@@ -12,6 +12,8 @@
  *   持续 ≥2s 放行 / 中途变假 cancel·重置 / <2s 间隙 ready 不误压 / 冷拉真值豁免直通
  * - D8 degraded 可行动化：[重新提交审批] 按钮（复用消息发送通道注入固定文案）+ resumeHint
  *   分源文案（'resubmit' / 通用）+ 发送失败就近错误行
+ * - D8 检测窗开窗时机（dmg-r1-2）：nudge 轮自身的 message_start 到达才开判定窗——busy
+ *   defer 场景（busy 拒绝 reply success + 前置在途 turn 终态信号）不误报「agent 未响应」
  * - D9③ 自审结论行（截断 + Popover 全文；无 selfReview 不渲染）
  * - 两键 respond payload 形状（approve 无 comments / revise 打包草稿快照）+ P2-2 失效帧 +
  *   §3.5 0 评论禁用 / 评论计数回看
@@ -517,9 +519,10 @@ describe('degraded 可行动化（D8：成因分源文案 + [重新提交审批]
 
 describe('D8「agent 未响应」分支（turn 生命周期信号驱动，非墙钟）', () => {
   /** turn 生命周期事件派发（真实 events 通道，use-plan-sync.test 同款 dispatchSession 形态）；
-   *  payloadExtra 透传扩展字段（willRetry 判据用例，event-adapter 透传形态） */
+   *  payloadExtra 透传扩展字段（willRetry 判据用例，event-adapter 透传形态）。
+   *  message_start = nudge 轮起点标记（armed → watching 开判定窗，dmg-r1-2） */
   function dispatchTurnEvent(
-    type: 'message.complete' | 'message.error' | 'send.rejected',
+    type: 'message.message_start' | 'message.complete' | 'message.error' | 'send.rejected',
     payloadExtra: Record<string, unknown> = {},
   ): void {
     events.dispatchSession(SID, { type, payload: { sessionId: SID, ...payloadExtra } } as never)
@@ -538,13 +541,14 @@ describe('D8「agent 未响应」分支（turn 生命周期信号驱动，非墙
     return wrapper
   }
 
-  it('nudge 发送成功但 turn 结束未重挂 → 就近错误行「agent 未响应」（D8 失败契约②）', async () => {
+  it('nudge 开轮（message_start）后 turn 结束未重挂 → 就近错误行「agent 未响应」（D8 失败契约②）', async () => {
     const wrapper = await mountDegraded()
     await clickResubmit(wrapper)
     expect(chatSendMock).toHaveBeenCalledTimes(1)
     expect(wrapper.find('[data-testid="plan-review-resubmit-error"]').exists()).toBe(false)
 
-    // turn 结束（message.complete）而预期重挂未至 → 判未响应
+    // nudge 轮真正开始（起点标记开窗）→ turn 结束（message.complete）而预期重挂未至 → 判未响应
+    dispatchTurnEvent('message.message_start')
     dispatchTurnEvent('message.complete')
     await flushAsync()
 
@@ -552,6 +556,35 @@ describe('D8「agent 未响应」分支（turn 生命周期信号驱动，非墙
     expect(err.exists()).toBe(true)
     expect(err.text()).toContain('agent 未响应')
     expect(wrapper.find('[data-testid="plan-review-resubmit"]').exists()).toBe(true) // 保留可重试
+  })
+
+  it('busy defer 场景（dmg-r1-2）：busy 拒绝 reply success 后前置在途 turn 的终态信号不误报；defer 重投开轮后才判', async () => {
+    const wrapper = await mountDegraded()
+    // busy 预检拒绝走 reply success：send.rejected 广播先于 reply 到达（WS FIFO）——
+    // 用 pending promise 锁定发送在途，先派拒绝帧再放行 reply，如实模拟到达序
+    let resolveSend!: () => void
+    chatSendMock.mockReturnValueOnce(new Promise<void>((r) => { resolveSend = r }))
+    const clicked = wrapper.find('[data-testid="plan-review-resubmit"]').trigger('click')
+    dispatchTurnEvent('send.rejected', { reason: 'busy' }) // 窗未开（idle）→ no-op
+    resolveSend()
+    await clicked
+    await flushAsync()
+    expect(wrapper.find('[data-testid="plan-review-resubmit-error"]').exists()).toBe(false)
+
+    // nudge 尚未开轮（defer 队列等 occupancy idle 重投）：前置在途 turn 的收尾帧
+    // （message.complete / message.error）先于 nudge 轮起点标记到达 → 不判定、不落错误
+    dispatchTurnEvent('message.complete')
+    dispatchTurnEvent('message.error')
+    await flushAsync()
+    expect(wrapper.find('[data-testid="plan-review-resubmit-error"]').exists()).toBe(false)
+
+    // defer 重投、nudge 真正开轮（message_start 开窗）→ turn 结束未重挂 → 此刻才判
+    dispatchTurnEvent('message.message_start')
+    dispatchTurnEvent('message.complete')
+    await flushAsync()
+    const err = wrapper.find('[data-testid="plan-review-resubmit-error"]')
+    expect(err.exists()).toBe(true)
+    expect(err.text()).toContain('agent 未响应')
   })
 
   it('同轮先重挂后收尾：pending 到达撤销检测，turn 结束不误报（成功路径）', async () => {
@@ -571,11 +604,13 @@ describe('D8「agent 未响应」分支（turn 生命周期信号驱动，非墙
   it('turn 错误收尾（message.error）同判未响应；send.rejected（预检拒绝未进轮）同判', async () => {
     const wrapper = await mountDegraded()
     await clickResubmit(wrapper)
+    // nudge 轮开轮后错误收尾（message.error）→ 判未响应
+    dispatchTurnEvent('message.message_start')
     dispatchTurnEvent('message.error')
     await flushAsync()
     expect(wrapper.find('[data-testid="plan-review-resubmit-error"]').text()).toContain('agent 未响应')
 
-    // 重试 → 预检拒绝（busy 未进轮）→ 同一失败契约②
+    // 重试 → 预检拒绝（busy 未进轮，armed 相位）→ 同一失败契约②（不受起点标记门）
     await clickResubmit(wrapper)
     dispatchTurnEvent('send.rejected')
     await flushAsync()
@@ -585,6 +620,8 @@ describe('D8「agent 未响应」分支（turn 生命周期信号驱动，非墙
   it('willRetry=true 中间失败帧不关检测窗（pi auto-retry 中 turn 未结束）；终态帧才判未响应', async () => {
     const wrapper = await mountDegraded()
     await clickResubmit(wrapper)
+    // nudge 轮开轮（watching）后进入 pi 自动重试链
+    dispatchTurnEvent('message.message_start')
 
     // pi 自动重试链的中间失败帧（willRetry=true，event-adapter 透传形态）→ turn 未结束，
     // 不关窗不落错误（判据与 useCompletionNotify 的 willRetry 静音同型）

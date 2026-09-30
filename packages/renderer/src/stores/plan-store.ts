@@ -67,6 +67,18 @@ export type PlanStage =
 /** 审批条分支模式（D4 分支公式输出；null = 不渲染）。 */
 export type PlanReviewBarMode = 'ready' | 'revising' | 'degraded'
 
+/**
+ * D8「agent 未响应」检测窗相位（显式状态机，dmg-r1-2 开窗时机修正）：
+ * - `idle`：无在途 nudge——一切终态信号 no-op（未点重提 / 已收口）。
+ * - `armed`：nudge 已提交（send resolve）但 nudge 轮尚未开——session 忙时 runtime busy
+ *   预检拒绝走 reply success，nudge 推迟投递，此相位下到达的 message.complete / error
+ *   属于**前置在途 turn**（先于 nudge 轮起点标记），不判定；send.rejected 例外（见下）。
+ * - `watching`：nudge 轮自身的 message_start 已到（轮真正开始）——turn 终态信号此刻起
+ *   判「agent 未响应」。send.rejected（预检拒绝未进轮 / defer 重投再拒）不受起点标记门：
+ *   armed 与 watching 相位均落错误行（nudge 在途时被拒 = 未进轮，失败要出声）。
+ */
+export type PlanReviewNudgePhase = 'idle' | 'armed' | 'watching'
+
 // ── state 读侧解析（归一产物直读；垃圾值域守卫 = 保留边界的「垃圾 state 值防御」落点）──
 
 /**
@@ -236,11 +248,13 @@ interface PlanPartition {
    */
   reviewPendingKnown: boolean
   /**
-   * D8「agent 未响应」检测窗（per-session，分区派而非实例级 ref——turn 事件 handler 经
-   * action 写「消息所属 sid」分区，切 session 无丢值/串台，ADR-0049）：nudge 发送成功即
-   * 开窗，重挂到达（setPlanReviewPending(true) 内含收口）/ turn 结束判未响应后关窗。
+   * D8「agent 未响应」检测窗相位（per-session，分区派而非实例级 ref——turn 事件 handler 经
+   * action 写「消息所属 sid」分区，切 session 无丢值/串台，ADR-0049；状态机语义见
+   * PlanReviewNudgePhase）：nudge 提交成功进 armed，nudge 轮自身的 message_start 到达
+   * 才开判定窗（watching）；重挂到达（setPlanReviewPending(true) 内含收口）/ turn 结束
+   * 判未响应 / 发送失败后回 idle。
    */
-  reviewNudgeWatching: boolean
+  reviewNudgePhase: PlanReviewNudgePhase
   /** D8 重新提交错误行（发送失败 / agent 未响应双分支的就近呈现；分区级，随焦点切换保留）。 */
   reviewNudgeError: string | null
   /** degraded 稳定窗放行（组合持续 ≥2s；变假 cancel·重置）。 */
@@ -268,6 +282,97 @@ function clearDraftsOnPlanEnter(p: PlanPartition, next: PlanStateView | null): v
   if (!wasActive && nowActive) p.drafts.length = 0
 }
 
+/**
+ * D8 重新提交审批的检测窗相位机 action 组（模块级工厂，控 store setup 行数；依赖面收窄为
+ * updateFor 单方法的结构形态——D8 全部 action 只写「事件所属 sid」分区，不读焦点实时值，
+ * AGENTS.md 规则 8）。相位机 PlanReviewNudgePhase（idle → armed → watching → idle）：
+ * 开窗时机挂在 nudge 轮自身的 message_start，而非 send resolve——session 忙时 busy 预检
+ * 拒绝走 reply success、nudge 推迟投递，send resolve 即开窗会把前置在途 turn 的
+ * message.complete 误判为 nudge 轮无响应（dmg-r1-2）。
+ */
+function createPlanReviewNudgeActions(scoped: {
+  updateFor: (targetSid: string, updater: (state: PlanPartition) => void) => void
+}): {
+  beginPlanReviewNudge: (sessionId: string) => void
+  markPlanReviewNudgeTurnStart: (sessionId: string) => void
+  setPlanReviewNudgeError: (sessionId: string, message: string | null) => void
+  endPlanReviewNudge: (sessionId: string, message: string) => void
+  rejectPlanReviewNudge: (sessionId: string, message: string) => void
+} {
+  /**
+   * nudge 提交成功（send resolve）：进 armed 相位（清旧错误）——只武装不开窗，等
+   * markPlanReviewNudgeTurnStart 的起点标记到达才开判定窗。
+   */
+  function beginPlanReviewNudge(sessionId: string): void {
+    if (!sessionId) return
+    scoped.updateFor(sessionId, (p) => {
+      p.reviewNudgePhase = 'armed'
+      p.reviewNudgeError = null
+    })
+  }
+
+  /**
+   * nudge 轮起点标记（其 message_start 到达）：armed → watching 开判定窗；idle（无在途
+   * nudge，他人消息开轮）/ watching（轮内后续消息段）均 no-op。
+   */
+  function markPlanReviewNudgeTurnStart(sessionId: string): void {
+    if (!sessionId) return
+    scoped.updateFor(sessionId, (p) => {
+      if (p.reviewNudgePhase !== 'armed') return
+      p.reviewNudgePhase = 'watching'
+    })
+  }
+
+  /**
+   * nudge 错误行写入/清除（发送失败分支落文案；null = 清除兼检测窗复位——重试入口）。
+   * 无检测窗语义，直接落分区。
+   */
+  function setPlanReviewNudgeError(sessionId: string, message: string | null): void {
+    if (!sessionId) return
+    scoped.updateFor(sessionId, (p) => {
+      p.reviewNudgePhase = 'idle'
+      p.reviewNudgeError = message
+    })
+  }
+
+  /**
+   * turn 生命周期终态信号收口（D8 失败契约②「agent 未响应」）：watching 相位才判——
+   * armed 相位的终态信号属于前置在途 turn（先于 nudge 轮起点标记，busy defer 形态），
+   * 连同重挂已到达的同轮收尾（相位已被 setPlanReviewPending(true) 收口）/ 未点重提
+   * （idle）均 no-op。
+   */
+  function endPlanReviewNudge(sessionId: string, message: string): void {
+    if (!sessionId) return
+    scoped.updateFor(sessionId, (p) => {
+      if (p.reviewNudgePhase !== 'watching') return
+      p.reviewNudgePhase = 'idle'
+      p.reviewNudgeError = message
+    })
+  }
+
+  /**
+   * send.rejected 收口（预检拒绝未进轮 / defer 重投再拒）：不受 nudge 轮起点标记门——
+   * armed 与 watching 相位（nudge 在途）均落错误行提示可重试（失败要出声）；idle（无
+   * 在途 nudge，他人发送被拒）no-op。
+   */
+  function rejectPlanReviewNudge(sessionId: string, message: string): void {
+    if (!sessionId) return
+    scoped.updateFor(sessionId, (p) => {
+      if (p.reviewNudgePhase === 'idle') return
+      p.reviewNudgePhase = 'idle'
+      p.reviewNudgeError = message
+    })
+  }
+
+  return {
+    beginPlanReviewNudge,
+    markPlanReviewNudgeTurnStart,
+    setPlanReviewNudgeError,
+    endPlanReviewNudge,
+    rejectPlanReviewNudge,
+  }
+}
+
 export const usePlanStore = defineStore('plan', () => {
   // ── 分区（useSessionScopedState 工厂：分区表 + cleanup 链自动接入）──
   /**
@@ -288,7 +393,7 @@ export const usePlanStore = defineStore('plan', () => {
       reviewDegradedStable: false,
       reviewColdExempt: false,
       reviewStableEpoch: 0,
-      reviewNudgeWatching: false,
+      reviewNudgePhase: 'idle',
       reviewNudgeError: null,
     }),
   )
@@ -305,18 +410,23 @@ export const usePlanStore = defineStore('plan', () => {
    * 只对「已确认更老」的 reply 丢弃）；无轮询、无重试、无定时器，比较是有界的等值判定。
    * 失败分支同守卫：失效请求的 error envelope 同样不代表当前链路（帧已活，错误已过时）。
    * 清理挂 sessionCleanup 链（useSidebar.deleteSession 统一编排，与分区同生命周期）。
+   * 迟到写拦截（D-B2-1 口径延伸）：写入点在 updateFor 拦截之外（非分区态），applyFrame
+   * 入口经 scoped.isDeleted 前置守卫与 updateFor 同口径——cleanup 后迟到帧不重建条目
+   * （防拖偏同 id 重建后下一生命周期的陈旧守卫基准）。
    */
   const frameRevs = new Map<string, number>()
 
   /**
    * 活动补拉冷却表（per-sid 上次活动补拉时间戳；新 session 首拉窗口丢帧补偿）。
-   * 语义见 reconcileOnAssistantMessage。清理挂 sessionCleanup 链（与 frameRevs 同批）。
+   * 语义见 reconcileOnAssistantMessage。清理挂 sessionCleanup 链（与 frameRevs 同批）；
+   * 迟到写拦截同 frameRevs（写入点 reconcileOnAssistantMessage 入口 isDeleted 守卫）。
    */
   const activityReconcileAt = new Map<string, number>()
 
   /**
    * 消息边沿观察的帧基准表（per-sid：上一条消息边沿时的 frameRev，活跃冻结检测的进展基准，
-   * 语义见 reconcileOnAssistantMessage）。清理挂 sessionCleanup 链。
+   * 语义见 reconcileOnAssistantMessage）。清理挂 sessionCleanup 链；迟到写拦截同 frameRevs
+   * （写入点 reconcileOnAssistantMessage 入口 isDeleted 守卫）。
    */
   const edgeFrameRevs = new Map<string, number>()
 
@@ -426,6 +536,10 @@ export const usePlanStore = defineStore('plan', () => {
    * 落地同时递增该 sid 帧版本号（陈旧首拉守卫的写侧，见 frameRevs 注释）。
    */
   function applyFrame(sid: string, planState: PlanStateView): void {
+    // 迟到写拦截（D-B2-1 口径延伸）：已销毁 session 的迟到帧整体丢弃——frameRevs 的
+    // 递增与下方 updateFor 的分区写同口径（工厂 deletedSids 单源查询），防迟到帧在
+    // cleanup 删除条目后重建 rev 残留、拖偏同 id 重建后下一生命周期的陈旧守卫基准。
+    if (scoped.isDeleted(sid)) return
     frameRevs.set(sid, frameRevOf(sid) + 1)
     scoped.updateFor(sid, (p) => {
       clearDraftsOnPlanEnter(p, planState)
@@ -495,6 +609,9 @@ export const usePlanStore = defineStore('plan', () => {
    */
   function reconcileOnAssistantMessage(sessionId: string): void {
     if (!sessionId) return
+    // 迟到写拦截（D-B2-1 口径延伸，同 applyFrame）：edgeFrameRevs / activityReconcileAt
+    // 两张辅助表的写入与 updateFor 同口径——cleanup 后迟到活动信号不重建条目、不触发补拉。
+    if (scoped.isDeleted(sessionId)) return
     const revNow = frameRevOf(sessionId)
     const prevRev = edgeFrameRevs.get(sessionId)
     edgeFrameRevs.set(sessionId, revNow)
@@ -526,7 +643,7 @@ export const usePlanStore = defineStore('plan', () => {
       if (has) {
         clearAckMark(sessionId, p)
         // D8 成功收口（内含于挂起到达）：预期重挂发生 → 关检测窗 + 清旧错误（含重试后成功）
-        p.reviewNudgeWatching = false
+        p.reviewNudgePhase = 'idle'
         p.reviewNudgeError = null
       }
       evalReviewWindow(sessionId, p)
@@ -607,39 +724,15 @@ export const usePlanStore = defineStore('plan', () => {
   }
 
   // ── D8 重新提交审批的检测窗/错误行（分区级，action 收口供事件 handler 经 capturedSid 写入）──
-
-  /** nudge 发送成功：开「agent 未响应」检测窗（清旧错误）。 */
-  function beginPlanReviewNudge(sessionId: string): void {
-    if (!sessionId) return
-    scoped.updateFor(sessionId, (p) => {
-      p.reviewNudgeWatching = true
-      p.reviewNudgeError = null
-    })
-  }
-
-  /**
-   * nudge 错误行写入/清除（发送失败分支落文案；null = 清除）。无检测窗语义，直接落分区。
-   */
-  function setPlanReviewNudgeError(sessionId: string, message: string | null): void {
-    if (!sessionId) return
-    scoped.updateFor(sessionId, (p) => {
-      p.reviewNudgeWatching = false
-      p.reviewNudgeError = message
-    })
-  }
-
-  /**
-   * turn 生命周期信号收口（D8 失败契约②「agent 未响应」）：检测窗开着才判——重挂已到达
-   * 的同轮收尾（窗口已被 setPlanReviewPending(true) 关闭）/ 未点重提（未开窗）均 no-op。
-   */
-  function endPlanReviewNudge(sessionId: string, message: string): void {
-    if (!sessionId) return
-    scoped.updateFor(sessionId, (p) => {
-      if (!p.reviewNudgeWatching) return
-      p.reviewNudgeWatching = false
-      p.reviewNudgeError = message
-    })
-  }
+  // 相位机实装提取为模块级工厂 createPlanReviewNudgeActions（控本 setup 函数行数；只闭包
+  // 依赖 scoped 分区写入口，无 store 内其余状态）。
+  const {
+    beginPlanReviewNudge,
+    markPlanReviewNudgeTurnStart,
+    setPlanReviewNudgeError,
+    endPlanReviewNudge,
+    rejectPlanReviewNudge,
+  } = createPlanReviewNudgeActions(scoped)
 
   // ── 评论草稿操作（D6：只作用当前焦点 session 分区；scoped.update 读 focusedSid 实时值）──
 
@@ -715,9 +808,9 @@ export const usePlanStore = defineStore('plan', () => {
     () => scoped.current.value.reviewPendingKnown,
   )
 
-  /** 焦点分区「agent 未响应」检测窗（D8；PlanReviewBar/测试读取）。 */
-  const planReviewNudgeWatching: ComputedRef<boolean> = computed(
-    () => scoped.current.value.reviewNudgeWatching,
+  /** 焦点分区「agent 未响应」检测窗相位（D8 状态机 idle/armed/watching；PlanReviewBar/测试读取）。 */
+  const planReviewNudgePhase: ComputedRef<PlanReviewNudgePhase> = computed(
+    () => scoped.current.value.reviewNudgePhase,
   )
 
   /** 焦点分区重新提交错误行文案（null = 无错误；PlanReviewBar 就近呈现）。 */
@@ -740,8 +833,10 @@ export const usePlanStore = defineStore('plan', () => {
     setPlanReviewPending,
     markPlanReviewAnswered,
     beginPlanReviewNudge,
+    markPlanReviewNudgeTurnStart,
     setPlanReviewNudgeError,
     endPlanReviewNudge,
+    rejectPlanReviewNudge,
     addDraftComment,
     removeDraftComment,
     clearDraftComments,
@@ -756,7 +851,7 @@ export const usePlanStore = defineStore('plan', () => {
     planReviewAckMarked,
     planReviewDegradedGate,
     planReviewPendingKnown,
-    planReviewNudgeWatching,
+    planReviewNudgePhase,
     planReviewNudgeError,
   }
 })

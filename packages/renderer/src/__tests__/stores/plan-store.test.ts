@@ -10,6 +10,10 @@
  * - 审批窗口机件：已应答标记三路解除（预期后态帧值判定 / 新 pending / 冷拉真值）、迟到旧帧
  *   不解标记、稳定窗 arm/cancel·重置、10s 兑底双源冷拉（失败 → 标记悬挂 + loadError（R7）；
  *   成功 → 真值解除 + 冷拉豁免直通 + sink 再入店）
+ * - D8 检测窗相位机（dmg-r1-2）：send resolve 只进 armed（前置在途 turn 终态不判定）、
+ *   nudge 轮 message_start 才开 watching、send.rejected 不受起点标记门
+ * - 辅助表迟到写拦截（D-B2-1 口径延伸，dmg-r1-3）：cleanup 后迟到 applyFrame /
+ *   活动信号不复活 frameRevs / edgeFrameRevs / activityReconcileAt 条目
  * - 首拉成功/置空/失败、陈旧首拉守卫、applyFrame 分区写、评论草稿、enter 翻转清、
  *   草稿回看（历史族，行为不变）
  *
@@ -278,27 +282,70 @@ describe('审批窗口机件（D4）', () => {
     expect(planReviewAckMarked.value).toBe(true)
   })
 
-  it('D8 检测窗分区态：未开窗/已收口的 turn 信号 no-op；重挂到达内含收口（关窗 + 清错误）', () => {
-    const { store, planReviewNudgeWatching, planReviewNudgeError } = mountStore()
-    // 未开窗 → endPlanReviewNudge no-op（不误报）
+  it('D8 检测窗相位机：send resolve 只进 armed（前置在途 turn 终态不判定），message_start 才开窗，watching 下终态判未响应', () => {
+    const { store, planReviewNudgePhase, planReviewNudgeError } = mountStore()
+    // 未点重提（idle）→ turn 终态信号 no-op（不误报）
     store.endPlanReviewNudge('A', 'no-response')
     expect(planReviewNudgeError.value).toBeNull()
 
-    // 开窗 → turn 结束未重挂 → 落错误行
+    // send resolve → armed（只武装不开窗，清旧错误）
     store.beginPlanReviewNudge('A')
-    expect(planReviewNudgeWatching.value).toBe(true)
+    expect(planReviewNudgePhase.value).toBe('armed')
+    // busy defer 形态：armed 阶段到达的 message.complete / message.error 属于前置在途
+    // turn（先于 nudge 轮起点标记）→ 不判定、不落错误（dmg-r1-2）
     store.endPlanReviewNudge('A', 'no-response')
-    expect(planReviewNudgeWatching.value).toBe(false)
+    expect(planReviewNudgePhase.value).toBe('armed')
+    expect(planReviewNudgeError.value).toBeNull()
+
+    // nudge 轮自身的 message_start 到达 → 开判定窗（watching）
+    store.markPlanReviewNudgeTurnStart('A')
+    expect(planReviewNudgePhase.value).toBe('watching')
+    // 此后 turn 结束未重挂 → 落错误行
+    store.endPlanReviewNudge('A', 'no-response')
+    expect(planReviewNudgePhase.value).toBe('idle')
     expect(planReviewNudgeError.value).toBe('no-response')
 
-    // 重试成功形态：开窗后重挂到达（setPlanReviewPending(true) 内含收口：关窗 + 清错误）
+    // 重试成功形态：armed → 重挂到达（setPlanReviewPending(true) 内含收口：关窗 + 清错误）
     store.beginPlanReviewNudge('A')
     store.setPlanReviewPending('A', true)
-    expect(planReviewNudgeWatching.value).toBe(false)
+    expect(planReviewNudgePhase.value).toBe('idle')
     expect(planReviewNudgeError.value).toBeNull()
     // 已收口后的 turn 信号不再误报
     store.endPlanReviewNudge('A', 'no-response')
     expect(planReviewNudgeError.value).toBeNull()
+  })
+
+  it('D8 起点标记相位门：idle / watching 下的 message_start no-op（他人消息开轮不误开窗、轮内后续消息段不重入）', () => {
+    const { store, planReviewNudgePhase } = mountStore()
+    // idle：无在途 nudge，起点标记 no-op
+    store.markPlanReviewNudgeTurnStart('A')
+    expect(planReviewNudgePhase.value).toBe('idle')
+
+    // watching：轮已开（首个 message_start 已消费），轮内后续 assistant 消息段再到达不重入
+    store.beginPlanReviewNudge('A')
+    store.markPlanReviewNudgeTurnStart('A')
+    store.markPlanReviewNudgeTurnStart('A')
+    expect(planReviewNudgePhase.value).toBe('watching')
+  })
+
+  it('send.rejected（预检拒绝未进轮）不受起点标记门：armed / watching 均落错误行，idle no-op', () => {
+    const { store, planReviewNudgePhase, planReviewNudgeError } = mountStore()
+    // idle（无在途 nudge，他人发送被拒）→ no-op，不误写审批条错误行
+    store.rejectPlanReviewNudge('A', 'no-response')
+    expect(planReviewNudgeError.value).toBeNull()
+
+    // armed（busy 拒绝的 defer 重投再拒形态）→ 判未响应
+    store.beginPlanReviewNudge('A')
+    store.rejectPlanReviewNudge('A', 'no-response')
+    expect(planReviewNudgePhase.value).toBe('idle')
+    expect(planReviewNudgeError.value).toBe('no-response')
+
+    // watching（nudge 轮开后的拒绝）→ 同判
+    store.setPlanReviewNudgeError('A', null)
+    store.beginPlanReviewNudge('A')
+    store.markPlanReviewNudgeTurnStart('A')
+    store.rejectPlanReviewNudge('A', 'no-response')
+    expect(planReviewNudgeError.value).toBe('no-response')
   })
 
   it('稳定窗 arm/cancel·重置（fake timers）：组合持续 ≥2s 放行；中途变假重置，再转真重新计满', async () => {
@@ -537,6 +584,53 @@ describe('陈旧首拉守卫（F-R2-1：冷回填不倒拨 live 帧）', () => {
     resolveForSid('A', { sessionId: 'A', planState: { ...BASE_VIEW } })
     await settle()
     expect(planView.value?.isActive).toBe(true)
+  })
+
+  it('辅助表迟到写拦截（D-B2-1 口径延伸）：cleanup 后迟到 applyFrame 不复活 frameRevs 条目，旧生命周期在途 reply 不写进同 id 重建分区', async () => {
+    const { store, planView } = usePlanRefs()
+    store.syncFocus('A')
+    store.applyFrame('A', { ...BASE_VIEW, docs: [DOC] }) // rev=1，view 就绪
+    // 旧生命周期的首拉在途（reply 跨 cleanup 到达）
+    void store.loadPlanState('A') // baseRev=1
+    triggerSessionCleanups('A')
+    await settle()
+
+    // WS 退订窗口内的迟到 live 帧：updateFor 分区写被工厂拦截，frameRevs 的递增也须
+    // 同口径拦截——若未拦截，rev 条目复活回 1，下方旧 reply 的陈旧判定被伪解除
+    store.applyFrame('A', { ...BASE_VIEW })
+
+    // 同 id 重建（重导入形态）：current 重新 init 出列，view 从空起步
+    store.syncFocus('A')
+    expect(planView.value).toBeNull()
+
+    // 旧生命周期在途 reply 到达：迟到帧被拦截（rev 保持 cleanup 清除态，0 ≠ baseRev 1）
+    // → 陈旧守卫丢弃，不写进新生命周期分区；未拦截形态下 rev=1 === baseRev 伪解除 →
+    // 僵尸 reply 写入新分区（docs 1），断言即红
+    resolveForSid('A', { sessionId: 'A', planState: { ...BASE_VIEW, docs: [DOC] } })
+    await settle()
+    expect(planView.value).toBeNull()
+
+    // 新生命周期重新首拉：正常回填（拦截不误伤健康路径）
+    void store.loadPlanState('A')
+    resolveForSid('A', { sessionId: 'A', planState: { ...BASE_VIEW, docs: [DOC] } })
+    await settle()
+    expect(planView.value?.docs?.length).toBe(1)
+  })
+
+  it('辅助表迟到写拦截（D-B2-1 口径延伸）：cleanup 后迟到活动信号不重建 edgeFrameRevs/activityReconcileAt，不触发补拉', async () => {
+    const { store } = usePlanRefs()
+    store.syncFocus('A')
+    store.applyFrame('A', { ...BASE_VIEW, docs: [DOC] })
+    triggerSessionCleanups('A')
+    await settle()
+
+    // 迟到活动信号 ×2：若未拦截，第一次会重建 edgeFrameRevs('A'→0)，第二次因「边沿间
+    // frameRev 零增长」通过帧进展门 + 冷却表空 → 触发补拉 RPC（零 RPC 断言拦截生效）
+    store.reconcileOnAssistantMessage('A')
+    store.reconcileOnAssistantMessage('A')
+    await settle()
+
+    expect(commandMock).not.toHaveBeenCalled()
   })
 })
 

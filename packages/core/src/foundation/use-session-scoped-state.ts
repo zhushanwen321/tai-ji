@@ -20,6 +20,9 @@
  * - `updateFor(targetSid, updater)`：显式指定 sid 分区操作（不读 sid.value 实时值）。
  *   用于 WS handler 捕获订阅时 sid，防切 sid 后旧消息写入新分区（M1 竞态修复）；
  *   对已删分区 no-op（防迟到写复活已销毁 session 的分区——僵尸写回，D-B2-1）
+ * - `isDeleted(sid)`：查询该 sid 是否处于「已删未重建」态（与 updateFor 的拦截共用同一份
+ *   deletedSids，含重建出列语义）。供消费方自管的分区外辅助表（非分区态的模块级 Map）
+ *   在写入点做同口径迟到写拦截——不必自建第二份删除登记（避免与工厂的出列语义漂移）
  * - `cleanup(sid)`：从 Map 移除指定 sid 分区并记入 deletedSids（下次访问重新 init；
  *   重新 init 时出列，此后 updateFor 恢复写入——删除后同 id 重建不丢写）
  * - 切 sid 不丢旧数据（Map 保留），切回恢复
@@ -101,11 +104,12 @@ export function __clearSessionCleanupRegistryForTest(): void {
  *
  * @param sid 响应式 session id（Ref<string|null>），null 表示无活跃 session
  * @param init 新 session 的状态工厂（惰性调用，每 sid 仅一次）
- * @returns { current, update, updateFor, cleanup }
+ * @returns { current, update, updateFor, cleanup, isDeleted }
  *   - current: 当前 sid 分区的 computed（null 返回默认实例不写 Map）
  *   - update(updater): 操作当前 sid 分区（读 sid.value 实时值，用于 UI 操作）
  *   - updateFor(targetSid, updater): 显式指定 sid 分区（用于 WS handler 捕获订阅时 sid，防 M1 竞态）
  *   - cleanup(sid): 移除指定 sid 分区
+ *   - isDeleted(sid): 查询「已删未重建」态（分区外辅助表的同口径迟到写拦截，见上方契约）
  */
 export function useSessionScopedState<T>(
   sid: Ref<string | null>,
@@ -115,6 +119,8 @@ export function useSessionScopedState<T>(
   update: (updater: (state: T) => void) => void
   updateFor: (targetSid: string, updater: (state: T) => void) => void
   cleanup: (sid: string) => void
+  /** 已删 sid 查询（D-B2-1 口径延伸）：与 updateFor 拦截共用同一份 deletedSids。 */
+  isDeleted: (sid: string) => boolean
   /** 测试钩子：清空所有分区（bump version 触发 current 重算）。生产代码禁止调用。 */
   _clearAllForTest: () => void
 } {
@@ -153,6 +159,16 @@ export function useSessionScopedState<T>(
     partitions.delete(id)
     deletedSids.add(id)
     version.value += 1
+  }
+
+  /**
+   * 已删 sid 查询（D-B2-1 口径延伸）：消费方自管的分区外辅助表（非分区态的模块级 Map）
+   * 在写入点前置本查询，即可获得与 updateFor 完全同口径的迟到写拦截——同一份
+   * deletedSids 承载（含 getOrCreatePartition 重建出列语义），消费方无需自建第二份
+   * 删除登记（自建登记不会随分区重建出列，重导入同 id 后会永久误拦，与 updateFor 漂移）。
+   */
+  function isDeleted(id: string): boolean {
+    return deletedSids.has(id)
   }
 
   // current computed：按 sid.value 查分区。
@@ -233,6 +249,7 @@ export function useSessionScopedState<T>(
     update,
     updateFor,
     cleanup,
+    isDeleted,
     _clearAllForTest: () => {
       partitions.clear()
       deletedSids.clear()

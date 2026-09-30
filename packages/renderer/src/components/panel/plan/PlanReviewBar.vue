@@ -291,20 +291,33 @@ const resubmitError = computed(() => planStore.planReviewNudgeError)
  * 「agent 未响应」检测（D8 失败契约②）——**turn 生命周期信号驱动，非墙钟超时**
  *（AGENTS.md 超时默认原则：任务级正常路径不设墙钟——nudge 的正常路径 = 开轮 → agent 调
  * submit-review 重挂，耗时随 turn 长度自然波动，固定窗口必误杀长思考轮）：
+ * - 开窗时机 = nudge 轮自身的 message_start 到达（dmg-r1-2），非 send resolve——session
+ *   忙时 runtime busy 预检拒绝走 reply success、nudge 推迟投递，send resolve 即开窗会把
+ *   前置在途 turn 的 message.complete 误判为 nudge 轮无响应（错误行假性可见）。相位机
+ *   在 plan-store（idle → armed → watching → idle），本组件只接线事件：
+ *   armed（send resolve）相位的 message.complete / message.error 属于前置在途 turn，
+ *   store 侧 no-op 不判定；message_start 到达才开窗（watching）；
  * - 成功收口 = 新 planReview 挂起登记到达（重挂发生）→ 内含于 plan-store
  *   setPlanReviewPending(true)（关检测窗 + 清旧错误，同轮先重挂后收尾不误报）；
- * - 失败判定 = 检测窗开着时 turn 结束（message.complete / message.error）而重挂未至，
- *   或发送被预检拒绝未进轮（send.rejected）→ endPlanReviewNudge 落错误行提示可重试；
+ * - 失败判定 = watching 相位下 turn 结束（message.complete / message.error）而重挂未至；
+ *   send.rejected（预检拒绝未进轮 / defer 重投再拒）不受起点标记门——nudge 在途
+ *  （armed/watching）即落错误行提示可重试；
  *   [willRetry 过滤] message.complete 携 willRetry=true（pi auto-retry 中间失败，turn
  *   未结束，runtime event-adapter 透传）不在此列——不关窗不落错误，pi 续跑后的终态帧
  *   再判（判据与 useCompletionNotify 的 willRetry 静音同型，防「中间失败帧落错误 →
  *   重挂成功清错误」的误报闪现）；payload 缺省（旧 runtime / 非重试终态）按终态处理；
- *   未开窗（未点重提）/ 已收口的 turn 信号由 action no-op；
+ *   未点重提（idle）/ 已收口的 turn 信号由 action no-op；
  * - WS 断连无信号的形态不判死（fail-safe 不误导，与评论/批准同风险面 R1）；
  * - 切 session 无串台：检测窗在 per-session 分区（非实例 ref），事件按 capturedSid 写旧
  *   分区，新焦点分区天然是干净基线（ADR-0049 Map 分区，免 watch(sessionId) 手动清空）。
  */
 const onMessage = useSessionEvents(sessionIdRef)
+// nudge 轮起点标记（armed → watching 开判定窗）：assistant 消息开帧即轮真正开始（user /
+// toolResult 记账角色在 runtime event-adapter 已过滤，到达的必是 assistant 轮信号）；idle
+// / watching 相位 store 侧 no-op。
+onMessage('message.message_start', (_msg, sid) => {
+  planStore.markPlanReviewNudgeTurnStart(sid)
+})
 // message.complete 单独订阅（TypedHandler 下 payload 为 Record 占位，willRetry 直读免断言）：
 // [willRetry 过滤] pi auto-retry 中间失败帧（willRetry=true）turn 未结束，此刻关窗会在
 // pi 续跑重挂成功时被 setPlanReviewPending(true) 清错误——形成「agent 未响应」误报闪现。
@@ -312,9 +325,14 @@ onMessage('message.complete', (msg, sid) => {
   if (msg.payload.willRetry === true) return
   planStore.endPlanReviewNudge(sid, t('plan.reviewBar.resubmitNoResponse'))
 })
-// message.error / send.rejected 恒终态信号，照常判「未响应」
-onMessage(['message.error', 'send.rejected'], (_msg, sid) => {
+// message.error 恒终态信号，照常判「未响应」（watching 相位门在 store 侧）
+onMessage('message.error', (_msg, sid) => {
   planStore.endPlanReviewNudge(sid, t('plan.reviewBar.resubmitNoResponse'))
+})
+// send.rejected（预检拒绝未进轮 / defer 重投再拒）：不受 nudge 轮起点标记门，nudge 在途
+// 即判（rejectPlanReviewNudge 的相位门在 store 侧）
+onMessage('send.rejected', (_msg, sid) => {
+  planStore.rejectPlanReviewNudge(sid, t('plan.reviewBar.resubmitNoResponse'))
 })
 
 async function onResubmit(): Promise<void> {
@@ -324,7 +342,7 @@ async function onResubmit(): Promise<void> {
   planStore.setPlanReviewNudgeError(sid, null) // 清旧错误（重试入口）
   try {
     await sendChatMessage(sid, t('plan.reviewBar.resubmitNudge'))
-    planStore.beginPlanReviewNudge(sid) // 开检测窗（失败契约②的判定窗）
+    planStore.beginPlanReviewNudge(sid) // 武装检测窗（armed：等 nudge 轮 message_start 才开判定窗）
   } catch (e) {
     planStore.setPlanReviewNudgeError(sid, t('plan.reviewBar.resubmitError', { message: toErrorMessage(e) }))
   } finally {
