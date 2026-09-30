@@ -1272,5 +1272,74 @@
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-session-replay.test.ts"
     },
     "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-61",
+    "claim": "manual 压缩掐断语义与事件序：AgentSession.compact() 第一步 await this.abort() 掐当前 run（abort() 只置 activeRun.abortController 为 aborted——不清 steering/followUp 队列、无补投副作用），JSDoc 明文 \"Manual compaction never retries or continues the interrupted agent turn\"；被掐 run 以 agent_end（末条 assistant message stopReason='aborted'，实机探针 P-reason(c) 断言）收尾且该事件先于 compaction_start 到达（compact 头 await this.abort() 先于 compaction_start emit 的 await 序形态 + P-reason(c) 真机实测）。承重（delivery-ownership-kernel D4② 续跑判定条件①③）：runtime 以「reason==='manual' + compaction_start 前 turn 被掐断」判定补投续跑——pi 若在 abort 后自动续跑/补投队列，续跑投递即变重复起 run",
+    "piAnchor": [
+      {
+        "pkg": "pi-agent-core",
+        "distPath": "dist/agent.js",
+        "symbol": "abort()",
+        "note": ":201-204 —— 单行体 this.activeRun?.abortController.abort()（纯 signal 置位；全文件唯一 abort() 方法）"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "compact(customInstructions)（manual 压缩入口）",
+        "note": ":1463-1464 JSDoc 'Aborts the current agent operation first. Manual compaction never retries or continues the interrupted agent turn'；:1468 方法体 → :1469 await this.abort()（全文件唯一 await this.abort() 点）→ :1470 _compactionAbortController 置位 → :1471 compaction_start emit"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-compaction-resume.test.ts"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-62",
+    "claim": "compaction_start/end 的 reason 词表恒三值：manual 路径（AgentSession.compact）start 恒字面量 'manual'（全 dist 唯一 emit 点），end 成功/aborted 两处均 'manual'；auto 路径 _runAutoCompaction(reason, willRetry) 变量透传，reason 仅 'threshold'（阈值命中，2 调用点）与 'overflow'（溢出/截断恢复，2 调用点）两值。auto 路径收尾有 hasQueuedMessages→continue 补投（设计 F6：不丢消息、不掐 turn，无需续跑），与 manual 路径无补投（PS-61）互为对照——runtime 续跑判定以 reason==='manual' 识别「掐 turn 的压缩」；pi 引入第四 reason 值或改 manual 判定名时判定面须复审（漏判 = 不续跑；误判 = 多一条被投递内核吸收的投递）",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "compact 的 manual reason 字面量（start + end ×2）",
+        "note": ":1471 _emit({type:\"compaction_start\", reason:\"manual\"})；:1560-1565 end 成功分支 reason:\"manual\"；:1574-1580 end aborted/失败分支 reason:\"manual\""
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "_runAutoCompaction(reason, willRetry) 透传 + 调用点",
+        "note": ":1733 签名 → :1747 compaction_start reason 透传 → :1844 compaction_end reason 透传；threshold 调用点 :282/:1719、overflow 调用点 :1659/:1689；溢出恢复失败另有 :1665-1672 end{reason:\"overflow\"} 直发与 :1673-1679 session_compact_failed{reason:\"overflow\"}"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "auto 压缩收尾 hasQueuedMessages→continue 补投（设计 F6）",
+        "note": ":807-810（post-run 队列检查：'The agent loop drains both queues before emitting agent_end' 注释 + return this.agent.hasQueuedMessages()）；:1856-1860（auto compaction 收尾：'Auto-compaction can complete while follow-up/steering/custom messages are waiting. Continue once so queued messages are delivered'）"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-compaction-resume.test.ts"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-63",
+    "claim": "extension slash 命令的 args 切分 = 首个空格原样切：_tryExecuteExtensionCommand 以 text.indexOf(\" \") 定位首个空格，commandName = 首空格前（剥 / 前缀），args = 首个空格后的原样余串（text.slice(spaceIndex + 1)——无 trim、无多空格折叠、无引号解析；无空格时 args=''）。单空格形态 '/<cmd> <id>' 下 handler 收到的 args 精确等于 id 本体。承重（message-revoke D1）：runtime revoke 信令 sendSystemCommand(`/${TAIJI_NAV_COMMAND} ${entryId}`) 单空格拼接（revoke-orchestrator.ts）→ agent-ext __taiji_nav__ handler 的 entryId 直用（navigateTree 回退目标）；pi 改切分规则（trim/引号解析/多空格容忍）则 id 失真 → nav mismatch，失败形态 = navigateTree 找不到目标报 nav-failed 可重试（安全降级，非破坏）",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "_tryExecuteExtensionCommand 的切分三行",
+        "note": ":956-958 —— :956 const spaceIndex = text.indexOf(\" \")；:957 commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex)；:958 args = spaceIndex === -1 ? \"\" : text.slice(spaceIndex + 1)"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-compaction-resume.test.ts"
+    },
+    "verifiedWith": "0.84.4"
   }
 ]

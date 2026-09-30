@@ -3,12 +3,13 @@
  *
  * 背景（谁是问题源）：smart-context 的 `compact_context` 工具经 `ctx.compact()` 触发 **manual**
  * 压缩，pi 的 manual 路径先 `abort()` 当前 run 再压缩，且明文 "never retries or continues the
- * interrupted agent turn"（pi 实装 F5）——被掐断的 turn 今天靠「压缩结果通知自起 run」兜底，
+ * interrupted agent turn"（pi-semantics PS-61）——被掐断的 turn 今天靠「压缩结果通知自起 run」兜底，
  * 而那正是故事 C 竞态的另一半。本模块把它换成 runtime 侧判定 + 经投递内核 FIFO 的门内投递。
  *
  * 判定三条件（设计 §3.1 / D4②，逐条落到事件面）：
- * 1. **manual**：`compaction_end.reason === 'manual'`（pi 手动路径恒 'manual'；自动压缩为
- *    'threshold' | 'overflow'——auto 路径不掐 turn，pi 内部 post-run 继续运行，无需续跑）；
+ * 1. **manual**：`compaction_end.reason === 'manual'`（pi-semantics PS-62：pi 手动路径恒
+ *    'manual'；自动压缩为 'threshold' | 'overflow'——auto 路径不掐 turn，pi 内部 post-run
+ *    继续运行，无需续跑）；
  * 2. **非 runtime 发起**：runtime 自己的 `/compact` 入口（transport session.compact RPC →
  *    sessionService.compact → dispatcher.compact → pi compact RPC）在 RPC 生命周期内打标
  *    （beginRuntimeCompact），本模块在 compaction_start 消费该标记——用户显式要求压缩 =
@@ -18,7 +19,8 @@
  *    assistant message → turn_end/agent_end；pi 侧 `await abort()` 保证 agent_end 必先于
  *    compaction_start 到达），本模块记 `lastTurnCutByAbort` 并在 compaction_start 快照。
  *    不读 occupancy：abort→压缩链在 pi 内同步推进，runtime 投影到 compaction_start 时 turn
- *    相位已回落 settling/idle（实测序见探针 P-reason），投影不是可靠判据。
+ *    相位已回落 settling/idle（实测序见探针 P-reason，语义登记 pi-semantics PS-61/PS-62），
+ *    投影不是可靠判据。
  *
  * 投递口径（D4② 后半句）：
  * - **经内核 FIFO**：投递只经 `submitResumeDelivery`（组合根注入 = registry.submit）——

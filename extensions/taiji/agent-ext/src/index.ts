@@ -45,7 +45,8 @@ export default function (pi: ExtensionAPI): void {
   // [message-revoke D1] 已消费层（消息已注入模型上下文）撤回信令：runtime 撤回编排经
   // 系统信令入口直达 client.prompt('/__taiji_nav__ <entryId>')——command 同步执行、
   // 不进模型、无 turn（pi agent-session _tryExecuteExtensionCommand）。entryId 从命令
-  // args 取（pi 切首个空格后的原样余串，单空格形态下精确等于 entryId）。
+  // args 取（pi 切首个空格后的原样余串，单空格形态下精确等于 entryId——pi-semantics
+  // PS-63 实锚：dist/core/agent-session.js:956-958）。
   // 双下划线前缀 = 内部命令（前端 internal-command-filter 过滤 `/__` 前缀不显示）。
   // summarize:false = 不触发 tree summary；label:'taiji:revoked' = pi 追加 LabelEntry
   // 落盘（树重放规则 leaf=文件尾，重启/空闲回收后回退不复活——pi-semantics PS-60 实锚：

@@ -13,6 +13,10 @@
  * 驱动方式：真 pi 进程 + faux LLM + 真实 extension（零网络零 token；阈值档位经
  * `<agentDir>/config/smart-context-ext-config.json` 种入 [1]，使首轮后必越档）。
  *
+ * 语义登记：docs/pi-semantics.json PS-06（_pendingNextTurnMessages 唯一消费点 = 用户驱动
+ * prompt 走到的 _runAgentPrompt 注入段）——nextTurn 不自起 run、随下一次 prompt 注入的
+ * pi 侧语义以此承重，本脚本是该语义的行为序实测层。
+ *
  * 运行：cd packages/runtime && node src/__tests__/probes/p-f13-nextturn-injection.mjs
  * 退出码：0 全绿 / 1 断言失败 / 2 环境不可用（pi binary 缺失）
  */
