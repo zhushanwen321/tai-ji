@@ -38,9 +38,13 @@ import { assertModelInCatalog } from "../../shared/model-catalog.ts";
 // [D3 协议版 P6] armed 回执落账投递（runId 键入口；observedEvent 消费点）。value
 // import 方向 execution/service → orchestration/pump：pump 的传递闭包（persistence/
 // assembly/orchestration 内部）不 import execution/service，无循环。
-// [U4 → D15/D6] scanRunEvents 迁 terminal-actions（投递域单写者链），供成员复用
-// 绑定的 record 读注入面（MemberReusePoolIo 生产装配）。
-import { scanRunEvents } from "../../orchestration/terminal-actions.ts";
+// [U4 → D15/D6 → D1 Class C 第 3 步] scanRunEvents 直连持久化层（journal 目录解析
+// 集群随「目录解析是持久化策略」一并迁 execution/persistence/run-event-journal.ts），
+// 供成员复用绑定的 record 读注入面（MemberReusePoolIo 生产装配）——读面仍单源，
+// 写面单写者纪律（唯一写者 = orchestration/terminal-actions）不变。本 import 即
+// D1 拆边 Class C 消掉的那条 execution → orchestration 值边（terminal-actions 侧
+// 保留同名 re-export，其余消费点零改动）。
+import { scanRunEvents } from "../persistence/run-event-journal.ts";
 // [U4] 成员复用池（决策 4/9/10 的机制本体；orchestration → execution 零反向依赖，
 // 池的 journal 读写经 io 注入，无环）。
 import {
@@ -197,10 +201,10 @@ export class WorkflowDispatch {
   private readonly deps: WorkflowDispatchDeps;
 
   /**
-   * [U4 → D6] 成员复用绑定的 record 读注入面（本聚合单点装配；scan 经
-   * terminal-actions 的 scanRunEvents 同源防线，不自建 journal 实例）。append
-   * 通道随 [D6] 绑定消解删除——绑定随 agent-started 帧落账（pump dispatchAgentCall
-   * 链），登记收尾只改内存（member-reuse-pool.registerMemberRecord）。
+   * [U4 → D6 → D1 Class C] 成员复用绑定的 record 读注入面（本聚合单点装配；scan 经
+   * persistence/run-event-journal 的 scanRunEvents 同源解析，不自建 journal 实例）。
+   * append 通道随 [D6] 绑定消解删除——绑定随 agent-started 帧落账（pump
+   * dispatchAgentCall 链），登记收尾只改内存（member-reuse-pool.registerMemberRecord）。
    */
   private readonly memberReusePoolIo: MemberReusePoolIo = {
     scanEvents: (runId) => scanRunEvents(runId),

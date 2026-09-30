@@ -17,15 +17,12 @@
 // 边界（[D15]）：resume 复活发起不是终局动作，在 resume-run.ts 锁段内自完成、不经
 // 本入口（U2）；resumed run 的后续终局天然走本入口。
 
-import { join } from "node:path";
-
 import { getLogger } from "../core/logger.ts";
 
 import { mapReasonToStatus, PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/extension-protocol";
 
 import { disposeWorkflowWindowEngineState } from "../execution/engine/routing.ts";
 import { writeRunTerminalManifest } from "../execution/persistence/manifest-store.ts";
-import { resolvePiWorkflowStateDir } from "../execution/assembly/workflow-state-root.ts";
 import { clearMemberReusePool, type MemberReusePoolIo } from "./member-reuse-pool.ts";
 import type { LifecycleDeps } from "./models/ports.ts";
 import type { RunSpec } from "./models/run-spec.ts";
@@ -33,25 +30,37 @@ import type { WorkflowRun } from "./models/workflow-run.ts";
 // [P1b-1] run 显式状态机（D5）：transition 纯函数 + record 事件流（run-events.ts
 // 为唯一权威实装，本文件是其编排侧消费入口之一——journal 单写者纪律的物理载体）。
 import {
-  createRunEventJournal,
   doneReasonToRunOutcome,
   finalRunErrorCodeOf,
   foldRunEventFrames,
   IllegalTransitionError,
   INITIAL_RUN_LIFECYCLE_STATE,
   RUN_EVENT_TYPES,
-  RUN_EVENTS_SUFFIX,
   transition,
   type RunErrorCode,
-  type RunEventJournal,
   type RunOutcome,
   type RunLifecycleState,
   type TransitionContext,
   type TransitionResult,
   type TransitionTrigger,
-  type WorkflowRunEvent,
   type WorkflowRunEventInput,
 } from "./run-events.ts";
+// [D1 拆边 Class C 第 3 步] journal 目录解析集群 + record 读面（scanRunEvents）迁
+// 持久化层 `execution/persistence/run-event-journal.ts`——目录解析是持久化策略，留在
+// 编排层会迫使 execution 侧消费者反向值导入编排层。本文件（编排侧唯一写者 + 终局
+// 编排入口）反向 import 复用同源解析，并对既有消费点保留同名 re-export（全仓既有
+// 导入面零改动）；execution 侧消费者（service/workflow-dispatch）改直连持久化层。
+import {
+  resolveRunEventJournal,
+  runEventJournalPathOf,
+  scanRunEvents,
+  setRunEventJournalDirForTest as setRunEventJournalDirForTestInPersistence,
+} from "../execution/persistence/run-event-journal.ts";
+export {
+  runEventJournalDirOf,
+  runEventJournalPathOf,
+  scanRunEvents,
+} from "../execution/persistence/run-event-journal.ts";
 // [W1 / D1] v2 条目契约（两族小条目）：customType 同 v1（kind 判别），构造器与
 // 写点在本文件（见「v2 条目接驳」段）。
 import {
@@ -110,81 +119,18 @@ function enqueueRunDispatch<T>(runId: string, task: () => Promise<T>): Promise<T
   return next;
 }
 
-/** journal 实例缓存（按目录 keyed）与测试注入点（生产目录 = run store 旁
- *  workflow-state，惰性解析）。keyed 缓存（ADR-0081）：per-call
- *  目录参数化后同进程可并存多个目录的 journal 实例（runtime 启动扫描收编 ≠ pi 壳
- *  模块锚目录），单值缓存会让两目录互相踢缓存——Map 按目录各持一份，单写者纪律
- *  不受影响（同一 run 恒同目录）。 */
-const journalCache = new Map<string, RunEventJournal>();
-let runEventJournalDirForTest: string | undefined;
-let noopJournalWarned = false;
-
-/** 测试钩子：注入 journal 目录 + 清空活体态缓存与终局记录注册表（run-events.test
- *  同款 teardown 纪律；连带清按目录 keyed 的 journal 缓存——换目录注入即换实例）。 */
+/**
+ * 测试钩子（journal 注入面；door 已随 [D1 拆边 Class C 第 3 步] 迁持久化层
+ * `execution/persistence/run-event-journal.ts`，本函数保留同名包装）：转调持久化层
+ * 钩子（注入 journal 目录 + 清按目录 keyed 的 journal 缓存）后，连带清本模块两族
+ * 进程内状态——活体态缓存与终局记录注册表（run-events.test 同款 teardown 纪律）。
+ * 包装是必需的：那两族归编排层，持久化层不得反向依赖编排层。
+ * 保留同名导出 = 全仓既有注入点（~20 处）零改动。
+ */
 export function setRunEventJournalDirForTest(dir: string | undefined): void {
-  runEventJournalDirForTest = dir;
-  journalCache.clear();
+  setRunEventJournalDirForTestInPersistence(dir);
   liveRunStates.clear();
   settledRunRecords.clear();
-}
-
-/**
- * 测试防线的 no-op journal：scan 恒空、append 零写（vitest 未显式注入目录时启用）。
- * append 仍返回含 seq 的完整事件（内存计数分配——接口契约「返回值 = 落盘事件」
- * 在零写形态下保持形状，调用链不需要感知防线）。
- */
-class NoopRunEventJournal implements RunEventJournal {
-  private seqCounter = 0;
-
-  async append(_runId: string, event: WorkflowRunEventInput): Promise<WorkflowRunEvent> {
-    this.seqCounter += 1;
-    return { ...event, seq: this.seqCounter } as WorkflowRunEvent;
-  }
-
-  async scan(): Promise<readonly WorkflowRunEvent[]> {
-    return [];
-  }
-}
-
-/** 按目录取（惰性创建）journal 实例（keyed 缓存单点）。 */
-function journalForDir(dir: string): RunEventJournal {
-  let journal = journalCache.get(dir);
-  if (journal === undefined) {
-    journal = createRunEventJournal(dir);
-    journalCache.set(dir, journal);
-  }
-  return journal;
-}
-
-/**
- * journal 目录解析（ADR-0081 目录参数化）：显式 `journalDir`
- * 优先（runtime 侧收编链注入——调用进程 cwd/env 与落盘目录不相交的形态，目录
- * 即权威）；缺省 = 模块锚三层解析（测试注入 / vitest 防线 / 生产推导），pi 壳
- * 既有调用点零改动。显式目录不受 VITEST 防线拦截（与 setRunEventJournalDirForTest
- * 同信任级——显式注入即显式落点，红线护的是「未注入却落到真实推导路径」）。
- */
-function resolveRunEventJournal(journalDir?: string): { dir: string; journal: RunEventJournal } {
-  if (journalDir !== undefined) {
-    return { dir: journalDir, journal: journalForDir(journalDir) };
-  }
-  if (runEventJournalDirForTest !== undefined) {
-    return { dir: runEventJournalDirForTest, journal: journalForDir(runEventJournalDirForTest) };
-  }
-  // 测试防线（「测试禁止触碰真实数据目录」红线）：vitest 环境未显式注入目录时禁写
-  // 真实推导路径——落 no-op journal + 一次性 warn 留痕。生产（无 VITEST env）不受
-  // 影响；断言 record 流的测试必须显式 setRunEventJournalDirForTest(mkdtemp 目录)。
-  if (process.env.VITEST === "true") {
-    if (!noopJournalWarned) {
-      noopJournalWarned = true;
-      runEventLogger.warn(
-        "run-event journal disabled: vitest env without setRunEventJournalDirForTest(dir) — " +
-          "no-op journal active (prevents writes to the real workflow-state dir)",
-      );
-    }
-    return { dir: "", journal: new NoopRunEventJournal() };
-  }
-  const dir = resolvePiWorkflowStateDir();
-  return { dir, journal: journalForDir(dir) };
 }
 
 /** record 流 fold：scan + 逐事件 transition（不传 ctx——run-events.ts fold 契约；
@@ -201,26 +147,6 @@ async function foldRunState(runId: string, journalDir?: string): Promise<RunLife
   });
 }
 
-/**
- * run record 事件流文件绝对路径（record/manifest 同一解析源：生产推导
- * resolvePiWorkflowStateDir，测试经 setRunEventJournalDirForTest 注入）。
- *
- * [W1 / D1] v2 注册条目的 journalPath 锚点字段经本函数寻址（lifecycle.runWorkflow
- * 写注册条目时消费）——锚点与 record 实写面同源，防条目指向漂移。vitest 无注入
- * 防线（dir=""）下返回 undefined = 锚点不可寻址，调用方据此跳过条目写（禁触真实
- * 数据目录红线，与 no-op journal 同一防线语义）。
- */
-export function runEventJournalPathOf(runId: string): string | undefined {
-  const { dir } = resolveRunEventJournal();
-  if (dir === "") return undefined;
-  return join(dir, `${runId}${RUN_EVENTS_SUFFIX}`);
-}
-
-/**
- * run record 事件流 / manifest 同目录锚（[W2/V1] 收编原语的 manifest 证据面读点；
- * `journalDir` = per-call 目录（决策 2 收编链注入，缺省模块锚）；测试防线
- * （NoopJournal 形态 dir=""）返回 undefined——零写域不做真目录读）。
- */
 /**
  * 诊断事件落账（[§2.1 errorLogs 持久化] ADR-0093）：worker 诊断日志进 record 流的唯一写点。
  *
@@ -250,20 +176,6 @@ export function appendRunDiagnosticEvent(runId: string, entry: WorkerLogEntry, j
       detail: toErrorMessage(err),
     });
   }
-}
-
-export function runEventJournalDirOf(journalDir?: string): string | undefined {
-  const { dir } = resolveRunEventJournal(journalDir);
-  return dir === "" ? undefined : dir;
-}
-
-/** [U4] run record 事件流只读访问器（成员复用绑定 fold 重建的读通道，决策 9 →
- *  [D6] 绑定字段查询辅助）——池侧不自建 journal 实例，防绕过本文件的单写者纪律
- *  与 no-op 测试防线。`journalDir` = per-call 目录（runtime 侧收编扫描注入，缺省
- *  模块锚）。 */
-export async function scanRunEvents(runId: string, journalDir?: string): Promise<readonly WorkflowRunEvent[]> {
-  const { journal } = resolveRunEventJournal(journalDir);
-  return journal.scan(runId);
 }
 
 /** [U4 → D6] 成员绑定面的 record 读注入面（生产装配单点——append 通道随
