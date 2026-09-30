@@ -548,12 +548,11 @@ describe('mock model / extension / plugin / composer / search domain', () => {
 
 // ── mock workspace / quota / project / preset ───────────────────────────────
 describe('mock workspace / quota / project / preset domain', () => {
-  it('workspace：listRecent/record 同源 + detectBare 非 bare + detect not-repo', async () => {
+  it('workspace：listRecent/record 同源 + detect not-repo', async () => {
     const recent = await workspace.listRecent()
     expect(recent).toHaveLength(3)
     // lastUsedAt 按调用时刻取 Date.now()（ms 级漂移），比对 cwd 序列而非全等
     expect((await workspace.record('/any')).map((r) => r.cwd)).toEqual(recent.map((r) => r.cwd))
-    expect(await workspace.detectBare('/any')).toMatchObject({ isBare: false })
     expect(await workspace.detect('/any')).toMatchObject({ mode: 'not-repo' })
   })
 

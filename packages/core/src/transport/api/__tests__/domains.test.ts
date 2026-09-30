@@ -737,17 +737,11 @@ describe('workspace 域', () => {
     expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['workspace.record', { cwd: '/b' }])
   })
 
-  it('detect 三态透传；detectBare 映射 isBare', async () => {
+  it('detect 三态透传', async () => {
     const bareReply = { mode: 'bare-workspace', wsRoot: '/ws', barePath: '/bare', repoRoot: '', defaultBranch: 'main' }
     mockCommand.mockResolvedValueOnce(bareReply)
     await expect(workspace.detect('/ws/proj')).resolves.toEqual(bareReply)
     expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['workspace.detect', { cwd: '/ws/proj' }])
-
-    mockCommand.mockResolvedValueOnce(bareReply)
-    await expect(workspace.detectBare('/ws/proj')).resolves.toEqual({ isBare: true, wsRoot: '/ws', barePath: '/bare' })
-
-    mockCommand.mockResolvedValueOnce({ mode: 'plain-repo', wsRoot: '', barePath: '', repoRoot: '/r', defaultBranch: 'main' })
-    await expect(workspace.detectBare('/r')).resolves.toMatchObject({ isBare: false })
   })
 })
 

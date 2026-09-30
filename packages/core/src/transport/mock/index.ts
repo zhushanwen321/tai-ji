@@ -1862,10 +1862,6 @@ const workspaceImpl = {
     // Mock record：模拟写入后返回最新列表（与 listRecent 一致，简化实现）
     return listRecentRecords()
   },
-  // detectBare：mock 恒返非 bare（landing 态 isBare 演示由 real 轨驱动，mock 轨无需真实检测）
-  async detectBare(_cwd: string): Promise<{ isBare: boolean; wsRoot: string; barePath: string }> {
-    return { isBare: false, wsRoot: '', barePath: '' }
-  },
   // detect：mock 恒返 not-repo（三态检测，real 轨驱动）
   async detect(_cwd: string): Promise<import('@taiji/shared').ServerMessageMap['workspace.detected']> {
     return { mode: 'not-repo', wsRoot: '', barePath: '', repoRoot: '', defaultBranch: '' }
