@@ -17,6 +17,7 @@
  *   - fail-closed：timeout / 抛错 / 解析失败 / 无可用模型 → 一律 ask
  */
 
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import type { CallLLMOptions, CallLLMResult } from "@zhushanwen/pi-llm-shared";
@@ -140,8 +141,9 @@ function buildCallOptions(
 		messages: buildMessages(ctx),
 		...(timeoutMs !== undefined ? { timeoutMs } : {}),
 		...(signal !== undefined ? { signal } : {}),
-		// thinkingLevel 直接透传（含 "off"）；llm-shared 内部会把 "off" 映射为不传 reasoning（provider 默认）
-		reasoning: config.thinkingLevel,
+		// 档位按「该模型自己的 supportedLevels」判定（pi-ai 数据驱动，本层不自持词表）；
+		// 不支持则按「不传档位」处理，不静默换成别的档。llm-shared 会把 "off" 映射为不传。
+		reasoning: getSupportedThinkingLevels(model).find((l) => l === config.thinkingLevel),
 	};
 }
 

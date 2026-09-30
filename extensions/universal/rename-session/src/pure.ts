@@ -2,11 +2,10 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 
 import { isEnoentError } from "@zhushanwen/pi-ext-guards";
 import {
-	isThinkingLevel,
+	normalizeThinkingLevel,
 	loadConfig,
 	normalizeModelSelector,
 	saveConfig,
@@ -40,11 +39,11 @@ export interface RenameSessionConfig {
 	/** 标题最大长度（Unicode 码点数）。 */
 	maxTitleLength: number;
 	/**
-	 * 标题生成 LLM 的 thinking 级别（pi 的 ModelThinkingLevel，THINKING_ORDER SSOT）。
+	 * 标题生成 LLM 的 thinking 级别（字符串透传；合法档位按模型 supportedLevels 在调用点判定）。
 	 * 默认 "off"：不传 pi-ai reasoning（provider 默认行为，与旧版本一致）；
 	 * "minimal"~"max" 透传给 SimpleStreamOptions.reasoning（provider 不支持时静默忽略）。
 	 */
-	thinkingLevel: ModelThinkingLevel;
+	thinkingLevel: string;
 }
 
 // ──────────────────────── 枚举校验 ────────────────────────
@@ -144,9 +143,7 @@ export function normalizeRenameConfig(raw: unknown): RenameSessionConfig {
 	// normalizeModelSelector：llm-shared 导出（ext-simplify-17 D6 收口）
 	const model = normalizeModelSelector(obj.model) ?? DEFAULT_RENAME_CONFIG.model;
 
-	const thinkingLevel = isThinkingLevel(obj.thinkingLevel)
-		? obj.thinkingLevel
-		: DEFAULT_RENAME_CONFIG.thinkingLevel;
+	const thinkingLevel = normalizeThinkingLevel(obj.thinkingLevel) ?? DEFAULT_RENAME_CONFIG.thinkingLevel;
 
 	return { enabled, model, mode, maxTitleLength, thinkingLevel };
 }

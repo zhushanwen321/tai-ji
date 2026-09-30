@@ -1593,7 +1593,7 @@
   },
   {
    "id": "E2E-PIPE-08",
-   "summary": "thinking 档位词表比对守卫：pi-ai ModelThinkingLevel ↔ 入口层词表（core shared/model-ref THINKING_ORDER）+ 扩展共享库副本（llm-shared）；pi-rpc 已改为透传退出比对面",
+   "summary": "thinking 档位词表比对守卫：pi-ai ModelThinkingLevel ↔ 入口层词表（core shared/model-ref THINKING_ORDER）单向比对——pi-rpc 与 llm-shared 的副本已删除，比对面只剩入口层这一份",
    "scope": ["scripts/check-thinking-levels.mjs", "packages/subagent-core/src/shared/model-ref.ts"],
    "layer": "L1",
    "assets": [{"kind": "script", "ref": "scripts/check-thinking-levels.mjs"}],

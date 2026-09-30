@@ -380,7 +380,9 @@ const STUB_MODEL: Model<Api> = {
 	api: "anthropic-messages",
 	provider: "stub",
 	baseUrl: "https://stub.invalid",
-	reasoning: false,
+	// reasoning=true：档位按模型 supportedLevels 数据驱动判定（pi-ai getSupportedThinkingLevels），
+	// 不支持思考的模型只支持 "off"——用例要断言档位透传，故此处声明支持。
+	reasoning: true,
 	input: ["text"],
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 	contextWindow: 128_000,

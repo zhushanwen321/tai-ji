@@ -13,11 +13,11 @@
  * - check-pi-sync 管 build.yml/快照/peerDeps 等构建期派生锚点，S6 只比 KnownApi（API 名
  *   词表），不碰 thinking 档位；
  * - 本脚本只管 thinking 档位词表：pi-ai dist types.d.ts 的 ModelThinkingLevel 联合成员
- *   ↔ 本地两副本（llm-shared Set / subagent-core 有序数组）双向比对——pi-rpc 已改为
- *   档位字符串透传（合法性权威 = 宿主与 pi），不再持有词表，故退出比对面。
+ *   ↔ 入口层词表（subagent-core shared/model-ref THINKING_ORDER）单向比对——词表只有
+ *   这一份：pi-rpc 改为档位透传（合法性权威 = 宿主与 pi）、扩展共享库改为非空字符串
+ *   归一（合法性归写入侧 UI 与 pi），两处副本均已删除。
  *
  * 守卫项 3 组：
- *   T1 llm-shared THINKING_LEVELS（extensions 侧唯一副本）== pi-ai ModelThinkingLevel
  *   T3 subagent-core THINKING_ORDER（packages 侧有序数组副本，ext-simplify-18 §3.4 D6
  *      纳入；比对语义 = 成员集合一致性，不判低→高顺序——顺序语义由 subagent-core
  *      自身测试锚定）[fail]
@@ -35,9 +35,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const PI_AI = '@earendil-works/pi-ai'
-const LLM_SHARED_RESOLVE = join(ROOT, 'extensions', 'shared', 'llm-shared', 'src', 'resolve.ts')
 const SUBAGENT_CORE_MODEL_REF = join(ROOT, 'packages', 'subagent-core', 'src', 'shared', 'model-ref.ts')
-const DESIGN_DOC = 'docs/architecture/ext-simplify-17-shared-extraction.md'
 const DESIGN_DOC_18 = 'docs/architecture/ext-simplify-18-shared-adoption.md'
 
 let failed = 0
@@ -208,13 +206,12 @@ function main() {
     process.exit(1)
   }
   const piMembers = extracted.values
-  console.log(`thinking-levels 守卫：权威源 pi-ai ${piAiVersion} ModelThinkingLevel（${piMembers.length} 值）↔ 本地词表副本`)
+  console.log(`thinking-levels 守卫：权威源 pi-ai ${piAiVersion} ModelThinkingLevel（${piMembers.length} 值）↔ 入口层词表（subagent-core shared/model-ref）`)
 
-  // 副本比对（T1 llm-shared / T3 subagent-core；fail 信息指向各自副本 + 设计文档）
-  const RECOVERY_SUFFIX = `——恢复动作：人工核对 ${dtsPath} 的 ModelThinkingLevel 定义后同步副本与 ${DESIGN_DOC} D5（pi 升级新增/移除档位即红灯），重跑 node scripts/check-thinking-levels.mjs`
+  // 词表比对（唯一比对面：入口层 core；fail 信息指向该文件 + 设计文档）
   const T3_RECOVERY_SUFFIX = `——恢复动作：人工核对 ${dtsPath} 的 ModelThinkingLevel 定义后同步 THINKING_ORDER 与 ${DESIGN_DOC_18} D6（pi 升级新增/移除档位即红灯），重跑 node scripts/check-thinking-levels.mjs`
 
-  const compareCopy = (label, filePath, values, recoverySuffix = RECOVERY_SUFFIX) => {
+  const compareCopy = (label, filePath, values, recoverySuffix) => {
     const { extra, missing } = setDiff(values, piMembers)
     if (extra.length === 0 && missing.length === 0) {
       ok(`${label} 与 pi-ai ${piAiVersion} ModelThinkingLevel 一致（${values.length} 值）`)
@@ -224,20 +221,6 @@ function main() {
     if (extra.length > 0) parts.push(`副本多出: ${extra.join(', ')}`)
     if (missing.length > 0) parts.push(`副本缺失: ${missing.join(', ')}`)
     fail(`${label} 与 pi-ai ${piAiVersion} ModelThinkingLevel 漂移: ${parts.join('；')}${recoverySuffix}`)
-  }
-
-  // T1：llm-shared（extensions 侧唯一副本，D5 双登记裁决）
-  {
-    if (!existsSync(LLM_SHARED_RESOLVE)) {
-      fail(`T1 llm-shared resolve.ts 缺失: ${LLM_SHARED_RESOLVE}——恢复动作：确认文件未被移动/删除（副本迁移时同步本守卫路径与 ${DESIGN_DOC} D5）`)
-    } else {
-      const r = extractConstListMembers(readFileSync(LLM_SHARED_RESOLVE, 'utf-8'), 'THINKING_LEVELS')
-      if (r.error) {
-        fail(`T1 llm-shared THINKING_LEVELS 提取失败: ${r.error}（${LLM_SHARED_RESOLVE}）${RECOVERY_SUFFIX}`)
-      } else {
-        compareCopy('T1 llm-shared THINKING_LEVELS', LLM_SHARED_RESOLVE, r.values)
-      }
-    }
   }
 
   // T3：subagent-core THINKING_ORDER（packages 侧唯一副本，ext-simplify-18 D6 纳入比对面）。
@@ -258,7 +241,7 @@ function main() {
 
   // 汇总
   if (failed === 0) {
-    console.log(`✓ thinking-levels 守卫通过（pi-ai ${piAiVersion} 权威源 ↔ llm-shared + subagent-core 两份副本一致）`)
+    console.log(`✓ thinking-levels 守卫通过（pi-ai ${piAiVersion} 权威源 ↔ 入口层 core 词表一致）`)
     process.exit(0)
   }
   console.error('thinking-levels 守卫未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）')
