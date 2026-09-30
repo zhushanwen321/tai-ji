@@ -17,7 +17,7 @@
  * 层归属：Interface。依赖 Pi SDK + Engine lifecycle/launcher + helpers。
  */
 
-import { readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import os from "node:os";
 
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -527,140 +527,11 @@ async function actionAbort(
   }
 }
 
-// ── resume action（D14 args 校验 + resumeRun 接线）──────────
-
-/**
- * D14 比对排除键：rfl 仪表向 spec.args 原地注入的稳定 `_runId`（lifecycle
- * runWorkflow 注入面）——run 派发的机器字段，不属用户意图，比对前双侧剔除。
- */
-const RESUME_ARGS_EXCLUDED_KEY = "_runId";
-
-/** record 流内 run-created 帧的 args 读取结果（D14 比对的数据源形态）。 */
-type HistoricalArgs =
-  | { kind: "args"; args: Record<string, unknown> }
-  | { kind: "absent" }
-  | { kind: "truncated" };
-
-/**
- * record 行 → run-created 帧窄化（type 字面量判别 + args 全文 / argsSummary 透传；
- * 非该帧 / 非 object 返回 undefined——结构判别走运行时守卫，不做断言）。
- */
-function asRunCreatedFrame(parsed: unknown): { args?: unknown; argsSummary: unknown } | undefined {
-  if (typeof parsed !== "object" || parsed === null) return undefined;
-  if (!("type" in parsed) || parsed.type !== "run-created") return undefined;
-  return {
-    args: "args" in parsed ? parsed.args : undefined,
-    argsSummary: "argsSummary" in parsed ? parsed.argsSummary : undefined,
-  };
-}
-
-/**
- * 读 run-created 帧的历史 args（D14 比对数据源；record 流是唯一事实源）。
- *
- * - args 全文优先（设计 §3.1 载荷表 run-created 行「args」——现行写入面
- *   dispatchRunCreated 随帧落全文，任意体积的 args 都可逐字段深度比对）；
- * - 流不存在 / 无 run-created 帧 → absent：不在 D14 层拒绝——资格判据（无 record
- *   流 / 首帧缺失）归 resumeRun 权威文案，此处不重复实现（分层：D14 只管 args 一致性）；
- * - 旧格式帧回落 argsSummary（无 args 字段）：截断（>256 字符，写侧
- *   summarizeRunArgs 截断标记）→ truncated——截断摘要无法逐字段比对，保守拒绝
- *   （静默放行 = 静默忽略传入 args，D14 不采用形态）；
- * - 解析失败 → throw：args/argsSummary 是 JSON.stringify 产物，未截断必可解析——
- *   不可解析 = 流被篡改或写入器 bug（对齐 D12 拒绝精神）。
- */
-function readHistoricalArgs(recordPath: string, runId: string): HistoricalArgs {
-  let content: string;
-  try {
-    content = readFileSync(recordPath, "utf8");
-  } catch {
-    return { kind: "absent" };
-  }
-  for (const line of content.split("\n")) {
-    if (line.trim().length === 0) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const frame = asRunCreatedFrame(parsed);
-    if (frame === undefined) continue;
-    // args 全文优先：大 args run 的 D14 逐字段比对由此成立（truncated 拒绝只对
-    // 旧格式帧的截断摘要形态出现）
-    if (isPlainObject(frame.args)) return { kind: "args", args: frame.args };
-    const summary = frame.argsSummary;
-    if (typeof summary !== "string" || summary.length === 0) return { kind: "absent" };
-    if (summary.endsWith("…")) return { kind: "truncated" };
-    let args: unknown;
-    try {
-      args = JSON.parse(summary);
-    } catch {
-      // 未截断摘要必可解析（JSON.stringify 产物）——不可解析 = 字段被篡改/流损坏，
-      // 与上方 malformed 分支同构拒绝（裸 SyntaxError 无恢复指引，不透出）。
-      throw new Error(
-        `Resume rejected: original args of run ${runId} are malformed in its record stream — ` +
-          "the record stream is the sole source of truth. Recovery: inspect the record file for external edits; " +
-          "if unrepairable, start a new run.",
-      );
-    }
-    if (!isPlainObject(args)) {
-      throw new Error(
-        `Resume rejected: original args of run ${runId} are malformed in its record stream — ` +
-          "the record stream is the sole source of truth. Recovery: inspect the record file for external edits; " +
-          "if unrepairable, start a new run.",
-      );
-    }
-    return { kind: "args", args };
-  }
-  return { kind: "absent" };
-}
-
-/** plain object 判定（数组/null 排除——数组按值比、不递归键差）。 */
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-/**
- * 逐字段深度比对（D14）——返回差异字段描述列表（空 = 一致）。
- *
- * 差异三形态：仅 resume 侧有（unexpected）/ 仅原 run 侧有（missing）/ 值不等
- * （mismatch）。嵌套 plain object 递归比对（路径 `a.b` 形态）；数组与原始值按
- * JSON 值比。值展示用 JSON.stringify（函数/undefined 等不可序列化形态按原样）。
- */
-export function diffResumeArgs(
-  incoming: Record<string, unknown>,
-  historical: Record<string, unknown>,
-): string[] {
-  return diffPlainObject(incoming, historical).map((d) => `args.${d}`);
-}
-
-/** diffResumeArgs 的递归体（裸键路径，`a.b` 形态——前缀由公开包装统一添加）。 */
-function diffPlainObject(
-  incoming: Record<string, unknown>,
-  historical: Record<string, unknown>,
-): string[] {
-  const diffs: string[] = [];
-  const keys = new Set([...Object.keys(incoming), ...Object.keys(historical)]);
-  keys.delete(RESUME_ARGS_EXCLUDED_KEY);
-  for (const key of [...keys].sort()) {
-    const hasIn = Object.hasOwn(incoming, key);
-    const hasHist = Object.hasOwn(historical, key);
-    if (!hasIn || !hasHist) {
-      const holder = hasIn ? "resume args only (not in original run)" : "original run only (missing from resume args)";
-      diffs.push(`${key}: ${holder}`);
-      continue;
-    }
-    const a = incoming[key];
-    const b = historical[key];
-    if (isPlainObject(a) && isPlainObject(b)) {
-      diffs.push(...diffPlainObject(a, b).map((d) => `${key}.${d}`));
-      continue;
-    }
-    const sa = JSON.stringify(a);
-    const sb = JSON.stringify(b);
-    if (sa !== sb) diffs.push(`${key}: resume ${sa ?? String(a)} vs original ${sb ?? String(b)}`);
-  }
-  return diffs;
-}
+// ── resume action（args 判定归 core D14 单源 + resumeRun 接线）──
+//
+// [§2.5 下沉] args 一致性判定（D14）已移入 core `orchestration/resume-args-guard.ts`，
+// 由 `assertResumeEligibility` 用**已读到的** run-created 事件执行——本文件只做参数
+// 装配（args + journalDir）与成功文案，不再读 record 文件、不再持有比对逻辑与拒绝文案。
 
 /**
  * resume action：interrupted 态 run 断点续跑。
@@ -688,34 +559,13 @@ export async function actionResume(
   }
   assertEntryTimeBudget(params.time);
 
-  // D14 args 校验（fail-fast——先于任何副作用；不一致即拒绝，不触碰 run 状态）
-  if (params.args !== undefined) {
-    const historical = readHistoricalArgs(deps.store.stateFilePath(runId), runId);
-    if (historical.kind === "truncated") {
-      // 仅旧格式帧（args 全文载荷落地前落盘、截断摘要形态）到达此分支——现行
-      // 写入面随帧落 args 全文，任意体积可逐字段比对
-      throw new Error(
-        `Resume rejected: original args of run ${runId} exceed the record's args summary limit ` +
-          "(legacy record stream without the full-args payload) — they cannot be verified field-by-field. " +
-          "Recovery: start a new run for these arguments, or resume WITHOUT args knowing $ARGS will be empty " +
-          "(a truncated summary cannot be reconstructed).",
-      );
-    }
-    if (historical.kind === "args") {
-      const diffs = diffResumeArgs(params.args, historical.args);
-      if (diffs.length > 0) {
-        throw new Error(
-          `Resume rejected: args for run ${runId} differ from the original run — resume replays the same intent; ` +
-            `changed arguments belong to a new run. Differing fields:\n  - ${diffs.join("\n  - ")}\n` +
-            "Recovery: pass the original args exactly, omit args to reuse them, or start a new run.",
-        );
-      }
-    }
-    // absent：D14 层不拒绝——无 record 流 / 无 run-created 帧的资格判据归 resumeRun 权威文案
-  }
-
   const options: ResumeRunOptions = {
     ...(params.time !== undefined ? { budgetTimeMs: params.time } : {}),
+    // [§2.5] args 原样下传由 core 判定（D14 单源）；journalDir 传壳的 store 同源目录，
+    // 否则 core 会按模块锚解析 record 路径——多 session 场景会静默读成「无记录」
+    //（D14 静默放行 = 安全语义反转；core 锚点与壳 store 锚点必须同源）。
+    ...(params.args !== undefined ? { args: params.args } : {}),
+    journalDir: dirname(deps.store.stateFilePath(runId)),
     host: os.hostname(),
   };
   await resumeRun(runId, deps, options);

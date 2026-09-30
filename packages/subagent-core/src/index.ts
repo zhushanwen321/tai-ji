@@ -430,6 +430,14 @@ export {
   type ResumeRunOptions,
 } from "./orchestration/resume-run.ts";
 
+// [§2.5] D14 args 一致性判定单源（原壳层实现下沉；壳只装配 args + journalDir）。
+export {
+  assertResumeArgsMatch,
+  diffResumeArgs,
+  historicalArgsOf,
+  type HistoricalArgs,
+} from "./orchestration/resume-args-guard.ts";
+
 // launcher 层：deps 类型 + 拒单文案单点。
 // formatAvailableWorkflowRefs / workflowNotFoundMessage：not found 拒单清单与
 // 文案单点（extension 顶层 workflow tool 同案消费，副本已删）。

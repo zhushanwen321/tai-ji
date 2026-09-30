@@ -58,6 +58,7 @@ import { RunRuntime } from "./models/run-runtime.ts";
 import { makeHandlers } from "./lifecycle.ts";
 import { forgetRunResumedBudget, noteRunResumedBudget } from "./worker-message-pump.ts";
 import { WORKFLOW_RECORD_CUSTOM_TYPE } from "./workflow-record-entry.ts";
+import { assertResumeArgsMatch } from "./resume-args-guard.ts";
 
 const logger = getLogger("subagents");
 
@@ -390,6 +391,13 @@ export interface ResumeRunOptions { // oe-exempt:20260929:framework:resumeRun pu
   /** journal 目录锚（缺省 = 模块锚解析——与 dispatch 链 resolveRunEventJournal 同源）。 */
   journalDir?: string;
   /**
+   * 调用方期望复用的 args（可选）。传入即与 run-created 事件记录的历史 args 逐字段
+   * 深度比对（排除 `_runId`），不一致 / 旧格式截断摘要 → 拒绝（ResumeRejectionError，
+   * 文案含差异字段与恢复动作）；缺省 = 沿用历史，不比对。判定单源 = 本包
+   * `resume-args-guard.ts`（D14 领域规则；壳只负责把 args 与 journalDir 装配进来）。
+   */
+  args?: Record<string, unknown>;
+  /**
    * 时间预算上界（ms）。生效预算三档回落（单点在 assertResumeEligibility）：
    * 显式提供 = 覆盖；缺省 = 继承最近一条 run-resumed 帧记录的生效值（跨崩溃存续
    * ——上次显式覆盖不会在下次无参 resume 时退回创建预算）；再缺省 = 继承 run-created
@@ -514,6 +522,12 @@ function assertResumeEligibility(
       `Resume rejected: record stream for run ${runId} has no run-created frame (the run never started, ` +
         "or the stream is truncated at the head). Recovery: verify the runId, or start a new run.",
     );
+  }
+  // [§2.5 D14] args 一致性判定（fail-fast 于任何副作用之前）：数据源 = 上面已读到的
+  // run-created 事件（无需壳再读文件，也不需要新的端口原语）；absent 不在此拒绝
+  //（资格判据归下方权威文案）。
+  if (options?.args !== undefined) {
+    assertResumeArgsMatch(runId, options.args, created, reject);
   }
   // fold 坏帧保守停摆（严格读取已保证行级合法；表外转移序的篡改流在此显形——
   // fold 停在中途态且不达 interrupted 即拒绝）

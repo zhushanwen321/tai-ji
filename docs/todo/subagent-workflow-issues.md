@@ -33,19 +33,25 @@
 - create 前置 rmSync 清目录（:176-182）但不清 git 元数据；上次 create 回滚的 `worktree remove` 失败被 bestEffort 吞掉（:221-224）留下 `<repo>/.git/worktrees/<branch>` 陈旧登记后，`worktree add` 报 already registered 恒失败。reconstruct 对同形态有 prune+重试（:296-305），create 没有。
 - 关联登记：keepBranch 保留的 pi-sub-* 分支无终局回收（单调累积），回收策略（TTL / 数量上限 / 显式清理）待裁决。
 
-### 1.4 轮终收尾遇 stale extension ctx 崩溃 runtime 进程（P1，间歇性，2026-09-22 登记）
+### 1.4 轮终收尾遇陈旧 extension 上下文崩溃（P1，间歇性，2026-09-22 登记；机制 2026-09-30 核实）
 
-- 症状：GUI 派发 subagent，轮终收尾时 runtime 进程 exit 1，当轮 record 丢失、manifest 轮终投影未执行；supervisor 重启循环约 6 分钟。复验 3 轮仅第 1 轮触发。
-- 根因（已核实部分）：簿记⑧ emitPendingUnregister（`record-store-rounds.ts:207`）→ notify-host 的 `pi?.events.emit("pending:unregister", …)`——`pi?.` 只挡 null 不挡「非空但已失效」的 stale 适配器，emit 抛错沿 markRoundIdle 调用链未捕获，进程死亡。**stale ctx 产生机制未核实，修复前需先排查**（不查清根因就加 try/catch 属掩盖）。
-- 同族风险：notify-host 其他 emit 面（register 等）共用同一 `pi?.events.emit` 形态。
-- 证据：`.tmp/dev-flow/b1b2-verify/`（崩溃日志/重启截图）。
+- 症状：GUI 派发 subagent，轮终收尾时 **pi 会话进程** exit 1（登记原文写「runtime 进程」不准确：runtime 只写 `pi-crash-*.log` 并把会话重新拉起，runtime 自身的未处理拒绝只记日志不退出），当轮 record 丢失、轮终 manifest 投影未执行；复验 3 轮仅第 1 轮触发。「supervisor 重启循环约 6 分钟」未能核实（现场证据目录已不在盘上）。
+- 调用链（11 跳全无捕获）：onRunSettled（conversation-continuation.ts:337-348）→ settleRoundSuccess / settleRoundFailed（:667 / :701）→ finalizeRoundOutcome（chat-rounds.ts:569）→ finalizeRoundToIdle（:729-745）→ doFinalizeRoundToIdle（finalize-record.ts:266-278）→ store.markRoundIdle → markRoundIdleImpl（record-store-rounds.ts:251，登记原文的行号 :207 已漂移）→ notify-host.ts:82 的 `pi?.events.emit("pending:unregister", …)` → pi 侧 assertActive() 抛错。该步排在 manifest 投影（同文件 :275）之前，所以 manifest 丢失。
+- 死亡通道：conversation-continuation.ts:344/:347 用 `void this.settleRoundX(...)` 起了一条无人接的 promise 链，异步抛错变成未处理的 promise 拒绝；pi 在 rpc 模式下没有安装未处理拒绝 / 未捕获异常处理器（0.84.4 只在交互模式注册）→ Node 默认退出，exit 1。
+- 陈旧上下文机制（本次核实到窗口级）：pi 在会话替换（newSession / fork / switchSession / reload）时把旧 runner 标记失效——teardownCurrent 的顺序是 session_shutdown → session.dispose()（即失效）→ `await createRuntime()` → 新 session_start → initSession(新 pi)。失效后旧 api 的每个方法首行断言并抛错，文案含 `stale after session replacement`（已登记为 pi 语义断言 PS-30，探针随 pi 版本门禁重验）。
+- 命中窗口：SessionBaselines._pi（session-baselines.ts:169）全文只有 initSession（:257）一处赋值、**从不置空**；SubagentService.dispose()（subagent-service.ts:784-823）只置 `_disposed`；reload 分支（workflow-events.ts:540-548）直接返回、跳过清理（有意保留在途 run 交给 reload 后的接管）→ 在途 run 的轮终收尾正好落在「旧句柄已失效、新句柄尚未注入」的窗口里。该窗口已在 workflow-events.ts:138-152 显式登记为设计接受的窗口（降级检查放在消费侧）。
+- 缺口定位：陈旧上下文的普查与机器检查只覆盖 `extensions/` 三组目录，`packages/subagent-core` 不在扫描范围内。core 全域同形无保护的 `pi?.` / `getPi()?.` 共 **15 处**（notify-host 4 处 :70/:82/:95/:110；record-store 族 7 处含 :425/:461 的轮终与注册条目写点；subagent-service / finalize-record / sweep-binding / chat-rounds 各 1 处）。只给通知面加捕获，等于把崩溃挪到下一跳（条目写点）且不留痕。
+- 修复方向（三者组合，缺一即掩盖或留后门）：(a) 从根源消窗口——session-baselines 增 pi 绑定代际，代际不符时 `get pi()` 返回 null；dispose() 与 reload 分支都显式作废句柄；轮终收尾给有界的「句柄就绪」等待，避免窗口内丢写。(b) 通知路径 best-effort 化（notify-host.ts:69-86 及 :95、:110；core 不能 import `@zhushanwen/pi-ext-guards`，需包内极小分类常量并注释指向 PS-30）。(c) 把 `void this.settleRoundX(...)` 改成带 `.catch(bestEffort)`——消灭「任何轮终链异常 → 整进程退出」这一最坏后果，不只陈旧上下文一种成因。
+- 为什么 (b) 单独做属掩盖：注销被吞后 pending 差集残留（要靠下一轮对账补），而同一窗口的条目写点仍会抛；且静默降级的影响面尚无登记。
+- 证据与取证：原证据目录 `.tmp/dev-flow/b1b2-verify/` 已不在盘上；复核建议先在 `<dataDir>/logs/` 找 `pi-crash-*.log` 核对崩溃栈是否含上述文案，并与同一 `pi-<date>-<sid>.jsonl` 的 shutdown / start 时间戳对齐。
 
 ### 1.5 resume 档 1 补收丢失结构化调用的对象形态（用户已裁决应修）
 
-- 现状：活体链 schema 调用的 `AgentResult.parsedOutput`（校验后对象）随 agent-settled 帧落 record 流，但 resume 档 1（结果补收）帧只带 `extractAssistantTextContent` 提取的正文文本（resume-run.ts 补收帧构造处无 parsedOutput）；worker 侧回放恒 `parsedOutput ?? content` 优先——schema 调用经档 1 补收后脚本拿到原始 JSON 文本串而非对象，无测试覆盖。
+- 现状（已核实）：活体链的 schema 调用把校验后对象 `AgentResult.parsedOutput` 写进 agent-settled 事件，但 resume 档 1（结果补收）构造的事件只带 `extractAssistantTextContent` 提取的正文文本（resume-run.ts:531-543，全文件无 parsedOutput）；worker 侧回放恒 `parsedOutput ?? content` 优先（worker-script-builder.ts:183 与缓存路径 :303）→ schema 调用经档 1 补收后脚本拿到 JSON 文本串，且脚本无感知（returnMeta.error 仍为 undefined）。测试覆盖应精确表述为「**对象形态无覆盖**」：档 1 集成用例存在（resume-tier-budget.test.ts:227-252），只断言 content 与 sessionFile。
 - 裁决语义（2026-09-29 用户定案）：schema 调用的结果必须是对象形态，**没有文本回落选项**；拿不到对象形态就不该判档 1。
-- 附带隐患（推断未完全核实）：档 1 判据（classifyResumeTierFromContent）只看「最后一条 assistant 回复完整带正文」，不校验是否通过 schema 验收——崩溃发生在「校验失败轮已落盘、steer 重试未完成」窗口时，可能把未验收文本当结果回放。修复必须一并封住。
-- 实现要点（方向 A）：从 pi 会话文件提取 structured-output 工具调用块参数，「工具调用 + 配对成功 toolResult」双证据确认校验通过；拿不到可信对象形态 → 改判档 2 续写重花。补两类测试（对象形态补收 / 未验收不补收）。评估复用 session-reader 已有会话读取能力。
+- 附带隐患（**推断成立**：判据形态支持，无 fixture 直证）：档 1 判据 classifyResumeTierFromContent（resume-run.ts:219-245）只看「最后一条 assistant 回复有正文文本块」，不校验结构化输出是否成功配对——崩溃发生在「校验失败轮已落盘、steer 重试未完成」窗口时，未验收文本会被当成结果回放。修复必须一并封住。
+- 证据来源（本次核实）：record 流拿不到工具级验收痕迹——mapToolCalls（agent-result-mapper.ts:78-83）只留 `{name, input}`，丢掉 isError 与 details；且被判档的 call 定义上就没有 agent-settled 事件。成员会话文件里有：工具调用是 assistant 消息 content 内的 `{type:"toolCall", id, name, arguments}` 块，工具结果是独立 `role:"toolResult"` 条目并带 `toolName` / `toolCallId`（实测 515/515 配对），权威类型还带 details 与 isError。限制：`packages/session-core` 的 Entry 不保留未知字段 → 方向 A 需直读原始 JSONL 或扩展 session-core。
+- 实现要点（方向 A）：该 call 是否结构化调用由 agent-started 事件的 `opts.schema` 判定；是则在补收前从成员会话文件提取最后一个非错误的 `structured-output` 工具调用参数作为对象，补收事件带 parsedOutput；拿不到可信对象就不判档 1，改判档 2 续写重花。补两类测试（对象形态补收 / 未验收不补收）。第二道闸（方向 B，非根因、须与 A 同批）：worker 侧在 schema 调用命中无 parsedOutput 的缓存结果时不回落文本，改为报错或降档。
 - 出处：workflow-run-resume-revision 设计 §5 检查点 7。影响窗口窄。
 
 ---
@@ -54,19 +60,20 @@
 
 ### 2.1 双 `RunState` 同名异义（同一 run 域两个完全不同的类型）
 
-- `orchestration/models/run-state.ts:25`（status/reason/budget/calls/trace 执行快照形态，WorkflowRun 聚合持有）vs `orchestration/run-events.ts:613`（lifecycle/outcome 状态机两维形态，转移表与 fold 消费）。同包同词两义。旧形态是 v1 兼容层（W4 sunset 范畴），但其头部注释描述的「RunStore.save 触发持久化 / 重启时从 JSONL 重新加载」机制已随 record 单源收敛删除——注释过期。
-- 同族实例：`isProcessAlive` 在 pid-file.ts（三态）与 persistence/alive-store.ts（二态）同名异义（已加警示注释，改名待设计批）；`ModelCatalogEntry` 在 core（{provider,id}）与 SDK 协议（{id,aliases?,canonicalRef?}）同名不同形。
+- `orchestration/models/run-state.ts:25`（status / reason / budget / calls / trace / errorLogs / error / scriptResult 执行快照形态，WorkflowRun 聚合持有）vs `orchestration/run-events.ts:613`（lifecycle 五态 + outcome 状态机两维形态，转移表与 fold 消费）。同包同词两义。头部注释「两半各对一半」（2026-09-30 核实）：`RunStore.save 触发持久化` 已失效（壳侧 save 是显式 no-op），`重启时从 JSONL 重新加载` 仍真但**残缺**——loadAll 重建时 `budget` 与 `errorLogs` 不恢复（重启后令牌 / 费用统计归零、诊断日志清空）；「callCache 保留」是错误归因（那是 worker 侧脚本的重放缓存，与重建无因果）。另：「旧形态是 v1 兼容层」只对状态轴成立，budget / calls / trace / errorLogs / scriptResult 是 TUI 的唯一活体数据面，整体当兼容层退役会拆掉 WorkflowsView 的数据源。修法：先做纯改名（如 `RunExecutionSnapshot` / `RunLifecycleState`）+ 注释回写；补齐 budget / errorLogs 重建属行为变更，需先裁决「重启后统计归零是否预期」。
+- 同族实例：`isProcessAlive` 在 pid-file.ts:174（三态，EPERM = 不确定）与 persistence/alive-store.ts:91（二态，EPERM = 保守判活）同名异义——警示注释已在 pid-file.ts:170-172；三态版**无任何外部 import**（只在 pid-file.ts 内用），实际无误用面，二态版被 worktree-reconcile / worktree-manager / session-file-gc 消费。`ModelCatalogEntry` 在 core（`{provider, id}`，`orchestration/model-catalog.ts:33`）与 SDK 协议（`{id, aliases?, canonicalRef?}`，`protocol/contract-types.ts:447`）同名不同形，两者之间无类型关联或转换函数（core 那份 extensions/ 零消费，SDK 那份被 `execution/engine/` 6 个文件消费）。
 
-### 2.2 run 生命周期状态判定散布约 7 处 + 展示层映射未归并
+### 2.2 run 生命周期状态判定散布（9 处以上）+ 展示层映射未归并（2026-09-30 核实修正）
 
-- 状态表达位置：`WorkflowRun.state.status` 两态（聚合根，v1 兼容层）、`WorkflowRunMeta.interruptedAt` 标记（中断态靠 meta 字段投影表达）、record 事件流 fold 五态 RunState（唯一权威）、DoneReason 五因、RunOutcome 四值、shared `WorkflowRunStatus` 第三份字面量副本、壳 gui-mappers 关键字匹配。映射有单点（doneReasonToRunOutcome）但单点两侧仍是两套词表。
-- 展示层同构问题（原 workflow-architecture-backlog G2 并入）：「运行状态 → 展示文案/颜色/图标」映射在 4 个文件至少 6 处独立实现——`interface/format.ts` 内部 3 处（:149/:454/:474）+ `interface/views/detail-content.ts:88` + `interface/gui-mappers.ts:62` + `interface/bg-notify-render.ts:260`。
-- gui-mappers 现状：对现行真实输入域（ExecutionStatus 的 running/idle）覆盖正确；4 个潜伏错映射格（created/settling/interrupted/active 都归 done）靠「数据流不流入」兜底，入参裸 string 无类型防线。
-- 设计决策点：v1 兼容层退役顺序；内活性状态唯一读口（建议 fold checkpoint 进程内缓存）；DoneReason 是否只活在引擎协议侧；展示映射归并形态。
+- 状态表达位置（登记原列 7 处，实测 9 处以上）：`WorkflowRun.state.status` 两态（聚合根，v1 兼容层）、`WorkflowRunMeta.interruptedAt` 标记、record 事件流 fold 五态（唯一权威）、DoneReason 五因、RunOutcome 四值、shared `WorkflowRunStatus` 第三份字面量副本，外加登记未列的 `shared/workflow.ts` 的 `WorkflowDoneReason` 与 `WorkflowRunOutcome` / `WORKFLOW_RUN_OUTCOME_ALL`、runtime `workflow-extractor.ts:69/:72` 的两份副本、`assembly/types.ts:58` 的 `ExecutionStatus`。映射有单点（doneReasonToRunOutcome）但单点两侧仍是两套词表。**值级一致性断言只有 outcome 轴有**（`packages/runtime/test/workflow-outcome-vocab-parity.test.ts`），status 轴没有。
+- 展示层同构问题（原 workflow-architecture-backlog G2 并入）：「运行状态 → 展示文案/颜色/图标」映射实测 **7 处 / 4 文件、跨文件零共享**——`interface/format.ts` 内 3 处（:146-161 状态字形 / :451-460 颜色 token / :470-483 徽标文案）+ `interface/views/detail-content.ts:87-95` + `interface/gui-mappers.ts:62-67` 与 `:76-81` + `interface/bg-notify-render.ts:240-264`。唯一的共享是同文件内的 `statusDotStr → statusColorToken`（后者是 private，跨文件无法复用）。
+- gui-mappers 现状：对现行真实输入域（ExecutionStatus 的 running / idle）覆盖正确；潜伏错映射格实测 **5 个**（created / settling / interrupted / active 都落 done；terminal 落 done 但丢失 failed / cancelled / time_limited 区分），入参裸 string 无类型防线。数据流不流入有充分类型证据：list 分支唯一入参是 `ExecutionStatus`，「结构性不流入」成立，一旦有人改传 run 域词表或扩字段，错格立刻活跃。
+- 设计决策点：v1 兼容层退役顺序；内活性状态唯一读口（建议 fold checkpoint 进程内缓存）；DoneReason 是否只活在引擎协议侧；展示映射归并形态（先做入参类型收窄，再做单表归并）；补 status 轴的值级一致性断言（对齐 outcome 轴先例）。
 
-### 2.3 orchestration ↔ execution 双向循环依赖（19 / 6 文件）
+### 2.3 orchestration ↔ execution 双向循环依赖（20 / 6 文件；机器检查已落地 2026-09-30）
 
-- 6 个 orchestration 文件 import execution（terminal-actions.ts:26-28 一次值 import 5 处），19 个 execution 文件 import orchestration（execution/service/workflow-dispatch.ts:37,48,55 值 import model-catalog/terminal-actions/member-reuse-pool）。终局编排的归属在两域间摇摆；runtime 侧有 NO_SERVICE_CYCLE_CHECK 而 core 内无对应防线。
+- 6 个 orchestration 文件 import execution（其中 3 个是值导入；terminal-actions.ts:26-28 一次值 import 5 处），**20 个** execution 文件 import orchestration（登记原写 19；其中 10 个是值导入，例如 execution/service/workflow-dispatch.ts:33-43 值导入 model-catalog / terminal-actions）。终局编排的归属在两域间摇摆。
+- 防线现状（2026-09-30 更新）：core 侧的包级值依赖循环检查已落地（`scripts/check-subagent-core-value-cycles.mjs` + 其测试，见 commit 65440e5b1）——「core 内无对应防线」这一条已不成立。剩余工作 = 拆边（终局编排整体入 orchestration，或反向边收窄到端口），属架构排期项。
 - 修法方向：先加 core 版循环依赖机器检查止血，再谈拆边（终局编排整体入 orchestration、execution 只暴露 persistence 端口，或反向边收窄到端口）。
 
 ### 2.4 领域核心类型反向依赖应用层目录
@@ -74,11 +81,14 @@
 - `models/ports.ts:13` import `execution/assembly/stream-sink.ts`、`models/types.ts:23` import `execution/assembly/types.ts`——models（领域核心候选）的端口签名依赖 assembly 类型，ports.ts 头部自称「零 infra 依赖（AC-1）」名实不符。
 - record 域聚合核心 execution-record.ts 的全部领域类型（ExecutionRecord/ExecutionStatus/Turn 等 20 个）定义在 assembly/types.ts——`assembly/types.ts` 实为跨域公共类型堆积处，领域概念的权威定义位置错位。
 
-### 2.5 壳层（interface/）混入领域规则 + 自带 record 流解析（原 G7 并入）
+### 2.5 壳层混入领域规则（领域规则部分已修；interface 职责混装属独立议题）
 
-- `interface/` 22 文件混装命令处理 / 格式化 / GUI 映射 / 工具定义 / TUI 基建多类职责（原 backlog G7）。
-- 领域规则实例：`tool-workflow.ts:570-715` D14 resume args 一致性判定（含篡改检测与拒绝文案）完整实现在壳，readHistoricalArgs 自带 record 流 JSONL 解析与 core scanJournalFile 构成双实现——根因是 RunStore 端口只有 save（no-op）/loadAll/stateFilePath 三方法，没有「读 run-created 帧 args」的原语。
-- ADR 候选登记：「D14 args 判定刻意放在壳而非 core resumeRun」若无登记将反复被审查质疑；若非刻意即本条修复入口。
+- 状态：**领域规则部分已修**（2026-09-30）。D14 resume args 一致性判定（含篡改检测与三套拒绝文案）已下沉 core 单源 `orchestration/resume-args-guard.ts`，由 `resumeRun` 的资格段用**已读到的** run-created 事件执行；壳 `tool-workflow.ts` 只做装配（`args` + `journalDir`）与成功文案，`readHistoricalArgs` 与壳内的 record 流 JSONL 解析整体删除——第三份平行读实现消失（另两份见 §3.2，已由 core/壳共享校验原语收敛）。
+  - 方案取 B（零端口改动）：core 资格段本就已读到 run-created 事件，无需给 `RunStore` 加读原语（该端口是公共 semver 面，宿主自写实现会因此编译期破裂）。
+  - 必须同源的一条：壳传入的 `journalDir` = `dirname(store.stateFilePath(runId))`；否则 core 按模块锚解析，多 session 场景会静默读成「无记录」→ D14 静默放行（安全语义反转）。
+  - 测试：core 侧新增 `orchestration/__tests__/resume-args-guard.test.ts`（17 例：纯逻辑 + 数据源形态 + 判定文案 + resumeRun 端到端「拒绝且零副作用——不落 run-resumed 帧、不占 run」）；壳侧 `tool-workflow-resume.test.ts` 改为转发契约（args/journalDir 原样下传）；真链路锁 = `scenario-24-args-mismatch-rejection.test.ts`（7 例，文案逐字不变）。
+  - 「ADR 候选：D14 判定刻意放壳」随之作废（本就不是刻意——根因是端口无读原语与实现惯性）。
+- 遗留（不属本条）：`interface/` 22 文件的职责混装（命令处理 / 格式化 / GUI 映射 / 工具定义 / TUI 基建）单独排期，与领域规则下沉无关。
 
 ### 2.6 进程级 globalThis Symbol 槽键前缀混用（已修，2026-09-30）
 
@@ -158,23 +168,25 @@
 
 ---
 
-## 5. 待裁决项
+## 5. 已裁决项（2026-09-30 用户裁决；四项均已定案）
 
-### 5.1 无主 run 对账清理的持续损坏计数封顶
+### 5.1 无主 run 对账清理的持续损坏计数封顶——裁决：**不加封顶，维持现状**
 
-- reapOrphanRuns（workflow-run-resume-revision 裁决点 7）登记文件 `orphan-run-reap.json` 承载 7 天宽限窗：一次性损坏自愈；**持续损坏**（每轮读/写都坏，如磁盘坏道）才宽限窗反复重起 = 孤儿永不删除。
-- 待裁决：是否加「持续损坏计数封顶」（超阈值改告警/强制删除/人工介入）；反方向同样成立——极低频形态 + 原子写已消除主成因，加封顶可能属重复保险式过度工程。
+- 事实修正（2026-09-30 核实）：形成「孤儿永不删除」循环的前提比原文更窄——必须是**登记文件每轮写入都失败**（磁盘 / 权限故障）；单纯读侧损坏一轮就会被末尾的原子重写自愈（`orphan-reap.test.ts:252-278` 断言「一次性自愈」）。循环期间不产生误删。
+- 裁决理由：① 触发前提是磁盘 / 文件系统已经故障，此时「强制删除」多半同样失败；② 强制删除与维护轮的明文纪律冲突（`run-state-evidence.ts:747-748`：删除只会延后、永不提前）；③ 写失败时日志已带完整恢复指引（该文件可安全删除、下一轮重建），人工介入路径已存在；④ 累积速率极低（每个 run 几件小文件），原子写已消除主成因——加封顶属重复保险式过度工程。
+- 留档条件：将来若该循环被现场证据坐实，优先只做「连续写失败升级为告警」，不改删除语义。
 - 出处：`.tmp/tech-design/workflow-run-resume-revision/round-3/dispositions.json` D-3-3。
 
-### 5.2 zcode 宿主 run 双源收敛议题（实际等需求出现再裁）
+### 5.2 zcode 宿主 run 双源收敛——裁决：**不做，维持挂起**
 
-- run record 单源收敛只在 pi 壳侧落地；core 侧 FileRunStore 已随 commit bd5750b70 退役删除（读侧收敛到 run-state-evidence.ts 证据核）。议题变为纯裁决：zcode 宿主未来出现 workflow 编排需求时，run 态持久化是否直接采用 pi 壳同款 record 单源形态。zcode 引擎现无编排链，议题挂起。
+- run record 单源收敛只在 pi 壳侧落地；core 侧 FileRunStore 已随 commit bd5750b70 退役删除（读侧收敛到 run-state-evidence.ts 的证据判定核）。zcode 引擎当前没有 workflow 编排链路，无落点可做。
+- 裁决：维持挂起；等 zcode 出现 workflow 编排需求时，再按「是否直接采用 pi 壳同款 record 单源形态」立项裁决。
 
-### 5.3 workflow resume scriptPath 锚定——关闭形态取舍
+### 5.3 workflow resume scriptPath 锚定——裁决：**关闭（候选 A）**
 
-- 候选 A 已实施（run-created 帧携带可选 scriptPath，双侧恢复 + 六模板检查收紧；record-mode 回归网 A2/A4 用例通过，commit a32df2905）。真机复跑 run3 证据：帧正确携带、fold 完整走完 15 帧、无 Cannot find module _shared——但剧本被环境类缺陷（Provider Registry，见 §6.2）阻断在 kill/resume 阶段前。
-- 待裁决：A = 接受「修复实现 + 确定性回归 + 真机写入侧」三重验证作为关闭判据（推荐）；B = 等 §6.2 修复后重跑真机拿全绿再关闭。
-- 内置模板 scriptPath 缺席即 throw 是防注入安全设计（回退 process.cwd() 会打开用户目录误加载通道），修复不改变该语义。
+- 关闭判据 = 修复实现 + 确定性回归 + 真机写入侧取证三重验证。**commit 引用修正**：实现是 `1d51b490f`（run-created 携带可选 scriptPath + 双侧恢复 + 六个内置模板检查收紧）；`a32df2905` 只是 A2/A4 回归用例（两个测试文件）——登记原文把实现与回归网混为一谈。
+- 真机写入侧证据：记录里字段正确携带、fold 完整走完、无 `Cannot find module _shared`；真机 kill/resume 阶段被无关缺陷（§6.2 zcode provider）阻断，**不再作为关闭前置**。
+- 语义不变：内置模板 scriptPath 缺席即报错是防注入安全设计（回退 `process.cwd()` 会打开用户目录误加载通道），修复不改变该语义。
 
 ### 5.4 args 撞名防御只盖一个入口
 
