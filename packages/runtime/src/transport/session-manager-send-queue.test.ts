@@ -431,8 +431,16 @@ describe('P9-accept-receipt-vitest: 受理回执（onSettled delivered → markI
     h.claims.arm({ parentSid: 'parent-1', notifyId: NID2, kind: 'claim', sessionId: 's1' })
     const handle = h.registry.getOrCreateDelivery('s1')
     expect(handle).toBe(h.registry.getOrCreateDelivery('s1')) // 单例约束（原 U6_SINGLETON 语义）
-    await handle.sendChecked({ payload: { kind: 'text', content: 'a' }, meta: { notifyId: NID, parentSid: 'parent-1' } })
-    await handle.sendChecked({ payload: { kind: 'text', content: 'b' }, meta: { notifyId: NID2, parentSid: 'parent-1' } })
+    // receiptAnchor:'acceptance' 申报与 handler send 生产路径同形（agent 通路无回执锚点，
+    // 受理即 delivered——缺省 'marker' 会留守 in-flight，回执不触发）
+    await handle.sendChecked(
+      { payload: { kind: 'text', content: 'a' }, meta: { notifyId: NID, parentSid: 'parent-1' } },
+      { receiptAnchor: 'acceptance' },
+    )
+    await handle.sendChecked(
+      { payload: { kind: 'text', content: 'b' }, meta: { notifyId: NID2, parentSid: 'parent-1' } },
+      { receiptAnchor: 'acceptance' },
+    )
     expect(h.claims.getClaim('parent-1', NID)?.state).toBe('injected')
     expect(h.claims.getClaim('parent-1', NID2)?.state).toBe('injected')
     expect(h.client.prompt).toHaveBeenCalledTimes(2)

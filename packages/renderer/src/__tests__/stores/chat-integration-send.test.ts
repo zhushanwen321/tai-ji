@@ -79,16 +79,29 @@ vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ toasts: { value: [] }, error: vi.fn(), remove: vi.fn() }),
 }))
-vi.mock('@/composables/panel/useComposerModelThinking', () => ({
-  useComposerModelThinking: () => ({
-    currentModelId: { value: '' },
-    currentThinkingLevel: { value: undefined },
-    currentThinkingLevelMap: { value: undefined },
-    localThinkingLevel: { value: undefined },
-    onModelSelect: vi.fn(),
-    onThinkingSelect: vi.fn(),
-  }),
-}))
+// useComposerModelThinking 实装已迁 core（@taiji/core/domain/composer，composer 迁移）；
+// 部分 mock 注入与 composer-shell-model-toast.test.ts 同款：importOriginal 保其余导出实装，
+// stub 面覆盖 composer-shell 消费的全部返回字段（switching 等——缺字段在 Composer 渲染 computed 炸）
+vi.mock('@taiji/core/domain/composer', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>()
+  const { ref } = await import('vue')
+  return {
+    ...actual,
+    useComposerModelThinking: () => ({
+      currentModelId: ref(''),
+      currentThinkingLevel: ref(undefined),
+      currentThinkingLevelMap: ref(undefined),
+      currentSupportedLevels: ref(undefined),
+      localThinkingLevel: ref(undefined),
+      switching: ref(null),
+      onModelSelect: vi.fn(),
+      onThinkingSelect: vi.fn(),
+      enterStagingMode: vi.fn(),
+      exitStagingMode: vi.fn(),
+      getStagingConfig: vi.fn(() => null),
+    }),
+  }
+})
 
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'

@@ -179,6 +179,36 @@ function endsWithMarkerFor(text: string, bareId: string): boolean {
   return false
 }
 
+/** ③ 通道 a：msg-id-mapper custom entry 映射（customType 过滤 + data 形状守卫——entry-tree-builder 同款防御）。miss（含映射指向 entry 不在文件的数据断链形态）返回 null，调用方落通道 b 继续。 */
+function locateViaClientUuidMap(
+  snapshot: TreeSnapshot,
+  targetId: string,
+): { entryId: string; content: string } | null {
+  for (const entry of snapshot.byId.values()) {
+    if (entry.customType !== CLIENT_MSG_ID_TYPE) continue
+    const data = entry.data as Partial<{ clientUuid?: unknown; userEntryId?: unknown }> | null | undefined
+    if (data && data.clientUuid === targetId && typeof data.userEntryId === 'string') {
+      const target = snapshot.byId.get(data.userEntryId)
+      if (target) return { entryId: target.id, content: userEntryText(target) }
+    }
+  }
+  return null
+}
+
+/** ③ 通道 b：user entry 文本裸标记末尾锚（uuid 双形态归一——MSG_ID_TAG_RE 捕获组 2 恒裸形态）。 */
+function locateViaBareMarker(
+  snapshot: TreeSnapshot,
+  targetId: string,
+): { entryId: string; content: string } | null {
+  const bare = bareMarkerId(targetId)
+  for (const entry of snapshot.byId.values()) {
+    if (entry.type !== 'message' || entry.message?.role !== 'user') continue
+    const text = piContentText(entry.message.content)
+    if (text !== '' && endsWithMarkerFor(text, bare)) return { entryId: entry.id, content: text }
+  }
+  return null
+}
+
 /**
  * ③ 定位目标 entryId（targetId 双形态分派）。原前提「renderer 消息 id 两空间互斥使分派
  * 构造性可靠」被 U8 保号削弱：外来条目 clientUuid 可为裸 uuid 形态（chat store appendUser
@@ -199,26 +229,11 @@ function locateTarget(
   targetId: string,
 ): { entryId: string; content: string } | null {
   if (targetId.startsWith('u-')) {
-    // 通道 a：custom entry 映射（customType 过滤 + data 形状守卫——entry-tree-builder 同款防御）
-    for (const entry of snapshot.byId.values()) {
-      if (entry.customType !== CLIENT_MSG_ID_TYPE) continue
-      const data = entry.data as Partial<{ clientUuid?: unknown; userEntryId?: unknown }> | null | undefined
-      if (data && data.clientUuid === targetId && typeof data.userEntryId === 'string') {
-        const target = snapshot.byId.get(data.userEntryId)
-        if (target) return { entryId: target.id, content: userEntryText(target) }
-        // 映射指向的 entry 不在文件（数据断链）→ 落通道 b 继续（b 同样扫不到即 miss）
-      }
-    }
+    const mapped = locateViaClientUuidMap(snapshot, targetId)
+    if (mapped) return mapped
   }
   if (targetId.startsWith('u-') || BARE_UUID_RE.test(targetId)) {
-    // 通道 b：裸标记末尾锚（uuid 双形态归一——MSG_ID_TAG_RE 捕获组 2 恒裸形态）
-    const bare = bareMarkerId(targetId)
-    for (const entry of snapshot.byId.values()) {
-      if (entry.type !== 'message' || entry.message?.role !== 'user') continue
-      const text = piContentText(entry.message.content)
-      if (text !== '' && endsWithMarkerFor(text, bare)) return { entryId: entry.id, content: text }
-    }
-    return null
+    return locateViaBareMarker(snapshot, targetId)
   }
   const direct = snapshot.byId.get(targetId)
   return { entryId: targetId, content: direct ? userEntryText(direct) : '' }
@@ -265,52 +280,10 @@ export class RevokeOrchestrator {
       // ── ② 内核 active 条目全量 cancel（D4：等价 exclude=全部，走既有 cancel 管道）────
       await this.cancelAllActiveEntries(registry, sessionId)
 
-      // 数据面：拉活 + 一次 get_entries（③⑤ 共用——设计 D2 ③「同一次 get_entries」）。
-      // 拉活失败回 pi-reclaimed（A10：无感拉活是常态，失败才是终态码）。
-      let client: IPiEngine
-      try {
-        client = await this.deps.ensureActive(sessionId)
-      } catch (e) {
-        console.error(`[revoke-orchestrator] ensureActive failed, sid=${sessionId}`, e)
-        return { sessionId, revoked: false, error: 'pi-reclaimed' }
-      }
-      // get_entries 失败归 nav-failed（可重试语义——与 ⑥ 校验读失败同族；重试时若撤回
-      // 实际已成功，⑤ 幂等判定兜住不误报 no-mapping）
-      const before = await readTreeSnapshot(client)
-      if (!before) {
-        warn(`nav-failed: pre-signal get_entries read failed, sid=${sessionId}, targetId=${targetId}`)
-        return { sessionId, revoked: false, error: 'nav-failed' }
-      }
-
-      // ── ③ 定位目标 entryId ─────────────────────────────────────────────────────
-      const located = locateTarget(before, targetId)
-      if (!located) return { sessionId, revoked: false, error: 'no-mapping' }
-
-      // ── ④ 清 history 重建缓存（惰性清除——下次重建时才读树，无数据时序问题）──────
-      // 派生态失效不在此触发（后置到⑥ 校验通过后，见调用点注释）：失效经 SessionRecords
-      // 同步触发 fire-and-forget 全量重算，重算消费的是调用时点的树快照——信令前调用时
-      // 树尚未回退，无参 getEntries 先于信令到达 pi（同一 client 顺序处理），返回撤回前
-      // 快照 → 全量重建派生被撤残影 + cursor 回写撤回前 leafId，信令生效后增量批
-      // 「保持基线」→ 残影永续。信令前失效 = 无效失效（时序错位缺陷的根修落点）。
-      this.deps.evictHistoryRebuildCache(sessionId)
-
-      // ── ⑤ 信令前校验（用 nav 前数据——放⑥则恒假/恒真皆失效）──────────────────────
-      const pre = walkActiveChain(before)
-      if (!pre.ids.has(located.entryId)) {
-        // 二次判定：目标在全文件存在 → 已被前序撤回带走（含 reply 丢失重试形态）→
-        // 幂等回 revoked:true + 原文（重试同样完成 D7 草稿回填闭环）；不存在 → no-mapping。
-        // 两分支均不发信令——防复活性跳转（对旧分支目标的 navigateTree 会把叶子挪回去）。
-        if (before.byId.has(located.entryId)) {
-          // 幂等分支同样触发派生态失效：首次尝试可能已「信令送达 + 树回退、但⑥校验读失败
-          // 归 nav-failed」（失效未触发，残影仍在）；重试此刻触发的全量重算消费的已是撤回
-          // 后树（时序合法——与⑥′同款后置契约）。
-          this.invalidateDerived(sessionId)
-          return { sessionId, revoked: true, content: located.content }
-        }
-        return { sessionId, revoked: false, error: 'no-mapping' }
-      }
-      // 顺取 M.parentId = expectedParentId（append-only 文件中不可变，时序安全——唯一取数点）
-      const expectedParentId = before.byId.get(located.entryId)?.parentId ?? null
+      // ── 数据面拉活 + ③ 定位 + ④ 缓存清除 + ⑤ 信令前校验（含全部前置终态分支）──────
+      const prelude = await this.acquireTargetContext(sessionId, targetId)
+      if (!('client' in prelude)) return prelude // 前置终态（busy 码族 / no-mapping / 幂等 revoked）
+      const { client, located, expectedParentId } = prelude
 
       // ── ⑥ 信令 + prompt resolve 后校验 ──────────────────────────────────────────
       const outcome = await this.deps.sendSystemCommand(
@@ -326,41 +299,14 @@ export class RevokeOrchestrator {
         warn(`nav-failed: nav command transport error, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}, message=${outcome.message}`)
         return { sessionId, revoked: false, error: 'nav-failed' }
       }
-      // [post-signal 防御性失效] 以下三个 nav-failed 分支（校验读失败 / 活跃链断裂 /
+      // [post-signal 防御性失效] 下方三个 nav-failed 分支（校验读失败 / 活跃链断裂 /
       // parentReached 不过）的共同前提：nav 信令已送达 pi（sendSystemCommand 已 resolve），
       // 树可能已实际回退而校验未能确证——三处均补派生态失效。失效幂等：树未回退时全量
       // 重算消费未变树，收敛到同态零副作用；已回退时立即按撤回后树清残影，不等用户重试
       // （重试前存在残影窗口）。与⑥′的差别 = 时机证据强度：⑥′是树回退确证后的失效，
       // 此处是不确定态的防御性失效。
-      const after = await readTreeSnapshot(client)
-      if (!after) {
-        warn(`nav-failed: post-signal get_entries read failed, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}`)
-        this.invalidateDerived(sessionId)
-        return { sessionId, revoked: false, error: 'nav-failed' }
-      }
-      const post = walkActiveChain(after)
-      if (!post.complete) {
-        warn(`nav-failed: active chain broken/cyclic after rewind, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}, expectedParentId=${expectedParentId}`)
-        this.invalidateDerived(sessionId)
-        return { sessionId, revoked: false, error: 'nav-failed' }
-      }
-      // 谓词（注释锚③）：按回溯链 entry.id 集合判定，禁序列化字符串包含判法——
-      // LabelEntry.targetId 字段指向被撤消息，字符串包含判法会误报「路径仍含目标」。
-      if (post.ids.has(located.entryId)) {
-        // 此分支刻意不失效（与上方三分支相反）：目标仍在活跃链 = 树确证未回退（回退后
-        // 目标必不在活跃链），无残影产生——树未回退时失效收敛到同态，纯冗余调用；
-        // nav-failed 语义 = 本轮未完成，重试走⑤正常路径。
-        warn(`nav-failed: target still on active path after rewind, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}`)
-        return { sessionId, revoked: false, error: 'nav-failed' }
-      }
-      // parentReached：expectedParentId === null（目标是根）时活跃链自然终止即达成
-      // （complete 已在上一步判定）；否则按 entry.id 集合判定。
-      const parentReached = expectedParentId === null || post.ids.has(expectedParentId)
-      if (!parentReached) {
-        warn(`nav-failed: expected parent not reached after rewind, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}, expectedParentId=${expectedParentId}`)
-        this.invalidateDerived(sessionId)
-        return { sessionId, revoked: false, error: 'nav-failed' }
-      }
+      const verifyOutcome = await this.verifyRewind(sessionId, client, targetId, located, expectedParentId)
+      if (verifyOutcome !== null) return verifyOutcome
 
       // ── ⑥′ 派生态失效（树回退确认后——时序契约见④段注释）：此刻触发的全量重算
       // 消费撤回后树，被撤派生（plan 残影等）随活跃路径裁剪收敛清除。
@@ -375,6 +321,112 @@ export class RevokeOrchestrator {
       // queued 死轮询（恢复通道仅重启 app）。幂等（dispose 已清场时 no-op）。
       registry.endRevokeHold(sessionId)
     }
+  }
+
+  /**
+   * ② 后数据面前置段：拉活 + 一次 get_entries（③⑤ 共用——设计 D2 ③「同一次
+   * get_entries」）+ ③ 定位 + ④ 缓存清除 + ⑤ 信令前校验。返回上下文（含 ⑤ 校验取出的
+   * expectedParentId）或前置终态 reply（拉活失败 pi-reclaimed / 读失败 nav-failed /
+   * 定位失败与不在活跃链 no-mapping / 幂等已撤 revoked:true）——调用方按 `'client' in`
+   * 判别后原样返回或继续 ⑥。
+   */
+  private async acquireTargetContext(
+    sessionId: string,
+    targetId: string,
+  ): Promise<
+    | { client: IPiEngine; located: { entryId: string; content: string }; expectedParentId: string | null }
+    | SessionRevokeMessageReply
+  > {
+    // 拉活失败回 pi-reclaimed（A10：无感拉活是常态，失败才是终态码）。
+    let client: IPiEngine
+    try {
+      client = await this.deps.ensureActive(sessionId)
+    } catch (e) {
+      console.error(`[revoke-orchestrator] ensureActive failed, sid=${sessionId}`, e)
+      return { sessionId, revoked: false, error: 'pi-reclaimed' }
+    }
+    // get_entries 失败归 nav-failed（可重试语义——与 ⑥ 校验读失败同族；重试时若撤回
+    // 实际已成功，⑤ 幂等判定兜住不误报 no-mapping）
+    const before = await readTreeSnapshot(client)
+    if (!before) {
+      warn(`nav-failed: pre-signal get_entries read failed, sid=${sessionId}, targetId=${targetId}`)
+      return { sessionId, revoked: false, error: 'nav-failed' }
+    }
+
+    // ── ③ 定位目标 entryId ─────────────────────────────────────────────────────
+    const located = locateTarget(before, targetId)
+    if (!located) return { sessionId, revoked: false, error: 'no-mapping' }
+
+    // ── ④ 清 history 重建缓存（惰性清除——下次重建时才读树，无数据时序问题）──────
+    // 派生态失效不在此触发（后置到⑥ 校验通过后，见调用点注释）：失效经 SessionRecords
+    // 同步触发 fire-and-forget 全量重算，重算消费的是调用时点的树快照——信令前调用时
+    // 树尚未回退，无参 getEntries 先于信令到达 pi（同一 client 顺序处理），返回撤回前
+    // 快照 → 全量重建派生被撤残影 + cursor 回写撤回前 leafId，信令生效后增量批
+    // 「保持基线」→ 残影永续。信令前失效 = 无效失效（时序错位缺陷的根修落点）。
+    this.deps.evictHistoryRebuildCache(sessionId)
+
+    // ── ⑤ 信令前校验（用 nav 前数据——放⑥则恒假/恒真皆失效）──────────────────────
+    const pre = walkActiveChain(before)
+    if (!pre.ids.has(located.entryId)) {
+      // 二次判定：目标在全文件存在 → 已被前序撤回带走（含 reply 丢失重试形态）→
+      // 幂等回 revoked:true + 原文（重试同样完成 D7 草稿回填闭环）；不存在 → no-mapping。
+      // 两分支均不发信令——防复活性跳转（对旧分支目标的 navigateTree 会把叶子挪回去）。
+      if (before.byId.has(located.entryId)) {
+        // 幂等分支同样触发派生态失效：首次尝试可能已「信令送达 + 树回退、但⑥校验读失败
+        // 归 nav-failed」（失效未触发，残影仍在）；重试此刻触发的全量重算消费的已是撤回
+        // 后树（时序合法——与⑥′同款后置契约）。
+        this.invalidateDerived(sessionId)
+        return { sessionId, revoked: true, content: located.content }
+      }
+      return { sessionId, revoked: false, error: 'no-mapping' }
+    }
+    // 顺取 M.parentId = expectedParentId（append-only 文件中不可变，时序安全——唯一取数点）
+    const expectedParentId = before.byId.get(located.entryId)?.parentId ?? null
+    return { client, located, expectedParentId }
+  }
+
+  /**
+   * ⑥ post-signal 校验（prompt resolve 后）：读 post 快照 + 活跃链三判定。返回 null =
+   * 树回退确证（调用方走⑥′/⑦ 收尾）；返回 reply = 终态回复（调用方原样返回——三防御
+   * 分支的失效语义见调用点 [post-signal 防御性失效] 注释）。
+   */
+  private async verifyRewind(
+    sessionId: string,
+    client: IPiEngine,
+    targetId: string,
+    located: { entryId: string },
+    expectedParentId: string | null,
+  ): Promise<SessionRevokeMessageReply | null> {
+    const after = await readTreeSnapshot(client)
+    if (!after) {
+      warn(`nav-failed: post-signal get_entries read failed, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}`)
+      this.invalidateDerived(sessionId)
+      return { sessionId, revoked: false, error: 'nav-failed' }
+    }
+    const post = walkActiveChain(after)
+    if (!post.complete) {
+      warn(`nav-failed: active chain broken/cyclic after rewind, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}, expectedParentId=${expectedParentId}`)
+      this.invalidateDerived(sessionId)
+      return { sessionId, revoked: false, error: 'nav-failed' }
+    }
+    // 谓词（注释锚③）：按回溯链 entry.id 集合判定，禁序列化字符串包含判法——
+    // LabelEntry.targetId 字段指向被撤消息，字符串包含判法会误报「路径仍含目标」。
+    if (post.ids.has(located.entryId)) {
+      // 此分支刻意不失效（与上方三分支相反）：目标仍在活跃链 = 树确证未回退（回退后
+      // 目标必不在活跃链），无残影产生——树未回退时失效收敛到同态，纯冗余调用；
+      // nav-failed 语义 = 本轮未完成，重试走⑤正常路径。
+      warn(`nav-failed: target still on active path after rewind, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}`)
+      return { sessionId, revoked: false, error: 'nav-failed' }
+    }
+    // parentReached：expectedParentId === null（目标是根）时活跃链自然终止即达成
+    // （complete 已在上一步判定）；否则按 entry.id 集合判定。
+    const parentReached = expectedParentId === null || post.ids.has(expectedParentId)
+    if (!parentReached) {
+      warn(`nav-failed: expected parent not reached after rewind, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}, expectedParentId=${expectedParentId}`)
+      this.invalidateDerived(sessionId)
+      return { sessionId, revoked: false, error: 'nav-failed' }
+    }
+    return null
   }
 
   /**

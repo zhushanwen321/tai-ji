@@ -852,41 +852,7 @@ export function createSessionDeliveryRegistry(
     const rebuild: Array<{ id: string; text: string }> = []
     const adopt: string[] = []
     for (const text of texts) {
-      const markers = extractMarkerIds(text)
-      if (markers.length === 0) {
-        adopt.push(text)
-        continue
-      }
-      // 尾附锚（MF-2-1；口径 msg-pipeline-debloat D5-3/P5 统一 =「剥除标记、不动其他
-      // 字符」——文末判定在原文上精确 endsWith，不 trimEnd 吃尾随空白）：出站标记恒尾附
-      // （withDeliveryMarker 读写同形），与 shared 撤回切条的严格文末口径一致；其余提取
-      // id 处中部/前部，不构成 rebuild 身份
-      const tailMarker = markers[markers.length - 1]!
-      const tailAnchored = text.endsWith(markerLiteral(tailMarker))
-      let dispatched = false
-      let reclaimTarget = false
-      for (const bare of markers) {
-        const record = findSubmittedByMarker(rt, bare)
-        const id = record?.id ?? bare
-        if (exclude?.has(id)) {
-          reclaimTarget = true // cancel 目标所在文本整体沉默（回草稿语义，不收养不重投）
-          continue
-        }
-        if (record && stillActive(rt.handle, record.id)) {
-          own.push(record.id)
-          dispatched = true
-          continue
-        }
-        if (bare === tailMarker && tailAnchored) {
-          rebuild.push({ id, text })
-          dispatched = true
-        }
-      }
-      if (!dispatched && !reclaimTarget) {
-        // 全部提取 id 均非尾附锚且无 record 承接：标记字面量不构成投递身份 → 按外来
-        // 文本收养（新 id 正常投递），不丢弃
-        adopt.push(text)
-      }
+      classifyClearedText(text, rt, exclude, { own, rebuild, adopt })
     }
     if (own.length > 0) {
       rt.handle.requeue(own)
@@ -894,6 +860,54 @@ export function createSessionDeliveryRegistry(
     }
     for (const item of rebuild) await rebuildEntry(sessionId, rt, item.id, item.text)
     for (const text of adopt) adoptText(sessionId, rt, text)
+  }
+
+  /**
+   * disposeCleared 单条文本的三分归类（D3①②③，判据见 disposeCleared 头注释）：把该文本
+   * 应得的处置追加进 buckets——own 命中 id 列表 / rebuild 身份项 / adopt 原文。文本既有
+   * 标记但全部不构成投递身份（无 record 承接且非尾附锚）时按③收养，不丢弃。
+   */
+  function classifyClearedText(
+    text: string,
+    rt: SessionRuntime,
+    exclude: ReadonlySet<string> | undefined,
+    buckets: { own: string[]; rebuild: Array<{ id: string; text: string }>; adopt: string[] },
+  ): void {
+    const markers = extractMarkerIds(text)
+    if (markers.length === 0) {
+      buckets.adopt.push(text)
+      return
+    }
+    // 尾附锚（MF-2-1；口径 msg-pipeline-debloat D5-3/P5 统一 =「剥除标记、不动其他
+    // 字符」——文末判定在原文上精确 endsWith，不 trimEnd 吃尾随空白）：出站标记恒尾附
+    // （withDeliveryMarker 读写同形），与 shared 撤回切条的严格文末口径一致；其余提取
+    // id 处中部/前部，不构成 rebuild 身份
+    const tailMarker = markers[markers.length - 1]!
+    const tailAnchored = text.endsWith(markerLiteral(tailMarker))
+    let dispatched = false
+    let reclaimTarget = false
+    for (const bare of markers) {
+      const record = findSubmittedByMarker(rt, bare)
+      const id = record?.id ?? bare
+      if (exclude?.has(id)) {
+        reclaimTarget = true // cancel 目标所在文本整体沉默（回草稿语义，不收养不重投）
+        continue
+      }
+      if (record && stillActive(rt.handle, record.id)) {
+        buckets.own.push(record.id)
+        dispatched = true
+        continue
+      }
+      if (bare === tailMarker && tailAnchored) {
+        buckets.rebuild.push({ id, text })
+        dispatched = true
+      }
+    }
+    if (!dispatched && !reclaimTarget) {
+      // 全部提取 id 均非尾附锚且无 record 承接：标记字面量不构成投递身份 → 按外来
+      // 文本收养（新 id 正常投递），不丢弃
+      buckets.adopt.push(text)
+    }
   }
 
   /**

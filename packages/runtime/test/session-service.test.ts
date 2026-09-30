@@ -2204,3 +2204,25 @@ describe('SessionService · 业务持久化写安全守卫（W2 ipc-converge-a3 
     })
   })
 })
+
+// ───────────────────────────────────────────────────────────────────
+// revokeMessage facade（message-revoke D2/U4：七步编排经 RevokeOrchestrator 委派）
+// ───────────────────────────────────────────────────────────────────
+
+describe('SessionService · revokeMessage', () => {
+  let setup: Setup
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetMockState()
+    autoId = 0
+    setup = createSetup()
+  })
+
+  it('facade 委派编排全链可用：空树定位 miss → no-mapping（deps 窄注入经真实装配跑通）', async () => {
+    setup.mountClient('sid-r1')
+    const reply = await setup.service.revokeMessage('sid-r1', 'u-missing-target')
+    // mock client 默认空 entries（getEntries → {entries:[], leafId:null}）→ 通道 a/b 均
+    // miss → no-mapping（六码之一；走完 hold/空闲/workflow 检查 + ensureActive + 读树）
+    expect(reply).toEqual({ sessionId: 'sid-r1', revoked: false, error: 'no-mapping' })
+  })
+})

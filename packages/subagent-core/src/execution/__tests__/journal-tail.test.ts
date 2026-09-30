@@ -378,6 +378,10 @@ describe("createJournalDirectoryTailer（周期复查 / offset 续读状态）",
       parseLine: parseRecordEventFileLine,
       onEvents: (_filename, events) => seen.push(events.length),
       debounceMs: 20,
+      // 周期复查兜底必须在断言窗口内真实可用（默认 30s 落不进 2s 窗口——「双保险」
+      // 名不副实）：注入短间隔后，fs.watch 事件在负载下迟到/丢失时由复查轮兜住，
+      // 断言与窗口均不变
+      recheckIntervalMs: 200,
     });
     try {
       tailer.rescan(); // 冷启动消费首事件

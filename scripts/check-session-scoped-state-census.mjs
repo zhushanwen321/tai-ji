@@ -80,19 +80,26 @@ export function collectCallSites() {
       if (!/\.(ts|tsx|vue)$/.test(entry.name)) continue
       if (/\.(spec|test)\.(ts|tsx|vue)$/.test(entry.name)) continue // 测试文件
       if (abs.includes(`${path.sep}__tests__${path.sep}`)) continue
-      const lines = readFileSync(abs, 'utf8').split('\n')
-      let count = 0
-      for (const line of lines) {
-        if (!CALL_PATTERN.test(line)) continue
-        // 工厂定义行非调用点（`export function useSessionScopedState<T>(` 同样命中锁模式）
-        if (line.includes('function useSessionScopedState')) continue
-        count += (line.match(CALL_PATTERN_G) ?? []).length
-      }
+      const count = countFactoryCalls(abs)
       if (count > 0) out[path.relative(REPO_ROOT, abs)] = count
     }
   }
   walk(REPO_ROOT)
   return out
+}
+
+/** 单文件工厂调用计数：逐行匹配 CALL_PATTERN（定义行排除——`export function
+ *  useSessionScopedState<T>(` 同样命中锁模式但非调用点；计数用 g 变体防 lastIndex 状态翻转）。 */
+function countFactoryCalls(abs) {
+  const lines = readFileSync(abs, 'utf8').split('\n')
+  let count = 0
+  for (const line of lines) {
+    if (!CALL_PATTERN.test(line)) continue
+    // 工厂定义行非调用点
+    if (line.includes('function useSessionScopedState')) continue
+    count += (line.match(CALL_PATTERN_G) ?? []).length
+  }
+  return count
 }
 
 /**

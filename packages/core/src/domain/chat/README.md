@@ -1,3 +1,4 @@
+<!-- coverage-file-gate-exempt: 纯文档（架构决策记录）——无可执行代码，测试无「加载 markdown」语义 -->
 # chat 域 — 架构决策记录
 
 `store.ts`（chat store factory，IF1 契约）的设计决策记录。`store.ts` 内仅保留与代码

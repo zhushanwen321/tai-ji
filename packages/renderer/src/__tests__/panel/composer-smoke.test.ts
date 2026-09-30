@@ -22,6 +22,7 @@ import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
 import Panel from '@/components/panel/Panel.vue'
+import { makeComposerInputMock } from '../helpers/composer-mount'
 
 // ── useNewTaskFlow mock：Landing + Composer 的 session/cwd/branch/模型真源 ──
 // （currentCwd 不入 hoisted 块——W4 要求真 ref，由工厂执行期内联 ref 注入）

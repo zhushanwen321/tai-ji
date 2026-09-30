@@ -25,6 +25,8 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick, defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import * as events from '@taiji/core/transport/api'
+import { provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import type { ServerMessage } from '@taiji/shared'
 import type { SkillInfo } from '@taiji/shared'
 
@@ -67,6 +69,9 @@ import { useSessionStore } from '@/stores/session'
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  // [C3] 打 seam：P7 断言 getProjectSkills 拉取参数（getProjectSkillsMock 可控）——
+  // useProjectSkills 走 getSettingsTransport()（非 @/api 门面），不打桩则 P7 拉取恒 0 次
+  provideSettingsTransport(makeSettingsTransportStub({ getProjectSkills: getProjectSkillsMock }))
 })
 
 // ─────────────────────── W 组：Composer wiring（真实 ComposerInput + stub CommandPopover） ───────────────────────

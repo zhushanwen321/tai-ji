@@ -1605,6 +1605,46 @@
       "owner": "packages/runtime",
       "authority": "docs/constraints.json#C-proc-14",
       "note": "R2 态：真实运行形态 = pre-commit 按路径触发（扫描范围 packages/runtime/src/** 生产代码，触发面同域）；本表 run = 改检查自身时的自含冒烟（全量扫描恒绿形态——白名单当前恰 1 文件 = D3 唯一通道成立的机器证据，白名单膨胀 >1 文件即收口失效信号）。scope 仅脚本自身：守卫的触发时机是 runtime 源码 diff 而非本脚本 diff，挂接纪律权威源 = docs/constraints.json C-proc-14/C-proc-15"
+    },
+    {
+      "id": "E2E-CHATOPS-01",
+      "summary": "chat store facet 双清单对账守卫（chat-ops-sync）：store.ts 的 ChatStoreOps Pick 字段清单（类型面 SSOT）× taste-lint no-chat-ops-in-components 的 OPS_FIELDS 手写 Set（lint 拦截面）零漂移机检（TypeScript AST 双侧机械提取，字段增删自动跟随）",
+      "scope": [
+        "scripts/check-chat-ops-sync.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-chat-ops-sync.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-chat-ops-sync.mjs",
+      "owner": "packages/renderer",
+      "authority": "scripts/check-chat-ops-sync.mjs",
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（store.ts / taste-lint 规则文件 diff 时对账，看护对象是两清单载体文件而非本脚本）；本表 run = 改检查自身时的自含冒烟（42×42 零漂移恒绿形态）。无独立约束/ADR 登记，设计决策（独立脚本 vs lint 规则 import 类型的 D5-4 权衡）记录在脚本头注释块，故 authority 自指"
+    },
+    {
+      "id": "E2E-CENSUS-01",
+      "summary": "useSessionScopedState 全仓调用点 census 守卫：per-session 状态 composable（ADR-0049 Map 分区工厂）的调用入口静态锁——快照清单外出现新调用点（新文件或既有文件新增）即红",
+      "scope": [
+        "scripts/check-session-scoped-state-census.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-session-scoped-state-census.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-session-scoped-state-census.mjs",
+      "owner": "packages/renderer",
+      "authority": "docs/adr/decisions.md#ADR-0049",
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（renderer/ui 生产代码 diff 时对账快照，看护对象是全仓调用点而非本脚本；退出码契约 0=合规 / 3=census 与快照不符 / 1=脚本自身异常）；本表 run = 改检查自身时的自含冒烟。同源约束 = docs/constraints.json C-state-01（enforcement 为 review 维度，本脚本是其入口静态锁机器载体）"
     }
   ]
 }

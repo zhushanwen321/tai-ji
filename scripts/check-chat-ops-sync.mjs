@@ -108,28 +108,34 @@ export function extractLintOpsFields(sourceText) {
   const visit = (node) => {
     if (fields === null && ts.isVariableStatement(node) && node.parent === sf) {
       for (const decl of node.declarationList.declarations) {
-        if (!ts.isIdentifier(decl.name) || decl.name.text !== LINT_FIELD_CONST) continue
-        const init = decl.initializer
-        if (!init || !ts.isNewExpression(init)) continue
-        if (!ts.isIdentifier(init.expression) || init.expression.text !== 'Set') continue
-        const arr = init.arguments?.[0]
-        if (!arr || !ts.isArrayLiteralExpression(arr)) continue
-        const collected = new Set()
-        let wellFormed = true
-        for (const el of arr.elements) {
-          if (!ts.isStringLiteral(el)) {
-            wellFormed = false
-            break
-          }
-          collected.add(el.text)
-        }
-        if (wellFormed) fields = collected
+        const collected = extractConstSetLiteral(decl)
+        if (collected !== null) fields = collected
       }
     }
     ts.forEachChild(node, visit)
   }
   visit(sf)
   return fields
+}
+
+/**
+ * 单个变量声明 → `const LINT_FIELD_CONST = new Set(['a', 'b'])` 的字符串字面量集。
+ * 声明名不符 / 初始化形态不符 / 数组元素非字符串字面量 → null（结构不符显形）。
+ * @returns {Set<string>|null}
+ */
+function extractConstSetLiteral(decl) {
+  if (!ts.isIdentifier(decl.name) || decl.name.text !== LINT_FIELD_CONST) return null
+  const init = decl.initializer
+  if (!init || !ts.isNewExpression(init)) return null
+  if (!ts.isIdentifier(init.expression) || init.expression.text !== 'Set') return null
+  const arr = init.arguments?.[0]
+  if (!arr || !ts.isArrayLiteralExpression(arr)) return null
+  const collected = new Set()
+  for (const el of arr.elements) {
+    if (!ts.isStringLiteral(el)) return null
+    collected.add(el.text)
+  }
+  return collected
 }
 
 /** 配置故障报告（提取失败时）：退出码 2，恢复动作指向源文件 */
