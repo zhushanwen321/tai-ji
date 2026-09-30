@@ -146,7 +146,10 @@ pull-only RPC（workspace.listRecent，无 broadcast——规避订阅时序竞�
 config 层 skill/agent 加载 = 强制目录（桥接层硬编码注入，不可关）∪ discovery.json v2 可选目录（project/global 拆分、可排序）；目录级粒度无文件级开关。agent/workflow 的资源发现已改 `subagent-core/src/shared/resource-discovery.ts` 7 源代码推导（last-writer-wins 遮蔽语义），discovery.json 在该链路废弃。
 
 ### ADR-0051 项目 skill 目录 .agents/skills
-skill 路径按 cwd 解析（getSkillPaths(cwd)），项目自用 skill 归 `.agents/skills/`，跨项目通用归 `~/.agents/`。
+skill 路径按 cwd 解析（getSkillPaths(cwd)），项目自用 skill 归 `.agents/skills/`，跨项目通用归 `~/.agents/`；实体存储形态（workspace 根共享 + 脱离版本化）见 ADR-0076。
+
+### ADR-0076 项目级 AI skill 实体迁 workspace 根，脱离分支版本化（2026-09-25 裁决）
+`.agents/` 项目级 skill 实体唯一落 workspace 根 `<workspace>/.agents/`，各 worktree 以相对 symlink（`.agents -> ../.agents`）共享同一实体，git 不跟踪（`.gitignore` 忽略条目即裁决载体）；路径解析仍按 ADR-0051（cwd 相对 `.agents/skills/`，symlink 对消费方透明）。理由：skill/workflow 是开发者工作流资产而非分支交付物，随分支版本化 = 各 worktree 各持副本、实体改动与业务分支耦合出合并负担；单一共享实体按变化原因归位（工作流资产全 worktree 同步演化，不随业务分支分叉）。脱离 git 版本化的丢失风险由备份恢复通道补偿：`refs/skills-snapshot` 备份 ref（滚动快照链，覆盖 `.agents/skills/` 全量文件），恢复操作见 [TROUBLESHOOTING.md §25](../TROUBLESHOOTING.md)。边界：① symlink 必须相对路径形态——`check_directory_rules.py` 白名单只放行 `../` / `./` 前缀相对 symlink，指向外部绝对路径的 symlink 仍禁（AGENTS.md 规则 13）；② skill 目录自包含义务不变（引用的脚本随 skill 目录存放、禁依赖 `~/.agents/` 全局脚本），但「随 git 跟踪」义务随 untrack 消失（AGENTS.md 规则 14）；③ 回退形态（恢复 git 跟踪）= 删 worktree symlink 后 `git checkout refs/skills-snapshot -- .agents` 检回实体，同批删 `.gitignore` 忽略条目。
 
 ## 前端交互结构
 

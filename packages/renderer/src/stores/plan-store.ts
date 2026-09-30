@@ -139,9 +139,35 @@ export function derivePlanReviewBarMode(input: PlanReviewBarModeInput): PlanRevi
 
 // ── 审批窗口时序常量（D4）──
 
-/** degraded 稳定窗：`state=reviewing ∧ 无挂起` 组合持续该时长后放行渲染（S15 五断言口径）。 */
+/**
+ * degraded 稳定窗：`state=reviewing ∧ 无挂起` 组合持续该时长后放行渲染（S15 五断言口径）。
+ * [时间平抑红线登记]（2s 稳定窗 = 用时间换一致的兜底）：
+ *   补偿根因：双源投影时延差——planReview 挂起（runtime 注册表 → requests 广播 →
+ *   registry 漏斗）与 plan-state 值帧（entry 持久化投影）是两条独立链路，值帧先达
+ *   reviewing 而挂起登记在途的瞬窗，组合判定呈假阳性 degraded。不能靠事件顺序或单一
+ *   事实源自然解决：presence 与值分属两个投影域，到达顺序无契约，双域架构下「瞬时无
+ *   挂起」结构上不可判别是「真无挂起」还是「登记在途」。
+ *   量级/形态：组合转真 arm 2s 单发（已在计时不重启）；变假 cancel·重置；epoch 世代
+ *   防陈旧回调；冷拉真值豁免直通（对账结果即事实，不走窗）。
+ *   恢复路径：满窗放行 degraded 渲染；期间挂起到达（ready 恒优先）或组合变假即自然消解。
+ *   重审触发（退役条件）：挂起注册表与 plan-state 帧合并为单一状态帧（一次投影同帧
+ *   携带 presence 与值）时，假阳性瞬窗构造性消失，本稳定窗退役。
+ */
 export const PLAN_REVIEW_DEGRADED_STABLE_MS = 2_000
-/** 已应答抑制窗兜底：标记置起后该时长未见预期后态帧 → 转双源冷拉对账（10s = 投影链路时延的量级冗余）。 */
+/**
+ * 已应答抑制窗兜底：标记置起后该时长未见预期后态帧 → 转双源冷拉对账（10s = 投影链路时延的量级冗余）。
+ * [时间平抑红线登记]（10s 兜底 = 用时间换一致的兜底）：
+ *   补偿根因：应答后的预期后态帧可能丢失（WS 帧链无送达保证，断连窗口高发），ack 标记
+ *   无事件通道解除会无限悬挂，审批条被持续压制。不能靠事件顺序或单一事实源自然解决：
+ *   帧丢失 = 无任何事件到达，顺序契约无从谈起；「事实上无挂起」必须查询而非断言
+ *   （coldReconcilePlanReview 双查询），只能靠拉取真值收敛（ADR-0075 拉为主）。
+ *   量级/形态：标记置起即 arm 10s 单发（single-flight 重置不叠加；epoch 世代防陈旧回调）。
+ *   恢复路径：三解除路（预期后态帧值判定 / 新 pending 登记到达 / 冷拉真值）任一到达即
+ *   清标记杀定时器；冷拉失败（断连）标记悬挂 fail-safe + loadError 通路，重连后
+ *   stateSnapshot 重派发自然解除。
+ *   重审触发（退役条件）：runtime 帧链具备可靠送达（送达确认或断连重放）后，后态帧
+ *   丢失通道封闭，本兜底退役。
+ */
 export const PLAN_REVIEW_ACK_FALLBACK_MS = 10_000
 
 /**
@@ -150,6 +176,10 @@ export const PLAN_REVIEW_ACK_FALLBACK_MS = 10_000
  * PLAN_REVIEW_ACK_FALLBACK_MS（投影链路时延冗余）取半——补拉是「状态可能已刷新」的
  * 对账而非异常恢复，频率上限取「每 turn 至多一次」的近似（turn 内多条 assistant 消息
  * 合并），避免长对话 session 每条消息一拉。
+ * [时间平抑红线登记]（5s 冷却）：定性 = 对账频率上限而非一致性平抑——补偿动作本体是
+ * reconcileOnAssistantMessage 补拉（帧链丢帧补偿），本常量只是该补拉 RPC 的节流门。
+ * 永久配套：消费侧动作边沿触发补拉范式存在即配套存在（ADR-0075 推允许丢失、丢失收敛
+ * 靠拉），不设「根因修复即删」的退役语义；帧链可靠送达后补拉支路退役，本冷却随支路消失。
  */
 export const PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS = 5_000
 

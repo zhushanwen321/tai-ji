@@ -330,6 +330,29 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 **排障**：组件经 `defineExpose` 暴露真实元素 getter（先例 `ComposerInput.getInputElement()`），消费方读 expose 元素、缺失即 fail-closed，禁回退 `$el`（ADR-0073 [HISTORICAL]，事故 = W1 F-1 直发门 dev 全变体静默失效）。
 
+### 25. `.agents` 项目 skill 实体丢失 / 回退（workspace 根共享实体 + `refs/skills-snapshot` 备份）
+
+**现状**：项目级 AI skill 实体（`.agents/`）唯一落 workspace 根 `<workspace>/.agents/`，各 worktree 以相对 symlink（`.agents -> ../.agents`）共享同一实体，git 不跟踪（`.gitignore` 忽略条目，裁决见 [ADR-0076](adr/decisions.md)）。实体缺失的典型症状：skill 调用报脚本/SKILL.md 不存在；dev-merge-gates / pr-lifecycle 等 workflow 发起时报 agent 定义缺失（其报错文案即指向本恢复通道）。
+
+**判定**：`ls -la <worktree>/.agents` 看 symlink 是否存在且指向 `../.agents`；`ls <workspace>/.agents/skills` 看 workspace 根实体是否在。worktree 内 symlink 缺失 = 只需重建 symlink（实体无损）；workspace 根实体缺失/损坏 = 走下面的备份恢复。
+
+**恢复（workspace 根实体）**：备份通道 = git 备份 ref `refs/skills-snapshot`——滚动快照链（每条快照 commit 以上一条为 parent，message 记录采集时点的 worktree/branch/head），覆盖 `.agents/skills/` 全量文件；`.agents/workflows/` 不在快照内（从未 git 跟踪）。快照为手工滚动更新、当前无脚本承载，实体大改后需手工补采。
+
+```bash
+git log --oneline -5 refs/skills-snapshot                              # 看快照链与采集时点
+git ls-tree -r --name-only refs/skills-snapshot -- .agents             # 核对快照内容
+git show refs/skills-snapshot:.agents/skills/<路径>                    # 单文件查看/救回
+git archive refs/skills-snapshot -- .agents | tar -x -C <workspace>/   # 整体恢复实体到 workspace 根
+```
+
+**重建 worktree symlink**（实体在、单 worktree symlink 缺失时）：
+
+```bash
+ln -s ../.agents <worktree>/.agents
+```
+
+**回退为 git 跟踪**（推翻 ADR-0076 时）：删 worktree 内 symlink → `git checkout refs/skills-snapshot -- .agents` 检回实体 → 删 `.gitignore` 的 `.agents` 忽略条目 → commit。
+
 ## 环境变量速查
 
 | 变量 | 用途 | 生产默认值 | 开发默认值 |

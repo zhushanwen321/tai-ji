@@ -153,6 +153,6 @@ package-lock.json.*
 # === 本地决策/工作流档案（2026-09-13 裁决：不入库，靠 commit 与 docs 承载决策追溯）===
 /.taiji-harness/
 
-# === 项目级 AI skill 实体已迁 workspace 根（各 worktree 以 symlink 共享同一实体，脱离分支版本化；
-# 见 docs/adr/decisions.md 对应 ADR；恢复通道见 docs/TROUBLESHOOTING.md）===
+# === 项目级 AI skill 实体已迁 workspace 根（各 worktree 以相对 symlink 共享同一实体，脱离分支版本化；
+# 裁决见 docs/adr/decisions.md ADR-0076；恢复通道见 docs/TROUBLESHOOTING.md §25）===
 .agents

@@ -102,8 +102,8 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 **架构机制**：
 
 12. **Electron 打包约束（事故最高发）**：① runtime 源码禁止 `import.meta.url` / `globalThis.__dirname`（CJS bundle 下失效），路径用 `typeof __dirname !== 'undefined' ? __dirname : undefined`；② 新增 runtime 依赖必须同步加 `tsup.config.ts` 的 `noExternal`；③ 打包子系统改动逐个 commit 逐个验证。细节核对见 `pr-cr-fix/agents/review-electron-build.md`；验证三阶段（preflight → build → postbuild）+ validate-runtime-bundle 由脚本自动化
-13. **目录规范**：禁止 `demos/` / `impeccable/` 目录；禁止外部绝对路径 symlink（pre-commit 检查）；`.taiji-harness/` 是本地决策/工作流档案，**不入库**（2026-09-13 裁决：gitignore，决策追溯靠 commit message 与 docs）；视觉设计权威 = `docs/DESIGN.md`（Warm&Soft 旧根 DESIGN.md 已删除，git 可追溯）
-14. **项目 skill 必须自包含 [HISTORICAL]**：`.agents/skills/` 引用的脚本复制到 skill 目录内随 git 跟踪（`merge/scripts/` 已自包含），禁止依赖 `~/.agents/skills/` 全局脚本或 symlink
+13. **目录规范**：禁止 `demos/` / `impeccable/` 目录；禁止指向外部绝对路径的 symlink（pre-commit 检查 `check_directory_rules.py`——白名单放行 `../` / `./` 前缀**相对** symlink，`.agents -> ../.agents` 即该合法形态，ADR-0076）；`.taiji-harness/` 是本地决策/工作流档案，**不入库**（2026-09-13 裁决：gitignore，决策追溯靠 commit message 与 docs）；视觉设计权威 = `docs/DESIGN.md`（Warm&Soft 旧根 DESIGN.md 已删除，git 可追溯）
+14. **项目 skill 必须自包含 [HISTORICAL]**：`.agents/skills/` 引用的脚本复制到 skill 目录内（`merge/scripts/` 已自包含），禁止依赖 `~/.agents/skills/` 全局脚本或 symlink。存储形态 = workspace 根共享实体：各 worktree 经 `.agents` 相对 symlink 共享 `<workspace>/.agents/`，**不入库**（ADR-0076）——「自包含」约束的是 skill 目录形态（脚本随目录存放），不再有「随 git 跟踪」义务；备份与恢复通道 = `refs/skills-snapshot` 备份 ref（操作见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) §25）
 15. **排查规则（untracked 展开 `-uall` / 禁止写死绝对路径用 `getDataDir()` 等动态推导 / 跨层机制穷尽 pi extension 层）**：详见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) 的「历史排查规则」
 
 **Plugin / Builtin extensions**：

@@ -7,7 +7,7 @@ import type {
   PlanLifecycleState,
   PlanTransitionResult,
 } from "@zhushanwen/extension-protocol";
-import { readLifecycleState, readResumeHint, transition, truncateSelfReview } from "@zhushanwen/extension-protocol";
+import { PLAN_STATE_CUSTOM_TYPE, readLifecycleState, readResumeHint, transition, truncateSelfReview } from "@zhushanwen/extension-protocol";
 import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
@@ -96,7 +96,7 @@ export const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "plan", "a
 
 /**
  * plan 包注入消息的 customType（pi.sendMessage custom message 注入的 8 处调用
- * 统一使用）。命名对齐本包 entry customType 字面量 'plan-state' 的连字符风格
+ * 统一使用）。命名对齐本包 entry customType 'plan-state' 的连字符风格
  * （设计 §2.1 双命名范式决策：各包跟随所在包 entry 惯例，跨包不统一）。
  * 放 state.ts（叶模块）理由同 PLAN_MODE_TOOLS。
  */
@@ -289,13 +289,14 @@ export function getPlanState(
 }
 
 export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
-  // customType 字面量 'plan-state' 是 runtime 投影链的派生锚点（u1-proj 侧用同字面量
-  // 派生扫描），两侧独立常量，勿改字面量。optional 字段（templateProvided /
-  // selfReview / resumeHint / lastSubmitReviewDocsFingerprint）为 undefined 时 JSON
-  // 序列化自然消失，旧 entry 消费方对该字段惰性（D4 向后兼容）。
+  // customType 判别键 = canonical 常量 PLAN_STATE_CUSTOM_TYPE（extension-protocol 导出，
+  // 值冻结——改即历史会话全部失联，冻结锚测试见 legacy-entries.test.ts）；runtime 投影链
+  // （plan-state-extractor / session-records）消费同一常量。
+  // optional 字段（templateProvided / selfReview / resumeHint / lastSubmitReviewDocsFingerprint）
+  // 为 undefined 时 JSON 序列化自然消失，旧 entry 消费方对该字段惰性（D4 向后兼容）。
   // D2 取代式演进：reviewState / reviewStateSource 停写——新写只落 state / resumeHint /
   // selfReview；读侧对旧 entry 的映射见 applyPlanStateEntry（D2 读方①）。
-  pi.appendEntry("plan-state", {
+  pi.appendEntry(PLAN_STATE_CUSTOM_TYPE, {
     isActive: state.isActive,
     planFilePath: state.planFilePath,
     requirement: state.requirement,
@@ -381,12 +382,12 @@ export function resetPlanState(
   return state;
 }
 
-function isPlanStateEntry(entry: SessionEntry): entry is CustomEntry<LegacyPlanEntryData> & { customType: "plan-state" } {
+function isPlanStateEntry(entry: SessionEntry): entry is CustomEntry<LegacyPlanEntryData> & { customType: typeof PLAN_STATE_CUSTOM_TYPE } {
   // 判别式收窄（type === "custom"）后可直接访问 customType/data，无需 cast。
   // 「字段存在即合法」：新字段全部 optional，旧四字段 entry 同样合法（D4 向后兼容）。
   return (
     entry.type === "custom" &&
-    entry.customType === "plan-state" &&
+    entry.customType === PLAN_STATE_CUSTOM_TYPE &&
     typeof entry.data === "object" &&
     entry.data !== null
   );

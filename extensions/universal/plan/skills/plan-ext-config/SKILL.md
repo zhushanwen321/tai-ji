@@ -1,6 +1,6 @@
 ---
 name: plan-ext-config
-description: "使用或排查 @zhushanwen/pi-plan（计划模式 plan mode）时加载。说明 /plan 命令用法（--skills / --template / status / abort）、plan 工具六 action（enter / select-template / register-doc / submit-review / complete / abort）、审阅三键裁决（approve / revise / dismiss 搁置）、自审硬门（submit-review 必带 selfReview）、执行方式选项集（plan-exec skill 检测 + Execute + 暂不执行）、数据存储模型（session JSONL 的 plan-state entry，无独立配置文件）、生命周期状态（state）崩溃恢复语义。触发词：plan mode、计划模式、/plan、plan 工具、submit-review、selfReview、dismiss、搁置、register-doc、plan-state、计划文档登记、审阅挂起、计划模式排查、plan-ext-config。"
+description: "使用或排查 @zhushanwen/pi-plan（计划模式 plan mode）时加载。涵盖 /plan 命令用法、plan 工具六 action、审阅三键裁决与自审硬门、执行方式选项集、session JSONL 存储模型（无独立配置文件）与按 state 崩溃恢复——细节见正文各节。触发词：plan mode、计划模式、/plan、plan 工具、submit-review、selfReview、dismiss、搁置、register-doc、plan-state、计划文档登记、审阅挂起、计划模式排查、plan-ext-config。"
 ---
 
 # plan 使用与存储指南
@@ -87,7 +87,7 @@ headless（json/print 无 UI）默认 execute 不弹选择；交互框被解散�
 
 - **submit-review 返回「taiji host does not understand the plan review marker」**：taiji 宿主版本过旧（select 回显 payload 的确定性识别）。不要重挂（会同样回显循环），指引升级 taiji 或固定 plan 扩展版本。
 - **submit-review 返回 no-self-review / stale-self-review**：自审硬门拒收（D9①）——前者补自审后带 selfReview 重调；后者是文档已变而自审照抄，必须对新版本重做自审。
-- **submit-review 返回 version-mismatch**：回传 decision 不在值域（宿主/扩展版本错配）——不要重挂（会同样错配循环），指引用户升级对齐版本。
+- **submit-review 回传 decision 不在值域（unknown-decision）**：落 bad-response 出口、result 引导重挂（重挂即恢复）；版本错配信号只在日志 warn 留痕——原子发版下生产不可达（唯一窗口 = dev-link 版本错开），生产出现 = 错配组合真实可达的反证，恢复动作 = dev-link 对齐版本后重试。
 - **submit-review 返回 cancelled / review-interrupted**：审批选择框被解散——非批准，禁止实施，等用户指示；cancelled = plan mode 已退出（命令解散），review-interrupted = plan 模式保持在规划态（外部解散，可按用户要求重挂）。
 - **重提交总带「no documents changed」警告**：必须先 rewrite 文件 + `register-doc`（version+1）再 submit-review，警告按 docs 指纹逐次检测。
 - **plan-exec skill 没出现在执行选项里**：确认 frontmatter 有 `plan-exec: true`（严格布尔 true，字符串 "true" 不算）；确认 skill 过了 pi 的 description 必填门且未被 settings overrides（`-`/`!`）禁用；untrusted 项目不扫 `.pi/skills` 与祖先链两族。
@@ -96,6 +96,6 @@ headless（json/print 无 UI）默认 execute 不弹选择；交互框被解散�
 
 ## 备注
 
-- **宿主信号**：taiji runtime 对托管 pi 恒注入 `TAIJI_AGENT_EXT_LOG=1`（引导文案注入 + marker 交互判据之一）；marker 交互另需 `mode==='rpc'`，env 泄漏到独立 pi TUI 时回落文本软门（不挂乱码 select）。
+- **宿主信号**：taiji runtime 对托管 pi 恒注入 `TAIJI_AGENT_EXT_LOG=1`（扩展日志落盘开关 + marker 交互宿主分流判据）；marker 交互另需 `mode==='rpc'`，env 泄漏到独立 pi TUI 时回落文本软门（不挂乱码 select）。
 - **计划态工具白名单**：read / bash / grep / find / ls / plan / ask_user（D10：探索期提问可用；ask-user 扩展被禁时 pi 静默跳过，回退对话流提问）——bash 在白名单内，文件写约束来自注入的计划模式提示词（产物只写 plan 目录）。
 - **无配置 schema 可编辑**：plan 的所有状态都由运行时命令/工具产生，没有可手动编辑的配置文件。

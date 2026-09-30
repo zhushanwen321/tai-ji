@@ -37,7 +37,12 @@
 
 export type RejectDigestKey = 'bash' | 'compact'
 
-/** key → (sid → 是否已消化)。嵌套 Map 保持 per-key 遍历/清理粒度。 */
+/**
+ * key → (sid → 是否已消化)。嵌套 Map 保持 per-key 遍历/清理粒度。
+ * taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记表 §4 ⑧ 补登 2026-09-30）：
+ * 1 比特「消化」标记簿记非 GUI 数据本体——写方 = markDigestInitiated/markDigestConsumed
+ * 单模块，清理 = clearDigest/clearDigestSession/clearAllDigests 三口（见文件头生命周期节）。
+ */
 const digestMarks = new Map<RejectDigestKey, Map<string, boolean>>()
 
 function partitionOf(key: RejectDigestKey): Map<string, boolean> {
