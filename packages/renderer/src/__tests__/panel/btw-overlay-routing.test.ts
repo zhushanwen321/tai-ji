@@ -220,7 +220,7 @@ describe('① vid 路由：五类请求 drawer 内联确认条 + 主视图零浮
     expect(band.find('[data-testid="companion-band-message"]').text()).not.toContain('rm -rf')
   })
 
-  it('plan 审批降档：两键（执行/修订）现 drawer；批准回传 PlanReviewResponse JSON', async () => {
+  it('plan 审批降档：三键（执行/修订/搁置）现 drawer；批准回传 PlanReviewResponse JSON', async () => {
     const w = mountPanel(MAIN)
     await settle(w)
     emitUIRequest(VID, planFrame('r-plan'))
@@ -228,12 +228,29 @@ describe('① vid 路由：五类请求 drawer 内联确认条 + 主视图零浮
 
     expect(w.find('[data-testid="btw-plan-approve"]').exists()).toBe(true)
     expect(w.find('[data-testid="btw-plan-revise"]').exists()).toBe(true)
+    // 协议第三键搁置在 btw 面可达（键集对齐主审批面 PlanReviewDecision 全值域）
+    expect(w.find('[data-testid="btw-plan-dismiss"]').exists()).toBe(true)
     expect(w.find('[data-testid="btw-plan-revise"]').attributes('disabled')).toBeDefined() // 0 意见禁用
 
     await w.find('[data-testid="btw-plan-approve"]').trigger('click')
     await settle(w)
     expect(extMock.sendExtensionUIResponse).toHaveBeenCalledWith(
       VID, 'r-plan', 'select', JSON.stringify({ decision: 'approve' }),
+    )
+    expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false) // 应答 → 撤下
+  })
+
+  it('plan 审批降档 dismiss：搁置键经 respond 同通道回传 {decision:"dismiss"}（无评论负载），应答后撤下', async () => {
+    const w = mountPanel(MAIN)
+    await settle(w)
+    emitUIRequest(VID, planFrame('r-plan-dismiss'))
+    await settle(w)
+
+    // 搁置不依赖意见草稿（无输入可直接点）
+    await w.find('[data-testid="btw-plan-dismiss"]').trigger('click')
+    await settle(w)
+    expect(extMock.sendExtensionUIResponse).toHaveBeenCalledWith(
+      VID, 'r-plan-dismiss', 'select', JSON.stringify({ decision: 'dismiss' }),
     )
     expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false) // 应答 → 撤下
   })
