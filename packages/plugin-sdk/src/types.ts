@@ -1,8 +1,9 @@
 /**
  * 插件系统契约类型 —— single source of truth（D28 方向反转，2026-09-05）。
  *
- * 本文件是 taiji 插件契约的权威定义：面向插件作者对外发布（第三方插件作者无需
- * 装整个 monorepo）；无运行时依赖。类型依赖仅两处，均为 workspace 包：
+ * 本文件是 taiji 插件契约的权威定义：仅 workspace 内消费（本包 private，无 npm
+ * 发布链，插件作者不安装本包）；无运行时依赖。类型依赖仅两处，均为 workspace 包
+ * （private 与否见各自 package.json）：
  * @zhushanwen/extension-protocol（Bridge* 回包形状与 GUI 协议段定义源，见下方
  * D4 单源化说明）与 @taiji/shared（SendPromptReason 回执词表，msg-pipeline-debloat
  * D4-6）。
@@ -12,7 +13,8 @@
  *   packages/runtime/src/services/plugin-service/plugin-types/hook-types.ts（Hook 域）
  *   descriptor / rpc 子域亦经本文件（SDK）re-export 消费，无本地副本。
  *
- * 修改契约：直接编辑本文件（对外类型名/结构零变化承诺——published API 兼容）。
+ * 修改契约：直接编辑本文件（类型名/结构零变化承诺——runtime 薄壳 re-export 依赖
+ * 导入面稳定）。
  *
  * 历史：2026-09-05 前本文件由 packages/plugin-sdk/scripts/sync-types.sh 从
  * runtime 的 plugin-types 自动生成（runtime 为真相源的镜像方向）；D28 审计
@@ -41,7 +43,7 @@ import type { SendPromptReason } from '@taiji/shared'
  * extension-protocol/src/core/types.ts 逐字手工镜像的 167 行副本（另有一套文本探针
  * 守卫测试）；依赖方向本就允许 plugin-sdk → extension-protocol（Bridge* 回包形状
  * 已如此），故改单行 re-export，镜像副本与守卫测试一并删除。导出名与类型面零变化
- * （published API 兼容承诺不变）。
+ * （SDK 类型面零变化承诺不变）。
  *
  * @see docs/architecture/extension-gui-protocol.md
  */
@@ -635,7 +637,7 @@ export type WorkerToHostMessage =
 // ── 通用类型 ─────────────────────────────────────────────────────
 
 // Disposable 在本文件定义（SDK 为 SSOT，runtime 经 taiji-plugin-sdk re-export 消费）。
-// @taiji/shared 无同名定义；本文件是对外发布契约面（除 Bridge* 回包形状经
+// @taiji/shared 无同名定义；本文件是插件契约面（除 Bridge* 回包形状经
 // @zhushanwen/extension-protocol 外无依赖），无需跨包提升。
 /**
  * @stable — 可释放资源契约（Disposable 是插件生命周期的基础设施）。
