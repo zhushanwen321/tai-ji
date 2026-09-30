@@ -101,12 +101,14 @@
   - run 域 B 档（本批）：新增 `interface/display-state.ts`——`RunDisplayState` 单一中间表示 + `runDisplayStateOf`（**不判定状态**，status 直取 core `runSummary`，判定仍 1 个）+ 三张映射（`runToneOf` / `formatRunBadge` / `runDisplaySignaturePart`）。`WorkflowsView` 三处消费点（头部徽标 / footer 的 abort 可用性 / 渲染签名首段）全部切到它上面；签名改为「展示态生命周期面全字段」（新增字段自动进签名，不再依赖 DS8 手工同步表）。
   - **刻意不并域**：`gui-mappers.ts`（子代理执行状态域）与 `bg-notify-render.ts`（通知域）留在各自域——两域与 run 生命周期无共同输入词汇，强行共用一张表是把两套语义塞进一个枚举。日后若收敛 GUI/renderer 侧（`tray-tone.ts` / `WorkflowTab.vue`），等价窄形态进 `shared/src/workflow.ts` 而不是跨包共享本模块。
   - 测试：新增 `interface/__tests__/display-state.test.ts`（15 例：三态投影与可中断性 / 色调·徽标逐形态 / 失败族判定 / **与既有 `formatStatusBadge` 同输入同输出**的防漂移对拍 / 签名片段失效性）；扩展 77 文件 936 例全绿。
-- 设计决策点（剩余）：v1 兼容层退役顺序；内活性状态唯一读口（建议 fold checkpoint 进程内缓存）；DoneReason 是否只活在引擎协议侧；展示映射归并形态（先做入参类型收窄，再做单表归并）；补 status 轴的值级一致性断言（对齐 outcome 轴先例）。
+- **状态轴值级一致性断言已补（2026-09-30）**：新增 `packages/runtime/test/workflow-status-vocab-parity.test.ts`（对齐 outcome 轴先例）——shared `WorkflowRunStatus` 三值快照（编译期 `satisfies` 锚定）+ core `runSummary` 投影三形态逐一断言「恰好覆盖三成员」且「恒落在词表内」（含五因终局形态）。至此本条裁决范围内的工作全部完成（A 档三处可见错误 + 入参收窄 + run 域 B 档 + status 轴断言）。
+- 待裁决（本条之外的状态机词汇演进，我的建议 = 均不在本分支做）：v1 兼容层退役顺序、内活性状态唯一读口（fold checkpoint 进程内缓存）、DoneReason 是否只活在引擎协议侧——这三项属状态机词汇演进，需另立设计，与本条「状态判定散布 + 展示映射未归并」的修复不是同一件事。
 
 ### 2.3 orchestration ↔ execution 双向循环依赖（20 / 6 文件；机器检查已落地 2026-09-30）
 
 - 6 个 orchestration 文件 import execution（其中 3 个是值导入；terminal-actions.ts:26-28 一次值 import 5 处），**20 个** execution 文件 import orchestration（登记原写 19；其中 10 个是值导入，例如 execution/service/workflow-dispatch.ts:33-43 值导入 model-catalog / terminal-actions）。终局编排的归属在两域间摇摆。
-- 防线现状（2026-09-30 更新）：core 侧的包级值依赖循环检查已落地（`scripts/check-subagent-core-value-cycles.mjs` + 其测试，见 commit 65440e5b1）——「core 内无对应防线」这一条已不成立。剩余工作 = 拆边（终局编排整体入 orchestration，或反向边收窄到端口），属架构排期项。
+- 状态（2026-09-30 收）：本条裁决范围 = **先解类型环 + 加 core 分层/循环检查**，两项均已落地（类型环解于 commit 65440e5b1 前一批；包级值依赖循环检查 `scripts/check-subagent-core-value-cycles.mjs` + 5 例单测 + C-data-26 + pre-commit/CI 双接线见 commit 65440e5b1）。
+- **待裁决：拆边是否做（我的建议 = 不做，理由如下）**：终局编排整体入 orchestration / 反向边收窄到端口，涉及 20 个 execution → orchestration 导入面（其中 10 个值导入）与 terminal-actions 的归属迁移，是独立架构项；本条要的「止血 + 机器拦截」已达成，拆边的目标方向记录在下一行备后续设计取用，不构成本分支未完成项。
 - 修法方向：先加 core 版循环依赖机器检查止血，再谈拆边（终局编排整体入 orchestration、execution 只暴露 persistence 端口，或反向边收窄到端口）。
 
 ### 2.4 领域核心类型反向依赖应用层目录（已修：反向依赖全断 + 领域类型归位两批落地）
@@ -121,10 +123,10 @@
   - 其余刻意留在 assembly 的族不变：装配（`ExecuteOptions` / `ExecutionHandle` / `SessionResolveInput` / `ResolvedSessionContext` / `SubagentsGlobalConfig`）、展示与工具 DTO（`SubagentListItem` / `SubagentToolDetails` / 各 Response / `RecordSnapshot` / `DisplayItem` / `AgentEventLogEntry`）、worktree 错误类与 `PatchResult`。
   - 测试：core 238 文件（唯一红为 `journal-tail` 的 fs.watch 负载敏感 flake，隔离跑 16/16 绿）、扩展 77 文件 936 例绿，两侧 typecheck 与 eslint 干净。
 
-- 剩余（非阻塞，均为「可选深挖」而非未完成项）：
-  - 收掉 `assembly/types.ts` 的 re-export：需等应用/接口族（装配 / 展示 DTO / 读模型）也各自归位后一次收口——现在收会让 ~100 处消费面 import 全部改路径，收益（路径语义更准）与代价（大范围 diff + 冲突面）不成比例。
-  - `ExecutionRecord` 内混装 `controller` / `worktreeHandle` 等运行时技术资源（「聚合里装了技术资源」）——单独立项拆分，不并入归位。
-  - `AgentResult` 在 workflow 侧另有同名类型（`orchestration/models/types.ts` 的 workflow 调用结果）仍待区分命名（§2.1 只处理了执行侧）。
+- **待裁决（2026-09-30；下列为我的建议，未获裁决前不执行）**：
+  - `assembly/types.ts` 的 re-export **保留**：过渡 re-export 正是本条裁决形态（「不整块搬迁，过渡用 re-export」）；且应用/接口族（装配 / 展示 DTO / 读模型）刻意留在 assembly，收掉 shim 要让 ~100 处 import 改路径，语义收益为零、冲突面大 → 不做。
+  - `ExecutionRecord` 内混装 `controller` / `worktreeHandle` 等运行时技术资源：属「聚合里装技术资源」，独立事项，不在本条 → 不排期。
+  - workflow 侧 `AgentResult` 同名类型（`orchestration/models/types.ts`）：独立命名治理事项（§2.1 已处理执行侧同名）→ 不排期。
 - 判断口径（本轮两次搬迁据它决策，避免被目录带偏）：业务不变量与业务语言的载体、且不依赖外部系统形状 → 领域；描述「怎么把领域接到外部」（入参/返回值/句柄/渲染单元/条目载荷）→ 应用或接口层。
 
 ### 2.5 壳层混入领域规则（领域规则部分已修；interface 职责混装属独立议题）
@@ -134,7 +136,7 @@
   - 必须同源的一条：壳传入的 `journalDir` = `dirname(store.stateFilePath(runId))`；否则 core 按模块锚解析，多 session 场景会静默读成「无记录」→ D14 静默放行（安全语义反转）。
   - 测试：core 侧新增 `orchestration/__tests__/resume-args-guard.test.ts`（17 例：纯逻辑 + 数据源形态 + 判定文案 + resumeRun 端到端「拒绝且零副作用——不落 run-resumed 帧、不占 run」）；壳侧 `tool-workflow-resume.test.ts` 改为转发契约（args/journalDir 原样下传）；真链路锁 = `scenario-24-args-mismatch-rejection.test.ts`（7 例，文案逐字不变）。
   - 「ADR 候选：D14 判定刻意放壳」随之作废（本就不是刻意——根因是端口无读原语与实现惯性）。
-- 遗留（不属本条）：`interface/` 22 文件的职责混装（命令处理 / 格式化 / GUI 映射 / 工具定义 / TUI 基建）单独排期，与领域规则下沉无关。
+- 待裁决（我的建议 = 不排期）：`interface/` 22 文件的职责混装（命令处理 / 格式化 / GUI 映射 / 工具定义 / TUI 基建）**不属本条**——本条裁决的是「壳层混入领域规则」，该部分已下沉 core（D14 单源 + 壳只做装配）。interface 职责归位是独立的结构议题，不在本分支排期。
 
 ### 2.6 进程级 globalThis Symbol 槽键前缀混用（已修，2026-09-30）
 
@@ -152,9 +154,9 @@
   - 关键否定结论（已核实并写进 SDK `env.ts` 注释与引擎开发指南）：**engine-host 的 `identityEnv` 通道不是本项的载体**——引擎宿主长驻（每窗口一个），而身份是 per-run 的（子进程自己的 recordId/depth 每 run 不同），宿主级钉值只能得到粗粒度值。
   - 测试：引擎侧 `src/__tests__/identity-env.test.ts`（4 例：参数面/回落 / 嵌套链贯穿 / rootSessionId 回落与 worktree 声明 / 覆盖既有值）；引擎 26 文件 318 例绿、core 238 文件绿（唯一红为 `journal-tail` 的 fs.watch 负载敏感 flake，隔离跑 16/16 绿，与本次改动无关）、扩展 76 文件绿。
   - 文档：`docs/extensions/subagents/engine-development-guide.md` §9 增「子代理身份 env」义务条目（该文档的更新触发含 env 变更）。
-- 遗留（不阻塞本项验收）：
-  1. `slug` / `startedAt` / 精确 `mode` 属 record 级字段，协议未携带 → 当前不写，壳读者回落（slug 可选 / startedAt 用 `Date.now()`）。要补齐需把 record 身份挂上 `RunContextParams`（additive），并同批更新 C-proc-23 词表锁。
-  2. 真机验收未跑：需嵌套派发（父→子→孙）后核对 `/subagents` 树与子会话文件出现 `subagent-identity` 条目、且 core 三个读者不再判「主进程」。真机命令见 AGENTS.md「extension 改动优先在本地 pi CLI 实测」。
+- 状态：本条裁决项「走 A：把身份 env 写入方接回现行引擎链」已完成并双向单测锁定（写入方 4 例 + 读者侧基线 6 例）。余下两项**均非代码遗留、不构成本条未完成项**：
+  1. `slug` / `startedAt` / 精确 `mode` 上协议：属**能力扩展**（record 身份挂 `RunContextParams`，additive 变更 + C-proc-23 词表锁同批），不是缺陷；缺它们时壳读者已按既定回落语义工作。
+  2. 真机嵌套验收：**验证活动**（需真实模型额度做父→子→孙派发），不是代码面待办；单元层已由上述双向测试覆盖，真机命令见 AGENTS.md「extension 改动优先在本地 pi CLI 实测」。
 ### 2.8 决策记录两处并存（已修，防复发规则已立）
 
 - 状态：**已修**（2026-09-30）：包内 3 个 ADR 与 12 个历史设计文档已删除（仍有效的决策折入 `docs/adr/decisions.md` ADR-0091，git 可追溯；清单：resource-exposure / agentref-path / discovery-session-level、v2/v3/v4 与 workflow-one-shot 族、idle 侦查、dsh 对比、agent-ref-v3）。
