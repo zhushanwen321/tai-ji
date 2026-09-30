@@ -127,6 +127,8 @@ function hasPendingDelivery(entries: readonly { state: DeliveryEntryState }[] | 
 }
 
 export function createResumeDecision(deps: ResumeDecisionDeps): ResumeDecision {
+  // @data-owner #6（docs/architecture/data-source-registry.md）：per-session 续跑判定
+  // 中间态（六字段），非持久、dispose 即弃，登记见 #6 已知例外「续跑判定中间态」款
   const sessions = new Map<string, SessionState>()
 
   const log = (message: string): void => {

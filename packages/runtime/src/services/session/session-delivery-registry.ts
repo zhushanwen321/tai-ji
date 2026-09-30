@@ -411,6 +411,9 @@ export function createSessionDeliveryRegistry(
   // server.ts 的退化兜底装配——无标记文本不触达映射）。
   injector: SkillInjector = new SkillInjector(new LateBoundSkillSource()),
 ): SessionDeliveryRegistry {
+  // @data-owner #15（docs/architecture/data-source-registry.md）：sessionId → 投递运行态
+  // 注册表（内核 handle 的投递队列 = delivery outbox + 适配层 pendingRevoke 等运行态；
+  // 内存、非持久，session 删除时 dispose 清空）
   const runtimes = new Map<string, SessionRuntime>()
 
   function warn(...args: unknown[]): void {
