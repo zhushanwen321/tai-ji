@@ -11,7 +11,7 @@ import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest'
 import type { ServerMessageUnion } from '@taiji/shared'
 import * as events from '../../api/events'
 import * as mock from '../index'
-import { __clearTimers, setMockE2E, setMockTiming, resetMockTiming, session, chat, config, model, extension, plugin, composer, search, settings, workspace, quota, project, preset, btw } from '../index'
+import { __clearTimers, setMockE2E, setMockTiming, resetMockTiming, session, chat, config, model, extension, plugin, composer, search, settings, workspace, quota, project, preset, btw, tts } from '../index'
 import type { Timing } from '../run-send-stream'
 import { file } from '../file'
 import { git, fixtureGitStatus } from '../git'
@@ -586,7 +586,7 @@ describe('mock workspace / quota / project / preset domain', () => {
 // ── 门面导出与 real/whats 通道 ──────────────────────────────────────────────
 describe('mock 门面导出', () => {
   it('导出齐备（facade 三元消费方逐项存在）', () => {
-    for (const key of ['session', 'chat', 'config', 'model', 'extension', 'plugin', 'composer', 'search', 'settings', 'workspace', 'quota', 'project', 'preset', 'btw'] as const) {
+    for (const key of ['session', 'chat', 'config', 'model', 'extension', 'plugin', 'composer', 'search', 'settings', 'workspace', 'quota', 'project', 'preset', 'btw', 'tts'] as const) {
       expect(mock[key]).toBeDefined()
     }
     expect(typeof mock.setMockE2E).toBe('function')
@@ -614,5 +614,49 @@ describe('mock btw 域（D6 3 控制帧）', () => {
     expect((await btw.list('btw-main-b')).map((t) => t.vid)).toEqual([second.vid])
     // 未命中 vid 不抛（mock v1 不模拟失败口径）
     await expect(btw.remove('btw:ghost')).resolves.toBeUndefined()
+  })
+})
+
+// ── mock tts 域（ai-voice-tts 设计 §7.5，M0）────────────────────────────────
+describe('mock tts 域', () => {
+  it('getConfig：默认骨架（三家齐备、hasApiKey 全 false、脱敏无 Key 字段）', async () => {
+    const { config: sanitized } = await tts.getConfig()
+    for (const pid of ['stepfun', 'minimax', 'mimo'] as const) {
+      const entry = sanitized.providers[pid]
+      expect(entry.hasApiKey).toBe(false)
+      expect(entry.providerKeyAvailable).toBe(false)
+      expect(entry.config.baseUrl).not.toContain('apikey')
+      expect(Object.keys(entry.config.vendor)).toEqual([])
+    }
+    expect(sanitized.activeProvider).toBe('minimax')
+  })
+
+  it('configure：写入内存态后 getConfig 回读一致（u4 往返单测的 mock 通道）+ apiKeys 语义', async () => {
+    const next = { baseUrl: 'https://api.minimax.cn/v1', model: 'speech-2.8-hd', voice: 'male-qn-qingse', vendor: { voice_setting: { vol: 2 } } }
+    const r = await tts.configure({
+      providerId: 'minimax',
+      config: next,
+      apiKeys: { minimax: 'sk-test', mimo: null },
+    })
+    expect(r.ok).toBe(true)
+    expect(r.config?.activeProvider).toBe('minimax')
+    expect(r.config?.providers.minimax.hasApiKey).toBe(true)
+    expect(r.config?.providers.mimo.hasApiKey).toBe(false)
+    const readback = await tts.getConfig()
+    expect(readback.config.providers.minimax.config).toEqual(next)
+  })
+
+  it('getCapabilities：三家投影齐备且形状关键位符合控件存在性三分支（MiMo 语速 null 置灰 / MiniMax 情感非空 / StepFun 情感空数组）', async () => {
+    const { forms } = await tts.getCapabilities()
+    expect(Object.keys(forms).sort()).toEqual(['mimo', 'minimax', 'stepfun'])
+    expect(forms.mimo.capabilities.speedRange).toBeNull()
+    expect(forms.minimax.emotions.length).toBeGreaterThan(0)
+    expect(forms.stepfun.emotions).toEqual([])
+    expect(forms.minimax.capabilities.supportsInstructions).toBe(false)
+    expect(forms.mimo.capabilities.authHeader).toBe('api-key')
+  })
+
+  it('speak：恒以 tts_not_configured 失败（错误路径驱动按钮/toast 状态机）', async () => {
+    await expect(tts.speak({ sessionId: 's1', text: '你好' })).rejects.toMatchObject({ code: 'tts_not_configured' })
   })
 })
