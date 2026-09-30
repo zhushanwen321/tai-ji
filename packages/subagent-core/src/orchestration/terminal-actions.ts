@@ -80,6 +80,9 @@ import {
   IN_FLIGHT_CALL_CANCELLED_MSG,
 } from "./worker-message-pump-constants.ts";
 import { runAccountingFromEvents } from "./run-accounting.ts";
+// [D1 Class B] 纯映射下沉 shared（execution 侧读证据时直接 import，不再反向依赖编排层）
+export { runSettledOutcomeToDoneReason } from "../shared/run-vocabulary.ts";
+import { runSettledOutcomeToDoneReason } from "../shared/run-vocabulary.ts";
 
 // ══════════════════════════════════════════════════════════════
 // §1 run 事件投递域（单写者链，自 worker-message-pump 迁入）
@@ -823,38 +826,7 @@ export function forgetSettledRecord(runId: string): void {
   settledRunRecords.delete(runId);
 }
 
-/**
- * (outcome, errorCode) → DoneReason 的联合判别单点（[W2 D5] 连带取值裁决：
- * 五处 reason 统一本派生源）。budget_limited 恢复同名细分（与帧生产侧
- * finalRunErrorCodeOf 恒等映射互逆——纯 outcome 反推会把预算终局静默折叠成
- * "failed"，通知串与条目 reason 细分丢失，不采用）；time_limited outcome 直返
- * 同名 DoneReason（[D2] 升格后双向恒等）。DoneReason 无 interrupted 成员——
- * [D2] 后 interrupted 已移出 outcome，无该分支。
- */
-export function runSettledOutcomeToDoneReason(outcome: RunOutcome, errorCode?: RunErrorCode): DoneReason {
-  if (outcome === "failed" && errorCode === "budget_limited") {
-    return errorCode;
-  }
-  switch (outcome) {
-    case "done":
-      return "completed";
-    case "cancelled":
-      return "aborted";
-    case "time_limited":
-      return "time_limited";
-    case "failed":
-      return "failed";
-    default:
-      // 词表外防御（判定核单点收敛）：穷尽 switch 无兜底时词表外值漏出
-      // undefined，会击穿 RunSettlementEvidence.reason: string 契约（枚举 status /
-      // 注销 reason 等消费面直接透传）。运行时可达形态 = 历史 manifest 的
-      // outcome=interrupted 族（[D2] 前旧收编链物化，文件名未随 [D1] 迁移故磁盘
-      // 可达，经 findRunSettlementEvidence 的 as RunOutcome 强转读入）——统一
-      // 折叠 "failed" 诊断兜底容器（W2 D5 先例「interrupted → failed」：中断形态
-      // 报 completed 是完成语义误报），消费侧零处理。
-      return "failed";
-  }
-}
+
 
 // ══════════════════════════════════════════════════════════════
 // §3 [D15] 终局/中断编排入口

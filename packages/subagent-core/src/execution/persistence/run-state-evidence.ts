@@ -33,7 +33,7 @@ import {
 } from "./record-events.ts";
 import { RUN_EVENT_JOURNAL_SUFFIX, type RunErrorCode, type RunOutcome } from "../../shared/run-vocabulary.ts";
 import { createRunEventJournal } from "./run-event-journal.ts";
-import { foldRunEventFrames, type WorkflowRunEvent } from "../../orchestration/run-events.ts";
+import type { WorkflowRunEvent } from "../../orchestration/run-events.ts";
 import { runSettledOutcomeToDoneReason } from "../../orchestration/terminal-actions.ts";
 
 const logger = getLogger("run-state-evidence");
@@ -169,12 +169,6 @@ async function assessRunRetention(
     deps.debug(`state retention: journal scan failed, skipped ${runId}: ${deps.toMsg(err)}`);
     return undefined;
   }
-  const state = foldRunEventFrames(events, (err, lastType) => {
-    // 坏帧（历史帧与当前转移表不兼容）保守停在最近一致态——fold 非终态即不获资格
-    deps.debug(
-      `state retention: broken frame ignored in ${runId} (lastType=${lastType}): ${deps.toMsg(err)}`,
-    );
-  });
   let settledAt: number | undefined;
   let registeredAt: number | undefined;
   let lastEventTs: number | undefined;
@@ -183,7 +177,10 @@ async function assessRunRetention(
     if (event.type === "run-settled") settledAt = event.ts;
     lastEventTs = event.ts;
   }
-  const terminal = state.lifecycle === "terminal";
+  // [D1 Class B] 终态判据直接读帧（不再经编排层 fold）：不变量 = terminal ⟺ 存在
+  // run-settled 帧（终态必经该帧写入，转移表构造性保证）。本层只做证据判读，不引入
+  // 状态机语义——这正是拆边要的方向。
+  const terminal = settledAt !== undefined;
   // 终态时间 = journal 内终态事件时间戳（run-settled 帧 ts）；「收编无终态事件者
   // 取末条事件时间戳」——经转移表构造性不可达（terminal 必经 run-settled 帧），
   // 留防御兜底防未来词表演进破坏该不变量
