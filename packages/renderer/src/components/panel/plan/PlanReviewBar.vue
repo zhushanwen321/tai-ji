@@ -295,13 +295,25 @@ const resubmitError = computed(() => planStore.planReviewNudgeError)
  *   setPlanReviewPending(true)（关检测窗 + 清旧错误，同轮先重挂后收尾不误报）；
  * - 失败判定 = 检测窗开着时 turn 结束（message.complete / message.error）而重挂未至，
  *   或发送被预检拒绝未进轮（send.rejected）→ endPlanReviewNudge 落错误行提示可重试；
+ *   [willRetry 过滤] message.complete 携 willRetry=true（pi auto-retry 中间失败，turn
+ *   未结束，runtime event-adapter 透传）不在此列——不关窗不落错误，pi 续跑后的终态帧
+ *   再判（判据与 useCompletionNotify 的 willRetry 静音同型，防「中间失败帧落错误 →
+ *   重挂成功清错误」的误报闪现）；payload 缺省（旧 runtime / 非重试终态）按终态处理；
  *   未开窗（未点重提）/ 已收口的 turn 信号由 action no-op；
  * - WS 断连无信号的形态不判死（fail-safe 不误导，与评论/批准同风险面 R1）；
  * - 切 session 无串台：检测窗在 per-session 分区（非实例 ref），事件按 capturedSid 写旧
  *   分区，新焦点分区天然是干净基线（ADR-0049 Map 分区，免 watch(sessionId) 手动清空）。
  */
 const onMessage = useSessionEvents(sessionIdRef)
-onMessage(['message.complete', 'message.error', 'send.rejected'], (_msg, sid) => {
+// message.complete 单独订阅（TypedHandler 下 payload 为 Record 占位，willRetry 直读免断言）：
+// [willRetry 过滤] pi auto-retry 中间失败帧（willRetry=true）turn 未结束，此刻关窗会在
+// pi 续跑重挂成功时被 setPlanReviewPending(true) 清错误——形成「agent 未响应」误报闪现。
+onMessage('message.complete', (msg, sid) => {
+  if (msg.payload.willRetry === true) return
+  planStore.endPlanReviewNudge(sid, t('plan.reviewBar.resubmitNoResponse'))
+})
+// message.error / send.rejected 恒终态信号，照常判「未响应」
+onMessage(['message.error', 'send.rejected'], (_msg, sid) => {
   planStore.endPlanReviewNudge(sid, t('plan.reviewBar.resubmitNoResponse'))
 })
 

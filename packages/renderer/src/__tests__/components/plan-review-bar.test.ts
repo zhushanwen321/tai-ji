@@ -516,9 +516,13 @@ describe('degraded 可行动化（D8：成因分源文案 + [重新提交审批]
 })
 
 describe('D8「agent 未响应」分支（turn 生命周期信号驱动，非墙钟）', () => {
-  /** turn 生命周期事件派发（真实 events 通道，use-plan-sync.test 同款 dispatchSession 形态） */
-  function dispatchTurnEvent(type: 'message.complete' | 'message.error' | 'send.rejected'): void {
-    events.dispatchSession(SID, { type, payload: { sessionId: SID } } as never)
+  /** turn 生命周期事件派发（真实 events 通道，use-plan-sync.test 同款 dispatchSession 形态）；
+   *  payloadExtra 透传扩展字段（willRetry 判据用例，event-adapter 透传形态） */
+  function dispatchTurnEvent(
+    type: 'message.complete' | 'message.error' | 'send.rejected',
+    payloadExtra: Record<string, unknown> = {},
+  ): void {
+    events.dispatchSession(SID, { type, payload: { sessionId: SID, ...payloadExtra } } as never)
   }
 
   async function clickResubmit(wrapper: VueWrapper): Promise<void> {
@@ -576,6 +580,23 @@ describe('D8「agent 未响应」分支（turn 生命周期信号驱动，非墙
     dispatchTurnEvent('send.rejected')
     await flushAsync()
     expect(wrapper.find('[data-testid="plan-review-resubmit-error"]').text()).toContain('agent 未响应')
+  })
+
+  it('willRetry=true 中间失败帧不关检测窗（pi auto-retry 中 turn 未结束）；终态帧才判未响应', async () => {
+    const wrapper = await mountDegraded()
+    await clickResubmit(wrapper)
+
+    // pi 自动重试链的中间失败帧（willRetry=true，event-adapter 透传形态）→ turn 未结束，
+    // 不关窗不落错误（判据与 useCompletionNotify 的 willRetry 静音同型）
+    dispatchTurnEvent('message.complete', { stopReason: 'error', willRetry: true })
+    await flushAsync()
+    expect(wrapper.find('[data-testid="plan-review-resubmit-error"]').exists()).toBe(false)
+
+    // 重试链终态（willRetry=false）而重挂仍未至 → 此刻才判「agent 未响应」
+    dispatchTurnEvent('message.complete', { stopReason: 'error', willRetry: false })
+    await flushAsync()
+    expect(wrapper.find('[data-testid="plan-review-resubmit-error"]').text()).toContain('agent 未响应')
+    expect(wrapper.find('[data-testid="plan-review-resubmit"]').exists()).toBe(true) // 保留可重试
   })
 
   it('未点重提时 turn 信号不误报（检测窗口未开启）', async () => {
