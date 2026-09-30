@@ -125,6 +125,7 @@
           <SystemPromptPage v-else-if="activeMenu === 'system-prompt'" :key="activeMenu" />
           <TerminalPage v-else-if="activeMenu === 'terminal'" :key="activeMenu" />
           <PiPresetsPage v-else-if="activeMenu === 'preset'" :key="activeMenu" />
+          <TtsPage v-else-if="activeMenu === 'tts'" :key="activeMenu" />
           <WorktreePage v-else-if="activeMenu === 'worktree'" :key="activeMenu" />
           <UpdatePage v-else-if="activeMenu === 'update'" :key="activeMenu" />
           <AppearancePage v-else-if="activeMenu === 'appearance'" :key="activeMenu" :system="system" @update="onSystemUpdate" />
@@ -139,7 +140,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, X, Download, Palette, BarChart3, ArrowLeft, ArrowRight, PanelLeftClose } from '@lucide/vue'
+import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, Volume2, X, Download, Palette, BarChart3, ArrowLeft, ArrowRight, PanelLeftClose } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { getSettingsStore, useSettings, type SystemSettings } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
@@ -154,6 +155,7 @@ import SystemPromptPage from './system/SystemPromptPage.vue'
 import TerminalPage from './terminal/TerminalPage.vue'
 import WorktreePage from './worktree/WorktreePage.vue'
 import PiPresetsPage from './preset/PiPresetsPage.vue'
+import TtsPage from './tts/TtsPage.vue'
 import UpdatePage from './update/UpdatePage.vue'
 import UsagePage from './usage/UsagePage.vue'
 import AppearancePage from './appearance/AppearancePage.vue'
@@ -167,6 +169,7 @@ const menus = [
   { id: 'system-prompt', labelKey: 'settings.menu.systemPrompt', icon: ScrollText },
   { id: 'terminal', labelKey: 'settings.menu.terminal', icon: TerminalSquare },
   { id: 'preset', labelKey: 'settings.menu.preset', icon: ClipboardList },
+  { id: 'tts', labelKey: 'settings.menu.tts', icon: Volume2 },
   { id: 'worktree', labelKey: 'settings.menu.worktree', icon: GitBranch },
   { id: 'update', labelKey: 'settings.menu.update', icon: Download },
   { id: 'system', labelKey: 'settings.menu.system', icon: SlidersHorizontal },
