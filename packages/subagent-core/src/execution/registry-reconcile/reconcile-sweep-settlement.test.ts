@@ -37,11 +37,8 @@ import { mapReasonToStatus } from "@zhushanwen/extension-protocol";
 import type { LogLevel } from "../../core/logger.ts";
 import { configureCore, resetCoreForTests, type HostServices } from "../../core/host-services.ts";
 import { findRunSettlementEvidence } from "../persistence/run-state-evidence.ts";
-import {
-  createRunEventJournal,
-  RUN_EVENT_JOURNAL_SUFFIX,
-  type RunErrorCode,
-} from "../../orchestration/run-events.ts";
+import { RUN_EVENT_JOURNAL_SUFFIX, type RunErrorCode } from "../../shared/run-vocabulary.ts";
+import { createRunEventJournal } from "../../orchestration/run-events.ts";
 import { runReconcileSweep, type ReconcileSweepDeps } from "./reconcile-sweep.ts";
 import { settlementEvidenceToRunState } from "./sweep-binding.ts";
 

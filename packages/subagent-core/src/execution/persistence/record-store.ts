@@ -91,7 +91,6 @@ import { toErrorMessage } from "../../core/error-message.ts";
 import { getLogger } from "../../core/logger.ts";
 
 import { snapshot as toSnapshot } from "./execution-record.ts";
-import { statStateStamp } from "./state-marker.ts";
 import { recordEventsPath } from "./record-events.ts";
 // [UF-1] record 绑定 sidecar：宿主侧 id→file 映射（engine-CLI 化后子文件无 identity
 // entry 时代的身份载体）——scanFile 探测分支在 identity miss 时消费它重建 light record。
@@ -99,6 +98,7 @@ import { recordEventsPath } from "./record-events.ts";
 // （U6-D2 交接：binding 键 = 锚基底 + 扩展名，pi 锚基底 = 子 session 文件路径）；
 // binding 读写函数的调用已随终态轴/投影轴外迁（readRecordBinding/writeRecordBinding/
 // updateRecordBinding 仅经轴文件 import——读函数与 binding 写不在 D7 七名拦截面）。
+import type { StateMarker } from "./state-marker.ts";
 import { RECORD_BINDING_SIDECAR_EXT } from "./state-marker.ts";
 import { SUBAGENT_RECORD_CUSTOM_TYPE } from "./record-entry.ts";
 // [W1 / U2a] v2 条目构造 / v2 定界扫描 / 收编组装 / 事件帧载荷构造（纯函数族，
@@ -1515,7 +1515,6 @@ export class RecordStore {
     }
     const stamps: FileStamps = {
       jsonl,
-      state: statStateStamp(file),
       binding: statStamp(`${file}${RECORD_BINDING_SIDECAR_EXT}`),
     };
 
@@ -1539,22 +1538,21 @@ export class RecordStore {
     // 覆盖两种形态：首扫（映像已装载但 miss/不匹配）与后续轮次（映像已释放，凡进重建分支必是戳变化）。
     this.indexDirty = true;
 
-    const sidecars = readSidecarPayloads(file, stamps);
+    const payloads = readSidecarPayloads(file, stamps);
     const header = detectIdentity(file, jsonl.size);
     // [UF-1] 身份源两级：子文件 identity entry（历史权威，命中时绑定不参与）→
     // record 绑定 sidecar（engine-CLI 化后子文件无身份 entry，宿主在 sessionFile
     // 回填点落盘的 id→file 映射承担恢复能力）。两者皆缺 → 负缓存。
-    const base = header ?? identityFromBinding(sidecars.binding, file);
+    const base = header ?? identityFromBinding(payloads.binding, file);
     if (!base) {
       // 负缓存：确认无 identity。后续扫描 stat 命中直接跳过；戳变化（文件补写 /
       // 绑定后到落盘）自动重试。
       this.fileCache.set(file, { negative: true, ...stamps });
       return null;
     }
-    // 终态收条：折叠（事件流 = 事实源）优先，sidecar 退为存量兜底（无事件文件的记录）。
-    const fold = this.eventStreamFace?.foldOf(base.id);
-    const payloads = { ...sidecars, state: stateMarkerFromFold(fold) ?? sidecars.state };
-    const entry = buildFileCacheEntry(base, file, stamps, payloads, this.eventsStampOfId(base.id));
+    // 终态收条 = 折叠结果（事件流是唯一事实源；`.state` sidecar 已退场）。
+    const state = stateMarkerFromFold(this.eventStreamFace?.foldOf(base.id));
+    const entry = buildFileCacheEntry(base, file, stamps, payloads, state, this.eventsStampOfId(base.id));
     // [U7 / §3.2.7 统计口径单基准] binding 补投影扩展到 identity 基底（原仅 binding
     // 基底）：binding 快照是 settle 写点的统计权威（.state 收条不冗余承载 round/
     // usage，§3.2.4），light 重建一律从 binding 恢复 turns/tokens/round/endedAt 终值
@@ -1603,17 +1601,11 @@ export class RecordStore {
     if (!sameNullableStamp(hitEvents, events)) return undefined;
     // 终态收条自索引读出（① 快路径换源：不再读 .state sidecar）；无收条条目
     //（无收条事件 = 在途中断，或存量索引形态）落回 sidecar 读取。
-    const payloads: SidecarPayloads =
+    const payloads: SidecarPayloads = { binding: undefined };
+    const state: StateMarker | undefined =
       hit.receipt !== undefined
-        ? {
-            state: {
-              status: "idle",
-              reason: hit.receipt.stopReason,
-              endedAt: hit.receipt.endedAt,
-            },
-            binding: undefined,
-          }
-        : readSidecarPayloads(file, stamps);
+        ? { status: "idle", reason: hit.receipt.stopReason, endedAt: hit.receipt.endedAt }
+        : undefined;
     const entry = buildFileCacheEntry(
       {
         ...hit,
@@ -1631,6 +1623,7 @@ export class RecordStore {
       file,
       stamps,
       payloads,
+      state,
       events,
     );
     this.fileCache.set(file, entry);

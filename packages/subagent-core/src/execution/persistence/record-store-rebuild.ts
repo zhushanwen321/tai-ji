@@ -25,7 +25,6 @@ import * as fs from "node:fs";
 import { getLogger } from "../../core/logger.ts";
 
 import { getCurrentActivity, getDisplayItems, getEventLog, isLegacyClosedSettled, markReconstructedStatus } from "./execution-record.ts";
-import { readStateMarker } from "./state-marker.ts";
 import type { RecordBinding, StateMarker } from "./state-marker.ts";
 import { readRecordBinding, zcodeAnchorBasePath } from "./state-marker.ts";
 import { SUBAGENT_RECORD_CUSTOM_TYPE, classifySubagentRecordEntryData } from "./record-entry.ts";
@@ -108,7 +107,6 @@ export interface FileCacheEntry {
   light: SubagentRecord;
   full: SubagentRecord | undefined;
   jsonl: Stamp;
-  state: Stamp | null;
   /** [UF-1] record 绑定 sidecar 戳（null = 无绑定文件）。 */
   binding: Stamp | null;
   /**
@@ -126,7 +124,6 @@ export interface FileCacheEntry {
 export interface NegativeFileEntry {
   negative: true;
   jsonl: Stamp;
-  state: Stamp | null;
   /** [UF-1] 绑定戳纳入负缓存：绑定文件后到（run 应答回填点落盘）改变戳，
    *  打破负缓存触发重探测——「先扫描后绑定落盘」时序的恢复能力锚点。 */
   binding: Stamp | null;
@@ -139,13 +136,11 @@ export type FileCacheValue = FileCacheEntry | NegativeFileEntry;
  *  [U4a / D3b (a)] alive 戳退役——light 态不依赖 .alive，省去每文件一次 statSync）。 */
 export interface FileStamps {
   jsonl: Stamp;
-  state: Stamp | null;
   binding: Stamp | null;
 }
 
 /** sidecar payload 读取结果（索引命中与探测重建两分支共享的读点）。 */
 export interface SidecarPayloads {
-  state: StateMarker | undefined;
   /** [UF-1] record 绑定载荷（identity miss 时的身份重建源）。 */
   binding: RecordBinding | undefined;
 }
@@ -392,11 +387,7 @@ export function sameNullableStamp(a: Stamp | null, b: Stamp | null): boolean {
 
 /** 缓存条目与本轮 stat 戳全同（jsonl + 终态 sidecar + record 绑定，null 语义对齐）→ 零读取复用。 */
 export function isFreshCache(cached: FileCacheValue, stamps: FileStamps, events: Stamp | null): boolean {
-  if (
-    !sameStamp(cached.jsonl, stamps.jsonl) ||
-    !sameNullableStamp(cached.state, stamps.state) ||
-    !sameNullableStamp(cached.binding, stamps.binding)
-  ) {
+  if (!sameStamp(cached.jsonl, stamps.jsonl) || !sameNullableStamp(cached.binding, stamps.binding)) {
     return false;
   }
   // 负缓存无 id → 无事件文件可对账（只比 jsonl）。
@@ -422,7 +413,6 @@ export function detectIdentity(file: string, size: number): IdentityHeaderRecon 
  */
 export function readSidecarPayloads(file: string, stamps: FileStamps): SidecarPayloads {
   return {
-    state: stamps.state !== null ? readStateMarker(file) : undefined,
     binding: stamps.binding !== null ? readRecordBinding(file) : undefined,
   };
 }
@@ -647,19 +637,19 @@ export function buildFileCacheEntry(
   file: string,
   stamps: FileStamps,
   payloads: SidecarPayloads,
+  state: StateMarker | undefined,
   events: Stamp | null,
 ): FileCacheEntry {
   return {
     light: buildRecord(base, {
-      state: payloads.state,
+      state,
       jsonlMtimeMs: stamps.jsonl.mtimeMs,
     }),
     full: undefined,
     jsonl: stamps.jsonl,
-    state: stamps.state,
     binding: stamps.binding,
     events,
-    stateMarker: payloads.state,
+    stateMarker: state,
   };
 }
 

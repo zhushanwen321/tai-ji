@@ -24,6 +24,9 @@ import type {
   WorktreeHandle,
 } from "@zhushanwen/subagent-engine-sdk";
 
+// [D1 Class A] 词汇下沉 shared（execution 侧直接 import，不再反向依赖本层）
+export { SLUG_MAX_LENGTH } from "../../shared/run-vocabulary.ts";
+
 // ── 状态机 ────────────────────────────────────────────────────
 
 /**
@@ -90,15 +93,7 @@ export function isTerminalDoneReason(reason: DoneReason): boolean {
 
 // ── Agent 调用 ────────────────────────────────────────────────
 
-/**
- * slug 最大长度（D6 合流迁入本文件，原权威定义在已删除的 execution/execute-options-mapper.ts）。
- * 历史值 20 偏紧——描述性 slug 如 "audit-structured-output"（23）/ "fix-subagent-wf-tools"（21）
- * 会撞上限，放宽到 35 兼顾「短到能塞进 TUI 标题行」与「容纳合理描述性 kebab-case 名」。
- * 放本文件的原因：约束对象是 AgentCallOpts.description（slug 的源字段，见下方 slug 派生说明），
- * 与字段同文件；subagent-actions-core（slug 校验）、subagent-service（record slug 截断）
- * 与壳侧 tool schema maxLength 共享引用。
- */
-export const SLUG_MAX_LENGTH = 35;
+
 
 /**
  * 单次 agent 调用的任务声明（D6 任务形状合流后的单一形状）。

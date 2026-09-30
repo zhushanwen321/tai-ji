@@ -22,11 +22,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LogLevel } from "../../core/logger.ts";
 import { configureCore, resetCoreForTests, type HostServices } from "../../core/host-services.ts";
 
-import {
-  createRunEventJournal,
-  RUN_EVENT_JOURNAL_SUFFIX,
-  type WorkflowRunEventInput,
-} from "../../orchestration/run-events.ts";
+import { RUN_EVENT_JOURNAL_SUFFIX } from "../../shared/run-vocabulary.ts";
+import { createRunEventJournal, type WorkflowRunEventInput } from "../../orchestration/run-events.ts";
 import { adoptInterruptedRun } from "../../orchestration/run-registry.ts";
 import {
   setRunEventJournalDirForTest,

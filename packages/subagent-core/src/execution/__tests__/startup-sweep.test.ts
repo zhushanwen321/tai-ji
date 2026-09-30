@@ -24,11 +24,8 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readRunTerminalManifest } from "../persistence/manifest-store.ts";
-import {
-  createRunEventJournal,
-  RUN_EVENT_JOURNAL_SUFFIX,
-  type WorkflowRunEventInput,
-} from "../../orchestration/run-events.ts";
+import { RUN_EVENT_JOURNAL_SUFFIX } from "../../shared/run-vocabulary.ts";
+import { createRunEventJournal, type WorkflowRunEventInput } from "../../orchestration/run-events.ts";
 import {
   STARTUP_SWEEP_GRACE_WINDOW_MS,
   startupSweep,

@@ -23,7 +23,7 @@ import { cleanupExpiredJournals } from "../engine/common/pool-manager.ts";
 // journal 事件文件后缀单源（run 域 = run-events；record 域 = record-events）——
 // 后缀字面量散布是静默漂移源（两常量的单源导出头注同款考量）。
 import { RECORD_EVENTS_SUFFIX } from "./record-events.ts";
-import { RUN_EVENT_JOURNAL_SUFFIX } from "../../orchestration/run-events.ts";
+import { RUN_EVENT_JOURNAL_SUFFIX } from "../../shared/run-vocabulary.ts";
 
 /** 30 天 TTL（毫秒）。 */
 const TTL_DAYS = 30;

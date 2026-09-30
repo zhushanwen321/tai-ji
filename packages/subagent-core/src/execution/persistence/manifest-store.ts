@@ -10,8 +10,8 @@ import { isMissingFsError } from "./fs-error.ts";
 import type { ClosedReason, ExecutionStatus } from "../domain/record-types.ts";
 // 类型面依赖（D5 终局投影词表单源）——纯 type import，无运行时循环
 //（run-events 只依赖 core/logger 与 orchestration/models，不回指 execution 层）。
-import type { RunErrorCode, RunOutcome } from "../../orchestration/run-events.ts";
-import { ALL_RUN_OUTCOMES } from "../../orchestration/run-events.ts";
+import { RunErrorCode, RunOutcome } from "../../shared/run-vocabulary.ts";
+import { ALL_RUN_OUTCOMES } from "../../shared/run-vocabulary.ts";
 
 const logger = getLogger("subagents");
 

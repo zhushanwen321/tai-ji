@@ -19,7 +19,7 @@ import { findForeignLiveInstance } from "../persistence/alive-store.ts";
 // 守卫 5 的「锚不可解析 → 引导 reopen」分流消费。
 import { isAnchorResolvable } from "./cold-lookup.ts";
 import { computeElapsedSeconds, projectOutcome } from "../persistence/execution-record.ts";
-import { SLUG_MAX_LENGTH } from "../../orchestration/models/types.ts";
+import { SLUG_MAX_LENGTH } from "../../shared/run-vocabulary.ts";
 import type { ModelInfo } from "./model-resolver.ts";
 import type { SubagentService } from "../subagent-service.ts";
 import { displayAgentName } from "../../shared/agent-ref.ts";

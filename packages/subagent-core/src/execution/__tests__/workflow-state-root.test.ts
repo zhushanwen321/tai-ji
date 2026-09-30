@@ -26,7 +26,8 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { findRunSettlementEvidence } from "../persistence/run-state-evidence.ts";
-import { createRunEventJournal, RUN_EVENT_JOURNAL_SUFFIX } from "../../orchestration/run-events.ts";
+import { RUN_EVENT_JOURNAL_SUFFIX } from "../../shared/run-vocabulary.ts";
+import { createRunEventJournal } from "../../orchestration/run-events.ts";
 import {
   setRunEventJournalDirForTest,
 } from "../../orchestration/terminal-actions.ts";

@@ -54,7 +54,7 @@ import { join } from "node:path";
 
 import { getLogger } from "../../core/logger.ts";
 import { findRunSettlementEvidence, STATE_DIR_NAME } from "../persistence/run-state-evidence.ts";
-import { RUN_EVENT_JOURNAL_SUFFIX } from "../../orchestration/run-events.ts";
+import { RUN_EVENT_JOURNAL_SUFFIX } from "../../shared/run-vocabulary.ts";
 import { errorCodeOf } from "../../shared/fs-error.ts";
 
 const logger = getLogger("pi-host-run-store");

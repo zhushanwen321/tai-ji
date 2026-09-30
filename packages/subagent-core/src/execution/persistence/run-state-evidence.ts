@@ -31,14 +31,8 @@ import {
   foldRecordEvents,
   RECORD_EVENTS_SUFFIX,
 } from "./record-events.ts";
-import {
-  createRunEventJournal,
-  foldRunEventFrames,
-  RUN_EVENT_JOURNAL_SUFFIX,
-  type RunErrorCode,
-  type RunOutcome,
-  type WorkflowRunEvent,
-} from "../../orchestration/run-events.ts";
+import { RUN_EVENT_JOURNAL_SUFFIX, type RunErrorCode, type RunOutcome } from "../../shared/run-vocabulary.ts";
+import { createRunEventJournal, foldRunEventFrames, type WorkflowRunEvent } from "../../orchestration/run-events.ts";
 import { runSettledOutcomeToDoneReason } from "../../orchestration/terminal-actions.ts";
 
 const logger = getLogger("run-state-evidence");
