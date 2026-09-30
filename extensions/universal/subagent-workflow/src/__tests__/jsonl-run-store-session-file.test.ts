@@ -220,6 +220,55 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     expect(byId.get(legacyResumedId)!.spec.budgetTimeMs).toBe(3_600_000);
   });
 
+  it("loadAll round-trip: spec.budgetTokens 与时间轴同构——无 run-resumed 回落 created（0 值不限）", async () => {
+    // created 10k → 生效 10k
+    const createdId = "run-rt-tokens-created";
+    const createdPath = appendRecordLine(tmpDir, createdId, { type: "run-created", seq: 1, ts: 1000, runId: createdId, workflowName: "test-script", argsSummary: "{}", scriptSource: "agent('x')", budgetTokens: 10_000 });
+    appendRecordLine(tmpDir, createdId, { type: "run-settled", seq: 2, ts: 2000, outcome: "done", artifactsDir: tmpDir });
+    // created 无 budgetTokens / 0 值 → 不限制（旧格式行为不劣化）
+    const legacyId = "run-rt-tokens-legacy";
+    const legacyPath = appendRecordLine(tmpDir, legacyId, { type: "run-created", seq: 1, ts: 1000, runId: legacyId, workflowName: "test-script", argsSummary: "{}", scriptSource: "agent('x')" });
+    appendRecordLine(tmpDir, legacyId, { type: "run-settled", seq: 2, ts: 2000, outcome: "done", artifactsDir: tmpDir });
+    const zeroId = "run-rt-tokens-zero";
+    const zeroPath = appendRecordLine(tmpDir, zeroId, { type: "run-created", seq: 1, ts: 1000, runId: zeroId, workflowName: "test-script", argsSummary: "{}", scriptSource: "agent('x')", budgetTokens: 0 });
+    appendRecordLine(tmpDir, zeroId, { type: "run-settled", seq: 2, ts: 2000, outcome: "done", artifactsDir: tmpDir });
+
+    const entries: CustomEntry[] = [
+      v2RegisteredEntry(createdId, createdPath),
+      v2RegisteredEntry(legacyId, legacyPath),
+      v2RegisteredEntry(zeroId, zeroPath),
+    ];
+    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
+    const restored = await store.loadAll();
+    const byId = new Map(restored.map((r) => [r.runId, r]));
+    expect(byId.get(createdId)!.spec.budgetTokens).toBe(10_000);
+    expect(byId.get(legacyId)!.spec.budgetTokens).toBeUndefined();
+    expect(byId.get(zeroId)!.spec.budgetTokens).toBeUndefined();
+  });
+
+  it("loadAll round-trip: spec.budgetTokens 取最近一条 run-resumed 的生效值（覆盖 created；旧格式 run-resumed 回落 created）", async () => {
+    // created 10k + run-resumed 50k → 生效 50k（跨崩溃存续的 record 侧）
+    const overrideId = "run-rt-tokens-resumed";
+    const overridePath = appendRecordLine(tmpDir, overrideId, { type: "run-created", seq: 1, ts: 1000, runId: overrideId, workflowName: "test-script", argsSummary: "{}", scriptSource: "agent('x')", budgetTokens: 10_000 });
+    appendRecordLine(tmpDir, overrideId, { type: "run-interrupted", seq: 2, ts: 2000, errorCode: "crashed" });
+    appendRecordLine(tmpDir, overrideId, { type: "run-resumed", seq: 3, ts: 3000, budgetTokens: 50_000 });
+    appendRecordLine(tmpDir, overrideId, { type: "run-settled", seq: 4, ts: 4000, outcome: "done", artifactsDir: tmpDir });
+
+    // created 10k + 旧格式 run-resumed（无 budgetTokens）→ 回落 created 10k
+    const legacyResumedId = "run-rt-tokens-legacy-resumed";
+    const legacyResumedPath = appendRecordLine(tmpDir, legacyResumedId, { type: "run-created", seq: 1, ts: 1000, runId: legacyResumedId, workflowName: "test-script", argsSummary: "{}", scriptSource: "agent('x')", budgetTokens: 10_000 });
+    appendRecordLine(tmpDir, legacyResumedId, { type: "run-interrupted", seq: 2, ts: 2000, errorCode: "crashed" });
+    appendRecordLine(tmpDir, legacyResumedId, { type: "run-resumed", seq: 3, ts: 3000 });
+    appendRecordLine(tmpDir, legacyResumedId, { type: "run-settled", seq: 4, ts: 4000, outcome: "done", artifactsDir: tmpDir });
+
+    const entries: CustomEntry[] = [v2RegisteredEntry(overrideId, overridePath), v2RegisteredEntry(legacyResumedId, legacyResumedPath)];
+    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
+    const restored = await store.loadAll();
+    const byId = new Map(restored.map((r) => [r.runId, r]));
+    expect(byId.get(overrideId)!.spec.budgetTokens).toBe(50_000);
+    expect(byId.get(legacyResumedId)!.spec.budgetTokens).toBe(10_000);
+  });
+
   it("loadAll round-trip: AgentCall.sessionFile / sessionId 经 result 载荷恢复（overlay 定位链）", async () => {
     const sessionFilePath = "/abs/.pi/agent/subagents/enc/sessions/2026-07-15T_session-abc.jsonl";
     const runId = "run-rt-001";

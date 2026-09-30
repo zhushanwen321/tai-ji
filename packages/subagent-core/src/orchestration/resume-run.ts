@@ -61,7 +61,7 @@ import { makeHandlers } from "./lifecycle.ts";
 import { forgetRunResumedBudget, noteRunResumedBudget } from "./worker-message-pump.ts";
 import { WORKFLOW_RECORD_CUSTOM_TYPE } from "./workflow-record-entry.ts";
 import { assertResumeArgsMatch } from "./resume-args-guard.ts";
-import { rebuildBudget } from "./run-accounting.ts";
+import { rebuildBudget, runAccountingFromEvents } from "./run-accounting.ts";
 
 const logger = getLogger("subagents");
 
@@ -285,6 +285,16 @@ export interface ResumeRunOptions { // oe-exempt:20260929:framework:resumeRun pu
    * run-resumed 帧落盘——全链单值，不在别处二次折算。
    */
   budgetTimeMs?: number;
+  /**
+   * token 预算上界（Budget.isExceeded 的加权口径）。生效预算三档回落与 budgetTimeMs
+   * 完全同构（单点在 assertResumeEligibility）：显式提供 = 覆盖；缺省 = 继承最近一条
+   * run-resumed 帧记录的生效值（跨崩溃存续）；再缺省 = 继承 run-created 帧的创建
+   * 预算；三处都没有 = 不限制（Budget 缺省语义）。生效值写入重建 spec（引擎侧
+   * maxTokens 投影与 fresh run 同形）、用于 D10 token 预检（已耗加权 tokens ≥ 上限
+   * 即拒绝——帧推导下界口径，下界越界 ⟹ 真实消耗必越界）、并随本次 run-resumed 帧
+   * 落盘——全链单值，不在别处二次折算。
+   */
+  budgetTokens?: number;
   /** 时钟注入（epoch ms）；缺省 Date.now()——run-resumed 帧 ts 与预算算式的确定性测试通道。 */
   now?: () => number;
   /** 宿主标识（run-resumed 帧 host 载荷——跨进程锁裁决的胜出方语境）。 */
@@ -388,7 +398,7 @@ function assertResumeEligibility(
   runId: string,
   recordPath: string,
   options: ResumeRunOptions | undefined,
-): { events: WorkflowRunEvent[]; created: Extract<WorkflowRunEvent, { type: "run-created" }>; activeElapsedMs: number; budgetTimeMs: number | undefined } {
+): { events: WorkflowRunEvent[]; created: Extract<WorkflowRunEvent, { type: "run-created" }>; activeElapsedMs: number; budgetTimeMs: number | undefined; budgetTokens: number | undefined } {
   const events = readRecordStreamStrict(recordPath, runId);
   const created = events.find(
     (e): e is Extract<WorkflowRunEvent, { type: "run-created" }> => e.type === "run-created",
@@ -430,6 +440,8 @@ function assertResumeEligibility(
   // 不出现第二处折算。旧格式帧（无字段）自然回落 run-created，行为不劣化。
   const lastResumed = findLatestRunResumed(events);
   const budgetTimeMs = options?.budgetTimeMs ?? lastResumed?.budgetTimeMs ?? created.budgetTimeMs;
+  // token 轴三档回落（与 budgetTimeMs 同构：显式覆盖 > 末次 run-resumed > run-created）
+  const budgetTokens = options?.budgetTokens ?? lastResumed?.budgetTokens ?? created.budgetTokens;
   const activeElapsedMs = computeActiveElapsedMs(events);
   if (budgetTimeMs !== undefined && budgetTimeMs > 0 && activeElapsedMs >= budgetTimeMs) {
     throw reject(
@@ -438,7 +450,22 @@ function assertResumeEligibility(
         "time is). Recovery: start a new run, or rerun with a larger budgetTimeMs.",
     );
   }
-  return { events, created, activeElapsedMs, budgetTimeMs };
+  // D10 token 预检（与时间轴对齐：已耗是否已越界）。已耗口径 = runAccountingFromEvents
+  // 单源（agent-settled.result.usage 同一加权折算，下界近似——中间失败尝试不在事件流）。
+  // 用下界做拒绝判据方向安全：下界 ≥ 上限 ⟹ 真实消耗（活体逐尝试累计）必 ≥ 上限，
+  // 不产生误拒；下界未越界时放行，复活后由重建 Budget.isExceeded 正常路径守卫。
+  if (budgetTokens !== undefined && budgetTokens > 0) {
+    const usedTokens = runAccountingFromEvents(events).usedTokens;
+    if (usedTokens >= budgetTokens) {
+      throw reject(
+        `Resume rejected: run ${runId} has exhausted its token budget ` +
+          `(${Math.round(usedTokens)} weighted tokens used of ${Math.round(budgetTokens)} — the count is the ` +
+          "frame-derived lower bound, so the true spend is at least this high). Recovery: start a new run, " +
+          "or rerun with a larger budgetTokens.",
+      );
+    }
+  }
+  return { events, created, activeElapsedMs, budgetTimeMs, budgetTokens };
 }
 
 
@@ -455,19 +482,21 @@ function adoptResumedRun(
     events: readonly WorkflowRunEvent[];
     activeElapsedMs: number;
     budgetTimeMs: number | undefined;
+    budgetTokens: number | undefined;
     resumedAt: number;
     plan: ResumePlan;
   },
   now: () => number,
 ): void {
   noteRunResumedBudget(runId, summary.activeElapsedMs, summary.resumedAt);
-  // 生效预算（summary.budgetTimeMs 与首次挂表同源）随 spec 落定——重试重建面读
-  // run.spec.budgetTimeMs，本处不另算一遍
+  // 生效预算（summary.budgetTimeMs/budgetTokens 与首次挂表同源）随 spec 落定——重试
+  // 重建面读 run.spec.budgetTimeMs/budgetTokens，本处不另算一遍
   const run = rebuildRunFromRecord(
     runId,
     created,
     readRecordStreamStrict(recordPath, runId),
     summary.budgetTimeMs,
+    summary.budgetTokens,
   );
   const handlers = makeHandlers(run, deps);
   // 剩余预算（D10）：budget −（累计活跃已耗 + 本段已跑）——搁置不计
@@ -514,7 +543,7 @@ async function resumeRunLocked(
   now: () => number,
 ): Promise<string> {
   // ── 2. 资格校验 ──
-  const { events, created, activeElapsedMs, budgetTimeMs } = assertResumeEligibility(runId, recordPath, options);
+  const { events, created, activeElapsedMs, budgetTimeMs, budgetTokens } = assertResumeEligibility(runId, recordPath, options);
 
   // ── 2b. 派发前语法闸（第 4 道检查的 resume 侧）──
   // run-created 里的 scriptSource 是权威脚本文本；不可编译（顶层重声明宿主预声明名）
@@ -553,6 +582,7 @@ async function resumeRunLocked(
       // 未设/0/负值不落（与 run-created 同款条件式），读取面按「最近一条
       // run-resumed 的字段 ?? run-created 的字段」回落
       ...(budgetTimeMs !== undefined && budgetTimeMs > 0 ? { budgetTimeMs } : {}),
+      ...(budgetTokens !== undefined && budgetTokens > 0 ? { budgetTokens } : {}),
       ts: resumedAt,
     });
   } catch (err) {
@@ -576,7 +606,7 @@ async function resumeRunLocked(
   // 原异常照常上抛（调用方报错给用户）。
   try {
     adoptResumedRun(runId, deps, created, recordPath, {
-      events, activeElapsedMs, budgetTimeMs, resumedAt, plan,
+      events, activeElapsedMs, budgetTimeMs, budgetTokens, resumedAt, plan,
     }, now);
   } catch (err) {
     // 回滚清账（D10）：noteRunResumedBudget 在段 6 首行写入（workerHost.start 之前）
@@ -647,9 +677,9 @@ function appendResumeRegisteredEntry(
  * 恢复链不合成补收帧）；
  * 重派集（有 started 无 settled）不建条目：worker 重跑脚本到断点处重新发
  * agent-call(callId=N) → dispatchAgentCall miss → 真实派发（D8 档 2/3 经成员
- * 复用通道续写/新建）。budget 按恢复语义最小形态（record 流不承载预算）；args
- * 从 run-created 帧的 args 全文恢复（设计 §3.1 载荷表，旧格式帧回落 argsSummary
- * 尽力恢复——见 parseArgsSummary）。
+ * 复用通道续写/新建）。budget 双轴按生效值恢复（时间预算挂计时器重排、token
+ * 预算挂引擎 maxTokens 投影）；args 从 run-created 帧的 args 全文恢复（设计 §3.1
+ * 载荷表，旧格式帧回落 argsSummary 尽力恢复——见 parseArgsSummary）。
  */
 /** call 重建中间形态（Trace 先建——traceNode 回链 D-10 引用共享；重派集成员不建 node——dispatchAgentCall 重派时 trace.append 自然落位，重建悬空节点只会与重派 append 重复）。 */
 type CallDraft = { agentName: string; phase?: string; startedAtIso: string; attempts: number; result?: AgentResult; settledTs?: number; opts?: AgentCallOpts };
@@ -752,6 +782,7 @@ function rebuildRunFromRecord(
   created: Extract<WorkflowRunEvent, { type: "run-created" }>,
   events: readonly WorkflowRunEvent[],
   budgetTimeMs?: number,
+  budgetTokens?: number,
 ): WorkflowRun {
   const spec = {
     scriptSource: created.scriptSource ?? "",
@@ -768,6 +799,10 @@ function rebuildRunFromRecord(
     // 引擎侧 run.state.budget.maxTimeMs 投影与 fresh run 同形。undefined/<=0 不落
     // 字段 = 不限时（旧格式帧无该字段且未显式传 time 时与现状一致，不劣化）
     ...(budgetTimeMs !== undefined && budgetTimeMs > 0 ? { budgetTimeMs } : {}),
+    // token 预算单源（与时间轴同构）：生效值随 spec 落定，引擎侧 maxTokens 投影
+    // （createRunningRun / worker-host budget 注入读 spec.budgetTokens）与 fresh
+    // run 同形。undefined/<=0 不落字段 = 不限制
+    ...(budgetTokens !== undefined && budgetTokens > 0 ? { budgetTokens } : {}),
     ...(created.model !== undefined ? { model: created.model } : {}),
   };
   const drafts = collectCallDrafts(runId, events);
@@ -779,12 +814,13 @@ function rebuildRunFromRecord(
     runId,
     spec,
     {
-      // fresh run 的 Budget 同源（lifecycle.createRunningRun：maxTimeMs=spec.budgetTimeMs）
-      // ——复活聚合形状与新建一致，避免展示/消费面按 maxTimeMs 判定时双形态。
+      // fresh run 的 Budget 同源（lifecycle.createRunningRun：maxTokens=spec.budgetTokens、
+      // maxTimeMs=spec.budgetTimeMs）——复活聚合形状与新建一致，避免展示/消费面按
+      // maxTimeMs/maxTokens 判定时双形态。
       // [§2.1b] 计数不再归零：帧推导（agent-settled.result.usage 同一加权口径）重建
       // 已耗 tokens/cost/callCount——下界近似（中间失败尝试不在事件流，见
       // run-accounting.ts 头注）。
-      budget: rebuildBudget(undefined, events, budgetTimeMs),
+      budget: rebuildBudget(undefined, events, budgetTimeMs, budgetTokens),
       calls,
       trace,
       errorLogs: [],

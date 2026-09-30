@@ -267,6 +267,17 @@ export interface RunCreatedEvent extends EventEnvelope { // oe-exempt:20260929:f
    * dispatchRunCreated，仅 > 0 时落字段——与 scriptPath/model 同款条件式）。
    */
   budgetTimeMs?: number;
+  /**
+   * run 级 token 预算上界（RunSpec.budgetTokens 原文——run 创建时的 token 消耗上限，
+   * Budget.isExceeded 的加权口径）。record 单源后 resume 无法从别处恢复原预算约束，
+   * 本字段是唯一数据面：resume 重建 spec 时据此恢复（未显式传 tokens 即继承），
+   * 复活 run 的引擎侧 maxTokens 投影（lifecycle createRunningRun / worker-host budget
+   * 注入）与 fresh run 同形；缺失 = 旧格式行（本载荷落地前的流）或创建时未设预算，
+   * 两种形态一律回落不限制（旧格式行为不劣化）。可选 = 读取面对旧格式行放行，
+   * 写侧契约由写入方承担（写入点 = terminal-actions dispatchRunCreated，仅 > 0 时
+   * 落字段——与 budgetTimeMs 同款条件式）。
+   */
+  budgetTokens?: number;
 }
 
 /**
@@ -434,6 +445,17 @@ export interface RunResumedEvent extends EventEnvelope { // oe-exempt:20260929:f
    * 派发）。
    */
   budgetTimeMs?: number;
+  /**
+   * 本次复活实际生效的 token 预算上界——即 resume 生效预算三档回落的落定值（与
+   * budgetTimeMs 同族），使「显式传入的覆盖预算」跨崩溃存续（否则下次无参 resume
+   * 会退回 run-created 的创建预算）。读取面三档回落：显式 options > 最近一条
+   * run-resumed 的本字段 > run-created 的创建预算；三处都没有 = 不限制。缺席有
+   * 两种形态——本次复活不限制（未设/0/负值），或旧格式帧（本载荷落地前的流，
+   * 一律回落 run-created，不劣化）：读取面按「最近一条 run-resumed 的本字段 ??
+   * run-created」处理，与 run-created 同款条件式（仅 > 0 落字段；写入点 =
+   * resume-run.resumeRunLocked 的 run-resumed 派发）。
+   */
+  budgetTokens?: number;
 }
 
 /** `run-settled`——run 终局（一个 run 恰好一帧；终局通知的单点判定源，防多处各判漏分支）。 */

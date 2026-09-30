@@ -107,7 +107,7 @@ const WorkflowParams = Type.Object({
         "the differing fields listed. Omit to reuse the original args.",
     }),
   ),
-  tokens: Type.Optional(Type.Number({ description: "Max token budget — ONLY set when user explicitly requests a limit; omit = unlimited (default)" })),
+  tokens: Type.Optional(Type.Number({ description: "Max token budget — ONLY set when user explicitly requests a limit; omit = unlimited (default). For resume: the token budget applied to the resumed execution (tokens already spent by the run are counted against it)" })),
   time: Type.Optional(Type.Number({ description: `Max time budget in ms — ONLY set when user explicitly requests a limit; omit = unlimited (default; hard ceiling ${MAX_TIMER_DELAY_MS} ms — larger values fail fast at entry). For resume: the budget applied to the resumed execution (active time already spent by the run is counted against it; suspended time is not)` })),
   error: Type.Optional(
     Type.String({ description: "Error/reason message (optional, used with abort)" }),
@@ -236,7 +236,7 @@ export function registerWorkflowTool(
       "- run: {\"action\":\"run\",\"name\":\"<script>\",\"args\":{...},\"tokens\":N,\"time\":N,\"model\":\"<provider/modelId>\",\"thinkingLevel\":\"<level>\"}. " +
       "- status: {\"action\":\"status\"}. " +
       "- abort: {\"action\":\"abort\",\"runId\":\"<id>\"} (optional: {\"error\":\"<reason>\"}). " +
-      "- resume: {\"action\":\"resume\",\"runId\":\"<id>\",\"args\":{...},\"time\":N} — args/time optional.",
+      "- resume: {\"action\":\"resume\",\"runId\":\"<id>\",\"args\":{...},\"tokens\":N,\"time\":N} — args/tokens/time optional.",
       "Budget: Do NOT set tokens/time unless the user explicitly requests a limit. Built-in workflows run unlimited by default.",
       "Model/thinkingLevel: omit by default (inherit main agent's model). Only set model/thinkingLevel when the user explicitly requests a specific model or thinking depth for this run.",
       "Anti-patterns: Flattening args sub-fields (task/items/...) to the top level — they belong inside args. Calling {\"action\":\"run\"} without name.",
@@ -542,6 +542,8 @@ async function actionAbort(
  *   不一致明确拒绝并列出差异字段（换 args 重放 = 换意图，属新 run）；不传默认沿用历史；
  * - time 可选——resume 执行段的时间预算（活跃段算式在 core：已耗活跃时间计入、
  *   搁置不计）；入口护栏（负值/超安全域）与 run action 同源（assertEntryTimeBudget）。
+ * - tokens 可选——resume 执行段的 token 预算（已耗加权 tokens 计入，帧推导下界
+ *   口径）；入口护栏（负值）与 run action 同源（assertEntryTokenBudget）。
  *
  * 资格拒绝（非 interrupted / record 损坏 / 锁被占 / D13 嵌套 / 预算耗尽）由 core
  * resumeRun 权威裁决——ResumeRejectionError 文案含恢复指引，原样透出（throw，
@@ -558,9 +560,12 @@ export async function actionResume(
     );
   }
   assertEntryTimeBudget(params.time);
+  assertEntryTokenBudget(params.tokens);
 
   const options: ResumeRunOptions = {
     ...(params.time !== undefined ? { budgetTimeMs: params.time } : {}),
+    // token 预算显式覆盖（与 time 同款通道；三档回落与落盘归 core 单点）
+    ...(params.tokens !== undefined ? { budgetTokens: params.tokens } : {}),
     // [§2.5] args 原样下传由 core 判定（D14 单源）；journalDir 传壳的 store 同源目录，
     // 否则 core 会按模块锚解析 record 路径——多 session 场景会静默读成「无记录」
     //（D14 静默放行 = 安全语义反转；core 锚点与壳 store 锚点必须同源）。

@@ -420,19 +420,31 @@ function draftsToAgentCalls(
  * spec 重建预算的读取面三档回落（与 core resume-run.assertResumeEligibility 等价，
  * 少 options 档——resume 的显式覆盖已由 core 写进 run-resumed 帧，本折叠只表达
  * record 事实）：最近一条 run-resumed 的生效值 > run-created 的创建预算；两者
- * 皆无/<=0 = 不限时。取流尾最近一条 run-resumed 而非「最近一条带字段」——更晚的
+ * 皆无/<=0 = 不限制。取流尾最近一条 run-resumed 而非「最近一条带字段」——更晚的
  * 「不限时复活」（0/负值不落字段）须回落 created，而非错误地沿用更早的覆盖值。
- * `findLast` 属 ES2023 lib（本包 target ES2022）——从尾向头手写。
+ * 回落按**逐字段 `??`**（两轴独立）：run-resumed 帧可只载一轴（另一轴沿 created
+ * 继承），与 core 侧 `lastResumed?.budgetTimeMs ?? created.budgetTimeMs` 同构。
+ * 双预算轴（budgetTimeMs / budgetTokens）同遍历；`findLast` 属 ES2023 lib
+ * （本包 target ES2022）——从尾向头手写。
  */
-function resolveSpecBudgetMs(
+function resolveSpecBudget(
   created: Extract<WorkflowRunEvent, { type: "run-created" }> | undefined,
   events: readonly WorkflowRunEvent[],
-): number | undefined {
+): { budgetTimeMs?: number; budgetTokens?: number } {
+  let lastResumed: Extract<WorkflowRunEvent, { type: "run-resumed" }> | undefined;
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const event = events[i]!;
-    if (event.type === "run-resumed") return event.budgetTimeMs ?? created?.budgetTimeMs;
+    if (event.type === "run-resumed") {
+      lastResumed = event;
+      break;
+    }
   }
-  return created?.budgetTimeMs;
+  const budgetTimeMs = lastResumed?.budgetTimeMs ?? created?.budgetTimeMs;
+  const budgetTokens = lastResumed?.budgetTokens ?? created?.budgetTokens;
+  return {
+    ...(budgetTimeMs !== undefined ? { budgetTimeMs } : {}),
+    ...(budgetTokens !== undefined ? { budgetTokens } : {}),
+  };
 }
 
 /** [foldRecordStreamToRun 拆分] run spec 重建（run-created 帧优先，注册条目兜底）：
@@ -440,14 +452,14 @@ function resolveSpecBudgetMs(
  * argsSummary 尽力恢复（未截断可完整恢复，截断回落 {}——core parseArgsSummary
  * 同款语义；两侧行为等价由 record-mode 测试锁定）；scriptPath 锚定恢复（core
  * rebuildRunFromRecord 同款）：worker 沙箱 eval 模式无 __dirname，模板脚本靠
- * scriptPath 定位 _shared 族共享件；旧格式帧缺失回落空串。budgetTimeMs 恢复（core
- * 同款三档回落的 record 侧：最近一条 run-resumed 的生效值 > run-created 的创建
- * 预算，仅 > 0 落 spec）：引擎/展示投影按 run 生效预算读（缺字段 = 旧格式/未设
- * 预算 = 不限时）。 */
+ * scriptPath 定位 _shared 族共享件；旧格式帧缺失回落空串。budgetTimeMs/budgetTokens
+ * 恢复（core 同款三档回落的 record 侧：最近一条 run-resumed 的生效值 > run-created
+ * 的创建预算，仅 > 0 落 spec）：引擎/展示投影按 run 生效预算读（缺字段 = 旧格式/
+ * 未设预算 = 不限制）。 */
 function rebuildRunSpecFromEntries(
   created: Extract<WorkflowRunEvent, { type: "run-created" }> | undefined,
   reg: WorkflowRecordRegisteredEntryData,
-  budgetTimeMs: number | undefined,
+  budgets: { budgetTimeMs?: number; budgetTokens?: number },
 ) {
   return {
     scriptSource: created?.scriptSource ?? "",
@@ -455,8 +467,9 @@ function rebuildRunSpecFromEntries(
     scriptName: reg.scriptName,
     scriptPath: created?.scriptPath ?? "",
     // 条件式与 core rebuildRunFromRecord 等价（> 0 才落字段）——旧格式帧/0/负值
-    // 一律不限时，两侧折叠结果同形
-    ...(budgetTimeMs !== undefined && budgetTimeMs > 0 ? { budgetTimeMs } : {}),
+    // 一律不限时/不限制，两侧折叠结果同形
+    ...(budgets.budgetTimeMs !== undefined && budgets.budgetTimeMs > 0 ? { budgetTimeMs: budgets.budgetTimeMs } : {}),
+    ...(budgets.budgetTokens !== undefined && budgets.budgetTokens > 0 ? { budgetTokens: budgets.budgetTokens } : {}),
     ...(reg.slug !== undefined ? { slug: reg.slug } : {}),
   };
 }
@@ -473,7 +486,7 @@ function foldRecordStreamToRun(
   const startedAtMs =
     created?.ts ?? (Number.isFinite(reg.startedAt) ? reg.startedAt : Date.now());
   const startedAtIso = new Date(startedAtMs).toISOString();
-  const spec = rebuildRunSpecFromEntries(created, reg, resolveSpecBudgetMs(created, events));
+  const spec = rebuildRunSpecFromEntries(created, reg, resolveSpecBudget(created, events));
   // [§2.1b] 会计重建：v2 终态条目带活体口径 usedTokens/callCount → 真值优先；条目缺席
   // 回落 agent-settled.result.usage 的同一加权口径（下界近似，含 usedCost）。
   const budget = rebuildBudget(settled, events);

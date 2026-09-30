@@ -443,8 +443,9 @@ function reportDispatchFailure(runId: string, err: unknown): void {
  * lifecycle.runWorkflow 宿主派发点；入队先于 worker 启动（enqueueRunDispatch 同步
  * 入队 + 队列执行序 = 入队序——worker 首个 agent() 的 agent-started 帧必然排在
  * created 之后，竞态丢帧结构性消除），落账完成的 await 由调用方持有（「runWorkflow
- * 返回 ⟹ 投影可查」）。载荷 runId/scriptName/args/scriptPath/budgetTimeMs/model
- * 全部同源自 run.spec（scriptPath/budgetTimeMs/model 为条件式可选项）。
+ * 返回 ⟹ 投影可查」）。载荷 runId/scriptName/args/scriptPath/budgetTimeMs/
+ * budgetTokens/model 全部同源自 run.spec（scriptPath/budgetTimeMs/budgetTokens/
+ * model 为条件式可选项）。
  * 重复调用 = running × run-created 表外转移 fail-fast（IllegalTransitionError），
  * 构造性排除双帧。
  */
@@ -480,6 +481,11 @@ export function dispatchRunCreated(run: WorkflowRun): Promise<TransitionResult> 
     // 唯一数据面（与 scriptPath/model 同款条件式）
     ...(run.spec.budgetTimeMs !== undefined && run.spec.budgetTimeMs > 0
       ? { budgetTimeMs: run.spec.budgetTimeMs }
+      : {}),
+    // token 预算（RunSpec.budgetTokens）：与 budgetTimeMs 同款条件式（仅 > 0 落字段）
+    // ——resume 继承恢复的唯一数据面（Budget.isExceeded 加权口径的上限）
+    ...(run.spec.budgetTokens !== undefined && run.spec.budgetTokens > 0
+      ? { budgetTokens: run.spec.budgetTokens }
       : {}),
     ...(run.spec.model !== undefined ? { model: run.spec.model } : {}),
     ts: Date.now(),
