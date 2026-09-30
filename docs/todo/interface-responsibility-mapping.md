@@ -263,6 +263,8 @@ vi.mock 命中 = 10 处，分布在 6 个测试文件
 
 ### 批 5：`tool/`（9 个文件，2,391 行）
 
+> ✅ **已落**（commit `b8398bb74`）：9 个 tool 文件迁入 `src/interface/tool/`，8 个测试/fixture 随迁 `tool/__tests__/`（顶层 `__tests__/` 随之清空）。批内跨类边按 §2.3 保持（`gui → tool` 经 `subagent-actions.ts`、`tool → tui` 经 `tool-render.ts`、`tui → tool` 经 `commands.ts` / `views/WorkflowsView.ts`，全部收敛为 `<类别>/` 新路径）；批外引用面同批改齐——barrel `src/index.ts` 4 条、`displayStatusOf`（`command/commands.ts` / `tui/views/WorkflowsView.ts`）、`withGuiAttach`（`gui/subagent-actions.ts`）、10 个跨切面测试、`vi.mock` 15 处（scenario-08 / scenario-19 / session-lifecycle / session-start-once-guard）、上表全部非 import 路径面（`docs/testing/e2e-map.json` 路径登记全量同步 / structured-output 跨包候选 / `prompt-quality.test.ts` 源码文本读取 / 随迁测试的 `__dirname` 攀升与 `"interface/subagents.ts"` 字面量断言 / `docs/extensions/subagents/architecture.md` 机制落点表），另同步 2 处批外注释路径串（`injectors/subagent-list-injector.ts` / `command/subagents.ts`）。行为零变更（schema / 文案 / 渲染 / 注册顺序不动，三条反向边保持）；验证 = tsc clean + 受影响 18 个测试文件 325 例全过 + `validate-e2e-map.mjs` / `check-doc-symbol-drift.mjs` 绿。本节以下 import 面清单与风险点为设计期快照（行号/路径以搬迁时点为准，落地后不逐行回改）。
+
 涉及：`subagent-tool.ts`（337）、`subagent-tool-schema.ts`（172）、`tool-workflow.ts`（599）、`tool-workflow-script.ts`（398）、`tool-subagents.ts`（321）、`tool-render.ts`（342）、`tool-result.ts`（40）、`tool-shared.ts`（152）、`reentry-guard.ts`（30）；测试与 fixture 8 个随迁：`__tests__/capture-tool.ts`、`tool-prompt-contract.test.ts`、`tool-render.test.ts`、`tool-subagents.test.ts`、`tool-workflow-resume.test.ts`、`tool-workflow-script.test.ts`、`tool-workflow.test.ts`、`subagent-tool-path-guard.test.ts`（迁入 `tool/__tests__/`）。
 
 ```
