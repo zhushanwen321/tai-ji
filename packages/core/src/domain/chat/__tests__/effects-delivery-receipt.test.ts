@@ -13,6 +13,10 @@
  * - direct 车道回执：无 morph 段 → 不重复入流，仅占位回收
  * - 未命中下落 ②：无标记 / 标记不命中投影 → 纯计数兜底（现状链）
  * - 幂等：已 delivered 条目二次回执不重复消费
+ * - [dmg-r1-5] 多标记帧整批消费（splitComposed 放弃拆分 → 整条多标记文本一次进
+ *   transcript）：全部标记逐一消费投影条目（对齐 runtime confirmByMessageEnd 全量提取）
+ *   ——morph 段逐条目入流 / 全无段帧整帧文本降级一次（同帧互斥防重复）/ 粘贴标记不命中
+ *   即跳过 / 同 id 重复标记拒重
  * - [消息撤回 U8] 回执入流保号：两分支（① morph 段 / ② 外来纯文本降级）appendUser
  *   第三参均传原 clientUuid——重建气泡沿用提交 id（live 窗口撤回定位锚）
  * - 投影生命周期：replaceDeliveryProjection 整体替换 / 空帧删键 / captureMorphSegments
@@ -33,7 +37,7 @@ import {
 } from '../effects/user-delivery'
 import type { MessageEffectContext } from '../effect-types'
 import type { DeliveryFrameEntry } from '../api-port'
-import type { Message, Segment } from '@taiji/shared'
+import type { Message, Segment, ServerMessage } from '@taiji/shared'
 import { userEndFrame } from './helpers/fixtures'
 
 // getDeliveryProjection 快照读口已随过度设计审计候选 1 删除——测试断言经响应式读口组装同款快照。
@@ -198,6 +202,118 @@ describe('captureMorphSegments（morph 段暂存，送达回执消费）', () =>
     dispatchMessageEvent(ctx, SID, userEndFrame(SID, 'hi', UUID))
 
     expect(ctx.appendUser).toHaveBeenCalledWith(SID, [{ type: 'text', text: '第二版' }], CLIENT_UUID)
+  })
+})
+
+// ── [dmg-r1-5] 多标记帧整批消费（splitComposed 放弃拆分 → 整条多标记文本一次进 transcript）──
+
+/**
+ * 多标记帧（内核合批放弃拆分的整批投递形态）：BATCH_SEP（'\n\n---\n\n'）连接各条目
+ * 文本 + 各自尾标记。entry 形态与 helpers.userEndFrame 同构（多标记变体本地构造——
+ * helpers 头注释「本地版有语义差异时保留各文件实现」纪律，不动共享 fixture）。
+ */
+function composedEndFrame(sid: string, parts: { text: string; marker: string }[]): ServerMessage {
+  const fullText = parts
+    .map(({ text, marker }) => `${text}\n<!--taiji:msg:${marker}-->`)
+    .join('\n\n---\n\n')
+  return {
+    type: 'message.message_end',
+    payload: {
+      sessionId: sid,
+      entry: {
+        type: 'message',
+        parentId: null,
+        timestamp: new Date(0).toISOString(),
+        message: { role: 'user', content: [{ type: 'text', text: fullText }], timestamp: 0 },
+      },
+    },
+  } as ServerMessage
+}
+
+const UUID_B = '6e9f8a3c-1b25-4d6e-8c47-a9f0d2b35e18'
+const CLIENT_UUID_B = `u-${UUID_B}`
+
+describe('多标记帧整批消费（dmg-r1-5：整批投递回执不再只消费尾标记）', () => {
+  it('AC8: 两条目均有 morph 段 → 全部按段各自入流 + 投影全转 delivered + inflight 批量扣减', () => {
+    const segsA: Segment[] = [{ type: 'text', text: '排队消息 A' }]
+    const segsB: Segment[] = [{ type: 'text', text: '排队消息 B' }]
+    replaceDeliveryProjection(SID, [entry(), entry({ clientUuid: CLIENT_UUID_B })])
+    captureMorphSegments(SID, CLIENT_UUID, segsA)
+    captureMorphSegments(SID, CLIENT_UUID_B, segsB)
+    const ctx = makeCtx()
+    ctx.addInflight(2)
+
+    dispatchMessageEvent(ctx, SID, composedEndFrame(SID, [
+      { text: '排队消息 A', marker: UUID },
+      { text: '排队消息 B', marker: UUID_B },
+    ]))
+
+    // 其余条目不再等不到消费：两段各自按原 segments 入流（保号各传原 clientUuid）
+    expect(ctx.appendUser).toHaveBeenCalledTimes(2)
+    expect(ctx.appendUser).toHaveBeenNthCalledWith(1, SID, segsA, CLIENT_UUID)
+    expect(ctx.appendUser).toHaveBeenNthCalledWith(2, SID, segsB, CLIENT_UUID_B)
+    // 投影全转 delivered（修前仅尾标记条目转态，其余滞留至 TTL/下一帧快照覆盖）
+    expect(getDeliveryProjection(SID).map((e) => e.state)).toEqual(['delivered', 'delivered'])
+    // 批量确认扣减：命中 2 条 = 扣 2（每条乐观气泡挂 1）
+    expect(ctx.inflightOf()).toBe(0)
+  })
+
+  it('AC9: 全无段多标记帧（外来合批形态）→ 整帧剥标记文本降级入流一次，保号挂首个降级条目', () => {
+    replaceDeliveryProjection(SID, [entry(), entry({ clientUuid: CLIENT_UUID_B })])
+    const ctx = makeCtx()
+    ctx.addInflight(2)
+
+    dispatchMessageEvent(ctx, SID, composedEndFrame(SID, [
+      { text: '外来消息 A', marker: UUID },
+      { text: '外来消息 B', marker: UUID_B },
+    ]))
+
+    // 整帧文本涵盖全部条目内容，逐条目入流同一整帧文本会重复——按帧只入流一次。
+    // 剥净全部标记（DEFER_FLUSH_MARKER_RE_GLOBAL 全量剥除），标记原占位的换行保留
+    // （条目尾标记前的 \n + BATCH_SEP 前导 \n 叠加为三连换行），trimEnd 只收尾部
+    expect(ctx.appendUser).toHaveBeenCalledTimes(1)
+    expect(ctx.appendUser).toHaveBeenCalledWith(
+      SID,
+      [{ type: 'text', text: '外来消息 A\n\n\n---\n\n外来消息 B' }],
+      CLIENT_UUID,
+    )
+    expect(getDeliveryProjection(SID).map((e) => e.state)).toEqual(['delivered', 'delivered'])
+    expect(ctx.inflightOf()).toBe(0)
+  })
+
+  it('AC10: 防误配保留——多标记帧中粘贴形态标记不命中投影即跳过，命中的条目正常消费', () => {
+    const segsA: Segment[] = [{ type: 'text', text: '排队消息 A' }]
+    replaceDeliveryProjection(SID, [entry()])
+    captureMorphSegments(SID, CLIENT_UUID, segsA)
+    const ctx = makeCtx()
+    ctx.addInflight(1)
+
+    // 第二个标记（UUID_B）无对应投影条目 = 正文自带粘贴标记形态：跳过不误配
+    dispatchMessageEvent(ctx, SID, composedEndFrame(SID, [
+      { text: '排队消息 A', marker: UUID },
+      { text: '粘贴的尾巴', marker: UUID_B },
+    ]))
+
+    expect(ctx.appendUser).toHaveBeenCalledTimes(1)
+    expect(ctx.appendUser).toHaveBeenCalledWith(SID, segsA, CLIENT_UUID)
+    expect(getDeliveryProjection(SID).map((e) => e.state)).toEqual(['delivered'])
+    expect(ctx.inflightOf()).toBe(0)
+  })
+
+  it('AC11: 同帧重复同 id 标记拒重——只消费一次，不重复扣 inflight', () => {
+    replaceDeliveryProjection(SID, [entry()])
+    const ctx = makeCtx()
+    ctx.addInflight(1)
+
+    dispatchMessageEvent(ctx, SID, composedEndFrame(SID, [
+      { text: 'hi', marker: UUID },
+      { text: '再次提及', marker: UUID },
+    ]))
+
+    // 同 id 第二次出现不再命中（consumedIds 拒重）：无段 → 整帧文本降级一次
+    expect(ctx.appendUser).toHaveBeenCalledTimes(1)
+    expect(getDeliveryProjection(SID).map((e) => e.state)).toEqual(['delivered'])
+    expect(ctx.inflightOf()).toBe(0)
   })
 })
 

@@ -25,20 +25,22 @@ import { textToSegments, MSG_ID_TAG_RE } from '@taiji/shared'
 import type { PiMessageEntry, Segment } from '@taiji/shared'
 import type { MessageEffectContext } from '../effect-types'
 import type { DeliveryFrameEntry } from '../api-port'
-import { DEFER_FLUSH_MARKER_RE } from '../apply-entry-convert'
+import { DEFER_FLUSH_MARKER_RE_GLOBAL } from '../apply-entry-convert'
 import { isDevMode } from '../../../platform/dev-mode'
 
 /**
  * [u3b 契约桥] 回执标记提取：SSOT = @taiji/shared 的 MSG_ID_TAG_RE（投递身份标记正则，
  * 双形态 `u-<uuid>` / 裸 `<uuid>`，捕获组 2 = 裸 uuid——本文件原手写体已收敛进该 SSOT，
  * 与 runtime skill-notice-publisher 同源）。只服务送达回执匹配；与显示剥标记
- * DEFER_FLUSH_MARKER_RE 职责分离（其字符集结构性排除 u- 前缀，显示层只需裸形态），不改 SSOT。
+ * DEFER_FLUSH_MARKER_RE_GLOBAL 职责分离（其字符集结构性排除 u- 前缀，显示层只需裸形态），不改 SSOT。
  */
 
 /**
  * [R2-b04-2] 回执匹配用全局形态（由 shared SSOT 派生，不复制模式文本）：matchAll 取文本内
- * **最后一个**标记——内核标记恒追加在消息尾部，用户正文自带（粘贴）标记时首匹配会命中
- * 粘贴 id 而非本条投递身份（误配不命中投影 → 条目滞留 in-flight 至下一帧快照覆盖）。
+ * **全部**标记逐一消费（[dmg-r1-5] 整批口径，对齐 runtime confirmByMessageEnd 的全量提取
+ * ——splitComposed 放弃拆分时一帧携带多条目标记，只取尾标记会让其余条目 morph 段等不到
+ * 消费、TTL 过期丢弃，live 对话流缺已提交消息）。防误配由「命中未 delivered 投影条目才
+ * 消费」判定承接：用户正文自带（粘贴）标记不命中投影即跳过，误配无消费面。
  */
 const MSG_ID_TAG_RE_GLOBAL = new RegExp(MSG_ID_TAG_RE.source, `${MSG_ID_TAG_RE.flags}g`)
 
@@ -192,16 +194,27 @@ function extractUserContentText(entry: PiMessageEntry): string {
  * [u3b / D2① 泛化] message_end(user) 送达回执——内核裸标记 id 命中投影条目即送达事实
  * （C-data-08 修订方向：标记 id 精确匹配取代计数 FIFO/文本匹配，id 是身份不是内容）。
  *
+ * 提取口径：文本内**全部**标记逐一消费（[dmg-r1-5] 对齐 runtime confirmByMessageEnd
+ * session-delivery-registry.ts 的 extractMarkerIds 全量提取）——splitComposed 放弃拆分
+ * 的整批投递一帧携带多条目标记，只取尾标记会让其余条目 morph 段等不到消费、TTL 过期
+ * 丢弃（live 对话流缺已提交消息直到重开/切回由基线投影恢复）。防误配语义由「命中未
+ * delivered 投影条目才消费」判定承接（见 MSG_ID_TAG_RE_GLOBAL 注释）。
+ *
  * 命中处理（三分支，单一 owner = 内核投影）：
  * - ① morph 段存在（本地乐观气泡被 morph 移除过）→ 按原 segments 入流（非降级恢复）。
- * - ② 无 morph 段且非 direct 车道且 ref 中无同 id 气泡 → 纯文本降级入流：外来注入
- *   （session_manager send / plugin-service / 收养）与 runtime 重启 reattach 形态没有本地
- *   乐观气泡，其显示责任由本分支承接（前身 = 已退役的腿 2 includes 兜底，见下方
- *   [HISTORICAL] 注记）——文本按 reload 投影同规则剥标记 + trimEnd（同一正则同一变换，
- *   live ≡ reload 构造性成立）。direct 车道豁免：其气泡原位保留，入流会双插。
+ * - ② 无任何段恢复的帧里，无 morph 段且非 direct 车道且 ref 中无同 id 气泡的首个条目 →
+ *   整帧剥标记纯文本降级入流**一次**：外来注入（session_manager send / plugin-service /
+ *   收养）与 runtime 重启 reattach 形态没有本地乐观气泡，其显示责任由本分支承接（前身
+ *   = 已退役的腿 2 includes 兜底，见下方 [HISTORICAL] 注记）——文本按 reload 投影同
+ *   规则剥标记 + trimEnd（同一正则同一变换，live ≡ reload 构造性成立）。多标记帧整帧
+ *   文本涵盖全部条目内容，逐条目入流同一整帧文本会重复，故按帧只入流一次、保号挂首个
+ *   降级条目；已有段恢复的帧不再整帧文本入流（与已恢复段重复显示），其中无段条目
+ *   （外来/reattach 混批形态，三重低频）的显示由基线投影兜底。direct 车道豁免：其气泡
+ *   原位保留，入流会双插。
  * - ③ 其余（direct 气泡原位 / 已有同 id 气泡）→ 不动 ref（防双插）。
  * 共同收尾：投影转 delivered（幂等：已 delivered 命中即拒）+ inflight 占位回收（统一
- * submit 每条挂 1，回执即其确认帧）+ 返回 true（帧消费终止，调用方不再走 ② 计数兜底）。
+ * submit 每条挂 1，命中 N 条 = 批量确认扣 N，钳制幂等机制兜底外来条目的挂账缺席）+
+ * 返回 true（帧消费终止，调用方不再走 ② 计数兜底）。
  * 未命中返回 false（无标记 / 标记不命中投影——外来直发、帧缺失形态，落 ② 现状链）。
  *
  * [消息撤回 U8] 两分支入流均传 hit.clientUuid 保号：重建气泡沿用提交时 clientUuid
@@ -224,33 +237,63 @@ export function confirmKernelDeliveryOnMessageEnd(
 ): boolean {
   const text = extractUserContentText(entry)
   if (!text) return false
-  // [R2-b04-2] 取文本内最后一个标记（内核标记恒追加尾部，防用户正文自带标记首匹配误配）
-  const marker = [...text.matchAll(MSG_ID_TAG_RE_GLOBAL)].pop()
-  if (!marker) return false
-  const bareId = marker[2]!
-  // 双形态匹配（契约桥见 MSG_ID_TAG_RE 注释）：裸 uuid（期望形态）/ u-<uuid> 原文
+  const markers = [...text.matchAll(MSG_ID_TAG_RE_GLOBAL)]
+  if (markers.length === 0) return false
+  // 双形态匹配（契约桥见 MSG_ID_TAG_RE 注释）：裸 uuid（期望形态）/ u-<uuid> 原文。
+  // 同帧重复标记按已消费集合拒重（consumeDeliveryReceipt 出新对象不 mutate，局部 entries
+  // 引用的 state 判定不随消费更新，由 consumedIds 兜住同 id 双扣）。
   const entries = deliveryEntriesBySession.value.get(sid) ?? []
-  const hit = entries.find(
-    (e) => (e.clientUuid === bareId || e.clientUuid === `u-${bareId}`) && e.state !== 'delivered',
-  )
-  if (!hit) return false
-  const segments = consumeDeliveryReceipt(sid, hit.clientUuid)
-  // [R2-b04-3] 外来投递观测判定（须在 ② 入流前取——appendUser 会改变 hasLocalBubble 结果）：
-  // 无 morph 段且 ref 无同 id 气泡 = 本地未挂账的投递（外来注入 / reattach 形态）。
-  const isForeignReceipt = segments === undefined && !hasLocalBubble(ctx, sid, hit.clientUuid)
-  if (segments) {
+  const consumedIds = new Set<string>()
+  const hits: { hit: DeliveryFrameEntry; segments: Segment[] | undefined; foreign: boolean }[] = []
+  for (const marker of markers) {
+    const bareId = marker[2]!
+    const hit = entries.find(
+      (e) =>
+        (e.clientUuid === bareId || e.clientUuid === `u-${bareId}`) &&
+        e.state !== 'delivered' &&
+        !consumedIds.has(e.clientUuid),
+    )
+    if (!hit) continue
+    consumedIds.add(hit.clientUuid)
+    const segments = consumeDeliveryReceipt(sid, hit.clientUuid)
+    // [R2-b04-3] 外来投递观测判定（须在 ② 入流前取——appendUser 会改变 hasLocalBubble 结果）：
+    // 无 morph 段且 ref 无同 id 气泡 = 本地未挂账的投递（外来注入 / reattach 形态）。
+    hits.push({
+      hit,
+      segments,
+      foreign: segments === undefined && !hasLocalBubble(ctx, sid, hit.clientUuid),
+    })
+  }
+  if (hits.length === 0) return false
+  // 处置（收集后统一执行）：① 段恢复逐条目入流；② 整帧文本降级与段恢复同帧互斥（防
+  // 同帧重复入流），全无段帧只入流一次、保号挂首个降级条目。
+  let anySegments = false
+  for (const { hit, segments } of hits) {
+    if (!segments) continue
     // ① morph 段入流（气泡已移除的条目按原 segments 恢复为正常 user 气泡——overlay-only，
     // 不喂 reducer：transcript 权威已由调用方 applyEntryFrame 承担，appendUser 不写 sidecar）；
     // 保号传 hit.clientUuid（= 被移除乐观气泡的 id——morph key 同源），见函数头 [U8] 注释
     ctx.appendUser(sid, segments, hit.clientUuid)
-  } else if (hit.lane !== 'direct' && !hasLocalBubble(ctx, sid, hit.clientUuid)) {
-    // ② 无本地气泡的投递（外来注入 / reattach 恢复）：纯文本降级可见，不静默丢显示；
-    // 保号传 hit.clientUuid（内核条目 id——外来形态可能为裸 uuid，保号语义优先于形态）
-    ctx.appendUser(sid, textToSegments(text.replace(DEFER_FLUSH_MARKER_RE, '').trimEnd()), hit.clientUuid)
+    anySegments = true
   }
-  if (isForeignReceipt) logForeignReceiptDecrement(sid, hit)
-  // inflight 占位回收：统一 submit 的每条乐观气泡挂 1，本帧即其确认帧（② 不再重复扣）
-  ctx.decrementInflight(sid, 1)
+  if (!anySegments) {
+    const degradeTarget = hits.find(({ hit, foreign }) => hit.lane !== 'direct' && foreign)
+    if (degradeTarget) {
+      // ② 无本地气泡的投递（外来注入 / reattach 恢复）：纯文本降级可见，不静默丢显示；
+      // 保号传 hit.clientUuid（内核条目 id——外来形态可能为裸 uuid，保号语义优先于形态）
+      ctx.appendUser(
+        sid,
+        textToSegments(text.replace(DEFER_FLUSH_MARKER_RE_GLOBAL, '').trimEnd()),
+        degradeTarget.hit.clientUuid,
+      )
+    }
+  }
+  for (const { hit, foreign } of hits) {
+    if (foreign) logForeignReceiptDecrement(sid, hit)
+  }
+  // inflight 占位回收：统一 submit 的每条乐观气泡挂 1，命中 N 条 = 批量确认扣 N
+  // （钳制幂等机制兜底外来投递的挂账缺席；② 不再重复扣）
+  ctx.decrementInflight(sid, hits.length)
   return true
 }
 

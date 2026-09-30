@@ -43,18 +43,20 @@ import { isLooseRecord, isPlainRecord, normalizePiToolResult, truncateEntryToolO
  * user-delivery ①a 按 id 确认出队）。全文搜索（标记在 skill 展开块拼接 /
  * BeforeSend hook 改写后可能不在文本尾）。
  *
- * 消费方：① convertMessageBody user 投影剥标记（下方，live 帧 / reload 重放同点——显示
- * 层不暴露实现标记，且剥后基线文本 = confirmDelivery overlay 文本，mergeBaselineWithLive
- * 文本去重命中不双计）；② effects/user-delivery ①a 提取 id；③ renderer QueueBubble
- * 快照文本剥标记。三处同 import 本常量，禁复制字面量。
+ * 消费方（两处显示剥除，一律走下方全局派生形态 DEFER_FLUSH_MARKER_RE_GLOBAL，禁复制
+ * 字面量）：① convertMessageBody user 投影剥标记（下方，live 帧 / reload 重放同点——
+ * 显示层不暴露实现标记，且剥后基线文本 = confirmDelivery overlay 文本，
+ * mergeBaselineWithLive 文本去重命中不双计）；② effects/user-delivery 纯文本降级分支
+ * 的整帧剥标记入流。
  *
  * [MF-1-11 → msg-pipeline-debloat D5-1] 正则本体 = @taiji/shared 的
  * MSG_ID_TAG_BARE_RE 单份常量（uuid 段经 MSG_ID_UUID_SEGMENT 单点构造，捕获组 1 = 裸
  * uuid）；runtime entry-tree-builder 同 import 该常量，无双侧派生器与同步纪律。
- * 本别名仅为既有消费方 import 路径（core index / effects/user-delivery / renderer
- * QueueBubble）保持稳定。
  */
-export const DEFER_FLUSH_MARKER_RE = MSG_ID_TAG_BARE_RE
+export const DEFER_FLUSH_MARKER_RE_GLOBAL = new RegExp(
+  MSG_ID_TAG_BARE_RE.source,
+  `${MSG_ID_TAG_BARE_RE.flags}g`,
+)
 
 // ── user 消息 skill 标记反解析（D7 兜底通道，三链路共用 SSOT；R4 升级三形态）────────
 
@@ -392,7 +394,7 @@ export function convertMessageBody(
     // → live ≡ reload 构造性保持；剥后基线文本 = 条目原文 = confirmDelivery 的 appendUser
     // overlay 文本 → mergeBaselineWithLive 文本去重命中（不剥则带标记基线 vs 无标记 overlay
     // 失配，同一条消息双条显示）。skill 块解析在剥后进行——标记在文本尾附加，不影响块区间。
-    const deliveryText = acc.textContent.replace(DEFER_FLUSH_MARKER_RE, '').trimEnd()
+    const deliveryText = acc.textContent.replace(DEFER_FLUSH_MARKER_RE_GLOBAL, '').trimEnd()
     msg.content = parseSkillBlock(deliveryText) ?? textToSegments(deliveryText)
   }
   return msg
