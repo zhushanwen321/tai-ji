@@ -118,21 +118,18 @@
 - 防复发：`scripts/check-global-slot-keys.mjs`（字面量只允许出现在两处声明文件 + 前缀/唯一性校验）+ 约束 C-state-20 + pre-commit/CI 双接线 + fixture 单测 5 例。
 - 兼容性须知：改键不破坏跨进程语义（槽是运行时单例，重启即空），但 dev 热重载期间新旧代码各自成槽、需整进程重启收敛。
 
-### 2.7 靠 process.env 探针区分父/子进程角色（裁决 = 路 A 接通身份传递；落地契约已核实）
+### 2.7 靠 process.env 探针区分父/子进程角色（路 A 主体已接通，2026-09-30）
 
-- 原状：`session-lifecycle.ts`（appendSubagentIdentityEntry）以 `PI_SUBAGENT_SELF_RECORD_ID` 是否存在判主/子进程，并从 `PI_SUBAGENT_MODE` 等一组 env 读身份数据；core 三个读者同源——`record-access.ts:146`（子进程跳过孤儿恢复）、`session-baselines.ts:216`（ROOT_CWD）、`:312/:328`（FORK_DEPTH / 执行嵌套基线）。
-- 2026-09-30 用户裁决：**路 A**（重新接通身份传递，不退役递归可见性）。
-- 已核实事实（决定落地方案）：
-  1. 这组 env 在生产**当前无写入方**（SDK `env.ts:75-82` 自记「两键已无写入方」并把判据改到 `TAIJI_AGENT_SUBAGENT=1`；ext-guards `isSubagentProcess()` 已改用新标记）→ core 三个读者在现行引擎链上恒判「我是主进程」。
-  2. **不能用 SDK 的 `identityEnv`（`env.ts:82`，engine-host spawn 通道）单独解决**：引擎宿主是长驻进程（每窗口一个），而身份是 **per-run** 的（子进程自己的 recordId / depth 每 run 不同）——在宿主 spawn 时钉值只能得到进程级粗粒度值，SELF_RECORD_ID 这类必须每 run 传递。该通道保留但**不足以**承载本项（其文档里的「待另行裁决」即指此事）。
-  3. `ENGINE_ENV_DENY_LIST` 不含 `PI_SUBAGENT_*`，但**含** TAIJI_SUBAGENT_RELAY_* 两键；引擎侧对 deny 键的既有处置 = `spawn-runner.ts:186-191` **post-deny 显式写回**（relay SESSION_ID/RECORD_ID 先例，注释记有「经 extras 注入会被剥掉致退出码 13」的历史事故）——身份键若走 extras 同理会/可能被剥，应照该先例在 deny 终态之后写回。
-- 落地方案（四步，落地时逐条核对）：
-  1. **SDK 协议**：`packages/subagent-engine-sdk/src/protocol/methods.ts` 的 `RunContextParams`（:72）加 additive 可选 `identity?: { selfRecordId, rootSessionId, depth?, forkDepth?, rootCwd?, agent?, task?, slug?, mode?, startedAt?, parentRecordId?, worktree? }`；同批更新 C-proc-23 词表锁/契约闭合测试与 `docs/extensions/subagents/engine-development-guide.md`（其「更新触发」明列 RunContext 变更须同 commit）。
-  2. **core 组装**：`execution/engine/client/remote-engine.ts:600-615` 的 ctx 组装处（现有 additive 字段先例 `ctx.sessionRootId` / `task.cwd`）从 run/record 取身份写 `identity`；嵌套深度取 SDK `ExecutionNestingState`（`nesting-guard.ts`）。
-  3. **pi 引擎注入**：`pi-subagent-cli/src/server.ts` 的 `buildRunContext`（:285-340）→ `SpawnRunParams` 增 identity → `spawn-runner.ts:172-192` 的 `buildChildEnv` 在 `buildOutboundChildEnv` **之后**按 identity 写回 `PI_SUBAGENT_SELF_RECORD_ID` / `ROOT_SESSION_ID` / `DEPTH` / `FORK_DEPTH` / `ROOT_CWD` / `MODE` / `AGENT` / `TASK` / `SLUG` / `STARTED_AT` / `PARENT_RECORD_ID` / `WORKTREE`（key 常量单源放 core `execution/service/service-constants.ts` 或 SDK）。
-  4. **验收**：真机嵌套派发（父→子→孙）后核对 `/subagents` 树与子会话文件出现 `subagent-identity` 条目（session-reader 路径），并补「写入方 ↔ 读者同源」测试（engine 侧 env 断言 + core 读者单测）。
-- 替代路 B（正式退役递归可见性）已被用户否决，无需再论证。
-
+- 用户裁决：**路 A**（重新接通身份传递，不退役递归可见性）。
+- 已实现（2026-09-30）：
+  - 键名单源 = SDK `src/identity-env.ts` 的 `SUBAGENT_IDENTITY_ENV`（12 键 + 值语义注释）；core 的 `ENV_SELF_RECORD_ID` / `ENV_ROOT_SESSION_ID` / `ENV_DEPTH` / `ENV_ROOT_CWD` 与壳、引擎同取该表——写入方与读者键名不再可能各自漂移。
+  - 写入方 = pi 引擎 `spawn-runner.ts` 的 `applyIdentityEnvToChildEnv`（纯函数，可单测），在 `buildOutboundChildEnv` 的 **deny 终态之后**写回（relay 归属键同款先例）。值来源分层：`selfRecordId`/`agent`/`task` 取 run 参数；`rootSessionId` 参数优先回落引擎 env；`rootCwd` 引擎 env 优先回落 spawn cwd；`depth` = 引擎 env 深度 + 1；`forkDepth`/`worktree` 继承；`parentRecordId` = 引擎自身 `selfRecordId`；`mode` 继承、缺省 `background`。
+  - 关键否定结论（已核实并写进 SDK `env.ts` 注释与引擎开发指南）：**engine-host 的 `identityEnv` 通道不是本项的载体**——引擎宿主长驻（每窗口一个），而身份是 per-run 的（子进程自己的 recordId/depth 每 run 不同），宿主级钉值只能得到粗粒度值。
+  - 测试：引擎侧 `src/__tests__/identity-env.test.ts`（4 例：参数面/回落 / 嵌套链贯穿 / rootSessionId 回落与 worktree 声明 / 覆盖既有值）；引擎 26 文件 318 例绿、core 238 文件绿（唯一红为 `journal-tail` 的 fs.watch 负载敏感 flake，隔离跑 16/16 绿，与本次改动无关）、扩展 76 文件绿。
+  - 文档：`docs/extensions/subagents/engine-development-guide.md` §9 增「子代理身份 env」义务条目（该文档的更新触发含 env 变更）。
+- 遗留（不阻塞本项验收）：
+  1. `slug` / `startedAt` / 精确 `mode` 属 record 级字段，协议未携带 → 当前不写，壳读者回落（slug 可选 / startedAt 用 `Date.now()`）。要补齐需把 record 身份挂上 `RunContextParams`（additive），并同批更新 C-proc-23 词表锁。
+  2. 真机验收未跑：需嵌套派发（父→子→孙）后核对 `/subagents` 树与子会话文件出现 `subagent-identity` 条目、且 core 三个读者不再判「主进程」。真机命令见 AGENTS.md「extension 改动优先在本地 pi CLI 实测」。
 ### 2.8 决策记录两处并存（已修，防复发规则已立）
 
 - 状态：**已修**（2026-09-30）：包内 3 个 ADR 与 12 个历史设计文档已删除（仍有效的决策折入 `docs/adr/decisions.md` ADR-0091，git 可追溯；清单：resource-exposure / agentref-path / discovery-session-level、v2/v3/v4 与 workflow-one-shot 族、idle 侦查、dsh 对比、agent-ref-v3）。

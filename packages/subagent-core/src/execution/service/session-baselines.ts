@@ -36,6 +36,7 @@ import { UiRequestObservability } from "../ui/ui-request-observability.ts";
 // [R6/D-R3-2] ENV_SELF_RECORD_ID 因跨聚合消费（record-access）归位常量叶子文件，
 // 本聚合 initSession 消费改经 import（聚合→支撑文件方向合法）。
 import { ENV_SELF_RECORD_ID } from "./service-constants.ts";
+import { SUBAGENT_IDENTITY_ENV } from "@zhushanwen/subagent-engine-sdk";
 
 const logger = getLogger("subagents");
 
@@ -51,9 +52,10 @@ const logger = getLogger("subagents");
  *  迁入本聚合并 export——壳经 import 消费（壳→聚合正向合法），禁聚合→壳反向 import（D4）。
  *  [R6/D-R3-2] ENV_SELF_RECORD_ID 因 record-access 跨聚合消费归位 service-constants.ts
  *  （消费主体单一且在本聚合时留驻，跨聚合时迁叶子文件——消除 R5 台账合法边①）。 */
-export const ENV_ROOT_SESSION_ID = "PI_SUBAGENT_ROOT_SESSION_ID";
-export const ENV_DEPTH = "PI_SUBAGENT_DEPTH";
-export const ENV_ROOT_CWD = "PI_SUBAGENT_ROOT_CWD";
+/** [§2.7] 键名单源 = SDK `identity-env.ts`。 */
+export const ENV_ROOT_SESSION_ID = SUBAGENT_IDENTITY_ENV.rootSessionId;
+export const ENV_DEPTH = SUBAGENT_IDENTITY_ENV.depth;
+export const ENV_ROOT_CWD = SUBAGENT_IDENTITY_ENV.rootCwd;
 
 /** dispose 后注入的 stub UI 请求 handler。
  *
