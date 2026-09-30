@@ -58,10 +58,19 @@
 
 ## 2. 结构性 / 架构问题（需排期，多数走 tech-design 立项）
 
-### 2.1 双 `RunState` 同名异义（同一 run 域两个完全不同的类型）
+### 2.1 双 `RunState` 同名异义（已改名，2026-09-30）
 
 - `orchestration/models/run-state.ts:25`（status / reason / budget / calls / trace / errorLogs / error / scriptResult 执行快照形态，WorkflowRun 聚合持有）vs `orchestration/run-events.ts:613`（lifecycle 五态 + outcome 状态机两维形态，转移表与 fold 消费）。同包同词两义。头部注释「两半各对一半」（2026-09-30 核实）：`RunStore.save 触发持久化` 已失效（壳侧 save 是显式 no-op），`重启时从 JSONL 重新加载` 仍真但**残缺**——loadAll 重建时 `budget` 与 `errorLogs` 不恢复（重启后令牌 / 费用统计归零、诊断日志清空）；「callCache 保留」是错误归因（那是 worker 侧脚本的重放缓存，与重建无因果）。另：「旧形态是 v1 兼容层」只对状态轴成立，budget / calls / trace / errorLogs / scriptResult 是 TUI 的唯一活体数据面，整体当兼容层退役会拆掉 WorkflowsView 的数据源。修法：先做纯改名（如 `RunExecutionSnapshot` / `RunLifecycleState`）+ 注释回写；补齐 budget / errorLogs 重建属行为变更，需先裁决「重启后统计归零是否预期」。
 - 同族实例：`isProcessAlive` 在 pid-file.ts:174（三态，EPERM = 不确定）与 persistence/alive-store.ts:91（二态，EPERM = 保守判活）同名异义——警示注释已在 pid-file.ts:170-172；三态版**无任何外部 import**（只在 pid-file.ts 内用），实际无误用面，二态版被 worktree-reconcile / worktree-manager / session-file-gc 消费。`ModelCatalogEntry` 在 core（`{provider, id}`，`orchestration/model-catalog.ts:33`）与 SDK 协议（`{id, aliases?, canonicalRef?}`，`protocol/contract-types.ts:447`）同名不同形，两者之间无类型关联或转换函数（core 那份 extensions/ 零消费，SDK 那份被 `execution/engine/` 6 个文件消费）。
+
+
+- 状态：**改名与注释回写已完成**（2026-09-30）：
+  - `RunState`（执行快照，`models/run-state.ts`）→ **`RunExecutionSnapshot`**（消费面：`models/workflow-run.ts` + barrel；注释回写为「活体执行快照，状态轴权威源已归 record 流 fold；持久化 = record 事件流追加，壳侧 save 是 no-op；重启重建覆盖 status/reason/calls/trace 与 spec，budget 计数与 errorLogs 不重建」）。
+  - `RunState`（状态机两维，`run-events.ts`）→ **`RunLifecycleState`**，常量 `INITIAL_RUN_STATE` → `INITIAL_RUN_LIFECYCLE_STATE`（消费面：terminal-actions / run-registry / run-events 测试 / 注释）。
+  - 三态 `isProcessAlive`（`execution/engine/client/pid-file.ts`）→ **`probePidAliveness`**（与 `persistence/alive-store.ts` 的二态同名函数脱钩；两函数语义差异真实，刻意不合并，注释已写明）。
+  - core `ModelCatalogEntry`（`orchestration/model-catalog.ts`）→ **`PiRegistryModelEntry`**（与 SDK 引擎协议同名类型区分；engine 侧消费的仍是 SDK 类型，未受影响）。
+  - 全仓 `RunState` 零残留；core 236 文件 / 3617 用例绿，扩展 typecheck 绿。
+- 遗留（本条后半，未做）：**budget / errorLogs 重建补齐**——现状 = 壳侧 fold 与 core `resume-run` 重建面把 `budget` 归零、`errorLogs` 置空（四个归零点：`jsonl-run-store` fold、`resume-run.rebuildRunFromRecord`、终态条目补写、中断条目构造）。零介质近路 = 用 v2 终态条目已有的 `usedTokens`/`callCount` seed（`loadAll` 手上已有 settledEntries），顺带修两处硬编码 0；`errorLogs` 无任何持久面，需新增诊断事件（改介质，需 ADR）或明确接受重启即空。
 
 ### 2.2 run 生命周期状态判定散布（9 处以上）+ 展示层映射未归并（2026-09-30 核实修正）
 

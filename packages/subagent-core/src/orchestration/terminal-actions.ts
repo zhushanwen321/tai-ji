@@ -38,14 +38,14 @@ import {
   finalRunErrorCodeOf,
   foldRunEventFrames,
   IllegalTransitionError,
-  INITIAL_RUN_STATE,
+  INITIAL_RUN_LIFECYCLE_STATE,
   RUN_EVENT_TYPES,
   RUN_EVENT_JOURNAL_SUFFIX,
   transition,
   type RunErrorCode,
   type RunEventJournal,
   type RunOutcome,
-  type RunState,
+  type RunLifecycleState,
   type TransitionContext,
   type TransitionResult,
   type TransitionTrigger,
@@ -91,7 +91,7 @@ const JOURNAL_EVENT_TYPES: ReadonlySet<string> = new Set(RUN_EVENT_TYPES);
 const RUN_ARGS_SUMMARY_MAX_CHARS = 256;
 
 /** 本进程内 per-run 活体状态缓存（key = runId；terminal 即删）。 */
-const liveRunStates = new Map<string, RunState>();
+const liveRunStates = new Map<string, RunLifecycleState>();
 
 /** per-run 投递队列（串行化 dispatchRunTrigger——并发事件链的活体态读取必须串行，
  *  否则前一链 fold/引导挂起中、后链读到空 Map 各自补投造成状态分叉）。entry =
@@ -184,7 +184,7 @@ function resolveRunEventJournal(journalDir?: string): { dir: string; journal: Ru
 
 /** record 流 fold：scan + 逐事件 transition（不传 ctx——run-events.ts fold 契约；
  *  journalDir = dispatch 源携带的 per-call 目录，缺省模块锚）。 */
-async function foldRunState(runId: string, journalDir?: string): Promise<RunState> {
+async function foldRunState(runId: string, journalDir?: string): Promise<RunLifecycleState> {
   const { journal } = resolveRunEventJournal(journalDir);
   const events = await journal.scan(runId);
   return foldRunEventFrames(events, (err, lastType) => {
@@ -267,7 +267,7 @@ function journalEventOf(trigger: TransitionTrigger, journalDir?: string): Workfl
  * run-settled 帧载荷直取（ts 用帧信封打点）；cancel-requested 合成路径 ts 现钟
  * （信封打点归调用侧——与 journalEventOf 的合成打点同一时点语义）。
  */
-function settlementRecordOfTrigger(trigger: TransitionTrigger, next: RunState): RunSettlementRecord {
+function settlementRecordOfTrigger(trigger: TransitionTrigger, next: RunLifecycleState): RunSettlementRecord {
   if (trigger.type === "run-settled") {
     return {
       outcome: trigger.outcome,
@@ -287,7 +287,7 @@ function settlementRecordOfTrigger(trigger: TransitionTrigger, next: RunState): 
 
 async function appendTransition(
   run: RunDispatchSource,
-  state: RunState,
+  state: RunLifecycleState,
   trigger: TransitionTrigger,
   ctx?: TransitionContext,
   journalDir?: string,
@@ -350,7 +350,7 @@ async function appendTransition(
  */
 async function persistTerminalProjection(
   run: RunDispatchSource,
-  state: RunState,
+  state: RunLifecycleState,
   trigger: TransitionTrigger,
   dir: string,
   journalDir?: string,
@@ -518,7 +518,7 @@ export function dispatchRunCreated(run: WorkflowRun): Promise<TransitionResult> 
   // - 终局记录注册表已命中（终局后重复发射）→ 不 seed——队列任务 liveRunStates
   //   miss → fold record → terminal × run-created 表外 fail-fast。
   if (!liveRunStates.has(run.runId) && !settledRunRecords.has(run.runId)) {
-    liveRunStates.set(run.runId, INITIAL_RUN_STATE);
+    liveRunStates.set(run.runId, INITIAL_RUN_LIFECYCLE_STATE);
   }
   return dispatchRunTrigger(run, {
     type: "run-created",

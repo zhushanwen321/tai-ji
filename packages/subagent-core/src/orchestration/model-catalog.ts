@@ -29,15 +29,23 @@ import { stripThinkingSuffix } from "../shared/model-ref.ts";
 /** 报错信息中列出的可用模型上限（防超长错误信息；与 shared/model-ref 同量级口径）。 */
 const MODEL_LIST_LIMIT = 20;
 
-/** 目录条目（ModelRegistryLike.getAvailable() 元素的结构子集，duck-typed 可 mock）。 */
-export interface ModelCatalogEntry { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
+/**
+ * pi 注册表模型条目（`ModelRegistryLike.getAvailable()` 元素的结构子集，duck-typed
+ * 可 mock）。
+ *
+ * [§2.1 改名] 原名 `ModelCatalogEntry` 与 SDK 引擎协议里的 `ModelCatalogEntry`
+ *（`@zhushanwen/subagent-engine-sdk` 的 manifest/能力面载荷）同名异义：两者形状相近
+ * 但归属不同（本类型 = pi 侧注册表目录，SDK 类型 = 引擎声明面），同名会让读者误以为
+ * 同一契约。改为 `PiRegistryModelEntry` 后各自可检索。
+ */
+export interface PiRegistryModelEntry { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   provider: string;
   id: string;
 }
 
 /** 模型清单源的最小 duck 接口（ModelRegistryLike 结构兼容——getAvailable 只含已配鉴权模型）。 */
 export interface ModelCatalogSource { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
-  getAvailable(): ReadonlyArray<ModelCatalogEntry>;
+  getAvailable(): ReadonlyArray<PiRegistryModelEntry>;
 }
 
 /** 未命中分类（D8 分类修复指引）：查无（输入侧可修）vs provider 配置漂移（配置侧可修）。 */
@@ -102,7 +110,7 @@ function classifyMiss(
   input: string,
   provider: string,
   id: string,
-  available: ReadonlyArray<ModelCatalogEntry>,
+  available: ReadonlyArray<PiRegistryModelEntry>,
   source: string | undefined,
 ): ModelCatalogMiss {
   const prefix = source ? ` (${source})` : "";

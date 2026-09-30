@@ -254,7 +254,7 @@ export {
 // 消费 core 符号，不进 barrel 无法接线，H4 formatEmptyResourceList 同构先例）。
 export {
   assertModelInCatalog,
-  type ModelCatalogEntry,
+  type PiRegistryModelEntry,
   type ModelCatalogOptions,
   type ModelCatalogSource,
 } from "./orchestration/model-catalog.ts";
@@ -481,7 +481,7 @@ export type {
   WorkerHandlers,
   WorkerHost,
 } from "./orchestration/models/ports.ts";
-export type { RunState } from "./orchestration/models/run-state.ts";
+export type { RunExecutionSnapshot } from "./orchestration/models/run-state.ts";
 export { Trace } from "./orchestration/models/trace.ts";
 export { AgentCall } from "./orchestration/models/agent-call.ts";
 export { Budget } from "./orchestration/models/budget.ts";

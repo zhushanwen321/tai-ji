@@ -29,7 +29,7 @@ import {
   CONTROL_TRIGGER_TYPES,
   doneReasonToRunOutcome,
   foldRunEventCheckpoint,
-  INITIAL_RUN_STATE,
+  INITIAL_RUN_LIFECYCLE_STATE,
   RUN_EVENT_TYPES,
   RUN_TRANSITIONS,
   TRANSITION_OUTPUT_TYPES,
@@ -43,7 +43,7 @@ import {
   type RunEventType,
   type RunLifecycle,
   type RunOutcome,
-  type RunState,
+  type RunLifecycleState,
   type TransitionTrigger,
   type WorkflowRunEvent,
 } from "../run-events.ts";
@@ -507,12 +507,12 @@ const triggerSamples: Record<RunEventType | ControlTriggerType, TransitionTrigge
 };
 
 /** 构造某 lifecycle 的状态样本（terminal 带 outcome——真实终态形态）。 */
-function stateOf(lifecycle: RunLifecycle): RunState {
+function stateOf(lifecycle: RunLifecycle): RunLifecycleState {
   return lifecycle === "terminal" ? { lifecycle, outcome: "done" } : { lifecycle };
 }
 
 /** 表外转移断言：抛 IllegalTransitionError，且错误信息含当前态与事件名。 */
-function expectIllegalTransition(state: RunState, trigger: TransitionTrigger): void {
+function expectIllegalTransition(state: RunLifecycleState, trigger: TransitionTrigger): void {
   let caught: unknown;
   try {
     transition(state, trigger);
@@ -555,8 +555,8 @@ describe("状态词表（D5-1 → [D2] 四态 + interrupted 暂停态）", () =>
     ]);
   });
 
-  it("INITIAL_RUN_STATE = created 且无 outcome", () => {
-    expect(INITIAL_RUN_STATE).toEqual({ lifecycle: "created" });
+  it("INITIAL_RUN_LIFECYCLE_STATE = created 且无 outcome", () => {
+    expect(INITIAL_RUN_LIFECYCLE_STATE).toEqual({ lifecycle: "created" });
   });
 
   it("[D2] lifecycle 词表类型锁：RunLifecycle 恰为四态 + interrupted（暂停态回归的类型锚——增删任一成员本 Equal 断言编译红）", () => {
@@ -705,7 +705,7 @@ describe("终局与输出动作语义", () => {
   });
 
   it("run-settled 的 outcome 透传到终态（done / failed / cancelled / time_limited——[D2] 四值全贯通）", () => {
-    const settling: RunState = { lifecycle: "settling" };
+    const settling: RunLifecycleState = { lifecycle: "settling" };
     expect(transition(settling, runSettledCompleted).state).toEqual({
       lifecycle: "terminal",
       outcome: "done",
@@ -775,7 +775,7 @@ describe("终局与输出动作语义", () => {
       phaseSettled,
       runSettledCompleted,
     ];
-    let state = INITIAL_RUN_STATE;
+    let state = INITIAL_RUN_LIFECYCLE_STATE;
     for (const trigger of chain) {
       state = transition(state, trigger).state;
     }
@@ -785,7 +785,7 @@ describe("终局与输出动作语义", () => {
   it("cancel 路径 fold：record 里的合成 run-settled(cancelled) 把 running 直接收敛到 terminal", () => {
     // 控制事件不进 record——fold 只见 run-created / agent-started / run-settled
     const chain: TransitionTrigger[] = [runCreated, agentStarted, runSettledCancelled];
-    let state = INITIAL_RUN_STATE;
+    let state = INITIAL_RUN_LIFECYCLE_STATE;
     for (const trigger of chain) {
       state = transition(state, trigger).state;
     }
@@ -800,7 +800,7 @@ describe("终局与输出动作语义", () => {
       runResumed,
       runSettledCompleted,
     ];
-    let state = INITIAL_RUN_STATE;
+    let state = INITIAL_RUN_LIFECYCLE_STATE;
     for (const trigger of chain) {
       state = transition(state, trigger).state;
     }
@@ -821,7 +821,7 @@ describe("transition 纯函数边界", () => {
       throw new Error("transition 不得取随机数");
     };
     try {
-      transition(INITIAL_RUN_STATE, runCreated);
+      transition(INITIAL_RUN_LIFECYCLE_STATE, runCreated);
       transition({ lifecycle: "running" }, agentSettledFailed, { enterSettling: true });
       transition({ lifecycle: "running" }, triggerSamples["cancel-requested"]);
       // fail-fast 路径同样不碰时钟

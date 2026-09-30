@@ -628,19 +628,19 @@ export type RunLifecycle = (typeof ALL_RUN_LIFECYCLES)[number];
  * run 状态机状态（两维正交的扁平形态）。
  *
  * 为什么扁平而非嵌套判别联合（`{ lifecycle: "terminal"; outcome } | 其余`）：
- * 「outcome 仅 terminal 出现」是机器不变量，transition 是 RunState 的唯一构造
+ * 「outcome 仅 terminal 出现」是机器不变量，transition 是 RunLifecycleState 的唯一构造
  * 点（表行声明 terminalOutcome 或从 run-settled 事件取），消费侧读 outcome 前
  * 只需一处 `lifecycle === "terminal"` 判定；嵌套形态把同一不变量复制进类型系统，
  * 全部消费点多一层 narrow，收益不抵摩擦。
  */
-export interface RunState { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
+export interface RunLifecycleState { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   lifecycle: RunLifecycle;
   /** 终局形态——仅 lifecycle === "terminal" 时有值（transition 构造性保证）。 */
   outcome?: RunOutcome;
 }
 
 /** 状态机初始态（run 创建点与 journal fold 起点共用）。 */
-export const INITIAL_RUN_STATE: RunState = { lifecycle: "created" };
+export const INITIAL_RUN_LIFECYCLE_STATE: RunLifecycleState = { lifecycle: "created" };
 
 // ── 控制事件词表（驱动转移、不属 journal 词表——D5 第 2 层注记）─
 
@@ -722,7 +722,7 @@ export interface TransitionRule { // oe-exempt:20260929:framework:workflow/recor
    * next === "terminal" 时的终局形态来源：固定值（cancel → cancelled）或缺省 =
    * 从 run-settled 事件载荷取（event.outcome）。
    * 非 terminal 行恒缺省。abandon 路径的 errorCode（interrupted_abandoned）
-   * 是 manifest 写入内容而非状态——由收编原语消费方附着，不进 RunState
+   * 是 manifest 写入内容而非状态——由收编原语消费方附着，不进 RunLifecycleState
    * （词表边界见 RunErrorCode 注释）。
    */
   terminalOutcome?: RunOutcome;
@@ -791,7 +791,7 @@ export interface TransitionContext { // oe-exempt:20260929:framework:workflow/re
 
 /** 转移结果：次态 + 应发生的输出动作（声明性标签，执行归调用侧）。 */
 export interface TransitionResult { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
-  state: RunState;
+  state: RunLifecycleState;
   outputs: readonly TransitionOutput[];
 }
 
@@ -846,7 +846,7 @@ function resolveTerminalOutcome(rule: TransitionRule, trigger: TransitionTrigger
  * 错误信息可操作）。
  */
 export function transition(
-  state: RunState,
+  state: RunLifecycleState,
   trigger: TransitionTrigger,
   ctx?: TransitionContext,
 ): TransitionResult {
@@ -869,7 +869,7 @@ export function transition(
     );
   }
   const rule = candidates[0];
-  const nextState: RunState = { lifecycle: rule.next };
+  const nextState: RunLifecycleState = { lifecycle: rule.next };
   if (rule.next === "terminal") {
     nextState.outcome = resolveTerminalOutcome(rule, trigger);
   }
@@ -1013,13 +1013,13 @@ export interface RunJournalFold { // oe-exempt:20260929:framework:workflow/recor
  * foldRunEventFrames 只取 state，骨架半边零成本闲置。
  */
 export interface RunEventFoldCheckpoint extends RunJournalFold { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
-  state: RunState;
+  state: RunLifecycleState;
   lastSeq: number;
 }
 
 /** fold 起点（全量 fold 缺省初值；增量 fold 以既有 checkpoint 传入）。 */
 export const INITIAL_RUN_EVENT_FOLD: RunEventFoldCheckpoint = {
-  state: INITIAL_RUN_STATE,
+  state: INITIAL_RUN_LIFECYCLE_STATE,
   lastSeq: 0,
   created: undefined,
   asks: new Map(),
@@ -1283,7 +1283,7 @@ export function foldRunEventCheckpoint(
 export function foldRunEventFrames(
   events: readonly WorkflowRunEvent[],
   onBrokenFrame: (err: unknown, lastType: string) => void,
-): RunState {
+): RunLifecycleState {
   return foldRunEventCheckpoint(events, onBrokenFrame).state;
 }
 

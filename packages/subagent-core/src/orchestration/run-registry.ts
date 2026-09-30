@@ -29,11 +29,11 @@
 import { getLogger } from "../core/logger.ts";
 import { readRunTerminalManifest } from "../execution/persistence/manifest-store.ts";
 import {
-  INITIAL_RUN_STATE,
+  INITIAL_RUN_LIFECYCLE_STATE,
   foldRunEventFrames,
   type RunErrorCode,
   type RunEventJournal,
-  type RunState,
+  type RunLifecycleState,
   type WorkflowRunEvent,
 } from "./run-events.ts";
 // [D15] 中断编排入口（run-interrupted 转移事件 + 中断条目补写的统一写点）与
@@ -65,8 +65,8 @@ export type RunRegistryPhase =
 /** run 注册表投影（单一推导点，无独立状态存储）。 */
 export interface RunRegistryProjection { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   runId: string;
-  /** D5 两维状态（fold 终帧；missing 时 = INITIAL_RUN_STATE）。 */
-  state: RunState;
+  /** D5 两维状态（fold 终帧；missing 时 = INITIAL_RUN_LIFECYCLE_STATE）。 */
+  state: RunLifecycleState;
   /** 投影判读（见 {@link RunRegistryPhase}）。 */
   phase: RunRegistryPhase;
   /** 事件流最后活动时刻（record 末帧 ts；空事件流 = undefined）。 */
@@ -93,7 +93,7 @@ export interface RunProjectionOptions { // oe-exempt:20260929:framework:workflow
  * 循环体单源 run-events.ts 的 foldRunEventFrames（与 terminal-actions.foldRunState
  * 共享同一坏帧失效模式：保守停在最近一致态）；本侧只持注册表域的 warn 文案与 logger。
  */
-function foldEvents(events: readonly WorkflowRunEvent[], runId: string): RunState {
+function foldEvents(events: readonly WorkflowRunEvent[], runId: string): RunLifecycleState {
   return foldRunEventFrames(events, (err, lastType) => {
     logger.warn(
       `run registry fold stopped at a broken frame (runId=${runId}, lastType=${lastType}): ${
@@ -127,7 +127,7 @@ export function projectRunRegistryEvents(
   if (events.length === 0) {
     return {
       runId,
-      state: INITIAL_RUN_STATE,
+      state: INITIAL_RUN_LIFECYCLE_STATE,
       phase: active ? "active" : "missing",
       ...(lastEventAt !== undefined ? { lastEventAt } : {}),
     };

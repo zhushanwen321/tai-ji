@@ -5,7 +5,7 @@
  * 架构核心——所有字段变更通过方法（transition/assignRuntime/releaseRuntime/
  * replaceRuntime），engine 模块不直接打洞（AC-3）。
  *
- * 层归属：Engine。依赖 RunRuntime（具体类，D-12 允许）+ RunSpec/RunState + 类型。
+ * 层归属：Engine。依赖 RunRuntime（具体类，D-12 允许）+ RunSpec/RunExecutionSnapshot + 类型。
  *
  * 关键不变式（必须全测）：
  * I1: state.status === "running" ⟺ runtime !== undefined
@@ -28,14 +28,14 @@
 
 import { RunRuntime } from "./run-runtime.ts";
 import type { RunSpec } from "./run-spec.ts";
-import type { RunState } from "./run-state.ts";
+import type { RunExecutionSnapshot } from "./run-state.ts";
 import type { DoneReason, RunStatus } from "./types.ts";
 import { canRunTransition } from "./types.ts";
 
 // ── WorkflowRunMeta ──────────────────────────────────────────
 
 /**
- * 聚合根级 meta（非 RunState 的一部分，不随 trace 持久化到 worker JSONL）。
+ * 聚合根级 meta（非 RunExecutionSnapshot 的一部分，不随 trace 持久化到 worker JSONL）。
  *
  * workerErrorCount/scriptErrorCount 跨 runtime 存活（C.5：worker-message-pump 重试计数载体），
  * 因为 retry 会 replaceRuntime，但计数是 run 级而非 runtime 级。
@@ -64,7 +64,7 @@ export interface WorkflowRunMeta {
 export class WorkflowRun {
   readonly runId: string;
   readonly spec: RunSpec;
-  state: RunState;
+  state: RunExecutionSnapshot;
   runtime?: RunRuntime;
   meta: WorkflowRunMeta;
 
@@ -81,7 +81,7 @@ export class WorkflowRun {
   constructor(
     runId: string,
     spec: RunSpec,
-    state: RunState,
+    state: RunExecutionSnapshot,
     meta: WorkflowRunMeta,
   ) {
     this.runId = runId;
@@ -104,7 +104,7 @@ export class WorkflowRun {
  *
  * @throws I2 违反（done 快照缺 reason 仍是 bug，不可跳过）
  */
-  static reconstruct(runId: string, spec: RunSpec, state: RunState, meta: WorkflowRunMeta): WorkflowRun {
+  static reconstruct(runId: string, spec: RunSpec, state: RunExecutionSnapshot, meta: WorkflowRunMeta): WorkflowRun {
     return new WorkflowRun(runId, spec, state, meta);
   }
 
