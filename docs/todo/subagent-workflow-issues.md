@@ -65,7 +65,7 @@
 
 | # | 议题 | 终态方向（已裁决） | 阶段 |
 |---|---|---|---|
-| D1 | §2.3 双向依赖终态形态 | **整体拆边**：终局编排（terminal-actions 一族）归 orchestration；execution 只暴露端口（persistence / engine / ui / worktree），反向边收窄为「execution → orchestration 端口接口」 | ✅① 盘清并分类（见下「D1 拆边分类」）；② 逐类收窄，每类一个 commit（进行中：Class A 词汇下沉已落、Class B 已收口、Class C 已落 script-lint / model-catalog / scanRunEvents〔第 3 步〕/ member-reuse-pool〔第 4 步〕，余 `run-registry.adoptInterruptedRun` 与 `terminal-actions.settleWorkflowRecord`〔须随终局编排搬迁〕）；③ 终局编排搬迁 |
+| D1 | §2.3 双向依赖终态形态 | **整体拆边**：终局编排（terminal-actions 一族）归 orchestration；execution 只暴露端口（persistence / engine / ui / worktree），反向边收窄为「execution → orchestration 端口接口」 | ✅① 盘清并分类（见下「D1 拆边分类」）；② 逐类收窄，每类一个 commit（进行中：Class A 词汇下沉已落、Class B 已收口、Class C 已落 script-lint / model-catalog / scanRunEvents〔第 3 步〕/ member-reuse-pool〔第 4 步〕/ settle 单点下沉 + 启动收编上移〔第 5 步〕，生产代码反向值边清零）；③ 终局编排搬迁 |
 
 **D1 拆边分类（2026-09-30 实测：execution→orchestration 共 40 文件 / 值导入 48 条 / 类型导入 31 条，其中测试文件占大半）**
 
@@ -137,6 +137,8 @@
 
 - 6 个 orchestration 文件 import execution（其中 3 个是值导入；terminal-actions.ts:26-28 一次值 import 5 处），**20 个** execution 文件 import orchestration（登记原写 19；其中 10 个是值导入，例如 execution/service/workflow-dispatch.ts:33-43 值导入 model-catalog / terminal-actions）。终局编排的归属在两域间摇摆。
 - 状态（2026-09-30 收）：本条裁决范围 = **先解类型环 + 加 core 分层/循环检查**，两项均已落地（类型环解于 commit 65440e5b1 前一批；包级值依赖循环检查 `scripts/check-subagent-core-value-cycles.mjs` + 5 例单测 + C-data-26 + pre-commit/CI 双接线见 commit 65440e5b1）。
+- 拆边进展（D1 Class C 第 4 步，2026-09-30）：`member-reuse-pool` 整体下沉 `execution/service/member-reuse-pool.ts`——依赖面核查 = 可下沉（值依赖只有 `core/logger` 叶子，类型依赖只有 run-events 的 `WorkflowRunEvent`〔事件载荷接口按 B1 先例留原位作类型导入〕，本体是 record 流 fold + runId 分区内存表，零编排状态机语义）；`orchestration/member-reuse-pool.ts` 保留同名 re-export 使编排侧消费面（terminal-actions / worker-message-pump / 测试）零改动，`service/workflow-dispatch` 改直连新址——该条 execution → orchestration 值边消失。实测剩余反向值边 = `run-registry.adoptInterruptedRun`、`terminal-actions.settleWorkflowRecord`（两个消费点）+ 1 条 `registry-reconcile` 内联测试文件；值依赖环检查零环。
+- 拆边进展（D1 Class C 第 5 步，2026-09-30）：两族「依赖面核查 → 最小正确做法」——① `settleWorkflowRecord` 判为**记录级原语**（函数体只有 `trySettleLegacyClosed(record, closedReason)` 这个两态 CAS + 委托注入的 `finalizeRecord`，不读 run 生命周期 / 转移表 / 通知面），整体下沉 `execution/persistence/execution-record.ts`；`service/record-lifecycle` 与 `service/run-orchestration` 两个消费点改直连持久化层——两条 `execution → orchestration` 值边消失。② `adoptInterruptedRun` 判为**编排动作**（读 fold 状态机 + `RUN_TRANSITIONS` 表外 fail-fast + D15 `interruptRun` 中断入口 + 中断条目补写），留在 orchestration；唯一调用点 `startup-sweep` 整体上移 `orchestration/startup-sweep.ts`（纯搬迁，barrel 面 / 签名 / runtime 挂点零改动），依赖方向恢复 orchestration → execution（只剩枚举 store 同向消费）——该条值边消失。实测生产代码反向值边 = 0（仅剩 1 条 `registry-reconcile` 内联测试文件，`__tests__` 面按分类 D 不计）；值依赖环检查零环、core tsc 与消费面测试绿。
 - **待裁决：拆边是否做（我的建议 = 不做，理由如下）**：终局编排整体入 orchestration / 反向边收窄到端口，涉及 20 个 execution → orchestration 导入面（其中 10 个值导入）与 terminal-actions 的归属迁移，是独立架构项；本条要的「止血 + 机器拦截」已达成，拆边的目标方向记录在下一行备后续设计取用，不构成本分支未完成项。
 - 修法方向：先加 core 版循环依赖机器检查止血，再谈拆边（终局编排整体入 orchestration、execution 只暴露 persistence 端口，或反向边收窄到端口）。
 

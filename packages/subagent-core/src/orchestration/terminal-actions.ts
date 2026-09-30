@@ -72,8 +72,6 @@ import {
 import type { AgentCall } from "./models/agent-call.ts";
 import { canonicalJsonStringify } from "./canonical-json.ts";
 import { toErrorMessage } from "../core/error-message.ts";
-import { trySettleLegacyClosed } from "../execution/persistence/execution-record.ts";
-import type { AgentResult as ExecutionAgentResult, ExecutionRecord } from "../execution/domain/record-model.ts";
 import type {
   AgentCallOpts,
   AgentResult,
@@ -1300,21 +1298,10 @@ function appendWorkflowRecordSettledEntry(
   }
 }
 
-// ── settle 链收口（execution service 直写点删除后的单点，P1b-1） ─────────────
+// ── settle 链收口 ────────────────────────────────────────────────────────
+//
+// [D1 拆边 Class C] settleWorkflowRecord 已下沉 `execution/persistence/execution-record.ts`
+// （记录级原语：CAS + 委托注入的 finalizeRecord，零编排语义）——execution 两个消费点
+// 直连持久化层，本模块不再被反向值导入；本文件保留的「终局编排」面 = finalizeRun /
+// interruptRun / dispatchRunTrigger。
 
-/** settleWorkflowRecord 的既有写入面注入（finalizeRecord 归 RecordLifecycle 显式接口，
- *  经调用方闭包回指）。 */
-export interface WorkflowRecordSettleExec { // oe-exempt:20260929:framework:record settle exec contract per design D15
-  finalizeRecord: (result: ExecutionAgentResult, closedReason: "gc" | "cancelled") => Promise<void>;
-}
-
-export async function settleWorkflowRecord(
-  record: ExecutionRecord,
-  result: ExecutionAgentResult,
-  closedReason: "gc" | "cancelled",
-  exec: WorkflowRecordSettleExec,
-): Promise<void> {
-  if (trySettleLegacyClosed(record, closedReason)) {
-    await exec.finalizeRecord(result, closedReason);
-  }
-}

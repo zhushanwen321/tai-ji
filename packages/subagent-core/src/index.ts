@@ -580,7 +580,9 @@ export { createPiHostRunEnumeration } from "./execution/assembly/pi-host-run-sto
 // 后的替代实装——枚举 + 逐 run 收编 + 事件流静止宽限窗 + 失败语义 + 注入日志
 // 通道；决策登记见 docs/adr/decisions.md 启动扫描条目）。消费方 = runtime main()
 // 挂点（registerRuntimeInstance 之后、service 构造段之前，先于任何 pi spawn）。
-export { startupSweep } from "./execution/assembly/startup-sweep.ts";
+// [D1 拆边 Class C] 实现已上移 orchestration/（收编是编排动作，execution 不再
+// 反向依赖 run-registry）；barrel 面与签名不变。
+export { startupSweep } from "./orchestration/startup-sweep.ts";
 
 // ── workflow-record entry 契约（词表/guard 收敛单源）──────────
 // customType / entry schema 版本 / v1 判定分类：壳 jsonl-run-store（写点 +
