@@ -49,7 +49,8 @@ const apiMock = vi.hoisted(() => ({
   })),
   streamSubscribe: vi.fn((): (() => void) => () => {}),
   // composer-bash-execute: landing 态 bash 首发 → useChat.sendBash → chatApi.bash
-  chatBash: vi.fn((): Promise<void> => Promise.resolve()),
+  // 回执契约（dmg-r1-2）：默认 = 已执行并收口
+  chatBash: vi.fn((): Promise<{ status: 'settled' }> => Promise.resolve({ status: 'settled' })),
   chatAbortBash: vi.fn((): Promise<void> => Promise.resolve()),
 }))
 

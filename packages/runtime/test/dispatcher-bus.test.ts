@@ -202,17 +202,20 @@ describe('message-dispatcher bus integration', () => {
 
   // ── sendBash paths ──
 
-  it('sendBash ensureActive fail → bus.publish(message.error)', async () => {
+  it('sendBash ensureActive fail → bus.publish(message.error) + 回执 rejected（未执行，不 throw）', async () => {
     const { dispatcher, messageBus, svc } = makeMocks()
     svc.ensureActive = vi.fn(async () => { throw new Error('restore failed') })
-    await expect(dispatcher.sendBash('s1', 'ls')).rejects.toThrow('restore failed')
+    // dmg-r1-2：restore 失败 = 未执行 → rejected 回执（不再 throw——throw 走 error envelope
+    // 会丢执行状态，消费方只能保守丢草稿）
+    const result = await dispatcher.sendBash('s1', 'ls')
+    expect(result).toEqual({ status: 'rejected', error: 'Failed to restore session: restore failed' })
     expect(messageBus.publish).toHaveBeenCalledWith('s1', expect.objectContaining({ type: 'message.error' }))
   })
 
   it('sendBash busy → bus.publish(send.rejected)', async () => {
     const { dispatcher, messageBus } = makeMocks({ isBashRunning: true })
     const result = await dispatcher.sendBash('s1', 'ls')
-    expect(result.blocked).toBe(true)
+    expect(result.status).toBe('rejected') // 未执行（busy 预检）
     expect(messageBus.publish).toHaveBeenCalledWith('s1', expect.objectContaining({ type: 'send.rejected' }))
   })
 
@@ -244,7 +247,8 @@ describe('message-dispatcher bus integration', () => {
     const { dispatcher, messageBus, bashFn } = makeMocks()
     bashFn.mockRejectedValue(new Error('bash failed'))
     const result = await dispatcher.sendBash('s1', 'bad-cmd')
-    expect(result.blocked).toBe(true)
+    expect(result.status).toBe('settled') // 已执行并收口（失败终态已广播）
+    expect(result.error).toContain('bash failed')
     // Should have both bashResult and message.error
     const types = messageBus.publish.mock.calls.map((c: any[]) => c[1].type)
     expect(types).toContain('message.bashResult')

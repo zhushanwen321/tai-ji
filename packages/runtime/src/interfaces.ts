@@ -185,10 +185,14 @@ export interface ISessionService {
   /**
    * 直接执行 bash 命令（pi bash RPC，不经 LLM turn）。
    *
-   * 返回语义与 sendMessage 对称：{ blocked: true, rejected?: true } 表示预检拒绝或执行失败。
+   * 返回 bash 投递回执（执行状态的权威判定，dmg-r1-2）：
+   * status='started' = 已开跑未收口（超时置孤儿仍在执行）/'settled' = 已执行并收口
+   * （成功或失败终态已广播，失败原因在 error）/'rejected' = 未执行（busy 预检 / 空命令 /
+   * restore 失败）。transport 层把它翻译进 message.status reply，消费方据此决定是否恢复
+   * `!command` 草稿（不依赖推送帧是否到达）。
    * excludeFromContext 透传给 pi bash RPC（控制是否进 LLM 上下文）。
    */
-  sendBash(sessionId: string, command: string, excludeFromContext?: boolean): Promise<{ blocked: boolean; rejected?: boolean }>
+  sendBash(sessionId: string, command: string, excludeFromContext?: boolean): Promise<{ status: 'started' | 'settled' | 'rejected'; error?: string }>
   /**
    * 取消进行中的 bash 执行（pi abort_bash）。
    *

@@ -44,7 +44,7 @@ import type { DeliveryIntent } from '@zhushanwen/session-delivery'
 import type { SendPromptReason } from '@taiji/shared'
 import { AbortLiveness } from './abort-liveness.js'
 import type { AbortSource } from './abort-liveness.js'
-import { BashDispatcher } from './bash-dispatcher.js'
+import { BashDispatcher, type InternalBashDispatchReceipt } from './bash-dispatcher.js'
 
 // abort 阶梯协作类（test-infra-source-simplify T5 抽离）：三级阶梯 + 防重入 + 处置竞态
 // 独立单元在 abort-liveness.ts，本模块持实例并委托；resetAbortLivenessForTest re-export
@@ -67,6 +67,21 @@ export { resetAbortLivenessForTest } from './abort-liveness.js'
  */
 const REQUIRE_COMMAND_RETRY_INTERVAL_MS = 500
 const REQUIRE_COMMAND_RETRY_ATTEMPTS = 6
+
+/**
+ * bash 投递回执的 services 层内部类型（翻译层标准做法）：字段与 shared 的
+ * BashDispatchReceipt 逐字段一致，transport 层（session-message-handler.handleMessageBash）
+ * 1:1 翻译进 message.status 回执。
+ *
+ * status 语义（消费方判定「命令是否已执行」的权威依据）：
+ * - started = 已开跑未收口（如 bash 等待超时置孤儿，仍在执行）；
+ * - settled = 已执行并收口（成功或失败终态已广播）；
+ * - rejected = 未执行（busy 预检拒绝 / 空命令不变式 / restore 失败）。
+ */
+interface InternalBashDispatchReceipt {
+  status: 'started' | 'settled' | 'rejected'
+  error?: string
+}
 
 /**
  * sendSystemCommand 的判别结果（消息撤回 D1/D8）：编排按 kind 映射错误码——
@@ -574,7 +589,7 @@ export class MessageDispatcher {
     sessionId: string,
     command: string,
     excludeFromContext?: boolean,
-  ): Promise<{ blocked: boolean; rejected?: boolean }> {
+  ): Promise<InternalBashDispatchReceipt> {
     return this.bash.sendBash(sessionId, command, excludeFromContext)
   }
 

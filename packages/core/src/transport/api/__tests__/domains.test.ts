@@ -34,6 +34,7 @@ vi.mock('../../ws-client', () => ({
 
 import * as btw from '../domains/btw'
 import * as chat from '../domains/chat'
+import { notDeliveredError, transportUnavailableError } from '../../errors'
 import * as composer from '../domains/composer'
 import * as config from '../domains/config'
 import * as extension from '../domains/extension'
@@ -122,6 +123,18 @@ describe('chat 域 RPC 封装', () => {
     expect(mockCommand.mock.calls[1][1]).toEqual({ sessionId: 's1', command: 'ls', excludeFromContext: true })
     // 钉字面毫秒值（BASH_RPC_TIMEOUT_MS 3_600_000 + RENDERER_RPC_MARGIN_MS 60_000），同上防镜像互证
     expect(mockCommand.mock.calls[1][2]).toBe(3_660_000)
+  })
+
+  it('bash 回执契约（dmg-r1-2）：回执透传；未送达错误翻译为 rejected 回执；其余 reject 原样抛出', async () => {
+    // 回执透传（status 携带执行状态——消费方判定是否恢复草稿的权威依据）
+    mockCommand.mockResolvedValueOnce({ status: 'settled' })
+    await expect(chat.bash('s1', 'ls')).resolves.toEqual({ status: 'settled' })
+    // 消息未送达 runtime（可证明未执行）→ 翻译为 rejected 回执（消费方恢复草稿安全）
+    mockCommand.mockRejectedValueOnce(notDeliveredError('transport unavailable (ws not open)'))
+    await expect(chat.bash('s1', 'ls')).resolves.toEqual({ status: 'rejected', error: 'transport unavailable (ws not open)' })
+    // 回执不可达（断连 rejectAll 等同 code 错误：命令可能已执行）→ 原样抛出，消费方保守处置
+    mockCommand.mockRejectedValueOnce(transportUnavailableError('disconnected'))
+    await expect(chat.bash('s1', 'ls')).rejects.toMatchObject({ code: 'disconnected' })
   })
 
   it('abortBash 走 message.abortBash', async () => {

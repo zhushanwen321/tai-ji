@@ -2311,7 +2311,8 @@ export interface ServerMessageMapBase {
   // status 是动作结果字面量（sent/rejected/steered/queued/aborted/staged/unstaged/committed/switched/branch_created），
   // CL10 决策不收窄死字面量，统一 string（ack 型 domain register<void> 不读 status 值）。
   // 见 session-message-handler.ts:175/180/186/198/211 + git-message-handler.ts:65/74/87/96/105。
-  'message.status': { sessionId?: string; status: string }
+  // error（message.bash 回执专用）：执行失败原因短文案，随 BashDispatchReceipt 携带（其余 ack 不带）。
+  'message.status': { sessionId?: string; status: string; error?: string }
   // extension.discovered：installDir/installGit 的成功 reply（extension-message-handler.ts:162/176 reply { tempDir, candidates }）。
   // candidates 是发现的扩展候选列表（runtime ExtensionInfo[]，与 extension.ts ExtensionDiscoveredPayload 同构）。
   'extension.discovered': { tempDir: string; candidates: ExtensionInfo[] }
@@ -2579,6 +2580,26 @@ export type ServerMessageUnion = {
 }[ServerMessageType]
 
 /**
+ * message.bash 投递回执（bash 投递可靠性契约）——「命令是否已执行」的权威判定载体。
+ *
+ * 消费方（useChat.sendBash）据 status 决定是否恢复 `!command` 草稿，不依赖推送帧是否到达：
+ * 帧（bashStart/bashResult）是可丢弃的呈现信号，帧丢失不得导致「未执行」误判（误判会触发
+ * 草稿恢复 → 用户重发 → 命令双执行）。回执不可达（断连 / 超时收不到 reply）时消费方按
+ * 「可能已执行」保守处置。
+ */
+export interface BashDispatchReceipt {
+  /**
+   * started = 命令已开跑未收口（如 bash 等待超时置孤儿，仍在执行，结果经 bashResult 广播 /
+   *   重开 session 可见）；
+   * settled = 命令已执行并收口（成功或失败终态已广播）；
+   * rejected = 命令未执行（busy 预检拒绝 / 空命令不变式 / restore 失败 / 消息未送达 runtime）。
+   */
+  status: 'started' | 'settled' | 'rejected'
+  /** 执行失败原因短文案（toast 用；成功或未执行时缺省——未执行的用户反馈由各自广播承担） */
+  error?: string
+}
+
+/**
  * # ReplyPayloadMap —— RPC request → reply payload 一级映射（方案C 精简版）。
  *
  * key = RPC 型 ClientMessageType（runtime 有成功 reply 的请求）。
@@ -2775,10 +2796,11 @@ export interface ReplyPayloadMap {
   'git.stage': void               // reply message.status
   'git.unstage': void             // reply message.status
   'message.abort': void           // reply message.status
-  // message.bash / message.abortBash：reply message.status（sent/rejected/aborted ack）。
-  // bash 是 fire-and-forget 型——实际结果经 message.bashStart/bashResult 广播通道推回
-  //（abortBash 的兜底终态走 message.bashAborted，不走 reply）。
-  'message.bash': void             // reply message.status
+  // message.bash / message.abortBash：reply message.status。
+  // bash 实际输出经 message.bashStart/bashResult 广播通道推回（不走 reply）；reply 回执只携带
+  // 执行状态（BashDispatchReceipt）——它是「命令是否已执行」的权威判定，消费方据它决定是否
+  // 恢复 !command 草稿，不再依赖推送帧是否到达（帧丢失不再致误判双执行）。
+  'message.bash': BashDispatchReceipt // reply message.status（status/error 字段按本契约）
   'message.abortBash': void        // reply message.status
   'message.send': void            // reply message.status
   'model.switch': ServerMessageMap['model.switched'] // reply model.switched（回执修型 U6：transport 层在

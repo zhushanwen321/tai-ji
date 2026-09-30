@@ -16,6 +16,10 @@ export default {
   revokeNavFailed: '撤回未完成，请重试',
   revokePiReclaimed: '会话进程已回收，恢复失败请重试',
   revokeWorkflowRunning: '后台任务运行中，完成或停止后再撤回',
+
+  // 回执不可达（断连/超时收不到 reply）：命令可能已执行——不得说「失败」（会诱导重发双执行），
+  // 恢复动作 = 先看对话流确认后再决定是否重跑
+  bashOutcomeUnknown: '命令状态未知：可能已开始执行，请先查看对话流确认后再决定是否重跑（{msg}）',
   // `@` 定向消息（U2b）：空文本挡 + RPC 失败（错误可读，S8 恢复动作 = 重试 / 重新 @ 选择）
   subagentDirectiveEmpty: '定向消息内容为空，请输入发送给 subagent 的内容',
   subagentDirectiveFailed: '定向消息发送失败：{msg}',

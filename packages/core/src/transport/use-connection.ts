@@ -34,7 +34,7 @@ import {
 } from '../coordination/route-inbound'
 import { resubscribeAll } from '../coordination/subscription-state'
 import * as pendingApi from './api/pending'
-import { transportUnavailableError } from './errors'
+import { transportUnavailableError, notDeliveredError } from './errors'
 import { BASE_PORT, DEV_PORT_OFFSET } from '@taiji/shared'
 
 // ── 端口契约（§10.2 D-1：renderer 装配点注入实现） ─────────────────
@@ -322,11 +322,13 @@ export function useConnection() {
     // 消息在 auth 失败 / 断连清队时永无 reply，若不在此 reject，pending 要等 request 层
     // 65s sweep 才收口。错误构造走 transport/errors 工厂单点（code='disconnected' 供调用方
     // 识别传输断开类失败）；无 id 消息（非 RPC 型，如 flush 前 close 的 notify）无 pending 可收，跳过。
+    // 未送达标记（notDelivered）：清队消息没抵达 runtime 消息处理链，可证明未执行——与
+    // 断连 rejectAll（可能已送达）区分，消费方据它走「可证明未执行」路径。
     if (!removeQueueDropListener) {
       removeQueueDropListener = onQueueDrop((msgs) => {
         for (const msg of msgs) {
           if (typeof msg.id !== 'string') continue
-          pendingApi.reject(msg.id, transportUnavailableError(ports.t('connection.disconnectedError')))
+          pendingApi.reject(msg.id, notDeliveredError(ports.t('connection.disconnectedError')))
         }
       })
     }

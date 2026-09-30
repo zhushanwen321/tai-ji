@@ -25,6 +25,7 @@ import { segmentsToText, textToSegments } from '@taiji/shared'
 import type { Message, Segment, ServerMessage } from '@taiji/shared'
 import { createChatStore } from '../store'
 import { createUseChat, resetChatModuleStateForTest } from '../useChat'
+import { getExecutingBash as getExecutingBashForTest } from '../bash-effects'
 import { provideDevMode, __resetDevModeForTesting } from '../../../platform/dev-mode'
 import type { UseChatDeps } from '../useChat'
 import { getDeliveryProjectionRef, replaceDeliveryProjection, resetDeliveryProjectionForTest } from '../effects/user-delivery'
@@ -73,7 +74,8 @@ function makeFixture(): Fixture {
     subagentAction: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(undefined),
     compact: vi.fn().mockResolvedValue(undefined),
-    bash: vi.fn().mockResolvedValue(undefined),
+    // bash 回执契约（dmg-r1-2）：默认 = 已执行并收口（BashDispatchReceipt settled）
+    bash: vi.fn().mockResolvedValue({ status: 'settled' }),
     abortBash: vi.fn().mockResolvedValue(undefined),
     getHistory: vi.fn().mockResolvedValue({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }),
     streamSubscribe: vi.fn((sid: string, h: (m: ServerMessage) => void) => {
@@ -777,13 +779,17 @@ describe('subagent.directive 广播消费', () => {
 
 // ── sendBash toast 抑制（msg-pipeline-debloat D4-2 分类码路由）────────────────
 //
-// 判别式：error envelope 携带 runtime 分类码 'message_blocked'（bash handler 对 blocked
-// 失败落的码，错误气泡已广播）→ 抑制 toast；transport 级（pending 超时 / 断连，机械码
-// 或无码）→ 保守 toast 兜底（错误可见性优先）。
-describe('sendBash toast 抑制（D4-2 分类码：message_blocked→抑制 / 无码→兜底）', () => {
-  it('error envelope 携带分类码 message_blocked → 抑制 bashFailed toast，错误气泡是权威面', async () => {
+// 极性（[消息投递可靠性 A-bash] 契约修订后）：投递判定（true/false）只看 RPC 回执
+// （BashDispatchReceipt status），bashResult 帧观测计数只作 toast 抑制提示——
+// ① 本次窗口终态帧已渲染 → 抑制失败 toast（气泡终态是权威呈现面）；
+// ② 终态未渲染 → toast 是唯一提示，不抑制；
+// ③ 回执不可达（reject 无回执：断连 rejectAll / backstop 超时）→ 保守返回 true
+//    （命令可能已执行，恢复 !command 会双执行）+「状态未知」诚实 toast（不得说「失败」，
+//    那会诱导用户重发）；可证明未执行（回执 rejected）才返回 false 交调用方恢复草稿。
+describe('sendBash ①b toast 抑制（D2 极性：终态已渲染→抑制 / 其余→不抑制）', () => {
+  it('终态帧先于回执到达（executingBash 为空）→ 抑制失败 toast，气泡终态是权威面', async () => {
     const f = makeFixture()
-    // bash RPC 挂起：手动控制 reject 时机（模拟 runtime 先广播合成终态帧、后回 error envelope）
+    // bash RPC 挂起：手动控制 reject 时机（模拟 runtime 先广播合成终态帧、后回执不可达）
     let rejectBash: (e: unknown) => void = () => {}
     f.chatApi.bash.mockImplementation(
       () => new Promise((_resolve, reject) => { rejectBash = reject }),
@@ -796,14 +802,15 @@ describe('sendBash toast 抑制（D4-2 分类码：message_blocked→抑制 / �
       command: 'sleep 3700', output: '命令执行超过 1 小时，已停止等待……', exitCode: null,
       cancelled: false, truncated: false, excludeFromContext: false, timestamp: 1724000000001,
     }))
-    // error envelope（blocked → 分类码 message_blocked + 错误气泡已广播）此时刻达
-    rejectBash(Object.assign(new Error('Bash execution failed'), { code: 'message_blocked' }))
-    await sending
+    expect(getExecutingBashForTest('b1')).toBeUndefined()
+    // 回执不可达（无回执可判）此时刻达
+    rejectBash(new Error('Bash execution failed'))
+    expect(await sending).toBe(true) // 终态已呈现 = 已被消费，调用方不得恢复 !command
     expect(f.toast.error).not.toHaveBeenCalled()
     f.dispose()
   })
 
-  it('pending 超时 reject（机械码 timeout = runtime 呈现未发生）→ toast 是唯一提示', async () => {
+  it('回执不可达且终态帧未到达（bashStart 在场 = env backstop 先到形态）→ 不抑制，toast 是唯一提示', async () => {
     const f = makeFixture()
     let rejectBash: (e: unknown) => void = () => {}
     f.chatApi.bash.mockImplementation(
@@ -812,19 +819,48 @@ describe('sendBash toast 抑制（D4-2 分类码：message_blocked→抑制 / �
     const sending = f.useChat.sendBash('b2', 'sleep 3700', false)
     // bashStart 到达（命令确实在 runtime 执行中），bashResult 未到（runtime 3600s 未到点）
     f.emit('b2', msg('b2', 'message.bashStart', { command: 'sleep 3700', excludeFromContext: false, timestamp: 1724000000000 }))
-    // renderer backstop（3660s 或中间态 65s）先 reject（pending 机械码 timeout）
-    rejectBash(Object.assign(new Error('request timeout after 3660000ms'), { code: 'timeout' }))
-    await sending
+    expect(getExecutingBashForTest('b2')).toBeDefined()
+    // renderer backstop（3660s 或中间态 65s）先 reject
+    rejectBash(new Error('request timeout after 3660000ms'))
+    expect(await sending).toBe(true) // 已开跑 → 保守 true（恢复 !command 会双执行）
     expect(f.toast.error).toHaveBeenCalledTimes(1)
     expect(f.toast.error).toHaveBeenCalledWith(expect.stringContaining('request timeout after 3660000ms'))
     f.dispose()
   })
 
-  it('无分类码 reject（WS 断连 rejectAll 形态）→ 保守回退 toast 兜底（契约边界）', async () => {
+  it('可证明未执行（回执 rejected：消息未送达 runtime）→ toast 可见 + 返回 false（原 deviations 登记偏差随契约清除）', async () => {
     const f = makeFixture()
-    f.chatApi.bash.mockRejectedValue(new Error('transport unavailable (ws not open)'))
-    await f.useChat.sendBash('b3', 'echo hi', false)
+    // 端口层把「消息未送达 runtime」的传输失败翻译为 rejected 回执（可证明未执行）
+    f.chatApi.bash.mockResolvedValue({ status: 'rejected', error: 'transport unavailable (ws not open)' })
+    const ok = await f.useChat.sendBash('b3', 'echo hi', false)
+    // 原偏差登记（「无终态可呈现 → 抑制」）= !command 静默丢失面，随 [消息投递可靠性
+    // A-bash] 契约清除：与 send catch 同款——toast 可见 + false 交调用方恢复草稿；
+    // ①b 抑制仅限「本次窗口终态帧已渲染」形态（见上方极性三分）。
     expect(f.toast.error).toHaveBeenCalledTimes(1)
+    f.dispose()
+  })
+
+  it('回执不可达且无任何帧（断连 rejectAll 形态：命令可能已执行）→ 保守返回 true + 状态未知 toast（dmg-r1-2 双执行回归防护）', async () => {
+    const f = makeFixture()
+    // 断连 rejectAll：RPC 已送达 runtime 与否不可知——旧三分类会误入「从未开跑」返回 false
+    // → 调用方恢复 !command 草稿 → 用户按「失败」提示重发即命令双执行
+    f.chatApi.bash.mockRejectedValue(new Error('connection disconnected'))
+    const ok = await f.useChat.sendBash('b4', 'rm -rf build', false)
+    expect(ok).toBe(true) // 保守按已执行处理：不恢复草稿 = 不给双执行开门
+    expect(getExecutingBashForTest('b4')).toBeUndefined() // 无帧证据也不改判定（帧只是提示）
+    // 诚实措辞：状态未知（不得是「失败」措辞诱导重发），含原始错误供排障
+    expect(f.toast.error).toHaveBeenCalledTimes(1)
+    expect(f.toast.error).toHaveBeenCalledWith(expect.stringContaining('composable.bashOutcomeUnknown'))
+    expect(f.toast.error).toHaveBeenCalledWith(expect.stringContaining('connection disconnected'))
+    f.dispose()
+  })
+
+  it('回执 started（bash 等待超时置孤儿仍在跑）→ 返回 true 不恢复草稿', async () => {
+    const f = makeFixture()
+    f.chatApi.bash.mockResolvedValue({ status: 'started', error: 'RPC command "bash" timed out after 3600000ms' })
+    const ok = await f.useChat.sendBash('b5', 'sleep 9999', false)
+    expect(ok).toBe(true)
+    expect(f.toast.error).toHaveBeenCalledTimes(1) // 失败原因可见提示（无终态帧可呈现）
     f.dispose()
   })
 })
@@ -1168,6 +1204,76 @@ describe('[U5] useChat.revokeMessage（统一撤回编排）', () => {
     f.chatApi.getHistory.mockResolvedValueOnce({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })
     await f.useChat.revokeMessage('sr8', 'entry-6')
     expect(f.restoreDraft).not.toHaveBeenCalled()
+    f.dispose()
+  })
+})
+
+// ── 消息投递可靠性：bash 投递回执（验收⑦）──
+describe('消息投递可靠性：bash 投递回执（验收⑦a-⑦d）', () => {
+
+  it('验收⑦a bash 可证明未执行（回执 rejected，无任何帧）→ 返回 false + 无悬空标记 + toast 可见', async () => {
+    const f = makeFixture()
+    // 回执契约（dmg-r1-2）：「真失败且未执行」的形态 = 回执 rejected（消息未送达 runtime /
+    // runtime 拒绝），由回执状态判定——不再以「无任何帧」推断（帧丢失会误判致双执行）
+    f.chatApi.bash.mockResolvedValueOnce({ status: 'rejected', error: 'WS断' })
+
+    const ok = await f.useChat.sendBash('bf1', 'ls -la', false)
+
+    expect(ok).toBe(false) // 可证明未执行 → 调用方恢复 !command 草稿（安全，不会双执行）
+    // 无悬空标记：executingBash 从未置位（瞬时行/气泡全由帧驱动，bash 无乐观面）、
+    // inflight 恒 0（不挂占位）、pendingSend 不置（无主 agent turn）
+    expect(getExecutingBashForTest('bf1')).toBeUndefined()
+    expect(f.chatStore.getInflight('bf1')).toBe(0)
+    expect(f.chatStore.isPendingSend('bf1')).toBe(false)
+    // 错误可见（不静默——原实现此形态误入 toast 抑制分支 → !command 静默丢失）
+    expect(f.toast.error).toHaveBeenCalledTimes(1)
+    f.dispose()
+  })
+
+  it('验收⑦b 终态帧已渲染后 RPC 再败 → 返回 true（已呈现终态=已被消费）+ toast 抑制不变（①b 回归）', async () => {
+    const f = makeFixture()
+    let rejectBash: (e: unknown) => void = () => {}
+    f.chatApi.bash.mockImplementation(() => new Promise((_resolve, reject) => { rejectBash = reject }))
+    const sending = f.useChat.sendBash('bf2', 'sleep 3700', false)
+    f.emit('bf2', msg('bf2', 'message.bashStart', { command: 'sleep 3700', excludeFromContext: false, timestamp: 1724000000000 }))
+    f.emit('bf2', msg('bf2', 'message.bashResult', {
+      command: 'sleep 3700', output: '命令执行超过 1 小时，已停止等待……', exitCode: null,
+      cancelled: false, truncated: false, excludeFromContext: false, timestamp: 1724000000001,
+    }))
+    rejectBash(new Error('Bash execution failed'))
+
+    // 终态帧 = 用户可见恢复锚 → true（调用方恢复 !command 会与终态气泡双份）
+    expect(await sending).toBe(true)
+    expect(f.toast.error).not.toHaveBeenCalled() // ①b toast 抑制极性不变（气泡终态是权威呈现面）
+    f.dispose()
+  })
+
+  it('验收⑦c bash 正常投递 → 返回 true（回归）', async () => {
+    const f = makeFixture()
+
+    const ok = await f.useChat.sendBash('bf3', 'git status', false)
+
+    expect(ok).toBe(true)
+    expect(f.chatApi.bash).toHaveBeenCalledWith('bf3', 'git status', false)
+    expect(f.toast.error).not.toHaveBeenCalled()
+    f.dispose()
+  })
+
+  it('验收⑦d bashStart 在场、终态未到（backstop 先 reject）→ 返回 true（已投递，恢复会双执行）+ toast 不抑制', async () => {
+    const f = makeFixture()
+    let rejectBash: (e: unknown) => void = () => {}
+    f.chatApi.bash.mockImplementation(() => new Promise((_resolve, reject) => { rejectBash = reject }))
+    const sending = f.useChat.sendBash('bf4', 'sleep 3700', false)
+    f.emit('bf4', msg('bf4', 'message.bashStart', { command: 'sleep 3700', excludeFromContext: false, timestamp: 1724000000000 }))
+    rejectBash(new Error('request timeout after 3660000ms'))
+
+    // 命令已开跑（瞬时执行行=可见恢复锚 + 迟到 bashResult 照常入流）→ true（恢复会双执行）
+    expect(await sending).toBe(true)
+    expect(getExecutingBashForTest('bf4')).toBeDefined() // 执行中瞬时态保持（非悬空——真实运行中）
+    expect(f.toast.error).toHaveBeenCalledTimes(1) // 唯一提示，不抑制（D5 先例极性不变）
+    // 收尾：哨兵帧（command:'' + cancelled:true，abortBash 兜底广播形态）清 executingBash，
+    // 防 bash-effects 模块级 Map 残留泄漏到后续用例
+    f.emit('bf4', msg('bf4', 'message.bashResult', { command: '', output: '', exitCode: null, cancelled: true, truncated: false, excludeFromContext: false, timestamp: 1724000000002 }))
     f.dispose()
   })
 })

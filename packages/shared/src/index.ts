@@ -3,6 +3,7 @@ export type {
   SetProviderData,
   ServerMessageType, ServerMessage, ServerMessageMap, ServerMessageMapBase, ServerMessageUnion,
   ReplyPayloadMap,
+  BashDispatchReceipt,
   BatchDeleteResult,
   RenameMode,
   UiLocale,

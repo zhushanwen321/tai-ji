@@ -15,12 +15,14 @@ import type {
   Message,
   Segment,
   ServerMessageUnion,
+  BashDispatchReceipt,
 } from '@taiji/shared'
 import {
   BASH_RPC_TIMEOUT_MS,
   COMPACT_RPC_TIMEOUT_MS,
   RENDERER_RPC_MARGIN_MS,
 } from '@taiji/shared'
+import { isNotDeliveredError } from '../../errors'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 import { command as sendCommand } from '../request'
 import * as events from '../events'
@@ -187,27 +189,41 @@ export function abort(sessionId: string): Promise<void> {
  * `!`/`!!` 前缀输入的 shell 文本原样透传 pi bash RPC，结果经 message.bashStart/
  * message.bashResult 广播回对话流（不走 segment 提取 / segmentsToPrompt）。
  *
+ * 返回 BashDispatchReceipt（bash 投递可靠性契约）：reply 回执携带执行状态
+ * （started/settled/rejected），消费方据它判定「命令是否已执行」——不依赖推送帧是否到达。
+ * 「消息未送达 runtime」的传输失败在此翻译为 rejected 回执（可证明未执行，与 runtime
+ * 拒绝同构）；其余 reject（断连 rejectAll / backstop 超时 / pending 驱逐）= 已送出但
+ * 回执不可达，原样抛出，消费方按「可能已执行」保守处置（防草稿恢复致命令双执行）。
+ *
  * 超时 = BASH_RPC_TIMEOUT_MS + RENDERER_RPC_MARGIN_MS（1h + 60s = 3660s，语义化取值，
  * timeout-slow-flow-wallclock D5）：校准链「renderer = runtime 第一刀（rpc-client
  * BASH_RPC_TIMEOUT_MS）+ 余量」，双端引用同一 shared 常量编译期对齐——结构保证默认
  * 配置下 renderer 恒不先于 runtime 判死，`!` 长命令（65s 存量误报 / 300s 前科）
  * 不再被 renderer backstop 误杀。不变量仅默认配置成立：env 逃生门
  * TAIJI_RUNTIME_BASH_RPC_TIMEOUT_MS 把 runtime 调成 >3660s 或 0（不限时）时，本 3660s
- * backstop 先到为失败 toast——已知接受（D5 不变量收窄）。
+ * backstop 先到即回执不可达——消费方保守按已执行处理（已知接受，D5 不变量收窄）。
  *
  * excludeFromContext 为 undefined 时只传 {sessionId, command}（与 send 的 images 空数组
  * 归一模式对称，避免 runtime 收到无意义的 excludeFromContext:false 键）。
  */
-export function bash(
+export async function bash(
   sessionId: string,
   command: string,
   excludeFromContext?: boolean,
-): Promise<void> {
-  return sendCommand(
-    'message.bash',
-    excludeFromContext !== undefined ? { sessionId, command, excludeFromContext } : { sessionId, command },
-    BASH_RPC_TIMEOUT_MS + RENDERER_RPC_MARGIN_MS,
-  )
+): Promise<BashDispatchReceipt> {
+  try {
+    return await sendCommand(
+      'message.bash',
+      excludeFromContext !== undefined ? { sessionId, command, excludeFromContext } : { sessionId, command },
+      BASH_RPC_TIMEOUT_MS + RENDERER_RPC_MARGIN_MS,
+    )
+  } catch (e) {
+    if (isNotDeliveredError(e)) {
+      // 可证明请求没离机/没抵达 runtime 处理链 → 未执行，翻译为 rejected 回执
+      return { status: 'rejected', error: e.message }
+    }
+    throw e
+  }
 }
 
 /** 取消进行中的 bash 执行（调 pi abort_bash） */

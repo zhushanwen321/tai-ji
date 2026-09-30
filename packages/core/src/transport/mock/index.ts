@@ -25,6 +25,7 @@
  */
 import type {
   Message, ModelInfo, ServerMessage, ServerMessageMap, ServerMessageUnion, SessionSummary, SessionGroup, ProviderInfo, BuiltinProviderTemplate,
+  BashDispatchReceipt,
   SkillInfo, AgentInfo, PluginInfo, SetProviderData,
   SkillDirConfig, FileNode, RecommendedExtension, SubagentRecord, WorkflowRunRecord,
   SystemPromptConfig,
@@ -933,7 +934,9 @@ const chatImpl = {
   // 让开发者能看到 loading 态（spinner + 取消按钮）。
   // 不模拟真实 shell 输出（与 send 的 mock 策略一致——只驱动 UI 状态机，不验证业务逻辑）。
   // happy path：普通命令 → exitCode:0 + '(mock) <command>'（保留原有行为，不破坏）。
-  async bash(sessionId: string, command: string, excludeFromContext?: boolean): Promise<void> {
+  // 回执（bash 投递可靠性契约）：mock 全分支都「已执行并收口」→ settled（与 real 轨
+  // ChatApiPort.bash 同契约）。
+  async bash(sessionId: string, command: string, excludeFromContext?: boolean): Promise<BashDispatchReceipt> {
     await sleep(TIMING.ack)
     emit(sessionId, {
       type: 'message.bashStart',
@@ -955,6 +958,7 @@ const chatImpl = {
         timestamp: Date.now(),
       },
     })
+    return { status: 'settled' }
   },
 
   async abortBash(sessionId: string): Promise<void> {

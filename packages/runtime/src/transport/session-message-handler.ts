@@ -993,19 +993,20 @@ export class SessionMessageHandler {
   }
 
   private async handleMessageBash(msg: Extract<ClientMessage, { type: 'message.bash' }>, ws: WsType): Promise<void> {
-    // 与 message.send 对称：调 dispatcher.sendBash → 按 result.rejected/blocked 走 ack 路径。
-    // rejected（预检拒绝）：send.rejected 已广播，reply message.status{rejected} 让 pending 干净 resolve。
-    // blocked（执行失败）：message.error 已广播（错误气泡），走 error envelope 让 pending.reject。
-    // 正常：reply message.status{sent}。实际 bash 结果经 message.bashStart/bashResult 广播通道推回（fire-and-forget）。
+    // 与 message.send 对称：调 dispatcher.sendBash → 回执携带执行状态（bash 投递可靠性契约）。
+    // 回执是「命令是否已执行」的权威判定（started/settled/rejected + 可选失败原因 error），
+    // 消费方（useChat.sendBash）据它决定是否恢复 !command 草稿——不依赖推送帧是否到达
+    // （帧丢失不再致「未执行」误判 → 草稿恢复 → 命令双执行）。
+    // 失败不再走 error envelope（error envelope 会让 pending.reject，消费方拿不到执行状态）：
+    // 失败原因随回执 error 携带；对话流呈现继续由 message.bashStart/bashResult/message.error
+    // 广播（dispatcher 各收口点）承担。实际 bash 输出经广播通道推回（fire-and-forget）。
     const { sessionId, command, excludeFromContext } = msg.payload
     const result = await this.ctx.sessionService.sendBash(sessionId, command, excludeFromContext)
-    if (result.rejected) {
-      return this.ctx.reply(ws, msg.id, 'message.status', { sessionId, status: 'rejected' })
-    }
-    if (result.blocked) {
-      return this.ctx.sendError(ws, MESSAGE_BLOCKED_CODE, 'Bash execution failed', msg.id, { sessionId })
-    }
-    return this.ctx.reply(ws, msg.id, 'message.status', { sessionId, status: 'sent' })
+    return this.ctx.reply(ws, msg.id, 'message.status', {
+      sessionId,
+      status: result.status,
+      ...(result.error !== undefined ? { error: result.error } : {}),
+    })
   }
 
   private async handleMessageAbortBash(msg: Extract<ClientMessage, { type: 'message.abortBash' }>, ws: WsType): Promise<void> {

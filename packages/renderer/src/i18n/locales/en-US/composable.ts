@@ -16,6 +16,10 @@ export default {
   revokeNavFailed: 'Revoke incomplete — please retry',
   revokePiReclaimed: 'Session process was reclaimed and could not be restored — please retry',
   revokeWorkflowRunning: 'Background task running — finish or stop it before revoking',
+
+  // Receipt unreachable (disconnect / timeout): the command may have started — never say
+  // "failed" (invites a re-run = double execution); recovery = check the conversation first.
+  bashOutcomeUnknown: 'Bash command state unknown: it may have started. Check the conversation before running it again ({msg})',
   // `@` directive messages (U2b): empty-text guard + RPC failure (readable error, S8)
   subagentDirectiveEmpty: 'Directive message is empty, please type content for the subagent',
   subagentDirectiveFailed: 'Failed to send directive message: {msg}',

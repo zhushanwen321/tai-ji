@@ -11,7 +11,7 @@
  * getHistory 返回类型用内联结构（{ messages; truncated; loadedTurns; totalTurnsEstimate }），
  * 不依赖 chat 域的 HistoryResult（保持 core 平台无关）。
  */
-import type { DeliveryFrameEntry, DeliverySubmitReply, DeliveryCancelReply, Message, Segment, SegmentsMetadataEntry, ServerMessageUnion, SessionRevokeMessageReply } from '@taiji/shared'
+import type { DeliveryFrameEntry, DeliverySubmitReply, DeliveryCancelReply, Message, Segment, SegmentsMetadataEntry, ServerMessageUnion, SessionRevokeMessageReply, BashDispatchReceipt } from '@taiji/shared'
 
 // delivery DTO 具名类型（投递所有权内核 D5，u-contracts 契约）：shared 根入口已收编
 // （u3a 落地），本文件 re-export 供域内消费方沿用既有 import 路径（./api-port）。
@@ -84,8 +84,16 @@ export interface ChatApiPort {
   abort(sessionId: string): Promise<void>
   /** 压缩上下文（session.compact）*/
   compact(sessionId: string, customInstructions?: string): Promise<void>
-  /** 直接执行 bash 命令（message.bash，不经 LLM turn）*/
-  bash(sessionId: string, command: string, excludeFromContext: boolean): Promise<void>
+  /**
+   * 直接执行 bash 命令（message.bash，不经 LLM turn）。
+   *
+   * 返回 BashDispatchReceipt（RPC 回执携带执行状态，bash 投递可靠性契约）：
+   * status 是「命令是否已执行」的权威判定——'started'/'settled' = 已执行（消费方不得
+   * 恢复 `!command` 草稿，恢复后用户重发即命令双执行）；'rejected' = 未执行（恢复草稿
+   * 安全）。回执不可达（断连 rejectAll / backstop 超时收不到 reply）时本方法 reject——
+   * 此时命令可能已执行，消费方必须保守按已执行处置。
+   */
+  bash(sessionId: string, command: string, excludeFromContext: boolean): Promise<BashDispatchReceipt>
   /** 取消进行中的 bash（message.abortBash）*/
   abortBash(sessionId: string): Promise<void>
   /**

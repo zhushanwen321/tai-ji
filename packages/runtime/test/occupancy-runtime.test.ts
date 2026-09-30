@@ -432,7 +432,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
   it('#7 失败路径：bash transport 抛错 → finally 仍复位 bash=false（⑤ bashResult/message.error 保留）', async () => {
     const { dispatcher, publish } = makeDispatcher({ bashBehavior: 'error' })
     const result = await dispatcher.sendBash('s1', 'bad')
-    expect(result.blocked).toBe(true)
+    expect(result.status).toBe('settled') // 已执行并收口（回执携带执行状态）
     const frames = occupancyFrames(publish)
     expect(frames.at(-1)).toMatchObject({ bash: false })
     expect(frameTypes(publish)).toContain('message.bashResult')

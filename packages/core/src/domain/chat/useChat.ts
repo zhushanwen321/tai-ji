@@ -137,12 +137,20 @@ const BLOCKED_CLASSIFIED_CODE: MessageBlockedCode = MESSAGE_BLOCKED_CODE
  */
 
 /**
- * [簇 A1 / session-dead 第三环 → 投递所有权内核 u3b 退役] defer 队列 flush 失败重投 timer（1s）、
- * 连续失败熔断阈值（N=5）与 per-session 失败计数三件套已整体退役（设计 §3.1 删除面）：重投职责
- * 由内核 backoff + settled 边沿 + 30s watchdog 三路吸收；S1 拒绝检测与 send.rejected 全链退役
- * （内核排队取代拒绝，D5）；renderer 不再持有待投递队列（useCompactQueue 退役归 u3c）。
- * 声明与全部读写点同批删除（零残留死状态），git 可追溯。
+ * [消息投递可靠性 A-bash] per-session bashResult 终态帧观测计数（sid → 已见帧数）。
+ *
+ * 用途（**仅作 toast 抑制提示，不参与投递判定**）：sendBash 据
+ * 「本次调用窗口内终态帧是否到达」决定是否抑制失败 toast——终态已渲染时气泡终态是权威
+ * 呈现面，再弹「失败」措辞 toast 冗余且误导（如超时后命令仍在跑）。投递判定（是否恢复
+ * `!command` 草稿）只看 RPC 回执状态（BashDispatchReceipt）：帧是可丢弃的推送信号，帧
+ * 丢失不得导致「未执行」误判（误判会触发草稿恢复 → 用户重发 → 命令双执行）。
+ * 计数在 streamSubscribe 回调内**同步**递增（先于 coalescer dispatch，不受合帧节拍影响）。
+ * 窗口比对（entry 快照）天然排除历史帧；bash↔bash 互斥（预检拒绝），窗口内该 sid 的终态帧
+ * 必属本次命令。清理：resetChatModuleStateForTest / disposeSession（与同文件其余模块级 Map 同模式）。
  */
+
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，流程观测态）：bash 终态帧观测计数
+const bashTerminalFrameCounts = new Map<string, number>()
 
 /**
  * [RD-1#9 / R1-B12 双轨收敛] 未列 session.* 帧类型的一次性 dev warn（观测补齐，非行为变更）。
@@ -190,6 +198,9 @@ export function resetChatModuleStateForTest(): void {
     }
   }
   streamSubscriptions.clear()
+  // [消息投递可靠性 A-bash] 清 bash 终态帧观测计数（残留计数会让下一用例的 sendBash
+  // 误判「本次窗口已见终态」，错误地抑制失败提示）
+  bashTerminalFrameCounts.clear()
   // [u4d] 截断窗口状态随 chat store per-instance，无需模块级 reset
   // [投递所有权内核 u3b] 清内核投影 + morph 段（测试间不 reset 会把上一用例的
   // session.delivery 投影带进下一用例的回执/morph 断言）
@@ -563,6 +574,11 @@ export function ensureStreamSubscription(
     // 链路（→ effects registry）抛错不得沿订阅回调逆传炸掉本 handler（否则后续流式帧
     // 全部丢失），仅 warn 记录后半执行帧，后续帧正常处理。
     if (msg.type.startsWith('message.')) {
+      // [消息投递可靠性 A-bash] bashResult 终态帧观测计数（sendBash 的 toast 抑制提示，
+      // 不参与投递判定——判定看 RPC 回执）：同步递增先于合帧 dispatch，渲染节拍不影响提示可用性。
+      if (msg.type === 'message.bashResult') {
+        bashTerminalFrameCounts.set(sid, (bashTerminalFrameCounts.get(sid) ?? 0) + 1)
+      }
       // [crash-resilience T4 回流修复] 恢复窗口收口 gate（dispatch 前——同步于流式帧处理
       // 之前插 T4 提示条，保证条目在 assistant 气泡之前；非 message_start 帧 no-op）
       if (msg.type === 'message.message_start') {
@@ -973,27 +989,58 @@ export function createUseChat(deps: UseChatDeps) {
    * （内部已 toast 或终态帧已呈现故抑制 toast）——调用方（dispatch bash）据 `=== false`
    * 留痕输入未恢复（restoreInput 待壳层注入）。早退无。
    *
-   * toast 抑制判别（msg-pipeline-debloat D4-2）：error envelope 携带分类码
-   * MessageBlockedCode（runtime bash handler 对 blocked 失败落的码，错误气泡已广播）=
-   * 终态呈现已编排，抑制 toast；transport 级（backstop 超时 / 断连 / 溢出驱逐）保守
-   * toast 兜底。
+   * [消息投递可靠性 A-bash] 返回值（Promise<boolean>）契约（与 send 同语义）：
+   *   false = 可证明命令未执行（调用方恢复 !command 草稿安全）——RPC 回执
+   *     status==='rejected'（busy 预检拒绝 / 空命令不变式 / restore 失败 / 消息未送达
+   *     runtime）。bash 无乐观面可回滚（气泡由 bashStart/bashResult 帧驱动、executingBash
+   *     由帧置/清、本函数零 appendUser/零 inflight/零 pendingSend）→ 回滚对象结构性为空、
+   *     无悬空标记。
+   *   true = 命令已执行或可能已执行（调用方不得恢复 !command——恢复后用户重发即命令双
+   *     执行）：① 回执 status 为 'started'/'settled'（权威回执证明已执行）；② 回执不可达
+   *     （catch：断连 rejectAll / backstop 超时 / pending 驱逐）——无法证明未执行，保守按
+   *     已执行处置（误判「未执行」恢复草稿 = 双执行；误判「已执行」最坏是草稿不恢复需重输，
+   *     方向性取舍：双执行是更严重错误）。
+   * 判定只看 RPC 回执（BashDispatchReceipt）：bashStart/bashResult 帧与帧观测计数是可丢弃
+   * 的呈现信号（仅作 toast 抑制提示），帧丢失不得导致「未执行」误判。
+   * 不 throw（W2 家族契约不变）。
    *
    * 显式接收 sessionId：per-panel 隔离，不读全局 activeId。
    */
   async function sendBash(sessionId: string, command: string, excludeFromContext: boolean): Promise<boolean> {
     const sid = sessionId
     ensureStreamSubscription(sid, chat, session, subDeps)
+    // [消息投递可靠性 A-bash] 帧观测基线：toast 抑制提示判据（不参与投递判定）
+    const bashFramesAtEntry = bashTerminalFrameCounts.get(sid) ?? 0
+    const terminalFrameRendered = (): boolean => (bashTerminalFrameCounts.get(sid) ?? 0) > bashFramesAtEntry
     try {
-      await deps.chatApi.bash(sid, command, excludeFromContext)
-      return true
-    } catch (e) {
-      if (isTransportLevelFailure(e, [BLOCKED_CLASSIFIED_CODE])) {
-        const msg = toErrorMessage(e)
-        deps.toast.error(deps.t('composable.bashFailed', { msg }))
+      const receipt = await deps.chatApi.bash(sid, command, excludeFromContext)
+      if (receipt.status === 'rejected') {
+        // 未执行（回执权威判定）→ false 交调用方恢复 !command 草稿（安全：不会双执行）。
+        // busy 预检的用户反馈由 send.rejected handler 的 toast 承担（不重复弹）；其余
+        // rejected 形态（restore 失败等）回执带 error，此处 toast 不静默。
+        if (receipt.error) {
+          deps.toast.error(deps.t('composable.bashFailed', { msg: receipt.error }))
+        }
         return false
       }
-      console.warn(`[useChat] sendBash RPC failed with classified error envelope, toast suppressed, sid=${sid}`, e)
-      return false
+      // 'started' | 'settled'：已执行 → true（恢复 !command 会双执行）。失败原因可见提示；
+      // 终态帧已渲染时抑制（气泡终态是权威呈现面——超时三步指引或错误输出，再弹「失败」
+      // 措辞 toast 冗余且误导），①b 抑制极性不变。
+      if (receipt.error && !terminalFrameRendered()) {
+        deps.toast.error(deps.t('composable.bashFailed', { msg: receipt.error }))
+      }
+      return true
+    } catch (e) {
+      // 回执不可达（已送出但 reply 没回来：断连 rejectAll / renderer backstop 超时 /
+      // pending 驱逐）：命令可能已执行 → 保守 true（调用方不恢复草稿，防双执行）。
+      // 「可证明未执行」的传输失败（消息未送达 runtime）已在端口层翻译为 rejected 回执，
+      // 不会走到此分支。toast 用「状态未知」诚实措辞（不得说「失败」——那会诱导用户重发）。
+      console.warn(`[useChat] sendBash receipt unavailable (command may have executed), sid=${sid}`, e)
+      const msg = toErrorMessage(e)
+      if (!terminalFrameRendered()) {
+        deps.toast.error(deps.t('composable.bashOutcomeUnknown', { msg }))
+      }
+      return true
     }
   }
 
@@ -1193,6 +1240,8 @@ export function createUseChat(deps: UseChatDeps) {
     // [u4d] 截断窗口状态由下方 chat.disposeSession 内统一清理（store 分区），无需单独清
     // [投递所有权内核 u3b] 清内核投影 + morph 段（session 已销毁，帧/回执不再有意义）
     clearDeliveryProjection(sessionId)
+    // [消息投递可靠性 A-bash] 帧观测计数随 session 销毁回收（防 Map 永久增长 + 跨 session 误判）
+    bashTerminalFrameCounts.delete(sessionId)
     // wave:renderer-subscribe：清除 MessageBus 订阅状态（SubscriptionState）。
     // 与 streamSubscriptions.delete 配对——session 删除后若不清，routeInbound 的 gap 检测
     // 仍会读残留 state（lastSeenSeq 基线 stale），且 Map 永久增长。

@@ -944,7 +944,8 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   async abort(sessionId: string): Promise<void> { return this.dispatcher.abort(sessionId) }
   /** 强制退出卡死 session（sidebar 右键入口，杀 pi 进程 + stopped 收敛）。 */
   async forceQuit(sessionId: string): Promise<void> { return this.dispatcher.forceQuit(sessionId) }
-  async sendBash(sessionId: string, command: string, excludeFromContext?: boolean): Promise<{ blocked: boolean; rejected?: boolean }> {
+  /** bash 投递回执（started/settled/rejected + 可选失败原因），1:1 透传 dispatcher（翻译层在 transport）。 */
+  async sendBash(sessionId: string, command: string, excludeFromContext?: boolean): Promise<{ status: 'started' | 'settled' | 'rejected'; error?: string }> {
     return this.dispatcher.sendBash(sessionId, command, excludeFromContext)
   }
   async abortBash(sessionId: string): Promise<{ sent: boolean }> { return this.dispatcher.abortBash(sessionId) }

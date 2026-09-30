@@ -41,6 +41,21 @@ interface InternalBashResult {
 }
 
 /**
+ * bash 投递回执的 services 层内部类型（翻译层标准做法）：字段与 shared 的
+ * BashDispatchReceipt 逐字段一致，transport 层（session-message-handler.handleMessageBash）
+ * 1:1 翻译进 message.status 回执。
+ *
+ * status 语义（消费方判定「命令是否已执行」的权威依据）：
+ * - started = 已开跑未收口（如 bash 等待超时置孤儿，仍在执行）；
+ * - settled = 已执行并收口（成功或失败终态已广播）；
+ * - rejected = 未执行（busy 预检拒绝 / 空命令不变式 / restore 失败）。
+ */
+export interface InternalBashDispatchReceipt {
+  status: 'started' | 'settled' | 'rejected'
+  error?: string
+}
+
+/**
  * 时长换算系数（命名对齐 dialog-queue 惯例）：formatTimeoutDuration 的整时折算用，
  * 是纯单位换算（ms/秒、ms/分、ms/时）而非业务超时值——业务超时链值域 SSOT 在
  * packages/shared/src/timeouts.ts，两者语义不同禁止混用。
@@ -131,17 +146,23 @@ export class BashDispatcher {
    *
    * 生命周期：bashStart 广播（开始，执行中反馈——前端 ephemeral executingBash 态，不建消息）
    * → pi bash RPC → bashResult 广播（终态，双分支延迟如上）。
-   * 返回 { blocked: true } 有三种形态（一致性审查 SG-A1 修订——catch abort skip 是 D1 新增分支）：
-   * 预检拒绝（send.rejected 已广播）、执行失败（message.error + 错误 bashResult 终态帧均已广播）、
-   * catch abort skip（**不广播**——abortBash 已抢先收口广播 message.bashAborted 帧，token 不匹配
-   * 即跳过，D1 收窄后唯一残余例外⑤）。
-   * 调用方（session-message-handler）据此走对应 ack 路径，与 sendMessage 的返回语义对称。
+   * 返回 InternalBashDispatchReceipt（bash 投递可靠性契约）：回执携带执行状态，是「命令是否
+   * 已执行」的权威判定（消费方据此决定是否恢复 !command 草稿，不依赖推送帧是否到达——帧丢失
+   * 不得致「未执行」误判、双执行）：
+   * - 'rejected' = 未执行（busy 预检拒绝，send.rejected 已广播 / restore 失败，message.error
+   *   已广播）；
+   * - 'settled' = 已执行并收口（成功；或执行失败——message.error + 错误 bashResult 终态帧均已
+   *   广播，失败原因随 error 携带；或 catch abort skip——**不广播**，abortBash 已抢先收口广播
+   *   哨兵帧，token 不匹配即跳过，D1 收窄后唯一残余例外⑤）；
+   * - 'started' = 已开跑未收口（bash 等待超时 RpcTimeoutError 置孤儿，pi 侧照常执行）。
+   * 调用方（session-message-handler）把回执翻译进 message.status reply，与 sendMessage 的
+   * 返回语义对称。
    */
   async sendBash(
     sessionId: string,
     command: string,
     excludeFromContext?: boolean,
-  ): Promise<{ blocked: boolean; rejected?: boolean }> {
+  ): Promise<InternalBashDispatchReceipt> {
     // ── ensureActive(必要时 restore)──
     // [时序不变量 timeout-tick-parity] 必须保持 HEAD 内联 try/await/catch 形态：
     // 任何 Promise 组合子（async 包装 / .catch 链）都会使衍生 promise 在 resolve 路径
@@ -155,7 +176,10 @@ export class BashDispatcher {
       console.error(`[bash-dispatcher] sendBash: ${errMsg}`)
       const errMsgObj = { type: 'message.error' as const, payload: { sessionId, message: errMsg } }
       this.bus?.publish(sessionId, errMsgObj)
-      throw e
+      // restore 失败 = 命令从未开跑 → 'rejected' 回执（消费方可安全恢复 !command 草稿）。
+      // 不再 throw：throw 会让 transport 层走 error envelope，回执状态缺失 → 消费方只能按
+      // 「可能已执行」保守处置，白白丢草稿（bash 投递可靠性契约）。
+      return { status: 'rejected', error: errMsg }
     }
 
     // ── busy 预检 + 占槽（W2: bash↔streaming 放宽并发，对齐 pi-tui）──
@@ -170,7 +194,8 @@ export class BashDispatcher {
     // sendMessage 预检拒 isGenerating 是安全网。
     // null = 预检拒绝（send.rejected 已广播）；activeSession 为 undefined 时原逻辑不拒直接执行。
     const reservation = this.reserveBashSlot(sessionId, client)
-    if (!reservation) return { blocked: true, rejected: true }
+    // busy 预检拒绝 = 未执行 → 'rejected'（send.rejected 已广播，用户反馈由前端该 handler 承担）
+    if (!reservation) return { status: 'rejected' }
     const { activeSession, myToken } = reservation
 
     // ── bashStart 广播（实时反馈，与 bashResult 终态对称）──
@@ -187,7 +212,7 @@ export class BashDispatcher {
     } finally {
       this.releaseBashReservation(sessionId, activeSession, myToken)
     }
-    return { blocked: false }
+    return { status: 'settled' }
   }
 
   /**
@@ -273,9 +298,11 @@ export class BashDispatcher {
   }
 
   /**
-   * sendBash 失败收口（catch 体整体，恒返回 { blocked: true }）：
-   * ① abort 抢收口竞态守卫（跳过重复报错）；② RpcTimeoutError 诚实文案合成终态；
-   * ③ 通用错误兜底（错误 bashResult + message.error，S2 对称收口）。
+   * sendBash 失败收口（catch 体整体）：回执按执行状态收口（bash 投递可靠性契约）——
+   * ① abort 抢收口竞态守卫（跳过重复报错，已执行已收口 → 'settled'）；
+   * ② RpcTimeoutError 诚实文案合成终态（pi 侧孤儿仍在跑 → 'started'）；
+   * ③ 通用错误兜底（错误 bashResult + message.error，S2 对称收口 → 'settled'）。
+   * 失败原因随回执 error 携带（消费方 toast 用）。
    */
   private handleBashFailure(
     sessionId: string,
@@ -284,14 +311,15 @@ export class BashDispatcher {
     e: unknown,
     activeSession: IManagedSessionView | undefined,
     myToken: string | undefined,
-  ): { blocked: boolean } {
+  ): InternalBashDispatchReceipt {
     const errMsg = toErrorMessage(e)
     console.error(`[bash-dispatcher] sendBash failed: sessionId=${sessionId}`, errMsg)
     // [W1] 竞态守卫：若 await 抛错是因 abortBash 抢先收口（如 abort_bash 触发 pi 关闭流），
     // 已有 cancelled bashResult 广播，此处不再发 message.error，避免双重报错。
     if (activeSession && myToken !== undefined && activeSession.bashRunToken !== myToken) {
       console.warn(`[bash-dispatcher] sendBash: aborted during await (catch), skip duplicate error. sid=${sessionId}`)
-      return { blocked: true }
+      // 命令已执行且已由 abortBash 收口（哨兵帧已广播）→ 'settled'
+      return { status: 'settled', error: errMsg }
     }
     // [D2 timeout-slow-flow-wallclock] bash RPC 超时（RpcTimeoutError，字段化 commandType/
     // timeoutMs）：合成终态换诚实文案（三步恢复指引），不自动 abort_bash——超时是「停止
@@ -317,9 +345,10 @@ export class BashDispatcher {
       })
       // [P6 deviation] 不广播 message.error 技术帧（'RPC command "bash" timed out after...'）：
       // Gate B 实测它与诚实气泡在聊天流双条目并存（renderer 把 message.error 插入对话流），
-      // 与 G2「诚实告知」矛盾；诊断信息由 error envelope（session-message-handler blocked
-      // 分支）+ runtime 日志承载，用户可见面只保留诚实气泡。
-      return { blocked: true }
+      // 与 G2「诚实告知」矛盾；诊断信息由回执 error 字段（session-message-handler 翻译进
+      // message.status reply）+ runtime 日志承载，用户可见面只保留诚实气泡。
+      // 超时 = 停止等待不是处决：pi 侧孤儿仍在跑 → 'started'（未收口，消费方不得恢复草稿）。
+      return { status: 'started', error: errMsg }
     }
     // [S2] 对称兜底：与 abortBash「无论成败都广播 bashResult 终态」对称。
     // 前端 message.error handler 只收口 streaming **assistant** 消息（finalizeSession 按
@@ -339,7 +368,8 @@ export class BashDispatcher {
     })
     const bashErrMsg = { type: 'message.error' as const, payload: { sessionId, message: errMsg } }
     this.bus?.publish(sessionId, bashErrMsg)
-    return { blocked: true }
+    // 命令已执行并收口（错误终态帧已广播）→ 'settled'（消费方不得恢复草稿）
+    return { status: 'settled', error: errMsg }
   }
 
   /**

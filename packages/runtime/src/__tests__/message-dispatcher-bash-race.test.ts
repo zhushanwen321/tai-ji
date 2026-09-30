@@ -132,8 +132,8 @@ describe('MessageDispatcher —— W1 abortBash/sendBash 竞态守卫', () => {
     // 不广播 message.error（pi 是正常 resolve，无错误）
     expect(broadcasts.some((m) => m.type === 'message.error')).toBe(false)
 
-    // sendBash 正常完成（发布路径走完）
-    expect(result).toEqual({ blocked: false })
+    // sendBash 正常完成（发布路径走完）→ 回执 settled
+    expect(result).toEqual({ status: 'settled' })
   })
 
   it('W1b: abortBash 抢先收口后，client.bash reject 到达时 sendBash 不广播 message.error（避免双重报错）', async () => {
@@ -158,7 +158,8 @@ describe('MessageDispatcher —— W1 abortBash/sendBash 竞态守卫', () => {
     const allResults = findBashResults(broadcasts)
     expect(allResults).toHaveLength(0)
 
-    expect(result).toEqual({ blocked: true })
+    // 回执 settled+error（已执行、已由 abortBash 抢先收口——消费方不得恢复草稿）
+    expect(result).toEqual({ status: 'settled', error: 'stream closed by abort' })
   })
 
   it('W1c: 无 abort 时 sendBash 正常广播真实 bashResult（守卫不影响正常路径）', async () => {
@@ -177,7 +178,7 @@ describe('MessageDispatcher —— W1 abortBash/sendBash 竞态守卫', () => {
     expect(allResults[0]!.payload).toMatchObject({ output: 'done', exitCode: 0, cancelled: false })
     // 不广播 message.error
     expect(broadcasts.some((m) => m.type === 'message.error')).toBe(false)
-    expect(result).toEqual({ blocked: false })
+    expect(result).toEqual({ status: 'settled' })
   })
 })
 
