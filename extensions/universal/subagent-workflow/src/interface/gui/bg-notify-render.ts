@@ -1,4 +1,4 @@
-// src/interface/bg-notify-render.ts
+// src/interface/gui/bg-notify-render.ts
 //
 // background 完成通知的对话流渲染器。
 // pi.registerMessageRenderer("subagent-bg-notify", ...) 注册。
@@ -31,8 +31,8 @@ import {
   shortId,
   statusGlyph,
   type ThemeLike,
-} from "./format/format.ts";
-import { padToVisible, truncLine } from "./tui/tui-kit.ts";
+} from "../format/format.ts";
+import { padToVisible, truncLine } from "../tui/tui-kit.ts";
 
 /** agent 名最大显示宽度。 */
 const AGENT_MAX_WIDTH = 40;

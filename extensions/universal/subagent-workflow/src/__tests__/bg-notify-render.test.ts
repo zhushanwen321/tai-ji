@@ -15,11 +15,11 @@ import { fileURLToPath } from "node:url";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
-import { renderBgNotifyMessage } from "../interface/bg-notify-render.ts";
+import { renderBgNotifyMessage } from "../interface/gui/bg-notify-render.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** 壳侧消费方源码（同构成败推导已收敛删除）。 */
-const CONSUMER_SOURCE = join(here, "..", "interface", "bg-notify-render.ts");
+const CONSUMER_SOURCE = join(here, "..", "interface", "gui", "bg-notify-render.ts");
 
 /**
  * 手写同构 switch 的源码特征 token：出现即说明有人把收敛删除的成败推导又写了回去。

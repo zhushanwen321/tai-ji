@@ -26,7 +26,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ListHandlerResult, StartHandlerResult, SubagentService } from "@zhushanwen/subagent-core";
 import { startHandler } from "@zhushanwen/subagent-core";
-import { adapter } from "../interface/subagent-actions.ts";
+import { adapter } from "../interface/gui/subagent-actions.ts";
 import { SubagentParams } from "../interface/subagent-tool-schema.ts";
 import { BG_MESSAGE } from "@zhushanwen/subagent-core/execution/assembly/subagent-actions-core.ts";
 import type { ExecutionHandle, SubagentToolDetails } from "@zhushanwen/subagent-core/execution/assembly/types.ts";

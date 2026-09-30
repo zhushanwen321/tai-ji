@@ -47,7 +47,7 @@ import { setupEngineAwarenessInjector } from "./injectors/engine-awareness.ts";
 import { setupModelListInjector } from "./injectors/model-list-injector.ts";
 import { setupSubagentListInjector } from "./injectors/subagent-list-injector.ts";
 import { setupWorkflowListInjector } from "./injectors/workflow-list-injector.ts";
-import { renderBgNotifyMessage } from "./interface/bg-notify-render.ts";
+import { renderBgNotifyMessage } from "./interface/gui/bg-notify-render.ts";
 import { registerWorkflowsCommand } from "./interface/commands.ts";
 import { registerSubagentTool } from "./interface/subagent-tool.ts";
 // ═══ interface/ 层（tools/commands/tui 合并） ═══

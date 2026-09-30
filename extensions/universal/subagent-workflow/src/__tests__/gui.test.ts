@@ -20,9 +20,9 @@
 import type { GuiContext } from "@zhushanwen/extension-protocol";
 import { describe, expect, it } from "vitest";
 
-import { mapRunIcon, mapRunStatus, toGuiCtx } from "../interface/gui-mappers.ts";
-import { adapter, buildGuiComponent } from "../interface/subagent-actions.ts";
-import type { AdapterInput } from "../interface/subagent-actions.ts";
+import { mapRunIcon, mapRunStatus, toGuiCtx } from "../interface/gui/gui-mappers.ts";
+import { adapter, buildGuiComponent } from "../interface/gui/subagent-actions.ts";
+import type { AdapterInput } from "../interface/gui/subagent-actions.ts";
 import { buildScriptGui } from "../interface/tool-workflow-script.ts";
 import type { WorkflowScriptToolDetails } from "../interface/tool-workflow-script.ts";
 

@@ -28,8 +28,8 @@ import {
   startHandler,
 } from "@zhushanwen/subagent-core";
 import { extractAgentName } from "./format/format.ts";
-import { toGuiCtx } from "./gui-mappers.ts";
-import { adapter } from "./subagent-actions.ts";
+import { toGuiCtx } from "./gui/gui-mappers.ts";
+import { adapter } from "./gui/subagent-actions.ts";
 import { SubagentParams } from "./subagent-tool-schema.ts";
 import { type RenderContext,renderSubagentCall, renderSubagentResult } from "./tool-render.ts";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";

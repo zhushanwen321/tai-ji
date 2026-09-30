@@ -1,4 +1,4 @@
-// src/interface/subagent-actions.ts
+// src/interface/gui/subagent-actions.ts
 //
 // subagent tool 六 action 的 TUI/GUI 渲染壳（sink 设计 D6② 消费收缩）。
 //
@@ -25,8 +25,8 @@ import type {
   SubagentToolResult,
 } from "@zhushanwen/subagent-core";
 import { mapRunIcon, mapRunStatus } from "./gui-mappers.ts";
-import { ID_PREVIEW_LENGTH } from "./format/id-preview.ts";
-import { withGuiAttach } from "./tool-shared.ts";
+import { ID_PREVIEW_LENGTH } from "../format/id-preview.ts";
+import { withGuiAttach } from "../tool-shared.ts";
 
 // ============================================================
 // 渲染层常量 / 类型（pi TUI 渲染族，按设计留壳）
