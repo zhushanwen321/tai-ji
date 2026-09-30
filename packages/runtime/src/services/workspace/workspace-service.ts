@@ -11,13 +11,9 @@
 import { homedir } from 'node:os'
 import type { RecentWorkspaceRecord } from '@taiji/shared'
 import type { RecentWorkspacesStore } from './recent-workspaces-store.js'
-import type { WorkspaceDetector } from '../worktree/workspace-detector.js'
 
 export class WorkspaceService {
-  constructor(
-    private readonly store: RecentWorkspacesStore,
-    private readonly detector: WorkspaceDetector,
-  ) {}
+  constructor(private readonly store: RecentWorkspacesStore) {}
 
   /**
    * 记录一次工作区使用。INV-1 主守卫：空串/undefined/whitespace 静默跳过。

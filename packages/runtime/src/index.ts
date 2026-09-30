@@ -118,7 +118,6 @@ import type { SessionImportSource } from './services/session/import-source.js'
 // db-path.ts 同源 SDK 常量，session-reader-shared-core U10 起唯一承载）
 import { hostZcodeDbPath } from '@zhushanwen/zcode-session-source'
 import { WorkspaceService } from './services/workspace/workspace-service.js'
-import { WorkspaceDetector } from './services/worktree/workspace-detector.js'
 // D8-1（perf W29）：后台初始化序列（listen 后执行）——独立模块承载使「migrateBuiltin →
 // autoUpgrade 顺序」可 spy 断言（06 §5 门禁），组合根只负责构造与注入。
 // resolveReclaimConfig（u3b，idle-pi-reclamation D4）：reaper 三旋钮 env 解析。
@@ -579,7 +578,7 @@ async function main(): Promise<void> {
   // RecentWorkspacesStore：最近工作区持久化（WriteBackCache 固定 partition 'global'）。
   // configDir 由 configService 动态推导，无硬编码路径（INV-5）。
   const recentWorkspacesStore = new RecentWorkspacesStore(configDir)
-  const workspaceService = new WorkspaceService(recentWorkspacesStore, new WorkspaceDetector(fs))
+  const workspaceService = new WorkspaceService(recentWorkspacesStore)
   // ProjectStore：project 列表持久化（D14，2026-08-04 迁 runtime projects.json，
   // 与 recent-workspaces 同模式；前端 localStorage 仅首启迁移源）。
   const projectStore = new ProjectStore(configDir)
