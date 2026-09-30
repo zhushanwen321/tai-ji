@@ -319,20 +319,16 @@ run 与 record 的状态变化唯一落盘形态：append-only 文本流，逐�
 |---|---|---|---|---|
 | `sessions-index.json` | 是 | **是**（每条带该 jsonl 的 mtime+size，消费点 `record-store.ts` 逐条比对，不匹配即重探测） | 是 | **三性质齐备**——唯一的纯索引 |
 | manifest（`<sa-id>.json`） | 否 | 否 | 否（`stopReason` 现由它独家承载） | 跨包读取面（session-reader 只认它） |
-| ~~`.state` 收条~~ | — | — | — | **已退场**：收条由 `record-settled` 帧承载（写侧删除、读侧删除，快路径走索引收条） |
+| ~~`.state` 收条~~ | — | — | — | **已删除**：收条由 `record-settled` / `record-round-idle` 帧承载（写侧、读侧、戳与常量全部退场；快路径走索引收条，重建路径走折叠） |
 | `.record-binding` | 否 | 否 | 否（见 [身份绑定](#身份绑定record-binding与写权epoch)） | 唯一身份/统计载体 |
 
 **终态目标**：只有索引存在，且三性质齐备；其余载体删除。
 
-**退场后残留的收尾项**（`state-marker.ts` 侧）：写函数族（`writeStateMarker` / `writeSettledState` / `writeFinalizedState` / `writeCancelledState`）与 `readStateMarker` / `statStateStamp` 已成死代码但仍在文件里；`markResurrected` 仍会删 `.state`/`.finalized`/`.cancelled` 残留（无害的旧文件清理，但它的「删失败即响亮抛错」语义已随载体退场而失去意义，其 6 个用例覆盖的正是该语义）。
-
-清点（实测，按真实调用点，排除注释与未使用 import）：**共 12 处调用点 + 1 个模块测试文件**——`state-marker.test.ts` 46 处（模块自身用例，整段删除）、`record-store.test.ts` 4 处、`permanent-session-universal-resume.test.ts` 3 处、`record-binding.test.ts` 3 处、`get-record-for-action-restart.test.ts` 2 处；其余 8 个文件只是注释或未使用 import（已清）。迁移方式：加一个同步 helper 播种「created + settled」两帧事件（头行键 `record-events`），把 `writeFinalizedState(file[, reason])` 换成它；**注意 `stopReason` 取 StopReason 值域（`disconnected`/`completed` 等），`gc`/`user-close` 是 ClosedReason、不是合法停因**。`record-store.test.ts` 的 4 处里有两处所在用例用 `new RecordStore(tmpDir)`（无事件面）——这类用例要么补 recordsDir，要么按其「旧 sidecar 投影」性质删除。
-
-**读侧退场的隐藏前置**（`readStateMarker` / `FileStamps.state` 删除时踩到）：终态收条换源到折叠后，**没有事件面的 store 就无法表达终态**——`new RecordStore(sessionsDir)`（不传 recordsDir）这类构造在测试里很常见，它们的「终态 fixture」原来靠写 `.state` 造，收条退场后这些断言无处落地。因此读侧退场必须同批处理：要么让这些测试构造带 recordsDir 的 store 并用事件帧造终态，要么删掉其终态断言（其被测行为已随旧读链退场）。
+**`.state` 退场已完成**（记录于此以免后人重复排查）：写函数族 / 读函数 / `statStateStamp` / 三个后缀常量与 `SidecarStat` 已从 `state-marker.ts` 删除；`markResurrected` 不再清理旧终态文件（磁盘终态由事件流决定，重开由 `record-reopened` 帧表达）；12 处测试 fixture 迁到事件帧播种（helper `execution/__tests__/helpers/seed-terminal-record.ts`），纯旧兼容用例随其被测对象一并删除。
 
 **索引承载终态收条的裁决**（换源时不可回避）：终态域（`stopReason` / `turns` / `totalTokens`）换源到折叠后，索引快路径**不能**去读每条记录的事件文件——那正好废掉索引存在的理由（冷启动零内容读取）。因此索引条目必须自己承载终态收条，且它的水位要覆盖**事件文件**的 stat（今天只盖 jsonl 的 mtime+size：轮终收条写在 jsonl 末次写入之后，只比 jsonl 会漏掉收条变化）。两条腿：① 索引条目加终态字段；② 水位扩到 `jsonl + <id>.events` 两个 stat。未做到之前，索引快路径的终态仍只能读 sidecar。
 
-第 ② 腿的改动面（动手前先看这里，别低估）：事件戳要进 `FileStamps`（今天只有 `jsonl` / `state` / `binding` 三个），而 `FileStamps` 是缓存新鲜度判定的中心——连带影响 `isFreshCache`、负缓存条目、`statStateStamp` 一族、以及索引投影 `projectIndexEntries` 的正/负两类条目。也就是说这不是「加一个字段」，而是给缓存键加一维。
+第 ② 腿的改动面（动手前先看这里，别低估）：事件戳属于缓存键，而缓存新鲜度判定是中心面——连带影响 `isFreshCache`、负缓存条目、以及索引投影 `projectIndexEntries` 的正/负两类条目。**已完成**：`FileStamps` 去掉 state 维（现为 `jsonl` + `binding`），事件戳落在 `FileCacheEntry.events` 并由 `isFreshCache` 作为第四维比对；索引条目承载事件戳（`eventsMtimeMs` / `eventsSize`）与终态收条（`receipt`），`INDEX_VERSION` 升到 2。
 
 ### 身份绑定（`.record-binding`）与写权（`epoch`）
 
