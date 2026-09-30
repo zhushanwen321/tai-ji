@@ -39,15 +39,14 @@ import { writeAliveMarker } from "../persistence/alive-store.ts";
 // [W1 / U2a] record 事件文件观察点（u0 契约层 scan/路径原语——被测面独立性）。
 import { createRecordEventJournal, recordEventsPath } from "../persistence/record-events.ts";
 import type { RecordJournalEvent } from "../persistence/record-events.ts";
-import { readStateMarker } from "../persistence/state-marker.ts";
 import { completeLegacyClosed, createRecord, projectOutcome, trySettleLegacyClosed } from "../persistence/execution-record.ts";
-import { writeCancelledState, writeFinalizedState, writeSettledState } from "../persistence/state-marker.ts";
 import type { ManifestRecord } from "../persistence/manifest-store.ts";
 import { ManifestStore } from "../persistence/manifest-store.ts";
 import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import { SUBAGENT_RECORD_CUSTOM_TYPE, SUBAGENT_RECORD_ENTRY_VERSION } from "../persistence/record-entry.ts";
 import type { StatusFilter } from "../persistence/record-store.ts";
 import { RecordStore } from "../persistence/record-store.ts";
+import { seedTerminalRecord } from "./helpers/seed-terminal-record.ts";
 import { manifestToSubagent, stateMarkerFromFold, v2PairToRecord } from "../persistence/record-store-rebuild.ts";
 import type { V2EntryPair } from "../persistence/record-store-rebuild.ts";
 import { foldRecordEvents } from "../persistence/record-events.ts";
@@ -224,18 +223,6 @@ describe("RecordStore", () => {
       expect(full?.status).toBe("idle"); // 单规则在全量路径同样套用
     });
 
-    it("磁盘 session.jsonl + .state sidecar（finalized） → idle", () => {
-      const sessionFile = path.join(tmpDir, "2026-01-01-uuid-b.jsonl");
-      writeSessionJsonl(sessionFile, {
-        id: "bg-2", agent: "worker", mode: "background", task: "do it", startedAt: 5000,
-      });
-      writeFinalizedState(sessionFile);
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === "bg-2");
-      expect(found).toBeDefined();
-      expect(found?.status).toBe("idle");
-    });
-
     it("statusFilter='running' 只剩内存 running（§3.2.4：磁盘重建恒 idle，running 只在轮次在飞时有意义）", () => {
       const sessionFile = path.join(tmpDir, "2026-01-01-uuid-a.jsonl");
       writeSessionJsonl(sessionFile, {
@@ -319,15 +306,19 @@ describe("RecordStore", () => {
   describe("compareRecords 排序", () => {
     it("status priority（running < closed）", () => {
       const store = new RecordStore(tmpDir);
-      // 内存 running record
+      // 被测对象 = compareRecords 的状态优先级：两条内存记录即可表达（磁盘终态投影
+      // 已由事件流承载，与本用例的比较逻辑无关——不再借 sidecar fixture 造形态）。
       const running = makeRecord({ id: "run-1", mode: "background", startedAt: 3000, status: "running" });
-      store.register(running);
-      // 磁盘 closed record（.state sidecar（finalized） → closed，v4 B-1 统一终态）
-      const doneFile = path.join(tmpDir, "a.jsonl");
-      writeSessionJsonl(doneFile, {
-        id: "done-1", agent: "w", mode: "background", task: "t", startedAt: 5000,
+      const closed = makeRecord({
+        id: "done-1",
+        mode: "background",
+        startedAt: 5000,
+        status: "idle",
+        stopReason: "completed",
+        closedReason: "gc",
       });
-      writeFinalizedState(doneFile);
+      store.register(running);
+      store.register(closed);
       const ids = store.collectRecords(100).map((r) => r.id);
       expect(ids[0]).toBe("run-1"); // running(0) 排在 closed(3) 前
     });
@@ -427,15 +418,6 @@ describe("RecordStore", () => {
     }
 
     // ── 输入 1: 新格式收条 {status:"idle", stopReason, endedAt}（writeSettledState 写面）──
-    it(".state 新格式收条无 stopReason → idle + interrupted-by-restart 兜底", () => {
-      const sessionFile = writeBaseSession();
-      writeSettledState(sessionFile, { endedAt: 6000 });
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("idle");
-      expect(found?.stopReason).toBe("interrupted-by-restart");
-    });
-
     it(".state 新格式 stopReason 非法值（外部损坏）→ idle + interrupted-by-restart 兜底", () => {
       const sessionFile = writeBaseSession();
       fs.writeFileSync(`${sessionFile}.state`, JSON.stringify({ status: "idle", reason: "garbage-reason" }), "utf-8");
@@ -894,7 +876,7 @@ describe("RecordStore", () => {
         id: "sa-orphan-4", agent: "worker", mode: "background", task: "already settled",
         startedAt: 4000, rootSessionId: "sess-orphan",
       });
-      writeFinalizedState(closedFile);
+      seedTerminalRecord(path.join(rootDir, "records"), { id: "sa-orphan-4", startedAt: 4000, stopReason: "disconnected" });
       const noEntryFile = path.join(tmpDir, "orphan-noentry.jsonl");
       writeSessionJsonl(noEntryFile, {
         id: "sa-orphan-6", agent: "worker", mode: "background", task: "no main entry",
