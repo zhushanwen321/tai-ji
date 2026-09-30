@@ -152,7 +152,8 @@ export function enforceTtsCacheFifoCap(cacheDir: string, opts: TtsCacheFifoCapOp
       .filter((name) => name.endsWith('.wav'))
       .map((name) => {
         const filePath = join(cacheDir, name)
-        // 并发窗口可能在 readdir 与 stat 之间已删掉该文件：按「对方已清理」跳过
+        // 并发窗口可能在 readdir 与 stat 之间已删掉该文件：statSync 抛 ENOENT 落
+        // 外层 catch 的 ENOENT 分支 → 本轮封顶提前结束（不删任何文件），下次写入再收敛
         const st = statSync(filePath)
         return { path: filePath, size: st.size, mtimeMs: st.mtimeMs }
       })

@@ -6,8 +6,8 @@
  * 丢弃）+ settings-tts-test 伪 id 互斥 + 错误码 → toast（§5.4 表）。
  *
  * 全局单例（D11）：同一时刻每窗口只有一条消息在朗读，状态本身窗口级唯一——不按 per-session
- * Map 分区（语义错误：切 session 后旧 session 的播放态应继续存在且全局唯一）。本例外属
- * ADR-0049 例外清单语义（全局协调器类），ADR 登记随 dev-flow 收尾同 commit（设计关联登记清单）。
+ * Map 分区（语义错误：切 session 后旧 session 的播放态应继续存在且全局唯一）。本例外已登记
+ * 进 ADR-0049 例外清单（全局协调器类）与数据源登记表 §4 ⑧ EX-B 清单。
  * 切 session 不打断播放（本模块无任何 session 监听）；播放中删除 session 的停播编排归
  * useSidebar.deleteSession 统一调 stop()（D11，消费方装配）。
  *
@@ -60,9 +60,9 @@ interface TtsJob {
   status: 'loading' | 'playing'
 }
 
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态）：窗口级唯一朗读任务态——同一时刻
-// 只有一条在播，状态本身全局唯一（per-session 分区语义错误，D11）；播完/停止/失败即清空，
-// 无常驻数据本体。登记表 §4-⑧ 补登句随 dev-flow 收尾同 commit。
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，登记见数据源登记表 §4 ⑧）：窗口级
+// 唯一朗读任务态——同一时刻只有一条在播，状态本身全局唯一（per-session 分区语义错误，D11）；
+// 播完/停止/失败即清空，无常驻数据本体。
 const currentJob = ref<TtsJob | null>(null)
 
 /** 播放代次：每次真正起播递增；取消/顶替再递增——迟到的 onended/playing 推进按代次失效。 */

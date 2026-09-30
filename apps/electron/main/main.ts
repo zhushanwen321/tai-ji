@@ -31,6 +31,10 @@
  *
  * 6. window-all-closed：macOS 不 quit（activate 会复用 runtime），其他平台 stop+quit
  *
+ * 7. local-file scheme 特权声明（registerSchemesAsPrivileged）必须保持在 app ready
+ *    之前的模块顶层调用（scheme 级全局特权，ready 后注册不生效）；特权集取舍与
+ *    standard 陷阱见声明点注释块
+ *
  * 生命周期时序：
  * ```
  *   app.whenReady:
