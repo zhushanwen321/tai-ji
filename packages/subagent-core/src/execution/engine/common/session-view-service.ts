@@ -85,7 +85,7 @@ const OUTCOME_PLACEHOLDER_TEXT = "(no outcome recorded)";
 export interface EngineRouteSource {
   /** record.engine（'pi' | 'zcode' | ...；缺席 = pi 缺省）。 */
   engine?: unknown;
-  /** record.engineHandle（原生引擎锚载体；pi record 不写）。 */
+  /** record.engineHandle（会话锚载体：pi 与原生引擎都写，判据见 hasNativeEngineAnchor）。 */
   engineHandle?: unknown;
 }
 
@@ -109,11 +109,11 @@ export class RecordEngineIdentityError extends Error {
   constructor(recordId: string) {
     const recovery =
       "Do not read this record through the default engine ('pi'). Restore the engine id recorded " +
-      "at spawn (engineHandle.sessionRef identifies the native session) from the record's session " +
-      "entry / manifest projection, then rebuild the record projection.";
+      "at spawn (the session-db anchor in engineHandle.sessionRef identifies the native session) " +
+      "from the record's session entry / manifest projection, then rebuild the record projection.";
     super(
       `${RECORD_ENGINE_IDENTITY_MISSING_CODE}: record "${recordId}" carries a native engine anchor ` +
-        `(engineHandle.sessionRef) but no engine id — the record is corrupted, refusing to route ` +
+        `(engineHandle.sessionRef.dbPath) but no engine id — the record is corrupted, refusing to route ` +
         `it to the default engine 'pi'. Recovery: ${recovery}`,
     );
     this.name = "RecordEngineIdentityError";
@@ -123,9 +123,13 @@ export class RecordEngineIdentityError extends Error {
 }
 
 /**
- * 原生引擎锚判据：record.engineHandle.sessionRef 为非空 plain object（≥1 键）。
- * pi record 不写 engineHandle；zcode 等原生引擎 record 的锚恒为
- * {sessionId, dbPath}（引擎 onHandleReady 回传面）。
+ * 原生引擎（会话库型）锚判据：engineHandle.sessionRef 带非空 string `dbPath`。
+ *
+ * 为什么不是「sessionRef 非空」：pi 与原生引擎的 run 都会回填 engineHandle.sessionRef
+ * ——pi 的 ref 是 {recordId, sessionId?, sessionFile?}（进程内会话锚），zcode 的 ref 是
+ * {sessionId, dbPath}（隔离会话库锚，dbPath 是原生引擎独有的键）。判据取 dbPath 才与
+ * transcriptAnchorOf 的 zcode 分支同源（assembly/cold-lookup.ts），否则每条 pi record
+ * 都会被误判成「原生锚 + 缺 engine」的损坏形态。
  */
 export function hasNativeEngineAnchor(engineHandle: unknown): boolean {
   if (typeof engineHandle !== "object" || engineHandle === null || Array.isArray(engineHandle)) {
@@ -135,7 +139,8 @@ export function hasNativeEngineAnchor(engineHandle: unknown): boolean {
   if (typeof sessionRef !== "object" || sessionRef === null || Array.isArray(sessionRef)) {
     return false;
   }
-  return Object.keys(sessionRef).length > 0;
+  const dbPath = Reflect.get(sessionRef, "dbPath");
+  return typeof dbPath === "string" && dbPath.length > 0;
 }
 
 /**

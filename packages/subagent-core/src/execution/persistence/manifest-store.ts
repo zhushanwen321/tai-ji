@@ -77,15 +77,6 @@ export interface ManifestRecord {
   task?: string;
   slug?: string;
   model?: string;
-  /**
-   * [P1b-2 / D5 终局投影] run 终局形态（completed/failed/cancelled）。record 域的
-   * 投影能力面：record 终态写入链（markFinalized 族）接线归后继批次（Q2/P3 领地），
-   * 本批只交付字段与读侧兼容。undefined = 未投影/旧 manifest（isValidManifest 不查
-   * 可选字段，读侧守卫归一，不炸）。
-   */
-  outcome?: RunOutcome;
-  /** [P1b-2 / D5 终局投影] 失败终局的结构化编码（见 outcome 注释的接线归属）。 */
-  errorCode?: RunErrorCode;
 }
 
 /** manifest JSON.stringify 缩进空格数（no-magic-numbers 合规）。

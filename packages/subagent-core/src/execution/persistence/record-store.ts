@@ -885,35 +885,6 @@ export class RecordStore {
     pi?.appendEntry?.("subagent:manifest-write-failed", { id, error: msg });
   }
 
-  /**
-   * [H4 收口 / G1] entry 重物化腿的 manifest 投影补写（record-access 可重连终态
-   * 重物化通道的唯一入口——store 外零 manifest 直写）。manifest 是可丢缓存（D5），
-   * 本方法只做缺员补写：失败 warn 留痕不响亮（缓存补缺失败不构成宿主错误，对齐
-   * U4c rebuildIndexes 的降级语义——区别于终态面 writeManifestPersisted 的响亮）；
-   * manifestDir 接线时为同步写（停机窗防护与终态面同源）。
-   */
-  rematerializeManifest(manifest: ManifestRecord): void {
-    const warnFailure = (err: unknown): void => {
-      logger.warn("[subagents] rematerialize manifest write failed (cache backfill)", {
-        detail: { id: manifest.id, error: err instanceof Error ? err.message : String(err) },
-      });
-    };
-    if (this.manifestDir !== undefined) {
-      try {
-        writeAtomicFileSync(
-          path.join(this.manifestDir, `${manifest.id}.json`),
-          JSON.stringify(manifest, null, MANIFEST_INDENT_SPACES),
-        );
-      } catch (err) {
-        warnFailure(err);
-      }
-      return;
-    }
-    if (this.manifestStore !== undefined) {
-      void this.manifestStore.writeManifest(manifest).catch(warnFailure);
-    }
-  }
-
   /** 按 id 查找。返回可变 record（仅 runtime 内部用）。 */
   getMutable(id: string): ExecutionRecord | undefined {
     return this.records.get(id);

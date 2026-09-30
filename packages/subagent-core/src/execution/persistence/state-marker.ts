@@ -99,14 +99,6 @@ export interface StateMarker {
   /** idle = 收口时间（新格式）；cancelled 的精确结束时间（重建判定消费）；
    *  finalized 恒 undefined（重建走 jsonl 末 entry ts）。 */
   endedAt?: number;
-  /**
-   * [P1b-2 / D5 终局投影] run 终局形态（completed/failed/cancelled）。仅新格式
-   * 写入面（writeSettledState）携带；旧 `.state`（存量三值形态）无此字段 →
-   * undefined（读守卫归一，不炸）。finalized/cancelled 旧值分支不投影本字段。
-   */
-  outcome?: RunOutcome;
-  /** [P1b-2 / D5 终局投影] 失败终局的结构化编码（outcome=failed 时有意义）。 */
-  errorCode?: RunErrorCode;
 }
 
 /** sidecar stat 戳（结构对齐 record-store 的 Stamp——缓存校验用，避免跨模块类型耦合）。 */
@@ -168,14 +160,12 @@ export function writeCancelledState(sessionFile: string, endedAt: number): boole
  */
 export function writeSettledState(
   sessionFile: string,
-  payload: { stopReason?: StopReason; endedAt?: number; outcome?: RunOutcome; errorCode?: RunErrorCode },
+  payload: { stopReason?: StopReason; endedAt?: number },
 ): boolean {
   return writeStateMarker(sessionFile, {
     status: "idle",
     ...(payload.stopReason !== undefined ? { reason: payload.stopReason } : {}),
     ...(payload.endedAt !== undefined ? { endedAt: payload.endedAt } : {}),
-    ...(payload.outcome !== undefined ? { outcome: payload.outcome } : {}),
-    ...(payload.errorCode !== undefined ? { errorCode: payload.errorCode } : {}),
   });
 }
 
@@ -267,15 +257,11 @@ function readNewStateMarker(sessionFile: string): StateMarker | undefined {
     const parsed = JSON.parse(raw) as Partial<StateMarker>;
     // 新格式收条（§3.2.4）：{status:"idle", reason?=stopReason, endedAt?}——可选域
     // 类型守卫归一（非法/缺省 → undefined，重建面按「无则」兜底，见 buildRecord）。
-    // [P1b-2 / D5] outcome/errorCode 同款守卫归一：outcome 需落 ALL_RUN_OUTCOMES
-    // 词表（词表外/缺省 → undefined = 不投影，旧 .state 存量形态零迁移）。
     if (parsed.status === "idle") {
       return {
         status: "idle",
         ...(typeof parsed.reason === "string" ? { reason: parsed.reason } : {}),
         ...(typeof parsed.endedAt === "number" ? { endedAt: parsed.endedAt } : {}),
-        ...(isRunOutcome(parsed.outcome) ? { outcome: parsed.outcome } : {}),
-        ...(typeof parsed.errorCode === "string" ? { errorCode: parsed.errorCode } : {}),
       };
     }
     if (parsed.status === "cancelled") {

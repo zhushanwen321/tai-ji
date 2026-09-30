@@ -146,18 +146,30 @@ describe("extractEngineId / resolveEngineRouteId（引擎路由裁决单点）",
 
   it("resolveEngineRouteId 无 record id 入参 → 错误信息用 (unknown) 占位", () => {
     expect(() =>
-      resolveEngineRouteId({ engine: undefined, engineHandle: { sessionRef: { sessionId: "s" } } }),
+      resolveEngineRouteId({
+        engine: undefined,
+        engineHandle: { sessionRef: { sessionId: "s", dbPath: "/db/z.sqlite" } },
+      }),
     ).toThrow(/record "\(unknown\)"/);
   });
 
-  it("hasNativeEngineAnchor 判据：非对象 / 数组 / sessionRef 非法 / 空 sessionRef → false", () => {
+  it("hasNativeEngineAnchor 判据：只有会话库锚（sessionRef.dbPath）算原生锚", () => {
     expect(hasNativeEngineAnchor(undefined)).toBe(false);
     expect(hasNativeEngineAnchor("x")).toBe(false);
     expect(hasNativeEngineAnchor([])).toBe(false);
     expect(hasNativeEngineAnchor({})).toBe(false);
     expect(hasNativeEngineAnchor({ sessionRef: [] })).toBe(false);
     expect(hasNativeEngineAnchor({ sessionRef: {} })).toBe(false);
-    expect(hasNativeEngineAnchor({ sessionRef: { sessionId: "s" } })).toBe(true);
+    // pi 的引擎句柄：{recordId, sessionId?, sessionFile?} 无 dbPath → 不是原生锚
+    expect(
+      hasNativeEngineAnchor({
+        sessionRef: { recordId: "sub-1", sessionId: "s", sessionFile: "/f.jsonl" },
+      }),
+    ).toBe(false);
+    expect(hasNativeEngineAnchor({ sessionRef: { sessionId: "s" } })).toBe(false);
+    // 原生引擎（zcode）会话库锚：sessionId + dbPath
+    expect(hasNativeEngineAnchor({ sessionRef: { sessionId: "s", dbPath: "/db/z.sqlite" } })).toBe(true);
+    expect(hasNativeEngineAnchor({ sessionRef: { dbPath: "" } })).toBe(false);
   });
 
   it("缺省引擎 id 与 registry 的 DEFAULT_ENGINE_ID 同值（本地锚定防漂移守护）", async () => {

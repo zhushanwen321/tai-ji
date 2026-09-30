@@ -5,8 +5,7 @@
 // 锁四面（D5-④ manifest-write 输出 + D5 清理规则①单源锚定）：
 // 1. 三形态写读闭环：成功=completed、失败=failed+errorCode、取消=cancelled。
 // 2. 旧读侧兼容：旧 manifest（无 outcome 字段的存量/手写形态）读回 null 不炸；
-//    ManifestRecord（record 域）带 outcome/errorCode 往返保留、旧记录缺字段
-//    读回 undefined 不炸（isValidManifest 不拒可选字段）。
+//    旧记录缺可选字段读回 undefined 不炸（isValidManifest 不拒可选字段）。
 // 3. 损坏降级：JSON 损坏 / 形状不合法 → null（未终局语义），消费方按「无投影」。
 // 4. runId 防穿越：白名单外 runId 拒绝（文件名由 runId 直接拼出的路径安全线）。
 
@@ -17,10 +16,8 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
-  ManifestStore,
   readRunTerminalManifest,
   writeRunTerminalManifest,
-  type ManifestRecord,
   type RunTerminalManifest,
 } from "../persistence/manifest-store.ts";
 
@@ -108,39 +105,6 @@ describe("旧读侧兼容（无 outcome 字段读回 null/undefined 不炸）", 
     expect(await readRunTerminalManifest(dir, "wf-1719500000000-abcd")).toBeNull();
   });
 
-  it("ManifestRecord 带 outcome/errorCode：writeManifest → readManifest 往返保留（record 域投影能力面）", async () => {
-    const store = new ManifestStore(dir);
-    const record: ManifestRecord = {
-      id: "rec-1",
-      rootSessionId: "root",
-      agentName: "reviewer",
-      status: "closed",
-      createdAt: 1,
-      outcome: "failed",
-      errorCode: "engine_crashed",
-    };
-    await store.writeManifest(record);
-
-    const read = await store.readManifest("rec-1");
-    expect(read).toMatchObject({ id: "rec-1", outcome: "failed", errorCode: "engine_crashed" });
-  });
-
-  it("旧 ManifestRecord（无 outcome 字段）readManifest 正常返回且 outcome undefined", async () => {
-    const store = new ManifestStore(dir);
-    const record: ManifestRecord = {
-      id: "rec-old",
-      rootSessionId: "root",
-      agentName: "reviewer",
-      status: "closed",
-      createdAt: 1,
-    };
-    await store.writeManifest(record);
-
-    const read = await store.readManifest("rec-old");
-    expect(read).not.toBeNull();
-    expect(read?.outcome).toBeUndefined();
-    expect(read?.errorCode).toBeUndefined();
-  });
 });
 
 // ── 3. 损坏降级 ──────────────────────────────────────────────
