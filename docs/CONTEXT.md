@@ -319,10 +319,12 @@ run 与 record 的状态变化唯一落盘形态：append-only 文本流，逐�
 |---|---|---|---|---|
 | `sessions-index.json` | 是 | **是**（每条带该 jsonl 的 mtime+size，消费点 `record-store.ts` 逐条比对，不匹配即重探测） | 是 | **三性质齐备**——唯一的纯索引 |
 | manifest（`<sa-id>.json`） | 否 | 否 | 否（`stopReason` 现由它独家承载） | 跨包读取面（session-reader 只认它） |
-| `.state` 收条 | 否 | 否 | 是 | **写侧已退场**（收条由 `record-settled` 帧承载）；读侧兜底待删 |
+| ~~`.state` 收条~~ | — | — | — | **已退场**：收条由 `record-settled` 帧承载（写侧删除、读侧删除，快路径走索引收条） |
 | `.record-binding` | 否 | 否 | 否（见 [身份绑定](#身份绑定record-binding与写权epoch)） | 唯一身份/统计载体 |
 
 **终态目标**：只有索引存在，且三性质齐备；其余载体删除。
+
+**退场后残留的收尾项**（`state-marker.ts` 侧）：写函数族（`writeStateMarker` / `writeSettledState` / `writeFinalizedState` / `writeCancelledState`）与 `readStateMarker` / `statStateStamp` 已成死代码但仍在文件里；`markResurrected` 仍会删 `.state`/`.finalized`/`.cancelled` 残留（无害的旧文件清理，但它的「删失败即响亮抛错」语义已随载体退场而失去意义，其 6 个用例覆盖的正是该语义）。这两项要连同 12 个仍以这些函数造 fixture 的测试文件一起清，属于同一批。
 
 **读侧退场的隐藏前置**（`readStateMarker` / `FileStamps.state` 删除时踩到）：终态收条换源到折叠后，**没有事件面的 store 就无法表达终态**——`new RecordStore(sessionsDir)`（不传 recordsDir）这类构造在测试里很常见，它们的「终态 fixture」原来靠写 `.state` 造，收条退场后这些断言无处落地。因此读侧退场必须同批处理：要么让这些测试构造带 recordsDir 的 store 并用事件帧造终态，要么删掉其终态断言（其被测行为已随旧读链退场）。
 
