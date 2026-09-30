@@ -53,6 +53,7 @@ import {
   type DiscoverEnginesOptions,
 } from "./engine-discovery-scan.ts";
 import type { ProbeReport } from "./types.ts";
+import { GLOBAL_SLOT_KEYS } from "../../shared/global-slots.ts";
 
 // core log facade（execution 层统一 "subagents" component，模块顶层缓存惯例）。
 const logger = getLogger("subagents");
@@ -66,7 +67,7 @@ const logger = getLogger("subagents");
 // ensureRuntimeEngineWiring 装载；pi 壳接线归后续单元——slot 未设置时本通道与裸
 // hasEngine 等价，零行为变化）。参数与 session_start 发现扫描同源（hostKind/agentDir/
 // dataDir），补扫只读 manifest 不握手（DiscoverEnginesOptions 语义）。
-const RESCAN_OPTS_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagent-workflow.engineDiscoveryRescanOpts");
+const RESCAN_OPTS_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.engineDiscoveryRescanOpts);
 
 /** 宿主接线：登记补扫发现参数（与发现扫描同源；重复登记覆盖，幂等）。 */
 export function setEngineDiscoveryRescanOptions(opts: DiscoverEnginesOptions): void {
@@ -526,9 +527,7 @@ export interface WorkflowWindowEngineState {
   readonly ports: Map<string, EnginePort>;
 }
 
-const WORKFLOW_WINDOW_STATES_SLOT_KEY = Symbol.for(
-  "@zhushanwen/pi-subagent-workflow.workflowWindowEngineStates",
-);
+const WORKFLOW_WINDOW_STATES_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.workflowWindowEngineStates);
 
 function getWorkflowWindowStates(): Map<string, WorkflowWindowEngineState> {
   // globalThis 无 symbol 索引签名，Reflect 读写（registry getRegistrySlot 同款）。
@@ -619,9 +618,7 @@ const productionWorkflowWindowEngineGateway: WorkflowWindowEngineGateway = {
   },
 };
 
-const WORKFLOW_WINDOW_GATEWAY_SLOT_KEY = Symbol.for(
-  "@zhushanwen/pi-subagent-workflow.workflowWindowEngineGateway",
-);
+const WORKFLOW_WINDOW_GATEWAY_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.workflowWindowEngineGateway);
 
 /** 宿主/测试注入窗口引擎网关（undefined = 回落生产缺省，保守透传）。 */
 export function setWorkflowWindowEngineGateway(gateway: WorkflowWindowEngineGateway | undefined): void {

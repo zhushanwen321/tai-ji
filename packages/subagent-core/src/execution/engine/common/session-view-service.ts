@@ -55,6 +55,7 @@ import type {
   SubagentRecordSnapshot,
 } from "./session-view-types.js";
 import { parseEngineHandle } from "./session-view-types.js";
+import { GLOBAL_SLOT_KEYS } from "../../../shared/global-slots.ts";
 
 const logger = getLogger("subagents");
 
@@ -110,9 +111,7 @@ export type NativeSessionReader = (
 ) => Promise<SessionView | undefined>;
 
 /** 进程级注册表槽位（globalThis[Symbol.for] 防 jiti 双路径加载分裂，对齐 registry.ts 惯例）。 */
-const NATIVE_READER_SLOT_KEY = Symbol.for(
-  "@zhushanwen/pi-subagent-workflow.nativeSessionReaders",
-);
+const NATIVE_READER_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.nativeSessionReaders);
 
 function getReaderSlot(): Map<string, NativeSessionReader> {
   let slot = Reflect.get(globalThis, NATIVE_READER_SLOT_KEY) as

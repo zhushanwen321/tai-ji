@@ -74,6 +74,7 @@ import { setupNotifyLedgerCompactionGuard } from "./workflow-notify.ts";
 import { setupModelEvents } from "./model-events.ts";
 import { setupSubagentsCascadeEvents } from "./subagents-events.ts";
 // ═══ session 生命周期装配 seam（bootstrap seam，设计 §3.1/D1） ═══
+import { GLOBAL_SLOT_KEYS } from "@zhushanwen/subagent-core";
 import {
   getOrCreateDialogQueue,
   setupSessionLifecycle,
@@ -125,7 +126,7 @@ function createWorkflowDomainState(): WorkflowDomainState {
 // 此槽拿回同一 domain state，session_shutdown(reload) 跳过清理（D1）保住的
 // 在飞 run / store 由 post-reload session_start(reason=reload) 的 adoption
 // 接管（D4，session-lifecycle.ts）。
-const WORKFLOW_DOMAIN_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.workflow-domain-state");
+const WORKFLOW_DOMAIN_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.workflowDomainState);
 
 function getOrCreateWorkflowDomainState(): WorkflowDomainState {
   let state = Reflect.get(globalThis, WORKFLOW_DOMAIN_SLOT_KEY) as WorkflowDomainState | undefined;

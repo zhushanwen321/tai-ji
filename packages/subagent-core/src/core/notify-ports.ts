@@ -15,6 +15,8 @@
 //   - 投递工厂缺席 → 消费方降级直发：直发是消费方行为，端口层无法代为执行，
 //     故 createDelivery 刻意保持缺席（undefined），由消费方判缺席降级。
 
+import { GLOBAL_SLOT_KEYS } from "../shared/global-slots.ts";
+
 /** 投递意图（与 session-delivery 的 DeliveryIntent 字面量一致）。 */
 export type DeliveryIntent = "interrupt-at-turn-boundary" | "after-run";
 
@@ -120,7 +122,7 @@ export interface NotifyDomainPorts {
 // 配置态持有：globalThis[Symbol.for] slot（与 host-services 同款覆盖式语义——重复
 // 注入以后者覆盖；post-convergence D9 根治，dist 双形态下免模块副本分裂，范式与
 // execution/subagent-service.ts 进程单例 slot 同型）。
-const NOTIFY_PORTS_SLOT_KEY = Symbol.for("@zhushanwen/subagent-core.notify-ports");
+const NOTIFY_PORTS_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.notifyPorts);
 
 type NotifyPortsSlot = { current: NotifyDomainPorts | undefined };
 

@@ -90,6 +90,7 @@ function dialogTimeoutLogMessage(req: UiRequest, waitedMs: number): string {
 // （contract-closure），漂移编译期可抓。 ──
 export type { UiMethod, UiRequest, UiRequestHandler, UiResponse } from "@zhushanwen/subagent-engine-sdk";
 import type { UiRequest, UiRequestHandler, UiResponse } from "@zhushanwen/subagent-engine-sdk";
+import { GLOBAL_SLOT_KEYS } from "../../shared/global-slots.ts";
 
 // ── DialogGlobalQueue 实现 ──
 
@@ -147,7 +148,7 @@ interface QueueItem {
  * 线程模型：纯 Promise + 微任务驱动，无锁。Node 单线程 event loop 保证队列状态一致。
  *
  * 单 session 假设（M-2，与 index.ts lastSessionId 同源）：本队列是进程级单例（实例挂在
- * globalThis[Symbol.for("@zhushanwen/pi-subagents.dialogQueue")]，见 getOrCreateDialogQueue）。
+ * globalThis[Symbol.for(GLOBAL_SLOT_KEYS.dialogQueue)]，见 getOrCreateDialogQueue）。
  * rejectAll() 清空所有 pending dialog——无 per-session 隔离。Pi 当前架构保证单进程
  * 单 session 串行（同进程不会并发多个 session），故 session_shutdown 调 rejectAll() 只会清掉
  * 当前 session 的 pending。若未来 Pi 支持同进程多 session 并发，session A 退出会误清 session B

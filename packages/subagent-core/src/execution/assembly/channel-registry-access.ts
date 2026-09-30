@@ -4,7 +4,7 @@
 //
 // ask-user 等扩展通过本模块注册 channel handler，让 subagent 子进程的 UI 请求
 // 能透传到主进程渲染。所有扩展各自直接读写
-// globalThis[Symbol.for("@zhushanwen/pi-subagents.channelHandshake")]，
+// globalThis[Symbol.for(GLOBAL_SLOT_KEYS.channelHandshake)]，
 // 拿到结构兼容 ChannelRegistryHandshake 的同一握手对象。
 //
 // ── 升级说明（决策 D 修复 M4）─────────────────────────────────
@@ -25,6 +25,7 @@
 // version 守卫：    slot.version !== 1 时 console.warn + 丢弃重建（向前兼容未来升级）
 
 import { getLogger } from "../../core/logger.ts";
+import { GLOBAL_SLOT_KEYS } from "../../shared/global-slots.ts";
 
 import { createUiChannelRegistry, type UiChannelRegistry, type ChannelHandler } from "../ui/ui-channels.ts";
 
@@ -39,7 +40,7 @@ const logger = getLogger("subagents");
  *  改名历史：原 `CHANNEL_REGISTRY_KEY`（字面量 `...channelRegistry`）在决策 D
  *  中升级为 `CHANNEL_HANDSHAKE_KEY`（字面量 `...channelHandshake`），槽位形状
  *  从 registry 实例改为握手对象。 */
-export const CHANNEL_HANDSHAKE_KEY = Symbol.for("@zhushanwen/pi-subagents.channelHandshake");
+export const CHANNEL_HANDSHAKE_KEY = Symbol.for(GLOBAL_SLOT_KEYS.channelHandshake);
 
 /** 握手版本。未来若形状不兼容升级，递增此常量并在 getOrCreateChannelRegistry
  *  的 version 守卫里加迁移逻辑。 */

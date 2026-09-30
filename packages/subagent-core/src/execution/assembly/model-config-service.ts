@@ -20,6 +20,7 @@ import {
   resolveModel,
 } from "./model-resolver.ts";
 import type { SubagentsGlobalConfig } from "./types.ts";
+import { GLOBAL_SLOT_KEYS } from "../../shared/global-slots.ts";
 
 // ============================================================
 // 类型
@@ -224,7 +225,7 @@ export class ModelConfigService {
 
 // 用 globalThis[Symbol.for] 持有进程单例，避免 jiti 因路径字符串不同加载多份模块
 // 导致单例分裂（详见 docs/STANDARDS.md §7.5）。
-const MODEL_SERVICE_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.model-service");
+const MODEL_SERVICE_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.modelService);
 
 type ModelServiceSlot = { current: ModelConfigService | null };
 

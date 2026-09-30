@@ -15,7 +15,9 @@ import type {
   WorktreeHandle,
 } from "@zhushanwen/subagent-engine-sdk";
 
-import type { AgentFailureKind } from "../../orchestration/models/types.ts";
+// [§2.3 环解开] AgentFailureKind 的权威定义在 SDK；此前经 orchestration/models/types.ts
+// 转手（那里的 re-export），构成与上一条对称的类型环。直接从 SDK 取。
+import type { AgentFailureKind } from "@zhushanwen/subagent-engine-sdk";
 import type { ModelInfo } from "./model-resolver.ts";
 
 // ============================================================

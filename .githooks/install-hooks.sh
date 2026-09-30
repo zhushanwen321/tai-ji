@@ -1666,6 +1666,49 @@ if echo "$SUBAGENT_CORE_STAGED" | grep -qE "^packages/subagent-core/|^scripts/ch
 fi
 
 # ============================================================================
+# subagent-core 包内值依赖环检查（C-data-26，§2.3 配套）
+#   packages/subagent-core/** 或检查脚本自身变更时触发：
+#   scripts/check-subagent-core-value-cycles.mjs —— 值 import 图不得成环（类型擦除边
+#   豁免，仅提示）。与 H3 聚合边界检查互补：后者只看六聚合子图，本检查覆盖整包。
+# ============================================================================
+
+SUBAGENT_CORE_CYCLE_STAGED=$(git diff --cached --name-only -- packages/subagent-core/ scripts/check-subagent-core-value-cycles.mjs)
+if echo "$SUBAGENT_CORE_CYCLE_STAGED" | grep -qE "^packages/subagent-core/|^scripts/check-subagent-core-value-cycles\.mjs$"; then
+    print_section "[subagent-core 包内值依赖环检查]"
+    if [ ! -f "scripts/check-subagent-core-value-cycles.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-subagent-core-value-cycles.mjs（C-data-26 守卫缺失）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-subagent-core-value-cycles.mjs; then
+        echo -e "${RED}[ERROR] subagent-core 包内检出值依赖环（C-data-26）——按上方 SCC 成员与内部边处理（端口反转/装配注入/共享词汇下沉契约层）${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] subagent-core 包内值依赖环检查通过${NC}"
+fi
+
+# ============================================================================
+# 进程级全局槽键归属检查（C-state-20，§2.6 配套）
+#   subagent 体系三包或检查脚本自身变更时触发：scripts/check-global-slot-keys.mjs
+#   —— Symbol.for 字面量只允许出现在两处声明文件，前缀/唯一性同时校验。
+# ============================================================================
+
+GLOBAL_SLOT_STAGED=$(git diff --cached --name-only -- packages/subagent-core/src packages/subagent-engine-sdk/src extensions/universal/subagent-workflow/src scripts/check-global-slot-keys.mjs)
+if echo "$GLOBAL_SLOT_STAGED" | grep -qE "^packages/subagent-(core|engine-sdk)/src/|^extensions/universal/subagent-workflow/src/|^scripts/check-global-slot-keys\.mjs$"; then
+    print_section "[进程级全局槽键归属检查]"
+    if [ ! -f "scripts/check-global-slot-keys.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-global-slot-keys.mjs（C-state-20 守卫缺失）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-global-slot-keys.mjs; then
+        echo -e "${RED}[ERROR] 进程级全局槽键归属检查未通过（C-state-20）——字面量集中到两处声明文件，其余写 Symbol.for(<常量>)${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] 进程级全局槽键归属检查通过${NC}"
+fi
+
+# ============================================================================
 # subagent-service 聚合边界检查（H3/R5，subagent-service-decomposition S3 依赖单向）
 #   staged 命中六聚合（packages/subagent-core/src/execution/service/）或壳
 #   （subagent-service.ts）或检查脚本自身时触发：

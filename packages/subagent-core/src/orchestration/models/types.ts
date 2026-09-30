@@ -18,9 +18,11 @@ import type {
   AgentFailureKind,
   AgentOutcomeUsage as AgentUsage,
   ToolCallEntry,
+  // [§2.3 环解开] WorktreeHandle 的权威定义在 SDK（assembly/types.ts 只是 re-export）；
+  // 此前本文件经 assembly/types.ts 转手取它，构成 orchestration/models ↔
+  // execution/assembly 的文件级类型环。直接从 SDK 取，环自解。
+  WorktreeHandle,
 } from "@zhushanwen/subagent-engine-sdk";
-
-import type { WorktreeHandle } from "../../execution/assembly/types.ts";
 
 // ── 状态机 ────────────────────────────────────────────────────
 

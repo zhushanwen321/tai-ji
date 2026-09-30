@@ -325,7 +325,7 @@ jobs:
       # 产物污染，抽取自 scripts/render-sampling/decisions.mjs，jsdom 直测浏览器侧
       # 同一函数体，不依赖 staged 产物）。
       - name: Test - scripts guards
-        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs scripts/__tests__/check-guide-contract-projection.test.mjs scripts/__tests__/check-infra-services-import.test.mjs scripts/__tests__/verify-scheduler-e2e.test.mjs scripts/__tests__/render-sampling-decisions.test.mjs
+        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-subagent-core-value-cycles.test.mjs scripts/__tests__/check-global-slot-keys.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs scripts/__tests__/check-guide-contract-projection.test.mjs scripts/__tests__/check-infra-services-import.test.mjs scripts/__tests__/verify-scheduler-e2e.test.mjs scripts/__tests__/render-sampling-decisions.test.mjs
 
   # E2E 视觉回归（mock 轨 visual-chromium）：只跑像素 diff baseline（S2 W3 交付的
   # visual-chromium project，testMatch **/visual/** + chromium.launch + spawn vite @ VITE_MOCK=true）。
@@ -636,6 +636,16 @@ jobs:
       # 同上行 G4 的挂载理由）。
       - name: Subagent-core closure guard (D9-①)
         run: node scripts/check-subagent-core-closure.mjs
+
+      # C-data-26 subagent-core 包内值依赖环守卫（与 pre-commit 同源直调）：整包值
+      # import 图零环，类型擦除边豁免——CI 面是全量等价拦截点（D7 通则）。
+      - name: Subagent-core value-cycle guard (C-data-26)
+        run: node scripts/check-subagent-core-value-cycles.mjs
+
+      # C-state-20 进程级全局槽键归属守卫（与 pre-commit 同源直调）：Symbol.for 字面量
+      # 只允许出现在两处声明文件，前缀/唯一性同时校验。
+      - name: Global slot-key ownership guard (C-state-20)
+        run: node scripts/check-global-slot-keys.mjs
 
       # H3 subagent-service 聚合边界守卫（与 pre-commit 同源直调；守卫全量扫描
       # SERVICE_DIR 不依赖 staged 上下文）：聚合间值 import 禁 / 聚合→壳 import 禁 /
