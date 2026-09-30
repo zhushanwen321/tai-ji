@@ -319,10 +319,12 @@ run 与 record 的状态变化唯一落盘形态：append-only 文本流，逐�
 |---|---|---|---|---|
 | `sessions-index.json` | 是 | **是**（每条带该 jsonl 的 mtime+size，消费点 `record-store.ts` 逐条比对，不匹配即重探测） | 是 | **三性质齐备**——唯一的纯索引 |
 | manifest（`<sa-id>.json`） | 否 | 否 | 否（`stopReason` 现由它独家承载） | 跨包读取面（session-reader 只认它） |
-| `.state` 收条 | 否 | 否 | 是 | core 查询面的终态读源 |
+| `.state` 收条 | 否 | 否 | 是 | **写侧已退场**（收条由 `record-settled` 帧承载）；读侧兜底待删 |
 | `.record-binding` | 否 | 否 | 否（见 [身份绑定](#身份绑定record-binding与写权epoch)） | 唯一身份/统计载体 |
 
 **终态目标**：只有索引存在，且三性质齐备；其余载体删除。
+
+**读侧退场的隐藏前置**（`readStateMarker` / `FileStamps.state` 删除时踩到）：终态收条换源到折叠后，**没有事件面的 store 就无法表达终态**——`new RecordStore(sessionsDir)`（不传 recordsDir）这类构造在测试里很常见，它们的「终态 fixture」原来靠写 `.state` 造，收条退场后这些断言无处落地。因此读侧退场必须同批处理：要么让这些测试构造带 recordsDir 的 store 并用事件帧造终态，要么删掉其终态断言（其被测行为已随旧读链退场）。
 
 **索引承载终态收条的裁决**（换源时不可回避）：终态域（`stopReason` / `turns` / `totalTokens`）换源到折叠后，索引快路径**不能**去读每条记录的事件文件——那正好废掉索引存在的理由（冷启动零内容读取）。因此索引条目必须自己承载终态收条，且它的水位要覆盖**事件文件**的 stat（今天只盖 jsonl 的 mtime+size：轮终收条写在 jsonl 末次写入之后，只比 jsonl 会漏掉收条变化）。两条腿：① 索引条目加终态字段；② 水位扩到 `jsonl + <id>.events` 两个 stat。未做到之前，索引快路径的终态仍只能读 sidecar。
 
