@@ -14,11 +14,11 @@
  * （设计 §3.1 删除面），确认通道由「队列 FIFO 文本匹配」升级为「内核条目 id 标记匹配」，
  * git 可追溯。
  *
- * 投影落位说明：session.delivery 投影的理想宿主是 chat store 分区（对齐 retryStates
- * 分区惯例），但 store.ts 不在 u3b 领地——本模块级 ref 为 interim 承载（taste:allow-no-data-owner
- * 同类豁免：内核状态帧是 runtime 投影数据，非本地 UI 输入），store 分区收编归 u3c/u5
- * 评估；per-session 键控 + disposeSession/resetChatModuleStateForTest 双清理点 + 测试
- * reset 钩子已按 ADR-0049 分区纪律对齐。
+ * 投影落位说明：session.delivery 投影由本模块级 ref 承载（u3c 落地形态：useQueueRows
+ * 等 composable 不持 per-session 状态，投影分区由本 ref 持有——内核状态帧是 runtime
+ * 投影数据，非本地 UI 输入）；per-session 键控 + disposeSession/resetChatModuleStateForTest
+ * 双清理点 + 测试 reset 钩子按 ADR-0049 分区纪律对齐。登记条目 = 登记表主表 #6
+ * （deliveryEntriesBySession 声明处 @data-owner #6）。
  */
 import { ref } from 'vue'
 import { textToSegments, MSG_ID_TAG_RE } from '@taiji/shared'
@@ -45,7 +45,8 @@ const MSG_ID_TAG_RE_GLOBAL = new RegExp(MSG_ID_TAG_RE.source, `${MSG_ID_TAG_RE.f
 // ── session.delivery 帧投影（D7 队列区单一数据源）──────────────────────────────
 
 /** per-session 内核条目快照投影（state topic last-value 语义：每帧整体替换）。 */
-// taste:allow-no-data-owner W24-EX-C（内核状态帧投影，interim 承载说明见文件头注）
+// @data-owner #6 —— 主表 #6 renderer 消费副本：队列区渲染（useQueueRows / QueueBubble）
+// 与撤回/气泡三态路由（findDeliveryEntry）直接消费的数据源，自 §4 ⑧ W24-EX-C 豁免转正向注解
 const deliveryEntriesBySession = ref<Map<string, DeliveryFrameEntry[]>>(new Map())
 
 /** steer/queued 条目 morph 时捕获的乐观气泡 segments（sid → clientUuid → 快照）。
@@ -56,8 +57,8 @@ interface MorphSegmentsSnapshot {
   segments: Segment[]
   capturedAt: number
 }
-// taste:allow-no-data-owner W24-EX-C（进程内流程状态——morph 暂存的段待回执消费，非 GUI 数据源；
-// 与上方投影同批 interim 承载，登记表条目随 u3c/u5 收编评估一并补登）
+// taste:allow-no-data-owner W24-EX-C（进程内流程状态——morph 暂存的段待送达回执一次性
+// 消费，无 GUI 直接消费方；登记于登记表 §4 ⑧ W24-EX-C 条目，队列条目本体归主表 #6 投影/内核）
 const morphSegmentsBySession = new Map<string, Map<string, MorphSegmentsSnapshot>>()
 
 /**
