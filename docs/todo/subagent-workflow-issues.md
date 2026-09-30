@@ -244,10 +244,10 @@
 - **[遗留·已登记]** ① **[已处置 2026-09-30]** 引擎路由不换目标——三层（调用参数 / agent frontmatter / 全局缺省）任一指定即按该引擎执行，不可用即结构化失败（probe 失败 → `engine_probe_failed`；id 未注册 → `engine_not_found`；全局 config.json 存在但读不出来 → `engine_config_unreadable`），不存在 `engineFallback` 留痕机制，故无持久化载体需求，本遗留项关闭；② `record-access.rematerializeReconnectableEntryManifests` 的 gate（`isLegacyClosedSettled ∧ isReconnectableFinalReason(closedReason)`）在 v2 无输入（终态条目不携带 closedReason）——本轮删除该不可达方法，物理判据版自愈（按「终态条目在场但查询面不可见」重物化）待裁决；③ workflow-record（run 族）的 v1 快照分支与 session-reader 旧指针 fallback 不在本轮范围（属 run 侧历史数据处置）。
 ---
 
-## 4. record 域轮次轴 CAS 缺口
+## 4. record 域轮次轴 CAS 缺口（已修 2026-09-30：markRoundStarted 终态门 + 无在途门的判定依据落档）
 
-- 「意图原语即状态机（CAS 拒绝表外转移）」在轮次轴不成立：markRoundIdle 唯一保护是 endedAt 终态检查（rounds.ts:190），无 status CAS（错误信息自认「调用方负责 gate」）；markRoundStarted（:132-138）对 running 中的 record 静默清在途轮数据。对照 markReopened（CAS+回滚，terminal.ts:377-425）是全库参照形态。
-- 设计决策点：CAS 拒绝语义（抛错 vs 幂等返回 false）；三个生产调用链（finalize-record / run-orchestration / record-lifecycle）是否都保证前置 status==="running" 需逐一核实——可能有调用方依赖「重复调用幂等」现状，补 CAS 会把静默变抛错。
+- 轮次轴两原语的现行保护形态（record-store-rounds.ts）：markRoundIdle = 在途门（`status !== "running"` warn + false，拒绝语义对齐 markReopened/markSettled）+ endedAt 终态冻结抛错（A3 断言）；markRoundStarted = endedAt 终态冻结抛错（对齐 A3；合法 revive 链经 resurrectClosed / reviveOrThrow 在轮始前清 endedAt，不被拦）。测试同族并列在 record-store-intent-api.test.ts 的 markRoundStarted / markRoundIdle describe 段。
+- markRoundStarted 无 running 在途门是核实后的判定，非缺口：轮始合法前提横跨 running（首轮出生 / 续轮 tryEnterRunning 翻边后 / revive 清位后 / onAbandoned→drain 的无轮终连续轮始）∪ idle（轮终后直接轮始 / reopen 后）——五种合法前提与「在途双轮始」内存形态完全同形（running + stopReason/result/endedAt 全 undefined），事件面 fold 也同形（同 round 双 started 帧无 idle 帧），原语层加 running 拒绝门只能误伤全部合法轮始。双轮始的生产防护在 Continuation 编排层构造性成立（dispatchRoundGuarded 的 activeRunId 单飞窗 + 终态门 + 复查到轮始之间无 await 的同步段），判定依据全文落档在 markRoundStartedImpl 方法头注释。
 
 ---
 

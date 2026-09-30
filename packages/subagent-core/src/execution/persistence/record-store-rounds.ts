@@ -119,16 +119,50 @@ export function appendEventImpl(id: string, event: AgentEvent, ctx: RoundsCtx): 
  * 的上轮停因（markRoundIdleImpl 簿记⑩）不清则第 2+ 轮在飞 record 被确定性误排除
  * （A2 第二轮 spinner+badge+1 必挂）。代价裁决（two-state-convergence §3.1）：在飞期
  * 上轮停因不可见（与「stopReason=上轮停因」语义的显式冲突裁决）。revive 格同步清
- * （conversation-continuation reviveOrThrow）与本清点同族。归口写点：热路径轮始与
- * 冷启动 resume 续轮（subagent-service，U3 迁移）。
+ * （conversation-continuation reviveOrThrow）与本清点同族。归口写点：Continuation
+ * 派发主干 dispatchRoundAsync（chat-rounds ContinuationHost 接线——含首轮 / 续轮 /
+ * 冷启动 resume 续轮，resume 编排已迁 Continuation）。
+ *
+ * [轮次轴 CAS] 终态冻结门：endedAt 已设（真终态簿记已落——写点只有 markFinalized /
+ * markCancelled / completeLegacyClosed 真终态族；markRoundIdle 刻意不写本位，轮终
+ * 留内存 idle 可续聊）时轮始 = 复活终态，fail-fast 抛错（对齐 markRoundIdle A3
+ * 断言）。全部合法解冻序列都在轮始**前**清 endedAt——markResurrected →
+ * resurrectClosed（idle→running 翻边并清终态位）、reviveOrThrow（tryEnterRunning
+ * 后手动清 endedAt）——「先轮始后解冻」的序列不存在，本门不拦 revive 链。
+ *
+ * [轮次轴 CAS·无 running 在途门的判定依据] 与 markRoundIdle 在途门（`status!==
+ * running` 拒绝）的对偶差异：轮终合法前提唯一（running），status 可作判据；轮始
+ * 合法前提横跨 running（首轮出生 / 续轮 tryEnterRunning 翻边后 / revive 清位后
+ * ——三种来源与「在途双轮始」的内存形态完全同形：running + stopReason/result/
+ * endedAt 全 undefined）∪ idle（轮终后直接轮始 / reopen 后——markReopened 保持
+ * idle 翻边归轮始），且 onAbandoned→drain（acquire 被打断、无 run 产生、不终态化）
+ * 的合法连续轮始连事件面 fold 也同形（同 round 双 started 帧无 idle 帧）。原语层
+ * 加「running 拒绝门」只能拒绝全部合法轮始（误伤首轮/续轮/revive 主链）或写成
+ * 永不触发的检查。双轮始的生产防护在 Continuation 编排层构造性成立
+ * （dispatchRoundGuarded 的 activeRunId 单飞窗 + 终态门 + 复查到轮始之间无 await
+ * 的同步段），本原语不设不可判定的门。
  *
  * @returns false = id 不在内存（debug 留痕，无副作用）。
+ * @throws Error record 终态簿记已冻结（endedAt 已设——复活终态的调用即 bug，
+ *         fail-fast，对齐 markRoundIdle A3 断言；生产链经 voidRoundFinalChain
+ *         承接为 error 留痕，不升格未处理拒绝）。
  */
 export function markRoundStartedImpl(id: string, ctx: RoundsCtx): boolean {
   const rec = ctx.records.get(id);
   if (rec === undefined) {
     logger.debug("[subagents] markRoundStarted: record not in memory", { detail: { id } });
     return false;
+  }
+  // [轮次轴 CAS] 终态冻结门（判定依据见方法头）：endedAt 已设 = 真终态簿记已落，
+  // 此刻轮始即复活终态 = 调用方 bug。合法 revive 链经 resurrectClosed /
+  // reviveOrThrow 在轮始前清本位，不会触达本门。
+  if (rec.endedAt !== undefined) {
+    throw new Error(
+      `markRoundStarted(${id}): terminal bookkeeping already frozen ` +
+        `(status: ${rec.status}${rec.closedReason !== undefined ? `/${rec.closedReason}` : ""}, endedAt: ${rec.endedAt}) — ` +
+        `round-start would resurrect a finalized record. ` +
+        `Recovery: caller must gate on record.status before dispatching a round; revived records must clear endedAt via markResurrected/reviveOrThrow first.`,
+    );
   }
   rec.status = "running";
   rec.result = undefined;

@@ -75,7 +75,7 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 import { writeAliveMarker, readAliveMarker } from "../persistence/alive-store.ts";
-import { createRecord, trySettleLegacyClosed } from "../persistence/execution-record.ts";
+import { createRecord, resurrectClosed, trySettleLegacyClosed } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
 import type { SubagentRecord } from "../assembly/types.ts";
@@ -319,6 +319,83 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
     it("id 不在内存 → false 无副作用", () => {
       expect(store.markRoundStarted("nope")).toBe(false);
+    });
+
+    // ── [轮次轴 CAS] 终态冻结门（与 markRoundIdle A3 断言同族；判定依据见
+    //    markRoundStartedImpl 方法头）────────────────────────────────
+
+    it("[轮次轴 CAS] 终态簿记已冻结（endedAt 已设）→ fail-fast 抛错，零副作用", () => {
+      // 形态来源：真终态族写点（markFinalized / markCancelled / completeLegacyClosed）
+      // 之后误派轮始 = 复活终态（调用方 bug）。markRoundIdle 刻意不写 endedAt
+      //（轮终留内存 idle 可续聊），本门只拦真终态复活。
+      const record = makeRecord("chat-rs-frozen", { status: "idle", endedAt: 123, result: "final output" });
+      store.register(record);
+      const eventsPath = path.join(manifestDir, "chat-rs-frozen.events");
+      const countEventLines = (): number =>
+        fs.existsSync(eventsPath)
+          ? fs.readFileSync(eventsPath, "utf-8").split("\n").filter((l) => l.trim().length > 0).length
+          : 0;
+      const linesBefore = countEventLines();
+
+      expect(() => store.markRoundStarted("chat-rs-frozen")).toThrow(
+        /terminal bookkeeping already frozen/,
+      );
+      // 零副作用：内存态不动（status/result 保持终态冻结值）、事件文件不追加
+      //（fail-fast 先于一切簿记——轮始帧不落账）。
+      expect(record.status).toBe("idle");
+      expect(record.result).toBe("final output");
+      expect(countEventLines()).toBe(linesBefore);
+    });
+
+    it("[轮次轴 CAS] 终态 record 经 resurrectClosed 解冻后轮始放行（revive 链不误伤）", () => {
+      // 合法解冻序列全部在轮始前清 endedAt：markResurrected → resurrectClosed
+      //（idle→running 翻边并清终态位）/ reviveOrThrow（tryEnterRunning 后手动清）
+      //——「先轮始后解冻」的序列不存在，本门不拦 revive 链。
+      const record = makeRecord("chat-rs-revived", { status: "idle", endedAt: 123 });
+      store.register(record);
+
+      expect(() => store.markRoundStarted("chat-rs-revived")).toThrow(
+        /terminal bookkeeping already frozen/,
+      );
+      expect(resurrectClosed(record)).toBe(true); // 解冻：idle→running + 清 endedAt
+      expect(store.markRoundStarted("chat-rs-revived")).toBe(true);
+      expect(record.status).toBe("running");
+    });
+
+    it("idle 续轮放行：轮终（idle）后轮始 → 翻 running + result/stopReason 清点 + 落帧", () => {
+      // 形态来源：轮终后直接续轮（markReopened 保持 idle 的 reopen 后轮始同形态）。
+      const record = makeRecord("chat-rs-idle", { round: 0 });
+      record.result = "round 1 output";
+      record.stopReason = "completed";
+      store.register(record);
+      expect(store.markRoundIdle("chat-rs-idle", { kind: "success", content: "round 1 output" })).toBe(true);
+      expect(record.status).toBe("idle");
+
+      expect(store.markRoundStarted("chat-rs-idle")).toBe(true);
+      expect(record.status).toBe("running"); // idle→running 翻边（续轮在飞）
+      expect(record.result).toBeUndefined(); // 上轮结果随轮始清点（isStreaming 公式）
+      expect(record.stopReason).toBeUndefined();
+      expect(lastJournalEvent(manifestDir, "chat-rs-idle")).toMatchObject({
+        type: "record-round-started",
+        round: 1,
+      });
+    });
+
+    it("running 连续轮始放行（onAbandoned→drain 合法路径语义锚）——无 running 在途门的判定依据", () => {
+      // 形态来源：acquire 被打断（无 run 产生、不终态化）→ drain 重派 = running 中
+      // 第二次轮始，是合法生产路径。与假想「双轮始竞态」的内存形态完全同形
+      //（running + stopReason/result/endedAt 全 undefined），首轮出生 / 续轮翻边 /
+      // revive 清位三种合法前提也同形——原语层无法构造「只拒双轮始」的 running 门，
+      // 双轮始的生产防护在 Continuation 编排层（activeRunId 单飞窗 + 终态门）。
+      // 本用例锚定原语层不拒绝的现状语义（详见 markRoundStartedImpl 方法头）。
+      const record = makeRecord("chat-rs-again");
+      store.register(record);
+      expect(store.markRoundStarted("chat-rs-again")).toBe(true);
+      loggerMock.warn.mockClear();
+
+      expect(store.markRoundStarted("chat-rs-again")).toBe(true); // 连续轮始不拒绝
+      expect(record.status).toBe("running");
+      expect(loggerMock.warn).not.toHaveBeenCalled(); // 无 CAS 拒绝留痕
     });
   });
 
