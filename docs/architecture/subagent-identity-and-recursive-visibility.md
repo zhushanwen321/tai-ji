@@ -25,14 +25,14 @@
 | `PI_SUBAGENT_FORK_DEPTH` | fork 链深度（root 侧一次设定，链上不变） | 视为 0 |
 | `PI_SUBAGENT_PARENT_RECORD_ID` | 父 record id（嵌套时 = 父进程自身的 selfRecordId） | 无父（顶层派发） |
 | `PI_SUBAGENT_AGENT` / `PI_SUBAGENT_TASK` | agent 名 / 任务文本（身份条目展示用） | 壳读者按空串兜底 |
-| `PI_SUBAGENT_MODE` | 执行形态（`background` / `chat`） | 壳读者按 `background` 兜底（含非法值） |
-| `PI_SUBAGENT_SLUG` / `PI_SUBAGENT_STARTED_AT` | 短标签 / 起始时刻（epoch ms） | slug 可选；startedAt 回落 `Date.now()` |
+| `PI_SUBAGENT_MODE` | 执行形态（信封权威值；core 现役词表只有 `background`，env 侧保持字符串以容纳其它引擎） | 信封缺席时继承父进程判定，顶层缺省 `background` |
+| `PI_SUBAGENT_SLUG` / `PI_SUBAGENT_STARTED_AT` | 短标签 / 起始时刻（epoch ms）——来源 = `ctx.identity` 信封（宿主权威值） | 信封缺席时 slug 可选、startedAt 回落 `Date.now()` |
 | `PI_SUBAGENT_WORKTREE` | worktree 隔离标志（`"true"` = 是） | 视为否 |
 
 ## 3. 传递链路
 
 ```
-core 派发 run（run.params / ctx 携带本次身份）
+core 派发 run（run.params.task + ctx.identity 信封；宿主侧构造单点 identityEnvelopeOf）
   → 引擎协议 run 帧送达引擎进程
     → 引擎 spawn 任务子 pi 进程：写回子进程 env（buildOutboundChildEnv 的 deny 终态之后）
       → 子 pi 进程启动即读到身份
