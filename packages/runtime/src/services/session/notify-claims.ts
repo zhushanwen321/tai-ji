@@ -284,18 +284,23 @@ export function createClaimLedger(deps: ClaimLedgerDeps = {}): ClaimLedger {
     }
   }
 
+  /** 单条 respond 素材组装（watchId 由调用方给——openWatch/abort/sweep 的挂表时点不同）。 */
+  function targetOf(r: ClaimRecord, watchId: string, payload: RespondPayload): RespondTarget {
+    return {
+      parentSid: r.parentSid,
+      notifyId: r.notifyId,
+      watchId,
+      sessionId: r.sessionId,
+      kind: r.kind,
+      payload,
+    }
+  }
+
   function targetsOf(rs: ClaimRecord[], payload: RespondPayload): RespondTarget[] {
     const out: RespondTarget[] = []
     for (const r of rs) {
       if (r.watchId === undefined) continue
-      out.push({
-        parentSid: r.parentSid,
-        notifyId: r.notifyId,
-        watchId: r.watchId,
-        sessionId: r.sessionId,
-        kind: r.kind,
-        payload,
-      })
+      out.push(targetOf(r, r.watchId, payload))
     }
     return out
   }
@@ -374,21 +379,12 @@ export function createClaimLedger(deps: ClaimLedgerDeps = {}): ClaimLedger {
         const payload: RespondPayload = snap
           ? { type: 'settled', outcome: snap.outcome, settleSeq: snap.settleSeq, fulfills: snap.fulfills }
           : { type: 'settled', outcome: null, settleSeq: 0, fulfills: 0 }
-        return {
-          action: 'respond',
-          target: { parentSid, notifyId, watchId, sessionId: r.sessionId, kind: r.kind, payload },
-        }
+        return { action: 'respond', target: targetOf(r, watchId, payload) }
       }
       case 'aborted':
-        return {
-          action: 'respond',
-          target: { parentSid, notifyId, watchId, sessionId: r.sessionId, kind: r.kind, payload: { type: 'aborted' } },
-        }
+        return { action: 'respond', target: targetOf(r, watchId, { type: 'aborted' }) }
       case 'orphaned':
-        return {
-          action: 'respond',
-          target: { parentSid, notifyId, watchId, sessionId: r.sessionId, kind: r.kind, payload: { type: 'orphaned' } },
-        }
+        return { action: 'respond', target: targetOf(r, watchId, { type: 'orphaned' }) }
     }
   }
 
@@ -428,14 +424,7 @@ export function createClaimLedger(deps: ClaimLedgerDeps = {}): ClaimLedger {
       aborted.push(view(r))
       if (r.watchId !== undefined) {
         transition(r, 'aborted') // 保留至 onRespond：已终结态对迟到 watch 仍可应答、且不可被 settle 兑现
-        targets.push({
-          parentSid: r.parentSid,
-          notifyId: r.notifyId,
-          watchId: r.watchId,
-          sessionId: r.sessionId,
-          kind: r.kind,
-          payload: { type: 'aborted' },
-        })
+        targets.push(targetOf(r, r.watchId, { type: 'aborted' }))
       } else {
         unlink(r) // 无 watch = 无应答对象 → 静默销账当场删除
       }
@@ -516,14 +505,7 @@ export function createClaimLedger(deps: ClaimLedgerDeps = {}): ClaimLedger {
           orphan(r)
           orphaned.push(snapshot)
           if (watchId !== undefined) {
-            respondOrphaned.push({
-              parentSid: r.parentSid,
-              notifyId: r.notifyId,
-              watchId,
-              sessionId: r.sessionId,
-              kind: r.kind,
-              payload: { type: 'orphaned' },
-            })
+            respondOrphaned.push(targetOf(r, watchId, { type: 'orphaned' }))
           }
         }
       } else if (r.state === 'fulfilled' && r.watchId === undefined) {

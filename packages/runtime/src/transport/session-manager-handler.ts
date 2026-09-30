@@ -26,7 +26,7 @@ import type { ISessionService } from '../interfaces.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 // 通知债权状态机（u-claims）：本 handler 是其唯一受理侧消费方；组合根 index.ts 经
 // 本模块导出的映射/回执助手（toWatchRespondPayload 等）消费同一批素材。
-import type { ClaimLedger, RespondPayload, RespondTarget, SweepResult } from '../services/session/notify-claims.js'
+import type { ClaimLedger, RespondPayload, RespondTarget, SettleOutcome, SweepResult } from '../services/session/notify-claims.js'
 import { toErrorMessage } from '../utils/errors.js'
 import { SESSION_MANAGER_ACTIONS } from '@zhushanwen/extension-protocol'
 import {
@@ -118,6 +118,13 @@ export function collectStderrTail(stderr: string): string | undefined {
  * 非 cancelled 的 claim 命中路径恒回带 sessionId（D-4）；fail-closed（无 claim）由调用方
  * 构造 {reason:'cancelled'}，不携 sessionId。
  */
+/** settled outcome → 协议 reason 词形（done→completed、error→failed、stopped→stopped；null 视同 done）。 */
+const SETTLED_REASON_BY_OUTCOME: Record<Exclude<SettleOutcome, null>, 'completed' | 'failed' | 'stopped'> = {
+  done: 'completed',
+  error: 'failed',
+  stopped: 'stopped',
+}
+
 export function toWatchRespondPayload(
   payload: RespondPayload,
   sessionId: string,
@@ -126,11 +133,7 @@ export function toWatchRespondPayload(
   const file = extra.sessionFilePath !== undefined ? { sessionFilePath: extra.sessionFilePath } : {}
   switch (payload.type) {
     case 'settled': {
-      const reason = payload.outcome === 'error'
-        ? 'failed'
-        : payload.outcome === 'stopped'
-          ? 'stopped'
-          : 'completed'
+      const reason = payload.outcome === null ? 'completed' : SETTLED_REASON_BY_OUTCOME[payload.outcome]
       return { reason, sessionId, settleSeq: payload.settleSeq, fulfillsN: payload.fulfills, ...file }
     }
     case 'aborted':
@@ -752,7 +755,7 @@ export class SessionManagerHandler {
             sessionFilePath: this.resolveSessionFile(t.sessionId),
           })
         }
-        const ok = this.respondWatch(parentSessionId, watchId, payload) === true
+        const ok = this.respondWatch(parentSessionId, watchId, payload)
         claims.onRespond(t.parentSid, t.notifyId, ok)
         return null
       }

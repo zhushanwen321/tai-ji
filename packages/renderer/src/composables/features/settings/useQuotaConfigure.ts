@@ -306,6 +306,12 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     if (source === 'exclusive') sourceHint = 'exclusive'
     else if (authKinds.value.includes('oauth') && providerOauthPresent.value) sourceHint = 'providerOauth'
     const helpUrl = activePreset.value?.helpUrl
+    // §7.4 跨区块时序：provider 凭据不可用且未改用专属 Key → 警示，两套文案按
+    // 「已填未保存」分档（providerCredentialPendingSave 判定式见彼处）
+    let providerWarning: 'pendingSave' | 'missing' | null = null
+    if (!exclusiveKeyBlockShown && !providerCredentialAvailable.value) {
+      providerWarning = providerCredentialPendingSave.value ? 'pendingSave' : 'missing'
+    }
     return {
       type: {
         selected: fetcherIdDraft.value,
@@ -321,11 +327,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
         exclusiveApplicable,
         providerAvailable: providerCredentialAvailable.value,
         sourceHint,
-        // §7.4 跨区块时序：provider 凭据不可用且未改用专属 Key → 警示，两套文案按
-        // 「已填未保存」分档（providerCredentialPendingSave 判定式见彼处）
-        providerWarning: !exclusiveKeyBlockShown && !providerCredentialAvailable.value
-          ? (providerCredentialPendingSave.value ? 'pendingSave' : 'missing')
-          : null,
+        providerWarning,
       },
       workspace: { required: needsWorkspace.value },
       help: helpUrl ? { url: helpUrl, text: activePreset.value?.helpText ?? '' } : null,
