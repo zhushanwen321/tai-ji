@@ -102,6 +102,36 @@ function respondAt(opts: SessionManagerHandlerOptions, call = 0): Record<string,
   return JSON.parse(mock.mock.calls[call][2] as string) as Record<string, unknown>
 }
 
+/** list 场景装配单源：mock 持久化会话 → handle(list, params) → respond 会话数组（类型锚定） */
+async function runListScenario(
+  sessions: SessionSummary[],
+  params: Record<string, unknown>,
+): Promise<Array<{ id: string }>> {
+  const opts = makeMockOptions({
+    sessionService: makeMockSessionService({
+      listPersistedSessions: vi.fn().mockReturnValue([{ cwd: '/test', sessions }]),
+    }),
+  })
+  const handler = new SessionManagerHandler(opts)
+  await handler.handle('req-1', 'sid-parent', 'list', params)
+  const response = respondAt(opts)
+  return response.sessions as Array<{ id: string }>
+}
+
+/** status 场景装配单源：mock getSummary → handle(status) → opts（mock 调用断言用）+ respond payload */
+async function runStatusScenario(
+  summary: SessionSummary,
+): Promise<{ opts: SessionManagerHandlerOptions; response: Record<string, unknown> }> {
+  const opts = makeMockOptions({
+    sessionService: makeMockSessionService({
+      getSummary: vi.fn().mockReturnValue(summary),
+    }),
+  })
+  const handler = new SessionManagerHandler(opts)
+  await handler.handle('req-1', 'sid-parent', 'status', { sessionId: 's1' })
+  return { opts, response: respondAt(opts) }
+}
+
 /**
  * watch 路由族用例共用脚手架：mock options + getSummary 覆盖 + claim arm→injected（sendDirect
  * 受理回执锚形态）+ 可选 settle 预兑现。summaryOverrides 传 undefined → getSummary 返回
@@ -441,16 +471,7 @@ describe('SessionManagerHandler', () => {
     })
 
     it('status → {status, modelId}', async () => {
-      const summary = makeSessionSummary({ status: 'active', modelId: 'openai/gpt-4' })
-      const opts = makeMockOptions({
-        sessionService: makeMockSessionService({
-          getSummary: vi.fn().mockReturnValue(summary),
-        }),
-      })
-      const handler = new SessionManagerHandler(opts)
-
-      await handler.handle('req-1', 'sid-parent', 'status', { sessionId: 's1' })
-
+      const { opts } = await runStatusScenario(makeSessionSummary({ status: 'active', modelId: 'openai/gpt-4' }))
       expect(opts.sendExtensionUiResponse).toHaveBeenCalledWith(
         'sid-parent',
         'req-1',
@@ -478,65 +499,41 @@ describe('SessionManagerHandler', () => {
     })
 
     it('list → {sessions} 过滤 spawnSource', async () => {
-      const sessions = [
-        makeSessionSummary({ id: 's1', spawnSource: 'user' }),
-        makeSessionSummary({ id: 's2', spawnSource: 'agent', parentAgentSessionId: 'sid-parent' }),
-        makeSessionSummary({ id: 's3', spawnSource: 'agent', parentAgentSessionId: 'sid-parent' }),
-      ]
-      const opts = makeMockOptions({
-        sessionService: makeMockSessionService({
-          listPersistedSessions: vi.fn().mockReturnValue([{ cwd: '/test', sessions }]),
-        }),
-      })
-      const handler = new SessionManagerHandler(opts)
-
-      await handler.handle('req-1', 'sid-parent', 'list', { spawnSource: 'agent' })
-
-      const response = respondAt(opts)
-      const respondSessions = response.sessions as Array<{ id: string }>
+      const respondSessions = await runListScenario(
+        [
+          makeSessionSummary({ id: 's1', spawnSource: 'user' }),
+          makeSessionSummary({ id: 's2', spawnSource: 'agent', parentAgentSessionId: 'sid-parent' }),
+          makeSessionSummary({ id: 's3', spawnSource: 'agent', parentAgentSessionId: 'sid-parent' }),
+        ],
+        { spawnSource: 'agent' },
+      )
       expect(respondSessions).toHaveLength(2)
       expect(respondSessions[0].id).toBe('s2')
       expect(respondSessions[1].id).toBe('s3')
     })
 
     it('list → 缺省注入路由上下文：只返回本父的 agent 子 session（params 不得放宽）', async () => {
-      const sessions = [
-        makeSessionSummary({ id: 's1', spawnSource: 'user' }),
-        makeSessionSummary({ id: 's2', spawnSource: 'agent', parentAgentSessionId: 'sid-parent' }),
-        makeSessionSummary({ id: 's3', spawnSource: 'agent', parentAgentSessionId: 'parent-b' }),
-      ]
-      const opts = makeMockOptions({
-        sessionService: makeMockSessionService({
-          listPersistedSessions: vi.fn().mockReturnValue([{ cwd: '/test', sessions }]),
-        }),
-      })
-      const handler = new SessionManagerHandler(opts)
-
       // 空 params（extension 端 list_my_sessions 实际发送的形状）
-      await handler.handle('req-1', 'sid-parent', 'list', {})
-
-      const response = respondAt(opts)
-      const respondSessions = response.sessions as Array<{ id: string }>
+      const respondSessions = await runListScenario(
+        [
+          makeSessionSummary({ id: 's1', spawnSource: 'user' }),
+          makeSessionSummary({ id: 's2', spawnSource: 'agent', parentAgentSessionId: 'sid-parent' }),
+          makeSessionSummary({ id: 's3', spawnSource: 'agent', parentAgentSessionId: 'parent-b' }),
+        ],
+        {},
+      )
       expect(respondSessions).toHaveLength(1)
       expect(respondSessions[0].id).toBe('s2')
     })
 
     it('list → params 显式指定其他 parentAgentSessionId 不生效（防跨父枚举）', async () => {
-      const sessions = [
-        makeSessionSummary({ id: 's1', spawnSource: 'agent', parentAgentSessionId: 'sid-parent' }),
-        makeSessionSummary({ id: 's2', spawnSource: 'agent', parentAgentSessionId: 'parent-b' }),
-      ]
-      const opts = makeMockOptions({
-        sessionService: makeMockSessionService({
-          listPersistedSessions: vi.fn().mockReturnValue([{ cwd: '/test', sessions }]),
-        }),
-      })
-      const handler = new SessionManagerHandler(opts)
-
-      await handler.handle('req-1', 'sid-parent', 'list', { parentAgentSessionId: 'parent-b' })
-
-      const response = respondAt(opts)
-      const respondSessions = response.sessions as Array<{ id: string }>
+      const respondSessions = await runListScenario(
+        [
+          makeSessionSummary({ id: 's1', spawnSource: 'agent', parentAgentSessionId: 'sid-parent' }),
+          makeSessionSummary({ id: 's2', spawnSource: 'agent', parentAgentSessionId: 'parent-b' }),
+        ],
+        { parentAgentSessionId: 'parent-b' },
+      )
       expect(respondSessions).toHaveLength(1)
       expect(respondSessions[0].id).toBe('s1')
     })
@@ -650,32 +647,12 @@ describe('SessionManagerHandler', () => {
 
   describe('U4-A5: modelId 从 state.model 组装', () => {
     it('status 返回 modelId', async () => {
-      const summary = makeSessionSummary({ modelId: 'anthropic/claude-3' })
-      const opts = makeMockOptions({
-        sessionService: makeMockSessionService({
-          getSummary: vi.fn().mockReturnValue(summary),
-        }),
-      })
-      const handler = new SessionManagerHandler(opts)
-
-      await handler.handle('req-1', 'sid-parent', 'status', { sessionId: 's1' })
-
-      const response = respondAt(opts)
+      const { response } = await runStatusScenario(makeSessionSummary({ modelId: 'anthropic/claude-3' }))
       expect(response.modelId).toBe('anthropic/claude-3')
     })
 
     it('modelId 为空时不在 respond 中出现', async () => {
-      const summary = makeSessionSummary({ modelId: '' })
-      const opts = makeMockOptions({
-        sessionService: makeMockSessionService({
-          getSummary: vi.fn().mockReturnValue(summary),
-        }),
-      })
-      const handler = new SessionManagerHandler(opts)
-
-      await handler.handle('req-1', 'sid-parent', 'status', { sessionId: 's1' })
-
-      const response = respondAt(opts)
+      const { response } = await runStatusScenario(makeSessionSummary({ modelId: '' }))
       expect(response.modelId).toBeUndefined()
     })
   })
