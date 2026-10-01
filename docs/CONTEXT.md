@@ -420,6 +420,8 @@ workflow run 的结果语义通知纪律：成功/失败/取消一律出终局�
 
 ### 模型目录（pi 引擎域）
 pi 引擎的可用模型集合及其能力（思考档位等）。能力判定只在 `packages/runtime/src/services/model-capability.ts` 一点进入（ADR-0064 能力注册表），离线快照由 builtin provider 快照承载（`scripts/check-model-references.mjs` 检查漂移）。workflow 派发按全路径形态引用模型：裸名不解析、解析失败为期望行为（C-ext-24）。
+### 窗口外壳（window chrome）
+窗口的标题栏区装饰总和：关闭/最小化/最大化按钮、边框圆角、拖拽区、默认尺寸行为。本项目的平台分叉：mac 由系统绘制（`titleBarStyle: hidden`，原生红黄绿圆点）；win/linux 由应用自绘（`frame: false` + renderer 的 TrafficLight 圆点 + `-webkit-app-region` 拖拽条带）。
 
 ---
 

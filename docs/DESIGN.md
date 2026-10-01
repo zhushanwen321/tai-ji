@@ -882,14 +882,24 @@ v3 重建采用 zcode-demo 拓扑：base 平铺全屏 → sidebar 透明融合 �
 
 - AppShell `p-1`(4px) 四周统一：上下左右各 4px（紧凑但有呼吸，对称）。注意：左右 4 使 aside 左缘 x=4，与红黄绿 x=8 有 4px 差（红黄绿保持原生位置不动，用户明确不移动 trafficLightPosition）；折叠态 `!gap-0`（aside 归零，padding 保持 p-1 四周 4px，与展开态一致）
 - `.aside-region` 恒定 `padding-top: 44px`(pt-11)（安全区 + 拉开 trafficlight 行与 LOGO 行间距），**三平台统一，全屏也保留**（mac 全屏 hover 时系统下拉覆盖层会落进这块留白）。AppShell py-1 使 aside 顶在窗口 y=4，红黄绿 y=8~20，安全区让出，与 trafficlight 行（nav 按钮 bottom y27）视觉间距约 12px
-- mac 红黄绿位置由主进程 `titleBarStyle:'hidden'` + `trafficLightPosition:{x:8,y:8}` 放到 macOS 原生左上角（**不用 hiddenInset**——inset 模式强制水平内缩，`trafficLightPosition.x` 被系统忽略）；win/linux 自绘圆点 `left:0 top:[4px]`（TrafficLight.vue 挂载于 AsideRegion 内，aside 顶在窗口 y=4，故 top-4 = 窗口 y8，与 mac 同位）。圆点 12px，顶理论 y=8 / **实测中线 y≈15.75**（macOS 渲染亚像素偏置，比理论 y14 低 ~2pt）/ 右缘 x=60
+- mac 红黄绿位置由主进程 `titleBarStyle:'hidden'` + `trafficLightPosition:{x:8,y:8}` 放到 macOS 原生左上角（**不用 hiddenInset**——inset 模式强制水平内缩，`trafficLightPosition.x` 被系统忽略）；win/linux 自绘圆点 `left:0 top:[4px]`（TrafficLight.vue 挂载于 AsideRegion 内，aside 顶在窗口 y=4，故 top-4 = 窗口 y8，与 mac 同位——y 轴同位；x 轴自绘圆点在 x4，与 mac x8 有 4px 差，同 883 行预期差）。圆点 12px，顶理论 y=8 / **实测中线 y≈15.75**（macOS 渲染亚像素偏置，比理论 y14 低 ~2pt）/ 右缘 x=60
 - app-nav-controls（收起侧栏/←/→）浮在 AppShell 层（aside 外，避免折叠态 overflow-hidden 裁剪），**非折叠态** `left:72px top:5px`（按钮中线 y=5+11=16，对齐红黄绿**实测**中线 ~15.75；红黄绿右缘 60 + 12 呼吸），全屏 `left:8px`（320ms 平移与 traffic-light opacity 同步）。**PanelHeader `h-[22px]` 与 trafficlight 行共线对齐**：main-panel 顶=AppShell p-1(4)+border(1)=y5，h-22 → header bottom y27 = nav 按钮 bottom，内容中线 y16 ≈ 红黄绿实测中线 y15.75（三者顶/底/中线全对齐）。右侧 drawer/git 按钮 `size-[22px]` 适配 22 高 header
 - **折叠态** chrome 迁入 P1 PanelHeader 内（header `pl-[88px]` 让位红黄绿右缘 60），chrome 按钮在 header 中线（header h-22 中线 y16 = 红黄绿中线，无高度差）；AppShell 折叠态 `!gap-0`（强制覆盖 gap-3，padding 保持 p-1）
 - 全屏两态：非全屏（traffic light opacity 1，按钮 left:72px）/ 全屏（opacity 0，按钮左移 left:8px）。**无第三态**，mac 全屏 hover 红黄绿由系统提供，应用不渲染。全屏态 TrafficLight 圆点 `opacity-0 pointer-events-none` 成对（review MF-1：隐形圆点仍可命中会劫持 header chrome 点击）
-- win/linux 走 mimic_mac：自绘彩色圆点放左侧模拟 mac，三平台左上视觉统一
+- win/linux 走 mimic_mac：自绘彩色圆点放左侧模拟 mac，三平台左上视觉统一（issue #24 复核后维持不变——抱怨全部指向实现缺陷，无推翻形态的新证据；裁决登记 [ADR-0074](./adr/decisions.md)，自绘路径数值见下方「win/linux 自绘窗口外壳」）
 - 唤回侧栏：⌘B + header chrome 按钮（**rail-restore 左缘细条已移除**）
+
+### win/linux 自绘窗口外壳（frame:false 路径，mac 不适用）
+
+win/linux 是无边框窗口（`frame: false`），系统不提供任何窗口装饰，以下均为应用自理数值；mac 各项由系统绘制或提供，不适用本小节（mac 默认尺寸恒 1200×800，darwin 分支创建参数零改动）。
+
+- **自绘圆点交互态**：悬停 = 逐点同色 important 覆盖（红/黄/绿分别为 `hover:!bg-[#ff5f57]` / `hover:!bg-[#febc2e]` / `hover:!bg-[#28c840]`——Button ghost 变体的悬停灰底与覆盖类同特异性，Tailwind 生成顺序不可靠，必须 `!`），悬停浮出的 ×/−/+ 符号由 `[&_svg]:!size-2` 锁定 8px（Button 基础样式 `[&_svg]:size-4` 为 16px，画进 12px 圆点会溢出）；`.traffic-light` 容器声明 `[-webkit-app-region:no-drag]`，叠在拖拽条带之上保住点击命中（圆点组与导航按钮父链均无 drag 声明，点击不受条带影响）
+- **顶部拖拽条带**：`AsideRegion` 内 `absolute inset-x-0 top-0 h-11` + `[-webkit-app-region:drag]`，仅非 mac 渲染（`data-testid="aside-drag-strip"`；mac 顶部拖拽由系统提供，渲染 app-region 会重定义系统拖拽区）。双击条带空白处 = 最大化/还原（drag 区平台原生行为，无需代码）。折叠态分叉（已接受）：aside 折叠 = `flexBasis: 0` + `overflow-hidden`，条带随折叠被裁剪隐藏（与圆点组折叠态隐藏一致），此时拖拽区域缩回主面板 PanelHeader 的 22px 标题栏（不随折叠消失），与 mac「系统拖拽不随折叠消失」形成平台分叉
+- **窗口圆角策略**：应用内圆角仅 mac——AppShell 根节点 `rounded-[10px]` 经 setup 期 `detectPlatform()` 类绑定仅 mac 渲染（非 CSS 选择器分支，避免非 mac 首次渲染 rounded 闪现，且组件测试可断言）；Windows 11 = 无边框窗口系统默认圆角（Electron `roundedCorners` 默认值即 `true`）；Windows 10 与 Linux = 方角（OS 能力边界），四角与窗口内容同色、无色差方块。窗口创建**不加任何圆角配置键**——显式 `roundedCorners: true` 是 no-op（默认值即 `true`，行为增量为零：Win11 本就圆角、Win10 键无效果、Linux 键不适用），已否决防复发（[ADR-0075](./adr/decisions.md)）
+- **默认尺寸与持久化**（仅非 mac）：默认尺寸按主屏工作区比例取值 `width = min(1440, round(workArea.width × 0.62))`、`height = min(960, round(workArea.height × 0.75))`，下限 800×600（minWidth/minHeight）；cap 1440×960 取值依据 = 300px 固定侧栏的密度底线（1440 时侧栏占比约 20.8%，超宽默认窗会加重侧栏占比失衡）。尺寸持久化 `<getDataDir()>/window-state.json` 字段恰 `{width, height, isMaximized}`（位置不记忆，Electron 默认居中放置），仅主窗口写入与恢复（create-window IPC 迁移窗口不参与），恢复尺寸 clamp 到当前工作区；语义裁决见 [ADR-0076](./adr/decisions.md)
 
 ### 相关
 
 - v6-spec-shell.html 已删除（2026-09-13 退役，git 可追溯）——v6 demo/spec 的 38px/16,26/52px 拓扑不适用本实现，属刻意偏离
 - 设计决策记录：[ADR 0017（档案摘要）](./adr/archive-digest.md#adr-0017)（旧版 padding-left 方案，**已 Superseded**，原文 git 可追溯）；8c62f64bc/0251b6d40/860ee6007（刻意调整序列，现版形态来源）
+- 窗口外壳跨平台决策登记（mimic_mac 维持 / 圆角策略 / 尺寸持久化三字段）：[ADR-0074/0075/0076](./adr/decisions.md)

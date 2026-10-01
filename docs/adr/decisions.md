@@ -353,6 +353,15 @@ subagent 体系的资源面决策三条现状（原记于包内 `extensions/univ
 | D7-40 | ui↔renderer 镜像族收编 @taiji/shared（镜像守卫生效后的正式收编） | 下次 renderer 域改动立项时顺带 | 3 处镜像归 shared 单份，守卫测试删除 |
 | D7-41 | 惰性恢复跨 timer fire 子态发帧（attempt 让位裸 return 不置标志 → 三信号皆 miss；根治 = 第四信号或让位腿 join+标志改造，需裁决 join 失败记账归属） | 该格 UX 收口退化——症状锚点 = 活 session 回落 dead 终态页需手动解锁，或下次 respawn 域专项 | 判据封闭或收口机制重构 |
 
+### ADR-0074 窗口外壳 mimic_mac 形态维持（issue #24 复核 reaffirm，2026-10-01）
+GitHub issue #24（Windows 10 窗口外壳四问题）复核结论：用户抱怨全部指向 win/linux 自绘路径的实现缺陷（悬停圆点消失、16px 图标溢出 12px 圆点、侧栏顶部不可拖拽、四角色差方块、默认尺寸不看屏幕），无一条指向「自绘彩色圆点放左侧模拟 mac」的形态本身——无推翻既定裁决的新证据，mimic_mac 维持（三平台左上视觉统一，数值 SSOT = [DESIGN.md §11](../DESIGN.md)）。窗口控制按钮改为各平台原生风格的方案不采用（三平台视觉从此分裂，破坏「跨平台同一工作台」气质）。实现缺陷已在同批修复：悬停同色覆盖 + 8px 图标锁定 + 非 mac 顶部拖拽条带（DESIGN.md §11 增补段）。
+
+### ADR-0075 窗口圆角策略：应用内圆角仅 mac，不加窗口配置键（2026-10-01）
+三平台窗口圆角策略定案：mac = 系统圆角 + AppShell 根节点 `rounded-[10px]` 保留；Windows 11 = 无边框窗口系统默认圆角（Electron `roundedCorners` 默认值即 `true`，实装依据 electron.d.ts 平台标注 darwin/win32）；Windows 10 与 Linux = 方角（OS 能力边界）。应用内圆角仅 mac 渲染（AppShell 根节点 setup 期 `detectPlatform()` 类绑定，非 CSS 选择器分支——避免非 mac 首次渲染 rounded 闪现，且组件测试可断言）；非 mac 四角与窗口内容同色，色差方块随应用内圆角关闭而消除。两条不采用登记防复发：① **显式声明 `roundedCorners: true`**——默认值即 `true`，显式化行为增量为零（Win11 本就圆角、Win10 键无效果、Linux 键不适用），零收益纯维护成本；② **透明窗口统一圆角**（`transparent: true`）——丢失系统贴边吸附与投影、部分 Linux 合成器直接失效，为视觉细节引入 P0 级窗口行为风险。
+
+### ADR-0076 窗口尺寸持久化三字段裁决：{width, height, isMaximized}、仅主窗口、close 同步 flush（2026-10-01）
+非 mac 平台的窗口尺寸持久化（`<getDataDir()>/window-state.json`）字段恰三件 `{width, height, isMaximized}`，四条语义裁决：① **位置（x,y）不持久化**——窗口由 Electron 默认居中放置；已接受代价：多显示器用户重启后窗口回主屏居中、不记忆用户摆放位置（位置记忆引入恢复错位问题家族——副屏拔除后窗口开在不可见区域、「相交不足一半丢弃」的阈值裁决、恢复归属歧义，收益与证据不匹配；重审触发 = 用户反馈不可忍受）。② **仅主窗口写者**——只有 bootstrap 创建的主窗口挂持久化监听与启动恢复（`isMainWindow` 门标志），create-window IPC 迁移窗口不读不挂，持久化文件全局单写者，多窗口 last-writer-wins 互踩结构性消除。③ **close 同步 flush**——关闭事件取消防抖定时器立即落盘，`isMaximized` 取退出时刻窗口实际值：「最大化→直接关闭」序列下最大化期间跳过写、无防抖数据，须以退出时刻状态落 `isMaximized: true`，重启才能按正常态尺寸 show 后恢复最大化，同时消除防抖窗口的退出竞态。④ **最大化/全屏态跳过防抖写**——字段恒记最近一次正常态尺寸；resize/move 防抖 500ms 合并写；启动读取损坏/字段非法 → 丢弃回默认尺寸 + warn 日志（不阻断启动），合法值 clamp 到当前工作区后生效。实装 `apps/electron/main/window/window-state.ts`（不 import electron，窗口经最小结构接口注入；tmp+rename 原子写）。默认尺寸公式（主屏工作区 62%/75%、cap 1440×960、下限 800×600）与 darwin 分支恒 1200×800 的零改动边界同属本条裁决，数值权威 = [DESIGN.md §11](../DESIGN.md)。
+
 ## 已否谱系（决策已过时/被推翻，一行注记防重新发现旧坑）
 
 

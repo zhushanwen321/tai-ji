@@ -40,6 +40,9 @@ export default taijiTestConfig({
             // （[HISTORICAL] 2026-09-23 污染事故：legacy 池无拦截面，pin 改写 env 后
             // marker 落进真实 ~/.taiji）。
             'test/main-run-state.test.ts',
+            // window-state：真实文件 IO（window-state.json 持久化语义——防抖写/close
+            // flush/损坏回默认），夹具 mkdtemp tmpdir 自建自删（u-window-state §6.4）
+            'test/window-state.test.ts',
           ],
           setupFiles: [FS_GUARD_PATH],
         },
@@ -54,6 +57,8 @@ export default taijiTestConfig({
           include: [
             'test/**/*.test.ts',
             '!test/main-run-state.test.ts',
+            // window-state（真实文件 IO）已进 guarded 池，此处排除防跨池重复收集
+            '!test/window-state.test.ts',
             'update/__tests__/**/*.test.ts',
             '../scripts/__tests__/**/*.test.mjs',
           ],
