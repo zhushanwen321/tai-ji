@@ -3,7 +3,7 @@
  * Extracted from RuntimeServer to reduce file size.
  */
 import type { WebSocket as WsType } from 'ws'
-import type { ClientMessage, ClientMessageType, ServerMessage, PlanStateView, SessionSummary, SessionRevokeMessageReply } from '@taiji/shared'
+import type { ClientMessage, ClientMessageType, ServerMessage, PlanStateView, SessionSummary, SessionRevokeMessageReply, WorkflowRunEventsReply, WorkflowDagReply } from '@taiji/shared'
 // hook 否决类分类码值常量（词表 SSOT = shared MessageBlockedCode）：message.send /
 // message.bash / delivery.submit 三落码点统一引用，不手抄字面量。
 import { MESSAGE_BLOCKED_CODE } from '@taiji/shared'
@@ -77,6 +77,9 @@ export interface SessionHandlerContext extends MessageHandlerContext {
    * - revokeMessage（message-revoke 设计 §3.3 D2，U4）：session.revokeMessage 七步编排
    *   （RevokeOrchestrator）的转发面。可选成员形态对齐 getPlanState 先例——缺省仅出现
    *   在测试最小 mock 中，case 内判空走 revoke_unsupported 防御分支。
+   * - getWorkflowRunEvents / getWorkflowDag（workflow-visualization U3，设计 §3.1-4/§3.1-5）：
+   *   事件流拉取与 DAG 解析两 RPC 的转发面。可选成员形态对齐 revokeMessage 先例——
+   *   缺省仅出现在测试最小 mock 中，case 内判空走 *_unsupported 防御分支。
    */
   sessionService: ISessionService & {
     readonly backgroundTasks?: BackgroundTaskRpcPort
@@ -84,6 +87,8 @@ export interface SessionHandlerContext extends MessageHandlerContext {
     getPlanState?(sessionId: string): Promise<PlanStateView>
     notifySessionActivated?(summary: SessionSummary): void
     revokeMessage?(sessionId: string, targetId: string): Promise<SessionRevokeMessageReply>
+    getWorkflowRunEvents?(sessionId: string, runId: string): Promise<WorkflowRunEventsReply>
+    getWorkflowDag?(sessionId: string, runId: string): Promise<WorkflowDagReply>
   }
   /** fast-handoff 编排层（session.handoff 路由用）。可选：未注入时该 case 报 unsupported。 */
   handoffService?: HandoffService
@@ -178,6 +183,8 @@ export class SessionMessageHandler {
     'session.getWorkflows': (msg, ws) => this.handleSessionGetWorkflows(msg, ws),
     'session.getAgentCallHistory': (msg, ws) => this.handleSessionGetAgentCallHistory(msg, ws),
     'session.getAgentCallFilePath': (msg, ws) => this.handleSessionGetAgentCallFilePath(msg, ws),
+    'session.getWorkflowRunEvents': (msg, ws) => this.handleSessionGetWorkflowRunEvents(msg, ws),
+    'session.getWorkflowDag': (msg, ws) => this.handleSessionGetWorkflowDag(msg, ws),
     'session.workflowAction': (msg, ws) => this.handleSessionWorkflowAction(msg, ws),
     'session.subagentAction': (msg, ws) => this.handleSessionSubagentAction(msg, ws),
     'session.writeImage': (msg, ws) => this.handleSessionWriteImage(msg, ws),
@@ -640,6 +647,44 @@ export class SessionMessageHandler {
   private async handleSessionGetAgentCallFilePath(msg: Extract<ClientMessage, { type: 'session.getAgentCallFilePath' }>, ws: WsType): Promise<void> {
     const filePath = await this.ctx.sessionService.getAgentCallFilePath(msg.payload.sessionId, msg.payload.agentCallSessionId)
     return this.ctx.reply(ws, msg.id, 'session.agentCallFilePath', { sessionId: msg.payload.sessionId, agentCallSessionId: msg.payload.agentCallSessionId, filePath })
+  }
+
+  // ── workflow 可视化拉取 RPC（workflow-visualization U3，设计 §3.1-4 / §3.1-5）──
+  //
+  // 领域回执不走 error envelope——结构化错误臂（{ runId, code, message } 闭集）是
+  // 设计内回执（renderer 按码分流降级形态：record_not_found → 静态指引无重试、
+  // parse_failed → 重试解析入口、暂时性失败 → 错误 + 重试按钮）；判别字段 code。
+  // RPC 通道错误（service throw，如非 ENOENT 的 fs 错误 / scanSessions 失败）走
+  // reportFailure → error envelope；两通道在 renderer 侧经同一错误适配函数归一。
+
+  private async handleSessionGetWorkflowRunEvents(msg: Extract<ClientMessage, { type: 'session.getWorkflowRunEvents' }>, ws: WsType): Promise<void> {
+    const { sessionId, runId } = msg.payload
+    const svc = this.ctx.sessionService
+    if (!svc.getWorkflowRunEvents) {
+      // SessionService 未组装转发（仅测试最小 mock 形态，对齐 getPlanState 防御分支口径）
+      // → 显式报错不留静默。
+      return this.ctx.sendError(ws, 'workflow_run_events_unsupported', 'workflow run events reader not available', msg.id, { sessionId })
+    }
+    try {
+      const reply = await svc.getWorkflowRunEvents(sessionId, runId)
+      return this.ctx.reply(ws, msg.id, 'session.workflowRunEvents', reply)
+    } catch (e) {
+      return this.reportFailure(ws, msg.id, 'workflow_run_events_failed', e, { scope: 'session.getWorkflowRunEvents', sessionId })
+    }
+  }
+
+  private async handleSessionGetWorkflowDag(msg: Extract<ClientMessage, { type: 'session.getWorkflowDag' }>, ws: WsType): Promise<void> {
+    const { sessionId, runId } = msg.payload
+    const svc = this.ctx.sessionService
+    if (!svc.getWorkflowDag) {
+      return this.ctx.sendError(ws, 'workflow_dag_unsupported', 'workflow dag reader not available', msg.id, { sessionId })
+    }
+    try {
+      const reply = await svc.getWorkflowDag(sessionId, runId)
+      return this.ctx.reply(ws, msg.id, 'session.workflowDag', reply)
+    } catch (e) {
+      return this.reportFailure(ws, msg.id, 'workflow_dag_failed', e, { scope: 'session.getWorkflowDag', sessionId })
+    }
   }
 
   private async handleSessionWorkflowAction(msg: Extract<ClientMessage, { type: 'session.workflowAction' }>, ws: WsType): Promise<void> {
