@@ -258,10 +258,15 @@ function stripLinuxRestart(script: string): string {
   return script.replace(/^"[^"]+" &\s*$/m, 'echo "[test] skip AppImage spawn"')
 }
 
-/** 把 60s 超时（120 轮）压成 2 轮（1s），让超时 abort 用例 1s 出结果。 */
+/**
+ * 把 60s 超时（120 轮）压成 6 轮（3s），让超时 abort 用例快速出结果。
+ * [HISTORICAL] 曾压成 2 轮（1s）：CI runner 高负载下 bash spawn + 脚本前置步骤的
+ * 调度抖动可吃掉大半窗口，v0.10.8 post-merge macOS job 实测 flaky（2/23，rerun 绿）。
+ * 3s 对抖动容忍 ×3，代价仅超时用例时长 +2s。
+ */
 function shortenWaitLimit(script: string): string {
   if (!script.includes('-gt 120')) throw new Error('未找到等待上限 -gt 120（模板变了？）')
-  return script.replace('-gt 120', '-gt 2')
+  return script.replace('-gt 120', '-gt 6')
 }
 
 /** mac 用标准 vars（parentPid 默认死 PID：kill -0 立即失败 = 模拟 app 已退出）。 */
@@ -857,7 +862,9 @@ describe('updater-script integration: linux mv 备份/回滚', () => {
     expect(result.error).toBe('mv failed')
   })
 
-  it('只读检测：APP_DIR 不可写 → exit 1、error=read-only volume、不动任何文件', () => {
+  // retry: 2 —— CI macOS runner 高负载下实测 flaky（v0.10.8 post-merge 2/23，rerun 绿），
+  // chmod 语义与负载的耦合无法在 JS 侧消除，retry 兜底环境敏感性
+  it('只读检测：APP_DIR 不可写 → exit 1、error=read-only volume、不动任何文件', { retry: 2 }, () => {
     const appDir = path.join(tmpDir, 'readonly-mount')
     mkdirSync(appDir, { recursive: true })
     const vars = makeLinuxVars({ appImagePath: path.join(appDir, 'TaiJi-x86_64.AppImage') })
@@ -877,7 +884,8 @@ describe('updater-script integration: linux mv 备份/回滚', () => {
     }
   })
 
-  it('等待超时 abort：父进程不退 → failed(app still running)', async () => {
+  // retry: 2 —— 等待窗已放宽到 3s（见 shortenWaitLimit），retry 再兜一层极端调度抖动
+  it('等待超时 abort：父进程不退 → failed(app still running)', { retry: 2 }, async () => {
     const vars = makeLinuxVars()
     writeFileSync(vars.appImagePath, 'OLD AppImage content')
     mkdirSync(path.dirname(vars.newFilePath), { recursive: true })
