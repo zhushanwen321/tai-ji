@@ -26,6 +26,10 @@ export interface DrawerOpenOptions {
   commandName?: string
 }
 
+/** 朗读按钮三态（ai-voice-tts 设计 §5.1 状态机数据面；数据源 = renderer useTtsPlayer
+ *  全局单例任务态，D11——同一时刻每窗口只有一条消息在朗读，状态窗口级唯一） */
+export type SpeakState = 'idle' | 'loading' | 'playing'
+
 /**
  * ChatView 依赖端口（shell → ui 展示层注入）。
  */
@@ -49,8 +53,17 @@ export interface ChatViewDeps {
   /** 取 session 的相对资源解析基准目录（session cwd，与工厂内 resourceBaseDir env 装配
    *  同源同层查询）。MarkdownRenderer ④路相对链接点击的 props 缺省 fallback——设计
    *  markdown-html-sanitize-render D4 双通道矩阵：props 覆盖优先（drawer 文件目录语义），
-   *  props 缺省（对话流/命令文档零模板传 props 的消费面）经此拿 session cwd */
-  sessionCwdOf: (sessionId: string) => string | undefined
+
+   *  props 缺省（对话流/命令文档零模板传 props 的消费面）经此拿 session cwd。
+   *  optional，同 isTakeover：未 provide（测试 mock 壳）时 MarkdownRenderer 可选链容错
+   *  （fallback undefined → ④路 preventDefault 无动作），renderer useChatViewDeps 运行时
+   *  总 provide 真实实现 */
+  sessionCwdOf?: (sessionId: string) => string | undefined
+  /** 查询某消息的朗读态（ai-voice-tts 设计 §5.1 按钮状态机数据面，TurnSummary 朗读按钮消费；
+   *  三态与 renderer useTtsPlayer 的 SpeakStatus 结构同形——ui 不 import renderer，形状各自声明）。
+   *  optional，同 onSpeak：两字段成对 provide/缺席，未 provide 时朗读按钮不渲染 */
+  speakStateOf?: (messageId: string) => SpeakState
+
 
   // ── 操作回调（触发 RPC / store action）──
   /** 切换 turn 展开/折叠（useTurnExpansion store action。key=turnStableId(turn)） */
@@ -73,6 +86,12 @@ export interface ChatViewDeps {
   onForkAsk: (sessionId: string, message: Message) => void
   /** handoff 并备注（useTurnActions.handoffAsk） */
   onHandoffAsk: (sessionId: string, message: Message) => void
+  /** 朗读指定消息（ai-voice-tts 设计 §5.1：TurnSummary 朗读按钮操作回调，壳层装配绑
+   *  renderer useTtsPlayer——文本清洗（cleanTextForSpeech）与错误 toast 由播放器内部承担；
+   *  非 idle 态点击的取消/停止语义也在装配侧分流（stop 同源复用），ui 只管调用本回调）。
+   *  optional，同 isTakeover：与 speakStateOf 成对，未 provide（宿主未接语音能力/测试 mock
+   *  壳）时朗读按钮不渲染，renderer useChatViewDeps 运行时总 provide 真实实现 */
+  onSpeak?: (sessionId: string, message: Message) => void
   /** 打开 drawer tab（useSideDrawer.open 经壳桥接，opts 携带 filePath/commandName） */
   openDrawer: (tab: string, opts?: DrawerOpenOptions) => void
   /** 点击文件路径（useFileTree.selectFile 经壳桥接） */

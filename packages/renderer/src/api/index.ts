@@ -29,7 +29,11 @@ import * as realQuota from '@taiji/core/transport/api/domains/quota'
 import * as realPreset from '@taiji/core/transport/api/domains/preset'
 import * as realProject from '@taiji/core/transport/api/domains/project'
 import * as realBtw from '@taiji/core/transport/api/domains/btw'
+
 import * as realUsage from '@taiji/core/transport/api/domains/usage'
+
+import * as realTts from '@taiji/core/transport/api/domains/tts'
+
 import * as mockApi from '@taiji/core/transport/mock'
 
 const isMock = import.meta.env.VITE_MOCK === 'true'
@@ -63,9 +67,15 @@ export const preset = isMock ? mockApi.preset : realPreset
 // mock 轨走 mockApi.btw（in-memory 线注册表，G4 类型锚定签名全等）；real 轨走 core
 // transport 域（运行时 handler 注册归 M2-b，接线前真实 RPC 不可达）。
 export const btw = isMock ? mockApi.btw : realBtw
+
 // usage（Settings · 用量统计页）：mock 轨走 mockApi.usage（fixture 行），real 轨扫 session JSONL。
 // [C3] settings 域 transport 收编后由 SettingsTransport seam 的 getUsageStats 消费。
 export const usage = isMock ? mockApi.usage : realUsage
+
+// tts：语音合成朗读域（ai-voice-tts，M0）。mock 轨走 mockApi.tts（内存态配置 + 静态演示
+// 投影，G4 类型锚定签名全等）；real 轨走 core transport 域（runtime 接线归 u3b）。
+export const tts = isMock ? mockApi.tts : realTts
+
 // search（⌘K 全局搜索）编排归 useSearchModalDeps（packages/renderer/src/composables/features/search/useSearchModalDeps.ts，D-026，#5）：
 // 该处判 VITE_MOCK 决定 mock 轨走 mockApi.search fixture / real 轨走真实 3 源聚合（命令/file/session domain）。
 // 本门面不再导出 search（renderer 版 useSearch.ts 已随域迁移删除，2026-09-11）。

@@ -87,7 +87,10 @@ import type * as realQuotaDomain from '../api/domains/quota'
 import type * as realProjectDomain from '../api/domains/project'
 import type * as realPresetDomain from '../api/domains/preset'
 import type * as realBtwDomain from '../api/domains/btw'
+
 import type * as realUsageDomain from '../api/domains/usage'
+import type * as realTtsDomain from '../api/domains/tts'
+
 
 /** real 域形状单点（mock 锚定源；散函数模块的 namespace 类型即域接口） */
 export type SessionDomain = typeof realSessionDomain
@@ -101,7 +104,10 @@ export type QuotaDomain = typeof realQuotaDomain
 export type ProjectDomain = typeof realProjectDomain
 export type PresetDomain = typeof realPresetDomain
 export type BtwDomain = typeof realBtwDomain
+
 export type UsageDomain = typeof realUsageDomain
+export type TtsDomain = typeof realTtsDomain
+
 
 /** 去 tuple 标签（Parameters 产 labeled tuple；参数名是修饰不是类型身份，归一后再比对）。导出：被导出的 SameTuple / DomainParamsExact 引用 */
 export type PlainTuple<T extends unknown[]> = { [K in keyof T]: T[K] }
@@ -2017,3 +2023,62 @@ const btwImpl = {
 // [G4] 参数全等断言：mock btw 任一方法少参/多参/错型在此行编译失败
 export type BtwDomainParamsExact = AssertExact<DomainParamsExact<BtwDomain, typeof btwImpl>>
 export const btw: BtwDomain = btwImpl
+
+// ── tts 域 mock（ai-voice-tts 设计 §7.5，M0）────────────────────────────────
+// 与 real 域同接口（门面三元要求两侧同构）。行为（设计 §7.5）：speak 恒以
+// tts_not_configured 失败（mock 无 runtime 合成链，错误路径驱动按钮/toast 状态机）；
+// getCapabilities 回 mock 内嵌静态演示数据（tts-data.ts 三家最小 TtsFormModel）；
+// getConfig/configure 持内存态（u4 保存/读取往返单测依赖 configure → getConfig 回读一致）。
+// taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：mock tts 配置态
+import { MOCK_TTS_FORMS, mockDefaultTtsConfig } from './tts-data'
+import type { SanitizedTtsConfig, TtsProviderId, TtsConfig } from '@taiji/shared'
+type MockTtsState = SanitizedTtsConfig
+const mockTtsState: MockTtsState = mockDefaultTtsConfig()
+
+const ttsImpl = {
+  /** 读脱敏配置投影：mock 内存态快照（深拷贝——调用方突变不污染 mock 态，fixture 惯例）。 */
+  async getConfig(): Promise<ServerMessageMap['tts.getConfig:result']> {
+    await sleep(TIMING.ack)
+    return { config: JSON.parse(JSON.stringify(mockTtsState)) as SanitizedTtsConfig }
+  },
+
+  /**
+   * 保存配置：更新内存态（providerId 条目 + activeProvider）后回脱敏投影。mock 不做
+   * runtime 写路校验（真实校验在 TtsService，ok 恒 true 与 quota mock「不模拟失败」口径一致）；
+   * apiKeys 语义照协议（字符串非空 = 写入、null/空串 = 清除、'from-provider' = 模拟联动带入成功）。
+   */
+  async configure(payload: realTtsDomain.TtsConfigurePayload): Promise<ServerMessageMap['tts.configure:result']> {
+    await sleep(TIMING.ack)
+    const entry = mockTtsState.providers[payload.providerId]
+    entry.config = JSON.parse(JSON.stringify(payload.config)) as TtsConfig
+    mockTtsState.activeProvider = payload.providerId
+    for (const [id, key] of Object.entries(payload.apiKeys ?? {})) {
+      const provider = id as TtsProviderId
+      const target = mockTtsState.providers[provider]
+      if (key === null || key === '') target.hasApiKey = false
+      else target.hasApiKey = true // 字符串写入 / 'from-provider'（mock 无凭据链，联动恒成功）
+    }
+    return { ok: true, config: JSON.parse(JSON.stringify(mockTtsState)) as SanitizedTtsConfig }
+  },
+
+  /** 拉三家表单投影：mock 内嵌静态演示数据（mock 本职 = 模拟 runtime，设计 §7.5）。 */
+  async getCapabilities(): Promise<ServerMessageMap['tts.getCapabilities:result']> {
+    await sleep(TIMING.ack)
+    return {
+      forms: JSON.parse(JSON.stringify(MOCK_TTS_FORMS)) as ServerMessageMap['tts.getCapabilities:result']['forms'],
+    }
+  },
+
+  /**
+   * mock 恒以 tts_not_configured 失败（与 real 轨「未配置」错误路径同形，供按钮/toast
+   * 状态机与错误码→i18n 映射在 mock 轨开发；真实合成链验收归 runtime 轨）。
+   */
+  async speak(_payload: { sessionId?: string; text: string }): Promise<ServerMessageMap['tts.speak:result']> {
+    await sleep(TIMING.ack)
+    throw Object.assign(new Error('Speech service is not configured (mock)'), { code: 'tts_not_configured' })
+  },
+}
+
+// [G4] 参数全等断言：mock tts 任一方法少参/多参/错型在此行编译失败
+export type TtsDomainParamsExact = AssertExact<DomainParamsExact<TtsDomain, typeof ttsImpl>>
+export const tts: TtsDomain = ttsImpl

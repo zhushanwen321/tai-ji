@@ -206,6 +206,20 @@ export function getAttachmentsDir(sessionId: string, dataDir?: string): string {
 }
 
 /**
+ * 朗读（TTS）缓存目录（`<dataDir>/tts-cache/`，设计 .tmp/tech-design/ai-voice-tts.md §7.4）。
+ *
+ * 合成结果 WAV 落盘处（文件名 = 缓存键内容哈希），经既有 local-file:// 协议回 renderer
+ * 播放——main 侧 local-file 白名单已含 `<dataDir>` 整树，本目录落其下即被放行。
+ * 可重建缓存语义（删除 = 全部重新合成，无状态损失）；封顶常量 TTS_CACHE_MAX_FILES /
+ * TTS_CACHE_MAX_BYTES 在 shared constants（双条件 FIFO）。
+ *
+ * @param dataDir 可选数据根目录（测试注入）；缺省读 getDataDir()
+ */
+export function getTtsCacheDir(dataDir?: string): string {
+  return join(dataDir ?? getDataDir(), 'tts-cache')
+}
+
+/**
  * toolResult 图片缓存根目录（`<dataDir>/cache/images`）[D6-⑨]。
  *
  * 纯缓存语义（可随时丢弃、可幂等重建）；落盘执行方 = main 进程（IPC IMAGE_CACHE_WRITE），

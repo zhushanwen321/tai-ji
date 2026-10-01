@@ -502,6 +502,22 @@ export const DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS = 15 * 1000
 // ── 滚动重启计划内退出码（crash-forensics-and-watchdog §3.3 D5 ④，u7c）──
 
 /**
+ * 朗读（TTS）上限与缓存封顶常量（设计 .tmp/tech-design/ai-voice-tts.md §7.6，SSOT）。
+ *
+ * 量化依据：中文约 4 字/秒 → MAX_SPEAK_CHARS（4000 字）≈ 17 分钟音频 ≈ 48MB WAV
+ *（24kHz 16-bit mono = 48KB/s），即单次朗读的成本/体积上限与缓存单文件最坏体积；
+ * 超限报 tts_text_too_long。缓存双条件 FIFO 封顶（文件数与总字节同时满足才停删）：
+ * 只按文件数封顶时最坏 100 × 48MB ≈ 4.8GB 不可接受，字节条件才是真实磁盘上界
+ *（512MB ≈ 典型文件 3–6MB 的百个容量、最坏 48MB 长文约 10 个）。
+ */
+// eslint-disable-next-line no-magic-numbers -- 设计标定阈值（§7.6），校准依据见上方 JSDoc
+export const MAX_SPEAK_CHARS = 4000 as const
+// eslint-disable-next-line no-magic-numbers -- 设计标定阈值（§7.6），校准依据见上方 JSDoc
+export const TTS_CACHE_MAX_FILES = 100 as const
+// eslint-disable-next-line no-magic-numbers -- 设计标定阈值（§7.6：512MB 磁盘上界），校准依据见上方 JSDoc
+export const TTS_CACHE_MAX_BYTES: number = 512 * 1024 * 1024
+
+/**
  * runtime 滚动重启计划内退出的专用退出码（86）。supervisor（classifyRuntimeExit
  * 判别式 + planned 立即重启分支）与 runtime 执行链（rolling-restart 触发的
  * process.exit）双端共用——两进程依赖方向单向（main → runtime），runtime 无法

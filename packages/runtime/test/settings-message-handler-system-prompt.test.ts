@@ -85,6 +85,7 @@ function makeHandler() {
       hasProviderCredential: vi.fn().mockReturnValue(false),
       listCredentialBackedProviderIds: vi.fn().mockReturnValue(new Set<string>()),
       resolveProviderCredential: vi.fn().mockResolvedValue(undefined),
+      resolveProviderBaseUrl: vi.fn().mockReturnValue(undefined),
     },
     skillRegistry: { getGlobalSkills: () => [], getProjectSkills: vi.fn().mockResolvedValue([]) } as unknown as SettingsHandlerContext['skillRegistry'],
     // D-21 端口化：ctx connectionTester 构造必需（本文件直接传 ctx 无 cast，缺字段 tsc 红）
