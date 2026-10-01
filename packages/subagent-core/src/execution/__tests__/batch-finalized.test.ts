@@ -1,14 +1,18 @@
 // src/execution/__tests__/batch-finalized.test.ts
 //
-// [collect 退役] 读侧守卫（D6「存量数据兼容」行）：sync 批写面（flushBatch /
-// markBatchFinalized 原语——manifest 屏障 + 落标 entry 显式覆写）已整体删除，本文件
-// 守的是**存量 entry / manifest 的读侧容忍面**——旧 session 文件必须可读：
+// [collect 退役 / 登记 §3.3] 读侧守卫：sync 批写面（flushBatch / markBatchFinalized
+// 原语）与 v1 全量快照兼容读面（toSubagentRecordEntry / rebuildEntryRecord）已整体
+// 删除，本文件守的是**现行 v2 条目与存量 manifest 的读侧容忍面**——旧 session 文件
+// 必须可读：
 //
-//   1. 存量落标 entry（batchFinalized=true）经真实落盘 → 末条扫描 + rebuildEntryRecord
-//      投影读回带标记，不炸不丢；
+//   1. v2 条目对（registered + settled）经真实落盘 → 末条扫描（collectV2EntryPairs +
+//      v2PairToRecord）投影读回终局域，不炸不丢；
 //   2. 存量批成员 manifest（批时代产物词汇：legacy status + executionStatus 并存）→
 //      无子文件锚时 manifest 源兜底投影可读；
-//   3. 存量批成员 record 经 record-store 重建路径（collectRecords）完整投影。
+//   3. v2 条目与 manifest 并存 → record-store 重建路径（collectRecords）完整投影。
+//
+// v2 条目契约不承载 batchFinalized / closedReason / worktree / round / patchFile——
+// 只检查这些遗留字段的断言无 v2 来源，已随兼容层删除（见各用例内注释）。
 //
 // 通路保真：RecordStore / ManifestStore 走真实实现（tmpdir 自建自删，红线），仅
 // pi.appendEntry 为 mock（种子的观察点）。
@@ -23,15 +27,17 @@ import { ManifestStore } from "../persistence/manifest-store.ts";
 import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import { createMemberRecord } from "./helpers/subagent-record-fixture.ts";
 import { RecordStore } from "../persistence/record-store.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
 import { SubagentService } from "../subagent-service.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
+import { v2Entries } from "./helpers/v2-record-entry.ts";
 
 const ROOT_SESSION = "root-batch-finalized";
 
-/** 存量批成员 record 形态（rebuildEntryRecord 解析门槛字段齐备——共享 fixture 工厂）。 */
+/** 批成员 record 形态（v2 条目投影门槛字段齐备——共享 fixture 工厂）。 */
 const memberRecord = createMemberRecord({ task: "batch task", slug: "batch", rootSessionId: ROOT_SESSION });
 
-describe("[collect 退役] 存量 batchFinalized entry / manifest 读侧容忍——旧 session 文件必须可读", () => {
+describe("[collect 退役] v2 条目 / 存量 manifest 读侧容忍——旧 session 文件必须可读", () => {
   let tmpDir: string;
   let sessionsDir: string;
   let manifestDir: string;
@@ -86,42 +92,38 @@ describe("[collect 退役] 存量 batchFinalized entry / manifest 读侧容忍�
     };
   }
 
-  it("存量落标 entry（batchFinalized=true）经真实落盘→末条扫描投影读回带标记，不炸", () => {
-    const store = new RecordStore(sessionsDir, undefined, makeWritingPi(), manifestDir);
-    // 成员 A：register（running）→ 终态（idle + gc + result）两笔真实 entry
-    store.reportSubagentRecord(memberRecord({ id: "sa-bf-a" }));
-    store.reportSubagentRecord(
-      memberRecord({ id: "sa-bf-a", status: "idle", closedReason: "gc", endedAt: 2000, result: "done-a" }),
-    );
-    // 成员 B：存量落标形态（batchFinalized=true——批时代落标/归档透传 entry 的
-    // 磁盘遗留词汇；写侧已删，读侧必须容忍解析）
-    store.reportSubagentRecord(
-      memberRecord({ id: "sa-bf-b", status: "idle", closedReason: "gc", endedAt: 3000, batchFinalized: true }),
-    );
+  it("v2 注册 + 终态条目经真实落盘→末条扫描投影读回终局域，不炸", () => {
+    // 现行主 session 条目契约 = 注册 + 终态两条小条目（record-entry.ts v2）。旧
+    // 「落标 entry」（batchFinalized=true）已无任何 v2 写入侧，兼容读面亦随 v1 快照
+    // 层删除——本用例守 v2 条目对经真实落盘 → scanLastRecordEntries 投影的终局域
+    // 保真（终态条目携带的字段读回不丢）。
+    const seedPi = makeWritingPi();
+    for (const entry of v2Entries(
+      memberRecord({ id: "sa-bf-a", status: "idle", endedAt: 2000, result: "done-a", stopReason: "completed" }),
+    )) {
+      seedPi.appendEntry(SUBAGENT_RECORD_CUSTOM_TYPE, entry);
+    }
 
     // 读侧：真实 readFileSync 扫描 + 投影（store 测试后门访问，零 mock 断言面）
     const fresh = new RecordStore(sessionsDir, undefined, { appendEntry: appendEntryMock }, manifestDir);
     const scanned = fresh.scanLastRecordEntries(mainFile);
-    const byId = new Map(scanned.map((r) => [r.id, r]));
+    const a = scanned.find((r) => r.id === "sa-bf-a");
 
-    const a = byId.get("sa-bf-a");
     expect(a).toBeDefined();
     expect(a!.status).toBe("idle");
     expect(a!.result).toBe("done-a");
-    expect(a!.batchFinalized).toBeUndefined();
-    const b = byId.get("sa-bf-b");
-    expect(b).toBeDefined();
-    expect(b!.batchFinalized).toBe(true);
-    expect(b!.closedReason).toBe("gc");
+    expect(a!.stopReason).toBe("completed");
+    expect(a!.endedAt).toBe(2000);
+    // [已删除断言] batchFinalized / closedReason：v2 条目契约无此二字段的承载位
+    // （v2PairToRecord 明确不投影），原断言在 v2 无来源。
 
     // [collect 退役] pi entry-only record 不经 store 投影是设计内语义（H4 M1
     // 「不重物化」——mergeEntrySourceRecords 收窄到 zcode 锚）：读侧容忍面 =
     // entry 末条扫描链（session-reader 反查投影同源），上方断言已覆盖；此处补
-    // 「initSession 恢复段对存量标记 entry 不炸」（真实组合路径全链跑通）。
+    // 「initSession 恢复段对 v2 条目不炸」（真实组合路径全链跑通）。
     const svc = makeCompatService();
     svc.dispose();
     fresh.dispose();
-    store.dispose();
   });
 
   it("存量批成员 manifest（批时代产物词汇）无子文件锚时 manifest 源兜底投影可读", () => {
@@ -154,19 +156,14 @@ describe("[collect 退役] 存量 batchFinalized entry / manifest 读侧容忍�
     store.dispose();
   });
 
-  it("存量批成员 entry 与 manifest 并存 → collectRecords 重建投影完整（容忍既有 entry）", () => {
-    const store = new RecordStore(sessionsDir, new ManifestStore(manifestDir), makeWritingPi(), manifestDir);
-    // 存量形态：落标 entry（batchFinalized=true + 终态五字段）+ 批时代 manifest 并存
-    store.reportSubagentRecord(
-      memberRecord({
-        id: "sa-bf-both",
-        status: "idle",
-        closedReason: "gc",
-        endedAt: 4000,
-        result: "both-sources",
-        batchFinalized: true,
-      }),
-    );
+  it("v2 条目与 manifest 并存 → collectRecords 重建投影完整（容忍既有 entry）", () => {
+    // 并存形态：v2 条目对（注册 + 终态）+ 批时代 manifest
+    const seedPi = makeWritingPi();
+    for (const entry of v2Entries(
+      memberRecord({ id: "sa-bf-both", status: "idle", endedAt: 4000, result: "both-sources" }),
+    )) {
+      seedPi.appendEntry(SUBAGENT_RECORD_CUSTOM_TYPE, entry);
+    }
     fs.writeFileSync(
       path.join(manifestDir, "sa-bf-both.json"),
       JSON.stringify({
@@ -186,7 +183,7 @@ describe("[collect 退役] 存量 batchFinalized entry / manifest 读侧容忍�
 
     // 模拟重启重建：走真实 SubagentService.initSession 组合路径。manifest 存在 →
     // manifest 源兜底投影（无子文件锚时的可见面），容忍既有 entry 并存不炸、
-    // identity 不丢；落标标记不在 manifest 词汇——entry 扫描链读取（同上）。
+    // identity 不丢。
     const svc = makeCompatService();
     // queries 面无 rootFilter 参数——rootSessionId 由 initSession 供给的 sessionRootId
     // 内部承担（ROOT_SESSION 过滤语义一致）。
@@ -195,12 +192,15 @@ describe("[collect 退役] 存量 batchFinalized entry / manifest 读侧容忍�
     expect(rec!.status).toBe("idle"); // manifest executionStatus=idle 两态权威词读回
     expect(rec!.agent).toBe("/agents/worker.md");
     expect(rec!.task).toBe("batch task");
-    // 标记经 entry 末条扫描链可见（session-reader 反查投影同源）
-    const fresh = new RecordStore(sessionsDir, new ManifestStore(manifestDir), makeWritingPi(), manifestDir);
+    // v2 条目对经末条扫描链读取（session-reader 反查投影同源）——终局域保真；
+    // batchFinalized 已无 v2 来源（原断言删除）。
+    const fresh = new RecordStore(sessionsDir, new ManifestStore(manifestDir), { appendEntry: appendEntryMock }, manifestDir);
     const scanned = fresh.scanLastRecordEntries(mainFile);
-    expect(scanned.find((r) => r.id === "sa-bf-both")!.batchFinalized).toBe(true);
+    const seeded = scanned.find((r) => r.id === "sa-bf-both");
+    expect(seeded).toBeDefined();
+    expect(seeded!.status).toBe("idle");
+    expect(seeded!.result).toBe("both-sources");
     fresh.dispose();
     svc.dispose();
-    store.dispose();
   });
 });

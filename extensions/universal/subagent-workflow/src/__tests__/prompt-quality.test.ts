@@ -85,8 +85,8 @@ describe("notifyDone 终止性原因追加防偷懒收尾", () => {
 // includeFinished:true + includeWorkflow 扩展），壳侧 toContain 弱锚无增量。
 
 describe("not-found 错误含退路指引", () => {
-  const toolWorkflowSrc = readSrc("src/interface/tool-workflow.ts");
-  const toolWorkflowScriptSrc = readSrc("src/interface/tool-workflow-script.ts");
+  const toolWorkflowSrc = readSrc("src/interface/tool/tool-workflow.ts");
+  const toolWorkflowScriptSrc = readSrc("src/interface/tool/tool-workflow-script.ts");
 
   it("tool-workflow.ts: not-found 错误含 action:status 指引", () => {
     // abort 的 not-found 错误应有 action:status 指引（pause/resume 已随一次性生命周期移除）
@@ -249,7 +249,7 @@ describe("debugger 假设驱动 + 临时日志恢复", () => {
 // ── workflow-script tool description + anti-pattern ──────────
 
 describe("workflow-script tool description + anti-pattern", () => {
-  const src = readSrc(join("src", "interface", "tool-workflow-script.ts"));
+  const src = readSrc(join("src", "interface", "tool", "tool-workflow-script.ts"));
 
   it("description 含 discovery 优先提示", () => {
     expect(src).toContain("Before generating");

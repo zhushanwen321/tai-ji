@@ -38,7 +38,7 @@ import type {
   ProbeReport,
   SessionView,
 } from "../types.ts";
-import type { EnginePort, EngineRunResult, RunContext } from "../port.ts";
+import type { EngineModelSelectorInput, EnginePort, EngineRunResult, RunContext } from "../port.ts";
 import type { EngineClient, RunRoute } from "./engine-client.ts";
 
 /** manifest 注册期快照（发现器/注册表读取，构造时注入——同步成员唯一源）。 */
@@ -295,10 +295,12 @@ export class RemoteEngine implements EnginePort {
    *   未命中且 dynamic:false → throw engine_model_unknown（同步拒，record 不创建）；
    *   未命中且 dynamic:true → 放行，返回原样 ref（运行期以引擎为权威
    *   engine_model_mismatch；无斜杠 ref 的 core 侧拆分 = 契约变更④，归 W3）。
-   * modelRef undefined（查引擎缺省）对静态目录恒属未命中：dynamic:true 放行回空串
-   * （缺省模型无静态 canonical 形态，运行期自证）；dynamic:false 同步拒。
+   * modelRef（未裁决词形，EngineModelSelectorInput——字符串边界入口的裁决见
+   * EnginePort.validateModel 注释）undefined（查引擎缺省）对静态目录恒属未命中：
+   * dynamic:true 放行回空串（缺省模型无静态 canonical 形态，运行期自证）；
+   * dynamic:false 同步拒。
    */
-  validateModel(modelRef: string | undefined): { canonicalRef: string } {
+  validateModel(modelRef: EngineModelSelectorInput): { canonicalRef: string } {
     const catalog = this.opts.manifest.modelCatalog;
     if (!catalog || modelRef === undefined || modelRef.trim() === "") {
       if (catalog?.dynamic === false) {
@@ -336,8 +338,8 @@ export class RemoteEngine implements EnginePort {
   }
 
   /**
-   * 协议 run 映射。task 收窄为引擎面子集（model/cwd/engineFallback 改挂
-   * run.params.ctx，协议层单列——SDK AgentCallOpts 注释的字段裁决；schema 本体经
+   * 协议 run 映射。task 收窄为引擎面子集（model/cwd 改挂 run.params.ctx，协议层
+   * 单列——SDK AgentCallOpts 注释的字段裁决；schema 本体经
    * wire task.schema 单字段承载，PI_WORKFLOW_SCHEMA env 由引擎侧派生——H1 schema
    * 传输归位）；事件经 run 作用域
    * 路由分发（event 通知 / streamDelta / poolResolved / handleReady）；abort → cancel
@@ -534,7 +536,6 @@ interface WireRunParams {
     cwd?: string;
     model: string | undefined;
     ctxModel: string | undefined;
-    engineFallback: RunContext["engineFallback"];
     streamMode: "stream" | undefined;
     sessionRootId?: string;
     /** [Option C] 恒有值（宿主注入 ?? 同源 env 推导）——与 sessionRootId 的
@@ -605,7 +606,6 @@ function buildRunParams(task: AgentCallOpts, ctx: RunContext, runId: string): Wi
       ...(task.cwd !== undefined ? { cwd: task.cwd } : {}),
       model: task.model,
       ctxModel: ctxModelRef,
-      engineFallback: ctx.engineFallback,
       streamMode: ctx.stream !== undefined ? ("stream" as const) : undefined,
       // [F6] 根 session id（relay 归属键 SESSION_ID 权威源）——undefined 不上 wire
       //（additive 语义，与顶层 chat 参数同写法）。

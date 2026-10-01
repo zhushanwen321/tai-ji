@@ -52,6 +52,16 @@
 
 目标：用户 `pi install <extension>` 后直接可用，无需额外下载或配置外部资源。
 
+## 决策记录与设计文档归属 [MANDATORY]
+
+扩展包内**不做**决策记录或长期设计文档的第二份源头：
+
+- 体系级决策（跨包生效、影响进程拓扑或协议语义）→ 项目级 [docs/adr/decisions.md](../adr/decisions.md)，编号沿用该文件规则。
+- 包内实现细节的设计 → [docs/architecture/](../architecture/)（现行文档族）或包内 README/源码注释。
+- 包内 `docs/adr/`、包内 `docs/design/` 一类的历史档案族不再新建、不再回填；已失效的按根 AGENTS.md 的「历史档案不回填不新建」纪律删除（git 可追溯）。
+
+依据：2026-09-29 §2.8 裁决（包内 3 个 ADR + 13 个设计文档与项目级 SSOT 并存，决策与设计位置无单一规则）；本规则即该条的防复发约束。
+
 ## Session 隔离（进程内层面）
 
 - 状态必须存储在 `session_start` 重建的闭包变量或 `ctx.sessionManager` entries 中
@@ -156,7 +166,7 @@ event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消�
 
 **可靠性分级（结果语义 vs 交互注入）[MANDATORY]**：event handler 里发消息必须先分清两类语义——
 
-- **结果语义通知**（subagent 完成、scheduler 触发、未来 webhook 等终态/结果类）：**必须走确认式送达**——持久账本 + 幂等键通道（`@zhushanwen/pi-session-delivery` 账本 / subagent-workflow 的 notify-ledger 设施，at-least-once）；**禁止**依赖 steer/nextTurn/followUp 内存队列的 at-most-once 投递（消费窗极窄，基线事故十余次完成仅送达 1 次）。约束登记 [docs/constraints.json](../constraints.json) C-ext-19，机器检查 `check_subagent_channels.py`（pre-commit + CI）。
+- **结果语义通知**（subagent 完成、scheduler 触发、未来 webhook 等终态/结果类）：**必须走确认式送达**——持久账本 + 幂等键通道（`@zhushanwen/session-delivery` 账本 / subagent-workflow 的 notify-ledger 设施，at-least-once）；**禁止**依赖 steer/nextTurn/followUp 内存队列的 at-most-once 投递（消费窗极窄，基线事故十余次完成仅送达 1 次）。约束登记 [docs/constraints.json](../constraints.json) C-ext-19，机器检查 `check_subagent_channels.py`（pre-commit + CI）。
 - **交互式注入**（非结果语义：实时 steer 用户意图、followUp 续推）：上表 deliverAs 两模式照常适用，不在禁令内——禁令对象是「结果语义的一次性通知」，不是交互式 steer。
 
 ## 模型引用解析 [MANDATORY]
@@ -166,6 +176,14 @@ event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消�
 - **原因**：pi CLI 的 `--model` 是 pattern 非精确 ID（toLowerCase 相等 → canonical 双命中判歧义作废 → contains 模糊 → localeCompare 取最大，PS-01；机器登记 [docs/pi-semantics.json](../pi-semantics.json)）——「扩展层校验通过」不代表「子进程按此名执行」，models-store 刷新引入大小写家族条目后被静默换模 429（2026-08-27 事故 A）
 - **检查**：`check_subagent_channels.py` 拦截白名单外的 `"--model"` 字面量（pre-commit + CI，行级豁免须给职责定性注释）；全等裁决不通过时 start 同步期拒单并给纠错候选
 - **约束登记**：[docs/constraints.json](../constraints.json) C-ext-19；能力档位同理由 C-pi-12 禁本地推断（只消费注册表下发的 supportedLevels）
+
+## 命令/技能获取 [MANDATORY]
+
+扩展域内任何「发现可执行 skill / 校验技能可用」一律走共享包 `@zhushanwen/pi-exec-skills`（`extensions/shared/exec-skills/`）：`detectExecSkills` 自研扫描直读磁盘 = **发现**（表单列出可用技能，技能热装即时可见，无 reload 滞后）；`resolveSkills` = **执行门禁**（pi 注册表 `pi.getCommands()` 过滤 `source === "skill"` 确认 pi 实际认得，注入前把关）——扫描与门禁两段消费语义闭环，**禁止各扩展自扫 skill 目录或直用 pi 注册表快照形成第二实现**。
+
+- **原因**：`pi.getCommands()` 返回 resource loader 的启动加载集（reload 才刷新的滞后快照）——发现面用它会让新装技能不可见；执行面它才是权威（快照滞后只造成「刚装技能本 turn 门禁拒绝」，重试即过）
+- **守卫**：依赖登记方向经 `check-extension-dependencies.mjs` 双向校验——包 package.json dependencies/peerDependencies 声明的 `@zhushanwen/*` / `@taiji/*` 包未登记进 extension-dependencies.json 该条目 dependsOn 即红（漏登记，含 shared 库条目存在性），dependsOn 引用的 workspace 内包无法解析同样即红（悬空引用）；pi bump 的目录/overrides 语义漂移由共享包对拍测试兜住（[docs/pi-semantics.json](../pi-semantics.json) PS-53 探针）
+- **约束登记**：[docs/constraints.json](../constraints.json) C-ext-30
 
 ## 扩展安装红线 [强制]
 

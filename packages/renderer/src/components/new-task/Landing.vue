@@ -18,7 +18,7 @@ import { computed, onMounted, onUnmounted, provide, watch } from 'vue'
  */
 
 import { useI18n } from 'vue-i18n'
-import { Folder, GitFork, RefreshCw } from '@lucide/vue'
+import { Folder, GitFork, LoaderCircle, RefreshCw } from '@lucide/vue'
 import { resolveLaunchConfig } from '@taiji/core'
 import { BUILTIN_PRESET_IDS, type PiLaunchPreset } from '@taiji/shared'
 import { Button } from '@/components/ui/button'
@@ -61,6 +61,27 @@ const deps = useNewTaskDeps()
 provide(NewTaskDepsKey, deps)
 const flow = deps.flow
 const toastError = deps.toast.error
+
+/**
+ * [perf-landing 跳转先行] 首发提交飞行中（flow.isInflight = createInFlight，submitFirstMessage
+ * 入口同步置位）→ 立即离开 landing 内容态（问候语 + chip 行 + composer 卡片 v-show 隐藏），
+ * 展示创建中过渡视图。session.create 本体（pi 子进程 spawn + boot，实测 warm ~1.6s /
+ * cold ~4.2s，pi 是外部二进制不可改）串行阻塞跳转是原「卡 landing 页」根因——真实 session
+ * 页最早只能在 create 返回后渲染（id 权威来自 pi getState），但用户感知的「点击无反应」
+ * 由本过渡视图消除：点击同帧离开 landing，create 完成后无缝落入新 session 页。
+ *
+ * 隐藏用 v-show 而非 v-if：Composer 必须全程挂载——create 失败时 sendLandingFirstMessage
+ * 的 catch 调 restoreSegments 回滚草稿，写目标是本实例的 inputRef；v-if 卸载会令回滚写进
+ * 已卸载实例 → 输入丢失（[form-hang-fix] 同族教训）。Landing 自身也不卸载（D4 卸载守卫
+ * 会 cancelFlow 杀掉在途 create），过渡完全发生在组件内部。
+ */
+const isCreating = computed(() => flow.isInflight.value)
+/** [E] 「正在取消…」态（abandonSubmit 置位）：hint 替换 + 取消按钮 disabled；过渡视图保持到 create settle */
+const isCancelling = computed(() => flow.isSubmitAbandoned?.value ?? false)
+/** [E] 创建中取消：置 abandoned（flow 在 submitFirstMessage 出口收尾：不投递 + 删已建 session + 归还草稿） */
+function onCancelCreate(): void {
+  flow.abandonSubmit()
+}
 
 /**
  * onOpenDirDialog — 打开 OS 目录选择器（AC-5.6 异常反馈）。
@@ -167,13 +188,11 @@ const isWorktreeModalOpen = computed(() => flow.state.value === 'worktree-modal'
 /** 当前 cwd 所在 workspace 的已有 worktree 列表（BranchSelectPopover Worktree tab 数据源）。 */
 const worktreeItems = computed(() => flow.worktreeItems?.value ?? [])
 
-/** 短名去尾缀后的最小保留长度（低于此值回退全名，避免「模式」二字模式名被去空） */
-const MIN_SHORT_NAME_LENGTH = 2
-
 /**
  * 当前显示 / 将生效的模式（u4b 接线）：与 PresetSelectChip 内部同一 resolve 链
- * （explicit > 全局默认 > builtin:full，D3 单一解析层）。renderer 侧算好全名 / 短名 /
- * 信任标记文案，经 props 传给 ui chip（ui 包不耦合 renderer i18n——u4a 的 props 契约）。
+ * （explicit > 全局默认 > builtin:full，D3 单一解析层）。renderer 侧算好全名 /
+ * 信任标记文案，经 props 传给 ui chip（ui 包不耦合 renderer i18n——u4a 的 props 契约；
+ * 短名不在传参面——chip 内 fallback 是唯一实现，避免去尾缀启发式双实现漂移）。
  */
 const displayPreset = computed<PiLaunchPreset | null>(() => {
   const presets = deps.presets.value
@@ -189,13 +208,6 @@ const displayPreset = computed<PiLaunchPreset | null>(() => {
 })
 /** 模式全名（缺省 undefined → ui chip 回落其内部解析名，既有接入零改动） */
 const modeName = computed(() => displayPreset.value?.name)
-/** 模式短名（中文本土模式名去「模式」尾缀；无尾缀保持全名） */
-const modeShortName = computed(() => {
-  const name = modeName.value
-  if (!name) return undefined
-  const stripped = name.replace(/模式$/, '')
-  return stripped.length >= MIN_SHORT_NAME_LENGTH ? stripped : name
-})
 /** 信任标记判据（设计 §7.1：`replace.enabled && 文案非空`） */
 const modeHasReplace = computed(() => {
   const seg = displayPreset.value?.prompt?.replace
@@ -273,6 +285,37 @@ function onPresetSelect(payload: { presetId: string }): void {
     data-testid="new-task-landing"
     class="relative flex min-h-0 flex-1 flex-col items-center justify-center gap-8 overflow-hidden p-6"
   >
+
+    <!-- [perf-landing 跳转先行] 创建中过渡视图：点击发送后同帧出现（isInflight 入口同步置位），
+         替换问候语/composer 内容态；create 完成后 Panel 切 conversation 分支，本视图随 Landing
+         一并卸载。失败时 isInflight 复位 → 内容态回显 + restoreSegments 已回滚草稿。
+         [E] 取消按钮：abandonSubmit 置 abandoned → 「正在取消…」态（disabled 防重入），
+         过渡视图保持到 create settle（防 create 仍在途时重发造成并发双 create）。 -->
+    <div
+      v-if="isCreating"
+      data-testid="new-task-creating"
+      class="z-10 flex flex-col items-center gap-3"
+      role="status"
+    >
+      <LoaderCircle class="size-6 animate-spin text-neutral-mid" />
+      <p class="text-[length:var(--text-sm)] text-neutral-mid">
+        {{ isCancelling ? t('newTask.creating.cancellingHint') : t('newTask.creating.hint') }}
+      </p>
+      <Button
+        data-testid="new-task-cancel-create"
+        variant="ghost"
+        class="h-auto gap-1.5 px-3 py-1.5 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg disabled:pointer-events-none disabled:opacity-50"
+        :disabled="isCancelling"
+        @click="onCancelCreate"
+      >
+        {{ t('common.cancel') }}
+      </Button>
+    </div>
+
+    <!-- landing 内容态（问候语 + chip 行 + composer 卡片）：创建中 v-show 隐藏（保挂载）。
+         display:contents 包裹层——子元素仍作为根 flex 的直接项参与 gap/居中布局，
+         v-show 切 display:none/'' 不改变原有布局（若用普通 div 包裹会多一层 flex item 断 gap）。 -->
+    <div v-show="!isCreating" class="contents">
 
     <!-- 问候语（22px / weight 650 / --fg，spec §3.1） -->
     <h1 class="z-10 text-center text-[22px] font-[650] text-neutral-fg">
@@ -355,7 +398,6 @@ function onPresetSelect(payload: { presetId: string }): void {
             :launch-preset-id="flow.currentSession.value?.launchPresetId"
             :accent="isNonDefaultPreset"
             :mode-name="modeName"
-            :short-name="modeShortName"
             :has-replace-prompt="modeHasReplace"
             :replace-hint="modeReplaceHint"
             v-model:preset-open="isPresetOpen"
@@ -378,5 +420,6 @@ function onPresetSelect(payload: { presetId: string }): void {
       @success="onWorktreeCreated"
       @use-existing="onWorktreeActivated"
     />
+    </div><!-- /v-show 内容态（display:contents 包裹） -->
   </div>
 </template>

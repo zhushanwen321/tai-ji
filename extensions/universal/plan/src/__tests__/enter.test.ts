@@ -27,19 +27,23 @@ vi.mock("node:fs", () => ({
 // Mock templates（enter 的 buildPlanModePrompt 走 listTemplates；单测不扫真实模板目录）
 vi.mock("../templates.js", () => ({
   listTemplates: vi.fn(() => []),
-  loadTemplate: vi.fn(() => null),
   formatAvailablePlans: vi.fn(() => ""),
 }));
 
-vi.mock("../compact.js", () => ({
+vi.mock("../execution-notice.js", () => ({
   handlePlanComplete: vi.fn(),
-  detectGoalCapability: vi.fn(() => false),
   GOAL_FAILURE_RECOVERY: {},
 }));
 
-vi.mock("../exec-skills.js", () => ({
-  detectExecSkills: vi.fn(() => []),
-}));
+// Mock 执行方式检测（D10）：单测不扫真实目录。importActual 展开：只覆写
+// detectExecSkills，其余导出（含 enter.ts re-export 的 resolveSkills 执行门禁）走
+// 真实现——mock 罩全模块会把它一并变 undefined
+vi.mock("@zhushanwen/pi-exec-skills", async () => {
+  const actual = await vi.importActual<typeof import("@zhushanwen/pi-exec-skills")>(
+    "@zhushanwen/pi-exec-skills",
+  );
+  return { ...actual, detectExecSkills: vi.fn(() => []) };
+});
 
 vi.mock("../widget.js", () => ({
   updatePlanWidget: vi.fn(),
@@ -50,13 +54,12 @@ import * as fs from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { registerPlanTool } from "../tool.js";
-import { type PlanState, DEFAULT_PLAN_STATE, PLAN_MODE_TOOLS } from "../state.js";
+import { type PlanState, createPlanCtx, DEFAULT_PLAN_STATE, PLAN_MODE_TOOLS } from "../state.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
 
 function setup(skillCommands: Array<{ name: string; path: string }> = []) {
-  const sessions = new Map();
-  const controllers = new Map<string, AbortController>();
+  const planCtx = createPlanCtx();
   let executeFn: (id: string, p: Record<string, unknown>, sig?: AbortSignal, upd?: unknown, ctx?: unknown) => Promise<{
     content: Array<{ type: string; text: string }>;
     details: { action: string; requirement?: string; skills?: string[] };
@@ -69,7 +72,7 @@ function setup(skillCommands: Array<{ name: string; path: string }> = []) {
     getCommands: vi.fn(() => skillCommands.map((c) => ({ name: c.name, source: "skill", sourceInfo: { path: c.path } }))),
     getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
   } as unknown as ExtensionAPI;
-  registerPlanTool(pi, sessions, controllers);
+  registerPlanTool(pi, planCtx);
 
   const ctx = {
     sessionId: "test-session",
@@ -77,13 +80,13 @@ function setup(skillCommands: Array<{ name: string; path: string }> = []) {
     hasUI: true,
     mode: "tui" as const,
     isProjectTrusted: () => true,
-    sessionManager: { getSessionId: () => "test-session", getEntries: () => [] },
+    sessionManager: { getSessionId: () => "test-session", getLeafId: () => null, getEntries: () => [] },
     ui: { select: vi.fn(), notify: vi.fn() },
   } as unknown as ExtensionContext;
 
   const exec = (params: Record<string, unknown>, signal?: AbortSignal) =>
     executeFn!("tc0", params, signal, undefined, ctx);
-  return { pi, sessions, ctx, exec };
+  return { pi, sessions: planCtx.states, ctx, exec };
 }
 
 describe("plan(action='enter') — agent 自助进入（plan-mode-agent-enter U1）", () => {
@@ -112,6 +115,10 @@ describe("plan(action='enter') — agent 自助进入（plan-mode-agent-enter U1
     // 状态对象已是激活态
     const state = sessions.get("test-session") as { isActive?: boolean; requirement?: string };
     expect(state.isActive).toBe(true);
+    // 状态写走 transition()：idle --enter--> planning 落盘（新会话缺省态进入；原独立
+    // 用例的转移断言并入——同通道同断言字段，仅转移源字面量与下方坏格用例不同）
+    const lastEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
+    expect(lastEntry.state).toBe("planning");
   });
 
   it("已在 plan 模式：幂等返回，不重复收工具 / 不重复注入", async () => {
@@ -154,19 +161,50 @@ describe("plan(action='enter') — agent 自助进入（plan-mode-agent-enter U1
     expect(res.content[0].text).toContain("(from conversation context)");
   });
 
-  it("新轮次进入：上轮残留的 reviewStateSource 随进入失效（跨 plan run 残留防护，§3.4 清除点）", async () => {
+  it("新轮次进入：上轮残留的 selfReview/resumeHint/指纹随进入失效（clearRoundFields 单函数出口的 enter 调用点，D9①防跨轮误触新鲜度门）", async () => {
     const { exec, pi, sessions } = setup();
-    // 模拟上轮残留：崩溃/bad-response 等绕过 resetPlanState 的路径留下的来源标记
-    sessions.set("test-session", { ...DEFAULT_PLAN_STATE, isActive: false, reviewStateSource: "explain" });
+    // 模拟上轮残留：崩溃/bad-response 等绕过 resetPlanState 的路径留下的降级标记与基线
+    sessions.set("test-session", {
+      ...DEFAULT_PLAN_STATE,
+      isActive: false,
+      state: "exited",
+      selfReview: "stale self-review",
+      resumeHint: "resubmit",
+      lastSubmitReviewDocsFingerprint: "old.md:3",
+    });
 
     const res = await exec({ action: "enter", requirement: "new round" });
 
     expect(res.details.action).toBe("enter");
-    // activatePlanMode 新轮次重置组清来源标记（与 resetPlanState 对齐）
-    const state = sessions.get("test-session") as { reviewStateSource?: string };
-    expect(state.reviewStateSource).toBeUndefined();
-    // 新轮 entry 无来源标记（undefined 序列化自然消失——D4）
+    // activatePlanMode 经 clearRoundFields 清三字段（D4 单函数出口，与 resetPlanState 同源）
+    const state = sessions.get("test-session") as PlanState;
+    expect(state.selfReview).toBeUndefined();
+    expect(state.resumeHint).toBeUndefined();
+    expect(state.lastSubmitReviewDocsFingerprint).toBeUndefined();
+    // enter 边落盘（exited --enter--> planning 新一轮）；entry 无残留字段
     const lastEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
-    expect(lastEntry.reviewStateSource).toBeUndefined();
+    expect(lastEntry.state).toBe("planning");
+    expect(lastEntry.resumeHint).toBeUndefined();
+  });
+
+  it("坏数据格（isActive=false 且 state 落活跃族）：enter 按转移 ok:false 落穿，不归一不重试（坏格自愈分支已删，C1 行为变更组——仅坏格可达，行为差锚）", async () => {
+    const { exec, pi, sessions } = setup();
+    // 手改 session 文件可达的坏格：isActive=false 却残留活跃族 state（reviewing）
+    sessions.set("test-session", {
+      ...DEFAULT_PLAN_STATE,
+      isActive: false,
+      state: "reviewing",
+    });
+
+    await exec({ action: "enter", requirement: "on a corrupt cell" });
+
+    // 落穿：不归一 idle 再进——state 保持坏值（reviewing --enter--> 非 ok），进入副作用
+    // 照常（isActive=true 已置、persist 携带现值）
+    const state = sessions.get("test-session") as PlanState;
+    expect(state.isActive).toBe(true);
+    expect(state.state).toBe("reviewing");
+    const lastEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
+    expect(lastEntry.state).toBe("reviewing");
+    expect(lastEntry.isActive).toBe(true);
   });
 });

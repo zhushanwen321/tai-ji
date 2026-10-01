@@ -421,14 +421,38 @@ function collectRecentTurnEntriesFromTail(
 /**
  * entries → Message[]（共享 mapper + port 翻译 + entry 专属回填，全量读与①②档窗口共用单点）。
  *
+ * [message-revoke U6a] 活跃路径裁剪接入：leafId 取窗口/文件**最后一条** entry 的 id——
+ * pi 树重放规则（重启后叶子 = 文件最后一条 entry；PS-60 实锚 dist/core/session-manager.js:673
+ * `_buildIndex` 文件序循环置 leafId=entry.id、:616 `_setSessionFile` 加载路径）保证文件尾即
+ * 活跃叶子；撤回后 label
+ * entry 落文件尾，被撤子树条目按文件序先于 label，经 computeActivePathEntries 沿 parentId
+ * 回溯滤除（离线尾读 / oversize 窗口 / 全量文件读 / 游标窗口四条腿共用本单点，被撤分支
+ * 在文件源腿同样不渲染）。已知边界（设计 D3 允许的降级面）：turn 计数与字节预算在
+ * collect 阶段按原始行计算（含旧分支行）→ 分支 session 的窗口可能欠填（可见 turns 少于
+ * 预算）、totalTurnsEstimate 偏大——内容正确性优先，truncated=true 时「加载更多」可继续
+ * 翻页补全。末条 entry 无 string id（畸形文件尾）→ leafId undefined → 不裁剪（现行为降级）。
+ *
  * 回填步骤 applyEntryEndTimes：用 entry 时间戳写 assistant 消息的产出结束时刻（Message.endedAt，
  * pi 落盘于 message_end → ≈ 该消息产出结束）；turn 聚合口径（「已工作」时长/时刻区间）
  * 依赖它，且该数据只在持久化 entry 上有（live 链路走自己的时钟，见 shared Message.endedAt 注释）。
  */
 function convertWindowEntries(entries: PiSessionEntry[], sessionStore: ISessionStore): Message[] {
-  const { messages, entryIds } = mapSessionEntries(entries)
+  // 文件腿喂入前剥 session header 行：pi getEntries() RPC 已滤除（dist/core/
+  // session-manager.js getEntries 的 `e.type !== "session"`，0.84.4 实锚），而 parseJsonl
+  // 文件直读原样含 header——header 有 id 无 parentId，会与真根 entry 一起把
+  // computeActivePathEntries 的单根守卫顶成多根降级（warn + 原样返回），活跃路径裁剪
+  // 静默失效、被撤分支从文件源腿渲染。header 本就不进映射产物，剥除零行为差异，仅恢复
+  // 裁剪生效（喂数语义与 RPC 腿对齐；session-file-utils.trimFileEntriesToActivePath 同款
+  // 剥除——文件腿喂数变换的两个消费点各自单点持有）。
+  // 类型注记：header 形态不在 PiSessionEntry 联合内（pi 类型层的已知盲区——它只在文件
+  // raw 首行存在，历史调用点把 parseJsonl 输出直接断言成 PiSessionEntry[]），故谓词经
+  // unknown 中转比较；此 filter 即运行时守卫本体。
+  const scoped = entries.filter((e) => (e as { type?: unknown }).type !== 'session')
+  const last = scoped[scoped.length - 1]
+  const leafId = last !== undefined && typeof last.id === 'string' ? last.id : undefined
+  const { messages, entryIds } = mapSessionEntries(scoped, leafId)
   const converted = sessionStore.convertHistory(messages, entryIds)
-  applyEntryEndTimes(converted, entries)
+  applyEntryEndTimes(converted, scoped)
   return converted
 }
 

@@ -15,7 +15,7 @@
 import { execFileSync, execSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { BASE_PORT, MAX_PORT } from '@taiji/shared'
+import { BASE_PORT, MAX_PORT, RUNTIME_INSTANCE_FILE, type RuntimeInstanceRecord } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import { mainLogger } from '../logs/main-logger.js'
 import { isPortInUse } from './health-checker.js'
@@ -27,8 +27,6 @@ export const PORT_RETRY_MS = 300
 export const KILL_WAIT_MS = 200
 export const SAFE_KILL_NAMES = /(?:^|[\/\\])(?:node|node\.exe|pi|pi\.exe|pi-windows-x64\.exe|tsx|tsx\.exe|electron|electron\.exe|taiji|taiji\.exe|bash|bash\.exe|sh|sh\.exe|zsh|zsh\.exe)$/i
 
-/** runtime 自登记文件名（single-instance-guard 写入，位于数据目录根，0600）。 */
-const RUNTIME_INSTANCE_FILE = 'runtime-instance.json'
 /** runtime 进程 cmdline 指纹：dev（tsx 跑源码）与打包（dist bundle）两种形态都显式注入该参数。 */
 const RUNTIME_CMDLINE_MARKER = '--builtin-plugins-dir='
 /** 残留 runtime SIGTERM → SIGKILL 的宽限上界（控制面秒级，对齐 STOP_TIMEOUT_MS 量级）。 */
@@ -122,7 +120,7 @@ function getUnixListeningPids(port: number): number[] {
 }
 
 /** 读本数据目录的 runtime 自登记。文件缺失/损坏 = 无身份锚点（首次启动/旧版实例），按无残留处理——文件非权威。 */
-function readOwnInstanceRecord(dataDir: string): { pid: number; port: number; startedAt: string } | null {
+function readOwnInstanceRecord(dataDir: string): RuntimeInstanceRecord | null {
   try {
     const raw = JSON.parse(readFileSync(path.join(dataDir, RUNTIME_INSTANCE_FILE), 'utf-8')) as { pid?: unknown; port?: unknown; startedAt?: unknown }
     if (typeof raw.pid !== 'number' || !Number.isInteger(raw.pid) || raw.pid < 1) return null

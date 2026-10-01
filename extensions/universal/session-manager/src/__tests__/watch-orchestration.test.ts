@@ -26,7 +26,7 @@ vi.mock("@zhushanwen/pi-extension-logger", () => createLoggerModuleMock());
 
 const loggerMock = getLoggerMock();
 
-const LEDGER_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.notifyLedger");
+const LEDGER_SLOT_KEY = Symbol.for("@zhushanwen/subagent-core.notifyLedger");
 
 /** watch 开表调用（deferred）——opts 为开表时传入的 select 第三参原样值 */
 interface DeferredWatch extends WatchInvocation {

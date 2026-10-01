@@ -133,8 +133,8 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 > 帮我 review 这段代码 <taiji-skill name="code-review-graph" location="…"/> <taiji-skill name="code-simplify" location="…"/>
 >
 > <taiji-skill-data>
-> <skill name="code-review-graph" location="/Users/x/.agents/skills/code-review-graph/SKILL.md">
-> References are relative to /Users/x/.agents/skills/code-review-graph.
+> <skill name="code-review-graph" location="<家目录>/.agents/skills/code-review-graph/SKILL.md">
+> References are relative to <家目录>/.agents/skills/code-review-graph.
 >
 > （SKILL.md 全文…）
 > </skill>
@@ -154,8 +154,8 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 > 帮我 review 这段代码 <taiji-skill name="code-review-graph" location="…"/> <taiji-skill name="code-simplify" location="…"/>
 >
 > <taiji-skill-data>
-> <taiji-skill name="code-review-graph" location="/Users/x/.agents/skills/code-review-graph/SKILL.md"/>
-> <taiji-skill name="code-simplify" location="/Users/x/.agents/skills/code-simplify/SKILL.md"/>
+> <taiji-skill name="code-review-graph" location="<家目录>/.agents/skills/code-review-graph/SKILL.md"/>
+> <taiji-skill name="code-simplify" location="<家目录>/.agents/skills/code-simplify/SKILL.md"/>
 > Use the read tool to load the skill files above before continuing the task
 > </taiji-skill-data>
 > ```
@@ -246,12 +246,11 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 - **证据**：pi 对未知 skill 原样透传（`agent-session.js:989-991`）——行为对齐。
 - **效果**：§3.1 场景 3。
 
-**D9：四条发送路径统一收敛 + hook 顺序（选定）**
-- **采用**：runtime 新增单一展开函数（注入模块），`message-dispatcher.ts` 的三个入口——`sendPrompt`（:79-149，普通发送/landing 首条最终都汇入）、`steerMessage`（:522）、`followUpMessage`（:527）——在把文本交给 `client.prompt/steer/followUp` 之前**统一调用**。
-- **挂载顺序（明确）**：注入器挂在 **BeforeSend hook 之后、`client.prompt` 之前**——plugin hook 审核的是用户原文（含标记，语义为「用户提交了什么」），注入器处理 hook 改写后的文本；hook 改写若破坏标记完整性，走 D8 透传+提示（标记残缺不展开、不静默丢内容）。
-- **幂等（结构化保证）**：每条消息仅过一次注入器，由 dispatcher 调用点保证（sendPrompt/steerMessage/followUpMessage 各自单次调用）；**不做文本级幂等检测**（grep「已展开否」会被用户正文手打 `<taiji-skill` 字样欺骗而误跳过真实 chip）。
-- **不采用**：只改 sendPrompt——steer/followUp 场景（busy 补充 skill）注入失效，G2 不完整。
-- **证据**：`message-dispatcher.ts:522-529`（steer/followUp 不走 sendPrompt 骨架，需各自挂载）、`:84-137`（hook 先于 client.prompt 的现有顺序）。
+**D9：发送路径统一收敛 + hook 顺序（选定；投递所有权内核化后挂载点随出站交接点迁移）**
+- **采用（现行终态）**：注入器挂载点 = 投递注册表的出站交接点（`session-delivery-registry.ts` deliverOne 的 `injector.inject`，skill 注入器所有权随出站交接点走）——全部用户消息路径（message.send / delivery.submit / 内核 requeue/rebuild/adopt 重投）经同一交接点，注入恰好一次。runtime 组合根构造注入器时与 dispatcher/records 共源（`sessionService.skillMappingSource` 单权威）。
+- **挂载顺序（明确）**：BeforeSend hook 在受理入口（`MessageDispatcher.runAcceptance`，提交前唯一拦截面，审核用户原文），注入器在出站交接（hook 改写后的文本交给内核，出站时注入）；hook 改写若破坏标记完整性，走 D8 透传+提示（标记残缺不展开、不静默丢内容）。
+- **幂等（结构化保证）**：每条消息仅过一次注入器，由「hook 只在受理阶段一次、注入只在出站交接一次」的分工保证；**不做文本级幂等检测**（grep「已展开否」会被用户正文手打 `<taiji-skill` 字样欺骗而误跳过真实 chip）。
+- **历史形态（已被替代）**：早期方案在 `message-dispatcher.ts` 的三个发送入口（sendPrompt / steerMessage / followUpMessage）各自挂载；steer/followUp 转发腿随协议条目 message.steer / message.follow_up 退役（MF-1-8），busy 场景的补充消息经 delivery.submit 统一排队，G2 由内核持有+释放后投递承接。
 - **效果**：§3.1 场景 4。
 
 **D10：runtime readline 分帧防御顺手修（选定）**
@@ -301,7 +300,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 
 ① **store 去重第三判据失配面扩大（P0-12 登记；R4 修正机制描述）**。`packages/core/src/domain/chat/store.ts` 的 `mergeBaselineWithLive` 第三判据（user 文本多重集）实际比较的是**两侧投影**（`userMessageText`：基线 Array content 走 segmentsToText）——sidecar 命中消息的基线 content 已被 backfillSegments 换回原始 Segment[]，与 live 侧同源**命中**（不双计）；真实失配域 = sidecar 丢失的兜底路径（反解析产物与提交文本存在剥块残留分隔空白等字节差）。store.ts 注释中「pi 文本 ≡ 提交文本」为过时前提（实施期同批更正）。改造后含 skill chip 消息的兜底反解析产物 ≠ 提交文本，判据在该域失配落回「身份+数量对齐」——**现状已存在同类失配**（行首 skill chip 消息，注释明示「skill 展开消息自然失配 → 落回现状」），本设计将触发面从边缘形态扩到主用例。**量级**：仅在 F2 竞态窗口（切入 session 时 getHistory 快照与 live 帧流时序差 + 基线尾部为 assistant）且 sidecar 丢失时短暂双计（badge 版 + 纯文本版各一条）；**恢复路径**：下一轮 reconcile 自动收敛（现状机制，非新增）；**重审条件**：若实跑出现可见双计未收敛，评估归一比对（兜底产物归拢回标记形态再比对）；**判定**：可接受（现状同类边界先例 `store.ts:128-130`）。**R4 注记**：末尾块协议下 pi 落盘文本 = 标记正文 + 末尾展开块，仍 ≠ 提交文本（标记正文），失配面与结论不变。
 
-② **宿主 JSONL 写入量级与跨消息累积（P0-19 登记）**。**量级**：本机实测 SKILL.md 体量 0.9KB~50KB，单条消息注入 N 个 skill = 追加 N×全文；同一 skill 跨消息重复注入**单调累积**（每条挂该 skill 的消息都注入一份全文进历史，每轮请求上下文含全部历史副本），token 成本线性增长（prompt cache 命中时增量主要是 cache read）。**清理通道**：pi compaction 会把旧 skill block 摘掉（普通 skill < 20000 token 不受切点保护，可被摘要——与单条巨大消息的盲区不同）；单条超窗由 D6 预检拦截。**控制旋钮**：单消息内 chip 去重（D2）；跨消息**显式不做去重**——重复插入是用户的显式强调意图，自动跳过会静默违背意图。**重审条件**：用户反馈成本异常时评估跨消息引用提升（如上下文已有同 skill 全文时第二条起降级为标记）。**判定**：可接受。连带：steer 队列回显（`queue_update` 帧的 queuedMessages 全文数组）随注入量膨胀——内存帧不落盘，量级与消息体积同阶，可接受。**R4 补登显示投影**：steer/followUp 入队前已完成注入，QueueBubble 对快照仅剥 defer 标记，skill 标记与包裹块以单行 truncate 原样可见（存量行为非 R4 新增；单行 truncate 天然缓解；重审条件 = 用户反馈排队气泡可读性，届时 QueueBubble 复用反解析投影剥块/还原短标记）。
+② **宿主 JSONL 写入量级与跨消息累积（P0-19 登记）**。**量级**：本机实测 SKILL.md 体量 0.9KB~50KB，单条消息注入 N 个 skill = 追加 N×全文；同一 skill 跨消息重复注入**单调累积**（每条挂该 skill 的消息都注入一份全文进历史，每轮请求上下文含全部历史副本），token 成本线性增长（prompt cache 命中时增量主要是 cache read）。**清理通道**：pi compaction 会把旧 skill block 摘掉（普通 skill < 20000 token 不受切点保护，可被摘要——与单条巨大消息的盲区不同）；单条超窗由 D6 预检拦截。**控制旋钮**：单消息内 chip 去重（D2）；跨消息**显式不做去重**——重复插入是用户的显式强调意图，自动跳过会静默违背意图。**重审条件**：用户反馈成本异常时评估跨消息引用提升（如上下文已有同 skill 全文时第二条起降级为标记）。**判定**：可接受。连带：`queue_update` 帧的 queuedMessages 全文数组随注入量膨胀——帧只在内核内部回执链消费、不再直驱 UI（队列区读 `session.delivery` 帧的 preview 文本），内存帧不落盘，量级与消息体积同阶，可接受。**R4 补登显示投影**：steer/followUp 入队前已完成注入，队列区行（QueueBubble）以 `session.delivery` 帧的 preview（提交原文侧投影）单行 truncate 展示——skill 标记与包裹块不经队列区行呈现（注入文本在 pi 槽位与 transcript 中仍完整存在，展示层剥离 SSOT = `apply-entry-convert.ts`；重审条件 = 用户反馈排队气泡可读性，届时 QueueBubble 复用反解析投影剥块/还原短标记）。
 
 ③ **兜底误还原（D7 边界四要素）**。正文手打 `<taiji-skill` 字样 + 该消息 sidecar 同时丢失时，兜底反解析把手打字样误还原为 chip。**量级**：联合概率极低（需用户精确打出机器标记前缀，且 sidecar 丢失——sidecar 丢失率无历史数据，实施期可经日志观测）；**恢复路径**：不可恢复——偏差**仅限显示层消费**（badge 显示的 name/location 可辨识，pi 已落盘的实际内容不变）；**注意**：若误还原 segment 经编辑重发（§3.5-⑤② 的 draftText 回填路径），序列化回标记 → 注入器真展开，偏差会升级为语义改变——该升级路径只能由 ⑤② 的完整优化项（编辑重发从 Segment[] 重建 chip 而非文本回填）消除（该优化项经评估延期未实施，升级路径仍开放，重审条件不变）；design-code-sync 轮 3（2026-09-10）已单独消除同一路径上的**标记翻倍/重复注入**形态（编辑重发重建时剥离编辑稿里与保留段重复的序列化文本，见 ⑤②），但「误还原 → 真展开」的语义升级本身不受该修复影响；**重审条件**：观测到实际误还原案例时，改用更强唯一性标记（如 name+location+短校验和三属性）；**判定**：可接受（编辑重发升级路径为已登记的低频残余风险，处置见 ⑤②）。
 
@@ -388,7 +387,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 
 | 阶段 | 单元 | 内容 | justification | 对应验收 |
 |---|---|---|---|---|
-| P1 | **runtime 注入器**（核心，先行） | `packages/runtime/src/services/session/skill-injector.ts`（新增）：标记解析、权威映射（D7 切源后 = SkillRegistry，原 get_commands）、展开（import pi stripFrontmatter）、**[R4] 末尾 `<taiji-skill-data>` 块组装（正文标记保留，D11；同 name 去重）**、预检（CJK 感知估算 + 0.8 阈值常量）、**[R4] 降级形态生成（标记清单 + 指引行并入同一块）**、失效/残缺透传+广播提示；`message-dispatcher.ts` 三入口挂载（hook 之后、client.prompt 之前） | 注入器是全链路枢纽且可独立测（纯函数 + RPC 查询）；先行实施可用手写标记文本验证，不依赖 UI 改动 | 场景 2/3/5/12（用脚本发构造消息；12 = 跨消息累积观察） |
+| P1 | **runtime 注入器**（核心，先行） | `packages/runtime/src/services/session/skill-injector.ts`（新增）：标记解析、权威映射（D7 切源后 = SkillRegistry，原 get_commands）、展开（import pi stripFrontmatter）、**[R4] 末尾 `<taiji-skill-data>` 块组装（正文标记保留，D11；同 name 去重）**、预检（CJK 感知估算 + 0.8 阈值常量）、**[R4] 降级形态生成（标记清单 + 指引行并入同一块）**、失效/残缺透传+广播提示；注入挂载点 = 投递注册表出站交接（现行终态，随投递内核化迁移） | 注入器是全链路枢纽且可独立测（纯函数 + RPC 查询）；先行实施可用手写标记文本验证，不依赖 UI 改动 | 场景 2/3/5/12（用脚本发构造消息；12 = 跨消息累积观察） |
 | P2 | **序列化与反解析（含 core SSOT 升级）** | `segments.ts` skill 分支改产 `<taiji-skill/>` 标记；`shared/skill-marker.ts` **[R4]** 新增 `SKILL_DATA_BLOCK_TAG`（`taiji-skill-data`）与块构建/解析辅助；**[R4] `packages/core/src/domain/chat/apply-entry-convert.ts` 反解析升级为三形态**（剥块优先 + 标记还原 + 存量 block/`<taiji-skills>` 兼容，D7，三链路共用 SSOT）；**[R4]** `apply-entry-equivalence` 等价性检查扩展覆盖「标记 + 末尾块消息」两链路（live ≡ reload，架构关键规则 9）；现有测试更新（`segments.test.ts`、`store.test.ts`、`turn-skill-badge.test.ts`、command-popover 系列——全部锁定旧 `/skill:` 形态将变红） | 序列化格式是 renderer/runtime 契约变更点；core 反解析与序列化同批定义标记语法；等价性检查是「live ≡ reload」的机器防线，必须随格式变更同步扩展 | 场景 1/4（含正文保留断言） |
 | P3 | **composer 触发与 chip + 提示呈现** | `input-dom.ts` 新增 skill 触发正则（`/[^\S\n]\/(\S*)$/` + query 过滤）；`contenteditable.ts` chip 抑制解除（skill 通道）；`chip-commands.ts` `insertSkillChip`；`CommandPopover.vue` skill-only variant + 已选禁选；**`ComposerInput.vue` skill chip 前后空开 CSS（D13，R4）**；**renderer 提示呈现**（降级「标记模式注入」提示行——文案区分「预算超限」vs「窗口信息获取失败」两种降级原因——+ 失效 toast/消息内联提示，复用现有 toast 机制；实施形态 = 消息内联提示行 `SkillNoticeInline`，锚点 turn 之后渲染） | UI 层最后做：P1/P2 就绪后插入即可端到端生效，避免 UI 先行却无注入的空转；提示呈现是场景 2/2b/3/3b 的验收依赖面；**[R4]** D12 混排 inline 化 + D13 chip CSS 落点在本阶段（UserBubble/ComposerInput） | 场景 1/2b/3/3b/6/**10/11** |
 | P4 | **检查与防御** | PS-24 探针（golden diff，实施落点 = runtime REAL_PI vitest 池 + pi-semantics.json 登记）；rpc-client readline 替换 LF-only 读取器 | 检查与防御独立于功能主线，可并行或收尾 | 场景 8/9 |
@@ -410,7 +409,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 | `packages/ui/src/features/composer/ComposerInput.vue` | skill chip 前后空开 CSS（`.slash-chip[data-chip-type='skill']` margin，D13，R4） |
 | `packages/core/src/domain/chat/apply-entry-convert.ts` | **[R4] 反解析升级为三形态**：剥块优先（`<taiji-skill-data>` 任意位置剔除）+ 标记还原 + 存量 block/`<taiji-skills>` 兼容（D7 兜底，三链路 SSOT） |
 | `packages/runtime/src/services/session/skill-injector.ts` | **新增**：展开/预检/降级/失效提示 |
-| `packages/runtime/src/services/session/message-dispatcher.ts` | 三入口挂载注入器（hook 后、client.prompt 前） |
+| `packages/runtime/src/services/session/session-delivery-registry.ts` | 出站交接挂载注入器（deliverOne，hook 后、client.prompt 前；[MF-1-8] 后发送入口统一经内核） |
 | `packages/runtime/src/infra/pi/rpc-client.ts` | readline → LF-only 读取器（D10） |
 | `scripts/check-pi-semantics.mjs` | 不改（PS-24 探针实施落点改为 runtime REAL_PI vitest 池 `pi-semantics-skill-expansion-golden.test.ts` + `docs/pi-semantics.json` 登记，登记 schema 强制 guard.test 指向 .test.ts） |
 | 测试连带：`packages/shared/src/__tests__/segments.test.ts`、`packages/core/src/domain/chat/__tests__/store.test.ts`、`packages/renderer/src/__tests__/panel/turn-skill-badge.test.ts`、command-popover 系列测试、`apply-entry-equivalence` 等价性检查 | 锁定旧 `/skill:` 形态的断言全部更新；等价性检查扩展「标记消息」两链路 |

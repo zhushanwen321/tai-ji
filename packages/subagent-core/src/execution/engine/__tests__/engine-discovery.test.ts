@@ -4,7 +4,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// core logger 桩：断言发现/IO 失败路径的 warn 留痕（控制流仍 fail-safe 不抛）。
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("../../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import type { SubagentEnginesFile } from "@zhushanwen/extension-protocol";
 
@@ -47,6 +53,7 @@ beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "engine-discovery-"));
   agentDir = path.join(tmpRoot, "agent");
   clearEngines();
+  loggerMock.warn.mockClear();
 });
 
 afterEach(() => {
@@ -96,5 +103,20 @@ describe("syncEnginesFile", () => {
     registerEngine("pi", () => stubEngine("pi"));
     expect(() => syncEnginesFile(agentDir, HERMETIC_DISCOVERY)).not.toThrow();
     expect(fs.existsSync(getEnginesFilePath(agentDir))).toBe(true);
+  });
+
+  it("IO 失败 → 控制流不变（不抛）+ warn 留痕（含路径与「旧清单仍在用」后果）", () => {
+    registerEngine("pi", () => stubEngine("pi"));
+    // 落盘目标不可达：agentDir 位置是普通文件 → 其下 subagents/ 目录无法创建，写必失败
+    const blockedDir = path.join(tmpRoot, "blocked");
+    fs.writeFileSync(blockedDir, "not a directory", "utf8");
+
+    expect(() => syncEnginesFile(blockedDir, HERMETIC_DISCOVERY)).not.toThrow();
+
+    const messages = loggerMock.warn.mock.calls.map((c) => String(c[0]));
+    const syncWarn = messages.find((m) => m.includes("[engine-discovery] engines.json sync failed"));
+    expect(syncWarn).toBeDefined();
+    expect(syncWarn).toContain("the previous engine list stays in use");
+    expect(syncWarn).toContain(getEnginesFilePath(blockedDir));
   });
 });

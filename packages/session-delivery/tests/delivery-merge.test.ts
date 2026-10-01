@@ -1,5 +1,5 @@
 /**
- * A5-merge: mergeHoldActive 谓词语义 + 合批格式 + park 策略。
+ * A5-merge: mergeHoldActive 谓词语义 + 合批格式 + 非合批 timer 纪律（busy 停车形态）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDelivery } from '../src/delivery.js'
@@ -181,47 +181,32 @@ describe('A5-merge 合批拼接格式', () => {
   })
 })
 
-describe('A5-merge park 策略', () => {
+describe('A5-merge 非合批 timer 纪律（busy 停车形态）', () => {
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers() })
 
-  it('park 策略：busy 入队不主动重试，等外部 flush 触发', () => {
-    const port = makeMockPort()
-    port.idle = false
-    const handle = createDelivery(port, { busyPolicy: 'park' })
-
-    handle.send(textMsg('hello'))
-    expect(port.sendCalls).toHaveLength(0)
-
-    vi.advanceTimersByTime(30_000)
-    expect(port.sendCalls).toHaveLength(0)
-
-    port.idle = true
-    handle.flush()
-    vi.advanceTimersByTime(0)
-    expect(port.sendCalls).toHaveLength(1)
-
-    handle.dispose()
-  })
-
   it('非合批 send 只清残留合批 timer，不重设（无孤儿 flush timer 被武装）', () => {
-    const port = makeMockPort()
+    // busy 停车形态：subscribeSettled 订阅成立但回调从不触发 + busy 滞留 →
+    // 消息滞留 queue，唯一出站通道是真正的外部触发（idle + flush）。
+    // watchdogMs 拉出观察窗外，隔离「idle 后 watchdog 兜底 flush」对孤儿 timer
+    // 观测的干扰。
+    const port = makeMockPort({ subscribeSettled: () => () => {} })
     port.idle = false
     const handle = createDelivery(port, {
       mergeWindowMs: 60_000,
       mergeHoldActive: () => true,
-      busyPolicy: 'park',
+      watchdogMs: 3_600_000,
     })
 
     // 1. 合批 send 武装窗口 timer A；2. 非合批 send 清 A 且不得重设 B
     handle.send(textMsg('m1'), { merge: true })
     handle.send(textMsg('m2'), { merge: false })
-    // busy + park + 无订阅装配：消息滞留 queue（backoff 首轮后 park 停手）
+    // 有订阅装配 + busy：不启动退避强发，消息滞留 queue
     vi.advanceTimersByTime(100)
     expect(port.sendCalls).toHaveLength(0)
 
     // 3. 转空闲后推进整个 mergeWindow：若非合批路径重设了 timer，孤儿 timer 到期
-    //    flush 会把 parked 消息冲出（旧缺陷）；只清不设 → 消息仍等真正的外部触发
+    //    flush 会把滞留消息冲出（旧缺陷）；只清不设 → 消息仍等真正的外部触发
     port.idle = true
     vi.advanceTimersByTime(61_000)
     expect(port.sendCalls).toHaveLength(0)
@@ -240,7 +225,7 @@ describe('depth 诊断', () => {
   it('反映当前队列深度', () => {
     const port = makeMockPort()
     port.idle = false
-    const handle = createDelivery(port, { busyPolicy: 'park' })
+    const handle = createDelivery(port)
 
     expect(handle.depth()).toBe(0)
     handle.send(textMsg('m1'))

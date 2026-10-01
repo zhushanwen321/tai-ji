@@ -240,21 +240,11 @@ describe('fork 形配置：enter', () => {
 
     expect(deps.log).toEqual(['enterStagingMode'])
     expect(instance.mode.value).toBe(true)
-    expect(instance.modeRef.value).toBe(true)
   })
 
   it('enter 聚焦经 inputRef.focus 可选链（null 不抛错）', () => {
     const { instance } = setupFork()
     expect(() => instance.enter({ srcSessionId: 'src-1', fromMessageId: 'm1' })).not.toThrow()
-  })
-
-  it('modeRef getter 代理 mode ref（enter/exit 联动）', () => {
-    const { instance } = setupFork()
-    expect(instance.modeRef.value).toBe(false)
-    instance.enter({ srcSessionId: 'src-1', fromMessageId: 'm1' })
-    expect(instance.modeRef.value).toBe(true)
-    instance.exit()
-    expect(instance.modeRef.value).toBe(false)
   })
 })
 
@@ -393,7 +383,7 @@ describe('fork 形配置：asStagingAction（B 阶段缺省形态）', () => {
     const { instance, forkSessionAsk } = setupFork()
     instance.enter({ srcSessionId: 'src-1', fromMessageId: 'm1' })
 
-    await instance.asStagingAction().send('hi', { modelOverride: 'ignored' })
+    await instance.asStagingAction().send('hi')
 
     expect(forkSessionAsk).toHaveBeenCalledWith('src-1', 'm1', 'hi', {})
     expect(instance.mode.value).toBe(false)

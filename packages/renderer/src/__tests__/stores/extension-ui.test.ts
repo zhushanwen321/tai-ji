@@ -5,6 +5,9 @@
  *
  * 覆盖：
  * - hasPendingBlockingOverlay / hasPendingDialog 查询（核心：derivedStatus 入口）
+ * - D12 waiting 谓词加 planReview 员：planReview 挂起计入 hasPendingBlockingOverlay
+ *   （waiting 态数据源），hasPendingDialog 对称排除（不双真）；B 会话挂 planReview →
+ *   侧栏 waiting 标记（derivedStatus=waiting）且焦点 A 会话不受影响
  * - addRequest requestId dedup（迁移自 useExtensionUI push 去重）
  * - removeRequest（respond/cancel/timeout 出队）
  * - retainOnly 快照差集剔除（renderer 僵尸表单修剪主算法，§6.2 采用项④ v6.1）
@@ -43,6 +46,19 @@ function makeDialog(overrides: Partial<ExtensionUIRequest> = {}): ExtensionUIReq
     sessionId: 'sess-A',
     requestId: 'r1',
     method: 'confirm',
+    ...overrides,
+  }
+}
+
+/** 构造 planReview 审批挂起请求（D12：计入 waiting 谓词的第二种判定键，runtime PLAN_REVIEW_MARKER 帧形状） */
+function makePlanReview(
+  overrides: Partial<ExtensionUIRequest> = {},
+): ExtensionUIRequest & { planReview: true } {
+  return {
+    sessionId: 'sess-B',
+    requestId: 'pr-1',
+    method: 'select',
+    planReview: true,
     ...overrides,
   }
 }
@@ -302,5 +318,57 @@ describe('useExtensionUIStore — applyRecords 整体替换', () => {
     expect(store.getRequestsBySession('sess-A')).toHaveLength(2)
     expect(store.hasPendingBlockingOverlay('sess-A')).toBe(true)
     expect(store.hasPendingDialog('sess-A')).toBe(true)
+  })
+})
+
+describe('D12 waiting 谓词加 planReview 员（plan 审批挂起 → 侧栏 waiting）', () => {
+  it('planReview 挂起计入 hasPendingBlockingOverlay；hasPendingDialog 对称排除（不双真）', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-B', makePlanReview())
+
+    // D12：planReview===true 的挂起同计入 waiting 态数据源（多 session 后台审批挂起可见，F15）
+    expect(store.hasPendingBlockingOverlay('sess-B')).toBe(true)
+    expect(store.hasPendingDialog('sess-B')).toBe(false)
+    // per-session 分区：A 会话不受 B 的挂起影响
+    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(false)
+
+    // 出队后回落
+    store.removeRequest('sess-B', 'pr-1')
+    expect(store.hasPendingBlockingOverlay('sess-B')).toBe(false)
+  })
+
+  it('planReview 与 form 两键同位：与 plain dialog 混排时 dialog 不计入 overlay', () => {
+    const store = useExtensionUIStore()
+    store.addRequest('sess-B', makePlanReview({ requestId: 'pr-1' }))
+    store.addRequest('sess-B', makeDialog({ sessionId: 'sess-B', requestId: 'r-dlg' }))
+
+    expect(store.hasPendingBlockingOverlay('sess-B')).toBe(true)
+    // plain dialog 仍归 dialog 面（排除 planReview 后不双真）
+    expect(store.hasPendingDialog('sess-B')).toBe(true)
+  })
+
+  it('B 会话挂 planReview → 侧栏 waiting 标记（derivedStatus=waiting），焦点 A 不受影响', async () => {
+    // 延迟 import + invalidateStatusCache：useSessionDerivations 模块级 computed 缓存会持有
+    // 上个用例的旧 store 闭包（照 derive-status-ask-user.test.ts 模式逐用例清理）
+    const { useSessionDerivations, invalidateStatusCache } = await import(
+      '@/composables/features/chat/useSessionDerivations'
+    )
+    const { useExtensionUIStore } = await import('@/stores/extension-ui')
+    invalidateStatusCache()
+
+    const { derivedStatus } = useSessionDerivations()
+    const store = useExtensionUIStore()
+    // 未挂起（未 hydrate + 非活跃）→ done（与 ask-user 基线一致）
+    expect(derivedStatus('sess-A').value).toBe('done')
+    expect(derivedStatus('sess-B').value).toBe('done')
+
+    // S14 形态：B 会话挂起审批，焦点留在 A 会话 → B 侧栏出 waiting 标记，A 不变
+    store.addRequest('sess-B', makePlanReview())
+    expect(derivedStatus('sess-B').value).toBe('waiting')
+    expect(derivedStatus('sess-A').value).toBe('done')
+
+    // 应答出队 → 回落 done
+    store.removeRequest('sess-B', 'pr-1')
+    expect(derivedStatus('sess-B').value).toBe('done')
   })
 })

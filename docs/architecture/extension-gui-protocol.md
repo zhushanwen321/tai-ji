@@ -944,7 +944,7 @@ pi 的 Box 组件**不画 Unicode 边框**（只做 padding + 背景），所以
 - `ask-user/src/component.ts:124-129`——box `┌┐└┘─│`
 - `subagents/src/tui/bg-notify-render.ts:114-177`——`╭╮╰╯─│`（注释明确「为何不用 Box 组件：Box 不画 Unicode 边框」）
 - `subagents/src/tui/list-component.ts:255-361`——`│├┬┴┤─` 双列表格
-- `workflow/src/interface/views/WorkflowsView.ts:107-109,547-599`——完整 `╭╮╰╯├┤│─` + sidebar divider
+- `workflow/src/interface/tui/views/WorkflowsView.ts:107-109,547-599`——完整 `╭╮╰╯├┤│─` + sidebar divider
 - `todo/src/render.ts:88-107`——双列 `│` 分隔
 - `goal/src/projection/widget.ts:76-80`——progress bar `█░`
 

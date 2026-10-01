@@ -28,6 +28,8 @@ export * from "./ui-channels.ts";
 // W12 落地（impl-plan §2.12）：env/spawn 原语（三层 env 契约 + 引擎子进程唯一 spawn
 // 入口 + 宿主死亡自灭守卫）。
 export * from "./env.ts";
+// [§2.7] 子代理身份 env 键单源（引擎写入方与 core/壳读者共用同一常量表）。
+export * from "./identity-env.ts";
 export * from "./spawn.ts";
 
 // W9 落地（impl-plan §2.9）：引擎 CLI 启动解析（宿主 × 平台二维矩阵 + node 执行器探针，

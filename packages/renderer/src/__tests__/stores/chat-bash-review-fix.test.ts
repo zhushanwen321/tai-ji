@@ -21,7 +21,8 @@ import { apiProjectMock } from '../helpers/api-facade-mock'
 
 // ── api mock（B2 用：abortBash reject 触发 catch）──
 const apiMock = vi.hoisted(() => ({
-  bash: vi.fn(() => Promise.resolve()),
+  // bash 回执契约（dmg-r1-2）：默认 = 已执行并收口
+  bash: vi.fn(() => Promise.resolve({ status: 'settled' as const })),
   abortBash: vi.fn(() => Promise.resolve()),
   streamSubscribe: vi.fn((_sid: string, _handler: (msg: ServerMessage) => void) => () => {}),
 }))

@@ -1,0 +1,27 @@
+{
+  "name": "boundary-frames",
+  "description": "协议边界帧族：空载荷（options 空 / 空串）→ 非法形态（非法 JSON / docs 非数组）→ 超限（selfReview > 4KB / requirement > 64KB / 巨文本）→ error envelope 应答。宿主侧预期 = 逐帧降级不炸（marker 检测失败降级普通 select / capTo 截断 / 有界渲染）。",
+  "params": {
+    "selectRegisterDelayMs": 0,
+    "abortMode": "dissolve"
+  },
+  "onPrompt": {
+    "assistant": ["边界帧注入开始。"],
+    "select": {
+      "kind": "plan-review",
+      "id": "pr-boundary-0",
+      "docs": [{ "fileName": "plan.md", "absPath": "/edge/plan.md", "sourceSkill": "", "version": 1 }]
+    },
+    "rawFrames": [
+      { "__frame__": "empty-options-select" },
+      { "__frame__": "blank-option-select" },
+      { "__frame__": "illegal-json-select" },
+      { "__frame__": "docs-nonarray-select" },
+      { "__frame__": "oversized-plan-review-select" },
+      { "__frame__": "oversized-plan-state-entry" },
+      { "__frame__": "oversized-message-end" },
+      { "__frame__": "error-envelope-response" }
+    ],
+    "agentEnd": true
+  }
+}

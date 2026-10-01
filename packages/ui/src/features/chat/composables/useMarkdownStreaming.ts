@@ -5,8 +5,8 @@
  * __tests__/MarkdownRenderer.test.ts 与 renderer markdown-renderer-incremental.test.ts）。
  *
  * 职责（markdown 流式消费编排，展示层不感知）：
- * - 渲染模式：优先 deps.renderMarkdownIncremental（前缀段引用恒等缓存 + tail 段每帧重建 +
- *   streaming-fence 占位，D-5/W23）；未 provide 时回退 deps.renderMarkdown 全量（等价旧版）。
+ * - 渲染模式：deps.renderMarkdownIncremental（前缀段引用恒等缓存 + tail 段每帧重建 +
+ *   streaming-fence 占位，D-5/W23）。
  * - rAF trailing 节流（H2）：每帧多次 content 变化合并为单次渲染；序号守卫防旧覆盖；
  *   失败降级转义纯文本（console.error 出声，不静默）+ 增量缓存作废重建。
  * - latest-wins 串行（W23）：增量缓存是单个可变对象（W22 原地更新），并发调用会交叉改写
@@ -48,7 +48,8 @@ function escapeHtmlForFallback(s: string): string {
 
 /**
  * streaming-fence finalize 判定（纯函数，状态写回由调用方负责）：
- * 显式判定（forceFinalize / 壳 shouldFinalizeStreamingFence / complete 兜底）叠加
+ * 显式判定（forceFinalize / complete / 静默 ≥ deps.streamingFenceSilenceMs 阈值——审计
+ * 候选 18 收单阈值字段，原壳层谓词生产实现即此公式）叠加
  * silence-finalize 粘滞（W23 review Fix-1）：已 finalize 的 open fence 在新 token 到达后
  * 保持完整渲染，不回占位横跳——「静默 ≥阈值 → finalize 转完整代码块 → 新 token 到达
  * silenceMs≈0 → finalize=false → 占位回归（已渲染代码从屏幕消失）→ 再静默又完整」每次
@@ -62,12 +63,11 @@ function resolveStreamingFinalize(
   opts: { forceFinalize?: boolean } | undefined,
   complete: boolean,
   silenceMs: number,
-  shouldFinalize: ChatViewDeps['shouldFinalizeStreamingFence'],
+  silenceThresholdMs: number,
   currentSticky: string | null,
 ): { finalize: boolean; stickyAfter: string | null } {
   let finalize =
-    opts?.forceFinalize === true ||
-    (shouldFinalize?.({ complete, silenceMs }) ?? complete)
+    opts?.forceFinalize === true || complete || silenceMs >= silenceThresholdMs
   let stickyAfter = currentSticky
   if (!finalize && currentSticky !== null) {
     if (text.startsWith(currentSticky)) finalize = true
@@ -100,7 +100,7 @@ export function useMarkdownStreaming(
   let disposed = false
 
   // ── H2 流式 markdown 渲染 rAF trailing 节流 ──
-  // 每个 text_delta token 触发 watch → deps.renderMarkdown 全量重解析。rAF trailing 把一帧内
+  // 每个 text_delta token 触发 watch → 增量渲染。rAF trailing 把一帧内
   // 多次 content 变化合并为单次渲染，消除流式卡顿。D-5 增量渲染（前缀缓存 + tail 段）叠加在该
   // 节流之上：每帧渲染的只是稳定边界之后的 tail。
   let rafId: number | null = null
@@ -130,8 +130,8 @@ export function useMarkdownStreaming(
   }
 
   /**
-   * 渲染执行体（编排）：空文本重置 → 序号取号 → 按能力分发（增量 D-5/全量回退）→ 失败降级。
-   * 序号守卫 + 失败降级转义纯文本语义在 runIncrementalRender / runFullRender / handleRenderFailure。
+   * 渲染执行体（编排）：空文本重置 → 序号取号 → 增量渲染（D-5）→ 失败降级。
+   * 序号守卫 + 失败降级转义纯文本语义在 runIncrementalRender / handleRenderFailure。
    */
   async function runRender(text: string, opts?: { forceFinalize?: boolean }): Promise<void> {
     if (disposed) return
@@ -141,11 +141,7 @@ export function useMarkdownStreaming(
     }
     const seq = ++renderSeq
     try {
-      if (deps.renderMarkdownIncremental) {
-        await runIncrementalRender(deps.renderMarkdownIncremental, text, opts, seq)
-      } else {
-        await runFullRender(text, seq)
-      }
+      await runIncrementalRender(deps.renderMarkdownIncremental, text, opts, seq)
     } catch (e) {
       handleRenderFailure(e, text, seq)
     }
@@ -161,7 +157,7 @@ export function useMarkdownStreaming(
 
   /** 增量路径（D-5/W23）：finalize 判定（含粘滞）→ 壳增量渲染 → 序号守卫应用 + 重排 finalize 定时器 */
   async function runIncrementalRender(
-    renderIncremental: NonNullable<ChatViewDeps['renderMarkdownIncremental']>,
+    renderIncremental: ChatViewDeps['renderMarkdownIncremental'],
     text: string,
     opts: { forceFinalize?: boolean } | undefined,
     seq: number,
@@ -174,7 +170,7 @@ export function useMarkdownStreaming(
       opts,
       complete,
       silenceMs,
-      deps.shouldFinalizeStreamingFence,
+      deps.streamingFenceSilenceMs,
       finalizedStickyPrefix,
     )
     finalizedStickyPrefix = stickyAfter
@@ -188,13 +184,6 @@ export function useMarkdownStreaming(
       segments.value = [...r.prefixSegments, ...r.tailSegments]
       armFenceFinalizeTimer(r.tailSegments, complete)
     }
-  }
-
-  /** 全量回退路径（壳未 provide 增量能力，等价旧版）：壳全量渲染 → 卸载/序号守卫后应用 */
-  async function runFullRender(text: string, seq: number): Promise<void> {
-    const segs = await deps.renderMarkdown(text, props.sessionId ?? undefined)
-    if (disposed) return
-    if (seq === renderSeq) segments.value = segs
   }
 
   /** 渲染失败降级：出声 + 卸载/序号守卫内转义纯文本回填 + 作废缓存/粘滞 + 撤销 finalize 定时器 */
@@ -221,15 +210,12 @@ export function useMarkdownStreaming(
 
   /**
    * tail 含 streaming-fence 占位且消息未完成时安排静默 finalize 定时器（每帧渲染后重排）。
-   * 壳未提供阈值时不激活（complete-only 判定）。
    */
   function armFenceFinalizeTimer(tailSegments: MarkdownSegment[], complete: boolean): void {
     clearFenceFinalizeTimer()
     if (complete) return
     if (!tailSegments.some((s) => s.type === 'streaming-fence')) return
-    const threshold = deps.streamingFenceSilenceMs
-    if (threshold === undefined) return
-    const remaining = Math.max(0, threshold - (performance.now() - lastContentAt))
+    const remaining = Math.max(0, deps.streamingFenceSilenceMs - (performance.now() - lastContentAt))
     fenceFinalizeTimer = setTimeout(() => {
       fenceFinalizeTimer = null
       void doRender(pendingContent || props.content, { forceFinalize: true })

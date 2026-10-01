@@ -55,6 +55,7 @@ import type {
   SubagentRecordSnapshot,
 } from "./session-view-types.js";
 import { parseEngineHandle } from "./session-view-types.js";
+import { GLOBAL_SLOT_KEYS } from "../../../shared/global-slots.ts";
 
 const logger = getLogger("subagents");
 
@@ -80,14 +81,94 @@ const OUTCOME_PLACEHOLDER_TEXT = "(no outcome recorded)";
 // 引擎 id 提取（record 路由段）
 // ============================================================
 
+/** 引擎路由裁决的输入面（record 快照与 ExecutionRecord 均结构满足）。 */
+export interface EngineRouteSource {
+  /** record.engine（'pi' | 'zcode' | ...；缺席 = pi 缺省）。 */
+  engine?: unknown;
+  /** record.engineHandle（会话锚载体：pi 与原生引擎都写，判据见 hasNativeEngineAnchor）。 */
+  engineHandle?: unknown;
+}
+
+/** record 引擎身份缺失（有原生锚、无 engine 字段）的机器可判别错误码。 */
+export const RECORD_ENGINE_IDENTITY_MISSING_CODE = "record_engine_identity_missing";
+
 /**
- * record 的引擎路由段：engine 非 string 或空串 → 缺省 pi（存量 record 零迁移）。
- * 与被收敛前的 runtime extractRecordEngine 语义一致（非 trim 透传——空白 id 由
- * reader registry miss 落③级，与旧行为等价）。
+ * 引擎路由段损坏错误：record 带原生引擎锚却没有可用的 engine 字段（写侧身份域丢失）。
+ *
+ * 抛出而非回落 pi：原生引擎 record 的历史/续聊面在引擎自有会话库，按 pi 链读取
+ * 会把损坏 record 静默投给另一引擎的读取路径（跨引擎误读，A3/S3 形态）。结构化字段
+ * （code / recordId / recovery）供宿主与 GUI 按 code 分流并给出可操作指引。
+ */
+export class RecordEngineIdentityError extends Error {
+  readonly code = RECORD_ENGINE_IDENTITY_MISSING_CODE;
+  /** 受损 record 的 id（错误定位）。 */
+  readonly recordId: string;
+  /** 恢复指引：指向具体下一步（非安慰性文案）。 */
+  readonly recovery: string;
+
+  constructor(recordId: string) {
+    const recovery =
+      "Do not read this record through the default engine ('pi'). Restore the engine id recorded " +
+      "at spawn (the session-db anchor in engineHandle.sessionRef identifies the native session) " +
+      "from the record's session entry / manifest projection, then rebuild the record projection.";
+    super(
+      `${RECORD_ENGINE_IDENTITY_MISSING_CODE}: record "${recordId}" carries a native engine anchor ` +
+        `(engineHandle.sessionRef.dbPath) but no engine id — the record is corrupted, refusing to route ` +
+        `it to the default engine 'pi'. Recovery: ${recovery}`,
+    );
+    this.name = "RecordEngineIdentityError";
+    this.recordId = recordId;
+    this.recovery = recovery;
+  }
+}
+
+/**
+ * 原生引擎（会话库型）锚判据：engineHandle.sessionRef 带非空 string `dbPath`。
+ *
+ * 为什么不是「sessionRef 非空」：pi 与原生引擎的 run 都会回填 engineHandle.sessionRef
+ * ——pi 的 ref 是 {recordId, sessionId?, sessionFile?}（进程内会话锚），zcode 的 ref 是
+ * {sessionId, dbPath}（隔离会话库锚，dbPath 是原生引擎独有的键）。判据取 dbPath 才与
+ * transcriptAnchorOf 的 zcode 分支同源（assembly/cold-lookup.ts），否则每条 pi record
+ * 都会被误判成「原生锚 + 缺 engine」的损坏形态。
+ */
+export function hasNativeEngineAnchor(engineHandle: unknown): boolean {
+  if (typeof engineHandle !== "object" || engineHandle === null || Array.isArray(engineHandle)) {
+    return false;
+  }
+  const sessionRef = Reflect.get(engineHandle, "sessionRef");
+  if (typeof sessionRef !== "object" || sessionRef === null || Array.isArray(sessionRef)) {
+    return false;
+  }
+  const dbPath = Reflect.get(sessionRef, "dbPath");
+  return typeof dbPath === "string" && dbPath.length > 0;
+}
+
+/**
+ * record → 引擎路由 id（唯一裁决点：历史读取链 / 轮派发 / 资格 gate 共用）。
+ *
+ * 语义：
+ *   - engine 为非空 string → 原样透传（非 trim——空白 id 由 reader registry miss
+ *     落③级/registry 未注册抛错，与旧行为等价）；
+ *   - engine 缺席（非 string / 空串）且无原生引擎锚 → 缺省 pi（存量 pi record 零迁移）；
+ *   - engine 缺席但带原生引擎锚 → 抛 {@link RecordEngineIdentityError}：锚在而身份域丢失
+ *     = record 损坏，不允许静默换目标（禁投 pi 读链）。
+ */
+export function resolveEngineRouteId(source: EngineRouteSource, recordId?: string): string {
+  const engine = source.engine;
+  if (typeof engine === "string" && engine.length > 0) return engine;
+  if (hasNativeEngineAnchor(source.engineHandle)) {
+    throw new RecordEngineIdentityError(recordId !== undefined && recordId !== "" ? recordId : "(unknown)");
+  }
+  return DEFAULT_ENGINE_ID;
+}
+
+/**
+ * record 快照的引擎路由段（{@link resolveEngineRouteId} 的 record 形态入口）。
+ *
+ * @throws RecordEngineIdentityError record 带原生引擎锚却无 engine 字段（身份域损坏）
  */
 export function extractEngineId(record: SubagentRecordSnapshot): string {
-  const engine = record.engine;
-  return typeof engine === "string" && engine.length > 0 ? engine : DEFAULT_ENGINE_ID;
+  return resolveEngineRouteId(record, record.subagentId);
 }
 
 // ============================================================
@@ -110,9 +191,7 @@ export type NativeSessionReader = (
 ) => Promise<SessionView | undefined>;
 
 /** 进程级注册表槽位（globalThis[Symbol.for] 防 jiti 双路径加载分裂，对齐 registry.ts 惯例）。 */
-const NATIVE_READER_SLOT_KEY = Symbol.for(
-  "@zhushanwen/pi-subagent-workflow.nativeSessionReaders",
-);
+const NATIVE_READER_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.nativeSessionReaders);
 
 function getReaderSlot(): Map<string, NativeSessionReader> {
   let slot = Reflect.get(globalThis, NATIVE_READER_SLOT_KEY) as
@@ -149,29 +228,29 @@ export function resetNativeSessionReaders(): void {
 // ============================================================
 
 /**
- * ②级：journalPath 白名单 + 重放。返回 undefined = 本级不可达 / 重放无内容（降③级）。
+ * ②级：eventsPath 白名单 + 重放。返回 undefined = 本级不可达 / 重放无内容（降③级）。
  */
 function readJournalTier(
   record: SubagentRecordSnapshot,
   handle: EngineHandleView,
   dataDir: string,
 ): HistoryMessage[] | undefined {
-  const journalPath = handle.journalPath;
-  if (journalPath === undefined) {
-    logger.debug("[session-view-service] tier2 skipped: no journalPath in handle");
+  const eventsPath = handle.eventsPath;
+  if (eventsPath === undefined) {
+    logger.debug("[session-view-service] tier2 skipped: no eventsPath in handle");
     return undefined;
   }
-  if (!isStrictlyUnder(resolveEnginesRoot(dataDir), journalPath)) {
+  if (!isStrictlyUnder(resolveEnginesRoot(dataDir), eventsPath)) {
     logger.warn(
-      `[session-view-service] journalPath escapes engines root, reject tier2: ${journalPath}`,
+      `[session-view-service] eventsPath escapes engines root, reject tier2: ${eventsPath}`,
     );
     return undefined;
   }
-  const messages = replayEventsToHistory(replayJournal(journalPath), record);
+  const messages = replayEventsToHistory(replayJournal(eventsPath), record);
   if (messages === undefined) {
     logger.debug(
       `[session-view-service] tier2 journal replay produced no content, degrade to outcome-only ` +
-        `(path=${journalPath})`,
+        `(path=${eventsPath})`,
     );
   }
   return messages;
@@ -426,8 +505,13 @@ function outcomeOnlyMessages(record: SubagentRecordSnapshot): HistoryMessage[] {
  * 直读链，A1 守护）。未注册 reader 的引擎（W11 后 = 宿主未接线协议 reader 的
  * 进程）跳过①级直落②级 journal——record 字段就够，详情页至少有摘要卡。
  *
+ * 唯一抛出面 = extractEngineId 的引擎身份守卫：record 带原生引擎锚却无 engine
+ * 字段（身份域损坏）时显式抛 RecordEngineIdentityError，不降级也不投 pi 读链——
+ * 静默换读取目标会跨引擎误读历史。
+ *
  * @param record  record 快照（engine/engineHandle 为不可信源，内部守卫消费）
  * @param dataDir taiji 数据根（journal/dbPath 白名单经 paths.ts 布局 SSOT 推导）
+ * @throws RecordEngineIdentityError record 引擎身份域损坏（有原生锚、无 engine 字段）
  */
 export async function readSubagentHistoryMessages(
   record: SubagentRecordSnapshot,

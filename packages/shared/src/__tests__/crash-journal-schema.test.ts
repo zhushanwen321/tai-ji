@@ -2,7 +2,9 @@
  * crash-journal-schema 单测（crash-forensics-and-watchdog.impl-plan.md u1a）。
  *
  * 守护三条验收线：
- * 1. 枚举与设计 §3.3 D1 schema JSON 块逐字一致——event 21 值 / layer 5 值 /
+ * 1. 枚举与设计 §3.3 D1 schema JSON 块对齐——event = 设计行 20 值逐字转录 + 实装扩展
+ *    frame-unserializable 恰 1 值（message-bus 序列化失败丢帧，与 registry-miss 同为核心
+ *    链整帧丢弃的台账对称收尾）/ layer 5 值 /
  *    reason 已知值分层登记（下方 DESIGN_REASON_LINE = 设计 reason 行 6 值逐字转录，
  *    IMPLEMENTED_KNOWN_REASONS = 设计行 ∪ 实装 append 调用点静态可枚举值全集；
  *    设计改 schema 时同步改 DESIGN_*；event 枚举不得混入 reason 值 unclean-exit，
@@ -48,6 +50,11 @@ const DESIGN_EVENT_LINE = [
   'watermark-daily',
   'trigger-review',
 ]
+// 设计行之外的实装扩展 event 值全集（来源见逐值注释；差集锁空范式同 KNOWN_REASONS）
+const IMPLEMENTED_EXTRA_EVENTS = [
+  // message-bus publish 序列化失败丢帧（与 registry-miss 同为核心链整帧丢弃的台账对称收尾）
+  'frame-unserializable',
+]
 const DESIGN_REASON_LINE = [
   'extension-stale-ctx',
   'sigterm',
@@ -87,6 +94,8 @@ const IMPLEMENTED_KNOWN_REASONS = [
   // registry-miss（message-bus 出站守卫 dropReason 闭合二值）
   'registry_miss',
   'still_oversize_after_truncate',
+  // frame-unserializable（message-bus publish 序列化失败丢帧）
+  'serialize-failed',
   // rolling-restart-forced / deferred（rolling-restart.ts）
   'hard-threshold',
   'defer-limit',
@@ -115,17 +124,24 @@ const DESIGN_TOP_LEVEL_FIELDS = [
   'detailPath',
 ]
 
-describe('CRASH_JOURNAL_EVENTS（D1 schema event 行）', () => {
-  it('恰 21 值（设计 schema event 行值数）', () => {
-    expect(CRASH_JOURNAL_EVENTS).toHaveLength(21)
+describe('CRASH_JOURNAL_EVENTS（D1 schema event 行 + 实装扩展）', () => {
+  it(`恰 ${20 + IMPLEMENTED_EXTRA_EVENTS.length} 值（设计 schema event 行 20 值 + 实装扩展）`, () => {
+    expect(CRASH_JOURNAL_EVENTS).toHaveLength(DESIGN_EVENT_LINE.length + IMPLEMENTED_EXTRA_EVENTS.length)
   })
 
-  it('与设计 event 行集合完全一致（逐值对照，无多无漏）', () => {
-    expect([...CRASH_JOURNAL_EVENTS].sort()).toEqual([...DESIGN_EVENT_LINE].sort())
+  it('设计 event 行 20 值全部在内（逐字对齐部分）', () => {
+    for (const name of DESIGN_EVENT_LINE) {
+      expect(CRASH_JOURNAL_EVENTS).toContain(name)
+    }
+  })
+
+  it('实装扩展值全集精确一致（无多无漏，差集锁空）', () => {
+    const extras = [...CRASH_JOURNAL_EVENTS].filter((name) => !(DESIGN_EVENT_LINE as string[]).includes(name))
+    expect(extras.sort()).toEqual([...IMPLEMENTED_EXTRA_EVENTS].sort())
   })
 
   it('逐值断言（每值独立断言，任一漂移定位到具体值）', () => {
-    for (const name of DESIGN_EVENT_LINE) {
+    for (const name of [...DESIGN_EVENT_LINE, ...IMPLEMENTED_EXTRA_EVENTS]) {
       expect(CRASH_JOURNAL_EVENTS).toContain(name)
     }
   })

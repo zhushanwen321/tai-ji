@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext, TurnEndEvent } from '@earendil-works/pi-coding-agent'
+import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import type { GuiContext } from '@zhushanwen/extension-protocol'
 import { toErrorMessage } from '@zhushanwen/pi-ext-guards'
 import { getLogger } from '@zhushanwen/pi-extension-logger'
@@ -70,6 +70,9 @@ const WIDGET_KEEPALIVE_INTERVAL_MS = WIDGET_KEEPALIVE_MINUTES * MS_PER_MINUTE
  */
 export default function schedulerExtension(pi: ExtensionAPI): void {
   let service: SchedulerService | null = null
+  // U6c：当代 backend（session_start 装配点更新）。factory 顶层 session_tree handler
+  // 经它委托当代重折叠（注册面理由见下方 session_tree 注册点注释）。
+  let activeBackend: PiSchedulerBackend | null = null
   // IMPORT-FLUSH-GUARD（MF-1）：importLegacyStore 对未 flush 的新 session 返回延迟删除 .imported
   // 的 cleanup——turn_end / session_shutdown 时执行：确认 flush（sessionFile 已出现）则删，
   // 未 flush 保留供崩溃恢复重导入（否则未 flush 即退出 → 全部旧任务丢失且源文件已销毁）。
@@ -105,6 +108,9 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     service?.runtime.stopScheduler()
     // 装配点：backend（ctx.sessionManager 读 entries / pi.appendEntry 写 op）→ runtime（内存态 + 调度）→ service（业务入口）
     const backend = new PiSchedulerBackend(ctx, pi)
+    // U6c：同步给 factory 顶层 session_tree handler（下方注册）——同代 session_start
+    // 复发时本赋值覆盖为最新 backend，委托恒指当代 ctx 的实例。
+    activeBackend = backend
     // 旧 store 原子导入（CL3 方案A）：必须在 backend.loadTasks() 之前执行——
     // append 的 upsert entry 进入 pi 内存 fileEntries，紧接的 loadTasks replay 统一重放读到导入任务。
     // ctx.cwd 类型为 string（SDK ExtensionContext 必填），无需 ?? process.cwd() 兜底（CL2）。
@@ -186,37 +192,48 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     refreshWidget(ctx)
   })
 
+  // U6c：树回退（撤回 __taiji_nav__ → navigateTree / 用户树跳转）后重折叠任务集。
+  // 注册在 factory 顶层而非 PiSchedulerBackend 构造函数：pi 的 on 是追加语义（loader.js
+  // on 实现 list.push，无去重无 off，0.84.4 实装核对），且 RPC 模式下每次 session 替换
+  // session_start 在同一代内触发两次（agent-session-runtime finishSessionReplacement
+  // 内部 rebindSession 一路 + RPC handler 再 rebindSession 一路，均经 bindExtensions
+  // emit session_start）——构造函数注册会同代线性累积 handler（残留旧代 backend 在旧
+  // ctx 上重复执行幂等 loadTasks，handler 数随替换无界缓增）。factory 每代恰好运行一次
+  // （loader.js initializeExtension 每代新建 handlers Map 并重跑 factory），顶层注册
+  // 结构性保证每代恰一 handler；委托 activeBackend（session_start 装配点更新）保证折叠
+  // 输入恒为当代实例，事件早于首个 session_start 时 no-op。
+  // 纯重建体（goal/plan/todo 的 session_tree handler 同款）：只按活跃路径重折叠任务集
+  // 并回调 runtime 换 Map——不做任何 sendMessage / appendEntry / tickTimer 启停（tick
+  // 常驻循环照常消费新任务集，被撤子树任务不在集内即到点不触发，A14）。
+  pi.on('session_tree', (_event: unknown, _ctx: ExtensionContext) => {
+    activeBackend?.refoldSessionTree()
+  })
+
   // turn_end 单注册共用（U4 恢复挂点与 MF-1 cleanup 同事件）：真实 pi 的 on 是 handler 列表
   // 追加，但测试仿真 mock 为覆盖式单 handler，且同事件单注册与「listener 防重复注册」纪律一致。
-  pi.on('turn_end', (event?: TurnEndEvent) => {
+  // （U4 模型恢复不在本事件：D1 归属简化后恢复唯一事件通道 = agent_settled，见 runtime.handleRunSettled）
+  pi.on('turn_end', () => {
     // IMPORT-FLUSH-GUARD（MF-1）：延迟删除的主触发点——turn_end 前该轮所有 message_end 已持久化
     // （agent-session.js _handleAgentEvent 在 message_end 处理中调 appendMessage 触发 flush），
     // sessionFile 已出现 → cleanup 删 .imported；仍未 flush（无 assistant 消息的轮次）→ 静默保留，
     // 下次 turn_end / session_shutdown 重试。cleanup 幂等（importer.ts importFromFile）。
     importCleanup?.()
-    // U4 dispatch 模型切换恢复挂点（设计 D3 修订版）：状态机、恢复动作与 stale 代际守卫都在
-    // SchedulerRuntime。`event?.` 容错：pi 契约 payload 恒在，测试仿真可无参调用，缺省不匹配不动作。
-    service?.runtime.handleTurnEnd(event?.turnIndex)
     // ack 安全网注销（幂等）：正常路径已在 streamSimple 调用点自撤，这里覆盖「覆写未被调用」
     // 的轮次（E2）。
     ackController?.handleTurnEnd()
   })
 
-  // U4 dispatch 模型切换：归属状态机其余事件监听（P-MODEL-③④ 实测序态）。handler 只转发
-  // 事件数据；agent_settled = run 完全沉降（无 retry/compaction/queued continuation）后的
-  // 窗口封口 + awaiting-restore 模型恢复的即时兑现（区别于 agent_end 的纯封口）。
-  pi.on('agent_start', () => service?.runtime.handleAgentStart())
-  pi.on('turn_start', (event) => service?.runtime.handleTurnStart(event?.turnIndex))
+  // message_start 仅剩 ack 触发器判别（u-ack-turn）：只有我们注入的 custom 消息（前缀
+  // pi-scheduler-ack:）才同步武装覆写；外来/assistant 消息一律忽略。（U4 dispatch 归属匹配
+  // 已随 D1 归属简化删除）
   pi.on('message_start', (event) => {
-    service?.runtime.handleMessageStart(event?.message)
-    // ack 触发器判别（u-ack-turn）：只有我们注入的 custom 消息（前缀 pi-scheduler-ack:）
-    // 才同步武装覆写；外来/assistant 消息一律忽略。
     ackController?.handleMessageStart(event?.message)
   })
-  pi.on('agent_end', () => service?.runtime.handleRunClosed())
-  // agent_settled 除封口外兼作 awaiting-restore 模型恢复的即时兑现挂点（不与 agent_end
-  // 共用：end 后仍可能有自动续跑 turn，此时切回会把续跑 turn 的模型换掉，见
-  // runtime.handleRunSettled 注释）
+
+  // U4 dispatch 模型切换恢复的唯一事件挂点：agent_settled = run 完全沉降（无 retry/
+  // compaction/queued continuation）后的 isIdle 复核兑现（D1 归属简化——不挂 agent_start/
+  // turn_start/message_start/turn_end/agent_end，runtime 无 turnIndex 归属状态机；end 后仍
+  // 可能有自动续跑 turn，恢复只认 settled，见 runtime.handleRunSettled 注释）。
   pi.on('agent_settled', () => service?.runtime.handleRunSettled())
 
   pi.on('session_shutdown', async () => {

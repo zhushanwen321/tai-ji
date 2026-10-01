@@ -167,11 +167,13 @@ export function sweepEnginePidfiles(args: {
  * 进程存活三态探测：true（存活）/ false（ESRCH = 已死）/ undefined（探测失败，
  * 如 EPERM——清扫方必须保守跳过）。
  *
- * 同名异义警示：persistence/alive-store.ts 另有一个二态 isProcessAlive
- * （true=活含 EPERM 保守判活 / false=死，无 undefined 档）——本函数是三态语义，
- * 探测失败显式回流 undefined 由调用方分流；两个函数语义不同，勿混用。
+ * [§2.1 改名] 本函数原名 `isProcessAlive`，与 persistence/alive-store.ts 的同名二态
+ * 探测（true = 活，含 EPERM 保守判活 / false = 死，**无 undefined 档**）撞名异义。
+ * 改名后两者可检索区分：本函数是**三态**（探测失败如 EPERM 显式回流 undefined，由
+ * 清扫方保守跳过），alive-store 是**二态**（EPERM 判活是安全方向）；语义差异真实，
+ * 刻意不合并。
  */
-export function isProcessAlive(pid: number): boolean | undefined {
+export function probePidAliveness(pid: number): boolean | undefined {
   try {
     process.kill(pid, 0);
     return true;
@@ -296,7 +298,7 @@ function sweepOnePidfile(
     return;
   }
 
-  const hostAlive = isProcessAlive(content.hostPid);
+  const hostAlive = probePidAliveness(content.hostPid);
   if (hostAlive === undefined) {
     result.skipped.push({ file, reason: "host-pid-probe-uncertain" });
     return;
@@ -331,7 +333,7 @@ function reapDeadHostEngine(
     return;
   }
 
-  const engineAlive = isProcessAlive(content.enginePid);
+  const engineAlive = probePidAliveness(content.enginePid);
   if (engineAlive === undefined) {
     result.skipped.push({ file, reason: "engine-pid-probe-uncertain" });
     return;

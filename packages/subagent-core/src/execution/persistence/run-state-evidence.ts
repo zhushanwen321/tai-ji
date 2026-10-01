@@ -24,22 +24,17 @@ import { join } from "node:path";
 
 import { getLogger } from "../../core/logger.ts";
 import type {
-  RecordJournalEvent,
+  RecordEvent,
 } from "./record-events.ts";
 import {
-  createRecordEventJournal,
-  foldRecordJournalEvents,
+  createRecordEventStream,
+  foldRecordEvents,
   RECORD_EVENTS_SUFFIX,
 } from "./record-events.ts";
-import {
-  createRunEventJournal,
-  foldRunEventFrames,
-  RUN_EVENT_JOURNAL_SUFFIX,
-  type RunErrorCode,
-  type RunOutcome,
-  type WorkflowRunEvent,
-} from "../../orchestration/run-events.ts";
-import { runSettledOutcomeToDoneReason } from "../../orchestration/terminal-actions.ts";
+import { RUN_EVENTS_SUFFIX, type RunErrorCode, type RunOutcome } from "../../shared/run-vocabulary.ts";
+import { createRunEventJournal } from "./run-event-journal.ts";
+import type { WorkflowRunEvent } from "../../orchestration/run-events.ts";
+import { runSettledOutcomeToDoneReason } from "../../shared/run-vocabulary.ts";
 
 const logger = getLogger("run-state-evidence");
 
@@ -174,12 +169,6 @@ async function assessRunRetention(
     deps.debug(`state retention: journal scan failed, skipped ${runId}: ${deps.toMsg(err)}`);
     return undefined;
   }
-  const state = foldRunEventFrames(events, (err, lastType) => {
-    // 坏帧（历史帧与当前转移表不兼容）保守停在最近一致态——fold 非终态即不获资格
-    deps.debug(
-      `state retention: broken frame ignored in ${runId} (lastType=${lastType}): ${deps.toMsg(err)}`,
-    );
-  });
   let settledAt: number | undefined;
   let registeredAt: number | undefined;
   let lastEventTs: number | undefined;
@@ -188,7 +177,10 @@ async function assessRunRetention(
     if (event.type === "run-settled") settledAt = event.ts;
     lastEventTs = event.ts;
   }
-  const terminal = state.lifecycle === "terminal";
+  // [D1 Class B] 终态判据直接读帧（不再经编排层 fold）：不变量 = terminal ⟺ 存在
+  // run-settled 帧（终态必经该帧写入，转移表构造性保证）。本层只做证据判读，不引入
+  // 状态机语义——这正是拆边要的方向。
+  const terminal = settledAt !== undefined;
   // 终态时间 = journal 内终态事件时间戳（run-settled 帧 ts）；「收编无终态事件者
   // 取末条事件时间戳」——经转移表构造性不可达（terminal 必经 run-settled 帧），
   // 留防御兜底防未来词表演进破坏该不变量
@@ -212,7 +204,7 @@ async function deleteRunFootprint(
   deps: PruneStateDeps,
 ): Promise<boolean> {
   const stateFull = join(stateDir, `${runId}.jsonl`);
-  const journalFull = join(stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+  const journalFull = join(stateDir, `${runId}${RUN_EVENTS_SUFFIX}`);
   let prunedState = false;
   for (const full of [stateFull, journalFull]) {
     try {
@@ -282,7 +274,7 @@ async function pruneTerminalRunFootprint(
   // 不作候选是裁决点 7 引用保护的构成部分（唯一清理通道 = 对账清理），非实现疏漏；
   // 裁决性理由见 pruneTerminalRunFiles 注释 [D1 后射程] 段
   const stateNames = names.filter(
-    (n) => n.startsWith("wf-") && n.endsWith(".jsonl") && !n.endsWith(RUN_EVENT_JOURNAL_SUFFIX),
+    (n) => n.startsWith("wf-") && n.endsWith(".jsonl") && !n.endsWith(RUN_EVENTS_SUFFIX),
   );
   result.scanned = stateNames.length;
 
@@ -351,12 +343,12 @@ async function pruneTerminalRecordEventFiles(
   const eventNames = names.filter((n) => n.endsWith(RECORD_EVENTS_SUFFIX));
   result.scanned = eventNames.length;
 
-  const journal = createRecordEventJournal(recordsDir);
+  const journal = createRecordEventStream(recordsDir);
   const now = Date.now();
   const windowForCandidates = retentionMs ?? DEFAULT_STATE_TTL_MS;
   for (const name of eventNames) {
     const id = name.slice(0, -RECORD_EVENTS_SUFFIX.length);
-    let events: readonly RecordJournalEvent[];
+    let events: readonly RecordEvent[];
     try {
       events = await journal.scan(id);
     } catch (err) {
@@ -364,7 +356,7 @@ async function pruneTerminalRecordEventFiles(
       deps.debug(`state retention: record events scan failed, skipped ${name}: ${deps.toMsg(err)}`);
       continue;
     }
-    const fold = foldRecordJournalEvents(events);
+    const fold = foldRecordEvents(events);
     if (fold.settled !== undefined) {
       result.eligible += 1;
       if (retentionMs !== undefined && now - fold.settled.ts > retentionMs) {
@@ -538,10 +530,10 @@ type JournalScan =
 
 /** [findRunSettlementEvidence 拆分] journal 尾扫：自尾向头找最近一条 run-settled 帧
  * （坏行继续向前——append-only 下帧行独立有效；尾部空行静默跳过）。 */
-function scanJournalLastSettledFrame(journalPath: string): JournalScan {
+function scanJournalLastSettledFrame(recordPath: string): JournalScan {
   let settled: Extract<WorkflowRunEvent, { type: "run-settled" }> | undefined;
   try {
-    const content = readFileSync(journalPath, "utf8");
+    const content = readFileSync(recordPath, "utf8");
     const lines = content.split("\n");
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i]!.trim();
@@ -595,13 +587,13 @@ function readManifestSettlement(
 }
 
 export function findRunSettlementEvidence(stateDir: string, runId: string): RunSettlementEvidence {
-  const journalPath = join(stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
-  const journal = scanJournalLastSettledFrame(journalPath);
+  const recordPath = join(stateDir, `${runId}${RUN_EVENTS_SUFFIX}`);
+  const journal = scanJournalLastSettledFrame(recordPath);
   if (journal.kind === "ioError") {
     // 非 ENOENT 读错误（EACCES/EIO 等）≠ 文件不存在——保守侧按活跃挂账
     //（宁挂账不误注销），warn 留证防 IO 故障伪装成 missing。
     logger.warn(
-      `[run-state-evidence] findRunSettlementEvidence journal read failed, treating as running (stay registered): ${journalPath}`,
+      `[run-state-evidence] findRunSettlementEvidence journal read failed, treating as running (stay registered): ${recordPath}`,
     );
     return { kind: "running" };
   }
@@ -752,7 +744,7 @@ function warnCorruptOrphanReapRegistry(
 /** 三件（record 流 + manifest + 旧双源）+ .resume.lock 的存在性探测（mtime 取最大——与门输入）。 */
 function runFootprintMaxMtime(stateDir: string, runId: string): { exists: boolean; maxMtime: number } {
   const candidates = [
-    `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`,
+    `${runId}${RUN_EVENTS_SUFFIX}`,
     `${runId}.json`,
     `${runId}.jsonl`, // 历史遗留旧 state 快照（[D1] 不读不写不主动删——无主回收顺带删）
     `${runId}.events.jsonl`, // 历史遗留旧 journal（同上）
@@ -776,7 +768,7 @@ function runFootprintMaxMtime(stateDir: string, runId: string): { exists: boolea
 /** 成对删 run 磁盘足迹（三件 + 残锁，存在才删——ENOENT 静默）。 */
 function deleteOrphanRunFootprint(stateDir: string, runId: string): number {
   const names = [
-    `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`,
+    `${runId}${RUN_EVENTS_SUFFIX}`,
     `${runId}.json`,
     `${runId}.jsonl`,
     `${runId}.events.jsonl`,
@@ -830,7 +822,7 @@ export interface OrphanRunReapResult { // oe-exempt:20260929:framework:workflow/
 function collectOrphanCandidateRunIds(names: readonly string[]): Set<string> {
   const runIds = new Set<string>();
   for (const name of names) {
-    for (const suffix of [RUN_EVENT_JOURNAL_SUFFIX, ".events.jsonl"]) {
+    for (const suffix of [RUN_EVENTS_SUFFIX, ".events.jsonl"]) {
       if (name.endsWith(suffix)) {
         runIds.add(name.slice(0, -suffix.length));
         break;

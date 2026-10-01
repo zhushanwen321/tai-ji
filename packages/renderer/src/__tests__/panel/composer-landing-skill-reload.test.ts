@@ -85,6 +85,8 @@ vi.mock('@/composables/features/new-task/useNewTaskFlow', async () => {
       // currentCwd 必须是真 ref：Composer.vue line 191 传给 useProjectSkills，其内部 watch(currentCwd)
       // 要求 watch source 是 ref/getter。null cwd 使 useProjectSkills 早退（不 RPC）。
       currentCwd: ref(null),
+      // landing 态 launchConfigView 解析消费（model-thinking 单一解析层输入）
+      pendingPreset: ref(null),
     }),
     resetNewTaskFlow: vi.fn(),
   }

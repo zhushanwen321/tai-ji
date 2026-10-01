@@ -114,7 +114,6 @@ describe('equivalence：pending/notify-ledger entry 样本的 applyEntry reducer
     expect(first).toEqual(second)
     // 非空守卫（防空转）：3 条 message entry（user + 2 assistant）全数投影
     expect(first.messages).toHaveLength(3)
-    expect(first.clientUuidMap.size).toBe(0)
     expect(first.orphanToolResults).toHaveLength(0)
   })
 

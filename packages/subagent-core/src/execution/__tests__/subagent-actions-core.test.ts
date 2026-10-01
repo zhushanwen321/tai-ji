@@ -40,14 +40,10 @@ import {
   startHandler,
   wrapForkFromPrompt,
 } from "../assembly/subagent-actions-core.ts";
-import { ResurrectDeniedError } from "../assembly/types.ts";
+import { ResurrectDeniedError } from "../domain/record-types.ts";
 import { writeAliveMarker } from "../persistence/alive-store.ts";
-import type {
-  ExecutionHandle,
-  ExecutionRecord,
-  SubagentRecord,
-  SubagentToolDetails,
-} from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { ExecutionHandle, SubagentRecord, SubagentToolDetails } from "../assembly/types.ts";
 import type { SubagentService } from "../subagent-service.ts";
 
 // ── 时钟固定（duration 快照确定性，见文件头）──
@@ -721,6 +717,35 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
     // 文案 = engineConversationMessageUnsupportedError 单源（错误码前缀 + 拒绝依据）
     expect(err.errorName).toBe("EngineError");
     expect(err.message).toContain("cannot continue this subagent by message");
+    expect(deliverChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("[引擎身份域损坏] 有原生引擎锚却无 engine 字段 → 显式抛错（不按 pi 生成误导性拒绝文案）", async () => {
+    const deliverChatMessage = vi.fn(async () => {});
+    const corrupt = makeExecRecord({
+      id: "bg-corrupt",
+      status: "running",
+      engine: undefined,
+      engineHandle: {
+        sessionRef: { sessionId: "sess-corrupt", dbPath: "db.sqlite" },
+        poolKey: "shared",
+      },
+    });
+    const err = await errOf(() =>
+      messageHandler(
+        makeService({
+          getRecordForAction: vi.fn(() => corrupt),
+          deliverChatMessage,
+          // 资格判据拒绝 → 拒绝文案的引擎 id 解析点被损坏守卫拦截
+          engineSupportsConversation: vi.fn(() => false),
+        }),
+        { subagentId: "bg-corrupt", text: "hi" },
+      ),
+    );
+    expect(err.errorName).toBe("RecordEngineIdentityError");
+    expect(err.message).toContain('record "bg-corrupt"');
+    expect(err.message).toContain("refusing to route it to the default engine 'pi'");
+    expect(err.message).not.toContain("cannot continue this subagent by message");
     expect(deliverChatMessage).not.toHaveBeenCalled();
   });
 

@@ -243,24 +243,6 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     wrapper.unmount()
   })
 
-  it('引擎 badge：engineFallback → 警告态，文案「请求 zcode → 已回退 pi」+ title 恢复指引', async () => {
-    useSubagentStore().applyRecords(MAIN_SID, [
-      makeRecord({ engine: 'pi', engineFallback: { from: 'zcode', reason: 'engine_probe_failed' } }),
-    ])
-    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
-    const wrapper = mountTab()
-    await settle(wrapper)
-    const badge = wrapper.find('[data-testid="subagent-engine-badge"]')
-    expect(badge.exists()).toBe(true)
-    expect(badge.text()).toContain('请求 zcode → 已回退 pi')
-    // 警告态样式（--warn 语义色）
-    expect(badge.classes()).toContain('text-warn')
-    // title 展开恢复指引（含回退引擎名）
-    expect(badge.attributes('title')).toContain('zcode')
-    wrapper.unmount()
-  })
-
   // ── 停因词展示（永久会话模型 §3.2.8 U8b：详情面板 stopReason 原文 kebab-case，对齐 U8a TUI 决策）──
 
   it('停因词：idle + stopReason → 标题栏渲染原文 kebab-case（为什么停一句话解释）', async () => {

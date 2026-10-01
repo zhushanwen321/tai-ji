@@ -27,7 +27,7 @@ function todoEntry(todos: Todo[], nextId: number) {
 
 function makeCtx(entries: unknown[]) {
 	return {
-		sessionManager: { getEntries: () => entries },
+		sessionManager: { getLeafId: () => null, getEntries: () => entries },
 	} as unknown as Parameters<typeof reconstructState>[1];
 }
 

@@ -19,7 +19,7 @@ import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { RecordStore } from "../execution/persistence/record-store";
-import type { ExecutionRecord } from "../execution/assembly/types";
+import type { ExecutionRecord } from "../execution/domain/record-model.ts";
 
 describe("RecordStore per-file cache + light scan [perf]", () => {
   let rootDir: string;
@@ -108,56 +108,6 @@ describe("RecordStore per-file cache + light scan [perf]", () => {
     const second = store.collectRecords(100, "all", "root-1");
     expect(second.map((r) => r.id).sort()).toEqual(["sa-1", "sa-2"]);
     fs.chmodSync(f1, 0o644);
-  });
-
-  it("A2: jsonl 变化触发单文件重建——append + finalize 后状态翻转", () => {
-    const fA = writeSession({ name: "a.jsonl", id: "sa-1", assistantTexts: ["r1"] }); // 无 sidecar → idle
-    writeSession({ name: "b.jsonl", id: "sa-2", assistantTexts: ["r2"] });
-
-    // [U3 / §3.2.4] 重建单规则：无 sidecar 恒 idle + interrupted-by-restart
-    const initial = store.collectRecords(100, "all", "root-1");
-    expect(initial.every((r) => r.status === "idle")).toBe(true);
-    expect(initial.every((r) => r.stopReason === "interrupted-by-restart")).toBe(true);
-
-    // 文件 A 追加一条 assistant + 写 .finalized（模拟真实 finalize）
-    fs.appendFileSync(
-      fA,
-      JSON.stringify({
-        type: "message",
-        timestamp: "2026-08-14T00:01:00.000Z",
-        message: { role: "assistant", content: [{ type: "text", text: "more" }], usage: { input: 1, output: 1 }, stopReason: "stop", timestamp: 2500 },
-      }) + "\n",
-    );
-    fs.writeFileSync(`${fA}.finalized`, ""); // 空 sidecar = 旧格式（死因不可考）
-
-    const records = store.collectRecords(100, "all", "root-1");
-    const a = records.find((r) => r.id === "sa-1");
-    const b = records.find((r) => r.id === "sa-2");
-    expect(a?.status).toBe("idle");
-    // [v8.5 A2] 空 sidecar 兜底 disconnected（旧格式：死因不可考），不再误导为 gc。
-    // reason 读回的正向用例在 ended-message-and-fork-from.test.ts。
-    expect(a?.closedReason).toBe("disconnected");
-    expect(a?.endedAt).toBeGreaterThan(0); // light 旧 finalized 分支用 jsonl mtime 近似
-    expect(b?.status).toBe("idle"); // 未变文件不受影响（stopReason 保持兜底值）
-    expect(b?.stopReason).toBe("interrupted-by-restart");
-  });
-
-  it("A3: sidecar 变化触发状态翻转——.finalized 换 .cancelled", () => {
-    const f = writeSession({ name: "a.jsonl", id: "sa-1", assistantTexts: ["r1"], finalized: true });
-    // [v8.5 A2] fixture 写的空 .finalized 属旧格式 → disconnected
-    expect(store.collectRecords(100, "all", "root-1")[0].closedReason).toBe("disconnected");
-
-    fs.rmSync(`${f}.finalized`);
-    fs.writeFileSync(
-      `${f}.cancelled`,
-      JSON.stringify({ id: "sa-1", status: "cancelled", agent: "worker", startedAt: 1000, endedAt: 3000 }) + "\n",
-    );
-
-    const rec = store.collectRecords(100, "all", "root-1")[0];
-    expect(rec.status).toBe("idle");
-    expect(rec.closedReason).toBe("cancelled");
-    expect(rec.error).toBe("cancelled by user");
-    expect(rec.endedAt).toBe(3000);
   });
 
   it("A4: 删除文件后从结果中移除", () => {

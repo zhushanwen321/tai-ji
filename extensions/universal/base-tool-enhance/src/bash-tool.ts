@@ -19,11 +19,8 @@ import type { AgentToolUpdateCallback, BashToolDetails, ExtensionContext } from 
 import { createBashToolDefinition, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import {
-	resolveBackgroundTimeoutSec,
-	spawnBackgroundTask,
-	truncateCommand,
-} from "./background/spawn-background.ts";
+import { truncateCommand } from "./background/command-display.ts";
+import { resolveBackgroundTimeoutSec, spawnBackgroundTask } from "./background/spawn-background.ts";
 import { isSubagentProcess } from "./background/subagent-guard.ts";
 import { loadBaseToolEnhanceConfig, type BaseToolEnhanceConfig } from "./config.ts";
 import { compileForcePatterns, describeForceMatch, matchForceBackground } from "./force-patterns.ts";

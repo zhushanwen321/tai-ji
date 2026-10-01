@@ -26,7 +26,6 @@ import { computed, effectScope, ref, type Ref } from 'vue'
 import type {
   KeyboardEventLike,
   StagingAction,
-  StagingConfig,
   StagingSource,
   StagingType,
 } from '../types'
@@ -42,7 +41,7 @@ interface MockSpies {
   inProgressRef: Ref<boolean>
   enterSpy: ReturnType<typeof vi.fn>
   exitSpy: ReturnType<typeof vi.fn>
-  sendSpy: ReturnType<typeof vi.fn<(text: string, staging: StagingConfig) => Promise<void>>>
+  sendSpy: ReturnType<typeof vi.fn<(text: string) => Promise<void>>>
   handleEscSpy: ReturnType<typeof vi.fn<(e: KeyboardEventLike) => boolean>>
   abortSpy?: ReturnType<typeof vi.fn<(sessionId: string) => Promise<void>>>
 }
@@ -62,7 +61,7 @@ function makeMockAction(
   const enterSpy = vi.fn()
   const exitSpy = vi.fn()
   const sendSpy = vi
-    .fn<(text: string, staging: StagingConfig) => Promise<void>>()
+    .fn<(text: string) => Promise<void>>()
     .mockResolvedValue(undefined)
   const handleEscSpy = vi.fn<(e: KeyboardEventLike) => boolean>().mockReturnValue(false)
 
@@ -286,7 +285,7 @@ describe('send 路由', () => {
   it('无 active staging → send 返回 false，不调任何 action.send', async () => {
     const { api, fork, handoff } = setup()
 
-    const consumed = await api.send('hi', {})
+    const consumed = await api.send('hi')
 
     expect(consumed).toBe(false)
     expect(fork.sendSpy).not.toHaveBeenCalled()
@@ -297,11 +296,11 @@ describe('send 路由', () => {
     const { api, fork, handoff } = setup()
     fork.activeRef.value = true
 
-    const consumed = await api.send('hello', {})
+    const consumed = await api.send('hello')
 
     expect(consumed).toBe(true)
     expect(fork.sendSpy).toHaveBeenCalledTimes(1)
-    expect(fork.sendSpy).toHaveBeenCalledWith('hello', {})
+    expect(fork.sendSpy).toHaveBeenCalledWith('hello')
     expect(handoff.sendSpy).not.toHaveBeenCalled()
   })
 
@@ -309,22 +308,23 @@ describe('send 路由', () => {
     const { api, fork, handoff } = setup()
     handoff.activeRef.value = true
 
-    const consumed = await api.send('hi', {})
+    const consumed = await api.send('hi')
 
     expect(consumed).toBe(true)
     expect(handoff.sendSpy).toHaveBeenCalledTimes(1)
-    expect(handoff.sendSpy).toHaveBeenCalledWith('hi', {})
+    expect(handoff.sendSpy).toHaveBeenCalledWith('hi')
     expect(fork.sendSpy).not.toHaveBeenCalled()
   })
 
-  it('stagingConfig 透传：send(text, {modelOverride}) → action.send 收到相同对象', async () => {
+  // [审计候选 10] stagingConfig 三层死透传已删：useComposerStaging.send 只透传 text，
+  // 暂存配置由 action 实现内部自取 getStagingConfig（staging-mode handleSend）。
+  it('send 只透传 text：action.send 收到 (text) 单参（暂存配置由 action 内部自取）', async () => {
     const { api, fork } = setup()
     fork.activeRef.value = true
-    const staging: StagingConfig = { modelOverride: 'p/m', thinkingOverride: 'high' }
 
-    await api.send('text', staging)
+    await api.send('text')
 
-    expect(fork.sendSpy).toHaveBeenCalledWith('text', staging)
+    expect(fork.sendSpy).toHaveBeenCalledWith('text')
   })
 
   it('send action.send reject 时仍由 action 处理（这里 mock reject，send 仍 await 不吞错）', async () => {
@@ -333,7 +333,7 @@ describe('send 路由', () => {
     fork.sendSpy.mockRejectedValueOnce(new Error('boom'))
 
     // useComposerStaging.send 直接 await action.send，reject 会向上抛
-    await expect(api.send('x', {})).rejects.toThrow('boom')
+    await expect(api.send('x')).rejects.toThrow('boom')
   })
 })
 

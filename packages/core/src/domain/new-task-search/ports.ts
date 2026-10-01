@@ -17,7 +17,7 @@
  *   （cwd/presetId/pendingModel/segments/bashCommand → {session, migratedSegments} | null，
  *   含 INV-7 cwd 降级比对 + migrateImages）
  */
-import type { Segment } from '@taiji/shared'
+import type { Segment, ServerMessageMap } from '@taiji/shared'
 // AC10 跨域铁律：session 域经 '@taiji/core/domain/session' 公开 index API 消费（禁内部模块相对路径）
 import type {
   CreateSessionFlowInput,
@@ -37,14 +37,17 @@ export interface SessionFlowPort {
   createSession(input: CreateSessionFlowInput): Promise<CreateSessionFlowResult | null>
 }
 
-/** chat 发送端口（壳适配 useChat().send / useChat().sendBash）。 */
+/** chat 发送端口（壳适配 useChat().send / useChat().sendBash）。
+ *
+ * 返回值契约（两法同构，A 消费侧）：false = 未投递（RPC 真失败，错误面已 toast 消化）——
+ * flow 的 handover / 后台投递分支据此保稿（stashOrphanedDraft）。壳层消费判真用
+ * `r !== false`（兼容 void 形态，boolean 下语义等价）。
+ */
 export interface ChatSendPort {
-  /** 普通发送（segments 结构化段；壳适配 useChat().send）。
-   *  返回值随 useChat.send 契约（form-hang-fix D2）：false = B 策略转 steer 未消费；
-   *  flow 消费方（submitFirstMessage）不取返回值——send 成败属 session 错误通道（W2）。 */
+  /** 普通发送（segments 结构化段；壳适配 useChat().send）。false = 未投递（见上）。 */
   send(sessionId: string, segments: Segment[]): Promise<boolean>
-  /** bash 首发（landing 态 !/!! 前缀；壳适配 useChat().sendBash，不经 LLM turn） */
-  sendBash(sessionId: string, command: string, excludeFromContext: boolean): Promise<void>
+  /** bash 首发（landing 态 !/!! 前缀；壳适配 useChat().sendBash，不经 LLM turn）。false = 未投递（见上）。 */
+  sendBash(sessionId: string, command: string, excludeFromContext: boolean): Promise<boolean>
 }
 
 /**
@@ -65,14 +68,23 @@ export interface NavigationPanelPort {
   setActiveSession(sessionId: string): void
   /** 导航到 chat 视图（壳适配 navigation.push({ view: 'chat', sessionId })） */
   pushChat(sessionId: string): void
-  /** 默认 cwd（壳适配 workspaceStore.defaultCwd ?? null） */
-  defaultCwd(): string | null
 }
 
-/** toast 端口（壳适配 useToast().error / useToast().warning）。 */
+/** toast 端口（壳适配 useToast().error / .warning / .info）。
+ *  info = 后台投递可发现性（F12：用户切走但消息去了新 session 的通知通道）。 */
 export interface ToastPort {
   error(msg: string): void
   warning(msg: string): void
+  info(msg: string): void
+}
+
+/**
+ * [E] session 清理端口（创建中「取消」的收尾——删掉本次提交已建的 session，防幽灵任务烧 token）。
+ * 壳适配 @/api session.remove。可选端口：未接线时取消只跳过删除（flow 侧 console.warn 放行），
+ * 不影响取消主语义（不投递 + 草稿归还）。
+ */
+export interface SessionRemovePort {
+  remove(sessionId: string): Promise<void>
 }
 
 /** 文件树端口（壳适配 useFileTree().loadTree / useFileTreeStore().selectFile）。 */
@@ -107,18 +119,16 @@ export interface DirectoryPickerPort {
   pickDirectory(p?: { defaultPath?: string }): Promise<{ canceled: boolean; path?: string | null }>
 }
 
-/** workspace 三态模式（对齐 shared protocol workspace.detected 的 mode 字段）。 */
-export type WorkspaceMode = 'bare-workspace' | 'plain-repo' | 'not-repo'
-
-/** workspace.detect 的 reply（core 域内自声明，对齐 shared protocol workspace.detected）。 */
-export interface WorkspaceDetectReply {
-  mode: WorkspaceMode
-}
-
-/** worktree.list 的 reply（core 域内自声明，对齐 shared protocol worktree.list:result）。 */
-export interface WorktreeListReply {
-  items: Array<{ path: string; branch: string; HEAD: boolean; bare: boolean }>
-}
+/**
+ * workspace/worktree reply 类型：shared protocol 权威形状索引派生（对齐
+ * transport/api/domains/workspace.ts:14 先例）。原手写影子版已失步（WorkspaceDetectReply
+ * 仅声明 mode 一字段，权威形状 5 字段）——收编后零漂移。
+ */
+export type WorkspaceDetectReply = ServerMessageMap['workspace.detected']
+/** workspace 三态模式（派生自 workspace.detected 的 mode 字段）。 */
+export type WorkspaceMode = WorkspaceDetectReply['mode']
+/** worktree.list 的 reply（shared protocol 权威形状索引派生）。 */
+export type WorktreeListReply = ServerMessageMap['worktree.list:result']
 
 /** workspace/worktree 后端端口（壳适配 @/api workspace + worktree domains）。 */
 export interface WorkspaceApiPort {
@@ -134,8 +144,6 @@ export interface WorkspaceApiPort {
  * workspaceStore.record(cwd) 热更新最近工作区列表（fire-and-forget，失败静默降级）。
  */
 export interface WorkspaceStatePort {
-  /** 默认 cwd（records[0]?.cwd；壳适配 workspaceStore.defaultCwd ?? null） */
-  defaultCwd(): string | null
   /** 记录一次工作区使用（热更新最近工作区列表；壳适配 workspaceStore.record） */
   record(cwd: string): Promise<void>
 }
@@ -161,6 +169,8 @@ export interface NewTaskFlowDeps {
     fileTree: FileTreePort
     t: TranslatePort['t']
     migrateImage: ImageMigratePort
+    /** [E] session 清理（取消收尾删已建 session，best-effort）；可选——未接线时跳过删除 */
+    session?: SessionRemovePort
   }
   /** git 分支操作（branch 子编排器注入） */
   gitApi: GitApiPort

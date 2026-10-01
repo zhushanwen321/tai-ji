@@ -13,7 +13,7 @@
  *
  * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/UserBubble.test.ts
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { UserBubble, ChatViewDepsKey } from '@taiji/ui'
 import type { MessageTurn } from '@taiji/core/domain/chat'
@@ -74,21 +74,21 @@ describe('W4TC3: UserBubble 展示态', () => {
 
   it('canEdit=true + 非 sessionEditable → 编辑按钮存在', () => {
     const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
-    // hover actions 容器内有 2 个 button（复制 + 编辑）
+    // hover actions 容器内有 3 个 button（复制 + 编辑 + 撤回 [U5]）
+    const actions = wrapper.find('.group\\/user .opacity-0')
+    expect(actions.findAll('button').length).toBe(3)
+  })
+
+  it('canEdit=false → 复制 + 撤回按钮（编辑不显示）', () => {
+    const wrapper = mountBubble({ canEdit: false })
     const actions = wrapper.find('.group\\/user .opacity-0')
     expect(actions.findAll('button').length).toBe(2)
   })
 
-  it('canEdit=false → 只有复制按钮', () => {
-    const wrapper = mountBubble({ canEdit: false })
-    const actions = wrapper.find('.group\\/user .opacity-0')
-    expect(actions.findAll('button').length).toBe(1)
-  })
-
-  it('isSessionEditable=true → 只有复制按钮（活跃态禁止编辑）', () => {
+  it('isSessionEditable=true → 复制 + 撤回按钮（活跃态禁止编辑，撤回入口不受限）', () => {
     const wrapper = mountBubble({ canEdit: true, isSessionEditable: true })
     const actions = wrapper.find('.group\\/user .opacity-0')
-    expect(actions.findAll('button').length).toBe(1)
+    expect(actions.findAll('button').length).toBe(2)
   })
 })
 
@@ -345,10 +345,10 @@ describe('[MF-1] UserBubble slash 段（归位序渲染 + live ≡ reload）', (
 describe('W4TC3: UserBubble 编辑态', () => {
   it('canEdit=true 点编辑按钮 → 进入编辑态 + emit edit-state-change', async () => {
     const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
-    // hover actions 容器的第 2 个 button 是编辑
+    // hover actions 容器的第 2 个 button 是编辑（[U5] 撤回按钮在编辑之后，index 2）
     const actions = wrapper.find('.group\\/user .opacity-0')
     const buttons = actions.findAll('button')
-    expect(buttons.length).toBe(2)
+    expect(buttons.length).toBe(3)
     // 点编辑按钮
     await buttons[1].trigger('click')
     // emit edit-state-change（D2：负载携带 turnKey = turnStableId(turn) = 'u1'）
@@ -442,23 +442,8 @@ describe('[D3] submitEdit 双发锁', () => {
     expect(wrapper.find('textarea').exists()).toBe(false)
   })
 
-  it('未 provide isPendingSend（旧壳层兼容降级）→ 不互斥照常提交', async () => {
-    const editAndResend = vi.fn()
-    const deps = createMockDeps({ editAndResend })
-    delete (deps as { isPendingSend?: unknown }).isPendingSend
-    const wrapper = mount(UserBubble, {
-      props: { turn: makeTurn(), sessionId: 's1', canEdit: true, isSessionEditable: false },
-      global: {
-        provide: { [ChatViewDepsKey as symbol]: deps },
-        stubs: { MarkdownRenderer: true, ImageThumb: true },
-      },
-    })
-    const actions = wrapper.find('.group\\/user .opacity-0')
-    await actions.findAll('button')[1]!.trigger('click')
-    await wrapper.find('textarea').setValue('降级提交')
-    await findSendButton(wrapper).trigger('click')
-    expect(editAndResend).toHaveBeenCalledTimes(1)
-  })
+  // （「未 provide isPendingSend 旧壳层兼容降级」用例随 D6 收敛删除——isPendingSend 改必填后
+  // 缺位场景在类型层不可构造，降级分支已从 submitEdit 删除。）
 })
 
 // ── [MF-2] submitEdit 编辑含命令的消息：prompt 中命令只出现一次 ──
@@ -628,5 +613,56 @@ describe('chat-flow-timestamp U2: UserBubble 行尾时刻（A4）', () => {
     // 已进入编辑态（textarea 渲染）
     expect(wrapper.find('textarea').exists()).toBe(true)
     expect(wrapper.find('[data-testid="user-timestamp"]').exists()).toBe(false)
+  })
+})
+
+// ── [U5 消息撤回 D6] 撤回按钮单入口（生成中置灰 + 单回调透传）──
+// D6 收敛后 UI 不做路由判定（在途 cancel / 已送达树内回退的分派在 core useChat.revokeMessage
+// 单点，其投影复核由 core 侧测试覆盖），UI 仅用 isActive 谓词做展示态（置灰 + tooltip）；
+// 此处锁定单回调透传与生成中守卫。
+describe('[U5] UserBubble 撤回单入口（D6）', () => {
+  const onRevokeMessage = vi.fn()
+
+  function mountRevokeBubble(isActive = false) {
+    return mount(UserBubble, {
+      props: { turn: makeTurn(), sessionId: 's1', canEdit: false, isSessionEditable: false },
+      global: {
+        provide: mockChatProvide({ onRevokeMessage, isActive: () => isActive }),
+        stubs: { MarkdownRenderer: true, ImageThumb: true },
+      },
+    })
+  }
+
+  function revokeButton(wrapper: ReturnType<typeof mount>) {
+    const btn = wrapper.find('[data-testid="msg-revoke-button"]')
+    expect(btn.exists()).toBe(true)
+    return btn
+  }
+
+  beforeEach(() => {
+    onRevokeMessage.mockClear()
+  })
+
+  it('点击撤回 → 单回调 onRevokeMessage 透传 (sessionId, targetId)，路由判定不在 UI', async () => {
+    const wrapper = mountRevokeBubble()
+    await revokeButton(wrapper).trigger('click')
+    expect(onRevokeMessage).toHaveBeenCalledTimes(1)
+    expect(onRevokeMessage).toHaveBeenCalledWith('s1', 'u1')
+  })
+
+  it('生成中（isActive）→ 置灰（aria-disabled）+ tooltip 文案，点击不触达撤回回调（D2 附带裁决）', async () => {
+    const wrapper = mountRevokeBubble(true)
+    const btn = revokeButton(wrapper)
+    expect(btn.attributes('aria-disabled')).toBe('true')
+    // tooltip 文案断言（title = i18n key；测试环境 t 回显 key）
+    expect(btn.attributes('title')).toBe('panel.message.revokeGenerating')
+    await btn.trigger('click')
+    expect(onRevokeMessage).not.toHaveBeenCalled()
+  })
+
+  it('非生成中 → tooltip 为撤回默认文案（可撤态）', () => {
+    const wrapper = mountRevokeBubble()
+    expect(revokeButton(wrapper).attributes('title')).toBe('panel.message.revoke')
+    expect(revokeButton(wrapper).attributes('aria-disabled')).toBe('false')
   })
 })

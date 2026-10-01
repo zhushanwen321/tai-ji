@@ -66,7 +66,7 @@ function makeFlowDeps(launchConfig: LaunchConfigPort): NewTaskFlowDeps & { ports
         pushChat: vi.fn(),
         defaultCwd: vi.fn(() => null),
       },
-      toast: { error: vi.fn(), warning: vi.fn() },
+      toast: { error: vi.fn(), warning: vi.fn(), info: vi.fn() },
       fileTree: { loadTree: vi.fn(), selectFile: vi.fn() },
       t: vi.fn((key: string) => key),
       migrateImage: { migrateImage: vi.fn() },

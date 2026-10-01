@@ -14,6 +14,31 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { tmpdir } from 'node:os'
 import type { ClientMessage } from '@taiji/shared'
+import {
+  createSessionDeliveryRegistry,
+  type SessionDeliveryDeps,
+} from '../src/services/session/session-delivery-registry.js'
+import { flushDelivery } from './helpers/flush-delivery.js'
+
+/**
+ * [u2 投递所有权内核] 装配投递内核（dispatcher 只提交，出站交接在适配层）。
+ * fixture 的 getSession/ensureActive/workspace.record 与真实装配同源。
+ */
+function wireDeliveryKernel(deps: {
+  getSession: (sid: string) => unknown
+  ensureActive: unknown
+  record: (cwd: string) => void
+  bus: unknown
+}): ReturnType<typeof createSessionDeliveryRegistry> {
+  // [MF-1-7] 注册表实例返回给调用方，经 dispatcher 构造参数注入（活动槽已退役）
+  return createSessionDeliveryRegistry({
+    getSession: (sid) => deps.getSession(sid) as ReturnType<SessionDeliveryDeps['getSession']>,
+    ensureActive: deps.ensureActive as SessionDeliveryDeps['ensureActive'],
+    subscribeAgentSettled: () => () => {},
+    recordWorkspace: deps.record,
+    getMessageBus: () => deps.bus as ReturnType<SessionDeliveryDeps['getMessageBus']>,
+  })
+}
 
 // ── T1.9: WorkspaceMessageHandler RPC 贯穿 ─────────────────────
 
@@ -245,19 +270,23 @@ describe('MessageDispatcher — 写入时机 record', () => {
     const pm = { getClient: vi.fn(() => undefined) }
     // wave:perf-w09（D1-2）：dispatcher 4 参（svc/pm/workspace/bus），broker 依赖已删
     const bus = { publish: vi.fn() } as unknown as ConstructorParameters<typeof MessageDispatcher>[3]
+    const registry = wireDeliveryKernel({ getSession: () => activeSession, ensureActive: svc.ensureActive, record: workspaceRecord, bus })
     const dispatcher = new MessageDispatcher(
       svc as unknown as ConstructorParameters<typeof MessageDispatcher>[0],
       pm as unknown as ConstructorParameters<typeof MessageDispatcher>[1],
       workspaceService as unknown as ConstructorParameters<typeof MessageDispatcher>[2],
       bus,
     )
+    dispatcher.setDeliveryRegistry(registry)
 
     const result = await dispatcher.sendMessage('s1', 'hello')
+    await flushDelivery(30)
 
     expect(result.blocked).toBe(false)
     expect(workspaceRecord).toHaveBeenCalledWith('/project')
     expect(workspaceRecord).toHaveBeenCalledTimes(1)
   })
+
 
   it('T2.4: hook blocked → record 未被调', async () => {
     const { MessageDispatcher } = await import('../src/services/session/message-dispatcher.js')
@@ -271,17 +300,20 @@ describe('MessageDispatcher — 写入时机 record', () => {
     const pm = { getClient: vi.fn(() => undefined) }
     // wave:perf-w09（D1-2）：dispatcher 4 参（svc/pm/workspace/bus），broker 依赖已删
     const bus = { publish: vi.fn() } as unknown as ConstructorParameters<typeof MessageDispatcher>[3]
+    const registry = wireDeliveryKernel({ getSession: () => undefined, ensureActive: svc.ensureActive, record: workspaceRecord, bus })
     const dispatcher = new MessageDispatcher(
       svc as unknown as ConstructorParameters<typeof MessageDispatcher>[0],
       pm as unknown as ConstructorParameters<typeof MessageDispatcher>[1],
       workspaceService as unknown as ConstructorParameters<typeof MessageDispatcher>[2],
       bus,
     )
+    dispatcher.setDeliveryRegistry(registry)
 
     // 注册一个会 block 的 hook
     dispatcher.setSendMessageHook(vi.fn().mockResolvedValue({ blocked: true, reason: 'blocked by hook' }))
 
     const result = await dispatcher.sendMessage('s1', 'hello')
+    await flushDelivery(30)
 
     expect(result.blocked).toBe(true)
     expect(workspaceRecord).not.toHaveBeenCalled()
@@ -299,14 +331,23 @@ describe('MessageDispatcher — 写入时机 record', () => {
     const pm = { getClient: vi.fn(() => undefined) }
     // wave:perf-w09（D1-2）：dispatcher 4 参（svc/pm/workspace/bus），broker 依赖已删
     const bus = { publish: vi.fn() } as unknown as ConstructorParameters<typeof MessageDispatcher>[3]
+    const registry = wireDeliveryKernel({ getSession: () => undefined, ensureActive: svc.ensureActive, record: workspaceRecord, bus })
     const dispatcher = new MessageDispatcher(
       svc as unknown as ConstructorParameters<typeof MessageDispatcher>[0],
       pm as unknown as ConstructorParameters<typeof MessageDispatcher>[1],
       workspaceService as unknown as ConstructorParameters<typeof MessageDispatcher>[2],
       bus,
     )
+    dispatcher.setDeliveryRegistry(registry)
 
-    await expect(dispatcher.sendMessage('s1', 'hello')).rejects.toThrow('restore failed')
+    // [u2 受理口径 D9⑤] ensureActive 失败不再同步 reject：消息已受理入内核，
+    // 失败经 message.error 广播可见（投递终态失败面），record（三副作用）不执行
+    const result = await dispatcher.sendMessage('s1', 'hello')
+    await flushDelivery(30)
+    expect(result.blocked).toBe(false)
     expect(workspaceRecord).not.toHaveBeenCalled()
+    const types = (bus as unknown as { publish: { mock: { calls: unknown[][] } } }).publish.mock.calls
+      .map((c) => (c[1] as { type: string }).type)
+    expect(types).toContain('message.error')
   })
 })

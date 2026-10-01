@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
-  isProcessAlive,
+  probePidAliveness,
   pidfilePath,
   readPidfile,
   readProcessStartTime,
@@ -153,7 +153,7 @@ describe("pidfile 三条件清扫", () => {
       result.removed.some((r) => r.reason.includes("start-time-mismatch")),
     ).toBe(true);
     // 进程未被波及（保守方向：复用识别后只清文件）
-    expect(isProcessAlive(engine.pid)).toBe(true);
+    expect(probePidAliveness(engine.pid)).toBe(true);
   });
 
   it("cmdline 身份校验不符（pid 被复用给无关进程）→ 判定不成立：删文件不杀（防误杀）", async () => {

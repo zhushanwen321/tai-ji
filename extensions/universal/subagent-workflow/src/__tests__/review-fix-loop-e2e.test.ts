@@ -1047,7 +1047,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
         // git add 抛错 → terminated='fix-failure'（结构化终止语义）
         expect(outcome.terminated).toBe("fix-failure");
         expect(outcome.message).toContain("[UNRESOLVED]");
-        expect(outcome.message).toContain("统一 commit 失败");
+        expect(outcome.message).toContain("统一 commit 环境恢复重试后仍失败");
         expect(outcome.message).toContain("git status"); // 恢复动作指引
         // 终止路径 saveState 已落盘（断点恢复依据）
         expect(existsSync(join(outcome.runDir!, "state.json"))).toBe(true);
@@ -2364,7 +2364,9 @@ describe("review-fix-loop fail-fast（结构化返回失败立即终判）", () 
       expect(outcome.message).toContain("concatenated as plain text"); // raw dump 便于定位
       expect(outcome.message).toContain("恢复动作");
       const { kinds } = runner.stats();
-      expect(kinds.filter((k) => k === "review").length).toBe(1);
+      // 校验失败由同一 agent 回注失败原因重试一次（CR 门 fail-fast 语义，dev-merge-gates
+      // 同步机制）——第二次仍无效才 review-failure 终判，聚合/修复不发生。
+      expect(kinds.filter((k) => k === "review").length).toBe(2);
       expect(kinds.filter((k) => k === "aggregate").length).toBe(0);
       expect(kinds.filter((k) => k === "fix").length).toBe(0);
     },

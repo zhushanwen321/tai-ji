@@ -74,11 +74,18 @@ afterEach(() => {
 })
 
 /** 把 entries 序列化成 JSONL 文件，返回文件路径。 */
-function writeJsonl(entries: PiSessionEntry[]): string {
+function writeJsonl(entries: PiSessionEntry[], headerLine?: string): string {
   const filePath = join(tmpDir, 'test.jsonl')
-  writeFileSync(filePath, entries.map((e) => JSON.stringify(e)).join('\n'), 'utf-8')
+  // header 以 raw 行前置（真实 pi 文件形态：首行恒为 session header，有 id 无 parentId——
+  // 不剥会与真根 entry 一起把 computeActivePathEntries 单根守卫顶成多根降级，U6d 发现的
+  // U6a 缺陷）。header 形态不在 PiSessionEntry 联合内，故走 raw 行不进类型化数组。
+  const lines = headerLine ? [headerLine, ...entries.map((e) => JSON.stringify(e))] : entries.map((e) => JSON.stringify(e))
+  writeFileSync(filePath, lines.join('\n'), 'utf-8')
   return filePath
 }
+
+/** 真实 pi 文件首行 session header（0.84.4：type='session'，必有 id，无 parentId）。 */
+const HEADER_LINE = JSON.stringify({ type: 'session', id: 'sess-header', cwd: '/tmp', timestamp: '2026-01-01T00:00:00Z' })
 
 // 真实 PiSessionStore（convertHistory → convertPiHistory，端到端验证 mapper + converter）
 const realStore: ISessionStore = new PiSessionStore()
@@ -274,5 +281,55 @@ describe('边界用例', () => {
     const { messages, truncated } = await tailReadHistory(filePath, realStore)
     expect(messages).toEqual([])
     expect(truncated).toBe(false)
+  })
+})
+
+// ════════════════════════════════════════════════════════════════════
+// 活跃路径裁剪（message-revoke U6a）：文件源腿（全量文件读 / 离线尾读）
+// ════════════════════════════════════════════════════════════════════
+// 文件腿无 RPC leafId，convertWindowEntries 以窗口/文件末条 entry 为 leafId（pi 树重放
+// 规则：文件尾 = 活跃叶子）；被撤子树按文件序先于 label 锚，经 parentId 回溯滤除。
+
+describe('活跃路径裁剪（message-revoke U6a 文件源腿）', () => {
+  /** 有分支链式 fixture（真实撤回形态）：root → a1 → [m(被撤) → am] / [label(锚) → n]。 */
+  function branchedFile(opts: { withHeader?: boolean } = {}): string {
+    const label = {
+      type: 'label',
+      id: 'lbl',
+      parentId: 'a1',
+      timestamp: '2026-01-01T00:00:00Z',
+      label: 'taiji:revoked',
+      targetId: 'm',
+    } as PiSessionEntry
+    const entries: PiSessionEntry[] = [
+      { ...msgEntry('q', 'user', '问题'), parentId: null },
+      { ...msgEntry('a1', 'assistant', '回答'), parentId: 'q' },
+      { ...msgEntry('m', 'user', '发错的消息'), parentId: 'a1' },
+      { ...msgEntry('am', 'assistant', '对发错的回复'), parentId: 'm' },
+      label,
+      { ...msgEntry('n', 'user', '撤回后新消息'), parentId: 'lbl' },
+    ]
+    return writeJsonl(entries, opts.withHeader ? HEADER_LINE : undefined)
+  }
+
+  it('getHistoryFromFilePath: 有分支文件 → 旧分支（发错的消息及其回复）不渲染', async () => {
+    const { messages } = await getHistoryFromFilePath(branchedFile(), realStore)
+    expect(messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user'])
+    expect(messages.map((m) => m.piEntryId)).toEqual(['q', 'a1', 'n'])
+  })
+
+  it('tailReadHistory: 有分支文件 → 离线尾读窗口同样滤除旧分支条目', async () => {
+    const { messages } = await tailReadHistory(branchedFile(), realStore, 20)
+    expect(messages.map((m) => m.piEntryId)).toEqual(['q', 'a1', 'n'])
+    expect(messages.some((m) => m.piEntryId === 'm' || m.piEntryId === 'am')).toBe(false)
+  })
+
+  it('真实文件形态（首行 session header）→ 两条腿裁剪仍生效（header 不顶翻单根守卫）', async () => {
+    const filePath = branchedFile({ withHeader: true })
+    const full = await getHistoryFromFilePath(filePath, realStore)
+    expect(full.messages.map((m) => m.piEntryId)).toEqual(['q', 'a1', 'n'])
+    const tail = await tailReadHistory(filePath, realStore, 20)
+    expect(tail.messages.map((m) => m.piEntryId)).toEqual(['q', 'a1', 'n'])
+    expect(tail.messages.some((m) => m.piEntryId === 'm' || m.piEntryId === 'am')).toBe(false)
   })
 })

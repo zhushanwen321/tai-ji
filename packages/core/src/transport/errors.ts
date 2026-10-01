@@ -22,3 +22,27 @@ export function transportUnavailableError(message: string): TransportUnavailable
   error.code = 'disconnected'
   return error
 }
+
+/**
+ * 「消息未送达 runtime 消息处理链」的传输失败（TransportUnavailableError 的收窄形态）。
+ *
+ * 与普通传输断开的关键区别：本形态**可证明**请求没有抵达 runtime 处理链（send() 返回
+ * false 消息没离机 / pre-auth 队列被丢弃），消费方可据此安全判定「未执行」（如 bash
+ * 回执翻译为 rejected、恢复 !command 草稿不会双执行）；而断连 rejectAll 的同 code 错误
+ * 只能证明「reply 没回来」——请求可能已送达并执行，消费方必须保守处置。
+ */
+export interface NotDeliveredError extends TransportUnavailableError {
+  notDelivered: true
+}
+
+/** 构造「未送达」传输错误（notDelivered 标记唯一出处）。 */
+export function notDeliveredError(message: string): NotDeliveredError {
+  const error = transportUnavailableError(message) as NotDeliveredError
+  error.notDelivered = true
+  return error
+}
+
+/** 判定错误是否为「消息未送达 runtime」形态（消费方据它区分「可证明未执行」与「判定未知」）。 */
+export function isNotDeliveredError(e: unknown): e is NotDeliveredError {
+  return typeof e === 'object' && e !== null && (e as { notDelivered?: unknown }).notDelivered === true
+}

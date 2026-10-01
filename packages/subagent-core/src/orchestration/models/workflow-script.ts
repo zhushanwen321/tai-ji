@@ -13,7 +13,7 @@
  *
  * 层归属：Engine。lint 语义见 engine/script-lint.ts（lint 实现）。
  */
-import { type LintResult,lintScript } from "../script-lint.ts";
+import { type LintResult,lintScript } from "../../shared/script-lint.ts";
 // LintFinding/LintResult 类型规范归属 engine/script-lint.ts（canonical 源）。
 
 // WorkflowMeta 规范来源是 shared/resource-meta.ts（m1 DM1，含 parameters/usage/when/notFor）。

@@ -1,7 +1,9 @@
 # 压缩待发消息展示统一与压缩中分隔行（方案 2）
 
-> 状态：v4，经两轮对抗式审查（round1 三审 2/4/0 MF → round2 聚焦复审 0/2MF 主审收敛；收敛轨迹 6→2 MF，报告见 `.tmp/tech-design/design-review-20260913-compactdefer{,-impact,-simplicity}.md`）。v4 为压缩中形态降级同步（见变更历史）。
-> 视觉规格基线 = `docs/assets/compact-defer-queue-spec.html`（用户裁决的方案 2 demo 已入库；`.tmp/compact-queue-demos/` 的 demo-1/3 为落选过程残留，不入库）——**队列区部分继续有效**（defer 行 / Hourglass / 待发 chip / `+N`；DESIGN.md §6.1 不覆盖队列区）；**压缩中活动带部分已失效**：压缩中形态按 DESIGN.md §6.1 通知族二分「横线分隔行」修订行落地（通栏活动带属过渡形态，2026-09-16 降级，见 §2.2）。
+> 状态：v3，经两轮对抗式审查（round1 三审 2/4/0 MF → round2 聚焦复审 0/2MF 主审收敛；收敛轨迹 6→2 MF，报告见 `.tmp/tech-design/design-review-20260913-compactdefer{,-impact,-simplicity}.md`）。
+> 视觉规格基线 = `docs/page-design/compact-defer-queue-spec.html`（用户裁决的方案 2 demo 已入库；`.tmp/compact-queue-demos/` 的 demo-1/3 为落选过程残留，不入库）。
+>
+> **现行边界（投递所有权内核，[ADR-0074](../adr/decisions.md)，2026-09-16）**：本文的队列**数据源与记账**层已被内核取代——renderer 本地 defer 队列（`useCompactQueue` 分区、flush / S1 拒绝检测 / 1s 重投 timer / 5 次熔断、`PendingBubble`）整体退役；队列状态载体 = runtime 投递内核的 `session.delivery` 状态帧（core `getDeliveryProjectionRef`），composer 队列区（`QueueBubble`）单源读帧，条目态 = 内核五态（queued / in-flight / delivered / failed / cancelled）+ lane，撤销走 `delivery.cancel`、重试走 `delivery.resync`、forceQuit 回收走 `delivery.drain`。**本文仍有效**：队列区位置与形态基线（composer-box 顶部队列区、行截断、`VISIBLE_MAX` 截断 + 「+N」、hover × 撤销）、「压缩中」通栏活动带（`ActivityStrip` compacting 行 + 副文案计数）；occupancy 驱动展示的口径不变。**失效条款**：§2.1 的双数据源归一规则（defer 行仅渲染未提交条目、已提交 send 条目确认前不可见）随本地队列退役——内核条目从提交起全程可见（queued / in-flight 行）；活动带与队列区计数口径 = `session.delivery` 投影中「lane ≠ direct 且 state ≠ delivered」的条目数（过滤唯一定义点 `deliveryQueueEntries`，与队列区行渲染同源）；行内富内容 +N 徽标退役（帧只携带 preview 文本，草稿恢复由 cancel/drain reply 的全文快照承担，ADR-0043）。
 
 ## 1 背景与目标
 
@@ -62,7 +64,7 @@
 
 > 〔2026-09-16 降级〕本节原为「压缩中通栏活动带」（`-mx-5` + `border-y border-hairline` + `bg-[var(--accent-soft)]` + `py-[14px]`，高度 ≈50px）：瞬时状态占了通知族最高视觉权重，与 DESIGN.md §6.1 通知族二分（压缩中提示属「横线分隔行」）相抵。降级后四行（compacting / bash / thinking / settling）共用同一行结构。
 
-- **结构（四行同构）**：`system-notice content-col flex min-w-0 items-center gap-2 py-1.5` + 两端渐隐横线 ×2（`h-px flex-1` + `bg-[image:linear-gradient(to_right,transparent,var(--border-strong)_18%,var(--border-strong)_82%,transparent)]`）——`content-col` 保留（回到居中 720 内容列），`-mx-5` 通栏 / `accent-soft` 底 / `border-y` 全部摘除；`system-notice` 标记随形态回归横线分隔行族而恢复（零 CSS 语义标记，「形态归一」即理由——早期版本（v2 F5 摘除 / v3 死标记定性）的「摘除」判断以本版为准）；`COMPACTING_NOTICE_HEIGHT` 的 `useConstantHeightAssert` 绑定仍仅挂 compacting 行，bash 行绑定同批重测。
+- **结构（四行同构）**：`system-notice content-col flex min-w-0 items-center gap-2 py-1.5` + 两端渐隐横线 ×2（`h-px flex-1` + `bg-[image:linear-gradient(to_right,transparent,var(--border-strong)_18%,var(--border-strong)_82%,transparent)]`）——`content-col` 保留（回到居中 720 内容列），`-mx-5` 通栏 / `accent-soft` 底 / `border-y` 全部摘除；`system-notice` 标记随形态回归横线分隔行族而恢复（零 CSS 语义标记，「形态归一」即理由——早期版本（v2 F5 摘除 / v3 死标记定性）的「摘除」判断以本版为准）。
 - **内容**：Loader2 `size-[13px] stroke-width 2.2 text-neutral-mid`（原通栏带形态的 `size-3.5 animate-spin text-accent` 随降级作废；图标色走中性，语义色落 meta——exit 0 绿 / 非 0 与超时 warn）+ 主文案（`--text-sm` `--neutral-fg` 550；manual →「压缩中」/ threshold·overflow →「正在自动压缩上下文」，key 不变）+ 「待发 N」chip（mono `--text-3xs` + `border-border-strong` 描边，`t('panel.message.compactingQueueChip', { count })`；原副文案长句 `compactingFlushHint` 与「·」分隔随之退役）。bash 行的 mono 命令文本沿用主文案同行展示。
 - **chip 数据源与口径（口径不随形态变化）**：`useCompactQueue().peek(sid)` 过滤 `mode === undefined` 后计数（App 级单例，ActivityStrip 内 computed）——**只计未提交条目**，与 2.1 归一规则同口径：flush 提交后未确认条目不计入（它们已投递，承接形态分通道见 §2.1：steer 镜像行 / send 无行）；「已提交未确认 + 再压缩」边缘下 chip 语义仍准确。`count === 0` 时 chip 不渲染（活动行仍在，压缩状态本身独立成立）。
 - **高度常量同步**：`COMPACTING_NOTICE_HEIGHT` 50 → 32（py-1.5(6px×2) + 内容行 max(chip 20px, 主文案 text-sm×1.5≈19.5px)）；`EXECUTING_BASH_NOTICE_HEIGHT` 24 → 32（D3 增强规格三项 py-1→py-1.5 / text-xs→text-sm / icon 12→13px 同时改变行高，与 COMPACTING 同批重测）。两常量的强绑定 DOM 注释（逐 class 记录新结构）同批改写；数值为规格算式结果，**以 dev 断言实测校准为准**（`useConstantHeightAssert` 持续检查漂移，±1px 容差）。

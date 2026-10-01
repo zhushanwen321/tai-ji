@@ -4,9 +4,15 @@
 //
 // 本包是主 agent（runtime rpc-client）与 subagent（pi-subagent-cli）两套 pi 进程
 // RPC 客户端的公共协议层（设计 docs/architecture/subagent-permanent-session-model.md
-// §3.3.2）。类型自包含（零运行时依赖）：ThinkingLevel 字面量联合与
-// @taiji/shared / subagent-engine-sdk 侧同形（TS 结构化类型下互通），避免
-// 公共包背上宿主依赖（zcode 不经过此层——app-server 是另一协议）。
+// §3.3.2）。类型自包含（零运行时依赖）。
+//
+// thinking 档位在本层是**宿主入口层已校验的字符串透传**：合法性由上游入口层
+// （runtime launch-params resolveEffectiveThinking，词表 = shared PI_THINKING_LEVELS）
+// 校验保证，本层不做白名单收窄。不可把「pi 会拒绝非法档位」当兜底依赖——pi 实装
+// （0.84.4）对非法 --thinking 不报错：仅 push type:"warning" diagnostic 且不设置档位、
+// 进程照常以缺省档启动（node_modules/@earendil-works/pi-coding-agent
+// dist/cli/args.js:112-121；diagnostics 处理仅 type==="error" 才 exit(1)：
+// dist/main.js:476-478）。
 
 /**
  * Generic shape of a message received from pi's JSONL stdout.
@@ -25,23 +31,5 @@ export interface PiMessage {
 
 export type PiEventListener = (event: PiMessage) => void
 
-/**
- * pi CLI 认可的 thinking level 白名单（runtime shared/model-ref 与 pi-subagent-cli
- * spawn-args 两侧字面量面的单源；结构同形，两侧各自类型别名互通）。
- * 七值与 pi-ai ModelThinkingLevel 对齐（含 'xhigh'，ext-simplify-17 D5 P1-a：
- * 白名单曾缺 xhigh 致 `:xhigh` 后缀经 asThinkingLevel 静默降级 undefined）。
- */
-export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-
 /** prompt 命令的 busy 投递语义（pi 权威裁决：steer 抢占 / followUp 入队）。 */
 export type StreamingBehavior = 'steer' | 'followUp'
-
-const THINKING_LEVELS: readonly string[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
-
-/**
- * 运行时收窄守卫：字符串 → ThinkingLevel 白名单（非法值 undefined，不 throw——
- * 协议 ctx 的 thinkingLevel 是跨进程字符串，坏值降级缺省优于崩帧）。
- */
-export function asThinkingLevel(v: unknown): ThinkingLevel | undefined {
-  return typeof v === 'string' && THINKING_LEVELS.includes(v) ? (v as ThinkingLevel) : undefined
-}

@@ -9,25 +9,35 @@
  *   ready 分支可达（先有 isActive 帧后有消费者的鸡蛋困境由常驻订阅消除）
  * - 承接清单② focusedSid 注入：mount 后 planStore.focusedSid 非空（syncFocus 义务随
  *   组件自 PanelContainer 横幅/审批条迁移到 PlanModeBar）
- * - 左区渲染：模式名 + 三阶段点（tooltip 含义文案）+ 退出；skills 默认不渲染（有技能
- *   收进模式名 title）；hint 长句不再存在（组件无该文案挂点）
+ * - 左区渲染：模式名 + 技能 chips（D7①：至多 2 枚 + +n，点击 Popover 列全量；取代
+ *   tooltip-only）+ 三阶段点（tooltip 含义文案，含已批准档 ③✓ 不倒退）+ 退出；hint 长句
+ *   不再存在（组件无该文案挂点）
  * - §3.5 退出确认 Popover：点退出只开确认层（不发 abortPlan）；分情境警示（revising =
  *   「退出将中止修订」优先 / 有评论草稿 =「N 条评论草稿将丢弃」）；确认后才发 abortPlan
  *   且草稿清空；取消不发；退出唯一入口 = 左区退出按钮（degraded 右区退出已删，问题 5）
  * - 退出命令：确认后 click → command('session.abortPlan')；失败 → E9 错误行就近呈现
- * - 右区四分支：ready 三键 / revising / degraded / 隐藏（仅左区）
+ * - 右区三分支：ready 三键（修订/执行/搁置）/ revising / degraded（稳定窗放行后）/ 隐藏（仅左区）
  * - 窄窗换行策略（F-R2-2）：右区 grow+flex-wrap 反重叠契约 + 左区退出 shrink-0
  *   （jsdom 无布局，class 断言守卫策略不被改回 flex-1 收缩形态）
  * - 场景 7（A7 降级 L1，DOM 存在性）：退出（isActive=false）后 PlanModeBar 不在 DOM；
  *   PanelContainer 无横幅/审批条挂载残留（findComponent 断言 PlanReviewBar 不在其树内）
  * - 挂载位：Panel 内 plan-mode-bar 行位于 .composer-band 之前（composer 正上方）
  *
- * mock 形态与挂载脚手架共享 helpers/plan-bar-mount（command spread actual 保真实
- * events 通道 + 帧工厂 + 挂起请求注入 + mount 编排单源）+ extension domain mock +
- * 真实 InternalEventBus）；状态驱动用 store.applyFrame（真实 WS 帧路径）。i18n 经
- * vitest-i18n-setup 全局 mock，t() 取 zh-CN 文案。
+ * mock 形态照抄 plan-review-bar.test.ts（command spread actual 保真实 events 通道 +
+ * extension domain mock + 真实 InternalEventBus）；状态驱动用 store.applyFrame（真实 WS
+ * 帧路径）。i18n 经 vitest-i18n-setup 全局 mock，t() 取 zh-CN 文案。
  * 退出确认层经 reka Popover Portal 渲染在 document.body（UpdateButton.test.ts 同款断言
  * 形态）：mount attachTo document.body + 用例末尾统一 unmount（afterEach），禁 innerHTML 强删。
+ *
+ * D13 合规清单索引（S13 降级兑现，11 项逐条落位——本文件 = 状态带/审批条/文案侧）：
+ * ①「评论草稿」标题去 uppercase → plan-docs-panel.test.ts「D13 合规断言（drawer 面板）」；
+ * ② 评论计数图标/角标非 warn 色 → 本文件；③ sourceSkill 只留 meta chip →
+ * plan-docs-panel.test.ts L2 tab 渲染；④ L2 tab 选中 bg-bg-elevated → plan-docs-panel.test.ts；
+ * ⑤ 三处小字去 opacity 叠乘 → 本文件（降级提示）+ plan-docs-panel.test.ts（pending/空态提示）；
+ * ⑥ 退出键 padding 收敛进按钮尺寸体系 → 本文件；⑦ 0 草稿不渲染评论计数键 → 本文件；
+ * ⑧ 文案去「左区」布局黑话 → 本文件静态断言；⑨ em dash 改写 → 本文件静态断言；
+ * ⑩ 空态图标 +「输入 /plan 开始规划」→ plan-docs-panel.test.ts；⑪ 浮层 Esc + 草稿区划选
+ * 不触发 → plan-docs-panel.test.ts。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/plan-mode-bar.test.ts
  */
@@ -37,20 +47,13 @@ import { computed, defineComponent, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { InternalEventBus } from '@taiji/core'
 import type { PlanStateView } from '@taiji/shared'
-import {
-  emitPlanReviewRequest as emitPlanReviewRequestOnBus,
-  flushAsync,
-  mountPlanBar,
-  planStateView as viewOf,
-} from '../helpers/plan-bar-mount'
-import { commandApiModule } from '../helpers/transport-command-mock'
 
 // ── mock ①：command（plan-store 首拉 RPC + 退出 session.abortPlan）——spread actual ──
-// （mock 体单源 helpers/transport-command-mock commandApiModule）
 const commandMock = vi.hoisted(() => vi.fn())
-vi.mock('@taiji/core/transport/api', async (importActual) =>
-  commandApiModule(await importActual<typeof import('@taiji/core/transport/api')>(), commandMock),
-)
+vi.mock('@taiji/core/transport/api', async (importActual) => {
+  const actual = await importActual<typeof import('@taiji/core/transport/api')>()
+  return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
+})
 
 // ── mock ②：extension domain（useExtensionUI 的 WS/RPC 面，照 plan-review-bar.test.ts）──
 // getPendingRequests 快照引用外提：retainOnly 快照差集剔除以该快照为权威 pending 集，
@@ -101,35 +104,64 @@ vi.mock('@/composables/useToast', () => ({
 
 import PlanModeBar from '@/components/panel/plan/PlanModeBar.vue'
 import Panel from '@/components/panel/Panel.vue'
+import zhPlan from '@/i18n/locales/zh-CN/plan'
+import enPlan from '@/i18n/locales/en-US/plan'
 import { usePlanStore } from '@/stores/plan-store'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { isPlanReviewRequest, __resetExtensionBusSubscriptionForTesting } from '@/composables/useExtensionUI'
 
 const SID = 'sess-mode-bar'
 
+function viewOf(overrides: Partial<PlanStateView> = {}): PlanStateView {
+  return {
+    isActive: true,
+    planFilePath: '/data/A/.tmp/plans/auth/plan.md',
+    requirement: '重构 auth 模块',
+    templateName: 'default',
+    state: 'planning', // 真形态基线：归一 View 恒携带 state（批次 3 条目 1 后缺失格落 idle）
+    ...overrides,
+  }
+}
+
+/** 挂起 planReview 审批请求（runtime event-adapter 广播形状，D5） */
+function emitPlanReviewRequest(requestId = 'pr-1'): void {
+  mockBus.emit({
+    kind: 'ui-request',
+    sessionId: SID,
+    request: {
+      requestId,
+      pluginId: '',
+      kind: 'select',
+      method: 'select',
+      title: '\x00TAIJI_PLAN_REVIEW:',
+      options: [JSON.stringify({ docs: [] })],
+      planReview: true,
+    },
+  } as never)
+}
+
 /** 挂载注册表：reka Popover Portal 内容挂在 document.body，用例末尾统一 unmount 清理
  *  （禁 document.body.innerHTML='' 强删——破坏 Vue 内部 vnode 引致 unmount 崩溃，UpdateButton 先例） */
 const mountedWrappers: VueWrapper[] = []
 
 async function mountBar(view: PlanStateView | null = viewOf()): Promise<VueWrapper> {
-  return mountPlanBar(PlanModeBar, {
-    commandMock,
-    sid: SID,
-    view,
-    attachTo: document.body,
-    onMount: (w) => mountedWrappers.push(w),
-  })
-}
-
-/** 挂起 planReview 审批请求（发射体单源 helpers/plan-bar-mount；本文件绑定 mockBus+SID） */
-function emitPlanReviewRequest(requestId = 'pr-1'): void {
-  emitPlanReviewRequestOnBus(mockBus, SID, requestId)
+  commandMock.mockResolvedValue({ sessionId: SID, planState: view })
+  const wrapper = mount(PlanModeBar, { props: { sessionId: SID }, attachTo: document.body })
+  mountedWrappers.push(wrapper)
+  await flushAsync()
+  return wrapper
 }
 
 /** 退出确认层（Popover Portal 在 document.body，wrapper.find 不可见）；null = 未打开 */
 function findExitConfirm(): DOMWrapper<Element> | null {
   const el = document.body.querySelector('[data-testid="plan-mode-bar-exit-confirm"]')
   return el ? new DOMWrapper(el) : null
+}
+
+async function flushAsync(): Promise<void> {
+  await nextTick()
+  await Promise.resolve()
+  await nextTick()
 }
 
 beforeEach(() => {
@@ -142,6 +174,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   while (mountedWrappers.length > 0) {
     const w = mountedWrappers.pop()
     w?.unmount()
@@ -185,8 +218,8 @@ describe('承接清单① 常驻挂载订阅（M1 硬约束）', () => {
         planReview: true,
       },
     ])
-    usePlanStore().applyFrame(SID, viewOf({ reviewState: 'awaiting' }))
-    commandMock.mockResolvedValue({ sessionId: SID, planState: viewOf({ reviewState: 'awaiting' }) })
+    usePlanStore().applyFrame(SID, viewOf({ state: 'reviewing' }))
+    commandMock.mockResolvedValue({ sessionId: SID, planState: viewOf({ state: 'reviewing' }) })
     await flushAsync()
 
     expect(wrapper.find('[data-testid="plan-mode-bar"]').exists()).toBe(true)
@@ -240,13 +273,30 @@ describe('左区渲染（常驻：模式名 + 三阶段 + 退出）', () => {
     expect(firstAfter.find('svg').exists()).toBe(true) // done = 对勾（同色系，去绿点）
   })
 
-  it('skills 默认不渲染；有技能时收进模式名 title（hover tooltip）', async () => {
+  it('技能 chips（D7①）：无技能不渲染；有技能内联 chips（至多 2 枚 + +n），点击 Popover 列全量', async () => {
     const wrapper = await mountBar(viewOf())
+    expect(wrapper.find('[data-testid="plan-mode-bar-skills"]').exists()).toBe(false)
+
+    usePlanStore().applyFrame(SID, viewOf({ skills: ['tech-design', 'dev-flow', 'test-quality'] }))
+    await nextTick()
+    const chips = wrapper.find('[data-testid="plan-mode-bar-skills"]')
+    expect(chips.exists()).toBe(true)
+    // 至多 2 枚 + +n（D7①：不扩噪音墙）
+    expect(chips.text()).toContain('tech-design')
+    expect(chips.text()).toContain('dev-flow')
+    expect(chips.text()).not.toContain('test-quality')
+    expect(chips.text()).toContain('+1')
+    // 技能名不藏 tooltip（取代 tooltip-only）
     expect(wrapper.find('[data-testid="plan-mode-bar-title"]').attributes('title')).toBeUndefined()
 
-    usePlanStore().applyFrame(SID, viewOf({ skills: ['tech-design', 'dev-flow'] }))
-    await nextTick()
-    expect(wrapper.find('[data-testid="plan-mode-bar-title"]').attributes('title')).toContain('tech-design · dev-flow')
+    // 点击 Popover 列全量技能名（Portal 在 document.body；reka jsdom 形态 = 即点即查，
+    // 退出确认同款窗口断言形态）
+    await chips.trigger('click')
+    const list = document.body.querySelector('[data-testid="plan-mode-bar-skills-list"]')
+    expect(list).not.toBeNull()
+    expect(list!.textContent).toContain('tech-design')
+    expect(list!.textContent).toContain('dev-flow')
+    expect(list!.textContent).toContain('test-quality')
   })
 
   it('退出按钮 click 只开确认层（§3.5 确认前置）：abortPlan 未发、确认层含标题与两键', async () => {
@@ -288,7 +338,7 @@ describe('左区渲染（常驻：模式名 + 三阶段 + 退出）', () => {
   })
 
   it('revising 警示优先：「agent 正在修订文档，退出将中止修订」（GUI 草稿在 revise 提交时已清，警示指 agent 侧）', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'revising' }))
+    const wrapper = await mountBar(viewOf({ state: 'revising' }))
     usePlanStore().addDraftComment({ quote: '引文', comment: '评语' }) // 残留草稿也不改判：revising 优先
     await flushAsync()
     await wrapper.find('[data-testid="plan-mode-bar-exit"]').trigger('click')
@@ -300,7 +350,7 @@ describe('左区渲染（常驻：模式名 + 三阶段 + 退出）', () => {
   })
 
   it('ready 且有评论草稿 →「N 条评论草稿将丢弃」警示（计数随 drafts）', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     usePlanStore().addDraftComment({ quote: '引文一', comment: '评语一' })
     usePlanStore().addDraftComment({ quote: '引文二', comment: '评语二' })
     await flushAsync()
@@ -314,7 +364,7 @@ describe('左区渲染（常驻：模式名 + 三阶段 + 退出）', () => {
   })
 
   it('确认退出即清草稿（§3.5）：drafts 2 条 → 确认后焦点分区草稿清空', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     usePlanStore().addDraftComment({ quote: '引文一', comment: '评语一' })
     usePlanStore().addDraftComment({ quote: '引文二', comment: '评语二' })
     await flushAsync()
@@ -329,7 +379,9 @@ describe('左区渲染（常驻：模式名 + 三阶段 + 退出）', () => {
   })
 
   it('degraded 态右区无退出按钮（问题 5 去重：退出唯一入口 = 左区常驻退出按钮）', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    vi.useFakeTimers()
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
+    await vi.advanceTimersByTimeAsync(2000) // degraded 稳定窗放行（D4）
     await flushAsync()
 
     expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(true)
@@ -367,35 +419,37 @@ describe('左区渲染（常驻：模式名 + 三阶段 + 退出）', () => {
   })
 })
 
-describe('右区四分支（PlanReviewBar 情境渲染，宿主行内）', () => {
-  it('ready：awaiting + 挂起请求 → 两键 + 忽略渲染在状态带行内', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+describe('右区三分支（PlanReviewBar 情境渲染，宿主行内）', () => {
+  it('ready：state=reviewing + 挂起请求 → 修订/执行/搁置三键渲染在状态带行内', async () => {
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     emitPlanReviewRequest('pr-1')
     await flushAsync()
 
     expect(wrapper.find('[data-testid="plan-mode-bar"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-review-revise"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="plan-review-ignore"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="plan-review-dismiss"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="plan-review-ignore"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="plan-review-explain"]').exists()).toBe(false)
   })
 
-  it('revising → 修订中状态行，三键不渲染', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'revising' }))
-    emitPlanReviewRequest('pr-1')
+  it('revising（无挂起）→ 修订中状态行，三键不渲染', async () => {
+    const wrapper = await mountBar(viewOf({ state: 'revising' }))
     await flushAsync()
 
     expect(wrapper.find('[data-testid="plan-review-revising"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(false)
   })
 
-  it('degraded：awaiting 无挂起 → 降级态行', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+  it('degraded：state=reviewing 无挂起 → 稳定窗放行后降级态行', async () => {
+    vi.useFakeTimers()
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
+    await vi.advanceTimersByTimeAsync(2000)
     await flushAsync()
     expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(true)
   })
 
-  it('隐藏：isActive 且无 reviewState 无挂起（阶段①/②）→ 仅左区，右区无 DOM', async () => {
+  it('隐藏：isActive 且无审阅态无挂起（阶段①/②）→ 仅左区，右区无 DOM', async () => {
     const wrapper = await mountBar(viewOf())
     await flushAsync()
     expect(wrapper.find('[data-testid="plan-mode-bar"]').exists()).toBe(true)
@@ -405,7 +459,7 @@ describe('右区四分支（PlanReviewBar 情境渲染，宿主行内）', () =>
 
 describe('窄窗换行策略（F-R2-2 反重叠回归守卫）', () => {
   it('右区 = grow + flex-wrap（basis max-content）：窄窗放不下整体换行而非收缩覆盖左区', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     emitPlanReviewRequest('pr-1')
     await flushAsync()
 
@@ -460,7 +514,10 @@ describe('场景 7（A7 降级 L1，DOM 存在性）', () => {
     })
     await flushAsync()
 
-    // PlanReviewBar 若被挂回 PanelContainer（回归），findComponent 命中 → 红
+    // PlanReviewBar 若被挂回 PanelContainer（回归），stub 替身渲染 → 三个断言全命中 → 红。
+    // 杀伤断言是 stub 自身 testid（findComponent 按名匹配不上名为 PlanReviewBarStub 的
+    // 替身，plan-review-bar 真身 testid 也不在替身上——两者单独恒 false，靠本条兜住）
+    expect(wrapper.find('[data-testid="plan-review-bar-stub"]').exists()).toBe(false)
     expect(wrapper.findComponent({ name: 'PlanReviewBar' }).exists()).toBe(false)
     expect(wrapper.find('[data-testid="plan-review-bar"]').exists()).toBe(false)
     wrapper.unmount()
@@ -496,5 +553,88 @@ describe('挂载位：Panel 内 composer 下方（.composer-band 之后）', () 
     expect(bandIdx).toBeGreaterThan(-1)
     expect(barIdx).toBeGreaterThan(bandIdx)
     wrapper.unmount()
+  })
+})
+
+/** locale 值递归展平（文案合规静态断言的输入面） */
+function flattenStrings(obj: unknown, out: string[] = []): string[] {
+  if (typeof obj === 'string') {
+    out.push(obj)
+    return out
+  }
+  if (obj && typeof obj === 'object') {
+    for (const v of Object.values(obj as Record<string, unknown>)) flattenStrings(v, out)
+  }
+  return out
+}
+
+describe('D13 视觉/文案合规断言（S13 降级兑现：状态带/审批条/文案侧②⑤⑥⑦⑧⑨）', () => {
+  it('D13⑥ 退出键 padding 收敛进按钮尺寸体系（size=dense 档，无任意值 padding）', async () => {
+    const wrapper = await mountBar()
+    const cls = wrapper.find('[data-testid="plan-mode-bar-exit"]').classes()
+    // 回归形态 = px-[7px] py-[3px] 自定义任意值 padding；现 = Button 尺寸档（dense：h-8 px-3）
+    expect(cls.some((c) => /^p[xy]?-\[/.test(c))).toBe(false)
+    expect(cls).toContain('px-3')
+    expect(cls).toContain('h-8')
+  })
+
+  it('D13⑦ 0 草稿不渲染评论计数键（常态归零）；有草稿才出现且计数正确', async () => {
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
+    emitPlanReviewRequest('pr-1')
+    await flushAsync()
+    expect(wrapper.find('[data-testid="plan-review-summary"]').exists()).toBe(false)
+
+    usePlanStore().addDraftComment({ quote: '引文', comment: '评语' })
+    await flushAsync()
+    const summary = wrapper.find('[data-testid="plan-review-summary"]')
+    expect(summary.exists()).toBe(true)
+    expect(summary.text()).toContain('1 条评论')
+  })
+
+  it('D13② 评论计数图标/角标非 warn 色（图标 accent / 角标 neutral，warn 回归异常语义）', async () => {
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
+    emitPlanReviewRequest('pr-1')
+    usePlanStore().addDraftComment({ quote: '引文', comment: '评语' })
+    await flushAsync()
+
+    const icon = wrapper.find('[data-testid="plan-review-summary"] svg')
+    expect(icon.exists()).toBe(true)
+    expect(icon.classes()).not.toContain('text-warn')
+    expect(icon.classes()).toContain('text-accent')
+
+    const badge = wrapper.find('[data-testid="plan-review-revise"] span')
+    expect(badge.exists()).toBe(true)
+    expect(badge.classes()).not.toContain('text-warn')
+    expect(badge.classes()).not.toContain('bg-warn-soft')
+    expect(badge.classes()).toContain('text-neutral-mid')
+  })
+
+  it('D13⑤ 降级文案区无 opacity 叠乘（text-2xs × dim 已压线，不再乘 0.7）', async () => {
+    vi.useFakeTimers()
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushAsync()
+    const reason = wrapper.find('[data-testid="plan-review-degraded-reason"]')
+    expect(reason.exists()).toBe(true)
+    expect(reason.classes().some((c) => c.startsWith('opacity-'))).toBe(false)
+    expect(wrapper.find('[data-testid="plan-review-degraded"]').classes().some((c) => c.startsWith('opacity-'))).toBe(false)
+  })
+
+  it('D13⑧⑨ 文案合规（静态）：无布局黑话「左区」/left-zone；plan 域文案无 em dash；zh 无键盘标点', () => {
+    const zh = flattenStrings(zhPlan)
+    const en = flattenStrings(enPlan)
+    expect(zh.length).toBeGreaterThan(0)
+    expect(en.length).toBeGreaterThan(0)
+    for (const s of [...zh, ...en]) {
+      // D13⑧：用户可见文案不暴露布局黑话（改「左侧的『退出』」类指引）
+      expect(s).not.toContain('左区')
+      expect(s).not.toContain('left-zone')
+      // D13⑨：em dash 全部改写（en 实测 5 处字符串含 ignoreError，设计计 4 处）
+      expect(s).not.toContain('—')
+    }
+    // 中文文案键盘标点（半角 ,;:!?()）清零：中文语境用全角标点（D13 规则族）
+    for (const s of zh) {
+      expect(s).not.toMatch(/[(),;:!?]/)
+    }
   })
 })

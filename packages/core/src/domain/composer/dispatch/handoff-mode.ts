@@ -9,13 +9,12 @@
  * - handoffBoxClass / handoffPlaceholder：handoff 模式派生的 class 与 placeholder 文案
  * - handleHandoffEsc：Esc 退出（清空输入 + exitHandoffMode），返回是否已消费
  * - handleHandoffSend：handoff 模式发送（调 handoff(srcId, text) + 退出），返回是否已消费
- * - handoffModeRef：{ value: boolean } 包装对象，给 defineExpose 用（避免 Vue 解包顶层 ref）
  *
  * 与 fork 模式互斥：进 handoff 前退出 fork（deps.exitForkMode）；fork 模式自身进 handoff 时也对称退出。
  *
  * [D8 泛化] fork 与 handoff 曾约 75% 逐字镜像（设计 §2 例 5）。行为骨架已收敛到
  * createStagingMode（./staging-mode），本模块 = handoff 配置对象 + 薄包装：公开 API
- * （返回面 9 项）与 HandoffDeps 注入契约保持不变，消费方零改动。handoff 差异全部经
+ * （返回面 8 项）与 HandoffDeps 注入契约保持不变，消费方零改动。handoff 差异全部经
  * 配置表达（P2 清单见 staging-mode.ts 头注）：
  * - enterGuard：isSessionActive 入口拦截（源 session streaming 中 handoff 必然失败，toast 而非英文 RPC 错）
  * - beforeEnter：互斥退出 fork 模式（forkSource 残留指向错误 session）
@@ -45,8 +44,6 @@ interface HandoffSourceShape {
 /** useComposerHandoffMode 返回类型（从函数内联类型提取为命名 interface，便于复用 + 阅读） */
 export interface ComposerHandoffModeReturn {
   handoffMode: Ref<boolean>
-  /** { value: boolean } 包装对象，给 defineExpose 用（不被 Vue 解包） */
-  handoffModeRef: { readonly value: boolean }
   enterHandoffMode: (srcSessionId: string) => void
   exitHandoffMode: () => void
   /** handoff 模式 composer-box class（accent 边 + glow + accent-soft 底）；非 handoff 模式返回空串 */
@@ -180,7 +177,6 @@ export function useComposerHandoffMode(
 
   return {
     handoffMode: staging.mode,
-    handoffModeRef: staging.modeRef,
     enterHandoffMode: (srcSessionId) => staging.enter({ srcSessionId }),
     exitHandoffMode: staging.exit,
     handoffBoxClass: staging.boxClass,

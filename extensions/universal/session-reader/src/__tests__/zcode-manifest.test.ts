@@ -65,7 +65,10 @@ function recordLine(saId: string, sessionRef: Record<string, string>): string {
     customType: 'subagent-record',
     id: `e-${saId}`,
     parentId: null,
-    data: { v: 1, id: saId, engine: 'zcode', engineHandle: { sessionRef, poolKey: 'shared' } },
+    data: {
+      v: 2, kind: 'settled', id: saId, status: 'idle', stopReason: 'completed', endedAt: 2,
+      turns: 1, totalTokens: 10, engine: 'zcode', engineHandle: { sessionRef, poolKey: 'shared' },
+    },
   })
 }
 

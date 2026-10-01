@@ -13,7 +13,8 @@
  * - in-flight 去重：模块级 createInflightDedup 表（D9 共享原语收编，meta 携带发起时刻
  *   帧序号），多实例 await 同一 Promise 后各写各分区；resolve 即清条目（下次切入重拉）；
  *   组件 remount 的重复拉取接受（幂等查询）；
- * - cleanup：registerSessionCleanup 挂进 useSidebar.deleteSession 清理编排；
+ * - cleanup：分区删除由 useSessionScopedState 工厂自动注册进 useSidebar.deleteSession
+ *   清理编排（含 deletedSids 僵尸写回拦截，D-B2-1）；
  * - G4 dev 漂移检测器：TAIJI_AGENT_DEBUG=1 时恢复腿 resolve 后对账（口径见 applyReply）。
  *
  * 分区缓存的角色 = RPC 往返期的显示初值 + RPC 失败时的兜底显示（防闪横线），
@@ -22,8 +23,8 @@
  * 消费方（Wave 3）：ContextCapacityPopover 改 `const { current } = useContextUsage(...)`
  * 纯读。必须在组件 setup 同步调用（内部 useSessionEvents 依赖 getCurrentInstance 守卫）。
  */
-import { computed, onScopeDispose, reactive, watch, type ComputedRef, type Ref } from 'vue'
-import { registerSessionCleanup, useSessionScopedState } from '@/composables/useSessionScopedState'
+import { computed, reactive, watch, type ComputedRef, type Ref } from 'vue'
+import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import { useSessionEvents } from '@/composables/features/chat/useSessionEvents'
 import { createInflightDedup } from '@taiji/core/foundation/create-inflight-dedup'
 import { createFrameBookkeeping } from '@taiji/core/foundation/create-frame-bookkeeping'
@@ -98,19 +99,16 @@ export function useContextUsage(sessionIdRef: Ref<string | null | undefined>): U
   )
 
   /**
-   * 帧写入仲裁簿记（recency 序号表 + suppressed 抑制表）：共享原语单点
-   * createFrameBookkeeping（与 useGenStats 同构收敛），行为语义见原语模块头注——
-   * 序号表 session cleanup 不清（清零会假性「已覆盖」误跳合法写入）；抑制表于
-   * deleteSession 后挡僵尸写回（updateFor 会重建分区，形成已销毁 session 的泄漏条目）、
-   * 重新进入视图解除。
+   * 帧写入仲裁簿记（recency 序号表）：共享原语单点 createFrameBookkeeping
+   * （与 useGenStats 同构收敛），行为语义见原语模块头注——序号表 session cleanup
+   * 不清（清零会假性「已覆盖」误跳合法写入）。已删分区的僵尸写回拦截由工厂
+   * deletedSids 承担（D-B2-1），本 composable 不自养抑制簿记。
    */
   const bookkeeping = createFrameBookkeeping()
 
   // ── 订阅（D2）：只订 context.update；handler 用第二参数 sid（消息所属 session）写分区 ──
   const onMessage = useSessionEvents(sessionIdRef)
   onMessage('context.update', (msg, sid) => {
-    // 已销毁 session 的迟到帧：静默丢弃（分区已清理，写回即僵尸条目）
-    if (bookkeeping.isSuppressed(sid)) return
     const { inputTokens, contextLimit, usagePercent } = msg.payload
     // D4 0 帧哨兵：三字段全 0 物理上不可能是真值（任何模型 contextWindow > 0），属协议
     // 演进期/regression 的 0 基线残帧——丢弃 + dev 冒泡。防御纵深：即使 D1 的 runtime
@@ -163,7 +161,6 @@ export function useContextUsage(sessionIdRef: Ref<string | null | undefined>): U
    * 漂移，非当前视图分区无 UI 意义且无读取 API。
    */
   function applyReply(sid: string, reply: ContextUsageReply, seqAtIssue: number): void {
-    if (bookkeeping.isSuppressed(sid)) return
     const coveredByNewerFrame = bookkeeping.hasNewerFrame(sid, seqAtIssue)
     if (coveredByNewerFrame) return
 
@@ -200,9 +197,6 @@ export function useContextUsage(sessionIdRef: Ref<string | null | undefined>): U
    * （多实例/同实例快速来回切），不重复发。
    */
   function recover(sid: string): void {
-    // 重新进入视图 = 新生命周期：解除该 sid 的清理抑制
-    bookkeeping.release(sid)
-
     // meta（seqAtIssue）仅在首次发起时捕获，复用条目的实例共享发起时刻值（理由见模块级
     // 表注释）。settle 即清与引用比对防误删由 factory 内建（settle 清理先于调用方 then，
     // err 分支接管不产生 unhandled rejection）。
@@ -230,16 +224,9 @@ export function useContextUsage(sessionIdRef: Ref<string | null | undefined>): U
     { immediate: true },
   )
 
-  // cleanup 编排（D2 第 3 条）：挂进 useSidebar.deleteSession 的 triggerSessionCleanups。
-  // 分区删除本已由 useSessionScopedState 自身注册（幂等，二次 Map.delete 是 no-op），
-  // 这里显式再挂以对齐设计，同时清理本 composable 自有簿记（抑制表登记 + 分区）。
-  const unregisterUsageCleanup = registerSessionCleanup((sid) => {
-    scoped.cleanup(sid)
-    bookkeeping.suppress(sid)
-  })
-  onScopeDispose(() => {
-    unregisterUsageCleanup()
-  })
+  // cleanup 编排（D2 第 3 条）：分区删除由 useSessionScopedState 自动注册进
+  // triggerSessionCleanups（含 deletedSids 僵尸写回拦截，D-B2-1），本 composable
+  // 无自有簿记需登记。
 
   return { current: scoped.current }
 }

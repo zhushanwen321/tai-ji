@@ -13,19 +13,23 @@ import {
 import type { ManifestRecord } from "../execution/persistence/manifest-store";
 // [W1 / U2a] bound 物化守卫断言的观察面（RecordStore 写点 → records/<id>.json 投影）。
 import { createRecord } from "../execution/persistence/execution-record";
-import { createRecordEventJournal, recordEventsPath } from "../execution/persistence/record-events";
-import type { RecordJournalEvent } from "../execution/persistence/record-events";
+import { createRecordEventStream, recordEventsPath } from "../execution/persistence/record-events";
+import type { RecordEvent } from "../execution/persistence/record-events";
 import { RecordStore } from "../execution/persistence/record-store";
-import type { ExecutionRecord } from "../execution/assembly/types";
+import type { ExecutionRecord } from "../execution/domain/record-model.ts";
 
 // [C10] 磁盘满测试需要可控的 fs.promises.rename（拖 ENOSPC/EACCES）。
 // hoisted flag + vi.mock 透传：默认 renameErrorRef.current=null 走真实 rename，
 // 磁盘满 it 里置入 Error 让 rename 拖出（拖一次后自动重置），其它 it 不受影响。
-const { renameErrorRef, dirSyncErrorPathRef } = vi.hoisted(() => ({
+const { renameErrorRef, dirSyncErrorPathRef, loggerMock } = vi.hoisted(() => ({
   renameErrorRef: { current: null as NodeJS.ErrnoException | null },
   // T-fsync：设置为目标 dir 路径后，open(dir, "r") 返回的 handle.sync() 会抛错
   dirSyncErrorPathRef: { current: null as string | null },
+  // 读面可诊断性断言：manifest-store 的 warn 通道（JSON 损坏留证；ENOENT 静默）。
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
+
+vi.mock("../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof fsPromises>();
@@ -382,13 +386,13 @@ describe("ManifestStore", () => {
 
 // ── [W1 / U2a] bound 物化守卫段专属 helper（v2* 前缀防重名）────────
 
-function v2ReadEventLines(recordsDir: string, id: string): RecordJournalEvent[] {
+function v2ReadEventLines(recordsDir: string, id: string): RecordEvent[] {
   const content = fs.readFileSync(recordEventsPath(recordsDir, id), "utf8");
-  const out: RecordJournalEvent[] = [];
+  const out: RecordEvent[] = [];
   for (const line of content.split("\n")) {
     const trimmed = line.trim();
     if (trimmed.length === 0) continue;
-    out.push(JSON.parse(trimmed) as RecordJournalEvent);
+    out.push(JSON.parse(trimmed) as RecordEvent);
   }
   return out;
 }
@@ -542,6 +546,49 @@ describe("record 域 manifest 写面自由函数（W1/U2a/D2）", () => {
       const blocker = path.join(dir, "file-blocker");
       fs.writeFileSync(blocker, "occupied");
       await expect(readRunTerminalManifest(blocker, "wf-1")).resolves.toBeNull();
+    });
+  });
+
+  describe("读面损坏 JSON 的可诊断性（损坏 warn / ENOENT 静默）", () => {
+    it("readManifest：ENOENT → null 且零 warn（合法缺省静默）", async () => {
+      const store = new ManifestStore(dir);
+      loggerMock.warn.mockClear();
+      await expect(store.readManifest("missing")).resolves.toBeNull();
+      expect(loggerMock.warn).not.toHaveBeenCalled();
+    });
+
+    it("readManifest：JSON 损坏 → null + warn（含文件路径与「视为不存在、等待重建」）", async () => {
+      const store = new ManifestStore(dir);
+      const filePath = path.join(dir, "torn.json");
+      fs.writeFileSync(filePath, "{ torn", "utf8");
+      loggerMock.warn.mockClear();
+
+      await expect(store.readManifest("torn")).resolves.toBeNull();
+
+      expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+      const [message] = loggerMock.warn.mock.calls[0] as [string];
+      expect(message).toContain("readManifest: corrupted JSON, treated as absent");
+      expect(message).toContain("awaits rebuild");
+      expect(message).toContain(filePath);
+    });
+
+    it("readRunTerminalManifest：JSON 损坏 → null + warn（含文件路径）", async () => {
+      const filePath = path.join(dir, "wf-corrupt.json");
+      fs.writeFileSync(filePath, "{ torn", "utf8");
+      loggerMock.warn.mockClear();
+
+      await expect(readRunTerminalManifest(dir, "wf-corrupt")).resolves.toBeNull();
+
+      expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+      const [message] = loggerMock.warn.mock.calls[0] as [string];
+      expect(message).toContain("readRunTerminalManifest: corrupted JSON, treated as absent");
+      expect(message).toContain(filePath);
+    });
+
+    it("readRunTerminalManifest：ENOENT → null 且零 warn（未终局/已清理静默）", async () => {
+      loggerMock.warn.mockClear();
+      await expect(readRunTerminalManifest(dir, "wf-absent")).resolves.toBeNull();
+      expect(loggerMock.warn).not.toHaveBeenCalled();
     });
   });
 });

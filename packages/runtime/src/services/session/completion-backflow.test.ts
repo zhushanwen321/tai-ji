@@ -271,7 +271,12 @@ describe('U6_SINGLETON_REUSE 迁移：单例 delivery handle 上 envelope meta n
     })
 
     const handle = registry.getOrCreateDelivery(CHILD)
-    await handle.sendChecked({ payload: { kind: 'text', content: 'one' }, meta: { notifyId: NID2, parentSid: PARENT } })
+    // receiptAnchor 'acceptance' 申报（V2 D1 申报制义务）：缺省 'marker' 条目受理后挂
+    // in-flight 等回执，mock 场景无确认路径 → onSettled('delivered') 永不触发
+    await handle.sendChecked(
+      { payload: { kind: 'text', content: 'one' }, meta: { notifyId: NID2, parentSid: PARENT } },
+      { receiptAnchor: 'acceptance' },
+    )
     expect(ledger.getClaim(PARENT, NID2)?.state).toBe('injected') // 单例 handle 上 per-message 回执各自锚定
     expect(ledger.getClaim(PARENT, NID)?.state).toBe('injected') // 既有记录不被串改
     expect(client.prompt).toHaveBeenCalledTimes(1)

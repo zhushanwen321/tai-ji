@@ -17,7 +17,7 @@ import * as fs from "node:fs";
 
 import { getLogger } from "../../core/logger.ts";
 
-import type { AliveMarker } from "../assembly/types.ts";
+import type { AliveMarker } from "../domain/record-types.ts";
 
 const logger = getLogger("subagents");
 

@@ -40,6 +40,7 @@ import type { RunSpec } from "@zhushanwen/subagent-core/orchestration/models/run
 import { mkCtx, mkPi } from "@zhushanwen/subagent-core/orchestration/__tests__/test-mocks.ts";
 import type { InFlightReporter } from "../host/inflight-reporter.ts";
 import type { SessionLifecycleDeps, SessionLifecycleResult } from "../session-lifecycle.ts";
+import { GLOBAL_SLOT_KEYS } from "@zhushanwen/subagent-core";
 
 // 本包 vitest alias 把 @earendil-works/pi-coding-agent 指向 mocks/pi-coding-agent.ts
 //（getAgentDir 硬编码 /home/user/.pi/agent）。handler 级用例走真 JsonlRunStore 写盘，
@@ -56,8 +57,9 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 
 // ── 槽 key（Symbol.for 同 key 即同一 symbol——与被测实现登记的 key 一致） ─────────
 
-const WORKFLOW_DOMAIN_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.workflow-domain-state");
-const DIALOG_QUEUE_KEY = Symbol.for("@zhushanwen/pi-subagents.dialogQueue");
+// [§2.6] 槽键单源：与生产侧同取 core 的槽键常量，改键不再需要手工同步测试
+const WORKFLOW_DOMAIN_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.workflowDomainState);
+const DIALOG_QUEUE_KEY = Symbol.for(GLOBAL_SLOT_KEYS.dialogQueue);
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -96,7 +98,7 @@ function makeRun(
 function resetSlots(): void {
   Reflect.deleteProperty(globalThis, WORKFLOW_DOMAIN_SLOT_KEY);
   Reflect.deleteProperty(globalThis, DIALOG_QUEUE_KEY);
-  for (const key of ["@zhushanwen/pi-subagents.service", "@zhushanwen/pi-subagents.model-service"]) {
+  for (const key of [GLOBAL_SLOT_KEYS.service, GLOBAL_SLOT_KEYS.modelService]) {
     const slot = Reflect.get(globalThis, Symbol.for(key)) as { current: unknown } | undefined;
     if (slot) slot.current = null;
   }

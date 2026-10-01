@@ -33,7 +33,8 @@
   },
   "dependencies": {
     "@zhushanwen/extension-protocol": "workspace:*",
-    "@zhushanwen/pi-extension-logger": "workspace:*"
+    "@zhushanwen/pi-extension-logger": "workspace:*",
+    "@zhushanwen/pi-session-path": "workspace:*"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-tui": {

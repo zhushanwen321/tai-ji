@@ -10,7 +10,7 @@
  * 测试框架：vitest（从 vitest 导入），运行：npx vitest run，禁止 node:test。
  */
 import { describe, it, expect, vi } from 'vitest'
-import { applyEntryEndTimes, mapSessionEntries } from '../session-entry-mapper.js'
+import { applyEntryEndTimes, computeActivePathEntries, mapSessionEntries } from '../session-entry-mapper.js'
 import type { Message } from '@taiji/shared'
 import type {
   PiSessionEntry,
@@ -337,5 +337,130 @@ describe('applyEntryEndTimes assistant 产出结束时刻回填', () => {
     } finally {
       warnSpy.mockRestore()
     }
+  })
+})
+
+// ── 活跃路径裁剪（message-revoke U6a）：computeActivePathEntries + mapSessionEntries leafId ──
+
+describe('computeActivePathEntries（活跃路径裁剪纯函数，message-revoke U6a）', () => {
+  /**
+   * 有分支 fixture（真实 pi 撤回形态，单根链式树）：
+   * r(root) → u1 → a1 → [旧分支 m1(被撤消息) → a2(其回复)] / [label(撤回锚，parent=a1) → u2 → a3]
+   * leafId = a3（文件尾）；被撤子树 {m1, a2} 按文件序在 label 之前但不在活跃路径上。
+   */
+  function branchedEntries(): PiSessionEntry[] {
+    const withParent = (e: PiSessionEntry, parentId: string | null): PiSessionEntry => ({ ...e, parentId })
+    return [
+      withParent(msgEntry('r', 'user', 'root'), null),
+      withParent(msgEntry('u1', 'user', '第一句'), 'r'),
+      withParent(msgEntry('a1', 'assistant', '回复一'), 'u1'),
+      // 旧分支（被撤）：撤回 m1 → 叶子回退到其父 a1
+      withParent(msgEntry('m1', 'user', '发错的'), 'a1'),
+      withParent(msgEntry('a2', 'assistant', '对发错的回复'), 'm1'),
+      // label entry（撤回持久化锚，parent = 回退后叶子 a1）+ 新分支
+      withParent({ type: 'label', id: 'lbl', timestamp: '2026-01-01T00:00:00Z', label: 'taiji:revoked', targetId: 'm1' } as PiSessionEntry, 'a1'),
+      withParent(msgEntry('u2', 'user', '撤回后新消息'), 'lbl'),
+      withParent(msgEntry('a3', 'assistant', '新回复'), 'u2'),
+    ]
+  }
+
+  it('有分支：leafId 沿 parentId 回溯，旧分支条目被滤，输出保持输入（文件）序', () => {
+    const out = computeActivePathEntries(branchedEntries(), 'a3')
+    expect(out.map((e) => e.id)).toEqual(['r', 'u1', 'a1', 'lbl', 'u2', 'a3'])
+    expect(out.some((e) => e.id === 'm1' || e.id === 'a2')).toBe(false)
+  })
+
+  it('无分支（链式单根）：leafId 缺省与传「文件尾 entry id」输出逐条一致（回归不变）', () => {
+    const linear = [
+      { ...msgEntry('e1', 'user'), parentId: null },
+      { ...msgEntry('e2', 'assistant'), parentId: 'e1' },
+      { ...msgEntry('e3', 'user'), parentId: 'e2' },
+    ]
+    const untouched = computeActivePathEntries(linear, undefined)
+    expect(untouched).toBe(linear) // 缺省 = 原数组原样返回（同一引用）
+    expect(computeActivePathEntries(linear, 'e3')).toEqual(linear) // 尾 id = 全链，逐条一致
+  })
+
+  it('leafId 指向中间节点：裁剪到该节点为止（leafId 驱动，非文件序）', () => {
+    const out = computeActivePathEntries(branchedEntries(), 'a1')
+    expect(out.map((e) => e.id)).toEqual(['r', 'u1', 'a1'])
+  })
+
+  it('leafId 不在 entries 的 id 集合 → warn 后原样返回（fail-safe，不清空历史）', () => {
+    const entries = branchedEntries()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const out = computeActivePathEntries(entries, 'no-such-leaf')
+      expect(out).toBe(entries)
+      expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('leafId no-such-leaf not found'))).toBe(true)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('多根病态树（合法 pi 文件恰一个根）→ warn 后原样返回（活跃路径未定义，退回裁剪前行为）', () => {
+    const multiRoot = [msgEntry('e1', 'user'), msgEntry('e2', 'user')] // 两条 parentId 均为 null
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const out = computeActivePathEntries(multiRoot, 'e2')
+      expect(out).toBe(multiRoot)
+      expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('without parent link'))).toBe(true)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('窗口切片（无根、首条 parent 在集合外）→ 回溯到窗口边界即止，窗口内非链条目被滤', () => {
+    // 尾读窗口形态：首条 parent 指向窗口外（rootLikeCount = 0，单根检查不触发）
+    const window = [
+      { ...msgEntry('x1', 'assistant', '窗口内旧分支残余'), parentId: 'outside' },
+      { ...msgEntry('y1', 'user', '活跃路径上的窗口首条'), parentId: 'outside' },
+      { ...msgEntry('y2', 'assistant'), parentId: 'y1' },
+    ]
+    // leafId = 窗口末条 y2：链 y2→y1→outside（边界止）；x1 不在链上被滤
+    expect(computeActivePathEntries(window, 'y2').map((e) => e.id)).toEqual(['y1', 'y2'])
+  })
+
+  it('环状 parentId（文件损坏）→ 已访问集防御不死循环', () => {
+    const cyclic = [
+      { ...msgEntry('c1', 'user'), parentId: 'c2' },
+      { ...msgEntry('c2', 'user'), parentId: 'c1' },
+    ]
+    const out = computeActivePathEntries(cyclic, 'c1') // 若无防御此处死循环挂死测试
+    expect(out.map((e) => e.id).sort()).toEqual(['c1', 'c2'])
+  })
+})
+
+describe('mapSessionEntries leafId 参数（活跃路径裁剪接入，message-revoke U6a）', () => {
+  function branchedEntriesWithCustom(): PiSessionEntry[] {
+    const withParent = (e: PiSessionEntry, parentId: string | null): PiSessionEntry => ({ ...e, parentId })
+    return [
+      withParent(msgEntry('r', 'user', 'root'), null),
+      withParent(msgEntry('m1', 'user', '发错的'), 'r'),
+      // 被撤消息的 custom entry（parent = m1，随旧分支同生死）
+      withParent({ type: 'custom', customType: 'taiji.client-msg-id', id: 'cus1', timestamp: '2026-01-01T00:00:00Z', data: { clientUuid: 'u-x', userEntryId: 'm1' } } as PiSessionEntry, 'm1'),
+      withParent({ type: 'label', id: 'lbl', timestamp: '2026-01-01T00:00:00Z', label: 'taiji:revoked', targetId: 'm1' } as PiSessionEntry, 'r'),
+      withParent(msgEntry('u2', 'user', '新消息'), 'lbl'),
+    ]
+  }
+
+  it('有分支：旧分支的 message 与 custom entry 均被滤（映射失效即正确语义）', () => {
+    const { messages, entryIds, customDataEntries } = mapSessionEntries(branchedEntriesWithCustom(), 'u2')
+    expect(entryIds).toEqual(['r', 'u2']) // m1 不在 messages；label 走 default 跳过
+    expect(messages.map((m) => (m as { role: string }).role)).toEqual(['user', 'user'])
+    expect(customDataEntries).toHaveLength(0) // 被撤消息的映射 entry 随分支滤除
+  })
+
+  it('无分支回归：leafId 缺省与传文件尾 entry id，三个产物数组逐条一致', () => {
+    const linear = [
+      { ...msgEntry('e1', 'user'), parentId: null },
+      { ...customMessageEntry('e2', 'subagent-bg-notify'), parentId: 'e1' },
+      { ...msgEntry('e3', 'assistant'), parentId: 'e2' },
+    ]
+    const withoutLeaf = mapSessionEntries(linear)
+    const withLeaf = mapSessionEntries(linear, 'e3')
+    expect(withLeaf.messages).toEqual(withoutLeaf.messages)
+    expect(withLeaf.entryIds).toEqual(withoutLeaf.entryIds)
+    expect(withLeaf.customDataEntries).toEqual(withoutLeaf.customDataEntries)
   })
 })

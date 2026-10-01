@@ -6,7 +6,8 @@
 // 接线层级：[模块内直调] —— SubagentService.executeAndAwait 出口调。
 
 import type { AgentResult as WorkflowAgentResult, AgentUsage as WorkflowAgentUsage, ToolCallEntry } from "../../orchestration/models/types.ts";
-import type { AgentResult as SubagentsAgentResult, AgentUsageTotal, ToolCall } from "./types.ts";
+import type { AgentResult as SubagentsAgentResult } from "../domain/record-model.ts";
+import type { AgentUsageTotal, ToolCall } from "./types.ts";
 
 /** safeStringify 的 JSON 截断长度（字符），防大对象拼进 toolCalls 挤爆 trace。 */
 const TOOL_ARGS_JSON_MAX_CHARS = 500;

@@ -13,6 +13,8 @@
  * [w6 chat-ui-and-shell T7] ui 包 MarkdownRenderer 经 deps.renderMarkdown inject 消费
  * （原 vi.mock('@/composables/logic/markdown') 失效），降级逻辑在 ui doRender catch 分支，
  * 测试改为 provide mock deps + 按组件名 stub MermaidRenderer/AmbiguousFilePopover。
+ * [D6 收敛] renderMarkdownIncremental 改必填后渲染走增量通道，renderMarkdown 不再被组件
+ * 调用——失败注入点同步挪到 renderMarkdownIncremental reject（同一 catch 降级分支）。
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/markdown-renderer-fallback.test.ts
  */
@@ -22,14 +24,15 @@ import { nextTick } from 'vue'
 import { MarkdownRenderer } from '@taiji/ui'
 import { mockChatProvide } from '@/__tests__/helpers/chat-view-deps'
 
-// deps.renderMarkdown stub：reject 模拟渲染失败（shiki/markdown-it 异常）
+// deps.renderMarkdownIncremental stub：reject 模拟渲染失败（shiki/markdown-it 异常）
 const mockRenderMarkdown = vi.fn()
+const mockRenderMarkdownIncremental = vi.fn()
 
 function mountMd(props: Record<string, unknown>) {
   return mount(MarkdownRenderer, {
     props: props as never,
     global: {
-      provide: mockChatProvide({ renderMarkdown: mockRenderMarkdown }),
+      provide: mockChatProvide({ renderMarkdown: mockRenderMarkdown, renderMarkdownIncremental: mockRenderMarkdownIncremental }),
       // AmbiguousFilePopover stub 返回注释 vnode（不占 .md-render 直接子节点，避免空内容计数断言受影响）
       stubs: {
         MermaidRenderer: true,
@@ -58,11 +61,12 @@ afterAll(() => {
 describe('MarkdownRenderer 渲染失败降级为纯文本（W1）', () => {
   beforeEach(() => {
     mockRenderMarkdown.mockReset()
+    mockRenderMarkdownIncremental.mockReset()
   })
 
   it('renderMarkdown reject 时 → 降级为纯文本 segment，内容可见', async () => {
     // 模拟渲染失败（shiki 加载异常等）
-    mockRenderMarkdown.mockRejectedValue(new Error('shiki load failed'))
+    mockRenderMarkdownIncremental.mockRejectedValue(new Error('shiki load failed'))
     const content = '这是一条普通消息内容'
 
     const wrapper = mountMd({ content })
@@ -76,7 +80,7 @@ describe('MarkdownRenderer 渲染失败降级为纯文本（W1）', () => {
   })
 
   it('降级 segment 是 text 类型（非 mermaid），走 v-html 安全渲染', async () => {
-    mockRenderMarkdown.mockRejectedValue(new Error('parse error'))
+    mockRenderMarkdownIncremental.mockRejectedValue(new Error('parse error'))
     const content = 'hello world'
 
     const wrapper = mountMd({ content })
@@ -91,7 +95,7 @@ describe('MarkdownRenderer 渲染失败降级为纯文本（W1）', () => {
   })
 
   it('降级时 HTML 特殊字符被转义（XSS 安全 + 可读）', async () => {
-    mockRenderMarkdown.mockRejectedValue(new Error('boom'))
+    mockRenderMarkdownIncremental.mockRejectedValue(new Error('boom'))
     // 内容含 HTML 特殊字符（模拟恶意 / 含代码尖括号的内容）
     const content = '<script>alert(1)</script> & <b>bold</b>'
 
@@ -110,7 +114,7 @@ describe('MarkdownRenderer 渲染失败降级为纯文本（W1）', () => {
 
   it('空内容不触发降级（空内容 segments=[] 是正常行为，非渲染失败）', async () => {
     // 空内容走早期 return（segments=[]），不应进入 catch 降级
-    mockRenderMarkdown.mockRejectedValue(new Error('should not reach'))
+    mockRenderMarkdownIncremental.mockRejectedValue(new Error('should not reach'))
     const wrapper = mountMd({ content: '' })
     await nextTick()
     await nextTick()

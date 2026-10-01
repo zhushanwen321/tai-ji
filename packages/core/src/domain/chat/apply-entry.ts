@@ -51,7 +51,6 @@ import type {
   Message,
   PiBranchSummaryEntry,
   PiCompactionEntry,
-  PiCustomEntry,
   PiCustomMessageEntry,
   PiEntry,
   PiEntryBase,
@@ -61,7 +60,7 @@ import type {
 } from '@taiji/shared'
 import { COMPLETE_NOTIFY_CUSTOM_TYPES } from '@taiji/shared'
 import { computeToolCallFill, convertMessageBody } from './apply-entry-convert'
-import { CLIENT_MSG_ID_TYPE, isLooseRecord, isPlainRecord, toMs } from './apply-entry-utils'
+import { isLooseRecord, toMs } from './apply-entry-utils'
 import type { PiToolResultBody } from './apply-entry-utils'
 
 // ── pi entry 类型（W21 下沉 shared/pi-entry.ts，此处 re-export 保持 core API 兼容）───────
@@ -102,7 +101,7 @@ export { normalizePiToolResult } from './apply-entry-utils'
 /**
  * reducer 的 state：chat 视图态切片（plan W20 步骤 1）。
  *
- * W20 重放侧从 entry 日志可推导的字段集：messages + clientUuidMap + orphanToolResults。
+ * W20 重放侧从 entry 日志可推导的字段集：messages + orphanToolResults。
  * queueDepth / subagents 等 runtime 实时态不可从 entry 重放推导（W21+ 实时喂入侧扩展），
  * 按「不加推测性功能」原则不预置空字段。
  *
@@ -112,8 +111,6 @@ export { normalizePiToolResult } from './apply-entry-utils'
 export interface ChatViewState {
   /** 重建出的消息列表（entry 日志的投影，按 apply 顺序追加） */
   messages: Message[]
-  /** userEntryId → clientUuid（"taiji.client-msg-id" custom entry 累积，badge 回填查表用） */
-  clientUuidMap: Map<string, string>
   /**
    * 窗口内无法配对的孤儿 toolResult。消费方在 runtime 侧增量合并阶段（session-service
    * getHistory since 增量路径：rebuildHistoryFromEntries 透出本字段 →
@@ -142,7 +139,6 @@ export interface ChatViewState {
 export function createInitialChatViewState(): ChatViewState {
   return {
     messages: [],
-    clientUuidMap: new Map(),
     orphanToolResults: [],
     deliveredToolResultIds: new Set(),
     lastAssistantWithToolCalls: -1,
@@ -164,7 +160,7 @@ function deriveBaseId(entry: PiEntryBase, messageCount: number): string {
 
 /**
  * ChatViewState 落账抽象：派生段构造 Message / ToolCall 后经此提交，读口供 handler 的
- * 窗口配对 / 幂等去重 / 冲突检测查询。两个实现差异只在落账方式（copy-on-write vs 原地），
+ * 窗口配对 / 幂等去重查询。两个实现差异只在落账方式（copy-on-write vs 原地），
  * 派生与 dispatch 完全共享——「同一 reducer 双路喂入」的构造性保证。
  *
  * 不导出（模块内部 seam）：state 结构经 collector 收口，外部无法绕过 fold 构造 ChatViewState。
@@ -176,8 +172,6 @@ interface ChatStateCollector {
   hasDeliveredToolResult(toolCallId: string): boolean
   /** 窗口局部配对锚点：最近一条带 toolCalls 的消息及其下标（无 → undefined） */
   peekLastAssistantWithToolCalls(): { index: number; message: Message } | undefined
-  /** clientUuidMap 冲突检测读口：现有映射值（无 → undefined） */
-  peekClientUuid(userEntryId: string): string | undefined
   /** 对话流追加一条投影消息 */
   appendMessage(msg: Message): void
   /** toolResult 回填：原位替换 host 消息（copy-on-write 下其余元素保留引用） */
@@ -186,8 +180,6 @@ interface ChatStateCollector {
   addOrphanToolResult(orphan: PiToolResultBody): void
   /** [R2-S1] 投递记账（无 toolCallId 的畸形 body 由 handler 侧守卫不调） */
   recordDeliveredToolResult(toolCallId: string): void
-  /** "taiji.client-msg-id" 映射累积（later-wins 由 handler 侧 warn 后覆写） */
-  putClientUuid(userEntryId: string, clientUuid: string): void
   /** 追加的 assistant 消息带非空 toolCalls 时更新配对锚点下标 */
   markLastAssistantWithToolCalls(index: number): void
   /** fold 终点：当前累积态（copy-on-write = 链末端引用；mutable = 内部容器组装） */
@@ -216,9 +208,6 @@ function createCopyOnWriteCollector(state: ChatViewState): ChatStateCollector {
       const host = last >= 0 ? cur.messages[last] : undefined
       return host !== undefined ? { index: last, message: host } : undefined
     },
-    peekClientUuid(userEntryId) {
-      return cur.clientUuidMap.get(userEntryId)
-    },
     appendMessage(msg) {
       commit({ messages: [...cur.messages, msg] })
     },
@@ -230,11 +219,6 @@ function createCopyOnWriteCollector(state: ChatViewState): ChatStateCollector {
     },
     recordDeliveredToolResult(toolCallId) {
       commit({ deliveredToolResultIds: new Set(cur.deliveredToolResultIds).add(toolCallId) })
-    },
-    putClientUuid(userEntryId, clientUuid) {
-      const clientUuidMap = new Map(cur.clientUuidMap)
-      clientUuidMap.set(userEntryId, clientUuid)
-      commit({ clientUuidMap })
     },
     markLastAssistantWithToolCalls(index) {
       commit({ lastAssistantWithToolCalls: index })
@@ -254,7 +238,6 @@ function createCopyOnWriteCollector(state: ChatViewState): ChatStateCollector {
  */
 function createMutableCollector(initial: ChatViewState): ChatStateCollector {
   const messages = [...initial.messages]
-  const clientUuidMap = new Map(initial.clientUuidMap)
   const orphanToolResults = [...initial.orphanToolResults]
   const deliveredToolResultIds = new Set(initial.deliveredToolResultIds)
   let lastAssistantWithToolCalls = initial.lastAssistantWithToolCalls
@@ -269,9 +252,6 @@ function createMutableCollector(initial: ChatViewState): ChatStateCollector {
       const host = lastAssistantWithToolCalls >= 0 ? messages[lastAssistantWithToolCalls] : undefined
       return host !== undefined ? { index: lastAssistantWithToolCalls, message: host } : undefined
     },
-    peekClientUuid(userEntryId) {
-      return clientUuidMap.get(userEntryId)
-    },
     appendMessage(msg) {
       messages.push(msg)
     },
@@ -284,16 +264,12 @@ function createMutableCollector(initial: ChatViewState): ChatStateCollector {
     recordDeliveredToolResult(toolCallId) {
       deliveredToolResultIds.add(toolCallId)
     },
-    putClientUuid(userEntryId, clientUuid) {
-      clientUuidMap.set(userEntryId, clientUuid)
-    },
     markLastAssistantWithToolCalls(index) {
       lastAssistantWithToolCalls = index
     },
     snapshot() {
       return {
         messages,
-        clientUuidMap,
         orphanToolResults,
         deliveredToolResultIds,
         lastAssistantWithToolCalls,
@@ -540,27 +516,6 @@ function commitUserAssistantMessage(
   }
 }
 
-/**
- * custom entry：纯数据 entry 不进对话流。taiji.client-msg-id 累积 clientUuidMap（badge
- * 回填查表）。data 形状不匹配（缺字段/类型错）→ 跳过（降级不崩溃）；冲突 later-wins
- * （warn 防御）。
- */
-function commitClientMsgIdEntry(c: ChatStateCollector, entry: PiCustomEntry): void {
-  if (entry.customType !== CLIENT_MSG_ID_TYPE) return
-  const data = entry.data
-  if (!isPlainRecord(data) || typeof data.clientUuid !== 'string' || typeof data.userEntryId !== 'string') {
-    return
-  }
-  const existing = c.peekClientUuid(data.userEntryId)
-  if (existing !== undefined && existing !== data.clientUuid) {
-    console.warn(
-      `[apply-entry] clientUuidMap conflict for userEntryId=${data.userEntryId}: ` +
-        `existing=${existing}, new=${data.clientUuid} (later wins)`,
-    )
-  }
-  c.putClientUuid(data.userEntryId, data.clientUuid)
-}
-
 // ── dispatch 骨架（entry → 派生段/commit 段分派，两条 fold 路径的唯一入口）────────────
 
 /**
@@ -634,9 +589,12 @@ function dispatchEntry(c: ChatStateCollector, entry: PiEntry): void {
     case 'custom_message':
       c.appendMessage(deriveCustomMessageEntryMessage(entry, deriveBaseId(entry, c.messageCount)))
       return
-    case 'custom':
-      commitClientMsgIdEntry(c, entry)
+    case 'custom': {
+      // 纯数据 entry（taiji.client-msg-id / plan-state 等扩展数据）：不进对话流，显式 no-op。
+      // badge 回填的 clientUuid 查表走 runtime 自建 map（entry-tree-builder），reducer 侧
+      // 死簿记已删（msg-pipeline-debloat D6-4）；规则 #9：有 case、不丢弃、不崩溃。
       return
+    }
     case 'label': {
       // 用户书签/标记：重放侧无对话流投影，显式 no-op（规则 #9：有 case、不丢弃、不崩溃）。
       return
@@ -655,8 +613,8 @@ function dispatchEntry(c: ChatStateCollector, entry: PiEntry): void {
  * 单条 pi entry → chat 视图态切片的纯函数投影（D5）。
  *
  * 对外契约不变——applyEntry 仍是唯一单条喂入入口，「live ≡ reload」两条链路共用本入口。
- * copy-on-write：输入 state / entry 不被 mutate；no-op entry（label / 未建模类型 / 幂等去重
- * 命中 / custom 形状不匹配）返回原 state 引用。
+ * copy-on-write：输入 state / entry 不被 mutate；no-op entry（custom / label / 未建模类型 /
+ * 幂等去重命中）返回原 state 引用。
  */
 export function applyEntry(state: ChatViewState, entry: PiEntry): ChatViewState {
   const collector = createCopyOnWriteCollector(state)

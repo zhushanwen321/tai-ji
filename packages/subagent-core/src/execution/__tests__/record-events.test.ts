@@ -26,21 +26,21 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
-  applyRecordJournalEvent,
-  createRecordEventJournal,
-  foldRecordJournalEvents,
-  INITIAL_RECORD_JOURNAL_FOLD_STATE,
-  isRecordJournalHeader,
+  applyRecordEvent,
+  createRecordEventStream,
+  foldRecordEvents,
+  INITIAL_RECORD_EVENT_FOLD_STATE,
+  isRecordEventHeader,
   parseRecordEventFileLine,
   parseRecordEventLine,
   RECORD_EVENT_TYPES,
   recordEventsPath,
   RECORD_EVENTS_SUFFIX,
-  RECORD_JOURNAL_HEADER_TYPE,
-  toRecordJournalHeader,
+  RECORD_EVENTS_HEADER_TYPE,
+  toRecordEventHeader,
   type RecordCreatedEvent,
-  type RecordJournalEvent,
-  type RecordJournalEventInput,
+  type RecordEvent,
+  type RecordEventInput,
   type RecordSettledEvent,
 } from "../persistence/record-events.ts";
 
@@ -108,31 +108,31 @@ describe("词表钉住（D3 映射表逐项对应——恰好 6 类）", () => {
   });
 
   it("头行 type 与事件词表命名空间不相交（头行不是事件——fold 不会误吞）", () => {
-    expect(RECORD_EVENT_TYPES).not.toContain(RECORD_JOURNAL_HEADER_TYPE);
+    expect(RECORD_EVENT_TYPES).not.toContain(RECORD_EVENTS_HEADER_TYPE);
   });
 });
 
 describe("首行头行形态（写侧契约：文件创建时恰一行）", () => {
-  it("头行序列化形态 = {\"type\":\"record-journal\",\"id\":...}", () => {
-    expect(JSON.stringify(toRecordJournalHeader("sa-1"))).toBe('{"type":"record-journal","id":"sa-1"}');
+  it("头行序列化形态 = {\"type\":\"record-events\",\"id\":...}", () => {
+    expect(JSON.stringify(toRecordEventHeader("sa-1"))).toBe('{"type":"record-events","id":"sa-1"}');
   });
 
-  it("isRecordJournalHeader 判定（id 非空字符串）", () => {
-    expect(isRecordJournalHeader({ type: "record-journal", id: "sa-1" })).toBe(true);
-    expect(isRecordJournalHeader({ type: "record-journal" })).toBe(false);
-    expect(isRecordJournalHeader({ type: "record-journal", id: "" })).toBe(false);
-    expect(isRecordJournalHeader({ type: "record-created", id: "sa-1" })).toBe(false);
-    expect(isRecordJournalHeader(null)).toBe(false);
+  it("isRecordEventHeader 判定（id 非空字符串）", () => {
+    expect(isRecordEventHeader({ type: "record-events", id: "sa-1" })).toBe(true);
+    expect(isRecordEventHeader({ type: "record-events" })).toBe(false);
+    expect(isRecordEventHeader({ type: "record-events", id: "" })).toBe(false);
+    expect(isRecordEventHeader({ type: "record-created", id: "sa-1" })).toBe(false);
+    expect(isRecordEventHeader(null)).toBe(false);
   });
 
   it("首写自动落头行 + 首事件（文件创建点）；续写不重复头行", async () => {
-    const journal = createRecordEventJournal(recordsDir);
+    const journal = createRecordEventStream(recordsDir);
     await journal.append("sa-1", createdInput());
     await journal.append("sa-1", settledInput());
     const content = fs.readFileSync(recordEventsPath(recordsDir, "sa-1"), "utf8");
     const lines = content.split("\n").filter((l) => l.trim().length > 0);
     expect(lines).toHaveLength(3);
-    expect(isRecordJournalHeader(JSON.parse(lines[0]!))).toBe(true);
+    expect(isRecordEventHeader(JSON.parse(lines[0]!))).toBe(true);
     expect(JSON.parse(lines[1]!).type).toBe("record-created");
     expect(JSON.parse(lines[2]!).type).toBe("record-settled");
   });
@@ -140,7 +140,7 @@ describe("首行头行形态（写侧契约：文件创建时恰一行）", () =
 
 describe("journal 读写原语（seq 单调分配 / scan 宽容解析）", () => {
   it("append 分配行级单调 seq（1 起严格递增）并返回完整事件", async () => {
-    const journal = createRecordEventJournal(recordsDir);
+    const journal = createRecordEventStream(recordsDir);
     const first = await journal.append("sa-1", createdInput());
     const second = await journal.append("sa-1", {
       type: "record-round-started",
@@ -154,13 +154,13 @@ describe("journal 读写原语（seq 单调分配 / scan 宽容解析）", () =>
   });
 
   it("跨 journal 实例续写：seq 从文件末水位 +1（重启后续写不回退）", async () => {
-    await createRecordEventJournal(recordsDir).append("sa-1", createdInput());
-    const second = await createRecordEventJournal(recordsDir).append("sa-1", settledInput());
+    await createRecordEventStream(recordsDir).append("sa-1", createdInput());
+    const second = await createRecordEventStream(recordsDir).append("sa-1", settledInput());
     expect(second.seq).toBe(2);
   });
 
   it("scan 返回写入序事件（头行不在其中）", async () => {
-    const journal = createRecordEventJournal(recordsDir);
+    const journal = createRecordEventStream(recordsDir);
     await journal.append("sa-1", createdInput());
     await journal.append("sa-1", settledInput());
     const events = await journal.scan("sa-1");
@@ -168,11 +168,11 @@ describe("journal 读写原语（seq 单调分配 / scan 宽容解析）", () =>
   });
 
   it("scan 对不存在文件返回空流（record 未落账 / 已清理）", async () => {
-    expect(await createRecordEventJournal(recordsDir).scan("sa-none")).toEqual([]);
+    expect(await createRecordEventStream(recordsDir).scan("sa-none")).toEqual([]);
   });
 
   it("scan 中部坏行宽容跳过（不完整 JSON 行）——事件流不因坏行截断", async () => {
-    const journal = createRecordEventJournal(recordsDir);
+    const journal = createRecordEventStream(recordsDir);
     await journal.append("sa-1", createdInput());
     await journal.append("sa-1", settledInput());
     // 手工注入坏行于两事件之间（模拟磁盘半写/外部编辑）
@@ -202,7 +202,7 @@ describe("行解析（parseRecordEventLine / parseRecordEventFileLine）", () =>
 
   it("文件行解析：空行与头行静默跳过（undefined 且非坏 JSON 形态）", () => {
     expect(parseRecordEventFileLine("")).toBeUndefined();
-    expect(parseRecordEventFileLine('{"type":"record-journal","id":"sa-1"}')).toBeUndefined();
+    expect(parseRecordEventFileLine('{"type":"record-events","id":"sa-1"}')).toBeUndefined();
     expect(parseRecordEventFileLine('{"type":"record-created","seq":1,"ts":1}')).toMatchObject({
       type: "record-created",
       seq: 1,
@@ -213,7 +213,7 @@ describe("行解析（parseRecordEventLine / parseRecordEventFileLine）", () =>
 
 describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
   /** 全生命周期样例序列（含 round 往返与 reopen 回边）。 */
-  function lifecycleEvents(): RecordJournalEvent[] {
+  function lifecycleEvents(): RecordEvent[] {
     return [
       { ...createdInput(), seq: 1 },
       {
@@ -226,7 +226,7 @@ describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
         epoch: 0,
       },
       { type: "record-round-started", seq: 3, ts: 1780000002000, round: 1, epoch: 0 },
-      { type: "record-round-idle", seq: 4, ts: 1780000050000, stopReason: "completed", turns: 1, totalTokens: 1000 },
+      { type: "record-round-idle", seq: 4, ts: 1780000050000, round: 1, stopReason: "completed", turns: 1, totalTokens: 1000 },
       { ...settledInput(), seq: 5 },
       { type: "record-reopened", seq: 6, ts: 1780000200000, epoch: 1, round: 0 },
       { type: "record-round-started", seq: 7, ts: 1780000201000, round: 1, epoch: 1 },
@@ -234,7 +234,7 @@ describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
   }
 
   it("全量 fold：身份/绑定/轮/epoch/水位逐字段落位", () => {
-    const state = foldRecordJournalEvents(lifecycleEvents());
+    const state = foldRecordEvents(lifecycleEvents());
     expect(state.identity?.id).toBe("sa-test-1");
     expect(state.bound?.engine).toBe("pi");
     expect(state.epoch).toBe(1);
@@ -245,65 +245,65 @@ describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
   });
 
   it("settled 非吸收：record-settled 落终态，reopened/round-started 清除（可续实体回边）", () => {
-    const throughSettle = foldRecordJournalEvents(lifecycleEvents().slice(0, 5));
+    const throughSettle = foldRecordEvents(lifecycleEvents().slice(0, 5));
     expect(throughSettle.settled?.stopReason).toBe("completed");
-    const afterReopen = foldRecordJournalEvents(lifecycleEvents().slice(0, 6));
+    const afterReopen = foldRecordEvents(lifecycleEvents().slice(0, 6));
     expect(afterReopen.settled).toBeUndefined();
     expect(afterReopen.epoch).toBe(1);
     expect(afterReopen.round).toBe(0);
   });
 
   it("fold 幂等：同一序列重放产出逐字段相等 state（验收①）", () => {
-    const first = foldRecordJournalEvents(lifecycleEvents());
-    const second = foldRecordJournalEvents(lifecycleEvents());
+    const first = foldRecordEvents(lifecycleEvents());
+    const second = foldRecordEvents(lifecycleEvents());
     expect(second).toEqual(first);
   });
 
   it("增量 fold = 全量 fold：分两段以中间 state 续 fold，结果等价", () => {
     const events = lifecycleEvents();
-    const midState = foldRecordJournalEvents(events.slice(0, 4));
-    const incremental = foldRecordJournalEvents(events.slice(4), midState);
-    expect(incremental).toEqual(foldRecordJournalEvents(events));
+    const midState = foldRecordEvents(events.slice(0, 4));
+    const incremental = foldRecordEvents(events.slice(4), midState);
+    expect(incremental).toEqual(foldRecordEvents(events));
   });
 
   it("seq 重放去重：同一序列两遍拼接（截断重读形态）不重复应用（onSkipped 出声）", () => {
     const events = lifecycleEvents();
     const skipped: Array<{ seq: number; why: string }> = [];
-    const state = foldRecordJournalEvents(
+    const state = foldRecordEvents(
       [...events, ...events],
-      INITIAL_RECORD_JOURNAL_FOLD_STATE,
+      INITIAL_RECORD_EVENT_FOLD_STATE,
       (event, why) => skipped.push({ seq: event.seq, why }),
     );
     // 重放段全部被 seq 守卫拦下，状态与单遍 fold 等价
-    expect(state).toEqual(foldRecordJournalEvents(events));
+    expect(state).toEqual(foldRecordEvents(events));
     expect(skipped).toHaveLength(events.length);
     expect(skipped.every((s) => s.why === "seq-regression")).toBe(true);
   });
 
   it("seq 回退边界：乱序行（seq ≤ 水位）跳过、不炸、不回滚状态", () => {
     const events = lifecycleEvents();
-    const regressed: RecordJournalEvent[] = [
+    const regressed: RecordEvent[] = [
       events[0]!,
       events[4]!,
       events[1]!, // 回退：seq 2 ≤ 水位 5 → 跳过
     ];
-    const state = foldRecordJournalEvents(regressed);
+    const state = foldRecordEvents(regressed);
     expect(state.lastSeq).toBe(5);
     expect(state.settled?.seq).toBe(5);
     expect(state.bound).toBeUndefined(); // 被跳过的回退行未应用
   });
 
-  it("applyRecordJournalEvent 单步纯函数：不可变更新（原 state 不被 mutate）", () => {
-    const base = INITIAL_RECORD_JOURNAL_FOLD_STATE;
-    const after = applyRecordJournalEvent(base, { ...createdInput(), seq: 1 });
+  it("applyRecordEvent 单步纯函数：不可变更新（原 state 不被 mutate）", () => {
+    const base = INITIAL_RECORD_EVENT_FOLD_STATE;
+    const after = applyRecordEvent(base, { ...createdInput(), seq: 1 });
     expect(after.identity?.id).toBe("sa-test-1");
     expect(base.identity).toBeUndefined();
     expect(base.lastSeq).toBe(0);
   });
 
   it("空序列 / 残文件（无 created 帧）宽容：identity 缺席不炸", () => {
-    expect(foldRecordJournalEvents([])).toEqual(INITIAL_RECORD_JOURNAL_FOLD_STATE);
-    const orphan = foldRecordJournalEvents([{ type: "record-round-idle", seq: 1, ts: 1, stopReason: "completed", turns: 1, totalTokens: 1 }]);
+    expect(foldRecordEvents([])).toEqual(INITIAL_RECORD_EVENT_FOLD_STATE);
+    const orphan = foldRecordEvents([{ type: "record-round-idle", seq: 1, ts: 1, round: 1, stopReason: "completed", turns: 1, totalTokens: 1 }]);
     expect(orphan.identity).toBeUndefined();
     expect(orphan.roundIdle?.turns).toBe(1);
   });
@@ -311,8 +311,8 @@ describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
 
 describe("journal 写读闭环（append → scan → fold）", () => {
   it("落盘事件经 scan 回读后 fold，与内存构造的事件 fold 等价", async () => {
-    const journal = createRecordEventJournal(recordsDir);
-    const appended: RecordJournalEvent[] = [];
+    const journal = createRecordEventStream(recordsDir);
+    const appended: RecordEvent[] = [];
     appended.push(await journal.append("sa-1", createdInput()));
     appended.push(
       await journal.append("sa-1", {
@@ -324,7 +324,7 @@ describe("journal 写读闭环（append → scan → fold）", () => {
     );
     appended.push(await journal.append("sa-1", settledInput()));
     const scanned = await journal.scan("sa-1");
-    expect(foldRecordJournalEvents(scanned)).toEqual(foldRecordJournalEvents(appended));
+    expect(foldRecordEvents(scanned)).toEqual(foldRecordEvents(appended));
   });
 
   it("scan 非头行起始的文件：头行缺席时事件照常解析（头行是写侧契约，读侧宽容）", async () => {
@@ -335,7 +335,7 @@ describe("journal 写读闭环（append → scan → fold）", () => {
       `${JSON.stringify({ ...createdInput({ id: "sa-2" }), seq: 1 })}\n`,
       "utf8",
     );
-    const events = await createRecordEventJournal(recordsDir).scan("sa-2");
+    const events = await createRecordEventStream(recordsDir).scan("sa-2");
     expect(events.map((e) => e.type)).toEqual(["record-created"]);
     expect(events[0]?.seq).toBe(1);
   });

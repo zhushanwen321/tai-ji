@@ -44,7 +44,7 @@ export function useSessionDerivations() {
   // 未访问 session 的终态（done/error/stopped）来自 runtime session_end 元数据。
   const session = useSessionStore()
   // RK3：subagent/workflow/extensionUI store 在 useSessionDerivations 外层闭包取（Pinia 单例引用稳定）。
-  // computed 体内实际调用 hasBackgroundWork/hasPendingBlockingOverlay，建立对各自 records Map 的响应式依赖。
+  // computed 体内实际调用 hasBackgroundWork/hasPendingBlockingOverlay（后者含 planReview 员，D12），建立对各自 records Map 的响应式依赖。
   // 别名 hasSessionBackgroundWork：与 derivedStatus computed 体内同名局部变量解耦（避免 shadow）。
   const { hasBackgroundWork: hasSessionBackgroundWork } = useBackgroundWork()
   const extensionUIStore = useExtensionUIStore()
@@ -69,13 +69,16 @@ export function useSessionDerivations() {
         // hasBackgroundWork：主 turn 已结束但有 background subagent/workflow 仍在跑 → working 态。
         // 必须在 computed 体内读（建立对 recordsBySession 的响应式依赖，records 变化自动重算）。
         const hasBackgroundWork = hasSessionBackgroundWork(id)
-        // hasFormOverlayPending：统一表单 overlay 请求 pending → waiting 态。
-        // 判定键 = form 键，权威口径见 stores/extension-ui.ts hasPendingBlockingOverlay
-        // 注释：新 form 帧原生携带、legacy askUser / scheduleCreate 帧经归一层附加后
-        // 统一命中（T3 + schedule-create U6 随判定键收敛自动联动）。
+        // hasBlockingOverlayPending：阻塞型交互 overlay 请求 pending → waiting 态。
+        // 判定键 = form 键 + planReview 键（D12 拓宽：plan 审批挂起同计入 waiting，多 session
+        // 下后台 session 的审批挂起侧栏可见），权威口径见 stores/extension-ui.ts
+        // hasPendingBlockingOverlay 注释：新 form 帧原生携带、legacy askUser / scheduleCreate
+        // 帧经归一层附加后统一命中（T3 + schedule-create U6 随判定键收敛自动联动）；planReview
+        // 键由 runtime event-adapter PLAN_REVIEW_MARKER 分支附加。
         // 非响应式 getter，但 computed 通过其引用的 requestsBySession 响应式 ref 建立依赖。
-        const hasFormOverlayPending = extensionUIStore.hasPendingBlockingOverlay(id)
-        return deriveStatus(id, chat, chat.isActive(id), chat.isCompacting(id), hasBackgroundWork, meta, hasFormOverlayPending)
+        //（deriveStatus 形参名 hasFormOverlayPending 为历史名，实际已含 planReview，见 core 注释）
+        const hasBlockingOverlayPending = extensionUIStore.hasPendingBlockingOverlay(id)
+        return deriveStatus(id, chat, chat.isActive(id), chat.isCompacting(id), hasBackgroundWork, meta, hasBlockingOverlayPending)
       })
       statusCache.set(id, c)
     }

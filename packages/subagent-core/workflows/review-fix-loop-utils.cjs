@@ -191,7 +191,7 @@ function buildScopedRecheckPrompt({ header, round, max, roundDir, reportFile, mo
 }
 
 /**
- * 5.10 三层防御第 1 层：上游 LLM 产出用不可信数据标签包裹，内容中闭合标签转义。
+ * 5.10 三层防御第 1 层：上游 LLM 产出用不可信数据标签包裹，内容中若出现包裹的结束标签则转义（防止提前终止包裹）。
  * 所有嵌入 prompt 的上游产出唯一入口，禁止手写拼接（漏转义 = 标签逃逸 = 围栏失效）。
  */
 function wrapUntrusted(content, tag) {
@@ -322,7 +322,7 @@ function normIssueId(s) {
  *
  * 首查必须 Object.hasOwn（上收 zsw 侧同款修复）：truthy 查表（issues[issueId]）会让
  * 原型链键（"__proto__"/"toString"/"constructor"）误命中——ID 来自 LLM 产出，攻击面
- * 真实存在；误命中会把非 own 键当台账键返回，后续 issues[key].severity 读取原型
+ * 真实存在；误命中会把非 own 键当清单键返回，后续 issues[key].severity 读取原型
  * 成员（undefined 或函数）污染 fix 对账。归一化回退段的 Object.keys 只枚举 own 键，
  * 本就无此问题。
  */
@@ -402,11 +402,11 @@ function collectMustFixNotFixedViolations(result, mustFixIds) {
 
 /**
  * disputed 申述违规收集（2026-09-23 disputed 通道取代 rejected 一票否决）：申述是
- * claim 不是裁决——格式非法（未命中台账 / 反证空洞）仍违规（敷衍申诉不可放行），
+ * claim 不是裁决——格式非法（未命中问题清单 / 反证空洞）仍违规（敷衍申诉不可放行），
  * 格式合法则豁免 must-fix 记账、随终态转人类裁决。反证门槛 = evidence ≥20 字符
  *（对齐 ES2 deferred 理由下限）且含路径 hint（"/" 或 ":"）——防「我觉得不是问题」式
  * 空洞申诉。idMap 翻译同 deferred 侧（findIssueKey 查表输入）；trackedIssues 缺省
- *（无台账降级路径）跳过命中检查，仅查反证。
+ *（无问题清单降级路径）跳过命中检查，仅查反证。
  */
 function collectDisputedViolations(result, trackedIssues, idMap) {
   const violations = [];
@@ -431,12 +431,12 @@ function collectDisputedViolations(result, trackedIssues, idMap) {
  * ES3 硬校验（5.3-P1 红线）：(1) deferred 只允许 minor/trivial；(2) must-fix 必须全进
  * fixes[]/disputed[]——mustFixIds 中未修复且未申述的 ID 判 violation（漏修）。mustFixIds
  * 为 null/undefined 时仅做 (1)（无 aggregator 数据的降级路径，wave 2 限制）。
- * (3) disputed 申述格式校验（未命中台账/反证空洞即违规）。
+ * (3) disputed 申述格式校验（未命中问题清单/反证空洞即违规）。
  * trackedIssues（state.issues）可选：deferred/disputed 的交叉核对——
  * 追踪条目以追踪 severity 为准（must-fix 追踪皆 critical/major，defer 即违规），
  * 仅追踪无此 ID（S-x minor）时采信 fix agent 自报。
- * idMap（可选，本轮表格号→台账键）：仅在 deferred/disputed 交叉核对「查台账」的输入上
- * 翻译——L2/L3 改键后 fixer 申报的表格号需翻译才能命中台账。mustFixIds 与 fixes[].issue_id
+ * idMap（可选，本轮表格号→清单键）：仅在 deferred/disputed 交叉核对「查问题清单」的输入上
+ * 翻译——L2/L3 改键后 fixer 申报的表格号需翻译才能命中问题清单。mustFixIds 与 fixes[].issue_id
  * 的集合比较（第 2 项）**双侧保持表格号空间不翻译**——它们同源（aggregated.md），
  * 翻译任一侧都会制造假失配（must-fix-not-fixed 误杀整 run）。
  */
@@ -563,7 +563,7 @@ function buildAggregatorPrompt({ header, round, max, roundDir, reviewResults, pr
     //（消费侧 string[] 兼容保留在 schema oneOf + normalizeAggregatorResult，不进 prompt）。
     "- must_fix_ids: EACH element is an object with id, title, and severity one of critical/major/minor",
     "  (the converged-termination 'no critical' check depends on it).",
-    // 显式 id 延续（对齐 zcode 版约定，2026-09-20）：延续条目必须复用台账 id、新条目
+    // 显式 id 延续（对齐 zcode 版约定，2026-09-20）：延续条目必须复用问题清单 id、新条目
     // 带轮号格式（跨轮天然不撞）——提高 L1（编号+标题双命中）直接命中率，L2/L3 退居
     // LLM 未遵守指令时的兜底。消费侧 resolveIssueIdentity 三级对齐不变（防御不撤）。
     "- id: CONTINUING issues MUST reuse the tracked id verbatim from the previous-issues list",
@@ -671,7 +671,7 @@ function buildReconciliationSection({ aggPath, fixResult, aggRound, fixRound }) 
 /**
  * R2+ review prompt 三段式（5.2 + 防护规格）：
  * 第一段前轮对账（verify-first，buildReconciliationSection）
- * 台账未结条目注入段（假 clean 防护：台账 open/regressed 条目对 reviewer 显式可见，
+ * 清单未结条目注入段（假 clean 防护：清单 open/regressed 条目对 reviewer 显式可见，
  * 不依赖上轮 aggregated.md——漏报条目不在报告里，reviewer 无从对账）
  * 第二段 known-remaining 感知：deferred 不重报、显式升级声明（含换措辞反模式）
  * 第三段新发现（收敛 hunt）：证据链门槛 + 测试覆盖类默认 minor + 修复成本标注 + 不以多发现问题为目标
@@ -682,7 +682,7 @@ function buildR2ReviewPrompt({ header, round, max, roundDir, reportFile, aggPath
   const knownLines = knownRemaining && knownRemaining.length
     ? wrapUntrusted(knownRemaining.map((k) => "- " + k).join("\n"), "known_remaining")
     : "- (none)";
-  // 台账未结条目注入段（动态段，T9 形状稳定——全空时无该段）。条目内容来自
+  // 清单未结条目注入段（动态段，T9 形状稳定——全空时无该段）。条目内容来自
   // state（上游 LLM 产出持久化的 title/evidence），wrapUntrusted 包裹。
   const openLedger = (openIssues || []).filter((o) => o && typeof o.id === "string" && o.id);
   const ledgerSection = openLedger.length > 0
@@ -773,9 +773,9 @@ function computeKnownRemaining(issues) {
 }
 
 /**
- * 台账残留判定（成功收工前置守门）：存在 open/regressed 条目 → true。
+ * 清单残留判定（成功收工前置守门）：存在 open/regressed 条目 → true。
  * 四个收工点（全员 clean 早退 / all-clean / converged 已有 noActiveIssues / A4 全降级）
- * 统一用它守门——本轮观测（reviewer 报数 / 聚合活跃条目）为 0 不蕴涵台账已清账，
+ * 统一用它守门——本轮观测（reviewer 报数 / 聚合活跃条目）为 0 不蕴涵清单已清，
  * 残留时不得以成功终态收工（假 clean 防护）。
  */
 function hasOpenResidue(issues) {
@@ -831,17 +831,17 @@ function nextFreeId(existingIds) {
 }
 
 /**
- * merge 三级身份对齐（编号 + 标题）：为一条活跃聚合条目（表格号空间）决定台账键。
+ * merge 三级身份对齐（编号 + 标题）：为一条活跃聚合条目（表格号空间）决定清单键。
  * L1: 表格号在 issues 且（两侧 title 归一一致，或任一侧无 title——旧格式降级保持
  *     现状沿用）→ 恒等沿用。单编号命中但标题不一致 = 编号撞车（LLM 紧凑化重排把
  *     新问题排到旧号上），不沿用，落入 L2/L3——否则新问题会被当旧问题延续而静默
- *     失去追踪（对账申报 fixed 直接把新问题销账）。
+ *     失去追踪（对账申报 fixed 直接把新问题误关）。
  * L2: 标题归一唯一命中 issues/dormant → 沿用命中条目的键（同题换号复活走原条目）；
  *     多命中歧义不猜（undefined → 落 L3）。
  * L3: 表格号未被 issues/dormant 占用 → 直接用；被占 → nextFreeId 避让分配。
- * @returns { key: string, mapped: boolean } mapped=true 表示表格号≠台账键，需记入 idMap。
+ * @returns { key: string, mapped: boolean } mapped=true 表示表格号≠清单键，需记入 idMap。
  */
-/** L1/dormant 同构标题守卫：两侧 title 归一（缺 title 归空串），一致或任一侧无 title → true。 */
+/** L1/dormant 同构标题检查：两侧 title 归一（缺 title 归空串），一致或任一侧无 title → true。 */
 function titlesCompatible(leftTitle, rightTitle) {
   const a = typeof leftTitle === "string" ? normTitle(leftTitle) : "";
   const b = typeof rightTitle === "string" ? normTitle(rightTitle) : "";
@@ -860,10 +860,10 @@ function collectOccupiedIds(issues, dormant) {
 
 function resolveIssueIdentity(entry, { issues, dormant }) {
   const id = entry && typeof entry.id === "string" ? entry.id : "";
-  // L1：表格号在 issues 且标题守卫通过 → 恒等沿用
+  // L1：表格号在 issues 且标题检查通过 → 恒等沿用
   const existing = id && (issues || {})[id];
   if (existing && titlesCompatible(existing.title, entry.title)) return { key: id, mapped: false };
-  // dormant 自识别（表格号 = dormant 条目的 id，同构 L1 守卫）：title 一致或任一侧
+  // dormant 自识别（表格号 = dormant 条目的 id，同构 L1 检查）：title 一致或任一侧
   // 无 title 可核 → 沿用该号（该 dormant 条目以活跃身份重报 = 复活，键即 dormant id）；
   // title 不一致 = 新问题冒用 dormant 占号（幽灵复活向量）→ 落 L2/L3 避让。
   // 缺此分支时 L3 会把 dormant 自身的 id 当「被占」避让——复活条目拿到新键，
@@ -883,13 +883,13 @@ function resolveIssueIdentity(entry, { issues, dormant }) {
 }
 
 /**
- * 表格号 → 台账键翻译（idMap miss 回退原值——深层历史翻译丢失时退化为现状的
- * 归一化匹配行为）。台账键优先：id 直接命中 issues 时它就是台账键（注入段的
- * 清单 id 即台账键），不再过 idMap——防表格号空间与台账键空间同形碰撞的误翻译。
+ * 表格号 → 清单键翻译（idMap miss 回退原值——深层历史翻译丢失时退化为现状的
+ * 归一化匹配行为）。清单键优先：id 直接命中 issues 时它就是清单键（注入段的
+ * 清单 id 即清单键），不再过 idMap——防表格号空间与清单键空间同形碰撞的误翻译。
  */
 function translateId(idMap, id, issues) {
   if (typeof id !== "string" || !id) return id;
-  // Object.hasOwn：truthy 查表会让原型链键（"__proto__"/"toString"）误判为台账键
+  // Object.hasOwn：truthy 查表会让原型链键（"__proto__"/"toString"）误判为清单键
   // 直接返回，跳过 idMap 翻译（与 findIssueKey 同款加固，nextFreeId 键空间同理）。
   if (issues && Object.hasOwn(issues, id)) return id;
   if (idMap && Object.prototype.hasOwnProperty.call(idMap, id)) return idMap[id];
@@ -898,8 +898,8 @@ function translateId(idMap, id, issues) {
 
 /**
  * 对账集合 id 翻译 + 冲突互斥（MF-2 抽共享，原主循环内联块）：reconciliation 的
- * 表格号经 idMap 翻译到台账键，再做 not-fixed/escalate 优先于 fixed 的互斥——
- * 多 reviewer 并行对同一 prev_id 申报矛盾时采信「未修好」侧（误转 fixed 会销账
+ * 表格号经 idMap 翻译到清单键，再做 not-fixed/escalate 优先于 fixed 的互斥——
+ * 多 reviewer 并行对同一 prev_id 申报矛盾时采信「未修好」侧（误转 fixed 会把真问题误关
  * 真问题，误留 open 只多跑一轮）。三个 Set 原地更新（translate miss 回退原值 =
  * translateId 语义）。applyCleanRoundBackfill 与主对账路径共用，保证 clean 轮
  * 对账拿到与主路径一致的翻译与冲突消解。
@@ -921,7 +921,7 @@ function translateReconSets(reconSeen, reconEscalate, reconFixed, idMap, issues)
  * 判定：fix-attempted 未再现 → fixed；再现 → regressed（fixAttempts+1）；新 ID → open。
  * open/regressed + reconciliation 声明 fixed（verify-first，调用方已过滤 evidence 非空且
  * 与 seen/escalate 互斥）→ fixed——实际已解决但从未进修复队列的条目（被聚合降级/漏报，
- * 问题被顺带修复或初始误报）由此清账，不再永挂 open 阻塞 converged 或滞留假 clean 终态。
+ * 问题被顺带修复或初始误报）由此关闭条目，不再永挂 open 阻塞 converged 或滞留假 clean 终态。
  * deferred 留 known-remaining（不参与判定）；escalate（上下文改变，5.1-5）→ 重新 open
  * （保留 history/fixAttempts 累计）。stuck：同一 ID 连续 N 轮 open/regressed。
  * 未知 ID（不在 prevIssues 中）按新发现处理；stuckThreshold 复用 stuckThreshold 参数。
@@ -944,7 +944,7 @@ function escalateDeferredIssue(entry, id, escalated, round) {
 }
 
 /**
- * open/regressed + 声明 fixed（verify-first）→ 清账，命中返回 true（调用方跳过后续
+ * open/regressed + 声明 fixed（verify-first）→ 条目关闭，命中返回 true（调用方跳过后续
  * 转换）。与"fix result claiming fixed is NOT evidence"原则不冲突：这里的 fixed 声明
  * 来自 reviewer 亲自读目标后的申报（evidence 非空由调用方过滤），正是该原则认可的
  * 证据形态——此前它被收集侧整体丢弃，open 条目无消除通道。
@@ -1598,7 +1598,7 @@ function backfillFixRegression({ scores, fixResult, issues, round, batch, cleanR
  * round=1（无上轮 fix）仅对账。
  * stuck 消费（假 clean 防护）：reconcileIssues 返回的 stuck/stuckIds 上抛给调用方——
  * 全员 clean 但残留条目持续 not-fixed 达阈值时由调用方判 stuck 诚实终止，不再丢弃
- * （丢弃会让「clean 终态 + 台账 open 残留」的自相矛盾终态逃逸）。
+ * （丢弃会让「clean 终态 + 清单 open 残留」的自相矛盾终态逃逸）。
  * @param state 可变 state（issues/knownRemaining/scores 原地更新）
  * @returns { state, stuck, stuckIds }
  */
@@ -1969,7 +1969,7 @@ module.exports = {
   planUnifiedCommit,
   REVIEWER_BATCH,
   // 调度池/阈值一并导出（2026-09-20）：check-rfl-parity.mjs 需对账两侧同名字面量——
-  // 不导出时守卫只能比行为，池内容漂移（如某侧漏改一个关键词）无法被发现。
+  // 不导出时检查只能比行为，池内容漂移（如某侧漏改一个关键词）无法被发现。
   SLOW_POOL,
   FAST_POOL,
   DRIFTER_POOL,

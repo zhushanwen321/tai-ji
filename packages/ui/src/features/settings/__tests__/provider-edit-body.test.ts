@@ -1007,6 +1007,6 @@ describe('行级模型 Select：ctx / 策略守卫透传', () => {
     const row = models.find((m) => m.id === 'my-glm-alias')
     expect(row).toBeTruthy()
     expect(row!.contextWindow).toBe(128000)
-    expect(row!.thinkingLevelMap).toEqual({ off: 'off', high: 'high', minimal: null, low: null, medium: null })
+    expect(row!.thinkingLevelMap).toEqual({ off: 'off', high: 'high', minimal: null, low: null, medium: null, xhigh: null, max: null })
   })
 })

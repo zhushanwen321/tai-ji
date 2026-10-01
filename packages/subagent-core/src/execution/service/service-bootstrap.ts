@@ -19,7 +19,9 @@ import type { UiRequestHandler } from "../ui/dialog-queue.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { StatusFilter } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { ExecutionRecord, RecordSnapshot, SubagentRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { RecordSnapshot, SubagentRecord } from "../assembly/types.ts";
+import { GLOBAL_SLOT_KEYS } from "../../shared/global-slots.ts";
 
 /** [D4 查询面聚合] 读模型轴（record 快照读取 + store 订阅）——Service 上的
  *  `service.queries` 消费面。变化轴：改查询投影 / 过滤 / 订阅语义，只动 queries 组；
@@ -75,7 +77,7 @@ export interface SubagentServiceInit {
 
 // ── 进程单例访问器 ────────────────────────────────────
 // globalThis[Symbol.for] 防 jiti 路径不同致单例分裂。详见 docs/STANDARDS.md §7.5。
-const SERVICE_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.service");
+const SERVICE_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.service);
 
 type ServiceSlot = { current: SubagentService | null };
 

@@ -113,7 +113,6 @@ export interface StreamingStateMachineDeps {
   occupancies: { value: Map<string, SessionOccupancyState> }
   handingOffSessions: { value: Set<string> }
   retryStates: { value: Map<string, unknown> }
-  queueStates: { value: Map<string, unknown> }
   pendingSend: { value: Set<string> }
   clearOccupancy: (sessionId: string) => void
   setHandingOff: (sessionId: string, value: boolean) => void
@@ -124,7 +123,7 @@ export interface StreamingStateMachineDeps {
  * 由闭包持有），行为由 streaming-state-machine.test.ts + store.test.ts 双锁。
  */
 export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
-  const { messages, occupancies, handingOffSessions, retryStates, queueStates, pendingSend, clearOccupancy, setHandingOff } = deps
+  const { messages, occupancies, handingOffSessions, retryStates, pendingSend, clearOccupancy, setHandingOff } = deps
 
   /**
    * subagent streaming delta 吸收纯逻辑（W4，模块作用域）：
@@ -187,8 +186,8 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
    * finalizeAllStreaming 的候选 session 集合构造（W3 / W-S3，模块作用域）。
    *
    * 遍历所有可能持有瞬态态的 session 的 key 并集：messages.keys() ∪ occupancy 分区中
-   * compacting 的 sid ∪ handingOffSessions ∪ retryStates ∪ queueStates ∪ pendingSend。
-   * 不能只遍历 messages.keys()——compacting / retry / queue / pendingSend 可能独立于消息
+   * compacting 的 sid ∪ handingOffSessions ∪ retryStates ∪ pendingSend。
+   * 不能只遍历 messages.keys()——compacting / retry / pendingSend 可能独立于消息
    * 存在，仅遍历 messages 会漏掉这些 session。
    *
    * [u5b] compacting 候选来源从 compactingSessions Set 改为 occupancy 投影过滤（membership
@@ -204,25 +203,24 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
     }
     for (const sid of handingOffSessions.value) candidateSids.add(sid)
     for (const sid of retryStates.value.keys()) candidateSids.add(sid)
-    for (const sid of queueStates.value.keys()) candidateSids.add(sid)
     for (const sid of pendingSend.value) candidateSids.add(sid)
     return candidateSids
   }
 
   /**
    * resetTransientStates 的 session 级独立瞬态清理（W3，模块作用域）。
-   * 清 occupancy 分区 / handingOff / retry / queue（断连兜底：这些态在断连后无事件驱动清理）。
+   * 清 occupancy 分区 / handingOff / retry（断连兜底：这些态在断连后无事件驱动清理）。
+   * [u5a] queue 维度已随 queueStates 分区退役（分区删除，无清理对象）。
    *
    * [u5b] occupancy 分区删除（替代原 setCompacting(false)）：派生回落全 idle，重连后
    * resubscribeAll 的 stateSnapshot 回放恢复真实值（G4）。
    *
-   * [steer-bubble D4 豁免声明] 本断连收口点刻意**不**清 pendingBuffer 与 inflight 计数
-   * （D4「刻意保留」）——与「清理信号
-   * 到达即清全部瞬态」的直觉不一致是有意为之：queueStates 是重建型状态（重连 ring 回放
-   * 入队帧即可重建）故随收口清理；pendingBuffer 的 segments 暂存与 inflight 确认基线是
-   * **不可重建状态**（仅存在于前端，清了即永久丢失/漂移），断连重连后腿 1 暂存消费与
-   * 腿 2 inflight 判定仍依赖它们。LRU 驱逐回调（store lruEvictDeps）同理豁免，见该处
-   * 注释。后续维护勿顺手在本方法补清这两项。
+   * [steer-bubble D4 豁免声明] 本断连收口点刻意**不**清 inflight 计数
+   * （steer-bubble D4「刻意保留」）——与「清理信号
+   * 到达即清全部瞬态」的直觉不一致是有意为之：occupancy/retry 是重建型状态（重连 ring 回放
+   * 帧即可重建）故随收口清理；inflight 确认基线是**不可重建状态**（仅存在于前端，清了即
+   * 永久丢失/漂移），断连重连后标记回执回收与 ② 纯计数兜底仍依赖它。LRU 驱逐回调
+   * （store lruEvictDeps）同理豁免，见该处注释。后续维护勿顺手在本方法补清本项。
    */
   function clearIndependentTransient(sessionId: string): void {
     clearOccupancy(sessionId)
@@ -231,11 +229,6 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
       const next = new Map(retryStates.value)
       next.delete(sessionId)
       retryStates.value = next
-    }
-    if (queueStates.value.has(sessionId)) {
-      const next = new Map(queueStates.value)
-      next.delete(sessionId)
-      queueStates.value = next
     }
   }
 

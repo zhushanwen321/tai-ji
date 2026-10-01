@@ -30,6 +30,8 @@ import {
 import { abortRun } from "../lifecycle.ts";
 import { forgetRunResumedBudget, rebuildRuntime } from "../worker-message-pump.ts";
 import {
+  interruptRun,
+  isRunSettled,
   resetPhaseSettlementTrackerForTest,
   setRunEventJournalDirForTest,
 } from "../terminal-actions.ts";
@@ -46,6 +48,7 @@ import type { WorkerHandle } from "../worker-handle.ts";
 // ── helpers ──────────────────────────────────────────────────
 
 const T0 = 1_770_000_000_000;
+const MIN = 60_000;
 const SCRIPT_SOURCE = "async function execute({ agent }) { await agent('step1'); }";
 
 let journalDir: string;
@@ -120,11 +123,13 @@ function makeDeps(): {
   appendEntry: ReturnType<typeof vi.fn>;
   emit: ReturnType<typeof vi.fn>;
   workerStarts: number[];
+  budgetSchedules: Array<{ runId: string; ms: number }>;
 } {
   const runs = new Map();
   const appendEntry = vi.fn();
   const emit = vi.fn();
   const workerStarts: number[] = [];
+  const budgetSchedules: Array<{ runId: string; ms: number }> = [];
   const deps: LifecycleDeps = {
     store: { save: vi.fn(async () => {}), loadAll: vi.fn(async () => []), stateFilePath: vi.fn(() => "") },
     workerHost: {
@@ -142,8 +147,13 @@ function makeDeps(): {
     eventBus: { emit },
     onRunDone: vi.fn(),
     log: vi.fn(),
+    // 预算重排捕获面（D10：首次挂表 + 重试重建重排共用同一 deps 注入点）
+    scheduleTimeBudget: vi.fn((runId: string, ms: number) => {
+      budgetSchedules.push({ runId, ms });
+      return undefined;
+    }),
   };
-  return { deps, runs, appendEntry, emit, workerStarts };
+  return { deps, runs, appendEntry, emit, workerStarts, budgetSchedules };
 }
 
 function expectRejection(p: Promise<unknown>, fragment: string): Promise<void> {
@@ -176,7 +186,7 @@ describe("resumeRun — 复活主链（方案 A 同 runId 复活）", () => {
     // 聚合重建：回放集（taskIndex 0）done + result 全文；重派集（taskIndex 1）无条目
     const run = runs.get("wf-main");
     expect(run).toBeDefined();
-    expect(run!.state.status).toBe("running");
+    expect(isRunSettled(run!)).toBe(false);
     expect(run!.runtime).toBeDefined();
     expect(run!.spec.scriptSource).toBe(SCRIPT_SOURCE);
     // 锚定恢复：scriptPath 从 run-created 帧逐字恢复（worker 沙箱 _shared 定位来源）
@@ -215,6 +225,457 @@ describe("resumeRun — 复活主链（方案 A 同 runId 复活）", () => {
     // 无补收帧（档 3 不落 settled）
     expect(events.filter((e) => e.type === "agent-settled")).toHaveLength(1);
     expect(runs.get("wf-tier3")!.state.calls.has(1)).toBe(false);
+  });
+});
+
+// ── 预算单源（run-created 载荷继承/覆盖 + 重试重建重排）──────────
+//
+// 修复 已归档设计档案 §1.1：resume 重建 spec 曾结构性不含
+// budgetTimeMs——复活 run 命中一次 worker/script 错误重试后 rebuildRuntime 不重排
+// 计时器（预算静默失效，直到下次 resume）。修复后 run-created 帧是预算单源：
+// resume 显式 options 覆盖 / 未提供则继承该帧，生效值写入 spec。
+
+describe("resume 预算单源（run-created 载荷继承/覆盖）", () => {
+  /** 活跃跨度可控的崩溃 record 流（active = 段内末执行事件 ts − run-created ts）。 */
+  async function seedWithBudget(
+    runId: string,
+    opts: { budgetTimeMs?: number; activeElapsedMs: number },
+  ): Promise<void> {
+    const { activeElapsedMs } = opts;
+    const journal = createRunEventJournal(journalDir);
+    await journal.append(runId, {
+      type: "run-created",
+      runId,
+      workflowName: "test-wf",
+      argsSummary: "{}",
+      scriptSource: SCRIPT_SOURCE,
+      ...(opts.budgetTimeMs !== undefined ? { budgetTimeMs: opts.budgetTimeMs } : {}),
+      ts: T0,
+    });
+    await journal.append(runId, {
+      type: "agent-started",
+      taskIndex: 0,
+      agentName: "collector",
+      attempt: 1,
+      ts: T0 + 1_000,
+    });
+    await journal.append(runId, {
+      type: "agent-settled",
+      taskIndex: 0,
+      attempt: 1,
+      outcome: "done",
+      durationMs: activeElapsedMs - 1_000,
+      result: { content: "result-0" },
+      ts: T0 + activeElapsedMs - 1_000,
+    });
+    // 段内末执行事件 = 本帧（决定活跃已耗 = activeElapsedMs）
+    await journal.append(runId, {
+      type: "agent-started",
+      taskIndex: 1,
+      agentName: "collector",
+      attempt: 1,
+      ts: T0 + activeElapsedMs,
+    });
+    await journal.append(runId, {
+      type: "run-interrupted",
+      errorCode: "crashed",
+      reason: "test crash",
+      ts: T0 + activeElapsedMs + 1_000,
+    });
+  }
+
+  /** 触发重试重建（唯一计时器重排点，不 await 退避——直调 rebuildRuntime）。 */
+  function rebuild(run: WorkflowRun, deps: LifecycleDeps): void {
+    rebuildRuntime(run, deps, {
+      onMessage: vi.fn(async () => {}),
+      onError: vi.fn(async () => {}),
+      onExit: vi.fn(async () => {}),
+    });
+  }
+
+  it("未传 time → 继承 run-created 预算；重试重建按剩余活跃预算重排（非满额/非 undefined）", async () => {
+    const budget = 60 * MIN;
+    const active = 40 * MIN;
+    await seedWithBudget("wf-budget-inherit", { budgetTimeMs: budget, activeElapsedMs: active });
+    const { deps, runs, budgetSchedules } = makeDeps();
+
+    await resumeRun("wf-budget-inherit", deps, { now: () => Date.now() });
+
+    const run = runs.get("wf-budget-inherit")!;
+    // spec 单源恢复（修复前恒 undefined → 重试重排分支不可达）
+    expect(run.spec.budgetTimeMs).toBe(budget);
+    expect(run.state.budget.maxTimeMs).toBe(budget);
+    // 首次挂表（adoptResumedRun）与 summary 同一生效值折算：≈60−40=20min
+    expect(budgetSchedules).toHaveLength(1);
+    expect(budgetSchedules[0]!.ms).toBeGreaterThan(budget - active - 60_000);
+    expect(budgetSchedules[0]!.ms).toBeLessThanOrEqual(budget - active);
+
+    // 错误重试 → rebuildRuntime：账本可达 → 重排剩余（≈20min），非满额 60min
+    budgetSchedules.length = 0;
+    rebuild(run, deps);
+    expect(isRunSettled(run)).toBe(false);
+    expect(budgetSchedules).toHaveLength(1);
+    const rescheduled = budgetSchedules[0]!.ms;
+    expect(rescheduled).toBeGreaterThan(budget - active - 60_000);
+    expect(rescheduled).toBeLessThanOrEqual(budget - active);
+    expect(rescheduled).toBeLessThan(budget);
+  });
+
+  it("显式传 time → 覆盖 run-created 预算（生效值全链一致，重排按覆盖值）", async () => {
+    const createdBudget = 60 * MIN;
+    const override = 120 * MIN;
+    const active = 40 * MIN;
+    await seedWithBudget("wf-budget-override", { budgetTimeMs: createdBudget, activeElapsedMs: active });
+    const { deps, runs, budgetSchedules } = makeDeps();
+
+    await resumeRun("wf-budget-override", deps, {
+      now: () => Date.now(),
+      budgetTimeMs: override,
+    });
+
+    const run = runs.get("wf-budget-override")!;
+    expect(run.spec.budgetTimeMs).toBe(override); // 覆盖而非继承
+    expect(run.state.budget.maxTimeMs).toBe(override);
+    expect(budgetSchedules[0]!.ms).toBeGreaterThan(override - active - 60_000);
+    expect(budgetSchedules[0]!.ms).toBeLessThanOrEqual(override - active);
+
+    budgetSchedules.length = 0;
+    rebuild(run, deps);
+    const rescheduled = budgetSchedules[0]!.ms;
+    expect(rescheduled).toBeGreaterThan(override - active - 60_000);
+    expect(rescheduled).toBeLessThanOrEqual(override - active);
+    // 判别构造：继承形态会得到 ≈20min，覆盖形态 ≈80min（> 原创建预算 60min）
+    expect(rescheduled).toBeGreaterThan(createdBudget);
+  });
+
+  it("旧格式帧（无预算字段）+ 未传 time → 不限时（现状行为不劣化：spec 无预算、两处均不重排）", async () => {
+    await seedInterruptedRecord("wf-budget-legacy"); // 不传 budgetTimeMs = 载荷落地前的旧格式帧
+    const { deps, runs, budgetSchedules } = makeDeps();
+
+    await resumeRun("wf-budget-legacy", deps, { now: () => Date.now() });
+
+    const run = runs.get("wf-budget-legacy")!;
+    expect(run.spec.budgetTimeMs).toBeUndefined();
+    expect(run.state.budget.maxTimeMs).toBeUndefined();
+    expect(budgetSchedules).toHaveLength(0); // 首次挂表亦不排
+
+    rebuild(run, deps);
+    expect(budgetSchedules).toHaveLength(0); // 重试路径同样不排（与修复前一致）
+  });
+
+  it("旧格式帧（无预算字段）+ 显式传 time → 显式生效（既有恢复通道保留）", async () => {
+    await seedInterruptedRecord("wf-budget-legacy-explicit");
+    const { deps, runs, budgetSchedules } = makeDeps();
+
+    await resumeRun("wf-budget-legacy-explicit", deps, {
+      now: () => Date.now(),
+      budgetTimeMs: 30 * MIN,
+    });
+
+    const run = runs.get("wf-budget-legacy-explicit")!;
+    expect(run.spec.budgetTimeMs).toBe(30 * MIN);
+    expect(budgetSchedules).toHaveLength(1);
+  });
+
+  it("run-created 预算为 0/负值 → 不落 spec 字段（不限时，与写侧条件式一致）", async () => {
+    for (const [runId, budget] of [["wf-budget-zero", 0], ["wf-budget-negative", -1]] as const) {
+      await seedWithBudget(runId, { budgetTimeMs: budget, activeElapsedMs: 40 * MIN });
+      const { deps, runs, budgetSchedules } = makeDeps();
+
+      await resumeRun(runId, deps, { now: () => Date.now() });
+
+      const run = runs.get(runId)!;
+      expect(run.spec.budgetTimeMs).toBeUndefined();
+      rebuild(run, deps);
+      expect(budgetSchedules).toHaveLength(0);
+    }
+  });
+
+  it("继承预算已耗尽（活跃已耗 ≥ 原预算）→ D10 预检拒绝（复活窗不绕过预算）", async () => {
+    await seedWithBudget("wf-budget-exhausted", { budgetTimeMs: 30 * MIN, activeElapsedMs: 40 * MIN });
+    const { deps, runs } = makeDeps();
+
+    await expectRejection(
+      resumeRun("wf-budget-exhausted", deps, { now: () => Date.now() }),
+      "has exhausted its time budget",
+    );
+    expect(runs.has("wf-budget-exhausted")).toBe(false);
+  });
+
+  it("写侧：显式覆盖预算随 run-resumed 帧落盘；未设/0 → 不落字段（与 run-created 同款条件式）", async () => {
+    // 显式覆盖 120min（run-created 60min）→ 帧带 120min
+    await seedWithBudget("wf-budget-frame-override", { budgetTimeMs: 60 * MIN, activeElapsedMs: 40 * MIN });
+    await resumeRun("wf-budget-frame-override", makeDeps().deps, {
+      now: () => Date.now(),
+      budgetTimeMs: 120 * MIN,
+    });
+    const resumed = (await scanEvents("wf-budget-frame-override")).find((e) => e.type === "run-resumed")!;
+    expect(resumed).toMatchObject({ type: "run-resumed", budgetTimeMs: 120 * MIN });
+
+    // 未传 + run-created 也无 → 不限时 → 帧不落字段
+    await seedInterruptedRecord("wf-budget-frame-none");
+    await resumeRun("wf-budget-frame-none", makeDeps().deps, { now: () => Date.now() });
+    const noneResumed = (await scanEvents("wf-budget-frame-none")).find((e) => e.type === "run-resumed")!;
+    expect("budgetTimeMs" in noneResumed).toBe(false);
+
+    // 显式 0 → 不限时 → 帧不落字段
+    await seedInterruptedRecord("wf-budget-frame-zero");
+    await resumeRun("wf-budget-frame-zero", makeDeps().deps, { now: () => Date.now(), budgetTimeMs: 0 });
+    const zeroResumed = (await scanEvents("wf-budget-frame-zero")).find((e) => e.type === "run-resumed")!;
+    expect("budgetTimeMs" in zeroResumed).toBe(false);
+  });
+
+  it("跨崩溃存续：第一次显式 120min → 第二次无参 resume 生效 120min（非创建预算 60min），重试按剩余重排", async () => {
+    const runId = "wf-budget-durable";
+    const createdBudget = 60 * MIN;
+    const override = 120 * MIN;
+    const active = 40 * MIN;
+    try {
+      await seedWithBudget(runId, { budgetTimeMs: createdBudget, activeElapsedMs: active });
+      const first = makeDeps();
+      await resumeRun(runId, first.deps, { now: () => Date.now(), budgetTimeMs: override });
+      const firstResumed = (await scanEvents(runId)).find((e) => e.type === "run-resumed")!;
+      expect(firstResumed).toMatchObject({ budgetTimeMs: override });
+
+      // 第二次崩溃（生产等价：崩溃收编写 run-interrupted）
+      await interruptRun(runId, { errorCode: "crashed", reason: "second crash" });
+
+      // 第二次 resume 无参 → 三档回落命中上一条 run-resumed 的 120min（不是 created 60min）
+      const second = makeDeps();
+      await resumeRun(runId, second.deps, { now: () => Date.now() });
+      const run = second.runs.get(runId)!;
+      expect(run.spec.budgetTimeMs).toBe(override);
+      expect(run.state.budget.maxTimeMs).toBe(override);
+
+      // 重试重建按剩余（≈80min）重排——判别不是退回 created 60min 的 ≈20min
+      second.budgetSchedules.length = 0;
+      rebuild(run, second.deps);
+      const rescheduled = second.budgetSchedules[0]!.ms;
+      expect(rescheduled).toBeGreaterThan(createdBudget);
+      expect(rescheduled).toBeLessThanOrEqual(override - active);
+    } finally {
+      forgetRunResumedBudget(runId);
+      resetPhaseSettlementTrackerForTest();
+    }
+  });
+
+  it("旧格式 run-resumed（无字段）→ 回落 run-created 创建预算（旧格式行为不劣化）", async () => {
+    const runId = "wf-budget-legacy-resumed";
+    const journal = createRunEventJournal(journalDir);
+    await journal.append(runId, {
+      type: "run-created",
+      runId,
+      workflowName: "test-wf",
+      argsSummary: "{}",
+      scriptSource: SCRIPT_SOURCE,
+      budgetTimeMs: 60 * MIN,
+      ts: T0,
+    });
+    await journal.append(runId, { type: "agent-started", taskIndex: 0, agentName: "collector", attempt: 1, ts: T0 + 1_000 });
+    await journal.append(runId, {
+      type: "agent-settled",
+      taskIndex: 0,
+      attempt: 1,
+      outcome: "done",
+      durationMs: 1_000,
+      result: { content: "r" },
+      ts: T0 + 40 * MIN - 1_000,
+    });
+    await journal.append(runId, { type: "run-interrupted", errorCode: "crashed", ts: T0 + 40 * MIN });
+    // 旧格式 run-resumed（本载荷落地前的流：无 budgetTimeMs）
+    await journal.append(runId, { type: "run-resumed", ts: T0 + 40 * MIN + 1_000 });
+    await journal.append(runId, { type: "run-interrupted", errorCode: "crashed", ts: T0 + 40 * MIN + 2_000 });
+
+    const { deps, runs } = makeDeps();
+    await resumeRun(runId, deps, { now: () => Date.now() });
+
+    expect(runs.get(runId)!.spec.budgetTimeMs).toBe(60 * MIN);
+  });
+});
+
+// ── token 预算单源（budgetTokens 与时间轴同构）─────────────────
+//
+// 与上方时间预算同族缺口（已归档设计档案 §1.1 遗留项）：
+// resume 重建 spec 曾结构性不含 budgetTokens——复活 run 的引擎侧 maxTokens 投影
+// （lifecycle.createRunningRun / worker-host budget 注入读 spec.budgetTokens）静默
+// 失效。修复后 token 轴与时间轴完全同构：run-created 载预算 + 三档回落 + 生效值
+// 随 run-resumed 落盘 + spec 重建 + D10 token 预检（帧推导下界口径）。
+
+describe("resume token 预算单源（budgetTokens 与时间轴同构）", () => {
+  /** token 消耗可控的崩溃 record 流（usedTokens = settled 帧 usage 的加权口径 input*1）。 */
+  async function seedWithTokenBudget(
+    runId: string,
+    opts: { budgetTokens?: number; usedTokens?: number },
+  ): Promise<void> {
+    const journal = createRunEventJournal(journalDir);
+    await journal.append(runId, {
+      type: "run-created",
+      runId,
+      workflowName: "test-wf",
+      argsSummary: "{}",
+      scriptSource: SCRIPT_SOURCE,
+      ...(opts.budgetTokens !== undefined ? { budgetTokens: opts.budgetTokens } : {}),
+      ts: T0,
+    });
+    await journal.append(runId, {
+      type: "agent-started",
+      taskIndex: 0,
+      agentName: "collector",
+      attempt: 1,
+      ts: T0 + 1_000,
+    });
+    await journal.append(runId, {
+      type: "agent-settled",
+      taskIndex: 0,
+      attempt: 1,
+      outcome: "done",
+      durationMs: 5_000,
+      result: {
+        content: "result-0",
+        ...(opts.usedTokens !== undefined
+          ? {
+              usage: { input: opts.usedTokens, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 },
+            }
+          : {}),
+      },
+      ts: T0 + 6_000,
+    });
+    await journal.append(runId, {
+      type: "agent-started",
+      taskIndex: 1,
+      agentName: "collector",
+      attempt: 1,
+      ts: T0 + 7_000,
+    });
+    await journal.append(runId, {
+      type: "run-interrupted",
+      errorCode: "crashed",
+      reason: "test crash",
+      ts: T0 + 8_000,
+    });
+  }
+
+  it("未传 tokens → 继承 run-created 预算：spec 与 Budget 投影同源生效，已耗计数不归零", async () => {
+    await seedWithTokenBudget("wf-token-inherit", { budgetTokens: 10_000, usedTokens: 1_000 });
+    const { deps, runs } = makeDeps();
+
+    await resumeRun("wf-token-inherit", deps, { now: () => Date.now() });
+
+    const run = runs.get("wf-token-inherit")!;
+    // spec 单源恢复（worker-host budget 注入与错误重试重建读同源——修复前恒 undefined）
+    expect(run.spec.budgetTokens).toBe(10_000);
+    // Budget 投影与 fresh run 同形（rebuildBudget maxTokens 条件式）
+    expect(run.state.budget.maxTokens).toBe(10_000);
+    // 已耗恢复（[§2.1b] 帧推导）：加权口径 input*1
+    expect(run.state.budget.usedTokens).toBe(1_000);
+  });
+
+  it("显式传 tokens → 覆盖 run-created 预算，随 run-resumed 帧落盘", async () => {
+    await seedWithTokenBudget("wf-token-override", { budgetTokens: 10_000, usedTokens: 1_000 });
+    const { deps, runs } = makeDeps();
+
+    await resumeRun("wf-token-override", deps, { now: () => Date.now(), budgetTokens: 50_000 });
+
+    const run = runs.get("wf-token-override")!;
+    expect(run.spec.budgetTokens).toBe(50_000); // 覆盖而非继承
+    expect(run.state.budget.maxTokens).toBe(50_000);
+    const resumed = (await scanEvents("wf-token-override")).find((e) => e.type === "run-resumed")!;
+    expect(resumed).toMatchObject({ type: "run-resumed", budgetTokens: 50_000 });
+  });
+
+  it("跨崩溃存续：第一次显式覆盖 → 第二次无参 resume 继承末条 run-resumed 的生效值（非创建预算）", async () => {
+    const runId = "wf-token-durable";
+    try {
+      await seedWithTokenBudget(runId, { budgetTokens: 10_000, usedTokens: 100 });
+      const first = makeDeps();
+      await resumeRun(runId, first.deps, { now: () => Date.now(), budgetTokens: 50_000 });
+
+      // 第二次崩溃（生产等价：崩溃收编写 run-interrupted）
+      await interruptRun(runId, { errorCode: "crashed", reason: "second crash" });
+
+      // 第二次 resume 无参 → 三档回落命中上一条 run-resumed 的 50k（不是 created 10k）
+      const second = makeDeps();
+      await resumeRun(runId, second.deps, { now: () => Date.now() });
+      const run = second.runs.get(runId)!;
+      expect(run.spec.budgetTokens).toBe(50_000);
+      expect(run.state.budget.maxTokens).toBe(50_000);
+    } finally {
+      forgetRunResumedBudget(runId);
+      resetPhaseSettlementTrackerForTest();
+    }
+  });
+
+  it("旧格式帧（无预算字段）+ 未传 tokens → 不限制；旧格式 run-resumed 回落 created 创建预算", async () => {
+    // created 无 budgetTokens
+    await seedWithTokenBudget("wf-token-legacy", { usedTokens: 100 });
+    const { deps, runs } = makeDeps();
+    await resumeRun("wf-token-legacy", deps, { now: () => Date.now() });
+    const run = runs.get("wf-token-legacy")!;
+    expect(run.spec.budgetTokens).toBeUndefined();
+    expect(run.state.budget.maxTokens).toBeUndefined();
+
+    // created 有 budgetTokens + run-resumed 无字段（本载荷落地前的旧格式流）→ 回落 created
+    const runId = "wf-token-legacy-resumed";
+    const journal = createRunEventJournal(journalDir);
+    await journal.append(runId, {
+      type: "run-created",
+      runId,
+      workflowName: "test-wf",
+      argsSummary: "{}",
+      scriptSource: SCRIPT_SOURCE,
+      budgetTokens: 10_000,
+      ts: T0,
+    });
+    await journal.append(runId, { type: "agent-started", taskIndex: 0, agentName: "collector", attempt: 1, ts: T0 + 1_000 });
+    await journal.append(runId, {
+      type: "agent-settled",
+      taskIndex: 0,
+      attempt: 1,
+      outcome: "done",
+      durationMs: 1_000,
+      result: { content: "r" },
+      ts: T0 + 2_000,
+    });
+    await journal.append(runId, { type: "run-interrupted", errorCode: "crashed", ts: T0 + 3_000 });
+    await journal.append(runId, { type: "run-resumed", ts: T0 + 4_000 }); // 旧格式：无 budgetTokens
+    await journal.append(runId, { type: "run-interrupted", errorCode: "crashed", ts: T0 + 5_000 });
+
+    const second = makeDeps();
+    await resumeRun(runId, second.deps, { now: () => Date.now() });
+    expect(second.runs.get(runId)!.spec.budgetTokens).toBe(10_000);
+  });
+
+  it("run-created 预算为 0/负值、显式 0 → 不落 spec 字段、run-resumed 帧不落字段（与写侧条件式一致）", async () => {
+    for (const [runId, budget] of [["wf-token-zero", 0], ["wf-token-negative", -1]] as const) {
+      await seedWithTokenBudget(runId, { budgetTokens: budget, usedTokens: 100 });
+      const { deps, runs } = makeDeps();
+      await resumeRun(runId, deps, { now: () => Date.now() });
+      expect(runs.get(runId)!.spec.budgetTokens).toBeUndefined();
+      const resumed = (await scanEvents(runId)).find((e) => e.type === "run-resumed")!;
+      expect("budgetTokens" in resumed).toBe(false);
+    }
+  });
+
+  it("继承预算已耗尽（帧推导已耗 ≥ 原预算）→ D10 token 预检拒绝（复活窗不绕过预算）", async () => {
+    await seedWithTokenBudget("wf-token-exhausted", { budgetTokens: 10_000, usedTokens: 10_000 });
+    const { deps, runs } = makeDeps();
+
+    await expectRejection(
+      resumeRun("wf-token-exhausted", deps, { now: () => Date.now() }),
+      "has exhausted its token budget",
+    );
+    expect(runs.has("wf-token-exhausted")).toBe(false);
+  });
+
+  it("显式覆盖抬升预算 → 预检按覆盖值放行（覆盖是合法的扩预算通道）", async () => {
+    await seedWithTokenBudget("wf-token-raise", { budgetTokens: 10_000, usedTokens: 10_000 });
+    const { deps, runs } = makeDeps();
+
+    await resumeRun("wf-token-raise", deps, { now: () => Date.now(), budgetTokens: 20_000 });
+
+    const run = runs.get("wf-token-raise")!;
+    expect(run.spec.budgetTokens).toBe(20_000);
+    expect(run.state.budget.maxTokens).toBe(20_000);
   });
 });
 
@@ -346,6 +807,23 @@ describe("resumeRun — 资格校验（错了明说）", () => {
     await expectRejection(resumeRun("wf-live", deps), "not 'interrupted'");
   });
 
+  // [撞名缺陷 / 第 4 道检查扩展到派发期] run-created 里的脚本文本不可编译时，
+  // resume 必须在段 4/5/6 的任何写动作之前干净拒绝（否则 Worker 启动后必然异步语法错）。
+  it("派发前语法闸：脚本文本不可编译 → 干净拒绝（worker 未启动、无 run-resumed 写入）", async () => {
+    await seedInterruptedRecord("wf-bad-script", {
+      scriptSource: "const args = { a: 1 };\nasync function execute() {}",
+    });
+    const { deps, runs, workerStarts } = makeDeps();
+
+    await expectRejection(resumeRun("wf-bad-script", deps), "cannot compile");
+
+    // 干净拒绝：无 worker、无活体注册、record 流保持 interrupted（run-resumed 未落）
+    expect(workerStarts).toHaveLength(0);
+    expect(runs.size).toBe(0);
+    const events = await scanEvents("wf-bad-script");
+    expect(events.filter((e) => e.type === "run-resumed")).toHaveLength(0);
+  });
+
   // D13 嵌套词法拒绝已随嵌套 workflow() 功能移除而删除（检测对象不存在，场景 20 退役）
 });
 
@@ -464,7 +942,7 @@ describe("resumeRun — 段 6 接管失败补偿（僵尸 run 防线）", () => 
     const fresh = makeDeps();
     await expect(resumeRun("wf-adoptfail", fresh.deps, { now: () => T0 + 200_000 }))
       .resolves.toBe("wf-adoptfail");
-    expect(fresh.runs.get("wf-adoptfail")!.state.status).toBe("running");
+    expect(isRunSettled(fresh.runs.get("wf-adoptfail")!)).toBe(false);
     const eventsAfterRetry = await scanEvents("wf-adoptfail");
     expect(eventsAfterRetry.filter((e) => e.type === "run-resumed")).toHaveLength(2);
   });
@@ -521,7 +999,6 @@ describe("resumeRun — 段 6 接管失败补偿（僵尸 run 防线）", () => 
         budgetTimeMs: 60 * 60_000,
       },
       {
-        status: "running",
         budget: new Budget({ maxTimeMs: 60 * 60_000 }),
         calls: new Map(),
         trace: new Trace(),

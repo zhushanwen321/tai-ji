@@ -1,3 +1,4 @@
+<!-- coverage-file-gate-exempt: 纯文档（架构决策记录）——无可执行代码，测试无「加载 markdown」语义 -->
 # chat 域 — 架构决策记录
 
 `store.ts`（chat store factory，IF1 契约）的设计决策记录。`store.ts` 内仅保留与代码
@@ -61,7 +62,7 @@ assistant abort 动作而非 abortBash，与「bash 不阻塞」核心承诺矛�
 `applyMessageEvent` 是 `message.*` 事件的单一入口（F2 重构：消除 double-dispatch）。
 `useChat.ensureStreamSubscription` 收到 `message.*` 后调本方法，不再自己 switch。内部经
 `dispatchMessageEvent` 查 effect 注册表（`effects/registry.ts`），执行该 type 的全部副作用：
-(a) chunk 状态更新（messages/retryStates/queueStates）+ (b) 终态收口（finalizeSession）。
+(a) chunk 状态更新（messages/retryStates）+ (b) 终态收口（finalizeSession）。
 行为等价：与原 `appendAssistantChunk(applyChunk) + finalizeSession` 串联一致——handler 内先更新
 chunk 状态后收口实体。非 `message.*` / 未注册 type no-op（等价原 applyChunk default return）。
 
@@ -104,22 +105,22 @@ markBashError 承载，不应被 assistant 收口误清。`reason` 决定 messag
 `finalizeAllStreaming`（F1 修正 + W3 瞬态全收口）：遍历所有可能持有瞬态态的 session，对每个有
 瞬态态的调 `resetTransientStates`。useConnection runtime 重启/失败/断连时调此 helper，确保后台
 session 的全部瞬态指示位收口，避免 UI 在断连后永久卡「生成中 / 压缩中 / 重试中 / 队列中」。
-遍历范围是 `messages.keys() ∪ occupancy 投影中 compacting 的 sid ∪ retryStates ∪ queueStates` 的并集——不能只
-遍历 `messages.keys()`（compacting / retry / queue 可能独立于消息存在，如 session.occupancy 帧直接写 occupancy 投影、
+遍历范围是 `messages.keys() ∪ occupancy 投影中 compacting 的 sid ∪ retryStates ∪ pendingSend` 的并集——不能只
+遍历 `messages.keys()`（compacting / retry / pendingSend 可能独立于消息存在，如 session.occupancy 帧直接写 occupancy 投影、
 auto_retry_start 只写 retryStates 不写 messages），仅遍历 messages 会漏掉这些 session。
 
 `resetTransientStates`（W3）：一次性清理指定 session 的全部瞬态指示位。背景：断连 / runtime 重启
-等异常路径下，compactingSessions / retryStates / queueStates 不再有事件驱动清理（断连意味着
-不会再有 session.compacted / auto_retry_end / queue_update 到达），若不主动清则永久残留。与
+等异常路径下，occupancy 投影 / retryStates 不再有事件驱动清理（断连意味着不会再有
+session.occupancy / auto_retry_end 到达），若不主动清则永久残留。与
 `finalizeSession` 的关系：finalizeSession 是消息流正常/异常收口（只清 streaming 实体 + pendingSend
 + timer，保留 session 级独立状态如 compacting——compaction 由 session.compacted 事件独立清，
 不能被消息收尾误清）；resetTransientStates 是更广的「断连兜底全清」，在 finalizeSession 基础上
-额外清 compacting / retry / queue。
+额外清 compacting / retry。
 
 ### disposeSession — per-session 状态全清（deleteSession 调用，S3）
 
 deleteSession 必须同步清掉 chat store 的 per-session 状态（messages / hydrated / pendingSend /
-compactingSessions / retryStates / queueStates / failedHistory / changeSetStatuses），否则频繁
+compactingSessions / retryStates / failedHistory / changeSetStatuses），否则频繁
 建删 session 后内存单调增长。此函数一次性清理该 session 的所有分区数据 + 取消 timer + 清 LRU
 时序记录（R5）。Map ref 不可变写（新 Map + delete + 赋值 `.value`）保证响应式；
 `changeSetStatuses` 按 `${sessionId}:` 前缀过滤删除。

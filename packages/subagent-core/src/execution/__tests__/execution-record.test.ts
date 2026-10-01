@@ -21,8 +21,12 @@ import {
   trySettleLegacyClosed,
   updateFromEvent,
 } from "../persistence/execution-record.ts";
-import type { AgentResult, ExecutionRecord, SubagentRecord, Turn } from "../assembly/types.ts";
-import { toSubagentRecordEntry } from "../persistence/record-entry.ts";
+import type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord, Turn } from "../assembly/types.ts";
+// [v1 兼容层删除] v1 全量快照写点（toSubagentRecordEntry）已整体删除——现行主 session
+// 条目契约 = 「注册 + 终态两条小条目」（record-entry.ts v2），终局域（engine/engineHandle）
+// 的条目载体 = 终态条目，测试播种经 helpers/v2-record-entry.ts。
+import { v2SettledEntry } from "./helpers/v2-record-entry.ts";
 
 // ── 常量（与源码 module-private 值对齐，测试用字面量）──
 const TURN_SUMMARY_MAX = 80;
@@ -1143,11 +1147,11 @@ describe("tool_end running index [perf]", () => {
 });
 
 // ============================================================
-// P4 引擎留痕字段（engine / engineFallback，D9①）
+// P4 引擎留痕字段（engine，D9①）
 // ============================================================
 
 describe("createRecord 引擎留痕字段（P4）", () => {
-  it("identity 带 engine/engineFallback 时进 record，JSON 序列化保留（持久化语义）", () => {
+  it("identity 带 engine 时进 record，JSON 序列化保留（持久化语义）", () => {
     const record = createRecord("sa-engine-1", {
       agent: "reviewer",
       model: "p/m",
@@ -1156,16 +1160,13 @@ describe("createRecord 引擎留痕字段（P4）", () => {
       slug: "s",
       startedAt: 1,
       engine: "pi",
-      engineFallback: { from: "zcode", reason: "engine_probe_failed" },
     });
     expect(record.engine).toBe("pi");
-    expect(record.engineFallback).toEqual({ from: "zcode", reason: "engine_probe_failed" });
     const serialized = JSON.parse(JSON.stringify(record)) as Record<string, unknown>;
     expect(serialized["engine"]).toBe("pi");
-    expect(serialized["engineFallback"]).toEqual({ from: "zcode", reason: "engine_probe_failed" });
   });
 
-  it("不传时两字段缺省（存量 record 消费方零影响——序列化后无键产生）", () => {
+  it("不传时 engine 缺省（存量 record 消费方零影响——序列化后无键产生）", () => {
     const record = createRecord("sa-engine-2", {
       agent: "worker",
       model: "p/m",
@@ -1175,13 +1176,11 @@ describe("createRecord 引擎留痕字段（P4）", () => {
       startedAt: 1,
     });
     expect(record.engine).toBeUndefined();
-    expect(record.engineFallback).toBeUndefined();
     const serialized = JSON.parse(JSON.stringify(record)) as Record<string, unknown>;
     expect("engine" in serialized).toBe(false);
-    expect("engineFallback" in serialized).toBe(false);
   });
 
-  it("SubagentRecord → entry 投影保留两字段（record-entry 持久化链）", () => {
+  it("SubagentRecord → v2 终态条目投影保留 engine（record-entry 持久化链）", () => {
     const base: SubagentRecord = {
       id: "sa-engine-3",
       agent: "reviewer",
@@ -1201,11 +1200,10 @@ describe("createRecord 引擎留痕字段（P4）", () => {
       eventLog: [],
       displayItems: [],
     };
-    const entry = toSubagentRecordEntry({ ...base, engine: "pi", engineFallback: { from: "zcode", reason: "engine_probe_failed" } });
+    const entry = v2SettledEntry({ ...base, engine: "pi" });
     expect(entry.engine).toBe("pi");
-    expect(entry.engineFallback).toEqual({ from: "zcode", reason: "engine_probe_failed" });
     // 存量 record（无字段）投影后同样缺省——消费方按 pi 投影，零迁移
-    expect(toSubagentRecordEntry(base).engine).toBeUndefined();
+    expect(v2SettledEntry(base).engine).toBeUndefined();
   });
 });
 
@@ -1223,9 +1221,9 @@ describe("addUsage 分支语义（message_end 累积路径）", () => {
 });
 
 // ============================================================
-// U1 engine 三字段 entry 往返（engineHandle 贯通）
+// U1 engine 字段 entry 往返（engineHandle 贯通；v2 终态条目载体）
 // ============================================================
-describe("SubagentRecord ↔ subagent-record entry 往返（U1 engineHandle）", () => {
+describe("SubagentRecord ↔ subagent-record v2 终态条目往返（U1 engineHandle）", () => {
   const base: SubagentRecord = {
     id: "sa-engine-4",
     agent: "reviewer",
@@ -1245,37 +1243,30 @@ describe("SubagentRecord ↔ subagent-record entry 往返（U1 engineHandle）",
     eventLog: [],
     displayItems: [],
   };
-  const handle = { sessionRef: { sessionId: "s-1", dbPath: "pool/zcode.db" }, journalPath: "/abs/journal.jsonl", poolKey: "p1" };
+  const handle = { sessionRef: { sessionId: "s-1", dbPath: "pool/zcode.db" }, eventsPath: "/abs/journal.jsonl", poolKey: "p1" };
 
-  it("record 含三字段 → entry JSON → 解析回 deep equal（sessionRef 键不枚举整体透传）", () => {
-    const entry = toSubagentRecordEntry({ ...base, engine: "zcode", engineFallback: { from: "zcode", reason: "engine_probe_failed" }, engineHandle: handle });
+  it("record 含 engine/engineHandle → 终态条目 JSON → 解析回 deep equal（sessionRef 键不枚举整体透传）", () => {
+    const entry = v2SettledEntry({ ...base, engine: "zcode", engineHandle: handle });
     const roundTripped = JSON.parse(JSON.stringify(entry));
     expect(roundTripped).toEqual({
-      v: 1,
+      v: 2,
+      kind: "settled",
       id: "sa-engine-4",
-      agent: "reviewer",
-      task: "t",
-      slug: "s",
-      status: "running",
-      mode: "background",
-      startedAt: 1,
-      depth: 0,
+      status: "idle",
+      stopReason: "interrupted-by-restart",
+      endedAt: 1,
       turns: 0,
       totalTokens: 0,
       model: "p/m",
-      eventLog: [],
-      displayItems: [],
       engine: "zcode",
-      engineFallback: { from: "zcode", reason: "engine_probe_failed" },
       engineHandle: handle,
     });
-    expect(toSubagentRecordEntry({ ...base, engineHandle: handle }).engineHandle).toEqual(handle);
+    expect(v2SettledEntry({ ...base, engineHandle: handle }).engineHandle).toEqual(handle);
   });
 
-  it("record 无三字段 → entry JSON 不含对应键（undefined 经 JSON.stringify 自然省略，存量零迁移）", () => {
-    const serialized = JSON.parse(JSON.stringify(toSubagentRecordEntry(base))) as Record<string, unknown>;
+  it("record 无 engine/engineHandle → 条目 JSON 不含对应键（undefined 经 JSON.stringify 自然省略，存量零迁移）", () => {
+    const serialized = JSON.parse(JSON.stringify(v2SettledEntry(base))) as Record<string, unknown>;
     expect("engine" in serialized).toBe(false);
-    expect("engineFallback" in serialized).toBe(false);
     expect("engineHandle" in serialized).toBe(false);
   });
 });

@@ -1,6 +1,6 @@
 // src/__tests__/index-reminder-delivery.test.ts
 //
-// D4' + D15 装配回归：越档提醒的「静默注入 + 档位持久化」两条语义在 index.ts 装配点成立。
+// D4① + D15 装配回归：越档提醒的「nextTurn 投递 + 档位持久化」两条语义在 index.ts 装配点成立。
 //
 // 现场（2026-09-19 会话 01a0b8b3）：taiji skill-reload 发 `/__taiji_reload__` → pi ctx.reload()
 // 重跑 extension factory（jiti moduleCache:false 重新 import）→ firedThresholds 归零，且 reload
@@ -8,7 +8,9 @@
 // sendUserMessage(followUp) 恒触发一轮（pi 语义），用户收工后仍被唤醒烧掉一整轮全量上下文。
 //
 // 本文件锁两件事：
-//   ① 投递形态 = sendMessage({customType, display:false}, {triggerTurn:false})，且不再用 sendUserMessage；
+//   ① 投递形态 = notices.ts 的 sendSmartContextNotice（customType "smart-context" + display:true，
+//      {triggerTurn:false, deliverAs:"nextTurn"}——随下一次 prompt 注入，不自起 run），且不再用
+//      sendUserMessage；
 //   ② fired 档位写入 session entries（appendEntry marker），工厂重跑（reload 等价拓扑）后
 //      从 entries 重建 → 同档不重复、跨档照常提醒。
 
@@ -37,12 +39,15 @@ const TEST_CONFIG = {
 	reminderThresholds: [200_000, 400_000, 600_000],
 	excludedModels: [] as string[],
 };
+/** 当前生效配置（事件回调热读——用例按需改写，beforeEach 复位）。 */
+let activeConfig = structuredClone(TEST_CONFIG);
 vi.mock("../pure.js", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../pure.js")>()),
-	loadSmartContextConfig: () => structuredClone(TEST_CONFIG),
+	loadSmartContextConfig: () => structuredClone(activeConfig),
 }));
 
-import { FIRED_ENTRY_CUSTOM_TYPE, THRESHOLD_REMINDER_CUSTOM_TYPE } from "../pure.js";
+import { FIRED_ENTRY_CUSTOM_TYPE } from "../pure.js";
+import { SMART_CONTEXT_NOTICE_CUSTOM_TYPE } from "../notices.js";
 import smartContextExtension from "../index.js";
 
 interface MockPi {
@@ -93,8 +98,8 @@ function fireSessionStart(pi: MockPi, ctx: ExtensionContext): void {
 	pi.events.get("session_start")!({ type: "session_start", reason: "startup" }, ctx);
 }
 
-describe("D4': 越档提醒静默注入（不触发 turn、不进对话流）", () => {
-	it("命中档位 → sendMessage(customType, display:false) + {triggerTurn:false}；不再 sendUserMessage", () => {
+describe("D4①: 越档提醒 nextTurn 投递（不自起 run，随下次 prompt 注入）", () => {
+	it("命中档位 → sendMessage(customType smart-context + display:true + source) + {triggerTurn:false, deliverAs:'nextTurn'}；不再 sendUserMessage", () => {
 		const mock = createMockPi();
 		smartContextExtension(mock.pi);
 		fireSessionStart(mock, makeCtx(0));
@@ -103,9 +108,13 @@ describe("D4': 越档提醒静默注入（不触发 turn、不进对话流）", 
 		expect(mock.sendUserMessage).not.toHaveBeenCalled();
 		expect(mock.sendMessage).toHaveBeenCalledTimes(1);
 		const [message, options] = mock.sendMessage.mock.calls[0]!;
-		expect(message).toMatchObject({ customType: THRESHOLD_REMINDER_CUSTOM_TYPE, display: false });
+		expect(message).toMatchObject({
+			customType: SMART_CONTEXT_NOTICE_CUSTOM_TYPE,
+			display: true,
+			details: { source: "threshold-reminder" },
+		});
 		expect(String(message.content)).toContain("[smart-context]");
-		expect(options).toEqual({ triggerTurn: false });
+		expect(options).toEqual({ triggerTurn: false, deliverAs: "nextTurn" });
 	});
 
 	it("命中档位 → 先写 fired marker（session entries 持久化）", () => {
@@ -198,6 +207,75 @@ describe("D15: 档位持久化跨 factory 重跑（reload 等价拓扑）", () =
 		mock.events.get("session_compact")!({ type: "session_compact" }, makeCtx(250_000));
 		settle(mock, makeCtx(255_000));
 		expect(mock.sendMessage).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe("D5/D4①: 模型切换通知 nextTurn 投递（跨界 switch + downshift 两形态）", () => {
+	beforeEach(() => {
+		activeConfig = structuredClone(TEST_CONFIG);
+	});
+
+	/** 触发 model_select。 */
+	const fireModelSelect = (
+		mock: MockPi,
+		model: { provider: string; id: string; contextWindow?: number },
+		previousModel: { provider: string; id: string; contextWindow?: number },
+		tokens: number,
+	): void => {
+		mock.events.get("model_select")!({ type: "model_select", model, previousModel }, makeCtx(tokens));
+	};
+
+	it("跨越排除边界（切到 excludedModels 内模型）→ switch notice『不可用』经 nextTurn 投递", () => {
+		activeConfig.excludedModels = ["prov/small"];
+		const mock = createMockPi();
+		smartContextExtension(mock.pi);
+		fireModelSelect(mock, { provider: "prov", id: "small" }, { provider: "prov", id: "big" }, 0);
+
+		expect(mock.sendUserMessage).not.toHaveBeenCalled();
+		expect(mock.sendMessage).toHaveBeenCalledTimes(1);
+		const [message, options] = mock.sendMessage.mock.calls[0]!;
+		expect(message).toMatchObject({
+			customType: SMART_CONTEXT_NOTICE_CUSTOM_TYPE,
+			display: true,
+			details: { source: "model-switch" },
+		});
+		expect(String(message.content)).toContain("暂时不可用");
+		expect(options).toEqual({ triggerTurn: false, deliverAs: "nextTurn" });
+	});
+
+	it("同边界内切换（双方都未排除）且未触线 → 静默不投递", () => {
+		const mock = createMockPi();
+		smartContextExtension(mock.pi);
+		fireModelSelect(
+			mock,
+			{ provider: "prov", id: "a", contextWindow: 1_000_000 },
+			{ provider: "prov", id: "b", contextWindow: 1_000_000 },
+			100,
+		);
+
+		expect(mock.sendMessage).not.toHaveBeenCalled();
+	});
+
+	it("切到更小窗口且 tokens 将触线 → downshift notice 经 nextTurn 投递", () => {
+		const mock = createMockPi();
+		smartContextExtension(mock.pi);
+		// 旧窗口 1M → 新窗口 200K；触线 = 200K − pi 内建 reserve 16_384 = 183_616，tokens 190K 已过线
+		fireModelSelect(
+			mock,
+			{ provider: "prov", id: "small", contextWindow: 200_000 },
+			{ provider: "prov", id: "big", contextWindow: 1_000_000 },
+			190_000,
+		);
+
+		expect(mock.sendMessage).toHaveBeenCalledTimes(1);
+		const [message, options] = mock.sendMessage.mock.calls[0]!;
+		expect(message).toMatchObject({
+			customType: SMART_CONTEXT_NOTICE_CUSTOM_TYPE,
+			display: true,
+			details: { source: "model-downshift" },
+		});
+		expect(String(message.content)).toContain("接近新模型窗口上限");
+		expect(options).toEqual({ triggerTurn: false, deliverAs: "nextTurn" });
 	});
 });
 

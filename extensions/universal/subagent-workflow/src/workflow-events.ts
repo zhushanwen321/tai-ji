@@ -66,7 +66,7 @@ import { WorkflowScriptRegistryImpl } from "@zhushanwen/subagent-core";
 // 管道），session_start / session_shutdown 驱动 attach/detach；测试可注入 fake。
 import { createInFlightReporter, type InFlightReporter } from "./host/inflight-reporter.ts";
 // [W2/V1 D1 第 8 行] 判活类消费面（isScriptRunning）经 core 投影单点
-//（runSummary.status 二值——内部收拢注册表 ∨ 聚合混合判源）。
+//（runSummary.status 三态投影——终局判定源 = 终局记录注册表）。
 import { type RunSettlementRecord } from "./jsonl-run-store.ts";
 import { notifyDone, trackNotifiedRunId } from "./workflow-notify.ts";
 // ═══ 跨域事件注册（handler 体住各自域模块，本 seam 原位调用保注册顺序） ═══
@@ -74,6 +74,7 @@ import { setupNotifyLedgerCompactionGuard } from "./workflow-notify.ts";
 import { setupModelEvents } from "./model-events.ts";
 import { setupSubagentsCascadeEvents } from "./subagents-events.ts";
 // ═══ session 生命周期装配 seam（bootstrap seam，设计 §3.1/D1） ═══
+import { GLOBAL_SLOT_KEYS } from "@zhushanwen/subagent-core";
 import {
   getOrCreateDialogQueue,
   setupSessionLifecycle,
@@ -125,7 +126,7 @@ function createWorkflowDomainState(): WorkflowDomainState {
 // 此槽拿回同一 domain state，session_shutdown(reload) 跳过清理（D1）保住的
 // 在飞 run / store 由 post-reload session_start(reason=reload) 的 adoption
 // 接管（D4，session-lifecycle.ts）。
-const WORKFLOW_DOMAIN_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.workflow-domain-state");
+const WORKFLOW_DOMAIN_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.workflowDomainState);
 
 function getOrCreateWorkflowDomainState(): WorkflowDomainState {
   let state = Reflect.get(globalThis, WORKFLOW_DOMAIN_SLOT_KEY) as WorkflowDomainState | undefined;
@@ -148,7 +149,7 @@ function resolveCurrentPi(): ExtensionAPI {
   if (!pi) {
     throw new Error(
       "workflow deps current pi binding unset: setupWorkflowDomain has not run " +
-        "(slot @zhushanwen/pi-subagents.workflow-domain-state); re-run extension factory to re-register",
+        `(slot ${GLOBAL_SLOT_KEYS.workflowDomainState}); re-run extension factory to re-register`,
     );
   }
   return pi;
@@ -482,6 +483,15 @@ export function setupWorkflowDomain(
     const sessionId = ctx.sessionManager.getSessionId();
     lsRef.lastSessionId = sessionId;
 
+    // [PS-68] tree 导航 = 同进程分支导航，非会话替换：pi 原地换叶子
+    //（agent.state.messages = sessionContext.messages）后 emit，不 teardown、不失效
+    // runner——pi 绑定保持有效，此处不作废。替换形态 = new/fork/resume/quit +
+    // switchSession（借 reason="resume"，无专用枚举成员），全部发 session_shutdown；
+    // switchSession 的替换语义由 session_shutdown 非 reload 分支承接，与本 handler
+    // 无交集。reload 另有本文件 :546 显式作废。禁止在此 invalidatePiBinding：作废后
+    // 唯一重臂点 initSession 只由 session_start 触发，tree 导航不触发 session_start，
+    // 本 session 余生 record/notify 的 pi 写入将静默 no-op。
+    // [HISTORICAL] 曾按「switchSession 不发 session_shutdown、其内部路径即 tree 导航域」的假前提在此作废绑定，撤销依据与触发词表登记见 docs/pi-semantics.json PS-61。
     const state = sessionState.get(sessionId);
     if (state) {
       // 一次性生命周期（D-2）：running run 转 done,failed 落盘（helper 内部自过滤
@@ -526,6 +536,14 @@ export function setupWorkflowDomain(
   // ════════════════════════════════════════════════════════════
   pi.on("session_shutdown", async (event: SessionShutdownEvent, _ctx: ExtensionContext) => {
     if (event.reason === "reload") {
+      // [§1.4 (a) reload 分支显式作废句柄] reload 有意跳过全部破坏性清理（下方 D1 分支
+      // 说明——在途 run 交给 reload 后 adoption 接管），但 pi 会话替换会使旧 runner
+      // 失效（PS-30：assertActive 抛 stale after session replacement），core SubagentService
+      // 的 late-bound pi 读面在旧失效句柄上会一路命中 assertActive 抛错（在途 run 的
+      // 轮终收尾正落该窗口）。此处只作废「句柄可用性判定」，不动在途 run 纳管：
+      // 作废后读面降级 null（轮终收尾经有界等待挂到新 initSession 注入），新 session_start
+      // 注入新代际句柄后自然恢复。方法本身不抛（字段写 + 唤醒等待者）。
+      getSubagentService()?.invalidatePiBinding("session replacement (reload)");
       // b 动作保留（理由见上方 D1 分支说明）。
       inflightReporter.detachSession();
 

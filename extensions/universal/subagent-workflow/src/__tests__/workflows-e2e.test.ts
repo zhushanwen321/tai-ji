@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { JsonlRunStore } from "../jsonl-run-store.ts";
-import { actionRun } from "../interface/tool-workflow.ts";
+import { actionRun } from "../interface/tool/tool-workflow.ts";
 import type { AgentRunner } from "@zhushanwen/subagent-core/orchestration/models/ports.ts";
 import type { AgentResult } from "@zhushanwen/subagent-core/orchestration/models/types.ts";
 import {

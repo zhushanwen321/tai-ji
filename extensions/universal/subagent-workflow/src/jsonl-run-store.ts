@@ -19,7 +19,7 @@
  *   的改名波及大于语义收益），语义已收敛为 record store 单模式。
  * - **旧格式两件套（旧 journal `.events.jsonl` + state 快照 `<runId>.jsonl`）不读、
  *   不写、不主动删**（用户裁决 2026-09-28：不做存量迁移）：全部读取路径只认
- *   record 后缀；注册条目的 journalPath 锚点后缀天然区分新旧实体——旧后缀锚点
+ *   record 后缀；注册条目的 recordPath 锚点后缀天然区分新旧实体——旧后缀锚点
  *   = 历史 run，跳过不重建（从壳侧读取面消失即 D1 历史数据处置的预期行为）。
  * - **loadAll = record 流折叠重建**：v2 注册条目定界（本会话有哪些实体）→
  *   record 流全量读 → fold 重建（终局 ⟸ run-settled 帧）；「有注册、无终局帧」
@@ -49,19 +49,26 @@ import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "
 // 全部经 core barrel 消费（生产消费纪律：extensions 源码不深路径 import core）。
 import {
   AgentCall,
-  ALL_RUN_OUTCOMES,
-  Budget,
-  RUN_EVENT_TYPES,
-  RUN_EVENT_JOURNAL_SUFFIX,
+  RUN_EVENTS_SUFFIX,
   STATE_DIR_NAME,
   Trace,
   WORKFLOW_RECORD_CUSTOM_TYPE,
   buildWorkflowRecordSettledEntryData,
   classifyWorkflowRecordEntryData,
   getLogger,
+  // [§3.2] 单行坏行判定规则单源在 core（requireSeq:false = 兼容档，存量无 seq 行放行）；
+  // 壳侧只保留自己的错误文案与 ENOENT 分流。本地词表投影（RUN_EVENT_TYPE_SET /
+  // hasEventEnvelope）与 outcome 判据副本已删。
+  parseRecordStreamLine,
+  parseLegacyArgsSummary as parseLegacyArgsSummaryCore,
   runSettledOutcomeToDoneReason,
+  // [D6(a) 第 1 步] 恢复路径重建的终局事实注入（fold 出 run-settled 帧 → 终局记录
+  // 注册表），与 core isRunSettled / runSummary 的判据同源。
+  noteRebuiltSettlement,
+  settlementRecordOfRunSettledFrame,
   type AgentResult,
   type ExecutionTraceNode,
+  type RunEventLineIssue,
   type RunOutcome,
   type RunStore,
   type WorkflowRecordRegisteredEntryData,
@@ -69,13 +76,14 @@ import {
   type WorkflowRunEvent,
 } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
+import { errorLogsFromEvents, rebuildBudget, runAccountingFromEvents } from "@zhushanwen/subagent-core";
 import { guardStaleCtx, isEnoentError, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // ── [W1 / D1] v2 条目读面（注册定界 + 终态条目抑制）────────────────
 
 /** loadAll 的 entry 扫描产物。 */
 interface EntrySources {
-  /** v2 注册条目（runId → 注册载荷；record 重建的定界源 + journalPath 锚点）。 */
+  /** v2 注册条目（runId → 注册载荷；record 重建的定界源 + recordPath 锚点）。 */
   registered: Map<string, WorkflowRecordRegisteredEntryData>;
   /**
    * 已有 v2 终态条目的 run（runId → 终态载荷，后写覆盖 = last-wins）。唯一用途 =
@@ -96,9 +104,9 @@ function collectV2RecordEntry(entry: CustomEntry, entryIndex: number, sources: E
   if (classification.ok || classification.reason !== "v2") return;
   const v2 = classification.entry;
   if (v2.kind === "registered") {
-    if (typeof v2.runId !== "string" || v2.runId === "" || typeof v2.journalPath !== "string") {
+    if (typeof v2.runId !== "string" || v2.runId === "" || typeof v2.recordPath !== "string") {
       logger.warn(
-        `[subagent-workflow] workflow-record v2 registered entry #${entryIndex} malformed (runId/journalPath missing), skipped`,
+        `[subagent-workflow] workflow-record v2 registered entry #${entryIndex} malformed (runId/recordPath missing), skipped`,
       );
       return;
     }
@@ -116,8 +124,9 @@ function collectV2RecordEntry(entry: CustomEntry, entryIndex: number, sources: E
 }
 
 /** loadAll 的 entry 扫描：主 session entries → v2 注册定界 + 终态条目抑制（唯一发现
- *  通道）。历史形态 entry（v1 全量快照 / 旧 workflow-state-link 指针）静默忽略——
- *  历史数据仍在盘上，不再重建；未知 entry 的容忍面不受影响。 */
+ *  通道）。历史形态 entry（v1 全量快照 / 旧 workflow-state-link 指针）静默消失——
+ *  不识别、不拒读、不报错，是设计预期（[ADR-0095] 同 record 侧 v1 处置：项目未上线
+ *  无历史数据，不迁移不兼容）；未知 entry 的容忍面不受影响。 */
 function collectEntrySources(entries: SessionEntry[]): EntrySources {
   const sources: EntrySources = {
     registered: new Map<string, WorkflowRecordRegisteredEntryData>(),
@@ -172,21 +181,16 @@ export class RecordStreamCorruptionError extends Error {
   }
 }
 
-/** record 事件词表集合（[D2] 守卫判定的本地只读投影；词表 SSOT = run-events RUN_EVENT_TYPES）。 */
-const RUN_EVENT_TYPE_SET: ReadonlySet<string> = new Set<string>(RUN_EVENT_TYPES);
-
-/** 事件信封守卫（taste/no-unsafe-cast：结构断言改类型守卫——type/ts 可用性在守卫内收窄）。 */
-function hasEventEnvelope(v: object): v is { type: string; ts: number } {
-  const rec = v as Record<string, unknown>;
-  return typeof rec["type"] === "string" && rec["type"] !== "" && typeof rec["ts"] === "number" && Number.isFinite(rec["ts"]);
-}
-
 /**
  * record 流全量读（严格解析）：合法事件行按写入序返回；坏行（JSON 解析失败 /
- * 非对象 / 缺 type/ts 信封）与载荷完整性缺失（agent-settled 帧缺 result 全文）
+ * 非对象 / 缺 type/ts 信封 / 词表外 type 或 outcome / agent-settled 帧缺 result 全文）
  * 抛 {@link RecordStreamCorruptionError}——不静默跳过（场景 18 坏行停摆语义，
  * 与 core journal scan 活体投影的宽容跳过语义刻意分层：活体 fold 不能因单帧
  * 全停，恢复读面不能对损坏装瞎）。
+ *
+ * [§3.2] 判据经 core 单源原语 parseRecordStreamLine（requireSeq=false——本读面
+ * 兼容 W1 前无 seq 的存量行）消费；core 恢复读面用同一原语的严格档。两侧真差异只剩
+ * 错误文案与 ENOENT 分流。
  *
  * 文件不存在（ENOENT）原样上抛交调用方分流（新形态实体早期崩溃 vs 历史实体）。
  */
@@ -203,39 +207,34 @@ function readRecordStream(recordPath: string): WorkflowRunEvent[] {
           "record 流是 run 域唯一事实源（D1），坏行意味着截断/篡改/写入器缺陷。恢复：检查该文件是否被外部编辑" +
           "或写入器版本与载荷契约不符（dispatchRunCreated/dispatchAskSettled）；无法修复时接受该 run 不可续跑，勿手工删行。",
       );
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      throw corruption("非法 JSON（半截行/截断写入）");
-    }
-    if (typeof parsed !== "object" || parsed === null || !hasEventEnvelope(parsed)) {
-      throw corruption("缺事件信封（type/ts）或非对象行");
-    }
-    const event = parsed as WorkflowRunEvent;
-    // [D2] 词表/词值守卫（对齐 core isWorkflowRunEventLine 判定面）：type 落词表 +
-    // outcome（携带时）落词表——历史形态帧（旧词表成员/旧 outcome 值）按损坏拒绝
-    // （[D1] 历史数据处置：旧词表行不进解析路径；本 strict 读面不静默跳过坏行，
-    // 拒绝语义同半截行——调用方 storeHealthy=false fail-fast）。
-    if (!RUN_EVENT_TYPE_SET.has(event.type)) {
-      throw corruption(`词表外事件 type=${JSON.stringify(event.type)}（旧词表历史行——[D1] 不读旧两件）`);
-    }
-    if (event.type === "run-settled" || event.type === "agent-settled") {
-      // event 已窄化为 RunSettledEvent | AgentSettledEvent（两成员 outcome 均必填）；
-      // !== undefined 防御保留——旧格式历史行可能缺字段（读取面放行，词表判据兜底）。
-      const outcome = event.outcome;
-      if (outcome !== undefined && !(ALL_RUN_OUTCOMES as readonly string[]).includes(outcome as string)) {
-        throw corruption(`词表外 outcome=${JSON.stringify(outcome)}（[D2] 词表重构后的历史形态——interrupted 已入 lifecycle）`);
-      }
-    }
-    if (event.type === "agent-settled" && event.result === undefined) {
-      throw corruption(
-        "agent-settled 帧缺 result 全文（record 单源后为非法形态——流被篡改或写入器未携带全文，场景 18）",
-      );
-    }
-    events.push(event);
+    const result = parseRecordStreamLine(line, { requireSeq: false });
+    if (!result.ok) throw corruption(describeRecordStreamIssue(result.issue));
+    events.push(result.event);
   }
   return events;
+}
+
+/** 单行问题 → 壳 strict 读面的中文文案（core 恢复读面同问题出英文文案——本函数不共享）。 */
+function describeRecordStreamIssue(issue: RunEventLineIssue): string {
+  switch (issue.kind) {
+    case "invalid-json":
+      return "非法 JSON（半截行/截断写入）";
+    case "not-object":
+      return "非对象行（JSON 顶层不是对象）";
+    case "type-envelope":
+      return "缺事件信封（type 非字符串或为空）";
+    case "type-outside-vocabulary":
+      return `词表外事件 type=${JSON.stringify(issue.value)}（旧词表历史行——[D1] 不读旧两件）`;
+    case "ts-envelope":
+      return "缺事件信封 ts（非有限数值）";
+    case "seq-envelope":
+      // 兼容档（requireSeq=false）不校验 seq——本分支仅防御性保留（规则档位改动时文案已在）。
+      return `seq 信封非法 seq=${JSON.stringify(issue.value)}`;
+    case "outcome-outside-vocabulary":
+      return `词表外 outcome=${JSON.stringify(issue.value)}（[D2] 词表重构后的历史形态——interrupted 已入 lifecycle）`;
+    case "agent-settled-missing-result":
+      return "agent-settled 帧缺 result 全文（record 单源后为非法形态——流被篡改或写入器未携带全文，场景 18）";
+  }
 }
 
 /** 事件流尾向扫描取最后一帧 run-settled（单终局不变量下的防御性读取）。 */
@@ -308,20 +307,20 @@ interface CallDraft {
  * 语义限制，回落处置对齐 core 侧「尽力恢复」——core 同款分支 warn 留证，非静默）。
  */
 function parseLegacyArgsSummary(argsSummary: string | undefined): Record<string, unknown> {
-  if (argsSummary === undefined || argsSummary === "" || argsSummary.endsWith("…")) return {};
-  try {
-    const parsed: unknown = JSON.parse(argsSummary);
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch (err) {
-    // 回落 {} 不变（$ARGS 语义限制），warn 留证旧格式数据异常（对齐 core
-    // parseArgsSummary 同分支的日志级别）
+  // [§3.2] 恢复规则单源（core parseLegacyArgsSummary，与 resume-run 的旧格式回落同一实现）；
+  // 本包装只补壳侧日志文案——截断分支此前壳侧静默、core 侧 warn，现两侧同留证。
+  const { args, issue } = parseLegacyArgsSummaryCore(argsSummary);
+  if (issue === "truncated-summary") {
     logger.warn(
-      `[subagent-workflow] legacy run-created argsSummary is not parseable JSON — $ARGS restored as {} (${toErrorMessage(err)})`,
+      "[subagent-workflow] legacy run-created argsSummary is truncated — $ARGS restored as {} " +
+        "(legacy record stream predates the full-args payload; rerun with a fresh run if the script needs exact args)",
     );
+  } else if (issue === "not-parseable") {
+    logger.warn("[subagent-workflow] legacy run-created argsSummary is not parseable JSON — $ARGS restored as {}");
+  } else if (issue === "not-object") {
+    logger.warn("[subagent-workflow] legacy run-created argsSummary is not a JSON object — $ARGS restored as {}");
   }
-  return {};
+  return args;
 }
 
 /** [foldRecordStreamToRun 拆分] 事件流 → call 重建中间形态（per taskIndex 聚合
@@ -418,21 +417,60 @@ function draftsToAgentCalls(
 }
 
 
+/**
+ * spec 重建预算的读取面三档回落（与 core resume-run.assertResumeEligibility 等价，
+ * 少 options 档——resume 的显式覆盖已由 core 写进 run-resumed 帧，本折叠只表达
+ * record 事实）：最近一条 run-resumed 的生效值 > run-created 的创建预算；两者
+ * 皆无/<=0 = 不限制。取流尾最近一条 run-resumed 而非「最近一条带字段」——更晚的
+ * 「不限时复活」（0/负值不落字段）须回落 created，而非错误地沿用更早的覆盖值。
+ * 回落按**逐字段 `??`**（两轴独立）：run-resumed 帧可只载一轴（另一轴沿 created
+ * 继承），与 core 侧 `lastResumed?.budgetTimeMs ?? created.budgetTimeMs` 同构。
+ * 双预算轴（budgetTimeMs / budgetTokens）同遍历；`findLast` 属 ES2023 lib
+ * （本包 target ES2022）——从尾向头手写。
+ */
+function resolveSpecBudget(
+  created: Extract<WorkflowRunEvent, { type: "run-created" }> | undefined,
+  events: readonly WorkflowRunEvent[],
+): { budgetTimeMs?: number; budgetTokens?: number } {
+  let lastResumed: Extract<WorkflowRunEvent, { type: "run-resumed" }> | undefined;
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i]!;
+    if (event.type === "run-resumed") {
+      lastResumed = event;
+      break;
+    }
+  }
+  const budgetTimeMs = lastResumed?.budgetTimeMs ?? created?.budgetTimeMs;
+  const budgetTokens = lastResumed?.budgetTokens ?? created?.budgetTokens;
+  return {
+    ...(budgetTimeMs !== undefined ? { budgetTimeMs } : {}),
+    ...(budgetTokens !== undefined ? { budgetTokens } : {}),
+  };
+}
+
 /** [foldRecordStreamToRun 拆分] run spec 重建（run-created 帧优先，注册条目兜底）：
  * args 全文优先（设计 §3.1 载荷表 run-created 行「args」）；旧格式帧回落
  * argsSummary 尽力恢复（未截断可完整恢复，截断回落 {}——core parseArgsSummary
  * 同款语义；两侧行为等价由 record-mode 测试锁定）；scriptPath 锚定恢复（core
  * rebuildRunFromRecord 同款）：worker 沙箱 eval 模式无 __dirname，模板脚本靠
- * scriptPath 定位 _shared 族共享件；旧格式帧缺失回落空串。 */
+ * scriptPath 定位 _shared 族共享件；旧格式帧缺失回落空串。budgetTimeMs/budgetTokens
+ * 恢复（core 同款三档回落的 record 侧：最近一条 run-resumed 的生效值 > run-created
+ * 的创建预算，仅 > 0 落 spec）：引擎/展示投影按 run 生效预算读（缺字段 = 旧格式/
+ * 未设预算 = 不限制）。 */
 function rebuildRunSpecFromEntries(
   created: Extract<WorkflowRunEvent, { type: "run-created" }> | undefined,
   reg: WorkflowRecordRegisteredEntryData,
+  budgets: { budgetTimeMs?: number; budgetTokens?: number },
 ) {
   return {
     scriptSource: created?.scriptSource ?? "",
     args: created?.args ?? parseLegacyArgsSummary(created?.argsSummary),
     scriptName: reg.scriptName,
     scriptPath: created?.scriptPath ?? "",
+    // 条件式与 core rebuildRunFromRecord 等价（> 0 才落字段）——旧格式帧/0/负值
+    // 一律不限时/不限制，两侧折叠结果同形
+    ...(budgets.budgetTimeMs !== undefined && budgets.budgetTimeMs > 0 ? { budgetTimeMs: budgets.budgetTimeMs } : {}),
+    ...(budgets.budgetTokens !== undefined && budgets.budgetTokens > 0 ? { budgetTokens: budgets.budgetTokens } : {}),
     ...(reg.slug !== undefined ? { slug: reg.slug } : {}),
   };
 }
@@ -441,6 +479,7 @@ function foldRecordStreamToRun(
   runId: string,
   reg: WorkflowRecordRegisteredEntryData,
   events: readonly WorkflowRunEvent[],
+  settled?: WorkflowRecordSettledEntryData,
 ): WorkflowRun {
   const created = events.find(
     (e): e is Extract<WorkflowRunEvent, { type: "run-created" }> => e.type === "run-created",
@@ -448,7 +487,13 @@ function foldRecordStreamToRun(
   const startedAtMs =
     created?.ts ?? (Number.isFinite(reg.startedAt) ? reg.startedAt : Date.now());
   const startedAtIso = new Date(startedAtMs).toISOString();
-  const spec = rebuildRunSpecFromEntries(created, reg);
+  const spec = rebuildRunSpecFromEntries(created, reg, resolveSpecBudget(created, events));
+  // [§2.1b] 会计重建：v2 终态条目带活体口径 usedTokens/callCount → 真值优先；条目缺席
+  // 回落 agent-settled.result.usage 的同一加权口径（下界近似，含 usedCost）。
+  const budget = rebuildBudget(settled, events);
+  // [§2.1 errorLogs 持久化 / ADR-0093] 诊断日志重建：worker-log 帧 → errorLogs（与活体
+  // 写入同语义：按序 + 尾部上限裁剪）。此前无持久面、重启即空。
+  const errorLogs = errorLogsFromEvents(events);
 
   const drafts = collectRunCallDrafts(events);
 
@@ -467,18 +512,17 @@ function foldRecordStreamToRun(
       runId,
       spec,
       {
-        status: "running",
-        budget: new Budget(),
+        budget,
         calls,
         trace,
-        errorLogs: [],
+        errorLogs,
       },
       {
         startedAt: startedAtIso,
-        // 中断标记（[D2] 聚合 status 两态、中断态经 meta 投影表达）：末次
-        // run-interrupted 后无 run-resumed 复活 → meta.interruptedAt 置位，
-        // runSummary 投影 'interrupted'（CLI/TUI 不显示僵尸「运行中」；resume
-        // 资格判据在 core fold lifecycle，不受本投影影响）。
+        // 中断标记（[D2] 中断态经 meta 投影表达）：末次 run-interrupted 后无
+        // run-resumed 复活 → meta.interruptedAt 置位，runSummary 投影 'interrupted'
+        //（CLI/TUI 不显示僵尸「运行中」；resume 资格判据在 core fold lifecycle，
+        // 不受本投影影响）。
         ...(interruptedAt !== undefined ? { interruptedAt } : {}),
       },
     );
@@ -488,12 +532,11 @@ function foldRecordStreamToRun(
     runId,
     spec,
     {
-      status: "done",
       reason,
-      budget: new Budget(),
+      budget,
       calls,
       trace,
-      errorLogs: [],
+      errorLogs,
       // 成功终局无 error；失败终局带帧 reason 文本（不落 generic 恢复文案）
       ...(reason !== "completed" && settledEvent.reason !== undefined ? { error: settledEvent.reason } : {}),
     },
@@ -555,7 +598,7 @@ export class JsonlRunStore implements RunStore {
 
   /** record 流路径 for a given runId（唯一持久件）。 */
   private recordPathFor(runId: string): string {
-    return path.join(this.stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+    return path.join(this.stateDir, `${runId}${RUN_EVENTS_SUFFIX}`);
   }
 
   /**
@@ -616,7 +659,7 @@ export class JsonlRunStore implements RunStore {
    * 保持 running 交恢复链收编）；已终局且终态条目缺失 → 幂等补写（条目投影锚
    * 的收编半边；经 rebind 后的 appendEntry 面，stale guard 内置）。
    *
-   * **历史实体分流（D1 历史数据处置）**：注册条目 journalPath 锚点后缀非
+   * **历史实体分流（D1 历史数据处置）**：注册条目 recordPath 锚点后缀非
    * record 后缀 = 旧形态实体（旧 journal 锚点）→ 跳过不重建（历史 run 从壳侧
    * 读取面消失 = 预期行为，不读旧两件套）。
    *
@@ -665,8 +708,8 @@ export class JsonlRunStore implements RunStore {
   ): WorkflowRun[] {
     const runs: WorkflowRun[] = [];
     for (const [runId, reg] of registered) {
-      const recordPath = reg.journalPath;
-      if (!recordPath.endsWith(RUN_EVENT_JOURNAL_SUFFIX)) {
+      const recordPath = reg.recordPath;
+      if (!recordPath.endsWith(RUN_EVENTS_SUFFIX)) {
         // 旧形态锚点（旧 journal .events.jsonl）= 历史 run：不读旧两件套
         //（D1 历史数据处置——历史 run 从壳侧读取面消失，resume 一律拒绝）。
         logger.debug(
@@ -695,7 +738,7 @@ export class JsonlRunStore implements RunStore {
           logger.warn(
             `[subagent-workflow] record store: record stream missing, degraded rebuild for interruption adoption (runId=${runId}, path=${recordPath})`,
           );
-          runs.push(foldRecordStreamToRun(runId, reg, []));
+          runs.push(foldRecordStreamToRun(runId, reg, [], settledEntries.get(runId)));
           continue;
         }
         // 损坏 / 真实 IO 错误：拒绝（穿透 → 宿主 fail-fast），不静默降级。
@@ -711,8 +754,15 @@ export class JsonlRunStore implements RunStore {
         );
         continue;
       }
-      const run = foldRecordStreamToRun(runId, reg, events);
+      const run = foldRecordStreamToRun(runId, reg, events, settledEntries.get(runId));
       runs.push(run);
+      // [D6(a) 第 1 步] 终局事实随重建产物带到消费面：fold 判定出「该 run 的 record
+      // 流里有 run-settled 帧」后，把帧载荷登记进 core 终局记录注册表——重启后
+      // runSummary 投影（展示仍为 done）与 isRunSettled / evictDoneRunsBeyondCap
+      // （done run 内存淘汰白名单）据此判定，不再绕道聚合 status 字段读回。
+      if (settledEvent !== undefined) {
+        noteRebuiltSettlement(runId, settlementRecordOfRunSettledFrame(settledEvent));
+      }
       // 终态条目幂等补写：record 已终局而主 session 终态条目缺失（终局 coda 的
       // 条目半边写失败 / 旧版本写点形态）→ 补写；条目已在 → 跳过（双重启不重复
       // 追加的构造性保证）。无 pi（测试/非 Pi 环境）跳过。
@@ -743,7 +793,9 @@ export class JsonlRunStore implements RunStore {
       ...(settledEvent.errorCode !== undefined ? { errorCode: settledEvent.errorCode } : {}),
       settledAt: settledEvent.ts,
       callCount: events.filter((e) => e.type === "agent-settled").length,
-      usedTokens: 0,
+      // [§2.1b] 由 agent-settled.result.usage 推导（core 单源加权口径；此前硬编码 0，
+      // 展示层把补写条目显示成零消耗）
+      usedTokens: runAccountingFromEvents(events).usedTokens,
     });
     try {
       this.pi.appendEntry(WORKFLOW_RECORD_CUSTOM_TYPE, data);

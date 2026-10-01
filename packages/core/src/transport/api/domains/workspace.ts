@@ -39,23 +39,7 @@ export async function record(cwd: string): Promise<RecentWorkspaceRecord[]> {
  * 检测 cwd 所在 git 仓库模式（bare-workspace / plain-repo / not-repo）。
  *
  * 返回三态 { mode, wsRoot, barePath, repoRoot, defaultBranch }。
- * workspace.detectBare 为此接口的向后兼容别名（仅返 isBare/wsRoot/barePath）。
  */
 export async function detect(cwd: string): Promise<WorkspaceDetectReply> {
   return command('workspace.detect', { cwd }, RPC_BACKSTOP_TIMEOUT_MS)
-}
-
-/**
- * 检测 cwd 是否位于 bare repo + worktree 结构（向后兼容别名）。
- *
- * 映射到 workspace.detect，提取 isBare/wsRoot/barePath 三个字段。
- * 新代码应优先使用 detect() 获取完整三态信息。
- */
-export async function detectBare(cwd: string): Promise<{ isBare: boolean; wsRoot: string; barePath: string }> {
-  const result = await detect(cwd)
-  return {
-    isBare: result.mode === 'bare-workspace',
-    wsRoot: result.wsRoot,
-    barePath: result.barePath,
-  }
 }

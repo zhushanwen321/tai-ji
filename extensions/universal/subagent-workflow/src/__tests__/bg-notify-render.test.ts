@@ -15,11 +15,11 @@ import { fileURLToPath } from "node:url";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
-import { renderBgNotifyMessage } from "../interface/bg-notify-render.ts";
+import { renderBgNotifyMessage } from "../interface/gui/bg-notify-render.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** 壳侧消费方源码（同构成败推导已收敛删除）。 */
-const CONSUMER_SOURCE = join(here, "..", "interface", "bg-notify-render.ts");
+const CONSUMER_SOURCE = join(here, "..", "interface", "gui", "bg-notify-render.ts");
 
 /**
  * 手写同构 switch 的源码特征 token：出现即说明有人把收敛删除的成败推导又写了回去。
@@ -344,3 +344,57 @@ describe("同构 switch 残留守卫（收敛删除后不得写回）— 壳侧�
   });
 });
 
+
+// ============================================================
+// [§2.2] 通知字形与 outcome 同源（失败不再画绿勾）
+// ============================================================
+describe("通知字形（§2.2 回归）", () => {
+  it("failed（outcome 一等字段）→ ✗ + error 色，与 failed 文案同源", () => {
+    const { theme, fgColors } = makeTheme();
+    const comp = renderBgNotifyMessage(
+      { details: { status: "closed", outcome: "failed", agent: "scout", id: "bg-g1", error: "boom" } },
+      { expanded: false },
+      theme,
+    );
+    const joined = comp!.render(80).join("\n");
+    // 修复前：statusGlyph("closed") 返回 ✓ success，与同一行派生的 "failed" 文案自相矛盾
+    expect(joined).toContain("✗");
+    expect(joined).not.toContain("✓");
+    expect(fgColors).toContain("error");
+  });
+
+  it("failed（派生路径：无 outcome，仅 closedReason/error）同款 ✗", () => {
+    const { theme, fgColors } = makeTheme();
+    const comp = renderBgNotifyMessage(
+      { details: { status: "closed", closedReason: "gc", error: "legacy", agent: "w", id: "bg-g2" } },
+      { expanded: false },
+      theme,
+    );
+    expect(comp!.render(80).join("\n")).toContain("✗");
+    expect(fgColors).toContain("error");
+  });
+
+  it("cancelled → ■（无正文行），completed → ✓ success", () => {
+    const cancelled = (() => {
+      const { theme, fgColors } = makeTheme();
+      const comp = renderBgNotifyMessage(
+        { details: { status: "closed", outcome: "cancelled", agent: "w", id: "bg-g3" } },
+        { expanded: false },
+        theme,
+      );
+      return { joined: comp!.render(80).join("\n"), fgColors };
+    })();
+    expect(cancelled.joined).toContain("■");
+    expect(cancelled.fgColors).toContain("muted");
+
+    const { theme, fgColors } = makeTheme();
+    const comp = renderBgNotifyMessage(
+      { details: { status: "closed", outcome: "completed", agent: "w", id: "bg-g4", result: "ok" } },
+      { expanded: false },
+      theme,
+    );
+    const joined = comp!.render(80).join("\n");
+    expect(joined).toContain("✓");
+    expect(fgColors).toContain("success");
+  });
+});

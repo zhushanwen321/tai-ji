@@ -1,6 +1,6 @@
 /**
- * Plan store —— plan 模式重设计 u1-store：per-session 的 PlanStateView + 评论草稿状态源
- * （设计 plan-mode-redesign §3.3-D1⑥ 冷启动首拉 / D6 评论生命周期）。
+ * Plan store —— plan 模式状态机显式化（plan-mode-state-machine 设计 D1/D2/D4）：
+ * per-session 的 PlanStateView + 评论草稿 + 审批条窗口状态（已应答抑制窗 / degraded 稳定窗）状态源。
  *
  * 职责：
  * - 分区：per-session Map 分区走 useSessionScopedState 工厂（ADR-0049 Map 分区派）。
@@ -10,61 +10,207 @@
  * - 评论草稿（D6）：提交前是本 store 草稿（内存态，刷新丢失可接受——与 composer 草稿同
  *   语义），提交时由 PlanReviewBar 审批条打包进 respond payload 注入对话流持久。加/删/清空
  *   只作用于当前焦点 session 分区（scoped.update 读 focusedSid 实时值，null sid 工厂内建 no-op）。
- * - 三步阶段指示（D1，推导不落盘，ext-simplify-06「可推导信息不落盘」延续）：
- *   ① 需求探索 = isActive && !docs.length；② 文档撰写 = isActive && docs.length ≥ 1 &&
- *   无 reviewState；③ 审阅确认 = reviewState ∈ {awaiting, revising}。derivePlanStage
- *   纯函数承载，分区不存阶段字段。
+ * - 三步阶段指示（D1）+ 已批准档（D5 阶段不倒退）：derivePlanStage 纯函数承载（derivePhase
+ *   单点接线，禁止消费方各自 if 拼——consumers.md §三 C），分区不存阶段字段。
+ * - 审批条窗口状态（D4）：「已应答抑制窗」标记（respond 成功 / requestsInvalidated 摘除
+ *   planReview 挂起即置标记，预期后态帧（state ≠ reviewing）/ 新 planReview pending 到达 /
+ *   10s 双源冷拉真值三路解除）+「degraded 稳定窗」（state=reviewing ∧ 无挂起 ∧ 无标记的
+ *   组合持续 ≥2s 才放行渲染；冷拉真值豁免稳定窗直通）。per-session 定时器 arm/cancel，
+ *   epoch 世代比较防陈旧定时器误触发；2s + 10s 共 ≤2 个 per-session 定时器（上界量化），
+ *   清理挂分区 cleanup 链（frameRevs 同款）。
  *
- * 与 WS/RPC 的接线边界：本 store 只持状态与操作（applyFrame / loadPlanState），订阅与
- * 首拉触发编排归 composables/use-plan-sync.ts（usePlanState）。首拉回填带陈旧守卫
- * （per-sid 帧版本号）：live 帧在请求在途窗口内到达时，更早启动的冷读 reply 整体丢弃
- * （冷回填不倒拨热状态，F-R2-1；见 frameRevs 注释）。
+ * 与 WS/RPC 的接线边界：本 store 只持状态与操作（applyFrame / loadPlanState / 审批窗口
+ * actions），订阅与首拉触发编排归 composables/use-plan-sync.ts（usePlanState）；planReview
+ * 挂起的入店/出店漏斗归 useExtensionUI（其漏斗点回调本 store 的 setPlanReviewPending /
+ * markPlanReviewAnswered——store 禁 import store（铁律），挂起镜像由该漏斗单写）。
+ * 首拉回填带陈旧守卫（per-sid 帧版本号）：live 帧在请求在途窗口内到达时，更早启动的冷读
+ * reply 整体丢弃（冷回填不倒拨热状态，F-R2-1；见 frameRevs 注释）。
  *
  * stores 间依赖方向：无（不 import 其他 store）。焦点 sid 由 use-plan-sync 从 panel store
  * 读取后经 syncFocus 注入（跨 store 编排在 composable 层，useListSync 先例）。
  *
- * PlanReviewComment 本地同形说明：契约根在 extension-protocol core/types（u-foundation，
- * 字段 { quote: 划选引文, comment: 评语 }）；renderer 不依赖 extension-protocol（同
- * shared PlanDocMeta 的多端同形惯例——最底层共享包不反向依赖，形状漂移由双端契约测试守卫）。
+ * 契约引用（D2/D3④ regime：renderer 直接 import @zhushanwen/extension-protocol，renderer
+ * 早已依赖它——旧「本地同形」惯例已随状态机契约冻结退役）：PlanLifecycleState /
+ * derivePhase（state-machine）与 PlanReviewComment（core/types）均直接引用契约根，
+ * 本地同形副本已删除迁移（consumers.md 一④）。
  */
 import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { ComputedRef } from 'vue'
 import type { PlanStateView } from '@taiji/shared'
+import {
+  derivePhase,
+  PLAN_LIFECYCLE_STATES,
+  type PlanLifecycleState,
+  type PlanReviewComment,
+} from '@zhushanwen/extension-protocol'
 import { command, RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
+import {
+  getPendingRequests,
+  type ExtensionUIRequest,
+} from '@taiji/core/transport/api/domains/extension'
 import { toErrorMessage } from '@taiji/core'
 import {
   useSessionScopedState,
   registerSessionCleanup,
 } from '@/composables/useSessionScopedState'
 
-/** 用户对某文档划选段落的一条评论（与 extension-protocol core/types PlanReviewComment 同形，见文件头说明）。 */
-export interface PlanReviewComment {
-  /** 划选引文（agent 定位段落用） */
-  quote: string
-  /** 评语 */
-  comment: string
-}
+export type { PlanReviewComment }
 
-/** 三步阶段指示值（D1 推导三元组；与设计编号 ①②③ 一一对应，i18n 文案归 PlanModeBar 状态带）。 */
+/** 三步阶段指示值（D1 推导 + D5 已批准档；与设计 ①②③ 一一对应，i18n 文案归 PlanModeBar 状态带）。 */
 export type PlanStage =
   | 'exploring' // ① 需求探索
   | 'writing' // ② 文档撰写
-  | 'reviewing' // ③ 审阅确认
+  | 'reviewing' // ③ 审阅确认（进行中）
+  | 'approved' // ③ 审阅确认 · 已完成（✓）——approved/dispatching，阶段不倒退（F5）
+
+/** 审批条分支模式（D4 分支公式输出；null = 不渲染）。 */
+export type PlanReviewBarMode = 'ready' | 'revising' | 'degraded'
 
 /**
- * 三步阶段推导（D1：推导不落盘）。
+ * D8「agent 未响应」检测窗相位（显式状态机，dmg-r1-2 开窗时机修正）：
+ * - `idle`：无在途 nudge——一切终态信号 no-op（未点重提 / 已收口）。
+ * - `armed`：nudge 已提交（send resolve）但 nudge 轮尚未开——session 忙时 runtime busy
+ *   预检拒绝走 reply success，nudge 推迟投递，此相位下到达的 message.complete / error
+ *   属于**前置在途 turn**（先于 nudge 轮起点标记），不判定；send.rejected 例外（见下）。
+ * - `watching`：nudge 轮自身的 message_start 已到（轮真正开始）——turn 终态信号此刻起
+ *   判「agent 未响应」。send.rejected（预检拒绝未进轮 / defer 重投再拒）不受起点标记门：
+ *   armed 与 watching 相位均落错误行（nudge 在途时被拒 = 未进轮，失败要出声）。
+ */
+export type PlanReviewNudgePhase = 'idle' | 'armed' | 'watching'
+
+// ── state 读侧解析（归一产物直读；垃圾值域守卫 = 保留边界的「垃圾 state 值防御」落点）──
+
+/**
+ * PlanStateView → PlanLifecycleState 解析。归一点（runtime extractor）产出的 View 恒携带
+ * `state`（旧 entry 的 reviewState 映射已在 entry 读取侧完成，不进本帧——批次 3 条目 1：
+ * 混装格兜底映射随 deprecated 双字段删除）；缺失/垃圾 state 值统一落 'idle'（不信任外部
+ * 格式）。声明的行为变更例外：垃圾 state 值 + isActive=true 格原经 isActive 推断呈
+ * 'planning'，现落 'idle'（仅手改 session 文件可达的坏数据格）。
+ */
+export function resolvePlanLifecycleState(view: PlanStateView | null): PlanLifecycleState {
+  if (!view) return 'idle'
+  const state = view.state
+  if (state !== undefined && (PLAN_LIFECYCLE_STATES as readonly string[]).includes(state)) {
+    return state
+  }
+  return 'idle'
+}
+
+/**
+ * resumeHint 解析（D2）：'resubmit' 直读；其余/缺省 = 来源未知（不猜测来源）。
+ */
+export function resolveResumeHint(view: PlanStateView | null): 'resubmit' | undefined {
+  if (!view) return undefined
+  if (view.resumeHint === 'resubmit') return 'resubmit'
+  return undefined
+}
+
+/**
+ * 三步阶段推导（D1：推导不落盘）——derivePhase 单点接线（consumers.md §三 C）。
  * @param view session 分区内的 PlanStateView（null = 无 plan 状态）
- * @returns 阶段指示；isActive=false（退出/执行后）或无 view 时返回 null——PlanModeBar 由 isActive
- *          驱动消失，阶段随 PlanModeBar 不外显。reviewState 优先于 docs 判定（③ 公式不含 docs 条件；
- *          isActive 门兜住 reset 终态矩阵之外的异常组合）。
+ * @returns 阶段指示；isActive=false / phase idle·terminal 时返回 null（PlanModeBar 由 isActive
+ *          驱动消失，阶段随 PlanModeBar 不外显）。phase 'planning'（planning|revising）按
+ *          docs 有无分 ①/②；phase 'reviewing' → ③ 进行中；phase 'approved'
+ *          （approved|dispatching）→ ③ 已完成（✓）——执行方式表单挂起期间不打回 ②（F5）。
  */
 export function derivePlanStage(view: PlanStateView | null): PlanStage | null {
   if (!view?.isActive) return null
-  if (view.reviewState === 'awaiting' || view.reviewState === 'revising') return 'reviewing'
-  const docsCount = view.docs?.length ?? 0
-  if (docsCount === 0) return 'exploring'
-  return 'writing'
+  const phase = derivePhase(resolvePlanLifecycleState(view))
+  if (phase === 'reviewing') return 'reviewing'
+  if (phase === 'approved') return 'approved'
+  if (phase === 'planning') return (view.docs?.length ?? 0) === 0 ? 'exploring' : 'writing'
+  return null
+}
+
+/**
+ * 审批条分支公式（D4 单源——禁止消费方各自拼并集，F1「两个事实源的并集祈祷一致」的反面）：
+ * - `ready ⇔ 挂起 planReview 请求存在`（runtime 注册表投影，唯一交互权威；**presence 语义
+ *   ——ready 恒优先渲染**）
+ * - 抑制窗（ackMarked）压制一切 state 判定分支（degraded / revising）
+ * - `revising ⇔ state=revising`（无挂起、无压制）
+ * - `degraded ⇔ state=reviewing ∧ 无挂起 ∧ 稳定窗放行`（稳定窗 = 组合持续 ≥2s 或冷拉真值豁免）
+ * - state=dispatching/approved 不进审批条（执行方式表单是其唯一交互面）；其余不渲染
+ */
+export interface PlanReviewBarModeInput {
+  isActive: boolean
+  hasPending: boolean
+  state: PlanLifecycleState
+  ackMarked: boolean
+  degradedGate: boolean
+}
+
+export function derivePlanReviewBarMode(input: PlanReviewBarModeInput): PlanReviewBarMode | null {
+  if (!input.isActive) return null
+  if (input.hasPending) return 'ready'
+  if (input.ackMarked) return null
+  if (input.state === 'revising') return 'revising'
+  if (input.state === 'reviewing' && input.degradedGate) return 'degraded'
+  return null
+}
+
+// ── 审批窗口时序常量（D4）──
+
+/**
+ * degraded 稳定窗：`state=reviewing ∧ 无挂起` 组合持续该时长后放行渲染（S15 五断言口径）。
+ * [时间平抑红线登记]（2s 稳定窗 = 用时间换一致的兜底）：
+ *   补偿根因：双源投影时延差——planReview 挂起（runtime 注册表 → requests 广播 →
+ *   registry 漏斗）与 plan-state 值帧（entry 持久化投影）是两条独立链路，值帧先达
+ *   reviewing 而挂起登记在途的瞬窗，组合判定呈假阳性 degraded。不能靠事件顺序或单一
+ *   事实源自然解决：presence 与值分属两个投影域，到达顺序无契约，双域架构下「瞬时无
+ *   挂起」结构上不可判别是「真无挂起」还是「登记在途」。
+ *   量级/形态：组合转真 arm 2s 单发（已在计时不重启）；变假 cancel·重置；epoch 世代
+ *   防陈旧回调；冷拉真值豁免直通（对账结果即事实，不走窗）。
+ *   恢复路径：满窗放行 degraded 渲染；期间挂起到达（ready 恒优先）或组合变假即自然消解。
+ *   重审触发（退役条件）：挂起注册表与 plan-state 帧合并为单一状态帧（一次投影同帧
+ *   携带 presence 与值）时，假阳性瞬窗构造性消失，本稳定窗退役。
+ */
+export const PLAN_REVIEW_DEGRADED_STABLE_MS = 2_000
+/**
+ * 已应答抑制窗兜底：标记置起后该时长未见预期后态帧 → 转双源冷拉对账（10s = 投影链路时延的量级冗余）。
+ * [时间平抑红线登记]（10s 兜底 = 用时间换一致的兜底）：
+ *   补偿根因：应答后的预期后态帧可能丢失（WS 帧链无送达保证，断连窗口高发），ack 标记
+ *   无事件通道解除会无限悬挂，审批条被持续压制。不能靠事件顺序或单一事实源自然解决：
+ *   帧丢失 = 无任何事件到达，顺序契约无从谈起；「事实上无挂起」必须查询而非断言
+ *   （coldReconcilePlanReview 双查询），只能靠拉取真值收敛（ADR-0075 拉为主）。
+ *   量级/形态：标记置起即 arm 10s 单发（single-flight 重置不叠加；epoch 世代防陈旧回调）。
+ *   恢复路径：三解除路（预期后态帧值判定 / 新 pending 登记到达 / 冷拉真值）任一到达即
+ *   清标记杀定时器；冷拉失败（断连）标记悬挂 fail-safe + loadError 通路，重连后
+ *   stateSnapshot 重派发自然解除。
+ *   重审触发（退役条件）：runtime 帧链具备可靠送达（送达确认或断连重放）后，后态帧
+ *   丢失通道封闭，本兜底退役。
+ */
+export const PLAN_REVIEW_ACK_FALLBACK_MS = 10_000
+
+/**
+ * 活动补拉冷却（新 session 首拉窗口的丢帧补偿，2026-09-25 真机缺陷）：同一 session 的
+ * assistant 消息活动触发 reconcileOnAssistantMessage 补拉的最小间隔。量级对齐
+ * PLAN_REVIEW_ACK_FALLBACK_MS（投影链路时延冗余）取半——补拉是「状态可能已刷新」的
+ * 对账而非异常恢复，频率上限取「每 turn 至多一次」的近似（turn 内多条 assistant 消息
+ * 合并），避免长对话 session 每条消息一拉。
+ * [时间平抑红线登记]（5s 冷却）：定性 = 对账频率上限而非一致性平抑——补偿动作本体是
+ * reconcileOnAssistantMessage 补拉（帧链丢帧补偿），本常量只是该补拉 RPC 的节流门。
+ * 永久配套：消费侧动作边沿触发补拉范式存在即配套存在（ADR-0075 推允许丢失、丢失收敛
+ * 靠拉），不设「根因修复即删」的退役语义；帧链可靠送达后补拉支路退役，本冷却随支路消失。
+ */
+export const PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS = 5_000
+
+/**
+ * 冷拉对账「pending 在场」真值的再入店缝（store 禁 import store 铁律的合规绕行——
+ * extension-ui registry 的唯一写入方 useExtensionUI 注册 sink；本 store 只广播事实，
+ * registry 呈现 ready 由 sink 落店，respond 的 requestId 定位随之可用）。
+ */
+export type PlanReviewColdSink = (sessionId: string, records: ExtensionUIRequest[]) => void
+let planReviewColdSink: PlanReviewColdSink | null = null
+
+/** 注册冷拉 pending 再入店 sink（useExtensionUI 模块级一次；重复注册覆盖（后注册者持有当前 pinia 的惰性取店闭包））。 */
+export function registerPlanReviewColdSink(sink: PlanReviewColdSink): void {
+  planReviewColdSink = sink
+}
+
+/** 测试钩子：清 sink（模块级跨用例残留防护，对齐 __resetExtensionBusSubscriptionForTesting）。 */
+export function __resetPlanReviewColdSinkForTesting(): void {
+  planReviewColdSink = null
 }
 
 /** 分区容器（useSessionScopedState 响应式契约要求 reactive 容器：mutate 才触发下游 computed 失效）。 */
@@ -76,7 +222,7 @@ interface PlanPartition {
   view: PlanStateView | null
   /** 评论草稿（D6：GUI 草稿，提交时打包进 respond payload；per-session 隔离） */
   drafts: PlanReviewComment[]
-  /** 首拉失败错误（AGENTS.md 规则 5 错误通路：分区级落错误供 PlanModeBar / PlanDocsPanel 呈现，不覆盖现有 view） */
+  /** 首拉/冷拉失败错误（AGENTS.md 规则 5 错误通路：分区级落错误供 PlanModeBar / PlanDocsPanel 呈现，不覆盖现有 view） */
   loadError: string | null
   /**
    * 草稿回看请求（§3.5）：审批条评论计数可点 → requestDraftsReveal 递增序号并置
@@ -86,6 +232,37 @@ interface PlanPartition {
    */
   draftsRevealSeq: number
   draftsRevealConsumed: boolean
+  /**
+   * 「已应答待帧」标记（D4 抑制窗①）：planReview 挂起被摘除（respond 成功 /
+   * requestsInvalidated）即置起，压制 degraded/revising 的 state 判定分支到「预期后态帧」
+   * （帧内 state ≠ reviewing 的值判定——迟到旧帧值仍是 reviewing 不解除）/ 新 planReview
+   * pending 登记到达 / 10s 冷拉真值三路之一为止。presence 语义不受其压制（ready 恒优先）。
+   */
+  reviewAckMarked: boolean
+  /** ack 标记/兜底定时器世代（epoch 世代比较：cancel·重置后陈旧定时器回调按世代失配 no-op）。 */
+  reviewAckEpoch: number
+  /**
+   * planReview 挂起镜像（D4 稳定窗输入面；唯一写入口 = useExtensionUI 挂起漏斗 + 冷拉对账
+   * ——registry 的同步投影，渲染公式仍以 registry presence 为唯一交互权威，本镜像只驱动
+   * 定时器 arm/cancel 的组合判定）。
+   */
+  reviewPendingKnown: boolean
+  /**
+   * D8「agent 未响应」检测窗相位（per-session，分区派而非实例级 ref——turn 事件 handler 经
+   * action 写「消息所属 sid」分区，切 session 无丢值/串台，ADR-0049；状态机语义见
+   * PlanReviewNudgePhase）：nudge 提交成功进 armed，nudge 轮自身的 message_start 到达
+   * 才开判定窗（watching）；重挂到达（setPlanReviewPending(true) 内含收口）/ turn 结束
+   * 判未响应 / 发送失败后回 idle。
+   */
+  reviewNudgePhase: PlanReviewNudgePhase
+  /** D8 重新提交错误行（发送失败 / agent 未响应双分支的就近呈现；分区级，随焦点切换保留）。 */
+  reviewNudgeError: string | null
+  /** degraded 稳定窗放行（组合持续 ≥2s；变假 cancel·重置）。 */
+  reviewDegradedStable: boolean
+  /** 冷拉真值豁免稳定窗（对账结果即事实，直接放行；随组合变假同批重置）。 */
+  reviewColdExempt: boolean
+  /** 稳定窗定时器世代（同 reviewAckEpoch 纪律）。 */
+  reviewStableEpoch: number
 }
 
 /**
@@ -105,6 +282,97 @@ function clearDraftsOnPlanEnter(p: PlanPartition, next: PlanStateView | null): v
   if (!wasActive && nowActive) p.drafts.length = 0
 }
 
+/**
+ * D8 重新提交审批的检测窗相位机 action 组（模块级工厂，控 store setup 行数；依赖面收窄为
+ * updateFor 单方法的结构形态——D8 全部 action 只写「事件所属 sid」分区，不读焦点实时值，
+ * AGENTS.md 规则 8）。相位机 PlanReviewNudgePhase（idle → armed → watching → idle）：
+ * 开窗时机挂在 nudge 轮自身的 message_start，而非 send resolve——session 忙时 busy 预检
+ * 拒绝走 reply success、nudge 推迟投递，send resolve 即开窗会把前置在途 turn 的
+ * message.complete 误判为 nudge 轮无响应（dmg-r1-2）。
+ */
+function createPlanReviewNudgeActions(scoped: {
+  updateFor: (targetSid: string, updater: (state: PlanPartition) => void) => void
+}): {
+  beginPlanReviewNudge: (sessionId: string) => void
+  markPlanReviewNudgeTurnStart: (sessionId: string) => void
+  setPlanReviewNudgeError: (sessionId: string, message: string | null) => void
+  endPlanReviewNudge: (sessionId: string, message: string) => void
+  rejectPlanReviewNudge: (sessionId: string, message: string) => void
+} {
+  /**
+   * nudge 提交成功（send resolve）：进 armed 相位（清旧错误）——只武装不开窗，等
+   * markPlanReviewNudgeTurnStart 的起点标记到达才开判定窗。
+   */
+  function beginPlanReviewNudge(sessionId: string): void {
+    if (!sessionId) return
+    scoped.updateFor(sessionId, (p) => {
+      p.reviewNudgePhase = 'armed'
+      p.reviewNudgeError = null
+    })
+  }
+
+  /**
+   * nudge 轮起点标记（其 message_start 到达）：armed → watching 开判定窗；idle（无在途
+   * nudge，他人消息开轮）/ watching（轮内后续消息段）均 no-op。
+   */
+  function markPlanReviewNudgeTurnStart(sessionId: string): void {
+    if (!sessionId) return
+    scoped.updateFor(sessionId, (p) => {
+      if (p.reviewNudgePhase !== 'armed') return
+      p.reviewNudgePhase = 'watching'
+    })
+  }
+
+  /**
+   * nudge 错误行写入/清除（发送失败分支落文案；null = 清除兼检测窗复位——重试入口）。
+   * 无检测窗语义，直接落分区。
+   */
+  function setPlanReviewNudgeError(sessionId: string, message: string | null): void {
+    if (!sessionId) return
+    scoped.updateFor(sessionId, (p) => {
+      p.reviewNudgePhase = 'idle'
+      p.reviewNudgeError = message
+    })
+  }
+
+  /**
+   * turn 生命周期终态信号收口（D8 失败契约②「agent 未响应」）：watching 相位才判——
+   * armed 相位的终态信号属于前置在途 turn（先于 nudge 轮起点标记，busy defer 形态），
+   * 连同重挂已到达的同轮收尾（相位已被 setPlanReviewPending(true) 收口）/ 未点重提
+   * （idle）均 no-op。
+   */
+  function endPlanReviewNudge(sessionId: string, message: string): void {
+    if (!sessionId) return
+    scoped.updateFor(sessionId, (p) => {
+      if (p.reviewNudgePhase !== 'watching') return
+      p.reviewNudgePhase = 'idle'
+      p.reviewNudgeError = message
+    })
+  }
+
+  /**
+   * send.rejected 收口（预检拒绝未进轮 / defer 重投再拒）：不受 nudge 轮起点标记门——
+   * armed 与 watching 相位（nudge 在途）均落错误行提示可重试（失败要出声）；idle（无
+   * 在途 nudge，他人发送被拒）no-op。
+   */
+  function rejectPlanReviewNudge(sessionId: string, message: string): void {
+    if (!sessionId) return
+    scoped.updateFor(sessionId, (p) => {
+      if (p.reviewNudgePhase === 'idle') return
+      p.reviewNudgePhase = 'idle'
+      p.reviewNudgeError = message
+    })
+  }
+
+  return {
+    beginPlanReviewNudge,
+    markPlanReviewNudgeTurnStart,
+    setPlanReviewNudgeError,
+    endPlanReviewNudge,
+    rejectPlanReviewNudge,
+  }
+}
+
 export const usePlanStore = defineStore('plan', () => {
   // ── 分区（useSessionScopedState 工厂：分区表 + cleanup 链自动接入）──
   /**
@@ -113,7 +381,21 @@ export const usePlanStore = defineStore('plan', () => {
    */
   const focusedSid = ref<string | null>(null)
   const scoped = useSessionScopedState<PlanPartition>(focusedSid, () =>
-    reactive<PlanPartition>({ view: null, drafts: [], loadError: null, draftsRevealSeq: 0, draftsRevealConsumed: true }),
+    reactive<PlanPartition>({
+      view: null,
+      drafts: [],
+      loadError: null,
+      draftsRevealSeq: 0,
+      draftsRevealConsumed: true,
+      reviewAckMarked: false,
+      reviewAckEpoch: 0,
+      reviewPendingKnown: false,
+      reviewDegradedStable: false,
+      reviewColdExempt: false,
+      reviewStableEpoch: 0,
+      reviewNudgePhase: 'idle',
+      reviewNudgeError: null,
+    }),
   )
 
   // ── 陈旧首拉守卫（F-R2-1，per-sid 帧版本号）──
@@ -128,15 +410,116 @@ export const usePlanStore = defineStore('plan', () => {
    * 只对「已确认更老」的 reply 丢弃）；无轮询、无重试、无定时器，比较是有界的等值判定。
    * 失败分支同守卫：失效请求的 error envelope 同样不代表当前链路（帧已活，错误已过时）。
    * 清理挂 sessionCleanup 链（useSidebar.deleteSession 统一编排，与分区同生命周期）。
+   * 迟到写拦截（D-B2-1 口径延伸）：写入点在 updateFor 拦截之外（非分区态），applyFrame
+   * 入口经 scoped.isDeleted 前置守卫与 updateFor 同口径——cleanup 后迟到帧不重建条目
+   * （防拖偏同 id 重建后下一生命周期的陈旧守卫基准）。
    */
   const frameRevs = new Map<string, number>()
+
+  /**
+   * 活动补拉冷却表（per-sid 上次活动补拉时间戳；新 session 首拉窗口丢帧补偿）。
+   * 语义见 reconcileOnAssistantMessage。清理挂 sessionCleanup 链（与 frameRevs 同批）；
+   * 迟到写拦截同 frameRevs（写入点 reconcileOnAssistantMessage 入口 isDeleted 守卫）。
+   */
+  const activityReconcileAt = new Map<string, number>()
+
+  /**
+   * 消息边沿观察的帧基准表（per-sid：上一条消息边沿时的 frameRev，活跃冻结检测的进展基准，
+   * 语义见 reconcileOnAssistantMessage）。清理挂 sessionCleanup 链；迟到写拦截同 frameRevs
+   * （写入点 reconcileOnAssistantMessage 入口 isDeleted 守卫）。
+   */
+  const edgeFrameRevs = new Map<string, number>()
+
+  // ── 审批窗口 per-session 定时器（D4：2s 稳定窗 + 10s 兜底共 ≤2 个，single-flight 重置不叠加）──
+  // 定时器 handle 不进响应式分区（副作用句柄非状态）；epoch 世代在分区内（回调比较防陈旧触发）。
+  // 清理与 frameRevs 同挂 sessionCleanup 链（防 session 销毁后定时器空转写幽灵分区）。
+  const stableTimers = new Map<string, { epoch: number; handle: ReturnType<typeof setTimeout> }>()
+  const ackTimers = new Map<string, { epoch: number; handle: ReturnType<typeof setTimeout> }>()
+
   registerSessionCleanup((sid) => {
     frameRevs.delete(sid)
+    activityReconcileAt.delete(sid)
+    edgeFrameRevs.delete(sid)
+    const stable = stableTimers.get(sid)
+    if (stable) {
+      clearTimeout(stable.handle)
+      stableTimers.delete(sid)
+    }
+    const ack = ackTimers.get(sid)
+    if (ack) {
+      clearTimeout(ack.handle)
+      ackTimers.delete(sid)
+    }
   })
 
   /** 当前帧版本号（无帧历史 = 0）。 */
   function frameRevOf(sid: string): number {
     return frameRevs.get(sid) ?? 0
+  }
+
+  // ── 审批窗口内部机件（D4）──
+
+  /** 变假 cancel·重置：清稳定窗放行位 + 杀在途 2s 定时器（epoch 递增使陈旧回调 no-op）。 */
+  function cancelStableWindow(sid: string, p: PlanPartition): void {
+    p.reviewDegradedStable = false
+    p.reviewColdExempt = false
+    p.reviewStableEpoch += 1
+    const t = stableTimers.get(sid)
+    if (t) {
+      clearTimeout(t.handle)
+      stableTimers.delete(sid)
+    }
+  }
+
+  /** 解除已应答标记（三解除路径共用）：清标记 + 杀 10s 兜底定时器。 */
+  function clearAckMark(sid: string, p: PlanPartition): void {
+    p.reviewAckMarked = false
+    p.reviewAckEpoch += 1
+    const t = ackTimers.get(sid)
+    if (t) {
+      clearTimeout(t.handle)
+      ackTimers.delete(sid)
+    }
+  }
+
+  /**
+   * 稳定窗组合判定 + 定时器 arm/cancel（每次窗口输入变化后调用）：
+   * 组合 = `view 活跃 ∧ state=reviewing ∧ 无挂起镜像 ∧ 无已应答标记`。
+   * 组合转真 → arm 2s（已在计时则不动——「组合持续 ≥2s」语义，重复触发不重启时钟）；
+   * 组合变假 → cancel·重置；组合真且已放行（稳定/冷拉豁免）→ 保持。
+   */
+  function evalReviewWindow(sid: string, p: PlanPartition): void {
+    const candidate =
+      p.view?.isActive === true &&
+      resolvePlanLifecycleState(p.view) === 'reviewing' &&
+      !p.reviewPendingKnown &&
+      !p.reviewAckMarked
+    if (!candidate) {
+      cancelStableWindow(sid, p)
+      return
+    }
+    if (p.reviewDegradedStable || p.reviewColdExempt) return
+    if (stableTimers.has(sid)) return
+    p.reviewStableEpoch += 1
+    const epoch = p.reviewStableEpoch
+    const handle = setTimeout(() => {
+      stableTimers.delete(sid)
+      scoped.updateFor(sid, (q) => {
+        // epoch 世代比较：组合中途变假已 cancel·重置，本回调是陈旧残留（微任务/定时器序竞态）→ no-op
+        if (q.reviewStableEpoch !== epoch) return
+        q.reviewDegradedStable = true
+      })
+    }, PLAN_REVIEW_DEGRADED_STABLE_MS)
+    stableTimers.set(sid, { epoch, handle })
+  }
+
+  /** view 写入共同后置（帧 / 首拉 / 冷拉三路同覆）：预期后态值解除已应答标记 + 稳定窗重估。 */
+  function afterViewWrite(sid: string, p: PlanPartition): void {
+    // 解除②的值判定半边：收到的 state 值 ≠ reviewing = 预期后态帧（dismiss / review_aborted→
+    // planning、approve→dispatching、revise→revising、exit→exited 全命中）；迟到旧帧值仍是
+    // reviewing 不解除（D4②）。
+    if (resolvePlanLifecycleState(p.view) !== 'reviewing') clearAckMark(sid, p)
+    evalReviewWindow(sid, p)
   }
 
   // ── actions ──
@@ -153,11 +536,16 @@ export const usePlanStore = defineStore('plan', () => {
    * 落地同时递增该 sid 帧版本号（陈旧首拉守卫的写侧，见 frameRevs 注释）。
    */
   function applyFrame(sid: string, planState: PlanStateView): void {
+    // 迟到写拦截（D-B2-1 口径延伸）：已销毁 session 的迟到帧整体丢弃——frameRevs 的
+    // 递增与下方 updateFor 的分区写同口径（工厂 deletedSids 单源查询），防迟到帧在
+    // cleanup 删除条目后重建 rev 残留、拖偏同 id 重建后下一生命周期的陈旧守卫基准。
+    if (scoped.isDeleted(sid)) return
     frameRevs.set(sid, frameRevOf(sid) + 1)
     scoped.updateFor(sid, (p) => {
       clearDraftsOnPlanEnter(p, planState)
       p.view = planState
       p.loadError = null
+      afterViewWrite(sid, p)
     })
   }
 
@@ -188,6 +576,7 @@ export const usePlanStore = defineStore('plan', () => {
         clearDraftsOnPlanEnter(p, planState)
         p.view = planState
         p.loadError = null
+        afterViewWrite(sessionId, p)
       })
     } catch (e) {
       if (frameRevOf(sessionId) !== baseRev) return
@@ -198,6 +587,152 @@ export const usePlanStore = defineStore('plan', () => {
       })
     }
   }
+
+  /**
+   * 活动信号补拉（2026-09-25 真机缺陷「新 session 发 /plan 状态带不渲染」的丢帧补偿，
+   * 同日 F-W3-2「崩溃恢复后阶段指示冻结」扩展为双支路）。
+   *
+   * 补偿锚点 = assistant 消息活动（use-plan-sync 订阅 message.message_start /
+   * message.complete 转发）：/plan 处理写 plan entry 是 turn 的前置动作，必然早于
+   * assistant 消息开始，故活动信号到达时磁盘必已就绪，冷拉直读磁盘（runtime
+   * getPlanState 纯磁盘读语义）必得真值。范式对齐 useCommandSync 补拉闭环（消费侧
+   * 动作边沿触发主动拉取，不依赖 broadcast 可靠性）。
+   *
+   * 双支路（共享冷却门）：非活跃支路（fix-C 原语义）= 分区 view 未激活（首拉早于
+   * entry 落盘 / 从未进 plan）→ 补拉。活跃冻结支路（F-W3-2）= view 活跃但 frameRev
+   * 自上一条消息边沿以来无增长 → planState 帧链在该 session 上疑死（真机 6c3 实证：
+   * 消息帧正常到达而 planState 帧全程未达，view 冻结无再拉触发点），冷拉对账磁盘真值；
+   * 帧链恢复（任一 planState 帧到达 → frameRev 增长）后自动静默；首条边沿只立帧基准
+   * 不拉（健康链路上 plan 状态稳定的常态 turn 不产生补拉）。双门限频（无定时器无轮询）：
+   * 冷却门 = PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS 内同 sid 不重复补（长对话每条消息
+   * 都触发的频率上限）；帧进展门 = 活跃支路要求「边沿间 frameRev 零增长」。
+   */
+  function reconcileOnAssistantMessage(sessionId: string): void {
+    if (!sessionId) return
+    // 迟到写拦截（D-B2-1 口径延伸，同 applyFrame）：edgeFrameRevs / activityReconcileAt
+    // 两张辅助表的写入与 updateFor 同口径——cleanup 后迟到活动信号不重建条目、不触发补拉。
+    if (scoped.isDeleted(sessionId)) return
+    const revNow = frameRevOf(sessionId)
+    const prevRev = edgeFrameRevs.get(sessionId)
+    edgeFrameRevs.set(sessionId, revNow)
+    let inactive = false
+    scoped.updateFor(sessionId, (p) => {
+      inactive = p.view?.isActive !== true
+    })
+    // 帧进展门：活跃支路要求「边沿间 frameRev 零增长」；非活跃时 frameRev 常为 0，「无进展」无判别力，不适用
+    if (!inactive && (prevRev === undefined || prevRev !== revNow)) return
+    // 冷却门（两支路共用）
+    const last = activityReconcileAt.get(sessionId) ?? 0
+    if (Date.now() - last < PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS) return
+    activityReconcileAt.set(sessionId, Date.now())
+    void loadPlanState(sessionId)
+  }
+
+  // ── 审批窗口 actions（D4；写入口 = useExtensionUI 挂起漏斗 + 10s 兜底冷拉）──
+
+  /**
+   * planReview 挂起镜像同步（D4 抑制窗②的「新 pending 登记到达解除标记」半边）：
+   * has=true（新挂起入店）→ 解除已应答标记（挂起 = 唯一交互权威、ready 优先于抑制——
+   * 提前清压制，防 revising 帧丢失时压制拖到兜底超时）；has=false → 只更新镜像。
+   * 幂等（重复漏斗点调用无副作用）。
+   */
+  function setPlanReviewPending(sessionId: string, has: boolean): void {
+    if (!sessionId) return
+    scoped.updateFor(sessionId, (p) => {
+      p.reviewPendingKnown = has
+      if (has) {
+        clearAckMark(sessionId, p)
+        // D8 成功收口（内含于挂起到达）：预期重挂发生 → 关检测窗 + 清旧错误（含重试后成功）
+        p.reviewNudgePhase = 'idle'
+        p.reviewNudgeError = null
+      }
+      evalReviewWindow(sessionId, p)
+    })
+  }
+
+  /**
+   * 已应答标记置起（D4 抑制窗①触发：planReview 挂起被 respond 成功 / requestsInvalidated
+   * 摘除的任何路径）：压制 degraded/revising 到预期后态帧 / 新 pending / 冷拉真值三路之一；
+   * 同时 arm 10s 双源冷拉兜底（single-flight：重复触发重置不叠加）。
+   */
+  function markPlanReviewAnswered(sessionId: string): void {
+    if (!sessionId) return
+    scoped.updateFor(sessionId, (p) => {
+      p.reviewAckMarked = true
+      // 镜像真值不由本函数覆写：reviewPendingKnown 由 useExtensionUI 挂起漏斗按 registry
+      // 现值收口（syncPlanReviewWindow）/冷拉对账真值置位（漏斗单写）
+      p.reviewAckEpoch += 1
+      const epoch = p.reviewAckEpoch
+      const prev = ackTimers.get(sessionId)
+      if (prev) clearTimeout(prev.handle)
+      const handle = setTimeout(() => {
+        ackTimers.delete(sessionId)
+        // epoch 世代比较：标记已被解除路径处理/重置（epoch 已递增）→ 陈旧兜底 no-op
+        let stale = false
+        scoped.updateFor(sessionId, (q) => {
+          if (q.reviewAckEpoch !== epoch) stale = true
+        })
+        if (stale) return
+        void coldReconcilePlanReview(sessionId)
+      }, PLAN_REVIEW_ACK_FALLBACK_MS)
+      ackTimers.set(sessionId, { epoch, handle })
+      evalReviewWindow(sessionId, p)
+    })
+  }
+
+  /**
+   * 10s 兜底的双源冷拉对账（D4 抑制窗③）：`session.getPlanState` + `getPendingRequests`
+   * 双查询——「事实上无挂起」必须查询而非断言。
+   * - 成功：冷拉落地即以真值解除标记（不无条件亮 degraded）；pending 在场 → 经 sink 再入店
+   *   registry 呈 ready（权威优先），不在场 + 真值 reviewing → 冷拉真值豁免稳定窗直通
+   *   degraded；planState 真值按 F-R2-1 帧版本守卫回填（冷回填不倒拨热状态）。
+   * - 失败（WS 断连——恰是帧丢失主因，两通道同源失败相关性高）：标记悬挂（审批条保持
+   *   不渲染，fail-safe 不误导）+ loadError 既有错误通路呈现（R7 失败分支）；重连后经
+   *   stateSnapshot 重派发 / 再次触发自然解除。
+   */
+  async function coldReconcilePlanReview(sessionId: string): Promise<void> {
+    const baseRev = frameRevOf(sessionId)
+    const [planRes, pendingRes] = await Promise.allSettled([
+      command('session.getPlanState', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS),
+      getPendingRequests(sessionId),
+    ])
+    if (planRes.status === 'rejected' || pendingRes.status === 'rejected') {
+      const err =
+        planRes.status === 'rejected' ? planRes.reason : (pendingRes as PromiseRejectedResult).reason
+      console.error('[plan-store] plan review cold reconcile failed:', err)
+      scoped.updateFor(sessionId, (p) => {
+        p.loadError = toErrorMessage(err)
+      })
+      return
+    }
+    const planState = planRes.value?.planState ?? null
+    const planReviewRecords = pendingRes.value.filter(isPlanReviewFrameRecord)
+    // pending 在场真值 → 再入店 registry（呈 ready 需可枚举 requestId；sink = useExtensionUI
+    // 注册的 registry 写入缝，幂等 dedup）
+    if (planReviewRecords.length > 0) planReviewColdSink?.(sessionId, planReviewRecords)
+    scoped.updateFor(sessionId, (p) => {
+      p.loadError = null
+      clearAckMark(sessionId, p) // 冷拉落地即以真值解除标记（③解除路径）
+      p.reviewPendingKnown = planReviewRecords.length > 0
+      p.reviewColdExempt = true // 冷拉真值豁免稳定窗（对账结果即事实，直接放行）
+      if (frameRevOf(sessionId) === baseRev) {
+        clearDraftsOnPlanEnter(p, planState)
+        p.view = planState
+      }
+      afterViewWrite(sessionId, p)
+    })
+  }
+
+  // ── D8 重新提交审批的检测窗/错误行（分区级，action 收口供事件 handler 经 capturedSid 写入）──
+  // 相位机实装提取为模块级工厂 createPlanReviewNudgeActions（控本 setup 函数行数；只闭包
+  // 依赖 scoped 分区写入口，无 store 内其余状态）。
+  const {
+    beginPlanReviewNudge,
+    markPlanReviewNudgeTurnStart,
+    setPlanReviewNudgeError,
+    endPlanReviewNudge,
+    rejectPlanReviewNudge,
+  } = createPlanReviewNudgeActions(scoped)
 
   // ── 评论草稿操作（D6：只作用当前焦点 session 分区；scoped.update 读 focusedSid 实时值）──
 
@@ -215,7 +750,7 @@ export const usePlanStore = defineStore('plan', () => {
     })
   }
 
-  /** 清空焦点分区评论草稿（提交成功后由 PlanReviewBar 审批条调用）。 */
+  /** 清空焦点分区评论草稿（提交成功后由 PlanReviewBar 审批条调用；dismiss=暂存待办不清）。 */
   function clearDraftComments(): void {
     scoped.update((p) => {
       p.drafts.length = 0
@@ -244,13 +779,13 @@ export const usePlanStore = defineStore('plan', () => {
   /** 焦点 session 的 PlanStateView（null = 无 plan 状态）。 */
   const planView: ComputedRef<PlanStateView | null> = computed(() => scoped.current.value.view)
 
-  /** 焦点 session 的三步阶段指示（D1 推导三元组，见 derivePlanStage）。 */
+  /** 焦点 session 的三步阶段指示（D1 推导 + D5 已批准档，见 derivePlanStage）。 */
   const planStage: ComputedRef<PlanStage | null> = computed(() => derivePlanStage(scoped.current.value.view))
 
   /** 焦点 session 的评论草稿（只读视图，操作走 add/remove/clear 三个 action 收口）。 */
   const draftComments: ComputedRef<PlanReviewComment[]> = computed(() => scoped.current.value.drafts)
 
-  /** 焦点 session 的首拉错误（null = 无错误；非空时由 PlanModeBar / PlanDocsPanel 呈现错误态）。 */
+  /** 焦点 session 的首拉/冷拉错误（null = 无错误；非空时由 PlanModeBar / PlanDocsPanel 呈现错误态）。 */
   const planLoadError: ComputedRef<string | null> = computed(() => scoped.current.value.loadError)
 
   /** 焦点分区回看请求序号（watch 源：递增即新请求）。 */
@@ -261,11 +796,47 @@ export const usePlanStore = defineStore('plan', () => {
     () => scoped.current.value.draftsRevealSeq > 0 && !scoped.current.value.draftsRevealConsumed,
   )
 
+  /** 焦点分区「已应答抑制窗」标记（PlanReviewBar 分支公式的压制输入）。 */
+  const planReviewAckMarked: ComputedRef<boolean> = computed(() => scoped.current.value.reviewAckMarked)
+
+  /**
+   * 焦点分区 planReview 挂起镜像（D4 稳定窗输入面的只读透出；**非渲染权威**——审批条
+   * presence 判定以 registry（useExtensionUI currentPlanReviewRequests）为唯一交互权威，
+   * 本视图供漏斗一致性断言/诊断读取）。
+   */
+  const planReviewPendingKnown: ComputedRef<boolean> = computed(
+    () => scoped.current.value.reviewPendingKnown,
+  )
+
+  /** 焦点分区「agent 未响应」检测窗相位（D8 状态机 idle/armed/watching；PlanReviewBar/测试读取）。 */
+  const planReviewNudgePhase: ComputedRef<PlanReviewNudgePhase> = computed(
+    () => scoped.current.value.reviewNudgePhase,
+  )
+
+  /** 焦点分区重新提交错误行文案（null = 无错误；PlanReviewBar 就近呈现）。 */
+  const planReviewNudgeError: ComputedRef<string | null> = computed(
+    () => scoped.current.value.reviewNudgeError,
+  )
+
+  /** 焦点分区 degraded 稳定窗放行位（稳定窗通过 ∨ 冷拉真值豁免）。 */
+  const planReviewDegradedGate: ComputedRef<boolean> = computed(
+    () => scoped.current.value.reviewDegradedStable || scoped.current.value.reviewColdExempt,
+  )
+
   return {
     focusedSid,
     syncFocus,
     applyFrame,
     loadPlanState,
+    reconcileOnAssistantMessage,
+    coldReconcilePlanReview,
+    setPlanReviewPending,
+    markPlanReviewAnswered,
+    beginPlanReviewNudge,
+    markPlanReviewNudgeTurnStart,
+    setPlanReviewNudgeError,
+    endPlanReviewNudge,
+    rejectPlanReviewNudge,
     addDraftComment,
     removeDraftComment,
     clearDraftComments,
@@ -277,5 +848,15 @@ export const usePlanStore = defineStore('plan', () => {
     planLoadError,
     draftsRevealSeq,
     draftsRevealPending,
+    planReviewAckMarked,
+    planReviewDegradedGate,
+    planReviewPendingKnown,
+    planReviewNudgePhase,
+    planReviewNudgeError,
   }
 })
+
+/** planReview 帧记录判定（runtime pending 快照的 payload 解包形态，planReview 标记在顶层）。 */
+function isPlanReviewFrameRecord(req: ExtensionUIRequest): boolean {
+  return (req as { planReview?: unknown }).planReview === true
+}

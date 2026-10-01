@@ -39,7 +39,7 @@ export default {
   },
   // M3-c 交互闭环（D8 降级路径：drawer 内联确认条 + 失效提示 + 第四面状态区）
   interaction: {
-    // 终态机失效支行内提示（撤下 + badge 清 + 本提示，三路合并收口：事件 / 快照对账 / 回放悬空）
+    // 终态机失效支行内提示（失效支单入口 invalidateBtwRequests——事件帧一路：撤下 + badge 清 + 本提示同拍收口，D-B2-3）
     expiredNotice: '请求已失效',
     dismissExpired: '知道了',
     // 运行期错误边界（单线失败 = 行内错误 + 可重试，不外溢主面板）

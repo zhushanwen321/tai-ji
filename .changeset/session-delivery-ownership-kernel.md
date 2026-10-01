@@ -1,0 +1,5 @@
+---
+'@zhushanwen/session-delivery': major
+---
+
+The delivery kernel grows an ownership layer with typed contracts exported from the package root: entry state machine and dual views (`DeliveryLane`, `DeliveryEntryState`, `DeliveryEntry`, `DeliveryTombstone`, `DeliveryEntriesFull`, `DeliveryEntriesProjection`), the v2 handle surface (`DeliveryHandleV2` — a superset of `DeliveryHandle`, existing consumers keep working unchanged — plus `DeliverySubmitOptions`, `DeliverySendResult`, `DeliveryCancelResult`, `DrainResult`, `DeliveryWarnSink`, `DeliveryConfigWithWarn`), and the `DeliveryReclaimError` error class (rejects pending waiters on cancel/drain; discriminate via `instanceof`). Submits now carry an explicit `receiptAnchor` declaration (`'marker'` default | `'acceptance'`) so acceptance-only channels cannot deadlock in-flight entries. Contract tightening shipped in the same change: `DeliveryPort.hasPendingMessages()` and `DeliveryConfig.busyPolicy` are gone — busy gating now derives from send settlements and the settled-edge flush instead of a port capability plus a caller-chosen policy, so host adapters must drop those members.

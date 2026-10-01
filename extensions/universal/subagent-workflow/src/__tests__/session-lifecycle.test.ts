@@ -96,27 +96,27 @@ vi.mock("../jsonl-run-store.ts", () => ({
 const { mockRegisterWorkflowTool } = vi.hoisted(() => ({
   mockRegisterWorkflowTool: vi.fn(),
 }));
-vi.mock("../interface/subagent-tool.ts", () => ({
+vi.mock("../interface/tool/subagent-tool.ts", () => ({
   registerSubagentTool: vi.fn(),
 }));
-vi.mock("../interface/subagents.ts", () => ({
+vi.mock("../interface/command/subagents.ts", () => ({
   registerSubagentsCommand: vi.fn(),
 }));
-vi.mock("../interface/bg-notify-render.ts", () => ({
+vi.mock("../interface/gui/bg-notify-render.ts", () => ({
   renderBgNotifyMessage: vi.fn(),
 }));
-vi.mock("../interface/tool-workflow.ts", () => ({
+vi.mock("../interface/tool/tool-workflow.ts", () => ({
   registerWorkflowTool: mockRegisterWorkflowTool,
 }));
 // subagents 批量 tool（u2）：与其余注册调用同一处理——本文件的 fake pi 无
 // registerTool（挂载用例只需 factory 跑到 session 生命周期装配）。
-vi.mock("../interface/tool-subagents.ts", () => ({
+vi.mock("../interface/tool/tool-subagents.ts", () => ({
   registerSubagentsTool: vi.fn(),
 }));
-vi.mock("../interface/tool-workflow-script.ts", () => ({
+vi.mock("../interface/tool/tool-workflow-script.ts", () => ({
   registerWorkflowScriptTool: vi.fn(),
 }));
-vi.mock("../interface/commands.ts", () => ({
+vi.mock("../interface/command/commands.ts", () => ({
   registerWorkflowsCommand: vi.fn(),
 }));
 
@@ -126,7 +126,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 // [W2/V4 D6] 直落断言消费的 protocol SSOT（customType 常量 + status 映射单点）
 import { mapReasonToStatus, PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/extension-protocol";
 import { STALE_CTX_MARKER, _resetOncePerProcessForTest } from "@zhushanwen/pi-ext-guards";
-import { IDENTITY_CUSTOM_TYPE } from "@zhushanwen/subagent-core";
+import { IDENTITY_CUSTOM_TYPE, isRunSettled, noteRebuiltSettlement } from "@zhushanwen/subagent-core";
 import { ENV_ROOT_CWD, getSubagentRecordsDir, resolvePiSessionScopedDir, STATE_DIR_NAME } from "@zhushanwen/subagent-core";
 import type { WorkflowRun as WorkflowRunType } from "@zhushanwen/subagent-core/orchestration/models/workflow-run.ts";
 // 保留窗口 env 通道仅测试消费，深路径直取（对齐 retention 测试先例）
@@ -140,10 +140,11 @@ import type { SessionLifecycleDeps } from "../session-lifecycle.ts";
 import { bindLedgerHostAndRecover, setupSessionLifecycle } from "../session-lifecycle.ts";
 import subagentsExtension from "../index.ts";
 // 组 6 域隔离条的调用断言面；vi.mock 已在文件顶部拦截同路径（同一 mock 实例）。
-import { registerSubagentTool } from "../interface/subagent-tool.ts";
+import { registerSubagentTool } from "../interface/tool/subagent-tool.ts";
 // 组 1「new 分支」/ 组 3 观察面：单例访问器 + 双 Service 假类（mock 实例，与被测
 // 装配消费同一模块图——模块图单实例后静态引用即被测引用）。
 import {
+  GLOBAL_SLOT_KEYS,
   ModelConfigService,
   setModelConfigService,
   setSubagentService,
@@ -161,7 +162,7 @@ process.setMaxListeners(50);
  *  防线外兜底——防真实 service-bootstrap 经其他导入面写槽后跨用例泄漏，与
  *  index-session-start 先例同款）。 */
 function resetLifecycleSlots(): void {
-  for (const key of ["@zhushanwen/pi-subagents.service", "@zhushanwen/pi-subagents.model-service"]) {
+  for (const key of [GLOBAL_SLOT_KEYS.service, GLOBAL_SLOT_KEYS.modelService]) {
     const slot = Reflect.get(globalThis, Symbol.for(key)) as { current: unknown } | undefined;
     if (slot) slot.current = null;
   }
@@ -218,12 +219,13 @@ function createFakeCtx(
 
 /** 构造可重水合的 WorkflowRun（reconstruct 跳过 I1 校验）。 */
 function makeRun(runId: string, status: "running" | "done"): WorkflowRunType {
-  return WorkflowRun.reconstruct(
+  const run = WorkflowRun.reconstruct(
     runId,
-    { scriptSource: "execute() {}", args: {}, scriptName: "test", scriptPath: "/fake/test.js" },
+    { scriptSource: "async function execute() {}", args: {}, scriptName: "test", scriptPath: "/fake/test.js" },
     {
-      status,
-      reason: status === "done" ? "completed" : undefined,
+      // [D6(a) 第 3 步] 聚合快照不持生命周期轴：done 形态的终局事实由下方注册表
+      // 条目承载（生产 = 壳重建点 noteRebuiltSettlement 注入）。
+      ...(status === "done" ? { reason: "completed" as const } : {}),
       budget: new Budget({ maxTokens: 1000 }),
       calls: new Map(),
       trace: new Trace(),
@@ -231,6 +233,10 @@ function makeRun(runId: string, status: "running" | "done"): WorkflowRunType {
     },
     { startedAt: new Date().toISOString() },
   );
+  if (status === "done") {
+    noteRebuiltSettlement(runId, { outcome: "done", settledAt: Date.now() });
+  }
+  return run;
 }
 
 /** 构造可控 fake store（注入 deps.createRunStore）。 */
@@ -421,7 +427,7 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
 
     // [D2] 中断非终局：内存观测面 status 维持 running（活体写点停更——终局判据归
     // record fold）；state.error 承载 kill 文本
-    expect(runningRun.state.status).toBe("running");
+    expect(isRunSettled(runningRun)).toBe(false);
     expect(runningRun.state.error).toContain("Process killed");
     // [W2/V4 D6] 注销直落权威面：appendEntry 直接落盘（emit 链在 reload 转换窗
     // 失效——[reload-closeout D4] 定案在恢复链同样适用）。data 形状与 finalizeRun
@@ -942,7 +948,7 @@ describe("session_start crash recovery — store.loadAll 路径（吸收自 cras
     const second = await setupSessionLifecycle(pi2, createFakeCtx(), mkDeps([runningRun]));
     expect(second.storeHealthy).toBe(true);
     // [D2] 中断收编：内存观测面维持 running（终局判据归 record fold）
-    expect(runningRun.state.status).toBe("running");
+    expect(isRunSettled(runningRun)).toBe(false);
     expect(runningRun.state.error).toContain("crash");
   });
 
@@ -952,7 +958,7 @@ describe("session_start crash recovery — store.loadAll 路径（吸收自 cras
     const { entries, lazyDeps } = await mountWithLoadAll(async () => [doneRun]);
 
     // 状态不变（仍 done/completed），不重新 transition（completedAt 不变）
-    expect(doneRun.state.status).toBe("done");
+    expect(isRunSettled(doneRun)).toBe(true);
     expect(doneRun.state.reason).toBe("completed");
     expect(doneRun.meta.completedAt).toBe(originalCompletedAt);
 
@@ -998,7 +1004,7 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
     const { setRunEventJournalDirForTest } = await import(
       "@zhushanwen/subagent-core/orchestration/terminal-actions.ts"
     );
-    const { createRunEventJournal, RUN_EVENT_JOURNAL_SUFFIX, WORKFLOW_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_ENTRY_VERSION } =
+    const { createRunEventJournal, RUN_EVENTS_SUFFIX, WORKFLOW_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_ENTRY_VERSION } =
       await import("@zhushanwen/subagent-core");
     type CustomEntry = { type: string; customType?: string; data?: unknown; id: string; parentId: null; timestamp: string };
 
@@ -1006,7 +1012,7 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
     setRunEventJournalDirForTest(fixtureDir);
     try {
       const runId = "wf-kill9-1";
-      const journalPath = path.join(fixtureDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+      const recordPath = path.join(fixtureDir, `${runId}${RUN_EVENTS_SUFFIX}`);
       // 崩溃形态 journal：run-created + ask 帧，无 run-settled（进程被 kill-9 的磁盘形态）
       const journal = createRunEventJournal(fixtureDir);
       await journal.append(runId, { type: "run-created", runId, workflowName: "kill9", argsSummary: "{}", ts: Date.now() - 60_000 });
@@ -1025,7 +1031,7 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
             scriptName: "kill9",
             slug: "kill9",
             startedAt: Date.now() - 60_000,
-            journalPath,
+            recordPath,
           },
           id: "seed-reg",
           parentId: null,
@@ -1072,12 +1078,12 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
       const run = first.runs.get(runId);
       // [D2] 中断非终局：loadAll 重建产物 status 维持 running（fold 停在 interrupted
       // 是状态机相——聚合面无终局），无 reason
-      expect(run?.state.status).toBe("running");
+      expect(isRunSettled(run!)).toBe(false);
       expect(run?.state.reason).toBeUndefined();
       expect(emits.find((e) => e.channel === "pending:unregister")).toBeUndefined();
 
       // ① record 尾部有收编 run-interrupted（[D2] 中断转移帧；errorCode=crashed）
-      const lines = fs.readFileSync(journalPath, "utf8").split("\n").filter((l) => l.trim());
+      const lines = fs.readFileSync(recordPath, "utf8").split("\n").filter((l) => l.trim());
       const lastFrame = JSON.parse(lines[lines.length - 1]!) as { type: string; errorCode?: string };
       expect(lastFrame.type).toBe("run-interrupted");
       expect(lastFrame.errorCode).toBe("crashed");
@@ -1095,7 +1101,7 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
       appended.length = 0;
       await setupSessionLifecycle(pi, ctx, mkDeps());
       const interruptedFrames = fs
-        .readFileSync(journalPath, "utf8")
+        .readFileSync(recordPath, "utf8")
         .split("\n")
         .filter((l) => l.trim() && (JSON.parse(l) as { type: string }).type === "run-interrupted");
       expect(interruptedFrames).toHaveLength(1);

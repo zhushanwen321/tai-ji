@@ -11,9 +11,12 @@
  * mock 策略：全部依赖 mock，不 spawn pi。
  * 运行：cd packages/runtime && npx vitest run test/occupancy-runtime.test.ts
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventInterpreter, applySessionOccupancyTransition } from '../src/services/session/event-interpreter.js'
 import { MessageDispatcher } from '../src/services/session/message-dispatcher.js'
+import {
+  createSessionDeliveryRegistry,
+} from '../src/services/session/session-delivery-registry.js'
 import { SessionLifecycle } from '../src/services/session/session-lifecycle.js'
 import { MessageBus } from '../src/services/message-bus/message-bus.js'
 import { RpcTimeoutError } from '../src/utils/errors.js'
@@ -24,6 +27,7 @@ import type { IManagedSessionView } from '../src/services/session/types.js'
 import type { IMessageBus } from '../src/services/message-bus/message-bus.js'
 import type { IPiEngine, IProcessManager } from '../src/services/ports/pi-engine.js'
 import type { WorkspaceService } from '../src/services/workspace/workspace-service.js'
+import { flushDelivery } from './helpers/flush-delivery.js'
 import type { IConfigStore } from '../src/services/ports/config.js'
 import type { ISessionStore } from '../src/services/ports/session.js'
 import type { IEventAdapter } from '../src/interfaces.js'
@@ -58,6 +62,18 @@ function occupancyFrames(publish: ReturnType<typeof vi.fn>): Array<SessionOccupa
 
 function frameTypes(publish: ReturnType<typeof vi.fn>): string[] {
   return publish.mock.calls.map((c: unknown[]) => (c[1] as ServerMessage).type)
+}
+
+/** 按 type 取发布消息（错误面断言用；无则 undefined）。 */
+function publishedByType<T extends ServerMessage['type']>(
+  publish: ReturnType<typeof vi.fn>,
+  type: T,
+): ServerMessage<T> | undefined {
+  for (const call of publish.mock.calls) {
+    const msg = call[1] as ServerMessage
+    if (msg.type === type) return msg as ServerMessage<T>
+  }
+  return undefined
 }
 
 // ── Part A：occupancy 写原语（幂等合并 + 去重，经转移原语驱动） ────
@@ -213,6 +229,14 @@ describe('EventInterpreter occupancy 挂点（#2-#6）', () => {
 // ── Part C：dispatcher 挂点 #1/#7/#8/#9/#10/#11（含失败路径）─────
 
 describe('MessageDispatcher occupancy 挂点', () => {
+  // [u2 投递所有权内核] 出厂交接 async 链持有的 500ms 持有轮询 timer 在用例间清理
+  let cleanupRegistry: (() => void) | undefined
+
+  afterEach(() => {
+    cleanupRegistry?.()
+    cleanupRegistry = undefined
+  })
+
   function makeDispatcher(opts: {
     session?: IManagedSessionView
     promptError?: Error
@@ -221,9 +245,11 @@ describe('MessageDispatcher occupancy 挂点', () => {
     compactBehavior?: 'ok' | 'error'
   } = {}) {
     const session = opts.session ?? makeMockSession()
+    /** 时序记录（D-18：受理先于置位的帧序断言用）。 */
+    const seq: string[] = []
     const promptFn = opts.promptError
-      ? vi.fn(async () => { throw opts.promptError! })
-      : vi.fn(async () => ({}) as unknown as Awaited<ReturnType<IPiEngine['prompt']>>)
+      ? vi.fn(async () => { seq.push('prompt'); throw opts.promptError! })
+      : vi.fn(async () => { seq.push('prompt'); return {} as unknown as Awaited<ReturnType<IPiEngine['prompt']>> })
     const bashFn = opts.bashBehavior === 'error'
       ? vi.fn(async () => { throw new Error('bash transport exploded') })
       : vi.fn(async () => ({ output: 'ok', exitCode: 0, cancelled: false, truncated: false }))
@@ -256,55 +282,90 @@ describe('MessageDispatcher occupancy 挂点', () => {
       destroySession: vi.fn(async () => {}),
     } as unknown as IProcessManager
     const workspace = { record: vi.fn() } as unknown as WorkspaceService
-    const publish = vi.fn()
+    const publish = vi.fn((_sid: string, msg: ServerMessage) => { seq.push(`frame:${msg.type}`) })
+    // [u2 投递所有权内核] 出站交接经内核适配层（dispatcher 只提交；交接异步）——fixture 按真实
+    // 装配接内核（session 视图 / ensureActive / workspace.record 与组合根同源）
+    const registry = createSessionDeliveryRegistry({
+      getSession: (sid) => svc.getSession(sid),
+      ensureActive: svc.ensureActive as (sid: string) => Promise<IPiEngine>,
+      subscribeAgentSettled: () => () => {},
+      recordWorkspace: (cwd) => workspace.record(cwd),
+      getMessageBus: () => ({ publish } as unknown as IMessageBus),
+    })
+    cleanupRegistry = () => registry.disposeAll()
     const dispatcher = new MessageDispatcher(svc, pm, workspace, { publish } as unknown as IMessageBus)
-    return { dispatcher, session, svc, pm, publish, promptFn, bashFn, abortFn, compactFn, client }
+    dispatcher.setDeliveryRegistry(registry)
+    return { dispatcher, session, svc, pm, publish, promptFn, bashFn, abortFn, compactFn, client, seq, registry }
   }
 
-  it('#1 sendPrompt 预检通过 → turn=dispatching（先于 prompt 调用）', async () => {
-    const { dispatcher, publish, promptFn } = makeDispatcher()
+  it('#1 sendMessage 受理后 → turn=dispatching（[RT-4#10] occupancy 置位先于 prompt）', async () => {
+    const { dispatcher, publish, promptFn, seq } = makeDispatcher()
     await dispatcher.sendMessage('s1', 'hello')
+    await flushDelivery()
     expect(promptFn).toHaveBeenCalled()
     const frames = occupancyFrames(publish)
     expect(frames).toEqual([{ sessionId: 's1', turn: 'dispatching', compacting: false, bash: false }])
-    // 帧序：occupancy(dispatching) 在 prompt 之前构造（预检通过即写）
-    const occIdx = frameTypes(publish).indexOf('session.occupancy')
-    expect(occIdx).toBeGreaterThanOrEqual(0)
+    // 帧序（[RT-4#10] 合并收口）：occupancy 置位先于 prompt——RPC 往返窗内对预检/回收豁免
+    // 不再呈 idle；lastActiveAt/record 记账面（D-18「成功才显示 working」）仍在 prompt
+    // 受理成功后（markSessionActive 尾置，occupancy 同值转移去重不二播）
+    expect(seq.indexOf('prompt')).toBeGreaterThanOrEqual(0)
+    expect(seq.indexOf('frame:session.occupancy')).toBeLessThan(seq.indexOf('prompt'))
   })
 
-  it('#1 预检拒绝（busy）不写 dispatching（prompt 未发出，turn 无变化）', async () => {
-    // [u3b 预检改读 occupancy] 预检输入 = occupancy 投影（D1 立场），generating 计忙拒
-    const { dispatcher, publish } = makeDispatcher({
+  it('#1 busy（generating）不再预检拒绝：零 send.rejected + 按 lane=steer 承接投递（D5 排队取代拒绝）', async () => {
+    const { dispatcher, publish, promptFn, registry } = makeDispatcher({
       session: makeMockSession({ occupancy: { turn: 'generating', compacting: false, bash: false } }),
     })
     await dispatcher.sendMessage('s1', 'hello')
-    expect(occupancyFrames(publish)).toHaveLength(0)
-    expect(frameTypes(publish)).toContain('send.rejected')
+    await flushDelivery()
+    // 退役面：原「预检拒绝（busy）不写 dispatching + 广播 send.rejected」——排队取代拒绝（D5）
+    expect(frameTypes(publish)).not.toContain('send.rejected')
+    // 迁移面：内核按 lane=steer 即时投递（turn 边界注入 pi 队列），条目不丢
+    expect(promptFn).toHaveBeenCalledTimes(1)
+    expect((promptFn.mock.calls[0] as unknown[])[2]).toBe('steer')
+    expect(registry.entries('s1')?.active[0]).toMatchObject({ lane: 'steer' })
+    // 受理后置位（D-18）：dispatching 帧取代旧的「零 occupancy 帧」
+    expect(occupancyFrames(publish)).toEqual([{ sessionId: 's1', turn: 'dispatching', compacting: false, bash: false }])
   })
 
-  it('#8a prompt 抛转译拒绝（compacting）→ send.rejected + turn 复位 idle（防卡 dispatching 破坏 flush 触发）', async () => {
-    const { dispatcher, publish } = makeDispatcher({
+  it('#8a prompt 撞 compacting 拒绝（TOCTOU）→ 零拒绝帧/零错误气泡 + 条目留守 queued（D6 持有等 compaction_end）', async () => {
+    const { dispatcher, publish, registry, session } = makeDispatcher({
       promptError: new Error('Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.'),
     })
     const result = await dispatcher.sendMessage('s1', 'hello')
-    expect(result.rejected).toBe(true)
-    expect(frameTypes(publish)).toContain('send.rejected')
-    const frames = occupancyFrames(publish)
-    expect(frames).toEqual([
+    await flushDelivery()
+    expect(result.blocked).toBe(false)
+    // 退役面：send.rejected 广播（排队取代拒绝，D5）
+    expect(frameTypes(publish)).not.toContain('send.rejected')
+    expect(frameTypes(publish)).not.toContain('message.error') // busy 类拒绝不进错误气泡
+    // 迁移面（§3.4 错误规格表「压缩中 direct 投递撞 Cannot submit...」行）：条目回 queued，
+    // compaction_end 后再投——持有而非失败/丢弃（D6 适配器 catch 面处置）
+    expect(registry.entries('s1')?.active[0]).toMatchObject({ state: 'queued' })
+    // 帧序（[RT-4#10] 合并收口）：投递起腿写 dispatching → busy 类拒绝在 promptWithBusyRetry
+    // 内分型复位 idle（持有等 compaction_end）——显式收口帧序列，而非旧的「零帧」
+    expect(occupancyFrames(publish)).toEqual([
       { sessionId: 's1', turn: 'dispatching', compacting: false, bash: false },
       { sessionId: 's1', turn: 'idle', compacting: false, bash: false },
     ])
-    // 非 busy 转译拒绝不进 message.error 气泡（u2 存量语义）
-    expect(frameTypes(publish)).not.toContain('message.error')
+    // 原断言意图保留（防卡 dispatching）：终态 turn 不得停留 dispatching
+    expect(session.occupancy?.turn ?? 'idle').not.toBe('dispatching')
   })
 
-  it('#8b prompt 抛非 busy 错（auth 失败）→ message.error 保留 + turn 复位 idle', async () => {
-    const { dispatcher, publish } = makeDispatcher({ promptError: new Error('auth failed') })
+  it('#8b prompt 抛非 busy 错（auth 失败）→ message.error 保留（受理失败出口）+ 零 dispatching 置位（D-18）', async () => {
+    const { dispatcher, publish, session } = makeDispatcher({ promptError: new Error('auth failed') })
     const result = await dispatcher.sendMessage('s1', 'hello')
-    expect(result.blocked).toBe(true)
+    await flushDelivery()
+    // 受理口径（D9⑤）：提交成功返回；失败经内核失败出口异步广播（原 result.blocked=true 失真）
+    expect(result.blocked).toBe(false)
     expect(frameTypes(publish)).toContain('message.error')
-    const frames = occupancyFrames(publish)
-    expect(frames.at(-1)).toMatchObject({ turn: 'idle' })
+    expect(String(publishedByType(publish, 'message.error')?.payload.message)).toContain('auth failed')
+    // 帧序（[RT-4#10] 合并收口）：投递起腿写 dispatching → 非 busy 真失败由投递腿 catch 面
+    // 收口回 idle（不卡 dispatching）；原断言意图保留：终态不得停留 dispatching
+    expect(occupancyFrames(publish)).toEqual([
+      { sessionId: 's1', turn: 'dispatching', compacting: false, bash: false },
+      { sessionId: 's1', turn: 'idle', compacting: false, bash: false },
+    ])
+    expect(session.occupancy?.turn ?? 'idle').not.toBe('dispatching')
   })
 
   it('#9a abort 成功 → turn=idle；重复 abort 第二次零 occupancy 帧（④ 无变化不重复广播）', async () => {
@@ -371,7 +432,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
   it('#7 失败路径：bash transport 抛错 → finally 仍复位 bash=false（⑤ bashResult/message.error 保留）', async () => {
     const { dispatcher, publish } = makeDispatcher({ bashBehavior: 'error' })
     const result = await dispatcher.sendBash('s1', 'bad')
-    expect(result.blocked).toBe(true)
+    expect(result.status).toBe('settled') // 已执行并收口（回执携带执行状态）
     const frames = occupancyFrames(publish)
     expect(frames.at(-1)).toMatchObject({ bash: false })
     expect(frameTypes(publish)).toContain('message.bashResult')
@@ -389,7 +450,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
     expect(frames.every((f) => f.turn === 'generating')).toBe(true) // turn 维度不被 bash 挂点改写
   })
 
-  it('#11 abortBash → bash=false（成败皆兜底，cancelled 哨兵帧保留）', async () => {
+  it('#11 abortBash → bash=false（成败皆兜底，bashAborted 兜底终态帧保留）', async () => {
     const { dispatcher, publish } = makeDispatcher({
       session: makeMockSession({
         isBashRunning: true, bashRunToken: 'bash_1_abc',
@@ -399,7 +460,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
     await dispatcher.abortBash('s1')
     const frames = occupancyFrames(publish)
     expect(frames).toEqual([{ sessionId: 's1', turn: 'idle', compacting: false, bash: false }])
-    expect(frameTypes(publish)).toContain('message.bashResult')
+    expect(frameTypes(publish)).toContain('message.bashAborted')
   })
 
   it('#6 兜底：compact transport 失败 → finally 复位 compacting=false（compaction_end 不到达时）', async () => {
@@ -422,7 +483,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
     ])
   })
 
-  it('messageBus 未注入 → 挂点 no-op 不抛（null-safety，存量语义）', async () => {
+  it('messageBus 未注入 → 挂点 no-op 不抛（null-safety，存量语义：状态照写、广播跳过）', async () => {
     const session = makeMockSession()
     const client = {
       prompt: vi.fn(async () => ({})),
@@ -438,8 +499,20 @@ describe('MessageDispatcher occupancy 挂点', () => {
       removeSessionEntry: vi.fn(),
       detachSession: vi.fn(),
     }
-    const dispatcher = new MessageDispatcher(svc, { getClient: vi.fn(() => client) } as unknown as IProcessManager, { record: vi.fn() } as unknown as WorkspaceService)
+    const workspace = { record: vi.fn() } as unknown as WorkspaceService
+    // [u2] 内核装配（bus 缺省 → 广播跳过、occupancy 状态照写——原语 publish=null 分支）
+    const registry = createSessionDeliveryRegistry({
+      getSession: (sid) => svc.getSession(sid),
+      ensureActive: svc.ensureActive as (sid: string) => Promise<IPiEngine>,
+      subscribeAgentSettled: () => () => {},
+      recordWorkspace: (cwd) => workspace.record(cwd),
+      getMessageBus: () => null,
+    })
+    cleanupRegistry = () => registry.disposeAll()
+    const dispatcher = new MessageDispatcher(svc, { getClient: vi.fn(() => client) } as unknown as IProcessManager, workspace, undefined)
+    dispatcher.setDeliveryRegistry(registry)
     await dispatcher.sendMessage('s1', 'hello')
+    await flushDelivery()
     await dispatcher.abort('s1')
     expect(session.occupancy).toEqual({ turn: 'idle', compacting: false, bash: false }) // 状态照写
   })

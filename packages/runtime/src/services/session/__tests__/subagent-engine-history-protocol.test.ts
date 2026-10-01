@@ -164,12 +164,12 @@ describe('W8 runtime 协议客户端接线（subagent-engine-history）', () => 
     expect(spawnLogPids()).toHaveLength(2) // 过期 dispose 后新实例
   }, 20_000)
 
-  it('③ 协议 read 失败降②级 journal：journalPath 白名单内事件重放投影', async () => {
+  it('③ 协议 read 失败降②级 journal：eventsPath 白名单内事件重放投影', async () => {
     setEnv('FAKE_READ_MODE', 'error')
-    const journalPath = path.join(dataDir, 'engines', 'fake', 'shared', 'journal-j1.jsonl')
+    const eventsPath = path.join(dataDir, 'engines', 'fake', 'shared', 'journal-j1.jsonl')
     // 行 schema = JournalLine（event-journal parseLine 守卫：v:1 + ts/seq + event.type）。
     fs.writeFileSync(
-      journalPath,
+      eventsPath,
       [
         JSON.stringify({ v: 1, ts: Date.now(), taskId: 'j1', engineId: 'fake', seq: 1, event: { type: 'text_delta', delta: 'journal tier text' } }),
         JSON.stringify({ v: 1, ts: Date.now(), taskId: 'j1', engineId: 'fake', seq: 2, event: { type: 'turn_end' } }),
@@ -177,7 +177,7 @@ describe('W8 runtime 协议客户端接线（subagent-engine-history）', () => 
       ].join('\n'),
     )
     const messages = await readEngineSubagentHistory(
-      makeRecord({ engineHandle: { sessionRef: { sessionId: 's-1' }, poolKey: 'shared', journalPath } }),
+      makeRecord({ engineHandle: { sessionRef: { sessionId: 's-1' }, poolKey: 'shared', eventsPath } }),
       dataDir,
     )
     const assistant = messages.find((m) => m.role === 'assistant')

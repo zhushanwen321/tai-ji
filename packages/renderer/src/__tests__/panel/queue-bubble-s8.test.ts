@@ -1,302 +1,147 @@
 /**
- * QueueBubble S8 组件单测 —— v6 内嵌队列气泡。
+ * QueueBubble 组件单测 —— v6 内嵌队列气泡（投递所有权内核 u3c / D7 单源化后）。
  *
- * v6 §8.5 视觉重构后行为（组件注释为准）：去独立卡片/去标签/去 chevron（不支持收起）、
- * 多条按 3 行预算显示（≤3 条全显；>3 条显 2 条 + 「+N」汇总行）。本文件为 v6 重构后 stale
- * 断言的同步修复（对应 commit 5d46b9234 同类工作），断言对齐组件现状。
- *
- * [compact-defer-composer-queue u1] defer 行扩展后：
- * - steer/followUp 行：仍只读（无按钮/无 emit），Zap/Clock icon + truncate 文本
- * - defer 行：Hourglass（info 色）+ 分档 chip（deferChip prop）+ truncate 文本 +
- *   富内容 +N 徽标（segments 非 text 段 >0）+ hover ×（emit removeDefer）
- * - 展平顺序 steering → followUp → defer；3 行预算（QUEUE_LINE_BUDGET）与 +N 覆盖三组总和
- * - 根门基于展平列表非空（state === undefined 时 defer 行仍渲染，A1）
- * - 承接 PendingBubble.test.ts（u2 删除前）的占用分档 hover 文案用例（迁为 deferHint prop
- *   渲染断言）与 × 撤销边界用例（未提交行 × 可点 emit removeDefer；已提交条目不渲染 defer 行）
+ * 组件契约（组件头注为准）：纯 props 展示——
+ * - rows: QueueRow[]（调用方经 useQueueRows 从 session.delivery 帧投影过滤而来：
+ *   非 direct 车道且未 delivered）
+ * - hint: string（session 级占用分档 hover title）
+ * - emit cancel(clientUuid)（× 撤销 → delivery.cancel）+ retry(clientUuid)（failed 行重试
+ *   → delivery.resync 单条重报）
+ * 行形态：状态 chip（排队中 / 投递中 / 发送失败）+ 对应 icon（Hourglass / Zap / AlertCircle）
+ * + truncate 预览文本（>3 条显前 3 + 「+N」溢出）。
  *
  * 三视角覆盖：
- * - 观察者（形态）：单条/多条渲染结构、类型 icon（Zap=steer / Clock=followUp / Hourglass=defer）、
- *   chip / +N 徽标 / 溢出计数
- * - 使用者（黑盒）：steer/followUp 只读（无破坏性按钮、点击无副作用）；defer 行 × 撤销 emit
- * - 构建者（白盒）：state undefined + 空 defer 不渲染；state undefined + defer 非空渲染
+ * - 观察者（形态）：单条/多条渲染结构、状态 icon 与 chip 文案、溢出计数、失败行红色标识
+ * - 使用者（黑盒）：hover × 撤销 emit cancel；failed 行重试钮 emit retry；queued/in-flight
+ *   行无重试钮；hint 落到行 title
+ * - 构建者（白盒）：空 rows 不渲染根门；行增删跟随 props 变化（响应式）
+ *
+ * [HISTORICAL] 前身（draft-composer-states S8 → compact-defer-composer-queue u1）：数据源是
+ * 「queue_update 帧 steering/followUp 快照 + useCompactQueue 未提交条目」双拼，含 Zap/Clock
+ * 只读行与 defer 行 +N 富内容徽标。u3c 单源化后：pi 队列快照不再直驱 UI、本地 defer 队列
+ * 整体退役，行/状态/撤销全部对齐内核条目；+N 徽标随帧无 segments 字段退役（草稿恢复改由
+ * cancel reply 的 segments 快照承担，ADR-0043）。
  *
  * 运行：cd packages/renderer && pnpm test -- queue-bubble-s8
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import type { Segment } from '@taiji/shared'
 import QueueBubble from '@/components/panel/QueueBubble.vue'
-import type { QueueState } from '@/stores/chat'
-import type { QueuedMessage } from '@/composables/panel/useCompactQueue'
+import type { QueueRow } from '@/composables/panel/useQueueRows'
 
-/** 未提交 defer 条目构造（segments 恒有 text 单段等价形态，与 useCompactQueue.enqueue 一致） */
-function deferEntry(id: string, text: string, extra: Segment[] = []): QueuedMessage {
-  return { id, text, segments: [{ type: 'text', text }, ...extra] }
+/** 队列行构造（state 三态；默认 queued 车道行） */
+function row(clientUuid: string, preview: string, state: QueueRow['state'] = 'queued'): QueueRow {
+  return { clientUuid, preview, state }
 }
 
-/** mount 助手：三个 defer 相关 props 为必传（Composer 恒传），缺省给中性值 */
-function mountQB(overrides: {
-  state?: QueueState | undefined
-  deferEntries?: QueuedMessage[]
-  deferChip?: string
-  deferHint?: string
-} = {}) {
+/** mount 助手：rows/hint 为必传（Composer 恒传），缺省给中性值 */
+function mountQB(overrides: { rows?: QueueRow[]; hint?: string } = {}) {
   return mount(QueueBubble, {
     props: {
-      state: overrides.state,
-      deferEntries: overrides.deferEntries ?? [],
-      deferChip: overrides.deferChip ?? '压缩后',
-      deferHint: overrides.deferHint ?? '等待上下文压缩完成后发送',
+      rows: overrides.rows ?? [],
+      hint: overrides.hint ?? '等待上下文压缩完成后发送',
     },
   })
 }
 
-describe('QueueBubble S8 · 根门与 steer/followUp 只读契约', () => {
-  it('state undefined + 无 defer → 不渲染', () => {
-    const wrapper = mountQB({ state: undefined })
+describe('QueueBubble · 根门与单源行渲染', () => {
+  it('rows 为空 → 不渲染（无待发条目即无队列区）', () => {
+    const wrapper = mountQB()
     expect(wrapper.find('[data-testid="queue-bubble"]').exists()).toBe(false)
   })
 
-  it('state 空（无 steering/followUp）+ 无 defer → 不渲染', () => {
-    const wrapper = mountQB({ state: {} })
-    expect(wrapper.find('[data-testid="queue-bubble"]').exists()).toBe(false)
-  })
-
-  it('首屏冒烟：单条 steering → Zap icon + 内容渲染', () => {
-    const state: QueueState = { steering: ['补充注册页校验'] }
-    const wrapper = mountQB({ state })
+  it('单条 queued 行 → Hourglass icon + 「排队中」chip + 预览文本（用户可见状态）', () => {
+    const wrapper = mountQB({ rows: [row('u-1', '补充注册页校验', 'queued')] })
     expect(wrapper.find('[data-testid="queue-bubble"]').exists()).toBe(true)
-    // v6：无「待发送」标签，直接渲染内容行
-    expect(wrapper.text()).not.toContain('待发送')
     expect(wrapper.text()).toContain('补充注册页校验')
-    // 类型 icon：steering → Zap（lucide class 含 zap）
-    expect(wrapper.find('svg.lucide-zap').exists()).toBe(true)
-    expect(wrapper.find('svg.lucide-clock').exists()).toBe(false)
-    expect(wrapper.find('svg.lucide-hourglass').exists()).toBe(false)
-  })
-
-  it('单条 followUp → Clock icon + 内容渲染', () => {
-    const state: QueueState = { followUp: ['下轮加 refresh token'] }
-    const wrapper = mountQB({ state })
-    expect(wrapper.text()).toContain('下轮加 refresh token')
-    expect(wrapper.find('svg.lucide-clock').exists()).toBe(true)
-    expect(wrapper.find('svg.lucide-zap').exists()).toBe(false)
-    expect(wrapper.find('svg.lucide-hourglass').exists()).toBe(false)
-  })
-
-  it('无 chevron（v6 去折叠，不支持收起）', () => {
-    const state: QueueState = { steering: ['x'] }
-    const wrapper = mountQB({ state })
-    expect(wrapper.find('svg.lucide-chevron-right').exists()).toBe(false)
-    expect(wrapper.find('button').exists()).toBe(false)
-  })
-
-  it('多条 steering/followUp → steering 优先（pi 消费顺序），显前 3 条 + 溢出计数', () => {
-    const state: QueueState = {
-      steering: ['steer1', 'steer2'],
-      followUp: ['fu1'],
-    }
-    const wrapper = mountQB({ state })
-    // 展平顺序：steering 全在前（3 条 ≤ 行数预算，无溢出行）
-    expect(wrapper.text()).toContain('steer1')
-    expect(wrapper.text()).toContain('steer2')
-    expect(wrapper.text()).toContain('fu1')
-    expect(wrapper.text()).not.toContain('+1')
-  })
-
-  it('超过 3 条（steer/followUp only）→ 行数预算内只显 2 条 + 「+N」溢出计数', () => {
-    const state: QueueState = {
-      steering: ['s1', 's2', 's3', 's4'],
-      followUp: ['f1', 'f2'],
-    }
-    const wrapper = mountQB({ state })
-    // 6 条 > 预算 3：让位给汇总行 → 只显 s1/s2，其余 4 条收进 +4（总行数仍为 3）
-    expect(wrapper.text()).toContain('s1')
-    expect(wrapper.text()).toContain('s2')
-    expect(wrapper.text()).toContain('+4')
-    expect(wrapper.text()).not.toContain('s3')
-    expect(wrapper.text()).not.toContain('s4')
-  })
-
-  it('恰 3 条 → 全显且无溢出行（常见形态零变化）', () => {
-    const state: QueueState = { steering: ['s1', 's2'], followUp: ['f1'] }
-    const wrapper = mountQB({ state })
-    expect(wrapper.findAll('.qb-item-text').map((w) => w.text())).toEqual(['s1', 's2', 'f1'])
-    // 无溢出 → 不渲染 +N 汇总行（不多出一行撑高 composer）
-    expect(wrapper.text()).not.toContain('+1')
-    expect(wrapper.findAll('.qb-item').length).toBe(3)
-  })
-
-  it('4 条 → 2 条 + 汇总行，总行数恒为 3（纵向不随条目数增长）', () => {
-    const state: QueueState = { steering: ['s1', 's2', 's3'], followUp: ['f1'] }
-    const wrapper = mountQB({ state })
-    expect(wrapper.findAll('.qb-item').length).toBe(2)
-    expect(wrapper.text()).toContain('+2')
-  })
-
-  it('只读契约收窄：steer/followUp 行不渲染删除/dequeue/编辑/撤回等破坏性按钮（无 emit 通道）', () => {
-    const state: QueueState = { steering: ['x', 'y'], followUp: ['z'] }
-    const wrapper = mountQB({ state })
-    // 语义断言：不存在任何带删除/移除/撤回 title 的按钮（而非脆弱的计数）
-    for (const keyword of ['删除', '移除', '撤回', 'dequeue', 'remove', 'cancel', '编辑']) {
-      expect(wrapper.find(`button[title*="${keyword}"]`).exists()).toBe(false)
-    }
-    // steer/followUp 行无任何按钮（defer 行才渲染 ×）
-    expect(wrapper.find('button').exists()).toBe(false)
-  })
-
-  it('点击 steer/followUp item 文本无副作用（只读契约，无 emit）', async () => {
-    const state: QueueState = { steering: ['a', 'b'] }
-    const wrapper = mountQB({ state })
-    const itemTextsBefore = wrapper.findAll('.qb-item-text').map((w) => w.text())
-    const item = wrapper.findAll('.qb-item-text')[0]
-    if (item?.exists()) {
-      await item.trigger('click')
-    }
-    await nextTick()
-    const itemTextsAfter = wrapper.findAll('.qb-item-text').map((w) => w.text())
-    expect(itemTextsAfter).toEqual(itemTextsBefore) // 内容不变 = 无副作用
-    // steer/followUp 不 emit removeDefer（组件 emit 通道仅 defer 行触发）
-    expect(wrapper.emitted('removeDefer')).toBeUndefined()
-  })
-
-  it('state 变化 → 列表内容跟随更新', async () => {
-    const wrapper = mountQB({ state: { steering: ['a', 'b'] } })
-    expect(wrapper.text()).toContain('a')
-    expect(wrapper.text()).toContain('b')
-    await wrapper.setProps({ state: { steering: ['c', 'd'] } })
-    await nextTick()
-    expect(wrapper.text()).toContain('c')
-    expect(wrapper.text()).toContain('d')
-    expect(wrapper.text()).not.toContain('a')
-  })
-})
-
-describe('QueueBubble S8 · defer 行（compact-defer-composer-queue u1）', () => {
-  it('A1 根门：state undefined（纯压缩入队）+ defer 非空 → defer 行渲染', () => {
-    const wrapper = mountQB({
-      state: undefined,
-      deferEntries: [deferEntry('d1', '压缩中入队的消息')],
-    })
-    expect(wrapper.find('[data-testid="queue-bubble"]').exists()).toBe(true)
-    // Hourglass icon（defer 专属）+ chip + 文本
+    expect(wrapper.text()).toContain('排队中')
     expect(wrapper.find('svg.lucide-hourglass').exists()).toBe(true)
     expect(wrapper.find('svg.lucide-zap').exists()).toBe(false)
-    expect(wrapper.text()).toContain('压缩中入队的消息')
-    expect(wrapper.text()).toContain('压缩后') // 缺省 deferChip
   })
 
-  it('defer 行 chip 分档（deferChip prop 渲染）+ 行 title（deferHint prop）', () => {
+  it('in-flight 行 → Zap icon（accent）+「投递中」chip', () => {
+    const wrapper = mountQB({ rows: [row('u-2', '正在投递的消息', 'in-flight')] })
+    expect(wrapper.text()).toContain('正在投递的消息')
+    expect(wrapper.text()).toContain('投递中')
+    expect(wrapper.find('svg.lucide-zap').exists()).toBe(true)
+    expect(wrapper.find('svg.lucide-hourglass').exists()).toBe(false)
+  })
+
+  it('failed 行 → AlertCircle（danger）+「发送失败」chip + 重试钮可见（§3.4 重试耗尽行）', () => {
+    const wrapper = mountQB({ rows: [row('u-3', '重试耗尽的文本', 'failed')] })
+    expect(wrapper.text()).toContain('发送失败')
+    expect(wrapper.find('svg.lucide-circle-alert').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="queue-retry-u-3"]').exists()).toBe(true)
+    // 状态 chip 用 danger 底/前景（红色标识）
+    const chip = wrapper.find('[data-testid="queue-state-u-3"]')
+    expect(chip.classes()).toContain('text-danger')
+  })
+
+  it('queued/in-flight 行不渲染重试钮（仅 failed 行有重试入口）', () => {
+    const wrapper = mountQB({ rows: [row('u-4', '排队', 'queued'), row('u-5', '投递中', 'in-flight')] })
+    expect(wrapper.find('[data-testid="queue-retry-u-4"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="queue-retry-u-5"]').exists()).toBe(false)
+  })
+
+  it('多条 → 显前 3 条 + 「+N」溢出计数（行序 = 帧序 = 内核 FIFO 发送序）', () => {
     const wrapper = mountQB({
-      state: undefined,
-      deferEntries: [deferEntry('d1', '文本')],
-      deferChip: '命令后',
-      deferHint: '等待命令执行结束后发送',
+      rows: [row('u-1', 'm1'), row('u-2', 'm2'), row('u-3', 'm3'), row('u-4', 'm4'), row('u-5', 'm5')],
     })
-    // chip 渲染传入的 deferChip
-    expect(wrapper.find('.bg-info-soft').exists()).toBe(true)
-    expect(wrapper.find('.bg-info-soft').text()).toBe('命令后')
-    // 行 title = 传入的 deferHint
-    expect(wrapper.find('.qb-item').attributes('title')).toBe('等待命令执行结束后发送')
-  })
-
-  it('defer 行 × 撤销边界：未提交条目 × 可点 → emit removeDefer(id)，title=撤销排队', async () => {
-    const wrapper = mountQB({
-      state: undefined,
-      deferEntries: [deferEntry('dq-1', '待撤销消息')],
-      deferChip: '稍后发送',
-      deferHint: '占用结束后发送',
-    })
-    // × 无禁用态（已提交条目不渲染 defer 行，见归一规则）
-    const cancel = wrapper.find('[data-testid="defer-cancel-dq-1"]')
-    expect(cancel.exists()).toBe(true)
-    expect(cancel.attributes('disabled')).toBeUndefined()
-    // title 挂外层 anchor span（hover 揭示载体）
-    const anchor = wrapper.find('[data-testid="defer-cancel-anchor-dq-1"]')
-    expect(anchor.attributes('title')).toBe('撤销排队')
-    await cancel.trigger('click')
-    expect(wrapper.emitted('removeDefer')).toEqual([['dq-1']])
-  })
-
-  it('+N 富内容徽标：segments 非 text 段 >0 时显示（title 复用 chipBadgeHint）', () => {
-    const rich = deferEntry('dq-2', '帮我看下这个报错', [
-      { type: 'image', id: 'img-1', path: '/tmp/shot.png', fileName: 'shot.png', displayName: '截图.png' },
-      { type: 'skill', name: 'code-review' },
-    ])
-    const wrapper = mountQB({ state: undefined, deferEntries: [rich] })
-    const badge = wrapper.find('[data-testid="defer-chips-dq-2"]')
-    expect(badge.exists()).toBe(true)
-    expect(badge.text()).toBe('+2')
-    expect(badge.attributes('title')).toContain('2')
-    // 纯文本条目无徽标
-    const plain = deferEntry('dq-3', '纯文本')
-    const wrapper2 = mountQB({ state: undefined, deferEntries: [plain] })
-    expect(wrapper2.find('[data-testid="defer-chips-dq-3"]').exists()).toBe(false)
-  })
-
-  it('三组展平顺序 steering → followUp → defer（恰 3 条全显，无溢出行）', () => {
-    const state: QueueState = { steering: ['steer1'], followUp: ['fu1'] }
-    const entries = [deferEntry('d1', 'defer1')]
-    const wrapper = mountQB({ state, deferEntries: entries })
-    // 展平顺序：steer1 → fu1 → defer1（3 条 = 行数预算，全部可见）
-    expect(wrapper.findAll('.qb-item-text').map((w) => w.text())).toEqual(['steer1', 'fu1', 'defer1'])
-    expect(wrapper.text()).not.toContain('+1')
-    expect(wrapper.findAll('.qb-item').length).toBe(3)
-  })
-
-  it('三组总和溢出时 +N 覆盖三组（不重复计 defer 行：单一切片口径）', () => {
-    const state: QueueState = { steering: ['steer1'], followUp: ['fu1'] }
-    const entries = [deferEntry('d1', 'defer1'), deferEntry('d2', 'defer2')]
-    const wrapper = mountQB({ state, deferEntries: entries })
-    // 4 条跨三组：可见 steer1/fu1（steering 先于 followUp 的消费序保持），defer1/defer2 收进 +2
-    expect(wrapper.findAll('.qb-item-text').map((w) => w.text())).toEqual(['steer1', 'fu1'])
+    expect(wrapper.findAll('.qb-item-text').map((w) => w.text())).toEqual(['m1', 'm2', 'm3'])
     expect(wrapper.text()).toContain('+2')
-    expect(wrapper.text()).not.toContain('defer1')
+    expect(wrapper.text()).not.toContain('m4')
   })
 
-  it('deferEntries 变化 → defer 行跟随更新（响应式）', async () => {
-    const wrapper = mountQB({ state: undefined, deferEntries: [deferEntry('d1', 'first')] })
+  it('行 hover title = 传入的 hint（session 级占用分档文案）', () => {
+    const wrapper = mountQB({ rows: [row('u-1', 'x')], hint: '等待命令执行结束后发送' })
+    expect(wrapper.find('[data-testid="queue-item-u-1"]').attributes('title')).toBe('等待命令执行结束后发送')
+  })
+
+  it('rows 变化 → 行跟随更新（响应式）；清空 → 根门关闭', async () => {
+    const wrapper = mountQB({ rows: [row('u-1', 'first')] })
     expect(wrapper.text()).toContain('first')
-    await wrapper.setProps({ deferEntries: [deferEntry('d2', 'second')] })
+    await wrapper.setProps({ rows: [row('u-1', 'first'), row('u-2', 'second')] })
     await nextTick()
     expect(wrapper.text()).toContain('second')
-    expect(wrapper.text()).not.toContain('first')
+    await wrapper.setProps({ rows: [] })
+    await nextTick()
+    expect(wrapper.find('[data-testid="queue-bubble"]').exists()).toBe(false)
   })
 })
 
-describe('QueueBubble 稳定 key（RD-2#9：重排/中段删除 index 漂移 → DOM 复用错位）', () => {
-  it('defer 中段删除 → 幸存 defer 行保持同一 DOM 元素（key=defer:id 稳定，无重挂载错位）', async () => {
-    const wrapper = mountQB({ state: undefined, deferEntries: [deferEntry('d1', 'one'), deferEntry('d2', 'two')] })
-    const d2ElBefore = wrapper.find('[data-testid="defer-cancel-d2"]').element
-    // 删除前一项 d1（中段删除）：d2 的行元素应原地保留（旧 index key 会把 d1 的 DOM 复用给 d2）
-    await wrapper.setProps({ deferEntries: [deferEntry('d2', 'two')] })
-    await nextTick()
-    const d2ElAfter = wrapper.find('[data-testid="defer-cancel-d2"]').element
-    expect(d2ElAfter).toBe(d2ElBefore)
-    wrapper.unmount()
+describe('QueueBubble · 行操作（撤销 / 重试）', () => {
+  it('× 撤销：点击 emit cancel(clientUuid)，title=撤销排队（hover 揭示载体）', async () => {
+    const wrapper = mountQB({ rows: [row('u-9', '待撤销消息')] })
+    const cancel = wrapper.find('[data-testid="queue-cancel-u-9"]')
+    expect(cancel.exists()).toBe(true)
+    expect(cancel.attributes('disabled')).toBeUndefined()
+    const anchor = wrapper.find('[data-testid="queue-cancel-anchor-u-9"]')
+    expect(anchor.attributes('title')).toBe('撤销排队')
+    await cancel.trigger('click')
+    expect(wrapper.emitted('cancel')).toEqual([['u-9']])
   })
 
-  it('跨类型重排（steering 消费 → followUp 顶替首位）→ 不同 type 不复用同一 DOM（type 域 key）', async () => {
-    const wrapper = mountQB({ state: { steering: ['a'], followUp: ['b'] } })
-    const rowBefore = wrapper.findAll('.qb-item')[0].element
-    // steering 被消费：followUp 行顶到首位；裸 index key（0→0）会原地复用 steering 行的 DOM
-    await wrapper.setProps({ state: { followUp: ['b'] } })
-    await nextTick()
-    const rowAfter = wrapper.findAll('.qb-item')[0].element
-    expect(rowAfter).not.toBe(rowBefore)
-    wrapper.unmount()
+  it('in-flight 行 × 同样可撤（V10：投递中走内核收回-重投，UI 无禁用态）', async () => {
+    const wrapper = mountQB({ rows: [row('u-10', '投递中的消息', 'in-flight')] })
+    const cancel = wrapper.find('[data-testid="queue-cancel-u-10"]')
+    await cancel.trigger('click')
+    expect(wrapper.emitted('cancel')).toEqual([['u-10']])
   })
 
-  it('steering 同族追加（尾部增长）→ 既有行 DOM 保持（构造期 seq 在族内单调）', async () => {
-    const wrapper = mountQB({ state: { steering: ['a', 'b'] } })
-    const firstRowBefore = wrapper.findAll('.qb-item')[0].element
-    await wrapper.setProps({ state: { steering: ['a', 'b', 'c'] } })
-    await nextTick()
-    const rows = wrapper.findAll('.qb-item')
-    expect(rows).toHaveLength(3)
-    expect(rows[0].element).toBe(firstRowBefore)
-    expect(rows[2].text()).toContain('c')
-    wrapper.unmount()
+  it('failed 行重试：点击 emit retry(clientUuid)，title=重试发送', async () => {
+    const wrapper = mountQB({ rows: [row('u-11', '失败的消息', 'failed')] })
+    const retry = wrapper.find('[data-testid="queue-retry-u-11"]')
+    const anchor = retry.element.closest('span')
+    expect(anchor?.getAttribute('title')).toBe('重试发送')
+    await retry.trigger('click')
+    expect(wrapper.emitted('retry')).toEqual([['u-11']])
+    // 重试不等于撤销：cancel 通道未被触发
+    expect(wrapper.emitted('cancel')).toBeUndefined()
+  })
+
+  it('无 chevron / 无折叠控件（v6 去折叠，不支持收起）', () => {
+    const wrapper = mountQB({ rows: [row('u-1', 'x')] })
+    expect(wrapper.find('svg.lucide-chevron-right').exists()).toBe(false)
   })
 })

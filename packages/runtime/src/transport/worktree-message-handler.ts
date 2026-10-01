@@ -8,7 +8,6 @@
  * - worktree.listBranches → worktreeService.listBranches → reply 'worktree.branches' { local, remote, defaultBranch }
  * - worktree.list → worktreeService.list → reply 'worktree.list:result' { items }
  * - workspace.detect → worktreeService.detect → reply 'workspace.detected' { mode, wsRoot, barePath, repoRoot, defaultBranch }
- * - workspace.detectBare → 向后兼容别名，等价于 workspace.detect
  *
  * 写操作失效（perf 03 §5 worktree 检查点闭环，2026-08-17）：worktree.add 创建新分支，
  * 同 repo 各 cwd 的 getStatus branches 列表随之变化。worktree.create 成功后、reply 前以
@@ -83,7 +82,6 @@ export class WorktreeMessageHandler {
     'worktree.listBranches',
     'worktree.list',
     'workspace.detect',
-    'workspace.detectBare',
   ]
 
   async handleWorktreeMessage(msg: ClientMessage, ws: WsType): Promise<void> {
@@ -139,9 +137,7 @@ export class WorktreeMessageHandler {
         }
       }
 
-      case 'workspace.detect':
-      case 'workspace.detectBare': {
-        // workspace.detectBare 是 workspace.detect 的向后兼容别名
+      case 'workspace.detect': {
         const { cwd } = msg.payload
         try {
           const result = await this.ctx.worktreeService.detect(cwd)

@@ -3,9 +3,10 @@ import { describe, expect, it } from "vitest";
 /**
  * SDK 契约测试（规范：凡调用 pi.on / pi.registerTool / 读 ctx.* 的代码必须有契约测试覆盖）。
  * 兜底 compact-handler.ts / llm.ts 中跨 SDK 泛型边界的 `as never` 断言——
- * 断言的运行时形状在这里实测（node_modules 实装 @earendil-works/pi-coding-agent@0.84.1）。
+ * 断言的运行时形状在这里实测（node_modules 实装 @earendil-works/pi-coding-agent@0.84.4）。
  */
 
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	buildSessionContext,
 	compact,
@@ -42,6 +43,25 @@ describe("pi SDK 契约（compact 接管路径依赖的导出形状）", () => {
 
 	it("completeSimple 为函数导出（same-mode LLM 调用通道）", () => {
 		expect(typeof completeSimple).toBe("function");
+	});
+
+	/**
+	 * D4① 通知注入通道契约：notices.ts 的 sendSmartContextNotice 形态必须与 SDK
+	 * ExtensionAPI.sendMessage 参数类型完全对齐（customType/content/display/details +
+	 * {triggerTurn, deliverAs:'nextTurn'}）——SDK 形状漂移时本用例编译期红。
+	 */
+	it("sendMessage(nextTurn) 通知形态符合 SDK 参数契约", () => {
+		type SendMessageParams = Parameters<ExtensionAPI["sendMessage"]>;
+		const message: SendMessageParams[0] = {
+			customType: "smart-context",
+			content: "[smart-context] 压缩完成。",
+			display: true,
+			details: { source: "compact-complete" },
+		};
+		const options: SendMessageParams[1] = { triggerTurn: false, deliverAs: "nextTurn" };
+		expect(message.customType).toBe("smart-context");
+		expect(options?.deliverAs).toBe("nextTurn");
+		expect(options?.triggerTurn).toBe(false);
 	});
 
 	it("compact() 的 preparation 参数运行时消费字段（messagesToSummarize/previousSummary/fileOps）在函数体内可达——静态签名核对", async () => {

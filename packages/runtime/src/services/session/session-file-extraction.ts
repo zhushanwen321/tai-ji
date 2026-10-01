@@ -5,7 +5,7 @@
  *   此专属。行为冻结：预检/降级/错误分级语义保持改造前逐字不变；
  * - 新路径冷启动流式扫描 scanRecordFamilyEntriesFromSessionFile：按块读 + 行预过滤
  *   + 仅 record 族 entry 进结果（不整串物化、不解析全部对话行），journal 投影的
- *   entry 源冷启动专用（journal-projection.ts 消费）。
+ *   entry 源冷启动专用（events-projection.ts 消费）。
  *
  * subagent-extractor 与 workflow-extractor 的文件读取骨架此前逐字复制（statSync 预检 →
  * oversize 降级 warn → readFileSync → parseJsonl → entry 扫描），两份漂移即行为分叉；

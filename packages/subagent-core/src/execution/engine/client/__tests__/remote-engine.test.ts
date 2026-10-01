@@ -24,7 +24,7 @@ import {
 } from "../remote-engine.ts";
 import { SubagentStream } from "../../../assembly/stream-sink.ts";
 import { getSubagentSessionDir } from "../../../assembly/path-encoding.ts";
-import { isProcessAlive } from "../pid-file.ts";
+import { probePidAliveness } from "../pid-file.ts";
 import { getLogger, type UiRequest } from "@zhushanwen/subagent-engine-sdk";
 import { getLogger as coreGetLogger } from "../../../../core/logger.ts";
 import {
@@ -206,11 +206,10 @@ describe("RemoteEngine 同步成员形态映射（必写死）", () => {
 });
 
 describe("RemoteEngine run 帧映射", () => {
-  it("task 子集收窄（model/cwd/engineFallback 改挂 ctx）+ ctxModel 投影 provider/id", async () => {
+  it("task 子集收窄（model/cwd 改挂 ctx）+ ctxModel 投影 provider/id", async () => {
     const { engine, cleanup } = makeEngine();
     const { ctx, events } = makeCtx({
       ctxModel: { id: "glm-5.1", name: "GLM", provider: "zai", reasoning: true },
-      engineFallback: { from: "pi", reason: "probe-failed" },
     });
     const task = {
       prompt: "do things",
@@ -236,11 +235,12 @@ describe("RemoteEngine run 帧映射", () => {
       cwd: "/tmp/w2-cwd",
       model: "zai/glm-4.6",
       ctxModel: "zai/glm-5.1",
-      engineFallback: { from: "pi", reason: "probe-failed" },
     });
     // H1：schemaEnv wire 字段退役——schema 本体只经 task.schema 承载，ctx 不得重现该键
     expect(wire.task).not.toHaveProperty("schemaEnv");
     expect(wire.ctx).not.toHaveProperty("schemaEnv");
+    // 运行期引擎 fallback 已删：ctx 不得重现留痕字段（防字段名复活）
+    expect(wire.ctx).not.toHaveProperty("engineFallback");
     expect(wire.ctx).not.toHaveProperty("streamMode"); // 无 stream → 缺省（JSON 序列化丢 undefined 键）
     expect(result.outcome.content).toBe("fake-content-run-1");
     expect(result.handle.data.engineId).toBe("fake");
@@ -427,7 +427,7 @@ describe("abort 分级（cancel 帧 + 收敛兜底窗）", () => {
     // [D1] 定点杀链已退役：窗满只合成终态，宿主进程不动——薄壳回收由窗口收尾
     // dispose（dispose 请求 → 按进程组终止兜底）确定性承接。
     expect(client.currentState).toBe("ready");
-    expect(isProcessAlive(enginePid)).toBe(true);
+    expect(probePidAliveness(enginePid)).toBe(true);
     await cleanup();
   }, 20_000);
 
@@ -452,7 +452,7 @@ describe("abort 分级（cancel 帧 + 收敛兜底窗）", () => {
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("stalled, not stopped"));
     warnSpy.mockRestore();
     expect(client.currentState).toBe("ready");
-    expect(isProcessAlive(enginePid)).toBe(true);
+    expect(probePidAliveness(enginePid)).toBe(true);
     await cleanup();
   }, 20_000);
 });
@@ -731,7 +731,7 @@ describe("armed 回执等待门（[D3 协议版 P6]）", () => {
       expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("armed receipt timeout cancel failed"));
       // ② 兜底 timer 武装并在 grace（300ms）到点触发：per-window 引擎 → 本实例
       //    dispose（dispose 请求 → 组杀兜底），引擎进程消亡（薄壳整体回收）。
-      await waitForTrue(() => isProcessAlive(enginePid) === false);
+      await waitForTrue(() => probePidAliveness(enginePid) === false);
       await waitForTrue(() => client.currentState === "disposed");
     } finally {
       delete process.env[ARMED_RECEIPT_TIMEOUT_ENV];
@@ -761,7 +761,7 @@ describe("armed 回执等待门（[D3 协议版 P6]）", () => {
       const result = await runPromise;
       expect(result.outcome.error).toContain("armed receipt"); // fail-fast 先于引擎应答（delay 10s）
       // 兜底窗到点 → 实例 dispose → 薄壳与孙进程一并消亡（进程组连带）
-      await waitForTrue(() => isProcessAlive(child!.pid) === false);
+      await waitForTrue(() => probePidAliveness(child!.pid) === false);
       await waitForTrue(() => client.currentState === "disposed");
     } finally {
       delete process.env[ARMED_RECEIPT_TIMEOUT_ENV];
@@ -805,7 +805,7 @@ describe("armed 回执等待门（[D3 协议版 P6]）", () => {
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("stalled, not stopped"));
       // shared-service 不触发 dispose（G4：误触发破坏 app-server 单例常驻）
       expect(client.currentState).toBe("ready");
-      expect(isProcessAlive(enginePid)).toBe(true);
+      expect(probePidAliveness(enginePid)).toBe(true);
     } finally {
       delete process.env[ARMED_RECEIPT_TIMEOUT_ENV];
       warnSpy.mockRestore();

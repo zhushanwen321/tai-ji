@@ -17,7 +17,6 @@ export {
   mapAssistantMessageDelta,
   parseSpawnModelRef,
   type SpawnModelRef,
-  type ThinkingLevel,
 } from "./spawn-args.ts";
 export { getPiInvocation, type PiInvocation } from "./pi-invocation.ts";
 export {

@@ -42,7 +42,7 @@ function findByStep(trace: Trace, stepIndex: number): ExecutionTraceNode | undef
 
 function makeSpec(): RunSpec {
   return {
-    scriptSource: "execute() {}",
+    scriptSource: "async function execute() {}",
     args: {},
     scriptName: "test-wf",
     scriptPath: "/fake/test.js",

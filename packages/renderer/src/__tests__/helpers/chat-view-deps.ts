@@ -15,27 +15,39 @@ import { vi } from 'vitest'
 import { ChatViewDepsKey } from '@taiji/ui'
 import type { ChatViewDeps } from '@taiji/ui'
 
-/** 构造 mock ChatViewDeps（所有字段 vi.fn 或合理默认，零真 store） */
+/** 构造 mock ChatViewDeps（所有字段 vi.fn 或合理默认，零真 store；ChatViewDeps 全字段必填） */
 export function createMockChatDeps(overrides: Partial<ChatViewDeps> = {}): ChatViewDeps {
   return {
-    getMessages: () => [],
     isActive: () => false,
     isHandingOff: () => false,
     getChangeSetStatus: () => undefined,
     isExpanded: () => false,
+    isTakeover: () => false,
+    // submitEdit 双发锁默认放行（不互斥）；互斥用例经 overrides 注入
+    isPendingSend: () => false,
+    sessionCwdOf: () => undefined,
     toggleExpand: vi.fn(),
     collapse: vi.fn(),
+    setTakeover: vi.fn(),
     abortBash: vi.fn(),
     editAndResend: vi.fn(),
-    onFork: vi.fn(),
+    // [U5 消息撤回 D6] 统一撤回单入口（路由判定在 core，mock 默认 spy）
+    onRevokeMessage: vi.fn(),
     onForkAsk: vi.fn(),
-    onHandoff: vi.fn(),
     onHandoffAsk: vi.fn(),
     openDrawer: vi.fn(),
     onFileClick: vi.fn(),
-    onAmbiguousSelect: vi.fn(),
     loadFileCandidates: vi.fn().mockResolvedValue([]),
     renderMarkdown: vi.fn().mockResolvedValue([]),
+    renderMarkdownIncremental: vi.fn().mockResolvedValue({
+      prefixSegments: [],
+      tailSegments: [],
+      stableBoundary: 0,
+      mode: 'incremental',
+      cache: { boundary: 0, prefixText: '', prefixSegments: [], nextSegId: 0 },
+    }),
+    // [审计候选 18] 谓词注入收单阈值字段；默认大阈值 = 静默路径不触发（等价原 () => false 默认）
+    streamingFenceSilenceMs: 60_000,
     renderMermaid: vi.fn().mockResolvedValue({ svg: '' }),
     toMarkdown: vi.fn().mockReturnValue(''),
     ...overrides,

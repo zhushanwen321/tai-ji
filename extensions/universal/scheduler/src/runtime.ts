@@ -16,15 +16,28 @@ const logger = getLogger('scheduler')
 
 const MAX_TASKS = 50
 const RATE_LIMIT_PER_MINUTE = 6
-// 导出：ack 写盘自检复用同一节奏常量（禁新造魔数），值 = tick 间隔。
+// tick 间隔（30s）。导出供测试 import 复用（fake timers 推进量与生产节奏同源——禁
+// 测试本地重造 30_000 魔数，改值即测试锚同步漂移）；ack 写盘自检为事件驱动
+//（maybeStartAck 由任务创建回调触发，见 index.ts 创建汇聚点；message_start /
+// turn_end 挂点只承载覆写武装与安全网注销），不引用本常量。
 export const TICK_INTERVAL_MS = 30_000
 const DEFAULT_EXPIRY_DAYS = 7
 const DEFAULT_EXPIRY_MS = DEFAULT_EXPIRY_DAYS * MS_PER_DAY // 7 days
-// U4 dispatch 模型切换（设计 D3 修订版）：
-// - dispatch 注入消息的 customType 标记前缀（dispatchTaskInner 的 sendMessage 与
-//   handleMessageStart 的归属匹配共用单点，字面漂移会静默断开事件恢复链路）
+// U4 dispatch 模型切换（设计 D3 修订版 + D1 归属简化）：
+// - dispatch 注入消息的 customType 标记前缀（sendMessage 的消息标记，供运维从 session 流
+//   识别 scheduler dispatch 注入；与 ack 触发器前缀 pi-scheduler-ack: 避让）
 const DISPATCH_CUSTOM_TYPE_PREFIX = 'pi-scheduler:'
-// - 在途标记强制开放的 tick 计数（D3 在途标记生命周期：超过 2 个 tick 未关闭即视为事件丢失）
+// - 在途标记强制开放的 tick 计数：超过本计数的 tick 数未关闭即视为恢复事件丢失
+// [时间平抑红线登记]（30s tick 周期对账 = 用时间换一致的兜底）：
+//   补偿根因：agent_settled 恢复事件丢失（pi 事件通道无送达保证）时，未决记录无事件通道
+//   复位，会话停留在任务模型上不被切回。
+//   量级/形态：TICK_INTERVAL_MS=30s 周期 tick 对账；in-flight 标记超本计数（2 tick ≈ 60s，
+//   强制开放的最坏恢复延迟 ≈ 3 tick ≈ 90s）未关闭即视为事件丢失、强制开放转移。
+//   恢复路径：reconcileModelSwitch 强制开放 → idle 即 restoreExpectedModel 切回期望模型 /
+//   非 idle 转 awaiting-restore（tick 重入 idle 兑现）；恢复失败落 warn 日志（含
+//   "manual switch back required" 恢复动作）。
+//   重审触发（退役条件）：恢复事件闭环已由 agent_settled 单点达成（D1 归属简化）；待批次 5
+//   W2 通道可观测（事件丢失可报警）落地后，本对账强制开放分支删除（设计 §3.3 D-B4-4）。
 const MODEL_SWITCH_RECONCILE_TICKS = 2
 
 /**
@@ -47,14 +60,15 @@ export interface SchedulerModelOps {
 }
 
 /**
- * 未决模型切换记录（设计 D3 状态机三要素之一，纯内存态）。模型语义异常不进持久化词表
+ * 未决模型切换记录（模型状态机，纯内存态）。模型语义异常不进持久化词表
  * （replay 守卫对 advance.status 硬校验 'success'，旁路字段会炸重放推进）。
  *
- * phase 生命周期（在途标记三分）：
- * - 'in-flight'：等待 dispatched turn 的 turn_end 恢复；ticksOpen 计数超过
- *   MODEL_SWITCH_RECONCILE_TICKS → 事件丢失，对账强制开放
- * - 'awaiting-restore'：非 idle 推迟 / 强制开放转推迟；比对决策已在窗口内锁定，
- *   执行不受窗口过期限制——tick 重入 idle 即兑现（不设墙钟上界）
+ * phase 生命周期（D1 归属简化后二态；恢复事件 = agent_settled 单点）：
+ * - 'in-flight'：dispatch 受理后等待 run 落定（agent_settled）兑现恢复；ticksOpen 计数超过
+ *   MODEL_SWITCH_RECONCILE_TICKS → 恢复事件丢失，tick 对账强制开放
+ * - 'awaiting-restore'：settled 到达时非 idle（与用户新 run 交错）/ 对账强制开放时非 idle
+ *   的推迟态；比对决策已在窗口内锁定，执行不受窗口过期限制——tick 重入 idle 即兑现
+ *   （不设墙钟上界）
  * - 恢复成功 / restore-failed（setModel(原) false）→ 记录清除（终态只留日志）
  */
 interface PendingModelSwitch {
@@ -66,18 +80,6 @@ interface PendingModelSwitch {
   ticksOpen: number
 }
 
-/**
- * message_start 的 custom message 形状守卫（unknown 收窄，无断言）：
- * role:'custom' 且 customType 以 pi-scheduler: 开头（dispatch 注入标记，P-MODEL-④）。
- */
-function matchesDispatchCustomType(message: unknown): boolean {
-  if (typeof message !== 'object' || message === null) return false
-  if (!('role' in message) || !('customType' in message)) return false
-  if (message.role !== 'custom') return false
-  return (
-    typeof message.customType === 'string' && message.customType.startsWith(DISPATCH_CUSTOM_TYPE_PREFIX)
-  )
-}
 // HISTORY_LIMIT 单点在 types.ts（ext-simplify-08 L5）——与 replay.ts 的 advance 折叠共用
 // STALE_CTX_MARKER（文案兜底分诊词）已迁移到 ext-guards 共享守卫（guardStaleCtx 内部
 // 引用，本文件不再直接持有）。语义：G1 模块级代际检测（isCtxStale）为主判；文案子串
@@ -107,11 +109,6 @@ export class SchedulerRuntime {
   // 结构性不可能（完成顺序不定 → turn 静默跑错模型的交错被消除）。链条引用恒吞错
   // 自愈（见 serializeModelOp），前序 op 失败不阻断后继。
   private modelOpChain: Promise<void> = Promise.resolve()
-  // 归属状态机 run 窗口（P-MODEL-③④：turnIndex per-run 归零，禁止裸 turnIndex 跨 run 当 id）：
-  // agent_start 起算（重置 turn 序态）、agent_end / agent_settled 封口
-  private runWindowActive = false
-  private currentTurnIndex = -1
-  private dispatchedTurnIndex: number | null = null
 
   /**
    * 依赖反转构造：backend 承担 appendEntry/pi.sendMessage/时间源，runtime 只持有内存态。
@@ -128,6 +125,13 @@ export class SchedulerRuntime {
     this.backend = backend
     this.isCtxStale = isCtxStale
     this.modelOps = modelOps
+    // U6c：session_tree（树回退）重折叠接线——生产 backend 在 pi.on('session_tree')
+    // 时按活跃路径重折叠任务集并回调；落点 = 本 tasks Map（loadTasks 换集）。
+    // 纯重建：不 dispatch、不 append op、不动 tickTimer 启停（常驻循环照常消费
+    // 新任务集，被撤子树任务不在集内即到点不触发）也不动 pendingModelSwitch
+    // （撤回编排前置 = 会话空闲，无在途模型切换记录）。测试替身不实现
+    // onSessionTree 时 ?. 订阅为 no-op，既有单测路径不变。
+    backend.onSessionTree?.((tasks) => this.loadTasks(tasks))
   }
 
   // ── 任务 CRUD ──
@@ -305,7 +309,7 @@ export class SchedulerRuntime {
     // 「B dispatch 先切 Y → 对账持 A 旧记录把 Y 静默切回」的交错（Y 从未生效、全序列
     // 无报错，G4 被绕过）。恢复执行时 await 完成，保证恢复 setModel 完成后 dispatch 循环
     // 才开 setModel；更广的「任意两个 setModel 不并发」由模型 op 串行队列（modelOpChain）
-    // 结构保证——含 turn_end 恢复 fire-and-forget 挂点，dispatch 模型分支排在其后。
+    // 结构保证——含 agent_settled 恢复 fire-and-forget 挂点，dispatch 模型分支排在其后。
     // 无未决记录的绝大多数 tick 同步返回、不引入 microtask 断点——dispatch 的同步段
     // 契约（in-flight 守卫在 tickScheduler() 未 await 时同步可见）保持不变。
     const reconciling = this.reconcileModelSwitch()
@@ -421,7 +425,7 @@ export class SchedulerRuntime {
         skipped = true
       } else {
         // 模型 op 串行段（MF-2 收口，互斥窗口全程覆盖「setModel 起步 → 记录创建」）：
-        // 前序模型 op（turn_end 恢复 / 前序 dispatch 切换 / 错误路径恢复）可能仍在途——
+        // 前序模型 op（agent_settled 恢复 / 前序 dispatch 切换 / 错误路径恢复）可能仍在途——
         // 排队等待期间未决记录与当前模型均可能变化，禁止按排队前快照盲切（旧快照的
         // expectedModelRef 会把恢复锚点记错），串行段内重新校验后再切换。后来的需切模型
         // 任务同样排队、出队时重新校验命中互斥 skip——双记录叠写 / 两个 setModel 并发
@@ -448,7 +452,7 @@ export class SchedulerRuntime {
           const switched = await modelOps.setModelByRef(targetModelRef)
           if (switched) {
             // setModel 受理 → 记未决切换记录（会话期望模型 + 在途标记，内存态）；
-            // sendMessage 受理后等事件恢复（message_start 归属 → turn_end + isIdle 复核）。
+            // sendMessage 受理后等 run 落定（agent_settled + isIdle 复核）兑现恢复。
             // 记录创建收在同一串行段内：互斥窗口对后继模型任务即时可见，无「已切未记」
             // 的放行缺口。
             this.pendingModelSwitch = {
@@ -458,7 +462,6 @@ export class SchedulerRuntime {
               phase: 'in-flight',
               ticksOpen: 0,
             }
-            this.dispatchedTurnIndex = null
           } else {
             // setModel false（无可用 API key 等）→ 按「恢复失败」同族处理：日志 + 放弃本次
             // 切换，任务照常 dispatch（模型字段不阻塞核心调度）
@@ -489,7 +492,6 @@ export class SchedulerRuntime {
       const ps = this.pendingModelSwitch
       if (ps && modelOps) {
         this.pendingModelSwitch = null
-        this.dispatchedTurnIndex = null
         // 恢复 setModel 入模型 op 串行队列（与其他 setModel 发起点互斥，不并发）；排队后
         // 复核「当前 == 期望」：等待期间已切回则不动作
         await this.serializeModelOp(async () => {
@@ -552,15 +554,15 @@ export class SchedulerRuntime {
     return this.dispatchTimestamps.length < RATE_LIMIT_PER_MINUTE
   }
 
-  // ── 模型切换：对账兜底与归属状态机（U4，设计 D3 修订版）──
+  // ── 模型切换：agent_settled 恢复与 tick 对账兜底（U4，D3 修订版 + D1 归属简化）──
 
   /**
    * 未决模型切换记录的对账探测（tickScheduler 开头调用，严格先于 dispatch 循环）。
    * 同步推进状态机，仅在需要执行恢复时返回 Promise（调用方 await——顺序约束）。
    * 对账守卫前置：仅当存在未决记录才比对恢复——无记录时「模型 ≠ 期望」是用户自主行为，
    * 不动作（否则用户在任务间隙手动切模型会被静默回滚）。
-   * - in-flight：ticksOpen 计数超 MODEL_SWITCH_RECONCILE_TICKS → 恢复回调永不执行（事件
-   *   丢失），强制开放：idle 即恢复（返回恢复 Promise）；非 idle 转 awaiting-restore
+   * - in-flight：ticksOpen 计数超 MODEL_SWITCH_RECONCILE_TICKS → agent_settled 恢复事件
+   *   丢失，强制开放：idle 即恢复（返回恢复 Promise）；非 idle 转 awaiting-restore
    *   （P-MODEL-② 证实 setModel 不影响 in-flight turn，但保守口径维持非 idle 推迟。
    *   pi 实装锚点（0.84.4）：dist/core/agent-session.js:304 turn 模型在准备时一次性
    *   快照，setModel 只写 state 不回写已在途 turn 的已快照模型）。
@@ -638,8 +640,8 @@ export class SchedulerRuntime {
    * 执行恢复（切回会话期望模型）并关闭未决记录（在途标记生命周期收口）：
    * 当前模型已等于期望（用户已手动切回）→ 清记录不动作；setModel(原) false →
    * restore-failed 终态（日志含恢复动作：会话停留在任务模型，需手动切回）+ 清记录。
-   * 记录先关后恢复——防 await setModel 期间 turn_end 与 tick 对账并发重入。
-   * 恢复 setModel 本体经模型 op 串行队列（serializeModelOp，MF-2）：turn_end 挂点的
+   * 记录先关后恢复——防 await setModel 期间 agent_settled 与 tick 对账并发重入。
+   * 恢复 setModel 本体经模型 op 串行队列（serializeModelOp，MF-2）：agent_settled 挂点的
    * fire-and-forget 调用由此变为安全——在途恢复持队，后续任何 setModel 发起点
    * （dispatch 切换 / 对账恢复）排队等待，两个 setModel 并发结构性不可能（完成顺序
    * 不定 → turn 静默跑错模型的交错被消除）。「当前 == 期望」复核移入串行段：排队
@@ -650,7 +652,6 @@ export class SchedulerRuntime {
     const ops = this.modelOps
     if (!ps || !ops) return Promise.resolve()
     this.pendingModelSwitch = null
-    this.dispatchedTurnIndex = null
     return this.serializeModelOp(async () => {
       if (ops.getCurrentModelRef() === ps.expectedModelRef) return
       const restored = await ops.setModelByRef(ps.expectedModelRef)
@@ -665,85 +666,33 @@ export class SchedulerRuntime {
     })
   }
 
-  // 归属状态机事件入口（index.ts 的 pi.on 转发；方法内不触碰捕获的 pi/ctx——恢复动作
-  // 经构造注入的 modelOps，stale 代际由 isCtxStale 入口检查拦下：清状态机、不执行恢复）。
-
-  /** agent run 开始：重置 run 窗口与 turn 序态（P-MODEL-③：turnIndex per-run 归零） */
-  handleAgentStart(): void {
-    if (this.isCtxStale?.()) return
-    this.runWindowActive = true
-    this.currentTurnIndex = -1
-  }
-
-  /** turn 开始：监听器维护「当前 turnIndex」（message_start 序态关联的基准，P-MODEL-④）。
-   *  turnIndex 缺省（pi 契约恒有；测试仿真可无参调 handler）→ 忽略本次序态更新。 */
-  handleTurnStart(turnIndex: number | undefined): void {
-    if (this.isCtxStale?.()) return
-    if (typeof turnIndex !== 'number') return
-    this.currentTurnIndex = turnIndex
-  }
+  // 模型恢复事件入口（index.ts 的 pi.on('agent_settled') 转发；方法内不触碰捕获的 pi/ctx
+  // ——恢复动作经构造注入的 modelOps，stale 代际由 isCtxStale 入口检查拦下：清状态机、
+  // 不执行恢复）。
 
   /**
-   * message_start 归属匹配（P-MODEL-④ 实测序态 turn_start(n) → message_start(custom) →
-   * … → turn_end(n)）：customType 前缀命中 → 记 dispatchedTurnIndex = 当前 turnIndex。
-   * 仅在未决记录在场且 run 窗口活跃时归属——避免陈旧索引在记录关闭后意外匹配后续 turn，
-   * 以及裸 turnIndex 跨 run 当 id。
-   */
-  handleMessageStart(message: unknown): void {
-    if (this.isCtxStale?.()) return
-    if (!this.pendingModelSwitch || !this.runWindowActive) return
-    if (!matchesDispatchCustomType(message)) return
-    this.dispatchedTurnIndex = this.currentTurnIndex
-  }
-
-  /**
-   * turn_end 恢复挂点（设计 D3 修订版）：turnIndex === dispatchedTurnIndex → isIdle 复核——
-   * idle 即恢复；非 idle（用户长 run 的后续 turn 在途）推迟（phase 转 awaiting-restore，
-   * tick 重入 idle 即兑现）。裸 turn_end 挂点会在用户 run 未结束时提前恢复、把该 run 后续
-   * turn 切回原模型，禁止（P-MODEL-② 实测形态）。turnIndex 缺省（同 handleTurnStart）不匹配。
-   */
-  handleTurnEnd(turnIndex: number | undefined): void {
-    if (this.isCtxStale?.()) return
-    const ps = this.pendingModelSwitch
-    if (
-      !ps ||
-      typeof turnIndex !== 'number' ||
-      this.dispatchedTurnIndex === null ||
-      turnIndex !== this.dispatchedTurnIndex
-    ) {
-      return
-    }
-    if (this.modelOps?.isIdle()) {
-      void this.restoreExpectedModel('turn-end')
-    } else {
-      ps.phase = 'awaiting-restore'
-    }
-  }
-
-  /** agent_end / agent_settled 封口 run 窗口（窗口外 turnIndex 不作归属 id） */
-  handleRunClosed(): void {
-    if (this.isCtxStale?.()) return
-    this.runWindowActive = false
-    this.currentTurnIndex = -1
-    this.dispatchedTurnIndex = null
-  }
-
-  /**
-   * agent_settled：封口 run 窗口（同 handleRunClosed）+ awaiting-restore 的即时兑现。
-   * settled = run 完全落定（无 retry/compaction/queued continuation；pi 实装
-   * agent-session.js _emitAgentSettled 先置 _isAgentRunActive=false 再 emit），正是
-   * awaiting-restore 推迟恢复所等的「真空闲」时刻——挂上后恢复延迟从「最长 1 tick
-   * （30s）」收敛到事件即时。只挂 settled 不挂 agent_end：end 后仍可能有自动续跑
-   * turn，此时切回会把续跑 turn 的模型换掉（P-MODEL-② 同族形态）。
-   * 不动 in-flight（turn_end 丢失的归属异常归 tick 对账——2 tick 强制开放既有兜底）；
-   * settled 与用户新 run 交错（isIdle false）不动作留给 tick，兜底语义不变。
+   * agent_settled：模型恢复的唯一事件通道（D1 归属简化，审计裁决「agent_settled + isIdle
+   * 复核拆 turnIndex 状态机」——原 turnIndex 归属：4 状态字段 + 6 事件挂点 + customType
+   * 前缀匹配，绕路自造对 2-tick 对账的依赖）。settled = run 完全落定（无 retry/compaction/
+   * queued continuation；pi 实装 agent-session.js _emitAgentSettled 先置 _isAgentRunActive
+   * = false 再 emit），dispatched turn 必已结束，无需 turnIndex 归属识别——isIdle 复核：
+   * - idle → 兑现恢复（in-flight / awaiting-restore 均结算；恢复延迟从「最长 1 tick（30s）」
+   *   收敛到事件即时）
+   * - 非 idle（settled 与用户新 run 交错）→ 转 awaiting-restore 推迟（不能切：会把新 run
+   *   的模型换掉，P-MODEL-② 同族形态），tick 重入 idle 兑现
+   * 不挂 agent_end 恢复：end 后仍可能有自动续跑 turn，此时切回会把续跑 turn 的模型换掉
+   * （P-MODEL-② 同族形态）——恢复只认 settled。agent_settled 丢失（事件通道无送达保证）
+   * → 30s tick 对账强制开放兜底（见 MODEL_SWITCH_RECONCILE_TICKS 红线登记）。
    */
   handleRunSettled(): void {
     if (this.isCtxStale?.()) return
-    this.handleRunClosed()
     const ps = this.pendingModelSwitch
-    if (ps?.phase !== 'awaiting-restore' || !this.modelOps?.isIdle()) return
-    void this.restoreExpectedModel('agent-settled')
+    if (!ps || !this.modelOps) return
+    if (this.modelOps.isIdle()) {
+      void this.restoreExpectedModel('agent-settled')
+    } else {
+      ps.phase = 'awaiting-restore'
+    }
   }
 
   /**
@@ -760,7 +709,10 @@ export class SchedulerRuntime {
 
   // ── 装配与回调 ──
 
-  /** 装配点注入初始任务数组（读盘/重放由 backend 完成，runtime 只持有内存态）。 */
+  /**
+   * 任务集换装入口（装配点 session_start 注入初始数组 + U6c session_tree 重折叠共用；
+   * 读盘/重放由 backend 完成，runtime 只持有内存态）。
+   */
   loadTasks(tasks: ScheduledTask[]): void {
     this.tasks = new Map(tasks.map(t => [t.id, t]))
   }

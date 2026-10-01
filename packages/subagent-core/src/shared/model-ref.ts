@@ -39,15 +39,14 @@ export interface ModelRefSource {
 /**
  * thinking level 支持顺序（低→高）。spawn 侧 `:level` 后缀仅接受本白名单值。
  *
- * 本数组为 packages 侧有序数组副本；其余两处——extensions 侧 llm-shared 一处
- * （isThinkingLevel，extensions/shared/llm-shared/src/resolve.ts）与 packages 侧
- * pi-rpc 协议包被迫独立一处（packages/pi-rpc/src/types.ts THINKING_LEVELS，
- * 禁 subagent-core 依赖所致）。
- * 词表变更须三处同步（词表守卫 scripts/check-thinking-levels.mjs 比对
- * pi-ai ↔ llm-shared + pi-rpc + 本数组三副本，本数组为 T3 比对面
- * 〔ext-simplify-18 D6〕——成员集合一致性校验，不判低→高顺序）。
- * ext-simplify-17 D5 双登记裁决：两侧注释互指关联，不建跨包 import
- * （universal 角色包禁 import subagent-core，反向则 shared 库依赖 packages/ 破坏分层）。
+ * 本数组是宿主侧校验用的有序词表副本，为词表守卫 scripts/check-thinking-levels.mjs
+ * 的 T3 比对面〔ext-simplify-18 §3.4 D6〕：守卫在提交期把 pi-ai 实装的
+ * ModelThinkingLevel 联合与两份职责不同的词表单向比对——本数组（宿主校验用）+
+ * 前端派生源 shared PI_THINKING_LEVELS（packages/shared/src/pi-preset.ts，T4）。
+ * 比对语义 = 成员集合一致性，不判低→高顺序；顺序语义由本包自身测试锚定
+ * （__tests__/model-ref.test.ts「THINKING_ORDER SSOT：白名单全集顺序稳定」）。
+ * 与 PI_THINKING_LEVELS 分层约束禁跨包 import，故两份共存（pi-preset.ts 头注
+ * 同款互指），不建跨包 import。
  */
 export const THINKING_ORDER = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
@@ -77,17 +76,67 @@ export function assertThinkingLevel(level: string | undefined): ThinkingLevel | 
 }
 
 // ============================================================
-// 规则①：strip 合法 thinking 后缀
+// 规则①：模型引用串解析（strip 合法 thinking 后缀 + 切 provider/id，档位随串返回）
 // ============================================================
 
 /**
  * 剥离模型字符串尾部 ":thinkingLevel" 后缀（如 "ds-pro:xhigh" → "ds-pro"）。
  * 仅匹配合法 thinking level（THINKING_ORDER 白名单），避免误剥 "foo:bar" 这类无关冒号。
+ *
+ * 模块私有：对外唯一入口是 parseModelSelector（本函数只返回剥干净的串，单独暴露会
+ * 让调用方拿到半个解析结果、把档位丢掉）。
  */
-export function stripThinkingSuffix(modelStr: string): string {
+function stripThinkingSuffix(modelStr: string): string {
   // 按长度降序拼正则避免短串误匹配（如 "off" 先于 "o"——白名单无单字符，防御性保留）
   const alt = THINKING_ORDER.slice().sort((a, b) => b.length - a.length).join("|");
   return modelStr.replace(new RegExp(`:(${alt})$`), "");
+}
+
+/**
+ * 模型引用串的无损解析（语法单点）。
+ *
+ * 语法：`provider/id[:thinkingLevel]`——`/` 取第一个（id 自身可含 `/`）；`:level` 后缀
+ * 仅在取值落在 THINKING_ORDER 白名单时才不构成 id（`foo:bar` 这类冒号仍属 id）。
+ * 与 stripThinkingSuffix 的差别：本函数**把档位一起返回**，调用方不需要（也不允许）
+ * 自己再切一次——历史上就是因为这个函数只返回剥干净的串，模型串里显式写的档位被
+ * 无声丢弃。
+ */
+export interface ParsedModelSelector {
+  /** 原始输入串（未处理）。 */
+  readonly input: string;
+  /** 剥掉合法档位后缀后的串（身份裁决与 registry 匹配用）。 */
+  readonly ref: string;
+  /** ref 里的 provider（无 `/` 或 `/` 在首位时为空串）。 */
+  readonly provider: string;
+  /** ref 里的 id（无 `/` 时为空串）。 */
+  readonly id: string;
+  /** 串里显式写明的思考档位（仅白名单值时给出）。 */
+  readonly thinkingLevel?: ThinkingLevel;
+}
+
+/** 解析模型引用串（无损；档位随串返回）。 */
+export function parseModelSelector(input: string): ParsedModelSelector {
+  const ref = stripThinkingSuffix(input);
+  const level = ref === input ? undefined : (input.slice(ref.length + 1) as ThinkingLevel);
+  const slashIdx = ref.indexOf("/");
+  const provider = slashIdx > 0 ? ref.slice(0, slashIdx) : "";
+  const id = slashIdx > 0 ? ref.slice(slashIdx + 1) : "";
+  return {
+    input,
+    ref,
+    provider,
+    id,
+    ...(level !== undefined ? { thinkingLevel: level } : {}),
+  };
+}
+
+/**
+ * `provider/id` 形态判据（与解析同源；provider 与 id 都必须非空）。
+ * 供「先校验格式、再落盘/回显」的调用方使用，替代各自手写的正则或切分。
+ */
+export function isModelRef(input: string): boolean {
+  const { provider, id } = parseModelSelector(input);
+  return provider.length > 0 && id.length > 0;
 }
 
 // ============================================================
@@ -286,10 +335,7 @@ export function assertCanonicalModelRef(
   opts: { source?: string } = {},
 ): ModelRef {
   const prefix = opts.source ? ` (${opts.source})` : "";
-  const clean = stripThinkingSuffix(input);
-  const slashIdx = clean.indexOf("/");
-  const provider = slashIdx > 0 ? clean.slice(0, slashIdx) : "";
-  const id = slashIdx > 0 ? clean.slice(slashIdx + 1) : "";
+  const { provider, id } = parseModelSelector(input);
 
   if (provider.length > 0 && id.length > 0) {
     const exact = source

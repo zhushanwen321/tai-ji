@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { truncLine } from "../interface/tui-kit.ts";
+import { truncLine } from "../interface/tui/tui-kit.ts";
 
 interface SnapshotCase {
   label: string;

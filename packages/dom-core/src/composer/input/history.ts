@@ -38,6 +38,10 @@ export function useComposerHistory(
   handleArrowDown: () => boolean
   resetBrowsing: () => void
   isBrowsing: Ref<boolean>
+  /** 按 sid 显式读 browsing 态（session 切换 watch 回调时刻 sid.value 已是新值，isBrowsing 读不到旧分区） */
+  isBrowsingFor: (sid: string) => boolean
+  /** 按 sid 显式读进 browsing 前保存的草稿（用户真实输入；browsing 态 getText() 已被历史条目替换） */
+  getSavedDraft: (sid: string) => string
 } {
   /**
    * 派生历史（倒序、去重连续相同文本）。
@@ -60,6 +64,24 @@ export function useComposerHistory(
   )
 
   const isBrowsing = computed(() => navState.current.value.browsing)
+
+  /**
+   * 按 sid 显式读分区导航态（R2-A6：session 切换 watch 回调触发时 sessionIdRef 已指向
+   * 新 session，isBrowsing 只能读到新分区恒 false——旧 session 是否在 browsing、其用户
+   * 真实输入是什么，都必须按旧 sid 显式取）。
+   */
+  function isBrowsingFor(sid: string): boolean {
+    let browsing = false
+    navState.updateFor(sid, (s) => { browsing = s.browsing })
+    return browsing
+  }
+
+  /** 按 sid 显式读进 browsing 前保存的草稿（用户真实输入）。 */
+  function getSavedDraft(sid: string): string {
+    let saved = ''
+    navState.updateFor(sid, (s) => { saved = s.savedDraft })
+    return saved
+  }
 
   /** 是否正在程序化设置文本（防止 setText 触发的 input 事件导致 resetBrowsing） */
   let isSettingText = false
@@ -134,5 +156,5 @@ export function useComposerHistory(
     return true
   }
 
-  return { handleArrowUp, handleArrowDown, resetBrowsing, isBrowsing }
+  return { handleArrowUp, handleArrowDown, resetBrowsing, isBrowsing, isBrowsingFor, getSavedDraft }
 }

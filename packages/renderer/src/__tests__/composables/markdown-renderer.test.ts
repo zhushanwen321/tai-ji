@@ -20,11 +20,13 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick, h } from 'vue'
-import type { MarkdownSegment } from '@taiji/ui'
+import type { IncrementalMarkdownCache, IncrementalMarkdownResult, MarkdownSegment } from '@taiji/ui'
 import { MarkdownRenderer } from '@taiji/ui'
 import { mockChatProvide } from '@/__tests__/helpers/chat-view-deps'
 
 // deps.renderMarkdown stub：每个测试设置返回值，聚焦 MarkdownRenderer 的 segment 分发。
+// [D6 收敛] renderMarkdownIncremental 必填后渲染走增量通道：mountMd 内桥接把 renderMarkdown
+// 的段作为单帧增量 tail 返回（调用计数/入参断言仍落在 mockRenderMarkdown 上，语义不变）。
 const mockRenderMarkdown = vi.fn()
 
 /** MermaidRenderer stub：捕获 source prop（验证 mermaid segment 传递 source） */
@@ -46,7 +48,6 @@ const AmbiguousPopoverStub = { name: 'AmbiguousFilePopover', render: () => null 
 // 事件委托回调断言（ui 组件经 deps 桥接）
 const mockOpenDrawer = vi.fn()
 const mockOnFileClick = vi.fn()
-const mockOnAmbiguousSelect = vi.fn()
 
 function encodeB64(text: string): string {
   const bytes = new TextEncoder().encode(text)
@@ -56,14 +57,23 @@ function encodeB64(text: string): string {
 }
 
 function mountMd(props: Record<string, unknown> = {}) {
+  const renderMarkdownIncremental = vi.fn(
+    async (source: string, cache: IncrementalMarkdownCache | null, sid?: string): Promise<IncrementalMarkdownResult & { cache: IncrementalMarkdownCache }> => ({
+      prefixSegments: [],
+      tailSegments: await mockRenderMarkdown(source, sid),
+      stableBoundary: 0,
+      mode: 'incremental' as const,
+      cache: cache ?? { boundary: 0, prefixText: '', prefixSegments: [], nextSegId: 0 },
+    }),
+  )
   return mount(MarkdownRenderer, {
     props: props as never,
     global: {
       provide: mockChatProvide({
         renderMarkdown: mockRenderMarkdown,
+        renderMarkdownIncremental,
         openDrawer: mockOpenDrawer,
         onFileClick: mockOnFileClick,
-        onAmbiguousSelect: mockOnAmbiguousSelect,
       }),
       stubs: { MermaidRenderer: MermaidStub, AmbiguousFilePopover: AmbiguousPopoverStub },
     },
@@ -95,7 +105,6 @@ describe('MarkdownRenderer（segments 模式）', () => {
     mockMermaidSource.mockReset()
     mockOpenDrawer.mockReset()
     mockOnFileClick.mockReset()
-    mockOnAmbiguousSelect.mockReset()
     vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
   })
 
@@ -342,8 +351,9 @@ describe('MarkdownRenderer · H2 rAF trailing 节流', () => {
     const wrapper = mountMd({ content: 'first' })
     await nextTick()
     flushRAF()
-    await nextTick()
-    await nextTick()
+    // D6 收敛后渲染链经增量桥接，async 边界加深一跳——按 waitForDom 契约轮询期望呈现，
+    // 不钉固定 tick 数（同函数上方注释：固定 tick 会确定性失败）
+    await waitForDom(() => wrapper.html().includes('v1'))
     // 首渲染成功
     expect(wrapper.find('.md-render > div').html()).toContain('v1')
 
@@ -351,8 +361,7 @@ describe('MarkdownRenderer · H2 rAF trailing 节流', () => {
     mockRenderMarkdown.mockResolvedValue([{ type: 'text', content: '<p>v2-updated</p>' }])
     await wrapper.setProps({ content: 'second' })
     flushRAF()
-    await nextTick()
-    await nextTick()
+    await waitForDom(() => wrapper.html().includes('v2-updated'))
     // 序号守卫：新渲染覆盖旧，DOM 是 v2（非 v1）
     expect(wrapper.find('.md-render > div').html()).toContain('v2-updated')
   })

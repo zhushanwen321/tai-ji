@@ -87,9 +87,9 @@ describe('Sidebar 归入项目接线（review MF-1）', () => {
 
     expect(sidebarActionMocks.assignSessionToProject).toHaveBeenCalledWith('s1', 'p1')
     expect(toastErrorMock).toHaveBeenCalledTimes(1)
-    // 文案来自 zh-CN locale（vitest-i18n-setup 注入真实 t）：assignProjectFailed = '归入项目失败'
-    // （locale 无 {msg} 占位符，失败详情不进 toast——与 renameFailed 带 {msg} 的写法不同，此处按真实文案断言）
-    expect(toastErrorMock).toHaveBeenCalledWith('归入项目失败')
+    // 文案来自 zh-CN locale（vitest-i18n-setup 注入真实 t）：assignProjectFailed = '归入项目失败：{msg}'
+    // （失败详情 {msg} 进 toast，与 renameFailed 同款写法——按真实文案断言）
+    expect(toastErrorMock).toHaveBeenCalledWith('归入项目失败：rpc-fail')
     wrapper.unmount()
   })
 })

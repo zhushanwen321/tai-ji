@@ -18,7 +18,7 @@
  * - sendBash start → bus.publish(message.bashStart)
  * - sendBash success → bus.publish(message.bashResult)
  * - sendBash error → bus.publish(message.bashResult + message.error)
- * - abortBash cancelled → bus.publish(message.bashResult{cancelled:true})
+ * - abortBash → bus.publish(message.bashAborted)（D4-3 兜底终态独立帧）
  * - compact（M4 事件驱动）→ 零 compaction 广播（busy/start/fail/summary/success 各路径，生命周期归 interpreter）
  * - messageBus undefined → no crash（null-safety）
  *
@@ -26,14 +26,16 @@
  *
  * 运行：npx vitest run test/dispatcher-bus.test.ts
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { MessageDispatcher } from '../src/services/session/message-dispatcher.js'
 import type { IDispatcherSessionOps } from '../src/services/session/session-internal.js'
 import type { IManagedSessionView } from '../src/services/session/types.js'
+import { createSessionDeliveryRegistry } from '../src/services/session/session-delivery-registry.js'
 import type { IMessageBus } from '../src/services/message-bus/message-bus.js'
 import type { IPiEngine, IProcessManager } from '../src/services/ports/pi-engine.js'
 import type { ServerMessage } from '@taiji/shared'
 import type { WorkspaceService } from '../src/services/workspace/workspace-service.js'
+import { flushDelivery } from './helpers/flush-delivery.js'
 
 function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManagedSessionView {
   return {
@@ -113,8 +115,20 @@ function makeMocks(opts: {
 
   const messageBus = opts.messageBus ?? { publish: vi.fn() }
 
-  // wave:perf-w09（D1-2）：broker 双写腿已删，dispatcher 只依赖 publish 抽象（4 参构造）
+  // [u2 投递所有权内核] 出站交接经内核适配层（dispatcher 只提交；交接异步）——fixture 按真实
+  // 装配接内核（recordWorkspace 走 workspace.record，消息总线走同一 messageBus）
+  const registry = createSessionDeliveryRegistry({
+    getSession: (sid) => svc.getSession(sid),
+    ensureActive: svc.ensureActive,
+    subscribeAgentSettled: () => () => {},
+    recordWorkspace: (cwd) => workspace.record(cwd),
+    getMessageBus: () => messageBus as unknown as IMessageBus,
+  })
+
+  // wave:perf-w09（D1-2）：broker 双写腿已删，dispatcher 只依赖 publish 抽象（4 参构造）；
+  // [MF-1-7] 注册表经 setDeliveryRegistry 后置注入（审计候选 12：构造期注入参已删）
   const dispatcher = new MessageDispatcher(svc, pm, workspace, messageBus as unknown as IMessageBus)
+  dispatcher.setDeliveryRegistry(registry)
   return { dispatcher, session, promptFn, bashFn, abortFn, abortBashFn, compactFn, svc, pm, messageBus }
 }
 
@@ -128,6 +142,7 @@ describe('message-dispatcher bus integration', () => {
       promptError: new Error('pi crashed'),
     })
     await dispatcher.sendMessage('s1', 'hello')
+    await flushDelivery(30)
     expect(messageBus.publish).toHaveBeenCalledWith('s1', expect.objectContaining({ type: 'message.error' }))
     // occupancy 帧（u5a-p3）先于 message.error 入列，按 type 定位（原 calls[0] 断言失真同步）
     const errCall = messageBus.publish.mock.calls.map((c: any[]) => c[1]).find((m: ServerMessage) => m.type === 'message.error')
@@ -135,10 +150,13 @@ describe('message-dispatcher bus integration', () => {
     expect(errCall!.payload.message).toContain('pi crashed')
   })
 
-  it('sendMessage busy → bus.publish(send.rejected)', async () => {
+  it('sendMessage busy → 零 send.rejected（u2 退役：排队取代拒绝，改由内核按 steer 承接）', async () => {
     const { dispatcher, messageBus } = makeMocks({ isGenerating: true })
     await dispatcher.sendMessage('s1', 'hello')
-    expect(messageBus.publish).toHaveBeenCalledWith('s1', expect.objectContaining({ type: 'send.rejected' }))
+    await flushDelivery(30)
+    // 退役面显式断言（原 send.rejected 广播）：bus 上不再出现拒绝帧
+    const types = messageBus.publish.mock.calls.map((c: unknown[]) => (c[1] as ServerMessage).type)
+    expect(types).not.toContain('send.rejected')
   })
 
   it('hook blocked → bus.publish(message.error)', async () => {
@@ -184,17 +202,20 @@ describe('message-dispatcher bus integration', () => {
 
   // ── sendBash paths ──
 
-  it('sendBash ensureActive fail → bus.publish(message.error)', async () => {
+  it('sendBash ensureActive fail → bus.publish(message.error) + 回执 rejected（未执行，不 throw）', async () => {
     const { dispatcher, messageBus, svc } = makeMocks()
     svc.ensureActive = vi.fn(async () => { throw new Error('restore failed') })
-    await expect(dispatcher.sendBash('s1', 'ls')).rejects.toThrow('restore failed')
+    // dmg-r1-2：restore 失败 = 未执行 → rejected 回执（不再 throw——throw 走 error envelope
+    // 会丢执行状态，消费方只能保守丢草稿）
+    const result = await dispatcher.sendBash('s1', 'ls')
+    expect(result).toEqual({ status: 'rejected', error: 'Failed to restore session: restore failed' })
     expect(messageBus.publish).toHaveBeenCalledWith('s1', expect.objectContaining({ type: 'message.error' }))
   })
 
   it('sendBash busy → bus.publish(send.rejected)', async () => {
     const { dispatcher, messageBus } = makeMocks({ isBashRunning: true })
     const result = await dispatcher.sendBash('s1', 'ls')
-    expect(result.blocked).toBe(true)
+    expect(result.status).toBe('rejected') // 未执行（busy 预检）
     expect(messageBus.publish).toHaveBeenCalledWith('s1', expect.objectContaining({ type: 'send.rejected' }))
   })
 
@@ -226,7 +247,8 @@ describe('message-dispatcher bus integration', () => {
     const { dispatcher, messageBus, bashFn } = makeMocks()
     bashFn.mockRejectedValue(new Error('bash failed'))
     const result = await dispatcher.sendBash('s1', 'bad-cmd')
-    expect(result.blocked).toBe(true)
+    expect(result.status).toBe('settled') // 已执行并收口（失败终态已广播）
+    expect(result.error).toContain('bash failed')
     // Should have both bashResult and message.error
     const types = messageBus.publish.mock.calls.map((c: any[]) => c[1].type)
     expect(types).toContain('message.bashResult')
@@ -235,15 +257,15 @@ describe('message-dispatcher bus integration', () => {
 
   // ── abortBash path ──
 
-  it('abortBash cancelled → bus.publish(message.bashResult{cancelled:true})', async () => {
+  it('abortBash → bus.publish(message.bashAborted)（D4-3 兜底终态独立帧）', async () => {
     const session = makeMockSession({ isBashRunning: true, bashRunToken: 'bash_123_abc' })
     const { dispatcher, messageBus } = makeMocks({ session })
     await dispatcher.abortBash('s1')
-    const bashResultCall = messageBus.publish.mock.calls.find(
-      (c: any[]) => c[1].type === 'message.bashResult',
+    const bashAbortedCall = messageBus.publish.mock.calls.find(
+      (c: any[]) => c[1].type === 'message.bashAborted',
     )
-    expect(bashResultCall).toBeDefined()
-    expect(bashResultCall![1].payload.cancelled).toBe(true)
+    expect(bashAbortedCall).toBeDefined()
+    expect(bashAbortedCall![1].payload).toMatchObject({ sessionId: 's1' })
   })
 
   // ── compact paths ──
@@ -315,7 +337,11 @@ describe('message-dispatcher bus integration', () => {
     expect(session.occupancy?.compacting).toBe(true)
 
     // 第二发：预检读 isCompacting=true → 拒绝（不发出第二个 RPC）
-    await expect(dispatcher.compact('s1')).rejects.toThrow('Cannot compact while compaction already running')
+    const second = dispatcher.compact('s1')
+    await expect(second).rejects.toThrow('Cannot compact while compaction already running')
+    // 锁定 error envelope code 属性（产生点 = message-dispatcher compact 预检的
+    // Object.assign(new Error(errMsg), { code: 'compact_busy' })）
+    await expect(second).rejects.toMatchObject({ code: 'compact_busy' })
     expect(compactFn).toHaveBeenCalledTimes(1)
 
     // 第一发完成：finally 复位（compacting-end）
@@ -406,6 +432,7 @@ describe('message-dispatcher bus integration', () => {
       promptError: new Error('test'),
     })
     await dispatcher.sendMessage('s1', 'hello')
+    await flushDelivery(30)
     // occupancy 帧（u5a-p3：dispatching + catch 复位 idle）与 message.error 并存，
     // 本用例锁的是 message.error 单通道无双发——按 type 过滤后计数（原全量计数失真同步）。
     const errCalls = messageBus.publish.mock.calls.filter(
@@ -422,6 +449,7 @@ describe('message-dispatcher bus integration', () => {
       promptError: new Error('test'),
     })
     await dispatcher.sendMessage('my-session-123', 'hello')
+    await flushDelivery(30)
     expect(messageBus.publish).toHaveBeenCalledWith('my-session-123', expect.any(Object))
   })
 })

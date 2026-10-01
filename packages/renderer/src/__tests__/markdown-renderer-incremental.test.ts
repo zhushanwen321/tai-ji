@@ -86,7 +86,6 @@ async function createIncrementalDeps() {
   }
   const deps = createMockChatDeps({
     renderMarkdownIncremental,
-    shouldFinalizeStreamingFence: m.shouldFinalizeStreamingFence,
     streamingFenceSilenceMs: m.STREAMING_FENCE_SILENCE_MS,
   })
   return { m, deps, results }
@@ -162,6 +161,11 @@ describe('W23 ①: 增量更新只重渲染尾段（真实 renderIncremental）'
 
 describe('W23 ②: streaming-fence 占位（语言名 + loader 行，不跑 shiki/mermaid）', () => {
   it('未闭合代码 fence：占位可见（lang=ts），零 shiki 高亮', async () => {
+    // 冻结静默时钟：silenceMs = performance.now() - lastContentAt 每帧重读（useMarkdownStreaming
+    // runIncrementalRender），满载下 mount→首帧的 macrotask 边界可越过 200ms 阈值 → 首帧直接
+    // finalize（占位转完整代码块）→ 占位断言假红。冻结后 silenceMs 恒 0、finalize 定时器不
+    // advance 不触发，占位可见成为确定性行为。flushRaf 用模块级捕获的真实 setTimeout，不受影响。
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance.now'] })
     const { deps } = await createIncrementalDeps()
     const wrapper = mountMd({ content: 'intro paragraph\n\n```ts\nconst a = 1', streaming: true }, deps)
     await flushRaf()
@@ -178,6 +182,8 @@ describe('W23 ②: streaming-fence 占位（语言名 + loader 行，不跑 shik
   })
 
   it('未闭合 mermaid fence：占位可见（lang=mermaid），不加载 mermaid', async () => {
+    // 同上：冻结静默时钟，堵「满载首帧 silenceMs 越阈值 → 占位未现先 finalize」的假红窗口
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance.now'] })
     const { deps } = await createIncrementalDeps()
     const renderMermaid = vi.fn(deps.renderMermaid)
     const wrapper = mountMd(
@@ -197,7 +203,10 @@ describe('W23 ②: streaming-fence 占位（语言名 + loader 行，不跑 shik
 
 describe('W23 ③: 静默期 finalize 后完整渲染', () => {
   it('token 静默 ≥200ms → 占位转完整代码块（fence 已到达内容呈现）', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    // performance.now 一并冻结：flushRaf 后的占位存在断言与 ② 同暴露面（真实时钟下满载
+    // 首帧可提前 finalize）；advanceTimersByTimeAsync 命中的是 armFenceFinalizeTimer 挂的
+    // 静默定时器（remaining = 阈值 - 冻结差值 = 200ms），finalize 语义不变
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance.now'] })
     const { deps } = await createIncrementalDeps()
     const wrapper = mountMd({ content: 'intro paragraph\n\n```ts\nconst a = 1', streaming: true }, deps)
     await flushRaf()
@@ -239,10 +248,19 @@ describe('W23 ④: complete 消息渲染与旧版全量渲染等价（回归基�
     const { m, deps } = await createIncrementalDeps()
     // streaming 缺省 = complete → 直接完整渲染
     const inc = mountMd({ content }, deps)
+    // legacy 对照：renderMarkdownSegments 全量管线一次性产段（D6 收敛后 ChatViewDeps 无
+    // 「缺增量回退全量」路径，对照侧显式桥接单帧增量返回全量段）
     const legacy = mountMd(
       { content },
       createMockChatDeps({
         renderMarkdown: (source: string) => m.renderMarkdownSegments(source),
+        renderMarkdownIncremental: async (source, cache) => ({
+          prefixSegments: [],
+          tailSegments: await m.renderMarkdownSegments(source),
+          stableBoundary: 0,
+          mode: 'incremental' as const,
+          cache: cache ?? m.createIncrementalRenderCache(),
+        }),
       }),
     )
     await flushRaf()

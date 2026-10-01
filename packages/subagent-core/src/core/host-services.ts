@@ -17,6 +17,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { LogLevel } from "./logger.ts";
+import { GLOBAL_SLOT_KEYS } from "../shared/global-slots.ts";
 
 /** 发现根条目：dir 为扫描根路径；source 是宿主提供的语义标签（遮蔽报告透传用）。
  *  source 不枚举封闭集——core 只透传不解释（宿主如 pi 壳用 user-pi/npm/npm-dev）。 */
@@ -66,7 +67,7 @@ export const DEFAULT_DATA_ROOT: string = join(homedir(), ".subagent-core");
 // 「undefined 值与无 key 不可区分」；范式与 execution/subagent-service.ts 进程单例
 // slot 同型。读写语义不变：configureCore 覆盖式写入
 // （重复调用以后者覆盖——测试切宿主依赖此语义）。
-const HOST_SLOT_KEY = Symbol.for("@zhushanwen/subagent-core.host-services");
+const HOST_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.hostServices);
 
 type HostSlot = { current: HostServices | undefined };
 

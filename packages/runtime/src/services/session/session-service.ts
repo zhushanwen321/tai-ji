@@ -30,7 +30,7 @@
  */
 import { existsSync } from 'node:fs'
 import { isBtwVirtualId } from '@taiji/shared'
-import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId, PlanStateView } from '@taiji/shared'
+import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId, PlanStateView, SessionRevokeMessageReply, SendPromptReason } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
 import type {
   ISessionService, IMessageBroker, SessionCreateOptions,
@@ -75,8 +75,10 @@ import type { IConfigStore } from '../ports/config.js'
 import type { ISessionStore, SessionOutcome } from '../ports/session.js'
 import type { IGitInfoReader } from '../ports/git-info.js'
 import type { IManagedSessionView, ScannedSession, SendMessageHook, SessionOccupancy } from './types.js'
+import type { DeliverySubmitResult, SessionDeliveryRegistry } from './session-delivery-registry.js'
 import type { WorkspaceService } from '../workspace/workspace-service.js'
 import { SessionLifecycle } from './session-lifecycle.js'
+import { RevokeOrchestrator } from './revoke-orchestrator.js'
 import type { ReclaimSessionDeps } from './session-lifecycle.js'
 // B3 ensure 链分支（btw-question M2-b 授权）：ensureActive 对 btw vid 转自建附着编排。
 // type-only（本文件对 btw-service 零 value 依赖，无环——btw-service 不反向 import 本文件）。
@@ -162,6 +164,19 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   private lifecycle!: SessionLifecycle
   private dispatcher!: MessageDispatcher
   private scanner!: SessionScanner
+  /**
+   * 消息撤回编排域（message-revoke 设计 §3.3 D2，U4）：revokeMessage 七步编排——
+   * revoking hold 置位/释放 + cancel active + 定位 + 清缓存 + 信令前校验 + nav 信令 +
+   * reply。构造点在 dispatcher 之后（sendSystemCommand 依赖其实例），见 assembleSubmodules。
+   */
+  private revokeOrchestrator!: RevokeOrchestrator
+  /**
+   * [MF-1-7 装配收编] 后置注入槽（组合根创建晚于本类构造，对齐 setMessageBus 先例）：
+   * 原进程内活动槽已删，依赖经本 Facade 流转给 dispatcher 与 revoke 编排；注入前按
+   * 「组合根未接线」显式失败（fail-fast 保持）。
+   */
+  private deliveryRegistry?: SessionDeliveryRegistry
+  private revocationSignalNotifier?: (sessionId: string) => void
   /** 附件存储域（S1 迁出，零耦合子模块——无 Facade 状态依赖，故不注入 this） */
   private readonly attachmentStore = new AttachmentStore()
   /**
@@ -512,7 +527,9 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       // setCapabilityDriftSink 上报 + runtime 日志）。一次调用，fire-and-forget——对账是
       // 纯旁路诊断，失败绝不阻断附着（内部已降级，catch 双保险）。
       if (this.modelCapabilityReconciler) {
-        this.modelCapabilityReconciler(sessionId).catch(() => { /* 降级吞错：附着主链路优先 */ })
+        // 降级不吞错（harden b23-3）：对账是纯旁路诊断，失败绝不阻断附着主链，但必须留痕可归因
+        // （能力漂移对账长期静默失败 = 守卫失效）。
+        this.modelCapabilityReconciler(sessionId).catch((e: unknown) => console.error(`[session-service] capability reconcile failed (sessionId=${sessionId}):`, e))
       }
     })
     // D3 checkpoint + D5 mirror 的 attach 挂点（crash-forensics §3.3）：订阅体迁
@@ -524,8 +541,31 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       activityAt: (sessionId) => this.pm.getClient(sessionId)?.lastActivityAt,
       viewedAt: (sessionId) => this.getSessionLastViewedAt(sessionId),
     })
-    this.dispatcher = new MessageDispatcher(this, this.pm, this.workspaceService, messageBus, new SkillInjector(this.skillSource))
+    // [u2 内核化] dispatcher 不持有注入器（skill 注入在 delivery registry 投递腿）——
+    // registry 构造点（runtime/src/index.ts）传 sessionService.skillMappingSource 共源。
+    this.dispatcher = new MessageDispatcher(this, this.pm, this.workspaceService, messageBus)
     this.scanner = new SessionScanner(this, this.sessionStore, this.gitInfoReader)
+
+    // 消息撤回编排域（message-revoke D2，U4）：deps 窄注入——occupancy 经 lifecycle 只读面、
+    // workflow 检查经 records 磁盘扫描（W17 workflow-record entry，run 启动冷路径立即落盘）、
+    // history 缓存清理绑本 Facade 既有入口、信令经 dispatcher.sendSystemCommand 旁路。
+    this.revokeOrchestrator = new RevokeOrchestrator({
+      getSession: (sessionId) => this.lifecycle.get(sessionId),
+      ensureActive: (sessionId) => this.ensureActive(sessionId),
+      hasRunningWorkflow: async (sessionId) =>
+        (await this.records.getWorkflows(sessionId)).records.some((r) => r.status === 'running'),
+      evictHistoryRebuildCache: (sessionId) => this.evictHistoryRebuildCache(sessionId),
+      // [message-revoke U6d] 撤回派生态失效：SessionRecords 丢 cursor + forceFullRebuild
+      // 强制全量重建（plan 腿接 leafId 裁剪、subagent/workflow 照实保留）——复审 F2 拆边
+      // 窄接口已接线（U4 曾以 no-op 占位，U6d 交付后核销；session 无激活缓存条目时
+      // SessionRecords 侧内部 no-op，冷启动腿已各自接裁剪）。
+      invalidateDerivedState: (sessionId) => this.records.invalidateDerivedState(sessionId),
+      // [MF-1-7] 撤回信号广播腿：后置注入槽动态读（未注入时 no-op——对齐原活动槽 null 取值语义）。
+      notifyEntryInvalidation: (sessionId) => this.revocationSignalNotifier?.(sessionId),
+      // [MF-1-7] 投递注册表：后置注入槽动态读（getter 延迟解析——注册表晚于本类构造）。
+      registry: () => this.deliveryRegistry,
+      sendSystemCommand: (sid, cmd, req) => this.dispatcher.sendSystemCommand(sid, cmd, req),
+    })
 
     // 后台任务域组装（u-runtime-rpc①②）：广播回调经 this.messageBus 动态读（getter 语义，
     // 与 registerDeps/traceSync 的晚期注入同款——setMessageBus 后置注入前触发时 publish
@@ -785,6 +825,23 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   /**
+   * [MF-1-7 装配收编] 后置注入投递注册表（组合根创建后调用）：转发 dispatcher + 存槽
+   * 供 revoke 编排 getter 动态读；幂等。
+   */
+  setDeliveryRegistry(registry: SessionDeliveryRegistry): void {
+    this.deliveryRegistry = registry
+    this.dispatcher.setDeliveryRegistry(registry)
+  }
+
+  /**
+   * [MF-1-7 装配收编] 后置注入撤回信号广播腿（组合根在 pluginService 就绪后调用）；
+   * 未注入时广播腿 no-op（与原活动槽未注册语义一致）。
+   */
+  setRevocationSignalNotifier(notifier: (sessionId: string) => void): void {
+    this.revocationSignalNotifier = notifier
+  }
+
+  /**
    * [A1 接线] 绑定 skill 注入映射源真源（组合根在 SkillRegistry 构造后调用一次，
    * skill-reload-nondestructive D7）。records/dispatcher 的 SkillInjector 构造期已持
    * skillSource 占位，bind 后共享同源。getter 供组合根为 delivery registry 组装
@@ -842,11 +899,24 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   async renameSession(sessionId: string, newName: string): Promise<void> { return this.lifecycle.renameSession(sessionId, newName) }
   async restoreSession(sessionId: string): Promise<SessionSummary> {
     const summary = await this.lifecycle.restoreSession(sessionId)
-    // u8（crash-resilience D7 熔断语义）：任一恢复成功（自动 respawn / 用户手动 / 惰性
-    // ensureActive）→ 清零连续失败计数，保证未来崩溃获得全新自动恢复额度（熔断只针对
-    // 连续失败，成功即出清；唯一清零入口，与 pi-respawn.cancel 只清 timer 不清计数配套）。
-    this.respawn.notifyRestored(sessionId)
+    // [D3 msg-pipeline-debloat] 恢复成功三合一出口（单一发布事实源）：判别 → 发布
+    // session.restored → 清零连续失败计数。本 facade 是恢复四入口的真实汇合点（自动
+    // respawn / 惰性 ensureActive / 手动 RPC / startup-reattach 的 restore 内核都是它），
+    // 发布锚钉在此；三信号判别读取先于清零（见 pi-respawn.onRestoreSuccess）。普通懒
+    // spawn / startup-reattach 三信号皆空静默恢复不发布；熔断只针对连续失败，成功即出清
+    //（唯一清零入口，与 pi-respawn.cancel 只清 timer 不清计数配套）。
+    this.onRestoreSuccess(sessionId)
     return summary
+  }
+
+  /**
+   * [D3] 恢复成功三合一出口（判别 → 发布 session.restored → 清连续失败计数），委托
+   * respawn 编排器（三信号状态全在其内）。生产唯一调用点 = restoreSession facade 成功
+   * 尾部；组装级测试的 restoreSession 替身（spy 掉 lifecycle 的 FS/spawn 链）按同一契约
+   * 在成功尾部调用本方法，保证发布判别链与生产一致。
+   */
+  onRestoreSuccess(sessionId: string): void {
+    this.respawn.onRestoreSuccess(sessionId)
   }
   async forkSession(
     srcSessionId: string,
@@ -867,24 +937,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     return this.lifecycle.forkSession(srcSessionId, fromPiEntryId, includeFrom, label, opts)
   }
 
-  async sendMessage(
-    sessionId: string,
-    content: string,
-    images?: Array<{ data: string; mimeType: string }>,
-    clientUuid?: string,
-    requireCommand?: string,
-  ): Promise<{
-    blocked: boolean
-    rejected?: boolean
-    reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error'
-  }> { return this.dispatcher.sendMessage(sessionId, content, images, clientUuid, requireCommand) }
+  async sendMessage(sessionId: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string, requireCommand?: string): Promise<{ blocked: boolean; rejected?: boolean; receipt?: DeliverySubmitResult; reason?: SendPromptReason }> { return this.dispatcher.sendMessage(sessionId, content, images, clientUuid, requireCommand) }
   // [HISTORICAL] sendSubagentMessage（marker 半成品通道）已删除（composer 四符号设计 D2）：
   // base64 隐藏注释前缀在 extension 侧零消费方，且经主 agent 转发违背
   // 「直达 subagent」目标——定向消息改走 subagentAction(message/start)。
   async abort(sessionId: string): Promise<void> { return this.dispatcher.abort(sessionId) }
   /** 强制退出卡死 session（sidebar 右键入口，杀 pi 进程 + stopped 收敛）。 */
   async forceQuit(sessionId: string): Promise<void> { return this.dispatcher.forceQuit(sessionId) }
-  async sendBash(sessionId: string, command: string, excludeFromContext?: boolean): Promise<{ blocked: boolean; rejected?: boolean }> {
+  /** bash 投递回执（started/settled/rejected + 可选失败原因），1:1 透传 dispatcher（翻译层在 transport）。 */
+  async sendBash(sessionId: string, command: string, excludeFromContext?: boolean): Promise<{ status: 'started' | 'settled' | 'rejected'; error?: string }> {
     return this.dispatcher.sendBash(sessionId, command, excludeFromContext)
   }
   async abortBash(sessionId: string): Promise<{ sent: boolean }> { return this.dispatcher.abortBash(sessionId) }
@@ -894,8 +955,6 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 经 EventInterpreter.onAgentSettled 回调注入（组合根 index.ts）。
    */
   flushPendingBashResults(sessionId: string): void { this.dispatcher.flushPendingBashResults(sessionId) }
-  async steerMessage(sessionId: string, content: string): Promise<void> { return this.dispatcher.steerMessage(sessionId, content) }
-  async followUpMessage(sessionId: string, content: string): Promise<void> { return this.dispatcher.followUpMessage(sessionId, content) }
   async compact(sessionId: string, customInstructions?: string): Promise<void> { return this.dispatcher.compact(sessionId, customInstructions) }
   setSendMessageHook(hook: SendMessageHook): void { this.dispatcher.setSendMessageHook(hook) }
   listPersistedSessions(): SessionGroup[] { return this.scanner.listPersistedSessions() }
@@ -1139,6 +1198,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    */
   evictHistoryRebuildCache(sessionId: string): void { this.historyReader.onSessionReclaimed(sessionId) }
 
+  /**
+   * 消息撤回编排入口（message-revoke D2，U4）：七步编排全在 RevokeOrchestrator，reply
+   * 形状见 shared SessionRevokeMessageReply（D8 错误规格表 SSOT）。领域回执（六码）不走
+   * error envelope；编排 throw（装配缺失类）由 transport handler 收口。
+   */
+  revokeMessage(sessionId: string, targetId: string): Promise<SessionRevokeMessageReply> {
+    return this.revokeOrchestrator.revokeMessage(sessionId, targetId)
+  }
+
   // ── subagent/workflow 记录域（S6 迁出至 session-records.ts；磁盘扫描/引擎配置/动作详见该模块）──
 
   /** subagent 列表（冷启动磁盘扫描，实现迁 session-records.ts）。 */
@@ -1292,10 +1360,17 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   async destroyAll(): Promise<void> {
+    // 逐步隔离（code-harden RT-4#1，对齐 runDestroyStepIsolated 范式）：shutdown 收敛链
+    // 任一步失败不阻断后续清理（detach 扇出 → pm.destroyAll 进程收割 → 内存态清空），
+    // 失败逐步留痕（detach 步进台账 reason=destroy-chain-step-failed 可归因）。
     for (const session of this.lifecycle.values()) {
-      session.adapter.detach()
+      runDestroyStepIsolated('destroyAll.adapter.detach', session.id, () => session.adapter.detach())
     }
-    await this.pm.destroyAll()
+    // pm.destroyAll 是异步整体调用，runDestroyStepIsolated（同步 fn）不直接适用——等价
+    // .catch 留痕：单进程收割失败不阻断 shutdown 收敛，其余清理继续。
+    await this.pm.destroyAll().catch((e: unknown) => {
+      console.error('[session-service] destroyAll: pm.destroyAll failed (continuing shutdown):', e)
+    })
     // shutdown 路径：只清 sessions Map（Map 所有者执行），刻意不触发 dispose/销毁通知
     // ——进程将亡，缓存随进程同灭（迁移前行为保持，设计 D2②）。
     this.lifecycle.clear()
@@ -1342,7 +1417,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * session 不存在/文件未落盘（延迟写入窗口）→ 静默跳过（不阻断归类流程，下次 create 兜底）。
    */
   async setProject(sessionId: string, projectId: string): Promise<void> {
-    const active = this.lifecycle.get(sessionId) as (IManagedSessionView & { projectId?: string }) | undefined
+    const active = this.lifecycle.get(sessionId)
     if (active) {
       active.projectId = projectId || undefined
       if (active.sessionFilePath) {
@@ -1482,11 +1557,11 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 用 projectBindingPersisted 标记防重复写（session 级运行时标记，不进 toSummary）。
    */
   private tryPersistProjectBinding(s: IManagedSessionView): void {
-    const projectId = (s as IManagedSessionView & { projectId?: string }).projectId
-    const persisted = (s as IManagedSessionView & { projectBindingPersisted?: boolean }).projectBindingPersisted
+    const projectId = s.projectId
+    const persisted = s.projectBindingPersisted
     if (persisted || !projectId || !s.sessionFilePath || !existsSync(s.sessionFilePath)) return
     this.sessionStore.persistProjectBinding(s.sessionFilePath, projectId)
-    ;(s as IManagedSessionView & { projectBindingPersisted?: boolean }).projectBindingPersisted = true
+    s.projectBindingPersisted = true
   }
 
   /**
@@ -1546,10 +1621,12 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 用于 session 恢复后拉取用量——pi 从历史估算，重启后旧 session 也能显示当前占用。
    * 复用 context.update 契约（inputTokens/contextLimit/usagePercent）。
    * contextUsage.tokens=null（compaction 后未跑新 turn）或 session 未激活时返回 null。
+   * usagePercent 可选（[RT-4#7] 无值纪律：pi percent=null 时字段缺省不折 0——「未知」
+   * 与「真 0%」不可混淆；wire 契约 context.update 的 usagePercent 本就可选，字段缺失 = 无值）。
    * @throws session 未激活或 pi rpc 失败时抛（调用方 try-catch）
    */
   async fetchContext(sessionId: string): Promise<{
-    inputTokens: number; contextLimit: number; usagePercent: number
+    inputTokens: number; contextLimit: number; usagePercent?: number
   } | null> {
     const client = this.pm.getClient(sessionId)
     if (!client) throw new Error(`session ${sessionId} not active`)
@@ -1570,7 +1647,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       return {
         inputTokens: cu.tokens,
         contextLimit: cu.contextWindow,
-        usagePercent: Math.round(cu.percent ?? 0),
+        usagePercent: cu.percent != null ? Math.round(cu.percent) : undefined,
       }
     }
     return null

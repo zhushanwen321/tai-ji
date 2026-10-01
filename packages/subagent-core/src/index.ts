@@ -164,8 +164,17 @@ export {
 // session-view 归一符号（post-convergence D3）：runtime 读取侧 2 处深路径
 // （subagent-extractor / subagent-engine-history）归一 barrel 的前置——不新增
 // 子入口（D9：每条子入口 bundle 多一份 host-services 副本）。
+// 模型引用串解析单点（runtime / 壳侧消费）：字符串只在入口解析一次，内部传结构体。
+export { isModelRef, parseModelSelector, type ParsedModelSelector } from "./shared/model-ref.ts";
 export { parseEngineHandle } from "./execution/engine/common/session-view-types.ts";
 export { readSubagentHistoryMessages } from "./execution/engine/common/session-view-service.ts";
+// 引擎路由身份域裁决单点（runtime 读链同源消费——本地副本会让「有锚无 engine」的
+// 损坏 record 在 runtime 侧先被当成 pi，core 侧守卫永不触达）。
+export {
+  hasNativeEngineAnchor,
+  RecordEngineIdentityError,
+  resolveEngineRouteId,
+} from "./execution/engine/common/session-view-service.ts";
 // [W8] registerNativeSessionReader：runtime 成为协议客户端的①级接入点——宿主把
 // 「协议 read」注册为引擎原生 reader，core 三级降级链（①协议 read → ②journal →
 // ③outcome）自动编排（含投影），宿主零投影代码。壳消费 = runtime
@@ -179,33 +188,11 @@ export { registerNativeSessionReader } from "./execution/engine/common/session-v
 // stopReason 词表族（NEW_STOP_REASONS 中断+重开 4 值 / ROUND_TERMINAL_STOP_REASONS
 // 正常轮终 2 值 / STOP_REASONS 13 值全集）单源在 types.ts——runtime workflow-step-merge
 // 的步骤状态映射按词表判定（消费方引用常量，勿手抄字面量清单）。
-export {
-  CLOSED_REASONS,
-  DEFAULT_AGENT_NAME,
-  NEW_STOP_REASONS,
-  ROUND_TERMINAL_STOP_REASONS,
-  STOP_REASONS,
-  ResurrectDeniedError,
-} from "./execution/assembly/types.ts";
-export type {
-  AgentEventLogEntry,
-  BgResponse,
-  CancelResponse,
-  CloseResponse,
-  ClosedReason,
-  DisplayItem,
-  ExecutionMode,
-  ExecutionOutcome,
-  ExecutionRecord,
-  ExecutionStatus,
-  ExternalState,
-  ForkFromResponse,
-  ListResponse,
-  MessageResponse,
-  SubagentListItem,
-  SubagentRecord,
-  SubagentToolResult,
-} from "./execution/assembly/types.ts";
+export { CLOSED_REASONS, NEW_STOP_REASONS, ROUND_TERMINAL_STOP_REASONS, STOP_REASONS, ResurrectDeniedError } from "./execution/domain/record-types.ts";
+export { DEFAULT_AGENT_NAME } from "./execution/domain/record-model.ts";
+export type { AgentEventLogEntry, BgResponse, CancelResponse, CloseResponse, DisplayItem, ForkFromResponse, ListResponse, MessageResponse, SubagentListItem, SubagentRecord, SubagentToolResult } from "./execution/assembly/types.ts";
+export type { ClosedReason, ExecutionMode, ExecutionOutcome, ExecutionStatus, ExternalState } from "./execution/domain/record-types.ts";
+export type { ExecutionRecord } from "./execution/domain/record-model.ts";
 
 // execution-record 投影函数族：record → 渲染态投影（outcome / elapsed / tool
 // calls），interface 渲染层唯一消费入口（live 进度投影面 = SubagentRecord 投影族）。
@@ -254,10 +241,10 @@ export {
 // 消费 core 符号，不进 barrel 无法接线，H4 formatEmptyResourceList 同构先例）。
 export {
   assertModelInCatalog,
-  type ModelCatalogEntry,
+  type PiRegistryModelEntry,
   type ModelCatalogOptions,
   type ModelCatalogSource,
-} from "./orchestration/model-catalog.ts";
+} from "./shared/model-catalog.ts";
 
 // notify ledger：宿主通知账本端口（bind / getBound）——组合根装配 + workflow 域消费。
 export {
@@ -302,11 +289,9 @@ export {
   type StatusFilter,
 } from "./execution/persistence/record-store.ts";
 
-// record 落盘 entry 契约：custom entry 写入侧（@experimental U10 / D6）。
-export {
-  SUBAGENT_RECORD_CUSTOM_TYPE,
-  toSubagentRecordEntry,
-} from "./execution/persistence/record-entry.ts";
+// record 落盘 entry 契约（登记 §3.3 后 = v2 注册/终态两条小条目；v1 全量快照写点随
+// 兼容层删除——写侧自定义条目构造入口见下方 v2 条目契约行段）。
+export { SUBAGENT_RECORD_CUSTOM_TYPE } from "./execution/persistence/record-entry.ts";
 
 // ── W1 [D1/D3/D6]：介质归位契约与 tail 原语（U0 新增行段——既有行零改动，
 // cap 族导出行的删改归 U7）。两族 v2 条目契约（版本常量/classify）+
@@ -321,29 +306,29 @@ export {
   type SubagentRecordSettledEntryData,
 } from "./execution/persistence/record-entry.ts";
 export {
-  createRecordEventJournal,
-  foldRecordJournalEvents,
-  INITIAL_RECORD_JOURNAL_FOLD_STATE,
+  createRecordEventStream,
+  foldRecordEvents,
+  INITIAL_RECORD_EVENT_FOLD_STATE,
   parseRecordEventFileLine,
   recordEventsPath,
   RECORD_EVENTS_SUFFIX,
   type RecordCreatedEvent,
-  type RecordEventJournal,
-  type RecordJournalEvent,
-  type RecordJournalEventInput,
-  type RecordJournalFoldState,
+  type RecordEventStream,
+  type RecordEvent,
+  type RecordEventInput,
+  type RecordEventFoldState,
   type RecordSettledEvent,
-  applyRecordJournalEvent,
+  applyRecordEvent,
 } from "./execution/persistence/record-events.ts";
 export {
-  createJournalDirectoryTailer,
-  readJournalTail,
+  createEventDirectoryTailer,
+  readEventTail,
   splitCompleteLines,
-  type JournalDirectoryTailer,
-  type JournalDirectoryTailerOptions,
-  type JournalLineParser,
-  type JournalTailChunk,
-} from "./execution/persistence/journal-tail.ts";
+  type EventDirectoryTailer,
+  type EventDirectoryTailerOptions,
+  type EventLineParser,
+  type EventTailChunk,
+} from "./execution/persistence/event-tail.ts";
 
 // agent-registry 执行消费面：loadByPath 直接加载（@experimental U10 / D6）+
 // parseAgentProfile 宽容解析（无 frontmatter 不拒、name 缺省 stem、返回 body 与
@@ -354,10 +339,7 @@ export { parseAgentProfile } from "./execution/assembly/agent-registry.ts";
 
 // 错误类型族（error-recovery.ts 计划路径实测不存在，实测散布于下列源文件）：
 // resurrect/fork-depth/dirty-worktree 为动作层守卫抛出点（types.ts）。
-export {
-  DirtyWorktreeError,
-  ForkDepthExceededError,
-} from "./execution/assembly/types.ts";
+export { DirtyWorktreeError, ForkDepthExceededError } from "./execution/assembly/types.ts";
 
 // 动作层领域内核（@experimental U10 / D6）：六 handler 的校验/守卫链/归属判定/
 // 终态映射，产出领域对象，宿主 adapter 负责包装渲染。
@@ -432,6 +414,18 @@ export {
   type ResumeRunOptions,
 } from "./orchestration/resume-run.ts";
 
+// [§2.1b] run 会计重建（帧推导单源；壳侧折叠面与 core 重建面共用，避免第二套折算）。
+export { rebuildBudget, runAccountingFromEvents } from "./orchestration/run-accounting.ts";
+export { errorLogsFromEvents } from "./orchestration/run-events.ts";
+
+// [§2.5] D14 args 一致性判定单源（原壳层实现下沉；壳只装配 args + journalDir）。
+export {
+  assertResumeArgsMatch,
+  diffResumeArgs,
+  historicalArgsOf,
+  type HistoricalArgs,
+} from "./orchestration/resume-args-guard.ts";
+
 // launcher 层：deps 类型 + 拒单文案单点。
 // formatAvailableWorkflowRefs / workflowNotFoundMessage：not found 拒单清单与
 // 文案单点（extension 顶层 workflow tool 同案消费，副本已删）。
@@ -452,10 +446,15 @@ export {
 // buildWorkflowRecord{Registered,Settled,Interrupted}EntryData 条目构造器单源。
 // [G1 跨包单源] runSettledOutcomeToDoneReason：壳侧曾持同语义本地实现（值表靠
 // 双侧测试锁定），收敛为 core 单源——壳经 barrel import 消费。
+// [D6(a) 第 1 步] noteRebuiltSettlement / settlementRecordOfRunSettledFrame：恢复
+// 路径重建点把 fold 出的 run-settled 事实注入终局记录注册表（壳
+// foldRecordStreamToRun 消费）——终局判定不再绕道聚合状态字段。
 export {
   finalizeRun,
   interruptRun,
   isRunSettled,
+  noteRebuiltSettlement,
+  settlementRecordOfRunSettledFrame,
   runSettledOutcomeToDoneReason,
   closeOutInFlightCalls,
   buildWorkflowRecordRegisteredEntryData,
@@ -475,7 +474,7 @@ export type {
   WorkerHandlers,
   WorkerHost,
 } from "./orchestration/models/ports.ts";
-export type { RunState } from "./orchestration/models/run-state.ts";
+export type { RunExecutionSnapshot } from "./orchestration/models/run-state.ts";
 export { Trace } from "./orchestration/models/trace.ts";
 export { AgentCall } from "./orchestration/models/agent-call.ts";
 export { Budget } from "./orchestration/models/budget.ts";
@@ -485,7 +484,6 @@ export type {
   AgentResult,
   DoneReason,
   ExecutionTraceNode,
-  RunStatus,
   ToolCallEntry,
   WorkerLogEntry,
 } from "./orchestration/models/types.ts";
@@ -507,8 +505,8 @@ export {
   WorkflowScript,
 } from "./orchestration/workflow-script-registry-impl.ts";
 // lintScript：workflow 脚本静态检查（执行前 fail-fast，宿主 list/validate 面消费）。
-export { lintScript } from "./orchestration/script-lint.ts";
-export type { LintResult } from "./orchestration/script-lint.ts";
+export { lintScript } from "./shared/script-lint.ts";
+export type { LintResult } from "./shared/script-lint.ts";
 export { saveWorkflow, deleteWorkflow } from "./orchestration/workflow-files.ts";
 export { clearSkillPathCache } from "./orchestration/skill-discovery.ts";
 export { WorkerHostImpl } from "./orchestration/worker-host.ts";
@@ -586,7 +584,9 @@ export { createPiHostRunEnumeration } from "./execution/assembly/pi-host-run-sto
 // 后的替代实装——枚举 + 逐 run 收编 + 事件流静止宽限窗 + 失败语义 + 注入日志
 // 通道；决策登记见 docs/adr/decisions.md 启动扫描条目）。消费方 = runtime main()
 // 挂点（registerRuntimeInstance 之后、service 构造段之前，先于任何 pi spawn）。
-export { startupSweep } from "./execution/assembly/startup-sweep.ts";
+// [D1 拆边 Class C] 实现已上移 orchestration/（收编是编排动作，execution 不再
+// 反向依赖 run-registry）；barrel 面与签名不变。
+export { startupSweep } from "./orchestration/startup-sweep.ts";
 
 // ── workflow-record entry 契约（词表/guard 收敛单源）──────────
 // customType / entry schema 版本 / v1 判定分类：壳 jsonl-run-store（写点 +
@@ -594,8 +594,7 @@ export { startupSweep } from "./execution/assembly/startup-sweep.ts";
 // 契约单源（收敛前壳与 shared 各持一份字面量、v1 guard 壳/runtime 双实现）。
 // WORKFLOW_STATE_LINK_CUSTOM_TYPE：legacy workflow 指针条目（W17 前写侧停写，
 // 读侧兼容消费——runtime 两处 + 壳 session-lifecycle 引用集解析经 barrel 引用）。
-// classify 无 IO 无日志——日志策略（warn/warnOnce/静默）留消费方；snapshot 层
-// 解码仍在 run-snapshot.ts codec（entry 层 v 与 snapshot 层 v 两级独立版本）。
+// classify 无 IO 无日志——日志策略（warn/warnOnce/静默）留消费方。
 export {
   WORKFLOW_RECORD_CUSTOM_TYPE,
   WORKFLOW_STATE_LINK_CUSTOM_TYPE,
@@ -609,15 +608,9 @@ export {
   type WorkflowRecordSettledEntryData,
 } from "./orchestration/workflow-record-entry.ts";
 
-// ── 快照格式版本（U8 / D4）────────────────────────────────────
-// workflow-state/<runId>.jsonl 快照行的格式版本常量单源（消费方 = runtime
-// workflow-extractor 版本守卫，经 barrel import 不落第二份字面量；additive
-// 字段策略与 bump 代价见 run-snapshot.ts 常量注释）。
-export { SNAPSHOT_VERSION } from "./orchestration/run-snapshot.ts";
-
 // [P3/D6] run 事件 journal 读面（宿主 store fold 投影的数据源——journal scan 的
 // 坏行容忍与日志语义单源；生产源码只从 barrel 消费 core 符号先例同上）。
-// [C3 常量上收] RUN_EVENT_JOURNAL_SUFFIX / ALL_RUN_OUTCOMES / RunOutcome /
+// [C3 常量上收] RUN_EVENTS_SUFFIX / ALL_RUN_OUTCOMES / RunOutcome /
 // doneReasonToRunOutcome：壳侧曾本地镜像 journal 后缀与 DoneReason→RunOutcome
 // 映射（无机器守卫、漂移即静默失配）——经 barrel 单源后壳改 import 消费；
 // 词表与映射的语义锚点注释见 run-events.ts 对应定义。
@@ -628,10 +621,20 @@ export {
   doneReasonToRunOutcome,
   foldRunEventCheckpoint,
   INITIAL_RUN_EVENT_FOLD,
-  RUN_EVENT_JOURNAL_SUFFIX,
+  RUN_EVENTS_SUFFIX,
+  // [§3.2] record 流单行坏行判定原语（core 恢复读面与壳 strict 读面共用单源——规则
+  // 在 core，错误文案由各调用方自持；此前两处各写一份判据，漂移即同一坏行一边拒绝
+  // 一边放行）。
+  parseRecordStreamLine,
+  parseLegacyArgsSummary,
+  type LegacyArgsSummaryIssue,
+  type LegacyArgsSummaryResult,
   type RunAskStepFold,
   type RunEventFoldCheckpoint,
   type RunEventJournal,
+  type RunEventLineIssue,
+  type RunEventLineIssueKind,
+  type RunEventLineResult,
   type RunJournalFold,
   type RunOutcome,
   type WorkflowRunEvent,
@@ -665,6 +668,8 @@ export {
 export { THINKING_ORDER } from "./shared/model-ref.ts";
 // 定时器上限（壳 tool-workflow.ts OR-1 消费，D3 判定进 barrel）
 export { MAX_TIMER_DELAY_MS } from "./shared/timer-delay.ts";
+// [§2.6] 进程级全局槽键单一声明处（壳侧托管槽 dialogQueue/workflowDomainState 同源消费）。
+export { GLOBAL_SLOT_KEYS, type GlobalSlotName } from "./shared/global-slots.ts";
 // 入口态 fail-fast 断言（time 上界/负值、tokens 负值、slug 长度）：两个 tool 入口
 // 共用的同一份实现（findings g11a-F2；schema 第一道关卡之外，副作用链之前的运行时
 // 第二道）。

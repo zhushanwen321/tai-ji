@@ -67,7 +67,7 @@ export default {
     // 软停止（右键两段确认，ForkGroup 退役后迁入通用行）：运行中菜单项「停止」
     stop: '停止',
     stopConfirm: '确认停止？',
-    // 子会话计数徒标（D9）：父条目右侧中性 chip 的 tooltip。数字口径 = 未完成子会话数
+    // 子会话计数徽标（D9）：父条目右侧中性 chip 的 tooltip。数字口径 = 未完成子会话数
     // （非绿点：active / error / stopped / dead 都计入），故文案用「未完成」而非「运行中」。
     childCount: '{n} 个子会话未完成',
   },
@@ -77,12 +77,14 @@ export default {
     newSessionInFolder: '在此目录新建会话',
     deleteFolderConfirm: '确认删除此文件夹下所有会话？',
   },
-  assignProjectFailed: '归入项目失败',
+  assignProjectFailed: '归入项目失败：{msg}',
   forceQuitFailed: '强制退出失败：{msg}',
-  // [session-dead 结构性修复 D3] 强制退出后 defer 队列回收进 Composer 草稿的显式提示
+  // [投递所有权内核 u3c / D10] 强制退出后 delivery.drain 回收内核未送达条目进 Composer 草稿的显式提示
   forceQuitQueueRecovered: '{count} 条排队消息已收回草稿',
-  // [session-dead 结构性修复 D6/D7 C1 方案一] 长 turn 观测面（Composer 上方常驻条）。
-  // 文案纪律（D7）：只陈述事实，禁止判断词（卡死/无响应/异常/建议中止）；操作项中性不预置推荐
+  // drain RPC 失败（pi 已死/传输错误）——回收文本不可再生，必须出声（错误可操作：条目仍在 runtime 内核）
+  forceQuitQueueRecoverFailed: '排队消息回收失败：{msg}',
+  // 条目内容为空（写不回草稿且内核条目已 drain，不可再生）——计入失败出声，成功 toast 不虚报
+  forceQuitQueueRecoverEmpty: '{count} 条排队条目内容为空，未能收回草稿',
   segmentedTab: {
     session: '会话',
     file: '文件',
@@ -128,10 +130,6 @@ export default {
   // [HISTORICAL] 2026-09-16 侧栏任务 tab 退役：子代理列表 / 子代理筛选栏 / 工作流列表 /
   // 「后台命令」L2 视图四处死键全量删除——消费组件同批退役，任务文案现行承载 =
   // composer 任务托盘 `panel.tray.*`（locales/zh-CN/tray.ts）。
-  // [C7 用词登记·迁移] 原「正在跑（任务域，占用中的子代理会话）vs 运行中（进程域，仅进程
-  // running 的后台命令）」两套措辞刻意不统一——该域差异现行登记在两处：tray.ts 文件头
-  // [词表裁决]（`panel.tray.bucket.running` 任务域 / `panel.tray.bucket.runningProcess`
-  // 进程域）+ 本文件 turnProgress 节。概念域不同属真差异，勿合并措辞。
   workflowDetail: {
     terminate: '终止',
     terminateConfirm: '确认终止？',

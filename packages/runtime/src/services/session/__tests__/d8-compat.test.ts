@@ -107,7 +107,6 @@ describe('W8 D8 兼容公共面薄壳', () => {
     // routeEngine 注入 probe stub（注册断言只看 has 校验与 get 装配，不 spawn）。
     const result = await routeEngine({
       routing: { callEngine: 'zcode' },
-      strict: false,
       probe: async () => ({ ok: true, engineVersion: 'stub', checks: [] }),
     })
     expect(result.engineId).toBe('zcode')

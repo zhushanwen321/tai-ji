@@ -59,6 +59,7 @@ import {
   WORKFLOW_RESULT_CUSTOM_TYPE,
 } from "@zhushanwen/extension-protocol";
 import { collectDeliveredNotifyIds, isPlainObject } from "./notify-ledger-helpers.ts";
+import { GLOBAL_SLOT_KEYS } from "../../shared/global-slots.ts";
 
 /** U4 分桶日志与 index.ts 装配层共用同一具名 logger（getLogger 缓存单例）。 */
 const logger = getLogger("subagents");
@@ -755,7 +756,7 @@ export function createNotifyLedger(
 // 退回 delivery 内核路径」分岔（无任何 warn），U2 at-least-once 退化回 C-ext-19
 // 立约要防的 at-most-once 事故基线。先例：model-config-service MODEL_SERVICE_SLOT_KEY /
 // dialogQueue / channelHandshake / ui-observability 同款（docs/STANDARDS.md §7.5）。
-const NOTIFY_LEDGER_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.notifyLedger");
+const NOTIFY_LEDGER_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.notifyLedger);
 
 type NotifyLedgerSlot = {
   current: NotifyLedger | undefined;

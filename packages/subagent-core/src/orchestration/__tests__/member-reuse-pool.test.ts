@@ -44,13 +44,13 @@ import {
   registerMemberRecord,
   resetMemberReusePoolsForTest,
   type MemberReusePoolIo,
-} from "../member-reuse-pool.ts";
+} from "../../execution/service/member-reuse-pool.ts";
 import type { WorkflowRunEvent } from "../run-events.ts";
 
 import { ModelConfigService } from "../../execution/assembly/model-config-service.ts";
 import type { RecordStore } from "../../execution/persistence/record-store.ts";
 import { SubagentService } from "../../execution/subagent-service.ts";
-import type { ExecutionRecord } from "../../execution/assembly/types.ts";
+import type { ExecutionRecord } from "../../execution/domain/record-model.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "../../execution/__tests__/helpers/fake-engine-port.ts";
 import { CTX_MODEL as ctxModel, emptyRegistry } from "../../execution/__tests__/helpers/model-registry-mock.ts";
 import { makePi } from "../../execution/__tests__/helpers/pi-mock.ts";
@@ -216,7 +216,6 @@ describe("finalizeRun 绑定清空接线（[D6]：内存释放、零事件）", 
       runId,
       { scriptName: "reuse-it", scriptSource: "agent('hi')", args: {}, scriptPath: "/tmp/reuse-it.js" },
       {
-        status: "running",
         budget: new Budget(),
         calls: new Map(),
         trace: new Trace(),

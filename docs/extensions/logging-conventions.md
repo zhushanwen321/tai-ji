@@ -125,7 +125,7 @@ pi.registerCommand("my-cmd", async (_args, ctx) => {
 
 ### session-delivery / notify-ledger 的 warn 出口（确认式送达可观测性）
 
-`@zhushanwen/pi-session-delivery` 内核的投递失败警告默认 `console.warn`（stderr tee 不到日志盘、排查无痕）——接入方必须参数化接到 extensionLogger（先例：subagent-workflow notifier 的 `warn: (msg, err) => notifyLogger.warn(msg, err)`，pi-boundary-reliability U4 对接点）。notify-ledger 的投递计数三桶（`settleRejected` / `watchdogReplays` / `recoveryReplays`）增量同样经 `logger.warn` 落 extensionLogger（`notify delivery bucket [<bucket>]`）——排查「结果语义通知没送到」（C-ext-19 账本通道）先 grep 这两类 warn。
+`@zhushanwen/session-delivery` 内核的投递失败警告默认 `console.warn`（stderr tee 不到日志盘、排查无痕）——接入方必须参数化接到 extensionLogger（先例：subagent-workflow notifier 的 `warn: (msg, err) => notifyLogger.warn(msg, err)`，pi-boundary-reliability U4 对接点）。notify-ledger 的投递计数三桶（`settleRejected` / `watchdogReplays` / `recoveryReplays`）增量同样经 `logger.warn` 落 extensionLogger（`notify delivery bucket [<bucket>]`）——排查「结果语义通知没送到」（C-ext-19 账本通道）先 grep 这两类 warn。
 
 ## 迁移指南（从裸 console 收敛）
 

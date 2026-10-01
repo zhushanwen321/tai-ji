@@ -1581,9 +1581,11 @@ ${STAGED_DELETED}"
     # 复用上方 pi-sync 段拼好的 PI_SYNC_TRIGGER_FILES（staged ACMR + deleted D——副本文件
     # 被删除也必须触发，脚本对文件缺失自带 fail 分支）。与 pi-sync 触发面有意部分重叠
     # （lockfile 同为触发文件）但职责不同：pi-sync 守构建派生锚点且 S6 只比 KnownApi，
-    # 本检查守 extensions/pi-rpc/subagent-core 档位词表副本，互不覆盖。不设独立 SKIP_* 开关（R1 后惯例，
+    # 本检查守两个比对面：subagent-core 的 THINKING_ORDER（宿主侧校验词表）与 shared 的
+    # PI_THINKING_LEVELS（前端派生源，core/renderer 从它派生）。llm-shared / pi-rpc 的副本已删除，
+    # 触发面随之摘除。不设独立 SKIP_* 开关（R1 后惯例，
     # 总开关 SKIP_ALL_CHECKS 兜底）。
-    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^extensions/shared/llm-shared/src/resolve\.ts$|^packages/pi-rpc/src/types\.ts$|^scripts/check-thinking-levels\.mjs$|(^|/)pnpm-lock\.yaml$|^packages/subagent-core/src/shared/model-ref\.ts$"; then
+    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-thinking-levels\.mjs$|(^|/)pnpm-lock\.yaml$|^packages/subagent-core/src/shared/model-ref\.ts$|^packages/shared/src/pi-preset\.ts$"; then
         echo -e "${BLUE}[INFO] thinking 档位词表文件有变更，运行档位词表比对检查...${NC}"
         if [ ! -f "scripts/check-thinking-levels.mjs" ]; then
             echo -e "${RED}[ERROR] 找不到 scripts/check-thinking-levels.mjs（D5 机器检查交付物缺失）${NC}"
@@ -1663,6 +1665,70 @@ if echo "$SUBAGENT_CORE_STAGED" | grep -qE "^packages/subagent-core/|^scripts/ch
         exit 1
     fi
     echo -e "${GREEN}[OK] subagent-core 依赖闭包检查通过${NC}"
+fi
+
+# ============================================================================
+# subagent-core 包内值依赖环检查（C-data-26，§2.3 配套）
+#   packages/subagent-core/** 或检查脚本自身变更时触发：
+#   scripts/check-subagent-core-value-cycles.mjs —— 值 import 图不得成环（类型擦除边
+#   豁免，仅提示）。与 H3 聚合边界检查互补：后者只看六聚合子图，本检查覆盖整包。
+# ============================================================================
+
+SUBAGENT_CORE_CYCLE_STAGED=$(git diff --cached --name-only -- packages/subagent-core/ scripts/check-subagent-core-value-cycles.mjs)
+if echo "$SUBAGENT_CORE_CYCLE_STAGED" | grep -qE "^packages/subagent-core/|^scripts/check-subagent-core-value-cycles\.mjs$"; then
+    print_section "[subagent-core 包内值依赖环检查]"
+    if [ ! -f "scripts/check-subagent-core-value-cycles.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-subagent-core-value-cycles.mjs（C-data-26 守卫缺失）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-subagent-core-value-cycles.mjs; then
+        echo -e "${RED}[ERROR] subagent-core 包内检出值依赖环（C-data-26）——按上方 SCC 成员与内部边处理（端口反转/装配注入/共享词汇下沉契约层）${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] subagent-core 包内值依赖环检查通过${NC}"
+fi
+
+# ============================================================================
+# 进程级全局槽键归属检查（C-state-20，§2.6 配套）
+#   subagent 体系三包或检查脚本自身变更时触发：scripts/check-global-slot-keys.mjs
+#   —— Symbol.for 字面量只允许出现在两处声明文件，前缀/唯一性同时校验。
+# ============================================================================
+
+# ============================================================================
+# 领域类型路径单源检查（D2 配套，register §2.0/§2.4）
+#   subagent-core 源码或检查脚本自身变更时触发：scripts/check-domain-type-path.mjs
+#   —— execution/domain/ 是领域类型唯一权威路径；assembly 禁 re-export、消费面禁绕道。
+# ============================================================================
+
+DOMAIN_TYPE_PATH_STAGED=$(git diff --cached --name-only -- packages/subagent-core/src scripts/check-domain-type-path.mjs)
+if echo "$DOMAIN_TYPE_PATH_STAGED" | grep -qE "^packages/subagent-core/src/|^scripts/check-domain-type-path\.mjs$"; then
+    print_section "[领域类型路径单源检查]"
+    if [ ! -f "scripts/check-domain-type-path.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-domain-type-path.mjs（D2 守卫缺失）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-domain-type-path.mjs; then
+        echo -e "${RED}[ERROR] 领域类型路径出现双源（D2）——领域名只在 execution/domain/ 声明，assembly 不得 re-export，消费面不得绕道${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] 领域类型路径单源检查通过${NC}"
+fi
+
+GLOBAL_SLOT_STAGED=$(git diff --cached --name-only -- packages/subagent-core/src packages/subagent-engine-sdk/src extensions/universal/subagent-workflow/src scripts/check-global-slot-keys.mjs)
+if echo "$GLOBAL_SLOT_STAGED" | grep -qE "^packages/subagent-(core|engine-sdk)/src/|^extensions/universal/subagent-workflow/src/|^scripts/check-global-slot-keys\.mjs$"; then
+    print_section "[进程级全局槽键归属检查]"
+    if [ ! -f "scripts/check-global-slot-keys.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-global-slot-keys.mjs（C-state-20 守卫缺失）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-global-slot-keys.mjs; then
+        echo -e "${RED}[ERROR] 进程级全局槽键归属检查未通过（C-state-20）——字面量集中到两处声明文件，其余写 Symbol.for(<常量>)${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] 进程级全局槽键归属检查通过${NC}"
 fi
 
 # ============================================================================
@@ -2174,6 +2240,106 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
 fi
 
 # ============================================================================
+# chat store facet 双清单对账检查（E2E-CHATOPS-01 的 pre-commit 执行点；
+#   code-overdesign-audit 候选 6 / msg-pipeline-debloat D5-4）
+#   staged 命中两清单载体或检查脚本自身时触发：
+#   scripts/check-chat-ops-sync.mjs —— store.ts 的 ChatStoreOps Pick 字段清单
+#   （类型面 SSOT）× taste-lint/rules/no-chat-ops-in-components.mjs 的
+#   OPS_FIELDS 手写 Set（lint 拦截面）双侧机械提取做双向差集，幽灵/漏拦任一
+#   非空即红——「两处同步改」人工契约机器化（曾实测漂移 13 项无任何机器信号，
+#   靠事后对抗审查才抓出）。触发面 = 两载体 + 脚本自身：对账结果只由这三
+#   文件决定，其余 staged 不影响结果。触发面并入本路径范围的 staged 删除
+#   （pathspec 清单天然含 D）：单独 staged 删除检查脚本也必须触发，下方
+#   [ ! -f ] 存在性检查正是删除场景的防线。全量对账毫秒级，无增量模式。
+#   不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+CHAT_OPS_SYNC_STAGED=$(git diff --cached --name-only -- packages/core/src/domain/chat/store.ts taste-lint/rules/no-chat-ops-in-components.mjs scripts/check-chat-ops-sync.mjs)
+if echo "$CHAT_OPS_SYNC_STAGED" | grep -qE "^packages/core/src/domain/chat/store\.ts$|^taste-lint/rules/no-chat-ops-in-components\.mjs$|^scripts/check-chat-ops-sync\.mjs$"; then
+    print_section "[chat store facet 双清单对账]"
+    if [ ! -f "scripts/check-chat-ops-sync.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-chat-ops-sync.mjs（检查脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-chat-ops-sync.mjs; then
+        echo -e "${RED}[ERROR] facet 双清单漂移——按上方幽灵/漏拦明细，以 store.ts 的 ChatStoreOps 为唯一清单同步 OPS_FIELDS 后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] facet 双清单对账通过（E2E-CHATOPS-01）${NC}"
+else
+    echo -e "${GREEN}[OK] 无 facet 双清单载体变更，跳过对账检查${NC}"
+fi
+
+# ============================================================================
+# 跨进程契约字面量多侧对账检查
+#   staged 命中任一登记定义文件或检查脚本自身时触发：
+#   scripts/check-cross-process-literals.mjs —— 断言两组跨进程契约串的全部
+#   生产定义点同串：'taiji.client-msg-id'（runtime entry-tree-builder /
+#   revoke-orchestrator × msg-id-mapper 扩展三侧）与 'taiji:revoked'
+#   （revoke-orchestrator × agent-ext × scheduler-manager 插件三侧）。定义点
+#   分属互相不可 import 的包，编译期拦截不可行，多侧手抄仅靠注释纪律——本
+#   检查以 AST 提取代码字符串字面量（注释不算），任一侧漂移即红并指明需
+#   同步的各侧文件。触发面 = 登记定义文件 + 脚本自身：对账结果只由这些文件
+#   决定；触发面并入本路径范围的 staged 删除（pathspec 清单天然含 D），单独
+#   staged 删除检查脚本也必须触发，下方 [ ! -f ] 存在性检查正是删除场景的
+#   防线。全量对账毫秒级，无增量模式。新契约串在脚本 GROUPS 登记表登记，
+#   登记文件变更须同步本段 pathspec。不设独立 SKIP_* 开关（R1 后惯例，
+#   总开关 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+CROSS_PROC_LIT_PATHS="packages/runtime/src/infra/pi/entry-tree-builder.ts packages/runtime/src/services/session/revoke-orchestrator.ts extensions/taiji/msg-id-mapper/src/index.ts extensions/taiji/agent-ext/src/index.ts resources/plugins/scheduler-manager/index.ts scripts/check-cross-process-literals.mjs"
+CROSS_PROC_LIT_STAGED=$(git diff --cached --name-only -- $CROSS_PROC_LIT_PATHS)
+if echo "$CROSS_PROC_LIT_STAGED" | grep -qE "^packages/runtime/src/infra/pi/entry-tree-builder\.ts$|^packages/runtime/src/services/session/revoke-orchestrator\.ts$|^extensions/taiji/msg-id-mapper/src/index\.ts$|^extensions/taiji/agent-ext/src/index\.ts$|^resources/plugins/scheduler-manager/index\.ts$|^scripts/check-cross-process-literals\.mjs$"; then
+    print_section "[跨进程契约字面量对账]"
+    if [ ! -f "scripts/check-cross-process-literals.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-cross-process-literals.mjs（检查脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-cross-process-literals.mjs; then
+        echo -e "${RED}[ERROR] 跨进程契约字面量漂移——按上方明细把登记的各侧文件同步回登记串值（或契约串确属变更时同步全部侧与 GROUPS 登记表）后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] 跨进程契约字面量对账通过${NC}"
+else
+    echo -e "${GREEN}[OK] 无跨进程契约字面量载体变更，跳过对账检查${NC}"
+fi
+
+# ============================================================================
+# useSessionScopedState 调用点 census 静态锁（ADR-0049 入口边界，E2E-CENSUS-01
+#   的 pre-commit 执行点）
+#   staged 命中任意 .ts/.tsx/.vue 或检查脚本自身时触发：
+#   scripts/check-session-scoped-state-census.mjs —— 快照清单外出现新调用点
+#   （新文件或既有文件新增）即红，先审阅其 scope 上下文是否满足 ADR-0049
+#   分区范式，有意变更按脚本头注释更新 CENSUS_SNAPSHOT。触发面 = 与检查脚本
+#   全仓扫描面同构的结构无关 glob（快照清单横跨 core/dom-core/renderer/ui，
+#   目录清单式触发面必有洞——同 record-write-surface 段扩为 glob 全域的教训：
+#   禁止与目录结构耦合的清单式写法）。触发面天然含 staged 删除（快照内文件
+#   被删 = 消失调用点，同样必须红）：单独 staged 删除检查脚本也必须触发，
+#   下方 [ ! -f ] 存在性检查正是删除场景的防线。全仓扫描 ~0.2s，无增量模式。
+#   退出码 0=合规 / 3=census 与快照不符 / 1=脚本自身异常，非零一律拦截。
+#   不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+SESSION_CENSUS_STAGED=$(git diff --cached --name-only -- '*.ts' '*.tsx' '*.vue' scripts/check-session-scoped-state-census.mjs)
+if echo "$SESSION_CENSUS_STAGED" | grep -qE "\.(tsx?|vue)$|^scripts/check-session-scoped-state-census\.mjs$"; then
+    print_section "[useSessionScopedState 调用点 census]"
+    if [ ! -f "scripts/check-session-scoped-state-census.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-session-scoped-state-census.mjs（检查脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-session-scoped-state-census.mjs; then
+        echo -e "${RED}[ERROR] census 与快照不符——清单外新调用点先审阅 scope 上下文（ADR-0049 分区范式），有意变更按脚本头注释更新 CENSUS_SNAPSHOT 后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] 调用点 census 与快照一致（E2E-CENSUS-01）${NC}"
+else
+    echo -e "${GREEN}[OK] 无 .ts/.tsx/.vue 变更，跳过调用点 census 检查${NC}"
+fi
+
+# ============================================================================
 # [skills-snapshot 尾部段] 实体快照（备份链 D3；失败非阻断）
 #   全部检查通过后对 workspace 根实体做快照（refs/skills-snapshot：临时 index +
 #   commit-tree，不碰工作树与真实 index）。失败仅日志放行本次提交，下次提交自动
@@ -2286,6 +2452,9 @@ echo -e "  ${GREEN}[+]${NC} review-fix-loop 双实现锁步检查（workflows �
 echo -e "  ${GREEN}[+]${NC} subagent-engine-sdk + subagent-core typecheck（两包变更时触发：D11 编译期机器锁 C3 词表 / C4 双写禁令 / C2 必填 + C-proc-23 词表锁 core 侧镜像锚点）"
 echo -e "  ${GREEN}[+]${NC} pi 资产模型引用漂移检查（extensions .md / 快照变更时触发：D8 agent 资产 model 声明 vs builtin-providers 快照 diff）"
 echo -e "  ${GREEN}[+]${NC} oe-assert 过度设计自动初筛（code-overdesign-audit 三断言：no-reference / single-impl / pass-through，oe-exempt 豁免标记）"
+echo -e "  ${GREEN}[+]${NC} chat store facet 双清单对账（E2E-CHATOPS-01：store.ts ChatStoreOps × taste-lint OPS_FIELDS 双向差集，载体变更时触发）"
+echo -e "  ${GREEN}[+]${NC} useSessionScopedState 调用点 census 静态锁（E2E-CENSUS-01：ADR-0049 入口边界快照对账，.ts/.tsx/.vue 变更时触发）"
+echo -e "  ${GREEN}[+]${NC} 跨进程契约字面量多侧对账（taiji.client-msg-id / taiji:revoked 登记侧变更时触发：AST 字面量同串断言）"
 echo ""
 echo -e "${CYAN}Hook 脚本位置:${NC} .githooks/"
 echo ""

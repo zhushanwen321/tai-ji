@@ -25,9 +25,9 @@ import {
  * 返回 undefined = ②级不可达（journal 路径缺省 / 文件不存在 / 无事件），调用方落 ③级。
  */
 export function replayJournalToSessionView(handle: { data: EngineHandleData }, engineId: string) {
-  const journalPath = handle.data.journalPath;
-  if (journalPath === undefined) return undefined;
-  const events = replayJournal(journalPath);
+  const eventsPath = handle.data.eventsPath;
+  if (eventsPath === undefined) return undefined;
+  const events = replayJournal(eventsPath);
   if (events.length === 0) return undefined;
   return eventsToSessionView(events, engineId, sessionIdFromHandle(handle.data));
 }

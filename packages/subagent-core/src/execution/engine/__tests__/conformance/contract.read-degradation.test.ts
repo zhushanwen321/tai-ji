@@ -41,13 +41,13 @@ const liveEvents: AgentEvent[] = [
   { type: "turn_end" },
 ];
 
-function makeHandle(engineId: string, sessionRef: Record<string, string>, journalPath?: string): EngineHandle {
+function makeHandle(engineId: string, sessionRef: Record<string, string>, eventsPath?: string): EngineHandle {
   return {
     data: {
       v: 1,
       engineId,
       sessionRef,
-      ...(journalPath !== undefined ? { journalPath } : {}),
+      ...(eventsPath !== undefined ? { eventsPath } : {}),
       adapterVersion: "1.0.0-test",
     },
   };
@@ -120,11 +120,11 @@ describe("conformance C5：read 降级链（协议黑盒 + reducer 等价性）"
   });
 
   it("journal 落盘形态与 live 事件序列逐项相等（协议层回放复用的落盘通路）", async () => {
-    const journalPath = path.join(dataDir, "journal-sa-c5.jsonl");
-    const writer = new JournalWriter({ path: journalPath, taskId: "sa-c5", engineId: "fake" });
+    const eventsPath = path.join(dataDir, "journal-sa-c5.jsonl");
+    const writer = new JournalWriter({ path: eventsPath, taskId: "sa-c5", engineId: "fake" });
     for (const ev of liveEvents) writer.append(ev);
     await writer.close();
-    const lines = fs.readFileSync(journalPath, "utf8").trim().split("\n");
+    const lines = fs.readFileSync(eventsPath, "utf8").trim().split("\n");
     expect(lines).toHaveLength(liveEvents.length);
   });
 });

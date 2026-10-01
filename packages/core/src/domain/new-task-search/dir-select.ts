@@ -54,8 +54,9 @@ export function useNewTaskDirSelect(
    *
    * 旧实现 Landing.vue 读 gitInfo.isBare（依赖已绑定 session），延迟 create 架构下 landing 无 session
    * → gitInfo 恒 null → isBare 恒 false → 「新建 worktree」按钮永不显示。改由 pendingCwd 驱动：
-   * watch pendingCwd 变化时调 workspace.detectBare(cwd)（runtime WorkspaceDetector 检测 .bare 命中），
-   * 结果回填本 ref。pendingCwd=null 兜底 false（不调 RPC）。检测失败静默降级 false（不阻断选目录流程）。
+   * watch pendingCwd 变化时调 workspaceApi.detect(cwd)（三态检测，runtime WorkspaceDetector；
+   * mode === 'bare-workspace' 即 bare 命中），结果回填本 ref。pendingCwd=null 兜底 false（不调 RPC）。
+   * 检测失败静默降级 false（不阻断选目录流程）。
    */
   const isBare = ref(false)
   /** workspace 三态模式（bare-workspace / plain-repo / not-repo）。pendingCwd 驱动。 */

@@ -67,7 +67,7 @@ export interface EngineStream {
  * 本值（pi / zcode 均无池化实现——pi = PI_CODING_AGENT_DIR 全局一份，zcode = 共享
  * 宿主 HOME）。[池抽象降级 2026-09-13] poolKey 协议面（RunContext/run.params.ctx/
  * host/poolResolved 通道/EngineHandleData）已整体退役，本常量不再跨进程透传，仅
- * 三类消费：① journal 落盘路径构造（core journal-wiring）；② 存量 record 兼容
+ * 三类消费：① journal 落盘路径构造（core event-journal-wiring）；② 存量 record 兼容
  * （zcode read 旧相对 dbPath 的锚定分支 + 持久化 engineHandle.poolKey 字段——
  * record-store 读侧守卫要求非空，值恒本常量）；③ 引擎数据目录布局 SSOT paths.ts
  * 的签名参数。**值逐字不变**（存量 journal 落盘路径与记录含该值分段，改名不改值）。
@@ -81,7 +81,6 @@ export interface RunContext {
   onEvent?: (event: AgentEvent) => void;
   ctxModel?: EngineCtxModel;
   stream?: EngineStream;
-  engineFallback?: { from: string; reason: string };
   /**
    * [F6] 根 session id（协议 run.params.ctx.sessionRootId 的进程内还原）——pi 引擎
    * relay 归属键 SESSION_ID 的权威来源。additive 可选：宿主缺省不传。
@@ -101,6 +100,16 @@ export interface RunContext {
    * 恒无扩展 flag）。additive 可选：宿主缺省不传。
    */
   extensionPaths?: string[];
+  /**
+   * [D4 record 身份信封] 协议 `run.params.ctx.identity` 的进程内还原——引擎把它整封
+   * 写进任务子进程的身份 env（`SUBAGENT_IDENTITY_ENV` 的 slug / startedAt / mode）。
+   * additive 可选：宿主缺省不传时引擎不写这三个键，读者按回落语义工作。
+   */
+  identity?: {
+    slug?: string;
+    startedAt?: number;
+    mode?: string;
+  };
   onHandleReady?: (partial: Pick<EngineHandleData, "sessionRef">) => void;
   /** 一次性子进程 pid 上报（host/childSpawned 载荷形态；ChildProcess 句柄不跨协议面）。 */
   onChildSpawned?: (child: { pid: number | undefined; killed: boolean }) => void;

@@ -353,7 +353,6 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
           model: "prov/m1",
           ctxModel: "prov/ctx-model",
           streamMode: "stream",
-          engineFallback: { from: "zcode", reason: "manifest" },
           sessionRootId: "root-sess-9",
           sessionDir: "/host/agent-dir/subagents/--Users-x-proj--/sessions",
         },
@@ -389,7 +388,8 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
     expect(captured?.ctx.ctxModel).toEqual({ provider: "prov", id: "ctx-model" });
     // [D1] 负向断言：ctx 侧传输态 env 字符串字段已退役（防字段名复活）
     expect("schemaEnv" in (captured?.ctx ?? {})).toBe(false);
-    expect(captured?.ctx.engineFallback).toEqual({ from: "zcode", reason: "manifest" });
+    // 运行期引擎 fallback 已删：ctx 不得重现留痕字段（防字段名复活）
+    expect(captured?.ctx).not.toHaveProperty("engineFallback");
     expect(captured?.ctx.sessionRootId).toBe("root-sess-9");
     // [Option C 协议化] ctx.sessionDir 还原透传（宿主权威值，引擎不自推导）
     expect(captured?.ctx.sessionDir).toBe("/host/agent-dir/subagents/--Users-x-proj--/sessions");

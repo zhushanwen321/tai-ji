@@ -744,7 +744,8 @@ export interface PiSessionBranchSummaryEntry extends PiSessionEntryBase {
  * custom entry 是纯扩展数据（不进 LLM 上下文）。mapSessionEntries 据此分流：
  * custom_message → messages（伪消息），custom → customDataEntries。
  *
- * display:false 时 taiji 不渲染（filterDisplayableMessages）；完成通知类 customType
+ * display:false 时 taiji 不渲染（core message-turns 分组管线：display===false 消息透明跳过、
+ * 不产出渲染项，完成通知类则作 turn 边界触发器）；完成通知类 customType
  *（subagent-bg-notify/workflow-result）由 mapSessionEntries 引用 COMPLETE_NOTIFY_CUSTOM_TYPES
  * 覆写为 display:false（pi 可能持久化 display:true，taiji 统一隐藏）。
  */

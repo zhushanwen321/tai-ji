@@ -22,20 +22,15 @@ export default [
   ...tasteConfig,
   {
     ignores: [
-      'src/dist/**',
-      'src-tauri/**',
       'taste-lint/**',
       // 独立 CJS 验证脚本（verify-scheduler-e2e.cjs，随 tools→scripts 目录迁移更新路径）：
       // require() 是 CJS 唯一导入方式 + 内部 `_` 占位变量，no-require-imports/no-unused-vars 均误报
       'scripts/*.cjs',
-      'vendor/**',
-      '.pi/**',
       // 临时/历史 demo 目录（.tmp 已 gitignore，v6 是重构前的遗留 demo）
       '.tmp/**',
       // 构建产物（目录重构后：apps/electron + packages/*）
       'apps/electron/dist/**',
       'apps/electron/renderer/dist/**',
-      'apps/electron/renderer/dist-new/**',
       'packages/*/dist/**',
       // subagent-core 本地 bundle 产物（untracked、gitignored，构建后不重排 lint 代码风格）
       'packages/*/dist.bundle/**',
@@ -52,7 +47,8 @@ export default [
       // packages/*/.zcode/（目录内自带 .gitignore 自忽略），根锚定 glob 盖不住嵌套位
       '**/.zcode/workflow-runs/**',
       '**/.zcode/workflow-drafts/**',
-      // playwright 测试产物（trace/报告是工具生成的压缩 JS，非项目源码，已被 .gitignore）
+      // playwright 测试产物（trace/报告是工具生成的压缩 JS，非项目源码，已被 .gitignore；
+      // playwright/.cache 与 .gitignore 的 /playwright/.cache/ 预留一致，防御性保留）
       'playwright-report/**',
       'playwright/.cache/**',
       'test-results/**',
@@ -407,11 +403,6 @@ export default [
       'max-lines': 'off',
     },
   },
-  // [HISTORICAL] useProviderEdit 曾是 Provider 编辑的唯一 composable 工厂（779 行 / 31 成员），
-  // max-lines-per-function 豁免登记于此。[C4] 按裂缝拆为 provider-edit-{form,discover,models}
-  // 三 module + reconcile 纯核后，各文件函数体均在常规上限内，本豁免随之失效删除
-  //（旧 renderer 路径 packages/renderer/src/composables/features/useProviderEdit.ts 早已删除）。
-  //
   // [HISTORICAL] createChatStore 是 core 域 chat store 的唯一 setup 函数（自 renderer stores/chat.ts 迁入，
   // P3 chat 域绞杀 w4）。与 renderer chat.ts 同性质——唯一聚合中心，setup 天然是单一大函数，
   // max-lines-per-function 规则不适用（项目已裁定该场景为误报，对齐 renderer chat.ts 同款 override）。
@@ -521,50 +512,6 @@ export default [
       ],
     },
   },
-  // [W2/V1 D1 决策 11 + A1] run 两态机（WorkflowRun.transition / RunStatus /
-  // VALID_RUN_TRANSITIONS）活体写点退役：活体终局唯一经六态机 dispatchRunTrigger
-  //（worker-message-pump.settleRunAccounting 终局记录原语），transition("done", …)
-  // 调用仅剩恢复路径写点显式白名单——recoverCrashedRuns 公共快照收敛（lifecycle，
-  // v1/v2 实体崩溃后的 state 快照定格，壳调和旁路证据的生产者）+ 壳
-  // reconcileRunningFinality（v1 快照条目终局调和，v1 兼容层）。选择器精确锁定
-  // 两态机终局调用形态（方法调用 .transition("done", …)——六态机 transition 是
-  // 自由函数、record 域走 tryTransition，均不命中）；测试豁免（夹具构造非生产
-  // 写点，对齐 H4 record 写面守卫先例）。白名单外新增引用 = lint 红。
-  // [flat config 覆盖语义] 本块必须置于上方全局 node:test 块**之后**（同规则 ID
-  // 后块整条覆盖前块——本块 files 命中域与其相交，故按 core 块决策 4 先例把
-  // node:test selector 合并进本块选择器数组，双向红线互不拆除）。
-  {
-    files: [
-      'packages/subagent-core/src/**/*.ts',
-      'extensions/universal/subagent-workflow/src/**/*.ts',
-    ],
-    ignores: [
-      // 恢复路径写点白名单（函数级清单的文件级近似：两文件内 transition("done")
-      // 调用仅上述白名单函数持有，活体路径已清零——A1 grep 断言按函数级锚定复核）。
-      'packages/subagent-core/src/orchestration/lifecycle.ts',
-      'extensions/universal/subagent-workflow/src/jsonl-run-store.ts',
-      'packages/subagent-core/src/**/__tests__/**',
-      'packages/subagent-core/src/**/*.test.ts',
-      'extensions/**/src/**/__tests__/**',
-      'extensions/**/src/**/*.test.ts',
-    ],
-    rules: {
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector: "CallExpression[callee.property.name='transition'][arguments.0.value='done']",
-          message:
-            'run 两态机活体写点已退役（W2/V1 D1）——活体终局唯一经六态机 dispatchRunTrigger' +
-            '（settleRunAccounting 原语）；transition("done") 调用 = 恢复路径写点白名单专属' +
-            '（recoverCrashedRuns 快照收敛 + 壳 reconcileRunningFinality），新增引用即违规。',
-        },
-        {
-          selector: "ImportDeclaration[source.value='node:test']",
-          message: '禁止 node:test——测试框架统一 vitest（docs/TEST-STRATEGY.md 红线）',
-        },
-      ],
-    },
-  },
   // pi extensions（extensions/**/*.ts）专用规则块。
   // extensions 是无构建的 TS 源码（pi 运行时直接加载），迁自旧 pi 扩展仓（已废弃，见 git 历史与 AGENTS.md），
   // 与 renderer/runtime 的 Vue/Electron 代码性质不同：
@@ -601,11 +548,11 @@ export default [
   // core 切面抽离（u1-move），迁移前该源码受上方 extensions no-console:error 块约束，
   // 抽离后 extensions glob 不再命中——本块恢复同强度约束，防裸 console 渗入跨宿主
   // 共享层。范围同样限 src 源码：__tests__/ 与 *.test.ts 属测试基建（spyOn /
-  // monkey-patch），不在守卫目标内。
+  // monkey-patch），不在守卫目标内。src/core/** 的豁免由下方 no-console off 块唯一
+  // 承载（core log 端口缺省 sink = console，见该块注释），不在本块 ignores 重复编码。
   {
     files: ['packages/subagent-core/src/**/*.ts'],
     ignores: [
-      'packages/subagent-core/src/core/**',
       'packages/subagent-core/src/**/__tests__/**',
       'packages/subagent-core/src/**/*.test.ts',
     ],
@@ -700,10 +647,15 @@ export default [
   // 后折算 805 微超 5 行——按「微超即提额」（pi-provider-store 508>500→520 同型）
   // 提额 820 保留软上限告警；容器侧再拆属独立重构任务（事件写面接线族已在 rounds
   // 轴承接）。
+  // [HISTORICAL·2026-10-01] dev-0.10.7 集成线多轮合并后折算 899（轮次 CAS 门与
+  // 收编判定依据按「判定依据全文落档方法头注释」纪律入档，有效行天然膨胀）；rounds /
+  // terminal / entry-write / rebuild 轴均已各自成文件，容器 face（唯一合法写者封装点）
+  // 类方法经 this 强耦合，再拆 = 方法族去 this 化重组（独立重构任务）——改 'off'，
+  // 归 event-adapter「聚合中心职责内聚」同款，行数守卫由各轴文件承担。
   {
     files: ['packages/subagent-core/src/execution/persistence/record-store.ts'],
     rules: {
-      'max-lines': ['warn', { max: 820, skipBlankLines: true, skipComments: true }],
+      'max-lines': 'off',
     },
   },
   {
@@ -741,19 +693,6 @@ export default [
     files: ['packages/zcode-subagent-cli/src/zcode-engine.ts'],
     rules: {
       'max-lines': ['warn', { max: 1300, skipBlankLines: true, skipComments: true }],
-    },
-  },
-  // engine-client.ts：协议客户端聚合中心（spawn/握手/帧路由/崩溃重建/收割 + [W3]
-  // chat 轮次 recordId 路由面）。H1 chat-run 统一期间收割链与轮次活性承载并入后
-  // 541 行，按仓内惯例（偏差 #2 message-dispatcher 同款）登记 override；结构性拆分
-  // （正向请求面 / 反向路由面 / 收割面）登记为后续重构债，随 H3 service 拆分轮处置。
-  // [HISTORICAL] metrics-gate cyclo 偿还（teardownProcess 17 → reapOrphansAfterUnexpectedDeath
-  // / killLeakedAliveChild 原地拆解，各 ≤7）：行为保持提取的 helper 签名/花括号/调用行
-  // +6 代码行越 545 上限（547），同轮抬至 555——拆分债本体不变。
-  {
-    files: ['packages/subagent-core/src/execution/engine/client/engine-client.ts'],
-    rules: {
-      'max-lines': ['warn', { max: 555, skipBlankLines: true, skipComments: true }],
     },
   },
   // [H3/R4 已消解] subagent-service.ts 单列 override（max 1700）已移除——R4 抽取
@@ -837,8 +776,11 @@ export default [
   // 覆盖上方 idle-pi-reclamation 的 off 块——两块语义冲突时以本软上限为准）。
   {
     files: ['packages/runtime/src/services/session/session-service.ts'],
+    // [2026-09-25 架构审查 MF-1-7 装配收编] 投递注册表/撤回信号广播腿改构造-后置注入
+    // （两进程内活动槽删除），Facade 净代码行 659 > 650 → 提额 665（微超即提额先例：
+    // provider-config-helper / engine-client 同型）。提额而非 off：保留软上限告警，超限即再暴露。
     rules: {
-      'max-lines': ['warn', { max: 650, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 665, skipBlankLines: true, skipComments: true }],
     },
   },
   // [HISTORICAL] [u7a 生产补挂 2026-09-12] EngineClient 是引擎协议客户端唯一聚合点
@@ -847,10 +789,34 @@ export default [
   // 内聚（桥接消费本类镜像广播），抽独立模块仍余微超且引入新模块边界——微超即提额
   // 先例（session-service 650 / event-interpreter 700 同型）。提额而非 off：保留 650
   // 软上限告警，超限即再暴露。
+  // [HISTORICAL] 本文件更早一次提额：metrics-gate cyclo 偿还（teardownProcess 原地
+  // 拆解为 reapOrphansAfterUnexpectedDeath / killLeakedAliveChild，各 ≤7）行为保持
+  // 提取的签名/花括号/调用行 +6 曾抬至 555——拆分债本体不变，由本块 650 覆盖（同
+  // 文件多块同规则时后位生效，勿再另开同 files 块）。
   {
     files: ['packages/subagent-core/src/execution/engine/client/engine-client.ts'],
     rules: {
       'max-lines': ['warn', { max: 650, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // [HISTORICAL] 投递所有权内核两文件（design delivery-ownership-kernel u1/u2 交付物）：
+  // 二者都是「单闭包聚合中心」——同一函数体内多职责互引，拆任一职责段都必须为闭包互引
+  // 注入上下文（registry：对账器回调 handle、port 闭包读运行时态、cancel 复用对账回收
+  // 路径，四职责同源；delivery：五态状态机 / 出站批次重试 / v2 所有权 API 共享 active +
+  // checkedPending + 三组 timer 状态）。在不动行为、不改测试契约的前提下拆分不可低风险
+  // 完成（等价于重写 u1/u2 已验收实现），故按 event-adapter / chat.ts 聚合中心先例豁免
+  // （实测 registry 760 行 / 577 函数，delivery 642 行 / 496 函数）。
+  // 长期方向（本债务本体，改动这两文件时不得再增行）：registry → reconciler（五触发点 +
+  // 三分处置）/ receipt（两阶段回执）/ port 装配；delivery → 状态机 + 投影 + 回收 API
+  // 分模块（闭包态经上下文对象注入）。拆分属独立重构任务，须带两包测试全绿。
+  {
+    files: [
+      'packages/runtime/src/services/session/session-delivery-registry.ts',
+      'packages/session-delivery/src/delivery.ts',
+    ],
+    rules: {
+      'max-lines': 'off',
+      'max-lines-per-function': 'off',
     },
   },
   // [HISTORICAL] PluginService 是插件子系统唯一聚合点（注册表/激活器/Worker 宿主/
@@ -876,6 +842,19 @@ export default [
       'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
     },
   },
+  // session-file-utils 是 session JSONL 读侧工具聚合文件（header/name/outcome/handoff/model
+  // 反向读 + sidecar 家族导出路径 + 活跃路径裁剪喂数）。trimFileEntriesToActivePath 两降级
+  // 分支补显形 warn（静默不裁剪 = 活跃路径裁剪断链不可观测）净增 ~13 行代码，统计行
+  // 513 > 500 微超即提额（pi-provider-store RT-3#5 / preset-service 同型）。提额而非 off：
+  // 保留 520 软上限告警，超限即再暴露；再拆工具家族独立文件（residue-cleanup /
+  // scan-degraded 先例）属独立重构任务。
+  {
+    files: ['packages/runtime/src/infra/pi/session-file-utils.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
+    },
+  },
+
   // relay-registry.ts 是 relay 子进程注册表的唯一聚合点（握手/spawn/双向泵/断连杀/
   // pid 文件 + 重启残留扫描兜底）。2026-09-24 孤儿活跃度分级收割入列后统计行越过
   // 500：orphan 处置与 sweep 同属注册表生命周期职责，拆分归独立重构任务——按

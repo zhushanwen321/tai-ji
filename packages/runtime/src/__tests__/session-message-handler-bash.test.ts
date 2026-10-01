@@ -1,10 +1,11 @@
 /**
  * SessionMessageHandler bash 请求路由测试（composer-bash-execute W1）。
  *
- * 锁定 message.bash / message.abortBash 的 ack 路由：
- * - T11: message.bash 正常 → 调 sendBash(sid, cmd, excludeFromContext) → reply message.status{sent}
- * - T12: sendBash 返回 {blocked:true}（非 rejected）→ sendError('message_blocked') 非 reply status{sent}
- * - T13: message.bash 被预检拒绝（result.rejected）→ reply message.status{rejected}
+ * 锁定 message.bash / message.abortBash 的 ack 路由（回执契约 = bash 投递可靠性，dmg-r1-2）：
+ * - T11: message.bash 正常 → 调 sendBash(sid, cmd, excludeFromContext) → reply message.status{settled}
+ * - T12: sendBash 返回 settled+error（执行失败）→ reply 携带 error（失败不得伪装成无 error 成功回执，
+ *        也不再走 error envelope——error envelope 会让 pending.reject，消费方拿不到执行状态）
+ * - T13: message.bash 被预检拒绝（回执 rejected）→ reply message.status{rejected}
  * - T14: message.abortBash → 调 abortBash(sid) → reply message.status{aborted}
  *
  * mock 模式参考 test/session-message-handler.test.ts（makeHandler + Captured reply/error）。
@@ -23,7 +24,7 @@ interface Captured {
 function makeHandler(sessionOverrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
   const cap: Captured = { replies: [], errors: [] }
   const sessionService = {
-    sendBash: vi.fn().mockResolvedValue({ blocked: false }),
+    sendBash: vi.fn().mockResolvedValue({ status: 'settled' }),
     // P6 断言④回执真实化：abortBash 返回 { sent }，默认 sent=true（abort_bash 发出且 pi 确认）
     abortBash: vi.fn().mockResolvedValue({ sent: true }),
     // 其他方法 stub（handler 构造可能引用，保留最小实现避免 NPE）
@@ -54,8 +55,8 @@ function msg(type: string, payload: Record<string, unknown>, id = 'm1'): ClientM
 const WS = {} as never
 
 describe('SessionMessageHandler —— message.bash 路由', () => {
-  // T11: 正常路径 → sendBash 调用 + reply status{sent}
-  it('T11: message.bash → 调 sendBash(sid, cmd, excludeFromContext) + reply message.status{sent}', async () => {
+  // T11: 正常路径 → sendBash 调用 + reply 回执 settled
+  it('T11: message.bash → 调 sendBash(sid, cmd, excludeFromContext) + reply message.status{settled}', async () => {
     const { ctx, cap, handler } = makeHandler()
     await handler.handleSessionMessage(
       msg('message.bash', { sessionId: 's1', command: 'ls', excludeFromContext: false }),
@@ -64,43 +65,45 @@ describe('SessionMessageHandler —— message.bash 路由', () => {
 
     // sendBash 被调，参数透传
     expect(ctx.sessionService.sendBash).toHaveBeenCalledWith('s1', 'ls', false)
-    // reply status{sent}
+    // reply 回执 settled（成功回执不带 error）
     expect(cap.replies).toHaveLength(1)
     expect(cap.replies[0]).toMatchObject({
       id: 'm1',
       type: 'message.status',
-      payload: { sessionId: 's1', status: 'sent' },
+      payload: { sessionId: 's1', status: 'settled' },
     })
-    // 无 error
+    expect(cap.replies[0]!.payload.error).toBeUndefined()
+    // 无 error envelope
     expect(cap.errors).toHaveLength(0)
   })
 
-  // T12: blocked（执行失败，非 rejected）→ sendError('message_blocked')
-  it('T12: sendBash 返回 {blocked:true}（非 rejected）→ sendError(message_blocked) 非 reply status{sent}', async () => {
+  // T12: 执行失败（回执 settled+error）→ reply 携带 error（失败不得伪装成无 error 成功回执）
+  it('T12: sendBash 返回 settled+error（执行失败）→ reply 携带 error，不走 error envelope（消费方据回执判定，不再误判双执行）', async () => {
     const { ctx, cap, handler } = makeHandler({
-      sendBash: vi.fn().mockResolvedValue({ blocked: true }),
+      sendBash: vi.fn().mockResolvedValue({ status: 'settled', error: 'Bash execution failed' }),
     })
     await handler.handleSessionMessage(
       msg('message.bash', { sessionId: 's1', command: 'git status' }),
       WS,
     )
 
-    // sendError 而非 reply status
-    expect(cap.errors).toHaveLength(1)
-    expect(cap.errors[0]).toMatchObject({
+    // 回执携带执行状态 + 失败原因（消费方拿到 status 才能安全判定是否恢复草稿）
+    expect(cap.replies).toHaveLength(1)
+    expect(cap.replies[0]).toMatchObject({
       id: 'm1',
-      code: 'message_blocked',
-      details: { sessionId: 's1' },
+      type: 'message.status',
+      payload: { sessionId: 's1', status: 'settled', error: 'Bash execution failed' },
     })
-    // 不得 reply status{sent}
-    const sentReply = cap.replies.find((r) => r.payload.status === 'sent')
-    expect(sentReply).toBeUndefined()
+    // 不得伪装成无 error 的成功回执
+    expect(cap.replies[0]!.payload.error).toBeDefined()
+    // 不走 error envelope（error envelope 会让 pending.reject，回执状态就丢了）
+    expect(cap.errors).toHaveLength(0)
   })
 
-  // T13: rejected（预检拒绝）→ reply status{rejected}
-  it('T13: sendBash 返回 {blocked:true, rejected:true} → reply message.status{rejected}', async () => {
+  // T13: rejected（预检拒绝/未执行）→ reply 回执 rejected
+  it('T13: sendBash 返回回执 rejected → reply message.status{rejected}', async () => {
     const { cap, handler } = makeHandler({
-      sendBash: vi.fn().mockResolvedValue({ blocked: true, rejected: true }),
+      sendBash: vi.fn().mockResolvedValue({ status: 'rejected' }),
     })
     await handler.handleSessionMessage(
       msg('message.bash', { sessionId: 's1', command: 'ls' }),
@@ -110,6 +113,23 @@ describe('SessionMessageHandler —— message.bash 路由', () => {
     expect(cap.replies[0]).toMatchObject({
       type: 'message.status',
       payload: { sessionId: 's1', status: 'rejected' },
+    })
+    expect(cap.errors).toHaveLength(0)
+  })
+
+  // T12b: restore 失败（回执 rejected+error）→ reply 携带 error，未执行语义不变
+  it('T12b: sendBash 返回 rejected+error（restore 失败）→ reply status{rejected}+error（未执行，可恢复草稿）', async () => {
+    const { cap, handler } = makeHandler({
+      sendBash: vi.fn().mockResolvedValue({ status: 'rejected', error: 'Failed to restore session: boom' }),
+    })
+    await handler.handleSessionMessage(
+      msg('message.bash', { sessionId: 's1', command: 'ls' }),
+      WS,
+    )
+
+    expect(cap.replies[0]).toMatchObject({
+      type: 'message.status',
+      payload: { sessionId: 's1', status: 'rejected', error: 'Failed to restore session: boom' },
     })
     expect(cap.errors).toHaveLength(0)
   })

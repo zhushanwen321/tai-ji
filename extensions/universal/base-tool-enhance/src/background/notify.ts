@@ -30,6 +30,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
+import { truncateCommand } from "./command-display.ts";
 import type { BackgroundTask, BackgroundTaskEndReason } from "./types.ts";
 
 const logger = getLogger("base-tool-enhance");
@@ -39,24 +40,6 @@ const logger = getLogger("base-tool-enhance");
  * §3.1 用户视角「对话流中以 custom entry 形式出现」）。
  */
 export const BACKGROUND_BASH_CUSTOM_TYPE = "background-bash";
-
-/**
- * pending register 的 name 截断长度（§3.5 数据流 ⑤「command 前 80 字符」）。
- * 与 spawn-background COMMAND_DISPLAY_LIMIT 同值但刻意不共享 import——notify 被
- * spawn-background import，反向 import 会造成 spawn ↔ notify 循环依赖；两处语义
- * （pending 列表展示 / 错误文案展示）各自独立演化，仅数值对齐。
- */
-const PENDING_NAME_LIMIT = 80;
-
-/**
- * 命令文案截断（pending register 的 name 与完成通知 head 行共用同一口径）：
- * 超 PENDING_NAME_LIMIT 取前 80 字符 + 省略号。
- */
-function truncateCommand(command: string): string {
-	return command.length > PENDING_NAME_LIMIT
-		? `${command.slice(0, PENDING_NAME_LIMIT)}…`
-		: command;
-}
 
 /** 模块级「当前 pi 引用」（D17 核心可变状态，见文件头）。 */
 let currentPi: ExtensionAPI | undefined;
@@ -249,7 +232,7 @@ export interface BackgroundBashDetails {
  * 完成通知 details（D1）：终态字段与 buildNotificationContent 同源——durationMs
  * 同用 `?? 0` 归一（终态条目必已物化，缺省仅防御）。
  *
- * command 取原始终态值不截断：截断（PENDING_NAME_LIMIT）是 content 行宽约束，结构化
+ * command 取原始终态值不截断：截断（COMMAND_DISPLAY_LIMIT）是 content 行宽约束，结构化
  * 消费方的行宽由渲染层自己决定（旧数据无 details 时仍走 content 原文兜底）。
  */
 export function buildNotifyDetails(task: NotificationTaskLike): BackgroundBashDetails {

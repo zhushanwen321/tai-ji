@@ -133,12 +133,19 @@ describe("buildWorkerScript — W2 agent() returnMeta mode", () => {
       expect(handlerBlock![0]).toContain("value: _value");
       expect(handlerBlock![0]).toContain("sessionFile: msg.result.sessionFile");
       expect(handlerBlock![0]).toContain("worktreePath: msg.result.worktreePath");
-      expect(handlerBlock![0]).toContain("error: msg.result.error");
+      expect(handlerBlock![0]).toContain("error: _schemaGap ? _value : msg.result.error");
     });
 
-    it("fallback resolve single value uses msg.result.parsedOutput ?? msg.result.content", () => {
+    it("fallback resolve single value uses parsedOutput ?? content, gated by schema-gap (ADR-0092)", () => {
+      // 判定源 = pending.hasSchema（agent-result 段在 worker 顶层，opts 不在作用域）
       expect(script).toContain(
-        "const _value = msg.result.parsedOutput ?? msg.result.content;",
+        "const _schemaGap = pending.hasSchema && msg.result.parsedOutput === undefined && msg.result.error === undefined;",
+      );
+      expect(script).toContain(
+        "hasSchema: opts.schema !== undefined",
+      );
+      expect(script).toContain(
+        ": (msg.result.parsedOutput ?? msg.result.content);",
       );
     });
   });
@@ -160,12 +167,15 @@ describe("buildWorkerScript — W2 agent() returnMeta mode", () => {
       expect(cacheBlock![0]).toContain("value: _cachedValue");
       expect(cacheBlock![0]).toContain("sessionFile: cached.sessionFile");
       expect(cacheBlock![0]).toContain("worktreePath: cached.worktreePath");
-      expect(cacheBlock![0]).toContain("error: cached.error");
+      expect(cacheBlock![0]).toContain("error: _schemaGap ? _cachedValue : cached.error");
     });
 
-    it("cache replay fallback uses cached.parsedOutput ?? cached.content", () => {
+    it("cache replay fallback uses cached.parsedOutput ?? cached.content, gated by schema-gap (ADR-0092)", () => {
       expect(script).toContain(
-        "const _cachedValue = cached.parsedOutput ?? cached.content;",
+        "const _schemaGap = opts.schema !== undefined && cached.parsedOutput === undefined && cached.error === undefined;",
+      );
+      expect(script).toContain(
+        ": (cached.parsedOutput ?? cached.content);",
       );
     });
   });

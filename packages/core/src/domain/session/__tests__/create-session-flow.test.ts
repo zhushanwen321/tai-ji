@@ -2,7 +2,7 @@
  * createSessionFlow 单测（IF5，w4）。
  *
  * 覆盖 TC-1..TC-9 + TC-1b（label 三分支 + slash 段回退 label 文本源 / 编排序 / ES4+E7 降级 /
- * applyModel 步骤已删 / 空 content guard / migrateImages path 更新 / 降级 allSettled / defaultCwd 兜底）。
+ * applyModel 步骤已删 / 空 content guard / migrateImages path 更新 / 降级 allSettled / defaultCwd 兜底）+ TC-10（发现 B：clientUuid 幂等键透传 api.create 末参）。
  * mock 注入点即 ctx 依赖注入点：
  * api.create / api.migrateImage 用 vi.fn；applyModel / onCwdFallback 用 vi.fn；store 用真实
  * createSessionStore（w1 交付，appendSession 终态断言需真实响应式）。
@@ -70,7 +70,7 @@ describe('createSessionFlow', () => {
     await createSessionFlow(ctx, { cwd: '/x', segments: [textSeg('帮我重构这段代码 abc')] })
     // 第 4 参 projectId（D14 创建时归属 activeProject）：未传 → undefined
     // 第 5-6 参 modelOverride/thinkingOverride（B3）：未传 → undefined
-    expect(ctx.api.create).toHaveBeenCalledWith('/x', '帮我重构这段代码 a…', undefined, undefined, undefined, undefined)
+    expect(ctx.api.create).toHaveBeenCalledWith('/x', '帮我重构这段代码 a…', undefined, undefined, undefined, undefined, undefined)
 
     // ② bash command：label 从 command 取（无 ! 前缀）
     ctx = makeCtx()
@@ -79,7 +79,7 @@ describe('createSessionFlow', () => {
       segments: [textSeg('!ls')],
       bashCommand: { command: 'ls -la', excludeFromContext: false },
     })
-    expect(ctx.api.create).toHaveBeenCalledWith('/x', 'ls -la', undefined, undefined, undefined, undefined)
+    expect(ctx.api.create).toHaveBeenCalledWith('/x', 'ls -la', undefined, undefined, undefined, undefined, undefined)
 
     // ③ 非 text 仅贴图：deriveSessionLabel('') 兜底「无提示词」
     ctx = makeCtx()
@@ -87,23 +87,23 @@ describe('createSessionFlow', () => {
       cwd: '/x',
       segments: [imageSeg('/tmp/a.png', false)],
     })
-    expect(ctx.api.create).toHaveBeenCalledWith('/x', '无提示词', undefined, undefined, undefined, undefined)
+    expect(ctx.api.create).toHaveBeenCalledWith('/x', '无提示词', undefined, undefined, undefined, undefined, undefined)
   })
 
   it('TC-1b slash 段视同 text-like 作 label 文本源（S-6）：landing 首发纯命令 → label 含 /tasks', async () => {
     // ① 纯命令首发（结构：[{type:'slash'}]）→ label 回退首个 slash 段拼 '/' + name，不退化为兜底文案
     await createSessionFlow(ctx, { cwd: '/x', segments: [slashSeg('tasks')] })
-    expect(ctx.api.create).toHaveBeenCalledWith('/x', '/tasks', undefined, undefined, undefined, undefined)
+    expect(ctx.api.create).toHaveBeenCalledWith('/x', '/tasks', undefined, undefined, undefined, undefined, undefined)
 
     // ② 有非空 text 段 → 仍以 text 段为准（slash 段只在 trim 空时回退，不抢占 label）
     ctx = makeCtx()
     await createSessionFlow(ctx, { cwd: '/x', segments: [textSeg('总结'), slashSeg('compact')] })
-    expect(ctx.api.create).toHaveBeenCalledWith('/x', '总结', undefined, undefined, undefined, undefined)
+    expect(ctx.api.create).toHaveBeenCalledWith('/x', '总结', undefined, undefined, undefined, undefined, undefined)
 
     // ③ text 段仅空白（trim 空）+ slash 段 → 回退 slash 段（对齐 base：命令拍平进 text 时的 label）
     ctx = makeCtx()
     await createSessionFlow(ctx, { cwd: '/x', segments: [textSeg('   '), slashSeg('tasks')] })
-    expect(ctx.api.create).toHaveBeenCalledWith('/x', '/tasks', undefined, undefined, undefined, undefined)
+    expect(ctx.api.create).toHaveBeenCalledWith('/x', '/tasks', undefined, undefined, undefined, undefined, undefined)
 
     // ④ 无非 text 段且无 slash 段时仍走原兜底（guard 语义未变：空段不创建）
     ctx = makeCtx()
@@ -123,7 +123,7 @@ describe('createSessionFlow', () => {
 
     // 编排序断言：create → appendSession → migrateImages（无图片段跳过）
     expect(ctx.api.create).toHaveBeenCalledTimes(1)
-    expect(ctx.api.create).toHaveBeenCalledWith('/x', 'hi', undefined, undefined, 'openai/gpt-x', undefined)
+    expect(ctx.api.create).toHaveBeenCalledWith('/x', 'hi', undefined, undefined, 'openai/gpt-x', undefined, undefined)
     expect(appendSpy).toHaveBeenCalledTimes(1)
     expect(appendSpy).toHaveBeenCalledWith({ id: 'ns', cwd: '/x', label: 'hi', status: 'idle' })
     // [D5] step 7 applyModel 已删：模型经 create modelOverride 快照化一次到位，
@@ -164,7 +164,7 @@ describe('createSessionFlow', () => {
       presetId: 'preset-1',
       pendingModel: null,
     })
-    expect(ctx.api.create).toHaveBeenCalledWith('/x', 'hi', 'preset-1', undefined, undefined, undefined)
+    expect(ctx.api.create).toHaveBeenCalledWith('/x', 'hi', 'preset-1', undefined, undefined, undefined, undefined)
     // applyModel 编排步骤已删（D5），无论 pendingModel 有无恒不调（字段已随 U2d 删除）
   })
 
@@ -240,7 +240,7 @@ describe('createSessionFlow', () => {
   it('TC-8 defaultCwd 兜底：input.cwd=null → 用 ctx.defaultCwd 创建', async () => {
     ctx = makeCtx({ defaultCwd: '/home/user' })
     await createSessionFlow(ctx, { cwd: null, segments: [textSeg('hi')] })
-    expect(ctx.api.create).toHaveBeenCalledWith('/home/user', 'hi', undefined, undefined, undefined, undefined)
+    expect(ctx.api.create).toHaveBeenCalledWith('/home/user', 'hi', undefined, undefined, undefined, undefined, undefined)
   })
 
   it('TC-9 E7 两空 cwd：reqCwd 空串且 runtime 落 homedir → onCwdFallback("", actualCwd) 触发（不再静默）', async () => {
@@ -255,8 +255,26 @@ describe('createSessionFlow', () => {
       },
     })
     await createSessionFlow(ctx, { cwd: null, segments: [textSeg('hi')] })
-    expect(ctx.api.create).toHaveBeenCalledWith('', 'hi', undefined, undefined, undefined, undefined)
+    expect(ctx.api.create).toHaveBeenCalledWith('', 'hi', undefined, undefined, undefined, undefined, undefined)
     expect(ctx.onCwdFallback).toHaveBeenCalledTimes(1)
     expect(ctx.onCwdFallback).toHaveBeenCalledWith('', '/home/user')
+  })
+
+  it('TC-10 clientUuid 幂等键透传（发现 B）：input.clientUuid → api.create 末参；缺省传 undefined', async () => {
+    // 编译期契约：CreateSessionFlowInput.clientUuid 可选字段（与调用方的接口约定字段名）
+    const inputWithUuid: CreateSessionFlowInput = {
+      cwd: '/x',
+      segments: [textSeg('hi')],
+      clientUuid: 'u-create-1',
+    }
+    await createSessionFlow(ctx, inputWithUuid)
+    // 运行时透传：clientUuid 原样到达 api.create 第 7 参（壳适配层据此填 RPC payload.clientUuid，
+    // runtime 按其去重——同 uuid 重试返回已建 session，不重复 spawn/建号）
+    expect(ctx.api.create).toHaveBeenCalledWith('/x', 'hi', undefined, undefined, undefined, undefined, 'u-create-1')
+
+    // 缺省 clientUuid → 末参 undefined（向后兼容，api 侧 payload 不含该键；既有各 TC 已断言）
+    ctx = makeCtx()
+    await createSessionFlow(ctx, { cwd: '/x', segments: [textSeg('hi')] })
+    expect(ctx.api.create).toHaveBeenCalledWith('/x', 'hi', undefined, undefined, undefined, undefined, undefined)
   })
 })

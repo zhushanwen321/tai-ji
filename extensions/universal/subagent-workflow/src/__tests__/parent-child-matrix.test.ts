@@ -57,6 +57,7 @@ import { SubagentService, setSubagentService } from "@zhushanwen/subagent-core";
 import type { PiLike } from "@zhushanwen/subagent-core/execution/subagent-service.ts";
 import type { ExecutionRecord } from "@zhushanwen/subagent-core";
 import subagentsExtension from "../index.ts";
+import { GLOBAL_SLOT_KEYS } from "@zhushanwen/subagent-core";
 
 // ── helpers ──
 
@@ -98,7 +99,7 @@ function makeRunningRecord(id: string, overrides: Partial<ExecutionRecord> = {})
 /** 重置进程级 SubagentService 单例槽（setSubagentService 不接受 null，测试清理用）。
  *  key 与生产 getServiceSlot 的 SERVICE_SLOT_KEY（subagent-service.ts）一致。 */
 function resetServiceSlot(): void {
-  const slot = Reflect.get(globalThis, Symbol.for("@zhushanwen/pi-subagents.service")) as
+  const slot = Reflect.get(globalThis, Symbol.for(GLOBAL_SLOT_KEYS.service)) as
     | { current: SubagentService | null }
     | undefined;
   if (slot) slot.current = null;

@@ -110,6 +110,30 @@ describe('useComposerHistory 状态机', () => {
   })
 })
 
+describe('isBrowsingFor / getSavedDraft（R2-A6 按 sid 显式读）', () => {
+  it('browsing 分区：按旧 sid 显式读 browsing 态与进 browsing 前的用户草稿', () => {
+    const { handleArrowUp, isBrowsingFor, getSavedDraft } = setupHistory('s1', ['msg1'], {
+      getText: () => 'my draft',
+    })
+    expect(handleArrowUp()).toBe(true)
+    // getText 已被历史条目替换——用户真实输入只能按 sid 显式取
+    expect(isBrowsingFor('s1')).toBe(true)
+    expect(getSavedDraft('s1')).toBe('my draft')
+  })
+
+  it('session 切换后：新分区 browsing 恒 false / 草稿空，旧 sid 分区仍可显式读', () => {
+    const { handleArrowUp, sidRef, isBrowsingFor, getSavedDraft } = setupHistory('s1', ['msg1'], {
+      getText: () => 'old input',
+    })
+    handleArrowUp() // s1 进 browsing + savedDraft='old input'
+    sidRef.value = 's2' // 切换 watch 回调时刻 sidRef 已是新值——isBrowsing 读不到旧分区
+    expect(isBrowsingFor('s2')).toBe(false)
+    expect(getSavedDraft('s2')).toBe('')
+    expect(isBrowsingFor('s1')).toBe(true)
+    expect(getSavedDraft('s1')).toBe('old input')
+  })
+})
+
 describe('resetBrowsing', () => {
   it('用户输入触发 resetBrowsing：退出 browsing，下次 ↑ 重新从 H[0] 开始', () => {
     const { handleArrowUp, resetBrowsing, setTextCalls } = setupHistory('s1', ['msg1', 'msg2'])

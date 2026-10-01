@@ -19,9 +19,9 @@ const SUBAGENT_RECORD_ENTRY_V2 = 2
 
 /**
  * 目标 sa-id 的 zcode 形态 subagent-record data：type/customType/版本关/id/engine
- * 全过才返回。版本关（W1 v2 学习，entry-anchor.ts zcodeAnchorOfEntry 同口径）：
- * v1 全量快照（`d.v === 1`，兼容读面）或 v2 终态条（`d.v === 2` ∧
- * `d.kind === 'settled'`——engineHandle 只在终态条，registered 不携带不归因）。
+ * 全过才返回。版本关（与 entry-anchor.ts zcodeAnchorOfEntry 同口径）：
+ * v2 终态条（`d.v === 2` ∧ `d.kind === 'settled'`——engineHandle 只在终态条，
+ * registered 不携带不归因；v1 全量快照形态已随兼容层删除，2026-09-30 登记 §3.3）。
  * engine 判别（D5）在此——`d.engine !== 'zcode'` 的记录（pi 形态：
  * engine 缺省、sessionRef 无 dbPath）不是「zcode 锚不完整」，返回 undefined 跳过
  * 不归因：误归因 missing-dbPath 会把「pi record 先于 manifest settle 落盘」的正常
@@ -34,11 +34,7 @@ function zcodeRecordDataOf(entry: Entry, saId: string): Record<string, unknown> 
   if (typeof data !== 'object' || data === null) return undefined
   const d = data as Record<string, unknown>
   if (d.id !== saId) return undefined
-  if (d.v === SUBAGENT_RECORD_ENTRY_V2) {
-    if (d.kind !== 'settled') return undefined
-  } else if (d.v !== 1) {
-    return undefined
-  }
+  if (d.v !== SUBAGENT_RECORD_ENTRY_V2 || d.kind !== 'settled') return undefined
   if (d.engine !== 'zcode') return undefined
   return d
 }

@@ -32,14 +32,26 @@ function recordLine(
   entryId: string,
   saId: string,
   sessionRef: Record<string, string>,
-  v = 1,
+  v = 2,
 ): string {
+  // 登记 §3.3：v1 全量快照形态已删——锚源 = v2 终态条（settled 携带 engine/engineHandle）。
   return JSON.stringify({
     type: 'custom',
     customType: 'subagent-record',
     id: entryId,
     parentId: null,
-    data: { v, id: saId, engine: 'zcode', engineHandle: { sessionRef, poolKey: 'shared' } },
+    data: {
+      v,
+      kind: 'settled',
+      id: saId,
+      status: 'idle',
+      stopReason: 'completed',
+      endedAt: 2,
+      turns: 1,
+      totalTokens: 1,
+      engine: 'zcode',
+      engineHandle: { sessionRef, poolKey: 'shared' },
+    },
   })
 }
 
@@ -208,7 +220,7 @@ describe('形状校验窄而严：缺键条目不算命中，继续找更早条�
     expect(await findZcodeEntryAnchor([file], 'sa-1')).toBeUndefined()
   })
 
-  it('data.v 为认识的 v1/v2 之外的版本（future-v，如 3）不算命中，更早 v=1 条目仍可命中', async () => {
+  it('data.v 非当前版本（future-v，如 3）不算命中，更早 v=2 条目仍可命中', async () => {
     const file = writeMainSession('main.jsonl', [
       JSON.stringify({ type: 'session', id: 'main-1' }),
       recordLine('e1', 'sa-1', { sessionId: 'sess-A', dbPath: DB_PATH }),
@@ -251,22 +263,22 @@ describe('v2 终态条锚定：kind="settled" + engineHandle.sessionRef 双键',
     expect(await findZcodeEntryAnchor([file], 'sa-1')).toBeUndefined()
   })
 
-  it('v1 快照条（早）+ v2 终态条（晚）→ 末条 v2 胜（末条锚定跨版本一致）', async () => {
+  it('同 id 两条 v2 终态条（早/晚）→ 末条胜（末条锚定语义）', async () => {
     const file = writeMainSession('main.jsonl', [
       JSON.stringify({ type: 'session', id: 'main-1' }),
-      recordLine('e1', 'sa-1', { sessionId: 'sess-V1OLD', dbPath: DB_PATH }),
+      recordLine('e1', 'sa-1', { sessionId: 'sess-OLD', dbPath: DB_PATH }),
       v2SettledLine('e2', 'sa-1', {
         engine: 'zcode',
-        sessionRef: { sessionId: 'sess-V2NEW', dbPath: DB_PATH },
+        sessionRef: { sessionId: 'sess-NEW', dbPath: DB_PATH },
       }),
     ])
 
     const anchor = await findZcodeEntryAnchor([file], 'sa-1')
-    expect(anchor?.sessionId).toBe('sess-V2NEW')
-    expect(anchor?.sessionId).not.toBe('sess-V1OLD')
+    expect(anchor?.sessionId).toBe('sess-NEW')
+    expect(anchor?.sessionId).not.toBe('sess-OLD')
   })
 
-  it('v2 终态条锚残缺（缺 engineHandle）→ 不命中，更早 v1 完整条目仍可命中（缺键不遮蔽）', async () => {
+  it('v2 终态条锚残缺（缺 engineHandle）→ 不命中，更早完整条目仍可命中（缺键不遮蔽）', async () => {
     const file = writeMainSession('main.jsonl', [
       JSON.stringify({ type: 'session', id: 'main-1' }),
       recordLine('e1', 'sa-1', { sessionId: 'sess-EARLY', dbPath: DB_PATH }),

@@ -149,7 +149,7 @@ core 负责：选引擎 → 建 journal → 派发任务 → 收集事件流 →
       ├─ execution/engine/
       │    ├─ port.ts        EnginePort（9 成员，:153-211）
       │    ├─ registry.ts    id → factory（globalThis slot 单例）
-      │    ├─ routing.ts     三层优先级 + probe + fallback（:116-198）+ pi 同步短路（:262-278）
+      │    ├─ routing.ts     三层优先级 + probe（不可用即显式失败，不换引擎）+ pi 同步短路
       │    ├─ engine-discovery.ts  registry → <agentDir>/subagents/engines.json
       │    ├─ common/        capability-gate / schema-emulation / kill-chain /
       │    │                 kill-chain / nesting-guard / journal-replay / session-view-service
@@ -182,7 +182,7 @@ core 负责：选引擎 → 建 journal → 派发任务 → 收集事件流 →
 |---|------|------|------|
 | F1 | EnginePort 契约：`id / capabilities() / probe() / run() / interact() / read() / listModels?() / validateModel?() / dispose?()` | `execution/engine/port.ts:153-211`（文件 211 行） | 【实测】 |
 | F2 | 注册表是**进程内**的：`EngineFactory = () => EnginePort`，`globalThis` slot 单例 | `registry.ts:24/73-186` | 【实测】 |
-| F3 | 路由是纯决策层：三层优先级（`:57-68`）+ 检查 fallback（`:116-187`、`fallbackTargetId:189-198`）+ pi 同步短路（`routeEngineForHost:262-278`） | `routing.ts` | 【实测】 |
+| F3 | 路由是纯决策层：三层优先级（`resolveEngineRouting`）+ probe 编排（`routeEngine`：id 未注册 → `engine_not_found`；probe 失败 → `engine_probe_failed`）+ pi 同步短路（`routeEngineForHost`） | `routing.ts` | 【实测】 |
 | F4 | 引擎清单已有**元数据出口**：`taiji.subagentEngines` + `engines.json`（契约 `v:1, engines: string[]`），GUI 选择器消费 | `extensions/universal/subagent-workflow/package.json:34`、`runtime/src/services/session/session-records.ts:334-392`、`engine-discovery.ts:1-61`、`extension-protocol/src/extensions/subagent-engine/contract.ts:20-32`、`renderer/src/components/settings/agent/SubagentEngineSection.vue` | 【实测】 |
 | F5 | zcode 引擎**目录自包含但依赖 core 公共层**：静态 import `common/schema-emulation`（`zcode-engine.ts:45-47`，调用 969/1237）、`common/kill-chain`（`:49`、`connection.ts:42`）、`common/nesting-guard`（`connection.ts:43`）、`common/journal-replay`（`:51`）、`paths.ts`（`:64`）、`common/data-dir` + `registry.ts`（`registration.ts:11-12`）——**「只依赖 logger/错误工具」不成立**，这是 D7 的直接动因 | 上述行号 | 【实测】 |
 | F6 | pi 引擎**与宿主强耦合**：`PiEngine({getService})` 消费 `PiEngineService`（`pi-engine.ts:140-159`，含 `executeAndAwait`、`run:296`）；静态 import `session-runner.ts`（`:48-49`）、`lifecycle-manager.ts`（`:50-55`）、`stdin-writer.ts`（`:57-62`）；`engines/pi/reader.ts:32` import `session-reconstructor.ts`（core 基础设施，`record-store.ts:44` 也在用） | 上述行号 + `subagent-service.ts:377/2555-2580` | 【实测】 |
@@ -213,7 +213,7 @@ core 负责：选引擎 → 建 journal → 派发任务 → 收集事件流 →
 宿主进程（pi 扩展 / zsw CLI）——业务代码零改动（靠 §3.6 D8 兼容公共面保证）
  └─ @zhushanwen/subagent-core（壳）
       ├─ 编排层（不变）：SAR / workflow / record-store / journal / session-view 投影
-      ├─ 路由层（签名不变）：三层优先级 + probe + fallback（routing.ts）
+      ├─ 路由层（签名不变）：三层优先级 + probe（不可用即显式失败，不换引擎）（routing.ts）
       ├─ 注册表（改造）：id → EngineDescriptor（只持有「怎么启动」+ 声明的能力位）
       │     └─ 发现器：manifest 扫描 + 配置覆盖 + 宿主发现根
       ├─ 协议客户端（新增）：spawn / 帧编解码 / 请求关联 / 反向通知 / 崩溃重建 / 背压
@@ -281,7 +281,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 |------|------|------|------|
 | `initialize` | core→引擎 | 握手 | `{protocolVersion, hostInfo:{name,version,dataRoot}, engineConfig}` → `{protocolVersion, engineId, engineVersion, adapterVersion, capabilities, models?}`；**应答仅作诊断**（与 manifest 不一致 → warn 留痕，不参与判据，见下「同步成员清单」）；**`engineConfig` = L3 显式配置的 `engines.<id>.config`（`Record<string,string>`，缺省 `{}`）**，作为引擎自身配置入口透传（不放凭据）；版本越界 → `engine_protocol_mismatch`；能力位与 manifest 不符 → 按方向处理（见下「能力位」段） |
 | `probe` | core→引擎 | `probe` | `{force?}` → `ProbeReport` |
-| `run` | core→引擎 | `run` | `{runId, task, ctx:{cwd, model?, ctxModel?, engineFallback?, streamMode?, sessionRootId?, sessionDir?, extensionPaths?}}`；期间发 `event`；终态应答 `{handle, outcome}`（[池抽象降级] 原 `ctx.poolKey` 已删） |
+| `run` | core→引擎 | `run` | `{runId, task, ctx:{cwd, model?, ctxModel?, streamMode?, sessionRootId?, sessionDir?, extensionPaths?}}`；期间发 `event`；终态应答 `{handle, outcome}`（[池抽象降级] 原 `ctx.poolKey` 已删） |
 | `cancel` | core→引擎 | AbortSignal | `{runId, reason}`；引擎须在 3s 内收敛终态；超时 core 走杀链 |
 | `interact` | core→引擎 | `interact` | `{handle, action}` → `InteractResult` |
 | `read` | core→引擎 | `read` | `{handle, dataDir}` → `SessionView`（**`dataDir` 必填**：存量池时代相对 `dbPath` 需要它） |
@@ -306,7 +306,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 | `stream` | `host/streamDelta` | UI 实时刷新丢失 |
 | `onHandleReady` | `host/handleReady` | 运行中 GUI 详情页恒③级 |
 | `onChildSpawned` | `host/childSpawned` + `host/childStateChanged` | 子进程泄漏 + `isResumable` 同步谓词失真 |
-| `ctxModel` / `engineFallback` | `run.params.ctx` | model 兜底 / fallback 留痕丢失 |
+| `ctxModel` | `run.params.ctx` | ctx 模型 ref 丢失 |
 | `extensionPaths` | `run.params.ctx`（宿主 HostServices 端口注入；additive 可选，undefined 不上 wire） | 孙进程显式扩展加载缺失——pi 引擎不拼 `--extension` argv（undefined/空 = 不拼） |
 | `cwd` | `run.params.ctx.cwd`（有值才上 wire；server additive 还原进 `task.cwd`） | worktree 隔离失效——core 的 `taskSpecWithModel` 把 `WorktreeHandle.path` 合流进 cwd，引擎以 `task.cwd ?? process.cwd()` 决定子进程 spawn cwd；缺省不上 wire = 引擎回退自身进程 cwd（与无 worktree 任务现状一致） |
 
@@ -329,7 +329,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 **`modelCatalog` 生成与一致性**：引擎包**构建期导出**（`pnpm --filter <pkg> gen:model-catalog` 写进 package.json manifest）+ CI 校验
 （与引擎声明的模型清单一致）；运行时引擎 `listModels` 应答与 manifest 不一致 → **warn 留痕（诊断）**，不参与判据。
 （不采用：「握手应答更新缓存」——免探路径握手永不发生 → 缓存恒空 → `validateModel` 回落静态目录仍能跑，等于缓存无意义；且缓存失效时机在多轮审查中持续产生新矛盾。）
-| `probe()` | `routing.ts:132`（非 pi 路径先 await，本就在异步路径） | 协议 `probe` | 既有三检查不变 |
+| `probe()` | `routeEngine`（非 pi 路径先 await，本就在异步路径） | 协议 `probe` | probe 失败 → `engine_probe_failed`（含逐项 check 摘要 + 恢复指引，不换引擎） |
 
 **能力位（capabilities）**：`EnginePort.capabilities()` 是**同步**接口。协议下权威分两步：
 **①manifest 声明（同步可用，注册期即读）**；**②握手校验**——**时序固定**：免探路径（pi 缺省，`routing.ts:262-278`）
@@ -361,7 +361,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 **版本协商**：`ENGINE_PROTOCOL_VERSION = 1`（core 支持 `>=1 <2`）；越界 → `engine_protocol_mismatch`
 （含双方版本 + 升级指引），该引擎标记不可用，不影响其他引擎与宿主。
 
-**协议演进宪法**（条文权威 = 本节 + [ADR-0071](adr/decisions.md)；代码侧投影 = SDK protocol 四文件头注与 `contract-closure.test.ts` 机器锁）：
+**协议演进宪法**（条文权威 = 本节 + [ADR-0071](../adr/decisions.md)；代码侧投影 = SDK protocol 四文件头注与 `contract-closure.test.ts` 机器锁）：
 
 *字段归属三分判据（新增 wire 字段按决策树依序裁决；存量不搬家不重判，判据只约束新增）*：
 ① 引擎不消费它任务能否正确完成？能 → 宿主自持不上协议（「正确」含满足字段声明携带的约束面——
@@ -411,7 +411,8 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 | `engine_model_mismatch` | `dynamic=true` 时运行期引擎拒绝该 model | run 失败 + record 标 failed（契约变更，见 §3.3 同步成员清单） |
 | `engine_handshake_timeout` | `initialize` 超时（10s） | 该引擎不可用；检查引擎包是否可执行 |
 | `engine_crashed` | 进程意外退出 | 在途 run 失败（附 stderr 尾）；下次 run 重建（最多 3 次指数退避 1s/2s/4s，超过则标记不可用直到下次宿主启动） |
-| `engine_probe_failed` | `probe` 失败 | 既有 fallback 三检查不变 |
+| `engine_probe_failed` | `probe` 失败 | 结构化失败（含逐项 check 摘要 + 恢复指引），**不换引擎**；要换引擎须由调用方显式传 `engine:'<id>'` |
+| `engine_config_unreadable` | 全局 config.json 存在但读不出来（坏 JSON / 权限） | 派发前显式拒绝（缺省引擎是未知量，不按内置缺省 pi 执行）；修复或删除该文件后重试 |
 | 其余 `engine_*` | 引擎在 `error` 帧原样给出 | core 透传，文案契约不变 |
 
 **安全与 env（设计级契约；实现级键表/生成物/检查断言由代码承载——原 impl-plan §2.12 已删除，git 可追溯，入口 = 本节对应实现文件）**：
@@ -482,7 +483,7 @@ core 与引擎**统一从 SDK 读**——**不引入 core → `@taiji/shared` �
 | L3 显式配置 | `subagents/config.json` → `engines: { "<id>": { command, args, config, cwd, enabled } }` | 用户/开发态覆盖（路径注入；**引擎包落位 `packages/`，dev-link 脚本不覆盖，见 §3.7**）；`config` 经 `initialize.engineConfig` 透传（**引擎需自行实现消费，否则是死键**）；**无 `env` 键**（v6 删 extras 层，见 §3.3 env 段否决记录） |
 
 **为什么砍内置清单**：原「core 自带静态清单保证至少 pi 可用」与 DoD#1「core 内无引擎实现」互斥
-（静态清单 ≠ 可用）；pi 引擎包缺失时的行为由 D4「缺省引擎规格」定义。
+（静态清单 ≠ 可用）；pi 引擎包缺失时的行为由 D4「缺省引擎与不可用处置」定义。
 
 **发现时机**：与现有 `syncEnginesFile` 同点——**session_start 扫描一次**并缓存；`hasEngine()`
 （agent 解析期同步校验，`registry.ts:169`）查缓存快照；未命中时触发一次**同步补扫**（只读 manifest，
@@ -497,7 +498,7 @@ core 与引擎**统一从 SDK 读**——**不引入 core → `@taiji/shared` �
 | 消费方 | runtime RPC（`session-records.ts` 读取 + 冷启动静态声明回退）、renderer 选择器（`SubagentEngineSection.vue`）、写入门 `setSubagentDefaultEngine`（清单外拒绝） |
 | 投影规则 | 清单 = **已发现且可执行**的引擎 id 数组；契约 `SubagentEnginesFile{v:1, engines: string[]}` **不改** |
 | 速率/单调性 | 每次 session_start 幂等写（内容不变零写） |
-| 清理通道 | 引擎卸载 → 下次扫描自动消失；`defaultEngine` 指向已卸载引擎 → 加载期 warn + 回落第一个可用引擎 + record 留痕（D4） |
+| 清理通道 | 引擎卸载 → 下次扫描自动消失；`defaultEngine` 指向已卸载引擎 → 派发期 `engine_not_found`（列出已发现引擎 + 配置路径 + 安装指引） |
 | 「灰显 + 原因」 | **v1 不做**（需改契约 + renderer，违反 G1/G3）；不可用引擎不进清单，派发时给 `engine_not_found` + 原因 + 恢复指引 |
 | **冷启动回退源（H5 连带面，单源）** | 现状二级回退 = `engines.json` 缺失 → 读**扩展包** `taiji.subagentEngines` → 最终 `['pi']`（`session-records.ts:337-392`）。H5 后该字段消失 → **回退源 = runtime 自身发现结果**（W8 三级发现，与派发同源）。**不保留静态 JSON 兜底**：零命中时静态清单列出的 id 恰好**不可派发**（无引擎被发现 = 无 bin 可执行），会让选择器出现「能选不能跑」的项，且与本节投影规则「不可用引擎不进清单」直接冲突；零命中就返回**空清单 + 「未发现任何引擎包」状态**（GUI 按既有语义给 `engine_not_found` + 安装指引）。**量级**：冷启动窗口 = 首次 RPC 前（百毫秒级）；**重审触发条件** = 出现「选择器列出不可派发引擎」或「已装引擎不可见」报告；**判定** = 可接受。同步改两个守护测试（`engines-declaration.test.ts` / `session-service-engine-config.test.ts`）；**A12⑦ 断言 = 「已安装引擎全部可见（含第三方）」** |
 
@@ -508,7 +509,7 @@ core 与引擎**统一从 SDK 读**——**不引入 core → `@taiji/shared` �
 
 | 面 | 归属 | 说明 |
 |----|------|------|
-| 路由三层优先级 + 检查 fallback | **core 保留** | `routing.ts` 纯决策，改为面向 descriptor/代理 |
+| 路由三层优先级 + probe（不可用即显式失败，不换引擎） | **core 保留** | `routing.ts` 纯决策，改为面向 descriptor/代理 |
 | capability-gate | **core 保留** | 引擎无关（persona-router 已删除 2026-09-13——零生产接线，随本轮设计代码同步清扫） |
 | journal 落盘 / record-store / session-view 投影 | **core 保留** | 数据所有权在宿主 |
 | 引擎进程生命周期（spawn/握手/重建/dispose/杀链） | **core 保留**（新增 `EngineClient`） | 与 `AppServerConnection` 同型但**引擎无关** |
@@ -729,13 +730,11 @@ interface HostBridge {                        // core 侧实现；pi 包经 host
 
 **D3 开关与回退**：`TAIJI_SUBAGENT_ENGINE_MODE=auto|cli|inproc`（默认 `auto`）。**适用期 = 迁移期**；
 DoD#5 要求迁移完成后删除 `inproc` 分支。**DoD 之后的恢复路径**：① 引擎包版本回退
-（`npm i <pkg>@<old>`）；② 配置 `engines: { "<id>": { enabled: false } }` 禁用；③ 引擎缺失时按 D4 降级/报错。
+（`npm i <pkg>@<old>`）；② 配置 `engines: { "<id>": { enabled: false } }` 禁用；③ 引擎缺失时按 D4 显式报错（不换目标）。
 **重审触发条件**：连续两次引擎包升级导致派发失败 → 重新评估「是否保留 inproc 分支」。
 
-**D4 缺省引擎与 fallback 目标（无内置引擎后的规格）**：`DEFAULT_ENGINE_ID` 语义改为「**配置的缺省引擎 id**」；
-加载期若配置值不在已发现清单 → warn + 回落到**第一个可用引擎**（按 manifest `displayName` 稳定序）+ record 留痕；
-若一个引擎都不可用 → 派发期 `engine_not_found`（列出「未发现任何引擎包」+ 安装指引）。
-`fallbackTargetId()`（`routing.ts:189-198`）的恒 'pi' 改为「首个可用引擎」，无可用引擎则不 fallback（直接报错）。
+**D4 缺省引擎与不可用处置（无内置引擎后的规格，决策记录 [ADR-0093](../adr/decisions.md)）**：`DEFAULT_ENGINE_ID` 语义 = 「**配置的缺省引擎 id**」（`defaultEngine` 未配置 / 空串 / 非法值 → 内置缺省 `pi`）；三层（调用参数 / agent frontmatter / 全局缺省）任一指定了引擎 id，运行期就按该引擎执行。
+不可用一律显式失败，**不换目标**：id 未注册（含 `defaultEngine` 指向已卸载引擎）→ 派发期 `engine_not_found`（列出已发现引擎 + 配置路径 + 安装指引）；probe 失败 → `engine_probe_failed`（逐项 check 摘要 + 恢复指引）；全局 config.json 存在但读不出来 → `engine_config_unreadable`（缺省引擎是未知量，不按内置缺省 pi 执行）。要换引擎只能由调用方显式传 `engine:'<id>'`。
 
 **D5 存量数据**：record / journal / engineHandle 格式零变化；引擎 id 不变（`pi`/`zcode`），
 历史 record 的 `engine` 字段仍能路由到新引擎包。
@@ -849,7 +848,7 @@ RSS 实施期实测回写 §3.6 表；恢复 = 取消 runtime 路径（降②级
 | A9 | 迁移完成度（DoD） | 按 §3.8 D6 九条逐条验 | 九条全绿；`grep -r "engines/\(pi\|zcode\)" packages/subagent-core/src` 零生产命中 | G1/G2 |
 | A10 | 宿主表面不变量（zcode GUI / DB） | A1-A8 后（**N≥3 轮**）：打开 GUI 看会话列表；`sqlite3 "file:~/.zcode/cli/db/db.sqlite?mode=ro" "select count(*) from session where id in (<record 白名单>)"` 与 `tasks-index` 同查 | 宿主 zcode 会话列表**无新增 subagent 会话**；两库计数 = 0（白名单来源 = 本轮 record 的 `sessionRef.sessionId`，写入方归因即此） | G3 |
 | A11 | 宿主表面不变量（engines.json / 进程残留 / 数据根一致） | A1-A8 **含 runtime ①级读路径**（先打开详情页触发 runtime spawn）后（**N≥3 轮**）：检查 `engines.json` 形状；退宿主后 **POSIX**：`pgrep -f '<engine>-subagent-cli'` + `lsof -p <pid>`；**Windows 等效**：`tasklist /FI "PID eq <pid>"` + 无孙进程（`wmic process where "ParentProcessId=<pid>"` 或 `tasklist /V` 人工核）；向 runtime 发 SIGTERM（Windows：`taskkill /PID <runtimePid>`）并计时 | `engines.json` 仍是 `{v:1, engines: string[]}` 且消费方行为不变；**无遗留引擎/组内后代**（**三平台各验一次**：POSIX `pgrep` 零命中 / Windows `tasklist` 零命中；范围同 A3）、无 fd/socket 堆积（lsof 行数不增长）；**SIGTERM 关停后（dispose 发起起算）1s 内引擎进程消失**（退出钩子实效；注意 `shutdown()` 内 `await deinitRelayServer()` 有 3s grace，故 dispose 必须与 relay 关停**并行**）；**runtime ①级读打开的库路径 == pi 宿主引擎写入的库路径**（单数据根） | G3 |
-| A12 | 负面行为（反向验收） | ①同 id 两个包；②坏 manifest（含 `envPrefixes` 为 `""` / `"*"`）；③`bin` 缺失；④`defaultEngine` 指向已卸载引擎；⑤`engines:{"<id>":{enabled:false}}`；⑥迁移期 `TAIJI_SUBAGENT_ENGINE_MODE=inproc` 回退；⑦**冷启动（无 pi 进程）** | ①后者覆盖 + info 留痕；②坏包跳过（`envPrefixes` 非法条目 → **丢弃该前缀 + warn，引擎仍可用**）、其他引擎正常；③不进清单 + 派发报错含原因；④warn + 回落首个可用引擎 + 留痕；⑤该引擎不进清单 + 派发报错含恢复指引；⑥迁移期回退可跑（适用期至 DoD#5）；⑦**已安装引擎全部可见（含第三方）**——回退源 = runtime 自身发现结果（无静态 JSON 兜底） | G1/G2 |
+| A12 | 负面行为（反向验收） | ①同 id 两个包；②坏 manifest（含 `envPrefixes` 为 `""` / `"*"`）；③`bin` 缺失；④`defaultEngine` 指向已卸载引擎；⑤`engines:{"<id>":{enabled:false}}`；⑥迁移期 `TAIJI_SUBAGENT_ENGINE_MODE=inproc` 回退；⑦**冷启动（无 pi 进程）**；⑧全局 config.json 坏 JSON（存在但读不出来） | ①后者覆盖 + info 留痕；②坏包跳过（`envPrefixes` 非法条目 → **丢弃该前缀 + warn，引擎仍可用**）、其他引擎正常；③不进清单 + 派发报错含原因；④派发报错 `engine_not_found`（列已发现引擎 + 配置路径 + 安装指引），**不回落其它引擎**；⑤该引擎不进清单 + 派发报错含恢复指引；⑥迁移期回退可跑（适用期至 DoD#5）；⑦**已安装引擎全部可见（含第三方）**——回退源 = runtime 自身发现结果（无静态 JSON 兜底）；⑧派发前拒 `engine_config_unreadable`（不按内置缺省 pi 执行） | G1/G2 |
 | A13 | stderr 日志轮转（反向验收，含并发） | ①长跑 N 次任务（或人为刷屏）后检查 `logs/zcode-appserver-stderr-<pid>.log`；②**两个宿主（pi + runtime）同时长跑** | ①文件大小受上限（50MB）约束、超期（7 天）自动清理（**可执行步骤：`touch -d '8 days ago' <log>` 把 mtime 拨回后重跑清理**）；②双实例各自文件独立、**互不删除/重命名对方文件**、无 rename 失败（EPERM）静默丢失（**对方 pid 存活时其文件不得被删**；存活判据 = `process.kill(pid,0)` 跨实例探测） | 已接受代价 |
 
 **探针挂钩**（随代码落地）：

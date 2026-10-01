@@ -38,8 +38,7 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
   /**
    * Fork 会话：从指定源 session 截断历史到 fork 点，新建 session（独立 pi 进程）。
    *
-   * 语义（问题 6 AI 收尾 fork）：includeFrom=true → 保留到该 assistant（含），
-   * openInStandby 打开另一 panel。原 session 不变。
+   * 语义（问题 6 AI 收尾 fork）：includeFrom=true → 保留到该 assistant（含）。原 session 不变。
    *
    * 实现：runtime 读源 session JSONL 按 piEntryId 截断 → 新进程 switch_session 加载。
    * 不再前端 hydrate（runtime 通过 switch_session 让 pi 加载截断历史，selectSession 的
@@ -51,7 +50,7 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
   async function forkSession(
     srcSessionId: string,
     fromMessageId: string,
-    opts?: { includeFrom?: boolean; openInStandby?: boolean },
+    opts?: { includeFrom?: boolean },
   ): Promise<string> {
     // 从前端 Message.id 查到 piEntryId（runtime fork 截断定位用）
     const msgs = chat.getMessages(srcSessionId)
@@ -68,7 +67,7 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
     })
     session.appendSession(created)
     // [W2 fast-fork] 后台 fork 不切焦点：fork 后留在原线，对话流经 session.forkNotice 广播插反馈行
-    // （FR-9/10），侧栏静默新增。openInStandby 选项保留为契约（调用方可能传入），但行为退化为「不切焦点」。
+    // （FR-9/10），侧栏静默新增。
     return created.id
   }
 
@@ -84,8 +83,9 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
    * 无订阅者被静默丢弃，agent 回复看不到。同步 appendUser + addPendingSend，与正常 send 路径一致，
    * 让用户消息经 chat store 正常显示 + pending 态填充 ack 空窗。
    *
-   * 直接调 chatApi.send 而非 useChat().send：后者内部 try/catch 吞掉 send 错误（仅 toast），
-   * 此处需要捕获 reject 触发回滚；其 busy→steer 路由对新 fork session 也不适用。
+   * 直接调 chatApi.submitDelivery 而非 useChat().send：后者内部 try/catch 吞掉提交错误（仅 toast），
+   * 此处需要捕获 reject 触发回滚；[u3b/D1] 其 busy→steer 本地路由已退役（lane 判定在内核），
+   * 对本路径不再是差异点——剩余差异只有错误处理与回滚编排。
    * [W1] 错误反馈职责上移调用方：此处只做资源清理（disposeSession + remove + removeFromList），
    * 不 toast、不吞错——rethrow 让 handleForkSend 统一负责 toastError + restoreInput（避免草稿丢失）。
    * 主线 session 全程不参与（不写入、不 streaming、不 split）。
@@ -116,12 +116,21 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
     const segments = textToSegments(content)
     const prompt = segmentsToPrompt(segments)
     // [fast-fork] 建立新 session 的流式订阅 + 写入用户消息 + 标记 pending（对齐正常 send 的前置编排，
-    // 但跳过 send 的 busy→steer 检测与错误吞没）。订阅幂等：ensureStreamSubscription 已防重复。
+    // 但跳过 send 的错误吞没——本路径需要捕获 reject 触发回滚）。订阅幂等：ensureStreamSubscription 已防重复。
     ensureStreamSubscription(newId, chat, session)
-    chat.appendUser(newId, segments)
+    // [投递所有权内核 u3c / D-10] 统一提交 + clientUuid 单源：appendUser 返回的 `u-<uuid>` 既是
+    // 本地乐观气泡 id，也作为 delivery.submit 的条目 id（内核出站裸标记身份源 D2 + 回执匹配锚）。
+    // 前身（chatApi.send 不带 clientUuid）的异源窗口：内核自造条目 id ≠ 本地气泡 id——direct
+    // 车道下仅表现为占位记账错位（回执 decrementInflight 落在未挂账的 session 上被钳制），
+    // 非 direct 车道下气泡按 clientUuid 找不到 → morph 不生效 → 气泡与队列条目双显示悬挂。
+    // 迁移后 lane 判定全部形态收敛（新 session 恒 direct 的当前事实不再是前提）。
+    const clientUuid = chat.appendUser(newId, segments)
+    // inflight 占位 +1：对齐 core submitNewMessage 记账（每条统一提交挂 1，送达回执抵消），
+    // 缺席会让本条的 message_end 回执去抵消别条的配额。
+    chat.incrementInflight(newId, 1)
     chat.addPendingSend(newId)
     try {
-      await chatApi.send(newId, prompt)
+      await chatApi.submitDelivery(newId, prompt, clientUuid)
     } catch (e) {
       // send 失败回滚：删除占位 session（runtime + 列表），避免空壳悬挂。
       // 同步拆流式订阅 + 清 chat store 的 per-session 状态（含刚 appendUser 的消息 + pendingSend timer），
@@ -129,7 +138,11 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
       // disposeSession 与 deleteSession 清理口径一致（取消 WS 订阅 + clearPendingSend + 清 messages）。
       // [W1] 只做资源清理，不 toast、不吞错——rethrow 让调用方 handleForkSend 统一反馈 + restoreInput。
       disposeSession(newId)
-      await sessionApi.remove(newId).catch(() => {})
+      // 回滚清理是 best-effort：remove 失败只留痕（runtime 侧可能残留孤儿空壳，重启后经
+      // 会话扫描重现），不吞主错误——主错误在下方 rethrow 由调用方统一 toast。
+      await sessionApi.remove(newId).catch((err) =>
+        console.warn(`[useForkActions] rollback remove(${newId}) failed:`, err),
+      )
       session.removeFromList(newId)
       throw e
     }
@@ -156,14 +169,14 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
    * 无末条 assistant 时静默 no-op（无消息可 fork）。
    *
    * RPC 失败在函数内 catch + toast：⌘G 快捷键路径调用方 void 丢弃（useGlobalShortcuts），
-   * 裸 reject 成 unhandled 且用户零反馈——形态对齐 useChatViewDeps.onFork 的
-   * catch+toastError 先例（forkSessionAsk 不在此列：其调用方 handleForkSend 统一反馈）。
+   * 裸 reject 成 unhandled 且用户零反馈（forkSessionAsk 不在此列：其调用方 handleForkSend
+   * 统一反馈）。
    */
   async function forkFromLastAssistant(): Promise<void> {
     const last = lastAssistantOfFocused()
     if (!last) return
     try {
-      await forkSession(last.sessionId, last.messageId, { includeFrom: true, openInStandby: false })
+      await forkSession(last.sessionId, last.messageId, { includeFrom: true })
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e)
       toastError(t('panel.message.forkFailed', { error }))

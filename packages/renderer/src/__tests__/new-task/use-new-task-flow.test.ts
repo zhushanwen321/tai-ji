@@ -21,12 +21,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
 import type { SessionSummary, SessionGroup } from '@taiji/shared'
-// '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的 import（useNewTaskFlow 链）求值
-import { apiProjectMock, apiWorkspaceDomainsMock } from '../helpers/api-facade-mock'
 
 const apiMock = vi.hoisted(() => ({
   create: vi.fn(
-    // 六参签名（D14 projectId 透传断言用，原 session-project-attribution.test.ts 并入）
+    // 调用契约六参（cwd/label/presetId/projectId/modelOverride/thinkingOverride），
+    // mock 只命名前四参；projectId 透传断言用第 4 参
     (cwd?: string, _label?: string, _presetId?: string, projectId?: string): Promise<SessionSummary> =>
       Promise.resolve({
         id: `s-${Math.random().toString(36).slice(2, 8)}`,
@@ -40,30 +39,38 @@ const apiMock = vi.hoisted(() => ({
       }),
   ),
   remove: vi.fn((): Promise<void> => Promise.resolve()),
-  // submitFirstMessage → useChat.send → chatApi.send/streamSubscribe 需要 mock 占位
+  // submitFirstMessage → useChat.send → chatApi.submitDelivery（[u3c/D1] 统一提交）+ streamSubscribe
   chatSend: vi.fn((): Promise<void> => Promise.resolve()),
+  chatSubmitDelivery: vi.fn(async (sessionId: string, _content: string, clientUuid: string) => ({
+    clientUuid,
+    state: 'in-flight' as const,
+    lane: 'direct' as const,
+    sessionId,
+  })),
   streamSubscribe: vi.fn((): (() => void) => () => {}),
   // composer-bash-execute: landing 态 bash 首发 → useChat.sendBash → chatApi.bash
-  chatBash: vi.fn((): Promise<void> => Promise.resolve()),
+  // 回执契约（dmg-r1-2）：默认 = 已执行并收口
+  chatBash: vi.fn((): Promise<{ status: 'settled' }> => Promise.resolve({ status: 'settled' })),
   chatAbortBash: vi.fn((): Promise<void> => Promise.resolve()),
 }))
 
-vi.mock('@/api', () => ({ project: apiProjectMock(),
+vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
   session: { create: apiMock.create, remove: apiMock.remove, subscribe: vi.fn().mockResolvedValue({ snapshot: [], stateSnapshot: [], lastSeq: 0 }), unsubscribe: vi.fn().mockResolvedValue(undefined), migrateImage: vi.fn().mockResolvedValue(undefined), writeSegments: vi.fn().mockResolvedValue(undefined) },
   // submitFirstMessage → useFileTree.loadTree 调 fileApi.tree/gitApi.status（Promise.allSettled）；
   // 给空返回避免 unhandled rejection
   file: { tree: vi.fn().mockResolvedValue([]), expand: vi.fn().mockResolvedValue([]) },
   git: { status: vi.fn().mockResolvedValue({ isRepo: false }) },
-  chat: { send: apiMock.chatSend, streamSubscribe: apiMock.streamSubscribe, bash: apiMock.chatBash, abortBash: apiMock.chatAbortBash },
-  ...apiWorkspaceDomainsMock(),
+  chat: { send: apiMock.chatSend, submitDelivery: apiMock.chatSubmitDelivery, streamSubscribe: apiMock.streamSubscribe, bash: apiMock.chatBash, abortBash: apiMock.chatAbortBash },
+  workspace: { detect: vi.fn().mockResolvedValue({ mode: 'not-repo', isBareMode: false, wsRoot: '', repoRoot: '' }) },
+  worktree: { list: vi.fn().mockResolvedValue([]) },
 }))
 
 // W3: mock workspaceStore 让 submitFirstMessage 能取到 defaultCwd
 const workspaceStoreMock = vi.hoisted(() => ({
-  record: vi.fn(),
-  load: vi.fn(),
   records: [] as Array<{ cwd: string; lastUsedAt: number; label: string }>,
   defaultCwd: undefined as string | undefined,
+  load: vi.fn(),
+  record: vi.fn(),
 }))
 
 // INV-7: mock useToast 捕获 toastError 调用（cwd fallback 通知）
@@ -148,7 +155,7 @@ describe('useNewTaskFlow 状态机', () => {
       await flow.startFlow()
       await flow.submitFirstMessage(textToSegments('一二三四五六七八九十十一')) // 11 字
       expect(apiMock.create).toHaveBeenCalledTimes(1)
-      // cwd 兜底用最近 session 的 /repo；label 截断为前 10 字 + 省略号
+      // cwd 兑底用最近 session 的 /repo；label 截断为前 10 字 + 省略号
       expect(apiMock.create).toHaveBeenCalledWith('/repo', '一二三四五六七八九十…', undefined, undefined, undefined, 'high')
     })
 
@@ -162,7 +169,7 @@ describe('useNewTaskFlow 状态机', () => {
       expect(apiMock.create).toHaveBeenCalledWith('/repo', '修 bug', undefined, undefined, undefined, 'high')
     })
 
-    it('selectedWorkspace 选定 cwd 后发送 → create 第 1 参数用选定 cwd 而非兜底', async () => {
+    it('selectedWorkspace 选定 cwd 后发送 → create 第 1 参数用选定 cwd 而非兑底', async () => {
       setGroups([gitSession({ id: 'hist', cwd: '/repo', lastActiveAt: 1 })])
       const flow = useNewTaskFlow()
       await flow.startFlow()
@@ -189,7 +196,7 @@ describe('useNewTaskFlow 状态机', () => {
       const flow = useNewTaskFlow()
       await flow.startFlow()
       await flow.submitFirstMessage(textToSegments('hello'))
-      // create 用兜底 cwd 调用
+      // create 用兑底 cwd 调用
       expect(apiMock.create).toHaveBeenCalledWith('/gone', expect.any(String), undefined, undefined, undefined, 'high')
       // toast 触发一次，文案含「已不存在」+ 原 cwd
       expect(toastMock.error).toHaveBeenCalledTimes(1)
@@ -241,6 +248,7 @@ describe('useNewTaskFlow 状态机', () => {
   describe('submitFirstMessage bash 首发（landing 态 !/!! 前缀）', () => {
     beforeEach(() => {
       apiMock.chatSend.mockClear()
+      apiMock.chatSubmitDelivery.mockClear()
       apiMock.chatBash.mockClear()
     })
 
@@ -256,7 +264,8 @@ describe('useNewTaskFlow 状态机', () => {
       )
       expect(apiMock.chatBash).toHaveBeenCalledTimes(1)
       expect(apiMock.chatBash).toHaveBeenCalledWith(expect.any(String), 'echo hi', false)
-      // 关键：不调 chat.send（bash 不走 LLM turn）
+      // 关键：不提交消息（bash 不走 LLM turn）——统一提交入口与旧 send 均未被调
+      expect(apiMock.chatSubmitDelivery).not.toHaveBeenCalled()
       expect(apiMock.chatSend).not.toHaveBeenCalled()
     })
 
@@ -297,13 +306,14 @@ describe('useNewTaskFlow 状态机', () => {
       expect(labelArg!.startsWith('!')).toBe(false)
     })
 
-    it('无 bashCommand → 仍走 chat.send（普通首发，回归防护）', async () => {
+    it('无 bashCommand → 走统一提交（普通首发，回归防护）', async () => {
       setGroups([gitSession({ id: 'hist', cwd: '/repo', lastActiveAt: 1 })])
       workspaceStoreMock.defaultCwd = '/repo'
       const flow = useNewTaskFlow()
       await flow.startFlow()
       await flow.submitFirstMessage(textToSegments('hello'))
-      expect(apiMock.chatSend).toHaveBeenCalledTimes(1)
+      // [u3c/D1] 首发与正常 send 同通路：delivery.submit（clientUuid 三参）
+      expect(apiMock.chatSubmitDelivery).toHaveBeenCalledTimes(1)
       expect(apiMock.chatBash).not.toHaveBeenCalled()
     })
   })
@@ -609,9 +619,7 @@ describe('useNewTaskFlow 状态机', () => {
 //    非法态守卫覆盖，不再重复）──
 describe('create 透传归属 projectId（D14 语义修正，原 session-project-attribution 并入）', () => {
   function seedHistGroup(cwd: string): void {
-    useSessionStore().applySnapshot({ groups: [
-      { cwd, sessions: [{ id: 'hist', label: 'hist', cwd, status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0 }] },
-    ] as SessionGroup[] })
+    setGroups([{ id: 'hist', label: 'hist', cwd, status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0 }])
   }
 
   it('命名 project 下新建任务 → create 第 4 参数携带 activeProjectId', async () => {

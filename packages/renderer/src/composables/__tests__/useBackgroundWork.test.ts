@@ -179,14 +179,35 @@ describe('useBackgroundWork', () => {
 // undefined → hasBackgroundWork 判定断言同步转红（红锚联动）。
 describe('useBackgroundWork × runtime extractor 真实投影产物（R3-1④）', () => {
   /** 自描述 subagent-record entry 构造（pi JSONL 持久化形态 = runtime extractor 输入）。 */
-  function recordEntry(data: Record<string, unknown>): Record<string, unknown> {
-    return { type: 'custom', customType: SUBAGENT_RECORD_CUSTOM_TYPE, data }
+  /** 登记 §3.3：条目面 = v2 族（注册条定身份、终态条定终局）。 */
+  function recordEntry(
+    id: string,
+    extra: { origin?: string; result?: string; status?: 'running' | 'idle' } = {},
+  ): Array<Record<string, unknown>> {
+    const wrap = (data: Record<string, unknown>, entryId: string): Record<string, unknown> => ({
+      type: 'custom', customType: SUBAGENT_RECORD_CUSTOM_TYPE, id: entryId, parentId: null, data,
+    })
+    const registeredData: Record<string, unknown> = {
+      v: 2, kind: 'registered', id, agent: 'worker', task: 't', slug: 's',
+      rootSessionId: 's-proj', depth: 0, startedAt: 1000,
+    }
+    // origin 缺省 = 存量 record 语义（投影侧归一 undefined）——fixture 不代填默认值
+    if (extra.origin !== undefined) registeredData.origin = extra.origin
+    const registered = wrap(registeredData, `${id}-r`)
+    if (extra.status === 'idle') {
+      return [registered, wrap({
+        v: 2, kind: 'settled', id, status: 'idle', stopReason: 'completed', endedAt: 2000,
+        turns: 1, totalTokens: 1, model: undefined, thinkingLevel: undefined,
+        ...(extra.result !== undefined ? { result: extra.result } : {}),
+      }, `${id}-s`)]
+    }
+    return [registered]
   }
 
   it('投影透传 + 判定：extractor 产出的 workflow record 不绑架 hasBackgroundWork（投影白名单删 origin 即红）', () => {
     const records = scanSubagentEntries([
-      recordEntry({ v: 1, id: 'sub-proj-wf', status: 'running', origin: 'workflow' }),
-      recordEntry({ v: 1, id: 'sub-proj-wf-idle', status: 'running', result: '轮终产出', origin: 'workflow' }),
+      ...recordEntry('sub-proj-wf', { origin: 'workflow' }),
+      ...recordEntry('sub-proj-wf-idle', { origin: 'workflow', result: '轮终产出' }),
     ])
     // fixture 源证明：origin 由 runtime 投影产出，非手工拼装
     expect(records.find((r) => r.subagentId === 'sub-proj-wf')?.origin).toBe('workflow')
@@ -198,7 +219,7 @@ describe('useBackgroundWork × runtime extractor 真实投影产物（R3-1④）
   })
 
   it('零迁移：extractor 缺省投影（存量 record，origin undefined）仍判定为后台工作', () => {
-    const records = scanSubagentEntries([recordEntry({ v: 1, id: 'sub-proj-legacy', status: 'running' })])
+    const records = scanSubagentEntries([...recordEntry('sub-proj-legacy')])
     expect(records[0]?.origin).toBeUndefined()
 
     const sub = useSubagentStore()

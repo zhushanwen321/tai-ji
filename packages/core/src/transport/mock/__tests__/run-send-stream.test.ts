@@ -16,7 +16,7 @@ import { detectBranch } from '../run-send-stream-branches'
 
 const ZERO_TIMING: Timing = {
   ack: 0, startGap: 0, chunk: 0, done: 0, switchCmd: 0,
-  thinkingGap: 0, toolGap: 0, fileChangesGap: 0, retryGap: 0, steerDrain: 0, bashDelay: 0,
+  thinkingGap: 0, toolGap: 0, fileChangesGap: 0, retryGap: 0, bashDelay: 0,
 }
 
 interface Harness {
@@ -57,7 +57,7 @@ describe('detectBranch 关键词分发', () => {
 })
 
 describe('run-send-stream 默认（read）分支', () => {
-  it('完整生命周期：thinking → read tool_call（含 GUI）→ text → file_changes → complete', async () => {
+  it('完整生命周期：thinking → read tool_call → text → file_changes → complete', async () => {
     const h = makeHarness()
     await runSendStream('s1', 'hello', h.deps)
     const seq = types(h.emitted)
@@ -66,7 +66,7 @@ describe('run-send-stream 默认（read）分支', () => {
     expect(seq).toContain('message.thinking_start')
     expect(seq.filter((t) => t === 'message.thinking_delta').length).toBeGreaterThan(0)
     expect(seq).toContain('message.thinking_end')
-    // read 分支 tool_call（GUI card 嵌套在 tool_call_end entry details.__gui__）
+    // read 分支 tool_call：start/end 帧存在性（GUI card 细节归 e2e 分工，本测试不展开）
     const startIdx = seq.indexOf('message.tool_call_start')
     expect(startIdx).toBeGreaterThan(-1)
     const endFrame = h.emitted.find((m) => m.type === 'message.tool_call_end')

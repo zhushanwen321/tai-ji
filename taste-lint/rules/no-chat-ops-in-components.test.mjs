@@ -204,11 +204,11 @@ test('ImportDeclaration：core 深路径 import 同样激活工厂', () => {
   const messages = lintVue(
     sfc([
       "import { useChatStore } from '@taiji/core/domain/chat/store'",
-      'useChatStore().abortPending("s1")',
+      'useChatStore().setOccupancy("s1", "pending")',
     ].join('\n')),
   );
   expect(messages).toHaveLength(1);
-  expect(messages[0].message).toContain('abortPending');
+  expect(messages[0].message).toContain('setOccupancy');
 });
 
 test('ImportDeclaration：import type 形态不激活工厂', () => {

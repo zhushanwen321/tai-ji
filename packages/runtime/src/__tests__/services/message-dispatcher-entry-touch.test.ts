@@ -1,13 +1,14 @@
 /**
- * MessageDispatcher.sendPrompt 入口同步 touch 测试（idle-pi-reclamation 设计 D6-1）。
+ * MessageDispatcher 入口同步 touch 测试（idle-pi-reclamation 设计 D6-1；u2 内核化后更新）。
  *
  * 锁定：
  * - 入口 touch 在**任何 await 之前**同步执行：sendMessage 调用返回后（微任务/宏任务
- *   推进前）client 的空闲时钟已刷新——markSessionActive 置 occupancy=dispatching 位于
- *   await runBeforeSendHook（插件 hook，单 handler 5s 超时）与 await ensureActive
- *   （restore 600ms-3s）之后，「prompt 已发出、hook/restore 执行中」窗口靠本 touch
- *   关闭（reaper 判定刚 touch 过 → 不满足空闲阈值）
- * - 调用序：touch 先于 hook 先于 restore（ensureActive）先于 prompt
+ *   推进前）client 的空闲时钟已刷新——出站交接（ensureActive（restore 600ms-3s）→
+ *   inject → prompt）在投递内核适配层异步发生，「hook 执行中 + 交接在途」窗口靠本
+ *   touch 关闭（reaper 判定刚 touch 过 → 不满足空闲阈值）
+ * - 调用序（u2：出站交接异步化后经 flush 观察完整链）：touch 先于 hook 先于
+ *   restore（ensureActive）先于 prompt——hook 经 per-session 受理串行链（复审 R2）
+ *   微任务级启动，先于 restore/prompt 不变
  * - client 未附着（pm.getClient → undefined，已回收态）不 touch 也不炸：restore 路径
  *   spawn 的新 client lastActivityAt 初值 = spawn 时刻，天然不满足回收阈值
  *
@@ -16,12 +17,17 @@
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/services/message-dispatcher-entry-touch.test.ts
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { MessageDispatcher } from '../../services/session/message-dispatcher.js'
+import {
+  createSessionDeliveryRegistry,
+  type SessionDeliveryDeps,
+} from '../../services/session/session-delivery-registry.js'
 import type { IDispatcherSessionOps } from '../../services/session/session-internal.js'
 import type { IPiEngine, IProcessManager } from '../../services/ports/pi-engine.js'
 import type { IMessageBus } from '../../services/message-bus/message-bus.js'
 import type { WorkspaceService } from '../../services/workspace/workspace-service.js'
+import { flushDelivery } from '../../../test/helpers/flush-delivery.js'
 
 interface Fixture {
   dispatcher: MessageDispatcher
@@ -61,25 +67,38 @@ function makeFixture(attached = true): Fixture {
   const workspace = { record: vi.fn() } as unknown as WorkspaceService
   const bus = { publish: vi.fn() } as unknown as IMessageBus
 
+  // u2：出站交接经投递内核适配层（dispatcher 只提交，交接异步）——fixture 按真实装配接内核
+  const deps: SessionDeliveryDeps = {
+    getSession: (sid) => svc.getSession(sid),
+    ensureActive,
+    subscribeAgentSettled: () => () => {},
+    recordWorkspace: (cwd) => workspace.record(cwd),
+    getMessageBus: () => bus,
+  }
+  const registry = createSessionDeliveryRegistry(deps)
   const dispatcher = new MessageDispatcher(svc, pm, workspace, bus)
+  dispatcher.setDeliveryRegistry(registry)
   dispatcher.setSendMessageHook(hook)
   return { dispatcher, order, touchActivity, promptFn, ensureActive, hook }
 }
 
-describe('MessageDispatcher.sendPrompt 入口同步 touch（idle-pi-reclamation D6-1）', () => {
+afterEach(() => {
+})
+
+describe('MessageDispatcher 入口同步 touch（idle-pi-reclamation D6-1）', () => {
   it('入口 touch 同步执行：sendMessage 调用后（任何 await 推进前）已刷新，先于 hook/restore', async () => {
     const fx = makeFixture(true)
     const p = fx.dispatcher.sendMessage('s1', 'hello')
 
     // 同步时刻断言（微任务/宏任务均未推进）：touch 已发生且是调用链第一个动作。
-    // hook 是 async 函数，其同步段（push('hook') 前无 await）随 sendMessage 调用栈
-    // 同步执行——touch 排在 hook 前即证明入口 touch 先于任何 hook 副作用；restore
-    // （ensureActive，位于 sendPrompt 首个 await 之后）尚未执行。
-    expect(fx.order).toEqual(['touch', 'hook'])
+    // hook 经 per-session 受理串行链进入（复审 R2：hook 完成序不得重排内核提交序），
+    // 推迟至微任务级启动——同步窗口只剩 touch，恰证明入口 touch 先于任何链内副作用。
+    expect(fx.order).toEqual(['touch'])
     expect(fx.touchActivity).toHaveBeenCalledTimes(1)
 
     await p
-    // 完整调用序：touch（入口）→ hook（BeforeSend）→ restore（ensureActive）→ prompt
+    await flushDelivery(30)
+    // 完整调用序：touch（入口，同步）→ hook（BeforeSend，串行链内）→ restore（ensureActive）→ prompt
     expect(fx.order).toEqual(['touch', 'hook', 'restore', 'prompt'])
   })
 
@@ -87,9 +106,10 @@ describe('MessageDispatcher.sendPrompt 入口同步 touch（idle-pi-reclamation 
     const fx = makeFixture(false)
     const p = fx.dispatcher.sendMessage('s1', 'hello')
 
-    // 无附着 client：入口零动作（不抛 TypeError），后续链路照常推进
-    expect(fx.order).toEqual(['hook'])
+    // 无附着 client：入口零动作（不抛 TypeError），hook 在串行链的微任务窗口启动
+    expect(fx.order).toEqual([])
     await p
+    await flushDelivery(30)
 
     expect(fx.order).toEqual(['hook', 'restore', 'prompt'])
     expect(fx.touchActivity).not.toHaveBeenCalled()

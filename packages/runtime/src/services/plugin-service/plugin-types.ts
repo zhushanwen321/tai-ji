@@ -1,7 +1,8 @@
 import type { ISessionService, IConfigService } from '../../interfaces.js'
 
 // 插件系统类型消费薄壳（D28 方向反转，2026-09-05）：
-// 主域 single source of truth = packages/plugin-sdk/src/types.ts（对外发布契约）；
+// 主域 single source of truth = packages/plugin-sdk/src/types.ts（插件契约 SSOT，
+// workspace 内消费——SDK 与其依赖 @taiji/shared 均 private，无 npm 发布链）；
 // Bridge* 回包形状（BridgeSyncPayload / BridgeToolExecuteResponse /
 // BridgeInterceptResponse）single source of truth = @zhushanwen/extension-protocol
 // （D4 单源化，runtime 与 plugin-sdk 均经协议包 re-export 消费）。本文件原内联的

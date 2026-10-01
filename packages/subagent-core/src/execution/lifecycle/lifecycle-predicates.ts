@@ -26,7 +26,7 @@ import { hasIdleTimer } from "./lifecycle-manager.ts";
 // （engine/host/spawned-children.ts），不再深路径 import inproc pi 引擎目录 内部——
 // 行为不变（镜像 ∪ inproc 权威 map 并读，见该文件头注释的过渡桥语义）。
 import { hasLiveProcessHandleCore } from "../engine/host/spawned-children.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 
 /**
  * 活进程句柄是否存在（isResumable 子判据）。

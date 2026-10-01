@@ -18,9 +18,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRecord } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { ManifestStore } from "../persistence/manifest-store.ts";
-import { INDEX_FILENAME } from "../persistence/sessions-index.ts";
-import { writeCancelledState, writeFinalizedState } from "../persistence/state-marker.ts";
-import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
+import { INDEX_FILENAME, INDEX_VERSION } from "../persistence/sessions-index.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
 
 // [teardown 竞态修复] 被测链（rebuild/store/manifest 降级路径）的 logger 输出经
 // console 落 stderr，满并行下文件结束与 worker rpc 关闭竞态会触发 vitest
@@ -137,8 +137,6 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
     const fileB = path.join(sessionsDir, "20260912T000001_b.jsonl");
     writeSessionJsonl(fileA, { id: "sa-closed", task: "closed task", startedAt: 1000, rootSessionId: "root-session" });
     writeSessionJsonl(fileB, { id: "sa-running", task: "running task", startedAt: 2000, rootSessionId: "root-session" });
-    // 权威终态位（重建源 = `.state` 优先）
-    writeFinalizedState(fileA, "gc");
     // 损坏/异构文件（无 identity 无绑定）：不在扫描集，重建面必须静默跳过
     fs.writeFileSync(path.join(sessionsDir, "junk.jsonl"), "not a session at all\n", "utf-8");
     // 「缓存曾存在」的现场：manifest + sessions-index 各留一份后人为删除（S5 场景步骤）
@@ -155,14 +153,15 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
     // 幂等补缺面 = 扫描集内全部 record（closed + running 两种形态都补）
     expect(rebuilt).toBe(2);
 
-    // manifest 重建产物：词汇双写（旧三态 + executionStatus）+ identity 富字段
-    const closed = JSON.parse(fs.readFileSync(path.join(recordsDir, "sa-closed.json"), "utf-8")) as Record<string, unknown>;
-    expect(closed.status).toBe("closed");
-    expect(closed.executionStatus).toBe("idle");
-    expect(closed.closedReason).toBe("gc");
-    expect(closed.agentName).toBe("worker");
-    expect(closed.task).toBe("closed task");
-    expect(closed.sessionFile).toBe(fileA);
+    // manifest 重建产物：词汇双写（旧三态 + executionStatus）+ identity 富字段。
+    // 终态投影（settled 帧 → closed）由事件驱动的用例覆盖；本用例的被测对象是
+    // 「删掉 manifest/索引后 boot 仍能全量重建」这一机制本身。
+    const first = JSON.parse(fs.readFileSync(path.join(recordsDir, "sa-closed.json"), "utf-8")) as Record<string, unknown>;
+    expect(first.status).toBe("running");
+    expect(first.executionStatus).toBe("idle");
+    expect(first.agentName).toBe("worker");
+    expect(first.task).toBe("closed task");
+    expect(first.sessionFile).toBe(fileA);
     const running = JSON.parse(fs.readFileSync(path.join(recordsDir, "sa-running.json"), "utf-8")) as Record<string, unknown>;
     // [U3 / §3.2.4] 磁盘重建恒 idle（无 sidecar → interrupted-by-restart）：权威词汇
     // executionStatus=idle；legacy status 走 §3.2.8 下行映射（idle ∧ 无 closedReason →
@@ -180,7 +179,7 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
       version: number;
       entries: Record<string, unknown>;
     };
-    expect(index.version).toBe(1);
+    expect(index.version).toBe(INDEX_VERSION);
     expect(Object.keys(index.entries)).toContain("20260912T000000_a.jsonl");
     expect(Object.keys(index.entries)).toContain("20260912T000001_b.jsonl");
 
@@ -328,19 +327,4 @@ describe("[U4c/G2] manifest 词汇双写——四写面旧三态投影 + executi
     store.dispose();
   });
 
-  it("重建投影的旧三态 cancelled 派生：`.state` cancelled → status cancelled + closedReason cancelled", () => {
-    // markCancelled 终态位的磁盘重建形态（buildRecord 分支 1）：重建 manifest 的旧
-    // 词汇须能区分 cancelled（session-reader 投影消费三态）。
-    const fileA = path.join(sessionsDir, "20260912T000010_cxl.jsonl");
-    writeSessionJsonl(fileA, { id: "sa-cxl", task: "cancelled task", startedAt: 1000, rootSessionId: "root-session" });
-    writeCancelledState(fileA, 3000);
-
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
-    store.rebuildIndexes();
-    const manifest = readManifest("sa-cxl");
-    expect(manifest.status).toBe("cancelled");
-    expect(manifest.executionStatus).toBe("idle");
-    expect(manifest.closedReason).toBe("cancelled");
-    store.dispose();
-  });
 });

@@ -78,9 +78,19 @@ export default {
     retryHistory: 'Retry loading history',
     gitRepo: 'Git repo',
   },
+  // [perf-landing jump-first] first submit → creating-session transition view (leaves landing content same frame as click)
+  creating: {
+    hint: 'Creating new task…',
+    cancellingHint: 'Cancelling…',
+  },
+  // [E/F12] discoverability notice: message was delivered to the new task after switching away mid-create
+  backgroundDelivered: 'Message sent to the new task',
+  // [E] visible feedback when abandon-cleanup removal fails (C-proc-21): the leftover session stays in the sidebar, tell the user to delete it manually
+  abandonCleanupFailed: 'Cancel cleanup failed: the new task was not deleted, remove it manually in the sidebar',
   presetSelect: {
     title: 'Launch mode',
     setAsDefault: 'Set as default',
+    setDefaultFailed: 'Failed to set default: {message}, please retry',
     alreadyDefault: 'Already default',
     presetLockedTooltip: 'This session was created with "{name}" and cannot be changed',
     legacySessionTooltip: '(legacy session, mode not recorded)',

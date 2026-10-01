@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
 
 import type { LauncherDeps } from "@zhushanwen/subagent-core";
 
-import { actionResume } from "../interface/tool-workflow.ts";
+import { actionResume } from "../interface/tool/tool-workflow.ts";
 import type { ScenarioDeps } from "./record-mode/scenario-kit.ts";
 import {
   makeFauxRunner,

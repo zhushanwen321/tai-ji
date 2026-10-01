@@ -40,7 +40,7 @@ import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
 import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
 import { _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
-import type { AgentResult, ExecutionRecord } from "../assembly/types.ts";
+import type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
 
 interface ServiceInternals {
   store: RecordStore;

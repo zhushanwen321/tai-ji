@@ -70,7 +70,7 @@ import * as path from "node:path";
 
 import { isProcessAlive } from "../persistence/alive-store.ts";
 import { encodeCwd } from "../assembly/path-encoding.ts";
-import { WorktreeManager } from "../worktree/worktree-manager.ts";
+import { WorktreeManager, addWorktreeWithStaleRecovery, type WorktreeGitRunner } from "../worktree/worktree-manager.ts";
 
 // 被测链路（gitRunAsync）调用四参形态（file, args, options, callback）；vi.mocked
 // 直接包 execFile 会推导到无 options 重载，显式绑定四参签名
@@ -108,6 +108,7 @@ const MAIN_CWD = "/home/user/project";
 const AGENT_DIR = "/home/user/.pi/agent";
 const RECORD_ID = "bg-42-abc";
 const BASE_COMMIT = "abc123def456";
+const PATCH_FILE = "/tmp/wt-patch/backup.patch";
 
 /** create 路径期望（tmpdir/pi-subagents/<enc(mainCwd)> 下） */
 function expectedCreatePath(recordId: string): string {
@@ -293,6 +294,48 @@ describe("WorktreeManager", () => {
       // 同 repo 的 2 个 worktree add 全部执行且互斥（per-repo mutex）
       expect(addCount).toBe(2);
       expect(maxWriteActive).toBe(1);
+    });
+
+    it("[1.3] 陈旧 git 元数据：首次 add 失败 → prune + 删残留分支 + 重试成功（接共享原语）", async () => {
+      // clearAllMocks 不清 mockImplementation——重置前例注入的 symlinkSync throw，本用例走完整 create
+      vi.mocked(fs.symlinkSync).mockImplementation(() => {});
+      let addAttempts = 0;
+      setupExecFile((args) => {
+        if (args[0] === "rev-parse") return { stdout: `${BASE_COMMIT}\n` };
+        if (args[0] === "worktree" && args[1] === "add") {
+          addAttempts++;
+          if (addAttempts === 1) {
+            return {
+              err: Object.assign(
+                new Error(`Command failed: git worktree add\nfatal: a branch named 'pi-sub-${RECORD_ID}' already exists`),
+                { code: 128 },
+              ),
+            };
+          }
+        }
+        return { stdout: "" };
+      });
+      mockExistsSync.mockImplementation((p: unknown) => String(p).includes("node_modules"));
+
+      const handle = await mgr.create(MAIN_CWD, RECORD_ID);
+
+      expect(handle.branch).toBe(`pi-sub-${RECORD_ID}`);
+      expect(mockAdd).toHaveBeenCalledTimes(1);
+      const recoveryCmds = mockExecFile.mock.calls
+        .map((c) => c[1] as readonly string[])
+        .filter((args) => args[0] === "worktree" || args[0] === "branch")
+        .map((args) => args.join(" "));
+      expect(recoveryCmds).toEqual([
+        `worktree add -b pi-sub-${RECORD_ID} ${expectedCreatePath(RECORD_ID)} HEAD`,
+        "worktree prune",
+        `branch -D pi-sub-${RECORD_ID}`,
+        `worktree add -b pi-sub-${RECORD_ID} ${expectedCreatePath(RECORD_ID)} HEAD`,
+      ]);
+      // `-b` 新建形态的删分支前置判据：残留分支存在（rev-parse --verify 成功）
+      const verifyCalls = mockExecFile.mock.calls.filter(
+        (c) => (c[1] as readonly string[])[0] === "rev-parse" && (c[1] as readonly string[])[1] === "--verify",
+      );
+      expect(verifyCalls).toHaveLength(1);
     });
   });
 
@@ -505,6 +548,261 @@ describe("WorktreeManager", () => {
       // 两个注册表条目都移除（各自 cleanup 尾部执行）
       expect(mockRemove).toHaveBeenCalledWith("pi-sub-fail-1");
       expect(mockRemove).toHaveBeenCalledWith("pi-sub-fail-2");
+    });
+  });
+
+  // ============================================================
+  // [1.2 / 1.3] reconstruct 判定前置 + 陈旧元数据恢复原语
+  // ============================================================
+
+  describe("reconstruct", () => {
+    it("[1.2] patch 备份丢失 → degrade-reopen 且零副作用（无 worktree add / 无前置 rmSync / 无注册表条目 / 无软链）", async () => {
+      setupExecFile((args) => {
+        if (args[0] === "rev-parse" && args[1] === "--verify") return { stdout: `${BASE_COMMIT}\n` };
+        return { stdout: "" };
+      });
+      // checkout 残留目录存在（若判定不前置会被 rmSync 清掉）+ patch 备份不在盘 + node_modules 在
+      mockExistsSync.mockImplementation((p: unknown) => {
+        const s = String(p);
+        if (s === PATCH_FILE) return false;
+        if (s.includes("pi-sub-")) return true;
+        if (s.includes("node_modules")) return true;
+        return false;
+      });
+
+      const outcome = await mgr.reconstruct(MAIN_CWD, RECORD_ID, PATCH_FILE);
+
+      expect(outcome).toMatchObject({ kind: "degrade-reopen" });
+      if (outcome.kind === "degrade-reopen") {
+        expect(outcome.reason).toContain("patch backup file is gone");
+      }
+      // 零副作用：整条链只发出「分支存在性」这一条只读命令即返回——无 worktree add /
+      // 无 worktree prune / 无 baseCommit 解析（rev-parse <branch>）
+      const gitCmds = mockExecFile.mock.calls.map((c) => (c[1] as readonly string[]).join(" "));
+      expect(gitCmds).toEqual([`rev-parse --verify pi-sub-${RECORD_ID}`]);
+      expect(fs.rmSync).not.toHaveBeenCalled();
+      expect(mockAdd).not.toHaveBeenCalled();
+      expect(fs.symlinkSync).not.toHaveBeenCalled();
+    });
+
+    it("[1.3] 陈旧 git 登记 → prune + 重试成功（接共享原语），且不删既有分支（重建依据）", async () => {
+      let addAttempts = 0;
+      setupExecFile((args) => {
+        if (args[0] === "rev-parse") return { stdout: `${BASE_COMMIT}\n` };
+        if (args[0] === "worktree" && args[1] === "add") {
+          addAttempts++;
+          if (addAttempts === 1) {
+            return {
+              err: Object.assign(
+                new Error(`Command failed: git worktree add\nfatal: 'pi-sub-${RECORD_ID}' is already used by worktree at '/tmp/stale'`),
+                { code: 128 },
+              ),
+            };
+          }
+        }
+        return { stdout: "" };
+      });
+      mockExistsSync.mockImplementation(() => false);
+
+      const outcome = await mgr.reconstruct(MAIN_CWD, RECORD_ID);
+
+      expect(outcome.kind).toBe("rebuilt");
+      expect(mockAdd).toHaveBeenCalledTimes(1);
+      const relevant = mockExecFile.mock.calls
+        .map((c) => (c[1] as readonly string[]).join(" "))
+        .filter((s) => s.startsWith("worktree") || s.startsWith("branch"));
+      expect(relevant).toEqual([
+        `worktree add ${expectedCreatePath(RECORD_ID)} pi-sub-${RECORD_ID}`,
+        "worktree prune",
+        `worktree add ${expectedCreatePath(RECORD_ID)} pi-sub-${RECORD_ID}`,
+      ]);
+      // 既有分支是重建依据（deleteStaleBranch=false）——恢复链绝不发 branch -D
+      const branchCalls = mockExecFile.mock.calls.filter(
+        (c) => (c[1] as readonly string[])[0] === "branch",
+      );
+      expect(branchCalls).toHaveLength(0);
+    });
+  });
+
+  describe("addWorktreeWithStaleRecovery（[1.3] 共享恢复原语）", () => {
+    const PRIM_BRANCH = "pi-sub-prim-1";
+    const PRIM_PATH = "/tmp/pi-subagents/enc/pi-sub-prim-1";
+    /** `-b` 新建形态（create 调用方）。 */
+    const NEW_BRANCH_ARGS = ["-b", PRIM_BRANCH, PRIM_PATH, "HEAD"];
+    /** 既有分支检出形态（reconstruct 调用方）。 */
+    const EXISTING_BRANCH_ARGS = [PRIM_PATH, PRIM_BRANCH];
+
+    function gitError(msg: string): Error & { code?: number } {
+      return Object.assign(new Error(msg), { code: 128 });
+    }
+
+    /** 脚本化 git 执行器（记录全部调用；script 返回 Error 即模拟该命令失败）。 */
+    function scriptedRunner(
+      script: (args: string[], index: number) => string | Error,
+    ): { calls: string[][]; run: WorktreeGitRunner } {
+      const calls: string[][] = [];
+      const run: WorktreeGitRunner = async (args) => {
+        calls.push(args);
+        const result = script(calls[calls.length - 1]!, calls.length - 1);
+        if (result instanceof Error) throw result;
+        return result;
+      };
+      return { calls, run };
+    }
+    const lines = (calls: string[][]): string[] => calls.map((args) => args.join(" "));
+
+    it("路径 1（首次成功）→ 不触发任何清理（无 prune / 无 rev-parse / 无 branch -D）", async () => {
+      const { calls, run } = scriptedRunner(() => "");
+
+      await addWorktreeWithStaleRecovery(run, {
+        repo: MAIN_CWD,
+        branch: PRIM_BRANCH,
+        addArgs: NEW_BRANCH_ARGS,
+        deleteStaleBranch: true,
+      });
+
+      expect(lines(calls)).toEqual([`worktree add ${NEW_BRANCH_ARGS.join(" ")}`]);
+    });
+
+    it("路径 2（陈旧登记 + 残留分支仍在）→ prune + branch -D + 重试成功", async () => {
+      let addAttempts = 0;
+      const { calls, run } = scriptedRunner((args) => {
+        if (args[0] === "worktree" && args[1] === "add") {
+          addAttempts++;
+          if (addAttempts === 1) {
+            return gitError(`Command failed: git worktree add\nfatal: a branch named '${PRIM_BRANCH}' already exists`);
+          }
+        }
+        return "";
+      });
+
+      await addWorktreeWithStaleRecovery(run, {
+        repo: MAIN_CWD,
+        branch: PRIM_BRANCH,
+        addArgs: NEW_BRANCH_ARGS,
+        deleteStaleBranch: true,
+      });
+
+      expect(lines(calls)).toEqual([
+        `worktree add ${NEW_BRANCH_ARGS.join(" ")}`,
+        "worktree prune",
+        `rev-parse --verify ${PRIM_BRANCH}`,
+        `branch -D ${PRIM_BRANCH}`,
+        `worktree add ${NEW_BRANCH_ARGS.join(" ")}`,
+      ]);
+    });
+
+    it("路径 2b（残留分支已不在，仅陈旧登记）→ prune 后直接重试，不调 branch -D", async () => {
+      let addAttempts = 0;
+      const { calls, run } = scriptedRunner((args) => {
+        if (args[0] === "worktree" && args[1] === "add") {
+          addAttempts++;
+          if (addAttempts === 1) {
+            return gitError(`Command failed: git worktree add\nfatal: '${PRIM_PATH}' is a missing but already registered worktree`);
+          }
+        }
+        if (args[0] === "rev-parse") return gitError(`fatal: Needed a single revision`);
+        return "";
+      });
+
+      await addWorktreeWithStaleRecovery(run, {
+        repo: MAIN_CWD,
+        branch: PRIM_BRANCH,
+        addArgs: NEW_BRANCH_ARGS,
+        deleteStaleBranch: true,
+      });
+
+      expect(lines(calls)).toEqual([
+        `worktree add ${NEW_BRANCH_ARGS.join(" ")}`,
+        "worktree prune",
+        `rev-parse --verify ${PRIM_BRANCH}`,
+        `worktree add ${NEW_BRANCH_ARGS.join(" ")}`,
+      ]);
+    });
+
+    it("路径 2c（deleteStaleBranch=false——reconstruct 既有分支形态）→ 只 prune + 重试，不删分支", async () => {
+      let addAttempts = 0;
+      const { calls, run } = scriptedRunner((args) => {
+        if (args[0] === "worktree" && args[1] === "add") {
+          addAttempts++;
+          if (addAttempts === 1) {
+            return gitError(`Command failed: git worktree add\nfatal: '${PRIM_BRANCH}' is already used by worktree at '/tmp/stale'`);
+          }
+        }
+        return "";
+      });
+
+      await addWorktreeWithStaleRecovery(run, {
+        repo: MAIN_CWD,
+        branch: PRIM_BRANCH,
+        addArgs: EXISTING_BRANCH_ARGS,
+        deleteStaleBranch: false,
+      });
+
+      expect(lines(calls)).toEqual([
+        `worktree add ${EXISTING_BRANCH_ARGS.join(" ")}`,
+        "worktree prune",
+        `worktree add ${EXISTING_BRANCH_ARGS.join(" ")}`,
+      ]);
+    });
+
+    it("prune 自身失败只记日志：不改变主流程（重试照常执行）", async () => {
+      let addAttempts = 0;
+      const { calls, run } = scriptedRunner((args) => {
+        if (args[0] === "worktree" && args[1] === "prune") return gitError("fatal: unable to prune");
+        if (args[0] === "worktree" && args[1] === "add") {
+          addAttempts++;
+          if (addAttempts === 1) return gitError("Command failed: git worktree add\nfatal: stale metadata");
+        }
+        if (args[0] === "rev-parse") return gitError("fatal: Needed a single revision");
+        return "";
+      });
+
+      await addWorktreeWithStaleRecovery(run, {
+        repo: MAIN_CWD,
+        branch: PRIM_BRANCH,
+        addArgs: NEW_BRANCH_ARGS,
+        deleteStaleBranch: true,
+      });
+
+      expect(lines(calls)).toEqual([
+        `worktree add ${NEW_BRANCH_ARGS.join(" ")}`,
+        "worktree prune",
+        `rev-parse --verify ${PRIM_BRANCH}`,
+        `worktree add ${NEW_BRANCH_ARGS.join(" ")}`,
+      ]);
+    });
+
+    it("路径 3（重试仍失败）→ 照原样抛错（第二次 add 的错误，非首次）", async () => {
+      let addAttempts = 0;
+      const { calls, run } = scriptedRunner((args) => {
+        if (args[0] === "worktree" && args[1] === "add") {
+          addAttempts++;
+          if (addAttempts === 1) {
+            return gitError(`Command failed: git worktree add\nfatal: a branch named '${PRIM_BRANCH}' already exists`);
+          }
+          return gitError("Command failed: git worktree add\nfatal: disk full while adding worktree");
+        }
+        return "";
+      });
+
+      const err = await addWorktreeWithStaleRecovery(run, {
+        repo: MAIN_CWD,
+        branch: PRIM_BRANCH,
+        addArgs: NEW_BRANCH_ARGS,
+        deleteStaleBranch: true,
+      }).catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toContain("disk full while adding worktree");
+      // 清理序列走完（prune + 删残留分支）后才上抛
+      expect(lines(calls)).toEqual([
+        `worktree add ${NEW_BRANCH_ARGS.join(" ")}`,
+        "worktree prune",
+        `rev-parse --verify ${PRIM_BRANCH}`,
+        `branch -D ${PRIM_BRANCH}`,
+        `worktree add ${NEW_BRANCH_ARGS.join(" ")}`,
+      ]);
     });
   });
 

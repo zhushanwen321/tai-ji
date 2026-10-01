@@ -21,6 +21,7 @@ import { getProcessStartTimeSec, killProcessTree, pidStartMatchesRegistered } fr
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
+import { truncateCommand } from "./command-display.ts";
 import { emitPendingRegister } from "./notify.ts";
 import { ensurePollerRunning } from "./poller.ts";
 import { getRegistryPath, taskToRegistryEntry, writeRegistryEntry } from "./registry.ts";
@@ -49,9 +50,6 @@ export const DEFAULT_MAX_CONCURRENT_BACKGROUND = 8;
 const TASK_ID_RAND_LENGTH = 6;
 const TASK_ID_RADIX = 36;
 const TASK_ID_RAND_SPACE = TASK_ID_RADIX ** TASK_ID_RAND_LENGTH;
-
-/** 命令在错误文案中的展示长度上限。 */
-const COMMAND_DISPLAY_LIMIT = 80;
 
 /**
  * task_id 生成：`bt-<ts>-<rand>`（前缀 bt- 刻意区别于 subagent-workflow 的
@@ -289,10 +287,4 @@ function isRecordedPidStillOriginal(task: BackgroundTask): boolean {
 function accessOrThrow(cwd: string): void {
 	// 独立小函数：保持与内置 fsAccess(constants.F_OK) 语义一致的同步版本
 	accessSync(cwd, constants.F_OK);
-}
-
-export function truncateCommand(command: string): string {
-	return command.length > COMMAND_DISPLAY_LIMIT
-		? `${command.slice(0, COMMAND_DISPLAY_LIMIT)}…`
-		: command;
 }

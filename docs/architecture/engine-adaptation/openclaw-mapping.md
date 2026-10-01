@@ -42,7 +42,6 @@ gateway 侧请求参数权威：`SessionsSendParamsSchema`（`packages/gateway-p
 | ctx.streamMode | bus 推送恒 stream 粒度（assistant/thinking/tool 流） | §3 | 无 coarse 开关，适配器侧自行节流 |
 | ctx.sessionRootId | 无对等（源用 sessionKey 归属） | — | 丢弃 |
 | ctx.sessionDir | 会话文件由 gateway 按 agentId 固定布局落盘（`<state>/agents/<agentId>/sessions/`） | src/config/sessions/paths.ts:10-18 | 不可指定，忽略 |
-| ctx.engineFallback | `AgentCommandResultMetaOverrides.fallbackFrom/fallbackReason` | command/types.ts:20-25 | 诊断回填 |
 | resume.recordId | runId 体系：`idempotencyKey` 兼作 clientRunId | chat.ts:2968 | 关联键换成 runId |
 | resume.sessionRef | sessions.send `key`（sessionKey 指向既有会话即原地续聊）+ `sessionId` 定位 | schema/sessions.ts:144-146；config/sessions/types.ts:207-209 | 见 §6 |
 | resume.journalPath | 无 journal 概念 | — | 缺省 |

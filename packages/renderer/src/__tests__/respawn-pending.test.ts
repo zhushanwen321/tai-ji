@@ -22,6 +22,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ref, nextTick } from 'vue'
 import type { ServerMessage, SessionGroup } from '@taiji/shared'
+import type { PanelViewInput } from '@taiji/core'
 
 const mockHolder = vi.hoisted(() => {
   return {
@@ -94,6 +95,21 @@ async function initAndConnect(): Promise<void> {
   mockHolder.stateRef.value = 'connected'
 }
 
+/** Panel 派生事实包（三个用例的单源入参；hasMessages/isTraceView/hasFormOverlay/isFlowActive 本文件恒定）。 */
+function panelFacts(): PanelViewInput {
+  const chatStore = useChatStore()
+  const sessionStore = useSessionStore()
+  return {
+    sessionId: 's-respawn',
+    hasMessages: true,
+    isSessionDead: sessionStore.list.find((s) => s.id === 's-respawn')?.status === 'dead',
+    isSessionRespawning: chatStore.isRespawnPending('s-respawn'),
+    isTraceView: false,
+    hasFormOverlay: false,
+    isFlowActive: false,
+  }
+}
+
 /** 意外退出注入（code: 1 = 崩溃形态；强制退出走 forced-exit-marks 标记区分，帧形状相同） */
 function injectExited(sessionId = 's-respawn'): void {
   mockHolder.routeHandler!({
@@ -128,15 +144,7 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     // 过渡态分区置位（侧栏 status 仍 dead——置灰准确；panel 派生被 isSessionRespawning 抑制）
     expect(chatStore.isRespawnPending('s-respawn')).toBe(true)
     expect(sessionStore.list.find((s) => s.id === 's-respawn')?.status).toBe('dead')
-    const view = derivePanelView({
-      sessionId: 's-respawn',
-      hasMessages: true,
-      isSessionDead: sessionStore.list.find((s) => s.id === 's-respawn')?.status === 'dead',
-      isSessionRespawning: chatStore.isRespawnPending('s-respawn'),
-      isTraceView: false,
-      hasFormOverlay: false,
-      isFlowActive: false,
-    })
+    const view = derivePanelView(panelFacts())
     // conversation 形态 = Panel.vue Composer 渲染判据（dead 才卸载 composer）
     expect(view.kind).toBe('conversation')
   })
@@ -182,7 +190,7 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     expect(notice).toBeDefined()
   })
 
-  it('④ 恢复窗口发消息不报错：composer 可用（①）+ message.send RPC 经 ws 发出（runtime join 半边见 runtime 单测）', async () => {
+  it('④ 恢复窗口发消息不报错：composer 可用（①）+ delivery.submit RPC 经 ws 发出（runtime join 半边见 runtime 单测）', async () => {
     await initAndConnect()
     const wsSend = vi.mocked((await import('../../../core/src/transport/ws-client')).send)
     const chatStore = useChatStore()
@@ -192,11 +200,15 @@ describe('respawn 过渡态（T4 回流修复）', () => {
 
     // 过渡态（pending）下发送：UI 半边 = 无本地 dead 拦截，消息走既有发送编排链路发出
     //（runtime 侧 ensureActive join 等恢复完成后送达——该半边已有 runtime 单测）
+    // [u3c/D1] 发送链已收敛统一提交：RPC 类型为 delivery.submit（旧 message.send 保留至 u5 协议退役）
     const { useChat } = await import('@/composables/features/chat/useChat')
-    // [form-hang-fix] send 契约 Promise<boolean>：正常直发 → true
-    await expect(useChat().send('s-respawn', [{ type: 'text', text: 'hello during recovery' }])).resolves.toBe(true)
+    // [R2-A5] send 契约 Promise<boolean>：不 throw（失败 toast 消化 + 乐观回滚），
+    // false = RPC 失败。本环境 ws-client mock 的 send 返回 falsy（= 未送上 wire），
+    // request 层 fast-fail → false——用例锁定「恢复窗口发送不被 dead 拦截、提交链照常
+    // 出站 delivery.submit」，RPC 回复半边归 runtime 单测。
+    await expect(useChat().send('s-respawn', [{ type: 'text', text: 'hello during recovery' }])).resolves.toBe(false)
     const sentTypes = wsSend.mock.calls.map((args) => (args[0] as { type?: string }).type)
-    expect(sentTypes).toContain('message.send')
+    expect(sentTypes).toContain('delivery.submit')
   })
 
   it('⑤ 用户强制退出 → 直接终态（过渡态不出现，A7 反向验收）', async () => {
@@ -219,7 +231,6 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     try {
       await initAndConnect()
       const chatStore = useChatStore()
-      const sessionStore = useSessionStore()
       const { derivePanelView } = await import('@taiji/core')
 
       injectExited()
@@ -228,36 +239,38 @@ describe('respawn 过渡态（T4 回流修复）', () => {
       await vi.advanceTimersByTimeAsync(30_000)
       expect(chatStore.isRespawnPending('s-respawn')).toBe(false)
       // dead 已置（exited 时），过渡态清除后派生回落 dead 占位（「重新打开」出口）
-      const view = derivePanelView({
-        sessionId: 's-respawn',
-        hasMessages: true,
-        isSessionDead: sessionStore.list.find((s) => s.id === 's-respawn')?.status === 'dead',
-        isSessionRespawning: chatStore.isRespawnPending('s-respawn'),
-        isTraceView: false,
-        hasFormOverlay: false,
-        isFlowActive: false,
-      })
+      const view = derivePanelView(panelFacts())
       expect(view.kind).toBe('dead')
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('⑦ 手动重开（useSidebar.restoreSession）：restore RPC 成功即收口过渡态（手动路径无 restored 帧，本地收口兜底）', async () => {
+  it('⑦ 手动重开（useSidebar.restoreSession）：本地清账已删（D3），过渡态收口改由 restored 帧驱动；revive-on-RPC-reply 保留即时复位 dead', async () => {
     await initAndConnect()
     const chatStore = useChatStore()
+    const sessionStore = useSessionStore()
     const sessionApiMod = await import('@/api')
 
     injectExited()
     expect(chatStore.isRespawnPending('s-respawn')).toBe(true)
 
-    // spy restore RPC；后续 core 12 步切入链在本测试环境无 transport 会 reject——
-    // 收口点在 selectSession 之前（restore RPC 成功即恢复事实成立），reject 不影响断言
-    vi.spyOn(sessionApiMod.session, 'restoreSession').mockResolvedValue({ id: 's-respawn' } as never)
+    // spy restore RPC；后续 core 12 步切入链在本测试环境无 transport 会失败——壳侧
+    // catch 降级（toast + warn，不重抛），revive 不被切入失败阻断照常执行
+    vi.spyOn(sessionApiMod.session, 'restoreSession').mockResolvedValue({ id: 's-respawn', label: 'test', cwd: '/repo' })
     const { useSidebar } = await import('@/composables/features/sidebar/useSidebar')
     const sidebar = useSidebar()
-    await expect(sidebar.restoreSession('s-respawn')).rejects.toThrow()
+    await expect(sidebar.restoreSession('s-respawn')).resolves.toBeUndefined()
 
+    // revive-on-RPC-reply（D3 保留件）：RPC 成功即复位 dead → idle（切入失败不阻断）；
+    // runtime 重启后无 restored 帧的场景靠它收口
+    expect(sessionStore.list.find((s) => s.id === 's-respawn')?.status).toBe('idle')
+    // [D3] 本地 clearRespawnPending 已删：RPC 成功本身不再清过渡态（清账权归 runtime
+    // facade 尾部出口的 restored 帧——手动恢复于 respawn 编排上下文命中时发布）
+    expect(chatStore.isRespawnPending('s-respawn')).toBe(true)
+
+    // runtime 尾部出口发布 restored（手动路径信号③/①命中）→ 经恢复窗口订阅收口
+    injectRestored()
     expect(chatStore.isRespawnPending('s-respawn')).toBe(false)
   })
 
@@ -294,15 +307,7 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     const notice = msgs.find((m) => m.role === 'system' && (m.details as { variant?: string } | undefined)?.variant === 'restored')
     expect(notice).toBeDefined()
     // 派生保持 conversation 形态（Panel.vue Composer 渲染判据，dead 占位不出现）
-    const view = derivePanelView({
-      sessionId: 's-respawn',
-      hasMessages: true,
-      isSessionDead: sessionStore.list.find((s) => s.id === 's-respawn')?.status === 'dead',
-      isSessionRespawning: chatStore.isRespawnPending('s-respawn'),
-      isTraceView: false,
-      hasFormOverlay: false,
-      isFlowActive: false,
-    })
+    const view = derivePanelView(panelFacts())
     expect(view.kind).toBe('conversation')
   })
 })

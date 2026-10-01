@@ -75,6 +75,7 @@ import type { WorkflowRun } from "@zhushanwen/subagent-core";
 // 「导入面折叠直连」语义）
 import { normalizeEngineId } from "@zhushanwen/subagent-core";
 import { JsonlRunStore } from "./jsonl-run-store.ts";
+import { GLOBAL_SLOT_KEYS } from "@zhushanwen/subagent-core";
 
 // 模块级 logger（与原 index.ts 同 component 名；setPiHandle 注入后自动走 appendEntry）
 const logger = getLogger("subagents");
@@ -288,7 +289,7 @@ async function collectAliveWorkflowRunReferences(
 // dialog queue 仍为本模块私有单例——消费方 = 本文件 createOrReuseServices +
 // index.ts session_shutdown（flush L2 pending dialog）。
 
-const DIALOG_QUEUE_KEY = Symbol.for("@zhushanwen/pi-subagents.dialogQueue");
+const DIALOG_QUEUE_KEY = Symbol.for(GLOBAL_SLOT_KEYS.dialogQueue);
 
 /** 获取或创建进程级 dialog queue 单例。
  *  L2 跨子进程串行队列——所有子进程的 dialog 类请求共享同一队列实例。 */

@@ -3,10 +3,8 @@
  *
  * 这是「唯一跨 api + stores 的层」（R2 铁律 1）：包装 core createUseSession（w3）+ 注入
  * 端口适配（SessionApiPort/PanelOrchestrationPort/NavigationPort/ChatHydratePort/
- * SessionCleanupHooks/NewTaskFlowPort + selectSessionFallback 回退端口）+ renderer 专属编排。
- * 2026-08-31 双轨收尾：旧 useSidebar（自持全量编排版）删除，本文件由 useSidebar.ts
- * 重命名接管原名（C-W5-4 消费方切换完成），返回签名与旧版对齐 + 超集（restoreSession/
- * assignSessionToProject）。
+ * SessionCleanupHooks/NewTaskFlowPort + selectSessionFallback 回退端口）+ renderer 专属编排
+ * （restoreSession / assignSessionToProject / newSession 兜底 / 启动编排）。
  *
  * 关键裁决：
  * - C-W5-1 → [HISTORICAL]（renderer-deepening D3/D4 推翻，u5.2）：selectSession 曾壳重编排
@@ -29,6 +27,7 @@
  *
  * 未来替换挂载实现：P4 挂载实际以 core bootstrap.ts 的 registerMountPoints 五挂载点注册表
  * 落地（sidebar.tab / panel.header / composer.toolbar / statusbar / modal，无 'sessions' 挂载点）；
+
  * 如需替换挂载实现，走该注册表（packages/core/src/bootstrap.ts），勿另起壳侧入口。
  */
 import type { ComputedRef } from 'vue'
@@ -49,7 +48,9 @@ import type {
 } from '@taiji/core'
 import { chat as chatApi, session as sessionApi, extension as extensionApi } from '@/api'
 import { buildSessionApiPort } from '@/api/session-api-port'
+import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
+import { useToast } from '@/composables/useToast'
 import { useNavigationStore } from '@/stores/navigation'
 import { usePanelStore } from '@/stores/panel'
 import { useSidebarStore } from '@/stores/sidebar'
@@ -107,6 +108,8 @@ export function useSidebar() {
   const sidebar = useSidebarStore()
   const panel = usePanelStore()
   const workspaceStore = useWorkspaceStore()
+  const { t } = useI18n()
+  const { error: toastError } = useToast()
 
   // ── 端口适配层（core 定义接口、壳注入 renderer 实现）──
   const api: SessionApiPort = buildSessionApiPort()
@@ -118,7 +121,7 @@ export function useSidebar() {
     loadSession: (panelId, sid) => panel.loadSession(panelId, sid),
     // [P4 s5 drawer-widget-removal] tasks drawer 分支已删（tasks tab 移除），统一 open sideDrawer
     openPanel: (sid) => {
-      const { open } = useSideDrawerSafe()
+      const { open } = useSideDrawer()
       open()
       void sid // sideDrawer 内部按 focusedSessionId 路由，sid 透传无运行时消费（core 契约对齐）
     },
@@ -167,6 +170,12 @@ export function useSidebar() {
       clearBtwVirtualKeyMapping(sid)
     },
     clearAgentCallMapping: (sid) => useWorkflowStore().clearAgentCallMapping(sid),
+    // [投递所有权内核 u3c / ADR-0049 范围修订] 队列区 per-session 分区的销毁编排**收窄**：
+    // 旧 defer 队列（useCompactQueue 经 useSessionScopedState 注册的 registerSessionCleanup）
+    // 已随其退役从编排清单消失；现役队列状态 = 内核 session.delivery 投影，清理点在 core
+    // useChat.disposeSession 内（clearDeliveryProjection），随本 hook 一并执行——「session
+    // 销毁唯一编排点」仍是 deleteSession → triggerSessionCleanups → 本 hooks，renderer 侧
+    // 不再多注册一个分区清理项。
     disposeChat: (sid) => useChat().disposeSession(sid),
     invalidateStatus: (sid) => invalidateStatusCache(sid),
     // [B4 / 2026-09-14 内存审计 §2.1] main 侧 WebContentsView 销毁接线：browserDestroy IPC
@@ -204,7 +213,7 @@ export function useSidebar() {
     },
     clearUnread: clearSessionUnread,
     ensureStreamSubscription: (sid) =>
-      ensureStreamSubscription(sid, chat, useSessionStoreSafe()),
+      ensureStreamSubscription(sid, chat, useSessionStore()),
     touchRecency: (sid) => chat.touchLru(sid),
     preloadFileTree: (sid) => {
       void useFileTree().loadTree(sid)
@@ -269,20 +278,35 @@ export function useSidebar() {
     if (newTaskFlow.isActive.value) newTaskFlow.cancelFlow()
 
     await sessionApi.restoreSession(id)
-    // [T4] restore RPC 成功 = 恢复事实已发生（runtime 侧 spawn+attach 完成），即收口
-    // respawnPending 过渡态（恢复窗口内用户点了「重新打开」走手动 restore——手动路径
-    // runtime 不再 publish session.restored，此清理是过渡态在该路径的唯一出口；清在
-    // selectSession 之前，UI 切入失败也不留过渡条干等超时）。超时 timer 到期查
-    // isRespawnPending no-op 自清，无需跨模块卸载。
-    useChatStore().clearRespawnPending(id)
-    await core.selectSession(id)
+    // [T4→D3] respawnPending 过渡态的收口权归 runtime：restore RPC 成功即走 facade 尾部
+    // 三合一出口（msg-pipeline-debloat D3）——respawn 编排上下文命中（失败计数>0 含熔断
+    // 态 / 抢占窗口 pending timer / attemptInFlight）时发布 session.restored，帧经恢复窗口
+    // 订阅到达驱动收口（useMessageEffects.handleSessionRestored）。本地 clearRespawnPending
+    // 清账已删（与根源同缺口的补偿，发布点补齐后为纯噪音）。runtime 重启后编排器状态全
+    // 内存即清、三信号构造性 miss 无帧——该场景由下方 revive-on-RPC-reply 收口（保留件），
+    // 30s TTL 兜底过渡态回收。
+    // revive 不被切入失败阻断：restore RPC 成功 = runtime 侧 spawn+attach 已完成，revive 语义
+    // 是 UI 死态清除，与切入 RPC 成败解耦——不 revive 会留下「进程已恢复、列表仍置灰」的
+    // 半完成窗口。切入失败留痕不吞（用户重试本路径时，runtime 对已 spawn session 的二次
+    // restore 幂等性未核实，仅 handler 注释称 switch 为纯读——重试行为以 runtime 实装为准）。
+    try {
+      await core.selectSession(id)
+    } catch (e) {
+      // 有意降级：切入失败不回滚、不重抛（revive 照常执行，理由见上），但必须用户可见出声——
+      // 原路径该错误传播到 onSelectSession 的 toast，本层消化后在此补同 key toast，可见性等价。
+      const msg = e instanceof Error ? e.message : String(e)
+      toastError(t('sidebar.switchSessionFailed', { msg }))
+      console.warn(`[useSidebar.restoreSession] selectSession(${id}) failed after restore:`, e)
+    }
     sessionStore.revive(id)
   }
 
   /**
    * newSession——壳重编排（不代理 core.newSession：壳侧补 presetCwd ?? workspaceStore.defaultCwd
-   * 兜底，core 版无此回退）。委托 useNewTaskFlow.startFlow + selectSession（core 12 步链）载入。
-   * 返回新 id；延迟 create 返回 null。
+   * 兜底，core 版无此回退）。委托 useNewTaskFlow.startFlow 进 landing。
+   * 延迟 create 终态：startFlow 恒不建 session（session 由首发提交 submitFirstMessage 创建并
+   * 绑定），此处恒进 chat view 让 Panel 渲染 landing 空态，恒返回 null。返回类型保持
+   * string | null 对齐 core NewTaskFlowPort 契约形状（当前调用方均不消费返回值）。
    */
   let newTaskInFlight = false
   async function newSession(presetCwd?: string): Promise<string | null> {
@@ -292,15 +316,9 @@ export function useSidebar() {
       const newTaskFlow = useNewTaskFlow()
       const fallback = presetCwd ?? workspaceStore.defaultCwd
       await newTaskFlow.startFlow(fallback)
-      const created = newTaskFlow.currentSession.value
-      if (!created) {
-        // 首次启动延迟 create（AC-1.7）：无 session 可选，进 chat view 让 Panel 渲染 landing 空态
-        navigationPort.push({ view: 'chat' })
-        return null
-      }
-      // startFlow 已 appendSession + activeId=created.id；此处补 panel 载入 + history hydrate
-      await selectSession(created.id)
-      return created.id
+      // 延迟 create（AC-1.7）：无 session 可选，进 chat view 让 Panel 渲染 landing 空态
+      navigationPort.push({ view: 'chat' })
+      return null
     } finally {
       newTaskInFlight = false
     }
@@ -347,7 +365,7 @@ export function useSidebar() {
       // D14（2026-08-04）：project 列表迁 runtime 持久化。init 必须在 newSession 之前——
       // createSessionFlow 读 activeProjectId 做归属透传，未 init 时 active 是默认项目（归属丢失）。
       // init 内部 RPC 失败降级默认，不抛不阻断启动。
-      await useProjectStoreSafe().init()
+      await useProjectStore().init()
       // 同步进 landing（空 chip 态），必须先于 await loadSessions（消除 state=idle 启动窗口）
       await newSession()
       await loadSessions()
@@ -363,7 +381,13 @@ export function useSidebar() {
       if (recentCwd) newTaskFlow.presetCwd(recentCwd)
     } catch (e) {
       console.error('[useSidebar.initApp] bootstrap failed:', e)
+      // 复位 appBootstrapped 保留显式重试通道：重调 initApp（如启动失败重试入口）可重新编排；
+      // 生产常规路径首连失败后走 onConnected 重连刷新支，不会自动回到 initApp。
       appBootstrapped = false
+      // 失败必须用户可见：无提示时用户面对空 landing 无法区分「加载中」与「失败」。
+      // 恢复动作 = 刷新页面重试（无运行时内自动重试，符合任务级默认无超时/无自动重试约定）。
+      const msg = e instanceof Error ? e.message : String(e)
+      toastError(t('app.bootstrapFailed', { msg }))
     }
   }
 
@@ -378,7 +402,8 @@ export function useSidebar() {
       return
     }
     void workspaceStore.load()
-    void extensionApi.scan().catch(() => {})
+    // 重连扩展扫描是辅助刷新（A 类降级），失败降级为 stale 数据——必须留痕，与「扫描成功」可区分
+    void extensionApi.scan().catch((e) => console.warn('[useSidebar] extension scan on reconnect failed:', e))
     // 重连对账（residual-fixes 附录 A-3 闭环）：runtime 侧派生缓存的刷新以 entry_appended
     // 事件为触发，重连后若无新 entry 写入（如断连前 subagent 已全部终态），侧栏将停留
     // 断连前 stale 数据直到用户切 tab。对聚焦 session 显式重拉（getSubagents/getWorkflows
@@ -397,13 +422,13 @@ export function useSidebar() {
     forkSessionAsk,
     forkFromLastAssistant,
     enterForkModeFromLastAssistant,
-  } = useForkActions(focusedSessionId as ComputedRef<string | null>)
+  } = useForkActions(focusedSessionId)
   const {
     handoff,
     abortHandoff,
     handoffFromLastAssistant,
     enterHandoffModeFromLastAssistant,
-  } = useHandoffActions(focusedSessionId as ComputedRef<string | null>)
+  } = useHandoffActions(focusedSessionId)
 
   return {
     focusedSessionId,
@@ -432,19 +457,10 @@ export function useSidebar() {
   }
 }
 
-// ── 延迟 store 获取 helper（避免循环 import + 仅在需要时实例化）──
-// useSideDrawer/useSessionStore 在 selectSession/openPanel 路径按需获取，不在 setup 顶层
+// ── 底部 import（循环 import 防避，保留原位勿上移）──
+// useSideDrawer/useSessionStore/useProjectStore 按调用点时机惰性实例化（openPanel /
+// ensureStreamSubscription / initApp 回调内直调），不在 useSidebar setup 顶层调用
 //（避免测试时无 pinia 报错）。
 import { useSideDrawer } from '@/composables/features/drawer/useSideDrawer'
 import { useSessionStore } from '@/stores/session'
 import { useProjectStore } from '@/stores/project'
-
-function useSideDrawerSafe(): ReturnType<typeof useSideDrawer> {
-  return useSideDrawer()
-}
-function useSessionStoreSafe(): ReturnType<typeof useSessionStore> {
-  return useSessionStore()
-}
-function useProjectStoreSafe(): ReturnType<typeof useProjectStore> {
-  return useProjectStore()
-}

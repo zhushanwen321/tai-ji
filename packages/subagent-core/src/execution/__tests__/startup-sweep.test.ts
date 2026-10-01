@@ -24,16 +24,13 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readRunTerminalManifest } from "../persistence/manifest-store.ts";
-import {
-  createRunEventJournal,
-  RUN_EVENT_JOURNAL_SUFFIX,
-  type WorkflowRunEventInput,
-} from "../../orchestration/run-events.ts";
+import { RUN_EVENTS_SUFFIX } from "../../shared/run-vocabulary.ts";
+import { createRunEventJournal, type WorkflowRunEventInput } from "../../orchestration/run-events.ts";
 import {
   STARTUP_SWEEP_GRACE_WINDOW_MS,
   startupSweep,
   type SweepLogChannel,
-} from "../assembly/startup-sweep.ts";
+} from "../../orchestration/startup-sweep.ts"; // [D1 拆边 Class C] 实现已上移 orchestration/
 
 /** mock 日志通道（按方法名断言级别落位——规格 6 签名的级别结构承载位）。 */
 function makeLog(): SweepLogChannel {
@@ -147,7 +144,7 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
     const added = [...after.keys()].filter((k) => !before.has(k));
     expect(added).toEqual([]);
     const changed = [...after.keys()].filter((k) => before.has(k) && before.get(k) !== after.get(k));
-    expect(changed).toEqual([join("sessions", "--fixture-slug--", "workflow-state", `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`)]);
+    expect(changed).toEqual([join("sessions", "--fixture-slug--", "workflow-state", `${runId}${RUN_EVENTS_SUFFIX}`)]);
     // 结果行按方法名落位：info 恰一次（三类计数），warn/error 零调用
     expect(log.info).toHaveBeenCalledTimes(1);
     expect(log.info).toHaveBeenCalledWith(
@@ -211,7 +208,7 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
     await seedRunningRun(stateDir, "wf-sweep-bad", staleTs);
     // wf-sweep-bad 的 journal 读面破坏（EACCES）——判定核保守按 running 进收编，
     // scan 分通道上抛，收编失败
-    chmodSync(join(stateDir, `wf-sweep-bad${RUN_EVENT_JOURNAL_SUFFIX}`), 0o000);
+    chmodSync(join(stateDir, `wf-sweep-bad${RUN_EVENTS_SUFFIX}`), 0o000);
     try {
       const result = await startupSweep(() => agentRoot, log);
       // 其余可收编 run 正常收编；失败 run 计入 skipped + errors 摘要
@@ -231,7 +228,7 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
         "[subagents] startup sweep: adopted 1 run(s), skipped 1 (grace 0), across 1 state dir(s)",
       );
     } finally {
-      chmodSync(join(stateDir, `wf-sweep-bad${RUN_EVENT_JOURNAL_SUFFIX}`), 0o644);
+      chmodSync(join(stateDir, `wf-sweep-bad${RUN_EVENTS_SUFFIX}`), 0o644);
     }
   });
 
@@ -275,7 +272,7 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
 
     // 末帧改老（重建 journal 为远超窗的旧时间戳）再调 → 正常收编（场景 1 语义：
     // run-interrupted 帧 + manifest 不物化）
-    rmSync(join(stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`));
+    rmSync(join(stateDir, `${runId}${RUN_EVENTS_SUFFIX}`));
     await seedRunningRun(stateDir, runId, Date.now() - 3 * 60 * 60 * 1000);
     const stale = await startupSweep(() => agentRoot, log);
     expect(stale.adopted).toBe(1);

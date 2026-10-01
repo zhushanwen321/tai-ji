@@ -136,7 +136,7 @@
              错误条 + 重试在 Guard 外恒可达。 -->
         <div v-if="selectedVid" class="flex shrink-0 flex-col gap-1.5 px-2 pb-1.5" data-testid="btw-interaction">
           <BtwInteractionGuard :key="interactionKey">
-            <!-- 终态机失效支行内提示（badge 清 + 表单撤下 + 本提示，三路合并收口：事件 / 快照对账 / 回放悬空） -->
+            <!-- 终态机失效支行内提示（失效支单入口 invalidateBtwRequests——事件帧一路：badge 清 + 表单撤下 + 本提示同拍收口，D-B2-3） -->
             <div v-if="expiredNotice" class="flex items-center gap-1.5 rounded bg-danger-soft px-2.5 py-1.5 text-[length:var(--text-2xs)] text-danger" data-testid="btw-request-expired">
               <TriangleAlert class="size-3 shrink-0" />
               <span>{{ t('btw.interaction.expiredNotice') }}</span>
@@ -153,7 +153,8 @@
             </div>
             <!-- 内联确认条（五类请求共用；kind 分派，降档形态见 useBtwInteraction 文件头） -->
             <div v-if="active" class="overflow-hidden rounded-lg bg-bg-input" data-testid="btw-inline-confirm">
-              <!-- plan 审批降档：两键 + 单行意见 -->
+              <!-- plan 审批降档：三键（修订/执行/搁置）+ 单行意见——键集对齐主审批面
+                   PlanReviewBar（协议 PlanReviewDecision 全值域），dismiss = 非破坏搁置 -->
               <template v-if="active.kind === 'planReview'">
                 <div class="px-3.5 pt-2.5 text-[length:var(--text-xs)] font-medium text-neutral-fg">
                   {{ t('btw.interaction.planReviewTitle') }}
@@ -162,6 +163,7 @@
                   <Input v-model="planComment" :placeholder="t('btw.interaction.revisePlaceholder')" class="h-8 text-[length:var(--text-xs)]" data-testid="btw-plan-comment" />
                   <Button variant="ghost" size="sm" class="shrink-0" data-testid="btw-plan-revise" :disabled="!planComment.trim()" @click="submitPlan('revise')">{{ t('plan.reviewBar.submitRevise') }}</Button>
                   <Button variant="default" size="sm" class="shrink-0" data-testid="btw-plan-approve" @click="submitPlan('approve')">{{ t('plan.reviewBar.confirmExecute') }}</Button>
+                  <Button variant="ghost" size="sm" class="shrink-0 text-neutral-dim hover:text-neutral-mid" data-testid="btw-plan-dismiss" :title="t('plan.reviewBar.dismissTip')" @click="submitPlan('dismiss')">{{ t('plan.reviewBar.dismiss') }}</Button>
                 </div>
               </template>
               <!-- 表单族降档（ask-user 富表单 / scheduler）：问题平铺 + 选项按钮 + 单行输入 -->

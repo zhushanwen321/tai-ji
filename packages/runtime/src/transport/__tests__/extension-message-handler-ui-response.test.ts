@@ -5,7 +5,7 @@
  * - sendExtensionUiResponse 返 false（pi 进程不在或 stdin 写失败）→
  *   ① 带码 error envelope 上行（extension_response_send_failed + details.sessionId，
  *     renderer 经 route-inbound D6b onSessionError 兜底进消息流展示，作答不再石沉大海）
- *   ② pending 缓存即终结（removePendingRequest——本 client 绑定当前进程，pi 恢复后
+ *   ② pending 缓存即终结（removeRequest——本 client 绑定当前进程，pi 恢复后
  *     是全新 pending 表，旧 requestId 永不可投递，保留只会制造「可重投」假象）
  * - 送达成功（返 true）→ 无 sendError，pending 照常收缩（既有行为回归防线）
  *
@@ -29,9 +29,8 @@ function makeClient(delivered: boolean): IPiEngine {
 
 function makeCtx(client: IPiEngine | undefined): { ctx: ExtensionHandlerContext; sendError: ReturnType<typeof vi.fn>; mgr: ExtensionTimeoutManager } {
   const mgr = new ExtensionTimeoutManager()
-  // 预置 pending：模拟 ui_request 到达时 runtime 的缓存登记（getPendingRequests 据此回推）
-  mgr.cachePendingRequest(SID, REQUEST_ID, 'confirm', { title: 'confirm?' })
-  mgr.trackUiRequest(SID, REQUEST_ID, 'confirm')
+  // 预置 pending：模拟 ui_request 到达时 runtime 的挂起单表登记（getPendingRequests 据此回推）
+  mgr.registerRequest(SID, REQUEST_ID, 'confirm', { title: 'confirm?' })
   const sendError = vi.fn()
   const ctx = {
     send: vi.fn(),
@@ -70,7 +69,7 @@ describe('M1 环 1：extension.ui_response 写 pi 失败（RT-1#4）', () => {
     expect(id).toBeUndefined() // fire-and-forget 无 msg.id，走 onSessionError 兜底而非 pending reject
   })
 
-  it('写失败时 pending 即终结（removePendingRequest）——getPendingRequests 不再回推该请求', async () => {
+  it('写失败时 pending 即终结（removeRequest）——getPendingRequests 不再回推该请求', async () => {
     const { ctx, mgr } = makeCtx(makeClient(false))
     expect(mgr.getPendingRequests(SID)).toHaveLength(1) // 前置：预置生效
 

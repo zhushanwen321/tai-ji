@@ -1129,7 +1129,7 @@ async function renderSingleWorkflowRun(
     contentParts: string[]
   },
 ): Promise<void> {
-  // [D16③] 概览链换源：v2 档的 stateFile = record 流路径（journalPath 锚点语义
+  // [D16③] 概览链换源：v2 档的 stateFile = record 流路径（recordPath 锚点语义
   // 重定义）——直读流经 parseRunRecordStream 概览（[D2] 三态 status；空流/读失败
   // 投影 running，活跃 run 概览不退化为 skipped——红线）。record 后缀以外的
   // stateFile（v1 快照档空串 / 旧指针档 link path）走原快照链。

@@ -12,12 +12,12 @@
 // 1. 六类事件词表（判别键 type）——与设计 D3 映射表逐项对应，每类事件的 doc
 //    注释标注「对应现状写点」；
 // 2. 行级单调 seq 信封——W2 通知去重键（终态事件身份）的载体（设计目标 4）；
-// 3. 事件文件首行头行形态 `{"type":"record-journal","id":...}`——无 .jsonl 后缀
+// 3. 事件文件首行头行形态 `{"type":"record-events","id":...}`——无 .jsonl 后缀
 //    代价的补偿（文件自描述；检查点④：session-reader 首行读命中非 session header
 //    即忽略，零成本）；
-// 4. journal 读写原语（createRecordEventJournal：append 单调分配 seq + scan 坏行
+// 4. 事件文件读写原语（createRecordEventStream：append 单调分配 seq + scan 坏行
 //    宽容跳过）；
-// 5. fold 纯函数族（applyRecordJournalEvent 单步 + foldRecordJournalEvents 全量/
+// 5. fold 纯函数族（applyRecordEvent 单步 + foldRecordEvents 全量/
 //    增量共用——增量 = 以既有 state 为 initial 重入，seq 单调守卫保证幂等）。
 //
 // 落点裁决（D3）：`<recordsDir>/<sa-id>.events`（与 manifest 同目录同主名，寻址 =
@@ -26,22 +26,19 @@
 // 结构性忽略该文件族（「被忽略或被误读」两类风险一次排空）。清理归统一保留
 // 通道（D5），session-file-gc 对 *.events 显式忽略（U5）。
 //
-// tail 增量读取（offset 续读 / 完整行边界 / 坏行宽容）不在本模块——journal-tail.ts
+// tail 增量读取（offset 续读 / 完整行边界 / 坏行宽容）不在本模块——event-tail.ts
 // 是域无关的 tail 原语层，本模块只提供 parseRecordEventFileLine 行解析器注入。
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { getLogger } from "../../core/logger.ts";
-import type {
-  Epoch,
-  ExecutionMode,
-  ExecutionOutcome,
-  RecordOrigin,
-  StopReason,
-} from "../assembly/types.ts";
+// [§3.1.3 基座单源] append/scan 实现在 shared/jsonl-event-stream.ts（与 run journal
+// 共用同一实现体，差异经策略注入——本文件只提供 record 域策略）。
+import { JsonlEventStream } from "../../shared/jsonl-event-stream.ts";
+import type { Epoch, ExecutionMode, ExecutionOutcome, RecordOrigin, StopReason } from "../domain/record-types.ts";
+import type { AbandonedRoundMark, TranscriptRef } from "../domain/record-types.ts";
 
-const journalLogger = getLogger("record-event-journal");
+const eventLogger = getLogger("record-event-journal");
 
 // ── 文件形态（D3 落点）────────────────────────────────────────
 
@@ -80,32 +77,32 @@ function assertValidRecordId(id: string): void {
 // ── 首行头行形态（D3「无后缀的代价补偿」）─────────────────────
 
 /** 头行 type 判别值（与事件词表的 type 命名空间不相交——头行不是事件）。 */
-export const RECORD_JOURNAL_HEADER_TYPE = "record-journal";
+export const RECORD_EVENTS_HEADER_TYPE = "record-events";
 
 /**
- * 事件文件首行头行：`{"type":"record-journal","id":"..."}`。
+ * 事件文件首行头行：`{"type":"record-events","id":"..."}`。
  *
- * 作用是纯自描述（文件无 .jsonl 后缀，首行声明「这是 record 事件 journal」）——
+ * 作用是纯自描述（文件无 .jsonl 后缀，首行声明「这是 record 事件文件」）——
  * 不承载状态、不参与 fold；读者侧命中即静默跳过（检查点④：session-reader 首行
  * 读命中非 session header 即忽略）。写侧契约 = 文件创建时写恰一行（append 首写
- * 时落，见 FileRecordEventJournal）。
+ * 时落，见 FileRecordEventStream）。
  */
-export interface RecordJournalHeader { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
-  type: typeof RECORD_JOURNAL_HEADER_TYPE;
+export interface RecordEventHeader { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
+  type: typeof RECORD_EVENTS_HEADER_TYPE;
   /** record id（= 文件主名 sa-id）。 */
   id: string;
 }
 
 /** 头行序列化形态（append 首写时落盘的 JSON 单行）。 */
-export function toRecordJournalHeader(id: string): RecordJournalHeader {
-  return { type: RECORD_JOURNAL_HEADER_TYPE, id };
+export function toRecordEventHeader(id: string): RecordEventHeader {
+  return { type: RECORD_EVENTS_HEADER_TYPE, id };
 }
 
 /** 值级头行判定（JSON.parse 产物 → 头行形状校验；fold/scan 命中即跳过）。 */
-export function isRecordJournalHeader(value: unknown): value is RecordJournalHeader {
+export function isRecordEventHeader(value: unknown): value is RecordEventHeader {
   if (typeof value !== "object" || value === null) return false;
   const rec = value as { type?: unknown; id?: unknown };
-  return rec.type === RECORD_JOURNAL_HEADER_TYPE && typeof rec.id === "string" && rec.id.length > 0;
+  return rec.type === RECORD_EVENTS_HEADER_TYPE && typeof rec.id === "string" && rec.id.length > 0;
 }
 
 // ── 事件词表（D3 映射表，恰好 6 类）────────────────────────────
@@ -127,7 +124,7 @@ export type RecordEventType = (typeof RECORD_EVENT_TYPES)[number];
  *
  * seq（1 起严格递增，同一文件内全序）：同一事件的唯一行身份——W2 通知去重键
  * （终态事件身份）的载体 + tail 截断重建后全量重读的 fold 去重依据（seq ≤ 已见
- * 水位的行按重放跳过，见 foldRecordJournalEvents）。ts 对齐 run 侧 EventEnvelope
+ * 水位的行按重放跳过，见 foldRecordEvents）。ts 对齐 run 侧 EventEnvelope
  * 的投影需求（fold 派生统计/新鲜度判据消费墙钟）。
  */
 export interface RecordEventEnvelope {
@@ -139,7 +136,7 @@ export interface RecordEventEnvelope {
  * `record-created`——record 创建落账（事件文件首条事件）。
  *
  * 对应现状写点（D3 表行 1）：register（record-store 写点①）+ v2 注册条目（同点
- * 双写：journal 事件是事实，主 session 注册条目是锚）。
+ * 双写：事件文件是事实，主 session 注册条目是锚）。
  */
 export interface RecordCreatedEvent extends RecordEventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "record-created";
@@ -161,6 +158,18 @@ export interface RecordCreatedEvent extends RecordEventEnvelope { // oe-exempt:2
   depth: number;
   mode: ExecutionMode;
   startedAt: number;
+  /**
+   * 模型留痕（与 .record-binding 的 model 同源；undefined = 用户未指定模型，
+   * 引擎自身缺省解析）。写入点 = 记录创建，故与 created 事件同生。
+   */
+  model?: string;
+  /** 思考档位留痕（同上；undefined = 未指定）。 */
+  thinkingLevel?: string;
+  /**
+   * 创建时启用 worktree 隔离（与 .record-binding 的 worktree 同源；重建面
+   * hadWorktree 的恢复源）。undefined/false = 未启用。
+   */
+  worktree?: boolean;
 }
 
 /**
@@ -176,7 +185,7 @@ export interface RecordBoundEvent extends RecordEventEnvelope { // oe-exempt:202
   /** 实际执行引擎 id（缺省语义 = pi 由写侧归一后落账）。 */
   engine: string;
   /** 引擎自描述定位符（与 manifest / entry 的 engineHandle 同形——sessionRef 整体透传）。 */
-  engineHandle: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string };
+  engineHandle: { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string };
   /** 绑定生效的 epoch（与 .record-binding 的 epoch 同源）。 */
   epoch: Epoch;
 }
@@ -185,7 +194,7 @@ export interface RecordBoundEvent extends RecordEventEnvelope { // oe-exempt:202
  * `record-round-started`——轮开始。
  *
  * 对应现状写点（D3 表行 3）：resumeRound / reopen 后续轮（首轮经 created→bound
- * 隐含，续轮显式落账——record 轮次粒度事件进 journal 是 D5 增量裁决：不进则
+ * 隐含，续轮显式落账——record 轮次粒度事件进事件文件 是 D5 增量裁决：不进则
  * .state 仍是事实源，事实源介质数降不到 1）。
  */
 export interface RecordRoundStartedEvent extends RecordEventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
@@ -203,22 +212,31 @@ export interface RecordRoundStartedEvent extends RecordEventEnvelope { // oe-exe
  */
 export interface RecordRoundIdleEvent extends RecordEventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "record-round-idle";
+  /** 轮终时点的累计轮数（[② 读侧换源] ——轮计数进轮终收条帧：revive 水合的折叠源，
+   *  原 `.record-binding` round 快照的承载接替；首轮轮终（无 round-started 帧）也在此
+   *  落盘轮计数）。 */
+  round: number;
   /** 轮终停因（StopReason 值域——「为什么停」的轮粒度权威词）。 */
   stopReason: StopReason;
+  /**
+   * 轮被弃置的标记（与 .record-binding 的 lastAbandonedRound 同源；undefined = 无此
+   * 记录，null = 显式清空）。轮终是它的天然写点。
+   */
+  lastAbandonedRound?: AbandonedRoundMark | null;
   /** 轮终时点的累计轮数快照（统计终值以 record-settled 为准，本值是过程快照）。 */
   turns: number;
   /** 轮终时点的累计 token 快照（同上）。 */
   totalTokens: number;
   /**
    * 轮终 result 摘要锚（record-settled.resultSummary 同款截断摘要；可选——旧
-   * journal 行与空结果轮缺席）。承接 v1 轮终 result 显示信号（U8b：轮终迁移
+   * 事件行与空结果轮缺席）。承接 v1 轮终 result 显示信号（U8b：轮终迁移
    * 恰翻 result，是「轮终等待续聊」的展示面）——W1 停写 v1 entry 后轮终粒度的
    * result 断供由本锚补齐（终局全文仍只在 v2 终态条目一次性写，D1）。
    */
   resultSummary?: string;
   /**
-   * 轮终失败原因原文（可选——成功轮与旧 journal 行缺席）。失败轮 outcome.reason
-   * 的轮粒度结构化承载（投影 error 供源；v1 rec.error 显示信号的 journal 承接，
+   * 轮终失败原因原文（可选——成功轮与旧 事件行缺席）。失败轮 outcome.reason
+   * 的轮粒度结构化承载（投影 error 供源；v1 rec.error 显示信号的 事件文件承接，
    * W1 终态同步 F2-2 裁决）。resultSummary 的失败摘要句是兼容形态，本字段是权威。
    */
   error?: string;
@@ -260,10 +278,15 @@ export interface RecordReopenedEvent extends RecordEventEnvelope { // oe-exempt:
   epoch: Epoch;
   /** 归零后的轮计数（恒 0——字段显式承载 D3「round 归零」载荷）。 */
   round: number;
+  /**
+   * 谱系引用（与 .record-binding 的 transcriptRef 同源——markReopened 是它的写点；
+   * undefined = 未落）。
+   */
+  transcriptRef?: TranscriptRef;
 }
 
 /** record 事件判别联合（D3 词表全集，恰好 6 个；判别键 = type）。 */
-export type RecordJournalEvent =
+export type RecordEvent =
   | RecordCreatedEvent
   | RecordBoundEvent
   | RecordRoundStartedEvent
@@ -272,10 +295,10 @@ export type RecordJournalEvent =
   | RecordReopenedEvent;
 
 /**
- * 写侧入参形态：事件去掉 seq（seq 由 journal 单写者分配——单调性的构造性保证，
+ * 写侧入参形态：事件去掉 seq（seq 由 事件文件单写者分配——单调性的构造性保证，
  * 调用方无法传错）。DistributiveOmit 使联合逐成员 Omit（保持判别键窄化能力）。
  */
-export type RecordJournalEventInput = DistributiveOmit<RecordJournalEvent, "seq">;
+export type RecordEventInput = DistributiveOmit<RecordEvent, "seq">;
 
 type DistributiveOmit<T, K extends keyof never> = T extends unknown ? Omit<T, K> : never;
 
@@ -289,21 +312,21 @@ const RECORD_EVENT_TYPE_SET: ReadonlySet<string> = new Set(RECORD_EVENT_TYPES);
  * isWorkflowRunEventLine 的最宽共同判定面同哲学：词表外 type / 信封坏值 = 坏行，
  * 载荷形状损坏由 fold/消费方各自的守卫承接）。
  */
-export function parseRecordEventLine(value: unknown): RecordJournalEvent | null {
+export function parseRecordEventLine(value: unknown): RecordEvent | null {
   if (typeof value !== "object" || value === null) return null;
   const rec = value as { type?: unknown; seq?: unknown; ts?: unknown };
   if (typeof rec.type !== "string" || !RECORD_EVENT_TYPE_SET.has(rec.type)) return null;
   if (typeof rec.seq !== "number" || !Number.isSafeInteger(rec.seq) || rec.seq < 1) return null;
   if (typeof rec.ts !== "number" || !Number.isFinite(rec.ts)) return null;
-  return value as RecordJournalEvent;
+  return value as RecordEvent;
 }
 
 /**
- * 文件行解析器（journal-tail / scan 共用）：空行静默跳过、头行静默跳过（合法
- * 存在，非坏行——计数语义见 readJournalTail 的 skippedLines 注释）、坏行（JSON
+ * 文件行解析器（event-tail / scan 共用）：空行静默跳过、头行静默跳过（合法
+ * 存在，非坏行——计数语义见 readEventTail 的 skippedLines 注释）、坏行（JSON
  * 解析失败 / 词表外 / 信封坏值）返回 undefined 交调用方计数。
  */
-export function parseRecordEventFileLine(line: string): RecordJournalEvent | undefined {
+export function parseRecordEventFileLine(line: string): RecordEvent | undefined {
   const trimmed = line.trim();
   if (trimmed.length === 0) return undefined;
   let parsed: unknown;
@@ -312,7 +335,7 @@ export function parseRecordEventFileLine(line: string): RecordJournalEvent | und
   } catch {
     return undefined;
   }
-  if (isRecordJournalHeader(parsed)) return undefined;
+  if (isRecordEventHeader(parsed)) return undefined;
   return parseRecordEventLine(parsed) ?? undefined;
 }
 
@@ -325,7 +348,7 @@ export function parseRecordEventFileLine(line: string): RecordJournalEvent | und
  * settled 不是吸收位——reopened / round-started 清除 settled（可续实体回边），
  * 「当前是否终态」= settled !== undefined。
  */
-export interface RecordJournalFoldState { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
+export interface RecordEventFoldState { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 身份域（首条 record-created 落账；undefined = 文件缺创建帧——残文件/全坏行形态）。 */
   identity: RecordCreatedEvent | undefined;
   /** 引擎绑定（record-bound 落账；zcode 运行窗口锚定的数据源）。 */
@@ -338,20 +361,23 @@ export interface RecordJournalFoldState { // oe-exempt:20260929:framework:workfl
   roundIdle: RecordRoundIdleEvent | undefined;
   /** 当前终态（record-settled 落账、reopened/round-started 清除；undefined = 未终态）。 */
   settled: RecordSettledEvent | undefined;
+  /** 最近一次重开帧（record-reopened 落账；transcriptRef / epoch·round 归零的折叠载体）。 */
+  reopened: RecordReopenedEvent | undefined;
   /** fold 水位：已接受事件的最高 seq（增量续读/截断重读的去重依据）。 */
   lastSeq: number;
   /** 已接受的最后一条事件（空文件/全坏行 = undefined）。 */
-  lastEvent: RecordJournalEvent | undefined;
+  lastEvent: RecordEvent | undefined;
 }
 
 /** fold 初始态（全量 fold 起点；增量 fold 以既有 state 传入）。 */
-export const INITIAL_RECORD_JOURNAL_FOLD_STATE: RecordJournalFoldState = {
+export const INITIAL_RECORD_EVENT_FOLD_STATE: RecordEventFoldState = {
   identity: undefined,
   bound: undefined,
   round: undefined,
   epoch: undefined,
   roundIdle: undefined,
   settled: undefined,
+  reopened: undefined,
   lastSeq: 0,
   lastEvent: undefined,
 };
@@ -359,13 +385,13 @@ export const INITIAL_RECORD_JOURNAL_FOLD_STATE: RecordJournalFoldState = {
 /**
  * 单步应用（纯函数，不可变更新）。
  *
- * seq 守卫不在此层——apply 假定调用方已去重（foldRecordJournalEvents 统一把关；
+ * seq 守卫不在此层——apply 假定调用方已去重（foldRecordEvents 统一把关；
  * U1/U3 直接复用 fold 入口而非手写 apply 循环，守卫单点）。
  */
-export function applyRecordJournalEvent(
-  state: RecordJournalFoldState,
-  event: RecordJournalEvent,
-): RecordJournalFoldState {
+export function applyRecordEvent(
+  state: RecordEventFoldState,
+  event: RecordEvent,
+): RecordEventFoldState {
   switch (event.type) {
     case "record-created":
       return { ...state, identity: event, lastSeq: event.seq, lastEvent: event };
@@ -382,12 +408,14 @@ export function applyRecordJournalEvent(
         lastEvent: event,
       };
     case "record-round-idle":
-      return { ...state, roundIdle: event, lastSeq: event.seq, lastEvent: event };
+      // 轮终 = 轮计数推进（帧载荷自带累计轮数——[② 读侧换源] revive 水合的折叠源）。
+      return { ...state, roundIdle: event, round: event.round, lastSeq: event.seq, lastEvent: event };
     case "record-settled":
       return { ...state, settled: event, lastSeq: event.seq, lastEvent: event };
     case "record-reopened":
       return {
         ...state,
+        reopened: event,
         epoch: event.epoch,
         round: event.round,
         settled: undefined,
@@ -407,139 +435,62 @@ export function applyRecordJournalEvent(
  * - seq 跳号（gap）宽容放行——单写者 append-only 下 gap 仅在外部编辑时出现，
  *   宽容跳过语义不炸投影（与 run 侧 foldRunEventFrames 的坏帧行为同一精神）。
  */
-export function foldRecordJournalEvents(
-  events: readonly RecordJournalEvent[],
-  initial: RecordJournalFoldState = INITIAL_RECORD_JOURNAL_FOLD_STATE,
-  onSkipped?: (event: RecordJournalEvent, why: "seq-regression") => void,
-): RecordJournalFoldState {
+export function foldRecordEvents(
+  events: readonly RecordEvent[],
+  initial: RecordEventFoldState = INITIAL_RECORD_EVENT_FOLD_STATE,
+  onSkipped?: (event: RecordEvent, why: "seq-regression") => void,
+): RecordEventFoldState {
   let state = initial;
   for (const event of events) {
     if (event.seq <= state.lastSeq) {
       onSkipped?.(event, "seq-regression");
       continue;
     }
-    state = applyRecordJournalEvent(state, event);
+    state = applyRecordEvent(state, event);
   }
   return state;
 }
 
-// ── journal 读写原语（append 单调分配 seq / scan 宽容解析）──────
+// ── 事件文件读写原语（append 单调分配 seq / scan 宽容解析）──────
 
 /**
- * record 事件 journal 接口形态。
+ * record 事件文件读写接口形态。
  *
  * 单写者约束（对齐 run 侧 RunEventJournal 纪律）：append 的唯一合法调用方 =
  * RecordStore 状态迁移点（U2a 接线）——record 域事件经 store 落账，引擎与读侧
- * 不直接写。seq 分配权在 journal 实装内（文件末水位 + 1），构造性单调。
+ * 不直接写。seq 分配权在 事件文件实装内（文件末水位 + 1），构造性单调。
  */
-export interface RecordEventJournal { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
+export interface RecordEventStream { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /**
    * 追加一条事件（JSONL 单行；文件不存在时先落头行）。id 显式传参——文件定位
    * 不依赖事件形态。返回落盘的完整事件（含分配的 seq），调用方据此同步构造
    * v2 终态条目 / 物化投影（同一事件的单点载荷源）。
    */
-  append(id: string, event: RecordJournalEventInput): Promise<RecordJournalEvent>;
+  append(id: string, event: RecordEventInput): Promise<RecordEvent>;
   /**
    * 顺序扫描全部事件（写入序；头行与坏行跳过——坏行计数 warn 留证）。
-   * 文件不存在 = 空 journal（record 未落账 / 已过保留期清理）。
+   * 文件不存在 = 空事件流（record 未落账 / 已过保留期清理）。
    */
-  scan(id: string): Promise<readonly RecordJournalEvent[]>;
-}
-
-function isNodeErrorCode(error: unknown, code: string): boolean {
-  return typeof error === "object" && error !== null && (error as NodeJS.ErrnoException).code === code;
-}
-
-/** 读文件并宽容解析：头行跳过、坏行跳过计数（scan 与 append 的 seq 水位探测共用）。 */
-function scanEventFile(
-  filePath: string,
-): { events: RecordJournalEvent[]; skipped: number; maxSeq: number } {
-  let content: string;
-  try {
-    content = readFileSync(filePath, "utf8");
-  } catch (error) {
-    if (isNodeErrorCode(error, "ENOENT")) return { events: [], skipped: 0, maxSeq: 0 };
-    throw error;
-  }
-  const events: RecordJournalEvent[] = [];
-  let skipped = 0;
-  let maxSeq = 0;
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.length === 0) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      skipped += 1;
-      continue;
-    }
-    if (isRecordJournalHeader(parsed)) continue;
-    const event = parseRecordEventLine(parsed);
-    if (event === null) {
-      // 词表外 type（含合法 JSON 但漂移的形态）/信封坏值按坏行跳过——失效模式
-      // 是保守可诊断（跳过 + 计数 + warn），不是炸掉整个投影（run 侧 scan 同款）
-      skipped += 1;
-      continue;
-    }
-    events.push(event);
-    if (event.seq > maxSeq) maxSeq = event.seq;
-  }
-  return { events, skipped, maxSeq };
-}
-
-class FileRecordEventJournal implements RecordEventJournal {
-  private dirEnsured = false;
-  /** id → 已知末 seq（append 分配基数；跨实例正确性靠首 append 探测文件尾，不靠缓存）。 */
-  private readonly lastSeqById = new Map<string, number>();
-
-  constructor(private readonly recordsDir: string) {}
-
-  async append(id: string, event: RecordJournalEventInput): Promise<RecordJournalEvent> {
-    assertValidRecordId(id);
-    if (!this.dirEnsured) {
-      // 惰性一次：目录缺失自建（recursive 幂等），scan 侧不建目录（只读）
-      mkdirSync(this.recordsDir, { recursive: true });
-      this.dirEnsured = true;
-    }
-    const filePath = recordEventsPath(this.recordsDir, id);
-    // seq 分配：末水位 + 1。水位未缓存时探测文件（存在则取有效事件最大 seq）——
-    // 同步 readFileSync 与 run 侧 append 同一取舍（取证证据，append 返回即达页缓存）。
-    let lastSeq = this.lastSeqById.get(id);
-    if (lastSeq === undefined) {
-      lastSeq = scanEventFile(filePath).maxSeq;
-    }
-    const seq = lastSeq + 1;
-    const full = { ...event, seq } as RecordJournalEvent;
-    // 文件不存在 → 先落头行（写侧头行契约：创建时恰一行）。existsSync 每次探测
-    // （微秒级）而非进程内标记——跨 journal 实例（重启后续写）不重写头行。
-    if (!existsSync(filePath)) {
-      appendFileSync(filePath, `${JSON.stringify(toRecordJournalHeader(id))}\n`, "utf8");
-    }
-    appendFileSync(filePath, `${JSON.stringify(full)}\n`, "utf8");
-    this.lastSeqById.set(id, seq);
-    return full;
-  }
-
-  async scan(id: string): Promise<readonly RecordJournalEvent[]> {
-    assertValidRecordId(id);
-    const { events, skipped } = scanEventFile(recordEventsPath(this.recordsDir, id));
-    if (skipped > 0) {
-      journalLogger.warn(
-        `record-event journal scan：跳过 ${skipped} 个坏行（文件=${recordEventsPath(this.recordsDir, id)}）`,
-        { id, skipped },
-      );
-    }
-    return events;
-  }
+  scan(id: string): Promise<readonly RecordEvent[]>;
 }
 
 /**
- * 创建文件形态的 record 事件 journal（唯一创建入口）。
+ * 创建文件形态的 record 事件文件（唯一创建入口）。
+ *
+ * 实装体 = shared 泛型基座（JsonlEventStream，与 run journal 单源）；本函数只提供
+ * record 域策略：路径（含 id 白名单校验）、首行头行、行校验器（seq 必填）、warn 标签。
  *
  * @param recordsDir manifest 同款目录（getSubagentRecordsDir 产物；测试传
  *        mkdtemp 临时目录）。
  */
-export function createRecordEventJournal(recordsDir: string): RecordEventJournal {
-  return new FileRecordEventJournal(recordsDir);
+export function createRecordEventStream(recordsDir: string): RecordEventStream {
+  return new JsonlEventStream<RecordEventInput, RecordEvent>(recordsDir, {
+    pathFor: (id) => recordEventsPath(recordsDir, id),
+    headerFor: (id) => toRecordEventHeader(id),
+    isHeader: isRecordEventHeader,
+    parseLine: (value) => parseRecordEventLine(value) ?? undefined,
+    withSeq: (event, seq) => ({ ...event, seq }) as RecordEvent,
+    scanWarn: (filePath, skipped) => `record-events scan：跳过 ${skipped} 个坏行（文件=${filePath}）`,
+    warn: (message, detail) => eventLogger.warn(message, detail),
+  });
 }

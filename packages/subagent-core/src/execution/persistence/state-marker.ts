@@ -1,356 +1,54 @@
 // src/execution/persistence/state-marker.ts
 //
-// 轮收口 sidecar 单一入口（`.state`）：宿主侧写，collectRecords 磁盘重建时读——
-// 「上一轮已收口 + 为什么停」（永久会话模型 §3.2.4：收条，不是死亡证明）。
+// record 绑定 sidecar（`.record-binding`）单一入口 + 收条词汇类型。
 //
-// 形态（三值演进，读侧全兼容）：
+// [身份换源第二步] 读侧现状：身份域与统计域的读源 = 事件流折叠（record-store.scanFile
+// 的 identityFromFoldByFile / receiptStatisticsFromFold / hydrateReviveBaseline）——
+// 本文件的 readRecordBinding 只剩写面 merge-or-create 消费（record-store-terminal 的
+// persistSettleSnapshot / updateRecordBinding）；binding 写点（spawn 回填 / settle 快照
+// / reopen）仍在，写点退场是后续批次。`.state`/`.finalized`/`.cancelled` 收条 sidecar
+// 全族已退场（③）——收条由 `record-settled` / `record-round-idle` 事件帧承载，
+// StateMarker 只剩内存收条词汇（折叠投影 stateMarkerFromFold 的产物形态）。
 //
-//   { "status": "idle" | "finalized" | "cancelled", "reason"?: string, "endedAt"?: number }
-//
-//   - idle（现行，U2 写侧 / U3 读侧）：轮收口新格式 `{status:"idle", stopReason?,
-//     endedAt?}`——stopReason 承载在 reason 字段（值域 = types.ts StopReason）。
-//     上一轮收条：round/usage 真相源在 binding，本 sidecar 不冗余承载。
-//   - finalized（旧值，读侧上行映射）：reason = 关闭原因（旧格式空内容 → 空串 =
-//     死因不可考 → 重建兜底 closedReason=disconnected）；endedAt 不携带（重建用
-//     jsonl 末 entry ts / mtime）。
-//   - cancelled（旧值，读侧上行映射）：endedAt = 精确结束时间；reason 不携带。
-//
-// 读侧**兼容旧两名**（存量文件不迁移重写）：`.state` 优先，缺失时回退 `.finalized`
-// /`.cancelled` 并归一为同一 StateMarker。`.alive`（跨进程写权声明，D3 v7——acquire/
-// release 归口 RecordStore 意图原语）不并入。
-//
-// **双向兼容 §3.2.4**：①新版读旧值 = 上行映射（finalized/cancelled → idle + 对应
-// stopReason，见 record-store.buildRecord 单规则）；②旧版读新值（回滚场景）：旧版
-// readNewStateMarker 对未知 status（"idle"）落入下方「结构不合法 → 存在性降级」分支
-// （{status:"finalized"}）→ reason 缺失 → 重建兜底 disconnected——disconnected ∈
-// 旧版可重连集，回滚后 message 同 id 续聊仍可达，回滚方向行为良性。本降级分支对
-// 未知 status 永久保留（未来 v3 格式的回滚安全性同构）。
-//
-// 写侧语义（record 持久化收敛 §3.4 / D8 v7）：**权威同步写 + 响亮重试**——写失败
-// 重试 3 次（零退避立即连发，[W1 / D6] 同步睡退役），仍失败 logger.error 响亮暴露并返回 false（不抛出）。
-// 迁移已完成（D7）：写函数唯一生产调用方 = record-store 内部（意图原语消费返回值）。
-//
-// [UF-1] record 绑定 sidecar（`.record-binding`）同挂本载体族：宿主侧在 record.sessionFile
-// 回填点写「record id → session 文件」映射（engine-CLI 化后子 session 文件无身份 entry，
-// 旧 PI_SUBAGENT_SELF_RECORD_ID 注入链消失，collectRecords/findLightById 失去 id→file
-// 工件——本 sidecar 是该映射的宿主侧落盘权威）。与收口 sidecar 的关系：
-//   - 读侧消费（record-store scanFile）：仅当子文件无 identity entry 时用绑定重建身份，
-//     status/stopReason 判定走 buildRecord 重建单规则（§3.2.4）——`.state`（收口）
-//     优先级天然高于绑定的在途形态，二者并存无冲突（收口后绑定保留：resurrect 回边
-//     删 .state 后绑定仍在，再崩溃仍可恢复）；
-//   - GC：session-file-gc 的 sidecar 名单已含本扩展名（孤儿绑定随 TTL 清理；jsonl
-//     删除链同步同删——I-16 已销账，GC 领地批次落地）。
+// GC：session-file-gc 的 sidecar 名单已含本扩展名（孤儿绑定随 TTL 清理；jsonl
+// 删除链同步同删——I-16 已销账，GC 领地批次落地）。
 
 
 import * as fs from "node:fs";
 
 import { getLogger } from "../../core/logger.ts";
-// 原子写单源原语（tmp+rename）：.state 半写（进程死在 writeFileSync 中段）会让
-// 读侧落入「JSON 损坏 → finalized 存在性降级」的死因不可考窗口，rename 原子性
-// 把该窗口收到读侧不可见的层面。
-import { writeAtomicFileSync } from "../../shared/atomic-write.ts";
 
-import type { AbandonedRoundMark, Epoch, RecordOrigin, StopReason, TranscriptRef } from "../assembly/types.ts";
-// 类型面依赖（D5 终局投影词表单源）——run-events 不回指 execution 层，无循环；
-// ALL_RUN_OUTCOMES 是值导入（读侧 outcome 守卫的词表集合，SSOT 单源不复制）。
-import { ALL_RUN_OUTCOMES, type RunErrorCode, type RunOutcome } from "../../orchestration/run-events.ts";
+import type { AbandonedRoundMark, Epoch, RecordOrigin, TranscriptRef } from "../domain/record-types.ts";
 
 const logger = getLogger("subagents");
 
-/** 终态/收口 sidecar 扩展名（写侧新名 + 读侧兼容旧名；GC 清理名单与此同源语义）。 */
-export const STATE_SIDECAR_EXT = ".state";
-
-/** record 绑定 sidecar 扩展名（UF-1：宿主侧 id→file 映射载体）。 */
+/** record 绑定 sidecar 扩展名（UF-1：宿主侧 id→file 映射载体；GC 清理名单与此同源语义）。 */
 export const RECORD_BINDING_SIDECAR_EXT = ".record-binding";
-const LEGACY_FINALIZED_EXT = ".finalized";
-const LEGACY_CANCELLED_EXT = ".cancelled";
-
-// ============================================================
-// 写侧重试参数（§3.4 错误规格）
-// ============================================================
-
-/** 写失败重试次数（初始尝试之外再试 3 次）。 */
-const STATE_WRITE_RETRY_COUNT = 3;
-
-// [W1 / D6] 同步退避退役（主线程同步等待原语拆除）：写失败重试改为
-// 立即连发（零退避）——原实现同步睡至多 700ms 会停顿全进程的 session 推送。
-// 重试语义保持（瞬时故障的短窗二连击仍被覆盖）；退避间隔在同步收尾路径
-// （disposeAllRecords 等同步链）无异步等待通道可用，「写挪 worker 线程」形态
-// 的改造成本与 sidecar 写失败本身 <0.1% 的极端场景不匹配（重复保险式过度工程）。
-// 写失败语义不变：重试耗尽 logger.error 响亮 + 返回 false，record 留 running
-// 由 boot 孤儿恢复承接。
 
 // ============================================================
 // 类型
 // ============================================================
 
 /**
- * `.state` status 值域：新收口语 idle（永久会话模型 §3.2.4——「上一轮收条」而非
- * 死亡证明）+ 旧终态二态 finalized/cancelled（写侧已不再产出，读侧上行映射兼容）。
+ * 收条 status 值域：现役 idle（轮终/settle 收口——「上一轮收条」而非死亡证明）+
+ * 旧终态二态 finalized/cancelled（③ 起写侧不再产出；buildRecord 旧值上行映射分支
+ * 的词表位保留——随 U5 读侧兼容收口一并退役）。
  */
 export type TerminalState = "idle" | "finalized" | "cancelled";
 
-/** `.state` sidecar 归一形态（新名直读 / 旧名兼容读出共用）。 */
+/**
+ * 内存收条词汇（折叠投影 {@link ../record-store-rebuild.stateMarkerFromFold} 的产物
+ * 形态——`.state` sidecar 已退场，收条由 `record-settled` / `record-round-idle`
+ * 事件帧承载，本类型不再是磁盘格式；现役产物只含 status:"idle" 形态）。
+ */
 export interface StateMarker {
   status: TerminalState;
-  /** idle = 收口 stopReason（新格式 §3.2.4，值域 StopReason）；finalized 的关闭原因
-   *  （空串 = 旧格式空文件，死因不可考）；cancelled 恒 undefined。 */
+  /** 收口 stopReason（值域 StopReason，重建单规则消费）。 */
   reason?: string;
-  /** idle = 收口时间（新格式）；cancelled 的精确结束时间（重建判定消费）；
-   *  finalized 恒 undefined（重建走 jsonl 末 entry ts）。 */
+  /** 收条时间（settled.endedAt / 轮终收条事件 ts）。 */
   endedAt?: number;
-  /**
-   * [P1b-2 / D5 终局投影] run 终局形态（completed/failed/cancelled）。仅新格式
-   * 写入面（writeSettledState）携带；旧 `.state`（存量三值形态）无此字段 →
-   * undefined（读守卫归一，不炸）。finalized/cancelled 旧值分支不投影本字段。
-   */
-  outcome?: RunOutcome;
-  /** [P1b-2 / D5 终局投影] 失败终局的结构化编码（outcome=failed 时有意义）。 */
-  errorCode?: RunErrorCode;
 }
 
-/** sidecar stat 戳（结构对齐 record-store 的 Stamp——缓存校验用，避免跨模块类型耦合）。 */
-export interface SidecarStat {
-  mtimeMs: number;
-  size: number;
-}
-
-// ============================================================
-// 写侧（唯一入口：两终态共用 .state；权威同步写 + 响亮重试）
-// ============================================================
-
-/**
- * 写 finalized 终态 sidecar（权威同步写，§3.4）。
- * 失败重试 3 次指数退避（100ms 起）；仍失败 logger.error 响亮暴露并返回 false——
- * 调用方（RecordStore.markFinalized 意图原语）据此保持 record 不翻终态（record 留
- * running，boot 孤儿恢复终态化承接）。不抛出：失败处置经返回值交意图原语编排。
- *
- * @param sessionFile session.jsonl 绝对路径
- * @param reason 可选的关闭原因（磁盘重建用它还原 closedReason）。传 undefined =
- *        空串（死因不可考，重建兜底 disconnected）。
- * @returns true = 已落盘；false = 重试耗尽仍未落（错误已 error 级留痕）。
- */
-export function writeFinalizedState(sessionFile: string, reason?: string): boolean {
-  return writeStateMarker(sessionFile, reason === undefined ? { status: "finalized" } : { status: "finalized", reason });
-}
-
-/**
- * 写 cancelled 终态 sidecar（权威同步写 + tombstone endedAt，§3.4）。
- * 失败重试语义同 writeFinalizedState（响亮重试，终写失败返回 false 不抛出）。
- *
- * @param endedAt 精确结束时间（重建判定分支消费；调用方传 record.endedAt ?? Date.now()）
- * @returns true = 已落盘；false = 重试耗尽仍未落（错误已 error 级留痕）。
- */
-export function writeCancelledState(sessionFile: string, endedAt: number): boolean {
-  return writeStateMarker(sessionFile, { status: "cancelled", endedAt });
-}
-
-/**
- * [U2 / 永久会话模型 §3.2.4] 写轮收口 sidecar（新格式：`{status:"idle",
- * stopReason?, endedAt?}`——「上一轮收条」而非死亡证明）。响应重试语义与两终态
- * 写函数同源（writeStateMarker 响亮重试）。
- *
- * 本函数是 markSettled 意图原语的 `.state` 写面；读侧（readNewStateMarker 的 idle
- * 分支 → buildRecord 单规则映射 idle + stopReason）已随 U3 切换，live ≡ reload
- * 构造性成立。
- *
- * [P1b-2 / D5] payload 扩展 outcome/errorCode（终局投影字段，向后兼容——缺省
- * undefined 不写字段，存量调用方零变化）。run 域不消费本扩展（run 终局事实经
- * 事件 journal + terminal manifest 落账，无 .state sidecar）；record 域终态链
- *（markSettled）现未传参（缺省 undefined，读侧守卫归一兼容存量 .state）。
- *
- * @param stopReason 收口展示值（成功/失败/中断，值域见 types.ts StopReason）；
- *        undefined = 未指定停因（读侧兜底 interrupted-by-restart 同族语义）。
- * @param endedAt 收口时间（收条精度；调用方传 Date.now()）。
- * @param outcome run 终局形态（[P1b-2 / D5] 终局投影；undefined = 不投影）。
- * @param errorCode 失败终局的结构化编码（undefined = 不投影）。
- * @returns true = 已落盘；false = 重试耗尽仍未落（错误已 error 级留痕）。
- */
-export function writeSettledState(
-  sessionFile: string,
-  payload: { stopReason?: StopReason; endedAt?: number; outcome?: RunOutcome; errorCode?: RunErrorCode },
-): boolean {
-  return writeStateMarker(sessionFile, {
-    status: "idle",
-    ...(payload.stopReason !== undefined ? { reason: payload.stopReason } : {}),
-    ...(payload.endedAt !== undefined ? { endedAt: payload.endedAt } : {}),
-    ...(payload.outcome !== undefined ? { outcome: payload.outcome } : {}),
-    ...(payload.errorCode !== undefined ? { errorCode: payload.errorCode } : {}),
-  });
-}
-
-/**
- * .state 写入 + 旧名清理（互斥由单文件单状态字段构造性保证）。
- * 响亮重试（§3.4）：初始尝试 + 3 次重试（[W1 / D6] 零退避立即连发——同步睡退役，
- * 见上方重试参数注释）；仍失败 logger.error（终态权威未落必须可见）并返回
- * false——**不抛出**（收尾路径同步链不因重试耗尽中断，record 留 running 的处置
- * 由意图原语按返回值编排）。
- */
-function writeStateMarker(sessionFile: string, marker: StateMarker): boolean {
-  let lastError: unknown;
-  for (let attempt = 0; attempt <= STATE_WRITE_RETRY_COUNT; attempt++) {
-    try {
-      // 旧名清理放在写成功之后（S12 修复）：读侧 .state 优先，旧名残留无害（仅多一次
-      // stat 与「旧名在 .state 缺失/损坏时充当兼容读序兜底」），删除只是 stat 优化非正确性
-      // 依赖——若在写前删而写失败（重试耗尽），存量终态标记已被删而新标记未落，
-      // .cancelled tombstone 静默降级为无终态形态（重建回落 running，死因/时间丢失）。
-      // ensureDir:false——session 目录被外部删除属异常态，保持由下方响亮重试 +
-      // error 留痕暴露的既有失败语义，不静默重建目录掩盖。
-      writeAtomicFileSync(`${sessionFile}${STATE_SIDECAR_EXT}`, JSON.stringify(marker), {
-        encoding: "utf-8",
-        ensureDir: false,
-      });
-      // force:true 静默 ENOENT（未写过旧名的 session 正常路径）。
-      fs.rmSync(`${sessionFile}${LEGACY_FINALIZED_EXT}`, { force: true });
-      fs.rmSync(`${sessionFile}${LEGACY_CANCELLED_EXT}`, { force: true });
-      return true;
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  logger.error(
-    "[subagents] terminal state marker write failed after retries; record stays running " +
-      "(boot orphan recovery will re-finalize). Recovery: free disk/permissions and retry the finalize action.",
-    {
-      detail: {
-        sessionFile,
-        markerStatus: marker.status,
-        attempts: STATE_WRITE_RETRY_COUNT + 1,
-        error: lastError instanceof Error ? lastError.message : String(lastError),
-      },
-    },
-  );
-  return false;
-}
-
-// ============================================================
-// 读侧（.state 优先；旧名兼容归一）
-// ============================================================
-
-/**
- * 读轮收口 sidecar（.state 优先，缺失回退旧名）。
- *
- * 旧名回退顺序 **.cancelled → .finalized**：与合并前判定分支的优先级逐点一致
- * （原实现分支 1 = tombstone，分支 2 = finalized；两者共存时 cancelled 胜出——
- * 存量残留文件仍可能出现该形态）。
- *
- * 返回 undefined：三者皆无 / 内容无法判读（旧 .cancelled 损坏时不认 cancelled——
- * 对齐旧语义，避免把损坏残留误判成终态）。
- *
- * 边界对齐：
- *   - `.state` status=idle（新格式收条）→ {status:"idle", reason?, endedAt?}
- *     （reason/endedAt 经类型守卫归一，非法值丢弃不抛）；
- *   - `.state` status=cancelled / finalized → 旧值原样读出（上行映射到
- *     idle+stopReason 在 record-store.buildRecord 单规则，本层不做语义翻译）；
- *   - `.state` 存在但 status 未知/内容损坏 → {status:"finalized"}（存在性即信号；
- *     §3.2.4 双向兼容②的降级分支——旧版读新值（"idle" 在旧版即未知 status）走
- *     本分支 → disconnected 兜底 → 回滚方向良性可重连。永久保留，服务未来格式）；
- *   - 旧 `.finalized` 存在 → reason = 内容 trim（读失败 → undefined → 重建 disconnected）；
- *   - 旧 `.cancelled` 存在且结构合法 → {status:"cancelled", endedAt}。
- */
-export function readStateMarker(sessionFile: string): StateMarker | undefined {
-  const fromNew = readNewStateMarker(sessionFile);
-  if (fromNew !== undefined) return fromNew;
-  const fromCancelled = readLegacyCancelledMarker(sessionFile);
-  if (fromCancelled !== undefined) return fromCancelled;
-  return readLegacyFinalizedMarker(sessionFile);
-}
-
-function readNewStateMarker(sessionFile: string): StateMarker | undefined {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(`${sessionFile}${STATE_SIDECAR_EXT}`, "utf-8");
-  } catch {
-    return undefined; // sidecar 不存在（正常——未收口的 record 无 sidecar）。
-  }
-  try {
-    const parsed = JSON.parse(raw) as Partial<StateMarker>;
-    // 新格式收条（§3.2.4）：{status:"idle", reason?=stopReason, endedAt?}——可选域
-    // 类型守卫归一（非法/缺省 → undefined，重建面按「无则」兜底，见 buildRecord）。
-    // [P1b-2 / D5] outcome/errorCode 同款守卫归一：outcome 需落 ALL_RUN_OUTCOMES
-    // 词表（词表外/缺省 → undefined = 不投影，旧 .state 存量形态零迁移）。
-    if (parsed.status === "idle") {
-      return {
-        status: "idle",
-        ...(typeof parsed.reason === "string" ? { reason: parsed.reason } : {}),
-        ...(typeof parsed.endedAt === "number" ? { endedAt: parsed.endedAt } : {}),
-        ...(isRunOutcome(parsed.outcome) ? { outcome: parsed.outcome } : {}),
-        ...(typeof parsed.errorCode === "string" ? { errorCode: parsed.errorCode } : {}),
-      };
-    }
-    if (parsed.status === "cancelled") {
-      return typeof parsed.endedAt === "number"
-        ? { status: "cancelled", endedAt: parsed.endedAt }
-        : { status: "cancelled" };
-    }
-    if (parsed.status === "finalized") {
-      return typeof parsed.reason === "string"
-        ? { status: "finalized", reason: parsed.reason }
-        : { status: "finalized" };
-    }
-    return { status: "finalized" }; // 未知 status（含旧版读新值/未来 v3）→ 存在性信号（降级，不误判 cancelled）。
-  } catch {
-    return { status: "finalized" }; // JSON 损坏 → 同上。
-  }
-}
-
-function readLegacyFinalizedMarker(sessionFile: string): StateMarker | undefined {
-  try {
-    const content = fs.readFileSync(`${sessionFile}${LEGACY_FINALIZED_EXT}`, "utf-8").trim();
-    return { status: "finalized", reason: content };
-  } catch {
-    return undefined;
-  }
-}
-
-function readLegacyCancelledMarker(sessionFile: string): StateMarker | undefined {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(`${sessionFile}${LEGACY_CANCELLED_EXT}`, "utf-8");
-  } catch {
-    return undefined;
-  }
-  try {
-    const parsed = JSON.parse(raw) as { status?: unknown; endedAt?: unknown };
-    if (parsed.status !== "cancelled") return undefined; // 结构不合法 → 降级（对齐旧 readCancelledTombstone）。
-    return typeof parsed.endedAt === "number"
-      ? { status: "cancelled", endedAt: parsed.endedAt }
-      : { status: "cancelled" };
-  } catch {
-    return undefined; // JSON 损坏 → 降级。
-  }
-}
-
-// ============================================================
-// stat 戳（缓存校验）
-// ============================================================
-
-/**
- * 终态 sidecar 的合并 stat 戳（.state + 两个旧名一起取）。
- *
- * 为什么合并：record-store 的 per-file 缓存按戳校验失效——读侧要兼容旧名，若戳只盯
- * `.state`，旧 sidecar 被 GC 删除/内容变化时缓存不失效（读到过期终态）。合并 = 任一
- * 相关文件出现/消失/变化都改变戳（mtime 取最大、size 求和；旧名不再新增，碰撞面仅
- * 限「等量增删」的极端重叠，可接受）。
- *
- * 返回 null：三者皆不存在（未终态化）。
- */
-export function statStateStamp(sessionFile: string): SidecarStat | null {
-  let found = false;
-  let mtimeMs = 0;
-  let size = 0;
-  for (const ext of [STATE_SIDECAR_EXT, LEGACY_FINALIZED_EXT, LEGACY_CANCELLED_EXT]) {
-    try {
-      const st = fs.statSync(`${sessionFile}${ext}`);
-      found = true;
-      mtimeMs = Math.max(mtimeMs, st.mtimeMs);
-      size += st.size;
-    } catch (_e) {
-      void _e; // 该扩展名不存在——继续收集其余。
-    }
-  }
-  return found ? { mtimeMs, size } : null;
-}
 
 // ============================================================
 // record 绑定 sidecar（UF-1：宿主侧 id→file 映射的写读）
@@ -665,11 +363,6 @@ function normalizeOptionalBindingFields(
 /** string 守卫（非法/缺省 → undefined）。 */
 function strOrUndefined(v: string | undefined): string | undefined {
   return typeof v === "string" ? v : undefined;
-}
-
-/** [P1b-2 / D5] run 终局形态守卫（词表成员判定；词表外/缺省 → 不投影）。 */
-function isRunOutcome(v: unknown): v is RunOutcome {
-  return typeof v === "string" && (ALL_RUN_OUTCOMES as readonly string[]).includes(v);
 }
 
 /**

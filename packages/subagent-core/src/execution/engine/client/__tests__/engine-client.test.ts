@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EngineClient, type RunRoute } from "../engine-client.ts";
-import { isProcessAlive, pidfilePath, readPidfile, writePidfileAtomic } from "../pid-file.ts";
+import { probePidAliveness, pidfilePath, readPidfile, writePidfileAtomic } from "../pid-file.ts";
 import {
   _resetCoreSpawnedChildrenMirrorForTest,
   hasLiveProcessHandleCore,
@@ -440,7 +440,7 @@ describe("超时域二分（fake timers，R9-2 / R9-2b）", () => {
     // ack 已回（引擎继续跑），handler 挂起不触发任何杀链
     expect(client.currentState).toBe("ready");
     expect(client.enginePid).toBe(enginePid);
-    expect(isProcessAlive(enginePid)).toBe(true);
+    expect(probePidAliveness(enginePid)).toBe(true);
     // 负向断言完成后必须走杀链收尾：不 dispose = 引擎进程泄漏为常驻孤儿
     // （fake 引擎 stdin EOF 后保活不自灭），且带 exit 监听的 client 跨文件存活。
     vi.useRealTimers(); // 杀链（dispose 帧 3s 上界 / SIGKILL 收尸）走真实时钟
@@ -549,12 +549,12 @@ describe("收割（POSIX 进程组；范围 = 一代子进程 + 组内后代，R
     await waitFor(() => client.mirror.size > 0);
     const grandchildPid = client.mirror.snapshot()[0]!.pid;
     const enginePid = client.enginePid!;
-    expect(isProcessAlive(grandchildPid)).toBe(true);
+    expect(probePidAliveness(grandchildPid)).toBe(true);
 
     await client.killAll("test harvest");
     // 组内双亡（detached 后代不覆盖——R9-1 已接受代价，不在断言范围）
-    await waitFor(() => isProcessAlive(grandchildPid) === false);
-    await waitFor(() => isProcessAlive(enginePid) === false);
+    await waitFor(() => probePidAliveness(grandchildPid) === false);
+    await waitFor(() => probePidAliveness(enginePid) === false);
     expect(client.mirror.size).toBe(0);
     expect(existsSync(pidfilePath(dataDir, "fake", "test", process.pid))).toBe(false);
     unregister();
@@ -565,7 +565,7 @@ describe("收割（POSIX 进程组；范围 = 一代子进程 + 组内后代，R
     await client.ensureConnected();
     const enginePid = client.enginePid!;
     await client.dispose();
-    await waitFor(() => isProcessAlive(enginePid) === false);
+    await waitFor(() => probePidAliveness(enginePid) === false);
     expect(existsSync(pidfilePath(dataDir, "fake", "test", process.pid))).toBe(false);
     await expect(client.dispose()).resolves.toBeUndefined(); // 幂等
     await expect(client.killAll("again")).resolves.toBeUndefined();

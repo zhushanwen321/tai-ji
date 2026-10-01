@@ -280,10 +280,10 @@ export class HandoffService {
     // A'（2026-08-24）：persistLabel=true —— "handoff from X" 是语义性承接名，持久化到
     // session_info 且防 auto-rename 覆盖（承接会话名不应被 LLM 标题改写）。
     // 缺陷 C 修复（sidecar-binding-sync 决策 1 矩阵 handoff 列）：承接 session 继承源 project
-    // 归属——工作主体留在用户逻辑分组，与 fork 归属继承 / cwd 继承对称。内存态兜底读法对齐
-    // fork 同款 as-cast 惯例（IManagedSessionView 未声明 projectId）；源无归属时 undefined，
+    // 归属——工作主体留在用户逻辑分组，与 fork 归属继承 / cwd 继承对称。projectId 已收编进
+    // IManagedSessionView（照 handedOffTo 先例），直接读；源无归属时 undefined，
     // create 内部不触发 project 分支（行为与现状一致，归默认项目）。
-    const srcProjectId = (srcSession as { projectId?: string }).projectId
+    const srcProjectId = srcSession?.projectId
     // 源真值在 handoff turn 完成后读取（此时源必已 ensureActive，内存实例恒命中）：
     // switchModel/setThinkingLevel 对 session.modelId/thinkingLevel 的直写 + ReplicatedState
     // 收敛保证内存实例是当前生效值。承接 session 的 hydrate/sidecar 持久化由 create 路径按

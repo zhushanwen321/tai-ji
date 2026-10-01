@@ -47,20 +47,21 @@ vi.mock("node:child_process", async () => {
 
 vi.mock("node:fs", async () => {
   const actual = await import("node:fs");
-  return {
-    default: {
-      ...actual,
-      mkdirSync: vi.fn(),
-      existsSync: vi.fn(() => false),
-      appendFileSync: vi.fn(),
-      writeFileSync: vi.fn(),
-      readdirSync: vi.fn(() => []),
-    },
+  // 真实 fs 全量展开 + 五个同步写/探测函数覆写：只给五个会让其它 fs 调用
+  // （如全局配置读取的 readFileSync）在 mock 下抛「No export is defined」。
+  const realExports: Record<string, unknown> = { ...actual };
+  delete realExports["default"];
+  const syncMocks = () => ({
     mkdirSync: vi.fn(),
     existsSync: vi.fn(() => false),
     appendFileSync: vi.fn(),
     writeFileSync: vi.fn(),
     readdirSync: vi.fn(() => []),
+  });
+  return {
+    ...realExports,
+    ...syncMocks(),
+    default: { ...actual, ...syncMocks() },
     promises: actual.promises,
   };
 });
@@ -89,10 +90,6 @@ vi.mock("../persistence/alive-store.ts", async (importOriginal) => {
 });
 
 vi.mock("../persistence/state-marker.ts", () => ({
-  writeFinalizedState: vi.fn(),
-  writeCancelledState: vi.fn(),
-  readStateMarker: vi.fn(() => undefined),
-  statStateStamp: vi.fn(() => null),
   STATE_SIDECAR_EXT: ".state",
 }));
 

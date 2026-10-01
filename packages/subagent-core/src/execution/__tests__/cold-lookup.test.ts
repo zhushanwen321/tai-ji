@@ -33,10 +33,16 @@ import {
   transcriptAnchorOf,
   type ColdLookupDeps,
 } from "../assembly/cold-lookup.ts";
+
+// core logger 桩：断言 zcode 锚查询异常走 warn（下游按锚失效重开对话基线，代价大）。
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 import { RecordStore } from "../persistence/record-store.ts";
 import type { SubagentRecord } from "../assembly/types.ts";
-import type { ClosedReason } from "../assembly/types.ts";
-import { ResurrectDeniedError } from "../assembly/types.ts";
+import type { ClosedReason } from "../domain/record-types.ts";
+import { ResurrectDeniedError } from "../domain/record-types.ts";
 
 /** [U1/A4] 「异进程且存活」的确定性模拟 pid：1 号进程（launchd/init）必然存在且非
  *  本测试进程——kill(1, 0) 对普通用户返回 EPERM，isProcessAlive 按「存在但无权限」
@@ -154,8 +160,7 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
     expect(vi.mocked(deps.register)).toHaveBeenCalledWith(record);
     expect(vi.mocked(deps.reportRecordTransition)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(deps.reportRecordTransition)).toHaveBeenCalledWith(record);
-    // [review MF-8] 磁盘终态位同步翻转：.finalized 删除 + .alive 刷新为当前进程
-    expect(fs.existsSync(`${sessionFile}.finalized`)).toBe(false);
+    // [review MF-8] .alive 刷新为当前进程（终态位 sidecar 已随 ③ 退场，不再有删除动作）
     expect(readAliveMarker(sessionFile)).toMatchObject({ pid: process.pid, id: "sa-cold-1" });
     // 冷查扫描契约：全目录兜底按 COLD_LOOKUP_SCAN_LIMIT 上限扫全量（无 root 过滤）
     expect(vi.mocked(deps.collectRecords)).toHaveBeenCalledWith(COLD_LOOKUP_SCAN_LIMIT, "all", undefined);
@@ -164,27 +169,6 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
   // [round2-notify-fix 合并注] 原「冷重建水合 collectMode」回归锁随 modeless 波1/波3
   // 删除：collectMode 字段已出 record（message 资格只看引擎能力轴，sync 成员身份迁
   // 登记态且跨重启不复活），被锁的水合行为是 main 设计上有意移除的。
-
-  it("[L4] 磁盘 .state（现行终态载体）+ legacy .finalized 残留 → 重生回边两者同步删除（否则磁盘扫描翻回 closed）", () => {
-    // [review MF-8] 残留任一终态 sidecar 都会让 record-store buildRecord 终态分支
-    // （分支 1，.state 优先 / 旧名兼容归一）压过 .alive 活态分支——reload / 异进程 /
-    // session-reader 全部把 running record 报成 closed，并为跨进程二次 resurrect 开门。
-    const sessionFile = writeSessionFixture({
-      state: JSON.stringify({ status: "finalized", reason: "parent-shutdown" }),
-      finalized: JSON.stringify({ reason: "parent-shutdown" }),
-    });
-    const deps = makeDeps({ disk: [makeFound({ sessionFile, closedReason: "parent-shutdown" })] });
-
-    const record = coldLookupForAction(deps, "sa-cold-1", true)!;
-
-    expect(record.status).toBe("running");
-    expect(record.closedReason).toBeUndefined();
-    // 终态 sidecar 双双清除（现行 .state + legacy .finalized），磁盘扫描不再翻回 closed
-    expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
-    expect(fs.existsSync(`${sessionFile}.finalized`)).toBe(false);
-    expect(vi.mocked(deps.register)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(deps.reportRecordTransition)).toHaveBeenCalledTimes(1);
-  });
 
   it("[P4-① ⛔ two-state-convergence U4] 轮终 idle record（markRoundIdle 产物：idle + .state 收条 + 无 closedReason）跨重启 readopt：wasClosed=true 三件套全量 + transition 恰一条 + .state 删除", () => {
     // U4 写面翻边后正常轮终 = idle 形态落盘（stopReason=completed + .state 收条
@@ -209,8 +193,7 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
     // 三件套全量（markResurrected wasClosed=true）：
     //   ① 内存翻回 running（acquire marker 先行 + resurrectClosed 内存翻回）
     expect(record.status).toBe("running");
-    //   ② .state 收条删除（wasClosed 分支 rmSync——磁盘重建面收敛活态，reload 不回退 idle）
-    expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
+    //   ② 磁盘终态位不再需要清理（③ 后终态由事件流折叠决定，重开由 record-reopened 表达）
     //   ③ .alive 写权声明 acquire 到当前进程
     expect(readAliveMarker(sessionFile)).toMatchObject({ pid: process.pid, id: "sa-cold-1" });
     // register + transition entry 恰一条（重生后立刻上报——live ≡ reload，SP-2 先例）
@@ -562,6 +545,23 @@ describe("[U6] transcriptAnchorOf / isAnchorResolvable 引擎分派", () => {
       engineHandle: { sessionRef: { sessionId: "sess_z_1", dbPath: path.join(zcodeDir, "nope.sqlite") }, poolKey: "shared" },
     };
     expect(isAnchorResolvable(noDb)).toBe(false); // db 文件缺失（fail-closed）
+  });
+
+  it("zcode 锚查询异常（库文件存在但读不了）→ false + warn 留痕（库路径 + sessionId）", async () => {
+    const corruptDb = path.join(zcodeDir, "corrupt.sqlite");
+    fs.writeFileSync(corruptDb, "definitely not a sqlite database", "utf8");
+    loggerMock.warn.mockClear();
+
+    const rec = {
+      engine: "zcode",
+      engineHandle: { sessionRef: { sessionId: "sess_corrupt", dbPath: corruptDb }, poolKey: "shared" },
+    };
+    expect(isAnchorResolvable(rec)).toBe(false); // fail-closed 方向保留
+
+    const warnCalls = loggerMock.warn.mock.calls;
+    expect(warnCalls).toHaveLength(1);
+    expect(String(warnCalls[0]?.[0])).toContain("zcode 锚存在性查询异常");
+    expect(warnCalls[0]?.[1]).toMatchObject({ dbPath: corruptDb, sessionId: "sess_corrupt" });
   });
 
   it("pi 锚现行判据不变：sessionFile 在盘可读（`{sessionFile}` 字面量入参兼容）", () => {

@@ -29,7 +29,7 @@
  * 层归属：Engine。零 infra 依赖（runner 是 AgentRunner port，budget/trace/call 是 Engine 模型）。
  */
 
-import type { SubagentStream } from "../execution/assembly/stream-sink.ts";
+import type { AgentStreamSink } from "../shared/agent-stream.ts";
 import type { AgentEvent } from "../shared/agent-event.ts";
 import { getLogger } from "../core/logger.ts";
 import type { AgentCall } from "./models/agent-call.ts";
@@ -181,7 +181,7 @@ export async function executeAgentCall(
   signal: AbortSignal,
   trace: Trace,
   onEvent?: (event: AgentEvent) => void,
-  stream?: SubagentStream,
+  stream?: AgentStreamSink,
   isOrphaned?: () => boolean,
 ): Promise<void> {
   call.markRunning();

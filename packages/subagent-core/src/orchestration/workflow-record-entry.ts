@@ -62,7 +62,7 @@ export type WorkflowRecordEntryKind = (typeof WORKFLOW_RECORD_ENTRY_KINDS)[numbe
 /**
  * v2 注册条目 data（设计 D1 条目契约表 workflow-record 行·注册列）。
  *
- * run 创建时写一条：身份 + journal 锚点。journalPath 是 session-reader workflow
+ * run 创建时写一条：身份 + journal 锚点。recordPath 是 session-reader workflow
  * 发现链的主源数据基础（v2 注册条目是 run 步骤级详情读面的唯一发现锚点）。
  */
 export interface WorkflowRecordRegisteredEntryData { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
@@ -78,13 +78,13 @@ export interface WorkflowRecordRegisteredEntryData { // oe-exempt:20260929:frame
   startedAt: number;
   /**
    * record 事件流绝对路径锚点（`<sessionDir>/workflow-state/<runId>.record.jsonl`
-   * ——后缀经 core RUN_EVENT_JOURNAL_SUFFIX 单源常量，[D1] record 单源流命名；
+   * ——后缀经 core RUN_EVENTS_SUFFIX 单源常量，[D1] record 单源流命名；
    * 写侧锚点与实写面同源见 terminal-actions.runEventJournalPathOf）——v2 条目
-   * 的 journalPath 锚点字段（任务书 U0 职责 1）；保留窗口内 record 流在盘即可
+   * 的 recordPath 锚点字段（任务书 U0 职责 1）；保留窗口内 record 流在盘即可
    * 按锚点读步骤级家族链，窗口外回落 manifest 摘要级（session-reader 发现链
    * 三档，[D16③] 适配）。
    */
-  journalPath: string;
+  recordPath: string;
 }
 
 /**

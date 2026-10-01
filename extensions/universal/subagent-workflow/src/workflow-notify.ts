@@ -35,7 +35,7 @@ import {
   boundedPrettySerialize,
   getBoundNotifyLedger,
   isTerminalDoneReason,
-  RUN_EVENT_JOURNAL_SUFFIX,
+  RUN_EVENTS_SUFFIX,
   type RunOutcome,
 } from "@zhushanwen/subagent-core";
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
@@ -58,12 +58,13 @@ const MAX_RESULT_SUMMARY_LENGTH = 500;
 const RECORD_FAIL_CONTENT_PREVIEW_LENGTH = 200;
 
 /**
- * [D7] 事件 journal 文件名（run store 旁，artifactsDir 内）：`<runId>.events.jsonl`
- * （runId 即 generateRunId 的 wf- 前缀产物，渲染名 = 设计 D5 的 wf-<id>.events.jsonl；
- * 后缀经 core barrel 单源 RUN_EVENT_JOURNAL_SUFFIX，core 命名变更时编译期同步）。
+ * [D7] 事件 journal 文件名（run store 旁，artifactsDir 内）：`<runId>.record.jsonl`
+ * （runId 即 generateRunId 的 wf- 前缀产物；后缀随 core RUN_EVENTS_SUFFIX 改名，
+ * 历史 .events.jsonl = 旧写入方实体，设计 D5 的渲染名 wf-<id>.events.jsonl 即该
+ * 旧形态；实值经 core barrel 单源 RUN_EVENTS_SUFFIX，core 命名变更时编译期同步）。
  */
 function runEventsJournalPath(artifactsDir: string, runId: string): string {
-  return join(artifactsDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+  return join(artifactsDir, `${runId}${RUN_EVENTS_SUFFIX}`);
 }
 
 /**
@@ -138,7 +139,7 @@ interface WorkflowNotifyDetails { // oe-exempt:20260929:framework:workflow/recor
    */
   artifactsDir?: string;
   /**
-   * [D7] 事件 journal 指针（`<artifactsDir>/wf-<runId>.events.jsonl`）——终局
+   * [D7] 事件 journal 指针（`<artifactsDir>/wf-<runId>.record.jsonl`）——终局
    * 证据的入口载荷（D5-3 诊断引用落账的消费面）。
    */
   eventsJournalPath?: string;

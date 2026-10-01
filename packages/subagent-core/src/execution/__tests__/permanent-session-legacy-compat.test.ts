@@ -23,8 +23,10 @@ import { ManifestStore } from "../persistence/manifest-store.ts";
 import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { writeRecordBinding } from "../persistence/state-marker.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
 import { createRecord } from "../persistence/execution-record.ts";
+import { v2RegisteredEntry, v2SettledEntry } from "./helpers/v2-record-entry.ts";
 
 /** 最小合法子 session 文件（session header + identity custom entry，S8 旧数据形态）。 */
 function writeLegacySessionJsonl(
@@ -102,53 +104,6 @@ describe("[U8/S8] 旧格式磁盘组只读兼容——恒 idle + stopReason 桥�
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-  });
-
-  it("旧 `.finalized`（内容 = reason 原文）→ idle + stopReason=reason + closedReason 桥接位", () => {
-    const file = path.join(sessionsDir, "20260101T000000_a.jsonl");
-    writeLegacySessionJsonl(file, { id: "sa-old-fin", task: "old fin task", startedAt: 1000, rootSessionId: "root-session" });
-    writeLegacyBinding(file, "sa-old-fin", 1000);
-    // 旧格式 finalized sidecar：裸内容 = 关闭原因（state-marker LEGACY_FINALIZED_EXT 读侧）
-    fs.writeFileSync(`${file}.finalized`, "gc", "utf-8");
-
-    const store = new RecordStore(sessionsDir);
-    const rec = store.collectRecords(10, "all").find((r) => r.id === "sa-old-fin");
-    expect(rec).toBeDefined();
-    expect(rec?.status).toBe("idle");
-    expect(rec?.stopReason).toBe("gc");
-    expect(rec?.closedReason).toBe("gc");
-    expect(rec?.agent).toBe("worker");
-    expect(rec?.task).toBe("old fin task");
-    store.dispose();
-  });
-
-  it("旧 `.finalized` 空文件（v8.5 前形态）→ idle + stopReason=disconnected", () => {
-    const file = path.join(sessionsDir, "20260101T000001_b.jsonl");
-    writeLegacySessionJsonl(file, { id: "sa-old-empty", task: "old empty task", startedAt: 1000, rootSessionId: "root-session" });
-    fs.writeFileSync(`${file}.finalized`, "", "utf-8");
-
-    const store = new RecordStore(sessionsDir);
-    const rec = store.collectRecords(10, "all").find((r) => r.id === "sa-old-empty");
-    expect(rec?.status).toBe("idle");
-    expect(rec?.stopReason).toBe("disconnected");
-    expect(rec?.closedReason).toBe("disconnected");
-    store.dispose();
-  });
-
-  it("旧 `.cancelled` tombstone → idle + stopReason=interrupted + closedReason=cancelled", () => {
-    const file = path.join(sessionsDir, "20260101T000002_c.jsonl");
-    writeLegacySessionJsonl(file, { id: "sa-old-cx", task: "old cx task", startedAt: 1000, rootSessionId: "root-session" });
-    writeLegacyBinding(file, "sa-old-cx", 1000);
-    // 旧格式 cancelled tombstone：JSON {status:"cancelled", endedAt}
-    fs.writeFileSync(`${file}.cancelled`, JSON.stringify({ status: "cancelled", endedAt: 2500 }), "utf-8");
-
-    const store = new RecordStore(sessionsDir);
-    const rec = store.collectRecords(10, "all").find((r) => r.id === "sa-old-cx");
-    expect(rec?.status).toBe("idle");
-    expect(rec?.stopReason).toBe("interrupted");
-    expect(rec?.closedReason).toBe("cancelled");
-    expect(rec?.endedAt).toBe(2500);
-    store.dispose();
   });
 
   it("旧 manifest（无 executionStatus）三值域 closed/completed/cancelled → manifest 源投影 idle + closedReason 保留", () => {
@@ -328,46 +283,53 @@ describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
     reader.dispose();
   });
 
-  it("旧 entry 残留 intent 键被忽略（[u-arch] 停读证明）→ manifest 补建投 running、engine 域仍下行", () => {
-    // 离线形态：主 session 末条 subagent-record entry 携带旧数据残留 intent 键
-    //（收起概念删除前 close 落盘形态），manifest 缺失 → rebuildIndexes 惰性补建。
-    // [u-arch] 读侧停读：残留键被忽略（与 chatMode 消亡同款先例），补建不再按
-    // intent 派生 legacy closed——按 §3.4 方案 A 判定投 running。
+  it("残留 intent 键被忽略（[u-arch] 停读证明）→ manifest 补建投 running、engine 域仍下行", () => {
+    // 离线形态：主 session 末条 subagent-record entry 族（v2 注册 + 终态两条款）携带
+    // 旧数据残留 intent 键（收起概念删除前 close 落盘形态），manifest 缺失 →
+    // rebuildIndexes 惰性补建。v1 全量快照形态已随兼容层删除：残留键在 v2 读侧按
+    // 契约字段集重建时自然忽略（与 chatMode 消亡同款先例），补建不再按 intent 派生
+    // legacy closed——按 §3.4 方案 A 判定投 running。
     const mainSessionFile = path.join(tmpDir, "main-session.jsonl");
-    const entry = JSON.stringify({
-      type: "custom",
-      id: "seed-1",
-      parentId: null,
-      timestamp: new Date(1000).toISOString(),
-      customType: "subagent-record",
-      data: {
-        v: 1,
-        id: "sa-entry-arch",
-        agent: "worker",
-        task: "entry arch task",
-        slug: "entryarch",
-        status: "idle",
-        stopReason: "gc",
-        intent: "archived",
-        mode: "background",
-        startedAt: 1000,
-        rootSessionId: "root-session",
-        parentRecordId: undefined,
-        depth: 0,
-        endedAt: 2000,
-        turns: 1,
-        totalTokens: 10,
-        model: "test/model",
-        thinkingLevel: undefined,
-        eventLog: [],
-        displayItems: [],
-        engine: "zcode",
-      },
-    });
-    fs.writeFileSync(mainSessionFile, `${entry}\n`, "utf-8");
+    const archived: SubagentRecord = {
+      id: "sa-entry-arch",
+      agent: "worker",
+      task: "entry arch task",
+      slug: "entryarch",
+      status: "idle",
+      stopReason: "gc",
+      mode: "background",
+      startedAt: 1000,
+      rootSessionId: "root-session",
+      parentRecordId: undefined,
+      depth: 0,
+      endedAt: 2000,
+      turns: 1,
+      totalTokens: 10,
+      model: "test/model",
+      thinkingLevel: undefined,
+      eventLog: [],
+      displayItems: [],
+      engine: "zcode",
+    };
+    // 残留旧键 intent 手写入注册条目载荷（v2 契约无此字段——读侧零携带证明）。
+    const seeded = [
+      { ...v2RegisteredEntry(archived), intent: "archived" },
+      v2SettledEntry(archived),
+    ];
+    const lines = seeded.map((data) =>
+      JSON.stringify({
+        type: "custom",
+        id: "seed-1",
+        parentId: null,
+        timestamp: new Date(1000).toISOString(),
+        customType: "subagent-record",
+        data,
+      }),
+    );
+    fs.writeFileSync(mainSessionFile, `${lines.join("\n")}\n`, "utf-8");
 
-    // 锚定 entry 源（recoverEntryOnlyOrphans 的 mainSessionFile 记忆点；末条 idle 非
-    // running → 不触发纠偏 append），随后 collectRecords 经 mergedRecords 1.7
+    // 锚定 entry 源（recoverEntryOnlyOrphans 的 mainSessionFile 记忆点；非 interrupted
+    // 终态条目在场 → 不触发纠偏 append），随后 collectRecords 经 mergedRecords 1.7
     //（zcode entry 源）→ 惰性 manifest 补建。
     const store = new RecordStore(sessionsDir, undefined, undefined, manifestDir);
     store.recoverEntryOnlyOrphans(mainSessionFile, "root-session");

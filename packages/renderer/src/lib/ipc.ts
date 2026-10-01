@@ -10,8 +10,9 @@
 import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult } from '@taiji/shared'
 import type { ImageCacheWritePort } from '@taiji/core'
 
-/** preload 注入的 electronAPI（web/mock 环境为 undefined） */
-const api = window.electronAPI
+/** preload 注入的 electronAPI（web/mock / node 测试环境为 undefined——后者连
+ * window 全局都没有，裸标识符直接 ReferenceError，故按环境守卫取值） */
+const api = typeof window !== 'undefined' ? window.electronAPI : undefined
 
 /** 读取已知 runtime 端口（main 已 spawn）。无 IPC 或未启动返回 undefined */
 export function getRuntimePort(): Promise<number | undefined> {

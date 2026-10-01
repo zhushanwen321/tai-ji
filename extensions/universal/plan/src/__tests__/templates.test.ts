@@ -7,12 +7,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
-import { extractPlanSteps } from "../compact.js";
+import { extractPlanSteps } from "../execution-notice.js";
 import {
   formatAvailablePlans,
   getBuiltinTemplateDir,
   listTemplates,
-  loadTemplate,
 } from "../templates.js";
 
 const BUILTIN_TEMPLATE_NAMES = [
@@ -46,7 +45,7 @@ function absentDir(label: string): string {
   return join(tmpdir(), `plan-absent-${label}-${randomUUID()}`);
 }
 
-/** loadTemplate 用隔离源（用户级缺位 → 只剩内置源，不受运行机真实 ~/.agents/plans 干扰） */
+/** 发现视图用隔离源（用户级缺位 → 只剩内置源，不受运行机真实 ~/.agents/plans 干扰） */
 function isolatedSources(): { userPlansDir: string } {
   return { userPlansDir: absentDir("user") };
 }
@@ -170,24 +169,6 @@ describe("空发现 warn（bundle 布局事故信号）", () => {
   });
 });
 
-describe("loadTemplate（发现视图的读取侧）", () => {
-  it("returns content for existing builtin template（隔离用户源）", () => {
-    const content = loadTemplate("feature-plan", isolatedSources());
-    expect(content).not.toBeNull();
-    expect(content).toContain("## ");
-  });
-
-  it("returns null for non-existent template", () => {
-    expect(loadTemplate("non-existent-template", isolatedSources())).toBeNull();
-  });
-
-  it("从合并视图解析：同名时用户级胜者内容被加载", () => {
-    const userDir = mkTmpDir("plan-lt-user-");
-    writeTemplate(userDir, "feature-plan.md", "# user-owned skeleton\n");
-    expect(loadTemplate("feature-plan", { userPlansDir: userDir })).toBe("# user-owned skeleton\n");
-  });
-});
-
 describe("<available-plans> 段拼装纯函数（D6）", () => {
   it("空清单返回空串（不注入段）", () => {
     expect(formatAvailablePlans([])).toBe("");
@@ -233,12 +214,14 @@ describe("template ↔ extractPlanSteps alignment guard (D4)", () => {
   // ① 模板标题改名 → 恰一节断言失败；
   // ② 解析正则与标题脱节 → 提取退化到 fallback 收进其他节的噪音项 → toEqual 失败。
   it.each(BUILTIN_TEMPLATE_NAMES)("template '%s' has exactly one '## Implementation Steps' section that extractPlanSteps consumes", (name) => {
-    const content = loadTemplate(name, isolatedSources());
-    expect(content).not.toBeNull();
+    // 胜者 path 直读（读取侧已随 select-template 单次扫描复用收口——不另有按名读取 API）
+    const winner = listTemplates(isolatedSources()).find((t) => t.name === name);
+    expect(winner).toBeDefined();
+    const content = winner ? fs.readFileSync(winner.path, "utf-8") : "";
 
-    expect(content!.match(/^## Implementation Steps$/gm)).toHaveLength(1);
+    expect(content.match(/^## Implementation Steps$/gm)).toHaveLength(1);
 
-    const plan = content!
+    const plan = content
       // 在第一个非步骤节标题后放噪音编号项（模拟 Requirements 等节含编号列表）
       .replace(/^(## (?!Implementation Steps).+)$/m, "$1\n1. noise-from-other-section")
       // 在步骤节标题后填编号步骤（模拟 AI 按模板写 plan.md）

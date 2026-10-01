@@ -79,10 +79,14 @@ export default {
     newSessionInFolder: 'New session in this folder',
     deleteFolderConfirm: 'Delete all sessions in this folder?',
   },
-  assignProjectFailed: 'Failed to assign to project',
+  assignProjectFailed: 'Failed to assign to project: {msg}',
   forceQuitFailed: 'Failed to force quit: {msg}',
-  // [session-dead structural fix D3] explicit toast after forceQuit recovers the defer queue into the Composer draft
+  // [delivery-ownership kernel u3c / D10] explicit toast after forceQuit drains undelivered kernel entries into the Composer draft
   forceQuitQueueRecovered: '{count} queued message moved back to draft | {count} queued messages moved back to draft',
+  // drain RPC failure (pi already dead / transport error) — recovered text is not reproducible, must surface
+  forceQuitQueueRecoverFailed: 'Failed to recover queued messages: {msg}',
+  // entries with empty content (cannot be restored to draft; kernel entries already drained, not reproducible) — surface as failure, success toast reports recovered count only
+  forceQuitQueueRecoverEmpty: '{count} queued entry could not be restored (empty content) | {count} queued entries could not be restored (empty content)',
   segmentedTab: {
     session: 'Session',
     file: 'File',
@@ -129,11 +133,6 @@ export default {
   // list / subagent filter bar / workflow list / "background commands" L2 view) are deleted —
   // their consumer components were retired in the same batch; task copy now lives in the
   // composer tray namespace `panel.tray.*` (locales/en-US/tray.ts).
-  // [C7 word-choice note, migrated] The former deliberate split between "Running" (task-scoped:
-  // subagent sessions with a round in flight) and "Running" (process-scoped: background commands)
-  // is now registered in two places: tray.ts file header [term ruling]
-  // (`panel.tray.bucket.running` task scope / `panel.tray.bucket.runningProcess` process scope)
-  // and the turnProgress section of this file. A true conceptual difference — do not unify.
   workflowDetail: {
     terminate: 'Terminate',
     terminateConfirm: 'Confirm terminate?',

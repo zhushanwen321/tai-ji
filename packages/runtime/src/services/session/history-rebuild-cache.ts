@@ -36,16 +36,17 @@ import type { IProcessManager } from '../ports/pi-engine.js'
 import type { ISessionStore } from '../ports/session.js'
 import { getHistoryTailFromFile, tailReadHistory, type HistoryWindowQuery, type HistoryWindowResult } from '../session-history.js'
 import { applyOrphanToolResults } from '../../infra/pi/message-converter.js'
+import { computeActivePathEntries } from '../../infra/pi/session-entry-mapper.js'
 import { isEntryNotFoundError } from './trace-sync.js'
 import { isEnoent, toErrorMessage } from '../../utils/errors.js'
 import { warnOnce } from '../../utils/warn-once.js'
 
 /**
- * get_entries RPC 响应的域内收窄（u-s4 EntriesSinceResult 同款先例）：entries 只消费
- * parentId（增量首条的不变量检测）+ 整体透传 rebuildHistoryFromEntries（unknown[] 形参），
- * 不依赖 pi 原始 entry 全形状。
+ * get_entries RPC 响应的域内收窄（u-s4 EntriesSinceResult 同款先例）：entries 消费
+ * id/parentId（全量路径的活跃路径裁剪 + 增量首条的不变量检测）+ 整体透传
+ * rebuildHistoryFromEntries（unknown[] 形参），不依赖 pi 原始 entry 全形状。
  */
-type GetEntriesResult = { data?: { entries?: Array<{ parentId?: string | null }>; leafId?: string | null } }
+type GetEntriesResult = { data?: { entries?: Array<{ id?: string; parentId?: string | null }>; leafId?: string | null } }
 
 /** 单个 session 的重建缓存条目。 */
 export interface HistoryRebuildCacheEntry {
@@ -96,9 +97,10 @@ function estimateMessagesBytes(messages: Message[]): number {
  * 下次重进走全量重建，等价于「缓存从未存在」，行为退化为现状。
  *
  * 字节帽（B8，memory-leak-remediation §3.3-B8 候选 A）：条目写入前量全量 Message[]
- * 序列化字节，超 32MB 不入缓存。缓存基线**始终存全量重建结果**（增量合并正确性依赖
- * ——被否候选 B「缓存也切预算窗」的否决理由：增量基线错位 = 会话内容错乱），故字节
- * 维度只能整条目取舍，不做窗口化。
+ * 序列化字节，超 32MB 不入缓存。缓存基线**始终存完整活跃路径投影**（message-revoke
+ * U6a 起全量重建经 leafId 裁剪后落缓存——基线是「未切预算窗的完整活跃路径」，非全文件，
+ * 被撤分支不进基线；增量合并正确性依赖——被否候选 B「缓存也切预算窗」的否决理由：
+ * 增量基线错位 = 会话内容错乱），故字节维度只能整条目取舍，不做窗口化。
  */
 export class HistoryRebuildCache {
   private readonly entries = new Map<string, HistoryRebuildCacheEntry>()
@@ -267,8 +269,9 @@ function selectTurnWindowStart(
  * truncated 判定 = 窗口起点之前仍有消息（有更早历史未返回）。预算内（全部 turn
  * 入窗且字节未超）→ truncated=false，行为与预算化前一致（A6 回归基线）。
  *
- * 缓存关系：缓存基线始终存**全量**重建结果（增量合并的正确性依赖），本函数只作用
- * 于返回值——三分支（空增量/增量合并/全量重建）统一在返回前调用。
+ * 缓存关系：缓存基线始终存**完整活跃路径投影**（全量重建经 leafId 裁剪后的未切窗结果，
+ * message-revoke U6a；增量合并的正确性依赖），本函数只作用于返回值——三分支（空增量/
+ * 增量合并/全量重建）统一在返回前调用。
  *
  * totalTurnsEstimate：入参 Message[] 上的精确 turn 总数（user 消息计数）。[u6] 游标翻页
  * 时入参是「锚点之前」的前缀，此值即前缀内精确总量（读到锚点为精确值）。
@@ -412,8 +415,9 @@ export class SessionHistoryReader {
    * 视图不一致的文件尾部（最多 20 turn），两次 getHistory 结果闪变。
    *
    * 返回 HistoryWindowResult（u4b 起双预算窗口：truncated / loadedTurns /
-   * totalTurnsEstimate）——缓存基线始终存全量重建结果，**预算窗口只作用于返回值**
-   * （D4：最近 20 turns 且总字节 ≤ 640KB，单 turn 超预算完整放行，entry 原子性），
+   * totalTurnsEstimate）——缓存基线始终存完整活跃路径投影（message-revoke U6a：全量
+   * 重建经 leafId 裁剪后的未切窗结果），**预算窗口只作用于返回值**
+   *（D4：最近 20 turns 且总字节 ≤ 640KB，单 turn 超预算完整放行，entry 原子性），
    * 三分支在返回前统一经 applyHistoryBudgetWindow 切窗。
    *
    * 返回值契约（终审 minor）：messages 是缓存/重建结果的**浅拷贝**（数组级隔离，调用方可
@@ -452,7 +456,8 @@ export class SessionHistoryReader {
       return await this.getLatestWindow(sessionId, query, client)
     }
     // 无 RPC client（离线 session）：走尾读（分块扩窗预算窗口，D5②），
-    // 避免大文件全量读（不读不写缓存——文件路径无 leafId 概念）。
+    // 避免大文件全量读（不读不写缓存——文件路径无 RPC leafId，活跃路径以窗口末条
+    // entry 推导，见 session-history convertWindowEntries 的裁剪接入）。
     return await this.tailReadOffline(sessionId, query)
   }
 
@@ -544,13 +549,22 @@ export class SessionHistoryReader {
     const result = await client.getEntries() as GetEntriesResult
     const entries = result.data?.entries ?? []
     if (entries.length === 0) return null
+    // [message-revoke U6a] 全量重建路径接活跃路径裁剪（调用点契约：仅全量重建裁剪）。
+    // get_entries 返回全文件 entries + leafId（无路径过滤），不裁剪则撤回后被撤分支按
+    // 文件序渲染（A1「旧分支不渲染」结构性前提）。port 签名（ISessionStore
+    // rebuildHistoryFromEntries 两参）不含 leafId，故在调用点预过滤——与经
+    // rebuildHistoryFromEntries 第三参裁剪等价（同一 computeActivePathEntries SSOT）。
+    const leafId = result.data?.leafId ?? null
+    const scopedEntries = computeActivePathEntries(entries, leafId ?? undefined)
     // 读 segments.json sidecar（runtime 直接读文件，不经 IPC——IPC 是 renderer→main，runtime 是独立进程）。
     // 文件缺失/损坏 → null（rebuildHistoryFromEntries 全降级为占位文本，非硬错误）。
     const segmentsMetadata = await readSegmentsMetadataFile(sessionId)
-    const rebuilt = this.deps.sessionStore.rebuildHistoryFromEntries(entries, segmentsMetadata)
-    // leafId 是 session 当前叶子 entry id，记录为下次增量拉取的 since 基准（D6-1）。
-    // 缓存存全量基线（增量合并正确性依赖）；返回值按双预算切窗（D4）。
-    this.historyCache.set(sessionId, { leafId: result.data?.leafId ?? null, messages: rebuilt.messages, truncated: false })
+    const rebuilt = this.deps.sessionStore.rebuildHistoryFromEntries(scopedEntries, segmentsMetadata)
+    // leafId 是 session 当前叶子 entry id，记录为下次增量拉取的 since 基准（D6-1）——
+    // 存 pi 真实 leafId（非裁剪投影尾），增量 delta 首条 parent 与之配对（W20 Fix-2 不变量）。
+    // 缓存基线 = 完整活跃路径投影（全量重建裁剪后落缓存——「全量」指未切预算窗的完整
+    // 活跃路径，非全文件；增量合并正确性依赖基线为完整活跃路径）；返回值按双预算切窗（D4）。
+    this.historyCache.set(sessionId, { leafId, messages: rebuilt.messages, truncated: false })
     return rebuilt.messages
   }
 
@@ -559,6 +573,11 @@ export class SessionHistoryReader {
    * 缺省同源 HISTORY_BUDGET.MAX_BYTES（D4 同一预算逻辑——仅 turn 数截取挡不住 20 个
    * 大 turn 的超限 reply）；query.cursor 存在时随行透传（离线游标翻页走 cursorId 定位，
    * 缺省路径 cursor 恒 undefined，读侧 query?.cursor 与缺键等价）。
+   *
+   * [message-revoke U6a] 离线腿的活跃路径裁剪在本链末端统一接入（convertWindowEntries
+   * 以窗口末条 entry 为 leafId——见该函数注释），被撤分支条目不进返回的 messages；
+   * 已知边界：turn 计数/字节预算在 collect 阶段按原始行计算（含旧分支行）→ 分支
+   * session 的窗口可能欠填、totalTurnsEstimate 偏大（设计 D3 允许的降级面，内容正确性优先）。
    *
    * [btw-question 重载链修复] btw vid 分支先于通用链：线目录在 G4 隔离面
    *（`agent/btw/<encodeCwd>/<mainSid>/`，构造性不在 sessions/ 扫描面），通用链的
@@ -654,6 +673,12 @@ export class SessionHistoryReader {
         return undefined
       }
       const segmentsMetadata = await readSegmentsMetadataFile(sessionId)
+      // [message-revoke U6a 反直觉契约——增量路径不裁剪] 此处刻意不传 leafId（设计 D3/U6
+      // 定死的反向约束，勿「顺手统一」两路径）：delta 是活跃路径的后缀切片——上方 W20
+      // Fix-2 不变量保证首条 parent = 缓存 leafId = 活跃 tip，delta 条目构造性全在活跃
+      // 路径上；而活跃路径裁剪是「leafId 回溯到根」的全树语义，在 since 窗口切片上执行
+      // 会把窗口边界误当树边界（切片首条之前无根可回溯），属语义误用。缓存基线已是
+      // 活跃路径投影（rebuildFullHistoryAndCache 裁剪后落缓存），merge 结果保持投影语义。
       const rebuilt = this.deps.sessionStore.rebuildHistoryFromEntries(incEntries, segmentsMetadata)
       const merged = mergeIncrementalMessages(cached.messages, rebuilt.messages)
       // W20 review Fix-1：增量窗口以 toolResult 开头（缓存 leafId 切在 assistant(toolCalls)

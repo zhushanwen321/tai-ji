@@ -4,7 +4,7 @@
  * 单次 workflow run 的不可变规格。
  *
  * 设计：
- * - 全部字段 readonly——run 一旦创建，规格不可改（状态变化走 RunState）
+ * - 全部字段 readonly——run 一旦创建，规格不可改（状态变化走 RunLifecycleState）
  * - scriptSource 是已 strip `export const meta` 的可执行源（WorkflowScript.toExecutable）
  * - budgetTokens/budgetTimeMs 是上限（可选，未设 = 不限制）
  *

@@ -35,9 +35,8 @@ vi.mock('@zhushanwen/pi-extension-logger', () => ({
 }))
 
 import schedulerExtension from '../index.js'
+import { TICK_INTERVAL_MS } from '../runtime.js'
 import { TASK_ENTRY_TYPE } from '../types.js'
-
-const TICK_INTERVAL_MS = 30_000
 /** 与 index.ts 的 WIDGET_KEEPALIVE_INTERVAL_MS 同值（10min；常量不导出，测试锚定同值）。 */
 const KEEPALIVE_INTERVAL_MS = 10 * 60 * 1000
 const BASE = Date.parse('2026-01-01T00:00:00Z')

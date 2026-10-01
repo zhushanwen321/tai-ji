@@ -12,7 +12,9 @@
  * - AP-4 数据面：per-session 累计 entries（首拉全量 + sinceEntryId 增量 append），
  *   折叠始终对累计全量调共享 replayFoldEntries（前缀依赖语义不被破坏）；游标失效
  *   （Entry not found）→ 丢弃累计全量重拉自愈（E11）；无 client → SESSION_NOT_ACTIVE
- *   → 按会话 status 分「恢复中/不可用」两态（E4）。
+ *   → 按会话 status 分「恢复中/不可用」两态（E4）。树回退（消息撤回）经
+ *   'taiji:revoked' 失效信号触发镜像重建（丢弃累计 → 全量重拉，runtime readEntries
+ *   已按活跃路径裁剪，被撤子树的 task op 不在回包——面板/徽标残留随之清除）。
  *
  * 写路径（设计 §3.3 D6）：四个动作只拼白名单子命令字面量 on|off|rm|run + 折叠快照中
  * 存在的 8 位 hex id（快照无该 id → TASK_NOT_FOUND 行内提示、不发命令，E5——防
@@ -76,6 +78,14 @@ const MODAL_VIEW_ID = `modal-${PLUGIN_ID}-${MODAL_ID}`
 const MAX_TASKS = 50
 /** pi 侧 /schedule 扩展命令名（requireCommand 与 E13 判定同源） */
 const SCHEDULE_COMMAND_NAME = 'schedule'
+
+/**
+ * 撤回失效信号 customType（双侧同构字面量：与 agent-ext navigateTree 的 LabelEntry
+ * label 'taiji:revoked'、runtime revoke-orchestrator REVOKED_SIGNAL_CUSTOM_TYPE 三侧
+ * 同串——插件不能 import runtime 包，按 CLIENT_MSG_ID_TYPE 双侧同构先例自持）。
+ * 语义 = 该会话发生过树回退（消息撤回），累计镜像按活跃路径权威态重建。
+ */
+const REVOKED_SIGNAL_CUSTOM_TYPE = 'taiji:revoked'
 
 /** 失效信号防抖合并窗口（ms）：风暴合并成一次重拉（对齐 session-records 先例量级） */
 const READ_DEBOUNCE_MS = 200
@@ -301,6 +311,17 @@ function ensureMirror(api: Api, sessionId: string, sink: DisposableLike[]): Sess
   })
   mirror.disposables.push(sub)
   sink.push(sub)
+  // 树回退（消息撤回）信号：累计镜像按活跃路径权威态重建（与 TASK_ENTRY_TYPE 订阅
+  // 并列，同一 disposables 管理）——丢弃累计 + 全量重拉，被撤 task op 随 runtime 侧
+  // 活跃路径裁剪从回包消失，面板/徽标残留清除。
+  const revokedSub = api.sessions.onEntriesInvalidated(sessionId, REVOKED_SIGNAL_CUSTOM_TYPE, (sid) => {
+    const revokedMirror = mirrors.get(sid)
+    if (!revokedMirror) return
+    discardAccumulatedMirror(revokedMirror)
+    scheduleRefresh(api, sid)
+  })
+  mirror.disposables.push(revokedSub)
+  sink.push(revokedSub)
   scheduleRefresh(api, sessionId)
   void reevaluateCommandAvailability(api, mirror)
   return mirror
@@ -327,6 +348,16 @@ function refresh(api: Api, sessionId: string): Promise<void> {
     mirror.refreshInFlight = null
   })
   return mirror.refreshInFlight
+}
+
+/**
+ * 丢弃累计镜像（E11 游标失效自愈 / 'taiji:revoked' 撤回信号镜像重建共用的小函数）：
+ * 清 entries + cursor，下一次 doRefresh 因 cursor undefined 走全量重拉。全量回包已经
+ * runtime 活跃路径过滤（readEntries 裁剪），折叠输入天然不含被撤子树 op。
+ */
+function discardAccumulatedMirror(mirror: SessionMirror): void {
+  mirror.entries = []
+  mirror.cursor = undefined
 }
 
 async function doRefresh(api: Api, mirror: SessionMirror): Promise<void> {
@@ -357,8 +388,7 @@ async function doRefresh(api: Api, mirror: SessionMirror): Promise<void> {
         console.warn(
           `[scheduler-manager] cursor invalidated, full re-pull (session=${mirror.sessionId})`,
         )
-        mirror.entries = []
-        mirror.cursor = undefined
+        discardAccumulatedMirror(mirror)
         // 重拉必须挂在当前 in-flight 结束之后：此刻 refresh() 仍能看见本轮登记的
         // promise（finally 未跑、refreshInFlight 未清），直接调会被并发合并复用返回，
         // 自愈拉取静默丢失（E11 用例实测抓出）。挂到 settle 之后登记已清空，
@@ -574,14 +604,14 @@ async function handleWrite(
       )
       return
     }
-    // 回执失败：reason 是诊断/文案面，行为分支只看 accepted（E7 词表纪律）
-    const r = receipt.reason
+    // 回执失败：reason 是诊断/文案面，行为分支只看 accepted（E7 词表纪律）。
+    // busy/compacting/bash 退役值已随 SendPromptReason 词表收窄删除（「排队取代拒绝」
+    // 后投递内核对暂不可收时态只排队不回拒）——除 command-missing 外的失败统一走
+    // 通用重试文案。
     const line =
-      r === 'busy' || r === 'compacting' || r === 'bash'
-        ? `会话正在忙，操作未生效（可手敲 /schedule ${sub} ${parsed.id}）`
-        : r === 'command-missing'
-          ? '命令不可用，操作未生效 —— 若持续失败，请到 设置 → 扩展检查 该会话的 scheduler 扩展'
-          : '操作未生效，请重试'
+      receipt.reason === 'command-missing'
+        ? '命令不可用，操作未生效 —— 若持续失败，请到 设置 → 扩展检查 该会话的 scheduler 扩展'
+        : '操作未生效，请重试'
     await setNoticeAndPush(api, sessionId, line)
   } catch (e) {
     const msg = toMessage(e)
@@ -590,7 +620,7 @@ async function handleWrite(
       sessionId,
       wasRecovering
         ? `会话恢复失败：${msg} —— 请从侧栏手动打开该会话后再管理`
-        // 与 busy 分支同形态：错误提示必须携带可执行的恢复动作（手敲子命令重试）
+        // 错误提示必须携带可执行的恢复动作（手敲子命令重试）
         : `操作未生效：${msg}（可手敲 /schedule ${sub} ${parsed.id} 重试）`,
     )
   }

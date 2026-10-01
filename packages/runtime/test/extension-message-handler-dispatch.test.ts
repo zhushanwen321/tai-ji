@@ -29,9 +29,7 @@ function makeHandler(opts: HandlerOpts = {}) {
   const cap: Captured = { replies: [], errors: [] }
   const extensionTimeoutMgr = {
     isBridgeRequest: vi.fn().mockReturnValue(false),
-    removeBridgeRequest: vi.fn(),
-    clearTimeout: vi.fn(),
-    removePendingRequest: vi.fn(),
+    removeRequest: vi.fn(),
     getPendingRequests: vi.fn().mockReturnValue([]),
   }
   const ctx = {
@@ -62,8 +60,7 @@ describe('ExtensionMessageHandler 分发路由（W1 表驱动重构回归锚定�
       const { ctx, cap, handler, extensionTimeoutMgr } = makeHandler({ getRpcClient: vi.fn().mockReturnValue({ sendExtensionUiResponse: vi.fn() }) })
       extensionTimeoutMgr.isBridgeRequest.mockReturnValue(true)
       await handler.handleExtensionMessage(msg('extension.ui_response', { sessionId: 's1', requestId: 'r1', method: 'select', result: 'a' }), WS)
-      expect(extensionTimeoutMgr.removeBridgeRequest).toHaveBeenCalledWith('r1')
-      expect(extensionTimeoutMgr.removePendingRequest).toHaveBeenCalledWith('s1', 'r1')
+      expect(extensionTimeoutMgr.removeRequest).toHaveBeenCalledWith('r1')
       // 不向 pi 转发、不 reply、不 sendError
       expect(ctx.sessionService.getRpcClient).not.toHaveBeenCalled()
       expect(cap.replies).toHaveLength(0)
@@ -73,8 +70,7 @@ describe('ExtensionMessageHandler 分发路由（W1 表驱动重构回归锚定�
     it('无活跃 client → 清理 pending + sendError(handler_error, "No active session for extension response: s1")', async () => {
       const { ctx, cap, handler, extensionTimeoutMgr } = makeHandler({ getRpcClient: vi.fn().mockReturnValue(undefined) })
       await handler.handleExtensionMessage(msg('extension.ui_response', { sessionId: 's1', requestId: 'r1', method: 'confirm', result: true }), WS)
-      expect(extensionTimeoutMgr.clearTimeout).toHaveBeenCalledWith('r1')
-      expect(extensionTimeoutMgr.removePendingRequest).toHaveBeenCalledWith('s1', 'r1')
+      expect(extensionTimeoutMgr.removeRequest).toHaveBeenCalledWith('r1')
       expect(cap.errors).toHaveLength(1)
       expect(cap.errors[0]).toMatchObject({
         id: 'm1',
@@ -92,8 +88,7 @@ describe('ExtensionMessageHandler 分发路由（W1 表驱动重构回归锚定�
       const { ctx, cap, handler, extensionTimeoutMgr } = makeHandler({ getRpcClient: vi.fn().mockReturnValue(client) })
       await handler.handleExtensionMessage(msg('extension.ui_response', { sessionId: 's1', requestId: 'r1', method: 'confirm', result: true }), WS)
       expect(client.sendExtensionUiResponse).toHaveBeenCalledWith('r1', true, 'confirm')
-      expect(extensionTimeoutMgr.clearTimeout).toHaveBeenCalledWith('r1')
-      expect(extensionTimeoutMgr.removePendingRequest).toHaveBeenCalledWith('s1', 'r1')
+      expect(extensionTimeoutMgr.removeRequest).toHaveBeenCalledWith('r1')
       expect(cap.replies).toHaveLength(0)
       expect(cap.errors).toHaveLength(0)
 

@@ -117,12 +117,11 @@ export interface StagingAction<S extends StagingSource = StagingSource> {
   /**
    * 发送（经 Composer.onSend 路由到此）。
    * 实现职责：trim text（allowsEmptySend=false 时空文本拦截）+ clearInput + setSending(true)
-   * + 取 getStagingConfig 透传 + 调 features 层 action（forkSessionAsk / handoff）
+   * + 自取 getStagingConfig + 调 features 层 action（forkSessionAsk / handoff）
    * + 失败 restoreInput + toastError + finally setSending(false) + exit。
    * @param text 当前 draft
-   * @param staging 模型/thinking 暂存配置（来自 useComposerModelThinking.getStagingConfig）
    */
-  readonly send: (text: string, staging: StagingConfig) => Promise<void>
+  readonly send: (text: string) => Promise<void>
   /** 是否允许空输入发送（handoff 允许 reply 为空；fork 必须有 content） */
   readonly allowsEmptySend: boolean
   /**

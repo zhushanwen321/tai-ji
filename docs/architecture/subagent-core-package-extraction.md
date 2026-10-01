@@ -122,7 +122,7 @@
 
 **终态一：pi / taiji 用户零感知。** `subagent`/`workflow` 工具入参、返回、GUI 展示与抽包前完全一致——同一份 agent 清单、同一个 record 结构、同一个引擎选择行为。
 
-**终态二：zcode 用户命令面不变、内核统一。** `zsw start/run/workflow` 等命令照常；review-fix-loop 与 pi 侧是**同一份实现**（改 core 一处，下次 `zsw` 升级即生效）。zsw 获得 pi 侧的质量资产：agent .md `engine:` 字段路由、probe 拦截与 fallback 留痕、schema 降级链。边界声明：「命令面不变」指内置命令与参数面；资源发现的清单/优先级语义与自定义 `script:<name>` 脚本契约属 2b/2c 接管的显式处置面（D6-⑦⑧），不是静默沿用。
+**终态二：zcode 用户命令面不变、内核统一。** `zsw start/run/workflow` 等命令照常；review-fix-loop 与 pi 侧是**同一份实现**（改 core 一处，下次 `zsw` 升级即生效）。zsw 获得 pi 侧的质量资产：agent .md `engine:` 字段路由、probe 拦截（引擎不可用即结构化失败，不换目标）、schema 降级链。边界声明：「命令面不变」指内置命令与参数面；资源发现的清单/优先级语义与自定义 `script:<name>` 脚本契约属 2b/2c 接管的显式处置面（D6-⑦⑧），不是静默沿用。
 
 **终态三：开发者单权威源。** 例：`wrapUntrusted`（上游 LLM 产出的防注入包裹）行为修正落在 core 的一个函数——本仓 extension 因 workspace 引用立即生效（跑 extensions 三连验证）；zcode 仓 `pnpm bump @zhushanwen/subagent-core` 后同样生效。vendor 文件删除，5 个分叉点登记表关闭。HostServices 保持 4 方法环境服务语义，膨胀受 D2 演进纪律条款机器可查地约束。
 
@@ -207,7 +207,7 @@ interface NotifyDomainPorts {
 }
 ```
 
-  RunStore / AgentRunner / WorkerHost 三个既有 port 不动——jsonl-run-store（写 pi 会话）留 pi 壳；core 不持有 store 实现（RunStore 生产实现唯一 = 壳 JsonlRunStore，读侧统一 journal 判定核，见 ADR-0078）。
+  RunStore / AgentRunner / WorkerHost 三个既有 port 不动——jsonl-run-store（写 pi 会话）留 pi 壳；core 不持有 store 实现（RunStore 生产实现唯一 = 壳 JsonlRunStore，读侧统一 journal 判定核，见 ADR-0094）。
 
   **端口演进纪律（治理条款，随下一层接口契约产物固化）**：①新增宿主触点默认以**可选方法**或**独立窄端口**（RunStore/AgentRunner 先例）承载——HostServices 只收环境服务语义（数据根/日志/发现/通知），不收业务能力；②新增方法必须有 ≥1 个真实宿主触点证据，禁止推测性预留；③方法签名禁止出现宿主特有类型（pi SDK / zcode 类型泄漏即 D9 检查红线）；④方法数达 8 触发拆分评审（按域拆为独立端口）。P3 的每项演进（file: 入口 / 材料注入 / 常驻引擎）引入新触点时按此过闸。
 - **不采用**：①把 pi extension API 全量抽象成宿主接口——过度设计，CLI 宿主不需要 ask-user/GUI，端口按「core 实际触点」收尾；②HostServices 经 postMessage 传 worker thread——workflow 脚本跑在 worker，但 agent 调用经 agent-call 消息回主线程执行（AgentRunner 在主线程），worker 内无需 HostServices；③把 30 处模块顶层 `getLogger` 下沉为函数内惰性获取——改动范围大且每调用一次解析是纯噪音，facade 代理在保持既有顶层缓存惯例下达成同样的时序安全（P0 因此仍是机械替换）。
@@ -311,7 +311,7 @@ interface NotifyDomainPorts {
 |---|------|------|---------|------|
 | V1 | pi 宿主零回归 | ①抽包合入前采集基线：taiji dev 下派一个默认引擎 subagent、一个 reviewer.md 带 `engine: zcode` 的 subagent、跑一个两步 parallel workflow + 一个内置 review-fix-loop 最小 run（验证 workflows/ 资产迁移），保存 record entry JSON 快照与 GUI 关键视图截图（视图清单：对话流 / 工具面板 / record 详情三级读取页 / WorkflowsView）；②合入后重跑同四例；③standalone pi（pi CLI 直跑、非 taiji）派一个 subagent，核对 journal/record 落盘目录；④打包子系统验证：`validate-runtime-bundle.sh` + 打包产物内 workflows 目录 staged 布局与脚本 scriptPath 锚定解析探针 | record entry JSON 字段级一致；四视图与基线截图一致（逐视图人工比对）；③落 `~/.pi/agent` 派生目录（D2 三段语义未漂移）；④双验证 exit 0、staged 布局下以真实 scriptPath 注入执行一次 utils 解析成功 + scriptPath 缺席时 fail-fast（报 `core_module_load_failed`，不再 cwd 静默回退）；`pnpm extensions:typecheck && extensions:lint && extensions:test` 与 runtime vitest 全绿 | 目标 2 |
 | V2 | 分叉点归零 | zcode 仓基于 `fix-review-fix-loop` 分支：删 `lib/workflow/review-fix-loop-utils.js` vendor 拷贝，测试改 import core；在本机真实 repo 上跑 `zsw` review-fix-loop 一轮全流程（真实 diff + 真实模型审查/修复） | 流程走通且终态 JSON 与 pi 版同 schema；`grep -r "vendor 自 pi 仓" lib/` 零残留；parity 文档分叉点登记表标记关闭 | 目标 1 |
-| V3 | zcode 侧获得路由语义 | zsw 接 core 后（2b/2c 后）：①agent .md frontmatter `engine:` 生效；②调用参数显式覆盖 frontmatter；③临时移走 zcode 二进制模拟 probe 失败，观察 frontmatter 来源任务的 fallback；④对比迁移前后 `zsw` 的 agent / workflow 清单输出（含一个 symlink 安装的 agent 用例，D6-⑦） | ①生效引擎正确（record 留痕）；②覆盖优先级正确；③fallback 回默认引擎且 record 含 `engineFallback`（若为调用参数显式指定则不兜底、报 `engine_probe_failed`）；④清单 diff 一致或每项差异均有 D6-⑦ 语义归属的显式解释 | 目标 3 |
+| V3 | zcode 侧获得路由语义 | zsw 接 core 后（2b/2c 后）：①agent .md frontmatter `engine:` 生效；②调用参数显式覆盖 frontmatter；③临时移走 zcode 二进制模拟 probe 失败，观察 frontmatter 来源任务的终态；④对比迁移前后 `zsw` 的 agent / workflow 清单输出（含一个 symlink 安装的 agent 用例，D6-⑦） | ①生效引擎正确（record 留痕）；②覆盖优先级正确；③probe 失败一律报 `engine_probe_failed`（结构化错误 + 恢复指引），**不回落其它引擎**（任何一层显式指定即严格；要换引擎须由调用方显式传 `engine:'<id>'`）；④清单 diff 一致或每项差异均有 D6-⑦ 语义归属的显式解释 | 目标 3 |
 | V4 | 修复一次双宿主生效 | 选一个真实小修（如 utils 纯函数边界修正）落在 core：①本仓 extension 跑相关测试；②`npm-prerelease.sh` 发 beta；③zcode 仓 bump beta 后跑 zsw 测试 | ①绿；②beta 可安装；③zsw 测试绿且行为体现修正 | 目标 1 |
 | V5 | 宿主特有能力保留 | ①zcode：`zsw start` 后台任务（daemon 持有），主会话等待 task-notification 唤醒；②pi：taiji dev 打开 zcode 引擎 subagent 详情页（三级读取降级链）；③2c 后跑 zsw 测试族（含原 appserver e2e 改造为 spawn 通道的用例）；④一个真实自定义 `script:<name>` 脚本按 D6-⑧ 改写对照迁移到 core worker 契约后跑通（2b 后） | ①完成时主会话被原生通知唤醒（免轮询，与迁移前同感）；②详情页正常渲染；③全绿——appserver 退役（D6-⑥）无残留断链；④迁移后脚本产出与迁移前等价（markdown + json 双段），或走降级旧通道的对应用例绿 | 目标 4 |
 | V6 | 负面行为（检查不破防） | ①对 core 发布物跑 D9 检查探针，故意在 core 源加一处 `import ... from "@earendil-works/pi-coding-agent"` 后重跑；②zsw 声明需要 core ^2 但装了 1.x 后启动 | ①探针转红拦截（证明有牙）；②启动期 `core_version_incompatible` 报错含钉版本命令，不进入半初始化 | 目标 5 / §3.4 |

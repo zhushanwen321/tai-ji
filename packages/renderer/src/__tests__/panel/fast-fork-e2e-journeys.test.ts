@@ -4,14 +4,15 @@
  * 设计依据：.taiji-harness/fast-fork/changes/e2e-test-plan.md §2 层 1。
  * 与现有 4 个隔离测试（fork-entry-behavior / composer-fork-mode / fork-keymap / fork-group）的差异：
  * 现有测试每个只 mount 单组件 + mock 编排层。本文件用**分段断言拼接**覆盖 fork-ask 旅程——
- * 跨 mount 实例的真实链通在此受 jsdom 限制（Turn 与 Composer 各自独立 mount，channel→Composer 的
- * watch 联动由手动调 vm.enterForkMode 短路，非同进程信号传递）。
+ * Turn 与 Composer 各自独立 mount（跨组件同屏链通留 Playwright E2E）；Composer 侧的
+ * channel signal → watch → enterForkMode 一段经 triggerEnterForkMode 真实驱动（channel 是
+ * 模块级单例，同进程内写入与订阅真实联动）。
  *
- * 名实标注：**跨组件 channel 真实联动**（Turn 点击 → channel signal → Composer watch 自动进 fork 模式）
- * 留 Playwright E2E。本文件用分段断言拼接覆盖：
+ * 名实标注：Turn 点击 → channel signal → Composer watch 的**同屏**联动留 Playwright E2E。
+ * 本文件用分段断言拼接覆盖：
  *   - Turn 断言 signal 更新（点 fork 提问按钮 → useForkModeChannel.signal 携带 srcSessionId/fromMessageId）
- *   - Composer 手动调 enterForkMode 断言 fork 模式三重视觉
- *   - handleForkSend 断言 forkSessionAsk（sessionApi.fork + chatApi.send 新 session id）
+ *   - Composer 经 triggerEnterForkMode 真实信号驱动进 fork 模式，断言三重视觉
+ *   - handleForkSend 断言 forkSessionAsk（sessionApi.fork + chatApi.submitDelivery 新 session id，u3c/D-10）
  * 非真正跨 mount 实例链通（Turn 与 Composer 未同屏 mount，channel 经 watch 的真实投递未在此验证）。
  *
  * 只 mock 最底层 system boundary：api domain（RPC）+ useChat（流式依赖）。
@@ -34,17 +35,12 @@ import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, ref, h, nextTick } from 'vue'
 import type { Message, MessageTurn, SessionSummary, SessionGroup } from '@taiji/shared'
 import { textToSegments } from '@taiji/shared'
-import { composerChatApiSpy } from '../helpers/composer-mount'
-// '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的 import（被测组件链）求值
-import { apiProjectMock } from '../helpers/api-facade-mock'
 
 // ── mock 最底层 api domain（层 1 只 mock RPC 返回，不 mock 编排）──
 // 真实 useForkActions / useSidebar 内部 import { chat as chatApi, session as sessionApi } from '@/api'，
 // 此 mock 让 fork/send/abort 调用可被 spy 断言，组件间交互保持真实。
 // vi.hoisted：mock factory 被 vitest hoist 到文件顶部，引用的 mock 对象也必须 hoisted。
-// chat 域 spy 断言锚用 helpers/composer-mount.ts 的 composerChatApiSpy 单例（resolve 基线
-// 同构；工厂惰性执行期才解引用，非 hoisted 安全）。
-const { sessionApiMock, useChatAbortMock } = vi.hoisted(() => ({
+const { sessionApiMock, chatApiMock, useChatAbortMock } = vi.hoisted(() => ({
   sessionApiMock: {
     fork: vi.fn(),
     remove: vi.fn().mockResolvedValue(undefined),
@@ -53,12 +49,23 @@ const { sessionApiMock, useChatAbortMock } = vi.hoisted(() => ({
     getContext: vi.fn().mockResolvedValue({}),
     setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })),
   },
+  chatApiMock: {
+    send: vi.fn(() => Promise.resolve()),
+    // [u3c/D1] fork 首发走统一提交（clientUuid = appendUser 产物 → 与内核条目 id 同源，D-10）
+    submitDelivery: vi.fn((sessionId: string, _content: string, clientUuid: string) =>
+      Promise.resolve({ clientUuid, state: 'in-flight' as const, lane: 'direct' as const, sessionId }),
+    ),
+    steer: vi.fn(() => Promise.resolve()),
+    followUp: vi.fn(() => Promise.resolve()),
+    abort: vi.fn(() => Promise.resolve()),
+    compact: vi.fn(() => Promise.resolve()),
+  },
   // 软停止上层联动断言锚点（useSidebarSessionActions.onAbortSession → useChat().abort）
   useChatAbortMock: vi.fn(() => Promise.resolve()),
 }))
-vi.mock('@/api', () => ({ project: apiProjectMock(),
+vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
   session: sessionApiMock,
-  chat: composerChatApiSpy,
+  chat: chatApiMock,
   model: { switchModel: vi.fn() },
   composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
 }))
@@ -90,6 +97,7 @@ vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
     submitFirstMessage: vi.fn(),
     currentModel: { value: null },
     setPendingModel: vi.fn(),
+    currentCwd: ref(null),
   }),
   resetNewTaskFlow: vi.fn(),
 }))
@@ -182,6 +190,7 @@ import { useChatStore } from '@/stores/chat'
 import ForkNotice from '@/components/panel/ForkNotice.vue'
 import SessionList from '@/components/sidebar/SessionList.vue'
 import { useSidebarSessionActions } from '@/composables/features/sidebar/useSidebarSessionActions'
+import { triggerEnterForkMode } from '@/composables/panel/useForkModeChannel'
 
 const onForkAskMock = vi.fn()
 
@@ -198,7 +207,7 @@ afterEach(() => {
 // ════════════════════════════════════════════════════════════════════════
 // E2E-L1-1 · fork-ask 完整旅程（P0，最核心）
 // 真实链通：renderer 壳 useChatViewDeps.onForkAsk → useForkModeChannel signal → Composer.enterForkMode →
-//           handleForkSend → useForkActions.forkSessionAsk → sessionApi.fork + chatApi.send
+//           handleForkSend → useForkActions.forkSessionAsk → sessionApi.fork + chatApi.submitDelivery
 // ════════════════════════════════════════════════════════════════════════
 describe('E2E-L1-1: fork-ask 完整旅程（Turn → channel → Composer → forkSessionAsk）', () => {
   it('每条 assistant 区有 fork 提问按钮（data-testid 始终在 DOM，spec §1 门控已放开）', () => {
@@ -254,9 +263,8 @@ describe('E2E-L1-1: fork-ask 完整旅程（Turn → channel → Composer → fo
 
   it('Composer 订阅 channel：signal 命中本 session → 进入 fork 模式（三重视觉 DOM 可见）', async () => {
     const wrapper = mount(Composer, { props: { sessionId: 's-src' }, global: { stubs: otherComposerStubs } })
-    const vm = wrapper.vm as unknown as { enterForkMode: (s: string, m: string) => void }
-    // 模拟 signal 到达：手动调 enterForkMode（与 Composer watch signal 内部调法一致）
-    vm.enterForkMode('s-src', 'a1')
+    // 真实信号驱动：channel 模块级单例写入 → Composer 内 watch → enterForkMode
+    triggerEnterForkMode('s-src', 'a1')
     await nextTick()
 
     // 用户可见三重视觉：composer-box 含 fork-mode class
@@ -286,13 +294,10 @@ describe('E2E-L1-1: fork-ask 完整旅程（Turn → channel → Composer → fo
     sessionApiMock.fork.mockResolvedValue(forkedSummary)
 
     const wrapper = mount(Composer, { props: { sessionId: 's-src' }, global: { stubs: otherComposerStubs } })
-    const vm = wrapper.vm as unknown as {
-      enterForkMode: (s: string, m: string) => void
-      forkMode: { value: boolean }
-    }
-    vm.enterForkMode('s-src', 'a1')
+    triggerEnterForkMode('s-src', 'a1')
     await nextTick()
-    expect(vm.forkMode.value).toBe(true)
+    // fork 模式激活：mode-chip DOM 可见
+    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(true)
 
     // 输入 fork 提问内容
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', '追问那条回复')
@@ -305,11 +310,14 @@ describe('E2E-L1-1: fork-ask 完整旅程（Turn → channel → Composer → fo
     // fork RPC 被调 1 次，第 1 参 = 's-src'
     expect(sessionApiMock.fork).toHaveBeenCalledTimes(1)
     expect(sessionApiMock.fork.mock.calls[0][0]).toBe('s-src')
-    // chat.send 被调，第 1 参 = 新 session id（'s-forked'，非主线 's-src'）
-    expect(composerChatApiSpy.send).toHaveBeenCalledTimes(1)
-    expect(composerChatApiSpy.send.mock.calls[0][0]).toBe('s-forked')
-    // forkMode 自动复位 false（发送后退出 fork 模式）
-    expect(vm.forkMode.value).toBe(false)
+    // [u3c/D-10] 统一提交被调，第 1 参 = 新 session id（'s-forked'，非主线 's-src'）；
+    // 第 3 参 clientUuid = 本地乐观气泡 id（消除 fork 首发与内核条目 id 异源窗口）
+    expect(chatApiMock.submitDelivery).toHaveBeenCalledTimes(1)
+    expect(chatApiMock.submitDelivery.mock.calls[0][0]).toBe('s-forked')
+    expect(chatApiMock.submitDelivery.mock.calls[0][2]).toMatch(/^u-[0-9a-fA-F-]{36}$/)
+    expect(chatApiMock.send).not.toHaveBeenCalled()
+    // forkMode 自动复位 false（发送后退出 fork 模式）：mode-chip 消失 + fork-mode class 退场
+    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(false)
     // 用户可见：composer-box 已退出 fork-mode class
     expect(wrapper.find('[data-testid="composer-box"]').classes()).not.toContain('fork-mode')
   })

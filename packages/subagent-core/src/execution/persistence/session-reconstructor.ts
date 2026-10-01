@@ -20,16 +20,9 @@
 
 import * as fs from "node:fs";
 
-import type {
-  AgentEventLogEntry,
-  AgentUsage,
-  ExecutionMode,
-  ExecutionStatus,
-  InternalToolCall,
-  RecordOrigin,
-  Turn,
-} from "../assembly/types.ts";
-import { extractLabelFromArgs } from "./execution-record.ts";
+import type { ExecutionMode, ExecutionStatus, RecordOrigin } from "../domain/record-types.ts";
+import type { AgentEventLogEntry, AgentUsage, InternalToolCall, Turn } from "../assembly/types.ts";
+import { addUsage, deriveEventLog, emptyTurn, joinTurnText } from "./execution-record.ts";
 
 // ============================================================
 // 类型（SDK jsonl 结构的最小子集——窄化为重建所需字段）
@@ -196,7 +189,7 @@ export interface ReconstructedRecord extends RecordIdentityFields {
   status: ExecutionStatus;
   /** L2 关闭原因子枚举（仅 status="closed" 时有意义）。SP-1 新增。
    *  从 stopReason 推导：error/aborted → gc；其余 → gc。 */
-  closedReason?: import("../assembly/types.ts").ClosedReason;
+  closedReason?: import("../domain/record-types.ts").ClosedReason;
   turns: Turn[];
   turnCount: number;
   totalTokens: number;
@@ -210,7 +203,7 @@ export interface ReconstructedRecord extends RecordIdentityFields {
   thinkingLevel: string | undefined;
   /** 最后一条 entry 的时间戳（ms）。供 finalize/crashed 重建填 endedAt，避免耗时无限增长。 */
   endedAt: number | undefined;
-  /** 各 turn text 拼接的完整正文（镜像 getFullText）。 */
+  /** 各 turn text 拼接的完整正文（joinTurnText 单源，与活态 getFullText 同规则）。 */
   result: string | undefined;
   /** 来自最后一条 error/aborted assistant message（无则 undefined）。 */
   error: string | undefined;
@@ -222,42 +215,10 @@ export interface ReconstructedRecord extends RecordIdentityFields {
 // 内部 helper
 // ============================================================
 
-/** turn_end 摘要截断长度（镜像 execution-record.ts TURN_SUMMARY_MAX）。 */
-const TURN_SUMMARY_MAX = 80;
-
-/** 从 turns[] 派生 eventLog（镜像 execution-record.ts getEventLog，但接受最小结构）。 */
-function deriveEventLog(
-  turns: Turn[],
-  lastError: string | undefined,
-  startedAt: number,
-): AgentEventLogEntry[] {
-  const log: AgentEventLogEntry[] = [];
-  for (const turn of turns) {
-    for (const tc of turn.toolCalls) {
-      const label = extractLabelFromArgs(tc.toolName, tc.args);
-      const ts = tc.startedTs;
-      log.push({ type: "tool_start", label, ts, status: "running" });
-      if (tc._status !== "running") {
-        log.push({ type: "tool_end", label, ts, status: tc._status });
-      }
-    }
-    if (turn.closed) {
-      const summary = turn.text.length > 0
-        ? (turn.text.length > TURN_SUMMARY_MAX ? turn.text.slice(0, TURN_SUMMARY_MAX) : turn.text)
-        : "turn";
-      log.push({ type: "turn_end", label: summary, ts: turn.closedTs ?? startedAt });
-    }
-  }
-  if (lastError) {
-    log.push({ type: "error", label: lastError, ts: Date.now() });
-  }
-  return log;
-}
-
-/** 空 turn（镜像 execution-record.ts 的 emptyTurn，但本模块独立——避免循环依赖）。 */
-function emptyTurn(): Turn {
-  return { text: "", thinking: "", toolCalls: [], usageDelta: undefined, closed: false };
-}
+// [派生规则单源] eventLog / 空 turn / usage 累加 / 正文拼接四个派生 helper 已收敛到
+// execution-record.ts（deriveEventLog / emptyTurn / addUsage / joinTurnText，经 import
+// 消费）。此前本模块各持副本并注释互指「镜像」——反向 import 无环（本模块已 import
+// execution-record），「避免循环依赖」的理由不成立（2026-09-29 核实）。
 
 /** JsonlUsage → AgentUsage（cost 取 cost.total，与 session-runner 扁平化一致）。 */
 function toAgentUsage(u: JsonlUsage): AgentUsage {
@@ -267,18 +228,6 @@ function toAgentUsage(u: JsonlUsage): AgentUsage {
     cacheRead: u.cacheRead ?? 0,
     cacheWrite: u.cacheWrite ?? 0,
     cost: u.cost?.total,
-  };
-}
-
-/** 累加 AgentUsage（field-wise，镜像 execution-record.ts addUsage）。 */
-function addUsage(prev: AgentUsage | undefined, next: AgentUsage): AgentUsage {
-  if (prev === undefined) return { ...next };
-  return {
-    input: prev.input + next.input,
-    output: prev.output + next.output,
-    cacheRead: prev.cacheRead + next.cacheRead,
-    cacheWrite: prev.cacheWrite + next.cacheWrite,
-    cost: (prev.cost ?? 0) + (next.cost ?? 0),
   };
 }
 
@@ -525,13 +474,11 @@ function buildReconstructedRecord(
   // closedReason="gc" 保留（buildRecord sidecar 矩阵随后覆盖/校正）。
   const status: ExecutionStatus = "idle";
   // closedReason 统 gc（通用完成/失败）。error/aborted 的区分由 error 字段保留。
-  const closedReason: import("../assembly/types.ts").ClosedReason = "gc";
+  const closedReason: import("../domain/record-types.ts").ClosedReason = "gc";
 
   const turnCount = rebuilt.turns.length;
-  const resultText = rebuilt.turns
-    .map((t) => t.text)
-    .filter((t) => t.length > 0)
-    .join("\n\n");
+  // 正文拼接经单源 helper（execution-record.joinTurnText——与活态 getFullText 同规则）。
+  const resultText = joinTurnText(rebuilt.turns);
 
   // rootSessionId 归一化：新文件读 rootSessionId，旧文件 fallback parentSessionId。
   const rootSessionId = identity.rootSessionId ?? identity.parentSessionId;

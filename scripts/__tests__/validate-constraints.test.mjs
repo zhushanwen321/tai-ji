@@ -11,15 +11,22 @@
  *   R5 enforcement：machine 缺 hook / hook 不存在 / review agent 不存在 / type 非法 / 空数组
  *   R6 dimensions 非数组；constraints 空数组
  *   R7 validateHookExists：§ 内联段特例 / 真实 hook / 不存在
+ *   R8 validateAgentExists 枚举扫描（正向命中 + 跨 skill + 负向 + skillsDir 缺失）
  *
- * 本测试只读仓库既有文件（docs/ARCHITECTURE.md、scripts/validate-constraints.mjs），
- * fixture 全部自造数据、零写操作，不触碰真实数据目录。
+ * agent 存在性用例不依赖仓库 .agents/ 实体（skill 实体在 workspace 根共享、不入库，
+ * CI 检出环境无此树）——正向路径经 skillsDir 参数注入 os.tmpdir() 下自建自删的
+ * fixture 树；其余用例只读仓库既有文件（docs/ARCHITECTURE.md、
+ * scripts/validate-constraints.mjs、package.json），零写操作，不触碰真实数据目录。
  */
 import { describe, it, expect } from 'vitest'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import {
   validate,
   validateHookExists,
+  validateAgentExists,
 } from '../validate-constraints.mjs'
 
 /** 合法基准条目（authority/hook/agent 均指向仓库内真实存在文件；authority 相对 docs/ 解析）。 */
@@ -102,6 +109,17 @@ describe('R4 authority 校验', () => {
 
 // ---------- R5 enforcement ----------
 
+/** 自建临时 skills 树：两个含 agents/ 的 skill（agent 分散，验证「任一命中」）+ 一个无 agents/ 的 skill。 */
+function makeFixtureSkillsDir() {
+  const dir = mkdtempSync(join(tmpdir(), 'vc-skills-'))
+  mkdirSync(join(dir, 'dev-merge', 'agents'), { recursive: true })
+  writeFileSync(join(dir, 'dev-merge', 'agents', 'review-arch-boundary.md'), '# agent')
+  mkdirSync(join(dir, 'pr-cr-fix', 'agents'), { recursive: true })
+  writeFileSync(join(dir, 'pr-cr-fix', 'agents', 'review-other-dim.md'), '# agent')
+  mkdirSync(join(dir, 'bare-skill')) // 无 agents/ 的 skill：扫描须跳过而非报错
+  return dir
+}
+
 describe('R5 enforcement 校验', () => {
   it('machine 缺 hook 报一条', () => {
     const errors = validate({
@@ -119,7 +137,16 @@ describe('R5 enforcement 校验', () => {
     const errors = validate({
       constraints: [validConstraint({ enforcement: [{ type: 'review', agent: 'no-such-agent' }] })],
     })
-    expect(errors).toContainEqual('C-proc-99: review agent 不存在: no-such-agent')
+    expect(errors).toContainEqual('C-proc-99: review agent 不存在于 .agents/skills/*/agents/: no-such-agent')
+  })
+  it('review agent 存在于任一 skill 的 agents/ 即通过（完整链路，fixture skills 树）', () => {
+    const skillsDir = makeFixtureSkillsDir()
+    try {
+      const c = validConstraint({ enforcement: [{ type: 'review', agent: 'review-arch-boundary' }] })
+      expect(validate({ constraints: [c] }, skillsDir)).toEqual([])
+    } finally {
+      rmSync(skillsDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
   })
   it('enforcement.type 非法报一条', () => {
     const errors = validate({
@@ -160,5 +187,30 @@ describe('R7 validateHookExists 白名单目录', () => {
   })
   it('不存在的 hook 拒绝', () => {
     expect(validateHookExists('no-such-hook-anywhere.mjs')).toBe(false)
+  })
+})
+
+// ---------- R8 validateAgentExists 枚举扫描 ----------
+
+describe('R8 validateAgentExists 枚举扫描', () => {
+  it('agent 位于任一 skill 的 agents/ 即命中（跨 skill 分散）', () => {
+    const skillsDir = makeFixtureSkillsDir()
+    try {
+      expect(validateAgentExists('review-arch-boundary', skillsDir)).toBe(true)
+      expect(validateAgentExists('review-other-dim', skillsDir)).toBe(true)
+    } finally {
+      rmSync(skillsDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+  it('所有 skill 的 agents/ 均无该 agent → 不命中（含无 agents/ 的 skill 不炸）', () => {
+    const skillsDir = makeFixtureSkillsDir()
+    try {
+      expect(validateAgentExists('no-such-agent', skillsDir)).toBe(false)
+    } finally {
+      rmSync(skillsDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+  it('skillsDir 整体缺失（CI 检出环境无 .agents 实体形态）→ 不命中且不抛', () => {
+    expect(validateAgentExists('review-arch-boundary', join(tmpdir(), 'vc-no-such-skills-dir'))).toBe(false)
   })
 })

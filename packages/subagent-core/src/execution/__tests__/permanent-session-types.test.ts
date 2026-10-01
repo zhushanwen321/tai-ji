@@ -24,18 +24,9 @@ import { createRecord } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { readRecordBinding, writeRecordBinding } from "../persistence/state-marker.ts";
 import type { RecordBinding } from "../persistence/state-marker.ts";
-import {
-  NEW_STOP_REASONS,
-  ROUND_TERMINAL_STOP_REASONS,
-  STOP_REASONS,
-  isPiTranscriptRef,
-  isZcodeTranscriptRef,
-  isValidStopReason,
-} from "../assembly/types.ts";
-import type {
-  Epoch,
-  TranscriptRef,
-} from "../assembly/types.ts";
+import { NEW_STOP_REASONS, ROUND_TERMINAL_STOP_REASONS, STOP_REASONS } from "../domain/record-types.ts";
+import { isPiTranscriptRef, isZcodeTranscriptRef, isValidStopReason } from "../domain/record-model.ts";
+import type { Epoch, TranscriptRef } from "../domain/record-types.ts";
 
 // ── fixture ──────────────────────────────────────────────────────────────────
 

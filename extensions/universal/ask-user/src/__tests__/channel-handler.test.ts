@@ -18,6 +18,7 @@
 import type { AskUserQuestion, FormQuestion } from "@zhushanwen/extension-protocol";
 import { describe, expect, it } from "vitest";
 
+import { encodeAnswer } from "../answer-codec";
 import { createAskUserChannelHandler } from "../channel-handler";
 import type { Result } from "../types";
 
@@ -330,5 +331,66 @@ describe("createAskUserChannelHandler — input 校验", () => {
 		);
 		const resp = await handler({ channelPayload: { questions: [legacySingle] } });
 		expect(resp).toEqual({ cancelled: true });
+	});
+});
+
+// ── 输出等价锚（plan-mode-audit-remediation 批次 3 活路径去重）──
+// TUI 三格式往返收敛为单次转换：handler 编码直接迭代 internal Question[]（formToInternalQuestions
+// 单次转换产物），不再构造 legacy AskUserQuestion[] 中转视图（formToAskUserQuestions 已删）。
+// 本组断言钉死：新路径产出 ≡ 旧「proto 中转视图 + encodeAnswer」链路的产出——proto 视图以
+// 字面量充当被删转换的参考实现（key = header ?? question、multiSelect === true 语义不变）。
+describe("TUI encode 输出等价锚（internal 单次转换 ≡ 旧 proto 中转视图链路）", () => {
+	it("handler 编码结果 ≡ 旧链路参考实现（single/multi/Other 三形态对拍）", async () => {
+		const formQuestions: FormQuestion[] = [
+			{ type: "choice", question: "Which DB?", options: [{ label: "Postgres" }, { label: "SQLite" }] },
+			{
+				type: "choice",
+				question: "Which tools?",
+				header: "Tools",
+				multi: true,
+				options: [{ label: "A" }, { label: "B" }],
+			},
+		];
+		// 被删 formToAskUserQuestions 的逐字产出形态（参考实现字面量）
+		const deletedProtoView: AskUserQuestion[] = [
+			{
+				question: "Which DB?",
+				options: [{ label: "Postgres" }, { label: "SQLite" }],
+			},
+			{
+				question: "Which tools?",
+				header: "Tools",
+				multiSelect: true,
+				options: [{ label: "A" }, { label: "B" }],
+			},
+		];
+		const internalResult: Result = {
+			questions: [],
+			answers: {
+				"Which DB?": { selected: ["Postgres"], other: "Custom DB" },
+				"Which tools?": { selected: ["B", "A"], other: null },
+			},
+			cancelled: false,
+		};
+
+		const handler = createAskUserChannelHandler(
+			makeCtx({ mode: "tui", customResult: internalResult }) as never,
+		);
+		const resp = await handler({ channelPayload: { formQuestions } });
+
+		// 旧链路参考实现：proto 中转视图 + encodeAnswer（encode SSOT 未删未改，唯一变量是视图）
+		const expected: Record<string, string> = {};
+		for (const pq of deletedProtoView) {
+			const av = internalResult.answers[pq.question];
+			if (av === undefined) continue;
+			Object.assign(expected, encodeAnswer(av, { key: pq.header ?? pq.question, multiSelect: pq.multiSelect === true }));
+		}
+		expect(resp).toEqual({ value: JSON.stringify(expected) });
+		// 主 key/Other 键逐字形态（防 expected 构造自身退化成恒真对拍）
+		expect(JSON.parse((resp as { value: string }).value)).toEqual({
+			"Which DB?": "Postgres",
+			"Which DB?__other": "Custom DB",
+			"Tools": JSON.stringify(["B", "A"]),
+		});
 	});
 });

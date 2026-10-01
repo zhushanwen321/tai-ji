@@ -62,7 +62,6 @@ function makeRun(runId: string): WorkflowRun {
       model: "test-model",
     },
     {
-      status: "running",
       budget: new Budget(),
       calls: new Map(),
       trace: new Trace(),

@@ -59,7 +59,6 @@ function makeRealRun(runId: string): WorkflowRun {
       scriptPath: "/tmp/retry-silent.js",
     },
     {
-      status: "running",
       budget: new Budget(),
       calls: new Map(),
       trace: new Trace(),

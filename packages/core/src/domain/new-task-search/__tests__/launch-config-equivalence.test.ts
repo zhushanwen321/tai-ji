@@ -269,9 +269,8 @@ function mountHarness(
         clearActiveSession: vi.fn(),
         setActiveSession: vi.fn(),
         pushChat: vi.fn(),
-        defaultCwd: vi.fn(() => '/default'),
       },
-      toast: { error: vi.fn(), warning: vi.fn() },
+      toast: { error: vi.fn(), warning: vi.fn(), info: vi.fn() },
       fileTree: { loadTree: vi.fn(), selectFile: vi.fn() },
       t: vi.fn((key: string) => key),
       migrateImage: { migrateImage: vi.fn() },
@@ -282,7 +281,7 @@ function mountHarness(
       detect: vi.fn().mockResolvedValue({ mode: 'not-repo' }),
       listWorktrees: vi.fn().mockResolvedValue({ items: [] }),
     },
-    workspaceState: { defaultCwd: vi.fn(() => '/default'), record: vi.fn() },
+    workspaceState: { record: vi.fn() },
   }
   const flow = useNewTaskFlow({
     ...deps,
@@ -405,6 +404,7 @@ async function runMatrixCell(cell: {
       segments: [textSeg('hi')],
       bashCommand: null,
       pendingThinkingLevel: B.thinkingLevel as ThinkingLevel,
+      clientUuid: expect.any(String),
     })
   } finally {
     h.scope.stop()

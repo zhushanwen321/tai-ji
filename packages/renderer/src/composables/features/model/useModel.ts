@@ -57,7 +57,8 @@ export function useModel() {
   /**
    * 设置 session 的思考等级：调 runtime session.setThinkingLevel RPC，以回执生效值写 store。
    *
-   * level 是前端 6 级枚举字符串（off/low/medium/high/xhigh/max）。
+   * level 是前端 7 级枚举字符串（off/minimal/low/medium/high/xhigh/max，
+   * 集合来源 @taiji/shared PI_THINKING_LEVELS）。
    * 回执消费（U6 弃乐观写）：reply.level 是 pi 实际生效档（pi 会钳制模型族不支持的档位，
    * 如 mimo 族 max → high；钳制后 effective ≠ previous 时 pi 仍必发
    * thinking_level_changed 事件，isChanging=false 仅「值未变」场景——PS-04）——显示值从第一毫秒起就是真值，

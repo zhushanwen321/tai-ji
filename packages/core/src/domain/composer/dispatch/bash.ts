@@ -8,10 +8,9 @@
  * bash 不走 segment 提取（原始 shell 文本透传 pi bash RPC）。
  *
  * 错误策略：sendBash（壳层注入）内部已 try/catch + toast 且不重抛（与 send/abort/compact
- * 对称），故 trySendBash 失败时不再恢复 draft 输入。已知限制：sendBash 失败时 !command
- * 文本会丢失（草稿已在 clearInput 时清空）。长期治理方向：把 toast + restoreInput 收敛到
- * 调用方（本 composable），让 sendBash 改为抛错；但该改动牵连 submitFirstMessage 直调
- * sendBash 的完成转换路径，本次（W6/S10/S12 PR#116 review）不做。
+ * 对称）。[R2-A5 同族/b08] 失败信号契约：sendBash 返回 false = RPC 失败——本 composable
+ * 消费该信号把原始命令文本经 restoreInput 还回输入框（bash 文本不经 segments，原始 shell
+ * 文本透传，故纯文本恢复；restoreSegments 不适用）。
  *
  * [W3 迁移] 迁自 renderer composables/panel/useComposerBash.ts。改动：
  * - 去掉 renderer 跨域依赖 `import { useChat } from '@/composables/features/useChat'`
@@ -36,8 +35,12 @@ export interface ComposerBashOptions {
   isSending: Ref<boolean>
   /** session id（landing 态为 null，调用方需保证 trySendBash 在非 landing 分支调用） */
   sessionId: () => string | null
-  /** 执行 bash 命令（useChat.sendBash 注入）。内部已 try/catch + toast 且不重抛 */
-  sendBash: (sessionId: string, command: string, excludeFromContext: boolean) => Promise<void>
+  /** 执行 bash 命令（useChat.sendBash 注入）。内部已 try/catch + toast 且不重抛。
+   *  [R2-A5 同族] 返回 false = RPC 失败。 */
+  sendBash: (sessionId: string, command: string, excludeFromContext: boolean) => Promise<boolean>
+  /** 失败恢复（壳层注入）：sendBash 显式 false（可证明未执行）时把原始命令文本还回输入框。
+   *  bash 文本不经 segments（原始 shell 文本透传），故纯文本 restoreInput（restoreSegments 不适用）。 */
+  restoreInput: (text: string) => void
 }
 
 export interface UseComposerBash {
@@ -85,13 +88,17 @@ export function useComposerBash(opts: ComposerBashOptions): UseComposerBash {
 
     opts.clearInput()
     opts.isSending.value = true
+    let delivered: boolean
     try {
-      await opts.sendBash(sid, extracted.command, extracted.excludeFromContext)
+      delivered = await opts.sendBash(sid, extracted.command, extracted.excludeFromContext)
     } finally {
       opts.isSending.value = false
     }
-    // [W6/S10] sendBash 内部已 try/catch + toast 且不重抛（与 send/abort/compact 对称），
-    // 故此处不再 catch：失败时草稿不恢复（已知限制，见模块头注释）。错误已通过 toast 消化。
+    // [R2-A5 同族] 显式 false = RPC 失败（可证明未执行，错误已由 useChat.sendBash toast 消化）；
+    // 严格比较只认显式信号。原文还回输入框（含 !/!! 前缀），用户可直接重发。
+    if (delivered === false) {
+      opts.restoreInput(rawText)
+    }
     return true
   }
 

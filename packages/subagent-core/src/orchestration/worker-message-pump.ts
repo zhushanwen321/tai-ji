@@ -51,7 +51,7 @@ import {
   notePhaseDispatched,
   settlePhaseLedger,
 } from "./terminal-actions.ts";
-import { finalizeRun } from "./terminal-actions.ts";
+import { appendRunDiagnosticEvent, finalizeRun } from "./terminal-actions.ts";
 import { RunRuntime } from "./models/run-runtime.ts";
 import type { WorkerLogEntry } from "./models/types.ts";
 import type {
@@ -300,12 +300,13 @@ export function forgetRunResumedBudget(runId: string): void {
 /**
  * 计算 run 的剩余时间预算（ms）[race-F3 → D10 活跃段算式]。
  *
- * 账本消费现状（已登记缺陷，docs/todo/subagent-workflow-issues.md §1.1）：当前
- * resume 重建 spec（resume-run.ts rebuildRunFromRecord）不含 budgetTimeMs，本函数
- * 首行的预算缺失提前返回发生在查 [D10] resume 账本之前——账本消费在该形态下
- * 不可达（若可达，按 activeElapsedMs + 复活后墙钟折算，搁置时间不计）。无账目
- * 回落 startedAt 墙钟现状算法（非 resume 来源 run——重试不重置预算的既有语义
- * 保持）。未配置预算（budgetTimeMs 未设或 <=0，默认不限）返回 undefined。
+ * 账本消费（修复 已归档设计档案 §1.1 后可达）：resume 重建
+ * spec 时把生效预算写入 spec.budgetTimeMs（resume-run.ts rebuildRunFromRecord——
+ * 显式 options 覆盖 / 未提供则继承 run-created 帧），故带账目的复活 run 在错误重试
+ * 重建时走到本函数并消费账本：按 activeElapsedMs + 复活后墙钟折算（搁置时间不计）。
+ * 无账目回落 startedAt 墙钟现状算法（非 resume 来源 run——重试不重置预算的既有语义
+ * 保持）。未配置预算（budgetTimeMs 未设或 <=0，默认不限）返回 undefined——首行提前
+ * 返回对「旧格式帧 / 未设预算」形态仍然成立（该形态本就无账目可消费）。
  */
 function remainingTimeBudgetMs(run: WorkflowRun): number | undefined {
   const budget = run.spec.budgetTimeMs;
@@ -327,7 +328,7 @@ function remainingTimeBudgetMs(run: WorkflowRun): number | undefined {
  * pending-notification + onRunDone（[D15] 收敛为 terminal-actions.finalizeRun 单写点）。
  */
 async function finalizeTimeBudgetExhausted(run: WorkflowRun, deps: LifecycleDeps): Promise<void> {
-  deps.log?.("debug", "workflow:worker-message-pump", "time budget exhausted on rebuild, transition done", {
+  deps.log?.("debug", "workflow:worker-message-pump", "time budget exhausted on rebuild, finalizing run", {
     runId: run.runId,
     budgetTimeMs: run.spec.budgetTimeMs,
   });
@@ -339,19 +340,18 @@ async function finalizeTimeBudgetExhausted(run: WorkflowRun, deps: LifecycleDeps
  * 重建整个 RunRuntime：新 controller + 新 worker。
  *
  * 调 run.replaceRuntime(newRt)（G5-001）：原子释放旧 runtime（worker.terminate +
- * abort）+ 绑定新 runtime，全程 status==="running" 不变（不变式 I1 不违反）。
+ * abort）+ 绑定新 runtime。
  *
  * handlers 由调用方（lifecycle makeHandlers）构造——它们路由 onMessage/onError/
  * onExit 回本文件的 handle* 函数。handlers 捕获 run + deps 闭包，runtime 重建后
  * 仍有效（run 实例不变，deps 不变）。
  *
- * 前置：run.state.status === "running"（replaceRuntime 要求，G6-001）。
+ * 前置：run 未终局（G6-001——唯一生产调用方 scheduleRebuild 在退避后、本调用前
+ * 同步重检 isRunSettled，无 await 竞窗；终局 run 不可复活由调用方前置承载）。
  *
  * [race-F3] 时间预算重排按剩余墙钟折算（remainingTimeBudgetMs），不再用满额——
  * 否则每次错误重试都重置预算，最坏 6 次重试放大 ~6×。耗尽时的终态转移不在本函数
  * （唯一生产调用方 scheduleRebuild 已前置拦截，见其注释）。
- *
- * @throws status !== "running"（由 replaceRuntime 抛）
  */
 export function rebuildRuntime(
   run: WorkflowRun,
@@ -515,12 +515,25 @@ export async function handleWorkerMessage(
  * 计入 run.state.errorLogs（与 workerLogs 通路的 L9 追加/上限语义一致）+ deps.log
  * debug 留痕。终态守卫（isRunSettled）已由 handleWorkerMessage 前置——此处只管写入。
  */
-function handleWorkerLog(run: WorkflowRun, msg: LogMsg, deps: LifecycleDeps): void {
-  const message = typeof msg.message === "string" ? msg.message : String(msg.message);
-  run.state.errorLogs.push({ level: "log", message });
+/**
+ * errorLogs 追加 + 诊断落账（[§2.1 errorLogs 持久化] ADR-0093）。
+ *
+ * 活体写入与落账的唯一单点：追加语义 + 尾部上限裁剪（`MAX_ERROR_LOGS`）与
+ * `errorLogsFromEvents` 重建面同构；落账经 terminal-actions 的
+ * `appendRunDiagnosticEvent`（journal 单写者纪律）。
+ */
+function appendErrorLogs(run: WorkflowRun, entries: readonly WorkerLogEntry[]): void {
+  if (entries.length === 0) return;
+  run.state.errorLogs.push(...entries);
   if (run.state.errorLogs.length > MAX_ERROR_LOGS) {
     run.state.errorLogs = run.state.errorLogs.slice(-MAX_ERROR_LOGS);
   }
+  for (const entry of entries) appendRunDiagnosticEvent(run.runId, entry);
+}
+
+function handleWorkerLog(run: WorkflowRun, msg: LogMsg, deps: LifecycleDeps): void {
+  const message = typeof msg.message === "string" ? msg.message : String(msg.message);
+  appendErrorLogs(run, [{ level: "log", message }]);
   deps.log?.("debug", "workflow:worker-message-pump", "worker log", {
     runId: run.runId,
     phase: msg.phase,
@@ -550,6 +563,29 @@ function handleWorkerLog(run: WorkflowRun, msg: LogMsg, deps: LifecycleDeps): vo
  * M4: agent-call 消息 IPC 字段校验谓词——畸形（opts 非对象/缺失、callId 非数字、
  * prompt 缺失）= true。提取为谓词保持 dispatchAgentCall 主流程可读（圈复杂度门禁）。
  */
+/**
+ * agent-call 入参的 schema 形状检查（IPC 边界；调用方错误 = fail-fast 明确报错，
+ * 不静默降级成文本调用）。
+ *
+ * 判定：undefined / null = 未提供（兼容动态脚本的 falsy 写法）；非对象（字符串 /
+ * 数字 / 布尔等）与数组 = 调用方错误；其余对象放行（「无关键字 / 不可编译」的
+ * schema 归子进程 structured-output 明确报错：no recognized keyword /
+ * Invalid JSON Schema）。
+ *
+ * @returns 错误文案（含恢复指引）或 undefined（形状可接受）。
+ */
+function describeSchemaParamError(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object") {
+    const hint = typeof raw === "string" ? " (a JSON string is not a schema — JSON.parse it first)" : "";
+    return `Invalid schema param at the agent-call IPC boundary: expected a JSON Schema object, got ${typeof raw}${hint}. Recovery: pass an object schema, or omit schema to run in text mode; retrying the same call fails the same way.`;
+  }
+  if (Array.isArray(raw)) {
+    return "Invalid schema param at the agent-call IPC boundary: expected a JSON Schema object, got an array. Recovery: pass an object schema, or omit schema to run in text mode; retrying the same call fails the same way.";
+  }
+  return undefined;
+}
+
 function isMalformedAgentCallMsg(msg: AgentCallMsg): boolean {
   return typeof msg.callId !== "number" || !Number.isFinite(msg.callId) ||
     typeof msg.opts !== "object" || msg.opts === null ||
@@ -577,12 +613,21 @@ function detectReplayInputMismatch(cached: AgentCall, currentRaw: AgentCallMsg["
   const recordedKeys = Object.keys(recorded).filter((k) => recorded[k] !== undefined);
   if (cached.opts.prompt === "" && recordedKeys.length <= 1) return false; // 占位形态
   if (cached.result?.error !== undefined) return false; // 失败历史照放
+  // schema 形状非法：本次调用已 done，回放照走历史结果，但不参与哈希比对——否则
+  // 会被误报成「脚本非确定性漂移」；调用方错误在正常派发路径由 describeSchemaParamError
+  // fail-fast 报出，此处只留痕。
+  if (describeSchemaParamError(currentRaw.schema) !== undefined) {
+    logger.warn(
+      `[workflow] replay hit with a malformed schema param — skipping input comparison (callId=${cached.id})`,
+    );
+    return false;
+  }
   const current = resolveAgentOpts({
     ...currentRaw,
     schema:
-      typeof currentRaw.schema === "object" && currentRaw.schema !== null
-        ? (currentRaw.schema as Record<string, unknown>)
-        : undefined,
+      currentRaw.schema === undefined || currentRaw.schema === null
+        ? undefined
+        : (currentRaw.schema as Record<string, unknown>),
   });
   if (current.error) return false; // 本次 resolve 失败——错误结果回放路径
   return canonicalJsonHash(cached.opts) !== canonicalJsonHash(current.opts);
@@ -673,23 +718,29 @@ function dispatchAgentCall(
   notePhaseDispatched(run.runId, msg.phase);
 
   // 构建 AgentCall（opts 形状对齐 AgentCallOpts；schema: unknown → Record）
-  // 跨进程 IPC 边界的 schema 为 unknown，窄化前加 typeof guard 兜底。
+  // 跨进程 IPC 边界的 schema 为 unknown：非对象类型（字符串/数字/布尔/数组）是调用方
+  // 错误，fail-fast 拒绝，不静默降级为文本调用——结果形态不得静默漂移；undefined /
+  // null 视为「未提供」（兼容动态脚本的 falsy 写法）。schema 是对象但无关键字 /
+  // 不可编译的情形归子进程 structured-output 明确报错（no recognized keyword /
+  // Invalid JSON Schema）。
   const rawSchema = msg.opts.schema;
+  const schemaParamError = describeSchemaParamError(rawSchema);
   const opts: AgentCallOpts = {
     ...msg.opts,
     schema:
-      typeof rawSchema === "object" && rawSchema !== null
+      schemaParamError === undefined && rawSchema !== null && rawSchema !== undefined
         ? (rawSchema as Record<string, unknown>)
         : undefined,
   };
 
   // BL-1：解析 skill/schema → skillPath / appendSystemPrompt。
-  // 解析失败（skill 未找到）走 error 路径，不发 slot、不 spawn。
+  // 解析失败（skill 未找到）或 schema 入参形状非法走 error 路径，不发 slot、不 spawn。
   const resolved = resolveAgentOpts(opts);
-  if (resolved.error) {
+  const earlyError = schemaParamError ?? resolved.error;
+  if (earlyError) {
     const call = new AgentCall(msg.callId, opts, node);
     call.markRunning();
-    const errorResult: AgentResult = { content: "", error: resolved.error };
+    const errorResult: AgentResult = { content: "", error: earlyError };
     call.markDone(errorResult);
     run.state.calls.set(msg.callId, call);
     run.state.trace.update(msg.callId, {
@@ -805,7 +856,7 @@ function dispatchAgentCall(
       // finalizeRun 内含终局让位守卫。
       if (run.state.budget.isExceeded()) {
         run.state.error = run.state.error ?? "Budget exceeded";
-        deps.log?.("debug", "workflow:worker-message-pump", "budget exceeded, transition done", { runId: run.runId });
+        deps.log?.("debug", "workflow:worker-message-pump", "budget exceeded, finalizing run", { runId: run.runId });
         void finalizeRun(run, deps, "budget_limited", { context: "agent call budget done" });
       }
     })
@@ -956,14 +1007,11 @@ async function handleReturn(
   msg: ReturnMsg,
   deps: LifecycleDeps,
 ): Promise<void> {
-  deps.log?.("debug", "workflow:worker-message-pump", "handleReturn", { runId: run.runId, status: run.state.status });
+  deps.log?.("debug", "workflow:worker-message-pump", "handleReturn", { runId: run.runId });
   // 捕获 worker 诊断日志（P2-2）
   // L9: 追加而非覆盖——保留重试历史的诊断日志（各 worker 实例的 console 输出）
   if (msg.workerLogs && msg.workerLogs.length > 0) {
-    run.state.errorLogs.push(...msg.workerLogs);
-    if (run.state.errorLogs.length > MAX_ERROR_LOGS) {
-      run.state.errorLogs = run.state.errorLogs.slice(-MAX_ERROR_LOGS);
-    }
+    appendErrorLogs(run, msg.workerLogs);
   }
   run.state.scriptResult = msg.result;
   // C-4: run 到达 done 终态 → 注销 pending-notification + 通知 Interface 层
@@ -1018,7 +1066,7 @@ export async function handleWorkerError(
 
   // 超限 → failed
   run.state.error = err.message;
-  deps.log?.("debug", "workflow:worker-message-pump", "handleWorkerError retries exceeded, transition done", { runId: run.runId, count });
+  deps.log?.("debug", "workflow:worker-message-pump", "handleWorkerError retries exceeded, finalizing run", { runId: run.runId, count });
   await finalizeRun(run, deps, "failed", { context: "handleWorkerError (done,failed)" });
 }
 
@@ -1066,7 +1114,7 @@ export async function handleWorkerExit(
     // [F1] 无终态消息的 exit(0) = worker 静默退出（不可克隆 return 被吞 / 脚本直调
     // process.exit(0) 等）。置 failed 保证 run 必有终态。不重试：rebuild 重跑
     // 脚本对确定性根因（不可克隆 return）无意义，且 belt 路径优先给用户明确归因。
-    deps.log?.("debug", "workflow:worker-message-pump", "worker exited without terminal message, transition done", { runId: run.runId });
+    deps.log?.("debug", "workflow:worker-message-pump", "worker exited without terminal message, finalizing run", { runId: run.runId });
     run.state.error = WORKER_EXITED_WITHOUT_RESULT_MSG;
     await finalizeRun(run, deps, "failed", { context: "handleWorkerExit (done,failed, no terminal message)" });
     return;
@@ -1105,10 +1153,7 @@ export async function handleScriptError(
   // P2-2: 捕获 worker 诊断日志
   // L9: 追加而非覆盖
   if (workerLogs.length > 0) {
-    run.state.errorLogs.push(...workerLogs);
-    if (run.state.errorLogs.length > MAX_ERROR_LOGS) {
-      run.state.errorLogs = run.state.errorLogs.slice(-MAX_ERROR_LOGS);
-    }
+    appendErrorLogs(run, workerLogs);
   }
 
   const count = (run.meta.scriptErrorCount ?? 0) + 1;
@@ -1121,7 +1166,7 @@ export async function handleScriptError(
 
   // 超限 → failed
   run.state.error = `Workflow failed after ${MAX_WORKER_RETRIES} retries: ${errorMsg}`;
-  deps.log?.("debug", "workflow:worker-message-pump", "handleScriptError retries exceeded, transition done", { runId: run.runId, count });
+  deps.log?.("debug", "workflow:worker-message-pump", "handleScriptError retries exceeded, finalizing run", { runId: run.runId, count });
   await finalizeRun(run, deps, "failed", { context: "handleScriptError (done,failed)" });
 }
 
@@ -1196,7 +1241,7 @@ async function handleRebuildStartFailure(
 
   // 耗尽 → 收敛 done,failed（不卡 running）
   run.state.error = `Runtime rebuild failed after ${MAX_WORKER_RETRIES} retries: ${message}`;
-  deps.log?.("debug", "workflow:worker-message-pump", "rebuild retries exhausted, transition done", { runId: run.runId, count });
+  deps.log?.("debug", "workflow:worker-message-pump", "rebuild retries exhausted, finalizing run", { runId: run.runId, count });
   await finalizeRun(run, deps, "failed", { context: "handleRebuildStartFailure (done,failed)" });
 }
 
@@ -1224,4 +1269,4 @@ const ASK_RETRY_REASON_MAX_CHARS = 160;
 
 // ── [D6] 复用池活体缓存的同步读取面 ─────────────────────────
 
-import { peekMemberRecordId } from "./member-reuse-pool.ts";
+import { peekMemberRecordId } from "../execution/service/member-reuse-pool.ts";

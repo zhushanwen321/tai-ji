@@ -18,8 +18,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { configureCore, resetCoreForTests } from "../../core/host-services.ts";
 import {
-  createRecordEventJournal,
-  type RecordJournalEventInput,
+  createRecordEventStream,
+  type RecordEventInput,
 } from "../../execution/persistence/record-events.ts";
 // [W1 / D5 触发点②] RecordStore.register 首写触发维护轮的行为断言面
 import { RecordStore } from "../../execution/persistence/record-store.ts";
@@ -30,7 +30,7 @@ import {
   PruneStateDeps,
   pruneTerminalRunFiles,
 } from "../../execution/persistence/run-state-evidence.ts";
-import { RUN_EVENT_JOURNAL_SUFFIX } from "../run-events.ts";
+import { RUN_EVENTS_SUFFIX } from "../run-events.ts";
 
 let dataRoot: string;
 
@@ -65,7 +65,7 @@ function runSettledFrame(ts: number, outcome: "done" | "failed" | "cancelled"): 
 /** 直接写 run journal（<runId>.events.jsonl，每帧一行 JSONL）。 */
 function writeRunJournal(stateDir: string, runId: string, frames: readonly unknown[]): string {
   mkdirSync(stateDir, { recursive: true });
-  const full = join(stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+  const full = join(stateDir, `${runId}${RUN_EVENTS_SUFFIX}`);
   writeFileSync(full, frames.map((f) => JSON.stringify(f)).join("\n") + "\n", "utf8");
   return full;
 }
@@ -214,13 +214,13 @@ describe("runRetentionMaintenanceRound — run + record 两域同轮（W1 D5）"
   async function seedRecord(
     recordsDir: string,
     id: string,
-    frames: readonly RecordJournalEventInput[],
+    frames: readonly RecordEventInput[],
   ): Promise<string> {
-    const journal = createRecordEventJournal(recordsDir);
+    const journal = createRecordEventStream(recordsDir);
     for (const frame of frames) await journal.append(id, frame);
     return join(recordsDir, `${id}.events`);
   }
-  function recordCreatedInput(id: string, ts: number): RecordJournalEventInput {
+  function recordCreatedInput(id: string, ts: number): RecordEventInput {
     return {
       type: "record-created",
       ts,
@@ -235,7 +235,7 @@ describe("runRetentionMaintenanceRound — run + record 两域同轮（W1 D5）"
       startedAt: ts,
     };
   }
-  function recordSettledInput(ts: number): RecordJournalEventInput {
+  function recordSettledInput(ts: number): RecordEventInput {
     return { type: "record-settled", ts, stopReason: "completed", endedAt: ts, turns: 1, totalTokens: 10 };
   }
 
@@ -342,7 +342,7 @@ describe("record 首写触发维护轮（W1 / D5 触发点②：RecordStore.regi
     const staleEvents = join(recordsDir, "sa-trig-stale.events");
     const staleManifest = join(recordsDir, "sa-trig-stale.json");
     {
-      const j = createRecordEventJournal(recordsDir);
+      const j = createRecordEventStream(recordsDir);
       await j.append("sa-trig-stale", {
         type: "record-created",
         ts: daysAgoMs(35),

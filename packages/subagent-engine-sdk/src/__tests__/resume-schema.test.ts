@@ -23,7 +23,7 @@ const ajv = new Ajv({ strict: false });
 const validateSessionParams = ajv.compile(runSessionParamsSchema);
 const validateRequestFrame = ajv.compile(requestFrameSchema);
 
-/** 合法会话形态参数样本（首轮无锚点 / 冷续带锚点 / 含 journalPath）。 */
+/** 合法会话形态参数样本（首轮无锚点 / 冷续带锚点 / 含 eventsPath）。 */
 const sessionParamsSamples = [
   { recordId: "rec-1" },
   {
@@ -36,7 +36,7 @@ const sessionParamsSamples = [
     recordId: "rec-9",
     resume: {
       sessionRef: { sessionFile: "/data/sessions/b.jsonl" },
-      journalPath: "/data/journals/b.ndjson",
+      eventsPath: "/data/journals/b.ndjson",
     },
   },
 ] as const;
@@ -46,7 +46,7 @@ const sessionParamsSamples = [
 // ============================================================
 
 describe("run.params.resume：schema 校验通过（H1 U6 唯一会话形态键）", () => {
-  it("resume 载荷全形态过 runSessionParamsSchema（首轮无锚点 / 冷续带锚点 / 含 journalPath）", () => {
+  it("resume 载荷全形态过 runSessionParamsSchema（首轮无锚点 / 冷续带锚点 / 含 eventsPath）", () => {
     for (const sample of sessionParamsSamples) {
       expect(validateSessionParams(structuredClone(sample)), JSON.stringify(sample)).toBe(true);
     }
@@ -104,13 +104,13 @@ describe("非法 resume 载荷拒绝（runSessionParamsSchema 负向全集）", 
 
   it("resume 非 object / 缺 sessionRef", () => {
     expect(validateSessionParams({ recordId: "r", resume: "not-an-object" })).toBe(false);
-    expect(validateSessionParams({ recordId: "r", resume: { journalPath: "/j" } })).toBe(false);
+    expect(validateSessionParams({ recordId: "r", resume: { eventsPath: "/j" } })).toBe(false);
     expect(
       validateSessionParams({ recordId: "r", resume: {} }),
     ).toBe(false);
   });
 
-  it("sessionRef 值非字符串 / journalPath 非字符串", () => {
+  it("sessionRef 值非字符串 / eventsPath 非字符串", () => {
     expect(
       validateSessionParams({
         recordId: "r",
@@ -122,7 +122,7 @@ describe("非法 resume 载荷拒绝（runSessionParamsSchema 负向全集）", 
         recordId: "r",
         resume: {
           sessionRef: { sessionFile: "/s/a.jsonl" },
-          journalPath: 42,
+          eventsPath: 42,
         },
       }),
     ).toBe(false);

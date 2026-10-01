@@ -25,7 +25,7 @@ import { getNotifyDomainPorts, type DeliveryHandle, type DeliveryPort } from "..
 
 import { deriveOutcome } from "../persistence/execution-record.ts";
 import { getBoundNotifyLedger, NOTIFY_CUSTOM_TYPE } from "./notify-ledger.ts";
-import type { AbandonedRoundMark, ClosedReason, Epoch, ExecutionOutcome } from "../assembly/types.ts";
+import type { AbandonedRoundMark, ClosedReason, Epoch, ExecutionOutcome } from "../domain/record-types.ts";
 
 // ============================================================
 // [T4① / PS-2 → U5 二元组] notify 门（H1 U2 自 subagent-service.ts 迁入——
@@ -332,7 +332,6 @@ export function createNotifier(host: NotifierHost): BgNotifier {
       // 未注入 isIdle → 视为 idle（不 gate，向后兼容旧 host）
       return true;
     },
-    hasPendingMessages: () => false, // notifier 不关心 hasPendingMessages
     // D8（must-fix #4）：settled 边沿驱动装配——内核 busy 入队后由 settled 事件唤醒
     // flush（watch-dog 兜底事件丢失），替代无订阅时的退避轮询。host 只注入原生订阅
     // 能力；disposed 标志包装（兑现退订语义——pi.on 返回 void 且无 off）在此完成。
@@ -391,7 +390,6 @@ export function createNotifier(host: NotifierHost): BgNotifier {
       intent: "interrupt-at-turn-boundary",    // D3：turn 边界抢占（F1 教训内化）
       mergeWindowMs: 60_000,                   // 滑动窗口合批（继承 MERGE_WINDOW_MS=60s）
       mergeHoldActive: () => host.hasRunningBackground(), // D4 must-fix #1：禁止用 isIdle 代替
-      busyPolicy: "retry-force",               // settled 边沿驱动 + 退避达上限强发
       backoff: { ms: 100, max: 50 },           // 继承 FLUSH_BACKOFF_MS/MAX
       // dedup LRU：语义与旧 DEDUP_TTL_MS=60s **不同**——按 key 永久去重（仅 LRU 逐出后
       // 同 key 可再入）。当前 key 空间（id / id:round，id 每 spawn 唯一）无实际差异；
@@ -431,16 +429,21 @@ export function createNotifier(host: NotifierHost): BgNotifier {
         notifyId,
       });
     }
-    handle.send({
-      payload: {
-        kind: "custom",
-        customType: NOTIFY_CUSTOM_TYPE,
-        content,
-        display: true,
-        details,
+    // D1 申报制：通知出站文本不附裸标记（无回执锚点），申报 'acceptance' = 受理即落地
+    // （缺省 'marker' 会让条目永挂 in-flight，死锁形态复发——新增无标记提交点须同样申报）
+    handle.send(
+      {
+        payload: {
+          kind: "custom",
+          customType: NOTIFY_CUSTOM_TYPE,
+          content,
+          display: true,
+          details,
+        },
+        dedupeKey: notifyId,
       },
-      dedupeKey: notifyId,
-    });
+      { receiptAnchor: "acceptance" },
+    );
     return true;
   }
 

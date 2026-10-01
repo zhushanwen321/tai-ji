@@ -58,7 +58,7 @@ function scanRecordEventsFor(agentDir: string, id: string): Array<Record<string,
       .split("\n")
       .filter((l) => l.trim().length > 0)
       .map((l) => JSON.parse(l) as Record<string, unknown>)
-      .filter((e) => e.type !== "record-journal");
+      .filter((e) => e.type !== "record-events");
   } catch {
     return [];
   }
@@ -73,8 +73,8 @@ import {
   _resetCoreSpawnedChildrenMirrorForTest,
   registerSpawnedChildForRecord,
 } from "../engine/host/spawned-children.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
-import { SUBAGENT_RECORD_CUSTOM_TYPE, type SubagentRecordEntryData } from "../persistence/record-entry.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE, type SubagentRecordEntryV2 } from "../persistence/record-entry.ts";
 
 // [U4] 锚可解析性 fixture（模块级——makeRecord 缺省锚消费）：每个用例独立 tmp 文件。
 beforeEach(() => {
@@ -1445,7 +1445,7 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
   let store: RecordStore;
   let pi: PiMock;
   let fake: FakePiEnginePort;
-  let entries: SubagentRecordEntryData[];
+  let entries: SubagentRecordEntryV2[];
   let prevDataDirEnv: string | undefined;
 
   beforeEach(() => {
@@ -1468,7 +1468,7 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     entries = [];
     pi.appendEntry.mockImplementation(
       (customType: string, data: unknown) => {
-        if (customType === SUBAGENT_RECORD_CUSTOM_TYPE) entries.push(data as SubagentRecordEntryData);
+        if (customType === SUBAGENT_RECORD_CUSTOM_TYPE) entries.push(data as SubagentRecordEntryV2);
       },
     );
     service.initSession({ pi, sessionId: "root-session" });
@@ -1486,8 +1486,9 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
   });
 
   /** 本 record 的 entry 序列（appendEntry 捕获投影）。 */
-  function entriesFor(id: string): SubagentRecordEntryData[] {
-    return entries.filter((e) => (e as { id?: string }).id === id);
+  function entriesFor(id: string): SubagentRecordEntryV2[] {
+    // id 是 v2 两族（registered / settled）共有字段，无需按 kind 窄化。
+    return entries.filter((e) => e.id === id);
   }
 
   it("chat 轮：message_end(usage) → totalTokens/turnCount 实时累积；轮终 entry 保真；跨轮持续；close 终态 entry 保真", async () => {
@@ -1978,5 +1979,79 @@ describe("集成：锚失效处置真链（pi reopen 链 + U1b 循环专防 + D1
     expect(zcode.runs[0]!.task.prompt).toBe("无模型续聊");
     // 与首轮同语义：任务不带 model 键（缺席交 zcode 自身缺省解析）
     expect("model" in zcode.runs[0]!.task).toBe(false);
+  });
+});
+
+// ============================================================
+// [§1.4 (c)] 轮终链断头保护：链上异常降级 error 留痕，不升格为未处理 promise 拒绝
+// （pi rpc 模式无未处理拒绝处理器 → Node 默认 exit 1——登记 §1.4 死亡通道；成因不限
+// stale pi 一种）。vitest 对未处理拒绝默认判红 = 本组用例的隐式断言面。
+// ============================================================
+
+describe("[§1.4 (c)] 轮终链断头保护（voidRoundFinalChain）", () => {
+  it("onRunSettled 成功形态：finalizeRoundOutcome 抛错（stale pi 文案）→ error 留痕，不崩、不通知、不 drain", async () => {
+    loggerMock.error.mockClear();
+    const record = makeRecord({});
+    const { host, calls } = makeHost(record);
+    host.finalizeRoundOutcome = async () => {
+      throw new Error("This extension ctx is stale after session replacement or reload.");
+    };
+    const cont = new ConversationContinuation(record, host);
+
+    cont.onRunSettled(makeOutcome({ content: "ok" }));
+
+    await vi.waitFor(() => expect(loggerMock.error).toHaveBeenCalled());
+    const [msg, detail] = loggerMock.error.mock.calls.at(-1)! as [string, { detail: unknown }];
+    expect(msg).toContain("settleRoundSuccess (onRunSettled) (round-final chain)");
+    expect(String(detail.detail)).toContain("stale after session replacement");
+    // 链在簿记步降级：通知不达、后续 drain 不执行。
+    expect(calls.routed).toEqual([]);
+    expect(calls.dispatched).toEqual([]);
+  });
+
+  it("onRunSettled 失败形态与 onRoundRejected：settleRoundFailed 抛错同样降级留痕", async () => {
+    loggerMock.error.mockClear();
+    const record = makeRecord({ id: "sa-cont-fail" });
+    const { host } = makeHost(record);
+    host.finalizeRoundOutcome = async () => {
+      throw new Error("bookkeeping exploded");
+    };
+    const cont = new ConversationContinuation(record, host);
+
+    cont.onRunSettled(makeOutcome({ content: "", error: "engine_run_failed" }));
+    await vi.waitFor(() => expect(loggerMock.error).toHaveBeenCalled());
+    expect(String(loggerMock.error.mock.calls.at(-1)?.[0])).toContain(
+      "settleRoundFailed (onRunSettled) (round-final chain)",
+    );
+
+    const record2 = makeRecord({ id: "sa-cont-reject" });
+    const host2 = makeHost(record2).host;
+    host2.finalizeRoundOutcome = async () => {
+      throw new Error("bookkeeping exploded 2");
+    };
+    const cont2 = new ConversationContinuation(record2, host2);
+    cont2.onRoundRejected(new Error("prepare failed"));
+    await vi.waitFor(() =>
+      expect(String(loggerMock.error.mock.calls.at(-1)?.[0])).toContain(
+        "settleRoundFailed (onRoundRejected) (round-final chain)",
+      ),
+    );
+  });
+
+  it("dispatchRoundAsync：主干同步段之外（markRoundStarted）抛错 → error 留痕，不升格未处理拒绝", async () => {
+    loggerMock.error.mockClear();
+    const record = makeRecord({ id: "sa-cont-dispatch" });
+    const { host } = makeHost(record);
+    host.markRoundStarted = () => {
+      throw new Error("round-start bookkeeping exploded");
+    };
+    const cont = new ConversationContinuation(record, host);
+
+    cont.onMessage("hello");
+
+    await vi.waitFor(() => expect(loggerMock.error).toHaveBeenCalled());
+    const [msg, detail] = loggerMock.error.mock.calls.at(-1)! as [string, { detail: unknown }];
+    expect(msg).toContain("dispatchRoundAsync (round-final chain)");
+    expect(String(detail.detail)).toContain("round-start bookkeeping exploded");
   });
 });

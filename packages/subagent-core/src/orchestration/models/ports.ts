@@ -8,9 +8,9 @@
  * worker-message-pump 循环依赖：2 个 engine 函数文件各自独立，共用同一组
  * 依赖签名（D-12）。
  *
- * 层归属：Engine。零 infra 依赖（AC-1）。
+ * 层归属：Engine。零 infra 依赖（反向边由包级值依赖环检查拦截）。
  */
-import type { SubagentStream } from "../../execution/assembly/stream-sink.ts";
+import type { AgentStreamSink } from "../../shared/agent-stream.ts";
 import type { AgentEvent } from "../../shared/agent-event.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 import type { RunSpec } from "./run-spec.ts";
@@ -32,7 +32,7 @@ import type { WorkflowRun } from "./workflow-run.ts";
  * raw JSONL 中间层（executeAndAwait 直接出 AgentEvent）。
  */
 export interface AgentRunner {
-  run(opts: AgentCallOpts, signal: AbortSignal, onEvent?: (event: AgentEvent) => void, stream?: SubagentStream): Promise<AgentResult>;
+  run(opts: AgentCallOpts, signal: AbortSignal, onEvent?: (event: AgentEvent) => void, stream?: AgentStreamSink): Promise<AgentResult>;
 }
 
 // ── Port 2: RunStore ──────────────────────────────────────────
@@ -106,8 +106,8 @@ export interface WorkerHandlers {
  * - runs: 内存中的活动 run 聚合根索引（runId → WorkflowRun），替代旧 6 张并行 map
  * - onRunDone?: run 到达 done 终态时的回调（C-4 修复，可选）。由 Interface 层
  * factory 注入（notifyDone —— 唤醒 parent agent 消费结果）。Engine 层不依赖
- * Pi SDK，通过 callback 把完成信号外推到 Interface 层。所有 transition("done", ...)
- * 路径（handleReturn / handleWorkerError / handleScriptError / abortRun /
+ * Pi SDK，通过 callback 把完成信号外推到 Interface 层。所有终局路径
+ * （handleReturn / handleWorkerError / handleScriptError / abortRun /
  * dispatchAgentCall budget 终止）在终局编排后触发本回调（record 事件流落账；
  * store.save 为 no-op 契约保留，不承担持久化）。
  */
@@ -124,7 +124,7 @@ export interface LifecycleDeps {
  * runWorkflow 启动时 emit pending:register，经本端口（Engine 不直接依赖 Pi SDK）。
  * 可选——无 pending-notifications 扩展时 no-op（向后兼容）。
  *
- * [reload-closeout D4] transition("done") 路径的 pending:unregister 持久化不再走
+ * [reload-closeout D4] 终局路径的 pending:unregister 持久化不走
  * 本端口（emit→内存 listener 是易失跳：reload 转换窗/多 extension factory 顺序窗
  * 内丢失即注销 entry 永缺位）——finalizeRun 改经下方 appendEntry 直落权威面。
  */

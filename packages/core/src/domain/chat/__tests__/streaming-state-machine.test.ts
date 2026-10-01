@@ -34,7 +34,6 @@ function makeMachine() {
   const occupancies = ref<Map<string, SessionOccupancyState>>(new Map())
   const handingOffSessions = ref<Set<string>>(new Set())
   const retryStates = ref<Map<string, unknown>>(new Map())
-  const queueStates = ref<Map<string, unknown>>(new Map())
   const pendingSend = ref<Set<string>>(new Set())
   const clearOccupancy = vi.fn<(sessionId: string) => void>()
   const setHandingOff = vi.fn<(sessionId: string, value: boolean) => void>()
@@ -43,12 +42,11 @@ function makeMachine() {
     occupancies,
     handingOffSessions,
     retryStates,
-    queueStates,
     pendingSend,
     clearOccupancy,
     setHandingOff,
   })
-  return { sm, messages, retryStates, queueStates, clearOccupancy, setHandingOff }
+  return { sm, messages, retryStates, clearOccupancy, setHandingOff }
 }
 
 describe('applySubagentStreamDelta', () => {
@@ -295,48 +293,42 @@ describe('finalizeMessages', () => {
 })
 
 describe('collectFinalizeCandidates', () => {
-  it('TC6 并集：messages ∪ compacting ∪ handingOff ∪ retry ∪ queue ∪ pendingSend', () => {
-    // 6 源各贡献一个独有 sid，验证并集不漏
+  it('TC6 并集：messages ∪ compacting ∪ handingOff ∪ retry ∪ pendingSend（[u5a] queue 源已退役）', () => {
+    // 5 源各贡献一个独有 sid，验证并集不漏
     const messages = shallowRef<Map<string, ShallowRef<Message[]>>>(new Map([['a', shallowRef([streamingAssistant('a1')])]]))
     const occupancies = ref<Map<string, SessionOccupancyState>>(new Map([['b', { turn: 'idle', compacting: true, bash: false }]]))
     const handingOff = ref<Set<string>>(new Set(['c']))
     const retryStates = ref<Map<string, unknown>>(new Map([['d', {}]]))
-    const queueStates = ref<Map<string, unknown>>(new Map([['e', {}]]))
-    const pendingSend = ref<Set<string>>(new Set(['f']))
+    const pendingSend = ref<Set<string>>(new Set(['e']))
     const sm = createStreamingStateMachine({
       messages,
       occupancies,
       handingOffSessions: handingOff,
       retryStates,
-      queueStates,
       pendingSend,
       clearOccupancy: vi.fn(),
       setHandingOff: vi.fn(),
     })
 
     const candidates = sm.collectFinalizeCandidates()
-    expect([...candidates].sort()).toEqual(['a', 'b', 'c', 'd', 'e', 'f'])
+    expect([...candidates].sort()).toEqual(['a', 'b', 'c', 'd', 'e'])
   })
 })
 
 describe('clearIndependentTransient', () => {
-  it('TC7 清 compacting/handingOff 置位 + retry/queue 删除；无 sid 时 no-op', () => {
-    const { sm, retryStates, queueStates, clearOccupancy, setHandingOff } = makeMachine()
+  it('TC7 清 compacting/handingOff 置位 + retry 删除；无 sid 时 no-op（[u5a] queue 维度已退役）', () => {
+    const { sm, retryStates, clearOccupancy, setHandingOff } = makeMachine()
     retryStates.value = new Map([['s1', { attempt: 1 }]])
-    queueStates.value = new Map([['s1', { queued: true }]])
 
     sm.clearIndependentTransient('s1')
 
     expect(clearOccupancy).toHaveBeenCalledWith('s1')
     expect(setHandingOff).toHaveBeenCalledWith('s1', false)
     expect(retryStates.value.has('s1')).toBe(false)
-    expect(queueStates.value.has('s1')).toBe(false)
 
     // 无该 sid 的态：不再清（no-op 幂等）
     const retrySnapshot = retryStates.value
-    const queueSnapshot = queueStates.value
     sm.clearIndependentTransient('ghost')
     expect(retryStates.value).toBe(retrySnapshot)
-    expect(queueStates.value).toBe(queueSnapshot)
   })
 })

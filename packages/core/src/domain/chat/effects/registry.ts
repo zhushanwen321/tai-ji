@@ -6,7 +6,7 @@
  * [P4 s5 w2] tasks 路由（routeToolResultToTasks/routeToolStartToTasks）与
  * openTasksPanelOnFirstData 回调已随 tasks 域删除移除。
  *
- * 背景：原 chat-chunk-processor（21 case，更新 messages/retryStates/queueStates）
+ * 背景：原 chat-chunk-processor（21 case，更新 messages/retryStates/queueStates；[u5a] queueStates 维度已退役）
  * 与 useChat.ensureStreamSubscription（9 case，翻 isStreaming + applySnapshot）对同一
  * ServerMessage 流 switch 两次。新增 message.* type 必须两处同步改，易漏。
  *
@@ -22,11 +22,12 @@
  *   对应原 useChat 先 appendAssistantChunk 再 switch 翻 flag 的顺序）。
  * - 收口时机：complete/error/stream_error 调 finalizeSession 收口
  *   （status 由 streaming 派生 isGenerating，非手动 flag）。
- * - [设计裁决：坏 entry 静默丢弃（2026-09-17 错误处理审查 A5 登记）] 消息类 handler
- *   （构造点 = event-adapter tool-call-start / tool-call-end / handleMessageEnd）在 entry
- *   缺失或形态不符时静默 return 是有意取舍，不加 warn：正常流经 event-adapter 构造的帧
+ * - [设计裁决：坏 entry 静默丢弃（2026-09-17 错误处理审查 A5 登记；dev 观测后补，生产行为不变）]
+ *   消息类 handler（构造点 = event-adapter tool-call-start / tool-call-end / handleMessageEnd）
+ *   在 entry 缺失或形态不符时生产路径静默 return 是有意取舍：正常流经 event-adapter 构造的帧
  *   不会产生坏 entry（构造侧已守卫）；单帧异常静默丢弃换取异常帧不断流（主对话流不因
- *   协议漂移中断）。若本分支被触发即是 event-adapter 漂移信号，排障入口 = 对齐
+ *   协议漂移中断）。守卫触发即是 event-adapter 漂移信号——dev 下补一次/类型 warn（对齐
+ *   RD-1#9 未注册 type 待遇，见 warnMalformedEntryDropped），排障入口 = 对齐
  *   event-adapter（runtime event-adapter.ts）对应构造点日志。坏帧行为由 effects.test.ts
  *   坏帧用例锁定（不抛错、零副作用）。各 handler 只留一行指针。
  *
@@ -51,22 +52,19 @@ import type {
   PiEntry,
   PiMessageEntry,
   PiToolCallEntryForm,
-  Segment,
   ServerMessage,
   ServerMessageType,
-  SteerFollowUpMode,
   ToolCall,
 } from '@taiji/shared'
 import { normalizePiToolResult } from '../apply-entry'
 import { truncateEntryToolOutput } from '../apply-entry-utils'
-import type { RetryState, QueueState, FinalizeReason } from '../store-types'
+import type { RetryState, FinalizeReason } from '../store-types'
 import type { MessageEffectContext, MessageEffectHandler } from '../effect-types'
 export type { MessageEffectContext, MessageEffectHandler } from '../effect-types'
 import {
   readString,
   readNumber,
   readBool,
-  readStringArray,
   readDetail,
   readCompactionSummary,
   readBranchSummary,
@@ -76,182 +74,58 @@ import {
 import { findLastAssistantIndex, findToolCallOwner } from '../chunk-processor'
 import { commitMessages, REASON_FALLBACK_ERROR_TEXT, terminalMessagePatch } from '../mutations'
 import { truncateToolCall } from '../truncate-tool-output'
-import { bashStartEffect, bashResultEffect } from '../bash-effects'
+import { bashStartEffect, bashResultEffect, bashAbortedEffect } from '../bash-effects'
 import { applyEntryFrameWithOverlay } from './entry-overlay'
 import { isDevMode } from '../../../platform/dev-mode'
-// [session-occupancy u4a] message_end(user) 三分支 ①（defer 分区 FIFO 匹配）与 ①③ 共用
-// helper 归位 effects/user-delivery.ts（机制独立成模块，u4b flush 确认驱动只扩展该文件）
-import { confirmDeferQueueEntry, extractUserContentText, removeQueuedTextFromSnapshot } from './user-delivery'
+// [投递所有权内核 u3b] message_end(user) 送达回执（内核标记 id 匹配，C-data-08 修订方向）
+// 归位 effects/user-delivery.ts；① 前身（defer 分区 FIFO 文本匹配）与 queue_update 计数腿
+// （countDrained/drainN）已随内核整体退役（设计 §3.1 删除面），git 可追溯。
+import { confirmKernelDeliveryOnMessageEnd } from './user-delivery'
 // [TODO @i18n-migration] core/i18n 落地后恢复 i18n.global.t 调用（§0.3 列为后续迁移）。
 // compactionSummary（W6）/ branchSummary（D13 renderer-deepening）均已 entry 化：两者的
 // summary 兜底收敛到 reducer（compaction 中文 fallback「上下文已压缩」/ branchSummary
 // 空串），live/reload 一致，本文件不再持有占位文案。
 
 /**
- * 计数差集：返回 prev 比 next 多出的元素（按出现次数，非子串匹配）。
+ * [投递所有权内核 u3b] message_end(user) 投递确认/兜底显示（原三分支收敛为两分支）：
  *
- * [B1] queue_update drain 驱动 pending→complete 用。pi drain 一条 steer 时 splice 移除一项，
- * prev=['A','A'] → next=['A'] → 差集 ['A']（drain 了一条）。用 includes 会因 'A' 仍在 next 里
- * 漏判，导致第二条 pending 永久卡住。计数差集精确匹配出现次数差。
+ * - ① 内核送达回执（effects/user-delivery.ts confirmKernelDeliveryOnMessageEnd，最高
+ *   优先级）：帧文本尾内核裸标记 id 命中 session.delivery 投影条目 → 投影转 delivered +
+ *   morph 段按序入流 + inflight 占位回收 + 帧消费终止。C-data-08 修订方向：标记 id 精确
+ *   匹配（身份非内容）取代计数 FIFO / 文本匹配。
+ * - ② inflight > 0 → 纯计数 decrement → return（兜底：外来直发/帧缺失等无投影命中形态
+ *   ——乐观气泡已显示，纯计数抵消防重复入流）。
  *
- * [W14] 与 drainN 计数 FIFO 配合：countDrained 返回数组的 length = 被投递条数 N →
- * drainN(sid, mode, N) 按入队顺序取 N 条（FIFO，与 pi splice 顺序一致），不按文本找——
- * pi 入队存 skill 展开后文本 ≠ 提交原文，文本匹配在该场景必挂（D6）。
- */
-function countDrained(prev: string[], next: string[]): string[] {
-  const remaining = [...next]
-  const drained: string[] = []
-  for (const text of prev) {
-    const idx = remaining.indexOf(text)
-    if (idx !== -1) {
-      remaining.splice(idx, 1) // 仍在队列，消掉一个名额
-    } else {
-      drained.push(text) // prev 有但 next 没有/少了 → 被 drain
-    }
-  }
-  return drained
-}
-
-/** W06-B：帧数组 → 快照 state（空数组视为无内容，不设维度字段）。 */
-function queueStateOf(steering: string[] | undefined, followUp: string[] | undefined): QueueState {
-  const state: QueueState = {}
-  if (steering?.length) state.steering = steering
-  if (followUp?.length) state.followUp = followUp
-  return state
-}
-
-/**
- * [steer-bubble u2 / D2 维护点 1] pending→complete 驱动的腿 1 消费：计数差集找出「被 drain
- * 投递的」条数（prev 比 new 多出的元素）。
- * [B1] 不能用 includes（子串语义）——重复文本 'A' 入队两条、drain 一条后 new=['A']，
- * includes('A')===true 会漏判，第二条 pending 永久卡住。计数差集按出现次数精确匹配。
- * [W14] 差集数组的 length = N，drainN 计数 FIFO 取前 N 条（不按文本匹配——pi 入队存
- * skill 展开后文本 ≠ 提交原文，文本相等匹配在该场景必丢消息，D1 表末行 + D6）。
- * steer / follow-up 各自差集各自计数（sendMode 隔离，防跨类型同文本误取——W5 语义保留）。
- * 调用时序与原内联逐字一致：steer drain → steer appendUser 循环 → followUp drain →
- * followUp appendUser 循环 → 两维度 inflight 各按实取数累加。
- *
- * 腿 1 消费点 inflight += 实取数（m = drainN 实际返回数组长度，两维度各算各的）：
- * drain 帧是投递证据，这些气泡「已显示待 message_end 确认」。按实取数 m 计而非差集
- * N——m < N 的差额 = 扩展注入等 buffer 无货条目，未显示即不确认，其 message_end
- * 到达时走腿 2 includes 兜底。m = 0 时 incrementInflight no-op（不产生零值条目）。
- *
- * [steer-bubble Gate B AC-4 / dev 验证开关] globalThis.__TAIJI_STEER_SKIP_LEG1__ = true 时
- * 跳过腿 1 消费（模拟 drain 帧丢失——真实链路其余部分不动，快照照常写入），用于 AC-4
- * 确定性触发验证腿 2 独立承担显示（devtools console 设置；产线无人设置恒 false）。
- */
-function drainDeliveredByDiff(
-  ctx: MessageEffectContext,
-  sid: string,
-  prev: QueueState | undefined,
-  steering: string[] | undefined,
-  followUp: string[] | undefined,
-): void {
-  const skipLeg1 =
-    (globalThis as { __TAIJI_STEER_SKIP_LEG1__?: boolean }).__TAIJI_STEER_SKIP_LEG1__ === true
-  if (!prev || skipLeg1) return
-  const steerN = countDrained(prev.steering ?? [], steering ?? []).length
-  const steerDrained = ctx.drainN(sid, 'steer', steerN)
-  for (const segs of steerDrained) ctx.appendUser(sid, segs)
-  const followN = countDrained(prev.followUp ?? [], followUp ?? []).length
-  const followDrained = ctx.drainN(sid, 'follow-up', followN)
-  for (const segs of followDrained) ctx.appendUser(sid, segs)
-  ctx.incrementInflight(sid, steerDrained.length)
-  ctx.incrementInflight(sid, followDrained.length)
-}
-
-/**
- * [steer-bubble u2 / D4] 快照写入/删条目：帧数组（steering/followUp）驱动 QueueBubble 快照。
- * 投递侧 reconcilePending 裁剪已移除（见 queue_update handler 注释）；帧内
- * pendingMessageCount 字段投递侧裁剪移除后前端已无消费方（仅 event-adapter 翻译附带，
- * 与帧数组等值——W14 D6 的同源公式）。
- */
-function commitQueueSnapshot(
-  queueStates: MessageEffectContext['queueStates'],
-  sid: string,
-  state: QueueState,
-): void {
-  const hasContent = !!state.steering?.length || !!state.followUp?.length
-  if (!hasContent) {
-    if (queueStates.value.has(sid)) {
-      const nextMap = new Map(queueStates.value)
-      nextMap.delete(sid)
-      queueStates.value = nextMap
-    }
-  } else {
-    queueStates.value = new Map(queueStates.value).set(sid, state)
-  }
-}
-
-/**
- * [steer-bubble u1 / D1 + D2] message_end(user) 腿 2：投递事实驱动的用户气泡兜底显示。
- *
- * [session-occupancy-send-closure u4a / D5.3] 处理序升级为三分支（单一入口内，逐级下落）：
- * - ① defer 分区 FIFO 文本匹配（effects/user-delivery.ts，新增，最高优先级）：命中 →
- *   确认回调出队 + 剔一个快照实例 + 仅 send 条目 decrementInflight 回收占位 + 帧消费
- *   终止；未命中 → 逐级下落。
- * - ② inflight > 0 → 纯计数 decrement → return（现状零改动——恢复计数语义，不作出队信号）
- * - ③ inflight == 0 → includes 兜底（现状零改动——腿 2 正常 steer 路径，defer 帧未命中
- *   ① 时的数量守恒兜底：drainN 无货则降级 appendUser，帧不丢气泡不丢）。
- *
- * 腿 2 双腿互斥裁决原文（D2，P1 探针保证 drain 帧恒先于 message_end(user) 到达）：
- * - inflight > 0 → 本帧对应**已显示**的投递（腿 1 消费 +m / send 乐观 +1 的确认通道）
- *   → decrementInflight 抵消后跳过。不查 includes——同文本下数组可能还剩未投递条目，
- *   includes 不可判定，计数优先裁决。
- * - inflight == 0 → includes 兜底：contentText ∈ 最后 queue_update 帧快照（steering /
- *   followUp 两维度分别查）。这是 **pi 帧文本 ↔ pi 帧文本** 同源比对（P2 探针三处同源
- *   恒等），与 W14 否决的「前端提交原文 ↔ pi 展开文本」跨源匹配不是同一命题；唯一
- *   职责 = 排除 send（文本从不在数组）与确认曾入队。
- *   - 无快照（断连清了 queueStates / drain 空帧已删条目）→ 无据跳过，漏显由 D3
- *     快照收敛兜底。
- *   - 命中 → 消费 1 条：drainN(1) 回填 segments，暂存空（扩展注入等 buffer 无货）
- *     → 帧内文本纯文本降级插入（G2：降级可见不静默）。**消费后不加 inflight**——
- *     显示即完成，本帧就是自己的确认帧。
- *   - 双维度同文本命中（跨 mode）：按 steering → followUp 顺序取**有货**的一方
- *     （pi 投递序 steering 先于 followUp，同文本双命中时已投递更可能是 steering 条目；
- *     顺序 fallback 后仅剩「两 mode 暂存全空」才降级，比设计 D2 已知边界①的单 mode
- *     误指降级更强，内容同质无视觉差）。消费剔快照剔实际取货维度的一个实例。
+ * [HISTORICAL] ③ 腿 2 includes 兜底与 queue_update 计数腿（腿 1 countDrained/drainN）
+ * 已随内核退役：queue_update 帧降级为内核内部回执（不再直驱 UI），队列区数据源 =
+ * session.delivery 状态帧单一源（D7）。
  */
 function confirmUserDeliveryOnMessageEnd(
   ctx: MessageEffectContext,
   sid: string,
   entry: PiMessageEntry,
 ): void {
-  // ① defer 分区 FIFO 文本匹配（session-occupancy D5.3）：命中即消费终止，不走 ②③。
-  if (confirmDeferQueueEntry(ctx, sid, entry)) return
+  // ① 内核送达回执（标记 id 匹配）：命中即消费终止，不走 ②。
+  if (confirmKernelDeliveryOnMessageEnd(ctx, sid, entry)) return
+  // ② 计数兜底：乐观气泡已显示，纯计数抵消（本帧不重复入流）。
   if (ctx.getInflight(sid) > 0) {
+    // [R2-b04-3] 兜底触发频率观测（dev 门）：① 未命中落 ② = 外来直发/帧缺失形态的接管
+    // 频率，原先零痕迹（红线「兜底掩盖正常路径」的观测要求）。钳制幂等机制不变。
+    logDeliveryCountingFallback(sid)
     ctx.decrementInflight(sid, 1)
     return
   }
-  const snapshot = ctx.queueStates.value.get(sid)
-  // 无快照 → includes 无据 → 跳过（D2：漏显由 D3 reconcile 快照收敛兜底）
-  if (!snapshot) return
-  const text = extractUserContentText(entry)
-  // 空文本（纯 image 等无文字内容）无入队比对语义，跳过
-  if (!text) return
-  const hitSteer = snapshot.steering?.includes(text) === true
-  const hitFollow = snapshot.followUp?.includes(text) === true
-  // 未命中 = send 路径（send 文本从不在数组，其乐观插入已在 send 点显示）→ 跳过
-  if (!hitSteer && !hitFollow) return
-  const candidates: Array<{ mode: SteerFollowUpMode; dimension: 'steering' | 'followUp' }> = []
-  if (hitSteer) candidates.push({ mode: 'steer', dimension: 'steering' })
-  if (hitFollow) candidates.push({ mode: 'follow-up', dimension: 'followUp' })
-  let consumed: Segment[] | undefined
-  let consumedDimension = candidates[0]!.dimension
-  // 全空降级路径（两命中维度暂存全无货）下 consumedDimension 停留在最后尝试维度——
-  // 同文本剔一实例即完成深度对齐，维度选择不影响后续 countDrained 正确性（一致性审查
-  // doc_error #3：该子路径无取货发生，「剔实际取货维度」名不副实但行为等价）。
-  for (const candidate of candidates) {
-    consumedDimension = candidate.dimension
-    const drained = ctx.drainN(sid, candidate.mode, 1)
-    if (drained.length > 0) {
-      consumed = drained[0]
-      break
-    }
-    // 该 mode 暂存无货 → 试下一命中维度（双维度同文本场景取有货方，见函数头注释）
-  }
-  ctx.appendUser(sid, consumed ?? [{ type: 'text', text }])
-  removeQueuedTextFromSnapshot(ctx.queueStates, sid, consumedDimension, text)
+}
+
+/** [R2-b04-3] ② 计数兜底的 dev 计数/日志（生产零开销；计数跨 session 累计，供频率观察）。 */
+let deliveryCountingFallbackCount = 0
+function logDeliveryCountingFallback(sid: string): void {
+  if (!isDevMode()) return
+  deliveryCountingFallbackCount++
+  console.warn(
+    `[effects] message_end(user) ② counting fallback engaged (total=${deliveryCountingFallbackCount}, sid=${sid})` +
+      ` — receipt missed ① marker match (foreign direct / marker-miss form), decrementing by count`,
+  )
 }
 
 /**
@@ -333,6 +207,79 @@ function insertContentBlockByIndex(blocks: ContentBlock[], block: ContentBlock):
 }
 
 /**
+ * [b05 候选1 收敛] 终态错误帧「帧语义 → (FinalizeReason, errorText)」唯一映射（纯函数）。
+ *
+ * 原先 handler 内与 dispatchMessageEvent 安全网各自持有一套映射（complete 的
+ * stopReason→reason、error/stream_error 的错误字段来源），收敛为本函数；两处消费侧差异
+ * 保留为显式语义，不在映射内吞掉：
+ * - handler 对 error/stream_error 的 errorText 补字面量兜底（错误不得静默）；安全网透传
+ *   undefined（兜底文案由 finalizeSession 出口的 REASON_FALLBACK_ERROR_TEXT 统一承担）。
+ * - 安全网对 complete 把 'normal' 保守映射为 'error'（handler 中途抛错的正常完成帧
+ *   不按干净完成收口）。
+ */
+function deriveTerminalFrameParams(
+  type: string,
+  payload: Record<string, unknown>,
+): { reason: FinalizeReason; errorText: string | undefined } {
+  if (type === 'message.complete') {
+    const stopReason = readString(payload, 'stopReason')
+    return {
+      reason: stopReason === 'aborted' ? 'aborted' : stopReason === 'error' ? 'error' : 'normal',
+      errorText: readString(payload, 'errorMessage'),
+    }
+  }
+  if (type === 'message.stream_error') {
+    return { reason: 'stream_error', errorText: readString(payload, 'content') }
+  }
+  return { reason: 'error', errorText: readString(payload, 'message') }
+}
+
+/**
+ * [M2 形态统一 / b05 候选1 收敛] 兜底纯 error 气泡（错误文本只住 error 字段，content 空；
+ * 开始/结束时刻取同一读数，秒级展示口径下一致）。原 3 处同款对象字面量（complete 秒败
+ * 分支 / error / stream_error 的无前置 streaming entity 分支）收敛于此。store.ts
+ * markSessionError 第 4 处同款字面量不在本收敛批（store.ts 非本批领地，登记）。
+ */
+function appendFallbackErrorBubble(
+  messages: MessageEffectContext['messages'],
+  sid: string,
+  prev: Message[],
+  errorText: string,
+): void {
+  const errNow = Date.now()
+  commitMessages(messages, sid, [
+    ...prev,
+    { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: errNow, endedAt: errNow },
+  ])
+}
+
+/**
+ * [b05 候选1 收敛] error / stream_error 终态 handler 骨架（原两 handler 逐行近似复制，
+ * 仅差 reason 与错误字段来源，参数化收敛）：prev 读取 → hasStreaming 探测 →
+ * finalizeSession → 无前置 streaming entity 时追加兜底纯 error 气泡。
+ * 副作用顺序与原内联实现逐字一致。
+ */
+function terminalErrorEffect(
+  type: 'message.error' | 'message.stream_error',
+  fallbackErrorText: string,
+): MessageEffectHandler {
+  return (ctx, sid, payload) => {
+    const { messages, finalizeSession } = ctx
+    const { reason, errorText } = deriveTerminalFrameParams(type, payload)
+    // 检查是否有前置 streaming assistant（finalizeSession 会收口它）
+    const prev = messages.value.get(sid)?.value ?? []
+    const idx = findLastAssistantIndex(prev)
+    const hasStreaming = idx >= 0 && prev[idx].status === 'streaming'
+    // 统一收口：finalizeSession 做 streaming entity error 化 + 清 pendingSend + 清 timer
+    finalizeSession(sid, reason, errorText ?? fallbackErrorText)
+    // 无前置 streaming entity 时 finalizeSession 不追加消息——需手动追加（错误不得静默）
+    if (!hasStreaming) {
+      appendFallbackErrorBubble(messages, sid, prev, errorText ?? fallbackErrorText)
+    }
+  }
+}
+
+/**
  * tool_call_end overlay 终态派生段（纯函数提取，复杂度门禁 Gate-1.5）：normalize +
  * 64KB 截断。三态归一在消费侧做：传 entry.message（body）——与 reducer
  * computeToolCallFill 同语义（content block 数组 → join text），entry.content 已由
@@ -366,31 +313,13 @@ function deriveToolCallEndOverlay(message: PiMessageEntry['message']): {
 const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> = {
   // ── 主流式生命周期（chunk 创建/收口 + isGenerating 派生）──
   'message.message_start': (ctx, sid, payload) => {
-    const { messages, queueStates, clearPendingSend, reconcilePending } = ctx
-    // G-023: message_start 清 QueueBubble。只清 queueStates 显示态——pending→complete 的
-    // 转换完全由 queue_update 的 countDrained 精确驱动（pi 保证 queue_update(drain) 先于
-    // message_start 到达，见 agent-session.ts:515-536 注释 "remove it BEFORE emitting"）。
-    // 此前有个 W2 flush（把残留 pending 强转 complete），基于错误前提「queue_update 可能
-    // 晚于 message_start 乱序」——pi 同步保证不会乱序，且 abort 清空队列时强转会把
-    // 「被丢弃」误标成「已投递」。已删除。
-    //
-    // [steer-bubble u2 / D4 + §2 F4]
-    // 无条件清改**条件清**（F4 修复）：先读快照深度（steering + followUp 数组长度和），
-    // 深度 == 0（无条目或数组全空）→ 删条目（QueueBubble 随深度归零消失，现状语义）；
-    // 深度 > 0 → **保留**——混合提交常态路径下 steering 已 drain、followUp 待 turn 边界
-    // 投递，该快照是未投递 followUp 的投递判据（腿 1 的 prev 差集与腿 2 的 includes 都
-    // 读它），无条件删会断两腿（F4：f1 永久漏显）。QueueBubble 消失语义从「新回合启动」
-    // （edge，混合提交时误删未投递快照）归正为「队列深度归零」（level，幂等、丢帧可由
-    // 下一帧收敛）。保真前提（P3 探针 ✅）：本时点快照深度 == pi 真实队列深度 ==
-    // 未投递 followUp 数。
-    const snapshot = queueStates.value.get(sid)
-    const queueDepth = (snapshot?.steering?.length ?? 0) + (snapshot?.followUp?.length ?? 0)
-    if (queueDepth === 0) queueStates.value.delete(sid)
-    // [steer-bubble u2 / D4] 同点僵尸清理（与条件清同帧同据，先读后清）：pendingBuffer
-    // 存量 > 快照深度 → 裁残量（reconcilePending 内建判断：存量 <= 深度 no-op）。
-    // 投递侧每帧裁剪已移除（见 queue_update handler 注释），僵尸隔离收敛到本时点——
-    // 清残量防 FIFO 错位污染后续 steer。
-    reconcilePending(sid, queueDepth)
+    const { messages, clearPendingSend } = ctx
+    // [合并收口] premature-timeout 打标作废腿与 armStreamingTimer 随上游「streaming idle
+    // timeout 移除」一并退役（main 侧已整体摘除，git 可追溯）。
+    // [HISTORICAL] QueueBubble 快照条件清/僵尸清理（G-023）已随 queue_update 计数腿退役：
+    // 队列区数据源 = session.delivery 状态帧（内核 state topic 快照，D7），queueStates
+    // 不再是任何机制的工作前提。store 侧 queueStates 分区与其清理方法已随 u5a 退役（删除）
+    // （store.ts 不在 u3b 领地）。
     const prev = messages.value.get(sid)?.value ?? []
     const messageId = readString(payload, 'messageId') ?? `a-${crypto.randomUUID()}`
     commitMessages(messages, sid, [
@@ -411,15 +340,16 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
   'message.complete': (ctx, sid, payload) => {
     const { messages, finalizeSession } = ctx
     const prev = messages.value.get(sid)?.value ?? []
-    const stopReason = readString(payload, 'stopReason')
-    const isErrorStop = stopReason === 'error'
+    // [b05 候选1 收敛] stopReason→reason 与 errorMessage 提取走 deriveTerminalFrameParams
+    // 单映射（与 dispatch 安全网共用；原先 handler 内独立推导一套）。
+    const { reason, errorText: errorMessage } = deriveTerminalFrameParams('message.complete', payload)
+    const isErrorStop = reason === 'error'
     // [HISTORICAL] pi turn 失败（stopReason='error'）时 runtime event-adapter 从 agent_end 提取
     // errorMessage 放进本 payload。曾经过往 handler 只读 stopReason/content/usage 把它丢弃——
     // 秒败 turn（如模型 400 拒绝首请求）content 为空，气泡仅剩一个空 error 态，用户完全不可见。
     // 消费双通道：
     // 有 streaming 气泡 → errorMessage 写最后一条 assistant 的 Message.error 字段（追加形态，
     // content 崩溃前正文不动）；无 streaming 气泡 → 追加纯 error 气泡（errorMessage 即全文）。
-    const errorMessage = readString(payload, 'errorMessage')
     // [HISTORICAL] 收口**所有** status==='streaming' 的 assistant 气泡，不只用
     // findLastAssistantIndex 收最后一条。一个 turn 可能产生多个 assistant 气泡
     // （工具调用气泡 + 文字总结气泡）：只转最后一条会让前面的 toolCall 气泡永远 streaming，
@@ -451,76 +381,33 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // 条件只看 isErrorStop，文案用 errorMessage || 兜底，错误不得静默。
     if (isErrorStop && !changed) {
       // [M2 形态统一] 错误文本只住 error 字段，content 空（无崩溃前正文）
-      // 同帧气泡：开始/结束时刻取同一读数（秒级展示口径下一致，避免 1ms 漂移）
-      const errNow = Date.now()
-      commitMessages(messages, sid, [
-        ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorMessage || REASON_FALLBACK_ERROR_TEXT.error, status: 'error', timestamp: errNow, endedAt: errNow },
-      ])
+      appendFallbackErrorBubble(messages, sid, prev, errorMessage || REASON_FALLBACK_ERROR_TEXT.error)
     }
     // 统一收口（finalizeSession 幂等：entity 已改则 no-op，只清 pendingSend + timer）
     // 此处 message status 已改终态 → finalizeSession 内走「只补 toolCall 收口」分支。
-    const reason: FinalizeReason = isErrorStop ? 'error' : (stopReason === 'aborted' ? 'aborted' : 'normal')
-    // [steer-bubble u2 / D4] abort 只清
-    // inflight（在 finalizeSession 之外显式做——finalizeSession 是通用收口，normal/error
-    // 不清）。D4 初版按「pi abort 确定性清队列」假设做三项清，Gate B 实测（2026-08-30）
-    // 证伪：pi abort() 不调 clearQueue 也不 emit queue_update，队列跨 abort 存活并在下一
-    // prompt 照常投递（残余投递已被模型收到）。pendingBuffer 与 queueStates 是 pi 存活
-    // 队列的前端镜像，随 pi 保留——下一 prompt 的 drain/message_end 帧到达时两腿正常
-    // 消费（腿 1 回填完整 segments），QueueBubble 在 abort 后持续显示 = 真实队列深度；
-    // 快照/暂存的偏差收敛出口仍是 G-023 条件清 + 僵尸清理（帧驱动对账，不依赖 abort
-    // 全清）。inflight 必须清：abort 后已显示未确认的条目不会再有 message_end，残留
-    // 计数会吞掉后续投递的确认配额。
+    // [steer-bubble u2 / D4 → u3b/D10 修订] abort 只清 inflight（在 finalizeSession 之外显式
+    // 做——finalizeSession 是通用收口，normal/error 不清）。D10：abort 不取消未送达消息——
+    // 内核 queued/in-flight 条目按原 lane 规则继续投递（对账器/回执驱动），本清零只是确认
+    // 基线复位：已显示未确认条目的 message_end 仍会到达，送达回执（① 标记匹配）按投影
+    // 命中消费，② 纯计数兜底见 0 钳制 no-op，不会吞掉后续投递的确认。
     if (reason === 'aborted') {
       ctx.clearInflight(sid)
     }
     finalizeSession(sid, reason)
   },
 
-  'message.error': (ctx, sid, payload) => {
-    const { messages, finalizeSession } = ctx
-    const errorText = readString(payload, 'message') ?? 'Unknown error'
-    // 检查是否有前置 streaming assistant（finalizeSession 会收口它）
-    const prev = messages.value.get(sid)?.value ?? []
-    const idx = findLastAssistantIndex(prev)
-    const hasStreaming = idx >= 0 && prev[idx].status === 'streaming'
-    // 统一收口：finalizeSession 做 streaming entity error 化 + 清 pendingSend + 清 timer
-    finalizeSession(sid, 'error', errorText)
-    // 无前置 streaming entity 时 finalizeSession 不追加消息——需手动追加
-    if (!hasStreaming) {
-      // [M2 形态统一] 错误文本只住 error 字段，content 空；开始/结束同读数
-      const errNow = Date.now()
-      commitMessages(messages, sid, [
-        ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: errNow, endedAt: errNow },
-      ])
-    }
-  },
+  // [b05 候选1 收敛] error / stream_error 原 19 行/个的近似复制 handler 收敛为
+  // terminalErrorEffect 参数化骨架；错误字段来源与字面量兜底差异由参数表达。
+  'message.error': terminalErrorEffect('message.error', 'Unknown error'),
 
-  'message.stream_error': (ctx, sid, payload) => {
-    const { messages, finalizeSession } = ctx
-    const streamErrContent = readString(payload, 'content') ?? 'Stream error'
-    const prev = messages.value.get(sid)?.value ?? []
-    const idx = findLastAssistantIndex(prev)
-    const hasStreaming = idx >= 0 && prev[idx].status === 'streaming'
-    // 统一收口
-    finalizeSession(sid, 'stream_error', streamErrContent)
-    // 无前置 streaming entity 时需手动追加
-    if (!hasStreaming) {
-      // [M2 形态统一] 错误文本只住 error 字段，content 空；开始/结束同读数
-      const errNow = Date.now()
-      commitMessages(messages, sid, [
-        ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: streamErrContent, status: 'error', timestamp: errNow, endedAt: errNow },
-      ])
-    }
-  },
+  'message.stream_error': terminalErrorEffect('message.stream_error', 'Stream error'),
 
   // B1（PR#86 review）：非终结性提示通道，与 stream_error 物理隔离——仅追加 system
   // 提示消息，不调 finalizeSession，session 保持 streaming 态。两个生产者：ping 探测
   // 的 pi 静默卡死 WARN（120s 无活动，pi 可能只是慢，130s 后恢复产出）与 EventAdapter
   // 的单帧翻译失败提示（MF-1-13：pi 流继续、turn 可能照常成功，失败帧不可终结 turn）。
-  // [W2 fix-chat-flow-order D4] liveOnly 标记（全仓唯一写入点）：stream_warn 是 taiji runtime
+  // [W2 fix-chat-flow-order D4] liveOnly 标记（stream_warn 的写入点；另一 liveOnly 写点
+  // = store.appendRespawnNotice 恢复提示条）：stream_warn 是 taiji runtime
   // 自产提示，pi 无对应 entry、重开即消失——无 entry 可构故不 entry 化（直插即本类
   // 消息的正确入流路径），分组层据此归 turn 内 notice（不切断 turn，W3 消费），不参与
   // 「live ≡ reload」等价性断言。
@@ -597,7 +484,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // [坏 entry 静默丢弃 → 见文件头「行为等价性」设计裁决；构造点 = event-adapter tool-call-start]
     // toolCallId 缺失时 fallback 随机 id（迁移前同款宽容防御：异常事件不断流）。
     const entry = payload['entry'] as PiToolCallEntryForm | undefined
-    if (entry === undefined) return
+    if (entry === undefined) return warnMalformedEntryDropped('message.tool_call_start', sid)
     const callId = typeof entry.toolCallId === 'string' ? entry.toolCallId : `tc-${crypto.randomUUID()}`
     const toolName = typeof entry.toolName === 'string' ? entry.toolName : 'tool'
     const call: ToolCall = {
@@ -627,7 +514,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // ref 无 owner 时 reducer 喂入照常，ref 收敛归 W22）。
     // [坏 entry 静默丢弃 → 见文件头「行为等价性」设计裁决；构造点 = event-adapter tool-call-end]
     const entry = payload['entry'] as PiMessageEntry | undefined
-    if (entry === undefined || entry.type !== 'message') return
+    if (entry === undefined || entry.type !== 'message') return warnMalformedEntryDropped('message.tool_call_end', sid)
     // 状态类全走 reducer（w21）：toolResult entry 喂 per-session reducer state
     ctx.applyEntryFrame(sid, entry)
     const callId = typeof entry.message.toolCallId === 'string' ? entry.message.toolCallId : undefined
@@ -676,7 +563,9 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     const entry = payload['entry']
     // entry 形态守卫：message entry（type:'message'）才喂。
     // [坏 entry 静默丢弃 → 见文件头「行为等价性」设计裁决；构造点 = event-adapter handleMessageEnd]
-    if (typeof entry !== 'object' || entry === null || (entry as { type?: unknown }).type !== 'message') return
+    if (typeof entry !== 'object' || entry === null || (entry as { type?: unknown }).type !== 'message') {
+      return warnMalformedEntryDropped('message.message_end', sid)
+    }
     // custom role 去双计：pi 对同一条 custom message 双发 message_start + message_end（同一
     // message 对象——agent-loop.ts:112 prompt 路径 / agent-session sendCustomMessage no-trigger
     // 路径双发）。customStart effect 已在 message_start 时点以 custom_message entry 形态喂入
@@ -721,9 +610,12 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
 
   // ── Bash 执行（W1 fix-chat-flow-order：bashStart 写 ephemeral executingBash 不建消息项；
   //    bashResult 构造 bashExecution entry 走 applyEntryFrame——reducer 唯一入流通道，
-  //    dispatcher 双分支延迟使帧时序构造性对齐 pi 落盘。实现提取于 bash-effects.ts 避免本文件超行）──
+  //    dispatcher 双分支延迟使帧时序构造性对齐 pi 落盘；bashAborted 为 abortBash 兜底终态
+  //    独立帧（msg-pipeline-debloat D4-3），只清执行态不产 entry。实现提取于 bash-effects.ts
+  //    避免本文件超行）──
   'message.bashStart': bashStartEffect,
   'message.bashResult': bashResultEffect,
+  'message.bashAborted': bashAbortedEffect,
 
   // ── pi CustomMessage 注入（扩展向对话流注入结构化通知）──
   'message.customStart': (ctx, sid, payload) => {
@@ -848,24 +740,11 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     }
   },
 
-  'message.queue_update': (ctx, sid, payload) => {
-    // W06-B：消息队列更新。payload（event-adapter）：{ steering?, followUp? }。
-    // pi 发空数组 []（_emitQueueUpdate 总展开为数组），空数组视为无内容（length 判断）。
-    // 分三阶段 helper（读取 / 腿 1 消费 / 快照落盘），编排顺序与原内联一致。
-    const steering = readStringArray(payload, 'steering')
-    const followUp = readStringArray(payload, 'followUp')
-    const state = queueStateOf(steering, followUp)
-    const prev = ctx.queueStates.value.get(sid)
-    drainDeliveredByDiff(ctx, sid, prev, steering, followUp)
-
-    // [steer-bubble u2 / D4] 投递侧 reconcilePending 裁剪已移除：drain 后立即裁到深度会
-    // 吃掉腿 2（message_end(user)）还没回填的 segments——pi 时序保证 drain 帧先于
-    // message_end（P1 探针），立即裁剪会让腿 2 的 segments 回填在正常路径下永远失效；
-    // 且断连等场景 prev 缺失时以本帧深度裁空 buffer 是丢消息的不可逆放大器（F3）。
-    // buffer 存活到 message_end 是 D2 双腿的工作前提；僵尸改由 G-023 时点
-    // （message_start(assistant)）条件清理（见该 handler）。
-    commitQueueSnapshot(ctx.queueStates, sid, state)
-  },
+  // ── [投递所有权内核 u3b] message.queue_update handler 已退役 ──
+  // queue_update 帧降级为内核内部回执（runtime 侧消费），不再直驱 renderer UI（D7）：
+  // 队列区数据源 = session.delivery 状态帧（内核 state topic 全量快照，useChat 消费）。
+  // 前身计数腿（countDrained 差集 → drainN 计数 FIFO → appendUser + inflight +m）删除，
+  // git 可追溯。未注册 type 经 dispatchMessageEvent 直接 no-op，无需占位 handler。
 
   // ── FileChanges 通道（W10，ADR-0024 D5 baseline diff）──
   'message.file_changes': (ctx, sid, payload) => {
@@ -897,24 +776,59 @@ const TERMINAL_FRAME_TYPES: ReadonlySet<string> = new Set([
 ])
 
 /**
- * [RD-1#9] 未注册 message.* 帧类型的 dev 观测去重集合（一次/类型 warn 防刷屏）。
+ * [RD-1#9 / R1-B12 双轨收敛] dev 一次性帧观测 warn 工厂（isDevMode 门 + Set 去重一次/类型）。
  *
- * 与已登记的「坏 entry 静默丢弃」裁决不同类：未注册 type **无构造点守卫**，是 runtime
- * 新增 message.* 帧而注册表漏接的协议漂移，旧实现零痕迹。dev 留痕、生产零开销（isDevMode 门）。
- * 清理：__clearUnhandledFrameTypeWarnForTest（测试隔离）。
+ * 原三段式（isDevMode 门 + 模块级 Set 去重 + console.warn）在本文件（未注册 message.* 帧
+ * 观测）与 useChat（未列 session.* 帧观测）双轨维护，收敛为本工厂；前缀过滤与 warn 文案
+ * 属调用方语义差异，由调用侧保留（工厂只管 dev 门 + 去重 + warn）。生产零开销（isDevMode 门）。
+ * 返回 reset 供测试隔离（调用方配 __clearXxxForTest 导出，对齐 platform/dev-mode
+ * __resetDevModeForTesting 模式）。
  */
-// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：dev 观测去重集合（非 GUI 数据）
-const warnedUnregisteredFrameTypes = new Set<string>()
+export function createDevOnceFrameWarn(formatMessage: (type: string, sid: string) => string): {
+  warn: (type: string, sid: string) => void
+  reset: () => void
+} {
+  // taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：dev 观测去重集合（非 GUI 数据）
+  const warnedTypes = new Set<string>()
+  return {
+    warn(type: string, sid: string): void {
+      if (!isDevMode() || warnedTypes.has(type)) return
+      warnedTypes.add(type)
+      console.warn(formatMessage(type, sid))
+    },
+    reset(): void {
+      warnedTypes.clear()
+    },
+  }
+}
+
+// 未注册 message.* 帧观测（RD-1#9：无构造点守卫，runtime 新增帧而注册表漏接的协议漂移）
+// 与坏 entry 帧观测（A5 守卫触发 = event-adapter 漂移信号）各持独立实例——去重键同为
+// 帧类型，但互不挤占对方的「一次/类型」配额。
+const unregisteredFrameWarn = createDevOnceFrameWarn(
+  (type, sessionId) =>
+    `[effects] unhandled frame type ${type} (sid=${sessionId}) — no message effect registered; frame is a no-op (protocol drift or intentionally unhandled)`,
+)
+const malformedEntryWarn = createDevOnceFrameWarn(
+  (type, sessionId) =>
+    `[effects] malformed/missing entry in ${type} (sid=${sessionId}) — frame silently dropped (A5 guard: adapter-constructed frames should never be malformed; drift signal)`,
+)
 
 /** [RD-1#9] 未注册 type 的一次性 dev warn（观测补齐，no-op 行为不变）。 */
 function warnUnregisteredFrame(type: string, sessionId: string): void {
-  if (!isDevMode() || warnedUnregisteredFrameTypes.has(type)) return
-  warnedUnregisteredFrameTypes.add(type)
-  console.warn(`[effects] unhandled frame type ${type} (sid=${sessionId}) — no message effect registered; frame is a no-op (protocol drift or intentionally unhandled)`)
+  unregisteredFrameWarn.warn(type, sessionId)
 }
 
-/** 测试专用：清空去重集合（对齐 platform/dev-mode __resetDevModeForTesting 模式）。 */
-export function __clearUnhandledFrameTypeWarnForTest(): void { warnedUnregisteredFrameTypes.clear() }
+/** [A5 守卫] 坏 entry 静默丢弃的一次性 dev warn（生产行为不变：静默丢弃保留）。 */
+function warnMalformedEntryDropped(type: string, sessionId: string): void {
+  malformedEntryWarn.warn(type, sessionId)
+}
+
+/** 测试专用：清空去重集合。 */
+export function __clearUnhandledFrameTypeWarnForTest(): void {
+  unregisteredFrameWarn.reset()
+  malformedEntryWarn.reset()
+}
 
 /**
  * message.* 事件的单一入口（消除 double-dispatch）。
@@ -926,8 +840,9 @@ export function __clearUnhandledFrameTypeWarnForTest(): void { warnedUnregistere
  * 非 message.* 或未注册的 message.* type 直接 no-op（等价原 applyChunk 的 default return）。
  * [RD-1#9] 未注册 type 的 no-op 在 dev 下补一次/类型 warn（协议漂移零痕迹 → 可见）。
  *
- * 单帧异常隔离（RD-1#5）：handler 抛错仅记录不逆传（调用链上游 coalescer/events 各有
- * 隔离，但半执行帧的状态残留不能靠上游兜）；终态帧异常补 finalizeSession 收口——
+ * 单帧异常隔离（RD-1#5）：handler 抛错仅记录不逆传（上游 useChat 接线点 try/catch 已
+ * 隔离订阅回调侧的故障扩散，但半执行帧的状态残留不能靠上游兜）；终态帧异常补
+ * finalizeSession 收口——
  * 理由：非终态帧（delta/queue_update 等）半执行后下一帧自然继续，强行收口反而误杀
  * 进行中的流；终态帧的收口是 handler 的最后一步，被截断 = 永久卡 streaming，且
  * finalizeSession 幂等（handler 已收口则 no-op），补调安全。
@@ -948,20 +863,23 @@ export function dispatchMessageEvent(
   } catch (e) {
     console.error(`[effects] handler threw for ${msg.type} (sid=${sessionId}) — frame side effects may be partial:`, e)
     if (!TERMINAL_FRAME_TYPES.has(msg.type)) return
-    // 终态帧安全网：按帧语义推导收口参数（complete 按 stopReason 区分 aborted/error；
-    // error/stream_error 帧尽量透传原始错误文本），finalizeSession 本身抛错则放弃收口
-    // 仅记录（不得让安全网成为新异常源）。
-    const reason: FinalizeReason = msg.type === 'message.complete'
-      ? (readString(payload, 'stopReason') === 'aborted' ? 'aborted' : 'error')
-      : msg.type === 'message.stream_error' ? 'stream_error' : 'error'
-    const errorText = msg.type === 'message.complete'
-      ? readString(payload, 'errorMessage')
-      : readString(payload, 'message') ?? readString(payload, 'content')
+    // 终态帧安全网：收口参数按 deriveTerminalFrameParams 单映射推导（与各 handler 共用，
+    // b05 候选1）；complete 的 'normal' 保守映射为 'error'（handler 中途抛错的正常完成帧
+    // 不按干净完成收口——安全网的失败语义见上方注释）。finalizeSession 本身抛错则放弃
+    // 收口仅记录（不得让安全网成为新异常源）。
+    const derived = deriveTerminalFrameParams(msg.type, payload)
+    const reason: FinalizeReason = derived.reason === 'normal' ? 'error' : derived.reason
+    const errorText = derived.errorText
     try {
+      // [R2-b05-5] complete{aborted} 的 clearInflight 在安全网补做（幂等）：handler 中途
+      // 抛错可能未执行到其 clearInflight，残留 inflight 会被后续 message_end 的 ② 计数
+      // 兜底误消费。对齐 handler 内「abort 只清 inflight（finalizeSession 之外显式做）」
+      // 的顺序与语义；clearInflight 自身失败同样落入下方 catch 仅记录（安全网不成新异常源）。
+      if (reason === 'aborted') ctx.clearInflight(sessionId)
       ctx.finalizeSession(sessionId, reason, errorText)
     } catch (finalizeError) {
       // best-effort 降级：安全网自身失败时放弃收口仅记录——不得让安全网成为新异常源
-      // （再抛会逆传到 events/coalescer 上游，把单帧故障放大成消费面崩溃）。
+      // （再抛会沿 useChat 订阅回调逆传，把单帧故障放大成消费面崩溃）。
       console.error(`[effects] finalize safety net also failed for ${msg.type} (sid=${sessionId}):`, finalizeError)
     }
   }

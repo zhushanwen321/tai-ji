@@ -319,6 +319,8 @@ function buildRunOptionalFlags(task: AgentCallOpts, ctx: RunContext): Partial<Sp
     // [D2 扩展加载显式化] 孙进程扩展路径集透传（协议 ctx 还原 → spawn-args 逐项拼
     // --extension；undefined 不挂键 = 不拼）。
     ...(ctx.extensionPaths !== undefined ? { extensionPaths: ctx.extensionPaths } : {}),
+    // [D4] record 身份信封透传（spawn-runner 据此写子进程身份 env；undefined 不挂键）
+    ...(ctx.identity !== undefined ? { identity: ctx.identity } : {}),
   };
 }
 

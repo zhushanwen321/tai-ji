@@ -47,7 +47,7 @@ import {
 // 忠实复刻 notifier 消费面触及的内核行为切片：
 //   - send()：payload 能力 fail-fast → dedupe → 入队 → 合批判定（mergeHoldActive
 //     命中 → 重置 60s 窗口 timer；否则清窗口 timer 立即 scheduleFlush(0)）
-//   - busy gate：isIdle() + hasPendingMessages() 双条件；有 subscribeSettled 装配时
+//   - busy gate：isIdle() 单条件（V2 内查 active 表）；有 subscribeSettled 装配时
 //     busy 消息由 settled 边沿驱动（退避强发不启动，30s watchdog 兜底）；无订阅
 //     装配退避轮询（100ms × 50 上限）达上限强发（retry-force）
 //   - flush()：清合批 timer + scheduleFlush(0) 强投
@@ -97,9 +97,10 @@ function createDelivery(port: DeliveryPort, options?: DeliveryConfig): DeliveryH
   }
 
   function isBusy(): boolean {
+    // V2 内核（msg-pipeline-debloat D2）：busy 判定 = isIdle() 单条件——hasPendingMessages
+    // 自镜像四件套已拆除，在途队列判定内查 port 实装的 active 表，port 消费方不可见。
     try {
-      if (!port.isIdle()) return true;
-      return port.hasPendingMessages();
+      return !port.isIdle();
     } catch {
       return true;
     }

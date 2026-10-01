@@ -18,12 +18,11 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, effectScope, ref } from 'vue'
+import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { composerApiModuleWithChat, composerChatSpyModule, makeComposerInputMock } from '../helpers/composer-mount'
-import { toastSpyModule } from '../helpers/i18n-toast-mock'
-import { useCompactQueue } from '@/composables/panel/useCompactQueue'
+import { stashOrphanedDraft, __resetOrphanedDraftForTesting } from '@taiji/core/domain/composer'
 import Panel from '@/components/panel/Panel.vue'
+import { makeComposerInputMock } from '../helpers/composer-mount'
 
 // ── useNewTaskFlow mock：Landing + Composer 的 session/cwd/branch/模型真源 ──
 // （currentCwd 不入 hoisted 块——W4 要求真 ref，由工厂执行期内联 ref 注入）
@@ -31,6 +30,8 @@ const flowMock = vi.hoisted(() => ({
   currentSessionId: { value: null as string | null },
   currentSession: { value: null as { launchPresetId?: string } | null },
   currentModel: { value: null as string | null },
+  // landing 态 launchConfigView 解析消费（model-thinking 单一解析层输入）；显式选择未发生恒 null
+  pendingPreset: { value: null as string | null },
   gitInfo: { value: { branch: 'main' } as { branch: string } | null },
   mode: { value: 'plain-repo' as string },
   worktreeItems: { value: [] as Array<{ path: string; branch: string; HEAD: boolean; bare: boolean }> },
@@ -38,6 +39,8 @@ const flowMock = vi.hoisted(() => ({
   // panel-view 派生消费（D1：landing ⟺ !sessionId && isFlowActive）——TC19 的 Landing
   // 态挂载前提；flow mock 与 chat 解耦，true 恒定即可（挂载前求值，无响应式需求）
   isActive: { value: true as boolean },
+  // [perf-landing] 首发提交飞行标记（Landing 创建中过渡视图判据）
+  isInflight: { value: false as boolean },
   startFlow: vi.fn(),
   presetCwd: vi.fn(),
   openDirPopover: vi.fn(),
@@ -102,17 +105,37 @@ vi.mock('@/composables/useExtensionUI', () => ({
 }))
 
 // ── useChat / useToast / @/api / stores mock（Composer 的 chat RPC + 队列 flush）──
-// 不走 composer-shell-mount：flow 的 hoisted 超集与 session 的 revive 变体须由本文件
-// 注册生效（壳注册后到会覆盖文件内变体）；useChat/toast/api 三枚直挂单例工厂
-vi.mock('@/composables/features/chat/useChat', () => composerChatSpyModule())
-vi.mock('@/composables/useToast', () => toastSpyModule())
-vi.mock('@/api', () => composerApiModuleWithChat())
+const chatApiMock = vi.hoisted(() => ({
+  send: vi.fn(() => Promise.resolve()),
+  followUp: vi.fn(() => Promise.resolve()),
+  abort: vi.fn(() => Promise.resolve()),
+  compact: vi.fn(() => Promise.resolve()),
+  editAndResend: vi.fn(),
+  hydrateHistory: vi.fn(),
+  sendBash: vi.fn(() => Promise.resolve()),
+  abortBash: vi.fn(() => Promise.resolve()),
+}))
+const toastMock = vi.hoisted(() => ({ error: vi.fn(), info: vi.fn(), warning: vi.fn() }))
+vi.mock('@/composables/features/chat/useChat', () => ({
+  useChat: () => chatApiMock,
+  resetChatModuleState: vi.fn(),
+}))
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => toastMock,
+}))
+vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+  chat: { send: chatApiMock.send },
+  model: { switchModel: vi.fn() },
+  session: { setThinkingLevel: vi.fn() },
+  composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
+  config: { getGlobalSkills: vi.fn().mockResolvedValue([]), getProjectSkills: vi.fn().mockResolvedValue([]), onSkillCacheInvalidated: () => () => {} },
+}))
 vi.mock('@/stores/session', () => ({
   useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn(), revive: vi.fn() }),
 }))
 
 // ── ComposerInput mock（共用面收敛 helpers/composer-mount；data-testid 供冒烟断言）──
-const { lastInputText, ComposerInputMock } = makeComposerInputMock()
+const { lastInputText, lastSetText, ComposerInputMock } = makeComposerInputMock()
 
 const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
 const stubs = {
@@ -142,13 +165,9 @@ beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
   lastInputText.value = ''
+  lastSetText.value = null
+  __resetOrphanedDraftForTesting()
   uiMock.formReq.value = undefined
-  // 单例首次创建放 active effect scope（onScopeDispose 注册 cleanup，防 Vue warn），
-  // 并清空所有分区（单例跨用例共享）
-  effectScope().run(() => {
-    useCompactQueue()
-  })
-  useCompactQueue()._clearAllForTest()
 })
 
 describe('首屏冒烟（TC19）', () => {
@@ -171,6 +190,38 @@ describe('首屏冒烟（TC19）', () => {
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)
     // Landing 顶部元信息 chip（spec §3.1）
     expect(wrapper.find('[data-testid="chip-directory"]').exists()).toBe(true)
+  })
+})
+
+describe('[robustness P2/③b] orphan 草稿挂载取回（composer-shell onMounted 接线）', () => {
+  it('Landing mount → 上次失败草稿恢复进输入区；一次性消费不重复恢复', () => {
+    // 前置：上次 landing 首发失败且 Composer 已卸载 → catch 暂存 orphan 槽（暂存侧由 send.test ⑫b 锁定）
+    stashOrphanedDraft([{ type: 'text', text: 'lost draft' }])
+
+    // 使用者/观察者形态：恢复文本经 setText 落进输入区（onMounted take → restoreSegments）
+    // ——若 composer-shell 接线丢失，本断言红（③b 恢复链消费端唯一出口）
+    mount(Panel, {
+      props: { panelId: 'panel-root', sessionId: null, sessionLabel: '', sessionDir: '', status: 'done' },
+      global: { stubs },
+    })
+    expect(lastSetText.value).toBe('lost draft')
+
+    // 一次性消费：再挂载不重复恢复（防双份草稿）
+    lastSetText.value = null
+    mount(Panel, {
+      props: { panelId: 'panel-root', sessionId: null, sessionLabel: '', sessionDir: '', status: 'done' },
+      global: { stubs },
+    })
+    expect(lastSetText.value).toBeNull()
+  })
+
+  it('session 态 mount 不消费 orphan 槽（仅 landing 接线，session 草稿走 drafts store）', () => {
+    stashOrphanedDraft([{ type: 'text', text: 'lost draft' }])
+    mount(Panel, {
+      props: { panelId: 'panel-root', sessionId: 'session-A', sessionLabel: 'session-A', sessionDir: '', status: 'done' },
+      global: { stubs },
+    })
+    expect(lastSetText.value).toBeNull()
   })
 })
 

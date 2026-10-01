@@ -22,6 +22,7 @@ Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。架构分层�
 | [docs/TEST-STRATEGY.md](docs/TEST-STRATEGY.md) | 测试策略 | dev-flow 验收计划 + 写测试前 | 回归基线/测试分层/已知坑变化 |
 | [docs/FEATURE-PRIORITIES.md](docs/FEATURE-PRIORITIES.md) | 功能分级 P0-P3 | tech-design 风险打分 + dev-flow 收尾 | 功能增删/挂掉后果变化 [MANDATORY] |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 问题排查 | 排障时 | 新排障规则/日志路径/常见问题 |
+| [docs/todo/](docs/todo/) | 未解决缺陷与待裁决项登记（一文件一主题，状态行承载） | 收尾盘点 / 裁决时 | 新增登记或状态变化同 commit 更新 |
 
 ### 主题索引
 
@@ -34,6 +35,7 @@ Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。架构分层�
 | pi 边界可靠性（语义吸收层四支柱） | [docs/architecture/pi-boundary-reliability.md](docs/architecture/pi-boundary-reliability.md)（能力注册表 / 生效回执 / 确认式送达 / 漂移检查；决策记录 [ADR-0064](docs/adr/decisions.md)，约束登记 C-pi-12 / C-pi-13 / C-ext-19 / C-proc-08） |
 | session 导入源（多 coding-agent → pi session 统一转换） | [docs/architecture/session-import-sources.md](docs/architecture/session-import-sources.md)（SessionImportSource SPI 契约 / 新增导入源步骤清单 / 不变量全集 / zcode 源格式速查含消息投影语义层 §6.1）——扩展新 coding-agent 导入前必读 |
 | 功能开发地图（启动新 Phase 前更新） | [docs/architecture/feature-map.md](docs/architecture/feature-map.md)（滚动快照，只留最新一份；原 docs/feature-map/ 已并入 architecture，2026-09-13） |
+| 未解决缺陷与待裁决项登记（SSOT） | [docs/todo/](docs/todo/)（每文件一条，状态行承载——未解决缺陷、待裁决取舍；一文件一主题，裁决关闭后状态行落定案） |
 | 测试细则 | [docs/testing/](docs/testing/)（00 总览入口；testid 清单/调用链/已知坑）；渲染采样管道资产 [docs/testing/render-sampling.md](docs/testing/render-sampling.md) + `scripts/render-sampling/`（真机采样前必读，复用管道禁现场重写） |
 | Release Notes 写作规范 | 全局规范 SSOT `~/.agents/guide/release-notes.md`（三节结构 / 30 字模糊化 / 双语强制；merge 阶段 5 撰写 notes 前必读）+ 项目特化 [docs/release-notes.md](docs/release-notes.md)（展示位 / release.sh 草稿行为） |
 | Pi Extension 开发 | [docs/extensions/development-guide.md](docs/extensions/development-guide.md)（指南）· [extension-conventions.md](docs/extensions/extension-conventions.md)（强约束）· [logging-conventions.md](docs/extensions/logging-conventions.md)（日志现行 SSOT）· [glossary.md](docs/extensions/glossary.md) · [local-dev-guide.md](docs/extensions/local-dev-guide.md) |
@@ -42,7 +44,7 @@ Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。架构分层�
 
 **外部依赖 pi**：[badlogic/pi-mono](https://github.com/badlogic/pi-mono) 上游（npm `@earendil-works/pi-coding-agent@0.84.4`，曾用 fork taiji-pi 已切回）。**[MANDATORY] 不修改 pi 源码、不提 PR、不 fork**——pi 没有的能力由 taiji 自实现。**pi 语义断言的权威源 = node_modules 实装版**（断言前 `npm ls @earendil-works/pi-coding-agent` 核对版本，以 dist 编译 JS 为准）；clone 本机 `<pi-mono-clone>/main/packages/`（coding-agent/src 核心逻辑、ai/src/providers provider 层）仅作可读 TS 参照，引用前须核对 clone 版本与实装一致（clone 领先/落后实装均属常态——曾因按 0.80.3 clone 断言 0.84.1 行为连产 4 条漂移 bug，审计 C #6）。不靠网络搜索。pi 版本 bump 受 C-proc-08 版本门禁机器拦截（`node scripts/check-pi-semantics.mjs`：四包版本一致 + verifiedWith 比对 + 探针族重验；升级 PR 必查 pi-ai exports 的 `./compat` 与 changelog ModelManager 迁移——登记细节以 constraints.json 为准）。构建期派生锚点（build.yml env / prepare 脚本默认值 / 快照 / extensions peerDeps / KNOWN_PI_API_TYPES / pi-tui）由 `node scripts/check-pi-sync.mjs` 检查跟随（约束登记 C-build-07，pre-commit 按路径触发 + CI invariants）——升级 pi 后必须执行 `pnpm gen:builtin-providers` 重生成快照并随升级 PR 提交，锚点漏同步会被检查拦截。
 
-**Pi Extension 源码（本项目维护）**：`extensions/` 下 22 个 `@zhushanwen/pi-*` 包，按职责分两组（约定见 [extension-conventions.md](docs/extensions/extension-conventions.md)「目录分组」）+ `extensions/shared/` 共享库（llm-shared / extension-logger / file-lock / ext-guards / notify-ledger-host——NotifyLedgerHost 的 pi 扩展侧装配工厂，subagent-workflow 与 session-manager 共用），统一在本仓开发发布（旧仓 taiji-pi-extensions-workspace 已废弃，以本仓为准）。分组（package.json `taiji.role` 字段必须与所在分组一致，`scripts/check-extension-dependencies.mjs` 校验）：
+**Pi Extension 源码（本项目维护）**：`extensions/` 下 22 个 `@zhushanwen/pi-*` 包，按职责分两组（约定见 [extension-conventions.md](docs/extensions/extension-conventions.md)「目录分组」）+ `extensions/shared/` 共享库（llm-shared / extension-logger / file-lock / ext-guards / notify-ledger-host——NotifyLedgerHost 的 pi 扩展侧装配工厂，subagent-workflow 与 session-manager 共用 / exec-skills——技能获取共享包：目录扫描发现 + pi 注册表执行门禁，ADR-0074 / session-path——session 活跃路径裁剪单一实现，todo/plan/goal/scheduler 四包共用），统一在本仓开发发布（旧仓 taiji-pi-extensions-workspace 已废弃，以本仓为准）。分组（package.json `taiji.role` 字段必须与所在分组一致，`scripts/check-extension-dependencies.mjs` 校验）：
 
 - **`extensions/taiji/`**（role=taiji，taiji 集成包——契约两端在 taiji 体系内，离开 taiji 无功能，必在 mandatory 清单）：agent-ext / msg-id-mapper / plugin-bridge（Plugin system bridge——register plugin tools into pi and relay events/intercepts via select marker channel） / system-prompt / system-prompt-trace（builtin feature-tier，taiji:system-prompt 留痕）
 - **`extensions/universal/`**（role=universal，独立通用包——功能自足，独立 pi 用户可单独安装）：ask-user / base-tool-enhance（同名 override 内置 bash 工具：前台委托 pi 官方工厂保持等价 + 增量 background 后台模式 + 工具报错审计，承接已废弃 unified-hooks 的能力；设计决策记录在包内源码注释与 README，原设计文档见 git 历史） / cache-probe（前缀指纹采集 + analyze.py 归因） / cw-tool / goal / pending-notifications / permission / plan / provider-live-sync（运行中 pi 的模型快照实时同步：2s 轮询内容比较 + `modelRegistry.refresh({allowNetwork:false})`；设计依据见 模型切换实时可见性 设计文档）/ rename-session / scheduler / session-manager（agent-managed session：6 个 session 管理工具经 select+SESSION_MANAGER_MARKER 通道对接 taiji runtime 的 SessionManagerHandler；嵌套 {action,params} 契约 SSOT 在 @zhushanwen/extension-protocol） / session-reader / smart-context（agent 自决上下文压缩：compact_context 工具 + 双模式摘要接管 + 分档提醒） / structured-output / subagent-workflow / todo
@@ -78,6 +80,8 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 
 ## 关键规则（违反必出 bug）
 
+**时间平抑类逻辑红线（2026-09-26 用户裁决）**：防抖、稳定窗、抑制窗、定时兜底、延迟重试这类「用时间换一致」的代码，**默认视为通道设计缺陷的症状而非解法**——出现前必须先回答「为什么不能靠事件顺序或单一事实源自然解决」，答不出不得合入；已存在的每处须登记它补偿的根因与退役条件（根因修复后即删）。判别法：删掉该时间逻辑，若数据仍然最终一致（只是瞬态显示抖动），说明事实源/通道该修；若数据会错，说明事件顺序契约本身未定义，先定义契约。
+
 **runtime ↔ 前端编码核心**：
 
 1. **emit 只传单个 payload 对象**：`emit('event', { arg1, arg2 })`，禁止多参数
@@ -98,7 +102,7 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 **架构机制**：
 
 12. **Electron 打包约束（事故最高发）**：① runtime 源码禁止 `import.meta.url` / `globalThis.__dirname`（CJS bundle 下失效），路径用 `typeof __dirname !== 'undefined' ? __dirname : undefined`；② 新增 runtime 依赖必须同步加 `tsup.config.ts` 的 `noExternal`；③ 打包子系统改动逐个 commit 逐个验证。细节核对见 `dev-merge/agents/review-electron-build.md`；验证三阶段（preflight → build → postbuild）+ validate-runtime-bundle 由脚本自动化
-13. **目录规范**：禁止 `demos/` / `impeccable/` 目录；禁止外部绝对路径 symlink（pre-commit 检查）；`.taiji-harness/` 是本地决策/工作流档案，**不入库**（2026-09-13 裁决：gitignore，决策追溯靠 commit message 与 docs）；视觉设计权威 = `docs/DESIGN.md`（Warm&Soft 旧根 DESIGN.md 已删除，git 可追溯）
+13. **目录规范**：禁止 `demos/` / `impeccable/` 目录；禁止指向外部绝对路径的 symlink（pre-commit 检查 `check_directory_rules.py`——白名单放行 `../` / `./` 前缀**相对** symlink，`.agents -> ../.agents` 即该合法形态，ADR-0076）；`.taiji-harness/` 是本地决策/工作流档案，**不入库**（2026-09-13 裁决：gitignore，决策追溯靠 commit message 与 docs）；视觉设计权威 = `docs/DESIGN.md`（Warm&Soft 旧根 DESIGN.md 已删除，git 可追溯）
 14. **项目 skill 必须自包含 [HISTORICAL]**：skill 引用的脚本复制到该 skill 目录内（`merge/scripts/` 已自包含），禁止依赖 `~/.agents/skills/` 全局脚本或 symlink。`.agents` 整体**不入 git 跟踪**（2026-09-25 起：实体在 workspace 根 `<workspace>/.agents/`，各 worktree 经 symlink 共享同一实体，改动跨 worktree 实时生效；备份 = `refs/skills-snapshot`，由 pre-commit 尾部段自动维护；恢复 = `git archive refs/skills-snapshot | tar -x -C <workspace 根>`，见 ADR-0086 与 docs/TROUBLESHOOTING.md）——编辑 skill 后 `git status` 干净是常态而非异常，skill 改动不经 PR review，YAML 评审靠实体内 pr-cr-fix 的 validate-skill-yaml
 15. **排查规则（untracked 展开 `-uall` / 禁止写死绝对路径用 `getDataDir()` 等动态推导 / 跨层机制要查遍所有层直到 pi extension 层）**：详见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) 的「历史排查规则」
 
@@ -110,7 +114,7 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 19. **超时默认原则（任务级默认无超时，量级按对象粒度校准）**：subagent turn / workflow `agent()` / 引擎 run 等**任务执行正常路径禁止自带墙钟超时**——用户显式指定（`timeoutMs` / `budgetTimeMs` / watchdog env）才生效，调用方未传就是不限时。必须设防挂死兜底时，量级必须按**被保护对象的粒度**校准：任务级（subagent / workflow run）= 小时级或「无进展检测」（idle / ping，ADR-0047：静默 ≠ 卡死，活跃产出不得判死）；控制面单请求（一条 RPC 请求 / 探针 / 握手）= 秒级；禁止跨粒度挪用（单 turn 分钟级预算 ≠ 整任务总预算）。回收层（dispose / kill / 上界 / idle timer 四族）防挂死兜底允许默认有界（opt-out）——权威裁决见 [crash-forensics-and-watchdog.md 附录 E](docs/architecture/crash-forensics-and-watchdog.md)「正常路径逐点从根源修复 + 回收层统一有界兜底」。[HISTORICAL] 反例：zcode appserver `turnTimeoutMs` 固定 300s 墙钟（2026-09 实测 21% 任务误杀——343s/541s 正常完成的任务被 300s 判死，死后 app-server 继续烧 token；且流式 delta 不刷新计时）。
 20. **pnpm store 布局双向翻转（沙箱 HOME × pnpm store）**：zsw 引擎 worker 等沙箱执行体覆写 HOME，其 pre-commit 内 verify-*.sh 自含 `pnpm install` 会把沙箱侧 store 写进 `node_modules/.modules.yaml` 的 storeDir；本地（正常 HOME）后续 install 判布局过期 → `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` 直接崩溃（pre-commit 随机红，`CI=true` 治标会复发）。护栏 `.githooks/check_pnpm_store_layout.sh`（pre-commit 第 0 段 + validate-runtime-bundle Gate 0）翻转即红并给 [FIX]；恢复：`CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install`（约 6-7s）。根因/排障见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)；引擎侧修复落地后护栏应恒绿，红 = HOME 覆盖回退的验收信号
 21. **看门狗/滚动重启默认不武装（Gate W 数据门，C-proc-19）**：`TAIJI_RUNTIME_WATCHDOG_ARMED` 缺失时 runtime watchdog 纯观测（采样写入环形缓冲，无 relief / 无滚动重启 / 无通知）——armed 动作必须显式 env 开启，且武装前置 = V6 soak 水位数据 + 评估器 watermark-daily 趋势复审通过（阈值校准 + 重启循环风险排除），禁未经数据复审先武装（兜底先行掩盖问题）；滚动重启走专用退出码 86 + supervisor 零退避零计数，推迟上限 30min（`TAIJI_ROLLING_RESTART_DEFER_LIMIT_MS`）。设计依据 [docs/architecture/crash-forensics-and-watchdog.md](docs/architecture/crash-forensics-and-watchdog.md) §3.2 方案 B / D5
-22. **本机目录/绝对路径不入项目 + 不留历史痕迹（2026-09-15 用户裁决）**：本项目按整体重写定位维护，文档只保留当前现状。① 仓库内容（文档/代码/配置/注释）禁止出现本机绝对路径（`/Users/<user>/...`）与 workspace 专属目录名提法——引用 workspace 位置用占位形态（`<workspace>/<worktree>/`）或运行时动态推导（`os.homedir()` / `getDataDir()` / `getPiAgentDir()`，见既有路径白名单检查）；② 历史档案不回填不新建：版本沿革/迁移史/改名说明/演化叙述不进现行文档，已清理的历史档案族（`docs/adr/` 旧编号文件、`**/CHANGELOG.md`、`.orchestration/`、`packages/*/probe/`、`.cw-specs/`、cw 验收脚本、一次性迁移工具）的现行承载 = [docs/adr/decisions.md](docs/adr/decisions.md)（ADR 现行决策收敛）与各现行文档；③ 登记例外（对齐磁盘事实的功能性提法可保留）：`.gitignore` 对真实目录名的忽略条目、防御/检测脚本的功能性检查串、测试 fixture 的采集时点数据、merge/dev-merge 等 skill 操作真实 workspace 所必需的路径（优先动态推导，写死形态须注释说明）。`docs/todo/`（2026-09-27 裁决重建）是临时 TODO 目录——放未排期的后续事项登记（一事一文件，含背景/现状/实现要点），不入 docs/ 资产索引表
+22. **本机目录/绝对路径不入项目 + 不留历史痕迹（2026-09-15 用户裁决）**：本项目按整体重写定位维护，文档只保留当前现状。① 仓库内容（文档/代码/配置/注释）禁止出现本机绝对路径（`/Users/<user>/...`）与 workspace 专属目录名提法——引用 workspace 位置用占位形态（`<workspace>/<worktree>/`）或运行时动态推导（`os.homedir()` / `getDataDir()` / `getPiAgentDir()`，见既有路径白名单检查）；② 历史档案不回填不新建：版本沿革/迁移史/改名说明/演化叙述不进现行文档，已清理的历史档案族（`docs/adr/` 旧编号文件、`**/CHANGELOG.md`、`.orchestration/`、`packages/*/probe/`、`.cw-specs/`、cw 验收脚本、一次性迁移工具）的现行承载 = [docs/adr/decisions.md](docs/adr/decisions.md)（ADR 现行决策收敛）与各现行文档（`docs/todo/` 为现行登记处——未解决缺陷与待裁决项，见主题索引，不在本条范围）；③ 登记例外（对齐磁盘事实的功能性提法可保留）：`.gitignore` 对真实目录名的忽略条目、守卫/检测脚本的功能性检查串、测试 fixture 的采集时点数据、merge/dev-merge 等 skill 操作真实 workspace 所必需的路径（优先动态推导，写死形态须注释说明）
 
 ## 测试
 
@@ -151,6 +155,7 @@ agent.md / workflow.js 归位：与 extension 强相关（tools 受限某 extens
 
 ## 架构约定
 
+- **数据同步第一原则：拉为主、推补充 [ADR-0075]**——拉是真理通道（任何查询必须返回当前真值：缓存优先、磁盘兜底），推是性能提示（允许丢失，丢失后的收敛由域同步协议统一提供：快照回放/重连重放/事件边沿拉三路）；**功能域代码禁止出现推送补偿逻辑**（域层新增 reconcile/冷拉/兜底定时器 = constraints 红灯，豁免须登记理由）——可靠性由通道保证，不得用消费侧补丁偿付。功能域经 `DomainSyncDescriptor` 声明式接入，数据源（bus-state/rpc/file-derived/memory-registry）是参数，上层不感知底层方案；缓存性能（缓存优先/负缓存/增量管线/逆序分块冷读/可观测）是基建义务，不属于任何功能域。设计 SSOT 见 `.tmp/tech-design/pull-push-architecture.md`（分波落地 W0-W4）
 - 视图切换状态驱动（settingsStore.currentView），不用 vue-router；Mock 用 `VITE_MOCK=true` 在 ws-client 层拦截
 - **markdown 渲染管线安全模型 = 分通道净化**（`markdown-sanitize.ts`，renderMarkdown 唯一出口）：markdown-it `html:true`；可信段（shiki/KaTeX/md-* 契约：fence/math/code_inline/filepath）以 per-call nonce 哨兵在 sanitize 前摘出、净化后单遍回填，不参与白名单过滤；用户 HTML 走 DOMPurify 两级白名单（与 GitHub 的白名单行为对齐，class/style/data-* 构造性全剥——无样式伪造与交互借用通道）；相对资源的两条通道：img src 在净化 hook 按 `resourceBaseDir` 重写为 local-file URL（经 MarkdownEnv 透传，对话流 = session cwd、drawer = 文件所在目录）；相对链接 href 保持原样输出，点击时由 MarkdownRenderer ④路按 `props.resourceBaseDir ?? deps.sessionCwdOf()` resolve（drawer 走 props 通道不经 MarkdownEnv）；CSP 由此降级为纵深第二层。禁止绕过 renderMarkdown 直调 md.render、禁止向用户白名单放宽 class/style/data-*
 - 共享类型经 `packages/shared/` workspace 共享；Runtime 通信走 WebSocket（ws-client.ts + event-bus.ts）；Electron IPC 经 preload 暴露 `electronAPI`

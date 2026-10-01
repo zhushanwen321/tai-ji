@@ -927,3 +927,84 @@ describe('rebuildHistoryFromEntries deferEntryId 回填（defer segments 化 / D
     expect(messages[1].content).toEqual(RICH_SEGS)
   })
 })
+
+// ════════════════════════════════════════════════════════════════════
+// 活跃路径裁剪（message-revoke U6a）：rebuildHistoryFromEntries leafId 参数
+// ════════════════════════════════════════════════════════════════════
+// pi get_entries 返回全文件 entries + leafId（无路径过滤）；撤回（navigateTree 回退 +
+// label 锚落盘）后被撤子树仍在文件里但不在活跃路径上。leafId 提供时先裁剪再走既有映射
+// ——被撤分支不进 messages / clientUuidMap（A1「旧分支不渲染」结构性前提）；缺省 = 现行为。
+
+describe('rebuildHistoryFromEntries 活跃路径裁剪（message-revoke U6a）', () => {
+  /** label entry 工厂（撤回持久化锚：parent = 回退后叶子）。 */
+  function makeLabelEntry(overrides: { id: string; parentId?: string | null; targetId?: string; timestamp?: string }): PiSessionLabelEntry {
+    return {
+      type: 'label',
+      id: overrides.id,
+      parentId: overrides.parentId ?? null,
+      timestamp: overrides.timestamp ?? '2026-07-25T10:00:00.000Z',
+      label: 'taiji:revoked',
+      targetId: overrides.targetId ?? 'msg-old',
+    }
+  }
+
+  /**
+   * 有分支 fixture（真实撤回形态，单根链式树）：
+   * q(root user) → a1(assistant) → [旧分支 m(被撤 user) → am(其回复) + m 的映射 custom entry]
+   *                                / label(锚，parent=a1) → n(撤回后新 user)
+   */
+  function branchedEntries(): PiSessionEntry[] {
+    return [
+      makeMessageEntry({ id: 'q', parentId: null, role: 'user', text: '问题' }),
+      makeMessageEntry({ id: 'a1', parentId: 'q', role: 'assistant', text: '回答' }),
+      // 旧分支：被撤消息 m 及其引发的回复 am（树回退语义下一并移出活跃路径）
+      makeMessageEntry({ id: 'm', parentId: 'a1', role: 'user', text: '发错的消息' }),
+      makeMessageEntry({ id: 'am', parentId: 'm', role: 'assistant', text: '对发错的回复' }),
+      // m 的 client-msg-id 映射 entry（追加序在 am 之后，parent=am——同为 m 的后代，
+      // 随旧分支同生死，映射失效即正确语义）
+      makeClientMsgIdEntry({ id: 'cus-m', parentId: 'am', clientUuid: 'u-revoked', userEntryId: 'm' }),
+      // label 锚（parent = 回退后叶子 a1）+ 新分支
+      makeLabelEntry({ id: 'lbl', parentId: 'a1', targetId: 'm' }),
+      makeMessageEntry({ id: 'n', parentId: 'lbl', role: 'user', text: '撤回后新消息' }),
+    ]
+  }
+
+  it('有分支 + leafId（文件尾）：旧分支 message 与其 custom 映射均被滤，新分支渲染', () => {
+    const { messages, clientUuidMap } = rebuildHistoryFromEntries(branchedEntries(), null, 'n')
+
+    // 旧分支 m/am 不渲染；label 走 mapper default 跳过；活跃路径 = q → a1 → lbl → n
+    expect(messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user'])
+    expect(contentToText(messages[0].content)).toBe('问题')
+    expect(contentToText(messages[2].content)).toBe('撤回后新消息')
+    expect(messages.some((m) => contentToText(m.content) === '发错的消息')).toBe(false)
+    // 被撤消息的映射 entry 随分支滤除 → clientUuidMap 无 m 的映射（census §4.1 语义）
+    expect(clientUuidMap.has('m')).toBe(false)
+    expect(clientUuidMap.size).toBe(0)
+  })
+
+  it('无分支回归：leafId 缺省与传「文件尾 entry id」，messages 与 clientUuidMap 逐条一致', () => {
+    // 链式单根树：pi append-only 下每个 entry 追加时 parent = 当时叶子 → 线性文件的
+    // 活跃路径 = 全部条目（含 custom entry——映射 entry 也在链上，不因裁剪丢失）
+    const linear: PiSessionEntry[] = [
+      makeMessageEntry({ id: 'l1', parentId: null, role: 'user', text: '第一句' }),
+      makeClientMsgIdEntry({ id: 'cus-l1', parentId: 'l1', clientUuid: 'u-l1', userEntryId: 'l1' }),
+      makeMessageEntry({ id: 'l2', parentId: 'cus-l1', role: 'assistant', text: '回复' }),
+      makeMessageEntry({ id: 'l3', parentId: 'l2', role: 'user', text: '第二句' }),
+    ]
+
+    const withoutLeaf = rebuildHistoryFromEntries(linear, null)
+    const withLeaf = rebuildHistoryFromEntries(linear, null, 'l3')
+
+    expect(withLeaf.messages).toEqual(withoutLeaf.messages) // 逐条一致（回归不变断言）
+    expect(withLeaf.clientUuidMap).toEqual(withoutLeaf.clientUuidMap)
+    expect(withoutLeaf.messages.map((m) => m.piEntryId)).toEqual(['l1', 'l2', 'l3'])
+  })
+
+  it('leafId 缺省 + 有分支（现行为）：不裁剪，旧分支照文件序渲染（撤回链清缓存前的旧行为基线）', () => {
+    // 该基线正是撤回编排必须显式清 history-rebuild-cache 的原因：缓存未清时旧分支
+    // 仍按全文件渲染；显式清缓存 → 下次全量重建带 leafId → 投影正确。
+    const { messages } = rebuildHistoryFromEntries(branchedEntries(), null)
+    expect(messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'assistant', 'user'])
+    expect(messages.some((m) => contentToText(m.content) === '发错的消息')).toBe(true)
+  })
+})

@@ -36,6 +36,7 @@
  */
 
 import type { GenStatsCacheMiss, GenStatsCacheRatio, GenStatsFrame, GenStatsSpeed, GenStatsTtft, ServerMessage } from '@taiji/shared'
+import { parseModelSelector } from '@zhushanwen/subagent-core'
 import { logger } from '../../infra/logger.js'
 import type { ISessionService } from '../../interfaces.js'
 import { getOrCreate } from '../../utils/collections.js'
@@ -143,9 +144,9 @@ function rollingWindowCutoff(now: Date, days: number): string {
  * 两侧生产方拼接规则一致 → 复合 key 可逆）。无 '/'（理论不可达，防御）→ 整体作 model。
  */
 function splitModelKey(modelKey: string): { provider: string; model: string } {
-  const idx = modelKey.indexOf('/')
-  if (idx < 0) return { provider: '', model: modelKey }
-  return { provider: modelKey.slice(0, idx), model: modelKey.slice(idx + 1) }
+  // 切分规则单点 = core 的 parseModelSelector（首 '/' 切分；model 侧可含 '/'）。
+  const { provider, id } = parseModelSelector(modelKey)
+  return { provider, model: id }
 }
 
 /**
@@ -455,6 +456,13 @@ export class GenStatsService {
    * 模型全局聚合层（day/d7/d30；current 不在此层）。model 回填规则（R5/MF8）：modelKey 非
    * null 恒回填（含该模型无记录的全 null 帧——否则写 2 推的无记录帧被自家前端校验拦截，
    * 场景 4⑥「无记录则—」分支不可达）；仅 modelKey 为 null（降级链④走尽）时缺省 + 全 null。
+   *
+   * 帧 model 字段即**结构化归属标记**（A4/S18 归属上移，plan-mode-audit-remediation）：
+   * 三条推帧路径（recordSample 扩展广播按映射过滤 / onModelSwitched 重登记后推 / 恢复腿
+   * resolveModelKey 降级链解析）保证「发给某 sid 的帧，其 model = runtime 权威解析的该
+   * sid 当前模型复合 key」——含 '/' 的 Model.id（openrouter 系 "vendor/model"）原样保留
+   * 完整复合 key，不做尾段截取。renderer 据此纯显示（useGenStats 消费侧 model 比对兜底
+   * 已随归属上移删除；本地比对曾对 openrouter 系尾段失配、丢弃合法帧）。
    *
    * day/d7/d30 = 本地日 key 滚动窗口加权聚合（含当日）；聚合无有效样本 → null（store null
    * 纪律，禁止 0 充数）。

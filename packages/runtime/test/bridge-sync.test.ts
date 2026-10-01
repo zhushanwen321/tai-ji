@@ -1,23 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { IGitInfoReader } from '../src/services/ports/git-info.js'
 
-/**
- * 动态装配真实的 EventAdapter + EventInterpreter（绕过本文件顶部的 vi.mock(event-adapter.js)）。
- * 返回的 adapter 与生产装配等价：translate 纯翻译 → interpreter 业务编排。
- */
-async function buildRealAdapter(
-  sessionId: string,
-  send: (msg: unknown) => void,
-  options: Record<string, unknown>,
-): Promise<{ attach(c: unknown): void; detach(): void }> {
-  const [{ EventAdapter }, { EventInterpreter }] = await Promise.all([
-    vi.importActual<typeof import('../src/infra/pi/event-adapter.js')>('../src/infra/pi/event-adapter.js'),
-    vi.importActual<typeof import('../src/services/session/event-interpreter.js')>('../src/services/session/event-interpreter.js'),
-  ])
-  const interpreter = new EventInterpreter(sessionId, { send: send as never, ...options } as never)
-  return new EventAdapter(sessionId, (events) => interpreter.interpret(events))
-}
-
 // IGitInfoReader 桩：SessionService 被 vi.mock 整体替换（构造参数不被使用），仅满足构造签名。
 const noopGitInfoReader: IGitInfoReader = { readGitInfo: () => undefined, pruneStaleCache: () => {} }
 
@@ -27,8 +10,8 @@ const noopGitInfoReader: IGitInfoReader = { readGitInfo: () => undefined, pruneS
  * Test strategy:
  * - Server bridge routing: test handleBridgeRequest directly with mock IPiEngine
  *   （回包断言按新契约：JSON.stringify + 'select'，设计 bridge-rewrite-pi-0.84 §3.3-D1）
- * - Bridge 请求不排前端超时 + addBridgeRequest 登记（trackUiRequest 误传 bridge: 的
- *   防回归锁在 extension-timeout-manager.test.ts）
+ * - addBridgeRequest 登记链：spy 锁定「到达即登记 + B6 应答即删不残留」（registerRequest
+ *   误传 bridge: 的防回归锁在 extension-timeout-manager.test.ts）
  *
  * [HISTORICAL] 旧通道的「EventAdapter 对 method='bridge:*' 前缀帧的直接识别」用例已删除
  * （原 'detects bridge: prefix' / 'routes multiple bridge methods'）：该翻译分支随旧通道
@@ -142,57 +125,10 @@ import { RuntimeServer } from '../src/transport/server.js'
 import { SessionService } from '../src/services/session/session-service.js'
 import { PluginService } from '../src/services/plugin-service/plugin-service.js'
 
-// ── EventAdapter unit tests (using vi.importActual to bypass mock) ──
-
-// Helper to create a mock client compatible with EventAdapter.attach
-function makeMockClient() {
-  return {
-    onEvent: vi.fn((listener: (event: Record<string, unknown>) => void) => {
-      // store the listener for test invocation
-      return () => {}
-    }),
-  }
-}
-
-function attachAndEmit(adapter: any, mockClient: { onEvent: ReturnType<typeof vi.fn> }, event: Record<string, unknown>): void {
-  mockClient.onEvent.mockImplementationOnce((listener: (event: Record<string, unknown>) => void) => {
-    listener(event)
-    return () => {}
-  })
-  adapter.attach(mockClient as never)
-}
-
-describe('EventAdapter: bridge method detection', () => {
-  // [HISTORICAL] 'detects bridge: prefix in extension_ui_request' 与
-  // 'routes multiple bridge methods without frontend timeout registration' 两用例已删除：
-  // 断言的旧通道翻译分支（method.startsWith('bridge:') 直接产 bridge-ui kind）已随
-  // bridge 重写清理（设计 §3.3-D6）——新通道 marker 识别行为见 bridge-marker-channel.test.ts。
-
-  it('does not interfere with non-bridge extension_ui_request methods', async () => {
-    const extensionCallback = vi.fn()
-    const bridgeCallback = vi.fn()
-    const wsSender = vi.fn()
-    const adapter = await buildRealAdapter('test-session', wsSender, {
-      onExtensionUIRequest: extensionCallback,
-      onBridgeUIRequest: bridgeCallback,
-    })
-
-    const event = {
-      type: 'extension_ui_request' as const,
-      method: 'confirm',
-      id: 'confirm-req-1',
-      title: 'Test confirm',
-      message: 'Are you sure?',
-    }
-
-    const mockClient = makeMockClient()
-    attachAndEmit(adapter, mockClient, event)
-    await new Promise((r) => setTimeout(r, 50))
-
-    expect(bridgeCallback).not.toHaveBeenCalled()
-    expect(extensionCallback).toHaveBeenCalledTimes(1)
-  })
-})
+// [HISTORICAL] 'EventAdapter: bridge method detection' describe 已删：仅存用例
+// 'does not interfere with non-bridge extension_ui_request methods' 与 translate 层 P-10 组
+// （bridge-marker-channel.test.ts）+ interpreter 派发用例同契约逐层重复，且含 50ms 硬编码
+// sleep；其上方 'detects bridge: prefix' 等旧通道用例的删除记录见文件头 [HISTORICAL] 段。
 
 // ── Server bridge routing tests ──────────────────────────────────
 
@@ -302,17 +238,16 @@ describe('RuntimeServer: bridge request routing', () => {
   })
 })
 
-// ── Extension timeout: bridge message exclusion ──────────────────
+// ── Bridge 请求登记链 ────────────────────────────────────────────
 
-describe('RuntimeServer: bridge timeout exclusion', () => {
+describe('RuntimeServer: bridge request registration', () => {
   let server: RuntimeServer
 
   beforeEach(() => {
-    vi.useFakeTimers()
     mockSendExtensionUiResponse.mockClear()
     server = new RuntimeServer(0, '/tmp/test-project')
     const ss = new SessionService({} as never, {} as never, {} as never, '/tmp', {} as never, {} as never, {} as never, noopGitInfoReader, {} as never)
-    // 超时路径调 getRpcClient → client.sendExtensionUiResponse；mock 返回假 client。
+    // handleBridgeRequest 回包经 getRpcClient → client.sendExtensionUiResponse；mock 返回假 client。
     vi.spyOn(ss, 'getRpcClient').mockReturnValue({ sendExtensionUiResponse: mockSendExtensionUiResponse } as never)
     server.setServices(
       ss,
@@ -322,25 +257,9 @@ describe('RuntimeServer: bridge timeout exclusion', () => {
     )
   })
 
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('does NOT register frontend timeout for bridge: methods', async () => {
-    // 生产链路形态（marker 通道）：请求经 handleBridgeRequest → BridgeHandler 入口
-    // addBridgeRequest 登记（旧 registerTimeout 的 bridge: 前缀分支已删）
-    await server.handleBridgeRequest('sess-1', 'req-bridge-sync', 'bridge:sync', {})
-    await server.handleBridgeRequest('sess-1', 'req-bridge-exec', 'bridge:tool_execute', {})
-    await server.handleBridgeRequest('sess-1', 'req-bridge-ev', 'bridge:event', {})
-    await server.handleBridgeRequest('sess-1', 'req-bridge-int', 'bridge:intercept', {})
-    mockSendExtensionUiResponse.mockClear() // 正常回包已发生，只观察超时窗口
-
-    // Advance time past the normal timeout duration
-    vi.advanceTimersByTime(300_000)
-
-    // 超时窗口内零新增调用：bridge 请求无前端弹窗超时（等待终态由跨进程链路保证）
-    expect(mockSendExtensionUiResponse).not.toHaveBeenCalled()
-  })
+  // [HISTORICAL] 'does NOT register frontend timeout for bridge: methods' 与
+  // 'still registers normal timeout for non-bridge methods' 两用例已删：前端超时机制
+  // 2026-07-16 整体删除（extension UI 统一不超时），「不排超时」对已删除机制是恒真墓碑。
 
   it('tracks bridge requestIds in bridgeRequestIds set', async () => {
     // B6 应答即删（memory-leak-remediation §3.2-B6）：登记事实经 spy 锁定，完成后不残留
