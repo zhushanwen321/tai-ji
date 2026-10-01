@@ -1,7 +1,7 @@
 <!--
   Settings · 语音菜单页（ai-voice-tts 设计 §5.2；M0）。
 
-  自上而下：通用配置（启用总开关）→ 服务商卡片单选（三家独立记忆）→ 选中服务商全量
+  自上而下：通用配置（启用总开关）→ 服务商下拉单选（三家独立记忆）→ 选中服务商全量
   配置（TtsProviderForm，表单投影 TtsFormModel 驱动）→ 操作行（保存 / 保存并测试 /
   额度说明）。数据源：打开时并行拉 tts.getConfig + tts.getCapabilities（§7.5）；capabilities
   首载失败时表单区整体不渲染（投影枚举缺失无从渲染半态）+ 重试入口；已成功加载过投影
@@ -79,14 +79,14 @@
         <span
           data-testid="tts-provider-key-status"
           class="flex items-center gap-1.5 text-[12px]"
-          :class="providerMeta(activeProvider).hasApiKey ? 'text-success' : 'text-neutral-dim'"
+          :class="activeMeta.hasApiKey ? 'text-success' : 'text-neutral-dim'"
         >
           <span
             class="size-[7px] shrink-0 rounded-full"
-            :class="providerMeta(activeProvider).hasApiKey ? 'bg-success' : 'bg-neutral-dim opacity-40'"
+            :class="activeMeta.hasApiKey ? 'bg-success' : 'bg-neutral-dim opacity-40'"
             aria-hidden="true"
           />
-          {{ providerMeta(activeProvider).hasApiKey ? t('settings.tts.keyConfigured') : t('settings.tts.keyNotConfigured') }}
+          {{ activeMeta.hasApiKey ? t('settings.tts.keyConfigured') : t('settings.tts.keyNotConfigured') }}
         </span>
         <span class="font-mono text-[10px] text-neutral-dim">{{ protocolLabel(activeProvider) }}</span>
       </div>
@@ -99,8 +99,8 @@
       v-model:key-display="activeKeyDisplay"
       :provider-id="activeProvider"
       :form="activeForm"
-      :has-api-key="providerMeta(activeProvider).hasApiKey"
-      :provider-key-available="providerMeta(activeProvider).providerKeyAvailable"
+      :has-api-key="activeMeta.hasApiKey"
+      :provider-key-available="activeMeta.providerKeyAvailable"
       :key-op="keyOps[activeProvider]"
       :key-masked="keyMaskedOf(activeProvider)"
       :disabled="capsFailed"
@@ -211,6 +211,7 @@ const testState = computed(() => player.speakStateOf(SETTINGS_TTS_TEST_MESSAGE_I
 
 const activeForm = computed(() => forms.value?.[activeProvider.value] ?? null)
 const activeState = computed(() => formStates[activeProvider.value])
+const activeMeta = computed(() => providerMeta(activeProvider.value))
 const activeKeyDisplay = computed({
   get: () => keyDisplay[activeProvider.value],
   set: (v: string) => {
