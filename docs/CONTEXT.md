@@ -253,6 +253,9 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 
 **命名约定**: "Panel" 统一指 Session 的视口（即代码中的 `Panel` / `PanelLeaf` / `PanelTree`，`packages/renderer/src/stores/panel.ts`），不用于其他含义。
 
+### 窗口外壳（window chrome）
+窗口的标题栏区装饰总和：关闭/最小化/最大化按钮、边框圆角、拖拽区、默认尺寸行为。本项目的平台分叉：mac 由系统绘制（`titleBarStyle: hidden`，原生红黄绿圆点）；win/linux 由应用自绘（`frame: false` + renderer 的 TrafficLight 圆点 + `-webkit-app-region` 拖拽条带）。
+
 ---
 
 ## v3 UI 结构术语（2026-06 重构）

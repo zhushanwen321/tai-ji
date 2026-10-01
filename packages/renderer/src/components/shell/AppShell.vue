@@ -94,7 +94,7 @@ const isMac = detectPlatform() === 'mac'
 const settingsOpen = ref(false)
 provide('openSettings', () => { settingsOpen.value = true })
 
-// 平台 + 全屏态同步到 <html>（data-platform / data-fullscreen），驱动 traffic-light / app-nav-controls 两态。
+// 平台 + 全屏态：data-platform 注入 <html>（usePlatformChrome）；全屏态经 isFullscreen ref 响应式通路消费（TrafficLight opacity / AppNavControls left），不设 data-fullscreen 属性。
 usePlatformChrome()
 
 // Settings 域壳接入（W4）：providePlatform + provideSettingsTransport + core useSettings().init

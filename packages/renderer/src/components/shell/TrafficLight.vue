@@ -1,8 +1,8 @@
 <template>
   <!--
-    TrafficLight · 跨平台窗口控制（shell spec §五方案 X）
+    TrafficLight · 跨平台窗口控制
     - mac：空占位 div（保留 .traffic-light 定位 + opacity transition 语义，红黄绿由 OS 绘制）
-    - win/linux：自绘 3 彩色圆点 mimic mac（mac 原生位置 {8,8}；aside 顶在窗口 y=4，故 left-0=窗口x8 / top-[4px]=窗口y8），hover 整组显 close/min/max 符号，点击 IPC 控窗口
+    - win/linux：自绘 3 彩色圆点 mimic mac（mac 原生位置 {8,8}；aside 顶在窗口 y=4，故 left-0=窗口x4（与 mac x8 有 4px 差，同 §11:883 预期差）/ top-[4px]=窗口y8（与 mac 同位）），hover 整组显 close/min/max 符号，点击 IPC 控窗口
     全屏态 isFullscreen=true 时 opacity→0 + pointer-events-none（响应式 :class 绑定，替代旧 [data-fullscreen] 祖先选择器），
     mac 系统 hover 浮层独立不参与。
     [review MF-1] pointer-events-none 必须与 opacity-0 成对：仅隐藏视觉时，隐形圆点组

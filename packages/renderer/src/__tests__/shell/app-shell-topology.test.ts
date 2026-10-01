@@ -7,7 +7,7 @@
  *    MainPanel rounded-[10px]（float-panel 圆角与窗口共线）
  *  - 折叠态 !gap-0（强制覆盖 gap-3），展开态无
  *  - TrafficLight 挂载在 AsideRegion 内（2026-08 二次裁决：恢复刻意调整形态——trafficLightPosition {8,8}、
- *    aside 顶 y=4，left-0/top-4 = 窗口 (8,8)，与 mac OS 红黄绿同位）
+ *    aside 顶 y=4，left-0/top-4 = 窗口 (4,8)：y8 与 mac 同位；x4 与 mac x8 有 4px 预期差（§11:883））
  *  - 平台两态成对（跨平台窗口外壳 u-shell-chrome）：非 mac 根节点无 rounded-[10px]（修复证明面：方形窗口下
  *    应用内圆角只会产生四角色差方块）+ 渲染 aside-drag-strip 拖拽条带；mac 根节点保留 rounded-[10px]
  *    （零变化面）+ 不渲染条带（mac 拖拽由系统提供）
@@ -104,10 +104,10 @@ describe('AppShell 拓扑渲染 gate（刻意调整形态回归防线）', () =>
     expect(wrapper.find('[data-testid="app-shell"]').classes()).toContain('!gap-0')
   })
 
-  it('TrafficLight 挂载在 AsideRegion 内：left-0/top-4 相对 aside 顶 y=4 = 窗口 (8,8) 与 mac 同位', () => {
+  it('TrafficLight 挂载在 AsideRegion 内：left-0/top-4 相对 aside 顶 y=4 = 窗口 (4,8)，y8 与 mac 同位；x4 与 mac x8 有 4px 预期差（§11:883）', () => {
     const wrapper = mount(AppShell)
 
-    // traffic-light 在 aside 内（刻意调整形态：aside 是 offset parent，left-0/top-4 → 窗口 (8,8)）
+    // traffic-light 在 aside 内（刻意调整形态：aside 是 offset parent，left-0/top-4 → 窗口 (4,8)）
     const tl = wrapper.find('.traffic-light')
     expect(tl.exists()).toBe(true)
     expect(tl.element.parentElement).toBe(

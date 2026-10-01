@@ -333,7 +333,7 @@ export async function createWindow(
     //   AppNavControls top-[5px] → 按钮中线 y=16（≈ 红黄绿实测中线 y15.75 对齐）；left-[72px]（右缘 60 + 12 呼吸）。
     //   取舍：不再追求与 PanelHeader 中线(y=32)对齐——原生 mac 应用红黄绿在 titlebar 顶部、
     //   工具栏按钮在其下方，二者本就不同高；折叠态 PanelHeader chrome 在 header 中线，与红黄绿有高度差属预期。
-    // win/linux：frame:false 应用自绘圆点 mimic mac（renderer TrafficLight.vue left-0/top-0，aside 顶已在窗口 y=8）。
+    // win/linux：frame:false 应用自绘圆点 mimic mac（renderer TrafficLight.vue left-0/top-[4px]：aside 顶 y=4 → 圆点 y8 与 mac 同位；x=4 与 mac x8 有 4px 预期差（DESIGN §11））。
     ...(process.platform === 'darwin'
       ? {
         titleBarStyle: 'hidden' as const,
