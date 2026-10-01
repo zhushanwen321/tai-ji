@@ -134,6 +134,15 @@ describe('错误码翻译表（业务层 base_resp + HTTP 层）', () => {
     })
   })
 
+  it('base_resp.status_code=2049（invalid api key，2026-10-01 实测）→ tts_auth_failed 而非厂商通用错误', async () => {
+    stubFetch(() => new Response(JSON.stringify({ base_resp: { status_code: 2049, status_msg: 'invalid api key' } })))
+    const driver = createMinimaxDriver({ baseUrl: BASE_URL })
+    await expect(driver.synthesizeChunk(baseReq(), API_KEY)).rejects.toMatchObject({
+      code: 'tts_auth_failed',
+      snippet: expect.stringContaining('status_code=2049'),
+    })
+  })
+
   it.each([1042, 2013, 1008])('base_resp.status_code=%i → tts_vendor_error', async (statusCode) => {
     stubFetch(() => new Response(JSON.stringify({ base_resp: { status: statusCode, status_code: statusCode } })))
     const driver = createMinimaxDriver({ baseUrl: BASE_URL })
