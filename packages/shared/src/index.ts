@@ -37,6 +37,9 @@ export type {
   DeliveryDrainReplyEntry, DeliveryDrainReply, DeliveryResyncReply,
   // 消息撤回（message revoke，U3）：revokeMessage RPC 的错误码闭集 + reply 判别 union
   RevokeMessageErrorCode, SessionRevokeMessageReply,
+  // workflow 可视化（workflow-visualization U2 协议冻结）：两条拉取 RPC 的错误码
+  // 闭集 + reply 判别 union（runtime handler 落码 + renderer 错误归一跨包消费）
+  WorkflowDagErrorCode, WorkflowDagReply, WorkflowRunEventsErrorCode, WorkflowRunEventsReply,
 } from './protocol'
 // 消息撤回（U3）：__taiji_nav__ 信令命令名常量——U4 runtime 编排跨包消费；
 // 本文件对 protocol.ts 是显式 allowlist（非 export *），漏登记会使常量对下游不可达。
@@ -227,6 +230,34 @@ export type {
   WorkflowRunOutcome,
   WorkflowAgentCall,
   WorkflowRunRecord,
+  WorkflowRunPhaseFoldEntry,
+  WorkflowRunEventTruncatedField,
+  WorkflowRunEventType,
+  WorkflowRunEventEntryBase,
+  WorkflowRunCreatedEntry,
+  WorkflowRunPhaseStartedEntry,
+  WorkflowRunAgentStartedEntry,
+  WorkflowRunAgentRetryingEntry,
+  WorkflowRunAgentSettledEntry,
+  WorkflowRunPhaseSettledEntry,
+  WorkflowRunInterruptedEntry,
+  WorkflowRunResumedEntry,
+  WorkflowRunSettledEntry,
+  WorkflowRunWorkerLogEntry,
+  WorkflowRunEventEntry,
+  WorkflowGanttSegmentState,
+  WorkflowGanttAttemptSegment,
+  WorkflowGanttPhaseBand,
+  WorkflowGanttPhaseCard,
+  WorkflowGanttSegments,
+  WorkflowDagNodeKind,
+  WorkflowDagNode,
+  WorkflowDagEdgeKind,
+  WorkflowDagEdge,
+  WorkflowDagPhase,
+  WorkflowDagParallelGroup,
+  WorkflowDagLoop,
+  WorkflowDag,
 } from './workflow'
 // [W2 D8] 状态中文显示名词表运行时常量（ALL = 值域全集 / LABELS = outcome → 中文
 // 显示名（成功/失败/已取消/已中断），通知渲染与 tray 文案消费它 / COVERAGE_LOCK =
@@ -236,6 +267,14 @@ export {
   WORKFLOW_RUN_OUTCOME_ALL,
   WORKFLOW_RUN_OUTCOME_LABELS,
   WORKFLOW_RUN_OUTCOME_COVERAGE_LOCK,
+} from './workflow'
+// [可视化 U2] workflow-visualization 协议冻结段的运行时常量（截断白名单四字段 /
+// 截断阈值 / 事件类型全集 + 反向完备编译锁）——消费入口经包根导出面（同上先例）。
+export {
+  WORKFLOW_RUN_EVENT_TRUNCATED_FIELDS,
+  WORKFLOW_RUN_EVENT_TRUNCATE_BYTES,
+  WORKFLOW_RUN_EVENT_TYPES_ALL,
+  WORKFLOW_RUN_EVENT_ENTRY_COVERAGE_LOCK,
 } from './workflow'
 // pi-preset 用具名导出（S-SH-3）：避免 export * 导致的命名冲突与 tree-shaking 不友好。
 // 所有 type / const / 运行时守卫均显式列出，新增导出时同步在此登记。
