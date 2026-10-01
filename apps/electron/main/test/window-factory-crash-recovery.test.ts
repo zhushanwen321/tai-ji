@@ -112,6 +112,8 @@ vi.mock('electron', () => ({
   app: { getAppPath: electronStubs.getAppPath, isPackaged: false },
   BrowserWindow: FakeBrowserWindow,
   shell: { openExternal: electronStubs.openExternal },
+  // 非 mac 分支取主屏工作区算默认尺寸（mac 跑测不触达，为 CI linux 跑测补跨平台 mock）
+  screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }) },
 }))
 
 // ── main-logger mock（u5a writer 的 API 面；断言结构化 meta，不触文件系统）──

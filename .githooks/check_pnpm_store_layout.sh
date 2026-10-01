@@ -25,26 +25,26 @@ MODULES_YAML="$PROJECT_ROOT/node_modules/.modules.yaml"
 # pnpm 缺失时后续检查自会失败，不在此添噪
 command -v pnpm >/dev/null 2>&1 || exit 0
 
-# EXPECTED 解析 [HISTORICAL 2026-09-29]：pnpm 10.27 的 `pnpm store path` 不反映
+# EXPECTED 解析（双历史修复合并，两分支各覆盖一类环境）：
+# [HISTORICAL 2026-09-29] globalconfig store-dir 分支：pnpm 的 `pnpm store path` 不反映
 # globalconfig（~/Library/Preferences/pnpm/rc）的 store-dir 配置，而 install 读它
-# ——两命令分叉使本检查对配置了全局 store-dir 的环境永久假阳性（install 写
-# <store-dir>/v<major>，store path 报默认位置）。修正 = 与 install 同源解析：
-# config 有 store-dir 时取「<store-dir>/v<major>」，否则回落 store path（沙箱
-# HOME 覆写场景下 config 无 store-dir，回落路径与原防线语义不变）。
-STORE_DIR_CONFIG="$(pnpm config get store-dir 2>/dev/null)"
+# ——两命令分叉使本守卫对配置了全局 store-dir 的环境永久假阳性（install 写
+# <store-dir>/v<major>，store path 报默认位置）。config 有 store-dir 时取
+# 「<store-dir>/v<major>」，否则回落同源 store path（沙箱 HOME 覆写场景下 config
+# 无 store-dir，回落路径与原防线语义不变）。
+# [HISTORICAL 2026-10-01] 基准必须取「与 install 同源的 pnpm」。全局 pnpm 是 launcher
+# （bin/pnpm.mjs 实体可能已是更高版本，如 11.7.0），在项目内按 packageManager 字段把
+# install 自举到钉定版本（如 pnpm@10.27.0）执行——两版 store 版本段不同（v11 vs v10），
+# 裸 `pnpm store path` 与 install 写入的 storeDir 恒劈叉，护栏恒红。故回落分支优先经
+# corepack 按 packageManager 解析（与 install 同源），corepack 缺失时回退裸 pnpm
+# （旧环境形态）。
 PNPM_MAJOR="$(pnpm --version 2>/dev/null | cut -d. -f1)"
+STORE_DIR_CONFIG="$(pnpm config get store-dir 2>/dev/null)"
 if [ -n "$STORE_DIR_CONFIG" ] && [ "$STORE_DIR_CONFIG" != "undefined" ] && [ -n "$PNPM_MAJOR" ]; then
     EXPECTED="${STORE_DIR_CONFIG%/}/v${PNPM_MAJOR}"
 else
-    STORE_PATH="$(cd "$PROJECT_ROOT" && pnpm store path 2>/dev/null)" || exit 0
-    # [HISTORICAL 2026-10-01] pnpm 10.27 的 `pnpm store path` 尾段会报与自身 install 不一致的
-    # 布局版本（同机并存全局 pnpm 11 时实测报 /v11，install 恒写 /v10），EXPECTED 与 install
-    # 同源解析 = 尾段取 pnpm 主版本号（与上方 config 分支同式）；仅当 store path 输出以
-    # /v<数字> 结尾时改写尾段，其余形态原样采用（自定义无版本段 store 路径不受影响）。
+    STORE_PATH="$(cd "$PROJECT_ROOT" && { command -v corepack >/dev/null 2>&1 && corepack pnpm store path 2>/dev/null || pnpm store path 2>/dev/null; })" || exit 0
     EXPECTED="$STORE_PATH"
-    if [ -n "$PNPM_MAJOR" ] && [[ "$STORE_PATH" =~ /v[0-9]+$ ]]; then
-        EXPECTED="${STORE_PATH%/*}/v${PNPM_MAJOR}"
-    fi
 fi
 RECORDED="$(grep -m1 '^storeDir:' "$MODULES_YAML" | sed 's/^storeDir:[[:space:]]*//')"
 
@@ -54,7 +54,7 @@ RECORDED="$(grep -m1 '^storeDir:' "$MODULES_YAML" | sed 's/^storeDir:[[:space:]]
 if [ "$EXPECTED" != "$RECORDED" ]; then
     echo -e "${RED}[FAIL] pnpm store 布局翻转：.modules.yaml 记录 ${RECORDED} ，当前环境解析 ${EXPECTED} ${NC}"
     echo -e "${YELLOW}[根因] 沙箱执行体（zsw 引擎 worker / CI）覆写 HOME → store 路径分叉，见 docs/TROUBLESHOOTING.md「pnpm store 布局双向翻转」${NC}"
-    echo -e "${YELLOW}[FIX] cd ${PROJECT_ROOT} && CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install  （约 6-7s 重建后重试 commit）${NC}"
+    echo -e "${YELLOW}[FIX] cd ${PROJECT_ROOT} && rm -f node_modules/.modules.yaml && CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install  （约 6-7s 重建后重试 commit；先删清单强制重写 storeDir——清单 up-to-date 时 install 会跳过重写）${NC}"
     exit 1
 fi
 

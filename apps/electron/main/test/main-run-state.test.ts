@@ -51,7 +51,7 @@ const appMock = vi.hoisted(() => {
 
 vi.mock('electron', () => ({
   app: appMock,
-  protocol: { handle: vi.fn() },
+  protocol: { handle: vi.fn(), registerSchemesAsPrivileged: vi.fn() },
   net: { fetch: vi.fn() },
   BrowserWindow: Object.assign(vi.fn(), { getAllWindows: vi.fn(() => []) }),
 }))

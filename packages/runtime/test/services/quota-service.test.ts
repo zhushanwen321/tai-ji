@@ -67,6 +67,7 @@ function makeResolver(
     hasProviderCredential: vi.fn(() => false),
     listCredentialBackedProviderIds: vi.fn(() => new Set<string>()),
     resolveProviderCredential: vi.fn(async (id: string) => resolve(id)),
+    resolveProviderBaseUrl: vi.fn(() => undefined),
   }
 }
 

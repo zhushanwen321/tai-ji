@@ -31,11 +31,22 @@ import type { UsageStatsResult } from './usage-stats'
 import type { GenStatsFrame } from './gen-stats'
 // quota.configure payload 形状 SSOT 引用（coding-plan-quota-config-ux §7.1 契约收敛）
 import type { QuotaConfigurePayload } from './quota-types'
+
 // plan 生命周期状态类型（plan 状态机显式化 D2）：经包出口（@zhushanwen/extension-protocol）
 // 直接引用 PlanLifecycleState（canonical = packages/extension-protocol/src/extensions/plan/state-machine，barrel 已 re-export），
 // type-only 零运行时面（shared 不因此获得对该包的运行时依赖；类型解析由 devDependency 承载，
 // plan-protocol.test.ts 的跨包 AssertExact 锁镜像漂移）。
 import type { PlanLifecycleState } from '@zhushanwen/extension-protocol'
+
+// tts.* 域载荷形状 SSOT 引用（ai-voice-tts 设计 §7.1：域形状归属 tts-types，本文件仅登记 type→payload 映射）
+import type {
+  SanitizedTtsConfig,
+  TtsApiKeyInput,
+  TtsConfig,
+  TtsFormModel,
+  TtsProviderId,
+} from './tts-types'
+
 
 /**
  * 测试连接按协议分组的单行结果（SSOT，2026-09-10 review S-9 手写重复收编）：
@@ -237,6 +248,12 @@ export type ClientMessageType =
   // btw.close**（D6 被否项：与 message.send 双轨重复 / 与 remove 职责重叠；
   // __tests__/protocol.test.ts 负向守卫锁定「恰好 3 帧、无 send/close」）。
   | 'btw.create' | 'btw.list' | 'btw.remove'
+  // tts.*（ai-voice-tts 设计 §7.1，M0 四 RPC）：设置页语音菜单与朗读按钮的数据/动作面——
+  // getConfig（脱敏配置投影）/ configure（整对象透传 + apiKeys 联动带入）/ speak（朗读合成，
+  // reply 只回 filePath）/ getCapabilities（表单投影数据源）。tts.* 域不触发 mutation 登记
+  // 门禁（MUTATION_DOMAINS 只含 session/model/preset/config 四域）；错误统一走 sendError
+  // 错误信封，错误码词表 TtsErrorCode 七值（tts-types.ts）。
+  | 'tts.getConfig' | 'tts.configure' | 'tts.speak' | 'tts.getCapabilities'
 
 // ── Payload 类型定义 ────────────────────────────────────────────
 
@@ -898,6 +915,24 @@ export interface ClientMessageMap {
   'btw.list': { mainSid: string }
   /** btw.remove：关线销毁（单线级联——线进程 + 派生资源；主删级联走 session.delete，不走本帧）。 */
   'btw.remove': { vid: string }
+  // ── tts.*（ai-voice-tts 设计 §7.1，M0 四 RPC）──
+  /** tts.getConfig：设置页首屏拉脱敏配置投影（每家只回 hasApiKey/providerKeyAvailable 两敏感布尔，永不回 Key 本体）。 */
+  'tts.getConfig': Record<string, never>
+  /**
+   * tts.configure：整对象透传（quota.configure 先例）。providerId = 本次写入的目标家
+   *（§7.1 表只列 config/apiKeys 两字段；providerId 按 §5.2「选中 = 默认朗读服务商 + 每家
+   * 独立记忆」语义补全——无它 runtime 无法定位落盘条目，选中即同步写 activeProvider）。
+   * apiKeys 缺席 = 不动；字符串 = 写入；null = 清除；'from-provider' = 供应商 Key 联动带入（D4）。
+   */
+  'tts.configure': {
+    providerId: TtsProviderId
+    config: TtsConfig
+    apiKeys?: Partial<Record<TtsProviderId, TtsApiKeyInput>>
+  }
+  /** tts.speak：sessionId 供日志归因（缓存键不含 sessionId，D5）；settings 测试调用不带 sessionId。 */
+  'tts.speak': { sessionId?: string; text: string }
+  /** tts.getCapabilities：设置页表单数据源（TtsFormModel 内嵌该家 TtsCapabilities，形状见 tts-types）。 */
+  'tts.getCapabilities': Record<string, never>
 }
 
 // ClientMessage 由 ClientMessageMap 直接派生：每个 type 字面量映射到
@@ -1179,6 +1214,9 @@ export type ServerMessageType =
   // stateSnapshot 恢复；登记见 message-bus.ts TOPIC_TABLE / STATE_TYPE_KEY_MAP）。btw.create /
   // btw.remove 是纯 RPC reply（走 reply 通道不经 publish，不入 TOPIC_TABLE——session.subscribe 同族）。
   | 'btw.create' | 'btw.list' | 'btw.remove'
+  // tts.*（ai-voice-tts 设计 §7.1）：四 RPC 的 reply（:result 后缀复用 quota.fetch:result 约定；
+  // payload 消费型，形状见 ServerMessageMapBase tts 条目）。
+  | 'tts.getConfig:result' | 'tts.configure:result' | 'tts.speak:result' | 'tts.getCapabilities:result'
 
 /** skill 缓存失效广播的作用域：global=全局 skill 变动，project=某项目 cwd 的 skill 变动。 */
 export type SkillCacheScope = 'global' | 'project'
@@ -2524,6 +2562,22 @@ export interface ServerMessageMapBase {
   'btw.list': { mainSid: string; threads: BtwThreadInfo[] }
   /** btw.remove reply：ack 回显被关线 vid（ReplyPayloadMap 登记 void，消费侧不读 payload）。 */
   'btw.remove': { vid: string }
+
+  // ── tts.*（ai-voice-tts 设计 §7.1，四 RPC reply，payload 消费型）──
+  /** tts.getConfig:result：脱敏配置投影（SanitizedTtsConfig 敏感信息只含两布尔，永不回 Key 本体）。 */
+  'tts.getConfig:result': { config: SanitizedTtsConfig }
+  /**
+   * tts.configure:result：ok=false 时 error 带因（写路校验失败用通用码 invalid_payload 的
+   * 语义经 error 字段承载，§7.1——配置错误由设置页就地呈现）；成功时 config 回脱敏投影。
+   */
+  'tts.configure:result': { config?: SanitizedTtsConfig; ok: boolean; error?: string }
+  /**
+   * tts.speak:result：只回 filePath（D9 决死 mimeType 恒 'audio/wav'、fromCache/chars/chunks
+   * 无 renderer 消费方——三字段不进协议面，收敛依据见 §7.1）。
+   */
+  'tts.speak:result': { filePath: string }
+  /** tts.getCapabilities:result：三家表单投影（数据权威在 runtime driver，renderer 不 import 数据表）。 */
+  'tts.getCapabilities:result': { forms: Record<TtsProviderId, TtsFormModel> }
 }
 
 /**
@@ -2874,6 +2928,12 @@ export interface ReplyPayloadMap {
   'btw.create': ServerMessageMap['btw.create'] // payload 消费型：vid + mainSid + forkState
   'btw.list': ServerMessageMap['btw.list']     // payload 消费型：threads 线枚举
   'btw.remove': void                           // ack 型：关线完成即 resolve（wire reply btw.remove 回显 vid）
+
+  // ── tts.*（ai-voice-tts 设计 §7.1，M0 四 RPC，全 payload 消费型）──
+  'tts.getConfig': ServerMessageMap['tts.getConfig:result']
+  'tts.configure': ServerMessageMap['tts.configure:result']
+  'tts.speak': ServerMessageMap['tts.speak:result']
+  'tts.getCapabilities': ServerMessageMap['tts.getCapabilities:result']
 }
 
 /**

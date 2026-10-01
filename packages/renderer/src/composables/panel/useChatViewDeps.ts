@@ -25,15 +25,20 @@
  * - assistantToMarkdown（messageFormat.ts）→ toMarkdown
  */
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { FileNode, Message, Segment } from '@taiji/shared'
+import { normalizeContent } from '@taiji/shared'
 import type { ChatViewDeps } from '@taiji/ui'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useChat } from '@/composables/features/chat/useChat'
+import { useTtsPlayer } from '@/composables/features/chat/useTtsPlayer'
+import { useTtsSpeechEnabled } from '@/components/settings/tts/use-tts-enabled'
 import { useTurnExpansion } from '@/composables/panel/useTurnExpansion'
 import { useSideDrawer, type SideDrawerTab } from '@/composables/features/drawer/useSideDrawer'
 import { useFileTreeStore } from '@/stores/fileTree'
 import { useFileSearch } from '@/composables/features/search/useFileSearch'
+import { useToast } from '@/composables/useToast'
 import { triggerEnterForkMode } from '@/composables/panel/useForkModeChannel'
 import { triggerEnterHandoffMode } from '@/composables/panel/useHandoffModeChannel'
 import { renderMarkdownSegments } from '@/composables/logic/markdown'
@@ -60,9 +65,13 @@ export function useChatViewDeps(
   sessionId: Ref<string>,
   override?: { resourceBaseDir?: ComputedRef<string | undefined> },
 ): ChatViewDeps {
+  const { t } = useI18n()
+  const { error: toastError } = useToast()
   const chat = useChatStore()
   const sessionStore = useSessionStore()
   const { abortBash, editAndResend, revokeMessage } = useChat()
+  const tts = useTtsPlayer()
+  const { enabled: ttsSpeechEnabled } = useTtsSpeechEnabled()
   const turnExpansion = useTurnExpansion(sessionId)
   const drawer = useSideDrawer()
   const fileTreeStore = useFileTreeStore()
@@ -157,6 +166,26 @@ export function useChatViewDeps(
       if (!msg) return
       triggerEnterHandoffMode(sid)
     },
+    /** 朗读（ai-voice-tts §5.1）：点击动作分流收敛在装配侧——idle = 朗读（清洗由
+     *  useTtsPlayer 内部承担，文本源 = 消息正文 normalizeContent）；loading/playing =
+     *  取消/停止（stop 与「点击停止」同源复用，§5.1 状态机非 idle 态点击语义）。
+     *  ui 包不 import renderer（反向依赖禁令），状态机数据面经 speakStateOf 投影。
+     *  朗读总开关（§5.2 通用配置）只在 idle 分支拦截：关闭时 toast「语音服务未配置」
+     *  不发 RPC；非 idle 态点击 = 停止，不受开关约束（关掉开关也应能停掉在播的声音）。 */
+    onSpeak: (sid: string, msg: Message): void => {
+      if (!msg) return
+      if (tts.speakStateOf(msg.id) === 'idle') {
+        if (!ttsSpeechEnabled.value) {
+          toastError(t('panel.message.speakNotConfigured'))
+          return
+        }
+        tts.speak(sid, msg.id, normalizeContent(msg.content))
+      } else {
+        tts.stop()
+      }
+    },
+    /** 朗读态查询：useTtsPlayer 全局单例（D11）按 messageId 投影，三态直通 */
+    speakStateOf: (messageId: string) => tts.speakStateOf(messageId),
     openDrawer: (tab, opts?): void => {
       drawer.open(tab as SideDrawerTab, opts)
     },

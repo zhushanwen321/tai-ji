@@ -111,7 +111,9 @@ Agent Runtime（一个 Node.js 进程）
 | MessageConverter (`infra/pi/message-converter.ts`) | pi 历史格式 → 前端 Message[] | 纯函数 |
 | MessageBroker (`transport/message-broker.ts`) | 统一 WS 广播 | `IMessageBroker` |
 
-**依赖方向**: Transport → Service → ports → infra。Service 经 `services/ports/` 定义的 port 接口消费 pi 能力（`IPiEngine` / `IProcessManager` 由 `infra/pi/rpc-client.ts` + `process-manager.ts` 实现，D24 收尾），不直接碰 pi 协议；Transport 不包含业务逻辑。
+
+**依赖方向**: Transport → Service → ports → infra。Service 经 `services/ports/` 定义的 port 接口消费 pi 能力（`IPiEngine` / `IProcessManager` 由 `infra/pi/rpc-client.ts` + `process-manager.ts` 实现，收敛于 D24），不直接碰 pi 协议；Transport 不包含业务逻辑。
+
 
 ### 语义吸收层（pi-boundary-reliability，2026-08-28）
 
@@ -125,7 +127,9 @@ taiji subagent 体系的子任务执行单元：由引擎进程派生子进程�
 
 ### Fan-out / 批量派发
 
+
 2+ 独立任务并行、结果收齐一起处理的批量编排形态。唯一入口是 `subagents` 批量 tool：一次调用传 `tasks` 数组（每个元素 = 一条自包含任务 prompt），handler 转译 `runWorkflow("fan-out")` 走 workflow 单管道——`parallel()` allSettled 并行派 N 个一次性成员（one-shot，不可 message/续聊，恢复 = 重派），任一成员失败降 `partial` 不炸 run；run 收敛后主 agent 收到一条聚合结果通知（结构化 results：task / taskIndex / status / summary / fullReportPath）。机制落点：[subagents/architecture.md §4 批量编排行](../extensions/subagents/architecture.md)。
+
 
 **collect 退役迁移说明（2026-09-16 落地）**：
 1. 旧调用形态（`subagent start` 显式带 `collect` 字段）不会被 pi 拒绝——typebox 参数校验无 `additionalProperties`，未知字段静默放行且不剥离；字段退役后行为等价原 `collect:"async"` 缺省路径（立即逐条通知），无迁移动作、无功能损失。
@@ -138,7 +142,9 @@ subagent 跨 run 续聊时定位既有会话的凭据（引擎中立形态 `Resu
 
 ### Execution Record
 
+
 subagent 运行状态的内存单源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：事实源 = record 事件文件（W1 介质归位，[ADR-0094](adr/decisions.md)），恢复 = v2 注册条目定界 + 事件文件 fold（v1 全量快照兼容层已整体删除，2026-09-30）；状态词表三维正交（见下文 [run/record 状态词表](#runrecord-状态词表w2-收敛adr-0080)），对外投影两态（`active` / `idle`，ended 随终态概念删除），轮终收条由 `record-settled` / `record-round-idle` 事件帧承载（事件流是唯一事实源），manifest 为物化投影。
+
 
 ### ToolCall
 
@@ -184,7 +190,9 @@ extension 与 taiji runtime 之间的请求-回包通道原语（`packages/exten
 
 ### 统一表单协议（ui-form，2026-09-19）
 
-ask-user / scheduler / plan 三个 extension 提问交互的统一协议：问题即数据（类型化问题集），GUI 链路一个入口一个渲染器——多问 = 多 tab，单问 = 单视图（planReview 审批条与 permission 等 band 流程对话框不属提问表单，不在收敛范围）。协议 SSOT = `packages/extension-protocol/src/extensions/ui-form/`：
+
+ask-user / scheduler / plan 三个 extension 提问交互的统一协议：问题即数据（类型化问题集），GUI 链路一个入口一个渲染器——多问 = 多 tab，单问 = 单视图（planReview 审批条与 permission 等 band 流程对话框不属提问表单，不在统一范围）。协议 SSOT = `packages/extension-protocol/src/extensions/ui-form/`：
+
 
 - **问题集 `FormQuestion` 判别联合**：`choice`（选项题：`options`（label 即选中值，无独立 value 字段）/ `multi` 多选 / `allowOther`，默认 true）/ `text`（纯自由文本）/ `schedule`（时间输入整表单，`initial` 预填 `ScheduleDraft`）。answers key = `header ?? question`。
 - **回传 `FormAnswers = Record<string, string>`**：choice 单选 = label、多选 = `JSON.stringify(labels[])`、Other 文本独立键 `${key}__other`、text 键位 `${key}__other`（与纯 Other 形态同键位）、schedule value = `JSON.stringify(ScheduleFormResult)`。choice/text 部分与 `AskUserAnswers` 逐字兼容——`getAskUserAnswer` / `getAskUserOther` 解码零改动。
@@ -197,7 +205,9 @@ ask-user / scheduler / plan 三个 extension 提问交互的统一协议：问�
 
 ### Schedule Create（schedule 创建表单 / 触发反转，2026-09-20）
 
+
 调度任务的创建入口两路：**人侧 `/schedule` 命令打开创建表单**（无参 = 空草稿、带参 `<schedule> <prompt>` = 预填；命令 handler 异步打开、立即返回，填表时长不受 prompt RPC 60s 窗口约束），**模型侧 `schedule` tool 直建**（不再弹确认表单；参数不完整时要求模型先经 ask-user / 对话澄清）。交互入口收敛[统一表单协议](#统一表单协议ui-form2026-09-19)：extension 侧 `uiFormInteract` 携 `ScheduleQuestion` 单问整表单（预填草稿经 `initial` 直传），GUI 由 FormOverlay 的 ScheduleForm 渲染器呈现，回包 `FormAnswers` envelope 解出 `ScheduleFormResult` 经 `isScheduleFormResult` 判别（判别职责在 scheduler 包内）；TUI 走 `ctx.ui.custom` 挂 `ScheduleCreateComponent`；`json` / `print` 模式无交互通道，带参直建、无参/失败一律 `throw`（stderr 是唯一可见通道）。scheduler-create 模块为共享资产层：草稿 `ScheduleDraft`（表单预填值，含 `models` 列表注入）与回传 `ScheduleFormResult`（`action: 'create'`；取消不走此形状——select resolve undefined）契约类型 + `isScheduleDraft` / `isScheduleFormResult` 形状检查 + 时间折叠单点 `dateToOnceCron` / `onceCronToDate`（一次性时刻 ↔ 一次性 cron（5 段 `分 时 日 月 *`）互转，GUI/TUI 共用禁止双实现）。
+
 
 ### 计划模式（Plan Mode）
 
@@ -207,7 +217,9 @@ pi-plan extension 提供的只读规划态：用户输入 `/plan <需求> [--ski
 
 ### plan-state entry
 
+
 计划模式在 session JSONL 中的持久化状态条目（customType 字面量 `"plan-state"`，session 内取最后一条为当前态）。字段 = 现状四字段 `isActive` / `planFilePath` / `requirement` / `templateName` + 旧 entry 可缺省字段 `templateProvidedPath`（`--template` 直传标记：直传进入时为展开后模板绝对路径，select-template 防御判据；模板流程缺失）/ `skills`（挂载技能名）/ `docs`（产物清单 `PlanDocMeta[]`：fileName + absPath + sourceSkill + version）/ `state`（生命周期八值，D1/D2 取代式——每次转移落盘，见词条「计划生命周期状态机」）/ `selfReview`（上次 submit-review 的自审结论，≤4KB 写侧截断：E3 重挂回传源 + 防照抄比较基线，见词条「selfReview（自审结论）」）/ `resumeHint`（降级等待原因 `resubmit`：会话重启待重提交，仅描述当前降级等待、submit-review 重挂起点清空，不跨轮残留）/ `lastSubmitReviewDocsFingerprint`（submit-review 重提交指纹快照）。旧键 `reviewState` / `reviewStateSource` **已停写**（取代式演进），仅作重建映射输入（reviewState：awaiting→reviewing / revising→revising / 无→planning|idle 按 isActive；reviewStateSource:'resubmit'→resumeHint:'resubmit'）。旧 entry（无新字段）逐字段降级读 + 映射读。runtime 投影链按同字面量派生扫描，前端消费与冷启动首拉共用同一份派生代码。
+
 
 **代码映射**: `extensions/universal/plan/src/state.ts`（schema + 重建/落盘唯一入口）；`packages/extension-protocol/src/core/types.ts` 的 `PlanDocMeta`（产物元数据契约）。
 
@@ -420,6 +432,8 @@ workflow run 的结果语义通知纪律：成功/失败/取消一律出终局�
 
 ### 模型目录（pi 引擎域）
 pi 引擎的可用模型集合及其能力（思考档位等）。能力判定只在 `packages/runtime/src/services/model-capability.ts` 一点进入（ADR-0064 能力注册表），离线快照由 builtin provider 快照承载（`scripts/check-model-references.mjs` 检查漂移）。workflow 派发按全路径形态引用模型：裸名不解析、解析失败为期望行为（C-ext-24）。
+### 窗口外壳（window chrome）
+窗口的标题栏区装饰总和：关闭/最小化/最大化按钮、边框圆角、拖拽区、默认尺寸行为。本项目的平台分叉：mac 由系统绘制（`titleBarStyle: hidden`，原生红黄绿圆点）；win/linux 由应用自绘（`frame: false` + renderer 的 TrafficLight 圆点 + `-webkit-app-region` 拖拽条带）。
 
 ---
 
@@ -506,3 +520,12 @@ composer（Panel zone ④）内底部的展示型工具带（`packages/renderer/
 composer 工具条左簇的常驻观察入口（`packages/renderer/src/components/panel/tray/`，`ComposerTray.vue`）：条目 = built-in 四件（后台命令 / 子代理 / 工作流 / **子会话**，固定序）+ 协议 widget 区（extension 经 `setWidget` 推送的 todo/goal 等「给 agent 看的工作记忆」，icon/badge/状态色由 `WidgetMeta` 驱动）。hover icon 弹出该条目的分桶面板（计数与行集同源，可就地 kill/cancel/abort、点行开 drawer 详情，子会话行点开即跳该会话），点击 icon 可 pin。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻；全无记录 → 不渲染（归零不虚噪）。底栏密度状态机实测放不下时（fit L1）整托盘 + 插件 toolbar 聚合为**单图标**聚合按钮（角标 = 运行数数字）单入口，点击弹出全部图标列表；托盘全无条目且插件零贡献时不渲染（无死入口）。设计文档已删除（git 可追溯）。
 
 > **术语演进（2026-09 核对）**：原「WidgetArea」（对话流内的单行 pill 状态带，`@taiji/ui` 组件）已退役——widget 消费端收敛为上述托盘（2026-09-16，设计 D11：对话流回归纯内容，入口唯一化）。子会话第 4 件为模式体系设计 D7 新增（u7 已落地，面板 `TraySessionPanel.vue` 为扁平列表而非分桶槽）。
+
+### 语音朗读（TTS）
+taiji 的 assistant 回复朗读能力（ai-voice-tts 设计，P2 辅助功能）。链路：朗读按钮（TurnSummary `speak-btn`，三态 idle/loading/playing + 生成中置灰）→ `useTtsPlayer` 全局单例（ADR-0049 例外清单，窗口级唯一播放任务态）→ core 域 `tts.speak` → runtime `TtsService` 八步编排（现读配置 → 清洗复核 → 缓存键 → 分句 → 逐段合成 → WAV 封装 → 原子写 + FIFO 封顶 → reply `filePath`）→ local-file 音频播放。三家 provider：MiniMax `t2a_v2` / StepFun `audio/speech` / MiMo 借壳 `chat/completions`，配置入口 = 设置页「语音」菜单（表单投影驱动，用户不接触 JSON）。
+
+### 语音朗读总开关
+设置页「启用语音朗读」开关（`use-tts-enabled.ts`，localStorage key `taiji.tts.enabled`，data-source-registry #47）：只拦 idle 新朗读（关闭时点朗读 → 「语音服务未配置」toast 不发 RPC）；非 idle 停止与设置页「保存并测试」不受拦。默认开启（键缺失/读失败同默认开）。
+
+### settings-tts-test（伪 id）
+设置页「保存并测试」的播放通道：走与朗读按钮完全相同的 `useTtsPlayer.speak`，但用固定伪 messageId（`SETTINGS_TTS_TEST_MESSAGE_ID`）驱动，与对话朗读天然双向互斥（同一全局单例任务态）。

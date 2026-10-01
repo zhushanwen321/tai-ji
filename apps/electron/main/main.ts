@@ -31,6 +31,10 @@
  *
  * 6. window-all-closed：macOS 不 quit（activate 会复用 runtime），其他平台 stop+quit
  *
+ * 7. local-file scheme 特权声明（registerSchemesAsPrivileged）必须保持在 app ready
+ *    之前的模块顶层调用（scheme 级全局特权，ready 后注册不生效）；特权集取舍与
+ *    standard 陷阱见声明点注释块
+ *
  * 生命周期时序：
  * ```
  *   app.whenReady:
@@ -92,6 +96,22 @@ import { resolvePackagedDataDir } from './utils/packaged-data-dir.js'
 // 完整 PATH 补全，后续 buildSafeEnv 自然传递到 pi，pi 的 bash 工具才能找到 uv 等用户 CLI。
 // 必须在 buildSafeEnv / spawn 之前执行。
 fixPathEnv()
+
+// ── local-file scheme 特权声明（ai-voice-tts 设计 §7.7 改动 2）─────────────
+// registerSchemesAsPrivileged 是 scheme 级全局特权，必须在 app ready 之前调用（模块顶层）。
+// 声明 { secure, stream }：stream 让 Chromium media 栈直接以流方式加载 local-file 音频
+// （TTS 朗读缓存 WAV 播放的前提——未声明特权时 media 栈对自定义 scheme 直接
+// MEDIA_ERR_SRC_NOT_SUPPORTED（errCode 4），与 CSP 无关的第二层拦截，设计前提 8 实测）；
+// secure 仅作安全声明（local-file handler 有白名单校验）。
+// 不可带 standard: true（实测陷阱，§7.7）：standard scheme 的 URL 解析会把路径首段吞成
+// host（local-file:///Users/x 被规范化为 local-file://users/x，handler 拿到的 pathname
+// 缺首段、白名单必 403），现役 markdown 图片拼法（encodeURIComponent 整段路径）依赖
+// opaque 解析形态，standard 会连带破坏全部既有 local-file 消费方。
+// supportFetchAPI / corsEnabled 不预声明（M0 特权面最小化——仅 fetch→blob 降级路径需要，
+// 启用须与 CSP connect-src local-file: / media-src blob: 一次补齐三处，设计 §7.7）。
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'local-file', privileges: { secure: true, stream: true } },
+])
 
 // ── EPIPE 兜底 ───────────────────────────────────────────────────
 // concurrently/终端关闭后 pipe 断开，console 写入触发 uncaught exception
@@ -244,7 +264,7 @@ const browserViewManager = new BrowserViewManager(windows, (sid, state) => {
 })
 
 /** createWindow 适配器：把 ctx.windows.generateId 注入 window-factory */
-const createWindowFn = (options?: { windowId?: string; sessionId?: string }) =>
+const createWindowFn = (options?: { windowId?: string; sessionId?: string; isMainWindow?: boolean }) =>
   createWindow(options, { isDev, generateId: () => ctx.windows.generateId() })
     .then(({ win }) => win)
 
@@ -299,8 +319,9 @@ if (gotSingleInstanceLock) {
 async function bootstrapMainWindow(): Promise<void> {
   // bootstrap 也走 generateId() 并用返回值注册，避免与后续 renderer 调 create-window IPC
   // 时 generateId() 首返值 'win-1' 冲突导致 Map 覆盖、跟踪条目丢失。
+  // isMainWindow: true（u-window-state §6.4）：仅 bootstrap 主窗口挂尺寸持久化 + 恢复。
   const windowId = ctx.windows.generateId()
-  const win = await createWindowFn({ windowId })
+  const win = await createWindowFn({ windowId, isMainWindow: true })
   win.on('closed', () => { ctx.mainWindow = null })
   ctx.mainWindow = win
   ctx.windows.register(windowId, win)

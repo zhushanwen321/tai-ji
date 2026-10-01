@@ -97,6 +97,10 @@ import { ShellRunner } from './infra/shell-runner.js'
 import { WorktreeService } from './services/worktree/worktree-service.js'
 import { TerminalService } from './services/terminal/terminal-service.js'
 import { QuotaService } from './services/quota-service.js'
+import { TtsService } from './services/tts-service.js'
+// 三家 TTS driver 工厂与表单投影（ai-voice-tts u2，infra/tts 唯一装配出口）——组合根 import
+// infra 装配是 C-comm-03 的合法例外（services 层禁 infra，组合根不在此列）。
+import { createTtsDriver, getTtsFormModels } from './infra/tts/index.js'
 import { FileService } from './services/file-service.js'
 import { getSkillDirs } from './infra/pi/discovery-store.js'
 import { expandHome } from './utils/path-utils.js'
@@ -1317,6 +1321,21 @@ async function main(): Promise<void> {
   // 只有 S14 场景能发现。删除链侧保证只在 extras 条目确认清除后调用（防幽灵标记）。
   configService.setQuotaStateCleaner((providerId) => quotaService.clearProviderState(providerId))
 
+  // TtsService：语音合成朗读编排（ai-voice-tts 设计 §7.4）。
+  // 经 server.setServices 注入到 TtsMessageHandler（tts.getConfig/configure/speak/getCapabilities 路由）。
+  // createDriver：infra/tts 工厂直传——speak 合成前按 tts.json 现读 baseUrl 现建 driver，
+  // 请求端点跟随用户配置（构造期固化出厂默认会使非默认集群配置如 token plan 失效）。
+  // formModels：三家表单投影（skeleton 默认值/configure 校验/getCapabilities 数据源）。
+  // credentialResolver：凭据解析唯一通道（Key 联动 D4：providerKeyAvailable
+  // 检测 + from-provider 带入 + MiMo baseUrl 预填两级数据源）。dataDir 显式 getDataDir()（与
+  // TtsServiceOptions 缺省同值，quota 等服务同源推导）。
+  const ttsService = new TtsService({
+    dataDir: getDataDir(),
+    createDriver: createTtsDriver,
+    formModels: getTtsFormModels(),
+    credentialResolver: providerCredentialResolver,
+  })
+
   // ── BtwService（btw-question D1/D2/D3 + B2 授权接线，M2-b）──
   // 六项依赖按 BtwServiceDeps docstring 归位组合根：线进程复用同一 pm（出站 env 经
   // rpc-client start → buildOutboundChildEnv 统一武装，C-proc-09，无新增进程创建点）；
@@ -1422,6 +1441,8 @@ async function main(): Promise<void> {
     worktree: worktreeService,
     terminal: terminalService,
     quota: quotaService,
+    // ai-voice-tts：tts 四 RPC 路由（TtsMessageHandler 装配 + buildRoutes 展开 handles）。
+    tts: ttsService,
     handoff: handoffService,
     preset: presetService,
     auth: authService,

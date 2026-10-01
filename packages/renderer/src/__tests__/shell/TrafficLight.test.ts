@@ -6,6 +6,9 @@
  *  - mac：模板不渲染圆点（红黄绿由 OS 绘制），IPC 不可达
  *  - 全屏态：isFullscreen=true → 根 div opacity-0 + pointer-events-none 成对
  *    （review MF-1：单独任一都会让隐形圆点组劫持 PanelHeader chrome 点击）
+ *  - issue #24 缺陷修复：悬停同色 important 覆盖（缺陷 A：旧 hover:bg-transparent 把圆点
+ *    底色一并透明化）、图标锁定 8px（缺陷 B：Button 基础样式 [&_svg]:size-4 压过 lucide :size=8）、
+ *    容器 [-webkit-app-region:no-drag]（叠在侧栏顶部拖拽条带之上保住点击命中）
  *
  * Mock 策略（对齐 app-shell-topology.test.ts platformChromeMock 范式）：
  *  - usePlatformChrome mock：vi.hoisted 共享 isFullscreen ref（可改值）+ detectPlatform vi.fn（可切平台）
@@ -16,20 +19,13 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { platformChromeMock, expectFullscreenChromePairing } from '@/__tests__/helpers/platform-chrome-mock'
 
-/** usePlatformChrome mock：可控 isFullscreen ref + 可切换的 detectPlatform（win/linux vs mac） */
-const platformChromeMock = vi.hoisted(() => ({
-  isFullscreen: { value: false } as { value: boolean },
-  detectPlatform: vi.fn<() => 'mac' | 'win' | 'linux'>(() => 'win'),
-}))
+// usePlatformChrome mock：共享态在 helpers/platform-chrome-mock（isFullscreen 换装真 ref 供测试改值）；
+// 本文件默认平台 win（mac 用例逐点覆写 detectPlatform）
 vi.mock('@/composables/effects/usePlatformChrome', async () => {
-  const { ref } = await import('vue')
-  const isFullscreen = ref(false)
-  platformChromeMock.isFullscreen = isFullscreen
-  return {
-    usePlatformChrome: () => ({ isFullscreen }),
-    detectPlatform: platformChromeMock.detectPlatform,
-  }
+  const { installPlatformChromeMock } = await import('@/__tests__/helpers/platform-chrome-mock')
+  return installPlatformChromeMock('win')
 })
 
 /** @/lib/ipc mock：窗口控制 spy（TrafficLight 唯一消费面） */
@@ -98,23 +94,52 @@ describe('TrafficLight win/linux 交互路径', () => {
 
   it('全屏态根 div opacity-0 + pointer-events-none 成对（review MF-1 防隐形劫持）', async () => {
     const wrapper = mount(TrafficLight)
+    await expectFullscreenChromePairing(wrapper.find('.traffic-light'), async (v) => {
+      platformChromeMock.isFullscreen.value = v
+      await nextTick()
+    })
+  })
+})
+
+describe('TrafficLight issue #24 缺陷修复（悬停同色 / 图标 8px / no-drag）', () => {
+  it('缺陷 A 悬停同色覆盖：逐点 hover:!bg-<同色> 在 class 列表，透明化类已移除', async () => {
+    const wrapper = mount(TrafficLight)
+    const dots = wrapper.findAll('.tl-dot')
+
+    // 旧 hover:bg-transparent 会把圆点自身底色一并透明化（悬停即消失），必须移除
+    for (const dot of dots) {
+      expect(dot.classes()).not.toContain('hover:bg-transparent')
+    }
+
+    // 逐点同色覆盖类与底色类同源同色（红/黄/绿各持 hover:!bg-<色>，压 ghost hover:bg-surface-hover 灰底且保住自身底色）
+    const colors = ['#ff5f57', '#febc2e', '#28c840']
+    dots.forEach((dot, i) => {
+      expect(dot.classes()).toContain(`bg-[${colors[i]}]`)
+      expect(dot.classes()).toContain(`hover:!bg-[${colors[i]}]`)
+    })
+
+    // 触发 hover：覆盖类保持生效形态（jsdom 不套用 :hover 样式，类列表即确定性证据）
+    await dots[0].trigger('mouseenter')
+    expect(dots[0].classes()).toContain('hover:!bg-[#ff5f57]')
+    expect(dots[0].classes()).not.toContain('hover:bg-transparent')
+  })
+
+  it('缺陷 B 图标锁定 8px：圆点 Button 带 [&_svg]:!size-2 覆盖类且 svg 实际渲染', () => {
+    const wrapper = mount(TrafficLight)
+    const dots = wrapper.findAll('.tl-dot')
+
+    // Button 基础样式 [&_svg]:size-4（16px）压过 lucide :size=8 —— 必须 important 覆盖锁回 8px（size-2）
+    dots.forEach((dot) => {
+      expect(dot.classes()).toContain('[&_svg]:!size-2')
+      // 每个圆点内黑色符号 svg 真实存在（用户可见：hover 整组浮出 ×/−/+ 符号）
+      expect(dot.find('svg').exists()).toBe(true)
+    })
+  })
+
+  it('圆点组容器 no-drag：[-webkit-app-region:no-drag] 保住拖拽条带之上的点击命中', () => {
+    const wrapper = mount(TrafficLight)
     const tl = wrapper.find('.traffic-light')
-
-    // 非全屏：两类均无（圆点可见且可点）
-    expect(tl.classes()).not.toContain('opacity-0')
-    expect(tl.classes()).not.toContain('pointer-events-none')
-
-    // 全屏：opacity-0 与 pointer-events-none 必须成对（absolute z-10 圆点组在折叠+全屏下
-    // 悬浮于 PanelHeader chrome 之上，只隐藏视觉不关命中会静默触发最小化/最大化）
-    platformChromeMock.isFullscreen.value = true
-    await nextTick()
-    expect(tl.classes()).toContain('opacity-0')
-    expect(tl.classes()).toContain('pointer-events-none')
-
-    // 退出全屏：成对消失，恢复可交互
-    platformChromeMock.isFullscreen.value = false
-    await nextTick()
-    expect(tl.classes()).not.toContain('opacity-0')
-    expect(tl.classes()).not.toContain('pointer-events-none')
+    // 容器叠在侧栏顶部 drag 条带（U2）之上，no-drag 显式声明防点击被拖拽区吞掉
+    expect(tl.classes()).toContain('[-webkit-app-region:no-drag]')
   })
 })

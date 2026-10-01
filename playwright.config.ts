@@ -7,8 +7,11 @@ const REPO_ROOT = path.dirname(fileURLToPath(import.meta.url))
 /**
  * Playwright config —— taiji E2E（Electron 行为 + visual chromium 像素 diff）。
  *
- * 三 project 架构（W3 新增 visual-chromium；2026-09-15 新增 electron-smoke）：
- * - electron        : 行为 E2E 全量（_electron.launch + mock 构建产物），testIgnore visual/**
+ * 四 project 架构（W3 新增 visual-chromium；2026-09-15 新增 electron-smoke；electron 排除
+ * real 轨 spec 族 + 新增 electron-real 承接，见 REAL_TRACK_SPECS 注释）：
+ * - electron        : 行为 E2E mock 轨全量（_electron.launch + mock 构建产物），testIgnore visual/** + real 轨 spec 族（launch-app-real 与 mock bundle 互斥，按改动面单独跑）
+ * - electron-real   : real 轨承接（真实 app 启动轨），testMatch = real 轨 spec 族；只为显式文件
+ *                     命令（e2e-map REAL 族 run 形态）提供发现通道，不进任何门禁全量
  * - electron-smoke  : 行为 E2E 的 P0 smoke 子集（grep @p0-smoke 用例标签），CI e2e-behavior job
  *                     每 PR 固定跑（零 token mock 轨）。与 electron 是**子集关系非互斥分轨**
  *                     （smoke ⊂ 全量），故用 grep 表达而非 testMatch/testIgnore——裸跑
@@ -29,6 +32,25 @@ const REPO_ROOT = path.dirname(fileURLToPath(import.meta.url))
  * visual project 的 vite 由 e2e/visual/fixtures/visual-server.ts 的 worker-scoped fixture 管理
  *（复用 W1/W2 spawnVite 范式），不用全局 webServer——避免 visual 的 vite 依赖拖累 electron project。
  */
+/**
+ * real 轨 spec 族（真实 app 启动：launch-app-real / 真机轨）：
+ * - electron project 用它做 testIgnore —— mock bundle 与 real bundle 同 outDir 互斥
+ *   （launch-app-real.ts 的 assertRealRendererBundle 对 mock 标记 fail-fast），real spec
+ *   卷入 mock 轨必红；`--project=electron` 语义收敛为零 token mock 轨
+ * - electron-real project 用它做 testMatch —— real 轨 run 命令是显式文件形态（如
+ *   `npx playwright test e2e/workspace-real.spec.ts`，不带 --project），Playwright 的
+ *   project testIgnore 对显式文件参数同样生效，排除后必须由本 project 承接才能被发现
+ * - 清单 SSOT = docs/testing/e2e-map.json REAL/SKILLRELOAD/BTW/MODELS 各 rule 的 assets；
+ *   两类形态：文件名带 -real（*-real*.spec.ts）与沿用真实 app 轨但不带 -real 命名的
+ *   btw-turn-isolation / skill-reload-* / workflow-disconnect-recovery，逐一列明
+ */
+const REAL_TRACK_SPECS = [
+  '**/*-real*.spec.ts',
+  'e2e/btw-turn-isolation.spec.ts',
+  'e2e/skill-reload-*.spec.ts',
+  'e2e/workflow-disconnect-recovery.spec.ts',
+]
+
 export default defineConfig({
   testDir: './e2e',
   testMatch: '**/*.spec.ts',
@@ -56,9 +78,19 @@ export default defineConfig({
 
   projects: [
     {
-      // 行为 E2E：_electron.launch + mock 构建产物。排除 visual/ 目录（由 visual-chromium 接管）
+      // 行为 E2E mock 轨：_electron.launch + mock 构建产物（零 token）。排除 visual/（由
+      // visual-chromium 接管）与 real 轨 spec 族（REAL_TRACK_SPECS，见其注释）
       name: 'electron',
-      testIgnore: '**/visual/**/*.spec.ts',
+      testIgnore: ['**/visual/**/*.spec.ts', ...REAL_TRACK_SPECS],
+      use: {},
+    },
+    {
+      // real 轨承接 project：真实 app 启动（launch-app-real / 真机轨），按改动面显式文件跑
+      // （docs/testing/e2e-map.json REAL/SKILLRELOAD/BTW/MODELS 各 rule 的 run 命令）。
+      // 只为让显式文件命令在 electron project 排除 real 族后仍可发现测试；不得全量扫跑
+      // （CI/PR/merge 门禁不跑本轨，AGENTS.md e2e 执行准则）
+      name: 'electron-real',
+      testMatch: REAL_TRACK_SPECS,
       use: {},
     },
     {

@@ -190,6 +190,20 @@ export default {
     // in-row observation of the run after the command moved to the hover detail
     executingBashElapsed: '{elapsed} elapsed',
     // no hardcoded threshold — user-adjustable, a literal would drift)
+    // ── Speech reading (ai-voice-tts; key consumers = useTtsPlayer + TurnSummary button states) ──
+    // Toast wording mirrors design §5.4 failure table; four title keys = speak button state machine (design §5.1).
+    speakTitle: 'Read aloud',
+    speakCancel: 'Cancel',
+    speakStop: 'Stop',
+    speakStreaming: 'Reply is still generating',
+    speakEmpty: 'No readable text',
+    speakTooLong: 'Text too long ({count} chars), reading not supported yet',
+    speakNotConfigured: 'Speech service not configured',
+    speakAuthFailed: 'Speech service authentication failed',
+    speakQuotaExceeded: 'Speech synthesis quota exhausted',
+    speakVendorError: 'Speech synthesis failed: {detail}',
+    speakNetworkError: 'Speech synthesis request failed: network error',
+    speakFailed: 'Reading failed, please retry later',
   },
   git: {
     commit: 'Commit',

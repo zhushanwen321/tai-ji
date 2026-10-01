@@ -234,7 +234,7 @@ function handleAnchorClick(e: MouseEvent, anchor: Element): void {
   // 基准目录双通道（D4 传值矩阵）：props 覆盖优先（drawer 文件目录语义）；props 缺省
   // （对话流/命令文档）经 deps.sessionCwdOf 拿 session cwd；两者皆缺（未知 sid）→
   // preventDefault + 无动作（死链无害，优于窗口导航走）
-  const base = props.resourceBaseDir ?? deps.sessionCwdOf(props.sessionId ?? '')
+  const base = props.resourceBaseDir ?? deps.sessionCwdOf?.(props.sessionId ?? '')
   if (base) {
     deps.openDrawer('detail', { filePath: resolveHrefPath(base, href) })
   }

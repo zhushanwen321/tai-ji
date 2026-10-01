@@ -885,6 +885,7 @@ describe('M2c: RuntimeServer.setServices 透传 providerCredentialResolver（D3 
       hasProviderCredential: vi.fn(() => true),
       listCredentialBackedProviderIds: vi.fn(() => new Set<string>()),
       resolveProviderCredential,
+      resolveProviderBaseUrl: () => undefined,
     }
     const discoverModelsFromApi = vi.fn(async () => [{ id: 'm1' }])
     // 降级回查的诱饵：resolver 生效时不得被触碰

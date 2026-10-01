@@ -10,10 +10,18 @@
        以内联 data:font/woff2 形态加载，现保留此指令兼容未来自定义字体场景；
        connect-src ws://localhost:*：renderer 连 runtime 的 WebSocket（use-connection 拼
        ws://localhost:<port>，host 是 localhost 非 127.0.0.1；dev HMR 的同源 ws 已被
-       'self' 覆盖——Chromium 按 CSP3 scheme 家族规则 http↔ws 匹配同源）。
+       'self' 覆盖——Chromium 按 CSP3 scheme 家族规则 http↔ws 匹配同源）；
+       media-src 'self' local-file: data:：TTS 朗读音频播放（ai-voice-tts 设计 §7.7）。
+       放宽语义 = media 通道整体放宽（此前无 media-src 指令，media 元素由 default-src 'self'
+       兜底，本次从仅 'self' 放宽为三源）：local-file: 加载朗读缓存 WAV（主进程 local-file
+       协议白名单约束，白名单前缀外 403）+ data: 为既有 win32 完成提示音路径正名（此前
+       data: 音频实际被拦，实测靠 violation 才发现——本次显式放行）；blob: 不加（无使用方）。
+       安全面依据：用户内容无 audio/video 注入通道——markdown 渲染管线 DOMPurify 标签白名单
+       不含 audio/video；local-file: 受 main 侧路径白名单约束。实测（设计前提 8）：无本指令
+       时 local-file 音频 media-src violation ×3，补齐后直播 PLAYING。
        依据 dev 实测（W2 门）+ 打包态实测（S3）：round1 违规 ws://localhost:3310（dev）、
        data:font/woff2（打包），逐一最小增量补齐后双态零违规。 -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: local-file:; font-src 'self' data:; connect-src 'self' ws://localhost:*" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: local-file:; font-src 'self' data:; connect-src 'self' ws://localhost:*; media-src 'self' local-file: data:" />
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>TaiJi</title>

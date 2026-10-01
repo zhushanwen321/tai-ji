@@ -36,10 +36,16 @@ vi.mock('electron', () => {
   class MockBrowserWindow {
     show = showSpy
     showInactive = showInactiveSpy
+    maximize = vi.fn()
     on = vi.fn()
     once = (event: string, cb: () => void) => { captureOnce.cbs[event] = cb }
     isDestroyed = () => false
     destroy = vi.fn()
+    // 以下四员是 window-state 持久化挂点的结构依赖（非 mac 分支才触达；mac 跑测零调用，
+    // 备齐是为跨平台跑测保险——非 mac 机器上 createWindow 会走非 mac 分支）
+    getBounds = () => ({ width: 1200, height: 800 })
+    isMaximized = () => false
+    isFullScreen = () => false
     loadFile = vi.fn().mockResolvedValue(undefined)
     loadURL = vi.fn()
     setWindowOpenHandler = vi.fn()
@@ -48,6 +54,8 @@ vi.mock('electron', () => {
   return {
     app: { getAppPath: () => '/mock-app-root' },
     shell: { openExternal: vi.fn() },
+    // 非 mac 分支取主屏工作区算默认尺寸（mac 跑测不触达，同上为跨平台保险）
+    screen: { getPrimaryDisplay: () => ({ workArea: { width: 1920, height: 1040 } }) },
     BrowserWindow: MockBrowserWindow,
   }
 })
@@ -67,6 +75,35 @@ describe('window-factory: D-6 窗口级拓扑配置', () => {
 
   it('win/linux：frame:false（renderer TrafficLight 自绘圆点 mimic mac）', () => {
     expect(source).toContain(': { frame: false }')
+  })
+})
+
+describe('window-factory: 跨平台窗口外壳 u-window-state 源码断言（§6.4）', () => {
+  it('darwin 分支创建参数逐字不动：恒 1200×800（mac 首启/重启尺寸行为与现状一致）', () => {
+    expect(source).toContain('...(isMac ? { width: 1200, height: 800 } : initialSize)')
+    // darwin 分支零计算零 IO：isMac 短路在先，screen/持久化只进非 mac 分支
+    expect(source).toContain("if (!isMac) {")
+  })
+
+  it('darwin 分支无新增窗口键（§6.2：roundedCorners 默认即 true 显式化已否决；不采透明窗口方案丙）', () => {
+    expect(source).not.toContain('roundedCorners')
+    expect(source).not.toContain('transparent')
+    expect(source).not.toContain('fullscreenable')
+    expect(source).not.toContain('backgroundMaterial')
+  })
+
+  it('非 mac 分支含工作区比例取值调用（defaultSizeFor/pickInitialSize 纯函数在 window-state.ts）', () => {
+    expect(source).toContain('screen.getPrimaryDisplay().workArea')
+    expect(source).toContain('pickInitialSize(workArea, restoredWindowState)')
+  })
+
+  it('持久化挂点：仅主窗口门（isMainWindow）+ attach + show 后按恢复态 maximize', () => {
+    // 迁移窗口（create-window IPC）不读不挂——window-state.json 单写者结构性保证
+    expect(source).toContain('options?.isMainWindow === true')
+    expect(source).toContain('if (windowStatePersistence) {')
+    expect(source).toContain('windowStatePersistence.attach(win)')
+    expect(source).toContain('if (restoredWindowState?.isMaximized) {')
+    expect(source).toContain('win.maximize()')
   })
 })
 

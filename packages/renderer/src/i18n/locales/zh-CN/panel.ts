@@ -186,6 +186,20 @@ export default {
     // 详情后，行内保留计时观察维持执行期可见性
     executingBashElapsed: '已 {elapsed}',
     // 不写死阈值数字——阈值用户可调，写死会漂移）
+    // ── 语音朗读（ai-voice-tts，key 消费方 = useTtsPlayer + TurnSummary 按钮态）──
+    // toast 文案与设计 §5.4 失败表逐字对齐；title 四键 = 朗读按钮状态机（设计 §5.1）。
+    speakTitle: '朗读',
+    speakCancel: '取消',
+    speakStop: '停止',
+    speakStreaming: '回复生成中',
+    speakEmpty: '没有可朗读的文本',
+    speakTooLong: '文本过长（{count} 字符），暂不支持朗读',
+    speakNotConfigured: '语音服务未配置',
+    speakAuthFailed: '语音服务鉴权失败',
+    speakQuotaExceeded: '语音合成额度不足',
+    speakVendorError: '语音合成失败：{detail}',
+    speakNetworkError: '语音合成请求失败：网络异常',
+    speakFailed: '朗读失败，请稍后重试',
   },
   git: {
     commit: '提交',

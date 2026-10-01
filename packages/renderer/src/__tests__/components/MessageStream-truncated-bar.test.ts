@@ -78,45 +78,13 @@ vi.mock('@/composables/features/chat/useChat', () => ({
   resetChatModuleState: vi.fn(),
 }))
 
-// 壳 deps mock（MessageStream 装配 useChatViewDeps，本测不关心块渲染；键面与
-// __tests__/helpers/chat-stream-mount.ts 的 chatDepsMock 单例同形维护）
-const chatDepsMock = vi.hoisted(() => ({
-  isActive: vi.fn(() => false),
-  isHandingOff: vi.fn(() => false),
-  getChangeSetStatus: vi.fn(() => undefined),
-  isExpanded: vi.fn(() => false),
-  isTakeover: vi.fn(() => false),
-  isPendingSend: vi.fn(() => false),
-  sessionCwdOf: vi.fn(() => undefined),
-  toggleExpand: vi.fn(),
-  collapse: vi.fn(),
-  setTakeover: vi.fn(),
-  abortBash: vi.fn(),
-  editAndResend: vi.fn(),
-  onRevokeMessage: vi.fn(),
-  onForkAsk: vi.fn(),
-  onHandoffAsk: vi.fn(),
-  openDrawer: vi.fn(),
-  onFileClick: vi.fn(),
-  loadFileCandidates: vi.fn(() => Promise.resolve([])),
-  renderMarkdown: vi.fn(() => Promise.resolve([])),
-  renderMarkdownIncremental: vi.fn(() =>
-    Promise.resolve({
-      prefixSegments: [],
-      tailSegments: [],
-      stableBoundary: 0,
-      mode: 'incremental' as const,
-      cache: { boundary: 0, prefixText: '', prefixSegments: [], nextSegId: 0 },
-    }),
-  ),
-  // [审计候选 18] 谓词注入收单阈值字段；默认大阈值 = 静默路径不触发（等价原 () => false 默认）
-  streamingFenceSilenceMs: 60_000,
-  renderMermaid: vi.fn(() => Promise.resolve({ svg: '' })),
-  toMarkdown: vi.fn(() => ''),
-}))
-vi.mock('@/composables/panel/useChatViewDeps', () => ({
-  useChatViewDeps: () => chatDepsMock,
-}))
+// 壳 deps mock（MessageStream 装配 useChatViewDeps，本测不关心块渲染）：
+// 单例取 helpers/chat-stream-mount 的 chatDepsMock（工厂内动态 import——vi.mock 工厂
+// 惰性执行，静态导入绑定在此时已初始化）
+vi.mock('@/composables/panel/useChatViewDeps', async () => {
+  const { chatDepsMock } = await import('@/__tests__/helpers/chat-stream-mount')
+  return { useChatViewDeps: () => chatDepsMock }
+})
 vi.mock('@/composables/features/sidebar/useSidebar', () => ({
   useSidebar: () => ({ forkSession: vi.fn(), abortHandoff: vi.fn() }),
 }))

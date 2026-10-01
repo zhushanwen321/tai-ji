@@ -48,6 +48,7 @@ import * as quota from '../domains/quota'
 import * as session from '../domains/session'
 import * as settings from '../domains/settings'
 import * as terminal from '../domains/terminal'
+import * as tts from '../domains/tts'
 import * as usage from '../domains/usage'
 import * as workspace from '../domains/workspace'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
@@ -988,5 +989,44 @@ describe('btw 域 RPC 封装（D6 3 控制帧）', () => {
   it('remove：type/payload { vid }，ack 型（command 返回 void，完成即 resolve）', async () => {
     await btw.remove('btw:pi-1')
     expect(mockCommand).toHaveBeenCalledWith('btw.remove', { vid: 'btw:pi-1' }, RPC_BACKSTOP_TIMEOUT_MS)
+  })
+})
+
+// ── tts 域（ai-voice-tts 设计 §7.5，M0 四 RPC）────────────────────────────
+describe('tts 域 RPC 封装', () => {
+  it('getConfig / getCapabilities：空 payload + backstop 超时 + reply 原样透传', async () => {
+    const cfg = { config: { activeProvider: 'minimax', providers: {} } }
+    mockCommand.mockResolvedValueOnce(cfg)
+    await expect(tts.getConfig()).resolves.toEqual(cfg)
+    expect(mockCommand).toHaveBeenCalledWith('tts.getConfig', {}, RPC_BACKSTOP_TIMEOUT_MS)
+
+    const forms = { forms: { stepfun: { capabilities: {} }, minimax: { capabilities: {} }, mimo: { capabilities: {} } } }
+    mockCommand.mockResolvedValueOnce(forms)
+    await expect(tts.getCapabilities()).resolves.toEqual(forms)
+    expect(mockCommand).toHaveBeenCalledWith('tts.getCapabilities', {}, RPC_BACKSTOP_TIMEOUT_MS)
+  })
+
+  it('configure：payload 整对象透传 + 解包 ok/error', async () => {
+    const payload = {
+      providerId: 'minimax' as const,
+      config: { baseUrl: 'https://api.minimax.cn/v1', model: 'speech-2.6-hd', voice: 'male-qn-qingse', vendor: {} },
+      apiKeys: { minimax: 'sk-test' },
+    }
+    mockCommand.mockResolvedValueOnce({ ok: true, config: { activeProvider: 'minimax', providers: {} } })
+    await expect(tts.configure(payload)).resolves.toMatchObject({ ok: true })
+    expect(mockCommand).toHaveBeenCalledWith('tts.configure', payload, RPC_BACKSTOP_TIMEOUT_MS)
+
+    mockCommand.mockResolvedValueOnce({ ok: false, error: 'invalid_payload' })
+    await expect(tts.configure({ ...payload, apiKeys: undefined })).resolves.toEqual({ ok: false, error: 'invalid_payload' })
+  })
+
+  it('speak：payload 含可选 sessionId 透传；超时传 0（任务级不限时，§7.5 要点 2）', async () => {
+    mockCommand.mockResolvedValueOnce({ filePath: '/data/tts-cache/abc.wav' })
+    await expect(tts.speak({ sessionId: 's1', text: '你好' })).resolves.toEqual({ filePath: '/data/tts-cache/abc.wav' })
+    expect(mockCommand.mock.calls[0]).toEqual(['tts.speak', { sessionId: 's1', text: '你好' }, 0])
+
+    mockCommand.mockResolvedValueOnce({ filePath: '/x.wav' })
+    await tts.speak({ text: '设置页测试样句' })
+    expect(mockCommand.mock.calls[1]).toEqual(['tts.speak', { text: '设置页测试样句' }, 0])
   })
 })

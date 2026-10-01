@@ -168,20 +168,23 @@ mv /Applications/TaiJi.app.new /Applications/TaiJi.app   # 改用手动装新版
 
 补充：`.old` 或 `.new` 单独残留（`TaiJi.app` 在位且可启动）属良性残留，下次启动自动清理；从 DMG 只读卷运行时升级会被拒绝（update-result 写 `read-only volume`），请先将 `TaiJi.app` 拖入「应用程序」文件夹再触发升级。
 
-### 11. pnpm install 报 ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY（间歇，单跑却成功）
+### 11. pnpm store 布局翻转（pre-commit 护栏红 / install 报 ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY）
 
-**现象**：commit / e2e 脚本里 `pnpm install` 间歇失败（非 TTY abort）；同一命令单独重跑有时成功（假象：管道 `| tail` 后 `$?` 是 tail 的退出码）。
+**现象**：commit 被护栏 `.githooks/check_pnpm_store_layout.sh` 拦截（报「store 布局翻转」）；或 `pnpm install` 间歇非 TTY abort（`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`）。
 
-**根因**（2026-09-03 PR #196）：pnpm store 路径默认随 **HOME** 解析。引擎侧（覆写 HOME 的沙箱）pre-commit 内 verify-*.sh 自含 install 把引擎侧 store 写进 `node_modules/.modules.yaml` 的 `storeDir`；本地（正常 HOME）install 发现布局过期 → 判定删除重建 → 非 TTY abort。**双向翻转**：谁最后 install 谁的 storeDir 生效。
+**判定**：比对 `node_modules/.modules.yaml` 的 `storeDir` 与当前环境解析的 store 路径（`grep storeDir node_modules/.modules.yaml`）。两个已知劈叉源：
+
+1. **沙箱 HOME 覆写**（引擎 worker 侧 install 写入自身 store）——记录路径含引擎沙箱目录即此形态。
+2. **pnpm launcher 双版本**（全局 pnpm 是 launcher，bin/pnpm.mjs 实体版本可能高于项目 `packageManager` 钉定版本，两版 store 版本段不同，如 v11 vs v10）——裸 `pnpm store path` 与 install 写入劈叉。**判定基准必须与 install 同源**：护栏用 `corepack pnpm store path`（按项目 packageManager 解析；corepack 缺失回退裸 pnpm）。
+
+**恢复**（`.modules.yaml` up-to-date 时 install 跳过重写，须删清单强制）：
 
 ```bash
-grep storeDir node_modules/.modules.yaml
-# ~/.pnpm-store/v10 = 本地布局（健康）；~/.zcode/zsw/... = 被引擎侧翻转（先恢复再 commit）
-
-CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install   # 约 6-7s 重建本地布局，然后重试 commit
+rm node_modules/.modules.yaml
+CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install   # 约 7s 重建，然后重试 commit
 ```
 
-**防护**：护栏 `.githooks/check_pnpm_store_layout.sh`（pre-commit 第 0 段 + validate-runtime-bundle Gate 0），翻转即红并输出 [FIX] 指引。根治已落地（引擎共享宿主 HOME），护栏语义 = 防 HOME 覆写回退（正常恒绿，红 = 回退信号）。
+**防护**：护栏 `.githooks/check_pnpm_store_layout.sh`（pre-commit 第 0 段 + validate-runtime-bundle Gate 0），翻转即红并输出 [FIX] 指引。根治已落地（引擎共享宿主 HOME），护栏语义 = 防 HOME 覆写回退与版本段劈叉（正常恒绿，红 = 上述两形态之一复发）。
 
 ### 12. subagent 完成后不回收 / 回收慢：sessionFile 获取链与 workflow 域守护特征串（2026-09-10 重放移植重写；2026-09-11 H1 续聊链修订）
 
@@ -523,3 +526,16 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 - **症状**：续聊大上下文会话（实测 230K tokens）时 assistant 恒定 `stopReason=error`：`undefined is not an object (evaluating 'usage.totalTokens')`，秒级失败（上游 100ms 即拒）。
 - **机制**：provider 上游渠道对超窗口请求返回**不含 usage 字段**的错误响应，pi openai-completions 适配层解析时未对 usage 缺失做防御。凭据/通路无问题（同 provider 小上下文请求成功）。
 - **处置建议**：先排除渠道窗口限制（换小会话/先 compact 压缩再续聊）；根治需 pi 适配层对缺 usage 错误响应健壮降级——pi 上游问题按项目规则不改 pi 源码，待上游修复或由 taiji 侧降级链吸收。
+
+### 21. e2e smoke 全灭 `electron.launch: Process failed to launch`（宿主会话 ELECTRON_RUN_AS_NODE 泄漏，2026-10-01）
+
+- **症状**：`npx playwright test --project=electron-smoke` 全部用例秒级失败（40-60ms），报 `electron.launch: Process failed to launch!` + `bad option: --remote-debugging-port=0`（或 `--inspect=0`）+ 清理期 `kill EPERM`；同窗口内 `--project=visual-chromium`（纯 chromium，不经 electron.launch）正常。
+- **根因**：执行环境泄漏 `ELECTRON_RUN_AS_NODE=1`（taiji 桌面宿主 spawn 的 agent 会话可见）。该变量使 Electron 主二进制按纯 Node 运行——chromium/Electron 专属旗标全部不识别（`bad option`）即退出。**误诊陷阱**：此形态下 `Electron --version` 打印的是内嵌 Node 版本（42.x 内嵌 Node 24.15.0）而非 Electron 版本；且 Electron 42 mac 主二进制本就是 ~50KB 薄启动器（重量在 Frameworks）——「二进制只有 33KB/版本号不对 = dist 坏了」是泄漏导致的误诊，勿据此重装缓存（本次误删 @electron/get 缓存 zip 一份，无害但浪费一轮下载）。
+- **处置**：e2e/验收执行环境 `unset ELECTRON_RUN_AS_NODE` 再跑（Gate A 脚本与 A6 剧本已内建防御）；排查入口 `env | grep ELECTRON`。
+
+### 28. dev-merge 自动创建的 worktree 解析成 bare repo（config.worktree 缺失，2026-10-01）
+
+- **症状**：dev-merge.sh 自动创建目标 dev worktree 后，merge 预检报 `致命错误：该操作必须在一个工作区中运行`，且被误报成「有未提交改动（tracked）」；`git -C <dev> rev-parse --is-bare-repository` 返回 `true`。
+- **根因**：共享 config `core.bare=true`（bare repo + worktree 布局）下，worktree 依赖 per-worktree `config.worktree`（`core.bare=false` + `core.hooksPath`）覆盖。该补写是 git-cwt 包装层（`~/.shell/07-git-ws.sh`，[2026-09-11] 同族注释）的职责，`create-worktree.sh` 与 `setup-worktree.sh` 都不做——dev-merge.sh 绕过包装层直调创建脚本即漏。已修（auto-create 后补写 worktree 级 config；check_clean 区分 git 失败 exit≥2 与真脏）。
+- **连带发现**：`.bare/custom-hooks/setup-worktree.sh` 曾丢失可执行位（`[ -x ]` 为假 → 项目 hook 被静默跳过，依赖安装与 Electron/pi 缓存链接全缺）。已 `chmod +x` 根治；症状 = 创建输出无「执行项目 setup hook」行且新 worktree 无 node_modules。
+- **处置**：现症修复 = `git --git-dir=<.bare/worktrees/<name>> config --worktree core.bare false` + `core.hooksPath <同目录>/hooks`，再补跑 `bash .bare/custom-hooks/setup-worktree.sh <worktree路径>`。
