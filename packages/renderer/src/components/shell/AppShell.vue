@@ -7,11 +7,14 @@
   <!-- padding：p-1(4) 四周统一 4px（紧凑但有呼吸，上下左右对称）。
        注意：左右 4 使 aside 左缘 x=4，与红黄绿 x=8 有 4px 差（红黄绿位置由 main trafficLightPosition 控制，见 window-factory）；
        若要对齐需调 trafficLightPosition.x 8→4（main 改动，需重启 dev）。
+       圆角：rounded-[10px] 仅 mac（三平台圆角策略，跨平台窗口外壳设计 §6.2）——mac 系统圆角 + 应用内圆角共线保留；
+       win/linux 是不透明方形窗口，应用内圆角只会产生四角色差小方块，故非 mac 不渲染该类（类绑定，拓扑测试两态断言）。
+       窗口侧不加任何圆角配置键（roundedCorners 默认即 true 是 no-op，已否决）。
        折叠态 !gap-0：收起态 aside 归零，padding 保持 p-1（四周 4px，和展开一致）。
        !important 必须：gap-0 与 gap-3 同特异性，Tailwind 源码顺序 gap-0 先于 gap-3 生成，不加 ! 会被 gap-3 永久覆盖（死代码 bug）。 -->
   <div
-    class="app-shell relative flex h-screen w-screen gap-3 overflow-hidden rounded-[10px] bg-bg p-1"
-    :class="sidebar.collapsed ? '!gap-0' : ''"
+    class="app-shell relative flex h-screen w-screen gap-3 overflow-hidden bg-bg p-1"
+    :class="[isMac ? 'rounded-[10px]' : '', sidebar.collapsed ? '!gap-0' : '']"
     data-testid="app-shell"
   >
     <AsideRegion />
@@ -34,7 +37,7 @@
 import { defineAsyncComponent, defineComponent, h, provide, ref, watch } from 'vue'
 import { useNavigationStore } from '@/stores/navigation'
 import { useSessionStore } from '@/stores/session'
-import { usePlatformChrome } from '@/composables/effects/usePlatformChrome'
+import { detectPlatform, usePlatformChrome } from '@/composables/effects/usePlatformChrome'
 import { useSettingsShell } from '@/composables/shell/useSettingsShell'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import AppNavControls from './AppNavControls.vue'
@@ -82,6 +85,10 @@ const navigation = useNavigationStore()
 const session = useSessionStore()
 const sidebar = useSidebarStore()
 const { syncSessionToPanel } = useSidebar()
+
+// 圆角平台分支（设计 §6.2）：与 TrafficLight 同源判定（usePlatformChrome 的 detectPlatform），
+// 驱动根节点 rounded-[10px] 仅 mac 渲染；jsdom/真实模块回退 'mac'，mac 行为零变化。
+const isMac = detectPlatform() === 'mac'
 
 /** Settings modal 开关（⌘, / sidebar 用户区触发） */
 const settingsOpen = ref(false)
