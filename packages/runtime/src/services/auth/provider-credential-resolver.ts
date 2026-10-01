@@ -265,7 +265,8 @@ export class ProviderCredentialResolver implements IProviderCredentialResolver {
   /**
    * 两级数据源（语义见 port 接口注释）：① models.json provider 级网关值（strip 归一化后
    * 仅用户显式配网关时保留，读到即用户网关实际值）→ ② 内置 catalog provider 级 baseUrl
-   * （未配网关的内置 provider 此值即 pi 实际生效值）→ ③ 皆无 undefined。
+   * （未配网关的内置 provider 此值即 pi 实际生效值——pi 行为锚点：0.84.4
+   * dist/core/provider-composer.js:98 `config.baseUrl ?? model.baseUrl`）→ ③ 皆无 undefined。
    */
   resolveProviderBaseUrl(providerId: string): string | undefined {
     const gateway = this.deps.configStore.getProviderConfig(providerId)?.baseUrl

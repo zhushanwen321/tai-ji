@@ -57,7 +57,11 @@ export interface IProviderCredentialResolver {
 
   /**
    * 解析 provider 实际生效的 baseUrl（同步；两级数据源，对齐 pi 实际生效解析序
-   * provider-composer 的 `config.baseUrl ?? model.baseUrl` 覆盖式网关语义）：
+   * provider-composer 的 `config.baseUrl ?? model.baseUrl` 覆盖式网关语义——pi 行为锚点：
+   * @earendil-works/pi-coding-agent@0.84.4 dist/core/provider-composer.js:98
+   * `baseUrl: config.oauth === "radius" ? model.baseUrl : (config.baseUrl ?? model.baseUrl)`；
+   * radius-oauth 例外分支读 model.baseUrl 而非 config.baseUrl，联动 provider 均非 radius
+   * oauth，现行为不受影响）：
    * ① models.json providers[id].baseUrl（provider 级网关值）——该键经 pi-provider-store
    *    启动归一化（stripCatalogProviderLevelKeys）后仅在用户显式配网关（extras.gatewayBaseUrl
    *    标记）时保留，故此级读到的必是用户网关实际值；未配网关的内置 provider 此级无值。

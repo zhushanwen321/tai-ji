@@ -9,7 +9,9 @@
  *    （stripCatalogProviderLevelKeys）后仅在用户显式配网关（extras.gatewayBaseUrl 标记）时
  *    保留，此级读到的必是用户网关实际值，优先级最高；
  * ② 第一级无值时回退内置 catalog（generated/builtin-providers.json）该 provider 的
- *    provider 级 baseUrl——未配网关的内置 provider，此值即 pi 实际生效值；
+ *    provider 级 baseUrl——未配网关的内置 provider，此值即 pi 实际生效值（pi 行为锚点：
+ *    @earendil-works/pi-coding-agent@0.84.4 dist/core/provider-composer.js:98
+ *    `config.baseUrl ?? model.baseUrl` 覆盖式网关语义）；
  * ③ 两级皆无值 → undefined。
  */
 import { describe, it, expect } from 'vitest'
