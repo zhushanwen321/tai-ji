@@ -9,11 +9,8 @@
  *
  * 错误策略：sendBash（壳层注入）内部已 try/catch + toast 且不重抛（与 send/abort/compact
  * 对称）。[R2-A5 同族/b08] 失败信号契约：sendBash 返回 false = RPC 失败——本 composable
- * 消费该信号 console.warn 留痕（失败时输入已清、当前无恢复原语，见下）。
- * 已知限制（renderer 侧剩余缺口）：sendBash 失败时 !command 文本丢失（草稿已在 clearInput
- * 清空）。恢复需壳层（composer-shell 的 useComposerBash 注入点）传入 restoreInput 后在本
- * composable 的失败分支接线——bash 文本不经 segments（原始 shell 文本透传），restoreSegments
- * 不适用，须纯文本 restoreInput。
+ * 消费该信号把原始命令文本经 restoreInput 还回输入框（bash 文本不经 segments，原始 shell
+ * 文本透传，故纯文本恢复；restoreSegments 不适用）。
  *
  * [W3 迁移] 迁自 renderer composables/panel/useComposerBash.ts。改动：
  * - 去掉 renderer 跨域依赖 `import { useChat } from '@/composables/features/useChat'`
@@ -41,6 +38,9 @@ export interface ComposerBashOptions {
   /** 执行 bash 命令（useChat.sendBash 注入）。内部已 try/catch + toast 且不重抛。
    *  [R2-A5 同族] 返回 false = RPC 失败。 */
   sendBash: (sessionId: string, command: string, excludeFromContext: boolean) => Promise<boolean>
+  /** 失败恢复（壳层注入）：sendBash 显式 false（可证明未执行）时把原始命令文本还回输入框。
+   *  bash 文本不经 segments（原始 shell 文本透传），故纯文本 restoreInput（restoreSegments 不适用）。 */
+  restoreInput: (text: string) => void
 }
 
 export interface UseComposerBash {
@@ -94,11 +94,10 @@ export function useComposerBash(opts: ComposerBashOptions): UseComposerBash {
     } finally {
       opts.isSending.value = false
     }
-    // [R2-A5 同族] 显式 false = RPC 失败（错误已由 useChat.sendBash toast 消化）；严格比较
-    // 只认显式信号。输入恢复为 renderer 侧剩余缺口：restoreInput 未注入（见模块头注释），
-    // 先 console.warn 留痕——静默丢输入 ≠ 无声失败。
+    // [R2-A5 同族] 显式 false = RPC 失败（可证明未执行，错误已由 useChat.sendBash toast 消化）；
+    // 严格比较只认显式信号。原文还回输入框（含 !/!! 前缀），用户可直接重发。
     if (delivered === false) {
-      console.warn(`[useComposerBash] bash 执行失败，命令文本未恢复（restoreInput 待壳层注入）: ${extracted.command}`)
+      opts.restoreInput(rawText)
     }
     return true
   }

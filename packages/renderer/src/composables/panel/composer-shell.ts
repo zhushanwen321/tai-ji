@@ -370,6 +370,7 @@ export function useComposerShell(params: ComposerShellParams) {
     isSending,
     sessionId: () => sessionIdRef.value,
     sendBash,
+    restoreInput,
   })
   const isBashMode = composerBash.isBashMode
 

@@ -29,6 +29,7 @@ function makeOpts(overrides?: Partial<ComposerBashOptions>): ComposerBashOptions
     sendBash: vi.fn<(sessionId: string, command: string, excludeFromContext: boolean) => Promise<boolean>>(
       (_sessionId, _command, _excludeFromContext) => Promise.resolve(true),
     ),
+    restoreInput: vi.fn<(text: string) => void>(() => {}),
     ...overrides,
   }
 }
@@ -110,6 +111,26 @@ describe('useComposerBash.trySendBash', () => {
     expect(opts.sendBash).toHaveBeenCalledWith('s1', 'ls -la', false)
     // finally 复位 isSending
     expect(opts.isSending.value).toBe(false)
+  })
+
+  it('sendBash 显式 false（可证明未执行）→ 原文经 restoreInput 还回输入框（含前缀）', async () => {
+    const opts = makeOpts({
+      sendBash: vi.fn<(sessionId: string, command: string, excludeFromContext: boolean) => Promise<boolean>>(
+        () => Promise.resolve(false),
+      ),
+    })
+    const { trySendBash } = useComposerBash(opts)
+    const handled = await trySendBash('!ls -la')
+    expect(handled).toBe(true)
+    expect(opts.restoreInput).toHaveBeenCalledTimes(1)
+    expect(opts.restoreInput).toHaveBeenCalledWith('!ls -la')
+  })
+
+  it('sendBash 成功（true）→ 不调 restoreInput', async () => {
+    const opts = makeOpts()
+    const { trySendBash } = useComposerBash(opts)
+    await trySendBash('!ls -la')
+    expect(opts.restoreInput).not.toHaveBeenCalled()
   })
 
   it('command (sessionId=null) → 返回 false，sendBash 不调', async () => {
