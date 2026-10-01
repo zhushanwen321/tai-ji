@@ -322,7 +322,7 @@ export class TtsService {
 
     // ⑦ 原子写 <dataDir>/tts-cache/<hash>.wav（同目录临时文件 + rename）+ 双条件 FIFO 封顶
     this.ensureDirWithMode(cacheDir)
-    this.atomicWriteBinary(filePath, wav)
+    this.atomicWrite(filePath, wav)
     enforceTtsCacheFifoCap(cacheDir, {
       maxFiles: this.cacheMaxFiles,
       maxBytes: this.cacheMaxBytes,
@@ -611,7 +611,7 @@ export class TtsService {
   /** tts.json 原子写（同目录临时文件 + rename，auth.json 先例——撕裂/半写 JSON 会使朗读与设置页双双失效）。 */
   private writeTtsStore(store: TtsStoreShape): void {
     mkdirSync(this.dataDir, { recursive: true })
-    this.atomicWriteString(this.ttsConfigPath(), JSON.stringify(store, null, TTS_JSON_INDENT_SPACES))
+    this.atomicWrite(this.ttsConfigPath(), JSON.stringify(store, null, TTS_JSON_INDENT_SPACES))
   }
 
   /** 读 TTS 专属 secret：文件存在且内容 trim 非空才返回（缺文件/空内容 = 未配置 Key）。 */
@@ -654,8 +654,9 @@ export class TtsService {
     }
   }
 
-  /** 文本原子写（tts.json 用）。 */
-  private atomicWriteString(filePath: string, data: string): void {
+  /** 原子写（tts.json 与 WAV 缓存共用；string/Buffer 同型——writeFileSync 对 Buffer 输入忽略
+   *  encoding，语义同 fs-utils atomicWrite 的 tmp+rename）。 */
+  private atomicWrite(filePath: string, data: string | Buffer): void {
     const tmpPath = `${filePath}.tmp_${process.pid}-${this.nextTmpSeq()}`
     try {
       writeFileSync(tmpPath, data, 'utf-8')
@@ -665,22 +666,6 @@ export class TtsService {
         rmSync(tmpPath, { force: true })
       } catch {
         void 0 /* 清理失败不掩盖原错误（fs-utils 同款语义） */
-      }
-      throw err
-    }
-  }
-
-  /** 二进制原子写（WAV 缓存用；fs-utils atomicWrite 是 utf-8 字符串签名，Buffer 就地实现同语义）。 */
-  private atomicWriteBinary(filePath: string, data: Buffer): void {
-    const tmpPath = `${filePath}.tmp_${process.pid}-${this.nextTmpSeq()}`
-    try {
-      writeFileSync(tmpPath, data)
-      renameSync(tmpPath, filePath)
-    } catch (err) {
-      try {
-        rmSync(tmpPath, { force: true })
-      } catch {
-        void 0 /* 清理失败不掩盖原错误 */
       }
       throw err
     }

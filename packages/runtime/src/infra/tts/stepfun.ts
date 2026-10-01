@@ -13,7 +13,7 @@
  */
 import type { InternalSpeechRequest, TtsCapabilities, TtsFormModel, TtsProviderId } from '@taiji/shared'
 import type { TtsDriver, TtsSynthesisChunk } from '../../services/ports/tts.js'
-import { buildAuthHeaders, joinEndpoint, postTtsRequest, translateHttpFailure, snapToNearestSampleRate, binaryToPcm, DEFAULT_PCM_SAMPLE_RATE } from './base.js'
+import { buildAuthHeaders, joinEndpoint, postTtsRequest, translateHttpFailure, snapToNearestSampleRate, clampSpeed, binaryToPcm, DEFAULT_PCM_SAMPLE_RATE } from './base.js'
 import { AUTH_RESERVED_POLICY, mergeRequestBody, type PassthroughPolicy } from './passthrough-merge.js'
 
 /** 单段合成默认 instruction 截断上限（perModel 无该模型条目时的表缺省，§7.2 表 ≤200）。 */
@@ -27,11 +27,6 @@ const PROTOCOL_FIXED_KEYS = ['timestamp', 'return_url', 'stream_format', 'markdo
 const PASSTHROUGH_POLICY: PassthroughPolicy = {
   ...AUTH_RESERVED_POLICY,
   protocolKeys: PROTOCOL_FIXED_KEYS,
-}
-
-/** 语速钳制（读能力表 speedRange，不写 if——设计 D3）。 */
-function clampSpeed(speed: number, range: [number, number]): number {
-  return Math.min(range[1], Math.max(range[0], speed))
 }
 
 /** instructions → instruction，按当前模型的 per-model 上限截断（未知模型走表缺省 200）。 */
@@ -115,7 +110,7 @@ export const stepfunFormModel: TtsFormModel = {
     { id: 'step-tts-2', label: 'step-tts-2' },
     { id: 'step-tts-mini', label: 'step-tts-mini' },
   ],
-  voices: VOICES.map((v) => ({ id: v.id, label: v.label })),
+  voices: VOICES,
   volumeRange: { min: 0.1, max: 2, step: 0.1 },
   pitchRange: null,
   channels: [],

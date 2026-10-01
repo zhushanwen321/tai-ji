@@ -67,7 +67,7 @@ export const mimoFormModel: TtsFormModel = {
     { url: 'https://token-plan-sgp.xiaomimimo.com/v1', label: 'token plan 境外集群（sgp，TTS 可用性未实测）', isDefault: false },
   ],
   models: [{ id: 'mimo-v2.5-tts', label: 'mimo-v2.5-tts（内置音色）' }],
-  voices: VOICES.map((v) => ({ id: v.id, label: v.label })),
+  voices: VOICES,
   volumeRange: null,
   pitchRange: null,
   channels: [],

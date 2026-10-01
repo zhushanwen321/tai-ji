@@ -27,6 +27,7 @@ import {
   postTtsRequest,
   translateHttpFailure,
   snapToNearestSampleRate,
+  clampSpeed,
   decodeHexToPcm,
   isRecord,
   parseVendorJson,
@@ -49,10 +50,6 @@ const PASSTHROUGH_POLICY: PassthroughPolicy = AUTH_RESERVED_POLICY
 function translateBusinessError(statusCode: number, bodySnippet: string): TtsDriverFailure {
   const code: TtsErrorCode = statusCode === MINIMAX_AUTH_STATUS_CODE ? 'tts_auth_failed' : 'tts_vendor_error'
   return ttsFailure(code, `base_resp.status_code=${statusCode}: ${bodySnippet}`)
-}
-
-function clampSpeed(speed: number, range: [number, number]): number {
-  return Math.min(range[1], Math.max(range[0], speed))
 }
 
 export const minimaxCapabilities: TtsCapabilities = {
@@ -147,7 +144,7 @@ export const minimaxFormModel: TtsFormModel = {
     { id: 'speech-2.6-hd', label: 'speech-2.6-hd' },
     { id: 'speech-2.6-turbo', label: 'speech-2.6-turbo' },
   ],
-  voices: VOICES.map((v) => ({ id: v.id, label: v.label })),
+  voices: VOICES,
   volumeRange: { min: 0.5, max: 10, step: 0.5 },
   pitchRange: { min: -12, max: 12, step: 2 },
   channels: [

@@ -59,6 +59,11 @@ export function translateHttpFailure(status: number, bodySnippet: string): TtsDr
   return ttsFailure(code, `HTTP ${status}: ${bodySnippet}`)
 }
 
+/** 语速钳制到能力表 speedRange 值域（driver 共用；钳制判断读能力表不写 if——设计 D3）。 */
+export function clampSpeed(speed: number, range: [number, number]): number {
+  return Math.min(range[1], Math.max(range[0], speed))
+}
+
 /** 响应体压缩成单行 + 截断（日志/错误摘要行内展示友好，内容仍忠实）。 */
 export function toErrorSnippet(raw: string): string {
   return raw.replace(/\s+/g, ' ').trim().slice(0, TTS_ERROR_SNIPPET_MAX)
