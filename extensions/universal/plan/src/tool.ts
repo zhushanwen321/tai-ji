@@ -872,9 +872,18 @@ async function executeSubmitReview(
       // 落盘——被搁置的审批不复活（F1/F2/F3 构造性消除）；非破坏动作（不杀 turn、不丢状态），
       // 不需要确认 Popover（F16 守卫倒挂随之消解）。
       // 非归口分支的交错安全：select settle → 消费 continuation 先于下一消息 handler 执行
-      //（D3 实施注释级钉死），闭包 state 此处即现值；ok:false 时不落盘（兜底）
+      //（D3 实施注释级钉死），闭包 state 此处即现值。转移先于文案：ok:false = 审批已被
+      // 交错操作推进，此时仍报成功会让 agent 拿着与真实状态相反的反馈空跑一轮——
+      // 不落盘，按 out-of-order 返回（与 submit-review 同款出口）
       const movedDismiss = applyPlanEvent(state, "dismiss");
-      if (movedDismiss.ok) persistPlanState(pi, state);
+      if (!movedDismiss.ok) {
+        return reviewErrorResult(
+          "out-of-order",
+          `The plan is in state '${state.state}' and the review can no longer be set aside (it is not pending). ` +
+            `Check the current plan state and continue from there. Do not implement any changes.`,
+        );
+      }
+      persistPlanState(pi, state);
       return {
         content: [{
           type: "text" as const,
@@ -889,6 +898,17 @@ async function executeSubmitReview(
       // deliverAs:'steer' 排队至下一次 LLM 调用（pi 实装锚点：dist/core/agent-session.js
       // :859-868（0.84.4）——isStreaming 分支 steer 走 :868 _queueSteer；sendMessage 缺省
       // deliverAs 同为 steer，显式传保持排队语义自明）；非 streaming 由 triggerTurn:true 开轮
+      // 状态写走 transition()（D1 'revise' 边：reviewing → revising）且先于 steer 注入：
+      // ok:false = 审批已被交错操作推进，此时注入评论并报成功会让 agent 空跑一轮——
+      // 评论不进队、不落盘，按 out-of-order 返回（与 submit-review 同款出口）；交错安全同 dismiss 分支注释
+      const movedRevise = applyPlanEvent(state, "revise");
+      if (!movedRevise.ok) {
+        return reviewErrorResult(
+          "out-of-order",
+          `The plan is in state '${state.state}' and revision comments cannot be injected (no review is pending). ` +
+            `Check the current plan state and continue from there. Do not implement any changes.`,
+        );
+      }
       pi.sendMessage(
         {
           customType: PLAN_CONTEXT_CUSTOM_TYPE,
@@ -897,9 +917,7 @@ async function executeSubmitReview(
         },
         { deliverAs: "steer", triggerTurn: true },
       );
-      // 状态写走 transition()（D1 'revise' 边：reviewing → revising）；交错安全同 dismiss 分支注释
-      const movedRevise = applyPlanEvent(state, "revise");
-      if (movedRevise.ok) persistPlanState(pi, state);
+      persistPlanState(pi, state);
       return {
         content: [{
           type: "text" as const,

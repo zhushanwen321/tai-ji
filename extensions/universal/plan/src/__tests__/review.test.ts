@@ -497,6 +497,47 @@ describe("decision 消费（taiji 形态）", () => {
     );
   });
 
+  it("交错窗：dismiss 时审批已被推进（state 非 reviewing）→ out-of-order + 不落盘不报成功", async () => {
+    const { exec, ctx, pi, sessions } = setupTaiji();
+    (ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      // 交错窗模拟：select settle 后、回执消费前，state 已被其他操作从 reviewing 推走
+      (sessions.get("test-session")! as { state: string }).state = "planning";
+      return Promise.resolve(JSON.stringify({ decision: "dismiss" }));
+    });
+
+    const res = await exec({ action: "submit-review", selfReview: SELF_REVIEW });
+
+    expect(res.details).toEqual({ action: "review-error", reason: "out-of-order" });
+    expect(res.content[0].text).toContain("no longer be set aside");
+    expect(res.content[0].text).toContain("Do not implement");
+    // 零副作用：无 dismiss 边写入（submit 边的 reviewing 落盘不算）、不杀 turn
+    expect(pi.appendEntry).not.toHaveBeenCalledWith(
+      "plan-state",
+      expect.objectContaining({ state: "planning", isActive: true }),
+    );
+    expect(pi.setActiveTools).not.toHaveBeenCalled();
+  });
+
+  it("交错窗：revise 时审批已被推进 → out-of-order + 评论不注入（副作用收敛到转移成功之后）", async () => {
+    const { exec, ctx, pi, sessions } = setupTaiji();
+    const comments = [{ quote: "第二节", comment: "补失败分支" }];
+    (ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      (sessions.get("test-session")! as { state: string }).state = "planning";
+      return Promise.resolve(JSON.stringify({ decision: "revise", comments }));
+    });
+
+    const res = await exec({ action: "submit-review", selfReview: SELF_REVIEW });
+
+    expect(res.details).toEqual({ action: "review-error", reason: "out-of-order" });
+    expect(res.content[0].text).toContain("revision comments cannot be injected");
+    // 评论不进队、无 revise 边落盘——否则 agent 拿着成功文案空跑一轮
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+    expect(pi.appendEntry).not.toHaveBeenCalledWith(
+      "plan-state",
+      expect.objectContaining({ state: "revising", isActive: true }),
+    );
+  });
+
   it("E5: unparseable select response → warn + re-hang prompt, nothing injected into the conversation", async () => {
     const { exec, ctx, pi } = setupTaiji();
     (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValueOnce("this is not json");
