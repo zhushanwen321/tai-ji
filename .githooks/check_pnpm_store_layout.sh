@@ -26,6 +26,16 @@ MODULES_YAML="$PROJECT_ROOT/node_modules/.modules.yaml"
 command -v pnpm >/dev/null 2>&1 || exit 0
 
 EXPECTED="$(cd "$PROJECT_ROOT" && pnpm store path 2>/dev/null)" || exit 0
+
+# [HISTORICAL 2026-10-01] node-linker=hoisted（ADR-0032，Electron 需扁平 node_modules）下
+# pnpm 10.27 的 `pnpm store path` 报告 symlink 布局的版本段（v11），而 hoisted install
+# 实际使用并写入 v10（实测 3 次恒 v10：2 次 CI=true + 1 次裸跑；v10 store 3.1G 为活跃库）。
+# 不分派则 hoisted 项目恒红且 [FIX] install 永不收敛（写回的仍是 v10）。
+# HOME 覆写检测能力不变：引擎翻转时 RECORDED 指向 ~/.zcode/... 仍 ≠ EXPECTED。
+if grep -q '^node-linker=hoisted' "$PROJECT_ROOT/.npmrc" 2>/dev/null && [ -n "$EXPECTED" ]; then
+    EXPECTED="$(echo "$EXPECTED" | sed -E 's|/v[0-9]+$|/v10|')"
+fi
+
 RECORDED="$(grep -m1 '^storeDir:' "$MODULES_YAML" | sed 's/^storeDir:[[:space:]]*//')"
 
 # 记录缺失属 install 语义问题，不是翻转问题，不在此判
