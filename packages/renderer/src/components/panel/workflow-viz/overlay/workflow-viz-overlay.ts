@@ -61,7 +61,17 @@ function findRun(sessionId: string, nameOrRunId: string, slug?: string): Workflo
   const records = useWorkflowStore().getRecordsBySession(sessionId)
   const byRunId = records.find((w) => w.runId === nameOrRunId)
   if (byRunId) return byRunId
-  const byName = records.filter((w) => w.scriptName === nameOrRunId && (slug === undefined || slug === '' || w.slug === slug))
+  // 名字形态归一（L4 走查发现）：主 agent 调 workflow 工具常传脚本路径（/abs/path/x.js），
+  // record.scriptName 存 basename（x）——严格等值恒 miss。两侧 basename 化 + 去扩展名后比较，
+  // 路径/带扩展名/bare 三形态互通；slug 判据不变。
+  const normalize = (n: string): string => {
+    const base = n.replace(/\\/gu, '/').split('/').pop() ?? n
+    return base.replace(/\.(js|mjs|cjs|ts)$/u, '')
+  }
+  const want = normalize(nameOrRunId)
+  const byName = records.filter(
+    (w) => normalize(w.scriptName) === want && (slug === undefined || slug === '' || w.slug === slug),
+  )
   return byName.length > 0 ? byName[byName.length - 1] : undefined
 }
 

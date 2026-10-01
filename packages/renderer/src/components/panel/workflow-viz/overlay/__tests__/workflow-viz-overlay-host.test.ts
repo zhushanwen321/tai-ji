@@ -170,6 +170,21 @@ describe('opener 反查（D1 调用面：托盘 runId 直开 + block (name, slug
     expect(overlayCurrent.value).toEqual({ sessionId: SID, runId: 'wf-2' })
   })
 
+  it('block 路径：name 为路径/带扩展名形态时 basename 归一命中（L4 真机缺陷回归）', async () => {
+    await seedRecords([makeRun('wf-1', 's1'), makeRun('wf-2', 's2')])
+
+    // 主 agent 常传绝对路径（/abs/path/flow-a.js）与 record.basename（flow-a）互通
+    openWorkflow('/Users/agent/workflows/flow-a.js', { slug: 's1', sessionId: SID })
+    await flushPromises()
+    expect(overlayCurrent.value).toEqual({ sessionId: SID, runId: 'wf-1' })
+
+    overlayOpen.value = false
+    overlayCurrent.value = null
+    openWorkflow('flow-a.mjs', { slug: 's2', sessionId: SID })
+    await flushPromises()
+    expect(overlayCurrent.value?.runId).toBe('wf-2')
+  })
+
   it('slug 缺失回落「name → 最新 run」（记录末条，与 WorkflowTab 兼收解析同口径）', async () => {
     await seedRecords([makeRun('wf-1', 's1'), makeRun('wf-2', 's2'), makeRun('wf-3', 's3')])
 
