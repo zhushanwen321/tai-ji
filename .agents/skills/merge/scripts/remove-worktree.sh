@@ -26,7 +26,7 @@ done
 
 DIR_NAME="${BRANCH_NAME//\//-}"
 
-WORKSPACE_ROOT=$(find_workspace_root "$(pwd)") || {
+WORKSPACE_ROOT=$(find_workspace_root "$(pwd -P)") || {
     echo "Error: 未找到 workspace。当前目录及其父目录中没有 .bare/。"
     exit 1
 }
@@ -39,6 +39,29 @@ WT_PATH="$WORKSPACE_ROOT/$DIR_NAME"
 
 # 检查 worktree 是否存在
 if [[ ! -d "$WT_PATH" ]]; then
+    # 半删态自动恢复：目录已消失但 git 登记残留（prunable）。
+    # 成因：上次删除在 rm 阶段部分成功后会话中断（如删除了会话 cwd 导致 bash 失效），
+    # 登记与分支来不及清。目录已消失 = 最难的目录删除步骤已完成，剩余 prune 与删分支
+    # 均幂等低风险；删分支前置 is-ancestor 闸，未合入只清登记、分支保留待人工裁决。
+    if git -C .bare worktree list --porcelain 2>/dev/null | grep -Fxq "worktree $WT_PATH"; then
+        echo "检测到半删态: 目录 '$DIR_NAME' 已消失但 git 登记残留，自动恢复（prune + 分支清理）..."
+        git -C .bare fetch github --prune --quiet 2>/dev/null || true
+        _mb=$(git -C .bare remote show github 2>/dev/null | grep 'HEAD branch' | awk '{print $NF}') || true
+        _mb="${_mb:-main}"
+        git -C .bare worktree prune --verbose --expire now
+        if git -C .bare rev-parse --verify --quiet "refs/heads/$BRANCH_NAME" >/dev/null 2>&1; then
+            if git -C .bare merge-base --is-ancestor "$BRANCH_NAME" "github/$_mb" 2>/dev/null; then
+                git -C .bare branch -D "$BRANCH_NAME"
+                echo "✓ 半删态恢复完成: 登记已 prune，分支 '$BRANCH_NAME'（已合并）已删除"
+            else
+                echo "⚠ 分支 '$BRANCH_NAME' 未合并到 github/${_mb}，仅清理登记、分支保留"
+                echo "  确认无需保留后手工执行: git -C .bare branch -D '$BRANCH_NAME'"
+            fi
+        else
+            echo "✓ 半删态恢复完成: 登记已 prune（本地分支不存在，无需删除）"
+        fi
+        exit 0
+    fi
     echo "Error: worktree 目录 '$DIR_NAME' 不存在。"
     echo ""
     echo "当前 worktree 列表:"
@@ -152,7 +175,7 @@ MAIN_BRANCH=$(git -C .bare remote show github 2>/dev/null | grep 'HEAD branch' |
 MAIN_BRANCH="${MAIN_BRANCH:-main}"
 # 现行 dev 集成线动态识别 = 版本号最大的 dev 分支（dev-0.11.x 出现时无需改本脚本）
 ACTIVE_DEV=$(git -C .bare for-each-ref --format='%(refname:short)' refs/remotes/github 2>/dev/null | grep -E 'github/dev-[0-9]+\.[0-9]+' | sort -V | tail -1) || ACTIVE_DEV=""
-HYGIENE_SKIP="^(github/main|github/HEAD|github$"  # github 裸引用 = HEAD symref 实体，fetch 副产物，非分支
+HYGIENE_SKIP="^(github/main|github/HEAD|github)$"  # github 裸引用 = HEAD symref 实体，fetch 副产物，非分支
 [[ -n "$ACTIVE_DEV" ]] && HYGIENE_SKIP="^(github/main|github/HEAD|github|${ACTIVE_DEV//./\\.})$"
 GH_BRANCHES=$(git -C .bare for-each-ref --format='%(refname:short)' refs/remotes/github 2>/dev/null | grep -vE "$HYGIENE_SKIP" | grep -v 'github/dependabot/') || GH_BRANCHES=""
 HYGIENE_DELETED=0

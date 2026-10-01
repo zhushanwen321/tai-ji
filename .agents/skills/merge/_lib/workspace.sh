@@ -69,10 +69,17 @@ remove_worktree() {
     # 该闸门是拿掉 git 内建检查的交换条件）。与 dev-merge skill 同结构（ca6091f7e）。
     echo "删除 worktree '$dir_name'（rm -rf + prune）..."
     if ! rm -rf "$worktree_path"; then
-        echo "Error: 目录删除失败：${worktree_path}（rm stderr 见上）。git 登记与分支均未动。"
-        echo "       排查根因（文件锁 / 权限 / 外部挂载）后重跑本脚本，或执行单命令："
-        echo "       rm -rf '$worktree_path' && git -C '$workspace_root/.bare' worktree prune"
-        return 1
+        # rm 报非零但可能已部分成功（目录实际已消失）。此时剩余登记/分支清理与正常路径
+        # 完全同构（prune 幂等 + 分支有 delete_branch 闸），降级继续而非报错——否则留下
+        # 「目录已消失、登记 prunable」的半删态需要从兄弟 worktree 手工收尾（v0.10.8 实测）。
+        if [[ ! -d "$worktree_path" ]]; then
+            echo "Warning: rm -rf 报错但目录已实际消失，降级为 git 侧收尾（核对上方 rm stderr）..."
+        else
+            echo "Error: 目录删除失败：${worktree_path}（rm stderr 见上）。git 登记与分支均未动。"
+            echo "       排查根因（文件锁 / 权限 / 外部挂载）后重跑本脚本，或执行单命令："
+            echo "       rm -rf '$worktree_path' && git -C '$workspace_root/.bare' worktree prune"
+            return 1
+        fi
     fi
     # prune 幂等：只清「目录已丢失」的登记，不碰活跃 worktree
     git -C "$workspace_root/.bare" worktree prune
