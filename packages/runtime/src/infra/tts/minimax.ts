@@ -14,7 +14,7 @@
  *
  * 音量（vol）/音调（pitch）/情感（emotion ×9）等无内部标准位：经 passthrough 私有通道（D2）。
  * 错误翻译（本家私有知识，§7.2 表）：HTTP 层 401→鉴权、402→额度；业务层 base_resp.status_code
- * 1004→tts_auth_failed、其余非零（1042 非法字符 / 2013 参数等）→ tts_vendor_error。
+ * 1004/2049→tts_auth_failed、其余非零（1042 非法字符 / 2013 参数等）→ tts_vendor_error。
  */
 import type { InternalSpeechRequest, TtsCapabilities, TtsErrorCode, TtsFormModel } from '@taiji/shared'
 import type { TtsDriver, TtsSynthesisChunk } from '../../services/ports/tts.js'
@@ -37,8 +37,8 @@ import { AUTH_RESERVED_POLICY, mergeRequestBody, type PassthroughPolicy } from '
 
 const SAMPLE_RATES: number[] = [8000, 16_000, 22_050, 24_000, 32_000, 44_100]
 
-/** 鉴权失败的业务码（base_resp.status_code；§7.2 表 1004）。 */
-const MINIMAX_AUTH_STATUS_CODE = 1004
+/** 鉴权失败的业务码（base_resp.status_code；§7.2 表 1004 鉴权失效 / 2049 invalid api key——两码实测均为 Key 无效形态）。 */
+const MINIMAX_AUTH_STATUS_CODES: ReadonlySet<number> = new Set([1004, 2049])
 
 /** 音频就绪业务位（data.status=2，§7.2「status:2」）；存在且非 2 视为未就绪。 */
 const MINIMAX_AUDIO_STATUS_FINISHED = 2
@@ -46,9 +46,9 @@ const MINIMAX_AUDIO_STATUS_FINISHED = 2
 /** 出厂 policy：仅鉴权保留键（本家无协议行为键，护栏⑤无本家补充）。 */
 const PASSTHROUGH_POLICY: PassthroughPolicy = AUTH_RESERVED_POLICY
 
-/** 业务错误翻译（本家私有知识：1004 鉴权，其余非零 → 厂商错误，摘要带原始码）。 */
+/** 业务错误翻译（本家私有知识：1004/2049 鉴权，其余非零 → 厂商错误，摘要带原始码）。 */
 function translateBusinessError(statusCode: number, bodySnippet: string): TtsDriverFailure {
-  const code: TtsErrorCode = statusCode === MINIMAX_AUTH_STATUS_CODE ? 'tts_auth_failed' : 'tts_vendor_error'
+  const code: TtsErrorCode = MINIMAX_AUTH_STATUS_CODES.has(statusCode) ? 'tts_auth_failed' : 'tts_vendor_error'
   return ttsFailure(code, `base_resp.status_code=${statusCode}: ${bodySnippet}`)
 }
 

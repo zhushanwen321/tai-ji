@@ -1,7 +1,7 @@
 <!--
   Settings · 语音菜单页（ai-voice-tts 设计 §5.2；M0）。
 
-  自上而下：通用配置（启用总开关）→ 服务商卡片单选（三家独立记忆）→ 选中服务商全量
+  自上而下：通用配置（启用总开关）→ 服务商下拉单选（三家独立记忆）→ 选中服务商全量
   配置（TtsProviderForm，表单投影 TtsFormModel 驱动）→ 操作行（保存 / 保存并测试 /
   额度说明）。数据源：打开时并行拉 tts.getConfig + tts.getCapabilities（§7.5）；capabilities
   首载失败时表单区整体不渲染（投影枚举缺失无从渲染半态）+ 重试入口；已成功加载过投影
@@ -49,47 +49,64 @@
       </div>
     </GroupCard>
 
-    <!-- 服务商卡片单选（三家独立记忆；协议形态标签与 Key 状态点为投影/配置数据组装） -->
-    <div class="grid grid-cols-3 gap-2" role="radiogroup" :aria-label="t('settings.tts.providerSection')">
-      <Button
-        v-for="pid in PROVIDER_IDS"
-        :key="pid"
-        variant="secondary"
-        size="dense"
-        role="radio"
-        class="h-auto flex-col items-start gap-1 px-3 py-2.5 text-left font-normal"
-        :class="pid === activeProvider ? '!border-accent !bg-surface' : ''"
-        :aria-checked="pid === activeProvider"
-        :data-testid="`tts-provider-card-${pid}`"
-        @click="selectProvider(pid)"
-      >
-        <span class="flex w-full items-center gap-1.5 text-[13px] font-medium text-neutral-fg">
+    <!-- 服务商下拉单选（单选选中态由 Select 触发器直接可见；Key 状态点与协议形态标签随选中家展示） -->
+    <GroupCard>
+      <template #head>
+        <div class="gc-head-text">
+          <h3 class="gc-title">{{ t('settings.tts.providerSection') }}</h3>
+        </div>
+      </template>
+      <div class="flex flex-wrap items-center gap-3 px-4 py-3">
+        <Select v-model="providerModel" :disabled="capsFailed">
+          <SelectTrigger
+            id="tts-provider-select"
+            data-testid="tts-provider-select"
+            class="h-8 w-[220px] text-[13px]"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem
+              v-for="pid in PROVIDER_IDS"
+              :key="pid"
+              :value="pid"
+              :data-testid="`tts-provider-option-${pid}`"
+            >
+              {{ t(`settings.tts.providerName.${pid}`) }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <span
+          data-testid="tts-provider-key-status"
+          class="flex items-center gap-1.5 text-[12px]"
+          :class="activeMeta.hasApiKey ? 'text-success' : 'text-neutral-dim'"
+        >
           <span
             class="size-[7px] shrink-0 rounded-full"
-            :class="providerMeta(pid).hasApiKey ? 'bg-success' : 'bg-neutral-dim opacity-40'"
+            :class="activeMeta.hasApiKey ? 'bg-success' : 'bg-neutral-dim opacity-40'"
             aria-hidden="true"
           />
-          {{ t(`settings.tts.providerName.${pid}`) }}
+          {{ activeMeta.hasApiKey ? t('settings.tts.keyConfigured') : t('settings.tts.keyNotConfigured') }}
         </span>
-        <span class="w-full font-mono text-[10px] font-normal text-neutral-dim">{{ protocolLabel(pid) }}</span>
-        <span class="text-[11px] font-normal" :class="providerMeta(pid).hasApiKey ? 'text-success' : 'text-neutral-dim'">
-          {{ providerMeta(pid).hasApiKey ? t('settings.tts.keyConfigured') : t('settings.tts.keyNotConfigured') }}
-        </span>
-      </Button>
-    </div>
+        <span class="font-mono text-[10px] text-neutral-dim">{{ protocolLabel(activeProvider) }}</span>
+      </div>
+    </GroupCard>
 
-    <!-- 选中服务商全量配置（表单投影驱动；capabilities 缺失时禁用） -->
+    <!-- 选中服务商全量配置（表单投影驱动；capabilities 缺失时禁用；Key 展示态由页面状态机驱动） -->
     <TtsProviderForm
       v-if="activeForm && activeState"
       v-model:state="activeState"
-      v-model:key-input="activeKeyInput"
+      v-model:key-display="activeKeyDisplay"
       :provider-id="activeProvider"
       :form="activeForm"
-      :has-api-key="providerMeta(activeProvider).hasApiKey"
-      :provider-key-available="providerMeta(activeProvider).providerKeyAvailable"
+      :has-api-key="activeMeta.hasApiKey"
+      :provider-key-available="activeMeta.providerKeyAvailable"
+      :key-op="keyOps[activeProvider]"
+      :key-masked="keyMaskedOf(activeProvider)"
       :disabled="capsFailed"
       @clear-key="markKeyOp('clear')"
       @bring-key="markKeyOp('bring')"
+      @key-blur="onKeyBlur(activeProvider)"
     />
 
     <!-- 操作行：额度说明（§5.2 第 5 点原文）+ 保存 / 保存并测试 -->
@@ -124,11 +141,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertTriangle } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { GroupCard } from '@taiji/ui/features/settings'
 import { tts } from '@/api'
@@ -156,6 +174,15 @@ const PROVIDER_IDS: readonly TtsProviderId[] = ['stepfun', 'minimax', 'mimo']
 
 type KeyOp = 'clear' | 'bring' | null
 
+/** 已存 Key 的脱敏展示串（输入框值，非真实 Key——真实 Key 明文永不下发 renderer）。 */
+const SAVED_KEY_MASK = '***'
+/** 「带入」填充展示串长度（纯视觉占位宽度，不携带真实 Key 长度语义）。 */
+const BRING_FILL_MASK_LENGTH = 12
+/** 「带入」填充展示串（同样非真实 Key；保存时提交 'from-provider' 由 runtime 解析）。 */
+const BRING_FILL_MASK = '*'.repeat(BRING_FILL_MASK_LENGTH)
+/** 逐字动画步进间隔（清除 + 填充两相共用；总时长 ≈ (3+12)×18ms ≈ 270ms）。 */
+const KEY_ANIM_STEP_MS = 18
+
 const loading = ref(false)
 const capsFailed = ref(false)
 const configs = ref<SanitizedTtsConfig | null>(null)
@@ -167,9 +194,14 @@ const formStates = reactive<Record<TtsProviderId, TtsProviderFormState | null>>(
   minimax: null,
   mimo: null,
 })
-// Key 输入/一次性动作是临时态（不落表单值；保存时组 apiKeys）
+// Key 展示态/输入/一次性动作是临时态（不落表单值；保存时组 apiKeys）：
+// - keyDisplay：输入框展示值（明文新输入 / '***' 脱敏 / 带入填充串 / 清空）
+// - keyInputs：用户真实键入串（'' = 未输入；仅 @input 写入，掩码剥离后）
+// - keyOps：armed 动作（保存时消费；清除/带入是纯页面填充，落盘都走保存）
 const keyInputs = reactive<Record<TtsProviderId, string>>({ stepfun: '', minimax: '', mimo: '' })
 const keyOps = reactive<Record<TtsProviderId, KeyOp>>({ stepfun: null, minimax: null, mimo: null })
+const keyDisplay = reactive<Record<TtsProviderId, string>>({ stepfun: '', minimax: '', mimo: '' })
+const keyAnimToken = reactive<Record<TtsProviderId, number>>({ stepfun: 0, minimax: 0, mimo: 0 })
 const saving = ref(false)
 
 const { enabled: ttsEnabledRef, setEnabled } = useTtsSpeechEnabled()
@@ -179,9 +211,22 @@ const testState = computed(() => player.speakStateOf(SETTINGS_TTS_TEST_MESSAGE_I
 
 const activeForm = computed(() => forms.value?.[activeProvider.value] ?? null)
 const activeState = computed(() => formStates[activeProvider.value])
-const activeKeyInput = computed({
-  get: () => keyInputs[activeProvider.value],
-  set: (v: string) => { keyInputs[activeProvider.value] = v },
+const activeMeta = computed(() => providerMeta(activeProvider.value))
+const activeKeyDisplay = computed({
+  get: () => keyDisplay[activeProvider.value],
+  set: (v: string) => {
+    onKeyTyped(activeProvider.value, v)
+  },
+})
+
+/** Select 桥（reka 回填 AcceptableValue；运行时判型收窄回 TtsProviderId）。 */
+const providerModel = computed<TtsProviderId>({
+  get: () => activeProvider.value,
+  set: (v) => {
+    if (typeof v === 'string' && (PROVIDER_IDS as readonly string[]).includes(v)) {
+      activeProvider.value = v as TtsProviderId
+    }
+  },
 })
 
 function providerMeta(pid: TtsProviderId): { hasApiKey: boolean; providerKeyAvailable: boolean } {
@@ -196,23 +241,104 @@ function protocolLabel(pid: TtsProviderId): string {
   return `POST ${form.capabilities.endpointPath} · ${form.capabilities.authHeader}`
 }
 
-function selectProvider(pid: TtsProviderId): void {
-  activeProvider.value = pid
+/**
+ * 带入填充动画：逐字清空当前展示 → 逐字填满填充串（仅已存 Key 时有清空相）。
+ * token 失配即中止（再次点击/键入/清除/保存/卸载都会使旧动画失效）。
+ */
+function animateBringFill(pid: TtsProviderId): void {
+  const token = ++keyAnimToken[pid]
+  void (async () => {
+    const current = keyDisplay[pid]
+    for (let i = current.length; i > 0; i--) {
+      if (keyAnimToken[pid] !== token) return
+      keyDisplay[pid] = current.slice(0, i - 1)
+      await new Promise((r) => setTimeout(r, KEY_ANIM_STEP_MS))
+    }
+    for (let i = 1; i <= BRING_FILL_MASK.length; i++) {
+      if (keyAnimToken[pid] !== token) return
+      keyDisplay[pid] = BRING_FILL_MASK.slice(0, i)
+      await new Promise((r) => setTimeout(r, KEY_ANIM_STEP_MS))
+    }
+  })()
 }
 
+function cancelBringAnim(pid: TtsProviderId): void {
+  keyAnimToken[pid]++
+}
+
+onUnmounted(() => {
+  for (const pid of PROVIDER_IDS) cancelBringAnim(pid)
+})
+
+/** 展示值是否为掩码态（非用户键入内容；聚焦时全选便于整体替换）。 */
+function keyMaskedOf(pid: TtsProviderId): boolean {
+  if (keyInputs[pid] !== '') return false
+  const op = keyOps[pid]
+  if (op === 'bring') return true
+  if (op === 'clear') return false
+  return providerMeta(pid).hasApiKey
+}
+
+/**
+ * 用户键入（@input 唯一写入口）：展示态为掩码时剥离掩码残留只留新输入；
+ * 键入 = 更新的意图，显式解除已 armed 的清除/带入并中止动画。
+ * （v0.10.8 实测缺陷：残留输入串在 save() 里静默压过 armed 动作——从源头消除双意图并存）
+ */
+function onKeyTyped(pid: TtsProviderId, raw: string): void {
+  cancelBringAnim(pid)
+  let value = raw
+  if (keyInputs[pid] === '') {
+    const mask = keyOps[pid] === 'bring' ? BRING_FILL_MASK : SAVED_KEY_MASK
+    value = value.split(mask).join('')
+  }
+  keyInputs[pid] = value
+  keyOps[pid] = null
+  keyDisplay[pid] = value
+}
+
+/** 失焦回填：键入被手工清空且无 armed 动作时，恢复已存 Key 脱敏展示。 */
+function onKeyBlur(pid: TtsProviderId): void {
+  if (keyInputs[pid] === '' && keyOps[pid] === null && providerMeta(pid).hasApiKey) {
+    keyDisplay[pid] = SAVED_KEY_MASK
+  }
+}
+
+/**
+ * armed 动作标记（保存时消费；清除/带入只是页面填充，落盘统一走保存）：
+ - 清除：展示清空（已存 Key 时 *** 消失；无 Key 本就不渲染按钮）；
+ - 带入：已存 Key → 逐字清空+填满动画；无 Key → 直接填满；
+ - 再次点击同动作 = 取消，恢复脱敏展示。
+ */
 function markKeyOp(op: Exclude<KeyOp, null>): void {
-  keyOps[activeProvider.value] = keyOps[activeProvider.value] === op ? null : op
+  const pid = activeProvider.value
+  const next = keyOps[pid] === op ? null : op
+  keyOps[pid] = next
+  keyInputs[pid] = ''
+  cancelBringAnim(pid)
+  if (next === 'clear') {
+    keyDisplay[pid] = ''
+  } else if (next === 'bring') {
+    if (providerMeta(pid).hasApiKey) animateBringFill(pid)
+    else keyDisplay[pid] = BRING_FILL_MASK
+  } else {
+    keyDisplay[pid] = providerMeta(pid).hasApiKey ? SAVED_KEY_MASK : ''
+  }
 }
 
 function onToggleEnabled(v: string | number | boolean | undefined): void {
   setEnabled(v === true)
 }
 
-/** 落盘配置 → 表单编辑态（只刷指定家：其他家未保存编辑态保留，独立记忆语义）。 */
+/** 落盘配置 → 表单编辑态 + Key 展示态（只刷指定家：其他家未保存编辑态保留，独立记忆语义）。 */
 function applyProviderConfig(pid: TtsProviderId, config: SanitizedTtsConfig): void {
   const form = forms.value?.[pid]
   if (!form) return
   formStates[pid] = formStateFromConfig(pid, form, config.providers[pid].config)
+  // Key 展示态以保存结果为准（保存成功/首载回读统一走此入口）
+  cancelBringAnim(pid)
+  keyInputs[pid] = ''
+  keyOps[pid] = null
+  keyDisplay[pid] = config.providers[pid].hasApiKey === true ? SAVED_KEY_MASK : ''
 }
 
 /** 并行拉取配置投影与表单投影（独立数据源 allSettled，互不阻塞）。 */
@@ -263,8 +389,6 @@ async function save(): Promise<SanitizedTtsConfig | null> {
     }
     configs.value = res.config
     applyProviderConfig(pid, res.config)
-    keyInputs[pid] = ''
-    keyOps[pid] = null
     toastInfo(t('settings.tts.savedToast'))
     return res.config
   } catch (e) {

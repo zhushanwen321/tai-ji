@@ -7,7 +7,9 @@
   - 开关/结构类不在清单 / 为 0 = 不渲染（toggles 清单 / maxTimbreVoices / voiceModify / 词典）
   全部内置选项不手填（§5.2 开篇）：数值档位由投影 range 生成下拉，无自由数字输入。
 
-  Key 输入是临时态不落表单：keyInput v-model 归父级（保存时组 apiKeys），清除/带入只发事件。
+  Key 展示态归父级状态机（keyDisplay v-model）：无 Key 键入明文、已存 Key 展示 ***
+  脱敏串、带入填充串/清除清空都只是页面填充——落盘统一走保存（armed 动作消费）。
+  清除/带入只发事件；聚焦遇掩码态全选便于整体替换，失焦空值回填脱敏展示。
 -->
 <template>
   <div class="flex flex-col gap-3" :data-testid="`tts-form-${providerId}`">
@@ -26,13 +28,15 @@
           <div class="flex items-center gap-2">
             <Input
               :id="`tts-apikey-${providerId}`"
-              v-model="keyInput"
+              v-model="keyDisplay"
               :data-testid="`tts-apikey-input-${providerId}`"
-              type="password"
+              type="text"
               autocomplete="off"
               :placeholder="hasApiKey ? t('settings.tts.apiKeySavedPlaceholder') : t('settings.tts.apiKeyPlaceholder')"
               :disabled="disabled"
               class="h-8 flex-1 font-mono text-[12px]"
+              @focus="onKeyFocus"
+              @blur="emit('keyBlur')"
             />
             <Button
               v-if="hasApiKey"
@@ -41,12 +45,22 @@
               :data-testid="`tts-apikey-clear-${providerId}`"
               :title="t('settings.tts.clearKeyTitle')"
               :aria-label="t('settings.tts.clearKey')"
+              :aria-pressed="keyOp === 'clear'"
+              :class="keyOp === 'clear' ? '!border-accent !bg-surface' : ''"
               :disabled="disabled"
               @click="emit('clearKey')"
             >
               {{ t('settings.tts.clearKey') }}
             </Button>
           </div>
+          <!-- armed 待生效提示（点击动作按钮后可见，保存后消失） -->
+          <p
+            v-if="keyOp"
+            :data-testid="`tts-keyop-pending-${providerId}`"
+            class="text-[11px] text-neutral-mid"
+          >
+            {{ keyOp === 'clear' ? t('settings.tts.keyOpPendingClear') : t('settings.tts.keyOpPendingBring') }}
+          </p>
           <!-- Key 联动提示（D4；providerKeyAvailable 由 runtime 判定，StepFun 恒 false 不渲染） -->
           <div
             v-if="providerKeyAvailable"
@@ -59,6 +73,8 @@
               variant="secondary"
               size="dense"
               :data-testid="`tts-key-bring-${providerId}`"
+              :aria-pressed="keyOp === 'bring'"
+              :class="keyOp === 'bring' ? '!border-accent !bg-surface' : ''"
               :disabled="disabled"
               @click="emit('bringKey')"
             >
@@ -368,13 +384,22 @@ const props = defineProps<{
   form: TtsFormModel
   hasApiKey: boolean
   providerKeyAvailable: boolean
+  /** 已 armed 的 Key 动作（清除/带入；保存时消费，armed 态驱动按钮按下样式 + 待生效提示）。 */
+  keyOp?: 'clear' | 'bring' | null
+  /** 展示值是否为掩码态（*** / 带入填充串；驱动聚焦全选）。 */
+  keyMasked?: boolean
   disabled?: boolean
 }>()
 
-const emit = defineEmits<{ clearKey: []; bringKey: [] }>()
+const emit = defineEmits<{ clearKey: []; bringKey: []; keyBlur: [] }>()
 
 const state = defineModel<TtsProviderFormState>('state', { required: true })
-const keyInput = defineModel<string>('keyInput', { required: true })
+const keyDisplay = defineModel<string>('keyDisplay', { required: true })
+
+/** 掩码态聚焦全选：键入即整体替换，避免新字符追加在掩码串尾部。 */
+function onKeyFocus(e: FocusEvent): void {
+  if (props.keyMasked === true) (e.target as HTMLInputElement).select()
+}
 
 /** 「不指定」null 档 Select 中介（NONE 哨兵 ⇄ null；SelectItem value 不接受空串）。 */
 function nullableModel(get: () => string | null, set: (v: string | null) => void) {

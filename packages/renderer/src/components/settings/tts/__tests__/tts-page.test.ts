@@ -10,8 +10,10 @@
  * - MiMo：语速/音量/音调置灰（null 三分支）；情感/声道/语言增强/词典/效果器不渲染
  * - 三家输出格式/比特率控件均不渲染（D9 死控件禁令）
  * - capabilities 失败：表单区禁用 + 重试入口恢复（不渲染半态枚举）
- * - 保存提交：configure 整对象 + apiKeys（有输入才带 / 'from-provider' 仅在点了带入时）
+ * - 保存提交：configure 整对象 + apiKeys（有输入才带 / 'from-provider' 仅在点了带入时；
+ *   armed 动作与残留输入互斥——armed 清输入、输入解除 armed）
  * - 保存并测试：调 useTtsPlayer.speak（settings-tts-test 伪 id + 固定样句）
+ * - 服务商选择：下拉单选（v0.10.8 卡片三选改版），选中家名直接可见
  *
  * mock 策略：vi.mock('@/api') 注入 tts spy（数据 fixture 取 core mock 投影）；useTtsPlayer
  * 注入可控桩；@taiji/ui/features/settings 用轻量 GroupCard stub（保留具名 slot）。
@@ -127,8 +129,9 @@ const sel = (w: ReturnType<typeof mount>, testid: string) => w.find(`[data-testi
 describe('表单控件存在性（u1 mock 投影数据驱动，验收 2）', () => {
   it('MiniMax（默认选中家）：情感/效果器/词典/水印/LaTeX 渲染；指令与音色标签不渲染', async () => {
     const w = await mountPage()
-    // 投影 activeProvider = minimax
-    expect(sel(w, 'tts-provider-card-minimax').attributes('aria-checked')).toBe('true')
+    // 投影 activeProvider = minimax（下拉触发器显示选中家名）
+    expect(sel(w, 'tts-provider-select').text()).toContain('MiniMax')
+    expect(sel(w, 'tts-provider-key-status').exists()).toBe(true)
     // 情感枚举（emotions ×9）与语言增强渲染
     expect(sel(w, 'tts-emotion-select-minimax').exists()).toBe(true)
     expect(sel(w, 'tts-lang-select-minimax').exists()).toBe(true)
@@ -147,7 +150,7 @@ describe('表单控件存在性（u1 mock 投影数据驱动，验收 2）', () 
 
   it('StepFun：voice_label 置灰；情感/声道/效果器/水印不渲染；指令/词典/文本归一渲染', async () => {
     const w = await mountPage()
-    await sel(w, 'tts-provider-card-stepfun').trigger('click')
+    await pickSelect(w, 'tts-provider-select', 'StepFun')
     await flushPromises()
     // voice_label：perModel 表非空 → 控件渲染；voiceLabelSupported=false → disabled + 置灰提示
     const voiceTag = sel(w, 'tts-voicetag-select-stepfun')
@@ -172,7 +175,7 @@ describe('表单控件存在性（u1 mock 投影数据驱动，验收 2）', () 
 
   it('MiMo：语速/音量/音调置灰（null）；进阶整卡与情感/声道/语言增强不渲染', async () => {
     const w = await mountPage()
-    await sel(w, 'tts-provider-card-mimo').trigger('click')
+    await pickSelect(w, 'tts-provider-select', 'MiMo')
     await flushPromises()
     // 数值类 null = 置灰（渲染 disabled Select，非不渲染）
     for (const id of ['tts-speed-select-mimo', 'tts-volume-select-mimo', 'tts-pitch-select-mimo']) {
@@ -204,7 +207,7 @@ describe('表单控件存在性（u1 mock 投影数据驱动，验收 2）', () 
     forms.mimo.capabilities.perModel['mimo-v2.5-tts'] = { instructionMaxChars: null, voiceLabelSupported: true }
     ttsApiMock.getCapabilities.mockImplementation(() => Promise.resolve({ forms }))
     const w = await mountPage()
-    await sel(w, 'tts-provider-card-mimo').trigger('click')
+    await pickSelect(w, 'tts-provider-select', 'MiMo')
     await flushPromises()
     expect(sel(w, 'tts-instructions-input-mimo').attributes('disabled')).toBeDefined()
   })
@@ -218,8 +221,9 @@ describe('capabilities 拉取失败：表单禁用 + 重试（验收 4）', () =
     expect(sel(w, 'tts-caps-retry').exists()).toBe(true)
     // 半态不渲染：无表单投影时表单区整体缺席
     expect(sel(w, 'tts-emotion-select-minimax').exists()).toBe(false)
-    // 已保存配置值展示不受影响（§7.5）：服务商卡片 Key 状态点来自 getConfig 正常渲染
-    expect(sel(w, 'tts-provider-card-minimax').exists()).toBe(true)
+    // 已保存配置值展示不受影响（§7.5）：服务商下拉与 Key 状态来自 getConfig 正常渲染
+    expect(sel(w, 'tts-provider-select').exists()).toBe(true)
+    expect(sel(w, 'tts-provider-key-status').exists()).toBe(true)
     // 重试 → 恢复
     await sel(w, 'tts-caps-retry').trigger('click')
     await flushPromises()
@@ -375,7 +379,7 @@ describe('表单全控件操作回路（TtsProviderForm v-model 写路 + 发音�
 
   it('StepFun：指令输入与文本归一开关写进载荷（instructions + text_normalization=enhanced）', async () => {
     const w = await mountPage()
-    await sel(w, 'tts-provider-card-stepfun').trigger('click')
+    await pickSelect(w, 'tts-provider-select', 'StepFun')
     await flushPromises()
     await sel(w, 'tts-instructions-input-stepfun').setValue('轻声细语')
     await sel(w, 'tts-toggle-stepfun-text_normalization').trigger('click')
@@ -426,7 +430,7 @@ describe('加载失败路径（§7.5 配置/传输失败形态）', () => {
   })
 })
 
-describe('通用开关与服务商卡片', () => {
+describe('通用开关与服务商下拉', () => {
   it('总开关切换写入本地偏好（useTtsSpeechEnabled 共享状态）', async () => {
     const w = await mountPage()
     const switchNode = sel(w, 'tts-enabled-switch')
@@ -441,20 +445,98 @@ describe('通用开关与服务商卡片', () => {
   it('切服务商：通用开关保留，表单区切换到对应家（三家独立记忆）', async () => {
     const w = await mountPage()
     expect(sel(w, 'tts-emotion-select-minimax').exists()).toBe(true)
-    await sel(w, 'tts-provider-card-mimo').trigger('click')
+    await pickSelect(w, 'tts-provider-select', 'MiMo')
     await flushPromises()
     expect(sel(w, 'tts-emotion-select-minimax').exists()).toBe(false)
     const mimoInstructions = sel(w, 'tts-instructions-input-mimo')
     expect(mimoInstructions.exists()).toBe(true)
     expect(mimoInstructions.attributes('disabled')).toBeUndefined()
     // 切回 MiniMax：情感选择（未保存编辑态）保留（SelectValue 显示选中项 label）
-    await sel(w, 'tts-provider-card-minimax').trigger('click')
+    await pickSelect(w, 'tts-provider-select', 'MiniMax')
     await flushPromises()
     await pickSelect(w, 'tts-emotion-select-minimax', '悲伤')
-    await sel(w, 'tts-provider-card-mimo').trigger('click')
+    await pickSelect(w, 'tts-provider-select', 'MiMo')
     await flushPromises()
-    await sel(w, 'tts-provider-card-minimax').trigger('click')
+    await pickSelect(w, 'tts-provider-select', 'MiniMax')
     await flushPromises()
     expect(sel(w, 'tts-emotion-select-minimax').text()).toContain('悲伤')
+  })
+})
+
+describe('Key 动作 armed 语义（v0.10.8 实测缺陷回归：残留输入静默压过动作 + 零反馈）', () => {
+  /** minimax 家 hasApiKey + 联动可用的配置 fixture。 */
+  function armedConfig(): SanitizedTtsConfig {
+    const config = configWithKeyAvailable('minimax')
+    config.providers.minimax.hasApiKey = true
+    return config
+  }
+
+  it('带入：已存 Key → 逐字清空+填满动画（终态填充串）→ 保存提交 from-provider + armed 提示可见', async () => {
+    ttsApiMock.getConfig.mockImplementation(() => Promise.resolve({ config: armedConfig() }))
+    const w = await mountPage()
+    // 已存 Key 首载展示脱敏串；输入为明文 text 型
+    const input = () => sel(w, 'tts-apikey-input-minimax').element as HTMLInputElement
+    expect(input().value).toBe('***')
+    expect(input().getAttribute('type')).toBe('text')
+    vi.useFakeTimers()
+    await sel(w, 'tts-key-bring-minimax').trigger('click')
+    await vi.advanceTimersByTimeAsync(600)
+    vi.useRealTimers()
+    // 动画终态：填充串占位 + armed 提示可见
+    expect(input().value).toBe('*'.repeat(12))
+    expect(sel(w, 'tts-keyop-pending-minimax').text()).toContain('自动带入')
+    expect(await saveAndCaptureApiKeys(w)).toMatchObject({ minimax: 'from-provider' })
+  })
+
+  it('已存 Key：手工清空后失焦回填 *** 展示；键入为明文不脱敏', async () => {
+    ttsApiMock.getConfig.mockImplementation(() => Promise.resolve({ config: armedConfig() }))
+    const w = await mountPage()
+    const input = () => sel(w, 'tts-apikey-input-minimax').element as HTMLInputElement
+    await sel(w, 'tts-apikey-input-minimax').setValue('')
+    expect(input().value).toBe('')
+    await sel(w, 'tts-apikey-input-minimax').trigger('blur')
+    expect(input().value).toBe('***')
+    // 键入新值：明文展示（不脱敏），掩码剥离后只留新输入
+    await sel(w, 'tts-apikey-input-minimax').setValue('***abc')
+    expect(input().value).toBe('abc')
+    expect(await saveAndCaptureApiKeys(w)).toMatchObject({ minimax: 'abc' })
+  })
+
+  it('清除：残留输入被清空 → 展示同步清空 → 保存提交 null；按钮 armed 态 aria-pressed=true', async () => {
+    ttsApiMock.getConfig.mockImplementation(() => Promise.resolve({ config: armedConfig() }))
+    const w = await mountPage()
+    await sel(w, 'tts-apikey-input-minimax').setValue('sk-stale-key')
+    await sel(w, 'tts-apikey-clear-minimax').trigger('click')
+    expect((sel(w, 'tts-apikey-input-minimax').element as HTMLInputElement).value).toBe('')
+    expect(sel(w, 'tts-apikey-clear-minimax').attributes('aria-pressed')).toBe('true')
+    expect(sel(w, 'tts-keyop-pending-minimax').text()).toContain('清除')
+    expect(await saveAndCaptureApiKeys(w)).toMatchObject({ minimax: null })
+  })
+
+  it('armed 后输入新值 = 更新的意图：动作解除 + 动画中止，保存提交新输入串', async () => {
+    ttsApiMock.getConfig.mockImplementation(() => Promise.resolve({ config: armedConfig() }))
+    const w = await mountPage()
+    vi.useFakeTimers()
+    await sel(w, 'tts-key-bring-minimax').trigger('click')
+    await vi.advanceTimersByTimeAsync(600)
+    vi.useRealTimers()
+    expect(sel(w, 'tts-keyop-pending-minimax').exists()).toBe(true)
+    await sel(w, 'tts-apikey-input-minimax').setValue('sk-new-key')
+    // typing 解除 armed + 中止动画：提示消失，保存带新输入串而非 from-provider
+    expect(sel(w, 'tts-keyop-pending-minimax').exists()).toBe(false)
+    expect(await saveAndCaptureApiKeys(w)).toMatchObject({ minimax: 'sk-new-key' })
+  })
+
+  it('再次点击同动作 = 取消 armed：展示回 ***，保存不带 apiKeys', async () => {
+    ttsApiMock.getConfig.mockImplementation(() => Promise.resolve({ config: armedConfig() }))
+    const w = await mountPage()
+    vi.useFakeTimers()
+    await sel(w, 'tts-key-bring-minimax').trigger('click')
+    await vi.advanceTimersByTimeAsync(600)
+    vi.useRealTimers()
+    await sel(w, 'tts-key-bring-minimax').trigger('click')
+    expect(sel(w, 'tts-keyop-pending-minimax').exists()).toBe(false)
+    expect((sel(w, 'tts-apikey-input-minimax').element as HTMLInputElement).value).toBe('***')
+    expect((await saveAndCaptureApiKeys(w))?.minimax).toBeUndefined()
   })
 })

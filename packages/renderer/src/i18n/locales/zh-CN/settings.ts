@@ -1134,6 +1134,8 @@ export default {
     apiKeyPlaceholder: '粘贴 API Key',
     clearKey: '清除',
     clearKeyTitle: '清除已保存的 Key（保存后生效）',
+    keyOpPendingClear: '已标记清除已保存的 Key，点击保存后生效',
+    keyOpPendingBring: '已标记自动带入供应商 Key，点击保存后生效',
     providerKeyLinked: '已检测到供应商配置的 Key，保存时自动带入',
     bringFromProvider: '自动带入',
     baseUrlLabel: '服务地址',
