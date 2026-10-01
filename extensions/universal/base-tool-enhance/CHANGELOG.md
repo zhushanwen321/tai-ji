@@ -1,5 +1,11 @@
 # @zhushanwen/pi-base-tool-enhance
 
+## 0.7.2
+
+### Patch Changes
+
+- 0d36077d4: Internal adjustments to the enhanced bash tool plumbing (background-mode handoff and error-audit paths follow the consolidated composer surface).
+
 ## 0.7.1
 
 ### Patch Changes

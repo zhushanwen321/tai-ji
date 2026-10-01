@@ -1,5 +1,11 @@
 # @zhushanwen/extension-protocol
 
+## 0.17.0
+
+### Minor Changes
+
+- 0d36077d4: Extends the plan contract surface: `PlanReviewDecision` gains the `dismiss` member, `PlanReviewRequest` gains the optional `selfReview` field (agent self-review summary attached to review requests), the `extensions/plan` contract family (state machine, review contract, legacy entries) is now exported from the package root, and the `PLAN_STATE_CUSTOM_TYPE` constant moves into this package.
+
 ## 0.16.0
 
 ### Minor Changes

@@ -139,7 +139,7 @@ function collectTsFiles(absDir) {
     const full = path.join(absDir, name)
     const st = statSync(full)
     if (st.isDirectory()) {
-      if (name === '__tests__' || name === 'test' || name === 'node_modules' || name === 'dist') continue
+      if (name === '__tests__' || name === 'test' || name === 'node_modules' || name === 'dist' || name.startsWith('dist.')) continue
       out.push(...collectTsFiles(full))
     } else if (name.endsWith('.ts') && !name.endsWith('.d.ts')) {
       out.push(full)
@@ -359,7 +359,7 @@ const COMMENT_REF_SRC_EXTS = new Set(['.ts', '.tsx', '.mts', '.cts', '.mjs', '.c
 
 /** 全仓扫描（staged 含 .md 删除时触发）按目录名剪枝：依赖/产物/本地档案，无注释检查语义。
  *  .zcode 为 workflow 引擎工作区（agents 手工维护子目录除外，gitignored 产物目录不进扫描）。 */
-const FULL_SCAN_PRUNE_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', 'test-results', 'playwright-report', '.taiji-harness', 'resources', '.zcode'])
+const FULL_SCAN_PRUNE_DIRS = new Set(['node_modules', '.git', 'dist', 'dist.bundle', 'coverage', 'test-results', 'playwright-report', '.taiji-harness', 'resources', '.zcode'])
 
 /** Form A：docs/ 仓库相对引用。左边界断言防 URL 中缀误配（github.com/docs/x），
  *  与第二检查 REPO_PATH_RE 同口径。 */

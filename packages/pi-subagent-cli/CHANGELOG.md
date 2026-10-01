@@ -1,5 +1,11 @@
 # @zhushanwen/pi-subagent-cli
 
+## 0.5.0
+
+### Minor Changes
+
+- 0d36077d4: Writes the subagent identity env chain into spawned child processes (selfRecordId / agent / task / depth / rootSessionId / rootCwd per the SDK identity-env key table), applied after the outbound-env deny list.
+
 ## 0.4.5
 
 ### Patch Changes

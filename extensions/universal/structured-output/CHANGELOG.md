@@ -1,5 +1,11 @@
 # @zhushanwen/pi-structured-output
 
+## 6.0.0
+
+### Major Changes
+
+- 0d36077d4: Replaces the `LoopGate` / `RetryState` / `setupLoopGate` public exports with a single `WorkflowGate` export: the soft retry-steering gate and the hard termination gate now live on one state machine with one listener. Removed exports are breaking for direct importers — migrate to `WorkflowGate`.
+
 ## 5.1.9
 
 ### Patch Changes

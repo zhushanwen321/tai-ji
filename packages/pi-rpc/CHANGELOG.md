@@ -1,5 +1,11 @@
 # @zhushanwen/pi-rpc
 
+## 1.0.0
+
+### Major Changes
+
+- 0d36077d4: Removes the ThinkingLevel literal-whitelist type members: the spawn layer now passes thinking levels through as validated strings (vocabulary single-sourced from @taiji/shared at the host entry layer, which validates before this layer runs).
+
 ## 0.3.0
 
 ### Minor Changes

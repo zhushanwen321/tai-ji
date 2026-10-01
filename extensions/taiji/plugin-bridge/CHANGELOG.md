@@ -1,5 +1,11 @@
 # @zhushanwen/pi-plugin-bridge
 
+## 0.2.12
+
+### Patch Changes
+
+- 0d36077d4: chore: refresh dependency range (triggered by @zhushanwen/extension-protocol@0.16.0 → @zhushanwen/extension-protocol@0.17.0)
+
 ## 0.2.11
 
 ### Patch Changes

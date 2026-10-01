@@ -1,5 +1,11 @@
 # @zhushanwen/zcode-subagent-cli
 
+## 0.4.4
+
+### Patch Changes
+
+- 0d36077d4: Server frame loop consolidates onto the shared SDK server entry (classify/handle helpers); engine-specific ack semantics unchanged.
+
 ## 0.4.3
 
 ### Patch Changes
