@@ -1,15 +1,15 @@
 /**
- * useAppUpdate 的自动检测调度轴工厂：启动编排（initAutoCheck）+ 30s 首查 + 60min 周期
+ * useAppUpdate 的自动检测调度轴工厂：启动编排（initAutoCheck）+ 30s 首查 + 15min 周期
  * （递归 setTimeout）+ visibilitychange 补查（时间阈值驱动）+ 定时器生命周期清理。
  *
  * 定时器 id / 上次联网检查时刻 / disposed 标志是调度轴的私有可变态，收进
  * createAutoCheckAxis 闭包——每个控制器实例独立一份，测试建新控制器即隔离。
  *
- * 补查语义（时间阈值驱动）：恢复可见时距上次联网检查 ≥30min 即补查一次。不依赖
+ * 补查语义（时间阈值驱动）：恢复可见时距上次联网检查 ≥7.5min 即补查一次。不依赖
  * 「hidden 期间被跳过」的标记位（原 skippedWhileHidden 只能由周期 timer 触发置位，
  * 定时器链一旦死亡补查通道随之失活）；时间阈值使 visibility 补查成为独立自愈
  * 通路——周期链因任意形态沉默后，恢复可见即可拉起检查并重排周期。频繁切窗
- * 不致额外真实联网：main 侧 1h 缓存兜底，30min~1h 间的补查请求命中缓存零请求。
+ * 不致额外真实联网：main 侧 15min 缓存兜底，7.5~15min 间的补查请求命中缓存零请求。
  *
  * 依赖方向：本模块 → use-app-update-check（checkForUpdate，含 60s ipc 超时兜底）
  * + use-app-update-state（读 state 守卫）+ use-app-update-restore（启动恢复链）
@@ -24,25 +24,25 @@ import type { CheckSource } from './use-app-update-check'
 const AUTO_CHECK_DELAY_MS = 30_000
 
 /**
- * 自动检测周期：每 60 分钟联网检测一次。
+ * 自动检测周期：每 15 分钟联网检测一次（2026-10-01 用户裁决：由 60min 收紧到 15min，更快发现新版本）。
  *
- * GitHub API 未认证限额 60 次/小时，1h 一次 = 1 次/小时，配额宽裕；与 release-checker
- * 的 1h 缓存 TTL 同档（更密的周期也只会命中缓存）。启动后 30s 已有首查 + 恢复可见
- * 补查，周期检测只覆盖「应用连开数天」的长驻场景，无需更高频率。
+ * GitHub API 未认证限额 60 次/小时，15min 一次 = 4 次/小时，配额仍宽裕；与 release-checker
+ * 的 15min 缓存 TTL 同档（更密的周期也只会命中缓存，真实联网频率不超 4 次/小时）。启动后
+ * 30s 已有首查 + 恢复可见补查，周期检测覆盖「应用连开数天」的长驻场景。
  * 用递归 setTimeout 而非 setInterval：checkForUpdate 是 async，setInterval 会在
  * 上一次未完成时排下一次，可能堆积并发请求；递归 setTimeout 保证「上一次完成后才排下一次」。
  */
-const CHECK_INTERVAL_MINUTES = 60
+const CHECK_INTERVAL_MINUTES = 15
 const SECONDS_PER_MINUTE = 60
 const MS_PER_SECOND = 1000
-const AUTO_CHECK_INTERVAL_MS = CHECK_INTERVAL_MINUTES * SECONDS_PER_MINUTE * MS_PER_SECOND // 60min
+const AUTO_CHECK_INTERVAL_MS = CHECK_INTERVAL_MINUTES * SECONDS_PER_MINUTE * MS_PER_SECOND // 15min
 
 /**
- * 恢复可见补查阈值：距上次联网检查 ≥30min 才补查。取周期（60min）的一半——
+ * 恢复可见补查阈值：距上次联网检查 ≥7.5min 才补查。取周期（15min）的一半——
  * 比周期紧（长时间隐藏后半个周期内即可补上检查），又对频繁切窗保持防抖；
- * 30min~1h 间的补查由 main 侧 1h 缓存兜底，真实联网频率不超周期预算。
+ * 7.5~15min 间的补查由 main 侧 15min 缓存兜底，真实联网频率不超周期预算。
  */
-const VISIBILITY_RECHECK_AFTER_MINUTES = 30
+const VISIBILITY_RECHECK_AFTER_MINUTES = 7.5
 const VISIBILITY_RECHECK_AFTER_MS =
   VISIBILITY_RECHECK_AFTER_MINUTES * SECONDS_PER_MINUTE * MS_PER_SECOND
 
@@ -60,7 +60,7 @@ export interface AutoCheckAxisDeps {
 export interface AutoCheckAxis {
   /**
    * 启动自动检测：先恢复持久化提醒（立即），再读 autoUpdate 开关——
-   * true 时 30s 首次检测 + 60min 周期 + visibilitychange 补查 listener；
+   * true 时 30s 首次检测 + 15min 周期 + visibilitychange 补查 listener；
    * false 时只执行恢复链（RM1：恢复链均为本地读取不联网，且不挂任何定时器/
    * listener——无自动检查则补查无意义；设置页手动「检查更新」不受影响）。
    * 开关变更下次启动生效（与 preDownload 开关现状一致）。
@@ -97,7 +97,7 @@ export function createAutoCheckAxis(deps: AutoCheckAxisDeps): AutoCheckAxis {
    * dispose 标志（W05 review）：onScopeDispose 置位，initAutoCheck 复位。
    * runAutoCheck 在 await checkForUpdate 期间无 pending timer（autoCheckTimer 已置 null、
    * 下一周期尚未排）——此窗口内 scope dispose 后 clearAutoCheckTimer 无 timer 可清，
-   * await 恢复仍会排上 60min timer → 卸载后继续联网。runAutoCheck 排下一周期前检查
+   * await 恢复仍会排上 15min timer → 卸载后继续联网。runAutoCheck 排下一周期前检查
    * 本标志，已 dispose 则直接返回。
    */
   let disposed = false
@@ -123,7 +123,7 @@ export function createAutoCheckAxis(deps: AutoCheckAxisDeps): AutoCheckAxis {
   }
 
   /**
-   * visibilitychange 补查（时间阈值驱动）：恢复可见时距上次联网检查 ≥30min 即补查，
+   * visibilitychange 补查（时间阈值驱动）：恢复可见时距上次联网检查 ≥7.5min 即补查，
    * 不必等下一个周期（应用隐藏一整天后回来，最多再等一个周期才检测到新版是
    * 不可接受的延迟）。升级流程态（canAutoCheck=false）不补查。
    * 清掉已排定的周期 timer 再跑 runAutoCheck（其内部会重排下一周期），避免补查 + 周期双跑。
@@ -150,7 +150,7 @@ export function createAutoCheckAxis(deps: AutoCheckAxisDeps): AutoCheckAxis {
   }
 
   /**
-   * 自动检测单次执行：守卫检查 → 检测（force=false 走 1h 缓存，RM2.1）→ 排下一个 60min 周期定时器。
+   * 自动检测单次执行：守卫检查 → 检测（force=false 走 15min 缓存，RM2.1）→ 排下一个 15min 周期定时器。
    *
    * 守卫（canAutoCheck）：升级流程态跳过本次检查，但仍排下一次定时器，
    * 保证升级完成后能继续周期检测。
@@ -158,7 +158,7 @@ export function createAutoCheckAxis(deps: AutoCheckAxisDeps): AutoCheckAxis {
    * visibility 守卫：document.hidden 时跳过联网检测（后台隐藏期间不发周期请求，
    * 省 GitHub API 配额），恢复可见时由 onVisibilityChange 按时间阈值补查。
    *
-   * force=false（批次 4 RM2.1）：周期检查走 release-checker 1h 缓存（含负缓存），
+   * force=false（批次 4 RM2.1）：周期检查走 release-checker 15min 缓存（含负缓存），
    * 正常态 API 消耗 ≤1 次/小时；force=true 保留给设置页手动按钮。
    */
   async function runAutoCheck(): Promise<void> {

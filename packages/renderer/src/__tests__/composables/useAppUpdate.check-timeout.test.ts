@@ -8,7 +8,7 @@
  *
  * 覆盖：
  * - auto 链挂死自愈：invoke 永不返回 → 60s 超时 → state 静默回 idle（不固化 checking）
- *   → 60min 周期照常排上并触发第二次检查（链未断）
+ *   → 15min 周期照常排上并触发第二次检查（链未断）
  * - manual 挂死超时显形：state='error'（用户可见失败，不再无限等待）
  * - 迟到 resolve 丢弃：超时收口后原 promise 才 resolve，state 不被迟到结果改写
  *
@@ -38,7 +38,7 @@ setupAppUpdateLifecycle({
 })
 
 describe('useAppUpdate ipc check 超时兜底', () => {
-  it('auto 链挂死自愈：60s 超时静默回 idle，60min 周期照常排上（链不断）', async () => {
+  it('auto 链挂死自愈：60s 超时静默回 idle，15min 周期照常排上（链不断）', async () => {
     makeCheckHang()
     const { result, stop } = await startAutoCheckChain()
 
@@ -51,8 +51,8 @@ describe('useAppUpdate ipc check 超时兜底', () => {
     await vi.advanceTimersByTimeAsync(60_000)
     expect(result.state.state).toBe('idle')
 
-    // 下一周期定时器已排上：60min 后第二次检查照常发起（递归链未断）
-    await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
+    // 下一周期定时器已排上：15min 后第二次检查照常发起（递归链未断）
+    await vi.advanceTimersByTimeAsync(15 * 60 * 1000)
     expect(ipc.checkForUpdate).toHaveBeenCalledTimes(2)
     stop()
   })

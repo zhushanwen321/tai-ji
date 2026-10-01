@@ -238,7 +238,7 @@ describe('W2: ReleaseChecker 自动升级检测（多源编排）', () => {
 
       // 判别力断言（R2-U2，设计 §4.2③④）：prerelease 归 noNewVersionSources（「无新版」桶）
       // 而非 failedSources——负缓存已写：TTL 内再查命中零 fetch（若归失败桶则会重新逐源）
-      vi.setSystemTime(Date.now() + 30 * 60 * 1000)
+      vi.setSystemTime(Date.now() + 10 * 60 * 1000)
       const r2 = await checker.checkForLatestRelease('0.8.14')
       expect(r2).toBeNull()
       expect(spy).toHaveBeenCalledTimes(2)
@@ -795,7 +795,7 @@ describe('多源负缓存（循环出口语义）', () => {
     expect(spy).toHaveBeenCalledTimes(2)
 
     // 主源「无新版」没有触发负缓存：TTL 内非 force 再查命中正缓存（info 非 null）
-    vi.setSystemTime(Date.now() + 30 * 60 * 1000)
+    vi.setSystemTime(Date.now() + 10 * 60 * 1000)
     const r2 = await checker.checkForLatestRelease('0.8.14')
     expect(r2).not.toBeNull()
     expect(r2).toEqual(r1)
@@ -811,13 +811,13 @@ describe('多源负缓存（循环出口语义）', () => {
     expect(r1).toBeNull()
     expect(spy).toHaveBeenCalledTimes(2)
 
-    // TTL 内（+30min）非 force 再查 → 负缓存命中，零 fetch
-    vi.setSystemTime(Date.now() + 30 * 60 * 1000)
+    // TTL 内（+10min）非 force 再查 → 负缓存命中，零 fetch
+    vi.setSystemTime(Date.now() + 10 * 60 * 1000)
     const r2 = await checker.checkForLatestRelease('0.8.14')
     expect(r2).toBeNull()
     expect(spy).toHaveBeenCalledTimes(2)
 
-    // TTL 过（+61min）→ 重新逐源 fetch（负缓存过期）
+    // TTL 过（累计 +41min）→ 重新逐源 fetch（负缓存过期）
     vi.setSystemTime(Date.now() + 31 * 60 * 1000)
     const r3 = await checker.checkForLatestRelease('0.8.14')
     expect(r3).toBeNull()
@@ -842,7 +842,7 @@ describe('多源负缓存（循环出口语义）', () => {
     expect(spy).toHaveBeenCalledTimes(2)
 
     // TTL 内再查：负缓存未写 → github 恢复后当轮即可胜出（「未知」没有被固化为「确认无」）
-    vi.setSystemTime(Date.now() + 30 * 60 * 1000)
+    vi.setSystemTime(Date.now() + 10 * 60 * 1000)
     githubDown = false
     const r2 = await checker.checkForLatestRelease('0.8.14')
     expect(r2).not.toBeNull()

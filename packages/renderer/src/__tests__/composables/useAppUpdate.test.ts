@@ -588,15 +588,15 @@ describe('useAppUpdate initAutoCheck 定时器（递归 setTimeout + 守卫）',
     stop()
   })
 
-  it('首次完成后 60min 周期触发第二次 checkForUpdate', async () => {
+  it('首次完成后 15min 周期触发第二次 checkForUpdate', async () => {
     const { result, stop } = setupAppUpdate({ initAutoCheck: true })
 
     // 30s 首次触发
     await vi.advanceTimersByTimeAsync(30000)
     expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
 
-    // 60min（60 * 60 * 1000ms）周期触发第二次
-    await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
+    // 15min（15 * 60 * 1000ms）周期触发第二次
+    await vi.advanceTimersByTimeAsync(15 * 60 * 1000)
     expect(ipc.checkForUpdate).toHaveBeenCalledTimes(2)
     expect(ipc.checkForUpdate).toHaveBeenLastCalledWith({ force: false })
     stop()
@@ -613,7 +613,7 @@ describe('useAppUpdate initAutoCheck 定时器（递归 setTimeout + 守卫）',
 
     // 恢复可检测态后，下一个周期应恢复检测（证明仍排了下一次定时器）
     result.state.state = 'idle'
-    await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
+    await vi.advanceTimersByTimeAsync(15 * 60 * 1000)
     expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
     stop()
   })
