@@ -93,7 +93,8 @@
       <!-- ── subagent 块：委托 BlockSubagent ── -->
       <BlockSubagent v-if="isSubagent" :tool="tool!" :session-id="sessionId" />
 
-      <!-- ── workflow 块：collapsed only 单行（icon + workflow prefix + name · slug），点击开 drawer workflow tab（spec §11 / design D2）── -->
+      <!-- ── workflow 块：collapsed only 单行（icon + workflow prefix + name · slug），点击开 workflow overlay（workflow-visualization U6/D1 入口改向）；
+           name 下多阶段 chips（phases 折叠快照，§3.1-2④：只表达 phase 名与最新一轮状态，不经 DAG 通道）── -->
       <div v-else-if="isWorkflow" class="trace-workflow pb-2.5 mb-0.5" data-testid="workflow-block">
         <div
           data-testid="tool-block-header"
@@ -109,6 +110,29 @@
             <span class="text-neutral-faint">·</span>
             <span class="min-w-0 shrink-0 truncate font-mono text-[length:var(--text-sm)] text-accent">{{ workflowFields.slug }}</span>
           </template>
+        </div>
+        <!-- mini phase 管道 chips：数据源 = WorkflowRunRecord.phases 折叠（getWorkflows 同批透出，
+             反查经 core lookupWorkflowRun 桥接——ui 不 import renderer store）；settledAt 有值 =
+             已收束（success 点）、缺省 = 进行中（accent 点），fold 无 failed 语义不造第三态 -->
+        <div
+          v-if="workflowChips.length"
+          class="mt-1 flex flex-wrap items-center gap-1.5 pl-6"
+          data-testid="workflow-block-chips"
+        >
+          <span
+            v-for="p in workflowChips"
+            :key="p.phase"
+            class="inline-flex min-w-0 max-w-full items-center gap-1 rounded-sm border border-hairline px-1.5 py-px font-mono text-[length:var(--text-3xs)] text-neutral-mid"
+            :data-testid="`workflow-chip-${p.phase}`"
+            :data-state="chipState(p)"
+            :title="chipTitle(p)"
+          >
+            <span
+              class="size-1.5 shrink-0 rounded-full"
+              :class="p.settledAt !== undefined ? 'bg-success' : 'bg-accent'"
+            />
+            <span class="min-w-0 truncate">{{ p.phase }}</span>
+          </span>
         </div>
       </div>
 
@@ -231,7 +255,7 @@ import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import { extractGui } from '@zhushanwen/extension-protocol'
 import type { MessageStatus, ToolCall } from '@taiji/shared'
 import { SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES } from '@taiji/shared'
-import { openWorkflow } from '@taiji/core/domain/drawer'
+import { lookupWorkflowRun, openWorkflow } from '@taiji/core/domain/drawer'
 import { AnsiText, GuiComponentRenderer } from '../../rendering-protocol'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import BlockSubagent from './BlockSubagent.vue'
@@ -423,9 +447,37 @@ const workflowFields = computed(() => {
   return { name, slug }
 })
 
-/** 点击 workflow 块 → drawer 开 workflow tab（D1/D2）。name 为空时 openWorkflow 仅切 tab不记录选中。 */
+/**
+ * 点击 workflow 块 → 开 workflow overlay（workflow-visualization U6/D1 入口改向）。
+ * 传 (name, slug, sessionId)：反查 runId 的动作在 renderer opener 内单处执行（slug 缺失
+ * 回落「name → 最新 run」现状语义、碰撞取最新）；sessionId = 本块所属 session（发起 pane
+ * 的 session，D11⑤）。name 为空串时由 opener 兜底（反查不命中 → drawer workflow tab 空态，
+ * 与现状「仅切 tab」归宿一致）。
+ */
 function openWorkflowDrawer(): void {
-  openWorkflow(workflowFields.value.name)
+  openWorkflow(workflowFields.value.name, {
+    slug: workflowFields.value.slug || undefined,
+    sessionId: props.sessionId ?? undefined,
+  })
+}
+
+/** chips 数据源：反查本块对应 run 的 phases 折叠（响应式——lookup 实现读 store 分区，依赖
+ *  在本 computed 求值期间收集）。未绑定 lookup / 反查不命中 / 旧 run 无 phases → 不渲染。 */
+const workflowChips = computed(() => {
+  const name = workflowFields.value.name
+  const sid = props.sessionId
+  if (!name || !sid) return []
+  return lookupWorkflowRun(sid, name, workflowFields.value.slug || undefined)?.phases ?? []
+})
+
+/** chip 状态词表（两态：fold 快照只有起止——settledAt 有值 = 已收束、缺省 = 进行中）。 */
+function chipState(p: { settledAt?: number }): string {
+  return p.settledAt !== undefined ? 'settled' : 'running'
+}
+
+/** chip 状态提示（数据点标题；phase 名即正文，title 只承载状态语义）。 */
+function chipTitle(p: { settledAt?: number }): string {
+  return p.settledAt !== undefined ? t('panel.workflowViz.chipSettled') : t('panel.workflowViz.chipRunning')
 }
 
 /**

@@ -10,15 +10,16 @@
  * 行渲染细节（分桶/格式化/两段式操作/空态）已沉淀 ComposerTray / TrayNativePanel 组件测试
  * （packages/renderer/src/__tests__/panel/tray/），本 spec 只保留 e2e 层不可替代的**跨进程链路**：
  *   mock 数据源 → store 分区 → useTrayCounts 计数/行集 → 托盘 DOM，
- * 以及「点托盘行 → drawer workflow tab」的归宿不变量（原 E2 的回归守护对象）。
+ * 以及「点托盘行 → workflow overlay」的归宿不变量（workflow-visualization U6/D1 入口改向
+ * 后的回归守护对象；改向前归宿 = drawer workflow tab，git 可追溯）。
  *
  * 三条 case：
  * - T1：s3 存在 workflow 历史 record → 托盘出现 workflow 条目（dim 常驻）+ 点开面板后
  *       桶计数与行集来自同一份数据（跨进程链路的 DOM 终点断言）
  * - T2：切到无 workflow 数据的 session → 托盘该条目整体摘除（归零不虚亮：DOM 层不存在，
  *       而非 opacity:0 / 空壳）；切回 s3 恢复（分区读，非残留）
- * - T3：点面板 workflow 行 → drawer workflow tab 打开（归宿不回归），composer 不被 overlay
- *       遮挡（原 E2 后半段「Panel 不进 overlay」不变量）
+ * - T3：点面板 workflow 行 → workflow overlay 打开（全屏临时层，DAG 通道 mock 降级形态 +
+ *       实况面板挂载）；ESC 关闭后 composer/drawer 恢复（临时层不替换 Panel）
  *
  * mock 数据事实（packages/core/src/transport/mock/workflow-data.ts，本 spec 不改数据源）：
  * - getWorkflows('s3') = 1 条 WorkflowRunRecord（runId=wf-mock-001 / scriptName=deploy-flow /
@@ -110,20 +111,26 @@ test.describe('Workflow 任务托盘同步 E2E', () => {
     await expect(builtinButton(page, 'subagent')).toBeVisible()
   })
 
-  test('T3: 点面板 workflow 行 → drawer workflow tab 打开，composer 不被 overlay 遮挡', async ({ page }) => {
+  test('T3: 点面板 workflow 行 → workflow overlay 打开（U6 入口改向），关闭后 composer 恢复', async ({ page }) => {
     await activateSession(page)
 
     const panel = await openTrayPanel(page, 'workflow')
     await panel.getByTestId('tray-panel-empty-jump-ended').click()
     await panel.getByTestId('tray-workflow-row').click()
 
-    // 归宿（原 E2 第 1 段）：drawer workflow tab 打开，内容为 fixture 的 agent call 列表
-    const drawerTab = page.getByTestId('drawer-workflow-tab')
-    await expect(drawerTab).toBeVisible({ timeout: 5_000 })
-    await expect(drawerTab).toContainText('deploy-flow')
-    await expect(drawerTab).toContainText('dev-W1')
+    // 归宿（U6/D1 入口改向后）：全屏 overlay 打开，header 显示 fixture 的 scriptName；
+    // mock 无 record 文件基建 → DAG 通道返回 record_not_found → 左栏降级列表形态（按
+    // fixture agentCalls 的 phase 分组），右栏实况面板挂载
+    const overlay = page.getByTestId('wfvz-overlay')
+    await expect(overlay).toBeVisible({ timeout: 5_000 })
+    await expect(page.getByTestId('wfvz-overlay-header')).toContainText('deploy-flow')
+    await expect(page.getByTestId('wfvz-overlay-dag-fallback')).toBeVisible()
+    await expect(page.getByTestId('wf-viz-live-panel')).toBeVisible()
 
-    // 不变量（原 E2 第 2 段）：drawer 并排打开不把 Panel 推进 overlay——composer 仍可见可用
+    // 临时浮层不变量：overlay 是临时层（非替换 Panel）——ESC 关闭后 overlay 消失、
+    // composer 与 drawer 区恢复可见可用
+    await page.keyboard.press('Escape')
+    await expect(overlay).toHaveCount(0)
     await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: 5_000 })
     await expect(page.getByTestId('drawer-area')).toBeVisible()
   })

@@ -149,6 +149,13 @@ export interface SessionCleanupHooks {
   clearSlashCommands?(sid: string): void
   /** fork 通知 transient feed 分区（feedMap）释放 */
   clearForkNotices?(sid: string): void
+  /**
+   * workflow-viz overlay 关闭（workflow-visualization U6/D11⑤ 可选 hook）：删除的
+   * session 是 overlay 当前发起 session 时关 overlay（overlay 全局单例、绑定发起 pane
+   * 的 session）。事件流缓存与活跃锚的数据面清理由 clearWorkflow（store.clearSession）
+   * 承担，本 hook 只做 UI 关闭编排。
+   */
+  closeWorkflowOverlay?(sid: string): void
 }
 
 /**
@@ -466,6 +473,8 @@ export function createUseSession(deps: UseSessionDeps) {
     hooks.clearTerminalQueue?.(id)
     hooks.clearSlashCommands?.(id)
     hooks.clearForkNotices?.(id)
+    // workflow-viz overlay UI 关闭（U6/D11⑤，可选 hook——壳未接线即跳过；数据面在 clearWorkflow）
+    hooks.closeWorkflowOverlay?.(id)
     // ADR-0049 W5：触发所有 useSessionScopedState 实例清理该 sid 的 Map 分区，
     // 防已销毁 session 的 per-session 状态条目在 Map 中积累导致内存泄漏（AC-8）。
     // 销毁唯一编排点契约：triggerSessionCleanups 只经 deleteSession/deleteFolder 触发。

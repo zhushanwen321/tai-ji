@@ -29,6 +29,8 @@ import type {
   SkillInfo, AgentInfo, PluginInfo, SetProviderData,
   SkillDirConfig, FileNode, RecommendedExtension, SubagentRecord, WorkflowRunRecord,
   SystemPromptConfig,
+  WorkflowRunEventsReply,
+  WorkflowDagReply,
   TerminalConfig,
   BatchDeleteResult,
   ProviderSource, ProviderImportPreview, ProviderImportResult, ProviderImportedItem,
@@ -647,6 +649,26 @@ const sessionImpl = {
   async getWorkflows(sessionId: string): Promise<{ workflows: WorkflowRunRecord[]; oversize?: boolean }> {
     await sleep(TIMING.ack)
     return { workflows: sessionId === 's3' ? fixtureWorkflows.map((w) => ({ ...w })) : [] }
+  },
+
+  /**
+   * Mock run 事件流（workflow-visualization §3.1-4；[G4 锚定补齐] 同因：门面三元下 mock
+   * 缺成员即接口同构破）。mock 无 record 文件基建 → 返回结构化 record_not_found 领域回执
+   *（形态对齐 real 错误臂；renderer 按码分流静态指引）。
+   */
+  async getWorkflowRunEvents(_sessionId: string, runId: string): Promise<WorkflowRunEventsReply> {
+    await sleep(TIMING.ack)
+    return { runId, code: 'record_not_found', message: 'mock 无 record 事件流记录' }
+  },
+
+  /**
+   * Mock run DAG 蓝图（workflow-visualization §3.1-5；[G4 锚定补齐] 同因：门面三元下 mock
+   * 缺成员即接口同构破）。mock 无 record 文件基建 → 返回结构化 record_not_found 领域回执
+   *（形态对齐 real 错误臂；overlay 左栏按码分流降级形态 = 按 phase 分组只读列表）。
+   */
+  async getWorkflowDag(_sessionId: string, runId: string): Promise<WorkflowDagReply> {
+    await sleep(TIMING.ack)
+    return { runId, code: 'record_not_found', message: 'mock 无 record 文件基建' }
   },
 
   /** Mock agent call 对话流历史（返回空数组，drawer SubagentTab agentcall 分支加载不 throw 即可） */

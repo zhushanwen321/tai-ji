@@ -13,6 +13,7 @@
  * control 不 import 本文件（防循环）。
  */
 import { ref } from 'vue'
+import type { WorkflowRunRecord } from '@taiji/shared'
 import { drawerControl, getDrawerControlState, _resetDrawerControlForTest } from './control'
 import type { SideDrawerTab, OpenDrawerOptions, OpenSubagentOptions } from './types'
 
@@ -72,12 +73,71 @@ export function openSubagent(opts: OpenSubagentOptions): void {
   drawerControl.setSubagentView(opts.virtualId, opts.enteredFrom)
 }
 
+// ── workflow overlay 桥接（workflow-visualization U6/D1 入口语义分立）──────────
+//
+// core 保持 headless（零 pinia/renderer 依赖）：overlay 的打开与 run 反查实装在
+// renderer（workflow-viz controller），经本层绑定口注入（bindDrawerSessionId 同款
+// 模式，绑定动作发生在 renderer 装配模块加载时，函数体首次执行在用户交互时刻——
+// pinia 已 active）。未绑定时 openWorkflow no-op / lookupWorkflowRun 返回 undefined
+// （headless/测试环境安全默认）。
+
+/** overlay 打开回调（renderer 注入）：收 nameOrRunId（双语义，同 openWorkflow 形参约定）+ 可选 slug/sessionId */
+export type WorkflowOverlayOpener = (nameOrRunId: string, slug?: string, sessionId?: string) => void
+
+/** workflow run 反查回调（renderer 注入）：从 workflowStore 分区读，(scriptName, slug) → record */
+export type WorkflowRunLookup = (sessionId: string, scriptName: string, slug?: string) => WorkflowRunRecord | undefined
+
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：overlay 桥接绑定单例 ref
+const boundOverlayOpener = ref<WorkflowOverlayOpener | null>(null)
+const boundWorkflowRunLookup = ref<WorkflowRunLookup | null>(null)
+
 /**
- * 打开 workflow tab，展示指定 workflow 的 agent call 列表。
- * workflowName 为空串时仅切到 workflow tab（不记录选中名，显空态或全部）。
+ * 绑定 overlay 打开回调（renderer 装配调用；幂等，传 null 解绑——测试隔离用）。
  */
-export function openWorkflow(workflowName?: string): void {
+export function bindWorkflowOverlayOpener(opener: WorkflowOverlayOpener | null): void {
+  boundOverlayOpener.value = opener
+}
+
+/** 绑定 workflow run 反查回调（renderer 装配调用；幂等，传 null 解绑）。 */
+export function bindWorkflowRunLookup(lookup: WorkflowRunLookup | null): void {
+  boundWorkflowRunLookup.value = lookup
+}
+
+/**
+ * 打开 workflow——workflow-visualization U6/D1 改向后 = 开 overlay（全屏实况视图）。
+ *
+ * 形参双语义（与 D1 调用面全量一致）：托盘行传 runId（TrayNativePanel 行点击矩阵，
+ * 零改动）；对话流 block 传脚本名 + opts.slug（block 以 (scriptName, slug) 经
+ * workflowStore 反查 runId 的动作在 renderer opener 内单处执行——core 不感知
+ * store 数据）。opts.sessionId = 发起 pane 的 session（block 场景精确传，缺省由
+ * renderer opener 回落 focusedSessionId）。
+ *
+ * 同一函数不承担「开 overlay」与「注入 drawer 选中态」两种语义（D1）——drawer
+ * 语义见 openWorkflowInDrawer。
+ */
+export function openWorkflow(workflowName?: string, opts?: { slug?: string; sessionId?: string }): void {
+  boundOverlayOpener.value?.(workflowName ?? '', opts?.slug, opts?.sessionId)
+}
+
+/**
+ * 打开 drawer workflow tab，展示指定 workflow 的 agent call 列表（显式 drawer 语义，
+ * D1：现 openWorkflow 实现的移位保留）。
+ *
+ * 形参双语义与 WorkflowTab 兼收解析现状一致：传 runId（精确命中）或脚本名（取最新）；
+ * 空串时仅切到 workflow tab（不记录选中名，显空态或全部）。消费方 = D10 回落链
+ * （Guard → openDrawerTab('workflow') + 本函数注入选中态）、SubagentTab 返回按钮
+ * （返回 drawer workflow tab）、block 反查未命中的兜底归宿。
+ */
+export function openWorkflowInDrawer(workflowName?: string): void {
   drawerControl.setWorkflowView(workflowName ?? '')
+}
+
+/**
+ * workflow run 反查（chips 数据消费口）：转发 renderer 绑定的 lookup。
+ * 未绑定（headless/测试）返回 undefined（调用方按无数据渲染，不报错）。
+ */
+export function lookupWorkflowRun(sessionId: string, scriptName: string, slug?: string): WorkflowRunRecord | undefined {
+  return boundWorkflowRunLookup.value?.(sessionId, scriptName, slug)
 }
 
 /**
