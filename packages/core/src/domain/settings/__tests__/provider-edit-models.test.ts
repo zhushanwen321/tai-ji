@@ -288,8 +288,9 @@ describe('D9 思考档位修复（reasoning 显式化 + 预设对齐 pi 过滤�
 
   it('resolveThinkingMap 正向解析（深拷贝副本）且与 getStrategyFromMap round-trip', () => {
     expect(resolveThinkingMap('all-levels')).toBeUndefined()
-    expect(resolveThinkingMap('on-off')).toEqual({ off: 'off', high: 'high', minimal: null, low: null, medium: null })
-    expect(resolveThinkingMap('high-max')).toEqual({ off: 'off', high: 'high', max: 'xhigh', minimal: null, low: null, medium: null })
+    // 未启用档 = null（shared PI_THINKING_LEVELS 全集 7 值），启用档显式映射
+    expect(resolveThinkingMap('on-off')).toEqual({ off: 'off', high: 'high', minimal: null, low: null, medium: null, xhigh: null, max: null })
+    expect(resolveThinkingMap('high-max')).toEqual({ off: 'off', high: 'high', max: 'xhigh', minimal: null, low: null, medium: null, xhigh: null })
 
     // 深拷贝：两次 resolve 不共享引用，改一份不影响另一份（防多模型共享 map 引用）
     const a = resolveThinkingMap('on-off')!
