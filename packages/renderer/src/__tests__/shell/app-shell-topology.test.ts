@@ -24,6 +24,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
+import { platformChromeMock, expectFullscreenChromePairing } from '@/__tests__/helpers/platform-chrome-mock'
 
 vi.mock('@/composables/shell/useSettingsShell', () => ({
   useSettingsShell: () => {},
@@ -41,24 +42,11 @@ vi.mock('@/composables/features/sidebar/useSidebar', () => ({
   useSidebar: () => ({ syncSessionToPanel: vi.fn() }),
 }))
 
-/** usePlatformChrome mock：可控 isFullscreen ref（全屏态 TrafficLight 成对类断言）+
- *  可切换的 detectPlatform vi.fn（mac/非 mac 两态成对断言，TrafficLight.test.ts 同范式）。
- *  真实模块 isFullscreen 是模块级单例 ref 未导出，测试无法直接改值，故 mock 模块。
- *  与 PanelHeader.test.ts L29-37 同范式：vi.hoisted 共享同一 ref——mock 若不共享，
- *  组件读到的恒为 false，测试会在两类全缺失下静默通过。detectPlatform 默认 'mac'
- *  （jsdom 下真实模块也回退 'mac'，行为一致，不影响本文件其他用例）。 */
-const platformChromeMock = vi.hoisted(() => ({
-  isFullscreen: { value: false } as { value: boolean },
-  detectPlatform: vi.fn<() => 'mac' | 'win' | 'linux'>(() => 'mac'),
-}))
+/** usePlatformChrome mock：共享态在 helpers/platform-chrome-mock（isFullscreen 换装真 ref + detectPlatform 可切换；
+ *  TrafficLight.test.ts 同范式）。本文件默认平台 mac（jsdom 下真实模块也回退 'mac'，行为一致）。 */
 vi.mock('@/composables/effects/usePlatformChrome', async () => {
-  const { ref } = await import('vue')
-  const isFullscreen = ref(false)
-  platformChromeMock.isFullscreen = isFullscreen
-  return {
-    usePlatformChrome: () => ({ isFullscreen }),
-    detectPlatform: platformChromeMock.detectPlatform,
-  }
+  const { installPlatformChromeMock } = await import('@/__tests__/helpers/platform-chrome-mock')
+  return installPlatformChromeMock('mac')
 })
 
 import AppShell from '@/components/shell/AppShell.vue'
@@ -117,25 +105,11 @@ describe('AppShell 拓扑渲染 gate（刻意调整形态回归防线）', () =>
 
   it('TrafficLight 全屏态 opacity-0 + pointer-events-none 成对（review MF-1）', async () => {
     const wrapper = mount(AppShell)
-    const tl = wrapper.find('.traffic-light')
-    expect(tl.exists()).toBe(true)
-
-    // 非全屏：两类均无（圆点可见且可点）
-    expect(tl.classes()).not.toContain('opacity-0')
-    expect(tl.classes()).not.toContain('pointer-events-none')
-
-    // 全屏：opacity-0 与 pointer-events-none 必须成对——单独任一都会让隐形圆点
-    // （absolute z-10）重新劫持窗口控制点击（折叠+全屏下悬浮在 PanelHeader chrome 之上）
-    platformChromeMock.isFullscreen.value = true
-    await nextTick()
-    expect(tl.classes()).toContain('opacity-0')
-    expect(tl.classes()).toContain('pointer-events-none')
-
-    // 退出全屏：成对消失，恢复可交互
-    platformChromeMock.isFullscreen.value = false
-    await nextTick()
-    expect(tl.classes()).not.toContain('opacity-0')
-    expect(tl.classes()).not.toContain('pointer-events-none')
+    expect(wrapper.find('.traffic-light').exists()).toBe(true)
+    await expectFullscreenChromePairing(wrapper.find('.traffic-light'), async (v) => {
+      platformChromeMock.isFullscreen.value = v
+      await nextTick()
+    })
   })
 })
 

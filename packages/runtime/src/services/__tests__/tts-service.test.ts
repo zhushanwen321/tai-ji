@@ -35,7 +35,7 @@ import { getTtsCacheDir } from '@taiji/shared/paths'
 import type { ResolvedProviderCredential } from '../ports/provider-credential-resolver.js'
 import type { IProviderCredentialResolver } from '../ports/provider-credential-resolver.js'
 import type { TtsDriver, TtsSynthesisChunk } from '../ports/tts.js'
-import { TtsService, TtsServiceError } from '../tts-service.js'
+import { TtsService, TtsServiceError, type TtsConfigureResult } from '../tts-service.js'
 import {
   canonicalSerialize,
   enforceTtsCacheFifoCap,
@@ -186,6 +186,29 @@ function listWavFiles(): string[] {
   return readdirSync(cacheDir).filter((name) => name.endsWith('.wav'))
 }
 
+/** 封顶后的缓存内容断言（新文件 + 指定残留文件名全集，恰等）。 */
+function expectCacheContents(newFilePath: string, ...keptNames: string[]): void {
+  const remaining = listWavFiles().sort()
+  expect(remaining).toHaveLength(keptNames.length + 1)
+  expect(remaining).toContain(basename(newFilePath))
+  for (const name of keptNames) expect(remaining).toContain(name)
+}
+
+/** 读回落盘 tts.json 的 providers 表（配置写路用例共用）。 */
+function readStoredProviders(): Partial<Record<TtsProviderId, TtsConfig>> {
+  return (JSON.parse(readFileSync(join(dir, 'tts.json'), 'utf-8')) as { providers: Partial<Record<TtsProviderId, TtsConfig>> }).providers
+}
+
+/** minimax from-provider 带入（联动指引类用例共用载荷）。 */
+function configureMinimaxFromProvider(svc: TtsService): Promise<TtsConfigureResult> {
+  return svc.configure({ providerId: 'minimax', config: baseStepfunConfig(), apiKeys: { minimax: 'from-provider' } })
+}
+
+/** mimo from-provider 带入（baseUrl 联动类用例共用载荷；overrides 透传 baseStepfunConfig）。 */
+async function configureMimoFromProvider(svc: TtsService, overrides: Partial<TtsConfig> = {}): Promise<TtsConfigureResult> {
+  return svc.configure({ providerId: 'mimo', config: baseStepfunConfig(overrides), apiKeys: { mimo: 'from-provider' } })
+}
+
 /** 老缓存文件制造（可指定字节大小与 mtime 先后）。 */
 function seedCacheFile(name: string, sizeBytes: number, mtime: Date): string {
   const cacheDir = getTtsCacheDir(dir)
@@ -278,11 +301,7 @@ describe('缓存双条件 FIFO 封顶（§7.4 步骤 7）', () => {
     seedCacheFile('old-b.wav', 600, OLD)
     // 上限 1000：写新文件后总量 1246 > 1000 → 删最旧 old-a → 646 ≤ 1000 停
     const newFilePath = await prepareAndSpeak(makeCapService({ maxBytes: 1000 }))
-    const remaining = listWavFiles().sort()
-    expect(remaining).toHaveLength(2)
-    expect(remaining).toContain(basename(newFilePath))
-    expect(remaining).toContain('old-b.wav')
-    expect(remaining).not.toContain('old-a.wav')
+    expectCacheContents(newFilePath, 'old-b.wav')
   })
 
   it('文件数条件：超限删最旧至满足', async () => {
@@ -291,10 +310,7 @@ describe('缓存双条件 FIFO 封顶（§7.4 步骤 7）', () => {
     seedCacheFile('c.wav', 10, new Date('2026-02-01T00:00:00Z'))
     // 上限 2：写新文件后 4 个 → 删最旧 a、b → 剩 c + 新文件
     const newFilePath = await prepareAndSpeak(makeCapService({ maxFiles: 2 }))
-    const remaining = listWavFiles().sort()
-    expect(remaining).toHaveLength(2)
-    expect(remaining).toContain(basename(newFilePath))
-    expect(remaining).toContain('c.wav')
+    expectCacheContents(newFilePath, 'c.wav')
   })
 
   it('并发幂等：目标已被删除时 force rm 不抛、封顶照常收敛', () => {
@@ -363,7 +379,20 @@ describe('getConfig 脱敏投影（永不回 Key 本体）', () => {
   })
 })
 
-// ── 4. tts.json 原子写 + parse 失败降级 ──────────────────────────────────
+describe('getCapabilities 表单投影（三家键，本层纯转发）', () => {
+  it('返回三家键的全集投影，数据源 = 构造注入的 formModels（本层零加工）', () => {
+    const deps = makeServiceDeps()
+    const svc = makeService(deps)
+    const forms = svc.getCapabilities()
+    expect(Object.keys(forms).sort()).toEqual(['mimo', 'minimax', 'stepfun'])
+    // 投影与注入源同对象引用（纯转发语义，与生产接线 getTtsFormModels 同构）
+    expect(forms.stepfun).toBe(deps.stepfun.driver.formModel)
+    expect(forms.minimax).toBe(deps.minimax.driver.formModel)
+    expect(forms.mimo).toBe(deps.mimo.driver.formModel)
+  })
+})
+
+// ── 4. tts.json 原子写 + parse 失败降级 ──────────────────────────────────────
 
 describe('tts.json 原子写与 parse 失败降级', () => {
   it('configure 原子写：落盘可解析且无 tmp 残留', async () => {
@@ -581,11 +610,7 @@ describe('configure Key 联动（D4）', () => {
     const deps = makeServiceDeps()
     deps.resolver = makeResolver({ minimax: { unsupported: 'unresolved-env' } })
     const svc = makeService(deps)
-    const result = await svc.configure({
-      providerId: 'minimax',
-      config: baseStepfunConfig(),
-      apiKeys: { minimax: 'from-provider' },
-    })
+    const result = await configureMinimaxFromProvider(svc)
     expect(result.ok).toBe(false)
     expect(result.error).toContain('手动粘贴')
     expect(existsSync(join(dir, 'secrets', 'tts-minimax-apikey.txt'))).toBe(false)
@@ -594,11 +619,7 @@ describe('configure Key 联动（D4）', () => {
 
   it('全源未命中：ok:false + 手动粘贴指引', async () => {
     const svc = makeService(makeServiceDeps())
-    const result = await svc.configure({
-      providerId: 'minimax',
-      config: baseStepfunConfig(),
-      apiKeys: { minimax: 'from-provider' },
-    })
+    const result = await configureMinimaxFromProvider(svc)
     expect(result.ok).toBe(false)
     expect(result.error).toContain('手动粘贴')
   })
@@ -612,22 +633,12 @@ describe('configure Key 联动（D4）', () => {
     )
     const svc = makeService(deps)
     // baseUrl == isDefault 出厂默认 → 联动写入
-    await svc.configure({
-      providerId: 'mimo',
-      config: baseStepfunConfig({ baseUrl: DEFAULT_BASE_URL }),
-      apiKeys: { mimo: 'from-provider' },
-    })
-    const store = JSON.parse(readFileSync(join(dir, 'tts.json'), 'utf-8')) as { providers: Record<string, TtsConfig> }
-    expect(store.providers.mimo.baseUrl).toBe('https://token-plan-cn.xiaomimimo.com/v1')
+    await configureMimoFromProvider(svc, { baseUrl: DEFAULT_BASE_URL })
+    expect(readStoredProviders().mimo?.baseUrl).toBe('https://token-plan-cn.xiaomimimo.com/v1')
 
     // 手动改过的值不覆盖
-    await svc.configure({
-      providerId: 'mimo',
-      config: baseStepfunConfig({ baseUrl: 'https://my-own.example.com/v1' }),
-      apiKeys: { mimo: 'from-provider' },
-    })
-    const store2 = JSON.parse(readFileSync(join(dir, 'tts.json'), 'utf-8')) as { providers: Record<string, TtsConfig> }
-    expect(store2.providers.mimo.baseUrl).toBe('https://my-own.example.com/v1')
+    await configureMimoFromProvider(svc, { baseUrl: 'https://my-own.example.com/v1' })
+    expect(readStoredProviders().mimo?.baseUrl).toBe('https://my-own.example.com/v1')
   })
 
   it('MiMo baseUrl 联动跟随 Key 带入命中 id（D3 验收缺陷回归：独立遍历映射表时首位无凭据 id 经 catalog 短路成默认集群）', async () => {
@@ -642,13 +653,8 @@ describe('configure Key 联动（D4）', () => {
       },
     )
     const svc = makeService(deps)
-    await svc.configure({
-      providerId: 'mimo',
-      config: baseStepfunConfig({ baseUrl: DEFAULT_BASE_URL }),
-      apiKeys: { mimo: 'from-provider' },
-    })
-    const store = JSON.parse(readFileSync(join(dir, 'tts.json'), 'utf-8')) as { providers: Record<string, TtsConfig> }
-    expect(store.providers.mimo.baseUrl).toBe('https://token-plan-cn.xiaomimimo.com/v1')
+    await configureMimoFromProvider(svc, { baseUrl: DEFAULT_BASE_URL })
+    expect(readStoredProviders().mimo?.baseUrl).toBe('https://token-plan-cn.xiaomimimo.com/v1')
   })
 
   it('MiniMax 不联动 baseUrl（默认值保留）', async () => {
@@ -679,6 +685,14 @@ describe('configure Key 联动（D4）', () => {
 })
 
 // ── 8. message-handler 协议往返形状（§7.1 逐字段）────────────────────────
+
+describe('TtsMessageHandler.handles（路由认领清单）', () => {
+  it('认领 tts 四 RPC（且仅这四个类型）', () => {
+    const ctx = { send: vi.fn(), sendError: vi.fn(), reply: vi.fn(), ttsService: makeService(makeServiceDeps()) } as unknown as TtsHandlerContext
+    const handler = new TtsMessageHandler(ctx)
+    expect(handler.handles).toEqual(['tts.getConfig', 'tts.configure', 'tts.speak', 'tts.getCapabilities'])
+  })
+})
 
 describe('TtsMessageHandler 协议往返（payload/reply 键名与 §7.1 表一致）', () => {
   let deps: ServiceDeps

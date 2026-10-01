@@ -91,6 +91,24 @@ function speakResolves(filePath = '/data/tts-cache/ab12.wav'): void {
   ttsMocks.speak.mockResolvedValue({ filePath })
 }
 
+/** 驱动一个任务到 playing（speak 成功 + play 放行；播放态类用例公共前步）。 */
+async function startPlaying(messageId = 'm1'): Promise<void> {
+  speakResolves()
+  player().speak('s1', messageId, 'hello')
+  await flush()
+  resolvePlay()
+  await flush()
+  expect(player().speakStateOf(messageId)).toBe('playing')
+}
+
+/** 错误映射用例骨架：固定样句发出 + flush + toast key 与任务回 idle 断言（reject 注入在调用前完成）。 */
+async function speakAndExpectToast(expectedKeys: string[], text = 'hello'): Promise<void> {
+  player().speak('s1', 'm1', text)
+  await flush()
+  expect(toastMessages()).toEqual(expectedKeys)
+  expect(player().speakStateOf('m1')).toBe('idle')
+}
+
 // ── deferred reply：手动放行结算时点（构造「reply 迟到」时序用）──────────────
 type ReplyResolve = (value: { filePath: string }) => void
 type ReplyReject = (e: unknown) => void
@@ -155,12 +173,7 @@ describe('useTtsPlayer — 发送前本地拦截（验收 1：不发 RPC）', ()
   })
 
   it('空文本拦截发生在全局互斥取消之前：正在播放的朗读不受影响（§5.1「点击无效即终态」）', async () => {
-    speakResolves()
-    player().speak('s1', 'm1', 'hello')
-    await flush()
-    resolvePlay()
-    await flush()
-    expect(player().speakStateOf('m1')).toBe('playing')
+    await startPlaying()
     player().speak('s1', 'm2', '```\nfence only\n```')
     await flush()
     expect(toastMessages()).toEqual(['panel.message.speakEmpty'])
@@ -186,12 +199,7 @@ describe('useTtsPlayer — 播放态驱动（验收 5：playing 由 play() resol
   })
 
   it('playing 中 stop()：pause 被调、立即回 idle', async () => {
-    speakResolves()
-    player().speak('s1', 'm1', 'hello')
-    await flush()
-    resolvePlay()
-    await flush()
-    expect(player().speakStateOf('m1')).toBe('playing')
+    await startPlaying()
     player().stop()
     expect(lastStub()?.pause).toHaveBeenCalledTimes(1)
     expect(player().speakStateOf('m1')).toBe('idle')
@@ -296,19 +304,13 @@ describe('useTtsPlayer — 错误码 → toast key（验收 4：§5.4 逐码映�
     ['tts_empty_text', ['panel.message.speakEmpty']],
   ])('%s → 对应 speak* key，任务回 idle', async (code, expected) => {
     speakRejectsWithCode(code)
-    player().speak('s1', 'm1', 'hello')
-    await flush()
-    expect(toastMessages()).toEqual(expected)
-    expect(player().speakStateOf('m1')).toBe('idle')
+    await speakAndExpectToast(expected)
   })
 
   it('tts_vendor_error → speakVendorError，detail = 厂商错误摘要', async () => {
     speakRejectsWithCode('tts_vendor_error', 'voice not supported')
-    player().speak('s1', 'm1', 'hello')
-    await flush()
+    await speakAndExpectToast(['panel.message.speakVendorError'])
     expect(i18nMocks.t).toHaveBeenCalledWith('panel.message.speakVendorError', { detail: 'voice not supported' })
-    expect(toastMessages()).toEqual(['panel.message.speakVendorError'])
-    expect(player().speakStateOf('m1')).toBe('idle')
   })
 
   it('tts_vendor_error 摘要截断到 200 字符（§5.4 截断上限）', async () => {
@@ -320,26 +322,18 @@ describe('useTtsPlayer — 错误码 → toast key（验收 4：§5.4 逐码映�
 
   it('tts_text_too_long（runtime 防御路径）→ speakTooLong，count = 清洗后长度', async () => {
     speakRejectsWithCode('tts_text_too_long')
-    player().speak('s1', 'm1', 'hello')
-    await flush()
+    await speakAndExpectToast(['panel.message.speakTooLong'])
     expect(i18nMocks.t).toHaveBeenCalledWith('panel.message.speakTooLong', { count: 5 })
-    expect(toastMessages()).toEqual(['panel.message.speakTooLong'])
   })
 
   it('未知错误码（传输层 timeout 等）→ speakFailed 兜底（D8 catch-all）', async () => {
     speakRejectsWithCode('timeout')
-    player().speak('s1', 'm1', 'hello')
-    await flush()
-    expect(toastMessages()).toEqual(['panel.message.speakFailed'])
-    expect(player().speakStateOf('m1')).toBe('idle')
+    await speakAndExpectToast(['panel.message.speakFailed'])
   })
 
   it('非 Error 形态的 reject → speakFailed 兜底', async () => {
     speakResolves()
     ttsMocks.speak.mockRejectedValueOnce('plain string failure')
-    player().speak('s1', 'm1', 'hello')
-    await flush()
-    expect(toastMessages()).toEqual(['panel.message.speakFailed'])
-    expect(player().speakStateOf('m1')).toBe('idle')
+    await speakAndExpectToast(['panel.message.speakFailed'])
   })
 })

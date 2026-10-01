@@ -130,6 +130,56 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** invalid_payload 错误工厂（configure 写路整条拒绝形态，§7.1）。 */
+function invalidPayload(message: string): TtsServiceError {
+  return new TtsServiceError('invalid_payload', message)
+}
+
+/** wire 校验第一段：必填形状（wire 数据未经信任，运行时判型；错误序 = 字段声明序）。 */
+function requireValidCoreFields(config: TtsConfig): void {
+  if (typeof config.baseUrl !== 'string' || config.baseUrl.trim() === '') throw invalidPayload('config.baseUrl required')
+  if (typeof config.model !== 'string' || config.model.trim() === '') throw invalidPayload('config.model required')
+  if (typeof config.voice !== 'string' || config.voice.trim() === '') throw invalidPayload('config.voice required')
+  if (!isPlainObject(config.vendor)) throw invalidPayload('config.vendor must be an object')
+}
+
+/** wire 校验第二段：speed 必为有限数值且在该家投影域内（speedRange null = 该家不支持）。 */
+function requireValidSpeed(formModel: TtsFormModel, config: TtsConfig): void {
+  if (config.speed === undefined) return
+  if (typeof config.speed !== 'number' || !Number.isFinite(config.speed)) {
+    throw invalidPayload('config.speed must be a finite number')
+  }
+  const range = formModel.capabilities.speedRange
+  if (!range) throw invalidPayload('speed is not supported by this provider')
+  if (config.speed < range[0] || config.speed > range[1]) {
+    throw invalidPayload(`config.speed out of range [${range[0]}, ${range[1]}]`)
+  }
+}
+
+/** wire 校验第三段：可选字段类型形状（instructions string / sampleRate 有限数值）。 */
+function requireValidOptionalFields(config: TtsConfig): void {
+  if (config.instructions !== undefined && typeof config.instructions !== 'string') {
+    throw invalidPayload('config.instructions must be a string')
+  }
+  if (config.sampleRate !== undefined && (typeof config.sampleRate !== 'number' || !Number.isFinite(config.sampleRate))) {
+    throw invalidPayload('config.sampleRate must be a finite number')
+  }
+}
+
+/** 校验通过后的白名单拷贝（标准位字段逐项搬运；vendor 子树恒等搬运 D2）。 */
+function pickValidatedFields(config: TtsConfig): TtsConfig {
+  const validated: TtsConfig = {
+    baseUrl: config.baseUrl,
+    model: config.model,
+    voice: config.voice,
+    vendor: config.vendor,
+  }
+  if (config.speed !== undefined) validated.speed = config.speed
+  if (config.instructions !== undefined) validated.instructions = config.instructions
+  if (config.sampleRate !== undefined) validated.sampleRate = config.sampleRate
+  return validated
+}
+
 /** 单家驱动缺省配置骨架（D3 零厂商判断：默认值全部从该家表单投影推导，无硬编码枚举）。
  *  数据源是表单投影而非 driver 实例——骨架与 baseUrl 无关，先于 driver 现建发生。 */
 function skeletonConfigOf(formModel: TtsFormModel): TtsConfig {
@@ -449,40 +499,14 @@ export class TtsService {
     return { ok: true, config: await this.getConfig() }
   }
 
-  /** runtime 复核（设计 §7.4）：必填形状、speed 域内、发音词典条目格式（wire 数据未经信任，运行时判型）。 */
+  /** runtime 复核（设计 §7.4）：必填形状、speed 域内、可选字段形状、发音词典条目格式——
+   *  校验段按域拆分（每段错误序不变），本方法只编排段序。 */
   private validateTtsConfig(formModel: TtsFormModel, config: TtsConfig): TtsConfig {
-    const invalid = (message: string): TtsServiceError => new TtsServiceError('invalid_payload', message)
-    if (typeof config.baseUrl !== 'string' || config.baseUrl.trim() === '') throw invalid('config.baseUrl required')
-    if (typeof config.model !== 'string' || config.model.trim() === '') throw invalid('config.model required')
-    if (typeof config.voice !== 'string' || config.voice.trim() === '') throw invalid('config.voice required')
-    if (!isPlainObject(config.vendor)) throw invalid('config.vendor must be an object')
-    if (config.speed !== undefined) {
-      if (typeof config.speed !== 'number' || !Number.isFinite(config.speed)) {
-        throw invalid('config.speed must be a finite number')
-      }
-      const range = formModel.capabilities.speedRange
-      if (!range) throw invalid('speed is not supported by this provider')
-      if (config.speed < range[0] || config.speed > range[1]) {
-        throw invalid(`config.speed out of range [${range[0]}, ${range[1]}]`)
-      }
-    }
-    if (config.instructions !== undefined && typeof config.instructions !== 'string') {
-      throw invalid('config.instructions must be a string')
-    }
-    if (config.sampleRate !== undefined && (typeof config.sampleRate !== 'number' || !Number.isFinite(config.sampleRate))) {
-      throw invalid('config.sampleRate must be a finite number')
-    }
+    requireValidCoreFields(config)
+    requireValidSpeed(formModel, config)
+    requireValidOptionalFields(config)
     this.validatePronunciationDict(config.vendor)
-    const validated: TtsConfig = {
-      baseUrl: config.baseUrl,
-      model: config.model,
-      voice: config.voice,
-      vendor: config.vendor,
-    }
-    if (config.speed !== undefined) validated.speed = config.speed
-    if (config.instructions !== undefined) validated.instructions = config.instructions
-    if (config.sampleRate !== undefined) validated.sampleRate = config.sampleRate
-    return validated
+    return pickValidatedFields(config)
   }
 
   /**

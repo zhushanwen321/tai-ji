@@ -51,6 +51,7 @@ vi.mock('@taiji/ui/features/settings', () => ({
 import TtsPage from '@/components/settings/tts/TtsPage.vue'
 import { useToast } from '@/composables/useToast'
 import { useTtsSpeechEnabled } from '@/components/settings/tts/use-tts-enabled'
+import { pickSelect } from '@/__tests__/helpers/reka-select'
 
 function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T
@@ -98,27 +99,30 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-const sel = (w: ReturnType<typeof mount>, testid: string) => w.find(`[data-testid="${testid}"]`)
+/**
+ * 保存并取本次 configure 完整载荷（vendor 子树/标准位断言用例共用步；恰好一次调用）。
+ */
+async function saveAndCapturePayload(w: ReturnType<typeof mount>): Promise<Record<string, unknown>> {
+  await sel(w, 'tts-save').trigger('click')
+  await flushPromises()
+  expect(ttsApiMock.configure).toHaveBeenCalledTimes(1)
+  return ttsApiMock.configure.mock.calls[0][0] as Record<string, unknown>
+}
 
 /**
- * reka-ui Select 交互（先例 = system-page-smart-context.test.ts）：SelectContent 经
- * SelectPortal teleport 到 body 且仅 open 时挂载；Trigger 在 pointerdown 时打开，
- * happy-dom 下需显式 dispatch；选中项按可见文本点选（pointerup + click）。
- * 禁止事后清 body.innerHTML——Teleport 的 fragment 节点仍被 Vue 持有，强拆会在
- * 组件 unmount 时抛 nextSibling null。
+ * 保存并取本次 configure 载荷的 apiKeys（apiKeys 三态用例共用步）。
  */
-async function pickSelect(w: ReturnType<typeof mount>, triggerTestid: string, optionText: string): Promise<void> {
-  const trigger = sel(w, triggerTestid).element as HTMLElement
-  trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
-  trigger.click()
-  await flushPromises()
-  const options = Array.from(document.body.querySelectorAll('[role="option"]'))
-  const target = options.find((o) => (o.textContent ?? '').includes(optionText))
-  expect(target, `option "${optionText}" not found for ${triggerTestid}`).toBeTruthy()
-  target!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
-  target!.click()
-  await flushPromises()
+async function saveAndCaptureApiKeys(w: ReturnType<typeof mount>): Promise<Record<string, unknown> | undefined> {
+  const payload = await saveAndCapturePayload(w)
+  return payload['apiKeys'] as Record<string, unknown> | undefined
 }
+
+/** 断言当前 toast 列表中存在含指定文案的条目（错误/成功提示路径共用）。 */
+function expectToastContaining(fragment: string): void {
+  expect(useToast().toasts.value.some((x) => x.message.includes(fragment))).toBe(true)
+}
+
+const sel = (w: ReturnType<typeof mount>, testid: string) => w.find(`[data-testid="${testid}"]`)
 
 describe('表单控件存在性（u1 mock 投影数据驱动，验收 2）', () => {
   it('MiniMax（默认选中家）：情感/效果器/词典/水印/LaTeX 渲染；指令与音色标签不渲染', async () => {
@@ -230,33 +234,27 @@ describe('保存提交与保存并测试', () => {
     const w = await mountPage()
     // 用户改情感（MiniMax）
     await pickSelect(w, 'tts-emotion-select-minimax', '开心')
-    await sel(w, 'tts-save').trigger('click')
-    await flushPromises()
-    expect(ttsApiMock.configure).toHaveBeenCalledTimes(1)
-    const payload = ttsApiMock.configure.mock.calls[0][0] as { providerId: string; config: { model: string; vendor: Record<string, unknown> }; apiKeys?: Record<string, unknown> }
+    const payload = (await saveAndCapturePayload(w)) as {
+      providerId: string
+      config: { model: string; vendor: Record<string, unknown> }
+    }
     expect(payload.providerId).toBe('minimax')
     expect(payload.config.model).toBe('speech-2.6-hd')
-    expect((payload.config.vendor as Record<string, unknown>).voice_setting).toMatchObject({ emotion: 'happy' })
+    expect(payload.config.vendor.voice_setting).toMatchObject({ emotion: 'happy' })
     // 成功 toast（zh-CN locale）
-    expect(useToast().toasts.value.some((x) => x.message.includes('已保存'))).toBe(true)
+    expectToastContaining('已保存')
   })
 
   it('apiKeys：有输入才带；清除按钮 → null；联动带入 → from-provider（仅 providerKeyAvailable 时可点）', async () => {
     // a) 手动粘贴 Key
     let w = await mountPage()
     await sel(w, 'tts-apikey-input-minimax').setValue('sk-test-123')
-    await sel(w, 'tts-save').trigger('click')
-    await flushPromises()
-    let payload = ttsApiMock.configure.mock.calls[0][0] as { apiKeys?: Record<string, unknown> }
-    expect(payload.apiKeys).toMatchObject({ minimax: 'sk-test-123' })
+    expect(await saveAndCaptureApiKeys(w)).toMatchObject({ minimax: 'sk-test-123' })
     // 未输入且未点动作 → apiKeys 缺席该家（不动）
     w.unmount()
     ttsApiMock.configure.mockClear()
     w = await mountPage()
-    await sel(w, 'tts-save').trigger('click')
-    await flushPromises()
-    payload = ttsApiMock.configure.mock.calls[0][0] as { apiKeys?: Record<string, unknown> }
-    expect(payload.apiKeys?.minimax).toBeUndefined()
+    expect((await saveAndCaptureApiKeys(w))?.minimax).toBeUndefined()
     w.unmount()
     ttsApiMock.configure.mockClear()
 
@@ -267,10 +265,7 @@ describe('保存提交与保存并测试', () => {
     // StepFun 恒不参与联动（providerKeyAvailable false → 提示行不渲染）
     expect(sel(w, 'tts-key-link-hint-stepfun').exists()).toBe(false)
     await sel(w, 'tts-key-bring-minimax').trigger('click')
-    await sel(w, 'tts-save').trigger('click')
-    await flushPromises()
-    payload = ttsApiMock.configure.mock.calls[0][0] as { apiKeys?: Record<string, unknown> }
-    expect(payload.apiKeys).toMatchObject({ minimax: 'from-provider' })
+    expect(await saveAndCaptureApiKeys(w)).toMatchObject({ minimax: 'from-provider' })
     w.unmount()
 
     // c) 清除：hasApiKey 家点清除 → null
@@ -281,10 +276,7 @@ describe('保存提交与保存并测试', () => {
     w = await mountPage()
     expect(sel(w, 'tts-apikey-clear-minimax').exists()).toBe(true)
     await sel(w, 'tts-apikey-clear-minimax').trigger('click')
-    await sel(w, 'tts-save').trigger('click')
-    await flushPromises()
-    payload = ttsApiMock.configure.mock.calls[0][0] as { apiKeys?: Record<string, unknown> }
-    expect(payload.apiKeys).toMatchObject({ minimax: null })
+    expect(await saveAndCaptureApiKeys(w)).toMatchObject({ minimax: null })
   })
 
   it('configure 返回 ok=false → 错误 toast（error 带因），不刷新表单', async () => {
@@ -292,7 +284,7 @@ describe('保存提交与保存并测试', () => {
     const w = await mountPage()
     await sel(w, 'tts-save').trigger('click')
     await flushPromises()
-    expect(useToast().toasts.value.some((x) => x.message.includes('unsupported form shape'))).toBe(true)
+    expectToastContaining('unsupported form shape')
   })
 
   it('保存并测试：保存成功后经 useTtsPlayer.speak 发固定样句（settings-tts-test 伪 id）', async () => {
@@ -313,6 +305,124 @@ describe('保存提交与保存并测试', () => {
     await sel(w, 'tts-save-and-test').trigger('click')
     await flushPromises()
     expect(playerMock.speak).not.toHaveBeenCalled()
+  })
+})
+
+describe('表单全控件操作回路（TtsProviderForm v-model 写路 + 发音词典行编辑）', () => {
+  it('MiniMax 全控件编辑 → save 载荷标准位与 vendor 子树按编辑值落位', async () => {
+    const w = await mountPage()
+    // 凭据区：baseUrl 切集群
+    await pickSelect(w, 'tts-baseurl-select-minimax', '国际')
+    // 基础区：模型/音色/语速/音量/音调
+    await pickSelect(w, 'tts-model-select-minimax', 'Speech 2.8 HD')
+    await pickSelect(w, 'tts-speed-select-minimax', '1.5')
+    await pickSelect(w, 'tts-volume-select-minimax', '2')
+    await pickSelect(w, 'tts-pitch-select-minimax', '4')
+    // 音频区：采样率/声道
+    await pickSelect(w, 'tts-samplerate-select-minimax', '32000')
+    await pickSelect(w, 'tts-channel-select-minimax', '双声道')
+    // 风格区：情感/语言增强/LaTeX 开关
+    await pickSelect(w, 'tts-emotion-select-minimax', '悲伤')
+    await pickSelect(w, 'tts-lang-select-minimax', 'English')
+    await sel(w, 'tts-toggle-minimax-latex_read').trigger('click')
+    // 进阶区：第二音色 → 权重档位出现并选档；效果器档位 + 效果；水印开关；词典行增删
+    await pickSelect(w, 'tts-secondvoice-select-minimax', '青涩青年音色')
+    expect(sel(w, 'tts-weight-select-minimax').exists()).toBe(true)
+    await pickSelect(w, 'tts-weight-select-minimax', '51%')
+    await pickSelect(w, 'tts-vm-minimax-pitch', '25')
+    await pickSelect(w, 'tts-vm-effect-minimax', '电话失真')
+    await sel(w, 'tts-toggle-minimax-aigc_watermark').trigger('click')
+    await sel(w, 'tts-pronunciation-add-minimax').trigger('click')
+    await sel(w, 'tts-pronunciation-from-0').setValue('太极')
+    await sel(w, 'tts-pronunciation-to-0').setValue('taiji')
+    await sel(w, 'tts-pronunciation-add-minimax').trigger('click')
+    await sel(w, 'tts-pronunciation-from-1').setValue('临时行')
+    await sel(w, 'tts-pronunciation-remove-1').trigger('click')
+    expect(sel(w, 'tts-pronunciation-row-0').exists()).toBe(true)
+    expect(sel(w, 'tts-pronunciation-row-1').exists()).toBe(false)
+
+    const payload = (await saveAndCapturePayload(w)) as {
+      providerId: string
+      config: { baseUrl: string; model: string; speed: number; sampleRate: number; vendor: Record<string, unknown> }
+    }
+    expect(payload.providerId).toBe('minimax')
+    expect(payload.config.baseUrl).toBe('https://api.minimaxi.com/v1')
+    expect(payload.config.model).toBe('speech-2.8-hd')
+    expect(payload.config.speed).toBe(1.5)
+    expect(payload.config.sampleRate).toBe(32000)
+    const vendor = payload.config.vendor as {
+      voice_setting: Record<string, unknown>
+      audio_setting: Record<string, unknown>
+      language_boost?: string
+      timbre_weights: Array<{ voice_id: string; weight: number }>
+      voice_modify: Record<string, unknown>
+      aigc_watermark?: boolean
+      pronunciation_dict: { tone: string[] }
+    }
+    expect(vendor.voice_setting).toMatchObject({ vol: 2, pitch: 4, emotion: 'sad', latex_read: true, text_normalization: false })
+    expect(vendor.audio_setting).toMatchObject({ channel: 2 })
+    expect(vendor.language_boost).toBe('English')
+    // 双音色：主音色权重 = 总量 100 − 第二权重 51
+    expect(vendor.timbre_weights).toEqual([
+      { voice_id: 'male-qn-qingse', weight: 49 },
+      { voice_id: 'male-qn-qingse', weight: 51 },
+    ])
+    expect(vendor.voice_modify).toMatchObject({ pitch: 25, sound_effects: 'lofi_telephone' })
+    expect(vendor.aigc_watermark).toBe(true)
+    // 空行剔除后仅剩首行「原文/替换」
+    expect(vendor.pronunciation_dict.tone).toEqual(['太极/taiji'])
+  })
+
+  it('StepFun：指令输入与文本归一开关写进载荷（instructions + text_normalization=enhanced）', async () => {
+    const w = await mountPage()
+    await sel(w, 'tts-provider-card-stepfun').trigger('click')
+    await flushPromises()
+    await sel(w, 'tts-instructions-input-stepfun').setValue('轻声细语')
+    await sel(w, 'tts-toggle-stepfun-text_normalization').trigger('click')
+    await sel(w, 'tts-save').trigger('click')
+    await flushPromises()
+    const payload = ttsApiMock.configure.mock.calls[0][0] as {
+      config: { instructions: string; vendor: Record<string, unknown> }
+    }
+    expect(payload.config.instructions).toBe('轻声细语')
+    expect(payload.config.vendor.text_normalization).toBe('enhanced')
+  })
+})
+
+describe('测试播放按钮三态（settings-tts-test 互斥态的按钮面）', () => {
+  it('loading → 「测试中」按钮点击即 stop；playing → 「停止测试」按钮点击即 stop', async () => {
+    playerMock.speakStateOf.mockReturnValue('loading')
+    const loading = await mountPage()
+    expect(sel(loading, 'tts-test-loading').exists()).toBe(true)
+    expect(sel(loading, 'tts-save-and-test').exists()).toBe(false)
+    await sel(loading, 'tts-test-loading').trigger('click')
+    expect(playerMock.stop).toHaveBeenCalledTimes(1)
+    loading.unmount()
+
+    playerMock.speakStateOf.mockReturnValue('playing')
+    const playing = await mountPage()
+    expect(sel(playing, 'tts-test-stop').exists()).toBe(true)
+    await sel(playing, 'tts-test-stop').trigger('click')
+    expect(playerMock.stop).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('加载失败路径（§7.5 配置/传输失败形态）', () => {
+  it('getConfig reject → loadFailed toast；capabilities 正常时表单照常渲染', async () => {
+    ttsApiMock.getConfig.mockRejectedValueOnce(new Error('rpc down'))
+    const w = await mountPage()
+    expect(useToast().toasts.value.some((x) => x.message.includes('加载失败'))).toBe(true)
+    expect(sel(w, 'tts-emotion-select-minimax').exists()).toBe(true)
+  })
+
+  it('configure 抛错（传输层异常）→ 错误 toast 带 e.message，保存中止', async () => {
+    const w = await mountPage()
+    ttsApiMock.configure.mockRejectedValueOnce(new Error('ws down'))
+    await sel(w, 'tts-save').trigger('click')
+    await flushPromises()
+    expectToastContaining('ws down')
+    // 表单不刷新（回读缺席）：configure 仅失败一次
+    expect(ttsApiMock.configure).toHaveBeenCalledTimes(1)
   })
 })
 

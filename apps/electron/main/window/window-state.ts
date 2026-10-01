@@ -45,8 +45,8 @@ export interface Size {
 }
 
 /** 非 mac 默认/恢复尺寸下限 = BrowserWindow minWidth/minHeight（既有约束，守住） */
-export const WINDOW_MIN_WIDTH = 800
-export const WINDOW_MIN_HEIGHT = 600
+const WINDOW_MIN_WIDTH = 800
+const WINDOW_MIN_HEIGHT = 600
 
 /**
  * 比例取值 cap（设计 §6.4 cap 取值依据）：
@@ -108,7 +108,7 @@ export interface WindowStateLogger {
 }
 
 /** 防抖窗口（设计定值 500ms）：快速连续 resize/move 合并为一次写 */
-export const WINDOW_STATE_DEBOUNCE_MS = 500
+const WINDOW_STATE_DEBOUNCE_MS = 500
 
 /** 持久化文件名（<getDataDir()>/window-state.json） */
 export const WINDOW_STATE_FILENAME = 'window-state.json'
@@ -119,6 +119,23 @@ export interface WindowStatePersistenceDeps {
   logger: WindowStateLogger
   /** 防抖毫秒（默认 500；单测可注小值，本仓测试用 fake timers 不依赖此项） */
   debounceMs?: number
+}
+
+/** window-state.json 字段形状 guard（load 解析段的判型核心；width/height 必为有限数值）。 */
+function isWindowStateShape(value: unknown): value is { width: number; height: number; isMaximized?: unknown } {
+  if (value === null || typeof value !== 'object') return false
+  const candidate = value as { width?: unknown; height?: unknown }
+  return (
+    typeof candidate.width === 'number' && Number.isFinite(candidate.width) &&
+    typeof candidate.height === 'number' && Number.isFinite(candidate.height)
+  )
+}
+
+/** 原始 JSON 文本 → WindowState（字段非法时 throw，由 load 归一为 null + warn）。 */
+function parseWindowState(raw: string): WindowState {
+  const parsed: unknown = JSON.parse(raw)
+  if (!isWindowStateShape(parsed)) throw new Error('invalid window-state fields')
+  return { width: parsed.width, height: parsed.height, isMaximized: parsed.isMaximized === true }
 }
 
 /**
@@ -143,6 +160,15 @@ export class WindowStatePersistence {
     this.debounceMs = deps.debounceMs ?? WINDOW_STATE_DEBOUNCE_MS
   }
 
+  /** load 失败统一出口：warn + null（不阻断启动，调用方 pickInitialSize 回默认尺寸）。 */
+  private warnLoadFailure(message: string, err: unknown): null {
+    this.logger.warn(message, {
+      statePath: this.statePath,
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return null
+  }
+
   /**
    * 启动读取（§6.4 采用项 2 启动半边）：文件缺失（首启常态）/ JSON 损坏 / 字段非法
    * → null + warn（不阻断启动，调用方 pickInitialSize 回默认尺寸）；合法 → 原样返回
@@ -153,31 +179,12 @@ export class WindowStatePersistence {
     try {
       raw = readFileSync(this.statePath, 'utf-8')
     } catch (err) {
-      this.logger.warn('[window-state] no readable window-state file, using default size', {
-        statePath: this.statePath,
-        error: err instanceof Error ? err.message : String(err),
-      })
-      return null
+      return this.warnLoadFailure('[window-state] no readable window-state file, using default size', err)
     }
     try {
-      const parsed: unknown = JSON.parse(raw)
-      if (
-        parsed === null || typeof parsed !== 'object' ||
-        typeof (parsed as Partial<WindowState>).width !== 'number' ||
-        !Number.isFinite((parsed as Partial<WindowState>).width) ||
-        typeof (parsed as Partial<WindowState>).height !== 'number' ||
-        !Number.isFinite((parsed as Partial<WindowState>).height)
-      ) {
-        throw new Error('invalid window-state fields')
-      }
-      const state = parsed as Partial<WindowState>
-      return { width: state.width as number, height: state.height as number, isMaximized: state.isMaximized === true }
+      return parseWindowState(raw)
     } catch (err) {
-      this.logger.warn('[window-state] corrupt window-state file, discarding and using default size', {
-        statePath: this.statePath,
-        error: err instanceof Error ? err.message : String(err),
-      })
-      return null
+      return this.warnLoadFailure('[window-state] corrupt window-state file, discarding and using default size', err)
     }
   }
 
@@ -289,7 +296,7 @@ function atomicWriteFile(filePath: string, data: string): void {
 // ── 生产装配（mainLogger + getDataDir；单测不经过这里，直接 new 注入 tmp 路径）────
 
 /** window-state.json 绝对路径（动态推导，禁硬编码数据目录——AGENTS.md 路径白名单规则） */
-export function getWindowStateFilePath(): string {
+function getWindowStateFilePath(): string {
   return path.join(getDataDir(), WINDOW_STATE_FILENAME)
 }
 

@@ -2,40 +2,12 @@
  * MiMo driver 单测（ai-voice-tts 设计 §7.2 借壳列：api-key 头 / messages 变形 / base64 解码）。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  createMimoDriver,
-  buildMimoRequestBody,
-  decodeMimoResponse,
-  mimoCapabilities,
-  mimoFormModel,
-  MIMO_PCM_SAMPLE_RATE,
-} from './mimo.js'
+import { createMimoDriver, buildMimoRequestBody, decodeMimoResponse, mimoCapabilities, mimoFormModel, MIMO_PCM_SAMPLE_RATE } from './mimo.js'
+import { stubFetch, stubFetchFailure, type CapturedRequest } from './__tests__/driver-fetch-stub.js'
 import type { InternalSpeechRequest } from '@taiji/shared'
 
 const BASE_URL = 'https://token-plan-cn.xiaomimimo.com/v1'
 const API_KEY = 'test-key-mimo'
-
-interface CapturedRequest {
-  url: string
-  headers: Record<string, string>
-  body: Record<string, unknown>
-}
-
-function stubFetch(handler: (init: RequestInit) => Response | Promise<Response>): { calls: CapturedRequest[] } {
-  const calls: CapturedRequest[] = []
-  vi.stubGlobal(
-    'fetch',
-    async (_url: string | URL, init?: RequestInit): Promise<Response> => {
-      calls.push({
-        url: String(_url),
-        headers: (init?.headers ?? {}) as Record<string, string>,
-        body: JSON.parse(String(init?.body)) as Record<string, unknown>,
-      })
-      return await handler(init ?? {})
-    },
-  )
-  return { calls }
-}
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -128,12 +100,13 @@ describe('错误码翻译表（§7.2 注④）', () => {
     }
   })
 
-  it('网络异常 → tts_network_error（基座归类）', async () => {
-    vi.stubGlobal('fetch', async () => {
-      throw new DOMException('aborted due to timeout', 'TimeoutError')
-    })
+  it('网络异常 → tts_network_error（基座归类，摘要带 network 带因）', async () => {
+    stubFetchFailure(new DOMException('aborted due to timeout', 'TimeoutError'))
     const driver = createMimoDriver({ baseUrl: BASE_URL })
-    await expect(driver.synthesizeChunk(baseReq(), API_KEY)).rejects.toMatchObject({ code: 'tts_network_error' })
+    await expect(driver.synthesizeChunk(baseReq(), API_KEY)).rejects.toMatchObject({
+      code: 'tts_network_error',
+      snippet: expect.stringContaining('network'),
+    })
   })
 })
 

@@ -45,7 +45,7 @@ const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => st
 const { error: toastError } = useToast()
 
 /** 朗读任务三态（§5.1 按钮状态机数据面；查询接口 speakStateOf 的返回值）。 */
-export type SpeakStatus = 'idle' | 'loading' | 'playing'
+type SpeakStatus = 'idle' | 'loading' | 'playing'
 
 /** 设置页「保存并测试」固定伪 messageId（§7.5 要点 4：与对话朗读共享全局互斥，消费方 u4）。 */
 export const SETTINGS_TTS_TEST_MESSAGE_ID = 'settings-tts-test'

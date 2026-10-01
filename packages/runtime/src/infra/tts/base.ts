@@ -5,9 +5,10 @@
  *
  * 错误归一分层（2026-09-30 用户裁决：厂商错误知识封装在厂商调用层）：
  * - 基座（本文件）：网络异常与超时（fetch throw / AbortError / TimeoutError）→ tts_network_error；
- * - 各家 driver：厂商错误形态 → 统一错误码的翻译表是该家私有知识（StepFun/MiMo 知道
- *   HTTP 401=鉴权、402=额度、404/400=参数；MiniMax 知道 base_resp.status_code 1004=鉴权、
- *   1042/2013=参数）——基座不翻译 HTTP status，非 2xx 原样交本家 driver。
+ * - 各家 driver：厂商错误形态 → 统一错误码的翻译表是该家私有知识（MiniMax 知道 base_resp.status_code
+ *   1004=鉴权、1042/2013=参数）；OpenAI 同形三家（StepFun/MiMo/MiniMax）的 HTTP 非 2xx 语义一致
+ *   （401=鉴权、402=额度、其余=厂商错误），同表收敛在 translateHttpFailure 供 driver 显式调用——
+ *   postTtsRequest 本身不翻译，非 2xx 原样交本家 driver（基座职责边界不变）。
  * 统一层（service 与协议面）只消费统一错误码，零厂商判断。
  *
  * 超时形态照 model-connection-tester.ts 实装（范式源）：test(request) 签名无外部 signal，
@@ -46,6 +47,16 @@ export class TtsDriverFailure extends Error implements TtsDriverError {
 /** 构造统一错误形态（snippet 在此单点截断到 TTS_ERROR_SNIPPET_MAX）。 */
 export function ttsFailure(code: TtsErrorCode, snippet: string): TtsDriverFailure {
   return new TtsDriverFailure({ code, snippet: toErrorSnippet(snippet) })
+}
+
+/**
+ * OpenAI 同形 HTTP status → 统一错误码翻译（三家同表：401 鉴权、402 额度、其余厂商错误，
+ * §7.2 错误翻译表）。供各 driver 的非 2xx 分支显式调用；postTtsRequest 不调用（非 2xx 原样
+ * 返回交本家 driver，见文件头分层裁决）。
+ */
+export function translateHttpFailure(status: number, bodySnippet: string): TtsDriverFailure {
+  const code: TtsErrorCode = status === 401 ? 'tts_auth_failed' : status === 402 ? 'tts_quota_exceeded' : 'tts_vendor_error'
+  return ttsFailure(code, `HTTP ${status}: ${bodySnippet}`)
 }
 
 /** 响应体压缩成单行 + 截断（日志/错误摘要行内展示友好，内容仍忠实）。 */

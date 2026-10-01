@@ -18,8 +18,6 @@
  * mock 工厂与断言共享同一批 vi.fn，与原 vi.hoisted 文件内单例语义一致）。
  *
  * 变体保留未收敛：
- * - MessageStream-truncated-bar.test.ts：23 键版（多 isTakeover/isPendingSend/setTakeover，
- *   文件内联 vi.hoisted，键面与本单例同形维护）
  * - MessageStream-kind.test.ts：内联 virtua mock 复杂版（slotKeyCollector/keepMountedCollector
  *   收集器 + keepMounted 渲染循环语义——收集器断言依赖文件内 vi.hoisted 状态，不可共享）
  * - 其余各文件内联的 virtua/vue 模块 mock（keepMounted/scrollRef props 与渲染循环互为变体）
@@ -28,42 +26,13 @@ import { vi } from 'vitest'
 import { defineComponent, h, type ComponentOptions } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { Message } from '@taiji/shared'
+import { createMockDeps } from '@taiji/ui/features/chat/__tests__/helpers'
 
-/** 聊天流壳 deps mock 单例（ChatViewDeps 全字段必填默认面，零真 store；测试可断言 vi.fn 调用）。 */
-export const chatDepsMock = {
-  isActive: vi.fn(() => false),
-  isHandingOff: vi.fn(() => false),
-  getChangeSetStatus: vi.fn(() => undefined),
-  isExpanded: vi.fn(() => false),
-  isTakeover: vi.fn(() => false),
-  isPendingSend: vi.fn(() => false),
-  sessionCwdOf: vi.fn(() => undefined),
-  toggleExpand: vi.fn(),
-  collapse: vi.fn(),
-  setTakeover: vi.fn(),
-  abortBash: vi.fn(),
-  editAndResend: vi.fn(),
-  onRevokeMessage: vi.fn(),
-  onForkAsk: vi.fn(),
-  onHandoffAsk: vi.fn(),
-  openDrawer: vi.fn(),
-  onFileClick: vi.fn(),
-  loadFileCandidates: vi.fn(() => Promise.resolve([])),
-  renderMarkdown: vi.fn(() => Promise.resolve([])),
-  renderMarkdownIncremental: vi.fn(() =>
-    Promise.resolve({
-      prefixSegments: [],
-      tailSegments: [],
-      stableBoundary: 0,
-      mode: 'incremental' as const,
-      cache: { boundary: 0, prefixText: '', prefixSegments: [], nextSegId: 0 },
-    }),
-  ),
-  // [审计候选 18] 谓词注入收单阈值字段；默认大阈值 = 静默路径不触发（等价原 () => false 默认）
-  streamingFenceSilenceMs: 60_000,
-  renderMermaid: vi.fn(() => Promise.resolve({ svg: '' })),
-  toMarkdown: vi.fn(() => ''),
-}
+/**
+ * 聊天流壳 deps mock 单例（ChatViewDeps 全字段必填默认面，零真 store；测试可断言 vi.fn 调用）。
+ * 实装唯一化：直接复用 ui 包契约侧的 createMockDeps（门禁收敛；此前两包各持同构副本）。
+ */
+export const chatDepsMock = createMockDeps()
 
 /** '@/composables/panel/useChatViewDeps' mock 工厂（转发 chatDepsMock 单例）。 */
 export function chatViewDepsModule() {

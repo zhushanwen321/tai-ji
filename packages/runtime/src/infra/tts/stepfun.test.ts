@@ -5,32 +5,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createStepfunDriver, buildStepfunRequestBody, stepfunCapabilities, stepfunFormModel } from './stepfun.js'
 import { TtsDriverFailure } from './base.js'
+import { stubFetch, stubFetchFailure, type CapturedRequest } from './__tests__/driver-fetch-stub.js'
 import type { InternalSpeechRequest } from '@taiji/shared'
 
 const BASE_URL = 'https://api.stepfun.com/v1'
 const API_KEY = 'test-key-stepfun'
-
-interface CapturedRequest {
-  url: string
-  headers: Record<string, string>
-  body: Record<string, unknown>
-}
-
-function stubFetch(handler: (init: RequestInit) => Response | Promise<Response>): { calls: CapturedRequest[] } {
-  const calls: CapturedRequest[] = []
-  vi.stubGlobal(
-    'fetch',
-    async (_url: string | URL, init?: RequestInit): Promise<Response> => {
-      calls.push({
-        url: String(_url),
-        headers: (init?.headers ?? {}) as Record<string, string>,
-        body: JSON.parse(String(init?.body)) as Record<string, unknown>,
-      })
-      return await handler(init ?? {})
-    },
-  )
-  return { calls }
-}
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -128,9 +107,7 @@ describe('错误码翻译表（§7.2 注④实测四形态）', () => {
   })
 
   it('网络异常 → tts_network_error（基座归类）', async () => {
-    vi.stubGlobal('fetch', async () => {
-      throw new TypeError('fetch failed')
-    })
+    stubFetchFailure(new TypeError('fetch failed'))
     const driver = createStepfunDriver({ baseUrl: BASE_URL })
     await expect(driver.synthesizeChunk(baseReq(), API_KEY)).rejects.toMatchObject({ code: 'tts_network_error' })
   })

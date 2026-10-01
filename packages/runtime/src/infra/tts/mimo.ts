@@ -14,32 +14,26 @@
  * 音色为中文枚举 ×9（前提 10 实测全集）；错误翻译（本家私有知识，OpenAI 同形借壳）：
  * 401 → tts_auth_failed、402 → tts_quota_exceeded、其余非 2xx → tts_vendor_error。
  */
-import type { InternalSpeechRequest, TtsCapabilities, TtsErrorCode, TtsFormModel } from '@taiji/shared'
+import type { InternalSpeechRequest, TtsCapabilities, TtsFormModel } from '@taiji/shared'
 import type { TtsDriver, TtsSynthesisChunk } from '../../services/ports/tts.js'
 import {
   ttsFailure,
-  TtsDriverFailure,
   toErrorSnippet,
   buildAuthHeaders,
   joinEndpoint,
   postTtsRequest,
+  translateHttpFailure,
   decodeBase64ToPcm,
   isRecord,
   parseVendorJson,
 } from './base.js'
-import { AUTH_RESERVED_PASSTHROUGH_KEYS, mergeRequestBody, type PassthroughPolicy } from './passthrough-merge.js'
+import { AUTH_RESERVED_POLICY, mergeRequestBody, type PassthroughPolicy } from './passthrough-merge.js'
 
 /** pcm16 固定采样率（协议无独立字段；前提 7 实测 0.96s 样本 duration 精确印证）。 */
 export const MIMO_PCM_SAMPLE_RATE = 24_000
 
-const PASSTHROUGH_POLICY: PassthroughPolicy = {
-  reservedKeys: AUTH_RESERVED_PASSTHROUGH_KEYS,
-}
-
-function translateHttpError(status: number, bodySnippet: string): TtsDriverFailure {
-  const code: TtsErrorCode = status === 401 ? 'tts_auth_failed' : status === 402 ? 'tts_quota_exceeded' : 'tts_vendor_error'
-  return ttsFailure(code, `HTTP ${status}: ${bodySnippet}`)
-}
+/** 出厂 policy：仅鉴权保留键（本家无协议行为键，护栏⑤无本家补充）。 */
+const PASSTHROUGH_POLICY: PassthroughPolicy = AUTH_RESERVED_POLICY
 
 export const mimoCapabilities: TtsCapabilities = {
   endpointPath: '/chat/completions',
@@ -126,7 +120,7 @@ export function createMimoDriver(options: { baseUrl: string }): TtsDriver {
     async synthesizeChunk(req: InternalSpeechRequest, apiKey: string): Promise<TtsSynthesisChunk> {
       const body = buildMimoRequestBody(req)
       const res = await postTtsRequest(url, buildAuthHeaders(mimoCapabilities.authHeader, apiKey), body)
-      if (!res.ok) throw translateHttpError(res.status, res.errorText)
+      if (!res.ok) throw translateHttpFailure(res.status, res.errorText)
       return { pcm: decodeMimoResponse(res.bytes), sampleRate: MIMO_PCM_SAMPLE_RATE, channels: 1 }
     },
   }

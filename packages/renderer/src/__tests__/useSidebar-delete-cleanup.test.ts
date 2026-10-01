@@ -147,6 +147,15 @@ function seedSessions(groups: Array<{ cwd: string; ids: string[] }>): void {
   useSessionStore().applySnapshot({ groups: sessionGroups })
 }
 
+/** 建 scope + seed 两会话并删除 s1（删除编排类用例的公共前步；scope.stop 由调用方收尾）。 */
+async function deleteSeededSession(sessionId = 's1'): Promise<{ scope: ReturnType<typeof effectScope>; sidebar: ReturnType<typeof useSidebar> }> {
+  const scope = effectScope()
+  const sidebar = scope.run(() => useSidebar())!
+  seedSessions([{ cwd: '/proj', ids: ['s1', 's2'] }])
+  await sidebar.deleteSession(sessionId)
+  return { scope, sidebar }
+}
+
 beforeEach(() => {
   // 模块级 cleanup registry 跨测试可能残留（本文件断言 cleanup 调用次数）→ 显式清空防 flaky
   __clearSessionCleanupRegistryForTest()
@@ -230,11 +239,7 @@ describe('useSidebar deleteSession 跨 store 清理（W1 / S3）', () => {
     process.on('unhandledRejection', onUnhandled)
     try {
       browserDestroyMock.mockRejectedValueOnce(new Error('ipc down'))
-      const scope = effectScope()
-      const sidebar = scope.run(() => useSidebar())!
-      seedSessions([{ cwd: '/proj', ids: ['s1', 's2'] }])
-
-      await sidebar.deleteSession('s1')
+      const { scope } = await deleteSeededSession()
 
       expect(browserDestroyMock).toHaveBeenCalledWith('s1')
       // 微任务排空一个周期后无 unhandledrejection（.catch 消化契约）
@@ -250,14 +255,8 @@ describe('useSidebar deleteSession 跨 store 清理（W1 / S3）', () => {
 
 describe('useSidebar deleteSession 停播编排（ai-voice-tts D11）', () => {
   it('U-D11: deleteSession 统一编排调 useTtsPlayer.stop（播放中删会话失去可见停止入口的停播兜底）', async () => {
-    const scope = effectScope()
-    const sidebar = scope.run(() => useSidebar())!
-    seedSessions([{ cwd: '/proj', ids: ['s1', 's2'] }])
-
-    await sidebar.deleteSession('s1')
-
+    const { scope } = await deleteSeededSession()
     expect(ttsStopMock).toHaveBeenCalledTimes(1)
-
     scope.stop()
   })
 })

@@ -11,10 +11,10 @@
  * formModel.volumeRange（0.1–2）。错误翻译（本家私有知识，§7.2 注④实测四形态）：
  * 401 → tts_auth_failed、402 → tts_quota_exceeded、其余非 2xx → tts_vendor_error。
  */
-import type { InternalSpeechRequest, TtsCapabilities, TtsErrorCode, TtsFormModel, TtsProviderId } from '@taiji/shared'
+import type { InternalSpeechRequest, TtsCapabilities, TtsFormModel, TtsProviderId } from '@taiji/shared'
 import type { TtsDriver, TtsSynthesisChunk } from '../../services/ports/tts.js'
-import { ttsFailure, TtsDriverFailure, buildAuthHeaders, joinEndpoint, postTtsRequest, snapToNearestSampleRate, binaryToPcm, DEFAULT_PCM_SAMPLE_RATE } from './base.js'
-import { AUTH_RESERVED_PASSTHROUGH_KEYS, mergeRequestBody, type PassthroughPolicy } from './passthrough-merge.js'
+import { buildAuthHeaders, joinEndpoint, postTtsRequest, translateHttpFailure, snapToNearestSampleRate, binaryToPcm, DEFAULT_PCM_SAMPLE_RATE } from './base.js'
+import { AUTH_RESERVED_POLICY, mergeRequestBody, type PassthroughPolicy } from './passthrough-merge.js'
 
 /** 单段合成默认 instruction 截断上限（perModel 无该模型条目时的表缺省，§7.2 表 ≤200）。 */
 const DEFAULT_INSTRUCTION_MAX_CHARS = 200
@@ -25,14 +25,8 @@ const SAMPLE_RATES: number[] = [8000, 16_000, 22_050, 24_000, 48_000]
 const PROTOCOL_FIXED_KEYS = ['timestamp', 'return_url', 'stream_format', 'markdown_filter'] as const
 
 const PASSTHROUGH_POLICY: PassthroughPolicy = {
-  reservedKeys: AUTH_RESERVED_PASSTHROUGH_KEYS,
+  ...AUTH_RESERVED_POLICY,
   protocolKeys: PROTOCOL_FIXED_KEYS,
-}
-
-/** 错误翻译表（本家私有知识；摘要带 HTTP status + 响应原文片段供归因）。 */
-function translateHttpError(status: number, bodySnippet: string): TtsDriverFailure {
-  const code: TtsErrorCode = status === 401 ? 'tts_auth_failed' : status === 402 ? 'tts_quota_exceeded' : 'tts_vendor_error'
-  return ttsFailure(code, `HTTP ${status}: ${bodySnippet}`)
 }
 
 /** 语速钳制（读能力表 speedRange，不写 if——设计 D3）。 */
@@ -161,7 +155,7 @@ export function createStepfunDriver(options: { baseUrl: string }): TtsDriver {
     async synthesizeChunk(req: InternalSpeechRequest, apiKey: string): Promise<TtsSynthesisChunk> {
       const body = buildStepfunRequestBody(req)
       const res = await postTtsRequest(url, buildAuthHeaders(stepfunCapabilities.authHeader, apiKey), body)
-      if (!res.ok) throw translateHttpError(res.status, res.errorText)
+      if (!res.ok) throw translateHttpFailure(res.status, res.errorText)
       const sampleRate = typeof body['sample_rate'] === 'number' ? body['sample_rate'] : DEFAULT_PCM_SAMPLE_RATE
       return { pcm: binaryToPcm(res.bytes), sampleRate, channels: 1 }
     },

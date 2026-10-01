@@ -65,12 +65,12 @@ export interface TtsProviderFormState {
 }
 
 /** 语速步进（speedRange 只有 [min,max] 无 step；0.1 覆盖三家档位粒度）。 */
-export const SPEED_STEP = 0.1
+const SPEED_STEP = 0.1
 
 /** 混合音色权重步进与有效域（厂商 [1,100]；主音色占总量减第二权重，故第二权重有效域 [1,99]）。 */
-export const TIMBRE_WEIGHT_MIN = 1
-export const TIMBRE_WEIGHT_MAX = 99
-export const TIMBRE_WEIGHT_STEP = 5
+const TIMBRE_WEIGHT_MIN = 1
+const TIMBRE_WEIGHT_MAX = 99
+const TIMBRE_WEIGHT_STEP = 5
 /** 权重总量（厂商百分制：主音色权重 = 总量 − 第二权重）。 */
 const TIMBRE_WEIGHT_TOTAL = 100
 /** 读第二音色所需的最少 timbre_weights 条目数（主 + 第二成对）。 */
@@ -82,9 +82,9 @@ const DEFAULT_TIMBRE_WEIGHT = 50
 const RANGE_QUANTIZE_SCALE = 100
 
 /** 效果器档位值域与步进（厂商 [-100,100]，0 = 默认音色；25 步进 = 9 档）。 */
-export const VOICE_MODIFY_MIN = -100
-export const VOICE_MODIFY_MAX = 100
-export const VOICE_MODIFY_STEP = 25
+const VOICE_MODIFY_MIN = -100
+const VOICE_MODIFY_MAX = 100
+const VOICE_MODIFY_STEP = 25
 
 /** 「范围内出厂锚点」：range 含 1 取 1（三家语速/音量 range 均含 1），越界取最近边界。 */
 const DEFAULT_UNIT_VALUE = 1
@@ -144,7 +144,7 @@ function firstOptionId(options: readonly FormOption[]): string | null {
 }
 
 /** baseUrl 出厂默认 = 投影 isDefault 项（D4「出厂默认值」判定同源），缺省回退首项。 */
-export function defaultBaseUrl(form: TtsFormModel): string {
+function defaultBaseUrl(form: TtsFormModel): string {
   return (form.baseUrlOptions.find((o) => o.isDefault) ?? form.baseUrlOptions[0])?.url ?? ''
 }
 
@@ -237,12 +237,12 @@ function getPath(source: Record<string, unknown>, path: readonly string[]): unkn
 }
 
 /** 「原文/替换」行 → 词典条目串（MiniMax pronunciation_dict.tone[] / StepFun pronunciation_map[].tone 同格式，设计 §5.2）。 */
-export function joinPronunciationRule(rule: TtsPronunciationRule): string {
+function joinPronunciationRule(rule: TtsPronunciationRule): string {
   return `${rule.from}/${rule.to}`
 }
 
 /** 词典条目串 → 行（无分隔符的条目按「原文=整串、替换为空」回读，不丢用户数据）。 */
-export function splitPronunciationRule(entry: string): TtsPronunciationRule {
+function splitPronunciationRule(entry: string): TtsPronunciationRule {
   const i = entry.indexOf('/')
   if (i === -1) return { from: entry, to: '' }
   return { from: entry.slice(0, i), to: entry.slice(i + 1) }
@@ -276,54 +276,75 @@ const MINIMAX_TOGGLE_PATHS: Record<string, readonly string[]> = {
   aigc_watermark: ['aigc_watermark'],
 }
 
-function buildMinimaxVendor(form: TtsFormModel, state: TtsProviderFormState): Record<string, unknown> {
-  const vendor: Record<string, unknown> = {}
+/** 数值档位（音量/音调）→ voice_setting 深路径（投影 range null = 不写）。 */
+function applyMinimaxNumericFields(vendor: Record<string, unknown>, form: TtsFormModel, state: TtsProviderFormState): void {
   if (form.volumeRange && state.volume !== null) {
     setPath(vendor, ['voice_setting', 'vol'], clampNumber(state.volume, form.volumeRange.min, form.volumeRange.max, form.volumeRange.min))
   }
   if (form.pitchRange && state.pitch !== null) {
     setPath(vendor, ['voice_setting', 'pitch'], clampNumber(state.pitch, form.pitchRange.min, form.pitchRange.max, form.pitchRange.min))
   }
+}
+
+/** 枚举类字段（情感/声道/语言增强；投影空数组 = 不写）。声道是数值语义（MiniMax audio_setting.channel int64）
+ *  ——Select 档位 id 恒 string，写 vendor 必须 Number 化（D3 验收实测：字符串直传被厂商 2013 invalid params 拒）。 */
+function applyMinimaxEnumFields(vendor: Record<string, unknown>, form: TtsFormModel, state: TtsProviderFormState): void {
   if (form.emotions.length > 0 && state.emotion) {
     setPath(vendor, ['voice_setting', 'emotion'], state.emotion)
   }
   if (form.channels.length > 0 && state.channel !== null) {
-    // 声道是数值语义（MiniMax audio_setting.channel int64）——Select 档位 id 恒 string，
-    // 写 vendor 必须 Number 化（D3 验收实测：字符串直传被厂商 2013 invalid params 拒）。
     setPath(vendor, ['audio_setting', 'channel'], Number(state.channel))
   }
   if (form.languages.length > 0 && state.languageBoost) {
     vendor.language_boost = state.languageBoost
   }
+}
+
+/** toggles 清单 → 请求体深路径（MINIMAX_TOGGLE_PATHS 表驱动，键 = 投影 toggles 成员 id）。 */
+function applyMinimaxToggles(vendor: Record<string, unknown>, form: TtsFormModel, state: TtsProviderFormState): void {
   for (const id of form.toggles) {
     const path = MINIMAX_TOGGLE_PATHS[id]
     if (path) setPath(vendor, path, state.toggles[id] === true)
   }
+}
+
+/** 双音色混合（maxTimbreVoices 开；主音色权重 = 总量 − 第二权重，M0 开放 2，设计 §5.2）。 */
+function applyMinimaxTimbreWeights(vendor: Record<string, unknown>, form: TtsFormModel, state: TtsProviderFormState): void {
   if (form.maxTimbreVoices > 0 && state.secondVoice) {
-    const weight = clampNumber(
-      state.secondVoiceWeight,
-      TIMBRE_WEIGHT_MIN,
-      TIMBRE_WEIGHT_MAX,
-      DEFAULT_TIMBRE_WEIGHT,
-    )
-    // 双音色：主音色（顶层 voice）+ 第二音色按权重混合（timbre_weights，M0 开放 2，设计 §5.2）
+    const weight = clampNumber(state.secondVoiceWeight, TIMBRE_WEIGHT_MIN, TIMBRE_WEIGHT_MAX, DEFAULT_TIMBRE_WEIGHT)
     vendor.timbre_weights = [
       { voice_id: state.voice, weight: TIMBRE_WEIGHT_TOTAL - weight },
       { voice_id: state.secondVoice, weight },
     ]
   }
-  if (form.voiceModify) {
-    const modify: Record<string, unknown> = {}
-    for (const tier of form.voiceModify.tiers) {
-      modify[tier.id] = clampNumber(state.voiceModifyValues[tier.id], VOICE_MODIFY_MIN, VOICE_MODIFY_MAX, 0)
-    }
-    if (state.voiceModifyEffect) modify.sound_effects = state.voiceModifyEffect
-    if (Object.keys(modify).length > 0) vendor.voice_modify = modify
+}
+
+/** 效果器（voiceModify 投影驱动：tiers 档位全量写入 + 可选 sound_effects）。 */
+function applyMinimaxVoiceModify(vendor: Record<string, unknown>, form: TtsFormModel, state: TtsProviderFormState): void {
+  if (!form.voiceModify) return
+  const modify: Record<string, unknown> = {}
+  for (const tier of form.voiceModify.tiers) {
+    modify[tier.id] = clampNumber(state.voiceModifyValues[tier.id], VOICE_MODIFY_MIN, VOICE_MODIFY_MAX, 0)
   }
-  if (form.hasPronunciationDict && state.pronunciationRules.length > 0) {
-    const tone = nonEmptyRules(state.pronunciationRules).map((r) => joinPronunciationRule(r))
-    if (tone.length > 0) setPath(vendor, ['pronunciation_dict', 'tone'], tone)
-  }
+  if (state.voiceModifyEffect) modify.sound_effects = state.voiceModifyEffect
+  if (Object.keys(modify).length > 0) vendor.voice_modify = modify
+}
+
+/** 发音词典（hasPronunciationDict 开；空行剔除后非空才写 pronunciation_dict.tone）。 */
+function applyMinimaxPronunciation(vendor: Record<string, unknown>, form: TtsFormModel, state: TtsProviderFormState): void {
+  if (!form.hasPronunciationDict || state.pronunciationRules.length === 0) return
+  const tone = nonEmptyRules(state.pronunciationRules).map((r) => joinPronunciationRule(r))
+  if (tone.length > 0) setPath(vendor, ['pronunciation_dict', 'tone'], tone)
+}
+
+function buildMinimaxVendor(form: TtsFormModel, state: TtsProviderFormState): Record<string, unknown> {
+  const vendor: Record<string, unknown> = {}
+  applyMinimaxNumericFields(vendor, form, state)
+  applyMinimaxEnumFields(vendor, form, state)
+  applyMinimaxToggles(vendor, form, state)
+  applyMinimaxTimbreWeights(vendor, form, state)
+  applyMinimaxVoiceModify(vendor, form, state)
+  applyMinimaxPronunciation(vendor, form, state)
   return vendor
 }
 
@@ -401,24 +422,36 @@ function parseStepfunVendor(form: TtsFormModel, vendor: Record<string, unknown>,
   }
 }
 
-function parseMinimaxVendor(form: TtsFormModel, vendor: Record<string, unknown>, state: TtsProviderFormState): void {
+/** 数值档位回读（音量/音调；投影 range 开才读，档位 id string 承载）。 */
+function parseMinimaxNumericFields(vendor: Record<string, unknown>, form: TtsFormModel, state: TtsProviderFormState): void {
   const vol = getPath(vendor, ['voice_setting', 'vol'])
   if (form.volumeRange && typeof vol === 'number') state.volume = String(vol)
   const pitch = getPath(vendor, ['voice_setting', 'pitch'])
   if (form.pitchRange && typeof pitch === 'number') state.pitch = String(pitch)
+}
+
+/** 枚举类回读（情感/声道/语言增强）。声道兼容两形态：数值（本表单写路规范形态）与历史落盘的字符串档位 id。 */
+function parseMinimaxEnumFields(vendor: Record<string, unknown>, form: TtsFormModel, state: TtsProviderFormState): void {
   const emotion = getPath(vendor, ['voice_setting', 'emotion'])
   if (form.emotions.length > 0 && typeof emotion === 'string') state.emotion = emotion
   const channel = getPath(vendor, ['audio_setting', 'channel'])
-  // 读路兼容两形态：数值（本表单写路规范形态）与历史落盘的字符串档位 id
   if (form.channels.length > 0 && (typeof channel === 'number' || typeof channel === 'string')) {
     state.channel = String(channel)
   }
   const boost = vendor.language_boost
   if (form.languages.length > 0 && typeof boost === 'string') state.languageBoost = boost
+}
+
+/** toggles 回读（MINIMAX_TOGGLE_PATHS 表驱动，值恒布尔）。 */
+function parseMinimaxToggles(vendor: Record<string, unknown>, form: TtsFormModel, state: TtsProviderFormState): void {
   for (const id of form.toggles) {
     const path = MINIMAX_TOGGLE_PATHS[id]
     if (path) state.toggles[id] = getPath(vendor, path) === true
   }
+}
+
+/** 双音色回读（timbre_weights 第二条目；voice_id string 才认，weight 缺失保持出厂档）。 */
+function parseMinimaxTimbreWeights(vendor: Record<string, unknown>, form: TtsFormModel, state: TtsProviderFormState): void {
   const weights = vendor.timbre_weights
   if (form.maxTimbreVoices > 0 && Array.isArray(weights) && weights.length >= MIN_TIMBRE_ENTRIES) {
     const second = weights[1] as { voice_id?: unknown; weight?: unknown }
@@ -427,6 +460,10 @@ function parseMinimaxVendor(form: TtsFormModel, vendor: Record<string, unknown>,
       if (typeof second.weight === 'number') state.secondVoiceWeight = String(second.weight)
     }
   }
+}
+
+/** 效果器回读（tiers 档位数值化 + sound_effects）。 */
+function parseMinimaxVoiceModify(vendor: Record<string, unknown>, form: TtsFormModel, state: TtsProviderFormState): void {
   const modify = vendor.voice_modify
   if (form.voiceModify && typeof modify === 'object' && modify !== null) {
     const m = modify as Record<string, unknown>
@@ -436,12 +473,25 @@ function parseMinimaxVendor(form: TtsFormModel, vendor: Record<string, unknown>,
     }
     if (typeof m.sound_effects === 'string') state.voiceModifyEffect = m.sound_effects
   }
+}
+
+/** 发音词典回读（「原文/替换」串 → 行；无分隔符条目按原文整串回读，不丢用户数据）。 */
+function parseMinimaxPronunciation(vendor: Record<string, unknown>, form: TtsFormModel, state: TtsProviderFormState): void {
   const tone = getPath(vendor, ['pronunciation_dict', 'tone'])
   if (form.hasPronunciationDict && Array.isArray(tone)) {
     state.pronunciationRules = (tone as unknown[])
       .map((e) => (typeof e === 'string' ? splitPronunciationRule(e) : null))
       .filter((r): r is TtsPronunciationRule => r !== null)
   }
+}
+
+function parseMinimaxVendor(form: TtsFormModel, vendor: Record<string, unknown>, state: TtsProviderFormState): void {
+  parseMinimaxNumericFields(vendor, form, state)
+  parseMinimaxEnumFields(vendor, form, state)
+  parseMinimaxToggles(vendor, form, state)
+  parseMinimaxTimbreWeights(vendor, form, state)
+  parseMinimaxVoiceModify(vendor, form, state)
+  parseMinimaxPronunciation(vendor, form, state)
 }
 
 /**

@@ -4,40 +4,13 @@
  * 且 synthesizeChunk 返回 channels=2（WAV 头 numChannels 数据链）。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  createMinimaxDriver,
-  buildMinimaxRequestBody,
-  decodeMinimaxResponse,
-  minimaxCapabilities,
-  minimaxFormModel,
-} from './minimax.js'
+import { createMinimaxDriver, buildMinimaxRequestBody, decodeMinimaxResponse, minimaxCapabilities, minimaxFormModel } from './minimax.js'
+import { stubFetch, type CapturedRequest } from './__tests__/driver-fetch-stub.js'
 import { logger } from '../logger.js'
 import type { InternalSpeechRequest } from '@taiji/shared'
 
 const BASE_URL = 'https://api.minimax.cn/v1'
 const API_KEY = 'test-key-minimax'
-
-interface CapturedRequest {
-  url: string
-  headers: Record<string, string>
-  body: Record<string, unknown>
-}
-
-function stubFetch(handler: (init: RequestInit) => Response | Promise<Response>): { calls: CapturedRequest[] } {
-  const calls: CapturedRequest[] = []
-  vi.stubGlobal(
-    'fetch',
-    async (_url: string | URL, init?: RequestInit): Promise<Response> => {
-      calls.push({
-        url: String(_url),
-        headers: (init?.headers ?? {}) as Record<string, string>,
-        body: JSON.parse(String(init?.body)) as Record<string, unknown>,
-      })
-      return await handler(init ?? {})
-    },
-  )
-  return { calls }
-}
 
 afterEach(() => {
   vi.unstubAllGlobals()

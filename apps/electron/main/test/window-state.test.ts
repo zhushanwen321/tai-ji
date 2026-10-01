@@ -119,24 +119,41 @@ describe('pickInitialSize（启动尺寸决策：恢复 clamp / 缺省回公式�
 
 // ── 持久化语义表（fake timers 管防抖；文件 IO 全落 mkdtemp tmp）──────────────
 
-describe('WindowStatePersistence 持久化语义', () => {
+/** 持久化引擎夹具（mkdtemp tmp 目录 + spy logger + fake timers；两个 describe 共用）。 */
+function createPersistenceFixture(): {
+  dir: string
+  statePath: string
+  loggerSpy: ReturnType<typeof createLoggerSpy>
+  persistence: WindowStatePersistence
+} {
+  vi.useFakeTimers()
+  const dir = mkdtempSync(join(tmpdir(), 'taiji-window-state-test-'))
+  const statePath = join(dir, WINDOW_STATE_FILENAME)
+  const loggerSpy = createLoggerSpy()
+  const persistence = new WindowStatePersistence({ statePath, logger: loggerSpy.logger })
+  return { dir, statePath, loggerSpy, persistence }
+}
+
+/** 夹具收尾：拆挂载 + 还原真实 timers + 清 tmp 目录（自建自删）。 */
+function teardownPersistenceFixture(dir: string, persistence: WindowStatePersistence): void {
+  persistence.detach()
+  vi.useRealTimers()
+  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+}
+
+
+describe('WindowStatePersistence 持久化语义（写路防抖/flush + load 启动读取校验）', () => {
   let dir: string
   let statePath: string
   let loggerSpy: ReturnType<typeof createLoggerSpy>
   let persistence: WindowStatePersistence
 
   beforeEach(() => {
-    vi.useFakeTimers()
-    dir = mkdtempSync(join(tmpdir(), 'taiji-window-state-test-'))
-    statePath = join(dir, WINDOW_STATE_FILENAME)
-    loggerSpy = createLoggerSpy()
-    persistence = new WindowStatePersistence({ statePath, logger: loggerSpy.logger })
+    ({ dir, statePath, loggerSpy, persistence } = createPersistenceFixture())
   })
 
   afterEach(() => {
-    persistence.detach()
-    vi.useRealTimers()
-    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    teardownPersistenceFixture(dir, persistence)
   })
 
   it('防抖 500ms 合并写：连续 resize 只落一次盘，内容 = 最近正常态尺寸', () => {
@@ -260,27 +277,8 @@ describe('WindowStatePersistence 持久化语义', () => {
     expect(loggerSpy.warns[0]?.message).toContain('failed to persist window state')
     bad.detach()
   })
-})
 
-describe('WindowStatePersistence.load 启动读取校验（§5.2 失败路径）', () => {
-  let dir: string
-  let statePath: string
-  let loggerSpy: ReturnType<typeof createLoggerSpy>
-  let persistence: WindowStatePersistence
-
-  beforeEach(() => {
-    vi.useFakeTimers()
-    dir = mkdtempSync(join(tmpdir(), 'taiji-window-state-test-'))
-    statePath = join(dir, WINDOW_STATE_FILENAME)
-    loggerSpy = createLoggerSpy()
-    persistence = new WindowStatePersistence({ statePath, logger: loggerSpy.logger })
-  })
-
-  afterEach(() => {
-    persistence.detach()
-    vi.useRealTimers()
-    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-  })
+  // ── load 启动读取校验（§5.2 失败路径；与写路共用同一夹具）──────────────
 
   it('文件缺失（首启常态）→ null + warn，不抛不阻断', () => {
     expect(persistence.load()).toBeNull()

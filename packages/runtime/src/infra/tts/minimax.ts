@@ -25,13 +25,14 @@ import {
   buildAuthHeaders,
   joinEndpoint,
   postTtsRequest,
+  translateHttpFailure,
   snapToNearestSampleRate,
   decodeHexToPcm,
   isRecord,
   parseVendorJson,
   DEFAULT_PCM_SAMPLE_RATE,
 } from './base.js'
-import { AUTH_RESERVED_PASSTHROUGH_KEYS, mergeRequestBody, type PassthroughPolicy } from './passthrough-merge.js'
+import { AUTH_RESERVED_POLICY, mergeRequestBody, type PassthroughPolicy } from './passthrough-merge.js'
 
 const SAMPLE_RATES: number[] = [8000, 16_000, 22_050, 24_000, 32_000, 44_100]
 
@@ -41,14 +42,8 @@ const MINIMAX_AUTH_STATUS_CODE = 1004
 /** 音频就绪业务位（data.status=2，§7.2「status:2」）；存在且非 2 视为未就绪。 */
 const MINIMAX_AUDIO_STATUS_FINISHED = 2
 
-const PASSTHROUGH_POLICY: PassthroughPolicy = {
-  reservedKeys: AUTH_RESERVED_PASSTHROUGH_KEYS,
-}
-
-function translateHttpError(status: number, bodySnippet: string): TtsDriverFailure {
-  const code: TtsErrorCode = status === 401 ? 'tts_auth_failed' : status === 402 ? 'tts_quota_exceeded' : 'tts_vendor_error'
-  return ttsFailure(code, `HTTP ${status}: ${bodySnippet}`)
-}
+/** 出厂 policy：仅鉴权保留键（本家无协议行为键，护栏⑤无本家补充）。 */
+const PASSTHROUGH_POLICY: PassthroughPolicy = AUTH_RESERVED_POLICY
 
 /** 业务错误翻译（本家私有知识：1004 鉴权，其余非零 → 厂商错误，摘要带原始码）。 */
 function translateBusinessError(statusCode: number, bodySnippet: string): TtsDriverFailure {
@@ -249,7 +244,7 @@ export function createMinimaxDriver(options: { baseUrl: string }): TtsDriver {
     async synthesizeChunk(req: InternalSpeechRequest, apiKey: string): Promise<TtsSynthesisChunk> {
       const body = buildMinimaxRequestBody(req)
       const res = await postTtsRequest(url, buildAuthHeaders(minimaxCapabilities.authHeader, apiKey), body)
-      if (!res.ok) throw translateHttpError(res.status, res.errorText)
+      if (!res.ok) throw translateHttpFailure(res.status, res.errorText)
       const pcm = decodeMinimaxResponse(res.bytes)
       return { pcm, sampleRate: readSampleRate(body), channels: extractChannels(body) }
     },

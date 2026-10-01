@@ -38,6 +38,11 @@ export const AUTH_RESERVED_PASSTHROUGH_KEYS = [
   'token',
 ] as const
 
+/** 出厂 policy：仅鉴权保留键（无协议行为键的家直用；有协议键的家自行展开另声明）。 */
+export const AUTH_RESERVED_POLICY: PassthroughPolicy = {
+  reservedKeys: AUTH_RESERVED_PASSTHROUGH_KEYS,
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
