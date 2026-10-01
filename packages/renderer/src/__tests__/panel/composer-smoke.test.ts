@@ -18,7 +18,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent } from 'vue'
+import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { stashOrphanedDraft, __resetOrphanedDraftForTesting } from '@taiji/core/domain/composer'
 import Panel from '@/components/panel/Panel.vue'
