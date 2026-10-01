@@ -2,7 +2,7 @@
  * Workflow Extension — Engine 共享类型
  *
  * Engine 层全局基础类型。零 infra 依赖——不 import 任何 infra 文件，
- * 可独立编译测试（D-12 三层架构，AC-1）。
+ * 可独立编译测试（反向边由包级值依赖环检查拦截）。
  *
  * 核心内容：
  * - DoneReason（completed/failed/aborted/budget_limited/time_limited）

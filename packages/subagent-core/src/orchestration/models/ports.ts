@@ -8,7 +8,7 @@
  * worker-message-pump 循环依赖：2 个 engine 函数文件各自独立，共用同一组
  * 依赖签名（D-12）。
  *
- * 层归属：Engine。零 infra 依赖（AC-1）。
+ * 层归属：Engine。零 infra 依赖（反向边由包级值依赖环检查拦截）。
  */
 import type { AgentStreamSink } from "../../shared/agent-stream.ts";
 import type { AgentEvent } from "../../shared/agent-event.ts";
