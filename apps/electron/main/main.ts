@@ -244,7 +244,7 @@ const browserViewManager = new BrowserViewManager(windows, (sid, state) => {
 })
 
 /** createWindow 适配器：把 ctx.windows.generateId 注入 window-factory */
-const createWindowFn = (options?: { windowId?: string; sessionId?: string }) =>
+const createWindowFn = (options?: { windowId?: string; sessionId?: string; isMainWindow?: boolean }) =>
   createWindow(options, { isDev, generateId: () => ctx.windows.generateId() })
     .then(({ win }) => win)
 
@@ -299,8 +299,9 @@ if (gotSingleInstanceLock) {
 async function bootstrapMainWindow(): Promise<void> {
   // bootstrap 也走 generateId() 并用返回值注册，避免与后续 renderer 调 create-window IPC
   // 时 generateId() 首返值 'win-1' 冲突导致 Map 覆盖、跟踪条目丢失。
+  // isMainWindow: true（u-window-state §6.4）：仅 bootstrap 主窗口挂尺寸持久化 + 恢复。
   const windowId = ctx.windows.generateId()
-  const win = await createWindowFn({ windowId })
+  const win = await createWindowFn({ windowId, isMainWindow: true })
   win.on('closed', () => { ctx.mainWindow = null })
   ctx.mainWindow = win
   ctx.windows.register(windowId, win)
