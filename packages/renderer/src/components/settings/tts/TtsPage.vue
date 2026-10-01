@@ -49,36 +49,50 @@
       </div>
     </GroupCard>
 
-    <!-- 服务商卡片单选（三家独立记忆；协议形态标签与 Key 状态点为投影/配置数据组装） -->
-    <div class="grid grid-cols-3 gap-2" role="radiogroup" :aria-label="t('settings.tts.providerSection')">
-      <Button
-        v-for="pid in PROVIDER_IDS"
-        :key="pid"
-        variant="secondary"
-        size="dense"
-        role="radio"
-        class="h-auto flex-col items-start gap-1 px-3 py-2.5 text-left font-normal"
-        :class="pid === activeProvider ? '!border-accent !bg-surface' : ''"
-        :aria-checked="pid === activeProvider"
-        :data-testid="`tts-provider-card-${pid}`"
-        @click="selectProvider(pid)"
-      >
-        <span class="flex w-full items-center gap-1.5 text-[13px] font-medium text-neutral-fg">
+    <!-- 服务商下拉单选（单选选中态由 Select 触发器直接可见；Key 状态点与协议形态标签随选中家展示） -->
+    <GroupCard>
+      <template #head>
+        <div class="gc-head-text">
+          <h3 class="gc-title">{{ t('settings.tts.providerSection') }}</h3>
+        </div>
+      </template>
+      <div class="flex flex-wrap items-center gap-3 px-4 py-3">
+        <Select v-model="providerModel" :disabled="capsFailed">
+          <SelectTrigger
+            id="tts-provider-select"
+            data-testid="tts-provider-select"
+            class="h-8 w-[220px] text-[13px]"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem
+              v-for="pid in PROVIDER_IDS"
+              :key="pid"
+              :value="pid"
+              :data-testid="`tts-provider-option-${pid}`"
+            >
+              {{ t(`settings.tts.providerName.${pid}`) }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <span
+          data-testid="tts-provider-key-status"
+          class="flex items-center gap-1.5 text-[12px]"
+          :class="providerMeta(activeProvider).hasApiKey ? 'text-success' : 'text-neutral-dim'"
+        >
           <span
             class="size-[7px] shrink-0 rounded-full"
-            :class="providerMeta(pid).hasApiKey ? 'bg-success' : 'bg-neutral-dim opacity-40'"
+            :class="providerMeta(activeProvider).hasApiKey ? 'bg-success' : 'bg-neutral-dim opacity-40'"
             aria-hidden="true"
           />
-          {{ t(`settings.tts.providerName.${pid}`) }}
+          {{ providerMeta(activeProvider).hasApiKey ? t('settings.tts.keyConfigured') : t('settings.tts.keyNotConfigured') }}
         </span>
-        <span class="w-full font-mono text-[10px] font-normal text-neutral-dim">{{ protocolLabel(pid) }}</span>
-        <span class="text-[11px] font-normal" :class="providerMeta(pid).hasApiKey ? 'text-success' : 'text-neutral-dim'">
-          {{ providerMeta(pid).hasApiKey ? t('settings.tts.keyConfigured') : t('settings.tts.keyNotConfigured') }}
-        </span>
-      </Button>
-    </div>
+        <span class="font-mono text-[10px] text-neutral-dim">{{ protocolLabel(activeProvider) }}</span>
+      </div>
+    </GroupCard>
 
-    <!-- 选中服务商全量配置（表单投影驱动；capabilities 缺失时禁用） -->
+    <!-- 选中服务商全量配置（表单投影驱动；capabilities 缺失时禁用；keyOp 供动作按钮 armed 态展示） -->
     <TtsProviderForm
       v-if="activeForm && activeState"
       v-model:state="activeState"
@@ -87,6 +101,7 @@
       :form="activeForm"
       :has-api-key="providerMeta(activeProvider).hasApiKey"
       :provider-key-available="providerMeta(activeProvider).providerKeyAvailable"
+      :key-op="keyOps[activeProvider]"
       :disabled="capsFailed"
       @clear-key="markKeyOp('clear')"
       @bring-key="markKeyOp('bring')"
@@ -129,6 +144,7 @@ import { useI18n } from 'vue-i18n'
 import { AlertTriangle } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { GroupCard } from '@taiji/ui/features/settings'
 import { tts } from '@/api'
@@ -181,7 +197,23 @@ const activeForm = computed(() => forms.value?.[activeProvider.value] ?? null)
 const activeState = computed(() => formStates[activeProvider.value])
 const activeKeyInput = computed({
   get: () => keyInputs[activeProvider.value],
-  set: (v: string) => { keyInputs[activeProvider.value] = v },
+  set: (v: string) => {
+    keyInputs[activeProvider.value] = v
+    // 输入新值 = 更新的意图：显式解除已 armed 的清除/带入。
+    // （v0.10.8 实测缺陷：残留输入串在 save() 里静默压过 armed 动作，
+    //  「带入」点了却把旧粘贴串原样再存一遍——此处从源头消除双意图并存）
+    if (v.trim() !== '') keyOps[activeProvider.value] = null
+  },
+})
+
+/** Select 桥（reka 回填 AcceptableValue；运行时判型收窄回 TtsProviderId）。 */
+const providerModel = computed<TtsProviderId>({
+  get: () => activeProvider.value,
+  set: (v) => {
+    if (typeof v === 'string' && (PROVIDER_IDS as readonly string[]).includes(v)) {
+      activeProvider.value = v as TtsProviderId
+    }
+  },
 })
 
 function providerMeta(pid: TtsProviderId): { hasApiKey: boolean; providerKeyAvailable: boolean } {
@@ -196,12 +228,15 @@ function protocolLabel(pid: TtsProviderId): string {
   return `POST ${form.capabilities.endpointPath} · ${form.capabilities.authHeader}`
 }
 
-function selectProvider(pid: TtsProviderId): void {
-  activeProvider.value = pid
-}
-
+/**
+ * armed 动作标记（保存时消费）。armed 时清空残留输入：手动输入与动作互斥，
+ * 杜绝「输入框残留串静默压过动作」的实测缺陷；再次点击同动作 = 取消。
+ */
 function markKeyOp(op: Exclude<KeyOp, null>): void {
-  keyOps[activeProvider.value] = keyOps[activeProvider.value] === op ? null : op
+  const pid = activeProvider.value
+  const next = keyOps[pid] === op ? null : op
+  keyOps[pid] = next
+  if (next !== null) keyInputs[pid] = ''
 }
 
 function onToggleEnabled(v: string | number | boolean | undefined): void {

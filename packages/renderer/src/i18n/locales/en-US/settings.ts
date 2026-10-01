@@ -1135,6 +1135,8 @@ export default {
     apiKeyPlaceholder: 'Paste API Key',
     clearKey: 'Clear',
     clearKeyTitle: 'Clear the saved key (applied on save)',
+    keyOpPendingClear: 'Key removal marked — takes effect on save',
+    keyOpPendingBring: 'Provider key import marked — takes effect on save',
     providerKeyLinked: 'Provider key detected — it will be imported automatically on save',
     bringFromProvider: 'Import key',
     baseUrlLabel: 'Service URL',

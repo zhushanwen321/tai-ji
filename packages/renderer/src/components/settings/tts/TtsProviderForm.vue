@@ -41,12 +41,22 @@
               :data-testid="`tts-apikey-clear-${providerId}`"
               :title="t('settings.tts.clearKeyTitle')"
               :aria-label="t('settings.tts.clearKey')"
+              :aria-pressed="keyOp === 'clear'"
+              :class="keyOp === 'clear' ? '!border-accent !bg-surface' : ''"
               :disabled="disabled"
               @click="emit('clearKey')"
             >
               {{ t('settings.tts.clearKey') }}
             </Button>
           </div>
+          <!-- armed 待生效提示（点击动作按钮后可见，保存后消失） -->
+          <p
+            v-if="keyOp"
+            :data-testid="`tts-keyop-pending-${providerId}`"
+            class="text-[11px] text-neutral-mid"
+          >
+            {{ keyOp === 'clear' ? t('settings.tts.keyOpPendingClear') : t('settings.tts.keyOpPendingBring') }}
+          </p>
           <!-- Key 联动提示（D4；providerKeyAvailable 由 runtime 判定，StepFun 恒 false 不渲染） -->
           <div
             v-if="providerKeyAvailable"
@@ -59,6 +69,8 @@
               variant="secondary"
               size="dense"
               :data-testid="`tts-key-bring-${providerId}`"
+              :aria-pressed="keyOp === 'bring'"
+              :class="keyOp === 'bring' ? '!border-accent !bg-surface' : ''"
               :disabled="disabled"
               @click="emit('bringKey')"
             >
@@ -368,6 +380,8 @@ const props = defineProps<{
   form: TtsFormModel
   hasApiKey: boolean
   providerKeyAvailable: boolean
+  /** 已 armed 的 Key 动作（清除/带入；保存时消费，armed 态驱动按钮按下样式 + 待生效提示）。 */
+  keyOp?: 'clear' | 'bring' | null
   disabled?: boolean
 }>()
 
