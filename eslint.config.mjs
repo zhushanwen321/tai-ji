@@ -73,6 +73,11 @@ export default [
       // 的 CJS 惯用形态（对齐内置 review-fix-loop-utils.cjs）——与上方 workflow 脚本
       // 豁免同理由，非项目源码不参与 lint
       '.agents/workflows/**',
+      // [HISTORICAL] 项目 pi workflow 脚本（.pi/workflows/tech-review-loop.js，pi 宿主
+      // workflow 引擎加载）：$ARGS/$WORKSPACE 是引擎注入符号（仓库 eslint 环境下未定义），
+      // require() 是该环境的 CJS 惯用形态——与上方 .agents/workflows/** 豁免同理由，
+      // 非项目源码不参与 lint
+      '.pi/workflows/**',
     ],
   },
   // [HISTORICAL] mock 门面文件是所有 domain 的聚合中心（session/chat/config/model/extension/plugin/
@@ -139,6 +144,18 @@ export default [
     ],
     rules: {
       'max-lines': 'off',
+    },
+  },
+  // [HISTORICAL·2026-09 dev-0.10.8 gate] transport 路由装配聚合点：RuntimeServer 是
+  // setServices 三段装配（assignServices/createBroker/assembleHandlers）+ buildRoutes
+  // 全量路由表 + IMessageBroker 委托 + extension timeout 生命周期的唯一聚合面，职责内聚。
+  // 净代码行 505 微超 500（skill-route 注册与 btw 三帧路由入列时越过），先例 pi-provider-store
+  // 「微超即提额，保留软上限告警」同型——拆分属独立重构任务，gate 收敛批次禁止拆文件重构，
+  // 短期提额避免阻塞，长期应拆分。
+  {
+    files: ['packages/runtime/src/transport/server.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
     },
   },
   // [HISTORICAL] 复杂度债务偿还产物：
