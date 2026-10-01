@@ -1,0 +1,13 @@
+{"type":"run-created","runId":"wf-1790879968629-t2rdu6","workflowName":"u0-resume-sample","scriptSource":"phase(\"alpha\");\nawait agent({ prompt: \"u0-rs-task-0\", description: \"alpha-worker\" });\n// task-1 在飞时宿主中断（interruptRun）——重放代际立即成功穿过断点\nawait agent({ prompt: \"u0-rs-task-1\", description: \"alpha-paused\" });\nreturn { ok: true };","args":{"_runId":"wf-1790879968629-t2rdu6"},"argsSummary":"{\"_runId\":\"wf-1790879968629-t2rdu6\"}","scriptPath":"u0-resume-sample.js","ts":1790879968629,"seq":1}
+{"type":"phase-started","phase":"alpha","ts":1790879968647,"seq":2}
+{"type":"agent-started","taskIndex":0,"agentName":"alpha-worker","attempt":1,"phase":"alpha","input":"{\"description\":\"alpha-worker\",\"prompt\":\"u0-rs-task-0\"}","ts":1790879968648,"seq":3}
+{"type":"agent-settled","taskIndex":0,"attempt":1,"outcome":"done","result":{"content":"u0 sample result"},"durationMs":0,"ts":1790879968648,"seq":4}
+{"type":"phase-settled","phase":"alpha","ts":1790879968648,"seq":5}
+{"type":"agent-started","taskIndex":1,"agentName":"alpha-paused","attempt":1,"phase":"alpha","input":"{\"description\":\"alpha-paused\",\"prompt\":\"u0-rs-task-1\"}","ts":1790879968648,"seq":6}
+{"type":"run-interrupted","errorCode":"crashed","reason":"u0 sample: host crash while call #1 in flight","ts":1790879968658,"seq":7}
+{"type":"run-resumed","reason":"resume plan: replay=1 redispatch=1","host":"u0-sample-harness","ts":1790879968660,"seq":8}
+{"type":"phase-started","phase":"alpha","ts":1790879968676,"seq":9}
+{"type":"agent-started","taskIndex":1,"agentName":"alpha-paused","attempt":1,"phase":"alpha","input":"{\"description\":\"alpha-paused\",\"prompt\":\"u0-rs-task-1\"}","ts":1790879968677,"seq":10}
+{"type":"agent-settled","taskIndex":1,"attempt":1,"outcome":"done","result":{"content":"u0 sample result"},"durationMs":0,"ts":1790879968677,"seq":11}
+{"type":"phase-settled","phase":"alpha","ts":1790879968677,"seq":12}
+{"type":"run-settled","outcome":"done","reason":"completed","artifactsDir":"/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/u0-rebuild-sample-Dnbi5d","ts":1790879968677,"seq":13}
