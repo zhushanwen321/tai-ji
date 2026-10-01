@@ -388,7 +388,7 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
   });
 
   describe("零调用点与 fail-fast（不产半个错误 DAG）", () => {
-    it("纯门禁脚本（无 agent 调用）→ nodes 空数组（渲染层单节点摘要卡的契约输入）", () => {
+    it("纯门禁脚本（无 agent 调用）→ nodes 空数组（渲染层空画布 + 居中摘要提示的契约输入）", () => {
       const source = [
         `phase("preflight");`,
         `const ok = execSync("pnpm lint").exitCode === 0;`,

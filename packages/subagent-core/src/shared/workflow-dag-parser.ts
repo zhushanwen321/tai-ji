@@ -18,7 +18,7 @@
  * - 边：sequence（词法序相邻单元，并行组扇出/扇入）/ dataflow（上游返回值
  *   变量被下游实参引用）/ conditional（if/三元直接环绕的调用点，谓词原文随
  *   边）/ loop-back（循环体回边，loops[] 同时承载循环体节点集）。
- * - 零调用点脚本（纯门禁）→ nodes 空数组（渲染层出单节点摘要卡，设计 §3.1-3）。
+ * - 零调用点脚本（纯门禁）→ nodes 空数组（渲染层出空画布 + 居中摘要提示，设计 §3.1-3）。
  * - 不支持语法 fail-fast：acorn 解析失败返回结构化错误
  *   `{ code: 'parse_failed', message }`——不产半个错误 DAG。
  *
@@ -33,18 +33,23 @@
  * - dataflow/conditional 判定为名字级匹配，不做作用域 shadow 分析（同名词法
  *   槽极罕见；误连边的代价是图上多一条提示边，不产生错误结构）。
  *
- * 类型跟随锚（core 为权威源，shared 跟随——同 RunOutcome 先例）：
- * packages/shared/src/workflow.ts 的 WorkflowDag 族（u2 冻结，本文件为权威源）。
- * 扩字段同步链：core → shared（workflow-viz-protocol.test.ts 锚定集拦截漂移）。
+ * 类型跟随锚（core 为定义源——本文件是解析器产物类型；shared 的 WorkflowDag 族为
+ * u2 协议冻结面（跨包消费契约），core 包不依赖 @taiji/shared、双侧逐字段等值——同
+ * RunOutcome 值域跟随先例的「core 定义源 + shared 跟随载体」方向）：
+ * packages/shared/src/workflow.ts 的 WorkflowDag 族（u2 冻结）。
+ * 扩字段同步链：双侧同 commit 同步。等值锁定实测形态：shared 扩必选字段而 core
+ * 未跟 → runtime 赋值点 typecheck 红（workflow-run-events-reader.ts）；core 扩
+ * 必选字段 → 本文件构造点 typecheck 红（core 加可选字段方向无编译拦截，靠本注释
+ * 的同步义务约束）。
  */
 
 import * as acorn from "acorn";
 
 /** DAG 节点类型（跟随 shared WorkflowDagNodeKind）。 */
-export type WorkflowDagNodeKind = "agent" | "script-step"; // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（shared 为协议权威、core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；等价性由 runtime 分流 import 的 typecheck 构造性锁定）
+export type WorkflowDagNodeKind = "agent" | "script-step"; // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结面、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
 
 /** DAG 节点（跟随 shared WorkflowDagNode——权威源在本包，shared u2 冻结跟随）。 */
-export interface WorkflowDagNode { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（shared 为协议权威、core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；等价性由 runtime 分流 import 的 typecheck 构造性锁定）
+export interface WorkflowDagNode { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结面、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
   /** 节点 id（`agent-L<行号>-N<序>`，图内唯一）。 */
   id: string;
   kind: WorkflowDagNodeKind;
@@ -59,10 +64,10 @@ export interface WorkflowDagNode { // oe-exempt:20261002:framework:workflow-viz 
 }
 
 /** DAG 边类型（跟随 shared WorkflowDagEdgeKind）。 */
-export type WorkflowDagEdgeKind = "sequence" | "dataflow" | "conditional" | "loop-back"; // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（shared 为协议权威、core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；等价性由 runtime 分流 import 的 typecheck 构造性锁定）
+export type WorkflowDagEdgeKind = "sequence" | "dataflow" | "conditional" | "loop-back"; // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结面、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
 
 /** DAG 边（跟随 shared WorkflowDagEdge）。 */
-export interface WorkflowDagEdge { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（shared 为协议权威、core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；等价性由 runtime 分流 import 的 typecheck 构造性锁定）
+export interface WorkflowDagEdge { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结面、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
   /** 边 id（`edge-<序>`，图内唯一）。 */
   id: string;
   from: string;
@@ -73,18 +78,18 @@ export interface WorkflowDagEdge { // oe-exempt:20261002:framework:workflow-viz 
 }
 
 /** phase 分区（跟随 shared WorkflowDagPhase）。 */
-export interface WorkflowDagPhase { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（shared 为协议权威、core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；等价性由 runtime 分流 import 的 typecheck 构造性锁定）
+export interface WorkflowDagPhase { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结面、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
   name: string;
   order: number;
 }
 
 /** 并行组（跟随 shared WorkflowDagParallelGroup）。 */
-export interface WorkflowDagParallelGroup { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（shared 为协议权威、core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；等价性由 runtime 分流 import 的 typecheck 构造性锁定）
+export interface WorkflowDagParallelGroup { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结面、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
   nodeIds: string[];
 }
 
 /** 循环标注（跟随 shared WorkflowDagLoop）。 */
-export interface WorkflowDagLoop { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（shared 为协议权威、core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；等价性由 runtime 分流 import 的 typecheck 构造性锁定）
+export interface WorkflowDagLoop { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结面、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
   /** 循环标注 id（`loop-<序>`，图内唯一）。 */
   id: string;
   /** 循环体节点 id 集合（按执行序）。 */
@@ -96,7 +101,7 @@ export interface WorkflowDagLoop { // oe-exempt:20261002:framework:workflow-viz 
 }
 
 /** Workflow DAG（跟随 shared WorkflowDag——结构与 shared u2 冻结形态逐字段一致）。 */
-export interface WorkflowDag { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（shared 为协议权威、core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；等价性由 runtime 分流 import 的 typecheck 构造性锁定）
+export interface WorkflowDag { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结面、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
   nodes: WorkflowDagNode[];
   edges: WorkflowDagEdge[];
   phases: WorkflowDagPhase[];

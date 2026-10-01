@@ -428,7 +428,7 @@ describe('WorkflowDag 静态解析产物（U2，设计 §3.1-3）', () => {
     expect(() => new RegExp(node.matchPattern)).not.toThrow()
   })
 
-  it('零调用点 run：nodes 空数组形态合法（渲染层出单节点摘要卡）', () => {
+  it('零调用点 run：nodes 空数组形态合法（渲染层出空画布 + 居中摘要提示）', () => {
     const dag: WorkflowDag = { nodes: [], edges: [], phases: [], parallelGroups: [], loops: [] }
     expect(dag.nodes).toEqual([])
   })

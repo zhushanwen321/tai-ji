@@ -9,7 +9,7 @@
  * - 构建者：旧快照 additive 读缺省渲染路径（startedAt 缺省 → 时长槽省略，组件不炸）
  *
  * mock 策略：真实 pinia（panel + workflow store，分区 ref 直写种数据）；
- * drawer 控制态 bindDrawerSessionId + openWorkflow 真实域状态；vue-i18n 全局 setup
+ * drawer 控制态 bindDrawerSessionId + openWorkflowInDrawer 真实域状态；vue-i18n 全局 setup
  * （zh-CN 取值）；fake timers 固定 now（1s tick 在 fake timers 下不推进——推导以
  * FIXED_NOW 为锚，确定性断言）。
  *

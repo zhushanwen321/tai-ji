@@ -39,6 +39,13 @@ export interface SubagentTabDataDeps {
   currentRecord: ComputedRef<SubagentRecord | null>
   /** 兜底投影的「无结果」文案（i18n key 由组件注入，composable 不绑 useI18n） */
   noOutcomeText: () => string
+  /**
+   * [可视化] agentcall 快照的归属主 session 显式覆盖（可选；缺省回落焦点 pane 的
+   * focusedSessionId——SubagentTab 现状行为不变）。workflow-viz overlay 的 agent tab
+   * 必传：overlay 绑定发起 session（D11⑤ 不随焦点切换），焦点漂移窗口内的信号重拉
+   * 若走焦点 session 会打错分区且清理映射登记错位。
+   */
+  agentcallMainSid?: () => string | undefined
 }
 
 /**
@@ -143,8 +150,9 @@ export function useSubagentTabData(deps: SubagentTabDataDeps) {
           (id) => chatStore.finalizeSubagentStream(id),
         )
       } else if (isAgentCallVirtualId(vid)) {
-        // D4：agentcall 快照只读。mainSid 从 panelStore 取（虚拟 id 两段式不含 mainSid）。
-        const mainSessionId = panelStore.focusedSessionId
+        // D4：agentcall 快照只读。mainSid 优先取显式覆盖（overlay agent tab 绑定发起
+        // session，D11⑤），缺省回落焦点 pane（虚拟 id 两段式不含 mainSid）。
+        const mainSessionId = deps.agentcallMainSid?.() ?? panelStore.focusedSessionId
         const acsId = extractAgentCallSessionId(vid)
         if (!mainSessionId) return
         const history = await getAgentCallHistory(mainSessionId, acsId)

@@ -3,8 +3,9 @@
  *
  * - ① 投影消费 fold 新字段透出（workflow-record-projection）：phases 折叠
  *   （last-wins 单行快照，settledBy 不透出）/ created.argsSummary / per-call
- *   attempts / lastRetry / usage 分项 → inputTokens/outputTokens（turns 在 fold
- *   AgentUsage 中无供源不造值）。W2 D7 单源红线：投影只读 fold 骨架字段。
+ *   attempts / lastRetry / usage 分项 → inputTokens/outputTokens/turns（core
+ *   AgentUsage = SDK AgentOutcomeUsage 别名含 turns，有供源故填）。W2 D7 单源红线：
+ *   投影只读 fold 骨架字段。
  * - ② workflowUpdate 水位 diff 扩两维（session-records 全链）：per-ask attempt
  *   计数（重试边沿发信号——坑③盲区②）+ phases 折叠（纯脚本 phase 转态发信号——
  *   盲区①）；worker-log 不纳入 diff 维度（D4 已接受代价的回归锚）。

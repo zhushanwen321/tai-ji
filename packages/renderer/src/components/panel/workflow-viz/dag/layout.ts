@@ -98,7 +98,7 @@ function layoutCluster(phase: string, members: WorkflowDagNode[], x: number): {
 
 /**
  * 计算 DAG 列式布局。零节点 run（纯门禁脚本）：nodes 空数组、clusters 空、
- * 画布取最小占位尺寸——渲染层出单节点摘要卡提示（设计 §3.1-3，卡片由画布组件
+ * 画布取最小占位尺寸——渲染层出空画布 + 居中摘要提示（设计 §3.1-3，提示由画布组件
  * 渲染，不归布局）。
  */
 export function layoutDag(dag: WorkflowDag): DagLayout {

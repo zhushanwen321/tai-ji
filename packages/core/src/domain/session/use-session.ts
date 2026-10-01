@@ -182,7 +182,7 @@ export interface UseSessionDeps {
   navigation: NavigationPort
   /** chat 历史回填（壳注入 useChat + tasks 适配） */
   chat: ChatHydratePort
-  /** 跨 store 清理钩子（DM2 + B4 browserDestroy 必选 11 项 + G1 可选 3 项） */
+  /** 跨 store 清理钩子（DM2 + B4 browserDestroy 必选 11 项 + 可选 4 项 = G1 3 项 + workflow-viz overlay 1 项） */
   hooks: SessionCleanupHooks
   /** 新建任务流程（可选；缺省时 newSession 返回 null——壳未接线状态，w5 必须接线） */
   flow?: NewTaskFlowPort
@@ -432,9 +432,11 @@ export function createUseSession(deps: UseSessionDeps) {
    * 也不做 wasActive 回退（deleteFolder 统一在循环结束后回退）。
    *
    * S3 顺序（与 renderer cleanupSessionState 逐条对齐）：
-   * panel 解绑 → overlay 清理 → removeFromList →
+   * panel 解绑 → removeFromList →
    * 11 项必选跨 store 钩子（clearFileTree→…→invalidateStatus→browserDestroy）→
-   * G1 可选 3 钩子（clearTerminalQueue/clearSlashCommands/clearForkNotices）→ triggerSessionCleanups。
+   * G1 三钩子（clearTerminalQueue/clearSlashCommands/clearForkNotices）→
+   * closeWorkflowOverlay（workflow-viz overlay UI 关闭，第 4 项可选，U6/D11⑤）→
+   * triggerSessionCleanups。
    */
   function cleanupSessionState(id: string): void {
     // 删除的 session 若绑定到 panel，清空 panel 绑定，避免悬空引用指向已删 session。

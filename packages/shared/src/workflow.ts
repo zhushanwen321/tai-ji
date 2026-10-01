@@ -13,7 +13,7 @@
  * 读（[D16②]：不再新增事件、不可 resume，跟随裁决点 7 清理消亡）。
  *
  * 扩展源码：extensions/universal/subagent-workflow/src/jsonl-run-store.ts（record
- * store 单模式）；快照格式版本 `wf-run-v2` 的常量单源 = core run-snapshot.ts。
+ * store 单模式）。
  */
 
 /**
@@ -73,8 +73,9 @@ export interface WorkflowAgentCall {
   lastProgressAt?: number
   /**
    * [可视化 U2] 重试计数（fold 透出，runtime 投影消费 fold 行 attempts——该 call
-   * 的失败尝试次数，无重试 = 1 或缺省）。供 retrying 派生态与 trace attempt 列；
-   * 缺省 = 旧投影无此字段（消费侧按 1 处理）。
+   * 至今的失败尝试次数，无重试 undefined，值域与 core fold 对齐——fold attempts 仅
+   * 由 agent-retrying 帧写入）。供 retrying 派生态与 trace attempt 列；缺省 = 旧
+   * 投影无此字段（消费侧展示按 1 处理，判定语义按无重试）。
    */
   attempts?: number
   /**
@@ -267,8 +268,9 @@ export type WorkflowRunEventTruncatedField = (typeof WORKFLOW_RUN_EVENT_TRUNCATE
 /**
  * 单字段截断阈值（字节，2KB——设计 §3.1-4）。截断实装（读 record 流后按字段
  * 序列化并按字节截断）归 U3 runtime 投影单元；实装侧消费本常量，禁止另立第二常量。
+ * 消费方 = runtime workflow-run-events-reader 的 truncateUtf8ByBytes（U3 已实装）。
  */
-export const WORKFLOW_RUN_EVENT_TRUNCATE_BYTES = 2048 // TODO(U3)：实装截断读取逻辑时消费本常量
+export const WORKFLOW_RUN_EVENT_TRUNCATE_BYTES = 2048
 
 // ── record 事件条目（事件流 RPC 行形态）────────────────────────
 
@@ -586,7 +588,11 @@ export interface WorkflowGanttSegments {
 
 // ── DAG 静态解析产物（§3.1-3；解析器落 subagent-core，经 session.getWorkflowDag 透出）──
 
-/** DAG 节点类型：agent 调用点 | 脚本门禁步骤。 */
+/**
+ * DAG 节点类型：agent 调用点 | 脚本门禁步骤。'script-step' 为协议预留值——v1 解析器
+ * 恒产 'agent'（脚本门禁步骤是普通 JS 语句、无独立调用语法，静态解析无从识别；core
+ * 解析器头注释已登记该理由），消费侧按前向兼容枚举值处理。
+ */
 export type WorkflowDagNodeKind = 'agent' | 'script-step'
 
 /**
@@ -658,8 +664,8 @@ export interface WorkflowDagLoop { // oe-exempt:20261002:framework:workflow-viz 
 
 /**
  * Workflow DAG（脚本静态蓝图的解析产物）：节点/边/phase 分区/并行组/循环标注。
- * 零调用点 run（纯门禁脚本无 agent()）= nodes 空数组（渲染层出单节点摘要卡 +
- * 「本脚本无 agent 调用点」提示，设计 §3.1-3）。解析失败不产半个错误 DAG——
+ * 零调用点 run（纯门禁脚本无 agent()）= nodes 空数组（渲染层出空画布 + 居中摘要
+ * 提示「本脚本无 agent 调用点」，设计 §3.1-3）。解析失败不产半个错误 DAG——
  * fail-fast 返回结构化错误（session.getWorkflowDag 错误臂），本类型恒为完整产物。
  */
 export interface WorkflowDag { // oe-exempt:20261002:framework:workflow-viz 协议契约类型——类型契约先行、单实现常态（shared 跨包消费，同 run-events.ts 先例）

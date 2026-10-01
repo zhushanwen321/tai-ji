@@ -433,7 +433,7 @@ const toolStatusClass = computed(() => {
   return 'text-neutral-dim'
 })
 
-/** workflow 顶层 input 安全读取（拍平 schema：action/name/slug/args/runId 都在顶层） */
+/** workflow 顶层 input 安全读取（拍平 schema：action/name/slug/args/runId 都在顶层；runId 仅 schema 描述——run 动作调用时刻 runId 尚未由引擎生成、不可得，组件不读该字段，run 定位经 (name, slug) 反查，见 openWorkflowDrawer 注释与设计 §5 检查点④核实结论） */
 const workflowInputObj = computed(() => {
   const input = props.tool?.input as Record<string, unknown> | undefined
   return input && typeof input === 'object' ? input : {}

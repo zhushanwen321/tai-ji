@@ -1,11 +1,12 @@
 <!--
   WorkflowVizDagNode —— DAG 画布的单节点卡片内容（SVG 子组件）。
 
-  只承担节点形态渲染：状态点 + 调用点名（截断）+ kind 标签；六态着色经 data-state
-  属性由 scoped style 切换（pending 灰 / running accent 脉冲 / done 绿 / failed 红 /
-  retrying warn 脉冲 / skipped 中性虚线淡化）。停止叠加（D9：run 停止时在途节点不
-  显示蓝脉冲、着色随 run 级形态）经 stop-tone 属性切换——run 级输入（status/outcome
-  → stopTone）由画布归一后传入（映射定义见 types.ts），本组件零派生。
+  只承担节点形态渲染：状态点 + 调用点名（截断）+ kind 标签；六态着色经 tone
+  computed 整组切换 Tailwind 工具类（互斥防同名工具类胜负取决发射序——pending 灰 /
+  running accent 脉冲 / done 绿 / failed 红 / retrying warn 脉冲 / skipped 中性虚线
+  淡化），data-state 属性仅作测试观察锚点（非 CSS 选择器）。停止叠加（D9：run 停止
+  时在途节点不显示蓝脉冲、着色随 run 级形态）同样经 tone 整组切换——run 级输入
+  （status/outcome → stopTone）由画布归一后传入（映射定义见 types.ts），本组件零派生。
 
   守卫：node prop 违约（缺失 / id 非法）时 fail-fast throw——本组件渲染抛错由外层
   WorkflowVizDagNodeGuard（errorCaptured 节点级边界）捕获并渲染占位错误态，不挂

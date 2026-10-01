@@ -47,7 +47,7 @@ export interface WorkflowInstanceMatchResult { // oe-exempt:20261002:framework:w
 
 /**
  * D2 主匹配：实例归属判定（两级判据 + 多命中字面段长度降序 + 歧义/零命中进未匹配分组）。
- * dag.nodes 为空（零调用点 run——渲染层出单节点摘要卡）时全部实例进 unmatched。
+ * dag.nodes 为空（零调用点 run——渲染层出空画布 + 居中摘要提示）时全部实例进 unmatched。
  */
 export function matchInstancesToNodes(
   dag: Pick<WorkflowDag, 'nodes'>,

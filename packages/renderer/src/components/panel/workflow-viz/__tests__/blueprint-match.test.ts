@@ -138,7 +138,7 @@ describe('blueprint-match：未匹配分组（不静默丢弃）', () => {
     expect(result.unmatched[0].hitCount).toBe(0)
   })
 
-  it('零调用点 run（nodes 空）→ 全部实例进未匹配分组（渲染层单节点摘要卡形态）', () => {
+  it('零调用点 run（nodes 空）→ 全部实例进未匹配分组（渲染层空画布 + 居中摘要提示形态）', () => {
     const result = matchInstancesToNodes({ nodes: [] }, [call(0, 'a', 'p'), call(1, 'b', 'p')])
     expect(result.byNode.size).toBe(0)
     expect(result.unmatched).toHaveLength(2)

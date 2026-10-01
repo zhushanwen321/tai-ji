@@ -85,7 +85,7 @@ import {
   phaseTabKey,
 } from './panel-tabs'
 import type { WorkflowLiveTab } from './panel-tabs'
-import { useWorkflowStore } from '@/stores/workflow'
+import { useWorkflowStore, deriveWorkflowRunElapsedMs } from '@/stores/workflow'
 import { formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
 import type { WorkflowAgentCall, WorkflowRunRecord } from '@taiji/shared'
 
@@ -197,7 +197,10 @@ const pillClass = computed(() => {
     case 'interrupted':
       return 'text-neutral-mid'
     case 'done':
-      return props.run.outcome === 'failed' || props.run.outcome === 'time_limited' ? 'text-danger' : 'text-success'
+      // D9 全枚举着色（与 RunTraceTable stoppedColorOf 同源）：cancelled → 取消色
+      //（中性，对齐 trace 行）、failed/time_limited → 失败色系、done → 成功色
+      if (props.run.outcome === 'failed' || props.run.outcome === 'time_limited') return 'text-danger'
+      return props.run.outcome === 'cancelled' ? 'text-neutral-mid' : 'text-success'
     default: {
       const exhaustive: never = props.run.status
       throw new Error(`unreachable run status: ${String(exhaustive)}`)
@@ -233,21 +236,10 @@ const tickTimer = setInterval(() => {
 onUnmounted(() => clearInterval(tickTimer))
 
 const elapsedText = computed(() => {
-  const run = props.run
-  const start = Date.parse(run.startedAt)
-  if (Number.isNaN(start)) return '—'
-  // 停走锚（D9）：terminal 有 completedAt；interrupted（暂停态，无 completedAt）锚最后
-  // 进展时刻（health.lastProgressAt，缺省回 startedAt）——不计挂起时间；running = 当前时刻
-  let endMs: number
-  if (run.status === 'running') {
-    endMs = now.value
-  } else if (run.completedAt !== undefined) {
-    const parsed = Date.parse(run.completedAt)
-    endMs = Number.isNaN(parsed) ? start : parsed
-  } else {
-    const lastProgress = run.health?.lastProgressAt
-    endMs = lastProgress !== undefined && lastProgress >= start ? lastProgress : start
-  }
-  return formatCompactDuration(Math.floor(Math.max(0, endMs - start) / MS_PER_SECOND), { hours: false })
+  // D9 停走口径单点 = workflowStore 的 deriveWorkflowRunElapsedMs（与 overlay 壳 header
+  // 共用同一派生，禁双实现——两 header 数值恒一致）
+  const ms = deriveWorkflowRunElapsedMs(props.run, now.value)
+  if (ms === null) return '—'
+  return formatCompactDuration(Math.floor(ms / MS_PER_SECOND), { hours: false })
 })
 </script>

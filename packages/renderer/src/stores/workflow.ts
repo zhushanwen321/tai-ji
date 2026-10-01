@@ -7,6 +7,8 @@
  * 职责：
  * - 共享 workflow 列表（records）—— 所有消费面（composer 任务托盘 / drawer WorkflowTab）只读消费
  * - agentcall 虚拟 key 清理映射（mainSessionAgentCalls）：deleteSession 时清 agentcall 虚拟分区
+ * - [可视化 U5/D11] 事件流缓存（runId 分区 + LRU5 + 活跃 run 锚 + workflowUpdate 信号
+ *   联动 force 重拉）—— workflow-viz 面板（overlay 右栏实况面板）消费
  *
  * [HISTORICAL] overlay 展示层已于 U7 移除（drawer tab 化）：
  * 原 agentCallMap（Panel overlay 的 agent call sessionId）+ isViewing/getViewingAgentCallId/
@@ -52,6 +54,32 @@ export function agentCallElapsedMs(call: WorkflowAgentCall, nowMs: number): numb
   const started = Date.parse(call.startedAt)
   if (Number.isNaN(started)) return null
   return Math.max(0, nowMs - started)
+}
+
+/**
+ * [可视化 D9] run 已用时长 ms（「中断/终局停走」口径的单点派生——overlay 壳 header
+ * 与实况面板 header 两消费位共用，禁各自实现）。停走锚：running = 当前时刻；terminal
+ * （done）= completedAt（不可解析回退 start）；interrupted（暂停态，无 completedAt）=
+ * health.lastProgressAt（缺省或早于 start 回退 start）——不计挂起时间。返回 null =
+ * startedAt 不可解析（消费方省略时长槽）。
+ */
+export function deriveWorkflowRunElapsedMs(
+  run: Pick<WorkflowRunRecord, 'status' | 'startedAt' | 'completedAt' | 'health'>,
+  nowMs: number,
+): number | null {
+  const start = Date.parse(run.startedAt)
+  if (Number.isNaN(start)) return null
+  let endMs: number
+  if (run.status === 'running') {
+    endMs = nowMs
+  } else if (run.completedAt !== undefined) {
+    const parsed = Date.parse(run.completedAt)
+    endMs = Number.isNaN(parsed) ? start : parsed
+  } else {
+    const lastProgress = run.health?.lastProgressAt
+    endMs = lastProgress !== undefined && lastProgress >= start ? lastProgress : start
+  }
+  return Math.max(0, endMs - start)
 }
 
 // ── [可视化 U5/D11] 事件流缓存条目（runId 分区值形态）─────────────────────────
@@ -256,6 +284,14 @@ export const useWorkflowStore = defineStore('workflow', () => {
    * 面板挂载/卸载经 setActiveWorkflowRun 登记。overlay 全局单例 → 至多一个活跃 run。
    */
   const activeWorkflowRun = ref<{ sessionId: string; runId: string } | null>(null)
+
+  /**
+   * [可视化 D11] 活跃 run 信号纪元（每次 workflowUpdate 信号命中活跃 run 分支时自增）。
+   * 消费方 = overlay 内的 agent tab 快照面（AgentTabContent watch 本纪元重调快照拉取，
+   * 设计 §3.1-2/D8「实时性由列表 status + workflowUpdate 信号重新拉取体现」的 agentcall
+   * 半边接线）；纪元自增即代表「活跃 run 有新信号」，重拉目标由消费方各自的 virtualId 决定。
+   */
+  const activeRunSignalEpoch = ref(0)
 
   /** 活跃 run 登记（面板挂载时 set；切换 run = 新面板先 set 覆盖）。 */
   function setActiveWorkflowRun(sessionId: string, runId: string): void {
@@ -502,6 +538,10 @@ export const useWorkflowStore = defineStore('workflow', () => {
     const anchor = activeWorkflowRun.value
     if (anchor !== null && anchor.sessionId === sid) {
       void loadWorkflowRunEvents(sid, anchor.runId, { force: true })
+      // [可视化 D11] 信号纪元自增——通知活跃 run 的 agent tab 快照面重拉（§3.1-2：
+      // 对话流子页 = 拉取时刻快照 + 信号触发重新拉取；事件流 force 重拉之外，
+      // agentcall 快照通道同链刷新）
+      activeRunSignalEpoch.value += 1
     }
     // running 信号延迟重试：workflow-state-link 可能刚写入，首次拉取为空
     if (status === 'running') {
@@ -594,6 +634,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     setActiveWorkflowRun,
     releaseActiveWorkflowRun,
     loadWorkflowRunEvents,
+    activeRunSignalEpoch,
     registerAgentCall,
     getAgentCallVirtualIdsByMain,
     clearAgentCallMapping,

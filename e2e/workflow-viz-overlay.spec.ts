@@ -2,7 +2,9 @@
  * Workflow 可视化 overlay E2E —— Playwright + Electron + mock 轨。
  *
  * 分层定位（workflow-visualization 设计 §4 验收场景 S1/S2/S4/S6 的 mock 可达面 +
- * impl-plan 验收计划表 A5a/A6/A7 的脚本化部分）：本 spec 承接「overlay 打开形态 /
+ * impl-plan 验收计划表 A5a/A6/A7 的脚本化部分——A5a 承接「状态」子项，「信号 ≤2s」与
+ * 「纯脚本 phase 高亮切换」两子项 mock 不可达（无 workflowUpdate 发射）归 A4 真机走查，
+ * 不可达清单登记在 e2e-map E2E-MOCK-01 note）：本 spec 承接「overlay 打开形态 /
  * workflow tab 三子页 / 多级钻取 / 降级路径 / tab 编排 / 三通道关闭」六组 mock 可覆盖
  * 断言；跨进程链路入口（托盘行 → overlay）与 workflow-sidebar-sync.spec.ts T3 同源，
  * 本 spec 深入 overlay 内部行为（T3 只断言打开 + 降级形态挂载，不重复）。

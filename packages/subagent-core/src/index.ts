@@ -509,8 +509,9 @@ export { lintScript } from "./shared/script-lint.ts";
 export type { LintResult } from "./shared/script-lint.ts";
 // parseWorkflowDag：scriptSource → WorkflowDag 静态蓝图（workflow-visualization
 // 设计 §3.1-3 / §3.3-D2，U1；runtime session.getWorkflowDag RPC 的解析入口，
-// 解析失败 fail-fast 结构化错误——不产半个错误 DAG）。类型跟随锚：shared
-// workflow.ts 的 WorkflowDag 族（core 为权威源，u2 冻结跟随）。
+// 解析失败 fail-fast 结构化错误——不产半个错误 DAG）。类型跟随锚：core 为定义源
+// （解析器产物类型），shared workflow.ts 的 WorkflowDag 族为 u2 协议冻结面、
+// 双侧等值同 commit 同步（锁定形态见 workflow-dag-parser.ts 头注释）。
 export { parseWorkflowDag, WORKFLOW_DAG_DEFAULT_PHASE } from "./shared/workflow-dag-parser.ts";
 export type {
   WorkflowDag,

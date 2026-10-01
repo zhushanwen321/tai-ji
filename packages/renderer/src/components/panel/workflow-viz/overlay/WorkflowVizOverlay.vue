@@ -3,7 +3,8 @@
   U4 单元）。SearchModal 范式参照新写（D8：它是搜索功能组件、无 slot，不做组件级
   复用——只参照其「fixed 遮罩 + ESC keydown + autofocus」inline 形态与 close 后不再
   调度查询的资源清理手法）；视觉遵守 DESIGN.md（浮层 radius-lg 12px、z-modal 1000、
-  状态色降噪色阶、焦点管理两要素：打开即 focus 面板 / 关闭归还触发元素）。
+  状态色降噪色阶、焦点管理三要素：打开即 focus 面板 / 关闭归还触发元素 / Tab 首末
+  循环焦点陷阱防逃逸到遮罩后背景 UI）。
 
   结构：header（run 名 + slug + 状态 pill + 已用时长 + args 摘要 + 右上关闭）+
   左 DAG 栏（WorkflowVizDag 画布 / DAG 不可得降级列表）+ 右实况面板（slot——
@@ -21,9 +22,11 @@
   openDrawerTab + openWorkflowInDrawer 接线归 U6。
 
   数据边界（u4 与 u5 的派生单处分工）：节点六态映射（nodeStates）与已用时长
-  （elapsedMs，含 D9 中断停走口径）为已派生输入——派生函数在 u5 单处实现，本壳
-  纯展示不自行判定；DAG 不可得的降级形态（原因码 + parse_failed 重试入口 + 按
-  phase 分组只读列表）在本壳实现（左栏行为，数据 = run.agentCalls）。
+  （elapsedMs，含 D9 中断停走口径）为已派生输入——单点实现在 renderer 侧
+  gantt-segments 派生（deriveNodeStatus）与 workflowStore（deriveWorkflowRunElapsedMs），
+  由容器 Host 统一派生后经 props 透传（壳与实况面板 header 共用同一时长派生），
+  本壳纯展示不自行判定；DAG 不可得的降级形态（原因码 + parse_failed 重试入口 +
+  按 phase 分组只读列表）在本壳实现（左栏行为，数据 = run.agentCalls）。
 -->
 <template>
   <div
@@ -262,12 +265,46 @@ function close(): void {
   emit('close')
 }
 
-/** ESC 关闭（window keydown，open 时挂载；IME 组合态不拦截——SearchModal 同守卫）。 */
+/** ESC 关闭 + Tab 焦点陷阱（window keydown，open 时挂载；IME 组合态不拦截——SearchModal 同守卫）。 */
 function onWindowKeydown(e: KeyboardEvent): void {
   if (e.isComposing) return
   if (e.key === 'Escape') {
     e.preventDefault()
     close()
+    return
+  }
+  if (e.key === 'Tab') trapTab(e)
+}
+
+/** Tab 可聚焦元素查询（焦点陷阱的候选集）。 */
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+/**
+ * Tab 焦点陷阱（DESIGN §5.12 焦点管理三要素之三）：焦点在面板内可聚焦元素首末循环，
+ * 防 Tab 逃逸到被遮罩挡住的背景 UI（role=dialog + aria-modal 的 a11y 语义一致性）。
+ */
+function trapTab(e: KeyboardEvent): void {
+  const panel = panelRef.value
+  if (!panel) return
+  const focusables = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+  if (focusables.length === 0) {
+    e.preventDefault()
+    panel.focus()
+    return
+  }
+  const first = focusables[0]
+  const last = focusables[focusables.length - 1]
+  const active = document.activeElement
+  const inside = active instanceof Node && panel.contains(active)
+  if (e.shiftKey) {
+    if (!inside || active === first) {
+      e.preventDefault()
+      last.focus()
+    }
+  } else if (!inside || active === last) {
+    e.preventDefault()
+    first.focus()
   }
 }
 

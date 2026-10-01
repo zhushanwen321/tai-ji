@@ -404,20 +404,21 @@ export interface WorkflowCallDerivedView { // oe-exempt:20261002:framework:workf
 }
 
 /**
- * D9 call 级派生：retrying = 存在 agent-retrying 帧且尚无终局 settled。
- * 判定数据源 = U3 投影透出的 per-call attempts 计数（fold 行语义：失败尝试次数，
- * 无重试 = 1 或缺省）——attempts ≥ 2 ∧ status running 与「存在 retrying 帧 ∧ 无
- * settled」构造性等价（终局帧落盘时投影 status 已翻 done/failed，终局态优先）。
+ * D9 call 级派生：retrying = 该 call 存在 agent-retrying 事件且尚无终局 settled。
+ * 判定数据源 = U3 投影透出的 per-call attempts 计数（fold 行语义：失败尝试累计，
+ * 无重试 undefined——fold attempts 仅由 agent-retrying 帧写入，attempts !== undefined
+ * ⟺ 已落 retrying 帧；值 = 帧载荷 attempt，首败 = 1）。attempts 有值 ∧ 投影 running
+ * 与「存在 retrying 帧 ∧ 无 settled」逐字等价（终局帧落盘时投影 status 已翻
+ * done/failed，终局态优先；首败重试窗口——retrying 帧已落、settled 未落、投影
+ * running、attempts = 1——由此判据覆盖，这是 (attempts ?? 1) >= 2 下界判据系统性
+ * 漏掉的窗口）。注意不得用 (attempts ?? 1) >= 1——会把无重试 running 误判 retrying。
  * 重试窗口内 retrying 态随重试边沿信号触发的重新拉取到达（U3 diff 维度），非仅事后可见。
  */
-/** 重试历史判据下界：attempts ≥ 2 ⟺ 至少一次失败重试（fold attempts 语义：无重试 = 1 或缺省）。 */
-const RETRY_HISTORY_MIN_ATTEMPTS = 2
-
 export function deriveCallView(
   call: Pick<WorkflowAgentCall, 'status' | 'attempts'>,
   runStatus: WorkflowRunStatus,
 ): WorkflowCallDerivedView {
-  const hasRetryHistory = (call.attempts ?? 1) >= RETRY_HISTORY_MIN_ATTEMPTS
+  const hasRetryHistory = call.attempts !== undefined
   let status: WorkflowCallDerivedStatus
   switch (call.status) {
     case 'running':

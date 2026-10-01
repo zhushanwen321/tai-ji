@@ -2,8 +2,9 @@
   <!--
     AgentTabContent —— agent 一级 tab 内容（设计 §3.1-2：对话流复用 `agentcall:` 虚拟 id +
     MessageStream 快照语义（D4：agentcall 通道不接实时流式——实时性由列表 status +
-    workflowUpdate 信号重新拉取体现）与 call trace 详情；复用 useSubagentTabData 既有拉取
-    编排（getAgentCallHistory + setMessages + registerAgentCall 清理映射登记）。
+    workflowUpdate 信号重新拉取体现，信号 watch 见 script 末段）与 call trace 详情；复用
+    useSubagentTabData 既有拉取编排（getAgentCallHistory + setMessages + registerAgentCall
+    清理映射登记；归属 mainSid 显式传 props.sessionId）。
   -->
   <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-testid="wf-viz-agent-tab">
     <!-- call trace 详情（快照元信息条） -->
@@ -40,15 +41,14 @@ import { AlertCircle, RotateCcw } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import MessageStream from '@/components/panel/MessageStream.vue'
 import { useSubagentTabData } from '@/composables/panel/useSubagentTabData'
-import { agentCallVirtualId } from '@/stores/workflow'
+import { agentCallVirtualId, useWorkflowStore } from '@/stores/workflow'
 import { deriveCallView } from '../gantt-segments'
 import { formatTokens } from '@/lib/token-format'
 import { formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
 import type { WorkflowAgentCall, WorkflowRunStatus } from '@taiji/shared'
 
 const props = defineProps<{
-  /** 主 session id（useSubagentTabData 的 agentcall 编排内部取 focusedSessionId，本 prop
-   *  供派生状态与未来显式传递；虚拟 id 两段式不含 mainSid）。 */
+  /** 主 session id（agentcall 快照的显式归属——overlay 绑定发起 session 不随焦点，D11⑤）。 */
   sessionId: string
   call: WorkflowAgentCall
   /** run 投影状态（D9 派生输入）。 */
@@ -56,6 +56,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const store = useWorkflowStore()
 
 /** `agentcall:` 虚拟 id（两段式；chatStore.messages Map 按虚拟 id 分区）。 */
 const virtualId = computed(() => agentCallVirtualId(props.call.sessionId ?? ''))
@@ -64,11 +65,14 @@ const view = computed(() => deriveCallView(props.call, props.runStatus))
 
 /**
  * 复用 SubagentTab 的 agentcall 快照编排（零新拉取链）：currentRecord 传 null（三段式
- * subagent 专属兜底/种入分支不适用 agentcall 快照语义，agentcall 分支不读它）。
+ * subagent 专属兜底/种入分支不适用 agentcall 快照语义，agentcall 分支不读它）；
+ * agentcallMainSid 显式传 props.sessionId——overlay agent tab 绑定发起 session，不经
+ * 焦点 pane（焦点漂移窗口内的重拉仍打正确分区，D11⑤）。
  */
 const { loadError, loadSubagentData } = useSubagentTabData({
   currentRecord: computed(() => null),
   noOutcomeText: () => '',
+  agentcallMainSid: () => props.sessionId,
 })
 
 onMounted(() => {
@@ -77,6 +81,11 @@ onMounted(() => {
 // tab 复用实例切 call 时重拉快照（agentcall 快照只读语义：重拉覆盖分区）
 watch(virtualId, (vid) => {
   void loadSubagentData(vid)
+})
+// [D8/§3.1-2] workflowUpdate 信号重拉：store 活跃 run 信号纪元自增（信号命中活跃 run）
+// → 重调本 tab 快照拉取（拉取时刻快照 + 信号触发重新拉取——对话流随 run 推进刷新）
+watch(() => store.activeRunSignalEpoch, () => {
+  void loadSubagentData(virtualId.value)
 })
 
 /** 重试 = 重调 agentcall 快照拉取（loadError 同步置空 → 错误块切走按钮消失，构造性防重复点击）。 */

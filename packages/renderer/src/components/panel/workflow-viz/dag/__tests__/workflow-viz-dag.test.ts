@@ -115,6 +115,13 @@ describe('WorkflowVizDag 画布（黑盒 DOM）', () => {
     expect(wrapper.emitted('select')?.[0]?.[0]).toEqual({ semantic: 'phase', phase: 'review' })
   })
 
+  it('run 终局后 skipped 节点点击 = phase 语义（与 pending 同路由，非静默 no-op）', async () => {
+    const wrapper = mountDag(sampleDag(), { nodeStates: { 'n-biz': 'skipped' } })
+    await wrapper.find('[data-testid="wfvz-dag-node-n-biz"]').trigger('pointerdown')
+    await wrapper.find('[data-testid="wfvz-dag-node-n-biz"]').trigger('pointerup')
+    expect(wrapper.emitted('select')?.[0]?.[0]).toEqual({ semantic: 'phase', phase: 'review' })
+  })
+
   it('phase 分区点击 → select phase 语义', async () => {
     const wrapper = mountDag(sampleDag())
     await wrapper.find('[data-testid="wfvz-dag-cluster-gate"]').trigger('pointerdown')

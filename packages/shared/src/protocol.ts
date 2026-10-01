@@ -112,7 +112,7 @@ export type ClientMessageType =
   // workflow 可视化（workflow-visualization 设计 §3.1-4/§3.1-5 / U2 协议冻结）：
   // getWorkflowRunEvents 拉单 run 事件流原文（大字段 2KB 截断 + truncatedFields 标注），
   // reply session.workflowRunEvents；getWorkflowDag 拉脚本静态 DAG 解析产物
-  //（成功不缓存语义归 runtime 实装），reply session.workflowDag。错误形态为设计内
+  //（runtime 按 runId 内存缓存、仅缓存成功结果、失败不缓存），reply session.workflowDag。错误形态为设计内
   // 领域回执（结构化 code），与 error envelope 的 renderer 归一见各自 reply 类型注释。
   | 'session.getWorkflowRunEvents' | 'session.getWorkflowDag'
   // session.forceQuit：强制退出卡死 session（杀 pi 子进程 + stopped 收敛，区别于 message.abort 的协作式中止）。

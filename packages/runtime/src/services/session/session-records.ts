@@ -193,7 +193,7 @@ export interface OversizeAwareResult<T> {
   oversize: boolean
 }
 
-/** workflow 增量信号形状（session.workflowUpdate payload.update；status/reason/步骤数任一变化一条）。 */
+/** workflow 增量信号形状（session.workflowUpdate payload.update；status / reason / 步骤数 / stepStatuses（status@attempts）/ phasesFingerprint 任一变化一条）。 */
 interface WorkflowUpdateSignal {
   runId: string
   status: string
@@ -1241,8 +1241,10 @@ function subagentsDifferFromPublished(current: Map<string, SubagentRecord>, publ
 
 /**
  * workflows 水位 diff：按差异 run 构造增量信号（新 run / status / reason / 步骤数 /
- * [W1 / D6] 步骤状态全序列任一变化一条——事件投影驱动的转态在 steps 不变时由
- * stepStatuses 序列承载信号）。run 消失（fullRebuild 后全集不再含该 run）不构造信号
+ * stepStatuses（status@attempts 全序列）/[W1 / D6] 步骤状态 / [可视化 U3]
+ * phasesFingerprint 任一变化一条——事件投影驱动的转态在 steps 不变时由
+ * stepStatuses 序列承载信号；纯脚本 phase 转态与重试边沿由 phasesFingerprint /
+ * stepStatuses 的 attempts 段承载）。run 消失（fullRebuild 后全集不再含该 run）不构造信号
  * ——信号面无删除形态，硬造旧状态帧只会发 stale 信息；消费端由下次真实变化或冷拉收敛。
  */
 function workflowSignalsAgainstPublished(current: Map<string, WorkflowRunRecord>, published: Map<string, PublishedWorkflowRunState>): WorkflowUpdateSignal[] {

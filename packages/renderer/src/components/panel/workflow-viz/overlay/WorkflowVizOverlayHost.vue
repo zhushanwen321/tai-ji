@@ -67,7 +67,7 @@ import {
   overlayOpen,
   retryDagParse,
 } from './workflow-viz-overlay'
-import { useWorkflowStore } from '@/stores/workflow'
+import { useWorkflowStore, deriveWorkflowRunElapsedMs } from '@/stores/workflow'
 
 const panelRef = ref<InstanceType<typeof WorkflowLivePanel> | null>(null)
 
@@ -149,23 +149,11 @@ onUnmounted(() => {
   if (openTickTimer !== null) clearInterval(openTickTimer)
 })
 
-/** 已用时长 ms（D9 停走口径；与面板 elapsedText 同口径的 ms 形态，壳 header 槽消费）。 */
+/** 已用时长 ms（D9 停走口径单点 = workflowStore 的 deriveWorkflowRunElapsedMs——与面板 header 共用同一派生）。 */
 const elapsedMs = computed<number | undefined>(() => {
   const run = runRecord.value
   if (run === null) return undefined
-  const start = Date.parse(run.startedAt)
-  if (Number.isNaN(start)) return undefined
-  let endMs: number
-  if (run.status === 'running') {
-    endMs = now.value
-  } else if (run.completedAt !== undefined) {
-    const parsed = Date.parse(run.completedAt)
-    endMs = Number.isNaN(parsed) ? start : parsed
-  } else {
-    const lastProgress = run.health?.lastProgressAt
-    endMs = lastProgress !== undefined && lastProgress >= start ? lastProgress : start
-  }
-  return Math.max(0, endMs - start)
+  return deriveWorkflowRunElapsedMs(run, now.value) ?? undefined
 })
 
 // ── 事件接线 ─────────────────────────────────────────────────────────────────

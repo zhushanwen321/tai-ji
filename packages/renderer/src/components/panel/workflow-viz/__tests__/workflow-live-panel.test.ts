@@ -185,10 +185,36 @@ describe('WorkflowLivePanel · header（使用者黑盒）', () => {
     expect(wrapper.find('[data-testid="wf-viz-run-pill"]').text()).toBe('失败 · budget_exceeded')
   })
 
+  it('cancelled 终局：pill 文案「已取消」+ 取消色（D9 全枚举，与 trace 行 stoppedColorOf 同源非绿）', async () => {
+    const wrapper = await mountPanel(makeRun({ status: 'done', outcome: 'cancelled', reason: 'aborted' }))
+    const pill = wrapper.find('[data-testid="wf-viz-run-pill"]')
+    expect(pill.text()).toBe('已取消')
+    expect(pill.classes()).toContain('text-neutral-mid')
+    expect(pill.classes()).not.toContain('text-success')
+  })
+
   it('interrupted 暂停态：pill 承接「已中断（可续跑）」文案 key（WorkflowTab 徽标同款）', async () => {
     const wrapper = await mountPanel(makeRun({ status: 'interrupted', reason: undefined, completedAt: undefined }))
     // i18n mock 下 t() 返回 key——断言 key 引用（文案 SSOT 在 locale 文件）
     expect(wrapper.find('[data-testid="wf-viz-run-pill"]').text()).toBe('panel.tray.workflowInterrupted')
+  })
+
+  it('interrupted 暂停态：在途 trace 行叠加中性停止色且不旋转（D9 停止着色 + 静态图标）', async () => {
+    // call #2 = 无重试记录的纯 running（attempts 缺省）——stoppedInFlight 与 retrying 派生无关的正交验证
+    const wrapper = await mountPanel(makeRun({
+      status: 'interrupted',
+      reason: undefined,
+      completedAt: undefined,
+      agentCalls: [makeCall({ id: 2, status: 'running', attempts: undefined, phase: 'beta' })],
+    }))
+    // call #2 running → stoppedInFlight：状态文字 span 叠 text-neutral-mid；Loader2 静态（无 animate-spin）
+    const status2 = wrapper.find('[data-testid="wf-viz-trace-status-2"]')
+    expect(status2.attributes('data-status')).toBe('running')
+    const label = status2.find('span.font-mono')
+    expect(label.classes()).toContain('text-neutral-mid')
+    const spinner = status2.find('svg')
+    expect(spinner.exists()).toBe(true)
+    expect(spinner.classes()).not.toContain('animate-spin')
   })
 })
 
@@ -354,6 +380,23 @@ describe('WorkflowLivePanel · 多级 tab（使用者黑盒）', () => {
     expect(loadSubagentDataMock).toHaveBeenCalledWith('agentcall:acs-0')
     // trace 详情元信息条渲染
     expect(wrapper.find('[data-testid="wf-viz-agent-meta"]').text()).toContain('worker-0')
+  })
+
+  it('workflowUpdate 信号（命中活跃 run）→ agent tab 快照重拉（§3.1-2/D8 信号刷新链）', async () => {
+    const wrapper = await mountPanel()
+    await wrapper.find('[data-testid="wf-viz-trace-row-0"]').trigger('click')
+    await flushPromises()
+    loadSubagentDataMock.mockClear()
+    // 面板挂载已登记活跃锚（setActiveWorkflowRun）——信号经 store 聚合触发纪元自增
+    const store = useWorkflowStore()
+    store.triggerWorkflowReload(SID, 'running')
+    await flushPromises()
+    expect(loadSubagentDataMock).toHaveBeenCalledWith('agentcall:acs-0')
+    // 非活跃 session 的信号不触发重拉（纪元不自增）
+    loadSubagentDataMock.mockClear()
+    store.triggerWorkflowReload('other-session', 'running')
+    await flushPromises()
+    expect(loadSubagentDataMock).not.toHaveBeenCalled()
   })
 
   it('agent tab 快照拉取失败：错误态 + 重试按钮；点重试重调快照编排（§3.1-2 同一错误态语言）', async () => {

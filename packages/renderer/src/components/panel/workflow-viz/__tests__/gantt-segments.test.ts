@@ -144,9 +144,11 @@ describe('gantt-segments：call 级 attempt 分段（规则①，rebuild 真实�
     })
   })
 
-  it('输出按 taskIndex → generation 升序（确定性排序，消费方无需再排）', () => {
-    const keys = attemptSegments.map((s) => `${s.taskIndex}:${s.generation}:${s.attempt}`)
-    const sorted = [...keys].sort()
+  it('输出按 taskIndex → generation 升序（数值序确定性排序，消费方无需再排）', () => {
+    const keys = attemptSegments.map((s) => [s.taskIndex, s.generation, s.attempt] as const)
+    const sorted = [...keys].sort((a, b) =>
+      a[0] !== b[0] ? a[0] - b[0] : a[1] !== b[1] ? a[1] - b[1] : a[2] - b[2],
+    )
     expect(keys).toEqual(sorted)
   })
 })
@@ -395,10 +397,11 @@ describe('gantt-segments：phase 级色带（手工 fixture——空段判据/�
 // ── §3.3-D9：渲染层状态派生（trace 表与 DAG 共用）────────────────────────────
 
 describe('gantt-segments：D9 call 级派生（deriveCallView）', () => {
-  it('retrying = attempts ≥ 2 且投影 running；终局态优先不翻 retrying', () => {
+  it('retrying = attempts 有值（fold 仅由 agent-retrying 帧写入）且投影 running；首败重试窗口（attempts=1）覆盖；无 attempts running 不判 retrying；终局态优先', () => {
     expect(deriveCallView({ status: 'running', attempts: 2 }, 'running').status).toBe('retrying')
-    expect(deriveCallView({ status: 'running' }, 'running').status).toBe('running') // 缺省 = 1（无重试）
-    expect(deriveCallView({ status: 'running', attempts: 1 }, 'running').status).toBe('running')
+    // 首败重试窗口（S2 构造场景：mock 首败后成，retrying 帧已落 settled 未落）——attempts 峰值 = 1
+    expect(deriveCallView({ status: 'running', attempts: 1 }, 'running').status).toBe('retrying')
+    expect(deriveCallView({ status: 'running' }, 'running').status).toBe('running') // 缺省 = 无 retrying 帧
     expect(deriveCallView({ status: 'done', attempts: 3 }, 'running').status).toBe('done')
     expect(deriveCallView({ status: 'failed', attempts: 3 }, 'done').status).toBe('failed')
   })

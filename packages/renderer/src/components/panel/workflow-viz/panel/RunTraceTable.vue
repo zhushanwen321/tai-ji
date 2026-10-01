@@ -46,9 +46,14 @@
       <span class="truncate font-mono text-neutral-dim" :title="row.call.phase">{{ row.call.phase ?? '—' }}</span>
       <span class="font-mono text-neutral-dim">{{ row.call.attempts ?? 1 }}</span>
       <!-- 状态：D9 派生词（retrying = 重试窗口内可见，非仅事后；stoppedInFlight = run 已
-           停止的在途行——叠加停止着色不显示蓝脉冲，着色随 run 终局 outcome） -->
+           停止的在途行——叠加停止着色不显示蓝脉冲（spinner 静态不旋转，旋转动效本身是
+           「还在跑」的视觉信号），着色随 run 终局 outcome） -->
       <span class="flex items-center gap-1" :data-testid="`wf-viz-trace-status-${row.call.id}`" :data-status="row.view.status">
-        <Loader2 v-if="row.isLiveRunning" class="size-[11px] shrink-0 animate-spin" :class="row.stoppedColorClass" />
+        <Loader2
+          v-if="row.isLiveRunning"
+          class="size-[11px] shrink-0"
+          :class="[row.stoppedColorClass, row.view.stoppedInFlight ? '' : 'animate-spin']"
+        />
         <span v-else class="size-1.5 shrink-0 rounded-full" :class="row.dotClass" />
         <span class="font-mono" :class="row.stoppedColorClass">{{ statusLabel(row.view.status) }}</span>
       </span>

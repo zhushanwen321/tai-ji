@@ -8,8 +8,9 @@
   交互（原型 04-final-overlay.html 实测形态对齐）：
   - 缩放：wheel 指数缩放（0.35~2.6），以指针为缩放中心；
   - 平移：按住拖拽（位移 > 5px 判定 pan，抑制点击误触）；
-  - 点击上抛：agent 节点 → semantic 'agent'；pending 节点（零实例、无对话可看）与
-    phase 分区 → semantic 'phase'（设计 §3.1-2 点击行为边界）。
+  - 点击上抛：agent 节点 → semantic 'agent'；pending/skipped 节点（零实例、无对话
+    可看——skipped = run 终局后零实例）与 phase 分区 → semantic 'phase'
+    （设计 §3.1-2 点击行为边界）。
 
   运行实况：节点六态经 props.nodeStates 接收已派生映射（派生单处归 u5，D9 单点
   实现——本组件不自行判定 retrying/skipped）；run 停止叠加（D9）消费 run 级原始输入
@@ -79,8 +80,8 @@
         </text>
 
         <!-- 节点卡片（per-node 边界：单节点渲染失败 = 占位错误态，不挂整画布）；
-             data-stop-tone 同值绑外层（观察者形态锚点）与节点卡片根（着色选择器），
-             同一 computed 单源 -->
+             data-stop-tone 同值绑外层与节点卡片根（测试观察锚点，非 CSS 选择器——
+             着色由节点卡片 tone computed 整组切换 Tailwind 类） -->
         <g
           v-for="ln in layout.nodes"
           :key="ln.node.id"
@@ -102,7 +103,7 @@
       </g>
     </svg>
 
-    <!-- 零节点 run（纯门禁脚本无 agent()）：单节点摘要卡提示（设计 §3.1-3） -->
+    <!-- 零节点 run（纯门禁脚本无 agent()）：空画布 + 居中摘要提示（设计 §3.1-3） -->
     <div
       v-if="isEmptyDag"
       class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1"
@@ -269,7 +270,11 @@ function onWheel(e: WheelEvent): void {
   vp.k = k2
 }
 
-/** 点击路由：节点（pending → phase 语义）优先，其次 phase 分区。 */
+/**
+ * 点击路由：节点优先，其次 phase 分区。节点按渲染态分语义——pending（运行中零实例）
+ * 与 skipped（run 终局后零实例）同为「零实例、无对话可看」，点击均开所属 phase tab
+ * 而非落 agent 语义（Host 侧 byNode 空导致静默 no-op，设计 §3.1-2 点击行为边界）。
+ */
 function routeClick(target: EventTarget | null): void {
   const el = target as Element | null
   if (!el || typeof (el as Element).closest !== 'function') return
@@ -278,7 +283,8 @@ function routeClick(target: EventTarget | null): void {
     const id = nodeEl.getAttribute('data-wfvz-node') ?? ''
     const node = props.dag?.nodes.find((n) => n.id === id)
     if (!node) return
-    if (nodeState(id) === 'pending') {
+    const state = nodeState(id)
+    if (state === 'pending' || state === 'skipped') {
       emit('select', { semantic: 'phase', phase: node.phase })
     } else {
       emit('select', { semantic: 'agent', nodeId: id, templateName: node.templateName, phase: node.phase })

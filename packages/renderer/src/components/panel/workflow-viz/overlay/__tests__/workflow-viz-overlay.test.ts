@@ -129,6 +129,38 @@ describe('WorkflowVizOverlay 壳（黑盒 DOM）', () => {
     expect(wrapper.emitted('close')).toBeUndefined()
   })
 
+  it('Tab 焦点陷阱（DESIGN §5.12 三要素之三）：末元素 Tab 回首元素、首元素 Shift+Tab 到末元素', async () => {
+    // attach 到真实 document——document.activeElement 的首末循环断言依赖面板在文档树内
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const wrapper = mount(WorkflowVizOverlay, {
+      props: { open: true, run: run(), dag: SAMPLE_DAG, nodeStates: { n1: 'done' }, dagError: null },
+      attachTo: host,
+    })
+    try {
+      // 先冲掉组件打开时的 nextTick focus(panel)（安全默认焦点），再驱动 Tab 断言
+      await wrapper.vm.$nextTick()
+      const panel = wrapper.find('[data-testid="wfvz-overlay-panel"]').element as HTMLElement
+      const focusables = Array.from(panel.querySelectorAll<HTMLElement>('button:not([disabled])'))
+      expect(focusables.length).toBeGreaterThan(0)
+      const first = focusables[0]
+      const last = focusables[focusables.length - 1]
+      // 末元素上按 Tab → 焦点拉回首元素（不逃逸到背景）
+      last.focus()
+      expect(document.activeElement).toBe(last)
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+      await wrapper.vm.$nextTick()
+      expect(document.activeElement).toBe(first)
+      // 首元素上按 Shift+Tab → 焦点跳到末元素
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }))
+      await wrapper.vm.$nextTick()
+      expect(document.activeElement).toBe(last)
+    } finally {
+      wrapper.unmount()
+      host.remove()
+    }
+  })
+
   it('三通道②：右上关闭按钮点击 → close', async () => {
     const wrapper = mountOverlay()
     await wrapper.find('[data-testid="wfvz-overlay-close"]').trigger('click')
