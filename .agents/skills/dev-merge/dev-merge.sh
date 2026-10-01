@@ -53,13 +53,25 @@ if [[ ! -d "$DEV_DIR" ]]; then
     die "自动创建 worktree 失败。恢复动作: bash $CREATE_WORKTREE_SH $DEV_BRANCH main；或改用已存在的 dev worktree: $(list_dev_worktrees)"
   fi
   [[ -d "$DEV_DIR" ]] || die "创建脚本已执行但 $DEV_DIR 仍不存在，中止"
+  # worktree 级 config 补写（git-cwt 包装层职责，create-worktree.sh 不做）：共享 config
+  # core.bare=true 下，自动创建的 worktree 若无 config.worktree 覆盖会被 git 解析成
+  # bare 仓库（status/merge 全部报「该操作必须在一个工作区中运行」，check_clean 还会
+  # 把它误报成「有未提交改动」）。同族记录见 ~/.shell/07-git-ws.sh [2026-09-11] 注释。
+  DEVGIT="$(git -C "$CUR_DIR" rev-parse --git-common-dir)/worktrees/$DEV_BRANCH"
+  git --git-dir="$DEVGIT" config --worktree core.bare false
+  git --git-dir="$DEVGIT" config --worktree core.hooksPath "$DEVGIT/hooks"
   echo "OK: worktree $DEV_DIR 已自动创建（分支 $DEV_BRANCH 基于 main）"
 fi
 
 # ── 公共预检：两边 worktree 都必须干净（tracked 改动）──
 check_clean() {
   local dir="$1" label="$2"
-  git -C "$dir" diff --quiet && git -C "$dir" diff --cached --quiet \
+  git -C "$dir" diff --quiet 2>/dev/null
+  local rc=$?
+  if [ "$rc" -ge 2 ]; then
+    die "$label git 状态读取失败（exit $rc）——多为 worktree 结构损坏（bare 误解析/登记缺失），先修复 git 链再重跑"
+  fi
+  git -C "$dir" diff --cached --quiet 2>/dev/null \
     || die "$label 有未提交改动（tracked）。先按提交策略处理（自己的改动 commit；非本次会话产生的改动先询问用户），再重跑本脚本"
 }
 
