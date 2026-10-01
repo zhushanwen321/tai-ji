@@ -401,7 +401,7 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
       expect(result.dag.edges).toEqual([]);
       expect(result.dag.parallelGroups).toEqual([]);
       expect(result.dag.loops).toEqual([]);
-      // phase 分区仍登记（脚本结构信息零损失——摘要卡之外分区可用于背景）
+      // phase 分区仍登记（脚本结构信息零损失——居中摘要提示之外分区可用于背景）
       expect(result.dag.phases.map((p) => p.name)).toContain("preflight");
     });
 

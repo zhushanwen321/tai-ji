@@ -18,8 +18,8 @@
  * runtime warnOnce 去重是两消费方各自的可观测性选择，收敛判定不收敛日志。
  *
  * 不在本模块的：
- * - snapshot 格式版本（SNAPSHOT_VERSION）——run-snapshot.ts 常量单源；entry 层 v
- *   与 snapshot 层 v 是两级独立版本（entry schema 演化 vs 快照格式演化）；
+ * - v1 条目内 snapshot 的内部格式——v1 已冻结为兼容读面（D7）不再演化，无
+ *   独立格式版本常量需要单源（entry 层 v 只管 entry schema 自身的演化）；
  * - runtime 投影的 runId 存在性守卫——投影键需求（record 需要 runId 做 Map 键），
  *   非 entry schema 面，runtime 解码链自有等价校验。
  */
@@ -47,8 +47,8 @@ export const WORKFLOW_STATE_LINK_CUSTOM_TYPE = "workflow-state-link";
 
 /**
  * `workflow-record` entry 的 data schema 版本（W1 起 v2）。消费方按 v 判别
- * 解析，不认识的版本跳过而非猜测；与快照层 SNAPSHOT_VERSION（"wf-run-v2"）
- * 是两级独立版本号。v1 全量快照形态随版本门保留为兼容读面（D7）。
+ * 解析，不认识的版本跳过而非猜测。v1 全量快照形态随版本门保留为兼容读面
+ * （D7，冻结不演化）。
  *
  * （const 声明 + 字面量初始化使类型收窄为字面量 2，无需 `as const`。）
  */

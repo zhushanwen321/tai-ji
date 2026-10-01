@@ -413,6 +413,10 @@ export interface WorkflowCallDerivedView { // oe-exempt:20261002:framework:workf
  * running、attempts = 1——由此判据覆盖，这是 (attempts ?? 1) >= 2 下界判据系统性
  * 漏掉的窗口）。注意不得用 (attempts ?? 1) >= 1——会把无重试 running 误判 retrying。
  * 重试窗口内 retrying 态随重试边沿信号触发的重新拉取到达（U3 diff 维度），非仅事后可见。
+ * attempts 为全历史累计（fold 不分代际——agent-started 重派帧只推进进度边沿不清
+ * 计数）：resume 重派同 taskIndex 后新代际正常执行期间，旧代际 retrying 帧仍使
+ * attempts 有值 → 该窗口显示 retrying 属预期（设计 D9 判据不限定代际，历史重试
+ * 提示语义，非新代际异常）。
  */
 export function deriveCallView(
   call: Pick<WorkflowAgentCall, 'status' | 'attempts'>,

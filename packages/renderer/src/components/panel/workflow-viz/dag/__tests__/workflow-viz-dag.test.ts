@@ -2,7 +2,7 @@
  * WorkflowVizDag 画布组件测试（workflow-visualization U4；三视角）。
  *
  * - 使用者黑盒：phase 分区 / 节点 / 边的用户可见渲染、点击上抛语义、当前 phase
- *   高亮、零节点摘要卡——每条用例至少一个用户可见 DOM 断言；
+ *   高亮、零节点居中摘要提示——每条用例至少一个用户可见 DOM 断言；
  * - 构建者白盒：布局几何归 layout 纯函数单测（workflow-viz-dag-layout.test.ts），
  *   此处只测画布装配（props → DOM 形态映射）；
  * - 观察者形态：data-state 六态点亮、data-stop-tone 停止叠加、节点级渲染边界
@@ -175,7 +175,7 @@ describe('WorkflowVizDag 节点级渲染边界与零节点形态', () => {
     expect(wrapper.find('[data-testid="wfvz-dag-node-n-biz"]').exists()).toBe(true)
   })
 
-  it('零节点 run（纯门禁脚本）：摘要卡提示「本脚本无 agent 调用点」', () => {
+  it('零节点 run（纯门禁脚本）：居中摘要提示「本脚本无 agent 调用点」', () => {
     const empty: WorkflowDag = { nodes: [], edges: [], phases: [], parallelGroups: [], loops: [] }
     const wrapper = mountDag(empty)
     expect(wrapper.find('[data-testid="wfvz-dag-empty"]').exists()).toBe(true)

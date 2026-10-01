@@ -221,7 +221,7 @@ describe('WorkflowLivePanel · header（使用者黑盒）', () => {
 // ── workflow 固定 tab 三子页 ──────────────────────────────────────────────────
 
 describe('WorkflowLivePanel · workflow tab 三子页（使用者黑盒 + 观察者形态）', () => {
-  it('默认 workflow tab + trace 子页：实例行渲染，D9 派生 retrying 态可见（attempts≥2 running）', async () => {
+  it('默认 workflow tab + trace 子页：实例行渲染，D9 派生 retrying 态可见（attempts 有值 running → retrying，首败重试窗口覆盖，非仅事后）', async () => {
     const wrapper = await mountPanel()
     // 固定 tab 标题 = scriptName；trace 表 4 行
     expect(wrapper.find('[data-testid="wf-viz-tabbar"]').text()).toContain('panel-flow')

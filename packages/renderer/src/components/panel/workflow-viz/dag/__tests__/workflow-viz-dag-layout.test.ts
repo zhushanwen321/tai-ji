@@ -5,7 +5,7 @@
  * - 分区列 WorkflowDagPhase.order 升序从左到右；
  * - 分区内节点按 templateName 词法序（codepoint）垂直排列；
  * - 节点归属分区缺失 → 动态补尾部分区（节点不丢弃）；
- * - 零节点 run → 空布局 + 最小占位（渲染层出摘要卡）；
+ * - 零节点 run → 空布局 + 最小占位（渲染层出居中摘要提示，无独立卡片容器）；
  * - 边几何：顺序/数据流/条件 = 源右中心→目标左中心贝塞尔；loop-back = 底部下绕弧；
  *   端点缺失的边跳过不抛。
  *
@@ -89,7 +89,7 @@ describe('layoutDag 列式布局（白盒）', () => {
     expect(result.clusters[1].x).toBeGreaterThan(result.clusters[0].x)
   })
 
-  it('零节点 run：空布局 + 最小占位尺寸（渲染层出摘要卡）', () => {
+  it('零节点 run：空布局 + 最小占位尺寸（居中摘要提示的底板）', () => {
     const result = layoutDag(dag())
     expect(result.nodes).toHaveLength(0)
     expect(result.clusters).toHaveLength(0)

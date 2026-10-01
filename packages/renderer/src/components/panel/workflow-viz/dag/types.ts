@@ -22,9 +22,9 @@ export type WorkflowVizDagNodeStatus =
 
 /**
  * DAG 画布点击上抛语义：agent 节点点击 = 'agent'（开该 agent 的钻取）；
- * pending 节点（零实例、无对话可看）与 phase 分区点击 = 'phase'（开所属 phase
- * tab）——「pending 节点点击 = phase 语义」由画布按已派生六态路由（设计 §3.1-2
- * 点击行为边界），非业务派生。
+ * pending/skipped 节点（零实例、无对话可看——skipped = run 终局后零实例）与
+ * phase 分区点击 = 'phase'（开所属 phase tab）——「pending/skipped 节点点击 =
+ * phase 语义」由画布按已派生六态路由（设计 §3.1-2 点击行为边界），非业务派生。
  */
 export type WorkflowVizDagClickPayload =
   | { semantic: 'agent'; nodeId: string; templateName: string; phase: string }

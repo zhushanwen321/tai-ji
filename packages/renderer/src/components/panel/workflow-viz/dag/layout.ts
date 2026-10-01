@@ -32,7 +32,7 @@ const CLUSTER_GAP_X = 32
 /** 比较器返回值（排序比较器惯例语义，命名消 magic number）。 */
 const ORDER_BEFORE = -1
 const ORDER_AFTER = 1
-/** 零节点 run 的最小占位尺寸（渲染层出摘要卡的底板）。 */
+/** 零节点 run 的最小占位尺寸（渲染层居中摘要提示的底板）。 */
 const EMPTY_DAG_MIN_W = 240
 const EMPTY_DAG_MIN_H = 96
 /** 中心点除数（矩形中心 = 左上 + 尺寸/2）。 */
@@ -143,7 +143,7 @@ export function layoutDag(dag: WorkflowDag): DagLayout {
     cursorX += cluster.width + CLUSTER_GAP_X
   }
 
-  // 零分区（零节点 run）：最小占位，渲染层出摘要卡
+  // 零分区（零节点 run）：最小占位，渲染层出居中摘要提示（无独立卡片容器）
   const width = clusters.length > 0 ? cursorX - CLUSTER_GAP_X : EMPTY_DAG_MIN_W
   const height = clusters.length > 0 ? maxBottom : EMPTY_DAG_MIN_H
   return { clusters, nodes, width, height }
