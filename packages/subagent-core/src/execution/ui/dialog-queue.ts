@@ -90,7 +90,6 @@ function dialogTimeoutLogMessage(req: UiRequest, waitedMs: number): string {
 // （contract-closure），漂移编译期可抓。 ──
 export type { UiMethod, UiRequest, UiRequestHandler, UiResponse } from "@zhushanwen/subagent-engine-sdk";
 import type { UiRequest, UiRequestHandler, UiResponse } from "@zhushanwen/subagent-engine-sdk";
-import { GLOBAL_SLOT_KEYS } from "../../shared/global-slots.ts";
 
 // ── DialogGlobalQueue 实现 ──
 

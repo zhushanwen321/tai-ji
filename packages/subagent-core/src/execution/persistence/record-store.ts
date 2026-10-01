@@ -113,8 +113,8 @@ import {
   settledEntrySourceOf,
   toRegisteredEntryData,
   toSettledEntryData,
-} from "./record-store-terminal.ts";
-import type { V2EntryState } from "./record-store-terminal.ts";
+  type V2EntryState,
+} from "./record-entry-write.ts";
 // [W1 / U2a] record 事件文件写面接线层（fold 缓存 + 写点幂等判定 + 物化编排）——
 // 轮次簿记轴承载（事件落账调用面主体 = RoundsCtx/TerminalCtx 注入位）。RecordStore
 // 是 record 域事件的唯一合法写者（单写者纪律，face 是容器的单点封装）。
@@ -1900,13 +1900,13 @@ export class RecordStore {
           cached.stateMarker.reason !== undefined &&
           cached.stateMarker.endedAt !== undefined
             ? {
-                receipt: {
-                  stopReason: cached.stateMarker.reason,
-                  endedAt: cached.stateMarker.endedAt,
-                },
-                turns: cached.light.turns,
-                totalTokens: cached.light.totalTokens,
-              }
+              receipt: {
+                stopReason: cached.stateMarker.reason,
+                endedAt: cached.stateMarker.endedAt,
+              },
+              turns: cached.light.turns,
+              totalTokens: cached.light.totalTokens,
+            }
             : {}),
         });
       }

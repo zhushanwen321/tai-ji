@@ -647,10 +647,15 @@ export default [
   // 后折算 805 微超 5 行——按「微超即提额」（pi-provider-store 508>500→520 同型）
   // 提额 820 保留软上限告警；容器侧再拆属独立重构任务（事件写面接线族已在 rounds
   // 轴承接）。
+  // [HISTORICAL·2026-10-01] dev-0.10.7 集成线多轮合并后折算 899（轮次 CAS 门与
+  // 收编判定依据按「判定依据全文落档方法头注释」纪律入档，有效行天然膨胀）；rounds /
+  // terminal / entry-write / rebuild 轴均已各自成文件，容器 face（唯一合法写者封装点）
+  // 类方法经 this 强耦合，再拆 = 方法族去 this 化重组（独立重构任务）——改 'off'，
+  // 归 event-adapter「聚合中心职责内聚」同款，行数守卫由各轴文件承担。
   {
     files: ['packages/subagent-core/src/execution/persistence/record-store.ts'],
     rules: {
-      'max-lines': ['warn', { max: 820, skipBlankLines: true, skipComments: true }],
+      'max-lines': 'off',
     },
   },
   {

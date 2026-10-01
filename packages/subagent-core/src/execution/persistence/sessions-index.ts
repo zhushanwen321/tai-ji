@@ -120,9 +120,12 @@ export interface SessionsIndexNegativeEntry {
   size: number;
 }
 
+/** 磁盘 JSON 格式版本（唯一写点 = 索引重建；读侧按 it 拒旧格式）。 */
+export const SESSIONS_INDEX_VERSION = 3;
+
 /** 磁盘 JSON 顶层结构（key = jsonl basename 不含路径）。 */
 export interface SessionsIndexFile {
-  version: 3;
+  version: typeof SESSIONS_INDEX_VERSION;
   pid: number;
   entries: Record<string, SessionsIndexEntry | SessionsIndexNegativeEntry>;
 }

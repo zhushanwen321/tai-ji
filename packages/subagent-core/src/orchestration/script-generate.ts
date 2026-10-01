@@ -29,7 +29,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { parseResourceMetaDetailed } from "../shared/meta-parser.ts";
-import { checkWorkflowScriptSyntax, WORKER_IIFE_HOST_DECLARED_NAMES } from "./script-syntax.ts";
+import { checkWorkflowScriptSyntax } from "./script-syntax.ts";
 import { DEFAULT_WORKFLOW_TMP_DIR } from "./workflow-files.ts";
 
 // 宿主预声明名字清单与语法闸本体已抽至 ./script-syntax.ts（第二消费方 = 派发期

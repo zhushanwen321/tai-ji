@@ -22,7 +22,7 @@
  * 退出码：0 = 八场景全 PASS；1 = 存在 FAIL（明细见 <artifactsDir>/scenarios.md 与 scenes/*.log）。
  */
 import { spawn, execFileSync } from 'node:child_process';
-import { appendFileSync, cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -47,7 +47,6 @@ const NOTIFY_IDLE_WARN = 'No active plan mode.';
 const NOTIFY_INACTIVE_WARN_PREFIX = 'Plan mode is not active (it already completed or exited)';
 const CANCELLED_BY_EXIT_TEXT = 'Plan mode has been exited and the full tool set is restored.';
 const FORM_PENDING_EXIT_TEXT = 'Plan mode has been exited while the execution-method prompt was pending';
-const PLAN_MODE_TOOLS = ['read', 'bash', 'grep', 'find', 'ls', 'plan'];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -437,7 +436,7 @@ async function scene7(log) {
     llm.responses.push(() => [{ tool: { name: 'plan', args: { action: 'enter', requirement: 'scene7 req' } } }]);
     llm.responses.push(() => [{ tool: { name: 'plan', args: { action: 'register-doc', fileName: 'plan.md' } } }]);
     llm.responses.push(() => [{ tool: { name: 'plan', args: { action: 'submit-review', selfReview: 'scene7 self review' } } }]);
-    const select = await driveToReviewPending(api1);
+    await driveToReviewPending(api1);
     const abortId = 'abort-s7';
     api1.send({ type: 'prompt', id: abortId, message: '/plan abort' });
     await api1.wait((f) => f.type === 'response' && f.id === abortId && f.success, 'abort prompt ack');

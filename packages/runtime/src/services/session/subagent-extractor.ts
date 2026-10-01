@@ -44,7 +44,6 @@ import { SUBAGENT_BG_NOTIFY_CUSTOM_TYPE } from '@zhushanwen/extension-protocol'
 // subagent-record 词表已收 core 单源（runtime 投影经 core barrel 消费；shared 副本仅剩 renderer 消费）
 import {
   classifySubagentRecordEntryData,
-  parseEngineHandle,
   SUBAGENT_RECORD_CUSTOM_TYPE,
   type SubagentRecordRegisteredEntryData,
   type SubagentRecordSettledEntryData,
@@ -305,84 +304,6 @@ function deriveElapsedSeconds(startedAt: number | undefined, endedAt: number | u
     : undefined
 }
 
-/**
- * U1 engine 字段条件投影：投影层只透传（engine 非空才投影），缺省=pi 由读侧
- * extractRecordEngine 映射（不在此填默认值）；engineHandle 守卫 = core
- * parseEngineHandle 单一实现。
- */
-function projectEngineSpreadFields(
-  d: Record<string, unknown>,
-): Pick<SubagentRecord, 'engine' | 'engineHandle'> {
-  const engineRaw = optString(d.engine)
-  const engine = engineRaw !== undefined && engineRaw.length > 0 ? engineRaw : undefined
-  const engineHandle = parseEngineHandle(d.engineHandle)
-  return {
-    ...(engine !== undefined ? { engine } : {}),
-    ...(engineHandle !== undefined ? { engineHandle } : {}),
-  }
-}
-
-/**
- * 已守卫版本的 entry data → SubagentRecord 投影（必填 id/status 守卫 + 可选字段逐个 typeof
- * 守卫缺省，与 legacy 路径同构）。runtime 只取 shared SubagentRecord 投影需要的字段
- * （eventLog/displayItems 等扩展内部字段不进 runtime 契约）；缺必填字段视为坏 entry 返回 null。
- *
- * [U6/D5] 状态归一在此扩参承载：①legacy 值映射的展示位合成（derivedStopReason/
- * derivedClosedReason——entry 自带字段恒优先，合成仅兜缺失；chatMode 形态位已随
- * modeless 波4 字段消亡删除）；②第五归一上下文 resumable（存量桥接 entry 专有，[U5] 后新 entry 无此字段）。
- */
-function projectSelfDescribedSubagentRecord(d: Record<string, unknown>): SubagentRecord | null {
-  if (typeof d.id !== 'string' || typeof d.status !== 'string') return null
-  const norm = normalizeSubagentStatus(d.status, {
-    resumable: d.resumable === true,
-    closedReason: optString(d.closedReason),
-    error: optString(d.error),
-  })
-  const status = norm.status
-  const startedAt = optNumber(d.startedAt)
-  const endedAt = optNumber(d.endedAt)
-  return {
-    subagentId: d.id,
-    sessionFile: optString(d.sessionFile) ?? null,
-    agent: optString(d.agent) ?? 'general-purpose',
-    slug: optString(d.slug) ?? '',
-    task: optString(d.task) ?? '',
-    status,
-    // [U6] closed 遗留诊断位：归一明细仅 closed 分支返回（防 running + closedReason
-    // 脏组合的守卫内化到归一层——closed 已不存在于两态词表，原始字面守卫随之退役）。
-    closedReason: norm.derivedClosedReason,
-    // [U8 / 永久会话模型 §3.2.8] 展示维度下行投影：stopReason 有值即投影——string
-    // 宽松透传（shared 契约：extension 新增展示值读侧不因收窄丢字段）。[U6] entry
-    // 自带 stopReason 恒优先（A-lite 轮终展示位 / W4 failed 等真实数据），归一合成
-    // （legacy 值映射）仅兜缺失。[2026-09-16 裁决] intent 意愿维度已全链路删除——
-    // 旧 entry 残留 intent 键在此被忽略（读侧容忍）。
-    stopReason: optString(d.stopReason) ?? norm.derivedStopReason,
-    turns: optNumber(d.turns),
-    totalTokens: optNumber(d.totalTokens),
-    model: optString(d.model),
-    thinkingLevel: optString(d.thinkingLevel),
-    startedAt,
-    endedAt,
-    elapsedSeconds: deriveElapsedSeconds(startedAt, endedAt),
-    error: optString(d.error),
-    // 轮终结果文本：entry v1 的轮终迁移写点恒写非空。[U4 翻边] 轮终权威词 = idle，
-    // result 回归纯数据职责（「running-resumable 轮终信号」判据已随 U6 谓词终态化
-    // 退役为 status+stopReason 直读）。
-    result: optString(d.result),
-    // [modeless 波4] chatMode 投影已随字段消亡删除：新 entry 不再携带该键，旧 entry
-    // 残留键在此被忽略（读侧容忍——万物可续后「模式」不再是执行态判据）。
-    // record 来源身份（H2 R3-1 修复）：'tool' | 'workflow' 字面量透传（缺省 undefined =
-    // tool 语义）。此前投影白名单漏此字段 → renderer 过滤面 origin 恒 undefined，
-    // workflow record 运行期虚亮 badge / 绑架 hasRunning / 混入 GUI 列表。
-    origin: projectOrigin(d.origin),
-    // [W0 / D1] workflow 身份域透传（entry data 可选字段，与 origin 同族）：合并投影
-    // （workflow-step-merge）按 (parentRunId, stepIndex) 圈定 run 视图候选集。undefined
-    // = 存量 entry / tool 来源（读侧守卫：无 stepIndex 不成行，旧 session 回落 trace-only）。
-    parentRunId: optString(d.parentRunId),
-    stepIndex: optNumber(d.stepIndex),
-    ...projectEngineSpreadFields(d),
-  }
-}
 
 /**
  * 从主 session JSONL 文件提取 SubagentRecord[]（冷启动 / getSubagents RPC 路径）。

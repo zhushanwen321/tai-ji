@@ -19,10 +19,10 @@ import {
   initialEventProjectionSources,
   parseWorkflowRunEventFileLine,
   projectV2Subagent,
-  projectV2Workflow,
   scanV2RecordEntries,
   SessionEventProjection,
 } from '../events-projection.js'
+import { projectV2Workflow } from '../workflow-record-projection.js'
 import { scanRecordFamilyEntriesFromSessionFile } from '../session-file-extraction.js'
 import {
   foldRunEventCheckpoint,

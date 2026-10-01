@@ -22,7 +22,8 @@ import { getLogger } from "../../core/logger.ts";
 
 import { updateFromEvent } from "./execution-record.ts";
 import { zcodeAnchorBasePath } from "./state-marker.ts";
-import { persistSettleSnapshot, summarizeResultForJournal } from "./record-store-terminal.ts";
+import { persistSettleSnapshot } from "./record-store-terminal.ts";
+import { summarizeResultForJournal } from "./record-entry-write.ts";
 import { zcodeRefOf } from "./record-store-rebuild.ts";
 // [W1 / U2a] 事件文件写面接线层（fold 缓存 + 写点幂等判定 + 物化编排）的依赖面：
 // u0 契约层原语（词表/fold/seq 单源）+ terminal 轴载荷构造 + manifest 物化写面。
@@ -51,7 +52,7 @@ import {
   settledEntrySourceOf,
   toRegisteredEntryData,
   toSettledEntryData,
-} from "./record-store-terminal.ts";
+} from "./record-entry-write.ts";
 import type { StopReason } from "../domain/record-types.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
 import type { AgentEvent } from "../assembly/types.ts";

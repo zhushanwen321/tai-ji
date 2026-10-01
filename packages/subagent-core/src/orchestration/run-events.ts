@@ -47,19 +47,14 @@
 // run-resumed 复活（resume 编排，U2）；prune / 对账清理对 interrupted 态天然
 // 不获资格（fold 不达 terminal——宁保留不误裁）。
 
-import { join } from "node:path";
-
 // 引擎协议码运行时 guard（SDK 权威词表，RunErrorCode engine 家族收窄用——自造匹配
 // 逻辑会与 SDK 词表演进漂移）。
 import {
   isEngineErrorPassthroughCode,
   isEngineProtocolErrorCode,
-  type EngineProtocolErrorCode,
 } from "@zhushanwen/subagent-engine-sdk";
 
-import { getLogger } from "../core/logger.ts";
 // [D1 Class A] run 域词汇下沉 shared；本文件 re-export 保持 orchestration 消费面与 barrel 不变
-import { ALL_RUN_OUTCOMES, RUN_EVENTS_SUFFIX, RUN_EVENT_TYPES } from "../shared/run-vocabulary.ts";
 import type { RunEventType } from "../shared/run-vocabulary.ts";
 import type { RunErrorCode, RunOutcome } from "../shared/run-vocabulary.ts";
 export { ALL_RUN_OUTCOMES, RUN_EVENTS_SUFFIX, RUN_EVENT_TYPES } from "../shared/run-vocabulary.ts";
@@ -67,7 +62,6 @@ export type { RunErrorCode, RunEventType, RunOutcome } from "../shared/run-vocab
 import { MAX_ERROR_LOGS } from "./worker-message-pump-constants.ts";
 // [§3.1.3 基座单源] append/scan 实现在 shared/jsonl-event-stream.ts（与 record 事件
 // journal 共用同一实现体，差异经策略注入——本文件只提供 run 域策略）。
-import { JsonlEventStream } from "../shared/jsonl-event-stream.ts";
 import type { AgentFailureKind, AgentResult, DoneReason, WorkerLogEntry } from "./models/types.ts";
 import type { WorkflowRun } from "./models/workflow-run.ts";
 

@@ -16,8 +16,7 @@ import type { WorktreeHandle } from "@zhushanwen/subagent-engine-sdk";
 import type { ModelInfo } from "./model-resolver.ts";
 
 // [§2.4/D2] 领域词汇与聚合的权威路径 = execution/domain/（本文件不再 re-export）
-import type { ExecutionStatus, RecordOrigin, ClosedReason, ExecutionOutcome, ProjectedOutcome, ExternalState, ExecutionMode, StopReason, AliveMarker } from "../domain/record-types.ts";
-import type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
+import type { ExecutionStatus, RecordOrigin, ClosedReason, ExecutionOutcome, ProjectedOutcome, ExternalState, ExecutionMode, StopReason } from "../domain/record-types.ts";
 
 
 
