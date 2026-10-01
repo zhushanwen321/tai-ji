@@ -69,21 +69,6 @@ const REQUIRE_COMMAND_RETRY_INTERVAL_MS = 500
 const REQUIRE_COMMAND_RETRY_ATTEMPTS = 6
 
 /**
- * bash 投递回执的 services 层内部类型（翻译层标准做法）：字段与 shared 的
- * BashDispatchReceipt 逐字段一致，transport 层（session-message-handler.handleMessageBash）
- * 1:1 翻译进 message.status 回执。
- *
- * status 语义（消费方判定「命令是否已执行」的权威依据）：
- * - started = 已开跑未收口（如 bash 等待超时置孤儿，仍在执行）；
- * - settled = 已执行并收口（成功或失败终态已广播）；
- * - rejected = 未执行（busy 预检拒绝 / 空命令不变式 / restore 失败）。
- */
-interface InternalBashDispatchReceipt {
-  status: 'started' | 'settled' | 'rejected'
-  error?: string
-}
-
-/**
  * sendSystemCommand 的判别结果（消息撤回 D1/D8）：编排按 kind 映射错误码——
  * 'sent' = prompt resolve（完成确认由调用方 get_entries 校验，受理口径不反映执行结果）；
  * 'extension-missing' = requireCommand 探测耗尽（fail-closed，命令串未进模型）；
