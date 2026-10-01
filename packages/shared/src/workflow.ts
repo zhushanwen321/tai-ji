@@ -305,7 +305,7 @@ export type WorkflowRunEventType = (typeof WORKFLOW_RUN_EVENT_TYPES_ALL)[number]
  * D12 防误用边界：resume 的 $ARGS 恢复与 args 一致性校验在引擎侧读 record 原文
  * 全文字段，不经本通道）。
  */
-export interface WorkflowRunEventEntryBase {
+export interface WorkflowRunEventEntryBase { // oe-exempt:20261002:framework:workflow-viz 协议契约类型——类型契约先行、单实现常态（shared 跨包消费，同 run-events.ts 先例）
   /** 墙钟时间戳（epoch ms，core 事件信封原样）。 */
   ts: number
   /** 行级单调序号（1 起严格递增；旧格式行缺失）。 */
@@ -594,7 +594,7 @@ export type WorkflowDagNodeKind = 'agent' | 'script-step'
  * reviewer-<维度>-a<n>-r<轮>），运行时实例经 agent-started 事件的 agentName/
  * phase/taskIndex 按「先 phase 后模板正则」两级判据挂接（设计 D2）。
  */
-export interface WorkflowDagNode {
+export interface WorkflowDagNode { // oe-exempt:20261002:framework:workflow-viz 协议契约类型——类型契约先行、单实现常态（shared 跨包消费，同 run-events.ts 先例）
   /** 节点 id（解析器生成，图内唯一——边/并行组/循环的引用键）。 */
   id: string
   /** 调用点类型。 */
@@ -617,7 +617,7 @@ export interface WorkflowDagNode {
 export type WorkflowDagEdgeKind = 'sequence' | 'dataflow' | 'conditional' | 'loop-back'
 
 /** DAG 边（节点间执行/数据关系）。 */
-export interface WorkflowDagEdge {
+export interface WorkflowDagEdge { // oe-exempt:20261002:framework:workflow-viz 协议契约类型——类型契约先行、单实现常态（shared 跨包消费，同 run-events.ts 先例）
   /** 边 id（解析器生成，图内唯一）。 */
   id: string
   /** 源节点 id（WorkflowDagNode.id）。 */
@@ -631,7 +631,7 @@ export interface WorkflowDagEdge {
 }
 
 /** phase 分区（DAG 画布背景分区的绘制序）。 */
-export interface WorkflowDagPhase {
+export interface WorkflowDagPhase { // oe-exempt:20261002:framework:workflow-viz 协议契约类型——类型契约先行、单实现常态（shared 跨包消费，同 run-events.ts 先例）
   /** phase 名。 */
   name: string
   /** 分区序（0-based，绘制从左到右）。 */
@@ -639,13 +639,13 @@ export interface WorkflowDagPhase {
 }
 
 /** 并行组（同组调用点并行派发——parallel() 包裹的成员集合）。 */
-export interface WorkflowDagParallelGroup {
+export interface WorkflowDagParallelGroup { // oe-exempt:20261002:framework:workflow-viz 协议契约类型——类型契约先行、单实现常态（shared 跨包消费，同 run-events.ts 先例）
   /** 组内节点 id 集合。 */
   nodeIds: string[]
 }
 
 /** 循环标注（循环体与回边的关联结构——修复循环类 workflow 的结构表达）。 */
-export interface WorkflowDagLoop {
+export interface WorkflowDagLoop { // oe-exempt:20261002:framework:workflow-viz 协议契约类型——类型契约先行、单实现常态（shared 跨包消费，同 run-events.ts 先例）
   /** 循环标注 id（解析器生成，图内唯一）。 */
   id: string
   /** 循环体节点 id 集合（按执行序）。 */
@@ -662,7 +662,7 @@ export interface WorkflowDagLoop {
  * 「本脚本无 agent 调用点」提示，设计 §3.1-3）。解析失败不产半个错误 DAG——
  * fail-fast 返回结构化错误（session.getWorkflowDag 错误臂），本类型恒为完整产物。
  */
-export interface WorkflowDag {
+export interface WorkflowDag { // oe-exempt:20261002:framework:workflow-viz 协议契约类型——类型契约先行、单实现常态（shared 跨包消费，同 run-events.ts 先例）
   /** 调用点节点集（agent 调用点 + 脚本门禁步骤；零调用点 run 为空数组）。 */
   nodes: WorkflowDagNode[]
   /** 边集（顺序/数据流/条件/循环回边）。 */
