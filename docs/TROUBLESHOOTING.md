@@ -529,3 +529,10 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 - **症状**：`npx playwright test --project=electron-smoke` 全部用例秒级失败（40-60ms），报 `electron.launch: Process failed to launch!` + `bad option: --remote-debugging-port=0`（或 `--inspect=0`）+ 清理期 `kill EPERM`；同窗口内 `--project=visual-chromium`（纯 chromium，不经 electron.launch）正常。
 - **根因**：执行环境泄漏 `ELECTRON_RUN_AS_NODE=1`（taiji 桌面宿主 spawn 的 agent 会话可见）。该变量使 Electron 主二进制按纯 Node 运行——chromium/Electron 专属旗标全部不识别（`bad option`）即退出。**误诊陷阱**：此形态下 `Electron --version` 打印的是内嵌 Node 版本（42.x 内嵌 Node 24.15.0）而非 Electron 版本；且 Electron 42 mac 主二进制本就是 ~50KB 薄启动器（重量在 Frameworks）——「二进制只有 33KB/版本号不对 = dist 坏了」是泄漏导致的误诊，勿据此重装缓存（本次误删 @electron/get 缓存 zip 一份，无害但浪费一轮下载）。
 - **处置**：e2e/验收执行环境 `unset ELECTRON_RUN_AS_NODE` 再跑（Gate A 脚本与 A6 剧本已内建防御）；排查入口 `env | grep ELECTRON`。
+
+### 28. dev-merge 自动创建的 worktree 解析成 bare repo（config.worktree 缺失，2026-10-01）
+
+- **症状**：dev-merge.sh 自动创建目标 dev worktree 后，merge 预检报 `致命错误：该操作必须在一个工作区中运行`，且被误报成「有未提交改动（tracked）」；`git -C <dev> rev-parse --is-bare-repository` 返回 `true`。
+- **根因**：共享 config `core.bare=true`（bare repo + worktree 布局）下，worktree 依赖 per-worktree `config.worktree`（`core.bare=false` + `core.hooksPath`）覆盖。该补写是 git-cwt 包装层（`~/.shell/07-git-ws.sh`，[2026-09-11] 同族注释）的职责，`create-worktree.sh` 与 `setup-worktree.sh` 都不做——dev-merge.sh 绕过包装层直调创建脚本即漏。已修（auto-create 后补写 worktree 级 config；check_clean 区分 git 失败 exit≥2 与真脏）。
+- **连带发现**：`.bare/custom-hooks/setup-worktree.sh` 曾丢失可执行位（`[ -x ]` 为假 → 项目 hook 被静默跳过，依赖安装与 Electron/pi 缓存链接全缺）。已 `chmod +x` 根治；症状 = 创建输出无「执行项目 setup hook」行且新 worktree 无 node_modules。
+- **处置**：现症修复 = `git --git-dir=<.bare/worktrees/<name>> config --worktree core.bare false` + `core.hooksPath <同目录>/hooks`，再补跑 `bash .bare/custom-hooks/setup-worktree.sh <worktree路径>`。
