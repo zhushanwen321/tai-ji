@@ -1,4 +1,3 @@
-/* eslint-disable no-magic-numbers -- 字面量均为厂商协议数据（HTTP 状态码翻译表 / 固定采样率 / 音色枚举计数），非逻辑魔数；逻辑数值已命名（MIMO_PCM_SAMPLE_RATE） */
 /**
  * MiMo（小米）TTS driver——ai-voice-tts 设计 §7.2 映射表实装。
  *

@@ -49,13 +49,19 @@ export function ttsFailure(code: TtsErrorCode, snippet: string): TtsDriverFailur
   return new TtsDriverFailure({ code, snippet: toErrorSnippet(snippet) })
 }
 
+/** HTTP 401：鉴权失败（三家 vendor 同语义）。 */
+const HTTP_UNAUTHORIZED = 401
+/** HTTP 402：额度不足（Payment Required；三家 vendor 借此表达 quota 耗尽）。 */
+const HTTP_PAYMENT_REQUIRED = 402
+
 /**
  * OpenAI 同形 HTTP status → 统一错误码翻译（三家同表：401 鉴权、402 额度、其余厂商错误，
  * §7.2 错误翻译表）。供各 driver 的非 2xx 分支显式调用；postTtsRequest 不调用（非 2xx 原样
  * 返回交本家 driver，见文件头分层裁决）。
  */
 export function translateHttpFailure(status: number, bodySnippet: string): TtsDriverFailure {
-  const code: TtsErrorCode = status === 401 ? 'tts_auth_failed' : status === 402 ? 'tts_quota_exceeded' : 'tts_vendor_error'
+  const code: TtsErrorCode =
+    status === HTTP_UNAUTHORIZED ? 'tts_auth_failed' : status === HTTP_PAYMENT_REQUIRED ? 'tts_quota_exceeded' : 'tts_vendor_error'
   return ttsFailure(code, `HTTP ${status}: ${bodySnippet}`)
 }
 
