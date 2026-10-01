@@ -471,18 +471,38 @@ describe('Key 动作 armed 语义（v0.10.8 实测缺陷回归：残留输入静
     return config
   }
 
-  it('带入：残留输入被清空（不再静默压过动作）→ 保存提交 from-provider + armed 提示可见', async () => {
+  it('带入：已存 Key → 逐字清空+填满动画（终态填充串）→ 保存提交 from-provider + armed 提示可见', async () => {
     ttsApiMock.getConfig.mockImplementation(() => Promise.resolve({ config: armedConfig() }))
     const w = await mountPage()
-    await sel(w, 'tts-apikey-input-minimax').setValue('sk-stale-key')
+    // 已存 Key 首载展示脱敏串；输入为明文 text 型
+    const input = () => sel(w, 'tts-apikey-input-minimax').element as HTMLInputElement
+    expect(input().value).toBe('***')
+    expect(input().getAttribute('type')).toBe('text')
+    vi.useFakeTimers()
     await sel(w, 'tts-key-bring-minimax').trigger('click')
-    // armed 后残留输入被清空 + 待生效提示可见
-    expect((sel(w, 'tts-apikey-input-minimax').element as HTMLInputElement).value).toBe('')
+    await vi.advanceTimersByTimeAsync(600)
+    vi.useRealTimers()
+    // 动画终态：填充串占位 + armed 提示可见
+    expect(input().value).toBe('*'.repeat(12))
     expect(sel(w, 'tts-keyop-pending-minimax').text()).toContain('自动带入')
     expect(await saveAndCaptureApiKeys(w)).toMatchObject({ minimax: 'from-provider' })
   })
 
-  it('清除：残留输入被清空 → 保存提交 null；按钮 armed 态 aria-pressed=true', async () => {
+  it('已存 Key：手工清空后失焦回填 *** 展示；键入为明文不脱敏', async () => {
+    ttsApiMock.getConfig.mockImplementation(() => Promise.resolve({ config: armedConfig() }))
+    const w = await mountPage()
+    const input = () => sel(w, 'tts-apikey-input-minimax').element as HTMLInputElement
+    await sel(w, 'tts-apikey-input-minimax').setValue('')
+    expect(input().value).toBe('')
+    await sel(w, 'tts-apikey-input-minimax').trigger('blur')
+    expect(input().value).toBe('***')
+    // 键入新值：明文展示（不脱敏），掩码剥离后只留新输入
+    await sel(w, 'tts-apikey-input-minimax').setValue('***abc')
+    expect(input().value).toBe('abc')
+    expect(await saveAndCaptureApiKeys(w)).toMatchObject({ minimax: 'abc' })
+  })
+
+  it('清除：残留输入被清空 → 展示同步清空 → 保存提交 null；按钮 armed 态 aria-pressed=true', async () => {
     ttsApiMock.getConfig.mockImplementation(() => Promise.resolve({ config: armedConfig() }))
     const w = await mountPage()
     await sel(w, 'tts-apikey-input-minimax').setValue('sk-stale-key')
@@ -493,23 +513,30 @@ describe('Key 动作 armed 语义（v0.10.8 实测缺陷回归：残留输入静
     expect(await saveAndCaptureApiKeys(w)).toMatchObject({ minimax: null })
   })
 
-  it('armed 后输入新值 = 更新的意图：动作解除，保存提交新输入串', async () => {
+  it('armed 后输入新值 = 更新的意图：动作解除 + 动画中止，保存提交新输入串', async () => {
     ttsApiMock.getConfig.mockImplementation(() => Promise.resolve({ config: armedConfig() }))
     const w = await mountPage()
+    vi.useFakeTimers()
     await sel(w, 'tts-key-bring-minimax').trigger('click')
+    await vi.advanceTimersByTimeAsync(600)
+    vi.useRealTimers()
     expect(sel(w, 'tts-keyop-pending-minimax').exists()).toBe(true)
     await sel(w, 'tts-apikey-input-minimax').setValue('sk-new-key')
-    // typing 解除 armed：提示消失，保存带新输入串而非 from-provider
+    // typing 解除 armed + 中止动画：提示消失，保存带新输入串而非 from-provider
     expect(sel(w, 'tts-keyop-pending-minimax').exists()).toBe(false)
     expect(await saveAndCaptureApiKeys(w)).toMatchObject({ minimax: 'sk-new-key' })
   })
 
-  it('再次点击同动作 = 取消 armed：提示消失，保存不带 apiKeys', async () => {
+  it('再次点击同动作 = 取消 armed：展示回 ***，保存不带 apiKeys', async () => {
     ttsApiMock.getConfig.mockImplementation(() => Promise.resolve({ config: armedConfig() }))
     const w = await mountPage()
+    vi.useFakeTimers()
     await sel(w, 'tts-key-bring-minimax').trigger('click')
+    await vi.advanceTimersByTimeAsync(600)
+    vi.useRealTimers()
     await sel(w, 'tts-key-bring-minimax').trigger('click')
     expect(sel(w, 'tts-keyop-pending-minimax').exists()).toBe(false)
+    expect((sel(w, 'tts-apikey-input-minimax').element as HTMLInputElement).value).toBe('***')
     expect((await saveAndCaptureApiKeys(w))?.minimax).toBeUndefined()
   })
 })
