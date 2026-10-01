@@ -7,8 +7,8 @@
  * bun 捆绑 sqlite 语义漂移警报）；node 趟断言其不对称半边（直开成功但创建 -shm/-wal）。
  */
 
-import { describe, expect, it } from 'vitest'
-import { chmodSync, existsSync, statSync, truncateSync, writeFileSync } from 'node:fs'
+import { describe, expect, it, vi, afterAll } from 'vitest'
+import { chmodSync, existsSync, mkdtempSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
@@ -36,6 +36,26 @@ import {
   probeRestDbImmutableUriOpen,
   resolveRestDbExpectation,
 } from './platform-matrix.ts'
+
+// ── per-file 私有 tmp 根（快照计数竞态的结构性根修）───────────────────────────
+// 快照目录住全局共享 tmpdir（taiji-zcode-snap-*），vitest 并发 worker 互相可见：
+// 差分计数断言会被其他文件的新建/清理双向污染（全量并发跑稳定红、单文件跑绿）。
+// 把 tmpdir 隔离到本文件私有根后，本文件的快照计数只看见自己的快照，零拷贝 /
+// 零残留断言回到严格语义。vi.mock 文件级（vitest per-file isolate），不跨文件泄漏。
+const privateTmp = vi.hoisted(() => ({ root: null as string | null }))
+vi.mock('node:os', async (importOriginal) => {
+  const os = await importOriginal<typeof import('node:os')>()
+  return {
+    ...os,
+    tmpdir: () => {
+      privateTmp.root ??= mkdtempSync(join(os.tmpdir(), 'zss-test-private-tmp-'))
+      return privateTmp.root
+    },
+  }
+})
+afterAll(() => {
+  if (privateTmp.root) rmSync(privateTmp.root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+})
 
 // 超时预算已上移包级 vitest.config.ts（testTimeout 30s，真实 sqlite I/O 测试族共用，
 // 含本文件与 error-contract 假驱动族）——文件级设置移除，单一来源。
