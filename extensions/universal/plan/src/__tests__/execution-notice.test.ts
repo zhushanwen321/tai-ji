@@ -47,7 +47,7 @@ function setupFsMock(content: string) {
 }
 
 /**
- * goal 桥 slot key——与 compact.ts / goal 侧 index.ts 的字符串一致（本地声明，
+ * goal 桥 slot key——与 execution-notice.ts / goal 侧 index.ts 的字符串一致（本地声明，
  * 不 import 对方包：pi-goal 是 optional peer，两侧靠同一字符串共享 slot）。
  */
 const GOAL_INIT_SLOT_KEY = Symbol.for("@zhushanwen/pi-goal.goalInit");

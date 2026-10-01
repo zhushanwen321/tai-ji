@@ -264,7 +264,7 @@ describe("registerPlanTool", () => {
   describe("complete", () => {
     beforeEach(() => {
       // goal outcome 用例经 handlePlanComplete mock 构造结果（execute 档 tryGoalInit
-      // 在 compact.ts 内部自理 goal-unavailable 降级，不在本文件消费面）
+      // 在 execution-notice.ts 内部自理 goal-unavailable 降级，不在本文件消费面）
       (handlePlanComplete as ReturnType<typeof vi.fn>).mockReset();
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReset();
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([]);
@@ -459,7 +459,7 @@ describe("registerPlanTool", () => {
       expect(res.details.goalOutcome).toEqual({ started: true });
     });
 
-    it("compact tier outcome is deferred (undefined): result keeps the plain approved line", async () => {
+    it("no goal-bridge outcome (undefined): result keeps the plain approved line", async () => {
       const { exec, ctx } = setup();
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute");
       (handlePlanComplete as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
