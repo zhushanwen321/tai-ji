@@ -89,6 +89,7 @@ export type WorkflowRunLookup = (sessionId: string, scriptName: string, slug?: s
 
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：overlay 桥接绑定单例 ref
 const boundOverlayOpener = ref<WorkflowOverlayOpener | null>(null)
+// taste:allow-no-data-owner W24-EX-B（同上，同组桥接绑定的第二声明）
 const boundWorkflowRunLookup = ref<WorkflowRunLookup | null>(null)
 
 /**

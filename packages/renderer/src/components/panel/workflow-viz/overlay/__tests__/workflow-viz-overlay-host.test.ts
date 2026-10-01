@@ -316,6 +316,22 @@ describe('Host 容器（黑盒 DOM + D10 回落）', () => {
     wrapper.unmount()
   })
 
+  it('零命中实例在左栏未匹配分组可见（D2⑥ 不静默丢弃——真实匹配链派生，S3 对账出口）', async () => {
+    // phase 'elsewhere' 不在 DAG 分区 → 零命中进 unmatched（Host 派生经 matchInstancesToNodes）
+    await seedRecords([makeRun('wf-1', 's1', { agentCalls: [
+      { id: 0, agent: 'stray-agent', phase: 'elsewhere', status: 'done' },
+    ] })])
+    const wrapper = mount(WorkflowVizOverlayHost)
+
+    openWorkflowVizOverlay(SID, 'wf-1')
+    await flushPromises()
+
+    const group = wrapper.find('[data-testid="wfvz-overlay-unmatched-group-elsewhere"]')
+    expect(group.exists()).toBe(true)
+    expect(group.text()).toContain('stray-agent')
+    wrapper.unmount()
+  })
+
   it('D10 fallback：装载异常 → 关 overlay + drawer workflow tab 打开且选中态已注入（runId）', async () => {
     await seedRecords([makeRun('wf-1', 's1')])
     panelThrowBox.value = true

@@ -29,6 +29,7 @@
       :node-states="nodeStates"
       :active-phase="activePhase"
       :elapsed-ms="elapsedMs"
+      :unmatched="unmatchedInstances"
       @close="closeWorkflowVizOverlay"
       @select="onSelect"
       @retry-dag="retryDagParse"
@@ -54,6 +55,7 @@ import WorkflowVizOverlayGuard from './WorkflowVizOverlayGuard.vue'
 import WorkflowLivePanel from '../panel/WorkflowLivePanel.vue'
 import WorkflowVizGantt from '../gantt/WorkflowVizGantt.vue'
 import { matchInstancesToNodes } from '../blueprint-match'
+import type { WorkflowInstanceMatchResult } from '../blueprint-match'
 import { deriveNodeStatus } from '../gantt-segments'
 import type { WorkflowVizDagNodeStatus } from '../dag/types'
 import type { WorkflowVizDagClickPayload } from '../dag/types'
@@ -94,18 +96,30 @@ const panelInput = computed<{ sessionId: string; runId: string; run: WorkflowRun
 
 // ── 派生输入（容器单处派生，壳/面板均消费已派生 props）────────────────────────
 
+/** D2 匹配单源（byNode + 未匹配列表一次派生；节点六态 / 未匹配分组 / 点击钻取共用，
+ *  避免三处各自调 matchInstancesToNodes 重复计算）。 */
+const matchResult = computed<WorkflowInstanceMatchResult | null>(() => {
+  const dag = overlayDag.value
+  const run = runRecord.value
+  if (dag === null || run === null) return null
+  return matchInstancesToNodes(dag, run.agentCalls)
+})
+
 /** 节点六态映射（D2 蓝图-实例匹配 → D9 节点级派生；DAG 未就绪时 undefined = 画布解析中）。 */
 const nodeStates = computed<Record<string, WorkflowVizDagNodeStatus> | undefined>(() => {
   const dag = overlayDag.value
   const run = runRecord.value
-  if (dag === null || run === null) return undefined
-  const { byNode } = matchInstancesToNodes(dag, run.agentCalls)
+  const result = matchResult.value
+  if (dag === null || run === null || result === null) return undefined
   const out: Record<string, WorkflowVizDagNodeStatus> = {}
   for (const node of dag.nodes) {
-    out[node.id] = deriveNodeStatus({ runStatus: run.status, calls: byNode.get(node.id) ?? [] })
+    out[node.id] = deriveNodeStatus({ runStatus: run.status, calls: result.byNode.get(node.id) ?? [] })
   }
   return out
 })
+
+/** 未匹配实例（D2⑥：零命中/歧义不静默丢弃——透传壳渲染画布下方的 phase 分组）。 */
+const unmatchedInstances = computed(() => matchResult.value?.unmatched ?? [])
 
 /** 当前 phase 分区（运行中最后一个未收束 phase——phases 折叠单行快照，§3.1-2④ 口径）。 */
 const activePhase = computed<string | null>(() => {
@@ -166,7 +180,7 @@ function onSelect(payload: WorkflowVizDagClickPayload): void {
   const dag = overlayDag.value
   const run = runRecord.value
   if (dag === null || run === null) return
-  const call = matchInstancesToNodes(dag, run.agentCalls).byNode.get(payload.nodeId)?.[0]
+  const call = matchResult.value?.byNode.get(payload.nodeId)?.[0]
   if (call !== undefined) panelRef.value?.openAgentTab(call)
 }
 

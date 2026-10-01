@@ -23,6 +23,12 @@ export default {
     noAgentCalls: 'This script has no agent call sites',
     noAgentCallsHint: 'The script only contains script steps with no call sites to show',
     nodeRenderFailed: 'Node render failed',
+    // Unmatched instance groups (D2⑥: zero-hit/ambiguous instances are never dropped
+    // silently; shown in a dedicated group below the canvas)
+    unmatchedGroupTitle: 'Unmatched instances',
+    unmatchedPhaseUnknown: 'No phase',
+    unmatchedAmbiguous: 'Ambiguous (matched {n} call sites)',
+    unmatchedZeroHit: 'No call site matched',
     // Gantt
     ganttEmpty: 'No timeline data yet',
     ganttBackoffTitle: 'Backoff before retry: {ms}ms',

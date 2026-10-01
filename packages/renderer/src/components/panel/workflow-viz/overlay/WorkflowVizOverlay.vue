@@ -100,9 +100,9 @@
           class="relative flex min-w-0 grow-0 shrink-0 basis-[45%] flex-col border-r border-hairline"
           data-testid="wfvz-overlay-dag-pane"
         >
-          <!-- DAG 就绪：画布 -->
+          <!-- DAG 就绪：画布 + 未匹配分组同链（v-else-if/v-else 降级与解析中接续本链——三态互斥） -->
+          <template v-if="dag !== null">
           <WorkflowVizDag
-            v-if="dag !== null"
             :dag="dag"
             :node-states="nodeStates"
             :run-status="run?.status"
@@ -110,6 +110,39 @@
             :active-phase="activePhase"
             @select="(payload) => emit('select', payload)"
           />
+          <!-- 未匹配实例分组（D2⑥：零命中/歧义实例不静默丢弃——画布下方按 phase
+               分组的指定展示面；正常 run 无未匹配实例时零渲染，画布不受影响） -->
+          <div
+            v-if="unmatchedGroups.length > 0"
+            class="flex max-h-[35%] flex-none flex-col gap-1 overflow-y-auto border-t border-hairline px-3 py-2"
+            data-testid="wfvz-overlay-unmatched"
+          >
+            <p class="text-[length:var(--text-3xs)] font-semibold text-neutral-dim">{{ t('panel.workflowViz.unmatchedGroupTitle') }}</p>
+            <div
+              v-for="group in unmatchedGroups"
+              :key="group.phase"
+              class="flex flex-col gap-0.5"
+              :data-testid="`wfvz-overlay-unmatched-group-${group.phase || 'unknown'}`"
+            >
+              <p class="text-[length:var(--text-3xs)] text-neutral-faint">{{ group.phase || t('panel.workflowViz.unmatchedPhaseUnknown') }}</p>
+              <div
+                v-for="item in group.items"
+                :key="item.call.id"
+                class="flex items-center gap-2 rounded-sm px-1 py-[3px]"
+                :data-ambiguous="item.ambiguous ? 'true' : 'false'"
+                :data-hit-count="item.hitCount"
+                data-testid="wfvz-overlay-unmatched-item"
+              >
+                <span class="size-1.5 shrink-0 rounded-full" :class="callDotClass(item.call.status)" />
+                <span class="min-w-0 truncate font-mono text-[length:var(--text-2xs)] text-neutral-fg">{{ item.call.agent }}</span>
+                <span
+                  class="ml-auto shrink-0 font-mono text-[length:var(--text-3xs)]"
+                  :class="item.ambiguous ? 'text-warn' : 'text-neutral-dim'"
+                >{{ unmatchedNote(item) }}</span>
+              </div>
+            </div>
+          </div>
+          </template>
           <!-- DAG 不可得：降级列表 + 原因码（parse_failed 附重试解析入口） -->
           <div
             v-else-if="dagError"
@@ -180,6 +213,7 @@ import { WORKFLOW_RUN_OUTCOME_LABELS, type WorkflowAgentCall, type WorkflowDag, 
 import { Button } from '@/components/ui/button'
 import { formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
 import WorkflowVizDag from '../dag/WorkflowVizDag.vue'
+import type { WorkflowUnmatchedInstance } from '../blueprint-match'
 import type { WorkflowVizDagClickPayload, WorkflowVizDagNodeStatus } from '../dag/types'
 import type { WorkflowVizDagLoadError } from './types'
 
@@ -195,6 +229,11 @@ const props = defineProps<{
   nodeStates?: Record<string, WorkflowVizDagNodeStatus>
   /** 当前 phase 分区（已派生输入，透传画布）。 */
   activePhase?: string | null
+  /**
+   * 未匹配实例（已派生输入——匹配单处在容器 Host，D2⑥ 零命中/歧义不静默丢弃；
+   * 壳按 phase 分组渲染画布下方的指定分组，命中数/歧义标注随行）。
+   */
+  unmatched?: WorkflowUnmatchedInstance[]
   /**
    * 已用时长 ms（已派生输入——D9「中断停走」口径由上层单处派生函数产出；
    * 缺省不渲染时长槽，本壳不做计时派生）。
@@ -315,6 +354,32 @@ const fallbackGroups = computed<FallbackGroup[]>(() => {
 const hasExplicitPhases = computed(() =>
   fallbackGroups.value.some((g) => g.phase !== ''),
 )
+
+// ── 未匹配实例分组（D2⑥ 展示面：零命中/歧义实例按 phase 分组，不静默丢弃）──
+
+interface UnmatchedGroup {
+  phase: string
+  items: WorkflowUnmatchedInstance[]
+}
+
+/** 按 phase 分组（插入序 = 事件流序，与降级列表同型；phase 缺失归空串组）。 */
+const unmatchedGroups = computed<UnmatchedGroup[]>(() => {
+  const groups = new Map<string, WorkflowUnmatchedInstance[]>()
+  for (const item of props.unmatched ?? []) {
+    const phase = item.call.phase ?? ''
+    const list = groups.get(phase) ?? []
+    list.push(item)
+    groups.set(phase, list)
+  }
+  return [...groups.entries()].map(([phase, items]) => ({ phase, items }))
+})
+
+/** 随行标注（D2③ 原文口径：歧义 =「歧义（命中 N 个调用点）」，零命中给短标注）。 */
+function unmatchedNote(item: WorkflowUnmatchedInstance): string {
+  return item.ambiguous
+    ? t('panel.workflowViz.unmatchedAmbiguous', { n: item.hitCount })
+    : t('panel.workflowViz.unmatchedZeroHit')
+}
 
 const dagErrorLabel = computed(() => {
   const err = props.dagError

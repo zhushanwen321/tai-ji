@@ -59,9 +59,12 @@ vi.mock('vue-i18n', async (importOriginal) => {
 // ── mock：agent tab 对话流渲染树（MessageStream stub + 编排接线 spy）────────────
 
 const loadSubagentDataMock = vi.fn().mockResolvedValue(undefined)
+// loadError 用模块级可控 ref（agent tab 错误态用例注入失败值；useSubagentTabData 实装
+// 的 loadSubagentData 开头置空语义由用例内手动复位模拟）
+const loadErrorRef = ref<string | null>(null)
 vi.mock('@/composables/panel/useSubagentTabData', () => ({
   useSubagentTabData: () => ({
-    loadError: ref(null),
+    loadError: loadErrorRef,
     loadSubagentData: loadSubagentDataMock,
     stopSubagentStream: vi.fn(),
     recordEngine: vi.fn(() => 'pi'),
@@ -161,6 +164,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
   loadSubagentDataMock.mockClear()
+  loadErrorRef.value = null
   mockGetRunEvents.mockResolvedValue(eventsReply())
 })
 
@@ -269,14 +273,43 @@ describe('WorkflowLivePanel · workflow tab 三子页（使用者黑盒 + 观察
     expect(summary.text()).toContain('beta:')
   })
 
-  it('Gantt 子页（注入展示组件）：props 注入 segments + run（面板不反向 import u4 的分界验证）', async () => {
-    let received: unknown
+  it('Gantt 子页（注入展示组件）：props 注入 segments + 游标接线 runStatus/runOutcome/nowMs（面板不反向 import u4 的分界验证）', async () => {
+    let received: Record<string, unknown> = {}
     const GanttStub = {
       name: 'GanttStub',
-      props: ['segments', 'run'],
-      setup(props: { segments: unknown }) {
+      props: ['segments', 'runStatus', 'runOutcome', 'nowMs', 'callLabels'],
+      setup(props: Record<string, unknown>) {
         return () => {
-          received = props.segments
+          received = props
+          return h('div', { 'data-testid': 'gantt-stub' }, 'gantt')
+        }
+      },
+    }
+    // 运行中 run：游标三接线全透传（nowMs 激活即赋值，不等首个 1s tick）
+    const wrapper = await mountPanel(makeRun({ status: 'running', outcome: undefined, completedAt: undefined }), GanttStub)
+    await wrapper.find('[data-testid="wf-viz-subpage-gantt"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="gantt-stub"]').exists()).toBe(true)
+    // 注入组件收到派生分段（WorkflowGanttSegments 形态）
+    const segments = received.segments as { attemptSegments: unknown[]; phaseBands: unknown[]; phaseCards: unknown[] }
+    expect(Array.isArray(segments.attemptSegments)).toBe(true)
+    expect(segments.phaseCards.length).toBe(2) // alpha + beta
+    // 游标接线（D9）：runStatus/runOutcome 透传 + nowMs 已有值
+    expect(received.runStatus).toBe('running')
+    expect(received.runOutcome).toBeUndefined()
+    expect(typeof received.nowMs).toBe('number')
+    // 行标签接线：事件流 agent-started 帧的 taskIndex → agentName 映射（行标签 #N 退化消除）
+    expect(received.callLabels).toEqual({ 0: 'worker-0' })
+  })
+
+  it('Gantt 子页游标 tick 仅运行中活跃：停止 run 不启 tick（nowMs 不注入，冻结游标由 runStatus 驱动）', async () => {
+    let received: Record<string, unknown> = {}
+    const GanttStub = {
+      name: 'GanttStub',
+      props: ['segments', 'runStatus', 'runOutcome', 'nowMs', 'callLabels'],
+      setup(props: Record<string, unknown>) {
+        return () => {
+          received = props
           return h('div', { 'data-testid': 'gantt-stub' }, 'gantt')
         }
       },
@@ -284,11 +317,9 @@ describe('WorkflowLivePanel · workflow tab 三子页（使用者黑盒 + 观察
     const wrapper = await mountPanel(makeRun(), GanttStub)
     await wrapper.find('[data-testid="wf-viz-subpage-gantt"]').trigger('click')
     await flushPromises()
-    expect(wrapper.find('[data-testid="gantt-stub"]').exists()).toBe(true)
-    // 注入组件收到派生分段（WorkflowGanttSegments 形态）
-    const segments = received as { attemptSegments: unknown[]; phaseBands: unknown[]; phaseCards: unknown[] }
-    expect(Array.isArray(segments.attemptSegments)).toBe(true)
-    expect(segments.phaseCards.length).toBe(2) // alpha + beta
+    expect(received.runStatus).toBe('done')
+    expect(received.runOutcome).toBe('done')
+    expect(received.nowMs).toBeUndefined()
   })
 })
 
@@ -323,6 +354,29 @@ describe('WorkflowLivePanel · 多级 tab（使用者黑盒）', () => {
     expect(loadSubagentDataMock).toHaveBeenCalledWith('agentcall:acs-0')
     // trace 详情元信息条渲染
     expect(wrapper.find('[data-testid="wf-viz-agent-meta"]').text()).toContain('worker-0')
+  })
+
+  it('agent tab 快照拉取失败：错误态 + 重试按钮；点重试重调快照编排（§3.1-2 同一错误态语言）', async () => {
+    const wrapper = await mountPanel()
+    await wrapper.find('[data-testid="wf-viz-trace-row-0"]').trigger('click')
+    await flushPromises()
+    // 失败形态：错误态显示错误信息 + 重试按钮（恢复动作与事件流子页错误态语言一致）
+    loadErrorRef.value = 'rpc down'
+    await flushPromises()
+    const err = wrapper.find('[data-testid="wf-viz-agent-error"]')
+    expect(err.exists()).toBe(true)
+    expect(err.text()).toContain('rpc down')
+    const retryBtn = err.find('[data-testid="wf-viz-agent-retry"]')
+    expect(retryBtn.exists()).toBe(true)
+    // 点重试 → 重调快照拉取编排（实装 loadSubagentData 开头同步置空 loadError → 错误块
+    // 分支切走按钮消失，构造性防重复点击；mock 无副作用由用例手动复位模拟该语义）
+    loadSubagentDataMock.mockClear()
+    await retryBtn.trigger('click')
+    expect(loadSubagentDataMock).toHaveBeenCalledWith('agentcall:acs-0')
+    loadErrorRef.value = null
+    await flushPromises()
+    expect(wrapper.find('[data-testid="wf-viz-agent-error"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="message-stream-stub"]').exists()).toBe(true)
   })
 
   it('tab 关闭激活左侧相邻；关闭首个动态 tab 回 workflow 固定 tab（L2TabBar close 事件链）', async () => {

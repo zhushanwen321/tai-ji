@@ -20,6 +20,7 @@ import { defineComponent, h } from 'vue'
 import type { WorkflowDag, WorkflowRunRecord } from '@taiji/shared'
 import WorkflowVizOverlay from '../WorkflowVizOverlay.vue'
 import WorkflowVizOverlayGuard from '../WorkflowVizOverlayGuard.vue'
+import type { WorkflowUnmatchedInstance } from '../../blueprint-match'
 import type { WorkflowVizDagLoadError } from '../../overlay/types'
 
 function run(partial: Partial<WorkflowRunRecord> = {}): WorkflowRunRecord {
@@ -164,6 +165,54 @@ describe('WorkflowVizOverlay 壳（黑盒 DOM）', () => {
       slots: { default: h('div', { 'data-testid': 'wfvz-test-slot-probe' }, 'panel') },
     })
     expect(wrapper.find('[data-testid="wfvz-test-slot-probe"]').exists()).toBe(true)
+  })
+})
+
+describe('WorkflowVizOverlay 未匹配实例分组（D2⑥ 展示面，黑盒 DOM）', () => {
+  const unmatched: WorkflowUnmatchedInstance[] = [
+    { call: { id: 0, agent: 'orphan-agent', phase: 'gate', status: 'done' }, hitCount: 0, ambiguous: false },
+    { call: { id: 1, agent: 'reviewer-x', phase: 'review', status: 'running' }, hitCount: 2, ambiguous: true },
+  ]
+
+  it('DAG 就绪 + 未匹配非空：分组可见——phase 组标题 + agent 名 + 歧义/零命中标注随行', () => {
+    const wrapper = mountOverlay({ dag: SAMPLE_DAG, unmatched })
+    expect(wrapper.find('[data-testid="wfvz-overlay-unmatched"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="wfvz-overlay-unmatched-group-gate"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="wfvz-overlay-unmatched-group-review"]').exists()).toBe(true)
+    const items = wrapper.findAll('[data-testid="wfvz-overlay-unmatched-item"]')
+    expect(items).toHaveLength(2)
+    expect(items[0].attributes('data-ambiguous')).toBe('false')
+    expect(items[0].text()).toContain('orphan-agent')
+    expect(items[0].text()).toContain('未命中任何调用点')
+    expect(items[1].attributes('data-ambiguous')).toBe('true')
+    expect(items[1].attributes('data-hit-count')).toBe('2')
+    expect(items[1].text()).toContain('reviewer-x')
+    expect(items[1].text()).toContain('歧义（命中 2 个调用点）')
+  })
+
+  it('未匹配空/缺省：分组零渲染 + 三态互斥（画布就绪时解析中占位不渲染）', () => {
+    const empty = mountOverlay({ dag: SAMPLE_DAG, unmatched: [] })
+    expect(empty.find('[data-testid="wfvz-overlay-unmatched"]').exists()).toBe(false)
+    const absent = mountOverlay({ dag: SAMPLE_DAG })
+    expect(absent.find('[data-testid="wfvz-overlay-unmatched"]').exists()).toBe(false)
+    // U7 回归断言：dag 就绪 + 无未匹配实例时，左栏不得同时渲染「解析中」占位
+    expect(empty.find('[data-testid="wfvz-overlay-dag-loading"]').exists()).toBe(false)
+    expect(absent.find('[data-testid="wfvz-overlay-dag-loading"]').exists()).toBe(false)
+  })
+
+  it('phase 缺失实例归「未归属 phase」组（不猜缺省分区名）', () => {
+    const wrapper = mountOverlay({ dag: SAMPLE_DAG, unmatched: [
+      { call: { id: 2, agent: 'no-phase-agent', status: 'pending' }, hitCount: 0, ambiguous: false },
+    ] })
+    const group = wrapper.find('[data-testid="wfvz-overlay-unmatched-group-unknown"]')
+    expect(group.exists()).toBe(true)
+    expect(group.text()).toContain('未归属 phase')
+    expect(group.text()).toContain('no-phase-agent')
+  })
+
+  it('DAG 不可得时不渲染未匹配分组（分组属 DAG 就绪分支的展示面）', () => {
+    const wrapper = mountOverlay({ dagError: { code: 'parse_failed', message: 'bad' }, unmatched })
+    expect(wrapper.find('[data-testid="wfvz-overlay-unmatched"]').exists()).toBe(false)
   })
 })
 

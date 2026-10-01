@@ -32,6 +32,11 @@ export default {
     noAgentCalls: '本脚本无 agent 调用点',
     noAgentCallsHint: '脚本仅包含脚本步骤，没有可展示的调用点',
     nodeRenderFailed: '节点渲染失败',
+    // 未匹配实例分组（D2⑥：零命中/歧义实例不静默丢弃，画布下方指定分组展示）
+    unmatchedGroupTitle: '未匹配实例',
+    unmatchedPhaseUnknown: '未归属 phase',
+    unmatchedAmbiguous: '歧义（命中 {n} 个调用点）',
+    unmatchedZeroHit: '未命中任何调用点',
     // Gantt
     ganttEmpty: '暂无时间线数据',
     ganttBackoffTitle: '退避重试等待 {ms}ms',

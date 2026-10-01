@@ -20,6 +20,13 @@
       <AlertCircle class="size-6 text-danger opacity-60" />
       <p class="text-[length:var(--text-xs)] text-neutral-fg">{{ t('panel.sideDrawer.subagentLoadFailed') }}</p>
       <p class="max-w-[420px] break-all text-[length:var(--text-2xs)] text-neutral-dim">{{ loadError }}</p>
+      <!-- 重试按钮（设计 §3.1-2 失败路径：错误态 + 重试，同一错误态语言）；点击重调快照拉取，
+           loadSubagentData 开头同步置空 loadError → 错误块分支切走按钮消失（构造性防重复
+           点击，与事件流子页 onRetry 同款机制） -->
+      <Button variant="ghost" size="sm" data-testid="wf-viz-agent-retry" @click="onRetry">
+        <RotateCcw class="mr-1 size-3" />
+        {{ t('panel.workflowViz.retry') }}
+      </Button>
     </div>
     <!-- 对话流（D3 硬约束：直接挂主对话流同一个 MessageStream，不重写任何渲染树） -->
     <MessageStream v-else :session-id="virtualId" />
@@ -29,7 +36,8 @@
 <script setup lang="ts">
 import { computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlertCircle } from '@lucide/vue'
+import { AlertCircle, RotateCcw } from '@lucide/vue'
+import { Button } from '@taiji/ui'
 import MessageStream from '@/components/panel/MessageStream.vue'
 import { useSubagentTabData } from '@/composables/panel/useSubagentTabData'
 import { agentCallVirtualId } from '@/stores/workflow'
@@ -70,6 +78,11 @@ onMounted(() => {
 watch(virtualId, (vid) => {
   void loadSubagentData(vid)
 })
+
+/** 重试 = 重调 agentcall 快照拉取（loadError 同步置空 → 错误块切走按钮消失，构造性防重复点击）。 */
+function onRetry(): void {
+  void loadSubagentData(virtualId.value)
+}
 
 const statusText = computed(() => {
   switch (view.value.status) {

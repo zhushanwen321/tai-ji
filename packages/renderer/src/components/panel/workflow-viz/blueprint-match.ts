@@ -9,25 +9,23 @@
  *   分组，不静默丢弃；④ 同节点实例按 taskIndex 升序（WorkflowAgentCall.id = trace
  *   step 序号，与事件帧 taskIndex 同源）挂接为节点实例列表。
  *
- * 模板形态口径：templateName 字面段原样、变量段记 `<...>` 尖括号通配段（设计 §3.1-3
- * 权威示例 `reviewer-<维度>-r<轮>`；u1 解析器实装后如有出入以 u1 产物为准对齐）。
+ * 模板形态口径：templateName 字面段原样、变量段为 u1 解析器合成的 `${…}` 通配标记
+ * （workflow-dag-parser.ts extractNameTemplate——设计 §3.1-3 示例的 `<...>` 尖括号
+ * 形态仅为文档示意，产物以 u1 为准）；无字面段的全通配模板整段记 `*`。
  * 纯函数零 IO；正则编译失败（传输损坏等防御面）该节点按零命中处理，不拖垮整表。
  */
 import type { WorkflowAgentCall, WorkflowDag, WorkflowDagNode } from '@taiji/shared'
 
-/** 模板字面段总长（具体性度量）：templateName 剥 `<...>` 变量段后的字符总长。字面段越长模板越具体（D2 多命中裁决依据）。 */
+/**
+ * 模板字面段总长（具体性度量）：templateName 剥 `${…}` 变量段后的字符总长。字面段越长
+ * 模板越具体（D2 多命中裁决依据）。变量段标记 = u1 解析器产物形态 `${…}`（合成标记，
+ * 非源码原文——按精确串切分，不用状态机扫 `$`/`{`：字面段自身含 `${...}` 原文时不误吞）；
+ * 整段 `*`（无字面段的全通配模板）字面总长为 0。
+ */
 export function templateLiteralLength(templateName: string): number {
+  if (templateName === '*') return 0
   let length = 0
-  let inVariable = false
-  for (const ch of templateName) {
-    if (ch === '<') {
-      inVariable = true
-    } else if (ch === '>') {
-      inVariable = false
-    } else if (!inVariable) {
-      length += ch.length
-    }
-  }
+  for (const literal of templateName.split('${…}')) length += literal.length
   return length
 }
 

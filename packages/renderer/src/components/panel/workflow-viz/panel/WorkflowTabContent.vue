@@ -47,7 +47,10 @@
         :is="ganttComponent"
         v-if="ganttComponent !== undefined"
         :segments="segments"
-        :run="run"
+        :run-status="run.status"
+        :run-outcome="run.outcome"
+        :now-ms="nowMs"
+        :call-labels="callLabels"
       />
       <div v-else class="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
         <p class="text-[length:var(--text-2xs)] text-neutral-dim">{{ t('panel.workflowViz.ganttUnavailable') }}</p>
@@ -73,7 +76,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Component } from 'vue'
 import { Button } from '@taiji/ui'
@@ -92,7 +95,8 @@ const props = defineProps<{
   run: WorkflowRunRecord
   /**
    * u4 Gantt 展示组件（overlay 容器装配时注入；props 契约 = { segments: WorkflowGanttSegments,
-   * run: WorkflowRunRecord }）。面板不反向 import u4——分界 = u2 冻结的分段视图模型。
+   * runStatus, runOutcome, nowMs, callLabels }——游标接线见下方 tick）。面板不反向 import u4——
+   * 分界 = u2 冻结的分段视图模型。
    */
   ganttComponent?: Component
 }>()
@@ -124,6 +128,16 @@ const events = computed(() => store.runEventsOf(props.run.runId)?.events)
 
 const segments = computed(() => deriveWorkflowGanttSegments(events.value ?? []))
 
+/** call 行标签（taskIndex → agent 名，来自事件流 agent-started 帧——与 Gantt 行模型的
+ *  taskIndex 键域同源；行内 #taskIndex 降级由组件缺省承载，本层只做标签注入）。 */
+const callLabels = computed(() => {
+  const out: Record<number, string> = {}
+  for (const entry of events.value ?? []) {
+    if (entry.type === 'agent-started') out[entry.taskIndex] = entry.agentName
+  }
+  return out
+})
+
 /** 绘制面段数（重放空段不计——消费方按 emptyReplay 判定结果决定绘制的口径在本统计对齐）。 */
 const drawnPhaseBands = computed(() => segments.value.phaseBands.filter((b) => !b.emptyReplay))
 
@@ -131,4 +145,34 @@ const drawnPhaseBands = computed(() => segments.value.phaseBands.filter((b) => !
 const phaseTurnSummary = computed(() =>
   segments.value.phaseCards.map((c) => `${c.phase}:${c.turnCount}`).join('  '),
 )
+
+// ── Gantt 游标 tick（D9：运行中带当前时刻游标，run 停止冻结于最后事件 ts）────────
+// Gantt 展示组件零时钟（nowMs 由本层注入保证纯展示可测）；tick 仅在「运行中 ∧ Gantt
+// 子页可见」时活跃——run 停止后游标位置由 runStatus 驱动冻结（组件内锚 lastEventTs），
+// 不再需要 tick，避免 run 停止后 overlay 长开期间空转定时器。
+const nowMs = ref<number | undefined>(undefined)
+const CURSOR_TICK_MS = 1000
+let cursorTimer: ReturnType<typeof setInterval> | null = null
+
+watch(
+  () => props.run.status === 'running' && subpage.value === 'gantt',
+  (active) => {
+    if (active) {
+      // 激活即赋值：游标不等首个 1s tick 才出现
+      nowMs.value = Date.now()
+      if (cursorTimer === null) {
+        cursorTimer = setInterval(() => {
+          nowMs.value = Date.now()
+        }, CURSOR_TICK_MS)
+      }
+    } else if (cursorTimer !== null) {
+      clearInterval(cursorTimer)
+      cursorTimer = null
+    }
+  },
+  { immediate: true },
+)
+onUnmounted(() => {
+  if (cursorTimer !== null) clearInterval(cursorTimer)
+})
 </script>

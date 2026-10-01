@@ -28,7 +28,6 @@ import {
 } from '@zhushanwen/subagent-core'
 import {
   WORKFLOW_RUN_EVENT_TRUNCATE_BYTES,
-  WORKFLOW_RUN_EVENT_TRUNCATED_FIELDS,
   type WorkflowDag,
   type WorkflowDagReply,
   type WorkflowRunEventEntry,

@@ -6,7 +6,7 @@
  * 任务观察入口唯一化收敛到 composer 任务托盘），本 spec 改挂托盘。文件名与登记 id 保留
  * （docs/testing/e2e-map.json E2E-MOCK-01 条目），语义从「侧栏列表同步」变为「托盘同步」。
  *
- * 分层定位（设计 §4 e2e 影响面评估表 + 计划 u-e2e 验收④「单测化路径」）：
+ * 分层定位（workflow-visualization 设计 §4 e2e 影响面评估 + 计划 u6 验收条款）：
  * 行渲染细节（分桶/格式化/两段式操作/空态）已沉淀 ComposerTray / TrayNativePanel 组件测试
  * （packages/renderer/src/__tests__/panel/tray/），本 spec 只保留 e2e 层不可替代的**跨进程链路**：
  *   mock 数据源 → store 分区 → useTrayCounts 计数/行集 → 托盘 DOM，
@@ -19,7 +19,8 @@
  * - T2：切到无 workflow 数据的 session → 托盘该条目整体摘除（归零不虚亮：DOM 层不存在，
  *       而非 opacity:0 / 空壳）；切回 s3 恢复（分区读，非残留）
  * - T3：点面板 workflow 行 → workflow overlay 打开（全屏临时层，DAG 通道 mock 降级形态 +
- *       实况面板挂载）；ESC 关闭后 composer/drawer 恢复（临时层不替换 Panel）
+ *       实况面板挂载；D1 改向后点行只开 overlay、不再开 drawer）；
+ *       ESC 关闭后 overlay 消失，composer 恢复可用、drawer 仍可正常打开（临时层不替换 Panel）
  *
  * mock 数据事实（packages/core/src/transport/mock/workflow-data.ts，本 spec 不改数据源）：
  * - getWorkflows('s3') = 1 条 WorkflowRunRecord（runId=wf-mock-001 / scriptName=deploy-flow /
@@ -29,7 +30,7 @@
  * workflow/subagent 记录的生产/更新通道（fixture 恒为终态 done/idle，mock 的 run-send-stream
  * 只产 message/tool/widget 序列，无 record 广播）——「计数出现与更新」的渲染分支由托盘组件
  * 测试（__tests__/panel/tray/composer-tray.test.ts 三态用例）覆盖；本 spec 断言同一判据的
- * **否定面**（归零不虚亮 N2：running=0 → 计数/呼吸点元素不存在），二者合起来是完整的三态口径。
+ * **否定面**（归零不虚亮：running=0 → 计数/呼吸点元素不存在；composer-task-tray 设计验收项，该文档已删除、git 可追溯），二者合起来是完整的三态口径。
  *
  * 运行：npx playwright test --project=electron e2e/workflow-sidebar-sync.spec.ts
  */
@@ -76,7 +77,7 @@ test.describe('Workflow 任务托盘同步 E2E', () => {
     await expect(builtinButton(page, 'subagent')).toBeVisible()
     await expect(builtinButton(page, 'bash')).toHaveCount(0)
 
-    // 归零不虚亮（设计 §4 N2）：running=0 → 计数与呼吸点元素不渲染（不是 opacity:0）
+    // 归零不虚亮（composer-task-tray 设计验收项，git 可追溯）：running=0 → 计数与呼吸点元素不渲染（不是 opacity:0）
     await expect(workflowBtn.getByTestId('tray-builtin-count')).toHaveCount(0)
     await expect(workflowBtn.getByTestId('tray-builtin-pulse')).toHaveCount(0)
 
@@ -111,9 +112,14 @@ test.describe('Workflow 任务托盘同步 E2E', () => {
     await expect(builtinButton(page, 'subagent')).toBeVisible()
   })
 
-  test('T3: 点面板 workflow 行 → workflow overlay 打开（U6 入口改向），关闭后 composer 恢复', async ({ page }) => {
+  test('T3: 点面板 workflow 行 → workflow overlay 打开（U6 入口改向），关闭后 composer/drawer 恢复', async ({ page }) => {
     await activateSession(page)
 
+    // D1 改向后点 workflow 行只开 overlay、不再开 drawer（drawer WorkflowTab = 被动回落
+    // 载体，设计 §3.3-D10）——「临时层不替换 Panel」不变量后置到 ESC 关闭后断言
+    // （drawer 仍可正常打开）。不在点行前预开 drawer：drawer 打开压缩 composer 宽度
+    // 触发密度状态机 L1（leftCluster 聚合为单图标按钮），tray-builtin-button 从 DOM
+    // 摘除（ComposerTray v-if="!aggregated"），托盘面板行不可达
     const panel = await openTrayPanel(page, 'workflow')
     await panel.getByTestId('tray-panel-empty-jump-ended').click()
     await panel.getByTestId('tray-workflow-row').click()
@@ -128,10 +134,11 @@ test.describe('Workflow 任务托盘同步 E2E', () => {
     await expect(page.getByTestId('wf-viz-live-panel')).toBeVisible()
 
     // 临时浮层不变量：overlay 是临时层（非替换 Panel）——ESC 关闭后 overlay 消失、
-    // composer 与 drawer 区恢复可见可用
+    // composer 恢复可用、drawer-toggle 仍可正常打开 drawer（Panel 状态未被临时层改变）
     await page.keyboard.press('Escape')
     await expect(overlay).toHaveCount(0)
     await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: 5_000 })
-    await expect(page.getByTestId('drawer-area')).toBeVisible()
+    await page.getByTestId('drawer-toggle').click()
+    await expect(page.getByTestId('drawer-area')).toBeVisible({ timeout: 5_000 })
   })
 })
