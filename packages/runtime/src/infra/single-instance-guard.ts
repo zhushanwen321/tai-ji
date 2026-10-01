@@ -31,22 +31,18 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
+import { RUNTIME_INSTANCE_FILE, type RuntimeInstanceRecord } from '@taiji/shared'
 
-/** 本机制登记文件名（置于数据目录根，与 runtime.port / runtime-token 并排）。 */
-export const RUNTIME_INSTANCE_FILE = 'runtime-instance.json'
+// 文件名与记录形状的单一权威在 shared（supervisor port-discoverer 同源消费）；此处
+// re-export 保持本模块既有导入面（测试/调用方）零改动。
+export { RUNTIME_INSTANCE_FILE }
+export type { RuntimeInstanceRecord }
 
 /** supervisor 写的端口文件名（候选来源②，只读不写——写入权归 Electron 侧）。 */
 const SUPERVISOR_PORT_FILE = 'runtime.port'
 
 /** 候选端口合法上界（下界 1 与非法 NaN/非整数一并由 isValidPort 判弃）。 */
 const MAX_VALID_PORT = 65535
-
-/** runtime-instance.json 内容（registerRuntimeInstance 写入）。 */
-export interface RuntimeInstanceRecord {
-  pid: number
-  port: number
-  startedAt: string
-}
 
 /** probe 结果：blocked=true 时 holder 必在（拒绝信息需要 pid/port/source/reachable）。 */
 export interface InstanceGuardProbeResult {

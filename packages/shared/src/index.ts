@@ -303,3 +303,7 @@ export {
   findSkillDataBlockRange,
   estimateTokens,
 } from './skill-marker'
+// runtime 自登记文件契约（runtime single-instance-guard 写 / supervisor port-discoverer 读，
+// 唯一共享形状——两侧各自重声明会漂移，漂移后果 = 残留 runtime 占端口不被收割）
+export { RUNTIME_INSTANCE_FILE } from './runtime-instance'
+export type { RuntimeInstanceRecord } from './runtime-instance'
