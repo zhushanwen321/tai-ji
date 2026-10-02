@@ -115,9 +115,11 @@ function groupCallFrames(events: readonly WorkflowRunEventEntry[]): Map<number, 
 }
 
 /**
- * 帧的区间归属判定键：全部相关帧携带 seq（新格式）时用 seq 严格序（同 ts 帧的归属
- * 不含糊——phase-settled 与 agent-settled 常同 ts）；否则降级 epoch ms 半开区间
- * [startTs, endTs)。混合形态（部分行缺 seq = W1 前旧格式）按缺 seq 处理。
+ * 帧的区间归属判定键：区间内（含边界帧）全部帧携带 seq（新格式）时用 seq 严格序
+ * （同 ts 帧的归属不含糊——phase-settled 与 agent-settled 常同 ts）；任一帧缺 seq
+ * 即整体降级 epoch ms 半开区间 [startTs, endTs)。混合形态（部分行缺 seq = W1 前
+ * 旧格式）按缺 seq 处理——判定扫描区间内全部帧，防中部缺 seq 帧在 seq 模式下被
+ * frameInInterval 判在区间外（本段误判重放空段）。
  */
 interface IntervalKey { // oe-exempt:20261002:framework:workflow-viz 分段视图模型/派生契约类型——类型契约先行、单实现常态
   useSeq: boolean
@@ -130,9 +132,15 @@ interface IntervalKey { // oe-exempt:20261002:framework:workflow-viz 分段视�
 function makeIntervalKey(events: readonly WorkflowRunEventEntry[], startIdx: number, endIdx: number): IntervalKey {
   const start = events[startIdx]
   // endIdx === events.length = 开放式哨兵（无收束锚的运行中段——区间上界开放，见
-  // derivePhaseBands；此时 end 帧不存在，useSeq 只看 start 帧）
+  // derivePhaseBands；此时 end 帧不存在，seq 检查只扫到事件流末帧）
   const end = endIdx < events.length ? events[endIdx] : undefined
-  const useSeq = start.seq !== undefined && (end === undefined || end.seq !== undefined)
+  let useSeq = true
+  for (let i = startIdx; i <= endIdx && i < events.length; i++) {
+    if (events[i].seq === undefined) {
+      useSeq = false
+      break
+    }
+  }
   return {
     useSeq,
     startSeq: start.seq ?? 0,
@@ -282,7 +290,7 @@ function derivePhaseBands(events: readonly WorkflowRunEventEntry[]): {
   for (const startIdx of startedIdx) {
     const frame = events[startIdx] as Extract<WorkflowRunEventEntry, { type: 'phase-started' }>
     const phase = frame.phase
-    const { endIdx, state } = resolveBandEnd(events, startIdx, phase)
+    const { endIdx, state } = resolveBandEnd(events, startIdx)
 
     // 本段区间零 agent 事件判定（seq 严格序优先，同 ts 帧归属不含糊；缺 seq 降级 ts 半开区间）
     const key = makeIntervalKey(events, startIdx, endIdx)
@@ -300,26 +308,22 @@ function derivePhaseBands(events: readonly WorkflowRunEventEntry[]): {
 }
 
 /**
- * 单段收束（endIdx + state）三级锚定：
- * ① 本帧之后第一个同 phase 的 phase-settled → settled；
- * ② 本段之后第一个 phase 级或 run 级转移帧 → settled；
- * ③ 无 settled 且无转移帧：run 未终局如实进行中。区间上界 = 开放哨兵
- * （events.length，见 makeIntervalKey——区间内唯一 agent 帧恰为事件流末帧时
- * 不被边界排除）；显示终点 = 最后已知帧 ts（首帧自身兜底空流形态）→ running。
+ * 单段收束（endIdx + state）锚定（单遍扫描、转移帧先到者胜）：
+ * 本段之后第一个 phase 级或 run 级转移帧 → settled（含同 phase 的
+ * phase-settled = 本轮正常收束；重落 phase-started / run-interrupted /
+ * run-settled = 换段/中断/终局截断）；无转移帧：run 未终局如实进行中。
+ * 区间上界 = 开放哨兵（events.length，见 makeIntervalKey——区间内唯一
+ * agent 帧恰为事件流末帧时不被边界排除）；显示终点 = 最后已知帧 ts
+ * （首帧自身兜底空流形态）→ running。
+ *
+ * 同名 phase-settled 的搜索不越过转移帧（先到者胜，规则②「本轮 settled」口径）：
+ * 中断+resume 形态第一段本轮无 settled，若越过 run-interrupted 采重放轮的
+ * settled，会吞掉中断空隙并与重放段完全重叠（各段独立绘制不相连）。
  */
 function resolveBandEnd(
   events: readonly WorkflowRunEventEntry[],
   startIdx: number,
-  phase: string,
 ): { endIdx: number; state: WorkflowGanttPhaseBand['state'] } {
-  // 收束锚 1：本帧之后第一个同 phase 的 phase-settled
-  for (let i = startIdx + 1; i < events.length; i++) {
-    const e = events[i]
-    if (e.type === 'phase-settled' && e.phase === phase) {
-      return { endIdx: i, state: 'settled' }
-    }
-  }
-  // 收束锚 2：本段之后第一个 phase 级或 run 级转移帧
   for (let i = startIdx + 1; i < events.length; i++) {
     if (isPhaseOrRunTransitionFrame(events[i])) {
       return { endIdx: i, state: 'settled' }

@@ -382,6 +382,33 @@ describe('gantt-segments：phase 级色带（手工 fixture——空段判据/�
     expect(phaseCards[0]).toMatchObject({ turnCount: 1, state: 'running', scriptOnly: false })
   })
 
+  it('中断+resume 形态：本轮无 settled 的段终点 = run-interrupted.ts，不越过中断帧采重放轮 settled', () => {
+    resetSeq()
+    const events: WorkflowRunEventEntry[] = [
+      frame('run-created', { runId: 'wf-t', workflowName: 't', argsSummary: '{}', ts: 1000 }),
+      frame('phase-started', { phase: 'fix', ts: 1010 }),
+      frame('agent-started', { taskIndex: 0, agentName: 'a', attempt: 1, phase: 'fix', ts: 1015 }),
+      // agent 在飞时中断——本轮 phase 无 settled 帧（resume 样本不含的形态）
+      frame('run-interrupted', { errorCode: 'user', reason: 'stop', ts: 1100 }),
+      frame('run-resumed', { reason: 'resume plan', host: 'h', ts: 1200 }),
+      frame('phase-started', { phase: 'fix', ts: 1210 }),
+      frame('agent-started', { taskIndex: 0, agentName: 'a', attempt: 1, phase: 'fix', ts: 1215 }),
+      frame('agent-settled', { taskIndex: 0, attempt: 1, outcome: 'done', durationMs: 5, ts: 1300 }),
+      frame('phase-settled', { phase: 'fix', ts: 1310 }),
+      frame('run-settled', { outcome: 'done', reason: 'completed', artifactsDir: '/tmp/x', ts: 1320 }),
+    ]
+    const { phaseBands, phaseCards } = deriveWorkflowGanttSegments(events)
+    const fix = phaseBands.filter((b) => b.phase === 'fix')
+    expect(fix).toHaveLength(2)
+    // 段 1 终点 = run-interrupted.ts（同名 settled 搜索以转移帧为上界），非空（agent 帧 1015 在区间内）
+    expect(fix[0]).toMatchObject({ startTs: 1010, endTs: 1100, emptyReplay: false, state: 'settled' })
+    // 段 2 正常收束于本轮 settled
+    expect(fix[1]).toMatchObject({ startTs: 1210, endTs: 1310, emptyReplay: false, state: 'settled' })
+    // 两段不重叠——中断空隙可见（越界采重放轮 settled 会得 [1010,1310] 与段 2 完全重叠）
+    expect(fix[0].endTs).toBeLessThan(fix[1].startTs)
+    expect(phaseCards.find((c) => c.phase === 'fix')).toMatchObject({ turnCount: 2, state: 'settled' })
+  })
+
   it('缺 seq 旧格式行：区间判定降级 ts 半开区间（起点帧自身不计入本段区间）', () => {
     // 手工构造无 seq 的事件（W1 前旧格式）——ts 相邻帧用半开区间归属
     const events: WorkflowRunEventEntry[] = [
@@ -391,6 +418,18 @@ describe('gantt-segments：phase 级色带（手工 fixture——空段判据/�
     ]
     const { phaseBands } = deriveWorkflowGanttSegments(events)
     expect(phaseBands[0].emptyReplay).toBe(false) // agent 帧 ts ∈ [1000, 1100) → 非空
+  })
+
+  it('混合形态（区间中部缺 seq、边界帧有 seq）：整体降级 ts 半开区间，中部帧不丢', () => {
+    // 只查边界帧会把中部缺 seq 的旧格式 agent 帧留在 seq 模式下——frameInInterval
+    // 对无 seq 帧恒 false → 本段误判重放空段（隐藏、不计轮次）
+    const events: WorkflowRunEventEntry[] = [
+      { type: 'phase-started', phase: 'p', ts: 1000, seq: 1 },
+      { type: 'agent-started', taskIndex: 0, agentName: 'a', attempt: 1, phase: 'p', ts: 1020 }, // 中部缺 seq
+      { type: 'phase-settled', phase: 'p', ts: 1100, seq: 3 },
+    ]
+    const { phaseBands } = deriveWorkflowGanttSegments(events)
+    expect(phaseBands[0].emptyReplay).toBe(false) // ts 模式下 1020 ∈ [1000, 1100) → 非空
   })
 })
 
