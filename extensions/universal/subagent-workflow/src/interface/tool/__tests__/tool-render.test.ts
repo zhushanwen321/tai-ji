@@ -218,8 +218,9 @@ describe("renderSubagentResult — expanded 与 compact 的分支关系（字节
       },
     };
     const { compact, expanded } = renderBoth(details);
-    // compact：basename 短名（无目录、无 .md），无 session 行
-    expect(compact.join("\n")).toContain("worker");
+    // compact：basename 短名（无目录、无 .md），无 session 行。强断言带边界形态：
+    // agent 值以完整 accent 包裹出现（防 "worker" 作为其他字段子串命中弱化回归）
+    expect(compact.join("\n")).toMatch(/<accent>worker<\/accent>/);
     expect(compact.join("\n")).not.toContain("/Users/x/.agents/");
     expect(compact.join("\n")).not.toContain(".md");
     expect(compact.join("\n")).not.toContain("session: ");

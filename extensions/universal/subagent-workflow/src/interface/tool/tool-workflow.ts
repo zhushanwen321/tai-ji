@@ -242,7 +242,7 @@ export function registerWorkflowTool(
       "Model/thinkingLevel: omit by default (inherit main agent's model). Only set model/thinkingLevel when the user explicitly requests a specific model or thinking depth for this run.",
       "Anti-patterns: Flattening args sub-fields (task/items/...) to the top level — they belong inside args. Calling {\"action\":\"run\"} without name.",
       "CRITICAL: For orchestration patterns, ALWAYS use action:run with the <location> absolute " +
-      "path of a listed workflow — NEVER use workflow-script action:generate to recreate patterns " +
+      "path of the matching listed workflow — NEVER use workflow-script action:generate to recreate patterns " +
       "already covered by available workflows. workflow-script generate is ONLY for novel patterns.",
     ],
     parameters: WorkflowParams,
