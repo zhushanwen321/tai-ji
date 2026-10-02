@@ -1,5 +1,7 @@
 # # 引用补全：当前目录化 + 展示重构
 
+> **文档性质**：2026-08-10 时点的设计快照，方案已实施（`src/tui/hash-provider.ts` / `src/tui/session-command.ts` 当期重构落地）。后续实现已演化——insertText 由 8 字符片段改为完整 uuid、包路径由 `extensions/session-reader/` 迁至 `extensions/universal/session-reader/`，文中源码行号与 pi-tui / pi 上游引用以当期 git 历史为准，不对齐现行代码。
+>
 > **设计层性质**：技术方案设计（下一层产物 = 可实现的接口/数据路径/渲染映射）。准则 5/6/7 全适用，最严格。
 > **scope**：本次只设计 `@zhushanwen/pi-session-reader` 的 TUI 层（`#` 弹窗 + `/session-pick`）数据获取与展示映射；不改 `session_read` 工具语义，不改 pi-tui 渲染引擎。
 
