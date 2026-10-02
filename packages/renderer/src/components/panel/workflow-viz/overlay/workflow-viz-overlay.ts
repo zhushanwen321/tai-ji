@@ -33,16 +33,16 @@ import type { WorkflowVizDagLoadError } from './types'
 
 // ── 模块级单例状态（overlay 全局单例，D8；导出供 Host 容器消费）───────────────
 
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：overlay 开关
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记 §4 ⑧ 2026-10-02）：overlay 开关
 /** overlay 开关（Host 壳 open prop 源）。 */
 export const overlayOpen = ref(false)
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：overlay 当前 run 换指针
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记 §4 ⑧ 2026-10-02）：overlay 当前 run 换指针
 /** 当前查看的 run（null = 未打开）。开新 run 换指即「切换内容」。 */
 export const overlayCurrent = ref<{ sessionId: string; runId: string } | null>(null)
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：overlay DAG 态槽
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记 §4 ⑧ 2026-10-02）：overlay DAG 态槽
 /** DAG 蓝图（成功臂；null + dagError=null = 解析中）。 */
 export const overlayDag = ref<WorkflowDag | null>(null)
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：overlay DAG 错误槽
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记 §4 ⑧ 2026-10-02）：overlay DAG 错误槽
 /** DAG 不可得归一错误（null = 通道正常）。 */
 export const overlayDagError = ref<WorkflowVizDagLoadError | null>(null)
 
