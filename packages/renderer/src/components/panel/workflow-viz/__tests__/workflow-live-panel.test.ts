@@ -199,6 +199,21 @@ describe('WorkflowLivePanel · header（使用者黑盒）', () => {
     expect(wrapper.find('[data-testid="wf-viz-run-pill"]').text()).toBe('panel.tray.workflowInterrupted')
   })
 
+  it('interrupted 暂停态：已用时长锚 lastProgressAt 停走（D9 停走口径——显示锚值而非墙钟差，且不随 tick 推进）', async () => {
+    // startedAt + 20s 后中断：health.lastProgressAt = 02:00:20Z，completedAt 缺省
+    // （中断形态无完成时刻）——停走锚 = lastProgressAt（deriveWorkflowRunElapsedMs 数据锚
+    // 分支）。若停走失效（endMs 取墙钟 now），显示会是自 2026-10-02 起的天级数值。
+    const wrapper = await mountPanel(makeRun({
+      status: 'interrupted',
+      reason: undefined,
+      completedAt: undefined,
+      health: { lastProgressAt: Date.parse('2026-10-02T02:00:20Z') },
+    }))
+    expect(wrapper.find('[data-testid="wf-viz-run-elapsed"]').text()).toContain('20s')
+    // 同帧两次读取一致（tick 只在 running 态重算，interrupted 数据锚切换后输出与 now 无关）
+    expect(wrapper.find('[data-testid="wf-viz-run-elapsed"]').text()).toContain('20s')
+  })
+
   it('interrupted 暂停态：在途 trace 行叠加中性停止色且不旋转（D9 停止着色 + 静态图标）', async () => {
     // call #2 = 无重试记录的纯 running（attempts 缺省）——stoppedInFlight 与 retrying 派生无关的正交验证
     const wrapper = await mountPanel(makeRun({
