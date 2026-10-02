@@ -434,6 +434,39 @@ function defaultReadProcessStartTime(pid: number): Promise<number | null> {
 }
 
 /**
+ * 后代快照（首个信号之前，T0 不变量）。枚举失败/无 pgrep → 空表降级：pi 本体处置照旧，
+ * 仅 shell 顺链清扫缺席（宁漏不误杀），warn 留痕。
+ */
+async function snapshotDescendants(
+  row: PsRow,
+  getDescendantPids: (pid: number) => Promise<number[]>,
+): Promise<number[]> {
+  try {
+    return await getDescendantPids(row.pid)
+    // eslint-disable-next-line taste/no-silent-catch -- 降级策略：枚举失败按空表继续，pi 本体处置不阻断（宁漏不误杀），warn 留痕
+  } catch (e) {
+    console.warn(`[orphan-reap] descendant enumeration failed for pi pid=${row.pid}, shells will not be swept:`, e instanceof Error ? e.message : e)
+    return []
+  }
+}
+
+/**
+ * 宽限后探活：signal 0 只验证存在性不实际发信号。EPERM 等其他错误按「活着」处理
+ * （走 SIGKILL 兜底，宁可多一发强杀信号也不漏收）。
+ */
+function probeAliveAfterGrace(
+  signal: (pid: number, signal: 'SIGTERM' | 'SIGKILL' | 0) => void,
+  pid: number,
+): boolean {
+  try {
+    signal(pid, 0)
+    return true
+  } catch (e) {
+    return !isProcessGone(e)
+  }
+}
+
+/**
  * 执行一次孤儿收殓：枚举 → 读清单 → 筛选 → 逐个 SIGTERM → 宽限 → 仍活则 SIGKILL。
  * 清单缺失/坏（readSpawnMarkers 返回 null）→ 跳过本轮（fail-safe，宁漏不误杀）。
  * 本函数不抛（全路径 catch 或降级返回），调用方可安全 fire-and-forget。
@@ -445,6 +478,21 @@ interface OrphanKillDeps {
   delay: (ms: number) => Promise<void>
   readProcessStartTime: (pid: number) => Promise<number | null>
   getDescendantPids: (pid: number) => Promise<number[]>
+}
+
+/**
+ * 依赖解析：注入项缺省回落真实实现（options → OrphanKillDeps + ps 枚举）。`??` 回落链
+ * 集中在一个纯函数（复杂度门禁：分支大户与主流程编排解耦），主流程只消费解析结果。
+ */
+function resolveReapDeps(options: ReapOrphanOptions): OrphanKillDeps & { listProcesses: () => Promise<string> } {
+  return {
+    killGraceMs: options.killGraceMs ?? ORPHAN_KILL_GRACE_MS,
+    listProcesses: options.listProcesses ?? defaultListProcesses,
+    signal: options.signal ?? defaultSignal,
+    delay: options.delay ?? defaultDelay,
+    readProcessStartTime: options.readProcessStartTime ?? defaultReadProcessStartTime,
+    getDescendantPids: options.getDescendantPids ?? defaultGetDescendantPids,
+  }
 }
 
 /**
@@ -498,11 +546,8 @@ async function reapOrphansWithJournal(
 
 export async function reapOrphanPiProcesses(options: ReapOrphanOptions): Promise<ReapOrphanResult> {
   const { dataDir, ownPid, readSpawnMarkers } = options
-  const killGraceMs = options.killGraceMs ?? ORPHAN_KILL_GRACE_MS
-  const listProcesses = options.listProcesses ?? defaultListProcesses
-  const signal = options.signal ?? defaultSignal
-  const delay = options.delay ?? defaultDelay
-  const readProcessStartTime = options.readProcessStartTime ?? defaultReadProcessStartTime
+  const { listProcesses, ...killDeps } = resolveReapDeps(options)
+  const { killGraceMs } = killDeps
 
   const result: ReapOrphanResult = { scanned: 0, reaped: [], failed: [], unsupported: false }
 
@@ -553,10 +598,7 @@ export async function reapOrphanPiProcesses(options: ReapOrphanOptions): Promise
     reason: 'argv matches spawn marker list (--mode rpc + --no-extensions + staged extension/skill value) AND ppid=1 (parent runtime dead, orphan reparented to init)',
     graceMs: killGraceMs,
   })
-  const { reaped, failed, reapedDescendants } = await reapOrphansWithJournal(orphans, {
-    killGraceMs, signal, delay, readProcessStartTime,
-    getDescendantPids: options.getDescendantPids ?? defaultGetDescendantPids,
-  })
+  const { reaped, failed, reapedDescendants } = await reapOrphansWithJournal(orphans, killDeps)
   result.reaped = reaped
   result.failed = failed
   if (reapedDescendants.length > 0) result.reapedDescendants = reapedDescendants
@@ -596,13 +638,7 @@ async function killOrphan(
   const startLstart = await readProcessStartTime(row.pid)
   // 后代快照必须在首个信号之前（T0 不变量）。枚举失败/无 pgrep → 空表降级：pi 本体
   // 处置照旧，仅 shell 顺链清扫缺席（宁漏不误杀）。
-  let descendants: number[] = []
-  try {
-    descendants = await getDescendantPids(row.pid)
-    // eslint-disable-next-line taste/no-silent-catch -- 降级策略：枚举失败按空表继续，pi 本体处置不阻断（宁漏不误杀），warn 留痕
-  } catch (e) {
-    console.warn(`[orphan-reap] descendant enumeration failed for pi pid=${row.pid}, shells will not be swept:`, e instanceof Error ? e.message : e)
-  }
+  const descendants = await snapshotDescendants(row, getDescendantPids)
 
   // 后代补杀（幸存者 SIGKILL）。快照后已自然退出的（含被 pi 自身 handler 清理的）
   // ESRCH 直接跳过；其余盲杀——秒级窗口内 pid 复用风险与 process-control 同款接受。
@@ -647,15 +683,8 @@ async function killOrphan(
 
   await delay(killGraceMs)
 
-  // 宽限后探活：signal 0 只验证存在性不实际发信号。EPERM 等其他错误按「活着」处理
-  // （走 SIGKILL 兜底，宁可多一发强杀信号也不漏收）。
-  let alive = true
-  try {
-    signal(row.pid, 0)
-  } catch (e) {
-    if (isProcessGone(e)) alive = false
-  }
-  if (!alive) {
+  // 宽限后探活（signal 0 存在性探测，EPERM 等按「活着」走 SIGKILL 兜底——probeAliveAfterGrace）。
+  if (!probeAliveAfterGrace(signal, row.pid)) {
     const swept = sweepDescendants()
     console.log(`[orphan-reap] reaped orphan pi pid=${row.pid} (SIGTERM) ${summary}`)
     return { ok: true, descendantsSwept: swept }

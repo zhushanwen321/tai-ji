@@ -96,6 +96,7 @@ import { GitInfoReader } from './infra/system/git-info-reader.js'
 import { ShellRunner } from './infra/shell-runner.js'
 import { WorktreeService } from './services/worktree/worktree-service.js'
 import { TerminalService } from './services/terminal/terminal-service.js'
+import { disposeTerminalPtysStep } from './services/terminal/dispose-terminal-ptys-step.js'
 import { QuotaService } from './services/quota-service.js'
 import { FileService } from './services/file-service.js'
 import { getSkillDirs } from './infra/pi/discovery-store.js'
@@ -1594,9 +1595,9 @@ async function main(): Promise<void> {
       // 孤儿 shell 加固③：显式销毁全部终端 PTY（kill → 5s → SIGKILL 升级链），不再
       // 仅靠「进程死亡 → master 关闭 → 内核 SIGHUP」的隐式孝底——显式链可观测（日志
       // 留痕）且不依赖内核行为。挂点在 server.stop（传输层关停）之前：先收自己受托的
-      // 资源再关门。空表 no-op，双信号重入安全。
-      shutdownStep('dispose-terminal-ptys')
-      terminalService.destroyAll()
+      // 资源再关门。空表 no-op，双信号重入安全。步骤本体提取在
+      // dispose-terminal-ptys-step（本文件 import 即执行 main() 不可直测，单步语义经其单测锁定）。
+      disposeTerminalPtysStep(terminalService, shutdownStep)
       // E-2 + W8：relay 优雅关停与引擎协议客户端 dispose **并行**——deinitRelayServer
       // 内部有 3s grace，串行（先 relay 后 dispose）会把引擎进程消失时间拖到 3s 之后，
       // 违反 A11「dispose 发起起算 1s 内引擎进程消失」；并行发起后 dispose 单侧上界

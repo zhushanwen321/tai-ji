@@ -97,17 +97,33 @@ function projectAskStepToAgentCall(ask: RunAskStepFold): WorkflowAgentCall {
  * scriptPath：注册条目带 scriptPath（新 run）；旧条目/ v1 缺省 ''（消费侧按缺省
  * 处理，不回落猜路径）。
  */
+/**
+ * [projectV2Workflow 拆分] fold 骨架兑底链（created 元数据半边）：scriptName/startedAt
+ * 取注册条目，缺省回落 fold.created（run journal 重建的 run 名与起始时间），再缺省恒
+ * ('(unknown)' / epoch 0)。独立小函数：`?.`/`??` 长链是圈复杂度计数大户，主归并函数保持平铺。
+ */
+function resolveWorkflowOrigin(
+  registered: WorkflowRecordRegisteredEntryData | undefined,
+  fold: RunEventFoldCheckpoint | undefined,
+): Pick<WorkflowRunRecord, 'scriptName' | 'startedAt'> {
+  return {
+    scriptName: registered?.scriptName ?? fold?.created?.workflowName ?? '(unknown)',
+    startedAt: toIso(registered?.startedAt ?? fold?.created?.ts ?? 0),
+  }
+}
+
 function resolveWorkflowIdentity(
   registered: WorkflowRecordRegisteredEntryData | undefined,
   settledEntry: WorkflowRecordSettledEntryData,
   fold: RunEventFoldCheckpoint | undefined,
 ): Pick<WorkflowRunRecord, 'runId' | 'scriptName' | 'slug' | 'scriptPath' | 'startedAt' | 'stateFilePath'> {
+  const origin = resolveWorkflowOrigin(registered, fold)
   return {
     runId: registered?.runId ?? settledEntry.runId,
-    scriptName: registered?.scriptName ?? fold?.created?.workflowName ?? '(unknown)',
+    scriptName: origin.scriptName,
     slug: registered?.slug,
     scriptPath: registered?.scriptPath ?? '',
-    startedAt: toIso(registered?.startedAt ?? fold?.created?.ts ?? 0),
+    startedAt: origin.startedAt,
     stateFilePath: registered?.recordPath ?? '',
   }
 }
