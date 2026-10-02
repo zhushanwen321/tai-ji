@@ -304,7 +304,8 @@ export interface ReapOrphanResult {
   /**
    * 顺链清理的后代 pid（bash/sh/zsh 等 shell 子树，孤儿 shell 收口）。仅实际清扫过
    * 后代时赋值（空树/降级路径保持 undefined——toEqual 断言兼容既有用例形状）。
-   * 只收已发 SIGKILL/SIGTERM 的 pid，不以「以为死了」计数。
+   * 只收 SIGKILL **发送成功**的 pid（sweepDescendants 的 swept 收集面）；SIGTERM
+   * 阶段的发送不计入（那阶段只起宽限作用，真正收口在补杀 SIGKILL）。
    */
   reapedDescendants?: number[]
 }
@@ -510,8 +511,12 @@ async function reapOrphansWithJournal(
   const reapedDescendants: number[] = []
   for (const row of orphans) {
     const { ok, descendantsSwept } = await killOrphan(row, deps)
-    // 后代清扫结果不分 ok/failed 都收集：shell 收口独立于 pi 本体处置成败（EPERM 等
-    // 硬失败时幸存后代已被顺链清扫，观测面必须如实反映）。
+    // 后代清扫结果不分 ok/failed 都收集（shell 收口独立于 pi 本体处置成败），但两
+    // 条 failed 子路径的清扫语义不同，观测面必须如实区分：
+    // - SIGTERM 硬失败（signal throw 非 ESRCH，如 EPERM）：直接返回空表、**不清扫**
+    //   ——pi 尚存活，此时杀其 shell 会留下「pi 还活着、shell 已死」的半处置态；
+    // - SIGKILL 硬失败：catch 内已顺链清扫幸存后代（彼时 pi 处置已尽力，shell 收
+    //   口照常），reapedDescendants 收到真实清扫集。
     reapedDescendants.push(...descendantsSwept)
     if (ok) {
       reaped.push(row.pid)
@@ -536,7 +541,7 @@ async function reapOrphansWithJournal(
         event: 'reap-failed',
         pid: row.pid,
         ppid: row.ppid,
-        detailDigest: `orphan matched spawn marker list + ppid=1 but disposal failed (signal error, non-ESRCH); argv: ${argvSummary(row.command)}`,
+        detailDigest: `orphan matched spawn marker list + ppid=1 but disposal failed (signal error, non-ESRCH); descendants swept: ${descendantsSwept.length}; argv: ${argvSummary(row.command)}`,
       }
       getCrashJournal().append(journalEvent)
     }
@@ -608,6 +613,7 @@ export async function reapOrphanPiProcesses(options: ReapOrphanOptions): Promise
     trigger: options.trigger ?? 'unspecified',
     reaped: result.reaped,
     failed: result.failed,
+    reapedDescendants,
   })
   return result
 }
@@ -665,6 +671,9 @@ async function killOrphan(
   } catch (e) {
     if (isProcessGone(e)) {
       // 扫描到处置之间已自行退出（stdin-EOF 自杀链赶到前面）——按已回收计，幂等。
+      // 杀链不对称的接受理由：此分支直接对后代 SIGKILL、跳过「SIGTERM → 宽限 →
+      // SIGKILL」升级链——方向是宁漏不误杀（后代已随 pi 退出孤儿化，快照时点最新，
+      // 直杀不比升级链更危险），省掉对已无父 shell 的多余宽限等待。
       // 后代快照仍有效（信号前采集）：pi 死前 spawn 的 shell 照扫，不留永久孤儿。
       const swept = sweepDescendants()
       console.log(`[orphan-reap] reaped orphan pi pid=${row.pid} (exited before SIGTERM) ${summary}`)
