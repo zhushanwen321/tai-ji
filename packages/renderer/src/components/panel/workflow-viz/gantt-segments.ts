@@ -60,16 +60,16 @@ function isPhaseOrRunTransitionFrame(e: WorkflowRunEventEntry): boolean {
   )
 }
 
-/** agent 执行事实帧（agent-started/retrying/settled——携带 taskIndex/phase 载荷）。 */
-function isAgentEventFrame(e: WorkflowRunEventEntry): boolean {
+/** agent 执行事实帧（agent-started/retrying/settled——携带 taskIndex/phase 载荷；谓词形态供类型收窄复用）。 */
+function isAgentEventFrame(
+  e: WorkflowRunEventEntry,
+): e is Extract<WorkflowRunEventEntry, { type: 'agent-started' | 'agent-retrying' | 'agent-settled' }> {
   return e.type === 'agent-started' || e.type === 'agent-retrying' || e.type === 'agent-settled'
 }
 
-/** agent 帧的 taskIndex（三类 agent 帧全携带；类型收窄辅助）。 */
+/** agent 帧的 taskIndex（三类 agent 帧全携带；判据复用 isAgentEventFrame）。 */
 function agentTaskIndex(e: WorkflowRunEventEntry): number | undefined {
-  return e.type === 'agent-started' || e.type === 'agent-retrying' || e.type === 'agent-settled'
-    ? e.taskIndex
-    : undefined
+  return isAgentEventFrame(e) ? e.taskIndex : undefined
 }
 
 /**

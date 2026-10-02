@@ -180,10 +180,11 @@ const svgRef = ref<SVGSVGElement | null>(null)
 /** 视口变换（tx/ty 平移 + k 缩放；切换 run 重置）。 */
 const vp = reactive({ k: 1, tx: 0, ty: 0 })
 
-const layout = computed(() =>
-  layoutDag(props.dag ?? { nodes: [], edges: [], phases: [], parallelGroups: [], loops: [] }),
-)
-const edges = computed(() => layoutEdges(props.dag ?? { nodes: [], edges: [], phases: [], parallelGroups: [], loops: [] }, layout.value.nodes))
+/** dag prop 未就绪（null）时布局用的空 DAG（layoutDag/layoutEdges 均纯函数不 mutate 输入）。 */
+const EMPTY_DAG: WorkflowDag = { nodes: [], edges: [], phases: [], parallelGroups: [], loops: [] }
+
+const layout = computed(() => layoutDag(props.dag ?? EMPTY_DAG))
+const edges = computed(() => layoutEdges(props.dag ?? EMPTY_DAG, layout.value.nodes))
 const conditionalEdges = computed(() => edges.value.filter((le) => le.edge.kind === 'conditional' && le.edge.predicate))
 const isEmptyDag = computed(() => (props.dag?.nodes.length ?? 0) === 0)
 

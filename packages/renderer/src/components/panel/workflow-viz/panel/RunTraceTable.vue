@@ -132,18 +132,24 @@ function stoppedColorOf(runStatus: WorkflowRunStatus, outcome: WorkflowRunOutcom
   }
 }
 
+/**
+ * 派生态 → 状态点着色（查表全枚举 WorkflowCallDerivedStatus 五值——嵌套三元链的
+ * 平铺替代，retrying 与 running 同 accent）。
+ */
+const STATUS_DOT_CLASS: Record<TraceRow['view']['status'], string> = {
+  done: 'bg-success',
+  failed: 'bg-danger',
+  retrying: 'bg-accent',
+  running: 'bg-accent',
+  pending: 'bg-neutral-dim opacity-40',
+}
+
 const rows = computed<TraceRow[]>(() =>
   props.calls.map((call) => {
     const view = deriveCallView(call, props.runStatus)
     const stoppedColor = view.stoppedInFlight ? stoppedColorOf(props.runStatus, props.runOutcome) : ''
     const isLiveRunning = view.status === 'running' || view.status === 'retrying'
-    const dotClass =
-      view.status === 'done' ? 'bg-success'
-        : view.status === 'failed' ? 'bg-danger'
-          : view.status === 'retrying' ? 'bg-accent'
-            : view.status === 'running' ? 'bg-accent'
-              : 'bg-neutral-dim opacity-40'
-    return { call, view, isLiveRunning, dotClass, stoppedColorClass: stoppedColor }
+    return { call, view, isLiveRunning, dotClass: STATUS_DOT_CLASS[view.status], stoppedColorClass: stoppedColor }
   }),
 )
 

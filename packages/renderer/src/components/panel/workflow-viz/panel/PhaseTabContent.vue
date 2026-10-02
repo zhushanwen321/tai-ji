@@ -148,7 +148,6 @@ const phaseEventRows = computed<PhaseEventRow[]>(() =>
 
 const rangeText = computed(() => {
   if (card.value === undefined) return '—'
-  const fmt = (ts: number): string => new Date(ts).toLocaleTimeString('zh-CN', { hour12: false })
-  return `${fmt(card.value.startTs)} → ${fmt(card.value.endTs)}`
+  return `${timeTextOf(card.value.startTs)} → ${timeTextOf(card.value.endTs)}`
 })
 </script>

@@ -114,7 +114,7 @@ function readWorkflowRecordFile(recordPath: string): WorkflowRunEvent[] {
 }
 
 /** ENOENT → 结构化 record_not_found 裸码；其他 fs 错误上抛（通道错误）。错误臂由调用方按各自 reply 闭集组装。 */
-function readRecordOrRecordNotFound(runId: string, recordPath: string): { ok: true; events: WorkflowRunEvent[] } | { ok: false; code: 'record_not_found'; message: string } {
+function readRecordOrRecordNotFound(recordPath: string): { ok: true; events: WorkflowRunEvent[] } | { ok: false; code: 'record_not_found'; message: string } {
   try {
     return { ok: true, events: readWorkflowRecordFile(recordPath) }
   } catch (e) {
@@ -373,7 +373,7 @@ export class WorkflowRunEventsReader {
       )
       return { sessionId, runId, events: [], oversize: true }
     }
-    const events = readRecordOrRecordNotFound(runId, recordPath)
+    const events = readRecordOrRecordNotFound(recordPath)
     if (!events.ok) return { sessionId, runId, code: events.code, message: events.message }
     return { sessionId, runId, events: events.events.map(projectRunEventEntry) }
   }
@@ -393,7 +393,7 @@ export class WorkflowRunEventsReader {
     if (!this.isPathAllowed(recordPath)) {
       return { sessionId, runId, code: 'path_rejected', message: `workflow record path rejected by allowlist: ${recordPath}` }
     }
-    const events = readRecordOrRecordNotFound(runId, recordPath)
+    const events = readRecordOrRecordNotFound(recordPath)
     if (!events.ok) return { sessionId, runId, code: events.code, message: events.message }
     const created = events.events.find((event) => event.type === 'run-created')
     if (created === undefined || created.type !== 'run-created' || created.scriptSource === undefined) {

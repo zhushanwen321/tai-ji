@@ -320,11 +320,10 @@ export const useWorkflowStore = defineStore('workflow', () => {
   /**
    * 活跃 run 条件释放（面板卸载时调）：仅当锚仍是 (sessionId, runId) 本尊时才清 null。
    * 条件化原因：Vue 替换组件时旧面板 onUnmounted 晚于新面板 setup——无条件清会误删新
-   * 面板刚登记的锚（切 run 时序）。
+   * 面板刚登记的锚（切 run 时序）。判据复用 isActiveRun（同一定义，防双处漂移）。
    */
   function releaseActiveWorkflowRun(sessionId: string, runId: string): void {
-    const anchor = activeWorkflowRun.value
-    if (anchor !== null && anchor.runId === runId && anchor.sessionId === sessionId) {
+    if (isActiveRun(sessionId, runId)) {
       activeWorkflowRun.value = null
     }
   }
