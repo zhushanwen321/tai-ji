@@ -491,13 +491,13 @@ async function main(): Promise<Record<string, unknown>> {
     return out;
   }
 
-  // ── 统一提交 + commit 拦截三分类路由（改造点 1；提升至 main() 作用域——branch-review /
-  //    gates / changeset 三处复用）──
+  // ── 统一提交 + commit 拦截三分类路由（改造点 1；提升至 main() 作用域——branch-review 修复
+  //    组 / gates 残留 / changeset 残留 / 终态清扫四处复用）──
   // committer 红线不变：不改文件内容 / 不跳过检查 / 不提交清单外文件；content 类它只申报，
   // 补修由独立补修 fixer（dmg-commit-fix）执行——检查防线不被被检查的执行体修改。blocked 组
   // 由调用方处置（branch-review 转待办继续；gates / changeset 子循环无待办机制，按各自现行
-  // 语义终止）。返回 repairedFiles = 全部补修涉及文件（调用方喂归属对账集合）、reservedHits =
-  // 归属到待办组登记文件的补修文件（调用方披露）。
+  // 语义终止；终态清扫失败改判 needs-human）。返回 repairedFiles = 全部补修涉及文件（调用方
+  // 喂归属对账集合）、reservedHits = 归属到待办组登记文件的补修文件（调用方披露）。
   async function runUnifiedCommit(
     plan: { group: string; files: string[]; message: string }[],
     round: number,
@@ -582,7 +582,8 @@ async function main(): Promise<Record<string, unknown>> {
     // 串行化消除组间混提）
     // 防御路由：committed=false 且 errorKind 非 content 的组不进补修队列、也无其他路由承接
     // （按 committer 契约该形态只应是违约申报——env 处置后仍失败应报 blocked），一律视同
-    // blocked 转待办（deferredCommits 呈报），error 摘要注明违约兜底
+    // blocked 走 blocked 返回值，处置由调用方按语境决定（br 转待办 deferredCommits / gates、
+    // changeset throw 终止 / 终态清扫改判 needs-human），error 摘要注明违约兜底
     for (const p of plan) {
       const first = results.get(p.group);
       if (first !== undefined && !first.committed && first.errorKind !== "content") {
@@ -1265,6 +1266,7 @@ async function main(): Promise<Record<string, unknown>> {
         '2. 逐条证据裁决三档：有真实代码证据 → adjudication="evidence"；reviewer 未给实证 → "unverified"；臆测或纯风格指控 → "downgraded" + note。unverified/downgraded 同样写进聚合报告供人复核，但只有 evidence 条目进修复队列。',
         round >= 2 ? "3. 跨轮身份对齐：延续上轮的条目必须复用问题清单条目 id；新条目不填 id（workflow 统一分配）。" : "3. 全部为新问题，不填 id（workflow 统一分配）。",
         "4. 修复分组：把 evidence 条目按相关性和独立性分组——同文件/同模块/同根因归同组（一个 agent 修一组）；不同组的文件集必须不相交（组间可并行修复、互不冲突）；单条问题独立成组即可，无关联不强行合并。",
+        `5. 拦截前置消解检查（content 类 commit 拦截第一道防线，设计 §4.1）：亲跑只读门禁复现检查 node scripts/select-affected-e2e.mjs --check --base ${base}（e2e 资产防漏登记门禁）。若报出看护目录文件缺 rule 覆盖且该文件在本轮任一修复分组涉及文件中：把报错写明的恢复动作（按报错原文，如在 docs/testing/e2e-map.json 为该文件补 rule）并入涉及该文件的分组表最前一组（提交按分组表顺序执行）的对应条目 guidance，并注明该登记须与修复同批提交——拦截条件在提交时点被消解。报错与全部修复分组文件无关时不处理（既有欠账由补修链在该文件下次提交时承接）。`,
         "",
         `产出——聚合总报告 ${reportPath}（先建目录）：## Summary（一句话）+ Must-fix/Suggestions 计数 + 问题表（ID|严重度|来源维度|文件|证据|修复方向）+ 修复分组表（组ID|问题ID|涉及文件|分组依据）+ 裁决说明（unverified/downgraded 及原因）。`,
         "工作流会从你返回的 groups + issues 数据确定性渲染每组的修复任务文档（aggregate-4-fixer-<k>.md）——返回 JSON 里的 guidance 务必具体可执行。",
@@ -1596,6 +1598,9 @@ async function main(): Promise<Record<string, unknown>> {
       // 「path.md（中文说明…）」形态的说明文字进 pathspec 会 fatal 128；existsSync 预过滤：
       // 修完被挪走/删除的路径不进 pathspec）。提交动作交给提交 agent（见 runUnifiedCommit）
       const commitPlan: { group: string; files: string[]; message: string }[] = [];
+      // 前轮提交待办组登记文件（跨轮过滤依据；本轮 blocked 条目在 runUnifiedCommit 返回后才
+      // 登记，此处天然只含前轮条目）
+      const deferredFiles = new Set(deferredCommits.flatMap((d) => d.files));
       for (let gi = 0; gi < groups.length; gi++) {
         const g = groups[gi]!;
         const v = reports[gi];
@@ -1622,6 +1627,20 @@ async function main(): Promise<Record<string, unknown>> {
           const reason = `修复组 ${g.id}（第 ${round} 轮）申报了组内条目 files 清单之外的文件：${outside.join("、")}——人工复核是否越界改动`;
           log(`WARN: [branch-review] ${reason}`);
           disclosures.push({ item: `fix-${g.id}-r${round}-out-of-scope`, reason });
+        }
+        // 跨轮待办文件过滤（与 runUnifiedCommit 补修循环 reserved 防护同款语义，设计 §4.1 相交
+        // 归属 / §2 G2 防脱节目标）：前轮待办组文件上的遗留工作区改动与本轮新修复同文件时无法
+        // 按组拆分，直接 add 会把待办组遗留改动吞进本组 commit——制造「deferredCommits 列该
+        // 文件为待办、git 已（对该文件）干净」的清单与实物脱节。被过滤文件留工作区归待办，
+        // WARN 披露
+        const reservedFiles = files.filter((p) => deferredFiles.has(p));
+        if (reservedFiles.length > 0) {
+          for (let ri = files.length - 1; ri >= 0; ri--) {
+            if (deferredFiles.has(files[ri]!)) files.splice(ri, 1);
+          }
+          const reason = `修复组 ${g.id}（第 ${round} 轮）申报文件与前轮提交待办组登记文件相交：${reservedFiles.join("、")}——归待办（留工作区随 deferredCommits 处置，不进本轮 commit，防待办组遗留改动被吞进本组提交）`;
+          log(`WARN: [branch-review] ${reason}`);
+          disclosures.push({ item: `commit-plan-reserved-r${round}-${g.id}`, reason });
         }
         if (files.length === 0) continue;
         for (const p of [...files, ...skipped, ...outside]) attributableFiles.add(p);
