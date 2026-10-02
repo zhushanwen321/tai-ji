@@ -46,6 +46,16 @@ Resources/
 
 **开发模式差异**：数据目录 `~/.taiji-dev/`，端口 +100（3310-3320），Electron userData 隔离。
 
+### 浏览器浮层诊断信号（display-containers W2，2026-10-03 登记）
+
+浮层浏览器三类失败/回执信号（renderer 经 preload `browser` 通道可达）：
+
+| 信号 | 形态 | 含义与处置 |
+|---|---|---|
+| create 失败 reject | `browserCreate` IPC reject（原「主进程 warn 后静默 return」已消灭） | view 创建失败（window 失联等）→ 浮层 `browser-create-error` 占位 + 重试。**池满不是失败**（LRU 自动淘汰） |
+| render-process-gone | 页面进程崩溃信号 → 错误态占位 | 占位文案区分「创建失败 vs 页面加载失败」两类；重试 = create+show+navigate 整链重发 |
+| forward-keys rejected 回执 | 转发键清单双端匹配失败的拒收回执 | 键矩阵漂移信号——核对 `apps/electron/main/browser/gateway/forward-keys.ts` 与 renderer 注册处上报清单是否同源；settings 改键 / 窗口重载后的重报窗口期属已知可接受（毫秒级） |
+
 ## 常见问题排查清单
 
 ### 1. pi 启动失败："Failed to start bundled pi process"

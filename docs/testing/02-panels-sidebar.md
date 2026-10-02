@@ -308,17 +308,17 @@ test.describe('文件树 E2E', () => {
 ---
 
 
-> 覆盖：SideDrawer 抽屉（10 tab：terminal/browser/git/doc/detail/subagent/workflow/bashTask/plan/btw，枚举以 DrawerPanel 实装为准）、文件预览（detail tab，diff/preview 切换）、git 面板
+> 覆盖：SideDrawer 抽屉（终态 8 tab：git/doc/detail/subagent/workflow/bashTask/plan/btw——display-containers §7.1：terminal 迁底抽屉、browser 走浮层，枚举以 DrawerPanel 实装为准）、文件预览（detail tab，diff/preview 切换）、git 面板
 >
 > 先读 [00-overview.md](./00-overview.md) 理解双轨制和公共前置。
 
 ## 1. 功能概述
 
-SideDrawer 是 workspace-body 级的右侧抽屉，承载 5 个 tab：
+SideDrawer 是 workspace-body 级的右侧抽屉，终态 8 个 tab（本表为 GUI 族历史焦点视图，仅列 5 行——全量枚举见 §3 data-testid 清单「终态 8 员」行）：
 
 | tab | 内容 | 数据来源 |
 |-----|------|---------|
-| `terminal` | 终端 widget（extension:widget, widgetKey='terminal'） | extension.onWidget 订阅 |
+| `terminal` | **[已迁底抽屉 display-containers §7.3 W1]** 终端 widget 由底抽屉承载（StatusBar 开关 / ⌃` 触达），右抽屉无 terminal tab | —— |
 | `browser` | 浏览器内容已迁浮层（display-containers §7.4：点 localhost 链接 → openBrowser → 浮层 BrowserPane）——右抽屉无 browser tab | openBrowser(url, sessionId) URL 注入链 |
 | `git` | 全量 git 状态 + 暂存/提交（GitPanel） | provide/inject GIT_STATUS_KEY |
 | `doc` | 命令/skill 详细文档（CommandDocPanel） | commandStore + skills |
@@ -328,7 +328,7 @@ SideDrawer 是 workspace-body 级的右侧抽屉，承载 5 个 tab：
 
 ## 2. 组件结构概述
 
-`PanelContainer.vue` 挂载抽屉容器（现为 `packages/ui/src/features/drawer/DrawerPanel.vue`，props: open/activeTab/sessionId）。header 含 tab 栏（全枚举见首行覆盖节，含新增 btw；`drawer-tab-{key}` testid）、关闭按钮（`drawer-close`）；[display-containers §6.6③ W0] docked 死状态删除，钉住按钮（`drawer-pin`）已移除。content 按 activeTab 切换：terminal/browser tab 显示 widget 内容（extension.onWidget）或空态；git tab 挂 `GitPanel.vue`（git 全量状态）；doc tab 挂 `CommandDocPanel.vue`；detail tab 挂 `DetailPane.vue`（文件预览，容器 testid=`detail-pane`，[display-containers W3] 顶部实例层多文件 tab 条 `detail-tab-strip`/`detail-tab`（`data-path`/`data-active`）/`detail-tab-close`，含 diff/preview 切换 `detail-view-toggle`、加载/错误/空/二进制/截断态与 `detail-content` 内容区）；btw tab 挂 `BtwPanel.vue`（2026-09-22 btw-question 新增：面板根 `drawer-btw-tab`、线列表 `btw-thread-list`、新建 `btw-new-thread`、空态 `btw-empty`/`btw-empty-new`、错误 `btw-create-error`/`btw-load-error`+`btw-load-retry`、挂起点 `btw-thread-pending`、fork pill 随创建态）。
+`PanelContainer.vue` 挂载抽屉容器（现为 `packages/ui/src/features/drawer/DrawerPanel.vue`，props: open/activeTab/sessionId）。header 含 tab 栏（全枚举见首行覆盖节，含新增 btw；`drawer-tab-{key}` testid）、关闭按钮（`drawer-close`）；[display-containers §6.6③ W0] docked 死状态删除，钉住按钮（`drawer-pin`）已移除。content 按 activeTab 切换（terminal/browser 已迁出右抽屉）；git tab 挂 `GitPanel.vue`（git 全量状态）；doc tab 挂 `CommandDocPanel.vue`；detail tab 挂 `DetailPane.vue`（文件预览，容器 testid=`detail-pane`，[display-containers W3] 顶部实例层多文件 tab 条 `detail-tab-strip`/`detail-tab`（`data-path`/`data-active`）/`detail-tab-close`，含 diff/preview 切换 `detail-view-toggle`、加载/错误/空/二进制/截断态与 `detail-content` 内容区）；btw tab 挂 `BtwPanel.vue`（2026-09-22 btw-question 新增：面板根 `drawer-btw-tab`、线列表 `btw-thread-list`、新建 `btw-new-thread`、空态 `btw-empty`/`btw-empty-new`、错误 `btw-create-error`/`btw-load-error`+`btw-load-retry`、挂起点 `btw-thread-pending`、fork pill 随创建态）。
 
 ## 3. data-testid 清单
 
@@ -395,7 +395,7 @@ pnpm --filter @taiji/electron run dev:mock
 | 3 | 点 src/new-feature.ts（git added） | drawer 切到该文件，显示 git.getDiff patch（含 'diff --git'），detail-view-toggle 可见 |
 | 4 | 点 detail-view-toggle | diff ↔ preview 切换 |
 | 5 | 切到 git tab | GitPanel 显示（mock git 状态） |
-| 6 | 切到 terminal tab | widget 内容或空态 |
+| 6 | ~~切到 terminal tab~~ **[已退役 display-containers W1：terminal 迁底抽屉]** | 底抽屉 terminal 由 StatusBar 开关 / ⌃` 触达 |
 
 ### 6.2 集成测试
 
@@ -852,7 +852,7 @@ Mock 模式跳过 runtime event-adapter：`run-send-stream.ts` 直接 `pushSessi
 | 步骤 | 操作 | 期望 |
 |---|---|---|
 | 1-2 | 同 E2E-GUI-2 | 流式完成 |
-| 3 | 点 `drawer-toggle` | SideDrawer 打开（默认 terminal tab） |
+| 3 | 点 `drawer-toggle` | SideDrawer 打开（默认 git tab——display-containers W1 裁决） |
 | 4 | 断言 SideDrawer 内 `gui-stats-line` | 可见，含 'turns' 'tokens' 'duration' |
 
 #### E2E-GUI-4: 路径 A（widgetGui list-tree）
@@ -876,7 +876,7 @@ npx playwright test                            # 跑全部 E2E
 
 ## 5. 已知约束
 
-- **SideDrawer 打开方式**：通过 PanelHeader 的 `drawer-toggle` 按钮打开（always-visible，不依赖 git 仓库）。默认显示 terminal tab。
+- **SideDrawer 打开方式**：通过 PanelHeader 的 `drawer-toggle` 按钮打开（always-visible，不依赖 git 仓库）。默认显示 git tab（display-containers §7.1 W1 裁决：terminal 迁底抽屉后首项改高频 git）。
 - **widgetGui 是瞬态的**：不持久化到 message store，session 切换 / 组件卸载后清除。只有 tool result `__gui__` 在历史重放后仍存在。
 - **Card/Columns 递归**：通过 `<GuiComponentRenderer v-for :component>` 中转递归，不自己处理 type 路由。
 - **ListTree 自递归**：`<ListTree :items="children" :depth="depth+1">` Vue 组件自递归渲染子节点，depth 自动 +1 传递缩进。
@@ -1181,7 +1181,7 @@ ForkGroup（当前会话的「本会话的分支」折叠区）已整体退役�
 
 | 区域 | testid | 说明 |
 |---|---|---|
-| overlay 壳 | `wfvz-overlay` / `wfvz-overlay-header` / `wfvz-overlay-close` | 壳与三通道关闭 |
+| overlay 壳 | `wfvz-overlay` / `wfvz-overlay-header` / `wfvz-overlay-close` | 壳与两通道关闭（点遮罩/按钮；Esc 归编排器，display-containers §7.5） |
 | 浮层浏览器 | `browser-overlay-title` / `browser-pane` / `browser-vp` / `browser-create-error` / `browser-error` | BrowserPane 挂浮层壳（u-w2-browser-mount）：标题栏 URL / 面板 / 浮层视口 rect 同步观测目标 / 两类错误占位（创建失败 vs 页面加载失败） |
 | DAG 画布 | `wfvz-overlay-dag-pane` / `wfvz-overlay-dag-loading` / `wfvz-overlay-dag-fallback` / `wfvz-overlay-dag-error-code` | 画布三态互斥（就绪/降级/解析中） |
 | 节点 | `wfvz-dag-node-<id>` / `wfvz-dag-node-error` | 节点卡片与节点级渲染边界占位 |

@@ -59,7 +59,6 @@ export function setSubagentView(virtualId: string, enteredFrom: 'chat' | 'workfl
   cur.enteredFrom = enteredFrom
 }
 
-/** 读取当前分区选中态（复合谓词同步读取用）。返回 reactive 分区对象本身 */
 /** 按 sid 读 subagent 选中态（复合谓词跨域读取用；updateFor 语义：已删 sid 不复活分区） */
 export function readSubagentSelectionFor<R>(sid: string, read: (s: SubagentSelectionState) => R): R | undefined {
   let out: R | undefined
