@@ -230,7 +230,7 @@ import { AlertCircle, Check, Copy as CopyIcon } from '@lucide/vue'
 import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import { extractGui } from '@zhushanwen/extension-protocol'
 import type { MessageStatus, ToolCall } from '@taiji/shared'
-import { SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES } from '@taiji/shared'
+import { SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES, displayWorkflowName } from '@taiji/shared'
 import { openWorkflow } from '@taiji/core/domain/drawer'
 import { AnsiText, GuiComponentRenderer } from '../../rendering-protocol'
 import MarkdownRenderer from './MarkdownRenderer.vue'
@@ -417,12 +417,13 @@ const workflowInputObj = computed(() => {
 
 /** workflow 标题行字段：name / slug（collapsed only，spec §11）。
  *  nameShort：ref 是绝对路径（input.name），标题行展示 basename 去 .js 短名
- *  （`/a/b/batch.js` → `batch`）——全路径太长挤占单行；drawer 选中仍用全路径 name。 */
+ *  （`/a/b/batch.js` → `batch`）——全路径太长挤占单行；drawer 选中仍用全路径 name。
+ *  短名派生单点 = shared displayWorkflowName（与 tray 行同源）。 */
 const workflowFields = computed(() => {
   const input = workflowInputObj.value
   const name = typeof input.name === 'string' ? input.name : ''
   const slug = typeof input.slug === 'string' ? input.slug : ''
-  const nameShort = name.replace(/^.*[\\/]/, '').replace(/\.js$/i, '')
+  const nameShort = displayWorkflowName(name)
   return { name, nameShort, slug }
 })
 

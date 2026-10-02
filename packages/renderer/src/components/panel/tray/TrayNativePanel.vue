@@ -132,7 +132,7 @@
                   class="size-[13px] shrink-0 animate-spin text-accent" />
                 <span v-else class="size-2 shrink-0 rounded-full" :class="subagentDotClass(record)" />
                 <span class="min-w-0 flex-1 truncate text-[length:var(--text-xs)] font-medium leading-[1.35] text-neutral-fg">
-                  {{ subagentAgentLabel(record.agent) }}
+                  {{ displayAgentName(record.agent) }}
                 </span>
                 <span v-if="record.slug" data-testid="tray-subagent-slug"
                   class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-mid">{{ record.slug }}</span>
@@ -286,6 +286,7 @@ import type { BackgroundTaskEntry, BackgroundTaskIconState, BackgroundTaskStatus
 import { formatTokens as formatTokensK } from '@/lib/token-format'
 import { formatClockDuration, formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
 import { resolveEngineIcon } from '@/constants/engine-icons'
+import { displayAgentName } from '@taiji/shared'
 import { toErrorMessage } from '@taiji/core'
 import * as backgroundTaskApi from '@taiji/core/transport/api/domains/background-task'
 import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
@@ -369,15 +370,6 @@ const bashRows = computed<BackgroundTaskEntry[]>(() =>
 const subagentRows = computed<SubagentRecord[]>(() =>
   activeBucket.value === 'ended' ? tray.lists.subagent.ended.value : tray.lists.subagent.running.value,
 )
-/** subagent 行 agent 展示名：record.agent 是 .md 绝对路径，行内显示 basename 去 .md
- *  （窄列 truncate 优先；完整路径经行 title hover 保留）。默认值（general-purpose 等
- *  非路径值）原样返回。 */
-function subagentAgentLabel(raw: string): string {
-  const trimmed = raw.trim()
-  if (!trimmed) return raw
-  const base = trimmed.split('/').pop() ?? trimmed
-  return base.replace(/\.md$/i, '') || raw
-}
 const workflowRows = computed<WorkflowRunRecord[]>(() =>
   activeBucket.value === 'ended' ? tray.lists.workflow.ended.value : tray.lists.workflow.running.value,
 )

@@ -191,6 +191,11 @@ export const WORKFLOW_REF_EXT = ".js";
  * 非路径值（DEFAULT_AGENT_NAME "general-purpose"）与无 .md 后缀的值原样返回。
  * 手动 split(/[\\/]) 而非 path.basename：跨平台统一（macOS 的 path.basename
  * 不切 Windows `\` 分隔符，反之类推），且本模块避免引入平台分支。
+ *
+ * 包边界注记：GUI 侧（@taiji/shared display-name.ts）存在行为逐字节等价的同名
+ * 实现——shared 不发 npm，core 运行时 import shared 需改 bundle/发布面，代价不成
+ * 比例，故双实现并存。两侧测试用同款向量互锚（`C:\\a\\worker.md` → `worker`），
+ * 任一侧改语义须同步另一侧。
  */
 export function displayAgentName(ref: string): string {
   const base = ref.split(/[\\/]/).pop() ?? ref;
@@ -205,6 +210,9 @@ export function displayAgentName(ref: string): string {
  * name 形参 / record / 持久化保持完整路径。
  *
  * 非路径值/无 .js 后缀的值原样返回。跨平台切分理由同 displayAgentName。
+ *
+ * 包边界注记：与 displayAgentName 同款——GUI 侧 @taiji/shared 有逐字节等价同名
+ * 实现，双实现并存理由与互锚测试约定见其 JSDoc。
  */
 export function displayWorkflowName(ref: string): string {
   const base = ref.split(/[\\/]/).pop() ?? ref;
