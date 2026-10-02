@@ -1,9 +1,11 @@
 <template>
   <!--
-    RunEventStream —— workflow tab 事件流子页（设计 §3.1-2：record 事件原文，类型着色，
-    大字段按 D4 截断规则显示 + truncatedFields 标注；错误二分 = record_not_found 静态指引
-    无重试 vs 暂时错误重试按钮）。数据源 = workflowStore 事件流缓存（与 Gantt 子页共享同一
-    份拉取，§3.1-2）；刷新链 = workflowUpdate 信号（store 内聚合 force 重拉），本组件零订阅。
+  RunEventStream —— workflow tab 事件流子页（设计 §3.1-2：record 事件原文，类型着色，
+  大字段按 D4 截断规则显示 + truncatedFields 标注；错误二分 = record_not_found 静态指引
+  无重试 vs 暂时错误重试按钮；oversize 降级 = record 文件超 32MB 读取上限、events 恒空
+  + oversize 标志的第三态，RT-4#8「不可用 ≠ 无数据」同款分形）。数据源 = workflowStore
+  事件流缓存（与 Gantt 子页共享同一份拉取，§3.1-2）；刷新链 = workflowUpdate 信号
+  （store 内聚合 force 重拉），本组件零订阅。
   -->
   <div class="flex min-w-0 flex-1 flex-col overflow-hidden" data-testid="wf-viz-event-stream">
     <!-- 加载态 -->
@@ -32,6 +34,13 @@
         <RotateCcw class="mr-1 size-3" />
         {{ t('panel.workflowViz.retry') }}
       </Button>
+    </div>
+    <!-- oversize 降级（RT-4#8 同款分形：record 文件超 32MB 读取上限——「不可用」非
+         「无数据」，无重试（重拉结果恒同）） -->
+    <div v-else-if="entry?.oversize" class="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center" data-testid="wf-viz-events-oversize">
+      <AlertCircle class="size-6 text-neutral-dim opacity-60" />
+      <p class="text-[length:var(--text-xs)] text-neutral-fg">{{ t('panel.workflowViz.eventsOversize') }}</p>
+      <p class="max-w-[420px] text-[length:var(--text-2xs)] leading-relaxed text-neutral-dim">{{ t('panel.workflowViz.eventsOversizeHint') }}</p>
     </div>
     <!-- 空事件流（ready + 零行：record 未落首帧窗口） -->
     <div v-else-if="!entry || !entry.events || entry.events.length === 0" class="flex flex-1 items-center justify-center" data-testid="wf-viz-events-empty">
@@ -145,7 +154,9 @@ function suffixOf(part: string | undefined): string {
 function summaryOf(e: WorkflowRunEventEntry): string {
   switch (e.type) {
     case 'run-created':
-      return `${e.workflowName} · ${e.argsSummary}`
+      // argsSummary 经 suffixOf 空值省略：存量 run-created 行缺该字段时（读侧回退
+      // 空串）不渲染悬空「 · 」或字面 undefined——与 agent-started 分支同款拼接。
+      return `${e.workflowName}${suffixOf(e.argsSummary)}`
     case 'phase-started':
     case 'phase-settled':
       return e.phase

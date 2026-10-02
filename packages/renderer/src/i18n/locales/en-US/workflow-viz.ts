@@ -62,6 +62,8 @@ export default {
     eventsNotFound: 'No event stream record for this run',
     eventsNotFoundHint: 'Legacy-format run or the record has been cleaned up; the event stream is unavailable',
     eventsLoadFailed: 'Failed to load event stream',
+    eventsOversize: 'Event stream too large, unavailable',
+    eventsOversizeHint: 'This run’s record file exceeds the read limit (32 MB); the event stream cannot be shown. The run itself is unaffected',
     retry: 'Retry',
     truncatedHint: 'Fields truncated (2KB per-field cap): {fields}. Truncated content is display-only; view the full text via the run state file',
     ganttUnavailable: 'Timeline view unavailable; segment summary shown below',

@@ -102,6 +102,12 @@ export interface WorkflowRunEventsEntry {
   errorCode?: WorkflowRunEventsErrorCode
   /** RPC 通道错误消息（恢复指引展示位）。 */
   errorMessage?: string
+  /**
+   * oversize 降级标志（[RT-4#8] 语义同 subagent/workflow 列表款，run 粒度）：record
+   * 文件超 32MB 读取上限——runtime 不全文读取，events 恒空数组 + 本标志置位；
+   * 「不可用」与「无数据」（eventsEmpty）显式分形，事件流子页按标志显示降级提示。
+   */
+  oversize?: boolean
 }
 
 export const useWorkflowStore = defineStore('workflow', () => {
@@ -396,7 +402,14 @@ export const useWorkflowStore = defineStore('workflow', () => {
         return
       }
       if ('events' in reply) {
-        runEventsByRun.value.set(runId, { sessionId, status: 'ready', events: reply.events })
+        runEventsByRun.value.set(runId, {
+          sessionId,
+          status: 'ready',
+          events: reply.events,
+          // oversize 降级标志透传（[RT-4#8] 分形：events 恒空 + oversize=true——
+          // 「record 过大不可用」，与「run 无事件」显式区分，子页按标志降级提示）
+          ...(reply.oversize ? { oversize: true } : {}),
+        })
       } else {
         runEventsByRun.value.set(runId, {
           sessionId,

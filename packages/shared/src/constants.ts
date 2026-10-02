@@ -372,10 +372,12 @@ export const OUTBOUND_FRAME_TRUNCATE_BYTES: number = 32 * 1024 * 1024
 /**
  * runtime 全量读预检阈值（默认 32MB）[D5]。
  *
- * 五条全量读入口统一 statSync 大小预检：① getHistoryFromFilePath（含 subagent 历史
+ * 全量读入口统一 statSync 大小预检：① getHistoryFromFilePath（含 subagent 历史
  * 消费方）② 离线尾读 fallback ③ findLastEntryField fallback ④ readSessionJsonlText
- * （Trace 视图）⑤ restore 附着 normalize。超限按调用方语义分档降级（逆序分块读 /
- * oversize 标记 / 跳过 normalize + warn），消除「读巨文件 → OOM」恶性循环。
+ * （Trace 视图）⑤ restore 附着 normalize ⑥ workflow record 事件流拉取
+ * （workflow-run-events-reader，2026-10-02 增——record 含无上界 worker-log 行且信号
+ * force 重拉放大读面）。超限按调用方语义分档降级（逆序分块读 / oversize 标记 /
+ * 跳过 normalize + warn），消除「读巨文件 → OOM」恶性循环。
  *
  * 校准依据：本机实测 session 历史文件最大 6MB（探针 P-hist-sizes，`du` 实测）、单
  * session tee 累计流量最大 198MB——32MB ≈ 历史文件实测最大值的 5 倍余量，正常流量

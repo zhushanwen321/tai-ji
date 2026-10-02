@@ -6,7 +6,8 @@
  *   原语承载——C-data-18 组装，force 在途窗口到达同样并入不另起 RPC）
  * - ready 缓存复用（非 force 不重发 RPC）/ force 覆盖重拉（信号触发 / 重试按钮语义）
  * - 错误二分数据形态：record_not_found 结构化回执（errorCode）/ RPC 通道错误（errorMessage）；
- *   error 态非 force 不自动重拉（重试是用户显式动作）
+ *   error 态非 force 不自动重拉（重试是用户显式动作）；oversize 降级（成功臂 events 恒空
+ *   + oversize 标志透传——RT-4#8「不可用 ≠ 无数据」分形）
  * - D11① 在途丢弃检查：settle 时活跃锚已切走/已清 → 结果丢弃不写缓存
  * - D11② overlay 关闭不清缓存（重开秒显）；LRU 上界 5（最旧非活跃驱逐、活跃 run 豁免）
  * - D11⑤ clearSession 清该 session 名下 run 缓存 + 活跃锚 + 在途去重簿记；其他 session 分区保留
@@ -138,6 +139,14 @@ describe('workflowStore 事件流缓存：错误二分数据形态', () => {
     await store.loadWorkflowRunEvents(SID, RUN_A)
     expect(store.runEventsOf(RUN_A)).toMatchObject({ status: 'error', errorMessage: 'transport down' })
     expect(store.runEventsOf(RUN_A)?.errorCode).toBeUndefined()
+  })
+
+  it('oversize 降级（成功臂 + oversize 标志）→ status ready + events 恒空 + oversize=true（「不可用 ≠ 无数据」分形透传）', async () => {
+    mockGetRunEvents.mockResolvedValue({ runId: RUN_A, events: [], oversize: true })
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(SID, RUN_A)
+    await store.loadWorkflowRunEvents(SID, RUN_A)
+    expect(store.runEventsOf(RUN_A)).toMatchObject({ status: 'ready', events: [], oversize: true })
   })
 
   it('error 态非 force 不自动重拉（重试 = 用户显式 force）', async () => {

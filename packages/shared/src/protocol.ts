@@ -1636,13 +1636,17 @@ export type WorkflowRunEventsErrorCode = 'record_not_found'
  * session.getWorkflowRunEvents 的 reply（workflow-visualization 设计 §3.1-4 D4）。
  *
  * 成功形态：{ sessionId, runId, events }——单 run 事件流原文行（大字段截断形态见
- * WorkflowRunEventEntry：四字段 2KB 截断 + truncatedFields 逐行标注）。
+ * WorkflowRunEventEntry：四字段 2KB 截断 + truncatedFields 逐行标注）。oversize
+ * （[RT-4#8] 同款降级标志，与 session.workflows 形态一致）：record 文件超
+ * READ_PRECHECK_MAX_BYTES（32MB，D5 预检族）时 runtime 不全文读取（worker-log 行数
+ * 无上界 + workflowUpdate 信号 force 重拉放大读面），events 恒空数组 + oversize=true
+ * ——「不可用」与「无数据」显式分形，renderer 面板按标志显示降级提示。
  * 错误形态：{ sessionId, runId, code, message }——code 闭集见 WorkflowRunEventsErrorCode。
  * 两臂恒带 sessionId——C-comm-05 会话隔离（runtime→前端消息必须带 sessionId，
  * 对齐同族先例 session.workflows / workflowActionDone）。
  */
 export type WorkflowRunEventsReply =
-  | { sessionId: string; runId: string; events: WorkflowRunEventEntry[] }
+  | { sessionId: string; runId: string; events: WorkflowRunEventEntry[]; oversize?: boolean }
   | { sessionId: string; runId: string; code: WorkflowRunEventsErrorCode; message: string }
 
 // ── delivery 域具名 DTO（投递所有权内核 D5/D7，u-contracts 契约先行）────────────

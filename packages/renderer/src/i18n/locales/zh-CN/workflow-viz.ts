@@ -69,6 +69,8 @@ export default {
     eventsNotFound: '该 run 无事件流记录',
     eventsNotFoundHint: '旧格式 run 或记录已被清理，无法查看事件流',
     eventsLoadFailed: '事件流加载失败',
+    eventsOversize: '事件流过大，暂不可用',
+    eventsOversizeHint: '该 run 的记录文件超出读取上限（32MB），事件流无法展示；run 本身不受影响',
     retry: '重试',
     truncatedHint: '字段已截断（单字段 2KB 上限）：{fields}。截断内容仅供展示，全文查看经 run 关联持久化文件',
     ganttUnavailable: '时间线视图暂不可用，以下为分段统计',
