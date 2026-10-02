@@ -161,9 +161,12 @@ export function useFileTree() {
     store.removeExpanded(sessionId, path)
   }
 
-  /** 选中文件（#6 预览触发） */
-  function selectFile(path: string): void {
-    store.selectFile(path)
+  /**
+   * 选中文件（#6 预览触发）——per-session：选中态落位 + 同步注入 detail tab
+   * （display-containers W3 §6.3：未开新增并激活 / 已开仅激活）。
+   */
+  function selectFile(sessionId: string | null, path: string | null): void {
+    store.selectFile(sessionId, path)
   }
 
   /**

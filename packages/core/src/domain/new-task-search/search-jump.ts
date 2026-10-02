@@ -90,19 +90,20 @@ export function useSearchJump(deps: SearchDeps) {
   /**
    * file 分支（AC-6.9 关键约束）：直调 fileRead 校验，不经 useDetailPane 的预览加载吞错层。
    * useDetailPane 的预览加载方法现状 try/catch 吞错（设 status='error' 不抛），致本编排层 catch 永不触发，
-   * AC-6.5 假性 PASS。read 成功后调 fileTree.selectFile(path) 触发 useDetailPane 的
-   * watch([selectedPath, sessionId]) 链自动渲染（渲染靠 store 响应式驱动，错误已由直调 read 捕获）。
+   * AC-6.5 假性 PASS。read 成功后调 fileTree.selectFile(path) 同步注入 detail tab 实例
+   * （display-containers W3：注入落 store 分区，DetailPane 挂载后拉起加载渲染——渲染靠 store
+   * 响应式驱动，错误已由直调 read 捕获）。
    */
   async function confirmFile(item: SearchItem, ctx: JumpCtx): Promise<JumpResult> {
     const sid = ctx.activeSessionId
     try {
       // AC-6.9：直调 fileRead（不经 useDetailPane 预览吞错层），reject 真冒泡
       await ports.fileRead(item.sub, sid ?? undefined)
-      // read 成功后：selectFile(path) 设置 selectedPath → useDetailPane watch 链自动渲染（绕过吞错层直调）
+      // read 成功后：selectFile(path) 同步注入 detail tab（W3）→ DetailPane 拉起加载渲染（绕过吞错层直调）
       deps.fileTree.selectFile(item.sub)
       writeRecent(item)
       // drawerTab:'detail' 提示调用方（SearchModal）打开 SideDrawer detail tab——
-      // DetailPane 只在 activeTab==='detail' 时挂载，selectFile 单独设置 selectedPath 无法触发渲染。
+      // DetailPane 只在 activeTab==='detail' 时挂载，selectFile 单独注入 tab 无法立即渲染。
       // 对比 FileTreeRow.onSelectFile：selectFile(path) + drawer.open('detail') 双步，此处同构。
       return { ok: true, drawerTab: 'detail' }
     } catch (e) {

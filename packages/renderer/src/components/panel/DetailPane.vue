@@ -1,14 +1,49 @@
 <template>
+  <!-- split-justified: detail 文件预览域（多文件 tab 实例层 + header 动作 + 四态内容渲染 + 选区反推行号——同一预览面板语义域；display-containers W3 tab 条接入后 script 超 300，按登记制放行） -->
   <!--
     DetailPane —— 文件预览面板（#6，UC-6，对齐 draft-detail-pane.html）。
-    文件内容 / diff 预览，挂在 SideDrawer detail tab。
+    文件内容 / diff 预览，挂在 SideDrawer detail tab；顶部实例层 tab 条承载多文件
+    （display-containers §6.3：detail 多文件 tab，keep-alive 多实例）。
 
     [NFR-AC-S4] 禁 v-html：内容用 <pre> + {{ }} 文本插值渲染，XSS 安全（T6.10）。
     data-testid 标注供 E2E 选择器。
 
-    数据来源：useDetailPane（watch selectedPath → openPreview → git.getDiff / file.read）。
+    数据来源：useDetailPane（读 fileTreeStore.detailTabs per-session 分区——注入在
+    store.selectFile 同步落位，本组件是分区视图 + 加载编排消费方）。
   -->
   <div class="flex h-full flex-col" data-testid="detail-pane">
+    <!-- 实例层 tab 条（§6.3：文档式，做在 detail 面板内顶部；类型层容器 tab 在 DrawerPanel）。
+         点击切换（keep-alive：实例内容/模式态/滚动锚点原样保持）；× 关闭（激活者关闭时
+         激活右邻/左邻）；不设打开上限（§6.3，内存锚点 §11-9）。 -->
+    <div
+      v-if="tabs.length > 0"
+      class="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-hairline px-1 py-1"
+      data-testid="detail-tab-strip"
+    >
+      <div
+        v-for="tab in tabs"
+        :key="tab.path"
+        data-testid="detail-tab"
+        :data-path="tab.path"
+        :data-active="tab.path === activePath ? 'true' : 'false'"
+        class="flex shrink-0 cursor-pointer items-center gap-1 rounded-sm px-1.5 py-0.5 font-mono text-[length:var(--text-2xs)]"
+        :class="tab.path === activePath ? 'bg-bg-elevated text-neutral-fg' : 'text-neutral-mid hover:text-neutral-fg'"
+        :title="tab.path"
+        @click="activateTab(tab.path)"
+      >
+        <span class="max-w-32 truncate">{{ tabName(tab.path) }}</span>
+        <Button
+          variant="ghost"
+          data-testid="detail-tab-close"
+          class="size-4 shrink-0 rounded-sm p-0"
+          :title="t('panel.sideDrawer.close')"
+          @click.stop="closeTab(tab.path)"
+        >
+          <X class="size-3 text-neutral-dim" />
+        </Button>
+      </div>
+    </div>
+
     <!-- header：文件名（hover 显绝对路径 + 复制文件名）+ 复制绝对路径按钮 + view toggle -->
     <div class="flex items-center gap-2 border-b border-hairline px-2 py-1.5">
       <FileText class="size-3.5 shrink-0 text-neutral-dim" />
@@ -138,8 +173,9 @@
     <!-- 内容区：按 viewMode + kind 分发渲染（禁 v-html，<pre> + 文本插值，XSS 安全；
          markdown/code/diff 经各自渲染器的受控 v-html 点处理，论证 XSS 安全）。
          @mouseup 检测选区（FR-4）：选中文本后弹引用 bubble。
-         @scroll 清 selectionRange：滚动后选区定位偏移、bubble 不再贴合原文，
-         残留 bubble 会误导用户注入错误行范围，故滚动即清。 -->
+         @scroll 清 selectionRange + 存滚动锚点：滚动后选区定位偏移、bubble 不再贴合原文，
+         残留 bubble 会误导用户注入错误行范围，故滚动即清；滚动位置存 per-tab scrollTop
+         （keep-alive 语义：切 tab 回来恢复到离开时位置，S4「切 tab 不丢滚动位置」）。 -->
     <div
       v-else
       ref="contentRef"
@@ -245,9 +281,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, provide, ref, watch } from 'vue'
+import { computed, nextTick, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { FileText, Loader2, AlertCircle, Image as ImageIcon, Copy, Check, Quote } from '@lucide/vue'
+import { FileText, Loader2, AlertCircle, Image as ImageIcon, Copy, Check, Quote, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { useDetailPane, type DetailViewMode } from '@/composables/features/file-tree/useDetailPane'
@@ -275,19 +311,23 @@ const props = defineProps<{
   sessionId: string | null
 }>()
 
-const { state, toggleView, sessionCwd } = useDetailPane(
-  computed(() => props.sessionId),
-)
+const { tabs, activePath, state, toggleView, activateTab, closeTab, saveScroll, sessionCwd } =
+  useDetailPane(computed(() => props.sessionId))
 
 // [w6 T6] ui MarkdownRenderer 经 ChatViewDeps inject 消费壳层依赖。DetailPane 不在 MessageStream
 // provide 作用域内，需自行 provide（sessionId 可为 null，coalesce '' 后 renderMarkdown 无路径链接降级）。
 // provide 语句在下方 resourceBaseDir computed 声明之后（override 对象字面量即时求值，前置会 TDZ）。
 
+/** tab 显示名（basename） */
+function tabName(path: string): string {
+  const parts = path.split('/')
+  return parts[parts.length - 1] ?? path
+}
+
 /** 文件名（basename，从 state.path 取） */
 const fileName = computed(() => {
   if (!state.value.path) return t('panel.sideDrawer.noFileSelected')
-  const parts = state.value.path.split('/')
-  return parts[parts.length - 1] ?? state.value.path
+  return tabName(state.value.path)
 })
 
 /** 绝对路径：session cwd + 相对路径；若 path 已是绝对路径则直接使用。 */
@@ -393,12 +433,20 @@ function injectSelectionToNew(): void {
 }
 
 /**
- * 内容区滚动：清 selectionRange（W11，规则 15——模板内联副作用抽方法）。
- * 滚动后选区定位偏移、bubble 不再贴合原文，残留会误导用户注入错误行范围，故滚动即清。
+ * 内容区滚动：清 selectionRange（W11，规则 15——模板内联副作用抽方法）+ 存滚动锚点
+ * （keep-alive 滚动保持，切 tab 恢复）。滚动后选区定位偏移、bubble 不再贴合原文，故滚动即清。
  */
 function onContentScroll(): void {
   selectionRange.value = null
+  if (contentRef.value) saveScroll(contentRef.value.scrollTop)
 }
+
+/** keep-alive 滚动锚点恢复：切 tab 后把该实例上次滚动位置写回内容区（nextTick 等内容渲染完） */
+watch(activePath, () => {
+  void nextTick(() => {
+    if (contentRef.value) contentRef.value.scrollTop = state.value.scrollTop
+  })
+})
 
 /**
  * 内容区 mouseup：检测选区，非空且在内容区内时计算行范围显 bubble（FR-4）。

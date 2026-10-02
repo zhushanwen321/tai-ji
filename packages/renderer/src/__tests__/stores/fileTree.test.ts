@@ -326,3 +326,75 @@ describe('fileTreeStore 展开态 rehydrate', () => {
     expect(store.nodeStates.has('s1')).toBe(false)
   })
 })
+
+describe('fileTreeStore detail 多文件 tab（display-containers W3 §6.3）', () => {
+  it('selectFile：per-session 选中态 + 注入 tab（未开新增并激活）', () => {
+    const store = useFileTreeStore()
+    store.selectFile('s1', 'a.ts')
+    store.selectFile('s1', 'b.ts')
+    store.selectFile('s2', 'x.ts')
+
+    // per-session 选中态（旧全局单值跨会话串线的终局解）
+    expect(store.getSelectedPath('s1')).toBe('b.ts')
+    expect(store.getSelectedPath('s2')).toBe('x.ts')
+    // tab 注入（开序 + 激活）
+    expect(store.getDetailTabs('s1').map((t) => t.path)).toEqual(['a.ts', 'b.ts'])
+    expect(store.getDetailActivePath('s1')).toBe('b.ts')
+    expect(store.getDetailTabs('s2').map((t) => t.path)).toEqual(['x.ts'])
+  })
+
+  it('注入语义：已开仅激活（不新增不重载）；forceDiff 升级未加载实例、已加载不改模式', () => {
+    const store = useFileTreeStore()
+    store.openDetailTab('s1', 'a.ts')
+    store.updateDetailTab('s1', 'a.ts', { status: 'content', viewMode: 'preview' })
+
+    // 已开已加载 → 仅激活（模式保持）
+    store.openDetailTab('s1', 'a.ts', { forceDiff: true })
+    expect(store.getDetailTabs('s1').length).toBe(1)
+    expect(store.getDetailActivePath('s1')).toBe('a.ts')
+    expect(store.getDetailTab('s1', 'a.ts')?.viewMode).toBe('preview')
+
+    // 已开未加载（idle）→ forceDiff 升级为 diff（双通道同 tick 注入的修正式）
+    store.openDetailTab('s1', 'b.ts')
+    store.openDetailTab('s1', 'b.ts', { forceDiff: true })
+    expect(store.getDetailTabs('s1').length).toBe(2)
+    expect(store.getDetailTab('s1', 'b.ts')?.viewMode).toBe('diff')
+    expect(store.getDetailTab('s1', 'b.ts')?.forceDiff).toBe(true)
+  })
+
+  it('closeDetailTab：激活者关闭激活右邻（无则左邻）；关闭选中文件清选中态', () => {
+    const store = useFileTreeStore()
+    store.selectFile('s1', 'a.ts')
+    store.selectFile('s1', 'b.ts')
+    store.selectFile('s1', 'c.ts')
+    expect(store.getDetailActivePath('s1')).toBe('c.ts')
+
+    // 关激活 c → 右邻不存在 → 左邻 b；c 是选中文件 → 选中态清
+    store.closeDetailTab('s1', 'c.ts')
+    expect(store.getDetailTabs('s1').map((t) => t.path)).toEqual(['a.ts', 'b.ts'])
+    expect(store.getDetailActivePath('s1')).toBe('b.ts')
+    expect(store.getSelectedPath('s1')).toBeNull()
+
+    // 关非激活 a → 激活不变
+    store.closeDetailTab('s1', 'a.ts')
+    expect(store.getDetailActivePath('s1')).toBe('b.ts')
+
+    // 关最后一个 → 空态
+    store.closeDetailTab('s1', 'b.ts')
+    expect(store.getDetailTabs('s1')).toEqual([])
+    expect(store.getDetailActivePath('s1')).toBeNull()
+  })
+
+  it('selectFile(null sid) no-op；updateDetailTab 不复活已清分区', () => {
+    const store = useFileTreeStore()
+    store.selectFile(null, 'a.ts')
+    expect(store.getDetailTabs('s1')).toEqual([])
+
+    store.selectFile('s1', 'a.ts')
+    store.clearSession('s1')
+    // 迟到 RPC 回写不得复活已删 session 的分区（D-B2-1 同口径）
+    store.updateDetailTab('s1', 'a.ts', { status: 'content' })
+    expect(store.getDetailTabs('s1')).toEqual([])
+    expect(store.getSelectedPath('s1')).toBeNull()
+  })
+})

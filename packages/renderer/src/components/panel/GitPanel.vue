@@ -50,7 +50,7 @@
     <!-- 错误提示（操作失败 inline 回显） -->
     <p v-if="error" class="rounded-sm bg-danger-soft px-2 py-1 text-[length:var(--text-2xs)] text-danger">{{ error }}</p>
 
-    <!-- 文件列表（点击跳转 detail tab 查看 diff：selectFile 设 selectedPath + drawer 切 detail） -->
+    <!-- 文件列表（点击跳转 detail tab 查看 diff：selectFile 选中 + 注入 detail tab + drawer 切 detail） -->
     <ul v-if="result.files.length" class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
       <li
         v-for="f in result.files"
@@ -141,6 +141,7 @@ import { useGitStatusOrFail, type GitState } from '@/composables/features/file-t
 import { useFileTreeStore } from '@/stores/fileTree'
 import { useSideDrawer } from '@/composables/features/drawer/useSideDrawer'
 import { useSessionStore } from '@/stores/session'
+import { usePanelStore } from '@/stores/panel'
 import { composerInjectionStore } from '@/composables/panel/composer-injection-store'
 import type { GitFileStatus } from '@taiji/shared'
 
@@ -180,8 +181,11 @@ function onInjectFileRef(path: string): void {
 
 /**
  * 点击文件项 → 跳 detail tab 查看 diff（复刻 FileTreeRow.onSelectFile 模式）。
- * - selectFile 设 store.selectedPath（useDetailPane watch 自动加载内容）
+ * - selectFile 设 store.selectedPaths[sessionId] 并同步注入 detail tab（W3 注入语义）
  * - drawer.open('detail') 打开抽屉切 detail tab
+ *
+ * 注入目标会话 = focusedSessionId（drawer 分区键同源——DetailPane 的 sessionId 即它，
+ * 注入分区与展示分区必然同区）。
  *
  * 数据一致性：result.files 与 fileTreeStore.gitOverlay 均来自 git.status RPC（同源），
  * 故 DetailPane 的 getGitStatus(sid, path) 能命中该文件记录 → viewMode='diff'。
@@ -189,7 +193,7 @@ function onInjectFileRef(path: string): void {
  * 属可接受的降级（正常流程文件树已加载）。
  */
 function onFileClick(path: string): void {
-  fileTreeStore.selectFile(path)
+  fileTreeStore.selectFile(usePanelStore().focusedSessionId, path)
   drawer.open('detail')
 }
 
