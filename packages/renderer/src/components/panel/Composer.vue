@@ -2,8 +2,8 @@
 <template>
   <!--
     容器组件 · composer（panel/spec.md zone ④，draft-composer-states）。
-    发送位四态（u6b / D6 表）：send（↑ idle 直发）/ stop（■ turn 活跃 / settling 单独）/
-    queue（↑ 时钟角标：compacting/bash/settling+compacting，点击统一提交——排队 lane 由内核裁定）/
+    发送位四态（u6b / D6 表）：send（↑ idle 直发）/ stop（■ turn 活跃 dispatching|generating 无 compacting；settling 单独）/
+    queue（↑ 时钟角标：compacting 任意 turn 组合（与内核 hold 判定序同构）/bash/settling+bash，点击统一提交——排队 lane 由内核裁定）/
     spinner（isSending）。staging 模式优先（fork/handoff）。
     steer/followUp/queued 路由：⏎/Alt+⏎ 全部汇入统一发送分发器（D6，composer-shell
     sendRoute——turn 活跃→steer、占用→queued、idle→direct），Alt+⏎ 在 steer 路由行保留
@@ -215,9 +215,10 @@
           </div>
 
           <!-- 发送位四态（u6b / D6 表「发送位」列·序 0 不退化）：staging（fork/handoff，含 streaming 中）→
-             staging send / stop（turn 活跃 dispatching|generating；settling 单独）→ ■ stop /
-             queue（compacting/bash/settling+compacting）→ ↑ 带时钟角标（可点入队，flush 于占用
-             解除后自动投递）/ S5 sending→spinner / 全 idle→send。
+             staging send / queue（compacting 任意 turn 组合（含 generating∧compacting——与内核 holdReasonOf 判定序同构，
+             消除旧「按钮 stop 但 Enter 排队」形态漂移）/ bash、settling+bash）→ ↑ 带时钟角标（可点入队，flush 于占用
+             解除后自动投递）/ stop（turn 活跃 dispatching|generating 无 compacting；settling 单独）→ ■ /
+             S5 sending→spinner / 全 idle→send。
              派生源 = shell sendButtonState（与分发器 sendRoute 同源 effectivePhase，不漂移）。
              staging 优先于 stop（用户决策）：streaming 中提交 fork 合法（对源只读）；需停止时
              先 Esc 退出 staging 再点 stop。staging 发送中（isSending）仍走 spinner。 -->

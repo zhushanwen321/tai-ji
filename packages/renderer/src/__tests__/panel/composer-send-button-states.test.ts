@@ -6,13 +6,14 @@
  * |----|-------------------------------------------|-----------------|
  * | 1  | 全 idle                                    | ↑ send          |
  * | 2  | turn=dispatching/generating（无 compacting）| ■ stop          |
- * | 3  | turn=generating + compacting（threshold）   | ■ stop          |
+ * | 3  | turn=generating + compacting（threshold）   | ↑ queue（compacting hold 优先，[compaction-input-unlock]）|
  * | 4  | turn=settling                              | 单独→stop；+compacting→queue |
  * | 5  | turn=idle + compacting                     | ↑ queue（时钟角标）|
  * | 6  | bash=true 且 turn=idle                     | ↑ queue          |
  *
  * 覆盖（三视角，用户可见 DOM 断言优先）：
- * - 六行逐一 DOM 断言（含 settling 分档两形态与 threshold 行 3 的「turn 活跃优先于 compacting」）
+ * - 六行逐一 DOM 断言（含 settling 分档两形态与 threshold 行 3 的「compacting 优先于
+ *   turn 活跃——与内核 holdReasonOf 判定序同构，形态随权威 lane」）
  * - queue 态角标 title（「排队发送 · ⏎」）/ Clock aria-hidden / stop / send title
  * - ActivityStrip（u6a）与发送位同屏共存不互扰（同 wrapper 双组件 + 同一 chat store 真值）
  * - CompactQueueBadge / 专属 i18n key / testid 零残留（源码 grep 断言，C-proc-10）
@@ -159,11 +160,14 @@ describe('D6 发送位四态（六行逐一 DOM 断言）', () => {
     expectSendButtonState(wrapper, 'stop')
   })
 
-  it('行 3：turn=generating + compacting（threshold turn 内压缩）→ ■ stop（turn 活跃优先，不入 queue）', () => {
+  it('行 3：turn=generating + compacting（threshold turn 内压缩）→ ↑ queue（compacting hold 优先——内核 lane 权威，修复 stop/Enter 排队漂移）', () => {
+    // [compaction-input-unlock] 旧断言 ■ stop（turn 活跃优先）与真实车道漂移：内核
+    // holdReasonOf 首判 compacting（期间提交一律 queued），Enter/Alt+Enter 实际排队。
+    // 按钮形态改与权威 lane 同构；turn 回 generating（压缩结束）后自然回落 stop（行 2）。
     const chat = useChatStore()
     chat.setOccupancy('s3', { turn: 'generating', compacting: true, bash: false })
     const wrapper = mountComposer({ sessionId: 's3' })
-    expectSendButtonState(wrapper, 'stop')
+    expectSendButtonState(wrapper, 'queue')
   })
 
   it('行 4：turn=settling 单独 → ■ stop（收尾期可中止）', () => {

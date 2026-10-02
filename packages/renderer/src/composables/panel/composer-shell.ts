@@ -347,20 +347,24 @@ export function useComposerShell(params: ComposerShellParams) {
 
   /**
    * [u6b] 发送位四态（D6 表「发送位」列）：send（↑ 直发）/ stop（■ 中止）/ queue（↑ 带时钟
-   * 角标排队）。派生自与 sendRoute 同源的 effectivePhase：
-   * - turn ∈ {dispatching, generating}（含 threshold 行 3）→ stop（turn 活跃，点击 abort）
-   * - settling 分档：单独 → stop（收尾期可中止）；settling + compacting/bash → queue
-   *   （turn 不活跃 + 其他维度忙——行 5/6 同构；D6 表未单列 settling+bash，按同构归 queue，
-   *   登记 impl-plan 偏差表）
-   * - compacting / bash（turn=idle）→ queue（行 5/6）
+   * 角标排队）。派生自与 sendRoute 同源的 effectivePhase，判定序与内核 holdReasonOf 同构
+   * （compacting → bash → settling，活跃 turn 最后）：
+   * - compacting（任意 turn，含 generating/settling 组合）→ queue：内核 hold 首判 compacting
+   *   （期间提交一律 queued，compaction-end flush），按钮形态跟随权威 lane——修复旧行为
+   *   「generating∧compacting 按钮显示 stop 但 Enter 实际排队」的形态漂移
+   *   [compaction-input-unlock]；turn 回 generating 后（压缩结束）自然回落 stop
+   * - turn ∈ {dispatching, generating}（无 compacting）→ stop（turn 活跃，点击 abort）
+   * - settling 分档：单独 → stop（收尾期可中止）；settling + bash → queue（turn 不活跃 +
+   *   其他维度忙；D6 表未单列 settling+bash，按同构归 queue，登记 impl-plan 偏差表）
+   * - bash（turn 不活跃）→ queue
    * - 全 idle → send（行 1）
    */
   const sendButtonState = computed<'send' | 'stop' | 'queue'>(() => {
     const phase = effectivePhase.value
+    if (phase.compacting) return 'queue'
     if (phase.turn === 'dispatching' || phase.turn === 'generating') return 'stop'
-    if (phase.turn === 'settling') return (phase.compacting || phase.bash) ? 'queue' : 'stop'
-    if (phase.compacting || phase.bash) return 'queue'
-    return 'send'
+    if (phase.turn === 'settling') return phase.bash ? 'queue' : 'stop'
+    return phase.bash ? 'queue' : 'send'
   })
 
   // ── bash 命令模式（core dispatch/bash；sendBash 注入）──

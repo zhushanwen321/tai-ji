@@ -260,17 +260,29 @@ async function sendActiveMessage(deps: ComposerSendDeps, segments: Segment[], te
       ? trimmed.slice('/compact '.length).trim() || undefined
       : undefined
     deps.clearInput()
-    // isSending 置位/复位对齐 send 分支形态（双发锁：compact RPC 期间禁止并发提交）
-    deps.isSending.value = true
+    // [compaction-input-unlock] 不置 isSending：compact RPC 同步等待压缩全程完成（runtime
+    // dispatcher.compact await client.compact 全程，可达分钟级），置锁 = 整个压缩期 composer
+    // 置灰不可输入。压缩期输入/发送通道已由投递内核承接（compacting hold → queued →
+    // compaction-end flush），UI 锁只保留给「受理往返」型提交（send/staging/landing）。
+    // 并发互斥交还 runtime：压缩中再提交 /compact 被 compact_busy 预检拒绝（对话流 system
+    // 提示呈现 + 本分支 false 信号走下方守卫恢复）。
+    // 失败恢复空守卫：本分支不再持 UI 锁，压缩期间用户可能已输入新内容——restoreSegments
+    // 是 setText 整体覆盖语义，输入区非空（有文本或有 chip）时禁止恢复（覆盖用户输入 =
+    // 数据丢失）；失败呈现已由 useChat 分型路由兜底（分类码 → 对话流 / transport 级 →
+    // toast），此处只放弃本次 /compact 草稿回填。
+    const restoreIfComposerEmpty = (): void => {
+      const composerEmpty =
+        !deps.hasInput.value && (deps.inputRef.value?.getSegments().length ?? 0) === 0
+      if (composerEmpty) deps.restoreSegments(segments)
+    }
     try {
       // 严格比较 false：只认显式失败信号，真值判断会把成功发送误判为失败
       const delivered = await deps.compact(sessionId, customInstructions)
-      if (delivered === false) deps.restoreSegments(segments)
+      if (delivered === false) restoreIfComposerEmpty()
     } catch (e) {
-      deps.restoreSegments(segments)
+      // 契约外异常防御（useChat.compact 契约内不 throw）——同空守卫语义，防覆盖并发输入
+      restoreIfComposerEmpty()
       deps.toastError(deps.t('composable.compactFailed', { msg: toErrorMessage(e) }))
-    } finally {
-      deps.isSending.value = false
     }
     return
   }

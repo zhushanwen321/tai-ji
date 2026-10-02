@@ -311,7 +311,7 @@ Composer 是消息输入核心组件，有两种 variant：
 
 `Composer.vue`（`data-testid="composer-box"`，variant=landing|panel）是容器，内部组合：RetryIndicator / QueueBubble（排队与重试指示）、`CommandPopover`（slash/mention/file 浮层，portal 到 body）、ContextChipsBar（已附上下文 chip 行）、`ComposerInput`（contenteditable 输入区，位于 `packages/ui/src/features/composer/`，内含插入的 slash chip 与 mention chip）、工具条（AddMenuPopover / ContextCapacityPopover / ModelSelectPopover / ThinkingLevelPopover）。landing 态还有 meta-row chip 行（见 [01-chat-panel-composer.md](./01-chat-panel-composer.md)）。
 
-发送位三态：流式中（isStreaming）显示 stop 按钮（title="停止"）；压缩中/发送中显示 spinner；否则显示 send 按钮（title="发送 · ⏎" / "输入内容后发送"）。
+发送位四态（sendButtonState，与内核 holdReasonOf 判定序同构：compacting → bash → settling → turn 活跃）：compacting（任意 turn）→ queue 按钮（↑ 时钟角标，title="排队发送 · ⏎"）；turn=dispatching/generating（无 compacting）→ stop 按钮（title="停止"）；turn=settling 单独 → stop / settling+bash → queue；bash 且 turn 不活跃 → queue；全 idle → send 按钮（title="发送 · ⏎" / "输入内容后发送"）。发送中（isSending 受理往返）→ spinner。手动 /compact 期间不锁输入（压缩期输入/发送由投递内核 queued 车道承接）。
 
 ## 3. data-testid 清单
 
