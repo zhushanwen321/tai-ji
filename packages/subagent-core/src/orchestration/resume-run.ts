@@ -721,6 +721,8 @@ function appendResumeRegisteredEntry(
   const entry = buildWorkflowRecordRegisteredEntryData({
     runId,
     scriptName: created.workflowName,
+    // run-created 帧不含 scriptPath——resume 重建条目填空串（读侧与投影链按缺省处理）
+    scriptPath: "",
     startedAt: created.ts,
     recordPath: recordPath,
   });

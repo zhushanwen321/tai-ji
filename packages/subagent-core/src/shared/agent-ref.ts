@@ -196,3 +196,17 @@ export function displayAgentName(ref: string): string {
   const base = ref.split(/[\\/]/).pop() ?? ref;
   return base.endsWith(AGENT_REF_EXT) ? base.slice(0, -AGENT_REF_EXT.length) : base;
 }
+
+/**
+ * workflow ref 的显示名：basename + 去 .js 扩展名（`/a/b/batch.js` → `batch`）。
+ *
+ * 与 displayAgentName 对称：workflowRef 是绝对路径，UI 显示层（TUI tool block
+ * 标题等）统一经本函数取短名，避免长路径挤占显示宽度。数据层不动——run 的
+ * name 形参 / record / 持久化保持完整路径。
+ *
+ * 非路径值/无 .js 后缀的值原样返回。跨平台切分理由同 displayAgentName。
+ */
+export function displayWorkflowName(ref: string): string {
+  const base = ref.split(/[\\/]/).pop() ?? ref;
+  return base.endsWith(WORKFLOW_REF_EXT) ? base.slice(0, -WORKFLOW_REF_EXT.length) : base;
+}

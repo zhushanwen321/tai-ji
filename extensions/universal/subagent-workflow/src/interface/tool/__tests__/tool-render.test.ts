@@ -200,7 +200,7 @@ describe("renderSubagentResult — expanded 与 compact 的分支关系（字节
     expect(expanded.join("\n")).toContain("/tmp/sessions/old-abc.jsonl");
   });
 
-  it("list：expanded 在 compact 之上追加 session 行（差异锁定）", () => {
+  it("list：expanded agent 用完整 ref、并追加 session 行；compact agent 用 basename 短名（分层锁定）", () => {
     const details = {
       action: "list",
       subagentId: null,
@@ -209,7 +209,7 @@ describe("renderSubagentResult — expanded 与 compact 的分支关系（字节
         running: 1,
         items: [{
           subagentId: "sa-1",
-          agent: "worker",
+          agent: "/Users/x/.agents/agents/worker.md",
           slug: "scan",
           status: "running",
           duration: 12,
@@ -218,10 +218,17 @@ describe("renderSubagentResult — expanded 与 compact 的分支关系（字节
       },
     };
     const { compact, expanded } = renderBoth(details);
+    // compact：basename 短名（无目录、无 .md），无 session 行
+    expect(compact.join("\n")).toContain("worker");
+    expect(compact.join("\n")).not.toContain("/Users/x/.agents/");
+    expect(compact.join("\n")).not.toContain(".md");
     expect(compact.join("\n")).not.toContain("session: ");
+    // expanded：agent 完整 ref（详情层）+ session 路径行
+    expect(expanded.join("\n")).toContain("/Users/x/.agents/agents/worker.md");
+    expect(expanded.join("\n")).toContain("session: ");
     expect(expanded.join("\n")).toContain("/tmp/sessions/sa-1.jsonl");
-    expect(compact.join("\n")).not.toContain("/tmp/sessions/sa-1.jsonl");
-    // compact 的行是 expanded 的前缀（追加不修改既有行）
-    expect(expanded.slice(0, compact.length)).toEqual(compact);
+    // 标题行两态一致（首行），差异只在 item agent 行与追加 session 行
+    expect(expanded[0]).toBe(compact[0]);
+    expect(expanded.length).toBe(compact.length + 1);
   });
 });

@@ -230,7 +230,8 @@ function buildCompactLines(d: SubagentToolResult, theme: ThemeLike): string[] {
 /**
  * 展开视图行内容生成。除下列两个特例外与 compact 逐字节相同（一次性 block 无
  * 细节可展开），测试锁字节等价：
- * - list：compact 结果之上每 item 追加 sessionFile 路径行（renderListExpanded）
+ * - list：每 item agent 用完整 ref（compact 用 basename 短名），并追加 sessionFile 路径行
+ *   （renderListExpanded）
  * - fork-from：源文件用完整路径（compact 用 basename 短标签）
  */
 function buildExpandedLines(d: SubagentToolResult, theme: ThemeLike): string[] {
@@ -309,8 +310,14 @@ function getStringText(item: unknown): string | undefined {
 // list 渲染 helper（action:"list" 分支）
 // ============================================================
 
-/** list compact：标题行 + 每行一个 item 摘要（glyph + agent + slug + mode + status + duration）。 */
-function renderListCompact(resp: ListResponse, theme: ThemeLike, width: number): string[] {
+/**
+ * list compact：标题行 + 每行一个 item 摘要（glyph + agent + slug + mode + status + duration）。
+ *
+ * agent 展示分层（同 fork-from 先例：compact 短标签 / expanded 完整路径——摘要行
+ * 单行宽度优先，详情行信息完整优先）：`shortAgent: false`（expanded）输出完整 ref。
+ */
+function renderListCompact(resp: ListResponse, theme: ThemeLike, width: number, opts?: { shortAgent?: boolean }): string[] {
+  const shortAgent = opts?.shortAgent ?? true;
   if (resp.items.length === 0) {
     return [truncLine(theme.fg("dim", `No subagents (running: ${resp.running})`), width)];
   }
@@ -323,16 +330,21 @@ function renderListCompact(resp: ListResponse, theme: ThemeLike, width: number):
     const mode = "bg";
     // slug 非空时在 agent 后展示（· 分隔），空串时省略。
     const slugPart = it.slug ? `${theme.fg("dim", " · ")}${theme.fg("accent", it.slug)}` : "";
-    const line = `${theme.fg(glyph.color, icon)} ${theme.fg("accent", it.agent)}${slugPart}`
+    // compact 摘要：basename 短名（同 renderSubagentCall 标题行）；expanded 详情：完整 ref
+    const agent = shortAgent ? displayAgentName(it.agent) : it.agent;
+    const line = `${theme.fg(glyph.color, icon)} ${theme.fg("accent", agent)}${slugPart}`
       + ` ${theme.fg("dim", `· ${mode} · ${it.status} · ${formatElapsedSeconds(it.duration)}`)}`;
     lines.push(truncLine(`${STREAM_PREFIX}${line}`, width));
   }
   return lines;
 }
 
-/** list expanded：compact 基础上每 item 追加 sessionFile 路径行。 */
+/**
+ * list expanded：compact 基础之上每 item agent 用完整 ref（详情层信息优先），并追加
+ * sessionFile 路径行。
+ */
 function renderListExpanded(resp: ListResponse, theme: ThemeLike, width: number): string[] {
-  const lines = renderListCompact(resp, theme, width);
+  const lines = renderListCompact(resp, theme, width, { shortAgent: false });
   for (const it of resp.items) {
     if (it.sessionFile) {
       lines.push(truncLine(`${theme.fg("dim", `${FOOTER_PREFIX}session: `)}${it.sessionFile}`, width));

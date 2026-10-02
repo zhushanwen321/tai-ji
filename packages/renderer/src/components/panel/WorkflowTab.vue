@@ -30,8 +30,12 @@
       <!-- header：workflow 名 + slug + 中止（running 态 Abort 两段式） -->
       <div class="flex shrink-0 items-center gap-2 border-b border-hairline px-3 py-2">
         <Workflow class="size-[15px] shrink-0 text-neutral-dim" />
-        <span class="min-w-0 flex-1 truncate font-mono text-xs font-medium text-neutral-fg">
-          {{ workflow.scriptName }}
+        <!-- 详情层展示 workflow 脚本全路径（scriptPath；旧 run 缺该字段回落 scriptName 短名） -->
+        <span
+          class="min-w-0 flex-1 truncate font-mono text-xs font-medium text-neutral-fg"
+          :title="workflow.scriptPath || workflow.scriptName"
+        >
+          {{ workflow.scriptPath || workflow.scriptName }}
         </span>
         <span v-if="workflow.slug" class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-dim">
           {{ workflow.slug }}

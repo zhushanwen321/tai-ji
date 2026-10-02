@@ -91,19 +91,22 @@ function projectAskStepToAgentCall(ask: RunAskStepFold): WorkflowAgentCall {
 }
 
 /**
- * [projectV2Workflow 拆分] 身份半边归并：runId/scriptName/slug/startedAt 的
+ * [projectV2Workflow 拆分] 身份半边归并：runId/scriptName/slug/scriptPath/startedAt 的
  * 注册条目 → fold 骨架兜底链（stateFilePath = 注册条目 recordPath 承载，v2 无
  * state 文件锚；v1 快照路径恒 '' 由 workflow-extractor 对空串隐藏）。
+ * scriptPath：注册条目带 scriptPath（新 run）；旧条目/ v1 缺省 ''（消费侧按缺省
+ * 处理，不回落猜路径）。
  */
 function resolveWorkflowIdentity(
   registered: WorkflowRecordRegisteredEntryData | undefined,
   settledEntry: WorkflowRecordSettledEntryData,
   fold: RunEventFoldCheckpoint | undefined,
-): Pick<WorkflowRunRecord, 'runId' | 'scriptName' | 'slug' | 'startedAt' | 'stateFilePath'> {
+): Pick<WorkflowRunRecord, 'runId' | 'scriptName' | 'slug' | 'scriptPath' | 'startedAt' | 'stateFilePath'> {
   return {
     runId: registered?.runId ?? settledEntry.runId,
     scriptName: registered?.scriptName ?? fold?.created?.workflowName ?? '(unknown)',
     slug: registered?.slug,
+    scriptPath: registered?.scriptPath ?? '',
     startedAt: toIso(registered?.startedAt ?? fold?.created?.ts ?? 0),
     stateFilePath: registered?.recordPath ?? '',
   }

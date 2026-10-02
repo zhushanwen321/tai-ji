@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   displayAgentName,
+  displayWorkflowName,
   invalidAgentRefMessage,
   normalizeRef,
   normalizeWorkflowRef,
@@ -38,6 +39,27 @@ describe("displayAgentName", () => {
 
   it("裸文件名（无目录）也去 .md", () => {
     expect(displayAgentName("worker.md")).toBe("worker");
+  });
+});
+
+describe("displayWorkflowName", () => {
+  it("mac/linux 绝对路径取 basename 并去 .js", () => {
+    expect(displayWorkflowName("/Users/x/project/.pi/workflows/batch.js")).toBe("batch");
+    expect(displayWorkflowName("/home/u/p/.agents/workflows/parallel.js")).toBe("parallel");
+  });
+
+  it("windows 路径（反斜杠分隔）同样取短名", () => {
+    expect(displayWorkflowName("C:\\Users\\x\\wfs\\batch.js")).toBe("batch");
+    expect(displayWorkflowName("C:/Users/x/wfs/batch.js")).toBe("batch");
+  });
+
+  it("无 .js 扩展名的 basename 原样返回（不去别的后缀）", () => {
+    expect(displayWorkflowName("/a/b/batch")).toBe("batch");
+    expect(displayWorkflowName("/a/b/wf.spec.ts")).toBe("wf.spec.ts");
+  });
+
+  it("裸文件名（无目录）也去 .js", () => {
+    expect(displayWorkflowName("batch.js")).toBe("batch");
   });
 });
 

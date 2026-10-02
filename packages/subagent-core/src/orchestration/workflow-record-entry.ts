@@ -75,6 +75,11 @@ export interface WorkflowRecordRegisteredEntryData { // oe-exempt:20260929:frame
   scriptName: string;
   /** run 级短标签（RunSpec.slug，≤20 字符；缺省回落 scriptName）。 */
   slug: string;
+  /**
+   * workflow 脚本绝对路径（RunSpec.scriptPath——GUI 详情层展示全路径的唯一
+   * 投影源）。可缺省：旧注册条目无该字段，读侧兜底空串；新写侧恒带。
+   */
+  scriptPath?: string;
   startedAt: number;
   /**
    * record 事件流绝对路径锚点（`<sessionDir>/workflow-state/<runId>.record.jsonl`
