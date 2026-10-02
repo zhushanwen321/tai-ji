@@ -280,8 +280,6 @@ export default {
   },
   sideDrawer: {
     title: '侧边抽屉',
-    pin: '钉住',
-    unpin: '取消钉住',
     close: '关闭',
     noTerminal: '暂无终端输出',
     terminalHint: 'extension 推送 terminal widget 后显示实时输出',
@@ -370,6 +368,8 @@ export default {
     // RD-5#2：PTY spawn 失败 inline 错误条（复用 FileView error 态范式）
     spawnFailed: '终端启动失败：{error}',
     retry: '重试',
+    // display-containers §5.1：StatusBar 原生动作开关按钮（底抽屉）
+    toggle: '开关终端',
   },
   mermaid: {
     rendering: '图表渲染中…',

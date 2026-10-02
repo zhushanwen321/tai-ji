@@ -9,12 +9,12 @@
  * text 字段 = 设计 §7.2「条目文本」块的逐字锚（迁移类判据要求附全量），单测逐字对账；
  * §7.7 双形态契约：注册表条目即唯一权威，ui 壳组件与 core 协调函数都读它，禁止各自文字化。
  *
- * [MANDATORY] W0 行为不变（display-containers u-foundation 验收）：DrawerPanel tabs 数据源换注册表时
- * 条目数与显示序不变（旧 10 条）——W0 载入序列 = RIGHT_DRAWER_W0_ENTRIES（旧硬编码显示序）；
- * 终态容器归属 = CONTAINER_REGISTRY（右 8/底 1/浮 2，§7.2）。
+ * [HISTORICAL] W0 行为不变锚（u-foundation）：数据源切换当刻条目数与显示序与旧硬编码一致（旧 10 条）。
+ * 收窄后（W1）DrawerPanel L1 读 RIGHT_DRAWER_W0_ENTRIES（9 条）；终态容器归属 = CONTAINER_REGISTRY
+ * （右 8/底 1/浮 2，§7.2）。
  *
- * 状态：纯数据注册表，无行为实装（类型契约不实装行为）。后续波次对账：
- * - u-w1-layout：terminal 从载入序列移除（条目 10→9，terminal 迁底抽屉）
+ * 状态：纯数据注册表，无行为实装（类型契约不实装行为）。波次对账：
+ * - u-w1-layout：terminal 已从载入序列移除（条目 10→9，terminal 迁底抽屉）
  * - u-w2-browser-mount：browser 移除（条目 →8，与 RIGHT_DRAWER_REGISTRY 全等）后
  *   RIGHT_DRAWER_W0_ENTRIES 退役，DrawerPanel 直接读 CONTAINER_REGISTRY['right-drawer']
  */
@@ -172,17 +172,14 @@ export const CONTAINER_REGISTRY: Readonly<Record<ContainerId, readonly Container
 }
 
 /**
- * W0 载入序列（旧 10 条，旧硬编码 tabs 显示序）——[MANDATORY] W0 行为不变锚：
- * DrawerPanel tabs 数据源换本序列后条目数仍 10、显示序仍 terminal→browser→git→doc→detail→
- * subagent→workflow→bashTask→plan→btw（仅数据源换）。每条均引用容器声明中的同一对象
- * （单一事实源，文本/i18n key 零重复定义）。
+ * 右抽屉载入序列（W1 起 9 条——u-w1-layout 已撤 TERMINAL_ENTRY，terminal 迁底抽屉）。
+ * 显示序 = 旧硬编码 tabs 序去掉 terminal：browser→git→doc→detail→subagent→workflow→
+ * bashTask→plan→btw。每条均引用容器声明中的同一对象（单一事实源，文本/i18n key 零重复定义）。
  *
- * 退役路径（随波次收窄，注册条目达终态 8/1/2）：u-w1-layout 移除 TERMINAL_ENTRY（10→9，
- * terminal 迁底抽屉）→ u-w2-browser-mount 移除 BROWSER_ENTRY（→8，与 RIGHT_DRAWER_REGISTRY
- * 全等）→ 本序列退役，DrawerPanel 直接读 CONTAINER_REGISTRY['right-drawer']。
+ * 退役路径（随波次收窄，注册条目达终态 8/1/2）：u-w2-browser-mount 移除 BROWSER_ENTRY（→8，
+ * 与 RIGHT_DRAWER_REGISTRY 全等）→ 本序列退役，DrawerPanel 直接读 CONTAINER_REGISTRY['right-drawer']。
  */
 export const RIGHT_DRAWER_W0_ENTRIES: readonly ContainerRegistryEntry[] = [
-  TERMINAL_ENTRY,
   BROWSER_ENTRY,
   GIT_ENTRY,
   DOC_ENTRY,

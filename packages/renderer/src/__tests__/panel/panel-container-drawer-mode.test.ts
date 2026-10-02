@@ -41,13 +41,17 @@ import {
   bindDrawerSessionId,
   openDrawerTab,
   setDrawerTab,
-  getDrawerControlState,
+  setBackgroundTaskView,
   _resetDrawerForTest,
+  CONTAINER_REGISTRY,
+  RIGHT_DRAWER_REGISTRY,
+  BOTTOM_DRAWER_REGISTRY,
+  OVERLAY_REGISTRY,
 } from '@taiji/core/domain/drawer'
 // drawer-tab 注册表契约：全量 tab 清单收拢在 helpers/drawer-tabs.ts（SideDrawerTab 运行时
 // 投影，satisfies Record 双向防漂移），本文件的「注册表契约」用例是唯一全量断言处。其余
 // 用例只断言被测 tab 自身按钮，不再各留子集循环。
-import { ALL_DRAWER_TABS } from '../helpers/drawer-tabs'
+import { L1_DRAWER_TABS } from '../helpers/drawer-tabs'
 
 // ── mock 壳层依赖（PanelContainer setup 阶段执行，避免真实 WS/session 副作用）──
 vi.mock('@/composables/features/file-tree/useGitStatus', () => ({
@@ -171,8 +175,8 @@ beforeEach(() => {
 // activePinia，导致下个用例 usePanelStore() 解析到旧 pinia、读到旧 sid、drawer 打不开。
 enableAutoUnmount(afterEach)
 
-describe('drawer-tab 注册表契约（SideDrawerTab 全量收敛点）', () => {
-  it('drawer 打开态渲染生产注册表全部一级 tab 按钮（全量清单唯一断言处）', async () => {
+describe('drawer-tab 注册表契约（L1 全量收敛点，display-containers §7.2）', () => {
+  it('drawer 打开态渲染注册表投影的全部 L1 tab（9 条，terminal 已迁底抽屉）+ 注册表形状 右 8/底 1/浮 2', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 's-tab-registry')
     openDrawerTab('git')
@@ -180,9 +184,19 @@ describe('drawer-tab 注册表契约（SideDrawerTab 全量收敛点）', () => 
     const wrapper = await mountContainer()
     await nextTick()
 
-    for (const key of ALL_DRAWER_TABS) {
+    for (const key of L1_DRAWER_TABS) {
       expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists(), `drawer-tab-${key} 应存在`).toBe(true)
     }
+    // terminal 迁出 L1（用户可见：右抽屉不再有终端图标——入口改底抽屉 ⌃` / StatusBar 按钮）
+    expect(L1_DRAWER_TABS).toHaveLength(9)
+    expect(wrapper.find('[data-testid="drawer-tab-terminal"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-testid^="drawer-tab-"]')).toHaveLength(9)
+
+    // 注册表形状机器锚（§8.2：右 8/底 1/浮 2——迁移源侧清空）
+    expect(RIGHT_DRAWER_REGISTRY).toHaveLength(8)
+    expect(BOTTOM_DRAWER_REGISTRY).toHaveLength(1)
+    expect(OVERLAY_REGISTRY).toHaveLength(2)
+    expect(CONTAINER_REGISTRY['bottom-drawer'][0]?.content).toBe('terminal')
   }, 60_000)
 })
 
@@ -221,7 +235,6 @@ const DrawerPanelProbe = defineComponent({
   props: {
     isOpen: Boolean,
     activeTab: String,
-    docked: Boolean,
     sessionId: { type: String, default: null },
   },
   template:
@@ -251,7 +264,7 @@ describe('PanelContainer 首屏冒烟（TC1）', () => {
 })
 
 describe('PanelContainer 壳行为迁移（旧 side-drawer.test.ts 行为断言壳路径版）', () => {
-  it('ESC 键 → drawer 关闭（壳层 window keydown，旧 SideDrawer onKeyDown 迁移）', async () => {
+  it('ESC 键不再由壳层消费（display-containers §6.7 唯一属主 = 栈序编排器）——drawer 原样保持', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 's-esc')
     openDrawerTab('git')
@@ -260,11 +273,11 @@ describe('PanelContainer 壳行为迁移（旧 side-drawer.test.ts 行为断言�
     await nextTick()
     expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(true)
 
-    // ESC keydown → PanelContainer closeDrawer → drawer 卸载
+    // ESC keydown → 壳层零动作（旧 window keydown 已拆除：Esc 归编排器按层级序/让位路由，
+    // 正向行为（Esc 关抽屉）由 key-orchestrator 单测族承载，双监听双触发即回归）
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     await nextTick()
-    expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
-    // close 后 keydown 监听已卸（drawer 关闭态不再抢全局 keydown）
+    expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="panel"]').exists()).toBe(true)
   }, 60_000)
 
@@ -288,8 +301,8 @@ describe('PanelContainer bashTask tab 接线（D5③）', () => {
   it('bashTask + 已选中任务 → 注入 BackgroundTaskDetailPanel（stub 面板渲染）', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 's-bash-selected')
-    // 模拟列表 item 点击写入（D5④ 写入面：core 分区 selectedBackgroundTaskId）
-    getDrawerControlState().selectedBackgroundTaskId = 'bt-20260906-a1b2c3'
+    // 模拟列表 item 点击写入（D5④ 写入面：bashTask 内容域选中态 selection/bash-task.ts）
+    setBackgroundTaskView('bt-20260906-a1b2c3')
     openDrawerTab('bashTask')
 
     const wrapper = await mountContainer()

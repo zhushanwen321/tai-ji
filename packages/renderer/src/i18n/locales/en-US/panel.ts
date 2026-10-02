@@ -285,8 +285,6 @@ export default {
   },
   sideDrawer: {
     title: 'Side drawer',
-    pin: 'Pin',
-    unpin: 'Unpin',
     close: 'Close',
     noTerminal: 'No terminal output',
     terminalHint: 'Real-time output appears after extension pushes terminal widget',
@@ -378,6 +376,8 @@ export default {
     // RD-5#2: inline error bar for a failed PTY spawn (mirrors FileView error state)
     spawnFailed: 'Failed to start terminal: {error}',
     retry: 'Retry',
+    // display-containers §5.1: StatusBar native-action toggle button (bottom drawer)
+    toggle: 'Toggle terminal',
   },
   mermaid: {
     rendering: 'Rendering diagram…',

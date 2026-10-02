@@ -100,7 +100,7 @@ import {
 } from '@/composables/features/trace/useSessionTrace'
 import { useToast } from '@/composables/useToast'
 import { clearToasts } from '../../helpers/toast-queue'
-import { ALL_DRAWER_TABS } from '../../helpers/drawer-tabs'
+import { L1_DRAWER_TABS } from '../../helpers/drawer-tabs'
 
 const SID = 'sid-inspector-1'
 
@@ -240,21 +240,23 @@ describe('A44 drawer inspector 联动（选中切入临时页 / 返回复原 / �
     await nextTick()
     expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="trace-inspector"]').exists()).toBe(true)
-    // inspector 优先于 activeTab 面板（默认 terminal tab 内容被临时页取代）
-    expect(wrapper.find('[data-testid="terminal-panel"]').exists()).toBe(false)
+    // inspector 优先于 activeTab 面板（默认 git tab 内容被临时页取代）
+    expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(false)
 
-    // SideDrawerTab 体系不变：全量一级 tab 按钮仍在（清单与 drawer-mode 注册表契约用例
-    // 同源——helpers/drawer-tabs.ts，生产注册表运行时投影；inspector 不占 tab 位）
-    for (const tab of ALL_DRAWER_TABS) {
+    // SideDrawerTab 体系不变：全量 L1 tab 按钮仍在（清单与 drawer-mode 注册表契约用例
+    // 同源——helpers/drawer-tabs.ts，生产注册表运行时投影；inspector 不占 tab 位；
+    // terminal 已迁底抽屉不在 L1）
+    for (const tab of L1_DRAWER_TABS) {
       expect(wrapper.find(`[data-testid="drawer-tab-${tab}"]`).exists(), `drawer-tab-${tab} 应存在`).toBe(true)
     }
+    expect(wrapper.find('[data-testid="drawer-tab-terminal"]').exists()).toBe(false)
 
-    // 返回 → inspector 卸载 + 复原前 tab 内容（activeTab 未被改过，默认 terminal）
+    // 返回 → inspector 卸载 + 复原前 tab 内容（activeTab 未被改过，默认 git）
     await wrapper.find('[data-testid="trace-inspector-back"]').trigger('click')
     await nextTick()
     await nextTick()
     expect(wrapper.find('[data-testid="trace-inspector"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="terminal-panel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(true)
     wrapper.unmount()
   })
 

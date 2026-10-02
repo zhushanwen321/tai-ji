@@ -20,8 +20,19 @@
  *
  * 单实例：PanelContainer 单实例挂载，本 composable 随其 setup/卸载（rAF 循环经
  * onScopeDispose 清理），无多实例注册问题。
+ *
+ * 同文件另载纵轴模型 useBottomDrawerHeight（display-containers §7.3 纵轴复用）：底抽屉
+ * 高度（heightPct 全局单键，core bottom-drawer 域持有）+ 上沿拖拽/键盘微调 + 显示期 clamp
+ * （矮窗保证主区最小可视）。纵轴不派发 taiji:splitter-layout（§7.3：唯一消费方已随
+ * BrowserPane 迁浮层，纵轴派发无消费方——不造无人读的事件）。
  */
 import { computed, onScopeDispose, ref, watch, type Ref } from 'vue'
+import {
+  getBottomDrawerHeightPct,
+  resolveBottomDrawerDisplayPct,
+  setBottomDrawerHeightPct,
+  useBottomDrawerLayout,
+} from '@taiji/core/domain/bottom-drawer'
 
 /** drawer 宽度持久化 key（与 reka-ui autoSaveId 旧数据格式不兼容，换 key 避免读到旧 layout 数组） */
 const DRAWER_WIDTH_KEY = 'taiji:drawer-width'
@@ -172,5 +183,116 @@ export function useDrawerSplitWidth(splitAreaEl: Ref<HTMLElement | null>, drawer
     onHandlePointerMove,
     onHandlePointerUp,
     onHandleKeydown,
+  }
+}
+
+// ── 纵轴（display-containers §7.3：底抽屉高度，与横轴共用拖拽/键盘/持久化范式）──
+
+/** 显示期 clamp 的主区（对话流 + composer）最小可视高度（px，§5.3「窗口太矮」失败路径。
+ *  具体阈值是设计 §11-1 实施期真机校准项） */
+export const MIN_MAIN_AREA_HEIGHT_PX = 240
+
+/**
+ * 底抽屉高度模型（纵轴）：
+ * - 高度百分比（heightPct）归 core bottom-drawer 域：拖拽写侧 clamp 15%–70% + 全局单键
+ *   持久化（setBottomDrawerHeightPct 收编），本层只做拖拽数学与显示换算；
+ * - 显示期 clamp：resolveBottomDrawerDisplayPct（矮窗下保证主区 ≥ MIN_MAIN_AREA_HEIGHT_PX，
+ *   **纯读侧不写回**——恢复窗口高度后回到拖拽持久值，S2 断言）；
+ * - 显示高度 = pool（split 行 + 底抽屉共享容器）的百分比（CSS height 百分比直接对 pool
+ *   求值，无需换算 px）。
+ *
+ * @param poolEl split 行与底抽屉的共同容器（clamp 换算基准 + 拖拽数学基准）
+ * @param bottomOpen 底抽屉开合态（core bottom-drawer 域的 computed）
+ */
+export function useBottomDrawerHeight(
+  poolEl: Ref<HTMLElement | null>,
+  bottomOpen: Ref<boolean>,
+) {
+  const isBottomDragging = ref(false)
+  const { heightPct } = useBottomDrawerLayout()
+  /** pool 实测高度（px，仅显示期 clamp 输入；未测得 0 时 clamp 不生效、回落目标值） */
+  const poolHeightPx = ref(0)
+
+  function measure(): void {
+    const el = poolEl.value
+    if (el) poolHeightPx.value = el.getBoundingClientRect().height
+  }
+
+  let resizeObserver: ResizeObserver | null = null
+  watch(
+    poolEl,
+    (el) => {
+      resizeObserver?.disconnect()
+      resizeObserver = null
+      if (!el) return
+      measure()
+      resizeObserver = new ResizeObserver(measure)
+      resizeObserver.observe(el)
+    },
+    { immediate: true },
+  )
+  onScopeDispose(() => {
+    resizeObserver?.disconnect()
+    resizeObserver = null
+  })
+
+  /** 有效显示百分比（写侧 clamp 后的高度值 × 显示期钳制；关闭态 0） */
+  const bottomHeightStyle = computed(() => {
+    const pct = resolveBottomDrawerDisplayPct(
+      heightPct.value,
+      poolHeightPx.value,
+      MIN_MAIN_AREA_HEIGHT_PX,
+    )
+    return `${bottomOpen.value ? pct : 0}%`
+  })
+
+  /** 高度过渡（沿用现有 transition 体系加纵轴）：拖动期间移除过渡保证跟手 */
+  const bottomTransitionClass = computed(() =>
+    isBottomDragging.value
+      ? ''
+      : 'transition-[height] duration-[var(--duration-slow)] ease-[var(--ease)]',
+  )
+
+  /** 上沿手柄拖动（pointer capture：同横轴，拖出元素外仍跟手；jsdom 兼容可选调用） */
+  function onBottomHandlePointerDown(e: PointerEvent): void {
+    const target = e.currentTarget as HTMLElement
+    target.setPointerCapture?.(e.pointerId)
+    isBottomDragging.value = true
+  }
+
+  /** 拖动中：底抽屉高 = 容器下缘到指针的垂直占比（手柄在抽屉上缘） */
+  function onBottomHandlePointerMove(e: PointerEvent): void {
+    const el = poolEl.value
+    if (!el || !isBottomDragging.value) return
+    const rect = el.getBoundingClientRect()
+    if (rect.height === 0) return
+    setBottomDrawerHeightPct(((rect.bottom - e.clientY) / rect.height) * PCT_SCALE)
+  }
+
+  /** 拖动结束（pointerup/cancel）：释放 capture（高度持久化由 setBottomDrawerHeightPct 写穿） */
+  function onBottomHandlePointerUp(e: PointerEvent): void {
+    const target = e.currentTarget as HTMLElement
+    if (target.hasPointerCapture?.(e.pointerId)) target.releasePointerCapture(e.pointerId)
+    isBottomDragging.value = false
+  }
+
+  /** 键盘微调（separator 可达性，对齐横轴 ArrowLeft/Right 交互；ArrowUp 变高） */
+  function onBottomHandleKeydown(e: KeyboardEvent): void {
+    let delta = 0
+    if (e.key === 'ArrowUp') delta = KEYBOARD_STEP_PCT
+    else if (e.key === 'ArrowDown') delta = -KEYBOARD_STEP_PCT
+    else return
+    e.preventDefault()
+    setBottomDrawerHeightPct(getBottomDrawerHeightPct() + delta)
+  }
+
+  return {
+    bottomHeightStyle,
+    isBottomDragging,
+    bottomTransitionClass,
+    onBottomHandlePointerDown,
+    onBottomHandlePointerMove,
+    onBottomHandlePointerUp,
+    onBottomHandleKeydown,
   }
 }

@@ -1,7 +1,7 @@
 /**
- * 容器注册表单测 —— display-containers u-foundation（§7.2 条目文本逐字锚 + W0 载入序列行为不变对账）。
+ * 容器注册表单测 —— display-containers u-foundation（§7.2 条目文本逐字锚 + 载入序列对账）。
  *
- * 三视角：构建者白盒（条目六字段形状/单一事实源引用同一对象）、使用者黑盒（tab 数 10/8/1/2、
+ * 三视角：构建者白盒（条目六字段形状/单一事实源引用同一对象）、使用者黑盒（tab 数 9/8/1/2、
  * 显示序、条目文本——DrawerPanel L1 图标条的用户可见投影）、观察者形态（注册表纯数据形态）。
  * core 为 headless node 环境（vitest.config 零 DOM），用户可见断言落在 tab 数/顺序/文本等
  * 可见投影锚上；DOM 渲染断言归 ui 层 DrawerPanel 接线单元（E2E-MOCK-02 对账）。
@@ -32,8 +32,8 @@ const DESIGN_RIGHT_TEXTS = [
 const DESIGN_BOTTOM_TEXTS = ['terminal（终端）']
 const DESIGN_OVERLAY_TEXTS = ['browser（网页）', 'workflow（工作流图）']
 
-// ── W0 旧 10 条显示序锚（DrawerPanel 硬编码 tabs 数组旧序——数据源切换后用户可见 tab 顺序不变）──
-const W0_EXPECTED_CONTENTS = ['terminal', 'browser', 'git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask', 'plan', 'btw']
+// ── W1 载入序列 9 条显示序锚（u-w1-layout 撤 terminal 后——terminal 迁底抽屉）──
+const W0_EXPECTED_CONTENTS = ['browser', 'git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask', 'plan', 'btw']
 
 function texts(entries: readonly ContainerRegistryEntry[]): string[] {
   return entries.map((entry) => entry.text)
@@ -66,24 +66,24 @@ describe('注册表条目文本与设计 §7.2 逐字一致（右 8 / 底 1 / �
   })
 })
 
-describe('W0 阶段行为不变（tab 数仍 10 仅数据源换）', () => {
-  it('W0 载入序列 = 旧 10 条、旧显示序（DrawerPanel 数据源切换后 tab 数与顺序不变——用户可见）', () => {
-    expect(RIGHT_DRAWER_W0_ENTRIES).toHaveLength(10)
+describe('W1 载入序列（u-w1-layout：terminal 迁底抽屉，10→9）', () => {
+  it('载入序列 = 9 条、旧显示序去 terminal（DrawerPanel 数据源 = 本序列，用户可见 L1 图标锚）', () => {
+    expect(RIGHT_DRAWER_W0_ENTRIES).toHaveLength(9)
     expect(contents(RIGHT_DRAWER_W0_ENTRIES)).toEqual(W0_EXPECTED_CONTENTS)
   })
 
-  it('W0 序列 = 终态右 8 ∪ {terminal, browser}（收窄路径：u-w1-layout 撤 terminal→9、u-w2-browser-mount 撤 browser→8）', () => {
+  it('载入序列 = 终态右 8 ∪ {browser}（收窄路径：u-w2-browser-mount 撤 browser→8）', () => {
     const w0 = contents(RIGHT_DRAWER_W0_ENTRIES)
     for (const content of contents(RIGHT_DRAWER_REGISTRY)) {
       expect(w0).toContain(content)
     }
-    expect(w0).toContain('terminal')
+    expect(w0).not.toContain('terminal')
     expect(w0).toContain('browser')
-    // workflow 在 W0 序列只出现一次（右抽屉条目；浮层 workflow 是另一条目不入抽屉载入）
+    // workflow 在载入序列只出现一次（右抽屉条目；浮层 workflow 是另一条目不入抽屉载入）
     expect(w0.filter((content) => content === 'workflow')).toHaveLength(1)
   })
 
-  it('W0 序列每条均引用容器声明的同一对象（文本/i18n key 单一事实源，换数据源后渲染等价）', () => {
+  it('载入序列每条均引用容器声明的同一对象（文本/i18n key 单一事实源，换数据源后渲染等价）', () => {
     const declared = [
       ...RIGHT_DRAWER_REGISTRY,
       ...BOTTOM_DRAWER_REGISTRY,
@@ -92,10 +92,9 @@ describe('W0 阶段行为不变（tab 数仍 10 仅数据源换）', () => {
     for (const entry of RIGHT_DRAWER_W0_ENTRIES) {
       expect(declared.some((declaredEntry) => declaredEntry === entry)).toBe(true)
     }
-    // terminal/browser 条目分别引用底抽屉/浮层声明（终态归属）
-    expect(RIGHT_DRAWER_W0_ENTRIES[0]).toBe(BOTTOM_DRAWER_REGISTRY[0])
-    expect(RIGHT_DRAWER_W0_ENTRIES[1]).toBe(OVERLAY_REGISTRY[0])
-    // W0 序列右 8 段与终态声明同对象（顺序不同但条目同一）
+    // 首条 browser 引用浮层声明（终态归属）
+    expect(RIGHT_DRAWER_W0_ENTRIES[0]).toBe(OVERLAY_REGISTRY[0])
+    // 载入序列右 8 段与终态声明同对象（顺序不同但条目同一）
     for (const entry of RIGHT_DRAWER_REGISTRY) {
       expect(RIGHT_DRAWER_W0_ENTRIES).toContain(entry)
     }

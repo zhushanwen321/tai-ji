@@ -23,8 +23,9 @@
     header-extra slot 挂载）。[P4 s5 drawer-widget-removal] widget 订阅编排（extension:widget/
     widgetGui/status → core createDrawerBuffers）已删：旧 widget 通道由 PluginViewContainer 承接。
     控制态（isOpen/
-    activeTab/docked）读 core drawer 域（useDrawerControl + coordination 公开 API），分区键经
+    activeTab）读 core drawer 域（useDrawerControl + coordination 公开 API），分区键经
     useSideDrawer 兼容层模块顶层 bindDrawerSessionId 维持（C1：兼容层本 wave 保留）。
+    [display-containers §6.6 W0] 选中态五字段迁出（各内容域 selection 分区）；docked 死状态删除。
   -->
   <div class="panel-container flex h-full w-full flex-col overflow-hidden">
     <PanelHeader
@@ -52,6 +53,7 @@
          Transition（淡入右移）与 wrapper width 动画同时长（--duration-slow），叠加和谐。
          BrowserPane rect 同步：原 Splitter @layout 事件改为 notifyLayout()（拖动/键盘时直发 +
          开合动画期间 rAF 循环逐帧派发 taiji:splitter-layout）。 -->
+    <div ref="poolEl" data-testid="vertical-pool" class="flex min-h-0 flex-1 flex-col overflow-hidden">
     <div ref="splitAreaEl" data-testid="split-area" class="relative flex min-h-0 flex-1 overflow-hidden">
       <div
         data-fs-scope="chat"
@@ -101,11 +103,9 @@
         <DrawerPanel
           :is-open="drawerOpen"
           :active-tab="drawerTab"
-          :docked="drawerDocked"
           :session-id="panelSessionId"
           @close="closeDrawer"
           @set-tab="onDrawerSetTab"
-          @toggle-dock="toggleDrawerDock"
         >
           <!-- 桌面独占内容面板（C2 v-if chain，对齐旧 SideDrawer 内容区结构）：
                Git tab → GitPanel（inject GIT_STATUS_KEY，非 git 仓库组件内自隐藏走空态）
@@ -125,19 +125,16 @@
             :key="detailRetryKey"
             :session-id="panelSessionId"
           />
-          <TerminalView
-            v-else-if="drawerTab === 'terminal'"
-            :key="terminalRetryKey"
-            :session-id="panelSessionId"
-          />
           <!-- subagent/workflow tab（2026-08-14 subagent-workflow-drawer-tab U2/U3/U4）：内容由
-               SubagentTab/WorkflowTab 自治（读 useDrawerControl 的 selectedSubagentId/
-               selectedWorkflowName + 各自 store），不依赖 panelSessionId，延续默认 slot 注入模式 -->
+               SubagentTab/WorkflowTab 自治（读 core selection/ 各内容域选中态 + 各自 store），
+               不依赖 panelSessionId，延续默认 slot 注入模式。WorkflowTab 为懒加载挂载点
+               （display-containers §5.3 第 2 行：浮层回落目标，chunk 同样可能失败 →
+               AsyncErrorFallback 占位 + 重试链，见下方懒加载块） -->
           <SubagentTab v-else-if="drawerTab === 'subagent'" />
-          <WorkflowTab v-else-if="drawerTab === 'workflow'" />
+          <WorkflowTab v-else-if="drawerTab === 'workflow'" :key="workflowRetryKey" />
           <!-- bashTask tab（2026-09 background-task-sidebar-view D5③）：后台命令详情。未选中
-               任务（selectedBackgroundTaskId undefined）不注入 → DrawerPanel 空态 fallback
-               （C2 v-if chain 语义与 browser 无 URL 同款） -->
+               任务（selectedBackgroundTaskId undefined，bashTask 内容域选中态）不注入 →
+               DrawerPanel 空态 fallback（C2 v-if chain 语义与 browser 无 URL 同款） -->
           <BackgroundTaskDetailPanel
             v-else-if="drawerTab === 'bashTask' && bashTaskSelected"
           />
@@ -165,14 +162,53 @@
         </DrawerPanel>
       </div>
     </div>
+    <!-- 底抽屉（display-containers §6.2/§7.3）：插在 split 行之下、StatusBar 之上，横跨全宽
+         （右抽屉开着时同样全宽、右抽屉变矮）；唯一内容 = terminal（TerminalView 挂载点，保留
+         defineAsyncComponent + LAZY_RETRY_KEY 作用域接线——chunk 装载失败占位链随搬家不丢失）。
+         高度 = pool 百分比（heightPct 默认 35%，开合 0% ↔ displayPct% 纵轴动画）；上沿手柄
+         拖拽/键盘调高度（clamp 15%–70% 写侧归 core；显示期 clamp 不写回，S2）。纵轴不派发
+         taiji:splitter-layout（§7.3：无消费方，不造无人读的事件）。 -->
+    <div
+      data-testid="bottom-drawer"
+      class="relative shrink-0 overflow-hidden"
+      :class="bottomTransitionClass"
+      :style="{ height: bottomHeightStyle }"
+    >
+      <div
+        v-if="bottomOpen"
+        role="separator"
+        aria-orientation="horizontal"
+        tabindex="0"
+        class="absolute inset-x-0 top-0 z-10 h-px cursor-row-resize touch-none select-none bg-transparent transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-border-strong data-[state=drag]:bg-accent"
+        :data-state="isBottomDragging ? 'drag' : undefined"
+        data-testid="bottom-drawer-resize-handle"
+        @pointerdown="onBottomHandlePointerDown"
+        @pointermove="onBottomHandlePointerMove"
+        @pointerup="onBottomHandlePointerUp"
+        @pointercancel="onBottomHandlePointerUp"
+        @keydown="onBottomHandleKeydown"
+      />
+      <TerminalView
+        v-if="bottomOpen"
+        :key="terminalRetryKey"
+        :session-id="panelSessionId"
+      />
+    </div>
+    </div>
     <!-- ExtensionHost 状态栏（audit §12.1）：数据经 app.provide STATUS_BAR_SOURCE_KEY 注入（useExtensionHostBridge），
-         无数据时自隐藏；sessionId 绑定当前 leaf（per-session 项） -->
-    <StatusBar :session-id="leaf.sessionId ?? null" />
+         无数据时自隐藏；sessionId 绑定当前 leaf（per-session 项）。
+         trailing 原生动作通道（display-containers §5.1 规则 4）：终端开关按钮常驻
+         （干净安装无插件无 statusline 项时仍可见——防纯键盘不可发现）。 -->
+    <StatusBar :session-id="leaf.sessionId ?? null">
+      <template #trailing>
+        <StatusBarTerminalToggle />
+      </template>
+    </StatusBar>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, provide, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, defineComponent, h, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { PanelLeaf } from '@taiji/shared'
 import {
@@ -182,9 +218,12 @@ import {
   closeDrawer,
   toggleDrawer,
   setDrawerTab,
-  toggleDrawerDock,
-  getDrawerControlState,
+  useBashTaskSelection,
 } from '@taiji/core/domain/drawer'
+import {
+  bindBottomDrawerSessionId,
+  useBottomDrawerControl,
+} from '@taiji/core/domain/bottom-drawer'
 import { DrawerPanel } from '@taiji/ui/features/drawer'
 import { StatusBar } from '@taiji/ui/extension-host'
 import { usePanelStore } from '@/stores/panel'
@@ -192,7 +231,7 @@ import { useSessionStore } from '@/stores/session'
 import { useSessionDerivations } from '@/composables/features/chat/useSessionDerivations'
 import { provideGitStatus } from '@/composables/features/file-tree/useGitStatus'
 import type { GitIndicator } from '@/composables/features/file-tree/useGitStatus'
-import { useDrawerSplitWidth } from '@/composables/features/drawer/useDrawerSplitWidth'
+import { useDrawerSplitWidth, useBottomDrawerHeight } from '@/composables/features/drawer/useDrawerSplitWidth'
 import { usePlanDrawerSync } from '@/composables/use-plan-drawer-sync'
 import { useChatStore } from '@/stores/chat'
 import { useSessionTrace, clearTraceSelection } from '@/composables/features/trace/useSessionTrace'
@@ -205,24 +244,42 @@ import ToastContainer from '@/components/ui/ToastContainer.vue'
 import GitPanel from '@/components/panel/GitPanel.vue'
 import CommandDocPanel from '@/components/panel/CommandDocPanel.vue'
 import SubagentTab from '@/components/panel/SubagentTab.vue'
-import WorkflowTab from '@/components/panel/WorkflowTab.vue'
 import BackgroundTaskDetailPanel from '@/components/extension/BackgroundTaskDetailPanel.vue'
 import AsyncErrorFallback, { LAZY_RETRY_KEY } from '@/components/ui/AsyncErrorFallback.vue'
+import StatusBarTerminalToggle from '@/components/statusbar/StatusBarTerminalToggle.vue'
 
-// D-8 抽屉面板懒加载（§3.3 边界判据：首屏不渲染 + 重依赖）：
-// DetailPane（DiffView 等专属依赖）/ TerminalView（xterm + 4 addon）是 drawerTab 的 v-else-if
-// 互斥分支，切到该 tab 才挂载 → 首次切 tab 才拉取对应 chunk（xterm 移出首屏初始请求集合）。
-// 其余条件挂载面板（GitPanel/CommandDocPanel/SubagentTab/WorkflowTab）不拆：
-// 均无重第三方依赖（重依赖判据不满足），拆分只引入 async 边界无字节收益（边界评估结论写 W31 汇报）。
+// D-8 懒加载（§3.3 边界判据：首屏不渲染 + 重依赖）：DetailPane（DiffView 等专属依赖）在抽屉
+// detail tab、TerminalView（xterm + 4 addon）在底抽屉，各自激活才挂载 → 首次激活才拉 chunk
+// （xterm 移出首屏初始请求集合）；WorkflowTab（抽屉 workflow 回落内容）同为懒加载挂载点
+// ——它同时是浮层装载失败的回落目标（display-containers §5.3），回落目标自身的 chunk 也
+// 可能失败（file:// chunk 404），必须挂同一 AsyncErrorFallback 占位链才有「回落目标失败 →
+// 占位 + 重试」的恢复面。其余条件挂载面板（GitPanel/CommandDocPanel/SubagentTab）不拆：
+// 均无重第三方依赖（重依赖判据不满足），拆分只引入 async 边界无字节收益。
 // 错误兜底（§3.5）：file:// 下 chunk 404 是配置性错误，不自动重试，错误占位 + 重试按钮经
 // LAZY_RETRY_KEY 注入触发 loader 重跑（重试 = userRetry 重跑 loader + key 重挂 wrapper，两者缺一
 // 不可，机制见 AppShell.vue 同款注释）。
+// [W31 major-2 后续收口] 重试作用域 = 挂载点结构化隔离（scopedRetryFallback 在各自 errorComponent
+// 上 provide 自己的 LAZY_RETRY_KEY）：占位重试按钮天然路由到本挂载点的 loader，两个 chunk 同时
+// 失败（file:// 404 设计内真实路径）时互不串线——旧「按激活 tab 路由」竞态形态结构性消失。
+function scopedRetryFallback(retry: () => void) {
+  return defineComponent({
+    name: 'ScopedAsyncRetryFallback',
+    inheritAttrs: false,
+    setup(_, { attrs }) {
+      provide(LAZY_RETRY_KEY, retry)
+      return () => h(AsyncErrorFallback, attrs)
+    },
+  })
+}
 let detailRetryFn: (() => void) | null = null
 const detailRetryKey = ref(0)
 const DetailPane = defineAsyncComponent({
   loader: () => import('@/components/panel/DetailPane.vue'),
   loadingComponent: AsyncErrorFallback,
-  errorComponent: AsyncErrorFallback,
+  errorComponent: scopedRetryFallback(() => {
+    detailRetryFn?.()
+    detailRetryKey.value++
+  }),
   delay: 200,
   onError: (_err, retry, fail) => {
     detailRetryFn = retry
@@ -234,28 +291,30 @@ const terminalRetryKey = ref(0)
 const TerminalView = defineAsyncComponent({
   loader: () => import('@/components/panel/TerminalView.vue'),
   loadingComponent: AsyncErrorFallback,
-  errorComponent: AsyncErrorFallback,
+  errorComponent: scopedRetryFallback(() => {
+    terminalRetryFn?.()
+    terminalRetryKey.value++
+  }),
   delay: 200,
   onError: (_err, retry, fail) => {
     terminalRetryFn = retry
     fail()
   },
 })
-// [W31 review major-2] retry 按当前激活 tab 路由（drawerTab 经下方 useDrawerControl 解构，回调
-// 点击时才求值，晚于声明无碍）。依据：DetailPane/TerminalView 是 drawerTab 的 v-else-if 互斥
-// 分支，AsyncErrorFallback 错误占位只渲染在对应分支内——用户能点到的重试按钮必然属于当前 tab
-// 的面板，按 tab 路由即「按失败方路由」。旧实现 `if (detailRetryFn) else if (terminalRetryFn)`
-// 在 detail 失败后（detailRetryFn 恒非 null、无重置路径）terminal 再失败时，terminal 占位的
-// 重试实际执行 detail 的 userRetry + detailRetryKey++，terminal 永久卡 error——file:// chunk 404
-// 恰会同时打断两个 chunk，属设计内真实路径。不走「独立 InjectionKey」方案：需给
-// AsyncErrorFallback 开自定义 key 的接口表面积，而 tab 路由零新增接口且语义直接。
-provide(LAZY_RETRY_KEY, () => {
-  const isTerminal = drawerTab.value === 'terminal'
-  const retryFn = isTerminal ? terminalRetryFn : detailRetryFn
-  if (!retryFn) return
-  retryFn()
-  if (isTerminal) terminalRetryKey.value++
-  else detailRetryKey.value++
+let workflowRetryFn: (() => void) | null = null
+const workflowRetryKey = ref(0)
+const WorkflowTab = defineAsyncComponent({
+  loader: () => import('@/components/panel/WorkflowTab.vue'),
+  loadingComponent: AsyncErrorFallback,
+  errorComponent: scopedRetryFallback(() => {
+    workflowRetryFn?.()
+    workflowRetryKey.value++
+  }),
+  delay: 200,
+  onError: (_err, retry, fail) => {
+    workflowRetryFn = retry
+    fail()
+  },
 })
 
 const { t } = useI18n()
@@ -292,14 +351,18 @@ function statusOf(l: PanelLeaf) {
 // onSubagentBack / agentCallOverlayFile watch）已随 overlay 移除。subagent/agent call 详情
 // 走 drawer SubagentTab/WorkflowTab，PanelHeader 不再承载 overlay 标题/返回/JSONL 路径。
 /** Drawer 控制态（§6.3 点5 架构解耦）：workspace-body 单实例。
- *  读 core drawer 域当前分区（isOpen/activeTab/docked）。分区键显式绑定 panel store 的
+ *  读 core drawer 域当前分区（isOpen/activeTab）。分区键显式绑定 panel store 的
  *  focusedSessionId（惰性 computed，首次求值 pinia 已 active）——本容器自持绑定，不依赖
  *  useSideDrawer 兼容层的模块顶层 bind 副作用（C1：兼容层保留仅服务残留消费方，新代码直连 core）。
  *  方法委托 core coordination 公开 API（openDrawerTab 等）。
  *  bindDrawerSessionId 幂等：同语义 computed 重复绑定不报错（useSideDrawer 兼容层若已绑则覆盖，
  *  值等价）。 */
 bindDrawerSessionId(computed<string | null>(() => usePanelStore().focusedSessionId))
-const { isOpen: drawerOpen, activeTab: drawerTab, docked: drawerDocked } = useDrawerControl()
+const { isOpen: drawerOpen, activeTab: drawerTab } = useDrawerControl()
+// 底抽屉（display-containers §7.1）：开合 = per-session 分区（ADR-0049 范式，本容器自持绑定，
+// bindDrawerSessionId 同款时机）；高度全局值归 core bottom-drawer 域，纵轴模型在本文件末。
+bindBottomDrawerSessionId(computed<string | null>(() => usePanelStore().focusedSessionId))
+const { isOpen: bottomOpen } = useBottomDrawerControl()
 
 // drawer「计划产物」tab 自动打开接线（plan 模式重设计 u1-drawer-tab）：plan 激活/首份产物
 // 边界经 ADR-0053 pendingOpen 语义打开 drawer（消费源 = planStore 焦点分区；focusedSid
@@ -308,10 +371,10 @@ const { isOpen: drawerOpen, activeTab: drawerTab, docked: drawerDocked } = useDr
 usePlanDrawerSync()
 
 /** bashTask tab 选中态（D5①：selectedBackgroundTaskId undefined=未选中 → 不注入本面板，
- *  DrawerPanel 空态 fallback 承载；core per-session 分区直读，写入方 = 列表 item 点击 D5④） */
-const bashTaskSelected = computed(
-  () => getDrawerControlState().selectedBackgroundTaskId !== undefined,
-)
+ *  DrawerPanel 空态 fallback 承载；bashTask 内容域选中态（selection/bash-task.ts）直读，
+ *  写入方 = 列表 item 点击 D5④） */
+const { selectedBackgroundTaskId: selectedBashTaskId } = useBashTaskSelection()
+const bashTaskSelected = computed(() => selectedBashTaskId.value !== undefined)
 
 /** panel 的 session（git 状态数据源） */
 const panelSessionId = computed<string | null>(() => leaf.value?.sessionId ?? null)
@@ -375,29 +438,11 @@ watch(
 )
 
 /**
- * ESC 关闭抽屉（panel/spec.md：抽屉是浮层，ESC 收起）。壳层职责（W3 C3；旧 SideDrawer onKeyDown
- * 迁移）。仅在 drawer 打开时挂监听，避免抽屉关闭后仍抢全局 keydown（如 composer 输入态）。
- * 单实例安全：drawer 由 PanelContainer 单实例挂载（本组件注释「drawer 固定挂本容器，单实例」），
- * watch(drawerOpen) 挂/卸全局 keydown 不会重复注册（规则 2）。
+ * [display-containers §6.7 W1] ESC 关抽屉已并入键盘栈序编排器（key-orchestrator 唯一属主）：
+ * 旧壳层 window keydown 监听已拆除——双监听双触发（一次 Esc 连剥两层），且 Esc 需按焦点
+ * 所有权分派 + 固定层级序 + 模态/局部消费方让位守卫，非本壳单点可判。用户可感知行为由
+ * 编排器承接（含终端聚焦态让位）。
  */
-function onKeyDown(e: KeyboardEvent): void {
-  if (e.key === 'Escape') {
-    e.preventDefault()
-    closeDrawer()
-  }
-}
-watch(
-  () => drawerOpen.value,
-  (open) => {
-    if (open) window.addEventListener('keydown', onKeyDown)
-    else window.removeEventListener('keydown', onKeyDown)
-  },
-  { immediate: true },
-)
-
-onBeforeUnmount(() => {
-  window.removeEventListener('keydown', onKeyDown)
-})
 
 // ── 动态宽度（feat-chat-flow-width）：drawer 开合动画 + 可拖动宽度 ──
 // 宽度模型/拖动/键盘/持久化/BrowserPane rect 同步均在 useDrawerSplitWidth（含替换
@@ -414,4 +459,16 @@ const {
   onHandlePointerUp,
   onHandleKeydown,
 } = useDrawerSplitWidth(splitAreaEl, drawerOpen)
+
+// ── 纵轴：底抽屉高度（§7.3）——pool = split 行 + 底抽屉共享容器（拖拽数学与显示期 clamp 基准）──
+const poolEl = ref<HTMLElement | null>(null)
+const {
+  bottomHeightStyle,
+  isBottomDragging,
+  bottomTransitionClass,
+  onBottomHandlePointerDown,
+  onBottomHandlePointerMove,
+  onBottomHandlePointerUp,
+  onBottomHandleKeydown,
+} = useBottomDrawerHeight(poolEl, bottomOpen)
 </script>

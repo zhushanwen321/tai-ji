@@ -1,21 +1,21 @@
 /**
- * PanelContainer 懒加载双面板 retry 路由集成测试（W31 D-8 review major-2 回归防护）。
+ * PanelContainer 懒加载双面板 retry 作用域集成测试（W31 D-8 major-2 回归防护 · display-containers 搬家后形态）。
  *
- * 被测行为：DetailPane/TerminalView 懒加载（defineAsyncComponent）失败后，错误占位
- * （AsyncErrorFallback）的重试按钮经 LAZY_RETRY_KEY 回调必须路由到「当前激活 tab」的面板——
- * 旧实现 `if (detailRetryFn) else if (terminalRetryFn)` 在 detail 失败后（detailRetryFn 恒非
- * null、无重置路径）terminal 再失败时，terminal 占位的重试实际执行 detail 的 userRetry，
- * terminal 永久卡 error（file:// chunk 404 会同时打断两个 chunk，是设计内真实路径）。
+ * 被测行为：DetailPane（抽屉 detail tab）/ TerminalView（底抽屉，terminal 迁出右抽屉后的新家）
+ * 懒加载（defineAsyncComponent）失败后，错误占位（AsyncErrorFallback）的重试按钮必须路由到
+ * **本挂载点**的 loader——scopedRetryFallback 在各自 errorComponent 上 provide 自己的
+ * LAZY_RETRY_KEY，结构性隔离；旧「按激活 tab 路由」在两 chunk 同时失败（file:// 404，设计内
+ * 真实路径）时会串线，terminal 永久卡 error。
  *
  * 用户旅程（每步均有 DOM 断言 + loader 调用计数佐证路由正确性）：
- * 1. detail tab 首挂失败 → 错误占位（加载失败文案 + 重试按钮）
- * 2. 切 terminal tab 失败 → 错误占位
- * 3. 点 terminal 占位重试 → terminal loader 重跑成功、终端内容渲染，detail loader 未重跑
+ * 1. detail tab 首挂失败 → 抽屉内错误占位（加载失败文案 + 重试按钮）
+ * 2. 开底抽屉 terminal 首挂失败 → 底抽屉内错误占位（两占位同时可见）
+ * 3. 点底抽屉占位重试 → terminal loader 重跑成功、终端内容渲染，detail loader 未重跑
  *
  * mock 策略（探针验证过的运行时事实，AGENTS.md 规则 13）：
  * - vi.mock 工厂抛错后，userRetry 重新 import 时工厂会重新执行（失败结果不缓存）；成功结果
  *   会缓存——因此**失败注入场景必须每文件一个用例**（跨用例的成功缓存使下个用例的工厂不再
- *   执行），对称方向（detail tab 重试）在 panel-container-lazy-retry-detail.test.ts。
+ *   执行），对称方向（detail 占位重试）在 panel-container-lazy-retry-detail.test.ts。
  * - 工厂返回必须带 [Symbol.toStringTag]:'Module'，defineAsyncComponent 的 load() 依此
  *   unwrap .default（与 vite 动态 import 真实产物一致）。
  * - 禁用 vi.resetModules()：它会拆散模块身份（测试的静态 import 与 PanelContainer 重新导入的
@@ -26,7 +26,7 @@
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
-import { computed, nextTick, reactive } from 'vue'
+import { computed, reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
 import {
@@ -34,6 +34,11 @@ import {
   openDrawerTab,
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
+import {
+  bindBottomDrawerSessionId,
+  openBottomDrawer,
+  _resetBottomDrawerForTest,
+} from '@taiji/core/domain/bottom-drawer'
 
 // ── flaky 懒加载面板 mock：工厂按 hoisted 计数决定失败/成功（vi.hoisted 使工厂可引用）──
 const lazy = vi.hoisted(() => ({
@@ -149,7 +154,9 @@ async function mountContainer() {
 beforeEach(() => {
   setActivePinia(createPinia())
   bindDrawerSessionId(computed(() => usePanelStore().focusedSessionId))
+  bindBottomDrawerSessionId(computed(() => usePanelStore().focusedSessionId))
   _resetDrawerForTest()
+  _resetBottomDrawerForTest()
   reactiveMessages.clear()
   lazy.detailFailures = 0
   lazy.detailLoads = 0
@@ -160,38 +167,34 @@ beforeEach(() => {
 // [HISTORICAL] 用例间 wrapper 必须自动 unmount（原因见 panel-container-drawer-mode.test.ts 同注释）
 enableAutoUnmount(afterEach)
 
-describe('PanelContainer 懒加载双面板 retry 路由（major-2 回归防护）', () => {
-  it('detail 先失败、terminal 后失败 → 点 terminal 占位重试：terminal 重载渲染，detail loader 未重跑', async () => {
+describe('PanelContainer 懒加载双面板 retry 作用域隔离（major-2 回归防护）', () => {
+  it('detail + terminal 同时失败 → 点底抽屉 terminal 占位重试：terminal 重载渲染，detail loader 未重跑', async () => {
     lazy.detailFailures = 1
     lazy.terminalFailures = 1
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 'sess-lazy')
     openDrawerTab('detail')
+    openBottomDrawer()
     const wrapper = await mountContainer()
     await flushPromises()
 
-    // ① detail chunk 失败 → 用户可见错误占位（加载失败文案 + 重试按钮）
-    expect(wrapper.find('[data-testid="async-error-fallback"]').exists()).toBe(true)
+    // ① 两个挂载点 chunk 同时失败 → 各自错误占位（加载失败文案 + 重试按钮）同时可见
+    expect(wrapper.findAll('[data-testid="async-error-fallback"]')).toHaveLength(2)
     expect(wrapper.text()).toContain('加载失败')
-    expect(wrapper.find('[data-testid="async-retry-btn"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="bottom-drawer"] [data-testid="async-retry-btn"]').exists()).toBe(true)
     expect(lazy.detailLoads).toBe(1)
-
-    // ② 切 terminal tab → terminal chunk 失败 → 错误占位（detail 分支已卸载）
-    openDrawerTab('terminal')
-    await nextTick()
-    await flushPromises()
-    expect(wrapper.find('[data-testid="async-error-fallback"]').exists()).toBe(true)
     expect(lazy.terminalLoads).toBe(1)
 
-    // ③ 点 terminal 占位的重试 → terminal loader 重跑成功 → 终端内容替换占位
-    await wrapper.find('[data-testid="async-retry-btn"]').trigger('click')
+    // ② 点底抽屉 terminal 占位的重试 → terminal loader 重跑成功 → 终端内容替换占位
+    await wrapper.find('[data-testid="bottom-drawer"] [data-testid="async-retry-btn"]').trigger('click')
     await flushPromises()
     expect(lazy.terminalLoads).toBe(2)
     expect(wrapper.find('[data-testid="terminal-loaded"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="async-error-fallback"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="bottom-drawer"] [data-testid="async-error-fallback"]').exists()).toBe(false)
 
-    // ④ detail 不受影响：terminal 重试期间 detail loader 未重跑（旧 bug 下 ③ 的
-    //    terminal-loaded 断言会失败——重试被路由到 detailRetryFn，terminal 永久卡 error）
+    // ③ detail 不受影响：terminal 重试期间 detail loader 未重跑（作用域隔离；旧「按 tab 路由」
+    //    下会串线——terminal 永久卡 error）
     expect(lazy.detailLoads).toBe(1)
+    expect(wrapper.find('[data-testid="drawer-area"] [data-testid="async-error-fallback"]').exists()).toBe(true)
   }, 60_000)
 })

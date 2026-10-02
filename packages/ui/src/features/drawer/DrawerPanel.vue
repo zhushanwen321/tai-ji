@@ -10,8 +10,9 @@
   旧 extension:widget/widgetGui/status 通道由 PluginViewContainer 承接。
 
   状态/数据契约（IF2 + clarify C1）：
-  - props{isOpen, activeTab, docked, sessionId} 为控制态（父组件 PanelContainer 管理），
-    本组件只接收 + emit close/set-tab/toggle-dock，不持有状态（§6.3 点5 架构解耦）
+  - props{isOpen, activeTab, sessionId} 为控制态（父组件 PanelContainer 管理），
+    本组件只接收 + emit close/set-tab，不持有状态（§6.3 点5 架构解耦）。
+    [display-containers §7.6 W0] docked 死状态删除，pin 按钮一并移除（toggle-dock emit 删除）
   - [P4 s5 w2] hasTasksData 条件 tab（tasks store 壳裁剪）已随 tasks 域删除移除
 
   不纳入（C3 clarify）：ESC 关闭（window keydown 桌面副作用）+ AC-13 unread badge
@@ -47,17 +48,6 @@
           </Button>
         </div>
 
-        <Button
-          variant="ghost"
-          class="size-7 shrink-0 rounded-sm p-0"
-          :class="docked ? 'text-accent' : 'text-neutral-dim'"
-          :title="docked ? t('panel.sideDrawer.unpin') : t('panel.sideDrawer.pin')"
-          data-testid="drawer-pin"
-          @click="emit('toggle-dock')"
-        >
-          <PinOff v-if="docked" class="size-3" />
-          <Pin v-else class="size-3" />
-        </Button>
         <Button
           variant="ghost"
           class="size-7 shrink-0 rounded-sm p-0 text-neutral-dim hover:text-neutral-fg"
@@ -103,15 +93,16 @@
 import { Comment, computed, useSlots } from 'vue'
 import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { BookOpen, Bot, FileText, GitBranch, Globe, MessagesSquare, Pin, PinOff, SquareCheckBig, SquareTerminal, Terminal as TerminalIcon, Workflow, X } from '@lucide/vue'
+import { BookOpen, Bot, FileText, GitBranch, Globe, MessagesSquare, SquareCheckBig, SquareTerminal, Terminal as TerminalIcon, Workflow, X } from '@lucide/vue'
 import { Button } from '@taiji/ui'
+import { RIGHT_DRAWER_W0_ENTRIES, type ContainerRegistryEntry } from '@taiji/core/domain/drawer'
 import type { SideDrawerTab } from '@taiji/core/domain/drawer'
 
 const slots = useSlots()
 
 /**
  * 默认 slot 是否有有效内容（非注释节点）。
- * C2 契约：桌面壳按 tab 经默认 slot 注入独占面板（Git/Doc/Detail/Browser/Terminal），
+ * C2 契约：桌面壳按 tab 经默认 slot 注入独占面板（Git/Doc/Detail/Subagent 等），
  * 无匹配面板时（如 browser 无 url）不注入 → 应回退空态占位。但 Vue `<slot>` 的
  * fallback 只在「父组件未提供 slot 函数」时生效——PanelContainer 的 v-if chain 使 slot 函数
  * 始终存在（运行时渲染为空/注释节点），故需在此显式判断渲染结果，空则走空态。
@@ -127,7 +118,6 @@ const props = withDefaults(
   defineProps<{
     isOpen: boolean
     activeTab: SideDrawerTab
-    docked: boolean
     /** 订阅的 session 标识（壳层透传） */
     sessionId: string | null
   }>(),
@@ -137,7 +127,6 @@ const props = withDefaults(
 const emit = defineEmits<{
   close: []
   'set-tab': [tab: SideDrawerTab]
-  'toggle-dock': []
 }>()
 
 const { t } = useI18n()
@@ -150,101 +139,36 @@ interface TabMeta {
   emptyHint: string
 }
 
-/** tab 元信息（§6.3 点2：Terminal/Browser/Git/Doc/Detail）。
- *  Git tab 内容为 GitPanel（壳 slot 注入，inject 数据）。
- *  [P4 s5 w2] Tasks 条件 tab（T3 壳裁剪）已随 tasks 域删除移除。 */
-const tabs = computed<TabMeta[]>(() => {
-  const base: TabMeta[] = [
-    {
-      key: 'terminal',
-      label: t('panel.sideDrawer.tabTerminal'),
-      icon: TerminalIcon,
-      emptyText: t('panel.sideDrawer.noTerminal'),
-      emptyHint: t('panel.sideDrawer.terminalHint'),
-    },
-    {
-      key: 'browser',
-      label: t('panel.sideDrawer.tabBrowser'),
-      icon: Globe,
-      emptyText: t('panel.sideDrawer.noBrowser'),
-      emptyHint: t('panel.sideDrawer.browserHint'),
-    },
-    {
-      key: 'git',
-      label: t('panel.sideDrawer.tabGit'),
-      icon: GitBranch,
-      emptyText: t('panel.sideDrawer.noGit'),
-      emptyHint: t('panel.sideDrawer.gitHint'),
-    },
-    {
-      key: 'doc',
-      label: t('panel.sideDrawer.tabDoc'),
-      icon: BookOpen,
-      emptyText: t('panel.sideDrawer.noDoc'),
-      emptyHint: t('panel.sideDrawer.docHint'),
-    },
-    {
-      key: 'detail',
-      label: t('panel.sideDrawer.tabDetail'),
-      icon: FileText,
-      emptyText: t('panel.sideDrawer.noFileSelected'),
-      emptyHint: t('panel.sideDrawer.detailHint'),
-    },
-    // subagent/workflow 一级 tab（2026-08-14 subagent-workflow-drawer-tab U2）：
-    // collapsed only chat 块点击 → openSubagent/openWorkflow 开对应 tab。
-    // 内容由壳层（PanelContainer）经默认 slot v-if chain 注入 SubagentTab/WorkflowTab
-    // （ui 库不 import renderer 组件，延续 D5 硬编码占位留壳 slot 挂载模式）。
-    {
-      key: 'subagent',
-      label: t('panel.sideDrawer.tabSubagent'),
-      icon: Bot,
-      emptyText: t('panel.sideDrawer.noSubagent'),
-      emptyHint: t('panel.sideDrawer.subagentHint'),
-    },
-    {
-      key: 'workflow',
-      label: t('panel.sideDrawer.tabWorkflow'),
-      icon: Workflow,
-      emptyText: t('panel.sideDrawer.noWorkflow'),
-      emptyHint: t('panel.sideDrawer.workflowHint'),
-    },
-    // bashTask tab（2026-09 background-task-sidebar-view D5②）：后台命令详情。内容由壳层
-    // （PanelContainer）经默认 slot v-if chain 注入 BackgroundTaskDetailPanel（未选中任务
-    // 不注入 → 本组件空态 fallback），延续 ui 库不 import renderer 组件的留壳 slot 模式。
-    {
-      key: 'bashTask',
-      label: t('panel.sideDrawer.tabBashTask'),
-      icon: SquareTerminal,
-      emptyText: t('panel.sideDrawer.noBashTask'),
-      emptyHint: t('panel.sideDrawer.bashTaskHint'),
-    },
-    // plan tab（plan 模式重设计 u1-drawer-tab G2）：计划产物（agent 按 skill 流程产出的
-    // 多文档审阅面）。内容由壳层（PanelContainer）经默认 slot v-if chain 注入空面板骨架
-    // （PlanDocsPanel 归 u1-docs-panel），延续留壳 slot 模式；自动打开经 ADR-0053
-    // per-session pendingOpen 语义（renderer 侧 usePlanDrawerSync 接线，本组件不感知）。
-    // i18n key 落 plan 域文件（plan.drawer.*）——tab 语义属 plan 模式域，不并入 panel.sideDrawer。
-    {
-      key: 'plan',
-      label: t('plan.drawer.tabPlan'),
-      icon: SquareCheckBig,
-      emptyText: t('plan.drawer.noPlan'),
-      emptyHint: t('plan.drawer.planHint'),
-    },
-    // btw tab（btw-question D7，M3-a 第 10 员）：旁路线面板（线列表 + MessageStream +
-    // Composer 复用 + fork pill）。内容由壳层（PanelContainer）经默认 slot v-if chain 注入
-    // BtwPanel（留壳 slot 模式，ui 库不 import renderer 组件）；打开经 openDrawerTab('btw')
-    // （composer btw 按钮入口归 M3-b）。i18n key 落 btw 域文件（btw.drawer.*）——对齐 plan
-    // 域先例，tab 语义属 btw 功能域不并入 panel.sideDrawer。
-    {
-      key: 'btw',
-      label: t('btw.drawer.tabBtw'),
-      icon: MessagesSquare,
-      emptyText: t('btw.drawer.noThread'),
-      emptyHint: t('btw.drawer.threadHint'),
-    },
-  ]
-  return base
-})
+/** tab 元信息（图标标识 → @lucide/vue 组件映射，display-containers §7.2：图标是 Vue 组件进不了
+ *  core，ui 层建映射表解析渲染；标签/空态文案的 i18n key 由注册表条目携带）。 */
+const ICON_BY_ID: Record<string, Component> = {
+  terminal: TerminalIcon,
+  globe: Globe,
+  'git-branch': GitBranch,
+  'book-open': BookOpen,
+  'file-text': FileText,
+  bot: Bot,
+  'square-terminal': SquareTerminal,
+  'square-check-big': SquareCheckBig,
+  'messages-square': MessagesSquare,
+  workflow: Workflow,
+}
+
+/** 注册表新增图标标识未入映射时的占位（file-text 同形中性图标；新条目评审/测试可见） */
+const FALLBACK_ICON: Component = FileText
+
+/** L1 tab 列表 = 右抽屉注册表载入序列（单一权威 §7.7：禁止与注册表各自文字化）。
+ *  各 tab 的桌面内容面板仍由壳层（PanelContainer）经默认 slot v-if chain 注入（C2），
+ *  本组件不感知面板归属；空态/未读徽章不变。 */
+const tabs = computed<TabMeta[]>(() =>
+  RIGHT_DRAWER_W0_ENTRIES.map((entry: ContainerRegistryEntry) => ({
+    key: entry.content,
+    label: t(entry.labelKey),
+    icon: ICON_BY_ID[entry.icon] ?? FALLBACK_ICON,
+    emptyText: t(entry.emptyTextKey),
+    emptyHint: t(entry.emptyHintKey),
+  })),
+)
 
 const activeTabMeta = computed<TabMeta>(() => tabs.value.find((tab) => tab.key === props.activeTab) ?? tabs.value[0])
 </script>
