@@ -330,6 +330,54 @@ describe('TerminalService', () => {
     }
   })
 
+  it('TS-DA1: destroyAll 全量 kill + 清 ptyMap（runtime shutdown 链显式收口）', async () => {
+    const { publish } = createPublishCollector()
+    const svc = new TerminalService({ publish })
+    await svc.spawn('s-da1', undefined, 80, 24)
+    await svc.spawn('s-da2', undefined, 80, 24)
+
+    svc.destroyAll()
+    expect(mockPtys[0]!.kill).toHaveBeenCalledWith()
+    expect(mockPtys[1]!.kill).toHaveBeenCalledWith()
+    // ptyMap 清空：后续 write no-op（不触 pty.write）
+    svc.write('s-da1', 'ls\n')
+    expect(mockPtys[0]!.write).not.toHaveBeenCalled()
+  })
+
+  it('TS-DA2: destroyAll 幂等（空表 no-op，shutdown 双信号重入安全）', async () => {
+    vi.useFakeTimers()
+    try {
+      const { publish } = createPublishCollector()
+      const svc = new TerminalService({ publish })
+      await svc.spawn('s-da2', undefined, 80, 24)
+      const pty = mockPtys[0]!
+
+      svc.destroyAll()
+      svc.destroyAll() // 重入：空表 no-op，不重复 kill
+      vi.advanceTimersByTime(6000) // 升级链照常跑完（第一条路径的 timer）
+      expect(pty.kill).toHaveBeenCalledTimes(2) // SIGTERM + SIGKILL，无第三次
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('TS-DA3: destroyAll 后 PTY 未退出，升级 timer 无条件 SIGKILL（同 destroyPty 语义）', async () => {
+    vi.useFakeTimers()
+    try {
+      const { publish } = createPublishCollector()
+      const svc = new TerminalService({ publish })
+      await svc.spawn('s-da3', undefined, 80, 24)
+      const pty = mockPtys[0]!
+
+      svc.destroyAll()
+      vi.advanceTimersByTime(5000)
+      expect(pty.kill).toHaveBeenCalledTimes(2)
+      expect(pty.kill).toHaveBeenLastCalledWith('SIGKILL')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('TS-10: spawn 失败时 console.error 收到序列化后的 plain object（含 message/stack/code），非裸 Error 实例', async () => {
     // 回归守卫：spawn catch 块用 serializeError(e) 把 Error 转成 plain object 再传给 console.error。
     // 若有人改回裸 e，Error 实例经 logger 的 JSON.stringify 会变成 {}，日志看不出真实错误。

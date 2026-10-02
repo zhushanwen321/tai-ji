@@ -122,6 +122,15 @@ process.on('uncaughtException', (err) => {
   if (!app.isPackaged) process.exit(1)
 })
 
+// SIGTERM（dev-instance Ctrl+C/SIGHUP 转译、系统 shutdown/logout）→ app.quit()：
+// 走既有 before-quit 优雅链（runtime stop → destroyAll pi → pi 自身 handler 清
+// tracked shell），而非默认暴死——暴死会让 runtime/pi/shell 整树成孤儿（孤儿 shell
+// 加固②的 main 侧承接点；prod 同样受益：系统关机也给应用发 SIGTERM）。
+// 重复信号安全：before-quit 首行 isQuitting 幂等卫兵。
+process.on('SIGTERM', () => {
+  app.quit()
+})
+
 // ── 路径 & 模式 ──────────────────────────────────────────────────
 const isDev = !app.isPackaged
 

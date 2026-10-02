@@ -54,4 +54,12 @@ export interface ITerminalService {
    * kill 进程 + 移除 ptyMap 条目。sid 无 PTY 时 no-op。
    */
   destroyPty(sid: string): void
+  /**
+   * 销毁全部存活 PTY（runtime shutdown 链 dispose-terminal-ptys 步骤调用，孤儿
+   * shell 加固③）：逐个 kill + 清 ptyMap，SIGTERM 后升级兜底同 destroyPty。幂等
+   * （空表 no-op），shutdown 双信号重入安全。此后台依赖：PTY master 随进程死亡
+   * 关闭时内核会向 shell 发 SIGHUP 自清理，但那是隐式孝底——显式 kill 链（SIGTERM
+   * → 5s → SIGKILL）不依赖内核行为且可观测（升级日志留痕）。
+   */
+  destroyAll(): void
 }
