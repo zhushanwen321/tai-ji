@@ -307,7 +307,13 @@ function collectIdentifierRefs(node: AstNode, out: Set<string>): void {
     ) {
       for (const grandchild of childNodes(child)) {
         if (grandchild !== child.property && grandchild !== child.key) {
-          collectIdentifierRefs(grandchild, out);
+          // 对象侧/value 侧为叶子标识符时必须直接登记——collectIdentifierRefs 只收
+          // 子节点，叶子无子节点、递归自身将永久丢失（r1.output 的对象侧引用）
+          if (grandchild.type === "Identifier") {
+            if (typeof grandchild.name === "string") out.add(grandchild.name);
+          } else {
+            collectIdentifierRefs(grandchild, out);
+          }
         }
       }
       continue;

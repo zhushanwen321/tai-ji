@@ -302,6 +302,24 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
       void checker;
     });
 
+    it("成员访问对象侧引用 → dataflow 边（r1.output 形态：模板插值 / 二参对象值 / 裸标识符值）", () => {
+      const source = [
+        `const r1 = await agent({ prompt: "r", description: "researcher" });`,
+        "await agent({ prompt: `summarize: ${r1.output}`, description: \"summarizer\" });",
+        `await agent("seed", { label: "seeder", seed: r1.output });`,
+        `await agent({ prompt: "ctx", description: "ctxer", ctx: r1 });`,
+      ].join("\n");
+      const result = parseWorkflowDag(source);
+      if (!result.ok) throw new Error(result.message);
+      const [researcher, summarizer, seeder, ctxer] = result.dag.nodes;
+      const dataflow = result.dag.edges.filter((e) => e.kind === "dataflow");
+      // 三种引用形态各产一条 researcher → 下游 的 dataflow 边；成员属性名（output）
+      // 不是变量引用，不得凭空造第四条边
+      expect(dataflow).toHaveLength(3);
+      for (const edge of dataflow) expect(edge.from).toBe(researcher.id);
+      expect(dataflow.map((e) => e.to).sort()).toEqual([summarizer.id, seeder.id, ctxer.id].sort());
+    });
+
     it("if 环绕调用点 → conditional 边（谓词原文随边）；分支外顺序边不受影响", () => {
       const source = [
         `await agent({ prompt: "1", description: "gate" });`,
