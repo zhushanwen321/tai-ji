@@ -52,7 +52,8 @@ args:
 //   全局编号 dmg-r<轮>-<序号>（跨维度合并条目不再纯属于单一维度）；
 // - base 口径 = 分支增量（merge-base github/main HEAD），与 quality-gates --side dev-merge
 //   一致（pr-lifecycle 侧是累积 main，两侧差异有意）；
-// - fix 不由 fixer commit：组级文件清单申报、提交 agent（dmg-committer-r<轮>）串行统一
+// - fix 不由 fixer commit：组级文件清单申报、提交 agent（dmg-committer-<tag>-r<轮>，tag =
+//   gates/changeset/sweep/br 调用语境）串行统一
 //   commit（review-fix-loop 同款动机——避免并行 fixer 争 index.lock）；commit 拦截三分类：
 //   env 类 committer 就地恢复重试 / content 类后置补修循环（补修 fixer dmg-commit-fix 按
 //   报错原文补全、相交归属并入组清单重试、每组每轮 ≤2 次超限转 blocked）/ blocked 类组转
@@ -117,7 +118,8 @@ const EXISTS_UNDER_HOME =
 // LLM 自写文档会与 reconcileGroups 合并/补漏后的组错位）
 const WRITE_DOC =
   "require('fs').mkdirSync(require('path').dirname(process.argv[1]),{recursive:true});require('fs').writeFileSync(process.argv[1],process.argv[2])";
-// 组级统一 commit 由提交 agent（dmg-committer-r<轮>，LLM）执行——确定性脚本 commit 撞
+// 组级统一 commit 由提交 agent（dmg-committer-<tag>-r<轮>，LLM；tag 为调用语境
+// gates/changeset/sweep/br）执行——确定性脚本 commit 撞
 // 提交前自动检查（pre-commit）拦截时无处置能力即终止（历史上两次 fix-failure 均死于此），
 // LLM 执行员能读报错、按三分类处置（env 就地恢复 / content 申报后派补修 fixer / blocked 转待办）
 
@@ -1064,6 +1066,10 @@ async function main(): Promise<Record<string, unknown>> {
     const deferredCommits: { round: number; group: string; files: string[]; error: string }[] = [];
     // 终态清扫提交的文件（改造点 3）——随终态 sweptFiles 披露
     const sweptFiles: string[] = [];
+    // ledger.json 已实际落盘标志（G5 字段诚实性）：ledger 仅在 rebuildLedger 尾部写盘，早于
+    // 它的终态（R1 review-failure / aggregator-failure）没有 ledger——finishBr 对未落盘场景
+    // 返回 null 而非悬空路径（与 skipped 分支 ledgerFile: null 口径一致）
+    let ledgerOnDisk = false;
     // 归属对账集合（改造点 3 终态清扫第二条过滤）：修复组申报/跳过/越界文件 ∪ 补修披露文件 ∪
     // changeset 产物——对得上账的残留才进 sweep commit；无主改动（run 运行期间用户/其他会话
     // 写入本 worktree）不代提交，逐项 WARN 呈报
@@ -1095,7 +1101,7 @@ async function main(): Promise<Record<string, unknown>> {
         disputed: disputedRecs.map((r) => ({ id: r.id, title: r.title, severity: r.severity, files: r.files, evidence: r.disputeEvidence ?? "" })),
         deferredCommits: deferredCommits.map((d) => ({ ...d })),
         sweptFiles: [...sweptFiles],
-        ledgerFile: `${runDir}/ledger.json`,
+        ledgerFile: ledgerOnDisk ? `${runDir}/ledger.json` : null,
         message: msg,
       };
     }
@@ -1125,8 +1131,11 @@ async function main(): Promise<Record<string, unknown>> {
         swept.push(f);
       }
       if (swept.length === 0) return { swept, left, failed: false };
-      const uc = await runUnifiedCommit([{ group: "sweep", files: swept, message: "chore: dev-merge branch-review residual sweep" }], roundNo, { tag: "sweep" });
-      for (const f of uc.repairedFiles) attributableFiles.add(f);
+      // reservedFiles 与 br 主路径（runFixGroups 调用）同款：sweep commit 撞 content 拦截时
+      // 补修 fixer 可能改到待办组登记文件（该文件即使已在补修前 dirty 快照中，仍会经 declared
+      // 申报通道进入 allRepaired）——不传 reserved 会让它被并入 sweep 组重试清单裹挟提交，
+      // 待办组工作区改动随 sweep commit 入库、清单与 git 实物脱节（设计 §4.3 过滤 1）
+      const uc = await runUnifiedCommit([{ group: "sweep", files: swept, message: "chore: dev-merge branch-review residual sweep" }], roundNo, { reservedFiles: deferredCommits.flatMap((d) => d.files), tag: "sweep" });
       for (const f of uc.reservedHits) {
         if (!left.includes(f)) left.push(f);
       }
@@ -1459,6 +1468,7 @@ async function main(): Promise<Record<string, unknown>> {
         if (w.exitCode !== 0) {
           log(`WARN: [branch-review] ledger.json 落盘失败（不影响流程结果，审计上下文缺失）：${tailLines(`${w.stderr}\n${w.stdout}`, 3)}`);
         } else {
+          ledgerOnDisk = true;
           log(`[branch-review] ledger.json 已落盘（第 ${round} 轮，${records.length} 条）：${ledgerPath}`);
         }
       } catch (e) {
