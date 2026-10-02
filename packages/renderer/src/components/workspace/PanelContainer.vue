@@ -167,7 +167,8 @@
          defineAsyncComponent + LAZY_RETRY_KEY 作用域接线——chunk 装载失败占位链随搬家不丢失）。
          高度 = pool 百分比（heightPct 默认 35%，开合 0% ↔ displayPct% 纵轴动画）；上沿手柄
          拖拽/键盘调高度（clamp 15%–70% 写侧归 core；显示期 clamp 不写回，S2）。纵轴不派发
-         taiji:splitter-layout（§7.3：无消费方，不造无人读的事件）。 -->
+         taiji:splitter-layout（§7.3：无消费方，不造无人读的事件）。收合动画期内容保挂载
+         （U6 修复：Transition leave 语义，见下方包装层与 style 注释）。 -->
     <div
       data-testid="bottom-drawer"
       class="relative shrink-0 overflow-hidden"
@@ -188,11 +189,18 @@
         @pointercancel="onBottomHandlePointerUp"
         @keydown="onBottomHandleKeydown"
       />
-      <TerminalView
-        v-if="bottomOpen"
-        :key="terminalRetryKey"
-        :session-id="panelSessionId"
-      />
+      <!-- 收合过渡期内容保挂载（U6 修复，§6.2 S1「开合动画平顺」）：壳 height 过渡逐帧收拢
+           期间终端不同帧卸载（旧形态动画期空抽屉），卸载时机 = leave 过渡结束（Vue Transition
+           事件顺序语义，无定时兜底）。Transition 直接子项用无 key 包装层：retry 的 :key 重挂
+           留在内层，chunk 重试换件不经 leave/enter 过渡（chunk 失败占位链断言面不变）。 -->
+      <Transition name="bottom-drawer-content">
+        <div v-if="bottomOpen" class="h-full">
+          <TerminalView
+            :key="terminalRetryKey"
+            :session-id="panelSessionId"
+          />
+        </div>
+      </Transition>
     </div>
     </div>
     <!-- ExtensionHost 状态栏（audit §12.1）：数据经 app.provide STATUS_BAR_SOURCE_KEY 注入（useExtensionHostBridge），
@@ -472,3 +480,27 @@ const {
   onBottomHandleKeydown,
 } = useBottomDrawerHeight(poolEl, bottomOpen)
 </script>
+
+<style scoped>
+/*
+ * 底抽屉收合过渡期内容保挂载（display-containers §6.2 S1「开合动画平顺」，U6 修复）：
+ * 壳 height 过渡（--duration-slow）收拢期间内容不同帧消失——leave 期保持挂载并随壳淡出，
+ * 卸载时机 = leave 过渡结束（Vue Transition 事件顺序语义，无定时兜底）。leave-active 加
+ * absolute inset-0：收拢中的离场内容不占文档流（leave 未完即重开时新旧内容不叠流）。
+ * 淡出走 opacity 且与壳 height 过渡同参数同时长（收拢与淡出同步收束）；reduced-motion
+ * 全局兜底保留 opacity 过渡（style.css「更少更温和」非零裁决）。
+ */
+.bottom-drawer-content-leave-active {
+  position: absolute;
+  inset: 0;
+  transition: opacity var(--duration-slow) var(--ease);
+}
+
+.bottom-drawer-content-leave-from {
+  opacity: 1;
+}
+
+.bottom-drawer-content-leave-to {
+  opacity: 0;
+}
+</style>

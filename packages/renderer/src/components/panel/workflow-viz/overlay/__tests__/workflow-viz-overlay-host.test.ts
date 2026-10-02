@@ -30,7 +30,7 @@ import {
 import { ref } from 'vue'
 import type { Ref } from 'vue'
 import WorkflowVizOverlayHost from '../WorkflowVizOverlayHost.vue'
-import { closeOverlay, getOverlayControlState } from '@taiji/core/domain/overlay'
+import { closeOverlay, getOverlayControlState, openBrowser } from '@taiji/core/domain/overlay'
 import {
   closeWorkflowVizOverlay,
   closeWorkflowVizOverlayForSession,
@@ -99,6 +99,33 @@ vi.mock('../../panel/WorkflowLivePanel.vue', () => ({
   },
 }))
 
+// ── mock：BrowserOverlay stub（kind 门控用例经 openBrowser 换入 browser 内容）────
+// 真实 BrowserOverlay 会拉起 BrowserPane/view 链路；本文件只关心 Host 侧 kind 门控，
+// 壳内容无断言观测面，stub 掉保用例密闭。
+vi.mock('@/components/panel/BrowserOverlay.vue', () => ({
+  default: { name: 'BrowserOverlayStub', template: '<div />' },
+}))
+
+// ── mock：Guard 挂载计数包装（U4 kind 门控对账观测面）─────────────────────────
+// 保留真实 Guard 回落语义（onErrorCaptured → emit fallback 原样转发），仅在 setup 计数：
+// guardEpoch 重挂 = Guard 重建（:key 换代），计数即重挂次数。
+const { guardMounts } = vi.hoisted(() => ({ guardMounts: { count: 0 } }))
+vi.mock('../WorkflowVizOverlayGuard.vue', async (importOriginal) => {
+  const { defineComponent, h } = await import('vue')
+  const actual = await importOriginal<typeof import('../WorkflowVizOverlayGuard.vue')>()
+  return {
+    default: defineComponent({
+      name: 'CountingWorkflowVizOverlayGuard',
+      inheritAttrs: false,
+      emits: ['fallback'],
+      setup(_props, { attrs, slots, emit }) {
+        guardMounts.count++
+        return () => h(actual.default, { ...attrs, onFallback: () => emit('fallback') }, slots)
+      },
+    }),
+  }
+})
+
 // ── 测试数据 ──────────────────────────────────────────────────────────────────
 
 const SID = 's-main'
@@ -158,6 +185,7 @@ beforeEach(async () => {
   overlayDag.value = null
   overlayDagError.value = null
   panelThrowBox.value = false
+  guardMounts.count = 0
   mockGetDag.mockResolvedValue({ runId: 'x', dag: SAMPLE_DAG })
   focusPanel(SID)
 })
@@ -398,5 +426,66 @@ describe('Host 容器（黑盒 DOM + D10 回落）', () => {
     expect(wrapper.find('[data-testid="wf-live-panel-stub"]').exists()).toBe(true)
     wrapper.unmount()
     consoleSpy.mockRestore()
+  })
+})
+
+describe('kind 门控（U4 修复对账）：Guard 重挂与时长 tick 只随 workflow 内容开合', () => {
+  it('Guard 重挂：workflow 开必重挂（fresh Guard 复位 failed）；browser 开/换入零重挂', async () => {
+    await seedRecords([makeRun('wf-1', 's1')])
+    const wrapper = mount(WorkflowVizOverlayHost)
+    await flushPromises()
+    expect(guardMounts.count).toBe(1) // 关闭态首挂 1 次（immediate watch 不递增）
+
+    openWorkflowVizOverlay(SID, 'wf-1')
+    await flushPromises()
+    expect(guardMounts.count).toBe(2) // workflow 开 → epoch++ → 重挂
+
+    // 单例换内容：workflow → browser（isOpen 全程 true，仅 kind 判定感知换出）
+    openBrowser('http://localhost:1420', SID)
+    await flushPromises()
+    expect(guardMounts.count).toBe(2) // [U4] browser 换入零重挂（旧裸 overlayOpen 语义无法感知）
+
+    openWorkflowVizOverlay(SID, 'wf-1')
+    await flushPromises()
+    expect(guardMounts.count).toBe(3) // workflow 再入必重挂（fresh Guard，D10 每次点击均重试）
+
+    closeOverlay()
+    openBrowser('http://localhost:1420', SID)
+    await flushPromises()
+    expect(guardMounts.count).toBe(3) // [U4] 关闭态开 browser 零重挂（旧行为在此无谓重挂）
+
+    wrapper.unmount()
+  })
+
+  it('时长 tick：workflow 开启动、browser 换入即停（旧行为空转）、关闭即停', async () => {
+    await seedRecords([makeRun('wf-1', 's1', { startedAt: new Date(Date.now() - 5_000).toISOString() })])
+    const wrapper = mount(WorkflowVizOverlayHost)
+    await flushPromises()
+    // spy 在 mount 后建立：只观测用例内的开合动作（隔离环境杂音）
+    const setSpy = vi.spyOn(globalThis, 'setInterval')
+    const clearSpy = vi.spyOn(globalThis, 'clearInterval')
+
+    openWorkflowVizOverlay(SID, 'wf-1')
+    await flushPromises()
+    expect(setSpy).toHaveBeenCalledTimes(1) // workflow 开 → tick 启动
+    // 时长的用户可见消费面（壳 header 时长槽）随开渲染
+    expect(wrapper.find('[data-testid="wfvz-overlay-elapsed"]').exists()).toBe(true)
+
+    openBrowser('http://localhost:1420', SID)
+    await flushPromises()
+    expect(clearSpy).toHaveBeenCalledTimes(1) // [U4] 换入 browser 即停（旧行为 tick 空转）
+    expect(setSpy).toHaveBeenCalledTimes(1)
+
+    openWorkflowVizOverlay(SID, 'wf-1')
+    await flushPromises()
+    expect(setSpy).toHaveBeenCalledTimes(2) // workflow 再入 → 重启
+
+    closeOverlay()
+    await flushPromises()
+    expect(clearSpy).toHaveBeenCalledTimes(2) // 关闭即停
+
+    wrapper.unmount()
+    setSpy.mockRestore()
+    clearSpy.mockRestore()
   })
 })

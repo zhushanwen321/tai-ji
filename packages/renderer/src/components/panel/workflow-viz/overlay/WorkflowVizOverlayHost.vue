@@ -17,7 +17,7 @@
     v-if 不渲染，关闭态 DOM 零痕迹。
   - 已用时长（壳 header 槽，设计 §3.1-1）：D9 停走口径（terminal = completedAt、
     interrupted = health.lastProgressAt 缺省回 startedAt、running = 当前时刻），1s tick
-    仅在 open 态运行（关闭即停）；面板 header 的同口径时长归面板自身（双 header 形态——壳层服务 overlay 全局态、面板层使面板可独立测试复用；数值单源 deriveWorkflowRunElapsedMs 恒一致，裁决登记 = 设计文档 §3.1-2 header 裁决记录，2026-10-02 D5 终态同步）。
+    仅在 workflow 内容 open 态运行（内容切走/关闭即停，[U4] kind 门控）；面板 header 的同口径时长归面板自身（双 header 形态——壳层服务 overlay 全局态、面板层使面板可独立测试复用；数值单源 deriveWorkflowRunElapsedMs 恒一致，裁决登记 = 设计文档 §3.1-2 header 裁决记录，2026-10-02 D5 终态同步）。
 -->
 <template>
   <WorkflowVizOverlayGuard :key="guardEpoch" @fallback="onFallback">
@@ -93,8 +93,12 @@ const overlayRun = computed<{ sessionId: string; runId: string } | null>(() => {
 /** Guard 重挂代际（fallback 后递增；下次 open 重挂全新 Guard 实例复位 failed——D10 每次点击均重试）。 */
 const guardEpoch = ref(0)
 
-// 开 overlay 时递增（immediate 首挂同样建立递增基线，保证 :key 稳定存在）
-watch(overlayOpen, (open) => {
+// workflow 内容开时递增（immediate 首挂同样建立递增基线，保证 :key 稳定存在）。
+// [U4 修复] 门控用 isWorkflowOpen（kind 判定）而非裸 overlayOpen：开合态 SSOT 迁 core 后
+// isOpen kind 无关（browser 浮层开着时也是 true），裸值会让 Guard 随 browser 开合无谓重挂、
+// 且错过「workflow → browser 换出再换回（isOpen 全程 true）」的重入重挂——fresh Guard
+// 复位 failed 的语义只对 workflow 内容有意义（D10 每次点击均重试）。
+watch(isWorkflowOpen, (open) => {
   if (open) guardEpoch.value++
 }, { immediate: true })
 
@@ -151,11 +155,12 @@ const activePhase = computed<string | null>(() => {
   return null
 })
 
-// 已用时长 tick（仅 open 态运行；关闭即停，不留常驻定时器）
+// 已用时长 tick（仅 workflow 内容 open 态运行；内容切走（browser 换入）或关闭即停，
+// 不留常驻定时器。[U4 修复] kind 门控同 guardEpoch watch——isOpen 本身 kind 无关）
 const OPEN_TICK_INTERVAL_MS = 1000
 const now = ref(Date.now())
 let openTickTimer: ReturnType<typeof setInterval> | null = null
-watch(overlayOpen, (open) => {
+watch(isWorkflowOpen, (open) => {
   if (open) {
     now.value = Date.now()
     openTickTimer = setInterval(() => { now.value = Date.now() }, OPEN_TICK_INTERVAL_MS)

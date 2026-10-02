@@ -21,7 +21,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
-import { computed, reactive } from 'vue'
+import { computed, nextTick, reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
 import {
@@ -172,7 +172,9 @@ function bottomHeight(wrapper: Awaited<ReturnType<typeof mountContainer>>): stri
 
 async function mountContainer() {
   const PanelContainer = (await import('@/components/workspace/PanelContainer.vue')).default
-  return mount(PanelContainer)
+  // 真实 Transition（test-utils 默认 <transition-stub> 会吞掉 leave 语义——U6 收合期内容
+  // 保挂载的回归锚点必须走真实 leave 路径）；enter 无 CSS 类零动画，其余用例无感
+  return mount(PanelContainer, { global: { stubs: { transition: false } } })
 }
 
 beforeEach(() => {
@@ -253,7 +255,7 @@ describe('底抽屉纵轴布局（S1/S2 形态：split 行之下、StatusBar 之
     expect(wrapper.find('[data-testid="drawer-tab-terminal"]').exists()).toBe(false)
   }, 60_000)
 
-  it('收回底抽屉 → 高度回 0% 且终端卸载（对话流恢复原高：split 行吃回 flex-1）', async () => {
+  it('收回底抽屉 → 高度回 0%；收合过渡期终端保挂载（U6），leave 结束后卸载（对话流恢复原高：split 行吃回 flex-1）', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 'sess-bd-close')
     const wrapper = await mountContainer()
@@ -262,11 +264,18 @@ describe('底抽屉纵轴布局（S1/S2 形态：split 行之下、StatusBar 之
     expect(wrapper.find('[data-testid="terminal-loaded"]').exists()).toBe(true)
 
     toggleBottomDrawer()
-    await flushPromises()
+    await nextTick()
     expect(bottomHeight(wrapper)).toBe('0%')
-    expect(wrapper.find('[data-testid="terminal-loaded"]').exists()).toBe(false)
-    // 抽屉内容卸载后手柄不残留
+    // [U6] 收合动画期（壳 height 过渡期）终端仍挂载——动画期空抽屉回归锚点（真实
+    // Transition leave：元素带 leave-active 类保挂载，卸载时机 = leave 过渡结束）
+    expect(wrapper.find('[data-testid="terminal-loaded"]').exists()).toBe(true)
+    // 手柄（v-if 随开合态，不经 Transition）同帧消失
     expect(wrapper.find('[data-testid="bottom-drawer-resize-handle"]').exists()).toBe(false)
+
+    // leave 过渡结束（测试环境无 CSS → 时长 0，双 rAF 帧后移除）：终端卸载
+    await vi.waitFor(() => {
+      expect(wrapper.find('[data-testid="terminal-loaded"]').exists()).toBe(false)
+    })
   }, 60_000)
 })
 
