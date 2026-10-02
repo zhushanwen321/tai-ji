@@ -2,13 +2,14 @@
  * workflowStore 事件流缓存扩展测试（workflow-visualization U5——D11 生命周期五条逐条）。
  *
  * 覆盖：
- * - loadWorkflowRunEvents 成功写入 runId 分区（ready + events）；loading 在途合并
+ * - loadWorkflowRunEvents 成功写入 runId 分区（ready + events）；在途合并（runEventsInflight
+ *   原语承载——C-data-18 组装，force 在途窗口到达同样并入不另起 RPC）
  * - ready 缓存复用（非 force 不重发 RPC）/ force 覆盖重拉（信号触发 / 重试按钮语义）
  * - 错误二分数据形态：record_not_found 结构化回执（errorCode）/ RPC 通道错误（errorMessage）；
  *   error 态非 force 不自动重拉（重试是用户显式动作）
  * - D11① 在途丢弃检查：settle 时活跃锚已切走/已清 → 结果丢弃不写缓存
  * - D11② overlay 关闭不清缓存（重开秒显）；LRU 上界 5（最旧非活跃驱逐、活跃 run 豁免）
- * - D11⑤ clearSession 清该 session 名下 run 缓存 + 活跃锚；其他 session 分区保留
+ * - D11⑤ clearSession 清该 session 名下 run 缓存 + 活跃锚 + 在途去重簿记；其他 session 分区保留
  * - clearWorkflows 全清
  * - triggerWorkflowReload 活跃 run 联动 force 事件流重拉（§3.1-4 信号接线；非活跃不触发）
  *
@@ -95,6 +96,20 @@ describe('workflowStore 事件流缓存：拉取与缓存复用', () => {
     expect(mockGetRunEvents).toHaveBeenCalledTimes(1)
     resolveRpc(eventsReply(RUN_A))
     await Promise.all([first, second])
+    expect(store.runEventsOf(RUN_A)?.status).toBe('ready')
+  })
+
+  it('force 调用在途窗口内到达：并入在途拉取不另起 RPC（去重由 runEventsInflight 承载，缓存条目三态不兼任）', async () => {
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(SID, RUN_A)
+    let resolveRpc!: (v: unknown) => void
+    mockGetRunEvents.mockReturnValueOnce(new Promise((resolve) => (resolveRpc = resolve)))
+    const first = store.loadWorkflowRunEvents(SID, RUN_A)
+    // 信号触发的 force 重拉在首拉在途窗口到达——同 runId 仅首次发起，复用者共享 promise
+    const forced = store.loadWorkflowRunEvents(SID, RUN_A, { force: true })
+    expect(mockGetRunEvents).toHaveBeenCalledTimes(1)
+    resolveRpc(eventsReply(RUN_A))
+    await Promise.all([first, forced])
     expect(store.runEventsOf(RUN_A)?.status).toBe('ready')
   })
 
@@ -254,6 +269,30 @@ describe('workflowStore 事件流缓存：生命周期清理', () => {
     expect(store.runEventsOf(RUN_B)).toBeDefined()
     store.clearSession('s-other')
     expect(store.runEventsOf(RUN_B)).toBeUndefined()
+  })
+
+  it('clearSession 在途窗口释放去重簿记：后续同 runId 调用重新发起 RPC（不并入注定丢弃的在途拉取）', async () => {
+    const store = useWorkflowStore()
+    store.setActiveWorkflowRun(SID, RUN_A)
+    let resolveRpc!: (v: unknown) => void
+    mockGetRunEvents.mockReturnValueOnce(new Promise((resolve) => (resolveRpc = resolve)))
+    const stale = store.loadWorkflowRunEvents(SID, RUN_A)
+    expect(mockGetRunEvents).toHaveBeenCalledTimes(1)
+
+    // session 删除时首拉仍在途：分区 + 活跃锚 + 在途簿记一并释放
+    store.clearSession(SID)
+    // 重开该 run（分区重建后的重挂载形态）：新调用发起独立 RPC——若在途簿记未释放，
+    // 会静默并入已删除分区的陈旧在途（结果无 loading 占位可显示的空窗）
+    store.setActiveWorkflowRun(SID, RUN_A)
+    const fresh = store.loadWorkflowRunEvents(SID, RUN_A)
+    expect(mockGetRunEvents).toHaveBeenCalledTimes(2)
+    await fresh
+    expect(store.runEventsOf(RUN_A)?.status).toBe('ready')
+
+    // 陈旧在途 settle：活跃锚已重指本 run（非丢弃路径），写回同源数据无害
+    resolveRpc(eventsReply(RUN_A))
+    await stale
+    expect(store.runEventsOf(RUN_A)?.status).toBe('ready')
   })
 
   it('clearWorkflows：事件流缓存 + LRU 序 + 活跃锚全清', async () => {

@@ -214,6 +214,18 @@ describe('WorkflowLivePanel · header（使用者黑盒）', () => {
     expect(wrapper.find('[data-testid="wf-viz-run-elapsed"]').text()).toContain('20s')
   })
 
+  it('interrupted 暂停态无 health 锚（v2 事件 fold 投影恒缺省）：已用时长槽省略（—），不展示 0s', async () => {
+    // v2 投影不产出 health 字段（shared/workflow.ts 注释——消费侧按 unknown 处理）：
+    // 无停走锚 = 数据缺口，显示省略符而非确定的 0 值（跑半小时后中断显示「0s」更误导）
+    const wrapper = await mountPanel(makeRun({
+      status: 'interrupted',
+      reason: undefined,
+      completedAt: undefined,
+    }))
+    expect(wrapper.find('[data-testid="wf-viz-run-elapsed"]').text()).toContain('duration=—')
+    expect(wrapper.find('[data-testid="wf-viz-run-elapsed"]').text()).not.toContain('0s')
+  })
+
   it('interrupted 暂停态：在途 trace 行叠加中性停止色且不旋转（D9 停止着色 + 静态图标）', async () => {
     // call #2 = 无重试记录的纯 running（attempts 缺省）——stoppedInFlight 与 retrying 派生无关的正交验证
     const wrapper = await mountPanel(makeRun({

@@ -60,8 +60,9 @@ export function agentCallElapsedMs(call: WorkflowAgentCall, nowMs: number): numb
  * [可视化 D9] run 已用时长 ms（「中断/终局停走」口径的单点派生——overlay 壳 header
  * 与实况面板 header 两消费位共用，禁各自实现）。停走锚：running = 当前时刻；terminal
  * （done）= completedAt（不可解析回退 start）；interrupted（暂停态，无 completedAt）=
- * health.lastProgressAt（缺省或早于 start 回退 start）——不计挂起时间。返回 null =
- * startedAt 不可解析（消费方省略时长槽）。
+ * health.lastProgressAt（不计挂起时间）。返回 null = 时长槽省略（消费方显示 '—'）：
+ * startedAt 不可解析，或 interrupted 无 health 锚（缺省 / 早于 start——v2 事件 fold 投影
+ * 恒不产出 health 字段，见 shared/workflow.ts 注释；数据缺口不展示为确定的 0 值）。
  */
 export function deriveWorkflowRunElapsedMs(
   run: Pick<WorkflowRunRecord, 'status' | 'startedAt' | 'completedAt' | 'health'>,
@@ -77,7 +78,8 @@ export function deriveWorkflowRunElapsedMs(
     endMs = Number.isNaN(parsed) ? start : parsed
   } else {
     const lastProgress = run.health?.lastProgressAt
-    endMs = lastProgress !== undefined && lastProgress >= start ? lastProgress : start
+    if (lastProgress === undefined || lastProgress < start) return null
+    endMs = lastProgress
   }
   return Math.max(0, endMs - start)
 }
@@ -209,10 +211,11 @@ export const useWorkflowStore = defineStore('workflow', () => {
       // [W0/D4] 拉取收敛簿记一并清：在途 promise 完成后的 drainDirty 读到空簿记 → 不补拉
       inflightDedup.clear()
       dirtyWorkflows.clear()
-      // [可视化 U5/D11] 事件流簿记随实例回收（缓存 Map 本体随 ref 回收；LRU 序与活跃 run
-      // 锚是实例级非持久状态，清空防旧实例幻影写入）
+      // [可视化 U5/D11] 事件流簿记随实例回收（缓存 Map 本体随 ref 回收；LRU 序、活跃 run
+      // 锚与在途去重是实例级非持久状态，清空防旧实例幻影写入）
       runEventsLruOrder.length = 0
       activeWorkflowRun.value = null
+      runEventsInflight.clear()
     })
   }
 
@@ -286,6 +289,16 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const activeWorkflowRun = ref<{ sessionId: string; runId: string } | null>(null)
 
   /**
+   * [可视化 U5/D11] 事件流拉取在途去重（runId 级键）：组装 createInflightDedup 共享
+   * 原语（C-data-18——「同 key 并发异步操作去重」禁手写同构实现）。同 runId 在途期间的
+   * 新调用（含 force）共享在途 promise 不另起 RPC；settle 即清 + 引用比对防误删由原语
+   * 内建。缓存条目（runEventsByRun）只承载 loading/ready/error 展示三态，不兼任去重簿记
+   * ——「在途合并」判据不再落在条目 status 上（残留 loading 条目不会拦截后续拉取）。
+   * 随 clearSession / clearWorkflows / dispose 三点与缓存一并释放。
+   */
+  const runEventsInflight = createInflightDedup<void>()
+
+  /**
    * [可视化 D11] 活跃 run 信号纪元（每次 workflowUpdate 信号命中活跃 run 分支时自增）。
    * 消费方 = overlay 内的 agent tab 快照面（AgentTabContent watch 本纪元重调快照拉取，
    * 设计 §3.1-2/D8「实时性由列表 status + workflowUpdate 信号重新拉取体现」的 agentcall
@@ -340,6 +353,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
       if (entry.sessionId === sessionId) {
         runEventsByRun.value.delete(runId)
         removeFromRunEventsLru(runId)
+        // 在途去重簿记随条目一并释放：已删 session 的在途拉取结果会被活跃锚检查丢弃，
+        // 不让后续调用并入这条注定丢弃的在途（无 loading 占位可显示的静默窗口）
+        runEventsInflight.delete(runId)
       }
     }
     if (activeWorkflowRun.value?.sessionId === sessionId) activeWorkflowRun.value = null
@@ -352,10 +368,10 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   /**
    * D11① 在途丢弃的收尾（settle 且活跃锚已切走时由 performLoadRunEvents 调用）：撤除本次
-   * 拉取发起时写的 loading 占位条目——否则残留 loading 会被后续调用的「在途合并」误判为
-   * 在途拉取而 no-op，该 run 永远显示加载中（幻影 loading）。status === 'loading' 条件防
-   * 误删：只撤 loading 占位，不碰已被新拉取覆盖的条目（同 runId 并发拉取已被 loading 合并
-   * 拦截，loading 态至多一条，无交错窗口）。
+   * 拉取发起时写的 loading 占位条目——结果已被丢弃，条目若残留则该 run 的事件流分区永久
+   * 显示加载中（幻影 loading 展示）。status === 'loading' 条件防误删：只撤本次拉取的
+   * loading 占位，不碰已被新拉取覆盖的条目（同 runId 并发拉取已被 runEventsInflight 合并，
+   * loading 态至多一条，无交错窗口）。
    */
   function discardStaleRunEvents(sessionId: string, runId: string): void {
     const entry = runEventsByRun.value.get(runId)
@@ -366,19 +382,10 @@ export const useWorkflowStore = defineStore('workflow', () => {
   }
 
   /**
-   * 事件流拉取执行体。并发语义（run 级粒度）：loading 在途合并（重复调用 no-op）；
-   * ready 缓存复用（force = workflowUpdate 信号触发 / 子页重试按钮，覆盖缓存重拉）；
-   * error 态非 force 不自动重拉（重试是用户显式动作——record_not_found 静态指引恒无重试）。
+   * 事件流拉取执行体（loadWorkflowRunEvents 收敛壳内调用；只做「发起 + 写缓存」）。
+   * 在途合并由 runEventsInflight 承载（同 runId 仅首次发起，复用者共享 promise）。
    */
-  async function performLoadRunEvents(sessionId: string, runId: string, force: boolean): Promise<void> {
-    const existing = runEventsByRun.value.get(runId)
-    if (existing?.status === 'loading') return
-    if (!force && existing?.status === 'ready') {
-      touchRunEventsLru(runId)
-      return
-    }
-    if (!force && existing?.status === 'error') return
-
+  async function performLoadRunEvents(sessionId: string, runId: string): Promise<void> {
     runEventsByRun.value.set(runId, { sessionId, status: 'loading' })
     touchRunEventsLru(runId)
     evictRunEventsLru()
@@ -414,10 +421,23 @@ export const useWorkflowStore = defineStore('workflow', () => {
     return anchor !== null && anchor.runId === runId && anchor.sessionId === sessionId
   }
 
-  /** 事件流拉取入口（面板挂载首拉 / 信号触发 force 重拉 / 子页重试按钮 force）。 */
+  /**
+   * 事件流拉取入口（面板挂载首拉 / 信号触发 force 重拉 / 子页重试按钮 force）。
+   * 缓存语义（run 级粒度）：ready 缓存复用（force 覆盖重拉）；error 态非 force 不自动
+   * 重拉（重试是用户显式动作——record_not_found 静态指引恒无重试）；在途合并由
+   * runEventsInflight 承载（force 在途窗口到达同样并入该次在途，不另起 RPC——
+   * 同 runId 的新数据由后续信号/重开再触发拉取送达）。
+   */
   function loadWorkflowRunEvents(sessionId: string, runId: string, opts?: { force?: boolean }): Promise<void> {
     if (!sessionId || !runId) return Promise.resolve() // 空 sid/runId 不写分区（对齐 loadWorkflows 同款守卫）
-    return performLoadRunEvents(sessionId, runId, opts?.force ?? false)
+    const existing = runEventsByRun.value.get(runId)
+    if (!opts?.force && existing?.status === 'ready') {
+      touchRunEventsLru(runId)
+      return Promise.resolve()
+    }
+    if (!opts?.force && existing?.status === 'error') return Promise.resolve()
+    const { promise } = runEventsInflight.run(runId, () => performLoadRunEvents(sessionId, runId))
+    return promise
   }
 
   // ── actions ──
@@ -575,10 +595,11 @@ export const useWorkflowStore = defineStore('workflow', () => {
     // [W0/D4] 拉取收敛簿记一并清（同 clearSession / dispose 三点清理义务）
     inflightDedup.clear()
     dirtyWorkflows.clear()
-    // [可视化 U5/D11] 事件流缓存 + LRU 序 + 活跃 run 锚随全局重置一并清
+    // [可视化 U5/D11] 事件流缓存 + LRU 序 + 活跃 run 锚 + 在途去重簿记随全局重置一并清
     runEventsByRun.value = new Map()
     runEventsLruOrder.length = 0
     activeWorkflowRun.value = null
+    runEventsInflight.clear()
   }
 
   /**

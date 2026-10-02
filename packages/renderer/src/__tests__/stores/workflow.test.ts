@@ -775,13 +775,14 @@ describe('workflow store — [可视化 D9] deriveWorkflowRunElapsedMs（run 已
     expect(deriveWorkflowRunElapsedMs(runWith({ status: 'done', completedAt: 'garbage' }), NOW)).toBe(0)
   })
 
-  it('interrupted（无 completedAt）= health.lastProgressAt 锚停走（不计挂起时间）；缺省/早于 start 回退 start', () => {
+  it('interrupted（无 completedAt）= health.lastProgressAt 锚停走（不计挂起时间）；缺省/早于 start → null（时长槽省略）', () => {
     const run = runWith({ status: 'interrupted', health: { lastProgressAt: NOW - 5_000 } })
     expect(deriveWorkflowRunElapsedMs(run, NOW)).toBe(25_000) // 停在最后进展时刻，now 推进不增长
     expect(deriveWorkflowRunElapsedMs(run, NOW + 60_000)).toBe(25_000)
-    // lastProgressAt 缺省 / 早于 start → 回退 start（0）
-    expect(deriveWorkflowRunElapsedMs(runWith({ status: 'interrupted' }), NOW)).toBe(0)
-    expect(deriveWorkflowRunElapsedMs(runWith({ status: 'interrupted', health: { lastProgressAt: 1 } }), NOW)).toBe(0)
+    // lastProgressAt 缺省 / 早于 start → null：无可靠停走锚不展示为确定的 0 值（v2 事件
+    // fold 投影恒不产出 health——中断 run 走此省略分支，消费方 '—'）
+    expect(deriveWorkflowRunElapsedMs(runWith({ status: 'interrupted' }), NOW)).toBeNull()
+    expect(deriveWorkflowRunElapsedMs(runWith({ status: 'interrupted', health: { lastProgressAt: 1 } }), NOW)).toBeNull()
   })
 
   it('startedAt 不可解析 → null（时长槽省略）', () => {
