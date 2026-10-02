@@ -531,10 +531,19 @@ export class SessionRecords {
    * 文件目录，run journal 源错位（与壳侧 slug 锚 process.cwd() 而非 session cwd 的
    * 限制同族，边缘场景登记不改；根治属 core 布局单源）。
    * 会话 meta 不可得（pi 延迟写入 / 测试窄 mock）→ 无 tailer 的 entry-only
-   * 降级投影。
+   * 降级投影。[降级闩死修复 2026-10-02] 降级不再终身：早退分支内联升级腿
+   * （upgradeProjectionEventSources）——meta 可得后补建 tailer，fold 通道自愈。
    */
   private ensureProjection(sessionId: string, cache: RecordEntriesCache): SessionEventProjection {
-    if (cache.projection !== null) return cache.projection
+    if (cache.projection !== null) {
+      // [降级闩死修复 2026-10-02] 事件源迟到升级：创建时 meta 不可得（pi flush 前
+      // 窗口 / 磁盘扫描竞态）建出的 entry-only 降级投影此前被本早退永久复用——fold
+      // 通道对该 session 终身死亡（「icon 无 agent」形态的构造性成因之一）。meta
+      // 可得后补建 tailer（幂等：全接线源零成本早退）；补建的 rescan 经 fireChange
+      // → onEventProjectionChange 走既有发布腿，无需额外同步。
+      this.upgradeProjectionEventSources(sessionId, cache.projection)
+      return cache.projection
+    }
     const meta = this.deps.sessionStore
       .scanSessions({ force: true })
       .find((s) => s.id === sessionId)
@@ -558,6 +567,25 @@ export class SessionRecords {
     projection.attach()
     this.syncCacheFromProjection(cache, projection)
     return projection
+  }
+
+  /**
+   * [降级闩死修复 2026-10-02] 降级投影升级腿（ensureProjection 早退分支内联调用）：
+   * 事件源全接线时零成本早退；缺席时重扫 meta，可得则补建 tailer（目录推导与构造
+   * 路径同源）。meta 仍不可得 → 本轮跳过（下次 ensureProjection 再试，不设定时器
+   * ——重试由既有读/写触点驱动）。
+   */
+  private upgradeProjectionEventSources(sessionId: string, projection: SessionEventProjection): void {
+    if (!projection.needsEventSources()) return
+    const meta = this.deps.sessionStore
+      .scanSessions({ force: true })
+      .find((s) => s.id === sessionId)
+    if (meta === undefined) return
+    const cwd = meta.cwd
+    projection.attachEventSources({
+      recordsDir: typeof cwd === 'string' ? getSubagentRecordsDir(getPiAgentDir(), cwd) : undefined,
+      runJournalDir: join(dirname(meta.filePath), 'workflow-state'),
+    })
   }
 
   /**
