@@ -30,12 +30,13 @@ import {
   __clearSessionCleanupRegistryForTest,
 } from './use-session-scoped-state'
 // @ts-expect-error —— 无类型 .mjs 守卫脚本（Node 直跑形态），core 不为测试引入 allowJs；类型边界见下方别名
-import { collectCallSites, compareCensusToSnapshot } from '../../../../scripts/check-session-scoped-state-census.mjs'
+import { collectCallSites, compareCensusToSnapshot, CENSUS_SNAPSHOT } from '../../../../scripts/check-session-scoped-state-census.mjs'
 
 /** census 脚本（无类型 .mjs）的类型边界：仓库相对路径 → 非测试调用点次数 */
 type CensusCallSites = Record<string, number>
 const collectCensusCallSites = collectCallSites as () => CensusCallSites
 const censusDiffToSnapshot = compareCensusToSnapshot as (actual: CensusCallSites) => string[] | null
+const censusSnapshot = CENSUS_SNAPSHOT as CensusCallSites
 
 // 模块级 cleanup registry 跨测试可能残留（未包 effectScope 的用例无法触发反注册），
 // 每个用例前清空，防污染下游断言
@@ -402,12 +403,14 @@ describe('C-1 census 静态锁（守卫后误调用的唯一入口拦，新调�
   // 干跑同一实现，零双口径）；匹配口径（双形态锁模式 / 工厂定义行排除 / 扫描剪枝）与
   // 快照修正流程登记在脚本头注释。锁模式回归（如漏掉泛型形态）会表现为 census 计数
   // 下降 → 下方双向对账 diff 非空即红，无需独立自检用例。
-  it('全仓非测试调用点 census 与快照逐文件一致（15 文件各 1 处，清单外新调用点即红）', () => {
+  it('全仓非测试调用点 census 与快照逐文件一致（清单外新调用点即红）', () => {
     const actual = collectCensusCallSites()
     // 双向对账：新增 / 消失 / 计数变化任一即非 null（逐文件清单而非总数——防
     // 「+1 新调用 +1 删除」净额抵消漏检）
     expect(censusDiffToSnapshot(actual)).toBeNull()
-    expect(Object.keys(actual)).toHaveLength(15)
+    // 文件数从快照派生（快照单一源，与 diff 断言同口径）——硬编码计数在多单元并行
+    // 各自登记调用点时会双写冲突（display-containers u-w0-debt + u-w1-core 同批新增）
+    expect(Object.keys(actual)).toHaveLength(Object.keys(censusSnapshot).length)
 
   })
 })

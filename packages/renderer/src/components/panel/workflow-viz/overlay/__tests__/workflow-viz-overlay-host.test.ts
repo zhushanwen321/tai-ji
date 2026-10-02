@@ -24,24 +24,37 @@ import {
   openWorkflow,
   openWorkflowInDrawer,
   useDrawerControl,
+  useWorkflowSelection,
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
 import { ref } from 'vue'
 import type { Ref } from 'vue'
 import WorkflowVizOverlayHost from '../WorkflowVizOverlayHost.vue'
+import { closeOverlay, getOverlayControlState } from '@taiji/core/domain/overlay'
 import {
   closeWorkflowVizOverlay,
   closeWorkflowVizOverlayForSession,
   openWorkflowVizOverlay,
-  overlayCurrent,
   overlayDag,
   overlayDagError,
-  overlayOpen,
   retryDagParse,
 } from '../workflow-viz-overlay'
 import { useWorkflowStore } from '@/stores/workflow'
 import { usePanelStore } from '@/stores/panel'
 import type { WorkflowDag, WorkflowRunRecord } from '@taiji/shared'
+
+// ── core SSOT 读出投影（u-w1-core 迁移：开合态唯一权威 = core/domain/overlay）────
+
+/** 浮层是否开着（原 overlayOpen ref 已退役，读 core SSOT） */
+function isOverlayOpen(): boolean {
+  return getOverlayControlState().isOpen
+}
+
+/** 当前 workflow run 投影（core OverlayContent → { sessionId, runId } 断言口径） */
+function currentRun(): { sessionId: string; runId: string } | null {
+  const cur = getOverlayControlState().current
+  return cur !== null && cur.kind === 'workflow' ? cur.payload : null
+}
 
 // ── mock：RPC 域 + @/api 门面回指（u5 workflow-store-run-events.test.ts 同款）──
 
@@ -139,10 +152,9 @@ beforeEach(async () => {
   sidRef = ref<string | null>(null)
   bindDrawerSessionId(sidRef)
   _resetDrawerForTest()
-  // controller 模块单例状态复位（模块级 ref 直写——controller 未设测试 reset 导出，
-  // 装配绑定在 import 时已发生，本文件用例共用该绑定）
-  overlayOpen.value = false
-  overlayCurrent.value = null
+  // controller/SSOT 状态复位（overlay 开合态经 core closeOverlay——关浮层复位不变量；
+  // DAG 缓存模块级 ref 直写，装配绑定在 import 时已发生，本文件用例共用该绑定）
+  closeOverlay()
   overlayDag.value = null
   overlayDagError.value = null
   panelThrowBox.value = false
@@ -157,8 +169,8 @@ describe('opener 反查（D1 调用面：托盘 runId 直开 + block (name, slug
     openWorkflow('wf-2')
     await flushPromises()
 
-    expect(overlayOpen.value).toBe(true)
-    expect(overlayCurrent.value).toEqual({ sessionId: SID, runId: 'wf-2' })
+    expect(isOverlayOpen()).toBe(true)
+    expect(currentRun()).toEqual({ sessionId: SID, runId: 'wf-2' })
   })
 
   it('block 路径：(scriptName, slug) 精确命中（slug 区分并发 run）', async () => {
@@ -167,7 +179,7 @@ describe('opener 反查（D1 调用面：托盘 runId 直开 + block (name, slug
     openWorkflow('flow-a', { slug: 's2', sessionId: SID })
     await flushPromises()
 
-    expect(overlayCurrent.value).toEqual({ sessionId: SID, runId: 'wf-2' })
+    expect(currentRun()).toEqual({ sessionId: SID, runId: 'wf-2' })
   })
 
   it('block 路径：name 为路径/带扩展名形态时 basename 归一命中（L4 真机缺陷回归）', async () => {
@@ -176,13 +188,12 @@ describe('opener 反查（D1 调用面：托盘 runId 直开 + block (name, slug
     // 主 agent 常传绝对路径（/abs/path/flow-a.js）与 record.basename（flow-a）互通
     openWorkflow('/Users/agent/workflows/flow-a.js', { slug: 's1', sessionId: SID })
     await flushPromises()
-    expect(overlayCurrent.value).toEqual({ sessionId: SID, runId: 'wf-1' })
+    expect(currentRun()).toEqual({ sessionId: SID, runId: 'wf-1' })
 
-    overlayOpen.value = false
-    overlayCurrent.value = null
+    closeOverlay()
     openWorkflow('flow-a.mjs', { slug: 's2', sessionId: SID })
     await flushPromises()
-    expect(overlayCurrent.value?.runId).toBe('wf-2')
+    expect(currentRun()?.runId).toBe('wf-2')
   })
 
   it('slug 缺失回落「name → 最新 run」（记录末条，与 WorkflowTab 兼收解析同口径）', async () => {
@@ -191,7 +202,7 @@ describe('opener 反查（D1 调用面：托盘 runId 直开 + block (name, slug
     openWorkflow('flow-a', { sessionId: SID })
     await flushPromises()
 
-    expect(overlayCurrent.value?.runId).toBe('wf-3')
+    expect(currentRun()?.runId).toBe('wf-3')
   })
 
   it('slug 碰撞（多条同 slug）取最新一条并照常打开，不阻塞', async () => {
@@ -200,7 +211,7 @@ describe('opener 反查（D1 调用面：托盘 runId 直开 + block (name, slug
     openWorkflow('flow-a', { slug: 'dup', sessionId: SID })
     await flushPromises()
 
-    expect(overlayCurrent.value?.runId).toBe('wf-2')
+    expect(currentRun()?.runId).toBe('wf-2')
   })
 
   it('反查未命中 → 兜底显式 drawer 语义（workflow tab 打开 + 选中名注入，点击不丢反馈）', async () => {
@@ -209,11 +220,11 @@ describe('opener 反查（D1 调用面：托盘 runId 直开 + block (name, slug
     openWorkflow('gone-flow', { sessionId: SID })
     await flushPromises()
 
-    expect(overlayOpen.value).toBe(false)
+    expect(isOverlayOpen()).toBe(false)
     const drawer = useDrawerControl()
     expect(drawer.isOpen.value).toBe(true)
     expect(drawer.activeTab.value).toBe('workflow')
-    expect(drawer.selectedWorkflowName.value).toBe('gone-flow')
+    expect(useWorkflowSelection().selectedWorkflowName.value).toBe('gone-flow')
   })
 
   it('opener 未传 sessionId 且焦点 pane 无 session → no-op', async () => {
@@ -223,8 +234,8 @@ describe('opener 反查（D1 调用面：托盘 runId 直开 + block (name, slug
     openWorkflow('wf-1')
     await flushPromises()
 
-    expect(overlayOpen.value).toBe(false)
-    expect(overlayCurrent.value).toBeNull()
+    expect(isOverlayOpen()).toBe(false)
+    expect(currentRun()).toBeNull()
   })
 })
 
@@ -277,7 +288,7 @@ describe('DAG 通道（§3.1-5 两路错误归一 + 在途丢弃 + 重试）', (
     await flushPromises()
 
     // 旧拉取 settle 时活跃组合已是 wf-2 → 丢弃，不覆盖 wf-2 的结果
-    expect(overlayCurrent.value?.runId).toBe('wf-2')
+    expect(currentRun()?.runId).toBe('wf-2')
     expect(mockGetDag).toHaveBeenCalledTimes(2)
   })
 
@@ -302,13 +313,13 @@ describe('session 删除关 overlay（D11⑤）', () => {
   it('删除的是发起 session → 关 overlay；其他 session 不关', async () => {
     await seedRecords([makeRun('wf-1', 's1')], SID)
     openWorkflowVizOverlay(SID, 'wf-1')
-    expect(overlayOpen.value).toBe(true)
+    expect(isOverlayOpen()).toBe(true)
 
     closeWorkflowVizOverlayForSession('other-sid')
-    expect(overlayOpen.value).toBe(true)
+    expect(isOverlayOpen()).toBe(true)
 
     closeWorkflowVizOverlayForSession(SID)
-    expect(overlayOpen.value).toBe(false)
+    expect(isOverlayOpen()).toBe(false)
   })
 })
 
@@ -358,10 +369,10 @@ describe('Host 容器（黑盒 DOM + D10 回落）', () => {
 
     // Guard 捕获 → fallback 序列执行
     const drawer = useDrawerControl()
-    expect(overlayOpen.value).toBe(false)
+    expect(isOverlayOpen()).toBe(false)
     expect(drawer.isOpen.value).toBe(true)
     expect(drawer.activeTab.value).toBe('workflow')
-    expect(drawer.selectedWorkflowName.value).toBe('wf-1')
+    expect(useWorkflowSelection().selectedWorkflowName.value).toBe('wf-1')
     wrapper.unmount()
     consoleSpy.mockRestore()
   })
@@ -375,14 +386,14 @@ describe('Host 容器（黑盒 DOM + D10 回落）', () => {
     panelThrowBox.value = true
     openWorkflowVizOverlay(SID, 'wf-1')
     await flushPromises()
-    expect(overlayOpen.value).toBe(false)
+    expect(isOverlayOpen()).toBe(false)
 
     // 第二次打开：正常面板 → overlay 再次完整呈现
     panelThrowBox.value = false
     openWorkflowVizOverlay(SID, 'wf-1')
     await flushPromises()
 
-    expect(overlayOpen.value).toBe(true)
+    expect(isOverlayOpen()).toBe(true)
     expect(wrapper.find('[data-testid="wfvz-overlay-panel"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="wf-live-panel-stub"]').exists()).toBe(true)
     wrapper.unmount()

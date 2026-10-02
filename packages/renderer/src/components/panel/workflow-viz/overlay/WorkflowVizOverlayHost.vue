@@ -59,17 +59,26 @@ import type { WorkflowInstanceMatchResult } from '../blueprint-match'
 import { deriveNodeStatus } from '../gantt-segments'
 import type { WorkflowVizDagNodeStatus } from '../dag/types'
 import type { WorkflowVizDagClickPayload } from '../dag/types'
+import { useOverlayControl } from '@taiji/core/domain/overlay'
 import {
   closeWorkflowVizOverlay,
-  overlayCurrent,
   overlayDag,
   overlayDagError,
-  overlayOpen,
   retryDagParse,
 } from './workflow-viz-overlay'
 import { useWorkflowStore, deriveWorkflowRunElapsedMs } from '@/stores/workflow'
 
 const panelRef = ref<InstanceType<typeof WorkflowLivePanel> | null>(null)
+
+// overlay 开合态读 core SSOT（u-w1-core 迁移：workflow-viz-overlay 的 overlayOpen/overlayCurrent
+// 模块级 ref 已退役，开合态唯一权威 = core/domain/overlay）。
+const { isOpen: overlayOpen, current: overlayContent } = useOverlayControl()
+
+/** 当前 workflow run 投影（core OverlayContent → Host 的 run 选择形状；非 workflow 内容 = null）。 */
+const overlayRun = computed<{ sessionId: string; runId: string } | null>(() => {
+  const cur = overlayContent.value
+  return cur !== null && cur.kind === 'workflow' ? cur.payload : null
+})
 
 /** Guard 重挂代际（fallback 后递增；下次 open 重挂全新 Guard 实例复位 failed——D10 每次点击均重试）。 */
 const guardEpoch = ref(0)
@@ -81,7 +90,7 @@ watch(overlayOpen, (open) => {
 
 /** 当前 run 投影（workflowStore 分区按 runId 选中；信号触发的重拉经 store 响应式到达）。 */
 const runRecord = computed<WorkflowRunRecord | null>(() => {
-  const cur = overlayCurrent.value
+  const cur = overlayRun.value
   if (cur === null) return null
   const records = useWorkflowStore().recordsOf(cur.sessionId).value
   return records.find((w) => w.runId === cur.runId) ?? null
@@ -89,7 +98,7 @@ const runRecord = computed<WorkflowRunRecord | null>(() => {
 
 /** 面板输入（session + run 同时就绪才挂面板；run 记录被清理/分区清空时面板随之卸载）。 */
 const panelInput = computed<{ sessionId: string; runId: string; run: WorkflowRunRecord } | null>(() => {
-  const cur = overlayCurrent.value
+  const cur = overlayRun.value
   const run = runRecord.value
   return cur !== null && run !== null ? { sessionId: cur.sessionId, runId: cur.runId, run } : null
 })
@@ -174,7 +183,7 @@ function onSelect(payload: WorkflowVizDagClickPayload): void {
 
 /** D10 回落动作序列（无失败标记/计数分支）：关 overlay → drawer workflow tab + 注入选中态。 */
 function onFallback(): void {
-  const runId = overlayCurrent.value?.runId ?? ''
+  const runId = overlayRun.value?.runId ?? ''
   closeWorkflowVizOverlay()
   openDrawerTab('workflow')
   openWorkflowInDrawer(runId)

@@ -38,9 +38,18 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', 'test-re
  * 一致；13 个文件各 1 处非测试调用点，含模块级 2 处 drawer/control.ts 与
  * useSessionTrace.ts）。复核方式：`node scripts/check-session-scoped-state-census.mjs`
  * 干跑，按输出与下表逐文件对账；计数不符即 exit 3。
- */
-const CENSUS_SNAPSHOT = {
+ * [display-containers §6.6 W0 五字段迁出] 新增 drawer/selection/ 五处内容域/瞬时参数分区
+ * （subagent/workflow/bash-task/btw/transient——选中态迁出 DrawerControlState 的落点）。
+ * [display-containers §7.1 u-w1-core] 新增 bottom-drawer/control.ts（底抽屉 per-session
+ * 开合分区，bindDrawerSessionId 同款模块级单例）。 */
+export const CENSUS_SNAPSHOT = {
+  'packages/core/src/domain/bottom-drawer/control.ts': 1,
   'packages/core/src/domain/drawer/control.ts': 1,
+  'packages/core/src/domain/drawer/selection/bash-task.ts': 1,
+  'packages/core/src/domain/drawer/selection/btw.ts': 1,
+  'packages/core/src/domain/drawer/selection/subagent.ts': 1,
+  'packages/core/src/domain/drawer/selection/transient.ts': 1,
+  'packages/core/src/domain/drawer/selection/workflow.ts': 1,
   'packages/dom-core/src/composer/input/history.ts': 1,
   'packages/renderer/src/components/panel/MessageStream.vue': 1,
   'packages/renderer/src/components/panel/BtwPanel.vue': 1,
