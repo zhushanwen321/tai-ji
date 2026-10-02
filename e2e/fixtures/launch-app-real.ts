@@ -224,16 +224,27 @@ export async function launchRealApp(opts: RealLaunchOptions = {}): Promise<{
     fauxEnv.TAIJI_EXTENSION_PATHS = FAUX_PROVIDER_EXT_DIR
   }
 
+  // 子进程 env：继承 process.env 后剥离 ELECTRON_RUN_AS_NODE（与 launch-app.ts mock 轨同款
+  // 构造性免疫）。该变量（relay 打包模式注入，agent bash / Electron 宿主内可见）会让
+  // electron 二进制退化成纯 node 模式，不认 --remote-debugging-port → 全部用例
+  // electron.launch `Process failed to launch!` + `Electron: bad option`——剧本级
+  // `env -u ELECTRON_RUN_AS_NODE` 之外的第二道防线，直接裸跑 fixture 同样免疫。
+  const childEnv: Record<string, string> = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value === 'string') childEnv[key] = value
+  }
+  Object.assign(childEnv, {
+    // 不设 VITE_MOCK（renderer 已 real bundle）+ 不设 TAIJI_MOCK（启动 runtime）
+    TAIJI_E2E: '1',
+    TAIJI_AGENT_DATA_DIR: dataDir,
+    ...fauxEnv,
+  })
+  delete childEnv.ELECTRON_RUN_AS_NODE
+
   const app = await electron.launch({
     executablePath: ELECTRON_EXECUTABLE,
     cwd: ELECTRON_DIR,
-    env: {
-      ...process.env,
-      // 不设 VITE_MOCK（renderer 已 real bundle）+ 不设 TAIJI_MOCK（启动 runtime）
-      TAIJI_E2E: '1',
-      TAIJI_AGENT_DATA_DIR: dataDir,
-      ...fauxEnv,
-    },
+    env: childEnv,
     args: ['.'],
   })
 
