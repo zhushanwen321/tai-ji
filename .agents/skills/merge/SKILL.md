@@ -59,7 +59,7 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/init.sh <worktree-dir>
 5. **他人 commit 不动**：区间内存在 author 非本工作流的 commit → 停下询问用户，禁止自动改写
 6. **已在 review 的 PR**：整理会刷新 PR diff，若有进行中的人类 review 意见未处理完 → 先问用户再整理
 7. **区间内 merge commit 不碰**：重写会牵连重放其后全部 commit（冲突面陡增）→ 从最后一个 merge commit 之后重划整理起点，无法重划则放弃整理
-8. **重组 commit 全程走正常 pre-commit**（禁 `--no-verify`）——`reset --soft` 路线（路线 A，默认）下每笔重组 commit 都触发 hook，逐笔有守卫；这也是路线 A 优先于 rebase 的原因之一（rebase 逐笔重放不触发 hook，且需要交互 TTY，agent 环境会挂死）。rebase 作为批准替代路线（路线 B）见下方「执行方式」，须满足其补偿要求
+8. **重组 commit 全程走正常 pre-commit**（禁 `--no-verify`）——`reset --soft` 路线（路线 A，默认）下每笔重组 commit 都触发 hook，逐笔过检查；这也是路线 A 优先于 rebase 的原因之一（rebase 逐笔重放不触发 hook，且需要交互 TTY，agent 环境会挂死）。rebase 作为批准替代路线（路线 B）见下方「执行方式」，须满足其补偿要求
 9. **工作区先清空**：`git status --short` 非 empty（tracked + untracked）→ 先按全局提交策略处理完再进入本阶段
 
 **执行方式**（两步分离：先计划后应用，应用是确定性操作）：
@@ -81,7 +81,7 @@ git push github HEAD --force-with-lease
 **路线 B（批准替代）：rebase 整理**（2026-09-23 v0.10.3 发布期验证：62 → 35 commit 三轮收敛，tree-hash 等价）。适用：整理批次多（两位数 commit、多轮分组）或按笔重写 message 而非重新分组暂存时——`reset --soft` 路线在批次多时逐笔 hook + 重新暂存成本过高。约束 [MANDATORY]：
 
 1. 只能以**非交互形态**执行（`GIT_SEQUENCE_EDITOR` / `git rebase --onto` 等机制）；交互 TTY rebase 在 agent 环境会挂死（硬约束 8 的既有警告不变）
-2. rebase 逐笔重放**不触发 pre-commit hook**——整理完成后必须**补跑一轮全量守卫**补偿（`pnpm lint` + 类型检查 + 受影响域测试，等价阶段 1 口径），禁因「rebase 只是重放」跳过
+2. rebase 逐笔重放**不触发 pre-commit hook**——整理完成后必须**补跑一轮全量检查**补偿（`pnpm lint` + 类型检查 + 受影响域测试，等价阶段 1 口径），禁因「rebase 只是重放」跳过
 3. 机械校验 1-4 全过才算完成（tree-hash 等价在 rebase 路线下同样是防丢 hunk 的核心护栏）
 4. 硬约束 1-7、9 对路线 B 同样生效（备份先行 / force-with-lease / 他人 commit 不动等）
 
@@ -363,15 +363,24 @@ git push github "npm-${SLUG}-${STAMP}" > /tmp/merge-4n-push-tag.log 2>&1; echo "
 3. `pnpm --filter @zhushanwen/extension-protocol build` + `pnpm extensions:typecheck`
 4. `pnpm changeset publish`（预查 registry，只发未发布版本；extensions 直接发 .ts 源码）
 
-验证 CI 完成 + npm 上线：
+验证 CI 完成 + npm 上线——**整块一次执行，禁止拆开并行**：探测起点必须是 CI run 完成（`changeset publish` 是 CI 最后一步，探测窗口若早于它完成会整体落在发布前，误报「未上线」）；run 按 headSha 自动发现（npm tag 指向 HEAD，4N.4 已核对）：
 ```bash
 cd $WS_ROOT/main
-# 轮询 CI
-gh run list --workflow=release-npm.yml --repo zhushanwen321/tai-ji --limit 3
-gh run watch <run-id> --repo zhushanwen321/tai-ji
+# 第 1 段：等本次 tag 触发的 release-npm.yml 完成（--exit-status：run 失败时返回非零）
+SHA=$(git rev-parse HEAD)
+RUN_ID=""
+for i in 1 2 3 4 5 6; do
+  RUN_ID=$(gh run list --workflow=release-npm.yml --repo zhushanwen321/tai-ji --limit 5 --json databaseId,headSha \
+    | jq -r --arg sha "$SHA" '.[] | select(.headSha == $sha) | .databaseId' | head -1)
+  [ -n "$RUN_ID" ] && break
+  echo "  release-npm.yml run 尚未出现，10s 后重查"
+  sleep 10
+done
+[ -n "$RUN_ID" ] || { echo "✗ 60s 内未见本次 commit 触发的 run，先核对 tag 是否 push 成功：git ls-remote github 'refs/tags/npm-*'"; exit 1; }
+gh run watch "$RUN_ID" --repo zhushanwen321/tai-ji --exit-status || { echo "✗ release-npm.yml 失败，先归因：gh run view $RUN_ID --log-failed（勿盲目重打 tag）"; exit 1; }
 
-# 必须带具体版本号查（packument 任何版本都返回 200，验不出新版本发布）。
-# registry 最终一致性：新版本索引传播有延迟（v0.10.3 实测 15/23 包首轮 404、60s 内收敛），
+# 第 2 段：registry 探测（必须带具体版本号查——packument 任何版本都返回 200，验不出新版本发布）。
+# registry 最终一致性：publish 成功 ≠ 版本端点立即可查，新版本索引传播有延迟（v0.10.3 实测 15/23 包首轮 404、60s 内收敛），
 # 带上限重试（30s × 6 次），禁无限等待；超限按发布失败处理（exit 1），禁止放宽为「CI 绿即过」
 FAIL=0
 for entry in "@zhushanwen/pi-<pkg> <version>"; do
