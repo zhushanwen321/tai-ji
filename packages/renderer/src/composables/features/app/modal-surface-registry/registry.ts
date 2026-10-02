@@ -15,10 +15,19 @@
  * - **后行档消费方的开合态必须绑状态本体**（如 SessionList 绑删除确认态），禁绑广播计数器。
  *
  * 注意：本模块不做几何求交——shieldsView='intersecting' 成员与 view 显示矩形的双阈值空间
- * 滞回判定（§6.7 抖动面缓冲裁决）归 view 链（useBrowserRectSync 侧），本模块只报
- * 「哪些开着的表面声称遮蔽 view、按哪一档」。
+ * 滞回判定（§6.7 抖动面缓冲裁决）归 main 侧 view 收口链（browser gateway display-gate），
+ * 本模块只报「哪些开着的表面声称遮蔽 view、按哪一档、开态几何是多少」（rect 读点）。
  */
+import { shallowRef } from 'vue'
 import { modalSurfaceFlags, type ModalSurfaceId } from './manifest'
+
+/** 表面几何矩形（视口坐标 CSS px，getBoundingClientRect 同空间；view rect 链同一坐标系） */
+export interface ModalSurfaceRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
 
 /** 单个表面实例的注册描述 */
 export interface ModalSurfaceRegistration { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
@@ -28,13 +37,26 @@ export interface ModalSurfaceRegistration { // oe-exempt:20261003:framework:类�
   key: string
   /** 开合态读点（动作时刻直读，禁缓存） */
   isOpen: () => boolean
+  /** 开态几何读点（view 遮蔽族 'intersecting' 成员上报用，§5.1 规则 6②）：读点直读 DOM
+   *  实测（getBoundingClientRect）；缺省/返回 null = 不带 rect 上报（main 侧保守按相交处理）。
+   *  全屏阻塞面（unconditional）无需提供——fullscreen 上报不带 rect。 */
+  rect?: () => ModalSurfaceRect | null
 }
 
 interface RegistryEntry { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面 // oe-exempt:20261003:framework:聚合注册表数据契约，消费面为编排器与各表面单元
   surface: ModalSurfaceId
   isOpen: () => boolean
+  rect?: () => ModalSurfaceRect | null
   refCount: number
 }
+
+/** 成员表版本号（membership 变更信号源）：注册新条目 / 注销摘除条目时递增。view 遮蔽
+ *  联动（useShieldsViewSync）的反应式触发面依赖它——成员表的增删本身不是 Vue 响应式
+ *  变更（Map 非响应式），查询方必须在读点消费本版本号才能追踪「挂载⇔开」型成员
+ *  （isOpen 不读任何响应式 ref，卸载即注销）的开合翻转。
+ *  taste:allow-no-data-owner W24-EX-A（同 entries——注册基建的成员表变更计数器，
+ *  派生信号非独立数据源，owner 归属同一登记例外） */
+const membershipVersion = shallowRef(0)
 
 // taste:allow-no-data-owner W24-EX-A（模态表面聚合注册基建，登记草稿——同事件总线 handler
 // 注册表形态：refCount 保护的表面开合态注册表，非 GUI 数据、非持久、无单一 owner；
@@ -58,8 +80,10 @@ export function registerModalSurface(registration: ModalSurfaceRegistration): ()
     entries.set(registration.key, {
       surface: registration.surface,
       isOpen: registration.isOpen,
+      rect: registration.rect,
       refCount: 1,
     })
+    membershipVersion.value += 1
   }
   let released = false
   return () => {
@@ -68,7 +92,10 @@ export function registerModalSurface(registration: ModalSurfaceRegistration): ()
     const entry = entries.get(registration.key)
     if (!entry) return
     entry.refCount -= 1
-    if (entry.refCount <= 0) entries.delete(registration.key)
+    if (entry.refCount <= 0) {
+      entries.delete(registration.key)
+      membershipVersion.value += 1
+    }
   }
 }
 
@@ -91,12 +118,33 @@ export function anyModalSurfaceYieldsCmdW(): boolean {
   return openEntries().some((entry) => modalSurfaceFlags(entry.surface).yieldsCmdW)
 }
 
-/** view 遮蔽报告：开着且 shieldsView≠'none' 的成员及档位（几何求交/滞回归 view 链，见文件头） */
-export function openShieldingSurfaces(): Array<{ id: ModalSurfaceId; mode: 'unconditional' | 'intersecting' }> {
-  const report: Array<{ id: ModalSurfaceId; mode: 'unconditional' | 'intersecting' }> = []
-  for (const entry of openEntries()) {
+/**
+ * view 遮蔽报告：开着且 shieldsView≠'none' 的成员及档位（几何求交/滞回归 main 侧 view 链，
+ * 本模块只报「哪些开着的表面声称遮蔽 view、按哪一档、开态几何是多少」）。
+ *
+ * 响应式语义（useShieldsViewSync 触发面契约）：本函数内部读 membershipVersion（成员表
+ * 增删可追踪）+ 逐条目 isOpen getter（各成员绑定的响应式状态本体可追踪）——在 Vue
+ * 响应式作用域（watchEffect/computed）内调用时自动建立依赖；rect getter 的 DOM 实测
+ * 不响应（几何在每次重算时直读 DOM，由调用方的重算触发面保证新鲜度）。
+ */
+export function openShieldingSurfaces(): Array<{
+  id: ModalSurfaceId
+  mode: 'unconditional' | 'intersecting'
+  rect?: ModalSurfaceRect
+}> {
+  // 成员表版本号：读点消费 ⇒ 「挂载⇔开」型成员（卸载即注销）的开合翻转可追踪
+  void membershipVersion.value
+  const report: Array<{
+    id: ModalSurfaceId
+    mode: 'unconditional' | 'intersecting'
+    rect?: ModalSurfaceRect
+  }> = []
+  for (const entry of entries.values()) {
+    if (!entry.isOpen()) continue
     const mode = modalSurfaceFlags(entry.surface).shieldsView
-    if (mode !== 'none') report.push({ id: entry.surface, mode })
+    if (mode === 'none') continue
+    const rect = entry.rect?.() ?? null
+    report.push(rect !== null ? { id: entry.surface, mode, rect } : { id: entry.surface, mode })
   }
   return report
 }
@@ -115,4 +163,5 @@ export function isModalSurfaceOpen(id: ModalSurfaceId): boolean {
  */
 export function resetModalSurfaceRegistry(): void {
   entries.clear()
+  membershipVersion.value += 1
 }

@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import type { PopoverContentEmits, PopoverContentProps } from 'reka-ui'
+import { getCurrentInstance, onBeforeUnmount, ref } from 'vue'
 import type { HTMLAttributes } from 'vue'
 import { reactiveOmit } from '@vueuse/core'
-import { PopoverContent, PopoverPortal, useForwardPropsEmits } from 'reka-ui'
+import { PopoverContent, PopoverPortal, injectPopoverRootContext, useForwardPropsEmits } from 'reka-ui'
 import { cn } from '../../lib/utils'
+import { registerUiModalSurface } from '../../modal-surface-registrar'
 
 /**
  * PopoverContent —— composer 工具区浮层原语。
@@ -19,11 +21,37 @@ const emits = defineEmits<PopoverContentEmits>()
 
 const delegatedProps = reactiveOmit(props, 'class')
 const forwarded = useForwardPropsEmits(delegatedProps, emits)
+
+// 模态表面聚合注册（§6.7 弹出层族，经 renderer 注册桥——层级方向见
+// modal-surface-registrar.ts 文件头）：本原语常驻挂载（消费方模板恒含），开合态绑 reka
+// PopoverRoot context 的 open ref 状态本体（动作时刻直读，§6.7 R4 时序前提）；未在
+// PopoverRoot 内使用时 context 为 null。旗标组由登记表按 id 读取（Esc 让位、⌘W 不让位、
+// shieldsView intersecting——view 遮蔽联动按几何相交，rect 读内容根元素实测）。
+const popoverRootContext = injectPopoverRootContext(null)
+
+/** 内容根元素读点（view 遮蔽几何上报用）：内层 reka PopoverContent 单根渲染，实例 $el
+ *  即浮层 DOM；未挂载（关态）/非元素时 null → 上报不带 rect（主进程保守按相交）。 */
+const contentRef = ref<{ $el?: unknown } | null>(null)
+function contentRect(): { x: number; y: number; width: number; height: number } | null {
+  const el = contentRef.value?.$el
+  if (!(el instanceof HTMLElement)) return null
+  const r = el.getBoundingClientRect()
+  return { x: r.x, y: r.y, width: r.width, height: r.height }
+}
+
+const disposeSurfaceRegistration = registerUiModalSurface({
+  surface: 'popover-content',
+  key: `popover-content-${getCurrentInstance()?.uid ?? 0}`,
+  isOpen: () => popoverRootContext?.open.value ?? false,
+  rect: contentRect,
+})
+onBeforeUnmount(disposeSurfaceRegistration)
 </script>
 
 <template>
   <PopoverPortal>
     <PopoverContent
+      ref="contentRef"
       v-bind="forwarded"
       :class="
         cn(

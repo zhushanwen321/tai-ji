@@ -150,12 +150,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onUnmounted, type Component, type ComponentPublicInstance } from 'vue'
+import { ref, computed, onUnmounted, watch, nextTick, type Component, type ComponentPublicInstance } from 'vue'
 import { Search, Terminal, FileText, Code, MessageSquare, Clock, Loader2 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 // ui 原语走包内相对导入（不经 @taiji/ui 顶层 barrel）：SearchModal 经顶层 barrel
 // 再导出，顶层 barrel 自引用会闭合循环依赖环（R2 S-1）
 import { Input } from '../primitives/input'
+import { registerUiModalSurface } from '../modal-surface-registrar'
 import { useSearch, useSearchJump, useSearchModal, segments } from '@taiji/core'
 import type { SearchDeps, SearchItem } from '@taiji/core'
 
@@ -186,6 +187,17 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+// 模态表面聚合注册（§6.7 modal-dialog 族，经 renderer 注册桥——层级方向见
+// modal-surface-registrar.ts 文件头）：开合态绑 props.open 状态本体；旗标组由登记表按
+// id 读取（全屏阻塞面双键均让位 + shieldsView unconditional）。未装配桥（ui 单测 /
+// 非 taiji 宿主）静默跳过。
+const disposeSurfaceRegistration = registerUiModalSurface({
+  surface: 'search-modal',
+  key: 'search-modal',
+  isOpen: () => props.open,
+})
+onUnmounted(disposeSurfaceRegistration)
 
 const ICON: Record<SearchType, Component> = { command: Terminal, file: FileText, symbol: Code, session: MessageSquare }
 

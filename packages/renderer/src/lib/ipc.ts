@@ -235,6 +235,27 @@ export function browserSetOverlayState(state: {
 }
 
 /**
+ * shieldsView 遮蔽面全量上报（display-containers §5.1 规则 6② / §6.7 / §7.4 view 遮蔽联动）。
+ *
+ * 契约：**全量替换语义**——每次上报 = 当前开着的遮蔽面全集（非增量，调用方
+ * useShieldsViewSync 在重算触发面收敛后重报）。fullscreen=true = 全屏阻塞面（主进程无条件
+ * 隐藏 view）；fullscreen=false = 非全屏面（横幅/弹出层族），rect = 视口坐标 CSS px
+ * （getBoundingClientRect 同空间），与 view 显示矩形的几何相交判定与双阈值滞回都在主进程
+ * display-gate（renderer 只报事实不判相交）；rect 缺省时主进程保守按相交处理。
+ * 成员开态内 rect 变化（横幅文案随 level 改宽）也须重报——重算触发面归 useShieldsViewSync。
+ * 非法 payload 主进程 reject（error envelope）。无 IPC（web/mock）静默 no-op。
+ */
+export function browserSetShields(payload: {
+  faces: Array<{
+    id: string
+    fullscreen: boolean
+    rect?: { x: number; y: number; width: number; height: number }
+  }>
+}): Promise<void> {
+  return api?.browserSetShields(payload) ?? Promise.resolve()
+}
+
+/**
  * 监听主进程推送的 browser 状态变化（url/isLoading/error）。
  * 主进程 did-navigate / did-fail-load / did-start-loading 等事件触发时推送，
  * BrowserPane 据此更新地址栏真实 URL（防钓鱼）+ loading/error 态。

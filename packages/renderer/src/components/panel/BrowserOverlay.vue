@@ -50,6 +50,7 @@ import { closeOverlay, useOverlayControl } from '@taiji/core/domain/overlay'
 import OverlayShell from '@/components/panel/workflow-viz/overlay/OverlayShell.vue'
 import BrowserPane from '@/components/panel/BrowserPane.vue'
 import { useBrowserOverlayStateSync } from '@/composables/features/browser/useBrowserOverlayStateSync'
+import { useShieldsViewSync } from '@/composables/features/browser/useShieldsViewSync'
 
 const { t } = useI18n()
 
@@ -65,4 +66,8 @@ const browserContent = computed(() => {
 
 // 显示收口事实源上报（常驻：关态/换内容同样上报）
 useBrowserOverlayStateSync()
+
+// shieldsView 遮蔽面全量上报（常驻：聚合开合/overlay/resize 触发面收敛后重报，
+// §5.1 规则 6② view 遮蔽联动 renderer 半边——触发面与卸载复位语义见 composable 文件头）
+useShieldsViewSync()
 </script>

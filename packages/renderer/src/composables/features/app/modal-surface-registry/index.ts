@@ -25,6 +25,7 @@ export {
   isModalSurfaceOpen,
   resetModalSurfaceRegistry,
   type ModalSurfaceRegistration,
+  type ModalSurfaceRect,
 } from './registry'
 export { LOCAL_ESC_CONSUMERS, type LocalEscConsumerEntry } from './local-esc-consumers'
 export type { ModalSurfaceFlags, ShieldsViewMode } from '@taiji/core/domain/overlay'

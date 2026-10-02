@@ -141,6 +141,7 @@ import { useEventListener } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, X, Download, Palette, BarChart3, ArrowLeft, ArrowRight, PanelLeftClose } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
 import { getSettingsStore, useSettings, type SystemSettings } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
 import { createMirrorSave } from '@/composables/features/settings/setting-field'
@@ -180,6 +181,15 @@ const { t } = useI18n()
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ 'update:open': [value: boolean] }>()
+
+// 模态表面聚合注册（§6.7）：开合态绑 props.open 状态本体；旗标组由登记表按 id 读取
+// （模态族双键均让位 + shieldsView unconditional）。onBeforeUnmount 卸载对称注销。
+const disposeSurfaceRegistration = registerModalSurface({
+  surface: 'settings-modal',
+  key: 'settings-modal',
+  isOpen: () => props.open,
+})
+onBeforeUnmount(disposeSurfaceRegistration)
 
 const activeMenu = ref<MenuId>('provider')
 /** extension 域子视图（M16）：main=扩展管理 ExtensionPage / contributions=插件贡献 PluginContributionsPage。 */

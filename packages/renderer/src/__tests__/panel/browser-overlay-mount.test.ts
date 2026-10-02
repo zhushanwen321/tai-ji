@@ -32,6 +32,7 @@ const mockBrowserHide = vi.fn().mockResolvedValue(undefined)
 const mockBrowserShow = vi.fn().mockResolvedValue(undefined)
 const mockBrowserSetRect = vi.fn().mockResolvedValue(undefined)
 const mockBrowserSetOverlayState = vi.fn().mockResolvedValue(undefined)
+const mockBrowserSetShields = vi.fn().mockResolvedValue(undefined)
 const mockOnBrowserState = vi.fn().mockReturnValue(() => {})
 
 vi.mock('@/lib/ipc', () => ({
@@ -52,6 +53,9 @@ vi.mock('@/lib/ipc', () => ({
     content: 'browser' | 'workflow' | null
     sessionId: string | null
   }) => mockBrowserSetOverlayState(state),
+  browserSetShields: (payload: {
+    faces: Array<{ id: string; fullscreen: boolean; rect?: { x: number; y: number; width: number; height: number } }>
+  }) => mockBrowserSetShields(payload),
   onBrowserState: (cb: unknown) => mockOnBrowserState(cb),
   openExternal: vi.fn().mockResolvedValue(undefined),
 }))

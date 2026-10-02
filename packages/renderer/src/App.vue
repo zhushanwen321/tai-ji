@@ -58,6 +58,7 @@
        level 变化（升级）经 watch 重显。fixed 顶部居中，零布局侵入（同 CrashRecoveredBar 定位范式）。 -->
   <div
     v-if="memoryLevel !== 'normal' && !memoryBarDismissed"
+    ref="memoryBarRef"
     data-testid="memory-pressure-bar"
     class="fixed left-1/2 top-3 z-[9999] flex max-w-[min(520px,calc(100vw-6rem))] -translate-x-1/2 items-center gap-2 rounded-[var(--radius)] border border-border bg-surface py-2 pl-3 pr-2 shadow-lg"
   >
@@ -80,7 +81,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { Loader2, AlertCircle, AlertTriangle, X } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import TaijiLogo from '@/components/icons/TaijiLogo.vue'
@@ -90,6 +91,8 @@ import CrashRecoveredBar from '@/components/ui/CrashRecoveredBar.vue'
 import ToastContainer from '@/components/ui/ToastContainer.vue'
 import { Button } from '@/components/ui/button'
 import { useConnection } from '@/composables/useConnection'
+import { registerModalSurface, isModalSurfaceId } from '@/composables/features/app/modal-surface-registry'
+import { MODAL_SURFACE_REGISTRAR_KEY, type UiModalSurfaceRegistration } from '@taiji/ui'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import { bootstrapSettingsCore } from '@/composables/shell/useSettingsShell'
 import { usePermissionRequest } from '@/composables/shell/usePermissionRequest'
@@ -180,6 +183,36 @@ const { level: memoryLevel } = useMemoryPressure()
 const memoryBarDismissed = ref(false)
 // level 变化（normal→warn→critical 升级）时重显提示条：dismiss 只对当前 level 生效，不跨级别持久。
 watch(memoryLevel, () => { memoryBarDismissed.value = false })
+
+// 模态表面聚合注册（§6.7 横幅族）：内存压力提示条（App.vue 内联块，z-[9999]）非阻塞
+// 不入让位族，只入 view 遮蔽族（shieldsView intersecting——与 view 矩形几何相交才隐藏）。
+// 开合态绑「level 非正常 ∧ 未 dismiss」状态本体（与模板 v-if 同一谓词）；rect 读提示条
+// 根元素实测（warn/critical 文案切换的几何在重渲染后由上报链重测）。旗标组由登记表按 id 读取。
+const memoryBarRef = ref<HTMLElement | null>(null)
+function memoryBarRect(): { x: number; y: number; width: number; height: number } | null {
+  if (!memoryBarRef.value) return null
+  const r = memoryBarRef.value.getBoundingClientRect()
+  return { x: r.x, y: r.y, width: r.width, height: r.height }
+}
+const disposeMemoryBarSurface = registerModalSurface({
+  surface: 'memory-pressure-bar',
+  key: 'memory-pressure-bar',
+  isOpen: () => memoryLevel.value !== 'normal' && !memoryBarDismissed.value,
+  rect: memoryBarRect,
+})
+onBeforeUnmount(disposeMemoryBarSurface)
+
+// 模态表面注册桥装配（§6.7）：@taiji/ui 包内表面宿主（SearchModal / CompanionBand /
+// primitives 弹层族）不能反向依赖 renderer 注册表——根组件 provide 注册函数，ui 侧
+// inject 自注册（层级方向与未装配降级语义见 @taiji/ui modal-surface-registrar.ts）。
+// 未登记 id 抛错（与 registerModalSurface 登记红线同源，fail-fast 暴露漏登记）。
+provide(MODAL_SURFACE_REGISTRAR_KEY, (registration: UiModalSurfaceRegistration): (() => void) => {
+  const { surface, key, isOpen, rect } = registration
+  if (!isModalSurfaceId(surface)) {
+    throw new Error(`modal-surface-registry: 未登记的表面 id '${surface}'——先在 manifest.ts 登记（§6.7 完备性判据）`)
+  }
+  return registerModalSurface({ surface, key, isOpen, rect })
+})
 // 入站超界帧守卫消费编排（crash-forensics-and-watchdog §3.3 D8）：模块级单例（状态源在
 // core ws-client），幂等安装一次——丢帧上报 + 终止阀静态提示态投影 + 切走切回重试订阅。
 // App setup 顶层装配（与 bindForkNoticeEffect 同区），teardown 在 onBeforeUnmount 配对；

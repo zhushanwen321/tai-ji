@@ -19,6 +19,7 @@
          跳转/停止/退出逻辑由上层接线，本组件只保证事件链 emit navigateParent / abort / forceQuit。 -->
     <ContextMenuPortal v-if="hasAgentParent || canStop || canForceQuit">
       <ContextMenuContent
+        ref="menuContentRef"
         data-testid="session-context-menu"
         class="z-[1100] min-w-[160px] rounded-md border border-border-strong bg-bg-elevated p-1 text-neutral-fg shadow-2 outline-none"
       >
@@ -66,7 +67,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CornerLeftUp, Power, Square } from '@lucide/vue'
 import {
@@ -76,6 +77,7 @@ import {
   ContextMenuContent,
   ContextMenuItem,
 } from 'reka-ui'
+import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
 
 const props = defineProps<{
   sessionId: string
@@ -105,13 +107,35 @@ const { t } = useI18n()
 const confirmingStop = ref(false)
 /** 强制退出两段式确认态（同上）。 */
 const confirmingQuit = ref(false)
+/** 菜单开合态镜像（reka ContextMenuRoot open 经 update:open 广播；聚合注册读点直读）。 */
+const menuOpen = ref(false)
 /** 菜单关闭重置两个确认态，避免下次打开残留确认样式。 */
 function onMenuOpenChange(open: boolean): void {
+  menuOpen.value = open
   if (!open) {
     confirmingStop.value = false
     confirmingQuit.value = false
   }
 }
+
+// 模态表面聚合注册（§6.7 弹出层族）：右键菜单是键盘可感知的 reka 托管弹层（Esc 让位
+// ——reka DismissableLayer 不 preventDefault，走聚合让位档），开合态绑 update:open
+// 镜像 ref（ContextMenuRoot open 状态本体的官方通知通道，非广播计数器）；实例级 key
+// 按 session（N 个 SessionItem 各持一棵菜单树，同 session 单实例）。旗标组由登记表按 id 读取。
+const menuContentRef = ref<{ $el?: unknown } | null>(null)
+function menuRect(): { x: number; y: number; width: number; height: number } | null {
+  const el = menuContentRef.value?.$el
+  if (!(el instanceof HTMLElement)) return null
+  const r = el.getBoundingClientRect()
+  return { x: r.x, y: r.y, width: r.width, height: r.height }
+}
+const disposeSurfaceRegistration = registerModalSurface({
+  surface: 'session-item-context-menu',
+  key: `session-context-menu-${props.sessionId}`,
+  isOpen: () => menuOpen.value,
+  rect: menuRect,
+})
+onBeforeUnmount(disposeSurfaceRegistration)
 /** 停止首击进入确认态并阻止菜单关闭（reka select event cancelable）；再击 emit 并复位。 */
 function onStopSelect(e: Event): void {
   if (!confirmingStop.value) {
