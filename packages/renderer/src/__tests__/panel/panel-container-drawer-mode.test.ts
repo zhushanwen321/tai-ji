@@ -325,7 +325,7 @@ describe('PanelContainer bashTask tab 接线（D5③）', () => {
 
     expect(wrapper.find('[data-testid="bash-task-detail-panel"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(true)
-    // bashTask tab 按钮随 SideDrawerTab 扩展常驻（DrawerPanel D5②）
+    // bashTask tab 按钮随 RightDrawerTab 终态常驻（DrawerPanel D5②）
     expect(wrapper.find('[data-testid="drawer-tab-bashTask"]').exists()).toBe(true)
   }, 60_000)
 })
@@ -602,7 +602,7 @@ describe('PanelContainer btw tab 接线（btw-question D7 M3-a）', () => {
     expect(wrapper.find('[data-testid="btw-panel"]').exists()).toBe(true)
     // 常驻注入语义：面板存在时空态 fallback 不渲染（与 plan 同款）
     expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(false)
-    // btw tab 按钮随 SideDrawerTab 第 10 员常驻（DrawerPanel TabMeta；全量清单归注册表契约用例）
+    // btw tab 按钮随右抽屉终态 8 员常驻（DrawerPanel TabMeta；全量清单归注册表契约用例）
     expect(wrapper.find('[data-testid="drawer-tab-btw"]').exists()).toBe(true)
   }, 60_000)
 

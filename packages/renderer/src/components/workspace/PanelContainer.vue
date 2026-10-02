@@ -115,7 +115,7 @@
                Terminal tab → TerminalView（PTY 优先，交互式终端） -->
           <!-- session-trace inspector（D5b 临时上下文页）：选中 trace 行时切入 default slot
                最前（v-if chain 首项——优先于 activeTab 面板，点击即明确意图）；「← 返回」清
-               selectedKey 后回到 activeTab 内容（复原前 tab，SideDrawerTab 体系不变）。
+               selectedKey 后回到 activeTab 内容（复原前 tab，RightDrawerTab 体系不变）。
                未选中不注入（C2 v-if chain 语义保持，slot 空时走 DrawerPanel 空态 fallback）。 -->
           <TraceInspector v-if="traceSelected" :session-id="panelSessionId ?? ''" />
           <GitPanel v-else-if="drawerTab === 'git'" />
