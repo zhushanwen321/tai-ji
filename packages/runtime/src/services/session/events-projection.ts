@@ -58,6 +58,7 @@ import {
 
 import { mergeWorkflowStepRecords } from './workflow-step-merge.js'
 import { projectV2Workflow } from "./workflow-record-projection.js"
+import { logger } from '../../infra/logger.js'
 
 // ── run journal 行解析（域无关 tail 原语的 run 域注入）─────────
 
@@ -612,15 +613,25 @@ export class SessionEventProjection {
     // 初值；seq 守卫去重 + 坏帧保守停帧归 core 单点）。坏帧出声（warn 归消费方
     // 注入——停帧后骨架停在最近一致态，截断重建走 onReset 清 fold 全量重放）。
     const current = this.sources.runFolds.get(runId) ?? INITIAL_RUN_EVENT_FOLD
-    this.sources.runFolds.set(
+    const checkpoint = foldRunEventCheckpoint(events, (err, lastType) => {
+      console.warn(
+        `[events-projection] run journal fold stopped at a broken frame (file=${filename}, ` +
+          `lastType=${lastType}): ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }, current)
+    this.sources.runFolds.set(runId, checkpoint)
+    // [可观测性 2026-10-02] tail 读活动显形（workflow 详情空窗事故的第一定位锚）：
+    // journal 已写盘而本日志缺席 = tailer 没读到（watch 静默丢事件 + recheck 未生效）；
+    // 日志在场而 GUI 仍无步骤 = 故障在发布/GUI 腿——与发布归因行（trigger=
+    // event-projection）配套，两行即可二分。journal 只在 agent/phase 边界追加，
+    // 量级 = 每 agent 两行以内，info 档无噪声顾虑。
+    logger.info('[events-projection] run journal events applied', {
       runId,
-      foldRunEventCheckpoint(events, (err, lastType) => {
-        console.warn(
-          `[events-projection] run journal fold stopped at a broken frame (file=${filename}, ` +
-            `lastType=${lastType}): ${err instanceof Error ? err.message : String(err)}`,
-        )
-      }, current),
-    )
+      events: events.length,
+      lastSeq: checkpoint.lastSeq,
+      lifecycle: checkpoint.state.lifecycle,
+      asks: checkpoint.asks.size,
+    })
     this.recompute()
     this.fireChange()
   }

@@ -19,6 +19,9 @@
  * 复制自 session-records-reconcile.test.ts（测试文件间不互相 import）。fake timers。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { IMessageBus } from '../../message-bus/message-bus.js'
 import { MessageBus } from '../../message-bus/message-bus.js'
 import type { IProcessManager, IPiEngine } from '../../ports/pi-engine.js'
@@ -97,6 +100,43 @@ async function flushMicrotasks(): Promise<void> {
 
 function planFramesOf(publish: ReturnType<typeof vi.fn>): unknown[] {
   return publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.planState')
+}
+
+/** v2 workflow 注册条目 entry（fixture 形态对齐 events-projection.test.ts 同名 helper）。 */
+function workflowRegisteredEntry(runId: string, recordPath: string): Record<string, unknown> {
+  return {
+    type: 'custom',
+    customType: 'workflow-record',
+    id: 'e-wf-1',
+    parentId: null,
+    timestamp: '2026-10-02T00:00:00Z',
+    data: {
+      v: 2,
+      kind: 'registered',
+      runId,
+      workflowName: 'test-flow',
+      scriptName: 'test-flow',
+      slug: 'tf',
+      startedAt: 1000,
+      recordPath,
+    },
+  }
+}
+
+function workflowFramesOf(publish: ReturnType<typeof vi.fn>): unknown[] {
+  return publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.workflowUpdate')
+}
+
+function framesPublishedEvents(): Array<[string, Record<string, unknown>]> {
+  return loggerInfo.mock.calls.filter(
+    ([m]) => m === '[session-records] record frames published',
+  ) as unknown as Array<[string, Record<string, unknown>]>
+}
+
+function runJournalAppliedEvents(): Array<[string, Record<string, unknown>]> {
+  return loggerInfo.mock.calls.filter(
+    ([m]) => m === '[events-projection] run journal events applied',
+  ) as unknown as Array<[string, Record<string, unknown>]>
 }
 
 function warnsOf(prefix: string): Array<unknown[]> {
@@ -299,5 +339,77 @@ describe('断点显形 warn + 发布观测（W0 观测面）', () => {
     const pubEvents = loggerInfo.mock.calls.filter(([m]) => m === '[session-records] record frames published')
     expect(pubEvents).toHaveLength(1)
     expect(pubEvents[0]![1]).toMatchObject({ sessionId: 's1', trigger: 'invalidate' })
+  })
+})
+
+describe('发布归因 + workflowFolds fold 证据（可观测性 2026-10-02）', () => {
+  // 事故场景重放（workflow 详情空窗）：run journal 先落 run-created，entry 腿送注册条目
+  // 后 tailer 再读到 agent-started——两腿发布在观测面上必须可归因、fold 证据可分形。
+  it('tailer 腿发布落 trigger=event-projection + fold 证据推进；读活动落 events-projection 观测行；entry 腿对称', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wf-observe-'))
+    try {
+      const sessionDir = join(dir, 'sessions', 'enc-proj')
+      const runDir = join(sessionDir, 'workflow-state')
+      mkdirSync(runDir, { recursive: true })
+      const sessionFile = join(sessionDir, '2026-01-01T00-00-00-000Z_s1.jsonl')
+      writeFileSync(sessionFile, '')
+      const journal = join(runDir, 'wf-1.record.jsonl')
+      writeFileSync(
+        journal,
+        JSON.stringify({ type: 'run-created', runId: 'wf-1', workflowName: 'f', argsSummary: '', ts: 1000, seq: 1 }) + '\n',
+      )
+
+      const meta = { id: 's1', filePath: sessionFile, cwd: '/proj' }
+      const { records, publish, client } = makeRecords({
+        eventTailerRecheckMs: 30,
+        sessionStore: { scanSessions: vi.fn(() => [meta]) } as unknown as ISessionStore,
+      })
+      const fire = registerSession(records)
+      fire('s1')
+      client.getEntries.mockResolvedValue({
+        data: { entries: [workflowRegisteredEntry('wf-1', journal)], leafId: 'e1' },
+      })
+
+      // 轮 1（entry 腿送注册条目；attach 冷读抢跑 fold，asks=0）
+      records.invalidateRecordEntries('s1', 'workflow-record')
+      await flushDebounce()
+      await flushMicrotasks()
+      expect(workflowFramesOf(publish)).toHaveLength(1)
+      const round1 = framesPublishedEvents()
+      expect(round1).toHaveLength(1)
+      expect(round1[0]![1]).toMatchObject({
+        sessionId: 's1',
+        trigger: 'invalidate',
+        frames: ['session.workflowUpdate'],
+        workflowFolds: { 'wf-1': { fold: 'present', asks: 0 } },
+      })
+
+      // 轮 2（journal 追加 agent-started → tailer recheck 拾取 → fold 推进 → 归因发布）
+      appendFileSync(
+        journal,
+        JSON.stringify({ type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100, seq: 2 }) + '\n',
+      )
+      loggerInfo.mockClear()
+      await vi.advanceTimersByTimeAsync(120)
+
+      // 读活动观测行（events-projection 域）：tail 读到了什么，一步可见
+      const applied = runJournalAppliedEvents()
+      expect(applied).toHaveLength(1)
+      expect(applied[0]![1]).toMatchObject({ runId: 'wf-1', events: 1, lastSeq: 2, lifecycle: 'running', asks: 1 })
+
+      // 发布归因行：trigger=event-projection + fold 证据推进 + 无 elapsedMs（tailer 无轮概念）
+      const round2 = framesPublishedEvents()
+      expect(round2).toHaveLength(1)
+      expect(round2[0]![1]).toMatchObject({
+        sessionId: 's1',
+        trigger: 'event-projection',
+        frames: ['session.workflowUpdate'],
+        workflowFolds: { 'wf-1': { fold: 'present', asks: 1, lifecycle: 'running', lastSeq: 2 } },
+      })
+      expect('elapsedMs' in round2[0]![1]).toBe(false)
+      expect(workflowFramesOf(publish)).toHaveLength(2) // 两腿各一条 workflowUpdate
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
   })
 })
