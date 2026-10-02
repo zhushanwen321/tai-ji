@@ -135,45 +135,16 @@ function eventEnvelope(event: WorkflowRunEvent): Pick<WorkflowRunEventEntry, 'ts
  * core 事件 → shared 条目映射（逐成员载荷透传；input/result/scriptSource/args 四
  * 大字段按白名单截断并标注）。词表/字段形态跟随 core WorkflowRunEvent 联合与
  * shared WorkflowRunEventEntry u2 冻结契约（两端的覆盖编译锁守漂移）。
+ * 按事件类型分派到独立投影函数（每型字段形态自成一族，拆开各自演化）。
  */
 function projectRunEventEntry(event: WorkflowRunEvent): WorkflowRunEventEntry {
   switch (event.type) {
-    case 'run-created': {
-      const truncatedFields: WorkflowRunEventTruncatedField[] = []
-      const args = truncateJsonPayload(event.args, 'args', truncatedFields)
-      const scriptSource = truncateTextPayload(event.scriptSource, 'scriptSource', truncatedFields)
-      return {
-        type: 'run-created',
-        ...eventEnvelope(event),
-        runId: event.runId,
-        workflowName: event.workflowName,
-        argsSummary: event.argsSummary,
-        ...(args !== undefined ? { args } : {}),
-        ...(event.model !== undefined ? { model: event.model } : {}),
-        ...(scriptSource !== undefined ? { scriptSource } : {}),
-        ...(event.scriptPath !== undefined ? { scriptPath: event.scriptPath } : {}),
-        ...(event.budgetTimeMs !== undefined ? { budgetTimeMs: event.budgetTimeMs } : {}),
-        ...(event.budgetTokens !== undefined ? { budgetTokens: event.budgetTokens } : {}),
-        ...(truncatedFields.length > 0 ? { truncatedFields } : {}),
-      }
-    }
+    case 'run-created':
+      return projectRunCreated(event)
     case 'phase-started':
       return { type: 'phase-started', ...eventEnvelope(event), phase: event.phase }
-    case 'agent-started': {
-      const truncatedFields: WorkflowRunEventTruncatedField[] = []
-      const input = truncateTextPayload(event.input, 'input', truncatedFields)
-      return {
-        type: 'agent-started',
-        ...eventEnvelope(event),
-        taskIndex: event.taskIndex,
-        agentName: event.agentName,
-        attempt: event.attempt,
-        ...(event.phase !== undefined ? { phase: event.phase } : {}),
-        ...(event.memberRecordId !== undefined ? { memberRecordId: event.memberRecordId } : {}),
-        ...(input !== undefined ? { input } : {}),
-        ...(truncatedFields.length > 0 ? { truncatedFields } : {}),
-      }
-    }
+    case 'agent-started':
+      return projectAgentStarted(event)
     case 'agent-retrying':
       return {
         type: 'agent-retrying',
@@ -183,22 +154,8 @@ function projectRunEventEntry(event: WorkflowRunEvent): WorkflowRunEventEntry {
         backoffMs: event.backoffMs,
         reason: event.reason,
       }
-    case 'agent-settled': {
-      const truncatedFields: WorkflowRunEventTruncatedField[] = []
-      const result = truncateJsonPayload(event.result as unknown as Record<string, unknown> | undefined, 'result', truncatedFields)
-      return {
-        type: 'agent-settled',
-        ...eventEnvelope(event),
-        taskIndex: event.taskIndex,
-        attempt: event.attempt,
-        outcome: event.outcome,
-        ...(event.errorCode !== undefined ? { errorCode: event.errorCode } : {}),
-        durationMs: event.durationMs,
-        ...(event.stderrTeePath !== undefined ? { stderrTeePath: event.stderrTeePath } : {}),
-        ...(result !== undefined ? { result } : {}),
-        ...(truncatedFields.length > 0 ? { truncatedFields } : {}),
-      }
-    }
+    case 'agent-settled':
+      return projectAgentSettled(event)
     case 'phase-settled':
       return { type: 'phase-settled', ...eventEnvelope(event), phase: event.phase }
     case 'run-interrupted':
@@ -209,14 +166,7 @@ function projectRunEventEntry(event: WorkflowRunEvent): WorkflowRunEventEntry {
         ...(event.reason !== undefined ? { reason: event.reason } : {}),
       }
     case 'run-resumed':
-      return {
-        type: 'run-resumed',
-        ...eventEnvelope(event),
-        ...(event.reason !== undefined ? { reason: event.reason } : {}),
-        ...(event.host !== undefined ? { host: event.host } : {}),
-        ...(event.budgetTimeMs !== undefined ? { budgetTimeMs: event.budgetTimeMs } : {}),
-        ...(event.budgetTokens !== undefined ? { budgetTokens: event.budgetTokens } : {}),
-      }
+      return projectRunResumed(event)
     case 'run-settled':
       return {
         type: 'run-settled',
@@ -228,6 +178,74 @@ function projectRunEventEntry(event: WorkflowRunEvent): WorkflowRunEventEntry {
       }
     case 'worker-log':
       return { type: 'worker-log', ...eventEnvelope(event), entry: event.entry }
+  }
+}
+
+/** run-created 条目：args/scriptSource 两大字段截断 + 可选元字段透传。 */
+function projectRunCreated(event: Extract<WorkflowRunEvent, { type: 'run-created' }>): WorkflowRunEventEntry {
+  const truncatedFields: WorkflowRunEventTruncatedField[] = []
+  const args = truncateJsonPayload(event.args, 'args', truncatedFields)
+  const scriptSource = truncateTextPayload(event.scriptSource, 'scriptSource', truncatedFields)
+  return {
+    type: 'run-created',
+    ...eventEnvelope(event),
+    runId: event.runId,
+    workflowName: event.workflowName,
+    argsSummary: event.argsSummary,
+    ...(args !== undefined ? { args } : {}),
+    ...(event.model !== undefined ? { model: event.model } : {}),
+    ...(scriptSource !== undefined ? { scriptSource } : {}),
+    ...(event.scriptPath !== undefined ? { scriptPath: event.scriptPath } : {}),
+    ...(event.budgetTimeMs !== undefined ? { budgetTimeMs: event.budgetTimeMs } : {}),
+    ...(event.budgetTokens !== undefined ? { budgetTokens: event.budgetTokens } : {}),
+    ...(truncatedFields.length > 0 ? { truncatedFields } : {}),
+  }
+}
+
+/** agent-started 条目：input 大字段截断 + 定位字段透传。 */
+function projectAgentStarted(event: Extract<WorkflowRunEvent, { type: 'agent-started' }>): WorkflowRunEventEntry {
+  const truncatedFields: WorkflowRunEventTruncatedField[] = []
+  const input = truncateTextPayload(event.input, 'input', truncatedFields)
+  return {
+    type: 'agent-started',
+    ...eventEnvelope(event),
+    taskIndex: event.taskIndex,
+    agentName: event.agentName,
+    attempt: event.attempt,
+    ...(event.phase !== undefined ? { phase: event.phase } : {}),
+    ...(event.memberRecordId !== undefined ? { memberRecordId: event.memberRecordId } : {}),
+    ...(input !== undefined ? { input } : {}),
+    ...(truncatedFields.length > 0 ? { truncatedFields } : {}),
+  }
+}
+
+/** agent-settled 条目：result 大字段截断 + outcome/duration 透传。 */
+function projectAgentSettled(event: Extract<WorkflowRunEvent, { type: 'agent-settled' }>): WorkflowRunEventEntry {
+  const truncatedFields: WorkflowRunEventTruncatedField[] = []
+  const result = truncateJsonPayload(event.result as unknown as Record<string, unknown> | undefined, 'result', truncatedFields)
+  return {
+    type: 'agent-settled',
+    ...eventEnvelope(event),
+    taskIndex: event.taskIndex,
+    attempt: event.attempt,
+    outcome: event.outcome,
+    ...(event.errorCode !== undefined ? { errorCode: event.errorCode } : {}),
+    durationMs: event.durationMs,
+    ...(event.stderrTeePath !== undefined ? { stderrTeePath: event.stderrTeePath } : {}),
+    ...(result !== undefined ? { result } : {}),
+    ...(truncatedFields.length > 0 ? { truncatedFields } : {}),
+  }
+}
+
+/** run-resumed 条目：恢复上下文可选字段透传。 */
+function projectRunResumed(event: Extract<WorkflowRunEvent, { type: 'run-resumed' }>): WorkflowRunEventEntry {
+  return {
+    type: 'run-resumed',
+    ...eventEnvelope(event),
+    ...(event.reason !== undefined ? { reason: event.reason } : {}),
+    ...(event.host !== undefined ? { host: event.host } : {}),
+    ...(event.budgetTimeMs !== undefined ? { budgetTimeMs: event.budgetTimeMs } : {}),
+    ...(event.budgetTokens !== undefined ? { budgetTokens: event.budgetTokens } : {}),
   }
 }
 

@@ -282,42 +282,7 @@ function derivePhaseBands(events: readonly WorkflowRunEventEntry[]): {
   for (const startIdx of startedIdx) {
     const frame = events[startIdx] as Extract<WorkflowRunEventEntry, { type: 'phase-started' }>
     const phase = frame.phase
-
-    // 收束锚 1：本帧之后第一个同 phase 的 phase-settled
-    let settledIdx: number | undefined
-    for (let i = startIdx + 1; i < events.length; i++) {
-      const e = events[i]
-      if (e.type === 'phase-settled' && e.phase === phase) {
-        settledIdx = i
-        break
-      }
-    }
-
-    let endIdx: number
-    let state: WorkflowGanttPhaseBand['state']
-    if (settledIdx !== undefined) {
-      endIdx = settledIdx
-      state = 'settled'
-    } else {
-      // 收束锚 2：本段之后第一个 phase 级或 run 级转移帧
-      let anchorIdx: number | undefined
-      for (let i = startIdx + 1; i < events.length; i++) {
-        if (isPhaseOrRunTransitionFrame(events[i])) {
-          anchorIdx = i
-          break
-        }
-      }
-      if (anchorIdx !== undefined) {
-        endIdx = anchorIdx
-        state = 'settled'
-      } else {
-        // 无 settled 且无转移帧：run 未终局如实进行中。区间上界 = 开放哨兵
-        //（events.length，见 makeIntervalKey——区间内唯一 agent 帧恰为事件流末帧时
-        // 不被边界排除）；显示终点 = 最后已知帧 ts（首帧自身兜底空流形态）
-        endIdx = events.length
-        state = 'running'
-      }
-    }
+    const { endIdx, state } = resolveBandEnd(events, startIdx, phase)
 
     // 本段区间零 agent 事件判定（seq 严格序优先，同 ts 帧归属不含糊；缺 seq 降级 ts 半开区间）
     const key = makeIntervalKey(events, startIdx, endIdx)
@@ -332,6 +297,35 @@ function derivePhaseBands(events: readonly WorkflowRunEventEntry[]): {
   }
 
   return { bands, agentPhasesWithEvents }
+}
+
+/**
+ * 单段收束（endIdx + state）三级锚定：
+ * ① 本帧之后第一个同 phase 的 phase-settled → settled；
+ * ② 本段之后第一个 phase 级或 run 级转移帧 → settled；
+ * ③ 无 settled 且无转移帧：run 未终局如实进行中。区间上界 = 开放哨兵
+ * （events.length，见 makeIntervalKey——区间内唯一 agent 帧恰为事件流末帧时
+ * 不被边界排除）；显示终点 = 最后已知帧 ts（首帧自身兜底空流形态）→ running。
+ */
+function resolveBandEnd(
+  events: readonly WorkflowRunEventEntry[],
+  startIdx: number,
+  phase: string,
+): { endIdx: number; state: WorkflowGanttPhaseBand['state'] } {
+  // 收束锚 1：本帧之后第一个同 phase 的 phase-settled
+  for (let i = startIdx + 1; i < events.length; i++) {
+    const e = events[i]
+    if (e.type === 'phase-settled' && e.phase === phase) {
+      return { endIdx: i, state: 'settled' }
+    }
+  }
+  // 收束锚 2：本段之后第一个 phase 级或 run 级转移帧
+  for (let i = startIdx + 1; i < events.length; i++) {
+    if (isPhaseOrRunTransitionFrame(events[i])) {
+      return { endIdx: i, state: 'settled' }
+    }
+  }
+  return { endIdx: events.length, state: 'running' }
 }
 
 // ── 规则③：phase tab 头卡 ────────────────────────────────────────────────────

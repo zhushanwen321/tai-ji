@@ -578,6 +578,19 @@ describe('session 域 请求-响应', () => {
     expect(mockCommand.mock.calls[4][1]).toEqual({ sessionId: 's1', action: 'message', subagentId: 'sa', text: 'hi' })
   })
 
+  it('workflow 可视化拉取：getWorkflowRunEvents / getWorkflowDag 结构化领域回执透传', async () => {
+    // reply 联合类型两臂均整体透传（成功 { runId, events } / 领域回执 { runId, code, message }），api domain 不解包
+    const eventsReply = { runId: 'r1', events: [{ kind: 'unit_start' }] }
+    mockCommand.mockResolvedValueOnce(eventsReply)
+    await expect(session.getWorkflowRunEvents('s1', 'r1')).resolves.toEqual(eventsReply)
+    expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['session.getWorkflowRunEvents', { sessionId: 's1', runId: 'r1' }])
+
+    const notFoundReply = { runId: 'r1', code: 'record_not_found', message: 'no record' }
+    mockCommand.mockResolvedValueOnce(notFoundReply)
+    await expect(session.getWorkflowDag('s1', 'r1')).resolves.toEqual(notFoundReply)
+    expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['session.getWorkflowDag', { sessionId: 's1', runId: 'r1' }])
+  })
+
   it('handoff 用 660s 超时；abortHandoff 用 backstop', async () => {
     await session.handoff('s1', 'reply-1', { modelOverride: 'p/m' })
     expect(mockCommand.mock.calls[0]).toEqual(['session.handoff', {

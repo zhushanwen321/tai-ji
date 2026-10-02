@@ -91,80 +91,90 @@ export function useSubagentTabData(deps: SubagentTabDataDeps) {
   const loadError = ref<string | null>(null)
 
   /**
-   * 按虚拟 id 类型加载对话流数据并注入 chatStore 虚拟分区。
+   * 按虚拟 id 类型分派加载（subagent 三段式 / agentcall 两段式，主体在对应 loader 内）。
    * - subagent 三段式：fetchAndInject 拉历史（返回值 = 拉取的 history；空历史不写分区，u1 契约）
    *   + 恒订阅 stream_delta（E-4 / R3 消解：不再依赖 isRunning 陈旧缓存判定订阅时机——entry 帧
    *   消费走 routeInbound 兜底链不依赖 drawer，stream_delta 订阅打开即挂，非 running 时空转零成本）
    *   空历史时兜底判定顺序即优先级（drawer-blank-fix 设计 §7.2）：①outcome 投影（非 pi）先行
-   *   ②task 气泡种入随后——两判定共用分区空守卫，①命中或 E-4 已投影时②自然跳过
+   *   ②task 用户气泡种入随后——两判定共用分区空守卫，①命中或 E-4 已投影时②自然跳过
    * - agentcall 两段式：快照只读，仅拉历史（D4：不接实时流式）
    */
   async function loadSubagentData(vid: string): Promise<void> {
     loadError.value = null
     try {
       if (isSubagentVirtualId(vid)) {
-        const mainSessionId = extractMainSessionId(vid)
-        const subId = extractSubagentId(vid)
-        const history = await subagentStore.fetchAndInject(mainSessionId, subId, (id, msgs) => chatStore.setMessages(id, msgs))
-        // 空历史兜底判定顺序即优先级（drawer-blank-fix 设计 §7.2，顺序写死禁止颠倒）：
-        // ① outcome 先行 → ② task 种入随后；①命中后分区非空 → ②自然跳过（靠分区空守卫）。
-        // ① U4 A8 兜底：非 pi record 读链异常返回空（③级保底失效等异常形态）→ 客户端
-        // outcome 投影顶上，详情页不白屏。pi 空结果行为不变（正常空 session 也可能是空）。
-        const record = deps.currentRecord.value
-        if (
-          record &&
-          recordEngine(record) !== DEFAULT_ENGINE_ID &&
-          chatStore.getMessages(vid).length === 0 &&
-          (record.result !== undefined || record.error !== undefined)
-        ) {
-          chatStore.setMessages(vid, outcomeFallbackMessages(record, deps.noOutcomeText()))
-        }
-        // ② task 种入判定随后（drawer-blank-fix 设计 §7.2）：空历史 × 分区空 × task 非空 →
-        // 种入 record.task 用户气泡（来自侧边栏已在 record，零额外 RPC 秒开初始态）。①命中或
-        // E-4 已投影（u1 空历史不擦）时分区非空 → 自然跳过，不加额外排除条件。
-        // history.length === 0 即「空历史」前提（fetchAndInject 返回值消费点）；非 pi 无 outcome
-        // 的 seed 可达场景 = runtime 磁盘扫描滞后窗口（设计 §5.1 变体）。
-        if (
-          record &&
-          history.length === 0 &&
-          chatStore.getMessages(vid).length === 0 &&
-          record.task.length > 0
-        ) {
-          chatStore.setMessages(vid, [
-            {
-              id: `task-u-${record.subagentId}`,
-              role: 'user',
-              content: record.task,
-              status: 'complete',
-              timestamp: record.startedAt ?? Date.now(),
-            },
-          ])
-        }
-        // 恒订阅（U8 scope token；E-4 R3 消解点：订阅时机与 record 状态机解耦）
-        subagentStore.subscribeStream(
-          STREAM_SCOPE,
-          mainSessionId,
-          subId,
-          vid,
-          (id, lines) => chatStore.applySubagentStreamDelta(id, lines),
-          (id) => chatStore.finalizeSubagentStream(id),
-        )
+        await loadSubagentVirtualPartition(vid)
       } else if (isAgentCallVirtualId(vid)) {
-        // D4：agentcall 快照只读。mainSid 优先取显式覆盖（overlay agent tab 绑定发起
-        // session，D11⑤），缺省回落焦点 pane（虚拟 id 两段式不含 mainSid）。
-        const mainSessionId = deps.agentcallMainSid?.() ?? panelStore.focusedSessionId
-        const acsId = extractAgentCallSessionId(vid)
-        if (!mainSessionId) return
-        const history = await getAgentCallHistory(mainSessionId, acsId)
-        chatStore.setMessages(vid, history)
-        // [MUST_FIX 1] 登记 agentcall 虚拟 key 到主 session 清理映射：agentcall 两段式无 mainSid
-        // 前缀，LRU isVirtualKeyOf 覆盖不到，deleteSession 须经此映射清 agentcall 虚拟分区（防泄漏）。
-        // 原 overlay 时代由 workflow.selectAgentCall 内部登记；overlay 移除后 SubagentTab 显式接管。
-        workflowStore.registerAgentCall(mainSessionId, vid)
+        await loadAgentCallSnapshot(vid)
       }
     } catch (e) {
       loadError.value = toErrorMessage(e)
     }
+  }
+
+  /** subagent 三段式主体：拉历史 + 空历史两段兜底 + 恒订阅。 */
+  async function loadSubagentVirtualPartition(vid: string): Promise<void> {
+    const mainSessionId = extractMainSessionId(vid)
+    const subId = extractSubagentId(vid)
+    const history = await subagentStore.fetchAndInject(mainSessionId, subId, (id, msgs) => chatStore.setMessages(id, msgs))
+    // 空历史兜底判定顺序即优先级（drawer-blank-fix 设计 §7.2，顺序写死禁止颠倒）：
+    // ① outcome 先行 → ② task 种入随后；①命中后分区非空 → ②自然跳过（靠分区空守卫）。
+    // ① U4 A8 兜底：非 pi record 读链异常返回空（③级保底失效等异常形态）→ 客户端
+    // outcome 投影顶上，详情页不白屏。pi 空结果行为不变（正常空 session 也可能是空）。
+    const record = deps.currentRecord.value
+    if (
+      record &&
+      recordEngine(record) !== DEFAULT_ENGINE_ID &&
+      chatStore.getMessages(vid).length === 0 &&
+      (record.result !== undefined || record.error !== undefined)
+    ) {
+      chatStore.setMessages(vid, outcomeFallbackMessages(record, deps.noOutcomeText()))
+    }
+    // ② task 种入判定随后（drawer-blank-fix 设计 §7.2）：空历史 × 分区空 × task 非空 →
+    // 种入 record.task 用户气泡（来自侧边栏已在 record，零额外 RPC 秒开初始态）。①命中或
+    // E-4 已投影（u1 空历史不擦）时分区非空 → 自然跳过，不加额外排除条件。
+    // history.length === 0 即「空历史」前提（fetchAndInject 返回值消费点）；非 pi 无 outcome
+    // 的 seed 可达场景 = runtime 磁盘扫描滞后窗口（设计 §5.1 变体）。
+    if (
+      record &&
+      history.length === 0 &&
+      chatStore.getMessages(vid).length === 0 &&
+      record.task.length > 0
+    ) {
+      chatStore.setMessages(vid, [
+        {
+          id: `task-u-${record.subagentId}`,
+          role: 'user',
+          content: record.task,
+          status: 'complete',
+          timestamp: record.startedAt ?? Date.now(),
+        },
+      ])
+    }
+    // 恒订阅（U8 scope token；E-4 R3 消解点：订阅时机与 record 状态机解耦）
+    subagentStore.subscribeStream(
+      STREAM_SCOPE,
+      mainSessionId,
+      subId,
+      vid,
+      (id, lines) => chatStore.applySubagentStreamDelta(id, lines),
+      (id) => chatStore.finalizeSubagentStream(id),
+    )
+  }
+
+  /** agentcall 两段式主体：快照只读拉历史 + 主 session 清理映射登记。 */
+  async function loadAgentCallSnapshot(vid: string): Promise<void> {
+    // D4：agentcall 快照只读。mainSid 优先取显式覆盖（overlay agent tab 绑定发起
+    // session，D11⑤），缺省回落焦点 pane（虚拟 id 两段式不含 mainSid）。
+    const mainSessionId = deps.agentcallMainSid?.() ?? panelStore.focusedSessionId
+    if (!mainSessionId) return
+    const acsId = extractAgentCallSessionId(vid)
+    const history = await getAgentCallHistory(mainSessionId, acsId)
+    chatStore.setMessages(vid, history)
+    // [MUST_FIX 1] 登记 agentcall 虚拟 key 到主 session 清理映射：agentcall 两段式无 mainSid
+    // 前缀，LRU isVirtualKeyOf 覆盖不到，deleteSession 须经此映射清 agentcall 虚拟分区（防泄漏）。
+    // 原 overlay 时代由 workflow.selectAgentCall 内部登记；overlay 移除后 SubagentTab 显式接管。
+    workflowStore.registerAgentCall(mainSessionId, vid)
   }
 
   /** 停止当前 drawer scope 的 stream 订阅（切换 subagent / 组件卸载时调） */

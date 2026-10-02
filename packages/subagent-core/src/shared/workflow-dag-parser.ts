@@ -435,112 +435,132 @@ function handlePhaseCall(ctx: ParseCtx, callNode: AstNode): void {
   if (ctx.currentPhase !== undefined) registerPhase(ctx, ctx.currentPhase);
 }
 
-/** 主遍历：按词法序收口调用点与控制流上下文。 */
+/** 主遍历：按词法序收口调用点与控制流上下文（各 case 主体在对应 handler 内）。 */
 function visit(ctx: ParseCtx, node: AstNode): void {
   switch (node.type) {
-    case "CallExpression": {
-      // 三个编排全局短路收口后直接 return（实参子树不再通用遍历）——防止
-      // parallel 成员被主遍历二次收口；实参内嵌套编排调用的极端形态登记于
-      // 头注释静态边界。
-      if (isGlobalCall(node, "phase")) {
-        handlePhaseCall(ctx, node);
-        return;
-      }
-      if (isGlobalCall(node, "agent")) {
-        const id = emitAgentCallSite(ctx, node);
-        closeUnit(ctx, [id]);
-        return;
-      }
-      if (isGlobalCall(node, "parallel")) {
-        const memberIds: string[] = [];
-        const arg = (node.arguments as AstNode[])[0];
-        if (arg != null) collectParallelMembers(ctx, arg, memberIds);
-        if (memberIds.length > 0) ctx.parallelGroups.push(memberIds);
-        closeUnit(ctx, memberIds); // 空组（变量形态）对顺序链不可见——prevBatch 不变
-        return;
-      }
+    case "CallExpression":
+      // 编排全局（phase/agent/parallel）短路收口（实参子树不再通用遍历）——防止
+      // parallel 成员被主遍历二次收口；实参内嵌套编排调用的极端形态登记于头注释静态边界。
+      if (handleOrchestrationCall(ctx, node)) return;
       break;
-    }
-    case "VariableDeclarator": {
-      const init = node.init as AstNode | undefined;
-      const binding = declaratorNames(node.id as AstNode | undefined);
-      if (init != null) {
-        visit(ctx, init);
-        const source = ctx.lastUnitIds;
-        if (binding !== undefined && source.length > 0) {
-          if (binding.kind === "single" && isAwaitOf(init, "agent") && source.length === 1) {
-            ctx.bindings.set(binding.name, source);
-          } else if (binding.kind === "single" && isAwaitOf(init, "parallel")) {
-            ctx.bindings.set(binding.name, source);
-          } else if (binding.kind === "array" && isAwaitOf(init, "parallel")) {
-            // 解构按序对应并行组成员（成员序 = 数组元素序的常见形态）
-            binding.names.forEach((name, i) => {
-              if (source[i] !== undefined) ctx.bindings.set(name, [source[i]]);
-            });
-          }
-        }
-      }
+    case "VariableDeclarator":
+      visitVariableDeclarator(ctx, node);
       return;
-    }
-    case "IfStatement": {
+    case "IfStatement":
       // consequent / alternate 各自独立帧：else 分支首单元同样连 conditional 边
-      const test = node.test as AstNode;
-      const entryBatch = ctx.prevBatch;
-      ctx.ctrlStack.push({ kind: "if", entryBatch, predicate: sourceSlice(ctx.source, test), consumed: false });
-      visit(ctx, node.consequent as AstNode);
-      ctx.ctrlStack.pop();
-      const alternate = node.alternate as AstNode | undefined;
-      if (alternate != null) {
-        ctx.ctrlStack.push({ kind: "if", entryBatch, predicate: sourceSlice(ctx.source, test), consumed: false });
-        visit(ctx, alternate);
-        ctx.ctrlStack.pop();
-      }
+      visitBranch(
+        ctx,
+        node.test as AstNode,
+        node.consequent as AstNode,
+        node.alternate as AstNode | undefined,
+      );
       return;
-    }
-    case "ConditionalExpression": {
-      const test = node.test as AstNode;
-      const entryBatch = ctx.prevBatch;
-      ctx.ctrlStack.push({ kind: "if", entryBatch, predicate: sourceSlice(ctx.source, test), consumed: false });
-      visit(ctx, node.consequent as AstNode);
-      ctx.ctrlStack.pop();
-      ctx.ctrlStack.push({ kind: "if", entryBatch, predicate: sourceSlice(ctx.source, test), consumed: false });
-      visit(ctx, node.alternate as AstNode);
-      ctx.ctrlStack.pop();
+    case "ConditionalExpression":
+      visitBranch(ctx, node.test as AstNode, node.consequent as AstNode, node.alternate as AstNode);
       return;
-    }
     case "WhileStatement":
     case "DoWhileStatement":
     case "ForStatement":
     case "ForOfStatement":
-    case "ForInStatement": {
-      const test = node.test as AstNode | undefined;
-      const label =
-        test != null
-          ? sourceSlice(ctx.source, test)
-          : `${sourceSlice(ctx.source, node.left as AstNode)} … ${sourceSlice(ctx.source, node.right as AstNode)}`;
-      ctx.ctrlStack.push({ kind: "loop", entryBatch: ctx.prevBatch, bodyNodes: [], label });
-      visit(ctx, node.body as AstNode);
-      const frame = ctx.ctrlStack.pop() as LoopFrame;
-      if (frame.bodyNodes.length > 0) {
-        // 回边闭合循环体（末节点 → 首节点）；循环整体参与后续顺序链。
-        // 回边独立表收集——不与顺序/条件/数据流候选混表去重（方向天然不同向）。
-        const loopId = newId("loop", ctx.loopSeq++);
-        const backEdgeId = `${loopId}-back`;
-        ctx.loops.push({ id: loopId, nodeIds: frame.bodyNodes, backEdgeId, label: frame.label });
-        ctx.loopBackEdges.push({
-          from: frame.bodyNodes[frame.bodyNodes.length - 1],
-          to: frame.bodyNodes[0],
-          kind: "loop-back",
-        });
-        ctx.prevBatch = frame.bodyNodes;
-        ctx.lastUnitIds = frame.bodyNodes;
-      }
+    case "ForInStatement":
+      visitLoop(ctx, node);
       return;
-    }
     default:
       break;
   }
   for (const child of childNodes(node)) visit(ctx, child);
+}
+
+/** 编排全局调用短路收口：返回 true = 已收口（调用方不再通用遍历实参子树）。 */
+function handleOrchestrationCall(ctx: ParseCtx, node: AstNode): boolean {
+  if (isGlobalCall(node, "phase")) {
+    handlePhaseCall(ctx, node);
+    return true;
+  }
+  if (isGlobalCall(node, "agent")) {
+    closeUnit(ctx, [emitAgentCallSite(ctx, node)]);
+    return true;
+  }
+  if (isGlobalCall(node, "parallel")) {
+    closeUnit(ctx, collectParallelGroup(ctx, node));
+    return true;
+  }
+  return false;
+}
+
+/** parallel 实参成员收集 + 并行组登记（成员非空时）；返回成员 id 供 closeUnit 收口。空组（变量形态）对顺序链不可见——prevBatch 不变。 */
+function collectParallelGroup(ctx: ParseCtx, node: AstNode): string[] {
+  const memberIds: string[] = [];
+  const arg = (node.arguments as AstNode[])[0];
+  if (arg != null) collectParallelMembers(ctx, arg, memberIds);
+  if (memberIds.length > 0) ctx.parallelGroups.push(memberIds);
+  return memberIds;
+}
+
+/** 变量声明：init 子树先遍历，再按绑定形态把 lastUnitIds 登记进 bindings。 */
+function visitVariableDeclarator(ctx: ParseCtx, node: AstNode): void {
+  const init = node.init as AstNode | undefined;
+  if (init == null) return;
+  visit(ctx, init);
+  const source = ctx.lastUnitIds;
+  const binding = declaratorNames(node.id as AstNode | undefined);
+  if (binding !== undefined && source.length > 0) recordBinding(ctx, binding, init, source);
+}
+
+/** 绑定登记三分支：单名 await agent（单源直登记）/ 单名 await parallel（整批）/ 解构 await parallel（按序对应并行组成员，成员序 = 数组元素序的常见形态）。 */
+function recordBinding(
+  ctx: ParseCtx,
+  binding: { kind: "single"; name: string } | { kind: "array"; names: string[] },
+  init: AstNode,
+  source: string[],
+): void {
+  if (binding.kind === "single") {
+    if (isAwaitOf(init, "agent") && source.length === 1) ctx.bindings.set(binding.name, source);
+    else if (isAwaitOf(init, "parallel")) ctx.bindings.set(binding.name, source);
+    return;
+  }
+  if (binding.kind === "array" && isAwaitOf(init, "parallel")) {
+    binding.names.forEach((name, i) => {
+      if (source[i] !== undefined) ctx.bindings.set(name, [source[i]]);
+    });
+  }
+}
+
+/** if / 三元分支：两臂各压独立 if 帧（同一 entryBatch + 谓词），臂内首单元连 conditional 边。 */
+function visitBranch(ctx: ParseCtx, test: AstNode, consequent: AstNode, alternate: AstNode | undefined): void {
+  const entryBatch = ctx.prevBatch;
+  const predicate = sourceSlice(ctx.source, test);
+  ctx.ctrlStack.push({ kind: "if", entryBatch, predicate, consumed: false });
+  visit(ctx, consequent);
+  ctx.ctrlStack.pop();
+  if (alternate == null) return;
+  ctx.ctrlStack.push({ kind: "if", entryBatch, predicate, consumed: false });
+  visit(ctx, alternate);
+  ctx.ctrlStack.pop();
+}
+
+/** 循环体遍历 + 回边闭合：体非空时登记 loop 与 loop-back 边，循环整体参与后续顺序链。 */
+function visitLoop(ctx: ParseCtx, node: AstNode): void {
+  const test = node.test as AstNode | undefined;
+  const label =
+    test != null
+      ? sourceSlice(ctx.source, test)
+      : `${sourceSlice(ctx.source, node.left as AstNode)} … ${sourceSlice(ctx.source, node.right as AstNode)}`;
+  ctx.ctrlStack.push({ kind: "loop", entryBatch: ctx.prevBatch, bodyNodes: [], label });
+  visit(ctx, node.body as AstNode);
+  const frame = ctx.ctrlStack.pop() as LoopFrame;
+  if (frame.bodyNodes.length === 0) return;
+  // 回边闭合循环体（末节点 → 首节点）。
+  // 回边独立表收集——不与顺序/条件/数据流候选混表去重（方向天然不同向）。
+  const loopId = newId("loop", ctx.loopSeq++);
+  ctx.loops.push({ id: loopId, nodeIds: frame.bodyNodes, backEdgeId: `${loopId}-back`, label: frame.label });
+  ctx.loopBackEdges.push({
+    from: frame.bodyNodes[frame.bodyNodes.length - 1],
+    to: frame.bodyNodes[0],
+    kind: "loop-back",
+  });
+  ctx.prevBatch = frame.bodyNodes;
+  ctx.lastUnitIds = frame.bodyNodes;
 }
 
 /** 候选边去重：同一 (from,to) 优先级 dataflow > conditional > sequence。边 id 由调用方统一编号。 */

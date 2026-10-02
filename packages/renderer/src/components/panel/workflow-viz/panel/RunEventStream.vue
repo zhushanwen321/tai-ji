@@ -136,6 +136,11 @@ function timeTextOf(ts: number): string {
   return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false })
 }
 
+/** 摘要可选后缀拼接：缺省/空串不追加，非空加「 · 」前缀。 */
+function suffixOf(part: string | undefined): string {
+  return part ? ` · ${part}` : ''
+}
+
 /** 单行摘要文案（骨架字段拼接；大字段不进摘要行——detail 区承载）。 */
 function summaryOf(e: WorkflowRunEventEntry): string {
   switch (e.type) {
@@ -145,17 +150,17 @@ function summaryOf(e: WorkflowRunEventEntry): string {
     case 'phase-settled':
       return e.phase
     case 'agent-started':
-      return `#${e.taskIndex} ${e.agentName} · ${t('panel.workflowViz.attemptLabel')} ${e.attempt}${e.phase ? ` · ${e.phase}` : ''}`
+      return `#${e.taskIndex} ${e.agentName} · ${t('panel.workflowViz.attemptLabel')} ${e.attempt}${suffixOf(e.phase)}`
     case 'agent-retrying':
       return `#${e.taskIndex} ${t('panel.workflowViz.attemptLabel')} ${e.attempt} · +${e.backoffMs}ms · ${e.reason}`
     case 'agent-settled':
-      return `#${e.taskIndex} ${e.outcome} · ${e.durationMs}ms${e.errorCode ? ` · ${e.errorCode}` : ''}`
+      return `#${e.taskIndex} ${e.outcome} · ${e.durationMs}ms${suffixOf(e.errorCode)}`
     case 'run-interrupted':
-      return `${e.errorCode ?? ''}${e.reason ? ` · ${e.reason}` : ''}`
+      return `${e.errorCode ?? ''}${suffixOf(e.reason)}`
     case 'run-resumed':
       return e.reason ?? ''
     case 'run-settled':
-      return `${e.outcome}${e.reason ? ` · ${e.reason}` : ''}`
+      return `${e.outcome}${suffixOf(e.reason)}`
     case 'worker-log':
       return e.entry.message
     default: {
