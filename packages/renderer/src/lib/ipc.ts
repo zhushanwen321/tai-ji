@@ -41,7 +41,8 @@ export function onRuntimePort(cb: (port: number) => void): () => void {
 
 /**
  * 监听主进程快捷键事件（before-input-event 拦截后转发）。
- * type 含 'standard' / 'focus'（globalShortcut）/'close'（before-input-event Cmd/Ctrl+W）。
+ * type 含 'standard' / 'focus'（globalShortcut）/'close'（before-input-event ⌘W）/
+ * 'toggle-bottom-drawer'（before-input-event ⌃`，display-containers §7.5）。
  * 返回取消订阅函数。无 IPC（web/mock）返回 no-op。
  */
 export function onShortcut(cb: (type: string) => void): () => void {
@@ -220,6 +221,20 @@ export function browserDestroy(sessionId: string): Promise<void> {
 }
 
 /**
+ * 浮层开合/内容切换上报（display-containers §7.4 show 统一谓词事实源之一）。
+ * 契约：浮层开/换 browser 内容时在 BrowserPane 挂载前上报（谓词事实先于 show 请求）；
+ * 浮层关闭/换出 browser 内容时立即上报——主进程联动隐藏 view（keep-alive）。
+ * 非法 payload 主进程 reject（error envelope）。无 IPC（web/mock）静默 no-op。
+ */
+export function browserSetOverlayState(state: {
+  open: boolean
+  content: 'browser' | 'workflow' | null
+  sessionId: string | null
+}): Promise<void> {
+  return api?.browserSetOverlayState(state) ?? Promise.resolve()
+}
+
+/**
  * 监听主进程推送的 browser 状态变化（url/isLoading/error）。
  * 主进程 did-navigate / did-fail-load / did-start-loading 等事件触发时推送，
  * BrowserPane 据此更新地址栏真实 URL（防钓鱼）+ loading/error 态。
@@ -231,6 +246,8 @@ export function onBrowserState(
     currentUrl: string
     isLoading: boolean
     error: { errorCode: number; errorDescription: string; validatedURL: string } | null
+    /** 渲染进程崩溃（render-process-gone，§5.3 两类占位之二：创建失败/进程崩溃） */
+    processGone: { reason: string } | null
     canGoBack: boolean
     canGoForward: boolean
     /** 当前缩放因子（autoFit 后主进程回推，BrowserPane 转发给 useBrowserZoom.setZoomFromRemote） */

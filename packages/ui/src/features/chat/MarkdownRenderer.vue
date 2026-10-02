@@ -153,6 +153,20 @@ const COPIED_FEEDBACK_MS = 1200
 /** scheme 前缀正则（http: / data: / mailto: 等带协议头的 URL——非相对路径，与 sanitize 侧同款） */
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i
 
+/** ⑤路浮层浏览器白名单主机（display-containers §7.4 URL 注入链，§11-3 校准点：
+ * localhost / 127.0.0.1 默认进浮层，其余维持系统浏览器） */
+const OVERLAY_BROWSER_HOSTS = new Set(['localhost', '127.0.0.1'])
+
+/** 浮层浏览器链接判定：http(s) + 白名单主机。非绝对 URL / 其他 scheme / 其他主机 = false。 */
+function isOverlayBrowserHref(value: string): boolean {
+  try {
+    const parsed = new URL(value)
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && OVERLAY_BROWSER_HOSTS.has(parsed.hostname)
+  } catch {
+    return false
+  }
+}
+
 /** 相对资源路径判定：非 # 开头（页内锚点）、非 // 开头（协议相对 = 远程）、无 scheme 前缀。空串非路径。 */
 function isRelativeHref(value: string): boolean {
   if (value === '') return false
@@ -177,8 +191,8 @@ function resolveHrefPath(base: string, rel: string): string {
 }
 
 /**
- * v-html 内点击事件委托路由（代码块复制 / 文件路径 / 歧义 basename / 相对链接 / 外链）。
- * 文件操作经 deps 桥接（onFileClick/openDrawer）。代码块复制是 DOM 副作用，ui 本地处理。
+ * v-html 内点击事件委托路由（代码块复制 / 文件路径 / 歧义 basename / 相对链接 / 外链 / 浮层浏览器）。
+ * 文件操作经 deps 桥接（onFileClick/openDrawer）；浮层浏览器经 deps.openBrowser 桥接。代码块复制是 DOM 副作用，ui 本地处理。
  */
 /** ① 代码块复制按钮（data-code 是 base64 编码的源码）。代码块复制是 DOM 副作用，ui 本地处理。 */
 function handleCodeblockCopy(e: MouseEvent, btn: HTMLElement): void {
@@ -222,14 +236,25 @@ function handleAmbiguousClick(e: MouseEvent, ambLink: HTMLElement): void {
 }
 
 /**
- * ④ 相对链接分流（④路扩展，设计 D4）：原生 <a> 的 href 命中相对路径 → 应用内打开对应
- * 文件（drawer detail，与路②同通道；目标有未提交改动显 diff / untracked 自动降级 preview
- * 是 detail 通道统一语义）。# 锚点 / // 协议相对 / scheme 链接不拦截（默认冒泡走外链闸）。
+ * ④⑤路链接分流：相对链接 → 应用内文件详情（④路，设计 D4）；http(s) localhost/127.0.0.1 →
+ * 浮层浏览器（⑤路，display-containers §7.4 URL 注入链：openBrowser(url) → 浮层壳 + BrowserPane）。
+ * 其余 scheme 链接不拦截（target=_blank 默认冒泡 → setWindowOpenHandler → 系统浏览器，维持现状）。
  */
 function handleAnchorClick(e: MouseEvent, anchor: Element): void {
   // 用 getAttribute 原始值判定：element.href 是浏览器绝对化后的值，相对形态失真（D4）
   const href = anchor.getAttribute('href')
-  if (!href || !isRelativeHref(href)) return
+  if (!href) return
+
+  if (!isRelativeHref(href)) {
+    // ⑤路浮层浏览器分流：需发起会话（view 键 + 级联/谓词锚）；无会话宿主（命令文档等）
+    // 回落系统浏览器（默认冒泡）
+    if (isOverlayBrowserHref(href) && props.sessionId) {
+      e.preventDefault()
+      deps.openBrowser(href, props.sessionId)
+    }
+    return
+  }
+
   e.preventDefault()
   // 基准目录双通道（D4 传值矩阵）：props 覆盖优先（drawer 文件目录语义）；props 缺省
   // （对话流/命令文档）经 deps.sessionCwdOf 拿 session cwd；两者皆缺（未知 sid）→
@@ -241,7 +266,7 @@ function handleAnchorClick(e: MouseEvent, anchor: Element): void {
 }
 
 /**
- * v-html 内点击事件委托路由（代码块复制 / 文件路径 / 歧义 basename / 相对链接 / 外链）。
+ * v-html 内点击事件委托路由（代码块复制 / 文件路径 / 歧义 basename / 相对链接 / 外链 / 浮层浏览器）。
  * 文件操作经 deps 桥接（onFileClick/openDrawer）。
  */
 function onClick(e: MouseEvent): void {

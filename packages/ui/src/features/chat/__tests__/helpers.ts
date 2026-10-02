@@ -34,6 +34,7 @@ export function createMockDeps(overrides: Partial<ChatViewDeps> = {}): ChatViewD
     onForkAsk: vi.fn(),
     onHandoffAsk: vi.fn(),
     openDrawer: vi.fn(),
+    openBrowser: vi.fn(),
     onFileClick: vi.fn(),
     loadFileCandidates: vi.fn().mockResolvedValue([]),
     renderMarkdown: vi.fn().mockResolvedValue([]),

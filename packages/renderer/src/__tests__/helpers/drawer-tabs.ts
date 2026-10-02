@@ -1,5 +1,5 @@
 import type { SideDrawerTab } from '@taiji/core/domain/drawer'
-import { RIGHT_DRAWER_W0_ENTRIES } from '@taiji/core/domain/drawer'
+import { RIGHT_DRAWER_REGISTRY } from '@taiji/core/domain/drawer'
 
 /**
  * drawer 一级 tab 全量清单（@taiji/core domain SideDrawerTab 联合类型的运行时投影）。
@@ -24,11 +24,11 @@ export const ALL_DRAWER_TABS = Object.keys({
 } satisfies Record<SideDrawerTab, 1>) as SideDrawerTab[]
 
 /**
- * 右抽屉 L1 tab 清单（display-containers §7.2 注册表载入序列的运行时投影，9 条——
- * terminal 已迁底抽屉）。DrawerPanel L1 图标条的用户可见投影；terminal 不在其中。
+ * 右抽屉 L1 tab 清单（display-containers §7.2 容器声明的运行时投影，终态 8 条——
+ * terminal 已迁底抽屉、browser 已走浮层）。DrawerPanel L1 图标条的用户可见投影。
  * 消费方：panel-container-drawer-mode.test.ts（注册表契约用例）、
  * session-trace/trace-inspector.test.ts（「L1 体系不变」断言）。
  */
-export const L1_DRAWER_TABS: readonly SideDrawerTab[] = RIGHT_DRAWER_W0_ENTRIES.map(
+export const L1_DRAWER_TABS: readonly SideDrawerTab[] = RIGHT_DRAWER_REGISTRY.map(
   (entry) => entry.content,
 )

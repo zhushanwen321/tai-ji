@@ -550,6 +550,70 @@ describe('D4 ④路: 相对链接分流（preventDefault + resolve + openDrawer 
   })
 })
 
+// ── ⑤路浮层浏览器分流（display-containers §7.4 URL 注入链，u-w2-browser-mount）──
+// http(s) localhost/127.0.0.1 链接点击 → deps.openBrowser（浮层 BrowserPane）；
+// 其余链接维持系统浏览器（默认冒泡 → setWindowOpenHandler，§11-3 判定规则）。
+describe('⑤路: 浮层浏览器分流（localhost 链接 → openBrowser，其余维持系统浏览器）', () => {
+  /** 挂载含单个 <a href> 文档的 MarkdownRenderer，收集冒泡 click 事件供 defaultPrevented 断言
+   *  （桥接形态同 ④路 mountWithAnchor：renderMarkdownIncremental 必填，单帧增量返回）。
+   *  注意 href 含 :// 时不能用属性插值裸插（避免模板解析歧义），用转义 attr 形态。 */
+  async function mountWithLink(href: string, props: Record<string, unknown> = {}, depsOverrides: Partial<ChatViewDeps> = {}) {
+    const renderMarkdown = vi.fn().mockResolvedValue([
+      { type: 'text', content: `<p><a href="${href}">dev server</a></p>` },
+    ])
+    const renderMarkdownIncremental = vi.fn(
+      async (source: string, cache: IncrementalMarkdownCache | null): Promise<IncrementalMarkdownResult & { cache: IncrementalMarkdownCache }> => {
+        const tailSegments = (await renderMarkdown(source)) as MarkdownSegment[]
+        return { prefixSegments: [], tailSegments, stableBoundary: 0, mode: 'incremental', cache: cache ?? emptyCache(0) }
+      },
+    )
+    const wrapper = mountMd({ content: 'x', ...props }, { renderMarkdown, renderMarkdownIncremental, ...depsOverrides })
+    await flushRaf()
+    const clicks: Event[] = []
+    wrapper.element.addEventListener('click', (e: Event) => clicks.push(e))
+    await wrapper.find('a').trigger('click')
+    return { wrapper, clicks }
+  }
+
+  it('localhost 链接 + 发起会话 → preventDefault + openBrowser(url, sessionId)（URL 注入链，用户可见：浮层开浏览器页）', async () => {
+    const openBrowser = vi.fn()
+    const { clicks } = await mountWithLink('http://localhost:1420/', { sessionId: 's1' }, { openBrowser })
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    expect(openBrowser).toHaveBeenCalledTimes(1)
+    expect(openBrowser).toHaveBeenCalledWith('http://localhost:1420/', 's1')
+  })
+
+  it('127.0.0.1 链接同进浮层（白名单双主机，§11-3）', async () => {
+    const openBrowser = vi.fn()
+    const { clicks } = await mountWithLink('http://127.0.0.1:5173/dev', { sessionId: 's1' }, { openBrowser })
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    expect(openBrowser).toHaveBeenCalledWith('http://127.0.0.1:5173/dev', 's1')
+  })
+
+  it('非 localhost http(s) 链接不进浮层（维持系统浏览器：不 preventDefault、不调 openBrowser）', async () => {
+    const openBrowser = vi.fn()
+    const { clicks } = await mountWithLink('https://example.com/docs', { sessionId: 's1' }, { openBrowser })
+    expect(clicks[0]?.defaultPrevented).toBe(false)
+    expect(openBrowser).not.toHaveBeenCalled()
+  })
+
+  it('localhost 链接但无发起会话（sessionId 缺省宿主）→ 回落系统浏览器（不进浮层）', async () => {
+    const openBrowser = vi.fn()
+    const { clicks } = await mountWithLink('http://localhost:1420/', {}, { openBrowser })
+    expect(clicks[0]?.defaultPrevented).toBe(false)
+    expect(openBrowser).not.toHaveBeenCalled()
+  })
+
+  it('相对链接仍走 ④路 openDrawer，不误入浮层（④⑤路分流共存回归锚）', async () => {
+    const openBrowser = vi.fn()
+    const openDrawer = vi.fn()
+    const { clicks } = await mountWithLink('docs/x.md', { sessionId: 's1', resourceBaseDir: '/home/proj' }, { openBrowser, openDrawer })
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    expect(openBrowser).not.toHaveBeenCalled()
+    expect(openDrawer).toHaveBeenCalledWith('detail', { filePath: '/home/proj/docs/x.md' })
+  })
+})
+
 // ── ①②③路事件委托路由（复制按钮 / 文件路径 / 歧义 basename——D4 ④路之外的三路
 //    存量行为；因 onClick 重构拆具名函数而成为本 diff 新增行，此处钉住用户可见行为）──
 describe('①②③路: v-html 点击委托路由（copy / filepath / ambiguous）', () => {

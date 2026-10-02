@@ -23,7 +23,7 @@ import type { OverlayContent } from '../types'
 
 const WORKFLOW_A: OverlayContent = { kind: 'workflow', payload: { sessionId: 's-1', runId: 'wf-1' } }
 const WORKFLOW_B: OverlayContent = { kind: 'workflow', payload: { sessionId: 's-1', runId: 'wf-2' } }
-const BROWSER: OverlayContent = { kind: 'browser', payload: { url: 'http://127.0.0.1:5173/' } }
+const BROWSER: OverlayContent = { kind: 'browser', payload: { url: 'http://127.0.0.1:5173/', sessionId: 's-1' } }
 
 beforeEach(() => {
   _resetOverlayForTest()
@@ -84,7 +84,13 @@ describe('载荷校验边界（无效载荷 no-op，不改开合态）', () => {
   })
 
   it('browser 载荷 url 空白串 → no-op（W2 URL 注入链的前置边界）', () => {
-    openOverlay({ kind: 'browser', payload: { url: '   ' } })
+    openOverlay({ kind: 'browser', payload: { url: '   ', sessionId: 's-1' } })
+    expect(getOverlayControlState().isOpen).toBe(false)
+    expect(getOverlayControlState().current).toBeNull()
+  })
+
+  it('browser 载荷 sessionId 空串 → no-op（发起会话是级联/谓词锚，缺则不进浮层）', () => {
+    openOverlay({ kind: 'browser', payload: { url: 'http://127.0.0.1:5173/', sessionId: '' } })
     expect(getOverlayControlState().isOpen).toBe(false)
     expect(getOverlayControlState().current).toBeNull()
   })

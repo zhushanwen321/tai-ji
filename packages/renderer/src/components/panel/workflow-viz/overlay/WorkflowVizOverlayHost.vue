@@ -22,7 +22,7 @@
 <template>
   <WorkflowVizOverlayGuard :key="guardEpoch" @fallback="onFallback">
     <WorkflowVizOverlay
-      :open="overlayOpen"
+      :open="isWorkflowOpen"
       :run="runRecord"
       :dag="overlayDag"
       :dag-error="overlayDagError"
@@ -44,6 +44,11 @@
       />
     </WorkflowVizOverlay>
   </WorkflowVizOverlayGuard>
+  <!-- 浮层浏览器内容（display-containers §7.4，u-w2-browser-mount）：单例换内容——
+       当前内容是 browser 时由 BrowserOverlay 的 OverlayShell 承载（workflow 壳同期门控
+       只在 workflow 内容时开，两壳互斥不叠显）。Guard 只包 workflow 内容（回落语义
+       归属 workflow），browser 内容不进回落链。 -->
+  <BrowserOverlay />
 </template>
 
 <script setup lang="ts">
@@ -52,6 +57,7 @@ import type { WorkflowRunRecord } from '@taiji/shared'
 import { openDrawerTab, openWorkflowInDrawer } from '@taiji/core/domain/drawer'
 import WorkflowVizOverlay from './WorkflowVizOverlay.vue'
 import WorkflowVizOverlayGuard from './WorkflowVizOverlayGuard.vue'
+import BrowserOverlay from '@/components/panel/BrowserOverlay.vue'
 import WorkflowLivePanel from '../panel/WorkflowLivePanel.vue'
 import WorkflowVizGantt from '../gantt/WorkflowVizGantt.vue'
 import { matchInstancesToNodes } from '../blueprint-match'
@@ -73,6 +79,10 @@ const panelRef = ref<InstanceType<typeof WorkflowLivePanel> | null>(null)
 // overlay 开合态读 core SSOT（u-w1-core 迁移：workflow-viz-overlay 的 overlayOpen/overlayCurrent
 // 模块级 ref 已退役，开合态唯一权威 = core/domain/overlay）。
 const { isOpen: overlayOpen, current: overlayContent } = useOverlayControl()
+
+/** workflow 壳开合（单例换内容门控，u-w2-browser-mount）：仅浮层当前内容是 workflow 时开
+ *  workflow 壳——browser 内容由 BrowserOverlay 的壳承载，两壳互斥不叠显。 */
+const isWorkflowOpen = computed(() => overlayOpen.value && overlayContent.value?.kind === 'workflow')
 
 /** 当前 workflow run 投影（core OverlayContent → Host 的 run 选择形状；非 workflow 内容 = null）。 */
 const overlayRun = computed<{ sessionId: string; runId: string } | null>(() => {

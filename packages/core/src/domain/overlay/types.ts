@@ -12,9 +12,15 @@
 /** 浮层内容类型（§7.2 浮层 2 条目：browser（网页）/ workflow（工作流图）） */
 export type OverlayKind = 'browser' | 'workflow'
 
-/** browser 浮层载荷（openBrowser(url) URL 注入链重建，W2 接线） */
+/** browser 浮层载荷（openBrowser(url, sessionId) URL 注入链重建，W2 接线）。
+ * sessionId = 发起会话（链接所在会话）：view 池按 session 键控（BrowserPane 订阅标识）、
+ * 会话删除级联判定（closeBrowserOverlayForSession「仅发起会话被删才关」）、主进程
+ * 显示收口谓词事实源（browser:overlay-state 的 sessionId）三处消费——故载荷必须携带
+ * （u-foundation 契约 {url} 扩展，D1 下游消费面按 §7.4 发起会话语义补全）。 */
 export interface BrowserOverlayPayload { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费面
   url: string
+  /** 发起会话 id（点击链接所在会话；BrowserPane 的 view 键 + 级联/谓词判定锚） */
+  sessionId: string
 }
 
 /** workflow 浮层载荷（与 renderer workflow-viz-overlay.ts overlayCurrent 现状字段同构，SSOT 迁移对账锚） */

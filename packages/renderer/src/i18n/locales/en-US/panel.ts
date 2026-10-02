@@ -353,6 +353,9 @@ export default {
     bashTaskWriteFailed: 'Operation did not take effect (failed to write data); please retry',
   },
   browserPane: {
+    overlayTitle: 'Browser',
+    overlayClose: 'Close',
+    createFailed: 'Failed to open embedded browser',
     back: 'Back',
     forward: 'Forward',
     reload: 'Reload',

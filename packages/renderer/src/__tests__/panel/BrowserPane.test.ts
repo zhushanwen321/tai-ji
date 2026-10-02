@@ -233,3 +233,67 @@ describe('BrowserPane（Wave 5 导航 + 安全）', () => {
     wrapper.unmount()
   })
 })
+
+describe('BrowserPane（错误通道，display-containers §5.3 两类占位区分）', () => {
+  it('browserCreate reject → 「创建失败」占位（与页面加载失败占位区分，带原因 + 重试/外链出口）', async () => {
+    mockBrowserCreate.mockRejectedValueOnce(new Error('window gone'))
+    const wrapper = mountPane({ url: 'https://example.com' })
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="browser-create-error"]').exists()).toBe(true)
+    // 两类占位互斥：加载失败占位不出现
+    expect(wrapper.find('[data-testid="browser-error"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('window gone')
+    wrapper.unmount()
+  })
+
+  it('创建失败占位内点重试 → 重新 create + navigate + show（§5.3 恢复路径）', async () => {
+    mockBrowserCreate.mockRejectedValueOnce(new Error('window gone'))
+    const wrapper = mountPane({ url: 'https://example.com' })
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    mockBrowserCreate.mockClear()
+    mockBrowserNavigate.mockClear()
+    mockBrowserShow.mockClear()
+    await wrapper.find('[data-testid="browser-create-error"] button').trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    expect(mockBrowserCreate).toHaveBeenCalledWith('sess-1', expect.any(String))
+    expect(mockBrowserNavigate).toHaveBeenCalledWith('sess-1', 'https://example.com')
+    expect(mockBrowserShow).toHaveBeenCalledWith('sess-1')
+    expect(wrapper.find('[data-testid="browser-create-error"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('render-process-gone（processGone 推送）→ 「创建失败/进程崩溃」占位；存活推送恢复后清占位', async () => {
+    const wrapper = mountPane({ url: 'https://example.com' })
+    const stateCb = mockOnBrowserState.mock.calls[0][0] as (s: Record<string, unknown>) => void
+    stateCb({
+      sessionId: 'sess-1',
+      currentUrl: 'https://example.com',
+      isLoading: false,
+      error: null,
+      processGone: { reason: 'crashed' },
+      canGoBack: false,
+      canGoForward: false,
+      zoomFactor: 1,
+    })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="browser-create-error"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('crashed')
+    // 进程恢复（存活推送 processGone=null）→ 清占位
+    stateCb({
+      sessionId: 'sess-1',
+      currentUrl: 'https://example.com',
+      isLoading: false,
+      error: null,
+      processGone: null,
+      canGoBack: false,
+      canGoForward: false,
+      zoomFactor: 1,
+    })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="browser-create-error"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})

@@ -6,7 +6,8 @@
  * useOverlayControl / getOverlayControlState 读取；写入只经 openOverlay / closeOverlay。
  * renderer workflow-viz-overlay.ts 的 overlayOpen / overlayCurrent 模块级 ref 已退役。
  *
- * W2 扩展位（u-w2-browser-mount）：coordination.ts 增 openBrowser(url)。
+ * W2 已落位（u-w2-browser-mount）：coordination.ts 增 openBrowser(url, sessionId) +
+ * closeBrowserOverlayForSession（会话删除级联 UI 关闭编排）。
  */
 export * from './types'
 export {
@@ -18,5 +19,7 @@ export {
 export {
   openOverlay,
   closeOverlay,
+  openBrowser,
+  closeBrowserOverlayForSession,
   _resetOverlayForTest,
 } from './coordination'

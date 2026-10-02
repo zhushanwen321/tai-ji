@@ -126,6 +126,9 @@ import { useBtwTabData, getBtwVirtualIdsByMain } from '@/composables/panel/useBt
 import { useChatStore } from '@/stores/chat'
 import { useWorkflowStore } from '@/stores/workflow'
 import { registerSessionCleanup, __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
+// [display-containers §7.4 发起会话删除级联 browser 分支] 浮层开合态（core SSOT）真身：
+// 断言删除发起会话才关浮层（S5 反向断言 = 删非发起会话浮层不动）
+import { openBrowser, getOverlayControlState, _resetOverlayForTest } from '@taiji/core/domain/overlay'
 
 function makeSummary(id: string): SessionSummary {
   return { id, label: id, cwd: '/proj', status: 'idle', lastActiveAt: 1, modelId: 'm1', tokenCount: 0 }
@@ -439,5 +442,42 @@ describe('useSidebar deleteSession 级联前端腿：btw 线虚拟分区 + 派�
 
     scope.stop()
     host.unmount()
+  })
+})
+
+describe('useSidebar deleteSession 级联 browser 分支（display-containers §7.4 发起会话删除的浮层终态）', () => {
+  beforeEach(() => {
+    _resetOverlayForTest()
+  })
+
+  it('删发起会话（浮层正开该会话的浏览器页）→ 关浮层（overlay 态复位）+ browserDestroy 该会话 view', async () => {
+    openBrowser('http://localhost:1420/', 's1')
+    expect(getOverlayControlState().isOpen).toBe(true)
+
+    const scope = effectScope()
+    const sidebar = scope.run(() => useSidebar())!
+    seedSessions([{ cwd: '/proj', ids: ['s1', 's2'] }])
+    await sidebar.deleteSession('s1')
+
+    expect(getOverlayControlState().isOpen).toBe(false)
+    expect(getOverlayControlState().current).toBeNull()
+    expect(browserDestroyMock).toHaveBeenCalledWith('s1')
+    scope.stop()
+  })
+
+  it('S5 反向断言：删非发起会话 → 浮层不动（仍开、内容不变）', async () => {
+    openBrowser('http://localhost:1420/', 's1')
+
+    const scope = effectScope()
+    const sidebar = scope.run(() => useSidebar())!
+    seedSessions([{ cwd: '/proj', ids: ['s1', 's2'] }])
+    await sidebar.deleteSession('s2')
+
+    const state = getOverlayControlState()
+    expect(state.isOpen).toBe(true)
+    expect(state.current).toEqual({ kind: 'browser', payload: { url: 'http://localhost:1420/', sessionId: 's1' } })
+    // 被删会话自身的 view 仍照常销毁（B4 语义），不构成过宽清场
+    expect(browserDestroyMock).toHaveBeenCalledWith('s2')
+    scope.stop()
   })
 })

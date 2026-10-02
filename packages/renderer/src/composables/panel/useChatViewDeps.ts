@@ -32,6 +32,7 @@ import { useSessionStore } from '@/stores/session'
 import { useChat } from '@/composables/features/chat/useChat'
 import { useTurnExpansion } from '@/composables/panel/useTurnExpansion'
 import { useSideDrawer, type SideDrawerTab } from '@/composables/features/drawer/useSideDrawer'
+import { openBrowser } from '@taiji/core/domain/overlay'
 import { useFileTreeStore } from '@/stores/fileTree'
 import { useFileSearch } from '@/composables/features/search/useFileSearch'
 import { triggerEnterForkMode } from '@/composables/panel/useForkModeChannel'
@@ -160,8 +161,14 @@ export function useChatViewDeps(
     openDrawer: (tab, opts?): void => {
       drawer.open(tab as SideDrawerTab, opts)
     },
+    // [display-containers §7.4 URL 注入链] localhost 链接 → 浮层浏览器（core openBrowser：
+    // 单例换内容 + BrowserPane 挂浮层壳）；发起会话 = 调用方（MarkdownRenderer）透传的 sessionId
+    openBrowser: (url: string, sessionId: string): void => {
+      openBrowser(url, sessionId)
+    },
     onFileClick: (path: string): void => {
-      fileTreeStore.selectFile(path)
+      // per-session：选中态落位 + 同步注入 detail tab（W3 注入语义；目标会话 = 本 deps 绑定会话）
+      fileTreeStore.selectFile(sessionId.value, path)
     },
 
     // ── 数据加载 ──

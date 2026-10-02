@@ -68,6 +68,9 @@ import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useChat, ensureStreamSubscription } from '@/composables/features/chat/useChat'
 import { invalidateStatusCache } from '@/composables/features/chat/useSessionDerivations'
 import { browserDestroy as browserDestroyIpc } from '@/lib/ipc'
+// [display-containers §7.4 发起会话删除级联] 浮层 browser 内容的 UI 关闭编排（core 协调层，
+// 条件式：仅发起会话被删才关，删非发起会话不动浮层——S5 反向断言）
+import { closeBrowserOverlayForSession } from '@taiji/core/domain/overlay'
 import { useTerminalWriteQueueStore } from '@/stores/terminal-write-queue'
 import { useCommandStore } from '@/composables/features/command/useCommandStore'
 import { useForkNoticeFeed } from '@/composables/effects/useForkNoticeEffect'
@@ -184,6 +187,9 @@ export function useSidebar() {
     // fire-and-forget——preload invoke 透传 rejection，显式 .catch(console.warn 级) 消化，
     // 防 unhandledrejection 上报 error-reporter；失败仅降级为 view 驻留至 LRU 挤出（best-effort）。
     browserDestroy: (sid) => {
+      // [display-containers §7.4 发起会话删除级联 browser 分支] 关浮层（仅当浮层当前内容
+      // 是该会话的 browser——否则浮层不动）+ 销毁该会话 view（B4 语义保留）。
+      closeBrowserOverlayForSession(sid)
       browserDestroyIpc(sid).catch((e) => console.warn(`[useSidebar] browserDestroy(${sid}) failed:`, e))
     },
     // [G1 / 2026-09-14 内存审计 §3.4] 死清理 API 接线组：三个此前全仓零调用的清理 API

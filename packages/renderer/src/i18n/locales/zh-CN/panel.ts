@@ -345,6 +345,9 @@ export default {
     bashTaskWriteFailed: '操作未生效（数据写入失败），请重试',
   },
   browserPane: {
+    overlayTitle: '浏览器',
+    overlayClose: '关闭',
+    createFailed: '内置浏览器打开失败',
     back: '后退',
     forward: '前进',
     reload: '重载',
