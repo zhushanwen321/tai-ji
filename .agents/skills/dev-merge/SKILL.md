@@ -43,7 +43,7 @@ description: >-
 
 | 级别 | 判据（任一命中） | 动作 |
 |------|----------------|------|
-| **打回**（不进第 2 步合并） | quality-gates FAIL 经 3 轮修复子循环仍红；branch-review 终态 needs-human / stuck / max-rounds / review-failure / fix-failure（CR 门 fail-fast 语义，见 1.7；fix-failure 判据 = 结构化返回校验失败（重试后仍败）/ per-fixer 任务文档写盘失败；终态清扫失败改判 needs-human，同属打回级）；must-fix 未全修；传播检查红灯 | 停在合并之外，按各步失败输出的恢复指引处置后重跑对应步 |
+| **打回**（不进第 2 步合并） | quality-gates FAIL 经 3 轮修复子循环仍红；branch-review 终态 needs-human / stuck / max-rounds / review-failure / aggregator-failure / fix-failure（CR 门 fail-fast 语义，见 1.7；fix-failure 判据 = 结构化返回校验失败（重试后仍败）/ per-fixer 任务文档写盘失败；终态清扫失败改判 needs-human，同属打回级）；must-fix 未全修；传播检查红灯 | 停在合并之外，按各步失败输出的恢复指引处置后重跑对应步 |
 | **组级提交待办**（仅 zcode dev-merge-gates 主路径；pi 宿主手工编排走 review-fix-loop，无此通道） | 组 commit 撞 pre-commit 拦截经三分类处置（env 类环境恢复就地重试 / content 类补修 fixer 补全后重试、每组每轮 ≤2 次 / blocked 类）后仍失败 → 该组转提交待办随终态 deferredCommits 呈报，不终止 workflow | deferredCommits 非空时终态为 needs-human：主 agent 逐组判定补提交或还原后再进第 2 步；待办组文件不进终态清扫、保持工作区形态 |
 | **随分支带走** | branch-review minor（suggestion）残余；metrics/coverage 的 warn 档机器报告 | 不阻塞合并，登记进 commit message 或 TODO，终局 PR 期复核 |
 | **呈报后继续** | 传播检查软提示（兄弟线线粒度呈报 + 文件交集）；gates / changeset-check / cross-branch-overlap 脚本缺失的存在性检查披露；changeset WARN（自动分类处置，理由列明）；fixer 未申报的残留改动留工作区并逐文件披露（WARN，不终止——下轮审查两路覆盖可见后处置） | 呈报或披露后继续流程，不静默跳过 |

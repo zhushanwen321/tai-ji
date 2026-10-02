@@ -58,7 +58,8 @@ args:
 //   env 类 committer 就地恢复重试 / content 类后置补修循环（补修 fixer dmg-commit-fix 按
 //   报错原文补全、相交归属并入组清单重试、每组每轮 ≤2 次超限转 blocked）/ blocked 类组转
 //   提交待办（deferredCommits）不终止 run（红线 = 不改文件内容 / 不跳过检查 / 不提交清单外
-//   文件；需改检查器本体的失败仍 fix-failure 交人工）；
+//   文件；需改检查器本体的失败属 blocked 类：br 路径转待办随 deferredCommits 呈报、终态
+//   needs-human，gates/changeset/sweep 残留路径按各自现行语义终止或改判 needs-human 交人工）；
 // - 自愈与清扫为本 workflow 相对同族（review-fix-loop / pr-lifecycle / dev-consistency-loop）
 //   的已知差异：同族无 commit 拦截三分类与收敛出口终态清扫（它们以廉价重跑或 pr-lifecycle
 //   清扫垫底），同族内容配套缺口登记 docs/todo/dev-merge-gates-sibling-content-repair-gap.md
@@ -261,7 +262,7 @@ interface DmgRecord {
   disputeEvidence?: string;
   /** deferred 理由（fixer 申报；随终态 remaining 带出，并注入下轮对账 prompt 的 deferred 清单） */
   deferredReason?: string;
-  /** 上轮对账结论的证据（not-fixed/regressed 时落档；per-fixer 任务文档注入——fixer 知道上轮为什么没修好） */
+  /** 上轮对账结论的证据（对账套用的各路径均落档：fixed 核实证据与 not-fixed/regressed/申报不一致的问题证据；per-fixer 任务文档注入——fixer 知道上轮为什么没修好） */
   lastReconEvidence?: string;
   /** 上轮对账 regressed（修了又坏）标记（per-fixer 任务文档注入） */
   regressed?: boolean;
@@ -1437,6 +1438,7 @@ async function main(): Promise<Record<string, unknown>> {
           it.status = "fixed";
           it.uncleanRounds = 0;
           it.regressed = false;
+          it.lastReconEvidence = cs.map((c) => c.evidence).join(" | ");
           log(`[branch-review] ${it.id} 对账申报 fixed（全员带证据，已核实）`);
         } else {
           it.status = "open";
@@ -1654,8 +1656,11 @@ async function main(): Promise<Record<string, unknown>> {
       }
       // 止损检查降级（改造点 3，依赖改造点 2 两路覆盖先行——可见性先于容忍度）：fixer 未申报的
       // 残留 WARN 留工作区不终止——下轮 reviewer 经两路覆盖可见后处置（重报为问题或对账核实）；
-      // 逐文件披露供核对。无主改动不喂归属对账集合（fixer 未申报 ≠ 可归责，终态清扫时按无主处置）
-      const nowDirt = await dirtyFiles();
+      // 逐文件披露供核对。无主改动不喂归属对账集合（fixer 未申报 ≠ 可归责，终态清扫时按无主处置）。
+      // blocked 组文件已申报过（affectedFiles 进过提交计划），只是 commit 被拦留在暂存区/工作区
+      // ——由 commit-blocked-r<轮>-<组> 披露与 deferredCommits 终态字段承载，不计入「未申报」
+      const deferredFilesNow = new Set(deferredCommits.flatMap((d) => d.files));
+      const nowDirt = (await dirtyFiles()).filter((f) => !deferredFilesNow.has(f));
       if (nowDirt.length > 0) {
         const reason = `fixer 返回后存在未申报且未提交的改动（WARN 留工作区，不终止；下轮 reviewer 两路覆盖可见后处置）：\n${nowDirt.join("\n")}`;
         log(`WARN: [branch-review] ${reason}`);
@@ -1818,7 +1823,7 @@ async function main(): Promise<Record<string, unknown>> {
     deferredCommits: br?.deferredCommits ?? [],
     sweptFiles: br?.sweptFiles ?? [],
     ledgerFile: br?.ledgerFile ?? null,
-    nextAction: "继续 dev-merge 第 1.8 步：目标集成线传播检查（check-line-propagation.mjs --target HEAD）+ cross-branch-overlap.mjs 兄弟线交集呈报，软提示呈报用户线粒度裁决后进第 2 步合并（dev-merge.sh merge <dev-branch>）；deferredCommits 非空时先逐组判定补提交或还原",
+    nextAction: "继续 dev-merge 第 1.8 步：目标集成线传播检查（check-line-propagation.mjs --target HEAD）+ cross-branch-overlap.mjs 兄弟线交集呈报，软提示呈报用户线粒度裁决后进第 2 步合并（dev-merge.sh merge <dev-branch>）",
   };
 }
 
