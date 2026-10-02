@@ -1060,9 +1060,9 @@ export class SessionRecords {
   async getWorkflowRunEvents(sessionId: string, runId: string): Promise<WorkflowRunEventsReply> {
     const recordPath = this.resolveWorkflowRecordPath(sessionId, runId)
     if (recordPath === undefined) {
-      return { runId, code: 'record_not_found', message: `no v2 workflow record registration for run ${runId} in this session` }
+      return { sessionId, runId, code: 'record_not_found', message: `no v2 workflow record registration for run ${runId} in this session` }
     }
-    return this.runEventsReader.readRunEvents(runId, recordPath)
+    return this.runEventsReader.readRunEvents(sessionId, runId, recordPath)
   }
 
   /**
@@ -1073,9 +1073,9 @@ export class SessionRecords {
   async getWorkflowDag(sessionId: string, runId: string): Promise<WorkflowDagReply> {
     const recordPath = this.resolveWorkflowRecordPath(sessionId, runId)
     if (recordPath === undefined) {
-      return { runId, code: 'record_not_found', message: `no v2 workflow record registration for run ${runId} in this session` }
+      return { sessionId, runId, code: 'record_not_found', message: `no v2 workflow record registration for run ${runId} in this session` }
     }
-    return this.runEventsReader.readDag(runId, recordPath)
+    return this.runEventsReader.readDag(sessionId, runId, recordPath)
   }
 
   /**

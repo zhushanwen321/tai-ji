@@ -113,12 +113,12 @@ describe('session.getWorkflowDag 协议契约（U2，设计 §3.1-5 SSOT）', ()
     expectTypeOf<WorkflowDagErrorCode>().toEqualTypeOf<(typeof DAG_ERROR_CODES)[number]>()
   })
 
-  it('reply 判别 union：成功臂 { runId, dag }，dag 为完整产物（nodes 空数组 = 零调用点 run）', () => {
+  it('reply 判别 union：成功臂 { sessionId, runId, dag }，dag 为完整产物（nodes 空数组 = 零调用点 run）', () => {
     // 两臂覆盖全联合（无第三形态）
     expectTypeOf<DagOkArm | DagErrArm>().toEqualTypeOf<WorkflowDagReply>()
 
     const zeroCallDag: WorkflowDag = { nodes: [], edges: [], phases: [], parallelGroups: [], loops: [] }
-    const reply: WorkflowDagReply = { runId: 'wf-1', dag: zeroCallDag }
+    const reply: WorkflowDagReply = { sessionId: 's1', runId: 'wf-1', dag: zeroCallDag }
     if ('dag' in reply) {
       expect(reply.dag.nodes).toEqual([])
     } else {
@@ -126,9 +126,9 @@ describe('session.getWorkflowDag 协议契约（U2，设计 §3.1-5 SSOT）', ()
     }
   })
 
-  it.each([...DAG_ERROR_CODES])('reply 判别 union：错误臂 { runId, code: %s, message }', (code) => {
+  it.each([...DAG_ERROR_CODES])('reply 判别 union：错误臂 { sessionId, runId, code: %s, message }', (code) => {
     expectTypeOf<DagErrArm['code']>().toEqualTypeOf<WorkflowDagErrorCode>()
-    const reply: WorkflowDagReply = { runId: 'wf-1', code, message: '原因说明' }
+    const reply: WorkflowDagReply = { sessionId: 's1', runId: 'wf-1', code, message: '原因说明' }
     if ('code' in reply) {
       expect(reply.code).toBe(code)
       expect(typeof reply.message).toBe('string')
@@ -137,9 +137,10 @@ describe('session.getWorkflowDag 协议契约（U2，设计 §3.1-5 SSOT）', ()
     }
   })
 
-  it('边界：parse_failed 可重试语义在类型层无阻碍（成功与错误臂同带 runId——renderer 分区路由无需判臂）', () => {
-    const ok: DagOkArm = { runId: 'wf-1', dag: { nodes: [], edges: [], phases: [], parallelGroups: [], loops: [] } }
-    const err: DagErrArm = { runId: 'wf-1', code: 'parse_failed', message: '不支持语法' }
+  it('边界：parse_failed 可重试语义在类型层无阻碍（成功与错误臂同带 sessionId/runId——renderer 分区路由无需判臂）', () => {
+    const ok: DagOkArm = { sessionId: 's1', runId: 'wf-1', dag: { nodes: [], edges: [], phases: [], parallelGroups: [], loops: [] } }
+    const err: DagErrArm = { sessionId: 's1', runId: 'wf-1', code: 'parse_failed', message: '不支持语法' }
+    expect(ok.sessionId).toBe(err.sessionId)
     expect(ok.runId).toBe(err.runId)
   })
 })
@@ -148,6 +149,7 @@ describe('session.getWorkflowRunEvents 协议契约（U2，设计 §3.1-4 SSOT�
   it('结构化错误码闭集 = record_not_found 单码（降级路径错误二分的结构化半边）', () => {
     expectTypeOf<WorkflowRunEventsErrorCode>().toEqualTypeOf<'record_not_found'>()
     const reply: WorkflowRunEventsReply = {
+      sessionId: 's1',
       runId: 'wf-1',
       code: 'record_not_found',
       message: '该 run 无事件流记录（旧格式或已清理）',
@@ -156,9 +158,16 @@ describe('session.getWorkflowRunEvents 协议契约（U2，设计 §3.1-4 SSOT�
     else throw new Error('unreachable：错误臂不可达')
   })
 
-  it('reply 判别 union：成功臂 { runId, events }，两臂覆盖全联合', () => {
+  it('reply 判别 union：成功臂 { sessionId, runId, events }，两臂覆盖全联合', () => {
     expectTypeOf<EventsOkArm | EventsErrArm>().toEqualTypeOf<WorkflowRunEventsReply>()
     expectTypeOf<EventsOkArm['events']>().toEqualTypeOf<WorkflowRunEventEntry[]>()
+  })
+
+  it('C-comm-05 会话隔离：两 reply 判别 union 的四个臂均必带 sessionId（对齐 session.workflows 等同族先例）', () => {
+    expectTypeOf<DagOkArm['sessionId']>().toEqualTypeOf<string>()
+    expectTypeOf<DagErrArm['sessionId']>().toEqualTypeOf<string>()
+    expectTypeOf<EventsOkArm['sessionId']>().toEqualTypeOf<string>()
+    expectTypeOf<EventsErrArm['sessionId']>().toEqualTypeOf<string>()
   })
 
   it('截断形态：白名单四字段与 §3.1-4 截断清单逐字一致（快照式锚定 + 类型域穷举）', () => {
@@ -449,12 +458,12 @@ describe('两条 RPC 的载体与登记（U2）', () => {
     const dagReply: ServerMessage<'session.workflowDag'> = {
       type: 'session.workflowDag',
       id: 'r1',
-      payload: { runId: 'wf-1', dag: { nodes: [], edges: [], phases: [], parallelGroups: [], loops: [] } },
+      payload: { sessionId: 's1', runId: 'wf-1', dag: { nodes: [], edges: [], phases: [], parallelGroups: [], loops: [] } },
     }
     const eventsReply: ServerMessage<'session.workflowRunEvents'> = {
       type: 'session.workflowRunEvents',
       id: 'r2',
-      payload: { runId: 'wf-1', events: [] },
+      payload: { sessionId: 's1', runId: 'wf-1', events: [] },
     }
     // payload 为判别联合，in 收窄成功臂后断言
     if ('dag' in dagReply.payload) expect(dagReply.payload.dag.nodes).toEqual([])
@@ -468,7 +477,7 @@ describe('两条 RPC 的载体与登记（U2）', () => {
   it('error envelope 边界：结构化领域错误（reply 内嵌 code 闭集）与通道错误（error envelope，code 开放 string）两形态并存', () => {
     // 形态一：设计内领域回执——getWorkflowDag/getWorkflowRunEvents 的 reply 错误臂
     //（code 为闭集词表；renderer 按码分流降级形态）
-    const structured: WorkflowDagReply = { runId: 'wf-1', code: 'record_not_found', message: '已清理' }
+    const structured: WorkflowDagReply = { sessionId: 's1', runId: 'wf-1', code: 'record_not_found', message: '已清理' }
     // 形态二：RPC 通道错误——service 抛错走 server 中央 catch 的统一 error envelope
     //（payload.code: string 开放域，非本设计的领域码闭集）；renderer 侧两通道经同一
     // 错误适配函数归一（设计 §3.1-5）。此处锚定 envelope 形态未被本单元改动：

@@ -14,7 +14,7 @@
  *   runId 内存缓存仅缓存成功结果，失败不缓存（parse_failed 可重试，设计 §3.1-5）。
  *
  * 错误形态二分（两通道，renderer 侧归一）：
- * - 结构化错误臂（reply 正常返回 { runId, code, message }，不走 error envelope）：
+ * - 结构化错误臂（reply 正常返回 { sessionId, runId, code, message }，不走 error envelope）：
  *   事件流闭集 = record_not_found（U2 冻结单码；路径白名单拒绝在该闭集下归并
  *   record_not_found + warn 留痕——「run 的 record 不可读」语义等价）；DAG 闭集 =
  *   parse_failed / no_script_source / record_not_found / path_rejected 四码全枚举。
@@ -251,7 +251,8 @@ function projectRunResumed(event: Extract<WorkflowRunEvent, { type: 'run-resumed
 
 /**
  * record 读侧投影服务（SessionRecords 单实例持有——DAG 成功缓存随服务实例生命周期，
- * runId → WorkflowDag 仅缓存成功结果）。
+ * runId → WorkflowDag 仅缓存成功结果）。sessionId 经参数透传进 reply 两臂（协议恒带
+ * ——C-comm-05 会话隔离），会话定界本身归 SessionRecords 的路径发现。
  */
 export class WorkflowRunEventsReader {
   /** runId → 成功 DAG（失败不缓存——parse_failed 重试可再解析，设计 §3.1-5）。 */
@@ -267,17 +268,17 @@ export class WorkflowRunEventsReader {
    * （U2 单码 record_not_found）下归并同一码 + warn 留痕——「run 的 record 不可读」
    * 语义等价（renderer 均显示静态指引，无重试）。
    */
-  readRunEvents(runId: string, recordPath: string): WorkflowRunEventsReply {
+  readRunEvents(sessionId: string, runId: string, recordPath: string): WorkflowRunEventsReply {
     if (!this.isPathAllowed(recordPath)) {
       console.warn(
         `[workflow-run-events-reader] record path rejected by allowlist (runId=${runId}): ${recordPath}` +
           ' — returning record_not_found (structured closed set has no dedicated code)',
       )
-      return { runId, code: 'record_not_found', message: 'workflow record path rejected by allowlist' }
+      return { sessionId, runId, code: 'record_not_found', message: 'workflow record path rejected by allowlist' }
     }
     const events = readRecordOrRecordNotFound(runId, recordPath)
-    if (!events.ok) return { runId, code: events.code, message: events.message }
-    return { runId, events: events.events.map(projectRunEventEntry) }
+    if (!events.ok) return { sessionId, runId, code: events.code, message: events.message }
+    return { sessionId, runId, events: events.events.map(projectRunEventEntry) }
   }
 
   /**
@@ -286,17 +287,18 @@ export class WorkflowRunEventsReader {
    * no_script_source（无 run-created 帧或旧格式行缺 scriptSource）/
    * parse_failed（解析器不支持语法——fail-fast 不产半个错误 DAG）。成功结果缓存。
    */
-  readDag(runId: string, recordPath: string): WorkflowDagReply {
+  readDag(sessionId: string, runId: string, recordPath: string): WorkflowDagReply {
     const cached = this.dagCache.get(runId)
-    if (cached !== undefined) return { runId, dag: cached }
+    if (cached !== undefined) return { sessionId, runId, dag: cached }
     if (!this.isPathAllowed(recordPath)) {
-      return { runId, code: 'path_rejected', message: `workflow record path rejected by allowlist: ${recordPath}` }
+      return { sessionId, runId, code: 'path_rejected', message: `workflow record path rejected by allowlist: ${recordPath}` }
     }
     const events = readRecordOrRecordNotFound(runId, recordPath)
-    if (!events.ok) return { runId, code: events.code, message: events.message }
+    if (!events.ok) return { sessionId, runId, code: events.code, message: events.message }
     const created = events.events.find((event) => event.type === 'run-created')
     if (created === undefined || created.type !== 'run-created' || created.scriptSource === undefined) {
       return {
+        sessionId,
         runId,
         code: 'no_script_source',
         message: 'run record has no run-created scriptSource (legacy format before record single-source)',
@@ -304,9 +306,9 @@ export class WorkflowRunEventsReader {
     }
     const parsed = parseWorkflowDag(created.scriptSource)
     if (!parsed.ok) {
-      return { runId, code: 'parse_failed', message: parsed.message }
+      return { sessionId, runId, code: 'parse_failed', message: parsed.message }
     }
     this.dagCache.set(runId, parsed.dag)
-    return { runId, dag: parsed.dag }
+    return { sessionId, runId, dag: parsed.dag }
   }
 }

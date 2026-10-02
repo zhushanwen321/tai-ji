@@ -651,7 +651,8 @@ export class SessionMessageHandler {
 
   // ── workflow 可视化拉取 RPC（workflow-visualization U3，设计 §3.1-4 / §3.1-5）──
   //
-  // 领域回执不走 error envelope——结构化错误臂（{ runId, code, message } 闭集）是
+  // 领域回执不走 error envelope——结构化错误臂（{ sessionId, runId, code, message } 闭集，
+  // sessionId 由 service 构造点注入、两臂恒带——C-comm-05）是
   // 设计内回执（renderer 按码分流降级形态：record_not_found → 静态指引无重试、
   // parse_failed → 重试解析入口、暂时性失败 → 错误 + 重试按钮）；判别字段 code。
   // RPC 通道错误（service throw，如非 ENOENT 的 fs 错误 / scanSessions 失败）走

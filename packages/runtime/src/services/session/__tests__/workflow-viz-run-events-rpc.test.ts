@@ -137,6 +137,7 @@ describe('session.getWorkflowRunEvents（§3.1-4 事件流拉取）', () => {
     const records = makeRecords()
     const reply: WorkflowRunEventsReply = await records.getWorkflowRunEvents(SID, RUN_ID)
     expect(reply).toHaveProperty('events')
+    expect(reply.sessionId).toBe(SID) // C-comm-05：两臂恒带 sessionId
     if (!('events' in reply)) throw new Error('expected success arm')
     const created = reply.events.find((e): e is Extract<WorkflowRunEventEntry, { type: 'run-created' }> => e.type === 'run-created')
     const phaseStarted = reply.events.find((e): e is Extract<WorkflowRunEventEntry, { type: 'phase-started' }> => e.type === 'phase-started')
@@ -166,11 +167,11 @@ describe('session.getWorkflowRunEvents（§3.1-4 事件流拉取）', () => {
   it('record_not_found：无注册条目（run 非本会话实体）与 record 文件已清理（ENOENT）', async () => {
     const noRegistration = makeRecords()
     const reply1 = await noRegistration.getWorkflowRunEvents(SID, 'run-unknown')
-    expect(reply1).toEqual({ runId: 'run-unknown', code: 'record_not_found', message: expect.any(String) })
+    expect(reply1).toEqual({ sessionId: SID, runId: 'run-unknown', code: 'record_not_found', message: expect.any(String) })
 
     rmSync(recordPath)
     const reply2 = await noRegistration.getWorkflowRunEvents(SID, RUN_ID)
-    expect(reply2).toEqual({ runId: RUN_ID, code: 'record_not_found', message: expect.any(String) })
+    expect(reply2).toEqual({ sessionId: SID, runId: RUN_ID, code: 'record_not_found', message: expect.any(String) })
   })
 
   it('路径白名单拒绝归并 record_not_found（事件流结构化闭集单码；日志留痕）', async () => {
@@ -178,7 +179,7 @@ describe('session.getWorkflowRunEvents（§3.1-4 事件流拉取）', () => {
     writeFileSync(sessionFilePath, registeredEntryLine(join(tmpdir(), 'outside-agent-dir', 'x.record.jsonl')), 'utf8')
     const records = makeRecords()
     const reply = await records.getWorkflowRunEvents(SID, RUN_ID)
-    expect(reply).toEqual({ runId: RUN_ID, code: 'record_not_found', message: expect.any(String) })
+    expect(reply).toEqual({ sessionId: SID, runId: RUN_ID, code: 'record_not_found', message: expect.any(String) })
   })
 
   it('RPC 通道错误：非 ENOENT fs 错误上抛（renderer 走 error envelope 重试按钮）', async () => {
@@ -202,6 +203,7 @@ describe('session.getWorkflowDag（§3.1-5 DAG 透出通道）', () => {
     const records = makeRecords()
     const reply1: WorkflowDagReply = await records.getWorkflowDag(SID, RUN_ID)
     expect(reply1).toHaveProperty('dag')
+    expect(reply1.sessionId).toBe(SID) // C-comm-05：两臂恒带 sessionId
     if (!('dag' in reply1)) throw new Error('expected success arm')
     expect(reply1.dag.nodes).toHaveLength(2) // 探针核实：fixture 脚本 → 2 个 agent 调用点节点
     expect(reply1.dag.phases).toEqual([{ name: 'review', order: 0 }])
@@ -220,7 +222,7 @@ describe('session.getWorkflowDag（§3.1-5 DAG 透出通道）', () => {
     ])
     const records = makeRecords()
     const reply1 = await records.getWorkflowDag(SID, RUN_ID)
-    expect(reply1).toEqual({ runId: RUN_ID, code: 'parse_failed', message: expect.any(String) })
+    expect(reply1).toEqual({ sessionId: SID, runId: RUN_ID, code: 'parse_failed', message: expect.any(String) })
 
     // 失败不缓存（设计 §3.1-5「重试可再解析」）：修复 record 后重试成功
     writeJournal([
@@ -233,20 +235,20 @@ describe('session.getWorkflowDag（§3.1-5 DAG 透出通道）', () => {
   it('no_script_source：run-created 帧缺 scriptSource（旧格式行）', async () => {
     const records = makeRecords()
     const reply = await records.getWorkflowDag(SID, RUN_ID)
-    expect(reply).toEqual({ runId: RUN_ID, code: 'no_script_source', message: expect.any(String) })
+    expect(reply).toEqual({ sessionId: SID, runId: RUN_ID, code: 'no_script_source', message: expect.any(String) })
   })
 
   it('record_not_found：record 文件不存在', async () => {
     rmSync(recordPath)
     const records = makeRecords()
     const reply = await records.getWorkflowDag(SID, RUN_ID)
-    expect(reply).toEqual({ runId: RUN_ID, code: 'record_not_found', message: expect.any(String) })
+    expect(reply).toEqual({ sessionId: SID, runId: RUN_ID, code: 'record_not_found', message: expect.any(String) })
   })
 
   it('path_rejected：recordPath 落白名单域外（防御性返回）', async () => {
     writeFileSync(sessionFilePath, registeredEntryLine(join(tmpdir(), 'outside-agent-dir', 'x.record.jsonl')), 'utf8')
     const records = makeRecords()
     const reply = await records.getWorkflowDag(SID, RUN_ID)
-    expect(reply).toEqual({ runId: RUN_ID, code: 'path_rejected', message: expect.any(String) })
+    expect(reply).toEqual({ sessionId: SID, runId: RUN_ID, code: 'path_rejected', message: expect.any(String) })
   })
 })

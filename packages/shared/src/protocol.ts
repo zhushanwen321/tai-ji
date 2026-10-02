@@ -1610,17 +1610,19 @@ export type WorkflowDagErrorCode =
 /**
  * session.getWorkflowDag 的 reply（workflow-visualization 设计 §3.1-5）。
  *
- * 成功形态：{ runId, dag }——DAG JSON（WorkflowDag，runtime 按 runId 内存缓存、
+ * 成功形态：{ sessionId, runId, dag }——DAG JSON（WorkflowDag，runtime 按 runId 内存缓存、
  * 仅缓存成功结果，失败不缓存故 parse_failed 可重试）。
- * 错误形态：{ runId, code, message }——四码闭集（见 WorkflowDagErrorCode）。错误臂
+ * 错误形态：{ sessionId, runId, code, message }——四码闭集（见 WorkflowDagErrorCode）。错误臂
  * 不走统一 error envelope——它们是设计内领域回执（renderer 按码分流降级形态：
  * parse_failed 给重试解析入口；no_script_source / record_not_found 静态指引、无重试
  * 按钮），判别字段 code。RPC 通道错误（service 抛错走 server 中央 catch）另走
  * error envelope；两通道在 renderer 侧经同一错误适配函数归一为「DAG 不可得 + 原因码」。
+ * 两臂恒带 sessionId——C-comm-05 会话隔离（runtime→前端消息必须带 sessionId，
+ * 对齐同族先例 session.workflows / workflowActionDone）。
  */
 export type WorkflowDagReply =
-  | { runId: string; dag: WorkflowDag }
-  | { runId: string; code: WorkflowDagErrorCode; message: string }
+  | { sessionId: string; runId: string; dag: WorkflowDag }
+  | { sessionId: string; runId: string; code: WorkflowDagErrorCode; message: string }
 
 /**
  * session.getWorkflowRunEvents 的错误码闭集（workflow-visualization 设计 §3.1-2
@@ -1633,13 +1635,15 @@ export type WorkflowRunEventsErrorCode = 'record_not_found'
 /**
  * session.getWorkflowRunEvents 的 reply（workflow-visualization 设计 §3.1-4 D4）。
  *
- * 成功形态：{ runId, events }——单 run 事件流原文行（大字段截断形态见
+ * 成功形态：{ sessionId, runId, events }——单 run 事件流原文行（大字段截断形态见
  * WorkflowRunEventEntry：四字段 2KB 截断 + truncatedFields 逐行标注）。
- * 错误形态：{ runId, code, message }——code 闭集见 WorkflowRunEventsErrorCode。
+ * 错误形态：{ sessionId, runId, code, message }——code 闭集见 WorkflowRunEventsErrorCode。
+ * 两臂恒带 sessionId——C-comm-05 会话隔离（runtime→前端消息必须带 sessionId，
+ * 对齐同族先例 session.workflows / workflowActionDone）。
  */
 export type WorkflowRunEventsReply =
-  | { runId: string; events: WorkflowRunEventEntry[] }
-  | { runId: string; code: WorkflowRunEventsErrorCode; message: string }
+  | { sessionId: string; runId: string; events: WorkflowRunEventEntry[] }
+  | { sessionId: string; runId: string; code: WorkflowRunEventsErrorCode; message: string }
 
 // ── delivery 域具名 DTO（投递所有权内核 D5/D7，u-contracts 契约先行）────────────
 

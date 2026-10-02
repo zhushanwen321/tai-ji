@@ -253,8 +253,9 @@ export async function getWorkflows(
 /**
  * 拉取单 run 的 record 事件流原文（workflow-visualization §3.1-4 D4 事件流拉模式通道；
  * 大字段 2KB 截断 + truncatedFields 标注见 WorkflowRunEventEntry）。
- * reply = WorkflowRunEventsReply：成功 { runId, events } / 结构化领域回执
- * { runId, code, message }（错误臂不走统一 error envelope——code 闭集
+ * reply = WorkflowRunEventsReply：成功 { sessionId, runId, events } / 结构化领域回执
+ * { sessionId, runId, code, message }（两臂恒带 sessionId——C-comm-05；错误臂不走统一
+ * error envelope——code 闭集
  * WorkflowRunEventsErrorCode，renderer 按码分流降级形态）；RPC 通道错误（service 抛错）
  * 另走 error envelope reject，两通道在 renderer 侧归一。
  */
@@ -265,8 +266,9 @@ export async function getWorkflowRunEvents(sessionId: string, runId: string): Pr
 /**
  * 拉取单 run 的 DAG 蓝图（workflow-visualization §3.1-5；runtime 调 subagent-core 解析器，
  * 按 runId 内存缓存、仅缓存成功结果——失败不缓存故 parse_failed 可重试）。
- * reply = WorkflowDagReply：成功 { runId, dag } / 结构化领域回执 { runId, code, message }
- * （错误臂不走统一 error envelope——code 闭集 WorkflowDagErrorCode 四枚举，renderer 按
+ * reply = WorkflowDagReply：成功 { sessionId, runId, dag } / 结构化领域回执
+ * { sessionId, runId, code, message }（两臂恒带 sessionId——C-comm-05；错误臂不走统一
+ * error envelope——code 闭集 WorkflowDagErrorCode 四枚举，renderer 按
  * 码分流降级形态：parse_failed 给重试解析入口、其余静态指引）；RPC 通道错误（service 抛错）
  * 另走 error envelope reject，两通道在 renderer 侧归一。
  */

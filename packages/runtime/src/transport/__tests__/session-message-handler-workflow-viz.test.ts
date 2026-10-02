@@ -3,7 +3,8 @@
  * 设计 §3.1-4 / §3.1-5）：
  *
  * - handles 认领 session.getWorkflowRunEvents / session.getWorkflowDag
- * - 结构化错误臂（领域回执 { runId, code, message } 闭集）经 reply 正常返回，不走
+ * - 结构化错误臂（领域回执 { sessionId, runId, code, message } 闭集——两臂恒带
+ *   sessionId，C-comm-05）经 reply 正常返回，不走
  *   error envelope（renderer 按码分流降级形态）
  * - RPC 通道错误（service throw）→ error envelope（reportFailure 收口，sessionId 必带）
  * - 端口缺省（SessionService 未组装转发，仅测试最小 mock 形态）→ *_unsupported
@@ -80,8 +81,8 @@ describe('SessionMessageHandler workflow-viz 端口缺省', () => {
 
 describe('SessionMessageHandler session.getWorkflowRunEvents', () => {
   it('成功与结构化错误臂都经 reply 正常返回（领域回执不走 error envelope）', async () => {
-    const eventsReply: WorkflowRunEventsReply = { runId: RUN_ID, events: [] }
-    const notFoundReply: WorkflowRunEventsReply = { runId: RUN_ID, code: 'record_not_found', message: 'gone' }
+    const eventsReply: WorkflowRunEventsReply = { sessionId: SID, runId: RUN_ID, events: [] }
+    const notFoundReply: WorkflowRunEventsReply = { sessionId: SID, runId: RUN_ID, code: 'record_not_found', message: 'gone' }
     const svc = fakeSessionService({
       getWorkflowRunEvents: vi.fn().mockResolvedValueOnce(eventsReply).mockResolvedValueOnce(notFoundReply),
     })
@@ -115,8 +116,8 @@ describe('SessionMessageHandler session.getWorkflowRunEvents', () => {
 
 describe('SessionMessageHandler session.getWorkflowDag', () => {
   it('成功与结构化错误臂（四码闭集形态）都经 reply 正常返回', async () => {
-    const dagReply: WorkflowDagReply = { runId: RUN_ID, dag: { nodes: [], edges: [], phases: [], parallelGroups: [], loops: [] } }
-    const parseFailedReply: WorkflowDagReply = { runId: RUN_ID, code: 'parse_failed', message: 'unsupported syntax' }
+    const dagReply: WorkflowDagReply = { sessionId: SID, runId: RUN_ID, dag: { nodes: [], edges: [], phases: [], parallelGroups: [], loops: [] } }
+    const parseFailedReply: WorkflowDagReply = { sessionId: SID, runId: RUN_ID, code: 'parse_failed', message: 'unsupported syntax' }
     const svc = fakeSessionService({
       getWorkflowDag: vi.fn().mockResolvedValueOnce(dagReply).mockResolvedValueOnce(parseFailedReply),
     })

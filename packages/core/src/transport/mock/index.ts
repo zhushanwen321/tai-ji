@@ -658,12 +658,12 @@ const sessionImpl = {
    * 其余 runId 返回结构化 record_not_found 领域回执（形态对齐 real 错误臂；该降级形态的
    * renderer 分流由组件测试覆盖——workflow-live-panel.test.ts 错误二分用例）。
    */
-  async getWorkflowRunEvents(_sessionId: string, runId: string): Promise<WorkflowRunEventsReply> {
+  async getWorkflowRunEvents(sessionId: string, runId: string): Promise<WorkflowRunEventsReply> {
     await sleep(TIMING.ack)
     if (runId === 'wf-mock-001') {
-      return { runId, events: fixtureRunEvents.map((e) => ({ ...e })) }
+      return { sessionId, runId, events: fixtureRunEvents.map((e) => ({ ...e })) }
     }
-    return { runId, code: 'record_not_found', message: 'mock 无 record 事件流记录' }
+    return { sessionId, runId, code: 'record_not_found', message: 'mock 无 record 事件流记录' }
   },
 
   /**
@@ -671,9 +671,9 @@ const sessionImpl = {
    * 缺成员即接口同构破）。mock 无 record 文件基建 → 返回结构化 record_not_found 领域回执
    *（形态对齐 real 错误臂；overlay 左栏按码分流降级形态 = 按 phase 分组只读列表）。
    */
-  async getWorkflowDag(_sessionId: string, runId: string): Promise<WorkflowDagReply> {
+  async getWorkflowDag(sessionId: string, runId: string): Promise<WorkflowDagReply> {
     await sleep(TIMING.ack)
-    return { runId, code: 'record_not_found', message: 'mock 无 record 文件基建' }
+    return { sessionId, runId, code: 'record_not_found', message: 'mock 无 record 文件基建' }
   },
 
   /** Mock agent call 对话流历史（返回空数组，drawer SubagentTab agentcall 分支加载不 throw 即可） */
