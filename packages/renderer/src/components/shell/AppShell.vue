@@ -35,6 +35,7 @@
 
 <script setup lang="ts">
 import { defineAsyncComponent, defineComponent, h, provide, ref, watch } from 'vue'
+import { useKeyOrchestrator } from '@/composables/features/app/key-orchestrator'
 import { useNavigationStore } from '@/stores/navigation'
 import { useSessionStore } from '@/stores/session'
 import { usePlatformChrome } from '@/composables/effects/usePlatformChrome'
@@ -47,6 +48,11 @@ import WorkflowVizOverlayHost from '@/components/panel/workflow-viz/overlay/Work
 import RollingRestartBanner from '@/components/ui/RollingRestartBanner.vue'
 import AsyncErrorFallback, { LAZY_RETRY_KEY } from '@/components/ui/AsyncErrorFallback.vue'
 import { useSidebarStore } from '@/stores/sidebar'
+
+// [display-containers §6.7] 键盘栈序编排器：AppShell 根 setup **首位**注册（Esc/Tab window
+// keydown 监听 + IME 组合态跟踪）——FIFO 同相位下先于任何弹层挂载的监听，保证编排器
+// 先执行让位判定、reka DismissableLayer 后行 dismiss（R4 时序前提；移动本行会破坏该顺序）。
+useKeyOrchestrator()
 
 // 设置弹窗懒加载（D-8 §3.3 边界判据：首屏不渲染 + 重依赖——设置页树子树）。
 // 代价：activeMenu/extensionView 等弹窗内状态随关闭卸载而重置回默认页（此前常驻挂载保留上次页面，
