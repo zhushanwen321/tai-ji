@@ -33,10 +33,14 @@ export type WorkflowDoneReason =
   | 'time_limited'
 
 /**
- * workflow 内的单个 agent call（从 RunSnapshot.state.trace[] 映射）。
+ * workflow 内的单个 agent call（从 record 事件流 fold 的 ask 步骤行映射，
+ * taskIndex 升序——runtime workflow-record-projection）。
  *
- * trace 节点是 workflow run 的执行追踪——每个节点代表一次 agent 调用，
- * 含 agent 名/phase/model/sessionId/用量/耗时/状态。
+ * ask 步骤行是 workflow run 的执行追踪——每个节点代表一次 agent 调用，
+ * 含 agent 名/phase/model/sessionId/用量/耗时/状态。下方 WorkflowAgentCall
+ * 与 WorkflowRunRecord 行内的 trace.* / state.* / meta.* / budget.* 括注沿用
+ * 历史快照形态的字段路径（快照类型已随 v1 兼容读删除，ADR-0095），仅作
+ * 字段语义参考；spec.* 括注指向现役 core RunSpec，非历史形态。
  */
 export interface WorkflowAgentCall {
   /** call 序号（trace.stepIndex） */
@@ -66,9 +70,9 @@ export interface WorkflowAgentCall {
   /** failed 状态的错误文本（trace.error 或 trace.result.error） */
   error?: string
   /**
-   * [P3/D6] 该 ask 最近一次事件边沿的墙钟时间（epoch ms；RunSnapshot.state.calls[]
-   * 按 id 关联合并，事件 journal fold 投影）。可缺省——旧快照无此字段，消费侧缺省
-   * 渲染（时长槽/停滞判定省略）。
+   * [P3/D6] 该 ask 最近一次事件边沿的墙钟时间（epoch ms；fold ask 步骤行透出，
+   * 事件 journal fold 投影）。可缺省——旧投影无此字段，消费侧缺省渲染
+   * （时长槽/停滞判定省略）。
    */
   lastProgressAt?: number
   /**
@@ -87,7 +91,7 @@ export interface WorkflowAgentCall {
 }
 
 /**
- * [P3/D6] run 终局形态（RunSnapshot.state.outcome，事件 journal fold 投影）。
+ * [P3/D6] run 终局形态（record 事件流 run-settled 终帧 outcome，事件 journal fold 投影）。
  * 与 status/reason（DoneReason）正交——「run 自身怎么死的」维度（harness 系统层）。
  *
  * [W2 D5 → D2] 四值终态词表（done/failed/cancelled/time_limited），归类为**投影派生输出**（单一生产者 = runtime extractor
@@ -154,19 +158,22 @@ export const WORKFLOW_RUN_OUTCOME_LABELS: Record<WorkflowRunOutcome, string> = {
 /**
  * 单条 workflow run 记录（列表项 + 详情数据）。
  *
- * 字段来源对应关系（RunSnapshot → WorkflowRunRecord）：
- * - runId：RunSnapshot.runId（如 "wf-1783679279983-hlpc46"）
- * - scriptName/slug/description：RunSnapshot.spec（spec.scriptName / spec.slug / spec.description）
- * - status/reason：RunSnapshot.state（state.status / state.reason）
- * - startedAt/completedAt：RunSnapshot.meta
- * - usedTokens/totalCallCount：RunSnapshot.state.budget
- * - agentCalls：RunSnapshot.state.trace[] 逐项映射（[P3/D6] 并按 id 合并 state.calls[]
- *   的 lastProgressAt 投影字段）
- * - stateFilePath：v2 = 注册条目 recordPath（run 事件 journal 锚——详情面板「run
- *   关联持久化文件」展示位）；v1 快照路径恒 ''（workflow-extractor 对空串隐藏）
+ * 字段来源对应关系（v2 双源投影：注册/终态条目 + record 事件流 fold——runtime
+ * events-projection / workflow-record-projection）：
+ * - runId：注册条目 runId（缺注册时终态条目兜底；如 "wf-1783679279983-hlpc46"）
+ * - scriptName/slug/startedAt：注册条目（缺注册时 fold created 帧兜底）
+ * - description：投影不产出，恒缺省
+ * - status：fold 三态（run-settled 终帧 → done / 状态机 interrupted →
+ *   interrupted / 其余 running）；fold 缺席时终态条目三态自描述
+ * - reason：终态条目（core DoneReason 收窄到本词表，词表外归一缺省）
+ * - completedAt/usedTokens/totalCallCount：终态条目统计摘要
+ * - outcome/errorCode：fold run-settled 终帧优先，终态条目兜底
+ * - agentCalls：fold ask 步骤行逐项映射（[P3/D6] lastProgressAt 等投影字段随行透出）
+ * - stateFilePath：注册条目 recordPath（run 事件 journal 锚——详情面板「run
+ *   关联持久化文件」展示位）；缺注册时 ''，消费侧对空串隐藏
  */
 export interface WorkflowRunRecord {
-  /** run 唯一标识（RunSnapshot.runId） */
+  /** run 唯一标识（注册条目 runId，如 "wf-1783679279983-hlpc46"） */
   runId: string
   /** 脚本名（spec.scriptName） */
   scriptName: string
@@ -191,9 +198,9 @@ export interface WorkflowRunRecord {
   /** state 路径：v2 = 注册条目 recordPath（详情面板「run 关联持久化文件」展示位）；v1 快照恒 ''（对空串隐藏） */
   stateFilePath: string
   /**
-   * [P3/D6] run 级 health（RunSnapshot.state.health，事件 journal fold 投影）。
-   * 仅 lastProgressAt 单字段；stalledSince 由消费侧 lastProgressAt + 阈值推导。
-   * 可缺省——旧快照无此字段，消费侧按 unknown 处理（不判定停滞）。
+   * [P3/D6] run 级 health（run 停滞观测面）。仅 lastProgressAt 单字段；
+   * stalledSince 由消费侧 lastProgressAt + 阈值推导。v2 事件 fold 投影不产出
+   * 本字段（历史快照形态遗留），消费侧按 unknown 处理（不判定停滞）。
    */
   health?: { lastProgressAt: number }
   /** [P3/D6] 终局形态（state.outcome；仅终局后快照携带）。 */
