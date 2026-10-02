@@ -265,9 +265,10 @@ interface DmgRecord {
   regressed?: boolean;
   /** 连续修复后复审仍未清的轮数（stuck 顽固条目归因） */
   uncleanRounds: number;
-  /** commit 拦截 blocked 转待办标记：所在组 commit 三分类处置后仍失败——条目保持 fix-claimed
-   *  （代码改动留工作区，下轮 reviewer 两路覆盖可见、可核实）；修复分组输入排除 + 对账未过升
-   *  needs-human（防无效重修：不再自动派 fixer 重修同一批文件再撞同一拦截） */
+  /** commit 拦截 blocked 转待办标记：所在组 commit 三分类处置后仍失败——组内全部条目（不区分
+   *  status）置此标记（代码改动留工作区，下轮 reviewer 两路覆盖可见、可核实）；修复分组输入
+   *  排除 + 仍处 open 的条目升 needs-human（防无效重修：不再自动派 fixer 重修同一批文件再撞
+   *  同一拦截） */
   commitBlocked?: boolean;
 }
 
@@ -574,9 +575,39 @@ async function main(): Promise<Record<string, unknown>> {
     await askCommitter(plan.map((p) => ({ group: p.group, files: planOf.get(p.group)!.files, message: p.message })), "");
     // content 类统一后置补修（决策 7：相交归属规则需要完整组清单——全部组 commit 尝试完成后再补修，
     // 串行化消除组间混提）
+    // 防御路由：committed=false 且 errorKind 非 content 的组不进补修队列、也无其他路由承接
+    // （按 committer 契约该形态只应是违约申报——env 处置后仍失败应报 blocked），一律视同
+    // blocked 转待办（deferredCommits 呈报），error 摘要注明违约兜底
+    for (const p of plan) {
+      const first = results.get(p.group);
+      if (first !== undefined && !first.committed && first.errorKind !== "content") {
+        blocked.push({
+          group: p.group,
+          files: planOf.get(p.group)!.files,
+          error: first.errorKind === "env"
+            ? `违约申报 env，已按 blocked 兜底转待办（按契约 env 处置后仍失败应报 blocked）；报错首行：${tailLines(first.errorDetail, 1)}`
+            : `初判 blocked，转待办；报错首行：${tailLines(first.errorDetail, 1)}`,
+        });
+      }
+    }
     const contentQueue = plan.filter((p) => results.get(p.group)?.errorKind === "content").map((p) => p.group);
     const repairTries = new Map<string, number>();
+    // 各组补修涉及文件跨尝试累计（失败披露条目的「全部补修涉及文件」来源——单次尝试的
+    // allRepaired 是局部量，超限/兜底路径取不到）
+    const repairFilesByGroup = new Map<string, string[]>();
+    // 失败披露条目序号（同组同轮多次失败各登记一条，item 带序号后缀防撞名；成功条目无后缀、
+    // 且唯一带 commit hash——两类条目可区分）
+    const repairFailSeq = new Map<string, number>();
     let queueGuard = plan.length * 4 + 4; // 队列总迭代上限（相交归属互指成环时的确定性兜底，超限余组转 blocked）
+    // 补修失败披露（与成功条目互补：无 hash、item 带序号后缀、reason 末尾列失败去向）
+    function pushRepairFailDisclosure(gid: string, repaired: string[], detail: string, outcome: string, note = ""): void {
+      const seq = (repairFailSeq.get(gid) ?? 0) + 1;
+      repairFailSeq.set(gid, seq);
+      disclosures.push({
+        item: `commit-repair-r${round}-${gid}-${seq}`,
+        reason: `第 ${round} 轮组 ${gid} content 类拦截补修未通过：补修文件（全部）${repaired.join("、") || "（无）"}；报错首行：${tailLines(detail, 1)}${note !== "" ? `；补修说明：${note}` : ""}；${outcome}`,
+      });
+    }
     // 补修 fixer 派发（输入 = errorDetail 报错原文 UNTRUSTED 包裹；恢复动作以报错原文为权威源）
     async function askRepairFixer(gid: string, detail: string): Promise<CommitRepairReport> {
       const fixer = agent(
@@ -628,11 +659,13 @@ async function main(): Promise<Record<string, unknown>> {
       if (tries >= MAX_COMMIT_REPAIRS) {
         // 超限转 blocked 路由（与 committer 申报的 blocked 同通道：组转待办）
         contentQueue.shift();
+        const overDetail = results.get(gid)?.errorDetail ?? "";
         blocked.push({
           group: gid,
           files: planOf.get(gid)!.files,
-          error: `content 类补修 ${MAX_COMMIT_REPAIRS} 次仍被拦截，转待办；末次报错首行：${tailLines(results.get(gid)?.errorDetail ?? "", 1)}`,
+          error: `content 类补修 ${MAX_COMMIT_REPAIRS} 次仍被拦截，转待办；末次报错首行：${tailLines(overDetail, 1)}`,
         });
+        pushRepairFailDisclosure(gid, repairFilesByGroup.get(gid) ?? [], overDetail, `补修超限（${MAX_COMMIT_REPAIRS} 次）转待办`);
         continue;
       }
       const cur = planOf.get(gid)!;
@@ -651,6 +684,12 @@ async function main(): Promise<Record<string, unknown>> {
       }
       const allRepaired = [...new Set([...declared, ...actualNew])];
       for (const f of allRepaired) if (!repairedAll.includes(f)) repairedAll.push(f);
+      const groupAcc = repairFilesByGroup.get(gid) ?? [];
+      for (const f of allRepaired) if (!groupAcc.includes(f)) groupAcc.push(f);
+      repairFilesByGroup.set(gid, groupAcc);
+      // 补修说明（fixer note）非空时随该次补修披露条目带出（成功与仍拦两条路径），保证补修说明有处可查
+      const repairNote = nonEmptyStr(repair.note);
+      const noteSuffix = repairNote !== "" ? `；补修说明：${repairNote}` : "";
       // 相交归属：与其他组提交计划或待办组登记文件相交 → 并入相交组（同一文件的工作区改动无法
       // 按组拆分，直接 add 会把别组改动吞进本组 commit）；相交组也是 content 失败组时其补修与
       // 重试先于本组，相交组已成功提交或为待办组时按归属处理、无时序前提
@@ -699,11 +738,12 @@ async function main(): Promise<Record<string, unknown>> {
         const hash = h.exitCode === 0 ? h.stdout.trim() : "未知";
         disclosures.push({
           item: `commit-repair-r${round}-${gid}`,
-          reason: `第 ${round} 轮组 ${gid} content 类拦截补修（第 ${repairTries.get(gid)} 次）：补修文件（全部）${allRepaired.join("、") || "（无）"}；报错首行：${tailLines(detail, 1)}；重试成功 commit ${hash}`,
+          reason: `第 ${round} 轮组 ${gid} content 类拦截补修（第 ${repairTries.get(gid)} 次）：补修文件（全部）${allRepaired.join("、") || "（无）"}；报错首行：${tailLines(detail, 1)}${noteSuffix}；重试成功 commit ${hash}`,
         });
         log(`[commit] 组 ${gid} 补修重试成功（commit ${hash}）`);
       } else if (res.errorKind === "content") {
         // 仍拦 → 留在队列再派补修（每组每轮上限 MAX_COMMIT_REPAIRS，头部超限分支承接）
+        pushRepairFailDisclosure(gid, allRepaired, detail, "重试仍拦，留队列", repairNote);
         log(`[commit] 组 ${gid} 补修重试仍被拦截（第 ${repairTries.get(gid)} 次补修后），留在补修队列`);
       } else {
         contentQueue.shift();
@@ -713,7 +753,9 @@ async function main(): Promise<Record<string, unknown>> {
     while (contentQueue.length > 0) {
       // queueGuard 耗尽的余组（归属互指成环兜底）——按 blocked 路由，不静默
       const gid = contentQueue.shift()!;
-      blocked.push({ group: gid, files: planOf.get(gid)!.files, error: `补修队列处理上限耗尽（归属互指成环兜底），转待办；末次报错首行：${tailLines(results.get(gid)?.errorDetail ?? "", 1)}` });
+      const loopDetail = results.get(gid)?.errorDetail ?? "";
+      blocked.push({ group: gid, files: planOf.get(gid)!.files, error: `补修队列处理上限耗尽（归属互指成环兜底），转待办；末次报错首行：${tailLines(loopDetail, 1)}` });
+      pushRepairFailDisclosure(gid, repairFilesByGroup.get(gid) ?? [], loopDetail, "成环兜底转待办");
     }
     return { blocked, reservedHits, repairedFiles: repairedAll };
   }
@@ -741,6 +783,10 @@ async function main(): Promise<Record<string, unknown>> {
       };
     }
   }
+
+  // changeset 起草产物清单（跨闭包共享：gates 闭包起草后 push；branch-review 闭包并入归属
+  // 对账集合 attributableFiles——账本缺它会把 changeset 文件的残留误判为无主改动）
+  const csDraftedFiles: string[] = [];
 
   await runStep("gates", async () => {
     // ── 存在性检查（zcode/pi 两侧通用行为，设计 §5 时序约束 3）：脚本随 git 分支传播、
@@ -841,7 +887,7 @@ async function main(): Promise<Record<string, unknown>> {
     // changeset-check 只认 .changeset/ 声明、不懂「非发布改动可跳过」，合法跳过裁决会让重跑
     // 永远 WARN，故跳过裁决视同处置完成。起草漏包（上一次运行的失败点）由下一轮以剩余
     // missing 补上一轮；drafter 跨轮复用同一实例（保留前轮上下文，补漏无需重述背景）
-    const csDraftedFiles: string[] = [];
+    // csDraftedFiles 声明在 main() 主作用域（branch-review 归属对账读同一引用），此处直接沿用
     const csSkipReasons: string[] = [];
     const csSkippedPkgs = new Set<string>();
     const csRoundMissing: string[] = [];
@@ -1018,6 +1064,7 @@ async function main(): Promise<Record<string, unknown>> {
     // changeset 产物——对得上账的残留才进 sweep commit；无主改动（run 运行期间用户/其他会话
     // 写入本 worktree）不代提交，逐项 WARN 呈报
     const attributableFiles = new Set<string>();
+    for (const f of csDraftedFiles) attributableFiles.add(f);
 
     function finishBr(terminated: DmgBrResult["terminated"], rounds: number, message: string): DmgBrResult {
       const disputedRecs = records.filter((r) => r.status === "disputed");
@@ -1573,13 +1620,16 @@ async function main(): Promise<Record<string, unknown>> {
           log(`[branch-review] ${reason}`);
           disclosures.push({ item: `commit-repair-reserved-r${round}`, reason });
         }
-        // blocked 转待办（改造点 1）：组内条目保持 fix-claimed + commitBlocked 标记（代码改动
-        // 留工作区，下轮 reviewer 两路覆盖可见、可核实）——不抛 TerminalError，其余组照常，循环继续
+        // blocked 转待办（改造点 1）：组内全部条目置 commitBlocked 标记（代码改动留工作区，
+        // 下轮 reviewer 两路覆盖可见、可核实；修复分组输入排除）——不抛 TerminalError，
+        // 其余组照常，循环继续
         for (const b of uc.blocked) {
           const bg = groups.find((g) => g.id === b.group);
           if (bg !== undefined) {
+            // 组内全部条目一律置 commitBlocked（不区分 status）：未被 fixer 认领的 open 条目
+            // （minor 等）同属被拦组，漏标会照常进下轮修复分组——白付一轮重修再撞同一拦截
             for (const r of groupRecsOf(bg)) {
-              if (r.status === "fix-claimed") r.commitBlocked = true;
+              r.commitBlocked = true;
             }
           }
           deferredCommits.push({ round, group: b.group, files: b.files, error: tailLines(b.error, 3) });
@@ -1619,9 +1669,9 @@ async function main(): Promise<Record<string, unknown>> {
         const agg = await runAggregator(round, verdicts, activeAll);
         await rebuildLedger(round, agg, verdicts);
 
-        // commitBlocked 组条目对账未过（not-fixed/regressed/申报不一致回 open）→ 立即升
-        // needs-human（改造点 1 防无效重修）：代码本身没修好且提交持续被拦，不再自动重修——
-        // 每轮 fixer + 全维度审查的循环浪费；人工处置后重新发起
+        // commitBlocked 条目仍处 open（对账未过回 open，或被拦组内本就未被 fixer 认领的条目）
+        // → 立即升 needs-human（改造点 1 防无效重修）：代码未修好或未修且提交持续被拦，不再
+        // 自动重修——每轮 fixer + 全维度审查的循环浪费；人工处置后重新发起
         const blockedBroken = records.filter((r) => r.commitBlocked === true && r.status === "open");
         if (blockedBroken.length > 0) {
           brResult = finishBr("needs-human", round, `提交待办组条目对账未通过（${blockedBroken.map((r) => r.id).join("、")}）——不再自动重修，人工处置后重新发起本 workflow；提交待办见 deferredCommits`);
