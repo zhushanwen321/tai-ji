@@ -1166,3 +1166,25 @@ ForkGroup（当前会话的「本会话的分支」折叠区）已整体退役�
 - 设计文档：[composer-task-tray.md](../design/composer-task-tray.md)（托盘内置四件与子会话入口）、[pi-launch-presets.md](../architecture/pi-launch-presets.md)（模式体系）与模式体系设计 D8/D9
 - 会话列表组件测试：`packages/renderer/src/__tests__/sidebar/`（含 fork-group.test.ts 的反向断言）
 - 托盘侧 counterpart testid 见 [01-chat-panel-composer.md §3.1](./01-chat-panel-composer.md)
+
+## §W workflow 可视化 overlay（workflow-viz）
+
+> 来源：workflow-visualization 设计（2026-10-02 交付）。全屏 overlay = 左 DAG 蓝图 + 右多级 tab 实况面板；双入口（托盘 workflow 行 / 对话流 workflow block）改向 overlay，drawer WorkflowTab 保留作回落载体。
+>
+> **mock 轨 e2e**：`e2e/workflow-viz-overlay.spec.ts`（OV1-OV6：双入口/三子页对账/钻取与 tab 编排/DAG 降级/三通道关闭，挂 E2E-MOCK-01）；同域 `e2e/workflow-sidebar-sync.spec.ts` T1-T3（托盘同步 + 入口改向）。
+>
+> **组件测试**：`packages/renderer/src/components/panel/workflow-viz/__tests__/`（gantt-segments 分段派生 fixture 单测含 rebuild/resume 代际样本断言、blueprint-match 匹配规则、panel 面板、workflow-store 缓存生命周期）。
+
+**testid 清单**（锚 = 组件 template 内 data-testid 属性）：
+
+| 区域 | testid | 说明 |
+|---|---|---|
+| overlay 壳 | `wfvz-overlay` / `wfvz-overlay-header` / `wfvz-overlay-close` | 壳与三通道关闭 |
+| DAG 画布 | `wfvz-overlay-dag-pane` / `wfvz-overlay-dag-loading` / `wfvz-overlay-dag-fallback` / `wfvz-overlay-dag-error-code` | 画布三态互斥（就绪/降级/解析中） |
+| 节点 | `wfvz-dag-node-<id>` / `wfvz-dag-node-error` | 节点卡片与节点级渲染边界占位 |
+| 未匹配分组 | `wfvz-overlay-unmatched` / `wfvz-overlay-unmatched-group-<phase>` / `wfvz-overlay-unmatched-item` | D2⑥ 指定分组（不静默丢弃） |
+| 实况面板 | `wf-viz-live-panel` / `wf-viz-trace-table` / `wf-viz-trace-row-<id>` / `wf-viz-trace-empty` | workflow tab 实例 trace |
+| 事件流 | 事件流子页（RunEventStream）含截断标注与错误二分形态 | record 原文（2KB 截断 + truncatedFields） |
+| Gantt | `wfvz-gantt`（`data-frozen` 标记停止冻结） | attempt 分段横条/phase 色带/游标 |
+
+**坑位**：① mock 轨 getWorkflowDag 恒 record_not_found 降级（T3/OV4 共用断言面，勿改成功）；② block 反查名字形态归一（路径/basename/带扩展名互通，workflow-viz-overlay.ts findRun）——主 agent 传路径是常态；③ e2e 像素轨不覆盖 overlay（交互层不进 shell/composer 基线视口，视觉验证走 L4 截图）。

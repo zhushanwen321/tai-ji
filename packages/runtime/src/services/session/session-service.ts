@@ -30,7 +30,7 @@
  */
 import { existsSync } from 'node:fs'
 import { isBtwVirtualId } from '@taiji/shared'
-import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId, PlanStateView, SessionRevokeMessageReply, SendPromptReason } from '@taiji/shared'
+import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId, PlanStateView, SessionRevokeMessageReply, SendPromptReason, WorkflowRunEventsReply, WorkflowDagReply } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
 import type {
   ISessionService, IMessageBroker, SessionCreateOptions,
@@ -1257,6 +1257,10 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   async getAgentCallFilePath(sessionId: string, agentCallSessionId: string): Promise<string> { return this.records.getAgentCallFilePath(sessionId, agentCallSessionId) }
   /** workflow 生命周期操作（经扩展 slash command，实现迁 session-records.ts）。 */
   async workflowAction(sessionId: string, action: 'abort', runId: string): Promise<void> { return this.records.workflowAction(sessionId, action, runId) }
+  /** [可视化 U3] 单 run 事件流原文拉取（大字段截断形态；实现详见 session-records.ts / workflow-run-events-reader.ts）。 */
+  async getWorkflowRunEvents(sessionId: string, runId: string): Promise<WorkflowRunEventsReply> { return this.records.getWorkflowRunEvents(sessionId, runId) }
+  /** [可视化 U3] 单 run DAG 静态蓝图拉取（core 解析器 + 成功缓存；实现详见 session-records.ts / workflow-run-events-reader.ts）。 */
+  async getWorkflowDag(sessionId: string, runId: string): Promise<WorkflowDagReply> { return this.records.getWorkflowDag(sessionId, runId) }
   /** subagent 生命周期/定向消息操作（encodeDirectiveText 编码，实现迁 session-records.ts）。 */
   async subagentAction(
     sessionId: string,

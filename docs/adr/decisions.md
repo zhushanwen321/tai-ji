@@ -406,3 +406,24 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **登记**：壳 `jsonl-run-store.ts` 注释措辞同批终态化（v1 行静默消失 = 设计预期）；壳 `session-lifecycle.ts` 的 link 条目读面不在本批领地、另行批次收敛；无新约束族（数据处置口径承 ADR-0094 系）。
 
+### ADR-0104 workflow 可视化入口语义分立：openWorkflow 改向 overlay + openWorkflowInDrawer 显式 drawer 语义（2026-10-02 设计裁决，workflow-visualization D1）
+**决策**：「看 workflow」的入口从「切 drawer 到 workflow tab」改为「打开全屏 overlay」，入口函数语义分立为两个，同一函数不承担两种语义：① `openWorkflow`（`packages/core/src/domain/drawer/coordination.ts`）改向为开 overlay——汇聚点单点改向，托盘 workflow 行零改动（已传 runId）；未绑定 overlay opener 时 no-op（headless/测试安全默认，不触达 drawer）。② 新增显式 drawer 语义函数 `openWorkflowInDrawer`（= 原 openWorkflow 实现的移位保留：setWorkflowView 三步——切 workflow tab + 记录选中名 + 开 drawer），供 overlay 装载失败回落链（Guard 捕获后 openDrawerTab + openWorkflowInDrawer 注入选中态，不得经改向后的 openWorkflow，否则重入 overlay 入口）与 SubagentTab 返回按钮直调；形参双语义（收 workflowName 或 runId，由 WorkflowTab「先 runId 精确匹配、后 scriptName 取最新」兼收解析）。配套：对话流 workflow block 从只传脚本 name 改为以 (scriptName, slug) 经 workflowStore 反查 runId（slug 缺失回落「name → 最新 run」现状语义；slug 碰撞取最新不阻塞；反查名字匹配为归一形态——双侧 basename 化 + 去扩展名后比较，路径 / 带扩展名 / bare 三形态互通（实装锚 = renderer workflow-viz overlay 控制器的 findRun；L4 真机发现主 agent 常传脚本路径、record.scriptName 存 basename，严格等值恒 miss）；反查未命中的兜底 = openWorkflowInDrawer(nameOrRunId) 显空态——点击不丢反馈）；drawer WorkflowTab 保留作回落载体（overlay 装载异常与窄窗口形态）。
+
+**依据**：不采用「两处入口组件零改动」——被现状证伪（block 只传脚本 name，同脚本并发 run 会打开错误的 run）；不采用「回落复用 openWorkflow(runId)」——改向后该函数语义已是开 overlay，回落经它调用会再次触发 overlay 入口、与装载失败形成重入，显式函数让两条通道在调用点即可区分意图；不采用「从 tool result 解析 runId」——tool result 是面向模型的文本，解析它是脆弱间接链，(scriptName, slug) 反查用的是 slug 的设计本职（区分并发 run）。
+
+**登记**：无新约束族（调用意图经函数名区分，语义边界由 coordination.ts 的 D1/D10 注释锚点与测试钉住）；实装 = `packages/core/src/domain/drawer/coordination.ts`。设计文档 `.tmp/tech-design/workflow-visualization.md`（不入库，过程产物）；本条即该决策的现行登记处。
+
+### ADR-0105 workflow DAG 静态解析器落 subagent-core（2026-10-02 设计裁决，workflow-visualization §3.2 解析位置 A 方案）
+**决策**：`scriptSource → DAG JSON` 静态解析器（acorn 解析；节点/边/phase 分区/条件谓词/并行组/循环回边/调用点行号；模板名保留；不支持语法 fail-fast 结构化错误）落 **subagent-core**（workflow 编排核心包）——解析器紧邻 script-lint 与 record 写入点，与引擎 CLI 包（pi-subagent-cli / zcode-subagent-cli）无关（引擎包被边界禁止依赖 core）；解析产物作为 run 数据的派生物经 `session.getWorkflowDag(runId)` RPC 透出（runtime 读该 run record 的 `run-created` scriptSource，调 core 解析器，runId 内存缓存、仅缓存成功结果）。到达 renderer 的链路 = runtime tsup bundle（noExternal inline core）。**acorn 依赖只声明在 subagent-core**（runtime 不声明——runtime tsup 对自身 dependencies 默认 external，声明错位会致打包态断链）。
+
+**依据**：不采用 renderer 侧解析——acorn 进 renderer 包体，且解析逻辑与引擎 lint 规则形成双份漂移；不采用 runtime 侧解析——runtime 对 workflow 脚本的语义责任就此开端，职责边界不如编排核心干净。
+
+**登记**：无新约束族；实装 = `packages/subagent-core/src/shared/workflow-dag-parser.ts` + `packages/subagent-core/package.json`（acorn 声明）+ `tsup.config.ts` noExternal 同步。设计文档 `.tmp/tech-design/workflow-visualization.md`（不入库，过程产物）；本条即该决策的现行登记处。
+
+### ADR-0106 事件流通道 = 拉模式 RPC + 信号水位 diff 扩维与 worker-log 滞后取舍（2026-10-02 设计裁决，workflow-visualization D4）
+**决策**：workflow run 事件流原文对 renderer 的通道 = 新增 `session.getWorkflowRunEvents(runId)` 拉取 RPC（大字段 2KB 截断 + truncatedFields 标注——input/result/scriptSource/args 四个全文载荷字段；截断形态仅供展示，resume 恢复与 args 一致性校验在引擎侧读 record 原文全文字段，不经本通道）；运行中更新沿用 `workflowUpdate` 信号触发重新拉取（[ADR-0097](#adr-0097-拉为主推补充数据同步第一原则与域同步协议收口2026-09-26-架构裁决)「拉为主推补充」的应用）。信号水位 diff 扩两维——① phases 折叠（纯脚本 phase 转态发信号）② per-ask attempt 计数（重试边沿发信号，`stepStatusFingerprint` 在串各 call status 之外串入 attempts）——修复「纯脚本 phase 推进期间无信号」与「重试窗口内无信号」两个盲区。**已接受代价**：worker-log 行不纳入信号 diff 维度（无 phase 字段、不对应 call 转态、行数无上界——纳入等于把日志打印频率放大为每次信号的全量重新拉取频率），其展示滞后到下一转态信号（转态类事件秒级到达；worker-log 后无转态跟随时可能分钟级）。不做事件边沿级推送（逐条直播属体验增强非结构必需）。
+
+**依据**：逐条事件推送被 ADR-0097 否决面覆盖（拉是真理通道、推是性能提示，可靠性由通道保证）；拉模式满足「开 overlay 即得全量、运行中信号触发刷新」，结构/实况两个展示目标不依赖逐条直播。
+
+**登记**：无新约束族（推拉纪律承 ADR-0097）；实装 = `packages/shared/src/protocol.ts`（两 RPC 契约与错误码闭集）+ `packages/runtime/src/services/session/session-records.ts`（指纹扩维）。设计文档 `.tmp/tech-design/workflow-visualization.md`（不入库，过程产物）；本条即该决策的现行登记处。
+

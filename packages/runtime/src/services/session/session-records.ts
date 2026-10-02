@@ -54,6 +54,8 @@ import {
 import { extractWorkflowsFromSessionFile } from './workflow-extractor.js'
 import { scanRecordFamilyEntriesFromSessionFile } from './session-file-extraction.js'
 import { SessionEventProjection } from './events-projection.js'
+import { WorkflowRunEventsReader } from './workflow-run-events-reader.js'
+import type { WorkflowDagReply, WorkflowRunEventsReply } from '@taiji/shared'
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import { logger } from '../../infra/logger.js'
 import { discoverAndRegisterEngines } from '@zhushanwen/subagent-core/engine/engine-discovery-scan'
@@ -161,6 +163,14 @@ export interface PublishedWorkflowRunState {
   steps: number
   /** [W1 / D6] 步骤状态全序列（'|' 连接，位置敏感——步骤级转态的 diff 维度）。 */
   stepStatuses: string
+  /**
+   * [可视化 U3，设计 §3.1-4 坑③盲区①] phases 折叠序列指纹：phase 名 + 转态序列
+   * （startedAt/settledAt）入 diff——纯脚本 phase 推进期间（phase-started 落盘但无
+   * agent 事件）四维度全不变、无信号的盲区由此修复（phase 转态发信号，overlay
+   * 重新拉取后当前 phase 高亮切换）。phases 是 last-wins 单行快照，指纹随之单行
+   * 序列化（phase 名:startedAt-settledAt，未收束空尾）。
+   */
+  phasesFingerprint: string
 }
 
 /** get_entries RPC 响应的域内收窄（u-s4 EntriesSinceResult 同款先例，见 fetchRecordEntriesRound）。 */
@@ -183,7 +193,7 @@ export interface OversizeAwareResult<T> {
   oversize: boolean
 }
 
-/** workflow 增量信号形状（session.workflowUpdate payload.update；status/reason/步骤数任一变化一条）。 */
+/** workflow 增量信号形状（session.workflowUpdate payload.update；status / reason / 步骤数 / stepStatuses（status@attempts）/ phasesFingerprint 任一变化一条）。 */
 interface WorkflowUpdateSignal {
   runId: string
   status: string
@@ -311,6 +321,12 @@ export class SessionRecords {
    * onSessionDisposed（清防抖定时器）。
    */
   private readonly recordEntriesCaches = new Map<string, RecordEntriesCache>()
+
+  /**
+   * [可视化 U3] record 读侧投影服务（事件流拉取 + DAG 解析；DAG 成功缓存随本实例
+   * 生命周期——与 per-session 派生缓存同寿命，进程级单实例）。
+   */
+  private readonly runEventsReader = new WorkflowRunEventsReader()
 
   /**
    * [reload-closeout D2] 定时对账腿：服务级单例 timer（15s，unref 不钉住进程退出）。
@@ -1036,6 +1052,46 @@ export class SessionRecords {
   }
 
   /**
+   * [可视化 U3，设计 §3.1-4] 单 run 事件流原文拉取（session.getWorkflowRunEvents 后端）。
+   * record 路径发现 = 投影源 v2 注册条目的 recordPath 锚点（引擎写侧与实写面同源；
+   * 注册条目缺席 = 该 run 非本会话实体或 record 流已被清理 → 结构化 record_not_found，
+   * 与投影定界语义一致）。读取面（坏行宽容 / 大字段截断 / 错误臂）归 WorkflowRunEventsReader。
+   */
+  async getWorkflowRunEvents(sessionId: string, runId: string): Promise<WorkflowRunEventsReply> {
+    const recordPath = this.resolveWorkflowRecordPath(sessionId, runId)
+    if (recordPath === undefined) {
+      return { runId, code: 'record_not_found', message: `no v2 workflow record registration for run ${runId} in this session` }
+    }
+    return this.runEventsReader.readRunEvents(runId, recordPath)
+  }
+
+  /**
+   * [可视化 U3，设计 §3.1-5] 单 run DAG 静态蓝图拉取（session.getWorkflowDag 后端）。
+   * 读 record 首帧 scriptSource 原文调 core 解析器；错误臂四码全枚举；DAG 成功缓存
+   * 在 reader（runId 内存缓存仅成功结果，失败不缓存故 parse_failed 可重试）。
+   */
+  async getWorkflowDag(sessionId: string, runId: string): Promise<WorkflowDagReply> {
+    const recordPath = this.resolveWorkflowRecordPath(sessionId, runId)
+    if (recordPath === undefined) {
+      return { runId, code: 'record_not_found', message: `no v2 workflow record registration for run ${runId} in this session` }
+    }
+    return this.runEventsReader.readDag(runId, recordPath)
+  }
+
+  /**
+   * [可视化 U3] record 路径发现：session meta（scanSessions force——刚落盘 session 的
+   * 首拉不静默空，与 getSubagents/getWorkflows 同理）→ 投影源 v2 注册条目 recordPath。
+   * 注册条目缺席（run 非本会话实体 / v1 会话 / pi 延迟写入窗口）返回 undefined。
+   */
+  private resolveWorkflowRecordPath(sessionId: string, runId: string): string | undefined {
+    const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
+    if (!target) return undefined
+    const cache = this.ensureRecordEntriesCache(sessionId)
+    const projection = this.ensureProjection(sessionId, cache)
+    return projection.sources.v2WorkflowRegistered.get(runId)?.recordPath
+  }
+
+  /**
    * 解析 agent call 对话流 JSONL 绝对路径（record.sessionFile 直查）。
    *
    * 与 getAgentCallHistory 的区别：找不到时返回空串而非 throw——这是展示型功能
@@ -1185,8 +1241,10 @@ function subagentsDifferFromPublished(current: Map<string, SubagentRecord>, publ
 
 /**
  * workflows 水位 diff：按差异 run 构造增量信号（新 run / status / reason / 步骤数 /
- * [W1 / D6] 步骤状态全序列任一变化一条——事件投影驱动的转态在 steps 不变时由
- * stepStatuses 序列承载信号）。run 消失（fullRebuild 后全集不再含该 run）不构造信号
+ * stepStatuses（status@attempts 全序列）/[W1 / D6] 步骤状态 / [可视化 U3]
+ * phasesFingerprint 任一变化一条——事件投影驱动的转态在 steps 不变时由
+ * stepStatuses 序列承载信号；纯脚本 phase 转态与重试边沿由 phasesFingerprint /
+ * stepStatuses 的 attempts 段承载）。run 消失（fullRebuild 后全集不再含该 run）不构造信号
  * ——信号面无删除形态，硬造旧状态帧只会发 stale 信息；消费端由下次真实变化或冷拉收敛。
  */
 function workflowSignalsAgainstPublished(current: Map<string, WorkflowRunRecord>, published: Map<string, PublishedWorkflowRunState>): WorkflowUpdateSignal[] {
@@ -1195,24 +1253,44 @@ function workflowSignalsAgainstPublished(current: Map<string, WorkflowRunRecord>
     const prev = published.get(runId)
     if (prev === undefined || prev.status !== record.status || prev.reason !== record.reason ||
         prev.steps !== record.agentCalls.length ||
-        prev.stepStatuses !== stepStatusFingerprint(record)) {
+        prev.stepStatuses !== stepStatusFingerprint(record) ||
+        prev.phasesFingerprint !== phasesFingerprint(record)) {
       updates.push({ runId, status: record.status, reason: record.reason })
     }
   }
   return updates
 }
 
-/** [W1 / D6] 步骤状态全序列（'|' 连接，位置敏感）——步骤级转态的 diff 维度（settledSteps 计数的退役替换面）。 */
+/**
+ * [W1 / D6] 步骤状态全序列（'|' 连接，位置敏感）——步骤级转态的 diff 维度（settledSteps
+ * 计数的退役替换面）。[可视化 U3，设计 §3.1-4 坑③盲区②] call 带重试记录时段串入
+ * attempt 计数（`status@attempts`）——重试边沿（agent-retrying 落盘 → fold attempts
+ * 累计）期间步骤 status 仍为 running、其余维度全不变的重试盲区由此修复（重试窗口内
+ * 「谁在重试」随信号触发的重新拉取到达 GUI）；无重试记录（attempts 缺省）段保持
+ * `status` 字面不变（既有投影序列逐字节兼容，且与首次重试 attempts=1 可区分）。
+ * 协议 WorkflowAgentCall.status 四值词表不动——attempts 只进 runtime 内部比较串。
+ */
 function stepStatusFingerprint(record: WorkflowRunRecord): string {
   let fingerprint = ''
   for (let i = 0; i < record.agentCalls.length; i++) {
     if (i > 0) fingerprint += '|'
-    fingerprint += record.agentCalls[i]!.status
+    const call = record.agentCalls[i]!
+    fingerprint += call.attempts !== undefined ? `${call.status}@${call.attempts}` : call.status
   }
   return fingerprint
 }
 
-/** workflow 水位投影（推进时镜像当前派生 run-state：信号面三字段 + 步骤数 + 步骤状态序列 diff 维度）。 */
+/**
+ * [可视化 U3] phases 折叠序列指纹（phases 缺席 = 旧投影形态归一空串）：phase 名 +
+ * startedAt-settledAt（未收束空尾）'|' 连接，插入序敏感（fold 首现序 = phase 分区
+ * 绘制序）。phase-started 重开轮 / phase-settled 收束 / 自愈翻回都翻动本序列。
+ */
+function phasesFingerprint(record: WorkflowRunRecord): string {
+  if (record.phases === undefined) return ''
+  return record.phases.map((p) => `${p.phase}:${p.startedAt}-${p.settledAt ?? ''}`).join('|')
+}
+
+/** workflow 水位投影（推进时镜像当前派生 run-state：信号面三字段 + 步骤数 + 步骤状态序列 + phases 折叠序列 diff 维度）。 */
 function projectPublishedWorkflowStates(workflows: Map<string, WorkflowRunRecord>): Map<string, PublishedWorkflowRunState> {
   const projected = new Map<string, PublishedWorkflowRunState>()
   for (const [runId, record] of workflows) {
@@ -1221,6 +1299,7 @@ function projectPublishedWorkflowStates(workflows: Map<string, WorkflowRunRecord
       reason: record.reason,
       steps: record.agentCalls.length,
       stepStatuses: stepStatusFingerprint(record),
+      phasesFingerprint: phasesFingerprint(record),
     })
   }
   return projected

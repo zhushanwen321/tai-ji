@@ -16,7 +16,7 @@ import type { PluginInfo } from './plugin'
 import type { RecentWorkspaceRecord } from './workspace'
 import type { LlmRetryConfig } from './llm-retry'
 import type { SubagentRecord } from './subagent'
-import type { WorkflowRunRecord } from './workflow'
+import type { WorkflowDag, WorkflowRunEventEntry, WorkflowRunRecord } from './workflow'
 import type { PiLaunchPreset, PresetUsageEntry, ThinkingLevel } from './pi-preset'
 import type { SourceDetectResult } from './migration'
 import type {
@@ -109,6 +109,12 @@ export type ClientMessageType =
   | 'session.getSubagentEngineConfig' | 'session.setSubagentDefaultEngine'
   | 'session.getWorkflows' | 'session.getAgentCallHistory' | 'session.getAgentCallFilePath'
   | 'session.workflowAction' | 'session.subagentAction'
+  // workflow 可视化（workflow-visualization 设计 §3.1-4/§3.1-5 / U2 协议冻结）：
+  // getWorkflowRunEvents 拉单 run 事件流原文（大字段 2KB 截断 + truncatedFields 标注），
+  // reply session.workflowRunEvents；getWorkflowDag 拉脚本静态 DAG 解析产物
+  //（runtime 按 runId 内存缓存、仅缓存成功结果、失败不缓存），reply session.workflowDag。错误形态为设计内
+  // 领域回执（结构化 code），与 error envelope 的 renderer 归一见各自 reply 类型注释。
+  | 'session.getWorkflowRunEvents' | 'session.getWorkflowDag'
   // session.forceQuit：强制退出卡死 session（杀 pi 子进程 + stopped 收敛，区别于 message.abort 的协作式中止）。
   | 'session.forceQuit'
   // session.revokeMessage（消息撤回设计 D2）：已送达消息的 session 树内回退撤回（S8 已消费层）。
@@ -551,6 +557,11 @@ export interface ClientMessageMap {
   'session.getAgentCallHistory': { sessionId: string; agentCallSessionId: string }
   'session.getAgentCallFilePath': { sessionId: string; agentCallSessionId: string }
   'session.workflowAction': { sessionId: string; action: 'abort'; runId: string }
+  // workflow 可视化两条拉取 RPC（workflow-visualization 设计 §3.1-4/§3.1-5）：
+  // sessionId 定位 session 的 workflow-state 目录（record 流所在）+ 对齐 workflowAction
+  // 的双参数先例；runId 为 run 级标识（wf- 前缀）。
+  'session.getWorkflowRunEvents': { sessionId: string; runId: string }
+  'session.getWorkflowDag': { sessionId: string; runId: string }
   // session.subagentAction：subagent 生命周期/定向消息操作（cancel/message/start，对称 workflowAction
   // 的扩展 slash command 转发）。runtime 经 client.prompt("/subagents <action> ...") 调扩展（不经 LLM）。
   // 字段按 action 取用：cancel 用 subagentId，message 用 subagentId+text，start 用 slug+task
@@ -1004,6 +1015,9 @@ export type ServerMessageType =
   // E 方案（subagent-realtime-channel §4.3）：runtime relay tee 产出的 subagent entry 增量帧
   | 'session.subagentEntriesAppended'
   | 'session.workflows' | 'session.agentCallHistory' | 'session.agentCallFilePath'
+  // workflow 可视化拉取 RPC 的 reply type（与 request 异名，跟随 getWorkflows →
+  // session.workflows 先例；payload 形状见 ServerMessageMapBase 对应条目）。
+  | 'session.workflowRunEvents' | 'session.workflowDag'
   | 'session.workflowUpdate' | 'session.workflowActionDone' | 'session.subagentActionDone'
   // session-trace（design D4）：getTraceEntries 的 reply（全量台账）+ 增量腿推送（since 增量 entries）。
   | 'session.traceEntries' | 'session.traceEntryAppended'
@@ -1577,6 +1591,56 @@ export type SessionRevokeMessageReply =
   | { sessionId: string; revoked: true; content: string }
   | { sessionId: string; revoked: false; error: RevokeMessageErrorCode }
 
+/**
+ * session.getWorkflowDag 的错误码闭集（workflow-visualization 设计 §3.1-5 全枚举，
+ * 字面量逐字对齐；改码须先改设计再同步此处与 workflow-viz-protocol.test.ts 锚定集）。
+ * 值语义：
+ * - parse_failed：脚本含解析器不支持的语法（解析器 fail-fast，不产半个错误 DAG）；
+ * - no_script_source：旧格式 run（run-created 帧无 scriptSource——record 单源收敛前）；
+ * - record_not_found：record 文件不存在或已被清理（v1 run / 过保留期——点击列表中
+ *   这类 run 打开 overlay 即触发，非边角）；
+ * - path_rejected：路径白名单拒绝（防御性返回）。
+ */
+export type WorkflowDagErrorCode =
+  | 'parse_failed'
+  | 'no_script_source'
+  | 'record_not_found'
+  | 'path_rejected'
+
+/**
+ * session.getWorkflowDag 的 reply（workflow-visualization 设计 §3.1-5）。
+ *
+ * 成功形态：{ runId, dag }——DAG JSON（WorkflowDag，runtime 按 runId 内存缓存、
+ * 仅缓存成功结果，失败不缓存故 parse_failed 可重试）。
+ * 错误形态：{ runId, code, message }——四码闭集（见 WorkflowDagErrorCode）。错误臂
+ * 不走统一 error envelope——它们是设计内领域回执（renderer 按码分流降级形态：
+ * parse_failed 给重试解析入口；no_script_source / record_not_found 静态指引、无重试
+ * 按钮），判别字段 code。RPC 通道错误（service 抛错走 server 中央 catch）另走
+ * error envelope；两通道在 renderer 侧经同一错误适配函数归一为「DAG 不可得 + 原因码」。
+ */
+export type WorkflowDagReply =
+  | { runId: string; dag: WorkflowDag }
+  | { runId: string; code: WorkflowDagErrorCode; message: string }
+
+/**
+ * session.getWorkflowRunEvents 的错误码闭集（workflow-visualization 设计 §3.1-2
+ * 降级路径「事件流 RPC 失败错误二分」的结构化半边）：record_not_found → 静态指引
+ * 「该 run 无事件流记录（旧格式或已清理）」；暂时性失败走 RPC 通道错误 error
+ * envelope → 子页错误 + 重试按钮——两形态在 renderer 侧归一。
+ */
+export type WorkflowRunEventsErrorCode = 'record_not_found'
+
+/**
+ * session.getWorkflowRunEvents 的 reply（workflow-visualization 设计 §3.1-4 D4）。
+ *
+ * 成功形态：{ runId, events }——单 run 事件流原文行（大字段截断形态见
+ * WorkflowRunEventEntry：四字段 2KB 截断 + truncatedFields 逐行标注）。
+ * 错误形态：{ runId, code, message }——code 闭集见 WorkflowRunEventsErrorCode。
+ */
+export type WorkflowRunEventsReply =
+  | { runId: string; events: WorkflowRunEventEntry[] }
+  | { runId: string; code: WorkflowRunEventsErrorCode; message: string }
+
 // ── delivery 域具名 DTO（投递所有权内核 D5/D7，u-contracts 契约先行）────────────
 
 /**
@@ -2025,6 +2089,15 @@ export interface ServerMessageMapBase {
   }
   // session.workflowActionDone：workflow 操作完成确认（session.workflowAction RPC reply）
   'session.workflowActionDone': { sessionId: string; action: 'abort'; runId: string }
+  // session.workflowRunEvents：session.getWorkflowRunEvents 的 reply（workflow-visualization
+  // 设计 §3.1-4 D4 事件流拉模式）。成功/结构化错误两形态见 WorkflowRunEventsReply——
+  // 大字段截断与 truncatedFields 标注的行形态 = WorkflowRunEventEntry（shared/workflow.ts）；
+  // 截断载荷仅供展示（D12 防误用边界：恢复/重放/对账读面不经本通道）。
+  'session.workflowRunEvents': WorkflowRunEventsReply
+  // session.workflowDag：session.getWorkflowDag 的 reply（workflow-visualization 设计
+  // §3.1-5 DAG 透出通道）。成功/结构化错误两形态见 WorkflowDagReply——错误码四枚举
+  // 闭集 = WorkflowDagErrorCode（parse_failed 可重试——runtime 仅缓存成功结果）。
+  'session.workflowDag': WorkflowDagReply
   // session.subagentActionDone：subagent 操作完成确认（session.subagentAction RPC reply）。
   // 字段按 action 回显目标标识：cancel/message 回 subagentId，start 回 slug（text/task 不回显——
   // ack 型 payload，回显长文本无消费方）。
@@ -2682,6 +2755,10 @@ export interface ReplyPayloadMap {
   // plan 模式（D1-⑥ 冷启动首拉）：reply 复用 session.planState 广播 payload（同 getSubagents 先例）
   'session.getPlanState': ServerMessageMap['session.planState']
   'session.getWorkflows': ServerMessageMap['session.workflows']
+  // workflow 可视化拉取 RPC（workflow-visualization 设计 §3.1-4/§3.1-5）：payload 消费型，
+  // 成功/结构化错误判别 union（见 WorkflowRunEventsReply / WorkflowDagReply 注释）。
+  'session.getWorkflowRunEvents': ServerMessageMap['session.workflowRunEvents']
+  'session.getWorkflowDag': ServerMessageMap['session.workflowDag']
   'session.history': ServerMessageMap['session.history']
   // session.revokeMessage（消息撤回设计 D2/D3）：payload 消费型——renderer 读 revoked/content
   //（成功 → 重拉 session.history + 草稿回填，reply 即成功信号）与 error 六码（按 D8 呈现列分流）。

@@ -150,8 +150,9 @@ function makeFakeCtx(sessionId: string, entries: CustomEntry[] = []): ExtensionC
 }
 
 /** 从 pi session entries 里滤出某 runId 的 workflow-record 快照状态序列（物理序）。
- *  RunSnapshot 形态：{ v, runId, spec, state: { status, ... }, meta }——status 嵌套在
- *  state 层（core run-snapshot.ts RunSnapshot 接口）。 */
+ *  v1 快照条目形态：{ v, runId, spec, state: { status, ... }, meta }——status 嵌套在
+ *  state 层（接口已随 run-snapshot.ts 删除，git 12a60d0a4；[W1/D1] 停写锚定下现用途
+ *  为断言零条目）。 */
 function recordStatuses(entries: CustomEntry[], runId: string): string[] {
   return entries
     .filter(

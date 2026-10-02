@@ -15,6 +15,7 @@ import importSession from './en-US/importSession'
 import rollingRestart from './en-US/rollingRestart'
 import plan from './en-US/plan'
 import btw from './en-US/btw'
+import workflowViz from './en-US/workflow-viz'
 
 export default {
   common,
@@ -23,8 +24,9 @@ export default {
   settings,
   sidebar,
   // tray.ts 只含 tray 子树，展开并入 panel 命名空间（运行时 key = panel.tray.*；
-  // 顶层键唯一性约束下不能并列两个 panel 键）
-  panel: { ...panel, ...tray },
+  // 顶层键唯一性约束下不能并列两个 panel 键）。workflow-viz.ts 同款并入
+  // （运行时 key = panel.workflowViz.*——workflow-visualization U4 组件文案）
+  panel: { ...panel, ...tray, ...workflowViz },
   workspace,
   newTask,
   shell,

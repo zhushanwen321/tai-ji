@@ -256,7 +256,8 @@ describe('run 域 journal fold（[W2 D7] 单源 core foldRunEventCheckpoint—�
 
   it('骨架投影：created 定首帧、dispatched 成骨架行、settled 定步骤终局、run-settled 定 run 终局', () => {
     const fold = foldRunEventCheckpoint(legalEvents, noop)
-    expect(fold.created).toEqual({ runId: 'wf-1', workflowName: 'flow', ts: 1100 })
+    // created 载荷含 argsSummary（[可视化 U1] 扩 fold 骨架字段——写侧恒写的行内小摘要透传）
+    expect(fold.created).toEqual({ runId: 'wf-1', workflowName: 'flow', argsSummary: '', ts: 1100 })
     expect(fold.asks.get(0)).toMatchObject({ agentName: 'w1', startedAt: 1200, settled: { outcome: 'done' } })
     expect(fold.asks.get(1)?.settled).toBeUndefined()
     expect(fold.runSettled).toMatchObject({ outcome: 'done', ts: 1500 })

@@ -1,0 +1,15 @@
+{"type":"run-created","runId":"wf-1790879967247-2al466","workflowName":"u0-rebuild-sample","scriptSource":"phase(\"alpha\");\nawait agent({ prompt: \"u0-rb-task-0\", description: \"alpha-worker\" });\nconst inflight = agent({ prompt: \"u0-rb-task-1\", description: \"alpha-crasher\" });\n// 崩溃注入：task-1 在飞挂住时 worker 自杀（重放代际 clearTimeout 取消——脚本确定性重跑不得再次崩溃）\nconst suicide = setTimeout(() => process.exit(1), 200);\nawait inflight;\nclearTimeout(suicide);\nphase(\"beta\");\nawait agent({ prompt: \"u0-rb-task-2\", description: \"beta-retryer\" });\nreturn { ok: true };","args":{"_runId":"wf-1790879967247-2al466"},"argsSummary":"{\"_runId\":\"wf-1790879967247-2al466\"}","scriptPath":"u0-rebuild-sample.js","ts":1790879967247,"seq":1}
+{"type":"phase-started","phase":"alpha","ts":1790879967259,"seq":2}
+{"type":"agent-started","taskIndex":0,"agentName":"alpha-worker","attempt":1,"phase":"alpha","input":"{\"description\":\"alpha-worker\",\"prompt\":\"u0-rb-task-0\"}","ts":1790879967260,"seq":3}
+{"type":"agent-settled","taskIndex":0,"attempt":1,"outcome":"done","result":{"content":"u0 sample result"},"durationMs":0,"ts":1790879967261,"seq":4}
+{"type":"phase-settled","phase":"alpha","ts":1790879967261,"seq":5}
+{"type":"agent-started","taskIndex":1,"agentName":"alpha-crasher","attempt":1,"phase":"alpha","input":"{\"description\":\"alpha-crasher\",\"prompt\":\"u0-rb-task-1\"}","ts":1790879967261,"seq":6}
+{"type":"phase-started","phase":"alpha","ts":1790879967474,"seq":7}
+{"type":"agent-started","taskIndex":1,"agentName":"alpha-crasher","attempt":1,"phase":"alpha","input":"{\"description\":\"alpha-crasher\",\"prompt\":\"u0-rb-task-1\"}","ts":1790879967475,"seq":8}
+{"type":"agent-settled","taskIndex":1,"attempt":1,"outcome":"done","result":{"content":"u0 sample result"},"durationMs":0,"ts":1790879967476,"seq":9}
+{"type":"phase-started","phase":"beta","ts":1790879967476,"seq":10}
+{"type":"agent-started","taskIndex":2,"agentName":"beta-retryer","attempt":1,"phase":"beta","input":"{\"description\":\"beta-retryer\",\"prompt\":\"u0-rb-task-2\"}","ts":1790879967476,"seq":11}
+{"type":"agent-retrying","taskIndex":2,"attempt":1,"backoffMs":1001,"reason":"transient provider hiccup (sample fixture)","ts":1790879968477,"seq":12}
+{"type":"agent-settled","taskIndex":2,"attempt":2,"outcome":"done","result":{"content":"u0 sample result"},"durationMs":0,"ts":1790879968478,"seq":13}
+{"type":"phase-settled","phase":"beta","ts":1790879968478,"seq":14}
+{"type":"run-settled","outcome":"done","reason":"completed","artifactsDir":"/var/folders/3p/d4mx1j_j5s7bn3_03x48kpkw0000gn/T/u0-rebuild-sample-Icfevi","ts":1790879968479,"seq":15}
