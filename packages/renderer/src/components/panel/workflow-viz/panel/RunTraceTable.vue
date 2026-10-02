@@ -44,7 +44,8 @@
       <span class="font-mono text-neutral-dim">{{ row.call.id }}</span>
       <span class="truncate font-mono font-medium text-neutral-fg" :title="row.call.agent">{{ row.call.agent }}</span>
       <span class="truncate font-mono text-neutral-dim" :title="row.call.phase">{{ row.call.phase ?? '—' }}</span>
-      <span class="font-mono text-neutral-dim">{{ row.call.attempts ?? 1 }}</span>
+      <!-- attempt 列 = 当前尝试序号（与 record 帧 attempt 载荷同名同义；attempts 为失败累计，+1 得当前序号，无重试 = 1） -->
+      <span class="font-mono text-neutral-dim">{{ row.call.attempts === undefined ? 1 : row.call.attempts + 1 }}</span>
       <!-- 状态：D9 派生词（retrying = 重试窗口内可见，非仅事后；stoppedInFlight = run 已
            停止的在途行——叠加停止着色不显示蓝脉冲（spinner 静态不旋转，旋转动效本身是
            「还在跑」的视觉信号），着色随 run 终局 outcome） -->
