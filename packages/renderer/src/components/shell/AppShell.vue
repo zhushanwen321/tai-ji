@@ -30,6 +30,9 @@
          挡不住启动期加载；首开设置才拉取设置页树 chunk（首次触发才出现在 Network）。
          :key 重挂 wrapper 是重试链路的一环（见 script 注释）。 -->
     <SettingsModal v-if="settingsOpen" :key="settingsRetryKey" v-model:open="settingsOpen" />
+    <!-- workflow-viz overlay 全局单例容器（workflow-visualization U6/D8）：关闭态壳 v-if
+         不渲染（DOM 零痕迹，像素轨基线安全）；盖全屏跨双 pane，绑定发起 pane 的 session。 -->
+    <WorkflowVizOverlayHost />
   </div>
 </template>
 
@@ -43,6 +46,7 @@ import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import AppNavControls from './AppNavControls.vue'
 import AsideRegion from './AsideRegion.vue'
 import MainPanel from './MainPanel.vue'
+import WorkflowVizOverlayHost from '@/components/panel/workflow-viz/overlay/WorkflowVizOverlayHost.vue'
 import RollingRestartBanner from '@/components/ui/RollingRestartBanner.vue'
 import AsyncErrorFallback, { LAZY_RETRY_KEY } from '@/components/ui/AsyncErrorFallback.vue'
 import { useSidebarStore } from '@/stores/sidebar'

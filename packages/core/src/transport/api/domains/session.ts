@@ -7,7 +7,7 @@
  * 注：ServerMessage(id) → pending.resolve 的回灌由 features 层 dispatcher 串联（Wave 3）。
  *      mock 模式下不走本域（api/index 切到 mock 门面）。
  */
-import type { SessionSummary, SessionGroup, SubagentRecord, WorkflowRunRecord, Message, BatchDeleteResult, ServerMessage, ThinkingLevel, ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply, SessionRevokeMessageReply } from '@taiji/shared'
+import type { SessionSummary, SessionGroup, SubagentRecord, WorkflowRunRecord, Message, BatchDeleteResult, ServerMessage, ThinkingLevel, ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply, SessionRevokeMessageReply, WorkflowRunEventsReply, WorkflowDagReply } from '@taiji/shared'
 import { PI_THINKING_LEVELS } from '@taiji/shared'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 import { command } from '../request'
@@ -248,6 +248,32 @@ export async function getWorkflows(
   sessionId: string,
 ): Promise<{ workflows: WorkflowRunRecord[]; oversize?: boolean }> {
   return command('session.getWorkflows', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/**
+ * 拉取单 run 的 record 事件流原文（workflow-visualization §3.1-4 D4 事件流拉模式通道；
+ * 大字段 2KB 截断 + truncatedFields 标注见 WorkflowRunEventEntry）。
+ * reply = WorkflowRunEventsReply：成功 { sessionId, runId, events } / 结构化领域回执
+ * { sessionId, runId, code, message }（两臂恒带 sessionId——C-comm-05；错误臂不走统一
+ * error envelope——code 闭集
+ * WorkflowRunEventsErrorCode，renderer 按码分流降级形态）；RPC 通道错误（service 抛错）
+ * 另走 error envelope reject，两通道在 renderer 侧归一。
+ */
+export async function getWorkflowRunEvents(sessionId: string, runId: string): Promise<WorkflowRunEventsReply> {
+  return command('session.getWorkflowRunEvents', { sessionId, runId }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/**
+ * 拉取单 run 的 DAG 蓝图（workflow-visualization §3.1-5；runtime 调 subagent-core 解析器，
+ * 按 runId 内存缓存、仅缓存成功结果——失败不缓存故 parse_failed 可重试）。
+ * reply = WorkflowDagReply：成功 { sessionId, runId, dag } / 结构化领域回执
+ * { sessionId, runId, code, message }（两臂恒带 sessionId——C-comm-05；错误臂不走统一
+ * error envelope——code 闭集 WorkflowDagErrorCode 四枚举，renderer 按
+ * 码分流降级形态：parse_failed 给重试解析入口、其余静态指引）；RPC 通道错误（service 抛错）
+ * 另走 error envelope reject，两通道在 renderer 侧归一。
+ */
+export async function getWorkflowDag(sessionId: string, runId: string): Promise<WorkflowDagReply> {
+  return command('session.getWorkflowDag', { sessionId, runId }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
 /**

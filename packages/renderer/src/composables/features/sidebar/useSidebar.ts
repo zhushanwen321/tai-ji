@@ -59,6 +59,8 @@ import { useFileTree } from '@/composables/features/file-tree/useFileTree'
 import { useFileTreeStore } from '@/stores/fileTree'
 import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
+// [可视化 U6/D11⑤] overlay 关闭编排（deleteSession 级联经 SessionCleanupHooks.closeWorkflowOverlay）
+import { closeWorkflowVizOverlayForSession } from '@/components/panel/workflow-viz/overlay/workflow-viz-overlay'
 // [M4-a / btw-question D4 消费面①] deleteSession 级联的前端腿：枚举/处置/清映射三函数
 //（与 m7/agentcall 的 evictVirtualKeys 先例同构，登记结构在 useBtwTabData）。
 import { getBtwVirtualIdsByMain, clearBtwVirtualKeyMapping, disposeBtwLinePartitions } from '@/composables/panel/useBtwTabData'
@@ -193,6 +195,9 @@ export function useSidebar() {
     // （AppShell providePlatform 之后，对齐 useFileTreeStore 惰性取用范式）。
     clearTerminalQueue: (sid) => useTerminalWriteQueueStore().removeSession(sid),
     clearSlashCommands: (sid) => useCommandStore().clearCommands(sid),
+    // [可视化 U6/D11⑤] workflow-viz overlay UI 关闭：删除的 session 是 overlay 当前发起
+    // session 时关 overlay（数据面——事件流缓存 + 活跃锚——由 clearWorkflow/store.clearSession 收口）。
+    closeWorkflowOverlay: (sid) => closeWorkflowVizOverlayForSession(sid),
     clearForkNotices: (sid) => useForkNoticeFeed().clearSession(sid),
   }
 

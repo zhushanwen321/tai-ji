@@ -9,7 +9,7 @@
  * - 构建者：旧快照 additive 读缺省渲染路径（startedAt 缺省 → 时长槽省略，组件不炸）
  *
  * mock 策略：真实 pinia（panel + workflow store，分区 ref 直写种数据）；
- * drawer 控制态 bindDrawerSessionId + openWorkflow 真实域状态；vue-i18n 全局 setup
+ * drawer 控制态 bindDrawerSessionId + openWorkflowInDrawer 真实域状态；vue-i18n 全局 setup
  * （zh-CN 取值）；fake timers 固定 now（1s tick 在 fake timers 下不推进——推导以
  * FIXED_NOW 为锚，确定性断言）。
  *
@@ -20,7 +20,7 @@ import { mount } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { ref } from 'vue'
-import { bindDrawerSessionId, openWorkflow, _resetDrawerForTest } from '@taiji/core/domain/drawer'
+import { bindDrawerSessionId, openWorkflowInDrawer, _resetDrawerForTest } from '@taiji/core/domain/drawer'
 import WorkflowTab from '@/components/panel/WorkflowTab.vue'
 import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
 import { useWorkflowStore } from '@/stores/workflow'
@@ -48,11 +48,14 @@ function record(overrides: Partial<WorkflowRunRecord> = {}): WorkflowRunRecord {
   }
 }
 
-async function mountTab(records: WorkflowRunRecord[]): Promise<VueWrapper> {
+async function mountTab(records: WorkflowRunRecord[], selectName?: string): Promise<VueWrapper> {
   const workflowStore = useWorkflowStore()
   // 种数据：applyRecords 已从 store 导出面摘除，直写分区 ref（不可变替换触发响应性）
   workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(SID, records)
-  openWorkflow(records[0]!.runId)
+  // workflow-visualization U6/D1 入口改向后 openWorkflow = 开 overlay（core 测试环境无
+  // opener 绑定 no-op）；本组件测试意图 = 注入 drawer 选中态，改调显式 drawer 语义函数
+  // （selectName：run 名定位判据用例注入路径/带扩展名形态）
+  openWorkflowInDrawer(selectName ?? records[0]!.runId)
   const wrapper = mount(WorkflowTab)
   return wrapper
 }
@@ -196,5 +199,57 @@ describe('WorkflowTab [W0] 合并投影消费锚定（V4 结构 / V6 失败渲�
     const wrapper = await mountTab([wf])
     expect(wrapper.find('[data-testid="drawer-workflow-agent-call"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="drawer-workflow-agent-call-error"]').exists()).toBe(false)
+  })
+})
+
+// ── run 名定位判据（dmg-r1-8：归一单源 workflow-viz/run-name.ts，与 overlay findRun
+// 同源——注入来源 SubagentTab 返回按钮 / 反查未命中回落可携带路径形态选中名）──
+
+describe('WorkflowTab run 名定位判据（路径/带扩展名/bare 三形态互通）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    setActivePinia(createPinia())
+    _resetDrawerForTest()
+    usePanelStore().loadSession(ROOT_PANEL_ID, SID)
+    bindDrawerSessionId(ref(SID))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    _resetDrawerForTest()
+  })
+
+  it('路径形态选中名命中 record（L4 回归：record.scriptName 存 basename，严格等值恒 miss → 空态）', async () => {
+    const wf = record({
+      agentCalls: [call({ id: 0, agent: 'a-run', status: 'running', startedAt: startedIso(30_000) })],
+    })
+    const wrapper = await mountTab([wf], '/Users/agent/workflows/review-fix-loop.js')
+
+    // 非空态：record 命中，agent call 行可见（归一后 basename 互通）
+    expect(wrapper.find('[data-testid="drawer-workflow-empty"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-testid="drawer-workflow-agent-call"]')).toHaveLength(1)
+  })
+
+  it('带扩展名形态与多条同名取记录末条（最新，与 overlay findRun 同口径）', async () => {
+    const older = record({
+      runId: 'wf-old',
+      agentCalls: [call({ id: 0, agent: 'old-agent', status: 'done', durationMs: 60_000 })],
+    })
+    const newer = record({
+      runId: 'wf-new',
+      agentCalls: [call({ id: 0, agent: 'new-agent', status: 'running', startedAt: startedIso(30_000) })],
+    })
+    const wrapper = await mountTab([older, newer], 'review-fix-loop.mjs')
+
+    expect(wrapper.find('[data-testid="drawer-workflow-empty"]').exists()).toBe(false)
+    const rows = wrapper.findAll('[data-testid="drawer-workflow-agent-call"]')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.text()).toContain('new-agent')
+  })
+
+  it('归一后仍未命中 → 空态（反查未命中回落的兜底归宿显式可见）', async () => {
+    const wf = record()
+    const wrapper = await mountTab([wf], '/abs/path/gone-flow.js')
+    expect(wrapper.find('[data-testid="drawer-workflow-empty"]').exists()).toBe(true)
   })
 })

@@ -26,8 +26,10 @@
  * - run 存活反证串：`[relay] connection lost, killing child (kill-on-disconnect)` 与
  *   `[relay] child exited recordId=... code=143`（infra/relay/relay-registry.ts:465/459）。
  * - workflow-record 权威 entry：主 session JSONL `{"customType":"workflow-record","data":
- *   {v:1,snapshot}}`，snapshot.state.status ∈ 'running'|'done'（v1 冻结历史格式——
- *   终态 flush 永不节流），读取形态同 workflow-thinkinglevel-real.spec.ts findWorkflowRecord。
+ *   {v:2,kind}}`（W1 record/journal 媒体重定位起现行格式，schema SSOT =
+ *   subagent-core orchestration/workflow-record-entry.ts）：kind=registered（起跑，无
+ *   status 字段）与 kind=settled（终局，status ∈ 'done'|'interrupted'）两条小条目——
+ *   读取形态同 lastWorkflowRecordFor（registered 投影 running，settled 取 status）。
  * - composer skill 浮层候选行：CommandPopover.vue:95 `.cmd-row`（portal 到 body，00-overview §6.4），
  *   skill 项 displayName = 裸名（command-popover-skill-candidates.ts:68，`/skill:` 前缀已去）。
  *   触发 = 行中空白后 `/`（非换行空白 + `/`，空 query 合法——dom-core skill-trigger.test.ts 锁定语义）。
@@ -236,19 +238,33 @@ export interface WorkflowRecordView {
   status: string | undefined
 }
 
-/** 提取主 session JSONL 内指定 runId 的最后一条 workflow-record（W17：last-wins 终态） */
+/**
+ * workflow-record entry 的 data schema 版本（= subagent-core orchestration/
+ * workflow-record-entry.ts 的 WORKFLOW_RECORD_ENTRY_VERSION，当前 2；e2e 侧
+ * 数字字面量对齐，升级时随产品侧同步）。
+ */
+const WORKFLOW_RECORD_ENTRY_V = 2
+
+/**
+ * 提取主 session JSONL 内指定 runId 的最后一条 workflow-record（W17：last-wins 终态）。
+ * v2 条目形态（W1 record/journal 媒体重定位起，classifyWorkflowRecordEntryData 同款判别键）：
+ * registered = run 起跑（无 status 字段，投影 running）；settled = 终局（status ∈
+ * 'done'|'interrupted'）。测试 session 全新创建只写 v2；v1 快照格式已随该重定位退役。
+ */
 export function lastWorkflowRecordFor(file: string, runId: string): WorkflowRecordView | null {
   const entries = readJsonlEntries(file)
   if (entries === null) return null
   let latest: WorkflowRecordView | null = null
   for (const e of entries) {
-    const rec = e as { customType?: unknown; data?: { v?: unknown; snapshot?: { runId?: unknown; state?: { status?: unknown } } } }
-    if (rec?.customType !== 'workflow-record' || rec?.data?.v !== 1) continue
-    const snap = rec.data.snapshot
-    if (typeof snap?.runId !== 'string' || snap.runId !== runId) continue
+    const rec = e as {
+      customType?: unknown
+      data?: { v?: unknown; kind?: unknown; runId?: unknown; status?: unknown }
+    }
+    if (rec?.customType !== 'workflow-record' || rec.data?.v !== WORKFLOW_RECORD_ENTRY_V) continue
+    if (typeof rec.data.runId !== 'string' || rec.data.runId !== runId) continue
     latest = {
-      runId: snap.runId,
-      status: typeof snap.state?.status === 'string' ? snap.state.status : undefined,
+      runId: rec.data.runId,
+      status: rec.data.kind === 'settled' && typeof rec.data.status === 'string' ? rec.data.status : 'running',
     }
   }
   return latest

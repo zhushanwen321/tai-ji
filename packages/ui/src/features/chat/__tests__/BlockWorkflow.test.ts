@@ -18,10 +18,15 @@ import { Block } from '@taiji/ui'
 import type { ToolCall } from '@taiji/shared'
 import { makeToolCall, mountToolBlock } from './helpers'
 
-// mock drawer 协同层：断言点击 workflow 块时 openWorkflow(name) 被调
-const { openWorkflowMock } = vi.hoisted(() => ({ openWorkflowMock: vi.fn() }))
+// mock drawer 协同层：断言点击 workflow 块时 openWorkflow(name, { slug, sessionId }) 被调
+//（workflow-visualization U6/D1 入口改向后 = 开 overlay；chips 反查经 lookupWorkflowRun）
+const { openWorkflowMock, lookupWorkflowRunMock } = vi.hoisted(() => ({
+  openWorkflowMock: vi.fn(),
+  lookupWorkflowRunMock: vi.fn(),
+}))
 vi.mock('@taiji/core/domain/drawer', () => ({
   openWorkflow: openWorkflowMock,
+  lookupWorkflowRun: lookupWorkflowRunMock,
 }))
 
 function makeWorkflow(over: Partial<ToolCall> = {}): ToolCall {
@@ -40,6 +45,8 @@ function makeWorkflow(over: Partial<ToolCall> = {}): ToolCall {
 
 beforeEach(() => {
   openWorkflowMock.mockReset()
+  // chips 反查缺省无数据（不渲染；chips 用例内按需覆写返回值）
+  lookupWorkflowRunMock.mockReset().mockReturnValue(undefined)
 })
 
 describe('BlockWorkflow: 标题行字段（v6 §11：prefix + name · slug）', () => {
@@ -148,14 +155,18 @@ describe('BlockWorkflow: collapsed only（§11：无内联详情展开，GUI 迁
     expect(wrapper.text()).not.toContain('workflow running')
   })
 
-  it('点击整行 → openWorkflow(name)（drawer 开 workflow tab）', async () => {
+  it('点击整行 → openWorkflow(name, { slug, sessionId })（U6/D1：开 overlay，反查在 renderer opener）', async () => {
     const wrapper = mountToolBlock(makeWorkflow({ status: 'completed' }))
     await wrapper.find('[data-testid="tool-block-header"]').trigger('click')
     expect(openWorkflowMock).toHaveBeenCalledTimes(1)
-    expect(openWorkflowMock).toHaveBeenCalledWith('email-validation-refactor')
+    // mountToolBlock 不传 sessionId prop → 透传 undefined（opener 回落焦点 pane）
+    expect(openWorkflowMock).toHaveBeenCalledWith('email-validation-refactor', {
+      slug: 'email-refactor',
+      sessionId: undefined,
+    })
   })
 
-  it('无 name 时点击 → openWorkflow(空串)（仅切 tab，不记录选中名）', async () => {
+  it('无 name 时点击 → openWorkflow(空串, { slug: undefined, ... })（opener 兜底归宿）', async () => {
     const wrapper = mountToolBlock(
       makeWorkflow({
         status: 'completed',
@@ -164,6 +175,64 @@ describe('BlockWorkflow: collapsed only（§11：无内联详情展开，GUI 迁
     )
     await wrapper.find('[data-testid="tool-block-header"]').trigger('click')
     expect(openWorkflowMock).toHaveBeenCalledTimes(1)
-    expect(openWorkflowMock).toHaveBeenCalledWith('')
+    expect(openWorkflowMock).toHaveBeenCalledWith('', { slug: undefined, sessionId: undefined })
+  })
+})
+
+describe('BlockWorkflow: 多阶段 chips（workflow-visualization U6/P5，phases 折叠快照）', () => {
+  const PHASES = [
+    { phase: 'gate', startedAt: 1000, settledAt: 2000 },
+    { phase: 'review', startedAt: 3000 },
+  ]
+
+  function mockLookup(phases: typeof PHASES | undefined): void {
+    lookupWorkflowRunMock.mockReturnValue(
+      phases === undefined
+        ? undefined
+        : {
+            runId: 'wf-run-1',
+            scriptName: 'email-validation-refactor',
+            status: 'running',
+            startedAt: '2026-10-02T00:00:00Z',
+            agentCalls: [],
+            stateFilePath: '',
+            ...(phases.length > 0 ? { phases } : {}),
+          },
+    )
+  }
+
+  it('反查命中且有 phases → 渲染 mini 管道 chips（phase 名 + 状态点两态）', () => {
+    mockLookup(PHASES)
+    const wrapper = mountToolBlock(makeWorkflow({ status: 'running' }), { sessionId: 's9' })
+    const chips = wrapper.find('[data-testid="workflow-block-chips"]')
+    expect(chips.exists()).toBe(true)
+    // phase 名可见
+    expect(wrapper.text()).toContain('gate')
+    expect(wrapper.text()).toContain('review')
+    // 两态：settledAt 有值 = settled（success 点）、缺省 = running（accent 点）
+    const gate = wrapper.find('[data-testid="workflow-chip-gate"]')
+    expect(gate.attributes('data-state')).toBe('settled')
+    const review = wrapper.find('[data-testid="workflow-chip-review"]')
+    expect(review.attributes('data-state')).toBe('running')
+  })
+
+  it('反查未命中 / 旧 run 无 phases → chips 不渲染（collapsed only 形态不变）', () => {
+    mockLookup(undefined)
+    const miss = mountToolBlock(makeWorkflow({ status: 'completed' }), { sessionId: 's9' })
+    expect(miss.find('[data-testid="workflow-block-chips"]').exists()).toBe(false)
+
+    mockLookup([])
+    const noPhases = mountToolBlock(makeWorkflow({ status: 'completed' }), { sessionId: 's9' })
+    expect(noPhases.find('[data-testid="workflow-block-chips"]').exists()).toBe(false)
+  })
+
+  it('反查请求参数 = (sessionId, name, slug)——按块归属 session 分区反查', () => {
+    mockLookup(PHASES)
+    mountToolBlock(makeWorkflow({ status: 'completed' }), { sessionId: 's9' })
+    expect(lookupWorkflowRunMock).toHaveBeenCalledWith(
+      's9',
+      'email-validation-refactor',
+      'email-refactor',
+    )
   })
 })

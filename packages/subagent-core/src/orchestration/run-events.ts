@@ -62,7 +62,7 @@ export type { RunErrorCode, RunEventType, RunOutcome } from "../shared/run-vocab
 import { MAX_ERROR_LOGS } from "./worker-message-pump-constants.ts";
 // [§3.1.3 基座单源] append/scan 实现在 shared/jsonl-event-stream.ts（与 record 事件
 // journal 共用同一实现体，差异经策略注入——本文件只提供 run 域策略）。
-import type { AgentFailureKind, AgentResult, DoneReason, WorkerLogEntry } from "./models/types.ts";
+import type { AgentFailureKind, AgentResult, AgentUsage, DoneReason, WorkerLogEntry } from "./models/types.ts";
 import type { WorkflowRun } from "./models/workflow-run.ts";
 
 // ── 终态双维度（D5-1 → [D2] 四态重构）────────────────────────
@@ -838,6 +838,25 @@ export interface RunAskStepFold { // oe-exempt:20260929:framework:workflow/recor
   lastProgressAt: number;
   /** 终局（agent-settled；未终态 undefined）。call 级 outcome 实际值域 = done/failed/cancelled。 */
   settled?: { outcome: RunOutcome; durationMs?: number; errorCode?: RunErrorCode; ts: number };
+  /**
+   * [可视化 U1，设计 §3.3-D12] 失败尝试累计（agent-retrying 帧驱动——该 call 至今
+   * 的失败尝试次数，帧载荷 attempt 单调递增即累计值；无重试 undefined）。runtime
+   * 投影透出供 retrying 派生态与 trace attempt 列（shared WorkflowAgentCall.attempts）。
+   */
+  attempts?: number;
+  /**
+   * [可视化 U1，设计 §3.3-D12] 最近一次重试（agent-retrying 帧值——单值快照，只够
+   * 最近一次；多轮 attempt 起止只有事件流各帧可重构，workflow-visualization 设计
+   * §3.1-2）。runtime 投影透出供 retrying 派生态展示（shared WorkflowAgentCall.lastRetry）。
+   */
+  lastRetry?: { attempt: number; backoffMs: number; reason: string };
+  /**
+   * [可视化 U1，设计 §3.3-D12] token 分项（agent-settled 帧 result.usage 透传——
+   * AgentUsage 分项；result 缺省/usage 缺省 undefined）。runtime 投影消费填充
+   * shared WorkflowAgentCall 的 inputTokens/outputTokens/turns 三字段（不设嵌套
+   * usage 字段——同一信息禁止双轨，u2 冻结裁决）。
+   */
+  usage?: AgentUsage;
 }
 
 /** 单个 phase 的状态机投影行（[D3] pending → running → settled 的 fold 半边）。 */
@@ -926,8 +945,13 @@ function derivePhaseSettlement(
  * （state/lastSeq）同源于一次 fold 循环。
  */
 export interface RunJournalFold { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
-  /** run-created 帧（record 流首帧；undefined = 首帧未达）。 */
-  created: { runId: string; workflowName: string; ts: number } | undefined;
+  /**
+   * run-created 帧（record 流首帧；undefined = 首帧未达）。argsSummary = 写侧恒写
+   * 的调用参数行内小摘要（RunCreatedEvent.argsSummary 透传——overlay header args
+   * 摘要消费位，设计 §3.3-D12；args 全文不进 fold，查看经事件流 RPC 截断形态）。
+   * 旧格式行载荷缺失时 undefined（写侧契约恒写，读取面对缺失放行）。
+   */
+  created: { runId: string; workflowName: string; argsSummary?: string; ts: number } | undefined;
   /** call 投影（taskIndex → 步骤行）。 */
   asks: Map<number, RunAskStepFold>;
   /** phase 状态机投影（[D3]，phase 名 → 状态行；phase-started 缺失时按 agent-started 载荷自愈重建）。 */
@@ -1047,6 +1071,10 @@ function foldAgentRetryingEvent(
   nextAsks.set(event.taskIndex, {
     ...existing,
     lastProgressAt: Math.max(existing.lastProgressAt, event.ts),
+    // [可视化 U1，设计 §3.3-D12] 重试骨架：失败尝试累计（帧载荷 attempt 1 起单调
+    // 递增即累计失败次数）+ 最近一次重试单值快照（多轮起止只有事件流各帧可重构）
+    attempts: event.attempt,
+    lastRetry: { attempt: event.attempt, backoffMs: event.backoffMs, reason: event.reason },
   });
   // [D3 对称自愈] 重试在途（call 行仍携上一次尝试的旧 settled）→ 该 phase
   // 推导值翻回 running（treatAsRunning——判据不依赖 call 行 settled 缺席）
@@ -1064,6 +1092,9 @@ function foldAgentSettledEvent(
 ): { asks: Map<number, RunAskStepFold>; phases: Map<string, RunPhaseFold> } {
   const existing = asks.get(event.taskIndex);
   const settled = { outcome: event.outcome, durationMs: event.durationMs, errorCode: event.errorCode, ts: event.ts };
+  // [可视化 U1，设计 §3.3-D12] token 分项（result.usage 透传——AgentUsage 分项；
+  // result/usage 缺省 undefined，runtime 投影消费填充 shared 三字段）
+  const usage = event.result?.usage;
   const nextAsks = new Map(asks);
   nextAsks.set(
     event.taskIndex,
@@ -1072,6 +1103,7 @@ function foldAgentSettledEvent(
         ...existing,
         lastProgressAt: Math.max(existing.lastProgressAt, event.ts),
         settled,
+        ...(usage !== undefined ? { usage } : {}),
       }
       : {
         taskIndex: event.taskIndex,
@@ -1081,6 +1113,7 @@ function foldAgentSettledEvent(
         startedAt: event.ts,
         lastProgressAt: event.ts,
         settled,
+        ...(usage !== undefined ? { usage } : {}),
       },
   );
   // [D3 对称自愈] 该 phase 名下 call 行全部落定 → 推导 phase 终局（行存在
@@ -1193,10 +1226,11 @@ export function foldRunEventCheckpoint(
         state,
         lastSeq: typeof seq === "number" ? seq : checkpoint.lastSeq,
         // 骨架半边（[W2 D7]）：状态机转移合法才推进——坏帧行整体不写，骨架与
-        // 状态同停在最近一致态。
+        // 状态同停在最近一致态。argsSummary 为写侧恒写载荷的透传（[可视化 U1，
+        // 设计 §3.3-D12]；旧格式行缺失即 undefined，读取面放行）。
         created:
           event.type === "run-created"
-            ? { runId: event.runId, workflowName: event.workflowName, ts: event.ts }
+            ? { runId: event.runId, workflowName: event.workflowName, argsSummary: event.argsSummary, ts: event.ts }
             : checkpoint.created,
         asks,
         phases,

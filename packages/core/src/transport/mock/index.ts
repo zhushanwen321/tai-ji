@@ -29,6 +29,8 @@ import type {
   SkillInfo, AgentInfo, PluginInfo, SetProviderData,
   SkillDirConfig, FileNode, RecommendedExtension, SubagentRecord, WorkflowRunRecord,
   SystemPromptConfig,
+  WorkflowRunEventsReply,
+  WorkflowDagReply,
   TerminalConfig,
   BatchDeleteResult,
   ProviderSource, ProviderImportPreview, ProviderImportResult, ProviderImportedItem,
@@ -144,7 +146,7 @@ import { __setMockFileAck } from './file'
 import { __setMockGitAck } from './git'
 
 // workflow/subagent fixture（E2E 验证 Flows/Agents tab，从 workflow-data.ts 拆出控文件行数）
-import { fixtureWorkflows, fixtureSubagents } from './workflow-data'
+import { fixtureWorkflows, fixtureSubagents, fixtureRunEvents } from './workflow-data'
 
 /** "npm:" 前缀长度（install source 解析用，对齐 runtime NPM_PREFIX_LENGTH） */
 const NPM_PREFIX = 'npm:'
@@ -653,6 +655,31 @@ const sessionImpl = {
   async getWorkflows(sessionId: string): Promise<{ workflows: WorkflowRunRecord[]; oversize?: boolean }> {
     await sleep(TIMING.ack)
     return { workflows: sessionId === 's3' ? fixtureWorkflows.map((w) => ({ ...w })) : [] }
+  },
+
+  /**
+   * Mock run 事件流（workflow-visualization §3.1-4；[G4 锚定补齐] 同因：门面三元下 mock
+   * 缺成员即接口同构破）。按 runId 分流：wf-mock-001 返回 fixtureRunEvents 成功回执
+   * （workflow-viz overlay 事件流/Gantt 子页的正向对账数据，e2e/workflow-viz-overlay.spec.ts）；
+   * 其余 runId 返回结构化 record_not_found 领域回执（形态对齐 real 错误臂；该降级形态的
+   * renderer 分流由组件测试覆盖——workflow-live-panel.test.ts 错误二分用例）。
+   */
+  async getWorkflowRunEvents(sessionId: string, runId: string): Promise<WorkflowRunEventsReply> {
+    await sleep(TIMING.ack)
+    if (runId === 'wf-mock-001') {
+      return { sessionId, runId, events: fixtureRunEvents.map((e) => ({ ...e })) }
+    }
+    return { sessionId, runId, code: 'record_not_found', message: 'mock 无 record 事件流记录' }
+  },
+
+  /**
+   * Mock run DAG 蓝图（workflow-visualization §3.1-5；[G4 锚定补齐] 同因：门面三元下 mock
+   * 缺成员即接口同构破）。mock 无 record 文件基建 → 返回结构化 record_not_found 领域回执
+   *（形态对齐 real 错误臂；overlay 左栏按码分流降级形态 = 按 phase 分组只读列表）。
+   */
+  async getWorkflowDag(sessionId: string, runId: string): Promise<WorkflowDagReply> {
+    await sleep(TIMING.ack)
+    return { sessionId, runId, code: 'record_not_found', message: 'mock 无 record 文件基建' }
   },
 
   /** Mock agent call 对话流历史（返回空数组，drawer SubagentTab agentcall 分支加载不 throw 即可） */

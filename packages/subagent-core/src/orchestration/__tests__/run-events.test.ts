@@ -1354,6 +1354,83 @@ describe("foldRunEventCheckpoint（seq 守卫，D6 域 fold 去重）", () => {
     expect(checkpoint.resumed).toEqual({ reason: "resume requested", host: "pi-host-1", ts: TS + 200_000 });
     expect(checkpoint.state).toEqual({ lifecycle: "running" });
   });
+
+  // ── [可视化 U1，设计 §3.3-D12] fold 骨架字段扩展：created.argsSummary /
+  //    asks 行 attempts / lastRetry / usage——仅骨架字段与映射赋值，状态机
+  //    转移逻辑零改动（diff 自核验：新增行全部在骨架写入点）。
+
+  it("[可视化 U1] created.argsSummary：run-created 写侧恒写载荷的透传（overlay header args 摘要消费位）", () => {
+    const checkpoint = foldRunEventCheckpoint([runCreated], () => {
+      throw new Error("run-created 不该被判坏帧");
+    });
+    expect(checkpoint.created).toEqual({
+      runId: "wf-1758-a1",
+      workflowName: "review-fix-loop",
+      argsSummary: '{"pr":"#123"}',
+      ts: TS,
+    });
+  });
+
+  it("[可视化 U1] agent-retrying 帧累计 attempts + 记 lastRetry（单值快照，多轮起止走事件流各帧）", () => {
+    const checkpoint = foldRunEventCheckpoint(
+      [runCreated, agentStarted, agentRetrying],
+      () => {
+        throw new Error("retrying 帧不该被判坏帧");
+      },
+    );
+    const ask = checkpoint.asks.get(0);
+    expect(ask?.attempts).toBe(1);
+    expect(ask?.lastRetry).toEqual({ attempt: 1, backoffMs: 1000, reason: "provider 503" });
+  });
+
+  it("[可视化 U1] 连续重试波：attempts 随帧序递增、lastRetry 取最近一帧值", () => {
+    const checkpoint = foldRunEventCheckpoint(
+      [
+        runCreated,
+        agentStarted,
+        agentRetrying,
+        { ...agentRetrying, seq: 6, ts: TS + 60_000, attempt: 2, backoffMs: 2000, reason: "provider 503 (attempt 2)" },
+      ],
+      () => {},
+    );
+    const ask = checkpoint.asks.get(0);
+    expect(ask?.attempts).toBe(2);
+    expect(ask?.lastRetry).toEqual({ attempt: 2, backoffMs: 2000, reason: "provider 503 (attempt 2)" });
+  });
+
+  it("[可视化 U1] agent-settled 帧 result.usage 落 usage 分项（runtime 投影消费填充 shared 三字段）", () => {
+    const usage = { input: 1200, output: 340, cacheRead: 50, cacheWrite: 10, cost: 0.02, contextTokens: 1250, turns: 3 };
+    const settledWithUsage: AgentSettledEvent = {
+      ...agentSettledCompleted,
+      result: { content: "done", usage },
+    };
+    const checkpoint = foldRunEventCheckpoint([runCreated, agentStarted, settledWithUsage], () => {});
+    const ask = checkpoint.asks.get(1);
+    expect(ask?.usage).toEqual(usage);
+    // 无 usage 的 result：usage 缺省不造键（toEqual 忽略 undefined 字段语义下按 undefined 断言）
+    const plain = foldRunEventCheckpoint([runCreated, agentStarted, agentSettledCompleted], () => {});
+    expect(plain.asks.get(1)?.usage).toBeUndefined();
+  });
+
+  it("[可视化 U1] 重试后终局：attempts/lastRetry 保留 + usage 随终局帧落行（骨架字段跨帧共存）", () => {
+    const usage = { input: 2200, output: 500, cacheRead: 0, cacheWrite: 0, cost: 0.03, contextTokens: 2300, turns: 2 };
+    const settledAfterRetry: AgentSettledEvent = {
+      ...agentSettledFailed,
+      outcome: "done",
+      errorCode: undefined,
+      attempt: 2,
+      result: { content: "recovered", usage },
+    };
+    const checkpoint = foldRunEventCheckpoint(
+      [runCreated, agentStarted, agentRetrying, settledAfterRetry],
+      () => {},
+    );
+    const ask = checkpoint.asks.get(0);
+    expect(ask?.attempts).toBe(1);
+    expect(ask?.lastRetry).toEqual({ attempt: 1, backoffMs: 1000, reason: "provider 503" });
+    expect(ask?.usage).toEqual(usage);
+    expect(ask?.settled?.outcome).toBe("done");
+  });
 });
 
 // ── DoneReason 终止性判定（词表语义单点；消费方 = 壳 workflow-notify 防偷懒收尾指令）──

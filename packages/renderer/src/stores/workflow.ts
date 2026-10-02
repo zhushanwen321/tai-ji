@@ -7,6 +7,8 @@
  * 职责：
  * - 共享 workflow 列表（records）—— 所有消费面（composer 任务托盘 / drawer WorkflowTab）只读消费
  * - agentcall 虚拟 key 清理映射（mainSessionAgentCalls）：deleteSession 时清 agentcall 虚拟分区
+ * - [可视化 U5/D11] 事件流缓存（runId 分区 + LRU5 + 活跃 run 锚 + workflowUpdate 信号
+ *   联动 force 重拉）—— workflow-viz 面板（overlay 右栏实况面板）消费
  *
  * [HISTORICAL] overlay 展示层已于 U7 移除（drawer tab 化）：
  * 原 agentCallMap（Panel overlay 的 agent call sessionId）+ isViewing/getViewingAgentCallId/
@@ -27,7 +29,7 @@
 import { defineStore } from 'pinia'
 import { getCurrentScope, onScopeDispose, ref } from 'vue'
 import type { ComputedRef } from 'vue'
-import type { WorkflowAgentCall, WorkflowRunRecord } from '@taiji/shared'
+import type { WorkflowAgentCall, WorkflowRunEventEntry, WorkflowRunRecord, WorkflowRunEventsErrorCode } from '@taiji/shared'
 // 虚拟 session ID 工厂 SSOT 迁至 @taiji/shared/virtual-session-id（跨层协议级约定）。
 // 此处 re-export 保持现有 import 路径向后兼容；本 store body 清理逻辑用本地 import。
 export {
@@ -52,6 +54,60 @@ export function agentCallElapsedMs(call: WorkflowAgentCall, nowMs: number): numb
   const started = Date.parse(call.startedAt)
   if (Number.isNaN(started)) return null
   return Math.max(0, nowMs - started)
+}
+
+/**
+ * [可视化 D9] run 已用时长 ms（「中断/终局停走」口径的单点派生——overlay 壳 header
+ * 与实况面板 header 两消费位共用，禁各自实现）。停走锚：running = 当前时刻；terminal
+ * （done）= completedAt（不可解析回退 start）；interrupted（暂停态，无 completedAt）=
+ * health.lastProgressAt（不计挂起时间）。返回 null = 时长槽省略（消费方显示 '—'）：
+ * startedAt 不可解析，或 interrupted 无 health 锚（缺省 / 早于 start——v2 事件 fold 投影
+ * 恒不产出 health 字段，见 shared/workflow.ts 注释；数据缺口不展示为确定的 0 值）。
+ */
+export function deriveWorkflowRunElapsedMs(
+  run: Pick<WorkflowRunRecord, 'status' | 'startedAt' | 'completedAt' | 'health'>,
+  nowMs: number,
+): number | null {
+  const start = Date.parse(run.startedAt)
+  if (Number.isNaN(start)) return null
+  let endMs: number
+  if (run.status === 'running') {
+    endMs = nowMs
+  } else if (run.completedAt !== undefined) {
+    const parsed = Date.parse(run.completedAt)
+    endMs = Number.isNaN(parsed) ? start : parsed
+  } else {
+    const lastProgress = run.health?.lastProgressAt
+    if (lastProgress === undefined || lastProgress < start) return null
+    endMs = lastProgress
+  }
+  return Math.max(0, endMs - start)
+}
+
+// ── [可视化 U5/D11] 事件流缓存条目（runId 分区值形态）─────────────────────────
+
+/**
+ * 单 run 事件流缓存条目（workflow-visualization D11②：overlay 关闭不清——重开秒显；
+ * session 删除随 clearSession 清；LRU 上界 5）。错误二分数据源（设计 §3.1-2 降级路径）：
+ * errorCode = 结构化领域回执（record_not_found——静态指引无重试按钮）；errorMessage =
+ * RPC 通道错误（暂时性失败——子页错误 + 重试按钮）。
+ */
+export interface WorkflowRunEventsEntry {
+  /** 归属主 session（clearSession 按 sid 反查清理的依据）。 */
+  sessionId: string
+  status: 'loading' | 'ready' | 'error'
+  /** 事件流原文行（status === 'ready' 时有值；行形态含截断标注，见 WorkflowRunEventEntry）。 */
+  events?: WorkflowRunEventEntry[]
+  /** 结构化领域回执错误码（协议闭集 = record_not_found）。 */
+  errorCode?: WorkflowRunEventsErrorCode
+  /** RPC 通道错误消息（恢复指引展示位）。 */
+  errorMessage?: string
+  /**
+   * oversize 降级标志（[RT-4#8] 语义同 subagent/workflow 列表款，run 粒度）：record
+   * 文件超 32MB 读取上限——runtime 不全文读取，events 恒空数组 + 本标志置位；
+   * 「不可用」与「无数据」（eventsEmpty）显式分形，事件流子页按标志显示降级提示。
+   */
+  oversize?: boolean
 }
 
 export const useWorkflowStore = defineStore('workflow', () => {
@@ -161,6 +217,11 @@ export const useWorkflowStore = defineStore('workflow', () => {
       // [W0/D4] 拉取收敛簿记一并清：在途 promise 完成后的 drainDirty 读到空簿记 → 不补拉
       inflightDedup.clear()
       dirtyWorkflows.clear()
+      // [可视化 U5/D11] 事件流簿记随实例回收（缓存 Map 本体随 ref 回收；LRU 序、活跃 run
+      // 锚与在途去重是实例级非持久状态，清空防旧实例幻影写入）
+      runEventsLruOrder.length = 0
+      activeWorkflowRun.value = null
+      runEventsInflight.clear()
     })
   }
 
@@ -204,6 +265,191 @@ export const useWorkflowStore = defineStore('workflow', () => {
     oversizeBySession.value.delete(sessionId)
     // [W0/D4] 簿记 + running 重试 timer 随分区一并释放（dirty 不复活已删分区；timer 缺口补齐）
     releaseLoadBookkeeping(sessionId)
+    // [可视化 U5/D11⑤] 该 session 名下 run 的事件流缓存随分区一并释放；活跃 run 归属该
+    // session 时清除活跃锚（overlay 关闭编排归 useSidebar.deleteSession 链，数据面在此收口）
+    clearRunEventsBySession(sessionId)
+  }
+
+  // ── [可视化 U5/D11] 事件流缓存（runId 分区）+ 活跃 run 锚（在途丢弃检查）────────
+  //
+  // 生命周期五条（D11）：
+  // ① 在途丢弃检查——overlay 关闭/切换 run 后返回的拉取结果一律丢弃（activeWorkflowRun
+  //    校验，对齐 SearchModal close 后不再调度查询先例）；
+  // ② 缓存按 runId 分区——overlay 关闭不清（重开秒显）、session 删除随 clearSession 清、
+  //    LRU 上界 5（防长会话内存累积）；
+  // ③ 切换 run——关全部 run 级 tab 归 overlay 容器（面板按 runId 重挂载，tab 随挂载态
+  //    消亡）；store 侧活跃锚换指 + 在途丢弃即数据面完备；
+  // ④ agentcall 分区——复用现状 LRU 联动与 registerAgentCall（面板 agent tab 经
+  //    useSubagentTabData 走既有编排，本 store 零新增）；
+  // ⑤ session 删除——clearSession 扩展清缓存与活跃锚（上方 clearSession 内）。
+
+  const WORKFLOW_RUN_EVENTS_LRU_LIMIT = 5
+  /** runId → 事件流缓存条目（D11②；overlay 关闭不清）。 */
+  const runEventsByRun = ref(new Map<string, WorkflowRunEventsEntry>())
+  /** LRU 访问序（最近使用在后；元素 = runId。非响应式簿记）。 */
+  const runEventsLruOrder: string[] = []
+  /**
+   * 活跃 run（overlay 正在查看的 run）——在途拉取 settle 时的丢弃检查锚（D11①）。
+   * 面板挂载/卸载经 setActiveWorkflowRun 登记。overlay 全局单例 → 至多一个活跃 run。
+   */
+  const activeWorkflowRun = ref<{ sessionId: string; runId: string } | null>(null)
+
+  /**
+   * [可视化 U5/D11] 事件流拉取在途去重（runId 级键）：组装 createInflightDedup 共享
+   * 原语（C-data-18——「同 key 并发异步操作去重」禁手写同构实现）。同 runId 在途期间的
+   * 新调用（含 force）共享在途 promise 不另起 RPC；settle 即清 + 引用比对防误删由原语
+   * 内建。缓存条目（runEventsByRun）只承载 loading/ready/error 展示三态，不兼任去重簿记
+   * ——「在途合并」判据不再落在条目 status 上（残留 loading 条目不会拦截后续拉取）。
+   * 随 clearSession / clearWorkflows / dispose 三点与缓存一并释放。
+   */
+  const runEventsInflight = createInflightDedup<void>()
+
+  /**
+   * [可视化 D11] 活跃 run 信号纪元（每次 workflowUpdate 信号命中活跃 run 分支时自增）。
+   * 消费方 = overlay 内的 agent tab 快照面（AgentTabContent watch 本纪元重调快照拉取，
+   * 设计 §3.1-2/D8「实时性由列表 status + workflowUpdate 信号重新拉取体现」的 agentcall
+   * 半边接线）；纪元自增即代表「活跃 run 有新信号」，重拉目标由消费方各自的 virtualId 决定。
+   */
+  const activeRunSignalEpoch = ref(0)
+
+  /** 活跃 run 登记（面板挂载时 set；切换 run = 新面板先 set 覆盖）。 */
+  function setActiveWorkflowRun(sessionId: string, runId: string): void {
+    activeWorkflowRun.value = { sessionId, runId }
+  }
+
+  /**
+   * 活跃 run 条件释放（面板卸载时调）：仅当锚仍是 (sessionId, runId) 本尊时才清 null。
+   * 条件化原因：Vue 替换组件时旧面板 onUnmounted 晚于新面板 setup——无条件清会误删新
+   * 面板刚登记的锚（切 run 时序）。判据复用 isActiveRun（同一定义，防双处漂移）。
+   */
+  function releaseActiveWorkflowRun(sessionId: string, runId: string): void {
+    if (isActiveRun(sessionId, runId)) {
+      activeWorkflowRun.value = null
+    }
+  }
+
+  function touchRunEventsLru(runId: string): void {
+    const idx = runEventsLruOrder.indexOf(runId)
+    if (idx >= 0) runEventsLruOrder.splice(idx, 1)
+    runEventsLruOrder.push(runId)
+  }
+
+  function removeFromRunEventsLru(runId: string): void {
+    const idx = runEventsLruOrder.indexOf(runId)
+    if (idx >= 0) runEventsLruOrder.splice(idx, 1)
+  }
+
+  /** LRU 超界驱逐（活跃 run 移队尾保留——正在显示的 run 不驱逐；至多绕活跃一圈必收敛）。 */
+  function evictRunEventsLru(): void {
+    while (runEventsLruOrder.length > WORKFLOW_RUN_EVENTS_LRU_LIMIT) {
+      const victim = runEventsLruOrder.shift()
+      if (victim === undefined) break
+      if (activeWorkflowRun.value?.runId === victim) {
+        runEventsLruOrder.push(victim)
+        continue
+      }
+      runEventsByRun.value.delete(victim)
+    }
+  }
+
+  /** D11⑤ 清理执行体（clearSession 调）。 */
+  function clearRunEventsBySession(sessionId: string): void {
+    for (const [runId, entry] of runEventsByRun.value) {
+      if (entry.sessionId === sessionId) {
+        runEventsByRun.value.delete(runId)
+        removeFromRunEventsLru(runId)
+        // 在途去重簿记随条目一并释放：已删 session 的在途拉取结果会被活跃锚检查丢弃，
+        // 不让后续调用并入这条注定丢弃的在途（无 loading 占位可显示的静默窗口）
+        runEventsInflight.delete(runId)
+      }
+    }
+    if (activeWorkflowRun.value?.sessionId === sessionId) activeWorkflowRun.value = null
+  }
+
+  /** 指定 run 的事件流缓存读（响应式——组件 computed 内调用建立依赖）。 */
+  function runEventsOf(runId: string): WorkflowRunEventsEntry | undefined {
+    return runEventsByRun.value.get(runId)
+  }
+
+  /**
+   * D11① 在途丢弃的收尾（settle 且活跃锚已切走时由 performLoadRunEvents 调用）：撤除本次
+   * 拉取发起时写的 loading 占位条目——结果已被丢弃，条目若残留则该 run 的事件流分区永久
+   * 显示加载中（幻影 loading 展示）。status === 'loading' 条件防误删：只撤本次拉取的
+   * loading 占位，不碰已被新拉取覆盖的条目（同 runId 并发拉取已被 runEventsInflight 合并，
+   * loading 态至多一条，无交错窗口）。
+   */
+  function discardStaleRunEvents(sessionId: string, runId: string): void {
+    const entry = runEventsByRun.value.get(runId)
+    if (entry?.status === 'loading' && entry.sessionId === sessionId) {
+      runEventsByRun.value.delete(runId)
+      removeFromRunEventsLru(runId)
+    }
+  }
+
+  /**
+   * 事件流拉取执行体（loadWorkflowRunEvents 收敛壳内调用；只做「发起 + 写缓存」）。
+   * 在途合并由 runEventsInflight 承载（同 runId 仅首次发起，复用者共享 promise）。
+   */
+  async function performLoadRunEvents(sessionId: string, runId: string): Promise<void> {
+    runEventsByRun.value.set(runId, { sessionId, status: 'loading' })
+    touchRunEventsLru(runId)
+    evictRunEventsLru()
+    try {
+      const reply = await sessionApi.getWorkflowRunEvents(sessionId, runId)
+      if (!isActiveRun(sessionId, runId)) {
+        discardStaleRunEvents(sessionId, runId) // D11① 在途丢弃（撤 loading 占位防幻影 loading）
+        return
+      }
+      if ('events' in reply) {
+        runEventsByRun.value.set(runId, {
+          sessionId,
+          status: 'ready',
+          events: reply.events,
+          // oversize 降级标志透传（[RT-4#8] 分形：events 恒空 + oversize=true——
+          // 「record 过大不可用」，与「run 无事件」显式区分，子页按标志降级提示）
+          ...(reply.oversize ? { oversize: true } : {}),
+        })
+      } else {
+        runEventsByRun.value.set(runId, {
+          sessionId,
+          status: 'error',
+          errorCode: reply.code,
+          errorMessage: reply.message,
+        })
+      }
+    } catch (e) {
+      if (!isActiveRun(sessionId, runId)) {
+        discardStaleRunEvents(sessionId, runId) // D11① 同检（关后失败的拉取同样不复活条目）
+        return
+      }
+      const msg = e instanceof Error ? e.message : String(e)
+      runEventsByRun.value.set(runId, { sessionId, status: 'error', errorMessage: msg })
+    }
+  }
+
+  /** D11① 活跃锚判据（overlay 正在查看该 run）。 */
+  function isActiveRun(sessionId: string, runId: string): boolean {
+    const anchor = activeWorkflowRun.value
+    return anchor !== null && anchor.runId === runId && anchor.sessionId === sessionId
+  }
+
+  /**
+   * 事件流拉取入口（面板挂载首拉 / 信号触发 force 重拉 / 子页重试按钮 force）。
+   * 缓存语义（run 级粒度）：ready 缓存复用（force 覆盖重拉）；error 态非 force 不自动
+   * 重拉（重试是用户显式动作——record_not_found 静态指引恒无重试）；在途合并由
+   * runEventsInflight 承载（force 在途窗口到达同样并入该次在途，不另起 RPC——
+   * 同 runId 的新数据由后续信号/重开再触发拉取送达）。
+   */
+  function loadWorkflowRunEvents(sessionId: string, runId: string, opts?: { force?: boolean }): Promise<void> {
+    if (!sessionId || !runId) return Promise.resolve() // 空 sid/runId 不写分区（对齐 loadWorkflows 同款守卫）
+    const existing = runEventsByRun.value.get(runId)
+    if (!opts?.force && existing?.status === 'ready') {
+      touchRunEventsLru(runId)
+      return Promise.resolve()
+    }
+    if (!opts?.force && existing?.status === 'error') return Promise.resolve()
+    const { promise } = runEventsInflight.run(runId, () => performLoadRunEvents(sessionId, runId))
+    return promise
   }
 
   // ── actions ──
@@ -316,6 +562,19 @@ export const useWorkflowStore = defineStore('workflow', () => {
     const sid = sessionId
     // 增量信号 → 立即拉取完整列表
     void loadWorkflows(sid)
+    // [可视化 U5/D4] overlay 活跃 run 的事件流重新拉取（§3.1-4：overlay 订阅 run 级信号
+    // 触发 getWorkflows + 事件流重新拉取——store 内聚合接线，信号处理链零改动）。force
+    // 覆盖 ready 缓存；在途丢弃检查由 performLoadRunEvents 内建（信号到达时 overlay 已切
+    // 走的结果自动丢弃）。无 500ms 延迟：事件流与 getWorkflows 同链读 record 文件，信号
+    // 由 runtime 投影发出时 record 帧已落盘（构造性时序，无需时间平抑兜底）。
+    const anchor = activeWorkflowRun.value
+    if (anchor !== null && anchor.sessionId === sid) {
+      void loadWorkflowRunEvents(sid, anchor.runId, { force: true })
+      // [可视化 D11] 信号纪元自增——通知活跃 run 的 agent tab 快照面重拉（§3.1-2：
+      // 对话流子页 = 拉取时刻快照 + 信号触发重新拉取；事件流 force 重拉之外，
+      // agentcall 快照通道同链刷新）
+      activeRunSignalEpoch.value += 1
+    }
     // running 信号延迟重试：workflow-state-link 可能刚写入，首次拉取为空
     if (status === 'running') {
       // W3-3：用模块级 Map 跟踪 timer，去重（同 sid 多次 running 信号只保留最后一次的重试）
@@ -348,6 +607,11 @@ export const useWorkflowStore = defineStore('workflow', () => {
     // [W0/D4] 拉取收敛簿记一并清（同 clearSession / dispose 三点清理义务）
     inflightDedup.clear()
     dirtyWorkflows.clear()
+    // [可视化 U5/D11] 事件流缓存 + LRU 序 + 活跃 run 锚 + 在途去重簿记随全局重置一并清
+    runEventsByRun.value = new Map()
+    runEventsLruOrder.length = 0
+    activeWorkflowRun.value = null
+    runEventsInflight.clear()
   }
 
   /**
@@ -398,6 +662,12 @@ export const useWorkflowStore = defineStore('workflow', () => {
     loadWorkflows,
     triggerWorkflowReload,
     clearWorkflows,
+    // [可视化 U5/D11] 事件流缓存（runId 分区）+ 活跃 run 锚
+    runEventsOf,
+    setActiveWorkflowRun,
+    releaseActiveWorkflowRun,
+    loadWorkflowRunEvents,
+    activeRunSignalEpoch,
     registerAgentCall,
     getAgentCallVirtualIdsByMain,
     clearAgentCallMapping,
