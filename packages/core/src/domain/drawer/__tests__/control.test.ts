@@ -79,7 +79,7 @@ describe('null sid no-op 语义', () => {
     expect(getBoundSessionId()).toBe(null)
     expect(() => {
       openDrawerTab('git')
-      openDrawerTab('terminal', { commandName: '/commit' })
+      openDrawerTab('doc', { commandName: '/commit' })
     }).not.toThrow()
 
     // 绑定真实 sid 后，其分区是默认态（isOpen=false/activeTab=git）——
@@ -139,7 +139,7 @@ describe('B9 getViewedVids：agentcall LRU 联动豁免查询源（panel 枚举�
   it('drawer 开在其他 tab（非 subagent）→ 不算正在查看，不豁免', () => {
     focusSession('A')
     openSubagent({ virtualId: 'agentcall:acs-1', enteredFrom: 'workflow' })
-    setDrawerTab('terminal')
+    setDrawerTab('git')
     panels.value = ['A']
 
     expect(getViewedVids()).toEqual(new Set())
@@ -209,7 +209,7 @@ describe('D5 getViewedVids：btw 线查看豁免（btw-question，M3-a）', () =
     focusSession('A')
     openDrawerTab('btw')
     setBtwView('btw:pi-1')
-    setDrawerTab('terminal')
+    setDrawerTab('git')
     panels.value = ['A']
 
     expect(getViewedVids()).toEqual(new Set())

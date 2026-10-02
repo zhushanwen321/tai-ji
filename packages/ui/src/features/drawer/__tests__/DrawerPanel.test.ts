@@ -22,14 +22,14 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { DrawerPanel } from '../index'
-import type { SideDrawerTab } from '@taiji/core/domain/drawer'
+import type { RightDrawerTab } from '@taiji/core/domain/drawer'
 
 /** 展开态基础 props（控制态三字段，widget 数据走默认空 → 空态分支；display-containers
  *  §6.6③ W0：docked 死状态删除，props 面同步收窄；默认 activeTab = 'git'（§7.1）） */
 function baseProps<T extends object>(overrides: T = {} as T) {
   return {
     isOpen: true as boolean,
-    activeTab: 'git' as SideDrawerTab,
+    activeTab: 'git' as RightDrawerTab,
     sessionId: 's1',
     ...overrides,
   }

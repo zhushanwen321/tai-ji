@@ -31,7 +31,7 @@ import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useChat } from '@/composables/features/chat/useChat'
 import { useTurnExpansion } from '@/composables/panel/useTurnExpansion'
-import { useSideDrawer, type SideDrawerTab } from '@/composables/features/drawer/useSideDrawer'
+import { useSideDrawer, type RightDrawerTab } from '@/composables/features/drawer/useSideDrawer'
 import { openBrowser } from '@taiji/core/domain/overlay'
 import { useFileTreeStore } from '@/stores/fileTree'
 import { useFileSearch } from '@/composables/features/search/useFileSearch'
@@ -159,7 +159,7 @@ export function useChatViewDeps(
       triggerEnterHandoffMode(sid)
     },
     openDrawer: (tab, opts?): void => {
-      drawer.open(tab as SideDrawerTab, opts)
+      drawer.open(tab as RightDrawerTab, opts)
     },
     // [display-containers §7.4 URL 注入链] localhost 链接 → 浮层浏览器（core openBrowser：
     // 单例换内容 + BrowserPane 挂浮层壳）；发起会话 = 调用方（MarkdownRenderer）透传的 sessionId

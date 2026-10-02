@@ -28,8 +28,8 @@
  *   turn-skill-badge.test.ts（注释）。无需迁移。
  * [P4 s5 drawer-widget-removal] 原 B 项（useSidebar.ts consumePendingOpen）已随本 wave 删除
  *   （pendingOpen 机制整体移除）。
- * C 待 chat-w6 迁移（认知外文件，不触碰）：useChatViewDeps.ts:35 import
- *   { useSideDrawer, type SideDrawerTab }——chat-w6 迁移后改指向 core API。
+ * C 待 chat-w6 迁移（认知外文件，类型名已随 U7 收窄同步，仍经兼容层）：useChatViewDeps.ts
+ *   import { useSideDrawer, type RightDrawerTab }——chat-w6 迁移后改指向 core API。
  * D 可平滑迁移（改 import 指向 '@taiji/core/domain/drawer' 即可，~11 生产 + ~14 测试）：
  *   生产：useRunInTerminal.ts / useCloseShortcut.ts
  *   （isOpen/close）/ useDetailPane.ts（detailFilePath）/ useSidebar.ts（open）/ stores/chat.ts
@@ -62,15 +62,15 @@ import {
   detailFilePath,
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
-import type { SideDrawerTab, OpenDrawerOptions } from '@taiji/core/domain/drawer'
+import type { RightDrawerTab, OpenDrawerOptions } from '@taiji/core/domain/drawer'
 
 // 分区键绑定：focusedSessionId 来自 panel store（active panel 的 sessionId），与 SideDrawer
 // 物理挂载归属一致。lazy 调 usePanelStore()（computed 首次求值时 pinia 已 active，
 // 避免模块加载期 pinia 未初始化）。core controlState 按此分区（null = 未绑定，no-op 语义）。
 bindDrawerSessionId(computed<string | null>(() => usePanelStore().focusedSessionId))
 
-// re-export 类型：SideDrawer.test / useDrawerWidgetBuffers 等类型消费方零改动
-export type { SideDrawerTab, OpenDrawerOptions }
+// re-export 类型：类型消费方经兼容层 import 零改动
+export type { RightDrawerTab, OpenDrawerOptions }
 
 /**
  * SideDrawer 状态访问器（兼容层，返回形状与旧版逐字段一致）。

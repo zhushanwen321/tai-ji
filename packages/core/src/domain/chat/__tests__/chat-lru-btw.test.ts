@@ -296,7 +296,7 @@ describe('AU1 D5 查看态保护：查看中的 btw 线不落阈值驱逐（evic
     try {
       seedNineCandidates(h)
       startViewing('btw:pi-view')
-      setDrawerTab('terminal') // 切走 btw tab → 三分量破 → viewed 清空
+      setDrawerTab('git') // 切走 btw tab → 三分量破 → viewed 清空
       expect(getViewedVids()).toEqual(new Set())
 
       h.store.evictIfNeeded() // 无查看保护 → 最旧的 btw 线照常被逐

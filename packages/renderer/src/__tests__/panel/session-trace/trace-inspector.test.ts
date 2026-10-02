@@ -6,7 +6,7 @@
  *   （优先于 activeTab 面板），详情按 kind 渲染（文本全文 / kv / 原始 JSON）
  * - 返回复原前 tab：「← 返回」清 selectedKey → inspector 卸载 → activeTab 内容复原
  * - 未开自动打开：drawer 关闭态点选 → openDrawerTab 自动打开（保持当前 tab）
- * - 单向 main→drawer + SideDrawerTab 体系不变（全量一级 tab 仍在，无新 tab 位；
+ * - 单向 main→drawer + RightDrawerTab 体系不变（全量一级 tab 仍在，无新 tab 位；
  *   清单与 drawer-mode 注册表契约同源：helpers/drawer-tabs.ts）
  *
  * 两层：组件级（mount TraceInspector 断言详情内容）+ 壳路径（mount PanelContainer，
@@ -188,7 +188,7 @@ beforeEach(() => {
   usePanelStore().loadSession(ROOT_PANEL_ID, SID)
 })
 
-describe('A44 drawer inspector 联动（选中切入临时页 / 返回复原 / 未开自动打开 / SideDrawerTab 不变）', () => {
+describe('A44 drawer inspector 联动（选中切入临时页 / 返回复原 / 未开自动打开 / RightDrawerTab 不变）', () => {
   it('组件级：选中 USER 行渲染详情（全文 / kv / 原始 JSON），返回清除选中', async () => {
     await readyPartition()
     selectTraceEntry(SID, 'u1')
@@ -243,7 +243,7 @@ describe('A44 drawer inspector 联动（选中切入临时页 / 返回复原 / �
     // inspector 优先于 activeTab 面板（默认 git tab 内容被临时页取代）
     expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(false)
 
-    // SideDrawerTab 体系不变：全量 L1 tab 按钮仍在（清单与 drawer-mode 注册表契约用例
+    // RightDrawerTab 体系不变：全量 L1 tab 按钮仍在（清单与 drawer-mode 注册表契约用例
     // 同源——helpers/drawer-tabs.ts，生产注册表运行时投影；inspector 不占 tab 位；
     // terminal 已迁底抽屉不在 L1）
     for (const tab of L1_DRAWER_TABS) {

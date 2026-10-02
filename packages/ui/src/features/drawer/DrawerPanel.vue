@@ -95,8 +95,8 @@ import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { BookOpen, Bot, FileText, GitBranch, Globe, MessagesSquare, SquareCheckBig, SquareTerminal, Terminal as TerminalIcon, Workflow, X } from '@lucide/vue'
 import { Button } from '@taiji/ui'
-import { RIGHT_DRAWER_REGISTRY, type ContainerRegistryEntry } from '@taiji/core/domain/drawer'
-import type { SideDrawerTab } from '@taiji/core/domain/drawer'
+import { RIGHT_DRAWER_REGISTRY } from '@taiji/core/domain/drawer'
+import type { RightDrawerTab } from '@taiji/core/domain/drawer'
 
 const slots = useSlots()
 
@@ -117,7 +117,7 @@ function hasDesktopPanelContent(): boolean {
 const props = withDefaults(
   defineProps<{
     isOpen: boolean
-    activeTab: SideDrawerTab
+    activeTab: RightDrawerTab
     /** 订阅的 session 标识（壳层透传） */
     sessionId: string | null
   }>(),
@@ -126,13 +126,13 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   close: []
-  'set-tab': [tab: SideDrawerTab]
+  'set-tab': [tab: RightDrawerTab]
 }>()
 
 const { t } = useI18n()
 
 interface TabMeta {
-  key: SideDrawerTab
+  key: RightDrawerTab
   label: string
   icon: Component
   emptyText: string
@@ -161,7 +161,7 @@ const FALLBACK_ICON: Component = FileText
  *  u-w2-browser-mount 撤 browser 载入序列后直读容器声明）。各 tab 的桌面内容面板仍由壳层
  *  （PanelContainer）经默认 slot v-if chain 注入（C2），本组件不感知面板归属；空态/未读徽章不变。 */
 const tabs = computed<TabMeta[]>(() =>
-  RIGHT_DRAWER_REGISTRY.map((entry: ContainerRegistryEntry) => ({
+  RIGHT_DRAWER_REGISTRY.map((entry) => ({
     key: entry.content,
     label: t(entry.labelKey),
     icon: ICON_BY_ID[entry.icon] ?? FALLBACK_ICON,

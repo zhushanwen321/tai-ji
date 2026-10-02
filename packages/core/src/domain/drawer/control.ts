@@ -24,7 +24,7 @@
 import { ref, computed, reactive } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import { useSessionScopedState } from '../../foundation/use-session-scoped-state'
-import type { SideDrawerTab, DrawerControlState } from './types'
+import type { RightDrawerTab, DrawerControlState } from './types'
 
 // ── 分区键占位 + 绑定（headless 不直接读 pinia）──
 // boundSid 存绑定目标 ref（初始 null = 未绑定，模块级 API 按 null sid no-op 语义）。
@@ -109,7 +109,7 @@ const controlState = useSessionScopedState<DrawerControlState>(
  */
 export const drawerControl = {
   /** 打开抽屉（当前分区），可指定初始 tab */
-  open(tab?: SideDrawerTab): void {
+  open(tab?: RightDrawerTab): void {
     const cur = controlState.current.value
     if (tab) cur.activeTab = tab
     cur.isOpen = true
@@ -119,7 +119,7 @@ export const drawerControl = {
     controlState.current.value.isOpen = false
   },
   /** 切换 tab（抽屉关闭时仅改 activeTab，不自动打开） */
-  setTab(tab: SideDrawerTab): void {
+  setTab(tab: RightDrawerTab): void {
     controlState.current.value.activeTab = tab
   },
 }
@@ -131,7 +131,7 @@ export const drawerControl = {
  */
 export function useDrawerControl(): {
   isOpen: ComputedRef<boolean>
-  activeTab: ComputedRef<SideDrawerTab>
+  activeTab: ComputedRef<RightDrawerTab>
   } {
   return {
     isOpen: computed(() => controlState.current.value.isOpen),

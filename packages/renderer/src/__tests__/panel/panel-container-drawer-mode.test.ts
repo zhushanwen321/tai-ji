@@ -49,7 +49,7 @@ import {
   BOTTOM_DRAWER_REGISTRY,
   OVERLAY_REGISTRY,
 } from '@taiji/core/domain/drawer'
-// drawer-tab 注册表契约：全量 tab 清单收拢在 helpers/drawer-tabs.ts（SideDrawerTab 运行时
+// drawer-tab 注册表契约：全量 tab 清单收拢在 helpers/drawer-tabs.ts（RightDrawerTab 运行时
 // 投影，satisfies Record 双向防漂移），本文件的「注册表契约」用例是唯一全量断言处。其余
 // 用例只断言被测 tab 自身按钮，不再各留子集循环。
 import { L1_DRAWER_TABS } from '../helpers/drawer-tabs'

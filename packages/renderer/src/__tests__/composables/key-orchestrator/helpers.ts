@@ -11,7 +11,7 @@ import {
   getDrawerControlState,
   openDrawerTab,
   _resetDrawerForTest,
-  type SideDrawerTab,
+  type RightDrawerTab,
 } from '@taiji/core/domain/drawer'
 import {
   bindBottomDrawerSessionId,
@@ -52,7 +52,7 @@ export function openBottom(): void {
   openBottomDrawer()
 }
 
-export function openRight(tab: SideDrawerTab = 'git'): void {
+export function openRight(tab: RightDrawerTab = 'git'): void {
   openDrawerTab(tab)
 }
 

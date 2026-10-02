@@ -4,7 +4,7 @@
  * 迁移自 renderer composables/features/useSideDrawer.ts 的协同部分（W1）。
  * [P4 s5 drawer-widget-removal] pendingOpen 机制（pendingOpenMap/setPendingOpenForSid/
  * getPendingOpenForSid/consumePendingOpen/openTasksDrawerOnFirstData）已随 tasks 域删除移除——
- * PluginViewContainer 承接后无消费方（tasks tab 已从 SideDrawerTab 联合删除）。
+ * PluginViewContainer 承接后无消费方（tasks tab 已从抽屉 tab 联合删除）。
  *
  * 瞬时参数（selectedCommandName/detailFilePath）：打开时的瞬时参数，按会话分区
  * （selection/transient.ts，display-containers §6.6②——消跨会话劫持），读取面在该文件。
@@ -25,7 +25,7 @@ import { setWorkflowView } from './selection/workflow'
 import { setBackgroundTaskView } from './selection/bash-task'
 import { selectedCommandName, detailFilePath } from './selection/transient'
 import { _resetSelectionForTest } from './selection'
-import type { SideDrawerTab, OpenDrawerOptions, OpenSubagentOptions } from './types'
+import type { RightDrawerTab, OpenDrawerOptions, OpenSubagentOptions } from './types'
 
 // ── 模块级公开 API（C2）──
 
@@ -33,7 +33,7 @@ import type { SideDrawerTab, OpenDrawerOptions, OpenSubagentOptions } from './ty
  * 打开抽屉，可指定初始 tab + Doc tab 的选中命令 / Detail tab 的文件路径。
  * 瞬时参数写入当前会话分区（selection/transient.ts；undefined 字段不写——缺省不覆盖已有值）。
  */
-export function openDrawerTab(tab?: SideDrawerTab, opts?: OpenDrawerOptions): void {
+export function openDrawerTab(tab?: RightDrawerTab, opts?: OpenDrawerOptions): void {
   if (opts?.commandName !== undefined) selectedCommandName.value = opts.commandName
   if (opts?.filePath !== undefined) detailFilePath.value = opts.filePath
   drawerControl.open(tab)
@@ -45,13 +45,13 @@ export function closeDrawer(): void {
 }
 
 /** 切换开关；从关到开可指定 tab */
-export function toggleDrawer(tab?: SideDrawerTab): void {
+export function toggleDrawer(tab?: RightDrawerTab): void {
   if (getDrawerControlState().isOpen) closeDrawer()
   else openDrawerTab(tab)
 }
 
 /** 切换 tab（抽屉关闭时仅改 activeTab，不自动打开） */
-export function setDrawerTab(tab: SideDrawerTab): void {
+export function setDrawerTab(tab: RightDrawerTab): void {
   drawerControl.setTab(tab)
 }
 

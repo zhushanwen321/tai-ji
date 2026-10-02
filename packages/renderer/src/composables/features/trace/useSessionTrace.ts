@@ -12,7 +12,7 @@
  * - 视图状态：view（对话/Trace）、过滤（contextOnly/activeGroups/searchText）、selectedKey
  *   同分区存储（单 panel 下 pane 跟随 session，D5c per-pane 语义由分区承载）。
  * - drawer 联动（A44）：selectTraceEntry 写 selectedKey 且 drawer 未开时自动 openDrawerTab
- *   （单向 main→drawer；SideDrawerTab 体系不变，inspector 是临时页不占 tab 位——设计 D5b）。
+ *   （单向 main→drawer；RightDrawerTab 体系不变，inspector 是临时页不占 tab 位——设计 D5b）。
  *
  * 订阅生命周期：loadTrace 时 ensureIncrementSubscription（Set 去重防重复注册，规则 2）；
  * 不随 TraceView 卸载退订（切回对话视图增量继续收集，切回 Trace 不丢数据）；

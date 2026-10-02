@@ -116,8 +116,8 @@ describe('公开 API 薄封装（close/toggle/setTab）', () => {
     toggleDrawer() // 开 → 关
     expect(isOpen.value).toBe(false)
 
-    setDrawerTab('browser') // 抽屉关闭时仅改 activeTab
-    expect(activeTab.value).toBe('browser')
+    setDrawerTab('doc') // 抽屉关闭时仅改 activeTab
+    expect(activeTab.value).toBe('doc')
     expect(isOpen.value).toBe(false)
 
     closeDrawer()

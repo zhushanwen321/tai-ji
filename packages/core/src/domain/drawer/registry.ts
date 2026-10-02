@@ -13,20 +13,26 @@
  * 收窄后（W1）DrawerPanel L1 曾读 RIGHT_DRAWER_W0_ENTRIES（9 条）；终态容器归属 = CONTAINER_REGISTRY
  * （右 8/底 1/浮 2，§7.2）。
  *
- * 状态：纯数据注册表，无行为实装（类型契约不实装行为）。波次对账：
- * - u-w1-layout：terminal 已从载入序列移除（条目 10→9，terminal 迁底抽屉）
- * - u-w2-browser-mount：browser 从右抽屉移除（9→8）后 RIGHT_DRAWER_W0_ENTRIES 退役，
- *   DrawerPanel 直接读 RIGHT_DRAWER_REGISTRY（CONTAINER_REGISTRY['right-drawer'] 同对象）
+ * 状态：纯数据注册表，无行为实装（类型契约不实装行为）。终态容器归属 = CONTAINER_REGISTRY
+ * （右 8/底 1/浮 2，§7.2）；右抽屉数组以 ContainerRegistryEntry<RightDrawerTab> 实例化——
+ * 编译层锁终态 8 员（terminal/browser 混入右抽屉声明即 tsc 红），DrawerPanel 直接读
+ * RIGHT_DRAWER_REGISTRY（CONTAINER_REGISTRY['right-drawer'] 同对象）
  */
-import type { SideDrawerTab } from './types'
+import type { RightDrawerTab } from './types'
+
+/** 三容器内容类型全集（display-containers §7.2）：右抽屉 8 员（RightDrawerTab）+ 底抽屉 terminal + 浮层 browser；
+ * workflow 双承接（右抽屉回落载体 + 浮层主形态，§7.6）。仅注册表层使用——右抽屉控制态/tab 位一律用 RightDrawerTab。 */
+export type ContainerContentType = RightDrawerTab | 'terminal' | 'browser'
 
 /** 容器标识（§7.2 三个容器） */
 export type ContainerId = 'right-drawer' | 'bottom-drawer' | 'overlay'
 
-/** 容器注册表条目（§7.2：内容类型 + 图标标识字符串 + 标签/空态文案的 i18n key） */
-export interface ContainerRegistryEntry { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费面
-  /** 内容类型（tab/内容标识；drawer 侧 = SideDrawerTab，W0 超集 10 员） */
-  content: SideDrawerTab
+/** 容器注册表条目（§7.2：内容类型 + 图标标识字符串 + 标签/空态文案的 i18n key）。
+ * 泛型按容器实例化：RIGHT_DRAWER_REGISTRY = <RightDrawerTab>（编译层锁终态 8 员）；
+ * 底抽屉/浮层条目持全集类型（各容器条目数 1/2 由单测锚定，§7.2 声明即终态）。 */
+export interface ContainerRegistryEntry<C extends ContainerContentType = ContainerContentType> { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费面
+  /** 内容类型（tab/内容标识；泛型参数 C 精确到容器承接的内容类型） */
+  content: C
   /** §7.2 条目文本逐字锚（含内容类型前缀，如 'git（变更集）'）——与设计文档逐字对账，禁止改写 */
   text: string
   /** 图标标识字符串（kebab-case lucide 组件名，ui 层映射 @lucide/vue 组件渲染） */
@@ -61,7 +67,7 @@ const BROWSER_ENTRY: ContainerRegistryEntry = {
   emptyHintKey: 'panel.sideDrawer.browserHint',
 }
 
-const GIT_ENTRY: ContainerRegistryEntry = {
+const GIT_ENTRY: ContainerRegistryEntry<RightDrawerTab> = {
   content: 'git',
   text: 'git（变更集）',
   icon: 'git-branch',
@@ -70,7 +76,7 @@ const GIT_ENTRY: ContainerRegistryEntry = {
   emptyHintKey: 'panel.sideDrawer.gitHint',
 }
 
-const DOC_ENTRY: ContainerRegistryEntry = {
+const DOC_ENTRY: ContainerRegistryEntry<RightDrawerTab> = {
   content: 'doc',
   text: 'doc（命令文档）',
   icon: 'book-open',
@@ -79,7 +85,7 @@ const DOC_ENTRY: ContainerRegistryEntry = {
   emptyHintKey: 'panel.sideDrawer.docHint',
 }
 
-const DETAIL_ENTRY: ContainerRegistryEntry = {
+const DETAIL_ENTRY: ContainerRegistryEntry<RightDrawerTab> = {
   content: 'detail',
   text: 'detail（文件详情）',
   icon: 'file-text',
@@ -88,7 +94,7 @@ const DETAIL_ENTRY: ContainerRegistryEntry = {
   emptyHintKey: 'panel.sideDrawer.detailHint',
 }
 
-const SUBAGENT_ENTRY: ContainerRegistryEntry = {
+const SUBAGENT_ENTRY: ContainerRegistryEntry<RightDrawerTab> = {
   content: 'subagent',
   text: 'subagent（子代理）',
   icon: 'bot',
@@ -97,7 +103,7 @@ const SUBAGENT_ENTRY: ContainerRegistryEntry = {
   emptyHintKey: 'panel.sideDrawer.subagentHint',
 }
 
-const BASHTASK_ENTRY: ContainerRegistryEntry = {
+const BASHTASK_ENTRY: ContainerRegistryEntry<RightDrawerTab> = {
   content: 'bashTask',
   text: 'bashTask（后台命令）',
   icon: 'square-terminal',
@@ -106,7 +112,7 @@ const BASHTASK_ENTRY: ContainerRegistryEntry = {
   emptyHintKey: 'panel.sideDrawer.bashTaskHint',
 }
 
-const PLAN_ENTRY: ContainerRegistryEntry = {
+const PLAN_ENTRY: ContainerRegistryEntry<RightDrawerTab> = {
   content: 'plan',
   text: 'plan（计划文档）',
   icon: 'square-check-big',
@@ -115,7 +121,7 @@ const PLAN_ENTRY: ContainerRegistryEntry = {
   emptyHintKey: 'plan.drawer.planHint',
 }
 
-const BTW_ENTRY: ContainerRegistryEntry = {
+const BTW_ENTRY: ContainerRegistryEntry<RightDrawerTab> = {
   content: 'btw',
   text: 'btw（旁路线）',
   icon: 'messages-square',
@@ -125,7 +131,7 @@ const BTW_ENTRY: ContainerRegistryEntry = {
 }
 
 /** 右抽屉 workflow 条目（§7.2：workflow（回落载体，L1 常驻，主入口浮层）） */
-const WORKFLOW_DRAWER_ENTRY: ContainerRegistryEntry = {
+const WORKFLOW_DRAWER_ENTRY: ContainerRegistryEntry<RightDrawerTab> = {
   content: 'workflow',
   text: 'workflow（回落载体，L1 常驻，主入口浮层）',
   icon: 'workflow',
@@ -146,8 +152,8 @@ const WORKFLOW_OVERLAY_ENTRY: ContainerRegistryEntry = {
 
 // ── 终态容器声明（§7.2 逐字序：右 8 / 底 1 / 浮 2）──
 
-/** 右抽屉（right-drawer）承接的内容类型列表（8 条，§7.2 声明序） */
-export const RIGHT_DRAWER_REGISTRY: readonly ContainerRegistryEntry[] = [
+/** 右抽屉（right-drawer）承接的内容类型列表（8 条，§7.2 声明序；<RightDrawerTab> = 编译层锁终态） */
+export const RIGHT_DRAWER_REGISTRY: readonly ContainerRegistryEntry<RightDrawerTab>[] = [
   GIT_ENTRY,
   DOC_ENTRY,
   DETAIL_ENTRY,
