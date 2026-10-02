@@ -378,6 +378,35 @@ describe('TerminalService', () => {
     }
   })
 
+  it('TS-11: destroyPty 时 kill 已抛错（进程已死竞态）：console.error 留痕 + ptyMap 清理 + 升级链照跑', async () => {
+    // killAndUntrack 合并主体后的 catch 分支：kill 抛错不阻断调用方（unmap + untracked 升级照常）。
+    vi.useFakeTimers()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const { publish } = createPublishCollector()
+      const svc = new TerminalService({ publish })
+      await svc.spawn('s-kf', undefined, 80, 24)
+      const pty = mockPtys[0]!
+      pty.kill = vi.fn(() => {
+        throw new Error('EPIPE: process already dead')
+      })
+      expect(() => svc.destroyPty('s-kf')).not.toThrow()
+      expect(errorSpy).toHaveBeenCalledTimes(1)
+      expect(String(errorSpy.mock.calls[0]![0])).toContain('[terminal] destroyPty (session delete) kill failed: sid=s-kf')
+      // ptyMap 已清：write no-op
+      svc.write('s-kf', 'ls\n')
+      expect(pty.write).not.toHaveBeenCalledWith('ls\n')
+      // untracked 升级 timer 照常（SIGTERM 后未退的升级兑底不因首杀失败而缺席）：
+      // SIGKILL 再抛错落升级 catch（console.error 第二条），不留静默断链
+      vi.advanceTimersByTime(5000)
+      expect(pty.kill).toHaveBeenLastCalledWith('SIGKILL')
+      expect(errorSpy).toHaveBeenCalledTimes(2)
+      expect(String(errorSpy.mock.calls[1]![0])).toContain('SIGKILL 升级失败')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('TS-10: spawn 失败时 console.error 收到序列化后的 plain object（含 message/stack/code），非裸 Error 实例', async () => {
     // 回归守卫：spawn catch 块用 serializeError(e) 把 Error 转成 plain object 再传给 console.error。
     // 若有人改回裸 e，Error 实例经 logger 的 JSON.stringify 会变成 {}，日志看不出真实错误。
