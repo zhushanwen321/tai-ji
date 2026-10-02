@@ -42,6 +42,7 @@ function expectStructurallyValid(dag: WorkflowDag): void {
       expect(nodeIds.has(id), `parallelGroup 成员 ${id} 不在节点集`).toBe(true);
     }
   }
+  const referencedBackEdgeIds = new Set(dag.loops.map((l) => l.backEdgeId));
   for (const loop of dag.loops) {
     expect(loop.nodeIds.length).toBeGreaterThan(0);
     for (const id of loop.nodeIds) {
@@ -52,6 +53,13 @@ function expectStructurallyValid(dag: WorkflowDag): void {
     expect(backEdge?.kind).toBe("loop-back");
     expect(backEdge?.from).toBe(loop.nodeIds[loop.nodeIds.length - 1]);
     expect(backEdge?.to).toBe(loop.nodeIds[0]);
+  }
+  // 孤儿回边：每条 loop-back 边必被某 loop 引用——嵌套循环共享 (首,末) 节点对时
+  // 两条回边同 (from,to)，若按 (from,to) 配对会让先压入的回边成孤儿（dmg-r1-11）
+  for (const edge of dag.edges) {
+    if (edge.kind === "loop-back") {
+      expect(referencedBackEdgeIds.has(edge.id), `孤儿回边（无 loop 引用）：${edge.id}`).toBe(true);
+    }
   }
   dag.phases.forEach((phase, i) => {
     expect(phase.order).toBe(i);
@@ -360,6 +368,57 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
       expect(back?.kind).toBe("loop-back");
       expect(back?.from).toBe(result.dag.nodes[1].id);
       expect(back?.to).toBe(result.dag.nodes[0].id);
+    });
+
+    it("for(;;) 裸轮询形态（test/left/right 全缺席）→ 固定标签回退，不产原生异常", () => {
+      const source = [
+        `for (;;) {`,
+        `  await agent({ prompt: "poll", description: "poller" });`,
+        `  if (done) break;`,
+        `}`,
+      ].join("\n");
+      const result = parseWorkflowDag(source);
+      // 守卫前：visitLoop 对 undefined 取 sourceSlice → TypeError 以原生 throw 逃出
+      // 结构化错误边界，被挂接侧误归类为可重试通道错误；守卫后 for(;;) 是合法脚本，
+      // 按「合法脚本不得误报 parse_failed」契约正常解析（标签回退固定串 "loop"）
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expectStructurallyValid(result.dag);
+      expect(result.dag.nodes.map((n) => n.templateName)).toEqual(["poller"]);
+      expect(result.dag.loops).toHaveLength(1);
+      expect(result.dag.loops[0].label).toBe("loop");
+      expect(result.dag.loops[0].nodeIds).toEqual([result.dag.nodes[0].id]);
+    });
+
+    it("嵌套循环共享 (首,末) 节点对 → 两 loop 各持独立回边（backEdgeId 不因同键覆盖共享）", () => {
+      const source = [
+        `while (retry < limit) {`,
+        `  for (const item of items) {`,
+        `    await agent({ prompt: "p", description: "worker" });`,
+        `  }`,
+        `}`,
+      ].join("\n");
+      const result = parseWorkflowDag(source);
+      if (!result.ok) throw new Error(result.message);
+      expectStructurallyValid(result.dag);
+      // ctx.loops 登记序：内层先出（外层 visitLoop 等内层闭合后才登记）
+      expect(result.dag.loops).toHaveLength(2);
+      const [inner, outer] = result.dag.loops;
+      expect(inner.label).toBe("const item … items");
+      expect(outer.label).toBe("retry < limit");
+      // 外层循环体只含内层循环 → 两循环 bodyNodes 相同（共享 (首,末) 节点对）
+      expect(inner.nodeIds).toEqual(result.dag.nodes.map((n) => n.id));
+      expect(outer.nodeIds).toEqual(inner.nodeIds);
+      // 回边归属：各 loop 持有本 loop 自有回边，from/to === 本 loop 末/首节点
+      expect(inner.backEdgeId).not.toBe(outer.backEdgeId);
+      for (const loop of [inner, outer]) {
+        const back = result.dag.edges.find((e) => e.id === loop.backEdgeId);
+        expect(back, `loop ${loop.id} backEdgeId=${loop.backEdgeId} 无对应边`).toBeDefined();
+        expect(back?.kind).toBe("loop-back");
+        expect(back?.from).toBe(loop.nodeIds[loop.nodeIds.length - 1]);
+        expect(back?.to).toBe(loop.nodeIds[0]);
+      }
+      expect(result.dag.edges.filter((e) => e.kind === "loop-back")).toHaveLength(2);
     });
 
     it("parallel 数组内联成员成组：成员间无顺序边，组外前驱扇出/后继扇入", () => {

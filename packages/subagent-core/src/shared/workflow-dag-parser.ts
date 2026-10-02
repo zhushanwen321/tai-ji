@@ -19,8 +19,9 @@
  *   变量被下游实参引用）/ conditional（if/三元直接环绕的调用点，谓词原文随
  *   边）/ loop-back（循环体回边，loops[] 同时承载循环体节点集）。
  * - 零调用点脚本（纯门禁）→ nodes 空数组（渲染层出空画布 + 居中摘要提示，设计 §3.1-3）。
- * - 不支持语法 fail-fast：acorn 解析失败返回结构化错误
- *   `{ code: 'parse_failed', message }`——不产半个错误 DAG。
+ * - 不支持语法 fail-fast：acorn 解析失败与遍历期内部异常均返回结构化错误
+ *   `{ code: 'parse_failed', message }`——原生异常不得逃出结构化错误边界
+ *   （出界会被挂接侧归类为可重试通道错误，而非 parse_failed），不产半个错误 DAG。
  *
  * 已知静态边界（登记，不做模拟执行）：
  * - opts 对象在调用点之外构造、经变量传入 parallel() 的形态（如
@@ -32,6 +33,9 @@
  *   「未匹配实例」分组兜底。
  * - dataflow/conditional 判定为名字级匹配，不做作用域 shadow 分析（同名词法
  *   槽极罕见；误连边的代价是图上多一条提示边，不产生错误结构）。
+ * - parallel 实参子树内的嵌套 parallel() 调用不展开（collectParallelMembers
+ *   短路 return，主遍历亦不进入）：嵌套组成员的调用点不产节点，运行时实例经
+ *   事件流「未匹配实例」分组兜底（设计 D2 ⑥），不静默丢失。
  *
  * 类型跟随锚（core 为定义源——本文件是解析器产物类型；shared 的 WorkflowDag 族为
  * u2 协议冻结面（跨包消费契约），core 包不依赖 @taiji/shared、双侧逐字段等值——同
@@ -265,6 +269,13 @@ interface EdgeCandidate { // oe-exempt:20261002:framework:workflow-viz 解析器
   predicate?: string;
 }
 
+/** loop-back 回边候选（携带 loopId——回边按 loop 归属配对：嵌套循环共享 (首,末) 节点对时各持独立边，不因 (from,to) 同键覆盖共享同一条）。 */
+interface LoopBackEdgeCandidate { // oe-exempt:20261002:framework:workflow-viz 解析器 AST 帧类型——判别联合成员数据形状，非抽象接口
+  loopId: string;
+  from: string;
+  to: string;
+}
+
 interface ParseCtx { // oe-exempt:20261002:framework:workflow-viz 解析器 AST 帧类型——判别联合成员数据形状，非抽象接口
   source: string;
   currentPhase: string | undefined;
@@ -280,7 +291,7 @@ interface ParseCtx { // oe-exempt:20261002:framework:workflow-viz 解析器 AST 
   sequenceEdges: EdgeCandidate[];
   conditionalEdges: EdgeCandidate[];
   dataflowEdges: EdgeCandidate[];
-  loopBackEdges: EdgeCandidate[];
+  loopBackEdges: LoopBackEdgeCandidate[];
   nodeSeq: number;
   loopSeq: number;
 }
@@ -548,22 +559,31 @@ function visitBranch(ctx: ParseCtx, test: AstNode, consequent: AstNode, alternat
 /** 循环体遍历 + 回边闭合：体非空时登记 loop 与 loop-back 边，循环整体参与后续顺序链。 */
 function visitLoop(ctx: ParseCtx, node: AstNode): void {
   const test = node.test as AstNode | undefined;
+  const left = node.left as AstNode | undefined;
+  const right = node.right as AstNode | undefined;
+  // 标签三形态：while/do/for(带条件) 取 test；for-of/for-in 取「left … right」；
+  // for(;;) 裸形 test/left/right 全缺席（ForStatement 无 left/right 字段）——回退
+  // 固定标签，勿对 undefined 取 sourceSlice（原生 TypeError 会逃出结构化错误边界）
   const label =
     test != null
       ? sourceSlice(ctx.source, test)
-      : `${sourceSlice(ctx.source, node.left as AstNode)} … ${sourceSlice(ctx.source, node.right as AstNode)}`;
+      : left != null && right != null
+        ? `${sourceSlice(ctx.source, left)} … ${sourceSlice(ctx.source, right)}`
+        : "loop";
   ctx.ctrlStack.push({ kind: "loop", entryBatch: ctx.prevBatch, bodyNodes: [], label });
   visit(ctx, node.body as AstNode);
   const frame = ctx.ctrlStack.pop() as LoopFrame;
   if (frame.bodyNodes.length === 0) return;
   // 回边闭合循环体（末节点 → 首节点）。
-  // 回边独立表收集——不与顺序/条件/数据流候选混表去重（方向天然不同向）。
+  // 回边独立表收集（携带 loopId 按 loop 归属配对——嵌套循环共享 (首,末) 节点对时
+  // 各持独立回边，不因同键覆盖让先压入的回边成孤儿），不与顺序/条件/数据流候选
+  // 混表去重（方向天然不同向）。
   const loopId = newId("loop", ctx.loopSeq++);
   ctx.loops.push({ id: loopId, nodeIds: frame.bodyNodes, backEdgeId: `${loopId}-back`, label: frame.label });
   ctx.loopBackEdges.push({
+    loopId,
     from: frame.bodyNodes[frame.bodyNodes.length - 1],
     to: frame.bodyNodes[0],
-    kind: "loop-back",
   });
   ctx.prevBatch = frame.bodyNodes;
   ctx.lastUnitIds = frame.bodyNodes;
@@ -584,7 +604,7 @@ function dedupeEdges(sequence: EdgeCandidate[], conditional: EdgeCandidate[], da
   return [...byPair.values()];
 }
 
-/** 解析产物的循环回边 id 重写（dedupe 后 edge id 已定，loops.backEdgeId 指向实际边）。 */
+/** 解析产物的循环回边 id 重写（回边按 loopId 配对——edge id 定序后 loops.backEdgeId 指向本 loop 自有边）。 */
 function buildDag(source: string, program: AstNode): WorkflowDag {
   const ctx: ParseCtx = {
     source,
@@ -607,21 +627,20 @@ function buildDag(source: string, program: AstNode): WorkflowDag {
   visit(ctx, program);
 
   const forwardEdges = dedupeEdges(ctx.sequenceEdges, ctx.conditionalEdges, ctx.dataflowEdges);
-  // 回边独立附加（不参与候选去重——方向与其余边类天然不同向）
+  // 回边独立附加（不参与候选去重——方向与其余边类天然不同向）；loopId → 本 loop
+  // 自有回边 id（嵌套循环共享 (首,末) 节点对时两条回边同 (from,to)——按 loopId 配对
+  // 各归各，先压入的回边不成孤儿）
+  const loopBackEdgeIdByLoop = new Map<string, string>();
   const edges: WorkflowDagEdge[] = [
     ...forwardEdges.map((e, i) => ({ ...e, id: newId("edge", i) })),
-    ...ctx.loopBackEdges.map((e, i) => ({
-      id: newId("edge", forwardEdges.length + i),
-      from: e.from,
-      to: e.to,
-      kind: "loop-back" as const,
-    })),
+    ...ctx.loopBackEdges.map((e, i) => {
+      const id = newId("edge", forwardEdges.length + i);
+      loopBackEdgeIdByLoop.set(e.loopId, id);
+      return { id, from: e.from, to: e.to, kind: "loop-back" as const };
+    }),
   ];
-  const edgeIdByPair = new Map(edges.map((e) => [`${e.from}\u0000${e.to}`, e.id] as const));
   const loops: WorkflowDagLoop[] = ctx.loops.map((loop) => {
-    const last = loop.nodeIds[loop.nodeIds.length - 1];
-    const first = loop.nodeIds[0];
-    const backEdgeId = edgeIdByPair.get(`${last}\u0000${first}`);
+    const backEdgeId = loopBackEdgeIdByLoop.get(loop.id);
     if (backEdgeId === undefined) {
       throw new Error(`workflow-dag-parser: loop back edge missing for ${loop.id}`);
     }
@@ -644,15 +663,17 @@ function buildDag(source: string, program: AstNode): WorkflowDag {
  * @param scriptSource 脚本全文（record `run-created` 的 scriptSource / 脚本文件原文）
  */
 export function parseWorkflowDag(scriptSource: string): WorkflowDagParseResult {
-  let program: AstNode;
   try {
-    program = acorn.parse(scriptSource, {
+    const program = acorn.parse(scriptSource, {
       ecmaVersion: "latest",
       sourceType: "script",
       allowReturnOutsideFunction: true,
       allowAwaitOutsideFunction: true,
       locations: true,
     }) as unknown as AstNode;
+    // buildDag 同界包裹：遍历期内部异常不得以原生 throw 逃出结构化错误边界——
+    // 逃出会被挂接侧（readDag 裸调无兜底）归类为可重试通道错误，而非 parse_failed
+    return { ok: true, dag: buildDag(scriptSource, program) };
   } catch (err) {
     return {
       ok: false,
@@ -660,5 +681,4 @@ export function parseWorkflowDag(scriptSource: string): WorkflowDagParseResult {
       message: err instanceof Error ? err.message : String(err),
     };
   }
-  return { ok: true, dag: buildDag(scriptSource, program) };
 }
