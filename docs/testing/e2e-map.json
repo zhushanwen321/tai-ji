@@ -1715,6 +1715,26 @@
       "note": "H3/R5 防线（设计 §3.4 D4/G2，impl-plan §2 R5 行）：合法边以符号级台账登记在检查脚本内（ALLOWED_EDGES / SUPPORT_SHELL_EDGES），非聚合叶子 helper 走 SUPPORT_FILES 登记；pre-commit 按 execution/service/** 与脚本自身触发。纯文本级检查（无 AST 依赖），对存量结构零误报。"
     },
     {
+      "id": "E2E-PIPE-11",
+      "summary": "runtime bundle 打包深度验证（C-build-01 machine 门）：tsup 产物存在性 / 依赖内联（noExternal）/ 裸 require 说明符全量白名单（workspace 直依赖 + acorn 等传递内联链零外漏）/ CJS 兼容 / 产物可启动 health check / 插件链非 mock 验收",
+      "scope": [
+        "scripts/validate-runtime-bundle.sh"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/validate-runtime-bundle.sh"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "bash scripts/validate-runtime-bundle.sh",
+      "owner": "packages/runtime",
+      "authority": "docs/constraints.json#C-build-01",
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（runtime 源码 / tsup 配置变更，SKIP_RUNTIME_BUNDLE_CHECK 段）+ 打包管线验证；脚本自含前置构建（产物缺失时先 build）。本表 run = 改脚本自身时的自跑——泄漏探针从 SDK 单点 grep 泛化为全量裸 require 白名单（允许集合 = node 内建 + tsup external 登记项 + 设计内可选 native bufferutil/utf-8-validate + 文本形态误报清单），改动须由本 run 自证六段验证不破坏。守卫的触发时机是 runtime 源码 diff 而非本脚本 diff，挂接纪律权威源 = docs/constraints.json C-build-01"
+    },
+    {
       "id": "E2E-PLANMODE-01",
       "summary": "plan 模式验收资产族（U0 预建，R2 按改动面）：mock pi 脚本族 / S5 fixture 技能模板 / CDP 等待断言脚本三自测入口零 token 确定性回归（真机场景 S1-S16 执行归阶段 5 验收窗口，PR/merge/CI 门禁不跑）",
       "scope": [
