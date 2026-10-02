@@ -10,18 +10,24 @@
  *
  * 状态隔离：beforeEach 调 _resetDrawerForTest() 清模块级单例状态。
  */
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ref } from 'vue'
 import type { Ref } from 'vue'
+import type { WorkflowRunRecord } from '@taiji/shared'
 import { bindDrawerSessionId, useDrawerControl } from '../control'
 import {
-  openDrawerTab,
+  bindWorkflowOverlayOpener,
+  bindWorkflowRunLookup,
   closeDrawer,
-  toggleDrawer,
+  lookupWorkflowRun,
+  openDrawerTab,
+  openWorkflow,
+  openWorkflowInDrawer,
   setDrawerTab,
-  toggleDrawerDock,
   selectedCommandName,
   detailFilePath,
+  toggleDrawer,
+  toggleDrawerDock,
   _resetDrawerForTest,
 } from '../coordination'
 
@@ -36,6 +42,10 @@ beforeEach(() => {
   sid = ref<string | null>(null)
   bindDrawerSessionId(sid)
   _resetDrawerForTest()
+  // overlay 桥接绑定解绑（workflow-visualization U6：openWorkflow 改向后 openWorkflow 的
+  // 单测不依赖 renderer 装配——各用例自行绑定，用例间解绑防串扰）
+  bindWorkflowOverlayOpener(null)
+  bindWorkflowRunLookup(null)
 })
 
 describe('瞬时参数：设置 + 消费后清空', () => {
@@ -93,5 +103,79 @@ describe('_resetDrawerForTest 测试隔离', () => {
 
     expect(selectedCommandName.value).toBe(null)
     expect(detailFilePath.value).toBe(null)
+  })
+})
+
+describe('workflow 入口语义分立（workflow-visualization U6/D1）', () => {
+  it('openWorkflow 改向 = 调绑定的 overlay opener（转发 nameOrRunId + slug + sessionId 三参）', () => {
+    focusSession('A')
+    const opener = vi.fn()
+    bindWorkflowOverlayOpener(opener)
+
+    // 托盘路径：runId 直传（TrayNativePanel 零改动形态）
+    openWorkflow('wf-run-1')
+    expect(opener).toHaveBeenCalledWith('wf-run-1', undefined, undefined)
+
+    // block 路径：(scriptName, slug, sessionId) 三参透传
+    openWorkflow('flow-a', { slug: 's-2', sessionId: 's9' })
+    expect(opener).toHaveBeenCalledWith('flow-a', 's-2', 's9')
+
+    // 无参：空串转发（opener 侧兜底）
+    openWorkflow()
+    expect(opener).toHaveBeenCalledWith('', undefined, undefined)
+  })
+
+  it('openWorkflow 未绑定 opener 时 no-op（headless/测试安全默认，不抛错）', () => {
+    focusSession('A')
+    expect(() => openWorkflow('wf-run-1')).not.toThrow()
+    // drawer 未被误开（改向后 openWorkflow 不再触达 drawerControl）
+    expect(useDrawerControl().isOpen.value).toBe(false)
+  })
+
+  it('openWorkflowInDrawer = setWorkflowView 三步（切 workflow tab + 记录选中名 + 开 drawer）', () => {
+    focusSession('A')
+    const { isOpen, activeTab, selectedWorkflowName } = useDrawerControl()
+
+    // runId 形参（D10 回落链传 runId，精确命中）
+    openWorkflowInDrawer('wf-run-1')
+    expect(isOpen.value).toBe(true)
+    expect(activeTab.value).toBe('workflow')
+    expect(selectedWorkflowName.value).toBe('wf-run-1')
+
+    // 空串（SubagentTab 返回按钮）：仅切 tab，不记录选中名
+    openWorkflowInDrawer('')
+    expect(selectedWorkflowName.value).toBe('')
+    expect(activeTab.value).toBe('workflow')
+
+    // 缺省同空串
+    openWorkflowInDrawer()
+    expect(selectedWorkflowName.value).toBe('')
+  })
+
+  it('openWorkflowInDrawer 不经 overlay opener（两条通道类型/运行时双分立，回落不重入 overlay 入口）', () => {
+    focusSession('A')
+    const opener = vi.fn()
+    bindWorkflowOverlayOpener(opener)
+
+    openWorkflowInDrawer('wf-run-1')
+    expect(opener).not.toHaveBeenCalled()
+  })
+
+  it('lookupWorkflowRun 转发绑定 lookup；未绑定返回 undefined（安全默认）', () => {
+    focusSession('A')
+    expect(lookupWorkflowRun('s9', 'flow-a', 's-2')).toBeUndefined()
+
+    const record: WorkflowRunRecord = {
+      runId: 'wf-run-1',
+      scriptName: 'flow-a',
+      status: 'running',
+      startedAt: '2026-10-02T00:00:00Z',
+      agentCalls: [],
+      stateFilePath: '',
+    }
+    const lookup = vi.fn(() => record)
+    bindWorkflowRunLookup(lookup)
+    expect(lookupWorkflowRun('s9', 'flow-a', 's-2')).toBe(record)
+    expect(lookup).toHaveBeenCalledWith('s9', 'flow-a', 's-2')
   })
 })

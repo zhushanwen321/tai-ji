@@ -196,6 +196,14 @@ describe('mock session domain', () => {
     expect(await session.getAgentCallHistory('s1', 'ac1')).toEqual([])
     expect((await session.getWorkflows('s3')).workflows.length).toBeGreaterThan(0)
     expect(await session.getWorkflows('other')).toEqual({ workflows: [], oversize: undefined })
+    // workflow 可视化拉取（G4 锚定补齐成员）：run 事件流按 runId 分流，DAG 恒 record_not_found；
+    // 两臂恒带 sessionId（C-comm-05，形态对齐 real）
+    const runEvents = await session.getWorkflowRunEvents('s3', 'wf-mock-001')
+    expect(runEvents.runId).toBe('wf-mock-001')
+    expect(runEvents.sessionId).toBe('s3')
+    expect('events' in runEvents && runEvents.events.length).toBeGreaterThan(0)
+    expect(await session.getWorkflowRunEvents('s3', 'other-run')).toEqual({ sessionId: 's3', runId: 'other-run', code: 'record_not_found', message: 'mock 无 record 事件流记录' })
+    expect(await session.getWorkflowDag('s3', 'wf-mock-001')).toEqual({ sessionId: 's3', runId: 'wf-mock-001', code: 'record_not_found', message: 'mock 无 record 文件基建' })
     // [G4 锚定补齐] 缺失成员 stub：引擎配置视图 / 默认引擎回执回显 / agent call 路径恒空串
     expect(await session.getSubagentEngineConfig()).toEqual({ engines: [], defaultEngine: '' })
     expect(await session.setSubagentDefaultEngine('eng-x')).toEqual({ engineId: 'eng-x' })

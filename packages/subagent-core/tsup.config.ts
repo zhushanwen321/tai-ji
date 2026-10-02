@@ -59,13 +59,15 @@ const bundleConfig = defineConfig({
   sourcemap: false,
   target: 'node20',
   // 全部运行时依赖内联：@zhushanwen/* 用前缀正则（未来新增 workspace 运行时
-  // 依赖自动跟随，不静默漏网）；ajv/yaml/proper-lockfile 逐名列出。node 内建
+  // 依赖自动跟随，不静默漏网）；ajv/yaml/proper-lockfile/acorn 逐名列出。node 内建
   // 模块（node: 前缀）不受 noExternal 影响，仍保持 external。
   // [HISTORICAL] 前缀正则原为 /^@taiji\//（extension-protocol/session-delivery
   // 2026-09-16 改发 @zhushanwen scope——npm 无 taiji org），随包名一并更新；
   // @zhushanwen/subagent-engine-sdk（W12：worktree git 出站卫生经其
   // buildOutboundChildEnv）由前缀正则覆盖，显式条目保留作冗余声明。
-  noExternal: [/^@zhushanwen\//, '@zhushanwen/subagent-engine-sdk', 'ajv', 'yaml', 'proper-lockfile'],
+  // acorn：workflow-dag-parser（可视化 U1）的解析依赖，声明位置约束 = 只在
+  // 本包声明（runtime 不声明，经 bundle inline 传递，设计 P2/U1）。
+  noExternal: [/^@zhushanwen\//, '@zhushanwen/subagent-engine-sdk', 'ajv', 'yaml', 'proper-lockfile', 'acorn'],
 })
 
 export default bundleOnly ? bundleConfig : mainConfig

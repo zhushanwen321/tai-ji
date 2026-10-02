@@ -589,6 +589,19 @@ textarea {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.55; }
 }
+/* Gantt 运行段透明度呼吸（workflow-viz WorkflowVizGantt 模板 Tailwind 任意值类
+   animate-[wfvz-gantt-pulse_1.5s_ease-in-out_infinite] 消费；同 toolcall-breathe
+   理由 keyframes 必须全局定义） */
+@keyframes wfvz-gantt-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+/* DAG 节点 running/retrying 态呼吸（workflow-viz WorkflowVizDagNode tone computed 的
+   animate-[wfvz-node-pulse_1.5s_ease-in-out_infinite] 消费；同上理由 keyframes 全局定义） */
+@keyframes wfvz-node-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
 @keyframes ask-user-slide-up {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }

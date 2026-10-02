@@ -38,7 +38,7 @@ import { useWorkflowStore } from '@/stores/workflow'
 import { useToast } from '@/composables/useToast'
 import { clearToasts } from '../../helpers/toast-queue'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
-import { bindDrawerSessionId, getDrawerControlState, _resetDrawerForTest } from '@taiji/core/domain/drawer'
+import { bindDrawerSessionId, bindWorkflowOverlayOpener, getDrawerControlState, _resetDrawerForTest } from '@taiji/core/domain/drawer'
 import { subagentVirtualId } from '@taiji/shared'
 import TrayNativePanel from '@/components/panel/tray/TrayNativePanel.vue'
 import { TRAY_COUNTS_KEY, useTrayCounts } from '@/components/panel/tray/useTrayCounts'
@@ -653,17 +653,19 @@ describe('TrayNativePanel 行点击归宿矩阵（D2）', () => {
     expect(control.isOpen).toBe(true)
   })
 
-  it('workflow 行 → drawer workflow tab（以 runId 作选中值）', async () => {
+  it('workflow 行 → openWorkflow(runId)（workflow-visualization U6/D1 改向后归宿 = overlay 打开通道；opener 绑定 spy 断言转发，反查逻辑归 controller 单测）', async () => {
     trayState.workflowRunning = [makeWorkflow({ runId: 'wf-1', status: 'running' })]
+    const overlayOpener = vi.fn()
+    bindWorkflowOverlayOpener(overlayOpener)
     wrapper = mountPanel('workflow')
     await flushPromises()
 
     await wrapper.find('[data-testid="tray-workflow-row"]').trigger('click')
     await flushPromises()
+    // 托盘行零改动（仍传 runId）；改向后 openWorkflow 转发 overlay opener，不触达 drawer
+    expect(overlayOpener).toHaveBeenCalledWith('wf-1', undefined, undefined)
     const control = getDrawerControlState()
-    expect(control.selectedWorkflowName).toBe('wf-1')
-    expect(control.activeTab).toBe('workflow')
-    expect(control.isOpen).toBe(true)
+    expect(control.selectedWorkflowName).not.toBe('wf-1')
   })
 })
 

@@ -5,10 +5,11 @@
 import type {
   RunAskStepFold,
   RunEventFoldCheckpoint,
+  RunJournalFold,
   WorkflowRecordRegisteredEntryData,
   WorkflowRecordSettledEntryData,
 } from "@zhushanwen/subagent-core";
-import type { WorkflowRunRecord, WorkflowAgentCall } from "@taiji/shared";
+import type { WorkflowRunRecord, WorkflowAgentCall, WorkflowRunPhaseFoldEntry } from "@taiji/shared";
 
 /** ms → ISO（WorkflowAgentCall/WorkflowRunRecord 时间契约是 ISO 字符串）。 */
 function toIso(ms: number): string {
@@ -69,7 +70,15 @@ function projectAskStepsToAgentCalls(fold: RunEventFoldCheckpoint): WorkflowAgen
   return agentCalls
 }
 
-/** 单个 ask 骨架行映射（phase 供源透传（W1 D6）——renderer hasExplicitPhases 判据 `phase !== undefined` 由此成立；fold 缺 phase（旧行）不造键保持平铺）。 */
+/**
+ * [projectV2Workflow 拆分] 单个 ask 骨架行 → agentCalls 行（骨架映射，taskIndex 升序）。
+ *
+ * [可视化 U3，设计 §3.1-4] fold 新字段透出（W2 D7 单源——只读骨架行，不自建第二套 fold）：
+ * - attempts/lastRetry（agent-retrying 帧驱动）：供 retrying 派生态与 trace attempt 列；
+ * - usage 分项 → inputTokens/outputTokens/turns（settled 帧 result.usage 透传——core
+ *   AgentUsage = SDK AgentOutcomeUsage 别名，含 turns；contextTokens/cacheRead/
+ *   cacheWrite/cost 无 shared 消费位不透出）；attempts/lastRetry 缺省 = 无重试记录不造键。
+ */
 function projectAskStepToAgentCall(ask: RunAskStepFold): WorkflowAgentCall {
   const stepStatus: WorkflowAgentCall['status'] =
     ask.settled === undefined
@@ -87,7 +96,29 @@ function projectAskStepToAgentCall(ask: RunAskStepFold): WorkflowAgentCall {
     ...(ask.settled?.durationMs !== undefined ? { durationMs: ask.settled.durationMs } : {}),
     ...(ask.settled?.errorCode !== undefined ? { error: ask.settled.errorCode } : {}),
     lastProgressAt: ask.lastProgressAt,
+    ...(ask.attempts !== undefined ? { attempts: ask.attempts } : {}),
+    ...(ask.lastRetry !== undefined ? { lastRetry: ask.lastRetry } : {}),
+    ...(ask.usage !== undefined
+      ? { inputTokens: ask.usage.input, outputTokens: ask.usage.output, turns: ask.usage.turns }
+      : {}),
   }
+}
+
+/**
+ * [可视化 U3] phase 折叠行映射（last-wins 单行快照透传；settledBy 是 fold 内部
+ * 翻回裁决标记，协议不透出——shared WorkflowRunPhaseFoldEntry u2 冻结注释）。
+ * 展示消费位 = 对话流 block chips（Gantt 色带/头卡经事件流 RPC 按轮分段，禁消费本字段）。
+ */
+function projectPhaseFolds(phases: RunJournalFold['phases']): WorkflowRunPhaseFoldEntry[] {
+  const entries: WorkflowRunPhaseFoldEntry[] = []
+  for (const row of phases.values()) {
+    entries.push({
+      phase: row.phase,
+      startedAt: row.startedAt,
+      ...(row.settledAt !== undefined ? { settledAt: row.settledAt } : {}),
+    })
+  }
+  return entries
 }
 
 /**
@@ -158,5 +189,10 @@ export function projectV2Workflow(
     reason,
     agentCalls: fold !== undefined ? projectAskStepsToAgentCalls(fold) : [],
     ...settlement,
+    // [可视化 U3，设计 §3.1-4] phases 折叠透出（last-wins 单行快照，消费位 = block
+    // chips）+ run args 摘要（fold created 行透传）。fold 缺席（entry-only 降级投影）
+    // 或无 phases 行不造键——缺省语义 = 旧投影无此字段。
+    ...(fold !== undefined && fold.phases.size > 0 ? { phases: projectPhaseFolds(fold.phases) } : {}),
+    ...(fold?.created?.argsSummary !== undefined ? { argsSummary: fold.created.argsSummary } : {}),
   }
 }

@@ -164,21 +164,66 @@ if [ -n "$MISSING" ]; then
 fi
 [ -z "$NATIVE_SKIPPED" ] && echo -e "${GREEN}[OK] 所有 runtime dependencies 已打包 (noExternal: $NO_EXTERNAL)${NC}"
 
-# ── 2b. workspace:* 依赖零外漏（W11/A5，第 2 步 DEPS 过滤的盲区补口）─────
+# ── 2b. 裸 require 说明符全量白名单（W11/A5 + 传递内联断链防线 dmg-r1-6）──
 # 第 2 步把 workspace:* 协议依赖从 DEPS 断言中过滤（它们被 tsup inline 是预期），
-# 但「inline 后产物里不再出现裸 require(workspace 包名)」未被覆盖——SDK 若因
-# noExternal 漏配以外部依赖形态残留在 bundle，打包态 Cannot find module 延迟到
-# release 后才暴露。此处对产物 grep 断言零命中（A5 验收：产物 grep
-# require("@zhushanwen/subagent-engine-sdk") 零命中）。
+# 但「inline 后产物里不再出现裸 require(workspace 包名)」与「传递依赖的内联」
+# 均未覆盖——noExternal 漏配、或 esbuild 对内联包（如 subagent-core dist CJS
+# 内部的 acorn）递归解析断链时，残留的 require("dep") 在打包态（runtime 子进程
+# 无完整 node_modules）变 Cannot find module，延迟到 release 后才暴露。此处扫描
+# 产物内全部字面量 require 说明符，∉ 允许集合（node 内建 + tsup external 显式
+# 登记项 + 设计内可选 native）即红——A5 验收（SDK grep 零命中）与其余全部
+# 传递内联链由同一条扫描拦截。
 echo ""
-echo -e "${BLUE}[2b/6] 检查 workspace:* 依赖零外漏（SDK grep 零命中）...${NC}"
+echo -e "${BLUE}[2b/6] 检查产物裸 require 说明符白名单（workspace/传递依赖零外漏）...${NC}"
 BUNDLE_DIR_FOR_GREP="$(dirname "$BUNDLE_PATH")"
-if grep -rn 'require("@zhushanwen/subagent-engine-sdk")' "$BUNDLE_DIR_FOR_GREP"/*.cjs >/dev/null 2>&1; then
-    echo -e "${RED}[ERROR] runtime bundle 内出现裸 require(\"@zhushanwen/subagent-engine-sdk\")——SDK 未被 noExternal 内联${NC}"
-    echo -e "${YELLOW}[FIX] 编辑 $RUNTIME_DIR/tsup.config.ts，noExternal 追加 '@zhushanwen/subagent-engine-sdk' 后重跑 build${NC}"
+# tsup external 显式登记项（native module 等，允许以外部形态保留）
+TSUP_EXTERNAL=$(node -e "
+const fs=require('fs');
+const content=fs.readFileSync('$TSUP_CONFIG','utf-8');
+const match=content.match(/external:\\s*\\[([^\\]]+)\\]/);
+if(match) console.log(match[1].split(/[,\n]/).map(s=>s.trim().replace(/['\"]/g,'')).filter(Boolean).join('\n'));
+else console.log('');
+")
+if ! node -e '
+const fs = require("fs"), path = require("path");
+const dir = process.argv[1];
+const external = (process.argv[2] || "").split("\n").filter(Boolean);
+const builtins = new Set(require("module").builtinModules);
+// 设计内可选 native（真实调用，豁免理由）：ws 内联源码的 try/catch 可选加速，
+// 包缺失时回退纯 JS 实现（WS_NO_BUFFER_UTIL / WS_NO_UTF_8_VALIDATE 亦可关）
+const optionalNative = new Set(["bufferutil", "utf-8-validate"]);
+// 文本形态误报（非真实调用，前缀匹配）：注释/错误消息里的 require 文本、
+// 内联包编译产物残留的模块 id 元数据字符串（ajv 的 equal.code 即此形态）
+const textualOnly = ["electron", "ajv/dist/runtime/"];
+const files = fs.readdirSync(dir).filter((f) => f.endsWith(".cjs")).sort();
+if (files.length === 0) { console.error("[ERROR] bundle 目录无 .cjs 产物: " + dir); process.exit(1); }
+const bad = [];
+const re = /require\(\s*(["\u0027])([^"\u0027\n]+)\1\s*\)/g;
+for (const f of files) {
+  const src = fs.readFileSync(path.join(dir, f), "utf8");
+  let m;
+  while ((m = re.exec(src))) {
+    const spec = m[2];
+    // 模板插值（${...}）等非说明符字符 = 错误消息文本，非真实 require
+    if (!/^[@a-zA-Z0-9][@a-zA-Z0-9/._-]*$/.test(spec)) continue;
+    if (spec.startsWith("node:") || builtins.has(spec)) continue;
+    if (external.some((e) => spec === e || spec.startsWith(e + "/"))) continue;
+    if (optionalNative.has(spec)) continue;
+    if (textualOnly.some((p) => spec === p || spec.startsWith(p))) continue;
+    bad.push(f + ": require(\"" + spec + "\")");
+  }
+}
+if (bad.length > 0) {
+  console.error("[ERROR] 产物内出现允许集合外的裸 require（依赖未内联残留——打包态 runtime 子进程无完整 node_modules，运行期 Cannot find module）：");
+  for (const b of bad) console.error("  " + b);
+  process.exit(1);
+}
+console.log("[OK] " + files.length + " 个产物的裸 require 说明符均在允许集合内（传递内联链闭合）");
+' "$BUNDLE_DIR_FOR_GREP" "$TSUP_EXTERNAL"; then
+    echo -e "${YELLOW}[FIX] 纯 JS 依赖补进 $RUNTIME_DIR/tsup.config.ts 的 noExternal（内联）后重跑 build；native module（含 .node 二进制）才走 external + electron-builder asarUnpack${NC}"
     exit 1
 fi
-echo -e "${GREEN}[OK] 产物 require(\"@zhushanwen/subagent-engine-sdk\") 零命中（SDK 已内联）${NC}"
+echo -e "${GREEN}[OK] 产物裸 require 白名单检查通过（node 内建 + external 登记项 + 可选 native 之外零外漏）${NC}"
 
 # ── 3. CJS 兼容性检查 ───────────────────────────────────────────────
 echo ""

@@ -119,7 +119,7 @@ import { computed, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, Bot, ChevronLeft, Clock, Lock } from '@lucide/vue'
 import { Button } from '@taiji/ui'
-import { useDrawerControl, openWorkflow } from '@taiji/core/domain/drawer'
+import { useDrawerControl, openWorkflowInDrawer } from '@taiji/core/domain/drawer'
 import { usePanelStore } from '@/stores/panel'
 import {
   useSubagentStore,
@@ -297,6 +297,9 @@ function reload(): void {
 }
 
 function onBack(): void {
-  openWorkflow()
+  // 返回 drawer workflow tab（workflow-visualization U6/D1：入口改向后 openWorkflow 语义
+  // 已是开 overlay，返回按钮必须直调显式 drawer 语义函数——空串 = 仅切 workflow tab，
+  // 与改向前 openWorkflow() 行为逐字节一致）
+  openWorkflowInDrawer('')
 }
 </script>

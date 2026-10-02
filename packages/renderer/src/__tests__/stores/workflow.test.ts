@@ -743,3 +743,49 @@ describe('workflow store — [P3/D6] agentCallElapsedMs（每 ask 已执行时�
     expect(agentCallElapsedMs(callWith({ startedAt: 'garbage' }), NOW)).toBeNull()
   })
 })
+
+// ── [可视化 D9] run 已用时长停走派生（overlay 壳 header 与实况面板 header 共用单点）──
+
+import { deriveWorkflowRunElapsedMs } from '@/stores/workflow'
+
+describe('workflow store — [可视化 D9] deriveWorkflowRunElapsedMs（run 已用时长停走锚）', () => {
+  const startedIso = new Date(NOW - 30_000).toISOString()
+
+  function runWith(overrides: Partial<WorkflowRunRecord>): WorkflowRunRecord {
+    return {
+      runId: 'wf-x',
+      scriptName: 'x',
+      status: 'running',
+      startedAt: startedIso,
+      agentCalls: [],
+      stateFilePath: '',
+      ...overrides,
+    }
+  }
+
+  it('running = 当前时刻滚动（now - startedAt）', () => {
+    const run = runWith({ status: 'running' })
+    expect(deriveWorkflowRunElapsedMs(run, NOW)).toBe(30_000)
+    expect(deriveWorkflowRunElapsedMs(run, NOW + 5_000)).toBe(35_000)
+  })
+
+  it('terminal（done）= completedAt 锚停走；completedAt 不可解析回退 start', () => {
+    const completedIso = new Date(NOW - 10_000).toISOString()
+    expect(deriveWorkflowRunElapsedMs(runWith({ status: 'done', completedAt: completedIso }), NOW)).toBe(20_000)
+    expect(deriveWorkflowRunElapsedMs(runWith({ status: 'done', completedAt: 'garbage' }), NOW)).toBe(0)
+  })
+
+  it('interrupted（无 completedAt）= health.lastProgressAt 锚停走（不计挂起时间）；缺省/早于 start → null（时长槽省略）', () => {
+    const run = runWith({ status: 'interrupted', health: { lastProgressAt: NOW - 5_000 } })
+    expect(deriveWorkflowRunElapsedMs(run, NOW)).toBe(25_000) // 停在最后进展时刻，now 推进不增长
+    expect(deriveWorkflowRunElapsedMs(run, NOW + 60_000)).toBe(25_000)
+    // lastProgressAt 缺省 / 早于 start → null：无可靠停走锚不展示为确定的 0 值（v2 事件
+    // fold 投影恒不产出 health——中断 run 走此省略分支，消费方 '—'）
+    expect(deriveWorkflowRunElapsedMs(runWith({ status: 'interrupted' }), NOW)).toBeNull()
+    expect(deriveWorkflowRunElapsedMs(runWith({ status: 'interrupted', health: { lastProgressAt: 1 } }), NOW)).toBeNull()
+  })
+
+  it('startedAt 不可解析 → null（时长槽省略）', () => {
+    expect(deriveWorkflowRunElapsedMs(runWith({ startedAt: 'garbage' }), NOW)).toBeNull()
+  })
+})

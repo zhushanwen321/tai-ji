@@ -105,10 +105,11 @@ export function makeToolCall(over: Partial<ToolCall> = {}): ToolCall {
   }
 }
 
-/** mount Block 工具分支（stub 掉 Gui/Ansi/Md 子渲染，隔离 header/交互断言）。 */
-export function mountToolBlock(tool: ToolCall) {
+/** mount Block 工具分支（stub 掉 Gui/Ansi/Md 子渲染，隔离 header/交互断言）。
+ *  extraProps：追加 props 覆写（如 sessionId——workflow chips 反查按块归属 session 分区）。 */
+export function mountToolBlock(tool: ToolCall, extraProps: Record<string, unknown> = {}) {
   return mount(Block, {
-    props: { type: 'tool', tool },
+    props: { type: 'tool', tool, ...extraProps },
     global: {
       stubs: {
         GuiComponentRenderer: GuiStub,
