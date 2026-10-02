@@ -11,6 +11,10 @@
  * - handler 不做业务逻辑，仅转发；生命周期与错误处理在 BrowserViewManager 内。
  * - navigate 的 loadURL reject 会经 ipcMain.handle 自然变成 invoke rejection，
  *   renderer 侧 catch（W2 接）。
+ * - create 失败 reject（display-containers §7.4 错误通道）：manager.create 抛出经 handle
+ *   变成 invoke rejection，renderer caller catch 落错误占位（重试 = create + show + navigate）。
+ * - 显示收口 / 转发键清单的契约类通道（overlay-state / shields / forward-keys）payload
+ *   经 gateway 纯函数校验，非法即 reject（error envelope 带原因）。
  *
  * 依赖方向：browser-handlers → electron(ipcMain) + interfaces(BrowserViewManager type-only)
  */
@@ -18,7 +22,48 @@ import { ipcMain } from 'electron'
 import type { BrowserWindow } from 'electron'
 import type { BrowserViewManager } from '../browser/browser-view-manager.js'
 import { URL_PREVIEW_MAX_LENGTH, isAllowedNavigateUrl, isDangerousScheme } from './url-scheme-validators.js'
+import { parseOverlayDisplayState, parseShieldFacesPayload } from '../browser/gateway/display-gate.js'
+import { forwardKeyRegistry } from '../browser/gateway/forward-keys.js'
 
+/** 'browser:forward-keys' 的 op 字面量（set=全量重报；register/unregister=注册/注销增量） */
+/** 'browser:forward-keys' 的请求体（单 payload 对象，AGENTS 规则 #1）：
+ *  set = 全量重报（替换整个清单）；add/remove = 注册/注销增量（可同请求组合） */
+interface ForwardKeyRequest { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+  set?: string[]
+  add?: string[]
+  remove?: string[]
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((k) => typeof k === 'string')
+}
+
+function parseForwardKeyRequest(payload: unknown): ForwardKeyRequest {
+  if (typeof payload !== 'object' || payload === null) {
+    throw new Error('[browser:forward-keys] payload must be an object')
+  }
+  const { set, add, remove } = payload as Record<string, unknown>
+  if (set !== undefined && !isStringArray(set)) {
+    throw new Error('[browser:forward-keys] set must be a string array')
+  }
+  if (add !== undefined && !isStringArray(add)) {
+    throw new Error('[browser:forward-keys] add must be a string array')
+  }
+  if (remove !== undefined && !isStringArray(remove)) {
+    throw new Error('[browser:forward-keys] remove must be a string array')
+  }
+  if (set === undefined && add === undefined && remove === undefined) {
+    throw new Error('[browser:forward-keys] payload must carry set / add / remove')
+  }
+  if (set !== undefined && (add !== undefined || remove !== undefined)) {
+    throw new Error('[browser:forward-keys] set (全量重报) cannot combine with add / remove (增量)')
+  }
+  return {
+    ...(set !== undefined ? { set } : {}),
+    ...(add !== undefined ? { add } : {}),
+    ...(remove !== undefined ? { remove } : {}),
+  }
+}
 /**
  * 注册 browser drawer IPC handler。
  *
@@ -29,8 +74,9 @@ export function registerBrowserHandlers(
   manager: BrowserViewManager,
   _getMainWindow: () => BrowserWindow | null,
 ): void {
-  // 创建 view（attach 到 window，初始隐藏）
-  ipcMain.handle('browser:create', (_event, { sessionId, windowId }: { sessionId: string; windowId: string }) => {
+  // 创建 view（attach 到 window，初始隐藏）。
+  // §7.4 错误通道：create 失败抛出 → invoke reject（renderer caller catch 落错误占位 + 重试）。
+  ipcMain.handle('browser:create', async (_event, { sessionId, windowId }: { sessionId: string; windowId: string }) => {
     manager.create(sessionId, windowId)
   })
 
@@ -101,4 +147,28 @@ export function registerBrowserHandlers(
       manager.setRect(sessionId, rect)
     },
   )
+
+  // ── 显示收口事实源上报（display-containers §7.4 show 统一谓词 / 层级共存守卫）────
+
+  // 浮层开合/内容切换上报：{ open, content, sessionId }（关浮层/换出 browser 内容 → 隐藏 view；
+  // 重开 → 恢复显示）。非法 payload reject（error envelope）。
+  ipcMain.handle('browser:overlay-state', async (_event, payload: unknown) => {
+    manager.setOverlayState(parseOverlayDisplayState(payload))
+  })
+
+  // shieldsView 遮蔽面全量上报：{ faces: [{ id, fullscreen, rect? }] }（模态表面聚合 §6.7
+  // 的 view 遮蔽族；全屏无条件隐藏 / 非全屏几何相交（双阈值滞回））。非法 payload reject。
+  ipcMain.handle('browser:shields', async (_event, payload: unknown) => {
+    manager.setShieldsViewFaces(parseShieldFacesPayload(payload))
+  })
+
+  // 转发键清单上报（§7.4 [MANDATORY]）：{ set?: string[], add?: string[], remove?: string[] }。
+  // set = 全量重报（清单初始化 / settings 重录快捷键 / renderer 重载两个触发面的收敛手段）；
+  // add/remove = 注册/注销增量。入清单约束（仅 mod 前缀组合，Esc 不入）由 registry
+  // 强制，违规项进 rejected（不入清单）。返回 { accepted, rejected } 供上报方核对。
+  ipcMain.handle('browser:forward-keys', async (_event, payload: unknown) => {
+    const request = parseForwardKeyRequest(payload)
+    if (request.set) return forwardKeyRegistry.set(request.set)
+    return forwardKeyRegistry.update({ add: request.add, remove: request.remove })
+  })
 }
