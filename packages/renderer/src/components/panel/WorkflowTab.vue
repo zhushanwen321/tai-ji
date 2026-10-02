@@ -145,6 +145,7 @@ import { usePanelStore } from '@/stores/panel'
 import { useWorkflowAction } from '@/composables/features/workflow/useWorkflowAction'
 import { formatTokens } from '@/lib/token-format'
 import { formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
+import { normalizeWorkflowScriptName } from '@/components/panel/workflow-viz/run-name'
 import type { WorkflowRunRecord, WorkflowAgentCall } from '@taiji/shared'
 
 const { t } = useI18n()
@@ -161,8 +162,9 @@ const { isAbortConfirming, onAbortClick: onWorkflowAbortClick } = useWorkflowAct
 
 /**
  * 当前选中的 workflow record（响应式）。
- * selectedWorkflowName 匹配策略：先 runId 精确匹配，后 scriptName 取最新一条（调用归宿：
- * 托盘行传 runId（TrayNativePanel 行点击矩阵）。
+ * selectedWorkflowName 匹配策略：先 runId 精确匹配，后 scriptName 归一匹配取最新一条
+ * （归一单源 workflow-viz/run-name.ts，与 overlay findRun 判据同源——注入来源常带脚本
+ * 路径形态：SubagentTab 返回按钮 / 反查未命中回落 openWorkflowInDrawer(nameOrRunId)）。
  */
 const workflow = computed<WorkflowRunRecord | null>(() => {
   const name = selectedWorkflowName.value
@@ -171,7 +173,8 @@ const workflow = computed<WorkflowRunRecord | null>(() => {
   const records = workflowStore.getRecordsBySession(mainSessionId)
   const byRunId = records.find((w) => w.runId === name)
   if (byRunId) return byRunId
-  const byName = records.filter((w) => w.scriptName === name)
+  const want = normalizeWorkflowScriptName(name)
+  const byName = records.filter((w) => normalizeWorkflowScriptName(w.scriptName) === want)
   return byName.length > 0 ? byName[byName.length - 1] : null
 })
 

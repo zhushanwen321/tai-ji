@@ -29,6 +29,7 @@ import {
 import { session as sessionApi } from '@/api'
 import { usePanelStore } from '@/stores/panel'
 import { useWorkflowStore } from '@/stores/workflow'
+import { normalizeWorkflowScriptName } from '../run-name'
 import type { WorkflowVizDagLoadError } from './types'
 
 // ── 模块级单例状态（overlay 全局单例，D8；导出供 Host 容器消费）───────────────
@@ -62,15 +63,11 @@ function findRun(sessionId: string, nameOrRunId: string, slug?: string): Workflo
   const byRunId = records.find((w) => w.runId === nameOrRunId)
   if (byRunId) return byRunId
   // 名字形态归一（L4 走查发现）：主 agent 调 workflow 工具常传脚本路径（/abs/path/x.js），
-  // record.scriptName 存 basename（x）——严格等值恒 miss。两侧 basename 化 + 去扩展名后比较，
-  // 路径/带扩展名/bare 三形态互通；slug 判据不变。
-  const normalize = (n: string): string => {
-    const base = n.replace(/\\/gu, '/').split('/').pop() ?? n
-    return base.replace(/\.(js|mjs|cjs|ts)$/u, '')
-  }
-  const want = normalize(nameOrRunId)
+  // record.scriptName 存 basename（x）——严格等值恒 miss。归一单源在 run-name.ts（与
+  // drawer WorkflowTab 共用，两入口判据同源）；slug 判据不变。
+  const want = normalizeWorkflowScriptName(nameOrRunId)
   const byName = records.filter(
-    (w) => normalize(w.scriptName) === want && (slug === undefined || slug === '' || w.slug === slug),
+    (w) => normalizeWorkflowScriptName(w.scriptName) === want && (slug === undefined || slug === '' || w.slug === slug),
   )
   return byName.length > 0 ? byName[byName.length - 1] : undefined
 }
