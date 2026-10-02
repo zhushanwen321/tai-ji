@@ -591,8 +591,8 @@ async function main(): Promise<Record<string, unknown>> {
           group: p.group,
           files: planOf.get(p.group)!.files,
           error: first.errorKind === "env"
-            ? `违约申报 env，已按 blocked 兜底转待办（按契约 env 处置后仍失败应报 blocked）；报错首行：${tailLines(first.errorDetail, 1)}`
-            : `初判 blocked，转待办；报错首行：${tailLines(first.errorDetail, 1)}`,
+            ? `违约申报 env，已按 blocked 兜底走 blocked 返回值，处置由调用方按语境决定（按契约 env 处置后仍失败应报 blocked）；报错首行：${tailLines(first.errorDetail, 1)}`
+            : `初判 blocked，走 blocked 返回值，处置由调用方按语境决定；报错首行：${tailLines(first.errorDetail, 1)}`,
         });
       }
     }
@@ -665,15 +665,15 @@ async function main(): Promise<Record<string, unknown>> {
       const gid = contentQueue[0]!;
       const tries = repairTries.get(gid) ?? 0;
       if (tries >= MAX_COMMIT_REPAIRS) {
-        // 超限转 blocked 路由（与 committer 申报的 blocked 同通道：组转待办）
+        // 超限转 blocked 路由（与 committer 申报的 blocked 同通道：处置由调用方按语境决定）
         contentQueue.shift();
         const overDetail = results.get(gid)?.errorDetail ?? "";
         blocked.push({
           group: gid,
           files: planOf.get(gid)!.files,
-          error: `content 类补修 ${MAX_COMMIT_REPAIRS} 次仍被拦截，转待办；末次报错首行：${tailLines(overDetail, 1)}`,
+          error: `content 类补修 ${MAX_COMMIT_REPAIRS} 次仍被拦截，走 blocked 返回值，处置由调用方按语境决定；末次报错首行：${tailLines(overDetail, 1)}`,
         });
-        pushRepairFailDisclosure(gid, repairFilesByGroup.get(gid) ?? [], overDetail, `补修超限（${MAX_COMMIT_REPAIRS} 次）转待办`);
+        pushRepairFailDisclosure(gid, repairFilesByGroup.get(gid) ?? [], overDetail, `补修超限（${MAX_COMMIT_REPAIRS} 次）转 blocked 路由`);
         continue;
       }
       const cur = planOf.get(gid)!;
@@ -762,8 +762,8 @@ async function main(): Promise<Record<string, unknown>> {
       // queueGuard 耗尽的余组（归属互指成环兜底）——按 blocked 路由，不静默
       const gid = contentQueue.shift()!;
       const loopDetail = results.get(gid)?.errorDetail ?? "";
-      blocked.push({ group: gid, files: planOf.get(gid)!.files, error: `补修队列处理上限耗尽（归属互指成环兜底），转待办；末次报错首行：${tailLines(loopDetail, 1)}` });
-      pushRepairFailDisclosure(gid, repairFilesByGroup.get(gid) ?? [], loopDetail, "成环兜底转待办");
+      blocked.push({ group: gid, files: planOf.get(gid)!.files, error: `补修队列处理上限耗尽（归属互指成环兜底），走 blocked 返回值，处置由调用方按语境决定；末次报错首行：${tailLines(loopDetail, 1)}` });
+      pushRepairFailDisclosure(gid, repairFilesByGroup.get(gid) ?? [], loopDetail, "成环兜底转 blocked 路由");
     }
     return { blocked, reservedHits, repairedFiles: repairedAll };
   }
