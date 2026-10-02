@@ -62,8 +62,7 @@ args:
 //   needs-human，gates/changeset/sweep 残留路径按各自现行语义终止或改判 needs-human 交人工）；
 // - 自愈与清扫为本 workflow 相对同族（review-fix-loop / pr-lifecycle / dev-consistency-loop）
 //   的已知差异：同族无 commit 拦截三分类与收敛出口终态清扫（它们以廉价重跑或 pr-lifecycle
-//   清扫垫底），同族内容配套缺口登记 docs/todo/dev-merge-gates-sibling-content-repair-gap.md
-//   （重审触发条件见该登记）；
+//   清扫垫底）；
 // - 主体收进 main()、顶层只留 `return main()`：引擎以 AsyncFunction 包装编译本文件并 await
 //   其 Promise，顶层 await + 顶层 return 的扁平写法（pr-lifecycle 形态）会被裸 esbuild 语法
 //   门判「ESM 顶层 return」而失败——return main() 对引擎语义等价（返回值经 Promise 解包
