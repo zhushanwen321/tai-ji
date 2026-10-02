@@ -308,11 +308,15 @@ function onCreateFailed(e: unknown): void {
   createError.value = e instanceof Error ? e.message : String(e)
 }
 
-/** 重试（§5.3：占位内重试 = create + show + navigate，重新请求创建链） */
+/** 重试（§5.3：占位内重试 = create + show + navigate，重新请求创建链）。
+ * windowId 缺失口径与 onMounted 同路径一致（[W4] fail-fast + 结构化 warn，不静默）。 */
 function retryCreate(): void {
   createError.value = null
   const windowId = getCurrentWindowId()
-  if (!windowId) return
+  if (!windowId) {
+    console.warn('[browser-pane] windowId missing from URL query, skip browserCreate')
+    return
+  }
   void browserCreate(props.sessionId, windowId).catch(onCreateFailed)
   nextTick(() => {
     pushRect()

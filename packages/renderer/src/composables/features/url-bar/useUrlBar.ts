@@ -8,7 +8,9 @@
  * - 非编辑态：urlInput 同步 displayUrl（主进程 did-navigate 回填真实 URL）
  * - 编辑态（聚焦中）：urlInput 独立持有用户输入，displayUrl 更新不覆盖（避免导航中闪烁）
  * - 回车：协议前缀补全 + 危险协议黑名单拦截 + 触发 navigate + 退出编辑态
- * - Escape：放弃编辑，回填 displayUrl（防钓鱼：不导航到未确认的输入）
+ * - Escape：放弃编辑，回填 displayUrl（防钓鱼：不导航到未确认的输入）+ preventDefault
+ *   （display-containers §6.7 第 2 层：地址栏编辑态是 Esc 的真实消费方，消费即置位
+ *   defaultPrevented，阻断事件冒泡被 Esc 栈序编排器消费——否则「弃编辑 + 关浮层」双动作击穿）
  *
  * [HISTORICAL] 危险协议拦截（PR #100 B1 第一层防御）：renderer 端先用黑名单
  * 拒 javascript: / data: / file: / blob: 等，命中即 toast 提示。
@@ -76,7 +78,7 @@ export function useUrlBar(
   isEditingUrl: Ref<boolean>
   onUrlFocus: (e: FocusEvent) => void
   onUrlEnter: () => void
-  onUrlEscape: () => void
+  onUrlEscape: (e: KeyboardEvent) => void
 } {
   const { error: toastError } = useToast()
 
@@ -118,8 +120,14 @@ export function useUrlBar(
     blurActive()
   }
 
-  /** Escape → 放弃编辑，回填真实 URL（防钓鱼：不导航到未确认输入） */
-  function onUrlEscape(): void {
+  /** Escape → 放弃编辑，回填真实 URL（防钓鱼：不导航到未确认输入）。
+   * §6.7 先行档约定（元素级监听冒泡先达 = 消费即 preventDefault）：编辑态消费 Esc 时置位
+   * defaultPrevented，编排器（window bubble）看到已消费事件即让位——防「弃编辑 + 关浮层」
+   * 双动作击穿。非编辑态不拦（行为分界）：Esc 不经本处理器走层级序（关浮层）。
+   * 结构上元素级监听仅在 Input 聚焦（= 编辑态）时收到真实按键，此守卫是显式契约锚点。 */
+  function onUrlEscape(e: KeyboardEvent): void {
+    if (!isEditingUrl.value) return
+    e.preventDefault()
     urlInput.value = displayUrlRef.value
     isEditingUrl.value = false
     blurActive()

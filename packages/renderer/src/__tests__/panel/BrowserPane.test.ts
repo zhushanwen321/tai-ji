@@ -16,6 +16,11 @@
  * mock 策略：vi.mock('@/lib/ipc') 捕获 browserCreate/Navigate/Hide/Show/SetRect + onBrowserState（返回 no-op 退订），
  *            openExternal 捕获外链导出。useI18n 经 vitest-i18n-setup 全局注入。
  *
+ * display-containers 修复组 B 补测：
+ * - §6.7 先行档对账（真实事件序）：地址栏编辑态 Esc 消费即 preventDefault → 模拟编排器
+ *   （window bubble + defaultPrevented 检查）不动作；非编辑态 Esc 不拦 → 编排器照常动作
+ * - U5：retryCreate windowId 缺失 → 结构化 warn（口径对齐 onMounted）+ 不调 browserCreate
+ *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/panel/BrowserPane.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
@@ -294,6 +299,97 @@ describe('BrowserPane（错误通道，display-containers §5.3 两类占位区�
     })
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="browser-create-error"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+// ── display-containers 修复组 B：§6.7 先行档对账 + retryCreate 口径（U3/U5）────
+
+describe('BrowserPane（display-containers §6.7 地址栏 Esc 先行档对账）', () => {
+  /** 模拟 Esc 栈序编排器（window bubble + defaultPrevented 守卫，§6.7 规格最小化） */
+  function attachOrchestrator(decisions: string[]): () => void {
+    const onOrchestratorKeydown = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      decisions.push(e.defaultPrevented ? 'skip-prevented' : 'act')
+    }
+    window.addEventListener('keydown', onOrchestratorKeydown)
+    return () => window.removeEventListener('keydown', onOrchestratorKeydown)
+  }
+
+  function escEvent(): KeyboardEvent {
+    return new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+  }
+
+  it('编辑态 Esc：消费即 preventDefault → 编排器不动作（双动作击穿防御：不弃编辑关浮层）+ 回填放弃', async () => {
+    // attachTo：真实冒泡路径（Input → document → window）必需——detached 树冒泡不达 window
+    const wrapper = mount(BrowserPane, {
+      props: { sessionId: 'sess-1', url: 'https://example.com' },
+      attachTo: document.body,
+    })
+    await wrapper.vm.$nextTick()
+    const decisions: string[] = []
+    const detach = attachOrchestrator(decisions)
+
+    // 聚焦地址栏 → 进入编辑态（与真实使用路径一致），输入未确认地址
+    const input = wrapper.find('[data-testid="browser-urlbar-input"]')
+    await input.trigger('focus')
+    await input.setValue('github.com')
+    expect((input.element as HTMLInputElement).value).toBe('github.com')
+
+    mockBrowserNavigate.mockClear()
+    // 真实事件序：Esc 从 Input 元素冒泡到 window（元素级监听先于编排器）
+    const evt = escEvent()
+    input.element.dispatchEvent(evt)
+
+    // 先行档契约：消费即 preventDefault → 编排器让位（浮层不关）
+    expect(evt.defaultPrevented, '编辑态消费必须 preventDefault').toBe(true)
+    expect(decisions, '编排器不动作：只弃编辑不关浮层').toEqual(['skip-prevented'])
+    // 防钓鱼回填：不导航到未确认输入（DOM 回填走 Vue 响应式 flush）
+    await wrapper.vm.$nextTick()
+    expect((input.element as HTMLInputElement).value, '回填真实 URL').toBe('https://example.com')
+    expect(mockBrowserNavigate, 'Esc 不触发导航').not.toHaveBeenCalled()
+
+    detach()
+    document.body.innerHTML = ''
+    wrapper.unmount()
+  })
+
+  it('非编辑态 Esc 不拦：编排器照常走层级序（行为分界——Esc 归容器栈序）', async () => {
+    const wrapper = mountPane({ url: 'https://example.com' })
+    await wrapper.vm.$nextTick()
+    const decisions: string[] = []
+    const detach = attachOrchestrator(decisions)
+
+    // 焦点不在地址栏（未聚焦 = 非编辑态）：元素级监听不消费，事件直达 window bubble
+    const evt = escEvent()
+    window.dispatchEvent(evt)
+    expect(evt.defaultPrevented, '非编辑态不拦').toBe(false)
+    expect(decisions, '编排器照常动作（关浮层）').toEqual(['act'])
+
+    detach()
+    wrapper.unmount()
+  })
+})
+
+describe('BrowserPane（retryCreate windowId 缺失口径，U5）', () => {
+  it('占位内重试遇 windowId 缺失：结构化 warn（口径对齐 onMounted）+ 不调 browserCreate', async () => {
+    mockBrowserCreate.mockRejectedValueOnce(new Error('window gone'))
+    const wrapper = mountPane({ url: 'https://example.com' })
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="browser-create-error"]').exists()).toBe(true)
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockBrowserCreate.mockClear()
+    // 清除 beforeEach 注入的 windowId → 重试路径守卫命中
+    window.history.replaceState({}, '', '/')
+    await wrapper.find('[data-testid="browser-create-error"] button').trigger('click')
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('windowId missing'))
+    expect(mockBrowserCreate, '守卫拦截：不发起创建').not.toHaveBeenCalled()
+
+    warnSpy.mockRestore()
+    window.history.replaceState({}, '', '/?windowId=win-1')
     wrapper.unmount()
   })
 })
