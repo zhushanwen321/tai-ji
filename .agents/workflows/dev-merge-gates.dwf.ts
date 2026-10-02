@@ -498,7 +498,7 @@ async function main(): Promise<Record<string, unknown>> {
   async function runUnifiedCommit(
     plan: { group: string; files: string[]; message: string }[],
     round: number,
-    opts: { reservedFiles?: string[] } = {},
+    opts: { reservedFiles?: string[]; tag?: string } = {},
   ): Promise<{
     blocked: { group: string; files: string[]; error: string }[];
     reservedHits: string[];
@@ -510,7 +510,9 @@ async function main(): Promise<Record<string, unknown>> {
     const blocked: { group: string; files: string[]; error: string }[] = [];
     const reservedHits: string[] = [];
     const repairedAll: string[] = [];
-    const committer = agent(`dmg-committer-r${round}`, "你是提交执行员：只执行指定的 git add / git commit 与提交前检查报错中写明的环境恢复命令；绝不修改任何文件内容，绝不跳过检查，绝不提交清单外的文件。无法靠环境恢复解决的失败如实申报，绝不绕过。");
+    // actor 名带调用语境 tag（gates/changeset/sweep/br 各自的轮次计数器都从 1 起，裸 r<轮>
+    // 跨语境必撞 DuplicateActorName——2026-10-02 D3 真机验收实证）
+    const committer = agent(`dmg-committer-${opts.tag ?? "br"}-r${round}`, "你是提交执行员：只执行指定的 git add / git commit 与提交前检查报错中写明的环境恢复命令；绝不修改任何文件内容，绝不跳过检查，绝不提交清单外的文件。无法靠环境恢复解决的失败如实申报，绝不绕过。");
     // committer 调用 + 结构化校验（回注失败原因重试一次——CR 门现行语义形态，仍败 fix-failure）
     async function askCommitter(batch: { group: string; files: string[]; message: string }[], note: string): Promise<void> {
       let cr: CommitReport | null = null;
@@ -610,8 +612,10 @@ async function main(): Promise<Record<string, unknown>> {
     }
     // 补修 fixer 派发（输入 = errorDetail 报错原文 UNTRUSTED 包裹；恢复动作以报错原文为权威源）
     async function askRepairFixer(gid: string, detail: string): Promise<CommitRepairReport> {
+      // actor 名带尝试序号：同组多次补修每次重建 actor，裸 r<轮>-<组> 第二次尝试必撞名
+      const repairActorSeq = (repairTries.get(gid) ?? 0) + 1;
       const fixer = agent(
-        `dmg-commit-fix-r${round}-${gid}`,
+        `dmg-commit-fix-r${round}-${gid}-a${repairActorSeq}`,
         "你是提交拦截补修工程师：只按报错原文写明的恢复动作修改登记/配套文件，不碰其他文件，不 commit（工作流统一提交）。",
       );
       let v: CommitRepairReport | null = null;
@@ -855,7 +859,7 @@ async function main(): Promise<Record<string, unknown>> {
       if (dirt.length > 0) {
         // 脏区降级（改造点 3）：交统一提交 agent 三分类处置一笔 residual commit；三分类全部
         // 失败才按现行语义终止（有界罕见路径）
-        const uc = await runUnifiedCommit([{ group: "gates-residual", files: dirt, message: "fix: dev-merge gates residual" }], round);
+        const uc = await runUnifiedCommit([{ group: "gates-residual", files: dirt, message: "fix: dev-merge gates residual" }], round, { tag: "gates" });
         if (uc.blocked.length > 0) {
           throw new Error(
             `gate fixer 返回后的残留改动统一提交处置后仍失败：\n${uc.blocked.map((b) => `${b.group}: ${tailLines(b.error, 3)}`).join("\n")}\n残留文件：\n${dirt.join("\n")}\n人工检查后显式路径 commit 或还原，再重新发起本 workflow`,
@@ -959,7 +963,7 @@ async function main(): Promise<Record<string, unknown>> {
       const dirt2 = await dirtyFiles();
       if (dirt2.length > 0) {
         // 脏区降级（改造点 3）：同 gates——统一提交 agent 三分类处置，全部失败才按现行语义终止
-        const uc = await runUnifiedCommit([{ group: "changeset-residual", files: dirt2, message: "chore: changeset residual" }], round);
+        const uc = await runUnifiedCommit([{ group: "changeset-residual", files: dirt2, message: "chore: changeset residual" }], round, { tag: "changeset" });
         if (uc.blocked.length > 0) {
           throw new Error(`changeset 起草 agent 返回后的残留改动统一提交处置后仍失败：\n${uc.blocked.map((b) => `${b.group}: ${tailLines(b.error, 3)}`).join("\n")}\n残留文件：\n${dirt2.join("\n")}\n人工显式路径 commit 或还原后重新发起本 workflow`);
         }
@@ -1121,7 +1125,7 @@ async function main(): Promise<Record<string, unknown>> {
         swept.push(f);
       }
       if (swept.length === 0) return { swept, left, failed: false };
-      const uc = await runUnifiedCommit([{ group: "sweep", files: swept, message: "chore: dev-merge branch-review residual sweep" }], roundNo);
+      const uc = await runUnifiedCommit([{ group: "sweep", files: swept, message: "chore: dev-merge branch-review residual sweep" }], roundNo, { tag: "sweep" });
       for (const f of uc.repairedFiles) attributableFiles.add(f);
       for (const f of uc.reservedHits) {
         if (!left.includes(f)) left.push(f);
@@ -1613,7 +1617,7 @@ async function main(): Promise<Record<string, unknown>> {
         commitPlan.push({ group: g.id, files, message: msg });
       }
       if (commitPlan.length > 0) {
-        const uc = await runUnifiedCommit(commitPlan, round, { reservedFiles: deferredCommits.flatMap((d) => d.files) });
+        const uc = await runUnifiedCommit(commitPlan, round, { reservedFiles: deferredCommits.flatMap((d) => d.files), tag: "br" });
         for (const f of uc.repairedFiles) attributableFiles.add(f);
         for (const f of uc.reservedHits) {
           const reason = `补修文件与待办组登记文件相交，归待办（随 deferredCommits 处置，不进本轮 commit）：${f}`;
