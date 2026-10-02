@@ -25,7 +25,7 @@ import type { Ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import {
   bindDrawerSessionId,
-  useDrawerControl,
+  useBtwSelection,
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
 import BtwPanel from '@/components/panel/BtwPanel.vue'
@@ -133,7 +133,7 @@ describe('BtwPanel 首屏冒烟与线列表（观察者 + 使用者）', () => {
     expect(composer.attributes('show-btw')).toBe('false') // 防递归出 btw 入口（④ 调用处）
 
     // 构建者：选中写入 core drawer 分区（与 getViewedVids D5 豁免同源，无第二副本）
-    expect(useDrawerControl().selectedBtwVid.value).toBe('btw:pi-2')
+    expect(useBtwSelection().selectedBtwVid.value).toBe('btw:pi-2')
     // 列表加载完成后 loading 收口（空态不误显）
     expect(wrapper.find('[data-testid="btw-empty"]').exists()).toBe(false)
   })
@@ -171,7 +171,7 @@ describe('BtwPanel 首屏冒烟与线列表（观察者 + 使用者）', () => {
     expect(chip1.attributes('aria-pressed')).toBe('true')
     expect(chip1.classes()).toContain('bg-surface')
     expect(chip1.classes()).toContain('text-accent')
-    expect(useDrawerControl().selectedBtwVid.value).toBe('btw:pi-1')
+    expect(useBtwSelection().selectedBtwVid.value).toBe('btw:pi-1')
   })
 })
 
@@ -197,7 +197,7 @@ describe('BtwPanel 新建线与 fork pill 三态（D3 口径）', () => {
     // 新线入列表 + 会话区切到新线（create reply 即选中与 pill 的唯一数据源）
     expect(wrapper.find('[data-testid="btw-thread-chip"][data-vid="btw:pi-9"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="btw-stream"]').attributes('session-id')).toBe('btw:pi-9')
-    expect(useDrawerControl().selectedBtwVid.value).toBe('btw:pi-9')
+    expect(useBtwSelection().selectedBtwVid.value).toBe('btw:pi-9')
   })
 
   it('创建失败：行内错误可见（含原因）+ 入口保持可用（P2 可恢复）', async () => {

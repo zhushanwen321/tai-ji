@@ -44,26 +44,13 @@ export interface OpenDrawerOptions { // oe-exempt:20261003:framework:类型契�
   filePath?: string
 }
 
-/** per-session 控制态（ADR-0053 Map 分区） */
+/** per-session 控制态（ADR-0053 Map 分区）。
+ * [display-containers §6.6①/③ W0 还债] 收窄为容器控制态两字段：选中态五字段
+ * （selectedSubagentId/enteredFrom/selectedWorkflowName/selectedBackgroundTaskId/selectedBtwVid）
+ * 迁出至 selection/ 各内容域分区（各回各的内容域）；死状态 docked 全链删除（§7.6）。 */
 export interface DrawerControlState { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费面
   isOpen: boolean
   activeTab: SideDrawerTab
-  docked: boolean
-  /** subagent tab 当前展示的 subagent 虚拟 id（`subagent:<mainSid>:<subId>` 或 `agentcall:<acsId>`，由调用方算好传入）；null=未选中（subagent tab 显空态） */
-  selectedSubagentId: string | null
-  /** workflow tab 当前展示的 workflow 名；null=未选中（workflow tab 显空态） */
-  selectedWorkflowName: string | null
-  /** subagent tab 的进入来源：'chat'=从 chat subagent 块进入（无返回按钮）；'workflow'=从 workflow tab 点 agent call 进入（显←返回按钮）；null=未在 subagent tab */
-  enteredFrom: 'chat' | 'workflow' | null
-  /** bashTask tab 当前展示的后台任务 id（registry taskId，background-task-sidebar-view D5①）；undefined=未选中（bashTask tab 显空态）。
-   *  可选成员：默认控制态（core control.ts createDefaultControlState）无需初始化即可满足本接口。 */
-  selectedBackgroundTaskId?: string
-  /** btw tab 当前查看的旁路线 vid（`btw:<piSessionId>`，由 BtwPanel 选中线时写入）；undefined=未查看。
-   *  D5 chat-lru 查看态保护数据源之一（getViewedVids：isOpen + activeTab==='btw' + 本字段
-   *  三分量 → chat store 注入 evictIfNeeded，入口刷新该线 recency——查看中恒不落阈值驱逐）；
-   *  切走/关 drawer 不清（D7④ 切回恢复面板语义），predicate 已含 isOpen/activeTab 双闸不泄漏豁免。
-   *  可选成员：默认控制态零加员即可满足本接口（selectedBackgroundTaskId 同款先例）。 */
-  selectedBtwVid?: string
 }
 
 /** openSubagent 的参数（D3/D4：drawer SubagentTab 复用 MessageStream，virtualId 由调用方算好传入） */

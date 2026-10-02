@@ -7,7 +7,9 @@
     skill 路径优先用 command.sourceInfo.path（W2 透传，含项目级 skill）；
     /skill:xxx 格式无 sourceInfo 时兜底从 settings.skills 查 sourcePath。
     非 skill 命令（extension/builtin）：仅有 description，退化为信息卡。
-    selectedCommandName 由 useSideDrawer 单例持有（用户气泡 slash chip 点击时设置）。
+    selectedCommandName 由 core 瞬时参数分区（selection/transient.ts，display-containers
+    §6.6②——按会话分区，消跨会话劫持）持有，本面板作活数据源连续读取（用户气泡 slash chip
+    点击时经 openDrawerTab('doc', { commandName }) 写入）。
   -->
   <section v-if="command" class="flex h-full flex-col">
     <!-- 元信息头：icon + 命令名 + source 标签 + skill 命令的 sourcePath -->
@@ -153,7 +155,7 @@ import { Wrench, Copy, Check, FolderOpen, Loader2 } from '@lucide/vue'
 import type { Component } from 'vue'
 import { useCommandStore } from '@/composables/features/command/useCommandStore'
 import { getSettingsStore } from '@taiji/core'
-import { useSideDrawer } from '@/composables/features/drawer/useSideDrawer'
+import { selectedCommandName } from '@taiji/core/domain/drawer'
 import { SLASH_ICON_COMPONENTS } from '@/composables/slashIcons'
 import * as fileApi from '@taiji/core/transport/api/domains/file'
 import { useChatViewDeps } from '@/composables/panel/useChatViewDeps'
@@ -181,7 +183,6 @@ provide(ChatViewDepsKey, useChatViewDeps(computed(() => props.sessionId ?? '')))
 
 const commandStore = useCommandStore()
 const settings = getSettingsStore()
-const { selectedCommandName } = useSideDrawer()
 
 /** 当前选中的 SessionCommand（从 commandStore 查） */
 const command = computed(() => {

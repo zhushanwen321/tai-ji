@@ -3,18 +3,18 @@
  *
  * 兼容层（W1 迁移后 core/domain/drawer 为 SSOT）。
  *
- * 架构演进（ADR-0053 → W1 core 归位）：isOpen/activeTab/docked 从全局模块级单例 ref 改为
+ * 架构演进（ADR-0053 → W1 core 归位）：isOpen/activeTab 从全局模块级单例 ref 改为
  * per-session Map 分区（useSessionScopedState，ADR-0049），分区键 focusedSessionId（panel
  * store 派生：active panel 绑定的 sessionId）；W1 将控制态（control.ts）+ 协同逻辑
- * （coordination.ts：pendingOpen 守卫 / 瞬时参数 / openTasksDrawerOnFirstData）整体迁入
- * @taiji/core/domain/drawer。本文件不再持有任何业务状态，仅做两件事：
+ * （coordination.ts：瞬时参数 / 选中态写入编排）整体迁入 @taiji/core/domain/drawer。
+ * [display-containers §6.6 W0 还债] 选中态五字段迁出 DrawerControlState（各回各的内容域
+ * 分区，selection/）；瞬时参数改按会话分区；docked 死状态全链删除（§7.6）——
+ * 本兼容层返回形状相应收窄（docked/toggleDock 删除）。本文件不再持有任何业务状态，仅做两件事：
  *
  * 1. 绑定分区键：bindDrawerSessionId(computed(() => usePanelStore().focusedSessionId))
  *    ——惰性 computed（首次求值 pinia 已 active，避免模块加载期 pinia 未初始化）
  * 2. re-export + 函数形状兼容：useSideDrawer() 返回形状与旧版逐字段一致（isOpen/activeTab/
- *    docked/selectedCommandName/detailFilePath/open/close/
- *    toggle/setTab/toggleDock），~20 处旧调用方（SideDrawer.vue/PanelContainer.vue/
- *    useSidebar/useDetailPane/chat.ts 等）import '@/composables/
+ *    selectedCommandName/detailFilePath/open/close/toggle/setTab），旧调用方 import '@/composables/
  *    features/useSideDrawer' 路径不变、零改动。
  *
  * 旧 SideDrawer 删除后本兼容层可一并移除（core/domain/drawer 已是 SSOT，新代码直接 import core）。
@@ -58,7 +58,6 @@ import {
   closeDrawer,
   toggleDrawer,
   setDrawerTab,
-  toggleDrawerDock,
   selectedCommandName,
   detailFilePath,
   _resetDrawerForTest,
@@ -79,20 +78,18 @@ export type { SideDrawerTab, OpenDrawerOptions }
  * 方法逐字段委托 core 公开 API（openDrawerTab 等）。
  */
 export function useSideDrawer() {
-  const { isOpen, activeTab, docked } = useDrawerControl()
+  const { isOpen, activeTab } = useDrawerControl()
   return {
     // 控制态：computed 读当前分区字段（切 session 切分区，响应式自动跟随）
     isOpen,
     activeTab,
-    docked,
-    // 瞬时参数（core coordination 模块级单例，消费后清空）
+    // 瞬时参数（core selection/transient.ts 按会话分区，消费语义见该文件）
     selectedCommandName,
     detailFilePath,
     open: openDrawerTab,
     close: closeDrawer,
     toggle: toggleDrawer,
     setTab: setDrawerTab,
-    toggleDock: toggleDrawerDock,
   }
 }
 

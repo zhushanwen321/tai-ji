@@ -244,7 +244,7 @@ import { isBtwPending } from '@/composables/panel/btw-pending-bookkeeping'
 import { useBtwPanelSurface } from '@/composables/panel/useBtwTabData'
 import { useBtwInteraction } from '@/composables/panel/useBtwInteraction'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
-import { drawerControl, useDrawerControl, getBoundSessionId } from '@taiji/core/domain/drawer'
+import { setBtwView, useBtwSelection, getBoundSessionId } from '@taiji/core/domain/drawer'
 import { isBtwVirtualId, extractBtwPiSessionId } from '@taiji/shared'
 import type { ServerMessageMap } from '@taiji/shared'
 import MessageStream from '@/components/panel/MessageStream.vue'
@@ -291,10 +291,11 @@ const scoped = useSessionScopedState<BtwPanelState>(sidRef, () =>
 )
 const state = computed(() => scoped.current.value)
 
-/** 选中线唯一源 = core drawer 分区 selectedBtwVid（D5 豁免读同一字段；与 props.sessionId
+/** 选中线唯一源 = core btw 内容域选中态（selection/btw.ts，display-containers §6.6① 五字段
+ *  迁出后的落点；D5 豁免/视口命中经复合谓词 selection/predicates.ts 读同一字段；与 props.sessionId
  *  同分区前提由系统不变量保证——PanelContainer 绑定 focusedSessionId 与 leaf.sessionId 同值，
  *  SubagentTab selectedSubagentId 同款耦合）。null=未选中（列表仅展示）。 */
-const { selectedBtwVid } = useDrawerControl()
+const { selectedBtwVid } = useBtwSelection()
 const selectedVid = computed(() => selectedBtwVid.value ?? null)
 
 function messageOf(e: unknown): string {
@@ -336,15 +337,15 @@ async function loadThreads(captured: string): Promise<void> {
 function autoSelect(captured: string, threads: BtwThreadInfo[]): void {
   if (!canWriteSelection(captured)) return
   if (threads.length === 0) {
-    drawerControl.setBtwView(undefined)
+    setBtwView(undefined)
     return
   }
   const current = selectedBtwVid.value
   if (current && threads.some((th) => th.vid === current)) return
-  drawerControl.setBtwView(threads[threads.length - 1].vid)
+  setBtwView(threads[threads.length - 1].vid)
 }
 
-/** 选中写入前置：setBtwView 落「按绑定 sid 分区」的 drawer 控制态——仅当面板焦点与绑定
+/** 选中写入前置：setBtwView 落「按绑定 sid 分区」的 btw 内容域选中态——仅当面板焦点与绑定
  *  分区一致（生产不变量：focusedSessionId ≡ leaf.sessionId）才写，防焦点切换窗口期把线
  *  选中写进另一会话的分区（跨分区污染）。不一致时跳过（选中留待下次拉取/点击收敛）。 */
 function canWriteSelection(captured: string): boolean {
@@ -352,7 +353,7 @@ function canWriteSelection(captured: string): boolean {
 }
 
 function selectThread(vid: string): void {
-  drawerControl.setBtwView(vid)
+  setBtwView(vid)
 }
 
 /** 新建线（空态 Primary / 头部按钮共用）：create reply 即 pill 数据源（D3 一次性口径） */
@@ -372,7 +373,7 @@ async function createThread(): Promise<void> {
         s.threads = [...s.threads, { vid: reply.vid }]
       }
     })
-    if (canWriteSelection(captured)) drawerControl.setBtwView(reply.vid)
+    if (canWriteSelection(captured)) setBtwView(reply.vid)
   } catch (e) {
     scoped.updateFor(captured, (s) => {
       s.creating = false

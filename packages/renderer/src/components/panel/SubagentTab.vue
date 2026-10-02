@@ -119,7 +119,7 @@ import { computed, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, Bot, ChevronLeft, Clock, Lock } from '@lucide/vue'
 import { Button } from '@taiji/ui'
-import { useDrawerControl, openWorkflowInDrawer } from '@taiji/core/domain/drawer'
+import { useSubagentSelection, openWorkflowInDrawer } from '@taiji/core/domain/drawer'
 import { usePanelStore } from '@/stores/panel'
 import {
   useSubagentStore,
@@ -144,7 +144,7 @@ const panelStore = usePanelStore()
 const subagentStore = useSubagentStore()
 const workflowStore = useWorkflowStore()
 
-const { selectedSubagentId, enteredFrom } = useDrawerControl()
+const { selectedSubagentId, enteredFrom } = useSubagentSelection()
 
 /** 从 workflowStore records 查找指定 acsId 的 agent call（agentcall 入口的元信息来源） */
 function findAgentCall(acsId: string): WorkflowAgentCall | undefined {

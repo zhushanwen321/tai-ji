@@ -2,7 +2,9 @@
  * drawer 域入口 —— @taiji/core 的 drawer 域聚合 barrel。
  *
  * 子域：types（共享类型）/ control（per-session 控制态 + 分区键绑定 + 内部原语）/ coordination
- * （模块级公开 API + 瞬时参数）/ terminal-write-queue（终端写队列状态机工厂：write 副作用注入）。
+ * （模块级公开 API + 瞬时参数/选中态写入编排）/ selection（选中态五字段 + 瞬时参数的
+ * 内容域分区与复合谓词单一源，display-containers §6.6 W0 还债）/ terminal-write-queue
+ * （终端写队列状态机工厂：write 副作用注入）。
  * [P4 s5 drawer-widget-removal] widget-buffers（widget/status 缓冲容器）已随旧 widget 通道删除
  * （PluginViewContainer 承接）。W1 迁移 useSideDrawer 的控制态/协同逻辑入 core（drawer 域是第一个
  * 「迁实现而非仅迁类型」的域），core 保持 headless（零 pinia/tasks store 依赖，零事件总线），
@@ -14,11 +16,13 @@
  * core/domain/drawer 为 SSOT。
  *
  * 依赖方向（C3/C4）：coordination → control → foundation/use-session-scoped-state；
- * terminal-write-queue 仅依赖 foundation + 类型。control 不 import coordination
+ * selection/<域> → control（drawerSessionKey）；coordination → selection；
+ * terminal-write-queue 仅依赖 foundation + 类型。control 不 import coordination/selection
  * （防循环）。
  */
 export * from './types'
 export * from './registry'
 export * from './control'
 export * from './coordination'
+export * from './selection'
 export * from './terminal-write-queue'
