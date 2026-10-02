@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { ref } from 'vue'
-import type { SideDrawerTab, DrawerControlState } from '../types'
+import type { SideDrawerTab, RightDrawerTab, DrawerControlState } from '../types'
 import { bindDrawerSessionId, getDrawerControlState, _resetDrawerControlForTest } from '../control'
 
 // ── 编译期断言（tsc 系执行；esbuild 剥离不报错，与运行期用例共存不冲突）──
@@ -106,5 +106,39 @@ describe('drawer types：btw tab 扩展（btw-question D7，M3-a）', () => {
     expect(state.activeTab).not.toBe('btw')
     state.activeTab = 'btw'
     expect(getDrawerControlState().activeTab).toBe('btw')
+  })
+})
+
+// ── 右抽屉 8 tab 枚举（display-containers §7.1，u-foundation 类型契约）──
+// 形态照 bashTask/plan/btw 先例：编译期断言由 tsc 系执行，运行期影子验证成员合法。
+// 负向断言用条件类型锚（不依赖 @ts-expect-error：若负向条件成立（即收窄被回退），
+// 类型从 true 塌缩为 false，赋值即 tsc 红）。
+
+// §7.1 终态 8 员逐字成员序（成员缺失/改序即 tsc 红）
+const rightDrawerTabs: RightDrawerTab[] = ['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw', 'workflow']
+
+// 'terminal' 不属于右抽屉终态枚举（已迁底抽屉）——若 RightDrawerTab 混入 'terminal'，本类型塌缩为 false、赋值 tsc 红
+type TerminalIsNotRightTab = 'terminal' extends RightDrawerTab ? false : true
+const terminalNegativeAnchor: TerminalIsNotRightTab = true
+
+// SideDrawerTab W0 超集（10 员，行为不变——tab 数仍 10）：'terminal'/'browser' 仍合法
+type TerminalIsSideDrawerTab = 'terminal' extends SideDrawerTab ? true : false
+const terminalSideTabAnchor: TerminalIsSideDrawerTab = true
+const sideDrawerW0Tabs: SideDrawerTab[] = ['terminal', 'browser', 'git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask', 'plan', 'btw']
+
+describe('drawer types：右抽屉 8 tab 枚举（display-containers §7.1，W0 超集不收窄）', () => {
+  it('RightDrawerTab = §7.1 终态 8 员（编译期断言的运行期影子）', () => {
+    expect(rightDrawerTabs).toEqual(['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw', 'workflow'])
+  })
+
+  it('SideDrawerTab 仍为 W0 超集 10 员（用户可见 L1 tab 条不变：tab 数仍 10 含 terminal/browser）', () => {
+    expect(sideDrawerW0Tabs).toHaveLength(10)
+    expect(sideDrawerW0Tabs).toContain('terminal')
+    expect(sideDrawerW0Tabs).toContain('browser')
+    expect(terminalSideTabAnchor).toBe(true)
+  })
+
+  it("'terminal' 不可赋给 RightDrawerTab（条件类型负向锚的运行期影子）", () => {
+    expect(terminalNegativeAnchor).toBe(true)
   })
 })

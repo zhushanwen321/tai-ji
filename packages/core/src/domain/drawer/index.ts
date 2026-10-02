@@ -18,6 +18,7 @@
  * （防循环）。
  */
 export * from './types'
+export * from './registry'
 export * from './control'
 export * from './coordination'
 export * from './terminal-write-queue'
