@@ -103,9 +103,12 @@ function listAllSpecFiles(): string[] {
 }
 
 /** playwright CLI 的文件过滤（test 子命令后非 flag 参数；语义 = 对 test 文件路径的子串/正则匹配） */
+/** process.argv 的脚本参数偏移（[node, script, ...args]） */
+const PROCESS_ARGV_SCRIPT_OFFSET = 2
+
 function specFileFilters(argv: string[]): string[] {
   const start = argv.indexOf('test')
-  const rest = start >= 0 ? argv.slice(start + 1) : argv.slice(2)
+  const rest = start >= 0 ? argv.slice(start + 1) : argv.slice(PROCESS_ARGV_SCRIPT_OFFSET)
   return rest.filter((a) => a.length > 0 && !a.startsWith('-'))
 }
 

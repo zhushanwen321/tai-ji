@@ -928,13 +928,13 @@ export class SessionRecords {
         fold === undefined
           ? { fold: 'absent' }
           : {
-              fold: 'present',
-              lastSeq: fold.lastSeq,
-              lifecycle: fold.state.lifecycle,
-              asks: fold.asks.size,
-              phases: fold.phases.size,
-              runSettled: fold.runSettled !== undefined,
-            }
+            fold: 'present',
+            lastSeq: fold.lastSeq,
+            lifecycle: fold.state.lifecycle,
+            asks: fold.asks.size,
+            phases: fold.phases.size,
+            runSettled: fold.runSettled !== undefined,
+          }
     }
     return evidence
   }
