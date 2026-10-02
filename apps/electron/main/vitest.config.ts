@@ -1,4 +1,4 @@
-import { taijiTestConfig, FS_GUARD_PATH, GLOBAL_SETUP_PATH } from '../../../test-guard/factory.ts'
+import { taijiTestConfig, GLOBAL_SETUP_PATH, guardProjectSetup } from '../../../test-guard/factory.ts'
 
 // main 进程纯函数测试。
 // main/ 不在 workspace 包内（非 renderer/runtime/shared），但 vitest 已 hoist 到根 node_modules，
@@ -41,7 +41,10 @@ export default taijiTestConfig({
             // marker 落进真实 ~/.taiji）。
             'test/main-run-state.test.ts',
           ],
-          setupFiles: [FS_GUARD_PATH],
+          // 工厂助手双挂载（fs-guard + env-purity）：此前只显式挂 FS_GUARD_PATH，
+          // 漏掉 env 纯净度 setup（宿主链路泄漏 env 在用例可见前不剥除）——与工厂
+          // 单 project 语义不对齐（Must-fix E）。
+          ...guardProjectSetup({}),
         },
       },
       {
