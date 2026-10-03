@@ -14,17 +14,20 @@
  *   width/margin 全程可插值，开合动画无跳变）；
  * - 开合时双侧 width + margin transition（--duration-slow，与 DrawerPanel aside 淡入同时长）；
  * - 拖动（pointer capture 跟手，拖动期间 transition:none）/ 键盘微调调整 drawerPct，
- *   clamp [DRAWER_MIN_PCT, DRAWER_MAX_PCT]，localStorage 持久化；
- * - BrowserPane rect 同步：拖动/键盘直发 + 开合动画期间 rAF 循环逐帧派发
- *   taiji:splitter-layout（原 Splitter @layout 的替代路径；BrowserPane 侧 33ms 节流）。
+ *   clamp [DRAWER_MIN_PCT, DRAWER_MAX_PCT]，localStorage 持久化。
  *
- * 单实例：PanelContainer 单实例挂载，本 composable 随其 setup/卸载（rAF 循环经
- * onScopeDispose 清理），无多实例注册问题。
+ * [HISTORICAL] taiji:splitter-layout 事件族已随消费方整体退役（display-containers 终态
+ * 同步 2026-10-03）：唯一生产消费方 useBrowserRectSync 的监听半边已随挂载点迁浮层删除
+ * （该文件 HISTORICAL 注记——浮层 fixed 定位不随抽屉移动），此后全仓零监听方，按 §7.3
+ * 「不造无人读的事件」原则派发侧（notifyLayout / 开合动画 rAF 逐帧循环）一并删除，
+ * 本文件只保留只读宽度模型（拖拽/键盘/持久化照旧）。
+ *
+ * 单实例：PanelContainer 单实例挂载，本 composable 随其 setup/卸载，无多实例注册问题。
  *
  * 同文件另载纵轴模型 useBottomDrawerHeight（display-containers §7.3 纵轴复用）：底抽屉
  * 高度（heightPct 全局单键，core bottom-drawer 域持有）+ 上沿拖拽/键盘微调 + 显示期 clamp
- * （矮窗保证主区最小可视）。纵轴不派发 taiji:splitter-layout（§7.3：唯一消费方已随
- * BrowserPane 迁浮层，纵轴派发无消费方——不造无人读的事件）。
+ * （矮窗保证主区最小可视）。纵轴从未派发 taiji:splitter-layout（§7.3：事件族已随消费方
+ * 迁浮层整体退役——横轴纵轴均无消费方，不造无人读的事件）。
  */
 import { computed, onScopeDispose, ref, watch, type Ref } from 'vue'
 import {
@@ -42,8 +45,6 @@ const DRAWER_MAX_PCT = 60
 const DRAWER_DEFAULT_PCT = 50
 /** 键盘微调步长（%，ArrowLeft 变窄 / ArrowRight 变宽），对齐原 Splitter 键盘交互 */
 const KEYBOARD_STEP_PCT = 2
-/** 开合动画期间 rAF 逐帧派发的覆盖时长（--duration-slow 320ms + 缓冲） */
-const ANIM_NOTIFY_MS = 400
 /** 小数 → 百分比换算因子（no-magic-numbers） */
 const PCT_SCALE = 100
 /** standalone 留白分摊两侧（左右各半，no-magic-numbers） */
@@ -67,11 +68,6 @@ function loadDrawerPct(): number {
   const raw = localStorage.getItem(DRAWER_WIDTH_KEY)
   const n = raw === null ? NaN : Number(raw)
   return Number.isFinite(n) ? clampDrawerPct(n) : DRAWER_DEFAULT_PCT
-}
-
-/** 通知 BrowserPane 重算 viewport rect（BrowserPane 侧有 33ms 节流，高频派发无性能问题） */
-function notifyLayout(): void {
-  window.dispatchEvent(new CustomEvent('taiji:splitter-layout'))
 }
 
 /**
@@ -109,29 +105,6 @@ export function useDrawerSplitWidth(splitAreaEl: Ref<HTMLElement | null>, drawer
   }
 
   /**
-   * 开合动画期间逐帧派发 layout 事件（BrowserPane 的 WebContentsView setBounds 需要跟随
-   * width 过渡逐帧同步）。rAF 循环覆盖 ANIM_NOTIFY_MS 后自停；reduced-motion 下 transition
-   * 瞬时完成，多派发的事件被 BrowserPane 节流吸收，无害。
-   */
-  let layoutNotifyRafId: number | null = null
-  watch(drawerOpen, () => {
-    if (layoutNotifyRafId !== null) cancelAnimationFrame(layoutNotifyRafId)
-    const start = performance.now()
-    const tick = () => {
-      notifyLayout()
-      if (performance.now() - start < ANIM_NOTIFY_MS) {
-        layoutNotifyRafId = requestAnimationFrame(tick)
-      } else {
-        layoutNotifyRafId = null
-      }
-    }
-    layoutNotifyRafId = requestAnimationFrame(tick)
-  })
-  onScopeDispose(() => {
-    if (layoutNotifyRafId !== null) cancelAnimationFrame(layoutNotifyRafId)
-  })
-
-  /**
    * handle 拖动（pointer capture：move/up 事件路由到 handle，拖出元素外仍跟手）。
    * pointerdown 不 preventDefault：保留后续 focus 行为（键盘可达性），选中防御靠 select-none。
    * jsdom 兼容：setPointerCapture/hasPointerCapture 可选调用（测试环境无 Pointer Capture API）。
@@ -140,7 +113,6 @@ export function useDrawerSplitWidth(splitAreaEl: Ref<HTMLElement | null>, drawer
     const target = e.currentTarget as HTMLElement
     target.setPointerCapture?.(e.pointerId)
     isDragging.value = true
-    notifyLayout()
   }
 
   /** 拖动中：drawer 宽 = 容器右缘到指针的水平占比（handle 在 drawer 左缘，1px 误差可忽略） */
@@ -150,7 +122,6 @@ export function useDrawerSplitWidth(splitAreaEl: Ref<HTMLElement | null>, drawer
     const rect = el.getBoundingClientRect()
     if (rect.width === 0) return
     drawerPct.value = clampDrawerPct(((rect.right - e.clientX) / rect.width) * PCT_SCALE)
-    notifyLayout()
   }
 
   /** 拖动结束（pointerup/cancel）：释放 capture + 持久化宽度 */
@@ -170,7 +141,6 @@ export function useDrawerSplitWidth(splitAreaEl: Ref<HTMLElement | null>, drawer
     else return
     e.preventDefault()
     drawerPct.value = clampDrawerPct(drawerPct.value + delta)
-    notifyLayout()
     persistDrawerPct()
   }
 

@@ -229,14 +229,18 @@
     {
      "kind": "spec",
      "ref": "packages/renderer/src/__tests__/composables/use-extension-ui-plan-review.test.ts"
+    },
+    {
+     "kind": "spec",
+     "ref": "packages/ui/src/features/drawer/__tests__/DrawerPanel.test.ts"
     }
    ],
    "trigger": "on-diff",
    "serial": false,
-   "run": "cd packages/renderer && npx vitest run src/__tests__/stores/plan-store.test.ts src/__tests__/components/plan-mode-bar.test.ts src/__tests__/components/plan-review-bar.test.ts src/__tests__/components/plan-docs-panel.test.ts src/__tests__/components/plan-comment-popover.test.ts src/__tests__/composables/use-plan-sync.test.ts src/__tests__/composables/use-plan-drawer-sync.test.ts src/__tests__/composables/use-extension-ui-plan-review.test.ts",
+   "run": "cd packages/renderer && npx vitest run src/__tests__/stores/plan-store.test.ts src/__tests__/components/plan-mode-bar.test.ts src/__tests__/components/plan-review-bar.test.ts src/__tests__/components/plan-docs-panel.test.ts src/__tests__/components/plan-comment-popover.test.ts src/__tests__/composables/use-plan-sync.test.ts src/__tests__/composables/use-plan-drawer-sync.test.ts src/__tests__/composables/use-extension-ui-plan-review.test.ts && cd ../ui && npx vitest run src/features/drawer/__tests__/DrawerPanel.test.ts",
    "owner": "packages/renderer",
    "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-   "note": "plan 模式重设计登记：本条是圈定机制——scope 补上 packages/ui 无 rule scope 的机制洞（DrawerPanel 面此前靠同 commit 的 renderer/core 改动共触发）；assets 按磁盘实际登记现役 plan GUI 行为资产（零 token vitest 单测，照 E2E-EQUIV-01 引 vitest 文件先例），plan behavior 真实用例（真实 app 启动轨 spec）在阶段 5 验收建成后同 commit 扩 assets 并翻 layer/serial（翻轨先例：E2E-RENAME-01 按盘面修正）"
+   "note": "plan 模式重设计登记：本条是圈定机制——scope 补上 packages/ui 无 rule scope 的机制洞（DrawerPanel 面此前靠同 commit 的 renderer/core 改动共触发）；assets 按磁盘实际登记现役 plan GUI 行为资产（零 token vitest 单测，照 E2E-EQUIV-01 引 vitest 文件先例），plan behavior 真实用例（真实 app 启动轨 spec）在阶段 5 验收建成后同 commit 扩 assets 并翻 layer/serial（翻轨先例：E2E-RENAME-01 按盘面修正）。[2026-10-03 display-containers 终态同步 F1-26 补资产] assets 增 packages/ui/src/features/drawer/__tests__/DrawerPanel.test.ts（drawer 壳唯一单测回归锚：注册表投影/docked 删除断言）并同步扩 run——scope 洞此前已补而资产洞未补：改 drawer 壳时机器选跑选中的本 rule 只跑 plan 单测，DrawerPanel 自身面不在执行集，回归可静默滑过；display-containers 对 drawer 壳做过实质改造（W0 docked 删除/W1 注册表投影）后补齐资产才与设计 §8.3 意图闭环。"
   },
   {
    "id": "E2E-REAL-01",
@@ -285,7 +289,7 @@
    "run": "npx playwright test e2e/workspace-real.spec.ts e2e/ask-user-real.spec.ts e2e/tasks-drawer-real.spec.ts e2e/workflow-thinkinglevel-real.spec.ts",
    "owner": "packages/renderer",
    "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-   "note": "真实进程轨（真实 Electron app 启动），不进 CI 门禁；PR/merge 门禁不跑（AGENTS.md e2e 执行准则）。[2026-09-16 composer-task-tray 补 scope] 增补 `extensions/universal/**`：本 rule 的断言对象含 extension 侧的 GUI/协议形态（tasks-drawer-real R2/R3 断言 todo `__gui__` 根 tab-bar 双段 + meta icon/badge、goal `__gui__` group，并断言托盘 widget 区挂载），只按 spec 文件路径命中会漏掉「extension GUI 形态变更」这一改动范围（本次 todo buildGui 单 list-tree → tab-bar 即该漏项实例）。补充覆盖后：改 extensions/universal/** 会选中本 rule，按改动范围执行（real 轨空载串行，不因 scope 扩大而全跑）。[2026-09-19 ui-presentation-protocol] ask-user-real 断言已随统一表单迁移：testid 改 form-*，wire 键断言改 formQuestions ?? askUserQuestions 双读（form 帧（form:true + formQuestions，builtin ask-user 迁移后现行）/ legacy askUser 帧（版本偏斜窗口）双形态兼容，形态判定 form===true || askUser===true，不降断言强度）。"
+   "note": "真实进程轨（真实 Electron app 启动），不进 CI 门禁；PR/merge 门禁不跑（AGENTS.md e2e 执行准则）。[2026-10-03 display-containers 终态同步 F1-27 补登记] harness 形态门禁：e2e/fixtures/global-setup.ts 按被选 spec 源码判定 mock/real 变体（detectCurrentBundleVariant，判据 SSOT = fixtures/launch-app.ts 的 MOCK_BUNDLE_MARKER），产物缺失或形态失配自动重建（两轨共用 apps/electron/renderer/dist 单形态）——real 轨之后跑 mock 轨会触发整次重建（分钟级耗时），属预期行为而非构建异常（v-e2e-real-post-w3 失败归因曾误判 spec-bug，根因修复见 global-setup.ts 形态门禁段；此前该机制仅记于 commit 68e533ed8 message 与 .tmp 设计 §8.3，本表 note 此前无登记）[2026-09-16 composer-task-tray 补 scope] 增补 `extensions/universal/**`：本 rule 的断言对象含 extension 侧的 GUI/协议形态（tasks-drawer-real R2/R3 断言 todo `__gui__` 根 tab-bar 双段 + meta icon/badge、goal `__gui__` group，并断言托盘 widget 区挂载），只按 spec 文件路径命中会漏掉「extension GUI 形态变更」这一改动范围（本次 todo buildGui 单 list-tree → tab-bar 即该漏项实例）。补充覆盖后：改 extensions/universal/** 会选中本 rule，按改动范围执行（real 轨空载串行，不因 scope 扩大而全跑）。[2026-09-19 ui-presentation-protocol] ask-user-real 断言已随统一表单迁移：testid 改 form-*，wire 键断言改 formQuestions ?? askUserQuestions 双读（form 帧（form:true + formQuestions，builtin ask-user 迁移后现行）/ legacy askUser 帧（版本偏斜窗口）双形态兼容，形态判定 form===true || askUser===true，不降断言强度）。"
   },
   {
    "id": "E2E-BTW-01",

@@ -13,7 +13,9 @@
  *   flex 布局，替换 reka-ui Splitter：无 drawer main 占 75%、有 drawer 双侧 width 动画、
  *   handle 拖动/键盘调整 + localStorage 持久化，见下方「动态宽度」describe）
  * - drawerOpen=false：DrawerPanel aside 卸载，drawer-area 收缩为 0%（width 动画承载者常驻）
- * - ESC 关闭（window keydown）+ close 按钮关闭 → drawer 卸载（旧 side-drawer.test.ts 行为迁移）
+ * - close 按钮关闭 → drawer 卸载（旧 side-drawer.test.ts 行为迁移；ESC 已随
+ *   display-containers §6.7 W1 归栈序编排器，壳层 ESC 零动作有专属负向用例 +
+ *   关闭后焦点回 composer 的焦点契约用例）
  * - 内容区 fallback：无面板 tab 不注入内容 → DrawerPanel 空态（drawer-widget-empty）
  *   （[P4 s5 drawer-widget-removal] 旧 widget 缓冲通路已删，由 PluginViewContainer 承接；
  *   browser 内容已迁浮层（display-containers §7.4），右抽屉无 browser tab）
@@ -297,6 +299,62 @@ describe('PanelContainer 壳行为迁移（旧 side-drawer.test.ts 行为断言�
     await nextTick()
     expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
   }, 60_000)
+
+  it('点 drawer-close 关闭后焦点回 composer（§6.7 焦点契约右抽屉鼠标通道，StatusBarTerminalToggle 底抽屉同款）', async () => {
+    // focusComposer 按 testid/class 查 document——测试内挂真实 composer 锚
+    document.body.innerHTML = '<div class="composer-box" data-testid="composer-box" tabindex="0"></div>'
+    const composer = document.querySelector('[data-testid="composer-box"]')
+    try {
+      const panel = usePanelStore()
+      panel.loadSession(ROOT_PANEL_ID, 's-close-focus')
+      openDrawerTab('git')
+
+      const wrapper = await mountContainer()
+      await nextTick()
+      expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(true)
+
+      await wrapper.find('[data-testid="drawer-close"]').trigger('click')
+      await nextTick()
+      expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
+      // 用户可见行为：键盘输入有归宿（不流失到 body）
+      expect(document.activeElement).toBe(composer)
+    } finally {
+      document.body.innerHTML = ''
+    }
+  }, 60_000)
+
+  it('PanelHeader 开关按钮：关闭分支焦点回 composer，打开分支不抢焦点（镜像 StatusBarTerminalToggle）', async () => {
+    document.body.innerHTML = '<div class="composer-box" data-testid="composer-box" tabindex="0"></div>'
+    const composer = document.querySelector('[data-testid="composer-box"]')
+    // PanelHeader 已被 vi.mock 成空壳——经 stub 注入可点击的 toggle 发射器（同名替换）
+    const ToggleHeader = defineComponent({
+      name: 'PanelHeader',
+      emits: ['toggle-drawer'],
+      template: '<button data-testid="header-toggle" @click="$emit(\'toggle-drawer\')" />',
+    })
+    try {
+      const panel = usePanelStore()
+      panel.loadSession(ROOT_PANEL_ID, 's-toggle-focus')
+
+      const wrapper = await mountContainer({ PanelHeader: ToggleHeader })
+      await nextTick()
+      expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
+
+      // 打开分支：不调 focusComposer（焦点不迁移）
+      await wrapper.find('[data-testid="header-toggle"]').trigger('click')
+      await nextTick()
+      expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(true)
+      expect(document.activeElement).not.toBe(composer)
+
+      // 关闭分支：焦点回 composer（§6.7 任一容器关闭后焦点回 composer）
+      await wrapper.find('[data-testid="header-toggle"]').trigger('click')
+      await nextTick()
+      expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
+      expect(document.activeElement).toBe(composer)
+    } finally {
+      document.body.innerHTML = ''
+    }
+  }, 60_000)
 })
 
 // bashTask tab 接线（background-task-sidebar-view D5③：v-if chain 加分支 + 未选中空态 fallback）
@@ -559,11 +617,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     expect(areaWidth(wrapper, 'drawer-area')).toBe('60%')
   }, 60_000)
 
-  it('开合切换：drawer 打开后 main 从 75% 动画到拆分比例（style 逐帧驱动，断言终态）+ layout 事件派发', async () => {
-    const events: string[] = []
-    const onLayout = () => events.push('layout')
-    window.addEventListener('taiji:splitter-layout', onLayout)
-
+  it('开合切换：drawer 打开后 main 从 75% 动画到拆分比例（style 逐帧驱动，断言终态）', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 's-width-toggle')
 
@@ -573,17 +627,15 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     expect(areaStyle(wrapper, 'main-area')).toContain('margin-left: 12.5%')
     expect(areaStyle(wrapper, 'main-area')).toContain('margin-right: 12.5%')
 
-    // 打开 drawer：main 收缩到 50% 拆分（居中 margin 归 0 贴左）+ rAF 循环派发 layout 事件（BrowserPane rect 同步）
+    // 打开 drawer：main 收缩到 50% 拆分（居中 margin 归 0 贴左）
+    // [HISTORICAL] 用例原名含「+ layout 事件派发」：taiji:splitter-layout 已随消费方
+    // useBrowserRectSync 迁浮层删除而整体退役（终态同步 2026-10-03，§7.3 不造无人读的事件），
+    // 派发断言随行为删除——全仓零监听方后保留派发断言等于锁死死事件。
     openDrawerTab('git')
     await nextTick()
     expect(areaWidth(wrapper, 'main-area')).toBe('calc(100% - 50% - 1px)')
     expect(areaStyle(wrapper, 'main-area')).toContain('margin-left: 0')
     expect(areaWidth(wrapper, 'drawer-area')).toBe('50%')
-
-    // rAF 循环逐帧派发（至少一帧）——等待两帧后断言
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-    expect(events.length).toBeGreaterThan(0)
-    window.removeEventListener('taiji:splitter-layout', onLayout)
   }, 60_000)
 })
 

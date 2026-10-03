@@ -17,9 +17,10 @@
     [display-containers §7.6 W0] docked 死状态删除，pin 按钮一并移除（toggle-dock emit 删除）
   - [P4 s5 w2] hasTasksData 条件 tab（tasks store 壳裁剪）已随 tasks 域删除移除
 
-  不纳入（C3 clarify）：ESC 关闭（window keydown 桌面副作用）+ AC-13 unread badge
-  （chatStore 壳层状态）——均为壳层职责，W4 shell-integration 在 PanelContainer 侧处理
-  （经可选具名 slot header-extra 注入 badge，本组件零 chatStore 依赖）。
+  不纳入（C3 clarify）：ESC 关闭 + AC-13 unread badge（chatStore 壳层状态）——均为壳层
+  职责，在 PanelContainer 侧处理（经可选具名 slot header-extra 注入 badge，本组件零
+  chatStore 依赖）。[终态同步更正] ESC 已随 display-containers §6.7 W1 并入 key-orchestrator
+  栈序编排器（唯一属主），不再是壳层 window keydown 职责（W1 修正注记在 PanelContainer 内）。
 -->
 <template>
   <Transition name="drawer-slide-right">

@@ -19,9 +19,10 @@
     display-containers §7.6）。git 状态唯一数据源在此层 provide
     （按 panel 的 session），GitPanel 注入共享。
 
-    壳层职责（W3 C3 裁决，旧 SideDrawer 逻辑迁移至此）：ESC 关闭
-    （window keydown 桌面副作用）+ AC-13 unread badge（chatStore 消息数感知，经 DrawerPanel
-    header-extra slot 挂载）。[P4 s5 drawer-widget-removal] widget 订阅编排（extension:widget/
+    壳层职责（W3 C3 裁决，旧 SideDrawer 逻辑迁移至此）：AC-13 unread badge（chatStore
+    消息数感知，经 DrawerPanel header-extra slot 挂载）。ESC 关闭不在本壳（终态同步更正）：
+    已随 display-containers §6.7 W1 并入 key-orchestrator 栈序编排器（唯一属主，见本文件
+    script 内 W1 注记；本组件无 window keydown 监听）。[P4 s5 drawer-widget-removal] widget 订阅编排（extension:widget/
     widgetGui/status → core createDrawerBuffers）已删：旧 widget 通道由 PluginViewContainer 承接。
     控制态（isOpen/
     activeTab）读 core drawer 域（useDrawerControl + coordination 公开 API），分区键经
@@ -38,7 +39,7 @@
       :git-indicator="gitIndicatorOf(leaf)"
       :status="statusOf(leaf)"
       @open-git="openDrawerTab('git')"
-      @toggle-drawer="toggleDrawer()"
+      @toggle-drawer="onDrawerToggle()"
     />
     <!-- plan 模式状态带（PlanModeBar）与审批条已随 plan-mode-ux-refactor u-plan-bar 收敛到
          Panel 内 composer 下方一行（设计 §3.3 D1），本容器不再挂载。 -->
@@ -52,8 +53,10 @@
          + 键盘微调 + localStorage 持久化。
          drawer wrapper 常驻（width 0 ↔ drawerPct%）承载 width 动画；DrawerPanel 内部 aside
          Transition（淡入右移）与 wrapper width 动画同时长（--duration-slow），叠加和谐。
-         BrowserPane rect 同步：原 Splitter @layout 事件改为 notifyLayout()（拖动/键盘时直发 +
-         开合动画期间 rAF 循环逐帧派发 taiji:splitter-layout）。 -->
+         [HISTORICAL] taiji:splitter-layout 派发已随消费方退役（终态同步 2026-10-03）：
+         原「拖动/键盘直发 + 开合动画 rAF 逐帧派发（BrowserPane 侧 33ms 节流）」的消费方
+         useBrowserRectSync 已随 BrowserPane 迁浮层视口删除监听（§7.3：不造无人读的事件），
+         派发侧一并拆除，仅保留宽度模型。 -->
     <div ref="poolEl" data-testid="vertical-pool" class="flex min-h-0 flex-1 flex-col overflow-hidden">
     <div ref="splitAreaEl" data-testid="split-area" class="relative flex min-h-0 flex-1 overflow-hidden">
       <div
@@ -105,7 +108,7 @@
           :is-open="drawerOpen"
           :active-tab="drawerTab"
           :session-id="panelSessionId"
-          @close="closeDrawer"
+          @close="onDrawerClose"
           @set-tab="onDrawerSetTab"
         >
           <!-- 桌面独占内容面板（C2 v-if chain；分支与 RIGHT_DRAWER_REGISTRY 终态 8 员一一对应）：
@@ -241,6 +244,7 @@ import { useSessionDerivations } from '@/composables/features/chat/useSessionDer
 import { provideGitStatus } from '@/composables/features/file-tree/useGitStatus'
 import type { GitIndicator } from '@/composables/features/file-tree/useGitStatus'
 import { useDrawerSplitWidth, useBottomDrawerHeight } from '@/composables/features/drawer/useDrawerSplitWidth'
+import { focusComposer } from '@/composables/features/app/key-orchestrator'
 import { usePlanDrawerSync } from '@/composables/use-plan-drawer-sync'
 import { useChatStore } from '@/stores/chat'
 import { useSessionTrace, clearTraceSelection } from '@/composables/features/trace/useSessionTrace'
@@ -401,6 +405,24 @@ function onDrawerSetTab(tab: Parameters<typeof setDrawerTab>[0]): void {
   const sid = panelSessionId.value
   if (sid && tracePartition.value.selectedKey !== null) clearTraceSelection(sid)
   setDrawerTab(tab)
+}
+
+/**
+ * 鼠标路径关闭/开关的焦点契约包装（§6.7「任一容器关闭后焦点回 composer」，display-containers
+ * 终态同步补齐右抽屉鼠标通道——键盘路径已由编排器 stack-order 承接，StatusBarTerminalToggle
+ * 是底抽屉同款先例）：关闭分支关后 focusComposer（焦点原落在随即卸载的按钮上，不接续会
+ * 流失到 body）；开关的打开分支不抢焦点（内容自取，镜像 StatusBarTerminalToggle.onToggle
+ * 的 wasOpen 判定）。
+ */
+function onDrawerClose(): void {
+  closeDrawer()
+  focusComposer()
+}
+
+function onDrawerToggle(): void {
+  const wasOpen = drawerOpen.value
+  toggleDrawer()
+  if (wasOpen) focusComposer()
 }
 
 /** git 状态唯一数据源（panel/spec.md：git 移入抽屉后）。

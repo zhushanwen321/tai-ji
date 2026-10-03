@@ -15,6 +15,10 @@
  * - T2.8/T2.8b 角标全态（setGitOverlay M/A/D/U/untracked）
  * - T2.9 非 git 仓库（isRepo=false 不设 overlay）
  * - T4.6 invalidated 态过滤 graceful（invalidate 不报错）
+ * - W2 getDirChangeCount（目录改动文件数徽章）
+ * - W15/D-7.1 徽章预聚合；展开态 rehydrate
+ * - W3 detail 多文件 tab（selectFile per-session 注入 / openDetailTab forceDiff 升级 /
+ *   closeDetailTab 激活转移+清选中态，display-containers §6.3；u-w3-detail ed2492242 新增）
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/stores/fileTree.test.ts
  */
