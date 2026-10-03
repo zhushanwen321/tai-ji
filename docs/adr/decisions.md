@@ -274,6 +274,8 @@ skill 候选两态统一 taiji 源：globalSkills ∪ projectSkills（location �
 ### ADR-0054 Browser Drawer 用 WebContentsView
 内嵌网页用 WebContentsView（任意 URL + 独立 preload + CDP target），排除 iframe（X-Frame-Options 硬伤）与 webview tag（官方 discouraged）。实装 `apps/electron/main/browser/browser-view-manager.ts`。登记 C-build-06。
 
+[2026-10-04 理由边界修正] 「禁 iframe」的排除理由（依赖 `X-Frame-Options` / CSP `frame-ancestors` 的硬伤）只对**嵌入第三方远程网页**成立——目标站响应头拒绝被嵌。本地 HTML 文件由应用自有 `protocol.handle` 服务、响应不携带这些头，理由不命中；对话流 HTML 产物预览走 `sandbox="allow-scripts"` iframe（无 `allow-same-origin`、文档落 opaque origin、网络出站由内容级 CSP 封死）不在本条禁用范围。边界收窄同批落 `constraints.json` C-build-06 与 [ADR-0107](#adr-0107-对话流-html-预览与产物落点约定2026-10-04-设计裁决chat-html-support)。
+
 ### ADR-0066 太极·玄纯灰 V3（唯一现行视觉 ADR）
 全族去冷蓝换纯灰（bg/surface/neutral/border 同步），accent 中亮灰 #cfcfd4，状态色保留极弱色相（M/A/D badge 语义辨识下限）。值权威 = `packages/renderer/src/style.css`（暗色默认，亮色 [data-theme=light] 镜像）。视觉演化史见 [docs/design-evolution.md](../design-evolution.md)。
 
@@ -436,3 +438,18 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **登记**：无新约束族（推拉纪律承 ADR-0097）；实装 = `packages/shared/src/protocol.ts`（两 RPC 契约与错误码闭集）+ `packages/runtime/src/services/session/session-records.ts`（指纹扩维）。设计文档 `.tmp/tech-design/workflow-visualization.md`（不入库，过程产物）；本条即该决策的现行登记处。
 
+
+### ADR-0107 对话流 HTML 预览与产物落点约定（2026-10-04 设计裁决，chat-html-support）
+
+**决策**：对话流支持「agent 交付 HTML 产物 → 用户在应用内直接看渲染结果」——扩写 capability 段成精确能力契约（M0：正/负面清单；M1：交付约定与预览约束 + 每 turn 注入会话产物目录绝对路径）、新 fence info string `html-preview` + 对话流预览卡片、DetailPane 对 `.html` 新增渲染态。四条关键裁决：
+
+1. **产物目录选在白名单既有成员内**（`<dataDir>/artifacts/<sessionId>/`）：local-file 协议白名单静态成员集（`apps/electron/main/utils/local-file-prefixes.ts`）已含 `<dataDir>` 前缀，产物落其下则预览无需新增白名单成员、renderer 不成为白名单输入方（「白名单外路径一律 403」不变量保持）。目录推导公式单点 = `packages/shared/src/paths.ts` 的 `getSessionArtifactsDir`（含 sessionId 穿越校验，规则与 `isPiSessionId` 同域：允许 `.` / `_`、禁 `:`——不用 `getImageCacheDir` 的窄集）；system-prompt 扩展侧不 import shared（包边界 + C-proc-26 / C-proc-09 门禁组合），以同公式镜像推导，两实现段名与校验正则字面量对拍机检。
+2. **session cwd 动态注册方案不采用**：该方案让 renderer 首次成为 local-file 白名单的输入方（白名单防线对 renderer 的信任假设从零变为有），并连带引入新 IPC 通道、进程内集合、注册时序竞争、预检对注册完成的依赖；落点约定后这些复杂度全部无服务对象。**已接受代价**：项目目录内的 HTML 不能被应用内预览——恢复路径 = 要求 agent 把产物写到会话产物目录，或经「查看源码」在项目内直接读源码。
+3. **预检通道统一落主进程 `localFile:servable`**（入参绝对路径，出参 `{servable, reason, size}`，reason ∈ `not_found` / `is_dir` / `out_of_whitelist`）：卡片（经 deps `probeArtifact?`）与抽屉渲染态共用；谓词与 `protocol.handle` 复用同一规范化管线模块（白名单成员资格先行短路 → 存在性 → 目录性——越界路径不触 fs，杜绝任意路径存在性探测通道）。**不新增 runtime 文件 RPC**：白名单成员资格只在 main 信任域可见，runtime file 族的 cwd 守门看不见白名单，两处预检会形成两套准入语义。
+4. **产物回收用文件系统级判据**（对齐 `apps/electron/main/images/image-cache.ts` 先例的「判据落文件系统层、不依赖进程级在场集」形态）：① 删会话级联删目录（与既有 `cache/images` 级联同一落点 `session-lifecycle.ts`、同一幂等形态）；② 保留期扫描（默认 7 天，`TAIJI_ARTIFACTS_KEEP_DAYS` 可覆盖；runtime 会话服务内启动扫 + 每日复扫）判据 =「产物目录子树最新文件 mtime 超龄 **且** 目录名 sessionId 在三棵会话树无同名会话文件」。**枚举深度规格另写**（主树 `sessions/<encodeCwd>/*.jsonl` 两层 / subagent `subagents/<encodeCwd>/sessions/*.jsonl` 三层 / btw `btw/<encodeCwd>/<mainSid>/*.jsonl` 三层，逐层 readdir 自实现）——不得照 `image-cache.ts` 的 `isOrphanSessionDir` 单层形态（该先例与生产两层布局失配，缺陷另登记 `docs/todo/image-cache-orphan-depth-mismatch.md`）；文件名 → id 解析用同型 `sessionFileIdFromName`，解析失配（合法 sid 含 `_` / `.`）保守取向为「视为存在、不清」。
+
+**三条配套**：① **引用语法** = 新 fence info string `html-preview`（首词匹配，内容 = 单行文件路径；空 / 多行 → 卡片降级态「路径非法」），卡片走 Vue 段组件（`HtmlPreviewCard.vue`）不进 v-html / DOMPurify 通道——「用户 HTML 白名单契约」与「预览卡片不经 sanitize 通道」不变量保持；段类型复用 mermaid 同构通道，finalize 仅由 fence 收尾 / 消息 complete 触发（静默 200ms 不提前 finalize——半截路径不产假降级卡片）。② **渲染态** = DetailPane 对 `.html` 新增「预览 | 源码」切换，渲染态为 `<iframe sandbox="allow-scripts" src="local-file:///<百分号编码 abs>?r=<n>">`（无 `allow-same-origin`，文档落 opaque origin，读不到主窗口 DOM / localStorage / cookie；`?r=n` 仅作重导航触发）；CSP meta（`packages/renderer/index.html`）新增 `frame-src 'self' local-file:`。③ **协议响应头** = `protocol.handle('local-file')` 全部响应附加 `Cache-Control: no-store`，`.html` / `.htm` 再附加内容级 CSP（`default-src 'none'` 封网络出站；`script-src 'unsafe-inline' local-file:` 保脚本与相对子资源；指令集不含 opaque origin 下恒不匹配的 `'self'`）——sandbox 管「碰不到主窗口」、文档 CSP 管「连不出网络」双保险。
+
+**依据**：① 根因是四环缺失（能力契约 / 交付模式 / 预览链路 / 产物落点未约定），落点约定消除整类「白名单外不可读」问题，比事后放宽白名单（renderer 成为白名单输入方）代价更低；② 预览文档唯一需要的同源能力是相对子资源，而子资源经 local-file 协议加载不依赖 origin 同源，故 sandbox 可不给 `allow-same-origin`；③ 两条被否路线的击穿点——srcdoc 方案（file.read RPC + iframe srcdoc）能力死（继承主文档 CSP 致内联脚本不执行、相对子资源无基准地址，交互价值消失）；WebContentsView 方案在抽屉内可行，但与对话流内联预览方向冲突（窗口层原生覆盖视图不随虚拟滚动同步，需一整套滚动同步机制）。
+
+**登记**：约束 C-build-06 表述随本裁决收窄——scope 由「嵌入式网页」收窄为「嵌入第三方远程网页」，理由（`X-Frame-Options` / CSP `frame-ancestors` 硬伤）仅对远程站成立，本地 HTML 由应用自有 `protocol.handle` 服务、不携带这些头（见 ADR-0054 理由边界修正补记），登记 `docs/constraints.json` C-build-06；未新增约束族（预览隔离由 sandbox + 文档 CSP 构造性保证，落在 C-build-06 的 review-electron-build 面内）。设计文档 `.tmp/tech-design/chat-html-support.md`（不入库，过程产物）；实施 = 8 单元（u-foundation / u1-prompt / u2-infra / u-artifacts / u3-detailpane / u4-card / u5-docs / u6-acceptance）。

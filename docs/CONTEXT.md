@@ -181,6 +181,25 @@ session 的语义内容——对话历史、项目知识（AGENTS.md 等）、sk
 **代码映射**: 现行符号 `SystemNotice`（`packages/ui/src/features/chat/SystemNotice.vue` 唯一渲染点；core 写入点 `appendSystemNotice` / `appendSubagentDirective`，`packages/core/src/domain/chat/store.ts`）。
 
 > **术语演进**：历史名 `SystemNotification`（terminology R3 统一产物）已随 v3 重构消亡，现行符号为 `SystemNotice`，内联系统提示行已重新落地聊天流。
+
+### HTML 预览块
+info string 为 `html-preview` 的 fenced code block，内容是被预览 HTML 文件的路径（单行）。agent 交付 HTML 产物的引用语法（fence 首词匹配，尾随 token 忽略；空 / 多行 → 降级态「路径非法」）。
+
+**代码映射**: 段切分 `packages/renderer/src/composables/logic/markdown-incremental.ts`（`'html-preview'` 段类型）→ 分发 `packages/ui/src/features/chat/MarkdownRenderer.vue` → `HtmlPreviewCard.vue`。
+
+### 预览卡片
+HTML 预览块在对话流中渲染成的消息内卡片（文件名 + 打开预览按钮）。走 Vue 段组件产出 DOM，不经 v-html / DOMPurify 通道（用户 HTML 白名单契约不受影响）。
+
+**代码映射**: `packages/ui/src/features/chat/HtmlPreviewCard.vue`；预检能力经 `chat-view-deps.ts` 的 `probeArtifact?` 注入（未 provide → 跳过预检、不显示大小）。
+
+### 渲染态
+DetailPane 对 HTML 文件的 iframe 预览形态，与既有「源码态」相对，可切换。实现 = `sandbox="allow-scripts"` iframe（无 `allow-same-origin`，文档落 opaque origin）加载 `local-file://` URL；挂载前经主进程 servable 预检，不可服务 → 「无法预览」占位带原因 + 重试。
+
+### 会话产物目录
+`<dataDir>/artifacts/<sessionId>/`——HTML 产物落点。它在 local-file 白名单内（`<dataDir>` 前缀成员），因此预览无需任何白名单放宽。随会话删除级联删除，超龄（默认 7 天，`TAIJI_ARTIFACTS_KEEP_DAYS` 可覆盖）由保留期扫描按文件系统级判据回收（ADR-0107）。
+
+**代码映射**: `packages/shared/src/paths.ts` 的 `getSessionArtifactsDir`（公式单点，含 sessionId 穿越校验）；system-prompt 扩展侧以镜像推导（不 import shared——包边界 + 运行时门禁）。
+
 ### Thinking
 模型的内部推理过程，在回答生成前产生。属于单条 Message（挂在 `Message.thinking[]` 上），不属于整个 Session。UI 中默认折叠展示。
 

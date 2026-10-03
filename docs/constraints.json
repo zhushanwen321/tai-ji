@@ -1342,7 +1342,7 @@
     },
     {
       "id": "C-build-06",
-      "summary": "嵌入式网页一律用 WebContentsView；禁 iframe（X-Frame-Options/CSP 硬伤）与 <webview> tag（官方 discouraged）",
+      "summary": "嵌入第三方远程网页一律用 WebContentsView；禁 iframe（X-Frame-Options / CSP frame-ancestors 硬伤——仅对远程站成立）与 <webview> tag（官方 discouraged）。本地 HTML 文件由应用自有 protocol.handle 服务、不携带这些头，其 sandbox iframe 预览不在本条禁用范围（2026-10-04 边界收窄，见 ADR-0054 补记 / ADR-0107）",
       "scope": [
         "apps/electron/**"
       ],
