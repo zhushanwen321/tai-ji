@@ -533,3 +533,12 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 - **症状**：续聊大上下文会话（实测 230K tokens）时 assistant 恒定 `stopReason=error`：`undefined is not an object (evaluating 'usage.totalTokens')`，秒级失败（上游 100ms 即拒）。
 - **机制**：provider 上游渠道对超窗口请求返回**不含 usage 字段**的错误响应，pi openai-completions 适配层解析时未对 usage 缺失做防御。凭据/通路无问题（同 provider 小上下文请求成功）。
 - **处置建议**：先排除渠道窗口限制（换小会话/先 compact 压缩再续聊）；根治需 pi 适配层对缺 usage 错误响应健壮降级——pi 上游问题按项目规则不改 pi 源码，待上游修复或由 taiji 侧降级链吸收。
+
+### 18. 终端多实例（一会话多终端）四类症状定位（2026-10-04 交付）
+
+终端实例标识为 `term:<会话id>:<序号>`，注册表与序号分配的**唯一事实源在 runtime**（重键 `ptyMap` + 会话级计数器），界面经 `terminal.list` 对账恢复。按症状分路：
+
+- **「开第二个终端返回的还是第一个」**：先看是**反向混跑**还是缺陷——dev 工作流里 renderer 走 Vite HMR、runtime 是 tsx **非 watch**，所以「新界面 × 旧 runtime」可真实共存；旧 runtime 会按会话幂等复用单 PTY（静默复用、无报错）。处置：重启 `pnpm dev`（runtime 侧改动不重启不生效）；打包形态无混跑窗口（界面与后台成对原子更新）。
+- **「活着的死实例」**（切换条有条目、输入必得 `unknown_terminal_id`）：`spawn` 完成到界面建档之间的窗口内实例就已死亡（`terminal.exit` 帧无归属可投递）→ 残留条目。**自动回收双通道**：首次对该条目的 `write` / `kill` / `attach` 收到否定回执（`unknown_terminal_id`）即执行三腿清理；或下一次 `terminal.list` 对账（清单外条目）回收。若**反复出现且不自动消失**，取证 `<数据目录>/logs/runtime-*.log` 的 `[terminal]` 行与 `terminal.list` 返回，按缺陷报（回收通道应幂等）。
+- **runtime 重启后旧终端输出消失 / 编号从「终端 1」重算**：**既定语义**（世代变更：注册表纯内存，重启即清空、序号重算；界面经世代重置清输出分区与写队列）。判据 = auth token 变化（**端口值不可靠**——重启常落回原端口）。反向异常：**同世代 WS 闪断却丢了历史** = 世代判据误判，查 `getCurrentToken()` 读取面与连接态保存的旧值。
+- **应用退出后仍有终端子进程**：正常退出路径由 shutdown 序的 `dispose-terminal-pties`（`destroyAllPties`）全量清理；**异常死亡**（SIGKILL / 崩溃）下 `nohup`/disown 类子进程可能残留（已登记的前提 P5，属 OS 层行为）——按系统进程表定位后手动清理。

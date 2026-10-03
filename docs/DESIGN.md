@@ -636,7 +636,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 - **位置**：split 行（对话区 + 右抽屉）之下、StatusBar 之上，横跨全宽；composer 在其上沿保持可见、随开合上移。与右抽屉可同时开（一挤宽度、一挤高度互不冲突；右抽屉开着时底抽屉全宽、右抽屉变矮）
 - **高度**：默认 35%；上沿拖拽手柄（1px + `cursor: row-resize`，hover `border-strong` / drag `accent`，与 §6.3 SplitterHandle 同族）；拖拽 clamp 15%–70%，高度为全局布局值单键持久化（`taiji:bottom-drawer-height`）；窗口过矮时显示期钳制保证对话流 + composer 最小可视区域，不写回持久值
-- **内容**：terminal 唯一内容（单实例，不预设 tab 枚举）；spawn 失败走 inline 错误条 + 重试，chunk 装载失败走 AsyncErrorFallback
+- **内容**：terminal 唯一内容（不预设 tab 枚举）；终端面板顶部为**实例切换条**（多实例：条目切换 / 「+」新建 / 悬停关闭 / 最后实例禁用关闭 / 空态占位，文案如「终端 1」按序号命名）；spawn 失败走 inline 错误条 + 重试，chunk 装载失败走 AsyncErrorFallback
 - **开关**：`` ⌃` ``（before-input-event 窗口级拦截，不经 globalShortcut——失焦无动作）+ StatusBar 终端按钮（StatusBar 原生动作通道 trailing 区，根元素自隐藏条件扩展为「有状态项或有原生动作」，干净安装仍可见）；开合态按会话分区、不持久化；终端聚焦时 Esc 归终端输入，关抽屉走 `` ⌃` `` / StatusBar 按钮
 
 ### 6.5 Overlay（内容浮层）
