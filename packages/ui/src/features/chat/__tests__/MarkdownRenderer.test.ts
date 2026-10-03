@@ -649,3 +649,91 @@ describe('①②③路: v-html 点击委托路由（copy / filepath / ambiguous�
     expect(wrapper.findComponent({ name: 'AmbiguousFilePopover' }).props('open')).toBe(false)
   })
 })
+
+describe('chat-html-support §6.3 D3: html-preview 段 finalize 分流（静默不提前 finalize）', () => {
+  /** html-preview 感知 mock：finalize 或 fence 已收尾（content 尾行为闭行）→ html-preview 段；
+   *  否则 streaming-fence 占位（lang=html-preview）。记录每帧 finalize 标志。 */
+  function htmlPreviewMock() {
+    const calls: boolean[] = []
+    const isClosed = (s: string): boolean => s.trimEnd().endsWith('```')
+    const renderMarkdownIncremental = vi.fn(
+      async (source: string, _cache: IncrementalMarkdownCache | null, _sid?: string, opts?: { finalizeOpenFence?: boolean }): Promise<IncrementalMarkdownResult & { cache: IncrementalMarkdownCache }> => {
+        const finalize = opts?.finalizeOpenFence === true
+        calls.push(finalize)
+        if (finalize || isClosed(source)) {
+          return incResult([], [seg('html-preview', '/abs/report.html', 0)], emptyCache(1))
+        }
+        return incResult([], [seg('streaming-fence', '/abs/report.html', 0, { lang: 'html-preview' })], emptyCache(1))
+      },
+    )
+    return { calls, renderMarkdownIncremental }
+  }
+
+  it('静默 ≥200ms 不提前 finalize（不挂静默定时器），fence 收尾后一次成型', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const { calls, renderMarkdownIncremental } = htmlPreviewMock()
+    const wrapper = mountMd(
+      { content: '```html-preview\n/abs/report.html', streaming: true },
+      { renderMarkdownIncremental, streamingFenceSilenceMs: 200 },
+    )
+    await flushRaf()
+    // 首帧：占位（lang=html-preview）、无卡片
+    expect(calls).toEqual([false])
+    expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="html-preview-card"]').exists()).toBe(false)
+
+    // 静默远超阈值：不挂定时器 → 无第二次渲染、占位保持（半截路径不产假降级卡片）
+    await vi.advanceTimersByTimeAsync(1000)
+    await nextTick()
+    expect(calls).toEqual([false])
+    expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="html-preview-card"]').exists()).toBe(false)
+
+    // fence 收尾标记到达 → 一次成型成卡片
+    await wrapper.setProps({ content: '```html-preview\n/abs/report.html\n```' } as never)
+    await flushRaf()
+    expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="html-preview-card"]').exists()).toBe(true)
+  })
+
+  it('mermaid fence 静默提前 finalize 保留不变（部分图形提前渲染有价值）', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const calls: boolean[] = []
+    const renderMarkdownIncremental = vi.fn(
+      async (_source: string, _cache: IncrementalMarkdownCache | null, _sid?: string, opts?: { finalizeOpenFence?: boolean }): Promise<IncrementalMarkdownResult & { cache: IncrementalMarkdownCache }> => {
+        const finalize = opts?.finalizeOpenFence === true
+        calls.push(finalize)
+        return finalize
+          ? incResult([], [seg('mermaid', 'graph LR', 0)], emptyCache(1))
+          : incResult([], [seg('streaming-fence', 'graph LR', 0, { lang: 'mermaid' })], emptyCache(1))
+      },
+    )
+    const wrapper = mountMd(
+      { content: '```mermaid\ngraph LR', streaming: true },
+      { renderMarkdownIncremental, streamingFenceSilenceMs: 200 },
+    )
+    await flushRaf()
+    expect(calls).toEqual([false])
+    expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(250)
+    await nextTick()
+    await nextTick()
+    expect(calls[calls.length - 1]).toBe(true)
+    expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(false)
+  })
+
+  it('首现竞态兜底：静默条件在 html-preview fence 新开帧命中 → 撤回 finalize 重渲染为占位', async () => {
+    // 阈值 0 强制静默条件恒真，模拟「本轮才新开的 fence + 上一帧 openFenceLang 未知」的误 finalize 帧
+    const { calls, renderMarkdownIncremental } = htmlPreviewMock()
+    const wrapper = mountMd(
+      { content: '```html-preview\n/abs/report.html', streaming: true },
+      { renderMarkdownIncremental, streamingFenceSilenceMs: 0 },
+    )
+    await flushRaf()
+    // 首帧 finalize=true 落了 html-preview 段 → 检出后撤回重渲染为占位（calls=[true,false]）
+    expect(calls).toEqual([true, false])
+    expect(wrapper.find('[data-testid="html-preview-card"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(true)
+  })
+})

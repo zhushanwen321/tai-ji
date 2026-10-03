@@ -230,6 +230,14 @@ async function getMarkdown(): Promise<MarkdownIt> {
       return stashTrusted(env, `<div class="md-mermaid" data-source="${encodeBase64(code)}"></div>`) + '\n'
     }
 
+    // html-preview 块（chat-html-support §6.2 D2）：输出纯路径占位容器，由 MarkdownRenderer
+    // 分发到 HtmlPreviewCard 组件（路径载荷不进 v-html/净化信任槽——卡片 DOM 由 Vue 模板产出）。
+    // 与 mermaid 同构：info 首词命中即识别（尾随 token 忽略），载荷 base64 进 data-path
+    // 杜绝引号/HTML 注入。内容合法性（空/多行 → 「路径非法」降级）由卡片判定（D3）。
+    if (lang.toLowerCase() === 'html-preview') {
+      return stashTrusted(env, `<div class="md-html-preview" data-path="${encodeBase64(code)}"></div>`) + '\n'
+    }
+
     // 普通代码块：shiki 高亮 + 语言标签 + 复制按钮
     const shikiHtml = highlightShikiSync(hl, code, lang)
     const langLabel = lang || 'text'
@@ -646,29 +654,37 @@ export interface MarkdownSegment {
   mermaid?: boolean
 }
 
-/** 占位正则：匹配 fence 规则产出的 mermaid 占位（data-source base64） */
-const MERMAID_PLACEHOLDER_RE = /<div class="md-mermaid" data-source="([^"]*)"><\/div>/g
+/** 占位正则：匹配 fence 规则产出的 mermaid / html-preview 占位（base64 载荷）。
+ *  两个占位形态互斥，单遍交替扫描保持段序（原 mermaid-only 正则的扩展，§6.3 D3）。 */
+const SEGMENT_PLACEHOLDER_RE =
+  /<div class="md-mermaid" data-source="([^"]*)"><\/div>|<div class="md-html-preview" data-path="([^"]*)"><\/div>/g
 
 /**
- * 把 markdown 渲染成 segment 数组：text 段（HTML）+ mermaid 段（源码）交替。
- * MarkdownRenderer 用 v-for 渲染：text 走 v-html，mermaid 走 <MermaidRenderer> 组件。
- * 替代 v-html 占位 + Vue render 函数动态挂载的脆弱模式——segments 让 mermaid 成为
- * template 里的正常组件，响应式可靠。
+ * 把 markdown 渲染成 segment 数组：text 段（HTML）+ mermaid 段（源码）+ html-preview 段
+ * （被预览 HTML 文件路径）交替。
+ * MarkdownRenderer 用 v-for 渲染：text 走 v-html，mermaid 走 <MermaidRenderer> 组件，
+ * html-preview 走 <HtmlPreviewCard> 组件（纯路径载荷，不进 v-html）。
+ * 替代 v-html 占位 + Vue render 函数动态挂载的脆弱模式——segments 让组件成为 template 里的
+ * 正常组件，响应式可靠。
  */
 export async function renderMarkdownSegments(content: string, env?: MarkdownEnv): Promise<MarkdownSegment[]> {
   const html = await renderMarkdown(content, env)
   const segments: MarkdownSegment[] = []
   let lastIndex = 0
-  MERMAID_PLACEHOLDER_RE.lastIndex = 0
+  SEGMENT_PLACEHOLDER_RE.lastIndex = 0
   let match: RegExpExecArray | null
-  while ((match = MERMAID_PLACEHOLDER_RE.exec(html)) !== null) {
+  while ((match = SEGMENT_PLACEHOLDER_RE.exec(html)) !== null) {
     // 占位之前的 HTML 作为 text 段
     if (match.index > lastIndex) {
       segments.push({ type: 'text', content: html.slice(lastIndex, match.index) })
     }
-    // mermaid 段：解码 base64 source
-    const source = decodeBase64(match[1])
-    segments.push({ type: 'mermaid', content: source })
+    // mermaid 段：解码 base64 source；html-preview 段：解码 base64 路径（原样承载，
+    // trim/合法性判定归消费组件，切片层不做猜测）
+    if (match[1] !== undefined) {
+      segments.push({ type: 'mermaid', content: decodeBase64(match[1]) })
+    } else {
+      segments.push({ type: 'html-preview', content: decodeBase64(match[2]) })
+    }
     lastIndex = match.index + match[0].length
   }
   // 剩余 HTML 作为 text 段

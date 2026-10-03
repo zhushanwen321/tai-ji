@@ -57,7 +57,17 @@ function escapeHtmlForFallback(s: string): string {
  * 用内容前缀等价判据：流式 content 只会 append，finalize 快照的前缀未变则保持 finalize，
  * 改写/清空即解除（stickyAfter 置 null）。代价：粘滞期间同消息后续新开 fence 不再走占位
  * （闭合 fence 渲染与 finalize 无关、输出相同，仅损失占位优化，无正确性影响）。
+ *
+ * html-preview 分流（chat-html-support §6.3 D3 流式形态）：fenceLang = 上一帧结果的未闭合
+ * fence 语言名（useMarkdownStreaming 持有）。首词为 html-preview 时静默/强制提前 finalize
+ * 不生效——路径载荷是原子语义，半截路径只会产出假降级卡片；只由 fence 收尾标记到达 /
+ * 消息 complete 触发（complete 已在上方判定成立，fence 收尾后 openFence 消失、finalize
+ * 不再参与尾段形态）。mermaid / 代码 fence 的静默提前 finalize 行为不变。
  */
+function isHtmlPreviewFence(lang: string | null): boolean {
+  return (lang ?? '').toLowerCase() === 'html-preview'
+}
+
 function resolveStreamingFinalize(
   text: string,
   opts: { forceFinalize?: boolean } | undefined,
@@ -65,6 +75,7 @@ function resolveStreamingFinalize(
   silenceMs: number,
   silenceThresholdMs: number,
   currentSticky: string | null,
+  fenceLang: string | null,
 ): { finalize: boolean; stickyAfter: string | null } {
   let finalize =
     opts?.forceFinalize === true || complete || silenceMs >= silenceThresholdMs
@@ -73,9 +84,17 @@ function resolveStreamingFinalize(
     if (text.startsWith(currentSticky)) finalize = true
     else stickyAfter = null
   }
+  // html-preview 分流（见函数头注释）：未 complete 时不得提前 finalize
+  if (finalize && !complete && isHtmlPreviewFence(fenceLang)) finalize = false
   // finalize 发生且消息未完成 → 记录粘滞快照（complete 天然逐帧 finalize，无需粘滞）
   if (finalize && !complete) stickyAfter = text
   return { finalize, stickyAfter }
+}
+
+/** 从尾段回读未闭合 fence 语言名（占位段的 lang 即 scan.openFence 首词）；无占位 → null */
+function readOpenFenceLang(tailSegments: MarkdownSegment[]): string | null {
+  const fenceSeg = tailSegments.find((s) => s.type === 'streaming-fence')
+  return fenceSeg?.lang ?? null
 }
 
 export function useMarkdownStreaming(
@@ -96,6 +115,9 @@ export function useMarkdownStreaming(
    *  该消息流中某个未闭合 fence 已被 finalize 过。后续帧 content 仍是快照的 append-only 延长
    *  （同一消息流）时保持 finalize=true（见文件头「粘滞」段）。 */
   let finalizedStickyPrefix: string | null = null
+  /** 最近一帧结果里未闭合 fence 的语言名（finalize 分流依据，§6.3 D3）：首词为 html-preview
+   *  时静默提前 finalize 不生效。null = 无未闭合 fence（或尚未渲染）。 */
+  let openFenceLang: string | null = null
   /** 卸载标志（W23 review Fix-3）：短路 in-flight 渲染结果应用与 finally 分支的 queued 消费 */
   let disposed = false
 
@@ -152,10 +174,12 @@ export function useMarkdownStreaming(
     segments.value = []
     incrementalCache = null
     finalizedStickyPrefix = null
+    openFenceLang = null
     clearFenceFinalizeTimer()
   }
 
-  /** 增量路径（D-5/W23）：finalize 判定（含粘滞）→ 壳增量渲染 → 序号守卫应用 + 重排 finalize 定时器 */
+  /** 增量路径（D-5/W23）：finalize 判定（含粘滞 + html-preview 分流）→ 壳增量渲染 →
+   *  序号守卫应用 + 重排 finalize 定时器 */
   async function runIncrementalRender(
     renderIncremental: ChatViewDeps['renderMarkdownIncremental'],
     text: string,
@@ -165,19 +189,35 @@ export function useMarkdownStreaming(
     // complete 语义：streaming !== true（false/undefined = 消息完成或静态内容，占位判定直接 finalize）
     const complete = props.streaming !== true
     const silenceMs = performance.now() - lastContentAt
-    const { finalize, stickyAfter } = resolveStreamingFinalize(
+    const decision = resolveStreamingFinalize(
       text,
       opts,
       complete,
       silenceMs,
       deps.streamingFenceSilenceMs,
       finalizedStickyPrefix,
+      openFenceLang,
     )
-    finalizedStickyPrefix = stickyAfter
-    const r = await renderIncremental(text, incrementalCache, props.sessionId ?? undefined, {
+    let finalize = decision.finalize
+    let r = await renderIncremental(text, incrementalCache, props.sessionId ?? undefined, {
       finalizeOpenFence: finalize,
     })
     incrementalCache = r.cache
+    // 首现竞态兜底（§6.3 D3「半截路径不产假降级卡片」）：上面的 openFenceLang 是上一帧结果的
+    // 回读——本轮才新开的 html-preview fence，在静默条件命中（判定层 fenceLang 尚为 null/旧值）
+    // 时会被误 finalize，tail 落成 html-preview 段即半截路径卡片闪现。检出「未 complete 却落了
+    // html-preview 段」→ 撤回 finalize 以占位形态重渲染；fence 实际已闭合时无 open fence、
+    // finalize 不参与尾段形态，两次输出等价（仅多一次渲染，且只在竞态帧发生）。
+    if (finalize && !complete && r.tailSegments.some((s) => s.type === 'html-preview')) {
+      finalize = false
+      r = await renderIncremental(text, incrementalCache, props.sessionId ?? undefined, {
+        finalizeOpenFence: false,
+      })
+      incrementalCache = r.cache
+    } else {
+      finalizedStickyPrefix = decision.stickyAfter
+    }
+    openFenceLang = readOpenFenceLang(r.tailSegments)
     // 卸载后不应用结果、不重挂 finalize 定时器（W23 review Fix-3）
     if (disposed) return
     if (seq === renderSeq) {
@@ -197,6 +237,7 @@ export function useMarkdownStreaming(
       // 增量缓存可能已被半途污染（renderIncremental 抛错前原地改写），作废重建保证下帧正确
       incrementalCache = null
       finalizedStickyPrefix = null
+      openFenceLang = null
       clearFenceFinalizeTimer()
     }
   }
@@ -210,11 +251,15 @@ export function useMarkdownStreaming(
 
   /**
    * tail 含 streaming-fence 占位且消息未完成时安排静默 finalize 定时器（每帧渲染后重排）。
+   * html-preview 占位不挂定时器（§6.3 D3 分流）：静默 finalize 对本段类型不生效，挂上只会
+   * 每阈值触发一次被判定层再拦截的空转重渲染——收尾/complete 才是本段的 finalize 触发源。
    */
   function armFenceFinalizeTimer(tailSegments: MarkdownSegment[], complete: boolean): void {
     clearFenceFinalizeTimer()
     if (complete) return
-    if (!tailSegments.some((s) => s.type === 'streaming-fence')) return
+    const fenceSeg = tailSegments.find((s) => s.type === 'streaming-fence')
+    if (!fenceSeg) return
+    if (isHtmlPreviewFence(fenceSeg.lang ?? null)) return
     const remaining = Math.max(0, deps.streamingFenceSilenceMs - (performance.now() - lastContentAt))
     fenceFinalizeTimer = setTimeout(() => {
       fenceFinalizeTimer = null
@@ -239,6 +284,9 @@ export function useMarkdownStreaming(
     () => props.content,
     (text) => {
       lastContentAt = performance.now()
+      // 新 token 到达 → 撤销在途静默 finalize：静默语义只在「此后无新内容」时成立，
+      // 不清会让已排定定时器带旧 remaining 在新内容上触发一次迟到 finalize
+      clearFenceFinalizeTimer()
       scheduleRender(text)
     },
     { immediate: true },

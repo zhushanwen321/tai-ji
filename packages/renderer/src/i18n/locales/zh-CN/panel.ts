@@ -399,6 +399,19 @@ export default {
     fullscreenTitle: 'Mermaid 图表全屏查看',
     fullscreenDesc: '使用缩放控件查看 Mermaid 图表详情。',
   },
+  // html-preview fence 卡片（chat-html-support §6.3 D3；降级原因码一一对应）
+  htmlPreview: {
+    kind: 'HTML 预览',
+    open: '打开预览',
+    checking: '检查中…',
+    // 路径非法：fence 内容 trim 后为空或含换行（单条路径语义）
+    invalidPath: '路径非法',
+    // 无法解析路径：相对路径 + resourceBaseDir / session cwd 皆缺（不静默猜基准）
+    unresolvedPath: '无法解析路径',
+    notFound: '文件不存在',
+    isDir: '路径是目录',
+    outOfWhitelist: '不可预览（不在预览白名单）',
+  },
   modelSelect: {
     noModel: '暂无可用模型，请先在设置中导入凭据或配置供应商',
     switchModel: '切换模型',
@@ -521,6 +534,14 @@ export default {
     copyFilePath: '复制路径',
     injectFileRef: '加入文件引用到对话框',
     injectToNew: '引用到新对话',
+    // [chat-html-support §6.4 D4] HTML 渲染态（预览/源码切换 + servable 预检降级占位）
+    htmlTabSource: '源码',
+    htmlRefresh: '刷新',
+    htmlPreviewHint: '可切换到「源码」查看内容；确认文件仍在预览白名单内后重试',
+    htmlReasonNotFound: '文件不存在',
+    htmlReasonIsDir: '目标是一个目录',
+    htmlReasonOutOfWhitelist: '不在预览白名单',
+    htmlReasonServiceUnavailable: '预览服务不可用',
   },
   panel: {
     sessionDead: '会话进程已退出',

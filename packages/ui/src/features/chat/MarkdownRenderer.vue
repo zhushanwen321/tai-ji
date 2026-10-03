@@ -35,6 +35,15 @@
         <span class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" />
         <span data-testid="md-streaming-fence-lang" class="font-mono text-[length:var(--text-2xs)] font-semibold lowercase tracking-[0.08em] text-neutral-dim">{{ seg.lang }}</span>
       </div>
+      <!-- html-preview 段（chat-html-support §6.3 D3）：纯路径载荷走 HtmlPreviewCard 组件
+           （不经 v-html/净化信任槽）；路径解析矩阵与 ④路同源——props.resourceBaseDir 覆盖优先、
+           缺省由卡片经 deps.sessionCwdOf 拿 session cwd -->
+      <HtmlPreviewCard
+        v-else-if="seg.type === 'html-preview'"
+        :path="seg.content"
+        :session-id="props.sessionId"
+        :resource-base-dir="props.resourceBaseDir"
+      />
       <MermaidRenderer v-else :source="seg.content" />
     </template>
     <!-- 歧义文件选择浮层：裸 basename 多匹配时弹出（锚定到点击的 <a>，portal 到 body） -->
@@ -66,6 +75,7 @@ import type { MarkdownSegment } from './markdown-types'
 import { findByBasename } from '../../lib/file-basename'
 import { RUNNING_LOADER_SVG } from './block-icon'
 import AmbiguousFilePopover from './AmbiguousFilePopover.vue'
+import HtmlPreviewCard from './HtmlPreviewCard.vue'
 import MermaidRenderer from './MermaidRenderer.vue'
 import { useChatViewDeps } from './chat-view-deps'
 import { useMarkdownStreaming } from './composables/useMarkdownStreaming'
@@ -106,7 +116,8 @@ function decodeB64(b64: string): string {
  * v-for 段 key（W23 review Fix-2）：streaming-fence 占位段固定哨兵 'sf'——占位段的 segId
  * 在协议层每帧重分配（tail 段每帧重建），若 key 随帧变则占位 DOM 重建、loader 旋转动画
  * （1.4s 周期）每帧从头重启，视觉冻结在起转 18°。文档级至多一个未闭合 fence，哨兵不撞号。
- * 其余段沿用 segId（前缀段跨帧不变 → DOM 复用）/ index（全量降级路径）。
+ * 其余段沿用 segId（前缀段跨帧不变 → DOM 复用）/ index（全量降级路径）。html-preview 段
+ * （fence 闭合后才成段，属前缀/稳定区）走 segId——卡片预检态随实例保活，不被重建重置。
  */
 function segKey(seg: MarkdownSegment, i: number): string {
   if (seg.type === 'streaming-fence') return 'sf'

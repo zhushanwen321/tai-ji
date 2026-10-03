@@ -407,6 +407,19 @@ export default {
     fullscreenTitle: 'Mermaid diagram fullscreen',
     fullscreenDesc: 'Use zoom controls to view Mermaid diagram details.',
   },
+  // html-preview fence 卡片（chat-html-support §6.3 D3；降级原因码一一对应）
+  htmlPreview: {
+    kind: 'HTML preview',
+    open: 'Open preview',
+    checking: 'Checking…',
+    // 路径非法：fence 内容 trim 后为空或含换行（单条路径语义）
+    invalidPath: 'Invalid path',
+    // 无法解析路径：相对路径 + resourceBaseDir / session cwd 皆缺（不静默猜基准）
+    unresolvedPath: 'Cannot resolve path',
+    notFound: 'File not found',
+    isDir: 'Path is a directory',
+    outOfWhitelist: 'Not previewable (outside the preview whitelist)',
+  },
   modelSelect: {
     noModel: 'No models available. Import credentials or configure a provider in Settings first.',
     switchModel: 'Switch model',
@@ -529,6 +542,14 @@ export default {
     copyFilePath: 'Copy path',
     injectFileRef: 'Add file reference to composer',
     injectToNew: 'Reference in new chat',
+    // [chat-html-support §6.4 D4] HTML render state (preview/source toggle + servable precheck fallback)
+    htmlTabSource: 'Source',
+    htmlRefresh: 'Refresh',
+    htmlPreviewHint: 'Switch to "Source" to inspect the file; retry after confirming it is still inside the preview allowlist',
+    htmlReasonNotFound: 'File not found',
+    htmlReasonIsDir: 'Target is a directory',
+    htmlReasonOutOfWhitelist: 'Not in the preview allowlist',
+    htmlReasonServiceUnavailable: 'Preview service unavailable',
   },
   panel: {
     sessionDead: 'Session process exited',
