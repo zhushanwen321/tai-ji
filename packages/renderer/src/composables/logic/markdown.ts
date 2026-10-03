@@ -625,12 +625,15 @@ export async function renderMarkdown(content: string, env?: MarkdownEnv): Promis
  *
  * D-5 增量渲染（W22）在 text/mermaid 之外扩展 `streaming-fence` 变体（未闭合 fence 的流式占位），
  * 并为段增加可选稳定键 `segId`（renderIncremental 首次产出时分配，前缀段跨帧不变）。
+ * chat-html-support（§6.3 D3 / §7「fence 段」行）再扩展 `html-preview` 变体（载荷 = 被预览
+ * HTML 文件路径字符串，卡片走 HtmlPreviewCard 组件、不进 sanitize 信任槽）。
  * 协议形状对齐 ui 层 MarkdownRenderer 的现有消费结构（ui/src/features/chat/markdown-types.ts，
  * W23 同步镜像扩展）。
  */
 export interface MarkdownSegment {
-  /** text: HTML（v-html）；mermaid: 源码（MermaidRenderer 渲染）；streaming-fence: fence 内已流式源码（占位数据） */
-  type: 'text' | 'mermaid' | 'streaming-fence'
+  /** text: HTML（v-html）；mermaid: 源码（MermaidRenderer 渲染）；html-preview: 被预览 HTML 文件路径；
+   *  streaming-fence: fence 内已流式源码（占位数据） */
+  type: 'text' | 'mermaid' | 'html-preview' | 'streaming-fence'
   /** 各 type 的载荷（见 type 注释；streaming-fence 为 fence 行之后的已到达源码） */
   content: string
   /** 段稳定键：单调递增、跨帧不复用（前缀段一经分配永不变）；W23 渲染树 v-for :key 用 */

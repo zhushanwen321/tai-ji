@@ -6,6 +6,10 @@
  *
  * - text 段：渲染后的 HTML 字符串（含代码块/链接等，走 v-html）
  * - mermaid 段：原始 mermaid 源码（走 MermaidRenderer 组件渲染）
+ * - html-preview 段（chat-html-support §6.3 D3 / §7「fence 段」行）：content 为被预览
+ *   HTML 文件的路径字符串（fence info 首词 = 'html-preview'，单行路径；绝对路径直用、
+ *   相对路径按 resourceBaseDir ?? sessionCwdOf(sessionId) 矩阵解析）。卡片 DOM 由
+ *   HtmlPreviewCard 组件产出，**不进 v-html / DOMPurify 信任槽**——纯路径载荷。
  * - streaming-fence 段（D-5 增量渲染，W22 协议 / W23 消费）：未闭合 fence 的流式占位
  *   ——content 为 fence 内已到达源码，lang 为语言名，mermaid 标记是否 mermaid fence；
  *   占位 UI（语言名 + spinner 行）由 MarkdownRenderer 特殊渲染
@@ -18,7 +22,7 @@
  * 渲染树 v-for 按 segId 取 key（全量渲染路径不携带，undefined）。
  */
 export interface MarkdownSegment {
-  type: 'text' | 'mermaid' | 'streaming-fence'
+  type: 'text' | 'mermaid' | 'html-preview' | 'streaming-fence'
   content: string
   /** 段稳定键（D-5 增量渲染）：单调递增、前缀段跨帧不变；全量路径不携带。
    *  例外：streaming-fence 占位段的 segId 每帧重分配（tail 段每帧重建），组件侧对该类型
