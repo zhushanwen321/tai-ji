@@ -501,8 +501,10 @@ async function main(): Promise<void> {
   // codemode 启动迁移（codemode 设计 D1/D2/A1）：defaultTools 字段缺失 → 幂等写
   // ["+codemode"]，字段存在（任何内容）→ 不碰。置于 cleanLeakedPackages 之后同窗口
   // （listen 前同步段、先于一切 pi 进程 spawn）：cleanLeakedPackages 是既有 settings
-  // 读写点，坏文件会被它按既有行为隔离改名——其后本迁移的 raw 预检按「副本形态」判
-  // 损坏并跳过 + 告警，正是 A1 预期的组合行为（自身读写路径绝不触发或加速隔离）。
+  // 读写点，坏文件会被它按既有行为隔离改名，且 updateSettingsFields 隔离后无条件写回
+  // 默认内容（原路径重建为合法文件）——其后本迁移对重建后的合法文件正常判定并写入；
+  // 仅当原路径缺失且有隔离副本（重建未发生）时才走副本形态拒入 + 告警（A1 副本形态，
+  // u6 S7 实测：启动窗变体下错误态不可达属预期，验收以「运行中改坏」变体为准）。
   runCodemodeStartupMigration()
   // PiConfigStore 提前构造（纯委托无副作用）：下方 A1-2 迁移经 port 读写 models.json。
   const configStore = new PiConfigStore()

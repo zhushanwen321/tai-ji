@@ -699,6 +699,7 @@ export default {
     codemodeEnable: '启用 Code Mode',
     codemodeDesc: '模型可编写 JavaScript 脚本，在脚本中并行调用工具、过滤过大的结果、生成图片；配置随新启动的会话读取',
     codemodeSwitchFailed: '开关操作失败，请重试',
+    codemodeSwitchFailedDetail: '开关操作失败：{message}',
     codemodeSetRejected: '写入被拒绝：设置文件已损坏（{path}）。修复或删除该文件后重试，无需重启',
     codemodeCorruptionTitle: '设置文件已损坏，Code Mode 开关暂不可用',
     codemodeCorruptionGuide: '修复或删除该文件后重试开关操作，无需重启——损坏检测每次现查，修复即恢复；新会话按生效时机读取配置',

@@ -93,7 +93,6 @@ export type { LlmRetryConfig, LlmRetryProviderConfig } from './llm-retry'
 export { LLM_RETRY_DOMAIN, validateLlmRetryConfig } from './llm-retry'
 // codemode 域 WS 协议契约（codemode 设计 D1/A1：开关命令对请求响应 + settings.json 损坏错误态形状，renderer 与 runtime 共用）
 export type {
-  CodemodeDefaultTools,
   CodemodeSettingsCorruption,
   CodemodeEnabledResult,
   CodemodeSetEnabledRequest,

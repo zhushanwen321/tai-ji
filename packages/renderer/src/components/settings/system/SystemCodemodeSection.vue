@@ -120,7 +120,15 @@ async function onToggle(next: boolean): Promise<void> {
   } catch (e) {
     enabled.value = !next
     console.warn('[SystemCodemodeSection] failed to toggle codemode:', e)
-    toastError(t('settings.system.codemodeSwitchFailed'))
+    // 失败路径 2（codemode 设计 §3.1）：非损坏类 RPC 失败（如 settings.json 只读 EACCES
+    // 写失败）的 error 信封 message 含目标文件路径（runtime handler_error 透传 Node fs
+    // 错误原文），透传给用户定位修复对象；message 缺失时回退静态提示。
+    const detail = e instanceof Error && e.message ? e.message : ''
+    toastError(
+      detail
+        ? t('settings.system.codemodeSwitchFailedDetail', { message: detail })
+        : t('settings.system.codemodeSwitchFailed'),
+    )
   } finally {
     switching.value = false
   }

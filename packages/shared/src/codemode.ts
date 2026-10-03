@@ -12,14 +12,6 @@
  */
 
 /**
- * settings.json `defaultTools` 字段类型（pi 默认工具集条目数组；条目为工具名 /
- * "+name" / "-name" 增量形态，解析语义权威在 pi settings-manager——启动迁移写
- * ["+codemode"]、开关关闭写 ["-codemode"] 占位，见设计 D2）。
- * runtime `SettingsFieldScope` 'tools' 域与 `PiSettings.defaultTools` 引用本类型。
- */
-export type CodemodeDefaultTools = string[]
-
-/**
  * settings.json 损坏错误态形状（设计 A1 检测的两种损坏形态的协议投影）：
  * ①原路径存在但 JSON 非法；②原路径已被其他读方自动隔离为 `.corrupt-<时间戳>` 副本。
  * 字段即 D3 错误态渲染所需：完整路径（带复制按钮）+ 隔离副本提示。
@@ -49,5 +41,12 @@ export interface CodemodeSetEnabledRequest { // oe-exempt:20261004:framework:WS 
  * 隔离副本提示（D3 错误态渲染同源）。
  */
 export type CodemodeSetEnabledResult =
-  | { ok: true; enabled: boolean }
-  | { ok: false; error: string; corruption: CodemodeSettingsCorruption }
+  | {
+      ok: true
+      enabled: boolean
+    }
+  | {
+      ok: false
+      error: string
+      corruption: CodemodeSettingsCorruption
+    }

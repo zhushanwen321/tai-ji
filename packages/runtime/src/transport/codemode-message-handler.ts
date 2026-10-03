@@ -26,19 +26,14 @@ export class CodemodeMessageHandler {
       }
       case 'config.setCodemodeEnabled': {
         // codemode 开关写（D2 语义表 + A1 写点拒入）：损坏拒入走 ok:false 信封
-        // （error 含拒绝原因与恢复指引，corruption 含路径与隔离副本提示），不 sendError
-        // 不广播；成功 reply + 广播 config.codemodeEnabled（多窗口同步，同 retry 域
-        // terminal 范式；payload 为写后落盘终态，corruption 恒 null）。
+        // （error 含拒绝原因与恢复指引，corruption 含路径与隔离副本提示），不 sendError；
+        // 成功仅 reply 终态信封、不广播——设计 D3 的开关协议只有 get 读取 + set 切换
+        // （+ 前端乐观写），未要求多窗口同步，config.codemodeEnabled 广播无订阅消费方
+        // （对照 retry 域 broadcast→onRetryConfig 链路，codemode 未接消费端）；跨窗口
+        // 一致性由各窗口打开设置页时的 get 拉取保证（ADR-0075 拉为主、推补充）。
         const { enabled } = msg.payload
         const result = this.ctx.configService.setCodemodeEnabled(enabled)
         this.ctx.reply(ws, msg.id, 'config.codemodeSetEnabled', result)
-        if (result.ok) {
-          this.ctx.broadcast({
-            type: 'config.codemodeEnabled',
-            id: this.ctx.nextPushId(),
-            payload: { enabled: result.enabled, corruption: null },
-          })
-        }
         return true
       }
       default:

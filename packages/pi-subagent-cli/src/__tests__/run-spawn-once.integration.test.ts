@@ -409,9 +409,12 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       );
       const argv: string[] = JSON.parse(result.content ?? "[]");
       expect(argv).toContain("--no-extensions");
-      const extIdx = argv.indexOf("--extension");
-      expect(extIdx).toBeGreaterThanOrEqual(0);
-      expect(argv[extIdx + 1]).toBe(extPath);
+      // 基座恒带 --extension builtin:codemode（codemode 设计 D8），白名单路径追加其后——
+      // 白名单路径须与 --extension 成对出现（以值反查，不经 indexOf 首个 --extension，
+      // 那是基座对）
+      const extValIdx = argv.indexOf(extPath);
+      expect(extValIdx).toBeGreaterThan(0);
+      expect(argv[extValIdx - 1]).toBe("--extension");
       // 旧镜像机制的面不再透传（--approve/--no-context-files 属主进程 flag，非孙进程固有）
       expect(argv).not.toContain("--approve");
       expect(argv).not.toContain("--no-context-files");
@@ -420,12 +423,15 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
     }
   }, 15_000);
 
-  it("[D2] extensionPaths 缺省 → 孙进程 argv 不含 --extension（基座 --no-extensions 仍在）", async () => {
+  it("[D2] extensionPaths 缺省 → 孙进程 argv 仅含基座 --extension builtin:codemode 一对（--no-extensions 仍在）", async () => {
     const h = await makeHarness("echo-argv");
     try {
       const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
       const argv: string[] = JSON.parse(result.content ?? "[]");
-      expect(argv).not.toContain("--extension");
+      // 基座恒带 codemode 装载对（codemode 设计 D8）；缺省白名单 = 无第二个 --extension
+      expect(argv.filter((a) => a === "--extension")).toHaveLength(1);
+      const extIdx = argv.indexOf("--extension");
+      expect(argv[extIdx + 1]).toBe("builtin:codemode");
       expect(argv).toContain("--no-extensions");
     } finally {
       restoreHarness(h);

@@ -6,8 +6,9 @@
  * - 路由注册：两命令经 handleSettingsMessage 查表命中（handled=true）并委托
  *   CodemodeMessageHandler（settings-message-handler.ts routes 表断言）。
  * - get：reply config.codemodeEnabled payload 透传（含损坏错误态形状透传）。
- * - set 成功：reply config.codemodeSetEnabled 终态信封 + 广播 config.codemodeEnabled
- *   （多窗口同步，同 retry/terminal 域范式）。
+ * - set 成功：reply config.codemodeSetEnabled 终态信封，不广播——设计 D3 的开关协议
+ *   只有 get 读取 + set 切换（+ 前端乐观写），config.codemodeEnabled 广播零订阅消费方，
+ *   已删（协议类型保留作 get reply）。
  * - set 损坏拒入：ok:false 信封经 reply 返回，不广播不 sendError（shared codemode.ts
  *   协议定死错误数据在信封内，与 retry 的 D10 error envelope 语义不同）。
  *
@@ -80,16 +81,15 @@ describe('config.getCodemodeEnabled / config.setCodemodeEnabled（路由注册 +
     })
   })
 
-  it('路由注册 + set 成功：委托 setCodemodeEnabled(true) + reply 终态信封 + 广播 config.codemodeEnabled', async () => {
+  it('路由注册 + set 成功：委托 setCodemodeEnabled(true) + reply 终态信封 + 不广播', async () => {
     const setCodemodeEnabled = vi.fn().mockReturnValue({ ok: true, enabled: true })
     const { ctx, replies, broadcasts, handler } = makeHandler({ setCodemodeEnabled })
     const handled = await handler.handleSettingsMessage(msg('config.setCodemodeEnabled', { enabled: true }), WS)
     expect(handled).toBe(true)
     expect(ctx.configService.setCodemodeEnabled).toHaveBeenCalledWith(true)
     expect(replies[0]).toEqual({ id: 'm1', type: 'config.codemodeSetEnabled', payload: { ok: true, enabled: true } })
-    const b = broadcasts.find(m => m.type === 'config.codemodeEnabled')
-    expect(b).toBeDefined()
-    expect(b?.payload).toEqual({ enabled: true, corruption: null })
+    // 设计 D3 未要求多窗口同步：config.codemodeEnabled 广播零订阅消费方，set 成功不发射。
+    expect(broadcasts).toHaveLength(0)
   })
 
   it('set 损坏拒入：ok:false 信封经 reply 返回，不广播不 sendError（协议信封语义，非 D10 error envelope）', async () => {

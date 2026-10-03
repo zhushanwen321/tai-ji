@@ -35,6 +35,8 @@ import type { ServerMessageMap, ReplyPayloadMap } from '@taiji/shared'
  * 文件名一段），四个 '..' 到 packages/，protocol.ts = <workspace>/packages/shared/src/protocol.ts。
  */
 const PROTOCOL_TS = resolve(fileURLToPath(import.meta.url), '..', '..', '..', '..', 'shared', 'src', 'protocol.ts')
+// codemode 域形状 SSOT（protocol.ts 头部登记约定：payload/reply 形状在 ./codemode）
+const CODEMODE_DOMAIN_SOURCE = readFileSync(resolve(PROTOCOL_TS, '..', 'codemode.ts'), 'utf8')
 
 // ── 登记清单（SSOT：新增 mutation 必须在此登记，漏登记测试即红）──────────────
 
@@ -125,6 +127,16 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     contract: 'echo-value',
     replyKey: 'config.retryConfig',
     effectiveFields: ['config'],
+  },
+  {
+    // codemode 开关写（codemode 设计 D1/A1/D2）：后端按 D2 语义表规范化落盘（幂等不动 /
+    // 负条目占位），reply ok 分支 enabled = 写后落盘终态（生效值）；ok:false 为损坏拒入
+    // 信封（error+corruption，A1 写点拒入），错误态不走 effectiveFields
+    type: 'config.setCodemodeEnabled',
+    branch: 'transformable',
+    contract: 'effective-value',
+    replyKey: 'config.codemodeSetEnabled',
+    effectiveFields: ['enabled'],
   },
   {
     type: 'config.setSystemPrompt',
@@ -487,22 +499,38 @@ function extractMapValue(block: string, key: string): string | undefined {
   return raw === undefined ? undefined : raw.split('//')[0].trim()
 }
 
-/** 提取 reply 形状文本：内联 `{ ... }` 直接返回；具名 `XxxMutationReply` 引用则取该 interface 的 body。
+/** 提取 reply 形状文本：内联 `{ ... }` 直接返回；具名引用则取该声明的 body。
+ *  具名查找次序：protocol.ts → ./codemode 域文件（protocol.ts 头部登记约定：codemode 域
+ *  payload/reply 形状 SSOT 在 ./codemode，本文件仅登记命令对）；interface 与 type 联合两种
+ *  声明形态均支持。
  *  ServerMessageMapBase 无该 replyKey 时回退取 ReplyPayloadMap 映射行的内联形状——适用
  *  wire reply 无具名广播条目的 RPC（如 config.setScopedModels 的 'config.scopedModels'）。 */
+function extractNamedDeclarationBody(source: string, base: string): string | null {
+  const iface = source.indexOf(`export interface ${base} {`)
+  if (iface !== -1) {
+    const end = source.indexOf('\n}', iface)
+    return source.slice(iface, end)
+  }
+  const typeAnchor = `export type ${base} =`
+  const t = source.indexOf(typeAnchor)
+  if (t !== -1) {
+    let end = source.indexOf('\nexport ', t)
+    if (end === -1) end = source.length
+    return source.slice(t, end)
+  }
+  return null
+}
+
 function extractReplyShape(replyKey: string, requestType: string): string {
   const base = extractMapValue(SERVER_MESSAGE_MAP_BASE_BLOCK, replyKey)
   if (base !== undefined) {
     if (base.startsWith('{')) return base
-    // 具名引用：取 `export interface <Name> {` 到配对 `}` 的 body（嵌套一层对象字面量内
-    // 的 } 会导致提前截断——当前 mutation reply 形状均为扁平字段，无嵌套）
-    const anchor = `export interface ${base} {`
-    const start = PROTOCOL_SOURCE.indexOf(anchor)
-    if (start === -1) {
-      throw new Error(`reply '${replyKey}' 引用了具名类型 ${base}，但 protocol.ts 中未找到其 interface 声明`)
+    const body = extractNamedDeclarationBody(PROTOCOL_SOURCE, base)
+      ?? extractNamedDeclarationBody(CODEMODE_DOMAIN_SOURCE, base)
+    if (body === null) {
+      throw new Error(`reply '${replyKey}' 引用了具名类型 ${base}，但 protocol.ts / codemode 域文件中均未找到其声明`)
     }
-    const end = PROTOCOL_SOURCE.indexOf('\n}', start)
-    return PROTOCOL_SOURCE.slice(start, end)
+    return body
   }
   const inline = extractMapValue(REPLY_PAYLOAD_MAP_BLOCK, requestType)
   if (inline !== undefined && inline.startsWith('{')) return inline

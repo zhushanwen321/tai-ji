@@ -114,17 +114,24 @@ describe('SystemCodemodeSection（codemode u3）', () => {
     wrapper.unmount()
   })
 
-  it('乐观写失败回滚：setCodemodeEnabled reject → Switch 回滚 checked + error toast', async () => {
+  it('乐观写失败回滚：setCodemodeEnabled reject → Switch 回滚 checked + error toast 含错误详情（失败路径 2 的目标文件路径）', async () => {
     const wrapper = mountSection()
     await flushPromises()
 
-    transportApiMock.setCodemodeEnabled.mockRejectedValueOnce(new Error('rpc down'))
+    // 权限异常形态（设计 §3.1 失败路径 2）：runtime handler_error 信封 message = Node fs
+    // 错误原文（server.ts toErrorMessage 透传），含目标 settings.json 路径
+    transportApiMock.setCodemodeEnabled.mockRejectedValueOnce(
+      new Error(
+        "EACCES: permission denied, rename '/home/demo/.pi/agent/settings.json.tmp-1' -> '/home/demo/.pi/agent/settings.json'",
+      ),
+    )
     await wrapper.find('[data-testid="codemode-enabled-switch"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.find('[data-testid="codemode-enabled-switch"]').attributes('data-state')).toBe('checked')
     expect(toastMock.error).toHaveBeenCalledTimes(1)
     expect(toastMock.error.mock.calls[0][0]).toContain('开关操作失败')
+    expect(toastMock.error.mock.calls[0][0]).toContain('/home/demo/.pi/agent/settings.json')
     wrapper.unmount()
   })
 
