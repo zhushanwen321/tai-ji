@@ -721,6 +721,11 @@ function appendResumeRegisteredEntry(
   const entry = buildWorkflowRecordRegisteredEntryData({
     runId,
     scriptName: created.workflowName,
+    // scriptPath 与 scriptName 同源取自 run-created 帧（写侧 dispatchRunCreated
+    // 条件式恒带）；旧格式帧缺载荷时回落空串（读侧与投影链按缺省处理）。不可写死
+    // 空串：同 id 后到的 resume 条目在 events-projection 的 last-writer-wins 下
+    // 会遮蔽原始注册条目，GUI 全路径退化短名。
+    scriptPath: created.scriptPath ?? "",
     startedAt: created.ts,
     recordPath: recordPath,
   });

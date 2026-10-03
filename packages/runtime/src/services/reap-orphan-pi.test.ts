@@ -237,6 +237,7 @@ describe('spawn 清单读取与 fail-safe 降级（V10④：宁漏不误杀）',
         listProcesses: async () => psStdout([row(501, 1, piCmd(MARKERS[0]))]),
         signal,
         readSpawnMarkers: realRead(dataDir),
+        getDescendantPids: async () => [],
       })
       expect(res.reaped).toEqual([])
       expect(signal).not.toHaveBeenCalled()
@@ -260,6 +261,7 @@ describe('spawn 清单读取与 fail-safe 降级（V10④：宁漏不误杀）',
         listProcesses: async () => psStdout([row(502, 1, piCmd(MARKERS[0]))]),
         signal,
         readSpawnMarkers: realRead(dataDir),
+        getDescendantPids: async () => [],
       })
       expect(res.reaped).toEqual([])
       expect(signal).not.toHaveBeenCalled()
@@ -281,6 +283,7 @@ describe('spawn 清单读取与 fail-safe 降级（V10④：宁漏不误杀）',
         listProcesses: async () => psStdout([row(503, 1, piCmd(MARKERS[0]))]),
         signal,
         readSpawnMarkers: realRead(dataDir),
+        getDescendantPids: async () => [],
       })
       expect(res.reaped).toEqual([])
       expect(signal).not.toHaveBeenCalled()
@@ -304,6 +307,7 @@ describe('spawn 清单读取与 fail-safe 降级（V10④：宁漏不误杀）',
         signal,
         delay: async () => {},
         readSpawnMarkers: realRead(dataDir),
+        getDescendantPids: async () => [],
       })
       expect(res.reaped).toEqual([504])
       // 合并后语义取 dev 侧 D5① kill-path-logging 契约（K1-K8 同族）：正常收殓也是 kill 路径，
@@ -325,6 +329,7 @@ describe('spawn 清单读取与 fail-safe 降级（V10④：宁漏不误杀）',
       listProcesses: async () => psStdout([row(505, 1, piCmd(MARKERS[0]))]),
       signal,
       readSpawnMarkers: () => null,
+      getDescendantPids: async () => [],
     })
     expect(res.reaped).toEqual([])
     expect(res.scanned).toBe(1)
@@ -342,6 +347,7 @@ describe('spawn 清单读取与 fail-safe 降级（V10④：宁漏不误杀）',
       signal,
       readProcessStartTime: async () => null,
       readSpawnMarkers: () => [],
+      getDescendantPids: async () => [],
     })
     expect(res.reaped).toEqual([])
     expect(res.failed).toEqual([])
@@ -370,6 +376,7 @@ describe('reapOrphanPiProcesses（编排；清单一律注入，与 fs 隔离）
       signal,
       delay,
       readSpawnMarkers: () => [...MARKERS],
+      getDescendantPids: async () => [],
     })
     expect(res.reaped).toEqual([201])
     expect(res.failed).toEqual([])
@@ -393,6 +400,7 @@ describe('reapOrphanPiProcesses（编排；清单一律注入，与 fs 隔离）
       signal,
       delay,
       readSpawnMarkers: () => [...MARKERS],
+      getDescendantPids: async () => [],
     })
     expect(res.reaped).toEqual([301])
     expect(signal.mock.calls.map(c => `${c[0]}:${c[1]}`)).toEqual(['301:SIGTERM', '301:0', '301:SIGKILL'])
@@ -412,6 +420,7 @@ describe('reapOrphanPiProcesses（编排；清单一律注入，与 fs 隔离）
       signal,
       delay,
       readSpawnMarkers: () => [...MARKERS],
+      getDescendantPids: async () => [],
     })
     expect(res.reaped).toEqual([401])
     expect(delay).not.toHaveBeenCalled()
@@ -428,6 +437,7 @@ describe('reapOrphanPiProcesses（编排；清单一律注入，与 fs 隔离）
       signal,
       delay: async () => {},
       readSpawnMarkers: () => [...MARKERS],
+      getDescendantPids: async () => [],
     })
     expect(res.reaped).toEqual([501])
     expect(res.failed).toEqual([])
@@ -448,6 +458,7 @@ describe('reapOrphanPiProcesses（编排；清单一律注入，与 fs 隔离）
       signal,
       delay: async () => {},
       readSpawnMarkers: () => [...MARKERS],
+      getDescendantPids: async () => [],
     })
     expect(res.reaped).toEqual([])
     expect(res.failed).toEqual([601])
@@ -482,6 +493,7 @@ describe('reapOrphanPiProcesses（编排；清单一律注入，与 fs 隔离）
         listProcesses,
         signal,
         readSpawnMarkers: () => [...MARKERS],
+        getDescendantPids: async () => [],
       })
       expect(res.unsupported).toBe(true)
       expect(listProcesses).not.toHaveBeenCalled()
@@ -499,6 +511,7 @@ describe('reapOrphanPiProcesses（编排；清单一律注入，与 fs 隔离）
       listProcesses: async () => psStdout([row(701, 1, 'node app.js')]),
       signal,
       readSpawnMarkers: () => [...MARKERS],
+      getDescendantPids: async () => [],
     })
     expect(res).toEqual({ scanned: 1, reaped: [], failed: [], unsupported: false })
     expect(signal).not.toHaveBeenCalled()
@@ -589,6 +602,7 @@ describe('reapOrphanPiProcesses 杀链决策日志（crash-resilience §3.3 D6-�
           listProcesses: async () => psStdout([row(902, 1, piCmd(MARKERS[0]!))]),
           signal: vi.fn(),
           delay: vi.fn(async () => {}),
+          getDescendantPids: async () => [],
           readSpawnMarkers: () => readSpawnMarkerList(dataDir),
         })
       } finally {
@@ -599,5 +613,123 @@ describe('reapOrphanPiProcesses 杀链决策日志（crash-resilience §3.3 D6-�
     } finally {
       logSpy.mockRestore()
     }
+  })
+})
+
+describe('reapOrphanPiProcesses 后代顺链清扫（孤儿 shell 收口：SIGTERM 前快照 + 幸存者补杀）', () => {
+  it('顽固孤儿带 shell 后代：SIGTERM pi → SIGTERM 后代 → 宽限 → pi SIGKILL → 幸存后代 SIGKILL，reapedDescendants 记录', async () => {
+    // 孤儿 pi 201 名下：前台 bash 211、后台任务 sh 212（detached 形态）；212 在宽限期内
+    // 自退（模拟 pi handler 清理 / 自然退出），补杀阶段 ESRCH 跳过（SIGKILL 仍会发出、
+    // 只是空命中，清扫列表不计它）。
+    const descendants: Record<number, number[]> = { 201: [211, 212] }
+    const signal = vi.fn((pid: number, sig: 'SIGTERM' | 'SIGKILL' | 0) => {
+      if (sig === 'SIGKILL' && pid === 212) throw esrch()
+    })
+    const res = await reapOrphanPiProcesses({
+      dataDir: DATA_DIR,
+      ownPid: OWN_PID,
+      listProcesses: async () => psStdout([row(201, 1, piCmd(MARKERS[0]!))]),
+      signal,
+      delay: vi.fn(async () => {}),
+      getDescendantPids: async (pid) => descendants[pid] ?? [],
+      readSpawnMarkers: () => [...MARKERS],
+    })
+    expect(res.reaped).toEqual([201])
+    expect(res.reapedDescendants).toEqual([211])
+    // 时序：pi SIGTERM 先行（自身 handler 优雅清理），后代 SIGTERM 随后，补杀在探活后。
+    const calls = signal.mock.calls.map(c => `${c[0]}:${String(c[1])}`)
+    expect(calls.indexOf('201:SIGTERM')).toBeLessThan(calls.indexOf('211:SIGTERM'))
+    expect(calls.indexOf('212:SIGTERM')).toBeLessThan(calls.indexOf('201:0'))
+    expect(calls).toContain('201:SIGKILL')
+    expect(calls).toContain('211:SIGKILL')
+    expect(calls).toContain('212:SIGKILL') // 盲杀仍发出，ESRCH 空命中不计数
+    // 后代枚举必须发生在首个信号之前（T0 不变量）——用注入探针验证顺序。
+    const order: string[] = []
+    await reapOrphanPiProcesses({
+      dataDir: DATA_DIR,
+      ownPid: OWN_PID,
+      listProcesses: async () => psStdout([row(202, 1, piCmd(MARKERS[0]!))]),
+      signal: () => order.push('signal'),
+      delay: async () => {},
+      getDescendantPids: async () => { order.push('scan'); return [] },
+      readSpawnMarkers: () => [...MARKERS],
+    })
+    expect(order[0]).toBe('scan')
+  })
+
+  it('pi 在 SIGTERM 即已自退（ESRCH）：后代照扫不留永久孤儿', async () => {
+    const delay = vi.fn(async () => {})
+    const signal = vi.fn((_pid: number, sig: 'SIGTERM' | 'SIGKILL' | 0) => {
+      if (sig === 'SIGTERM') throw esrch()
+    })
+    const res = await reapOrphanPiProcesses({
+      dataDir: DATA_DIR,
+      ownPid: OWN_PID,
+      listProcesses: async () => psStdout([row(401, 1, piCmd(MARKERS[0]!))]),
+      signal,
+      delay: vi.fn(async () => {}),
+      getDescendantPids: async () => [411, 412],
+      readSpawnMarkers: () => [...MARKERS],
+    })
+    expect(res.reaped).toEqual([401])
+    expect(res.reapedDescendants).toEqual([411, 412])
+    const calls = signal.mock.calls.map(c => `${c[0]}:${String(c[1])}`)
+    expect(calls).toContain('411:SIGKILL')
+    expect(calls).toContain('412:SIGKILL')
+    expect(delay).not.toHaveBeenCalled() // pi 已自退时不等待宽限（既有语义保持）
+  })
+
+  it('无后代（快照空表）：零额外信号，reapedDescendants 字段缺席（toEqual 形状兼容）', async () => {
+    const signal = vi.fn()
+    const res = await reapOrphanPiProcesses({
+      dataDir: DATA_DIR,
+      ownPid: OWN_PID,
+      listProcesses: async () => psStdout([row(301, 1, piCmd(MARKERS[0]!))]),
+      signal,
+      delay: async () => {},
+      getDescendantPids: async () => [],
+      readSpawnMarkers: () => [...MARKERS],
+    })
+    expect(res).toEqual({ scanned: 1, reaped: [301], failed: [], unsupported: false })
+    const touched = signal.mock.calls.map(c => c[0])
+    expect(touched).toEqual([301, 301, 301]) // SIGTERM + 探活 0 + SIGKILL，无后代信号
+  })
+
+  it('后代枚举注入抛错：降级继续处置 pi 本体（shell 清扫缺席不阻断收殓）', async () => {
+    const signal = vi.fn()
+    const res = await reapOrphanPiProcesses({
+      dataDir: DATA_DIR,
+      ownPid: OWN_PID,
+      listProcesses: async () => psStdout([row(601, 1, piCmd(MARKERS[0]!))]),
+      signal,
+      delay: async () => {},
+      getDescendantPids: async () => { throw new Error('pgrep exploded') },
+      readSpawnMarkers: () => [...MARKERS],
+    })
+    expect(res.reaped).toEqual([601])
+    expect(res.reapedDescendants).toBeUndefined()
+    expect(signal).toHaveBeenCalledWith(601, 'SIGKILL')
+  })
+
+  it('pi SIGKILL 硬失败（非 ESRCH）：记 failed 但幸存后代仍照扫（shell 收口独立于 pi 处置成败）', async () => {
+    const signal = vi.fn((pid: number, sig: 'SIGTERM' | 'SIGKILL' | 0) => {
+      if (sig === 'SIGKILL' && pid === 701) {
+        const e = new Error('not permitted') as NodeJS.ErrnoException
+        e.code = 'EPERM'
+        throw e
+      }
+    })
+    const res = await reapOrphanPiProcesses({
+      dataDir: DATA_DIR,
+      ownPid: OWN_PID,
+      listProcesses: async () => psStdout([row(701, 1, piCmd(MARKERS[0]!))]),
+      signal,
+      delay: async () => {},
+      getDescendantPids: async () => [711],
+      readSpawnMarkers: () => [...MARKERS],
+    })
+    expect(res.failed).toEqual([701])
+    expect(res.reapedDescendants).toEqual([711])
+    expect(signal).toHaveBeenCalledWith(711, 'SIGKILL')
   })
 })

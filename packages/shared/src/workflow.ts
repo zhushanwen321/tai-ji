@@ -177,6 +177,11 @@ export interface WorkflowRunRecord {
   runId: string
   /** 脚本名（spec.scriptName） */
   scriptName: string
+  /**
+   * workflow 脚本绝对路径（spec.scriptPath——GUI 详情层 workflow 全路径展示源）。
+   * 可缺省：v2 注册条目缺该字段的旧 run / v1 快照投影按缺省处理（空串 = 未记录）。
+   */
+  scriptPath?: string
   /** run 级短标签（spec.slug，≤20 字符，区分并发 run。旧 run 缺失时为 undefined） */
   slug?: string
   /** 人类可读描述（spec.description） */

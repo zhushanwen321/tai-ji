@@ -82,7 +82,7 @@ const SubagentsParams = Type.Object({
   }),
   agents: Type.Optional(Type.String({
     description:
-      "Comma-separated absolute paths to agent .md files (use <location> from <available_subagents>). " +
+      "Comma-separated absolute paths to agent .md files (usually <location> values from <available_subagents>; arbitrary absolute .md paths also work). " +
       "One path applies to every member; N paths map one-to-one onto tasks in the same order. " +
       "When more than one path is given it MUST equal the number of tasks — a mismatch fails the run fast (never a silent persona swap). " +
       "Omit for the default (general-purpose) executor.",

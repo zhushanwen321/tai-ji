@@ -162,15 +162,50 @@ function launch(env) {
       process.exit(r.status ?? 1)
     }
   }
+  // Ctrl+C → SIGTERM 转译（孤儿 shell 加固②）：concurrently 子树 detached 成独立进程组，
+  // 终端 Ctrl+C 的 SIGINT 只达本装配器，由下方 handler 向子树进程组转发 SIGTERM——
+  // 链路经 electron main 的 SIGTERM handler → app.quit() → before-quit 优雅链
+  // （runtime stop → destroyAll pi → pi 自身 handler 清 tracked shell），而非各进程
+  // 直接收 SIGINT 暴死（pi 无优雅清理型 SIGINT handler——挂起窗口仅注册 ignoreSigint，
+  // 见 docs/pi-semantics.json 登记，暴死会留下无人认领的 shell 孤儿）。
+  // 前置 spawnSync 步骤期间不装 handler：Ctrl+C 保持默认行为（整组死，不出现"前置
+  // 步骤被跳过继续跑下一动作"的错位）。
+  const isUnix = process.platform !== 'win32'
   const child = spawn('pnpm', ['exec', 'concurrently', 'pnpm run dev:vite', 'pnpm run dev:electron'], {
     cwd: APP_ROOT,
     stdio: 'inherit',
     env,
+    detached: isUnix,
   })
-  child.on('exit', (code, signal) => {
-    if (signal) process.kill(process.pid, signal)
-    else process.exit(code ?? 0)
-  })
+  if (isUnix && child.pid) {
+    let forwarded = false
+    const forward = () => {
+      // 第一次：SIGTERM 给整组（concurrently + vite + electron → runtime → pi），
+      // 走优雅退出链；再按（子树卡住）：升级 SIGKILL 保住强杀能力。
+      try {
+        process.kill(-child.pid, forwarded ? 'SIGKILL' : 'SIGTERM')
+      } catch {
+        // 组已不存在（子树已退出）——等 child 'exit' 收尾即可
+      }
+      forwarded = true
+    }
+    const forwardSignals = ['SIGINT', 'SIGHUP', 'SIGTERM']
+    for (const sig of forwardSignals) process.on(sig, forward)
+    // 托管信号后，子进程 exit 的信号重抛必须先摘 handler 再重抛：handler 在位时
+    // process.kill(self, sig) 只触发回调不再终止进程（默认处置已被取代），dev-instance
+    // 会在子树退出后挂住不退。摘除后重抛恢复默认处置，信号语义（被何种信号杀死）
+    // 对外层脚本（pnpm）保持与旧实现一致。
+    child.on('exit', (code, signal) => {
+      for (const sig of forwardSignals) process.off(sig, forward)
+      if (signal) process.kill(process.pid, signal)
+      else process.exit(code ?? 0)
+    })
+  } else {
+    child.on('exit', (code, signal) => {
+      if (signal) process.kill(process.pid, signal)
+      else process.exit(code ?? 0)
+    })
+  }
 }
 
 // ── CLI ───────────────────────────────────────────────────────────

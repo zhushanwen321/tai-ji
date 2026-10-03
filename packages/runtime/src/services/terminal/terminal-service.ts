@@ -207,19 +207,39 @@ export class TerminalService implements ITerminalService {
   destroyPty(sid: string): void {
     const proc = this.ptyMap.get(sid)
     if (!proc) return
-    console.log(`[terminal] destroyPty (session delete): sid=${sid}`)
+    this.killAndUntrack(sid, proc, 'destroyPty (session delete)')
+  }
+
+  /**
+   * 销毁全部存活 PTY（runtime shutdown 链 dispose-terminal-ptys 步骤，孤儿 shell
+   * 加固③）。逐 PTY 复用 kill + untracked 升级 + 清 map 语义，快照迭代。幂等：空表
+   * no-op，shutdown 双信号重入（SIGTERM 后未退再入 / 未捕获异常路径再入）安全。
+   */
+  destroyAll(): void {
+    const entries = [...this.ptyMap.entries()]
+    if (entries.length === 0) return
+    console.log(`[terminal] destroyAll (runtime shutdown): ${entries.length} PTY(s)`)
+    for (const [sid, proc] of entries) {
+      this.killAndUntrack(sid, proc, 'destroyAll (runtime shutdown)')
+    }
+  }
+
+  /** kill + 清 map + untracked 升级兜底（destroyPty / destroyAll 共用主体，label 供日志归因）。 */
+  private killAndUntrack(sid: string, proc: pty.IPty, label: string): void {
+    console.log(`[terminal] ${label}: sid=${sid}`)
     try {
       proc.kill()
     } catch (e) {
-      // 进程已退出时 kill 抛错，紧接的 ptyMap.delete 会兜底清理，不阻塞 session 销毁
-      console.error(`[terminal] destroyPty kill failed: sid=${sid}`, serializeError(e))
+      // 进程已退出时 kill 抛错，紧接的 ptyMap.delete 会兜底清理，不阻塞调用方
+      console.error(`[terminal] ${label} kill failed: sid=${sid}`, serializeError(e))
     }
     this.ptyMap.delete(sid)
-    // session 销毁不广播 terminal.exit（前端已在 session.deleted 清理分区）
-    // SIGTERM 被忽略时仍需升级（fd 残留与 session 存亡无关）。此时 ptyMap 已删，
-    // 升级 timer 不能靠 map 判活——untracked 模式下进程已退出时 kill 会抛错被吞（无害），
-    // 误杀新 PTY 的风险不存在：destroyPty 是 session 销毁路径，同 sid 不会 re-spawn。
-    this.scheduleKillEscalation(sid, proc, 'destroyPty', { untracked: true })
+    // session 销毁 / shutdown 不广播 terminal.exit（前端分别在 session.deleted 与退出
+    // 流程清理）。SIGTERM 被忽略时仍需升级（fd 残留与 session 存亡无关）。此时 ptyMap
+    // 已删，升级 timer 不能靠 map 判活——untracked 模式下进程已退出时 kill 会抛错被吞
+    // （无害）。误杀新 PTY 的风险不存在：两条调用路径（session 销毁 / runtime 退出）
+    // 后同 sid 都不会再 re-spawn。
+    this.scheduleKillEscalation(sid, proc, label, { untracked: true })
   }
 
   /**

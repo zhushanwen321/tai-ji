@@ -149,7 +149,7 @@ export function registerSubagentTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "subagent",
     label: "Subagent",
-    promptSnippet: "Delegate to specialized subagents (agentRef = absolute .md path from <available_subagents>)",
+    promptSnippet: "Delegate to specialized subagents (agentRef = absolute .md path, e.g. a <location> from <available_subagents>)",
     description: `Delegate a task to a specialized subagent — when to delegate rather than do it yourself.
 
 CRITICAL — executionMode "sequential": multiple \`subagent\` calls in the SAME message run one-after-another. For concurrency, start runs in background and tasks run concurrently in the pool (default maxConcurrent=6).

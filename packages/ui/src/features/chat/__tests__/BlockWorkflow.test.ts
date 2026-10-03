@@ -166,6 +166,25 @@ describe('BlockWorkflow: collapsed only（§11：无内联详情展开，GUI 迁
     })
   })
 
+  it('全路径 name：标题行显示 basename 去 .js 短名，title 保留全路径，点击 openWorkflow 仍传全路径', async () => {
+    const fullPath = '/Users/x/project/.pi/workflows/email-validation-refactor.js'
+    const wrapper = mountToolBlock(
+      makeWorkflow({ status: 'completed', input: { action: 'run', name: fullPath, slug: 'email-refactor' } }),
+    )
+    const wfBlock = wrapper.find('[data-testid="workflow-block"]')
+    expect(wfBlock.exists()).toBe(true)
+    // 标题行短名（无目录、无 .js 后缀）
+    expect(wfBlock.text()).toContain('email-validation-refactor')
+    expect(wfBlock.text()).not.toContain(fullPath)
+    expect(wfBlock.text()).not.toContain('.js')
+    // title 保留全路径（hover 可见完整 ref）
+    const nameSpan = wfBlock.findAll('span').find((s) => s.attributes('title') === fullPath)
+    expect(nameSpan).toBeDefined()
+    // drawer 选中仍用全路径（行为不变；openWorkflow 两参形态随 main 侧 opener 演化）
+    await wrapper.find('[data-testid="tool-block-header"]').trigger('click')
+    expect(openWorkflowMock).toHaveBeenCalledWith(fullPath, { slug: 'email-refactor', sessionId: undefined })
+  })
+
   it('无 name 时点击 → openWorkflow(空串, { slug: undefined, ... })（opener 兜底归宿）', async () => {
     const wrapper = mountToolBlock(
       makeWorkflow({

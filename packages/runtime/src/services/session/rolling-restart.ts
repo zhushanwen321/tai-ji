@@ -119,6 +119,7 @@ export const SHUTDOWN_STEP_SEQUENCE = [
   'dispose-skill-registry',
   'dispose-git-head-watcher',
   'dispose-claim-ledger',
+  'dispose-terminal-ptys',
   'deinit-relay-server',
   'server-stop',
   'engine-pool-dispose',

@@ -73,6 +73,7 @@ function makeOptions(rows: PsRow[], overrides?: Partial<ReapOrphanOptions>): Rea
     dataDir: DATA_DIR,
     ownPid: OWN_PID,
     readSpawnMarkers: () => [MARKER],
+    getDescendantPids: async () => [],
     listProcesses: () => Promise.resolve(psStdout(rows)),
     signal: signalDiesOnProbe(),
     delay: () => Promise.resolve(),
