@@ -3,7 +3,9 @@
  *
  * 覆盖验收条款：缺 terminalId 的 write / resize / kill / attach 四帧各自被拒（T6 语义；
  * 独立码 terminal_id_required，≠ unknown_terminal_id——后者是 renderer 回收幽灵条目的唯一判据）；
- * spawn 缺编号是合法新建形态（走新建路径，不拒）；terminal.list 路由 + ack 携实例清单；
+ * spawn 缺编号是合法新建形态（走新建路径，不拒）；**spawn 的 terminalId 为非字符串（数字 / null /
+ * 对象 / 布尔）是畸形帧 → terminal_id_required 拒绝且不调 service.spawn（不静默归一为新建）**；
+ * terminal.list 路由 + ack 携实例清单；
  * 交叉校验独立码经既有错误通道透传（不触发回收的码不被 handler 改写）。
  *
  * 运行：cd packages/runtime && npx vitest run src/transport/terminal-message-handler.test.ts
@@ -179,6 +181,39 @@ describe('TerminalMessageHandler terminal.spawn 双形态', () => {
     expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-1', 'terminal.ack', { terminalId: 'term:s1:1' })
     expect(ctx.sendError).not.toHaveBeenCalled()
   })
+
+  // F2-6/F2-9：非字符串 terminalId 是畸形帧（设计 §3.3「卫生默认」= 对畸形输入 fail-fast）。
+  // 旧写法 `typeof id === 'string' && id !== '' ? id : undefined` 把非字符串一并归一为「新建」，
+  // 会静默 spawn 真实 PTY 且无错误回执；收窄后非字符串走 terminal_id_required 拒绝。
+  const malformedIds: Array<{ label: string; value: unknown }> = [
+    { label: '数字', value: 123 },
+    { label: 'null', value: null },
+    { label: '对象', value: {} },
+    { label: '布尔', value: true },
+  ]
+
+  for (const { label, value } of malformedIds) {
+    it(`非字符串 terminalId（${label}）不静默新建：terminal_id_required 且不调 service.spawn`, async () => {
+      const service = mockService()
+      const ctx = mockContext(service)
+      const handler = new TerminalMessageHandler(ctx)
+      const ws = mockWs()
+
+      await handler.handleTerminalMessage(
+        msg('terminal.spawn', { sessionId: 's1', terminalId: value, cols: 80, rows: 24 }),
+        ws,
+      )
+
+      expect(service.spawn).not.toHaveBeenCalled()
+      expect(ctx.reply).not.toHaveBeenCalled()
+      expect(ctx.sendError).toHaveBeenCalledWith(
+        ws,
+        'terminal_id_required',
+        expect.stringContaining('类型非法'),
+        'msg-1',
+      )
+    })
+  }
 
   it('spawn 失败透传 spawn_failed', async () => {
     const service = mockService({

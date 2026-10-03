@@ -382,12 +382,14 @@ export type TerminalRoutingErrorCode =
  * 终端错误码联合（TerminalService 抛出 + handler 路由拒绝码）。
  * 其中 `terminal_id_required` 由协议入口 TerminalMessageHandler 在畸形帧拒绝时发出
  *（非 TerminalService 抛出）；其余由 TerminalService 以扁平错误抛出。
+ * `resize_failed` / `kill_failed` / `not_found` 为存量保留码：**当前无抛出点**（保留 union 供消费侧
+ * 穷尽，勿据以设计错误处理分支——实装语义以 `services/ports/terminal-service.ts` 头注为准）。
  */
 export type TerminalErrorCode =
   | 'spawn_failed'     // pty.spawn 失败（shell 不存在/无执行权限）
-  | 'not_found'        // 操作的 sessionId 无对应 PTY（存量保留；实例路由否定回执改用 unknown_terminal_id）
-  | 'resize_failed'    // pty.resize 失败
-  | 'kill_failed'      // pty.kill 失败
+  | 'not_found'        // 操作的 sessionId 无对应 PTY（存量保留、当前无抛出点；实例路由否定回执改用 unknown_terminal_id）
+  | 'resize_failed'    // 存量保留、当前无抛出点（pty.resize best-effort：失败仅记 console、下次 fit 重试；见 services/ports/terminal-service.ts）
+  | 'kill_failed'      // 存量保留、当前无抛出点（pty.kill 失败靠 onExit 幂等清理；见 services/ports/terminal-service.ts）
   | TerminalRoutingErrorCode
 /** handler 对未知错误归一的兜底字面量（非 TerminalService 主动抛出，单列让 renderer switch 可穷尽） */
 export type TerminalUnknownErrorCode = 'terminal_failed'
