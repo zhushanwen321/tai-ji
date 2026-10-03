@@ -1,5 +1,11 @@
 # @zhushanwen/pi-notify-ledger-host
 
+## 0.2.3
+
+### Patch Changes
+
+- b44f1316b: chore: refresh dependency range (triggered by @zhushanwen/subagent-core@1.1.0 → @zhushanwen/subagent-core@1.2.0)
+
 ## 0.2.2
 
 ### Patch Changes
