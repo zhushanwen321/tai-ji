@@ -4,6 +4,7 @@
 import type {
 	ExtensionAPI,
 	ExtensionContext,
+	ExtensionToolContext,
 	SessionCompactEvent,
 	SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
@@ -189,7 +190,8 @@ function registerSessionTool<S extends TObject>(pi: ExtensionAPI, cfg: SessionTo
 			params: Static<S>,
 			_signal: AbortSignal | undefined,
 			_onUpdate: unknown,
-			ctx: ExtensionContext,
+			// pi 1.0.0：ToolDefinition.execute 第 5 参 ctx 收窄为 ExtensionToolContext
+			ctx: ExtensionToolContext,
 		) {
 			return executeTool(ctx, cfg.action, cfg.toParams(params), cfg.onResult);
 		},

@@ -198,7 +198,7 @@ describe('createSessionCommand - handler select 流程', () => {
     listAllSpy.mockRestore()
   })
 
-  it('MF-2 回归：同 cwd 同预览同 age 桶 → label 带短 uuid 后缀消歧，选第 2 条插第 2 条 uuid', async () => {
+  it('MF-2 回归：同 cwd 同预览同 age 桶 → label 带短 uuid 后缀消歧，选中哪条插哪条 uuid', async () => {
     // 两 session：相同首消息 + 相同 timestamp（同 age 桶）→ toCandidate label 完全相同
     const ID1 = '019e6c96-0a0c-74b8-a73f-d1854d88e2a7'
     const ID2 = '019fffff-1111-2222-3333-444455556666'
@@ -207,15 +207,22 @@ describe('createSessionCommand - handler select 流程', () => {
 
     const cmd = createSessionCommand(() => cwdSessionDir)
     const { ctx, select, setEditorText } = makeFakeCtx()
-    // 用户选第 2 条（label 数组下标 1）
-    select.mockImplementation(async (_title: string, options: string[]) => options[1])
+    // 用户选中 ID2 那一项。pi 1.0.0 起 listAll 并发加载在 modified 相同时不保文件序
+    // （0.84.4 按 index 写回稳定，1.0.0 按完成序）——不硬编码下标，按 label 中的短 uuid
+    // 定位目标项（消歧后缀保证了可定位性，这正是 MF-2 的承重点）
+    select.mockImplementation(async (_title: string, options: string[]) => {
+      const target = options.find((o) => o.includes(ID2.slice(0, 8)))
+      if (target === undefined) throw new Error(`labels 未含 ID2 短 uuid：${JSON.stringify(options)}`)
+      return target
+    })
     await cmd.handler('', ctx)
 
     // select 收到的 labels 必须两两不同（uuid 后缀消歧生效）
     const labelsArg = select.mock.calls[0][1] as string[]
     expect(labelsArg.length).toBe(2)
     expect(new Set(labelsArg).size).toBe(2)
-    // 插入的是第 2 条 session 的完整 uuid（旧实现 indexOf(label) 会错插第 1 条）；尾随空格与 applyCompletion spacer 语义一致（S-2）
+    // 插入的是被选中的第 2 条 session 完整 uuid（旧实现 indexOf(原始 label) 会错插第 1 条）；
+    // 尾随空格与 applyCompletion spacer 语义一致（S-2）
     expect(setEditorText).toHaveBeenCalledWith(`#${ID2} `)
   })
 })

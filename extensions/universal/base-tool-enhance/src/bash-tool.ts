@@ -15,7 +15,7 @@
  *     （前台未填 → foregroundTimeoutSeconds，后台未填 → backgroundTimeoutSeconds）
  */
 
-import type { AgentToolUpdateCallback, BashToolDetails, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolUpdateCallback, BashToolDetails, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { createBashToolDefinition, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
@@ -76,7 +76,7 @@ const ENHANCED_BASH_DESCRIPTION = [
  */
 function startBackgroundAndReply(
 	command: string,
-	ctx: ExtensionContext,
+	ctx: ExtensionToolContext,
 	config: BaseToolEnhanceConfig,
 	timeoutSec: number | undefined,
 	extraNotes: string[] = [],
@@ -162,7 +162,9 @@ export function createBashOverrideToolDefinition() {
 			// 与官方 delegate 同型（展开透传后泛型 TDetails=BashToolDetails|undefined
 			// 随 render 面传入，execute 签名必须对齐，否则 registerTool 赋值检查不过）
 			onUpdate: AgentToolUpdateCallback<BashToolDetails | undefined> | undefined,
-			ctx: ExtensionContext,
+			// pi 1.0.0：ToolDefinition.execute 第 5 参 ctx 收窄为 ExtensionToolContext
+			// （ExtensionContext + tools/executeTool，嵌套工具调用面）
+			ctx: ExtensionToolContext,
 		) {
 			// 配置每次 execute 读时加载（热重载契约：禁止上层缓存，同进程改配置文件
 			// 不重启即生效）。D14：subagent 降级是全量的——白名单与 background 参数
