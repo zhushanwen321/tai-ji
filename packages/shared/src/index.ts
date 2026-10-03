@@ -199,6 +199,7 @@ export {
   btwVirtualId,
   isBtwVirtualId,
   extractBtwPiSessionId,
+  resolveVirtualSessionId,
 } from './virtual-session-id'
 // Coding Plan 额度查询类型
 export type {

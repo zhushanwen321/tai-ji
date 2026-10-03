@@ -19,7 +19,9 @@
  * - triggerEnterForkMode/triggerEnterHandoffMode → forkAsk/handoffAsk 回调
  * - useSideDrawer（open）→ openDrawer
  * - useFileTreeStore（selectFile）→ onFileClick
- * - useFileSearch（load）+ collectFilePaths/collectBasenames → loadFileCandidates + renderMarkdown env
+ * - useFileSearch（load）+ collectFilePaths/collectBasenames → loadFileCandidates + renderMarkdown env；
+ *   虚拟 id（subagent:/agentcall:/btw:）先经 shared resolveVirtualSessionId 解析到真实 session id
+ *   再发起 file.search（runtime 只登记真实 pi session，vid 直传必 session_not_found——fileSearch vid 修复）
  * - renderMarkdownSegments（markdown.ts，含 shiki 高亮 + 路径链接化）→ renderMarkdown
  * - renderMermaid（mermaid.ts）→ renderMermaid
  * - assistantToMarkdown（messageFormat.ts）→ toMarkdown
@@ -35,6 +37,7 @@ import { useSideDrawer, type RightDrawerTab } from '@/composables/features/drawe
 import { openBrowser } from '@taiji/core/domain/overlay'
 import * as events from '@taiji/core/transport/api'
 import { useFileTreeStore } from '@/stores/fileTree'
+import { resolveVirtualSessionId } from '@taiji/shared'
 import { useFileSearch } from '@/composables/features/search/useFileSearch'
 import { triggerEnterForkMode } from '@/composables/panel/useForkModeChannel'
 import { triggerEnterHandoffMode } from '@/composables/panel/useHandoffModeChannel'
@@ -67,7 +70,13 @@ function setsEqual(a: Set<string>, b: Set<string>): boolean {
  */
 export function useChatViewDeps(
   sessionId: Ref<string>,
-  override?: { resourceBaseDir?: ComputedRef<string | undefined> },
+  override?: {
+    resourceBaseDir?: ComputedRef<string | undefined>
+    /** 虚拟 id 归属真实 session（agentcall 两段式 vid 无 mainSid 命名空间，挂载链显式传入——
+     *  MessageStream mainSessionId prop 一跳；subagent:/btw: vid 自带归属，不消费本字段）。
+     *  缺失时 agentcall vid 无 cwd 数据源 → 白名单空集 + 不发起必失败的 file.search。 */
+    mainSessionId?: ComputedRef<string | undefined>
+  },
 ): ChatViewDeps {
   const chat = useChatStore()
   const sessionStore = useSessionStore()
@@ -76,6 +85,12 @@ export function useChatViewDeps(
   const drawer = useSideDrawer()
   const fileTreeStore = useFileTreeStore()
   const { load: loadFileCandidates } = useFileSearch()
+
+  /** vid → 真实 session id（shared resolveVirtualSessionId，跨层 SSOT）：file.search 与
+   *  cwd 查询只认真实 pi session，vid 直传必 session_not_found。ownerSid 是挂载链显式
+   *  传入的归属 session（agentcall 专属；读 .value 保持响应式，owner 切换后解析跟随）。 */
+  const ownerSid = override?.mainSessionId
+  const realSidOf = (sid: string): string | undefined => resolveVirtualSessionId(sid, ownerSid?.value)
 
   /** 当前 session 的本地文件白名单（filePaths 含 / 路径 + localFiles 裸 basename）。
    *  对齐旧 MarkdownRenderer 的 refreshLocalFiles：sessionId 变化重新 load（无缓存，
@@ -90,8 +105,17 @@ export function useChatViewDeps(
       localFiles.value = new Set()
       return
     }
+    const realSid = realSidOf(sid)
+    if (!realSid) {
+      // 虚拟 id 无归属 session（agentcall 挂载链未传 mainSessionId 等未知形态）→ 无 cwd
+      // 数据源，白名单空集（该视图 markdown 路径降级纯文本）。不发必失败的 file.search
+      // （修复前每次挂载打一发 session_not_found 的 fileSearch warn——fileSearch vid 修复）。
+      filePaths.value = new Set()
+      localFiles.value = new Set()
+      return
+    }
     try {
-      const nodes = await loadFileCandidates(sid)
+      const nodes = await loadFileCandidates(realSid)
       // 代际守卫（ADR-0049 updateFor(capturedSid) 同源思路）：await 期间 sessionId 可能已切到
       // 新 session——迟到的 file.search 结果属旧 session，写入会跨 session 串台（新 session 的
       // markdown 路径按旧文件集判定链接化）。不等则整体丢弃，由新 session 自己的加载负责落位。
@@ -142,11 +166,15 @@ export function useChatViewDeps(
   })
 
   /** 按 id 查 session cwd（sessionStore.list 线性查，与 useDetailPane.sessionCwd 同源同层）。
-   *  resourceBaseDir env 装配与 deps.sessionCwdOf（ui MarkdownRenderer ④路 props 缺省
-   *  fallback，设计 D4 双通道）共用此单一实现，避免双份查询逻辑漂移。 */
+   *  虚拟 id 先解析到归属真实 session 再查（sessionCwdOf 的 deps 消费方传的是 vid——
+   *  MarkdownRenderer ④路点击解析拿 cwd）。resourceBaseDir env 装配与 deps.sessionCwdOf
+   *  （ui MarkdownRenderer ④路 props 缺省 fallback，设计 D4 双通道）共用此单一实现，
+   *  避免双份查询逻辑漂移。 */
   function sessionCwdOf(sid: string): string | undefined {
     if (!sid) return undefined
-    return sessionStore.list.find((s) => s.id === sid)?.cwd ?? undefined
+    const real = realSidOf(sid)
+    if (!real) return undefined
+    return sessionStore.list.find((s) => s.id === real)?.cwd ?? undefined
   }
 
   /** 当前 session 的相对资源解析基准目录（resourceBaseDir，设计 markdown-html-sanitize-render

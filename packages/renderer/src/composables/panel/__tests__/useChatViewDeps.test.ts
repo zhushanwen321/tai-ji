@@ -106,7 +106,13 @@ beforeEach(() => {
 
 /** 装配器在组件 setup 外直调：effectScope 提供响应式上下文（onScopeDispose 等不告警），用完 stop */
 let scope: EffectScope | null = null
-function assemble(sid: ReturnType<typeof ref<string>>, override?: { resourceBaseDir?: ComputedRef<string | undefined> }) {
+function assemble(
+  sid: ReturnType<typeof ref<string>>,
+  override?: {
+    resourceBaseDir?: ComputedRef<string | undefined>
+    mainSessionId?: ComputedRef<string | undefined>
+  },
+) {
   scope = effectScope()
   return scope.run(() => useChatViewDeps(sid, override))!
 }
@@ -360,5 +366,68 @@ describe('useChatViewDeps — turn settled 白名单刷新（agent 落盘文件�
     events.dispatchSession('s1', { type: 'message.complete', payload: { sessionId: 's1' } })
     await flushPromises()
     expect(mockLoad.mock.calls.length).toBe(callsAfterStop)
+  })
+})
+
+describe('useChatViewDeps — 虚拟 id 解析（fileSearch vid 修复：需要真实 id 的 RPC 调用方先解析）', () => {
+  it('agentcall vid + mainSessionId override → file.search 收到真实归属 sid（非 vid）', async () => {
+    mockLoad.mockResolvedValue([fileNode('f.md', '/proj-a/f.md')])
+    const deps = assemble(ref('agentcall:acs-1'), { mainSessionId: computed(() => 's1') })
+    await flushPromises()
+    expect(mockLoad).toHaveBeenCalledWith('s1')
+    // 白名单与 resourceBaseDir 都按归属 session 落位（不再降级空集/undefined）
+    await deps.renderMarkdown('after-load')
+    const env = mockRenderMarkdownSegments.mock.calls.at(-1)![1] as { filePaths: Set<string>; resourceBaseDir?: string }
+    expect(env.filePaths.has('/proj-a/f.md')).toBe(true)
+    expect(env.resourceBaseDir).toBe('/home/demo/project-a')
+  })
+
+  it('agentcall vid 无 override → 不发起必失败的 file.search（零 RPC 零 warn）+ 白名单空集', async () => {
+    const deps = assemble(ref('agentcall:acs-1'))
+    await flushPromises()
+    expect(mockLoad).not.toHaveBeenCalled()
+    await deps.renderMarkdown('degraded')
+    const env = mockRenderMarkdownSegments.mock.calls.at(-1)![1] as { filePaths: Set<string>; resourceBaseDir?: string }
+    expect(env.filePaths.size).toBe(0)
+    expect(env.resourceBaseDir).toBeUndefined()
+  })
+
+  it('subagent 三段式 vid → 从 vid 自解析 mainSid 发起 file.search（无需 override）', async () => {
+    const deps = assemble(ref('subagent:s1:sub-1'))
+    await flushPromises()
+    expect(mockLoad).toHaveBeenCalledWith('s1')
+    await deps.renderMarkdown('x')
+    expect((mockRenderMarkdownSegments.mock.calls.at(-1)![1] as { resourceBaseDir?: string }).resourceBaseDir).toBe('/home/demo/project-a')
+  })
+
+  it('btw 两段式 vid → 解析到内嵌线 pi session id', async () => {
+    const deps = assemble(ref('btw:s2'))
+    await flushPromises()
+    expect(mockLoad).toHaveBeenCalledWith('s2')
+    await deps.renderMarkdown('x')
+    expect((mockRenderMarkdownSegments.mock.calls.at(-1)![1] as { resourceBaseDir?: string }).resourceBaseDir).toBe('/home/demo/project-b')
+  })
+
+  it('真实 sid 直通不回归：file.search 收到原样 sid', async () => {
+    assemble(ref('s1'))
+    await flushPromises()
+    expect(mockLoad).toHaveBeenCalledWith('s1')
+  })
+
+  it('deps.sessionCwdOf 对 vid 解析后查 cwd（MarkdownRenderer ④路点击消费面）', () => {
+    const deps = assemble(ref('s1'), { mainSessionId: computed(() => 's1') })
+    expect(deps.sessionCwdOf?.('subagent:s1:sub-9')).toBe('/home/demo/project-a')
+    expect(deps.sessionCwdOf?.('agentcall:acs-1')).toBe('/home/demo/project-a')
+    expect(deps.sessionCwdOf?.('btw:s2')).toBe('/home/demo/project-b')
+    // agentcall vid 一律解析到挂载链 owner（第二段 acsId 不参与归属判定——同视图分区共享归属）
+    expect(deps.sessionCwdOf?.('agentcall:other')).toBe('/home/demo/project-a')
+  })
+
+  it('mainSessionId override 响应式：owner 变化后解析跟随（sessionCwdOf 读 .value）', () => {
+    const owner = ref('s1')
+    const deps = assemble(ref('agentcall:acs-1'), { mainSessionId: computed(() => owner.value) })
+    expect(deps.sessionCwdOf?.('agentcall:acs-1')).toBe('/home/demo/project-a')
+    owner.value = 's2'
+    expect(deps.sessionCwdOf?.('agentcall:acs-1')).toBe('/home/demo/project-b')
   })
 })

@@ -73,9 +73,14 @@ vi.mock('@/composables/panel/useSubagentTabData', () => ({
 vi.mock('@/components/panel/MessageStream.vue', () => ({
   default: {
     name: 'MessageStreamStub',
-    props: ['sessionId'],
-    setup(props: { sessionId: string }) {
-      return () => h('div', { 'data-testid': 'message-stream-stub' }, props.sessionId)
+    props: ['sessionId', 'mainSessionId'],
+    setup(props: { sessionId: string; mainSessionId?: string }) {
+      return () =>
+        h(
+          'div',
+          { 'data-testid': 'message-stream-stub', 'data-main-sid': props.mainSessionId ?? '' },
+          props.sessionId,
+        )
     },
   },
 }))
@@ -391,6 +396,9 @@ describe('WorkflowLivePanel · 多级 tab（使用者黑盒）', () => {
     const stream = wrapper.find('[data-testid="message-stream-stub"]')
     expect(stream.exists()).toBe(true)
     expect(stream.text()).toBe('agentcall:acs-0')
+    // mainSessionId 接线（fileSearch vid 修复）：agentcall 两段式 vid 的归属解析依赖它，
+    // 值 = 主 session id（D11⑤ 归属绑定发起 session）
+    expect(stream.attributes('data-main-sid')).toBe(SID)
     // 快照编排接线（useSubagentTabData.loadSubagentData 复用，零新拉取链）
     expect(loadSubagentDataMock).toHaveBeenCalledWith('agentcall:acs-0')
     // trace 详情元信息条渲染
