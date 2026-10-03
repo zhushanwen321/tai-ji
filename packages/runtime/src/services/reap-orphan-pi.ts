@@ -354,11 +354,6 @@ function defaultDelay(ms: number): Promise<void> {
   })
 }
 
-/**
- * 读进程启动时间（epoch ms）；ps 失败/目标不存在/解析失败返回 null（防线尽力而为）。
- * 单目标查询是毫秒级本地操作，10s 只是无 ps/假死兜底。SIGKILL 前 pid 复用复验的
- * 数据源（killOrphan 内两时点比对），与 relay-registry 同名私有的探针语义一致。
- */
 /** pgrep 缺失只 warn 一次（BFS 每层一次调用，逐层刷屏无意义；缺 pgrep = 后代清扫降级为不扫）。 */
 let pgrepMissingWarned = false
 
@@ -421,6 +416,11 @@ async function defaultGetDescendantPids(rootPid: number): Promise<number[]> {
   return result
 }
 
+/**
+ * 读进程启动时间（epoch ms）；ps 失败/目标不存在/解析失败返回 null（防线尽力而为）。
+ * 单目标查询是毫秒级本地操作，10s 只是无 ps/假死兜底。SIGKILL 前 pid 复用复验的
+ * 数据源（killOrphan 内两时点比对），与 relay-registry 同名私有的探针语义一致。
+ */
 function defaultReadProcessStartTime(pid: number): Promise<number | null> {
   return new Promise((resolve) => {
     execFile('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf8', timeout: PS_TIMEOUT_MS }, (err, stdout) => {
@@ -618,23 +618,6 @@ export async function reapOrphanPiProcesses(options: ReapOrphanOptions): Promise
 }
 
 /**
- * 单个孤儿的处置序列（含后代顺链清扫）。返回 ok = pi 本体处置成败（调用方记入
- * reaped/failed），descendantsSwept = 实际发过信号的快照后代（bash/sh/zsh 等孤儿
- * shell 收口的观测面，供日志与结果汇总）。
- *
- * 时序：锚定 lstart → 【SIGTERM 前】快照后代树（T0 不变量：pi 死后 reparent，树形即失）
- * → SIGTERM pi（自身 handler 先跑优雅清理）→ SIGTERM 后代 → 统一宽限 → pi 探活 /
- * lstart 复验 / 补 SIGKILL（既有链不动）→ 幸存后代补 SIGKILL。pi 在 SIGTERM 即已
- * 自退（ESRCH）时后代照扫——快照已在前完成。
- *
- * SIGKILL 前 pid 复用复验（防线尽力而为，仅 pi 本体）：处置起点锚定一次 ps lstart，
- * SIGKILL 发射前复读比对——lstart 变化 = 原孤儿已死、pid 已被无关进程复用（pid 复用必
- * 经原进程退出），跳过 SIGKILL 防「杀链延迟窗口内误杀复用者」。任一时点 ps 失败（null）
- * → 按现状继续，不因防线缺席放弃处置。原孤儿已随 pid 复用确定死亡，按已回收计（对齐
- * 「exited before SIGTERM」语义），warn 留痕供归因。后代不发 lstart 复验（快照→补杀
- * 同处置内秒级窗口，对齐 process-control stopRuntimeProcess 对后代的同款风险接受）。
- */
-/**
  * 向 pi 本体发一次信号的结果三分类：delivered = 送达；exited = ESRCH（处置窗口内已自行
  * 退出，幂等按已回收计）；failed = 其他错误（warn 留痕后归失败）。
  */
@@ -657,6 +640,23 @@ function signalOrphanPi(row: PsRow, sig: 'SIGTERM' | 'SIGKILL', signal: OrphanKi
   }
 }
 
+/**
+ * 单个孤儿的处置序列（含后代顺链清扫）。返回 ok = pi 本体处置成败（调用方记入
+ * reaped/failed），descendantsSwept = 实际发过信号的快照后代（bash/sh/zsh 等孤儿
+ * shell 收口的观测面，供日志与结果汇总）。
+ *
+ * 时序：锚定 lstart → 【SIGTERM 前】快照后代树（T0 不变量：pi 死后 reparent，树形即失）
+ * → SIGTERM pi（自身 handler 先跑优雅清理）→ SIGTERM 后代 → 统一宽限 → pi 探活 /
+ * lstart 复验 / 补 SIGKILL（既有链不动）→ 幸存后代补 SIGKILL。pi 在 SIGTERM 即已
+ * 自退（ESRCH）时后代照扫——快照已在前完成。
+ *
+ * SIGKILL 前 pid 复用复验（防线尽力而为，仅 pi 本体）：处置起点锚定一次 ps lstart，
+ * SIGKILL 发射前复读比对——lstart 变化 = 原孤儿已死、pid 已被无关进程复用（pid 复用必
+ * 经原进程退出），跳过 SIGKILL 防「杀链延迟窗口内误杀复用者」。任一时点 ps 失败（null）
+ * → 按现状继续，不因防线缺席放弃处置。原孤儿已随 pid 复用确定死亡，按已回收计（对齐
+ * 「exited before SIGTERM」语义），warn 留痕供归因。后代不发 lstart 复验（快照→补杀
+ * 同处置内秒级窗口，对齐 process-control stopRuntimeProcess 对后代的同款风险接受）。
+ */
 async function killOrphan(
   row: PsRow,
   deps: OrphanKillDeps,
