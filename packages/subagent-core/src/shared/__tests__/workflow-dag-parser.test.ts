@@ -624,24 +624,43 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
       expect(result.dag.parallelGroups.length).toBe(1);
     });
 
-    it("复合调用链（caller 自带 1 个 agent 调用且调用另一候选）：对全候选集判定，caller 不投影", () => {
+    it("复合调用链真形态（caller 自带 agent 调用且调用另一候选，span 更小）：命运结算拒 caller，无幻影投影", () => {
       const source = [
         `function grade(n) {`,
         `  const p = String(n);`,
         `  return agent({ prompt: p, description: n });`,
         `}`,
-        `function fast(n) { return grade(n); }`,
+        "function fast(n) { const x = grade(n); return agent({ prompt: x, description: n }); }",
         `phase("评审");`,
         `await fast("a");`,
       ].join("\n");
       const result = parseWorkflowDag(source);
       if (!result.ok) throw new Error(result.message);
       expectStructurallyValid(result.dag);
-      // fast 子树调用候选 grade → fast 不投影（跨度升序下 fast 先评估，判定必须对全候选集）；
-      // grade 录取且实现点抑制；fast 体内 grade(n) 调用点投影（n 非静态 → 通配；声明在 phase 前 → 缺省分区）
-      expect(result.dag.nodes.length).toBe(1);
-      expect(result.dag.nodes[0]?.templateName).toBe("*");
-      expect(result.dag.nodes[0]?.phase).toBe(WORKFLOW_DAG_DEFAULT_PHASE);
+      // fast（自带 agent 调用 + 调用候选 grade，span 最小先评估）依赖 grade 录取 → 拒；
+      // grade 录取且实现点抑制。判别断言：无 fast("a") 调用点的幻影投影节点（旧代码
+      // 在此产 ["a","评审"]；命运循环下两节点均为缺省分区通配——fast 体内自身派发点
+      // 词法收口 + 体内 grade 派发点投影）
+      expect(result.dag.nodes.length).toBe(2);
+      expect(result.dag.nodes.every((n) => n.phase === WORKFLOW_DAG_DEFAULT_PHASE)).toBe(true);
+      expect(result.dag.nodes.some((n) => n.templateName === "a")).toBe(false);
+    });
+
+    it("候选互调环：命运循环停滞残留全拒（实现点词法收口，调用点零投影）", () => {
+      const source = [
+        "function a(n) { const x = b(n); return agent({ prompt: x, description: n }); }",
+        "function b(n) { const y = a(n); return agent({ prompt: y, description: n }); }",
+        `phase("P");`,
+        `await a("q");`,
+      ].join("\n");
+      const result = parseWorkflowDag(source);
+      if (!result.ok) throw new Error(result.message);
+      expectStructurallyValid(result.dag);
+      // a/b 互调（各含自身 agent 调用，均为合格候选）→ 互为未结算依赖 → 停滞 → 全拒；
+      // 实现点词法收口（2 节点，phase("P") 前 → 缺省分区）；a("q") 调用点不产节点
+      expect(result.dag.nodes.length).toBe(2);
+      expect(result.dag.nodes.every((n) => n.phase === WORKFLOW_DAG_DEFAULT_PHASE)).toBe(true);
+      expect(result.dag.nodes.some((n) => n.templateName === "q")).toBe(false);
     });
 
     it("同名多候选声明：全部不投影（实现点保持词法收口）", () => {
