@@ -26,6 +26,9 @@ import type {
 } from './migration'
 import type { SegmentsMetadataEntry } from './message-metadata'
 import type { ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply } from './import-session'
+// codemode 域：payload/reply 形状 SSOT 在 ./codemode（codemode 设计 D1/A1，本文件仅登记
+// type→payload 映射——沿 import-session 域同款分工）
+import type { CodemodeEnabledResult, CodemodeSetEnabledRequest, CodemodeSetEnabledResult } from './codemode'
 import type { UsageStatsResult } from './usage-stats'
 // composer-gen-stats：生成指标帧形状 SSOT（本文件仅登记 type→payload 映射）
 import type { GenStatsFrame } from './gen-stats'
@@ -211,6 +214,9 @@ export type ClientMessageType =
   | 'config.setSmartContextCompactModel'
   | 'config.setSmartContextThresholds'
   | 'config.setSmartContextExcludedModels'
+  // codemode 开关命令对（codemode 设计 D1/A1）：get 读激活态（损坏错误态经 corruption 字段返回），
+  // set 写增量条目（损坏拒入走 ok:false 信封）；payload/reply 形状见 codemode 域登记段。
+  | 'config.getCodemodeEnabled' | 'config.setCodemodeEnabled'
   // u-locale-channel：renderer 上报 UI 语言 → runtime 写 <dataDir>/ui-preferences.json（ack 型 reply）。
   | 'config.setUiLocale'
   | 'preset.list' | 'preset.getDefault' | 'preset.setDefault'
@@ -853,6 +859,10 @@ export interface ClientMessageMap {
   'config.setSmartContextThresholds': { thresholds: number[] }
   /** config.setSmartContextExcludedModels：设置排除模型列表（每条完整 provider/modelId，runtime 侧过滤去重）。 */
   'config.setSmartContextExcludedModels': { models: string[] }
+  /** config.getCodemodeEnabled：读取 codemode 开关（无参数）。 */
+  'config.getCodemodeEnabled': Record<string, never>
+  /** config.setCodemodeEnabled：设置 codemode 开关目标态（写入语义归 runtime 侧字段域）。 */
+  'config.setCodemodeEnabled': CodemodeSetEnabledRequest
   /**
    * config.setUiLocale：上报 renderer UI 语言（跨进程 locale 通道，u-locale-channel）。
    * runtime 原子写 `<dataDir>/ui-preferences.json`（{ v:1, locale, updatedAt }），extension 侧读取热生效。
@@ -1183,6 +1193,9 @@ export type ServerMessageType =
   | 'config.smartContextCompactModel'
   | 'config.smartContextThresholds'
   | 'config.smartContextExcludedModels'
+  // codemode 开关命令对 reply（codemode 设计 D1/A1）：get 回激活态 + 损坏错误态；set 回两态信封
+  //（成功终态 / 损坏拒入含 error + corruption）。
+  | 'config.codemodeEnabled' | 'config.codemodeSetEnabled'
   | 'preset.list' | 'preset.getDefault' | 'preset.setDefault'
   | 'preset.create' | 'preset.update' | 'preset.delete'
   | 'preset.recordUsage' | 'preset.getUsage'
@@ -2313,6 +2326,10 @@ export interface ServerMessageMapBase {
   'config.smartContextThresholds': { thresholds: number[] }
   /** config.smartContextExcludedModels：config.setSmartContextExcludedModels 的 reply（过滤去重后）。 */
   'config.smartContextExcludedModels': { models: string[] }
+  /** config.codemodeEnabled：config.getCodemodeEnabled 的 reply（corruption 非空 = settings.json 损坏错误态，此时 enabled 恒 false）。 */
+  'config.codemodeEnabled': CodemodeEnabledResult
+  /** config.codemodeSetEnabled：config.setCodemodeEnabled 的 reply（两态信封：写后落盘终态 / 损坏拒入）。 */
+  'config.codemodeSetEnabled': CodemodeSetEnabledResult
 
   // ── preset 域 reply（设计文档 pi-launch-presets.md，runtime PresetMessageHandler reply）──
   // 仅登记 payload 消费型 reply（domain 读 reply 字段）。
@@ -2885,6 +2902,9 @@ export interface ReplyPayloadMap {
   'config.setSmartContextCompactModel': ServerMessageMap['config.smartContextCompactModel']
   'config.setSmartContextThresholds': ServerMessageMap['config.smartContextThresholds']
   'config.setSmartContextExcludedModels': ServerMessageMap['config.smartContextExcludedModels']
+  // codemode 开关命令对（codemode 设计 D1/A1）
+  'config.getCodemodeEnabled': ServerMessageMap['config.codemodeEnabled']
+  'config.setCodemodeEnabled': ServerMessageMap['config.codemodeSetEnabled']
   // u-locale-channel：ack 型（无读回 RPC，成功只回 config.uiLocaleSet；写盘失败走错误信封）。
   'config.setUiLocale': void
   // preset 域（设计文档 pi-launch-presets.md）：runtime PresetMessageHandler reply。

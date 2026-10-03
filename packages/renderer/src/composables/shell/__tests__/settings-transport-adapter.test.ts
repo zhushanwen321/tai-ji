@@ -154,6 +154,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     getRenameMode: fwd('settings', 'getRenameMode', [], (t) => t.getRenameMode()),
     getRenameModel: fwd('settings', 'getRenameModel', [], (t) => t.getRenameModel()),
     getSmartContextConfig: fwd('settings', 'getSmartContextConfig', [], (t) => t.getSmartContextConfig()),
+    getCodemodeEnabled: fwd('settings', 'getCodemodeEnabled', [], (t) => t.getCodemodeEnabled()),
     getUsageStats: fwd('usage', 'getUsageStats', [], (t) => t.getUsageStats()),
     getSubagentEngineConfig: fwd('session', 'getSubagentEngineConfig', [], (t) => t.getSubagentEngineConfig()),
     getCachedQuota: fwd('quota', 'getCached', [PROBE_PID], (t, providerId) => t.getCachedQuota(providerId)),
@@ -211,6 +212,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     setSmartContextExcludedModels: fwd('settings', 'setSmartContextExcludedModels', [['probe/excluded']], (t, models) =>
       t.setSmartContextExcludedModels(models),
     ),
+    setCodemodeEnabled: fwd('settings', 'setCodemodeEnabled', [true], (t, enabled) => t.setCodemodeEnabled(enabled)),
     setSubagentDefaultEngine: fwd('session', 'setSubagentDefaultEngine', ['probe-engine'], (t, engineId) =>
       t.setSubagentDefaultEngine(engineId),
     ),

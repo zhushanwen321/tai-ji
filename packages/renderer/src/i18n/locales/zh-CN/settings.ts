@@ -694,6 +694,17 @@ export default {
     llmRetryUnitMs: '毫秒',
     llmRetryEmptyAsZero: '留空 = 0',
     llmRetryTimeoutPlaceholder: '留空 = 跟随全局',
+    // ── Code Mode（脚本模式）（codemode 设计 D3，SystemCodemodeSection）──
+    codemodeTitle: 'Code Mode（脚本模式）',
+    codemodeEnable: '启用 Code Mode',
+    codemodeDesc: '模型可编写 JavaScript 脚本，在脚本中并行调用工具、过滤过大的结果、生成图片；配置随新启动的会话读取',
+    codemodeSwitchFailed: '开关操作失败，请重试',
+    codemodeSetRejected: '写入被拒绝：设置文件已损坏（{path}）。修复或删除该文件后重试，无需重启',
+    codemodeCorruptionTitle: '设置文件已损坏，Code Mode 开关暂不可用',
+    codemodeCorruptionGuide: '修复或删除该文件后重试开关操作，无需重启——损坏检测每次现查，修复即恢复；新会话按生效时机读取配置',
+    codemodeCopyPath: '复制路径',
+    codemodePathCopied: '路径已复制',
+    codemodeCorruptCopyHint: '文件已被自动隔离，原内容可从 {path} 找回',
     saved: '已保存',
     saveFailed: '保存失败：{reason}',
     // RD-4#8：onMounted 读配置失败时的常驻提示（禁止把默认值当已存值渲染）

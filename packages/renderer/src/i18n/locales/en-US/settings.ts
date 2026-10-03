@@ -695,6 +695,17 @@ export default {
     llmRetryUnitMs: 'ms',
     llmRetryEmptyAsZero: 'empty = 0',
     llmRetryTimeoutPlaceholder: 'empty = follow global',
+    // ── Code Mode (codemode design D3, SystemCodemodeSection) ──
+    codemodeTitle: 'Code Mode',
+    codemodeEnable: 'Enable Code Mode',
+    codemodeDesc: 'The model can write JavaScript scripts that call tools in parallel, filter oversized results, and generate images; configuration is read by newly started sessions',
+    codemodeSwitchFailed: 'Failed to toggle, please retry',
+    codemodeSetRejected: 'Rejected: the settings file is corrupted ({path}). Fix or delete the file and retry — no restart required',
+    codemodeCorruptionTitle: 'Settings file is corrupted; the Code Mode switch is unavailable',
+    codemodeCorruptionGuide: 'Fix or delete the file and retry the switch — no restart required. Corruption is re-checked on every attempt, so recovery is immediate once fixed; new sessions read the configuration when they start',
+    codemodeCopyPath: 'Copy path',
+    codemodePathCopied: 'Path copied',
+    codemodeCorruptCopyHint: 'The file has been auto-quarantined; the original content can be recovered from {path}',
     saved: 'Saved',
     saveFailed: 'Save failed: {reason}',
     // RD-4#8: persistent hint when onMounted config read fails (never render defaults as saved values)
