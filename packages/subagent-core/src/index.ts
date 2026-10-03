@@ -677,7 +677,7 @@ export {
 // ── 共享原语（shared/）───────────────────────────────────────
 // agent 展示名归一（渲染层 7 处消费的 SSOT）+ meta 解析 / XML 注入 / 资源发现 /
 // thinking 档位序（THINKING_ORDER 定义源 shared/model-ref，model-resolver 为转发）。
-export { displayAgentName } from "./shared/agent-ref.ts";
+export { displayAgentName, displayWorkflowName } from "./shared/agent-ref.ts";
 export {
   parseResourceMeta,
   parseResourceMetaDetailed,

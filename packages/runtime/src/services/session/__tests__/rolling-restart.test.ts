@@ -472,12 +472,20 @@ describe('A5 shutdown 步骤打点序列 SSOT（SHUTDOWN_STEP_SEQUENCE）', () =
       'dispose-skill-registry',
       'dispose-git-head-watcher',
       'dispose-claim-ledger',
+      'dispose-terminal-ptys',
       'deinit-relay-server',
       'server-stop',
       'engine-pool-dispose',
       'close-crash-journal',
       'close-logger',
     ])
+  })
+
+  it('dispose-terminal-ptys 位于传输层关停（deinit-relay-server / server-stop）之前（先收受托资源再关门）', () => {
+    const seq = SHUTDOWN_STEP_SEQUENCE as readonly string[]
+    const terminalIdx = seq.indexOf('dispose-terminal-ptys')
+    expect(terminalIdx).toBeGreaterThan(seq.indexOf('dispose-claim-ledger'))
+    expect(terminalIdx).toBeLessThan(seq.indexOf('deinit-relay-server'))
   })
 })
 

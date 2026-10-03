@@ -132,7 +132,7 @@
                   class="size-[13px] shrink-0 animate-spin text-accent" />
                 <span v-else class="size-2 shrink-0 rounded-full" :class="subagentDotClass(record)" />
                 <span class="min-w-0 flex-1 truncate text-[length:var(--text-xs)] font-medium leading-[1.35] text-neutral-fg">
-                  {{ record.agent }}
+                  {{ displayAgentName(record.agent) }}
                 </span>
                 <span v-if="record.slug" data-testid="tray-subagent-slug"
                   class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-mid">{{ record.slug }}</span>
@@ -286,6 +286,7 @@ import type { BackgroundTaskEntry, BackgroundTaskIconState, BackgroundTaskStatus
 import { formatTokens as formatTokensK } from '@/lib/token-format'
 import { formatClockDuration, formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
 import { resolveEngineIcon } from '@/constants/engine-icons'
+import { displayAgentName } from '@taiji/shared'
 import { toErrorMessage } from '@taiji/core'
 import * as backgroundTaskApi from '@taiji/core/transport/api/domains/background-task'
 import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
