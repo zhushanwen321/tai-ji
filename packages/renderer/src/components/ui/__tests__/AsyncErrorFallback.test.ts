@@ -128,7 +128,10 @@ describe('createLazyChunkRetry 状态机（bustedImport spy 注入）', () => {
     const retry = createLazyChunkRetry(load, { bustedImport })
     const onError = (err: unknown) => {
       const failSpy = vi.fn()
-      retry.onError(err, () => { void retry.loader() }, failSpy)
+      // promise 卫生：重跑链的 rejection 由下一次 onError 断言消费（或故意不消费），
+      // 这里必须显式接住——`void` 不阻止 unhandledRejection（Node 语义：无 handler 即报），
+      // 否则机械重试/重跑仍败的用例会以「全绿 + exit 1」泄漏（2026-10-03 实测 6 例）。
+      retry.onError(err, () => { retry.loader().catch(() => {}) }, failSpy)
       return Promise.resolve(failSpy)
     }
     return { retry, bustedImport, onError }
