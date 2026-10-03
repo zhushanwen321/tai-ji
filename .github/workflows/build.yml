@@ -50,7 +50,7 @@ jobs:
       # 与 scripts/prepare-pi-resources.sh 默认值对齐（0.84.4），避免 CI 打包内置旧 pi。
       # 该值受 scripts/check-pi-sync.mjs S1 守卫（pre-commit 按路径触发 + ci.yml invariants），
       # 与根 package.json 声明不一致时会被拦截。
-      PI_VERSION: '0.84.4'
+      PI_VERSION: '1.0.0'
 
     steps:
       - uses: actions/checkout@v4

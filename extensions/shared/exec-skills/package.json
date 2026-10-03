@@ -30,10 +30,10 @@
     "@zhushanwen/pi-extension-logger": "workspace:*"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.4"
+    "@earendil-works/pi-coding-agent": "^1.0.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@earendil-works/pi-coding-agent": "^1.0.0",
     "@vitest/coverage-v8": "^4.1.9",
     "vitest": "^4.1.8"
   }

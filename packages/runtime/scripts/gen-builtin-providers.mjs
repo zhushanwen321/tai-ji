@@ -89,6 +89,9 @@ const PROVIDER_ENV_VARS = {
   'xiaomi-token-plan-sgp': ['XIAOMI_TOKEN_PLAN_SGP_API_KEY'],
   zai: ['ZAI_API_KEY'],
   'zai-coding-cn': ['ZAI_CODING_CN_API_KEY'],
+  meta: ['META_API_KEY'],
+  radius: ['RADIUS_API_KEY'],
+  typesafe: ['TYPESAFE_API_KEY'],
 }
 
 // ambient provider：走云凭证（Google ADC / AWS profile），不消费 env var。
@@ -122,6 +125,10 @@ export const OAUTH_DIR = join(
 // 服务端不校验 client_id。新增此类 provider 必须在此登记，否则缺 clientId 会被 E6 阻断误报。
 const NO_CLIENT_ID_PROVIDERS = new Set(['openrouter'])
 
+// provider id → oauth 实现文件名映射（默认 `<id>.js`）。pi-ai 1.0.0 把 openai 的
+// Sign in with ChatGPT 实现改名为 openai-chatgpt.js（dist/auth/oauth/load.js 动态 import 同名源文件）。
+const OAUTH_FILE_ALIASES = { openai: 'openai-chatgpt' }
+
 function extractClientId(src) {
   // ① base64 混淆（`const CLIENT_ID = decode("...")`，decode = atob）
   const b64 = src.match(/const CLIENT_ID = decode\("([^"]+)"\)/)
@@ -132,6 +139,12 @@ function extractClientId(src) {
   // ③ xai 常量名特例（XAI_CLIENT_ID 而非 CLIENT_ID）
   const xai = src.match(/const XAI_CLIENT_ID = "([^"]+)"/)
   if (xai) return xai[1]
+  // ④ openai-chatgpt（pi-ai 1.0.0）：登录时动态注册 client，常量名 DYNAMIC_CLIENT_ID
+  const dynamic = src.match(/const DYNAMIC_CLIENT_ID = "([^"]+)"/)
+  if (dynamic) return dynamic[1]
+  // ⑤ radius（pi-ai 1.0.0）：OAUTH_CLIENT_ID 常量名（gateway 客户端 id，非厂商注册）
+  const oauthPrefix = src.match(/const OAUTH_CLIENT_ID = "([^"]+)"/)
+  if (oauthPrefix) return oauthPrefix[1]
   return undefined
 }
 
@@ -164,7 +177,7 @@ function extractEndpoint(src, constNames) {
 
 // token 端点：常量优先；copilot/kimi 的端点在函数内模板（无顶层 const），特判路径模式 + 默认 host。
 function extractTokenUrl(src) {
-  const fromConst = extractEndpoint(src, ['TOKEN_URL', 'XAI_TOKEN_URL'])
+  const fromConst = extractEndpoint(src, ['TOKEN_URL', 'XAI_TOKEN_URL', 'DEVICE_TOKEN_URL'])
   if (fromConst) return fromConst
   const copilot = src.match(/`https:\/\/\$\{domain\}\/login\/oauth\/access_token`/)
   if (copilot) return 'https://github.com/login/oauth/access_token'
@@ -176,9 +189,10 @@ function extractTokenUrl(src) {
   return undefined
 }
 
-// deviceCode 端点：同上，常量优先 + copilot/kimi 函数内模板特判。
+// deviceCode 端点：同上，常量优先 + copilot/kimi 函数内模板特判；meta（pi-ai 1.0.0）的
+// DEVICE_AUTHORIZATION_URL 是 `${AUTH_HOST}/...` 模板，AUTH_HOST 为顶层 const 由通用解析命中。
 function extractDeviceCode(src) {
-  const fromConst = extractEndpoint(src, ['XAI_DEVICE_CODE_URL', 'DEVICE_USER_CODE_URL', 'DEVICE_CODE_URL'])
+  const fromConst = extractEndpoint(src, ['XAI_DEVICE_CODE_URL', 'DEVICE_USER_CODE_URL', 'DEVICE_CODE_URL', 'DEVICE_AUTHORIZATION_URL'])
   if (fromConst) return fromConst
   const copilot = src.match(/`https:\/\/\$\{domain\}\/login\/device\/code`/)
   if (copilot) return 'https://github.com/login/device/code'
@@ -273,7 +287,8 @@ export function extractOAuthConfig(id, src) {
 
 // 读取实现文件 + 提取；文件缺失同样 throw（oauth provider 必须能提取出配置）。
 function extractOAuthConfigFromFile(id) {
-  const filePath = join(OAUTH_DIR, `${id}.js`)
+  const fileName = OAUTH_FILE_ALIASES[id] ?? id
+  const filePath = join(OAUTH_DIR, `${fileName}.js`)
   let src
   try {
     src = readFileSync(filePath, 'utf-8')

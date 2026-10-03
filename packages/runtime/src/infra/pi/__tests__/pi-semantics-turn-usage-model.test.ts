@@ -121,9 +121,11 @@ describe.skipIf(SKIP_REASON !== '')(
         agentSession.includes('this._emit(event.type === "agent_end" ? { ...event, willRetry: this._willRetryAfterAgentEnd(event) } : event);'),
         'PS-25 漂移：_handleAgentEvent 的 listener 透传形态改变（turn_end 不再原样 _emit）——复核 agent-session.js',
       ).toBe(true)
-      // 扩展事件形态：message 字段原样引用 event.message（无字段重写/裁剪）
-      const ext = /type: "turn_end",\s*\n\s*turnIndex: this\._turnIndex,\s*\n\s*message: event\.message,/.exec(agentSession)
-      expect(ext, 'PS-25 漂移：_emitExtensionEvent 的 turn_end.message 不再原样引用 event.message').not.toBeNull()
+      // 扩展事件形态（pi 1.0.0：_emitExtensionEvent 的 turn_end 分支改经 _dispatchTurnEndBoundary
+      // → emitBoundary 下发，message 原样简写引用 + 新增 messageEntryId/toolResultEntryIds/outcome；
+      // listener 面 _emit 透传不变，此为扩展订阅面形态）
+      const ext = /const boundary = await this\._extensionRunner\.emitBoundary\(\{\s*\n\s*type: "turn_end",\s*\n\s*turnIndex: this\._turnIndex,\s*\n\s*message,\s*\n\s*toolResults,\s*\n\s*messageEntryId,\s*\n\s*toolResultEntryIds,\s*\n\s*outcome: this\._lastActivityOutcome,/.exec(agentSession)
+      expect(ext, 'PS-25 漂移：turn_end 扩展 boundary（emitBoundary）不再原样引用 message——扩展面字段被重写/裁剪').not.toBeNull()
     })
 
     it('pi-coding-agent RPC 通路：toJsonEvent 非 message_update 原样返回 + rpc-mode 经其下发全部 session 事件', () => {
@@ -177,15 +179,17 @@ describe.skipIf(SKIP_REASON !== '')(
       it('P3①：error/aborted 分支——真实 partial message 的 message_end（流内收敛）先于 turn_end(空工具结果) + return', () => {
         expect(streamBody, 'P3① 锚点漂移：streamAssistantResponse 函数体切片为空——复核 agent-loop.js 结构').not.toBe('')
         expect(runLoopBody, 'P3① 锚点漂移：runLoop 函数体切片为空——复核 agent-loop.js 结构').not.toBe('')
-        // 流内 error 事件与 done 同 case：response.result() 取真实 partial message（provider 已计部分 usage）并 emit message_end 后返回
+        // 流内 error 事件与 done 同 case：result() 闭包（pi 1.0.0：response.result() 包装
+        // thinkingLevel 附加后返回）取真实 partial message 并 emit message_end 后返回
         expect(
-          /case "done":\s*\n\s*case "error": \{\s*\n\s*const finalMessage = await response\.result\(\);[\s\S]*?await emit\(\{ type: "message_end", message: finalMessage \}\);\s*\n\s*return finalMessage;/.test(streamBody),
+          /case "done":\s*\n\s*case "error": \{\s*\n\s*const finalMessage = await result\(\);[\s\S]*?await emit\(\{ type: "message_end", message: finalMessage \}\);\s*\n\s*return finalMessage;/.test(streamBody),
           'P3① 漂移：流 error 事件不再收敛出真实 partial message 的 message_end——Esc 中断的「部分流窗口」样本前提破裂，复核 agent-loop.js case "error" 段',
         ).toBe(true)
-        // runLoop 分支：stopReason error/aborted → turn_end(toolResults:[]) → agent_end → return（无工具执行、无二次流式）
+        // runLoop 分支：stopReason error/aborted → finishTurn 钩子（pi 1.0.0 起失败轮也触发，
+        // 扩展 boundary 可表决续跑）→ turn_end(toolResults:[]) → agent_end → return
         expect(
-          /if \(message\.stopReason === "error" \|\| message\.stopReason === "aborted"\) \{\s*\n\s*await emit\(\{ type: "turn_end", message, toolResults: \[\] \}\);\s*\n\s*await emit\(\{ type: "agent_end", messages: newMessages \}\);\s*\n\s*return;/.test(runLoopBody),
-          'P3① 漂移：error/aborted 分支不再是「turn_end(空工具结果) → agent_end → return」结构——复核 agent-loop.js',
+          /if \(message\.stopReason === "error" \|\| message\.stopReason === "aborted"\) \{\s*\n\s*lastCompletedTurn = \{\s*\n\s*message,\s*\n\s*toolResults: \[\],\s*\n\s*context: currentContext,\s*\n\s*newMessages,\s*\n\s*\};\s*\n\s*await config\.finishTurn\?\.\(lastCompletedTurn, signal\);\s*\n\s*await emit\(\{ type: "turn_end", message, toolResults: \[\] \}\);\s*\n\s*await emit\(\{ type: "agent_end", messages: newMessages \}\);\s*\n\s*return;/.test(runLoopBody),
+          'P3① 漂移：error/aborted 分支不再是「finishTurn → turn_end(空工具结果) → agent_end → return」结构——复核 agent-loop.js',
         ).toBe(true)
       })
 
@@ -222,8 +226,9 @@ describe.skipIf(SKIP_REASON !== '')(
           'P4 漂移：streamAssistantResponse 调用点不再唯一——每 turn 恰一次 LLM 请求的 1:1 配对前提破裂，新口径将产「末窗口 × 全 turn tokens」静默偏高样本，复核 agent-loop.js',
         ).toBe(1)
         // 调用点位于 runLoop 内层 while 直线体：while 头 → turn_start/steering 注入 → 唯一流式调用（无条件执行）
+        // pi 1.0.0：steering 注入循环头 = declareToolChanges 包裹（prepared + pending 合并注入）
         const whileIdx = runLoopBody.indexOf('while (hasMoreToolCalls || pendingMessages.length > 0) {')
-        const steeringIdx = runLoopBody.indexOf('for (const message of pendingMessages) {')
+        const steeringIdx = runLoopBody.indexOf('for (const message of declareToolChanges(currentContext, [...preparedMessages, ...pendingMessages])) {')
         const callIdx = runLoopBody.indexOf('const message = await streamAssistantResponse(')
         expect(whileIdx, 'P4 锚点漂移：内层 while 条件结构改变——复核 agent-loop.js runLoop').toBeGreaterThan(-1)
         expect(steeringIdx, 'P4 锚点漂移：steering 注入循环消失——复核 agent-loop.js runLoop').toBeGreaterThan(-1)

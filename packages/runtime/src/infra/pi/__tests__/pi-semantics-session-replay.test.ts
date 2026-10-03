@@ -63,7 +63,7 @@ describe.skipIf(!PI_DIST)(
       ).toBeGreaterThan(headerSkipIdx)
     })
 
-    it('_setSessionFile（resume/branching 加载路径）：loadEntriesFromFile 装载文件后调 _buildIndex', () => {
+    it('_setSessionFile（resume/branching 加载路径）：loadEntriesFromFile 装载文件后经共享 _loadEntries 调 _buildIndex', () => {
       const win = methodWindow(SM_SRC, '_setSessionFile(sessionFile, preloadedFileEntries) {')
       expect(win, 'PS-60 漂移：_setSessionFile 方法消失/改签名——加载路径改形，复核 PS-60').not.toBe('')
       const loadIdx = win.indexOf('loadEntriesFromFile(this.sessionFile)')
@@ -71,11 +71,18 @@ describe.skipIf(!PI_DIST)(
         loadIdx,
         'PS-60 漂移：加载路径不再经 loadEntriesFromFile 读全文件——复核 PS-60（文件腿裁剪喂数前提）',
       ).toBeGreaterThanOrEqual(0)
-      const buildIdx = win.indexOf('this._buildIndex()')
+      // pi 1.0.0 起「装载 + 建索引」抽成共享 _loadEntries（构造器 preloaded 分支与本路径共用），
+      // _buildIndex 移入其中尾部——链式两跳断言：_setSessionFile → _loadEntries → _buildIndex
+      const loadEntriesIdx = win.indexOf('this._loadEntries(entries)')
       expect(
-        buildIdx,
-        'PS-60 漂移：加载路径不再调 _buildIndex——重放不发生或换了准则，复核 PS-60',
+        loadEntriesIdx,
+        'PS-60 漂移：加载路径不再经共享 _loadEntries 装载——装载链改形，复核 PS-60',
       ).toBeGreaterThan(loadIdx)
+      const loadWin = methodWindow(SM_SRC, '_loadEntries(entries, options) {')
+      expect(
+        loadWin.includes('this._buildIndex()'),
+        'PS-60 漂移：_loadEntries 末尾不再调 _buildIndex——重放不发生或换了准则，复核 PS-60',
+      ).toBe(true)
     })
 
     it('buildSessionPath：从叶子沿 parentId 回溯到根；leaf 缺失兜底 = entries 末条', () => {

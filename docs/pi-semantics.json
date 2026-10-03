@@ -20,7 +20,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-model-resolution.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-02",
@@ -37,7 +37,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-thinking-gating.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-03",
@@ -54,7 +54,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-rpc-surface.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-04",
@@ -71,7 +71,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-agent-session.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-05",
@@ -88,7 +88,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-steering-drain.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-06",
@@ -105,7 +105,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-agent-session.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-07",
@@ -122,7 +122,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-agent-session.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-08",
@@ -139,7 +139,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-agent-session.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-09",
@@ -156,7 +156,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-session-entries.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-10",
@@ -179,7 +179,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-rpc-surface.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-11",
@@ -196,7 +196,7 @@
       "type": "observe",
       "note": "运行时防御：切片 1 孪生检查（start 同步期拒单）+ U5 能力注册表对账 drift 日志；pi 升级时人工复核 models-store 刷新行为（file mtime/checkedAt）"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-12",
@@ -213,7 +213,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-thinking-gating.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-13",
@@ -230,7 +230,7 @@
       "type": "observe",
       "note": "处置建议已在 troubleshooting 观察项 #1（taiji 侧不依赖挂起窗口的信号语义；runtime 无 TUI 交互面）"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-14",
@@ -247,7 +247,7 @@
       "type": "observe",
       "note": "既有兜底已生效（troubleshooting 观察项 #2；taiji 侧 SessionScanner.listAll 合并内存 Map 显示，读取代码必须处理文件不存在）"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-15",
@@ -264,7 +264,7 @@
       "type": "observe",
       "note": "pi 升级 PR 必查两项：exports 是否移除 ./compat、changelog 是否提及迁移完成——checklist 并入 C-proc-08 报错文案（U8 登记）"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-16",
@@ -281,7 +281,7 @@
       "type": "observe",
       "note": "待产品裁决（troubleshooting 观察项 #5）；裁决前 fork 链路不依赖 entry model_change 终态"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-17",
@@ -298,7 +298,7 @@
       "type": "observe",
       "note": "消费方：sw notify-ledger 的『跨重启不丢』限定语义 = OS 崩溃/断电窗口（无 fsync 的真实残余面），进程强杀不丢已 append entry。pi 升级时重验：_appendEntry 是否引入异步 flush/debounce"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-18",
@@ -321,7 +321,7 @@
       "type": "observe",
       "note": "sw 子进程单写者不变量（extensions/universal/subagent-workflow session-runner.ts 的 buildSpawnArgs / runSpawn 注释）的 pi 侧机制依据；resume/续聊冷路径须先确认旧进程已死（resumesInFlight 检查）。pi 升级时重验：compaction 是否仍 append-only、_rewriteFile 触发面是否仍限于加载期"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-19",
@@ -344,7 +344,7 @@
       "type": "observe",
       "note": "扩展侧磁盘保留的承重依据（W1 介质归位后口径，ADR-0094）：pi 不清理则 taiji 自担——journal/record 事件文件经统一保留维护轮清理（fold 终态资格判据 + 默认 30 天保留窗口，state 快照成对删、manifest 永不随裁；cap=50 计数裁剪已废除）。pi 升级时重验：SessionManager 是否新增自动清理/retention"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-20",
@@ -373,7 +373,7 @@
       "type": "observe",
       "note": "共同承重机制：structured-output loop-gate 的 tool_execution_end 计数通道选型（参数层失败只经 tool_execution_end 可观测）+ workflow 变体 execute 透传不做第二校验（D2 单一校验权威 = 本链）+ subagent tool schema pattern/maxLength 运行时强制（工具层检查定位为 defense-in-depth）。探针锚点：structured-output cross-package-contract.test.ts ③ 真实 SDK 冒烟对 SW schema 跑 validateToolArguments。pi 升级时重验：校验是否仍在 beforeToolCall/execute 之前、immediate 分支是否仍 emitToolExecutionEnd、错误消息格式（Received arguments: 回显）是否稳定"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-21",
@@ -408,7 +408,7 @@
       "type": "observe",
       "note": "承重：subagent-workflow U3「ASP 单点注入、删 task 后缀」（agent-opts-resolver.ts formatSchemaInstruction 与 session-runner.ts runSpawn 头注引用本条）——若 pi 升级后不再把注册工具 parameters 下发进请求体，模型将失去 schema 展示面，structured-output 指令链断裂且 ASP 的 {value} 包装契约失去对位；PS-20 的 observe 检查只覆盖校验链不覆盖展示面。pi 升级时重验：convertTools 是否仍原样映射 tool.parameters、state.tools 是否仍随流式调用上下文下发。观察记录：bcadf4c22 live-verification（structured-output 全链实测，schema 经工具定义对模型生效）"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-22",
@@ -425,7 +425,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-prompt-rejection.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-23",
@@ -442,7 +442,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-prompt-rejection.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-24",
@@ -465,7 +465,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-skill-expansion-golden.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-25",
@@ -518,11 +518,11 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-turn-usage-model.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-26",
-    "claim": "消息文本 transform 面唯一性：pi 对 user 消息文本的改写只发生在 prompt() 通路的 extension input hook（hasHandlers(\"input\")/emitInput 全文仅此一处，hook 返回 transform 才替换 currentText）；steer()/followUp()/_queueSteer/_queueFollowUp 全程无 input hook，消息对象从 _queueSteer 原文本构造 → agent.steer 入队（steeringQueue.enqueue）→ drain（getSteeringMessages 原样返回）→ 直接 emit message_start/message_end 并 push 进 LLM 上下文，零改写；user 消息落盘与事件同源（_handleAgentEvent 对 message_end 的 event.message 原样 sessionManager.appendMessage，runAgentLoop 对初始 prompt 同款 emit）。推论（core defer 投递确认协议承重，data-governance round2 MF-1）：不匹配 msg-id-mapper TAG_STRIP（仅 u- 前缀形态，uuid hex 字符集不含 u，与裸 uuid 结构互斥）的裸标记 <!--taiji:msg:<uuid>-->（DEFER_FLUSH_MARKER_RE，SSOT apply-entry-convert.ts）在 send 通路（input hook 不命中即 transform 不发生）与 steer 通路（无 hook）均全程存活——pi 落盘文本与 message_end(user) 回流文本都携带标记，core user-delivery ①a 按标记 id 确认出队的可达性锚点；裸标记随消息文本进入 LLM 上下文（prompt 尾部一行 HTML 注释，已知权衡登记 registry #6 修订注记）",
+    "claim": "消息文本 transform 面唯一性：pi 对 user 消息文本的改写只发生在 prompt() 通路的 extension input hook（hasHandlers(\"input\")/emitInput 全文仅此一处，hook 返回 transform 才替换 currentText）；steer()/followUp()/_queueSteer/_queueFollowUp 全程无 input hook，消息对象从 _queueSteer 原文本构造 → agent.steer 入队（steeringQueue.enqueue）→ drain（getSteeringMessages 原样返回）→ 直接 emit message_start/message_end 并 push 进 LLM 上下文，零改写；user 消息落盘与事件同源（_handleAgentEvent 对 message_end 的 event.message 原样 sessionManager.appendMessage，runAgentLoop 对初始 prompt 同款 emit）。推论（core defer 投递确认协议承重，data-governance round2 MF-1）：不匹配 msg-id-mapper TAG_STRIP（仅 u- 前缀形态，uuid hex 字符集不含 u，与裸 uuid 结构互斥）的裸标记 <!--taiji:msg:<uuid>-->（DEFER_FLUSH_MARKER_RE，SSOT apply-entry-convert.ts）在 send 通路（input hook 不命中即 transform 不发生）与 steer 通路（无 hook）均全程存活——pi 落盘文本与 message_end(user) 回流文本都携带标记，core user-delivery ①a 按标记 id 确认出队的可达性锚点；裸标记随消息文本进入 LLM 上下文（prompt 尾部一行 HTML 注释，已知权衡登记 registry #6 修订注记）。pi 1.0.0 附带变化：hook 拦截段抽为独立方法 _runInputHandlers（守卫反转早退，handled → undefined 终止 prompt）；初始 prompt 与 steering 注入循环经 declareToolChanges 包裹——工具装载有增量时插入/改写 system 消息（toolsAdded/toolsRemoved），无增量时消息原样直通，user prompt 文本零改写，transform 面唯一性不变",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -553,7 +553,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-defer-marker-survival.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-27",
@@ -576,11 +576,11 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-skill-expansion-static.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-28",
-    "claim": "appendCompaction 对 hook 返回的 compaction.details 逐字透传落盘：agent-session 两条压缩路径（manual/threshold auto）在 session_before_compact hook 返回 compaction 时 details = extensionCompaction.details 原样引用，随后原样传入 sessionManager.appendCompaction，后者 entry 字面量直接引用该对象（无克隆/无字段白名单/无裁剪）——extension 在 details 写入的自定义字段（如 smart-context 的 model 归属，usage-page-fixes §3.3 ①）必然随 compaction entry 原样落盘；pi 升级若对 details 做克隆/裁剪/改名，归属字段静默丢失（scanner ③ 回退 generic 行，不报错），由本探针拦截",
+    "claim": "appendCompaction 对 hook 返回的 compaction.details 逐字透传落盘：agent-session 两条压缩路径（manual/threshold auto）在 session_before_compact hook 返回 compaction 时 details = extensionCompaction.details 原样引用，随后原样传入 sessionManager.appendCompaction，后者 entry 字面量直接引用该对象（无克隆/无字段白名单/无裁剪）——extension 在 details 写入的自定义字段（如 smart-context 的 model 归属，usage-page-fixes §3.3 ①）必然随 compaction entry 原样落盘；pi 升级若对 details 做克隆/裁剪/改名，归属字段静默丢失（scanner ③ 回退 generic 行，不报错），由本探针拦截。pi 1.0.0 附带变化：appendCompaction 前置调 buildSessionProjection()（读 fileEntries/byId）提取可选 systemMessage 快照字段；firstKeptEntryId 入参 falsy 时自指 compaction entry 自身 id （0.84.4 原样透传 undefined）；details 逐字透传语义不变",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -599,7 +599,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-compaction-details.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-29",
@@ -622,7 +622,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-session-entries.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-30",
@@ -645,7 +645,7 @@
       "type": "probe",
       "test": "extensions/shared/ext-guards/src/__tests__/pi-semantics-stale-ctx-wording.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-31",
@@ -662,7 +662,7 @@
       "type": "observe",
       "note": "消费方：runtime rpc-client 删 --session-dir（U16）后，pi 的 session 根解析完全落在链的缺省分支，链顺序是该改造行为等价性的前提。pi 升级时重验：main.js 三级 ?? 链顺序与 expandTildePath 语义是否漂移"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-32",
@@ -685,7 +685,7 @@
       "type": "observe",
       "note": "消费方：session-reader index.ts 信号采集以可选链 ctx?.sessionManager?.getSessionDir?.() 读 [live] 根（ctx === undefined 时降级，u3）。pi 升级时重验：ExtensionContext 是否仍无条件携带 sessionManager、ReadonlySessionManager Pick 是否仍含 getSessionDir"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-33",
@@ -708,7 +708,7 @@
       "type": "observe",
       "note": "消费方：session-reader roots.ts 的 [live] 根识别（根本身 vs encodeCwd 子目录剥层）与 P-6（RPC 模式 getSessionDir() 实跑值）依赖此双形态语义。pi 升级时重验：create 三目分支与实例 getSessionDir 是否仍无再派生"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-34",
@@ -737,7 +737,7 @@
       "type": "observe",
       "note": "消费方：session-reader 四根标签（[live] 剥层 / [default]）与 taiji 方案 B 布局对齐（U15 SSOT 改值）以本构造式为基准；数据目录下全部 <encoded-cwd> 形态子目录须与本编码式一致才能被 pi 原生 listAll 枚举。pi 升级时重验：编码式（分隔符集合与 -- 包裹）与 sessions 挂载层是否漂移"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-35",
@@ -754,7 +754,7 @@
       "type": "observe",
       "note": "消费方：方案 B（taiji 数据布局与 pi 同构）成立前提之一——托管数据目录内 settings.json 的 sessionDir 恒空，pi 才走默认派生（PS-34）；该字段被清除时方走默认派生（无写入方应设置它）。pi 升级时重验：getSessionDir 是否仍直读 settings.sessionDir 且无副作用、是否新增 sessionDir 写入路径"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-36",
@@ -771,7 +771,7 @@
       "type": "observe",
       "note": "消费方：session-reader [env] 根信号读该变量定位托管 session 根（方案 B 先行路径不注入，U4 仅退路；纯 pi 用户手工设置同变量生效）。pi 升级时重验：dist/config.js 的 ENV_SESSION_DIR 模板与 APP_NAME 默认值是否漂移"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-37",
@@ -788,7 +788,7 @@
       "type": "observe",
       "note": "消费方：rename-session first-prompt 谓词（pure.ts countUserMessages，设计 rename-session-three-modes.md D2）——message_end(user) handler 内 entries 计数 === 0 ⇔ 本条即 session 首条 user；顺序反转则首 turn 标题生成停触发（首条被判非首条）。单测 TC-M1/M3（index.test.ts）以 entries 空/含 user 编码该契约（mock 不验证 pi 侧真实顺序）。pi 升级时重验：_emitExtensionEvent 与 appendMessage 的相对顺序"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-38",
@@ -811,7 +811,7 @@
       "type": "observe",
       "note": "消费方：taiji 经 get_available_models（PS-10 读面）拿到的可用模型清单由该巡检快照承载——oauth 凭据临近过期的 provider 刷新失败时该轮快照不更新，清单滞后属 pi 侧行为非 taiji 缓存失真（cache-governance 审计 A-1 登记的 pi 语义断言依赖）。pi 升级时重验：resolveProviderAuth 调用点是否补 catch、Promise.all 是否改 allSettled 化部分成功、availabilityError 记录后是否有自动重试收敛"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-39",
@@ -828,7 +828,7 @@
       "type": "observe",
       "note": "消费方：taiji 读 pi 模型状态（get_state 的 model 字段等，PS-10 读面同族）遇未初始化窗口拿到的是 unknown 占位而非空值——按对象真值判定会误判「已有模型」。pi 升级时重验：占位字段集与 ?? 兜底位置是否漂移（如改回 undefined 或新增独立 hasModel 标志）"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-40",
@@ -845,7 +845,7 @@
       "type": "observe",
       "note": "消费方：packages/runtime/src/services/session/history-rebuild-cache.ts 的 since=leafId 游标翻页（头注 :25 自述「compact 是 append-only → since 不会因 compact 失效」）+ cache-governance 批 3 extractLatestModelFromJsonl 尾扫（U7/U8 落地后生效）。pi 升级时重验与 PS-18 同点：_rewriteFile 触发面是否仍限加载期、是否新增删除/改写路径——PS-18 登记 pi 侧机制，本条登记 taiji 消费侧前提，pi bump 双条同验"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-41",
@@ -868,7 +868,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-model-snapshot.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-42",
@@ -897,7 +897,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-model-snapshot.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-43",
@@ -920,7 +920,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-model-snapshot.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-44",
@@ -949,7 +949,7 @@
       "type": "probe",
       "test": "packages/zcode-session-source/src/__tests__/pi-reader-invariant.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-45",
@@ -966,7 +966,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-select-no-turn.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-46",
@@ -989,7 +989,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-ttft-anchors.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-47",
@@ -1042,7 +1042,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-ttft-anchors.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-48",
@@ -1059,7 +1059,7 @@
       "type": "observe",
       "note": "消费方：structured-output workflow-hook RETRY_REMINDER_CUSTOM_TYPE 注释 / decisions.md ADR-0068 语义① / extension-conventions「Event handler 消息注入」三处引用本条。pi 升级时重验：case \"custom\" 是否仍无条件 role:\"user\"——若引入 display/其它条件门控，custom 注入的 LLM 可见性语义变化，三处消费方同审"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-49",
@@ -1076,7 +1076,7 @@
       "type": "observe",
       "note": "消费方：packages/runtime/src/services/session/event-interpreter.ts OccupancySettleWindow 头注（CP6，scheduler-trigger-inversion §11 CP6）——arm（dispatcher 在 prompt resolve 后武装 2s 短窗）/ cancel（agent_start、turn_start 到达即取消）语义整体承重于「纯命令零 turn 事件」；命令 handler 自身经 ctx sendMessage 开轮属命令副作用，产生的 turn 事件会 cancel 短窗，语义不冲突。pi 升级时重验：handled 分支是否仍早退于 agent 轮启动、preflightResult 回调时序是否变化——若命令路径开始产 turn 事件，CP6 的「窗口内无 turn 事件 ⇔ 纯命令」判据失效，须复审收敛设计"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-50",
@@ -1105,7 +1105,7 @@
       "type": "observe",
       "note": "消费方：extensions/universal/scheduler/src/ack-provider.ts computeAckAvailability 判据②注释（no-base 短路先于 available 判定）。pi 升级时重验三断言：registerProvider 是否仍无条件删 native 层（若改为保留/合并 native 条目，覆写不再顶掉第三方注册，判据②可放宽）；unregisterProvider 是否仍两层同删无恢复；getRegisteredProviderIds 是否仍两层并集（若改为仅扩展层，isProviderRegistered 漏看 native 层注册）——任一漂移须复审 scheduler ack 判据②的 no-base 前提"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-51",
@@ -1122,7 +1122,7 @@
       "type": "observe",
       "note": "消费方：packages/runtime/src/services/session/btw-fork-exec.ts forkViaCliPi 成功分支 await 注释（锚点 pi@0.84.4 dist/core/session-manager.js:1237/:1269/:1271-1275）+ inspectSourceState JSDoc；btw-service.ts 设计前提核实块①回指本条。pi 升级重验：forkFrom 是否仍先同步 writeFileSync(header) 后同步 appendFileSync 循环（改异步/流式即漂移——「退出即写入侧封闭」失效）；检查 throw 与 header-only 行为有 durable 探针 packages/runtime/src/services/session/__tests__/btw-pi-fork-semantics.test.ts（forkFrom 实装直驱，断言最终逐字节等价/throw/零 entry 快照）；写序时序本身无探针（时序断言探针化成本高，靠锚点行号复审）"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-52",
@@ -1139,7 +1139,7 @@
       "type": "observe",
       "note": "消费方：packages/runtime/src/infra/pi/pi-paths.ts isPiSessionId JSDoc + packages/zcode-session-source/src/normalize.ts 头注（两处均带锚点行号）。漂移形态 = pi 放宽/收紧字符集时 taiji 侧 fail-fast 响亮拒绝（getBtwThreadDir throw / normalizeZcodeSessionId throw），非静默错路由。pi 升级重验：比对 assertValidSessionId 正则字面量与 taiji 侧 PI_SESSION_ID_PATTERN 是否仍逐字符一致"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-53",
@@ -1156,11 +1156,11 @@
       "type": "observe",
       "note": "消费方：packages/subagent-core/src/orchestration/resume-run.ts extractAssistantTextContent JSDoc（带锚点行号）。漂移形态 = pi 改 content 块词表（新增块类型/更名 text 块）时提取口径漏收新正文形态——档 1 判档退化为档 2 重派（多花一次生成，功能不阻断）。pi 升级重验：比对 types.d.ts 三 Message 接口的 content 联合类型是否仍为上述形态"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-56",
-    "claim": "pi agent-loop 对工具 execute 返回值的错误标记约定：正常路径 return { result, isError: false }（isError 硬编码 false——execute 返回值携带的 isError 字段被丢弃，不参与判定），仅 execute throw 时 catch 分支置 isError:true 并以 createErrorToolResult(error.message) 作为 result。承重（W4 throw 范式）：pi extension 的工具错误路径必须 throw 才能对 agent 呈现 isError:true——session-manager 6 工具（callSessionManager 失败四态 cancelled/timeout/channel-error/non-json + channel {error} respond）、ask-user/scheduler/session-reader 同款；若扩展改在返回值上携带 isError 字段，agent-loop 丢弃之，错误退化为「错误标成功」（agent 无法区分成败以决定重试/放弃，违反 extension-conventions「禁止错误成功模式」）。pi 升级时重验：executePreparedToolCall 正常 return 是否仍硬编码 isError:false、catch 是否仍置 true 并经 createErrorToolResult 包装",
+    "claim": "pi agent-loop 对工具 execute 返回值的错误标记约定（pi 1.0.0 起）：正常路径 return { result, isError: result.isError === true }（返回值携带的 isError 字段被尊重，=== true 判定；0.84.4 为硬编码 false 丢弃），execute throw 时 catch 分支仍置 isError:true 并以 createErrorToolResult(error.message) 作为 result。W4 throw 范式（错误路径 throw）仍是有效呈现方式；返回值携带 isError:true 自 1.0.0 起也正确标记（语义放宽，两范式均可用），taiji 全部扩展沿用 throw 范式行为不变",
     "piAnchor": [
       {
         "pkg": "pi-agent-core",
@@ -1173,7 +1173,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-tool-error-flag.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-57",
@@ -1196,7 +1196,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-stdout-fifo.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-58",
@@ -1225,7 +1225,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-steer-drain-cascade.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-59",
@@ -1242,7 +1242,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-select-long-pending.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-67",
@@ -1277,7 +1277,7 @@
       "type": "probe",
       "test": "extensions/shared/exec-skills/src/__tests__/exec-skills.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-68",
@@ -1300,7 +1300,7 @@
       "type": "observe",
       "note": "消费方：extensions/universal/subagent-workflow/src/workflow-events.ts session_tree handler 注释（不作废依据）与 session_shutdown reload 分支（真替换形态作废机制）；行为证据 = workflow-events.test.ts session_tree 用例（invalidatePiBinding 不被调 + 在途 run 照常 terminate）。pi 升级时重验：session_tree 发射点是否仍唯一（navigateTree）且未引入 teardown/invalidate；SessionShutdownReason 是否新增成员；switchSession 是否仍走 teardownCurrent(\"resume\") + session_start(reason:\"resume\")（改道即替换触发词表与 workflow-events 注释需重审）；tree 导航是否改为触发 session_start——任一变化即 subagent-workflow 的绑定生命周期判定需重审"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-69",
@@ -1323,11 +1323,11 @@
       "type": "observe",
       "note": "消费方 = pi-subagent-cli spawn 链：packages/pi-subagent-cli/src/spawn-runner.ts runSpawnOnce 档位透传注释（[pi 锚点] 块）+ packages/pi-rpc/src/spawn-args.ts buildPiSubagentSpawnArgs（:222-227 --model 后缀改写）。pi 升级时人工重验 model-resolver.js :185 缺省值与 :383/:419 严格实参；无独立单测探针——非法后缀的承重行为是真实 CLI 子进程报错退出（e2e 面），单测层直调 resolveCliModel 需 stub modelRuntime，收益低"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-60",
-    "claim": "pi session 树重放规则：SessionManager 加载路径（_setSessionFile → loadEntriesFromFile → _buildIndex）重建内存 leafId = 文件序最后一条非 header entry 的 id（_buildIndex 循环内逐条赋 this.leafId = entry.id，type==='session' header 被跳过）——重启/空闲回收后活跃叶子 = 文件尾，活跃上下文路径由 buildSessionPath 从该叶子沿 parentId 回溯到根构成。配套不变量：①运行时追加恒落文件尾且推进 leafId（_appendEntry 置 leafId=entry.id，全部 append* 的 parentId=旧 leafId）；②navigateTree 树内回退 = branch() 仅移内存指针不重写文件（被撤子树保留在文件里），随后 appendLabelChange 以 parentId=回退后 leaf 追加 LabelEntry 到文件尾——故撤回（summarize:false + label:'taiji:revoked'）后文件尾 = 新路径上的 label entry，重启重放所得叶子的 parentId 链不含被撤子树（回退不复活）；③label entry 不投影为 LLM 消息（sessionEntryToContextMessages 对 type==='label' 落入末尾 return []）。承重（ADR-0076 撤回持久化安全 + message-revoke U6a/U6d 文件腿裁剪 leaf=文件尾取数）：taiji 文件源活跃路径裁剪（trimFileEntriesToActivePath / computeActivePathEntries 取文件尾 entry id 回溯）与 pi 重放语义同构全靠本条；pi 若改为按持久化 leaf 指针/其他准则重放，文件尾≠叶子，撤回复活或裁剪错叶。pi 升级时重验：_buildIndex 的文件序赋值循环与 header 跳过、_setSessionFile 加载路径调 _buildIndex、navigateTree 的 branch+appendLabelChange 两步形态",
+    "claim": "pi session 树重放规则：SessionManager 加载路径（_setSessionFile → loadEntriesFromFile → _buildIndex）重建内存 leafId = 文件序最后一条非 header entry 的 id（_buildIndex 循环内逐条赋 this.leafId = entry.id，type==='session' header 被跳过）——重启/空闲回收后活跃叶子 = 文件尾，活跃上下文路径由 buildSessionPath 从该叶子沿 parentId 回溯到根构成。配套不变量：①运行时追加恒落文件尾且推进 leafId（_appendEntry 置 leafId=entry.id，全部 append* 的 parentId=旧 leafId）；②navigateTree 树内回退 = branch() 仅移内存指针不重写文件（被撤子树保留在文件里），随后 appendLabelChange 以 parentId=回退后 leaf 追加 LabelEntry 到文件尾——故撤回（summarize:false + label:'taiji:revoked'）后文件尾 = 新路径上的 label entry，重启重放所得叶子的 parentId 链不含被撤子树（回退不复活）；③label entry 不投影为 LLM 消息（sessionEntryToContextMessages 对 type==='label' 落入末尾 return []）。承重（ADR-0076 撤回持久化安全 + message-revoke U6a/U6d 文件腿裁剪 leaf=文件尾取数）：taiji 文件源活跃路径裁剪（trimFileEntriesToActivePath / computeActivePathEntries 取文件尾 entry id 回溯）与 pi 重放语义同构全靠本条；pi 若改为按持久化 leaf 指针/其他准则重放，文件尾≠叶子，撤回复活或裁剪错叶。pi 升级时重验：_buildIndex 的文件序赋值循环与 header 跳过、_setSessionFile 加载路径调 _buildIndex、navigateTree 的 branch+appendLabelChange 两步形态。pi 1.0.0 附带变化：装载 + 建索引抽成共享 _loadEntries（构造器 preloaded 分支与 _setSessionFile 共用），_buildIndex 移入其尾部，重放准则不变",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -1352,7 +1352,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-session-replay.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-61",
@@ -1375,11 +1375,11 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-compaction-resume.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-62",
-    "claim": "compaction_start/end 的 reason 词表恒三值：manual 路径（AgentSession.compact）start 恒字面量 'manual'（全 dist 唯一 emit 点），end 成功/aborted 两处均 'manual'；auto 路径 _runAutoCompaction(reason, willRetry) 变量透传，reason 仅 'threshold'（阈值命中，2 调用点）与 'overflow'（溢出/截断恢复，2 调用点）两值。auto 路径收尾有 hasQueuedMessages→continue 补投（设计 F6：不丢消息、不掐 turn，无需续跑），与 manual 路径无补投（PS-61）互为对照——runtime 续跑判定以 reason==='manual' 识别「掐 turn 的压缩」；pi 引入第四 reason 值或改 manual 判定名时判定面须复审（漏判 = 不续跑；误判 = 多一条被投递内核吸收的投递）",
+    "claim": "compaction_start/end 的 reason 词表恒三值：manual 路径（AgentSession.compact）start 恒字面量 'manual'（全 dist 唯一 emit 点），end 成功/aborted 两处均 'manual'；auto 路径 _runAutoCompaction(reason, willRetry) 变量透传，reason 仅 'threshold'（阈值命中，2 调用点）与 'overflow'（溢出/截断恢复，2 调用点）两值。auto 路径收尾有 hasQueuedMessages→continue 补投（设计 F6：不丢消息、不掐 turn，无需续跑），与 manual 路径无补投（PS-61）互为对照——runtime 续跑判定以 reason==='manual' 识别「掐 turn 的压缩」；pi 引入第四 reason 值或改 manual 判定名时判定面须复审（漏判 = 不续跑；误判 = 多一条被投递内核吸收的投递）。pi 1.0.0 附带变化：threshold 字面量调用点 2→3（新增 _checkCompaction post-run 复查段超限即压缩路径），词表仍恒三值、auto 路径仍变量透传",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -1404,7 +1404,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-compaction-resume.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-63",
@@ -1417,11 +1417,11 @@
         "note": ":956-958 —— :956 const spaceIndex = text.indexOf(\" \")；:957 commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex)；:958 args = spaceIndex === -1 ? \"\" : text.slice(spaceIndex + 1)"
       }
     ],
-      "guard": {
+    "guard": {
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-compaction-resume.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-64",
@@ -1444,7 +1444,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-reclaim-primitives.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-65",
@@ -1467,7 +1467,7 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-reclaim-primitives.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-66",
@@ -1490,6 +1490,6 @@
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-reclaim-primitives.test.ts"
     },
-    "verifiedWith": "0.84.4"
+    "verifiedWith": "1.0.0"
   }
 ]

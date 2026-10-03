@@ -16,7 +16,7 @@
     "src/"
   ],
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.4"
+    "@earendil-works/pi-coding-agent": "^1.0.0"
   },
   "scripts": {
     "typecheck": "npx tsc --noEmit",

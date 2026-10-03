@@ -1,15 +1,16 @@
 /**
  * PS-56 探针：pi agent-loop 工具 execute 返回值的错误标记约定——W4 throw 范式前提守卫。
  *
- * 登记条目（docs/pi-semantics.json PS-56）：agent-loop executePreparedToolCall 正常路径
- * return { result, isError: false }（硬编码 false——execute 返回值携带的 isError 字段被
- * 丢弃，不参与判定），仅 execute throw 时 catch 分支置 isError:true 并以
- * createErrorToolResult(error.message) 作为 result。
+ * 登记条目（docs/pi-semantics.json PS-56，pi 1.0.0 起语义更新）：agent-loop
+ * executePreparedToolCall 正常路径 return { result, isError: result.isError === true }
+ * ——返回值携带的 isError 字段被尊重（pi 1.0.0 起；0.84.4 为硬编码 false 丢弃）。
+ * execute throw 时 catch 分支仍置 isError:true 并以 createErrorToolResult(error.message)
+ * 作为 result。
  *
- * 承重（W4 throw 范式）：pi extension 工具错误路径必须 throw 才能对 agent 呈现
- * isError:true——session-manager 6 工具（callSessionManager 失败四态 + channel {error}
- * respond）、ask-user/scheduler/session-reader 同款；扩展若改在返回值上携带 isError
- * 字段，agent-loop 丢弃之，错误退化为「错误标成功」。
+ * 承重（W4 throw 范式）：pi extension 工具错误路径 throw 仍是有效呈现方式（catch 分支
+ * 不变）——session-manager 6 工具（callSessionManager 失败四态 + channel {error} respond）、
+ * ask-user/scheduler/session-reader 同款。pi 1.0.0 起在返回值上携带 isError: true 也能正确
+ * 标记错误（语义放宽，两种范式均可用）；taiji 全部扩展沿用 throw 范式，行为不变。
  *
  * 断言方式：静态直读 node_modules 实装 dist（pi 语义断言权威源，见 AGENTS.md）。
  * dist 不可达时 skip 不 fail；凭证无关、不进 REAL_PI_TESTS 分池。
@@ -29,7 +30,7 @@ const SKIP_REASON = AGENT_CORE_DIST
 if (!AGENT_CORE_DIST) console.warn(`[pi-semantics] skip：${SKIP_REASON}`)
 
 describe.skipIf(!AGENT_CORE_DIST)(
-  `PS-56 探针：execute 返回值 isError 被丢弃、仅 throw 置 true（${SKIP_REASON ? `skip：${SKIP_REASON}` : ''}）`,
+  `PS-56 探针：正常 return 尊重返回值 isError（=== true 判定）、throw 置 true（${SKIP_REASON ? `skip：${SKIP_REASON}` : ''}）`,
   () => {
     const agentLoopRaw = readFileSync(join(AGENT_CORE_DIST as string, 'agent-loop.js'), 'utf-8')
     const agentLoop = stripToCode(agentLoopRaw)
@@ -43,26 +44,24 @@ describe.skipIf(!AGENT_CORE_DIST)(
       ).not.toBeNull()
     })
 
-    it('语义①：正常 return 硬编码 isError:false（返回值携带的 isError 字段被丢弃）', () => {
+    it('语义①：正常 return 以 result.isError === true 判定（返回值携带的 isError 字段被尊重）', () => {
       const fn = execFn as string
-      const okReturns = fn.split('isError: false').length - 1
       expect(
-        okReturns,
-        'PS-56 漂移：正常 return 的 isError: false 字面量出现次数 ≠ 1——返回值错误标记改形' +
-          '（读取 execute 返回值携带的 isError / 改由调用方判定），扩展在返回值上携带 isError 的' +
-          '「错误标成功」退化须重审。恢复动作：复核正常路径 return 形态后更新本探针与 PS-56',
-      ).toBe(1)
+        fn.includes('isError: result.isError === true'),
+        'PS-56 漂移：正常 return 不再按 result.isError === true 判定错误——返回值错误标记语义改形' +
+          '（回退硬编码丢弃 / 改由调用方判定），扩展在返回值上携带 isError 的语义须重审。' +
+          '恢复动作：复核正常路径 return 形态后更新本探针与 PS-56',
+      ).toBe(true)
     })
 
-    it('语义②：catch 分支置 isError:true（错误标记唯一来源 = execute throw）', () => {
+    it('语义②：catch 分支置 isError:true（throw 的错误标记来源不变）', () => {
       const fn = execFn as string
       const catchIdx = fn.indexOf('catch (error)')
       const errFlagIdx = fn.indexOf('isError: true')
       expect(
         catchIdx !== -1 && errFlagIdx > catchIdx,
-        'PS-56 漂移：isError: true 不再位于 catch 分支内（错误标记来源改形——返回值字段/' +
-          '外部状态判定），W4 throw 范式（错误路径必须 throw）前提失锚。' +
-          '恢复动作：复核 catch 分支后更新本探针与 PS-56',
+        'PS-56 漂移：isError: true 不再位于 catch 分支内（W4 throw 范式「错误路径 throw 即呈现」' +
+          '前提失锚）。恢复动作：复核 catch 分支后更新本探针与 PS-56',
       ).toBe(true)
     })
 

@@ -124,7 +124,8 @@ describe.skipIf(SKIP_REASON !== '')(
       ).toBe(1)
       const turnStartIdx = runLoopBody.indexOf('await emit({ type: "turn_start" });')
       const prepareIdx = runLoopBody.indexOf('await config.prepareNextTurn?.(lastCompletedTurn);')
-      const steeringIdx = runLoopBody.indexOf('for (const message of pendingMessages) {')
+      // pi 1.0.0：steering 注入循环头 = declareToolChanges 包裹（prepared + pending 合并注入）
+      const steeringIdx = runLoopBody.indexOf('for (const message of declareToolChanges(currentContext, [...preparedMessages, ...pendingMessages])) {')
       const streamCallIdx = runLoopBody.indexOf('const message = await streamAssistantResponse(')
       expect(prepareIdx, 'PS-46 漂移：prepareNextTurn 调用点消失——复核 agent-loop.js runLoop').toBeGreaterThan(-1)
       expect(steeringIdx, 'PS-46 漂移：steering 注入循环消失——复核 agent-loop.js runLoop').toBeGreaterThan(-1)

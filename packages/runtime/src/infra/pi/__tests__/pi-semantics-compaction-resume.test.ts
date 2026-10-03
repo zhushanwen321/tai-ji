@@ -107,10 +107,11 @@ describe.skipIf(!PI_DIST)(
         count(SESSION_SRC, 'this._emit({ type: "compaction_end", reason,'),
         'PS-62 漂移：auto compaction_end 不再透传 reason 变量——词表锚改形，复核 PS-62 锚 :1844',
       ).toBe(1)
+      // pi 1.0.0 第三处：_checkCompaction post-run 复查段超限即 threshold 压缩
       expect(
         count(SESSION_SRC, '_runAutoCompaction("threshold"'),
-        'PS-62 漂移：threshold 调用点数量变化（预期 2）——auto 词表构成变化，复审 PS-62',
-      ).toBe(2)
+        'PS-62 漂移：threshold 调用点数量变化（预期 3：_compactBeforeNextAssistantResponse / prepareRequest 重试 / _checkCompaction post-run 复查）——auto 词表构成变化，复审 PS-62',
+      ).toBe(3)
       expect(
         count(SESSION_SRC, '_runAutoCompaction("overflow"'),
         'PS-62 漂移：overflow 调用点数量变化（预期 2）——auto 词表构成变化，复审 PS-62',

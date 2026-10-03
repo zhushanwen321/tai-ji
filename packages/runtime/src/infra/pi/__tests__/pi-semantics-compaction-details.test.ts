@@ -57,11 +57,18 @@ describe.skipIf(!PI_DIST)(
         win,
         'PS-28 漂移：appendCompaction 方法消失/改名——compaction 落盘入口改形，复核 PS-28 锚点',
       ).not.toBe('')
-      // entry 字面量：details 入参逐字透传（summary/firstKeptEntryId/tokensBefore/details/usage/fromHook 六字段序）
+      // entry 字面量：details 入参逐字透传（pi 1.0.0 形态：id/timestamp 收简写、
+      // firstKeptEntryId 新增 ?? id 自指兜底、新增可选 systemMessage 快照展开；
+      // details/usage/fromHook 六字段序透传语义不变）
       expect(
         win,
         'PS-28 漂移：entry 字面量不再逐字引用 details 入参（字段被克隆/裁剪/改名）——extension 写入 details 的自定义字段将静默丢失，复核 session-manager.js appendCompaction 与 PS-28',
-      ).toMatch(/\{\s*type: "compaction",\s*id: generateId\(this\.byId\),\s*parentId: this\.leafId,\s*timestamp: new Date\(\)\.toISOString\(\),\s*summary,\s*firstKeptEntryId,\s*tokensBefore,\s*details,\s*usage,\s*fromHook,/)
+      ).toMatch(/\{\s*type: "compaction",\s*id,\s*parentId: this\.leafId,\s*timestamp,\s*summary,\s*firstKeptEntryId: firstKeptEntryId \?\? id,\s*tokensBefore,\s*details,\s*usage,\s*fromHook,/)
+      // 防未来克隆化：details 不得出现展开/克隆形态（PS-28 本体负断言）
+      expect(
+        win.includes('...details') || win.includes('structuredClone(details)'),
+        'PS-28 漂移：appendCompaction 出现 details 克隆/展开形态——逐字透传语义被破坏，extension 自定义字段将静默丢失',
+      ).toBe(false)
       // 落盘仍走 _appendEntry（append-only 追加，与 PS-18 一致）
       expect(
         win.includes('this._appendEntry(entry);'),
@@ -90,10 +97,13 @@ describe.skipIf(!PI_DIST)(
 describe.skipIf(!sessionManager?.SessionManager)(
   'PS-28 探针：appendCompaction 行为断言（动态 import 实装 dist，原型桩零 fs 写）',
   () => {
-    /** 原型桩宿主形状（只暴露 appendCompaction 依赖的成员；_appendEntry 被覆写为捕获器）。 */
+    /** 原型桩宿主形状（只暴露 appendCompaction 依赖的成员；_appendEntry 被覆写为捕获器）。
+     * pi 1.0.0 起 appendCompaction 前置调 buildSessionProjection()（读 fileEntries + byId 提取
+     * systemMessage 快照），桩需提供空 fileEntries 与空 Map 型 byId（空投影 → 无 systemMessage 展开）。 */
     type AppendCompactionHost = {
-      byId: Set<string>
+      byId: Map<string, unknown>
       leafId: string
+      fileEntries: Array<unknown>
       _appendEntry: (entry: Record<string, unknown>) => void
       appendCompaction: (
         summary: string,
@@ -109,8 +119,9 @@ describe.skipIf(!sessionManager?.SessionManager)(
 
     function makeHost(): { host: AppendCompactionHost; captured: Array<Record<string, unknown>> } {
       const host = Object.create(Cls.prototype) as AppendCompactionHost
-      host.byId = new Set()
+      host.byId = new Map()
       host.leafId = 'leaf-0'
+      host.fileEntries = []
       const captured: Array<Record<string, unknown>> = []
       // 覆写落盘钩子：捕获 entry 即返回，不触 fileEntries/_persist（零 fs 写）
       host._appendEntry = (entry) => {

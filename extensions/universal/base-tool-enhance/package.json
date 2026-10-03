@@ -39,9 +39,9 @@
     "vitest": "^4.1.8"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@earendil-works/pi-coding-agent": "^1.0.0",
     "@zhushanwen/pi-pending-notifications": "workspace:*",
-    "typebox": "*"
+    "typebox": "1.3.27"
   },
   "peerDependenciesMeta": {
     "@zhushanwen/pi-pending-notifications": {

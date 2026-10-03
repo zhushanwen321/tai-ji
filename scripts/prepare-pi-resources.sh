@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # prepare-pi-resources.sh — Download pi binary for local build / CI.
 #
-# pi binary comes from upstream badlogic/pi-mono releases (not a fork).
+# pi binary comes from upstream earendil-works/pi releases (not a fork).
 # Builtin extensions (goal/todo/subagents/workflow/structured-output) are
 # declared in root package.json dependencies and resolved via npm — this
 # script does NOT handle them (dev: scanNpmExtensions, packaged: extraResources).
@@ -11,7 +11,7 @@
 # Usage: ./scripts/prepare-pi-resources.sh [PI_VERSION]
 set -euo pipefail
 
-PI_VERSION="${1:-0.84.4}"
+PI_VERSION="${1:-1.0.0}"
 PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
 
@@ -51,7 +51,7 @@ if [ -f "$BINARY_PATH" ]; then
 else
   echo "Downloading pi v${PI_VERSION} (${ASSET})..."
   gh release download "v${PI_VERSION}" \
-    -R badlogic/pi-mono \
+    -R earendil-works/pi \
     -p "$ASSET" \
     -D "$RESOURCES_DIR" \
     --clobber
