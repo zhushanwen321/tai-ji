@@ -118,10 +118,18 @@ const contextMenuOpen = ref(false)
 function onCardMenuOpenChange(open: boolean): void {
   contextMenuOpen.value = open
 }
-const cardMenuContentRef = ref<{ $el?: unknown } | null>(null)
+// rect 读点（函数 ref 单槽位）：v-for 作用域内 string ref 会被 Vue 运行时填充为**数组**
+// （compiler-dom ref_for 路径），`.$el` 恒 undefined → rect 恒 null（fail-safe 保守相交，
+// 几何精度损失）。reka 菜单内容仅开态挂载且同帧至多一棵开着，单槽位语义 =「当前打开的
+// 那棵菜单内容元素」：开态挂载写入、关态卸载置空。
+const cardMenuContentEl = ref<HTMLElement | null>(null)
+function setCardMenuContentRef(el: Element | ComponentPublicInstance | null): void {
+  const root = (el as { $el?: unknown } | null)?.$el ?? el
+  cardMenuContentEl.value = root instanceof HTMLElement ? root : null
+}
 function cardMenuRect(): { x: number; y: number; width: number; height: number } | null {
-  const el = cardMenuContentRef.value?.$el
-  if (!(el instanceof HTMLElement)) return null
+  const el = cardMenuContentEl.value
+  if (!el) return null
   const r = el.getBoundingClientRect()
   return { x: r.x, y: r.y, width: r.width, height: r.height }
 }
@@ -233,7 +241,7 @@ function cancelCreate() {
           </ContextMenuTrigger>
           <ContextMenuPortal v-if="canDelete(p)">
             <ContextMenuContent
-              ref="cardMenuContentRef"
+              :ref="setCardMenuContentRef"
               data-testid="project-context-menu"
               class="z-[1100] min-w-[160px] rounded-md border border-border-strong bg-bg-elevated p-1 text-neutral-fg shadow-2 outline-none"
             >
