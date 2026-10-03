@@ -5,7 +5,8 @@
  * （逐条对应见各 test 标题的 T 号标注）：
  *
  * - T1 双终端并行（脚本化部分）：⌃`/StatusBar 开底部抽屉 → 「终端 1」→ 「+」→ 两条目 →
- *   两实例各自跑命令并断言**输出**可见 → 切换来回各自历史在屏（分区隔离）
+ *   两实例各自跑命令并断言**输出**可见 → 切换来回各自历史在屏（分区隔离）→ 不可见实例隐藏期
+ *   到达的新输出在切回时回放上屏（T1_C 隐藏期累积锚，见下）
  * - T2 关闭隔离：关第二个实例 → 条目恢复 1 个、关闭按钮回禁用态、终端 2 的 PTY shell 进程
  *   消失（真机进程级断言）、焦点落相邻的终端 1（activeElement 断言）、终端 1 仍可写（进程存活）
  * - T4 会话级联：多实例会话 → `session.delete` → runtime 实例清单空 + PTY shell 进程消失
@@ -58,6 +59,13 @@ const TOKEN_POLL_INTERVAL_MS = 300
 /** 输出断言标记（命令行里不出现标记字面量，防「命令回显」冒充「命令输出」）。 */
 const T1_A = { cmd: 'echo T1A-$((12*34))', out: 'T1A-408' }
 const T1_B = { cmd: 'echo T1B-$((56*78))', out: 'T1B-4368' }
+// 隐藏期累积锚：命令在终端 1 可见时发出、输出在终端 1 被隐藏期间到达，切回后才断言新标记——
+// 只在「不可见实例订阅保持 + 分区累积 + 切回回放」全链成立时可见（单测 RT-1 只证 data 帧按
+// terminalId 落分区，不覆盖 WS 实链路 + 隐藏期累积）。延迟量级须显著大于中间步骤耗时
+// （createInstance → 切终端 2 → 跑 T1_B → 两条 exclude 断言，实测约 1.5-3s），保证 T1_C 在隐藏
+// 期已上屏；sleep 10 对中间步骤留足余量，不得缩小到同量级（否则输出可能晚于切回终端 1，
+// 排除断言仍绿但隐藏期累积未被真正覆盖）。
+const T1_C = { cmd: 'sleep 10; echo T1C-$((7*7))', out: 'T1C-49' }
 const T2_MARK = { cmd: 'echo T2R-$((25*2))', out: 'T2R-50' }
 const T8_MARK = { cmd: 'echo T8C-$((9*91))', out: 'T8C-819' }
 const T8_UNIQ = { cmd: 'echo T8U-$((3*3))', out: 'T8U-9' }
@@ -355,6 +363,13 @@ test('T1: 双终端并行——「+」新建第二实例、两实例各自输出
     await runInTerminal(h.page, T1_A.cmd)
     await expectTerminalOutput(h.page, T1_A.out)
 
+    // 隐藏期累积锚（设计 §3.1 成功路径「另一实例日志也在各自推进」/ §4 T1「两实例输出独立推进」）：
+    // 切走终端 1 前发一条延迟出标记的命令——Enter 后 10s 才输出（量级须显著大于中间步骤耗时，
+    // 保证 T1_C 在隐藏期已上屏），期间界面已切到终端 2（下方
+    // 新建 → 切到终端 2 → 跑 T1_B 恰好覆盖这段窗口）；该标记不出现在命令行字面量里，故只有
+    // 真执行才出现。切回终端 1 时断言它上屏 = 封闭「不可见实例在新输出到达时累积 → 切回回放」链。
+    await runInTerminal(h.page, T1_C.cmd)
+
     // 「+」新建 → 条目变为两个，且编号序号递增（runtime 分配，经 ack 回传）
     await createInstance(h.page)
     await expectInstanceCount(h.page, 2)
@@ -367,10 +382,16 @@ test('T1: 双终端并行——「+」新建第二实例、两实例各自输出
     await expectTerminalOutput(h.page, T1_B.out)
     // 分区隔离：终端 2 看不到终端 1 的输出历史
     await expectTerminalTextExcludes(h.page, T1_A.out)
+    // 终端 1 隐藏期到达的 T1_C 输出也不得串入当前显示的终端 2 分区（应落在终端 1 分区）
+    await expectTerminalTextExcludes(h.page, T1_C.out)
 
     // 切回终端 1：历史输出完整在屏（设计 §1 目标 2）；且不含终端 2 输出
     await selectInstance(h.page, 0, { expectText: T1_A.out })
     await expectTerminalTextExcludes(h.page, T1_B.out)
+    // 隐藏期累积锚的收口断言：终端 1 不可见期间到达的 T1_C 输出已在切回时回放上屏（新标记，
+    // 非切换前就在屏的旧标记 T1_A）——不可见实例的输出在此前全程无断言（切回只断旧标记时，
+    // 隐藏期丢输出仍全绿）
+    await expectTerminalOutput(h.page, T1_C.out)
 
     // 再切回终端 2：其历史同样在屏
     await selectInstance(h.page, 1, { expectText: T1_B.out })
@@ -489,7 +510,7 @@ test('T4: 会话级联——删除多实例会话后 runtime 实例清单空 + P
 
 // ── T8 序号不复用 ──────────────────────────────────────────────────────
 
-test('T8: 关中间实例后新建不复用序号——新条目为终端 3 且输出区空白', async () => {
+test('T8: 关最后一个实例后新建不复用序号——新条目为终端 3 且输出区空白', async () => {
   const skip = mockBundleSkipReason()
   test.skip(skip !== null, skip ?? '')
   test.setTimeout(180_000)

@@ -1918,6 +1918,7 @@
     "packages/core/src/transport/api/domains/terminal.ts",
     "packages/core/src/transport/ws-client.ts",
     "packages/runtime/src/services/terminal/**",
+    "packages/runtime/src/services/ports/terminal-service.ts",
     "packages/runtime/src/transport/terminal-message-handler.ts",
     "packages/shared/src/protocol.ts",
     "e2e/terminal-multi-instance.spec.ts"
@@ -1934,7 +1935,7 @@
    "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK——mock 产物在场时 spec 自 skip 不 fail）。执行：npx playwright test e2e/terminal-multi-instance.spec.ts",
    "owner": "packages/renderer",
    "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-   "note": "terminal-multi-instance 验收资产（2026-10-03）。落地设计 §4 T1/T2/T4/T8/T9/T10/T13 的可脚本化部分（impl-plan §4.4 A1/A2/A4/A8/A9/A10/A13；T2 顺带断言 T7 的最后实例关闭按钮禁用态）。执行口径 = 开发阶段按改动范围空载串行（AGENTS.md e2e 执行准则），PR/merge 门禁不跑；触发面 = 终端域四层锚点（renderer 终端 composable/组件/store + core write-queue 与 terminal API/ws-client + runtime terminal service/handler + shared protocol）任一变更。未覆盖项与归属：T3 刷新恢复 / T5 单实例无感 = L4 真机走查（前提 P3 已由 u0-probe 探针核实），T6/T7/T11/T12 = L1 单测（u1 runtime 协议 / u3-bar 组件 / u2 世代与对账）；T4 的 UI 右键删除路径与 T10 的 write-queue 重置细节归 D3 verify 剧本。spec 用 `npx playwright test --list` 自检（本单元只产出资产，真机执行在 D3 段）。"
+   "note": "terminal-multi-instance 验收资产（2026-10-03）。落地设计 §4 T1/T2/T4/T8/T9/T10/T13 的可脚本化部分（impl-plan §4.4 A1/A2/A4/A8/A9/A10/A13；T2 顺带断言 T7 的最后实例关闭按钮禁用态）。执行口径 = 开发阶段按改动范围空载串行（AGENTS.md e2e 执行准则），PR/merge 门禁不跑；触发面 = 终端域四层锚点（renderer 终端 composable/组件/store + core write-queue 与 terminal API/ws-client + runtime terminal service/端口契约/handler + shared protocol）任一变更。[补 scope] 增补 `packages/runtime/src/services/ports/terminal-service.ts`：端口契约层（destroySessionPties / destroyAllPties 等）也是终端域四层锚点的一层——`packages/runtime/src/services/terminal/**` 是不含 ports/ 的另一条路径，只改端口契约时本轨此前圈不到。未覆盖项与归属：T3 刷新恢复 / T5 单实例无感 = L4 真机走查（前提 P3 已由 u0-probe 探针核实），T6/T11/T12 = L1 单测（u1 runtime 协议 / u3-bar 组件 / u2 世代与对账）；T7 不单列场景：禁用态由 T2 断言 + u3-bar 单测承载；T4 的 UI 右键删除路径归 D3 verify 剧本，T10 的 write-queue 重置逻辑归 u2 单测（GEN-1/GEN-3），真机可见面（重置提示）归 D3 走查。spec 用 `npx playwright test --list` 自检（本单元只产出资产，真机执行在 D3 段）。T1 断言面含隐藏期累积锚：切走终端 1 前发延迟出标记的命令，切回后断言该新标记上屏（覆盖「不可见实例输出累积 → 切回回放」链，单测只证 data 帧按 terminalId 落分区）。"
   }
  ]
 }

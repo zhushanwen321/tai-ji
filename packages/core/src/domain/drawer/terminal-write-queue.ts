@@ -3,8 +3,13 @@
  *
  * 迁移自 renderer stores/terminal-write-queue.ts（W2，drawer 域向 core 归位第二步）。
  * 联动 2（AI 命令→填终端）的跨组件写队列 + PTY 存活态：
- * - 写入方（消息流 tool 块「在终端运行」）→ enqueueWrite(terminalId, cmd)
+ * - 写入方（预留接入点：消息流 tool 块「在终端运行」；**当前仓内无生产调用方**——现有用户键盘
+ *   输入写路径不经本队列，见下 pointer）→ enqueueWrite(terminalId, cmd)
  * - 状态更新方（TerminalView 的 alive/exit handler）→ markAlive(terminalId) / markExited(terminalId)
+ *
+ * 现状写入方 pointer：用户键入 / 粘贴走 renderer useTerminal.writeToTerminal → terminalApi.write
+ * 直连 runtime（不经本队列）；本队列当前仅由测试驱动，承接「PTY 未就绪时先滞留、markAlive 后
+ * flush」的批量填命令场景，待联动 2 接线后成为真实写入方。
  *
  * 多实例主键（terminal-multi-instance 设计 §2.2 第 4 表 / §3.3）：键从会话 id 迁移到**实例编号**
  * `term:<会话id>:<序号>`——每实例独立 pendingWrites / ptyAlive 镜像 / droppedCount，旧世代滞留
@@ -33,7 +38,7 @@ export interface TerminalWriteQueue {
   /** PTY 退出标记（terminal.exit handler 调）。 */
   markExited(terminalId: string): void
   /**
-   * 入队写命令（联动 2：消息流 tool 块「在终端运行」调）。
+   * 入队写命令（预留接入点：消息流 tool 块「在终端运行」调；**当前仓内无生产调用方**）。
    * - PTY 已活 → 立即 write
    * - PTY 未活 → 入 pendingWrites，markAlive 时 flush；队列达 MAX_PENDING_WRITES 上限时丢弃最旧命令（drop-oldest，保留最新）
    * - **关闭沿入队守卫**（设计 §3.3「实例关闭沿 renderer 资源处置」）：已配置 isRegistered

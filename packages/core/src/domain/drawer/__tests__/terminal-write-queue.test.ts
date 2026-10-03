@@ -133,10 +133,13 @@ describe('terminal-write-queue 状态机（多实例）', () => {
     const isRegistered = vi.fn((terminalId: string) => terminalId === T1)
     const queue = createTerminalWriteQueue(writeFn, { isRegistered })
     queue.enqueueWrite(T2, 'closed-instance')
-    // 未建档：pendingCountOf / isPtyAlive 均回落默认（不产生幽灵条目）
+    // 守卫被征询（判据 = 注册成员资格），且未建档：pendingCountOf / isPtyAlive 均回落默认（不产生幽灵条目）
+    expect(isRegistered).toHaveBeenCalledWith(T2)
     expect(queue.pendingCountOf(T2)).toBe(0)
     expect(queue.isPtyAlive(T2)).toBe(false)
     expect(writeFn).not.toHaveBeenCalled()
+    // 「输入可能丢失」提示腿在 renderer store 兼容层（core 零 UI 依赖）——见
+    // packages/renderer/src/__tests__/terminal/terminal-write-queue.test.ts MI-1。
   })
 
   it('MI-2: 守卫判据与存活镜像解耦——已建档未 alive 仍入 pendingWrites，markAlive 后 flush', () => {

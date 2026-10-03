@@ -120,11 +120,15 @@ describe('terminal-write-queue store（多实例）', () => {
 
   // ── 关闭沿入队守卫（注册成员资格，与存活镜像解耦）───────────────────────
 
-  it('MI-1: 未注册实例入队被拒（不建档、不 write）', () => {
+  it('MI-1: 未注册实例入队被拒（不建档、不 write）+「输入可能丢失」提示一次', () => {
     const store = useTerminalWriteQueueStore()
     store.enqueueWrite('term:s1:9', 'to-closed')
     expect(store.pendingCountOf('term:s1:9')).toBe(0)
     expect(terminalApiMock.write).not.toHaveBeenCalled()
+    // 丢弃必显形（设计 §5 u2）：复用「输入可能丢失」提示通道，含实例显示名
+    const warnings = useToast().toasts.value.filter((x) => x.type === 'warning')
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]!.message).toContain('终端 9')
   })
 
   it('MI-2: 已注册未 alive → 入 pendingWrites，markAlive 后正常 flush（守卫与镜像解耦）', () => {

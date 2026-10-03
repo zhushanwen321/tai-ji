@@ -20,7 +20,8 @@
  * 判据（与 ptyAlive 镜像解耦——已建档未 alive 仍入 pendingWrites）。
  *
  * 数据流（多实例）：
- * 写入方 → enqueueWrite(terminalId, cmd)
+ * 写入方（预留接入点：消息流 tool 块「在终端运行」；**当前仓内无生产调用方**——用户键盘输入
+ * 直接走 useTerminal.writeToTerminal → terminalApi.write，不经本队列）→ enqueueWrite(terminalId, cmd)
  * 状态更新方（useTerminal 模块级订阅 ack/alive/exit）→ markAlive(terminalId) / markExited(terminalId)
  * 清理方（实例关闭沿 / 会话删除 / 世代重置）→ removeInstance(terminalId) / removeSession(sid) / clearAll()
  */
@@ -32,11 +33,18 @@ import i18n from '@/i18n'
 import {
   hasInstance,
   isTerminalIdOfSession,
+  seqOfTerminalId,
   sessionIdOfTerminalId,
 } from '@/composables/features/terminal/terminal-instance-registry'
 
 /** i18n.global.t 的类型窄化 cast（先例：useConnection.ts / useSkillNoticeStream.ts 同款）。 */
 const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => string
+
+/** 实例显示名（「终端 <seq>」，与 useTerminal.instanceLabel 同 i18n 键）；非法编号回退原始编号。 */
+function instanceLabel(terminalId: string): string {
+  const seq = seqOfTerminalId(terminalId)
+  return seq > 0 ? t('panel.terminal.instanceName', { seq }) : terminalId
+}
 
 /**
  * drop toast 聚合窗口：队列满时入队方可能连发（AI 批量「在终端运行」），逐条 toast 会刷屏——
@@ -94,6 +102,15 @@ export const useTerminalWriteQueueStore = defineStore('terminal-write-queue', ()
     }
   }
 
+  /**
+   * 「输入可能丢失」提示（设计 §5 u2 / §3.3）：对已关闭实例的入队被拒时复用与死亡沿滞留
+   * 命令丢弃同一提示通道（i18n `panel.terminal.writeFailed`），命令丢弃必显形、不静默。
+   * core 保持零 UI 依赖，显形（toast）在 renderer 兼容层注入。
+   */
+  function warnInputMayBeLost(terminalId: string): void {
+    toastWarning(t('panel.terminal.writeFailed', { message: instanceLabel(terminalId) }))
+  }
+
   /** 实例关闭沿：队列实例态 + 聚合 timer 一并释放，返回被丢弃的滞留命令数。 */
   function removeInstance(terminalId: string): number {
     clearDropTimer(terminalId)
@@ -117,14 +134,29 @@ export const useTerminalWriteQueueStore = defineStore('terminal-write-queue', ()
     return queue.clearAll()
   }
 
+  /**
+   * 入队写命令（预留接入点：Block「在终端运行」调；**当前仓内无生产调用方**）。PTY 已活立即 write / 未活入 pendingWrites
+   * markAlive 时 flush。
+   * **关闭沿入队守卫**（设计 §5 u2）：实例不在注册表（已关闭）→ 拒绝入队并经「输入可能
+   * 丢失」提示告知（core 侧同名守卫保留为无 UI 依赖的兜底，防幽灵实例态建档）。判据 =
+   * 注册成员资格，与 ptyAlive 镜像解耦（已建档未 alive 仍入 pendingWrites）。
+   */
+  function enqueueWrite(terminalId: string, cmd: string): void {
+    if (!hasInstance(terminalId)) {
+      warnInputMayBeLost(terminalId)
+      return
+    }
+    queue.enqueueWrite(terminalId, cmd)
+  }
+
   // 兼容形状：方法集合与旧版 pinia store 逐字段一致（消费方零改动）
   return {
     /** PTY 就绪标记（ack 建档 / alive handler 调）+ flush 写队列。 */
     markAlive: queue.markAlive,
     /** PTY 退出标记（exit handler 调）。 */
     markExited: queue.markExited,
-    /** 入队写命令（联动 2：Block「在终端运行」调）。PTY 已活立即 write / 未活入队 markAlive 时 flush */
-    enqueueWrite: queue.enqueueWrite,
+    /** 入队写命令（预留接入点：Block「在终端运行」调；**当前仓内无生产调用方**）。PTY 已活立即 write / 未活入队 markAlive 时 flush */
+    enqueueWrite,
     /** 查询 PTY 存活态（TerminalView 工具栏 kill 按钮 disabled 判断用）。 */
     isPtyAlive: queue.isPtyAlive,
     /** 查询该实例累计丢弃数 / 当前滞留数（世代重置提示判据）。 */

@@ -496,6 +496,25 @@ async function reconcileSession(sessionId: string): Promise<ReconcileResult> {
 let lastConnectionToken: string | null | undefined = undefined
 
 /**
+ * 世代判据播种（设计 §0.5 P6）：本模块经 TerminalView 的 `defineAsyncComponent` 懒加载
+ * （底部抽屉 isOpen 默认 false，开抽屉才求值），模块求值可能晚于首次连接建立——此时模块
+ * 观察到的第一条 `connected` 边沿不是「首次连接」而是**同世代重连**（ws-client 退避 /
+ * visibility 重连复用 currentToken 与 url，token 不变）。若不播种，旧值仍为 undefined
+ * 会被 `handleConnectionEstablished` 的「旧值不可得」分支保守判为世代变更 → 误跑
+ * resetTerminalDomain（清空分区 / 订阅 / 滞留命令并弹「输入可能丢失」），与 §3.3
+ * 「重置触发面显式收窄为世代变更」相悖，T11/T12 反向验收落空。
+ *
+ * 故模块求值时按当前连接态播种旧值（ws-client 只读取值面）：已有已知 token
+ * （已连接 / 连接中 / 等待重连）即取为旧值，使「旧值不可得」只对应真正无任何已知 token
+ * 的首次连接——该腿无输出历史与滞留命令，重置为空操作，正是 P6 的代价前提。
+ */
+function seedGenerationBaseline(): void {
+  const token = getCurrentToken()
+  if (token !== null) lastConnectionToken = token
+}
+seedGenerationBaseline()
+
+/**
  * 世代变更重连沿处理（触发信号 = WS connected 边沿——`runtime-port` 广播沿每次必致重连，
  * 为其保守超集；判据 = auth token 是否变化）：
  * - 世代变更 → 终端域失效重置（见 resetTerminalDomain）；
