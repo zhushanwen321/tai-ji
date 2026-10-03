@@ -16,7 +16,10 @@
  *
  * 本清单 = §8.2「局部表面两档对照基线」的机器形态（z-surface-baseline.test.ts /
  * local-esc-two-tier.test.ts 对账）：新增局部表面 Esc 消费方必须在此登记并落实对应契约，
- * 否则对照基线测试红。**不在此列**的 Esc 消费方（各有归宿，勿登记）：
+ * 否则对照基线测试红。**护栏机器承载（2026-10-03 F1-15 补）**：基线测试含 z-scan-helper
+ * `scanEscConsumers` 全仓重扫（三形态：@keydown.esc / @keydown.escape / 'Escape' 字面量——
+ * 早期仅扫字面量，结构性漏模板修饰符形态，ProjectSwitcher 漏登即此盲区），未登记且不在
+ * 测试侧豁免清单的命中即红。**不在此列**的 Esc 消费方（各有归宿，勿登记，豁免清单见测试）：
  * - 模态内消费方（SystemShortcutSection 改键录制）：仅模态开着时可达，编排器经聚合让位不参与；
  * - 输入编辑态消费方（core staging-mode handleEsc / 浮层浏览器地址栏）：§6.7 所有权第 2 层；
  * - xterm 终端（node_modules 内 stopPropagation，编排器 bubble 天然收不到）：第 3 层；
@@ -72,6 +75,13 @@ export const LOCAL_ESC_CONSUMERS = [
     tier: 'first',
     contract: 'prevent-default',
     basis: '元素级监听（冒泡先达）',
+  },
+  {
+    id: 'project-switcher-create-input',
+    file: 'packages/renderer/src/components/sidebar/ProjectSwitcher.vue',
+    tier: 'first',
+    contract: 'prevent-default',
+    basis: '元素级监听（@keydown.esc.prevent 新建项目输入 Esc 取消，冒泡先达；.prevent 即 defaultPrevented 约定已落实）——2026-10-03 终态同步补登：模板修饰符形态不在早期 Escape 字面量扫描面（F1-15 盲区），scanEscConsumers 三形态扫描补收',
   },
   {
     id: 'session-list-confirm',

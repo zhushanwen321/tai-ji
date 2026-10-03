@@ -22,7 +22,7 @@ const SCAN_ROOTS = ['packages', 'apps', 'extensions']
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'test-results', 'coverage', '.git', '.turbo', '.vite'])
 /** 参与扫描的源文件后缀 */
 const SCAN_EXTS = new Set(['.vue', '.ts', '.tsx', '.css'])
-/** 登记表模块自身（字面量是数据不是表面，防自指误报） */
+/** 登记表模块自身（字面量是数据不是表面，防自指误报）；esc 扫描无自指面，传 null 不排除 */
 const SELF_DIR_FRAGMENT = 'modal-surface-registry'
 
 export type ZForm = 'class-token' | 'class-raw' | 'inline-style' | 'css-decl'
@@ -49,17 +49,17 @@ export function findRepoRoot(startDir: string = process.cwd()): string {
   throw new Error(`z-scan: 从 ${startDir} 向上未找到 pnpm-workspace.yaml（仓库根）`)
 }
 
-/** 递归收集扫描面内的源文件（排序稳定，报错信息可复现） */
-function collectFiles(root: string, dir: string, out: string[]): void {
+/** 递归收集扫描面内的源文件（排序稳定，报错信息可复现）；selfDirFragment = null 时不排除登记目录 */
+function collectFiles(root: string, dir: string, out: string[], selfDirFragment: string | null = SELF_DIR_FRAGMENT): void {
   const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))
   for (const entry of entries) {
     const full = join(dir, entry.name)
     const rel = relative(root, full)
     if (entry.isDirectory()) {
       if (SKIP_DIRS.has(entry.name)) continue
-      if (rel.includes(SELF_DIR_FRAGMENT)) continue
+      if (selfDirFragment !== null && rel.includes(selfDirFragment)) continue
       if (rel.includes('__tests__')) continue
-      collectFiles(root, full, out)
+      collectFiles(root, full, out, selfDirFragment)
       continue
     }
     if (!entry.isFile()) continue
@@ -161,4 +161,47 @@ export function scanZSurfaces(root: string): ZOccurrence[] {
   }
   return occurrences.sort((a, b) =>
     a.file === b.file ? (a.literal < b.literal ? -1 : a.literal > b.literal ? 1 : 0) : a.file < b.file ? -1 : 1)
+}
+
+/** Esc 消费方命中（局部表面两档对照基线的扫描面，§6.7） */
+export interface EscConsumerOccurrence { // oe-exempt:20261003:test:esc 基线扫描测试夹具数据形态
+  /** 仓库根相对路径 */
+  file: string
+  /** 形态：'template-modifier'（@keydown.esc/.escape）/ 'string-literal'（'Escape'） */
+  form: 'template-modifier' | 'string-literal'
+  /** 行内命中片段（报错信息可定位） */
+  snippet: string
+}
+
+/**
+ * 扫描全仓 Esc 消费点（**三形态**，2026-10-03 F1-15 补盲：早期仅扫 'Escape' 字面量，
+ * 结构性漏掉 Vue 模板 .esc/.escape 修饰符形态——ProjectSwitcher 创建输入漏登即此盲区）：
+ * ① 模板修饰符形 `@keydown.esc` / `@keydown.escape`（可带 .prevent 等后续修饰符链）；
+ * ② 字符串字面量形 `'Escape'`（window/document/元素级 keydown 判定的 JS/TS 形态）。
+ * 注释/散文行过滤同 scanZSurfaces；排除测试文件与产物目录。
+ */
+export function scanEscConsumers(root: string): EscConsumerOccurrence[] {
+  const files: string[] = []
+  for (const scanRoot of SCAN_ROOTS) {
+    const dir = join(root, scanRoot)
+    if (existsSync(dir)) collectFiles(root, dir, files, null)
+  }
+  const occurrences: EscConsumerOccurrence[] = []
+  for (const file of files) {
+    if (!file.endsWith('.vue') && !file.endsWith('.ts')) continue
+    const rel = relative(root, file)
+    // 登记表数据文件自身非消费点（entry basis 字符串提及形态字面量属数据，防自指误报）
+    if (rel.endsWith('local-esc-consumers.ts')) continue
+    const lines = readFileSync(file, 'utf8').split('\n')
+    for (const line of lines) {
+      if (isProseLine(line)) continue
+      for (const m of line.matchAll(/@keydown\.esc(?:ape)?[.="'\s]/g)) {
+        occurrences.push({ file: rel, form: 'template-modifier', snippet: m[0].trim() })
+      }
+      if (line.includes("'Escape'")) {
+        occurrences.push({ file: rel, form: 'string-literal', snippet: "'Escape'" })
+      }
+    }
+  }
+  return occurrences.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))
 }
