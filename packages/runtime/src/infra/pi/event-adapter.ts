@@ -1674,8 +1674,9 @@ const DEBUG_PI_EVENTS = process.env.TAIJI_DEBUG_PI_EVENTS === '1'
  * 判据来源（pi 1.0.0 dist 实证，非 codemode 专属逻辑）：工具经 ctx.executeTool() 发起的
  * 嵌套调用，其 tool_execution_start / tool_execution_update / tool_execution_end 事件一律
  * 携带 parentToolCallId（dist/core/nested-tool-calls.js 三处 emit 点），且嵌套调用不落
- * transcript、结果不持久化（dist/core/extensions/types.d.ts executeTool 契约「It does not
- * appear in the transcript」）。过滤语义 = 与 transcript 投影对齐：reload 后嵌套调用只有
+ * 独立 transcript 条目（dist/core/extensions/types.d.ts executeTool 契约「It does not
+ * appear in the transcript」——仅外层 result message 的 nestedCalls 保留有界记录）。
+ * 过滤语义 = 与 transcript 投影对齐：reload 后嵌套调用只有
  * 外层一个工具块，live 期放行 start/end 会各产独立工具块 → 投影不一致。未来任何
  * ctx.executeTool 调用源自动被本过滤覆盖（现役唯一发射源为 codemode 脚本）。
  *

@@ -172,7 +172,7 @@ export const PLAN_REVIEW_DEGRADED_STABLE_MS = 2_000
  *   补偿根因：应答后的预期后态帧可能丢失（WS 帧链无送达保证，断连窗口高发），ack 标记
  *   无事件通道解除会无限悬挂，审批条被持续压制。不能靠事件顺序或单一事实源自然解决：
  *   帧丢失 = 无任何事件到达，顺序契约无从谈起；「事实上无挂起」必须查询而非断言
- *   （coldReconcilePlanReview 双查询），只能靠拉取真值收敛（ADR-0075 拉为主）。
+ *   （coldReconcilePlanReview 双查询），只能靠拉取真值收敛（ADR-0097 拉为主）。
  *   量级/形态：标记置起即 arm 10s 单发（single-flight 重置不叠加；epoch 世代防陈旧回调）。
  *   恢复路径：三解除路（预期后态帧值判定 / 新 pending 登记到达 / 冷拉真值）任一到达即
  *   清标记杀定时器；冷拉失败（断连）标记悬挂 fail-safe + loadError 通路，重连后
@@ -190,7 +190,7 @@ export const PLAN_REVIEW_ACK_FALLBACK_MS = 10_000
  * 合并），避免长对话 session 每条消息一拉。
  * [时间平抑红线登记]（5s 冷却）：定性 = 对账频率上限而非一致性平抑——补偿动作本体是
  * reconcileOnAssistantMessage 补拉（帧链丢帧补偿），本常量只是该补拉 RPC 的节流门。
- * 永久配套：消费侧动作边沿触发补拉范式存在即配套存在（ADR-0075 推允许丢失、丢失收敛
+ * 永久配套：消费侧动作边沿触发补拉范式存在即配套存在（ADR-0097 推允许丢失、丢失收敛
  * 靠拉），不设「根因修复即删」的退役语义；帧链可靠送达后补拉支路退役，本冷却随支路消失。
  */
 export const PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS = 5_000

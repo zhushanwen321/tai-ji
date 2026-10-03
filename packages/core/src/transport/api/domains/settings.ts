@@ -175,8 +175,11 @@ export async function setSmartContextExcludedModels(models: string[]): Promise<S
 
 // ── codemode 开关（config.getCodemodeEnabled / config.setCodemodeEnabled）──
 // codemode 设计 D1/A1：开关命令对，reply 类型 = shared codemode 域 payload 原样
-//（沿 import-session 域同款分工：消息类型字符串与 case 分发由 runtime transport 层登记，
-// 本域不经 ServerMessageMap）。损坏错误态（corruption 非空）与写入语义见 shared codemode.ts。
+//（分工同 shared codemode.ts 头注：消息类型字符串与 type→payload 映射登记在 shared
+// protocol.ts，含 ServerMessageMap 的 config.codemodeEnabled / config.codemodeSetEnabled
+// reply 键；本域函数签名直接 import shared codemode 域类型，不走上方其他命令的
+// ServerMessageMap 索引访问形态；case 分发由 runtime transport 层 handler 登记）。
+// 损坏错误态（corruption 非空）与写入语义见 shared codemode.ts。
 
 /** 读取 codemode 开关（corruption 非空 = settings.json 损坏错误态，enabled 恒 false）。 */
 export async function getCodemodeEnabled(): Promise<CodemodeEnabledResult> {

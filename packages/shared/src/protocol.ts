@@ -27,7 +27,7 @@ import type {
 import type { SegmentsMetadataEntry } from './message-metadata'
 import type { ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply } from './import-session'
 // codemode 域：payload/reply 形状 SSOT 在 ./codemode（codemode 设计 D1/A1，本文件仅登记
-// type→payload 映射——沿 import-session 域同款分工）
+// type→payload 映射）
 import type { CodemodeEnabledResult, CodemodeSetEnabledRequest, CodemodeSetEnabledResult } from './codemode'
 import type { UsageStatsResult } from './usage-stats'
 // composer-gen-stats：生成指标帧形状 SSOT（本文件仅登记 type→payload 映射）

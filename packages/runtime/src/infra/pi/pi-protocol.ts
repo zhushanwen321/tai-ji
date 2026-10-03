@@ -334,7 +334,7 @@ export interface PiToolExecutionStartEvent extends PiBaseMessage {
   toolName: string
   /** pi 的规范字段名（pi 从不发 input）。 */
   args: Record<string, unknown>
-  /** pi 1.0.0：嵌套调用（工具经 ctx.executeTool 调其他工具）时携带的父调用 id；顶层调用缺省。taiji 容忍并丢弃（event-adapter 重建 payload 不带该字段）；嵌套事件的投影语义归第二类组 4 设计。 */
+  /** pi 1.0.0：嵌套调用（工具经 ctx.executeTool 调其他工具）时携带的父调用 id；顶层调用缺省。带该字段（非空串）的 start/end 被 event-adapter 按 codemode D4 过滤（live≡reload 对齐，见 isNestedToolExecutionBlockEvent）；update 豁免照常翻译、payload 不携带该字段。 */
   parentToolCallId?: string
 }
 
@@ -348,7 +348,7 @@ export interface PiToolExecutionUpdateEvent extends PiBaseMessage {
    * 不强制具体类型（pi 不保证形态）。
    */
   partialResult: unknown
-  /** pi 1.0.0：嵌套调用时携带的父调用 id；顶层调用缺省。taiji 容忍并丢弃（同 start 事件注释）。 */
+  /** pi 1.0.0：嵌套调用时携带的父调用 id；顶层调用缺省。update 豁免不过滤（照常翻译，嵌套 update 不产工具块且是 subagent 活性信号载体；判据见 start 事件注释）。 */
   parentToolCallId?: string
 }
 
@@ -369,7 +369,7 @@ export interface PiToolExecutionEndEvent extends PiBaseMessage {
   result: PiToolExecutionResult
   /** pi 必填字段（agent-session.ts 始终发送）。 */
   isError: boolean
-  /** pi 1.0.0：嵌套调用时携带的父调用 id；顶层调用缺省。taiji 容忍并丢弃（同 start 事件注释）。 */
+  /** pi 1.0.0：嵌套调用时携带的父调用 id；顶层调用缺省。带该字段（非空串）的 end 与 start 同点同判被过滤（codemode D4，见 isNestedToolExecutionBlockEvent）。 */
   parentToolCallId?: string
 }
 

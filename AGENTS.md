@@ -155,7 +155,7 @@ agent.md / workflow.js 归位：与 extension 强相关（tools 受限某 extens
 
 ## 架构约定
 
-- **数据同步第一原则：拉为主、推补充 [ADR-0075]**——拉是真理通道（任何查询必须返回当前真值：缓存优先、磁盘兜底），推是性能提示（允许丢失，丢失后的收敛由域同步协议统一提供：快照回放/重连重放/事件边沿拉三路）；**功能域代码禁止出现推送补偿逻辑**（域层新增 reconcile/冷拉/兜底定时器 = constraints 红灯，豁免须登记理由）——可靠性由通道保证，不得用消费侧补丁偿付。功能域经 `DomainSyncDescriptor` 声明式接入，数据源（bus-state/rpc/file-derived/memory-registry）是参数，上层不感知底层方案；缓存性能（缓存优先/负缓存/增量管线/逆序分块冷读/可观测）是基建义务，不属于任何功能域。设计 SSOT 见 `.tmp/tech-design/pull-push-architecture.md`（分波落地 W0-W4）
+- **数据同步第一原则：拉为主、推补充 [ADR-0097]**——拉是真理通道（任何查询必须返回当前真值：缓存优先、磁盘兜底），推是性能提示（允许丢失，丢失后的收敛由域同步协议统一提供：快照回放/重连重放/事件边沿拉三路）；**功能域代码禁止出现推送补偿逻辑**（域层新增 reconcile/冷拉/兜底定时器 = constraints 红灯，豁免须登记理由）——可靠性由通道保证，不得用消费侧补丁偿付。功能域经 `DomainSyncDescriptor` 声明式接入，数据源（bus-state/rpc/file-derived/memory-registry）是参数，上层不感知底层方案；缓存性能（缓存优先/负缓存/增量管线/逆序分块冷读/可观测）是基建义务，不属于任何功能域。设计 SSOT 见 `.tmp/tech-design/pull-push-architecture.md`（分波落地 W0-W4）
 - 视图切换状态驱动（settingsStore.currentView），不用 vue-router；Mock 用 `VITE_MOCK=true` 在 ws-client 层拦截
 - **markdown 渲染管线安全模型 = 分通道净化**（`markdown-sanitize.ts`，renderMarkdown 唯一出口）：markdown-it `html:true`；可信段（shiki/KaTeX/md-* 契约：fence/math/code_inline/filepath）以 per-call nonce 哨兵在 sanitize 前摘出、净化后单遍回填，不参与白名单过滤；用户 HTML 走 DOMPurify 两级白名单（与 GitHub 的白名单行为对齐，class/style/data-* 构造性全剥——无样式伪造与交互借用通道）；相对资源的两条通道：img src 在净化 hook 按 `resourceBaseDir` 重写为 local-file URL（经 MarkdownEnv 透传，对话流 = session cwd、drawer = 文件所在目录）；相对链接 href 保持原样输出，点击时由 MarkdownRenderer ④路按 `props.resourceBaseDir ?? deps.sessionCwdOf()` resolve（drawer 走 props 通道不经 MarkdownEnv）；CSP 由此降级为纵深第二层。禁止绕过 renderMarkdown 直调 md.render、禁止向用户白名单放宽 class/style/data-*
 - 共享类型经 `packages/shared/` workspace 共享；Runtime 通信走 WebSocket（ws-client.ts + event-bus.ts）；Electron IPC 经 preload 暴露 `electronAPI`

@@ -5,9 +5,10 @@
  * codemode 专属而错误放行）：工具经 ctx.executeTool() 发起的嵌套调用，其
  * tool_execution_start / tool_execution_update / tool_execution_end 事件一律携带
  * parentToolCallId（pi dist/core/nested-tool-calls.js 三处 emit 点，嵌套 id 形态
- * `${parentToolCallId}/${n}`），且嵌套调用不落 transcript、结果不持久化
+ * `${parentToolCallId}/${n}`），且嵌套调用不落独立 transcript 条目
  * （pi dist/core/extensions/types.d.ts executeTool 契约「It does not appear in the
- * transcript」）。过滤语义 = 与 transcript 投影对齐：reload 后嵌套调用只有外层一个
+ * transcript」——仅外层 result message 的 nestedCalls 保留有界记录）。
+ * 过滤语义 = 与 transcript 投影对齐：reload 后嵌套调用只有外层一个
  * 工具块，live 期放行 start/end 会各产独立工具块 → 「live ≡ reload」破缺
  * （AGENTS.md 关键规则 9 / codemode 设计 §3.3 D4）。
  *

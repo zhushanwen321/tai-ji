@@ -3,8 +3,11 @@
  *
  * 命令对 `config.getCodemodeEnabled` / `config.setCodemodeEnabled`（codemode 设计 D1：
  * 设置页开关经 services port 读写 settings.json `defaultTools` 字段域）。本文件只承载
- * payload/reply 的类型定义，供两端共同 import 防止裁量漂移；消息类型字符串与 case
- * 分发由 runtime transport 层登记（沿 import-session 域同款分工）。
+ * payload/reply 的类型定义，供两端共同 import 防止裁量漂移；消息类型字符串与
+ * type→payload 映射登记在 shared protocol.ts（受 ReplyPayloadMap 类型约束，新增命令
+ * 须五处挂接：ClientMessageType / ClientMessageMap / ServerMessageType /
+ * ServerMessageMap / ReplyPayloadMap），case 分发由 runtime transport 层 handler
+ * 登记。
  *
  * 损坏错误态（codemode 设计 A1，fail-fast 裁决）：settings.json 非法 JSON 时——
  * get 返回错误态（enabled=false + corruption 有值，不走默认读路径，避免 get 自身触发

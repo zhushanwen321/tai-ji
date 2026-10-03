@@ -30,7 +30,7 @@ export class CodemodeMessageHandler {
         // 成功仅 reply 终态信封、不广播——设计 D3 的开关协议只有 get 读取 + set 切换
         // （+ 前端乐观写），未要求多窗口同步，config.codemodeEnabled 广播无订阅消费方
         // （对照 retry 域 broadcast→onRetryConfig 链路，codemode 未接消费端）；跨窗口
-        // 一致性由各窗口打开设置页时的 get 拉取保证（ADR-0075 拉为主、推补充）。
+        // 一致性由各窗口打开设置页时的 get 拉取保证（ADR-0097 拉为主推补充）。
         const { enabled } = msg.payload
         const result = this.ctx.configService.setCodemodeEnabled(enabled)
         this.ctx.reply(ws, msg.id, 'config.codemodeSetEnabled', result)

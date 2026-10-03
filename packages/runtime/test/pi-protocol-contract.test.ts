@@ -422,8 +422,11 @@ describe('C4: PiToolExecutionEndEvent has NO args field (pi never sends args on 
 // codemode 脚本并行 tools.read；RPC tool_execution_end 事件原样采集，仅替换标识符
 // 与正文为脱敏占位）。信封与 C4 通用样本同构（type/toolCallId/toolName/result/
 // isError），codemode 特有形状在 result 内：
-//   - content 恒两块 text：[0] 沙箱执行元信息（Script completed / Wall time），
-//     [1] 脚本返回值序列化文本
+//   - content 首块恒为 text：[0] 沙箱执行元信息（Script completed / Wall time）；
+//     其后为脚本产物 items——本样本（并行 read 场景）恰一块脚本返回值序列化 text。
+//     非恒定形状（pi execute.js content 拼装 = [header, ...items]）：image 产出场景
+//     image 块追加在 text 块后（设计 §2 链路 C「text 块在前、image 块追加在后」；
+//     S3 真机已验 image 块出现于 content 数组），无返回值脚本则无返回值 text 块
 //   - details.calls：嵌套调用清单（D6 后置的树形展示数据源，本期无渲染消费点），
 //     每项 { id: "<toolCallId>/<序号>", name, args: JSON 字符串, status, durationMs }
 // 嵌套子调用自身的事件带 parentToolCallId 且不落 transcript（D4 过滤判据的
