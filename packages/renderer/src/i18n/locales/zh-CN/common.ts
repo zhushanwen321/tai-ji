@@ -8,6 +8,7 @@ export default {
   close: '关闭',
   loading: '加载中…',
   loadFailed: '加载失败',
+  loadFailedHint: '已自动重试 {n} 次仍未成功，关闭后重新打开可恢复（Esc / ⌘W 可退出）',
   empty: '暂无数据',
   noData: '暂无内容',
   search: '搜索',

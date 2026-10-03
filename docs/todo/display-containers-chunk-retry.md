@@ -1,26 +1,35 @@
-# 浮层 chunk 网络类装载失败：占位重试不自愈（已知限制）
+# 浮层 chunk 装载失败：内部自动重试（现行机制 + 残余限制）
 
-> **状态**：已知限制（2026-10-03 D5 sync 裁决取登记臂，终态同步 F1-18 落盘；修码臂如翻转立项时更新本状态行）。
+> **状态**：已裁决并实施（2026-10-03 用户裁决：「重试按钮，不应该有，应该是内部保证加载重试，而不是界面做这个事情」——界面无重试按钮，装载失败由系统内部自动重试兜底，穷尽才呈现错误态）。
 >
-> **本文件定位**：登记 display-containers 交付的「错误占位重试对网络类 chunk 失败不自愈」已知缺陷及其修复方向。裁决关闭或立项修复时更新状态行。
+> **本文件定位**：懒加载 chunk 失败自动重试机制的现行说明（SSOT）：实现位置、机制、探针证据、残余限制。
 
-## 缺陷描述
+## 现行实现
 
-浮层装载失败回落目标（右抽屉 workflow tab，AsyncErrorFallback 占位链）的占位内重试按钮，对**网络类** chunk 装载失败瞬时再拒：浏览器 module map 对失败模块的记忆化使 re-import 零网络请求（dev/prod 同构造）。重试链机械在位（loader 重跑 + key 重挂），但重试不会产生新的网络请求——自愈不存在。
+- `packages/renderer/src/components/ui/lazy-chunk-retry.ts`（createLazyChunkRetry 状态机）
+- `packages/renderer/src/components/ui/AsyncErrorFallback.vue`（错误态无按钮，穷尽文案给恢复指引）
+- 消费方：AppShell 设置弹窗 + PanelContainer 的 DetailPane / TerminalView / WorkflowTab 三挂载点
+- 设计文档：`.tmp/tech-design/display-containers.md` §5.3 第 2 行（.tmp 过程产物不入 git，本文件为仓库内唯一登记处）
 
-- **降级形态（现状可接受面）**：错误占位可见；Esc / ⌘W 可退出；重开浮层重置 Guard，每次点击均重试（重试链本身不坏）。
-- **双证据**：D3-G2（实测重试零网络请求 + module map 记忆化归因）。
+## 机制
 
-## 修复方向（二选一，立项时裁决）
+- **有界自动重试**：3 次 × 300ms 递增退避（300/600/900ms，累计 ~1.8s）。参数依据：瞬时类失败（升级替换窗口 / AV 扫描 / dev server 抖动）恢复窗口在亚秒～秒级，3 次覆盖之；仍失败即持久故障（版本错配 / 文件缺失），继续重试只推迟错误态出现。
+- **失败未穷尽 → loading 占位**（非错误态，瞬时失败不闪错误）；**穷尽 → 错误态**：文案给恢复指引（已自动重试 3 次未成功，关闭后重新打开可恢复，Esc/⌘W 可退出——退出与重开路径既有且不回归）。
+- **cache-busting 自愈**：从失败错误消息提取 chunk URL（严格锚定 Chromium 原生前缀 `Failed to fetch dynamically imported module: <url>`），`import(/* @vite-ignore */ url + '?t=N')` 绕过浏览器 module map 对失败 URL 的记忆化（同 URL 再 import 零网络请求是浏览器模块语义，非同 URL 重试不构成自愈）。
+- **重试驱动（Vue 3.5.39 runtime-core 实装核对）**：退避到点 `userRetry() + retryKey++` 双要素同调——前者清 pendingRequest 并重跑 loader（busted 重跑唯一跑点），后者重挂新 wrapper 接续同一链、结算时置 loaded。穷尽 fail 后实装 setup catch 清 pendingRequest，「关闭后重新打开」恒获得全新一轮自动重试。
+- 构建产物零改动（正式构建验证：静态 import 的 chunk 拆分无损，变量 import 保留为运行时动态 import）。
 
-1. **retry import 加 cache-busting**——仅 dev 形态可行；prod `file://` 指纹 chunk 的 URL 由构建管线生成，无法按 URL 重建。
-2. **降级 reload**——整窗刷新，代价是对话流状态重挂，需评估 per-session 分区状态的持久恢复面。
+## 探针证据（file:// 可 bust 的实证链）
 
-## 证据指针
+1. **浏览器层**（Electron 42 / Chromium 实测，file://）：失败 URL 记忆化确认（同 URL 再 import 零网络瞬时失败，即使文件已恢复）；`?t=N` busting 绕过记忆化重新加载成功——dir 与 asar 双形态一致。
+2. **构建层**（vite 8 / rolldown spike）：静态 `import()` 保持 chunk 拆分的同时，`import(/* @vite-ignore */ 变量URL)` 原样保留为运行时动态 import——不需要固定 chunk 名或改指纹策略。
+3. **集成层**（正式构建产物核对）：4 个懒加载 chunk 正常生成；busting 表达式与错误前缀匹配串编译在位。
 
-- 设计文档：`.tmp/tech-design/display-containers.md` §5.3 第 2 行「已知限制」段（.tmp 过程产物不入库，本文件为仓库内唯一登记处）。
-- 实施计划：`.tmp/tech-design/display-containers.impl-plan.json` `residualRisks[1]`（chunk 网络失败重试不可自愈，source = D3-G2 双证据）。
+证据链全文见 `.tmp/dev-flow/display-containers.runlog/d6-fix-internal-retry.md`（.tmp 过程产物不入 git）。
 
-## 同族项（登记口径互见）
+## 残余限制（落地事实，不美化）
 
-- vitest 4.x worker 拆卸竞态（全仓套件 ~12%/轮假红，跟踪点 = vitest 升级时复验）：同属「已知未解决缺陷」，登记处 = impl-plan `residualRisks[0]`（未落 docs/todo——登记口径统一属主 agent 终审，见 impl-plan residualRisks[0] detail 互引）。
+1. **busting 只覆盖失败入口 chunk**：若失败发生在入口 chunk 依赖的共享 chunk（vendor 等），依赖 URL 已被记忆化，入口 busting 后依赖仍瞬时再拒——该形态不自愈，出路仍是关闭重开 / 重启进程（版本错配类在进程重启后天然消除）。
+2. **非 URL 形错误回落机械重试**：错误消息不符合 Chromium 前缀（如测试 mock 错误）时提取不到 URL，重试为同 URL 机械路径（无效但无害）；真实浏览器装载失败恒带 URL（探针实证）。
+3. **重试调度期间关闭挂载点**：后续轮次在背景继续推进（计数有界），穷尽 fail 主动归零，重开恒全新一轮。
+4. **失败未穷尽期间 wrapper 停 loading 占位**（Vue userOnError 契约：链 pending → loading）：设计内形态，非缺陷。

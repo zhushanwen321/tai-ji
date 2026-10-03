@@ -168,7 +168,8 @@
     </div>
     <!-- 底抽屉（display-containers §6.2/§7.3）：插在 split 行之下、StatusBar 之上，横跨全宽
          （右抽屉开着时同样全宽、右抽屉变矮）；唯一内容 = terminal（TerminalView 挂载点，保留
-         defineAsyncComponent + LAZY_RETRY_KEY 作用域接线——chunk 装载失败占位链随搬家不丢失）。
+         defineAsyncComponent + 内部自动重试接线（D6：原 LAZY_RETRY_KEY 占位重试链已删——
+         chunk 装载失败由 createLazyChunkRetry 自动重试，见下方懒加载块）。
          高度 = pool 百分比（heightPct 默认 35%，开合 0% ↔ displayPct% 纵轴动画）；上沿手柄
          拖拽/键盘调高度（clamp 15%–70% 写侧归 core；显示期 clamp 不写回，S2）。纵轴不派发
          taiji:splitter-layout（§7.3：无消费方，不造无人读的事件）。收合动画期内容保挂载
@@ -220,7 +221,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, defineComponent, h, provide, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { PanelLeaf } from '@taiji/shared'
 import {
@@ -258,7 +259,8 @@ import GitPanel from '@/components/panel/GitPanel.vue'
 import CommandDocPanel from '@/components/panel/CommandDocPanel.vue'
 import SubagentTab from '@/components/panel/SubagentTab.vue'
 import BackgroundTaskDetailPanel from '@/components/extension/BackgroundTaskDetailPanel.vue'
-import AsyncErrorFallback, { LAZY_RETRY_KEY } from '@/components/ui/AsyncErrorFallback.vue'
+import AsyncErrorFallback from '@/components/ui/AsyncErrorFallback.vue'
+import { createLazyChunkRetry } from '@/components/ui/lazy-chunk-retry'
 import StatusBarTerminalToggle from '@/components/statusbar/StatusBarTerminalToggle.vue'
 
 // D-8 懒加载（§3.3 边界判据：首屏不渲染 + 重依赖）：DetailPane（DiffView 等专属依赖）在抽屉
@@ -266,68 +268,43 @@ import StatusBarTerminalToggle from '@/components/statusbar/StatusBarTerminalTog
 // （xterm 移出首屏初始请求集合）；WorkflowTab（抽屉 workflow 回落内容）同为懒加载挂载点
 // ——它同时是浮层装载失败的回落目标（display-containers §5.3），回落目标自身的 chunk 也
 // 可能失败（file:// chunk 404），必须挂同一 AsyncErrorFallback 占位链才有「回落目标失败 →
-// 占位 + 重试」的恢复面。其余条件挂载面板（GitPanel/CommandDocPanel/SubagentTab）不拆：
+// 占位」的呈现面。其余条件挂载面板（GitPanel/CommandDocPanel/SubagentTab）不拆：
 // 均无重第三方依赖（重依赖判据不满足），拆分只引入 async 边界无字节收益。
-// 错误兜底（§3.5）：file:// 下 chunk 404 是配置性错误，不自动重试，错误占位 + 重试按钮经
-// LAZY_RETRY_KEY 注入触发 loader 重跑（重试 = userRetry 重跑 loader + key 重挂 wrapper，两者缺一
-// 不可，机制见 AppShell.vue 同款注释）。
-// [W31 major-2 后续收口] 重试作用域 = 挂载点结构化隔离（scopedRetryFallback 在各自 errorComponent
-// 上 provide 自己的 LAZY_RETRY_KEY）：占位重试按钮天然路由到本挂载点的 loader，两个 chunk 同时
-// 失败（file:// 404 设计内真实路径）时互不串线——旧「按激活 tab 路由」竞态形态结构性消失。
-function scopedRetryFallback(retry: () => void) {
-  return defineComponent({
-    name: 'ScopedAsyncRetryFallback',
-    inheritAttrs: false,
-    setup(_, { attrs }) {
-      provide(LAZY_RETRY_KEY, retry)
-      return () => h(AsyncErrorFallback, attrs)
-    },
-  })
-}
-let detailRetryFn: (() => void) | null = null
-const detailRetryKey = ref(0)
+// 错误兜底（§3.5 · D6 2026-10-03 用户裁决改版）：界面无重试按钮——装载失败由内部有界自动
+// 重试承接（createLazyChunkRetry：3 次 × 300ms 递增退避，失败 URL 提取 + ?t=N cache-busting
+// 绕过浏览器 module map 对失败模块的记忆化——同 URL 重试零网络请求、busting 才有真自愈，
+// 探针证据见 runlog d6-fix-internal-retry）；穷尽才呈现错误态（文案给「重开恢复」指引），
+// 重开抽屉/浮层即重置计数获得新一轮自动重试。
+// [HISTORICAL W31 major-2] 旧「重试作用域 = scopedRetryFallback provide LAZY_RETRY_KEY 按挂载点
+// 隔离」随按钮删除一并退役：重试不再由用户点击路由，各挂载点状态机天然独立，串线形态
+// 结构性消失；retryKey 重挂保留为自动重试的唯一驱动（Vue 实装语义见 lazy-chunk-retry.ts
+// 头注「重试驱动形态」）。
+const detailRetryState = createLazyChunkRetry(() => import('@/components/panel/DetailPane.vue'))
+const { retryKey: detailRetryKey } = detailRetryState
 const DetailPane = defineAsyncComponent({
-  loader: () => import('@/components/panel/DetailPane.vue'),
+  loader: detailRetryState.loader,
   loadingComponent: AsyncErrorFallback,
-  errorComponent: scopedRetryFallback(() => {
-    detailRetryFn?.()
-    detailRetryKey.value++
-  }),
+  errorComponent: AsyncErrorFallback,
   delay: 200,
-  onError: (_err, retry, fail) => {
-    detailRetryFn = retry
-    fail()
-  },
+  onError: detailRetryState.onError,
 })
-let terminalRetryFn: (() => void) | null = null
-const terminalRetryKey = ref(0)
+const terminalRetryState = createLazyChunkRetry(() => import('@/components/panel/TerminalView.vue'))
+const { retryKey: terminalRetryKey } = terminalRetryState
 const TerminalView = defineAsyncComponent({
-  loader: () => import('@/components/panel/TerminalView.vue'),
+  loader: terminalRetryState.loader,
   loadingComponent: AsyncErrorFallback,
-  errorComponent: scopedRetryFallback(() => {
-    terminalRetryFn?.()
-    terminalRetryKey.value++
-  }),
+  errorComponent: AsyncErrorFallback,
   delay: 200,
-  onError: (_err, retry, fail) => {
-    terminalRetryFn = retry
-    fail()
-  },
+  onError: terminalRetryState.onError,
 })
-let workflowRetryFn: (() => void) | null = null
-const workflowRetryKey = ref(0)
+const workflowRetryState = createLazyChunkRetry(() => import('@/components/panel/WorkflowTab.vue'))
+const { retryKey: workflowRetryKey } = workflowRetryState
 const WorkflowTab = defineAsyncComponent({
-  loader: () => import('@/components/panel/WorkflowTab.vue'),
+  loader: workflowRetryState.loader,
   loadingComponent: AsyncErrorFallback,
-  errorComponent: scopedRetryFallback(() => {
-    workflowRetryFn?.()
-    workflowRetryKey.value++
-  }),
+  errorComponent: AsyncErrorFallback,
   delay: 200,
-  onError: (_err, retry, fail) => {
-    workflowRetryFn = retry
-    fail()
-  },
+  onError: workflowRetryState.onError,
 })
 
 const { t } = useI18n()

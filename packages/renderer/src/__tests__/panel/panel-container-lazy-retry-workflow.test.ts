@@ -1,22 +1,16 @@
 /**
- * PanelContainer 抽屉 workflow 回落内容懒加载失败占位测试（display-containers §5.3 第 2 行 ·
- * u-w2-shell 验收「回落目标失败 → AsyncErrorFallback 占位」）。
+ * PanelContainer 抽屉 workflow 回落内容懒加载内部自动重试测试（display-containers §5.3 第 2 行 ·
+ * u-w2-shell 验收「回落目标失败 → AsyncErrorFallback 占位」· D6 交付后修复改版）。
  *
  * 被测行为：WorkflowTab 是浮层装载失败回落链的目标内容（S6：render-error → 关浮层 →
- * 自动开右抽屉 workflow tab 注入选中态、无占位无重试），目标内容自身的 chunk 也可能
- * 失败（file:// chunk 404）——此时抽屉内容位必须显示 AsyncErrorFallback 占位（加载失败
- * 文案 + 重试按钮），重试按钮路由到**本挂载点**的 loader（scopedRetryFallback 作用域隔离，
- * 与 DetailPane/TerminalView 同款，见 panel-container-lazy-retry.test.ts）。
+ * 自动开右抽屉 workflow tab 注入选中态、无占位），目标内容自身的 chunk 也可能失败
+ * （file:// chunk 404）——失败由内部自动重试承接（无界面按钮，无用户交互），瞬时失败
+ * 恢复渲染；持续失败穷尽后才呈现错误态（指引文案见 AsyncErrorFallback）。
  *
- * 用户旅程（每步均有 DOM 断言 + loader 调用计数佐证）：
- * 1. 开抽屉 workflow tab，WorkflowTab chunk 首挂失败 → 抽屉内容位错误占位（无内容渲染）
- * 2. 点占位重试 → loader 重跑成功 → workflow 内容替换占位（恢复面成立）
- *
- * mock 策略：vi.mock 工厂抛错 = 动态 import reject（defineAsyncComponent onError →
- * errorComponent）；失败结果不缓存、成功结果缓存 → 本文件一个用例覆盖失败→重试成功全链
- * （探针验证过的运行时事实，见 panel-container-lazy-retry.test.ts 头注）；工厂返回带
- * [Symbol.toStringTag]:'Module' 使 defineAsyncComponent unwrap .default。其余壳层依赖
- * mock 对齐 panel-container-drawer-mode.test.ts。
+ * mock 策略：vi.mock 工厂抛错 = 动态 import reject；失败结果不缓存、成功结果缓存 → 本文件
+ * 一个用例覆盖失败→自动重试成功全链（工厂错误不带模块 URL → busting 分支不触发，重试走
+ * 同 URL 机械路径，loader 重跑断言等价；busting 由 helper 单测覆盖）。工厂返回带
+ * [Symbol.toStringTag]:'Module' 使 defineAsyncComponent unwrap .default。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/panel-container-lazy-retry-workflow.test.ts
  */
@@ -132,33 +126,40 @@ beforeEach(() => {
   reactiveMessages.clear()
   lazy.workflowFailures = 0
   lazy.workflowLoads = 0
+  vi.useFakeTimers()
 })
 
 // [HISTORICAL] 用例间 wrapper 必须自动 unmount（原因见 panel-container-drawer-mode.test.ts 同注释）
 enableAutoUnmount(afterEach)
+afterEach(() => {
+  vi.useRealTimers()
+})
 
-describe('抽屉 workflow 回落内容懒加载失败占位（display-containers §5.3 第 2 行）', () => {
-  it('回落目标 chunk 失败 → 抽屉内容位 AsyncErrorFallback 占位；点重试重跑 loader 恢复内容', async () => {
+describe('抽屉 workflow 回落内容懒加载内部自动重试（display-containers §5.3 第 2 行 · D6）', () => {
+  it('回落目标 chunk 失败 → 内部自动重试（无按钮无交互）→ 内容渲染', async () => {
     lazy.workflowFailures = 1
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 'sess-wf-lazy')
     openDrawerTab('workflow')
     const wrapper = await mountContainer()
     await flushPromises()
+    // delay:200 门控（defineAsyncComponent delayed ref）——fake timers 下需推进才显示 loading 占位
+    await vi.advanceTimersByTimeAsync(200)
+    await flushPromises()
 
-    // ① 回落目标 chunk 失败 → 抽屉内容位错误占位（加载失败文案 + 重试按钮，无内容渲染）
+    // ① 回落目标 chunk 失败：未穷尽 → loading 占位（非错误态），全程无重试按钮
     expect(lazy.workflowLoads).toBe(1)
-    expect(wrapper.find('[data-testid="drawer-area"] [data-testid="async-error-fallback"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('加载失败')
-    const retry = wrapper.find('[data-testid="drawer-area"] [data-testid="async-retry-btn"]')
-    expect(retry.exists()).toBe(true)
+    expect(wrapper.find('[data-testid="drawer-area"] [data-testid="async-loading"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="drawer-area"] [data-testid="async-error-fallback"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="async-retry-btn"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="workflow-loaded"]').exists()).toBe(false)
 
-    // ② 占位内重试按钮重跑本挂载点 loader → 内容渲染、占位消失（恢复面成立）
-    await retry.trigger('click')
+    // ② 第 1 轮退避（300ms）到点 → 内部自动重试 → 内容渲染、占位消失（恢复面成立，零交互）
+    await vi.advanceTimersByTimeAsync(300)
     await flushPromises()
     expect(lazy.workflowLoads).toBe(2)
     expect(wrapper.find('[data-testid="workflow-loaded"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="drawer-area"] [data-testid="async-error-fallback"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="async-retry-btn"]').exists()).toBe(false)
   }, 60_000)
 })

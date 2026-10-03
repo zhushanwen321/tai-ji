@@ -3,8 +3,8 @@
  *
  * 被测行为：
  * - S1 形态：底抽屉插在 split 行（对话区+右抽屉）之下、StatusBar 之上，横跨全宽（不在
- *   drawer-area 内）；terminal 搬家后在此挂载（defineAsyncComponent + LAZY_RETRY_KEY 作用域
- *   接线保留，chunk 失败占位链归 lazy-retry 测试族）
+ *   drawer-area 内）；terminal 搬家后在此挂载（defineAsyncComponent + 内部自动重试接线
+ *   〔D6：原 LAZY_RETRY_KEY 占位重试链已删〕，chunk 失败路径归 lazy-retry 测试族）
  * - S2 双容器同开：右抽屉 + 底抽屉同时可见；高度默认 35%；拖上沿调高度（写侧 clamp 15–70 +
  *   全局单键持久化）；矮窗显示期 clamp（保证对话流+composer 最小可视区）且**不写回**持久值
  * - S10 默认 git：首开右抽屉呈现 git tab（terminal 迁出后默认 activeTab 'terminal'→'git'）
