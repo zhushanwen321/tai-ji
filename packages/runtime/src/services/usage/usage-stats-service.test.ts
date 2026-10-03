@@ -148,7 +148,7 @@ function renameSessionEntry(opts: {
 
 /** 构造 pi 1.0.0 usage entry（appendUsage 落盘形态：kind/provider/model/usage/note）。 */
 function piUsageEntry(opts: {
-  usage?: Record<string, unknown> | null
+  usage?: unknown // 刻意放宽：守卫用例喂非法形态（string/number）验证不计 row
   provider?: unknown
   model?: unknown
   kind?: string
@@ -266,12 +266,16 @@ describe('UsageStatsService', () => {
     expect(result.scannedAt).toBeGreaterThan(0)
   })
 
-  it('assistant 主桶正常计入', async () => {
-    const content = [
-      sessionEntry('/Users/dev/project-a'),
-      assistantEntry({ provider: 'kimi-coding', model: 'k3-256k' }),
-    ].join('\n')
-    await writeFile(join(tmpDir, 'test-1.jsonl'), content)
+  // ①⑤ 共享结算链（extractMetrics/makeRow/extractProject/date）一处归属：两类别喂同一
+  // SAMPLE_USAGE，token/cost 期望全等；各类别只保留分流与字段源特有断言（assistant 取
+  // message.usage + responseModel 链，usage entry 取顶层 provider/model——差异归各自
+  // 专项用例，此处钉「入主桶后结算等价」）
+  it.each([
+    ['① assistant message.usage → 主桶', 'bucket-assistant', () => assistantEntry({ provider: 'kimi-coding', model: 'k3-256k' }), 'kimi-coding', 'k3-256k'],
+    ['⑤ usage entry → 主桶（pi 1.0.0 非对话用量）', 'bucket-usage', () => piUsageEntry({ usage: SAMPLE_USAGE, provider: 'zai-coding-cn', model: 'glm-5.3-flash' }), 'zai-coding-cn', 'glm-5.3-flash'],
+  ])('%s：SAMPLE_USAGE 全量落账', async (_label, fileName, makeEntry, provider, model) => {
+    const content = [sessionEntry('/Users/dev/project-a'), makeEntry()].join('\n')
+    await writeFile(join(tmpDir, `${fileName}.jsonl`), content)
 
     const svc = new UsageStatsService(tmpDir)
     const result = await svc.getStats()
@@ -279,8 +283,8 @@ describe('UsageStatsService', () => {
     expect(result.rows).toHaveLength(1)
     expect(result.sessionCount).toBe(1)
     const row = result.rows[0]
-    expect(row.provider).toBe('kimi-coding')
-    expect(row.model).toBe('k3-256k')
+    expect(row.provider).toBe(provider)
+    expect(row.model).toBe(model)
     expect(row.input).toBe(1000)
     expect(row.output).toBe(200)
     expect(row.cacheRead).toBe(50)
@@ -889,29 +893,8 @@ describe('UsageStatsService', () => {
   })
 
   // ── ⑤ pi 1.0.0 usage entry（模型产生的非对话用量，appendUsage 落盘形态）────────
-
-  it('⑤ usage entry 正常落账：真实 provider/model 行，cost 计入', async () => {
-    const content = [
-      sessionEntry('/Users/dev/usage-warm'),
-      piUsageEntry({ usage: SAMPLE_USAGE, provider: 'zai-coding-cn', model: 'glm-5.3-flash' }),
-    ].join('\n')
-    await writeFile(join(tmpDir, 'usage-1.jsonl'), content)
-
-    const svc = new UsageStatsService(tmpDir)
-    const result = await svc.getStats()
-
-    expect(result.rows).toHaveLength(1)
-    const row = result.rows[0]
-    expect(row.provider).toBe('zai-coding-cn')
-    expect(row.model).toBe('glm-5.3-flash')
-    expect(row.input).toBe(1000)
-    expect(row.output).toBe(200)
-    expect(row.cacheRead).toBe(50)
-    expect(row.costUSD).toBe(0.005)
-    expect(row.messages).toBe(1)
-    expect(row.project).toBe('usage-warm')
-    expect(row.date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-  })
+  // 正常落账路径已并入上方 ①⑤ 表驱动行 2（顶层 provider/model 字段源为 ⑤ 特有断言）；
+  // 本组保留守卫与回退专项。
 
   it('⑤ usage 缺失/非对象不计 row；provider/model 缺失回退 (unknown)；timestamp 非法计 skippedLines', async () => {
     const content = [

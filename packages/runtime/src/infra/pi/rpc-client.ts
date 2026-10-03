@@ -34,6 +34,7 @@ import {
   type PiMessage,
   type PiEventListener,
 } from '@zhushanwen/pi-rpc'
+import { parseInputDisposition } from './pi-protocol.js'
 
 // 协议类型与 LF-only 行分帧 re-export：既有消费方（event-adapter / 测试）的 import
 // 路径 'rpc-client.js' 保持不变；实现本体在 @zhushanwen/pi-rpc（无独立副本）。
@@ -309,8 +310,9 @@ export class RpcClient implements IPiEngine {
   private spawnedAt: number | null = null
   /**
    * 已知 pi 历史文件绝对路径：switch_session 参数（restore/fork 路径）或 get_state
-   * 返回的 sessionFile（attach 序列恒调）任一发生过。新建 session 在 pi 首条 assistant
-   * 前文件可能不存在（仓规 #6），runtime 不探测文件系统，未知即 null。
+   * 返回的 sessionFile（attach 序列恒调）任一发生过。新建 session 在 pi 首次 flush
+   * （user/assistant 首消息后，pi 1.0.0 起 user 消息即建文件——仓规 #6）前文件可能
+   * 不存在，runtime 不探测文件系统，未知即 null。
    */
   private attachedSessionFile: string | null = null
 
@@ -755,6 +757,10 @@ export class RpcClient implements IPiEngine {
               if (res.data === undefined && res.payload !== undefined) {
                 res.data = res.payload
               }
+              // disposition 出口统一解析并挂载（B3 传递）：仅 prompt/steer/follow_up 响应
+              // 携带该字段；解析出值才挂键，其余命令响应保持无键（上层 undefined 即缺失语义）。
+              const disposition = parseInputDisposition(res)
+              if (disposition !== undefined) res.disposition = disposition
               resolve(res)
             }
           },

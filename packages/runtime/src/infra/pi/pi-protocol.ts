@@ -22,6 +22,8 @@
  */
 // ThinkingLevel 值域双向防漂移锁的比对对象（import type：类型位置消费，保持本文件零运行时依赖）。
 import type { PI_THINKING_LEVELS } from '@taiji/shared'
+// disposition 词表（PiMessage.disposition 同源；本文件 re-export 供既有 import 路径使用）。
+import type { PiInputDisposition } from '@zhushanwen/pi-rpc'
 
 // ── Base types ─────────────────────────────────────────────────────
 
@@ -332,7 +334,7 @@ export interface PiToolExecutionStartEvent extends PiBaseMessage {
   toolName: string
   /** pi 的规范字段名（pi 从不发 input）。 */
   args: Record<string, unknown>
-  /** pi 1.0.0：嵌套调用（工具经 ctx.executeTool 调其他工具）时携带的父调用 id；顶层调用缺省。taiji 原样透传不消费。 */
+  /** pi 1.0.0：嵌套调用（工具经 ctx.executeTool 调其他工具）时携带的父调用 id；顶层调用缺省。taiji 容忍并丢弃（event-adapter 重建 payload 不带该字段）；嵌套事件的投影语义归第二类组 4 设计。 */
   parentToolCallId?: string
 }
 
@@ -346,7 +348,7 @@ export interface PiToolExecutionUpdateEvent extends PiBaseMessage {
    * 不强制具体类型（pi 不保证形态）。
    */
   partialResult: unknown
-  /** pi 1.0.0：嵌套调用时携带的父调用 id；顶层调用缺省。taiji 原样透传不消费。 */
+  /** pi 1.0.0：嵌套调用时携带的父调用 id；顶层调用缺省。taiji 容忍并丢弃（同 start 事件注释）。 */
   parentToolCallId?: string
 }
 
@@ -367,7 +369,7 @@ export interface PiToolExecutionEndEvent extends PiBaseMessage {
   result: PiToolExecutionResult
   /** pi 必填字段（agent-session.ts 始终发送）。 */
   isError: boolean
-  /** pi 1.0.0：嵌套调用时携带的父调用 id；顶层调用缺省。taiji 原样透传不消费。 */
+  /** pi 1.0.0：嵌套调用时携带的父调用 id；顶层调用缺省。taiji 容忍并丢弃（同 start 事件注释）。 */
   parentToolCallId?: string
 }
 
@@ -824,20 +826,16 @@ export interface GetEntriesResponse {
 // ── Shared types ───────────────────────────────────────────────────
 
 /**
- * pi 1.0.0 prompt/steer/follow_up 响应 data.disposition（B3）：这条输入的实际去向。
- * - 'handled'：被扩展接管（斜杠命令 / input hook 返回 handled），不会产生 LLM turn；
- * - 'queued'：排队等待（steering / followUp 队列或 streaming 中的 prompt）；
- * - 'started'：已真正开始执行（会产生 LLM 流）。
- * 锚点：pi dist/core/agent-session.d.ts QueuedInputDisposition = 'handled'|'queued'、
- * PromptDisposition = QueuedInputDisposition|'started'；rpc-mode.js prompt/steer/follow_up
- * 应答 success(id, cmd, { disposition })。steer/follow_up 恒为前两值；prompt 三值全可能。
- * 界面消费（等待语义修正）属第二类组 2 设计，本层只做兼容解析。
+ * pi 1.0.0 prompt/steer/follow_up 响应 data.disposition 的值域（'handled' 被扩展接管 /
+ * 'queued' 排队 / 'started' 已开始执行）。词表 SSOT 在 @zhushanwen/pi-rpc（PiMessage.disposition
+ * 字段同源），此处 re-export 保持既有 import 路径；字段语义见 pi-rpc types.ts。
  */
-export type PiInputDisposition = 'handled' | 'queued' | 'started'
+export type { PiInputDisposition }
 
 /**
  * 从 RPC 响应解析 disposition（B3 兼容式）：pi < 1.0.0 或 mock 无该字段 → undefined
  *（调用方行为与现状完全一致）；非法值（协议漂移）→ undefined + warn 可观测。
+ * 唯一调用点 = rpc-client sendCommand 出口（解析结果挂 PiMessage.disposition 透传上层）。
  */
 export function parseInputDisposition(msg: PiMessageLike): PiInputDisposition | undefined {
   const value = msg.data?.disposition
@@ -847,7 +845,7 @@ export function parseInputDisposition(msg: PiMessageLike): PiInputDisposition | 
   return undefined
 }
 
-/** parseInputDisposition 的最小结构入参（PiMessage 的结构子集，避免 import 环）。 */
+/** parseInputDisposition 的最小结构入参（PiMessage 的结构子集）。 */
 export interface PiMessageLike {
   data?: Record<string, unknown>
 }

@@ -27,7 +27,24 @@ export interface PiMessage {
   data?: Record<string, unknown>
   success?: boolean
   error?: string
+  /**
+   * prompt/steer/follow_up 响应的实际去向（pi 1.0.0 起 data.disposition，rpc-client
+   * 出口统一解析后挂载；其余命令恒 undefined）。
+   * - 'handled'：被扩展接管（斜杠命令 / input hook 返回 handled），不会产生 LLM turn；
+   * - 'queued'：排队等待（steering / followUp 队列或 streaming 中的 prompt）；
+   * - 'started'：已真正开始执行（会产生 LLM 流）。
+   * 锚点：pi dist/core/agent-session.d.ts QueuedInputDisposition = 'handled'|'queued'、
+   * PromptDisposition = QueuedInputDisposition|'started'。steer/follow_up 恒为前两值；
+   * prompt 三值全可能。界面消费（等待语义修正）归 taiji 服务层设计，本包只承载解析后的值。
+   */
+  disposition?: PiInputDisposition
 }
+
+/**
+ * pi 1.0.0 prompt/steer/follow_up 响应 data.disposition 的值域（词表 SSOT 在本包，
+ * runtime pi-protocol.ts re-export）。
+ */
+export type PiInputDisposition = 'handled' | 'queued' | 'started'
 
 export type PiEventListener = (event: PiMessage) => void
 

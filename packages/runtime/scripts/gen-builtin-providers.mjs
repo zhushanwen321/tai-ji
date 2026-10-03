@@ -1,4 +1,4 @@
-// prebuild 提取脚本：从 pi-ai catalog 提取 37 个内置 provider 元数据，
+// prebuild 提取脚本：从 pi-ai catalog 提取内置 provider 元数据（1.0.0 为 42 个），
 // 生成 packages/runtime/src/generated/builtin-providers.json 供运行时零 pi-ai 依赖消费。
 //
 // 关键 import 路径（已实测）：
@@ -217,15 +217,27 @@ function extractEndpoints(src) {
   return endpoints
 }
 
-// scopes 提取（缺失回退 [] 不阻断）：数组字面量 → 字符串常量 → body 字面量（copilot 的 `scope: "read:user"`）。
+// scopes 提取（缺失回退 [] 不阻断）：数组字面量 → 字符串常量 → 模板字面量 → body 字面量。
+// 常量名覆盖 pi-ai 1.0.0 全部在用形态：SCOPES（anthropic）、SCOPE（openai 系）、XAI_SCOPE（xai）、
+// OAUTH_SCOPE（radius）。模板插值 ${VAR} 在同文件展开（resolveTemplateVar 同款思路），
+// 展开失败的片段丢弃——scopes 是可降级字段，与端点缺失同级不阻断。
+const SCOPE_CONST_NAMES = 'SCOPES|SCOPE|XAI_SCOPE|OAUTH_SCOPE'
 function extractScopes(src) {
-  const arr = src.match(/const (?:SCOPES|SCOPE|XAI_SCOPE) = \[([^\]]*)\]/)
+  const arr = src.match(new RegExp(`const (?:${SCOPE_CONST_NAMES}) = \\[([^\\]]*)\\]`))
   if (arr) {
     const items = [...arr[1].matchAll(/"([^"]+)"/g)].map((m) => m[1])
     if (items.length > 0) return items
   }
-  const str = src.match(/const (?:SCOPES|SCOPE|XAI_SCOPE) = "([^"]+)"/)
+  const str = src.match(new RegExp(`const (?:${SCOPE_CONST_NAMES}) = "([^"]+)"`))
   if (str) return str[1].split(/\s+/).filter(Boolean)
+  const tpl = src.match(new RegExp(`const (?:${SCOPE_CONST_NAMES}) = \`([^\`]+)\``))
+  if (tpl) {
+    const resolved = tpl[1].replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name) => {
+      const def = src.match(new RegExp(`const ${name} = "([^"]+)"`))
+      return def ? def[1] : ''
+    })
+    return resolved.split(/\s+/).filter(Boolean)
+  }
   const body = src.match(/scope: "([^"]+)"/)
   if (body) return body[1].split(/\s+/).filter(Boolean)
   return []
@@ -331,11 +343,11 @@ function summarizeModel(m) {
 }
 
 /**
- * 从 pi-ai catalog 提取 37 个内置 provider 元数据。纯函数无副作用，供测试与 main 共用。
+ * 从 pi-ai catalog 提取内置 provider 元数据（数量随 pi 版本变化，测试基线为权威）。纯函数无副作用，供测试与 main 共用。
  * @returns {Array<object>} provider 模板数组（见 contract c1）
  */
 export function generateBuiltinProviders() {
-  // getBuiltinProviders() 返回 MODELS 的 keys（37 个，自然排除 radius——radius 是 dynamic provider 无静态 catalog）
+  // getBuiltinProviders() 返回 MODELS 的 keys（1.0.0 起 radius 也有静态 catalog 在册，42 个）
   const catalogIds = getBuiltinProviders()
   // builtinProviders() 返回完整 provider 对象数组（含 auth/baseUrl，但含 radius 共 38 个），
   // 建立 id -> provider 映射供按需取对象字段

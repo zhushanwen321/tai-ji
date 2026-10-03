@@ -604,6 +604,16 @@ function dispatchEntry(c: ChatStateCollector, entry: PiEntry): void {
       // 用户书签/标记：重放侧无对话流投影，显式 no-op（规则 #9：有 case、不丢弃、不崩溃）。
       return
     }
+    case 'usage': {
+      // pi 1.0.0 用量记录（cache_warm 等）：不产对话流消息（用量统计由 runtime 侧
+      // usage-stats-service 扫描计入），零投影显式 no-op（与 live 侧 event-adapter 跳过同语义）。
+      return
+    }
+    case 'context_edit': {
+      // pi 1.0.0 上下文编辑（只改未来模型上下文，原始历史/UI/导出不变——pi 官方语义
+      // 就是投影不动），零投影显式 no-op；模型上下文的编辑投影属第二类组 4 设计。
+      return
+    }
     default: {
       // 未建模 entry 类型（thinking_level_change / model_change / session_info / pi 未来新增）
       // → no-op。重放不中断，后续 entry 照常投影；类型清单见 pi session-manager.ts SessionEntry。

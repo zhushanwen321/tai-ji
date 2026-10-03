@@ -263,8 +263,9 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
   // 注册 schedule tool（触发反转：直建，不再弹确认表单——人侧表单入口在 /schedule 命令）。
   // execute 内联闭包：从 SDK 全签名 (toolCallId, params, signal, onUpdate, ctx) 提取
   // 转调 handleSchedule 直建流（预校验 → abort 检查 → service.create）。
-  // 错误路径 throw（W4）：pi 只对 execute throw 置 isError:true（返回值里的
-  // isError 被 agent-loop 丢弃）；getService() 未初始化异常穿透到这里，包装
+  // 错误路径 throw（W4）：pi 对 execute throw 置 isError:true（agent-loop.js:581-588；
+  // 1.0.0 起返回值 isError:true 也被尊重，本工具恒走 throw 路径两版语义等价）；
+  // getService() 未初始化异常穿透到这里，包装
   // 'Error: Scheduler not initialized' 格式（R3 格式保持）。
   pi.registerTool({
     name: 'schedule',

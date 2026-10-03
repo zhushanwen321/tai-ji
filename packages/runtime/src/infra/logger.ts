@@ -574,8 +574,9 @@ export interface PiCrashContext {
   sessionId: string | null
   /**
    * pi 历史文件绝对路径：switch_session 参数或 get_state 返回的 sessionFile，二者
-   * 任一发生过才非 null。新建 session 在首条 assistant 前 pi 侧尚未落盘（仓规 #6），
-   * runtime 不主动创建/探测文件，未知即 null。
+   * 任一发生过才非 null。新建 session 在 user/assistant 首消息前 pi 侧尚未落盘
+   * （仓规 #6，pi 1.0.0 起 user 首消息即建文件），runtime 不主动创建/探测文件，
+   * 未知即 null。
    */
   sessionFile: string | null
   /** 最后一次发出的 RPC 命令类型（sendCommand 记录，如 'send_prompt' / 'switch_session'）。 */

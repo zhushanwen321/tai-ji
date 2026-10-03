@@ -28,6 +28,11 @@ const SKIP_REASON = PI_DIST
   : 'node_modules/@earendil-works/pi-coding-agent/dist 不可达（cwd 上溯 6 级未命中）'
 if (!PI_DIST) console.warn(`[pi-semantics] skip：${SKIP_REASON}`)
 
+// dist 不可达时 skip（describe.skipIf 命中时 vitest 仍执行工厂体——读取必须在模块级
+// 三元守卫内完成，不能放 describe 体，否则收集期抛错而非 skip）
+const SESSION_MANAGER_SRC = PI_DIST ? readFileSync(join(PI_DIST, 'core', 'session-manager.js'), 'utf-8') : ''
+const AGENT_SESSION_SRC = PI_DIST ? readFileSync(join(PI_DIST, 'core', 'agent-session.js'), 'utf-8') : ''
+
 /** 行为级断言用：动态 import session-manager.js（取 SessionManager 类做原型桩）。 */
 type SessionManagerModule = {
   SessionManager?: { prototype: object }
@@ -44,8 +49,8 @@ const sessionManager: SessionManagerModule | null = await (async () => {
 describe.skipIf(!PI_DIST)(
   `PS-28 探针：appendCompaction details 透传链静态断言（代码形态${SKIP_REASON ? `｜skip：${SKIP_REASON}` : ''}）`,
   () => {
-    const sessionManagerSrc = readFileSync(join(PI_DIST as string, 'core', 'session-manager.js'), 'utf-8')
-    const agentSessionSrc = readFileSync(join(PI_DIST as string, 'core', 'agent-session.js'), 'utf-8')
+    const sessionManagerSrc = SESSION_MANAGER_SRC
+    const agentSessionSrc = AGENT_SESSION_SRC
 
     it('appendCompaction：entry 字面量 details 字段逐字引用入参（无克隆/无白名单）', () => {
       const win = methodWindowUntil(
@@ -115,9 +120,10 @@ describe.skipIf(!sessionManager?.SessionManager)(
       ) => string
     }
 
-    const Cls = sessionManager!.SessionManager!
-
     function makeHost(): { host: AppendCompactionHost; captured: Array<Record<string, unknown>> } {
+      // Cls 提取在 it 体执行时进行（skip 态不走到这里）——describe 体级非空断言会在
+      // 收集期对 null 崩溃，破坏「dist 不可达时 skip 不 fail」契约
+      const Cls = sessionManager!.SessionManager!
       const host = Object.create(Cls.prototype) as AppendCompactionHost
       host.byId = new Map()
       host.leafId = 'leaf-0'

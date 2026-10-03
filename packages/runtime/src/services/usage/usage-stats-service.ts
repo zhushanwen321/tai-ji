@@ -223,10 +223,10 @@ export class UsageStatsService {
   }
 
   /**
-   * 流式扫描单个 JSONL 文件，按四分类计入 usage。
+   * 流式扫描单个 JSONL 文件，按五分类计入 usage。
    *
-   * 计入规则（①②③ 对齐 pi getUsageCostBreakdown，锚点：@earendil-works/pi-coding-agent@0.84.4
-   * dist/core/usage-totals.js:23-33，升级 pi 时须重新核对该锚点；④ 为 taiji 自有口径）：
+   * 计入规则（①②③⑤ 对齐 pi getUsageCostBreakdown，锚点：@earendil-works/pi-coding-agent@1.0.0
+   * dist/core/usage-totals.js:41-70；④ 为 taiji 自有口径）：
    * ① type==='message' && message.role==='assistant' && message.usage → 主桶
    * ② type==='message' && message.role==='toolResult' && message.usage → compaction 虚拟桶
    * ③ (type==='compaction' || type==='branch_summary') && entry.usage → compaction 虚拟桶
@@ -234,10 +234,13 @@ export class UsageStatsService {
    *    非 string/空串回退 'compaction'（usage-page-fixes §3.3 ④ 守卫与回退字面量）
    * ④ type==='custom' && customType==='rename-session' && data.usage 为非 null 对象
    *    → rename-session 虚拟桶（G3）
+   * ⑤ type==='usage'（pi 1.0.0 新 entry，cache_warm 等非对话操作的用量记录）→ 主桶
+   *    （pi 自身口径：usage entry 按 `${provider}/${model}` 计入合计）
    *
-   * 四类判定互斥（①② 同 type 不同 role，③④ 不同 type），拆分到
+   * 五类判定互斥（①② 同 type 不同 role，③④⑤ 各不同 type），拆分到
    * rowFromAssistant / rowFromToolResult / rowFromCompactionEntry /
-   * rowFromRenameSessionEntry 四个辅助方法；本方法只做行读取 + cwd 提取 + 编排。
+   * rowFromRenameSessionEntry / rowFromUsageEntry 五个辅助方法；本方法只做行读取 +
+   * cwd 提取 + 编排。
    *
    * @returns FileShard 分片（含 rows, skippedLines, cwd）
    */

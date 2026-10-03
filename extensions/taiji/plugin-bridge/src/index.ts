@@ -132,14 +132,13 @@ function getSessionId(ctx: ExtensionContext): string {
 // 消费方；error/cancelled/unexpected 是 isError 派生不出的失败原因族信号，保留；ok 无载荷——
 // content[0].text 已完整携带回包信息，不重复持久化。错误必须 isError）──
 
-// 【坑】isError 是 extension 侧约定字段——pi 0.84.4 的 AgentToolResult 接口无此字段
-// （实装锚点：node_modules/@earendil-works/pi-agent-core@0.84.4 dist/types.d.ts:317，
-// 字段集 = content / details / usage? / addedToolNames? / terminate?）、agent-loop 不读取
-// （正常 return 恒按成功，仅 throw 才算错——实装锚点：同包 dist/agent-loop.js:468
-// executePreparedToolCall 正常分支硬编码 isError:false，:473-477 仅 catch 分支置
-// isError:true）；LLM 判错实际依据 content 文本。因此 cancelled/error result 的 content
-// 必须带可读文案，isError 只作下游（details 消费方）的结构化标记。
-// pi 版本 bump 时随探针族重验（C-proc-08）。
+// 【坑·pi 1.0.0 已核验（探针族 PS-56）】返回值 isError 现在被 agent-loop 尊重：
+// pi-agent-core 1.0.0 dist/agent-loop.js:579 `return { result, isError: result.isError === true }`
+// （catch 分支 :581-588 仍 throw → isError:true）。0.84.4 时返回值 isError 被丢弃、
+// 仅 throw 才算错；升级后本桥 cancelled/error/unexpected 三处 `isError: true` 返回从
+// 「伪成功（模型靠 content 文本判错）」变为「正式标错」——方向有利（模型可结构化感知
+// 失败），但 cancelled 路径的标错可能诱发模型重试已取消操作，该行为观察项归第二类
+// 组 2（发送状态机）设计时一并裁决。content 可读文案仍是必须（标错后的解释文本）。
 interface PluginBridgeToolResult {
 	content: Array<{ type: "text"; text: string }>;
 	details:

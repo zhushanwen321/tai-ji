@@ -49,12 +49,18 @@ const SKIP_REASON = CODING_AGENT_DIST && AGENT_CORE_DIST && REPO_ROOT
   : 'node_modules/@earendil-works/{pi-coding-agent,pi-agent-core}/dist 或仓库根不可达（cwd 上溯 6 级未命中）'
 if (SKIP_REASON) console.warn(`[pi-semantics] skip：${SKIP_REASON}`)
 
+// dist 不可达时 skip（describe.skipIf 命中时 vitest 仍执行工厂体——读取必须在模块级
+// 三元守卫内完成，不能放 describe 体，否则收集期抛错而非 skip）
+const AGENT_SESSION_SRC = CODING_AGENT_DIST ? readFileSync(join(CODING_AGENT_DIST, 'core', 'agent-session.js'), 'utf-8') : ''
+const AGENT_CORE_SRC = AGENT_CORE_DIST ? readFileSync(join(AGENT_CORE_DIST, 'agent.js'), 'utf-8') : ''
+const AGENT_LOOP_SRC = AGENT_CORE_DIST ? readFileSync(join(AGENT_CORE_DIST, 'agent-loop.js'), 'utf-8') : ''
+
 describe.skipIf(SKIP_REASON !== '')(
   `PS-26 探针：transform 面唯一性与裸标记两通路存活（静态断言${SKIP_REASON ? `｜skip：${SKIP_REASON}` : ''}）`,
   () => {
-    const agentSession = readFileSync(join(CODING_AGENT_DIST as string, 'core', 'agent-session.js'), 'utf-8')
-    const agentCore = readFileSync(join(AGENT_CORE_DIST as string, 'agent.js'), 'utf-8')
-    const agentLoop = readFileSync(join(AGENT_CORE_DIST as string, 'agent-loop.js'), 'utf-8')
+    const agentSession = AGENT_SESSION_SRC
+    const agentCore = AGENT_CORE_SRC
+    const agentLoop = AGENT_LOOP_SRC
 
     it('pi-coding-agent prompt()：input hook 是全文唯一 transform 询问点（hasHandlers("input")/emitInput 各仅 1 处）', () => {
       // 唯一性 = steer/followUp/_queueSteer/_queueFollowUp 无 input hook 的结构性依据：

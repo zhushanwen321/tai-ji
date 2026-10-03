@@ -64,8 +64,16 @@ function assertEveryPrecededBy(
   precedings: string[],
   window: number,
   label: string,
+  minCount = 1,
 ): void {
-  for (const [n, idx] of allIndices(src, marker).entries()) {
+  // 装置下界：marker 计数 < minCount（含整体改名/消失 → 0 处）时显式红——否则后续循环
+  // 空转、pi 重写流式实现时整用例保持绿（假绿通路，审查 2026-10-03 补封）
+  const all = allIndices(src, marker)
+  expect(
+    all.length,
+    `PS-47 装置（${label}）："${marker}" 在场 ${all.length} 处 < 下界 ${minCount}——事件串改名或流式实现重写，复核 pi-ai`,
+  ).toBeGreaterThanOrEqual(minCount)
+  for (const [n, idx] of all.entries()) {
     const before = src.slice(Math.max(0, idx - window), idx)
     const ok = precedings.some((p) => before.includes(p))
     expect(
@@ -109,10 +117,17 @@ describe.skipIf(SKIP_REASON !== '')(
       const agentStartIdx = runAgentLoopContinueBody.indexOf('await emit({ type: "agent_start" });')
       const runLoopCallIdx = runAgentLoopContinueBody.indexOf('await runLoop(')
       expect(startIdx, 'PS-46 漂移：runAgentLoopContinue 入口不再 emit turn_start——重试轮失去起算锚点').toBeGreaterThan(-1)
+      // 存在性断言与 A1 对称：-1 参与序断言恒真（agent_start 消失/移位时不红），单独钉住
+      expect(agentStartIdx, 'PS-46 漂移：runAgentLoopContinue 入口不再 emit agent_start——复核 agent-loop.js').toBeGreaterThan(-1)
+      expect(runLoopCallIdx, 'PS-46 漂移：runAgentLoopContinue 不再调用 runLoop——复核 agent-loop.js').toBeGreaterThan(-1)
       expect(
         agentStartIdx < startIdx && startIdx < runLoopCallIdx,
         'PS-46 漂移：runAgentLoopContinue 的 turn_start 位置变化——复核 agent-loop.js',
       ).toBe(true)
+      expect(
+        allIndices(runAgentLoopContinueBody, 'type: "turn_start"').length,
+        'PS-46 漂移：runAgentLoopContinue 内 turn_start 出现次数 ≠ 1——逐请求锚点前提变化',
+      ).toBe(1)
     })
 
     it('A3 工具循环后续轮：prepareNextTurn 之后、steering 注入与流式调用之前恰发一次 turn_start', () => {
@@ -165,6 +180,11 @@ describe.skipIf(SKIP_REASON !== '')(
           ['blocks.push(thinkingBlock);', 'type: "thinking_start"'],
           ['blocks.push(block);', 'type: "toolcall_start"'],
         ]
+        // 装置下界：三锚串整体消失（流式实现重写）时显式红，防循环空转绿
+        expect(
+          allIndices(src, 'blocks.push(').length,
+          'PS-47 装置：openai-completions "blocks.push(" 不足 3 处——block 创建点形态变化，复核 pi-ai',
+        ).toBeGreaterThanOrEqual(3)
         for (const [push, start] of pairs) {
           for (const idx of allIndices(src, push)) {
             const after = src.slice(idx, idx + 120)

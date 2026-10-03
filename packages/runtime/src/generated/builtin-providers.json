@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-03T12:18:58.942Z",
+  "generatedAt": "2026-10-03T14:26:51.222Z",
   "piAiVersion": "1.0.0",
   "catalogGeneratedAt": 1790881031882,
   "providerCount": 42,
@@ -16198,7 +16198,14 @@
           "authorize": "https://auth.openai.com/api/accounts/authorize",
           "token": "https://auth.openai.com/api/accounts/oauth/token"
         },
-        "scopes": [],
+        "scopes": [
+          "openid",
+          "profile",
+          "email",
+          "offline_access",
+          "resource.invoke",
+          "chatgpt.tokens.use.direct"
+        ],
         "callbackPort": 1455
       },
       "modelCount": 44,
@@ -34531,7 +34538,10 @@
         "noClientId": false,
         "flow": "device",
         "endpoints": {},
-        "scopes": [],
+        "scopes": [
+          "gateway",
+          "offline_access"
+        ],
         "callbackPort": 1456
       },
       "modelCount": 28,

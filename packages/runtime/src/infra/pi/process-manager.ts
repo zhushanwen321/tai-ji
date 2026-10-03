@@ -264,8 +264,9 @@ export class ProcessManager implements IProcessManager {
    *
    * 附着经 switchSession RPC 而非 `pi --session <file>` CLI flag——RpcClient 的 spawn
    * 参数面（rpc-client.ts）不在本 wave 改动范围，switchSession 是既有附着原语
-   * （restoreSession 同款）。spawn 时 pi 先建内存新 session（首条 assistant 前不落盘，
-   * 规则 #6），switchSession 切走后即弃，sessions 目录零残留。
+   * （restoreSession 同款）。spawn 时 pi 先建内存新 session（user/assistant 首消息前
+   * 不落盘，规则 #6——pi 1.0.0 起 user 首消息即建文件），switchSession 切走后即弃，
+   * sessions 目录零残留。
    *
    * 失败语义：spawn 失败 / 就绪超时 / fn 抛错一律 rethrow（进程在 finally 销毁），
    * 调用方（如 renameSession 非活跃分支）按既有失败路径报错、保留旧值可重试。

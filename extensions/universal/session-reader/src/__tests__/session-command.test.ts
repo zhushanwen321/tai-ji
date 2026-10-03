@@ -207,8 +207,10 @@ describe('createSessionCommand - handler select 流程', () => {
 
     const cmd = createSessionCommand(() => cwdSessionDir)
     const { ctx, select, setEditorText } = makeFakeCtx()
-    // 用户选中 ID2 那一项。pi 1.0.0 起 listAll 并发加载在 modified 相同时不保文件序
-    // （0.84.4 按 index 写回稳定，1.0.0 按完成序）——不硬编码下标，按 label 中的短 uuid
+    // 用户选中 ID2 那一项。pi 1.0.0 起 listSessionsFromDir 对文件名倒序预排序
+    // （files.sort((a,b) => b.localeCompare(a))，session-manager.js），同 modified 下
+    // a.jsonl/b.jsonl 的顺序与 0.84.4（readdir 字母序、无预排序）相反——listAll 本身
+    // 仍保序（mapWithConcurrency 按 index 写回）。不硬编码下标，按 label 中的短 uuid
     // 定位目标项（消歧后缀保证了可定位性，这正是 MF-2 的承重点）
     select.mockImplementation(async (_title: string, options: string[]) => {
       const target = options.find((o) => o.includes(ID2.slice(0, 8)))

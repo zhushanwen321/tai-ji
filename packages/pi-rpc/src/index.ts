@@ -9,6 +9,7 @@
 export type {
   PiMessage,
   PiEventListener,
+  PiInputDisposition,
   StreamingBehavior,
 } from './types.ts'
 
