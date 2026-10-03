@@ -70,6 +70,13 @@ export interface StartupBackgroundDeps {
    */
   startIdleReaper?: () => void
   /**
+   * 产物目录保留期扫描（chat-html-support §6.7 D7 回收②）：启动扫 + 每日复扫定时器。
+   * 可选成员保证既有测试构造点不破；undefined = 跳过（行为不变）。装配 = runtime 会话服务
+   * 的 `startArtifactRetention`（services/session/artifact-retention.ts），由组合根注入——
+   * 本模块只在后台序列 ⑪ 触发一次。
+   */
+  startArtifactRetention?: () => void
+  /**
    * 孤儿收殓完成 promise 交付回调（crash-forensics-and-watchdog D3，u5）。定时器调度后
    * 同步调用一次，参数 = 「5s 延迟 + 孤儿 pi 收殓 + 后台任务收殓」全链 settle 的 promise
    * （永不 reject——既有 catch 链尾部 resolve）。消费方 = reattach 编排（live 孤儿未收割完
@@ -280,6 +287,18 @@ export async function runStartupBackgroundInit(deps: StartupBackgroundDeps): Pro
     // eslint-disable-next-line taste/no-silent-catch -- best-effort：闭包装配错误仅 warn，不阻塞启动序列（reaper 缺席 = 现状行为，下轮重启重试）
     } catch (e) {
       console.warn('[runtime] idle pi reaper start failed:', e)
+    }
+  }
+
+  // ⑪ 产物目录保留期扫描（chat-html-support §6.7 D7 回收②）：启动扫 + 每日复扫定时器
+  // （节奏照搬 main 侧 log-retention.ts 模式，落点在 runtime 会话服务）。同步返回无异步面，
+  // 定时器 unref；单次扫描异常在闭包内消化。缺省（undefined）= 跳过（行为不变）。
+  if (deps.startArtifactRetention) {
+    try {
+      deps.startArtifactRetention()
+    // eslint-disable-next-line taste/no-silent-catch -- best-effort：保留期扫描失败仅 warn，不阻塞启动序列（残留仅是磁盘垃圾，下拍/下次启动重试）
+    } catch (e) {
+      console.warn('[runtime] artifact retention start failed:', e)
     }
   }
 
