@@ -13,7 +13,10 @@
  * - **⌃`**（主进程 before-input-event 窗口级 → 'shortcut' type='toggle-bottom-drawer'）：
  *   isImeComposing 守卫 → toggleBottomDrawer()（浮层开着照常切换——§5.1 规则 3）。
  * - **Tab 焦点陷阱**（浮层分支）：浮层开着时 Tab 首末循环（§7.3 随迁保位，W2 随 OverlayShell
- *   归位）；面板 ref 经 overlay 宿主注入（overlay-focus-trap）。
+ *   归位）；面板 ref 经 overlay 宿主注入（overlay-focus-trap）。**Tab 属主 = 最上层表面**
+ *   （2026-10-03 用户裁决）：模态/弹层叠在浮层上时 Tab 归该模态焦点域——先行档已消费
+ *   （defaultPrevented）+ 聚合让位（anyModalSurfaceYieldsEsc，与 Esc 分支同源）双检后陷阱
+ *   不动作，不把焦点拉回浮层面板。
  *
  * 让位数据源 = 模态表面聚合（modal-surface-registry，u-w1-agg）：动作时刻直读，注册方
  * 无权自带旗标；注册序前提 = 本监听在 AppShell 根 setup 首位注册（FIFO 同相位先于任何
@@ -45,6 +48,12 @@ function onWindowKeydown(e: KeyboardEvent): void {
     return
   }
   if (e.key === 'Tab' && getOverlayControlState().isOpen) {
+    // Tab 属主 = 最上层表面（2026-10-03 用户裁决；登记 docs/todo/display-containers-overlay-tab-ownership.md）：
+    // 模态/弹层叠在浮层上 → Tab 归该模态焦点域，陷阱不把焦点拉回浮层面板。
+    // 双检与 Esc 分支同源（§6.7 模态共存守卫）：先行档消费方已消费（defaultPrevented）→
+    // 不动作；聚合让位族（yieldsEsc）任一成员开着 → 不动作（Tab 先服务视觉最外层）。
+    if (e.defaultPrevented) return
+    if (anyModalSurfaceYieldsEsc()) return
     trapTabIntoOverlayPanel(e)
   }
 }
