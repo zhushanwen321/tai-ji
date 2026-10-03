@@ -104,8 +104,9 @@ describe('terminal 协议契约', () => {
   it('TerminalEnvelopeCode 覆盖业务码 + 实例路由码 + 兜底', () => {
     const codes: TerminalEnvelopeCode[] = [
       'spawn_failed', 'not_found', 'resize_failed', 'kill_failed',
-      'unknown_terminal_id', 'terminal_id_session_mismatch', 'terminal_failed',
+      'unknown_terminal_id', 'terminal_id_session_mismatch', 'terminal_id_required',
+      'terminal_failed',
     ]
-    expect(codes).toHaveLength(7)
+    expect(codes).toHaveLength(8)
   })
 })

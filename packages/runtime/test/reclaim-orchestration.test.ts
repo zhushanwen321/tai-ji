@@ -497,7 +497,7 @@ describe('SessionService 编排集成（D6-2 / R4 / D5）', () => {
     await expect(ensurePromise).rejects.toThrow(/Persisted session/)
     // 无二次销毁：全程 destroySession 恰 1 次（restore 的 existing 清场对已摘除条目 no-op）
     expect(pm.destroySession).toHaveBeenCalledTimes(1)
-    // 死亡汇聚点全程未触发（bus.clearSession/destroyPty/didDestroy 家族均无入口）
+    // 死亡汇聚点全程未触发（bus.clearSession/destroySessionPties/didDestroy 家族均无入口）
     expect(destroyedHandler).not.toHaveBeenCalled()
     expect(seat.isHeld('s-1')).toBe(false)
   })

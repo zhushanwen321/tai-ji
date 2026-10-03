@@ -15,7 +15,7 @@
  *
  * 状态性质（ADR-0049「全局 sid 协调器例外类」）：模块级单例、无 Vue setup 上下文、
  * 方法显式接收 terminalId、alive 镜像非业务数据。生命周期 = 应用进程；会话销毁 / 世代
- * 变更时经显式清理入口（unregisterInstanceBySession / __resetTerminalInstanceRegistryForTest）。
+ * 变更时经显式清理入口（unregisterInstanceBySession / resetTerminalInstanceRegistry）。
  */
 import { reactive } from 'vue'
 
@@ -42,6 +42,11 @@ export function terminalIdPrefixOf(sessionId: string): string {
 /**
  * 精确前缀匹配（设计 §0.5 P7）：`term:<sid>:` 之后必须是纯数字序号段。
  * 负例：sid 含冒号时 `term:a:` 不匹配键 `term:a:1:1`（序号段为 `1:1` 非纯数字）。
+ *
+ * **参数顺序口径（跨包同名函数防错序的唯一抓手）**：`(terminalId, sessionId)`——被查编号在前、
+ * 归属会话在后，与本包全部调用点及 runtime 同名函数（terminal-service.ts）显式一致。
+ * 两包无编译期约束，顺序一致是调用点传错序时能被读出的唯一信号（两参数同为 string，
+ * 传反不报错、静默恒 false）——改动本签名须同步 runtime 同名函数与全部调用点。
  */
 export function isTerminalIdOfSession(terminalId: string, sessionId: string): boolean {
   const prefix = terminalIdPrefixOf(sessionId)
@@ -175,11 +180,19 @@ export function unregisterInstanceBySession(sessionId: string): void {
   delete registry.activeBySession[sessionId]
 }
 
-// ── 测试专用 hooks（生产代码禁止调用，参照 useTerminal __reset 先例）──────────
-
-/** 测试专用：清空注册表（全量）。 */
-export function __resetTerminalInstanceRegistryForTest(): void {
+/**
+ * 清空注册表全量（世代变更失效重置的必需动作，生产路径 resetTerminalDomain 调用；
+ * 会话维度的关闭沿删条用 unregisterInstanceBySession）。清空后由重建链按 runtime 清单恢复。
+ */
+export function resetTerminalInstanceRegistry(): void {
   for (const key of Object.keys(registry.byId)) delete registry.byId[key]
   for (const key of Object.keys(registry.orderBySession)) delete registry.orderBySession[key]
   for (const key of Object.keys(registry.activeBySession)) delete registry.activeBySession[key]
+}
+
+// ── 测试专用 hooks（生产代码禁止调用，参照 useTerminal __reset 先例）──────────
+
+/** 测试专用：清空注册表（全量）——与生产重置共用同一实现。 */
+export function __resetTerminalInstanceRegistryForTest(): void {
+  resetTerminalInstanceRegistry()
 }

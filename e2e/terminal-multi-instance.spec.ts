@@ -6,7 +6,8 @@
  *
  * - T1 双终端并行（脚本化部分）：⌃`/StatusBar 开底部抽屉 → 「终端 1」→ 「+」→ 两条目 →
  *   两实例各自跑命令并断言**输出**可见 → 切换来回各自历史在屏（分区隔离）
- * - T2 关闭隔离：关第二个实例 → 条目恢复 1 个、关闭按钮回禁用态、终端 1 仍可写（进程存活）
+ * - T2 关闭隔离：关第二个实例 → 条目恢复 1 个、关闭按钮回禁用态、终端 2 的 PTY shell 进程
+ *   消失（真机进程级断言）、焦点落相邻的终端 1（activeElement 断言）、终端 1 仍可写（进程存活）
  * - T4 会话级联：多实例会话 → `session.delete` → runtime 实例清单空 + PTY shell 进程消失
  *   （进程级断言，无孤儿）；本 spec 未覆盖的会话删除 UI 交互归 D3 verify 剧本
  * - T8 序号不复用：关「终端 2」→「+」→ 新条目序号为 3、输出区空白
@@ -21,8 +22,9 @@
  *   前提 P3 已由 u0-probe 探针核实成立）
  * - T6 幂等防御 / T7 最后实例保护 / T11 同世代闪断 / T12 非世代广播沿：L1 单测
  *   （u1 runtime 协议测试 + u3-bar 组件测试 + u2「世代与对账」测试）
- * - T1/T2 的「三腿资源释放 / 滞留命令提示 / 焦点落相邻」与 T10 的 write-queue 重置
- *   细节：artefact 单测承载（impl-plan §4.4），本轨只锚用户可见面
+ * - T1/T2 的「三腿资源释放 / 滞留命令提示」与 T10 的 write-queue 重置细节：artefact 单测
+ *   承载（impl-plan §4.4）；「焦点落相邻」在 T2 做真机 activeElement 断言（impl-plan §4.4
+ *   A2 明列的 L3 可脚本化判据），不由单测承载
  *
  * 运行（开发阶段按改动范围空载串行，禁全量扫跑——项目 AGENTS.md e2e 执行准则）：
  *   VITE_E2E=true pnpm run build:e2e   # real renderer bundle（不带 VITE_MOCK）
@@ -234,7 +236,7 @@ async function expectTerminalTextExcludes(page: Page, marker: string): Promise<v
     .not.toContain(marker)
 }
 
-// ── 进程级 helper（T4 / T10）────────────────────────────────────────────
+// ── 进程级 helper（T2 / T4 / T10）──────────────────────────────────────────
 
 /** 监听指定端口的进程 pid（runtime = WS server）。空数组 = 未找到。 */
 function pidsListeningOnPort(port: number): number[] {
@@ -272,6 +274,25 @@ function ptyShellPids(runtimePid: number): number[] {
     return []
   }
   return children.filter((pid) => /(?:^|[\s/-])(?:zsh|bash|sh)(?:\s|$)/.test(commandOfPid(pid)))
+}
+
+/**
+ * 轮询等 runtime 的 PTY shell 子进程数达到期望值，返回末次采样的 pid 列表。
+ * spawn 后 forkpty 建 shell 与 ack / 条目建立之间有极短窗口，立即读会漏采（漏采会让
+ * 「进程消失」断言证明力不足——本 helper 是 T2 实例归属与 T4 全杀断言的共同前置）。
+ */
+async function waitForPtyShellCount(runtimePid: number, count: number): Promise<number[]> {
+  let pids: number[] = []
+  await expect
+    .poll(
+      () => {
+        pids = ptyShellPids(runtimePid)
+        return pids.length
+      },
+      { timeout: INSTANCE_SETTLE_TIMEOUT_MS, intervals: [100, 200, 500, 1000] },
+    )
+    .toBe(count)
+  return pids
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -360,7 +381,7 @@ test('T1: 双终端并行——「+」新建第二实例、两实例各自输出
 
 // ── T2 关闭隔离（+ T7 最后实例关闭按钮禁用态）────────────────────────────
 
-test('T2: 关闭隔离——关第二实例后条目回 1、关闭按钮禁用、终端 1 进程存活可继续写', async () => {
+test('T2: 关闭隔离——关第二实例后其进程消失、条目回 1、关闭按钮禁用、焦点落终端 1', async () => {
   const skip = mockBundleSkipReason()
   test.skip(skip !== null, skip ?? '')
   test.setTimeout(180_000)
@@ -371,12 +392,23 @@ test('T2: 关闭隔离——关第二实例后条目回 1、关闭按钮禁用�
     // 终端 1 留下历史输出
     await runInTerminal(h.page, T1_A.cmd)
     await expectTerminalOutput(h.page, T1_A.out)
+
+    // 进程级锚准备（设计 §4 T2「终端 2 进程消失、终端 1 的进程存活」）：runtime 是 PTY shell
+    // 的直接父进程；此刻只有终端 1 的 shell，先记下它作「未被波及」的对照（新建前后差集即
+    // 终端 2 的 shell，不靠命令行文本归属）。
+    const runtimePid = runtimePidOnPort(h.port)
+    const [pid1] = await waitForPtyShellCount(runtimePid, 1)
+    if (pid1 === undefined) throw new Error('终端 1 的 PTY shell 子进程未出现（进程级锚准备失败）')
+
     // 终端 2 起一个长命令（关闭 = 杀进程）
     await createInstance(h.page)
     await expectInstanceCount(h.page, 2)
     const id2 = await terminalIdAt(h.page, 1)
     await selectInstance(h.page, 1, { excludeText: T1_A.out })
     await runInTerminal(h.page, 'sleep 300')
+
+    const pid2 = (await waitForPtyShellCount(runtimePid, 2)).find((pid) => pid !== pid1)
+    if (pid2 === undefined) throw new Error('终端 2 的 PTY shell 子进程未出现（进程级锚准备失败）')
 
     // 关闭终端 2 → 条目恢复 1 个
     await closeInstance(h.page, id2)
@@ -387,12 +419,28 @@ test('T2: 关闭隔离——关第二实例后条目回 1、关闭按钮禁用�
     // 「+」始终可用
     await expect(h.page.getByTestId('terminal-instance-create')).toBeEnabled()
 
-    // 终端 1 进程存活、输出连续：再跑一条命令仍有输出（关闭终端 2 未波及终端 1）
+    // 焦点规则（设计 §3.3「焦点规则」/ §4 T2「焦点落相邻实例」）：关掉右侧的终端 2 后焦点落
+    // 其右侧相邻（无右取左）= 仅剩的终端 1 的输入区（xterm helper textarea；impl-plan §4.4 A2
+    // 明列的 activeElement 断言在此落地）。
+    await expect(h.page.locator('[data-testid="terminal-xterm"] .xterm-helper-textarea')).toBeFocused({
+      timeout: INSTANCE_SETTLE_TIMEOUT_MS,
+    })
+
+    // 进程级断言（本轨的真机锚，补 u1 单测只验 mock pty.kill 调用的盲区）：终端 2 的 shell 进程
+    // 已消失，终端 1 的 shell 仍存活、PTY 集合恰好回到 1（关闭未波及终端 1）
+    await expect
+      .poll(() => isProcessAlive(pid2), { timeout: INSTANCE_SETTLE_TIMEOUT_MS, intervals: [200, 500, 1000] })
+      .toBe(false)
+    expect(isProcessAlive(pid1), '终端 1 的 shell 进程应存活（关闭终端 2 未波及）').toBe(true)
+    expect(await waitForPtyShellCount(runtimePid, 1)).toEqual([pid1])
+
+    // 终端 1 输出连续：再跑一条命令仍有输出
     await expectTerminalOutput(h.page, T1_A.out)
     await runInTerminal(h.page, T2_MARK.cmd)
     await expectTerminalOutput(h.page, T2_MARK.out)
 
-    // 关闭沿滞留命令提示 / 三腿资源释放细节由 u2 单测承载（impl-plan §4.4 A2），本轨只锚可见面
+    // 关闭沿滞留命令提示 / 三腿资源释放细节由 u2 单测承载（impl-plan §4.4 A2）；本轨锚用户可见面
+    // + 真机进程级（上）与 activeElement（上）两处 L3 判据
   } finally {
     await teardownHarness(h)
   }
@@ -410,10 +458,11 @@ test('T4: 会话级联——删除多实例会话后 runtime 实例清单空 + P
     await createInstance(h.page)
     await expectInstanceCount(h.page, 2)
 
-    // 会话删除前：记录 runtime 下的 PTY shell 进程
+    // 会话删除前：记录 runtime 下的 PTY shell 进程——两实例各一个，等第二个 shell 也起来
+    // 再采集（只捕到部分 shell 会让下面的「全杀」断言证明力不足）
     const runtimePid = runtimePidOnPort(h.port)
-    const shellPids = ptyShellPids(runtimePid)
-    expect(shellPids.length, '双实例会话应至少有 1 个 PTY shell 子进程').toBeGreaterThanOrEqual(1)
+    const shellPids = await waitForPtyShellCount(runtimePid, 2)
+    expect(new Set(shellPids).size, '双实例会话应有两个各不相同的 PTY shell 子进程').toBe(2)
 
     // 删除会话（WS 直连等效业务动作；UI 右键删除路径归 D3 verify 剧本）
     const reply = await wsRoundTrip(h.port, { type: 'session.delete', id: 't4-del', payload: { sessionId } }, 't4-del')

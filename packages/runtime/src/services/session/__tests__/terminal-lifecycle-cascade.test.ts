@@ -208,8 +208,9 @@ describe('u4 ③序列常量与 index.ts 打点序列一致（源码级机械对
     expect(callIdx - stepIdx).toBeLessThan(400)
   })
 
-  it('会话删除回调改调 destroySessionPties（不再用旧名 destroyPty 切链）', () => {
+  it('会话删除回调调 destroySessionPties（唯一会话维度回收入口，不残留 destroyPty 旧名）', () => {
     expect(source).toContain('terminalService.destroySessionPties(sid)')
+    // destroyPty 旧名已从 port/实现整体删除；本断言防其以过渡态名义回流
     expect(source).not.toMatch(/terminalService\.destroyPty\(sid\)/)
   })
 })

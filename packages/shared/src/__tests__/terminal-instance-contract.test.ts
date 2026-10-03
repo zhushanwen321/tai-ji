@@ -8,7 +8,7 @@
  * - 缺编号防御帧集合 = {write, resize, kill, attach}（类型上不可构造合法载荷，见 @ts-expect-error，
  *   由 `pnpm -C packages/shared typecheck`（tsc --noEmit）实检）
  * - spawn ack 回包携分配/复用的 terminalId；list ack 携实例清单；ack 无 terminalId 路由字段
- * - 两个路由错误码互斥；TerminalInstanceSummary 必填字段齐全
+ * - 三个路由错误码互斥（仅 unknown_terminal_id 触发回收）；TerminalInstanceSummary 必填字段齐全
  *
  * 运行：pnpm -C packages/shared test
  */
@@ -122,11 +122,14 @@ describe('terminal ack 回包与实例清单（设计 §3.3）', () => {
 })
 
 describe('terminal 路由错误码（设计 §3.3）', () => {
-  it('两个路由错误码互斥（值不等、集合恰两码）', () => {
+  it('三个路由错误码互斥（值两两不等、集合恰三码）且仅 unknown_terminal_id 触发回收', () => {
     const unknown: TerminalRoutingErrorCode = 'unknown_terminal_id'
     const mismatch: TerminalRoutingErrorCode = 'terminal_id_session_mismatch'
-    expect(unknown).not.toBe(mismatch)
-    const all: TerminalRoutingErrorCode[] = ['unknown_terminal_id', 'terminal_id_session_mismatch']
-    expect(new Set(all).size).toBe(2)
+    const required: TerminalRoutingErrorCode = 'terminal_id_required'
+    expect(new Set([unknown, mismatch, required]).size).toBe(3)
+    // 缺编号畸形帧的拒绝码独立于「注册成员资格的否定回执」——后者是 renderer 关闭沿
+    // 三腿回收的唯一判据（设计 §3.3：回收只由否定回执触发）
+    expect(required).not.toBe(unknown)
+    expect(mismatch).not.toBe(unknown)
   })
 })

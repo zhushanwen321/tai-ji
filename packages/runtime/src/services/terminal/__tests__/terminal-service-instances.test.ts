@@ -3,7 +3,7 @@
  *
  * 覆盖验收条款：同会话两次新建编号 1/2 且关闭后不复用（T8 语义）、交叉校验独立码、
  * listInstances 会话范围钉死 + 含冒号 sid 负例（T13 语义、设计 §0.5 P7）、
- * destroySessionPties / destroyAllPties / destroyPty 会话维度全实例杀（T4 语义）、
+ * destroySessionPties / destroyAllPties 会话维度全实例杀（T4 语义）、
  * spawn 指定形态（存活幂等 / 不存在 unknown_terminal_id）。
  *
  * mock 策略：vi.mock('node-pty')（同 terminal-service.test.ts 范式），configService 注入固定
@@ -180,8 +180,53 @@ describe('TerminalService.listInstances（范围钉死被查询会话）', () =>
     expect(svc.listInstances('a:1')).toEqual([{ terminalId: colon, alive: true }])
     expect(svc.listInstances('a:1').map((i) => i.terminalId)).not.toContain(plain)
 
-    // 正向：sid 'a' 的清单仍持有自己的实例
-    expect(svc.listInstances('a')).toContainEqual({ terminalId: plain, alive: true })
+    // 负例断言：查询 sid 'a'（外层）不得命中 sid 'a:1' 的内层实例键 term:a:1:1
+    //（序号段 `1:1` 非纯数字——仅做 startsWith(prefix) 会误纳，此处为口径守卫的核心断言）
+    expect(svc.listInstances('a').map((i) => i.terminalId)).not.toContain(colon)
+    // 正向：sid 'a' 的清单恰好只有自己的实例（正反合并为精确断言）
+    expect(svc.listInstances('a')).toEqual([{ terminalId: plain, alive: true }])
+  })
+
+  it('MI-6b: destroySessionPties 同口径——含冒号 sid 不误杀他会话实例', async () => {
+    const svc = createService()
+    await svc.spawn('a', undefined, 80, 24) // term:a:1
+    await svc.spawn('a:1', undefined, 80, 24) // term:a:1:1
+    const [plainPty, colonPty] = mockPtys
+
+    svc.destroySessionPties('a')
+
+    expect(plainPty!.kill).toHaveBeenCalled()
+    // 前缀开关会误杀 term:a:1:1，序号段校验后不误杀
+    expect(colonPty!.kill).not.toHaveBeenCalled()
+    expect(svc.listInstances('a')).toEqual([])
+    expect(svc.listInstances('a:1')).toEqual([{ terminalId: 'term:a:1:1', alive: true }])
+  })
+
+  it('MI-6c: 交叉校验同口径——sid `a` 持有 sid `a:1` 的键 `term:a:1:1` 判 mismatch（不误路由写入）', async () => {
+    const svc = createService()
+    await svc.spawn('a', undefined, 80, 24) // term:a:1
+    await svc.spawn('a:1', undefined, 80, 24) // term:a:1:1
+    const [, colonPty] = mockPtys
+
+    // 裸 startsWith(`term:a:`) 会放行本帧、在注册表命中 sid `a:1` 的存活实例并写入；
+    // 交叉校验改走「前缀 + 序号段」后必须拒绝（序号段 `1:1` 非纯数字）
+    let mismatch: unknown
+    try {
+      svc.write('a', 'term:a:1:1', 'x')
+    } catch (e) {
+      mismatch = e
+    }
+    expect(mismatch).toMatchObject({ code: 'terminal_id_session_mismatch' })
+    expect(colonPty!.write).not.toHaveBeenCalled()
+
+    // 正向：键归属会话正确时仍可达（口径收紧不影响合法路由）
+    svc.write('a:1', 'term:a:1:1', 'ok')
+    expect(colonPty!.write).toHaveBeenCalledWith('ok')
+
+    // spawn 指定形态走同一交叉校验路径：同样拒绝且不误判 unknown
+    await expect(svc.spawn('a', undefined, 80, 24, 'term:a:1:1')).rejects.toMatchObject({
+      code: 'terminal_id_session_mismatch',
+    })
   })
 })
 
@@ -216,18 +261,5 @@ describe('TerminalService 生命周期回收 API', () => {
     expect(svc.listInstances('sess-b')).toEqual([])
     // 幂等：无实例时再次调用不抛
     expect(() => svc.destroyAllPties()).not.toThrow()
-  })
-
-  it('MI-9: destroyPty 仍可调用，语义 = 会话维度全实例杀', async () => {
-    const svc = createService()
-    await svc.spawn('sess-a', undefined, 80, 24)
-    await svc.spawn('sess-a', undefined, 80, 24)
-    const [aPty1, aPty2] = mockPtys
-
-    svc.destroyPty('sess-a')
-
-    expect(aPty1!.kill).toHaveBeenCalled()
-    expect(aPty2!.kill).toHaveBeenCalled()
-    expect(svc.listInstances('sess-a')).toEqual([])
   })
 })

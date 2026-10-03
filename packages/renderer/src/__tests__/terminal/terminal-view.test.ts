@@ -9,7 +9,7 @@
  * 三视角（规则 5-8）：
  * - 观察者：DOM 渲染（terminal-view / terminal-xterm / toolbar / 实例切换条）
  * - 使用者：交互（clear / kill / 切换实例 / 关闭实例）
- * - 构建者：mount 后对账 + 自动新建；切换实例后焦点落当前实例输入区
+ * - 构建者：mount 后对账 + 自动新建（首挂载不夺焦）；切换实例后焦点落当前实例输入区
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/terminal/terminal-view.test.ts
  */
@@ -174,6 +174,70 @@ describe('TerminalView 实例激活（构建者视角）', () => {
     expect(useTerminalMock.reconcileInstances).toHaveBeenCalledTimes(1)
     expect(useTerminalMock.spawnTerminal).toHaveBeenCalledTimes(1)
     expect(useTerminalMock.spawnTerminal.mock.calls[0]![0]).toBe('/tmp/test-cwd')
+  })
+
+  it('TV-13: 首挂载自动新建（ack 异步建档落位）不夺焦（设计目标 5：开面板体感不变）', async () => {
+    // 生产时序：spawn RPC 异步往返，ack 建档晚于挂载轮——用受控 deferred 复现该时序
+    const deferred: { resolve?: (terminalId: string) => void } = {}
+    useTerminalMock.spawnTerminal.mockImplementation(
+      () => new Promise<string>((resolve) => { deferred.resolve = resolve }),
+    )
+    wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
+    await flushPromises() // 挂载轮（对账 → 发起自动新建）完成
+
+    activeRef.value = 'term:test-session:1' // ack 建档：active 落位
+    deferred.resolve?.('term:test-session:1')
+    await flushPromises()
+
+    // 实例 xterm 已建立，但首挂载建档沿不落焦（非用户手势）
+    expect(xtermInstances.length).toBeGreaterThan(0)
+    for (const inst of xtermInstances) expect(inst.focus).not.toHaveBeenCalled()
+  })
+
+  it('TV-14: 面板先以 sessionId=null 挂载、后经 loadSession 绑上会话 → 绑定轮不夺焦，绑定完成后切换实例按焦点规则落新实例输入区', async () => {
+    // 真实路径：stores/panel.ts initialLeaf.sessionId=null → loadSession(null)（面板先挂载）
+    // → 后续 loadSession(sid) 绑上会话（prop 变化）。
+    const w = mount(TerminalView, { props: { sessionId: null }, attachTo: document.body })
+    wrapper = w
+    await flushPromises()
+    expect(useTerminalMock.reconcileInstances).not.toHaveBeenCalled()
+
+    // 受控 deferred 复现 ack 异步建档落位（spawn RPC 往返晚于绑定轮）
+    const deferred: { resolve?: (terminalId: string) => void } = {}
+    useTerminalMock.spawnTerminal.mockImplementation(
+      () => new Promise<string>((resolve) => { deferred.resolve = resolve }),
+    )
+
+    // 绑上会话（loadSession → sessionId prop 变化）：对账 → 自动新建（ack 挂起）
+    await w.setProps({ sessionId: 'test-session' })
+    await flushPromises()
+    expect(useTerminalMock.reconcileInstances).toHaveBeenCalledTimes(1)
+
+    // ack 建档落位：实例清单 + active 落位
+    instancesRef.value = [{ terminalId: 'term:test-session:1', seq: 1, alive: true }]
+    activeRef.value = 'term:test-session:1'
+    deferred.resolve?.('term:test-session:1')
+    await flushPromises()
+
+    // 绑定轮内不夺焦（首挂载语义，设计目标 5）
+    expect(xtermInstances.length).toBeGreaterThan(0)
+    for (const inst of xtermInstances) expect(inst.focus).not.toHaveBeenCalled()
+
+    // 绑定完成（ack 建档、可写）→ 交互门置位：用户手势切换实例 → 焦点落新显示实例
+    // （未置位时本条必红：watcher 因 interactive=false 不调 focus）
+    instancesRef.value = [
+      { terminalId: 'term:test-session:1', seq: 1, alive: true },
+      { terminalId: 'term:test-session:2', seq: 2, alive: true },
+    ]
+    await flushPromises()
+    const items = document.body.querySelectorAll('[data-testid="terminal-instance-item"]')
+    expect(items).toHaveLength(2)
+    ;(items[1] as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    expect(useTerminalMock.selectInstance).toHaveBeenCalledWith('term:test-session:2')
+    const xterm = xtermInstances[xtermInstances.length - 1]!
+    expect(xterm.focus).toHaveBeenCalled()
   })
 
   it('TV-4: 对账清单非空 → 不自动新建（复用后台存活实例）', async () => {

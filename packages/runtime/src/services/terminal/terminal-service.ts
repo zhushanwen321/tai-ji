@@ -11,7 +11,7 @@
  * 3. write/resize/kill/attach：按实例编号转发（实例不存在 = unknown_terminal_id 明确错误，
  *    退役「静默 no-op」语义）
  * 4. 会话级序号计数器（单次 runtime 生命周期内单调递增、实例关闭后不回填，设计 §2.3 不变量①）
- * 5. destroySessionPties / destroyAllPties / destroyPty：实例回收
+ * 5. destroySessionPties / destroyAllPties：实例回收
  *
  * shell 解析（Phase 6）：
  *   config.terminal.json 的 shell 字段（deps.configService 注入）→ fallback 登录 shell
@@ -19,8 +19,10 @@
  *   仅对新 spawn 的 PTY 生效。
  *
  * 错误模式：扁平 `Object.assign(new Error(msg), { code })`（仿 worktree-service），
- * code 为 TerminalErrorCode：未知实例 = unknown_terminal_id，会话段不一致 =
- * terminal_id_session_mismatch（两码互斥，见设计 §3.3「网络消息」末条）。
+ * code 为 TerminalErrorCode：未知实例 = unknown_terminal_id（否定回执），会话段不一致 =
+ * terminal_id_session_mismatch（交叉校验拒绝）；两者与 handler 发出的 terminal_id_required
+ * （畸形帧拒绝）构成路由三码，只有 unknown_terminal_id 触发 renderer 关闭沿回收
+ * （见设计 §3.3「网络消息」末条）。
  *
  * 日志：直接用 console.*（initLogger 已 patch 全局，tee 到文件，见架构约定 #4）。
  */
@@ -61,11 +63,24 @@ function terminalError(code: string, message: string): Error {
 
 /**
  * 实例编号的会话段前缀（精确前缀枚举口径，设计 §0.5 P7）：
- * 判归属 / 枚举 / 交叉校验一律用 `startsWith(prefix)`，**禁按冒号切分取段**——
+ * 判归属 / 枚举 / 交叉校验一律用前缀 + 序号段校验，**禁按冒号切分取段**——
  * 该口径仅在 sid 域不含冒号时无歧义（否则 `term:a:` 会吞 sid 为 `a:1` 的键）。
  */
 function sessionPrefix(sid: string): string {
   return `term:${sid}:`
+}
+
+/**
+ * terminalId 是否属于会话 sid：前缀命中后序号段必须是纯数字（设计 §0.5 P7 精确前缀口径）。
+ * 负例：sid `a` 不误纳键 `term:a:1:1`（序号段 `1:1` 非纯数字，实属 sid `a:1` 的实例）。
+ * 与 renderer `isTerminalIdOfSession` / core `terminal-write-queue.removeSession` 同口径。
+ * 参数顺序（terminalId 在前、sessionId 在后）与 renderer 同名函数显式对齐——跨包同名函数
+ * 无编译期约束，顺序一致是调用点防错序的唯一抓手（两包参数顺序相反时调用点极易静默错序）。
+ */
+function isTerminalIdOfSession(terminalId: string, sessionId: string): boolean {
+  const prefix = sessionPrefix(sessionId)
+  if (!terminalId.startsWith(prefix)) return false
+  return /^\d+$/.test(terminalId.slice(prefix.length))
 }
 
 /** 把 Error 序列化为 plain object，避免 logger 的 JSON.stringify 把 Error 实例变成 {}。
@@ -243,12 +258,11 @@ export class TerminalService implements ITerminalService {
   }
 
   listInstances(sid: string): TerminalInstanceSummary[] {
-    const prefix = sessionPrefix(sid)
     const instances: TerminalInstanceSummary[] = []
     for (const terminalId of this.ptyMap.keys()) {
       // 精确前缀匹配（设计 §0.5 P7）：`term:<sid>:` 后必须紧邻序号——
       // 不做冒号切分取段，避免含冒号 sid 形态跨会话误匹配。
-      if (terminalId.startsWith(prefix)) {
+      if (isTerminalIdOfSession(terminalId, sid)) {
         instances.push({ terminalId, alive: true })
       }
     }
@@ -256,10 +270,10 @@ export class TerminalService implements ITerminalService {
   }
 
   destroySessionPties(sid: string): void {
-    const prefix = sessionPrefix(sid)
     const targets: Array<[string, pty.IPty]> = []
     for (const [terminalId, proc] of this.ptyMap) {
-      if (terminalId.startsWith(prefix)) targets.push([terminalId, proc])
+      // 与 listInstances 同口径（精确前缀 + 序号段）：sid 含冒号时不误杀他会话实例
+      if (isTerminalIdOfSession(terminalId, sid)) targets.push([terminalId, proc])
     }
     if (targets.length === 0) return
     console.log(`[terminal] destroySessionPties: sid=${sid} count=${targets.length}`)
@@ -275,14 +289,6 @@ export class TerminalService implements ITerminalService {
     for (const [terminalId, proc] of targets) {
       this.destroyInstance(terminalId, proc)
     }
-  }
-
-  /**
-   * 兼容旧名（u4 把 index.ts 调用点切到 destroySessionPties 前保留可编译可调用）。
-   * 多实例语义下 = 该会话**全实例**杀（不再只杀一个）。
-   */
-  destroyPty(sid: string): void {
-    this.destroySessionPties(sid)
   }
 
   /** 分配会话内下一个编号并推进计数器（实例关闭后不回填；分配即消耗，spawn 失败也不复用）。 */
@@ -309,7 +315,10 @@ export class TerminalService implements ITerminalService {
    * 回收）；会话段一致但不在注册表 → 返回 null（调用方按语义抛 unknown_terminal_id 或走幂等分支）。
    */
   private requireInstance(sid: string, terminalId: string): pty.IPty | null {
-    if (!terminalId.startsWith(sessionPrefix(sid))) {
+    // 交叉校验与判归属/枚举同口径（精确前缀 + 序号段校验），不用裸 startsWith：
+    // sid `a` 收到键 `term:a:1:1`（实属 sid `a:1`）时必须判 mismatch，裸前缀会放行后在
+    // 注册表命中他会话实例、被错误路由写入。
+    if (!isTerminalIdOfSession(terminalId, sid)) {
       throw terminalError(
         'terminal_id_session_mismatch',
         `terminalId session segment mismatch: terminalId=${terminalId} sessionId=${sid}`,
@@ -318,13 +327,15 @@ export class TerminalService implements ITerminalService {
     return this.ptyMap.get(terminalId) ?? null
   }
 
-  /** 回收单个实例：kill + 清注册表 + 清写失败标记 + SIGKILL 升级兜底（untracked）。 */
+  /**
+   * 回收单个实例：kill + 清注册表 + 清写失败标记 + SIGKILL 升级兜底（untracked）。
+   */
   private destroyInstance(terminalId: string, proc: pty.IPty): void {
     try {
       proc.kill()
     } catch (e) {
       // 进程已退出时 kill 抛错，紧接的 ptyMap.delete 会兜底清理，不阻塞销毁
-      console.error(`[terminal] destroyPty kill failed: terminalId=${terminalId}`, serializeError(e))
+      console.error(`[terminal] destroyInstance kill failed: terminalId=${terminalId}`, serializeError(e))
     }
     this.ptyMap.delete(terminalId)
     this.writeFailedReported.delete(terminalId)
@@ -332,7 +343,7 @@ export class TerminalService implements ITerminalService {
     // SIGTERM 被忽略时仍需升级（fd 残留与销毁原因无关）。此时注册表已删，升级 timer 不能靠
     // map 判活——untracked 模式下进程已退出时 kill 会抛错被吞（无害）；误杀风险不存在：
     // terminalId 永不复用，同 id 不会 re-spawn。
-    this.scheduleKillEscalation(terminalId, proc, 'destroyPty', { untracked: true })
+    this.scheduleKillEscalation(terminalId, proc, 'destroyInstance', { untracked: true })
   }
 
   /**

@@ -17,7 +17,8 @@
  *
  * 错误：TerminalService 用扁平错误模式（code 为 TerminalErrorCode）。
  * spawn 失败透传 spawn_failed；未知实例 = unknown_terminal_id；会话段不一致 =
- * terminal_id_session_mismatch（两码互斥，后者不触发 renderer 的幽灵回收）。
+ * terminal_id_session_mismatch；缺编号畸形帧 = terminal_id_required（三码互斥：仅
+ * unknown_terminal_id 是「注册成员资格的否定回执」、触发 renderer 幽灵回收，另两码走普通错误通道）。
  *
  * 注：terminal.data/exit/alive/writeFailed 是 service 层主动广播（不经 handler），handler 只处理 client→server 请求。
  */
@@ -115,9 +116,11 @@ export class TerminalMessageHandler {
   /**
    * 缺编号防御：对既有实例操作的帧缺 terminalId 时发明确错误并返回 true（调用方直接 return）。
    *
-   * 错误码取 `unknown_terminal_id`：缺编号的请求无法归属任何注册表成员（语义 = 「无此实例」的
-   * 否定回执的同族）；不取 `terminal_id_session_mismatch`（那码专属「会话段与请求会话不一致」
-   * 的交叉校验拒绝，语义不同）。
+   * 错误码取独立码 `terminal_id_required`：缺编号**不是**「注册成员资格的否定回执」（无编号可裁决），
+   * 复用 `unknown_terminal_id` 会让「非成员资格拒绝」在契约上等价于成员资格否定——renderer 的
+   * 平行守卫只按 code 分档，该组合正是设计 §3.3 明令禁止的（回收只由注册成员资格的否定回执触发）。
+   * 也不同于 `terminal_id_session_mismatch`（那码专属「会话段与请求会话不一致」的交叉校验拒绝）。
+   * 本码走普通错误通道，不触发 renderer 关闭沿三腿回收。
    */
   private rejectIfMissingTerminalId(
     ws: WsType,
@@ -126,7 +129,7 @@ export class TerminalMessageHandler {
     terminalId: string | undefined,
   ): boolean {
     if (typeof terminalId === 'string' && terminalId !== '') return false
-    this.ctx.sendError(ws, 'unknown_terminal_id', `${frame} 缺少 terminalId（既有实例操作帧必填；新建终端请用不带编号的 terminal.spawn）`, id)
+    this.ctx.sendError(ws, 'terminal_id_required', `${frame} 缺少 terminalId（既有实例操作帧必填；新建终端请用不带编号的 terminal.spawn）`, id)
     return true
   }
 

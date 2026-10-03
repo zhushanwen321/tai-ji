@@ -140,8 +140,14 @@ const hasSelection = view.hasSelection
 const selectionPos = view.selectionPos
 
 /**
- * 交互门：首挂载（含自动新建默认实例）不主动夺焦（保持改造前「开面板不夺焦」体感，
- * 设计目标 5）；进入交互态后的切换 / 关闭才按焦点规则落焦。
+ * 交互门：首轮激活（挂载轮 / 挂载后经 loadSession 绑上会话轮，两腿同语义）不主动夺焦
+ * （保持改造前「开面板不夺焦」体感，设计目标 5）；激活轮结束后由用户手势触发的
+ * 切换 / 关闭 / 守卫迁焦才按焦点规则落焦。
+ * 置位时序：见 activateSessionRound——轮内 await 完 spawn（含其后的 nextTick 屏障）才置 true，
+ * 使 ack 建档引起的 active 变化 watcher 先于置位消费，不被误判为「用户切换」。
+ * 两腿都须置位：面板可能先以 sessionId=null 挂载（stores/panel.ts initialLeaf）、随后
+ * loadSession 绑上会话——只在 onMounted 置位会让该路径的交互门永不打开，§3.3 焦点规则
+ * （切换落新实例 / 关闭落相邻）整体落空。
  */
 let interactive = false
 
@@ -178,16 +184,26 @@ function sendSelectionToAI(): void {
  */
 async function activateSession(): Promise<void> {
   const result = await terminal.reconcileInstances()
-  if (result.ok && result.count === 0) spawnWithFeedback()
+  // await 落定：激活轮内 ack 建档引起的 active 变化不被误判为「用户切换」（见 interactive 注释）
+  if (result.ok && result.count === 0) await spawnWithFeedback()
   view.syncView()
 }
 
-onMounted(async () => {
-  if (!props.sessionId) return
+/**
+ * 激活轮收口（挂载轮 / 挂载后绑定会话轮共用）：对账 → 必要时自动新建（含 ack 建档落位）→
+ * 同步视图，**轮末才开放交互门**。置位判据 = 「该会话的实例集合已落定（ack 建档、可写）」——
+ * 此后由用户手势触发的 active 变化（切换 / 关闭 / 守卫迁焦）才按焦点规则落焦。
+ */
+async function activateSessionRound(): Promise<void> {
   await nextTick()
   await activateSession()
   await nextTick()
   interactive = true
+}
+
+onMounted(async () => {
+  if (!props.sessionId) return
+  await activateSessionRound()
 })
 
 onBeforeUnmount(() => {
@@ -205,8 +221,9 @@ watch(
   () => props.sessionId,
   async (sid) => {
     if (!sid) return
-    await nextTick()
-    await activateSession()
+    // 挂载后绑定会话腿（sessionId=null → loadSession 绑上）：与挂载轮同语义收口，
+    // 轮末开放交互门，否则该路径交互门永不置位（见 interactive 注释）。
+    await activateSessionRound()
   },
 )
 </script>

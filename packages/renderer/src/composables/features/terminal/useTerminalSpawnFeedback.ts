@@ -34,18 +34,25 @@ export function useTerminalSpawnFeedback(
 ) {
   const spawnError = ref<string | null>(null)
 
-  /** 挂载自动新建：清错误态后 spawn，失败置 inline 错误条（不出现新条目）。 */
-  function spawnWithFeedback(): void {
+  /**
+   * 挂载自动新建：清错误态后 spawn，失败置 inline 错误条（不出现新条目）。
+   * 返回 spawn 落定（ack 建档 / 失败）即 resolve 的 promise——首挂载轮据此在置位交互门前
+   * 等 ack 建档落位（见 TerminalView.activateSession「首挂载不夺焦」）。
+   */
+  function spawnWithFeedback(): Promise<void> {
     spawnError.value = null
     const { cwd, cols, rows } = resolveDims()
-    void terminal.spawnTerminal(cwd, cols, rows).catch((e: unknown) => {
-      spawnError.value = e instanceof Error ? e.message : String(e)
-    })
+    return terminal.spawnTerminal(cwd, cols, rows).then(
+      () => undefined,
+      (e: unknown) => {
+        spawnError.value = e instanceof Error ? e.message : String(e)
+      },
+    )
   }
 
-  /** 错误条重试：清错误态后重发 spawn。 */
-  function retrySpawn(): void {
-    spawnWithFeedback()
+  /** 错误条重试：清错误态后重发 spawn（返回同上，供调用方等待落定）。 */
+  function retrySpawn(): Promise<void> {
+    return spawnWithFeedback()
   }
 
   /**

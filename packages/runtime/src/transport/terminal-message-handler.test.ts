@@ -1,7 +1,8 @@
 /**
  * TerminalMessageHandler 单元测试（terminal-multi-instance u1）。
  *
- * 覆盖验收条款：缺 terminalId 的 write / resize / kill / attach 四帧各自被拒（T6 语义）；
+ * 覆盖验收条款：缺 terminalId 的 write / resize / kill / attach 四帧各自被拒（T6 语义；
+ * 独立码 terminal_id_required，≠ unknown_terminal_id——后者是 renderer 回收幽灵条目的唯一判据）；
  * spawn 缺编号是合法新建形态（走新建路径，不拒）；terminal.list 路由 + ack 携实例清单；
  * 交叉校验独立码经既有错误通道透传（不触发回收的码不被 handler 改写）。
  *
@@ -27,7 +28,6 @@ function mockService(overrides?: Partial<ITerminalService>): ITerminalService {
     listInstances: () => [],
     destroySessionPties: () => {},
     destroyAllPties: () => {},
-    destroyPty: () => {},
     ...overrides,
   }
   // 包一层 vi.fn 便于断言（保留 ITerminalService 类型的形参/返回）
@@ -78,7 +78,7 @@ describe('TerminalMessageHandler 缺编号防御（write/resize/kill/attach 逐�
   ]
 
   for (const { type, payload } of missingFrames) {
-    it(`${type} 缺 terminalId → sendError（明确错误），不调 service`, async () => {
+    it(`${type} 缺 terminalId → sendError（terminal_id_required，独立于否定回执），不调 service`, async () => {
       const service = mockService()
       const ctx = mockContext(service)
       const handler = new TerminalMessageHandler(ctx)
@@ -89,10 +89,13 @@ describe('TerminalMessageHandler 缺编号防御（write/resize/kill/attach 逐�
       expect(ctx.sendError).toHaveBeenCalledTimes(1)
       expect(ctx.sendError).toHaveBeenCalledWith(
         ws,
-        'unknown_terminal_id',
+        'terminal_id_required',
         expect.stringContaining('缺少 terminalId'),
         'msg-1',
       )
+      // 缺编号不是「注册成员资格的否定回执」——不得复用 unknown_terminal_id（后者是 renderer
+      // 关闭沿三腿回收的唯一判据，设计 §3.3）
+      expect(ctx.sendError).not.toHaveBeenCalledWith(ws, 'unknown_terminal_id', expect.any(String), 'msg-1')
       expect(ctx.reply).not.toHaveBeenCalled()
     })
   }
@@ -106,10 +109,11 @@ describe('TerminalMessageHandler 缺编号防御（write/resize/kill/attach 逐�
 
     expect(ctx.sendError).toHaveBeenCalledWith(
       ws,
-      'unknown_terminal_id',
+      'terminal_id_required',
       expect.any(String),
       'msg-1',
     )
+    expect(ctx.sendError).not.toHaveBeenCalledWith(ws, 'unknown_terminal_id', expect.any(String), 'msg-1')
   })
 
   it('带 terminalId 的四帧正常转发', async () => {

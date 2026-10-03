@@ -54,6 +54,7 @@ import {
   isTerminalIdOfSession,
   listInstances,
   registerInstance,
+  resetTerminalInstanceRegistry,
   sessionIdOfTerminalId,
   seqOfTerminalId,
   setActiveTerminalId,
@@ -539,8 +540,8 @@ function resetTerminalDomain(): void {
   partitions.clear()
   flushListeners.clear()
   mapVersion.value += 1
-  // 注册表镜像
-  __resetTerminalInstanceRegistryForTest()
+  // 注册表镜像（生产重置入口；测试别名 __resetTerminalInstanceRegistryForTest 仅供测试）
+  resetTerminalInstanceRegistry()
   // ② write-queue 状态机（滞留命令丢弃；确有滞留才提示）
   const dropped = store.clearAll()
   if (dropped > 0) warnInputMayBeLost(pendingBearingInstance ?? '')

@@ -17,7 +17,7 @@
  * terminal 错误码只在本域消费，无需跨层 instanceof，扁平字段利于测试 toMatchObject。
  * 错误码联合见 shared TerminalEnvelopeCode（runtime ↔ renderer 契约 SSOT）。
  *
- * 生命周期挂钩：session 销毁（sessionService.onSessionDelete）→ destroyPty；
+ * 生命周期挂钩：session 销毁（sessionService.onSessionDelete）→ destroySessionPties；
  * runtime shutdown → destroyAllPties。
  * PTY 是 lazy spawn（首次打开 terminal tab 才创建），session 创建时不占进程。
  */
@@ -29,9 +29,14 @@ import type { TerminalInstanceSummary } from '@taiji/shared'
  * 失败模式（实现抛 Object.assign 错误，code 为 TerminalErrorCode）：
  * - spawn_failed：pty.spawn 失败（shell 不存在/无执行权限）
  * - unknown_terminal_id：操作的 terminalId 不在实例注册表（否定回执；renderer 据此回收幽灵条目）
- * - terminal_id_session_mismatch：terminalId 的会话段与请求 sessionId 不一致（交叉校验拒绝）——
- *   与 unknown_terminal_id **必须不同码**：同码会把仍存活实例误判为幽灵并触发关闭沿回收
+ * - terminal_id_session_mismatch：terminalId 的会话段与请求 sessionId 不一致（交叉校验拒绝）
+ * - terminal_id_required：既有实例操作帧缺 terminalId 的畸形帧拒绝（由 protocol 入口 handler 发出）
  * - resize_failed / kill_failed：对应 node-pty 操作失败（存量码保留）
+ *
+ * 路由三码的不变量：只有 unknown_terminal_id 是「注册成员资格的否定回执」，是 renderer 关闭沿
+ * 三腿回收的唯一判据（平行守卫只按 code 分档）。terminal_id_session_mismatch（交叉校验拒绝）
+ * 与 terminal_id_required（畸形帧拒绝）都走普通错误通道、不触发回收——同码会把仍存活实例
+ * 误判为幽灵并回收（条目消失、输出此后无人接收而进程继续跑）。
  *
  * 注意：写/调尺寸/杀/attach 对**不存在的实例**抛 unknown_terminal_id（退役「静默 no-op」语义，
  * 静默丢失正是重启后向死实例敲命令、输入无反馈消失的事故形态）。缺 terminalId 属畸形请求，
@@ -64,13 +69,13 @@ export interface ITerminalService {
   /**
    * 查询会话实例清单（`terminal.list` 对账 reply）。
    * 范围钉死为「被查询会话」：枚举基准 = terminalId 键的**精确前缀** `term:<sid>:`
-   * （禁按冒号切分取段，前提「sid 域不含冒号」见设计 §0.5 P7）；他会话实例不参与返回。
+   * 且前缀后须紧邻纯数字序号段（禁按冒号切分取段，前提「sid 域不含冒号」见设计 §0.5 P7）；
+   * 他会话实例不参与返回。
    * 清单来自注册表派生，条目 alive 恒 true（保留字段供 renderer 置 ptyAlive 镜像）。
    */
   listInstances(sid: string): TerminalInstanceSummary[]
   /**
    * 销毁指定 session 的**全部**实例（会话删除时调用）。kill 进程 + 移除注册表条目。
-   * 保留 destroyPty 旧名的调用点（u4 切链前）——本方法是会话维度语义的权威实现。
    */
   destroySessionPties(sid: string): void
   /**
@@ -78,9 +83,4 @@ export interface ITerminalService {
    * 幂等：无实例时 no-op。
    */
   destroyAllPties(): void
-  /**
-   * 销毁指定 session 的 PTY（session 销毁时调用）。**等价 destroySessionPties(sid)**
-   * ——多实例下语义升级为「该会话全实例杀」（u4 把组合根调用点切到 destroySessionPties 前保留本名可编译）。
-   */
-  destroyPty(sid: string): void
 }

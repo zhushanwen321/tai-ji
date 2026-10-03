@@ -171,12 +171,12 @@ describe('TerminalService', () => {
     expect(pty.write).not.toHaveBeenCalledWith('should be no-op')
   })
 
-  it('TS-6: destroyPty 调 pty.kill + 清 ptyMap', async () => {
+  it('TS-6: destroySessionPties 调 pty.kill + 清 ptyMap', async () => {
     const { publish } = createPublishCollector()
     const svc = new TerminalService({ publish })
     const terminalId = await svc.spawn('s6', undefined, 80, 24)
     const pty = mockPtys.at(-1)!
-    svc.destroyPty('s6')
+    svc.destroySessionPties('s6')
     expect(pty.kill).toHaveBeenCalled()
     // 回收后 write 抛 unknown_terminal_id
     expect(() => svc.write('s6', terminalId, 'x')).toThrowError(
@@ -185,14 +185,14 @@ describe('TerminalService', () => {
     expect(pty.write).not.toHaveBeenCalledWith('x')
   })
 
-  it('TS-7: 对不存在实例的操作抛 unknown_terminal_id（退役静默 no-op）；destroyPty 空会话 no-op', async () => {
+  it('TS-7: 对不存在实例的操作抛 unknown_terminal_id（退役静默 no-op）；destroySessionPties 空会话 no-op', async () => {
     const { publish } = createPublishCollector()
     const svc = new TerminalService({ publish })
     expect(() => svc.kill('s7', 'term:s7:1')).toThrowError(expect.objectContaining({ code: 'unknown_terminal_id' }))
     expect(() => svc.write('s7', 'term:s7:1', 'x')).toThrowError(expect.objectContaining({ code: 'unknown_terminal_id' }))
     expect(() => svc.resize('s7', 'term:s7:1', 80, 24)).toThrowError(expect.objectContaining({ code: 'unknown_terminal_id' }))
     expect(() => svc.attach('s7', 'term:s7:1')).toThrowError(expect.objectContaining({ code: 'unknown_terminal_id' }))
-    expect(() => svc.destroyPty('nonexistent')).not.toThrow()
+    expect(() => svc.destroySessionPties('nonexistent')).not.toThrow()
   })
 
   it('TS-8: spawn 双形态——不带编号每次新建；带编号（实例存活）幂等 no-op', async () => {
@@ -336,7 +336,7 @@ describe('TerminalService', () => {
     }
   })
 
-  it('RT8-10-K4: destroyPty 后 SIGTERM 未退出，升级 timer 无条件 SIGKILL（untracked）', async () => {
+  it('RT8-10-K4: destroySessionPties 后 SIGTERM 未退出，升级 timer 无条件 SIGKILL（untracked）', async () => {
     vi.useFakeTimers()
     try {
       const { publish } = createPublishCollector()
@@ -344,8 +344,8 @@ describe('TerminalService', () => {
       await svc.spawn('s-k4', undefined, 80, 24)
       const pty = mockPtys[0]!
 
-      svc.destroyPty('s-k4')
-      // destroyPty 立即清 ptyMap（升级 timer 不靠 map 判活——session 销毁路径同 sid 不重 spawn）
+      svc.destroySessionPties('s-k4')
+      // destroySessionPties 立即清 ptyMap（升级 timer 不靠 map 判活——session 销毁路径同 sid 不重 spawn）
       vi.advanceTimersByTime(5000)
       expect(pty.kill).toHaveBeenCalledTimes(2)
       expect(pty.kill).toHaveBeenLastCalledWith('SIGKILL')

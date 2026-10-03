@@ -360,17 +360,29 @@ export interface TerminalInstanceSummary {
 
 /**
  * 终端实例路由错误码（terminal-multi-instance 设计 §3.3「网络消息」末条）。
- * 两码**互斥**、语义不可混用——同码会把「仍在注册表内、进程仍活」的实例误判为幽灵并触发关闭沿回收：
+ * 三码语义**互斥**：只有 `unknown_terminal_id` 是「注册成员资格的否定回执」，是 renderer 关闭沿
+ * 三腿回收的**唯一**判据（平行守卫只按 code 分档）——同码会把「仍在注册表内、进程仍活」的实例
+ * 误判为幽灵并回收（条目消失、输出此后无人接收而进程继续跑）：
  * - `unknown_terminal_id`：对不存在实例的操作（write/resize/kill/attach 及 spawn 指定形态）——
- *   即「该 terminalId 不在 runtime 注册表」的**否定回执**，renderer 据此执行关闭沿三腿清理；
+ *   即「该 terminalId 不在 runtime 注册表」的否定回执，renderer 据此执行关闭沿三腿清理；
  * - `terminal_id_session_mismatch`：terminalId 的会话段与请求 sessionId 不一致（交叉校验拒绝）——
- *   走普通错误通道，**不触发回收**（实例仍活）。
+ *   走普通错误通道，**不触发回收**（实例仍活）；
+ * - `terminal_id_required`：既有实例操作帧（write/resize/kill/attach）缺 terminalId 的**畸形帧拒绝**
+ *   （设计 §3.3「缺 terminalId 即拒」防御，由 runtime handler 发出）——无编号可归属、不是注册成员
+ *   资格裁决，走普通错误通道，**不触发回收**。
  * 命名口径：仓库惯例 snake_case（对齐既有 `terminal_failed` / `record_not_found`）；设计文档的
  * camelCase 写法为等价笔误（实施计划 §5 偏差表 D1），实现不得改写为 camelCase。
  */
-export type TerminalRoutingErrorCode = 'unknown_terminal_id' | 'terminal_id_session_mismatch'
+export type TerminalRoutingErrorCode =
+  | 'unknown_terminal_id'
+  | 'terminal_id_session_mismatch'
+  | 'terminal_id_required'
 
-/** 终端错误码（TerminalService 主动抛出）。 */
+/**
+ * 终端错误码联合（TerminalService 抛出 + handler 路由拒绝码）。
+ * 其中 `terminal_id_required` 由协议入口 TerminalMessageHandler 在畸形帧拒绝时发出
+ *（非 TerminalService 抛出）；其余由 TerminalService 以扁平错误抛出。
+ */
 export type TerminalErrorCode =
   | 'spawn_failed'     // pty.spawn 失败（shell 不存在/无执行权限）
   | 'not_found'        // 操作的 sessionId 无对应 PTY（存量保留；实例路由否定回执改用 unknown_terminal_id）
