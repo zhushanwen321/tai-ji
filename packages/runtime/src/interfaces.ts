@@ -36,6 +36,8 @@ import type {
   ProviderId,
   LlmRetryConfig,
   RenameMode,
+  CodemodeEnabledResult,
+  CodemodeSetEnabledResult,
   SendPromptReason,
 } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
@@ -589,6 +591,11 @@ export interface IConfigService {
   getRetryConfig(): { config: LlmRetryConfig; configured: boolean }
   /** 写 retry 域：D8 全量校验失败返回 ok:false + error 不落盘；成功 D3 嵌套键级 merge。 */
   setRetryConfig(config: LlmRetryConfig): { ok: boolean; error?: string }
+  // ── Codemode 开关（codemode 设计 D1/A1，经 ICodemodeSettings port）──
+  /** 读 codemode 开关激活态：settings.json 损坏时错误态经 corruption 返回（enabled 恒 false）。 */
+  getCodemodeEnabled(): CodemodeEnabledResult
+  /** 写 codemode 开关（defaultTools 增量条目）：损坏拒入 ok:false 信封（含路径与隔离副本提示）。 */
+  setCodemodeEnabled(enabled: boolean): CodemodeSetEnabledResult
   // ── Worktree config（git-cwt-anywhere）──
   /** 读取 worktree 根目录（config.json.worktreeRootDir），默认 '~/worktrees'。 */
   getWorktreeRootDir(): string

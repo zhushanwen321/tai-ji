@@ -32,6 +32,8 @@ import {
   type ProviderId,
   type LlmRetryConfig,
   type RenameMode,
+  type CodemodeEnabledResult,
+  type CodemodeSetEnabledResult,
 } from '@taiji/shared'
 import type { IConfigService } from '../interfaces.js'
 import type { IConfigStore } from './ports/config.js'
@@ -112,6 +114,7 @@ import {
   setTerminalConfig as setTerminalConfigImpl,
 } from './terminal-config-helper.js'
 import type { ILlmRetrySettings, LlmRetryConfigSnapshot } from './ports/llm-retry-settings.js'
+import type { ICodemodeSettings } from './ports/codemode-settings.js'
 import type { IProviderCredentialResolver } from './ports/provider-credential-resolver.js'
 
 // ── Service ─────────────────────────────────────────────────────
@@ -162,6 +165,12 @@ export class ConfigService implements IConfigService {
      * 后置回填（QuotaService 依赖 ConfigService，构造期拿不到）。
      */
     private quotaStateCleaner?: QuotaStateCleaner,
+    /**
+     * codemode 开关域 port（pi settings.json 的 defaultTools 字段，codemode 设计 D1/A1）。
+     * 实现 PiCodemodeSettings（infra 层，PiRetrySettings 同款分层）在组合根注入。可选注入：未注入时 get/set 抛错
+     * （生产恒注入；既有测试不关心 codemode 域可不传，同 llmRetrySettings 形态）。
+     */
+    private codemodeSettings?: ICodemodeSettings,
   ) {}
 
   /**
@@ -585,5 +594,23 @@ export class ConfigService implements IConfigService {
       throw new Error('[config-service] llmRetrySettings not available (setRetryConfig)')
     }
     return this.llmRetrySettings.setRetryConfig(config)
+  }
+
+  // ── Codemode 开关（codemode 设计 D1/A1，单行委托注入 port）──
+  // pi settings.json 的 defaultTools 域：损坏检查/错误态映射/增量条目写入逻辑在
+  // PiCodemodeSettings（infra，组合本模块字段域函数 + getSettingsCorruption 单点）。
+
+  getCodemodeEnabled(): CodemodeEnabledResult {
+    if (!this.codemodeSettings) {
+      throw new Error('[config-service] codemodeSettings not available (getCodemodeEnabled)')
+    }
+    return this.codemodeSettings.getEnabled()
+  }
+
+  setCodemodeEnabled(enabled: boolean): CodemodeSetEnabledResult {
+    if (!this.codemodeSettings) {
+      throw new Error('[config-service] codemodeSettings not available (setCodemodeEnabled)')
+    }
+    return this.codemodeSettings.setEnabled(enabled)
   }
 }

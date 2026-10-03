@@ -33,6 +33,7 @@ import { fanOutSettled } from './services/session/agent-settled-fanout.js'
 // D4（rename-session-three-modes）：session-renamed 扇出处理体（label 回写 + 整表广播）。
 import { createSessionRenamedHandler } from './services/session/session-rename-fanout.js'
 import { ConfigService } from './services/config-service.js'
+import { PiCodemodeSettings } from './infra/pi/pi-codemode-settings.js'
 import { AuthService } from './services/auth/auth-service.js'
 import { AuthStorage } from './services/auth/auth-storage.js'
 import { ProviderCredentialResolver } from './services/auth/provider-credential-resolver.js'
@@ -538,6 +539,9 @@ async function main(): Promise<void> {
   const extensionSettings = new PiExtensionSettings(configStore.getPiAgentDir())
   // ILlmRetrySettings port 的 infra 实现：settings.json retry 域读写（无参构造，同上）。
   const llmRetrySettings = new PiRetrySettings()
+  // ICodemodeSettings port 的实现：settings.json defaultTools 域开关读写（codemode 设计
+  // D1/A1——损坏检查经 getSettingsCorruption 单点，字段域写入经 pi-codemode-settings）。
+  const codemodeSettings = new PiCodemodeSettings()
   const extensionService = new ExtensionService({
     settingsDir: configStore.getPiAgentDir(),
     projectRoot: effectiveRoot,
@@ -568,7 +572,9 @@ async function main(): Promise<void> {
   initProviderCredentialResolver(providerCredentialResolver)
   // providerExtrasStore 注入：setProvider 的 authMethod 改写 providers.json（A1-5 写侧切换）。
   // providerCredentialResolver（D3 链 5 接线）：listProviders 的凭据判定经唯一通道批量 sync 版。
-  const configService = new ConfigService(effectiveRoot, configStore, authStorage, providerExtrasStore, llmRetrySettings, providerCredentialResolver)
+  // 第 7 参 undefined = quotaStateCleaner 占位（QuotaService 构造后经 setQuotaStateCleaner
+  // 后置回填，同 setCredentialWriter 模式）；第 8 参 codemodeSettings（codemode 设计 D1）。
+  const configService = new ConfigService(effectiveRoot, configStore, authStorage, providerExtrasStore, llmRetrySettings, providerCredentialResolver, undefined, codemodeSettings)
   // ADR-0021 §1 一次性迁移：旧版本 skill 路径存在 settings.json.skills，
   // 首启用时提升为 discovery.json SSOT。幂等：discovery 已有数据则 no-op。
   // D8-1 位置判断（perf W29，06 §5 m-7 结论）：保持 listen 前同步执行——
