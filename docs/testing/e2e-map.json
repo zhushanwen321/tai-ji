@@ -74,7 +74,7 @@
    "run": "npx playwright test --project=electron-smoke",
    "owner": "packages/renderer",
    "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-   "note": "smoke 用例圈定 SSOT = playwright.config.ts electron-smoke project 的 grep @p0-smoke（与 electron 全量是子集关系非互斥分轨）；@p0-smoke 标签散布在上述 6 个 spec 共 10 处，本表登记 asset 为文件级"
+   "note": "smoke 用例圈定 SSOT = playwright.config.ts electron-smoke project 的 grep @p0-smoke（与 electron 全量是子集关系非互斥分轨）；@p0-smoke 标签散布在上述 7 个 spec 共 12 处，本表登记 asset 为文件级"
   },
   {
    "id": "E2E-VISUAL-01",

@@ -328,7 +328,7 @@ SideDrawer 是 workspace-body 级的右侧抽屉，终态 8 个 tab（本表为 
 
 ## 2. 组件结构概述
 
-`PanelContainer.vue` 挂载抽屉容器（现为 `packages/ui/src/features/drawer/DrawerPanel.vue`，props: open/activeTab/sessionId）。header 含 tab 栏（全枚举见首行覆盖节，含新增 btw；`drawer-tab-{key}` testid）、关闭按钮（`drawer-close`）；[display-containers §6.6③ W0] docked 死状态删除，钉住按钮（`drawer-pin`）已移除。content 按 activeTab 切换（terminal/browser 已迁出右抽屉）；git tab 挂 `GitPanel.vue`（git 全量状态）；doc tab 挂 `CommandDocPanel.vue`；detail tab 挂 `DetailPane.vue`（文件预览，容器 testid=`detail-pane`，[display-containers W3] 顶部实例层多文件 tab 条 `detail-tab-strip`/`detail-tab`（`data-path`/`data-active`）/`detail-tab-close`，含 diff/preview 切换 `detail-view-toggle`、加载/错误/空/二进制/截断态与 `detail-content` 内容区）；btw tab 挂 `BtwPanel.vue`（2026-09-22 btw-question 新增：面板根 `drawer-btw-tab`、线列表 `btw-thread-list`、新建 `btw-new-thread`、空态 `btw-empty`/`btw-empty-new`、错误 `btw-create-error`/`btw-load-error`+`btw-load-retry`、挂起点 `btw-thread-pending`、fork pill 随创建态）。
+`PanelContainer.vue` 挂载抽屉容器（现为 `packages/ui/src/features/drawer/DrawerPanel.vue`，props: isOpen/activeTab/sessionId）。header 含 tab 栏（全枚举见首行覆盖节，含新增 btw；`drawer-tab-{key}` testid）、关闭按钮（`drawer-close`）；[display-containers §6.6③ W0] docked 死状态删除，钉住按钮（`drawer-pin`）已移除。content 按 activeTab 切换（terminal/browser 已迁出右抽屉）；git tab 挂 `GitPanel.vue`（git 全量状态）；doc tab 挂 `CommandDocPanel.vue`；detail tab 挂 `DetailPane.vue`（文件预览，容器 testid=`detail-pane`，[display-containers W3] 顶部实例层多文件 tab 条 `detail-tab-strip`/`detail-tab`（`data-path`/`data-active`）/`detail-tab-close`，含 diff/preview 切换 `detail-view-toggle`、加载/错误/空/二进制/截断态与 `detail-content` 内容区）；btw tab 挂 `BtwPanel.vue`（2026-09-22 btw-question 新增：面板根 `drawer-btw-tab`、线列表 `btw-thread-list`、新建 `btw-new-thread`、空态 `btw-empty`/`btw-empty-new`、错误 `btw-create-error`/`btw-load-error`+`btw-load-retry`、挂起点 `btw-thread-pending`、fork pill 随创建态）。
 
 ## 3. data-testid 清单
 
@@ -554,9 +554,9 @@ test.describe('SideDrawer E2E', () => {
 
 | 缺口 | 场景 | 测试方式 | 优先级 |
 |------|------|---------|--------|
-| 钉住（dock） | 点钉住按钮 → drawer 持续打开（切 session 不关） | E2E（需补 dock 按钮 testid） | 中 |
-| terminal tab widget | extension:widget widgetKey='terminal' 推送 → 渲染 | E2E（mock 推 widget，需补 tab testid） | 中 |
-| browser tab widget | widgetKey='browser' 推送 → 渲染 | E2E（同上） | 低 |
+| ~~钉住（dock）~~ | [已退役] docked 死状态已随 ADR-0111 删除、drawer-pin testid 已移除（见 §2 组件结构与本文 :331/:348 登记）——本行非待补项，不可立项 | — | — |
+| ~~terminal tab widget~~ | [已退役] 双重失效：右抽屉 terminal tab 已迁底抽屉（display-containers §7.6）+ widget 消费端已于 2026-09-16 迁托盘（见同文件 gui 渲染管线文档「渲染路径概述」路径 A 退役注记）——本行非待补项 | — | — |
+| ~~browser tab widget~~ | [已退役] 同上：右抽屉 browser tab 已删除（能力在浮层壳），widget 消费端已迁托盘——本行非待补项 | — | — |
 | doc tab | slash 命令 chip 点击 → doc tab 展示 CommandDocPanel | E2E（需补 CommandDocPanel testid） | 中 |
 | git tab 暂存/提交交互 | stage/unstage/commit 操作（E2E-SD-5 已覆盖只读渲染） | E2E（需补操作按钮 testid） | 中 |
 | 大文件截断 | file.read >1MB → detail-truncated 显示 | 非 MOCK（mock file.read 恒小文本） | 低 |
@@ -571,7 +571,7 @@ test.describe('SideDrawer E2E', () => {
 |------|------|
 | ⚠️ GitPanel/CommandDocPanel testid 覆盖薄 | GitPanel 仅有 `git-inject-file`；CommandDocPanel 无 testid。git/doc tab 内容查询靠内部元素文本（脆弱） |
 | ✅ DetailPane testid 完整 | detail tab 有完整 testid（detail-pane/content/loading/error/empty/binary/truncated/toggle），E2E 稳定 |
-| ✅ DrawerPanel testid 已落地 | tab 栏 `drawer-tab-{key}` + 容器/钉住/关闭均有 testid |
+| ✅ DrawerPanel testid 已落地 | tab 栏 `drawer-tab-{key}` + 容器/关闭均有 testid（钉住已随 docked 删除，`drawer-pin` 已移除） |
 | ❌ mock 不模拟大文件/二进制 | detail-truncated（>1MB）/ detail-binary 只能非 MOCK 测（mock file.read 恒小文本） |
 | ❌ 真实 git diff 格式 | mock getDiff 返回固定 patch，真实 git（binary/rename）只能非 MOCK 测 |
 | ❌ widget 订阅 | terminal/browser tab 走 extension.onWidget，mock 推送有限，真实 widget 内容只能非 MOCK 测 |
@@ -795,7 +795,7 @@ pnpm dev    # 非 MOCK 轨，起 runtime + pi
 | `gui-columns` | Columns | `rendering-protocol/primitives/Columns.vue` |
 | `gui-list-tree` | ListTree | `rendering-protocol/primitives/ListTree.vue` |
 | `tool-block-header` | Block tool 块 header（点击展开） | `features/chat/Block.vue` |
-| `drawer-tab-{key}` | DrawerPanel tab 按钮（key=terminal/browser/git/doc/detail/subagent/workflow/bashTask/plan/btw） | `features/drawer/DrawerPanel.vue` |
+| `drawer-tab-{key}` | DrawerPanel tab 按钮（终态 8 员，key=git/doc/detail/subagent/bashTask/plan/btw/workflow——terminal 迁底抽屉、browser 删除；与同文件「组件结构概述」及首份文档覆盖节枚举同源，避免双处枚举漂移） | `features/drawer/DrawerPanel.vue` |
 
 ## 2. 渲染路径概述
 
