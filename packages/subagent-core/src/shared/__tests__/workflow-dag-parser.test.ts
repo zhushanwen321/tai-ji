@@ -95,6 +95,9 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
           expect(reviewer).toBeDefined();
           expect(reviewer?.matchPattern).toMatch(/^\^reviewer-/);
           expect(reviewer?.phase).toBe("并行多维审查（4 个一批）");
+          // helper 投影锚点：askAgent 调用点的 callSpec.description 模板可寻且落对分区（pr-lifecycle 的 aggregator 经 askAgent 派发）
+          const aggregator = result.dag.nodes.find((n) => n.templateName.startsWith("aggregator-"));
+          expect(aggregator?.phase).toBe("聚合去重与修复分组");
         }
       });
     }
@@ -517,6 +520,223 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
       expect(result.dag.nodes[0].line).toBe(2);
       expect(result.dag.nodes[1].line).toBe(4);
       expect(new Set(result.dag.nodes.map((n) => n.id)).size).toBe(result.dag.nodes.length);
+    });
+  });
+
+  describe("helper 投影（恰含 1 个 agent() 调用的具名函数 → 调用点虚拟节点）", () => {
+    it("wfAgent 形态：调用点投影（模板取第一实参、phase 取词法位置），体内实现点不产节点", () => {
+      const source = [
+        `function wfAgent(name, persona) {`,
+        `  return {`,
+        `    ask: async (typeKey, instructions) => {`,
+        `      const raw = await agent({ prompt: instructions, description: name });`,
+        `      return raw;`,
+        `    },`,
+        `  };`,
+        `}`,
+        `phase("审查");`,
+        "const a = wfAgent(`审查员-${1}`, P);",
+        `await wfAgent("规划", P);`,
+      ].join("\n");
+      const result = parseWorkflowDag(source);
+      if (!result.ok) throw new Error(result.message);
+      expectStructurallyValid(result.dag);
+      // 实现点不再落缺省分区（「唯一节点落 default + 全部实例未匹配」假象消除）
+      expect(result.dag.nodes.some((n) => n.phase === WORKFLOW_DAG_DEFAULT_PHASE)).toBe(false);
+      expect(result.dag.nodes.map((n) => n.templateName)).toEqual(["审查员-${…}", "规划"]);
+      expect(result.dag.nodes[0]?.matchPattern).toBe("^审查员-.*$");
+      expect(result.dag.nodes[1]?.matchPattern).toBe("^规划$");
+      expect(result.dag.nodes.every((n) => n.phase === "审查")).toBe(true);
+    });
+
+    it("askAgent 形态：第一实参对象字面量优先取 description 属性表达式（模板段保留）", () => {
+      const source = [
+        `async function askAgent(callSpec, roleLabel) {`,
+        `  const raw = await agent(Object.assign({ returnMeta: true }, callSpec));`,
+        `  return raw;`,
+        `}`,
+        `phase("门禁");`,
+        `await askAgent({ prompt: "p", description: "agg-" + n + "-r" + round }, "聚合");`,
+      ].join("\n");
+      const result = parseWorkflowDag(source);
+      if (!result.ok) throw new Error(result.message);
+      expectStructurallyValid(result.dag);
+      expect(result.dag.nodes.length).toBe(1);
+      expect(result.dag.nodes[0]?.templateName).toBe("agg-${…}-r${…}");
+      expect(result.dag.nodes[0]?.matchPattern).toBe("^agg-.*-r.*$");
+      expect(result.dag.nodes[0]?.phase).toBe("门禁");
+    });
+
+    it("phase 上下文函数边界作用域化：具名函数体内的 phase() 不外泄（planner 绑定错分区修复）", () => {
+      const source = [
+        `function wfAgent(name, persona) {`,
+        `  return { ask: async (_t, q) => (await agent({ prompt: q, description: name })) };`,
+        `}`,
+        `phase("首轮");`,
+        `async function retireClosure(round) {`,
+        `  phase("退役");`,
+        `  const r = wfAgent("伴生产物判定", P);`,
+        `  await r.ask("V", "q");`,
+        `}`,
+        `const plannerAgent = wfAgent("框架对照规划", P);`,
+        `phase("次轮");`,
+        `await wfAgent("复审", P);`,
+      ].join("\n");
+      const result = parseWorkflowDag(source);
+      if (!result.ok) throw new Error(result.message);
+      expectStructurallyValid(result.dag);
+      // retire → 退役（体内自身 phase）；planner → 首轮（声明后恢复外层，不被体内 phase 污染）；复审 → 次轮
+      expect(result.dag.nodes.map((n) => [n.templateName, n.phase])).toEqual([
+        ["伴生产物判定", "退役"],
+        ["框架对照规划", "首轮"],
+        ["复审", "次轮"],
+      ]);
+    });
+
+    it("多 agent() 调用 helper 不投影（实现点保持词法收口，调用点不产节点）", () => {
+      const source = [
+        `async function two(name) {`,
+        `  await agent({ prompt: "1", description: name });`,
+        `  await agent({ prompt: "2", description: name + "2" });`,
+        `}`,
+        `phase("P");`,
+        `await two("x");`,
+      ].join("\n");
+      const result = parseWorkflowDag(source);
+      if (!result.ok) throw new Error(result.message);
+      expectStructurallyValid(result.dag);
+      expect(result.dag.nodes.length).toBe(2);
+      expect(result.dag.nodes.map((n) => n.templateName)).toEqual(["*", "${…}2"]);
+      // two 声明词法位置在 phase("P") 之前 → 实现点归缺省分区（登记边界）
+      expect(result.dag.nodes.every((n) => n.phase === WORKFLOW_DAG_DEFAULT_PHASE)).toBe(true);
+    });
+
+    it("匿名回调（map/parallel 成员）内的调用点不是 helper——批量回调语义不变", () => {
+      const source = [
+        `phase("P");`,
+        "const rs = await parallel(names.map((n) => agent({ prompt: \"p\", description: `r-${n}` })));",
+      ].join("\n");
+      const result = parseWorkflowDag(source);
+      if (!result.ok) throw new Error(result.message);
+      expectStructurallyValid(result.dag);
+      expect(result.dag.nodes.length).toBe(1);
+      expect(result.dag.nodes[0]?.templateName).toBe("r-${…}");
+      expect(result.dag.parallelGroups.length).toBe(1);
+    });
+
+    it("复合调用链真形态（caller 自带 agent 调用且调用另一候选，span 更小）：命运结算拒 caller，无幻影投影", () => {
+      const source = [
+        `function grade(n) {`,
+        `  const p = String(n);`,
+        `  return agent({ prompt: p, description: n });`,
+        `}`,
+        "function fast(n) { const x = grade(n); return agent({ prompt: x, description: n }); }",
+        `phase("评审");`,
+        `await fast("a");`,
+      ].join("\n");
+      const result = parseWorkflowDag(source);
+      if (!result.ok) throw new Error(result.message);
+      expectStructurallyValid(result.dag);
+      // fast（自带 agent 调用 + 调用候选 grade，span 最小先评估）依赖 grade 录取 → 拒；
+      // grade 录取且实现点抑制。判别断言：无 fast("a") 调用点的幻影投影节点（旧代码
+      // 在此产 ["a","评审"]；命运循环下两节点均为缺省分区通配——fast 体内自身派发点
+      // 词法收口 + 体内 grade 派发点投影）
+      expect(result.dag.nodes.length).toBe(2);
+      expect(result.dag.nodes.every((n) => n.phase === WORKFLOW_DAG_DEFAULT_PHASE)).toBe(true);
+      expect(result.dag.nodes.some((n) => n.templateName === "a")).toBe(false);
+    });
+
+    it("候选互调环：命运循环停滞残留全拒（实现点词法收口，调用点零投影）", () => {
+      const source = [
+        "function a(n) { const x = b(n); return agent({ prompt: x, description: n }); }",
+        "function b(n) { const y = a(n); return agent({ prompt: y, description: n }); }",
+        `phase("P");`,
+        `await a("q");`,
+      ].join("\n");
+      const result = parseWorkflowDag(source);
+      if (!result.ok) throw new Error(result.message);
+      expectStructurallyValid(result.dag);
+      // a/b 互调（各含自身 agent 调用，均为合格候选）→ 互为未结算依赖 → 停滞 → 全拒；
+      // 实现点词法收口（2 节点，phase("P") 前 → 缺省分区）；a("q") 调用点不产节点
+      expect(result.dag.nodes.length).toBe(2);
+      expect(result.dag.nodes.every((n) => n.phase === WORKFLOW_DAG_DEFAULT_PHASE)).toBe(true);
+      expect(result.dag.nodes.some((n) => n.templateName === "q")).toBe(false);
+    });
+
+    it("同名多候选声明：全部不投影（实现点保持词法收口）", () => {
+      const source = [
+        `function h(n) { return agent({ prompt: "p", description: n }); }`,
+        `async function h(name) { return await agent({ prompt: "q", description: name }); }`,
+        `phase("P");`,
+        `await h("x");`,
+      ].join("\n");
+      const result = parseWorkflowDag(source);
+      if (!result.ok) throw new Error(result.message);
+      expectStructurallyValid(result.dag);
+      // 两个 h 声明均不录取 → 实现点按词法收口（两节点，均在 phase("P") 之前）；h("x") 调用点不产节点
+      expect(result.dag.nodes.length).toBe(2);
+      expect(result.dag.nodes.every((n) => n.phase === WORKFLOW_DAG_DEFAULT_PHASE)).toBe(true);
+      expect(result.dag.nodes.every((n) => n.templateName === "*")).toBe(true);
+    });
+
+    it("helper 套 helper：内层投影、外层让位（外层体内对内层的调用仍投影，外层调用点不产节点）", () => {
+      const source = [
+        `function inner(n) {`,
+        `  return agent({ prompt: "p", description: n });`,
+        `}`,
+        `function outer(n) {`,
+        `  return inner(n + "-x");`,
+        `}`,
+        `phase("P");`,
+        `await outer("a");`,
+      ].join("\n");
+      const result = parseWorkflowDag(source);
+      if (!result.ok) throw new Error(result.message);
+      expectStructurallyValid(result.dag);
+      // outer 子树含已录取 inner → 让位；其体内 inner(n + "-x") 投影（n 非静态段通配），phase 取声明词法位置（缺省分区）
+      expect(result.dag.nodes.length).toBe(1);
+      expect(result.dag.nodes[0]?.templateName).toBe("${…}-x");
+      expect(result.dag.nodes[0]?.phase).toBe(WORKFLOW_DAG_DEFAULT_PHASE);
+    });
+
+    it("parallel 实参内 helper 调用成组（成员投影）+ 解构绑定 dataflow", () => {
+      const source = [
+        `function mk(n) {`,
+        `  return agent({ prompt: "p", description: n });`,
+        `}`,
+        `phase("P");`,
+        `const [a, b] = await parallel([mk("x"), mk("y")]);`,
+        `await agent({ prompt: a.note, description: "down-" + b.id });`,
+      ].join("\n");
+      const result = parseWorkflowDag(source);
+      if (!result.ok) throw new Error(result.message);
+      expectStructurallyValid(result.dag);
+      expect(result.dag.parallelGroups.length).toBe(1);
+      expect(result.dag.parallelGroups[0]?.nodeIds.length).toBe(2);
+      expect(result.dag.nodes.map((n) => n.templateName)).toEqual(["x", "y", "down-${…}"]);
+      expect(result.dag.edges.some((e) => e.kind === "dataflow")).toBe(true);
+    });
+
+    it("const 箭头 helper（zcAgent 形态）投影；零参 helper 不投影（实现点词法收口）", () => {
+      const source = [
+        `const mk = async (name, persona) => {`,
+        `  return await agent({ prompt: persona, description: name });`,
+        `};`,
+        `function zero() {`,
+        `  return agent({ prompt: "p", description: "fixed" });`,
+        `}`,
+        `phase("P");`,
+        `await mk("z", PERSONA);`,
+        `await zero();`,
+      ].join("\n");
+      const result = parseWorkflowDag(source);
+      if (!result.ok) throw new Error(result.message);
+      expectStructurallyValid(result.dag);
+      // zero 不投影：实现点在声明遍历时即按词法收口（序在前）；mk 投影在调用点（序在后）
+      expect(result.dag.nodes.map((n) => [n.templateName, n.phase])).toEqual([
+        ["fixed", WORKFLOW_DAG_DEFAULT_PHASE],
+        ["z", "P"],
+      ]);
     });
   });
 });
