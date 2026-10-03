@@ -15,7 +15,8 @@ import type { ServerMessage } from '@taiji/shared'
 const { mockPtys, createMockPty } = vi.hoisted(() => {
   // IPty 的 onData/onExit 是 IEvent<T>（(listener) => IDisposable），非 EventEmitter。
   // mock 实现：维护 listener 列表，emit 时遍历调用。
-  interface MockPty {
+  // 测试内 mock 形状载体，非契约接口——类型别名（interface 会被 oe-assert 单实现初筛误拦）
+  type MockPty = {
     onData: (listener: (data: string) => void) => { dispose: () => void }
     onExit: (listener: (e: { exitCode: number; signal?: number }) => void) => { dispose: () => void }
     write: (data: string) => void
@@ -107,41 +108,46 @@ describe('TerminalService', () => {
   it('TS-1: spawn 后广播 terminal.alive，ptyMap 持有 sid', async () => {
     const { messages, publish } = createPublishCollector()
     const svc = new TerminalService({ publish })
-    await svc.spawn('s1', '/tmp', 80, 24)
+    const terminalId = await svc.spawn('s1', '/tmp', 80, 24)
+    expect(terminalId).toBe('term:s1:1')
     const alive = findMsg(messages, 'terminal.alive')
     expect(alive).toBeDefined()
-    expect((alive!.payload as { sessionId: string }).sessionId).toBe('s1')
-    // write 能找到 PTY（间接证明 ptyMap 持有）
-    svc.write('s1', 'echo hi\n')
+    expect((alive!.payload as { sessionId: string; terminalId: string })).toMatchObject({
+      sessionId: 's1',
+      terminalId,
+    })
+    // write 能找到 PTY（间接证明实例注册表持有）
+    svc.write('s1', terminalId, 'echo hi\n')
     expect(mockPtys[0]!.write).toHaveBeenCalledWith('echo hi\n')
   })
 
   it('TS-2: write 转发到 pty.write', async () => {
     const { publish } = createPublishCollector()
     const svc = new TerminalService({ publish })
-    await svc.spawn('s2', undefined, 80, 24)
-    svc.write('s2', 'ls -la')
+    const terminalId = await svc.spawn('s2', undefined, 80, 24)
+    svc.write('s2', terminalId, 'ls -la')
     expect(mockPtys.at(-1)!.write).toHaveBeenCalledWith('ls -la')
   })
 
   it('TS-3: resize 转发到 pty.resize', async () => {
     const { publish } = createPublishCollector()
     const svc = new TerminalService({ publish })
-    await svc.spawn('s3', undefined, 80, 24)
-    svc.resize('s3', 120, 40)
+    const terminalId = await svc.spawn('s3', undefined, 80, 24)
+    svc.resize('s3', terminalId, 120, 40)
     expect(mockPtys.at(-1)!.resize).toHaveBeenCalledWith(120, 40)
   })
 
   it('TS-4: PTY onData 触发 terminal.data 广播（含 sessionId + data）', async () => {
     const { messages, publish } = createPublishCollector()
     const svc = new TerminalService({ publish })
-    await svc.spawn('s4', undefined, 80, 24)
+    const terminalId = await svc.spawn('s4', undefined, 80, 24)
     const pty = mockPtys.at(-1)!
     pty.__emitData('hello world\r\n')
     const dataMsg = findMsg(messages, 'terminal.data')
     expect(dataMsg).toBeDefined()
-    expect((dataMsg!.payload as { sessionId: string; data: string })).toMatchObject({
+    expect((dataMsg!.payload as { sessionId: string; terminalId: string; data: string })).toMatchObject({
       sessionId: 's4',
+      terminalId,
       data: 'hello world\r\n',
     })
   })
@@ -149,46 +155,58 @@ describe('TerminalService', () => {
   it('TS-5: PTY onExit 触发 terminal.exit 广播 + 清理 ptyMap', async () => {
     const { messages, publish } = createPublishCollector()
     const svc = new TerminalService({ publish })
-    await svc.spawn('s5', undefined, 80, 24)
+    const terminalId = await svc.spawn('s5', undefined, 80, 24)
     const pty = mockPtys.at(-1)!
     pty.__emitExit(42)
     const exitMsg = findMsg(messages, 'terminal.exit')
     expect(exitMsg).toBeDefined()
-    expect((exitMsg!.payload as { exitCode: number }).exitCode).toBe(42)
-    // 清理后 write 不再转发（ptyMap 已删）
-    svc.write('s5', 'should be no-op')
+    expect((exitMsg!.payload as { terminalId: string; exitCode: number })).toMatchObject({
+      terminalId,
+      exitCode: 42,
+    })
+    // 退役静默 no-op：实例已从注册表移除后 write 抛 unknown_terminal_id（renderer 据此回收条目）
+    expect(() => svc.write('s5', terminalId, 'should be no-op')).toThrowError(
+      expect.objectContaining({ code: 'unknown_terminal_id' }),
+    )
     expect(pty.write).not.toHaveBeenCalledWith('should be no-op')
   })
 
   it('TS-6: destroyPty 调 pty.kill + 清 ptyMap', async () => {
     const { publish } = createPublishCollector()
     const svc = new TerminalService({ publish })
-    await svc.spawn('s6', undefined, 80, 24)
+    const terminalId = await svc.spawn('s6', undefined, 80, 24)
     const pty = mockPtys.at(-1)!
     svc.destroyPty('s6')
     expect(pty.kill).toHaveBeenCalled()
-    // 清理后 write no-op
-    svc.write('s6', 'x')
+    // 回收后 write 抛 unknown_terminal_id
+    expect(() => svc.write('s6', terminalId, 'x')).toThrowError(
+      expect.objectContaining({ code: 'unknown_terminal_id' }),
+    )
     expect(pty.write).not.toHaveBeenCalledWith('x')
   })
 
-  it('TS-7: kill 不存在的 sid 是 no-op（不抛错）', async () => {
+  it('TS-7: 对不存在实例的操作抛 unknown_terminal_id（退役静默 no-op）；destroyPty 空会话 no-op', async () => {
     const { publish } = createPublishCollector()
     const svc = new TerminalService({ publish })
-    expect(() => svc.kill('nonexistent')).not.toThrow()
-    expect(() => svc.write('nonexistent', 'x')).not.toThrow()
-    expect(() => svc.resize('nonexistent', 80, 24)).not.toThrow()
+    expect(() => svc.kill('s7', 'term:s7:1')).toThrowError(expect.objectContaining({ code: 'unknown_terminal_id' }))
+    expect(() => svc.write('s7', 'term:s7:1', 'x')).toThrowError(expect.objectContaining({ code: 'unknown_terminal_id' }))
+    expect(() => svc.resize('s7', 'term:s7:1', 80, 24)).toThrowError(expect.objectContaining({ code: 'unknown_terminal_id' }))
+    expect(() => svc.attach('s7', 'term:s7:1')).toThrowError(expect.objectContaining({ code: 'unknown_terminal_id' }))
     expect(() => svc.destroyPty('nonexistent')).not.toThrow()
   })
 
-  it('TS-8: spawn 幂等（同 sid 重复 spawn 不新建 PTY）', async () => {
+  it('TS-8: spawn 双形态——不带编号每次新建；带编号（实例存活）幂等 no-op', async () => {
     const { publish } = createPublishCollector()
     const svc = new TerminalService({ publish })
-    await svc.spawn('s8', undefined, 80, 24)
-    await svc.spawn('s8', undefined, 80, 24)
-    // node-pty.spawn 应只被调一次
+    const first = await svc.spawn('s8', undefined, 80, 24)
+    const second = await svc.spawn('s8', undefined, 80, 24)
+    expect([first, second]).toEqual(['term:s8:1', 'term:s8:2'])
     const { spawn } = await import('node-pty')
-    expect(spawn).toHaveBeenCalledTimes(1)
+    expect(spawn).toHaveBeenCalledTimes(2)
+    // 指定形态（实例存活）幂等：不再新建
+    const again = await svc.spawn('s8', undefined, 80, 24, first)
+    expect(again).toBe('term:s8:1')
+    expect(spawn).toHaveBeenCalledTimes(2)
   })
 
   it('TS-9: spawn 失败抛 spawn_failed 错误（含 code）', async () => {
@@ -209,7 +227,7 @@ describe('TerminalService', () => {
   it('RT8-10-W1: write 失败 publish terminal.writeFailed（每 PTY 生命周期至多一次，防击键流刷屏）', async () => {
     const { messages, publish } = createPublishCollector()
     const svc = new TerminalService({ publish })
-    await svc.spawn('s-w1', undefined, 80, 24)
+    const terminalId = await svc.spawn('s-w1', undefined, 80, 24)
     const pty = mockPtys[0]!
     // write 模拟管道关闭（进程已死）抛错
     ;(pty.write as ReturnType<typeof vi.fn>).mockImplementation(() => {
@@ -217,38 +235,44 @@ describe('TerminalService', () => {
     })
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    svc.write('s-w1', 'a')
-    svc.write('s-w1', 'b')
-    svc.write('s-w1', 'c')
+    svc.write('s-w1', terminalId, 'a')
+    svc.write('s-w1', terminalId, 'b')
+    svc.write('s-w1', terminalId, 'c')
 
     const failed = messages.filter((m) => m.type === 'terminal.writeFailed')
     expect(failed).toHaveLength(1)
-    expect((failed[0]!.payload as { sessionId: string; message: string }).sessionId).toBe('s-w1')
+    expect((failed[0]!.payload as { sessionId: string; terminalId: string; message: string })).toMatchObject({
+      sessionId: 's-w1',
+      terminalId,
+    })
     expect((failed[0]!.payload as { sessionId: string; message: string }).message).toContain('EPIPE')
     errorSpy.mockRestore()
   })
 
-  it('RT8-10-W2: PTY onExit 后重新 spawn，writeFailed 标记重置（新周期可再报）', async () => {
+  it('RT8-10-W2: writeFailedReported 按实例分键——同会话两实例各自可上报一次（跨实例互不吞）', async () => {
     const { messages, publish } = createPublishCollector()
     const svc = new TerminalService({ publish })
-    await svc.spawn('s-w2', undefined, 80, 24)
+    const firstId = await svc.spawn('s-w2', undefined, 80, 24)
+    const secondId = await svc.spawn('s-w2', undefined, 80, 24)
     const first = mockPtys[0]!
+    const second = mockPtys[1]!
     ;(first.write as ReturnType<typeof vi.fn>).mockImplementation(() => {
-      throw new Error('EPIPE')
+      throw new Error('EPIPE first')
+    })
+    ;(second.write as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error('EPIPE second')
     })
     vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    svc.write('s-w2', 'x') // 第一周期首报
-    first.__emitExit(1) // 周期结束（清理标记）
+    svc.write('s-w2', firstId, 'x') // 第一实例首报
+    svc.write('s-w2', firstId, 'x') // 同实例重复：不重复上报
+    svc.write('s-w2', secondId, 'y') // 另一实例不被第一实例的标记吞
 
-    await svc.spawn('s-w2', undefined, 80, 24) // 同 sid 重 spawn（新 PTY）
-    const second = mockPtys[1]!
-    ;(second.write as ReturnType<typeof vi.fn>).mockImplementation(() => {
-      throw new Error('EPIPE again')
-    })
-    svc.write('s-w2', 'y') // 新周期应可再报
-
-    expect(messages.filter((m) => m.type === 'terminal.writeFailed')).toHaveLength(2)
+    const failed = messages.filter((m) => m.type === 'terminal.writeFailed')
+    expect(failed).toHaveLength(2)
+    expect(failed.map((m) => (m.payload as { terminalId: string }).terminalId).sort()).toEqual(
+      [firstId, secondId].sort(),
+    )
     vi.restoreAllMocks()
   })
 
@@ -257,10 +281,10 @@ describe('TerminalService', () => {
     try {
       const { publish } = createPublishCollector()
       const svc = new TerminalService({ publish })
-      await svc.spawn('s-k1', undefined, 80, 24)
+      const terminalId = await svc.spawn('s-k1', undefined, 80, 24)
       const pty = mockPtys[0]!
 
-      svc.kill('s-k1')
+      svc.kill('s-k1', terminalId)
       expect(pty.kill).toHaveBeenCalledWith() // 先 SIGTERM（默认信号）
 
       vi.advanceTimersByTime(4999)
@@ -279,10 +303,10 @@ describe('TerminalService', () => {
     try {
       const { publish } = createPublishCollector()
       const svc = new TerminalService({ publish })
-      await svc.spawn('s-k2', undefined, 80, 24)
+      const terminalId = await svc.spawn('s-k2', undefined, 80, 24)
       const pty = mockPtys[0]!
 
-      svc.kill('s-k2')
+      svc.kill('s-k2', terminalId)
       pty.__emitExit(0) // PTY 在升级窗口内正常退出（ptyMap 清理）
 
       vi.advanceTimersByTime(6000)
@@ -297,12 +321,12 @@ describe('TerminalService', () => {
     try {
       const { publish } = createPublishCollector()
       const svc = new TerminalService({ publish })
-      await svc.spawn('s-k3', undefined, 80, 24)
+      const oldId = await svc.spawn('s-k3', undefined, 80, 24)
       const oldPty = mockPtys[0]!
 
-      svc.kill('s-k3')
+      svc.kill('s-k3', oldId)
       oldPty.__emitExit(0)
-      await svc.spawn('s-k3', undefined, 80, 24) // 同 sid 新 PTY
+      await svc.spawn('s-k3', undefined, 80, 24) // 新实例（编号不复用）
       const newPty = mockPtys[1]!
 
       vi.advanceTimersByTime(6000)
