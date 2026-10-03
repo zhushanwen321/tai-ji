@@ -53,7 +53,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | Markdown 渲染 | shiki 高亮、HTML 分通道净化（可信段摘出回填 + 用户 HTML DOMPurify 白名单）、相对资源通道（resourceBaseDir 双通道）、CSP 兼容、降级路径 | 对话内容呈现主体；纯文本降级已属不可读（曾 CSP 事故） |
 | 扩展装载框架 | builtin 21 包装载、分组检查（infrastructure 不可禁）、worker 隔离 | 所有进阶能力的装载底座，挂了 feature 扩展全灭 |
 | subagent/workflow 面板与派发 | composer 任务托盘的 subagent/workflow 列表与运行计数（含 built-in 第 4 件「子会话」观察入口——调度模式派发进度的主视图；含行内取消/中止——workflow 一次性生命周期 abort-only，pause/resume 已随扩展 D-2 移除）、workflow 可视化 overlay（2026-10-02：双入口改向全屏 overlay——左 DAG 蓝图 + 右多级 tab 实况面板，挂掉回落 drawer WorkflowTab 对冲）、drawer 详情 tab（回落载体）、通知链 | agent 生产力的核心形态（边界判例 #2，2026-09-12 升 P0）；2026-09-16 观察入口自侧栏 Agents/Flows tab 迁 composer 任务托盘（侧栏收敛三 tab，入口唯一化） |
-| 设置页 | provider/API key 管理、系统提示词编辑、**模式（预设）编辑 + 模式提示词卡**、主题 | provider 配置是首次使用必经路径，配不了连会话都起不了 |
+| 设置页 | provider/API key 管理、系统提示词编辑、**模式（预设）编辑 + 模式提示词卡**、主题、settings.json 写入面（跨进程锁 + 字段域 merge + 损坏拒入——settings.json 是「设置」功能的载体，写坏影响全部会话；codemode 启动迁移/开关写入同域，写方与字段域归属见 data-source-registry §6） | provider 配置是首次使用必经路径，配不了连会话都起不了 |
 | 插件系统 | PluginService、trusted/sandbox 隔离、statusBar、交互点位（headerAction 顶栏按钮区 / modal 弹层 / action-bar 交互原语 + 条目镜像数据面） | harness 可扩展能力主体（testing 13）；交互点位是管理面类需求的规范底座，modal/徽标链路挂了 = 插件无法提供任何可交互入口 |
 | 统一提问表单 FormOverlay | agent 提问浮层（ask-user/scheduler/plan 三方统一）、Other 保留、pi 恢复 turn | agent↔用户交互闭环的唯一通道（边界判例 #3，2026-09-12 升 P0） |
 
@@ -84,6 +84,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 对话流时间戳 | 行尾耗时·时刻槽、TurnMeta 首末区间、reload endTime 回填（chat-flow-timestamp；TurnMeta/Block/apply-entry-convert 单测 + live≡reload 等价性） |
 | btw 旁路提问（drawer 辅助对话流） | composer btw 按钮入口、fork 快照线（独立 pi 进程 / `btw:` 虚拟 id / `btw/<encodeCwd>/<mainSid>/` 目录隔离）、消息分区、主删级联与持久恢复、交互 drawer 路由（D8）。**挂掉后果 = 主对话链路完整可用**（btw 创建/提问/面板失效仅损失辅助提问面，不动 P0 对话主链；设计原文口径「触及最高 P 级 P2——btw 为常用辅助面，挂掉后主链路完整可用」）。错误处理按 §1「P2/P3 降级隔离不拖垮核心」契约：接入点 catch + 日志 + 功能关闭/占位兜底，禁向上传播打断 P0/P1 主流程，降级 ≠ 吞错（运行时错误码 `fork_failed / spawn_state_invalid / state_mismatch / line_not_found / thread_file_missing` 供 runtime 分流与日志归因；renderer 呈现 = 通用降级文案 + 原因透传 + 行内可重试入口，不按码分流——2026-09-22 一致性审查对账修正） |
 | 语音朗读（TTS） | assistant 回复朗读按钮三态（idle/loading/playing，生成中置灰）、设置页「语音」菜单（三家 provider 表单：凭据/基础/音频/风格/长尾，Key 联动带入 + MiMo baseUrl 集群预填）、runtime `tts.*` 四 RPC（三家 driver + 分句合成 + WAV 缓存 + 双条件 FIFO 封顶）、错误码 toast 分流（§5.4 六码）。**挂掉后果 = 对话主链路完整可用**（朗读按钮不渲染/合成失败仅损失听觉通道，不动 P0 对话主链；ai-voice-tts 设计原文口径 P2）。错误处理按 §1 P2 降级隔离契约：u6 播放器 catch + 错误码 toast + 回 idle，runtime `tts_*` 错误码词表（`tts_not_configured / tts_auth_failed / tts_quota_exceeded / tts_vendor_error / tts_network_error / tts_text_too_long / tts_empty_text`），缓存写失败日志不阻断（磁盘治理失败下次写入收敛）。总开关关闭时 idle 朗读本地拦截不发 RPC（data-source-registry #45） |
+| Code Mode（codemode） | 模型写 JavaScript 脚本调用工具（pi 1.0 内置扩展，QuickJS 沙箱：脚本内并行调用/过滤过大结果/生成图片）：常驻默认启用（启动迁移幂等写 `+codemode`，字段已配置不碰）、设置页「系统」Code Mode 开关（`config.getCodemodeEnabled` / `config.setCodemodeEnabled`，损坏错误态）、嵌套脚本调用事件过滤（对话流单工具块，live ≡ reload）、脚本调用工具块与图片条渲染（复用既有通用工具块 + 图片条通道，零新渲染组件）。**挂掉后果 = 对话主链路完整可用**（codemode 未激活/脚本报错仅损失脚本调用能力，普通工具调用不受影响，不动 P0 对话主链；codemode 设计原文口径「功能本体 P2——codemode 故障时对话主链路完整可用，同 TTS/btw 口径」）。错误处理按 §1 P2 降级隔离契约：启动迁移失败不阻塞启动（warn 留痕 + 下次启动幂等补跑）；开关操作遇 settings.json 损坏呈错误态（Switch 禁用 + 完整路径可复制 + 修复指引，不静默重置不代偿）。**P0 关联**：写入域本身是 P0（§2 设置页行——settings.json 写坏影响全部会话），本功能对它的义务 = 只动 `defaultTools` 的 codemode 相关系目 + 写前损坏拒入，见 data-source-registry §6 tools 域行 |
 
 ## 5. P3 — 特定人群/低影响
 

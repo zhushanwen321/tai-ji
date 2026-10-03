@@ -1491,5 +1491,22 @@
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-reclaim-primitives.test.ts"
     },
     "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-70",
+    "claim": "settings.json defaultTools 解析语义（taiji tools 字段域的 pi 侧承重语义）：mergeDefaultTools 做 global/project 两层合并——overrides 未设返回 base；任一层非数组或 overrides 含非增量条目时 overrides 整体替换（源码自述 Settings files are not validated; a malformed value replaces instead of throwing）；overrides 全为 +name/-name 增量条目时拼接 [...base, ...overrides]。resolveDefaultTools 激活集解析：纯名条目（无修饰符）整体替换 DEFAULT_TOOL_NAMES（read/bash/edit/write）；仅增量条目则从默认集起步；空数组 = 空激活集；+name 追加（name 非空且不在集内）、-name 移除，按条目顺序应用。getDefaultTools 读面：数组先 filter 剥非字符串元素再解析（坏值逐元素行为的实测定案——非字符串元素既非纯名也非增量条目，解析前即被丢弃）；非数组按空数组解析 = 空激活集；字段缺失（undefined）原样返回 undefined，会话层回落 DEFAULT_TOOL_NAMES。taiji 读侧同构实现 resolveDefaultToolSet 对字段缺失/非数组坏值统一空激活集——codemode 不在 DEFAULT_TOOL_NAMES，空集与回落默认集对 includes('codemode') 判定等价；pi bump 时本条随探针重验",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/settings-manager.js",
+        "symbol": "DEFAULT_TOOL_NAMES / mergeDefaultTools / resolveDefaultTools / deepMergeSettings 的 defaultTools 合并 / getDefaultTools",
+        "note": "DEFAULT_TOOL_NAMES :35；isToolModifier :36-38（仅字符串判定）；mergeDefaultTools :43-50（overrides undefined → base :44-45；malformed-replaces 注释 :46、整体替换判定 :47-48；全增量条目拼接 :49）；resolveDefaultTools :55-69（纯名替换或空数组空集 :57、+name/-name 顺序应用 :58-67）；deepMergeSettings 调用 :73-74；getDefaultTools :1021-1026（undefined 原样返回 :1023-1024、数组 filter typeof string 后解析 :1025）——taiji 消费点 packages/runtime/src/infra/pi/pi-codemode-settings.ts（resolveDefaultToolSet/isCodemodeActive 同构 + 迁移与开关写入）【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-codemode-settings.test.ts"
+    },
+    "verifiedWith": "1.0.0"
   }
 ]

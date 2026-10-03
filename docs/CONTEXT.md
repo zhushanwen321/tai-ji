@@ -439,6 +439,19 @@ pi 引擎的可用模型集合及其能力（思考档位等）。能力判定�
 
 ## Settings 域
 
+### Code Mode（codemode / 脚本模式）
+pi 1.0 内置扩展（builtin extension）提供的能力：模型编写 JavaScript 脚本调用工具，脚本内可并行调用多个工具、过滤过大的结果、生成图片，QuickJS 沙箱执行。taiji 侧常驻默认启用（零配置可用），设置页「系统」提供全局开关（SystemCodemodeSection，经 `config.getCodemodeEnabled` / `config.setCodemodeEnabled` 命令对）。激活判定 = settings.json `defaultTools` 解析出的激活工具集含 `codemode`（`isCodemodeActive`）；配置随新启动的会话读取。例外：会话以显式工具白名单启动时（launch preset `--tools` 或 subagent agentTools），pi 语义是白名单整体覆盖 `defaultTools`，该类会话 codemode 不激活。与 MCP 管理设计的职责边界：本词条域管 codemode 全局默认启用（settings.json `defaultTools`）；per-server 暴露档位（exposure）与 `autoEnableCodemode` 字段归 MCP 管理设计（`pi-mcp-management.md`）。
+
+**代码映射**: `packages/runtime/src/infra/pi/pi-codemode-settings.ts`（解析/迁移/开关写入唯一写点）；渲染面 `packages/renderer/src/components/settings/system/SystemCodemodeSection.vue`。
+
+### defaultTools
+pi settings.json 的默认工具集字段（数组，settings-manager 解析后决定新会话启动时激活哪些工具）：pi 侧两层合并（global/project）经 `mergeDefaultTools`、激活集解析经 `resolveDefaultTools`；字段缺失时 pi 会话层回落 `DEFAULT_TOOL_NAMES`（read/bash/edit/write）。taiji 读侧解析同构实现 = `resolveDefaultToolSet`（开关显示判定），对字段缺失/非数组坏值统一解析为空激活集（codemode 不在默认集，与 pi 侧「不激活」判定等价）。字段归属 = settings.json tools 字段域（[data-source-registry §6](architecture/data-source-registry.md)），写方全集 = taiji 启动迁移 + 设置页 Code Mode 开关，用户手工编辑始终被尊重（taiji 不把用户移除的条目写回）。
+
+### 工具增量条目（`+name` / `-name` 语法）
+`defaultTools` 数组条目的增量修饰语法：`+name` 追加工具、`-name` 移除工具，按条目顺序应用；纯名条目（无修饰符）= 整体替换默认工具集。解析规则（pi `resolveDefaultTools` 同构）：数组内任一纯名出现 → 激活集 = 全部纯名（增量条目在其上继续应用）；仅增量条目 → 激活集从 `DEFAULT_TOOL_NAMES` 起步；空数组 → 空激活集；非字符串元素解析前被丢弃。taiji 用 `+codemode` 表达默认启用、`-codemode` 表达关闭占位（负条目占位 = 字段保留 + codemode 关闭跨重启持久 + 不写回用户默认工具集的唯一同时满足形态）。
+
+**代码映射**: `packages/runtime/src/infra/pi/pi-codemode-settings.ts` 的 `resolveDefaultToolSet`（语义表驱动单测 `__tests__/pi-codemode-settings.test.ts`；pi 语义门禁登记 docs/pi-semantics.json PS-70）。
+
 ### 乐观更新协议
 「乐观写本地 → await 持久化 → 失败回滚后 rethrow」的唯一实现（`packages/core/src/foundation/optimistic-update.ts`，提供 `runOptimisticUpdate`/`optimisticUpdate`/`refCell` 三形态）；错误映射到既有错误面（toast / actionError / saveError 标志）由调用方或字段 module 承接。RPC 设置项字段编排（`setting-field` module）与 settings 域全部乐观写现场均收编于此协议。**Avoid**：手写 prev/rollback 快照样板、组件内 try/catch 回滚、置标志式失败语义。
 
