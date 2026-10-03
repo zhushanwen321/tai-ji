@@ -222,6 +222,67 @@ describe('detectSkillTriggerFromEl query 合法性过滤（D5 误弹缓解）', 
   })
 })
 
+describe('chip spacer（ZWSP）边界：Tab 确认后直接敲 /（多 skill 连续注入主链路）', () => {
+  let cleanup: () => void = () => {}
+  beforeEach(() => {
+    window.getSelection()?.removeAllRanges()
+  })
+  afterEach(() => {
+    cleanup?.()
+  })
+
+  it('detect：\u200B/rev（chip spacer 后直接敲 /）→ {query:"rev"}', () => {
+    const el = document.createElement('div')
+    el.textContent = '\u200B/rev'
+    document.body.appendChild(el)
+    cursorAt(el.firstChild as Text, 5)
+    expect(detectSkillTriggerFromEl(el)).toEqual({ query: 'rev' })
+    el.remove()
+  })
+
+  it('互斥回归：\u200B/rev 不触发命令域（ZWSP 既非行首也非 \\n）', () => {
+    const el = document.createElement('div')
+    el.textContent = '\u200B/rev'
+    document.body.appendChild(el)
+    cursorAt(el.firstChild as Text, 5)
+    expect(detectSlashTriggerFromEl(el)).toBeNull()
+    el.remove()
+  })
+
+  it('编排（Tab 后真实 DOM 形态）：chip + ZWSP + query → 只亮 skill 路（命令路 hasChip 抑制收 null）', () => {
+    const c = setup(
+      '<span class="slash-chip"><span class="chip-label">/commit</span></span>\u200B/rev',
+    )
+    // 光标在 spacer 文本节点「\u200B/rev」末尾（insertChipAtSelection 落位 + 用户续敲的真实形态）
+    cursorAt(c.el.childNodes[1] as Text, 5)
+    c.onInput()
+    expect(c.callbacks.onSkillTrigger).toHaveBeenCalledWith({ query: 'rev' })
+    expect(c.callbacks.onSlashTrigger).toHaveBeenCalledWith(null)
+    cleanup = c.cleanup
+  })
+
+  it('连续注入链：两个 chip + ZWSP + query 仍命中（N 个 skill 同理）', () => {
+    const c = setup(
+      '<span class="slash-chip"><span class="chip-label">a</span></span>\u200B' +
+        '<span class="slash-chip"><span class="chip-label">b</span></span>\u200B/rev',
+    )
+    cursorAt(c.el.childNodes[3] as Text, 5)
+    c.onInput()
+    expect(c.callbacks.onSkillTrigger).toHaveBeenCalledWith({ query: 'rev' })
+    expect(c.callbacks.onSlashTrigger).toHaveBeenCalledWith(null)
+    cleanup = c.cleanup
+  })
+
+  it('clearSkillQueryText：只删 /query 段，ZWSP spacer 保留（getText 剥 ZWSP 后为空）', () => {
+    const c = setup('\u200B/rev')
+    cursorAt(c.el.firstChild as Text, 5)
+    c.clearSkillQueryText()
+    expect(c.getText()).toBe('')
+    expect(c.callbacks.onInput).toHaveBeenCalledWith('')
+    cleanup = c.cleanup
+  })
+})
+
 describe('useContenteditableInput skill 分路编排（D1/D2）', () => {
   let cleanup: () => void = () => {}
   beforeEach(() => {

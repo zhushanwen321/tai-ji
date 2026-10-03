@@ -47,8 +47,8 @@ export const ACTIVE_TOKEN_DOMAIN_PATTERN_SOURCES: Readonly<Record<ActiveTokenDom
   session: '(?:^|\\s)#',
   /** 行首或空白后 @（subagent 域）——对齐 detectSubagentTriggerFromEl */
   subagent: '(?:^|\\s)@',
-  /** 行中非换行空白后 /（skill 域，与行首命令域正则互斥）——对齐 detectSkillTriggerFromEl */
-  skill: '[^\\S\\n]\\/',
+  /** 行中非换行空白或 chip spacer（ZWSP）后 /（skill 域，与行首命令域正则互斥）——对齐 input-dom SKILL_TRIGGER_PATTERN */
+  skill: '(?:[^\\S\\n]|\\u200B)\\/',
 }
 
 /** 正则元字符转义惯用法（query 是用户输入文本，动态拼入正则前必须转义，防语义漂移误匹配） */

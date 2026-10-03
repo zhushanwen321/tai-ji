@@ -363,19 +363,31 @@ export function detectSlashTriggerFromEl(el: HTMLDivElement | null): { query: st
 const SKILL_QUERY_PATTERN = /^[a-z0-9-]{0,64}$/
 
 /**
- * skill 触发检测（多 skill 注入设计 D1）：行中空白（非换行）后 `/` 触发 skill-only 浮层。
+ * skill 触发域完整 pattern（边界 + `/` + query 捕获，多 skill 注入设计 D1）——SSOT：
+ * detect（detectSkillTriggerFromEl）与 clearSkillQueryText（contenteditable.ts）同源消费，
+ * 禁止两处手写字面量漂移。
  *
- * 正则 /[^\S\n]\/(\S*)$/：`[^\S\n]` = 空白但非换行（半角空格/tab/全角空格 U+3000/NBSP
- * 全覆盖，对齐 `#`/`$`/`@` 的 \s 空白语义仅排除 \n）——行首与换行后行首完整让位现有
- * 命令浮层（detectSlashTriggerFromEl），两正则触发域互斥无重叠（D1 仲裁：行首归命令，
- * 行中空白后归 skill），同一次输入至多一路命中。
+ * 边界类 `(?:[^\S\n]|\u200B)` = 非换行空白（半角空格/tab/全角空格 U+3000/NBSP——\s 空白
+ * 语义仅排除 \n，对齐 `#`/`$`/`@`）∪ ZWSP（chip spacer）。收编 ZWSP 的原因：Tab 确认插
+ * chip 后 `insertChipAtSelection` 在 chip 后落 `\u200B` spacer 锚定光标，用户连续注入的
+ * 下一个 `/` 前缀恰是它——`\u200B` 非 `\s`，不入域则「chip 后直接敲 /」是触发死区（两域
+ * 都 null，浮层不弹，多 skill 连续注入主链路断裂）。
+ *
+ * 互斥性（D1 仲裁）：ZWSP 既非 `^` 也非 `\n`，本 pattern 与命令域 `(?:^|\n)\/(
+ * \S*)$` 触发域无重叠——行首与换行后行首完整让位命令浮层。
+ */
+export const SKILL_TRIGGER_PATTERN = /(?:[^\S\n]|\u200B)\/(\S*)$/
+
+/**
+ * skill 触发检测（多 skill 注入设计 D1）：行中空白或 chip spacer（ZWSP）后 `/` 触发
+ * skill-only 浮层（pattern 语义与互斥性见 SKILL_TRIGGER_PATTERN 注释）。
  *
  * query 合法性过滤（D5 翻案后的误弹缓解）：query 一旦含 `/`、大写、下划线等 skill 名
  * 非法字符立即返回 null（关闭浮层）——「帮我看看 /usr」输到第二个 `/` 即关闭（场景 6①）。
  * 返回 null 的两种含义（无光标 / 不命中或 query 非法）由调用方语境区分（同四符号前置约定）。
  */
 export function detectSkillTriggerFromEl(el: HTMLDivElement | null): { query: string } | null {
-  const hit = matchTriggerBeforeCursor(el, /[^\S\n]\/(\S*)$/)
+  const hit = matchTriggerBeforeCursor(el, SKILL_TRIGGER_PATTERN)
   if (!hit) return null
   return SKILL_QUERY_PATTERN.test(hit.query) ? hit : null
 }
