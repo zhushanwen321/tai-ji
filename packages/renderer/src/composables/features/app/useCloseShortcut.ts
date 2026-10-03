@@ -11,7 +11,7 @@
  *
  * 跨平台：before-input-event 主进程侧已处理 mac(meta)/win-linux(control)，renderer 只收 type。
  *
- * 调用方：Workspace.vue onMounted 调用一次（与 useBrowserFocusSync 并列）。
+ * 调用方：Workspace.vue setup 顶层调用一次（与 useBrowserFocusSync 并列）。
  * 生命周期跟随组件，onScopeDispose 自动退订。
  */
 import { onScopeDispose } from 'vue'

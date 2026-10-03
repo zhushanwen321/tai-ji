@@ -180,7 +180,7 @@ function onInjectFileRef(path: string): void {
 }
 
 /**
- * 点击文件项 → 跳 detail tab 查看 diff（复刻 FileTreeRow.onSelectFile 模式）。
+ * 点击文件项 → 跳 detail tab 查看 diff（复刻 FileView.onSelectRow 模式）。
  * - selectFile 设 store.selectedPaths[sessionId] 并同步注入 detail tab（W3 注入语义）
  * - drawer.open('detail') 打开抽屉切 detail tab
  *

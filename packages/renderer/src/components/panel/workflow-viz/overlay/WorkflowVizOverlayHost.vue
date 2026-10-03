@@ -5,7 +5,9 @@
   （u5 WorkflowLivePanel，slot 填充位）。本组件是 u4 壳注释中「挂载方」与 u5 面板注释中
   「overlay 容器」的落点：
 
-  - 数据源：控制器（workflow-viz-overlay.ts，模块级单例）持开关/当前 run/DAG 态；run
+  - 数据源：开合/当前内容读 core/domain/overlay（SSOT，u-w1-core 迁移——workflow-viz-overlay
+    的 overlayOpen/overlayCurrent 已退役）；DAG 解析态（overlayDag/overlayDagError）留
+    renderer 控制器 workflow-viz-overlay.ts；run
     投影从 workflowStore 分区按 runId 选中（recordsOf 响应式读，workflowUpdate 信号触发
     的重新拉取经 store 自动到达）；节点六态/当前 phase/已用时长在本容器单处派生后经
     props 透传（壳与面板均为已派生输入，不自行判定）。

@@ -35,13 +35,14 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', 'test-re
 
 /**
  * 实测快照（来源：console-noise-triage §2 前提 3 census + C-1 实施期复测，两期口径
- * 一致；13 个文件各 1 处非测试调用点，含模块级 2 处 drawer/control.ts 与
- * useSessionTrace.ts）。复核方式：`node scripts/check-session-scoped-state-census.mjs`
- * 干跑，按输出与下表逐文件对账；计数不符即 exit 3。
+ * 一致；创生时点 13 个文件各 1 处非测试调用点，含模块级 2 处 drawer/control.ts 与
+ * useSessionTrace.ts；后续增量见下方各 [注记]，来源在括号内标注）。
  * [display-containers §6.6 W0 五字段迁出] 新增 drawer/selection/ 五处内容域/瞬时参数分区
  * （subagent/workflow/bash-task/btw/transient——选中态迁出 DrawerControlState 的落点）。
  * [display-containers §7.1 u-w1-core] 新增 bottom-drawer/control.ts（底抽屉 per-session
- * 开合分区，bindDrawerSessionId 同款模块级单例）。 */
+ * 开合分区，bindDrawerSessionId 同款模块级单例）。
+ * [quality-gates，main 线 5c190c7bb] 新增 BtwPanel.vue / useBtwTabData.ts 两处（非本设计引入，
+ * 快照增量对账用注记——免翻 commit message 即可解释 21-13-6=2 差值）。 */
 export const CENSUS_SNAPSHOT = {
   'packages/core/src/domain/bottom-drawer/control.ts': 1,
   'packages/core/src/domain/drawer/control.ts': 1,

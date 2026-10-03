@@ -1,8 +1,10 @@
 /**
  * useBrowserFocusSync —— 切 session 时同步主进程 WebContentsView 焦点（Wave 4 per-session 隔离）。
  *
- * 职责：watch focusedSessionId 变化 → browserFocus(newSid) → 主进程 swap visible view。
- * 确保切 session 时屏幕只显示新 session 的 browser view（隐藏其他 session 的可见 view）。
+ * 职责：watch focusedSessionId 变化 → browserFocus(newSid) → 主进程 hide-only 收口换显
+ * （display-containers §7.4 R3：恒只隐藏不显示 + 浮层随行豁免，显示唯一触发 =
+ * browser-view-manager.applyDisplay 统一谓词）。
+ * 确保切 session 时不会残留其他 session 的可见 view（防多 view 同屏/残影经 focus 旁路复显）。
  *
  * 为什么需要独立 composable 而非依赖 BrowserPane 的 mount/unmount：
  * - mount/unmount 驱动的 view swap 是隐式的，依赖 Vue 渲染时序
@@ -33,7 +35,7 @@ export function useBrowserFocusSync(): void {
    */
   const { focusedSessionId } = storeToRefs(panel)
 
-  // 切 session 时通知主进程 swap visible view。
+  // 切 session 时通知主进程收口换显（hide-only + 浮层随行豁免）。
   // immediate: true 覆盖首次挂载（此时可能已有 session 聚焦，确保 view 状态正确）。
   // null sid（无 session）时跳过——无 session 时主进程无需 swap。
   watch(

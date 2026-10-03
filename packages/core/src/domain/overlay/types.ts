@@ -6,7 +6,7 @@
  * （开新内容替换旧内容；多实例 tab 条 W4 才加维度）。**SSOT 迁移**：renderer 既有
  * workflow-viz-overlay.ts 的 overlayOpen / overlayCurrent 模块级 ref 随 u-w1-core 同 PR 退役
  * （DAG 缓存留 renderer）——开合态只保留 core 一份，禁止 core/renderer 双权威并存。
- * workflow 浮层载荷与 overlayCurrent 现状 `{ sessionId, runId }` 同构（SSOT 迁移对账锚）。
+ * workflow 浮层载荷与迁移前 overlayCurrent `{ sessionId, runId }` 同构（SSOT 迁移对账锚）。
  */
 
 /** 浮层内容类型（§7.2 浮层 2 条目：browser（网页）/ workflow（工作流图）） */
@@ -23,7 +23,7 @@ export interface BrowserOverlayPayload { // oe-exempt:20261003:framework:类型�
   sessionId: string
 }
 
-/** workflow 浮层载荷（与 renderer workflow-viz-overlay.ts overlayCurrent 现状字段同构，SSOT 迁移对账锚） */
+/** workflow 浮层载荷（与 renderer workflow-viz-overlay.ts 迁移前 overlayCurrent 字段同构，SSOT 迁移对账锚） */
 export interface WorkflowOverlayPayload { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费面
   sessionId: string
   runId: string

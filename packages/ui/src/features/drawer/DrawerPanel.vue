@@ -3,9 +3,11 @@
 
   迁移自 renderer components/panel/SideDrawer.vue 的「跨端共享容器」部分（drawer 域归位
   第三步：W1 控制态/协同进 core、W3 容器组件进 ui 包）。
-  桌面独占内容面板（GitPanel/TerminalView/BrowserPane/CommandDocPanel/DetailPane）
+  桌面独占内容面板（GitPanel/CommandDocPanel/DetailPane/SubagentTab 等）
   留壳 slot 挂载（D5 硬编码占位，不走 contribution 路由）——本组件经默认 slot 接收，
   空态（activeTabMeta 驱动）作为 slot fallback（C2）。
+  [display-containers §7.6 迁移终态] TerminalView 现挂 PanelContainer 底抽屉块、
+  BrowserPane 现挂浮层壳（BrowserOverlay），均不再是本组件 slot 内容。
   [P4 s5 drawer-widget-removal] 内置 widget 内容区（gui/lines/status footer）已删：
   旧 extension:widget/widgetGui/status 通道由 PluginViewContainer 承接。
 
@@ -62,7 +64,7 @@
         <slot name="header-extra" />
       </div>
 
-      <!-- 内容区：壳按 tab 经默认 slot 注入桌面独占面板（Git/Terminal/Browser 等）；
+      <!-- 内容区：壳按 tab 经默认 slot 注入桌面独占面板（Git/Doc/Detail 等）；
            slot 无有效内容时（v-if chain 全 false / 跨端不传 slot）回退空态占位（activeTabMeta 驱动）。
            用 hasDesktopPanelContent() 而非 `<slot>` fallback：父组件提供 slot 函数但运行时为空时，
            Vue 的 slot fallback 不生效，需显式判断渲染结果。 -->
@@ -103,7 +105,7 @@ const slots = useSlots()
 /**
  * 默认 slot 是否有有效内容（非注释节点）。
  * C2 契约：桌面壳按 tab 经默认 slot 注入独占面板（Git/Doc/Detail/Subagent 等），
- * 无匹配面板时（如 browser 无 url）不注入 → 应回退空态占位。但 Vue `<slot>` 的
+ * 无匹配面板时（如未选中后台任务时 bashTask 不注入）不注入 → 应回退空态占位。但 Vue `<slot>` 的
  * fallback 只在「父组件未提供 slot 函数」时生效——PanelContainer 的 v-if chain 使 slot 函数
  * 始终存在（运行时渲染为空/注释节点），故需在此显式判断渲染结果，空则走空态。
  * 非 computed：slots.default() 返回的 VNode 无响应式依赖，computed 缓存不失效；

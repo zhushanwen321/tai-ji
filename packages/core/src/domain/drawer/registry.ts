@@ -10,8 +10,7 @@
  * §7.7 双形态契约：注册表条目即唯一权威，ui 壳组件与 core 协调函数都读它，禁止各自文字化。
  *
  * [HISTORICAL] W0 行为不变锚（u-foundation）：数据源切换当刻条目数与显示序与旧硬编码一致（旧 10 条）。
- * 收窄后（W1）DrawerPanel L1 曾读 RIGHT_DRAWER_W0_ENTRIES（9 条）；终态容器归属 = CONTAINER_REGISTRY
- * （右 8/底 1/浮 2，§7.2）。
+ * 终态容器归属 = CONTAINER_REGISTRY（右 8/底 1/浮 2，§7.2）。
  *
  * 状态：纯数据注册表，无行为实装（类型契约不实装行为）。终态容器归属 = CONTAINER_REGISTRY
  * （右 8/底 1/浮 2，§7.2）；右抽屉数组以 ContainerRegistryEntry<RightDrawerTab> 实例化——

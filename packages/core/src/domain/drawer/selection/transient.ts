@@ -2,11 +2,12 @@
  * 瞬时参数（selectedCommandName / detailFilePath）——display-containers §6.6②：从全局单例
  * 改为按会话分区（W0 还债）。解决「跨会话劫持首次打开」：A 会话的链接点击不再被 B 会话的
  * 旧参数污染（改前全局单例 = 跨会话串写）。「切回 A 恢复 A 的文件详情」不在 W0 承诺内——
- * detail 展示链另有 fileTreeStore.selectedPath 全局单值与 DetailPane 单实例态两个全局点，
- * 由 W3 的 useDetailPane 单值→map 改造顺带解决（§7.1 瞬时参数范围说明）。
+ * 原 detail 展示链 selectedPath 全局单值与 DetailPane 单实例两个全局点已随 display-containers
+ * W3 per-session 化（fileTree.ts selectedPaths/detailTabs，useDetailPane 单值→map）终局解决
+ * （§7.1 瞬时参数范围说明）。
  *
  * 语义（迁移保持）：打开时写入、按消费语义清除——selectedCommandName 是 CommandDocPanel
- * 的活数据源（连续 computed 读取、不清空）；detailFilePath 由 useDetailPane watch 消费后
+ * 的活数据源（连续 computed 读取、不清空）；detailFilePath 由 useDetailPane 消费后
  * 置 null（避免残留导致下次打开 detail tab 被旧值劫持）。
  *
  * 读取面 = 可写 computed（名字沿用旧全局 ref：selectedCommandName / detailFilePath），

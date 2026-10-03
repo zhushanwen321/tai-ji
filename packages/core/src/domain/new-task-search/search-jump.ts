@@ -12,7 +12,7 @@
  * 数据流：SearchModal.confirmSel → confirm(item, ctx) → type switch →
  *   command: AppCommand → commandStore 取 action 执行；
  *            slash 命令 → commandStore.requestSlashInjection 写一次性通道（Composer watch 消费调 insertSlashChip）
- *   file: 直调 fileRead（AC-6.9 不经 useDetailPane 的预览加载吞错层）→ 成功后 selectFile 触发 useDetailPane watch 链渲染
+ *   file: 直调 fileRead（AC-6.9 不经 useDetailPane 的预览加载吞错层）→ 成功后 selectFile 同步注入 detail tab 分区（W3），DetailPane 挂载后拉起加载渲染
  *   session: selectSession（id 经 sessionList 按 title 反查，因 SearchItem 无 id 字段）
  *   symbol: 占位不跳转（D-001）
  * → useRecents.write + 返回 JumpResult（AC-6.7：成功才关浮层，失败浮层保持打开）
@@ -104,7 +104,7 @@ export function useSearchJump(deps: SearchDeps) {
       writeRecent(item)
       // drawerTab:'detail' 提示调用方（SearchModal）打开 SideDrawer detail tab——
       // DetailPane 只在 activeTab==='detail' 时挂载，selectFile 单独注入 tab 无法立即渲染。
-      // 对比 FileTreeRow.onSelectFile：selectFile(path) + drawer.open('detail') 双步，此处同构。
+      // 对比 FileView.onSelectRow：selectFile(path) + drawer.open('detail') 双步，此处同构。
       return { ok: true, drawerTab: 'detail' }
     } catch (e) {
       // AC-6.5：file.read reject → {ok:false}（直调使 reject 真冒泡，不经吞错层）

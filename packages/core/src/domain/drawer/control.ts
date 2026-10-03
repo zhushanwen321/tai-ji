@@ -103,9 +103,9 @@ const controlState = useSessionScopedState<DrawerControlState>(
  * closeDrawer / toggleDrawer / setDrawerTab / openSubagent / openWorkflowInDrawer /
  * setBtwView / selectBackgroundTask（C2 契约）。
  *
- * 与 renderer 原 openInternal 的差异：瞬时参数与选中态不在此写入——它们是 coordination
- * 层职责（opts 归 coordination.openDrawerTab，选中态归 selection/<域>），control 保持
- * 纯控制态（C4 单向依赖防循环）。
+ * drawerControl 现行职责：只写纯控制态（isOpen/activeTab）——瞬时参数与选中态不在此
+ * 写入，它们是 coordination 层职责（opts 归 coordination.openDrawerTab，选中态归
+ * selection/<域>），control 保持纯控制态（C4 单向依赖防循环）。
  */
 export const drawerControl = {
   /** 打开抽屉（当前分区），可指定初始 tab */

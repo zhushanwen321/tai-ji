@@ -14,8 +14,9 @@
     浮层模式。[U7] subagent/agent call 详情走 drawer tab（SubagentTab/WorkflowTab），PanelHeader
     不再承载 overlay 返回/标题/JSONL 路径（那套展示层已随 overlay 移除）。本容器渲染跨端共享容器
     DrawerPanel（@taiji/ui/features/drawer，W3 迁移自旧
-    SideDrawer.vue），并按 C2 contract 经默认 slot 注入桌面独占内容面板（GitPanel/TerminalView/
-    SubagentTab 等，v-if chain 对齐旧 SideDrawer 内容区结构）。git 状态唯一数据源在此层 provide
+    SideDrawer.vue），并按 C2 contract 经默认 slot 注入桌面独占内容面板（GitPanel/SubagentTab
+    等，v-if chain 对齐注册表终态 8 员；TerminalView 现挂本文件 bottom-drawer 块——
+    display-containers §7.6）。git 状态唯一数据源在此层 provide
     （按 panel 的 session），GitPanel 注入共享。
 
     壳层职责（W3 C3 裁决，旧 SideDrawer 逻辑迁移至此）：ESC 关闭
@@ -107,12 +108,12 @@
           @close="closeDrawer"
           @set-tab="onDrawerSetTab"
         >
-          <!-- 桌面独占内容面板（C2 v-if chain，对齐旧 SideDrawer 内容区结构）：
+          <!-- 桌面独占内容面板（C2 v-if chain；分支与 RIGHT_DRAWER_REGISTRY 终态 8 员一一对应）：
                Git tab → GitPanel（inject GIT_STATUS_KEY，非 git 仓库组件内自隐藏走空态）
                Doc tab → CommandDocPanel（selectedCommandName 由 core 瞬时参数指定）
-               Detail tab → DetailPane（useDetailPane watch selectedPath 自动加载）
-               Browser tab → 无 URL 注入链（browserUrl 死链已删）→ DrawerPanel 空态 fallback
-               Terminal tab → TerminalView（PTY 优先，交互式终端） -->
+               Detail tab → DetailPane（W3 多文件 tab：selectFile 同步注入 detail 分区，store 响应式自动加载）
+               browser/terminal 已迁出本链（display-containers §7.6）——terminal 归底抽屉（本文件
+               bottom-drawer 块 TerminalView 挂载点），browser tab 已删除、能力在浮层壳复活 -->
           <!-- session-trace inspector（D5b 临时上下文页）：选中 trace 行时切入 default slot
                最前（v-if chain 首项——优先于 activeTab 面板，点击即明确意图）；「← 返回」清
                selectedKey 后回到 activeTab 内容（复原前 tab，RightDrawerTab 体系不变）。

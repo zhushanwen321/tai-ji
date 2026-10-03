@@ -22,7 +22,7 @@ import type {
 // kind 双员（browser / workflow）
 const overlayKinds: OverlayKind[] = ['browser', 'workflow']
 
-// 判别联合：browser 载荷 url+sessionId（发起会话，URL 注入链）/ workflow 载荷 sessionId+runId（与 overlayCurrent 现状同构）
+// 判别联合：browser 载荷 url+sessionId（发起会话，URL 注入链）/ workflow 载荷 sessionId+runId（与迁移前 overlayCurrent 同构）
 const browserContent: OverlayContent = { kind: 'browser', payload: { url: 'http://127.0.0.1:5173/', sessionId: 'sess-1' } }
 const workflowContent: OverlayContent = { kind: 'workflow', payload: { sessionId: 'sess-1', runId: 'run-1' } }
 
@@ -54,7 +54,7 @@ describe('overlay 开合态类型契约（§7.1 单例 kind/payload 换内容）
     expect(openState.current).toBe(workflowContent)
   })
 
-  it('payload 形状：browser=URL 注入链（url + 发起会话）/ workflow=与 overlayCurrent 现状同构（SSOT 迁移对账锚）', () => {
+  it('payload 形状：browser=URL 注入链（url + 发起会话）/ workflow=与迁移前 overlayCurrent 同构（SSOT 迁移对账锚）', () => {
     expect(browserContent).toEqual({ kind: 'browser', payload: { url: 'http://127.0.0.1:5173/', sessionId: 'sess-1' } })
     expect(workflowContent).toEqual({ kind: 'workflow', payload: { sessionId: 'sess-1', runId: 'run-1' } })
   })
