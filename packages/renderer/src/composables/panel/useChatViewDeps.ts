@@ -24,7 +24,7 @@
  * - renderMermaid（mermaid.ts）→ renderMermaid
  * - assistantToMarkdown（messageFormat.ts）→ toMarkdown
  */
-import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, onScopeDispose, ref, watch, type ComputedRef, type Ref } from 'vue'
 import type { FileNode, Message, Segment } from '@taiji/shared'
 import type { ChatViewDeps } from '@taiji/ui'
 import { useChatStore } from '@/stores/chat'
@@ -33,6 +33,7 @@ import { useChat } from '@/composables/features/chat/useChat'
 import { useTurnExpansion } from '@/composables/panel/useTurnExpansion'
 import { useSideDrawer, type RightDrawerTab } from '@/composables/features/drawer/useSideDrawer'
 import { openBrowser } from '@taiji/core/domain/overlay'
+import * as events from '@taiji/core/transport/api'
 import { useFileTreeStore } from '@/stores/fileTree'
 import { useFileSearch } from '@/composables/features/search/useFileSearch'
 import { triggerEnterForkMode } from '@/composables/panel/useForkModeChannel'
@@ -46,6 +47,13 @@ import {
 import { renderMermaid } from '@/composables/logic/mermaid'
 import { assistantToMarkdown } from '@/composables/logic/messageFormat'
 import { collectBasenames, collectFilePaths } from '@/lib/file-basename'
+
+/** Set 内容等价（大小 + 逐成员），白名单去重赋值的判等基础 */
+function setsEqual(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false
+  for (const v of a) if (!b.has(v)) return false
+  return true
+}
 
 /**
  * 装配 ChatViewDeps。
@@ -71,8 +79,9 @@ export function useChatViewDeps(
 
   /** 当前 session 的本地文件白名单（filePaths 含 / 路径 + localFiles 裸 basename）。
    *  对齐旧 MarkdownRenderer 的 refreshLocalFiles：sessionId 变化重新 load（无缓存，
-   *  缓存治理 U1 1-3 退役——每次现拉 file.search），fire-and-forget RPC 完成后赋值触发重渲染。
-   *  renderMarkdown 消费这两个 Set 作 markdown 路径/basename 链接化白名单。 */
+   *  缓存治理 U1 1-3 退役——每次现拉 file.search），fire-and-forget RPC 完成后赋值触发重渲染；
+   *  另有 agent turn settled 刷新（下方订阅，覆盖 turn 内新建文件）。renderMarkdown 消费
+   *  这两个 Set 作 markdown 路径/basename 链接化白名单。 */
   const filePaths = ref<Set<string>>(new Set())
   const localFiles = ref<Set<string>>(new Set())
   async function refreshLocalFiles(sid: string | null): Promise<void> {
@@ -87,8 +96,13 @@ export function useChatViewDeps(
       // 新 session——迟到的 file.search 结果属旧 session，写入会跨 session 串台（新 session 的
       // markdown 路径按旧文件集判定链接化）。不等则整体丢弃，由新 session 自己的加载负责落位。
       if (sid !== sessionId.value) return
-      filePaths.value = collectFilePaths(nodes)
-      localFiles.value = collectBasenames(nodes)
+      const nextPaths = collectFilePaths(nodes)
+      const nextBasenames = collectBasenames(nodes)
+      // 内容等价 → 不赋值：保持 Set 引用稳定（env 签名不变 → 增量渲染缓存不失效、已完成
+      // 消息不重渲染）。turn-settle 每 turn 触发一次刷新，绝大多数 turn 文件集未变。
+      if (setsEqual(filePaths.value, nextPaths) && setsEqual(localFiles.value, nextBasenames)) return
+      filePaths.value = nextPaths
+      localFiles.value = nextBasenames
     } catch (e) {
       // 降级：load 失败时白名单为空集，markdown 路径降级纯文本（与无 env 一致，无回归）。
       // 同样受代际守卫约束：旧 session 的失败结果不得清空新 session 已加载的白名单。
@@ -101,6 +115,31 @@ export function useChatViewDeps(
     }
   }
   watch(sessionId, (sid) => { void refreshLocalFiles(sid) }, { immediate: true })
+
+  /** agent turn settled → 白名单刷新（complete / error 收口帧均触发；abort 经 complete{stopReason:'aborted'}）。
+   *  动机（2026-10-03 display-containers 交付复盘缺陷）：白名单快照在会话视图挂载时拉取（上方
+   *  watch 只随 sessionId 变化重拉），turn 内 agent 新建/删除的文件不进白名单 → 该 turn 回复里
+   *  反引号引用的新落盘文件路径不链接化（纯文本死链）。turn 收口帧是天然刷新锚点：此时本 turn
+   *  的全部写盘已完成。内容等价守卫保证无文件变化的 turn 零赋值零重渲染，常态成本 = 一次
+   *  file.search RPC。
+   *  订阅生命周期：裸 events.on（useSessionEvents 有 getCurrentInstance 守卫，本装配器存在
+   *  effectScope 直调形态不满足）+ watch(sessionId) 重订 + onScopeDispose 退订；切 sid 边界的
+   *  迟到帧由 refreshLocalFiles 内代际守卫兜底。 */
+  let unsubTurnSettle: (() => void) | null = null
+  watch(sessionId, (sid) => {
+    unsubTurnSettle?.()
+    unsubTurnSettle = null
+    if (!sid) return
+    unsubTurnSettle = events.on(sid, (msg) => {
+      if (msg.type === 'message.complete' || msg.type === 'message.error') {
+        void refreshLocalFiles(sid)
+      }
+    })
+  }, { immediate: true })
+  onScopeDispose(() => {
+    unsubTurnSettle?.()
+    unsubTurnSettle = null
+  })
 
   /** 按 id 查 session cwd（sessionStore.list 线性查，与 useDetailPane.sessionCwd 同源同层）。
    *  resourceBaseDir env 装配与 deps.sessionCwdOf（ui MarkdownRenderer ④路 props 缺省

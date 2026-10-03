@@ -18,6 +18,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { computed, defineComponent, h, inject, provide, nextTick, effectScope, ref, type EffectScope, type ComputedRef } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { ChatViewDepsKey, type ChatViewDeps } from '@taiji/ui'
+import * as events from '@taiji/core/transport/api'
 import type { FileNode } from '@taiji/shared'
 
 const mockRenderMarkdownSegments = vi.fn(async () => [{ type: 'text', content: '<p>x</p>' }])
@@ -159,7 +160,9 @@ describe('useChatViewDeps — resourceBaseDir 传值矩阵（对话流 cwd 装�
 
   it('sessionId ref 变化（切 session）→ 下次装配取新 cwd（响应式）', async () => {
     const sid = ref('s1')
-    const deps = useChatViewDeps(sid)
+    // 经 assemble（effectScope）装配：装配器现在持有 events.on 订阅（turn-settle 刷新），
+    // 裸调会在本用例结束时泄漏事件注册表条目（无 scope 承接 onScopeDispose）
+    const deps = assemble(sid)
     await deps.renderMarkdown('a')
     expect((mockRenderMarkdownSegments.mock.calls[0]?.[1] as { resourceBaseDir?: string }).resourceBaseDir).toBe('/home/demo/project-a')
     sid.value = 's2'
@@ -283,5 +286,79 @@ describe('useChatViewDeps — 文件白名单代际守卫（RD-1#1：迟到 file
     await deps.renderMarkdown('after-late-failure')
     const env = mockRenderMarkdownSegments.mock.calls.at(-1)![1] as { filePaths: Set<string> }
     expect([...env.filePaths]).toEqual(['/proj-b/s2-file.ts'])
+  })
+})
+
+describe('useChatViewDeps — turn settled 白名单刷新（agent 落盘文件进入链接白名单）', () => {
+  it('message.complete（本 session）→ 重拉 file.search，turn 内新建文件进入 filePaths 白名单', async () => {
+    const deps = assemble(ref('s1'))
+    await flushPromises()
+    expect(mockLoad).toHaveBeenCalledTimes(1) // 挂载时首拉
+    // turn 内 agent 新建文件：下一帧 complete 时 file.search 返回包含新文件的结果
+    mockLoad.mockResolvedValueOnce([fileNode('new-doc.md', '/proj-a/docs/todo/new-doc.md')])
+    events.dispatchSession('s1', { type: 'message.complete', payload: { sessionId: 's1' } })
+    await flushPromises()
+    expect(mockLoad).toHaveBeenCalledTimes(2)
+    await deps.renderMarkdown('after-turn')
+    const env = mockRenderMarkdownSegments.mock.calls.at(-1)![1] as { filePaths: Set<string> }
+    expect(env.filePaths.has('/proj-a/docs/todo/new-doc.md')).toBe(true)
+  })
+
+  it('message.error（本 session）同样触发刷新（turn 异常收口，写盘可能已发生）', async () => {
+    assemble(ref('s1'))
+    await flushPromises()
+    expect(mockLoad).toHaveBeenCalledTimes(1)
+    mockLoad.mockResolvedValueOnce([fileNode('w.md', '/proj-a/w.md')])
+    events.dispatchSession('s1', { type: 'message.error', payload: { sessionId: 's1', message: 'x' } })
+    await flushPromises()
+    expect(mockLoad).toHaveBeenCalledTimes(2)
+  })
+
+  it('其他 session 的 complete 不触发本装配器刷新（订阅按 sid 隔离）', async () => {
+    assemble(ref('s1'))
+    await flushPromises()
+    expect(mockLoad).toHaveBeenCalledTimes(1)
+    events.dispatchSession('s2', { type: 'message.complete', payload: { sessionId: 's2' } })
+    await flushPromises()
+    expect(mockLoad).toHaveBeenCalledTimes(1)
+  })
+
+  it('内容等价守卫：无文件变化的 turn 重拉但 Set 引用恒等（增量渲染缓存不失效、零重渲染）', async () => {
+    mockLoad.mockResolvedValue([fileNode('a.ts', '/proj-a/a.ts')])
+    const deps = assemble(ref('s1'))
+    await flushPromises()
+    await deps.renderMarkdown('before')
+    const envBefore = mockRenderMarkdownSegments.mock.calls.at(-1)![1] as { filePaths: Set<string> }
+    events.dispatchSession('s1', { type: 'message.complete', payload: { sessionId: 's1' } })
+    await flushPromises()
+    await deps.renderMarkdown('after')
+    const envAfter = mockRenderMarkdownSegments.mock.calls.at(-1)![1] as { filePaths: Set<string> }
+    expect(mockLoad).toHaveBeenCalledTimes(2) // 刷新发生了
+    expect(envAfter.filePaths).toBe(envBefore.filePaths) // 但引用恒等 → env 签名不变 → 不重建
+  })
+
+  it('切 session 后旧 sid 的 complete 不再触发刷新（重订退订），新 sid 正常触发', async () => {
+    const sid = ref('s1')
+    assemble(sid)
+    await flushPromises()
+    sid.value = 's2'
+    await flushPromises()
+    const callsAfterSwitch = mockLoad.mock.calls.length
+    events.dispatchSession('s1', { type: 'message.complete', payload: { sessionId: 's1' } })
+    await flushPromises()
+    expect(mockLoad.mock.calls.length).toBe(callsAfterSwitch)
+    events.dispatchSession('s2', { type: 'message.complete', payload: { sessionId: 's2' } })
+    await flushPromises()
+    expect(mockLoad.mock.calls.length).toBe(callsAfterSwitch + 1)
+  })
+
+  it('scope 销毁后退订（onScopeDispose）：complete 帧不再触发 load（无跨用例 handler 泄漏）', async () => {
+    assemble(ref('s1'))
+    await flushPromises()
+    scope?.stop()
+    const callsAfterStop = mockLoad.mock.calls.length
+    events.dispatchSession('s1', { type: 'message.complete', payload: { sessionId: 's1' } })
+    await flushPromises()
+    expect(mockLoad.mock.calls.length).toBe(callsAfterStop)
   })
 })
