@@ -332,6 +332,8 @@ export interface PiToolExecutionStartEvent extends PiBaseMessage {
   toolName: string
   /** pi 的规范字段名（pi 从不发 input）。 */
   args: Record<string, unknown>
+  /** pi 1.0.0：嵌套调用（工具经 ctx.executeTool 调其他工具）时携带的父调用 id；顶层调用缺省。taiji 原样透传不消费。 */
+  parentToolCallId?: string
 }
 
 export interface PiToolExecutionUpdateEvent extends PiBaseMessage {
@@ -344,6 +346,8 @@ export interface PiToolExecutionUpdateEvent extends PiBaseMessage {
    * 不强制具体类型（pi 不保证形态）。
    */
   partialResult: unknown
+  /** pi 1.0.0：嵌套调用时携带的父调用 id；顶层调用缺省。taiji 原样透传不消费。 */
+  parentToolCallId?: string
 }
 
 /**
@@ -363,6 +367,8 @@ export interface PiToolExecutionEndEvent extends PiBaseMessage {
   result: PiToolExecutionResult
   /** pi 必填字段（agent-session.ts 始终发送）。 */
   isError: boolean
+  /** pi 1.0.0：嵌套调用时携带的父调用 id；顶层调用缺省。taiji 原样透传不消费。 */
+  parentToolCallId?: string
 }
 
 /**
@@ -579,9 +585,13 @@ export interface PiGetMessagesData {
   messages: PiHistoryMessage[]
 }
 
-/** A single message in pi's conversation history. */
+/** A single message in pi's conversation history.
+ * pi 1.0.0 起 role 联合新增 'system'（系统提示词与工具集变更的持久化消息，
+ * 经 message_end 事件 + appendMessage 落盘；锚点 agent-session.js message_end
+ * 持久化分支 role==='system' 走 appendMessage）。taiji 对话流跳过 system 消息
+ *（event-adapter message_start/end 分流 + apply-entry reducer 不产渲染项）。 */
 export interface PiHistoryMessage {
-  role: 'user' | 'assistant' | 'toolResult'
+  role: 'user' | 'assistant' | 'toolResult' | 'system'
   content: PiHistoryContentPart[]
   timestamp?: number
   stopReason?: string
@@ -645,6 +655,8 @@ export type PiSessionEntry =
   | PiSessionCompactionEntry
   | PiSessionBranchSummaryEntry
   | PiSessionCustomMessageEntry
+  | PiSessionUsageEntry
+  | PiSessionContextEditEntry
 
 /**
  * 所有 entry 的公共字段（对应 pi SessionEntryBase，session-manager.ts:46-51）。
@@ -758,6 +770,34 @@ export interface PiSessionCustomMessageEntry extends PiSessionEntryBase {
 }
 
 /**
+ * usage entry（pi 1.0.0 新增：模型产生的非对话操作用量，不进 LLM 上下文）。
+ * 对应 pi UsageEntry（session-manager.js appendUsage 字面量：kind/provider/model/usage/note）。
+ * 当前已知 kind = 'cache_warm'（缓存保活请求）。taiji 消费：usage-stats-service 第 ⑤ 分类
+ * 计入用量页成本合计（不接入则 taiji 统计与 pi 自身统计口径出现缺口）；对话流不显示。
+ */
+export interface PiSessionUsageEntry extends PiSessionEntryBase {
+  type: 'usage'
+  kind: string
+  provider: string
+  model: string
+  usage: PiUsage
+  note?: string
+}
+
+/**
+ * context_edit entry（pi 1.0.0 新增：branch 内对更早 model 可见 entry 的编辑记录，不进 LLM
+ * 上下文——pi 官方语义是原始历史不变，重放时在投影层应用替换）。对应 pi ContextEditEntry
+ *（session-manager.js appendContextEdit 字面量：targetId/replacement）。
+ * replacement = null（删除语义）或 { content: string | content parts 数组 }。
+ * taiji 当前对话流不显示（原始历史不变的投影语义，PS-60 树重放链路按 unknown 跳过）。
+ */
+export interface PiSessionContextEditEntry extends PiSessionEntryBase {
+  type: 'context_edit'
+  targetId: string
+  replacement: null | { content: string | PiHistoryContentPart[] }
+}
+
+/**
  * get_entries RPC 请求（对应 pi rpc-types.ts:63 `{ type: "get_entries"; since?: string }`）。
  *
  * since 可选：传 entry id 时返回该 entry 之后的所有 entry（增量拉取，pi rpc-mode.ts:614-620
@@ -782,6 +822,35 @@ export interface GetEntriesResponse {
 }
 
 // ── Shared types ───────────────────────────────────────────────────
+
+/**
+ * pi 1.0.0 prompt/steer/follow_up 响应 data.disposition（B3）：这条输入的实际去向。
+ * - 'handled'：被扩展接管（斜杠命令 / input hook 返回 handled），不会产生 LLM turn；
+ * - 'queued'：排队等待（steering / followUp 队列或 streaming 中的 prompt）；
+ * - 'started'：已真正开始执行（会产生 LLM 流）。
+ * 锚点：pi dist/core/agent-session.d.ts QueuedInputDisposition = 'handled'|'queued'、
+ * PromptDisposition = QueuedInputDisposition|'started'；rpc-mode.js prompt/steer/follow_up
+ * 应答 success(id, cmd, { disposition })。steer/follow_up 恒为前两值；prompt 三值全可能。
+ * 界面消费（等待语义修正）属第二类组 2 设计，本层只做兼容解析。
+ */
+export type PiInputDisposition = 'handled' | 'queued' | 'started'
+
+/**
+ * 从 RPC 响应解析 disposition（B3 兼容式）：pi < 1.0.0 或 mock 无该字段 → undefined
+ *（调用方行为与现状完全一致）；非法值（协议漂移）→ undefined + warn 可观测。
+ */
+export function parseInputDisposition(msg: PiMessageLike): PiInputDisposition | undefined {
+  const value = msg.data?.disposition
+  if (value === undefined) return undefined
+  if (value === 'handled' || value === 'queued' || value === 'started') return value
+  console.warn(`[pi-protocol] disposition 非法值: ${String(value)}（协议漂移？），按缺失处理`)
+  return undefined
+}
+
+/** parseInputDisposition 的最小结构入参（PiMessage 的结构子集，避免 import 环）。 */
+export interface PiMessageLike {
+  data?: Record<string, unknown>
+}
 
 /**
  * pi Usage type — mirrors pi 源码字段名（input/output/cacheRead/cacheWrite/totalTokens）。

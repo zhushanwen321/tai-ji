@@ -1096,6 +1096,13 @@ function handleMessageStart(event: PiMessageStartEvent, sid: string): PiTranslat
   // 同属「内部记账」语义。过滤行为不变。
   if (role === 'user') return [{ kind: 'noop' }]
 
+  // pi 1.0.0 system role（B2）：系统提示词与工具集变更的持久化消息（declareToolChanges
+  // 注入的 toolsAdded/toolsRemoved 记录 + system prompt 快照），内部记账语义与 user/toolResult
+  // 同族——对话流不显示（原始历史不变），持久化侧经 message_end 落盘由 apply-entry reducer
+  // 处理（ PiSessionMessageEntry role 联合已登记 'system'）。start 侧转发会给前端建空气泡，
+  // 与 user/toolResult 同理由此跳过。
+  if (role === 'system') return [{ kind: 'noop' }]
+
   // toolResult 是 pi agent-core 工具执行完毕的内部记账（agent-loop.js emitToolResultMessage：
   // executeToolCalls 后 emit message_start/end{role:'toolResult'}）。
   // 前端已通过 tool_execution_end 拿到 output，toolResult message_start 对前端是噪声——
@@ -1154,6 +1161,14 @@ function handleMessageStart(event: PiMessageStartEvent, sid: string): PiTranslat
 const MESSAGE_END_ALLOWED_ROLES = new Set(['user', 'assistant', 'toolResult'])
 
 /**
+ * message_end 静默跳过的已知 role（pi 1.0.0 起出现）：system = 系统提示词与工具集变更的
+ * 持久化消息。持久化侧由 reload 链路（JSONL entry → apply-entry）处理，live 链路跳过
+ * 下发（对话流不显示）。与上方白名单防线的区别：system 是 pi 已建模的合法 role、
+ * 预期会出现在 message_end（B2），跳过是有意行为而非漂移信号——静默不 warn。
+ */
+const MESSAGE_END_SILENT_SKIP_ROLES = new Set(['system'])
+
+/**
  * message_end — 重构 message entry 作为实时 feed 载体（W21，D5 单一 reducer 双路喂入的实时侧）。
  *
  * pi 把 message_end 作为 user/assistant/toolResult/custom 四种 message 持久化的唯一触发点
@@ -1186,6 +1201,10 @@ function handleMessageEnd(event: PiMessageEndEvent, sid: string): PiTranslatedEv
     return [{ kind: 'noop' }]
   }
   const isCustom = typeof msg.customType === 'string'
+  if (!isCustom && MESSAGE_END_SILENT_SKIP_ROLES.has(msg.role)) {
+    // pi 1.0.0 system role：已知合法、有意跳过（见 MESSAGE_END_SILENT_SKIP_ROLES 注释）
+    return [{ kind: 'noop' }]
+  }
   if (!isCustom && !MESSAGE_END_ALLOWED_ROLES.has(msg.role)) {
     // 未建模 role 防线：pi 当前不经 message_end 发这些 role，命中说明 pi 行为漂移——
     // warn 可观测 + 跳过（防 registry 端与既有 effect 双计），不中断事件流。

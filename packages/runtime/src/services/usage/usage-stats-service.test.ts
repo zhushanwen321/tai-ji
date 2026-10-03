@@ -146,6 +146,34 @@ function renameSessionEntry(opts: {
   return JSON.stringify(entry)
 }
 
+/** 构造 pi 1.0.0 usage entry（appendUsage 落盘形态：kind/provider/model/usage/note）。 */
+function piUsageEntry(opts: {
+  usage?: Record<string, unknown> | null
+  provider?: unknown
+  model?: unknown
+  kind?: string
+  timestamp?: string
+} = {}): string {
+  const {
+    usage = SAMPLE_USAGE,
+    provider = 'zai-coding-cn',
+    model = 'glm-5.3-flash',
+    kind = 'cache_warm',
+    timestamp = '2026-08-25T10:05:00.000Z',
+  } = opts
+  const entry: Record<string, unknown> = {
+    type: 'usage',
+    kind,
+    id: 'usage-1',
+    parentId: 'entry-0',
+    timestamp,
+    provider,
+    model,
+  }
+  if (usage !== null) entry.usage = usage
+  return JSON.stringify(entry)
+}
+
 /** 构造 branch_summary entry（无 usage，设计文档 §2.1 事实 1 已验证）。 */
 function branchSummaryEntry(): string {
   return JSON.stringify({
@@ -857,6 +885,52 @@ describe('UsageStatsService', () => {
     const result = await svc.getStats()
 
     expect(result.rows).toHaveLength(1)
+    expect(result.skippedLines).toBe(1)
+  })
+
+  // ── ⑤ pi 1.0.0 usage entry（模型产生的非对话用量，appendUsage 落盘形态）────────
+
+  it('⑤ usage entry 正常落账：真实 provider/model 行，cost 计入', async () => {
+    const content = [
+      sessionEntry('/Users/dev/usage-warm'),
+      piUsageEntry({ usage: SAMPLE_USAGE, provider: 'zai-coding-cn', model: 'glm-5.3-flash' }),
+    ].join('\n')
+    await writeFile(join(tmpDir, 'usage-1.jsonl'), content)
+
+    const svc = new UsageStatsService(tmpDir)
+    const result = await svc.getStats()
+
+    expect(result.rows).toHaveLength(1)
+    const row = result.rows[0]
+    expect(row.provider).toBe('zai-coding-cn')
+    expect(row.model).toBe('glm-5.3-flash')
+    expect(row.input).toBe(1000)
+    expect(row.output).toBe(200)
+    expect(row.cacheRead).toBe(50)
+    expect(row.costUSD).toBe(0.005)
+    expect(row.messages).toBe(1)
+    expect(row.project).toBe('usage-warm')
+    expect(row.date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it('⑤ usage 缺失/非对象不计 row；provider/model 缺失回退 (unknown)；timestamp 非法计 skippedLines', async () => {
+    const content = [
+      sessionEntry('/Users/dev/usage-guard'),
+      piUsageEntry({ usage: null }), // usage 缺失
+      piUsageEntry({ usage: 'oops' }), // 非 string 不合格
+      piUsageEntry({ provider: 42, model: '' }), // provider/model 非 string/空串 → (unknown)
+      piUsageEntry({ timestamp: 'not-a-date' }), // timestamp 非法
+      piUsageEntry({ kind: 'other-kind' }), // 合法对照（kind 不参与分类）
+    ].join('\n')
+    await writeFile(join(tmpDir, 'usage-2.jsonl'), content)
+
+    const svc = new UsageStatsService(tmpDir)
+    const result = await svc.getStats()
+
+    expect(result.rows).toHaveLength(2)
+    const unknownRow = result.rows.find((r) => r.provider === '(unknown)')
+    expect(unknownRow).toBeDefined()
+    expect(unknownRow?.model).toBe('(unknown)')
     expect(result.skippedLines).toBe(1)
   })
 

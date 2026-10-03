@@ -27,6 +27,7 @@
  * 运行：cd packages/core && pnpm exec vitest run src/domain/chat/__tests__/apply-entry-equivalence.test.ts
  */
 import { describe, it, expect, beforeEach } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { effectScope, toRaw } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { replayEntries } from '../apply-entry'
@@ -1484,6 +1485,54 @@ describe('plan-state entry：不进对话流，live ≡ reload 构造性（A7）
     expect(normalizeIds(liveState)).toEqual(normalizeIds(reloadState))
     // 对话流呈现（toRenderItems 分组：turn 边界 / 气泡）同样一致
     expect(toRenderItems(normalizeIds(liveState).messages)).toEqual(toRenderItems(normalizeIds(reloadState).messages))
+  })
+})
+
+// ── pi 1.0.0 新 entry 类型（B1）：usage / context_edit / role:'system' message ──
+
+describe('pi 1.0.0 新 entry 类型（真实样本 fixture）', () => {
+  // 样本生成方式（形态权威）：pi 1.0.0 实装 dist 的 SessionManager API 落盘产物——
+  // appendMessage(user) → appendMessage(assistant+usage) → appendUsage('cache_warm',...)
+  // → appendMessage({role:'system'}) → appendContextEdit(...)，与 pi 写盘走同一 append* 代码
+  // 路径。fixture 逐行为 pi 1.0.0 权威 JSONL 落盘形态（uuid/timestamp 为生成时点值）。
+  const fixtureEntries: PiEntry[] = readFileSync(
+    new URL('./__fixtures__/pi-1.0.0-new-entries.jsonl', import.meta.url),
+    'utf-8',
+  )
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => JSON.parse(line) as PiEntry)
+
+  it('装置：fixture 含 session header + 三类新 entry（usage / context_edit / system message）', () => {
+    const types = fixtureEntries.map((e) => (e as { type: string }).type)
+    expect(types[0]).toBe('session')
+    expect(types).toContain('usage')
+    expect(types).toContain('context_edit')
+    const systemMsg = fixtureEntries.find(
+      (e) => (e as { type: string }).type === 'message' && (e as { message?: { role?: string } }).message?.role === 'system',
+    )
+    expect(systemMsg).toBeDefined()
+  })
+
+  it('三类新 entry 零对话流投影、不崩：messages 恒 user+assistant 两条，重放确定性', () => {
+    const state = replayEntries(fixtureEntries)
+    // usage / context_edit / system message 三类均不产对话流消息（system 与 live 侧
+    // event-adapter 跳过同语义）；user/assistant 两条正常渲染
+    expect(state.messages).toHaveLength(2)
+    expect(state.messages.map((m) => m.role)).toEqual(['user', 'assistant'])
+    // reducer 纯函数确定性：同序列两次重放全等
+    expect(state).toEqual(replayEntries(fixtureEntries))
+    // 对话流呈现（toRenderItems 分组）正常产出
+    expect(toRenderItems(state.messages).length).toBeGreaterThan(0)
+  })
+
+  it('单独喂入 usage/context_edit entry：零投影不崩（reducer 无 case 走 default no-op）', () => {
+    const onlyNew = fixtureEntries.filter((e) => {
+      const t = (e as { type: string }).type
+      return t === 'usage' || t === 'context_edit'
+    })
+    const state = replayEntries(onlyNew)
+    expect(state.messages).toHaveLength(0)
   })
 })
 

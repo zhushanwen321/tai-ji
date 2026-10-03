@@ -817,9 +817,10 @@ export class SessionLifecycle implements ISessionRegistry {
   ): void {
     // [HISTORICAL] 不再调 ensureSessionFile 提前创建 session 文件。
     // 之前的实现在此处用 openSync(wx) 创建含 session+session_info 两行的最小文件，理由是
-    // 「pi 延迟写入期间 scanPiSessions 找不到该 session」。但这与 pi 0.80.3 SessionManager._persist
-    // 的写入策略冲突：_persist 首次 flush（收到 assistant 消息时）也用 openSync("wx")，撞上已存在文件
-    // → EEXIST → pi 抛 message_start{stopReason:"error"} → 整个 session 永久卡死。
+    // 「pi 延迟写入期间 scanPiSessions 找不到该 session」。但这与 pi SessionManager._persist
+    // 的写入策略冲突：_persist 首次 flush（pi 0.80.3 收到 assistant 消息时；pi 1.0.0 起
+    // _hasConversation 判 user OR assistant——用户首条消息即建文件）也用 openSync("wx")，
+    // 撞上已存在文件 → EEXIST → pi 抛 message_start{stopReason:"error"} → 整个 session 永久卡死。
     // 现在依赖 SessionScanner.listAll 的合并机制：active session 从内存 Map（this.sessions）读，
     // 即使磁盘无文件也显示（restart 后内存清空，但此时未 flush 的 session 本就无内容，丢失合理）。
     this.sessionStore.refreshAll()
@@ -851,8 +852,9 @@ export class SessionLifecycle implements ISessionRegistry {
    *
    * [V9-④ 根修，2026-09-09] 三个 persist* 调用传 skipJsonlExistsGuard 放行 existsSync
    * 守卫：create 路径 session 必然真实（getState 成功 + registerSession 成功后才到达
-   * 本段），.jsonl 未 flush 只是 pi 延迟写入窗口（pi 0.84.4 实装：SessionManager 构造
-   * 即确定性生成 sessionFile 路径，get_state 透传——路径有值、文件不存在），不再以文件
+   * 本段），.jsonl 未 flush 只是 pi 延迟写入窗口（pi 实装（1.0.0 已核对）：SessionManager
+   * 构造即确定性生成 sessionFile 路径，get_state 透传——路径有值、文件不存在；首次落盘
+   * 条件 = 存在 user 或 assistant 消息，即用户首条消息发出即建文件），不再以文件
    * 存在性当 session 有效性判据。规则 #6 禁止的是创建/触碰 pi session .jsonl 本体
    *（openSync('wx') EEXIST 卡死），sidecar 是 taiji 自有文件经 atomicWrite 落盘、不触碰
    * .jsonl，放行不违反规则 #6。此前守卫恒跳过且无补偿写点（model 面经 turn-end 补偿，

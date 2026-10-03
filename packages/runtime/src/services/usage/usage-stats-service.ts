@@ -275,12 +275,13 @@ export class UsageStatsService {
           foundSessionEntry = true
         }
 
-        // 按原顺序尝试四类判定；'skip' 短路（timestamp 无效行不再计入任何桶）
+        // 按原顺序尝试五类判定；'skip' 短路（timestamp 无效行不再计入任何桶）
         const row =
           this.rowFromAssistant(entry, cwd) ??
           this.rowFromToolResult(entry, cwd) ??
           this.rowFromCompactionEntry(entry, cwd) ??
-          this.rowFromRenameSessionEntry(entry, cwd)
+          this.rowFromRenameSessionEntry(entry, cwd) ??
+          this.rowFromUsageEntry(entry, cwd)
 
         if (row === 'skip') {
           skippedLines++
@@ -385,6 +386,26 @@ export class UsageStatsService {
 
     const model = typeof data?.model === 'string' && data.model !== '' ? data.model : 'rename-session'
     return this.makeRow(date, 'rename-session', model, cwd, usage as Record<string, unknown>)
+  }
+
+  /**
+   * ⑤ pi 1.0.0 usage entry（模型产生的非对话操作用量，如缓存保活 cache_warm）→
+   * 真实 provider/model 行。落盘形态锚：pi dist/core/session-manager.js appendUsage
+   * 字面量（type:'usage' + kind/provider/model/usage/note）。不接入则用量页成本合计
+   * 与 pi 自身统计口径出现缺口（B1）。usage 存在性守卫：entry.usage 为非 null 对象才计
+   * row（同 ①②③ 范式）；kind 不参与分类（provider/model 是行字段真值）。
+   * 命中但 timestamp 无效 → 'skip'（计 skippedLines）；不命中 → null。
+   */
+  private rowFromUsageEntry(entry: Record<string, unknown>, cwd: string | null): ScanRowResult {
+    if (entry.type !== 'usage') return null
+    if (typeof entry.usage !== 'object' || entry.usage === null) return null
+
+    const date = toLocalDate(entry.timestamp as string)
+    if (date === null) return 'skip'
+
+    const provider = typeof entry.provider === 'string' && entry.provider !== '' ? entry.provider : '(unknown)'
+    const model = typeof entry.model === 'string' && entry.model !== '' ? entry.model : '(unknown)'
+    return this.makeRow(date, provider, model, cwd, entry.usage as Record<string, unknown>)
   }
 
   /**
