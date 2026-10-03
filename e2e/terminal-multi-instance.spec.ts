@@ -25,8 +25,9 @@
  *   前提 P3 已由 u0-probe 探针核实成立）
  * - T6 幂等防御 / T7 最后实例保护 / T11 同世代闪断 / T12 非世代广播沿：L1 单测
  *   （u1 runtime 协议测试 + u3-bar 组件测试 + u2「世代与对账」测试）
- * - T1/T2 的「三腿资源释放 / 滞留命令提示」与 T10 的 write-queue 重置细节：artefact 单测
- *   承载（impl-plan §4.4）；「焦点落相邻」在 T2 做真机 activeElement 断言（impl-plan §4.4
+ * - T1/T2 的「三腿资源释放 / 滞留命令提示」与 T10 的 write-queue 重置细节：由 u2 单测承载
+ *   （`use-terminal.test.ts` RT-4 / CL-1 / GEN-1、GEN-3；impl-plan §5 u2 验收条款）；
+ *   「焦点落相邻」在 T2 做真机 activeElement 断言（impl-plan §4.4
  *   A2 明列的 L3 可脚本化判据），不由单测承载
  *
  * 运行（开发阶段按改动范围空载串行，禁全量扫跑——项目 AGENTS.md e2e 执行准则）：

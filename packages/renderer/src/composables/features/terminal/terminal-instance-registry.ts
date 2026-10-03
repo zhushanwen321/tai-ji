@@ -81,7 +81,7 @@ export function seqOfTerminalId(terminalId: string): number {
  * - orderBySession：sid → terminalId 有序数组（注册顺序 = 切换条显示顺序）
  * - activeBySession：sid → 当前显示实例编号（null = 空态）
  */
-// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：终端实例注册表界面镜像（生命周期 = runtime 世代 / 应用进程）
+// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，已登记）：终端实例注册表界面镜像（生命周期 = runtime 世代 / 应用进程）
 const registry = reactive({
   byId: {} as Record<string, TerminalInstanceEntry>,
   orderBySession: {} as Record<string, string[]>,

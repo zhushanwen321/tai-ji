@@ -5,8 +5,8 @@
  * TerminalMessageHandler 经此 port 调用，不直接依赖具体 TerminalService。
  *
  * 编排职责（实现侧 TerminalService）：
- * 1. 经 node-pty spawn 交互式 shell（shell/shellArgs 从 IConfigService.getTerminalShell 读，
- *    fallback $SHELL → /bin/bash，win: powershell）
+ * 1. 经 node-pty spawn 交互式 shell（shell/shellArgs 从 deps.configService.getTerminalConfig() 读，
+ *    fallback $SHELL → /bin/bash，win: powershell；config 缺失/损坏时降级登录 shell）
  * 2. 持有实例注册表（ptyMap: Map<terminalId, IPty>，terminalId = `term:<sessionId>:<序号>`），
  *    与 session-pool 同生命周期；**键集即存活实例全集**（不另建平行注册结构）
  * 3. PTY 输出经 publish 推 terminal.data；退出推 terminal.exit；就绪推 terminal.alive；
@@ -31,7 +31,11 @@ import type { TerminalInstanceSummary } from '@taiji/shared'
  * - unknown_terminal_id：操作的 terminalId 不在实例注册表（否定回执；renderer 据此回收幽灵条目）
  * - terminal_id_session_mismatch：terminalId 的会话段与请求 sessionId 不一致（交叉校验拒绝）
  * - terminal_id_required：既有实例操作帧缺 terminalId 的畸形帧拒绝（由 protocol 入口 handler 发出）
- * - resize_failed / kill_failed：对应 node-pty 操作失败（存量码保留）
+ *
+ * 存量码（当前无抛出点，保留 union 供消费侧穷尽，勿据以设计错误处理）：
+ * - resize_failed / kill_failed：对应 node-pty 操作失败——实装为 best-effort（resize 失败仅记
+ *   console、下次 fit 重试；kill 失败靠 onExit 幂等清理），runtime 从不抛出；not_found 亦无抛出点
+ *   （实例路由否定回执改用 unknown_terminal_id）
  *
  * 路由三码的不变量：只有 unknown_terminal_id 是「注册成员资格的否定回执」，是 renderer 关闭沿
  * 三腿回收的唯一判据（平行守卫只按 code 分档）。terminal_id_session_mismatch（交叉校验拒绝）

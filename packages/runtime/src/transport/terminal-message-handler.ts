@@ -56,8 +56,12 @@ export class TerminalMessageHandler {
       case 'terminal.spawn': {
         // 双形态：不带 terminalId = 新建（runtime 分配并经 ack 回传）；带 = 指定（存活幂等 / 不存在报错）
         const { sessionId, terminalId, cwd, cols, rows } = msg.payload
+        // 空串视同缺编号（与既有实例帧的 rejectIfMissingTerminalId 同口径）：空串不是合法编号，
+        // 原样下传会被 service 判为「会话段不一致」（误导性错误，帧里根本没有合法编号）；归一为
+        // undefined 走新建形态，使两帧族对空串的判义一致。
+        const normalizedTerminalId = typeof terminalId === 'string' && terminalId !== '' ? terminalId : undefined
         try {
-          const assigned = await this.ctx.terminalService.spawn(sessionId, cwd, cols, rows, terminalId)
+          const assigned = await this.ctx.terminalService.spawn(sessionId, cwd, cols, rows, normalizedTerminalId)
           return this.ctx.reply(ws, msg.id, 'terminal.ack', { terminalId: assigned })
         } catch (e) {
           return this.sendTerminalError(ws, msg.id, e)

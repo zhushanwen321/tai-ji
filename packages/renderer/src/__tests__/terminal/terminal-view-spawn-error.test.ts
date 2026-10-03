@@ -183,4 +183,20 @@ describe('TerminalView spawn 失败 inline 错误条（RD-5#2 挂载自动新建
     expect(useToast().toasts.value[0]!.message).toContain('spawn boom')
     expect(document.body.querySelector('[data-testid="terminal-spawn-error"]')).toBeNull()
   })
+
+  it('挂载腿失败后点「+」新建成功 → 撤下 inline 错误条（错误态不跨腿泄漏）', async () => {
+    spawnTerminalMock.mockRejectedValueOnce(new Error('mount boom'))
+    wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
+    await flushPromises()
+    expect(document.body.querySelector('[data-testid="terminal-spawn-error"]')).toBeTruthy()
+
+    // 「+」成功（spawnTerminalMock 默认 resolve）——错误态不得跨腿泄漏到已成功新建的场景
+    const create = document.body.querySelector('[data-testid="terminal-instance-create"]') as HTMLButtonElement
+    create.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-testid="terminal-spawn-error"]')).toBeNull()
+    expect(document.body.querySelector('[data-testid="terminal-spawn-retry"]')).toBeNull()
+    expect(useToast().toasts.value).toHaveLength(0)
+  })
 })

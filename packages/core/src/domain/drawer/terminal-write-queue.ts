@@ -46,7 +46,7 @@ export interface TerminalWriteQueue {
    *   terminalId 自动建档成幽灵实例态、命令静默滞留至会话删除）。
    */
   enqueueWrite(terminalId: string, cmd: string): void
-  /** 查询 PTY 存活态（TerminalView 工具栏 kill 按钮 disabled 判断用）。 */
+  /** 查询 PTY 存活态（当前无生产消费者，保留为 API 面；工具栏 kill 按钮 disabled 判据 = 当前分区 state.ptyAlive）。 */
   isPtyAlive(terminalId: string): boolean
   /** 查询该实例的累计丢弃命令数（drop-oldest 计数，RD-3#5）。 */
   droppedCountOf(terminalId: string): number

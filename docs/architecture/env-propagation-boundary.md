@@ -99,7 +99,7 @@
 | B4 | pi → 全部后代 | pi 上游实现 | 全量/近似继承（本会话 bash 实测携带 4 个 TAIJI_/PI_* 变量） | 不可治理（红线），倒逼必须在 B3 封堵 |
 | B5 | runtime → 嵌套 pi（relay 受托 spawn） | `infra/relay/relay-registry.ts:314`（buildChildEnv :173-182） | 握手帧透传，仅剥 5 个 relay 定位键，不再过白名单 | 泄漏沿嵌套链传播，中途无二次拦截 |
 | B6 | runtime → plugin 宿主/沙箱 | `plugin-host-process.ts:392,:394,:397` | `{...process.env}` 全量 + 强制 `ELECTRON_RUN_AS_NODE=1`（sandbox 另注 `TAIJI_PLUGIN_SANDBOX_DIR`） | 产品标志一并漏入三方插件进程 |
-| B7 | runtime → 用户终端 PTY | `terminal-service.ts:93`（buildEnv :229-250） | 全量副本，仅删 ELECTRON_ 三键（PR #105 先例） | PACKAGED/TOKEN 仍漏入用户 shell |
+| B7 | runtime → 用户终端 PTY | `terminal-service.ts:430`（buildEnv :430-457） | 全量副本，仅删 ELECTRON_ 三键（PR #105 先例） | PACKAGED/TOKEN 仍漏入用户 shell |
 | B8 | runtime → 自有脚本/git | `shell-runner.ts:63`、`git-executor.ts:40-47`、`reap-orphan-pi.ts:225`(ps 只读无害) | 未提供 env ⇒ **隐式全量继承**（含 `ELECTRON_RUN_AS_NODE=1`） | 与 PR #105 同病未治：worktree 脚本内再起 node/electron 会退化为 Electron GUI 语义 |
 
 无害特例一处：`infra/relay/relay-env.ts:68` 探针 spawn（手工 env、stdio ignore、不触达下游），进检查豁免名单（U7）。
@@ -349,7 +349,7 @@ rg -n 'spawn\(|execFile\(|fork\(|pty\.spawn' packages/runtime/src apps/electron/
 | U1 出站契约 SSOT | 新建 `packages/shared/src/spawn-env-contract.ts`：导出 `SPAWN_ENV_OUTBOUND_DENY_LIST`（首版两项，逐项 JSDoc 写危害证据锚点）+ forward 参考清单（B 组五项，标注消费锚点）+ 文件头「入站白名单管准入／出站契约管出站」关系说明；配套 `packages/shared/src/__tests__/spawn-env-contract.test.ts`（断言：常量名规避 guard 字面量、成员最小性=首版恰为 2） | deny 清单需被 U2 构建器与 U3-U4 五个消费端共享，放 shared 与入站 SSOT 同居一仓才是单一权威 | 两文件存在；`cd packages/shared && npx vitest run spawn-env-contract` 绿 | AC5 |
 | U2 出站构建器 | 新建 `packages/runtime/src/infra/spawn-env.ts`：`buildOutboundChildEnv({ parentEnv, extras?, prefixes? }): Record<string,string>`——语义＝prefixes 过滤（缺省 SSOT）→ merge extras（保留 undefined=删除语义）→ apply DENY_LIST；纯函数 env 全 DI；配套测试覆盖：deny 键剔除 / PATH·HOME 基座完整 / extras undefined 删除 / 不 mutate 入参（R1）/ 大输入幂等 | 出站语义唯一实现点；DI 是 R3 的结构性保证 | 模块与测试存在且绿；R1/R2 两个红线用例在测试清单中显式可查 | AC2/AC4 基础 |
 | U3 主链路接线（B2+B3） | `safe-env.ts` 改为 U2 薄封装（保留 ELECTRON_ 扩展入参，删本地循环体）；`rpc-client.ts:15-29` 私有 buildSafeEnv 删除改 import U2；`process-manager.ts:104-124` 组装迁至 U2 调用（PATH 补齐 / relayEnv / DATA_DIR 传参不变） | 重复实现消灭在此；等价范围最大的一步单拆便于精准回归 | runtime 相关既有 vitest 用例全绿 + 新增「RpcClient env 无 deny 键」用例；`cd packages/runtime && npx vitest run infra` 绿 | AC2/AC3 |
-| U4 周边边界接线（B5-B8） | `shell-runner.ts:63`、`git-executor.ts:40` 显式传入构建器输出（不再隐式继承）；`terminal-service.ts:229` buildEnv 替换为构建器输出 + 原 TERM/ELECTRON_ 删除逻辑保留；`relay-registry.ts:173` buildChildEnv 叠加 deny 过滤；`plugin-host-process.ts:392` 叠加 deny 两键删除（拷贝拓扑不动，D6） | 五处接线互不依赖、每处是独立小 diff，出问题可单独 revert | 每处各配一个小单测（污染 env 输入 → 子进程 env 断言）；四个文件相关测试全绿 | AC6/AC7 |
+| U4 周边边界接线（B5-B8） | `shell-runner.ts:63`、`git-executor.ts:40` 显式传入构建器输出（不再隐式继承）；`terminal-service.ts:430` buildEnv 替换为构建器输出 + 原 TERM/ELECTRON_ 删除逻辑保留；`relay-registry.ts:173` buildChildEnv 叠加 deny 过滤；`plugin-host-process.ts:392` 叠加 deny 两键删除（拷贝拓扑不动，D6） | 五处接线互不依赖、每处是独立小 diff，出问题可单独 revert | 每处各配一个小单测（污染 env 输入 → 子进程 env 断言）；四个文件相关测试全绿 | AC6/AC7 |
 | U5 回归检查测试 | 在 `packages/runtime/src/infra/__tests__/spawn-env.test.ts` 内固化「契约快照」用例：给定模拟污染父 env（PACKAGED/TOKEN=1 + 正常系统变量）→ 断言输出无 deny 键、必备基座齐全 | 把本案永久钉进测试基线，防止未来重构悄悄放行 | 该测试文件入 CI 常跑集合并绿 | AC2 自动化层 |
 | U6 constraints 登记 | `docs/constraints.json` 新增条目：「runtime 子进程 env 出站契约」scope=[rpc-client.ts, shell-runner.ts, git-executor.ts, terminal-service.ts, relay-registry.ts, plugin-host-process.ts]，执行方式指向 U7 检查脚本；附「与 ENV_WHITELIST_PREFIXES 关系」说明段；随后 `node scripts/validate-constraints.mjs` 结构校验（原指令 `node scripts/render-constraints.mjs` 再生成 constraints.md 的脚本已于 2026-09-13 删除，md 视图不再生成） | 本项目约束治理的唯一登记处（AGENTS.md 文档索引行），先登记再写码制度 | json 校验过、两条目互引成立 | AC5 |
 | U7 pre-commit 静态检查 | 新建 `.githooks/check_spawn_env_boundary.py`：扫 `packages/runtime/src` 与 `apps/electron/main` 中 spawn/execFile/fork/pty.spawn/Worker( 调用点，要求相邻 ≤10 行出现 `buildOutboundChildEnv` 或命中脚本内置豁免名单（豁免逐条注释理由：reap-orphan-pi ps 只读、relay-env 探针 :68 手工 env、__tests__ 等）；报错信息给修复指引（import 路径 + U1 清单链接）；注册进 `.githooks/install-hooks.sh` heredoc 并重跑安装（R4） | G3 的机器强制力；静态检查成本低误报可控（豁免白名单兜底） | 带 U 临时文件跑 exit≠0 且输出含行号指引；清理后 exit 0；重装 hook 后对新文件生效 | AC8 |
@@ -376,5 +376,5 @@ rg -n 'spawn\(|execFile\(|fork\(|pty\.spawn' packages/runtime/src apps/electron/
 - 反向清除语义：`apps/electron/main/supervisor/safe-env.ts:26-43`
 - 泄道（第二份 buildSafeEnv + spawn 整体替换）：`packages/runtime/src/infra/pi/rpc-client.ts:15-29,:162-164,:168,:255-258`
 - runtime isPackaged 消费六处：`find-pi-executable.ts:26` · `pi-maintenance.ts:108` · `relay-paths.ts:58` · `logger.ts:119` · `process-manager.ts:132` · `extension-service.ts:131`
-- 嵌套剥离范式：`relay-registry.ts:173-182`；终端净化先例：`terminal-service.ts:229-250`
+- 嵌套剥离范式：`relay-registry.ts:173-182`；终端净化先例：`terminal-service.ts:430-457`
 - guard 兼容依据：`.githooks/check_env_whitelist_sync.py:43`（`LOCAL_DEF_RE` 精确名匹配，已核）；hook 安装源：`.githooks/install-hooks.sh:43-48,:1036`

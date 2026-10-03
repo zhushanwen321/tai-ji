@@ -164,6 +164,22 @@ describe('TerminalMessageHandler terminal.spawn 双形态', () => {
     expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-1', 'terminal.ack', { terminalId: 'term:s1:2' })
   })
 
+  it('空串 terminalId 视同缺编号：归一为新建形态（不判会话段不一致）', async () => {
+    const service = mockService({ spawn: vi.fn(async () => 'term:s1:1') })
+    const ctx = mockContext(service)
+    const handler = new TerminalMessageHandler(ctx)
+    const ws = mockWs()
+
+    await handler.handleTerminalMessage(
+      msg('terminal.spawn', { sessionId: 's1', terminalId: '', cols: 80, rows: 24 }),
+      ws,
+    )
+
+    expect(service.spawn).toHaveBeenCalledWith('s1', undefined, 80, 24, undefined)
+    expect(ctx.reply).toHaveBeenCalledWith(ws, 'msg-1', 'terminal.ack', { terminalId: 'term:s1:1' })
+    expect(ctx.sendError).not.toHaveBeenCalled()
+  })
+
   it('spawn 失败透传 spawn_failed', async () => {
     const service = mockService({
       spawn: vi.fn(async () => {

@@ -58,8 +58,11 @@ export function useTerminalSpawnFeedback(
   /**
    * 「+」手动新建（设计 §3.3「新建失败」）：失败经既有全局错误通道提示，
    * 不占 inline 错误条、不影响既有实例。
+   * 入口先清 spawnError：挂载腿的 inline 错误条不得跨腿泄漏到已成功新建的场景
+   *（挂载 spawn 失败留下错误条后，点「+」成功建档会让错误条覆盖在新实例之上）。
    */
   function createWithToast(): void {
+    spawnError.value = null
     const { cwd, cols, rows } = resolveDims()
     void terminal.spawnTerminal(cwd, cols, rows).catch((e: unknown) => {
       const message = e instanceof Error ? e.message : String(e)

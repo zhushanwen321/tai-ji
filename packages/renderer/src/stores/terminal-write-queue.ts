@@ -157,7 +157,7 @@ export const useTerminalWriteQueueStore = defineStore('terminal-write-queue', ()
     markExited: queue.markExited,
     /** 入队写命令（预留接入点：Block「在终端运行」调；**当前仓内无生产调用方**）。PTY 已活立即 write / 未活入队 markAlive 时 flush */
     enqueueWrite,
-    /** 查询 PTY 存活态（TerminalView 工具栏 kill 按钮 disabled 判断用）。 */
+    /** 查询 PTY 存活态（当前无生产消费者，保留为 API 面；TerminalView 工具栏 kill 按钮 disabled 判据 = 当前分区 state.ptyAlive）。 */
     isPtyAlive: queue.isPtyAlive,
     /** 查询该实例累计丢弃数 / 当前滞留数（世代重置提示判据）。 */
     droppedCountOf: queue.droppedCountOf,

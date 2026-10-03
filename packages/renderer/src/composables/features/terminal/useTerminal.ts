@@ -132,25 +132,25 @@ const REPLAY_BATCH_CHUNKS = 500
 // ── 模块级持久分区（W27/D-6.2 生命周期上提，键 = terminalId）─────────────────
 // ADR-0049「全局 sid 协调器例外类」：无 setup 上下文、方法显式接收 terminalId、buffer 非响应式。
 // 分区生命周期 = 实例生命周期（关闭沿 / 会话销毁 / 世代重置清理），独立于任何 TerminalView。
-// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：终端输出分区表（键 = terminalId，生命周期 = 实例生命周期）
+// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，已登记）：终端输出分区表（键 = terminalId，生命周期 = 实例生命周期）
 const partitions = new Map<string, TerminalPartition>()
 
 /** 分区表结构版本：分区增删时 bump，让各实例 current computed 失效重算。 */
-// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：分区表结构版本计数
+// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，已登记）：分区表结构版本计数
 const mapVersion = ref(0)
 
 // ── 模块级 terminal.* 订阅（生命周期 = 实例生命周期，键 = terminalId）────────
 // publish-only 契约（W09）：runtime 只把 terminal.* 发给订阅该 sid 的连接，且 renderer 侧
 // events.on(sid) 无 handler 时 dispatchSession 直接丢弃——订阅必须跨组件存活。
 // 多实例：一个 sid 可挂多个 handler（每实例一个），handler 内按 payload.terminalId 过滤。
-// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：terminal.* 订阅实例编号集合
+// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，已登记）：terminal.* 订阅实例编号集合
 const subscribedTerminalIds = new Set<string>()
-// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：terminal.* 订阅退订函数表（键 = terminalId）
+// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，已登记）：terminal.* 订阅退订函数表（键 = terminalId）
 const subscriptionUnsubs = new Map<string, () => void>()
 
 // ── flush 监听器注册表（terminalId → 已挂载视图的增量回放回调）──────────────
 // 组件 mount 注册、unmount 反注册。flush 后直接通知，替代 W14 的 watch(flush 版本) 链。
-// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：flush 监听器注册表（键 = terminalId）
+// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，已登记）：flush 监听器注册表（键 = terminalId）
 const flushListeners = new Map<string, Set<(buffer: TerminalBuffer) => void>>()
 
 /**
@@ -530,7 +530,7 @@ function handleConnectionEstablished(token: string | null): void {
 
 /**
  * 世代变更失效重置：①清空输出分区与切换条（含 flush 监听表——跨世代编号同形，残留监听
- * 会命中幂等守卫使新世代同号实例静默 no-op）；②terminal-write-queue 状态机清空（旧世代
+ * 随重置回收；视图 dispose 亦会反注册）；②terminal-write-queue 状态机清空（旧世代
  * 滞留命令随重置丢弃，**提示仅在确有滞留命令时发出**）；③模块级订阅表**先退订再清空**
  * （键跨世代同形，残留条目会命中订阅建立的幂等守卫导致新世代订阅静默 no-op）。
  * 重置后按 `terminal.list` 拉取重建（新 runtime 清单为空 → 空态；**失败不提示**）。
@@ -702,7 +702,10 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
   function handleRoutingError(terminalId: string, e: unknown, trigger: 'write' | 'kill' | 'attach' | 'resize'): void {
     const code = (e as { code?: string } | null)?.code
     if (code === 'unknown_terminal_id') {
-      if (!hasInstance(terminalId)) return // 重复打击：已回收，静默
+      // 三腿判据（与 handleInstanceExit 同形）：注册表 / 分区 / 订阅皆无才早退（重复打击静默）。
+      // 仅注册表条目已删而分区或订阅仍在场时不得早退——设计 §3.3 守卫覆盖「刚建立的订阅条目与
+      // 分区」（注册表条目删 ≠ 已回收），此时仍需走 releaseInstance（幂等）回收。
+      if (!hasInstance(terminalId) && !partitions.has(terminalId) && !subscribedTerminalIds.has(terminalId)) return
       // 先告知后迁移焦点：prompt 走同步路径先发；焦点迁移由视图对 active 变化的异步
       // watcher 落地（关闭沿显示规则落相邻实例）
       if (trigger === 'write') warnInputMayBeLost(terminalId)

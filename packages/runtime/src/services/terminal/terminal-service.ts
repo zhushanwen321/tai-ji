@@ -339,7 +339,8 @@ export class TerminalService implements ITerminalService {
     }
     this.ptyMap.delete(terminalId)
     this.writeFailedReported.delete(terminalId)
-    // 销毁不广播 terminal.exit（renderer 已在 session.deleted / 关闭沿清理分区）。
+    // destroyInstance 不主动 publish exit；进程真正退出时 spawn 期注册的 onExit 回调仍会广播
+    // terminal.exit（消费侧按缺条目 / 幂等静默收敛——renderer 已在 session.deleted / 关闭沿清理分区）。
     // SIGTERM 被忽略时仍需升级（fd 残留与销毁原因无关）。此时注册表已删，升级 timer 不能靠
     // map 判活——untracked 模式下进程已退出时 kill 会抛错被吞（无害）；误杀风险不存在：
     // terminalId 永不复用，同 id 不会 re-spawn。

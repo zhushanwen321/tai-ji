@@ -36,7 +36,7 @@ import {
   __terminalSubscriptionCountForTest,
   __handleConnectionEstablishedForTest,
 } from '@/composables/features/terminal/useTerminal'
-import { hasInstance } from '@/composables/features/terminal/terminal-instance-registry'
+import { hasInstance, setActiveTerminalId, unregisterInstance } from '@/composables/features/terminal/terminal-instance-registry'
 import { dispatchSession } from '@taiji/core/transport/api'
 import { triggerSessionCleanups } from '@/composables/useSessionScopedState'
 import { useToast } from '@/composables/useToast'
@@ -496,6 +496,24 @@ describe('unknown_terminal_id 平行守卫（提示与焦点按触发面分档�
     await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled())
     expect(hasInstance(T1)).toBe(true)
     expect(terminal.instances.value.map((i) => i.terminalId)).toEqual([T1])
+    expect(useToast().toasts.value).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('UG-6: 注册表条目已删但分区/订阅在场时，unknown_terminal_id 仍回收（三腿判据不早退）', async () => {
+    const { wrapper, terminal } = await seedAlive()
+    // 模拟「关闭沿已删注册表条目、但分区与订阅仍在场」的竞态残留形态（设计 §3.3 守卫覆盖面）
+    unregisterInstance(T1)
+    setActiveTerminalId('s1', T1) // active 仍指向该编号（模拟竞态残留，使 attach 腿可达）
+    expect(hasInstance(T1)).toBe(false)
+    expect(__terminalPartitionCountForTest()).toBe(1)
+    expect(__terminalSubscriptionCountForTest()).toBe(1)
+
+    terminalApiMock.attach.mockRejectedValueOnce(rpcError('unknown_terminal_id'))
+    terminal.attachTerminal()
+    await vi.waitFor(() => expect(__terminalPartitionCountForTest()).toBe(0))
+
+    expect(__terminalSubscriptionCountForTest()).toBe(0)
     expect(useToast().toasts.value).toHaveLength(0)
     wrapper.unmount()
   })
