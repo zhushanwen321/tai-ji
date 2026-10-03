@@ -283,6 +283,67 @@ describe('chip spacer（ZWSP）边界：Tab 确认后直接敲 /（多 skill 连
   })
 })
 
+describe('chip 感知行首收编：有 chip 时行首/换行后行首 / 也归 skill 域', () => {
+  let cleanup: () => void = () => {}
+  beforeEach(() => {
+    window.getSelection()?.removeAllRanges()
+  })
+  afterEach(() => {
+    cleanup?.()
+  })
+
+  /** 真实换行形态：chip + ZWSP spacer + <br> + 新行行首 /rev */
+  const CHIP_BR_REV =
+    '<span class="slash-chip"><span class="chip-label">a</span></span>\u200B<br>/rev'
+
+  it('detect（有 chip）：新行行首 /rev → {query:"rev"}（行首边界并入 skill 域）', () => {
+    const el = document.createElement('div')
+    el.innerHTML = CHIP_BR_REV
+    document.body.appendChild(el)
+    cursorAt(el.childNodes[3] as Text, 4)
+    expect(detectSkillTriggerFromEl(el)).toEqual({ query: 'rev' })
+    el.remove()
+  })
+
+  it('无 chip 对照：新行行首 /rev 不触发 skill（行首仍归命令域）——既有互斥契约不变', () => {
+    const el = document.createElement('div')
+    el.innerHTML = 'line1<br>/rev'
+    document.body.appendChild(el)
+    cursorAt(el.childNodes[2] as Text, 4)
+    expect(detectSkillTriggerFromEl(el)).toBeNull()
+    el.remove()
+  })
+
+  it('编排（有 chip + 换行）：只亮 skill 路（命令路 hasChip 抑制收 null，两域不重叠）', () => {
+    const c = setup(CHIP_BR_REV)
+    cursorAt(c.el.childNodes[3] as Text, 4)
+    c.onInput()
+    expect(c.callbacks.onSkillTrigger).toHaveBeenCalledWith({ query: 'rev' })
+    expect(c.callbacks.onSlashTrigger).toHaveBeenCalledWith(null)
+    cleanup = c.cleanup
+  })
+
+  it('clear（有 chip）：行首 /rev 被清（pattern 选择与 detect 同源，能触发就能清）', () => {
+    const c = setup(CHIP_BR_REV)
+    cursorAt(c.el.childNodes[3] as Text, 4)
+    c.clearSkillQueryText()
+    // 断言 token 文本节点本身被清（getText 是序列化视图：chip 段提首 + 补边界空格，
+    // 不反映「明文是否清掉」；明文清理的观察面 = 该 text node）
+    expect((c.el.childNodes[3] as Text).textContent).toBe('')
+    expect(c.callbacks.onInput).toHaveBeenCalledTimes(1)
+    cleanup = c.cleanup
+  })
+
+  it('clear 反向回归（无 chip）：行首 /rev 不被 skill 清理层删（pattern 选择两侧一致）', () => {
+    const c = setup('/rev')
+    cursorAt(c.el.firstChild as Text, 4)
+    c.clearSkillQueryText()
+    expect(c.getText()).toBe('/rev')
+    expect(c.callbacks.onInput).not.toHaveBeenCalled()
+    cleanup = c.cleanup
+  })
+})
+
 describe('useContenteditableInput skill 分路编排（D1/D2）', () => {
   let cleanup: () => void = () => {}
   beforeEach(() => {

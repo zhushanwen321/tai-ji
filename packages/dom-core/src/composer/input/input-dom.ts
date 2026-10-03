@@ -363,9 +363,18 @@ export function detectSlashTriggerFromEl(el: HTMLDivElement | null): { query: st
 const SKILL_QUERY_PATTERN = /^[a-z0-9-]{0,64}$/
 
 /**
- * skill 触发域完整 pattern（边界 + `/` + query 捕获，多 skill 注入设计 D1）——SSOT：
- * detect（detectSkillTriggerFromEl）与 clearSkillQueryText（contenteditable.ts）同源消费，
- * 禁止两处手写字面量漂移。
+ * chip 存在性判定选择器（SSOT）：命令域 hasChip 抑制门（contenteditable.detectSlashTrigger）
+ * 与 skill 域行首收编条件（skillTriggerPatternFor）必须用同一判定——两处漂移会造出
+ * 「命令域已抑制而 skill 域未收编」的重叠/死区。语义与既有门一致：任何 slash-chip
+ * （命令/skill）或 mention-chip（file/session/subagent）存在即为 true（image chip 不在内，
+ * 沿旧口径）。
+ */
+export const CHIP_PRESENCE_SELECTOR = '.slash-chip, .mention-chip'
+
+/**
+ * skill 触发域基础 pattern（边界 + `/` + query 捕获，多 skill 注入设计 D1）——SSOT：
+ * detect（detectSkillTriggerFromEl）与 clearSkillQueryText（contenteditable.ts）经
+ * skillTriggerPatternFor 同源消费，禁止手写字面量漂移。
  *
  * 边界类 `(?:[^\S\n]|\u200B)` = 非换行空白（半角空格/tab/全角空格 U+3000/NBSP——\s 空白
  * 语义仅排除 \n，对齐 `#`/`$`/`@`）∪ ZWSP（chip spacer）。收编 ZWSP 的原因：Tab 确认插
@@ -373,21 +382,40 @@ const SKILL_QUERY_PATTERN = /^[a-z0-9-]{0,64}$/
  * 下一个 `/` 前缀恰是它——`\u200B` 非 `\s`，不入域则「chip 后直接敲 /」是触发死区（两域
  * 都 null，浮层不弹，多 skill 连续注入主链路断裂）。
  *
- * 互斥性（D1 仲裁）：ZWSP 既非 `^` 也非 `\n`，本 pattern 与命令域 `(?:^|\n)\/(
- * \S*)$` 触发域无重叠——行首与换行后行首完整让位命令浮层。
+ * 互斥性（无 chip 形态，D1 仲裁）：ZWSP 既非 `^` 也非 `\n`，本 pattern 与命令域
+ * `(?:^|\n)\/(\S*)$` 触发域无重叠——行首与换行后行首完整让位命令浮层。
  */
 export const SKILL_TRIGGER_PATTERN = /(?:[^\S\n]|\u200B)\/(\S*)$/
 
 /**
- * skill 触发检测（多 skill 注入设计 D1）：行中空白或 chip spacer（ZWSP）后 `/` 触发
- * skill-only 浮层（pattern 语义与互斥性见 SKILL_TRIGGER_PATTERN 注释）。
+ * 有 chip 形态 pattern：边界类并入行首/换行后行首（`^|\n`）——命令域此刻被 hasChip
+ * 门同步抑制（两域判定同用 CHIP_PRESENCE_SELECTOR），收编不产生重叠；换行后新行行首
+ * 的 `/` 因而也能连续注入 skill（挤除旧死区）。无 chip 时仍用基础 pattern——行首恒归
+ * 命令浮层（命令 + skill 全量候选）。
+ */
+export const SKILL_TRIGGER_PATTERN_WITH_LINE_START = /(?:[^\S\n]|\u200B|^|\n)\/(\S*)$/
+
+/**
+ * chip 感知的 skill 触发 pattern 选择（唯一决策点）：有 chip → 行首/换行边界并入
+ * （SKILL_TRIGGER_PATTERN_WITH_LINE_START）；无 chip → 基础 pattern（行首让位命令域）。
+ * detect 与 clearSkillQueryText 同调本函数——「能触发就能清」，两侧不会各用一份条件。
+ */
+export function skillTriggerPatternFor(el: HTMLDivElement | null): RegExp {
+  return el?.querySelector(CHIP_PRESENCE_SELECTOR)
+    ? SKILL_TRIGGER_PATTERN_WITH_LINE_START
+    : SKILL_TRIGGER_PATTERN
+}
+
+/**
+ * skill 触发检测（多 skill 注入设计 D1）：行中空白、chip spacer（ZWSP）后，或「存在 chip
+ * 时的行首/换行后行首」`/` 触发 skill-only 浮层（pattern 语义见上两个常量 + skillTriggerPatternFor）。
  *
  * query 合法性过滤（D5 翻案后的误弹缓解）：query 一旦含 `/`、大写、下划线等 skill 名
  * 非法字符立即返回 null（关闭浮层）——「帮我看看 /usr」输到第二个 `/` 即关闭（场景 6①）。
  * 返回 null 的两种含义（无光标 / 不命中或 query 非法）由调用方语境区分（同四符号前置约定）。
  */
 export function detectSkillTriggerFromEl(el: HTMLDivElement | null): { query: string } | null {
-  const hit = matchTriggerBeforeCursor(el, SKILL_TRIGGER_PATTERN)
+  const hit = matchTriggerBeforeCursor(el, skillTriggerPatternFor(el))
   if (!hit) return null
   return SKILL_QUERY_PATTERN.test(hit.query) ? hit : null
 }

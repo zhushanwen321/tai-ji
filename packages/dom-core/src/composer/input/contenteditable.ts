@@ -31,7 +31,8 @@ import {
   detectSubagentTriggerFromEl,
   detectSlashTriggerFromEl,
   detectSkillTriggerFromEl,
-  SKILL_TRIGGER_PATTERN,
+  CHIP_PRESENCE_SELECTOR,
+  skillTriggerPatternFor,
   getCaretLineRect,
   moveCaretVerticalOf,
   pickClipboardImageItem,
@@ -160,11 +161,13 @@ export function useContenteditableInput(
    * 「有光标但明确不命中」（如「帮我看看 /usr」空格后）不进兜底——否则第二行编辑时
    * 会被第一行行首 / 误触发。chip 存在时不触发（chip label 的 / 文本不构成新命令），
    * 沿用旧 hasChip 语义；slash-chip 后光标处的 / 天然不命中（光标前缀有 ZWSP spacer）。
+   * 抑制门与 skill 域的行首收编（skillTriggerPatternFor）同用 CHIP_PRESENCE_SELECTOR——
+   * 有 chip 时行首 / 由 skill 域承接（换行续链，两域不重叠）。
    */
   function detectSlashTrigger(): { query: string } | null {
     const el = getEl()
     if (!el) return null
-    const hasChip = !!el.querySelector('.slash-chip, .mention-chip')
+    const hasChip = !!el.querySelector(CHIP_PRESENCE_SELECTOR)
     if (hasChip) return null
     const sel = window.getSelection()
     if (sel && sel.rangeCount > 0 && el.contains(sel.anchorNode)) {
@@ -177,8 +180,9 @@ export function useContenteditableInput(
   /**
    * skill 触发检测编排（多 skill 注入设计 D1/D2）。
    *
-   * 与命令触发（detectSlashTrigger）互斥派发：两正则触发域不重叠（行首归命令、行中
-   * 非换行空白或 chip spacer（ZWSP）后归 skill），同一次 onInput 至多一路非 null。无
+   * 与命令触发（detectSlashTrigger）互斥派发：两正则触发域不重叠（无 chip：行首归命令、
+   * 行中非换行空白或 chip spacer（ZWSP）后归 skill；有 chip：命令域被 hasChip 门整体
+   * 抑制，行首/换行后行首并入 skill 域——见 skillTriggerPatternFor），同一次 onInput 至多一路非 null。无
    * hasChip 抑制——skill 浮层解除「存在任何 chip 时 slash 不触发」限制（D2：多 skill
    * chip 与正文混排是核心语义；chip 后光标处的 / 经 ZWSP spacer 边界命中 skill 域——
    * Tab 确认后直接敲 / 连续注入多 skill 的主链路，见 SKILL_TRIGGER_PATTERN 注释）。
@@ -347,12 +351,13 @@ export function useContenteditableInput(
   }
 
   /**
-   * 清除「空白或 chip spacer（ZWSP）/query」段（skill 触发选中后清过滤文本，多 skill
-   * 注入 D2；boundaryLen 模式与命令通道同款——边界空白/ZWSP 保留不吞草稿，spacer 是
-   * 光标锚点须留守）。正则与 detectSkillTriggerFromEl 同源（SKILL_TRIGGER_PATTERN）。
+   * 清除「空白或 chip spacer（ZWSP）/query」段，有 chip 时亦含行首/换行后行首形态
+   * （skill 触发选中后清过滤文本，多 skill 注入 D2；boundaryLen 模式与命令通道同款——
+   * 边界空白/ZWSP 保留不吞草稿，spacer 是光标锚点须留守）。pattern 与
+   * detectSkillTriggerFromEl 同源（skillTriggerPatternFor 唯一决策点，chip 判定两侧一致）。
    */
   function clearSkillQueryText(): void {
-    if (!clearSymbolQueryBeforeCursor(getEl(), SKILL_TRIGGER_PATTERN)) return
+    if (!clearSymbolQueryBeforeCursor(getEl(), skillTriggerPatternFor(getEl()))) return
     syncEmpty()
     emitInput(getText())
   }

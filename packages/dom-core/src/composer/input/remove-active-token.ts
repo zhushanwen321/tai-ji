@@ -8,10 +8,13 @@
  * 四轮收敛的教训），禁止 import / 复用 clear 家族的选区前置。
  *
  * 两条硬规则（设计 D2b 终态机制 2）：
- * - 域约束拼正则：slash `(?:^|\n)\/` 行首 vs skill `[^\S\n]\/` 行中空白后——同符号异
+ * - 域约束拼正则：slash `(?:^|\n)\/` 行首 vs skill `(?:[^\S\n]|\u200B|^|\n)\/`——同符号异
  *   约束，禁止无域约束的「符号+文本」拼接搜索（跨域串扰）。域约束源与 input-dom.ts
  *   detect 家族（detectSlashTriggerFromEl / detectSkillTriggerFromEl / 三符号 detect）
- *   同源对齐，两侧修改须同步。
+ *   同源对齐，两侧修改须同步。skill 域含 `^|\n` 是刻意放宽（有 chip 时 detect 侧
+ *   skillTriggerPatternFor 把行首/换行纳入 skill 域，清理侧须同宽才能覆盖该形态）；
+ *   放宽不增加误删面——删除仍受「全 el 恰一处命中」唯一性门 + 右边界 `(?!\S)` 约束，
+ *   多命中/0 命中一律 no-op 跳过（安全侧）。
  * - 非唯一命中（含 0 命中）no-op 跳过：无法消歧位置时不动 DOM（误删失活历史 token
  *   = 复发垃圾参数 + 改写用户草稿，双输；跳过使低频形态退归残留代价面）。
  *
@@ -33,8 +36,9 @@ export type ActiveTokenDomainType = 'slash' | 'file' | 'session' | 'subagent' | 
 /**
  * 五域约束正则源（前缀形态，尾部不含 query）。
  *
- * 与 input-dom.ts detect 家族同源（slash=`(?:^|\n)\/`、skill=`[^\S\n]\/`，其余三符号
- * `(?:^|\s)` 前缀族）——行首 vs 行中空白后两 `/` 域互斥语义由前缀承载。约束：
+ * 与 input-dom.ts detect 家族同源（slash=`(?:^|\n)\/`、skill=`(?:[^\S\n]|\u200B|^|\n)\/`，其余三符号
+ * `(?:^|\s)` 前缀族）——行首归属随 chip 存在性切换（无 chip：slash；有 chip：skill），
+ * 两 `/` 域互斥语义由前缀承载。约束：
  * 必须为非捕获形态（不得自带捕获组——本助手外包捕获组后 m[1] 用于定位符号起点）；
  * 尾部符号恒单字符（$/#/@// 均是），符号起点 = m.index + m[1].length - 1 依赖此约束。
  */
@@ -47,8 +51,8 @@ export const ACTIVE_TOKEN_DOMAIN_PATTERN_SOURCES: Readonly<Record<ActiveTokenDom
   session: '(?:^|\\s)#',
   /** 行首或空白后 @（subagent 域）——对齐 detectSubagentTriggerFromEl */
   subagent: '(?:^|\\s)@',
-  /** 行中非换行空白或 chip spacer（ZWSP）后 /（skill 域，与行首命令域正则互斥）——对齐 input-dom SKILL_TRIGGER_PATTERN */
-  skill: '(?:[^\\S\\n]|\\u200B)\\/',
+  /** 行中非换行空白/chip spacer（ZWSP）/行首/换行后行首 /（skill 域；行首归属随 chip 存在性切换）——对齐 input-dom skillTriggerPatternFor */
+  skill: '(?:[^\\S\\n]|\\u200B|^|\\n)\\/',
 }
 
 /** 正则元字符转义惯用法（query 是用户输入文本，动态拼入正则前必须转义，防语义漂移误匹配） */
