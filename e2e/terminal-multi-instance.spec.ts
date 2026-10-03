@@ -13,8 +13,10 @@
  *   （进程级断言，无孤儿）；本 spec 未覆盖的会话删除 UI 交互归 D3 verify 剧本
  * - T8 序号不复用：关「终端 2」→「+」→ 新条目序号为 3、输出区空白
  * - T9 最后实例自然退出：唯一实例敲 `exit` → 空态 + 「+」可用 → 新建得序号 2（不回落 1）
- * - T10 runtime 重启边界：杀 runtime → supervisor 重生（token 变化 = 世代变更）→ 切换条
- *   重置为空态 → 「+」新建得「终端 1」→ 回显命令输出正常、无上一世代串入
+ * - T10 runtime 重启边界：杀 runtime → supervisor 重生（token 变化 = 世代变更）→ App.vue
+ *   非 connected 态整壳替换 AppShell（TerminalView 卸载）→ 重连后重挂载，挂载腿对账得空清单
+ *   自动新建本世代默认实例 → 恰 1 条实例且编号 = `term:<sid>:1`（世代重置证据）→ 回显命令
+ *   输出正常、无上一世代串入
  * - T13 跨会话不误清：会话 A 双实例 → 切 B（触发 B 的 terminal.list 对账）→ 切回 A →
  *   A 的条目 / 分区 / 历史输出保持
  *
@@ -576,14 +578,14 @@ test('T9: 最后实例自然退出——exit 后空态 + 「+」可用、新建�
 
 // ── T10 runtime 重启边界（世代变更重置）─────────────────────────────────
 
-test('T10: runtime 重启边界——杀 runtime 后切换条重置空态、新建得终端 1、回显正常无串入', async () => {
+test('T10: runtime 重启边界——杀 runtime 后世代重置为终端 1、回显正常无串入', async () => {
   const skip = mockBundleSkipReason()
   test.skip(skip !== null, skip ?? '')
   test.setTimeout(240_000)
   const h = await launchHarness()
   try {
     // 双实例各有输出（旧世代痕迹，用于「无串入」负向断言）
-    await openSessionWithTerminal(h, 'term-t10')
+    const { sessionId } = await openSessionWithTerminal(h, 'term-t10')
     await runInTerminal(h.page, T1_A.cmd)
     await expectTerminalOutput(h.page, T1_A.out)
     await createInstance(h.page)
@@ -596,21 +598,31 @@ test('T10: runtime 重启边界——杀 runtime 后切换条重置空态、新�
     const previousToken = readRuntimeToken(h.dataDir)
     expect(previousToken, '重启前应能读到 runtime token（世代核对旧值）').not.toBe('')
     const runtimePid = runtimePidOnPort(h.port)
+    // 重挂载判据的操作数：记录旧 AppShell 的 terminal-view 节点（同一 DOM 节点不跨重挂载复用）
+    const preRestartTerminalView = await h.page.getByTestId('terminal-view').elementHandle()
+    expect(preRestartTerminalView, '重启前 terminal-view 应在场（重挂载判据操作数）').not.toBeNull()
     process.kill(runtimePid, 'SIGKILL')
     await waitForGenerationChange(h.dataDir, previousToken)
 
-    // 世代变更 → 终端域重置：切换条重建为空态（新 runtime 注册表为空）
-    // （超时放宽到世代预算：token 在 spawn 前写入，重置等到 WS 重连完成后才发生）
-    await expectInstanceCount(h.page, 0, GENERATION_CHANGE_TIMEOUT_MS)
-    await expect(h.page.getByTestId('terminal-instance-empty')).toBeVisible({ timeout: INSTANCE_SETTLE_TIMEOUT_MS })
+    // 世代变更 → App.vue 非 connected 态整壳替换 AppShell（App.vue:7），TerminalView 随之卸载。
+    // **「条目数 0」不能作「重置已发生」的判据**：整壳卸载期 `terminal-instance-item` 不存在，
+    // `toHaveCount(0)` 恒真（实测 6.5ms 即通过）——必须先等旧 AppShell 卸载（旧 terminal-view
+    // 节点 detach；ElementHandle 的 'hidden' 对已 detach 节点同样成立）→ 再等重挂载后的
+    // terminal-view 可见，此后条目数才反映新 runtime 的真实注册表。
+    await preRestartTerminalView?.waitForElementState('hidden', { timeout: GENERATION_CHANGE_TIMEOUT_MS })
+    await expect(h.page.getByTestId('terminal-view')).toBeVisible({ timeout: GENERATION_CHANGE_TIMEOUT_MS })
+    // 重挂载后抽屉保持打开（面板 store 跨整壳替换存活）；本调用幂等，兼作兜底
+    await openTerminalDrawer(h.page)
 
-    // 「+」新建得终端 1（新世代序号从 1 重新起算）
-    await createInstance(h.page)
-    await expectInstanceCount(h.page, 1)
+    // 重置的可观测终态：空态在本链路不可稳定观测——重连 remount 触发 TerminalView 挂载腿
+    // `reconcileInstances → 空清单 → spawnWithFeedback` 自动新建本世代默认实例（u2 既定行为），
+    // 空态窗口 ~50-150ms 短于 100ms 起的轮询间隔 → 不断言空态，断言终态：恰 1 条实例且编号
+    // = `term:<sid>:1`（新世代序号从 1 重新起算 = 世代重置证据；上一世代为 2 条、编号 :1/:2）。
+    await expectInstanceCount(h.page, 1, GENERATION_CHANGE_TIMEOUT_MS)
     const id = await terminalIdAt(h.page, 0)
-    expect(seqOf(id), '新世代新建应得终端 1').toBe(1)
+    expect(id, '新世代重建实例应为 term:<sid>:1（序号从 1 重新起算）').toBe(`term:${sessionId}:1`)
 
-    // 全链正向锚：新建终端敲键回显正常显示（重置 → ack 建档 → 订阅建立 → 输出可达）
+    // 全链正向锚：重建实例敲键回显正常显示（重置 → 挂载腿 ack 建档 → 订阅建立 → 输出可达）
     await runInTerminal(h.page, T10_MARK.cmd)
     await expectTerminalOutput(h.page, T10_MARK.out)
     // 无上一世代输出串入
