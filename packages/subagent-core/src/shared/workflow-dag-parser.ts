@@ -41,10 +41,14 @@
  *   无 agent() 调用点，解析为零调用点；运行时实例经事件流「未匹配实例」分组
  *   兜底（设计 D2 ⑥），不静默丢失。
  * - helper 投影的边界：多 agent() 调用的 helper、零参数 helper（名字无实参入口）、
- *   匿名回调（map 等实参位置的函数——批量回调内的调用点语义保持现状）、helper 体内
- *   再调/嵌套声明其他 helper（外层让位于内层）、同名重复声明（首个录取）均不投影——
- *   相关调用点保持词法位置收口，归属漂移由挂接侧「未匹配实例」分组兜底；helper 体内
- *   对显示名的后处理（replace 等）不在投影语义内，模板取自调用点第一实参原文。
+ *   匿名回调（map 等实参位置的函数——批量回调内的调用点语义保持现状）、子树内
+ *   直接调用其他 helper 候选（复合调用链，命运迭代结算：被调者录取则 caller 让位，
+ *   被调者注定落选则无碍）、嵌套声明其他候选（内层录取、外层让位）、同名多候选
+ *   声明（全部不投影——hoisting 末者胜与词法序错位属静态不可裁决）均不投影——
+ *   相关调用点保持词法位置收口，归属漂移由挂接侧「未匹配实例」分组兜底；helper
+ *   体内对显示名的后处理（replace 等）不在投影语义内，模板取自调用点第一实参原文。
+ *   helper 调用匹配为名字级（裸 callee Identifier ∈ 注册表，shadow 不分析——与
+ *   dataflow/conditional 名字级匹配同族）。
  * - dataflow/conditional 判定为名字级匹配，不做作用域 shadow 分析（同名词法
  *   槽极罕见；误连边的代价是图上多一条提示边，不产生错误结构）。
  * - dataflow 只认 `await agent(...)` / `await parallel(...)` 的直接绑定；helper
@@ -643,33 +647,77 @@ function collectHelperCandidates(node: AstNode, out: HelperCandidate[]): void {
 }
 
 /**
- * helper 注册表构建：恰 1 个 agent() 调用 + 参数 ≥1 + 子树不调/不嵌套其他已录取
- * helper。跨度升序录取（内层先录取，外层按包含/调用关系让位）——双层投影会失真
- * （外层第一实参 ≠ 内层实现实际收到的名字），让位后外层体内对内层的调用点仍按
- * 内层投影（phase 取外层体内词法位置），外层自身的调用点不产节点。
+ * helper 注册表构建（预计算 + 迭代结算）：先收集全部具名候选，平凡不合格者（多/
+ * 零 agent 调用、零参、同名多候选）先结算为拒；其余按依赖命运逐轮结算——依赖 =
+ * 子树内直接调用的候选 + 嵌套声明的候选，依赖已录取 → 复合形态拒（双层投影失真：
+ * 外层第一实参 ≠ 内层实现实际收到的名字），依赖全部落选 → 录取，存在未结算 →
+ * 延到下轮（跨度升序仅为评估序；「单行 caller 先于多行 callee 评估」的次序漏洞
+ * 由依赖命运结算消除，不依赖评估顺序），循环停滞（互调环）→ 剩余全拒。
+ * 让位归属：被拒 caller 的调用点不产节点；其体内对已录取 helper 的调用点仍按
+ * helper 投影（phase 取该处词法位置）。
  */
 function collectAgentHelpers(program: AstNode): Map<string, AgentHelperEntry> {
   const candidates: HelperCandidate[] = [];
   collectHelperCandidates(program, candidates);
-  candidates.sort((a, b) => a.fn.end - a.fn.start - (b.fn.end - b.fn.start));
-  const byName = new Map<string, AgentHelperEntry>();
+  const candidateNames = new Set(candidates.map((c) => c.name));
+  const directCalls = new Map<HelperCandidate, Set<string>>();
+  const contains = new Map<HelperCandidate, HelperCandidate[]>();
   for (const cand of candidates) {
-    if (byName.has(cand.name)) continue; // 同名重复声明：首个录取（hoisting 末者胜为病理形态，登记于头注释边界）
-    if (cand.calls.length !== 1) continue;
-    if ((cand.fn.params as AstNode[]).length === 0) continue;
-    const composedCalls: AstNode[] = [];
-    collectCallsToNames(cand.fn, new Set(byName.keys()), composedCalls);
-    if (composedCalls.length > 0) continue;
-    let containsAccepted = false;
-    for (const entry of byName.values()) {
-      if (entry.fn !== cand.fn && entry.fn.start >= cand.fn.start && entry.fn.end <= cand.fn.end) {
-        containsAccepted = true;
-        break;
+    const called: AstNode[] = [];
+    collectCallsToNames(cand.fn, candidateNames, called);
+    directCalls.set(cand, new Set(called.map((call) => (call.callee as AstNode).name as string)));
+    contains.set(
+      cand,
+      candidates.filter((other) => other !== cand && other.fn.start >= cand.fn.start && other.fn.end <= cand.fn.end),
+    );
+  }
+  const byName = new Map<string, AgentHelperEntry>();
+  const status = new Map<HelperCandidate, "accepted" | "rejected">();
+  // 结算阶段：平凡不合格（命运已定，对调用方无碍——调用注定落选的 helper 只是普通函数调用）
+  for (const cand of candidates) {
+    if (cand.calls.length !== 1 || (cand.fn.params as AstNode[]).length === 0) status.set(cand, "rejected");
+  }
+  const nameCounts = new Map<string, number>();
+  for (const cand of candidates) nameCounts.set(cand.name, (nameCounts.get(cand.name) ?? 0) + 1);
+  for (const cand of candidates) {
+    if ((nameCounts.get(cand.name) ?? 0) > 1) status.set(cand, "rejected");
+  }
+  const candByName = new Map<string, HelperCandidate>();
+  for (const cand of candidates) candByName.set(cand.name, cand);
+  const order = [...candidates].sort((a, b) => a.fn.end - a.fn.start - (b.fn.end - b.fn.start));
+  let progress = true;
+  while (progress) {
+    progress = false;
+    for (const cand of order) {
+      if (status.has(cand)) continue;
+      const deps = new Set<HelperCandidate>();
+      for (const name of directCalls.get(cand) ?? []) {
+        const dep = candByName.get(name);
+        if (dep !== undefined && dep !== cand) deps.add(dep);
+      }
+      for (const inner of contains.get(cand) ?? []) deps.add(inner);
+      let composed = false;
+      let pending = false;
+      for (const dep of deps) {
+        const s = status.get(dep);
+        if (s === "accepted") {
+          composed = true;
+          break;
+        }
+        if (s === undefined) pending = true;
+      }
+      if (composed) {
+        status.set(cand, "rejected");
+        progress = true;
+      } else if (!pending) {
+        status.set(cand, "accepted");
+        byName.set(cand.name, { fn: cand.fn, internalCall: cand.calls[0] as AstNode });
+        progress = true;
       }
     }
-    if (containsAccepted) continue;
-    byName.set(cand.name, { fn: cand.fn, internalCall: cand.calls[0] as AstNode });
   }
+  // 停滞残留 = 候选间互调/嵌套环 → 全部不投影
+  for (const cand of candidates) if (!status.has(cand)) status.set(cand, "rejected");
   return byName;
 }
 

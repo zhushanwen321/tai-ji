@@ -624,6 +624,42 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
       expect(result.dag.parallelGroups.length).toBe(1);
     });
 
+    it("复合调用链（caller 自带 1 个 agent 调用且调用另一候选）：对全候选集判定，caller 不投影", () => {
+      const source = [
+        `function grade(n) {`,
+        `  const p = String(n);`,
+        `  return agent({ prompt: p, description: n });`,
+        `}`,
+        `function fast(n) { return grade(n); }`,
+        `phase("评审");`,
+        `await fast("a");`,
+      ].join("\n");
+      const result = parseWorkflowDag(source);
+      if (!result.ok) throw new Error(result.message);
+      expectStructurallyValid(result.dag);
+      // fast 子树调用候选 grade → fast 不投影（跨度升序下 fast 先评估，判定必须对全候选集）；
+      // grade 录取且实现点抑制；fast 体内 grade(n) 调用点投影（n 非静态 → 通配；声明在 phase 前 → 缺省分区）
+      expect(result.dag.nodes.length).toBe(1);
+      expect(result.dag.nodes[0]?.templateName).toBe("*");
+      expect(result.dag.nodes[0]?.phase).toBe(WORKFLOW_DAG_DEFAULT_PHASE);
+    });
+
+    it("同名多候选声明：全部不投影（实现点保持词法收口）", () => {
+      const source = [
+        `function h(n) { return agent({ prompt: "p", description: n }); }`,
+        `async function h(name) { return await agent({ prompt: "q", description: name }); }`,
+        `phase("P");`,
+        `await h("x");`,
+      ].join("\n");
+      const result = parseWorkflowDag(source);
+      if (!result.ok) throw new Error(result.message);
+      expectStructurallyValid(result.dag);
+      // 两个 h 声明均不录取 → 实现点按词法收口（两节点，均在 phase("P") 之前）；h("x") 调用点不产节点
+      expect(result.dag.nodes.length).toBe(2);
+      expect(result.dag.nodes.every((n) => n.phase === WORKFLOW_DAG_DEFAULT_PHASE)).toBe(true);
+      expect(result.dag.nodes.every((n) => n.templateName === "*")).toBe(true);
+    });
+
     it("helper 套 helper：内层投影、外层让位（外层体内对内层的调用仍投影，外层调用点不产节点）", () => {
       const source = [
         `function inner(n) {`,
