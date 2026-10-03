@@ -21,6 +21,8 @@ import { useSessionStore } from '@/stores/session'
 import { useSideDrawer } from '@/composables/features/drawer/useSideDrawer'
 import { file as fileApi, git as gitApi } from '@/api'
 import { detectFileKind, type FileKind } from '@/composables/logic/file-type'
+import { createHtmlPreviewController, type HtmlViewMode } from '@/composables/features/file-tree/html-preview'
+import { localFileServable } from '@/lib/ipc'
 import { parseDiff } from '@/composables/logic/parseDiff'
 import { resolvePreviewPath } from '@/lib/path-utils'
 import i18n from '@/i18n'
@@ -81,6 +83,27 @@ export function useDetailPane(sessionId: Ref<string | null>) {
    * 不匹配则 return（旧请求的慢响应不覆盖新选中文件的 state）。
    */
   let loadToken = 0
+
+  /**
+   * HTML 渲染态（chat-html-support §6.4 D4）：预览 / 源码切换 + servable 预检 + sandbox iframe。
+   * 挂载 / 刷新 / 重试三者是同一挂载函数的重入（§6.4 子决策④「按钮语义归一」）。
+   */
+  const htmlView = ref<HtmlViewMode>('rendered')
+  const htmlPreview = createHtmlPreviewController(localFileServable)
+
+  /** 渲染态文件绝对路径（~ 不展开；无 cwd 且相对路径时由预检自然拒绝，不设 session 防御分支） */
+  function htmlAbsolutePath(): string | null {
+    const path = state.value.path
+    if (!path) return null
+    return resolvePreviewPath(sessionCwd(sessionId.value) ?? '', path).absolute
+  }
+
+  /** 重走整个挂载序列：servable 预检 + 重开 iframe（占位态 = 重试；已挂载态 = 刷新） */
+  async function reloadHtmlPreview(): Promise<void> {
+    const abs = htmlAbsolutePath()
+    if (!abs) return
+    await htmlPreview.mount(abs)
+  }
 
   /**
    * 取当前 session 的 cwd 绝对路径（图片渲染拼 local-file:// URL 用）。
@@ -153,12 +176,25 @@ export function useDetailPane(sessionId: Ref<string | null>) {
     // 判断 git 改动：gitOverlay per-session 查（含 untracked，T2.8b untracked 也算改动可 diff）
     const gitStatus = gitPath ? store.getGitStatus(sid, gitPath)?.status : undefined
     state.value.hasGitChange = !!gitStatus
-    // 默认 viewMode：forceDiff（变更集卡等已知有改动的入口）优先；否则按 gitOverlay 判定
-    const mode: DetailViewMode = forceDiff ? 'diff' : gitStatus ? 'diff' : 'preview'
-    state.value.viewMode = mode
     // 文件渲染类别（preview 模式渲染器选择依据；diff 模式统一走 DiffView）
-    state.value.kind = detectFileKind(path)
-
+    const kind = detectFileKind(path)
+    state.value.kind = kind
+    // 默认 viewMode：.html/.htm 恒默认预览（设计 §6.4 D4「默认预览」——含变更集卡入口的
+    // forceDiff：渲染态是点开 HTML 的压倒性意图，diff 仍可经「差异 | 预览」切换到达）；
+    // 其余：forceDiff（变更集卡等已知有改动的入口）优先，否则按 gitOverlay 判定
+    const mode: DetailViewMode = kind === 'html' ? 'preview' : forceDiff || gitStatus ? 'diff' : 'preview'
+    state.value.viewMode = mode
+    // HTML 渲染态（§6.4 D4）：预览不依赖 file.read——产物目录在 session cwd 外，file.read
+    // 的 cwd 守门会拒绝；准入由 servable 预检（白名单 ∪ 存在 ∪ 非目录）承担。
+    if (kind === 'html') {
+      htmlView.value = 'rendered'
+      htmlPreview.reset()
+      if (mode === 'preview') {
+        state.value.status = 'content'
+        void reloadHtmlPreview()
+        return
+      }
+    }
     await loadContent(sid, path, gitPath, mode, token, true)
   }
 
@@ -177,12 +213,43 @@ export function useDetailPane(sessionId: Ref<string | null>) {
     const cwd = sessionCwd(sid) ?? ''
     const resolved = resolvePreviewPath(cwd, path)
     const gitPath = resolved.relative
+    // 切回渲染态（html 默认预览态）：重走挂载序列；源码态内容按需加载
+    if (mode === 'preview' && state.value.kind === 'html' && htmlView.value === 'rendered') {
+      state.value.status = 'content'
+      void reloadHtmlPreview()
+      return
+    }
     await loadContent(sid, path, gitPath, mode, token)
+  }
+
+  /**
+   * HTML 渲染态「预览 | 源码」切换（§6.4 D4）。
+   * - rendered：重走挂载序列（预检 + 开 iframe）
+   * - source：既有 shiki 源码高亮——需 file.read 内容（cwd 守门；失败走既有错误态）
+   */
+  async function setHtmlView(mode: HtmlViewMode): Promise<void> {
+    if (state.value.kind !== 'html') return
+    if (mode === 'rendered') {
+      htmlView.value = 'rendered'
+      await reloadHtmlPreview()
+      return
+    }
+    htmlView.value = 'source'
+    const sid = sessionId.value
+    const path = state.value.path
+    if (!sid || !path) return
+    const token = ++loadToken
+    state.value.status = 'loading'
+    state.value.error = ''
+    const resolved = resolvePreviewPath(sessionCwd(sid) ?? '', path)
+    await loadContent(sid, path, resolved.relative, 'preview', token)
   }
 
   /** 清空预览（关闭 drawer / 取消选中时） */
   function clearPreview(): void {
     state.value = initialState()
+    htmlView.value = 'rendered'
+    htmlPreview.reset()
   }
 
   /**
@@ -234,5 +301,11 @@ export function useDetailPane(sessionId: Ref<string | null>) {
     toggleView,
     clearPreview,
     sessionCwd,
+    htmlView,
+    htmlPreviewStatus: htmlPreview.status,
+    htmlPreviewReasonKey: htmlPreview.reasonKey,
+    htmlSrc: htmlPreview.src,
+    setHtmlView,
+    reloadHtmlPreview,
   }
 }

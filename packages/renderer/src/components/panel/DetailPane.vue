@@ -1,3 +1,4 @@
+<!-- split-justified: 文件预览抽屉单一语义域（类型分发 + 四态渲染 + 选区引用注入 + HTML 渲染态切换/预检/iframe——渲染面与选区反推围绕同一预览上下文） -->
 <template>
   <!--
     DetailPane —— 文件预览面板（#6，UC-6，对齐 draft-detail-pane.html）。
@@ -91,7 +92,49 @@
           @click="onToggleView('preview')"
         >{{ t('panel.detail.preview') }}</Button>
       </div>
+      <!-- HTML 渲染态：预览 | 源码切换（chat-html-support §6.4 D4，默认预览） -->
+      <div
+        v-if="state.kind === 'html' && state.viewMode === 'preview'"
+        class="flex gap-0.5 rounded-md bg-bg-input p-0.5"
+        data-testid="detail-html-view-toggle"
+      >
+        <Button
+          variant="ghost"
+          class="h-6 rounded-sm px-1.5 text-[length:var(--text-3xs)]"
+          :class="htmlView === 'rendered' ? 'bg-bg-elevated text-neutral-fg' : 'text-neutral-mid'"
+          :title="t('panel.detail.preview')"
+          @click="setHtmlView('rendered')"
+        >{{ t('panel.detail.preview') }}</Button>
+        <Button
+          variant="ghost"
+          class="h-6 rounded-sm px-1.5 text-[length:var(--text-3xs)]"
+          :class="htmlView === 'source' ? 'bg-bg-elevated text-neutral-fg' : 'text-neutral-mid'"
+          :title="t('panel.detail.htmlTabSource')"
+          @click="setHtmlView('source')"
+        >{{ t('panel.detail.htmlTabSource') }}</Button>
+      </div>
+      <!-- 刷新：仅 iframe 已挂载态（占位态只显「重试」——按钮语义归一，§6.4 子决策④） -->
+      <Button
+        v-if="state.kind === 'html' && state.viewMode === 'preview' && htmlView === 'rendered' && htmlSrc"
+        variant="ghost"
+        data-testid="detail-html-refresh"
+        class="h-6 w-6 rounded-sm p-0"
+        :title="t('panel.detail.htmlRefresh')"
+        @click="reloadHtmlPreview"
+      >
+        <RefreshCw class="size-3.5 text-neutral-dim" />
+      </Button>
     </div>
+
+    <!-- HTML 渲染态（chat-html-support §6.4 D4）：servable 预检 pending / 不可服务占位
+         （带原因 + 重试）/ sandbox iframe——三态互斥，落 HtmlPreviewPane。 -->
+    <HtmlPreviewPane
+      v-if="state.kind === 'html' && state.viewMode === 'preview' && htmlView === 'rendered'"
+      :status="htmlPreviewStatus"
+      :reason-key="htmlPreviewReasonKey"
+      :src="htmlSrc"
+      @reload="reloadHtmlPreview"
+    />
 
     <!-- 加载态（骨架，AC-6.6/T6.7：异步返回前非空白） -->
     <div
@@ -225,9 +268,9 @@
             <p class="font-mono text-[length:var(--text-3xs)] text-neutral-dim opacity-60">{{ state.path }}</p>
           </div>
         </div>
-        <!-- code：CodeBlock shiki 高亮 -->
+        <!-- code（含 .html/.htm 的「源码」态）：CodeBlock shiki 高亮 -->
         <div
-          v-else-if="state.kind === 'code'"
+          v-else-if="state.kind === 'code' || state.kind === 'html'"
           class="p-2"
           data-testid="detail-code"
         >
@@ -247,7 +290,7 @@
 <script setup lang="ts">
 import { computed, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { FileText, Loader2, AlertCircle, Image as ImageIcon, Copy, Check, Quote } from '@lucide/vue'
+import { FileText, Loader2, AlertCircle, Image as ImageIcon, Copy, Check, Quote, RefreshCw } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { useDetailPane, type DetailViewMode } from '@/composables/features/file-tree/useDetailPane'
@@ -258,6 +301,7 @@ import { resolvePreviewPath } from '@/lib/path-utils'
 import { MarkdownRenderer, ChatViewDepsKey } from '@taiji/ui'
 import CodeBlock from '@/components/panel/detail-renderers/CodeBlock.vue'
 import DiffView from '@/components/panel/detail-renderers/DiffView.vue'
+import HtmlPreviewPane from '@/components/panel/detail-renderers/HtmlPreviewPane.vue'
 import { useChatViewDeps } from '@/composables/panel/useChatViewDeps'
 
 const { t } = useI18n()
@@ -275,7 +319,17 @@ const props = defineProps<{
   sessionId: string | null
 }>()
 
-const { state, toggleView, sessionCwd } = useDetailPane(
+const {
+  state,
+  toggleView,
+  sessionCwd,
+  htmlView,
+  htmlPreviewStatus,
+  htmlPreviewReasonKey,
+  htmlSrc,
+  setHtmlView,
+  reloadHtmlPreview,
+} = useDetailPane(
   computed(() => props.sessionId),
 )
 

@@ -456,3 +456,24 @@ export function getImageCacheWritePort(): ImageCacheWritePort | undefined {
   const invoke = api?.imageCacheWrite
   return invoke ? (sessionId, images) => invoke({ sessionId, images }) : undefined
 }
+
+// ── 产物可服务性预检（chat-html-support §6.9 D9，u3-detailpane）────────
+
+/** localFile:servable 预检结果（类型面落在 preload/index.d.ts 的 LocalFileServableChannel） */
+export interface LocalFileServableResult {
+  servable: boolean
+  reason?: 'not_found' | 'is_dir' | 'out_of_whitelist'
+  size?: number
+}
+
+/**
+ * 预检绝对路径是否可经 local-file 协议服务（渲染态挂载前准入检查）。
+ *
+ * 谓词与协议 handler 同源（白名单成员资格 → 存在性 → 目录性，main 侧单一实现）。
+ * 无 IPC（web/mock / 旧 preload 未暴露该通道）→ reject：调用方（渲染态）转
+ * 「预览服务不可用」占位 + 重试（不静默空白）。
+ */
+export function localFileServable(absPath: string): Promise<LocalFileServableResult> {
+  if (!api?.localFileServable) return Promise.reject(new Error('localFileServable unavailable'))
+  return api.localFileServable(absPath)
+}
