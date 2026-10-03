@@ -413,3 +413,80 @@ describe('C4: PiToolExecutionEndEvent has NO args field (pi never sends args on 
     expect(_e).toBeDefined()
   })
 })
+
+// ════════════════════════════════════════════════════════════════════════
+// C5: pi 1.0.0 codemode tool_execution_end shape (codemode 设计 D4① 契约样本)
+// ════════════════════════════════════════════════════════════════════════
+//
+// 样本来源：真机实测（taiji dev 实例 + pi 1.0.0 二进制 --mode rpc，真实 LLM 触发
+// codemode 脚本并行 tools.read；RPC tool_execution_end 事件原样采集，仅替换标识符
+// 与正文为脱敏占位）。信封与 C4 通用样本同构（type/toolCallId/toolName/result/
+// isError），codemode 特有形状在 result 内：
+//   - content 恒两块 text：[0] 沙箱执行元信息（Script completed / Wall time），
+//     [1] 脚本返回值序列化文本
+//   - details.calls：嵌套调用清单（D6 后置的树形展示数据源，本期无渲染消费点），
+//     每项 { id: "<toolCallId>/<序号>", name, args: JSON 字符串, status, durationMs }
+// 嵌套子调用自身的事件带 parentToolCallId 且不落 transcript（D4 过滤判据的
+// 协议依据），不会以独立 tool_execution_end 形态出现在该契约面上。
+
+describe('C5: pi 1.0.0 codemode tool_execution_end shape (real-device sample)', () => {
+  const CODEMODE_END_SAMPLE: PiToolExecutionEndEvent = {
+    type: 'tool_execution_end',
+    toolCallId: 'call_codemode_sample_0001',
+    toolName: 'codemode',
+    result: {
+      content: [
+        { type: 'text', text: 'Script completed\nWall time 0.1 seconds\nOutput:\n' },
+        { type: 'text', text: '[{"file":"a.txt","lines":5},{"file":"a1.log","lines":7}]' },
+      ],
+      details: {
+        calls: [
+          {
+            id: 'call_codemode_sample_0001/1',
+            name: 'read',
+            args: '{"path":"a.txt","offset":null,"limit":null}',
+            status: 'ok',
+            durationMs: 14.27,
+          },
+          {
+            id: 'call_codemode_sample_0001/2',
+            name: 'read',
+            args: '{"path":"a1.log","offset":null,"limit":null}',
+            status: 'ok',
+            durationMs: 4.7,
+          },
+        ],
+      },
+    },
+    isError: false,
+  }
+
+  it('envelope is assignable to PiToolExecutionEndEvent (same fields as C4 canonical)', () => {
+    const e: PiToolExecutionEndEvent = CODEMODE_END_SAMPLE
+    expect(e.type).toBe('tool_execution_end')
+    expect(e.toolName).toBe('codemode')
+    expect(e.isError).toBe(false)
+  })
+
+  it('result.content is two text blocks (sandbox meta + serialized return value)', () => {
+    const content = CODEMODE_END_SAMPLE.result.content
+    expect(content).toHaveLength(2)
+    expect(content.every((c) => c.type === 'text')).toBe(true)
+    expect((content[0] as { type: 'text'; text: string }).text).toMatch(/^Script completed/)
+  })
+
+  it('result.details.calls pins the nested-call list shape (D6 deferred data source)', () => {
+    const details = CODEMODE_END_SAMPLE.result.details as {
+      calls: { id: string; name: string; args: string; status: string; durationMs: number }[]
+    }
+    expect(details.calls).toHaveLength(2)
+    for (const call of details.calls) {
+      expect(call.id).toMatch(/^call_codemode_sample_0001\/\d+$/)
+      expect(typeof call.name).toBe('string')
+      expect(typeof call.args).toBe('string') // JSON-serialized arguments, not an object
+      expect(call.status).toBe('ok')
+      expect(typeof call.durationMs).toBe('number')
+    }
+    expect(() => JSON.parse(details.calls[0].args)).not.toThrow()
+  })
+})
