@@ -18,7 +18,7 @@
  * 裸键与 shift-only 组合不入清单（反例：'j' 入清单则页面文本框输入字母 j 触发 app 动作——
  * 劫持页面输入通道）；**Esc 不入清单**（§6.7 所有权第 4 层：页面聚焦态 Esc 归页面自身语义——
  * dev server 错误浮层 / 页内 IME 组合取消 / 全屏退出；关浮层键盘兜底 = ⌘W 无条件转发）。
- * 不采用「view 注入 preload 探测页面是否消费 Esc」——零信任嵌入立场明文无 preload 零注入
+ * 不采用「view 注入 preload 探测页面是否消费 Esc」——零信任嵌入立场明文无 preload、无持久注入
  * （§6.7 不采用④），browser-view-manager 头注不变量 1。
  *
  * 双端匹配配对契约（§7.4）：mod = input.control || input.meta（两分皆认）；shift 严格双分

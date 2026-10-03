@@ -9,7 +9,10 @@
  *
  * 1. 零信任嵌入：创建 view 时显式 webPreferences
  *    { contextIsolation: true, nodeIntegration: false, sandbox: true }，
- *    无 preload、零注入——被嵌入页不能访问 Node / Electron API。
+ *    无 preload、无持久注入——被嵌入页不能访问 Node / Electron API。仅限主进程一次性
+ *    executeJavaScript 白名单用途（viewport meta 注入 / autoFit 读数 / getSelection，
+ *    均一次性只读或幂等 meta 补齐，无常驻脚本面；与 §6.7④ 否决的常驻 preload 探测面
+ *    是两类风险，不构成「已有注入先例」的边界松动）。
  *
  * 2. WebContentsView 是 Electron 42 原生 API（`import { WebContentsView } from 'electron'`），
  *    不是已废弃的 BrowserView。

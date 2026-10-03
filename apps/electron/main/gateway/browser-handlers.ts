@@ -105,8 +105,10 @@ export function registerBrowserHandlers(
     manager.show(sessionId)
   })
 
-  // 切换可见 view（Wave 4 per-session 隔离）：隐藏当前可见的其他 session view，显示 target session view。
-  // 场景：renderer watch(focusedSessionId) → 切 session 时调，确保屏幕只显示新 session 的 view。
+  // 切换可见 view（Wave 4 per-session 隔离；display-containers §7.4 R3 收口后语义）：
+  // hide-only 收口 + 浮层随行豁免——非「浮层开 ∧ 内容 browser」态恒只隐藏不显示，
+  // 显示唯一触发 = browser-view-manager.applyDisplay 统一谓词。
+  // 场景：renderer watch(focusedSessionId) → 切 session 时调。
   ipcMain.handle('browser:focus', (_event, sessionId: string) => {
     manager.focus(sessionId)
   })

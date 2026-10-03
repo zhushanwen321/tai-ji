@@ -169,9 +169,10 @@ export function browserShow(sessionId: string): Promise<void> {
   return api?.browserShow(sessionId) ?? Promise.resolve()
 }
 
-/** 切换可见 view 到指定 session（Wave 4 per-session 隔离）。
- * 隐藏当前可见的其他 session view，显示 target session view。切 session 时由 useBrowserFocusSync 调用。
- * 无 IPC（web/mock）静默 no-op。 */
+/** 切换可见 view 到指定 session（Wave 4 per-session 隔离；§7.4 R3 收口后语义）。
+ *  hide-only 收口 + 浮层随行豁免：恒只隐藏不显示，显示唯一触发 = browser-view-manager.applyDisplay
+ *  统一谓词。切 session 时由 useBrowserFocusSync 调用。
+ *  无 IPC（web/mock）静默 no-op。 */
 export function browserFocus(sessionId: string): Promise<void> {
   return api?.browserFocus(sessionId) ?? Promise.resolve()
 }
@@ -253,6 +254,38 @@ export function browserSetShields(payload: {
   }>
 }): Promise<void> {
   return api?.browserSetShields(payload) ?? Promise.resolve()
+}
+
+// ── view 转发键清单（display-containers §7.4 [MANDATORY]，renderer 半边）─────────────
+// 主进程半边（forward-keys.ts 桥 + registry + before-input-event）已备；本组封装是
+// renderer 注册处的上报/派发腿：useGlobalShortcuts 装配处按 keymap+shortcutOverrides
+// 派生 mod 前缀清单上报，并订阅 'shortcut:forward' 按 accelerator 派发动作。
+// 无 IPC（web/mock）静默 no-op / 返回空回执 / no-op 退订。
+
+/**
+ * 转发键清单全量上报（初始化 / renderer 重载/崩溃恢复后启动；settings 重录走增量
+ * browserUpdateForwardKeys）。入清单约束（仅 mod 前缀组合，Esc 不入）由主进程 registry
+ * 强制，违规项进 rejected 回执。无 IPC 时返回空回执。
+ */
+export function browserSetForwardKeys(keys: string[]): Promise<{ accepted: string[]; rejected: string[] }> {
+  return api?.browserSetForwardKeys(keys) ?? Promise.resolve({ accepted: [], rejected: [] })
+}
+
+/** 转发键清单注册/注销增量（settings 重录 = 注销旧 accelerator + 注册新 accelerator）。无 IPC 时返回空回执 */
+export function browserUpdateForwardKeys(delta: {
+  add?: string[]
+  remove?: string[]
+}): Promise<{ accepted: string[]; rejected: string[] }> {
+  return api?.browserUpdateForwardKeys(delta) ?? Promise.resolve({ accepted: [], rejected: [] })
+}
+
+/**
+ * 监听 view 转发的 app 快捷键族（主进程 before-input-event 命中清单后转发，页面聚焦态
+ * 宿主 window keydown 收不到输入的唯一通路）。按 accelerator 派发各自注册动作；
+ * 容器键（⌃`/⌘W）不经此通道（走 onShortcut → useCloseShortcut）。无 IPC 返回 no-op 退订。
+ */
+export function onBrowserForwardKey(callback: (payload: { accelerator: string }) => void): () => void {
+  return api?.onBrowserForwardKey(callback) ?? (() => {})
 }
 
 /**
