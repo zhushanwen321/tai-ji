@@ -600,7 +600,9 @@ describe('capability 段 ③④（HTML 交付约定 + 预览约束）与产物�
       // 其余 ③④ 文案完整（只路径处退化）
       expect(text).toContain('info string is html-preview')
       expect(text).toContain('regenerate on reference failure instead of assuming persistence')
-      expect(text).toContain('scripts/styles/fonts/images must be inline or reference local files')
+      expect(text).toContain('scripts/styles/images may be inline or reference local files')
+      expect(text).toContain('fonts must be inlined as data: URIs')
+      expect(text).toContain('blocked by the browser CORS policy')
       expect(text).toContain('CDN links will not load')
       // 不出现半截/伪造路径
       expect(text).not.toContain(path.join(DATA_DIR, 'artifacts'))
