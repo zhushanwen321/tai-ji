@@ -91,14 +91,7 @@ function projectAskStepToAgentCall(ask: RunAskStepFold): WorkflowAgentCall {
 }
 
 /**
- * [projectV2Workflow 拆分] 身份半边归并：runId/scriptName/slug/scriptPath/startedAt 的
- * 注册条目 → fold 骨架兜底链（stateFilePath = 注册条目 recordPath 承载，v2 无
- * state 文件锚；v1 快照路径恒 '' 由 workflow-extractor 对空串隐藏）。
- * scriptPath：注册条目带 scriptPath（新 run）；旧条目/ v1 缺省 ''（消费侧按缺省
- * 处理，不回落猜路径）。
- */
-/**
- * [projectV2Workflow 拆分] fold 骨架兑底链（created 元数据半边）：scriptName/startedAt
+ * [projectV2Workflow 拆分] fold 骨架兜底链（created 元数据半边）：scriptName/startedAt
  * 取注册条目，缺省回落 fold.created（run journal 重建的 run 名与起始时间），再缺省恒
  * ('(unknown)' / epoch 0)。独立小函数：`?.`/`??` 长链是圈复杂度计数大户，主归并函数保持平铺。
  */
@@ -112,6 +105,13 @@ function resolveWorkflowOrigin(
   }
 }
 
+/**
+ * [projectV2Workflow 拆分] 身份半边归并：runId/scriptName/slug/scriptPath/startedAt 的
+ * 注册条目 → fold 骨架兜底链（stateFilePath = 注册条目 recordPath 承载，v2 无
+ * state 文件锚；v1 快照路径恒 '' 由 workflow-extractor 对空串隐藏）。
+ * scriptPath：注册条目带 scriptPath（新 run）；旧条目/ v1 缺省 ''（消费侧按缺省
+ * 处理，不回落猜路径）。
+ */
 function resolveWorkflowIdentity(
   registered: WorkflowRecordRegisteredEntryData | undefined,
   settledEntry: WorkflowRecordSettledEntryData,

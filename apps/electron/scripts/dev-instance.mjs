@@ -166,7 +166,8 @@ function launch(env) {
   // 终端 Ctrl+C 的 SIGINT 只达本装配器，由下方 handler 向子树进程组转发 SIGTERM——
   // 链路经 electron main 的 SIGTERM handler → app.quit() → before-quit 优雅链
   // （runtime stop → destroyAll pi → pi 自身 handler 清 tracked shell），而非各进程
-  // 直接收 SIGINT 暴死（pi 无 SIGINT handler，暴死会留下无人认领的 shell 孤儿）。
+  // 直接收 SIGINT 暴死（pi 无优雅清理型 SIGINT handler——挂起窗口仅注册 ignoreSigint，
+  // 见 docs/pi-semantics.json 登记，暴死会留下无人认领的 shell 孤儿）。
   // 前置 spawnSync 步骤期间不装 handler：Ctrl+C 保持默认行为（整组死，不出现"前置
   // 步骤被跳过继续跑下一动作"的错位）。
   const isUnix = process.platform !== 'win32'
