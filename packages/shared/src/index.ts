@@ -16,7 +16,7 @@ export type {
   CompactErrorCode,
   // hook 否决类分类码（message.send / message.bash / delivery.submit blocked）：同上跨包共用
   MessageBlockedCode,
-  TerminalConfig, TerminalErrorCode, TerminalUnknownErrorCode, TerminalEnvelopeCode,
+  TerminalConfig, TerminalInstanceSummary, TerminalRoutingErrorCode, TerminalErrorCode, TerminalUnknownErrorCode, TerminalEnvelopeCode,
   SkillCacheScope, SkillCacheInvalidatedPayload,
   SessionTraceHeaderPayload, SessionTraceMalformedLine, SessionTraceSessionEndPayload,
   SessionViewSnapshot,

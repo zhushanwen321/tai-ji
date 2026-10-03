@@ -183,6 +183,7 @@ export type ClientMessageType =
   | 'project.load' | 'project.save'
   | 'worktree.create' | 'worktree.listBranches' | 'worktree.list'
   | 'terminal.spawn' | 'terminal.write' | 'terminal.resize' | 'terminal.kill' | 'terminal.attach'
+  | 'terminal.list'
   | 'config.getTerminalConfig' | 'config.setTerminalConfig'
   | 'config.getRetryConfig' | 'config.setRetryConfig'
   | 'quota.fetch' | 'quota.getCached' | 'quota.configure' | 'quota.refresh'
@@ -346,12 +347,36 @@ export interface TerminalConfig {
   bell: boolean
 }
 
+/**
+ * 终端实例清单条目（`terminal.list` 对账 reply 的元素，terminal-multi-instance 设计 §3.3）。
+ * runtime 侧 = 被查询会话在实例注册表（ptyMap 派生视图）上的存活全集。
+ * - `terminalId`：实例编号 `term:<会话id>:<序号>`——序号会话内单调递增、单次 runtime 生命周期内永不复用；
+ * - `alive`：存活态（清单来自注册表派生，当前恒 true；保留字段供 renderer 建档时置 ptyAlive 镜像）。
+ */
+export interface TerminalInstanceSummary {
+  terminalId: string
+  alive: boolean
+}
+
+/**
+ * 终端实例路由错误码（terminal-multi-instance 设计 §3.3「网络消息」末条）。
+ * 两码**互斥**、语义不可混用——同码会把「仍在注册表内、进程仍活」的实例误判为幽灵并触发关闭沿回收：
+ * - `unknown_terminal_id`：对不存在实例的操作（write/resize/kill/attach 及 spawn 指定形态）——
+ *   即「该 terminalId 不在 runtime 注册表」的**否定回执**，renderer 据此执行关闭沿三腿清理；
+ * - `terminal_id_session_mismatch`：terminalId 的会话段与请求 sessionId 不一致（交叉校验拒绝）——
+ *   走普通错误通道，**不触发回收**（实例仍活）。
+ * 命名口径：仓库惯例 snake_case（对齐既有 `terminal_failed` / `record_not_found`）；设计文档的
+ * camelCase 写法为等价笔误（实施计划 §5 偏差表 D1），实现不得改写为 camelCase。
+ */
+export type TerminalRoutingErrorCode = 'unknown_terminal_id' | 'terminal_id_session_mismatch'
+
 /** 终端错误码（TerminalService 主动抛出）。 */
 export type TerminalErrorCode =
   | 'spawn_failed'     // pty.spawn 失败（shell 不存在/无执行权限）
-  | 'not_found'        // 操作的 sessionId 无对应 PTY
+  | 'not_found'        // 操作的 sessionId 无对应 PTY（存量保留；实例路由否定回执改用 unknown_terminal_id）
   | 'resize_failed'    // pty.resize 失败
   | 'kill_failed'      // pty.kill 失败
+  | TerminalRoutingErrorCode
 /** handler 对未知错误归一的兜底字面量（非 TerminalService 主动抛出，单列让 renderer switch 可穷尽） */
 export type TerminalUnknownErrorCode = 'terminal_failed'
 /** envelope code 字段的完整联合（业务码 + 兜底） */
@@ -769,13 +794,20 @@ export interface ClientMessageMap {
     workspaceHint?: string
   }
   // terminal.*：drawer 集成终端的 PTY 控制（Phase 2 runtime service）。
+  // 多实例（terminal-multi-instance 设计 §3.3）：全部对既有实例操作的帧带 `terminalId`
+  //（实例编号 `term:<会话id>:<序号>`）；缺编号属畸形请求、由 runtime 拒绝（唯一豁免 = spawn 新建形态）。
   // spawn 是 lazy 的（首次打开 terminal tab 才调），cwd 省略则用 session.cwd。
   // write 的 data 是原始字节字符串（含 ANSI/控制字符），不带换行则 shell 不提交（联动 2 填命令）。
-  'terminal.spawn': { sessionId: string; cwd?: string; cols: number; rows: number }
-  'terminal.write': { sessionId: string; data: string }
-  'terminal.resize': { sessionId: string; cols: number; rows: number }
-  'terminal.kill': { sessionId: string }
-  'terminal.attach': { sessionId: string }
+  // spawn 双形态：不带 terminalId = 新建（编号由 runtime 分配，经 terminal.ack 回传）；
+  // 带 terminalId = 指定形态（实例存活则幂等 no-op；不存在则 unknown_terminal_id）。
+  'terminal.spawn': { sessionId: string; terminalId?: string; cwd?: string; cols: number; rows: number }
+  'terminal.write': { sessionId: string; terminalId: string; data: string }
+  'terminal.resize': { sessionId: string; terminalId: string; cols: number; rows: number }
+  'terminal.kill': { sessionId: string; terminalId: string }
+  'terminal.attach': { sessionId: string; terminalId: string }
+  // terminal.list：查询帧（按会话返回实例清单含存活态），reply 'terminal.ack' 携 TerminalInstanceSummary[]。
+  // 触发点：⌘R 界面刷新 / 会话激活 / runtime 世代变更重连；对账范围 = 本次查询所属会话（他会话条目不参与）。
+  'terminal.list': { sessionId: string }
   'config.getTerminalConfig': Record<string, never>
   'config.setTerminalConfig': { config: TerminalConfig }
   'config.getRetryConfig': Record<string, never>
@@ -2211,17 +2243,19 @@ export interface ServerMessageMapBase {
    *  usedBaseRef：实际用作创建基线的 ref（RT-8#8）。请求的 baseBranch 校验失败时
    *  runtime 会 fallback 到本地 main——可选字段存在即「实际 ref ≠ 请求 ref」，前端可提示。 */
   'worktree.created': { cwd: string; branch: string; usedBaseRef?: string }
-  // terminal.data：PTY 输出流（高频广播，按 sessionId 路由到对应 panel 的 scrollback buffer）。
-  'terminal.data': { sessionId: string; data: string }
-  // terminal.exit：PTY 进程退出（exitCode 来自 node-pty onExit）。PTY 销毁后 ptyMap 移除。
-  'terminal.exit': { sessionId: string; exitCode: number }
+  // terminal.data：PTY 输出流（高频广播，按 sessionId + terminalId 路由到对应实例的 scrollback buffer）。
+  'terminal.data': { sessionId: string; terminalId: string; data: string }
+  // terminal.exit：PTY 进程退出（exitCode 来自 node-pty onExit）。实例销毁后从注册表（ptyMap）移除。
+  'terminal.exit': { sessionId: string; terminalId: string; exitCode: number }
   // terminal.alive：PTY 就绪信号（spawn 成功后发，renderer flush 写队列——联动 2 异步写时序）。
-  'terminal.alive': { sessionId: string }
+  'terminal.alive': { sessionId: string; terminalId: string }
   // terminal.writeFailed：PTY 写入失败（进程已退出/管道关闭，RT-8#10）。低频错误信号
-  //（每 PTY 生命周期至多一次，防击键流刷屏），renderer 收到后 toast 提示输入可能丢失。
-  'terminal.writeFailed': { sessionId: string; message: string }
-  // terminal.ack：spawn/write/resize/kill/attach 的通用 ack reply（空 payload，前端按 id 匹配）。
-  'terminal.ack': Record<string, never>
+  //（每 PTY 生命周期至多一次，防击键流刷屏），renderer 收到后按实例 toast 提示输入可能丢失。
+  'terminal.writeFailed': { sessionId: string; terminalId: string; message: string }
+  // terminal.ack：terminal.* RPC 的通用 ack reply（前端按 msg.id 匹配请求，故**不加** terminalId 路由字段，
+  // 设计 §3.3）。按请求分形态：spawn 回包携分配/复用的 terminalId（renderer 以 ack 为唯一编号来源建档）；
+  // list 回包携被查询会话的实例清单；write/resize/kill/attach 回包为空 payload。
+  'terminal.ack': { terminalId?: string; instances?: TerminalInstanceSummary[] }
   // config.terminalConfig：reply + broadcast + sendInitialState 三用（复刻 config.systemPrompt 范式）。
   'config.terminalConfig': { config: TerminalConfig; corrupted?: boolean }
   // config.retryConfig：reply + broadcast 多窗口同步（同 terminal 范式）；configured 区分「显式配置」与「未配置（显示默认）」。
@@ -2940,9 +2974,11 @@ export interface ReplyPayloadMap {
   //（payload 消费型；与 request 同名——session.subscribe / backgroundTask.list 同款模式）。
   'rollingRestart.status': ServerMessageMap['rollingRestart.status']
 
-  // terminal.* 都是 ack 型，统一 reply 'terminal.ack'（空 payload，前端 command() 按 id 匹配 resolve）
+  // terminal.* 都是 ack 型，统一 reply 'terminal.ack'（前端 command() 按 id 匹配 resolve；
+  // spawn 回包携 terminalId、list 回包携 instances，见 ServerMessageMap['terminal.ack']）
   'terminal.attach': ServerMessageMap['terminal.ack']
   'terminal.kill': ServerMessageMap['terminal.ack']
+  'terminal.list': ServerMessageMap['terminal.ack']
   'terminal.resize': ServerMessageMap['terminal.ack']
   'terminal.spawn': ServerMessageMap['terminal.ack']
   'terminal.write': ServerMessageMap['terminal.ack']
