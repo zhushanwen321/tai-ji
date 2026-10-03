@@ -615,22 +615,38 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - **UserArea**（footer 钉底）：`margin-top:auto` + 20px accent 纯色头像（去装饰渐变）+ 用户名 + 设置齿轮(24px)
 - **QuickComposer**（workspace 快捷新建 spotlight）：SessionList group head hover「+」触发；spotlight 卡片 560px 宽 `bg-elevated + border-strong + shadow-2 + radius-lg`，backdrop `rgba(0,0,0,0.45)`（比 modal 0.8 轻）；预选 cwd chip + branch 去重；Enter 创建 / Esc 取消
 
-### 6.3 右侧 Drawer（D2 一体化 + 7 tab）
+### 6.3 右侧 Drawer（D2 一体化 + 8 tab）
 
 - **一体化生长**：drawer 与 main 共享 `--surface` 浮起体，从 main 右缘生长挤占 main 宽度；去 border-l。〔2026-09-09〕原「保留弱投影 `--shadow-drawer`(0.16) 分隔」已移除（overflow-hidden 裁剪，从未可见）。主面板:drawer 默认宽度比 1:1，可拖拽调整〔2026-09-13 自 v6-design.md 并入〕
-- **形态 B**：icon 一级 + 各 tab 自治二级
-  - detail：多文件 tab（点文件新开/切换/关闭）—— **阶段 B 衔接点**（useDetailPane 单值→map 重构）
-  - terminal：多实例 tab + 新增按钮占位 —— **阶段 B 衔接点**（单 PTY→多 PTY）
+- **容器归属规则**：内容按形状分家——竖长阅读型归右抽屉、横宽输出流归底抽屉（§6.4）、全画布内容（网页/workflow 图）归浮层（§6.5）；归属声明唯一权威 = 容器注册表（`packages/core/src/domain/drawer/registry.ts`，core 纯数据，ui 层映射图标渲染）
+- **形态 B**：icon 一级 + 各 tab 自治二级（L1 列表由容器注册表驱动，8 条）
   - git/doc：无二级 tab
-  - browser：内嵌网页预览（无二级 tab）
-  - subagent（新增）：嵌套只读对话流（无 composer）
-  - workflow（新增）：phase 分组 + agent call 列表
+  - detail：文件详情/diff，面板内顶部多文件实例 tab 条（命中未开 = 新增并激活、已开 = 仅激活、不设打开上限；keep-alive 多实例语义——切换不丢滚动位置与 diff/preview 模式）
+  - subagent：嵌套只读对话流（无 composer）
+  - bashTask：后台命令详情（无二级 tab）
+  - plan：计划文档阅读器（面板内文档切换条 = 组件内部导航）
+  - btw：旁路线列表 + 当前线对话（组件内部导航，可开多条线）
+  - workflow：phase 分组 + agent call 列表——**回落载体**（主入口浮层，L1 常驻第 8 图标；浮层装载失败回落本 tab）
 - **tasks tab 移除**（D3）：goal/todo 回归对话流
 - **GitPanel MVP 三功能**（v6-design 决策 #16 授权，2026-09-13 自 v6-design.md 并入）：per-file stage/unstage toggle / BranchSelectPopover 分支切换 / CreateBranchModal 新建分支 / commit 快捷键 `⌘/Ctrl+Enter`（见 §5.12 快捷键表）；零后端改动的纯前端能力
-- **L1 icon 栏结构**：`surface` 同色 + `border-bottom: 1px hairline`（0.05，方案 G 弱分隔）+ icon 30×30（active 见 §3.4 例外）+ spacer + unread badge（accent 胶囊 + 6px `accent-fg` 脉动点 + mono 计数）+ pin 按钮（pinned 染 accent）+ close 按钮
+- **L1 icon 栏结构**：`surface` 同色 + `border-bottom: 1px hairline`（0.05，方案 G 弱分隔）+ icon 30×30（active 见 §3.4 例外）+ spacer + unread badge（accent 胶囊 + 6px `accent-fg` 脉动点 + mono 计数）+ close 按钮
 - **SplitterHandle**：6px 宽视觉 + 10px 命中区（margin 负值扩展）；1px transparent → hover `border-strong` → active `accent + 2px`；`cursor: col-resize`
 
-### 6.4 设置页（D1 全屏覆盖重构）
+### 6.4 Bottom Drawer（底抽屉）
+
+- **位置**：split 行（对话区 + 右抽屉）之下、StatusBar 之上，横跨全宽；composer 在其上沿保持可见、随开合上移。与右抽屉可同时开（一挤宽度、一挤高度互不冲突；右抽屉开着时底抽屉全宽、右抽屉变矮）
+- **高度**：默认 35%；上沿拖拽手柄（1px + `cursor: row-resize`，hover `border-strong` / drag `accent`，与 §6.3 SplitterHandle 同族）；拖拽 clamp 15%–70%，高度为全局布局值单键持久化（`taiji:bottom-drawer-height`）；窗口过矮时显示期钳制保证对话流 + composer 最小可视区域，不写回持久值
+- **内容**：terminal 唯一内容（单实例，不预设 tab 枚举）；spawn 失败走 inline 错误条 + 重试，chunk 装载失败走 AsyncErrorFallback
+- **开关**：`` ⌃` ``（before-input-event 窗口级拦截，不经 globalShortcut——失焦无动作）+ StatusBar 终端按钮（StatusBar 原生动作通道 trailing 区，根元素自隐藏条件扩展为「有状态项或有原生动作」，干净安装仍可见）；开合态按会话分区、不持久化；终端聚焦时 Esc 归终端输入，关抽屉走 `` ⌃` `` / StatusBar 按钮
+
+### 6.5 Overlay（内容浮层）
+
+- **统一壳 OverlayShell**：AppShell 层挂载、`--z-modal`；88%×92%（高×宽）圆角面板 + 遮罩；两通道关闭（点遮罩 / 右上关闭按钮）——Esc 不在壳内监听，由键盘栈序编排器统一路由
+- **双内容**：browser（网页预览，WebContentsView 原生 view 锚定浮层视口）/ workflow（工作流图，左 DAG 蓝图 + 右实况面板）；单例换内容——开新内容替换旧内容，不并开
+- **排他与共存**：浮层开时两个抽屉保持状态但被盖住，关浮层后原样恢复；`` ⌃` `` 照常切换底抽屉（被遮罩盖住但状态变化）
+- **Esc 归属**：栈序编排器唯一属主，固定层级序「浮层 → 底抽屉 → 右抽屉」逐层剥（与打开先后无关）；焦点所有权分派——模态/输入编辑态让位，浮层浏览器页面内 Esc 归页面自身语义，关浮层键盘兜底 = ⌘W（任何焦点位置生效）
+
+### 6.6 设置页（D1 全屏覆盖重构）
 
 - **FullSettingsOverlay**：手写 `fixed inset-0 bg-bg z-modal`（不用 reka Dialog）；无遮罩/无模糊（纯不透明全屏）
 - 左 nav `w-220px bg-sunken` 无 border-r；右内容区底色 `--bg`（卡片才能浮起），内容列 `max-w-content-max-w`(720) **左对齐**（非居中）
@@ -641,7 +657,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - 表单 label 去 uppercase tracking-wider
 - **交互状态机**（有编辑态的页面）：dirty 快照 diff（净零翻转恢复 clean）/ 保存流（mock 延迟 + 已保存反馈）/ 离开检查（dirty 拦截切页 + 放弃先还原快照防重入）/ beforeunload
 
-### 6.5 Overlays
+### 6.7 Overlays
 
 - **SearchModal**：手写覆盖层；命令/文件聚合（session 源待接入，demo 现有 2 group：建议命令 + 最近打开）；选中态见 §3.4 例外（surface-hover + 蓝字，dialog 底 surface 上 bg-surface 会淹没）；分组 header 去 uppercase；高亮 `<span class="sm-hit">` font-semibold 不染蓝（颜色继承父元素）；loading 防闪 200ms（见 §5.10）；default 态尾部 clock icon 表最近/历史
 - **FormOverlay**：内联（非 modal），统一提问表单协议（ui-form）的 GUI 唯一渲染面——ask-user / scheduler / plan 三方提问收尾，覆盖 composer 挂载（多问 = 多 tab，单问 = 单视图；schedule 整表单 = ScheduleForm 渲染器，无边框一体化形态）
@@ -654,7 +670,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - **ConfirmDialog**：圆角 12px；danger 三角 icon 降 size-4
 - **MermaidRenderer**：保持现状（主产品已有，demo 未实现该组件）
 
-### 6.6 Plugin 渲染（4 维度 × 3 级别 × 16 挂载点）
+### 6.8 Plugin 渲染（4 维度 × 3 级别 × 16 挂载点）
 
 详见 §7。
 
