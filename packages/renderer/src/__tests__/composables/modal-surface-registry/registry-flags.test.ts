@@ -16,7 +16,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, h, onBeforeUnmount, ref } from 'vue'
+import { defineComponent, h, nextTick, onBeforeUnmount, ref } from 'vue'
 import {
   registerModalSurface,
   anyModalSurfaceYieldsEsc,
@@ -145,5 +145,71 @@ describe('注册红线与 refCount（构建者白盒）', () => {
 
     dispose2()
     expect(isModalSurfaceOpen('settings-modal'), '归零后移除').toBe(false)
+  })
+
+  it('三实例交接（D3 S9 真机实锤回归）：rect 读点随最新活实例覆盖，交接窗口不指死实例、归零后重注册起新条目', async () => {
+    // 形态还原：ToastContainer 以固定 key 'toast-container' 在 App.vue(connecting 态) →
+    // PanelContainer / MainPanel 三挂载点交接——新实例先注册、旧实例后注销（Vue 挂载点
+    // 切换的真实事件序，真实组件 mount/unmount 驱动注册/注销，非手工桩时序）。
+    // 旧缺陷：refCount 条目保留首注册者 getters ⇒ 活实例注册后读点仍指已卸载实例
+    // （containerRef=null ⇒ rect 恒 null ⇒ main 侧保守恒相交，几何相交判定失效）。
+    // 每实例 rect 带实例序号标记（x=序号），卸载后 el=null ⇒ 死实例 getter 返回 null——
+    // 三种形态（死实例=null / 首注册者=1 / 活实例=2,3）可判别。
+    let instanceSeq = 0
+    function mountToastInstance() {
+      const seq = ++instanceSeq
+      const el = ref<HTMLElement | null>(null)
+      const visible = ref(false)
+      const wrapper = mount(defineComponent({
+        setup() {
+          const dispose = registerModalSurface({
+            surface: 'toast-container',
+            key: 'toast-container',
+            isOpen: () => visible.value,
+            rect: () => (el.value ? { x: seq, y: 0, width: 100, height: 40 } : null),
+          })
+          onBeforeUnmount(dispose)
+          return () => h('div', { ref: el, 'data-testid': `toast-host-${seq}` })
+        },
+      }))
+      return { wrapper, visible, seq }
+    }
+    const reportedXs = () => openShieldingSurfaces().map((s) => s.rect?.x ?? null)
+
+    // ① 实例 A 注册并开：rect = A（x=1）
+    const a = mountToastInstance()
+    a.visible.value = true
+    await nextTick()
+    expect(reportedXs(), '单实例在册：读点 = A').toEqual([1])
+
+    // ② 实例 B 注册（交接窗口开启——A 尚未注销）+ 开：条目读点立即覆盖为 B（最新注册者 wins）
+    const b = mountToastInstance()
+    b.visible.value = true
+    await nextTick()
+    expect(reportedXs(), '交接窗口内读点必须已切到 B，不得保留首注册者 A').toEqual([2])
+
+    // ③ 实例 A 注销（refCount 2→1，条目保留）：rect 仍 = B 活实例——
+    //    A 已卸载（el=null ⇒ 其 getter 返回 null），读点若残留 A 则 rect 键直接消失
+    a.wrapper.unmount()
+    await nextTick()
+    expect(reportedXs(), '交接完成：读点 = 活实例 B，死实例 A（null）不得浮现').toEqual([2])
+    expect(isModalSurfaceOpen('toast-container'), 'refCount 未归零条目保留').toBe(true)
+
+    // ④ 实例 B 注销（refCount 归零 → 条目摘除，「挂载⇔开」语义保持）
+    b.wrapper.unmount()
+    await nextTick()
+    expect(openShieldingSurfaces()).toEqual([])
+    expect(isModalSurfaceOpen('toast-container'), '归零后摘除').toBe(false)
+
+    // ⑤ 实例 C 重注册（摘除后全新条目）并开：读点 = C（x=3）
+    const c = mountToastInstance()
+    c.visible.value = true
+    await nextTick()
+    expect(reportedXs(), '重注册起新条目：读点 = C').toEqual([3])
+
+    // 收尾：卸载 C，不给后续用例留活条目（beforeEach 也有 reset 兜底）
+    c.wrapper.unmount()
+    await nextTick()
+    expect(isModalSurfaceOpen('toast-container')).toBe(false)
   })
 })

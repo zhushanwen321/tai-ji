@@ -10,8 +10,13 @@
  *   编排器让位；flush 后注册随挂载点注销/状态翻新 ⇒ 第二次 Esc 时聚合已是「已关」的正确态。
  *   唯一顺序前提 = 编排器 window keydown 监听注册于 AppShell 根 setup（FIFO 同相位下编排器
  *   先执行让位判定）+ 编排器不在 flush 后的异步回调中重评同一事件。
- * - **refCount 防重复注册**（同规则 2——事件总线 listener 去重同款）：同一 key 重复注册
- *   只计数，注销到 0 才移除；防挂载点重复接线/HMR 时「注册被提前摘除」。
+ * - **refCount 计数 + 最新注册者 wins**（同规则 2——事件总线 listener 去重同款）：同一 key
+ *   重复注册继续计数，注销到 0 才移除（防挂载点重复接线/HMR 时「注册被提前摘除」）；同时
+ *   条目的 isOpen/rect 读点**覆盖为最新注册者**——同 key 前后实例交接（如 ToastContainer
+ *   在 App.vue connecting 态 → PanelContainer/MainPanel 三挂载点交接）时读点必须指向
+ *   活实例：保留首注册者 getters 会把 rect 读点留在已卸载实例上（containerRef=null ⇒
+ *   rect 恒 null ⇒ main 侧保守恒相交，§5.1 规则 6② 几何相交判定失效）。
+ *   「挂载⇔开」语义不变：实例挂载即注册、卸载即注销，条目只在 refCount 归零时摘除。
  * - **后行档消费方的开合态必须绑状态本体**（如 SessionList 绑删除确认态），禁绑广播计数器。
  *
  * 注意：本模块不做几何求交——shieldsView='intersecting' 成员与 view 显示矩形的双阈值空间
@@ -33,7 +38,8 @@ export interface ModalSurfaceRect {
 export interface ModalSurfaceRegistration { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
   /** 登记表内的表面 id（manifest.ts；未登记 id 直接抛错） */
   surface: ModalSurfaceId
-  /** 实例级去重键（同 key 重复注册走 refCount；同表面多实例各用独立 key） */
+  /** 实例级去重键（同 key 重复注册走 refCount 计数 + 读点覆盖为最新注册者；
+   *  同表面多实例并存各用独立 key——同 key 语义 = 同一挂载点的前后实例交接） */
   key: string
   /** 开合态读点（动作时刻直读，禁缓存） */
   isOpen: () => boolean
@@ -50,7 +56,8 @@ interface RegistryEntry { // oe-exempt:20261003:framework:类型契约先行—�
   refCount: number
 }
 
-/** 成员表版本号（membership 变更信号源）：注册新条目 / 注销摘除条目时递增。view 遮蔽
+/** 成员表版本号（membership 变更信号源）：注册新条目 / 覆盖既有条目读点（挂载点交接，
+ *  读点集合变更需让消费方改绑依赖）/ 注销摘除条目时递增。view 遮蔽
  *  联动（useShieldsViewSync）的反应式触发面依赖它——成员表的增删本身不是 Vue 响应式
  *  变更（Map 非响应式），查询方必须在读点消费本版本号才能追踪「挂载⇔开」型成员
  *  （isOpen 不读任何响应式 ref，卸载即注销）的开合翻转。
@@ -76,6 +83,14 @@ export function registerModalSurface(registration: ModalSurfaceRegistration): ()
       )
     }
     existing.refCount += 1
+    // 最新注册者 wins（D3 S9 真机实锤修复）：同 key 重复注册 = 同一挂载点的前后实例交接，
+    // 读点立即切到最新活实例——refCount 只保证「注销不提前摘条目」，不决定读点归属。
+    existing.isOpen = registration.isOpen
+    existing.rect = registration.rect
+    // 覆盖读点 = 条目有效读点集合变更：递增版本号让响应式消费方（useShieldsViewSync 的
+    // watchEffect）重跑并改绑新 getter 读到的状态本体依赖——旧实例的依赖已随卸载失效，
+    // 不重绑会让开合翻转对消费方不可见。
+    membershipVersion.value += 1
   } else {
     entries.set(registration.key, {
       surface: registration.surface,
