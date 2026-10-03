@@ -381,6 +381,11 @@ export default {
     retry: 'Retry',
     // display-containers §5.1: StatusBar native-action toggle button (bottom drawer)
     toggle: 'Toggle terminal',
+    // terminal-multi-instance §3.1: instance switch bar (TerminalInstanceBar)
+    instanceName: 'Terminal {seq}',
+    instanceCreate: 'New terminal',
+    instanceClose: 'Close terminal',
+    instanceEmpty: 'No terminal instances',
   },
   mermaid: {
     rendering: 'Rendering diagram…',

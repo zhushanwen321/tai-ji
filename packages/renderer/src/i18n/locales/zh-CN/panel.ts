@@ -373,6 +373,11 @@ export default {
     retry: '重试',
     // display-containers §5.1：StatusBar 原生动作开关按钮（底抽屉）
     toggle: '开关终端',
+    // terminal-multi-instance §3.1：实例切换条（TerminalInstanceBar）
+    instanceName: '终端 {seq}',
+    instanceCreate: '新建终端',
+    instanceClose: '关闭终端',
+    instanceEmpty: '暂无终端实例',
   },
   mermaid: {
     rendering: '图表渲染中…',
