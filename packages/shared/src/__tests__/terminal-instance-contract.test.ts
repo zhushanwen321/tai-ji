@@ -127,8 +127,9 @@ describe('terminal 路由错误码（设计 §3.3）', () => {
     const mismatch: TerminalRoutingErrorCode = 'terminal_id_session_mismatch'
     const required: TerminalRoutingErrorCode = 'terminal_id_required'
     expect(new Set([unknown, mismatch, required]).size).toBe(3)
-    // 缺编号畸形帧的拒绝码独立于「注册成员资格的否定回执」——后者是 renderer 关闭沿
-    // 三腿回收的唯一判据（设计 §3.3：回收只由否定回执触发）
+    // 畸形帧拒绝码独立于「注册成员资格的否定回执」——后者是 renderer 关闭沿
+    // 三腿回收的唯一判据（设计 §3.3：回收只由否定回执触发）；该码同时承载「缺编号」与
+    // 「编号类型非法（非字符串，含 spawn 指定形态）」（设计 §3.3 类型维度 fail-fast）
     expect(required).not.toBe(unknown)
     expect(mismatch).not.toBe(unknown)
   })

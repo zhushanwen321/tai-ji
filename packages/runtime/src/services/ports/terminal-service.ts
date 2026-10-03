@@ -30,7 +30,8 @@ import type { TerminalInstanceSummary } from '@taiji/shared'
  * - spawn_failed：pty.spawn 失败（shell 不存在/无执行权限）
  * - unknown_terminal_id：操作的 terminalId 不在实例注册表（否定回执；renderer 据此回收幽灵条目）
  * - terminal_id_session_mismatch：terminalId 的会话段与请求 sessionId 不一致（交叉校验拒绝）
- * - terminal_id_required：既有实例操作帧缺 terminalId 的畸形帧拒绝（由 protocol 入口 handler 发出）
+ * - terminal_id_required：编号缺失（既有实例操作帧）**或编号类型非法**（非字符串——数字 / null /
+ *   布尔 / 对象，含 `terminal.spawn` 指定形态）的畸形帧拒绝（由 protocol 入口 handler 发出）
  *
  * 存量码（当前无抛出点，保留 union 供消费侧穷尽，勿据以设计错误处理）：
  * - resize_failed / kill_failed：对应 node-pty 操作失败——实装为 best-effort（resize 失败仅记
@@ -43,8 +44,9 @@ import type { TerminalInstanceSummary } from '@taiji/shared'
  * 误判为幽灵并回收（条目消失、输出此后无人接收而进程继续跑）。
  *
  * 注意：写/调尺寸/杀/attach 对**不存在的实例**抛 unknown_terminal_id（退役「静默 no-op」语义，
- * 静默丢失正是重启后向死实例敲命令、输入无反馈消失的事故形态）。缺 terminalId 属畸形请求，
- * 由 protocol 入口（TerminalMessageHandler）逐帧拒绝，唯一豁免 = spawn 新建形态。
+ * 静默丢失正是重启后向死实例敲命令、输入无反馈消失的事故形态）。缺 terminalId 或编号类型非法
+ *（非字符串）属畸形请求，由 protocol 入口（TerminalMessageHandler）逐帧拒绝，缺编号的 spawn 新建
+ * 形态是唯一豁免（类型非法的 spawn 指定形态不豁免）。
  */
 export interface ITerminalService {
   /**
