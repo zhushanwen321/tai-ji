@@ -368,6 +368,22 @@ describe('TrayNativePanel 分桶 tab 与行渲染（使用者黑盒）', () => {
     expect(row.text()).toContain('1m5s')
   })
 
+  it('subagent：agent 绝对路径时行内显示 basename 去 .md，title 保留全路径', async () => {
+    const fullPath = '/Users/x/.agents/skills/explorer/agent.md'
+    trayState.subagentRunning = [
+      makeSubagent({ subagentId: 'sub-1', status: 'running', engine: 'pi', agent: fullPath }),
+    ]
+    wrapper = mountPanel('subagent')
+    await flushPromises()
+
+    const row = wrapper.find('[data-testid="tray-subagent-row"]')
+    // 行内短名（窄列 truncate 优先）
+    expect(row.text()).toContain('agent')
+    expect(row.text()).not.toContain(fullPath)
+    // title hover 保留全路径
+    expect(row.attributes('title')).toBe(`${fullPath} · review-changes`)
+  })
+
   it('workflow：行渲染 scriptName/slug/进度 N-M/耗时（done 行无 spinner，状态点替代）', async () => {
     trayState.workflowRunning = [
       makeWorkflow({ runId: 'wf-1', status: 'running' }),

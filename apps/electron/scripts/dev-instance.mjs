@@ -145,7 +145,8 @@ function printBanner(p, env) {
 └───────────────────────────────────────────────────────`)
 }
 
-function launch(env) {
+/** dev 前置链（[F7] 恒重建 staged 引擎副本；prepare-builtin-plugins / electron-ensure 同批）。 */
+function runPreSteps(env) {
   // [F7] 前置链保持原 dev script 语义：bundle-extensions 恒重建 staged 引擎副本。
   // prepare-builtin-plugins 同理恒重建：builtin 插件产物 index.js 是 gitignored 构建产物，
   // 而 dev 态 supervisor 按 --builtin-plugins-dir 扫 repo 根 resources/plugins——
@@ -162,15 +163,69 @@ function launch(env) {
       process.exit(r.status ?? 1)
     }
   }
-  const child = spawn('pnpm', ['exec', 'concurrently', 'pnpm run dev:vite', 'pnpm run dev:electron'], {
-    cwd: APP_ROOT,
-    stdio: 'inherit',
-    env,
-  })
+}
+
+/** 信号转发器构造：首次 SIGTERM 给子树进程组（优雅链），再按升级 SIGKILL 保住强杀能力。 */
+function makeSignalForwarder(childPid) {
+  let forwarded = false
+  return () => {
+    try {
+      process.kill(-childPid, forwarded ? 'SIGKILL' : 'SIGTERM')
+    } catch {
+      // 组已不存在（子树已退出）——等 child 'exit' 收尾即可
+    }
+    forwarded = true
+  }
+}
+
+/** 托管信号后子进程 exit 的收尾：先摘 handler 再重抛——恢复默认处置，信号语义对外层脚本不变。 */
+function relayExitAfterForwarding(forwardSignals, forward) {
+  return (code, signal) => {
+    for (const sig of forwardSignals) process.off(sig, forward)
+    if (signal) process.kill(process.pid, signal)
+    else process.exit(code ?? 0)
+  }
+}
+
+/** Unix 信号转发装配：SIGINT/SIGHUP/SIGTERM → 子树进程组（detached 进程组，孤儿 shell 加固②）。 */
+function installUnixSignalForwarding(child) {
+  const forwardSignals = ['SIGINT', 'SIGHUP', 'SIGTERM']
+  const forward = makeSignalForwarder(child.pid)
+  for (const sig of forwardSignals) process.on(sig, forward)
+  // 托管信号后，子进程 exit 的信号重抛必须先摘 handler 再重抛：handler 在位时
+  // process.kill(self, sig) 只触发回调不再终止进程（默认处置已被取代），dev-instance
+  // 会在子树退出后挂住不退。摘除后重抛恢复默认处置，信号语义（被何种信号杀死）
+  // 对外层脚本（pnpm）保持与旧实现一致。
+  child.on('exit', relayExitAfterForwarding(forwardSignals, forward))
+}
+
+/** 非 Unix（Windows）形态：无进程组转发，子进程 exit 直接收尾。 */
+function relayChildExit(child) {
   child.on('exit', (code, signal) => {
     if (signal) process.kill(process.pid, signal)
     else process.exit(code ?? 0)
   })
+}
+
+function launch(env) {
+  runPreSteps(env)
+  // Ctrl+C → SIGTERM 转译（孤儿 shell 加固②）：concurrently 子树 detached 成独立进程组，
+  // 终端 Ctrl+C 的 SIGINT 只达本装配器，由下方 handler 向子树进程组转发 SIGTERM——
+  // 链路经 electron main 的 SIGTERM handler → app.quit() → before-quit 优雅链
+  // （runtime stop → destroyAll pi → pi 自身 handler 清 tracked shell），而非各进程
+  // 直接收 SIGINT 暴死（pi 无优雅清理型 SIGINT handler——挂起窗口仅注册 ignoreSigint，
+  // 见 docs/pi-semantics.json 登记，暴死会留下无人认领的 shell 孤儿）。
+  // 前置 spawnSync 步骤期间不装 handler（runPreSteps 内）：Ctrl+C 保持默认行为
+  // （整组死，不出现"前置步骤被跳过继续跑下一动作"的错位）。
+  const isUnix = process.platform !== 'win32'
+  const child = spawn('pnpm', ['exec', 'concurrently', 'pnpm run dev:vite', 'pnpm run dev:electron'], {
+    cwd: APP_ROOT,
+    stdio: 'inherit',
+    env,
+    detached: isUnix,
+  })
+  if (isUnix && child.pid) installUnixSignalForwarding(child)
+  else relayChildExit(child)
 }
 
 // ── CLI ───────────────────────────────────────────────────────────

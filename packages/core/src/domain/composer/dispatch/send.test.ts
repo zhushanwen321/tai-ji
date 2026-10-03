@@ -77,7 +77,14 @@ function setup(initial?: Partial<DepsControl>): { deps: ComposerSendDeps; spies:
   }
   const spies: Spies = {
     stagingSend: vi.fn(async () => ctrl.stagingSendReturn) as unknown as Spies['stagingSend'],
-    clearInput: vi.fn(() => {}),
+    // 真实 clearInput 语义（[compaction-input-unlock] 守卫用例前置）：draft/drafts 清空 +
+    // DOM 清空（getSegments 归空）——hasInput/draft computed 经 ctrl 翻转为 false/''，
+    // 守卫读取的「失败时刻输入区是否为空」与生产一致
+    clearInput: vi.fn(() => {
+      ctrl.hasInput = false
+      ctrl.draft = ''
+      spies.getSegments.mockReturnValue([])
+    }),
     restoreSegments: vi.fn((_segments: Segment[]) => {}),
     submitFirstMessage: vi.fn(async () => {}) as unknown as Spies['submitFirstMessage'],
     // 默认 resolve true = 契约成功路径（useChat 失败信号契约：false = RPC 失败已 toast）
@@ -346,7 +353,7 @@ describe('useComposerSend.onSend', () => {
     expect(spies.toastError).not.toHaveBeenCalled()
   })
 
-  it('⑨d [R2-A5 同族] compact 契约失败（false）→ restoreSegments（slash chip + 指令完整恢复）+ 不补 toast + isSending 复位', async () => {
+  it('⑨d [R2-A5 同族] compact 契约失败（false）→ 空输入时 restoreSegments（slash chip + 指令完整恢复）+ 不补 toast + isSending 恒未置位', async () => {
     const { deps, spies } = setup({ variant: 'panel', draft: '/compact focus on auth' })
     spies.getSegments.mockReturnValue([
       { type: 'slash', name: 'compact' },
@@ -355,12 +362,16 @@ describe('useComposerSend.onSend', () => {
     spies.compact.mockResolvedValueOnce(false)
     await useComposerSend(deps).onSend()
     expect(spies.compact).toHaveBeenCalledWith('s1', 'focus on auth')
+    // clearInput 后输入区为空（fixture 真实语义）→ 守卫放行恢复
     expect(spies.restoreSegments).toHaveBeenCalledTimes(1)
     expect(spies.toastError).not.toHaveBeenCalled()
     expect(deps.isSending.value).toBe(false)
   })
 
-  it('⑨e compact 期间 isSending 置位（双发锁），结束复位——对齐 send 分支形态', async () => {
+  it('⑨e [compaction-input-unlock] compact RPC 期间不置 isSending（压缩期 composer 可输入）', async () => {
+    // 旧契约（已废）：compact 期间 isSending 置位双发锁——锁住整个压缩期（runtime compact
+    // RPC 同步等压缩全程）→ composer 置灰不可输入。新契约：UI 锁只保留给受理往返型提交，
+    // 压缩期输入/发送由投递内核 queued 车道承接；并发 /compact 互斥交还 runtime compact_busy。
     const { deps, spies } = setup({ variant: 'panel', draft: '/compact' })
     spies.getSegments.mockReturnValue([{ type: 'slash', name: 'compact' }])
     let sendingDuringRpc: boolean | undefined
@@ -369,8 +380,37 @@ describe('useComposerSend.onSend', () => {
       return true
     })
     await useComposerSend(deps).onSend()
-    expect(sendingDuringRpc).toBe(true)
+    expect(sendingDuringRpc).toBe(false)
     expect(deps.isSending.value).toBe(false)
+  })
+
+  it('⑨f [compaction-input-unlock] compact 失败但压缩期用户已输入新文本 → 不恢复（防覆盖用户输入）', async () => {
+    const { deps, spies, ctrl } = setup({ variant: 'panel', draft: '/compact focus' })
+    spies.getSegments.mockReturnValue([{ type: 'slash', name: 'compact' }, { type: 'text', text: 'focus' }])
+    spies.compact.mockImplementationOnce(async () => {
+      // 模拟压缩期间用户输入新内容（fixture 真实语义：输入 → hasInput 翻 true + segments 非空）
+      ctrl.hasInput = true
+      ctrl.draft = '压缩期间新输入'
+      spies.getSegments.mockReturnValue([{ type: 'text', text: '压缩期间新输入' }])
+      return false
+    })
+    await useComposerSend(deps).onSend()
+    // restoreSegments 是 setText 整体覆盖语义——输入区非空时禁止恢复
+    expect(spies.restoreSegments).not.toHaveBeenCalled()
+  })
+
+  it('⑨g [compaction-input-unlock] compact 失败但压缩期用户已插入 chip（无文本）→ 不恢复（防覆盖 chip）', async () => {
+    // hasInput 只看纯文本 draft；chip（slash/skill/image 等）不进 draft——守卫第二支
+    // getSegments().length 兑现「有 chip 也不覆盖」
+    const { deps, spies } = setup({ variant: 'panel', draft: '/compact' })
+    spies.getSegments.mockReturnValue([{ type: 'slash', name: 'compact' }])
+    spies.compact.mockImplementationOnce(async () => {
+      // 模拟压缩期插入 chip：无文本（hasInput false）但 segments 非空
+      spies.getSegments.mockReturnValue([{ type: 'slash', name: 'review' }])
+      return false
+    })
+    await useComposerSend(deps).onSend()
+    expect(spies.restoreSegments).not.toHaveBeenCalled()
   })
 
   it('⑬ [b08-F2] session 缺失（null）→ panel 分支守卫早退：不 bash/compact/send、不清输入', async () => {

@@ -12,7 +12,7 @@
 // 覆盖口径：文本/思考增量、toolCall 配对（含 tool_end 无 start 的幽灵兜底）、isError
 // 状态位、turn_end 闭合与计数、message_end 的 usage 归一与 totalTokens、error 记录与
 // 轮终清除、no-op 事件（compaction/activity/armed）。
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { updateFromEvent as sdkUpdateFromEvent } from "@zhushanwen/subagent-engine-sdk";
 import type { ReplayRecordView } from "@zhushanwen/subagent-engine-sdk";
@@ -45,6 +45,17 @@ function runBoth(events: readonly AgentEvent[]): { core: ExecutionRecord; sdk: R
   }
   return { core, sdk };
 }
+
+// 两侧 reducer 都对 toolCall 盖墙钟戳（事件载荷不带 ts，各自 Date.now() 采点）；
+// 真实时钟下两次采点跨毫秒边界 → startedTs 差 1ms → 等价断言假红（负载下偶发，
+// 2026-10-02 质量门禁实锤）。fake timers 钉死时钟：两侧采点恒等，等价性判定
+// 回到 reducer 逻辑本身（时钟不是被测语义）。
+beforeEach(() => {
+  vi.useFakeTimers({ now: 1_000 });
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 /** 断言两侧 reducer 的状态面等价（turns 全文 + 计数 + usage + 末次错误）。 */
 function expectParity(core: ExecutionRecord, sdk: ReplayRecordView): void {

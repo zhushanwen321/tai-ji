@@ -139,7 +139,11 @@ export function buildGuiComponent(
     const listResp = input.domain;
     return guiComponent("list-tree", {
       items: listResp.response.items.map((it) => ({
-        label: it.slug ? `${it.agent} · ${it.slug} · ${it.subagentId}` : `${it.agent} · ${it.subagentId}`,
+        // GUI 详情层：label 保留完整 agent ref（摘要短名的取舍见 TUI compact/expanded
+        // 分层——GUI list-tree 是详情展示，全路径信息优先）
+        label: it.slug
+          ? `${it.agent} · ${it.slug} · ${it.subagentId}`
+          : `${it.agent} · ${it.subagentId}`,
         status: mapRunStatus(it.status),
         icon: mapRunIcon(it.status),
       })),

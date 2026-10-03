@@ -12,13 +12,24 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { parseResourceMeta } from "../../shared/meta-parser.ts";
 import {
   argKeysFromMeta,
   findFlattenedArgKeys,
 } from "../args-meta.ts";
+
+// [teardown 竞态修复] 被测链（args-meta patternProperties 非法正则跳过等 warn 路径）
+// 传递性 logger 输出经 console 落 stderr——同步用例的刷写落在文件结束的 teardown 窗口，
+// 与 worker rpc 关闭竞态 → vitest EnvironmentTeardownError（onUserConsoleLog pending）
+// → run 退出码 1。本文件对 logger 零断言依赖，mock 静默（rebuild-indexes.test.ts 同款先例）。
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("../../core/logger.ts", () => ({
+  getLogger: () => loggerMock,
+}));
 
 const here = dirname(fileURLToPath(import.meta.url));
 const WORKFLOWS_DIR = join(here, "..", "..", "..", "workflows");

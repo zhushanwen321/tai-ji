@@ -936,4 +936,16 @@ export default [
       'max-lines': ['warn', { max: 620, skipBlankLines: true, skipComments: true }],
     },
   },
+  // workflow-dag-parser.ts：workflow 脚本 → 静态 DAG 的唯一解析器纯函数（acorn 解析 +
+  // AST 遍历 + helper 投影命运结算 + 边收口，产物类型双侧等值锚在本文件头注释）。
+  // helper 投影两笔提交（调用点投影 + 依赖命运结算）入列后折算 657 越过 500 基线。
+  // 自然拆分缝（helper 结算族 / 遍历上下文）需连动 AstNode 帧类型与 isGlobalCall 等
+  // 共享谓词迁位，属独立重构任务——按 gate static-gate 复测同款先例（run-events 650 /
+  // resume-run 620 同型）登记 override 保留软上限告警，增长即告警。
+  {
+    files: ['packages/subagent-core/src/shared/workflow-dag-parser.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 700, skipBlankLines: true, skipComments: true }],
+    },
+  },
 ];

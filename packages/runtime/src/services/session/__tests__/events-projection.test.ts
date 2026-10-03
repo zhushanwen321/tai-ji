@@ -762,6 +762,44 @@ describe('projectV2Workflow（run 域定界 + 事件 fold 骨架）', () => {
     expect(projectV2Workflow(undefined, undefined, INITIAL_RUN_EVENT_FOLD)).toBeNull()
   })
 
+  /** registered 条目 fixture（v2 run 注册；scriptPath 可选——旧条目形态缺省）。 */
+  function registeredEntry(runId: string, scriptPath?: string) {
+    return {
+      v: 2 as const,
+      kind: 'registered' as const,
+      runId,
+      workflowName: 'flow',
+      scriptName: 'test-flow',
+      slug: 'tf',
+      ...(scriptPath !== undefined ? { scriptPath } : {}),
+      startedAt: 1000,
+      recordPath: `/tmp/ws/${runId}.events.jsonl`,
+    }
+  }
+
+  /** created + settled 两事件 fold（scriptPath 透传用例的最小事件面）。 */
+  function createdSettledFold(runId: string) {
+    return foldRunEventCheckpoint(
+      [
+        runEvent({ type: 'run-created', runId, workflowName: 'flow', argsSummary: '', ts: 1000 }),
+        runEvent({ type: 'run-settled', outcome: 'done', artifactsDir: '/tmp/a', ts: 3000 }),
+      ],
+      () => {},
+    )
+  }
+
+  it('注册条目 scriptPath 透传进 WorkflowRunRecord（GUI 详情层全路径源）', () => {
+    const scriptPath = '/Users/x/project/.pi/workflows/test-flow.js'
+    const record = projectV2Workflow(registeredEntry('wf-sp', scriptPath), undefined, createdSettledFold('wf-sp'))!
+    expect(record.scriptPath).toBe(scriptPath)
+  })
+
+  it('旧注册条目（无 scriptPath）→ record.scriptPath 缺省（不回落猜路径）', () => {
+    const record = projectV2Workflow(registeredEntry('wf-legacy'), undefined, createdSettledFold('wf-legacy'))!
+    // 缺省空串（WorkflowRunRecord.scriptPath 可选；UI 回落 scriptName 短名）
+    expect(record.scriptPath).toBe('')
+  })
+
   it('事件 fold 骨架 + 条目摘要合并成 WorkflowRunRecord', () => {
     const registered = {
       v: 2 as const,

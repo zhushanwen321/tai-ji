@@ -312,19 +312,90 @@ describe('TerminalService', () => {
     }
   })
 
-  it('RT8-10-K4: destroyPty 后 SIGTERM 未退出，升级 timer 无条件 SIGKILL（untracked）', async () => {
+  /**
+   * 升级链共形装置（RT8-10-K4 / TS-DA3 共享）：fake timers + 单 PTY 服务，执行 destroy
+   * 动作后推进升级 timer（5000ms），断言两段 kill 终态 SIGKILL。
+   */
+  async function expectUpgradeToSigkillAfterDestroy(sid: string, destroy: (svc: InstanceType<typeof TerminalService>) => void) {
     vi.useFakeTimers()
     try {
       const { publish } = createPublishCollector()
       const svc = new TerminalService({ publish })
-      await svc.spawn('s-k4', undefined, 80, 24)
+      await svc.spawn(sid, undefined, 80, 24)
       const pty = mockPtys[0]!
-
-      svc.destroyPty('s-k4')
-      // destroyPty 立即清 ptyMap（升级 timer 不靠 map 判活——session 销毁路径同 sid 不重 spawn）
+      destroy(svc)
       vi.advanceTimersByTime(5000)
       expect(pty.kill).toHaveBeenCalledTimes(2)
       expect(pty.kill).toHaveBeenLastCalledWith('SIGKILL')
+    } finally {
+      vi.useRealTimers()
+    }
+  }
+
+  it('RT8-10-K4: destroyPty 后 SIGTERM 未退出，升级 timer 无条件 SIGKILL（untracked）', async () => {
+    // destroyPty 立即清 ptyMap（升级 timer 不靠 map 判活——session 销毁路径同 sid 不重 spawn）
+    await expectUpgradeToSigkillAfterDestroy('s-k4', (svc) => svc.destroyPty('s-k4'))
+  })
+
+  it('TS-DA1: destroyAll 全量 kill + 清 ptyMap（runtime shutdown 链显式收口）', async () => {
+    const { publish } = createPublishCollector()
+    const svc = new TerminalService({ publish })
+    await svc.spawn('s-da1', undefined, 80, 24)
+    await svc.spawn('s-da2', undefined, 80, 24)
+
+    svc.destroyAll()
+    expect(mockPtys[0]!.kill).toHaveBeenCalledWith()
+    expect(mockPtys[1]!.kill).toHaveBeenCalledWith()
+    // ptyMap 清空：后续 write no-op（不触 pty.write）
+    svc.write('s-da1', 'ls\n')
+    expect(mockPtys[0]!.write).not.toHaveBeenCalled()
+  })
+
+  it('TS-DA2: destroyAll 幂等（空表 no-op，shutdown 双信号重入安全）', async () => {
+    vi.useFakeTimers()
+    try {
+      const { publish } = createPublishCollector()
+      const svc = new TerminalService({ publish })
+      await svc.spawn('s-da2', undefined, 80, 24)
+      const pty = mockPtys[0]!
+
+      svc.destroyAll()
+      svc.destroyAll() // 重入：空表 no-op，不重复 kill
+      vi.advanceTimersByTime(6000) // 升级链照常跑完（第一条路径的 timer）
+      expect(pty.kill).toHaveBeenCalledTimes(2) // SIGTERM + SIGKILL，无第三次
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('TS-DA3: destroyAll 后 PTY 未退出，升级 timer 无条件 SIGKILL（同 destroyPty 语义）', async () => {
+    await expectUpgradeToSigkillAfterDestroy('s-da3', (svc) => svc.destroyAll())
+  })
+
+  it('TS-11: destroyPty 时 kill 已抛错（进程已死竞态）：console.error 留痕 + ptyMap 清理 + 升级链照跑', async () => {
+    // killAndUntrack 合并主体后的 catch 分支：kill 抛错不阻断调用方（unmap + untracked 升级照常）。
+    vi.useFakeTimers()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const { publish } = createPublishCollector()
+      const svc = new TerminalService({ publish })
+      await svc.spawn('s-kf', undefined, 80, 24)
+      const pty = mockPtys[0]!
+      pty.kill = vi.fn(() => {
+        throw new Error('EPIPE: process already dead')
+      })
+      expect(() => svc.destroyPty('s-kf')).not.toThrow()
+      expect(errorSpy).toHaveBeenCalledTimes(1)
+      expect(String(errorSpy.mock.calls[0]![0])).toContain('[terminal] destroyPty (session delete) kill failed: sid=s-kf')
+      // ptyMap 已清：write no-op
+      svc.write('s-kf', 'ls\n')
+      expect(pty.write).not.toHaveBeenCalledWith('ls\n')
+      // untracked 升级 timer 照常（SIGTERM 后未退的升级兑底不因首杀失败而缺席）：
+      // SIGKILL 再抛错落升级 catch（console.error 第二条），不留静默断链
+      vi.advanceTimersByTime(5000)
+      expect(pty.kill).toHaveBeenLastCalledWith('SIGKILL')
+      expect(errorSpy).toHaveBeenCalledTimes(2)
+      expect(String(errorSpy.mock.calls[1]![0])).toContain('SIGKILL 升级失败')
     } finally {
       vi.useRealTimers()
     }

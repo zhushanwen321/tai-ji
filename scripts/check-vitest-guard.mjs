@@ -17,10 +17,11 @@
  *      必须含 `taijiTestConfig`；
  *   4. 仓库根 vitest.config.ts（兜底 config）必须存在且含 `taijiTestConfig`；
  *   5. 凡声明 `projects` 的 config，projects 数组内每个 project 条目都必须覆盖 fs-guard
- *      （经工厂 `guardProjectSetup` 助手，或显式 `setupFiles: [FS_GUARD_PATH]`）——
- *      projects 内 setupFiles 不继承 root 级，新 project 漏挂即静默失去 fs-guard 切面；
- *      有意不挂 fs-guard 的 project 须登记在 PROJECT_GUARD_EXEMPT（当前唯一例外：
- *      apps/electron/main 的 legacy 池，存量用例未适配 guard，见其配置注释）。
+ *      + env-purity 双防线（经工厂 `guardProjectSetup` 助手；显式形态必须同时含
+ *      `FS_GUARD_PATH` 与 `ENV_PURITY_PATH`——只挂 fs-guard 的单防线形态视为漏挂，
+ *      与工厂助手的双挂载语义对齐）——projects 内 setupFiles 不继承 root 级，新
+ *      project 漏挂即静默失去防线；有意不挂的 project 须登记在 PROJECT_GUARD_EXEMPT
+ *      （当前唯一例外：apps/electron/main 的 legacy 池，存量用例未适配 guard，见其配置注释）。
  *
  * 只做静态特征校验，不执行测试。
  * 用法：node scripts/check-vitest-guard.mjs [目标根目录]（缺省 = 仓库根；位置参数仅供 fixture 自测）
@@ -35,8 +36,10 @@ import { fileURLToPath } from 'node:url'
 const FACTORY_MARK = 'taijiTestConfig'
 /** project 级防线挂载特征：project `test` 片段经工厂 guardProjectSetup 助手包装。 */
 const GUARD_PROJECT_MARK = 'guardProjectSetup'
-/** project 级防线显式挂载特征（不经助手时的等价形态）。 */
+/** project 级防线显式挂载特征（不经助手时的等价形态，须与 ENV_PURITY_MARK 同窗在场）。 */
 const GUARD_SETUP_MARK = 'FS_GUARD_PATH'
+/** env 纯净度防线特征（显式形态的第二防线——与助手双挂载语义对齐）。 */
+const ENV_PURITY_MARK = 'ENV_PURITY_PATH'
 /**
  * 已登记的 project 级 fs-guard 豁免（有意不挂 guard 的 project）。
  * key = config 相对目标根的 posix 路径，value = 该 config 内豁免的 project name 列表。
@@ -210,8 +213,10 @@ function projectName(element, index) {
 }
 
 /**
- * 第 5 条：凡声明 projects 的 config，逐个 project 校验 fs-guard 覆盖（未覆盖 → 违规）。
- * 覆盖 = 经工厂 guardProjectSetup 助手，或显式 setupFiles: [FS_GUARD_PATH]。
+ * 第 5 条：凡声明 projects 的 config，逐个 project 校验双防线覆盖（未覆盖 → 违规）。
+ * 覆盖 = 经工厂 guardProjectSetup 助手（内建 fs-guard + env-purity 双挂载），或显式
+ * setupFiles 同时含 FS_GUARD_PATH 与 ENV_PURITY_PATH（与助手语义等值的显式形态）。
+ * 只挂 fs-guard 的单防线形态视为漏挂（env 纯净度防线静默缺席）。
  */
 function checkProjectGuard(configPath, label, text) {
   if (!/\bprojects\s*:/.test(text)) return []
@@ -225,12 +230,18 @@ function checkProjectGuard(configPath, label, text) {
   const exempt = new Set(PROJECT_GUARD_EXEMPT[rel] ?? [])
   const violations = []
   for (const [index, element] of splitTopLevelElements(body).entries()) {
-    if (element.includes(GUARD_PROJECT_MARK) || element.includes(GUARD_SETUP_MARK)) continue
+    if (element.includes(GUARD_PROJECT_MARK)) continue
+    const explicitBoth = element.includes(GUARD_SETUP_MARK) && element.includes(ENV_PURITY_MARK)
+    if (explicitBoth) continue
     const name = projectName(element, index)
     if (exempt.has(name)) continue
+    const missing = element.includes(GUARD_SETUP_MARK)
+      ? `（已挂 ${GUARD_SETUP_MARK} 但缺 ${ENV_PURITY_MARK}——单防线形态，与助手双挂载语义不等值）`
+      : ''
     violations.push(
-      `${label}：project '${name}' 未挂 fs-guard（test 片段既无 ${GUARD_PROJECT_MARK}，也无 ${GUARD_SETUP_MARK}）——` +
-        `新 project 漏挂会让该 project 全部测试静默失去破坏性 fs 拦截；有意不挂请登记 PROJECT_GUARD_EXEMPT`,
+      `${label}：project '${name}' 未挂双防线${missing}（test 片段须经 ${GUARD_PROJECT_MARK}，` +
+        `或显式同时含 ${GUARD_SETUP_MARK} + ${ENV_PURITY_MARK}）——` +
+        `新 project 漏挂会让该 project 全部测试静默失去破坏性 fs / env 纯净度拦截；有意不挂请登记 PROJECT_GUARD_EXEMPT`,
     )
   }
   return violations

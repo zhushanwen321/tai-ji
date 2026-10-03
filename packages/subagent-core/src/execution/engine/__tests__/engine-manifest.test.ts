@@ -4,10 +4,21 @@
 // 友好——引擎新增能力位时旧解析器不炸，协议演进宪法 C2 的依赖前提）。
 // 纯函数测试，零 fs 触点。
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CONSERVATIVE_CAPABILITIES, parseCapabilities, parseProcessModel } from "../engine-manifest.ts";
 import type { EngineCapabilities } from "../types.ts";
+
+// [teardown 竞态修复] 被测链（parseCapabilities/parseProcessModel 回退路径）的 logger 输出
+// 经 console 落 stderr，本文件用例全同步——刷写只能落在文件结束的 teardown 窗口，与
+// worker rpc 关闭竞态 → vitest EnvironmentTeardownError（onUserConsoleLog pending）
+// → run 退出码 1。本文件对 logger 零断言依赖，mock 静默（rebuild-indexes.test.ts 同款先例）。
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("../../../core/logger.ts", () => ({
+  getLogger: () => loggerMock,
+}));
 
 const FULL_VALID: EngineCapabilities = {
   schemaEnforcement: "native",

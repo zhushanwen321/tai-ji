@@ -35,6 +35,7 @@ import { defineConfig, type ViteUserConfig } from 'vitest/config'
 const GUARD_DIR = fileURLToPath(new URL('.', import.meta.url))
 export const GLOBAL_SETUP_PATH = join(GUARD_DIR, 'global-setup.ts')
 export const FS_GUARD_PATH = join(GUARD_DIR, 'fs-guard.ts')
+export const ENV_PURITY_PATH = join(GUARD_DIR, 'env-purity.ts')
 
 /** junit 报告默认值（AGENTS.md MANDATORY）——各包不再手抄，用户同名字段可整体覆盖。
  *  注意：`include` 有意不做默认（会静默缩小未声明包的扫描面，见文件头）。 */
@@ -63,7 +64,7 @@ type ProjectTestFragment = { setupFiles?: string[] } & Record<string, unknown>
  * project 须在该守卫内登记豁免）。
  */
 export function guardProjectSetup<T extends ProjectTestFragment>(test: T): T & { setupFiles: string[] } {
-  return { ...test, setupFiles: [FS_GUARD_PATH, ...(test.setupFiles ?? [])] }
+  return { ...test, setupFiles: [FS_GUARD_PATH, ENV_PURITY_PATH, ...(test.setupFiles ?? [])] }
 }
 
 export function taijiTestConfig(config: ViteUserConfig = {}): ViteUserConfig {
@@ -77,7 +78,10 @@ export function taijiTestConfig(config: ViteUserConfig = {}): ViteUserConfig {
       ...DEFAULTS,
       ...userTest,
       globalSetup: [GLOBAL_SETUP_PATH, ...(userTest.globalSetup ?? [])],
-      setupFiles: [FS_GUARD_PATH, ...(userTest.setupFiles ?? [])],
+      // env 纯净度防线夹在 fs-guard 与用户 setup 之间：宿主链路泄漏类 env（PI_SUBAGENT_*
+      // 身份贯穿族）在用户 setup/用例可见前剥除——语义基线「测试进程 = 根进程」。与
+      // globalSetup 不同，setupFiles 在每个 worker 测试进程内运行，净化确定性生效。
+      setupFiles: [FS_GUARD_PATH, ENV_PURITY_PATH, ...(userTest.setupFiles ?? [])],
     } as ViteUserConfig['test'],
   })
 }

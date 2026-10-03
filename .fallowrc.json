@@ -1,7 +1,8 @@
 {
   "dynamicallyLoaded": [
     "extensions/*/index.ts",
-    "taste-lint/**/*.test.mjs"
+    "taste-lint/**/*.test.mjs",
+    "test-guard/*.ts"
   ],
   "ignoreExports": [
     {

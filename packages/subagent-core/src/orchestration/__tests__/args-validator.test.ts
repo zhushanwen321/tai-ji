@@ -11,11 +11,24 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ArgsValidationError, validateRunArgs } from "../args-validator.ts";
 import type { RunSpec } from "../models/run-spec.ts";
 import { parseResourceMeta } from "../../shared/meta-parser.ts";
+
+// [teardown 竞态修复] 本文件用例全同步——console 刷写只能落在文件结束的 teardown 窗口，
+// 与 worker rpc 关闭竞态 → vitest EnvironmentTeardownError（onUserConsoleLog pending）
+// → run 退出码 1。噪声两源：①被测链传递性 logger 输出（core logger mock，
+// rebuild-indexes.test.ts 同款先例）；②ajv 对 format:uri 的自有 console.warn（非 core
+// logger 通路，TC6b 故意容忍自定义 format）——console.warn spy 静默。本文件对两者零断言依赖。
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("../../core/logger.ts", () => ({
+  getLogger: () => loggerMock,
+}));
+vi.spyOn(console, "warn").mockImplementation(() => {});
 
 const WORKFLOWS_DIR = join(__dirname, "../../../workflows");
 
