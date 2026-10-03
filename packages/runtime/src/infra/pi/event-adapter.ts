@@ -1669,6 +1669,30 @@ const DISPATCHER = new Map<string, Handler>()
 const DEBUG_PI_EVENTS = process.env.TAIJI_DEBUG_PI_EVENTS === '1'
 
 /**
+ * 嵌套工具调用产块事件过滤（codemode u5 / 设计 D4，live ≡ reload 对齐）。
+ *
+ * 判据来源（pi 1.0.0 dist 实证，非 codemode 专属逻辑）：工具经 ctx.executeTool() 发起的
+ * 嵌套调用，其 tool_execution_start / tool_execution_update / tool_execution_end 事件一律
+ * 携带 parentToolCallId（dist/core/nested-tool-calls.js 三处 emit 点），且嵌套调用不落
+ * transcript、结果不持久化（dist/core/extensions/types.d.ts executeTool 契约「It does not
+ * appear in the transcript」）。过滤语义 = 与 transcript 投影对齐：reload 后嵌套调用只有
+ * 外层一个工具块，live 期放行 start/end 会各产独立工具块 → 投影不一致。未来任何
+ * ctx.executeTool 调用源自动被本过滤覆盖（现役唯一发射源为 codemode 脚本）。
+ *
+ * tool_execution_update 豁免（判据不含 update）：嵌套 update 不产工具块、不落 transcript，
+ * 丢弃无等价性收益；且它是 subagent 翻译层的活性信号载体（U-A6 无进展守护刷新通道，嵌套
+ * 执行窗口内唯一在途刷新源），丢弃会复发守护误杀。
+ *
+ * 空串按非嵌套放行：pi 实发恒为真实父 id，'' 属畸形值——误滤顶层事件会丢用户可见工具块
+ * （数据损失），误放行嵌套事件至多多一个重复块（表观噪声），两害取轻。
+ */
+function isNestedToolExecutionBlockEvent(event: PiEvent): boolean {
+  if (event.type !== 'tool_execution_start' && event.type !== 'tool_execution_end') return false
+  const parentToolCallId = event.parentToolCallId
+  return typeof parentToolCallId === 'string' && parentToolCallId !== ''
+}
+
+/**
  * 纯翻译：把单个 pi 事件翻译为 0~N 个中间事件。
  *
  * 无副作用、无可变态、不 import services 域类型。组合根负责把 translate 的结果
@@ -1697,6 +1721,10 @@ export function translate(event: PiEvent, sessionId: string): PiTranslatedEvent[
 
   // Lifecycle events that produce no output
   if (NULL_EVENTS.has(eventType)) return []
+
+  // [codemode u5 / D4] 嵌套工具调用产块事件过滤——start 与 end 同点同判（update 豁免，
+  // 判据来源与豁免依据见 isNestedToolExecutionBlockEvent 注释）
+  if (isNestedToolExecutionBlockEvent(event)) return []
 
   // agent_start — 仅产 hook 事件（interpreter 触发 onPiEvent/agent_start hook）
   if (eventType === 'agent_start') {
