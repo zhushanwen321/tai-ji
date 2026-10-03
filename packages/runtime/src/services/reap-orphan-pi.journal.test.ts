@@ -15,11 +15,9 @@
  *
  * 运行：cd packages/runtime && npx vitest run src/services/reap-orphan-pi.journal.test.ts
  */
-import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
 import { closeCrashJournal, initCrashJournal } from '../infra/crash-journal.js'
+import { setupCrashJournalHarness } from '../__tests__/helpers/crash-journal-test-support.js'
 import { reapOrphanPiProcesses, ORPHAN_KILL_GRACE_MS, type PsRow, type ReapOrphanOptions } from './reap-orphan-pi.js'
 
 const DATA_DIR = '/Users/tester/.taiji'
@@ -27,19 +25,8 @@ const OWN_PID = 100
 /** spawn 清单值（判据 v2：argv --extension 值与清单精确相等；形态对齐 reap-orphan-pi.test MARKERS）。 */
 const MARKER = '/Applications/TaiJi.app/Contents/Resources/extensions/pi-agent-ext'
 
-let dataDir: string
-const createdDirs: string[] = []
-
-beforeEach(() => {
-  dataDir = mkdtempSync(join(tmpdir(), 'reap-journal-'))
-  createdDirs.push(dataDir)
-})
-
-afterAll(() => {
-  // maxRetries+retryDelay（教训 d9ad39cb8）：teardown 递归删除与在途异步写竞争的
-  // ENOTEMPTY 瞬态重试（pre-commit flake 卫生检查硬要求）
-  for (const dir of createdDirs) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-})
+/** 台账装置：mkdtemp 数据目录生命周期 + 活跃档读取（两处 journal 直测共享 helper）。 */
+const journal = setupCrashJournalHarness('reap-journal-')
 
 /** taiji spawn 的 pi 典型 argv（判据 v2 形态：--mode rpc + --no-extensions + --extension 注入段）。 */
 function piCmd(extensionPath: string = MARKER): string {
@@ -81,26 +68,16 @@ function makeOptions(rows: PsRow[], overrides?: Partial<ReapOrphanOptions>): Rea
   }
 }
 
-/** 读台账活跃档全部行（不存在 = 零事件）。 */
-function readJournalRecords(): Array<Record<string, unknown>> {
-  const p = join(dataDir, 'logs', 'crashes', 'runtime.jsonl')
-  if (!existsSync(p)) return []
-  return readFileSync(p, 'utf8')
-    .split('\n')
-    .filter(l => l !== '')
-    .map(l => JSON.parse(l) as Record<string, unknown>)
-}
-
 describe('reap-orphan-pi → 崩溃台账 reaped 事件（D1 矩阵 reaped 行）', () => {
   it('① 判据命中且处置成功：一条 reaped 事件，含 pid/ppid 与 argv 判据摘要', async () => {
-    initCrashJournal(dataDir)
+    initCrashJournal(journal.getDataDir())
     const result = await reapOrphanPiProcesses(makeOptions([
       row(501, 1, piCmd()),
     ]))
     await closeCrashJournal()
 
     expect(result.reaped).toEqual([501])
-    const records = readJournalRecords()
+    const records = journal.readJournalRecords()
     expect(records).toHaveLength(1)
     const rec = records[0]!
     expect(rec.layer).toBe('pi')
@@ -117,7 +94,7 @@ describe('reap-orphan-pi → 崩溃台账 reaped 事件（D1 矩阵 reaped 行�
   })
 
   it('④ 防误记：判据未命中（ppid=并存实例 pid / marker 清单外值）→ 零台账事件', async () => {
-    initCrashJournal(dataDir)
+    initCrashJournal(journal.getDataDir())
     const result = await reapOrphanPiProcesses(makeOptions([
       row(601, 40842, piCmd()), // 另一合法实例的活跃 pi（ppid=对方 runtime）
       row(602, 1, piCmd('/Users/other/other-ext')), // 其他实例清单外的 pi（argv marker 不匹配）
@@ -126,11 +103,11 @@ describe('reap-orphan-pi → 崩溃台账 reaped 事件（D1 矩阵 reaped 行�
 
     expect(result.reaped).toEqual([])
     expect(result.failed).toEqual([])
-    expect(readJournalRecords()).toEqual([])
+    expect(journal.readJournalRecords()).toEqual([])
   })
 
   it('④ 防误记：混合命中 + 自有子进程（ppid=ownPid 被防线②排除）→ 仅命中者产生事件', async () => {
-    initCrashJournal(dataDir)
+    initCrashJournal(journal.getDataDir())
     const result = await reapOrphanPiProcesses(makeOptions([
       row(701, OWN_PID, piCmd()), // 本 runtime 活跃子代（不杀）
       row(702, 1, piCmd()), // 真孤儿
@@ -138,13 +115,13 @@ describe('reap-orphan-pi → 崩溃台账 reaped 事件（D1 矩阵 reaped 行�
     await closeCrashJournal()
 
     expect(result.reaped).toEqual([702])
-    const records = readJournalRecords()
+    const records = journal.readJournalRecords()
     expect(records).toHaveLength(1)
     expect(records[0]!.pid).toBe(702)
   })
 
   it('④ 处置失败（SIGTERM 抛非 ESRCH）→ 进 failed，台账记 reap-failed（不记 reaped）', async () => {
-    initCrashJournal(dataDir)
+    initCrashJournal(journal.getDataDir())
     const boom = new Error('operation not permitted')
     const result = await reapOrphanPiProcesses(makeOptions(
       [row(801, 1, piCmd())],
@@ -154,7 +131,7 @@ describe('reap-orphan-pi → 崩溃台账 reaped 事件（D1 矩阵 reaped 行�
 
     expect(result.reaped).toEqual([])
     expect(result.failed).toEqual([801])
-    const records = readJournalRecords()
+    const records = journal.readJournalRecords()
     expect(records).toHaveLength(1)
     const rec = records[0]!
     expect(rec.event).toBe('reap-failed')
@@ -165,7 +142,7 @@ describe('reap-orphan-pi → 崩溃台账 reaped 事件（D1 矩阵 reaped 行�
   })
 
   it('多孤儿逐一记事件：每 pid 一条，事件 pid 集与 reaped 结果一致', async () => {
-    initCrashJournal(dataDir)
+    initCrashJournal(journal.getDataDir())
     const result = await reapOrphanPiProcesses(makeOptions([
       row(901, 1, piCmd()),
       row(902, 1, piCmd()),
@@ -173,7 +150,7 @@ describe('reap-orphan-pi → 崩溃台账 reaped 事件（D1 矩阵 reaped 行�
     await closeCrashJournal()
 
     expect(result.reaped).toEqual([901, 902])
-    const records = readJournalRecords()
+    const records = journal.readJournalRecords()
     expect(records.map(r => r.pid)).toEqual([901, 902])
     for (const rec of records) {
       expect(rec.event).toBe('reaped')

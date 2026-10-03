@@ -762,48 +762,40 @@ describe('projectV2Workflow（run 域定界 + 事件 fold 骨架）', () => {
     expect(projectV2Workflow(undefined, undefined, INITIAL_RUN_EVENT_FOLD)).toBeNull()
   })
 
-  it('注册条目 scriptPath 透传进 WorkflowRunRecord（GUI 详情层全路径源）', () => {
-    const registered = {
+  /** registered 条目 fixture（v2 run 注册；scriptPath 可选——旧条目形态缺省）。 */
+  function registeredEntry(runId: string, scriptPath?: string) {
+    return {
       v: 2 as const,
       kind: 'registered' as const,
-      runId: 'wf-sp',
+      runId,
       workflowName: 'flow',
       scriptName: 'test-flow',
       slug: 'tf',
-      scriptPath: '/Users/x/project/.pi/workflows/test-flow.js',
+      ...(scriptPath !== undefined ? { scriptPath } : {}),
       startedAt: 1000,
-      recordPath: '/tmp/ws/wf-sp.events.jsonl',
+      recordPath: `/tmp/ws/${runId}.events.jsonl`,
     }
-    const fold = foldRunEventCheckpoint(
+  }
+
+  /** created + settled 两事件 fold（scriptPath 透传用例的最小事件面）。 */
+  function createdSettledFold(runId: string) {
+    return foldRunEventCheckpoint(
       [
-        runEvent({ type: 'run-created', runId: 'wf-sp', workflowName: 'flow', argsSummary: '', ts: 1000 }),
+        runEvent({ type: 'run-created', runId, workflowName: 'flow', argsSummary: '', ts: 1000 }),
         runEvent({ type: 'run-settled', outcome: 'done', artifactsDir: '/tmp/a', ts: 3000 }),
       ],
       () => {},
     )
-    const record = projectV2Workflow(registered, undefined, fold)!
-    expect(record.scriptPath).toBe('/Users/x/project/.pi/workflows/test-flow.js')
+  }
+
+  it('注册条目 scriptPath 透传进 WorkflowRunRecord（GUI 详情层全路径源）', () => {
+    const scriptPath = '/Users/x/project/.pi/workflows/test-flow.js'
+    const record = projectV2Workflow(registeredEntry('wf-sp', scriptPath), undefined, createdSettledFold('wf-sp'))!
+    expect(record.scriptPath).toBe(scriptPath)
   })
 
   it('旧注册条目（无 scriptPath）→ record.scriptPath 缺省（不回落猜路径）', () => {
-    const registered = {
-      v: 2 as const,
-      kind: 'registered' as const,
-      runId: 'wf-legacy',
-      workflowName: 'flow',
-      scriptName: 'test-flow',
-      slug: 'tf',
-      startedAt: 1000,
-      recordPath: '/tmp/ws/wf-legacy.events.jsonl',
-    }
-    const fold = foldRunEventCheckpoint(
-      [
-        runEvent({ type: 'run-created', runId: 'wf-legacy', workflowName: 'flow', argsSummary: '', ts: 1000 }),
-        runEvent({ type: 'run-settled', outcome: 'done', artifactsDir: '/tmp/a', ts: 3000 }),
-      ],
-      () => {},
-    )
-    const record = projectV2Workflow(registered, undefined, fold)!
+    const record = projectV2Workflow(registeredEntry('wf-legacy'), undefined, createdSettledFold('wf-legacy'))!
     // 缺省空串（WorkflowRunRecord.scriptPath 可选；UI 回落 scriptName 短名）
     expect(record.scriptPath).toBe('')
   })

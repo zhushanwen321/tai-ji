@@ -312,22 +312,29 @@ describe('TerminalService', () => {
     }
   })
 
-  it('RT8-10-K4: destroyPty 后 SIGTERM 未退出，升级 timer 无条件 SIGKILL（untracked）', async () => {
+  /**
+   * 升级链共形装置（RT8-10-K4 / TS-DA3 共享）：fake timers + 单 PTY 服务，执行 destroy
+   * 动作后推进升级 timer（5000ms），断言两段 kill 终态 SIGKILL。
+   */
+  async function expectUpgradeToSigkillAfterDestroy(sid: string, destroy: (svc: InstanceType<typeof TerminalService>) => void) {
     vi.useFakeTimers()
     try {
       const { publish } = createPublishCollector()
       const svc = new TerminalService({ publish })
-      await svc.spawn('s-k4', undefined, 80, 24)
+      await svc.spawn(sid, undefined, 80, 24)
       const pty = mockPtys[0]!
-
-      svc.destroyPty('s-k4')
-      // destroyPty 立即清 ptyMap（升级 timer 不靠 map 判活——session 销毁路径同 sid 不重 spawn）
+      destroy(svc)
       vi.advanceTimersByTime(5000)
       expect(pty.kill).toHaveBeenCalledTimes(2)
       expect(pty.kill).toHaveBeenLastCalledWith('SIGKILL')
     } finally {
       vi.useRealTimers()
     }
+  }
+
+  it('RT8-10-K4: destroyPty 后 SIGTERM 未退出，升级 timer 无条件 SIGKILL（untracked）', async () => {
+    // destroyPty 立即清 ptyMap（升级 timer 不靠 map 判活——session 销毁路径同 sid 不重 spawn）
+    await expectUpgradeToSigkillAfterDestroy('s-k4', (svc) => svc.destroyPty('s-k4'))
   })
 
   it('TS-DA1: destroyAll 全量 kill + 清 ptyMap（runtime shutdown 链显式收口）', async () => {
@@ -362,20 +369,7 @@ describe('TerminalService', () => {
   })
 
   it('TS-DA3: destroyAll 后 PTY 未退出，升级 timer 无条件 SIGKILL（同 destroyPty 语义）', async () => {
-    vi.useFakeTimers()
-    try {
-      const { publish } = createPublishCollector()
-      const svc = new TerminalService({ publish })
-      await svc.spawn('s-da3', undefined, 80, 24)
-      const pty = mockPtys[0]!
-
-      svc.destroyAll()
-      vi.advanceTimersByTime(5000)
-      expect(pty.kill).toHaveBeenCalledTimes(2)
-      expect(pty.kill).toHaveBeenLastCalledWith('SIGKILL')
-    } finally {
-      vi.useRealTimers()
-    }
+    await expectUpgradeToSigkillAfterDestroy('s-da3', (svc) => svc.destroyAll())
   })
 
   it('TS-11: destroyPty 时 kill 已抛错（进程已死竞态）：console.error 留痕 + ptyMap 清理 + 升级链照跑', async () => {

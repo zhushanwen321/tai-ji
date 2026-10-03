@@ -15,11 +15,9 @@
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/services/idle-pi-reaper.journal.test.ts
  */
-import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
 import { closeCrashJournal, initCrashJournal } from '../../infra/crash-journal.js'
+import { setupCrashJournalHarness } from '../helpers/crash-journal-test-support.js'
 import {
   ReclaimSeat,
   startIdlePiReaper,
@@ -27,19 +25,8 @@ import {
   type ReclaimExemptions,
 } from '../../services/session/idle-pi-reaper.js'
 
-let dataDir: string
-const createdDirs: string[] = []
-
-beforeEach(() => {
-  dataDir = mkdtempSync(join(tmpdir(), 'reaper-journal-'))
-  createdDirs.push(dataDir)
-})
-
-afterAll(() => {
-  // maxRetries+retryDelay（教训 d9ad39cb8）：teardown 递归删除 ENOTEMPTY 瞬态重试
-  // （pre-commit flake 卫生检查硬要求）
-  for (const dir of createdDirs) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-})
+/** 台账装置：mkdtemp 数据目录生命周期 + 活跃档读取（两处 journal 直测共享 helper）。 */
+const journal = setupCrashJournalHarness('reaper-journal-')
 
 // ── fake 装置 ─────────────────────────────────────────────────
 
@@ -94,32 +81,33 @@ function makeHarness(seed: Record<string, FakeState>, reclaimResult = true): Har
   }
 }
 
-/** 读台账活跃档全部行（不存在 = 零事件）。 */
-function readJournalRecords(): Array<Record<string, unknown>> {
-  const p = join(dataDir, 'logs', 'crashes', 'runtime.jsonl')
-  if (!existsSync(p)) return []
-  return readFileSync(p, 'utf8')
-    .split('\n')
-    .filter(l => l !== '')
-    .map(l => JSON.parse(l) as Record<string, unknown>)
-}
-
 describe('idle-pi-reaper → 崩溃台账 reclaimed 事件（D1 矩阵 reclaimed 行）', () => {
-  it('② reclaim 成功：reclaimed 事件含 sessionId/idleMs/lastViewedAt（被查看过的 session）', async () => {
-    initCrashJournal(dataDir)
-    // activityAt = NOW - 61_000 → idleMs = 61_000，严格大于阈值（恰好等于不回收的
-    // 边界语义见 reaper 注释）才进入回收；viewedAt = NOW - 40_000，在 30s 查看豁免
-    // 窗口之外（窗口内会被豁免 #6 跳过，不产生回收）
-    const viewedAt = NOW - 40_000
-    const h = makeHarness({
-      'sid-viewed': { activityAt: NOW - 61_000, viewedAt },
-    })
+  /**
+   * 单拍回收驱动（用例共形装置）：init 台账 → 装置种子（可选豁免预调）→ runOnce
+   * 单拍 → close flush → 返回台账行。零事件用例直接 toEqual([])，事件用例逐字段断言。
+   */
+  async function runOnceAndReadJournal(
+    seed: Record<string, FakeState>,
+    opts: { reclaimResult?: boolean; prepare?: (h: Harness) => void } = {},
+  ) {
+    initCrashJournal(journal.getDataDir())
+    const h = makeHarness(seed, opts.reclaimResult ?? true)
+    opts.prepare?.(h)
     const handle = startIdlePiReaper(h.options)
     await handle.runOnce()
     handle.stop()
     await closeCrashJournal()
+    return journal.readJournalRecords()
+  }
 
-    const records = readJournalRecords()
+  it('② reclaim 成功：reclaimed 事件含 sessionId/idleMs/lastViewedAt（被查看过的 session）', async () => {
+    // activityAt = NOW - 61_000 → idleMs = 61_000，严格大于阈值（恰好等于不回收的
+    // 边界语义见 reaper 注释）才进入回收；viewedAt = NOW - 40_000，在 30s 查看豁免
+    // 窗口之外（窗口内会被豁免 #6 跳过，不产生回收）
+    const viewedAt = NOW - 40_000
+    const records = await runOnceAndReadJournal({
+      'sid-viewed': { activityAt: NOW - 61_000, viewedAt },
+    })
     expect(records).toHaveLength(1)
     const rec = records[0]!
     expect(rec.layer).toBe('pi')
@@ -130,16 +118,9 @@ describe('idle-pi-reaper → 崩溃台账 reclaimed 事件（D1 矩阵 reclaimed
   })
 
   it('② 从未被查看（viewedAt undefined）：lastViewedAt 落显式 null（不知道 ≠ 没打点）', async () => {
-    initCrashJournal(dataDir)
-    const h = makeHarness({
+    const records = await runOnceAndReadJournal({
       'sid-never-viewed': { activityAt: NOW - 100_000 },
     })
-    const handle = startIdlePiReaper(h.options)
-    await handle.runOnce()
-    handle.stop()
-    await closeCrashJournal()
-
-    const records = readJournalRecords()
     expect(records).toHaveLength(1)
     expect(records[0]!.event).toBe('reclaimed')
     expect(records[0]!.sessionId).toBe('sid-never-viewed')
@@ -148,67 +129,37 @@ describe('idle-pi-reaper → 崩溃台账 reclaimed 事件（D1 矩阵 reclaimed
   })
 
   it('④ 防误记：空闲未到阈值（belowThreshold）→ 零台账事件', async () => {
-    initCrashJournal(dataDir)
-    const h = makeHarness({
+    expect(await runOnceAndReadJournal({
       'sid-fresh': { activityAt: NOW - 500 }, // idle = 500 < 60_000
-    })
-    const handle = startIdlePiReaper(h.options)
-    await handle.runOnce()
-    handle.stop()
-    await closeCrashJournal()
-
-    expect(readJournalRecords()).toEqual([])
+    })).toEqual([])
   })
 
   it('④ 防误记：恰好等于阈值（边界语义 idleMs > threshold 才回收）→ 零台账事件', async () => {
-    initCrashJournal(dataDir)
-    const h = makeHarness({
+    expect(await runOnceAndReadJournal({
       'sid-exact': { activityAt: NOW - IDLE_THRESHOLD_MS }, // idleMs === threshold
-    })
-    const handle = startIdlePiReaper(h.options)
-    await handle.runOnce()
-    handle.stop()
-    await closeCrashJournal()
-
-    expect(readJournalRecords()).toEqual([])
+    })).toEqual([])
   })
 
   it('④ 防误记：reclaim 返回 false（最终豁免拦截/代际校验取消）→ 零台账事件', async () => {
-    initCrashJournal(dataDir)
-    const h = makeHarness({ 'sid-blocked': { activityAt: NOW - 200_000 } }, false)
-    const handle = startIdlePiReaper(h.options)
-    await handle.runOnce()
-    handle.stop()
-    await closeCrashJournal()
-
-    expect(readJournalRecords()).toEqual([])
+    expect(await runOnceAndReadJournal(
+      { 'sid-blocked': { activityAt: NOW - 200_000 } },
+      { reclaimResult: false },
+    )).toEqual([])
   })
 
   it('④ 防误记：七类豁免命中（occupied）→ 零台账事件', async () => {
-    initCrashJournal(dataDir)
-    const h = makeHarness({ 'sid-occupied': { activityAt: NOW - 300_000 } })
-    // 覆写豁免 #1 为命中（装置默认全放行）
-    ;(h.options.exemptions as { isOccupied: (sid: string) => boolean }).isOccupied = () => true
-    const handle = startIdlePiReaper(h.options)
-    await handle.runOnce()
-    handle.stop()
-    await closeCrashJournal()
-
-    expect(readJournalRecords()).toEqual([])
+    expect(await runOnceAndReadJournal(
+      { 'sid-occupied': { activityAt: NOW - 300_000 } },
+      // 覆写豁免 #1 为命中（装置默认全放行）
+      { prepare: (h) => { (h.options.exemptions as { isOccupied: (sid: string) => boolean }).isOccupied = () => true } },
+    )).toEqual([])
   })
 
   it('一拍多回收：每 session 一条 reclaimed 事件，sessionId 与回收清单一致', async () => {
-    initCrashJournal(dataDir)
-    const h = makeHarness({
+    const records = await runOnceAndReadJournal({
       'sid-a': { activityAt: NOW - 200_000 },
       'sid-b': { activityAt: NOW - 150_000, viewedAt: NOW - 60_000 }, // viewed 距今 > 窗口，不豁免
     })
-    const handle = startIdlePiReaper(h.options)
-    await handle.runOnce()
-    handle.stop()
-    await closeCrashJournal()
-
-    const records = readJournalRecords()
     expect(records).toHaveLength(2)
     expect(records.map(r => r.sessionId).sort()).toEqual(['sid-a', 'sid-b'])
     for (const rec of records) {

@@ -659,6 +659,33 @@ function collectHelperCandidates(node: AstNode, out: HelperCandidate[]): void {
 function collectAgentHelpers(program: AstNode): Map<string, AgentHelperEntry> {
   const candidates: HelperCandidate[] = [];
   collectHelperCandidates(program, candidates);
+  const info = buildCandidateDependencyInfo(candidates);
+  const status = rejectTrivialCandidates(candidates);
+  settleByDependencyFate(info, status);
+  // 停滞残留（无结算状态）= 候选间互调/嵌套环 → 全部不投影；录取者登记注册表
+  const byName = new Map<string, AgentHelperEntry>();
+  for (const cand of candidates) {
+    if (status.get(cand) === "accepted") {
+      byName.set(cand.name, { fn: cand.fn, internalCall: cand.calls[0] as AstNode });
+    }
+  }
+  return byName;
+}
+
+/** 候选间依赖信息（预计算共享面：直接调用名集 + 词法嵌套集 + 同名索引 + 评估序）。 */
+interface CandidateDependencyInfo {
+  /** 候选子树内直接调用的候选名（原始名集，含自调——结算时按 byName 归一并剔除）。 */
+  directCalls: Map<HelperCandidate, Set<string>>;
+  /** 词法嵌套在该候选体内的其他候选（复合形态检测位）。 */
+  contains: Map<HelperCandidate, HelperCandidate[]>;
+  /** 名字 → 候选索引（同名多候选已在平凡阶段全拒，此处任取其一即可）。 */
+  byName: Map<string, HelperCandidate>;
+  /** 跨度升序评估序（结算正确性不依赖评估顺序，见 collectAgentHelpers 注释）。 */
+  order: HelperCandidate[];
+}
+
+/** 候选间依赖信息预计算（单遍：直接调用名集 + 词法嵌套集 + 索引 + 跨度升序评估序）。 */
+function buildCandidateDependencyInfo(candidates: HelperCandidate[]): CandidateDependencyInfo {
   const candidateNames = new Set(candidates.map((c) => c.name));
   const directCalls = new Map<HelperCandidate, Set<string>>();
   const contains = new Map<HelperCandidate, HelperCandidate[]>();
@@ -671,9 +698,21 @@ function collectAgentHelpers(program: AstNode): Map<string, AgentHelperEntry> {
       candidates.filter((other) => other !== cand && other.fn.start >= cand.fn.start && other.fn.end <= cand.fn.end),
     );
   }
-  const byName = new Map<string, AgentHelperEntry>();
-  const status = new Map<HelperCandidate, "accepted" | "rejected">();
-  // 结算阶段：平凡不合格（命运已定，对调用方无碍——调用注定落选的 helper 只是普通函数调用）
+  const byName = new Map<string, HelperCandidate>();
+  for (const cand of candidates) byName.set(cand.name, cand);
+  const order = [...candidates].sort((a, b) => a.fn.end - a.fn.start - (b.fn.end - b.fn.start));
+  return { directCalls, contains, byName, order };
+}
+
+/** 候选结算状态（在册 = 命运已定；缺席 = 未结算）。 */
+type HelperSettlement = "accepted" | "rejected";
+
+/**
+ * 平凡不合格预结算（命运已定，对调用方无碍——调用注定落选的 helper 只是普通函数调用）：
+ * 多/零 agent 调用、零参、同名多候选 → 拒。
+ */
+function rejectTrivialCandidates(candidates: HelperCandidate[]): Map<HelperCandidate, HelperSettlement> {
+  const status = new Map<HelperCandidate, HelperSettlement>();
   for (const cand of candidates) {
     if (cand.calls.length !== 1 || (cand.fn.params as AstNode[]).length === 0) status.set(cand, "rejected");
   }
@@ -682,43 +721,50 @@ function collectAgentHelpers(program: AstNode): Map<string, AgentHelperEntry> {
   for (const cand of candidates) {
     if ((nameCounts.get(cand.name) ?? 0) > 1) status.set(cand, "rejected");
   }
-  const candByName = new Map<string, HelperCandidate>();
-  for (const cand of candidates) candByName.set(cand.name, cand);
-  const order = [...candidates].sort((a, b) => a.fn.end - a.fn.start - (b.fn.end - b.fn.start));
+  return status;
+}
+
+/** 候选依赖集 = 子树内直接调用的其他候选（不含自调）+ 词法嵌套声明的候选。 */
+function candidateDependencies(cand: HelperCandidate, info: CandidateDependencyInfo): Set<HelperCandidate> {
+  const deps = new Set<HelperCandidate>();
+  for (const name of info.directCalls.get(cand) ?? []) {
+    const dep = info.byName.get(name);
+    if (dep !== undefined && dep !== cand) deps.add(dep);
+  }
+  for (const inner of info.contains.get(cand) ?? []) deps.add(inner);
+  return deps;
+}
+
+/** 依赖命运分类：任一依赖已录取 → 复合形态拒；存在未结算 → 延到下轮；其余 → 可录取。 */
+function classifyDependencyFate(
+  deps: ReadonlySet<HelperCandidate>,
+  status: ReadonlyMap<HelperCandidate, HelperSettlement>,
+): "composed" | "pending" | "settle" {
+  let pending = false;
+  for (const dep of deps) {
+    if (status.get(dep) === "accepted") return "composed";
+    if (!status.has(dep)) pending = true;
+  }
+  return pending ? "pending" : "settle";
+}
+
+/** 依赖命运迭代结算（不动点）：每轮至少一候选定命运才继续；停滞残留留给调用方全拒。 */
+function settleByDependencyFate(info: CandidateDependencyInfo, status: Map<HelperCandidate, HelperSettlement>): void {
   let progress = true;
   while (progress) {
     progress = false;
-    for (const cand of order) {
+    for (const cand of info.order) {
       if (status.has(cand)) continue;
-      const deps = new Set<HelperCandidate>();
-      for (const name of directCalls.get(cand) ?? []) {
-        const dep = candByName.get(name);
-        if (dep !== undefined && dep !== cand) deps.add(dep);
-      }
-      for (const inner of contains.get(cand) ?? []) deps.add(inner);
-      let composed = false;
-      let pending = false;
-      for (const dep of deps) {
-        const s = status.get(dep);
-        if (s === "accepted") {
-          composed = true;
-          break;
-        }
-        if (s === undefined) pending = true;
-      }
-      if (composed) {
+      const fate = classifyDependencyFate(candidateDependencies(cand, info), status);
+      if (fate === "composed") {
         status.set(cand, "rejected");
         progress = true;
-      } else if (!pending) {
+      } else if (fate === "settle") {
         status.set(cand, "accepted");
-        byName.set(cand.name, { fn: cand.fn, internalCall: cand.calls[0] as AstNode });
         progress = true;
       }
     }
   }
-  // 停滞残留 = 候选间互调/嵌套环 → 全部不投影
-  for (const cand of candidates) if (!status.has(cand)) status.set(cand, "rejected");
-  return byName;
 }
 
 /** parallel 实参成员收集 + 并行组登记（成员非空时）；返回成员 id 供 closeUnit 收口。空组（变量形态）对顺序链不可见——prevBatch 不变。 */

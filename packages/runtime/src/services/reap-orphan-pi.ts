@@ -634,6 +634,29 @@ export async function reapOrphanPiProcesses(options: ReapOrphanOptions): Promise
  * 「exited before SIGTERM」语义），warn 留痕供归因。后代不发 lstart 复验（快照→补杀
  * 同处置内秒级窗口，对齐 process-control stopRuntimeProcess 对后代的同款风险接受）。
  */
+/**
+ * 向 pi 本体发一次信号的结果三分类：delivered = 送达；exited = ESRCH（处置窗口内已自行
+ * 退出，幂等按已回收计）；failed = 其他错误（warn 留痕后归失败）。
+ */
+type OrphanSignalOutcome = "delivered" | "exited" | "failed";
+
+/**
+ * 单次信号发射 + ESRCH 归类（SIGTERM/SIGKILL 两处 try/catch 共形提取）：ESRCH 按
+ * 「已退出」归类，其余错误 warn 留痕（消息形态与原两处一致）。
+ */
+function signalOrphanPi(row: PsRow, sig: 'SIGTERM' | 'SIGKILL', signal: OrphanKillDeps['signal']): OrphanSignalOutcome {
+  try {
+    signal(row.pid, sig)
+    return 'delivered'
+  } catch (e) {
+    if (!isProcessGone(e)) {
+      console.warn(`[orphan-reap] ${sig} failed for orphan pi pid=${row.pid}:`, e instanceof Error ? e.message : e)
+      return 'failed'
+    }
+    return 'exited'
+  }
+}
+
 async function killOrphan(
   row: PsRow,
   deps: OrphanKillDeps,
@@ -665,22 +688,21 @@ async function killOrphan(
     return swept
   }
 
-  try {
-    signal(row.pid, 'SIGTERM')
-  } catch (e) {
-    if (isProcessGone(e)) {
-      // 扫描到处置之间已自行退出（stdin-EOF 自杀链赶到前面）——按已回收计，幂等。
-      // 杀链不对称的接受理由：此分支直接对后代 SIGKILL、跳过「SIGTERM → 宽限 →
-      // SIGKILL」升级链——方向是宁漏不误杀（后代已随 pi 退出孤儿化，快照时点最新，
-      // 直杀不比升级链更危险），省掉对已无父 shell 的多余宽限等待。
-      // 后代快照仍有效（信号前采集）：pi 死前 spawn 的 shell 照扫，不留永久孤儿。
-      const swept = sweepDescendants()
-      console.log(`[orphan-reap] reaped orphan pi pid=${row.pid} (exited before SIGTERM) ${summary}`)
-      return { ok: true, descendantsSwept: swept }
-    }
-    console.warn(`[orphan-reap] SIGTERM failed for orphan pi pid=${row.pid}:`, e instanceof Error ? e.message : e)
-    return { ok: false, descendantsSwept: [] }
+  // 成功收殓出口（后代清扫 + 结果日志；note = 处置路径留痕，进观测面）。
+  const finishReaped = (note: string): { ok: boolean; descendantsSwept: number[] } => {
+    const swept = sweepDescendants()
+    console.log(`[orphan-reap] reaped orphan pi pid=${row.pid} (${note}) ${summary}`)
+    return { ok: true, descendantsSwept: swept }
   }
+
+  // pi 本体 SIGTERM。ESRCH = 扫描到处置之间已自行退出（stdin-EOF 自杀链赶到前面）——按已
+  // 回收计，幂等。杀链不对称的接受理由：exited 分支直接对后代 SIGKILL、跳过「SIGTERM →
+  // 宽限 → SIGKILL」升级链——方向是宁漏不误杀（后代已随 pi 退出孤儿化，快照时点最新，
+  // 直杀不比升级链更危险），省掉对已无父 shell 的多余宽限等待。后代快照仍有效（信号前
+  // 采集）：pi 死前 spawn 的 shell 照扫，不留永久孤儿。
+  const termOutcome = signalOrphanPi(row, 'SIGTERM', signal)
+  if (termOutcome === 'exited') return finishReaped('exited before SIGTERM')
+  if (termOutcome === 'failed') return { ok: false, descendantsSwept: [] }
 
   // pi 自身 SIGTERM 后，快照后代同步 SIGTERM（多数 shell 对 SIGTERM 默认即退；
   // 与 pi 宽限共用同一窗口，不额外等待）。
@@ -692,11 +714,7 @@ async function killOrphan(
   await delay(killGraceMs)
 
   // 宽限后探活（signal 0 存在性探测，EPERM 等按「活着」走 SIGKILL 兜底——probeAliveAfterGrace）。
-  if (!probeAliveAfterGrace(signal, row.pid)) {
-    const swept = sweepDescendants()
-    console.log(`[orphan-reap] reaped orphan pi pid=${row.pid} (SIGTERM) ${summary}`)
-    return { ok: true, descendantsSwept: swept }
-  }
+  if (!probeAliveAfterGrace(signal, row.pid)) return finishReaped('SIGTERM')
 
   // SIGKILL 发射前的身份复验：lstart 与处置起点不同 = pid 已复用（原孤儿确定已死），
   // 跳过 SIGKILL——误杀复用者的代价高于少收一个已死孤儿。复验失败（null）不阻断。
@@ -710,20 +728,10 @@ async function killOrphan(
     }
   }
 
-  try {
-    signal(row.pid, 'SIGKILL')
-    const swept = sweepDescendants()
-    console.log(`[orphan-reap] reaped orphan pi pid=${row.pid} (SIGKILL after ${killGraceMs}ms grace) ${summary}`)
-    return { ok: true, descendantsSwept: swept }
-  } catch (e) {
-    if (isProcessGone(e)) {
-      const swept = sweepDescendants()
-      console.log(`[orphan-reap] reaped orphan pi pid=${row.pid} (exited during grace) ${summary}`)
-      return { ok: true, descendantsSwept: swept }
-    }
-    console.warn(`[orphan-reap] SIGKILL failed for orphan pi pid=${row.pid}:`, e instanceof Error ? e.message : e)
-    // pi 本体处置失败不阻断后代清扫（shell 收口独立于 pi 处置成败）。
-    const swept = sweepDescendants()
-    return { ok: false, descendantsSwept: swept }
-  }
+  const killOutcome = signalOrphanPi(row, 'SIGKILL', signal)
+  if (killOutcome === 'delivered') return finishReaped(`SIGKILL after ${killGraceMs}ms grace`)
+  if (killOutcome === 'exited') return finishReaped('exited during grace')
+  // pi 本体处置失败不阻断后代清扫（shell 收口独立于 pi 处置成败）。
+  const swept = sweepDescendants()
+  return { ok: false, descendantsSwept: swept }
 }
