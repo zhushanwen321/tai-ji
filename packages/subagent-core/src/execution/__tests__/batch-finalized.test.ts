@@ -32,6 +32,17 @@ import { SubagentService } from "../subagent-service.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import { v2Entries } from "./helpers/v2-record-entry.ts";
 
+// [teardown 竞态修复] 被测链传递性 logger 输出经 console 落 stderr——同步用例的刷写落在
+// 文件结束的 teardown 窗口，与 worker rpc 关闭竞态 → vitest EnvironmentTeardownError
+// （onUserConsoleLog pending）→ run 退出码 1。本文件对 logger 零断言依赖，mock 静默
+// （rebuild-indexes.test.ts 同款先例）。
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("../../core/logger.ts", () => ({
+  getLogger: () => loggerMock,
+}));
+
 const ROOT_SESSION = "root-batch-finalized";
 
 /** 批成员 record 形态（v2 条目投影门槛字段齐备——共享 fixture 工厂）。 */

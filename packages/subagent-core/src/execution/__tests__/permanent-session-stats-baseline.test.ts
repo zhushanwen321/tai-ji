@@ -25,7 +25,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { transcriptAnchorOf } from "../assembly/cold-lookup.ts";
 import { createRecord, updateFromEvent } from "../persistence/execution-record.ts";
@@ -37,6 +37,18 @@ import type { ExecutionRecord } from "../domain/record-model.ts";
 import type { SubagentRecord } from "../assembly/types.ts";
 import { ResurrectDeniedError } from "../domain/record-types.ts";
 import { v2RegisteredEntry, v2SettledEntry } from "./helpers/v2-record-entry.ts";
+
+// [teardown 竞态修复] 被测链传递性 logger 输出（如扫描尾 fire-and-forget saveIndex 的
+// 失败分支 warn，record-store-last-line.test.ts 同族根因）经 console 落 stderr——本文件
+// 用例全同步，刷写落在文件结束的 teardown 窗口，与 worker rpc 关闭竞态 → vitest
+// EnvironmentTeardownError（onUserConsoleLog pending）→ run 退出码 1。本文件对 logger
+// 零断言依赖，mock 静默（rebuild-indexes.test.ts 同款先例）。
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("../../core/logger.ts", () => ({
+  getLogger: () => loggerMock,
+}));
 
 // ── fixture ──────────────────────────────────────────────────────────────────
 

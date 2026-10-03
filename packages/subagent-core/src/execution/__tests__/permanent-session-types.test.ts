@@ -18,7 +18,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createRecord } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
@@ -27,6 +27,17 @@ import type { RecordBinding } from "../persistence/state-marker.ts";
 import { NEW_STOP_REASONS, ROUND_TERMINAL_STOP_REASONS, STOP_REASONS } from "../domain/record-types.ts";
 import { isPiTranscriptRef, isZcodeTranscriptRef, isValidStopReason } from "../domain/record-model.ts";
 import type { Epoch, TranscriptRef } from "../domain/record-types.ts";
+
+// [teardown 竞态修复] 被测链传递性 logger 输出经 console 落 stderr——同步用例的刷写落在
+// 文件结束的 teardown 窗口，与 worker rpc 关闭竞态 → vitest EnvironmentTeardownError
+// （onUserConsoleLog pending）→ run 退出码 1。本文件对 logger 零断言依赖，mock 静默
+// （rebuild-indexes.test.ts 同款先例）。
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("../../core/logger.ts", () => ({
+  getLogger: () => loggerMock,
+}));
 
 // ── fixture ──────────────────────────────────────────────────────────────────
 
