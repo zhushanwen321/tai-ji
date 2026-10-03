@@ -12,6 +12,7 @@ import { registerBridgeHandlers } from './bridge-handlers.js'
 import { registerBrowserHandlers } from './browser-handlers.js'
 import { registerUpdateHandlers } from './update-handlers.js'
 import { registerSoundHandlers } from './sound-handlers.js'
+import { registerLocalFileHandlers } from './local-file-handlers.js'
 import { registerRendererLogHandler } from '../logs/renderer-log-handler.js'
 import { registerImageCacheHandlers } from '../images/image-cache-ipc.js'
 import { registerLogRetentionDebugHandler } from '../logs/log-retention-ipc.js'
@@ -29,6 +30,9 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): void {
   registerBrowserHandlers(deps.browserViewManager, deps.getMainWindow)
   registerUpdateHandlers(deps)
   registerSoundHandlers()
+  // local-file servable 预检 IPC（chat-html-support §6.9 D9）：卡片与抽屉渲染态
+  // 挂载前的准入检查，与 main.ts 的 local-file 协议 handler 共用同一谓词模块
+  registerLocalFileHandlers(deps)
   registerRendererLogHandler()
   // [D6-⑨ u7] toolResult 图片落盘（含启动清扫：孤儿扫描 + 软上限）
   registerImageCacheHandlers()

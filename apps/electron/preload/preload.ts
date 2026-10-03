@@ -3,6 +3,20 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult } from '@taiji/shared'
 import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE } from '@taiji/shared'
 
+/**
+ * local-file servable 预检结果（chat-html-support §6.9 D9）。
+ *
+ * 形状与 preload/index.d.ts 的 `LocalFileServableResult` 一致（该文件是 u-foundation
+ * 先行落地的类型面；ElectronAPI 与 LocalFileServableChannel 的交集类型在
+ * `Window.electronAPI` 上合并，两侧方法形状相同即兼容）。
+ */
+export interface LocalFileServableResult {
+  servable: boolean
+  reason?: 'not_found' | 'is_dir' | 'out_of_whitelist'
+  /** servable=true 时的文件字节数 */
+  size?: number
+}
+
 export interface ElectronAPI {
   /** 监听 runtime 端口事件 */
   onRuntimePort(callback: (port: number) => void): () => void
@@ -60,6 +74,13 @@ export interface ElectronAPI {
   /** 在文件管理器中显示文件（trace MALFORMED 行「打开所在目录」；main 校验绝对路径后
    *  shell.showItemInFolder，返回是否放行） */
   revealInFolder(filePath: string): Promise<boolean>
+  /**
+   * 预检绝对路径是否可经 local-file 协议服务（chat-html-support §6.9 D9）：HtmlPreviewCard
+   * （经 deps `probeArtifact?`）与 DetailPane 渲染态挂载前共用。谓词 = 白名单成员资格
+   * （先行短路）→ 存在性 → 目录性，与 main 的 local-file 协议 handler 同一模块函数。
+   * 入参 = 明文绝对路径（% 解码由 URL 入口承担，IPC 不重复解码）。
+   */
+  localFileServable(absPath: string): Promise<LocalFileServableResult>
   /** 监听 macOS 全屏状态变化 */
   onFullscreenChanged(callback: (payload: { isFullscreen: boolean }) => void): () => void
   // ── 窗口控制（win/linux 自绘圆点点击）─────────────────────────
@@ -276,6 +297,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }) => ipcRenderer.invoke('pick-file', options),
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
   revealInFolder: (filePath: string) => ipcRenderer.invoke('reveal-in-folder', filePath),
+  // 通道名与 main 侧 gateway/local-file-handlers 的 LOCAL_FILE_SERVABLE_CHANNEL 同字面量
+  localFileServable: (absPath: string) => ipcRenderer.invoke('localFile:servable', absPath),
   onFullscreenChanged: (callback: (payload: { isFullscreen: boolean }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: { isFullscreen: boolean }) => callback(payload)
     ipcRenderer.on('fullscreen-changed', handler)

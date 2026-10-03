@@ -27,10 +27,15 @@
  *
  * 每项追加 path.sep 后缀，防止前缀误判（/Users/foo 匹配到 /Users/foobar）。
  *
- * 依赖方向：无下游（纯函数，node:path + node:os）
+ * 依赖方向：无下游（纯函数，node:path / node:os / node:fs + gateway/input-validators 的
+ * 白名单前缀判定）；被 main.ts 的协议 handler 与 gateway/local-file-handlers 的 servable
+ * 预检 IPC 共用（chat-html-support §6.4 D4「同一谓词」/ §6.9 D9）。
  */
 import path from 'node:path'
+import { statSync as fsStatSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { isPathInAllowedPrefixes } from '../gateway/input-validators.js'
+import { expandLocalFilePath } from './path.js'
 
 /** computeLocalFilePrefixes 入参（全部环境参数显式注入，便于单测） */
 export interface LocalFilePrefixOptions {
@@ -86,4 +91,96 @@ export function computeLocalFilePrefixes(opts: LocalFilePrefixOptions): string[]
     ...userContentSubdirs,
   ]
   return prefixes.map(p => (p.endsWith(sep) ? p : p + sep))
+}
+
+// ── local-file servable 预检谓词（chat-html-support §6.4 D4 子决策 / §6.9 D9）──────
+// 卡片（经 deps probeArtifact?）与抽屉渲染态挂载前经 `localFile:servable` IPC 预检；
+// 协议 handler 与预检必须复用本模块的同一谓词——边缘路径（.. 穿越 / // 冗余斜杠 /
+// %2e2e 编码遍历 / 含 % # 空格的文件名）上两份平行实现必然分叉。
+
+/** servable 预检失败原因（preload/index.d.ts 的 LocalFileServableResult.reason 同枚举） */
+export type LocalFileServableReason = 'not_found' | 'is_dir' | 'out_of_whitelist'
+
+/** servable 预检结果（IPC 出参面） */
+export interface LocalFileServableResult {
+  servable: boolean
+  reason?: LocalFileServableReason
+  /** servable=true 时的文件字节数（卡片显示大小） */
+  size?: number
+}
+
+/** 内部探测结果：比 IPC 出参多带规范化后的绝对路径（协议 handler 的 net.fetch 需要） */
+export interface LocalFileProbeResult extends LocalFileServableResult {
+  /** 规范化后的绝对路径；out_of_whitelist 短路返回空串（未进入文件系统面） */
+  resolvedPath: string
+}
+
+/** 探测用 fs 切面（缺省 node:fs；单测注入记录桩以断言「越界短路不触 fs」） */
+export interface LocalFileProbeFs {
+  statSync?: (filePath: string) => { isDirectory(): boolean; size: number } | undefined
+}
+
+/**
+ * URL pathname → 文件系统路径（协议 handler 入口专用）。
+ *
+ * 与 IPC 入口（probeLocalFileServable 直接收文件系统路径）的唯一差异是这一步：URL 路径段
+ * 是百分号编码形态（renderer 侧按路径段编码后拼入），而 IPC 入参已是明文路径——对明文
+ * 再解码会把文件名里的字面 `%` 吃掉（`report%20x.html` 变 `report x.html`）。
+ * 解码异常（非法 % 序列）回退原文，交由白名单短路成 403，不向调用方抛异常。
+ */
+export function decodeLocalFileUrlPathname(pathname: string): string {
+  try {
+    return decodeURIComponent(pathname)
+  } catch {
+    return pathname
+  }
+}
+
+/** `~` 展开 + path.resolve 规范化（两条入口共用的规范化收尾） */
+export function resolveLocalFilePath(rawPath: string): string {
+  return path.resolve(expandLocalFilePath(rawPath))
+}
+
+function defaultStat(filePath: string): { isDirectory(): boolean; size: number } | undefined {
+  try {
+    // throwIfNoEntry:false：不存在返回 undefined 而非抛错（存在性判定不靠异常）
+    return fsStatSync(filePath, { throwIfNoEntry: false })
+  } catch {
+    // 权限等异常同样降级为「不可服务」，不让协议 handler/IPC 抛错
+    return undefined
+  }
+}
+
+/**
+ * servable 谓词：白名单成员资格（先行短路）→ 存在性 → 目录性。
+ *
+ * **检查顺序是安全性质**：越界路径一律返回 out_of_whitelist 且不触 fs——否则
+ * 「越界不存在」与「越界存在」的响应差异会成为任意路径的存在性探测通道。
+ *
+ * @param rawPath 绝对路径或 `~` 形态路径（IPC 入参）
+ * @param allowedPrefixes computeLocalFilePrefixes 产出（已带 trailing path.sep）
+ * @param fs 探测切面（缺省 node:fs）
+ */
+export function probeLocalFileServable(
+  rawPath: string,
+  allowedPrefixes: readonly string[],
+  fs: LocalFileProbeFs = {},
+): LocalFileProbeResult {
+  const resolvedPath = resolveLocalFilePath(rawPath)
+  if (!isPathInAllowedPrefixes(resolvedPath, allowedPrefixes)) {
+    return { servable: false, reason: 'out_of_whitelist', resolvedPath: '' }
+  }
+  const stat = (fs.statSync ?? defaultStat)(resolvedPath)
+  if (!stat) return { servable: false, reason: 'not_found', resolvedPath }
+  if (stat.isDirectory()) return { servable: false, reason: 'is_dir', resolvedPath }
+  return { servable: true, size: stat.size, resolvedPath }
+}
+
+/** 协议 handler 入口：URL pathname 解码后走同一谓词（与 IPC 入口判定一致） */
+export function probeLocalFileUrlPathname(
+  pathname: string,
+  allowedPrefixes: readonly string[],
+  fs: LocalFileProbeFs = {},
+): LocalFileProbeResult {
+  return probeLocalFileServable(decodeLocalFileUrlPathname(pathname), allowedPrefixes, fs)
 }

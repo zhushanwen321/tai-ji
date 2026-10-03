@@ -19,9 +19,15 @@
        安全面依据：用户内容无 audio/video 注入通道——markdown 渲染管线 DOMPurify 标签白名单
        不含 audio/video；local-file: 受 main 侧路径白名单约束。实测（设计前提 8）：无本指令
        时 local-file 音频 media-src violation ×3，补齐后直播 PLAYING。
+       frame-src 'self' local-file:：HTML 预览抽屉的 sandbox iframe 加载 local-file://
+       预览文档（chat-html-support §6.6 D6）。无该指令时 iframe 回退 default-src 'self'
+       被拦，本地 HTML 预览不可行；新增后仅放行应用自身与 local-file 协议，远程 http(s)
+       iframe 继续被拦。拦截面边界：CSP 对嵌套上下文的每次导航都按创建它的父文档
+       frame-src 检查——预览文档自发起的自导航（meta-refresh / location.href 跳远程）
+       同样被拦（探针 P-1 实证）。
        依据 dev 实测（W2 门）+ 打包态实测（S3）：round1 违规 ws://localhost:3310（dev）、
        data:font/woff2（打包），逐一最小增量补齐后双态零违规。 -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: local-file:; font-src 'self' data:; connect-src 'self' ws://localhost:*; media-src 'self' local-file: data:" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: local-file:; font-src 'self' data:; connect-src 'self' ws://localhost:*; media-src 'self' local-file: data:; frame-src 'self' local-file:" />
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>TaiJi</title>
