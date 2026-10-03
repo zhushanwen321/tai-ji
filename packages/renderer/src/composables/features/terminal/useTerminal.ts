@@ -1,59 +1,68 @@
 /**
- * useTerminal —— drawer 集成终端的 per-session 状态 + PTY 控制（Phase 3）。
+ * useTerminal —— drawer 集成终端的 per-instance 状态 + PTY 控制（Phase 3 / 多实例 u2）。
+ *
+ * 主键迁移（terminal-multi-instance 设计 §2.2 四层锚点 / §3.3）：本模块三张表（输出缓冲 /
+ * 广播订阅 / flush 监听）与订阅表全部从**会话 id** 迁移到**实例编号** `term:<sid>:<序号>`；
+ * 实例注册表镜像 + 切换条状态在 terminal-instance-registry.ts（write-queue 入队守卫同源）。
  *
  * 职责：
- * 1. per-session 命令式输出 buffer（非响应式 chunks + 单调版本）+ rAF 输出写队列 + PTY 存活态
- * 2. 模块级订阅 terminal.data/exit/alive（跨组件生命周期存活，W27 分区生命周期上提）
- * 3. 对外暴露 spawn/write/resize/kill/attach/registerFlushListener（TerminalView 调用）
+ * 1. per-instance 命令式输出 buffer（非响应式 chunks + 单调版本）+ rAF 输出写队列 + PTY 存活态
+ * 2. 模块级订阅 terminal.data/exit/alive/writeFailed（**按 terminalId 幂等**，生命周期 = PTY
+ *    生命周期；跨组件生命周期存活）
+ * 3. 对外暴露实例维度 API（新建 / 切换 / 关闭 / 当前实例）+ spawn/attach/write/resize/kill/clear
+ *    + registerFlushListener（TerminalView 调用）
+ * 4. `terminal.list` 对账（⌘R / 会话激活 / 世代变更重连三触发点）+ 世代变更失效重置
+ *    （auth token 判据）+ `unknown_terminal_id` 平行守卫（提示与焦点按触发面分档）
  *
- * ── 分区生命周期上提（W27/D-6.2，R-22）──────────────────────────────────
- * W14 已知缺口（09 文档 E6-c）：TerminalPartition 与 terminal.* 订阅随 TerminalView
- * 组件实例销毁（v-if 挂载，切 tab 即 unmount）→ 切走期间 terminal.data 无人接收、
- * 切回是全新分区 + 重新 spawn，「切走 30s 切回历史完整」不可交付。
- * 本 wave 把分区的持有从 useSessionScopedState（per-instance Map，scope 销毁即清）
- * 提升为模块级持久 Map（partitions），订阅从 useSessionEvents（组件生命周期）
- * 提升为模块级订阅（spawn 时建立、session 销毁 cleanup 时解除）。
+ * ── 分区生命周期上提（W27/D-6.2，R-22）+ 实例编号化 ────────────────────────
+ * W14 缺口（09 文档 E6-c）：TerminalPartition 与 terminal.* 订阅随 TerminalView 组件实例销毁
+ * （v-if 挂载，切 tab 即 unmount）→ 切走期间 terminal.data 无人接收、切回是全新分区 + 重新
+ * spawn。W27 把分区持有提升为模块级持久 Map（partitions，键 = terminalId），订阅提升为模块级
+ * 订阅（ack 建档时建立、关闭沿 / 会话销毁 / 世代变更时解除）。
  *
- * 选型说明（ADR-0049「全局 sid 协调器例外类」）：useSessionScopedState 是 setup-scoped
- * 工厂——Map 在工厂调用（组件 setup）内创建，onScopeDispose 时反注册 cleanup，组件
- * unmount 即分区销毁，结构上无法满足 R-22「buffer 存组件外」。本模块升级后命中例外
- * 类判据（ADR-0049 §例外清单）：无 Vue setup 上下文（模块级单例）、所有方法显式接收
- * sessionId（appendChunk/flushPending/updatePartition）、buffer 是非响应式数据（markRaw）。
- * 同款先例：core/domain/chat/useChat.ts 的 streamSubscriptions（模块级 Map + 模块级
- * 订阅编排）、core/domain/drawer 的 write-queue factory 单例 Map（terminal-write-queue
- * store 已同款）。cleanup 仍经 registerSessionCleanup 挂载（useSidebar.deleteSession →
- * triggerSessionCleanups → 删分区 + 退订 + 清 flush 监听器），内存语义与工厂一致。
+ * 选型说明（ADR-0049「全局 sid 协调器例外类」）：useSessionScopedState 是 setup-scoped 工厂——
+ * Map 在工厂调用（组件 setup）内创建，onScopeDispose 时反注册 cleanup，组件 unmount 即分区销毁，
+ * 结构上无法满足「buffer 存组件外」。本模块命中例外类判据：无 Vue setup 上下文（模块级单例）、
+ * 所有方法显式接收 terminalId、buffer 是非响应式数据（markRaw）。同款先例：core/domain/chat/
+ * useChat.ts 的 streamSubscriptions、core 的 write-queue factory 单例 Map。
  *
- * 三层生命周期（W27 后）：
- * - PTY（runtime）：跟随 session（session 销毁 → destroyPty），切 terminal tab 不死
- * - buffer 分区 + 订阅（renderer 模块级）：spawn/attach 建立订阅 → session 销毁
- *   cleanup 释放。切走 tab（TerminalView unmount）只移除该视图的 flush 监听器，
- *   分区与订阅保留——切走期间 terminal.data 照常进 buffer，切回 mount 后
- *   replayFrom(0) 全量回放（V-P2-4 可交付）。
- * - xterm 组件：跟随 terminal tab 可见性（TerminalView mount/unmount）
+ * 三层生命周期（多实例）：
+ * - PTY（runtime）：跟随**实例**（关闭沿 / 会话删除 / runtime shutdown → 进程销毁）
+ * - buffer 分区 + 订阅（renderer 模块级）：ack 建档 / list 对账建立 → 关闭沿 / 会话销毁 /
+ *   世代变更重置释放。切走 tab（TerminalView unmount）只移除该视图的 flush 监听器。
+ * - xterm 组件：跟随 terminal tab 可见性 × 当前显示实例（TerminalView mount/unmount + 切换）
  *
- * rAF 输出写队列（D-6.1 → D-6.2 演进）：
- * - terminal.data 入 outputQueue（markRaw 非响应式），rAF flushPending 批量 append 进
- *   buffer.chunks + 版本前进 + 裁剪，然后直接通知本 sid 已注册的 flush 监听器
- *   （TerminalView 增量 replay）——watch 链消失（D-6.2 检查点：旧 watch 链（监听
- *   scrollback 长度 / flush 版本号）全部删除，回放只靠 replayFrom(version)）。
- * - buffer.version = 累计 append chunk 数（单调递增、裁剪不减，W14 双锚点——flush
- *   版本号 / 累计 append 数——合一）：既是「buffer 有更新」的版本信号，也是回放指针基准。
- *   replayChunks(buffer, fromVersion) 从版本号直接定位物理起点（逻辑索引 - 裁剪量），
- *   O(1) 无辅助结构，幂等（重复回放只是重写既有内容，E6-b）。
- * - 用户输入（writeToTerminal）不走此队列，直连 terminalApi.write（击键即时回显）。
+ * rAF 输出写队列（D-6.1 → D-6.2）：同 W27，仅键由 sid 改 terminalId。
  *
- * 依赖方向：api/events + terminalApi（@/api）+ registerSessionCleanup（core）+ write-queue store。
- * useTerminal 是组件视图层（current computed 按组件 sidRef 读模块分区），模块级状态不依赖组件。
+ * 依赖方向：api/events + terminalApi（core）+ registerSessionCleanup（core）+ write-queue store
+ * + 实例注册表 + ws-client（世代判据）。
  */
-import { computed, markRaw, reactive, ref, type ComputedRef, type Ref } from 'vue'
+import { computed, markRaw, reactive, ref, watch, type ComputedRef, type Ref } from 'vue'
 import type { ServerMessage } from '@taiji/shared'
 import * as events from '@taiji/core/transport/api'
+import { getCurrentToken, getState as getWsState } from '@taiji/core/transport/ws-client'
 import { registerSessionCleanup } from '@/composables/useSessionScopedState'
 import { useTerminalWriteQueueStore } from '@/stores/terminal-write-queue'
 import { terminalApi } from '@taiji/core/transport/api/domains/terminal'
 import { useToast } from '@/composables/useToast'
 import i18n from '@/i18n'
+import type { TerminalInstanceBarItem } from '@/components/panel/TerminalInstanceBar.vue'
+import {
+  activeTerminalIdOf,
+  allTerminalIds,
+  hasInstance,
+  isTerminalIdOfSession,
+  listInstances,
+  registerInstance,
+  sessionIdOfTerminalId,
+  seqOfTerminalId,
+  setActiveTerminalId,
+  setInstanceAlive,
+  terminalIdsOfSession,
+  unregisterInstance,
+  unregisterInstanceBySession,
+  __resetTerminalInstanceRegistryForTest,
+} from './terminal-instance-registry'
 
 /** 命令式输出 buffer（D-6.2）：append-only 非响应式 chunk 数组 + 单调版本号。 */
 export interface TerminalBuffer {
@@ -70,7 +79,7 @@ export interface TerminalBuffer {
   version: number
 }
 
-/** terminal per-session 状态分区（模块级持久，W27/D-6.2）。 */
+/** terminal per-instance 状态分区（模块级持久，键 = terminalId）。 */
 interface TerminalPartition {
   /** 命令式输出 buffer（D-6.2，markRaw 非响应式）。 */
   buffer: TerminalBuffer
@@ -81,9 +90,9 @@ interface TerminalPartition {
    * 命名避开 terminal-write-queue 的 pendingWrites（那是命令队列，drop-oldest 语义）。
    */
   outputQueue: string[]
-  /** rAF 是否已置位（per-sid 防重入：置位期间新 chunk 只入队不再调度）。 */
+  /** rAF 是否已置位（per-instance 防重入：置位期间新 chunk 只入队不再调度）。 */
   rafPending: boolean
-  /** PTY 是否存活（spawn 后置 true，exit 后置 false）。联动 2 的 ptyAlive 判断在全局 store（terminal-write-queue）。 */
+  /** PTY 是否存活（ack 建档置 true / alive 帧幂等，exit 后条目回收）。 */
   ptyAlive: boolean
   /** 当前 PTY 尺寸（xterm fit 后记录）。 */
   cols: number
@@ -119,73 +128,176 @@ const MAX_OUTPUT_QUEUE = 1000
 /** 回放分批每批 chunk 数上限（Fix-5）：每帧一批，避免全量单串 write 卡住主线程。 */
 const REPLAY_BATCH_CHUNKS = 500
 
-// ── 模块级持久分区（W27/D-6.2 生命周期上提）──────────────────────────────
-// ADR-0049「全局 sid 协调器例外类」：无 setup 上下文、方法显式接收 sid、buffer 非响应式。
-// 分区生命周期 = session 生命周期（session 销毁经 registerSessionCleanup 清理），
-// 独立于任何 TerminalView 组件实例——切 tab（unmount）只移除视图 flush 监听器，数据不丢。
-// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：终端输出分区表（ADR-0049「全局 sid 协调器例外类」，生命周期= session 生命周期，上方注释已述）
+// ── 模块级持久分区（W27/D-6.2 生命周期上提，键 = terminalId）─────────────────
+// ADR-0049「全局 sid 协调器例外类」：无 setup 上下文、方法显式接收 terminalId、buffer 非响应式。
+// 分区生命周期 = 实例生命周期（关闭沿 / 会话销毁 / 世代重置清理），独立于任何 TerminalView。
+// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：终端输出分区表（键 = terminalId，生命周期 = 实例生命周期）
 const partitions = new Map<string, TerminalPartition>()
 
-/** 分区表结构版本：cleanup 删分区时 bump，让各实例 current computed 失效重算（同 core 工厂）。 */
-// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：分区表结构版本计数（cleanup 删分区时 bump 使 computed 失效，同 ADR-0049 例外类基建）
+/** 分区表结构版本：分区增删时 bump，让各实例 current computed 失效重算。 */
+// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：分区表结构版本计数
 const mapVersion = ref(0)
 
-// ── 模块级 terminal.* 订阅（生命周期 = PTY 生命周期）──────────────────────
-// publish-only 契约（W09）：runtime 只把 terminal.data 发给订阅该 sid 的连接，且
-// renderer 侧 events.on(sid) 无 handler 时 dispatchSession 直接丢弃——订阅必须跨组件
-// 存活，否则切走期间输出无人接收（分区在组件外但没有订阅同样空转）。
-// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：terminal.* 订阅 sid 集合（订阅生命周期 = PTY 生命周期）
-const subscribedSids = new Set<string>()
-// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：terminal.* 订阅退订函数表（同上）
+// ── 模块级 terminal.* 订阅（生命周期 = 实例生命周期，键 = terminalId）────────
+// publish-only 契约（W09）：runtime 只把 terminal.* 发给订阅该 sid 的连接，且 renderer 侧
+// events.on(sid) 无 handler 时 dispatchSession 直接丢弃——订阅必须跨组件存活。
+// 多实例：一个 sid 可挂多个 handler（每实例一个），handler 内按 payload.terminalId 过滤。
+// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：terminal.* 订阅实例编号集合
+const subscribedTerminalIds = new Set<string>()
+// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：terminal.* 订阅退订函数表（键 = terminalId）
 const subscriptionUnsubs = new Map<string, () => void>()
 
-// ── flush 监听器注册表（sid → 已挂载视图的增量回放回调）────────────────────
+// ── flush 监听器注册表（terminalId → 已挂载视图的增量回放回调）──────────────
 // 组件 mount 注册、unmount 反注册。flush 后直接通知，替代 W14 的 watch(flush 版本) 链。
-// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：flush 监听器注册表（mount 注册/unmount 反注册）
+// taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：flush 监听器注册表（键 = terminalId）
 const flushListeners = new Map<string, Set<(buffer: TerminalBuffer) => void>>()
 
 /**
- * 模块级分区读写（updateFor 语义，ADR-0049）：WS handler 用显式 sid，不读组件 sidRef。
- * 分区创建（首次写入）时 bump mapVersion——新分区出现后各实例 current computed 失效
- * 重算，从「临时默认实例」切到真实分区（Fix-2 读/写语义拆分，见 current 注释）。
+ * 模块级分区读写（updateFor 语义，ADR-0049）：WS handler 用显式 terminalId，不读组件。
+ * 分区创建（首次写入/建档）时 bump mapVersion——分区出现后各实例 current computed 失效重算。
  */
-function getOrCreatePartition(sid: string): TerminalPartition {
-  let p = partitions.get(sid)
+function getOrCreatePartition(terminalId: string): TerminalPartition {
+  let p = partitions.get(terminalId)
   if (!p) {
     p = createPartition()
-    partitions.set(sid, p)
+    partitions.set(terminalId, p)
     mapVersion.value += 1
   }
   return p
 }
 
-/** 显式 sid 分区更新（WS handler 用，M1 竞态防护同工厂 updateFor）。 */
-function updatePartition(sid: string, updater: (state: TerminalPartition) => void): void {
-  updater(getOrCreatePartition(sid))
+/** 显式 terminalId 分区更新（WS handler 用，M1 竞态防护同工厂 updateFor）。 */
+function updatePartition(terminalId: string, updater: (state: TerminalPartition) => void): void {
+  updater(getOrCreatePartition(terminalId))
+}
+
+/** 分区移除（关闭沿 ① / 会话销毁 / 世代重置）。 */
+function removePartition(terminalId: string): void {
+  if (partitions.delete(terminalId)) mapVersion.value += 1
+}
+
+/** i18n.global.t 的类型窄化 cast（先例：useConnection.ts 同款）。 */
+const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => string
+
+/** 实例显示名（「终端 <seq>」，重命名后置）；非法编号回退原始编号。 */
+function instanceLabel(terminalId: string): string {
+  const seq = seqOfTerminalId(terminalId)
+  return seq > 0 ? t('panel.terminal.instanceName', { seq }) : terminalId
+}
+
+/**
+ * 「输入可能丢失」提示（对齐 runtime terminal.writeFailed 的 toast 范式，设计 §3.3）：
+ * 滞留命令随实例关闭 / 世代重置丢弃、或对已关闭实例的写入被拒时告知用户。
+ */
+function warnInputMayBeLost(terminalId: string): void {
+  useToast().warning(t('panel.terminal.writeFailed', { message: instanceLabel(terminalId) }))
+}
+
+/**
+ * 建立 terminalId 的模块级订阅（幂等）。时机：ack 建档 / list 对账建档 / attach 兜底。
+ * handler 内按 payload.terminalId 过滤——同会话多实例各有独立 handler。
+ */
+function ensureTerminalSubscription(terminalId: string): void {
+  if (subscribedTerminalIds.has(terminalId)) return
+  const sessionId = sessionIdOfTerminalId(terminalId)
+  if (sessionId === null) return
+  subscribedTerminalIds.add(terminalId)
+  const unsub = events.on(sessionId, (msg) => {
+    if (terminalIdOf(msg) !== terminalId) return
+    if (isTerminalDataMsg(msg)) {
+      appendChunk(terminalId, msg.payload.data)
+    } else if (isTerminalAliveMsg(msg)) {
+      setInstanceAlive(terminalId, true)
+      updatePartition(terminalId, (s) => {
+        s.ptyAlive = true
+      })
+      // store.markAlive 同步 ptyAlive + flush 写队列（联动 2 入队的命令）
+      useTerminalWriteQueueStore().markAlive(terminalId)
+    } else if (isTerminalExitMsg(msg)) {
+      handleInstanceExit(terminalId)
+    } else if (isTerminalWriteFailedMsg(msg)) {
+      // RT-8#10/RD-5#4：runtime PTY write 失败（进程已死/管道关闭）——输入字节已丢，
+      // toast 告知用户（runtime 每 PTY 生命周期至多发一次，无刷屏面）。与 write-queue
+      // store 的 writeRpcFailed 分层：那边管 RPC 通道故障，这边管 PTY 管道故障。
+      console.warn(`[terminal] write 失败（输入可能丢失）: terminalId=${terminalId}`, msg.payload.message)
+      useToast().warning(t('panel.terminal.writeFailed', { message: msg.payload.message }))
+    }
+  })
+  subscriptionUnsubs.set(terminalId, unsub)
+}
+
+/** 解除订阅（关闭沿 ③ / 会话销毁 / 世代重置）。 */
+function unsubscribeTerminal(terminalId: string): void {
+  if (!subscribedTerminalIds.delete(terminalId)) return
+  subscriptionUnsubs.get(terminalId)?.()
+  subscriptionUnsubs.delete(terminalId)
+}
+
+/**
+ * 建档（定义一次，全文引用——设计 §3.3「renderer 建档口径」四件事）：
+ * ①建 terminalId 条目（实例注册表镜像）；②建输出分区；③建立该实例的模块级订阅（幂等）；
+ * ④置位 ptyAlive 镜像（等价 markAlive——runtime 在 spawn 内同步 publish alive 后才回 ack，
+ * 同连接 FIFO 下 alive 先于 ack 到达，只按 ack 建订阅会让 alive 落地即丢、镜像恒 false 且
+ * 无自愈；故显式裁决置位等价 markAlive）。ack 建档与 `terminal.list` 对账建档均走此处。
+ */
+function establishInstance(
+  terminalId: string,
+  opts: { cols?: number; rows?: number; alive: boolean },
+): void {
+  const sessionId = sessionIdOfTerminalId(terminalId)
+  if (sessionId === null) return
+  registerInstance(terminalId, opts.alive)
+  const p = getOrCreatePartition(terminalId)
+  if (opts.cols !== undefined) p.cols = opts.cols
+  if (opts.rows !== undefined) p.rows = opts.rows
+  p.ptyAlive = opts.alive
+  ensureTerminalSubscription(terminalId)
+  const store = useTerminalWriteQueueStore()
+  if (opts.alive) store.markAlive(terminalId)
+  else store.markExited(terminalId)
+}
+
+/**
+ * 关闭沿 renderer 资源处置（设计 §3.3「实例关闭沿 renderer 资源处置」——主动关闭与自然
+ * 退出同语义）：①输出分区移除；②terminal-write-queue 实例态清理（滞留命令丢弃，确有滞留时
+ * 提示）；③模块级订阅退订。flush 监听器腿豁免（mount/unmount 自管理，视图随切换/卸载自然移除）。
+ */
+function releaseInstance(terminalId: string, opts: { promptPendingWrites: boolean }): void {
+  const store = useTerminalWriteQueueStore()
+  const dropped = store.removeInstance(terminalId)
+  if (opts.promptPendingWrites && dropped > 0) warnInputMayBeLost(terminalId)
+  removePartition(terminalId)
+  unsubscribeTerminal(terminalId)
+  unregisterInstance(terminalId)
+}
+
+/** terminal.exit 帧：自然退出 = 关闭沿（滞留命令丢弃并提示）。 */
+function handleInstanceExit(terminalId: string): void {
+  if (!hasInstance(terminalId) && !partitions.has(terminalId) && !subscribedTerminalIds.has(terminalId)) return
+  releaseInstance(terminalId, { promptPendingWrites: true })
 }
 
 /**
  * session 销毁 cleanup（registerSessionCleanup 注册一次，triggerSessionCleanups 遍历调）：
- * 删分区 + 解除模块级订阅 + 清 flush 监听器。迟到 rAF 回调持分区引用只写孤儿对象
- * （flushPending 内 `partitions.get(sid) !== p` 守卫不再通知视图，不复活分区）。
+ * 按精确前缀 `term:<sid>:` 释放该会话全部实例（分区 + 订阅 + write-queue 实例态 + 注册表条目），
+ * 覆盖竞态重建的幽灵条目。不依赖实例注册表遍历。
  */
-function cleanupPartition(sid: string): void {
-  if (partitions.delete(sid)) {
-    mapVersion.value += 1
+function cleanupSession(sessionId: string): void {
+  const store = useTerminalWriteQueueStore()
+  const candidates = new Set<string>([...partitions.keys(), ...subscribedTerminalIds])
+  for (const terminalId of candidates) {
+    if (!isTerminalIdOfSession(terminalId, sessionId)) continue
+    store.removeInstance(terminalId)
+    removePartition(terminalId)
+    unsubscribeTerminal(terminalId)
   }
-  if (subscribedSids.delete(sid)) {
-    subscriptionUnsubs.get(sid)?.()
-    subscriptionUnsubs.delete(sid)
-  }
-  flushListeners.delete(sid)
+  unregisterInstanceBySession(sessionId)
+  // write-queue 层再按前缀兜底一次（覆盖未建分区/订阅的幽灵条目）
+  store.removeSession(sessionId)
 }
 // 模块级注册一次（无 setup scope，应用生命周期内不反注册——分区清理点
 // useSidebar.deleteSession 的 triggerSessionCleanups 是唯一入口）。
-// HMR 注意（Fix-6）：vite 热重载本模块时旧模块的 cleanupPartition 仍在 registry 中
-// 残留（triggerSessionCleanups 会多调一次，幂等无害），events.on 的旧 handler 同理
-// （只写旧模块的孤儿分区，随 GC 回收）——与 useChat.streamSubscriptions 同类的
-// dev-only 有界残留，不做 import.meta.hot.dispose 退订。
-registerSessionCleanup(cleanupPartition)
+registerSessionCleanup(cleanupSession)
 
 // ServerMessage 是泛型接口（非可判别联合），type 字面量比较不会自动收窄 payload——
 // 用类型谓词显式收窄（与 useSessionEvents 的 TypedHandler 同构，无需 as 断言）
@@ -202,51 +314,27 @@ function isTerminalWriteFailedMsg(msg: ServerMessage): msg is ServerMessage<'ter
   return msg.type === 'terminal.writeFailed'
 }
 
-/** i18n.global.t 的类型窄化 cast（先例：useConnection.ts 同款）。 */
-const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => string
-
 /**
- * 建立 sid 的模块级 terminal.* 订阅（幂等）。时机：spawn（RPC 前）与 attach——
- * PTY 从 spawn 到 session 销毁全程有订阅，覆盖「切走 tab」整个窗口。
+ * 提取帧的实例编号归属（多实例路由键）。ServerMessage.payload 是宽联合，
+ * 四条 terminal.* 广播帧均带 `terminalId`——此处做一次受控读取（非空字符串才算命中），
+ * 避免为了过滤而在四个类型谓词上重复展开。
  */
-function ensureTerminalSubscription(sid: string): void {
-  if (subscribedSids.has(sid)) return
-  subscribedSids.add(sid)
-  const unsub = events.on(sid, (msg) => {
-    if (isTerminalDataMsg(msg)) {
-      appendChunk(sid, msg.payload.data)
-    } else if (isTerminalAliveMsg(msg)) {
-      updatePartition(sid, (s) => {
-        s.ptyAlive = true
-      })
-      // store.markAlive 同步 ptyAlive + flush 写队列（Block.vue 入队的命令，联动 2）
-      useTerminalWriteQueueStore().markAlive(sid)
-    } else if (isTerminalExitMsg(msg)) {
-      updatePartition(sid, (s) => {
-        s.ptyAlive = false
-      })
-      useTerminalWriteQueueStore().markExited(sid)
-    } else if (isTerminalWriteFailedMsg(msg)) {
-      // RT-8#10/RD-5#4：runtime PTY write 失败（进程已死/管道关闭）——输入字节已丢，
-      // toast 告知用户（runtime 每 PTY 生命周期至多发一次，无刷屏面）。与 write-queue
-      // store 的 writeRpcFailed 分层：那边管 RPC 通道故障，这边管 PTY 管道故障。
-      console.warn(`[terminal] write 失败（输入可能丢失）: sid=${sid}`, msg.payload.message)
-      useToast().warning(t('panel.terminal.writeFailed', { message: msg.payload.message }))
-    }
-  })
-  subscriptionUnsubs.set(sid, unsub)
+function terminalIdOf(msg: ServerMessage): string | undefined {
+  const payload = msg.payload
+  if (payload === null || typeof payload !== 'object') return undefined
+  const value = (payload as { terminalId?: unknown }).terminalId
+  return typeof value === 'string' && value !== '' ? value : undefined
 }
 
 /**
  * terminal.data chunk 入队（D-6.1 rAF 写队列入口，模块级订阅 handler 调）。
- * 只 push 进 outputQueue 并置位 rAF；buffer 累积与视图通知都推迟到 flush——
- * 高频输出（如 build 日志）时 N 次 data 只产生每帧一次的 flush + 一次 xterm.write。
+ * 只 push 进 outputQueue 并置位 rAF；buffer 累积与视图通知都推迟到 flush。
  * E6-a：rAF 被后台节流导致队列超限时 join 合并成单块（保序全量，不丢弃）。
  */
-function appendChunk(sid: string, chunk: string): void {
+function appendChunk(terminalId: string, chunk: string): void {
   let schedule = false
   let partition: TerminalPartition | null = null
-  updatePartition(sid, (s) => {
+  updatePartition(terminalId, (s) => {
     // updater 同步执行，schedule 为 true 时 partition 必已赋值
     partition = s
     s.outputQueue.push(chunk)
@@ -260,21 +348,19 @@ function appendChunk(sid: string, chunk: string): void {
   })
   const p = partition
   if (schedule && p !== null) {
-    // rAF 回调捕获 sid + 分区引用（W14 审查 Fix-4 语义延续）：session 销毁
-    // （triggerSessionCleanups 删分区）后迟到的回调只写孤儿对象，flushPending 的
-    // `partitions.get(sid) !== p` 守卫保证不复活分区、不通知新分区视图。
-    requestAnimationFrame(() => flushPending(sid, p))
+    // rAF 回调捕获 terminalId + 分区引用：实例回收后迟到的回调只写孤儿对象，
+    // flushPending 的 `partitions.get(terminalId) !== p` 守卫保证不复活分区、不通知视图。
+    requestAnimationFrame(() => flushPending(terminalId, p))
   }
 }
 
 /**
  * rAF 回调：把 outputQueue 批量刷进 buffer（D-6.2 命令式语义）。
  * ① append-only push 全部 chunk + 版本前进（version += 本批 chunk 数，裁剪不减）；
- * ② 超限裁剪（SCROLLBACK_LIMIT 按 chunk 计，F3 证伪 splice 不是成本）；
- * ③ 通知本 sid 已挂载视图增量回放——任何分支都不得丢弃 outputQueue 内容
- *   （xterm 可见性只影响 ③，buffer 累积永远先做）。
+ * ② 超限裁剪（SCROLLBACK_LIMIT 按 chunk 计）；
+ * ③ 通知本实例已挂载视图增量回放——任何分支都不得丢弃 outputQueue 内容。
  */
-function flushPending(sid: string, p: TerminalPartition): void {
+function flushPending(terminalId: string, p: TerminalPartition): void {
   p.rafPending = false
   const q = p.outputQueue
   if (q.length === 0) return
@@ -284,60 +370,46 @@ function flushPending(sid: string, p: TerminalPartition): void {
   }
   buf.version += q.length
   q.length = 0
-  // 裁剪 buffer 上限（保留最新 N chunk，语义同改造前的 per-push 裁剪）
   if (buf.chunks.length > SCROLLBACK_LIMIT) {
     buf.chunks.splice(0, buf.chunks.length - SCROLLBACK_LIMIT)
   }
-  // 分区已被 session 销毁清理：孤儿 flush 只写孤儿对象（随 GC 回收），
-  // 不通知任何视图（也不复活分区——Fix-4 语义）。
-  if (partitions.get(sid) !== p) return
-  const listeners = flushListeners.get(sid)
-  if (listeners) {
-    for (const cb of listeners) {
-      try {
-        cb(buf)
-      } catch (e) {
-        // 单监听器抛错不阻断其余视图（events 层 safeForEach 同款，M4）
-        console.error('[terminal] flush listener threw:', e)
-      }
+  // 分区已被回收：孤儿 flush 只写孤儿对象（随 GC 回收），不通知任何视图。
+  if (partitions.get(terminalId) !== p) return
+  notifyFlushListeners(terminalId, buf)
+}
+
+function notifyFlushListeners(terminalId: string, buf: TerminalBuffer): void {
+  const listeners = flushListeners.get(terminalId)
+  if (!listeners) return
+  for (const cb of listeners) {
+    try {
+      cb(buf)
+    } catch (e) {
+      // 单监听器抛错不阻断其余视图（events 层 safeForEach 同款，M4）
+      console.error('[terminal] flush listener threw:', e)
     }
   }
 }
 
 /**
- * 清屏（Fix-3，TerminalView clear 按钮）：重置 sid 分区 buffer（chunks/version 归零）
+ * 清屏（Fix-3，TerminalView clear 按钮）：重置当前实例分区 buffer（chunks/version 归零）
  * + 清 pending 输出队列（防帧边界 flush 回填）+ 通知已注册 flush 监听器。
- * buffer.version 单调只增（裁剪不减），回退即被 clear 重置——监听器据此清空本视图
- * xterm + 回放指针归零（多视图同 sid 同步清屏，见 TerminalView onFlushed）。
- * 不 bump mapVersion：buffer 非响应式，视图靠 flush 监听器感知，无需渲染重算。
  */
-function clearPartition(sid: string): void {
-  const p = partitions.get(sid)
+function clearPartition(terminalId: string): void {
+  const p = partitions.get(terminalId)
   if (!p) return
   p.buffer.chunks.length = 0
   p.buffer.version = 0
   p.outputQueue.length = 0
   p.rafPending = false
-  const listeners = flushListeners.get(sid)
-  if (listeners) {
-    for (const cb of listeners) {
-      try {
-        cb(p.buffer)
-      } catch (e) {
-        // 单监听器抛错不阻断其余视图（events 层 safeForEach 同款，M4）
-        console.error('[terminal] flush listener threw:', e)
-      }
-    }
-  }
+  notifyFlushListeners(terminalId, p.buffer)
 }
 
 /**
  * 版本回放纯函数（D-6.2）：从 fromVersion（含）之后 append 的 chunk 合并为单块。
  * fromVersion 是逻辑索引版本（= 已回放的 chunk 总数）；裁剪后物理起点
- * = fromVersion - 裁剪量，指针落后裁剪线时钳制到 0（保留区全量重放，内容层面无重复）。
- * 返回 null = 无新增（fromVersion 已是最新）。
- * 注意：本函数只保证返回内容不与「指针语义上的已回放区间」重复；xterm.write 是追加
- * 语义，视图侧需配合 replayChunksBatched 的 clamped 信号先清屏（S-15，见下）。
+ * = fromVersion - 裁剪量，指针落后裁剪线时钳制到 0（保留区全量重放）。
+ * 返回 null = 无新增。xterm.write 是追加语义，视图侧需配合 clamped 信号先清屏（S-15）。
  */
 export function replayChunks(buffer: TerminalBuffer, fromVersion: number): string | null {
   if (fromVersion >= buffer.version) return null
@@ -347,17 +419,9 @@ export function replayChunks(buffer: TerminalBuffer, fromVersion: number): strin
 }
 
 /**
- * 分批版本回放（Fix-5）：replayChunks 的全量单串合并（5000 chunks × 4KB ≈ 20MB 一次
- * write 会卡住主线程）拆成每批 ≤ maxBatchChunks 个 chunk 的批次数组，由视图侧分帧写
- * （TerminalView enqueueReplayWrites）。物理起点/幂等语义与 replayChunks 完全一致。
- * 返回 null = 无新增；targetVersion = 本批覆盖的最终版本（视图回放指针推进目标）。
- *
- * clamped（S-15，PR #175 R1）：指针落后裁剪线（fromVersion < 裁剪量）时 physicalStart
- * 被钳到 0、保留区全量重放。xterm.write 是追加语义，若视图屏上旧内容与全量重放区间
- * 重叠（指针失步场景：通知丢失/批量挂起/多视图），全量重写会重复显示——视图收到
- * clamped=true 必须先 xterm.clear() + 丢挂起批次再写（对齐 TerminalView onFlushed 的
- * version 回退 clear 模式）。当前可达路径（mount/切 session/clear 后，指针恒为 0 且
- * xterm 空或新建）clear 幂等无害；本信号同时是防御性守卫。
+ * 分批版本回放（Fix-5）：replayChunks 的全量单串合并拆成每批 ≤ maxBatchChunks 个 chunk 的
+ * 批次数组，由视图侧分帧写（TerminalView enqueueReplayWrites）。物理起点/幂等语义与
+ * replayChunks 完全一致。返回 null = 无新增；clamped=true 时视图必须先 xterm.clear()。
  */
 export function replayChunksBatched(
   buffer: TerminalBuffer,
@@ -375,135 +439,338 @@ export function replayChunksBatched(
   return { batches, targetVersion: buffer.version, clamped }
 }
 
+// ── terminal.list 对账（⌘R / 会话激活 / 世代变更重连三触发点）────────────────
+
+interface ReconcileResult {
+  /** 拉取是否成功（false = 保留既有条目、区分「成功空清单」与「拉取失败」）。 */
+  ok: boolean
+  /** 清单条目数（ok=true 时有效；ok=false 时为 -1，调用方不得据此自动新建）。 */
+  count: number
+}
+
 /**
- * terminal per-session 状态 + PTY 控制的组件视图层。
+ * 对账：清单 = 被查询会话在 runtime 注册表上的存活全集。
+ * - 清单内条目按 ack 同口径四件事建档（订阅建立幂等；不清空既有 pendingWrites——
+ *   需保留 pendingWrites 的存活实例均在清单内）；
+ * - 清单外条目按关闭沿三腿清理（含 ack 窗口内死亡产生的假阳幽灵）；
+ * - **范围钉死 = 本次查询所属会话**（与查询会话无关的 terminalId 键不参与增删）；
+ * - 拉取失败：保留既有条目、下一次触发自然重试（**禁定时兜底**）。失败是否提示由调用方
+ *   按触发点分腿（世代变更重连腿静默）。
+ */
+async function reconcileSession(sessionId: string): Promise<ReconcileResult> {
+  let listed: { terminalId: string; alive: boolean }[]
+  try {
+    listed = await terminalApi.list(sessionId)
+  } catch (e: unknown) {
+    // 失败分腿（设计 §3.3）：保留既有条目、不清空、不展示误导性空态；由下一次触发重试。
+    console.warn(`[terminal] terminal.list 拉取失败（保留既有条目，下次触发重试）: sid=${sessionId}`, e)
+    return { ok: false, count: -1 }
+  }
+  const listedIds = new Set(listed.map((i) => i.terminalId))
+  for (const terminalId of terminalIdsOfSession(sessionId)) {
+    if (!listedIds.has(terminalId)) releaseInstance(terminalId, { promptPendingWrites: true })
+  }
+  for (const item of listed) {
+    // 范围钉死：只对本次查询会话的编号建档（他会话编号为 runtime 异常形态，防御跳过）
+    if (!isTerminalIdOfSession(item.terminalId, sessionId)) continue
+    if (!hasInstance(item.terminalId)) establishInstance(item.terminalId, { alive: item.alive })
+    else {
+      setInstanceAlive(item.terminalId, item.alive)
+      const p = getOrCreatePartition(item.terminalId)
+      p.ptyAlive = item.alive
+      if (item.alive) useTerminalWriteQueueStore().markAlive(item.terminalId)
+      ensureTerminalSubscription(item.terminalId)
+    }
+  }
+  return { ok: true, count: listed.length }
+}
+
+// ── 世代变更失效重置（设计 §0.5 P6 / §3.3「实例注册表与恢复」）───────────────
+
+/**
+ * 上一次连接建立时的 auth token（undefined = 旧值不可得——首次连接）。新旧值比较：
+ * 变化 = runtime 世代变更（每次 spawn 重新生成 token），未变 = 同世代（WS 闪断 /
+ * 无新进程的幂等 `runtime-port` 广播沿）→ 不重置。
+ */
+let lastConnectionToken: string | null | undefined = undefined
+
+/**
+ * 世代变更重连沿处理（触发信号 = WS connected 边沿——`runtime-port` 广播沿每次必致重连，
+ * 为其保守超集；判据 = auth token 是否变化）：
+ * - 世代变更 → 终端域失效重置（见 resetTerminalDomain）；
+ * - 同世代 → 不重置（闪断保持分区与订阅，重连后新输出恢复推进）；
+ * - **旧 token 不可得（首次连接）→ 保守判为世代变更**（宁可清空过期历史，不可漏重置
+ *   造成跨世代撞号串数据；首次连接腿无输出历史与滞留命令，重置为空操作）。
+ */
+function handleConnectionEstablished(token: string | null): void {
+  const generationChanged = lastConnectionToken === undefined || token !== lastConnectionToken
+  lastConnectionToken = token
+  if (generationChanged) resetTerminalDomain()
+}
+
+/**
+ * 世代变更失效重置：①清空输出分区与切换条（含 flush 监听表——跨世代编号同形，残留监听
+ * 会命中幂等守卫使新世代同号实例静默 no-op）；②terminal-write-queue 状态机清空（旧世代
+ * 滞留命令随重置丢弃，**提示仅在确有滞留命令时发出**）；③模块级订阅表**先退订再清空**
+ * （键跨世代同形，残留条目会命中订阅建立的幂等守卫导致新世代订阅静默 no-op）。
+ * 重置后按 `terminal.list` 拉取重建（新 runtime 清单为空 → 空态；**失败不提示**）。
+ */
+function resetTerminalDomain(): void {
+  const affectedSessions = new Set<string>()
+  const collect = (terminalId: string): void => {
+    const sid = sessionIdOfTerminalId(terminalId)
+    if (sid !== null) affectedSessions.add(sid)
+  }
+  for (const terminalId of partitions.keys()) collect(terminalId)
+  for (const terminalId of subscribedTerminalIds) collect(terminalId)
+  for (const terminalId of allTerminalIds()) collect(terminalId)
+  const store = useTerminalWriteQueueStore()
+  let pendingBearingInstance: string | null = null
+  for (const terminalId of allTerminalIds()) {
+    if (pendingBearingInstance === null && store.pendingCountOf(terminalId) > 0) {
+      pendingBearingInstance = terminalId
+    }
+  }
+  // ③ 先退订再清空（防同形键命中幂等守卫）
+  for (const unsub of subscriptionUnsubs.values()) unsub()
+  subscriptionUnsubs.clear()
+  subscribedTerminalIds.clear()
+  // ① 分区 + 切换条 + flush 监听表
+  partitions.clear()
+  flushListeners.clear()
+  mapVersion.value += 1
+  // 注册表镜像
+  __resetTerminalInstanceRegistryForTest()
+  // ② write-queue 状态机（滞留命令丢弃；确有滞留才提示）
+  const dropped = store.clearAll()
+  if (dropped > 0) warnInputMayBeLost(pendingBearingInstance ?? '')
+  // 重建：新 runtime 清单恒为空（拉取仅保持通路一致性，失败静默）
+  for (const sid of affectedSessions) void reconcileSession(sid)
+}
+
+// 连接建立边沿监听（模块级单例）：同世代闪断 / 幂等广播沿 token 未变 → 不重置。
+watch(getWsState(), (state, previous) => {
+  if (state === 'connected' && previous !== 'connected') handleConnectionEstablished(getCurrentToken())
+})
+
+/**
+ * terminal per-instance 状态 + PTY 控制的组件视图层。
  *
  * @param sessionIdRef session id ref（string | null）
- * @returns current（按组件 sidRef 读模块分区的 computed）+ PTY 控制 + flush 监听注册
+ * @returns current（当前显示实例的分区）+ 实例清单 / 当前实例 + 实例与 PTY 控制 + flush 监听注册
  */
 export function useTerminal(sessionIdRef: Ref<string | null>) {
-  // 模块分区视图（读/写语义拆分，Fix-2）：null sid 或「分区不存在/已 cleanup」返回
-  // 临时默认实例（不写 Map，同工厂语义）；依赖 mapVersion 让 cleanup（删分区）后本
-  // computed 失效重算。禁止 create-on-read：deleteSession 流程中 cleanup 后、activeId
-  // 回退到下一 session 之前若渲染重算，会重建已删 sid 的空分区且该 sid 不再被 cleanup
-  // （永久泄漏，W27-4 原测试假阳性即因此漏检）。分区由写入方（updatePartition：
-  // spawn/resize/appendChunk）创建并 bump mapVersion，本 computed 随之切到真实分区。
-  const current: ComputedRef<TerminalPartition> = computed(() => {
-    void mapVersion.value
+  /** 当前会话的实例清单（切换条数据源，顺序 = 注册顺序）。 */
+  const instances: ComputedRef<TerminalInstanceBarItem[]> = computed(() => {
     const sid = sessionIdRef.value
-    if (sid === null) return createPartition()
-    return partitions.get(sid) ?? createPartition()
+    if (sid === null) return []
+    return listInstances(sid).map((e) => ({ terminalId: e.terminalId, seq: e.seq, alive: e.alive }))
+  })
+
+  /** 当前显示实例编号（null = 空态）。 */
+  const activeTerminalId: ComputedRef<string | null> = computed(() => {
+    const sid = sessionIdRef.value
+    if (sid === null) return null
+    return activeTerminalIdOf(sid)
   })
 
   /**
-   * 注册本视图的增量回放监听（mount 调、unmount 反注册）：每次有内容的 flush 后调用，
-   * 回调内按本视图已回放版本做增量 write。替代 W14 的 watch(flush 版本) 链。
-   *
-   * @param sid 所属 session
+   * 当前显示实例的分区（读/写语义拆分，Fix-2）：null 或「分区不存在/已回收」返回临时默认
+   * 实例（不写 Map）。依赖 mapVersion 让回收后本 computed 失效重算。禁止 create-on-read：
+   * 会话删除流程中 cleanup 后、active 回退之前若渲染重算，会重建已删实例的空分区且不再被
+   * cleanup（永久泄漏）。分区由写入方（establishInstance/updatePartition）创建并 bump。
+   */
+  const current: ComputedRef<TerminalPartition> = computed(() => {
+    void mapVersion.value
+    const terminalId = activeTerminalId.value
+    if (terminalId === null) return createPartition()
+    return partitions.get(terminalId) ?? createPartition()
+  })
+
+  /**
+   * 注册本视图的增量回放监听（mount 调、unmount 反注册）。
+   * @param terminalId 所属实例编号
    * @param cb 收到最新 buffer 的回调（视图持有自己的回放指针，只写增量）
    * @returns 反注册函数
    */
-  function registerFlushListener(sid: string, cb: (buffer: TerminalBuffer) => void): () => void {
-    let set = flushListeners.get(sid)
+  function registerFlushListener(terminalId: string, cb: (buffer: TerminalBuffer) => void): () => void {
+    let set = flushListeners.get(terminalId)
     if (!set) {
       set = new Set()
-      flushListeners.set(sid, set)
+      flushListeners.set(terminalId, set)
     }
     set.add(cb)
     return () => {
       set.delete(cb)
       if (set.size === 0) {
-        flushListeners.delete(sid)
+        flushListeners.delete(terminalId)
       }
     }
   }
 
-  /** 创建 PTY（TerminalView mount 且 !ptyAlive 时调）。cwd 取 session.cwd。 */
-  async function spawnTerminal(cwd: string | undefined, cols: number, rows: number): Promise<void> {
+  /**
+   * 新建实例（新建形态 spawn：不带 terminalId，编号由 runtime 分配经 ack 回传）：
+   * **renderer 以 ack 为唯一编号来源建档**（不本地预分配——双视图/快速连点撞号）。失败
+   * 直接 rethrow（不吞，反馈职责归调用方：mount 自动新建走 inline 错误条、「+」走全局错误通道）。
+   */
+  async function spawnTerminal(cwd: string | undefined, cols: number, rows: number): Promise<string> {
     const sid = sessionIdRef.value
-    if (!sid) return
-    // 订阅先于 spawn RPC 建立：PTY 输出在 alive 之后到达，订阅窗口覆盖全程
-    ensureTerminalSubscription(sid)
-    // 先记录尺寸
-    updatePartition(sid, (s) => {
-      s.cols = cols
-      s.rows = rows
-    })
-    // RD-5#2：spawn 是 PTY 起不起来的权威点——await 无 catch 时失败既无日志也不显形
-    // （调用方 void 丢弃 → 裸 reject + 用户看到空白终端）。此处留痕后 rethrow：反馈
-    // 职责归调用方（TerminalView 渲染 inline 错误条 + 重试，复用 useFileTree error 态范式），
-    // 本层不吞（吞了调用方无从分辨成功/失败）。
+    if (!sid) throw new Error('terminal.spawn skipped: no active session')
+    let ack: { terminalId?: string } | undefined
     try {
-      await terminalApi.spawn({ sessionId: sid, cwd, cols, rows })
+      ack = await terminalApi.spawn({ sessionId: sid, cwd, cols, rows })
     } catch (e: unknown) {
+      // RD-5#2：spawn 是 PTY 起不来的权威点——留痕后 rethrow（调用方决定显形方式）
       console.warn(`[terminal] spawn RPC 失败: sid=${sid}`, e)
       throw e
     }
-    // 注：ptyAlive 由 terminal.alive 广播置位（异步），这里不等
+    const terminalId = ack?.terminalId
+    if (!terminalId) {
+      const err = new Error('terminal.spawn ack missing terminalId')
+      console.warn(`[terminal] spawn ack 缺编号: sid=${sid}`, ack)
+      throw err
+    }
+    // ack 建档四件事（含置位存活镜像，见 establishInstance 注释）
+    establishInstance(terminalId, { cols, rows, alive: true })
+    return terminalId
   }
 
-  /** 写入字节（用户输入）。TerminalView 的 xterm.onData 调。 */
+  /** 切换当前显示实例（切换条 select）。 */
+  function selectInstance(terminalId: string): void {
+    const sid = sessionIdRef.value
+    if (!sid || !hasInstance(terminalId)) return
+    setActiveTerminalId(sid, terminalId)
+  }
+
+  /**
+   * 关闭实例（切换条 close）：杀进程 + **同步**释放界面侧资源（三腿，不驻留）。
+   * 进程终结后 runtime 的 terminal.exit 广播到达时走 handleInstanceExit（幂等收敛）。
+   * 当前显示实例被关闭时 active 落相邻（无右取左，注册表内实现）。
+   */
+  function closeInstance(terminalId: string): void {
+    const sid = sessionIdRef.value
+    if (!sid || !hasInstance(terminalId)) return
+    releaseInstance(terminalId, { promptPendingWrites: true })
+    terminalApi.kill(sid, terminalId).catch((e: unknown) => {
+      handleRoutingError(terminalId, e, 'kill')
+    })
+  }
+
+  /**
+   * `terminal.list` 对账（会话激活 / ⌘R 界面刷新触发点）。
+   * 返回值区分「成功空清单」与「拉取失败」——调用方据此决定是否自动新建默认实例
+   * （失败不得自动新建，否则会与后台存活实例撞号并存）。
+   */
+  function reconcileInstances(): Promise<ReconcileResult> {
+    const sid = sessionIdRef.value
+    if (!sid) return Promise.resolve({ ok: false, count: -1 })
+    return reconcileSession(sid)
+  }
+
+  /**
+   * `unknown_terminal_id` 平行守卫（设计 §3.3）：任意已建档条目收到首个
+   * `unknown_terminal_id`（write / kill / attach / resize 均可触发）→ 执行关闭沿三腿清理。
+   * 判据 = runtime「该 terminalId 不在注册表」的否定回执（与关闭沿守卫同源）。
+   * 用户可见语义按触发面分档：
+   * - `write` 命中 → 经「输入可能丢失」通道告知（对齐死亡沿 pendingWrites 丢弃范式）
+   *   + 迁焦点（焦点按关闭沿规则落相邻实例；**先告知后迁移**——prompt 在同步路径先发，
+   *   焦点迁移由视图对 active 变化的异步 watcher 落地）；
+   * - `attach` / `kill` / `resize` 命中 → **静默回收**（不提示、不迁焦点）。
+   * 重复打击静默收敛（条目已回收 → 后续命中直接早退）；交叉校验拒绝码
+   * （`terminal_id_session_mismatch`）走普通错误通道、**不触发回收**（实例仍活）。
+   */
+  function handleRoutingError(terminalId: string, e: unknown, trigger: 'write' | 'kill' | 'attach' | 'resize'): void {
+    const code = (e as { code?: string } | null)?.code
+    if (code === 'unknown_terminal_id') {
+      if (!hasInstance(terminalId)) return // 重复打击：已回收，静默
+      // 先告知后迁移焦点：prompt 走同步路径先发；焦点迁移由视图对 active 变化的异步
+      // watcher 落地（关闭沿显示规则落相邻实例）
+      if (trigger === 'write') warnInputMayBeLost(terminalId)
+      releaseInstance(terminalId, { promptPendingWrites: false })
+      return
+    }
+    // 普通错误通道（含交叉校验拒绝码）：留痕即可，PTY 管道级故障由 runtime 广播覆盖
+    console.warn(`[terminal] ${trigger} RPC 失败: terminalId=${terminalId}`, e)
+  }
+
+  /** 写入字节（用户输入 / 联动 2 填命令）。 */
   function writeToTerminal(data: string): void {
     const sid = sessionIdRef.value
-    if (!sid) return
-    // RD-5#4：fire-and-forget 必须留痕——击键流不 toast（PTY 死亡时 runtime 会广播
-    // terminal.writeFailed 走上面的 toast 显示链），这里只 warn 保证 unhandled 不裸奔
-    terminalApi.write(sid, data).catch((e: unknown) => {
-      console.warn(`[terminal] write RPC 失败: sid=${sid}`, e)
+    const terminalId = activeTerminalId.value
+    if (!sid || !terminalId) return
+    terminalApi.write(sid, terminalId, data).catch((e: unknown) => {
+      handleRoutingError(terminalId, e, 'write')
     })
   }
 
   /** 调整尺寸（xterm fit addon 触发）。 */
   function resizeTerminal(cols: number, rows: number): void {
     const sid = sessionIdRef.value
-    if (!sid) return
-    updatePartition(sid, (s) => {
+    const terminalId = activeTerminalId.value
+    if (!sid || !terminalId) return
+    updatePartition(terminalId, (s) => {
       s.cols = cols
       s.rows = rows
     })
-    terminalApi.resize(sid, cols, rows).catch((e: unknown) => {
-      console.warn(`[terminal] resize RPC 失败: sid=${sid} cols=${cols} rows=${rows}`, e)
+    terminalApi.resize(sid, terminalId, cols, rows).catch((e: unknown) => {
+      handleRoutingError(terminalId, e, 'resize')
     })
   }
 
-  /** kill PTY（工具栏 kill 按钮）。 */
+  /** kill 当前显示实例的 PTY（工具栏 kill 按钮）。 */
   function killTerminal(): void {
     const sid = sessionIdRef.value
-    if (!sid) return
-    terminalApi.kill(sid).catch((e: unknown) => {
-      console.warn(`[terminal] kill RPC 失败: sid=${sid}`, e)
+    const terminalId = activeTerminalId.value
+    if (!sid || !terminalId) return
+    terminalApi.kill(sid, terminalId).catch((e: unknown) => {
+      handleRoutingError(terminalId, e, 'kill')
     })
   }
 
-  /** 清屏（TerminalView clear 按钮）：重置当前 sid 分区 buffer + 通知监听器（Fix-3）。 */
+  /** 清屏（TerminalView clear 按钮）：重置当前实例分区 buffer + 通知监听器（Fix-3）。 */
   function clearTerminal(): void {
-    const sid = sessionIdRef.value
-    if (!sid) return
-    clearPartition(sid)
+    const terminalId = activeTerminalId.value
+    if (!terminalId) return
+    clearPartition(terminalId)
   }
 
-  /** 通知 PTY 活跃（TerminalView mount 调）。attach 保持 no-op 预留（09 §3.3.1 定案，不做源头过滤）。 */
+  /**
+   * 通知 PTY 活跃（TerminalView mount / 切换实例调）。attach 保留「确保订阅」职责
+   * （幂等兜底——现状 attachTerminal 同调 ensureTerminalSubscription；设计 §3.3 明示不退役）。
+   */
   function attachTerminal(): void {
     const sid = sessionIdRef.value
-    if (!sid) return
-    // 幂等补订阅：切回 mount 时若 PTY 早已 alive（分区 ptyAlive=true），
-    // 订阅可能已在旧实例清理外存活（模块级）——此处确保窗口覆盖
-    ensureTerminalSubscription(sid)
-    terminalApi.attach(sid).catch((e: unknown) => {
-      console.warn(`[terminal] attach RPC 失败: sid=${sid}`, e)
+    const terminalId = activeTerminalId.value
+    if (!sid || !terminalId) return
+    ensureTerminalSubscription(terminalId)
+    terminalApi.attach(sid, terminalId).catch((e: unknown) => {
+      handleRoutingError(terminalId, e, 'attach')
     })
+  }
+
+  /** 当前实例分区（xterm 回放起点；与 current 同源，供视图按 terminalId 显式取用）。 */
+  function partitionOf(terminalId: string): TerminalPartition {
+    return partitions.get(terminalId) ?? createPartition()
   }
 
   return {
-    /** 当前 sid 分区状态（null sid 返回默认实例）。 */
+    /** 当前会话实例清单（切换条数据源）。 */
+    instances,
+    /** 当前显示实例编号（null = 空态）。 */
+    activeTerminalId,
+    /** 当前显示实例分区状态（null 返回默认实例）。 */
     current,
-    /** PTY 控制方法。 */
+    /** 实例与 PTY 控制。 */
     spawnTerminal,
+    selectInstance,
+    closeInstance,
+    reconcileInstances,
     writeToTerminal,
     resizeTerminal,
     killTerminal,
     clearTerminal,
     attachTerminal,
+    partitionOf,
     /** flush 监听注册（TerminalView mount/unmount 编排）。 */
     registerFlushListener,
   }
@@ -514,24 +781,36 @@ export type UseTerminalReturn = ReturnType<typeof useTerminal>
 
 // ── 测试专用 hooks（生产代码禁止调用，参照 core lru.ts _resetLruForTest 先例）──
 
-/** 测试专用：清空模块级状态（分区/订阅/监听器 + bump mapVersion）。 */
+/** 测试专用：清空模块级状态（分区/订阅/监听器/注册表/世代 token + bump mapVersion）。 */
 export function __resetTerminalStateForTest(): void {
   partitions.clear()
   for (const unsub of subscriptionUnsubs.values()) unsub()
   subscriptionUnsubs.clear()
-  subscribedSids.clear()
+  subscribedTerminalIds.clear()
   flushListeners.clear()
+  __resetTerminalInstanceRegistryForTest()
+  lastConnectionToken = undefined
   mapVersion.value += 1
 }
 
-/** 测试专用：当前分区数（断言 session 销毁后分区释放）。 */
+/** 测试专用：驱动「WS 连接建立边沿」处理（世代核对 + 重置）。 */
+export function __handleConnectionEstablishedForTest(token: string | null): void {
+  handleConnectionEstablished(token)
+}
+
+/** 测试专用：当前分区数（断言实例回收 / 会话销毁后分区释放）。 */
 export function __terminalPartitionCountForTest(): number {
   return partitions.size
 }
 
-/** 测试专用：已注册 flush 监听器总数（断言 session 销毁后监听清空，Fix-2 W27-4）。 */
+/** 测试专用：已注册 flush 监听器总数（断言实例回收后监听清空）。 */
 export function __terminalFlushListenerCountForTest(): number {
   let count = 0
   for (const set of flushListeners.values()) count += set.size
   return count
+}
+
+/** 测试专用：已建立订阅的实例编号数（断言关闭沿 / 世代重置退订）。 */
+export function __terminalSubscriptionCountForTest(): number {
+  return subscribedTerminalIds.size
 }

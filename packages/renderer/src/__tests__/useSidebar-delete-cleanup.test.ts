@@ -187,10 +187,11 @@ describe('useSidebar deleteSession 跨 store 清理（W1 / S3）', () => {
     const sidebar = scope.run(() => useSidebar())!
     seedSessions([{ cwd: '/proj', ids: ['s1', 's2'] }])
 
-    // seed 三分区（s1 + 相邻 s2 对照）
+    // seed 三分区（s1 + 相邻 s2 对照）——terminal 写队列按**实例编号**分键（多实例 u2）
     const terminalQueue = useTerminalWriteQueueStore()
-    terminalQueue.markAlive('s1')
-    terminalQueue.markAlive('s2')
+    terminalQueue.markAlive('term:s1:1')
+    terminalQueue.markAlive('term:s1:2')
+    terminalQueue.markAlive('term:s2:1')
     const commands = useCommandStore()
     commands.applyCommands('s1', [{ name: '/compact', source: 'builtin' }])
     commands.applyCommands('s2', [{ name: '/goal', source: 'builtin' }])
@@ -198,19 +199,21 @@ describe('useSidebar deleteSession 跨 store 清理（W1 / S3）', () => {
     pushForkNoticeAsk('s2', 'n2', '相邻分支预览')
     const feed = useForkNoticeFeed()
     // 前置：seed 生效（防假绿——断言前确认三分区非空）
-    expect(terminalQueue.isPtyAlive('s1')).toBe(true)
+    expect(terminalQueue.isPtyAlive('term:s1:1')).toBe(true)
+    expect(terminalQueue.isPtyAlive('term:s1:2')).toBe(true)
     expect(commands.getCommands('s1')).toHaveLength(1)
     expect(feed.notices('s1')).toHaveLength(1)
 
     await sidebar.deleteSession('s1')
 
-    // s1 三分区归零：terminal 写队列（removeSession——isPtyAlive 回落 false 佐证条目已删）、
-    // slash 命令历史（clearCommands）、fork 通知 feed（clearSession）
-    expect(terminalQueue.isPtyAlive('s1')).toBe(false)
+    // s1 三分区归零：terminal 写队列（removeSession 按精确前缀 `term:<sid>:` 扇出——
+    // 该会话**全部**实例键回落 false 佐证条目已删）、slash 命令历史、fork 通知 feed
+    expect(terminalQueue.isPtyAlive('term:s1:1')).toBe(false)
+    expect(terminalQueue.isPtyAlive('term:s1:2')).toBe(false)
     expect(commands.getCommands('s1')).toHaveLength(0)
     expect(feed.notices('s1')).toHaveLength(0)
     // 相邻 session 分区不受误伤
-    expect(terminalQueue.isPtyAlive('s2')).toBe(true)
+    expect(terminalQueue.isPtyAlive('term:s2:1')).toBe(true)
     expect(commands.getCommands('s2')).toHaveLength(1)
     expect(feed.notices('s2')).toHaveLength(1)
 

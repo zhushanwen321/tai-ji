@@ -1,11 +1,9 @@
 /**
- * TerminalView spawn 失败 inline 错误条测试（RD-5#2）。
+ * TerminalView spawn 失败反馈测试（RD-5#2 / 多实例 u2）。
  *
- * 背景：mount / 切 session 的 `void terminal.spawnTerminal(...)` 丢弃返回 Promise，
- * 而 spawnTerminal 内 `await terminalApi.spawn` 无 catch —— PTY 起不来时既无日志也无
- * 显形，用户只看到空白终端。修复：spawnTerminal 留痕 + rethrow；TerminalView 用
- * spawnWithFeedback 接住失败 → inline 错误条（terminal-spawn-error）+ 重试按钮
- * （terminal-spawn-retry），复用 FileView error 态范式。
+ * 背景：PTY 起不来时原实现丢弃裸 reject → 用户只看到空白终端。多实例后新建失败分两腿：
+ * - 挂载自动新建腿（存量会话首开无实例）→ inline 错误条（terminal-spawn-error）+ 重试；
+ * - 「+」手动新建腿（设计 §3.3「新建失败」）→ 既有全局错误通道（toast），不出现新条目。
  *
  * mock 策略：与 terminal-view.test.ts 同（xterm/addon/session store 全替身，
  * useTerminal 替身的 spawnTerminal 可注入 reject）。
@@ -17,7 +15,6 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { ref } from 'vue'
 
-// happy-dom 无 ResizeObserver，TerminalView 依赖它（fit addon），需 polyfill
 class MockResizeObserver {
   observe() {}
   unobserve() {}
@@ -35,6 +32,8 @@ function createMockTerminal() {
     write: vi.fn(),
     clear: vi.fn(),
     dispose: vi.fn(),
+    focus: vi.fn(),
+    hasSelection: vi.fn(() => false),
     getSelection: vi.fn(() => ''),
     getSelectionPosition: vi.fn(() => ({ start: { x: 0, y: 0 }, end: { x: 5, y: 0 } })),
     unicode: { activeVersion: '6' },
@@ -60,19 +59,25 @@ const mockState = {
   ptyAlive: false,
   cols: 80,
   rows: 24,
-  pendingWrites: [] as string[],
 }
 const currentRef = ref(mockState)
-const spawnTerminalMock = vi.fn(() => Promise.resolve())
+const instancesRef = ref<Array<{ terminalId: string; seq: number; alive: boolean }>>([])
+const activeRef = ref<string | null>(null)
+const spawnTerminalMock = vi.fn(() => Promise.resolve('term:test-session:1'))
 const useTerminalMock = {
   current: currentRef,
+  instances: instancesRef,
+  activeTerminalId: activeRef,
   spawnTerminal: spawnTerminalMock,
+  selectInstance: vi.fn(),
+  closeInstance: vi.fn(),
+  reconcileInstances: vi.fn(async () => ({ ok: true, count: 0 })),
   writeToTerminal: vi.fn(),
   resizeTerminal: vi.fn(),
   killTerminal: vi.fn(),
   clearTerminal: vi.fn(),
   attachTerminal: vi.fn(),
-  enqueueWrite: vi.fn(),
+  partitionOf: vi.fn(() => mockState),
   registerFlushListener: vi.fn(() => () => {}),
 }
 vi.mock('@/composables/features/terminal/useTerminal', () => ({
@@ -88,6 +93,7 @@ vi.mock('@/stores/session', () => ({
 }))
 
 import TerminalView from '@/components/panel/TerminalView.vue'
+import { useToast } from '@/composables/useToast'
 
 let wrapper: ReturnType<typeof mount> | null = null
 
@@ -99,10 +105,13 @@ beforeEach(() => {
   mockState.ptyAlive = false
   mockState.cols = 80
   mockState.rows = 24
-  mockState.pendingWrites = []
+  instancesRef.value = []
+  activeRef.value = null
+  useToast().toasts.value = []
   spawnTerminalMock.mockReset()
-  spawnTerminalMock.mockResolvedValue(undefined)
-  useTerminalMock.attachTerminal.mockClear()
+  spawnTerminalMock.mockResolvedValue('term:test-session:1')
+  useTerminalMock.reconcileInstances.mockReset()
+  useTerminalMock.reconcileInstances.mockResolvedValue({ ok: true, count: 0 })
 })
 
 afterEach(() => {
@@ -111,7 +120,7 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-describe('TerminalView spawn 失败 inline 错误条（RD-5#2）', () => {
+describe('TerminalView spawn 失败 inline 错误条（RD-5#2 挂载自动新建腿）', () => {
   it('spawn resolve → 不显示错误条', async () => {
     wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
     await flushPromises()
@@ -120,7 +129,7 @@ describe('TerminalView spawn 失败 inline 错误条（RD-5#2）', () => {
     expect(document.body.querySelector('[data-testid="terminal-spawn-error"]')).toBeNull()
   })
 
-  it('spawn reject → inline 错误条显示（含错误信息）+ 不再静默空白', async () => {
+  it('spawn reject → inline 错误条显示（含错误信息）+ 重试按钮', async () => {
     spawnTerminalMock.mockRejectedValue(new Error('pty limit reached'))
     wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
     await flushPromises()
@@ -128,7 +137,6 @@ describe('TerminalView spawn 失败 inline 错误条（RD-5#2）', () => {
     const bar = document.body.querySelector('[data-testid="terminal-spawn-error"]')
     expect(bar).toBeTruthy()
     expect(bar?.textContent).toContain('pty limit reached')
-    // 重试按钮可见（复用 FileView error 态范式）
     expect(document.body.querySelector('[data-testid="terminal-spawn-retry"]')).toBeTruthy()
   })
 
@@ -147,12 +155,32 @@ describe('TerminalView spawn 失败 inline 错误条（RD-5#2）', () => {
     expect(document.body.querySelector('[data-testid="terminal-spawn-error"]')).toBeNull()
   })
 
-  it('PTY 已活时 mount 不 spawn、不显示错误条', async () => {
-    mockState.ptyAlive = true
+  it('对账清单非空（后台实例存活）→ 不 spawn、不显示错误条', async () => {
+    instancesRef.value = [{ terminalId: 'term:test-session:1', seq: 1, alive: true }]
+    activeRef.value = 'term:test-session:1'
+    useTerminalMock.reconcileInstances.mockResolvedValue({ ok: true, count: 1 })
     wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
     await flushPromises()
 
     expect(spawnTerminalMock).not.toHaveBeenCalled()
+    expect(document.body.querySelector('[data-testid="terminal-spawn-error"]')).toBeNull()
+  })
+
+  it('「+」手动新建失败 → 走全局错误通道（toast），不出现 inline 错误条', async () => {
+    instancesRef.value = [{ terminalId: 'term:test-session:1', seq: 1, alive: true }]
+    activeRef.value = 'term:test-session:1'
+    useTerminalMock.reconcileInstances.mockResolvedValue({ ok: true, count: 1 })
+    wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
+    await flushPromises()
+    spawnTerminalMock.mockRejectedValueOnce(new Error('spawn boom'))
+
+    const create = document.body.querySelector('[data-testid="terminal-instance-create"]') as HTMLButtonElement
+    create.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    expect(useToast().toasts.value).toHaveLength(1)
+    expect(useToast().toasts.value[0]!.type).toBe('error')
+    expect(useToast().toasts.value[0]!.message).toContain('spawn boom')
     expect(document.body.querySelector('[data-testid="terminal-spawn-error"]')).toBeNull()
   })
 })

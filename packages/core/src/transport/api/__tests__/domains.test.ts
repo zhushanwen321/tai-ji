@@ -717,19 +717,33 @@ describe('settings 域', () => {
 
 // ── terminal 域 ────────────────────────────────────────────────────────────
 describe('terminal 域', () => {
-  it('spawn/write/resize/kill/attach 五命令', async () => {
+  it('spawn/write/resize/kill/attach/list 六命令（多实例：既有实例操作带 terminalId）', async () => {
     mockCommand.mockResolvedValue({})
     const params = { sessionId: 's1', cwd: '/a' } as never
     await terminal.terminalApi.spawn(params)
     expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['terminal.spawn', params])
-    await terminal.terminalApi.write('s1', 'ls\n')
-    expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['terminal.write', { sessionId: 's1', data: 'ls\n' }])
-    await terminal.terminalApi.resize('s1', 80, 24)
-    expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['terminal.resize', { sessionId: 's1', cols: 80, rows: 24 }])
-    await terminal.terminalApi.kill('s1')
-    expect(mockCommand.mock.calls[3].slice(0, 2)).toEqual(['terminal.kill', { sessionId: 's1' }])
-    await terminal.terminalApi.attach('s1')
-    expect(mockCommand.mock.calls[4].slice(0, 2)).toEqual(['terminal.attach', { sessionId: 's1' }])
+    await terminal.terminalApi.write('s1', 'term:s1:1', 'ls\n')
+    expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual([
+      'terminal.write',
+      { sessionId: 's1', terminalId: 'term:s1:1', data: 'ls\n' },
+    ])
+    await terminal.terminalApi.resize('s1', 'term:s1:1', 80, 24)
+    expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual([
+      'terminal.resize',
+      { sessionId: 's1', terminalId: 'term:s1:1', cols: 80, rows: 24 },
+    ])
+    await terminal.terminalApi.kill('s1', 'term:s1:1')
+    expect(mockCommand.mock.calls[3].slice(0, 2)).toEqual(['terminal.kill', { sessionId: 's1', terminalId: 'term:s1:1' }])
+    await terminal.terminalApi.attach('s1', 'term:s1:1')
+    expect(mockCommand.mock.calls[4].slice(0, 2)).toEqual(['terminal.attach', { sessionId: 's1', terminalId: 'term:s1:1' }])
+  })
+
+  it('list 返回 ack.instances（缺省空数组）', async () => {
+    mockCommand.mockResolvedValueOnce({ instances: [{ terminalId: 'term:s1:1', alive: true }] })
+    await expect(terminal.terminalApi.list('s1')).resolves.toEqual([{ terminalId: 'term:s1:1', alive: true }])
+    expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['terminal.list', { sessionId: 's1' }])
+    mockCommand.mockResolvedValueOnce({})
+    await expect(terminal.terminalApi.list('s1')).resolves.toEqual([])
   })
 })
 
