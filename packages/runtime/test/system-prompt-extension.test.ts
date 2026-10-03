@@ -158,6 +158,24 @@ describe('@zhushanwen/pi-system-prompt', () => {
     })
   })
 
+  it('capability 段含 M0 正/负面清单文案（设计 D1 ①②）', async () => {
+    const factory = await loadPlugin()
+    const { handler } = installPlugin(factory)
+
+    const result = handler({ systemPrompt: 'BASE' })
+    const prompt = result!.systemPrompt as string
+    const capability = prompt.slice(prompt.indexOf(CAP_HEADER))
+    // ① 正面清单（标签族 + 呈现属性）与 ② 负面清单均在真实注入文本里
+    expect(capability).toContain('You may use these tags: ')
+    expect(capability).toContain('Presentational attributes allowed: ')
+    expect(capability).toContain('Do not use these tags (they are stripped before rendering): ')
+    expect(capability).toContain('Do not use these attributes (they are stripped and have no effect): ')
+    expect(capability).toContain('table')
+    expect(capability).toContain('colspan')
+    expect(capability).toContain('svg')
+    expect(capability).toContain('data-*')
+  })
+
   it('append.prompt 纯空白 → 返回 undefined', async () => {
     const factory = await loadPlugin()
     writeConfig(dataDir, {
