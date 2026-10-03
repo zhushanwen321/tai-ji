@@ -444,7 +444,6 @@ async function snapshotDescendants(
 ): Promise<number[]> {
   try {
     return await getDescendantPids(row.pid)
-    // eslint-disable-next-line taste/no-silent-catch -- 降级策略：枚举失败按空表继续，pi 本体处置不阻断（宁漏不误杀），warn 留痕
   } catch (e) {
     console.warn(`[orphan-reap] descendant enumeration failed for pi pid=${row.pid}, shells will not be swept:`, e instanceof Error ? e.message : e)
     return []
