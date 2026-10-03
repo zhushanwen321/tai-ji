@@ -138,13 +138,18 @@ function toInlinePromptValue(value: string): string {
  *
  * 基座 flag 语义（架构约定 #11）：
  * - --no-extensions：抑制 pi 自动发现/加载的全局扩展，不影响显式 --extension 注入；
+ * - --extension builtin:codemode（恒带，codemode 设计 D8）：pi 1.0 起 --no-extensions
+ *   把内置扩展一并排除（resource-loader noExtensions 分支只保留 CLI 显式源），codemode
+ *   正是内置扩展——不显式 -e 则 settings.json defaultTools 通道不可达。恒带不带开关
+ *   条件：spawn 参数与 settings.json 双通道条件同步会出现不一致窗口。builtin:codemode
+ *   仅 pi ≥1.0 存在（0.84.4 报 Unknown built-in extension），本旗标随 pi 1.0 升级同行。
  * - --approve：强制信任 cwd——RPC 模式无交互 UI，pi 原生信任流程在 hasUI=false 时
  *   默认拒绝会导致 <cwd>/.pi/ 下的 skill 被跳过；实际主要信任项目级 .pi/skills。
  *   TODO(follow-up): Project Trust UI 落地后移除全局 --approve。
  * - 不传 --session-dir：pi 走默认派生 <agentDir>/sessions/<encodeCwd>（B1 方案 B 布局）。
  */
 export function buildPiMainAgentArgs(options: PiMainAgentSpawnOptions, model: string | undefined): string[] {
-  const args = ['--mode', 'rpc', '--no-extensions', '--approve']
+  const args = ['--mode', 'rpc', '--no-extensions', '--approve', '--extension', 'builtin:codemode']
   if (model) args.push('--model', model)
   // --system-prompt: 替换 pi 核心系统提示词（身份/工具列表/指引/pi 文档路径 4 段）。
   // 动态段（project_context/skills/日期/cwd）仍由 pi 照常拼接。空白/未传不拼。
@@ -235,5 +240,11 @@ export function buildPiSubagentSpawnArgs(params: PiSubagentSpawnParams): string[
     args.push('--fork', params.forkSource)
   }
   appendSkillArgs(args, params.skillPaths)
+  // builtin:codemode 恒带（codemode 设计 D8，与主 agent 模板同源旗标）：pi 1.0 起
+  // --no-extensions 连内置扩展一起排除，显式 -e 是 -ne 下唯一装载通道（显式源
+  // enabled:true）。subagent 侧所有调用方经本模板传导自动携带；pi-subagent-cli
+  // 包装层在其后追加 --no-extensions 与 --extension 白名单。落点选尾部：不触碰
+  // --session 紧跟 --session-dir 的既有位置锚定。
+  args.push('--extension', 'builtin:codemode')
   return args
 }

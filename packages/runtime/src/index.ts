@@ -63,6 +63,7 @@ import { ProcessManager } from './infra/pi/process-manager.js'
 import { getProviderConfig, clearProviderApiKey, initProviderCredentialResolver, cleanLeakedPackages, sanitizeInvalidProviders } from './infra/pi/pi-provider-store.js'
 import { getExtensionsDir, getNpmDir, getTmpDir, getProviderExtrasPath, getPiAgentDir } from './infra/pi/pi-paths.js'
 import { getPiGlobalAgentDir, syncBundledResources } from './infra/pi/pi-maintenance.js'
+import { runCodemodeStartupMigration } from './infra/pi/pi-codemode-settings.js'
 import { PiConfigStore } from './infra/pi/pi-config-store.js'
 import { PiSessionStore } from './infra/pi/session-store.js'
 import { ModelApiDiscoverer } from './infra/model-api-discoverer.js'
@@ -496,6 +497,12 @@ async function main(): Promise<void> {
   syncBundledResources()
   // 清理 settings.json.packages 中泄漏到 pi 全局目录的相对路径项（架构约定 #1 隔离保障）
   cleanLeakedPackages()
+  // codemode 启动迁移（codemode 设计 D1/D2/A1）：defaultTools 字段缺失 → 幂等写
+  // ["+codemode"]，字段存在（任何内容）→ 不碰。置于 cleanLeakedPackages 之后同窗口
+  // （listen 前同步段、先于一切 pi 进程 spawn）：cleanLeakedPackages 是既有 settings
+  // 读写点，坏文件会被它按既有行为隔离改名——其后本迁移的 raw 预检按「副本形态」判
+  // 损坏并跳过 + 告警，正是 A1 预期的组合行为（自身读写路径绝不触发或加速隔离）。
+  runCodemodeStartupMigration()
   // PiConfigStore 提前构造（纯委托无副作用）：下方 A1-2 迁移经 port 读写 models.json。
   const configStore = new PiConfigStore()
   // TaijiProviderStore：config/providers.json 唯一读写者（组合根单例，下方注入迁移/ConfigService/QuotaService）。

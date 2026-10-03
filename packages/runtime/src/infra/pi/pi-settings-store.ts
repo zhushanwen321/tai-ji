@@ -44,8 +44,11 @@
  * 🔒 三层架构：本模块属 infra（直接碰文件系统），services 经 port 访问，不直接 import 本模块。
  */
 
+import { readdirSync, readFileSync } from 'node:fs'
+import { basename, dirname } from 'node:path'
 import { JsonStore } from '../../utils/json-store.js'
 import { withFileLockSync, type SyncFileLockOptions } from '../../utils/file-lock.js'
+import { isEnoent } from '../../utils/errors.js'
 import { getSettingsPath } from './pi-paths.js'
 
 /**
@@ -69,6 +72,11 @@ export interface PiSettings {
   // 透传类型：pi 侧 schema 可含未知子字段且可能为坏值（D3/D7 容错），结构由消费方
   // pi-retry-settings 解析，store 不做形状假设。
   retry?: unknown
+  // ── tools 域（pi-codemode-settings 管理）──
+  // 透传类型：pi 的 defaultTools 条目可含坏值（非字符串元素——pi 解析侧先 filter 剥除再
+  // 解析，settings-manager.js getDefaultTools），结构由消费方 pi-codemode-settings 解析，
+  // store 不做形状假设。
+  defaultTools?: unknown
   // ── pi 其他未知字段（透传，不破坏）──
   [key: string]: unknown
 }
@@ -83,11 +91,12 @@ export interface PiSettings {
  *   - extension = packages（extension-service 域）
  *   - retry     = retry（LLM 重试配置域，pi-retry-settings 管理；域内嵌套键级
  *     merge 见 pi-retry-settings 的 D3 规则）
+ *   - tools     = defaultTools（pi 默认工具集域，pi-codemode-settings 管理）
  *   - full      = 全部。**白名单仅一个调用点**：pi-maintenance.ts 启动迁移
  *     （无并发 pi 进程窗口）。新代码禁止使用 full scope（review checklist 项，
  *     见 docs/architecture/data-source-registry.md 跨进程文件登记表）。
  */
-export type SettingsFieldScope = 'model' | 'skills' | 'extension' | 'retry' | 'full'
+export type SettingsFieldScope = 'model' | 'skills' | 'extension' | 'retry' | 'tools' | 'full'
 
 /** 各 scope 覆盖的顶层字段（full 走全量，不在此表）。 */
 const SCOPE_FIELDS: Record<Exclude<SettingsFieldScope, 'full'>, readonly string[]> = {
@@ -95,6 +104,7 @@ const SCOPE_FIELDS: Record<Exclude<SettingsFieldScope, 'full'>, readonly string[
   skills: ['skills'],
   extension: ['packages'],
   retry: ['retry'],
+  tools: ['defaultTools'],
 }
 
 /**
@@ -207,4 +217,82 @@ function mergeScopeFields(scope: Exclude<SettingsFieldScope, 'full'>, latest: Pi
     }
   }
   return merged
+}
+
+// ── 损坏检测单点（codemode 设计裁决项 A1）────────────────────────────────
+
+/**
+ * settings.json 损坏判定结果（A1 落定形态）。
+ * 协议消费方（u-foundation shared 协议类型 / services 错误态）按此形状对齐。
+ */
+export interface SettingsCorruption {
+  corrupted: boolean
+  /** settings.json 当前生效路径（getActiveSettingsPath()，含测试重定向）。 */
+  filePath: string
+  /** 已被其他读方隔离的 `.corrupt-<时间戳>` 副本路径；无副本时为 null。 */
+  corruptCopyPath: string | null
+}
+
+/**
+ * settings.json 损坏检测单点（A1）：写点拒入与读侧错误态的唯一判定入口。
+ *
+ * 关键约束：**raw 预检，不经 JsonStore**——JsonStore 读损坏文件的既有行为是读时即
+ * 隔离（rename 为 `.corrupt-<时间戳>` 留底 + 返回默认值，json-store.ts quarantine），
+ * 经它检测会让「检测」动作自身触发改名、错误态不可达。因此这里直接 readFileSync +
+ * JSON.parse 尝试，不触碰 store 缓存。
+ *
+ * **结果不缓存，每次调用现查**：settings.json 是三方共享文件，可能在会话中途被改坏
+ * （手工编辑是第一等场景）；写点拒入与「修复后无需重启即恢复」的保证依赖每次以文件
+ * 当前真值判定。缓存形态会把「改坏 → 写点放行 → 锁内重读触发隔离 → 空基线合法化覆盖」
+ * 的窗口从指令级扩大为会话级（A1「不采用」节）。
+ *
+ * 检测两形态（设计 A1）：
+ *   ① 原路径存在但 JSON 非法（含存在但不可读——读不出文本即无法证明合法，按损坏
+ *      处理 fail-safe：JsonStore 对非 ENOENT 读失败同样会走隔离，放行写点即复发
+ *      「隔离后空基线覆盖」链）；
+ *   ② 原路径不存在但存在 `.corrupt-<时间戳>` 隔离副本（已被其他读方隔离——同启动
+ *     窗口的既有 settings 读写点如 cleanLeakedPackages 读到坏文件会按既有行为隔离
+ *     改名；多副本时报告最新的一个，ISO 压缩时间戳字典序即时间序）。
+ *
+ * 文件不存在且无副本 = 全新安装正常态，非损坏。
+ */
+export function getSettingsCorruption(): SettingsCorruption {
+  const filePath = getActiveSettingsPath()
+  let raw: string
+  try {
+    raw = readFileSync(filePath, 'utf-8')
+  } catch (e) {
+    if (isEnoent(e)) {
+      // 原路径不存在：查 `.corrupt-<时间戳>` 隔离副本（形态②）
+      return detectCorruptCopy(filePath)
+    }
+    // 存在但不可读（EACCES 等）：无法证明 JSON 合法，按损坏处理（fail-safe，见 JSDoc 形态①）
+    return { corrupted: true, filePath, corruptCopyPath: null }
+  }
+  try {
+    JSON.parse(raw)
+  } catch {
+    return { corrupted: true, filePath, corruptCopyPath: null }
+  }
+  return { corrupted: false, filePath, corruptCopyPath: null }
+}
+
+/** 扫描原路径同目录的 `<原文件名>.corrupt-<时间戳>` 副本；返回损坏判定 + 最新副本路径。 */
+function detectCorruptCopy(filePath: string): SettingsCorruption {
+  const dir = dirname(filePath)
+  const prefix = `${basename(filePath)}.corrupt-`
+  try {
+    const copies = readdirSync(dir)
+      .filter(name => name.startsWith(prefix))
+      .sort() // ISO 压缩时间戳字典序 = 时间序，取末位 = 最新副本
+    const latest = copies.length > 0 ? copies[copies.length - 1] : null
+    return {
+      corrupted: latest !== null,
+      filePath,
+      corruptCopyPath: latest !== null ? `${dir}/${latest}` : null,
+    }
+  } catch {
+    // 目录不可读：无法确认副本存在性，按「原路径不存在 + 无副本」处理（全新安装正常态）
+    return { corrupted: false, filePath, corruptCopyPath: null }
+  }
 }

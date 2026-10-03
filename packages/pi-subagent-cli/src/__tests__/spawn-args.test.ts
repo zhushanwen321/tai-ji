@@ -1,4 +1,8 @@
 // src/__tests__/spawn-args.test.ts
+// [HISTORICAL] codemode D8 起期望值随 pi-rpc 模板传导更新：buildPiSubagentSpawnArgs
+// 尾部恒带 `--extension builtin:codemode`（pi 1.0 起 --no-extensions 连内置扩展一起
+// 排除，显式 -e 是唯一装载通道；随 pi 1.0 升级同行）——包装层在其后追加
+// --no-extensions 与 --extension 白名单，二者并存（顺序无语义影响）。本包源码零改动。
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -21,10 +25,13 @@ describe("buildSpawnArgs", () => {
     skillPaths: undefined,
   };
 
-  it("基础参数：--mode rpc --session-dir + --model provider/id + --no-extensions 基座（孙进程扩展显式化），不含 -p 也不含 task（task 经 stdin 传）", () => {
+  it("基础参数：--mode rpc --session-dir + --model provider/id + D8 基座旗标 --extension builtin:codemode + --no-extensions 基座（孙进程扩展显式化），不含 -p 也不含 task（task 经 stdin 传）", () => {
     const args = buildSpawnArgs(baseParams);
+    // 传导形态：pi-rpc 模板尾部 --extension builtin:codemode 在包装层 push 的
+    // --no-extensions 之前（顺序无语义影响，此处一并锚定）
     expect(args).toEqual([
       "--mode", "rpc", "--session-dir", "/sessions/dir", "--model", "openai/gpt-4o",
+      "--extension", "builtin:codemode",
       "--no-extensions",
     ]);
   });
@@ -122,6 +129,12 @@ describe("buildSpawnArgs", () => {
     expect(args).toContain("--tools");
     expect(args).toContain("--skill");
     expect(args).not.toContain("-p");
+    // D8 传导：--no-extensions 与 --extension builtin:codemode 并存（-ne 下显式 -e
+    // 仍装载），白名单 extension 路径排其后
+    const extIdxs = args.map((a, i) => (a === "--extension" ? i : -1)).filter((i) => i >= 0);
+    expect(extIdxs).toHaveLength(2);
+    expect(args[extIdxs[0] + 1]).toBe("builtin:codemode");
+    expect(args).toContain("--no-extensions");
   });
 
   it("空 tools 数组不追加 --tools", () => {
@@ -159,22 +172,28 @@ describe("buildSpawnArgs", () => {
     });
     // -ne 与显式 --extension 共存（pi 官方语义：-ne 禁 discovery，显式 -e 仍生效）
     expect(args).toContain("--no-extensions");
-    // 每个 extension 独立 token，顺序保留
+    // D8 传导：builtin:codemode 基座旗标 + 2 条白名单路径，共 3 个 --extension token，
+    // 白名单顺序保留在基座旗标之后
     const extIdxs = args.map((a, i) => (a === "--extension" ? i : -1)).filter((i) => i >= 0);
-    expect(extIdxs).toHaveLength(2);
-    expect(args[extIdxs[0] + 1]).toBe("/staged/@zhushanwen/pi-structured-output");
-    expect(args[extIdxs[1] + 1]).toBe("/other/ext");
+    expect(extIdxs).toHaveLength(3);
+    expect(args[extIdxs[0] + 1]).toBe("builtin:codemode");
+    expect(args[extIdxs[1] + 1]).toBe("/staged/@zhushanwen/pi-structured-output");
+    expect(args[extIdxs[2] + 1]).toBe("/other/ext");
   });
 
-  it("extensionPaths 空数组 → 不拼 --extension（仍带 --no-extensions 基座）", () => {
+  it("extensionPaths 空数组 → 不拼白名单 --extension（仅剩 D8 基座旗标，仍带 --no-extensions 基座）", () => {
     const args = buildSpawnArgs({ ...baseParams, extensionPaths: [] });
-    expect(args).not.toContain("--extension");
+    const extIdxs = args.map((a, i) => (a === "--extension" ? i : -1)).filter((i) => i >= 0);
+    expect(extIdxs).toHaveLength(1);
+    expect(args[extIdxs[0] + 1]).toBe("builtin:codemode");
     expect(args).toContain("--no-extensions");
   });
 
-  it("extensionPaths undefined → 不拼 --extension（双源皆空的缺省形态）", () => {
+  it("extensionPaths undefined → 不拼白名单 --extension（双源皆空的缺省形态，仅剩 D8 基座旗标）", () => {
     const args = buildSpawnArgs(baseParams);
-    expect(args).not.toContain("--extension");
+    const extIdxs = args.map((a, i) => (a === "--extension" ? i : -1)).filter((i) => i >= 0);
+    expect(extIdxs).toHaveLength(1);
+    expect(args[extIdxs[0] + 1]).toBe("builtin:codemode");
     expect(args).toContain("--no-extensions");
   });
 
@@ -198,7 +217,10 @@ describe("buildSpawnArgs", () => {
   it("sessionFile undefined → 不含 --session（向后兼容）", () => {
     const args = buildSpawnArgs(baseParams);
     expect(args).not.toContain("--session");
-    expect(args).toEqual(["--mode", "rpc", "--session-dir", "/sessions/dir", "--model", "openai/gpt-4o", "--no-extensions"]);
+    expect(args).toEqual([
+      "--mode", "rpc", "--session-dir", "/sessions/dir", "--model", "openai/gpt-4o",
+      "--extension", "builtin:codemode", "--no-extensions",
+    ]);
   });
 
   it("sessionFile + modelRef + thinkingLevel → 三者都进 args（resume 全参数）", () => {

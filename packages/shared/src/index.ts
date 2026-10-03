@@ -91,6 +91,14 @@ export type {
 // LLM 重试配置域（类型 + D8 合法域常量 + 校验纯函数，renderer 表单与 runtime 写入侧共用）
 export type { LlmRetryConfig, LlmRetryProviderConfig } from './llm-retry'
 export { LLM_RETRY_DOMAIN, validateLlmRetryConfig } from './llm-retry'
+// codemode 域 WS 协议契约（codemode 设计 D1/A1：开关命令对请求响应 + settings.json 损坏错误态形状，renderer 与 runtime 共用）
+export type {
+  CodemodeDefaultTools,
+  CodemodeSettingsCorruption,
+  CodemodeEnabledResult,
+  CodemodeSetEnabledRequest,
+  CodemodeSetEnabledResult,
+} from './codemode'
 // RPC 超时校准链常量 SSOT（timeout-slow-flow-wallclock D2/D3，renderer/runtime 双端编译期对齐）
 export { BASH_RPC_TIMEOUT_MS, COMPACT_RPC_TIMEOUT_MS, RENDERER_RPC_MARGIN_MS } from './timeouts'
 export * from './extension'
