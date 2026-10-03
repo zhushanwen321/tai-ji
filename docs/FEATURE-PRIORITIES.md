@@ -78,7 +78,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | smart-context | 自动压缩、双模式摘要接管、分档提醒（手动 compact 兜底） |
 | structured-output / plan / todo 面板 | workflow 结构化输出、计划面板（审批闸口三决策：修订/执行/搁置 + 降级「重新提交审批」），todo 渲染、plan 执行方式选择（无 plan-exec 技能时直通不弹表单；goal 桥派发 / plan-exec skill / goal） |
 | i18n | zh/en 切换、消息键完整（边界判例 #1） |
-| 快捷键与 side drawer | 全局快捷键、composer pi 对齐快捷键（shift+tab 档位循环 / ctrl+p、ctrl+shift+p 模型双向循环 / ctrl+x 复制最后回复）、文件预览/diff/git tab（testing 05）；终端展示容器（右抽屉迁底抽屉）：底抽屉全宽开关（`` ⌃` `` / StatusBar 按钮）双入口，终端单实例与输出流不变 |
+| 快捷键与 side drawer | 全局快捷键、composer pi 对齐快捷键（shift+tab 档位循环 / ctrl+p、ctrl+shift+p 模型双向循环 / ctrl+x 复制最后回复）、文件预览/diff/git tab（testing 05）；终端展示容器（右抽屉迁底抽屉）：底抽屉全宽开关（`` ⌃` `` / StatusBar 按钮）双入口，终端**多实例**（关键用例组：多实例并行——实例切换条新建/切换/关闭/空态与实例间输出隔离；实例级生命周期——主动关闭·自然退出·会话删除级联·runtime shutdown 级联；刷新与世代恢复——⌘R 对账重建·runtime 重启世代重置·同世代闪断不重置） |
 | 浮层浏览器（应用内网页预览） | 对话流 localhost 链接点击进浮层（OverlayShell + BrowserPane）、地址栏/复制链接/在系统浏览器打开、错误占位与重试、切 session 浮层随行。**挂掉后果 = dev server 链接退回系统浏览器打开，预览能力基本可用但上下文切换中断**（基本可用稍可忍受） |
 | session 导入 | 多源统一入口：来源选择（pi/zcode）、候选列表、导入；zcode 源真实宿主库只读转换（session-import-sources 指南；SessionImportSource SPI） |
 | 后台命令观察面（composer 任务托盘 bash 面板） | background task 展示（testing 02） |

@@ -3,7 +3,7 @@
   "name": "taiji e2e 资产登记表（SSOT）",
   "description": "全部 e2e 资产与其触发面的机器可读登记：「改了哪个域 → 跑哪些 e2e」的对账依据。summary 仅导航；资产内容与执行口径的权威源是 authority 指向的文档与 asset 本体。收录以磁盘实际为准（脚本/目录改名或增删时同 commit 更新本表）。",
   "fields": {
-   "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写面唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本、npm 发布面一致性检查）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域 cw 剧本族：mock 探针轨 + 真 pi 全链路真机冒烟轨）",
+   "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写面唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本、npm 发布面一致性检查）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域 cw 剧本族：mock 探针轨 + 真 pi 全链路真机冒烟轨） / TERMINAL（终端多实例真实 app 轨：切换条多实例 / 实例级生命周期 / 编号不复用 / 世代重置与对账）",
    "summary": "一句话摘要（仅导航）",
    "scope": "代码 glob 数组（触发面）。只支持两种形态：<prefix>/** 前缀通配与精确路径（与 scripts/select-constraints.mjs 同款零依赖匹配语义：prefix/** → startsWith，精确路径 → 全等）",
    "layer": "L1 = 零 token mock/smoke（CI 固定环节）| L2 = 真实进程非真实 LLM（真实 app/pi 进程、mock 构建或 mock 数据）| L2.5 = faux（真实进程 + faux LLM 演员，凭证无关零 token）| L3 = 真实 LLM",
@@ -1904,6 +1904,37 @@
    "owner": "apps/electron",
    "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
    "note": "R2 归宿（2026-10-03 打包态内置资产发现失效事故的验收面；设计 docs/design/subagent-builtin-discovery-packaged-fix.md）：打包态扩展是 esbuild 自包含 bundle（core inline、staged 无 node_modules），内置 workflow/agent 靠 staged scope 根回退发现——该链只能在**产物**上验，dev 形态恒绿（事故曾静默一个版本）。前置 = build:dir 产物（本轨 run 自带）；空载串行（serial=是）；无需真实 LLM（纯文件系统 + 发现断言）。判据只认内置资产三项：① pi-subagent-workflow/{workflows,agents} 存在；② 数量与 packages/subagent-core 同量（不写死数字）；③ 存活 diff 无白名单外删除。本地构建会命中既存环境项 'Resources/pi 存在 symlink'（workspace pi 缓存 symlink；CI/真二进制不触发）与未签名警告——两者不计入本轨判据。"
+  },
+  {
+   "id": "E2E-TERMINAL-01",
+   "summary": "终端多实例真实 app 轨（L2，零 token，无 LLM）：T1 双实例并行 / T2 关闭隔离（含 T7 禁用态）/ T4 会话级联无孤儿 / T8 序号不复用 / T9 最后实例自然退出归零 / T10 runtime 重启世代重置 / T13 跨会话不误清",
+   "scope": [
+    "packages/renderer/src/composables/features/terminal/**",
+    "packages/renderer/src/components/panel/TerminalView.vue",
+    "packages/renderer/src/components/panel/TerminalInstanceBar.vue",
+    "packages/renderer/src/components/statusbar/StatusBarTerminalToggle.vue",
+    "packages/renderer/src/stores/terminal-write-queue.ts",
+    "packages/core/src/domain/drawer/terminal-write-queue.ts",
+    "packages/core/src/transport/api/domains/terminal.ts",
+    "packages/core/src/transport/ws-client.ts",
+    "packages/runtime/src/services/terminal/**",
+    "packages/runtime/src/transport/terminal-message-handler.ts",
+    "packages/shared/src/protocol.ts",
+    "e2e/terminal-multi-instance.spec.ts"
+   ],
+   "layer": "L2",
+   "assets": [
+    {
+     "kind": "spec",
+     "ref": "e2e/terminal-multi-instance.spec.ts"
+    }
+   ],
+   "trigger": "on-diff",
+   "serial": true,
+   "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK——mock 产物在场时 spec 自 skip 不 fail）。执行：npx playwright test e2e/terminal-multi-instance.spec.ts",
+   "owner": "packages/renderer",
+   "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+   "note": "terminal-multi-instance 验收资产（2026-10-03）。落地设计 §4 T1/T2/T4/T8/T9/T10/T13 的可脚本化部分（impl-plan §4.4 A1/A2/A4/A8/A9/A10/A13；T2 顺带断言 T7 的最后实例关闭按钮禁用态）。执行口径 = 开发阶段按改动范围空载串行（AGENTS.md e2e 执行准则），PR/merge 门禁不跑；触发面 = 终端域四层锚点（renderer 终端 composable/组件/store + core write-queue 与 terminal API/ws-client + runtime terminal service/handler + shared protocol）任一变更。未覆盖项与归属：T3 刷新恢复 / T5 单实例无感 = L4 真机走查（前提 P3 已由 u0-probe 探针核实），T6/T7/T11/T12 = L1 单测（u1 runtime 协议 / u3-bar 组件 / u2 世代与对账）；T4 的 UI 右键删除路径与 T10 的 write-queue 重置细节归 D3 verify 剧本。spec 用 `npx playwright test --list` 自检（本单元只产出资产，真机执行在 D3 段）。"
   }
  ]
 }
