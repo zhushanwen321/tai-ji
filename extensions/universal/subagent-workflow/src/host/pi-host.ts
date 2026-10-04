@@ -108,8 +108,11 @@ export function corePackageNpmRoot(moduleUrl: string = import.meta.url): string 
  * 正是 `@zhushanwen` scope 目录——npm 槽语义（"一级子项 = 包目录"）恰好成立，
  * 于是可直接当 npm 槽根用：约定目录扫描即命中
  * `pi-subagent-workflow/{workflows,agents}`（两目录由 `scripts/bundle-extensions.mjs`
- * 随包拷贝；已核无任何 staged 包声明 `pi.agents`/`pi.workflows`，不触发 manifest
- * 模式的"声明路径不存在 → 整包失败占位"）。
+ * 随包拷贝；`pi.agents`/`pi.workflows` manifest 约定及其"声明路径不存在 → 整包失败
+ * 占位"语义是 subagent-core resource-discovery 的 taiji 自建规则，权威源 =
+ * resource-discovery.ts processPackage——pi 上游 manifest 只有
+ * extensions/skills/prompts/themes 四字段，无 agents/workflows 概念。已核仓内无任何
+ * 包声明该字段，故扫描面内所有包都走约定目录分支，不进 manifest 失败分支）。
  *
  * 与 dev/npm 形态的既有语义一致：npm 槽根扫的就是 scope 下全部包目录（因此本包自带
  * 的 workflows/agents 在 dev/npm 形态同样入发现面），非新增语义。
