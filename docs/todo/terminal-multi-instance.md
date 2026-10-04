@@ -63,4 +63,4 @@
 
 - **P5 真机探针未执行**（终端内起 `nohup sleep 600` → 正常退出应用 → 查系统进程表应无残留）：正常退出 PTY 清理目前仅由 u4 单测与打点断言覆盖，非真机证据（impl-plan §6 R9）。
 - **R7 ack 残窗真机探针未执行**（见上表 R7）。
-- **T10 世代重置提示真机可见面未走查**（世代变更重置时「输入可能丢失」toast 的真机渲染面）：GEN-3 单测只覆盖「确有滞留命令时发提示」的触发条件逻辑，不覆盖真机 toast 渲染面；D3 四节点无世代变更构造故未走查（`docs/testing/e2e-map.json` E2E-TERMINAL-01 note 指向本条）。走查方法 = devtools 直调 `runtime-restart` IPC 造世代变更 + 预置滞留命令；随首次触发 E2E-TERMINAL-01（该轨 T10 例从未执行）或补真机走查时验证。
+- **T10 世代重置提示真机可见面未走查**（世代变更重置时「输入可能丢失」toast 的真机渲染面）：GEN-3 单测只覆盖「确有滞留命令时发提示」的触发条件逻辑，不覆盖真机 toast 渲染面；D3 四节点无世代变更构造故未走查（`docs/testing/e2e-map.json` E2E-TERMINAL-01 note 指向本条）。走查方法 = 真机制造世代变更（SIGKILL runtime 进程 → supervisor 自动重启换 token；或先 stop 再 `restartRuntime`）+ 预置滞留命令 → 观察「输入可能丢失」toast 真机渲染；**不可用 devtools 直调 `runtime-restart` IPC**——`runtime-supervisor.ts:303-309` 的 `restartRuntime()` 在 runtime 存活时是幂等分支（仅广播 `runtime-port` 后 return，不 spawn 新进程、token 不变），造的是设计 §4 T12 的「非世代广播沿」而非 T10 的世代变更。该面不在本轨断言内（spec 的 T10 用例无 toast 断言），须补真机走查或给 T10 增断言后方可验证；本轨 T8/T9/T13 三例尚未执行（T10 已由 D3 verify A10 三次绿灯）。
