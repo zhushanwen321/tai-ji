@@ -98,7 +98,7 @@ export type {
   CodemodeSetEnabledRequest,
   CodemodeSetEnabledResult,
 } from './codemode'
-// mcp 域 WS 协议契约（pi-mcp-management 设计：五操作 mcp.list/add/update/remove/test + 条目/徽标/损坏错误态形状，renderer 与 runtime 共用）
+// mcp 域 WS 协议契约（pi-mcp-management 设计：mcp.list/add/update/setEnabled/remove/test/testCancel 七命令 + 条目/徽标/损坏错误态形状，renderer 与 runtime 共用）
 export type {
   McpExposureLevel,
   McpServerEntryValue,
@@ -110,9 +110,12 @@ export type {
   McpAddRequest,
   McpUpdateRequest,
   McpRemoveRequest,
+  McpSetEnabledRequest,
   McpMutationResult,
   McpTestRequest,
   McpTestHandle,
+  McpTestCancelRequest,
+  McpTestCancelResult,
   McpTestResultEvent,
   McpProbeState,
   McpServerStatusBadge,

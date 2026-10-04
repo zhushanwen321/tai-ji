@@ -35,6 +35,9 @@ import type {
   McpListResult,
   McpMutationResult,
   McpRemoveRequest,
+  McpSetEnabledRequest,
+  McpTestCancelRequest,
+  McpTestCancelResult,
   McpTestHandle,
   McpTestRequest,
   McpTestResultEvent,
@@ -277,11 +280,13 @@ export type ClientMessageType =
   // 门禁（MUTATION_DOMAINS 只含 session/model/preset/config 四域）；错误统一走 sendError
   // 错误信封，错误码词表 TtsErrorCode 七值（tts-types.ts）。
   | 'tts.getConfig' | 'tts.configure' | 'tts.speak' | 'tts.getCapabilities'
-  // mcp.*（pi-mcp-management 设计，M0 五 RPC）：设置页 MCP 分区对 pi 用户级 mcp.json 的管理面——
+  // mcp.*（pi-mcp-management 设计，M0 七 RPC）：设置页 MCP 分区对 pi 用户级 mcp.json 的管理面——
   // list（清单 + 损坏错误态，拉取一次模型 §3.1）/ add / update（编辑写回契约 D7 归 runtime store）/
-  // remove / test（连接测试异步任务句柄，D3）。写入生效语义 = 新会话生效（D1）。payload/reply 形状
-  // 见 mcp 域登记段；ADR-0065 mutation 归类（add/update/remove）由 handler 实施期登记。
-  | 'mcp.list' | 'mcp.add' | 'mcp.update' | 'mcp.remove' | 'mcp.test'
+  // setEnabled（启停专用操作，仅翻转 enabled 键 §3.1 最小语义）/ remove / test（连接测试异步任务
+  // 句柄，D3）/ testCancel（取消进行中的连接测试，D3「取消」按钮）。写入生效语义 = 新会话生效
+  //（D1）。payload/reply 形状见 mcp 域登记段；ADR-0065 mutation 归类（add/update/setEnabled/remove）
+  // 由 mutation-reply-contract 登记。
+  | 'mcp.list' | 'mcp.add' | 'mcp.update' | 'mcp.setEnabled' | 'mcp.remove' | 'mcp.test' | 'mcp.testCancel'
 
 // ── Payload 类型定义 ────────────────────────────────────────────
 
@@ -970,14 +975,16 @@ export interface ClientMessageMap {
   'tts.speak': { sessionId?: string; text: string }
   /** tts.getCapabilities：设置页表单数据源（TtsFormModel 内嵌该家 TtsCapabilities，形状见 tts-types）。 */
   'tts.getCapabilities': Record<string, never>
-  // ── mcp.*（pi-mcp-management 设计，M0 五 RPC）请求 payload：形状 SSOT 在 ./mcp，此处仅登记
+  // ── mcp.*（pi-mcp-management 设计，M0 七 RPC）请求 payload：形状 SSOT 在 ./mcp，此处仅登记
   // type→payload 映射（u-foundation 补齐项——ClientMessageType 与 ReplyPayloadMap 已登记，
   // 本 map 缺登记会使 core 域函数 command() 的 payload 类型约束无法解析）。list 无参数。
   'mcp.list': Record<string, never>
   'mcp.add': McpAddRequest
   'mcp.update': McpUpdateRequest
+  'mcp.setEnabled': McpSetEnabledRequest
   'mcp.remove': McpRemoveRequest
   'mcp.test': McpTestRequest
+  'mcp.testCancel': McpTestCancelRequest
 }
 
 // ClientMessage 由 ClientMessageMap 直接派生：每个 type 字面量映射到
@@ -1268,10 +1275,10 @@ export type ServerMessageType =
   // tts.*（ai-voice-tts 设计 §7.1）：四 RPC 的 reply（:result 后缀复用 quota.fetch:result 约定；
   // payload 消费型，形状见 ServerMessageMapBase tts 条目）。
   | 'tts.getConfig:result' | 'tts.configure:result' | 'tts.speak:result' | 'tts.getCapabilities:result'
-  // mcp.*（pi-mcp-management 设计）：五 RPC 的 reply（:result 后缀复用 quota.fetch:result /
+  // mcp.*（pi-mcp-management 设计）：七 RPC 的 reply（:result 后缀复用 quota.fetch:result /
   // tts.getConfig:result 约定）。payload 直引 ./mcp 具名类型——清单/写入走 RPC reply 承载
   //（§3.1 打开时拉取一次 + D8 快照语义），连接测试终态另有广播帧 mcp:testResult（下一组）。
-  | 'mcp.list:result' | 'mcp.add:result' | 'mcp.update:result' | 'mcp.remove:result' | 'mcp.test:result'
+  | 'mcp.list:result' | 'mcp.add:result' | 'mcp.update:result' | 'mcp.setEnabled:result' | 'mcp.remove:result' | 'mcp.test:result' | 'mcp.testCancel:result'
   // mcp:testResult（pi-mcp-management 设计，u5b 打回接线）：probe 终态回填的 server→client
   // 广播帧（`mcp.test` 异步任务句柄的完成侧，D8① pi 实测类徽标数据源；冒号形态对齐
   // rollingRestart:* 全局帧先例，payload 无 sessionId 走 broker 纯全局通道）。
@@ -2715,8 +2722,10 @@ export interface ServerMessageMapBase {
   'mcp.list:result': McpListResult
   'mcp.add:result': McpMutationResult
   'mcp.update:result': McpMutationResult
+  'mcp.setEnabled:result': McpMutationResult
   'mcp.remove:result': McpMutationResult
   'mcp.test:result': McpTestHandle
+  'mcp.testCancel:result': McpTestCancelResult
   /** mcp:testResult 广播：probe 终态回填（D8① 徽标 + testId/name 回显，形状 SSOT 在 ./mcp）。 */
   'mcp:testResult': McpTestResultEvent
 }
@@ -2948,13 +2957,15 @@ export interface ReplyPayloadMap {
   // codemode 开关命令对（codemode 设计 D1/A1）
   'config.getCodemodeEnabled': ServerMessageMap['config.codemodeEnabled']
   'config.setCodemodeEnabled': ServerMessageMap['config.codemodeSetEnabled']
-  // mcp 域五操作（pi-mcp-management 设计）：reply 经 :result 帧承载（ServerMessageMapBase 登记，
+  // mcp 域七命令（pi-mcp-management 设计）：reply 经 :result 帧承载（ServerMessageMapBase 登记，
   // payload 直引 ./mcp 具名类型——本域无 server→client 广播帧，§3.1 打开时拉取一次 + D8 快照语义）。
   'mcp.list': ServerMessageMap['mcp.list:result']
   'mcp.add': ServerMessageMap['mcp.add:result']
   'mcp.update': ServerMessageMap['mcp.update:result']
+  'mcp.setEnabled': ServerMessageMap['mcp.setEnabled:result']
   'mcp.remove': ServerMessageMap['mcp.remove:result']
   'mcp.test': ServerMessageMap['mcp.test:result']
+  'mcp.testCancel': ServerMessageMap['mcp.testCancel:result']
   // u-locale-channel：ack 型（无读回 RPC，成功只回 config.uiLocaleSet；写盘失败走错误信封）。
   'config.setUiLocale': void
   // preset 域（设计文档 pi-launch-presets.md）：runtime PresetMessageHandler reply。

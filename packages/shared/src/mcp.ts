@@ -1,9 +1,10 @@
 /**
  * mcp 域 WS 协议契约（runtime ↔ renderer 共享，接口先行）。
  *
- * 命令族 `mcp.list` / `mcp.add` / `mcp.update` / `mcp.remove` / `mcp.test`（pi-mcp-management
- * 设计：设置页 MCP 分区经 runtime 唯一读写层管理 pi 1.0 用户级 mcp.json——文件层管理方案 A，
- * 写入生效语义 = 新会话生效，设计 D1）。本文件只承载 payload/reply 的类型定义，供两端共同
+ * 命令族 `mcp.list` / `mcp.add` / `mcp.update` / `mcp.setEnabled` / `mcp.remove` / `mcp.test`
+ * / `mcp.testCancel`（pi-mcp-management 设计：设置页 MCP 分区经 runtime 唯一读写层管理
+ * pi 1.0 用户级 mcp.json——文件层管理方案 A，写入生效语义 = 新会话生效，设计 D1）。
+ * 本文件只承载 payload/reply 的类型定义，供两端共同
  * import 防止裁量漂移；消息类型字符串与 type→reply 映射登记在 shared protocol.ts
  *（ClientMessageType + ReplyPayloadMap），case 分发由 runtime transport 层 handler 登记。
  *
@@ -129,6 +130,13 @@ export type McpListRequest = Record<string, never>
 export interface McpListResult { // oe-exempt:20261004:framework:WS 协议契约类型（两端共同 import），协议形状先行单实现常态
   servers: McpServerEntry[]
   corruption: McpConfigCorruption | null
+  /**
+   * pi agent 目录绝对路径（`<数据目录>/agent/`，getPiAgentDir SSOT）：needs-auth 条目的
+   * I3 登录引导数据源——界面拼装完整可复制登录命令 `PI_CODING_AGENT_DIR=<agentDir>
+   * pi mcp login <name>`（路径由界面填实际值；缺环境变量指引时凭据会写到 `~/.pi/agent`
+   * 成为会话读不到的孤岛，复刻 F1）。
+   */
+  agentDir: string
 }
 
 /**
@@ -153,6 +161,16 @@ export interface McpUpdateRequest { // oe-exempt:20261004:framework:WS 协议契
 /** `mcp.remove` 请求：待删除条目名。 */
 export interface McpRemoveRequest { // oe-exempt:20261004:framework:WS 协议契约类型（两端共同 import），协议形状先行单实现常态
   name: string
+}
+
+/**
+ * `mcp.setEnabled` 请求：目标条目名与目标启停态（§3.1「可启停（写入 enabled 字段）」最小
+ * 语义的专用操作——runtime store 锁内仅翻转 enabled 键、其余键一律不触，不带清单投影
+ * 回写，D2 丢失窗口保持锁内亚秒级）。
+ */
+export interface McpSetEnabledRequest { // oe-exempt:20261004:framework:WS 协议契约类型（两端共同 import），协议形状先行单实现常态
+  name: string
+  enabled: boolean
 }
 
 /**
@@ -187,6 +205,20 @@ export interface McpTestRequest { // oe-exempt:20261004:framework:WS 协议契�
  */
 export interface McpTestHandle { // oe-exempt:20261004:framework:WS 协议契约类型（两端共同 import），协议形状先行单实现常态
   testId: string
+}
+
+/** `mcp.testCancel` 请求：待取消的连接测试任务句柄 id（D3「取消」按钮——等价于超时到点杀进程的主动形态）。 */
+export interface McpTestCancelRequest { // oe-exempt:20261004:framework:WS 协议契约类型（两端共同 import），协议形状先行单实现常态
+  testId: string
+}
+
+/**
+ * `mcp.testCancel` reply：cancelled true = 取消生效（probe 被杀、以 cancelled 终态收敛，
+ * 不再回填徽标——renderer 恢复取消前徽标，本次无结果语义与 D3 超时同源）；false = 任务
+ * 已结束（含取消晚到窗口），结果徽标经 `mcp:testResult` 广播照常回填，renderer 不动。
+ */
+export interface McpTestCancelResult { // oe-exempt:20261004:framework:WS 协议契约类型（两端共同 import），协议形状先行单实现常态
+  cancelled: boolean
 }
 
 /**
