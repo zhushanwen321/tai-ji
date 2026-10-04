@@ -1,5 +1,11 @@
 # @zhushanwen/zcode-session-source
 
+## 0.2.4
+
+### Patch Changes
+
+- 492e02447: Remove the test-only countSnapshotDirs helper from the recovery module; snapshot-count assertions now live entirely in the test fixtures, keeping zero-residue checks explicit instead of depending on a production-side counter.
+
 ## 0.2.3
 
 ### Patch Changes

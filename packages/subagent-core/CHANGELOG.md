@@ -1,5 +1,11 @@
 # @zhushanwen/subagent-core
 
+## 1.2.1
+
+### Patch Changes
+
+- 492e02447: Export isTargetFile from the resource-discovery module so downstream test suites can derive their expectation sets from the same discovery-layer criterion instead of duplicating the filter logic.
+
 ## 1.2.0
 
 ### Minor Changes
