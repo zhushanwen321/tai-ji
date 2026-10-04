@@ -139,10 +139,12 @@ cd <workspace>/<dev-branch> && git add <files> && git commit
 合并成功后**自动执行清理**（删除 worktree + 分支）。用户不特别说明时默认清理，无需逐次确认。仅当用户明确说「不清理」时才跳过。
 
 ```bash
-bash "$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/dev-merge.sh" cleanup <dev-branch>
+bash "$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/dev-merge.sh" cleanup <dev-branch> [--kill-occupants]
 ```
 
 脚本内置安全闸：分支未合并进 dev 拒绝清理（`is_merged` 门禁通过后脚本直接 `git branch -D`，不依赖 `git branch -d`——`-D` 避免依赖 upstream/HEAD 校验的不确定性，已合并与否由 `is_merged` 门禁保证）；源 worktree 有未提交/未跟踪文件时**删除前预检拒绝**（`status --short` 在 git 完好时采集）——**不要擅自 clean**，先看那些文件是什么（来源不明的问用户），确认后由用户/显式决策强删。
+
+**占用预检闸（rm 之前）**：扫描持有**写模式句柄**的进程（`lsof +D` 的 fd 列过滤，cwd/txt/只读句柄不阻断 unlink 不入列）——写句柄持有者会让 `rm -rf` 中途失败（删除期间文件被持续写入重建 → `Directory not empty`，典型 = 扎根该 worktree 的 dev 实例 Vite/runtime/日志写入）。命中时默认拒绝并列恢复路径：① 主 agent 逐个核实为扎根本 worktree 的 dev 实例 / background 任务后精确 `kill <pid>`（禁 pkill 宽杀）再重跑；② `--kill-occupants` 授权脚本代为终止（TERM → 3s → KILL）后删除。**宿主链永不自动终止**：命令名 `zcode-cli` / `ZCode*` / `Claude*` 前缀或命令行含 `~/.zcode/` 路径的 MCP 子进程一律只 WARN 不杀——它们的句柄多为 cwd 继承（不阻断删除），且杀宿主 = 杀死发起本脚本的会话自身（2026-10-04 二次事故实证：按命令名宽匹配把 ZCode 宿主列入 kill 清单，会话当场断开）。甄别手段：`ps -p <pid> -o command=` 看完整命令行，宿主子进程（MCP server / node repl）与 dev 实例（vite/runtime/项目 electron）由此区分。lsof 大目录扫描 10-30s 属正常。
 
 **删除语义（显式两步）**：`rm -rf <feat 目录>` + `git worktree prune`，先删目录、后清登记。[HISTORICAL] 旧版用 `git worktree remove`，实验复现证实其内部**先删登记、后删目录**——目录删除失败时留下"登记已失、目录内 git 全废"的半删态，且旧脚本吞掉 stderr、硬编码诊断为"被 untracked 阻止"（空清单 + 不可执行的 clean -fd 指引），2026-09 事故后改为显式两步。中途失败情形：`rm -rf` 失败 → 登记与分支均未动，状态完好可排查重试；prune 失败/漏跑 → 目录已删、登记残留，prune 幂等可补跑，无破坏性。
 

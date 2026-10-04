@@ -3,7 +3,8 @@
 #
 # 用法（cwd 必须在待合并 feat worktree 根目录；用当前 worktree 内的脚本副本动态拼路径，禁止写死其他 worktree 目录——会随其 cleanup 过期）：
 #   bash "$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/dev-merge.sh" merge   <dev-branch>   # 预检（目标 worktree 缺失时自动创建）+ 合并
-#   bash "$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/dev-merge.sh" cleanup <dev-branch>   # 确认已合并后删当前 worktree + 分支
+#   bash "$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/dev-merge.sh" cleanup <dev-branch> [--kill-occupants]
+#      # 确认已合并后删当前 worktree + 分支；--kill-occupants = 占用预检命中时授权脚本终止非宿主占用进程
 #
 # 退出码：
 #   0  成功
@@ -14,6 +15,11 @@
 # - 不自动提交未提交改动（提交是 AI 决策行为：message / 粒度 / 非本次会话产生的改动检查）
 # - 不 push（push 必须用户明确授权）
 # - cleanup 拒绝删除未合并分支 / 脏 worktree（脏检查在删除前由脚本 status --short 预检，rm -rf 无内建拒删）
+# - cleanup 占用预检：删除前 lsof 扫描持有写句柄的进程（写句柄会让 rm 中途失败；cwd/txt/只读句柄
+#   不阻断 unlink 不入列），默认拒绝并列恢复路径，--kill-occupants 授权终止非宿主占用者；
+#   宿主应用链（zcode-cli / ZCode* / Claude* / ~/.zcode 下 MCP 子进程）永不自动终止——
+#   杀宿主 = 杀死发起本脚本的会话自身（2026-10-04 双事故：dev 实例写句柄阻断 rm；命令名宽
+#   匹配误把 ZCode 宿主当占用者杀死致会话断开）
 # - 删除用显式两步 rm -rf + worktree prune（先删目录后清登记，顺序与 git worktree remove 内部相反，
 #   后者先删登记，目录删除失败时留下登记已失、目录内 git 全废的半删态且曾被误诊，2026-09 事故后改此）
 
@@ -23,6 +29,12 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 SUBCMD="${1:-}"
 DEV_BRANCH="${2:-}"
+KILL_OCCUPANTS=false
+if [[ "${3:-}" == "--kill-occupants" ]]; then
+  KILL_OCCUPANTS=true
+elif [[ -n "${3:-}" ]]; then
+  die "未知参数: ${3}（cleanup 仅支持 --kill-occupants）"
+fi
 
 [[ "$SUBCMD" =~ ^(merge|cleanup)$ ]] || die "用法: bash $0 merge|cleanup <dev-branch>，如 bash $0 merge dev-0.9.11"
 
@@ -77,6 +89,28 @@ check_clean() {
 
 is_merged() { git -C "$DEV_DIR" merge-base --is-ancestor "$CUR_BRANCH" "$DEV_BRANCH"; }
 
+# 占用进程分类（输入 "CMD:PID" 多行经 stdin）→ 全局 KILLABLE_PIDS / HOST_OCCUPANTS。
+# 宿主链 = agent 宿主及其子进程（命令名 zcode-cli/ZCode*/Claude* 前缀，或命令行含 ~/.zcode/
+# 路径的 MCP 子进程）——它们的句柄多为 cwd 继承（不阻断 unlink）且绝不能被脚本自动终止。
+classify_occupants() {
+  KILLABLE_PIDS="" HOST_OCCUPANTS=""
+  local entry pid cmdline
+  while IFS= read -r entry; do
+    [[ -z "$entry" ]] && continue
+    pid="${entry##*:}"
+    cmdline="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    # lsof 对含空格的命令名输出转义形态（如 ZCode\x20），宿主判定用前缀匹配：
+    # 误判成宿主（不杀）代价远小于漏判（杀宿主断会话），宽容方向固定
+    if [[ "$entry" =~ ^(zcode-cli|ZCode|Claude) ]] || [[ "$cmdline" == *"/.zcode/"* ]] || [[ "$cmdline" == *"zcode-cli"* ]]; then
+      HOST_OCCUPANTS+="  ${entry}  ${cmdline}"$'\n'
+    else
+      KILLABLE_PIDS+="${pid} "
+    fi
+  done
+}
+
+scan_write_occupants() { lsof -wn +D "$CUR_DIR" 2>/dev/null | awk 'NR>1 && $4 ~ /^[0-9]+[wu]/ {print $1":"$2}' | sort -u || true; }
+
 case "$SUBCMD" in
   merge)
     check_clean "$CUR_DIR" "当前 worktree ($CUR_BRANCH)"
@@ -116,6 +150,34 @@ case "$SUBCMD" in
       die "源 worktree 有未提交/未跟踪文件，rm -rf 会无条件删除它们，脚本拒绝继续。git status --short 清单：
 $UNTRACKED
 先检视上述文件：本次会话产生的按提交策略处理；来源不明的询问用户；确认全部可丢弃后执行 git -C $CUR_DIR clean -fd，再重跑：bash $0 cleanup $DEV_BRANCH"
+    fi
+
+    # 闸 4：占用进程预检——持有写模式句柄的进程会让 rm -rf 中途失败（删除期间文件被持续
+    # 写入重建 → "Directory not empty"，2026-10-04 dev 实例事故）。lsof +D 全目录扫描对大
+    # 仓库较慢（10-30s 属正常），无占用时直接通过。命中时默认拒绝并列恢复路径；宿主链
+    # 永不自动终止，仅 WARN（其 cwd/只读句柄不阻断删除）
+    OCCUPANTS="$(scan_write_occupants)"
+    if [[ -n "$OCCUPANTS" ]]; then
+      classify_occupants <<< "$OCCUPANTS"
+      if [[ -n "$KILLABLE_PIDS" && "$KILL_OCCUPANTS" == true ]]; then
+        echo ">> 终止占用进程（TERM → 3s → KILL）: $KILLABLE_PIDS"
+        kill $KILLABLE_PIDS 2>/dev/null || true
+        sleep 3
+        kill -9 $KILLABLE_PIDS 2>/dev/null || true
+        sleep 1
+        OCCUPANTS="$(scan_write_occupants)"
+        classify_occupants <<< "$OCCUPANTS"
+      fi
+      [[ -z "$HOST_OCCUPANTS" ]] || echo "WARN: 以下宿主链占用不自动终止（其句柄多为 cwd/只读，不阻断删除；若删除仍失败按恢复配方人工处置）：
+$HOST_OCCUPANTS"
+      if [[ -n "$KILLABLE_PIDS" ]]; then
+        die "源 worktree 被以下进程占用（持有写句柄，rm -rf 会中途失败）：
+$OCCUPANTS
+恢复路径二选一：
+① 逐个核实为扎根本 worktree 的 dev 实例 / background 任务后精确终止（kill <pid>，禁 pkill 宽杀），再重跑：bash $0 cleanup $DEV_BRANCH
+② 授权脚本代为终止并删除：bash $0 cleanup $DEV_BRANCH --kill-occupants
+宿主链（zcode-cli / ZCode / Claude / ~/.zcode 下 MCP 子进程）永不自动终止——杀宿主会杀死发起本脚本的会话自身"
+      fi
     fi
 
     # 先 cd 出待删目录（macOS 删除 cwd 所在目录后 shell cwd 悬空，后续命令无法执行）
