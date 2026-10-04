@@ -16,12 +16,19 @@
  * message.error——先复核锚点，同步 infra/pi/pi-rejection.ts 的 PI_REJECTION_* 常量与
  * classifyPromptRejection（文案唯一驻留点，U3① 下沉）后再更新 verifiedWith。
  *
+ * 原文单点（F1-18）：本探针的识别串直接 import pi-rejection.ts 的 PI_REJECTION_* 常量
+ * （不内嵌同文字面量）——常量 ↔ dist 的一致性由本探针机器对账，pi 文案漂移时只改常量
+ * 一处探针即绿（改前探针字面量是常量的手写副本，漏改常量时探针绿而
+ * classifyPromptRejection 分型静默失效）。.githooks/check_pi_type_leak.py 的
+ * PI_REJECTION_TEXTS 副本仍人工同步（其头注自证「改常量必同步此处」）。
+ *
  * 运行：cd packages/runtime && npx vitest run src/infra/pi/__tests__/pi-semantics-prompt-rejection.test.ts
  */
 import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { locatePiCodingAgentDist, methodWindow } from './helpers/pi-semantics-probe.js'
+import { PI_REJECTION_COMPACTING, PI_REJECTION_PROCESSING } from '../pi-rejection.js'
 
 const PI_DIST = locatePiCodingAgentDist()
 const SKIP_REASON = PI_DIST
@@ -40,9 +47,10 @@ describe.skipIf(!PI_DIST)(
       const win = methodWindow(SESSION_SRC, 'async prompt(text, options) {')
       expect(win, 'PS-22 漂移：prompt() 方法消失/改签名——复核 PS-22 锚点 dist/core/agent-session.js').not.toBe('')
 
-      // 原文全文恰出现 1 次（文案漂移即红——runtime classifyPromptRejection 按 includes 识别）
+      // 原文全文恰出现 1 次（文案漂移即红——runtime classifyPromptRejection 按 includes 识别；
+      // 识别串 = PI_REJECTION_COMPACTING 常量单点，F1-18）
       expect(
-        count(SESSION_SRC, 'Cannot submit a prompt while compaction is in progress'),
+        count(SESSION_SRC, PI_REJECTION_COMPACTING),
         'PS-22 漂移：manual 压缩拒绝文案消失/变更——runtime 转译失效退化为 message.error，同步 infra/pi/pi-rejection.ts PI_REJECTION_COMPACTING 后更新 verifiedWith',
       ).toBe(1)
 
@@ -52,7 +60,7 @@ describe.skipIf(!PI_DIST)(
         checkIdx,
         'PS-22 漂移：_compactionAbortController 前置检查移出 prompt()（manual 压缩改走别的拒绝面？）——复核 PS-22',
       ).toBeGreaterThanOrEqual(0)
-      const throwIdx = win.indexOf('"Cannot submit a prompt while compaction is in progress')
+      const throwIdx = win.indexOf(`"${PI_REJECTION_COMPACTING}`)
       expect(
         throwIdx > checkIdx && throwIdx - checkIdx < 200,
         'PS-22 漂移：拒绝 throw 与 controller 检查不再相邻（检查顺序/分支改形）——复核 PS-22',
@@ -68,9 +76,10 @@ describe.skipIf(!PI_DIST)(
       const win = methodWindow(SESSION_SRC, 'async prompt(text, options) {')
       expect(win, 'PS-23 漂移：prompt() 方法消失/改签名——复核 PS-23 锚点').not.toBe('')
 
-      // 原文全文恰出现 1 次（文案漂移即红——runtime classifyPromptRejection 按 includes 识别）
+      // 原文全文恰出现 1 次（文案漂移即红——runtime classifyPromptRejection 按 includes 识别；
+      // 识别串 = PI_REJECTION_PROCESSING 常量单点，F1-18）
       expect(
-        count(SESSION_SRC, 'Agent is already processing'),
+        count(SESSION_SRC, PI_REJECTION_PROCESSING),
         'PS-23 漂移：isStreaming 拒绝文案消失/变更——runtime 转译失效退化为 message.error，同步 infra/pi/pi-rejection.ts PI_REJECTION_PROCESSING 后更新 verifiedWith',
       ).toBe(1)
 
@@ -80,7 +89,7 @@ describe.skipIf(!PI_DIST)(
         streamingIdx,
         'PS-23 漂移：isStreaming 分流分支移出 prompt()（busy 拒绝面改形？）——复核 PS-23',
       ).toBeGreaterThanOrEqual(0)
-      const throwIdx = win.indexOf('"Agent is already processing')
+      const throwIdx = win.indexOf(`"${PI_REJECTION_PROCESSING}`)
       expect(
         throwIdx > streamingIdx,
         'PS-23 漂移：拒绝 throw 不再位于 isStreaming 分支内（无 streamingBehavior 仍可入队/改由他处拦截？）——复核 PS-23',

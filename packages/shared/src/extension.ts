@@ -25,7 +25,7 @@ export const EXTENSION_EVENTS = {
  * 权威在 taiji 侧（pi 词汇止点于 event-adapter，帧与前端层只承载本词表）。
  * 与 event-adapter.ts INTERACTIVE_UI_METHODS + ExtensionUIDialog 渲染分支保持同步。
  *
- * notify 不在此列——它是 fire-and-forget（pi 不等回复），走独立 extension.notify WS 帧 + toast 渲染。
+ * notify 不在此列——它是 fire-and-forget（pi 不等回复），走独立 extension:notify WS 帧 + toast 渲染。
  * setStatus/setWidget/set_editor_text 也不在此列——它们走独立分支，不产 dialog 帧。
  */
 export type ExtensionInteractMethod = 'confirm' | 'select' | 'input' | 'editor'

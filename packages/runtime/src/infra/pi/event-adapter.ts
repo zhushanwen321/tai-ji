@@ -93,7 +93,7 @@ const STOP_REASON_MAP: Record<string, string> = {
  * Must stay in sync with ExtensionInteractMethod SSOT (shared/extension.ts).
  *
  * notify 不在此列——它是 fire-and-forget（pi rpc-mode.ts notify 发后不等回复），
- * 走独立 extension.notify WS 帧 + 前端 toast 渲染（非阻塞）。
+ * 走独立 extension:notify WS 帧 + 前端 toast 渲染（非阻塞）。
  * setStatus/setWidget/set_editor_text 也不在此列——它们走独立分支，不产 dialog 帧。
  *
  * 用 `as const satisfies readonly ExtensionInteractMethod[]` 实现编译期穷举检查：
@@ -716,7 +716,7 @@ function translateSetWidgetRequest(event: PiExtensionUiRequestEvent, sid: string
 }
 
 /**
- * notify → extension.notify（fire-and-forget，pi 不等回复）。
+ * notify → extension:notify（fire-and-forget，pi 不等回复）。
  * pi rpc-mode.ts notify 发出 extension_ui_request{method:'notify'} 后不注册 pending、不等 response。
  * 不走 INTERACTIVE_UI_METHODS（不产 extension-ui kind → 不注册 timeout → 不弹模态对话框）。
  * 前端用 toast 渲染（非阻塞）。

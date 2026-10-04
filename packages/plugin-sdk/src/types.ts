@@ -693,7 +693,7 @@ export interface ToolRegistration {
    * - >0 — 该工具单次执行的时间上界；
    * - <=0 或 Infinity — 显式 opt-out（不限时）；
    * - 非法值（非 number / NaN）— 注册入口 fail-fast（INVALID_TIMEOUT_MS）；
-   * - 缺省 — 回落 DEFAULT_TOOL_EXECUTE_TIMEOUT_MS（bridge-interop 默认兜底）。
+   * - 缺省 — 回落 DEFAULT_TOOL_EXECUTE_TIMEOUT_MS（tool-timeout 默认兜底）。
    */
   timeoutMs?: number
   /** Worker 侧本地执行 handler，在 createToolApi 注册时存储 */

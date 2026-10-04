@@ -168,9 +168,9 @@ export function onUIRequest(sessionId: string, handler: (req: ExtensionUIRequest
 }
 
 /**
- * 订阅指定 session 的 extension.notify 推送，返回取消函数。
+ * 订阅指定 session 的 extension:notify 推送，返回取消函数。
  *
- * pi notify 是 fire-and-forget（不等回复），runtime 翻译为 extension.notify WS 帧。
+ * pi notify 是 fire-and-forget（不等回复），runtime 翻译为 extension:notify WS 帧。
  * 前端渲染为 toast 通知（非阻塞），不走 dialog 模态对话框。
  */
 export function onNotify(sessionId: string, handler: (payload: { message: string; level: 'info' | 'warn' | 'error' }) => void): () => void {

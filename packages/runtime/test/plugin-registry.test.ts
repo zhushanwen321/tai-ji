@@ -295,7 +295,7 @@ describe('PluginRegistry', () => {
 //
 // 覆盖 tool-api.ts 注册入口的窄校验与透传（设计 §6.1 D1 / §7 文件地图 / 错误规格表
 // 「声明值非法」行）：
-// - 合法正数 → 透传存储（运行时语义归 bridge-interop resolveToolTimeoutMs，U1 领地）
+// - 合法正数 → 透传存储（运行时语义归 tool-timeout resolveToolTimeoutMs，U1 领地）
 // - 非 number / NaN → 注册入口 fail-fast（INVALID_TIMEOUT_MS，对齐 ui-api INVALID_* 风格）
 // - 0 / 负数 / Infinity → 合法声明（显式 opt-out），不抛、透传
 // - 缺省 → 不落键，现状注册行为不变（兼容用例）

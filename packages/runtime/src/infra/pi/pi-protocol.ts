@@ -571,7 +571,7 @@ export interface PiExtensionUiRequestEvent extends PiBaseMessage {
    *
    * 交互式 dialog 方法（产生 extension.ui_request WS 帧，需前端回复）：confirm / select / input / editor
    * Fire-and-forget 方法（独立 WS 帧，不等回复）：notify / setStatus / setWidget / set_editor_text / setTitle
-   * notify 走 extension.notify WS 帧 + toast 渲染（非模态）；setStatus/setWidget 走各自独立帧；
+   * notify 走 extension:notify WS 帧 + toast 渲染（非模态）；setStatus/setWidget 走各自独立帧；
    * set_editor_text 走 extension:setEditorText。setTitle 宿主不实现（pi fire-and-forget，
    * 丢弃无功能损失——event-adapter 落 default 分支 warn + noop，预决策只补类型不实现宿主）。
    * 全集对照 pi rpc-mode.js createExtensionUIContext 的 output 调用点（RT-2#7 补全

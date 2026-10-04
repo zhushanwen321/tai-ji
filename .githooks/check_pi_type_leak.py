@@ -64,9 +64,9 @@ pi1-disposition-chat-flow 设计 D5「pi 词汇合法持有点清单 + 泄漏并
   (a) taiji 复合消息类型尾段（'message.message_start' 等）——完整值 ≠ 词表词，属整串
       口径的选型理由而非盲区（taiji 自有 WS 词表合法代码）；
   (b) 无引号对象键形态（{ agent_start: ... }）——标识符键非字符串字面量，检不出；
-      现存实例 = services/plugin-service/bridge-interop.ts（pi 事件名 → hook 映射表键，
-      pi1-disposition-chat-flow D7① / U4⑤ 删除清单归宿，退役后盲区现存实例自然消失；
-      检查上线不以删除为前置——该形态不产生红灯）；
+      该形态现存实例已随 plugin-bridge 退役清零（曾为 services/plugin-service/
+      bridge-interop.ts 的 pi 事件名 → hook 映射表对象键，D7① 删除；ADR-0110 §4
+      同口径登记）；
   (c) 日志模板串内嵌（`...agent_start...` 等）——完整值 ≠ 词表词不命中；日志文本非
       协议穿透通道（与测试排除同论证），保留原文。
   未来 (b) 形态泄漏再现时，扩「对象键 word:」匹配形态是纯增量动作（本头注即重审

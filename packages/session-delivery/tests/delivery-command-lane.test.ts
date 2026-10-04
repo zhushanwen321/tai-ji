@@ -1,10 +1,10 @@
 /**
- * 命令条目内核豁免测试（pi1-disposition-chat-flow D14③②/D14⑥/U7，§4.1 验收条款 6/7）：
+ * 命令条目内核豁免测试（pi1-disposition-chat-flow D14③②/D14⑥/D2②，§4.1 验收条款 6/7）：
  * - G3 闸②：port.send settle 兜底对命令条目不武装（命令 handler await 用户交互属任务
  *   正常路径，60s 墙钟是跨粒级挪用）+ 普通条目兜底仍武装（对照）
  * - D14⑥：非 checked 通路（send()）命令条目首败即停、不进 backoff（「失败 = 可能已
  *   执行」，重试买不到安全性）+ 普通条目失败仍有限重试（对照）
- * - U7：组批隔离——命令条目与普通条目同窗挂账 / 同队列积累时命令恒单独成批（port.send
+ * - D2② 组批隔离：命令条目与普通条目同窗挂账 / 同队列积累时命令恒单独成批（port.send
  *   收到裸命令文本，不被 BATCH_SEP 拼接为混合 composed——拼接文本使命令解析必然 miss）+
  *   普通条目合批语义不变（对照）
  *
@@ -121,7 +121,7 @@ describe('D14⑥：非 checked 通路命令条目首败即停', () => {
   })
 })
 
-describe('U7：组批隔离——命令条目不与普通条目拼为混合 composed', () => {
+describe('D2② 组批隔离：命令条目不与普通条目拼为混合 composed', () => {
   /** BATCH_SEP 字面量（与 delivery.ts buildBatchPayload 同值镜像，模块私有故本处同值）。 */
   const BATCH_SEP = '\n\n---\n\n'
 
@@ -222,5 +222,36 @@ describe('U7：组批隔离——命令条目不与普通条目拼为混合 comp
     expect(bp.port.sendCalls.length).toBe(2)
     expect(composedOf(bp.port.sendCalls[1])).toBe(`普通A${BATCH_SEP}普通C`)
     handle.dispose()
+  })
+})
+
+describe('F1-11：handled 终局路径 checked waiter 受理口径 settle', () => {
+  it('port.send 实现内先 confirmDelivered 再 settle（registry deliverOne 同构时序）→ sendChecked promise resolve 且 tombstone 在册', async () => {
+    // handled 终局形态（session-delivery-registry deliverOne 同构）：port.send 实现
+    // 内部先 confirmDelivered（finalizeEntry 同步摘批 + 写 tombstone），随后 promise
+    // 才 settle——onSendOk 的 settleChecked 只 settle 当前批成员（批已不含该条目），
+    // 修复前 checked waiter 永不 settle、恒滞留 checkedPending（waiter 泄漏 +
+    // pump watchdog 停表条件恒假）。
+    const handleBox: { current: ReturnType<typeof createDelivery> | undefined } = {
+      current: undefined,
+    }
+    const port = makeMockPort({
+      send: async () => {
+        handleBox.current!.confirmDelivered('cmd-handled')
+        return undefined
+      },
+    })
+    const handle = createDelivery(port)
+    handleBox.current = handle
+    const checked = handle.sendChecked(msg('/todos'), { id: 'cmd-handled', isCommand: true })
+    // 修复前此 await 永挂（vitest 默认超时红）；修复后受理口径随 delivered 终局 resolve
+    await checked
+    const full = handle.entriesFull()
+    expect(full.active.some((e) => e.id === 'cmd-handled')).toBe(false)
+    expect(full.tombstones.some((t) => t.id === 'cmd-handled' && t.state === 'delivered')).toBe(true)
+    // waiter 已随终局了结（checkedPending 清空）：dispose 不再有挂账可 reject（无
+    // 未处理 rejection 即 waiter 已被 resolveWaitersOf 移除的间接锚定）
+    handle.dispose()
+    await checked
   })
 })

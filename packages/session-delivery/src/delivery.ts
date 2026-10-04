@@ -35,7 +35,12 @@
  * - 'rejected' = 重试耗尽通知（v1 时点不变，判定源 = sendAttempts > max，仅通知）。
  * - 显式例外：sendChecked 的同步 settle 维持受理口径不变——promise 在 port.send
  *   受理成功时点 resolve（session_manager send 的 {queued:true} 契约锚，D9⑤ 锁定），
- *   与 onSettled 送达口径正交。
+ *   与 onSettled 送达口径正交。补充受理口径的第二 settle 路径（F1-11）：条目在
+ *   port.send promise settle 之前已终局 delivered 时（handled 终局路径——适配器在
+ *   port.send 实现内部先 confirmDelivered 再让 promise settle，finalizeEntry 同步
+ *   摘批后 onSendOk 的 settleChecked 只 settle 当前批成员），受理确认随 confirmDelivered
+ *   同步了结（resolveWaitersOf）——契约「受理成功即 resolve」对命令条目成立，
+ *   waiter 不因 settle 时序倒挂滞留。
  *
  * 双视图（D9②/D5③）：entriesFull() = 全量视图（活跃条目 + 全量 tombstone，对账/
  * 判重消费）；projection() = 投影视图（活跃全量 + delivered 最近 50 条完整条目，
@@ -290,7 +295,7 @@ function buildBatchPayload(messages: DeliveryMessage[]): DeliveryMessage {
 }
 
 /**
- * 命令条目组批隔离（pi1-disposition-chat-flow U7/D2② 组批面补全）：命令条目不注标出站
+ * 命令条目组批隔离（pi1-disposition-chat-flow D2② 组批面）：命令条目不注标出站
  * （D2②，出站文本 = 裸命令），与普通条目合批会被 buildBatchPayload 以 BATCH_SEP 拼为
  * 一条出站文本——pi 命令解析（首个空格前段剥斜杠逐字精确匹配）对拼接文本必然 miss，
  * 命令退化为普通文本开 LLM 回合（★2 同构缺陷复发，D2② 效果主张落空）；两条命令互拼
@@ -521,6 +526,10 @@ export function createDelivery(
     e.settledAt = ts
     tombstones.set(e.id, { id: e.id, state, lane: e.lane, settledAt: ts })
     if (state === 'delivered') {
+      // F1-11：delivered 终局同步了结 checked waiter 的受理口径（resolveWaitersOf
+      // 注释）——防止「confirmDelivered 先于 port.send promise settle」时序倒挂下
+      // waiter 永挂（handled 终局恒定路径）。
+      resolveWaitersOf(e)
       deliveredLog.push(e)
       if (deliveredLog.length > DEFAULT_DELIVERED_WINDOW) deliveredLog.shift()
     }
@@ -539,6 +548,22 @@ export function createDelivery(
     for (let i = checkedPending.length - 1; i >= 0; i--) {
       if (checkedPending[i]!.entry === e) {
         checkedPending[i]!.reject(err)
+        checkedPending.splice(i, 1)
+      }
+    }
+  }
+
+  /**
+   * confirmDelivered 时 resolve 该条目的 checked waiter（F1-11，与 rejectWaitersOf
+   * 对称）：条目已终局 delivered 则受理确认随之了结——delivered 蕴含受理已发生，
+   * promise 不可能再走失败 reject。在 finalizeEntry 的 delivered 分支统一驱动，
+   * 覆盖全部终局路径（正规送达回执 / rebuild 直确认 / handled 终局适配器内先
+   * confirm 后 settle 的时序倒挂形态）。
+   */
+  function resolveWaitersOf(e: KernelEntry): void {
+    for (let i = checkedPending.length - 1; i >= 0; i--) {
+      if (checkedPending[i]!.entry === e) {
+        checkedPending[i]!.resolve()
         checkedPending.splice(i, 1)
       }
     }
@@ -814,7 +839,7 @@ export function createDelivery(
         if (inRegistry(w.entry) && w.entry.state === 'queued') batch.push(w.entry)
       }
       if (batch.length > 0) {
-        // 命令条目组批隔离（U7）：在途窗口（上一条 prompt RPC 往返 / 压缩等待）内连发的
+        // 命令条目组批隔离（D2②）：在途窗口（上一条 prompt RPC 往返 / 压缩等待）内连发的
         // 多条 checked 挂账经本处汇成一批——批内含命令条目时只取队首命令条目单独出站，
         // 防裸命令文本与普通条目被分隔符拼接为一条 composed（pi 命令解析必然 miss）。
         inflightBatch = isolateCommandEntry(batch)
@@ -836,7 +861,7 @@ export function createDelivery(
     if (disposed || inFlight) return
 
     // 候选批 = 全部 queued 条目（port.send 失败时留守重试，受理成功才转移）；命令条目
-    // 组批隔离（U7）：busy park 积累的队列中命令条目与普通条目同批时只取队首命令条目
+    // 组批隔离（D2②）：busy park 积累的队列中命令条目与普通条目同批时只取队首命令条目
     // 单独出站（同 pump，防拼接文本使命令解析 miss），普通条目留守待下一轮。
     const batch = isolateCommandEntry(active.filter((e) => e.state === 'queued'))
     if (batch.length === 0) return
@@ -997,7 +1022,9 @@ export function createDelivery(
     ensureSettledSub()
 
     // 统一投递循环（#3/#8）：resolve 挂钩本条目的 port.send 受理结果（D9⑤ 受理
-    // 口径锁定）。不经 busy gate——busy 时经 streaming 受理入 pi 队列即回（受理即
+    // 口径锁定；条目在 promise settle 前已终局 delivered 时由 confirmDelivered 的
+    // resolveWaitersOf 提前了结——F1-11 handled 终局时序倒挂形态，见头注显式例外段）。
+    // 不经 busy gate——busy 时经 streaming 受理入 pi 队列即回（受理即
     // 确认可达，探针 P1 rtt≈1ms）；不带走合批窗口中的其他条目（单独成批）。
     return new Promise<void>((resolve, reject) => {
       checkedPending.push({ entry, resolve, reject })
