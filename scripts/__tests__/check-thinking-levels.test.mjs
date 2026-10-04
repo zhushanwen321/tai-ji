@@ -16,17 +16,16 @@
  * （ci.yml「Test - scripts guards」逐文件列举同款口径。）
  */
 import { describe, it, expect } from 'vitest'
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, readFileSync, existsSync, copyFileSync, realpathSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, symlinkSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   extractModelThinkingLevel,
   extractConstListMembers,
-  setDiff,
   resolvePiAiRoot,
 } from '../check-thinking-levels.mjs'
+import { setDiff } from '../lib/guard-report.mjs'
+import { createMirrorRoot, installGuardIntoMirror } from './helpers/guard-mirror.mjs'
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'check-thinking-levels.mjs')
 
@@ -137,24 +136,10 @@ const sharedPiPresetSrc = (members) =>
  * packages/shared/src），node_modules/@earendil-works/pi-ai
  * symlink 到真实实装包根（import.meta.resolve realpath 后向上爬包根与真实运行同构）。
  * overrides 可按比对面覆盖成员集（漂移注入点），missing 指定不落盘的比对面路径。
- *
- * 守卫脚本本体复制进 `<mirror>/scripts/`，run() 跑的是该副本：守卫 ROOT 由
- * `import.meta.url` 推导，副本位置使 ROOT 落在 mirror 内——篡改 fixture 才真正改到守卫读
- * 的文件，「篡改即红、还原即绿」的差分才成立（跑真实仓库脚本时 ROOT 指向真实仓库，
- * 篡改 mirror 永不生效、恒 exit 0）。
- *
- * root 取 realpath：Node 对入口模块的 import.meta.url 做 realpath，而 process.argv[1] 保留
- * 调用方路径——macOS os.tmpdir() 是 /var/folders → /private/var/folders 符号链接，两者不一致
- * 会让守卫的 isMain 判定（`import.meta.url === pathToFileURL(resolve(process.argv[1]))`）为
- * false，脚本被 import 而不执行 main（又变恒 exit 0）。realpath 后两条路径同源。
+ * root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
  */
 function makeMirror({ thinkingOrder, piPresetLevels, missing = [] } = {}) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'thinking-levels-fx-')))
-  const writeAt = (rel, content) => {
-    const abs = join(root, rel)
-    mkdirSync(dirname(abs), { recursive: true })
-    writeFileSync(abs, content)
-  }
+  const { root, writeAt, cleanup } = createMirrorRoot('thinking-levels-fx-')
   const files = {
     'packages/subagent-core/src/shared/model-ref.ts': subagentCoreModelRefSrc(thinkingOrder ?? REAL_MEMBERS),
     'packages/shared/src/pi-preset.ts': sharedPiPresetSrc(piPresetLevels ?? REAL_MEMBERS),
@@ -163,14 +148,11 @@ function makeMirror({ thinkingOrder, piPresetLevels, missing = [] } = {}) {
     if (missing.includes(rel)) continue
     writeAt(rel, content)
   }
-  const guardCopy = join(root, 'scripts', 'check-thinking-levels.mjs')
-  mkdirSync(dirname(guardCopy), { recursive: true })
-  copyFileSync(SCRIPT, guardCopy)
+  const run = installGuardIntoMirror(root, SCRIPT)
   const linkDir = join(root, 'node_modules', '@earendil-works')
   mkdirSync(linkDir, { recursive: true })
   symlinkSync(PI_AI_ROOT, join(linkDir, 'pi-ai'), 'dir')
-  const run = () => spawnSync(process.execPath, [guardCopy], { cwd: root, encoding: 'utf-8' })
-  return { root, run, cleanup: () => rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }) }
+  return { root, run, cleanup }
 }
 
 describe('CLI 集成（守卫脚本 × tmp mirror）', () => {

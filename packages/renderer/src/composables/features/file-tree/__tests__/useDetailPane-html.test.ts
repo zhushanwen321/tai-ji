@@ -42,8 +42,24 @@ import { useDetailPane } from '@/composables/features/file-tree/useDetailPane'
 import { useFileTreeStore } from '@/stores/fileTree'
 import { useSideDrawer, resetSideDrawer } from '@/composables/features/drawer/useSideDrawer'
 
+/** pane 响应式 state 类型（从 useDetailPane 返回签名派生，类型未独立导出）。 */
+type PaneStateRef = ReturnType<typeof useDetailPane>['state']
+
 function setupSession(sid: string, path: string, status: string): void {
   useFileTreeStore().setGitOverlay(sid, [{ path, xyCode: 'M', status }])
+}
+
+/**
+ * 挂 pane 并驱动到分发落定（树选中入口；path = null 表示经 useSideDrawer.open 入口，
+ * 不走 selectFile）。等到 state.status 到达期望终态（content / error）后返回响应式 state。
+ */
+async function openPane(sid: string, path: string | null, expectStatus: 'content' | 'error' = 'content'): Promise<PaneStateRef> {
+  const sessionId = ref<string | null>(sid)
+  const { state } = useDetailPane(sessionId)
+  if (path !== null) useFileTreeStore().selectFile(path)
+  await nextTick()
+  await vi.waitFor(() => expect(state.value.status).toBe(expectStatus))
+  return state
 }
 
 beforeEach(() => {
@@ -61,11 +77,7 @@ describe('useDetailPane · .html 恢复源码分发（渲染态退役）', () =>
     setupSession(sid, path, 'modified')
     mockGitGetDiff.mockResolvedValue({ patch: 'diff --git a/docs/report.html b/docs/report.html\n@@ -1 +1 @@\n-a\n+b', binary: false })
 
-    const sessionId = ref<string | null>(sid)
-    const { state } = useDetailPane(sessionId)
-    useFileTreeStore().selectFile(path)
-    await nextTick()
-    await vi.waitFor(() => expect(state.value.status).toBe('content'))
+    const state = await openPane(sid, path)
 
     expect(state.value.kind).toBe('code')
     expect(state.value.viewMode).toBe('diff')
@@ -79,10 +91,7 @@ describe('useDetailPane · .html 恢复源码分发（渲染态退役）', () =>
     mockGitGetDiff.mockResolvedValue({ patch: 'diff --git a/docs/report.html b/docs/report.html\n@@ -1 +1 @@\n-a\n+b', binary: false })
 
     useSideDrawer().open('detail', { filePath: path })
-    const sessionId = ref<string | null>(sid)
-    const { state } = useDetailPane(sessionId)
-    await nextTick()
-    await vi.waitFor(() => expect(state.value.status).toBe('content'))
+    const state = await openPane(sid, null)
 
     expect(state.value.kind).toBe('code')
     expect(state.value.viewMode).toBe('diff')
@@ -93,11 +102,7 @@ describe('useDetailPane · .html 恢复源码分发（渲染态退役）', () =>
     const path = 'docs/report.html'
     mockFileRead.mockResolvedValue({ content: '<html>project</html>', truncated: false })
 
-    const sessionId = ref<string | null>(sid)
-    const { state } = useDetailPane(sessionId)
-    useFileTreeStore().selectFile(path)
-    await nextTick()
-    await vi.waitFor(() => expect(state.value.status).toBe('content'))
+    const state = await openPane(sid, path)
 
     expect(state.value.kind).toBe('code')
     expect(state.value.viewMode).toBe('preview')
@@ -113,11 +118,7 @@ describe('useDetailPane · .html 恢复源码分发（渲染态退役）', () =>
     setupSession(sid, path, 'modified')
     mockGitGetDiff.mockResolvedValueOnce({ patch: 'diff --git a/feed.xml b/feed.xml\n@@ -1 +1 @@\n-a\n+b', binary: false })
 
-    const sessionId = ref<string | null>(sid)
-    const { state } = useDetailPane(sessionId)
-    useFileTreeStore().selectFile(path)
-    await nextTick()
-    await vi.waitFor(() => expect(state.value.status).toBe('content'))
+    const state = await openPane(sid, path)
 
     expect(state.value.kind).toBe('code')
     expect(state.value.viewMode).toBe('diff')
@@ -130,11 +131,7 @@ describe('useDetailPane · 产物目录文件读取（白名单通道保留，§
     const path = '/Users/demo/.taiji-dev/artifacts/s1/report.html'
     mockLocalFileRead.mockResolvedValue({ ok: true, content: '<html>artifact</html>', truncated: false })
 
-    const sessionId = ref<string | null>(sid)
-    const { state } = useDetailPane(sessionId)
-    useFileTreeStore().selectFile(path)
-    await nextTick()
-    await vi.waitFor(() => expect(state.value.status).toBe('content'))
+    const state = await openPane(sid, path)
 
     expect(state.value.kind).toBe('code')
     expect(state.value.viewMode).toBe('preview')
@@ -148,11 +145,7 @@ describe('useDetailPane · 产物目录文件读取（白名单通道保留，§
     const path = '~/.taiji/artifacts/s1/report.html'
     mockLocalFileRead.mockResolvedValue({ ok: true, content: '<html>tilde</html>', truncated: false })
 
-    const sessionId = ref<string | null>(sid)
-    const { state } = useDetailPane(sessionId)
-    useFileTreeStore().selectFile(path)
-    await nextTick()
-    await vi.waitFor(() => expect(state.value.status).toBe('content'))
+    const state = await openPane(sid, path)
 
     expect(mockLocalFileRead).toHaveBeenCalledWith(path)
     expect(mockFileRead).not.toHaveBeenCalled()
@@ -163,11 +156,7 @@ describe('useDetailPane · 产物目录文件读取（白名单通道保留，§
     const path = '/Users/demo/.taiji-dev/artifacts/s1/gone.html'
     mockLocalFileRead.mockResolvedValue({ ok: false, reason: 'not_found' })
 
-    const sessionId = ref<string | null>(sid)
-    const { state } = useDetailPane(sessionId)
-    useFileTreeStore().selectFile(path)
-    await nextTick()
-    await vi.waitFor(() => expect(state.value.status).toBe('error'))
+    const state = await openPane(sid, path, 'error')
 
     expect(state.value.error).toBe('文件不存在')
     expect(mockFileRead).not.toHaveBeenCalled()
@@ -179,11 +168,7 @@ describe('useDetailPane · 产物目录文件读取（白名单通道保留，§
     mockLocalFileRead.mockResolvedValue({ ok: false, reason: 'out_of_whitelist' })
     mockFileRead.mockResolvedValue({ content: '<html>fallback</html>', truncated: false })
 
-    const sessionId = ref<string | null>(sid)
-    const { state } = useDetailPane(sessionId)
-    useFileTreeStore().selectFile(path)
-    await nextTick()
-    await vi.waitFor(() => expect(state.value.status).toBe('content'))
+    const state = await openPane(sid, path)
 
     expect(state.value.content).toBe('<html>fallback</html>')
     expect(mockLocalFileRead).toHaveBeenCalledWith(path)

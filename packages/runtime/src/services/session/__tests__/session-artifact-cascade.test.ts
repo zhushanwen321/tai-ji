@@ -63,43 +63,49 @@ function makeLifecycle(sid: string, filePath: string, cwd: string): SessionLifec
   )
 }
 
-describe('SessionLifecycle.delete —— 产物目录级联删除（D7 回收①）', () => {
-  it('删会话 → `<dataDir>/artifacts/<sessionId>/` 消失（递归删子树）', async () => {
-    const sid = uniqueSid()
-    const workDir = mkdtempSync(join(tmpdir(), 'taiji-artifact-cascade-'))
-    const filePath = join(workDir, `${sid}.jsonl`)
-    writeFileSync(filePath, '{"type":"session"}\n')
-    const artifactDir = getSessionArtifactsDir(sid)
+/**
+ * 级联删除用例骨架：建 tmp 会话文件 + （seedArtifactDir 时）产物目录树 → 断言种子在位 →
+ * 驱动 `SessionLifecycle.delete` → 用例断言 → finally 双清理（workDir + 产物目录）。
+ * 产物目录经 shared 公式推导（globalSetup 钉扎的 tmp 数据目录内，不触真实数据目录）。
+ */
+async function withCascadeFixture(
+  seedArtifactDir: boolean,
+  run: (ctx: { sid: string; filePath: string; artifactDir: string; lifecycle: SessionLifecycle }) => Promise<void>,
+): Promise<void> {
+  const sid = uniqueSid()
+  const workDir = mkdtempSync(join(tmpdir(), 'taiji-artifact-cascade-'))
+  const filePath = join(workDir, `${sid}.jsonl`)
+  writeFileSync(filePath, '{"type":"session"}\n')
+  const artifactDir = getSessionArtifactsDir(sid)
+  if (seedArtifactDir) {
     mkdirSync(join(artifactDir, 'assets'), { recursive: true })
     writeFileSync(join(artifactDir, 'report.html'), '<html/>')
     writeFileSync(join(artifactDir, 'assets', 'app.js'), 'console.log(1)')
     expect(existsSync(artifactDir)).toBe(true)
+  }
 
-    try {
-      const lifecycle = makeLifecycle(sid, filePath, workDir)
+  try {
+    const lifecycle = makeLifecycle(sid, filePath, workDir)
+    await run({ sid, filePath, artifactDir, lifecycle })
+  } finally {
+    rmSync(workDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    rmSync(artifactDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  }
+}
+
+describe('SessionLifecycle.delete —— 产物目录级联删除（D7 回收①）', () => {
+  it('删会话 → `<dataDir>/artifacts/<sessionId>/` 消失（递归删子树）', async () => {
+    await withCascadeFixture(true, async ({ sid, artifactDir, lifecycle }) => {
       await lifecycle.delete(sid)
       expect(existsSync(artifactDir)).toBe(false)
-    } finally {
-      rmSync(workDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      rmSync(artifactDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    }
+    })
   })
 
   it('重复删除幂等：产物目录已不存在时 delete 不抛（force 幂等形态）', async () => {
-    const sid = uniqueSid()
-    const workDir = mkdtempSync(join(tmpdir(), 'taiji-artifact-cascade-'))
-    const filePath = join(workDir, `${sid}.jsonl`)
-    writeFileSync(filePath, '{"type":"session"}\n')
-    const artifactDir = getSessionArtifactsDir(sid)
-
-    try {
-      const lifecycle = makeLifecycle(sid, filePath, workDir)
+    await withCascadeFixture(false, async ({ sid, artifactDir, lifecycle }) => {
       await lifecycle.delete(sid) // 首次：目录本就不存在（幂等 no-op）
       await lifecycle.delete(sid) // 再次：仍不抛
       expect(existsSync(artifactDir)).toBe(false)
-    } finally {
-      rmSync(workDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      rmSync(artifactDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    }
+    })
   })
 })

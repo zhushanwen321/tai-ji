@@ -16,8 +16,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, copyFileSync, realpathSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -26,6 +25,7 @@ import {
   extractArrayConst,
   extractRecordValues,
 } from '../check-capability-allowlist-sync.mjs'
+import { createMirrorRoot, installGuardIntoMirror } from './helpers/guard-mirror.mjs'
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url))
 const SCRIPT = join(TEST_DIR, '..', 'check-capability-allowlist-sync.mjs')
@@ -101,11 +101,7 @@ const sanitizeSrc = ({ tags, attrs, allowData = true, allowAria = true }) => {
 /**
  * tmp mirror 工厂：目录布局对齐守卫的 ROOT 相对路径（extensions/taiji/system-prompt/src、
  * packages/renderer/src/composables/logic）。overrides 覆盖任一侧成员集或净化配置锚点（漂移
- * 注入点），missing 指定不落盘的文件。
- *
- * root 取 realpath：Node 对入口模块 import.meta.url 做 realpath，而 process.argv[1] 保留调用方
- * 路径——macOS os.tmpdir() 是 /var/folders → /private/var/folders 符号链接，两者不一致会让守卫
- * 的 isMain 判定为 false，脚本被 import 而不执行 main（恒 exit 0）。realpath 后两条路径同源。
+ * 注入点），missing 指定不落盘的文件。root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
  */
 function makeMirror({
   capTags = REAL_CAP_TAGS,
@@ -118,12 +114,7 @@ function makeMirror({
   allowAria = true,
   missing = [],
 } = {}) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'cap-allowlist-fx-')))
-  const writeAt = (rel, content) => {
-    const abs = join(root, rel)
-    mkdirSync(dirname(abs), { recursive: true })
-    writeFileSync(abs, content)
-  }
+  const { root, writeAt, cleanup } = createMirrorRoot('cap-allowlist-fx-')
   const files = {
     'extensions/taiji/system-prompt/src/index.ts': systemPromptSrc({
       tags: capTags,
@@ -142,11 +133,8 @@ function makeMirror({
     if (missing.includes(rel)) continue
     writeAt(rel, content)
   }
-  const guardCopy = join(root, 'scripts', 'check-capability-allowlist-sync.mjs')
-  mkdirSync(dirname(guardCopy), { recursive: true })
-  copyFileSync(SCRIPT, guardCopy)
-  const run = () => spawnSync(process.execPath, [guardCopy], { cwd: root, encoding: 'utf-8' })
-  return { root, run, cleanup: () => rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }) }
+  const run = installGuardIntoMirror(root, SCRIPT)
+  return { root, run, cleanup }
 }
 
 describe('CLI 集成（守卫脚本 × tmp mirror）', () => {

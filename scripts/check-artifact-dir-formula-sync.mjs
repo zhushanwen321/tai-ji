@@ -27,6 +27,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fail, ok, isFailed, guardExit } from './lib/guard-report.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SHARED_PATHS_SRC = join(ROOT, 'packages', 'shared', 'src', 'paths.ts')
@@ -147,12 +148,7 @@ if (process.argv.includes('--self-test')) selfTest()
 
 // ── main()：CLI 直跑才执行 ──────────────────────────────────────────
 
-let failed = 0
-const fail = (msg) => {
-  console.error(`  ✗ ${msg}`)
-  failed = 1
-}
-const ok = (msg) => console.log(`  ✓ ${msg}`)
+// 呈报骨架（✓/✗ 行 + 失败旗标 + 汇总出口）与 scripts 家族共享：scripts/lib/guard-report.mjs
 
 function readTextOrFail(filePath, label) {
   if (!existsSync(filePath)) {
@@ -171,7 +167,7 @@ function main() {
   const mirrorBlock = extractFunctionBlock(mirrorText, MIRROR_ANCHOR)
   if (sharedBlock.error) fail(`权威侧 ${SHARED_FN} 提取失败: ${sharedBlock.error}`)
   if (mirrorBlock.error) fail(`镜像侧 ${MIRROR_FN} 提取失败: ${mirrorBlock.error}`)
-  if (failed !== 0) {
+  if (isFailed()) {
     console.error('产物目录公式对拍：函数块提取失败，按上方 ✗ 修复后重跑')
     process.exit(1)
   }
@@ -188,7 +184,7 @@ function main() {
   ]) {
     if (r.error) fail(`${label} 提取失败: ${r.error}`)
   }
-  if (failed !== 0) {
+  if (isFailed()) {
     console.error('产物目录公式对拍：字面量提取失败，按上方 ✗ 修复后重跑')
     process.exit(1)
   }
@@ -224,12 +220,10 @@ function main() {
     )
   }
 
-  if (failed === 0) {
-    console.log('✓ 产物目录公式双实现对拍通过（段名 + sessionId 校验正则逐字一致）')
-    process.exit(0)
-  }
-  console.error('产物目录公式对拍未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）')
-  process.exit(1)
+  guardExit(
+    '✓ 产物目录公式双实现对拍通过（段名 + sessionId 校验正则逐字一致）',
+    '产物目录公式对拍未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
+  )
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href

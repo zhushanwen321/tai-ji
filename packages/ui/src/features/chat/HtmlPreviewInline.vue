@@ -140,10 +140,11 @@
         />
       </div>
 
-      <!-- 源码态：iframe 卸载，内容经 deps.readArtifact 读取后走 MarkdownRenderer 的
-           shiki fence 高亮通道（嵌套 MarkdownRenderer——同一 ui 包组件，scoped 的
-           .md-codeblock 样式由该实例自带；fence 包裹后源码不再是 markdown 语法区，
-           构造性排除「源码内 html-preview fence → 嵌套容器」递归） -->
+      <!-- 源码态：iframe 卸载，内容经 deps.readArtifact 读取后交宿主提供的 #source 插槽
+           渲染（MarkdownRenderer 的 shiki fence 高亮通道由宿主注入，本容器不反向依赖
+           宿主组件——无组件间静态循环依赖；宿主不提供插槽时「源码」切换整组隐藏）。
+           fence 包裹后源码不再是 markdown 语法区，构造性排除「源码内 html-preview fence
+           → 嵌套容器」递归。 -->
       <div v-else>
         <div
           v-if="sourceState.kind === 'loading'"
@@ -166,12 +167,10 @@
             @click="loadSource"
           >{{ t('common.retry') }}</Button>
         </div>
-        <MarkdownRenderer
+        <slot
           v-else
-          :content="sourceMarkdown"
-          :session-id="sessionId ?? undefined"
-          class="p-1.5"
-          data-testid="html-preview-source"
+          name="source"
+          :markdown="sourceMarkdown"
         />
       </div>
     </template>
@@ -189,18 +188,19 @@
  * - 懒挂载：IntersectionObserver（threshold 0.1）进视口才设 src；已挂载不卸载（离视口
  *   保留，避免来回滚动反复重执行脚本）；卸载时断开 observer。
  * - 源码态经 deps.readArtifact（可选）：未 provide →「源码」按钮隐藏；读取失败 → 错误
- *   占位 + 重试。
+ *   占位 + 重试。源码内容由宿主经 #source 作用域插槽渲染（markdown 槽参 = fence 包裹后
+ *   的源码，走宿主的高亮通道）；插槽未提供（宿主无渲染能力）时「源码」切换同样隐藏。
  */
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, useSlots } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown, ChevronUp, FileCode2, Loader2, RefreshCw } from '@lucide/vue'
 import { Button } from '../../primitives/button'
 import { useChatViewDeps } from './chat-view-deps'
 import { basenameOf, buildLocalFileUrl, formatSize, isAbsolutePath, resolvePosixPath } from './html-preview-path'
-import MarkdownRenderer from './MarkdownRenderer.vue'
 
 const { t } = useI18n()
 const deps = useChatViewDeps()
+const slots = useSlots()
 
 const props = defineProps<{
   /** fence 内容（路径字符串，切片层原样承载——trim/合法性判定在本组件） */
@@ -291,8 +291,16 @@ const sizeText = computed(() => {
 
 // ── iframe src（local-file 编码 + ?r=n 重导航；与原抽屉渲染态同规格，镜像实现）──
 
-/** 源码态可用性：deps.readArtifact 已 provide 且路径可解析（缺一 →「源码」按钮整组隐藏） */
-const sourceAvailable = computed(() => typeof deps.readArtifact === 'function' && resolvedPath.value !== null)
+/**
+ * 源码态可用性：deps.readArtifact 已 provide、路径可解析、宿主提供了 #source 插槽
+ * （三者缺一 →「源码」按钮整组隐藏——无渲染通道就不暴露切换入口）。
+ */
+const sourceAvailable = computed(
+  () =>
+    typeof deps.readArtifact === 'function' &&
+    resolvedPath.value !== null &&
+    typeof slots.source === 'function',
+)
 
 /**
  * iframe 挂载条件：路径可解析、非降级、已进视口、预览态、预检通过（servable/skipped）。

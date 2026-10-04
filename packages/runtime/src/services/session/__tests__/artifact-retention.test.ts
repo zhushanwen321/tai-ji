@@ -69,6 +69,28 @@ function writeSessionFile(filePath: string): string {
   return filePath
 }
 
+/**
+ * 三棵树活会话保护用例骨架：建产物目录 + 在 `sessionFilePath` 落会话文件 → 跑清理 →
+ * 断言产物目录 `sid` 超龄仍被保留（`removed` 不含、目录仍在）。
+ */
+function expectProtectedBy(sessionFilePath: string, sid: string): void {
+  writeArtifactDir(sid)
+  writeSessionFile(sessionFilePath)
+  const r = cleanExpiredArtifactDirs(roots, 7, now)
+  expect(r.removed).toEqual([])
+  expect(existsSync(join(roots.artifactsRoot as string, sid))).toBe(true)
+}
+
+/**
+ * 「不超龄/未命中判据 → 保留」用例骨架：跑清理 → 断言 `removed` 不含任何目录、
+ * `dir` 仍在磁盘。
+ */
+function expectKept(dir: string): void {
+  const r = cleanExpiredArtifactDirs(roots, 7, now)
+  expect(r.removed).toEqual([])
+  expect(existsSync(dir)).toBe(true)
+}
+
 describe('sessionFileIdFromName / sessionFileNameMatchesDir（与 image-cache.ts 同型解析）', () => {
   it('主文件 `<ISO>_<uuid>.jsonl` 与 sidecar 均解析出同一 uuid', () => {
     expect(sessionFileIdFromName(`${ISO}_${UUID}.jsonl`)).toBe(UUID)
@@ -93,28 +115,16 @@ describe('sessionFileIdFromName / sessionFileNameMatchesDir（与 image-cache.ts
 
 describe('cleanExpiredArtifactDirs —— 三棵树活会话保护（真实嵌套夹具）', () => {
   it('主树存在同名会话文件（两层）→ 超龄也不清', () => {
-    writeArtifactDir(UUID)
-    writeSessionFile(join(roots.sessionsRoot as string, ENCODE_CWD, `${ISO}_${UUID}.jsonl`))
-    const r = cleanExpiredArtifactDirs(roots, 7, now)
-    expect(r.removed).toEqual([])
-    expect(existsSync(join(roots.artifactsRoot as string, UUID))).toBe(true)
+    expectProtectedBy(join(roots.sessionsRoot as string, ENCODE_CWD, `${ISO}_${UUID}.jsonl`), UUID)
   })
 
   it('subagent 树存在同名会话文件（三层）→ 超龄也不清', () => {
-    writeArtifactDir(UUID)
-    writeSessionFile(join(roots.subagentsRoot as string, ENCODE_CWD, 'sessions', `${ISO}_${UUID}.jsonl`))
-    const r = cleanExpiredArtifactDirs(roots, 7, now)
-    expect(r.removed).toEqual([])
-    expect(existsSync(join(roots.artifactsRoot as string, UUID))).toBe(true)
+    expectProtectedBy(join(roots.subagentsRoot as string, ENCODE_CWD, 'sessions', `${ISO}_${UUID}.jsonl`), UUID)
   })
 
   it('btw 树存在同名会话文件（三层）→ 超龄也不清', () => {
     // btw 布局 = `<btwRoot>/<encodeCwd>/<mainSid>/<线会话文件>`；产物目录按**线 sid** 键控
-    writeArtifactDir(OTHER_UUID)
-    writeSessionFile(join(roots.btwRoot as string, ENCODE_CWD, UUID, `${ISO}_${OTHER_UUID}.jsonl`))
-    const r = cleanExpiredArtifactDirs(roots, 7, now)
-    expect(r.removed).toEqual([])
-    expect(existsSync(join(roots.artifactsRoot as string, OTHER_UUID))).toBe(true)
+    expectProtectedBy(join(roots.btwRoot as string, ENCODE_CWD, UUID, `${ISO}_${OTHER_UUID}.jsonl`), OTHER_UUID)
   })
 
   it('平铺形态（主树单层）不构成保护——证明判据须按真实嵌套层级实现', () => {
@@ -142,9 +152,7 @@ describe('cleanExpiredArtifactDirs —— 超龄与新鲜度判定', () => {
 
   it('刚写入目录（文件 mtime 新）→ 不清', () => {
     const dir = writeArtifactDir(UUID, { fileMtimeMs: now - 1000 })
-    const r = cleanExpiredArtifactDirs(roots, 7, now)
-    expect(r.removed).toEqual([])
-    expect(existsSync(dir)).toBe(true)
+    expectKept(dir)
   })
 
   it('原地改写反例：文件 mtime 新、目录条目 mtime 旧 → 按子树最新文件 mtime 判不超龄', () => {
@@ -152,16 +160,12 @@ describe('cleanExpiredArtifactDirs —— 超龄与新鲜度判定', () => {
     // 目录条目 mtime 置为 30 天前（原地改写不更新父目录 mtime 的真实形态）
     const old = (now - 30 * MS_PER_DAY) / 1000
     utimesSync(dir, old, old)
-    const r = cleanExpiredArtifactDirs(roots, 7, now)
-    expect(r.removed).toEqual([])
-    expect(existsSync(dir)).toBe(true)
+    expectKept(dir)
   })
 
   it('延迟写入窗口反例：目录刚建、会话文件尚未落盘但未超龄 → 不清', () => {
     const dir = writeArtifactDir(UUID, { noFile: true })
-    const r = cleanExpiredArtifactDirs(roots, 7, now)
-    expect(r.removed).toEqual([])
-    expect(existsSync(dir)).toBe(true)
+    expectKept(dir)
   })
 
   it('空目录 + 超龄 + 无会话文件 → 清（回落目录 mtime 计龄）', () => {
@@ -190,19 +194,12 @@ describe('cleanExpiredArtifactDirs —— 目录名合法性与保守取向', ()
 
   it('解析失配保守用例：目录名与解析值不等（含 `_` 的 sid）→ 不清', () => {
     const sid = 'sess_AB_01'
-    const dir = writeArtifactDir(sid)
     // 该 sid 的会话文件：末段解析 = '01' ≠ dirName，但真 sid 通道命中 → 保护
-    writeSessionFile(join(roots.sessionsRoot as string, ENCODE_CWD, `${ISO}_${sid}.jsonl`))
-    const r = cleanExpiredArtifactDirs(roots, 7, now)
-    expect(r.removed).toEqual([])
-    expect(existsSync(dir)).toBe(true)
+    expectProtectedBy(join(roots.sessionsRoot as string, ENCODE_CWD, `${ISO}_${sid}.jsonl`), sid)
   })
 
   it('sidecar 形态会话文件（.jsonl.meta.json）同样构成保护', () => {
-    writeArtifactDir(UUID)
-    writeSessionFile(join(roots.sessionsRoot as string, ENCODE_CWD, `${ISO}_${UUID}.jsonl.meta.json`))
-    const r = cleanExpiredArtifactDirs(roots, 7, now)
-    expect(r.removed).toEqual([])
+    expectProtectedBy(join(roots.sessionsRoot as string, ENCODE_CWD, `${ISO}_${UUID}.jsonl.meta.json`), UUID)
   })
 })
 

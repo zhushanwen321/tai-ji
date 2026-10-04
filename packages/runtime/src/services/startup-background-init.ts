@@ -238,6 +238,46 @@ export async function runStartupBackgroundInit(deps: StartupBackgroundDeps): Pro
   // ⑦b extension 声明的启动配置统一 ensure（机制与容错见 ensureStartupConfigs 注释）。
   await ensureStartupConfigs(extensionService)
 
+  // ⑧+⑧b 启动期磁盘残留清扫（sessions 目录崩溃残留 + 冲突/损坏备份按龄回收），
+  // 语义与编排位置不变（本步骤不参与耗时分解探针）。
+  cleanupStartupResidue()
+
+  // ⑩ 空闲 pi 回收 reaper 启动（idle-pi-reclamation D4，u3b）：对齐 ⑨ 的 fire-and-forget
+  // + try/catch 形态——startIdleReaper 只起一个 setInterval 判定循环（tick 定时器已在
+  // reaper 内部 unref，不阻塞进程退出），同步返回无异步面；首拍在 tick 间隔（默认 5min）
+  // 之后，与串行链其余步骤零共享状态。缺省（undefined）= 跳过（行为不变，既有测试构造点
+  // 不受影响）。
+  if (deps.startIdleReaper) {
+    try {
+      deps.startIdleReaper()
+    // eslint-disable-next-line taste/no-silent-catch -- best-effort：闭包装配错误仅 warn，不阻塞启动序列（reaper 缺席 = 现状行为，下轮重启重试）
+    } catch (e) {
+      console.warn('[runtime] idle pi reaper start failed:', e)
+    }
+  }
+
+  // ⑪ 产物目录保留期扫描（chat-html-support §6.7 D7 回收②）：启动扫 + 每日复扫定时器
+  // （节奏照搬 main 侧 log-retention.ts 模式，落点在 runtime 会话服务）。同步返回无异步面，
+  // 定时器 unref；单次扫描异常在闭包内消化。缺省（undefined）= 跳过（行为不变）。
+  if (deps.startArtifactRetention) {
+    try {
+      deps.startArtifactRetention()
+    // eslint-disable-next-line taste/no-silent-catch -- best-effort：保留期扫描失败仅 warn，不阻塞启动序列（残留仅是磁盘垃圾，下拍/下次启动重试）
+    } catch (e) {
+      console.warn('[runtime] artifact retention start failed:', e)
+    }
+  }
+
+  // 后台初始化耗时分解探针（06 §5 m-7）：listen 后各段（改造前这些段全部堆在 listen 前）。
+  console.log(`[runtime] background init breakdown: migrationA=${(tMigA - tBg).toFixed(1)}ms migrateBuiltin=${(tMigB - tMigA).toFixed(1)}ms autoUpgrade=${(tAutoUpgrade - tMigB).toFixed(1)}ms piVersion=${(tPiVersion - tAutoUpgrade).toFixed(1)}ms skillInit=${(tSkillInit - tPiVersion).toFixed(1)}ms plugins=${(tPlugins - tSkillInit).toFixed(1)}ms total=${(tPlugins - tBg).toFixed(1)}ms`)
+}
+
+/**
+ * ⑧ + ⑧b 启动期磁盘残留清扫：两者同为「目录级兜底清扫、失败仅 warn 不影响主流程」的
+ * 一档关注点，收敛在独立函数承载（runStartupBackgroundInit 保持串行链编排骨架）。
+ * 同步执行，编排位置在 ⑦b 之后、⑩ 之前（本步骤不参与后台耗时分解探针）。
+ */
+function cleanupStartupResidue(): void {
   // ⑧ sessions 目录残留清扫（W3 `.tmp-migrate-`/`.tmp-import-` 崩溃残留 + 缓存治理 U9
   // `<session>.jsonl.model.json` 退役 sidecar 残留）：目录级兜底，补 cleanupMigrateResidues
   // 只在附着前/delete 链触发的覆盖缺口（不再被 restore 的 session 其残留会永久留存）。
@@ -275,35 +315,6 @@ export async function runStartupBackgroundInit(deps: StartupBackgroundDeps): Pro
     // best-effort：回收失败不影响主流程（残留仅是磁盘垃圾，下次启动重试）
     console.warn('[runtime] aged backup residue cleanup failed:', e)
   }
-
-  // ⑩ 空闲 pi 回收 reaper 启动（idle-pi-reclamation D4，u3b）：对齐 ⑨ 的 fire-and-forget
-  // + try/catch 形态——startIdleReaper 只起一个 setInterval 判定循环（tick 定时器已在
-  // reaper 内部 unref，不阻塞进程退出），同步返回无异步面；首拍在 tick 间隔（默认 5min）
-  // 之后，与串行链其余步骤零共享状态。缺省（undefined）= 跳过（行为不变，既有测试构造点
-  // 不受影响）。
-  if (deps.startIdleReaper) {
-    try {
-      deps.startIdleReaper()
-    // eslint-disable-next-line taste/no-silent-catch -- best-effort：闭包装配错误仅 warn，不阻塞启动序列（reaper 缺席 = 现状行为，下轮重启重试）
-    } catch (e) {
-      console.warn('[runtime] idle pi reaper start failed:', e)
-    }
-  }
-
-  // ⑪ 产物目录保留期扫描（chat-html-support §6.7 D7 回收②）：启动扫 + 每日复扫定时器
-  // （节奏照搬 main 侧 log-retention.ts 模式，落点在 runtime 会话服务）。同步返回无异步面，
-  // 定时器 unref；单次扫描异常在闭包内消化。缺省（undefined）= 跳过（行为不变）。
-  if (deps.startArtifactRetention) {
-    try {
-      deps.startArtifactRetention()
-    // eslint-disable-next-line taste/no-silent-catch -- best-effort：保留期扫描失败仅 warn，不阻塞启动序列（残留仅是磁盘垃圾，下拍/下次启动重试）
-    } catch (e) {
-      console.warn('[runtime] artifact retention start failed:', e)
-    }
-  }
-
-  // 后台初始化耗时分解探针（06 §5 m-7）：listen 后各段（改造前这些段全部堆在 listen 前）。
-  console.log(`[runtime] background init breakdown: migrationA=${(tMigA - tBg).toFixed(1)}ms migrateBuiltin=${(tMigB - tMigA).toFixed(1)}ms autoUpgrade=${(tAutoUpgrade - tMigB).toFixed(1)}ms piVersion=${(tPiVersion - tAutoUpgrade).toFixed(1)}ms skillInit=${(tSkillInit - tPiVersion).toFixed(1)}ms plugins=${(tPlugins - tSkillInit).toFixed(1)}ms total=${(tPlugins - tBg).toFixed(1)}ms`)
 }
 
 /**

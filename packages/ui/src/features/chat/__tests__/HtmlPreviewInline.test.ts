@@ -6,7 +6,7 @@
  *   local-file src ?r=1）
  * - 预检降级三原因（not_found / is_dir / out_of_whitelist）+ 路径非法（空 / 多行）+
  *   路径无法解析：降级占位文案可见、无 iframe、无操作按钮
- * - 源码态切换与 readArtifact 注入：切「源码」→ iframe 卸载 + 嵌套 MarkdownRenderer 收到
+ * - 源码态切换与 readArtifact 注入：切「源码」→ iframe 卸载 + 宿主 #source 插槽桩收到
  *   fence 包裹源码；readArtifact reject → 错误占位 + 重试；未 provide → 切换整组隐藏
  * - 刷新 ?r=n 递增：servable 重检 → ?r=2；文件已删（not_found）→ 刷新落降级占位
  * - 懒挂载（IntersectionObserver mock）：进视口前不挂 iframe、loading 占位；进视口后挂载；
@@ -55,25 +55,53 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function mountInline(props: Record<string, unknown>, overrides: Partial<ChatViewDeps> = {}): VueWrapper {
+/**
+ * 源码态插槽桩（宿主 #source 插槽的测试替身）：markdown 槽参落在 data-content 上，
+ * 断言「fence 包裹后的源码串」即断言容器交给宿主渲染通道的内容。
+ */
+const SOURCE_SLOT =
+  '<template #source="params"><div data-testid="html-preview-source" :data-content="params.markdown" /></template>'
+
+interface MountOpts {
+  /** 注入宿主 #source 插槽桩（源码态用例必传——插槽缺席时「源码」切换整组隐藏） */
+  withSourceSlot?: boolean
+}
+
+function mountInline(props: Record<string, unknown>, overrides: Partial<ChatViewDeps> = {}, opts: MountOpts = {}): VueWrapper {
   return mount(HtmlPreviewInline, {
     props: props as never,
     global: {
       provide: mockChatProvide(overrides),
-      stubs: {
-        MarkdownRenderer: {
-          template: '<div data-testid="source-md-stub" :data-content="content ?? \'\'" />',
-          props: ['content', 'sessionId'],
-        },
-      },
     },
+    slots: opts.withSourceSlot ? { source: SOURCE_SLOT } : undefined,
   })
 }
 
 /** 挂载并触发进视口（懒挂载放行）+ flush 预检链 */
-async function mountInView(props: Record<string, unknown>, overrides: Partial<ChatViewDeps> = {}): Promise<VueWrapper> {
-  const wrapper = mountInline(props, overrides)
+async function mountInView(props: Record<string, unknown>, overrides: Partial<ChatViewDeps> = {}, opts: MountOpts = {}): Promise<VueWrapper> {
+  const wrapper = mountInline(props, overrides, opts)
   MockIntersectionObserver.instances[0]?.trigger(true)
+  await flush()
+  return wrapper
+}
+
+/**
+ * 源码态用例骨架：servable 预检 + readArtifact 注入 + 源码插槽桩，挂载进视口后
+ * 点「源码」切源码态（iframe 卸载、插槽桩接管渲染）。
+ */
+async function mountAndSwitchToSource(readArtifact: NonNullable<ChatViewDeps['readArtifact']>): Promise<VueWrapper> {
+  const wrapper = await mountInView(
+    { path: '/abs/report.html' },
+    {
+      probeArtifact: vi.fn().mockResolvedValue({ servable: true }),
+      readArtifact,
+    },
+    { withSourceSlot: true },
+  )
+  // 懒加载不变量：源码读取发生在切「源码」时，不在容器挂载时预读
+  expect(readArtifact).not.toHaveBeenCalled()
+  const buttons = viewToggle(wrapper).findAll('button')
+  await buttons[1].trigger('click')
   await flush()
   return wrapper
 }
@@ -286,21 +314,13 @@ describe('展开-收起高度切换（固定高度降级形态：480 ⇄ 720）'
   })
 })
 
-describe('源码态（deps.readArtifact 注入）', () => {
-  it('切「源码」→ iframe 卸载 + 嵌套 MarkdownRenderer 收到 fence 包裹源码', async () => {
+describe('源码态（deps.readArtifact 注入 + 宿主 #source 插槽）', () => {
+  it('切「源码」→ iframe 卸载 + 源码插槽收到 fence 包裹源码', async () => {
     const readArtifact = vi.fn().mockResolvedValue({ content: '<html><body>hi</body></html>' })
-    const wrapper = await mountInView({ path: '/abs/report.html' }, {
-      probeArtifact: vi.fn().mockResolvedValue({ servable: true }),
-      readArtifact,
-    })
-    expect(readArtifact).not.toHaveBeenCalled()
-    const buttons = viewToggle(wrapper).findAll('button')
-    await buttons[1].trigger('click')
-    await flush()
+    const wrapper = await mountAndSwitchToSource(readArtifact)
     expect(readArtifact).toHaveBeenCalledWith('/abs/report.html')
     expect(frame(wrapper).exists()).toBe(false)
-    // 嵌套 MarkdownRenderer（stub）收到 fence 包裹：```html 开栅 + 原文 + 闭栅（shiki html 高亮通道）。
-    // 使用点 data-testid 落在 stub 根元素（VTU 透传属性覆盖 stub 模板自身属性）
+    // 源码插槽桩收到 fence 包裹：```html 开栅 + 原文 + 闭栅（shiki html 高亮通道）。
     const stub = wrapper.find('[data-testid="html-preview-source"]')
     expect(stub.exists()).toBe(true)
     expect(stub.attributes('data-content')).toBe('```html\n<html><body>hi</body></html>\n```')
@@ -308,13 +328,7 @@ describe('源码态（deps.readArtifact 注入）', () => {
 
   it('源码含 ``` 行首反引号 → 开栅长度抬升（不被源码提前闭合）', async () => {
     const readArtifact = vi.fn().mockResolvedValue({ content: 'intro\n```\ncode fence\n```' })
-    const wrapper = await mountInView({ path: '/abs/report.html' }, {
-      probeArtifact: vi.fn().mockResolvedValue({ servable: true }),
-      readArtifact,
-    })
-    const buttons = viewToggle(wrapper).findAll('button')
-    await buttons[1].trigger('click')
-    await flush()
+    const wrapper = await mountAndSwitchToSource(readArtifact)
     const content = wrapper.find('[data-testid="html-preview-source"]').attributes('data-content') ?? ''
     expect(content.startsWith('````html\n')).toBe(true)
     expect(content.endsWith('\n````')).toBe(true)
@@ -326,13 +340,7 @@ describe('源码态（deps.readArtifact 注入）', () => {
       const readArtifact = vi.fn()
         .mockRejectedValueOnce(new Error('localFileRead failed: not_found'))
         .mockResolvedValueOnce({ content: '<html>ok</html>' })
-      const wrapper = await mountInView({ path: '/abs/report.html' }, {
-        probeArtifact: vi.fn().mockResolvedValue({ servable: true }),
-        readArtifact,
-      })
-      const buttons = viewToggle(wrapper).findAll('button')
-      await buttons[1].trigger('click')
-      await flush()
+      const wrapper = await mountAndSwitchToSource(readArtifact)
       expect(wrapper.find('[data-testid="html-preview-source-error"]').exists()).toBe(true)
       await wrapper.find('[data-testid="html-preview-source-retry"]').trigger('click')
       await flush()
@@ -353,13 +361,8 @@ describe('源码态（deps.readArtifact 注入）', () => {
 
   it('切回「预览」→ iframe 重新挂载（src 保持既有 revision）', async () => {
     const readArtifact = vi.fn().mockResolvedValue({ content: '<html>x</html>' })
-    const wrapper = await mountInView({ path: '/abs/report.html' }, {
-      probeArtifact: vi.fn().mockResolvedValue({ servable: true }),
-      readArtifact,
-    })
+    const wrapper = await mountAndSwitchToSource(readArtifact)
     const buttons = viewToggle(wrapper).findAll('button')
-    await buttons[1].trigger('click')
-    await flush()
     await buttons[0].trigger('click')
     await flush()
     expect(frame(wrapper).exists()).toBe(true)

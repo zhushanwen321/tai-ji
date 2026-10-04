@@ -36,6 +36,7 @@
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fail, ok, guardExit, reportSetCompare, setDiff } from './lib/guard-report.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BUILD_YML = join(ROOT, '.github', 'workflows', 'build.yml')
@@ -50,13 +51,9 @@ const PI_TUI = `${PI_SCOPE}/pi-tui`
 const PI_AI = `${PI_SCOPE}/pi-ai`
 const RESOURCES_PI_PKG = join(ROOT, 'apps', 'electron', 'resources', 'pi', 'package.json')
 
-let failed = 0
-const fail = (msg) => {
-  console.error(`  ✗ ${msg}`)
-  failed = 1
-}
+// 呈报骨架（✓/✗ 行 + 失败旗标 + setDiff/对拍呈报/汇总出口）与 scripts 家族共享：
+// scripts/lib/guard-report.mjs。⚠ warn 行是本守卫的「仅警告不拦截」语义，本地定义。
 const warn = (msg) => console.warn(`  ⚠ ${msg}`)
-const ok = (msg) => console.log(`  ✓ ${msg}`)
 
 // ── 纯函数（--self-test 覆盖）────────────────────────────────────────
 
@@ -128,16 +125,6 @@ export function extractKnownApi(dtsText) {
   const values = [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1])
   if (values.length === 0) return { error: 'KnownApi 定义中提取不到任何字符串字面量' }
   return { values }
-}
-
-/** 求集合差异：extra = a 有 b 无；missing = b 有 a 无。 */
-export function setDiff(a, b) {
-  const bs = new Set(b)
-  const as = new Set(a)
-  return {
-    extra: [...as].filter((x) => !bs.has(x)),
-    missing: [...bs].filter((x) => !as.has(x)),
-  }
 }
 
 // ── --self-test：纯函数轻量自检（不触真实仓库文件）────────────────────
@@ -446,17 +433,13 @@ let snapshot
           fail(`S6 packages/shared/src/constants.ts 中找不到 KNOWN_PI_API_TYPES 常量定义——恢复动作：确认常量未被改名/移动，同步 check-pi-sync.mjs 的提取正则`)
         } else {
           const local = [...cm[1].matchAll(/'([^']+)'/g)].map((x) => x[1])
-          const { extra, missing } = setDiff(local, r.values)
-          if (extra.length === 0 && missing.length === 0) {
-            ok(`S6 KNOWN_PI_API_TYPES 与实装 KnownApi 一致（${r.values.length} 值）`)
-          } else {
-            const parts = []
-            if (extra.length > 0) parts.push(`常量多出: ${extra.join(', ')}`)
-            if (missing.length > 0) parts.push(`常量缺失: ${missing.join(', ')}`)
-            fail(
-              `S6 KNOWN_PI_API_TYPES 与 pi-ai ${installedAiVersion ?? ''} KnownApi 漂移: ${parts.join('；')}——恢复动作：人工核对 ${dtsPath} 的 KnownApi 定义后同步 packages/shared/src/constants.ts（顺序保持与 KnownApi 一致），重跑 node scripts/check-pi-sync.mjs`,
-            )
-          }
+          reportSetCompare(local, r.values, {
+            okMsg: `S6 KNOWN_PI_API_TYPES 与实装 KnownApi 一致（${r.values.length} 值）`,
+            extraPart: (xs) => `常量多出: ${xs.join(', ')}`,
+            missingPart: (xs) => `常量缺失: ${xs.join(', ')}`,
+            failHeader: `S6 KNOWN_PI_API_TYPES 与 pi-ai ${installedAiVersion ?? ''} KnownApi 漂移: `,
+            failSuffix: `——恢复动作：人工核对 ${dtsPath} 的 KnownApi 定义后同步 packages/shared/src/constants.ts（顺序保持与 KnownApi 一致），重跑 node scripts/check-pi-sync.mjs`,
+          })
         }
       }
     }
@@ -504,9 +487,7 @@ let snapshot
 }
 
 // ── 汇总 ────────────────────────────────────────────────────────────
-if (failed === 0) {
-  console.log('✓ pi-sync 守卫通过（构建期派生锚点 8 项：声明基准 3 + 实装基准 4 + dev binary 1）')
-  process.exit(0)
-}
-console.error('pi-sync 守卫未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）')
-process.exit(1)
+guardExit(
+  '✓ pi-sync 守卫通过（构建期派生锚点 8 项：声明基准 3 + 实装基准 4 + dev binary 1）',
+  'pi-sync 守卫未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
+)

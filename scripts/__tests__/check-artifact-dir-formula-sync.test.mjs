@@ -13,8 +13,6 @@
  */
 import { describe, it, expect } from 'vitest'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync, realpathSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -27,6 +25,7 @@ import {
   extractConstLiteral,
   mirrorUsesSegmentConst,
 } from '../check-artifact-dir-formula-sync.mjs'
+import { createMirrorRoot, installGuardIntoMirror } from './helpers/guard-mirror.mjs'
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url))
 const SCRIPT = join(TEST_DIR, '..', 'check-artifact-dir-formula-sync.mjs')
@@ -106,28 +105,20 @@ const mirrorSystemPromptSrc = ({ segmentConst = 'artifacts', regex = DEFAULT_REG
 /**
  * tmp mirror 工厂：目录布局对齐守卫 ROOT 相对路径（packages/shared/src、extensions/taiji/
  * system-prompt/src）。overrides 覆盖任一侧公式（漂移注入点），missing 指定不落盘的文件。
- *
- * root 取 realpath：Node 对入口模块 import.meta.url 做 realpath，而 process.argv[1] 保留调用方
- * 路径——macOS os.tmpdir() 是 /var/folders → /private/var/folders 符号链接，两者不一致会让守卫
- * 的 isMain 判定为 false，脚本被 import 而不执行 main（恒 exit 0）。realpath 后两条路径同源。
+ * root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
  */
 function makeMirror({ shared = {}, mirror = {}, missing = [] } = {}) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'artifact-formula-fx-')))
+  const { root, writeAt, cleanup } = createMirrorRoot('artifact-formula-fx-')
   const files = {
     'packages/shared/src/paths.ts': sharedPathsSrc(shared),
     'extensions/taiji/system-prompt/src/index.ts': mirrorSystemPromptSrc(mirror),
   }
   for (const [rel, content] of Object.entries(files)) {
     if (missing.includes(rel)) continue
-    const abs = join(root, rel)
-    mkdirSync(dirname(abs), { recursive: true })
-    writeFileSync(abs, content)
+    writeAt(rel, content)
   }
-  const guardCopy = join(root, 'scripts', 'check-artifact-dir-formula-sync.mjs')
-  mkdirSync(dirname(guardCopy), { recursive: true })
-  copyFileSync(SCRIPT, guardCopy)
-  const run = () => spawnSync(process.execPath, [guardCopy], { cwd: root, encoding: 'utf-8' })
-  return { root, run, cleanup: () => rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }) }
+  const run = installGuardIntoMirror(root, SCRIPT)
+  return { root, run, cleanup }
 }
 
 describe('CLI 集成（守卫脚本 × tmp mirror）', () => {

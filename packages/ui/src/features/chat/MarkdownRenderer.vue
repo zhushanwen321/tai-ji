@@ -37,13 +37,26 @@
       </div>
       <!-- html-preview 段（chat-html-support §6.3 D3，v16 内联容器）：纯路径载荷走
            HtmlPreviewInline 组件（不经 v-html/净化信任槽）；路径解析矩阵与 ④路同源——
-           props.resourceBaseDir 覆盖优先、缺省由容器经 deps.sessionCwdOf 拿 session cwd -->
+           props.resourceBaseDir 覆盖优先、缺省由容器经 deps.sessionCwdOf 拿 session cwd。
+           源码态经 #source 作用域插槽由本组件承接渲染（fence 高亮通道）：渲染能力由宿主
+           单向下供，容器不反向 import 本组件（无组件间静态循环依赖）。插槽内容里的
+           <MarkdownRenderer> 是 SFC 文件名隐式自引用——递归有界：容器把源码包进 html
+           fence，包裹后不再是 html-preview 语法区，嵌套实例不会命中本分支。 -->
       <HtmlPreviewInline
         v-else-if="seg.type === 'html-preview'"
         :path="seg.content"
         :session-id="props.sessionId"
         :resource-base-dir="props.resourceBaseDir"
-      />
+      >
+        <template #source="{ markdown }">
+          <MarkdownRenderer
+            :content="markdown"
+            :session-id="props.sessionId"
+            class="p-1.5"
+            data-testid="html-preview-source"
+          />
+        </template>
+      </HtmlPreviewInline>
       <MermaidRenderer v-else :source="seg.content" />
     </template>
     <!-- 歧义文件选择浮层：裸 basename 多匹配时弹出（锚定到点击的 <a>，portal 到 body） -->
