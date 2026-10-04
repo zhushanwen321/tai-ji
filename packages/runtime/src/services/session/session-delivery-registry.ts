@@ -176,16 +176,13 @@ export interface SessionDeliveryRegistry {
  * 文本（用户粘贴的字面 `<!--taiji:msg:...-->` 等）不构成投递身份（B2：不进 rebuild/
  * 回执/收养分派——原 BARE_MARKER_RE 手写体 `[^>]*` 宽松放行任意内容，假标记可经
  * rebuild 路径重复投递）：
- * ① shared SSOT `MSG_ID_TAG_RE`（source 派生，uuid 段禁手写）：协议层 clientUuid 形态
- *    （`u-<uuid>` 原文 / 裸 `<uuid>`，捕获组 2 = 恒裸 uuid）；
- * ② 本地生成条目 id 形态（捕获组 3）：`m-<base36 时间戳>-<序号>`，格式唯一定义点 =
- *    本文件 genLocalId（agent 通路收养条目 id 非 uuid，出站标记同为投递身份，判据必须
- *    同收——否则 message_end 回执 miss，条目永挂 in-flight）。
+ * shared SSOT `MSG_ID_TAG_RE`（source 派生，身份段禁手写）：协议层 clientUuid 形态
+ * （`u-<uuid>` 原文 / 裸 `<uuid>`）与本地收养条目 id 形态（`m-<base36 时间戳>-<序号>`，
+ * 格式唯一定义点 = 本文件 genLocalId）——收养形态 2026-10-04 起由 shared 身份段
+ * （MSG_ID_ADOPTED_SEGMENT）收编，此前双侧各写一半（runtime 认 m- / shared 不认）曾致
+ * 消费端回执 miss（D3 验收 A8 归因）。捕获组 2 = 恒为裸身份段（uuid 或收养 id）。
  */
-const DELIVERY_MARKER_ID_RE = new RegExp(
-  `${MSG_ID_TAG_RE.source}|<!--taiji:msg:(m-[0-9a-z]+-[0-9a-z]+)-->`,
-  `${MSG_ID_TAG_RE.flags}g`,
-)
+const DELIVERY_MARKER_ID_RE = new RegExp(MSG_ID_TAG_RE.source, `${MSG_ID_TAG_RE.flags}g`)
 /** 协议层 clientUuid 前缀（renderer 乐观气泡 id 形态 `u-<uuid>`；裸标记取其后段）。 */
 const CLIENT_UUID_PREFIX = 'u-'
 /** 内核合批拼接分隔符（@zhushanwen/session-delivery buildBatchPayload "\n\n---\n\n"）。 */
@@ -229,14 +226,13 @@ export function withDeliveryMarker(text: string, id: string): string {
 }
 
 /**
- * 提取文本中的全部投递标记 id（裸 id 形态，MF-1-1 判据收敛）：uuid 形态经捕获组 2 恒
- * 归一为裸 uuid（双形态原文对账兼容），本地 `m-` 形态经捕获组 3；其余形态不返回（B2）。
+ * 提取文本中的全部投递标记 id（裸 id 形态，MF-1-1 判据收敛）：捕获组 2 恒为裸身份段
+ * （uuid 或内核收养 `m-` 形态，shared MSG_ID_TAG_RE 单源）；其余形态不返回（B2）。
  */
 export function extractMarkerIds(text: string): string[] {
   const out: string[] = []
   for (const m of text.matchAll(DELIVERY_MARKER_ID_RE)) {
     if (m[2]) out.push(m[2])
-    else if (m[3]) out.push(m[3])
   }
   return out
 }

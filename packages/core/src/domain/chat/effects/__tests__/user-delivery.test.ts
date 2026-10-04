@@ -198,4 +198,24 @@ describe('D4 foreign 入流豁免精确化（remote-use-shell-unification D4：V
     expect(getDeliveryProjection(SID).map((e) => e.state)).toEqual(['delivered', 'delivered'])
     expect(ctx.inflightOf()).toBe(0)
   })
+
+  it('D4-AC7: 内核收养条目 m- 形态回执 → 观看端 foreign 入流保号收养 id（2026-10-03 D3 A8 归因修复——shared 标记身份段不认 m- 形态时，回执在消费端构造性 miss、观看端 live 无人入流，live ≠ reload）', () => {
+    // 场景（探针实证）：外部 message.send 不带 clientUuid → registry 收养生成 m-<token>-<n>
+    // → 回显文本尾标记 <!--taiji:msg:m-...-->，投影条目 clientUuid = m- 形态。前端标记
+    // 身份段收编 m- 分支后（MSG_ID_ADOPTED_SEGMENT），① 命中条目 → 无本地气泡 → foreign
+    // 降级入流，保号传收养 id 本体（e.clientUuid === bareId 分支）。
+    const ADOPTED = 'm-mustgqln-3'
+    replaceDeliveryProjection(SID, [entry({ clientUuid: ADOPTED, lane: 'direct' })])
+    const ctx = makeCtx()
+    ctx.addInflight(1)
+
+    const consumed = confirmKernelDeliveryOnMessageEnd(ctx, SID, userEndEntry('外部注入消息', ADOPTED))
+
+    expect(consumed).toBe(true)
+    const expected: Segment[] = [{ type: 'text', text: '外部注入消息' }]
+    expect(ctx.appendUser).toHaveBeenCalledTimes(1)
+    expect(ctx.appendUser).toHaveBeenCalledWith(SID, expected, ADOPTED)
+    expect(getDeliveryProjection(SID)[0]?.state).toBe('delivered')
+    expect(ctx.inflightOf()).toBe(0)
+  })
 })

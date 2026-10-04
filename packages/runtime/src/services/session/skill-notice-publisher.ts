@@ -10,17 +10,19 @@
  * 之后才调用——提示描述的注入形态此时才成立；发送失败路径不发（用户可见错误已由
  * 各自的错误通路覆盖）。
  */
-import { MSG_ID_TAG_RE } from '@taiji/shared'
+import { MSG_ID_UUID_SEGMENT } from '@taiji/shared'
 import type { SkillNotice } from './skill-injector.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
 
 /**
- * clientUuid 从发送文本提取：正则 SSOT = @taiji/shared 的 MSG_ID_TAG_RE（全文匹配，
- * 降级拼接把标记块放到文本之后也不影响提取；双形态 `u-<uuid>` 与裸 `<uuid>` 指向同一
- * clientUuid——捕获组 2 = 裸 uuid，i 旗标覆盖大写十六进制，消费方统一 toLowerCase 归一）。
- * payload 的 clientUuid 恒出 renderer 气泡 id 形态（`u-<uuid>`），与既有消费方（notice →
- * 气泡锚定）契约逐字一致；无标记（生成 id / steer 通路）→ 字段缺省（类型可空，u5 按可空消费）。
+ * clientUuid 从发送文本提取：正则由 shared MSG_ID_UUID_SEGMENT 构造（uuid 段单点，
+ * [MF-1-11]），**只认 renderer 气泡 id 形态**（`u-<uuid>` / 裸 `<uuid>`）——刻意不含
+ * MSG_ID_TAG_RE 的 `m-` 收养分支（2026-10-04 收编）：notice 的 clientUuid 用于气泡
+ * 锚定，收养条目无本地气泡、锚定无意义，误提取会把收养 id 误装成 `u-` 气泡 id 形态。
+ * payload 的 clientUuid 恒出 `u-<uuid>` 形态，与既有消费方（notice → 气泡锚定）契约
+ * 逐字一致；无 uuid 标记（收养 id / steer 通路）→ 字段缺省（类型可空，u5 按可空消费）。
  */
+const BUBBLE_ANCHOR_MARKER_RE = new RegExp(`<!--taiji:msg:(u-)?(${MSG_ID_UUID_SEGMENT})-->`, 'i')
 
 /**
  * 逐条定向发布 skill 注入提示（session.skillNotice，payload 契约见 protocol.ts）。
@@ -34,7 +36,7 @@ export function publishSkillNotices(
   notices: SkillNotice[],
 ): void {
   if (notices.length === 0) return
-  const matched = sentText.match(MSG_ID_TAG_RE)?.[2]
+  const matched = sentText.match(BUBBLE_ANCHOR_MARKER_RE)?.[2]
   const clientUuid = matched !== undefined ? `u-${matched.toLowerCase()}` : undefined
   for (const notice of notices) {
     bus?.publish(sessionId, {
