@@ -1,5 +1,5 @@
 import { describe, it, expect, expectTypeOf } from 'vitest'
-import { isRemoteAccessConfigShape, RemoteAccessConfig, REMOTE_ACCESS_FILENAME } from '../remote-access'
+import { isRemoteAccessConfigShape, RemoteAccessConfig, REMOTE_ACCESS_FILENAME, REMOTE_TOKEN_HEX64 } from '../remote-access'
 
 describe('REMOTE_ACCESS_FILENAME', () => {
   it('常量值为 remote-access.json', () => {
@@ -18,16 +18,17 @@ describe('RemoteAccessConfig 类型契约', () => {
     expectTypeOf<RemoteAccessConfig['createdAt']>().toEqualTypeOf<string>()
   })
 
-  it('合法形态样例满足契约：token 为 64 位 hex 小写、createdAt 为 ISO 8601', () => {
-    // 锚定 token 格式注释（32 字节随机 hex = 64 位小写 hex）与 createdAt
-    // 注释（ISO 8601）的语义，防止字段语义漂移时无断言可依。
+  it('合法形态样例满足契约：token 匹配 REMOTE_TOKEN_HEX64（64 位 hex 小写）', () => {
+    // token 判据锚定生产导出的 REMOTE_TOKEN_HEX64（写侧守卫与读侧解析共用同一正则
+    // SSOT）——生产正则被改坏时本用例变红（此前内联正则只证测试自身字面量，被测
+    // 模块零参与）。锚定边界：createdAt 的 ISO 8601 形态生产无可锚定导出（契约仅
+    // 注释约定，形态由 main 写侧生成处保证），不在此断言。
     const config: RemoteAccessConfig = {
       enabled: true,
       token: 'a'.repeat(64),
       createdAt: '2026-09-19T12:00:00.000Z',
     }
-    expect(config.token).toMatch(/^[0-9a-f]{64}$/)
-    expect(config.createdAt).toEqual(expect.stringContaining('T'))
+    expect(config.token).toMatch(REMOTE_TOKEN_HEX64)
   })
 })
 

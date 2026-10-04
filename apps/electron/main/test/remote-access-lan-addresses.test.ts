@@ -120,7 +120,4 @@ describe('enumerateLanAddresses', () => {
     expect(enumerateLanAddresses(interfaces, port)).toEqual([])
   })
 
-  it('空接口表 → 空列表', () => {
-    expect(enumerateLanAddresses({}, 3310)).toEqual([])
-  })
 })

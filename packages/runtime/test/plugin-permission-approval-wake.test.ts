@@ -3,12 +3,13 @@
  *
  * 修复前断链：PluginService.approvePermissions 只 grant 不 resolve pending，
  * 挂起在 waitForPermissionApproval 的激活（boot/handleEvent await 着）只能干等
- * 30s 超时；且等待期间 re-activate 被 ACTIVATING 幂等守卫 no-op 吞掉（实测
- * boot 后台初始化 plugins=30007.5ms）。
+ * 审批等待超时（PERMISSION_TIMEOUT_MS）；且等待期间 re-activate 被 ACTIVATING
+ * 幂等守卫 no-op 吞掉（实测 boot 后台初始化 plugins=30007.5ms）。
  *
  * 修复后契约（本文件锁定）：
  *  a. approvePermissions 唤醒挂起中的激活 → 毫秒级完成（fake timers 下不推进
- *     30s 即断言 ACTIVE），且唤醒的是同一次激活（assignWorker 恰好一次）
+ *     审批等待超时（PERMISSION_TIMEOUT_MS）即断言 ACTIVE），且唤醒的是同一次
+ *     激活（assignWorker 恰好一次）
  *  b. revokePermissions 拒绝唤醒 → 走既有失败语义（UNLOADED、不分配 Worker）
  *  e. denyPermissions（M7 语义分界）= 拒绝本次申请：descriptor.permissions 与
  *     granted 授予集不变、不调 save、不回收已授权限；有 pending 时唤醒为拒绝；
@@ -76,7 +77,7 @@ function internals(service: PluginService): ServiceInternals {
 /**
  * mock host：postMessage 后微任务回 activated——挂起中的激活被唤醒后能立即走完
  * assignWorker → loadPlugin → activate → ACTIVE 全程（fake timers 不推进也能完成，
- * 证明唤醒链路独立于 30s 超时 timer）。
+ * 证明唤醒链路独立于审批等待超时 timer，即 PERMISSION_TIMEOUT_MS）。
  */
 function createMockHost(activator: PluginActivator): PluginHost {
   return {
@@ -150,7 +151,7 @@ describe('权限审批唤醒链路（approve / revoke / 挂起期清理）', () 
   }
 
   // ── a. 批准唤醒：毫秒级完成，唤醒的是同一次激活 ─────────────────
-  it('a: 挂起等待审批 → approvePermissions → 激活立即完成（不推进 30s 超时 timer）', async () => {
+  it('a: 挂起等待审批 → approvePermissions → 激活立即完成（不推进审批等待超时 timer）', async () => {
     const { activation } = await startPendingActivation()
     const host = internals(service).host
 
@@ -159,8 +160,8 @@ describe('权限审批唤醒链路（approve / revoke / 挂起期清理）', () 
     const broadcastCalls = (broker.broadcast as ReturnType<typeof vi.fn>).mock.calls
     expect(broadcastCalls.some((c) => (c[0] as { type: string }).type === 'plugin:permissionRequest')).toBe(true)
 
-    // 批准。fake timers 下 30s 超时从未触发——若唤醒链路断裂，这里 state 仍会是
-    // ACTIVATING（修复前实测 boot 挂满 30007.5ms）
+    // 批准。fake timers 下审批等待超时（PERMISSION_TIMEOUT_MS）从未触发——若唤醒
+    // 链路断裂，这里 state 仍会是 ACTIVATING（修复前实测 boot 挂满 30007.5ms）
     await service.approvePermissions('wake-plugin', ['plugin.hooks.register'])
 
     expect(activator.getState('wake-plugin')).toBe('ACTIVE')
@@ -270,7 +271,8 @@ describe('权限审批唤醒链路（approve / revoke / 挂起期清理）', () 
     expect((host.assignWorker as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0)
   })
 
-  // ── W5 广播契约：权限命令 reply pong ack，列表刷新经 config.plugins 广播 ──
+  // ── W5 广播契约：列表刷新经 config.plugins 广播（reply pong ack 契约的断言
+  // 归属 plugin-message-handler.test.ts 的 plugin.* 分发表用例，本组不覆盖）──
   // PluginInfo 不含权限字段（pluginId/version/displayName/description/status/
   // trustLevel/enabled）——deny/revoke 后广播内容不变，不广播；approve 触发
   // activate（status discovered→active 真实变化）才广播。
@@ -307,7 +309,7 @@ describe('权限审批唤醒链路（approve / revoke / 挂起期清理）', () 
 
   // ── 超时兜底仍在（唤醒是加速，超时是语义不变的兜底）──────────────
   it('无人批准时仍按 permissionTimeoutMs 超时回落 UNLOADED（唤醒不破坏兜底）', async () => {
-    // 重建短超时 activator（service 内置 30s，这里直测 activator 层）
+    // 重建短超时 activator（service 用默认 PERMISSION_TIMEOUT_MS，这里直测 activator 层）
     const shortActivator = new PluginActivator({
       permissionChecker: { getUnapproved: () => ['plugin.hooks.register'] },
       onPermissionRequest: () => { /* 无人批准 */ },

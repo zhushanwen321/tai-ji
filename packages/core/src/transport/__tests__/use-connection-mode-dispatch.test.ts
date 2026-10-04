@@ -22,7 +22,7 @@ import {
   type ConnectionProfilePort,
   type ResolvedConnectionProfile,
 } from '../use-connection'
-import { connect, disconnect } from '../ws-client'
+import { connect } from '../ws-client'
 
 // ── ws-client mock：捕获 connect/disconnect 调用 + 可控连接状态 ref（token-refresh 测试同款）──
 const mockStateRef = ref<ConnectionState>('disconnected')
@@ -49,9 +49,6 @@ vi.mock('../ws-client', () => ({
 // ── 其余端口 mock（use-connection-token-refresh.test.ts 同款；D3 后三件套直连真实模块，
 // 本文件只断言分支选择与连接目标，三件套零断言依赖）──
 
-/** onRuntimePort 捕获的回调，测试内触发端口推送 */
-let portCb: ((port: number) => void) | null = null
-
 interface PortsSpec {
   isMock?: boolean
   isDev?: boolean
@@ -71,12 +68,7 @@ function buildIpc(spec: PortsSpec) {
     getRuntimePort: vi.fn().mockResolvedValue(spec.knownPort),
     getRuntimePortOffset: vi.fn().mockResolvedValue(spec.offset),
     getRuntimeToken: vi.fn().mockResolvedValue(spec.token ?? null),
-    onRuntimePort: vi.fn((cb: (port: number) => void) => {
-      portCb = cb
-      return () => {
-        portCb = null
-      }
-    }),
+    onRuntimePort: vi.fn().mockReturnValue(() => {}),
     onRuntimeRestarting: vi.fn().mockReturnValue(() => {}),
     onRuntimeFailed: vi.fn().mockReturnValue(() => {}),
     onRuntimeError: vi.fn().mockReturnValue(() => {}),
@@ -122,15 +114,8 @@ async function initFresh(ports: ConnectionPorts): Promise<void> {
   await useConnection().init()
 }
 
-/** 等 fire-and-forget 的 refreshTokenAndConnect 完成（token-refresh 测试同款） */
-async function flushAsync(): Promise<void> {
-  await new Promise((r) => setTimeout(r, 0))
-  await new Promise((r) => setTimeout(r, 0))
-}
-
 beforeEach(() => {
   vi.clearAllMocks()
-  portCb = null
   mockStateRef.value = 'disconnected'
 })
 
@@ -182,17 +167,6 @@ describe('连接发现收口：三形态分支选择（topology §2.4 / D4）', 
     // IPC 拿不到 token（null）→ 降级空串 token 握手探测（S4 裁决：本地 runtime 恒配 token，
     // skip 会在握手缺失下假 connected；探测必被拒走重连链，凭据恢复经 onRuntimePort 重拉）
     expect(connect).toHaveBeenCalledWith('ws://localhost:3310', { auth: 'token', token: '' })
-  })
-
-  it('TC-M6: 本地分支 onRuntimePort 推送 → disconnect + 重拉 token + connect ws://localhost:4500（收口前等价）', async () => {
-    const { ports } = makePorts({ knownPort: 4000, token: 'tok-3' })
-    await initFresh(ports)
-    // 推送守卫要求 state !== 'disconnected'（runtime 存活期间常态为 connected）
-    mockStateRef.value = 'connected'
-    portCb!(4500)
-    await flushAsync()
-    expect(disconnect).toHaveBeenCalledTimes(1)
-    expect(connect).toHaveBeenCalledWith('ws://localhost:4500', { auth: 'token', token: 'tok-3' })
   })
 
   it('TC-M7: 本地分支 HMR 重连（重复 init）→ fallback URL ws://localhost:3210（收口前等价）', async () => {

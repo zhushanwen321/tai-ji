@@ -14,7 +14,8 @@
 //   reconnecting/restarting/failed。[漂移] 原稿 4 态 connecting/open/closing/closed 是
 //   remote-use 期术语；closing 中间态不存在——主动 disconnect 先摘回调再 close，直接置
 //   disconnected。断言点：connecting → connected（onopen，token 模式经 auth.result ok 的
-//   markConnected）可达；主动 disconnect → disconnected 可达且残余回调被摘除；非法迁移拒绝
+//   markConnected）可达；主动 disconnect → disconnected 可达且残余回调不干扰行为（行为面
+//   锁定，不锁摘回调的实现手段——摘回调与 gen 拦截等价）；非法迁移拒绝
 //   （已连接/连接中重复 connect 幂等 no-op，不重置状态不建新 WS）；onclose → disconnected →
 //   scheduleReconnect（closed 是重连起点，原稿语义保留）。
 // ② auth 握手：token 模式下 open 后首帧必为 {type:'auth', payload:{token}}，等 auth.result
@@ -141,32 +142,41 @@ describe('ws-client 不变量 ① 连接状态机', () => {
     expect(getState().value).toBe('connected')
   })
 
-  it('合法迁移 open → closed 可达（主动 disconnect，残余回调被摘除）', () => {
+  it('合法迁移 open → closed 可达（主动 disconnect，残余回调不干扰行为）', () => {
     connect('ws://test', { auth: 'skip' })
     latestFake().triggerOpen()
     expect(getState().value).toBe('connected')
 
     disconnect()
     expect(getState().value).toBe('disconnected')
-    // 主动断开摘回调：fake 的 onclose/onerror/onmessage 已置 null（onopen 原版不摘，gen 检查兜底），
-    // 残余 trigger 不干扰新连接
+    // 行为面锁定（不锁「摘回调」实现手段——「保留回调 + gen 拦截」等价实现行为相同）：
+    // 残余 open/close 触发不改变状态；主动断开不复活重连链（不调度退避、无新 WS）。
     const f = latestFake()
-    expect(f.onclose).toBeNull()
-    expect(f.onerror).toBeNull()
-    expect(f.onmessage).toBeNull()
     f.triggerOpen()
     expect(getState().value).toBe('disconnected')
+    f.triggerClose()
+    expect(getState().value).toBe('disconnected')
+    vi.advanceTimersByTime(60_000)
+    expect(fakes.length).toBe(1)
   })
 
-  it('非法迁移 open → connecting 被拒绝（connect 幂等 no-op，不重置状态）', () => {
+  // 参数化覆盖单飞守卫（connect 内「存在非 CLOSED socket 即 return」分支）的两个 readyState
+  // 输入分区：connected（OPEN）与 connecting（CONNECTING）下重复 connect 一律幂等 no-op——
+  // 不建新 WS、状态不被重置。CLOSING 分区由 single-flight 文件锁定（原 single-flight
+  // 「CONNECTING 期间重复 connect」用例与本用例锁同一守卫行，已收敛至此）。
+  it.each([
+    { partition: 'connected（OPEN）', driveOpen: true },
+    { partition: 'connecting（CONNECTING）', driveOpen: false },
+  ])('非法迁移：$partition 下重复 connect 幂等 no-op（不建新 WS、不重置状态）', ({ driveOpen }) => {
     connect('ws://test', { auth: 'skip' })
-    latestFake().triggerOpen()
-    expect(getState().value).toBe('connected')
+    if (driveOpen) latestFake().triggerOpen()
+    const stateBefore = driveOpen ? 'connected' : 'connecting'
+    expect(getState().value).toBe(stateBefore)
     expect(fakes.length).toBe(1)
 
-    connect('ws://test-2', { auth: 'skip' }) // 已连接，重复建连应被拒绝
+    connect('ws://test-2', { auth: 'skip' }) // 非 CLOSED socket 存在，重复建连应被拒绝
     expect(fakes.length).toBe(1) // 未创建新 WS
-    expect(getState().value).toBe('connected')
+    expect(getState().value).toBe(stateBefore) // 状态不被重置
   })
 })
 

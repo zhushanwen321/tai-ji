@@ -90,6 +90,13 @@ function makeActivator(overrides: {
   })
 }
 
+/** 从开窗 permissionRequest 广播 spy 第 n 次调用提取 requestId 实值（expired 同源断言专用；
+ *  payload 为 activator 内存直传、无序列化往返，可按引用值 toBe 精确比对） */
+function openRequestIdOf(spy: ReturnType<typeof vi.fn>, callIndex: number): string {
+  const payload = spy.mock.calls[callIndex]?.[0] as { requestId?: string } | undefined
+  return payload?.requestId ?? ''
+}
+
 /**
  * 触发激活并推进到「挂在权限等待」稳定点。返回包裹对象防调用方误 await 挂起激活
  *（plugin-permission-approval-wake.test.ts 同模式）。
@@ -120,8 +127,13 @@ describe('审批等待到期取消语义（activator 层分流）', () => {
   // ── a. timeout 分流：取消非判拒 ─────────────────────────────────
   it("到期 resolve 'timeout' → warn 恢复指引 + expired 广播 + UNLOADED，不分配 Worker", async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const requestSpy = vi.fn()
     const expiredSpy = vi.fn()
-    const activator = makeActivator({ permissionTimeoutMs: 100, onPermissionRequestExpired: expiredSpy })
+    const activator = makeActivator({
+      permissionTimeoutMs: 100,
+      onPermissionRequest: requestSpy,
+      onPermissionRequestExpired: expiredSpy,
+    })
     activator.registerDescriptors([descriptor])
     const host = createMockHost(activator)
     const { activation } = await startPendingActivation(activator, host)
@@ -131,7 +143,11 @@ describe('审批等待到期取消语义（activator 层分流）', () => {
 
     expect(activator.getState('timeout-plugin')).toBe('UNLOADED')
     expect(expiredSpy).toHaveBeenCalledTimes(1)
-    expect(expiredSpy).toHaveBeenCalledWith({ pluginId: 'timeout-plugin', requestId: expect.any(String) })
+    // expired 广播的 requestId 与开窗 permissionRequest 广播同源——前端按 requestId
+    // 精确撤回无人应答弹窗的依据（requestId 经开窗 spy 实值回取，非 expect.any 弱断言）
+    const openRequestId = openRequestIdOf(requestSpy, 0)
+    expect(openRequestId).not.toBe('')
+    expect(expiredSpy).toHaveBeenCalledWith({ pluginId: 'timeout-plugin', requestId: openRequestId })
     const warnText = warnSpy.mock.calls.map((args) => args.join(' ')).join('\n')
     expect(warnText).toContain('timed out after 100ms')
     expect(warnText).toContain('re-trigger the activation event')
@@ -235,16 +251,24 @@ describe('审批等待到期取消语义（activator 层分流）', () => {
     await firstActivation
     expect(activator.getState('timeout-plugin')).toBe('UNLOADED')
     expect(expiredSpy).toHaveBeenCalledTimes(1)
+    // expired 广播的 requestId 与第一次开窗广播同源（前端按 requestId 精确撤窗的依据）
+    const firstRequestId = openRequestIdOf(requestSpy, 0)
+    expect(firstRequestId).not.toBe('')
+    expect(expiredSpy).toHaveBeenCalledWith({ pluginId: 'timeout-plugin', requestId: firstRequestId })
 
     // 重触发 activation event（handleEvent 候选过滤仅排除 ACTIVE/ACTIVATING，
     // UNLOADED 放行）→ 新审批 pending 挂起（第二个弹窗）
     const secondActivation = activator.handleEvent({ type: 'onStartupFinished' }, host)
     await vi.advanceTimersByTimeAsync(0)
     expect(requestSpy).toHaveBeenCalledTimes(2)
+    // 每次审批请求新生成 requestId：第二次与第一次不同——同 pluginId 陈旧 expired
+    // 广播不误撤后到新弹窗的前提
+    const secondRequestId = openRequestIdOf(requestSpy, 1)
+    expect(secondRequestId).not.toBe(firstRequestId)
     expect(requestSpy).toHaveBeenLastCalledWith({
       pluginId: 'timeout-plugin',
       permissions: ['plugin.hooks.register'],
-      requestId: expect.any(String),
+      requestId: secondRequestId,
     })
     expect(activator.getState('timeout-plugin')).toBe('ACTIVATING')
 

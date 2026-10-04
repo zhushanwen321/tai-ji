@@ -17,10 +17,11 @@
  *  - TC9/TC10 expired 按 requestId 精确匹配：同 pluginId 先后两单，前单陈旧
  *    expired 广播只在其 requestId 命中时撤回（不误撤后到弹窗）；payload 缺
  *    requestId（旧版广播）回退按 pluginId 匹配
- *  - TC11/TC12/TC13 resolved 终局撤窗（S5-V3，bridge 归一 bus 事件）：按 requestId
+ *  - TC11/TC12 resolved 终局撤窗（S5-V3，bridge 归一 bus 事件）：按 requestId
  *    精确撤回（多连接端中非操作端撤窗）；requestId 空串（bridge 对旧版广播的宽容
- *    窄化产物）回退按 pluginId 匹配；陈旧 resolved 不误撤 + 操作端 RPC 先收口的
- *    noop 幂等 + dispose 退订
+ *    窄化产物）回退按 pluginId 匹配；陈旧 resolved 不误撤后到弹窗
+ *  - TC8/TC13 dispose 退订：request/expired/resolved 三订阅 dispose 后均不再驱动
+ *    state（断言先置 pending=true 再 dispose，防终局态下泄漏恒 noop 的空洞证明）
  *
  * 策略：真实 InternalEventBus（bus.emit）+ dispatchGlobal（events 通道，对齐
  * shell-adapters.test.ts 全链路范式）；plugin 域 vi.mock 隔离 WS（断言回传形状）。
@@ -225,11 +226,21 @@ describe('createPermissionRequestController 状态机（双壳共享）', () => 
   })
 
   it('TC8: dispose 退订：bus 事件与 expired 广播均不再驱动 state', () => {
+    // 先置 pending=true（弹窗在场）再 dispose——终局态（pending=false）下 expired 泄漏是恒 noop，测不出退订
+    emitPermissionRequest(bus, 'p1', ['shell'], 'req-a')
+    expect(controller.state.pending).toBe(true)
+
     controller.dispose()
-    emitPermissionRequest(bus, 'p1')
-    expect(controller.state.pending).toBe(false)
-    emitExpired('p1')
-    expect(controller.state.pending).toBe(false)
+
+    // offRequest 退订锚：泄漏时新请求会覆盖 state（pluginId/requestId 被改写）
+    emitPermissionRequest(bus, 'p2', ['fs.read'], 'req-b')
+    expect(controller.state.pending).toBe(true)
+    expect(controller.state.pluginId).toBe('p1')
+    expect(controller.state.requestId).toBe('req-a')
+
+    // offExpired 退订锚：泄漏时命中形态（同 pluginId 同 requestId）的 expired 广播会误撤窗
+    emitExpired('p1', 'req-a')
+    expect(controller.state.pending).toBe(true)
   })
 
   it('TC9: 同 pluginId 先后两单，expired 按 requestId 精确撤回——前单陈旧广播不误撤后到弹窗', () => {
@@ -284,21 +295,15 @@ describe('createPermissionRequestController 状态机（双壳共享）', () => 
     expect(controller.state.pending).toBe(false)
   })
 
-  it('TC13: 操作端 RPC 先收口（pending=false）后 resolved 到达 → noop 幂等；dispose 一并退订 resolved', async () => {
+  it('TC13: dispose 退订 resolved 订阅：dispose 后 resolved 命中形态不再撤窗', () => {
+    // 先置 pending=true（弹窗在场）再 dispose——终局态（pending=false）下 resolved 泄漏是恒 noop，测不出退订
     emitPermissionRequest(bus, 'p1', ['shell'], 'req-a')
-    approvePermissions.mockResolvedValue(undefined)
-    controller.transport.approve('p1', ['shell'])
-    await vi.waitFor(() => expect(controller.state.pending).toBe(false))
+    expect(controller.state.pending).toBe(true)
 
-    // 本端已是终局收口，resolved 广播迟到不再翻转状态
-    emitResolved(bus, 'p1', 'req-a', true)
-    expect(controller.state.pending).toBe(false)
-    expect(controller.state.error).toBe(false)
-
-    // dispose 后 request 与 resolved 均不再驱动 state（pending 保持 false）
     controller.dispose()
-    emitPermissionRequest(bus, 'p2', ['shell'], 'req-c')
-    emitResolved(bus, 'p2', 'req-c', true)
-    expect(controller.state.pending).toBe(false)
+
+    // offResolved 泄漏时：requestId 命中形态的 resolved 广播会误撤窗（pending 翻 false）
+    emitResolved(bus, 'p1', 'req-a', true)
+    expect(controller.state.pending).toBe(true)
   })
 })

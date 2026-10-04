@@ -122,6 +122,9 @@ describe('ws-client auth 拒绝信号与重连抑制（D8）', () => {
 
     // token 重试路径形态：reset → 显式 connect（新凭据）
     resetAuthRejectionSuppression()
+    // reset 直接锚，且必须落在 connect 之前：markConnected（auth 成功）也会复位抑制位，
+    // 若锚在 connect 后则 reset 体被掏空仍全绿（无判别力）
+    expect(isAuthRejectedSuppressed()).toBe(false)
     connect('ws://test', { auth: 'token', token: 'tok-new' })
     expect(fakes.length).toBe(2)
     f = latestFake()

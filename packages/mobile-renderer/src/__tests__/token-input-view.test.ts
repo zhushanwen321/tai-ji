@@ -8,13 +8,17 @@
 //（硬编码中文回归防线，阶段 3 一致性修复）。
 //
 // 运行：cd packages/mobile-renderer && npx vitest run src/__tests__/token-input-view.test.ts
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import TokenInputView from '../shell/TokenInputView.vue'
 import { i18n } from '../i18n'
 
 function mountView() {
   return mount(TokenInputView, { global: { plugins: [i18n] } })
+}
+
+function mountViewWith(props: { submitting?: boolean; error?: 'invalid' | 'failed' | null }) {
+  return mount(TokenInputView, { props, global: { plugins: [i18n] } })
 }
 
 describe('TokenInputView（D4/D8 恢复入口）', () => {
@@ -61,5 +65,48 @@ describe('TokenInputView（D4/D8 恢复入口）', () => {
     expect(en.find('[data-testid="token-input"]').attributes('placeholder')).toBe('Paste access token')
     expect(en.find('[data-testid="token-submit"]').text()).toBe('Connect')
     en.unmount()
+  })
+})
+
+describe('TokenInputView 提交中/错误反馈投影（submitting/error props，App 投影 bootstrap tokenSubmit 态）', () => {
+  beforeEach(() => {
+    i18n.global.locale.value = 'zh-CN'
+  })
+
+  it('submitting=true：提交按钮禁用且文案切「连接中…」（已输入 token 也禁用，防重复触发）；false 时可点显「连接」', async () => {
+    const submitting = mountViewWith({ submitting: true })
+    const submitBtn = submitting.get('[data-testid="token-submit"]')
+    // 输入非空 token：禁用只由 submitting 驱动（空值守卫不参与本断言）
+    await submitting.find('[data-testid="token-input"]').setValue('tok-abc')
+    expect(submitBtn.attributes('disabled')).toBeDefined()
+    expect(submitBtn.text()).toBe('连接中…')
+    submitting.unmount()
+
+    const idle = mountViewWith({ submitting: false })
+    const idleBtn = idle.get('[data-testid="token-submit"]')
+    await idle.find('[data-testid="token-input"]').setValue('tok-abc')
+    expect(idleBtn.attributes('disabled')).toBeUndefined()
+    expect(idleBtn.text()).toBe('连接')
+    idle.unmount()
+  })
+
+  it('error="invalid"：role=alert 错误行渲染「Token 无效」文案；error 缺省时错误行不渲染', () => {
+    const invalid = mountViewWith({ error: 'invalid' })
+    const errorRow = invalid.get('[data-testid="token-input-error"]')
+    expect(errorRow.attributes('role')).toBe('alert')
+    expect(errorRow.text()).toBe('Token 无效或已被轮换，请回主机重新扫码获取')
+    invalid.unmount()
+
+    const clean = mountView()
+    expect(clean.find('[data-testid="token-input-error"]').exists()).toBe(false)
+    clean.unmount()
+  })
+
+  it('error="failed"：错误行渲染「连接发起失败」文案（failed 与 invalid 分支文案可区分）', () => {
+    const failed = mountViewWith({ error: 'failed' })
+    const errorRow = failed.get('[data-testid="token-input-error"]')
+    expect(errorRow.attributes('role')).toBe('alert')
+    expect(errorRow.text()).toBe('连接发起失败，请检查网络后重试')
+    failed.unmount()
   })
 })

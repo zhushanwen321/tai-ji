@@ -122,11 +122,13 @@ watch(isConnected, (connected) => {
     />
 
     <!-- failed：重连预算用尽终态，全屏接管必须给可行动指引
-         （禁无限期「连接中」假态——重试入口 = 刷新页面重走 bootstrap 验身链） -->
+         （禁无限期「连接中」假态——重试入口 = 刷新页面重走 bootstrap 验身链）。
+         容器独立 testid（shell-failed-screen），不复用首连分支的 shell-connecting：
+         「failed 态无 connecting 视图」类断言依赖二者不撞名；可行动指引元素是 shell-failed -->
     <div
       v-else-if="shellConnectionState === 'failed'"
       class="flex h-screen flex-col items-center justify-center gap-2 bg-bg"
-      data-testid="shell-connecting"
+      data-testid="shell-failed-screen"
     >
       <p class="text-sm text-neutral-fg" role="alert" data-testid="shell-failed">
         {{ t('mobile.connectionFailed') }}

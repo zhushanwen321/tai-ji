@@ -99,9 +99,6 @@ describe('ConnectionManager mobile static hosting (U1.1)', () => {
     fs.mkdirSync(join(distDir, 'sub'), { recursive: true })
     fs.writeFileSync(join(distDir, 'index.html'), `<!DOCTYPE html><html>${INDEX_MARK}</html>`, 'utf-8')
     fs.writeFileSync(join(distDir, 'assets', 'app.js'), 'console.log("app")', 'utf-8')
-    fs.writeFileSync(join(distDir, 'assets', 'main.css'), 'body { margin: 0 }', 'utf-8')
-    fs.writeFileSync(join(distDir, 'assets', 'icon.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>', 'utf-8')
-    fs.writeFileSync(join(distDir, 'assets', 'font.woff2'), Buffer.from([0x77, 0x4f, 0x46, 0x32, 0x00, 0x01]))
     // 穿越目标：dist 外的「秘密」文件——穿越防护失败的信号是它被 200 读出。
     fs.writeFileSync(join(dataDir, 'secret.txt'), 'TOP_SECRET_OUTSIDE_DIST', 'utf-8')
     vi.stubEnv('TAIJI_AGENT_DATA_DIR', dataDir)
@@ -148,22 +145,8 @@ describe('ConnectionManager mobile static hosting (U1.1)', () => {
       expect(res.headers['content-type']).toContain('text/javascript')
     })
 
-    it.each([
-      ['/assets/main.css', 'text/css'],
-      ['/assets/font.woff2', 'font/woff2'],
-    ])('Content-Type 映射：%s → %s', async (path, expectedType) => {
-      opened.push(await startManager(SPAWN_TOKEN, openStateOptions(distDir)))
-      const res = await rawRequest(opened[0].port, path)
-      expect(res.status).toBe(200)
-      expect(res.headers['content-type']).toContain(expectedType)
-    })
-
-    it('映射外扩展名（.svg）→ octet-stream 兜底（映射表按实测产物裁剪，不静默坏）', async () => {
-      opened.push(await startManager(SPAWN_TOKEN, openStateOptions(distDir)))
-      const res = await rawRequest(opened[0].port, '/assets/icon.svg')
-      expect(res.status).toBe(200)
-      expect(res.headers['content-type']).toContain('application/octet-stream')
-    })
+    // Content-Type 映射矩阵与 octet-stream 兜底归属裸 handler 面（mobile-static.test.ts
+    // 的 it.each 与映射外扩展名用例），集成面不重复。
 
     it('子目录请求（/sub/）也回退顶层 index.html；不存在的资产路径 404 兜底', async () => {
       opened.push(await startManager(SPAWN_TOKEN, openStateOptions(distDir)))
@@ -208,7 +191,9 @@ describe('ConnectionManager mobile static hosting (U1.1)', () => {
       ['编码 ..%2f 混合', '/..%2fsecret.txt'],
       ['全编码 %2e%2e%2f', '/%2e%2e%2fsecret.txt'],
       ['嵌套深穿越', '/assets/%2e%2e/%2e%2e/secret.txt'],
+      ['字面多级 .. 段', '/a/b/../../../x'],
       ['畸形百分号序列', '/%zzsecret'],
+      ['非法 UTF-8 百分号编码', '/%ffx'],
       ['NUL 字节', '/%00secret.txt'],
     ])('%s → 400 且不泄 dist 外内容', async (_label, path) => {
       opened.push(await startManager(SPAWN_TOKEN, openStateOptions(distDir)))
@@ -265,17 +250,15 @@ describe('ConnectionManager mobile static hosting (U1.1)', () => {
   })
 
   // ── E5：开态 dist 缺失 → 静态面禁用 + 响亮日志 + WS 不受影响 ────────────────
+  // 变体判定差异（未传 / 目录不存在 / 指向普通文件）与文案归属纯函数面
+  // resolveMobileStaticRoot（mobile-static.test.ts 的 E5 探测用例），集成面只锚降级行为。
 
-  describe('E5：开态但 mobileDist 缺失/无效', () => {
-    it('未传 --mobile-dist → error 日志含 pnpm build 指引与打包配置提示；GET / 404；WS auth 正常', async () => {
+  describe('E5：开态但 mobileDist 缺失（集成降级行为）', () => {
+    it('未传 --mobile-dist → 响亮 error 日志（计数 1）；GET / 404；WS auth 正常', async () => {
       const errorSpy = spyConsole('error')
       // 开态形态但 mobileDist 缺失（组合根装配链：探测在 handler 构造前发出 E5 日志）
       opened.push(await startManager(SPAWN_TOKEN, openStateOptions()))
       expect(errorSpy).toHaveBeenCalledTimes(1)
-      const logged = String(errorSpy.mock.calls[0]?.[0])
-      expect(logged).toContain('--mobile-dist')
-      expect(logged).toContain('pnpm --filter @taiji/mobile-renderer build')
-      expect(logged).toContain('extraResources')
       // 静态面禁用，不拒启：HTTP 静态路径 404、WS auth 照常。
       const res = await rawRequest(opened[0].port, '/')
       expect(res.status).toBe(404)
@@ -294,47 +277,15 @@ describe('ConnectionManager mobile static hosting (U1.1)', () => {
       ws.terminate()
       expect(authOk).toBe(true)
     })
-
-    it('目录不存在 → error 日志含 build 指引；GET / 404', async () => {
-      const errorSpy = spyConsole('error')
-      const missingDir = join(dataDir, 'no-such-dist')
-      opened.push(await startManager(SPAWN_TOKEN, openStateOptions(missingDir)))
-      expect(errorSpy).toHaveBeenCalledTimes(1)
-      expect(String(errorSpy.mock.calls[0]?.[0])).toContain('pnpm --filter @taiji/mobile-renderer build')
-      expect(String(errorSpy.mock.calls[0]?.[0])).toContain(missingDir)
-      const res = await rawRequest(opened[0].port, '/')
-      expect(res.status).toBe(404)
-    })
-
-    it('--mobile-dist 指向普通文件（非目录）→ 同 E5 处置', async () => {
-      const errorSpy = spyConsole('error')
-      const filePath = join(dataDir, 'not-a-dir')
-      fs.writeFileSync(filePath, 'x', 'utf-8')
-      opened.push(await startManager(SPAWN_TOKEN, openStateOptions(filePath)))
-      expect(errorSpy).toHaveBeenCalledTimes(1)
-      const res = await rawRequest(opened[0].port, '/')
-      expect(res.status).toBe(404)
-    })
   })
 
-  // ── resolveMobileStaticPath 纯函数白盒（穿越判定核心直接锚定）───────────────
+  // ── resolveMobileStaticPath 纯函数白盒（正向解析锚定；负向矩阵归上方 E4 集成面）───
 
   describe('resolveMobileStaticPath（纯函数）', () => {
     it('dist 内路径 → 绝对路径；根路径 → distRoot 本身（目录判定入口）', () => {
       expect(resolveMobileStaticPath(distDir, '/index.html')).toBe(join(distDir, 'index.html'))
       expect(resolveMobileStaticPath(distDir, '/assets/app.js')).toBe(join(distDir, 'assets', 'app.js'))
       expect(resolveMobileStaticPath(distDir, '/')).toBe(distDir)
-    })
-
-    it.each([
-      ['字面穿越', '/../x'],
-      ['深穿越', '/a/b/../../../x'],
-      ['编码穿越', '/%2e%2e/x'],
-      ['全编码穿越', '/%2e%2e%2fx'],
-      ['NUL 注入', '/%00x'],
-      ['畸形编码', '/%ffx'],
-    ])('%s → null（白名单外，不落 fs）', (_label, path) => {
-      expect(resolveMobileStaticPath(distDir, path)).toBeNull()
     })
   })
 })

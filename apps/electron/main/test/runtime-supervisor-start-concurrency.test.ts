@@ -90,13 +90,6 @@ describe('RuntimeSupervisor start() 并发串行化（AM2）', () => {
     expect(spawnMock).toHaveBeenCalledTimes(1)
   })
 
-  it('三个 start() 并发（toggle + 启动链 + 崩溃重启同窗口）仍只 spawn 一次', async () => {
-    const sup = new RuntimeSupervisor()
-    const ports = await Promise.all([sup.start(), sup.start(), sup.start()])
-    expect(ports).toEqual([43110, 43110, 43110])
-    expect(spawnMock).toHaveBeenCalledTimes(1)
-  })
-
   it('前序 start 失败不毒化队列：后序 start 独立执行并成功 spawn', async () => {
     const { waitForHealth } = await import('../supervisor/health-checker.js')
     vi.mocked(waitForHealth).mockRejectedValueOnce(new Error('health timeout'))

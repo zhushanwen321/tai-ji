@@ -8,7 +8,9 @@
 //
 // 修复后不变量（本文件锁定）：
 // 1. 单飞守卫：存在非 CLOSED socket 时 connect() 一律 no-op（新连接建立前旧连接必须 closed）。
-// 2. 单一定时器：connect() 放行时清挂起重连定时器；scheduleReconnect 覆盖前清旧 handle。
+//    OPEN/CONNECTING 分区的幂等断言收敛在 invariants 文件（参数化用例）；本文件锁 CLOSING
+//    分区与混合交错序列。
+// 2. 单一定时器：connect() 放行时清挂起的退避定时器；scheduleReconnect 覆盖前清旧 handle。
 // 3. close 配对：任意驱动序列的任意时点，非 CLOSED socket 至多一个（create 与 close 配对收敛）。
 //
 // 运行：cd packages/core && npx vitest run src/transport/__tests__/ws-client.single-flight.test.ts
@@ -114,15 +116,6 @@ describe('ws-client 单飞防并存', () => {
     expectAtMostOneAlive()
   })
 
-  it('CONNECTING 期间重复 connect（重复 init 等价）不新建 WS', () => {
-    connect('ws://test', { auth: 'skip' })
-    expect(fakes.length).toBe(1)
-    connect('ws://test', { auth: 'skip' })
-    expect(fakes.length).toBe(1)
-    expect(getState().value).toBe('connecting')
-    expectAtMostOneAlive()
-  })
-
   it('failed 后重试（connect 再入场）：旧 socket 已 CLOSED → 放行重建，重连预算已重置', () => {
     connect('ws://test', { auth: 'skip' })
     latestFake().triggerOpen()
@@ -140,6 +133,17 @@ describe('ws-client 单飞防并存', () => {
     // 用户重试 / 重复 init 再入场：ws CLOSED → 放行，state 离开 failed
     connect('ws://test', { auth: 'skip' })
     expect(fakes.length).toBe(lenAtFail + 1)
+    expect(getState().value).toBe('connecting')
+    expectAtMostOneAlive()
+
+    // 重连预算已重置的行为锚：再入场后不 open 直接断线（再入场后的首次掉线）。
+    // setFailed 未复位簿记时——残留 reconnectStartedAt（本次驱动约 90s 前）越 60s 时长上限，
+    // 本次 scheduleReconnect 直落 failed；残留 reconnectAttempts 使首个退避间隔为 8s（2^3）
+    // 而非 base 1s。两条复位线各有独立红灯。
+    latestFake().triggerClose()
+    expect(getState().value).toBe('reconnecting') // 未直落 failed = reconnectStartedAt 已复位
+    vi.advanceTimersByTime(1_000) // base 1s 到 → 退避链接力建新连接（从 base 起步 = attempts 已复位）
+    expect(fakes.length).toBe(lenAtFail + 2)
     expect(getState().value).toBe('connecting')
     expectAtMostOneAlive()
   })

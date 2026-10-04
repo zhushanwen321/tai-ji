@@ -78,3 +78,64 @@ describe('main.ts bootstrap 失败兜底呈现', () => {
     expect(errSpy).not.toHaveBeenCalled()
   })
 })
+
+// ── 全局错误留痕监听（main.ts 模块体注册的 window 'error' / 'unhandledrejection' 两面）──
+// 断言按调用参数不按次数：监听器随每次 fresh import 叠加注册（闭包引用无法 remove），
+// 泄漏的旧监听器与本次注册的产出相同参数的调用，次数断言会假红。
+describe('main.ts 全局错误留痕监听', () => {
+  let errSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    bootstrapMock.mockReset()
+    document.body.innerHTML = ''
+    errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    document.body.innerHTML = ''
+    errSpy.mockRestore()
+  })
+
+  it("window 'error' 事件（携带 error/message）→ console.error 以 uncaught error 标记留痕", async () => {
+    mountAppContainer()
+    bootstrapMock.mockResolvedValue(undefined)
+    await importFreshMain()
+    errSpy.mockClear()
+
+    const boom = new Error('render exploded')
+    window.dispatchEvent(new ErrorEvent('error', { error: boom, message: 'Uncaught Error: render exploded' }))
+
+    expect(errSpy).toHaveBeenCalledWith('[mobile-shell] uncaught error:', boom)
+  })
+
+  it("资源加载型 'error' 事件（无 error 无 message）跳过留痕", async () => {
+    mountAppContainer()
+    bootstrapMock.mockResolvedValue(undefined)
+    await importFreshMain()
+    errSpy.mockClear()
+
+    window.dispatchEvent(new ErrorEvent('error'))
+
+    expect(errSpy).not.toHaveBeenCalledWith('[mobile-shell] uncaught error:', expect.anything())
+    expect(errSpy).not.toHaveBeenCalledWith('[mobile-shell] unhandled rejection:', expect.anything())
+  })
+
+  it("'unhandledrejection' 事件 → console.error 以 unhandled rejection 标记留痕 reason", async () => {
+    mountAppContainer()
+    bootstrapMock.mockResolvedValue(undefined)
+    await importFreshMain()
+    errSpy.mockClear()
+
+    // happy-dom 无 PromiseRejectionEvent 构造器：监听器只读 e.reason / e.promise，
+    // 用 Event + 同形字段派发等价驱动
+    const rejection = new Event('unhandledrejection') as Event & {
+      promise: Promise<unknown>
+      reason: unknown
+    }
+    rejection.promise = Promise.resolve()
+    rejection.reason = 'socket closed'
+    window.dispatchEvent(rejection)
+
+    expect(errSpy).toHaveBeenCalledWith('[mobile-shell] unhandled rejection:', 'socket closed')
+  })
+})

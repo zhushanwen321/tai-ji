@@ -4,13 +4,12 @@
  *    构成开态」自 ConnectionManager 迁入此处——开态判据是显式 remoteAccess 布尔，
  *    不再从 remoteTokenProvider 装配痕迹推断）；关态零探测副作用（无 statSync、无日志）。
  * 2. createMobileStaticHandler：裸 httpServer 挂 handler（无需 ConnectionManager
- *    harness / authToken / wss）锚定核心服务行为——404 / Content-Type 映射 / 穿越防护。
- * 3. 端到端分派行为（/health 先于静态、405、HEAD、日志纪律）由
- *    connection-manager-mobile-static.test.ts 的 ConnectionManager 集成测试覆盖，
- *    此处不重复。
+ *    harness / authToken / wss）锚定核心服务行为——404 / Content-Type 映射。
+ * 3. 端到端分派行为（/health 先于静态、405、HEAD、日志纪律）与穿越防护矩阵（E4：
+ *    端到端 400 + 拒绝日志纪律）由 connection-manager-mobile-static.test.ts 的
+ *    ConnectionManager 集成测试覆盖，此处不重复。
  *
- * dist fixture 经 mkdtempSync 自建自删（fs-guard 白名单，禁触真实数据目录）；
- * 穿越请求用 node:http raw request 发字面 `..`（浏览器 fetch 会客户端 normalize）。
+ * dist fixture 经 mkdtempSync 自建自删（fs-guard 白名单，禁触真实数据目录）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as fs from 'node:fs'
@@ -64,10 +63,9 @@ describe('mobile-static module (S3)', () => {
     fs.mkdirSync(join(distDir, 'assets'), { recursive: true })
     fs.writeFileSync(join(distDir, 'index.html'), `<!DOCTYPE html><html>${INDEX_MARK}</html>`, 'utf-8')
     fs.writeFileSync(join(distDir, 'assets', 'app.js'), 'console.log("app")', 'utf-8')
+    fs.writeFileSync(join(distDir, 'assets', 'main.css'), 'body { margin: 0 }', 'utf-8')
     fs.writeFileSync(join(distDir, 'assets', 'font.woff2'), Buffer.from([0x77, 0x4f, 0x46, 0x32, 0x00, 0x01]))
     fs.writeFileSync(join(distDir, 'assets', 'icon.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>', 'utf-8')
-    // 穿越目标：dist 外的「秘密」文件——穿越防护失败的信号是它被 200 读出。
-    fs.writeFileSync(join(dataDir, 'secret.txt'), 'TOP_SECRET_OUTSIDE_DIST', 'utf-8')
   })
 
   afterEach(async () => {
@@ -167,6 +165,7 @@ describe('mobile-static module (S3)', () => {
 
     it.each([
       ['/assets/app.js', 'text/javascript'],
+      ['/assets/main.css', 'text/css'],
       ['/assets/font.woff2', 'font/woff2'],
       ['/index.html', 'text/html'],
     ])('Content-Type 映射：%s → %s', async (path, expectedType) => {
@@ -185,16 +184,7 @@ describe('mobile-static module (S3)', () => {
       expect(res.headers['content-type']).toContain('application/octet-stream')
     })
 
-    it.each([
-      ['字面 .. 段', '/../secret.txt'],
-      ['编码 %2e%2e 段', '/%2e%2e/secret.txt'],
-      ['全编码 %2e%2e%2f', '/%2e%2e%2fsecret.txt'],
-    ])('穿越防护：%s → 400 且不泄 dist 外内容', async (_label, path) => {
-      const { port, server } = await startStaticServer(distDir)
-      openedServers.push(server)
-      const res = await rawRequest(port, path)
-      expect(res.status).toBe(400)
-      expect(res.body.toString('utf-8')).not.toContain('TOP_SECRET_OUTSIDE_DIST')
-    })
+    // 穿越防护矩阵归属集成面（connection-manager-mobile-static.test.ts 的 E4 it.each，
+    // 端到端 400 + 拒绝日志纪律是更强剩余证明），裸 handler 面不重复。
   })
 })

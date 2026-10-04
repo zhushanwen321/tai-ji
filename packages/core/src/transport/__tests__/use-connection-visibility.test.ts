@@ -10,7 +10,8 @@
  * （isVisible 变量 + 捕获 onVisibilityChange 的 handler），断言语义不变。
  *
  * R2 error envelope 套件：dispatcher 经 mocked onMessage 捕获（原 renderer 版经
- * transport.on 捕获），pending 分流断言不变。
+ * transport.on 捕获），断言 pending.resolveEnvelope 接线（原始 envelope 原样委托）；
+ * envelope 展开语义归 pending 真实实现，单测在 transport/api/__tests__/pending.test.ts。
  *
  * 运行：cd packages/core && npx vitest run src/transport/__tests__/use-connection-visibility.test.ts
  */
@@ -51,6 +52,7 @@ vi.mock('../ws-client', () => ({
 const mockRejectAll = vi.fn()
 const mockPendingResolve = vi.fn()
 const mockPendingReject = vi.fn()
+const mockResolveEnvelope = vi.fn()
 const mockDispatchSession = vi.fn()
 const mockDispatchGlobal = vi.fn()
 const mockEffects = vi.fn()
@@ -65,26 +67,11 @@ vi.mock('../api/pending', () => ({
   reject: (...args: unknown[]) => mockPendingReject(...args),
   // routeInbound 用 has 判定 msg.id 是否命中 pending；测试模拟的带 id error reply 均为 reply
   has: vi.fn().mockReturnValue(true),
-  // 模拟 transport/api/pending.resolveEnvelope 行为（收尾 6 R2/ES1）：route-inbound 委托
-  // envelope 展开到 pending 层（code 提取 + details.detail → Error），此处转发到 reject/resolve。
-  // 真实实现单测在 transport/api/__tests__/pending.test.ts。
-  resolveEnvelope: (msg: ServerMessage) => {
-    if (msg.type === 'error') {
-      const payload = msg.payload as { code?: string; message?: string; details?: { detail?: unknown } }
-      const message = typeof payload.message === 'string' ? payload.message : 'request failed'
-      const code = typeof payload.code === 'string' ? payload.code : 'unknown'
-      const enriched: Record<string, unknown> = { code }
-      const d = payload.details?.detail
-      if (typeof d === 'string') {
-        enriched.cwd = d
-      } else if (d && typeof d === 'object') {
-        Object.assign(enriched, d)
-      }
-      mockPendingReject(msg.id!, Object.assign(new Error(message), enriched))
-    } else {
-      mockPendingResolve(msg.id!, msg.payload)
-    }
-  },
+  // route-inbound 的 pending 分流出口（R2/ES1）：mock 不实现，只捕获调用——
+  // use-connection 层只断言「原始 envelope 原样委托」的接线语义（见 R2 describe）；
+  // envelope 展开逻辑（code 提取 + details.detail → Error）归 pending 真实实现，
+  // 单测在 transport/api/__tests__/pending.test.ts。
+  resolveEnvelope: (...args: unknown[]) => mockResolveEnvelope(...args),
 }))
 
 vi.mock('../api/events', () => ({
@@ -207,14 +194,14 @@ describe('useConnection error envelope details 透传（R2）', () => {
     setConnectionPorts(makePorts())
   })
 
-  it('error envelope details.detail 为对象 → exitCode/stderr 展开到 reject Error', async () => {
+  it('error envelope → routeInbound 接线：pending.resolveEnvelope 收到原始 envelope（原样委托）', async () => {
     const { init, teardown } = useConnection()
     await init()
     expect(inboundHandler).not.toBeNull()
 
     // 模拟 runtime worktree handler 发来的 error envelope：
     // code=SETUP_FAILED, message, details.detail={ exitCode, stderr }
-    inboundHandler!({
+    const envelope: ServerMessage = {
       type: 'error',
       id: 'req-1',
       payload: {
@@ -222,62 +209,14 @@ describe('useConnection error envelope details 透传（R2）', () => {
         message: 'setup 脚本失败',
         details: { detail: { exitCode: 2, stderr: 'npm install failed' } },
       },
-    })
+    }
+    inboundHandler!(envelope)
 
-    expect(mockPendingReject).toHaveBeenCalledTimes(1)
-    const [rejectedId, err] = mockPendingReject.mock.calls[0]!
-    expect(rejectedId).toBe('req-1')
-    expect(err).toBeInstanceOf(Error)
-    expect((err as Error).message).toBe('setup 脚本失败')
-    // code + 展开的 exitCode/stderr 都在 Error 上
-    expect((err as { code: string }).code).toBe('SETUP_FAILED')
-    expect((err as { exitCode: number }).exitCode).toBe(2)
-    expect((err as { stderr: string }).stderr).toBe('npm install failed')
-
-    teardown()
-  })
-
-  it('error envelope details.detail 为对象（WORKTREE_EXISTS 的 {cwd, dirName}）→ cwd 展开到 reject Error', async () => {
-    const { init, teardown } = useConnection()
-    await init()
-
-    inboundHandler!({
-      type: 'error',
-      id: 'req-2',
-      payload: {
-        code: 'WORKTREE_EXISTS',
-        message: 'worktree 目录已存在',
-        details: { detail: { cwd: '/ws/feat-existing', dirName: 'feat-existing' } },
-      },
-    })
-
-    expect(mockPendingReject).toHaveBeenCalledTimes(1)
-    const [, err] = mockPendingReject.mock.calls[0]!
-    expect((err as { code: string }).code).toBe('WORKTREE_EXISTS')
-    // object detail 经 Object.assign 展开 → cwd + dirName 都在 Error 上
-    // CreateWorktreeModal exists 态「直接开始」读 lastError.cwd
-    expect((err as { cwd: string }).cwd).toBe('/ws/feat-existing')
-    expect((err as { dirName: string }).dirName).toBe('feat-existing')
-
-    teardown()
-  })
-
-  it('error envelope 无 details → 只透传 code（保持向后兼容）', async () => {
-    const { init, teardown } = useConnection()
-    await init()
-
-    inboundHandler!({
-      type: 'error',
-      id: 'req-3',
-      payload: { code: 'out_of_cwd', message: 'cwd 不存在' },
-    })
-
-    expect(mockPendingReject).toHaveBeenCalledTimes(1)
-    const [, err] = mockPendingReject.mock.calls[0]!
-    expect((err as { code: string }).code).toBe('out_of_cwd')
-    expect((err as Error).message).toBe('cwd 不存在')
-    // 无 details.detail → 不附加 cwd/exitCode/stderr
-    expect((err as { cwd?: string }).cwd).toBeUndefined()
+    // 接线断言：dispatcher 把原始 envelope 原样委托给 pending.resolveEnvelope。
+    // 展开语义（code 提取 + details.detail → Error 的 exitCode/stderr/cwd）不在本层断言——
+    // 归属测试在 transport/api/__tests__/pending.test.ts（真实实现单测）
+    expect(mockResolveEnvelope).toHaveBeenCalledTimes(1)
+    expect(mockResolveEnvelope).toHaveBeenCalledWith(envelope)
 
     teardown()
   })

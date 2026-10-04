@@ -1,7 +1,7 @@
 /**
  * message-bus-bridge.test.ts —— MessageBusBridge 单测（AC8/FR5/ERR2/dispose/窄化抽查）。
  *
- * 覆盖：AC8（9 个 plugin:* 每个 type 都 emit 对应 InternalEvent，无零订阅）、
+ * 覆盖：AC8（13 个 plugin:* 每个 type 都 emit 对应 InternalEvent，无零订阅）、
  * FR5（6 个 extension:* wire type 收敛，widget/widgetGui 双映射 + ui_request 归一 +
  * requestsInvalidated 失效链透传与防御分支）、
  * ERR2（未知 type + 4 种 payload 解析失败 → error 事件）、dispose 防泄漏、
@@ -41,7 +41,7 @@ describe('MessageBusBridge', () => {
     vi.restoreAllMocks()
   })
 
-  describe('AC8: 9 个 plugin:* 每个 type 都 emit 对应 InternalEvent（无零订阅）', () => {
+  describe('AC8: 13 个 plugin:* 每个 type 都 emit 对应 InternalEvent（无零订阅）', () => {
     it('statusBarUpdate → plugin-status-bar-update', () => {
       const { source, bus } = makeBridge()
       const { emitted } = spyEmit(bus)
@@ -181,7 +181,7 @@ describe('MessageBusBridge', () => {
       expect(e).toMatchObject({ kind: 'ui-request', request: { requestId: 'r1', pluginId: 'tasks', kind: 'confirm', title: '确认？', method: 'confirm' } })
     })
 
-    it('10 个 plugin:* 全部有 handler，无零订阅（kind 集合与 IF3 映射表逐一核对）', () => {
+    it('13 个 plugin:* 全部有 handler，无零订阅（kind 集合与 IF3 映射表逐一核对）', () => {
       const { source, bus } = makeBridge()
       const { emitted } = spyEmit(bus)
       const messages: IncomingPluginMessage[] = [

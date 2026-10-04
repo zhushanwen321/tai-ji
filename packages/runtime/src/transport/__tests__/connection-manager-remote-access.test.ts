@@ -125,14 +125,10 @@ describe('ConnectionManager remote-access (U0.1)', () => {
   }
 
   // ── D1：listen host 参数化 ──────────────────────────────────────────────
+  // 默认绑定 127.0.0.1 的断言归属 ws-listen-hardening.test.ts 的 SEC-U2（更强防线），
+  // 此处只锚参数化开态 0.0.0.0。
 
   describe('listen host 参数化（D1）', () => {
-    it('默认 start() 绑定 127.0.0.1（与参数化前现状逐字节一致）', async () => {
-      const harness = await startManager(SPAWN_TOKEN)
-      opened.push(harness)
-      expect((harness.httpServer.address() as AddressInfo).address).toBe('127.0.0.1')
-    })
-
     it("start('0.0.0.0') 绑定全网卡（远程访问开态）", async () => {
       const harness = await startManager(SPAWN_TOKEN, {}, '0.0.0.0')
       opened.push(harness)
@@ -141,17 +137,10 @@ describe('ConnectionManager remote-access (U0.1)', () => {
   })
 
   // ── 关态：默认行为等价（G2/S1）────────────────────────────────────────────
+  // 「auth 仅认 spawn token（正确值通过/错误值 1008）」归属 ws-listen-hardening.test.ts
+  // 的 SEC-U2（错 token 1008 + bad_token、正确 token 放行，真超集），此处只锚关态零 IO。
 
   describe('关态（无 remoteTokenProvider）——默认行为等价', () => {
-    it('auth 仅认 spawn token：正确值通过，错误值拒绝（close 1008）', async () => {
-      const harness = await startManager(SPAWN_TOKEN)
-      opened.push(harness)
-      expect((await tryAuth(harness.port, SPAWN_TOKEN)).ok).toBe(true)
-      const bad = await tryAuth(harness.port, 'wrong-token')
-      expect(bad.ok).toBe(false)
-      expect(bad.closeCode).toBe(1008)
-    })
-
     it('remote-access.json 存在也不被读取：文件内 token 不被认证 + fs 零读取', async () => {
       // 文件里放一个合法 remote token——若被读取入集合，该 token 将通过 auth。
       writeRemoteAccessFile(dataDir, remoteAccessJson(REMOTE_TOKEN_A))
@@ -192,19 +181,6 @@ describe('ConnectionManager remote-access (U0.1)', () => {
       // 轮换后：新 token B 通过（每次握手热读，无重启）、旧 token A 被拒。
       expect((await tryAuth(harness.port, REMOTE_TOKEN_B)).ok).toBe(true)
       expect((await tryAuth(harness.port, REMOTE_TOKEN_A)).ok).toBe(false)
-    })
-
-    it('构造选项透传：mobileStaticHandler / remoteTokenProvider 到达 ConnectionManager', () => {
-      const provider = (): string | null => REMOTE_TOKEN_A
-      const staticHandler = async (): Promise<void> => {}
-      const conn = new ConnectionManager(0, {
-        onConnect: () => {},
-        onMessage: async () => {},
-        sendError: () => {},
-      }, SPAWN_TOKEN, { mobileStaticHandler: staticHandler, remoteTokenProvider: provider })
-      const opts = (conn as unknown as { options: ConnectionManagerOptions }).options
-      expect(opts.mobileStaticHandler).toBe(staticHandler)
-      expect(opts.remoteTokenProvider).toBe(provider)
     })
   })
 
@@ -319,15 +295,20 @@ describe('ConnectionManager remote-access (U0.1)', () => {
     it('合法开态配置 → 返回 token', () => {
       expect(parseRemoteAccessToken(remoteAccessJson(REMOTE_TOKEN_A))).toBe(REMOTE_TOKEN_A)
     })
-    it('非对象 JSON（如数组/标量）→ null + error 日志', () => {
+    it('非对象 JSON（如数组/标量）→ null + error 日志含 shape 分支特有文案', () => {
       const errorSpy = spyConsole('error')
       expect(parseRemoteAccessToken('["not","an","object"]')).toBeNull()
       expect(errorSpy).toHaveBeenCalledTimes(1)
+      // 「字段不合法」是 bad-shape 分支特有文案（token hex 失败分支是「token 字段不符
+      // 合契约」）——区分两条失败路径，防 shape 守卫被移除后数组输入经 hex 失败路径
+      // 同样 null + error 造成假绿。
+      expect(String(errorSpy.mock.calls[0]?.[0])).toContain('字段不合法')
     })
-    it('缺 token 字段 → null + error 日志', () => {
+    it('缺 token 字段 → null + error 日志含 shape 分支特有文案', () => {
       const errorSpy = spyConsole('error')
       expect(parseRemoteAccessToken(JSON.stringify({ enabled: true }))).toBeNull()
       expect(errorSpy).toHaveBeenCalledTimes(1)
+      expect(String(errorSpy.mock.calls[0]?.[0])).toContain('字段不合法')
     })
   })
 })

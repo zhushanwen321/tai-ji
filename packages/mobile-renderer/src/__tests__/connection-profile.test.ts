@@ -163,11 +163,14 @@ describe('D4 三分支闭合（端口集成）', () => {
   })
 
   it('query 来源验身成功后同会话再 resolve 同样走 storage（已消费值不重复采纳）', async () => {
-    const { port, stripQuery } = makePort({ search: '?token=tok-new', stored: 'tok-old' })
+    const { port, map, stripQuery } = makePort({ search: '?token=tok-new', stored: 'tok-old' })
     await port.resolve()
     await port.handleAuthSuccess()
     expect(stripQuery).toHaveBeenCalledTimes(1)
-    expect(await port.resolve()).toEqual({ url: 'ws://192.168.1.5:3210', token: 'tok-new' })
+    // storage 改写异值消歧来源分支：若已消费 query 被重复采纳（消歧失效），此断言
+    // 拿到旧 query 值 tok-new 而非 storage 异值——fixture 值恒等时两分支不可区分
+    map.set(REMOTE_TOKEN_STORAGE_KEY, 'tok-rotated')
+    expect(await port.resolve()).toEqual({ url: 'ws://192.168.1.5:3210', token: 'tok-rotated' })
   })
 
   it('stripQuery 抛错降级：handleAuthSuccess 正常完成、storage 已落盘、消费消歧不受影响', async () => {

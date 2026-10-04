@@ -39,6 +39,7 @@ import {
   notifyTokenInputRequired,
   setupConnectionView,
   shellConnectionState,
+  submitRemoteToken,
   tokenSubmit,
 } from '../shell/connection-view'
 
@@ -112,5 +113,39 @@ describe('connection-view 转移优先级（三信号不变量）', () => {
     tokenSubmit.value = { submitting: true, error: null }
     notifyAuthRejected()
     expect(tokenSubmit.value).toEqual({ submitting: false, error: 'invalid' })
+  })
+})
+
+describe('submitRemoteToken 提交编排（TokenInputView 提交路径，含 catch 失败分支）', () => {
+  beforeEach(() => {
+    tokenSubmit.value = { submitting: false, error: null }
+    controller.adoptManualToken.mockClear()
+    mockResetSuppression.mockClear()
+    mockDisconnect.mockClear()
+    mockInitConnection.mockReset()
+    mockInitConnection.mockResolvedValue(undefined)
+  })
+
+  it('提交通道抛错：error=failed 且 submitting 复位（TokenInputView 可见错误态）；编排各步仍按序执行', async () => {
+    mockInitConnection.mockRejectedValueOnce(new Error('connect refused'))
+
+    await submitRemoteToken('tok-retry')
+
+    expect(tokenSubmit.value).toEqual({ submitting: false, error: 'failed' })
+    // catch 不跳过前置编排步骤：采纳凭据 → 解除抑制位 → 清残态 → 重连
+    expect(controller.adoptManualToken).toHaveBeenCalledWith('tok-retry')
+    expect(mockResetSuppression).toHaveBeenCalledTimes(1)
+    expect(mockDisconnect).toHaveBeenCalledTimes(1)
+    expect(mockInitConnection).toHaveBeenCalledTimes(1)
+  })
+
+  it('失败后可重试：再次提交走成功路径，submitting 置位且 error 清空（收口留给 auth 结果）', async () => {
+    mockInitConnection.mockRejectedValueOnce(new Error('connect refused'))
+    await submitRemoteToken('tok-retry')
+    expect(tokenSubmit.value.error).toBe('failed')
+
+    await submitRemoteToken('tok-retry')
+    // 编排提交成功 ≠ 提交中收口：auth 结果（connected / 拒绝）异步落地时才收口
+    expect(tokenSubmit.value).toEqual({ submitting: true, error: null })
   })
 })

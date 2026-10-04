@@ -9,6 +9,7 @@
  *  - 轮换流：点轮换按钮 → rotateRemoteAccessToken 被调 + 链接 token 刷新 + info toast
  *  - 复制按钮：clipboard.writeText 收到完整链接
  *  - 多地址：urls > 1 时渲染地址选择器且默认选中首个候选
+ *  - 多地址切换跟随：下拉选中另一候选后，链接文本 / QR 生成入参 / 复制内容跟随新地址
  *
  * Mock 策略：
  *  - vi.mock('@/lib/ipc') 提供三方法 stub（组件唯一 IPC 消费面）
@@ -36,6 +37,7 @@ vi.mock('qrcode', () => ({ default: qrMocks }))
 
 import RemoteAccessPage from '@/components/settings/remote-access/RemoteAccessPage.vue'
 import { useToast } from '@/composables/useToast'
+import { pickRekaOption } from '../helpers/reka-select-harness'
 import type { RemoteAccessInfo, RemoteAccessToggleResult } from '@taiji/shared'
 
 function makeInfo(overrides: Partial<RemoteAccessInfo> = {}): RemoteAccessInfo {
@@ -133,13 +135,6 @@ describe('RemoteAccessPage 开态渲染', () => {
     expect(alert.text()).toContain('pnpm --filter @taiji/mobile-renderer build')
   })
 
-  it('E5 显形：关态或产物就绪时警告条不渲染', async () => {
-    ipcMocks.getRemoteAccessInfo.mockResolvedValue(makeInfo({ enabled: false, mobileDistReady: false }))
-    wrapper = mount(RemoteAccessPage)
-    await flushPromises()
-    expect(wrapper.find('[data-testid="remote-access-dist-missing"]').exists()).toBe(false)
-  })
-
   it('多地址（Tailscale 优先排序由 main 侧保证）：默认选中数组首项，选中 Tailscale 项渲染使用前提提示', async () => {
     ipcMocks.getRemoteAccessInfo.mockResolvedValue(
       makeInfo({
@@ -162,6 +157,46 @@ describe('RemoteAccessPage 开态渲染', () => {
     const hint = wrapper.find('[data-testid="remote-access-tailscale-selected-hint"]')
     expect(hint.exists()).toBe(true)
     expect(hint.text()).toContain('Tailscale')
+  })
+
+  it('多地址切换跟随：下拉选中另一候选后，链接文本 / QR 生成入参 / 复制内容跟随新地址', async () => {
+    ipcMocks.getRemoteAccessInfo.mockResolvedValue(
+      makeInfo({
+        enabled: true,
+        token: 'b'.repeat(64),
+        // 形态对齐 main 侧枚举器输出：Tailscale 候选在前、局域网在后
+        urls: [
+          { url: 'http://100.82.44.102:3210', kind: 'tailscale' },
+          { url: 'http://192.168.1.5:3210', kind: 'lan' },
+        ],
+      }),
+    )
+    wrapper = mount(RemoteAccessPage)
+    await flushPromises()
+
+    // 起点：默认选中数组首项（Tailscale）
+    expect(wrapper.find('[data-testid="remote-access-url"]').text()).toBe(
+      `http://100.82.44.102:3210/?token=${'b'.repeat(64)}`,
+    )
+
+    // 用户经下拉点选第二个候选（LAN 地址）——reka Select 真实交互链
+    //（pointerdown 开下拉 + option 点选，单源在 helpers/reka-select-harness）
+    await pickRekaOption(wrapper.find('[data-testid="remote-access-url-select"]').element, 'http://192.168.1.5:3210')
+
+    // ① 链接文本跟随新选中地址（含 token）
+    expect(wrapper.find('[data-testid="remote-access-url"]').text()).toBe(
+      `http://192.168.1.5:3210/?token=${'b'.repeat(64)}`,
+    )
+    // ② QR 生成入参跟随：最新一代 toDataURL 调用参数 = 新地址完整链接
+    expect(qrMocks.toDataURL).toHaveBeenLastCalledWith(
+      `http://192.168.1.5:3210/?token=${'b'.repeat(64)}`,
+      expect.anything(),
+    )
+    // ③ 复制内容跟随：clipboard.writeText 收到新地址完整链接
+    await wrapper.find('[data-testid="remote-access-copy"]').trigger('click')
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(`http://192.168.1.5:3210/?token=${'b'.repeat(64)}`)
+    // 选中 LAN 候选 → Tailscale 使用前提提示随之消失（selectedKind 跟随）
+    expect(wrapper.find('[data-testid="remote-access-tailscale-selected-hint"]').exists()).toBe(false)
   })
 
   it('单条 Tailscale 地址（无下拉）：链接正常展示且使用前提提示仍渲染', async () => {

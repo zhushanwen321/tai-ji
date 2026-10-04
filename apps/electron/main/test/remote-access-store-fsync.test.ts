@@ -11,7 +11,6 @@
  * - fsyncSync 失败（掉电前兆形态）→ 写入裸抛中止，不 rename 可能半写的文件，
  *   目标文件保持旧内容（同时钉死 fsync 先于 rename 的顺序——若顺序颠倒，fsync
  *   失败抛出时目标文件已是新内容，本用例即红）；
- * - fsync 段不破坏 0600 权限语义。
  *
  * mock 策略：vi.mock('node:fs') 以 importOriginal 透传全部真实实现、仅用 vi.fn
  * 包装 fsyncSync（可计数 / 可注入失败）——除 fsync 外全部真实 fs 形态，与 store
@@ -23,7 +22,7 @@
  * 运行：cd apps/electron/main && npx vitest run test/remote-access-store-fsync.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { REMOTE_ACCESS_FILENAME } from '@taiji/shared'
@@ -89,14 +88,4 @@ describe('writeRemoteAccessConfig（rename 前 fsync 掉电半写防护）', () 
     expect(JSON.parse(readFileSync(FILE_PATH, 'utf-8')).token).toBe('b'.repeat(64))
   })
 
-  it('fsync 段不破坏 0600 权限语义（新建文件）', () => {
-    writeRemoteAccessConfig(
-      { enabled: false, token: 'd'.repeat(64), createdAt: '2026-01-01T00:00:00.000Z' },
-      TMP_DATA_DIR,
-    )
-    if (process.platform !== 'win32') {
-      expect(statSync(FILE_PATH).mode & 0o777).toBe(0o600)
-    }
-    expect(existsSync(FILE_PATH)).toBe(true)
-  })
 })

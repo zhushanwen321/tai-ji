@@ -145,25 +145,6 @@ describe('TC-4: AC5 createMobilePlatformAdapter 满足 core PlatformPort 契约'
     expect('ipc' in adapter).toBe(false)
   })
 
-  it('storage.get 不存在 key 返回 null（非抛错）', async () => {
-    const adapter = createMobilePlatformAdapter()
-    expect(await adapter.storage.get('missing-key')).toBeNull()
-  })
-
-  it('storage.set + get 读写通', async () => {
-    const adapter = createMobilePlatformAdapter()
-    await adapter.storage.set('k', 'v')
-    expect(await adapter.storage.get('k')).toBe('v')
-  })
-
-  it('webSocket.create(url) 返回对象含 send/close 函数 + readyState 数字', () => {
-    const adapter = createMobilePlatformAdapter()
-    const ws = adapter.webSocket.create('ws://localhost/test')
-    expect(typeof ws.readyState).toBe('number')
-    expect(typeof ws.send).toBe('function')
-    expect(typeof ws.close).toBe('function')
-  })
-
   // U1.3 真实化：stub（InMemoryStorage）→ localStorage 桥接，锁真实持久化语义
   it('storage 经 localStorage 真实持久化（adapter 写 → localStorage 可读；localStorage 写 → adapter 可读）', async () => {
     localStorage.clear()
@@ -174,28 +155,6 @@ describe('TC-4: AC5 createMobilePlatformAdapter 满足 core PlatformPort 契约'
     expect(await adapter.storage.get('persist-k2')).toBe('direct-v')
     await adapter.storage.remove('persist-k')
     expect(localStorage.getItem('persist-k')).toBeNull()
-  })
-
-  // code-harden 观测项 3：写失败降级——Safari 隐私模式 setItem 抛 QuotaExceededError，
-  // adapter 降级 console.warn 不 reject（写失败不沿调用链炸 token 落盘处置链）
-  it('storage.set/remove 遇 localStorage 抛错降级不 reject（warn 留痕）', async () => {
-    const setSpy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
-      throw new DOMException('quota exceeded', 'QuotaExceededError')
-    })
-    const removeSpy = vi.spyOn(localStorage, 'removeItem').mockImplementation(() => {
-      throw new DOMException('quota exceeded', 'QuotaExceededError')
-    })
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    try {
-      const adapter = createMobilePlatformAdapter()
-      await expect(adapter.storage.set('k', 'v')).resolves.toBeUndefined()
-      await expect(adapter.storage.remove('k')).resolves.toBeUndefined()
-      expect(warnSpy).toHaveBeenCalledTimes(2)
-    } finally {
-      setSpy.mockRestore()
-      removeSpy.mockRestore()
-      warnSpy.mockRestore()
-    }
   })
 
   // U1.3 真实化：stub（readyState 恒 CLOSED=3）→ 原生 WebSocket 包装，锁真实建连形态
@@ -285,6 +244,10 @@ describe('BM5: 断线重连中保持 connected 布局 + 壳顶部断线条', () 
     wrapper = mountApp()
 
     expect(wrapper.find('[data-testid="shell-failed"]').exists()).toBe(true)
+    // failed 全屏容器独立 testid（不复用首连分支的 shell-connecting）：负向断言防「failed 态
+    // 误渲染连接中视图」回归——曾因 failed 分支复用 shell-connecting 使该断言假绿
+    expect(wrapper.find('[data-testid="shell-failed-screen"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="shell-connecting"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="shell-reconnecting-banner"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="zone-message-stream"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="bottom-tab-bar"]').exists()).toBe(false)

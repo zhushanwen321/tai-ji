@@ -12,7 +12,7 @@
  *   消费面，双壳固定同源）；TC10 onUiRequestExpired 撤窗（D2，requestId 反查 + miss noop）
  * - transport 回传双通道（FR7/AC6/AC9）：TC7/TC8/TC8b 形状 + TC8c 未送达保留（M1/RD-3#1）
  *   + TC8d 通路级收尾锚点（ADR-0073 D4a：onPiResponseSettled 清在 delivered 判定之前）
- * - requestIdSessions 生命周期（G1 / memory-leak-remediation §3.4）：TC-G1a/b/c
+ * - requestIdSessions 生命周期（G1 / memory-leak-remediation §3.4）：TC-G1a/b/d
  *
  * 策略：convertToDialogRequest 直测（纯函数）；source 用真实 InternalEventBus（bus.emit）
  * + dispatchGlobal/dispatchCrossSession（events 通道）——全链路范式；transport 用 vi.mock
@@ -354,6 +354,8 @@ describe('createCompanionDialogAdapters（C2/C3/C4 分流）', () => {
   })
 
   it('TC10: onUiRequestExpired 订阅 global 通道 plugin:uiRequestExpired（D2 撤窗，requestId 反查 sessionId）', () => {
+    // 反查表为模块级共享（同文件先行用例可能残留表项）——用例内显式 reset，尾部表项数断言才只反映本用例写入
+    __testingProbe().resetRequestIdSessionsForTest()
     const adapters = createCompanionDialogAdapters(bus)
     const expiredHandler = vi.fn()
     const unsubExpired = adapters.source.onUiRequestExpired(expiredHandler)
@@ -389,6 +391,9 @@ describe('createCompanionDialogAdapters（C2/C3/C4 分流）', () => {
     // MF-4 兜底：Map miss（壳重启无条目）时 payload sid 兜底路由
     dispatchGlobal({ type: 'plugin:uiRequestExpired', payload: { requestId: 'r3', pluginId: 'p1', sessionId: 's-payload' } })
     expect(expiredHandler).toHaveBeenLastCalledWith({ sessionId: 's-payload', requestId: 'r3' })
+
+    // expired 命中出队即删表（G1 生命周期，不残留）：本用例 r1/r2 命中撤窗后表项数为 0
+    expect(__testingProbe().probeRequestIdSessionsSize()).toBe(0)
 
     unsubExpired()
     unsubRequest()
@@ -537,22 +542,6 @@ describe('requestIdSessions respond 路径删除（G1 / memory-leak-remediation 
 
     dispatchGlobal({ type: 'plugin:uiRequestExpired', payload: { requestId: 'r2', pluginId: 'p1' } })
     expect(expiredHandler).not.toHaveBeenCalled()
-    unsubExpired()
-  })
-
-  it('TC-G1c: 未 respond 的表项保留——撤窗反查仍命中（respond 删除不误伤展示中条目）', () => {
-    // 防御性边界：respond 补删不能波及排队/展示中（未作答）条目——撤窗路径仍按 D2 语义反查出队
-    const adapters = createCompanionDialogAdapters(bus)
-    const expiredHandler = vi.fn()
-    const unsubExpired = adapters.source.onUiRequestExpired(expiredHandler)
-    deliverRequest(adapters, 'r3', 's9')
-    expect(adapters.__testing.probeRequestIdSessionsSize()).toBe(1)
-
-    // 无 respond，直接撤窗 → 反查命中（投递时归属 sid）+ 出队后表项删除（原有语义保持）
-    dispatchGlobal({ type: 'plugin:uiRequestExpired', payload: { requestId: 'r3', pluginId: 'p1' } })
-    expect(expiredHandler).toHaveBeenCalledTimes(1)
-    expect(expiredHandler).toHaveBeenCalledWith({ sessionId: 's9', requestId: 'r3' })
-    expect(adapters.__testing.probeRequestIdSessionsSize()).toBe(0)
     unsubExpired()
   })
 

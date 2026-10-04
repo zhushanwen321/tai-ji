@@ -78,7 +78,7 @@ function resolveSessionId(msg: IncomingPluginMessage, payload: Record<string, un
 
 const PLUGIN_STATUS_VALUES = new Set(['discovered', 'loaded', 'active', 'inactive', 'crashed'])
 
-// ── 9 个 plugin:* 窄化守卫（返回 InternalEvent | null，null=解析失败）──
+// ── plugin:* 窄化守卫（返回 InternalEvent | null，null=解析失败；数量以 PLUGIN_HANDLERS 为准）──
 
 /**
  * statusbar 更新解析（CT-D5 毒化隔离，导出供单元测试）。

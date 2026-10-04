@@ -185,6 +185,30 @@ describe('writeRemoteAccessConfig（原子写 + 0600）', () => {
     expect(JSON.parse(readFileSync(join(nested, REMOTE_ACCESS_FILENAME), 'utf-8')).enabled).toBe(false)
     rmSync(join(TMP_DATA_DIR, 'deep'), { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
+
+  it('.tmp 崩溃残留（0644）+ 目标被外部放宽 → 写入后目标仍 0600（chmodSync 收紧残留 tmp 的旧 inode 权限）', () => {
+    if (process.platform === 'win32') return // POSIX 文件权限语义，win32 不跑本用例
+    // 兜底行的独立场景：writeFileSync 的 mode 只在创建文件时生效——上次写入进程在
+    // writeFileSync 之后、renameSync 之前崩溃，留下宽松权限（0644）的 `.tmp` 残留时，
+    // 本次写入打开的是既有 tmp inode（O_CREAT 不应用 mode），rename 后目标继承 0644，
+    // 只有 rename 后的 chmodSync 能把它拉回 0600。
+    const config = { enabled: true, token: 'g'.repeat(64), createdAt: '2026-01-01T00:00:00.000Z' }
+    const tmpPath = `${FILE_PATH}.tmp`
+    // ① 先正常写一次（合法基线态，rename 已移走 tmp——随后手动构造的 tmp 即崩溃残留形态）
+    writeRemoteAccessConfig({ enabled: false, token: 'h'.repeat(64), createdAt: '2026-01-01T00:00:00.000Z' }, TMP_DATA_DIR)
+    // ② 手动以 0644 构造 .tmp 崩溃残留 + 目标文件被外部放宽为 0644
+    writeFileSync(tmpPath, 'stale-content-from-crashed-writer', { mode: 0o644 })
+    chmodSync(tmpPath, 0o644)
+    chmodSync(FILE_PATH, 0o644)
+    // 前置自检：残留 tmp 权限确为 0644（防 umask 收窄致用例假绿——0600 的 tmp 无 chmodSync 也绿）
+    expect(statSync(tmpPath).mode & 0o777).toBe(0o644)
+    // ③ 再写入：落盘权限必须回到 0600
+    writeRemoteAccessConfig(config, TMP_DATA_DIR)
+    expect(statSync(FILE_PATH).mode & 0o777).toBe(0o600)
+    expect(JSON.parse(readFileRaw())).toEqual(config)
+    const leftovers = readdirSync(TMP_DATA_DIR).filter((name) => name.includes('.tmp'))
+    expect(leftovers).toEqual([])
+  })
 })
 
 describe('rotateRemoteAccessToken（轮换）', () => {
@@ -286,12 +310,6 @@ describe('ensureRemoteAccessIntegrity（E10 损坏重建，经 read 触发）', 
     const config = readRemoteAccessConfig(TMP_DATA_DIR)
     expect(config.enabled).toBe(false)
     expect(errorSpy).toHaveBeenCalledTimes(1)
-  })
-
-  it('合法配置不触发重建日志', () => {
-    seedFile('{"enabled":true,"token":"' + '5'.repeat(64) + '","createdAt":"2026-01-01T00:00:00.000Z"}')
-    readRemoteAccessConfig(TMP_DATA_DIR)
-    expect(errorSpy).not.toHaveBeenCalled()
   })
 
   it('损坏重建写回失败（dataDir 只读，EACCES 形态）→ 不拒启：降级内存关态空 token + 响亮日志含权限恢复指引（损坏文件原样留存）', () => {
