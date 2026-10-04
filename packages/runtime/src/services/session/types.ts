@@ -312,7 +312,7 @@ export interface PendingBashResultData {
  *    - hook 触发 / 阻断 / 改写（tool-call-start/end 携带原始 input/output 供 hook 改写后转发）
  *    - file_changes baseline diff（tool-changed / turn-bound）
  *    - context.update / thinkingLevel 回写 session 缓存
- *    - status / bridge / extension-ui 路由到 server
+ *    - status / extension-ui 路由到 server
  *
  * 一个 pi 事件可产生多个 translated event（数组返回）。
  * EventAdapter 不 import services 域类型 —— hook 的结构化契约（HookTransform）编码在此，
@@ -430,8 +430,6 @@ export type PiTranslatedEvent =
   | { kind: 'status-set'; sessionId: string; key: string; text: string; textRaw?: string }
   /** extension setStatus 对应的 WS 帧（interpreter 转发）。 */
   | { kind: 'status-broadcast'; message: ServerMessage }
-  /** bridge:* 前缀请求 —— interpreter 路由到 server.handleBridgeRequest。 */
-  | { kind: 'bridge-ui'; requestId: string; sessionId: string; method: string; data: Record<string, unknown> }
   /** 交互式 extension_ui_request（confirm/select/input/notify/editor）—— interpreter 注册超时。 */
   | { kind: 'extension-ui'; requestId: string; sessionId: string; method: string; payload: Record<string, unknown> }
   /** session-manager 请求（select + SESSION_MANAGER_MARKER）—— interpreter fire-and-forget 路由到 SessionManagerHandler。 */

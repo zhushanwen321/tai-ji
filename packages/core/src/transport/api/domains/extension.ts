@@ -116,26 +116,27 @@ export function setAutoUpgrade(name: string, enabled: boolean): Promise<void> {
 
 // ── Extension UI 交互（confirm/select/input/notify/editor）──────────
 
-/** extension.ui_request 的 payload 结构（event-adapter 翻译 pi extension_ui_request） */
+/** extension.dialog 的 payload 结构（event-adapter 翻译 pi extension_ui_request，
+ * pi1-disposition-chat-flow D6：帧判别字段 dialogKind 为 taiji 词表，pi 词汇止点于 event-adapter） */
 export interface ExtensionUIRequest {
   sessionId: string
   requestId: string
-  method: ExtensionInteractMethod
+  dialogKind: ExtensionInteractMethod
   title?: string
   message?: string
   options?: string[]
   default?: string
   level?: 'info' | 'warn' | 'error'
   prefill?: string
-  // ask-user 富交互扩展（仅 method='select' + askUser=true 时存在）
+  // ask-user 富交互扩展（仅 dialogKind='select' + askUser=true 时存在）
   askUser?: boolean
   askUserQuestions?: unknown[]  // AskUserQuestion[]，前端用类型守卫收窄
   allowCancel?: boolean
-  // schedule 创建确认富交互扩展（仅 method='select' + scheduleCreate=true 时存在，
+  // schedule 创建确认富交互扩展（仅 dialogKind='select' + scheduleCreate=true 时存在，
   // runtime event-adapter 第 4 marker 分支翻译 SCHEDULE_CREATE_MARKER select）
   scheduleCreate?: boolean
   scheduleDraft?: unknown  // ScheduleDraft（@zhushanwen/extension-protocol），前端守卫收窄
-  // 统一提问表单扩展（仅 method='select' + form=true 时存在；ui-presentation-protocol D1：
+  // 统一提问表单扩展（仅 dialogKind='select' + form=true 时存在；ui-presentation-protocol D1：
   // runtime event-adapter 翻译 UI_FORM_MARKER select，前端 FormOverlay 渲染类型化问题集）
   form?: true
   formQuestions?: unknown[]  // FormQuestion[]（@zhushanwen/extension-protocol），前端守卫收窄
@@ -153,12 +154,13 @@ export interface ExtensionUIRequest {
 }
 
 /**
- * 订阅指定 session 的 extension.ui_request 推送，返回取消函数。
- * pi extension 调 ctx.ui.select/confirm/input 时，runtime 推 extension.ui_request。
+ * 订阅指定 session 的 extension.dialog 推送，返回取消函数。
+ * pi extension 调 ctx.ui.select/confirm/input 时，runtime 推 extension.dialog
+ *（pi1-disposition-chat-flow D6：前端按消息类型分发）。
  */
 export function onUIRequest(sessionId: string, handler: (req: ExtensionUIRequest) => void): () => void {
   return events.on(sessionId, (msg) => {
-    if (msg.type !== 'extension.ui_request') return
+    if (msg.type !== 'extension.dialog') return
     const payload = msg.payload as ExtensionUIRequest
     if (payload.sessionId !== sessionId) return
     handler(payload)
@@ -181,7 +183,9 @@ export function onNotify(sessionId: string, handler: (payload: { message: string
 }
 
 /**
- * 发送用户对 extension.ui_request 的回复。
+ * 发送用户对 extension.dialog 的回复。
+ * respond 帧字段名保持 method（值域 = dialogKind 同形四值，通用词非 pi 专有命名形态）：
+ * runtime extension-message-handler 按 method 构建正确的 pi response 格式。
  * runtime extension-message-handler 收到此消息 → 按 method 转换为 pi 协议格式
  * （confirm→{confirmed}, select/input/editor→{value}, 取消→{cancelled:true}）
  * → 注入回 pi stdin → pi 的 select/confirm/input Promise resolve。
@@ -204,7 +208,7 @@ export function sendExtensionUIResponse(sessionId: string, requestId: string, me
  * 拉取指定 session 的 pending UI 请求（切换 session 后重新订阅时调用）。
  * runtime 返回 session 级只读快照（非破坏，多次拉取幂等，与 session.commands 快照语义同构）；
  * respond 后 runtime 侧 removeRequest 收缩快照。前端按 requestId 去重，
- * 因实时 extension.ui_request 帧可能已入队同一请求（详见 useExtensionUI push 处 dedup）。
+ * 因实时 extension.dialog 帧可能已入队同一请求（详见 useExtensionUI push 处 dedup）。
  */
 export async function getPendingRequests(sessionId: string): Promise<ExtensionUIRequest[]> {
   const reply = await command('extension.getPendingRequests', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)
@@ -212,5 +216,5 @@ export async function getPendingRequests(sessionId: string): Promise<ExtensionUI
   return reply.requests.filter((r): r is ExtensionUIRequest =>
     r != null && typeof r === 'object' &&
     typeof (r as Record<string, unknown>).requestId === 'string' &&
-    typeof (r as Record<string, unknown>).method === 'string')
+    typeof (r as Record<string, unknown>).dialogKind === 'string')
 }

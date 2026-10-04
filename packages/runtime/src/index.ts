@@ -877,9 +877,6 @@ async function main(): Promise<void> {
       onSessionManagerRequest: (requestId, sessionId, action, params) => {
         server.handleSessionManagerRequest(requestId, sessionId, action, params)
       },
-      onBridgeUIRequest: (requestId, sid, method, data) => {
-        server.handleBridgeRequest(sid, requestId, method, data)
-      },
       onStatusSetUpdate: (payload) => {
         server.handleStatusSetUpdate(payload)
       },

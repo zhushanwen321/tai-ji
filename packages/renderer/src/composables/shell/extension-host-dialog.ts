@@ -81,15 +81,15 @@ function normalizeOptions(options: unknown): DialogRequestOption[] | undefined {
 /**
  * 转换 bus ui-request 事件为 ui 包 DialogRequest（AC2）：
  * - source：request.pluginId !== '' → 'plugin'（plugin 源），否则 'pi'（extension 源统一 ''）
- * - method：索引签名原始 method（超界如 editor 透传）?? kind 兜底（对齐
+ * - method：索引签名原始 dialogKind（超界如 editor 透传）?? kind 兜底（对齐
  *   toExtensionUIRequest 语义）；form 类请求已被 C4 排除，不会到达本转换
  * - options：双形状归一（normalizeOptions）
  * - receivedAt：转换时刻时间戳（队列倒计时基准）
  */
 export function convertToDialogRequest(e: UiRequestEvent): DialogRequest {
   const req = e.request
-  const method: DialogRequest['method'] = isDialogMethod(req.method)
-    ? req.method
+  const method: DialogRequest['method'] = isDialogMethod(req.dialogKind)
+    ? req.dialogKind
     : req.kind
   return {
     source: req.pluginId !== '' ? 'plugin' : 'pi',

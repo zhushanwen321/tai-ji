@@ -761,17 +761,14 @@ export interface IPluginService {
   /** Handle UI response from frontend (confirm/select/input dialogs) */
   handleUiResponse(requestId: string, result: unknown): void
 
-  /** Bridge routing methods */
-  handleBridgeRequest?(method: string, payload: Record<string, unknown>, sessionId: string): Promise<unknown>
-
   /** Install a plugin from an npm package specifier */
   installPlugin(packageSpecifier: string): Promise<import('./services/ports/plugin-installer.js').InstallResult>
   getToolSchemas?(): import('./services/plugin-service/plugin-types.js').ToolRegistration[]
-  /** 构造 bridge:sync 同步负载（工具 schema 塑形下沉 service，transport 只 reply） */
-  getBridgeSyncPayload?(): import('./services/plugin-service/plugin-types.js').BridgeSyncPayload
-  handleBridgeToolExecute?(request: import('./services/plugin-service/plugin-types.js').BridgeToolExecuteRequest): Promise<import('./services/plugin-service/plugin-types.js').BridgeToolExecuteResponse>
-  handleBridgeEvent?(eventName: string, data: unknown, sessionId: string): void
-  handleBridgeIntercept?(eventName: string, data: Record<string, unknown>, sessionId: string): Promise<import('./services/plugin-service/plugin-types.js').BridgeInterceptResponse>
+  /**
+   * pi 侧事件向插件钩子的投递（pi1-disposition-chat-flow D7②）：泛型 'onPiEvent' 键派发，
+   * 载荷平铺形状（{ event, ...payload }）。statusSetUpdate 挂点迁移后的唯一投递入口。
+   */
+  notifyPiEvent?(eventName: string, payload: Record<string, unknown>, sessionId: string): void
 }
 
 // ── IGitService ───────────────────────────────────────────────────

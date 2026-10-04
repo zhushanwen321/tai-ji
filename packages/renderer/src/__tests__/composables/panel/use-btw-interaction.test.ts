@@ -19,7 +19,7 @@ const { toScheduleDraft, toBarQuestionKind, toBarQuestionBase, toBarOptions, toB
 
 /** ExtensionUIRequest 最小合法骨架（questionsOf 形参；其余用例直接喂 unknown） */
 function formReq(overrides: Partial<ExtensionUIRequest>): ExtensionUIRequest {
-  return { sessionId: 'btw:pi-1', requestId: 'r1', method: 'select', ...overrides }
+  return { sessionId: 'btw:pi-1', requestId: 'r1', dialogKind: 'select', ...overrides }
 }
 
 describe('toScheduleDraft（schedule 草稿形状守卫）', () => {

@@ -69,7 +69,6 @@ function createMockContext(): {
           return { dispose: () => {} }
         }),
         onBeforeToolCall: vi.fn(async () => ({ dispose: () => {} })),
-        onBeforeAgentStart: vi.fn(async () => ({ dispose: () => {} })),
         onAfterToolResult: vi.fn(async () => ({ dispose: () => {} })),
         onPiEvent: vi.fn(async () => ({ dispose: () => {} })),
       },

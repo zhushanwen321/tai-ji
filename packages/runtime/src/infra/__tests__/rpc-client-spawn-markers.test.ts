@@ -216,7 +216,9 @@ describe('B · spawn-markers 三根登记规则', () => {
       // resolver dev 分支产出形态：分组层恒在（scanDirectory 只扫分组目录下的包）
       const values = [
         `${repo}/extensions/universal/session-reader`,
-        `${repo}/extensions/taiji/plugin-bridge`,
+        // [pi1-disposition-chat-flow D7①] 原 fixture 路径 extensions/taiji/plugin-bridge 随包退役删除，
+        // 换现存 taiji 组包（dev 分支断言只认分组形态，包名无语义）
+        `${repo}/extensions/taiji/agent-ext`,
       ]
       expect(selectSpawnMarkerPaths(values, dataDir)).toEqual(values)
       // discovery 深层形态（包目录下入口文件）同样收录

@@ -36,7 +36,7 @@ describe('C4 过滤：统一表单类（form ∨ legacy askUser/scheduleCreate�
       requestId: 'r-form',
       pluginId: '',
       kind: 'select',
-      method: 'select',
+      dialogKind: 'select',
       form: true,
       formQuestions: [{ type: 'choice', question: 'q?', options: [{ label: 'a' }] }],
     })
@@ -55,7 +55,7 @@ describe('C4 过滤：统一表单类（form ∨ legacy askUser/scheduleCreate�
       requestId: 'r-sc',
       pluginId: '',
       kind: 'select',
-      method: 'select',
+      dialogKind: 'select',
       scheduleCreate: true,
       scheduleDraft: { kind: 'recurring', schedule: '0 9 * * *', prompt: 'p', models: [] },
     })
@@ -71,13 +71,13 @@ describe('C4 过滤：统一表单类（form ∨ legacy askUser/scheduleCreate�
     const unsub = source.onUiRequest((req) => delivered.push(req))
 
     emitBusUIRequest(bus, 's1', {
-      requestId: 'r-ask', pluginId: '', kind: 'select', method: 'select',
+      requestId: 'r-ask', pluginId: '', kind: 'select', dialogKind: 'select',
       askUser: true, askUserQuestions: [{ question: 'q?', options: [] }],
     })
     expect(delivered).toHaveLength(0)
 
     emitBusUIRequest(bus, 's1', {
-      requestId: 'r-plain', pluginId: '', kind: 'select', method: 'select',
+      requestId: 'r-plain', pluginId: '', kind: 'select', dialogKind: 'select',
       title: '选择', options: ['a', 'b'],
     })
     expect(delivered).toHaveLength(1)

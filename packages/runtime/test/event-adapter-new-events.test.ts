@@ -66,7 +66,7 @@ describe('EventAdapter: new event translations (FR-1~FR-6)', () => {
   // ════════════════════════════════════════════════════════════════════
 
   describe('FR-1: extension_ui_request — editor method', () => {
-    it('translates editor method to extension.ui_request with prefill', async () => {
+    it('translates editor method to extension.dialog with prefill', async () => {
       dispatchOne(adapter, {
         type: 'extension_ui_request',
         method: 'editor',
@@ -77,9 +77,9 @@ describe('EventAdapter: new event translations (FR-1~FR-6)', () => {
       await flushAsync()
 
       expect(sent).toHaveLength(1)
-      expect(sent[0].type).toBe('extension.ui_request')
+      expect(sent[0].type).toBe('extension.dialog')
       expect(sent[0].payload).toMatchObject({
-        method: 'editor',
+        dialogKind: 'editor',
         title: 'Edit',
         prefill: 'hello',
       })

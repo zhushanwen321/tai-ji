@@ -335,27 +335,6 @@
       "dependsOn": []
     },
     {
-      "name": "@zhushanwen/pi-plugin-bridge",
-      "directory": "extensions/taiji/plugin-bridge",
-      "dependsOn": [
-        {
-          "package": "@zhushanwen/extension-protocol",
-          "type": "package",
-          "reason": "代码层静态 import BRIDGE_MARKER 与 Bridge* 协议类型（src/index.ts），缺失时模块加载即失败"
-        },
-        {
-          "package": "@zhushanwen/pi-extension-logger",
-          "type": "package",
-          "reason": "代码层静态 import getLogger/setPiHandle（src/index.ts）"
-        },
-        {
-          "package": "@zhushanwen/pi-ext-guards",
-          "type": "package",
-          "reason": "代码层静态 import isRecord/toErrorMessage（src/index.ts，ext-simplify-17 D3/D1 引入；登记反向缺口由 ext-simplify-18 阶段 6 补齐）"
-        }
-      ]
-    },
-    {
       "name": "@zhushanwen/pi-system-prompt",
       "directory": "extensions/taiji/system-prompt",
       "dependsOn": [

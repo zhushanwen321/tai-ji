@@ -78,7 +78,6 @@ const PUBLISHED_REGISTRY_PACKAGES = new Set([
   // extensions/taiji 组（5）
   '@zhushanwen/pi-agent-ext',
   '@zhushanwen/pi-msg-id-mapper',
-  '@zhushanwen/pi-plugin-bridge',
   '@zhushanwen/pi-system-prompt',
   '@zhushanwen/pi-system-prompt-trace',
   // extensions/universal 组（17）

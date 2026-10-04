@@ -171,8 +171,8 @@ describe('RpcClient W1', () => {
 
   // [HISTORICAL] U5d「bridge 场景 {id, response} 包裹格式」用例已删除：旧 bridge 通道的
   // `{id, response}` 死分支随 bridge 重写清理（设计 bridge-rewrite-pi-0.84 §3.3-D6），
-  // 唯一调用方 bridge-handler 已全改 JSON.stringify + 'select'（value 通道），该形态无
-  // 生产调用方。bridge 通道回包形状由 test/bridge-marker-channel.test.ts 覆盖。
+  // 唯一调用方（runtime 内部应答通道）已全改 JSON.stringify + 'select'（value 通道），该形态无
+  // 生产调用方；该通道整体随 plugin-bridge 退役删除（pi1-disposition-chat-flow D7）。
 
   // ── U6: compact/getCommands/getSessionStats 用归一后的 data（删 readRpcData 后仍工作） ──
   it('U6a: compact returns normalized data (works without readRpcData)', async () => {

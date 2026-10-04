@@ -406,15 +406,18 @@ function parseExtensionUiRequest(msg: IncomingPluginMessage): InternalEvent | nu
   if (!payload) return null
   const requestId = asString(payload.requestId)
   if (requestId === null) return null
-  const method = asOptionalString(payload.method) ?? 'input'
-  const kind = DIALOG_KINDS.has(method) ? (method as 'select' | 'confirm' | 'input') : 'input'
+  // pi1-disposition-chat-flow D6③：extension.dialog 帧的判别字段 = dialogKind（taiji 词表，
+  // event-adapter 翻译点已消化 pi method）；原始字段透传（索引签名），kind 归一规则保持
+  // （select/confirm/input 之外如 editor → 兜底 'input'）。
+  const dialogKind = asOptionalString(payload.dialogKind) ?? 'input'
+  const kind = DIALOG_KINDS.has(dialogKind) ? (dialogKind as 'select' | 'confirm' | 'input') : 'input'
   const request: { requestId: string; pluginId: string; kind: 'select' | 'confirm' | 'input'; title?: string; [key: string]: unknown } = {
     ...payload,
     requestId,
     pluginId: '',
     kind,
     title: asOptionalString(payload.title),
-    method,
+    dialogKind,
   }
   return { kind: 'ui-request', sessionId: resolveSessionId(msg, payload), request }
 }
@@ -442,7 +445,7 @@ const EXTENSION_HANDLERS: Record<string, (msg: IncomingPluginMessage) => Interna
   'extension:status': parseExtensionStatus,
   'extension:notify': parseExtensionNotify,
   'extension:requestsInvalidated': parseExtensionRequestsInvalidated,
-  'extension.ui_request': parseExtensionUiRequest,
+  'extension.dialog': parseExtensionUiRequest,
 }
 
 /**

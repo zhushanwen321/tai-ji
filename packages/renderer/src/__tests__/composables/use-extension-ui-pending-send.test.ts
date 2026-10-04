@@ -81,7 +81,7 @@ function mkFormReq(requestId: string, overrides: Record<string, unknown> = {}): 
     requestId,
     pluginId: 'p',
     kind: 'select',
-    method: 'select',
+    dialogKind: 'select',
     title: 't',
     form: true,
     formQuestions: [{ type: 'text', header: 'q', question: 'q?' }],

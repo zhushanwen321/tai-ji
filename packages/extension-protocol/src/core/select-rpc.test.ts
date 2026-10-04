@@ -13,7 +13,6 @@ import {
   type GuiContext,
   type MarkerRpcResult,
   type SessionManagerErrorResult,
-  type BridgeErrorResponse,
 } from '../index'
 
 const MARKER = '\x00TEST_MARKER'
@@ -204,12 +203,8 @@ describe('D8 错误回包形状单源化', () => {
       expect(formatChannelErrorText(errorResult)).toBe('spawn failed')
     })
 
-    it('BridgeErrorResponse = ChannelErrorResult alias：值与文本拼接互通', () => {
-      const base: ChannelErrorResult = { error: 'plugin down', hint: 'check runtime logs' }
-      const bridge: BridgeErrorResponse = base
-      expect(isChannelErrorResult(bridge)).toBe(true)
-      expect(formatChannelErrorText(bridge)).toBe('plugin down\nhint: check runtime logs')
-    })
+    // [pi1-disposition-chat-flow D7①] BridgeErrorResponse alias 用例随 plugin-bridge 协议模块
+    // 退役删除（该 alias 已从桶导出摘除；ChannelErrorResult 原语与 SessionManager alias 保留）。
   })
 
   describe('GuiContext select opts 类型声明', () => {

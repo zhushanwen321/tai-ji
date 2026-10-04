@@ -7,6 +7,8 @@ import mandatoryExtensions from './mandatory-extensions.json'
 // 此处不再重复定义（此前有三个死 Payload interface 零消费，已删除）。
 
 export const EXTENSION_EVENTS = {
+  /** 对话框族帧（pi1-disposition-chat-flow D6）：kind=dialog 的 WS 消息族，载荷判别字段 dialogKind */
+  DIALOG: 'extension.dialog',
   WIDGET: 'extension:widget',
   WIDGET_GUI: 'extension:widgetGui',
   STATUS: 'extension:status',
@@ -18,11 +20,13 @@ export const EXTENSION_EVENTS = {
 // ── Extension UI 交互 / 安装流 payload ────────────────────────────
 
 /**
- * pi 扩展交互式 dialog 方法（产生 extension.ui_request WS 帧，需要前端回复 extension.ui_response）。
+ * taiji 对话框变体词表（pi1-disposition-chat-flow D6）：extension.dialog 帧的 dialogKind
+ * 判别值域 + 前端 respond 回传的交互方法。值为通用对话框类型词，与 pi method 同形、
+ * 权威在 taiji 侧（pi 词汇止点于 event-adapter，帧与前端层只承载本词表）。
  * 与 event-adapter.ts INTERACTIVE_UI_METHODS + ExtensionUIDialog 渲染分支保持同步。
  *
  * notify 不在此列——它是 fire-and-forget（pi 不等回复），走独立 extension.notify WS 帧 + toast 渲染。
- * setStatus/setWidget/set_editor_text/bridge:* 也不在此列——它们走独立分支，不产 ui_request 帧。
+ * setStatus/setWidget/set_editor_text 也不在此列——它们走独立分支，不产 dialog 帧。
  */
 export type ExtensionInteractMethod = 'confirm' | 'select' | 'input' | 'editor'
 

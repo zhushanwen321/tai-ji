@@ -217,24 +217,8 @@ export {
   SUBAGENT_DIRECTIVE_CUSTOM_TYPE,
 } from './extensions/subagent-notify/custom-types'
 
-// ── plugin-bridge 协议（plugin system bridge：插件工具/事件/拦截经 select 通道 + marker 桥接；实现在 extensions/taiji/plugin-bridge + runtime bridge-handler）──
-export type {
-  BridgeMethod,
-  BridgeRequest,
-  BridgeToolExecuteResponse,
-  BridgeSyncPayload,
-  BridgeInterceptResponse,
-  BridgeErrorResponse,
-} from './extensions/plugin-bridge/types'
-export { BRIDGE_MARKER, BRIDGE_METHODS } from './extensions/plugin-bridge/marker'
-// 回包形状守卫族（D11：marker + types + 守卫同住，自 plugin-bridge index.ts 迁入）
-export {
-  isBridgeErrorResponse,
-  isBridgeToolExecuteResponse,
-  isBridgeSyncPayload,
-  isBridgeInterceptResponse,
-  isSyncedTool,
-} from './extensions/plugin-bridge/guards'
+// [pi1-disposition-chat-flow D7①] plugin-bridge 协议段（marker/types/guards + 桶导出）
+// 随 plugin-bridge 整体退役删除；select 通道原语（core/select-rpc.ts）为公共层保留。
 
 // ── subagent-engine 协议（引擎可发现性：engines.json 状态文件 + 引擎配置视图；实现在 extensions/universal/subagent-workflow + runtime RPC）──
 export type {

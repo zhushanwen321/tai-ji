@@ -6,7 +6,7 @@
  * - D1 中央分发表：handler 的 handles 清单 + Map spread → O(N→M) 路由映射（亮点，勿动）。
  * - setServices：四阶段编排（assignServices → createBroker → assembleHandlers → buildRoutes），
  *   装配全部 message handler 并注入各 handler 的 context（messaging + 领域依赖）。
- * - extension timeout / bridge 请求的对外委托入口（event-adapter 经 index.ts 调用）。
+ * - extension timeout / statusSetUpdate 投递的对外委托入口（event-adapter 经 index.ts 调用）。
  *
  * 业务逻辑在 services，经 handler 调用；本类不含领域计算，只做路由与编排。
  */
@@ -39,7 +39,6 @@ import { ExtensionTimeoutManager } from '../services/extension-timeout-manager.j
 import type { PendingUIRequest, PendingUIRequestResolved } from '../services/extension-timeout-manager.js'
 import { ConnectionManager } from './connection-manager.js'
 import { ServerMessageBroker } from './message-broker.js'
-import { BridgeHandler } from './bridge-handler.js'
 import { SettingsMessageHandler } from './settings-message-handler.js'
 import { SessionMessageHandler } from './session-message-handler.js'
 import { ExtensionMessageHandler } from './extension-message-handler.js'
@@ -175,7 +174,6 @@ export class RuntimeServer implements IMessageBroker {
   // initialized and each handler receives an explicit context object rather than
   // the `as unknown as XxxHandlerContext` cast the field-initializer needed.
   private extensionTimeoutMgr = new ExtensionTimeoutManager()
-  private bridgeHandler!: BridgeHandler
   private settingsHandler!: SettingsMessageHandler
   private sessionHandler!: SessionMessageHandler
   private extensionHandler!: ExtensionMessageHandler
@@ -266,7 +264,7 @@ export class RuntimeServer implements IMessageBroker {
     this.genStatsService = genStats
     this.sessionService = session
     // D6a（integrity-hardening §3.6）：挂起 UI 请求的汇聚清理。extensionTimeoutMgr 的
-    // per-session 残留（pendingRequests / bridgeRequestIds / session 跟踪）此前只在
+    // per-session 残留（pendingRequests / session 跟踪）此前只在
     // session 删除分支直接清理，pi 意外退出的收敛链（onSessionExit → removeSessionEntry）
     // 不触碰它——挂起的 ask-user 弹窗在 restore 后重弹，作答发给新进程被静默丢弃（M8 幽灵
     // 弹窗）。挂到 onSessionDestroyed（removeSessionEntry 触发，覆盖主动删 / 进程退出 /
@@ -346,13 +344,9 @@ export class RuntimeServer implements IMessageBroker {
     }
   }
 
-  /** 核心 handler 批：bridge / settings / session / extension / plugin（无条件装配）。 */
+  /** 核心 handler 批：settings / session / extension / plugin（无条件装配）。 */
   private assembleCoreHandlers(messaging: MessageHandlerContext, optional: RuntimeServerOptionalServices): void {
     const { auth, providerCredentialResolver, connectionTester, mcpServersService } = optional
-    // 第二参注入 extensionTimeoutMgr：marker 通道（method 恒 'select'）识别出的 bridge
-    // 请求由 BridgeHandler 入口登记进 bridgeRequestIds（impl-plan 偏差 #5——生产装配点
-    // 必须传，否则前端误发 ui_response 的拦截依据丢失）。
-    this.bridgeHandler = new BridgeHandler(this.pluginService ?? null, this.extensionTimeoutMgr)
     this.settingsHandler = new SettingsMessageHandler({
       ...messaging,
       configService: this.configService,
@@ -741,17 +735,16 @@ export class RuntimeServer implements IMessageBroker {
     return this.extensionTimeoutMgr.getPendingRequests(sessionId)
   }
 
-  async handleBridgeRequest(sessionId: string, requestId: string, method: string, data: Record<string, unknown>): Promise<void> {
-    const client = this.sessionService.getRpcClient(sessionId)
-    if (!client) {
-      console.warn(`[server] bridge request for inactive session: ${sessionId}, method: ${method}`)
-      return
-    }
-    await this.bridgeHandler.handleBridgeRequest(sessionId, requestId, method, data, client)
-  }
-
+  /**
+   * statusSetUpdate 投递挂点（pi1-disposition-chat-flow D7② 挂点迁移 + 断链修复）：
+   * pi setStatus stdout 事件（event-adapter status-set → interpreter 路由）直达 pluginService
+   * 的插件事件投递方法——原 BridgeHandler.handleStatusSetUpdate 中转随 bridge 退役删除。
+   * 断链修复落点 = 分发侧：新投递点按泛型 'onPiEvent' 键派发（与 hook-api 注册面泛型键
+   * 形状对齐，事件名在载荷 event 字段），修复「注册键 'onPiEvent' vs 分发键原始事件名」
+   * 的既有错位（audit §4.2）。
+   */
   handleStatusSetUpdate(payload: { sessionId: string; key: string; text: string; textRaw?: string }): void {
-    this.bridgeHandler.handleStatusSetUpdate(payload)
+    this.pluginService?.notifyPiEvent?.('plugin:statusSetUpdate', payload, payload.sessionId)
   }
 
   /**
