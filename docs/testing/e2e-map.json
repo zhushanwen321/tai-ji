@@ -1320,15 +1320,20 @@
     },
     {
       "id": "E2E-DOC-01",
-      "summary": "文档-代码符号漂移检查（check-doc-symbol-drift：DOC_MODULE_MAP 映射文档 × 源码导出表零悬空 + 测试文档路径存在性 + 源码注释 docs 引用零悬空 + 数据源登记锚点对账）",
+      "summary": "文档-代码符号漂移检查（check-doc-symbol-drift：DOC_MODULE_MAP 映射文档 × 源码导出表零悬空 + 测试文档路径存在性 + 源码注释 docs 引用零悬空 + 数据源登记锚点对账 + ADR 编号唯一占用与引用存在性）",
       "scope": [
-        "scripts/check-doc-symbol-drift.mjs"
+        "scripts/check-doc-symbol-drift.mjs",
+        "scripts/__tests__/check-doc-symbol-drift.test.mjs"
       ],
       "layer": "L1",
       "assets": [
         {
           "kind": "script",
           "ref": "scripts/check-doc-symbol-drift.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/__tests__/check-doc-symbol-drift.test.mjs"
         }
       ],
       "trigger": "on-diff",
@@ -1336,7 +1341,27 @@
       "run": "node scripts/check-doc-symbol-drift.mjs",
       "owner": "docs",
       "authority": "docs/constraints.json",
-      "note": "设计文档同步纪律（C-proc-10）的机器门：pre-commit 按 docs/architecture/ 或映射源码路径触发（install-hooks.sh DOC_SYMBOL_DRIFT 段）。本 rule 登记脚本资产的 coverage（剪枝清单 = node_modules/.git/dist/coverage/test-results/playwright-report/.taiji-harness/resources/.zcode——.zcode 为 workflow 引擎 gitignored 工作区，agents 手工维护目录不受影响）；改动脚本扫描面/剪枝清单/映射表时跑 node scripts/check-doc-symbol-drift.mjs 冒烟（exit 0 + 四段 OK 行）"
+      "note": "设计文档同步纪律（C-proc-10）的机器门：pre-commit 按 docs/architecture/ 或映射源码路径触发（install-hooks.sh DOC_SYMBOL_DRIFT 段）。本 rule 登记脚本资产的 coverage（剪枝清单 = node_modules/.git/dist/coverage/test-results/playwright-report/.taiji-harness/resources/.zcode——.zcode 为 workflow 引擎 gitignored 工作区，agents 手工维护目录不受影响）；改动脚本扫描面/剪枝清单/映射表时跑 node scripts/check-doc-symbol-drift.mjs 冒烟（exit 0 + 四段 OK 行）。检查面 6（ADR 编号唯一占用与引用存在性，2026-10-04 增）与检测核心单测同族登记先例见 E2E-CONSTRAINTS 族：改动 extractAdrRegistry/checkAdrRefsInText 判定逻辑时跑 npx vitest run scripts/__tests__/check-doc-symbol-drift.test.mjs（R7 组用例锁定登记面提取与悬空判定）"
+    },
+    {
+      "id": "E2E-DUP-01",
+      "summary": "代码重复度基线脚本轨（measure-code-duplication：jscpd 生产口径一键重跑，口径 SSOT = docs/CODE-DUPLICATION-BASELINE.md）",
+      "scope": [
+        "scripts/measure-code-duplication.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/measure-code-duplication.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/measure-code-duplication.mjs",
+      "owner": "docs",
+      "authority": "docs/CODE-DUPLICATION-BASELINE.md",
+      "note": "重复度度量口径的唯一机器入口（min-tokens 50 / strict / typescript 通道 / 五域源码 / 排除测试与生成物，基线 164 clones / 2543 lines / 0.73%）；改动脚本口径参数时须同批重测并更新 docs/CODE-DUPLICATION-BASELINE.md 基线数字（口径两处一致纪律见该文档「一键重跑」节）"
     },
     {
       "id": "E2E-RESUME-01",

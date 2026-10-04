@@ -1,7 +1,7 @@
 # Flow 3 · 主 Agent 编排多子 Agent（护城河）
 
 **类型**: L3 Flow（时序 + L4 联动矩阵）· 产品差异化主路径
-**关联**: ADR-0020、flow-2-code-review/spec.md（单 agent 主路径，本 flow 是其并行编排升级）、panel/spec.md（Process Panel v1 已删，子 agent 编排走 Side Drawer）
+**关联**: flow-2-code-review/spec.md（单 agent 主路径，本 flow 是其并行编排升级）、panel/spec.md（Process Panel v1 已删，子 agent 编排走 Side Drawer）
 **配套 HTML**: `draft-cases.html`（编排屏幕样例）
 **依据**: 多 agent 并行编排是产品护城河——单 agent 对话（Flow 2）谁都能做，并行调度 + 进度聚合 + steer 是壁垒。
 

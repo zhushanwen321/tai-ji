@@ -478,7 +478,7 @@
         "packages/runtime/src/**"
       ],
       "authority": [
-        "adr/decisions.md#ADR-0042"
+        "adr/decisions.md#ADR-0062"
       ],
       "dimensions": [
         "data-governance"
