@@ -39,6 +39,14 @@ interface CodedError {
   message: string
 }
 
+/** 各帧族的收窄消息类型（Extract 判别收窄，与 switch narrowing 等价——协议注释的推荐形态） */
+type SpawnMsg = Extract<ClientMessage, { type: 'terminal.spawn' }>
+type WriteMsg = Extract<ClientMessage, { type: 'terminal.write' }>
+type ResizeMsg = Extract<ClientMessage, { type: 'terminal.resize' }>
+type KillMsg = Extract<ClientMessage, { type: 'terminal.kill' }>
+type AttachMsg = Extract<ClientMessage, { type: 'terminal.attach' }>
+type ListMsg = Extract<ClientMessage, { type: 'terminal.list' }>
+
 export class TerminalMessageHandler {
   constructor(private ctx: TerminalHandlerContext) {}
 
@@ -53,78 +61,102 @@ export class TerminalMessageHandler {
   ]
 
   async handleTerminalMessage(msg: ClientMessage, ws: WsType): Promise<void> {
+    // 路由只做分派（帧族语义各归私有方法）：switch 自身保持扁平，新增帧族 = 加 case + 方法，
+    // 不在共享方法内堆叠帧族分支（圈复杂度随帧族数线性膨胀的反模式）。
     switch (msg.type) {
-      case 'terminal.spawn': {
-        // 双形态：不带 terminalId = 新建（runtime 分配并经 ack 回传）；带 = 指定（存活幂等 / 不存在报错）
-        const { sessionId, terminalId, cwd, cols, rows } = msg.payload
-        // 类型与空串口径（设计 §3.3「卫生默认」= 对畸形输入 fail-fast）：
-        // - 非字符串 terminalId（数字 / null / 布尔 / 对象）是畸形帧 → 显式拒绝，不静默归一为新建
-        //   （静默归一会为畸形帧 alloc→spawn 真实 PTY 且无错误回执，掩盖实现缺陷/误用，与设计立项
-        //   依据相悖；修复前该形态经 service 的类型错误被 catch 成 terminal_failed，也是拒绝语义）；
-        // - 空串不是合法编号但也不是「非法类型」→ 视同缺编号（与既有实例帧的 rejectIfMissingTerminalId
-        //   同口径）：原样下传会被 service 判为「会话段不一致」（误导性错误，帧里根本没有合法编号）；
-        //   归一为 undefined 走新建形态，使两帧族对空串的判义一致。
-        const rawTerminalId: unknown = terminalId
-        if (rawTerminalId !== undefined && typeof rawTerminalId !== 'string') {
-          this.rejectMalformedTerminalId(ws, msg.id, 'terminal.spawn')
-          return
-        }
-        const normalizedTerminalId = terminalId === '' ? undefined : terminalId
-        try {
-          const assigned = await this.ctx.terminalService.spawn(sessionId, cwd, cols, rows, normalizedTerminalId)
-          return this.ctx.reply(ws, msg.id, 'terminal.ack', { terminalId: assigned })
-        } catch (e) {
-          return this.sendTerminalError(ws, msg.id, e)
-        }
-      }
-      case 'terminal.write': {
-        const { sessionId, terminalId, data } = msg.payload
-        if (this.rejectIfMissingTerminalId(ws, msg.id, 'terminal.write', terminalId)) return
-        try {
-          this.ctx.terminalService.write(sessionId, terminalId, data)
-          return this.ctx.reply(ws, msg.id, 'terminal.ack', {})
-        } catch (e) {
-          return this.sendTerminalError(ws, msg.id, e)
-        }
-      }
-      case 'terminal.resize': {
-        const { sessionId, terminalId, cols, rows } = msg.payload
-        if (this.rejectIfMissingTerminalId(ws, msg.id, 'terminal.resize', terminalId)) return
-        try {
-          this.ctx.terminalService.resize(sessionId, terminalId, cols, rows)
-          return this.ctx.reply(ws, msg.id, 'terminal.ack', {})
-        } catch (e) {
-          return this.sendTerminalError(ws, msg.id, e)
-        }
-      }
-      case 'terminal.kill': {
-        const { sessionId, terminalId } = msg.payload
-        if (this.rejectIfMissingTerminalId(ws, msg.id, 'terminal.kill', terminalId)) return
-        try {
-          this.ctx.terminalService.kill(sessionId, terminalId)
-          return this.ctx.reply(ws, msg.id, 'terminal.ack', {})
-        } catch (e) {
-          return this.sendTerminalError(ws, msg.id, e)
-        }
-      }
-      case 'terminal.attach': {
-        const { sessionId, terminalId } = msg.payload
-        if (this.rejectIfMissingTerminalId(ws, msg.id, 'terminal.attach', terminalId)) return
-        try {
-          this.ctx.terminalService.attach(sessionId, terminalId)
-          return this.ctx.reply(ws, msg.id, 'terminal.ack', {})
-        } catch (e) {
-          return this.sendTerminalError(ws, msg.id, e)
-        }
-      }
-      case 'terminal.list': {
-        // 查询帧无 terminalId（按会话查），范围 = 本次查询所属会话
-        const { sessionId } = msg.payload
-        return this.ctx.reply(ws, msg.id, 'terminal.ack', {
-          instances: this.ctx.terminalService.listInstances(sessionId),
-        })
-      }
+      case 'terminal.spawn':
+        return this.spawn(msg, ws)
+      case 'terminal.write':
+        return this.write(msg, ws)
+      case 'terminal.resize':
+        return this.resize(msg, ws)
+      case 'terminal.kill':
+        return this.kill(msg, ws)
+      case 'terminal.attach':
+        return this.attach(msg, ws)
+      case 'terminal.list':
+        return this.list(msg, ws)
     }
+  }
+
+  /**
+   * terminal.spawn：双形态——不带 terminalId = 新建（runtime 分配并经 ack 回传）；带 = 指定
+   * （存活幂等 / 不存在报错）。
+   *
+   * 类型与空串口径（设计 §3.3「卫生默认」= 对畸形输入 fail-fast）：
+   * - 非字符串 terminalId（数字 / null / 布尔 / 对象）是畸形帧 → 显式拒绝，不静默归一为新建
+   *   （静默归一会为畸形帧 alloc→spawn 真实 PTY 且无错误回执，掩盖实现缺陷/误用，与设计立项
+   *   依据相悖；修复前该形态经 service 的类型错误被 catch 成 terminal_failed，也是拒绝语义）；
+   * - 空串不是合法编号但也不是「非法类型」→ 视同缺编号（与既有实例帧的 rejectIfMissingTerminalId
+   *   同口径）：原样下传会被 service 判为「会话段不一致」（误导性错误，帧里根本没有合法编号）；
+   *   归一为 undefined 走新建形态，使两帧族对空串的判义一致。
+   */
+  private async spawn(msg: SpawnMsg, ws: WsType): Promise<void> {
+    const { sessionId, terminalId, cwd, cols, rows } = msg.payload
+    const rawTerminalId: unknown = terminalId
+    if (rawTerminalId !== undefined && typeof rawTerminalId !== 'string') {
+      this.rejectMalformedTerminalId(ws, msg.id, 'terminal.spawn')
+      return
+    }
+    const normalizedTerminalId = terminalId === '' ? undefined : terminalId
+    try {
+      const assigned = await this.ctx.terminalService.spawn(sessionId, cwd, cols, rows, normalizedTerminalId)
+      return this.ctx.reply(ws, msg.id, 'terminal.ack', { terminalId: assigned })
+    } catch (e) {
+      return this.sendTerminalError(ws, msg.id, e)
+    }
+  }
+
+  private write(msg: WriteMsg, ws: WsType): void {
+    const { sessionId, terminalId, data } = msg.payload
+    if (this.rejectIfMissingTerminalId(ws, msg.id, 'terminal.write', terminalId)) return
+    try {
+      this.ctx.terminalService.write(sessionId, terminalId, data)
+      return this.ctx.reply(ws, msg.id, 'terminal.ack', {})
+    } catch (e) {
+      return this.sendTerminalError(ws, msg.id, e)
+    }
+  }
+
+  private resize(msg: ResizeMsg, ws: WsType): void {
+    const { sessionId, terminalId, cols, rows } = msg.payload
+    if (this.rejectIfMissingTerminalId(ws, msg.id, 'terminal.resize', terminalId)) return
+    try {
+      this.ctx.terminalService.resize(sessionId, terminalId, cols, rows)
+      return this.ctx.reply(ws, msg.id, 'terminal.ack', {})
+    } catch (e) {
+      return this.sendTerminalError(ws, msg.id, e)
+    }
+  }
+
+  private kill(msg: KillMsg, ws: WsType): void {
+    const { sessionId, terminalId } = msg.payload
+    if (this.rejectIfMissingTerminalId(ws, msg.id, 'terminal.kill', terminalId)) return
+    try {
+      this.ctx.terminalService.kill(sessionId, terminalId)
+      return this.ctx.reply(ws, msg.id, 'terminal.ack', {})
+    } catch (e) {
+      return this.sendTerminalError(ws, msg.id, e)
+    }
+  }
+
+  private attach(msg: AttachMsg, ws: WsType): void {
+    const { sessionId, terminalId } = msg.payload
+    if (this.rejectIfMissingTerminalId(ws, msg.id, 'terminal.attach', terminalId)) return
+    try {
+      this.ctx.terminalService.attach(sessionId, terminalId)
+      return this.ctx.reply(ws, msg.id, 'terminal.ack', {})
+    } catch (e) {
+      return this.sendTerminalError(ws, msg.id, e)
+    }
+  }
+
+  /** terminal.list：查询帧无 terminalId（按会话查），范围 = 本次查询所属会话 */
+  private list(msg: ListMsg, ws: WsType): void {
+    const { sessionId } = msg.payload
+    return this.ctx.reply(ws, msg.id, 'terminal.ack', {
+      instances: this.ctx.terminalService.listInstances(sessionId),
+    })
   }
 
   /**

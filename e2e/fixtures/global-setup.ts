@@ -156,17 +156,11 @@ function buildE2E(variant: BundleVariant): void {
   })
 }
 
-export default async function globalSetup(config?: FullConfig): Promise<void> {
-  // visual-only 运行（CI e2e-visual job，E2E_VISUAL_ONLY=1）只需 chromium + vite（mock），
-  // 不需要 Electron 构建产物——直接跳过产物检查，避免 fresh checkout 上触发 build:e2e
-  //（electron 行为轨专属，visual 轨不应承担构建开销）。
-  if (process.env.E2E_VISUAL_ONLY === '1') {
-    console.log('[e2e global-setup] E2E_VISUAL_ONLY=1（visual 轨），跳过 Electron 构建产物检查')
-    return
-  }
-
-  const required = requiredBundleVariant(config?.argv ?? process.argv)
-  const current = detectCurrentBundleVariant()
+/**
+ * 产物就绪保障：齐备且形态匹配则跳过 build；缺失 / 形态失配则按本次轨形态重建并校验
+ * （校验与收尾日志拆到 verifyRebuiltArtifacts——globalSetup 只做 visual 轨短路 + 参数解析）。
+ */
+function ensureArtifacts(required: BundleVariant | null, current: BundleVariant | null): void {
   const missing = artifactsMissing()
   const mismatch = required !== null && current !== null && required !== current
 
@@ -188,6 +182,12 @@ export default async function globalSetup(config?: FullConfig): Promise<void> {
       : `[e2e global-setup] renderer bundle 形态失配（当前 ${current}，本次轨需 ${required}），重建 ${variant} bundle ...`,
   )
   buildE2E(variant)
+  const after = verifyRebuiltArtifacts(required)
+  console.log(`[e2e global-setup] 构建产物就绪（renderer ${after ?? '形态未知'} bundle）`)
+}
+
+/** 重建后校验：产物齐备且形态与本次轨所需一致，不符即 throw（fail-fast，不静默带病续跑） */
+function verifyRebuiltArtifacts(required: BundleVariant | null): BundleVariant | null {
   if (artifactsMissing()) {
     throw new Error('[e2e global-setup] build:e2e 完成后产物仍缺失：' + ARTIFACTS.filter((p) => !fs.existsSync(p)).join(', '))
   }
@@ -198,5 +198,17 @@ export default async function globalSetup(config?: FullConfig): Promise<void> {
         `与本次轨所需 ${required} 不符——检查构建 env（mock 需 VITE_MOCK=true，real 需不传 VITE_MOCK）`,
     )
   }
-  console.log(`[e2e global-setup] 构建产物就绪（renderer ${after ?? '形态未知'} bundle）`)
+  return after
+}
+
+export default async function globalSetup(config?: FullConfig): Promise<void> {
+  // visual-only 运行（CI e2e-visual job，E2E_VISUAL_ONLY=1）只需 chromium + vite（mock），
+  // 不需要 Electron 构建产物——直接跳过产物检查，避免 fresh checkout 上触发 build:e2e
+  //（electron 行为轨专属，visual 轨不应承担构建开销）。
+  if (process.env.E2E_VISUAL_ONLY === '1') {
+    console.log('[e2e global-setup] E2E_VISUAL_ONLY=1（visual 轨），跳过 Electron 构建产物检查')
+    return
+  }
+
+  ensureArtifacts(requiredBundleVariant(config?.argv ?? process.argv), detectCurrentBundleVariant())
 }

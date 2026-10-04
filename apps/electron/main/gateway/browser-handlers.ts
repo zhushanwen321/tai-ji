@@ -38,30 +38,32 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((k) => typeof k === 'string')
 }
 
+/** 单字段校验：出现时必须是 string[]（错误消息带字段名，方便上报方定位违规字段） */
+function requireStringArrayField(name: 'set' | 'add' | 'remove', value: unknown): string[] | undefined {
+  if (value !== undefined && !isStringArray(value)) {
+    throw new Error(`[browser:forward-keys] ${name} must be a string array`)
+  }
+  return value as string[] | undefined
+}
+
 function parseForwardKeyRequest(payload: unknown): ForwardKeyRequest {
   if (typeof payload !== 'object' || payload === null) {
     throw new Error('[browser:forward-keys] payload must be an object')
   }
   const { set, add, remove } = payload as Record<string, unknown>
-  if (set !== undefined && !isStringArray(set)) {
-    throw new Error('[browser:forward-keys] set must be a string array')
-  }
-  if (add !== undefined && !isStringArray(add)) {
-    throw new Error('[browser:forward-keys] add must be a string array')
-  }
-  if (remove !== undefined && !isStringArray(remove)) {
-    throw new Error('[browser:forward-keys] remove must be a string array')
-  }
-  if (set === undefined && add === undefined && remove === undefined) {
+  const setKeys = requireStringArrayField('set', set)
+  const addKeys = requireStringArrayField('add', add)
+  const removeKeys = requireStringArrayField('remove', remove)
+  if (setKeys === undefined && addKeys === undefined && removeKeys === undefined) {
     throw new Error('[browser:forward-keys] payload must carry set / add / remove')
   }
-  if (set !== undefined && (add !== undefined || remove !== undefined)) {
+  if (setKeys !== undefined && (addKeys !== undefined || removeKeys !== undefined)) {
     throw new Error('[browser:forward-keys] set (全量重报) cannot combine with add / remove (增量)')
   }
   return {
-    ...(set !== undefined ? { set } : {}),
-    ...(add !== undefined ? { add } : {}),
-    ...(remove !== undefined ? { remove } : {}),
+    ...(setKeys !== undefined ? { set: setKeys } : {}),
+    ...(addKeys !== undefined ? { add: addKeys } : {}),
+    ...(removeKeys !== undefined ? { remove: removeKeys } : {}),
   }
 }
 /**
