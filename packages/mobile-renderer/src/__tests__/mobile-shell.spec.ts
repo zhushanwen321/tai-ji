@@ -176,6 +176,28 @@ describe('TC-4: AC5 createMobilePlatformAdapter 满足 core PlatformPort 契约'
     expect(localStorage.getItem('persist-k')).toBeNull()
   })
 
+  // code-harden 观测项 3：写失败降级——Safari 隐私模式 setItem 抛 QuotaExceededError，
+  // adapter 降级 console.warn 不 reject（写失败不沿调用链炸 token 落盘处置链）
+  it('storage.set/remove 遇 localStorage 抛错降级不 reject（warn 留痕）', async () => {
+    const setSpy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota exceeded', 'QuotaExceededError')
+    })
+    const removeSpy = vi.spyOn(localStorage, 'removeItem').mockImplementation(() => {
+      throw new DOMException('quota exceeded', 'QuotaExceededError')
+    })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const adapter = createMobilePlatformAdapter()
+      await expect(adapter.storage.set('k', 'v')).resolves.toBeUndefined()
+      await expect(adapter.storage.remove('k')).resolves.toBeUndefined()
+      expect(warnSpy).toHaveBeenCalledTimes(2)
+    } finally {
+      setSpy.mockRestore()
+      removeSpy.mockRestore()
+      warnSpy.mockRestore()
+    }
+  })
+
   // U1.3 真实化：stub（readyState 恒 CLOSED=3）→ 原生 WebSocket 包装，锁真实建连形态
   it('webSocket.create 返回原生 WebSocket 形态（CONNECTING 初态，回调字段可赋值）', () => {
     const adapter = createMobilePlatformAdapter()
@@ -293,6 +315,11 @@ describe('TC-8: AC5 Tailwind 样式入口（U1.6 P0 防回归）', () => {
   it('main.ts import 样式入口（Tailwind 产物进构建图）', () => {
     const mainSrc = readFileSync(resolve(pkgRoot, 'src/main.ts'), 'utf-8')
     expect(mainSrc).toMatch(/import '\.\/styles\/tokens\.css'/)
+  })
+
+  it('main.ts import shell.css（浮层进出场过渡进构建图，缺失时弹窗出视口）', () => {
+    const mainSrc = readFileSync(resolve(pkgRoot, 'src/main.ts'), 'utf-8')
+    expect(mainSrc).toMatch(/import '\.\/styles\/shell\.css'/)
   })
 
   it('tailwind.config.ts content 覆盖壳源码与 ui 组件（防扫描面缩窄致工具类缺失）', () => {

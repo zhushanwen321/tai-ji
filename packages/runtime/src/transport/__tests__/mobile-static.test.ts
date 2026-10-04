@@ -151,6 +151,20 @@ describe('mobile-static module (S3)', () => {
       expect(res.body).toHaveLength(0)
     })
 
+    it('404 warn 日志纪律：只记 pathname 与 fs error code，不含 dist 绝对路径（code-harden P2）', async () => {
+      const warnSpy = spyConsole('warn')
+      const { port, server } = await startStaticServer(distDir)
+      openedServers.push(server)
+      const res = await rawRequest(port, '/assets/no-such-chunk.js')
+      expect(res.status).toBe(404)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      const logged = String(warnSpy.mock.calls[0]?.[0])
+      expect(logged).toContain('/assets/no-such-chunk.js')
+      expect(logged).toContain('ENOENT')
+      // fs error.message 内嵌的服务端 dist 绝对路径不落日志（模块头「日志只记 basename」纪律）。
+      expect(logged).not.toContain(dataDir)
+    })
+
     it.each([
       ['/assets/app.js', 'text/javascript'],
       ['/assets/font.woff2', 'font/woff2'],

@@ -21,17 +21,34 @@ import type { KVStorage, PlatformPort, WebSocketFactory, WebSocketLike } from '@
 // LocalStorageKV —— KVStorage 的 localStorage 桥接实现。
 // KVStorage 契约为异步签名（Promise 返回），localStorage 为同步 API——按契约包 Promise。
 // get 不存在 key 返回 null（localStorage.getItem 天然语义，非抛错）。
+// set/remove 写失败降级（console.warn、不 reject）：Safari 隐私模式等环境 setItem 抛
+// QuotaExceededError，直抛会沿调用链炸 token 落盘处置（handleAuthSuccess 经 connection-view
+// void 调用 = unhandled rejection）。降级后的凭据语义：本次会话内存可用（连接凭据已在
+// use-connection 模块态持有，WS 重连复用不回读 storage），刷新后落 token 输入视图
+// （storage 缺失 → resolve 三分支 need-input → runtime 拒绝 → token 输入视图，connection-profile D4）。
 class LocalStorageKV implements KVStorage {
   async get(key: string): Promise<string | null> {
     return localStorage.getItem(key)
   }
 
   async set(key: string, value: string): Promise<void> {
-    localStorage.setItem(key, value)
+    try {
+      localStorage.setItem(key, value)
+    } catch (e) {
+      // 降级策略（best-effort 持久化）：写失败不向上传播——Safari 隐私模式 setItem 抛
+      // QuotaExceededError，直抛会沿调用链炸 token 落盘处置（降级后凭据语义见类注释）。
+      console.warn(`[mobile-platform] localStorage.setItem failed (key=${key}), persist skipped:`, e)
+    }
   }
 
   async remove(key: string): Promise<void> {
-    localStorage.removeItem(key)
+    try {
+      localStorage.removeItem(key)
+    } catch (e) {
+      // 降级策略（best-effort 持久化）：清除失败不向上传播（与 set 同一面；残留键下次
+      // 验身失败路径会重试清除），warn 留排障依据。
+      console.warn(`[mobile-platform] localStorage.removeItem failed (key=${key}):`, e)
+    }
   }
 }
 

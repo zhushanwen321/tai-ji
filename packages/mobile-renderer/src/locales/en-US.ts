@@ -54,6 +54,14 @@ export default {
     mermaid: {
       placeholder: 'View chart on desktop',
     },
+    formCard: {
+      planReviewTitle: 'Plan awaiting review',
+      approve: 'Approve',
+      dismiss: 'Dismiss',
+      scheduleEchoNote: 'Confirms the prefilled draft; edit on desktop to change details',
+      scheduleNotReady: 'Draft incomplete or time has passed — edit on desktop to confirm, or cancel this request',
+      emptyForm: 'Empty form — cancel only',
+    },
     pasteImageFallback: '[Image paste: desktop only]',
   },
 }

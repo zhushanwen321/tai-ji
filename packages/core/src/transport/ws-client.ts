@@ -342,8 +342,20 @@ export function connect(url: string, credentials: ConnectCredentials): void {
   currentUrl = url
   currentCredentials = credentials
 
-  // 幂等：已连接或连接中，不重复建连
-  if (ws && (ws.readyState === WS_READY_STATE.OPEN || ws.readyState === WS_READY_STATE.CONNECTING)) return
+  // 单飞守卫（防并存连接）：存在非 CLOSED 的 socket 期间一律不放行建新连接。
+  // - OPEN/CONNECTING：已有活跃连接，no-op（原幂等行为不变）。
+  // - CLOSING：close 握手未完成（移动弱网下可悬挂数秒~分钟）——此前会被模块变量直接覆盖
+  //   并开新连接，旧 socket 悬挂期间与新连接并存（半死连接堆积的根因：移动端「同页多连接
+  //   并存」复验问题；退避定时器 / visibility 切前台 / token 重试三个入场口在 CLOSING 窗口
+  //   交错即复现）。现改为 no-op：该 socket 的 onclose 到达（WHATWG 保证 close 事件最终
+  //   触发）后由 onclose → scheduleReconnect 接力重连，收敛为单链。
+  // - null / CLOSED：放行（旧连接已死透）。放行即清挂起的重连定时器——本调用已是最新连接
+  //   意图，定时器接力作废，防「外部 connect 与退避定时器」两条链交错产生双定时器双建连。
+  if (ws && ws.readyState !== WS_READY_STATE.CLOSED) return
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
 
   state.value = 'connecting'
   const gen = ++wsGeneration
@@ -688,6 +700,9 @@ function scheduleReconnect(): void {
   console.log('[ws] reconnecting in', delay, 'ms (attempt', reconnectAttempts + ')')
   // 「保留上次凭据」的内部实现（S4）：复用 currentCredentials 重新发起（currentCredentials
   // 与 currentUrl 同在 connect 设置，非 null 由 currentUrl 守卫蕴含）
+  // 单一定时器不变量：覆盖前清旧 handle——旧定时器若滞留到期再触发，会与本次调度的定时器
+  // 构成双链（单飞守卫能挡住双建连，但重连簿记会被无谓搅动）。
+  if (reconnectTimer) clearTimeout(reconnectTimer)
   reconnectTimer = setTimeout(() => connect(currentUrl!, currentCredentials!), delay)
 }
 

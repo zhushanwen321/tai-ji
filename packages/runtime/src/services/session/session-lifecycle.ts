@@ -25,6 +25,8 @@ import { unlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import type { SessionSummary, BatchDeleteResult, ServerMessage } from '@taiji/shared'
 import { BUILTIN_PRESET_IDS, isBtwVirtualId } from '@taiji/shared'
+// 缺省 clientUuid 生成走 core 唯一入口（禁直调 crypto.randomUUID，secure context/Node 版本防御）
+import { randomUuid } from '@taiji/core/utils/random-uuid'
 // [D6-⑨ u7] 图片缓存目录推导（shared SSOT，含 sessionId 穿越校验——cache 级联删除用）
 import { getImageCacheDir } from '@taiji/shared/paths'
 import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
@@ -615,7 +617,7 @@ export class SessionLifecycle implements ISessionRegistry {
 
   /** create 的单次创建体（原 create 全体，行为保持；幂等登记在 create 入口收口）。 */
   private async createNew(cwd?: string, label?: string, options?: CreateOptions): Promise<SessionSummary> {
-    const tempId = crypto.randomUUID()
+    const tempId = randomUuid()
     const sessionCwd = resolveCreateCwd(cwd)
 
     // 启动 pi 前检查 model 配置,避免 pi 因无 model 直接 exit(1)

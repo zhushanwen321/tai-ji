@@ -14,6 +14,13 @@
  *  - TC6/TC7 expired 超时撤窗（D3，取消非判拒）：命中撤回（含清 error）/
  *    pluginId 不匹配 noop（陈旧广播）/ 无挂起 noop 幂等
  *  - TC8 dispose 退订：bus 事件与 expired 广播均不再驱动 state
+ *  - TC9/TC10 expired 按 requestId 精确匹配：同 pluginId 先后两单，前单陈旧
+ *    expired 广播只在其 requestId 命中时撤回（不误撤后到弹窗）；payload 缺
+ *    requestId（旧版广播）回退按 pluginId 匹配
+ *  - TC11/TC12/TC13 resolved 终局撤窗（S5-V3，bridge 归一 bus 事件）：按 requestId
+ *    精确撤回（多连接端中非操作端撤窗）；requestId 空串（bridge 对旧版广播的宽容
+ *    窄化产物）回退按 pluginId 匹配；陈旧 resolved 不误撤 + 操作端 RPC 先收口的
+ *    noop 幂等 + dispose 退订
  *
  * 策略：真实 InternalEventBus（bus.emit）+ dispatchGlobal（events 通道，对齐
  * shell-adapters.test.ts 全链路范式）；plugin 域 vi.mock 隔离 WS（断言回传形状）。
@@ -38,17 +45,38 @@ import {
   type PermissionRequestController,
 } from '../permission-request-controller'
 
-/** 通过 bus.emit 模拟 bridge 归一后的 permission 事件 */
-function emitPermissionRequest(bus: InternalEventBus, pluginId = 'p1', permissions: string[] = ['shell']): void {
+/** 通过 bus.emit 模拟 bridge 归一后的 permission 事件（requestId 默认合成形态） */
+function emitPermissionRequest(
+  bus: InternalEventBus,
+  pluginId = 'p1',
+  permissions: string[] = ['shell'],
+  requestId = `perm_${pluginId}`,
+): void {
   bus.emit({
     kind: 'plugin-permission-request',
-    request: { pluginId, permissions, requestId: `perm_${pluginId}` },
+    request: { pluginId, permissions, requestId },
   } as InternalEvent)
 }
 
 /** 通过 global 通道模拟 runtime 撤窗广播（payload { pluginId }，无 sessionId） */
-function emitExpired(pluginId: string): void {
-  dispatchGlobal({ type: 'plugin:permissionRequestExpired', payload: { pluginId } })
+function emitExpired(pluginId: string, requestId?: string): void {
+  dispatchGlobal({
+    type: 'plugin:permissionRequestExpired',
+    payload: { pluginId, ...(requestId !== undefined ? { requestId } : {}) },
+  })
+}
+
+/** 通过 bus.emit 模拟 bridge 归一后的 resolved 终局事件（S5-V3；requestId 空串 = 旧版广播窄化形态） */
+function emitResolved(
+  bus: InternalEventBus,
+  pluginId: string,
+  requestId: string,
+  approved = true,
+): void {
+  bus.emit({
+    kind: 'plugin-permission-request-resolved',
+    resolved: { pluginId, requestId, approved },
+  } as InternalEvent)
 }
 
 describe('createPermissionRequestController 状态机（双壳共享）', () => {
@@ -201,6 +229,76 @@ describe('createPermissionRequestController 状态机（双壳共享）', () => 
     emitPermissionRequest(bus, 'p1')
     expect(controller.state.pending).toBe(false)
     emitExpired('p1')
+    expect(controller.state.pending).toBe(false)
+  })
+
+  it('TC9: 同 pluginId 先后两单，expired 按 requestId 精确撤回——前单陈旧广播不误撤后到弹窗', () => {
+    // 同插件 p1 的两次审批请求先后到达（弹窗全局单例，后者覆盖前者）
+    emitPermissionRequest(bus, 'p1', ['shell'], 'req-a')
+    expect(controller.state.pending).toBe(true)
+    expect(controller.state.requestId).toBe('req-a')
+    emitPermissionRequest(bus, 'p1', ['net.http'], 'req-b')
+    expect(controller.state.requestId).toBe('req-b')
+
+    // 前单 req-a 的陈旧 expired 广播迟到：requestId 不匹配当前弹窗 → noop 不误撤
+    emitExpired('p1', 'req-a')
+    expect(controller.state.pending).toBe(true)
+    expect(controller.state.requestId).toBe('req-b')
+
+    // 当前单 req-b 的 expired 才撤
+    emitExpired('p1', 'req-b')
+    expect(controller.state.pending).toBe(false)
+
+    // 撤回后同 pluginId 再收 expired → noop 幂等
+    emitExpired('p1', 'req-b')
+    expect(controller.state.pending).toBe(false)
+  })
+
+  it('TC10: expired payload 缺 requestId（旧版广播）→ 回退按 pluginId 匹配撤回', () => {
+    emitPermissionRequest(bus, 'p1', ['shell'], 'req-a')
+    emitExpired('p1')
+    expect(controller.state.pending).toBe(false)
+  })
+
+  it('TC11: resolved 按 requestId 精确撤回——同 pluginId 先后两单，前单陈旧 resolved 不误撤后到弹窗；命中时连错误行一起清', async () => {
+    emitPermissionRequest(bus, 'p1', ['shell'], 'req-a')
+    emitPermissionRequest(bus, 'p1', ['net.http'], 'req-b')
+
+    // 前单 req-a 的陈旧 resolved（A 端对旧弹窗的批准广播迟到）：requestId 不匹配 → noop
+    emitResolved(bus, 'p1', 'req-a', true)
+    expect(controller.state.pending).toBe(true)
+    expect(controller.state.requestId).toBe('req-b')
+
+    // 当前单 req-b 的 resolved 命中撤回；先制造错误态再撤（弹窗都撤了，错误无载体）
+    denyPermissions.mockRejectedValue(new Error('rpc boom'))
+    controller.transport.deny('p1')
+    await vi.waitFor(() => expect(controller.state.error).toBe(true))
+    emitResolved(bus, 'p1', 'req-b', true)
+    expect(controller.state.pending).toBe(false)
+    expect(controller.state.error).toBe(false)
+  })
+
+  it('TC12: resolved requestId 空串（bridge 对旧版广播的宽容窄化产物）→ 回退按 pluginId 匹配撤回', () => {
+    emitPermissionRequest(bus, 'p1', ['shell'], 'req-a')
+    emitResolved(bus, 'p1', '', false)
+    expect(controller.state.pending).toBe(false)
+  })
+
+  it('TC13: 操作端 RPC 先收口（pending=false）后 resolved 到达 → noop 幂等；dispose 一并退订 resolved', async () => {
+    emitPermissionRequest(bus, 'p1', ['shell'], 'req-a')
+    approvePermissions.mockResolvedValue(undefined)
+    controller.transport.approve('p1', ['shell'])
+    await vi.waitFor(() => expect(controller.state.pending).toBe(false))
+
+    // 本端已是终局收口，resolved 广播迟到不再翻转状态
+    emitResolved(bus, 'p1', 'req-a', true)
+    expect(controller.state.pending).toBe(false)
+    expect(controller.state.error).toBe(false)
+
+    // dispose 后 request 与 resolved 均不再驱动 state（pending 保持 false）
+    controller.dispose()
+    emitPermissionRequest(bus, 'p2', ['shell'], 'req-c')
+    emitResolved(bus, 'p2', 'req-c', true)
     expect(controller.state.pending).toBe(false)
   })
 })

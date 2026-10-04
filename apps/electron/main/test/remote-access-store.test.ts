@@ -3,13 +3,16 @@
  *
  * 覆盖：
  * - 缺文件 → 默认关态配置（不报错、不落盘）
- * - 非 ENOENT 读失败（EACCES 形态）→ 响亮日志含恢复指引 + 默认关态降级（不落盘）
+ * - 非 ENOENT 读失败（EACCES 形态）→ 响亮日志含恢复指引 + 关态空 token 降级（缺失
+ *   形态，不落盘；重新开启时 setEnabled 自愈补发新 token）
  * - generateToken：64 位小写 hex
  * - write：原子写语义（同目录 .tmp 临时文件 + rename，写后无 .tmp 残留、无半截 JSON）+
- *   0600 权限（含覆写已存在文件后仍 0600——writeFileSync mode 仅创建时生效的兜底）
+ *   0600 权限（含覆写已存在文件后仍 0600——writeFileSync mode 仅创建时生效的兜底）；
+ *   rename 前 fsync 段的专项断言见 remote-access-store-fsync.test.ts
  * - rotate：重写后读取一致（新 token + enabled/createdAt 保留）
  * - setEnabled：仅 enabled 变化，token/createdAt 保留；关态文件留存
- * - 损坏 JSON / 字段不合法 → E10 重建默认关态 + 响亮日志（console.error 含恢复指引）
+ * - 损坏 JSON / 字段不合法 → E10 重建默认关态 + 响亮日志（console.error 含恢复指引）；
+ *   重建写回失败（只读 dataDir）→ 降级内存关态空 token 继续启动（不拒启）
  *
  * 数据目录经 dataDir 参数注入 mkdtemp tmp 自建自删（测试红线：禁触真实数据目录）。
  *
@@ -91,15 +94,16 @@ describe('readRemoteAccessConfig', () => {
     expect(errorSpy).not.toHaveBeenCalled()
   })
 
-  it('非 ENOENT 读失败（路径被目录占位，EISDIR 形态）→ 响亮日志含恢复指引 + 默认关态降级（不写回）', () => {
+  it('非 ENOENT 读失败（路径被目录占位，EISDIR 形态）→ 响亮日志含恢复指引 + 关态空 token 降级（不写回）', () => {
     // 真实 fs 形态制造读失败（vi.spyOn 对 node:fs ESM namespace 不可 redefine）：
     // 配置文件路径被目录占位 → readFileSync 抛 EISDIR（非 ENOENT）
     mkdirSync(FILE_PATH)
     try {
       const config = readRemoteAccessConfig(TMP_DATA_DIR)
-      // 行为降级语义不变：关态 fail-closed（与缺文件同形态），token 契约照常
+      // 降级为关态 fail-closed；token 空串 = 缺失形态（磁盘态不可信，不产磁盘上
+      // 不存在的假 token 误导面板——上游 fullUrl 有 token 真值守卫，空值不渲染假链接）
       expect(config.enabled).toBe(false)
-      expect(config.token).toMatch(/^[0-9a-f]{64}$/)
+      expect(config.token).toBe('')
       expect(config.createdAt).toBeTruthy()
       // 降级 ≠ 吞错：响亮日志（读失败原因 + 恢复指引），对齐 E10 处理强度
       expect(errorSpy).toHaveBeenCalledTimes(1)
@@ -112,6 +116,25 @@ describe('readRemoteAccessConfig', () => {
       expect(existsSync(FILE_PATH)).toBe(true)
     } finally {
       rmSync(FILE_PATH, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  it('降级缺失形态（空 token）后重新开启 → setRemoteAccessEnabled 自愈补发新 token 落盘（恢复通道）', () => {
+    if (process.platform === 'win32') return // POSIX 文件权限语义，win32 不跑本用例
+    // 真实形态构造「读降级 + 写可成功」组合：文件权限收回（0000）→ readFileSync 抛
+    // EACCES 降级空 token；写路径是 tmp + rename 覆盖（只查父目录权限）→ 成功。
+    // 无自愈时将落盘「开态 + 空 token」半合法文件（runtime 读侧 fail-closed 全拒，
+    // 面板却显示已开启）；有自愈则补发新 token，一步回到可用态。
+    seedFile('{"enabled":false,"token":"' + '2'.repeat(64) + '","createdAt":"2026-01-01T00:00:00.000Z"}')
+    chmodSync(FILE_PATH, 0o000)
+    try {
+      const enabled = setRemoteAccessEnabled(true, TMP_DATA_DIR)
+      expect(enabled.enabled).toBe(true)
+      expect(enabled.token).toMatch(/^[0-9a-f]{64}$/)
+      expect(statSync(FILE_PATH).mode & 0o777).toBe(0o600)
+      expect(JSON.parse(readFileRaw())).toEqual(enabled)
+    } finally {
+      chmodSync(FILE_PATH, 0o600)
     }
   })
 })
@@ -269,6 +292,30 @@ describe('ensureRemoteAccessIntegrity（E10 损坏重建，经 read 触发）', 
     seedFile('{"enabled":true,"token":"' + '5'.repeat(64) + '","createdAt":"2026-01-01T00:00:00.000Z"}')
     readRemoteAccessConfig(TMP_DATA_DIR)
     expect(errorSpy).not.toHaveBeenCalled()
+  })
+
+  it('损坏重建写回失败（dataDir 只读，EACCES 形态）→ 不拒启：降级内存关态空 token + 响亮日志含权限恢复指引（损坏文件原样留存）', () => {
+    if (process.platform === 'win32') return // POSIX 目录权限语义，win32 不跑本用例
+    // 真实 fs 形态制造写失败：损坏文件所在目录被收回写权限 → writeFileSync(.tmp) 抛 EACCES
+    seedFile('{corrupted')
+    chmodSync(TMP_DATA_DIR, 0o500)
+    try {
+      const config = readRemoteAccessConfig(TMP_DATA_DIR)
+      // fail-safe：降级为内存关态（token 空 = 缺失形态）继续返回，不裸抛拒启；
+      // 损坏文件保持原样未被改动（runtime 热读损坏内容走读侧 fail-closed，无开放面）
+      expect(config.enabled).toBe(false)
+      expect(config.token).toBe('')
+      expect(readFileRaw()).toBe('{corrupted')
+      // 响亮日志两次（损坏重建 + 写回失败）且写回失败日志含可操作恢复指引
+      expect(errorSpy).toHaveBeenCalledTimes(2)
+      const writeFailMessage = String(errorSpy.mock.calls[1]?.[0])
+      expect(writeFailMessage).toContain('写回失败')
+      expect(writeFailMessage).toContain('EACCES')
+      expect(writeFailMessage).toContain('chmod u+w')
+      expect(writeFailMessage).toContain('远程访问面板')
+    } finally {
+      chmodSync(TMP_DATA_DIR, 0o700)
+    }
   })
 })
 

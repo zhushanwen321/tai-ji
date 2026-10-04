@@ -51,9 +51,14 @@ export function readQueryToken(search: string): string | null {
   return new URLSearchParams(search).get('token')
 }
 
-/** 同源 WS URL 派生（D4：WS URL = ws://<location.host>，页面同源托管） */
-export function wsUrlFromHost(host: string): string {
-  return `ws://${host}`
+/**
+ * 同源 WS URL 派生（D4：WS URL = <ws|wss>://<location.host>，页面同源托管）。
+ * scheme 按页面协议派生（location.protocol 由 deps 注入，本模块零 location 直读）：
+ * http: → ws://，其余（https: 及未知协议）→ wss://——https 页面下发 ws 会被浏览器
+ * 混合内容（mixed content）拦截，未知协议按安全侧缺省。
+ */
+export function wsUrlFromHost(host: string, protocol: string): string {
+  return `${protocol === 'http:' ? 'ws' : 'wss'}://${host}`
 }
 
 export interface ConnectionProfileDeps {
@@ -61,6 +66,8 @@ export interface ConnectionProfileDeps {
   storage: KVStorage
   /** location.host（WS 同源派生） */
   host: string
+  /** location.protocol（WS scheme 派生：http: → ws，其余 → wss） */
+  protocol: string
   /** location.search 原文（query token 摄取） */
   search: string
   /** 抹地址栏 query（D4：query token 验身成功后调用；实现 = history.replaceState 剥 query） */
@@ -94,19 +101,19 @@ export function createConnectionProfilePort(
     async resolve(): Promise<ResolvedConnectionProfile> {
       // 手输采纳优先（token 重试路径的显式新意图，晚于页面加载发生，压过 query/storage）
       if (pending?.source === 'manual') {
-        return { url: wsUrlFromHost(deps.host), token: pending.token }
+        return { url: wsUrlFromHost(deps.host, deps.protocol), token: pending.token }
       }
       const queryToken = readQueryToken(deps.search)
       const storedToken = await deps.storage.get(REMOTE_TOKEN_STORAGE_KEY)
       const adoption = resolveCredential(queryToken, storedToken)
       if (adoption.action === 'adopt') {
         pending = adoption.credential
-        return { url: wsUrlFromHost(deps.host), token: pending.token }
+        return { url: wsUrlFromHost(deps.host, deps.protocol), token: pending.token }
       }
       // 皆无：不带凭据发起（E2 通路——runtime fail-closed 拒绝 → onAuthRejected →
       // handleAuthFailure → onTokenInputRequired）。不在此直接切视图：凭据缺失与其他验身
       // 失败同出口，连接发起面保持无异常路径。
-      return { url: wsUrlFromHost(deps.host) }
+      return { url: wsUrlFromHost(deps.host, deps.protocol) }
     },
 
     async handleAuthSuccess(): Promise<void> {

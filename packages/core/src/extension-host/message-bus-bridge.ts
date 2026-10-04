@@ -14,6 +14,9 @@
  *     uiRequest→ui-request；viewUpdate→extension-widget；modalState→plugin:modalState；
  *     headerActionUpdate→plugin:headerActionUpdate（后两成员为 plugin-header-action-modal-points
  *     新增点位帧，消费端 = plugin-modal-slot / HeaderActionStore 经 InternalEventBus 订阅）
+ *   1 个 permission 终局帧（remote-use-mobile S5-V3）：permissionRequestResolved→
+ *     plugin-permission-request-resolved（消费端 = permission-request-controller 撤窗，
+ *     payload 缺 requestId 置空串、消费端回退按 pluginId 匹配）
  *   5 个 extension 系：widget/widgetGui→extension-widget；status→extension-status；
  *     notify→extension-notify；ui_request→ui-request（与 plugin:uiRequest 归一）
  *
@@ -23,8 +26,9 @@
  *   alignment 取 payload.alignment，无则默认 'left'
  * - statusSetUpdate payload = { sessionId, key, text, textRaw? }（bridge-handler 形状）
  *   → StatusSetEntry：id←key、text←text、pluginId←''（wire 无 pluginId）
- * - permissionRequest payload = { pluginId, permissions: string[] }（activator 形状）
- *   → PermissionRequest：permissions 原样透传整个数组、requestId←合成 perm_${pluginId}
+ * - permissionRequest payload = { pluginId, permissions: string[], requestId }（activator
+ *   形状，requestId 每次审批新生成）→ PermissionRequest：permissions 原样透传整个数组、
+ *   requestId←payload 真值优先（前端按它精确撤窗），缺失（旧版广播）回退合成 perm_${pluginId}
  * - crashed payload = { pluginId, workerId, error } → { pluginId, error }
  * - notification payload = { pluginId, level, message } → NotificationPayload
  * - config payload = { pluginId, config } → { pluginId, config }
@@ -148,7 +152,38 @@ function parsePermissionRequest(msg: IncomingPluginMessage): InternalEvent | nul
   return {
     kind: 'plugin-permission-request',
     sessionId: resolveSessionId(msg, payload),
-    request: { pluginId, permissions, requestId: `perm_${pluginId}` },
+    request: {
+      pluginId,
+      permissions,
+      // payload 真值优先（runtime 每次审批新生成，前端按它精确撤窗）；缺失（旧版
+      // 广播）回退合成 perm_${pluginId}——消费端 expired 匹配对两形态均幂等兼容
+      requestId: asOptionalString(payload.requestId) ?? `perm_${pluginId}`,
+    },
+  }
+}
+
+/**
+ * plugin:permissionRequestResolved 解析守卫（remote-use-mobile S5-V3 审批终局帧）。
+ * payload = { pluginId, requestId, approved }（activator 形状，与开窗 request 广播
+ * 同源 requestId）。宽容窄化对齐 expired 消费端兼容链：requestId 缺失/非 string 置
+ * 空串（消费端空 requestId 回退按 pluginId 匹配，不在此合成伪 id——合成值不匹配任何
+ * 挂起弹窗，等价丢弃且掩盖形状缺陷）；approved 非 boolean 时整包拒绝（布尔是唯一
+ * 撤窗无关字段，坏形状不值得宽容）。
+ */
+function parsePermissionRequestResolved(msg: IncomingPluginMessage): InternalEvent | null {
+  const payload = asRecord(msg.payload)
+  if (!payload) return null
+  const pluginId = asString(payload.pluginId)
+  const approved = payload.approved
+  if (pluginId === null || typeof approved !== 'boolean') return null
+  return {
+    kind: 'plugin-permission-request-resolved',
+    sessionId: resolveSessionId(msg, payload),
+    resolved: {
+      pluginId,
+      requestId: asOptionalString(payload.requestId) ?? '',
+      approved,
+    },
   }
 }
 
@@ -425,6 +460,7 @@ const PLUGIN_HANDLERS: Record<string, (msg: IncomingPluginMessage) => InternalEv
   'plugin:statusBarUpdate': parseStatusBarUpdate,
   'plugin:statusSetUpdate': parseStatusSetUpdate,
   'plugin:permissionRequest': parsePermissionRequest,
+  'plugin:permissionRequestResolved': parsePermissionRequestResolved,
   'plugin:crashed': parseCrashed,
   'plugin:notification': parseNotification,
   'plugin:config': parseConfigChanged,

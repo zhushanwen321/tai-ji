@@ -47,6 +47,8 @@ import { supportedLevelsOf } from './supported-levels'
 // core 域 KV 单例直接 import（设计 D1，同 launch-config.ts 自身 import 先例）
 import { lookup as lookupLastUsedModel } from '../composer/last-used-model'
 import { lookup as lookupRememberedLevel } from '../composer/model-thinking-memory'
+// clientUuid 生成走 core 唯一入口（secure context 缺失时走 v4 fallback，禁直调 crypto.randomUUID）
+import { randomUuid } from '../../utils/random-uuid'
 // [A 消费侧] 投递失败保稿（handover / 后台两分支）：orphan 草稿槽单源（与 send.ts catch 共用同一槽）
 import { stashOrphanedDraft } from '@taiji/core/domain/composer'
 import { getSettingsStore } from '../settings'
@@ -186,7 +188,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
   function takeClientUuidFor(segments: Segment[]): string {
     const hash = hashSegments(segments)
     if (lastAttempt && lastAttempt.hash === hash) return lastAttempt.uuid
-    const uuid = crypto.randomUUID()
+    const uuid = randomUuid()
     lastAttempt = { hash, uuid }
     return uuid
   }

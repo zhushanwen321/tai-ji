@@ -15,6 +15,7 @@
     "@taiji/dom-core": "workspace:*",
     "@taiji/shared": "workspace:*",
     "@taiji/ui": "workspace:*",
+    "@zhushanwen/extension-protocol": "workspace:*",
     "pinia": "^3",
     "vue": "^3.5",
     "vue-i18n": "^10"

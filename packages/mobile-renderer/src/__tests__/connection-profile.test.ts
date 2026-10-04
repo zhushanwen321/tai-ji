@@ -33,13 +33,14 @@ function makeStore(initial?: string): { storage: KVStorage; map: Map<string, str
   return { storage, map }
 }
 
-function makePort(opts: { search?: string; stored?: string } = {}) {
+function makePort(opts: { search?: string; stored?: string; protocol?: string } = {}) {
   const { storage, map } = makeStore(opts.stored)
   const stripQuery = vi.fn()
   const onTokenInputRequired = vi.fn()
   const port = createConnectionProfilePort({
     storage,
     host: '192.168.1.5:3210',
+    protocol: opts.protocol ?? 'http:',
     search: opts.search ?? '',
     stripQuery,
     onTokenInputRequired,
@@ -78,8 +79,16 @@ describe('readQueryToken / wsUrlFromHost', () => {
     expect(readQueryToken('')).toBeNull()
   })
 
-  it('WS URL = ws://<host>（同源派生，D4）', () => {
-    expect(wsUrlFromHost('192.168.1.5:3210')).toBe('ws://192.168.1.5:3210')
+  it('WS URL scheme 按页面协议派生：http: → ws://，https: → wss://，未知协议安全侧缺省 wss://', () => {
+    expect(wsUrlFromHost('192.168.1.5:3210', 'http:')).toBe('ws://192.168.1.5:3210')
+    expect(wsUrlFromHost('remote.example.com', 'https:')).toBe('wss://remote.example.com')
+    expect(wsUrlFromHost('remote.example.com', 'file:')).toBe('wss://remote.example.com')
+  })
+
+  it('resolve 的连接目标随注入协议派生（https 托管形态 → wss://）', async () => {
+    const { port } = makePort({ stored: 'tok-stored', protocol: 'https:' })
+    const resolved = await port.resolve()
+    expect(resolved.url).toBe('wss://192.168.1.5:3210')
   })
 })
 

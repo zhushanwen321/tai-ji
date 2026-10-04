@@ -6,17 +6,18 @@
 // 不含 virtua/@wheel/TurnRail/fork-notice——桌面壳层编排语义不进移动壳（D10 被否①）。
 //
 // ChatViewDeps 四类分派（D10 全表逐字段）：
-// ① 真实现（core store/useChat + ui 渲染链下沉模块）：getMessages/isActive/isHandingOff/
-//    getChangeSetStatus/isExpanded/toggleExpand/collapse/abortBash + renderMarkdown
-//    （renderMarkdownSegments + copyLabel 经 i18n 注入）/renderMarkdownIncremental/
-//    shouldFinalizeStreamingFence/streamingFenceSilenceMs
-// ② no-op（hover 入口触屏不可见，D7）：onFork/onForkAsk/onHandoff/onHandoffAsk/editAndResend/toMarkdown
-// ③ no-op + D7 登记（面板族 Phase 2）：openDrawer/onFileClick/onAmbiguousSelect +
+// ① 真实现（core store/useChat + ui 渲染链下沉模块）：isActive/isHandingOff/
+//    getChangeSetStatus/isPendingSend/isExpanded/toggleExpand/collapse/abortBash/
+//    onRevokeMessage + renderMarkdown（renderMarkdownSegments + copyLabel 经 i18n 注入）/
+//    renderMarkdownIncremental/streamingFenceSilenceMs（finalize 判定已并入 ui 组件内派生：
+//    message complete ∨ token 静默 ≥ 阈值，谓词注入字段已随审计候选 18 收单删除）
+// ② 惰性（D10 移动壳无接管态——turn 展开分区只留展开集合，接管读写恒 false/no-op，
+//    与 ui 组件侧原兜底行为等价）：isTakeover/setTakeover
+// ③ no-op（hover 入口触屏不可见，D7）：onForkAsk/onHandoffAsk/editAndResend/toMarkdown
+// ④ no-op + D7 登记（面板族 Phase 2）：openDrawer/onFileClick +
 //    loadFileCandidates（空数组——路径链接化降级普通文本，env 白名单同步空集）
-// ④ 占位降级：renderMermaid 返回占位 svg（MarkdownRenderer 期望 {svg} 结构，纯 no-op 破图；
+// ⑤ 占位降级：renderMermaid 返回占位 svg（MarkdownRenderer 期望 {svg} 结构，纯 no-op 破图；
 //    mermaid 库不进移动壳 bundle，D7 图表行）
-// optional 三字段（isTakeover/isPendingSend/setTakeover）不 provide（D10：组件侧既有兜底
-// ——Turn takeover 兜底 false 折叠态、submitEdit 不做双发互斥）。
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChatView, ChatViewDepsKey } from '@taiji/ui'
@@ -25,7 +26,6 @@ import { renderMarkdownSegments } from '@taiji/ui/features/chat/markdown'
 import {
   createIncrementalRenderCache,
   renderIncremental,
-  shouldFinalizeStreamingFence,
   STREAMING_FENCE_SILENCE_MS,
 } from '@taiji/ui/features/chat/markdown-incremental'
 import type { Message } from '@taiji/shared'
@@ -45,28 +45,35 @@ const expansion = createTurnExpansion(computed(() => props.sessionId))
 const EMPTY_ENV = { filePaths: new Set<string>(), localFiles: new Set<string>() }
 
 const deps: ChatViewDeps = {
-  // 数据获取器（core chat store 派生）
-  getMessages: (sid) => chatStore.getMessages(sid),
+  // 数据获取器（core chat store 派生；messages 经 props 传入 ChatView，不再走 deps）
   isActive: (sid) => chatStore.isActive(sid),
   isHandingOff: (sid) => chatStore.isHandingOff(sid),
   getChangeSetStatus: (sid, messageId) => chatStore.getChangeSetStatus(sid, messageId),
   isExpanded: (turnKey) => expansion.isExpanded(turnKey),
+  // 惰性接管态（D10：移动壳 turn 展开分区无接管态，恒 false——与 ui 组件侧原兜底等价）
+  isTakeover: () => false,
+  // pendingSend 投影（core chat store 派生，UserBubble submitEdit 双发锁消费）
+  isPendingSend: (sid) => chatStore.isPendingSend(sid),
 
   // 操作回调
   toggleExpand: (turnKey) => expansion.toggle(turnKey),
   collapse: (turnKey) => expansion.collapse(turnKey),
+  // 惰性接管写入（同 isTakeover：移动壳无接管态，no-op）
+  setTakeover: () => {},
   abortBash: (sid) => {
     void useChatInstance.abortBash(sid)
   },
+  // 撤回统一单入口（core useChat.revokeMessage：在途 cancel / 已送达树内回退的路由判定
+  // 在 core 单点，壳透传 targetId）
+  onRevokeMessage: (sid, targetId) => {
+    void useChatInstance.revokeMessage(sid, targetId)
+  },
   // hover 全族 no-op（D7：触屏不可见；恢复路径 = 桌面操作）
   editAndResend: () => {},
-  onFork: () => {},
   onForkAsk: () => {},
-  onHandoff: () => {},
   onHandoffAsk: () => {},
   openDrawer: () => {},
   onFileClick: () => {},
-  onAmbiguousSelect: () => {},
 
   // 数据加载（D7 面板族 Phase 2：空候选 → 路径链接化降级普通文本）
   loadFileCandidates: () => [],
@@ -78,7 +85,6 @@ const deps: ChatViewDeps = {
     const result = await renderIncremental(source, c, { ...EMPTY_ENV, copyLabel: t('composable.copyLabel') }, opts)
     return { ...result, cache: c }
   },
-  shouldFinalizeStreamingFence,
   streamingFenceSilenceMs: STREAMING_FENCE_SILENCE_MS,
   // ④ 占位降级（D7 mermaid 行：图表在桌面查看；文案经 i18n，不养文案副本）
   renderMermaid: (source, _theme) => {

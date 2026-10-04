@@ -27,6 +27,7 @@ import {
   ConnectionManager,
   parseRemoteAccessToken,
   readRemoteAccessToken,
+  _resetRemoteReadGateForTest,
   type ConnectionManagerOptions,
 } from '../connection-manager.js'
 import { REMOTE_ACCESS_FILENAME } from '@taiji/shared'
@@ -111,11 +112,13 @@ describe('ConnectionManager remote-access (U0.1)', () => {
     opened.length = 0
     for (const spy of consoleSpies.reverse()) spy.mockRestore()
     consoleSpies.length = 0
+    // 频控是 connection-manager 模块级状态：逐测重置防「首个响亮已被前测消耗」跨测泄漏。
+    _resetRemoteReadGateForTest()
     vi.unstubAllEnvs()
     fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
-  function spyConsole(method: 'error' | 'warn' | 'debug'): ReturnType<typeof vi.spyOn> {
+  function spyConsole(method: 'error' | 'warn' | 'debug' | 'log'): ReturnType<typeof vi.spyOn> {
     const spy = vi.spyOn(console, method).mockImplementation(() => {})
     consoleSpies.push(spy)
     return spy
@@ -240,18 +243,62 @@ describe('ConnectionManager remote-access (U0.1)', () => {
       expect(String(errorSpy.mock.calls[0]?.[0])).toContain('64 位 hex')
     })
 
-    it('enabled=false（关态文件留存，设计内合法产出）→ null，不触发 error', () => {
+    it('enabled=false（关态文件留存，设计内合法产出）→ null，不触发 error；console.log 可观测（code-harden P2）', () => {
       const errorSpy = spyConsole('error')
-      const debugSpy = spyConsole('debug')
+      const logSpy = spyConsole('log')
       writeRemoteAccessFile(dataDir, remoteAccessJson(REMOTE_TOKEN_A, false))
       expect(readRemoteAccessToken()).toBeNull()
       expect(errorSpy).not.toHaveBeenCalled()
-      expect(debugSpy).toHaveBeenCalled()
+      // 非 debug 级：关态不入集合是安全相关事实，prod 日志可见（消息内自注明 debug 性质）。
+      expect(logSpy).toHaveBeenCalledTimes(1)
+      expect(String(logSpy.mock.calls[0]?.[0])).toContain('enabled=false')
+    })
+  })
+
+  // ── 热读失败频控（code-harden P2：重连风暴降噪）────────────────────────────
+  // 语义：每进程同因首次失败响亮 error，此后同因降 debug；读取成功重置回「首次响亮」。
+  // 频控状态是模块级单例，测试间隔离靠 afterEach 的 _resetRemoteReadGateForTest()。
+
+  describe('热读失败频控', () => {
+    it('同因连续失败：首次响亮 error，此后降 debug 不再刷 error', () => {
+      const errorSpy = spyConsole('error')
+      const debugSpy = spyConsole('debug')
+      // 文件缺失（read-ENOENT）连续 3 次热读（对应客户端重连风暴的逐握手调用）。
+      expect(readRemoteAccessToken()).toBeNull()
+      expect(readRemoteAccessToken()).toBeNull()
+      expect(readRemoteAccessToken()).toBeNull()
+      expect(errorSpy).toHaveBeenCalledTimes(1)
+      expect(debugSpy).toHaveBeenCalledTimes(2)
+      expect(String(errorSpy.mock.calls[0]?.[0])).toContain('恢复')
+    })
+
+    it('因变化重新响亮：文件缺失(ENOENT) → 坏 JSON，各自首次 error', () => {
+      const errorSpy = spyConsole('error')
+      const debugSpy = spyConsole('debug')
+      expect(readRemoteAccessToken()).toBeNull() // read-ENOENT 响亮
+      writeRemoteAccessFile(dataDir, '{broken json')
+      expect(readRemoteAccessToken()).toBeNull() // bad-json 因变化 → 响亮
+      expect(readRemoteAccessToken()).toBeNull() // bad-json 重复 → 降 debug
+      expect(errorSpy).toHaveBeenCalledTimes(2)
+      expect(String(errorSpy.mock.calls[0]?.[0])).toContain('读取')
+      expect(String(errorSpy.mock.calls[1]?.[0])).toContain('JSON')
+      expect(debugSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('读取成功重置：失败(响亮) → 同因降级 → 成功 → 复发重新响亮', () => {
+      const errorSpy = spyConsole('error')
+      const filePath = join(dataDir, REMOTE_ACCESS_FILENAME)
+      expect(readRemoteAccessToken()).toBeNull() // 首次失败响亮
+      expect(readRemoteAccessToken()).toBeNull() // 同因降 debug
+      writeRemoteAccessFile(dataDir, remoteAccessJson(REMOTE_TOKEN_A))
+      expect(readRemoteAccessToken()).toBe(REMOTE_TOKEN_A) // 成功 → 频控重置
+      fs.rmSync(filePath)
+      expect(readRemoteAccessToken()).toBeNull() // 复发 → 重新响亮（防长期降级掩盖复发）
+      expect(errorSpy).toHaveBeenCalledTimes(2)
     })
   })
 
   // ── D2 配套规格②：集合逐成员 timingSafeEqual，近似 token 一律拒绝 ───────────
-
   describe('集合成员比较（近似 token 拒绝）', () => {
     it.each([
       ['remote token 等长不同值', `${'a'.repeat(63)}b`],

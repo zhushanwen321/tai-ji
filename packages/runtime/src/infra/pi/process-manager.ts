@@ -2,6 +2,8 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter as pathDelimiter, dirname, join } from 'node:path'
 import { execSync } from 'node:child_process'
+// 临时 id 生成走 core 唯一入口（禁直调 crypto.randomUUID，secure context/Node 版本防御）
+import { randomUuid } from '@taiji/core/utils/random-uuid'
 import { RpcClient, type RpcClientOptions } from './rpc-client.js'
 import { getConfigDir } from './pi-paths.js'
 import { assertPiSessionFile } from './session-attach-assert.js'
@@ -281,7 +283,7 @@ export class ProcessManager implements IProcessManager {
     // cwd fallback，p1p4-closure W1；restoreSession 同款），与本入口无关。目录竞态消失时
     // 兜底 homedir，让失败落在 switchSession（pi 报「文件不存在」）而非 spawn ENOENT。
     const spawnCwd = existsSync(dirname(sessionFile)) ? dirname(sessionFile) : homedir()
-    const ephemeralId = `ephemeral-${Date.now()}-${crypto.randomUUID()}`
+    const ephemeralId = `ephemeral-${Date.now()}-${randomUuid()}`
     const client = await this.createSession(ephemeralId, spawnCwd)
     try {
       await raceReadyTimeout(

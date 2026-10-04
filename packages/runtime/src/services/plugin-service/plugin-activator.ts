@@ -17,6 +17,7 @@ import type {
   Disposable,
   WorkerToHostMessage,
 } from './plugin-types.js'
+import { randomUuid } from '@taiji/core/utils/random-uuid'
 import {
   topologicalSort,
   detectCycle,
@@ -65,13 +66,24 @@ export interface PermissionCheckerLike {
 /** Activator 构造函数选项 */
 export interface ActivatorOptions {
   permissionChecker?: PermissionCheckerLike
-  onPermissionRequest?: (payload: { pluginId: string; permissions: PluginPermission[] }) => void
+  onPermissionRequest?: (payload: { pluginId: string; permissions: PluginPermission[]; requestId: string }) => void
   /**
    * 权限审批等待到期取消回调（timeout-plugin-service D3）。生产装配点注入
    * `plugin:permissionRequestExpired` 广播（前端撤回无人应答的审批弹窗）；
-   * 未注入时到期取消只落日志与状态，无广播（单测/内嵌场景）。
+   * requestId 与本次审批 `plugin:permissionRequest` 广播携带的同源（每次审批
+   * 请求新生成）——前端按 requestId 精确撤回，同 pluginId 陈旧 expired 广播
+   * 不误撤后到的新审批弹窗。未注入时到期取消只落日志与状态，无广播（单测/内嵌场景）。
    */
-  onPermissionRequestExpired?: (payload: { pluginId: string }) => void
+  onPermissionRequestExpired?: (payload: { pluginId: string; requestId: string }) => void
+  /**
+   * 权限审批终局回调（remote-use-mobile S5-V3 弹窗自动撤回）。生产装配点注入
+   * `plugin:permissionRequestResolved` 广播：用户在任一连接端批准/拒绝后，其余端
+   * 据此撤回同一审批的弹窗（弹窗全局单例已随 onPermissionRequest 广播到全部连接）。
+   * requestId 与本次审批 `plugin:permissionRequest` 广播携带的同源——前端按它精确
+   * 匹配撤回。仅命中挂起审批时回调（迟到审批对已删 pending miss noop 不回调——
+   * 该请求终局已由 expired 广播覆盖，不重复发终局）。未注入时无广播（单测/内嵌场景）。
+   */
+  onPermissionRequestResolved?: (payload: { pluginId: string; requestId: string; approved: boolean }) => void
   /**
    * 覆盖权限审批超时（ms）。timeout-plugin-service D3 转正：生产装配点经
    * TAIJI_PLUGIN_PERMISSION_TIMEOUT_MS env 接线（合法正数生效，缺失/非法 warn 回落
@@ -92,6 +104,8 @@ interface PendingPermission {
   /** 结局三态：true=批准 / false=显式拒绝或挂起期清理唤醒 / 'timeout'=等待到期（D3 取消语义） */
   resolve: (outcome: boolean | 'timeout') => void
   timer: ReturnType<typeof setTimeout>
+  /** 审批请求唯一标识（与 permissionRequest 广播同源）：resolved 广播按它回传给前端精确撤窗 */
+  requestId: string
 }
 
 export class PluginActivator {
@@ -128,8 +142,9 @@ export class PluginActivator {
 
   /** 权限检查（可选） */
   private permissionChecker?: PermissionCheckerLike
-  private onPermissionRequest?: (payload: { pluginId: string; permissions: PluginPermission[] }) => void
-  private onPermissionRequestExpired?: (payload: { pluginId: string }) => void
+  private onPermissionRequest?: (payload: { pluginId: string; permissions: PluginPermission[]; requestId: string }) => void
+  private onPermissionRequestExpired?: (payload: { pluginId: string; requestId: string }) => void
+  private onPermissionRequestResolved?: (payload: { pluginId: string; requestId: string; approved: boolean }) => void
   private permissionTimeoutMs: number
   /** activate 生命周期握手超时（D4：默认 ACTIVATE_TIMEOUT_MS 30s 不动，构造选项可覆盖） */
   private activateTimeoutMs: number
@@ -143,6 +158,7 @@ export class PluginActivator {
     this.permissionChecker = options?.permissionChecker
     this.onPermissionRequest = options?.onPermissionRequest
     this.onPermissionRequestExpired = options?.onPermissionRequestExpired
+    this.onPermissionRequestResolved = options?.onPermissionRequestResolved
     this.permissionTimeoutMs = options?.permissionTimeoutMs ?? PERMISSION_TIMEOUT_MS
     // 对齐 U7 形态（plugin-host.ts 构造器 loadTimeoutMs ?? LOAD_PLUGIN_TIMEOUT_MS）：
     // 生产装配不传 → 默认 30s 不动；仅测试/重初始化插件场景传覆盖值。
@@ -305,9 +321,15 @@ export class PluginActivator {
     const unapproved = this.permissionChecker.getUnapproved(pluginId, descriptor.permissions)
     if (unapproved.length === 0) return true
 
-    // 先注册 pending promise，再通知外部（避免回调中立即 resolve 时竞态）
-    const approvalPromise = this.waitForPermissionApproval(pluginId)
-    this.onPermissionRequest?.({ pluginId, permissions: unapproved })
+    // 审批请求唯一标识（每次审批新生成）：request 广播与 expired 广播同源携带，
+    // 前端按 requestId 精确撤窗——同 pluginId 前序审批的陈旧 expired 广播不误撤
+    // 后到弹窗（pluginId 只能定位插件，无法区分同插件先后两次审批）。
+    const requestId = randomUuid()
+    // 先注册 pending promise，再通知外部（避免回调中立即 resolve 时竞态）；
+    // requestId 随 pending entry 持有——resolvePermissionApproval 命中时经
+    // onPermissionRequestResolved 广播回同一标识（前端按它精确撤窗）。
+    const approvalPromise = this.waitForPermissionApproval(pluginId, requestId)
+    this.onPermissionRequest?.({ pluginId, permissions: unapproved, requestId })
     // 等待审批结果（true=批准 / false=拒绝或挂起期清理唤醒 / 'timeout'=等待到期）
     const approval = await approvalPromise
     // 等待期间状态被外部改写（deactivate/disable → DEACTIVATING/UNLOADED、
@@ -329,7 +351,7 @@ export class PluginActivator {
         `[plugin-activator] permission approval for ${pluginId} timed out after ${this.permissionTimeoutMs}ms — activation cancelled (plugin left UNLOADED, not rejected). ` +
           `Recovery: re-trigger the activation event to approve again; tune the wait via env TAIJI_PLUGIN_PERMISSION_TIMEOUT_MS (ms).`,
       )
-      this.onPermissionRequestExpired?.({ pluginId })
+      this.onPermissionRequestExpired?.({ pluginId, requestId })
       this.setState(pluginId, 'UNLOADED')
       return false
     }
@@ -483,14 +505,14 @@ export class PluginActivator {
    * 唤醒 / 'timeout'=等待到期——超时与拒绝可区分，上游据此走取消分支（撤窗广播 +
    * UNLOADED 可重触发）而非判拒。
    */
-  private waitForPermissionApproval(pluginId: string): Promise<boolean | 'timeout'> {
+  private waitForPermissionApproval(pluginId: string, requestId: string): Promise<boolean | 'timeout'> {
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.pendingPermissions.delete(pluginId)
         resolve('timeout')
       }, this.permissionTimeoutMs)
 
-      this.pendingPermissions.set(pluginId, { resolve, timer })
+      this.pendingPermissions.set(pluginId, { resolve, timer, requestId })
     })
   }
 
@@ -513,6 +535,10 @@ export class PluginActivator {
 
     clearTimeout(pending.timer)
     this.pendingPermissions.delete(pluginId)
+    // 审批终局广播（remote-use-mobile S5-V3 弹窗自动撤回）：同一 requestId 至多一次
+    // （pending 命中即删）；miss 路径不广播——该请求终局已由 expired 广播覆盖，其余端
+    // 的弹窗已被撤，迟到审批无需再发终局。回调在 resolve 前发出（序上先撤窗后推进激活）。
+    this.onPermissionRequestResolved?.({ pluginId, requestId: pending.requestId, approved })
     pending.resolve(approved)
   }
 

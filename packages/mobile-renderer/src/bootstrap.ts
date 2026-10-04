@@ -42,6 +42,8 @@ export async function bootstrap(): Promise<void> {
   const profile = createConnectionProfilePort({
     storage: adapter.storage,
     host: location.host,
+    // WS scheme 派生源：http: → ws://，https: → wss://（wsUrlFromHost）
+    protocol: location.protocol,
     search: location.search,
     // D4：query token 验身成功后抹地址栏（replaceState 不产生历史条目）；失败路径刻意保留
     // query（刷新重试入口，D4 显式判定）

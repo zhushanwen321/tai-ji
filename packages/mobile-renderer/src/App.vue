@@ -11,8 +11,9 @@
 //   输入草稿，BM5），仅壳顶部插轻量断线条
 // - 首连尚未 connected：轻量「连接中」呈现（无重 UI；D8 裁决③：不复用桌面 runtime 不可用状态条）
 //
-// companion 区挂 ui CompanionBand（简单 dialog 渲染；form/审批类由桌面壳 useExtensionUI 消费面独占）；
-// source/transport 经 companion-bridge provide（回传走 core 既有通路，D7 ask-user 行）。
+// companion 区挂 ui CompanionBand（简单 dialog 渲染）；form/planReview 类请求（C4 门排除面）
+// 由 MobileFormCard 承接（D7 form 行恢复）；source/transport 经 companion-bridge provide
+// （回传走 core 既有通路，D7 ask-user 行）。
 // 权限审批弹窗（D7「手机可批」行）全局挂根：bus 'plugin-permission-request' →
 // companion-bridge 弹窗状态 → PermissionRequestDialog；回传经 provide 的
 // PermissionTransport（plugin.approvePermissions/denyPermissions 既有通路）。
@@ -31,6 +32,7 @@ import {
   mobileDialogRequestSource,
   mobilePermissionTransport,
   mobileUiResponseTransport,
+  useMobileFormRequests,
   useMobilePermissionRequest,
 } from './shell/companion-bridge'
 import { activeSessionId, loadSessions } from './shell/app-runtime'
@@ -39,6 +41,7 @@ import BottomTabBar, { type MobileTab } from './shell/BottomTabBar.vue'
 import SlashBarStub from './shell/stubs/SlashBarStub.vue'
 import TokenInputView from './shell/TokenInputView.vue'
 import MobileComposer from './views/MobileComposer.vue'
+import MobileFormCard from './views/MobileFormCard.vue'
 import MobileMessageStream from './views/MobileMessageStream.vue'
 import MobileSessionList from './views/MobileSessionList.vue'
 import NewTaskSheet from './views/NewTaskSheet.vue'
@@ -51,6 +54,24 @@ provide(PERMISSION_TRANSPORT_KEY, mobilePermissionTransport)
 
 // 权限审批弹窗状态（companion-bridge bus 订阅驱动，全局单例 session 无关）
 const permission = useMobilePermissionRequest()
+
+// form/planReview 类请求（C4 门排除出 CompanionBand 的富交互面，D7 form 行恢复）：
+// 队首请求派生 + 快照对账（companion-bridge form 通道）；作答经 respond 回传
+// extension.ui_response 既有通路。form 请求呈现时替换 composer（桌面 FormOverlay 与
+// composer 互斥同构——输入禁止）；planReview 卡与 composer 并存（桌面 PlanReviewBar 同式）。
+const {
+  currentFormRequest: pendingFormRequest,
+  currentPlanReviewRequest: pendingPlanReview,
+  respond: respondFormRequest,
+} = useMobileFormRequests(activeSessionId)
+
+function onFormSubmit(payload: { requestId: string; result: string }): void {
+  respondFormRequest(payload.requestId, payload.result)
+}
+
+function onFormCancel(payload: { requestId: string }): void {
+  respondFormRequest(payload.requestId, null)
+}
 
 const { t } = useI18n()
 
@@ -139,13 +160,22 @@ watch(isConnected, (connected) => {
             <CompanionBand :session-id="activeSessionId" />
           </section>
 
+          <!-- form/planReview 类请求卡（D7 form 行恢复）：C4 门排除的富交互面；
+               form 请求在场时 composer 隐藏（桌面 overlay 与 composer 互斥同构） -->
+          <MobileFormCard
+            :request="pendingFormRequest"
+            :plan-review="pendingPlanReview"
+            @submit="onFormSubmit"
+            @cancel="onFormCancel"
+          />
+
           <!-- slash（D 命令，composer 命令栏）：隐藏保留占位（D10 stub 处置行） -->
           <div class="mobile-shell__slash shrink-0" data-testid="zone-slash">
             <SlashBarStub />
           </div>
 
-          <!-- 输入条（发送/中断键在拇指区，D7 中断行） -->
-          <MobileComposer :session-id="activeSessionId" />
+          <!-- 输入条（发送/中断键在拇指区，D7 中断行）；form 请求呈现时隐藏（互斥） -->
+          <MobileComposer v-if="!pendingFormRequest" :session-id="activeSessionId" />
         </template>
       </template>
 

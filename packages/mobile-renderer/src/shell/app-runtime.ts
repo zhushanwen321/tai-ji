@@ -18,16 +18,12 @@ import {
   createSessionStore,
   createUseChat,
   createUseSession,
-  submitQueuedEntry,
 } from '@taiji/core'
 import type {
   ChatApiPort,
   SessionApiPort,
   SessionStoreLike,
   UseChatDeps,
-  CompactQueueEntrySnapshot,
-  CompactQueueLike,
-  SubmitQueuedEntryDeps,
 } from '@taiji/core'
 import * as chatApi from '@taiji/core/transport/api/domains/chat'
 import * as sessionApi from '@taiji/core/transport/api/domains/session'
@@ -45,10 +41,19 @@ const chatApiPort: ChatApiPort = {
   // 端口适配：ChatApiPort.send 无 images 概念（web 移动壳无 Cmd+V 富呈现落盘通路），
   // options.clientUuid（session-occupancy D2）经第 4 参透传（对齐桌面 chatApiPort 形态）
   send: (sid, text, options) => chatApi.send(sid, text, undefined, options),
+  // [投递所有权内核 u3b] 统一提交入口（delivery.submit）：lane（direct/steer/queued）由
+  // runtime 内核判定——壳只提交不判定。旧 steer/followUp 客户端封装随 u3b 退役，busy/
+  // compacting 期提交由内核排队承接（原本地 defer 队列 flush 的「首条 send 其余 steer」
+  // 语义由内核 lane 判定同义接管）。
+  submitDelivery: (sid, content, clientUuid, images, segments) =>
+    chatApi.submitDelivery(sid, content, clientUuid, images, segments),
   // `@` 定向消息分流实现在 session 域（session.subagentAction RPC），经端口暴露给发送链路
   subagentAction: (sid, action, params) => sessionApi.subagentAction(sid, action, params),
-  steer: chatApi.steer,
-  followUp: chatApi.followUp,
+  // 撤回已送达消息（session.revokeMessage RPC，消息撤回 D2）：实现在 session 域，
+  // 经端口暴露给 useChat.revokeMessage 的已送达分支（与 subagentAction 的跨域暴露同理）
+  revokeMessage: (sid, targetId) => sessionApi.revokeMessage(sid, targetId),
+  // 撤回在途条目（delivery.cancel RPC，内核 D6 统一入口的在途路由腿）
+  cancelDelivery: (sid, clientUuid) => chatApi.cancelDelivery(sid, clientUuid),
   abort: chatApi.abort,
   compact: chatApi.compact,
   bash: chatApi.bash,
@@ -76,71 +81,14 @@ const sessionApiPort: SessionApiPort = {
 const chatStore = createChatStore()
 const sessionStore = createSessionStore()
 
-/** 移动壳 compact defer 队列（内存最小实现）：入队暂存，flush 经 core submitQueuedEntry
- *  逐条提交（send/steer 等价编排）。移动壳无 compact 触发入口，但桌面端可对同一 session
- *  发起 compact——occupancy 事件会让 useChat 调 enqueue，恒空实现会静默丢消息。 */
-const deferQueue = new Map<string, CompactQueueEntrySnapshot[]>()
+// [投递所有权内核 u3b] 原本地 compact defer 队列（CompactQueueLike 内存实现 + flush 逐条
+// 提交）已随 core defer 队列状态机整体退役：UseChatDeps 不再有 getCompactQueue 成员，
+// useChat 编排不再 enqueue/flush，busy/compacting 期提交统一经 delivery.submit 由 runtime
+// 内核排队（lane 判定 + 逐条投递 + 断连 resync 对账全在内核侧）——壳侧再持队列即无人
+// 触发的死代码，静默积压反成新风险。
 
-function peekQueue(sid: string): ReadonlyArray<CompactQueueEntrySnapshot> {
-  return deferQueue.get(sid) ?? []
-}
-
-let entrySeq = 0
-
-/** 内存版 CompactQueueLike（flush 契约三态：true 全提交 / false busy 留队 / reject 上抛） */
-const compactQueue: CompactQueueLike = {
-  async flush(sid: string): Promise<boolean> {
-    const entries = deferQueue.get(sid)
-    if (!entries || entries.length === 0) return true
-    // 逐条「提交成功才出队」（mobile 简化形态：提交即离队，不等确认帧 confirmDelivery）；
-    // 失败时未提交条目必须留队（core flush 契约：reject 上抛时由实现保证条目仍在队，
-    // core 侧仅 toast，恢复后 occupancy idle 重放）——先 splice 全出队会让中途失败的
-    // 剩余条目静默丢失。通道路由对齐桌面 doFlush（D5.1 队首 send 语义）：本轮已用过
-    // send 或 turn 活跃 → 其余并入当前 run（再发 send 会被 S1 busy 拒且已离队 = 丢）。
-    let sendChannelUsed = false
-    while (entries.length > 0) {
-      const entry = entries[0]
-      const channel: 'send' | 'steer' = (sendChannelUsed || chatStore.isActive(sid)) ? 'steer' : 'send'
-      try {
-        await submitQueuedEntry(sid, entry, channel, submitQueueDeps())
-      } catch (e) {
-        // RPC reject：消息未投出。send 通道回滚 submitQueuedEntry 内乐观挂的 inflight
-        // 占位（挂点先于 RPC，桌面 doFlush 同款回滚；steer 不挂占位无需回滚）；
-        // 本条留队（未 shift），错误上抛由 core toast「发送失败」。
-        if (channel === 'send') chatStore.decrementInflight(sid, 1)
-        throw e
-      }
-      entries.shift()
-      sendChannelUsed = true
-    }
-    return true
-  },
-  enqueue(sid: string, text: string, segments?: Segment[], submitText?: string) {
-    const entry: CompactQueueEntrySnapshot = {
-      id: `mq-${Date.now()}-${entrySeq++}`,
-      text,
-      ...(segments !== undefined ? { segments } : {}),
-      ...(submitText !== undefined ? { submitText } : {}),
-    }
-    const list = deferQueue.get(sid) ?? []
-    list.push(entry)
-    deferQueue.set(sid, list)
-    return { id: entry.id, text: entry.text }
-  },
-  peek: peekQueue,
-  hasPending: (sid: string) => (deferQueue.get(sid)?.length ?? 0) > 0,
-  confirmDelivery: (sid: string, id: string): boolean => {
-    const list = deferQueue.get(sid)
-    if (!list) return false
-    const idx = list.findIndex((e) => e.id === id)
-    if (idx < 0) return false
-    list.splice(idx, 1)
-    return true
-  },
-}
-
-/** 两条提交链路共享的通道 deps 基座（submitQueueDeps / buildUseChatDeps 各自 spread 后补专属字段） */
-type CoreChannelDeps = Pick<UseChatDeps, 'chatApi' | 'writeSegments' | 'toast' | 't' | 'getCompactQueue'>
+/** 提交链路共享的通道 deps 基座（buildUseChatDeps spread 后补专属字段） */
+type CoreChannelDeps = Pick<UseChatDeps, 'chatApi' | 'writeSegments' | 'toast' | 't'>
 
 function coreChannelDeps(): CoreChannelDeps {
   return {
@@ -148,16 +96,6 @@ function coreChannelDeps(): CoreChannelDeps {
     writeSegments: (payload) => sessionApi.writeSegments(payload),
     toast: { error: console.error, warning: console.warn },
     t,
-    getCompactQueue: () => compactQueue,
-  }
-}
-
-/** submitQueuedEntry 所需 deps（惰性构造防状态陈旧） */
-function submitQueueDeps(): SubmitQueuedEntryDeps {
-  return {
-    ...coreChannelDeps(),
-    chat: chatStore,
-    sessionStore: sessionStore as SessionStoreLike,
   }
 }
 

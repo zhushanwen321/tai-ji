@@ -213,6 +213,33 @@ describe('RemoteAccessPage 轮换流', () => {
     const { toasts } = useToast()
     expect(toasts.value.some((toast) => toast.type === 'info' && toast.message.includes('已轮换'))).toBe(true)
   })
+
+  // code-harden 观测项：fullUrl 快速切换（轮换 token）时 QR 多代生成并发在途，
+  // 旧一代慢返回不得覆盖新一代（ConnectionEntrySection 序列号守卫防回归）
+  it('QR 竞态守卫：旧一代生成慢返回不覆盖新一代二维码', async () => {
+    // 第一代（旧 token URL）挂起、第二代（新 token URL）即刻返回——复现乱序返回时序
+    let resolveStale!: (value: string) => void
+    const staleGeneration = new Promise<string>((resolve) => {
+      resolveStale = resolve
+    })
+    qrMocks.toDataURL.mockReturnValueOnce(staleGeneration).mockReturnValueOnce(Promise.resolve('data:image/png;base64,QR-NEW'))
+
+    ipcMocks.getRemoteAccessInfo.mockResolvedValue(ENABLED_INFO)
+    const rotated: RemoteAccessInfo = { ...ENABLED_INFO, token: 'c'.repeat(64) }
+    ipcMocks.rotateRemoteAccessToken.mockResolvedValue(rotated)
+    wrapper = mount(RemoteAccessPage)
+    await flushPromises()
+
+    // 第一代仍在途时轮换 → fullUrl 变化触发第二代生成并落 QR-NEW
+    await wrapper.find('[data-testid="remote-access-rotate"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="remote-access-qr"]').attributes('src')).toBe('data:image/png;base64,QR-NEW')
+
+    // 旧一代此刻才返回：序列号守卫拦截，不得覆盖
+    resolveStale('data:image/png;base64,QR-STALE')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="remote-access-qr"]').attributes('src')).toBe('data:image/png;base64,QR-NEW')
+  })
 })
 
 describe('RemoteAccessPage 复制链接', () => {

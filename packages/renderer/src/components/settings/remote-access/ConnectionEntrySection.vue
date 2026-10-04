@@ -112,16 +112,26 @@ const fullUrl = computed(() =>
 /** 二维码 data URL（生成失败置空渲染占位块，不阻塞链接/复制通路） */
 const qrDataUrl = ref('')
 
+/**
+ * QR 生成序号（竞态守卫）：fullUrl 快速切换（轮换 token / 换地址）时多代生成并发在途，
+ * toDataURL 异步返回乱序——旧一代慢返回不得覆盖新一代结果，每代 await 后比对序号。
+ */
+let qrSeq = 0
+
 watch(fullUrl, async (url) => {
+  const seq = ++qrSeq
   if (!url) {
     qrDataUrl.value = ''
     return
   }
   try {
-    qrDataUrl.value = await QRCode.toDataURL(url, { width: 280, margin: 1 })
+    const dataUrl = await QRCode.toDataURL(url, { width: 280, margin: 1 })
+    if (seq !== qrSeq) return
+    qrDataUrl.value = dataUrl
   } catch (e) {
     // 降级占位不变：生成失败不阻断链接/复制通路，warn 留排障依据（QR 空白时可归因）
     console.warn('[remote-access] QRCode.toDataURL failed:', e)
+    if (seq !== qrSeq) return
     qrDataUrl.value = ''
   }
 }, { immediate: true })

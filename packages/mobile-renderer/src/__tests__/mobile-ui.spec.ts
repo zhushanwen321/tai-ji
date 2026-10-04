@@ -19,7 +19,7 @@ function mountStream(sessionId: string) {
   })
 }
 
-describe('ChatViewDeps provide 完整性（20 必需字段由 MobileMessageStream provide）', () => {
+describe('ChatViewDeps provide 完整性（全部必需字段由 MobileMessageStream provide）', () => {
   beforeEach(() => {
     resetChatModuleStateForTest()
     chatStore.disposeSession(SID)

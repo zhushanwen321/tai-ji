@@ -234,14 +234,15 @@ export class AbortLiveness {
    *   落地时再登记专属 'session.abortStalled' 帧（含 probe/eventWindow/abortRetries 诊断
    *   字段），届时本方法改发新帧即可。
    * - payload：{ sessionId, message }——文案三要素：现象（无法响应停止请求）+ 显式动作
-   *   出口（侧边栏右键「强制退出」= 既有 session.forceQuit RPC）+ 后果（历史完整，重开可恢复）。
+   *   出口（桌面端侧边栏对会话执行「强制退出」= 既有 session.forceQuit RPC；注明移动端
+   *   暂不支持，防移动壳用户按不存在的路径操作）+ 后果（历史完整，重开可恢复）。
    */
   private publishAbortStalledNotice(sessionId: string, errMsg: string): void {
     const stallMsg = {
       type: 'message.error' as const,
       payload: {
         sessionId,
-        message: `会话无法响应停止请求（${errMsg}）：pi 仍在运行，但停止请求迟迟未生效。可等待其自然结束；如需立即终止，请在侧边栏右键该会话选择「强制退出」——会话历史已保存，重新打开即可恢复。`,
+        message: `会话无法响应停止请求（${errMsg}）：pi 仍在运行，但停止请求迟迟未生效。可等待其自然结束；如需立即终止，请在桌面端侧边栏对该会话执行「强制退出」（移动端暂不支持该操作）——会话历史已保存，重新打开即可恢复。`,
       },
     }
     this.deps.publish(sessionId, stallMsg)

@@ -131,7 +131,7 @@ describe('审批等待到期取消语义（activator 层分流）', () => {
 
     expect(activator.getState('timeout-plugin')).toBe('UNLOADED')
     expect(expiredSpy).toHaveBeenCalledTimes(1)
-    expect(expiredSpy).toHaveBeenCalledWith({ pluginId: 'timeout-plugin' })
+    expect(expiredSpy).toHaveBeenCalledWith({ pluginId: 'timeout-plugin', requestId: expect.any(String) })
     const warnText = warnSpy.mock.calls.map((args) => args.join(' ')).join('\n')
     expect(warnText).toContain('timed out after 100ms')
     expect(warnText).toContain('re-trigger the activation event')
@@ -241,7 +241,11 @@ describe('审批等待到期取消语义（activator 层分流）', () => {
     const secondActivation = activator.handleEvent({ type: 'onStartupFinished' }, host)
     await vi.advanceTimersByTimeAsync(0)
     expect(requestSpy).toHaveBeenCalledTimes(2)
-    expect(requestSpy).toHaveBeenLastCalledWith({ pluginId: 'timeout-plugin', permissions: ['plugin.hooks.register'] })
+    expect(requestSpy).toHaveBeenLastCalledWith({
+      pluginId: 'timeout-plugin',
+      permissions: ['plugin.hooks.register'],
+      requestId: expect.any(String),
+    })
     expect(activator.getState('timeout-plugin')).toBe('ACTIVATING')
 
     // 本次批准 → 激活链走完（assignWorker → loadPlugin → activated 回复）→ ACTIVE

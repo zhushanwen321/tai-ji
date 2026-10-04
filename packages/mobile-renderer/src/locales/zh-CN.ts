@@ -56,6 +56,14 @@ export default {
     mermaid: {
       placeholder: '图表在桌面查看',
     },
+    formCard: {
+      planReviewTitle: '计划待审批',
+      approve: '批准执行',
+      dismiss: '搁置',
+      scheduleEchoNote: '按预填草稿确认；如需修改请在桌面操作',
+      scheduleNotReady: '草稿不完整或时刻已过，请在桌面编辑后确认，或取消本次请求',
+      emptyForm: '表单内容为空，仅可取消',
+    },
     pasteImageFallback: '[图片粘贴：需桌面环境]',
   },
 }

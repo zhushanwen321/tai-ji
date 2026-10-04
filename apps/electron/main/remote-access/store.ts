@@ -4,8 +4,9 @@
  * remote-access D2：main 是该文件的唯一写入方（生成/轮换 token、开关状态落盘），
  * runtime 是热读方（每次 WS auth 握手读 remote token 入鉴权集合）——因此本模块的
  * 写入形态（原子写 + 0600 + 字段契约）直接构成 runtime 读侧行为的前置：
- * - 原子写（同目录 `.tmp` 临时文件 + renameSync）：rename 的目标 inode 要么是完整
- *   旧内容要么是完整新内容，runtime 热读永不撕裂；
+ * - 原子写（同目录 `.tmp` 临时文件 + rename 前对 tmp fsync + renameSync）：
+ *   rename 的目标 inode 要么是完整旧内容要么是完整新内容，runtime 热读永不撕裂；
+ *   fsync 保证 rename 落定时刻数据已在盘上（防掉电留下内容为空的「完整」文件）；
  * - 0600：token 等同远程控制凭据，禁 group/other 读取（与 runtime-token 同级）；
  * - 字段契约：@taiji/shared 的 RemoteAccessConfig + REMOTE_ACCESS_FILENAME，
  *   shape 判据（对象 + enabled boolean + token string）复用 shared 的
@@ -15,13 +16,17 @@
  *   不对称是刻意的双侧策略差异，不上收。
  *
  * E10 main 侧：读取时发现文件损坏（非法 JSON / 字段不合法）→ 重建默认配置写回 +
- * 响亮日志（含恢复指引）。轮换是现成的人工恢复通道（重写文件）。
+ * 响亮日志（含恢复指引）；重建写回失败（如 dataDir 只读）→ 降级内存关态继续启动，
+ * 不拒启。读失败 / 重建写回失败两类降级的内存配置 token 均为空串（缺失形态）——
+ * 不产磁盘上不存在的假 token 误导面板；用户回面板重新开启时 setRemoteAccessEnabled
+ * 对缺失形态自愈补发新 token（轮换亦天然自愈），即恢复通道。轮换是现成的人工恢复
+ * 通道（重写文件）。
  *
  * 依赖方向：store → node:crypto/fs/path + @taiji/shared（契约与 getDataDir）。
  * dataDir 参数注入（测试用），缺省 getDataDir() 动态推导——禁硬编码数据目录。
  */
 import { randomBytes } from 'node:crypto'
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { isRemoteAccessConfigShape, REMOTE_ACCESS_FILENAME, REMOTE_TOKEN_HEX64, type RemoteAccessConfig } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
@@ -46,6 +51,20 @@ export function generateRemoteAccessToken(): string {
 /** 默认配置工厂：关态 + 新 token + 当前时刻（缺文件/E10 重建共用）。 */
 function createDefaultRemoteAccessConfig(): RemoteAccessConfig {
   return { enabled: false, token: generateRemoteAccessToken(), createdAt: new Date().toISOString() }
+}
+
+/**
+ * 降级配置工厂：关态 + 空 token（缺失形态）+ 当前时刻。
+ *
+ * 适用磁盘态不可信的降级路径（读失败 / 损坏重建写回失败）：此类降级的内存配置若带
+ * 随机新 token，面板会展示一个磁盘上不存在的 token，误导用户拿它去连（必然被拒）。
+ * 空 token 是显式缺失形态——上游连接入口对空 token 有真值守卫（fullUrl 拼 URL 前
+ * 校验 token，空值渲染空链接 + 空占位二维码），不产出假可用链接；且关态下入口卡
+ * 整体隐藏。恢复通道：用户回面板重新开启时，setRemoteAccessEnabled 对缺失形态
+ * 自愈补发新 token 并落盘，一步回到可用态。
+ */
+function createDegradedRemoteAccessConfig(): RemoteAccessConfig {
+  return { enabled: false, token: '', createdAt: new Date().toISOString() }
 }
 
 /**
@@ -97,10 +116,10 @@ export function readRemoteAccessConfig(dataDir?: string): RemoteAccessConfig {
     }
     const detail = isErrnoException(error) ? `${error.code}: ${error.message}` : String(error)
     console.error(
-      `[remote-access] ${REMOTE_ACCESS_FILENAME} 读取失败（${detail}）— 按缺文件降级为默认关态配置（本进程内生效，原文件未被改动）。` +
-        '恢复：检查文件权限/占用（权限异常时 chmod 600 归位）后重启应用；或回桌面端 设置 → 远程访问面板 重新开启（将重写文件并重启 runtime 生效）',
+      `[remote-access] ${REMOTE_ACCESS_FILENAME} 读取失败（${detail}）— 降级为关态配置（token 空 = 缺失形态，本进程内生效，原文件未被改动）。` +
+        '恢复：检查文件权限/占用（权限异常时 chmod 600 归位）后重启应用；或回桌面端 设置 → 远程访问面板 重新开启（将补发新 token 重写文件并重启 runtime 生效）',
     )
-    return createDefaultRemoteAccessConfig()
+    return createDegradedRemoteAccessConfig()
   }
   return ensureRemoteAccessIntegrity(raw, dataDir)
 }
@@ -111,6 +130,11 @@ export function readRemoteAccessConfig(dataDir?: string): RemoteAccessConfig {
  * JSON.parse 失败或字段不合法（含 token 非 64 位 hex）→ 重建默认配置（关态 + 新 token）
  * 写回文件 + console.error 响亮日志（含恢复指引）。开态下损坏被重建为关态是刻意的
  * fail-closed：宁可让用户回面板重新开启，不可默认带着未知来源的 token 绑 LAN。
+ *
+ * 重建写回失败（如 dataDir 只读）不裸抛拒启：降级为内存关态（token 空 = 缺失形态）
+ * 继续启动（fail-safe——损坏文件保持原样未被改动，runtime 热读到损坏内容走读侧
+ * fail-closed，不形成开放面），响亮日志含恢复指引（检查数据目录权限），重启后重试
+ * 重建或回面板重新开启（缺失形态自愈补发新 token）。
  *
  * @param raw 文件原始内容
  * @param dataDir 可选数据根目录（测试注入）
@@ -128,18 +152,33 @@ function ensureRemoteAccessIntegrity(raw: string, dataDir?: string): RemoteAcces
       '恢复：回桌面端 设置 → 远程访问面板 重新开启（将按新 token 重写文件并重启 runtime 生效）',
   )
   const rebuilt = createDefaultRemoteAccessConfig()
-  writeRemoteAccessConfig(rebuilt, dataDir)
+  try {
+    writeRemoteAccessConfig(rebuilt, dataDir)
+  } catch (error) {
+    const detail = isErrnoException(error) ? `${error.code}: ${error.message}` : String(error)
+    const dir = dataDir ?? getDataDir()
+    console.error(
+      `[remote-access] ${REMOTE_ACCESS_FILENAME} 损坏重建写回失败（${detail}）— 降级为内存关态配置（token 空 = 缺失形态）继续启动，损坏文件未被改动。` +
+        `恢复：检查数据目录写权限（chmod u+w 归位目录 ${dir} 或修正属主）后重启应用重试重建；或回桌面端 设置 → 远程访问面板 重新开启（将补发新 token 重写文件并重启 runtime 生效）`,
+    )
+    return createDegradedRemoteAccessConfig()
+  }
   return rebuilt
 }
 
 /**
- * 原子写配置（同目录 `.tmp` 临时文件 + renameSync）+ 0600。
+ * 原子写配置（同目录 `.tmp` 临时文件 + fsync + renameSync）+ 0600。
  *
  * 原子性：rename 是同目录内的 inode 原子替换，runtime 热读侧要么读到完整旧内容
  * 要么读到完整新内容，无半截 JSON 窗口（D2 配套规格①）。
+ * 掉电半写防护：writeFileSync 返回 ≠ 数据已落盘（page cache 异步刷写），掉电时
+ * rename 可能先于数据刷写落定，留下内容为空的「完整」新文件。rename 前对 `.tmp`
+ * 的 fd 做 fsyncSync 强制刷盘，保证 rename 落定时刻数据已在盘上；fsync 失败
+ * （掉电前兆）即中止写入（fail-fast 裸抛，不 rename 可能半写的文件）。
  * 权限：writeFileSync 的 mode 只在创建文件时生效且受 umask 影响；`.tmp` 每次都是
  * 新建文件（mode 生效），rename 后再 chmodSync 兜底（对齐 process-control
- * issueRuntimeToken 的 writeFileSync + chmodSync 双保险形态）。
+ * issueRuntimeToken 的 writeFileSync + chmodSync 双保险形态）。fsync 段以只读 fd
+ * 打开（fsync 不要求写权限），不改变 0600 语义。
  *
  * @param config 待写配置（调用方保证字段合法；本模块产出的配置均经结构守卫）
  * @param dataDir 可选数据根目录（测试注入）；缺省读 getDataDir()
@@ -150,6 +189,12 @@ export function writeRemoteAccessConfig(config: RemoteAccessConfig, dataDir?: st
   const filePath = join(dir, REMOTE_ACCESS_FILENAME)
   const tmpPath = `${filePath}.tmp`
   writeFileSync(tmpPath, `${JSON.stringify(config, null, CONFIG_JSON_INDENT)}\n`, { mode: REMOTE_ACCESS_FILE_MODE })
+  const fd = openSync(tmpPath, 'r')
+  try {
+    fsyncSync(fd)
+  } finally {
+    closeSync(fd)
+  }
   renameSync(tmpPath, filePath)
   chmodSync(filePath, REMOTE_ACCESS_FILE_MODE)
 }
@@ -178,13 +223,19 @@ export function rotateRemoteAccessToken(dataDir?: string): RemoteAccessConfig {
  * 本函数只落盘——重启 runtime 由调用方（IPC handler）触发。关态后文件留存（D2
  * 配套规格③），再开启复活原 token。
  *
+ * 降级缺失形态自愈：读侧降级产出的配置 token 为空（磁盘态不可信），直接落盘会写出
+ * 开态 + 空 token 的半合法文件（runtime 读侧 fail-closed 全拒，面板却显示已开启）。
+ * 本函数在 token 不合法时补发新 token，保证写出的配置恒经结构守卫，同时构成降级
+ * 后的恢复通道——用户回面板重新开启即获得新 token。
+ *
  * @param enabled 目标开关状态
  * @param dataDir 可选数据根目录（测试注入）
  * @returns 更新后的完整配置
  */
 export function setRemoteAccessEnabled(enabled: boolean, dataDir?: string): RemoteAccessConfig {
   const current = readRemoteAccessConfig(dataDir)
-  const updated: RemoteAccessConfig = { ...current, enabled }
+  const token = REMOTE_TOKEN_HEX64.test(current.token) ? current.token : generateRemoteAccessToken()
+  const updated: RemoteAccessConfig = { ...current, enabled, token }
   writeRemoteAccessConfig(updated, dataDir)
   return updated
 }

@@ -193,6 +193,10 @@ export class PluginService implements IPluginService {
       // 审批弹窗（迟到批准对已删 pending noop 幂等；旧版前端未消费此帧无异常，P-11）。
       onPermissionRequestExpired: (payload) =>
         this.broadcastOrBroker('plugin:permissionRequestExpired', `permExpired_${payload.pluginId}`, payload),
+      // 审批终局（remote-use-mobile S5-V3）：任一端批准/拒绝后广播，其余连接端按
+      // requestId 撤回同一审批的弹窗（activator 保证同一 requestId 至多广播一次）。
+      onPermissionRequestResolved: (payload) =>
+        this.broadcastOrBroker('plugin:permissionRequestResolved', `permResolved_${payload.pluginId}`, payload),
       // permissionTimeoutMs 转正（D3）：env 逃生门接线，undefined（缺失/非法已 warn）
       // 由 Activator 构造函数回落 PERMISSION_TIMEOUT_MS。
       permissionTimeoutMs: readEnvPermissionTimeoutMs(),

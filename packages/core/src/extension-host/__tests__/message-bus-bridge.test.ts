@@ -85,6 +85,48 @@ describe('MessageBusBridge', () => {
       })
     })
 
+    it('permissionRequest payload 带 requestId → 透传真值（不合成；expired 按 requestId 精确撤窗的依据）', () => {
+      const { source, bus } = makeBridge()
+      const { emitted } = spyEmit(bus)
+      source.emit({ type: 'plugin:permissionRequest', payload: { pluginId: 'tasks', permissions: ['fs.write'], requestId: 'req-real-1' } })
+      const e = emitted.find((x) => x.kind === 'plugin-permission-request')
+      expect(e).toMatchObject({
+        kind: 'plugin-permission-request',
+        request: { pluginId: 'tasks', requestId: 'req-real-1' },
+      })
+    })
+
+    it('permissionRequestResolved → plugin-permission-request-resolved（requestId/approved 透传真值）', () => {
+      const { source, bus } = makeBridge()
+      const { emitted } = spyEmit(bus)
+      source.emit({
+        type: 'plugin:permissionRequestResolved',
+        payload: { pluginId: 'tasks', requestId: 'req-real-1', approved: true },
+      })
+      const e = emitted.find((x) => x.kind === 'plugin-permission-request-resolved')
+      expect(e).toBeDefined()
+      expect(e).toMatchObject({
+        kind: 'plugin-permission-request-resolved',
+        resolved: { pluginId: 'tasks', requestId: 'req-real-1', approved: true },
+      })
+    })
+
+    it('permissionRequestResolved payload 缺 requestId（旧版广播）→ requestId 置空串（消费端回退 pluginId 匹配，不合成伪 id）', () => {
+      const { source, bus } = makeBridge()
+      const { emitted } = spyEmit(bus)
+      source.emit({
+        type: 'plugin:permissionRequestResolved',
+        payload: { pluginId: 'tasks', approved: false },
+      })
+      const e = emitted.find((x) => x.kind === 'plugin-permission-request-resolved')
+      expect(e).toMatchObject({
+        kind: 'plugin-permission-request-resolved',
+        resolved: { pluginId: 'tasks', requestId: '', approved: false },
+      })
+      // 空串是消费端回退分支的信号，不能被 error 帧顶掉（ERR2 只对整包坏形状发 error）
+      expect(emitted.some((x) => x.kind === 'error')).toBe(false)
+    })
+
     it('crashed → plugin-crashed', () => {
       const { source, bus } = makeBridge()
       const { emitted } = spyEmit(bus)
@@ -348,6 +390,18 @@ describe('MessageBusBridge', () => {
       const e = emitted.find((x) => x.kind === 'error')
       expect(e).toBeDefined()
       expect(e).toMatchObject({ kind: 'error', source: 'plugin:permissionRequest' })
+    })
+
+    it('permissionRequestResolved payload 缺 pluginId / approved 非 boolean → error（坏形状不宽容）', () => {
+      const { source, bus } = makeBridge()
+      const { emitted } = spyEmit(bus)
+      source.emit({ type: 'plugin:permissionRequestResolved', payload: { requestId: 'r1', approved: true } })
+      source.emit({ type: 'plugin:permissionRequestResolved', payload: { pluginId: 'p', requestId: 'r1', approved: 'yes' } })
+      const errors = emitted.filter((x) => x.kind === 'error')
+      expect(errors).toHaveLength(2)
+      for (const e of errors) {
+        expect(e).toMatchObject({ kind: 'error', source: 'plugin:permissionRequestResolved' })
+      }
     })
 
     it('uiRequest 无 requestId → error', () => {

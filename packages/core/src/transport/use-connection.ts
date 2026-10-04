@@ -65,6 +65,14 @@ function localRuntimeUrl(port: number): string {
   return 'ws://localhost:' + port
 }
 
+/**
+ * mock 形态连接地址（与 localRuntimeUrl 同款收口单点）。URL 只是 platform factory
+ * 的路由标识（'mock:' 前缀判别不再跨模块约定，S4），拼接点收在本函数内。
+ */
+function mockRuntimeUrl(): string {
+  return 'mock://localhost'
+}
+
 // ── 端口契约（§10.2 D-1：renderer 装配点注入实现） ─────────────────
 
 /**
@@ -486,7 +494,7 @@ export function useConnection() {
     // 凭据显式 {auth:'skip'}（S4）：跳过握手，onopen 即 connected——mock 判别不再经
     // 'mock:' URL 前缀跨模块约定（URL 只是 platform factory 的路由标识）。
     if (mode.kind === 'mock') {
-      connectWs('mock://localhost', { auth: 'skip' })
+      connectWs(mockRuntimeUrl(), { auth: 'skip' })
       return
     }
 

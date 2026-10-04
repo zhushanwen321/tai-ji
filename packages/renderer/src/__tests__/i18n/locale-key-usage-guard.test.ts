@@ -146,7 +146,7 @@ describe('locale 反向守卫：panel.* / settings.providerEdit.* / composable.*
         (key) =>
           `  - ${key}\n` +
           '      处置二选一：\n' +
-          '        (1) 删键 —— 在 packages/renderer/src/i18n/locales/{zh-CN,en-US}/ 对应文件里同号删除\n' +
+          '        (1) 删键 —— 在 packages/ui/src/locale/{zh-CN,en-US}/ 对应文件里同号删除\n' +
           '            （locale-sync-check 守卫要求双侧键集合一致，只删一侧会红）；\n' +
           '        (2) 保留 —— 仅当存在动态组装可达时，把 key 加入本文件顶部的 ALLOWLIST 常量，\n' +
           '            并在 reason 里写明「由哪一处、什么形式可达（file:line）」；无动态可达不得豁免。',

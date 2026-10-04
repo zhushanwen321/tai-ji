@@ -21,7 +21,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import * as fs from 'node:fs'
 import { basename, extname, join, resolve, sep } from 'node:path'
-import { toErrorMessage } from '../utils/errors.js'
+import { errorCodeOf, toErrorMessage } from '../utils/errors.js'
 
 const HTTP_OK = 200
 const HTTP_NOT_FOUND = 404
@@ -169,7 +169,10 @@ export function createMobileStaticHandler(distRoot: string): MobileStaticHandler
         content = await fs.promises.readFile(target)
       } catch (error) {
         // 探测与读取之间文件消失（race）或 index.html 缺失（产物被删）→ 404 兜底。
-        console.warn(`[runtime] mobile static: not found: ${pathname}（${toErrorMessage(error)}）`)
+        // 日志只记 fs error code（如 ENOENT）——error.message 形如
+        // "ENOENT: no such file or directory, open '<dist 绝对路径>'"，会泄漏服务端
+        // 绝对路径，违反本模块「日志只记 basename」纪律（code-harden P2）。
+        console.warn(`[runtime] mobile static: not found: ${pathname}（fs error code: ${errorCodeOf(error) ?? 'unknown'}）`)
         res.writeHead(HTTP_NOT_FOUND)
         res.end()
         return

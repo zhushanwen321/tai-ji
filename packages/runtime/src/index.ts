@@ -47,7 +47,7 @@ import type { IProviderCredentialResolver } from './services/ports/provider-cred
 import { PresetService } from './services/preset-service.js'
 import { ModelService } from './services/model-service.js'
 
-import { BASE_PORT, MAX_PORT, mandatoryExtensions, isBtwVirtualId } from '@taiji/shared'
+import { mandatoryExtensions, isBtwVirtualId } from '@taiji/shared'
 import type { ImportSourceKind } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 // startupSweep：启动收编扫描 core 装配单点（挂点见 main() 内 registerRuntimeInstance
@@ -170,58 +170,18 @@ import { spawnDataDirContractViolation } from './utils/runtime-env.js'
 // 回收面之外，进程退出的兜底回收——设计 §3.6 退出钩子落点）。
 import { disposeRuntimeEngineClients } from './services/session/subagent-engine-history.js'
 
-interface ParsedArgs {
-  port: number
-  projectRoot?: string
-  builtinPluginsDir?: string
-  /** 远程访问开态（remote-access D9）：--remote-access flag 存在即开。argv 判据，无 env 通道（ambient 免疫）。 */
-  remoteAccess: boolean
-  /** 移动壳 dist 目录（remote-access D3）：--mobile-dist=<path>；静态托管消费归 U1.1。 */
-  mobileDist?: string
-}
+// 组合根 argv 解析（remote-access D9）：解析逻辑与单测在 utils/runtime-args.ts（本文件
+// import 即执行 main() 不可直测，故提取；`=` 形态取值按首个 = 切分防路径含 = 截断）。
+import { parseRuntimeArgs } from './utils/runtime-args.js'
 
-function parseArgs(): ParsedArgs {
-  // eslint-disable-next-line no-magic-numbers -- argv[0] is node, argv[1] is script
-  const args = process.argv.slice(2)
-  const portOffset = Math.max(0, Math.min(parseInt(process.env.TAIJI_AGENT_PORT_OFFSET ?? '0', 10) || 0, MAX_PORT - BASE_PORT))
-  let port = BASE_PORT + portOffset
-  let projectRoot: string | undefined
-  let builtinPluginsDir: string | undefined
-  let remoteAccess = false
-  let mobileDist: string | undefined
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--port' && i + 1 < args.length) {
-      const parsed = parseInt(args[i + 1], 10)
-      if (isNaN(parsed)) {
-        console.error(`[runtime] invalid --port value: ${args[i + 1]}`)
-        process.exit(1)
-      }
-      port = parsed
-    } else if (args[i].startsWith('--port=')) {
-      const parsed = parseInt(args[i].split('=')[1], 10)
-      if (isNaN(parsed)) {
-        console.error(`[runtime] invalid --port value: ${args[i].split('=')[1]}`)
-        process.exit(1)
-      }
-      port = parsed
-    } else if (args[i] === '--project-root' && i + 1 < args.length) {
-      projectRoot = args[i + 1]
-    } else if (args[i].startsWith('--project-root=')) {
-      projectRoot = args[i].split('=')[1]
-    } else if (args[i] === '--builtin-plugins-dir' && i + 1 < args.length) {
-      builtinPluginsDir = args[i + 1]
-    } else if (args[i].startsWith('--builtin-plugins-dir=')) {
-      builtinPluginsDir = args[i].split('=')[1]
-    } else if (args[i] === '--remote-access') {
-      // 布尔 flag（remote-access D9）：出现即开，supervisor 按配置 enabled 拼参（U1.2）。
-      remoteAccess = true
-    } else if (args[i] === '--mobile-dist' && i + 1 < args.length) {
-      mobileDist = args[i + 1]
-    } else if (args[i].startsWith('--mobile-dist=')) {
-      mobileDist = args[i].split('=')[1]
-    }
+function parseArgs(): ReturnType<typeof parseRuntimeArgs> {
+  try {
+    // eslint-disable-next-line no-magic-numbers -- argv[0] is node, argv[1] is script
+    return parseRuntimeArgs(process.argv.slice(2))
+  } catch (error) {
+    console.error(toErrorMessage(error))
+    process.exit(1)
   }
-  return { port, projectRoot, builtinPluginsDir, remoteAccess, mobileDist }
 }
 
 /**
