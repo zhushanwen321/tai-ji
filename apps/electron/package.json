@@ -1,6 +1,6 @@
 {
   "name": "@taiji/electron",
-  "version": "0.10.11",
+  "version": "0.10.12",
   "private": true,
   "description": "AI Agent Desktop Workstation",
   "author": {
