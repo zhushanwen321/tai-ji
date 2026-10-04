@@ -12,7 +12,10 @@
 import { shallowRef } from 'vue'
 import type { SubagentRecord } from '@taiji/shared'
 
-/** per-session subagent 记录分区（shallowRef + 不可变替换，同 partitioned-session-records 范式） */
+/**
+ * per-session subagent 记录分区（shallowRef + 不可变替换，同 partitioned-session-records 范式）。
+ * @data-owner #8 —— #8 subagent 列表/状态的移动壳消费副本（权威源 / 写读口 / 清理语义见登记表 #8 行）
+ */
 const recordsBySession = shallowRef<Map<string, SubagentRecord[]>>(new Map())
 
 /**

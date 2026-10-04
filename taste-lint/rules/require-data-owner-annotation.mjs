@@ -16,6 +16,13 @@
  * mobile-renderer 模块级缓存族零机器拦截、豁免标记无登记对应行也逃过豁免闭环——扫描面
  * 必须随 GUI 数据消费包拓扑同步，登记表 §5 维护规约 6 承接后续新包）。runtime/ 主进程与
  * extensions/ 不在 GUI 数据层，不扫（runtime 侧声明经检查面 5 反向锁定，见登记表表头 6）。
+ *
+ * 载体（2026-10-04，branch-review round 3 dmg-r3-1）：.ts + .vue 双载体。.vue 下仅普通
+ * <script> 块内的 Program 顶层声明是模块级——vue-eslint-parser 把两个 script 块的顶层
+ * 语句平铺进同一 Program.body（parent 无从区分来源块），而 <script setup> 顶层语句编译
+ * 后进 setup() 函数体（每次实例化执行，无模块级形态），故按 script VElement range 区间
+ * 收窄（getDocumentFragment，no-instance-level-session-state 同机制）；拿不到文档片段
+ * （非 vue parser 路径）时保守放行整文件（宁漏勿拦——正常 vue 配置下恒可达）。
  * 模块级 = Program 顶层声明；defineStore setup 函数体内的 ref/new Map 是
  * store 实例状态（pinia 管理生命周期），不属本规则目标形态，函数作用域声明一律放行。
  *
@@ -60,7 +67,8 @@ export default {
     docs: {
       description:
         'Require @data-owner <registry entry> annotation on module-level cache declarations ' +
-        '(data-source-governance R3; renderer+core since W24, +mobile-renderer+ui since 2026-10)',
+        '(.ts/.vue carriers; plain <script> blocks only in .vue; data-source-governance R3; ' +
+        'renderer+core since W24, +mobile-renderer+ui since 2026-10)',
     },
     schema: [],
     messages: {
@@ -79,7 +87,9 @@ export default {
   create(context) {
     const filename = context.filename ?? context.getFilename?.() ?? ''
 
-    if (!filename.endsWith('.ts')) return {}
+    // 载体放行（2026-10-04，branch-review round 3 dmg-r3-1）：.ts + .vue 双载体
+    // （.vue 的模块级范围按 script 块区间收窄，见 plainScriptRanges 与文件头「载体」段）。
+    if (!/\.(ts|vue)$/.test(filename)) return {}
     // W24 扩围范围：renderer + core 全域（见文件头「范围裁定」）
     if (!SCOPE_RE.test(filename)) return {}
     // 豁免：测试文件（测试构造数据的缓存非生产状态）
@@ -95,6 +105,29 @@ export default {
 
     const sourceCode = context.sourceCode ?? context.getSourceCode?.()
     const registryEntries = loadRegistryEntries()
+
+    // .vue 载体的模块级区间（dmg-r3-1）：null = .ts 载体（Program 顶层即模块级，不限定）；
+    // 数组 = .vue 载体下普通 <script> 块的 range 集合（<script setup> 顶层语句平铺进同一
+    // Program.body 且无模块级形态——两 script 块的 parent 同为 Program，靠块 range 区间
+    // 区分，见文件头「载体」段）。getDocumentFragment 不可达（非 vue parser 路径）时为
+    // 空数组 = 整文件放行（宁漏勿拦；正常 eslint vue 配置下恒可达）。
+    let plainScriptRanges = null
+    if (filename.endsWith('.vue')) {
+      const services = sourceCode.parserServices ?? context.parserServices
+      const fragment = services?.getDocumentFragment?.()
+      plainScriptRanges = fragment
+        ? fragment.children
+            .filter(
+              (el) =>
+                el.type === 'VElement' &&
+                el.name === 'script' &&
+                !el.startTag.attributes.some(
+                  (a) => !a.directive && a.key.name === 'setup',
+                ),
+            )
+            .map((el) => el.range)
+        : []
+    }
 
     /**
      * 检查声明是否带有效 @data-owner 注解（相邻上方注释块或同行尾注释）。
@@ -156,10 +189,18 @@ export default {
       VariableDeclaration(node) {
         // 模块级 = Program 直接子节点（export const 经 ExportNamedDeclaration 包裹一层）
         const parent = node.parent
-        const isModuleLevel =
+        const isTopLevel =
           parent.type === 'Program' ||
           (parent.type === 'ExportNamedDeclaration' &&
             parent.parent.type === 'Program')
+        // .vue 载体：仅普通 <script> 块内的顶层声明计模块级（setup 块语句与普通块平铺进
+        // 同一 Program.body，靠块 range 区间区分；.ts 载体 plainScriptRanges 为 null 不限定）
+        const isModuleLevel =
+          isTopLevel &&
+          (plainScriptRanges === null ||
+            plainScriptRanges.some(
+              ([start, end]) => node.range[0] >= start && node.range[1] <= end,
+            ))
         if (!isModuleLevel) return
         if (!node.declarations.some((d) => isCacheInit(d.init))) return
 

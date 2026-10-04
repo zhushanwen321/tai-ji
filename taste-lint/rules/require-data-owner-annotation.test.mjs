@@ -10,6 +10,7 @@
 import { test, expect } from 'vitest';
 import { Linter } from 'eslint';
 import tseslint from 'typescript-eslint';
+import vueParser from 'vue-eslint-parser';
 import rule from './require-data-owner-annotation.mjs';
 
 const RULE_ID = 'taste/require-data-owner-annotation';
@@ -22,6 +23,25 @@ function lint(code, filename = STORES_FILE) {
     {
       files: ['**/*.ts'],
       languageOptions: { parser: tseslint.parser },
+      plugins: { taste: { rules: { 'require-data-owner-annotation': rule } } },
+      rules: { [RULE_ID]: 'error' },
+    },
+    { filename },
+  );
+}
+
+// .vue 双载体（2026-10-04，dmg-r3-1）：vue-eslint-parser + TS 内嵌 parser，挂载形态对齐
+// taste-lint/vue.mjs 的 .vue 块（parserOptions.parser + extraFileExtensions）
+function lintVue(code, filename = 'packages/mobile-renderer/src/views/probe.vue') {
+  const linter = new Linter();
+  return linter.verify(
+    code,
+    {
+      files: ['**/*.vue'],
+      languageOptions: {
+        parser: vueParser,
+        parserOptions: { parser: tseslint.parser, extraFileExtensions: ['.vue'] },
+      },
       plugins: { taste: { rules: { 'require-data-owner-annotation': rule } } },
       rules: { [RULE_ID]: 'error' },
     },
@@ -145,5 +165,69 @@ test('R3/W24: docstring 块中部的 @data-owner → 归属下方声明（源码
   const messages = lint(
     '/**\n * 模块级缓存说明。\n * @data-owner #2\n */\nconst cache = new Map()\n',
   );
+  expect(messages).toHaveLength(0);
+});
+
+// ── .vue 双载体用例（dmg-r3-1：.ts 短路曾对 .vue 整体放行，SubagentStatusLine 形态零拦截）──
+
+const PLAIN_SCRIPT_SFC = [
+  '<script lang="ts">',
+  '/** 模块级分区说明 */',
+  'const records = shallowRef(new Map())',
+  'export function apply(sid: string): void { records.value.set(sid, []) }',
+  '</script>',
+  '',
+  '<template><p>t</p></template>',
+].join('\n');
+
+test('R3/dmg-r3-1: .vue 普通 <script> 块模块级 shallowRef 无注解 → 报错（双载体生效）', () => {
+  const messages = lintVue(PLAIN_SCRIPT_SFC);
+  expect(messages).toHaveLength(1);
+  expect(messages[0].message).toMatch(/@data-owner/);
+});
+
+test('R3/dmg-r3-1: .vue 普通 <script> 块带 @data-owner #8 → 通过（SubagentStatusLine 真实形态）', () => {
+  const messages = lintVue(
+    PLAIN_SCRIPT_SFC.replace(
+      '/** 模块级分区说明 */',
+      '/**\n * 模块级分区说明。\n * @data-owner #8\n */',
+    ),
+  );
+  expect(messages).toHaveLength(0);
+});
+
+test('R3/dmg-r3-1: .vue <script setup> 顶层 ref 无注解 → 通过（setup 块无模块级形态）', () => {
+  const messages = lintVue(
+    [
+      '<script setup lang="ts">',
+      'const count = ref(0)',
+      '</script>',
+      '',
+      '<template><p>{{ count }}</p></template>',
+    ].join('\n'),
+  );
+  expect(messages).toHaveLength(0);
+});
+
+test('R3/dmg-r3-1: 双 script 块——普通块报错、setup 块不报（Program.body 平铺按块区间收窄）', () => {
+  const messages = lintVue(
+    [
+      '<script lang="ts">',
+      'const modLevel = shallowRef(new Map())',
+      '</script>',
+      '',
+      '<script setup lang="ts">',
+      'const instState = ref(0)',
+      '</script>',
+      '',
+      '<template><p>{{ instState }}</p></template>',
+    ].join('\n'),
+  );
+  expect(messages).toHaveLength(1);
+  expect(messages[0].line).toBe(2); // 只命中普通块第 2 行的 modLevel
+});
+
+test('R3/dmg-r3-1: .vue 范围外包（runtime 非 GUI 数据层）→ 通过（SCOPE_RE 口径不变）', () => {
+  const messages = lintVue(PLAIN_SCRIPT_SFC, 'packages/runtime/src/views/probe.vue');
   expect(messages).toHaveLength(0);
 });
