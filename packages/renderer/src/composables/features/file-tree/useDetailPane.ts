@@ -265,7 +265,10 @@ export function useDetailPane(sessionId: Ref<string | null>) {
     const abs = htmlAbsolutePath()
     if (abs) {
       // 白名单读取通道不可用（mock / 旧 preload 的 IPC reject）→ null → 落既有 cwd 通道
-      const result = await localFileRead(abs).catch(() => null)
+      const result = await localFileRead(abs).catch((e) => {
+        console.warn('[useDetailPane] localFileRead failed, falling back to cwd channel:', e)
+        return null
+      })
       if (token !== loadToken) return
       if (result?.ok) {
         state.value.content = result.content

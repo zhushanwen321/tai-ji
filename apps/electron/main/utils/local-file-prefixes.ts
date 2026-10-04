@@ -37,6 +37,23 @@ import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { isPathInAllowedPrefixes } from '../gateway/input-validators.js'
 import { expandLocalFilePath } from './path.js'
+import type {
+  LocalFileReadReason,
+  LocalFileReadResult,
+  LocalFileServableReason,
+  LocalFileServableResult,
+} from '@taiji/shared'
+
+// local-file 两条 IPC 通道的 payload 类型定义 SSOT = `@taiji/shared`
+// （packages/shared/src/ipc-payloads.ts，C-comm-22 唯一类型源）；此处 re-export 保持
+// gateway/local-file-handlers 与单测的既有消费面（本地探测结果 LocalFileProbeResult
+// 仍在本模块扩展）。
+export type {
+  LocalFileReadReason,
+  LocalFileReadResult,
+  LocalFileServableReason,
+  LocalFileServableResult,
+}
 
 /** computeLocalFilePrefixes 入参（全部环境参数显式注入，便于单测） */
 export interface LocalFilePrefixOptions {
@@ -98,17 +115,6 @@ export function computeLocalFilePrefixes(opts: LocalFilePrefixOptions): string[]
 // 卡片（经 deps probeArtifact?）与抽屉渲染态挂载前经 `localFile:servable` IPC 预检；
 // 协议 handler 与预检必须复用本模块的同一谓词——边缘路径（.. 穿越 / // 冗余斜杠 /
 // %2e2e 编码遍历 / 含 % # 空格的文件名）上两份平行实现必然分叉。
-
-/** servable 预检失败原因（preload/index.d.ts 的 LocalFileServableResult.reason 同枚举） */
-export type LocalFileServableReason = 'not_found' | 'is_dir' | 'out_of_whitelist'
-
-/** servable 预检结果（IPC 出参面） */
-export interface LocalFileServableResult {
-  servable: boolean
-  reason?: LocalFileServableReason
-  /** servable=true 时的文件字节数（卡片显示大小） */
-  size?: number
-}
 
 /** 内部探测结果：比 IPC 出参多带规范化后的绝对路径（协议 handler 的 net.fetch 需要） */
 export interface LocalFileProbeResult extends LocalFileServableResult {
@@ -245,14 +251,6 @@ export function probeLocalFileUrlPathname(
 
 /** 源码态读取上限（与 runtime `file.read` 的 MAX_FILE_SIZE 同语义：1 MiB，超出截断） */
 export const MAX_LOCAL_FILE_READ_BYTES = 1_048_576
-
-/** 读取失败原因：servable 三原因 + 读取本身失败（权限 / 解码等） */
-export type LocalFileReadReason = LocalFileServableReason | 'read_failed'
-
-/** 源码内容读取结果（IPC 出参面） */
-export type LocalFileReadResult =
-  | { ok: true; content: string; truncated: boolean }
-  | { ok: false; reason: LocalFileReadReason }
 
 /** 读取用 fs 切面（缺省 node:fs；单测注入桩） */
 export interface LocalFileReadFs {

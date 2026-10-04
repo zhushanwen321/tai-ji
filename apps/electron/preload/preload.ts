@@ -1,31 +1,11 @@
 // apps/electron/preload/preload.ts
 import { contextBridge, ipcRenderer } from 'electron'
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, LocalFileServableResult, LocalFileReadResult } from '@taiji/shared'
 import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ } from '@taiji/shared'
 
-/**
- * local-file servable 预检结果（chat-html-support §6.9 D9）。
- *
- * 形状与 preload/index.d.ts 的 `LocalFileServableResult` 一致（该文件是 u-foundation
- * 先行落地的类型面；ElectronAPI 与 LocalFileServableChannel 的交集类型在
- * `Window.electronAPI` 上合并，两侧方法形状相同即兼容）。
- */
-export interface LocalFileServableResult {
-  servable: boolean
-  reason?: 'not_found' | 'is_dir' | 'out_of_whitelist'
-  /** servable=true 时的文件字节数 */
-  size?: number
-}
-
-/**
- * local-file 源码内容读取结果（chat-html-support §8.2 S3 源码态）。
- *
- * 形状与 preload/index.d.ts 的 `LocalFileReadResult` 一致（同 LocalFileServableResult 的
- * 先行类型面模式）。
- */
-export type LocalFileReadResult =
-  | { ok: true; content: string; truncated: boolean }
-  | { ok: false; reason: 'not_found' | 'is_dir' | 'out_of_whitelist' | 'read_failed' }
+// local-file 预检 / 源码读取的 payload 类型（LocalFileServableResult / LocalFileReadResult）
+// 定义 SSOT = `packages/shared/src/ipc-payloads.ts`（C-comm-22 唯一类型源），本文件只 import
+// 用于 ElectronAPI 方法签名——从前在此处另立一份副本会与 main / renderer 侧静默漂移。
 
 export interface ElectronAPI {
   /** 监听 runtime 端口事件 */

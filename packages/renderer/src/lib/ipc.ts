@@ -7,7 +7,7 @@
  *
  * 依赖方向：无下游（读全局 window.electronAPI，类型经 declare global 自动可用）
  */
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, LocalFileServableReason, LocalFileServableResult, LocalFileReadReason, LocalFileReadResult } from '@taiji/shared'
 import type { ImageCacheWritePort } from '@taiji/core'
 
 /** preload 注入的 electronAPI（web/mock / node 测试环境为 undefined——后者连
@@ -459,11 +459,14 @@ export function getImageCacheWritePort(): ImageCacheWritePort | undefined {
 
 // ── 产物可服务性预检（chat-html-support §6.9 D9，u3-detailpane）────────
 
-/** localFile:servable 预检结果（类型面落在 preload/index.d.ts 的 LocalFileServableChannel） */
-export interface LocalFileServableResult {
-  servable: boolean
-  reason?: 'not_found' | 'is_dir' | 'out_of_whitelist'
-  size?: number
+// local-file 两条通道的 payload 类型不在此另立副本：定义 SSOT = `@taiji/shared`
+// （packages/shared/src/ipc-payloads.ts，C-comm-22 唯一类型源）；re-export 保持渲染域既有
+// 消费面（useDetailPane 等自 `@/lib/ipc` 取用）。
+export type {
+  LocalFileReadReason,
+  LocalFileReadResult,
+  LocalFileServableReason,
+  LocalFileServableResult,
 }
 
 /**
@@ -477,19 +480,6 @@ export function localFileServable(absPath: string): Promise<LocalFileServableRes
   if (!api?.localFileServable) return Promise.reject(new Error('localFileServable unavailable'))
   return api.localFileServable(absPath)
 }
-
-/**
- * localFile:read 源码内容读取结果（chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」）。
- *
- * 类型面与 preload/index.d.ts 的 `LocalFileReadResult` 同形（主进程谓词与 servable 同源：
- * 白名单成员资格先行短路 → 存在性 → 目录性）。
- */
-export type LocalFileReadResult =
-  | { ok: true; content: string; truncated: boolean }
-  | { ok: false; reason: 'not_found' | 'is_dir' | 'out_of_whitelist' | 'read_failed' }
-
-/** 源码内容读取失败原因（含 servable 三原因 + 读取本身失败） */
-export type LocalFileReadReason = Extract<LocalFileReadResult, { ok: false }>['reason']
 
 /**
  * 读白名单内文件内容（DetailPane 「源码」态）。

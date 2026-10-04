@@ -6,13 +6,15 @@
  *   → servable=true 开 sandbox iframe（local-file:// URL，路径百分号编码 + ?r=n 重导航）
  *   → servable=false / IPC 拒绝 → 「无法预览」占位带原因 + 重试
  *
- * 纯逻辑模块（无 store / 无 electronAPI / 无 i18n 直依赖）：预检函数由调用方注入，
- * 便于单测对着契约驱动全部降级分支（u3 只依赖 u-foundation 的通道类型契约）。
+ * 纯逻辑模块（无 store / 无 electronAPI / 无 i18n 直依赖；类型面经 type-only import 取
+ * `@taiji/shared` 的通道契约，无运行期依赖）：预检函数由调用方注入，便于单测对着契约
+ * 驱动全部降级分支（u3 只依赖 u-foundation 的通道类型契约）。
  *
  * 诚实边界（设计 §6.4）：sandbox opaque origin 下父页面读不到 iframe 文档状态码，
  * 占位触发 = 两层主动检查（挂载前预检 + 刷新时重检）；不承诺区分 403/404 的精确错误 UI。
  */
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
+import type { LocalFileServableReason, LocalFileServableResult } from '@taiji/shared'
 
 /** 渲染态视图模式：rendered=iframe 渲染（默认）/ source=既有 shiki 源码高亮 */
 export type HtmlViewMode = 'rendered' | 'source'
@@ -25,24 +27,19 @@ export type HtmlPreviewStatus = 'idle' | 'pending' | 'ready' | 'unavailable'
  * - not_found / is_dir / out_of_whitelist = 主进程 servable 谓词三原因（§6.9 D9）
  * - service_unavailable = IPC invoke 拒绝（通道不可用，§6.4 子决策③）
  */
-export type HtmlPreviewReason =
-  | 'not_found'
-  | 'is_dir'
-  | 'out_of_whitelist'
-  | 'service_unavailable'
+export type HtmlPreviewReason = LocalFileServableReason | 'service_unavailable'
 
-/** 主进程 servable 谓词返回的不可服务原因（IPC 拒绝不在此列——它是通道层失败） */
-export type HtmlServableReason = 'not_found' | 'is_dir' | 'out_of_whitelist'
-
-/** localFile:servable 预检结果（形状对齐 preload/index.d.ts 的 LocalFileServableResult） */
-export type HtmlServableResult = {
-  servable: boolean
-  reason?: HtmlServableReason
-  size?: number
+// 主进程 servable 谓词入/出参面不在此另立副本：定义 SSOT = `@taiji/shared`
+// （packages/shared/src/ipc-payloads.ts，C-comm-22 唯一类型源；preload 两文件 /
+// renderer lib/ipc / main utils 同源 import）。`Html*` 别名保留既有消费面
+// （单测直接 import 本模块的类型；useDetailPane 注入 lib/ipc.localFileServable）。
+export type {
+  LocalFileServableReason as HtmlServableReason,
+  LocalFileServableResult as HtmlServableResult,
 }
 
 /** 预检函数（渲染态注入 lib/ipc 的真实实现；单测注入桩） */
-export type HtmlProbe = (absPath: string) => Promise<HtmlServableResult>
+export type HtmlProbe = (absPath: string) => Promise<LocalFileServableResult>
 
 /** 不可预览原因 → i18n key（渲染态只消费 key，文案走 i18n 词条） */
 export const HTML_PREVIEW_REASON_KEYS: Record<HtmlPreviewReason, string> = {

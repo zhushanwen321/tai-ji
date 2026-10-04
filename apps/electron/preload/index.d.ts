@@ -4,28 +4,31 @@
  * 单一来源：直接 re-export preload.ts 的 ElectronAPI interface，避免手工副本漂移。
  * 改 ElectronAPI 只需改 preload.ts，此处自动跟随。
  *
- * 例外：`localFile:servable` 预检通道的类型面在本文件先行落地（chat-html-support
- * §7「桥接」行——本文件是 u-foundation 共享契约根，u3-detailpane / u4-card 并行开发时
- * 即需可见）；实现与 ElectronAPI 成员由 u2-infra 补入 preload.ts，两侧形状一致
- * （见下方 LocalFileServableChannel 注释）。
+ * 例外：`localFile:servable` / `localFile:read` 两条通道的**方法面**（LocalFileServableChannel /
+ * LocalFileReadChannel，及全局 Window.electronAPI 交集）声明在本文件；其 **payload 类型**
+ * （LocalFileServableResult / LocalFileReadResult 族）不在此另立副本——定义 SSOT =
+ * `packages/shared/src/ipc-payloads.ts`（C-comm-22 唯一类型源），preload.ts / renderer
+ * lib/ipc / main utils 同源 import，本文件 import 后 re-export。
  *
  * 注意：renderer 不能 ES import preload（preload 是 Electron 构建产物，通过 contextBridge
  * 挂全局）。本文件以 type-only re-export 提供类型给 renderer 的 tsconfig（include 项）。
  */
+import type {
+  LocalFileReadReason,
+  LocalFileReadResult,
+  LocalFileServableReason,
+  LocalFileServableResult,
+} from '@taiji/shared'
+
 export type { ElectronAPI } from './preload'
 
-/**
- * local-file servable 预检结果（chat-html-support §6.9 D9 / §6.4 D4「同一谓词」）。
- *
- * 谓词 = 白名单成员资格（先行短路）→ 存在性 → 目录性，与 local-file 协议 handler 复用
- * 同一模块函数：
- * - `servable: true`  → `size` 附文件字节数（HtmlPreviewCard 显示文件名与大小）
- * - `servable: false` → `reason` ∈ `not_found` / `is_dir` / `out_of_whitelist`（降级原因）
- */
-export interface LocalFileServableResult {
-  servable: boolean
-  reason?: 'not_found' | 'is_dir' | 'out_of_whitelist'
-  size?: number
+// local-file 两条通道的 payload 类型保持既有可见性（re-export），定义 SSOT 在
+// `packages/shared/src/ipc-payloads.ts`——不在此另立副本。
+export type {
+  LocalFileReadReason,
+  LocalFileReadResult,
+  LocalFileServableReason,
+  LocalFileServableResult,
 }
 
 /**
@@ -42,17 +45,6 @@ export interface LocalFileServableChannel {
    */
   localFileServable(absPath: string): Promise<LocalFileServableResult>
 }
-
-/**
- * local-file 源码内容读取结果（chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」）。
- *
- * 谓词与 `LocalFileServableResult` / 协议 handler 同一白名单模块：
- * - `ok: true`  → `content` + `truncated`（超 1 MiB 截断，与 runtime `file.read` 同语义）
- * - `ok: false` → `reason` ∈ servable 三原因 + `read_failed`（权限 / 读取失败）
- */
-export type LocalFileReadResult =
-  | { ok: true; content: string; truncated: boolean }
-  | { ok: false; reason: 'not_found' | 'is_dir' | 'out_of_whitelist' | 'read_failed' }
 
 /**
  * 源码内容读取通道的 electronAPI 方法面（IPC 通道名 `localFile:read`）。

@@ -1,5 +1,5 @@
 /**
- * Electron IPC payload 类型 SSOT（renderer → main 方向，与 ipc-channels.ts 通道名配对）。
+ * Electron IPC payload 类型 SSOT（与 ipc-channels.ts 通道名配对，请求与返回两侧）。
  *
  * 现状归属：既有 IPC payload 类型按领域散落（update.ts 的 UpdateErrorPayload、panel.ts
  * 的 WindowState 等）；renderer-log 是跨领域诊断通道，无既有领域文件可归，独立成文件
@@ -197,3 +197,47 @@ export type DiagnosticExportBundleResult =
   }
   | { status: 'canceled' }
   | { status: 'error'; error: DiagnosticExportError }
+
+// ── local-file 预检与源码读取（LOCAL_FILE_SERVABLE / LOCAL_FILE_READ invoke 通道）
+//    [chat-html-support §6.9 D9 / §6.4 D4 / §8.2 S3] ─────────────────────────────
+
+/**
+ * local-file servable 预检失败原因（§6.4 D4 子决策①检查顺序的谓词三轴）：
+ * - `out_of_whitelist`：白名单成员资格不通过（先行短路——不触文件系统）
+ * - `not_found`：白名单内但文件不存在
+ * - `is_dir`：白名单内但目标是目录（不可作文件服务）
+ */
+export type LocalFileServableReason = 'not_found' | 'is_dir' | 'out_of_whitelist'
+
+/**
+ * `localFile:servable` 预检结果（卡片 `probeArtifact?` 与抽屉渲染态挂载前准入检查，
+ * §6.9 D9 入/出参面 SSOT）。
+ *
+ * 谓词 = 白名单成员资格（先行短路）→ 存在性 → 目录性，与 local-file 协议 handler
+ * 复用主进程同一模块函数（越界路径不触 fs，不构成存在性探测通道）：
+ * - `servable: true`  → `size` 附文件字节数（HtmlPreviewCard 显示文件名与大小）
+ * - `servable: false` → `reason` 指明降级原因
+ */
+export interface LocalFileServableResult {
+  servable: boolean
+  reason?: LocalFileServableReason
+  /** servable=true 时的文件字节数 */
+  size?: number
+}
+
+/**
+ * `localFile:read` 源码内容读取失败原因：servable 三原因 + 读取本身失败
+ * （权限 / 解码等，§8.2 S3 源码态）。
+ */
+export type LocalFileReadReason = LocalFileServableReason | 'read_failed'
+
+/**
+ * `localFile:read` 源码内容读取结果（§8.2 S3「切换『源码』看到 shiki 高亮」）。
+ *
+ * 谓词与 `LocalFileServableResult` / 协议 handler 同一白名单模块（越界不触 fs）：
+ * - `ok: true`  → `content` + `truncated`（超 1 MiB 截断，与 runtime `file.read` 同语义）
+ * - `ok: false` → `reason` 指明失败原因
+ */
+export type LocalFileReadResult =
+  | { ok: true; content: string; truncated: boolean }
+  | { ok: false; reason: LocalFileReadReason }
