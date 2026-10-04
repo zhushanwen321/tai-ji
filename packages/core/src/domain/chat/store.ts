@@ -5,7 +5,7 @@
  * 本文件仅保留与代码行为直接绑定的短契约注释。
  */
 import { computed, onScopeDispose, ref, shallowRef, type ComputedRef, type ShallowRef } from 'vue'
-import { commitMessages, truncateMessagesFrom, prependHistory as prependHistoryMut } from './mutations'
+import { commitMessages, truncateMessagesFrom, prependHistory as prependHistoryMut, createAssistantErrorMessage } from './mutations'
 import { truncateToolOutputBatch, truncateToolOutputBatchCached } from './truncate-tool-output'
 import { dispatchMessageEvent } from './effects/registry'
 import {
@@ -1063,13 +1063,8 @@ export function createChatStore(options: ChatStoreOptions = {}) {
       finalizeSession(sessionId, 'error', errorText)
       return
     }
-    // 无 streaming entity → 直接追加 error 消息。
-    // [M2 形态统一] 错误文本只住 error 字段，content 恒为崩溃前正文（此处无正文=空）——
-    // 渲染端只有追加形态一种 error 形态（正文原色 + error 独立 danger 行）。
-    commitMessages(messages, sessionId, [
-      ...prev,
-      { id: `a-${randomUuid()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: Date.now() },
-    ])
+    // 无 streaming entity → 直接追加 error 消息（条目构造单源 createAssistantErrorMessage）。
+    commitMessages(messages, sessionId, [...prev, createAssistantErrorMessage(errorText)])
     clearPendingSend(sessionId)
   }
 

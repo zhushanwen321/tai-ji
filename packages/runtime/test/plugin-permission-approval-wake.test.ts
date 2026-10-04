@@ -10,6 +10,9 @@
  *  a. approvePermissions 唤醒挂起中的激活 → 毫秒级完成（fake timers 下不推进
  *     30s 即断言 ACTIVE），且唤醒的是同一次激活（assignWorker 恰好一次）
  *  b. revokePermissions 拒绝唤醒 → 走既有失败语义（UNLOADED、不分配 Worker）
+ *  e. denyPermissions（M7 语义分界）= 拒绝本次申请：descriptor.permissions 与
+ *     granted 授予集不变、不调 save、不回收已授权限；有 pending 时唤醒为拒绝；
+ *     无 pending 时幂等 no-op
  *  c. 挂起期间 uninstall / toggle(false) → pending 被清理、激活作废、无复活
  *  d. 批准唤醒与停用的竞态 → 醒来的激活作废，已停用插件不复活
  *
@@ -178,6 +181,50 @@ describe('权限审批唤醒链路（approve / revoke / 挂起期清理）', () 
     expect(activator.getState('wake-plugin')).toBe('UNLOADED')
     expect((host.assignWorker as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0)
     await activation
+  })
+
+  // ── e. denyPermissions：拒绝本次申请，不回收已授权限（M7 语义分界）──
+  it('e: denyPermissions → descriptor.permissions 与 granted 授予集不变、不调 save（不回收已授权限）', async () => {
+    const { permissionChecker: checker } = service as unknown as {
+      permissionChecker: import('../src/services/plugin-service/plugin-permission.js').PluginPermissionChecker
+    }
+    // 先授予（模拟既有已授权限），再拒绝新申请——已授权限必须原样保留
+    checker.grant('wake-plugin', ['plugin.hooks.register'])
+    const saveSpy = vi.spyOn(checker, 'save').mockResolvedValue()
+    const permissionsBefore = [...descriptor.permissions]
+
+    await service.denyPermissions('wake-plugin')
+
+    expect(descriptor.permissions).toEqual(permissionsBefore)
+    const granted = (checker as unknown as { granted: Map<string, Set<string>> }).granted.get('wake-plugin')
+    expect(granted?.size).toBeGreaterThan(0)
+    expect(saveSpy).not.toHaveBeenCalled()
+    // 无 pending：不触发激活，状态不受影响
+    expect(activator.getState('wake-plugin')).toBe('UNLOADED')
+  })
+
+  it('e2: 有 pending 等待审批时 denyPermissions → resolvePermissionApproval(false) 被调，激活走失败语义', async () => {
+    const { activation } = await startPendingActivation()
+    const host = internals(service).host
+    const resolveSpy = vi.spyOn(activator, 'resolvePermissionApproval')
+
+    await service.denyPermissions('wake-plugin')
+
+    expect(resolveSpy).toHaveBeenCalledWith('wake-plugin', false)
+    expect(activator.getState('wake-plugin')).toBe('UNLOADED')
+    expect((host.assignWorker as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0)
+    await activation
+  })
+
+  it('e3: 无 pending 时 denyPermissions → 幂等 no-op（状态不变、不分配 Worker、不抛）', async () => {
+    const host = internals(service).host
+    const resolveSpy = vi.spyOn(activator, 'resolvePermissionApproval')
+
+    await expect(service.denyPermissions('wake-plugin')).resolves.toBeUndefined()
+
+    expect(resolveSpy).toHaveBeenCalledWith('wake-plugin', false)
+    expect(activator.getState('wake-plugin')).toBe('UNLOADED')
+    expect((host.assignWorker as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0)
   })
 
   // ── c1. 挂起期间 uninstall：pending 清理 + 无幽灵状态复活 ────────

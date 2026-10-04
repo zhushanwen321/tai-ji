@@ -39,6 +39,7 @@
 // 双壳（桌面 renderer / 移动壳）import 本模块即构造性获得公式样式，消灭「库 CSS 住壳层」
 // 的隐式组装义务。
 import 'katex/dist/katex.min.css'
+import { bytesToBase64 } from '../../lib/base64'
 import katex from 'katex'
 import MarkdownIt from 'markdown-it'
 import markdownItKatex from 'markdown-it-katex'
@@ -129,19 +130,11 @@ const textDecoder = new TextDecoder()
 
 /**
  * UTF-8 安全 base64 编码（兼顾含中文/emoji 的代码与 mermaid 源码）。
- * TextEncoder 产出 UTF-8 字节 → 分块 String.fromCharCode 批量转 binary 字符串 →
- * 单次 btoa。分块范式同 useImageAttachment.fileBytesToBase64（0x8000 每块：低于
- * Function.prototype.apply 参数个数下限（Safari 65536），防爆栈/RangeError）；
- * base64 以 3 字节为一组，必须整体编码后单次 btoa，不可逐块 btoa（块长非 3 倍数会错位）。
+ * TextEncoder 产出 UTF-8 字节后委托 lib 单源 bytesToBase64（分块/单次 btoa 的
+ * 必要性说明见该函数注释）。
  */
 function encodeBase64(text: string): string {
-  const bytes = textEncoder.encode(text)
-  let binary = ''
-  const CHUNK = 0x8000
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)))
-  }
-  return btoa(binary)
+  return bytesToBase64(textEncoder.encode(text))
 }
 
 /**

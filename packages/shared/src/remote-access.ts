@@ -34,3 +34,11 @@ export interface RemoteAccessConfig {
   /** 创建时间，ISO 8601 格式字符串 */
   createdAt: string
 }
+
+/**
+ * remote token 契约形态判据：64 位 hex 小写（32 字节随机值的 hex 编码）。
+ * main 写侧守卫（isValidRemoteAccessConfig，从严校验）与 runtime 读侧
+ * （parseRemoteAccessToken 的 token 分支）import 同一正则——判据分叉会造成
+ * 「写侧放行、读侧拒绝」的静默通道失效，故 SSOT 上收至此，禁止本地重抄。
+ */
+export const REMOTE_TOKEN_HEX64 = /^[0-9a-f]{64}$/

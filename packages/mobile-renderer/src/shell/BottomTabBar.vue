@@ -1,7 +1,6 @@
 <script setup lang="ts">
 // BottomTabBar —— 移动壳底部导航（壳 chrome，两 tab：Sessions/Chat；BottomTabBarStub 真实化）。
 // v-model 驱动（App 持有 activeTab 状态；规范：独立数据源状态驱动切换）。
-import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessageSquare, SquareStack } from '@lucide/vue'
 import type { Component } from 'vue'
@@ -19,10 +18,8 @@ const TABS: ReadonlyArray<{ id: MobileTab; icon: Component; labelKey: string }> 
   { id: 'chat', icon: MessageSquare, labelKey: 'mobile.tabs.chat' },
 ]
 
-const current = computed(() => props.modelValue)
-
 function onSelect(tab: MobileTab): void {
-  if (tab !== current.value) emit('update:modelValue', tab)
+  if (tab !== props.modelValue) emit('update:modelValue', tab)
 }
 </script>
 
@@ -39,8 +36,8 @@ function onSelect(tab: MobileTab): void {
       role="tab"
       tabindex="0"
       class="flex flex-1 cursor-pointer flex-col items-center gap-0.5 py-2 outline-none transition-colors"
-      :class="tab.id === current ? 'text-accent' : 'text-neutral-dim'"
-      :aria-selected="tab.id === current"
+      :class="tab.id === modelValue ? 'text-accent' : 'text-neutral-dim'"
+      :aria-selected="tab.id === modelValue"
       :data-testid="`mobile-tab-${tab.id}`"
       @click="onSelect(tab.id)"
       @keydown.enter="onSelect(tab.id)"

@@ -1,10 +1,12 @@
 /**
- * Plugin 域 —— 订阅（onPlugins）+ 权限审批命令（approvePermissions/revokePermissions）。
+ * Plugin 域 —— 订阅（onPlugins）+ 权限审批命令（approvePermissions/revokePermissions/denyPermissions）。
  *
- * approvePermissions/revokePermissions 是 permissionRequest 闭环的回传通道：
+ * approvePermissions/denyPermissions 是 permissionRequest 闭环的回传通道：
  * runtime 广播 plugin:permissionRequest → bridge → Dialog → 用户操作 → 本域命令
- * → runtime plugin-service.approvePermissions/revokePermissions → reply config.plugins。
- * 命令名对齐 runtime transport/plugin-message-handler.ts。
+ * → runtime plugin-service.approvePermissions/denyPermissions → reply config.plugins。
+ * denyPermissions=拒绝本次申请（不回收已授权限）；revokePermissions=撤销全部已授权限
+ * （基线协议面保留，审批弹窗的拒绝按钮不走它）。命令名对齐 runtime
+ * transport/plugin-message-handler.ts。
  *
  * 依赖方向：events（订阅）+ command（类型化请求/动作原语）。
  */
@@ -30,4 +32,10 @@ export async function approvePermissions(pluginId: string, permissions: string[]
 export async function revokePermissions(pluginId: string): Promise<void> {
   // 同 approvePermissions：void 丢弃 reply 返回值
   void await command('plugin.revokePermissions', { pluginId }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 拒绝插件本次权限申请（不回收已授权限）。reply config.plugins（调用方忽略）。 */
+export async function denyPermissions(pluginId: string): Promise<void> {
+  // 同 approvePermissions：void 丢弃 reply 返回值
+  void await command('plugin.denyPermissions', { pluginId }, RPC_BACKSTOP_TIMEOUT_MS)
 }

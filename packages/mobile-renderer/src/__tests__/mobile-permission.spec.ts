@@ -2,10 +2,10 @@
 //
 // 链路锁定：bus 'plugin-permission-request'（companion-bridge 订阅）→ App 内
 // PermissionRequestDialog 渲染 → 勾选/批准/拒绝 → transport RPC
-// （plugin.approvePermissions / plugin.revokePermissions）→ pending=false 收口。
+// （plugin.approvePermissions / plugin.denyPermissions）→ pending/error 收口。
 //
 // mock 策略：
-// - plugin 域（approvePermissions/revokePermissions）模块级 vi.mock 隔离 WS（断言回传参数）；
+// - plugin 域（approvePermissions/denyPermissions）模块级 vi.mock 隔离 WS（断言回传参数）；
 // - Dialog 家族 stub 内联渲染（reka-ui DialogContent 在 happy-dom 下 Teleport 到 body 且
 //   时序不稳定——ui PermissionRequestDialog.test.ts 同款先例），stub 尊重 open prop。
 //
@@ -24,11 +24,11 @@ import { mobileExtensionBus, useMobilePermissionRequest } from '../shell/compani
 import { shellConnectionState } from '../bootstrap'
 
 // vi.hoisted：mock 工厂被 hoist 到 import 前，工厂内引用的变量须经 vi.hoisted 创建
-const { mockApprove, mockRevoke } = vi.hoisted(() => ({ mockApprove: vi.fn(), mockRevoke: vi.fn() }))
+const { mockApprove, mockDeny } = vi.hoisted(() => ({ mockApprove: vi.fn(), mockDeny: vi.fn() }))
 
 vi.mock('@taiji/core/transport/api/domains/plugin', () => ({
   approvePermissions: mockApprove,
-  revokePermissions: mockRevoke,
+  denyPermissions: mockDeny,
 }))
 
 // Dialog 家族 stub：内联渲染 slot，尊重 open（pending=false 时不渲染内容）
@@ -58,12 +58,13 @@ describe('移动壳权限审批链（D7 手机可批）', () => {
 
   beforeEach(() => {
     mockApprove.mockReset().mockResolvedValue(undefined)
-    mockRevoke.mockReset().mockResolvedValue(undefined)
-    // 模块级弹窗单例复位（跨用例隔离；pending 残留会让后续用例误判弹窗来源）
+    mockDeny.mockReset().mockResolvedValue(undefined)
+    // 模块级弹窗单例复位（跨用例隔离；pending/error 残留会让后续用例误判弹窗来源）
     const perm = useMobilePermissionRequest()
     perm.pending = false
     perm.pluginId = ''
     perm.permissions = []
+    perm.error = false
     shellConnectionState.value = 'connecting'
   })
 
@@ -95,13 +96,13 @@ describe('移动壳权限审批链（D7 手机可批）', () => {
 
     expect(mockApprove).toHaveBeenCalledTimes(1)
     expect(mockApprove).toHaveBeenCalledWith('p1', ['fs.read'])
-    expect(mockRevoke).not.toHaveBeenCalled()
+    expect(mockDeny).not.toHaveBeenCalled()
     // 回传成功 → pending=false → 弹窗关闭（状态收口）
     expect(useMobilePermissionRequest().pending).toBe(false)
     expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(false)
   })
 
-  it('拒绝 → transport.revoke 回传 → 弹窗关闭', async () => {
+  it('拒绝 → transport.deny 回传（denyPermissions 命令，拒绝本次申请）→ 弹窗关闭', async () => {
     wrapper = mountApp()
     emitPermissionRequest('p2', ['fs.write'])
     await nextTick()
@@ -109,11 +110,46 @@ describe('移动壳权限审批链（D7 手机可批）', () => {
     await wrapper.find('[data-testid="permission-reject"]').trigger('click')
     await flushPromises()
 
-    expect(mockRevoke).toHaveBeenCalledTimes(1)
-    expect(mockRevoke).toHaveBeenCalledWith('p2')
+    expect(mockDeny).toHaveBeenCalledTimes(1)
+    expect(mockDeny).toHaveBeenCalledWith('p2')
     expect(mockApprove).not.toHaveBeenCalled()
     expect(useMobilePermissionRequest().pending).toBe(false)
+    expect(useMobilePermissionRequest().error).toBe(false)
     expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(false)
+  })
+
+  it('拒绝 RPC 失败（BM3 假成功红线）：弹窗保持打开 + 错误行显形，重试成功后收口', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      wrapper = mountApp()
+      emitPermissionRequest('p2', ['fs.write'])
+      await nextTick()
+
+      // 第一次拒绝：RPC reject → pending 保持 true（弹窗不关）+ error=true（错误行渲染）
+      mockDeny.mockRejectedValueOnce(new Error('rpc boom'))
+      await wrapper.find('[data-testid="permission-reject"]').trigger('click')
+      await flushPromises()
+
+      expect(mockDeny).toHaveBeenCalledTimes(1)
+      expect(useMobilePermissionRequest().pending).toBe(true)
+      expect(useMobilePermissionRequest().error).toBe(true)
+      expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(true)
+      const errorLine = wrapper.find('[data-testid="permission-dialog-error"]')
+      expect(errorLine.exists()).toBe(true)
+      expect(errorLine.attributes('role')).toBe('alert')
+
+      // 重试成功 → 正常收口（pending=false + error=false + 弹窗关闭）
+      mockDeny.mockResolvedValueOnce(undefined)
+      await wrapper.find('[data-testid="permission-reject"]').trigger('click')
+      await flushPromises()
+
+      expect(mockDeny).toHaveBeenCalledTimes(2)
+      expect(useMobilePermissionRequest().pending).toBe(false)
+      expect(useMobilePermissionRequest().error).toBe(false)
+      expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(false)
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 
   it('无 sessionId 事件照常弹出（协议事实：permissionRequest 广播无 sessionId，审批全局单例）', async () => {

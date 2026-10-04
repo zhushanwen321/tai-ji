@@ -40,7 +40,7 @@ installRendererErrorReporting(app)
 // app.provide 注入 ui 组件数据源。须在 mount 前（provide 全局生效）。
 initExtensionHostBridge(app)
 // permissionRequest 闭环（audit §12.1）：订阅 bus plugin-permission-request → 驱动 Dialog →
-// app.provide 真实 PermissionTransport（转发 plugin.approvePermissions/revokePermissions WS 命令）。
+// app.provide 真实 PermissionTransport（转发 plugin.approvePermissions/denyPermissions WS 命令）。
 // 须在 mount 前 provide（Dialog 经 inject 取 transport）；复用 ExtensionHost 同一 bus 单例。
 initPermissionRequest(app, getExtensionBus())
 app.use(createPinia())

@@ -40,7 +40,7 @@ function statusLabel(status: SessionStatus): string {
   return t(`mobile.sessionList.status.${status}`)
 }
 
-/** 时间数字位数（HH:mm 两位补零） */
+/** 时间数字位数（HH:mm 两位补零；taste-lint no-magic-numbers ignore 仅 [0,1,-1]，2 须具名） */
 const TIME_PAD_WIDTH = 2
 
 /** 列表时间：今天显 HH:mm，更早显 M/D（无新增文案 key） */

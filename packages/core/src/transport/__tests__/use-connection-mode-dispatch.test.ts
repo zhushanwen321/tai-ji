@@ -217,11 +217,14 @@ describe('远程 profile 分支（U0.2 骨架，U1.3 移动壳消费点）', () 
     expect(connect).toHaveBeenCalledWith('ws://192.168.1.5:3210', 'remote-token')
   })
 
-  it('TC-M9: profile resolve 无 token → connect(url, undefined)（无凭据不阻断发起）', async () => {
+  it('TC-M9: profile resolve 无 token → connect(url, "")（空串强制走 auth 握手，D8 恢复链可达）', async () => {
+    // 不传 undefined：ws-client 的 undefined 语义是「保留上次 token / 无 token 模式」，
+    // 首连会被判为无 auth 模式跳过握手 → runtime fail-closed 拒绝永远不可达（假 connected
+    // 超时循环，token 输入视图不可达）。空串使 runtime 回 bad_token → onAuthRejected 闭合。
     const { ports, profile } = makePorts({ withIpc: false, withProfile: true, profileToken: null })
     await initFresh(ports)
     expect(profile?.resolve).toHaveBeenCalledTimes(1)
-    expect(connect).toHaveBeenCalledWith('ws://192.168.1.5:3210', undefined)
+    expect(connect).toHaveBeenCalledWith('ws://192.168.1.5:3210', '')
   })
 
   it('TC-M10: profile 未注入 → init 显式失败（含恢复指引）且不发起任何连接', async () => {

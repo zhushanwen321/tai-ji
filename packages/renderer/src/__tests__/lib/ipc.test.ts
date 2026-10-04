@@ -232,23 +232,23 @@ describe('lib/ipc revealInFolder 封装（原 ipc-reveal-in-folder.test.ts 并�
 })
 
 describe('lib/ipc remote-access 封装（remote-use-mobile U1.5）', () => {
-  it('无 preload（electronAPI 不存在）→ 三方法返回关态空态，不 throw', async () => {
+  it('无 preload（electronAPI 不存在）→ 读返回关态空态，写操作拒绝（CM3：写不假成功）', async () => {
     // 不设置 window.electronAPI（模拟 web/mock 环境）
     const { getRemoteAccessInfo, rotateRemoteAccessToken, setRemoteAccessEnabled } = await import('@/lib/ipc')
-    await expect(getRemoteAccessInfo()).resolves.toEqual({ enabled: false, token: '', createdAt: '', urls: [] })
-    await expect(rotateRemoteAccessToken()).resolves.toEqual({ enabled: false, token: '', createdAt: '', urls: [] })
-    await expect(setRemoteAccessEnabled(true)).resolves.toEqual({
-      enabled: false, token: '', createdAt: '', urls: [], restarted: false,
+    await expect(getRemoteAccessInfo()).resolves.toEqual({
+      enabled: false, token: '', createdAt: '', urls: [], mobileDistReady: false,
     })
+    await expect(rotateRemoteAccessToken()).rejects.toThrow('远程访问设置仅在桌面应用中可用')
+    await expect(setRemoteAccessEnabled(true)).rejects.toThrow('远程访问设置仅在桌面应用中可用')
   })
 
-  it('electronAPI 存在但无 remote-access 方法（旧 preload）→ 同样降级空态', async () => {
+  it('electronAPI 存在但无 remote-access 方法（旧 preload）→ 读降级空态，写操作同样拒绝', async () => {
     ;(window as { electronAPI?: unknown }).electronAPI = {}
     const { getRemoteAccessInfo, setRemoteAccessEnabled } = await import('@/lib/ipc')
-    await expect(getRemoteAccessInfo()).resolves.toEqual({ enabled: false, token: '', createdAt: '', urls: [] })
-    await expect(setRemoteAccessEnabled(false)).resolves.toEqual({
-      enabled: false, token: '', createdAt: '', urls: [], restarted: false,
+    await expect(getRemoteAccessInfo()).resolves.toEqual({
+      enabled: false, token: '', createdAt: '', urls: [], mobileDistReady: false,
     })
+    await expect(setRemoteAccessEnabled(false)).rejects.toThrow('远程访问设置仅在桌面应用中可用')
   })
 
   it('三方法存在 → 透传调用并返回其结果', async () => {

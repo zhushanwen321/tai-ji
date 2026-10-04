@@ -142,13 +142,19 @@ describe('ConnectionManager mobile static hosting (U1.1)', () => {
 
     it.each([
       ['/assets/main.css', 'text/css'],
-      ['/assets/icon.svg', 'image/svg+xml'],
       ['/assets/font.woff2', 'font/woff2'],
     ])('Content-Type 映射：%s → %s', async (path, expectedType) => {
       opened.push(await startManager(SPAWN_TOKEN, openStateOptions(distDir)))
       const res = await rawRequest(opened[0].port, path)
       expect(res.status).toBe(200)
       expect(res.headers['content-type']).toContain(expectedType)
+    })
+
+    it('映射外扩展名（.svg）→ octet-stream 兜底（映射表按实测产物裁剪，不静默坏）', async () => {
+      opened.push(await startManager(SPAWN_TOKEN, openStateOptions(distDir)))
+      const res = await rawRequest(opened[0].port, '/assets/icon.svg')
+      expect(res.status).toBe(200)
+      expect(res.headers['content-type']).toContain('application/octet-stream')
     })
 
     it('子目录请求（/sub/）也回退顶层 index.html；不存在的资产路径 404 兜底', async () => {

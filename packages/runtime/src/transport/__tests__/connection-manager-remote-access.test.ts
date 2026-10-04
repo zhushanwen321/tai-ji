@@ -25,7 +25,6 @@ import type { AddressInfo } from 'node:net'
 import { WebSocket, type WebSocket as WsType } from 'ws'
 import {
   ConnectionManager,
-  DEFAULT_LISTEN_HOST,
   parseRemoteAccessToken,
   readRemoteAccessToken,
   type ConnectionManagerOptions,
@@ -129,7 +128,6 @@ describe('ConnectionManager remote-access (U0.1)', () => {
       const harness = await startManager(SPAWN_TOKEN)
       opened.push(harness)
       expect((harness.httpServer.address() as AddressInfo).address).toBe('127.0.0.1')
-      expect(DEFAULT_LISTEN_HOST).toBe('127.0.0.1')
     })
 
     it("start('0.0.0.0') 绑定全网卡（远程访问开态）", async () => {

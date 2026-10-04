@@ -36,8 +36,8 @@
        （手动刷新不重现）。挂根部使 connecting 过渡屏/主界面两态均可见。 -->
   <CrashRecoveredBar />
   <!-- 权限请求弹窗（全局，session 无关）：bridge bus plugin-permission-request 驱动 pending；
-       transport 经 PERMISSION_TRANSPORT_KEY inject 调 WS approve/revoke（main.ts provide）。 -->
-  <PermissionRequestDialog :plugin-id="perm.pluginId" :permissions="perm.permissions" :pending="perm.pending" />
+       transport 经 PERMISSION_TRANSPORT_KEY inject 调 WS approve/deny（main.ts provide）。 -->
+  <PermissionRequestDialog :plugin-id="perm.pluginId" :permissions="perm.permissions" :pending="perm.pending" :error="perm.error" />
 </template>
 
 <script setup lang="ts">

@@ -25,16 +25,6 @@ export interface MobileDistEnv {
   appPath: string
 }
 
-/** dev 态移动壳 dist 在仓库内的相对段（packages/<pkg>/dist）。 */
-const MOBILE_RENDERER_DIST_SEGMENTS = ['packages', 'mobile-renderer', 'dist'] as const
-
-/**
- * prod 态 extraResources 复制目标（相对 resources）。
- * 字面量必须与 electron-builder.yml extraResources 的 `to: mobile-dist` 一致
- * （builder.yml 是该目标名的登记处，两侧漂移 = 打包产物找不到、E5 禁用静态托管面）。
- */
-const MOBILE_DIST_RESOURCE_SEGMENTS = ['mobile-dist'] as const
-
 /**
  * 解析移动壳 dist 绝对路径。
  *
@@ -42,8 +32,11 @@ const MOBILE_DIST_RESOURCE_SEGMENTS = ['mobile-dist'] as const
  */
 export function resolveMobileDistPath(env: MobileDistEnv): string {
   if (env.isPackaged) {
-    return join(env.resourcesPath, ...MOBILE_DIST_RESOURCE_SEGMENTS)
+    // 'mobile-dist' 字面量必须与 electron-builder.yml extraResources 的 `to: mobile-dist`
+    // 一致（builder.yml 是该目标名的登记处——YAML 无法 import，两侧一致性靠本注释指认；
+    // 漂移 = 打包产物找不到、E5 禁用静态托管面）。
+    return join(env.resourcesPath, 'mobile-dist')
   }
   const repoRoot = join(env.appPath, '..', '..')
-  return join(repoRoot, ...MOBILE_RENDERER_DIST_SEGMENTS)
+  return join(repoRoot, 'packages', 'mobile-renderer', 'dist')
 }

@@ -75,6 +75,7 @@ import { usePresetStore } from '@/stores/preset'
 import { usePiPresets } from '@/composables/features/settings/usePiPresets'
 import { useToast } from '@/composables/useToast'
 import { DEFAULT_PRESETS } from '@taiji/shared'
+import { randomUuid } from '@taiji/core'
 import type { PiLaunchPreset, ToolMode, ExtensionMode } from '@taiji/shared'
 import PresetListSection from './PresetListSection.vue'
 import PresetDetailSection from './PresetDetailSection.vue'
@@ -84,11 +85,6 @@ const { info: toastInfo, error: toastError } = useToast()
 const store = usePresetStore()
 const { presets, defaultPresetId, loadError } = storeToRefs(store)
 const { loadPresets, setDefault, create, update, remove } = usePiPresets()
-
-/** base36 进制基数（Math.toString 参数，标准 JS 写法）。 */
-const BASE36_RADIX = 36
-/** Math.random() 输出 '0.xxx'，slice 跳过前 2 字符（'0.'）取余下随机串。 */
-const RANDOM_PREFIX_LEN = 2
 
 // 删除确认
 const confirmDeleteId = ref('')
@@ -131,10 +127,8 @@ async function onSetDefault(presetId: string) {
 
 /** 新建自定义预设 */
 async function onCreate() {
-  // crypto.randomUUID 在非安全上下文（HTTP / 旧环境）可能不可用，用 Date+random 兜底
-  const uuid = crypto?.randomUUID?.()
-    ?? `${Date.now()}-${Math.random().toString(BASE36_RADIX).slice(RANDOM_PREFIX_LEN)}`
-  const id = `custom:${uuid}`
+  // core randomUuid 单源：内部已兜底非 secure context（LAN http）下原生 Web API 不可用的场景
+  const id = `custom:${randomUuid()}`
   const newPreset: PiLaunchPreset = {
     id,
     name: t('settings.preset.newPresetName'),

@@ -18,6 +18,7 @@ import { shallowRef, type ShallowRef } from 'vue'
 import type { Message } from '@taiji/shared'
 import type { FinalizeReason } from './store-types'
 import { readUsage } from './readers'
+import { randomUuid } from '../../utils/random-uuid'
 
 /** messages ref 的结构类型（兼容 Vue Ref 与裸 { value } 结构）。 */
 export type MessagesRef = { value: Map<string, ShallowRef<Message[]>> }
@@ -38,6 +39,20 @@ export function commitMessages(
   } else {
     messages.value = new Map(messages.value).set(sessionId, shallowRef(next))
   }
+}
+
+/**
+ * 纯 error assistant 气泡的条目构造单源（M2 形态统一：错误文本只住 error 字段、
+ * content 恒空——无 streaming 气泡可收口时追加的 error 气泡即全文，渲染端只有
+ * 「追加形态」一种 error 形态）。
+ *
+ * 消费点：store.markSessionError 与 registry 的 message.complete 秒败分支 /
+ * message.error / message.stream_error 无前置 streaming 分支——四处此前各自内联
+ * 同构字面量。只构造条目，追加动作（[...prev, entry] + commitMessages）留在调用点；
+ * 错误文案兜底（如 REASON_FALLBACK_ERROR_TEXT）是调用点语义，不在此收编。
+ */
+export function createAssistantErrorMessage(errorText: string): Message {
+  return { id: `a-${randomUuid()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: Date.now() }
 }
 
 /**

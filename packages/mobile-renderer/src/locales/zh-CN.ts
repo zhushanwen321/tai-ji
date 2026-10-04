@@ -6,6 +6,9 @@
 export default {
   mobile: {
     connecting: '连接中…',
+    reconnecting: '连接已断开，正在重连…',
+    connectionFailed: '连接失败',
+    connectionFailedHint: '请刷新页面重试；若持续失败，回主机「设置 → 远程访问」重新扫码',
     tabs: {
       sessions: '会话',
       chat: '聊天',
@@ -47,10 +50,26 @@ export default {
       hint: '回主机「设置 → 远程访问」重新扫码，或在下方粘贴 token',
       placeholder: '粘贴访问 token',
       submit: '连接',
+      invalid: 'Token 无效或已被轮换，请回主机重新扫码获取',
+      submitFailed: '连接发起失败，请检查网络后重试',
     },
     mermaid: {
       placeholder: '图表在桌面查看',
     },
     pasteImageFallback: '[图片粘贴：需桌面环境]',
+  },
+}
+
+/**
+ * connection 域（core transport 断连错误经 ports.t 构造，流入列表 loadError 等
+ * 用户可见面）：key 集与桌面 renderer locale 同名域对齐，语义取桌面文案。不放
+ * default export（mobile-locale 守卫要求壳自有文件顶层仅 mobile 命名空间，core
+ * 接线文案不是壳 chrome），由 i18n.ts 装配点展开进 messages 顶层。
+ */
+export const connectionZh = {
+  connection: {
+    disconnectedError: '连接已断开',
+    runtimeRestarting: 'Runtime 正在重启',
+    runtimeUnavailable: 'Runtime 不可用',
   },
 }

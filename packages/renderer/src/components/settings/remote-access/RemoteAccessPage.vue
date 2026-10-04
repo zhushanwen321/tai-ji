@@ -43,6 +43,16 @@
           {{ t('settings.remoteAccess.rotate') }}
         </Button>
       </div>
+      <!-- 移动壳 dist 缺失显形（E5）：enabled 但产物缺失时 runtime 静态面已禁用，手机端 404 -->
+      <div
+        v-if="!info.mobileDistReady"
+        role="alert"
+        class="mx-4 mb-1 flex items-start gap-2 rounded-sm bg-warn-soft px-3 py-2"
+        data-testid="remote-access-dist-missing"
+      >
+        <AlertTriangle class="mt-0.5 size-3.5 shrink-0 text-warn" />
+        <p class="text-[11px] leading-relaxed text-warn">{{ distMissingText }}</p>
+      </div>
       <ConnectionEntrySection :info="info" class="border-t border-border" />
     </div>
 
@@ -65,9 +75,9 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Loader2, RefreshCw } from '@lucide/vue'
+import { AlertTriangle, Loader2, RefreshCw } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -81,19 +91,31 @@ import {
   setRemoteAccessEnabled,
   type RemoteAccessConnectionInfo,
 } from '@/lib/ipc'
+import { toErrorMessage } from '@taiji/core'
 
 const { t } = useI18n()
 const { info: toastInfo, error: toastError } = useToast()
 
 /** 远程访问配置 + LAN 候选（单一状态；onMounted 拉取，开关/轮换后由 IPC 返回值刷新） */
-const info = ref<RemoteAccessConnectionInfo>({ enabled: false, token: '', createdAt: '', urls: [] })
+const info = ref<RemoteAccessConnectionInfo>({ enabled: false, token: '', createdAt: '', urls: [], mobileDistReady: false })
+
+/**
+ * 移动壳 dist 缺失提示文案（E5 显形）：dev 指向本地恢复命令，prod 指向重装——
+ * 两类受众的可执行恢复动作不同，文案 dev/prod 分流。
+ */
+const distMissingText = computed(() =>
+  t(import.meta.env.DEV ? 'settings.remoteAccess.distMissingDev' : 'settings.remoteAccess.distMissingProd'),
+)
 
 onMounted(async () => {
   try {
     info.value = await getRemoteAccessInfo()
   } catch (e) {
-    // 降级空态（关态 + 无候选）：加载失败不打断面板，开关仍可操作
+    // 降级空态（关态 + 无候选）：加载失败不打断面板，开关仍可操作。
+    // 必须 toast 显形（红线③：降级不显形）——读取失败渲染成「确认关态」会误导安全判断
+    // （实际远程访问可能开着且手机端正持有效链接）。
     console.error('[remote-access] getRemoteAccessInfo failed:', e)
+    toastError(toErrorMessage(e))
   }
 })
 
@@ -120,7 +142,7 @@ async function onToggleConfirm(): Promise<void> {
   } catch (e) {
     // IPC 失败保持原开关态（info 未更新 → model-value 回弹），错误经 toast 反馈
     confirmOpen.value = false
-    toastError(e instanceof Error ? e.message : String(e))
+    toastError(toErrorMessage(e))
   } finally {
     toggling.value = false
   }
@@ -135,7 +157,7 @@ async function onRotate(): Promise<void> {
     info.value = await rotateRemoteAccessToken()
     toastInfo(t('settings.remoteAccess.rotated'))
   } catch (e) {
-    toastError(e instanceof Error ? e.message : String(e))
+    toastError(toErrorMessage(e))
   } finally {
     rotating.value = false
   }

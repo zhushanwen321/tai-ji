@@ -1,15 +1,17 @@
 // apps/electron/preload/preload.ts
 import { contextBridge, ipcRenderer } from 'electron'
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, RemoteAccessConfig } from '@taiji/shared'
 import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE } from '@taiji/shared'
 
-/** remote-access 连接信息（bridge get-remote-access-info / rotate-remote-access-token 返回形态）。 */
-export interface RemoteAccessInfo {
-  enabled: boolean
-  token: string
-  createdAt: string
+/**
+ * remote-access 连接信息（bridge get-remote-access-info / rotate-remote-access-token 返回形态）。
+ * 配置字段（enabled/token/createdAt）extends 契约 SSOT RemoteAccessConfig，禁止复制定义。
+ */
+export interface RemoteAccessInfo extends RemoteAccessConfig {
   /** LAN 直连候选（`http://<ip>:<port>`，不含 token；runtime 未启动为空数组） */
   urls: string[]
+  /** 移动壳 dist 产物就绪（bridge 读时 statSync 探测；false = E5 静态面禁用，面板显形警告） */
+  mobileDistReady: boolean
 }
 
 /** set-remote-access-enabled 返回形态：连接信息 + 本次切换是否触发了 runtime 重启。 */

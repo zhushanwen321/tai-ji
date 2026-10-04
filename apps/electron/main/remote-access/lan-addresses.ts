@@ -11,9 +11,7 @@
  *
  * 纯函数：interfaces 结果与端口经参数注入（测试 mock networkInterfaces，零真实网络依赖）。
  */
-
-/** 单个地址候选：`http://<ip>:<port>`。 */
-export type LanAddress = string
+import type { NetworkInterfaceInfo } from 'node:os'
 
 /**
  * 从网卡枚举结果过滤出 LAN 直连候选列表。
@@ -23,20 +21,18 @@ export type LanAddress = string
  * @returns `http://<ip>:<port>` 候选数组（按接口枚举顺序，不去重——同名地址罕见且无副作用）
  */
 export function enumerateLanAddresses(
-  interfaces: Record<string, readonly unknown[] | undefined>,
+  interfaces: Record<string, readonly NetworkInterfaceInfo[] | undefined>,
   port: number | null,
-): LanAddress[] {
+): string[] {
   if (port === null || !Number.isInteger(port) || port <= 0) return []
-  const addresses: LanAddress[] = []
+  const addresses: string[] = []
   for (const infos of Object.values(interfaces)) {
     for (const info of infos ?? []) {
-      const record = info as Record<string, unknown>
-      // family：Node 18+ 为字符串 'IPv4'（IPv6 信息跳过）
-      if (record.family !== 'IPv4') continue
+      // 判别联合按 family 收窄：仅 'IPv4' 分支参与（IPv6 信息跳过），address 直接按类型访问
+      if (info.family !== 'IPv4') continue
       // internal：回环接口（lo0/127.0.0.1）对手机不可达，排除
-      if (record.internal === true) continue
-      if (typeof record.address !== 'string') continue
-      addresses.push(`http://${record.address}:${port}`)
+      if (info.internal) continue
+      addresses.push(`http://${info.address}:${port}`)
     }
   }
   return addresses

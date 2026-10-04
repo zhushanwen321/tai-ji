@@ -185,14 +185,38 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
   }
 
   /**
-   * 启动 runtime（幂等）。
+   * 启动 runtime（幂等 + 并发串行化）。
    *
    * 时序：if child 活着 → 复用 → stop（清旧）→ findAvailablePort → spawn → waitForHealth → writePortFile。
    * 重置 stopping 标志（从崩溃重启或用户手动重试进入时，清掉上次的 stopping）。
    *
+   * 并发串行化（AM2，TOCTOU 双 spawn 根修）：toggle 入口（restartRuntimeForRemoteAccess）
+   * 与启动链/崩溃重启并发时，双方都可能通过幂等守卫（守卫检查在 await stop 之前完成）
+   * → 双 spawn 抢端口。修复 = promise 链串行队列：
+   * - 串行而非 join（共享同一 promise）：join 会让后到的 toggle 复用先到的启动结果——
+   *   拿到旧配置的启动端口（幂等守卫命中旧实例），违背「toggle 必须以新配置重启」的
+   *   语义；串行队列保证每次 start 调用独立执行幂等判定。
+   * - 前序失败不阻塞后序：链条以 settle 后的空 promise 续接，失败不毒化队列。
+   * - 只串行化本方法：stop()/restartRuntime() 不包——attemptRestart→start 已经过本
+   *   串行入口，嵌套包裹会在 doStart 内 await start 时自死锁（doStart 无内部递归
+   *   start 调用，已核实）。
+   *
    * @returns 实际监听的端口号
    */
-  async start(): Promise<number> {
+  start(): Promise<number> {
+    const run = this.startChain.then(() => this.doStart(), () => this.doStart())
+    this.startChain = run.then(() => undefined, () => undefined)
+    return run
+  }
+
+  /**
+   * start 串行队列尾指针：每个新 start 排在其后（AM2）。类型含 unknown 拒因——
+   * 消费侧（start 包装）对 reject 分支显式续跑 doStart，不依赖前序成败。
+   */
+  private startChain: Promise<unknown> = Promise.resolve()
+
+  /** start() 的原函数体（幂等守卫 + 完整启动时序），串行队列内执行（AM2）。 */
+  private async doStart(): Promise<number> {
     // 重置停止标志（start 是新生命周期的开始，无论上次是崩溃还是主动 stop）
     this.policy.reset()
     // 同理复位 before-quit 上下文标记（防御性：正常时序 start 先于 before-quit，

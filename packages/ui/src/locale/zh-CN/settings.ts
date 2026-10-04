@@ -1085,5 +1085,7 @@ export default {
     firewallHint: '首次开启时 macOS 可能弹出防火墙授权提示，选择「允许」即可（授权一次，之后不再询问）。',
     tailscaleTitle: '跨网络访问（Tailscale）',
     tailscaleHint: '不在同一网络时可用 Tailscale 组网访问：主机与手机各安装 Tailscale 并登录同一账号，然后把链接中的局域网地址换成 Tailscale 分配的 100.x 地址。',
+    distMissingDev: '移动壳产物缺失，手机端页面将不可用。恢复：运行 pnpm --filter @taiji/mobile-renderer build 后重启应用',
+    distMissingProd: '安装包缺少移动壳产物，手机端页面不可用，请重新安装最新版本',
   },
 }

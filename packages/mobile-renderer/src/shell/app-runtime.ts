@@ -23,7 +23,6 @@ import {
 import type {
   ChatApiPort,
   SessionApiPort,
-  ChatStoreInstance,
   SessionStoreLike,
   UseChatDeps,
   CompactQueueEntrySnapshot,
@@ -33,8 +32,7 @@ import type {
 import * as chatApi from '@taiji/core/transport/api/domains/chat'
 import * as sessionApi from '@taiji/core/transport/api/domains/session'
 import { onGlobalType } from '@taiji/core/transport/api'
-import type { SessionSummary } from '@taiji/shared'
-import type { Segment } from '@taiji/shared'
+import type { Segment, SessionSummary } from '@taiji/shared'
 import { i18n } from '../i18n'
 
 // vue-i18n 的 t 复杂重载收窄为 (key, params?) => string（对齐 renderer useChat.ts tFn 形态）
@@ -94,14 +92,26 @@ const compactQueue: CompactQueueLike = {
   async flush(sid: string): Promise<boolean> {
     const entries = deferQueue.get(sid)
     if (!entries || entries.length === 0) return true
-    const drain = entries.splice(0, entries.length)
-    for (const entry of drain) {
-      await submitQueuedEntry(
-        sid,
-        { id: entry.id, text: entry.text, segments: entry.segments, submitText: entry.submitText },
-        'send',
-        submitQueueDeps(),
-      )
+    // 逐条「提交成功才出队」（mobile 简化形态：提交即离队，不等确认帧 confirmDelivery）；
+    // 失败时未提交条目必须留队（core flush 契约：reject 上抛时由实现保证条目仍在队，
+    // core 侧仅 toast，恢复后 occupancy idle 重放）——先 splice 全出队会让中途失败的
+    // 剩余条目静默丢失。通道路由对齐桌面 doFlush（D5.1 队首 send 语义）：本轮已用过
+    // send 或 turn 活跃 → 其余并入当前 run（再发 send 会被 S1 busy 拒且已离队 = 丢）。
+    let sendChannelUsed = false
+    while (entries.length > 0) {
+      const entry = entries[0]
+      const channel: 'send' | 'steer' = (sendChannelUsed || chatStore.isActive(sid)) ? 'steer' : 'send'
+      try {
+        await submitQueuedEntry(sid, entry, channel, submitQueueDeps())
+      } catch (e) {
+        // RPC reject：消息未投出。send 通道回滚 submitQueuedEntry 内乐观挂的 inflight
+        // 占位（挂点先于 RPC，桌面 doFlush 同款回滚；steer 不挂占位无需回滚）；
+        // 本条留队（未 shift），错误上抛由 core toast「发送失败」。
+        if (channel === 'send') chatStore.decrementInflight(sid, 1)
+        throw e
+      }
+      entries.shift()
+      sendChannelUsed = true
     }
     return true
   },
@@ -129,12 +139,12 @@ const compactQueue: CompactQueueLike = {
   },
 }
 
-/** submitQueuedEntry 所需 deps（惰性构造防状态陈旧） */
-function submitQueueDeps(): SubmitQueuedEntryDeps {
+/** 两条提交链路共享的通道 deps 基座（submitQueueDeps / buildUseChatDeps 各自 spread 后补专属字段） */
+type CoreChannelDeps = Pick<UseChatDeps, 'chatApi' | 'writeSegments' | 'toast' | 't' | 'getCompactQueue'>
+
+function coreChannelDeps(): CoreChannelDeps {
   return {
-    chat: chatStore,
     chatApi: chatApiPort,
-    sessionStore: sessionStore as SessionStoreLike,
     writeSegments: (payload) => sessionApi.writeSegments(payload),
     toast: { error: console.error, warning: console.warn },
     t,
@@ -142,16 +152,21 @@ function submitQueueDeps(): SubmitQueuedEntryDeps {
   }
 }
 
+/** submitQueuedEntry 所需 deps（惰性构造防状态陈旧） */
+function submitQueueDeps(): SubmitQueuedEntryDeps {
+  return {
+    ...coreChannelDeps(),
+    chat: chatStore,
+    sessionStore: sessionStore as SessionStoreLike,
+  }
+}
+
 /** createUseChat 实例（UseChatDeps 全量注入；对齐桌面薄包装的 deps 面） */
 function buildUseChatDeps(): UseChatDeps {
   return {
-    chatApi: chatApiPort,
-    writeSegments: (payload) => sessionApi.writeSegments(payload),
+    ...coreChannelDeps(),
     getChatStore: () => chatStore,
     getSessionStore: () => sessionStore as SessionStoreLike,
-    toast: { error: console.error, warning: console.warn },
-    t,
-    getCompactQueue: () => compactQueue,
   }
 }
 
@@ -266,8 +281,10 @@ export async function createMobileTask(input: MobileNewTaskInput): Promise<Sessi
 }
 
 // ── 导出（组件层消费面）──────────────────────────────────────────────
+// 仅暴露组件/测试实际消费的符号；useSessionInstance 与两个 api 端口是文件内组装细节，
+// 去 export 防「导出面 = API 面」的假象（外部断链由本文件 import 图自证）。
 
-export { chatStore, sessionStore, useChatInstance, useSessionInstance, chatApiPort, sessionApiPort }
+export { chatStore, sessionStore, useChatInstance }
 
 /** 当前激活 session（响应式） */
 export const activeSessionId = sessionStore.activeId
@@ -284,6 +301,3 @@ export function loadSessions(): Promise<void> {
 export function selectSession(id: string): Promise<void> {
   return useSessionInstance.selectSession(id)
 }
-
-/** chat store 类型再导出（组件 props/测试用） */
-export type { ChatStoreInstance }

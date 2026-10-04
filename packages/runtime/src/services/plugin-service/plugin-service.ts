@@ -642,6 +642,16 @@ export class PluginService implements IPluginService {
   }
 
   /**
+   * 拒绝插件本次权限申请（不回收已授权限）。对齐 WS 命令 plugin.denyPermissions。
+   * 与 revokePermissions（撤销全部已授权限并持久化，基线协议面保留）的语义分界：
+   * deny 只 resolve 挂起中的审批等待（无 pending 幂等 no-op），已授权限与持久化不动。
+   */
+  async denyPermissions(pluginId: string): Promise<void> {
+    if (!this.registry.getDescriptor(pluginId)) throw new Error(`Plugin not found: ${pluginId}`)
+    this.activator.resolvePermissionApproval(pluginId, false)
+  }
+
+  /**
    * 执行插件注册的命令（S3-W1 发送段闭环）。
    *
    * 实现在 api/commands-executor.ts（max-lines 拆分迁出，行为不变）：复合键查
@@ -840,11 +850,10 @@ export class PluginService implements IPluginService {
   }
 
   private broadcastPluginList(): void {
-    const plugins = this.getDiscoveredPlugins()
     this.broker.broadcast({
       type: 'config.plugins',
       id: `plugins_${Date.now()}`,
-      payload: { plugins },
+      payload: { plugins: this.getDiscoveredPlugins() },
     })
   }
 

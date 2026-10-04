@@ -8,8 +8,8 @@
 import { createI18n } from 'vue-i18n'
 import type { DefaultLocaleMessageSchema } from 'vue-i18n'
 import { enUS, zhCN } from '@taiji/ui/locale'
-import mobileZh from './locales/zh-CN'
-import mobileEn from './locales/en-US'
+import mobileZh, { connectionZh } from './locales/zh-CN'
+import mobileEn, { connectionEn } from './locales/en-US'
 
 export type MobileLocale = 'zh-CN' | 'en-US'
 
@@ -23,13 +23,14 @@ function detectLocale(): MobileLocale {
 }
 
 // 显式泛型对齐 renderer i18n 形态：默认推断会把 locale 窄化为字面量，setLocale 写路径需 cast。
-// messages = ui locale 下沉域（common/panel/... 单源）+ mobile 壳自有 key（mobile 命名空间）。
+// messages = ui locale 下沉域（common/panel/... 单源）+ connection 域（core ports.t 接线文案，
+// 命名导出展开进顶层）+ mobile 壳自有 key（mobile 命名空间）。
 export const i18n = createI18n<[DefaultLocaleMessageSchema], string, false>({
   legacy: false,
   locale: detectLocale(),
   fallbackLocale: 'en-US',
   messages: {
-    'zh-CN': { ...zhCN, ...mobileZh },
-    'en-US': { ...enUS, ...mobileEn },
+    'zh-CN': { ...zhCN, ...connectionZh, ...mobileZh },
+    'en-US': { ...enUS, ...connectionEn, ...mobileEn },
   },
 })

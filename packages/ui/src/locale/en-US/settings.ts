@@ -1086,5 +1086,7 @@ export default {
     firewallHint: 'macOS may show a firewall prompt the first time you enable this. Choose "Allow" (one-time, remembered afterwards).',
     tailscaleTitle: 'Cross-network access (Tailscale)',
     tailscaleHint: 'Off the same network: install Tailscale on both the host and the phone, sign in with the same account, then replace the LAN address in the link with the Tailscale 100.x address.',
+    distMissingDev: 'Mobile shell build is missing; the mobile page will be unavailable. To restore: run pnpm --filter @taiji/mobile-renderer build and restart the app.',
+    distMissingProd: 'The installed package is missing the mobile shell build; the mobile page is unavailable. Please reinstall the latest version.',
   },
 }

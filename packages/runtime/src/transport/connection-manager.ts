@@ -29,7 +29,7 @@ import { timingSafeEqual } from 'node:crypto'
 import * as fs from 'node:fs'
 import { basename, extname, join, resolve, sep } from 'node:path'
 import { WebSocketServer, WebSocket, type WebSocket as WsType } from 'ws'
-import { MAX_WS_PAYLOAD_BYTES, REMOTE_ACCESS_FILENAME, type ClientMessage, type RemoteAccessConfig } from '@taiji/shared'
+import { MAX_WS_PAYLOAD_BYTES, REMOTE_ACCESS_FILENAME, REMOTE_TOKEN_HEX64, type ClientMessage, type RemoteAccessConfig } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import { toErrorMessage } from '../utils/errors.js'
 import type { ErrorDetails } from './message-context.js'
@@ -54,10 +54,7 @@ const AUTH_TIMEOUT_MS = 10_000
 const WS_CLOSE_POLICY_VIOLATION = 1008
 
 /** 默认监听绑定地址（remote-access D1）：纯回环，与参数化前现状逐字节一致。 */
-export const DEFAULT_LISTEN_HOST = '127.0.0.1'
-
-/** remote token 契约形态（@taiji/shared RemoteAccessConfig）：64 位 hex 小写（32 字节随机值的 hex 编码）。 */
-const REMOTE_TOKEN_HEX64 = /^[0-9a-f]{64}$/
+const DEFAULT_LISTEN_HOST = '127.0.0.1'
 
 /** 常量比较（抗时序攻击）：长度不等直接 false（token 长度非秘密）。 */
 function tokenEquals(a: string, b: string): boolean {
@@ -134,26 +131,18 @@ function isRemoteAccessConfigShape(value: object): value is Pick<RemoteAccessCon
 
 const MOBILE_INDEX_FILENAME = 'index.html'
 
-/** 移动壳产物扩展名 → Content-Type 基础映射（vite web 构建产物 + katex 字体所需）。 */
+/**
+ * 移动壳产物扩展名 → Content-Type 映射。按 mobile dist 实测产物维护（html/js/css
+ * + katex 字体 ttf/woff/woff2 六类），新产物形态出现时补 1 行即可——映射外走
+ * octet-stream 兜底，不会静默坏（浏览器按字节流下载，不会渲染成错误页面）。
+ */
 const MOBILE_STATIC_CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.ico': 'image/x-icon',
-  '.json': 'application/json',
-  '.map': 'application/json',
-  '.txt': 'text/plain; charset=utf-8',
+  '.ttf': 'font/ttf',
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-  '.wasm': 'application/wasm',
 }
 
 /**
@@ -167,10 +156,11 @@ const MOBILE_STATIC_CONTENT_TYPES: Record<string, string> = {
  * 2. 先 decodeURIComponent 再做白名单判定——`/%2e%2e/`、`/%2e%2e%2f` 等编码变体解码后
  *    才暴露 `..` 段，判定置于解码之后使编码绕过无效；畸形百分号序列（decode 抛
  *    URIError）与 NUL 字节直接拒绝。
- * 2. path.resolve(distRoot, decoded) 消解全部 `..`/`.` 段得到绝对路径，再做前缀白名单
- *    判定：结果必须恰为 distRoot，或以 `distRoot + sep` 为前缀（带分隔符防 `/dist-evil`
- *    对 `/dist` 的前缀误命中）。
- * 3. 白名单外一律返回 null 且本函数不发起任何 fs 调用——不读白名单外任何路径（E4）。
+ * 3. 非 `/` 前缀的 decoded 直接拒绝（HTTP pathname 恒以 `/` 开头，其余形态不存在合法
+ *    产物，显式早返回而非借白名单间接拒绝）；`path.resolve(distRoot, '.' + decoded)` 消解
+ *    全部 `..`/`.` 段得到绝对路径，再做前缀白名单判定：结果必须恰为 distRoot，或以
+ *    `distRoot + sep` 为前缀（带分隔符防 `/dist-evil` 对 `/dist` 的前缀误命中）。
+ * 4. 白名单外一律返回 null 且本函数不发起任何 fs 调用——不读白名单外任何路径（E4）。
  *    读取目标只可能是判定通过的 resolved 路径或 distRoot/index.html 兜底，无其他拼点。
  * 已知不防：dist 内 symlink 指向外部——产物由本仓构建链生成、无 symlink，且非网络
  * 输入面；产物来源变化时需复审。
@@ -183,7 +173,8 @@ export function resolveMobileStaticPath(distRoot: string, pathname: string): str
     return null
   }
   if (decoded.includes('\0')) return null
-  const resolved = resolve(distRoot, decoded.startsWith('/') ? `.${decoded}` : `/${decoded}`)
+  if (!decoded.startsWith('/')) return null
+  const resolved = resolve(distRoot, `.${decoded}`)
   if (resolved !== distRoot && !resolved.startsWith(distRoot + sep)) return null
   return resolved
 }
@@ -315,7 +306,8 @@ export class ConnectionManager {
         res.writeHead(HTTP_OK, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ status: 'ok', uptime: process.uptime() }))
       } else if (this.mobileStaticRoot !== null) {
-        void this.serveMobileStatic(req, res)
+        // 分派点已收窄非空，distRoot 以参数下沉——serveMobileStatic 无 null 分支可走
+        void this.serveMobileStatic(req, res, this.mobileStaticRoot)
       } else {
         res.writeHead(HTTP_NOT_FOUND)
         res.end()
@@ -360,16 +352,11 @@ export class ConnectionManager {
 
   /**
    * 移动壳静态文件服务。仅 mobileStaticRoot 就绪（开态且 dist 探测通过）时从 HTTP
-   * 分派进入；/health 探针先于本方法（探针行为不受静态托管影响）。
+   * 分派进入，distRoot 由分派点收窄后以参数传入（本方法无 null 分支）；/health 探针
+   * 先于本方法（探针行为不受静态托管影响）。
    * 日志纪律（D3）：访问/拒绝日志只记 pathname（query 在入口剥除），完整 URL 不落盘。
    */
-  private async serveMobileStatic(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const distRoot = this.mobileStaticRoot
-    if (distRoot === null) {
-      res.writeHead(HTTP_NOT_FOUND)
-      res.end()
-      return
-    }
+  private async serveMobileStatic(req: IncomingMessage, res: ServerResponse, distRoot: string): Promise<void> {
     try {
       const method = req.method ?? 'GET'
       // 仅 GET/HEAD（D3）：静态面无写语义；其余方法 405 + Allow 头指明合法方法。
@@ -392,13 +379,9 @@ export class ConnectionManager {
       }
       // 目录（含 `/`）回 index.html（D3 兜底）。不存在的普通路径 404——移动壳无前端
       // 路由，不做任意路径 SPA fallback（那会把错误资产路径也回 HTML，Content-Type 混淆）。
-      let isDirectory = false
-      try {
-        isDirectory = (await fs.promises.stat(filePath)).isDirectory()
-      } catch {
-        isDirectory = false
-      }
-      const target = isDirectory ? join(distRoot, MOBILE_INDEX_FILENAME) : filePath
+      // stat 失败（ENOENT/EACCES 等）→ null → 视为非目录，交由下方 readFile 走 404。
+      const stat = await fs.promises.stat(filePath).catch(() => null)
+      const target = stat?.isDirectory() ? join(distRoot, MOBILE_INDEX_FILENAME) : filePath
       let content: Buffer
       try {
         content = await fs.promises.readFile(target)

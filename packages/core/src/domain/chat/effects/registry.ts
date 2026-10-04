@@ -74,7 +74,7 @@ import {
   readChangeSetStatus,
 } from '../readers'
 import { findLastAssistantIndex, findToolCallOwner } from '../chunk-processor'
-import { commitMessages, REASON_FALLBACK_ERROR_TEXT, terminalMessagePatch } from '../mutations'
+import { commitMessages, REASON_FALLBACK_ERROR_TEXT, terminalMessagePatch, createAssistantErrorMessage } from '../mutations'
 import { truncateToolCall } from '../truncate-tool-output'
 import { bashStartEffect, bashResultEffect } from '../bash-effects'
 import { randomUuid } from '../../../utils/random-uuid'
@@ -450,11 +450,8 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // errorMessage 缺失（pi extras.errorMessage 可 undefined）走 error reason 兜底文案——
     // 条件只看 isErrorStop，文案用 errorMessage || 兜底，错误不得静默。
     if (isErrorStop && !changed) {
-      // [M2 形态统一] 错误文本只住 error 字段，content 空（无崩溃前正文）
-      commitMessages(messages, sid, [
-        ...prev,
-        { id: `a-${randomUuid()}`, role: 'assistant', content: '', error: errorMessage || REASON_FALLBACK_ERROR_TEXT.error, status: 'error', timestamp: Date.now() },
-      ])
+      // errorMessage 缺失走 reason 兜底文案（调用点语义，不收编进构造 helper）
+      commitMessages(messages, sid, [...prev, createAssistantErrorMessage(errorMessage || REASON_FALLBACK_ERROR_TEXT.error)])
     }
     // 统一收口（finalizeSession 幂等：entity 已改则 no-op，只清 pendingSend + timer）
     // 此处 message status 已改终态 → finalizeSession 内走「只补 toolCall 收口」分支。
@@ -486,11 +483,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     finalizeSession(sid, 'error', errorText)
     // 无前置 streaming entity 时 finalizeSession 不追加消息——需手动追加
     if (!hasStreaming) {
-      // [M2 形态统一] 错误文本只住 error 字段，content 空
-      commitMessages(messages, sid, [
-        ...prev,
-        { id: `a-${randomUuid()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: Date.now() },
-      ])
+      commitMessages(messages, sid, [...prev, createAssistantErrorMessage(errorText)])
     }
   },
 
@@ -504,11 +497,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     finalizeSession(sid, 'stream_error', streamErrContent)
     // 无前置 streaming entity 时需手动追加
     if (!hasStreaming) {
-      // [M2 形态统一] 错误文本只住 error 字段，content 空
-      commitMessages(messages, sid, [
-        ...prev,
-        { id: `a-${randomUuid()}`, role: 'assistant', content: '', error: streamErrContent, status: 'error', timestamp: Date.now() },
-      ])
+      commitMessages(messages, sid, [...prev, createAssistantErrorMessage(streamErrContent)])
     }
   },
 

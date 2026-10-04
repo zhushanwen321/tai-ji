@@ -14,7 +14,7 @@
 // listener 不会翻倍），App.vue provide + 挂 PermissionRequestDialog。
 //
 // 回传走 core 既有通路（不新造协议）：pi 源 extension.ui_response（sendExtensionUIResponse）、
-// plugin 源 plugin.uiResponse（ws send）、审批源 plugin.approvePermissions/revokePermissions。
+// plugin 源 plugin.uiResponse（ws send）、审批源 plugin.approvePermissions/denyPermissions。
 import { reactive } from 'vue'
 import { EXTENSION_BRIDGE_TYPES, InternalEventBus, MessageBusBridge } from '@taiji/core/extension-host'
 import type { IncomingPluginMessage, InternalEvent, PluginMessageSource } from '@taiji/core/extension-host'
@@ -192,7 +192,7 @@ export const mobileUiResponseTransport = createMobileUiResponseTransport()
 //
 // 链路：runtime 广播 plugin:permissionRequest → bridge 归一 bus 'plugin-permission-request'
 // → 本模块订阅写 reactive 状态 → App.vue 绑定 PermissionRequestDialog props → 用户作答经
-// provide 的 transport 调 plugin.approvePermissions / plugin.revokePermissions。
+// provide 的 transport 调 plugin.approvePermissions / plugin.denyPermissions。
 //
 // sessionId 语义（与 dialog 通道的关键差异）：runtime permissionRequest 广播 payload 协议性
 // 无 sessionId（plugin-service onPermissionRequest 直发 activator payload {pluginId,
@@ -206,8 +206,10 @@ interface PermissionRequestState {
   pluginId: string
   /** 插件申请的权限列表 */
   permissions: string[]
-  /** 请求是否挂起（true=弹窗打开；RPC 回传成功/失败后置 false） */
+  /** 请求是否挂起（true=弹窗打开；RPC 回传成功后置 false；失败保持 true 供重试） */
   pending: boolean
+  /** 上次提交是否失败（失败时弹窗内显形错误行；下次提交入口乐观清错，新请求到达清零） */
+  error: boolean
 }
 
 // taste:allow-no-data-owner（模块级单例 UI 瞬态；规则扫描面为 renderer/core，注释形态对齐
@@ -216,6 +218,7 @@ const permissionRequestState = reactive<PermissionRequestState>({
   pluginId: '',
   permissions: [],
   pending: false,
+  error: false,
 })
 
 // bus 订阅（模块级装配，与上方 bridge 构造同层）。permissionRequest 一次一个，新请求覆盖
@@ -234,6 +237,8 @@ bus.on('plugin-permission-request', (e) => {
   permissionRequestState.pluginId = req.pluginId
   permissionRequestState.permissions = [...req.permissions]
   permissionRequestState.pending = true
+  // 新请求覆盖旧弹窗：上一单的失败错误态不残留（BM3 错误行只描述当前弹窗的提交结果）
+  permissionRequestState.error = false
 })
 
 // 审批等待超时撤窗（timeout-plugin-service D3，取消非判拒）：payload 无 sessionId →
@@ -245,34 +250,35 @@ onGlobal((msg) => {
   if (typeof payload.pluginId !== 'string') return
   if (permissionRequestState.pending && permissionRequestState.pluginId === payload.pluginId) {
     permissionRequestState.pending = false
+    permissionRequestState.error = false
   }
 })
 
 /**
  * 审批回传 transport（ui permission-transport 契约的壳侧实现）：Dialog 批准/拒绝 →
- * plugin.approvePermissions / plugin.revokePermissions WS 命令（core plugin 域既有通路，
- * 零新协议）。回传成功/失败均置 pending=false 关闭弹窗（错误必须重置状态，项目规则#3）。
+ * plugin.approvePermissions / plugin.denyPermissions WS 命令（core plugin 域既有通路，
+ * 零新协议）。失败语义（BM3 假成功红线）：RPC reject 时 pending 保持 true（弹窗不关）
+ * + error=true 显形错误行供用户重试——catch 后静默关窗会被误读为「拒绝已送达」。
  */
+function settlePending(promise: Promise<unknown>, op: string): void {
+  permissionRequestState.error = false
+  void promise
+    .then(() => {
+      permissionRequestState.pending = false
+      permissionRequestState.error = false
+    })
+    .catch((err: unknown) => {
+      console.warn(`[companion-bridge] ${op} failed`, err)
+      permissionRequestState.error = true
+    })
+}
+
 export const mobilePermissionTransport: PermissionTransport = {
   approve(pluginId: string, permissions: string[]): void {
-    void pluginApi.approvePermissions(pluginId, permissions)
-      .then(() => {
-        permissionRequestState.pending = false
-      })
-      .catch((err: unknown) => {
-        console.warn('[companion-bridge] approvePermissions failed', err)
-        permissionRequestState.pending = false
-      })
+    settlePending(pluginApi.approvePermissions(pluginId, permissions), 'approvePermissions')
   },
-  revoke(pluginId: string): void {
-    void pluginApi.revokePermissions(pluginId)
-      .then(() => {
-        permissionRequestState.pending = false
-      })
-      .catch((err: unknown) => {
-        console.warn('[companion-bridge] revokePermissions failed', err)
-        permissionRequestState.pending = false
-      })
+  deny(pluginId: string): void {
+    settlePending(pluginApi.denyPermissions(pluginId), 'denyPermissions')
   },
 }
 

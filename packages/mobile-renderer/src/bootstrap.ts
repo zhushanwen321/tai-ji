@@ -1,15 +1,14 @@
 // bootstrap.ts —— mobile 壳 bootstrap 编排（TODO(P1) 已兑现：对接 core transport/coordination
 // 序列，remote-use U1.3 连接装配）。
 //
-// 序列（core bootstrap 五步时序链的 mobile 子集；platform 先于连接编排由 await 链顺序保证，
+// 序列（core bootstrap 时序链的 mobile 子集；platform 先于连接编排由 await 链顺序保证，
 // 同 core bootstrap 死锁防线）：
 //   1. providePlatform(createMobilePlatformAdapter()) —— 注入 mobile 平台端口到 core
-//   2. MOBILE_MOUNT_POINTS.forEach(registerMountPoint) —— 注册 §6.3 mobile 三挂载点
-//   3. setConnectionPorts(mobile ports) —— 壳层端口注入（visibility/env/connectionProfile/
+//   2. setConnectionPorts(mobile ports) —— 壳层端口注入（visibility/env/connectionProfile/
 //      onAuthRejected），远程形态（无 ipc）走 use-connection 的 profile 分支
-//   4. initConnection() → restoreSessions() —— core transport/coordination 序列
+//   3. initConnection() → restoreSessions() —— core transport/coordination 序列
 //      （resolve = 编排已提交，非 connected——core bootstrap D2 裁决②同语义）
-//   5. createApp(App).use(createPinia()).mount('#app')
+//   4. createApp(App).use(createPinia()).mount('#app')
 //
 // 凭据派生（D4 三分支）在 platform/connection-profile.ts；auth 拒绝信号消费（D8：落 token
 // 输入视图 + 凭据来源分支处置）经 ports.onAuthRejected 接线。连接态 / token 态以模块级响应式
@@ -18,6 +17,7 @@
 import { createApp, ref, watch } from 'vue'
 import { createPinia } from 'pinia'
 import { i18n } from './i18n'
+import { chatStore } from './shell/app-runtime'
 import {
   disconnect,
   getState,
@@ -33,21 +33,37 @@ import {
   type ConnectionCredentialController,
 } from './platform/connection-profile'
 import { createMobilePlatformAdapter } from './platform/mobile-platform-adapter'
-import { MOBILE_MOUNT_POINTS, registerMountPoint } from './shell/mount-points'
 
 /**
  * 移动壳连接装配 UI 态（模块级响应式；App.vue 多视图消费）：
  * - 'connecting'：未连接（编排已提交 / 握手 auth 中 / 断线重连中）初值
  * - 'connected'：auth 通过（凭据有效）
  * - 'token-input'：凭据缺失或验身失败（D8 信号 / D4 皆无分支）——落 token 输入视图
+ * - 'failed'：重连预算用尽（ws-client 60s → failed）——终态，UI 必须给可行动恢复指引
+ *   而非无限期「连接中」（兜底长期接管 = 正常路径断裂）
  */
-export type MobileShellConnectionState = 'connecting' | 'connected' | 'token-input'
+export type MobileShellConnectionState = 'connecting' | 'connected' | 'token-input' | 'failed'
 
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态）：移动壳连接装配三态（App.vue 多视图切换消费）
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态）：移动壳连接装配四态（App.vue 多视图切换消费）
 export const shellConnectionState = ref<MobileShellConnectionState>('connecting')
+
+// 连接成功过至少一次（进程生命周期内不复位）：瞬时断连（connected → connecting）的
+// 视图分支锚点——App.vue 据此保持 connected 布局挂载（composer 草稿不丢）仅插顶部
+// 断线条，而非全屏换视图；首连（false）仍走全屏「连接中」。
+export const hasConnectedOnce = ref(false)
 
 /** bootstrap 装配的凭据控制器（token 重试路径 submitRemoteToken 的操作面） */
 let profileController: ConnectionCredentialController | null = null
+
+/**
+ * token 提交结果态（TokenInputView 消费）：提交编排进行中 / 验身失败的可见反馈。
+ * 验身结果异步于提交编排（initConnection resolve = 编排已提交，auth 结果后续到），
+ * submitting 的收口点 = auth 结果落地（watch connected / onAuthRejected）。
+ */
+export const tokenSubmit = ref<{ submitting: boolean; error: 'invalid' | 'failed' | null }>({
+  submitting: false,
+  error: null,
+})
 
 /**
  * token 重试路径（TokenInputView 提交 → 本入口，D8 reset 入口的壳侧形态）：
@@ -60,12 +76,20 @@ export async function submitRemoteToken(token: string): Promise<void> {
     console.warn('[mobile-bootstrap] submitRemoteToken before bootstrap — ignored (run bootstrap() first)')
     return
   }
-  profileController.adoptManualToken(token)
-  resetAuthRejectionSuppression()
-  // auth 拒绝路径的 socket 已 close；此处 disconnect 兜底清理「连接中 / 握手超时窗口内提交」
-  // 的残态（connect 幂等守卫会被 OPEN/CONNECTING 拦截，先断开保证重试必达）
-  disconnect()
-  await initConnection()
+  tokenSubmit.value = { submitting: true, error: null }
+  try {
+    profileController.adoptManualToken(token)
+    resetAuthRejectionSuppression()
+    // auth 拒绝路径的 socket 已 close；此处 disconnect 兜底清理「连接中 / 握手超时窗口内提交」
+    // 的残态（connect 幂等守卫会被 OPEN/CONNECTING 拦截，先断开保证重试必达）
+    disconnect()
+    await initConnection()
+    // 编排提交成功；submitting 不在此清——auth 结果（connected / 拒绝）异步落地时收口，
+    // 避免「提交中」与「验身中」两个阶段闪烁
+  } catch (e) {
+    console.error('[mobile-bootstrap] submitRemoteToken failed:', e)
+    tokenSubmit.value = { submitting: false, error: 'failed' }
+  }
 }
 
 // bootstrap —— mobile 壳启动编排。
@@ -74,10 +98,7 @@ export async function bootstrap(): Promise<void> {
   const adapter = createMobilePlatformAdapter()
   providePlatform(adapter)
 
-  // 2. 注册 §6.3 mobile B+D 子集三挂载点（pre-P4 本地 registrar）。
-  MOBILE_MOUNT_POINTS.forEach((name) => registerMountPoint(name, {}))
-
-  // 3. 壳层端口注入（远程 profile 形态：无 ipc；凭据派生 D4 + auth 拒绝消费 D8）。
+  // 2. 壳层端口注入（远程 profile 形态：无 ipc；凭据派生 D4 + auth 拒绝消费 D8）。
   const profile = createConnectionProfilePort({
     storage: adapter.storage,
     host: location.host,
@@ -104,39 +125,52 @@ export async function bootstrap(): Promise<void> {
     connectionProfile: profile,
     // D8：auth 被拒 → 凭据来源分支处置（storage 失效清空 / query 不动好 storage）+ 落 token
     // 输入视图。重连抑制位由 ws-client 在信号触发时置位（scheduleReconnect + visibility
-    // 两个自动重连触发点均短路）。
+    // 两个自动重连触发点均短路）。提交中的拒绝 = 用户刚提交的 token 被拒 → 置可见错误
+    // （非提交路径的拒绝如 storage 失效凭据，不误报错误）。
     onAuthRejected: () => {
+      if (tokenSubmit.value.submitting) {
+        tokenSubmit.value = { submitting: false, error: 'invalid' }
+      }
       void profile.handleAuthFailure()
     },
     // effects = session 生命周期 / subagent / workflow 类下行的壳层接线点（桌面
     // useMessageEffects 注入）；移动壳 v1 无对应消费面（D7 面板族 Phase 2），回调全 optional
     // call，空对象安全。对话流主链不经此处（streamSubscribe per-session 通道 + config.sessions）。
     effects: {},
-    // key 原文透传是终态而非兜底：t 消费的 connection 域留守桌面壳 locale（无 ui 组件消费，
-    // 不入 ui locale 下沉域），移动壳 messages 无此域——透传 key 落在 pending reject 错误消息
-    // 里，移动壳消费面 console-only（app-runtime toast 降级 console），可辨识不崩，无需装配文案
-    t: (key: string) => key,
-    onRuntimeUnavailable: () => {},
+    // t 必须真实现而非 key 透传：core 用它构造断连错误消息（connection.disconnectedError /
+    // runtimeRestarting / runtimeUnavailable），消息经 session store listLoadError / pending
+    // reject 流入用户可见 UI（列表 loadError role=alert）。透传 key 会把裸 key 直出给用户。
+    // i18n.global.t 的复杂重载收窄为 (key, params?) => string（对齐 app-runtime 同款收窄）。
+    t: i18n.global.t as (key: string, params?: Record<string, unknown>) => string,
+    // 断连/重启用尽的对话流收口（对齐桌面 useMessageEffects.handleRuntimeUnavailable，减去
+    // extensionUI clearAllPending——移动壳无 extension UI）：断连宽限（10s）到期或重连放弃
+    // （failed）时，把在途 streaming 消息落终态、错误作为 assistant 消息插入对话流（项目
+    // 规则#3：错误必须重置状态）。不接线 = 断连后 composer 永久卡「生成中」。
+    onRuntimeUnavailable: (reason) => {
+      chatStore.finalizeAllStreaming(reason)
+    },
   })
 
-  // auth 结果 → UI 态（D4 处置接线）：connected = 验身成功（落 storage / 抹地址栏的时机）；
-  // token-input 由 onAuthRejected / onTokenInputRequired 侧写入，不被中间连接态覆盖（重试
-  // 连接期间保持输入视图，auth 结果落地时切换）。
+  // auth 结果 → UI 态（D4 处置接线）：connected = 验身成功（落 storage / 抹地址栏的时机，
+  // 同时收口 token 提交 submitting）；token-input 由 onAuthRejected / onTokenInputRequired 侧
+  // 写入，不被中间连接态覆盖（重试连接期间保持输入视图，auth 结果落地时切换）；failed =
+  // 重连预算用尽（终态，UI 落可行动指引），token-input 优先级高于 failed。
   watch(getState(), (s) => {
     if (s === 'connected') {
+      hasConnectedOnce.value = true
       shellConnectionState.value = 'connected'
+      tokenSubmit.value.submitting = false
       void profile.handleAuthSuccess()
       return
     }
-    if (shellConnectionState.value !== 'token-input') {
-      shellConnectionState.value = 'connecting'
-    }
+    if (shellConnectionState.value === 'token-input') return
+    shellConnectionState.value = s === 'failed' ? 'failed' : 'connecting'
   })
 
-  // 4. core transport/coordination 序列（远程 profile 分支：D4 凭据解析 → ws 连接发起）。
+  // 3. core transport/coordination 序列（远程 profile 分支：D4 凭据解析 → ws 连接发起）。
   await initConnection()
   await restoreSessions()
 
-  // 5. 挂载 App（多视图：列表/聊天/token 输入；i18n 装配是 ui 组件 useI18n 的前置）。
+  // 4. 挂载 App（多视图：列表/聊天/token 输入；i18n 装配是 ui 组件 useI18n 的前置）。
   createApp(App).use(createPinia()).use(i18n).mount('#app')
 }

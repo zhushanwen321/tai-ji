@@ -17,9 +17,12 @@
  * 无挂起弹窗时 noop 幂等（迟到批准对已删 pending noop 语义的前端对称面）。
  *
  * 回传流：用户批准/拒绝 → Dialog 经 inject(PERMISSION_TRANSPORT_KEY) 调
- * transport.approve/revoke → 本 composable 调 api/domains/plugin 的
- * approvePermissions/revokePermissions（command('plugin.approvePermissions' /
- * 'plugin.revokePermissions')）→ runtime plugin-service → reply config.plugins。
+ * transport.approve/deny → 本 composable 调 api/domains/plugin 的
+ * approvePermissions/denyPermissions（command('plugin.approvePermissions' /
+ * 'plugin.denyPermissions')）→ runtime plugin-service → reply config.plugins。
+ *
+ * 失败语义（BM3 假成功红线）：RPC reject 时 pending 保持 true（弹窗不关）+ error=true
+ * （Dialog 渲染 role=alert 错误行），用户可重试；提交入口乐观清错，新请求到达清零。
  *
  * 全局弹窗（session 无关）：permissionRequest 一次一个，新请求到来覆盖旧 state
  * （不做队列）。
@@ -36,8 +39,10 @@ interface PermissionRequestState {
   pluginId: string
   /** 插件申请的权限列表 */
   permissions: string[]
-  /** 请求是否挂起（true=弹窗打开；RPC 回传成功/失败后置 false） */
+  /** 请求是否挂起（true=弹窗打开；RPC 回传成功后置 false；失败保持 true 供重试） */
   pending: boolean
+  /** 上次提交是否失败（失败时弹窗内显形错误行；下次提交入口乐观清错，新请求到达清零） */
+  error: boolean
 }
 
 /**
@@ -50,6 +55,7 @@ const state = reactive<PermissionRequestState>({
   pluginId: '',
   permissions: [],
   pending: false,
+  error: false,
 })
 
 /** bus / WS 订阅退订句柄（HMR/重复初始化幂等：先退订旧 handler）。 */
@@ -76,6 +82,8 @@ export function initPermissionRequest(app: App, bus: InternalEventBus): void {
     state.pluginId = e.request.pluginId
     state.permissions = e.request.permissions
     state.pending = true
+    // 新请求覆盖旧弹窗：上一单的失败错误态不残留（BM3 错误行只描述当前弹窗的提交结果）
+    state.error = false
   })
 
   // 超时撤窗（timeout-plugin-service D3）：审批等待到期，runtime 取消本次激活并广播。
@@ -88,31 +96,37 @@ export function initPermissionRequest(app: App, bus: InternalEventBus): void {
     // 新请求覆盖后，旧插件的迟到广播只应 noop）；无挂起弹窗时 noop 幂等。
     if (state.pending && state.pluginId === payload.pluginId) {
       state.pending = false
+      state.error = false
     }
   })
 
-  // 真实 transport：转发 WS 命令（plugin.approvePermissions / plugin.revokePermissions）。
+  // 真实 transport：转发 WS 命令（plugin.approvePermissions / plugin.denyPermissions）。
   // 壳层归位至此（permission-transport.ts 契约由本 provide 兑现）；RPC 收口在 api/domains/plugin.ts。
-  // 回传成功/失败均置 pending=false 关闭弹窗，避免卡死（项目规则#3 状态重置）。
+  // 失败语义（BM3 假成功红线）：RPC reject 时 pending 保持 true（弹窗不关）+ error=true
+  // 显形错误行供用户重试——catch 后静默关窗会被误读为「拒绝已送达」。
   const transport: PermissionTransport = {
     approve(pluginId: string, permissions: string[]): void {
+      state.error = false
       void pluginApi.approvePermissions(pluginId, permissions)
         .then(() => {
           state.pending = false
+          state.error = false
         })
         .catch((err: unknown) => {
           console.warn('[permission] approvePermissions failed', err)
-          state.pending = false
+          state.error = true
         })
     },
-    revoke(pluginId: string): void {
-      void pluginApi.revokePermissions(pluginId)
+    deny(pluginId: string): void {
+      state.error = false
+      void pluginApi.denyPermissions(pluginId)
         .then(() => {
           state.pending = false
+          state.error = false
         })
         .catch((err: unknown) => {
-          console.warn('[permission] revokePermissions failed', err)
-          state.pending = false
+          console.warn('[permission] denyPermissions failed', err)
+          state.error = true
         })
     },
   }

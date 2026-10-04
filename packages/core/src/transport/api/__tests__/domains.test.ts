@@ -348,12 +348,14 @@ describe('plugin 域', () => {
     expect(unsub).toBe(off)
   })
 
-  it('approvePermissions / revokePermissions 透传并丢弃 reply', async () => {
+  it('approvePermissions / revokePermissions / denyPermissions 透传并丢弃 reply', async () => {
     mockCommand.mockResolvedValue({ plugins: [] })
     await expect(plugin.approvePermissions('pl', ['fs.read'])).resolves.toBeUndefined()
     expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['plugin.approvePermissions', { pluginId: 'pl', permissions: ['fs.read'] }])
     await expect(plugin.revokePermissions('pl')).resolves.toBeUndefined()
     expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['plugin.revokePermissions', { pluginId: 'pl' }])
+    await expect(plugin.denyPermissions('pl')).resolves.toBeUndefined()
+    expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['plugin.denyPermissions', { pluginId: 'pl' }])
   })
 })
 

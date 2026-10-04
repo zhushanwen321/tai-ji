@@ -7,10 +7,14 @@
  * 展示插件申请的权限列表，用户可部分勾选批准（全选/部分）或拒绝。
  *
  * 回传双通道（clarify Q4，职责分离）：
- *  - emit('approve', selectedPermissions) / emit('revoke') —— 组件契约面，供父层 UI 编排（关浮层/置 pending=false）
- *  - transport.approve(pluginId, selected) / transport.revoke(pluginId) —— RPC 唯一通道（plugin.approvePermissions / plugin.revokePermissions）
+ *  - emit('approve', selectedPermissions) / emit('deny') —— 组件契约面，供父层 UI 编排（关浮层/置 pending=false）
+ *  - transport.approve(pluginId, selected) / transport.deny(pluginId) —— RPC 唯一通道（plugin.approvePermissions / plugin.denyPermissions，deny=拒绝本次申请不回收已授权限）
  *
  * transport 经 PERMISSION_TRANSPORT_KEY inject；未注入时只 emit 不 RPC（壳未接时不崩，design-review T3 cost）。
+ *
+ * 失败呈现（BM3 假成功防线）：RPC 失败时壳保持 pending=true（弹窗不关）并置
+ * error=true——本组件在权限列表与 actions 之间渲染 role=alert 错误行，用户可重试；
+ * 提交入口（approve/deny 点击）由壳乐观清错。
  */
 import { computed, inject, ref, watch } from 'vue'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../primitives/dialog'
@@ -25,11 +29,13 @@ const props = defineProps<{
   permissions: string[]
   /** 请求是否挂起（控制浮层 open；壳从消息生命周期驱动） */
   pending: boolean
+  /** 上次提交是否失败（true=弹窗内显形错误行，用户可重试；壳在下次提交入口乐观清错） */
+  error?: boolean
 }>()
 
 const emit = defineEmits<{
   approve: [permissions: string[]]
-  revoke: []
+  deny: []
 }>()
 
 const transport = inject(PERMISSION_TRANSPORT_KEY, null)
@@ -72,10 +78,10 @@ function onApprove(): void {
   transport?.approve(props.pluginId, [...selected.value])
 }
 
-/** 拒绝：emit 通知 + transport RPC */
-function onRevoke(): void {
-  emit('revoke')
-  transport?.revoke(props.pluginId)
+/** 拒绝本次申请：emit 通知 + transport RPC（不回收已授权限） */
+function onDeny(): void {
+  emit('deny')
+  transport?.deny(props.pluginId)
 }
 </script>
 
@@ -115,9 +121,12 @@ function onRevoke(): void {
         </label>
       </div>
 
+      <!-- 提交失败错误行（BM3）：弹窗保持打开供重试，role=alert 供辅助技术播报 -->
+      <p v-if="error" role="alert" data-testid="permission-dialog-error">{{ '审批提交失败，请检查连接后重试' }}</p>
+
       <!-- actions -->
       <div class="flex justify-end gap-2 pt-2">
-        <Button variant="ghost" data-testid="permission-reject" @click="onRevoke">{{ '拒绝' }}</Button>
+        <Button variant="ghost" data-testid="permission-reject" @click="onDeny">{{ '拒绝' }}</Button>
         <Button variant="default" data-testid="permission-approve" :disabled="selected.length === 0" @click="onApprove">
           {{ '批准' }}
         </Button>

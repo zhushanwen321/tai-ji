@@ -4,6 +4,9 @@
 export default {
   mobile: {
     connecting: 'Connecting…',
+    reconnecting: 'Disconnected, reconnecting…',
+    connectionFailed: 'Connection failed',
+    connectionFailedHint: 'Refresh this page to retry; if it keeps failing, re-scan the QR code on your desktop',
     tabs: {
       sessions: 'Sessions',
       chat: 'Chat',
@@ -45,10 +48,26 @@ export default {
       hint: 'Re-scan the QR code on your desktop (Settings → Remote Access), or paste a token below',
       placeholder: 'Paste access token',
       submit: 'Connect',
+      invalid: 'Token is invalid or has been rotated — re-scan on your desktop',
+      submitFailed: 'Failed to start connection — check your network and retry',
     },
     mermaid: {
       placeholder: 'View chart on desktop',
     },
     pasteImageFallback: '[Image paste: desktop only]',
+  },
+}
+
+/**
+ * connection domain (core transport builds disconnect errors via ports.t; keys mirror
+ * the desktop renderer locale domain of the same name). Kept out of the default export
+ * (the mobile-locale guard requires shell-owned files to be mobile-namespace only);
+ * merged into top-level messages by the i18n.ts assembly point.
+ */
+export const connectionEn = {
+  connection: {
+    disconnectedError: 'Connection lost',
+    runtimeRestarting: 'Runtime is restarting',
+    runtimeUnavailable: 'Runtime unavailable',
   },
 }

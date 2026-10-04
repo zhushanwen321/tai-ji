@@ -16,12 +16,15 @@
  *
  * 依赖方向：bridge-handlers → electron(ipcMain) + interfaces + remote-access(store/lan)
  */
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, BrowserWindow, app } from 'electron'
+import { statSync } from 'node:fs'
 import { homedir, networkInterfaces } from 'node:os'
 import { sep } from 'node:path'
 import { getDataDir } from '@taiji/shared/paths'
+import type { RemoteAccessConfig } from '@taiji/shared'
 import type { IpcHandlerDeps } from '../interfaces.js'
 import { enumerateLanAddresses } from '../remote-access/lan-addresses.js'
+import { resolveMobileDistPath } from '../remote-access/mobile-dist.js'
 import { readRemoteAccessConfig, rotateRemoteAccessToken, setRemoteAccessEnabled } from '../remote-access/store.js'
 import { isValidRemoteAccessEnabled } from './input-validators.js'
 
@@ -61,10 +64,10 @@ export function registerBridgeHandlers(deps: IpcHandlerDeps): void {
   // LAN IPv4 枚举 × 当前 runtime 端口（runtime 未启动 → 空列表，面板不产死链接）。
   ipcMain.handle('get-remote-access-info', () => buildRemoteAccessInfo(deps))
 
-  // 轮换 token：重写文件即生效（runtime 每次握手热读，不触发重启），返回新配置
+  // 轮换 token：重写文件即生效（runtime 每次握手热读，不触发重启），返回新配置。
+  // 复用轮换返回值构建 payload（同步写读之间无其他写方，读回恒等于写入值，免一次文件读）。
   ipcMain.handle('rotate-remote-access-token', () => {
-    rotateRemoteAccessToken()
-    return buildRemoteAccessInfo(deps)
+    return buildRemoteAccessInfo(deps, rotateRemoteAccessToken())
   })
 
   // 开关切换：先落盘，开关状态实际变化且 runtime 在跑时重启 runtime（listen host 与
@@ -112,33 +115,51 @@ export function registerBridgeHandlers(deps: IpcHandlerDeps): void {
  * 在 createWindow / window close 时触发。
  */
 export function broadcastWindowList(): void {
-  const allWindows = BrowserWindow.getAllWindows()
-  for (const win of allWindows) {
-    if (!win.isDestroyed()) {
-      win.webContents.send('window-list-updated')
-    }
-  }
+  broadcastToAllWindows('window-list-updated')
 }
 
 // ── remote-access 连接信息（helper，模式对齐 broadcastWindowList：实时取窗口，不存引用）──
 
-/** 连接信息 payload（renderer 面板消费；token 仅桌面 IPC 通道分发，不走 HTTP 面）。 */
-interface RemoteAccessInfo {
-  enabled: boolean
-  token: string
-  createdAt: string
+/** 连接信息 payload（renderer 面板消费；token 仅桌面 IPC 通道分发，不走 HTTP 面）。
+ *  配置字段 extends 契约 SSOT RemoteAccessConfig（禁止复制定义）。 */
+interface RemoteAccessInfo extends RemoteAccessConfig {
   /** LAN 直连候选（`http://<ip>:<port>`；runtime 未启动为空数组） */
   urls: string[]
+  /** 移动壳 dist 产物就绪（E5 静态面禁用时 false，面板显形警告） */
+  mobileDistReady: boolean
+}
+
+/**
+ * 移动壳 dist 产物就绪探测（面板读取时刻的点测）。
+ *
+ * [时间点] 本探测发生在面板读取时刻，与 runtime 启动期的 E5 探测
+ * （resolveMobileStaticRoot）存在窗口差——两次探测之间 dist 可能被构建/删除，
+ * 本结论是可接受的近似（E5 显形的目标是「用户有提示」，静态面挂载的权威判据
+ * 仍在 runtime 启动期探测）。
+ */
+function isMobileDistReady(): boolean {
+  // 运行环境三元组取法对齐 supervisor/process-control.ts spawnRuntimeProcess 的既有形态
+  try {
+    return statSync(
+      resolveMobileDistPath({
+        isPackaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        appPath: app.getAppPath(),
+      }),
+    ).isDirectory()
+  } catch {
+    return false
+  }
 }
 
 /** 当前配置 + LAN 候选（端口来自 supervisor 的既有端口发现，未启动为 null → 空列表）。 */
-function buildRemoteAccessInfo(deps: IpcHandlerDeps): RemoteAccessInfo {
-  const config = readRemoteAccessConfig()
+function buildRemoteAccessInfo(deps: IpcHandlerDeps, config: RemoteAccessConfig = readRemoteAccessConfig()): RemoteAccessInfo {
   return {
     enabled: config.enabled,
     token: config.token,
     createdAt: config.createdAt,
     urls: enumerateLanAddresses(networkInterfaces(), deps.runtime.port),
+    mobileDistReady: isMobileDistReady(),
   }
 }
 
@@ -162,10 +183,10 @@ async function restartRuntimeForRemoteAccess(deps: IpcHandlerDeps): Promise<void
 }
 
 /** 广播事件到所有存活窗口（对齐 RuntimeSupervisor.broadcastToAllWindows 语义）。 */
-function broadcastToAllWindows(channel: string, payload: unknown): void {
+function broadcastToAllWindows(channel: string, ...payload: unknown[]): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
-      win.webContents.send(channel, payload)
+      win.webContents.send(channel, ...payload)
     }
   }
 }

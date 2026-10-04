@@ -92,15 +92,15 @@ describe('U1: ReplyPayloadMap — key 覆盖 RPC request type', () => {
     expect(sample.content).toBe('hello')
   })
 
-  it('plugin.* 9 个 RPC key 全部映射存在（W20：ReplyPayloadMap SSOT 完整性）', () => {
-    // plugin-message-handler.ts 对 9 个 plugin.* 请求都发了 reply，ReplyPayloadMap 必须全部登记。
+  it('plugin.* 10 个 RPC key 全部映射存在（W20：ReplyPayloadMap SSOT 完整性）', () => {
+    // plugin-message-handler.ts 对 10 个 plugin.* 请求都发了 reply，ReplyPayloadMap 必须全部登记。
     // 此处只断言「key 存在且类型可赋值」——具体 shape 由 ServerMessageMap['config.plugins']/
     // ['plugin:config']/['pong'] 定义，下面三个 it 分别精确校验。
     type PluginKeys =
       | 'plugin.list' | 'plugin.toggle' | 'plugin.uninstall' | 'plugin.install'
-      | 'plugin.approvePermissions' | 'plugin.revokePermissions'
+      | 'plugin.approvePermissions' | 'plugin.revokePermissions' | 'plugin.denyPermissions'
       | 'plugin.executeCommand' | 'plugin.config.get' | 'plugin.config.set'
-    // 把 ReplyPayloadMap 收窄到这 9 个 key，若任一缺失编译报错（编译期防御）。
+    // 把 ReplyPayloadMap 收窄到这 10 个 key，若任一缺失编译报错（编译期防御）。
     type PluginSubset = Pick<ReplyPayloadMap, PluginKeys>
     const _check: PluginSubset = {
       'plugin.list': undefined as unknown as ReplyPayloadMap['plugin.list'],
@@ -109,25 +109,27 @@ describe('U1: ReplyPayloadMap — key 覆盖 RPC request type', () => {
       'plugin.install': undefined as unknown as ReplyPayloadMap['plugin.install'],
       'plugin.approvePermissions': undefined as unknown as ReplyPayloadMap['plugin.approvePermissions'],
       'plugin.revokePermissions': undefined as unknown as ReplyPayloadMap['plugin.revokePermissions'],
+      'plugin.denyPermissions': undefined as unknown as ReplyPayloadMap['plugin.denyPermissions'],
       'plugin.executeCommand': undefined as unknown as ReplyPayloadMap['plugin.executeCommand'],
       'plugin.config.get': undefined as unknown as ReplyPayloadMap['plugin.config.get'],
       'plugin.config.set': undefined as unknown as ReplyPayloadMap['plugin.config.set'],
     }
-    expect(Object.keys(_check)).toHaveLength(9)
+    expect(Object.keys(_check)).toHaveLength(10)
   })
 
-  it('plugin.list/toggle/uninstall/install/approve/revoke 映射到 config.plugins（含 plugins 字段）', () => {
-    // 6 个变更型请求都 reply 'config.plugins' { plugins }（plugin-message-handler.ts:31/35/39/43/47/71）
+  it('plugin.list/toggle/uninstall/install/approve/revoke/deny 映射到 config.plugins（含 plugins 字段）', () => {
+    // 7 个变更型请求都 reply 'config.plugins' { plugins }（plugin-message-handler.ts 分发表）
     type PluginsReply = ReplyPayloadMap['plugin.list']
     const sample: PluginsReply = { plugins: [] }
     expect(sample.plugins).toEqual([])
-    // 同类型引用一致性（任取其一即可代表其余 5 个）
+    // 同类型引用一致性（任取其一即可代表其余 6 个）
     const _t1: ReplyPayloadMap['plugin.toggle'] = sample
     const _t2: ReplyPayloadMap['plugin.uninstall'] = sample
     const _t3: ReplyPayloadMap['plugin.install'] = sample
     const _t4: ReplyPayloadMap['plugin.approvePermissions'] = sample
     const _t5: ReplyPayloadMap['plugin.revokePermissions'] = sample
-    void [_t1, _t2, _t3, _t4, _t5]
+    const _t6: ReplyPayloadMap['plugin.denyPermissions'] = sample
+    void [_t1, _t2, _t3, _t4, _t5, _t6]
   })
 
   it('plugin.executeCommand 映射到 pong（ack 型，无 payload 字段）', () => {

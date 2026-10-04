@@ -39,7 +39,7 @@ import { useToast } from '@/composables/useToast'
 import type { RemoteAccessConnectionInfo, RemoteAccessToggleResult } from '@/lib/ipc'
 
 function makeInfo(overrides: Partial<RemoteAccessConnectionInfo> = {}): RemoteAccessConnectionInfo {
-  return { enabled: false, token: '', createdAt: '2026-09-19T00:00:00Z', urls: [], ...overrides }
+  return { enabled: false, token: '', createdAt: '2026-09-19T00:00:00Z', urls: [], mobileDistReady: true, ...overrides }
 }
 
 const ENABLED_INFO: RemoteAccessConnectionInfo = {
@@ -47,6 +47,7 @@ const ENABLED_INFO: RemoteAccessConnectionInfo = {
   token: 'a'.repeat(64),
   createdAt: '2026-09-19T00:00:00Z',
   urls: ['http://192.168.1.5:3210'],
+  mobileDistReady: true,
 }
 
 const FAKE_QR = 'data:image/png;base64,FAKEQR'
@@ -105,6 +106,8 @@ describe('RemoteAccessPage 开态渲染', () => {
     )
     // 警告文案区渲染（design 指定文案 key）
     expect(wrapper.find('[data-testid="remote-access-warning"]').exists()).toBe(true)
+    // 产物就绪（mobileDistReady=true）→ E5 警告条不渲染
+    expect(wrapper.find('[data-testid="remote-access-dist-missing"]').exists()).toBe(false)
   })
 
   it('urls 为空（runtime 未运行）：渲染空态说明，不渲染链接与二维码', async () => {
@@ -114,6 +117,25 @@ describe('RemoteAccessPage 开态渲染', () => {
 
     expect(wrapper.find('[data-testid="remote-access-no-urls"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="remote-access-url"]').exists()).toBe(false)
+  })
+
+  it('E5 显形（AM1）：enabled 但 mobileDistReady=false → 渲染 role=alert 警告条（dev 文案指向恢复命令）', async () => {
+    ipcMocks.getRemoteAccessInfo.mockResolvedValue(makeInfo({ enabled: true, mobileDistReady: false }))
+    wrapper = mount(RemoteAccessPage)
+    await flushPromises()
+
+    const alert = wrapper.find('[data-testid="remote-access-dist-missing"]')
+    expect(alert.exists()).toBe(true)
+    expect(alert.attributes('role')).toBe('alert')
+    // vitest 环境 import.meta.env.DEV=true → dev 文案（含本地恢复命令）；prod 文案分流在打包形态生效
+    expect(alert.text()).toContain('pnpm --filter @taiji/mobile-renderer build')
+  })
+
+  it('E5 显形：关态或产物就绪时警告条不渲染', async () => {
+    ipcMocks.getRemoteAccessInfo.mockResolvedValue(makeInfo({ enabled: false, mobileDistReady: false }))
+    wrapper = mount(RemoteAccessPage)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="remote-access-dist-missing"]').exists()).toBe(false)
   })
 
   it('多地址（多网卡）：渲染地址选择器且默认展示首个候选的完整链接', async () => {

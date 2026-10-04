@@ -20,7 +20,7 @@
 import { randomBytes } from 'node:crypto'
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { REMOTE_ACCESS_FILENAME, type RemoteAccessConfig } from '@taiji/shared'
+import { REMOTE_ACCESS_FILENAME, REMOTE_TOKEN_HEX64, type RemoteAccessConfig } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 
 /** remote token 熵：32 字节 = 256 bit（hex 编码后 64 字符），对齐 runtime-token 量级。 */
@@ -32,9 +32,6 @@ const REMOTE_TOKEN_BYTES = 32
  */
 const REMOTE_ACCESS_FILE_MODE = 0o600
 
-/** token 契约形态：64 位 hex 小写（与 runtime 读侧 REMOTE_TOKEN_HEX64 同一判据）。 */
-const REMOTE_TOKEN_HEX64 = /^[0-9a-f]{64}$/
-
 /** 配置文件 JSON 缩进（人类可读落盘，与 dataDir 内其他 JSON 配置文件一致）。 */
 const CONFIG_JSON_INDENT = 2
 
@@ -44,8 +41,8 @@ export function generateRemoteAccessToken(): string {
 }
 
 /** 默认配置工厂：关态 + 新 token + 当前时刻（缺文件/E10 重建共用）。 */
-export function createDefaultRemoteAccessConfig(now: Date = new Date()): RemoteAccessConfig {
-  return { enabled: false, token: generateRemoteAccessToken(), createdAt: now.toISOString() }
+function createDefaultRemoteAccessConfig(): RemoteAccessConfig {
+  return { enabled: false, token: generateRemoteAccessToken(), createdAt: new Date().toISOString() }
 }
 
 /**
@@ -115,7 +112,7 @@ export function readRemoteAccessConfig(dataDir?: string): RemoteAccessConfig {
  * @param raw 文件原始内容
  * @param dataDir 可选数据根目录（测试注入）
  */
-export function ensureRemoteAccessIntegrity(raw: string, dataDir?: string): RemoteAccessConfig {
+function ensureRemoteAccessIntegrity(raw: string, dataDir?: string): RemoteAccessConfig {
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)

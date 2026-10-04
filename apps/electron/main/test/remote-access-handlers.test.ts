@@ -18,15 +18,17 @@
  * 运行：cd apps/electron/main && npx vitest run test/remote-access-handlers.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { REMOTE_ACCESS_FILENAME } from '@taiji/shared'
 
-// electron mock：ipcMain.handle 捕获 handler 供直接调用；getAllWindows 可控
+// electron mock：ipcMain.handle 捕获 handler 供直接调用；getAllWindows 可控；
+// app 三元组供 mobileDistReady 探测（AM1）——getAppPath 可控指向临时 dist 根
 const handlers = new Map<string, (...args: unknown[]) => unknown>()
 // 返回类型放宽为 unknown[]：window 桩（makeWindow）作为广播目标注入
 const getAllWindowsMock = vi.hoisted(() => vi.fn((): unknown[] => []))
+const getAppPathMock = vi.hoisted(() => vi.fn((): string => '/mock-repo/apps/electron'))
 
 vi.mock('electron', () => ({
   ipcMain: {
@@ -35,6 +37,7 @@ vi.mock('electron', () => ({
     }),
   },
   BrowserWindow: Object.assign(vi.fn(), { getAllWindows: getAllWindowsMock }),
+  app: { isPackaged: false, getAppPath: getAppPathMock },
 }))
 
 // networkInterfaces mock（LAN 枚举确定性；homedir 等保留真实实现）
@@ -242,5 +245,38 @@ describe('remote-access 连接信息 IPC', () => {
     // 缺文件场景未落盘（guard 在写之前拒绝）
     expect(existsSync(CONFIG_PATH)).toBe(true) // seed 过，未被改写
     expect(JSON.parse(readConfigRaw()).enabled).toBe(false)
+  })
+
+  // ── mobileDistReady 探测（AM1：E5 显形，bridge 面板读时点测）──────────────
+  // getAppPath 指向临时根 <DIST_ROOT>/apps/electron → resolveMobileDistPath
+  // 解析为 <DIST_ROOT>/packages/mobile-renderer/dist，目录存在性完全由测试控制。
+  describe('mobileDistReady 探测', () => {
+    const DIST_ROOT = mkdtempSync(join(tmpdir(), 'remote-access-dist-'))
+    const MOBILE_DIST = join(DIST_ROOT, 'packages', 'mobile-renderer', 'dist')
+
+    afterAll(() => {
+      rmSync(DIST_ROOT, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      getAppPathMock.mockReturnValue('/mock-repo/apps/electron')
+    })
+
+    it('dist 目录存在 → mobileDistReady=true', async () => {
+      mkdirSync(MOBILE_DIST, { recursive: true })
+      getAppPathMock.mockReturnValue(join(DIST_ROOT, 'apps', 'electron'))
+      seedConfig(true)
+      await loadHandlers()
+
+      const info = (await handlers.get('get-remote-access-info')!()) as { mobileDistReady: boolean }
+      expect(info.mobileDistReady).toBe(true)
+    })
+
+    it('dist 目录缺失 → mobileDistReady=false（statSync ENOENT 降级 false，不抛错）', async () => {
+      rmSync(MOBILE_DIST, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      getAppPathMock.mockReturnValue(join(DIST_ROOT, 'apps', 'electron'))
+      seedConfig(true)
+      await loadHandlers()
+
+      const info = (await handlers.get('get-remote-access-info')!()) as { mobileDistReady: boolean }
+      expect(info.mobileDistReady).toBe(false)
+    })
   })
 })

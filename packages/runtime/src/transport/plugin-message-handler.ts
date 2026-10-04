@@ -17,6 +17,7 @@ export class PluginMessageHandler {
   /** D1: 本 handler 认领的 ClientMessageType 清单。 */
   readonly handles: ClientMessageType[] = [
     'plugin.list', 'plugin.toggle', 'plugin.uninstall', 'plugin.approvePermissions', 'plugin.revokePermissions',
+    'plugin.denyPermissions',
     'plugin.executeCommand', 'plugin.config.get', 'plugin.config.set', 'plugin.install', 'plugin.uiResponse',
     'plugin.mountPoints.sync',
   ]
@@ -39,6 +40,7 @@ export class PluginMessageHandler {
 /** 本 handler 认领的 plugin.* type 全集（与 handles 清单一一对应，TS 层收窄用）。 */
 type PluginHandledType =
   | 'plugin.list' | 'plugin.toggle' | 'plugin.uninstall' | 'plugin.approvePermissions' | 'plugin.revokePermissions'
+  | 'plugin.denyPermissions'
   | 'plugin.executeCommand' | 'plugin.config.get' | 'plugin.config.set' | 'plugin.install' | 'plugin.uiResponse'
   | 'plugin.mountPoints.sync'
 
@@ -75,6 +77,11 @@ async function handlePluginApprovePermissions(ctx: PluginHandlerContext, msg: Pl
 
 async function handlePluginRevokePermissions(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.revokePermissions'>, ws: WsType, pluginService: IPluginService): Promise<void> {
   await pluginService.revokePermissions(msg.payload.pluginId)
+  return ctx.reply(ws, msg.id, 'config.plugins', { plugins: pluginService.getDiscoveredPlugins() })
+}
+
+async function handlePluginDenyPermissions(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.denyPermissions'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  await pluginService.denyPermissions(msg.payload.pluginId)
   return ctx.reply(ws, msg.id, 'config.plugins', { plugins: pluginService.getDiscoveredPlugins() })
 }
 
@@ -142,6 +149,7 @@ const PLUGIN_CASE_HANDLERS: { readonly [K in PluginHandledType]: (
   'plugin.uninstall': handlePluginUninstall,
   'plugin.approvePermissions': handlePluginApprovePermissions,
   'plugin.revokePermissions': handlePluginRevokePermissions,
+  'plugin.denyPermissions': handlePluginDenyPermissions,
   'plugin.executeCommand': handlePluginExecuteCommand,
   'plugin.config.get': handlePluginConfigGet,
   'plugin.config.set': handlePluginConfigSet,

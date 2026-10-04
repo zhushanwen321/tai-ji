@@ -125,7 +125,7 @@ export type ClientMessageType =
   | 'auth'
   | 'plugin.list' | 'plugin.toggle'
   | 'plugin.install' | 'plugin.uninstall'
-  | 'plugin.approvePermissions' | 'plugin.revokePermissions'
+  | 'plugin.approvePermissions' | 'plugin.revokePermissions' | 'plugin.denyPermissions'
   | 'plugin.executeCommand'
   | 'plugin.config.get' | 'plugin.config.set'
   | 'plugin.uiResponse'
@@ -547,6 +547,7 @@ export interface ClientMessageMap {
   'plugin.uninstall': { pluginId: string }
   'plugin.approvePermissions': { pluginId: string; permissions: string[] }
   'plugin.revokePermissions': { pluginId: string }
+  'plugin.denyPermissions': { pluginId: string }
   'plugin.executeCommand': { pluginId: string; commandId: string; args?: Record<string, unknown> }
   'plugin.config.get': { pluginId: string; key?: string }
   'plugin.config.set': { pluginId: string; key: string; value: unknown }
@@ -2138,7 +2139,7 @@ export interface ReplyPayloadMap {
   'session.importCandidates': ServerMessageMap['session.importCandidates']
   'session.import': ServerMessageMap['session.import']
   // plugin.* RPC reply 映射（plugin-message-handler.ts 全部发 reply）：
-  //  - plugin.list / toggle / uninstall / install / approvePermissions / revokePermissions
+  //  - plugin.list / toggle / uninstall / install / approvePermissions / revokePermissions / denyPermissions
   //    → reply 'config.plugins' { plugins }（前端读 plugins 列表刷新 UI）
   //  - plugin.executeCommand → reply 'pong' {}（fire-and-forget ack，前端不读 payload）
   //  - plugin.config.get / set → reply 'plugin:config' { pluginId, config }（前端读 config 应用到设置面板）
@@ -2148,6 +2149,7 @@ export interface ReplyPayloadMap {
   'plugin.install': ServerMessageMap['config.plugins']
   'plugin.approvePermissions': ServerMessageMap['config.plugins']
   'plugin.revokePermissions': ServerMessageMap['config.plugins']
+  'plugin.denyPermissions': ServerMessageMap['config.plugins']
   'plugin.executeCommand': ServerMessageMap['pong']
   'plugin.config.get': ServerMessageMap['plugin:config']
   'plugin.config.set': ServerMessageMap['plugin:config']

@@ -45,7 +45,7 @@ import { reactive, ref } from 'vue'
 import type { Ref } from 'vue'
 import type { Segment, ServerMessage } from '@taiji/shared'
 import { segmentsToPrompt } from '@taiji/shared'
-import { setCompactQueueProviderForEffects, submitQueuedEntry } from '@taiji/core'
+import { randomUuid, setCompactQueueProviderForEffects, submitQueuedEntry } from '@taiji/core'
 import type { SubmitQueuedEntryDeps } from '@taiji/core'
 import { createInflightDedup } from '@taiji/core/foundation/create-inflight-dedup'
 import { chat as chatApi, session as sessionApi } from '@/api'
@@ -95,7 +95,7 @@ interface CompactQueuePartition {
 
 export interface CompactQueue {
   /**
-   * 入队一条待发消息，返回含 crypto.randomUUID() id 的条目（updateFor push）。
+   * 入队一条待发消息，返回含 randomUuid() id 的条目（updateFor push）。
    * [defer segments 化 / D-A1-1] segments = 入队快照的完整段（未传包 text 单段——纯文本
    * 等价形态）；submitText 仅 send.rejected 静默重入队路径传（原文本即提交文本），
    * 普通入队由 flush 提交时写入。
@@ -209,7 +209,7 @@ function createCompactQueue(): CompactQueue {
     // [defer segments 化 / D-A1-1] segments 缺省包 text 单段：QueuedMessage.segments 恒有值
     //（纯文本条目的等价形态——flush 序列化 / 气泡徽标判定统一消费，无 undefined 分支）。
     const entry: QueuedMessage = {
-      id: crypto.randomUUID(),
+      id: randomUuid(),
       text,
       segments: segments ?? [{ type: 'text', text }],
       submitText,

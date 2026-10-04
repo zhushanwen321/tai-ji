@@ -15,7 +15,6 @@
  *   3. 远程形态（ipc 无值，移动壳）→ connectionProfile.resolve() 注入的连接目标；
  *      未注入时显式失败（fail-fast，不静默降级）——profile 真实实现由移动壳装配注入
  *
- * 本地 URL 拼接单点在 ./local-runtime-url（勿在分支外内联重拼）。
  * mock 优先于 ipc 存在性判别是桌面等价性要求：electron 装配恒注入 ipc（含 VITE_MOCK 构建），
  * 若按 ipc 存在性先行会把 mock 构建导入本地分支（连真实 URL 而非 mock://）。
  *
@@ -51,8 +50,16 @@ import {
 import { resubscribeAll } from '../coordination/subscription-state'
 import * as pendingApi from './api/pending'
 import { transportUnavailableError } from './errors'
-import { localRuntimeUrl } from './local-runtime-url'
 import { BASE_PORT, DEV_PORT_OFFSET } from '@taiji/shared'
+
+/**
+ * 本地形态 runtime WS 地址（renderer-package-topology §2.4「连接发现策略收口」）。
+ * 本函数是连接发现链路上该 URL 形态的唯一拼接点（收口单点）——新增连接发起路径
+ * 一律经 useConnection 的形态分支取得连接目标，禁止在分支外内联重拼。
+ */
+function localRuntimeUrl(port: number): string {
+  return 'ws://localhost:' + port
+}
 
 // ── 端口契约（§10.2 D-1：renderer 装配点注入实现） ─────────────────
 
@@ -297,7 +304,13 @@ async function connectRemoteProfile(ports: ConnectionPorts): Promise<void> {
   }
   installAuthRejectionSignal()
   const resolved = await ports.connectionProfile.resolve()
-  connectWs(resolved.url, resolved.token ?? undefined)
+  // 无凭据形态必须显式传空串而非 undefined：ws-client 的 undefined 语义是「保留上次
+  // token / 无 token 模式」（内部退避重连复用设计），首连 currentToken=null 时会被
+  // 判为无 auth 模式直接 markConnected——auth 握手根本不发，runtime 的 fail-closed
+  // 拒绝（rejectAuth 只回给发过 auth 的连接）永远不可达，D8 恢复链（拒绝 →
+  // onAuthRejected → token 输入视图）整体断裂，客户端陷入假 connected 超时循环。
+  // 空串强制走握手：runtime 对空串回 bad_token → 拒绝信号可达 → 恢复链闭合。
+  connectWs(resolved.url, resolved.token ?? '')
 }
 
 /** 当前注入端口（requirePorts 已在 init 校验，此处于事件回调内兜底取值） */

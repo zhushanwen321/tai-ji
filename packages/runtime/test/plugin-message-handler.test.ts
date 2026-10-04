@@ -3,7 +3,7 @@
  *
  * 覆盖（complexity-debt 第二批 U08，handlePluginMessage switch→表驱动重构的行为锚定）：
  * - 前置守卫：pluginService null → sendError('handler_error')，不触分发表
- * - 11 个 plugin.* case 的 reply/error 路径（payload 透传 + 文案逐字节）
+ * - 12 个 plugin.* case 的 reply/error 路径（payload 透传 + 文案逐字节）
  * - plugin.install 的 invalid_params / success / failure(+error 缺省兜底) 三分支
  * - 落空语义：未知 type 不调用任何 service 方法、无 reply/error（原 switch 无 default）
  *
@@ -35,6 +35,7 @@ function makeHandler(pluginServiceMethods: Record<string, ReturnType<typeof vi.f
     uninstallPlugin: vi.fn().mockResolvedValue([]),
     approvePermissions: vi.fn().mockResolvedValue(undefined),
     revokePermissions: vi.fn().mockResolvedValue(undefined),
+    denyPermissions: vi.fn().mockResolvedValue(undefined),
     executeCommand: vi.fn().mockResolvedValue(undefined),
     getPluginConfig: vi.fn().mockResolvedValue({}),
     setPluginConfig: vi.fn().mockResolvedValue(undefined),
@@ -121,6 +122,14 @@ describe('PluginMessageHandler — 查询/操作类 case', () => {
     const { replies, handler, pluginService } = makeHandler({ getDiscoveredPlugins: vi.fn().mockReturnValue(discovered) })
     await handler.handlePluginMessage(buildMsg('plugin.revokePermissions', { pluginId: 'p5' }), WS)
     expect(pluginService.revokePermissions).toHaveBeenCalledWith('p5')
+    expect(replies).toEqual([{ id: 'm1', type: 'config.plugins', payload: { plugins: discovered } }])
+  })
+
+  it('plugin.denyPermissions → denyPermissions + reply 当前 plugins（拒绝本次申请，不回收已授权限）', async () => {
+    const discovered: unknown[] = []
+    const { replies, handler, pluginService } = makeHandler({ getDiscoveredPlugins: vi.fn().mockReturnValue(discovered) })
+    await handler.handlePluginMessage(buildMsg('plugin.denyPermissions', { pluginId: 'p5' }), WS)
+    expect(pluginService.denyPermissions).toHaveBeenCalledWith('p5')
     expect(replies).toEqual([{ id: 'm1', type: 'config.plugins', payload: { plugins: discovered } }])
   })
 
@@ -222,11 +231,12 @@ describe('PluginMessageHandler — 落空语义与 handles 清单', () => {
     expect(pluginService.getDiscoveredPlugins).not.toHaveBeenCalled()
   })
 
-  it('handles 清单含全部 11 个 plugin.* type', () => {
+  it('handles 清单含全部 12 个 plugin.* type', () => {
     const { handler } = makeHandler()
-    expect(handler.handles).toHaveLength(11)
+    expect(handler.handles).toHaveLength(12)
     expect(handler.handles).toEqual(expect.arrayContaining([
       'plugin.list', 'plugin.toggle', 'plugin.uninstall', 'plugin.approvePermissions', 'plugin.revokePermissions',
+      'plugin.denyPermissions',
       'plugin.executeCommand', 'plugin.config.get', 'plugin.config.set', 'plugin.install', 'plugin.uiResponse',
       'plugin.mountPoints.sync',
     ]))

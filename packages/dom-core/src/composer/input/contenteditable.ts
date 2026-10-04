@@ -22,6 +22,7 @@
  * - Enter（无 shift）→ emit('keydown', e)
  */
 import { ref, type Ref } from 'vue'
+import { randomUuid } from '@taiji/core'
 import type { Segment } from '@taiji/shared'
 import {
   getSegmentsFromEl,
@@ -62,7 +63,9 @@ function handleImagePasteEvent(
   const imageItem = pickClipboardImageItem(e)
   const file = imageItem?.getAsFile()
   if (!file) return false
-  const placeholderMark = `__paste_pending_${crypto.randomUUID()}__`
+  // randomUuid 而非 crypto.randomUUID：移动壳经 LAN http 访问是非安全上下文，
+  // crypto.randomUUID 为 undefined（secure-context-only API），直调在粘贴事件里裸抛。
+  const placeholderMark = `__paste_pending_${randomUuid()}__`
   deps.insertImageBadge(placeholderMark, placeholderMark, '粘贴中...', false)
   const sessionId = deps.getSessionId()
   void (async () => {
