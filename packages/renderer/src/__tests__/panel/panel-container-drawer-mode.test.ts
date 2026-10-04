@@ -10,7 +10,7 @@
  *   断言 drawer-panel + drawer-content DOM 存在（AC9/AC12 壳层载体）；drawer-tab-* 全量
  *   tab 按钮断言收拢在「注册表契约」用例（右抽屉终态 8 成员，其余用例只断言被测 tab）
  * - drawerOpen=true：DrawerPanel 在 drawer-area wrapper 内挂载（feat-chat-flow-width 手写
- *   flex 布局，替换 reka-ui Splitter：无 drawer main 占 75%、有 drawer 双侧 width 动画、
+ *   flex 布局，替换 reka-ui Splitter：无 drawer main 撑满（2026-10-04 二轮裁决）、有 drawer 双侧 width 动画、
  *   handle 拖动/键盘调整 + localStorage 持久化，见下方「动态宽度」describe）
  * - drawerOpen=false：DrawerPanel aside 卸载，drawer-area 收缩为 0%（width 动画承载者常驻）
  * - close 按钮关闭 → drawer 卸载（旧 side-drawer.test.ts 行为迁移；ESC 已随
@@ -461,7 +461,7 @@ describe('PanelContainer unread badge 壳侧补回（AC-13，旧 SideDrawer 逻�
   }, 60_000)
 })
 
-// ── 动态宽度（feat-chat-flow-width）：无 drawer main 75% / 有 drawer 拆分 + 拖动/键盘/持久化 ──
+// ── 动态宽度（feat-chat-flow-width）：无 drawer main 撑满 / 有 drawer 拆分 + 拖动/键盘/持久化 ──
 
 /** jsdom 无布局：mock splitArea rect（宽 1000px，右缘 x=1000），drawer 宽 = (right - clientX)/width */
 function mockSplitAreaRect(wrapper: Awaited<ReturnType<typeof mountContainer>>): void {
@@ -482,25 +482,25 @@ function areaStyle(wrapper: Awaited<ReturnType<typeof mountContainer>>, testid: 
 }
 
 describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
-  it('无 drawer：main-area 75% + margin 居中 + 内容封顶解除，drawer-area 0%，无 resize handle', async () => {
+  it('无 drawer：main-area 撑满（100%）+ margin 0 + 内容封顶解除，drawer-area 0%，无 resize handle', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 's-width-closed')
 
     const wrapper = await mountContainer()
     await nextTick()
 
-    expect(areaWidth(wrapper, 'main-area')).toBe('75%')
+    // 撑满语义（2026-10-04 二轮裁决）：对话流卡默认占满公共容器，拉开 drawer 才让位
+    expect(areaWidth(wrapper, 'main-area')).toBe('100%')
     const mainStyle = areaStyle(wrapper, 'main-area')
-    // standalone 居中：75% 容器两侧各 (100%-75%)/2 留白（显式 calc 而非 auto，保证开合动画可插值）
-    expect(mainStyle).toContain('margin-left: 12.5%')
-    expect(mainStyle).toContain('margin-right: 12.5%')
-    // 内容列封顶解除（.content-col 消费 --content-max-w；覆盖全局 720px → 内容占满 75% 区域）
+    expect(mainStyle).toContain('margin-left: 0%')
+    expect(mainStyle).toContain('margin-right: 0%')
+    // 内容列封顶解除（.content-col 消费 --content-max-w；覆盖全局 720px → 内容占满容器）
     expect(mainStyle).toContain('--content-max-w: 100%')
     expect(areaWidth(wrapper, 'drawer-area')).toBe('0%')
     expect(wrapper.find('[data-testid="drawer-resize-handle"]').exists()).toBe(false)
   }, 60_000)
 
-  it('有 drawer（默认）：main = calc(100% - 50% - 1px) + margin 0 贴左 + 封顶解除不变，drawer = 50%，handle 挂载', async () => {
+  it('有 drawer（默认）：main = calc(100% - 50% - 8px) + margin 0 贴左 + 封顶解除不变，drawer = 50%，handle 挂载', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 's-width-open')
     openDrawerTab('git')
@@ -508,7 +508,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     const wrapper = await mountContainer()
     await nextTick()
 
-    expect(areaWidth(wrapper, 'main-area')).toBe('calc(100% - 50% - 1px)')
+    expect(areaWidth(wrapper, 'main-area')).toBe('calc(100% - 50% - 8px)')
     // split：main 贴左（drawer 贴右），margin 0；--content-max-w 两态恒 100%（开合无值切换跳变）
     const mainStyle = areaStyle(wrapper, 'main-area')
     expect(mainStyle).toContain('margin-left: 0')
@@ -592,7 +592,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     let wrapper = await mountContainer()
     await nextTick()
     expect(areaWidth(wrapper, 'drawer-area')).toBe('35%')
-    expect(areaWidth(wrapper, 'main-area')).toBe('calc(100% - 35% - 1px)')
+    expect(areaWidth(wrapper, 'main-area')).toBe('calc(100% - 35% - 8px)')
     wrapper.unmount()
 
     // 非法（NaN）→ 默认 50
@@ -617,15 +617,15 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     expect(areaWidth(wrapper, 'drawer-area')).toBe('60%')
   }, 60_000)
 
-  it('开合切换：drawer 打开后 main 从 75% 动画到拆分比例（style 逐帧驱动，断言终态）', async () => {
+  it('开合切换：drawer 打开后 main 从撑满动画到拆分比例（style 逐帧驱动，断言终态）', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 's-width-toggle')
 
     const wrapper = await mountContainer()
     await nextTick()
-    expect(areaWidth(wrapper, 'main-area')).toBe('75%')
-    expect(areaStyle(wrapper, 'main-area')).toContain('margin-left: 12.5%')
-    expect(areaStyle(wrapper, 'main-area')).toContain('margin-right: 12.5%')
+    expect(areaWidth(wrapper, 'main-area')).toBe('100%')
+    expect(areaStyle(wrapper, 'main-area')).toContain('margin-left: 0%')
+    expect(areaStyle(wrapper, 'main-area')).toContain('margin-right: 0%')
 
     // 打开 drawer：main 收缩到 50% 拆分（居中 margin 归 0 贴左）
     // [HISTORICAL] 用例原名含「+ layout 事件派发」：taiji:splitter-layout 已随消费方
@@ -633,7 +633,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     // 派发断言随行为删除——全仓零监听方后保留派发断言等于锁死死事件。
     openDrawerTab('git')
     await nextTick()
-    expect(areaWidth(wrapper, 'main-area')).toBe('calc(100% - 50% - 1px)')
+    expect(areaWidth(wrapper, 'main-area')).toBe('calc(100% - 50% - 8px)')
     expect(areaStyle(wrapper, 'main-area')).toContain('margin-left: 0')
     expect(areaWidth(wrapper, 'drawer-area')).toBe('50%')
   }, 60_000)

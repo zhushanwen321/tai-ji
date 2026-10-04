@@ -5,10 +5,12 @@
     active panel 的 sessionId 跟随 session store.activeId（sidebar 选 session → 载入 panel）。
 
     三卡化（2026-10-04 用户裁决，推翻 D2 一体化生长）：对话流 / 右抽屉 / 底抽屉三块内容区
-    各自持 float-panel 壳（border/radius/bg/shadow-[var(--shadow-1)]），卡间 8px 缝由根容器
-    gap-2 承载；本组件与 MainPanel 只做布局，不持卡片视觉。PanelHeader / StatusBar 仍是
-    横跨工具条/状态条，不属任何卡。main 与 drawer 的宽度 handle 即卡缝本体（w-2 缝内
-    1px 视觉线，hover/drag 染色）——drawer 关闭时 handle 随 v-if 消失，无缝无残线。
+    各自持 float-panel 壳（border/radius/bg/shadow-[var(--shadow-1)]）；本组件与 MainPanel
+    只做布局，不持卡片视觉。PanelHeader 是对话流卡的卡头（2026-10-04 二轮裁决：header 只与
+    对话流构成整体，不横跨抽屉卡——右抽屉卡有自己的 L1 栏、底抽屉卡有自己的实例切换条）；
+    StatusBar 仍是横跨状态条。main 与 drawer 的宽度 handle 即卡缝本体（w-2 缝内 1px 视觉线，
+    hover/drag 染色）——drawer 关闭时 handle 随 v-if 消失，无缝无残线。间距：split 行与底抽屉
+    卡 12px（用户裁决二轮：底抽屉上沿边距加大）、底抽屉卡与 StatusBar 8px。
 
     Drawer 协调（W4 drawer-shell-integration）：drawer 固定挂本容器（单实例），恒作 flex 子项与
     Panel 各占一半并排（mode='split'），贴右展开（direction='right'）。单 panel 下不再有 overlay
@@ -30,18 +32,7 @@
     useSideDrawer 兼容层模块顶层 bindDrawerSessionId 维持（C1：兼容层本 wave 保留）。
     [display-containers §6.6 W0] 选中态五字段迁出（各内容域 selection 分区）；docked 死状态删除。
   -->
-  <div class="panel-container flex h-full w-full flex-col gap-2 overflow-hidden">
-    <PanelHeader
-      :session-label="sessionLabelOf(leaf)"
-      :session-dir="sessionDirOf(leaf)"
-      :session-id="leaf.sessionId ?? undefined"
-      :session-file="sessionFileOf(leaf)"
-      :git-branch="gitBranchOf(leaf)"
-      :git-indicator="gitIndicatorOf(leaf)"
-      :status="statusOf(leaf)"
-      @open-git="openDrawerTab('git')"
-      @toggle-drawer="onDrawerToggle()"
-    />
+  <div class="panel-container flex h-full w-full flex-col overflow-hidden">
     <!-- plan 模式状态带（PlanModeBar）与审批条已随 plan-mode-ux-refactor u-plan-bar 收敛到
          Panel 内 composer 下方一行（设计 §3.3 D1），本容器不再挂载。 -->
     <!-- 对话流 + drawer 动态宽度区（feat-chat-flow-width，手写 flex 替换 reka-ui Splitter）。
@@ -62,11 +53,24 @@
     <div ref="splitAreaEl" data-testid="split-area" class="relative flex min-h-0 flex-1 overflow-hidden">
       <div
         data-fs-scope="chat"
-        class="relative h-full min-w-0 overflow-hidden rounded-[10px] border border-border bg-surface shadow-[var(--shadow-1)]"
+        class="relative flex h-full min-w-0 flex-col overflow-hidden rounded-[10px] border border-border bg-surface shadow-[var(--shadow-1)]"
         :class="splitTransitionClass"
         :style="mainAreaStyle"
         data-testid="main-area"
       >
+        <!-- header 是对话流卡的组成部分（2026-10-04 用户裁决：header 只与对话流构成整体，
+             不再横跨抽屉卡）——右抽屉卡有自己的 L1 栏，底抽屉卡有自己的实例切换条。 -->
+        <PanelHeader
+          :session-label="sessionLabelOf(leaf)"
+          :session-dir="sessionDirOf(leaf)"
+          :session-id="leaf.sessionId ?? undefined"
+          :session-file="sessionFileOf(leaf)"
+          :git-branch="gitBranchOf(leaf)"
+          :git-indicator="gitIndicatorOf(leaf)"
+          :status="statusOf(leaf)"
+          @open-git="openDrawerTab('git')"
+          @toggle-drawer="onDrawerToggle()"
+        />
         <Panel
           :panel-id="leaf.id"
           :session-id="leaf.sessionId"
@@ -187,16 +191,16 @@
       data-testid="bottom-drawer"
       class="relative shrink-0 overflow-hidden"
       :class="bottomTransitionClass"
-      :style="{ height: bottomHeightStyle }"
+      :style="{ height: bottomHeightStyle, marginTop: bottomOpen ? '12px' : '8px' }"
     >
-      <!-- 上沿手柄（三卡化）：命中区跨进卡上方 8px 缝（-top-2 h-2），视觉线贴卡顶边——
+      <!-- 上沿手柄（三卡化）：命中区跨进卡上方缝（-top-3 h-3 覆盖 12px，视觉线贴卡顶边）——
            缝即拖拽区，可发现性与命中宽度一并解决（原 1px 线命中过窄）。 -->
       <div
         v-if="bottomOpen"
         role="separator"
         aria-orientation="horizontal"
         tabindex="0"
-        class="absolute inset-x-0 -top-2 z-10 h-2 cursor-row-resize touch-none select-none"
+        class="absolute inset-x-0 -top-3 z-10 h-3 cursor-row-resize touch-none select-none"
         :data-state="isBottomDragging ? 'drag' : undefined"
         data-testid="bottom-drawer-resize-handle"
         @pointerdown="onBottomHandlePointerDown"
@@ -228,7 +232,7 @@
          无数据时自隐藏；sessionId 绑定当前 leaf（per-session 项）。
          trailing 插槽不再注入（三卡化 2026-10-04：终端开关迁 PanelHeader，StatusBar 回落
          「有状态项才显示」的纯显隐形态）。 -->
-    <StatusBar :session-id="leaf.sessionId ?? null" />
+    <StatusBar class="mt-2" :session-id="leaf.sessionId ?? null" />
   </div>
 </template>
 

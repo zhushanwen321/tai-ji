@@ -9,7 +9,7 @@
  *
  * - 无 drawer：main 占 MAIN_STANDALONE_PCT% 且左右 margin calc 居中（两侧各 (100%-75%)/2 留白，
  *   对话流整体在工作区视觉居中），main 层 --content-max-w:100% 解除 720px 封顶（内容占满 75%）；
- * - 有 drawer：drawer 占 drawerPct%（默认 50），main 占剩侧（模板侧 calc(100% - drawerPct% - 1px)），
+ * - 有 drawer：drawer 占 drawerPct%（默认 50），main 占剩侧（模板侧 calc(100% - drawerPct% - 8px)），
  *   margin 0 贴左；--content-max-w 恒 100% 不随开合切换（内容 min(容器,容器)=容器，
  *   width/margin 全程可插值，开合动画无跳变）；
  * - 开合时双侧 width + margin transition（--duration-slow，与 DrawerPanel aside 淡入同时长）；
@@ -50,17 +50,18 @@ const PCT_SCALE = 100
 /** standalone 留白分摊两侧（左右各半，no-magic-numbers） */
 const MARGIN_SIDES = 2
 
-/** 无 drawer 时 main 区域占比（用户预期：无 drawer 3/4，有 drawer 动画到 1/2） */
-export const MAIN_STANDALONE_PCT = 75
+/** 无 drawer 时 main 区域占比（2026-10-04 二轮裁决：对话流卡默认撑满公共容器——
+ *  三卡化后公共容器 = 主区除侧栏外全部空间，拉开 drawer 才让位） */
+export const MAIN_STANDALONE_PCT = 100
 
 function clampDrawerPct(v: number): number {
   return Math.min(DRAWER_MAX_PCT, Math.max(DRAWER_MIN_PCT, v))
 }
 
-/** standalone 时 main 居中的两侧 margin（(100% - 75%) / 2 = 12.5%；显式值而非 margin:auto——
- *  auto 不可插值，开合动画会横跳。物理属性 margin-left/right 而非 margin-inline：水平 LTR 下
- *  等效，且 transition-[width,margin] 简写自然覆盖（logical 属性不受 margin 简写过渡影响）；
- *  用纯百分比而非 calc()：jsdom cssstyle 对 margin 的 calc 值校验不过（width 则可），测试可断言） */
+/** standalone 时 main 两侧 margin（撑满语义下恒 0%；保留公式与显式值形态——
+ *  margin 键在两态样式里保持同形，开合动画只过渡 width 不跳 margin。物理属性
+ *  margin-left/right 而非 margin-inline：水平 LTR 下等效，且 transition-[width,margin]
+ *  简写自然覆盖） */
 export const MAIN_STANDALONE_MARGIN = `${(PCT_SCALE - MAIN_STANDALONE_PCT) / MARGIN_SIDES}%`
 
 /** 恢复持久化的 drawer 宽度（非法/缺失回退默认 50） */
@@ -87,16 +88,16 @@ export function useDrawerSplitWidth(splitAreaEl: Ref<HTMLElement | null>, drawer
 
   /**
    * main-area 动态样式（宽度模型 SSOT，模板直连）：
-   * - standalone：width 75% + 左右 margin calc 居中 + --content-max-w:100%（解除全局 720px
-   *   封顶，对话流/composer 内容列占满 75% 区域）；
-   * - split：width calc(100% - drawerPct% - 1px) + margin 0 贴左（drawer 贴右）。
+   * - standalone：width 100%（撑满公共容器）+ margin 0；
+   * - split：width calc(100% - drawerPct% - 8px) + margin 0 贴左（8px = 卡缝宽，
+   *   handle 即缝本体；drawer 卡占 drawerPct%）。
    * --content-max-w 两态恒 100% 不切换：值不变 → 无过渡跳变，内容 width:100% 永远跟随容器，
    * 开合动画期间 min(容器,容器)=容器 全程连续。
    */
   const mainAreaStyle = computed<Record<string, string>>(() => ({
     '--content-max-w': '100%',
     ...(drawerOpen.value
-      ? { width: `calc(100% - ${drawerPct.value}% - 1px)`, marginLeft: '0', marginRight: '0' }
+      ? { width: `calc(100% - ${drawerPct.value}% - 8px)`, marginLeft: '0', marginRight: '0' }
       : { width: `${MAIN_STANDALONE_PCT}%`, marginLeft: MAIN_STANDALONE_MARGIN, marginRight: MAIN_STANDALONE_MARGIN }),
   }))
 
@@ -115,7 +116,7 @@ export function useDrawerSplitWidth(splitAreaEl: Ref<HTMLElement | null>, drawer
     isDragging.value = true
   }
 
-  /** 拖动中：drawer 宽 = 容器右缘到指针的水平占比（handle 在 drawer 左缘，1px 误差可忽略） */
+  /** 拖动中：drawer 宽 = 容器右缘到指针的水平占比（handle 在 drawer 左缘，缝宽误差可忽略） */
   function onHandlePointerMove(e: PointerEvent): void {
     const el = splitAreaEl.value
     if (!el || !isDragging.value) return
@@ -216,11 +217,12 @@ export function useBottomDrawerHeight(
     return `${bottomOpen.value ? pct : 0}%`
   })
 
-  /** 高度过渡（沿用现有 transition 体系加纵轴）：拖动期间移除过渡保证跟手 */
+  /** 高度 + 上间距过渡（沿用现有 transition 体系加纵轴；marginTop 随开合 12px↔8px，
+   *  二轮裁决底抽屉上沿边距加大）：拖动期间移除过渡保证跟手 */
   const bottomTransitionClass = computed(() =>
     isBottomDragging.value
       ? ''
-      : 'transition-[height] duration-[var(--duration-slow)] ease-[var(--ease)]',
+      : 'transition-[height,margin] duration-[var(--duration-slow)] ease-[var(--ease)]',
   )
 
   /** 上沿手柄拖动（pointer capture：同横轴，拖出元素外仍跟手；jsdom 兼容可选调用） */
