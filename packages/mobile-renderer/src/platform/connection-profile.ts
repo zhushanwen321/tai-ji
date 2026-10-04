@@ -13,7 +13,7 @@
 
 import type { ConnectionProfilePort, KVStorage, ResolvedConnectionProfile } from '@taiji/core'
 
-/** remote token 在 storage 的持久 key（验身成功才写入，G3 免重扫） */
+/** remote token 在 storage 的持久 key（验身成功才写入，G3 免重扫；登记 = data-source-registry 主表 #54） */
 export const REMOTE_TOKEN_STORAGE_KEY = 'taiji.remote-access.token'
 
 /** 凭据来源：URL query / storage / 手输（token 输入视图提交；语义同 query——验身成功落盘 + 抹地址栏） */
