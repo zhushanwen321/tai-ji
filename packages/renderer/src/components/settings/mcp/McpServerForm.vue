@@ -43,9 +43,10 @@
 
         <div class="flex flex-col gap-1">
           <Label class="text-[12px] text-neutral-fg">{{ t('settings.mcp.fieldTransport') }}</Label>
+          <!-- 编辑态可切换（设计 D4/D7 编辑流切换路径；另一类型字段清空 =
+               onTransportChange 表单级 + store buildFormConfig 条目键级两级保证） -->
           <Select
             :model-value="transport"
-            :disabled="!!editing"
             @update:model-value="onTransportChange"
           >
             <SelectTrigger class="h-8 w-full text-[12px]" data-testid="mcp-form-transport">

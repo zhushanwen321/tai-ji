@@ -9,7 +9,7 @@
  *    归并同名，D4）+ 校验不过不调协议；
  *  - 双 tab：表单 → 代码自动序列化为包装形态；代码 → 表单解析成功才切换、失败留代码模式显示
  *    解析错误；添加流裸形态拦截（包装形态指引，D7）；编辑流名称锁定 + 改包装键名拦截（改名 =
- *    删除后重建，D7）；
+ *    删除后重建，D7）；编辑流切换传输类型（§4 断言①用户入口：payload 只含新类型键，D7 键级切换）；
  *  - 启停切换调协议（update 写 enabled，服务端终态校准）；删除确认（取消不调协议，确认后删除）；
  *  - 连接测试按钮调协议 + 「测试中」过程态徽标；
  *  - 状态徽标三类来源（D8）：config「配置有误」/ ui-local「未测试·测试中·测试超时」/ probe
@@ -31,8 +31,10 @@ const mcpDomainMock = vi.hoisted(() => ({
   listMcpServers: vi.fn(),
   addMcpServer: vi.fn(),
   updateMcpServer: vi.fn(),
+  setMcpServerEnabled: vi.fn(),
   removeMcpServer: vi.fn(),
   testMcpServer: vi.fn(),
+  cancelMcpServerTest: vi.fn(),
 }))
 const toastMock = vi.hoisted(() => ({
   info: vi.fn(),
@@ -45,6 +47,7 @@ vi.mock('@/composables/useToast', () => ({
 }))
 
 import McpSection from '@/components/settings/mcp/McpSection.vue'
+import { pickRekaOption } from '../helpers/reka-select-harness'
 import { dispatchGlobal } from '@taiji/core/transport/api'
 import zhCN from '@/i18n/locales/zh-CN/settings'
 import enUS from '@/i18n/locales/en-US/settings'
@@ -67,7 +70,7 @@ function entryFixture(name = 'filesystem', value: McpServerEntryValue = stdioEnt
 }
 
 function listFixture(servers: McpServerEntry[], corruption: McpListResult['corruption'] = null): McpListResult {
-  return { servers, corruption }
+  return { servers, corruption, agentDir: '/data/.taiji-dev/agent' }
 }
 
 let wrapper: VueWrapper | null = null
@@ -110,7 +113,9 @@ beforeEach(() => {
   mcpDomainMock.addMcpServer.mockResolvedValue({ ok: true, entry: entryFixture() })
   mcpDomainMock.updateMcpServer.mockResolvedValue({ ok: true, entry: entryFixture() })
   mcpDomainMock.removeMcpServer.mockResolvedValue({ ok: true, entry: entryFixture() })
+  mcpDomainMock.setMcpServerEnabled.mockResolvedValue({ ok: true, entry: entryFixture() })
   mcpDomainMock.testMcpServer.mockResolvedValue({ testId: 'test-1' })
+  mcpDomainMock.cancelMcpServerTest.mockResolvedValue({ cancelled: true })
 })
 
 afterEach(() => {
@@ -376,6 +381,33 @@ describe('McpSection（pi-mcp-management U3）', () => {
     wrapper?.unmount()
   })
 
+  it('编辑流切换传输类型：携带显式 type 的 http 条目切 stdio 保存 → payload 只含新类型键（§4 断言①用户入口，D7 切换清空另一类型字段）', async () => {
+    mcpDomainMock.listMcpServers.mockResolvedValue(
+      listFixture([entryFixture('mixed-src', { type: 'http', url: 'https://x', headers: { Authorization: 'Bearer t' }, exposure: 'codemode' })]),
+    )
+    mcpDomainMock.updateMcpServer.mockResolvedValue({ ok: true, entry: entryFixture('mixed-src') })
+    const w = mountSection()
+    await flushPromises()
+
+    await w.find('[data-testid="mcp-edit-mixed-src"]').trigger('click')
+    await flushPromises()
+
+    // 编辑态仅锁名称（§3.1）：传输类型可切换（D4 例外条款 / D7 键级清理明示的编辑流切换路径）
+    await pickRekaOption(q('[data-testid="mcp-form-transport"]').element, '本地命令（stdio）')
+    // 切换即清空另一类型表单字段：http 字段消失、stdio 字段出现，无残留可编辑
+    expect(document.querySelector('[data-testid="mcp-form-url"]')).toBeNull()
+    await q<HTMLInputElement>('[data-testid="mcp-form-command"]').setValue('npx')
+    await submitForm()
+
+    // payload 无 url/headers/type（toEqual 全量比对——表单级清理；条目对象键级清理由
+    // store buildFormConfig 承担，§4 断言①单测在 pi-mcp-store.test.ts）
+    expect(mcpDomainMock.updateMcpServer).toHaveBeenCalledWith({
+      name: 'mixed-src',
+      entry: { command: 'npx', exposure: 'codemode' },
+    })
+    wrapper?.unmount()
+  })
+
   it('runtime 保存校验失败（ok:false）→ error 内联显示在表单，不关闭弹层（校验权威在 runtime）', async () => {
     mcpDomainMock.addMcpServer.mockResolvedValue({ ok: false, error: 'type "sse" is not supported' })
     const w = mountSection()
@@ -393,22 +425,43 @@ describe('McpSection（pi-mcp-management U3）', () => {
 
   // ── 清单行动作 ──
 
-  it('启停切换调协议：Switch 点击 → update 写 enabled:false，服务端终态校准', async () => {
+  it('启停切换调协议：Switch 点击 → setEnabled 启停专用操作（仅 name + enabled，不带条目投影回写），服务端终态校准', async () => {
     const disabled = entryFixture('filesystem', { command: 'npx', enabled: false })
     mcpDomainMock.listMcpServers.mockResolvedValue(listFixture([entryFixture('filesystem')]))
-    mcpDomainMock.updateMcpServer.mockResolvedValue({ ok: true, entry: disabled })
+    mcpDomainMock.setMcpServerEnabled.mockResolvedValue({ ok: true, entry: disabled })
     const w = mountSection()
     await flushPromises()
 
     await w.find('[data-testid="mcp-toggle-filesystem"]').trigger('click')
     await flushPromises()
 
-    expect(mcpDomainMock.updateMcpServer).toHaveBeenCalledTimes(1)
-    expect(mcpDomainMock.updateMcpServer).toHaveBeenCalledWith({
+    expect(mcpDomainMock.setMcpServerEnabled).toHaveBeenCalledTimes(1)
+    // §3.1「写入 enabled 字段」最小语义：payload 只含 name + enabled（整条目回写会让
+    // 清单打开至切换之间的外部并发改动被旧投影覆盖，D2 丢失窗口失真——U4 修复锚定）
+    expect(mcpDomainMock.setMcpServerEnabled).toHaveBeenCalledWith({
       name: 'filesystem',
-      entry: expect.objectContaining({ command: 'npx', enabled: false }),
+      enabled: false,
     })
+    expect(mcpDomainMock.updateMcpServer).not.toHaveBeenCalled()
     expect(w.find('[data-testid="mcp-toggle-filesystem"]').attributes('data-state')).toBe('unchecked')
+    wrapper?.unmount()
+  })
+
+  it('启停失败损坏拒入（ok:false + corruption）→ toast 指引先修复 + 转整页损坏态（S6 同口径）', async () => {
+    mcpDomainMock.listMcpServers.mockResolvedValue(listFixture([entryFixture('filesystem')]))
+    mcpDomainMock.setMcpServerEnabled.mockResolvedValue({
+      ok: false,
+      error: 'mcp.json 无法解析（JSON 语法错误）：请先修复文件后再操作（文件路径：/data/agent/mcp.json）',
+      corruption: { filePath: '/data/agent/mcp.json', corruptCopyPath: null },
+    })
+    const w = mountSection()
+    await flushPromises()
+
+    await w.find('[data-testid="mcp-toggle-filesystem"]').trigger('click')
+    await flushPromises()
+
+    expect(toastMock.error).toHaveBeenCalledWith(expect.stringContaining('保存被拒绝'))
+    expect(w.find('[data-testid="mcp-corruption-error"]').exists()).toBe(true)
     wrapper?.unmount()
   })
 
@@ -618,6 +671,84 @@ describe('McpSection（pi-mcp-management U3）', () => {
 
     expect(w.find('[data-testid="mcp-load-error"]').exists()).toBe(false)
     expect(w.find('[data-testid="mcp-list-empty"]').exists()).toBe(true)
+    wrapper?.unmount()
+  })
+
+  // ── I3 登录引导（needs-auth 徽标：完整可复制登录命令 + PI_CODING_AGENT_DIR 指引）──
+
+  it('needs-auth 徽标：登录命令渲染（agentDir 运行时填充）+ 复制按钮拷贝完整命令 + toast 反馈（I3）', async () => {
+    mcpDomainMock.listMcpServers.mockResolvedValue(listFixture([entryFixture('auth')]))
+    const w = mountSection()
+    await flushPromises()
+
+    applyProbe(w, 'auth', { source: 'probe', state: 'needs-auth', testedAt: 1 })
+    await flushPromises()
+    expect(w.find('[data-testid="mcp-badge-auth"]').text()).toBe('需要登录')
+
+    // 完整可复制命令：PI_CODING_AGENT_DIR=<mcp.list reply agentDir> pi mcp login <name>
+    //（缺环境变量指引时凭据会写到 ~/.pi/agent 成为孤岛，复刻 F1）
+    const cmd = 'PI_CODING_AGENT_DIR=/data/.taiji-dev/agent pi mcp login auth'
+    expect(w.find('[data-testid="mcp-login-cmd-auth"]').text()).toBe(cmd)
+
+    writeText.mockResolvedValueOnce(undefined)
+    await w.find('[data-testid="mcp-login-copy-auth"]').trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith(cmd)
+    expect(toastMock.info).toHaveBeenCalledWith('登录命令已复制')
+    wrapper?.unmount()
+  })
+
+  it('非 needs-auth 条目不渲染登录命令（指引只属于 needs-auth 场景）', async () => {
+    mcpDomainMock.listMcpServers.mockResolvedValue(listFixture([entryFixture('ok')]))
+    const w = mountSection()
+    await flushPromises()
+
+    applyProbe(w, 'ok', { source: 'probe', state: 'connected', toolCount: 1, testedAt: 1 })
+    await flushPromises()
+    expect(w.find('[data-testid="mcp-login-cmd-ok"]').exists()).toBe(false)
+    expect(w.find('[data-testid="mcp-login-copy-ok"]').exists()).toBe(false)
+    wrapper?.unmount()
+  })
+
+  // ── 连接测试取消（D3「取消」按钮——等价于超时到点杀进程的主动形态）──
+
+  it('测试进行中按钮切「取消」：点击 → testCancel 按 testId 杀 probe，cancelled true 徽标恢复原态', async () => {
+    mcpDomainMock.listMcpServers.mockResolvedValue(listFixture([entryFixture('slow')]))
+    const w = mountSection()
+    await flushPromises()
+
+    await w.find('[data-testid="mcp-test-slow"]').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-testid="mcp-badge-slow"]').text()).toBe('测试中')
+    expect(w.find('[data-testid="mcp-test-slow"]').text()).toContain('取消')
+
+    await w.find('[data-testid="mcp-test-slow"]').trigger('click')
+    await flushPromises()
+
+    // testId 来自 mcp.test reply 句柄（beforeEach mock 恒 test-1）
+    expect(mcpDomainMock.cancelMcpServerTest).toHaveBeenCalledWith({ testId: 'test-1' })
+    // cancelled true：probe 将以 cancelled 终态收敛（不回填徽标），本侧恢复取消前徽标（未测试）
+    expect(w.find('[data-testid="mcp-badge-slow"]').text()).toBe('未测试')
+    wrapper?.unmount()
+  })
+
+  it('取消晚到（cancelled false）：徽标不动，结果由 mcp:testResult 广播照常回填', async () => {
+    mcpDomainMock.listMcpServers.mockResolvedValue(listFixture([entryFixture('slow')]))
+    mcpDomainMock.cancelMcpServerTest.mockResolvedValue({ cancelled: false })
+    const w = mountSection()
+    await flushPromises()
+
+    await w.find('[data-testid="mcp-test-slow"]').trigger('click')
+    await flushPromises()
+    await w.find('[data-testid="mcp-test-slow"]').trigger('click')
+    await flushPromises()
+
+    expect(w.find('[data-testid="mcp-badge-slow"]').text()).toBe('测试中')
+
+    // 任务实际已完成的形态：结果广播正常回填
+    broadcastTestResult('slow', { source: 'probe', state: 'connected', toolCount: 2, testedAt: 1730000000010 })
+    await flushPromises()
+    expect(w.find('[data-testid="mcp-badge-slow"]').text()).toBe('已连接（2 个工具）')
     wrapper?.unmount()
   })
 
