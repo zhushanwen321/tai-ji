@@ -477,3 +477,29 @@ export function localFileServable(absPath: string): Promise<LocalFileServableRes
   if (!api?.localFileServable) return Promise.reject(new Error('localFileServable unavailable'))
   return api.localFileServable(absPath)
 }
+
+/**
+ * localFile:read 源码内容读取结果（chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」）。
+ *
+ * 类型面与 preload/index.d.ts 的 `LocalFileReadResult` 同形（主进程谓词与 servable 同源：
+ * 白名单成员资格先行短路 → 存在性 → 目录性）。
+ */
+export type LocalFileReadResult =
+  | { ok: true; content: string; truncated: boolean }
+  | { ok: false; reason: 'not_found' | 'is_dir' | 'out_of_whitelist' | 'read_failed' }
+
+/** 源码内容读取失败原因（含 servable 三原因 + 读取本身失败） */
+export type LocalFileReadReason = Extract<LocalFileReadResult, { ok: false }>['reason']
+
+/**
+ * 读白名单内文件内容（DetailPane 「源码」态）。
+ *
+ * 产物目录 `<dataDir>/artifacts/<sessionId>` 在 session cwd 外（设计 §6.7 D7），runtime
+ * `file.read` 的 cwd 守门不可达——源码内容经本条与 servable 预检同一白名单谓词的主进程
+ * 通道读取。无 IPC（web/mock / 旧 preload 未暴露该通道）→ reject：调用方（源码态）
+ * 回落既有 `file.read` cwd 通道（不静默空白）。
+ */
+export function localFileRead(absPath: string): Promise<LocalFileReadResult> {
+  if (!api?.localFileRead) return Promise.reject(new Error('localFileRead unavailable'))
+  return api.localFileRead(absPath)
+}

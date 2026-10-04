@@ -45,8 +45,17 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 
-/** renderer 侧拼 local-file URL 的路径段编码形态（D4 编码规格） */
-const toUrlPathname = (raw: string): string => raw.split('/').map(encodeURIComponent).join('/')
+/** renderer 侧拼 local-file URL 的路径段编码形态（D4 编码规格）——与 packages/renderer
+ *  src/composables/features/file-tree/html-preview.ts 的 `encodeLocalFilePath` 同构：
+ *  剥冗余前导 `/` 后规范化为单个前导 `/`，逐段 encodeURIComponent。这是真实 URL 入口
+ *  形态（镜像实现会漏掉 `~` → `/~` 的前导 `/`，正是 U10 分叉的成因）。 */
+const toUrlPathname = (raw: string): string =>
+  '/' +
+  raw
+    .replace(/^\/+/, '')
+    .split('/')
+    .map(encodeURIComponent)
+    .join('/')
 
 /** 白名单 = 允许目录 + home（home 供 `~` 形态用例；只读探测，无写入） */
 const prefixes = (): string[] => [allowedDir + path.sep, homedir() + path.sep]
@@ -130,6 +139,64 @@ describe('servable 谓词：两条入口判定一致 + 边缘形态', () => {
   })
 })
 
+describe('servable 谓词：URL 入口 `~` 形态与 IPC 入口同判定（U10 / D4 子决策②）', () => {
+  // 白名单形态取自 computeLocalFilePrefixes：用户内容子目录是 home 下的具名子目录
+  // （不是 home 根本身）。用注入 stat 桩避免触真实 home（测试禁写真实数据/用户目录）。
+  const docsPrefix = [path.join(homedir(), 'Documents') + path.sep]
+  const docsFile = path.join(homedir(), 'Documents', 'x.html')
+  const statStub = {
+    statSync: (p: string) => (p === docsFile ? { isDirectory: () => false, size: 12 } : undefined),
+  }
+
+  it('白名单内 `~/Documents/x.html`：URL 入口（/~/...）与 IPC 入口同判可服务', () => {
+    const viaIpc = probeLocalFileServable('~/Documents/x.html', docsPrefix, statStub)
+    const viaUrl = probeLocalFileUrlPathname(toUrlPathname('~/Documents/x.html'), docsPrefix, statStub)
+    expect(viaUrl.resolvedPath).toBe(docsFile)
+    expect({ servable: viaUrl.servable, reason: viaUrl.reason, size: viaUrl.size }).toEqual({
+      servable: viaIpc.servable,
+      reason: viaIpc.reason,
+      size: viaIpc.size,
+    })
+    expect(viaUrl).toMatchObject({ servable: true, size: 12 })
+  })
+
+  it('非白名单目录 `~/secret/x.html`：两入口同判 out_of_whitelist（不触 fs）', () => {
+    const touched: string[] = []
+    const spy = {
+      statSync: (p: string) => {
+        touched.push(p)
+        return undefined
+      },
+    }
+    const viaIpc = probeLocalFileServable('~/secret/x.html', docsPrefix, spy)
+    const viaUrl = probeLocalFileUrlPathname(toUrlPathname('~/secret/x.html'), docsPrefix, spy)
+    expect(viaUrl).toMatchObject({ servable: false, reason: 'out_of_whitelist' })
+    expect({ servable: viaUrl.servable, reason: viaUrl.reason }).toEqual({
+      servable: viaIpc.servable,
+      reason: viaIpc.reason,
+    })
+    expect(touched).toEqual([])
+  })
+
+  it('含空格 / % / # 的 `~` 形态文件名经 URL 段编码往返后仍与 IPC 入口一致', () => {
+    for (const name of ['x.html', 'my report.html', 'weird%20x.html', 'hash#1.html']) {
+      const raw = `~/Documents/${name}`
+      const expected = path.join(homedir(), 'Documents', name)
+      const statForName = {
+        statSync: (p: string) => (p === expected ? { isDirectory: () => false, size: 7 } : undefined),
+      }
+      const viaIpc = probeLocalFileServable(raw, docsPrefix, statForName)
+      const viaUrl = probeLocalFileUrlPathname(toUrlPathname(raw), docsPrefix, statForName)
+      expect(viaUrl.resolvedPath, name).toBe(expected)
+      expect(
+        { servable: viaUrl.servable, reason: viaUrl.reason, size: viaUrl.size },
+        `${name}（URL 入口）`,
+      ).toEqual({ servable: viaIpc.servable, reason: viaIpc.reason, size: viaIpc.size })
+      expect(viaUrl, name).toMatchObject({ servable: true, size: 7 })
+    }
+  })
+})
+
 describe('servable 谓词：检查顺序（白名单先行短路）', () => {
   it('越界路径不触 fs——越界不存在与越界存在返回同形 out_of_whitelist', () => {
     const touched: string[] = []
@@ -181,6 +248,46 @@ describe('servable 谓词：检查顺序（白名单先行短路）', () => {
       statSync: () => ({ isDirectory: () => true, size: 0 }),
     })
     expect(r).toMatchObject({ servable: false, reason: 'is_dir' })
+  })
+})
+
+describe('探测异常旁路（onError）：非 ENOENT 真异常与「不存在」可辨', () => {
+  it('EACCES 真异常经 onError 可见且就地映射为 not_found（reason 枚举不扩）', () => {
+    const seen: Array<{ filePath: string; message: string }> = []
+    const eacces = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+    const target = path.join(allowedDir, 'data.txt')
+    const r = probeLocalFileServable(target, [allowedDir + path.sep], {
+      statSync: () => {
+        throw eacces
+      },
+      onError: (err, filePath) => {
+        seen.push({ filePath, message: err instanceof Error ? err.message : String(err) })
+      },
+    })
+    expect(r).toMatchObject({ servable: false, reason: 'not_found' })
+    expect(seen).toEqual([{ filePath: target, message: 'EACCES: permission denied' }])
+  })
+
+  it('越界短路仍不触 fs——异常路径不会被探测（onError 零调用）', () => {
+    const seen: string[] = []
+    const r = probeLocalFileServable(path.join(outsideDir, 'secret.html'), [allowedDir + path.sep], {
+      statSync: () => {
+        throw new Error('EACCES: permission denied')
+      },
+      onError: (_err, filePath) => seen.push(filePath),
+    })
+    expect(r).toMatchObject({ servable: false, reason: 'out_of_whitelist' })
+    expect(seen).toEqual([])
+  })
+
+  it('未注入 onError 时异常仍不向调用方抛出（缺省静默降级语义保持）', () => {
+    expect(() =>
+      probeLocalFileServable(path.join(allowedDir, 'data.txt'), [allowedDir + path.sep], {
+        statSync: () => {
+          throw new Error('EIO: i/o error')
+        },
+      }),
+    ).not.toThrow()
   })
 })
 

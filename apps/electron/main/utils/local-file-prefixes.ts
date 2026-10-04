@@ -32,8 +32,9 @@
  * 预检 IPC 共用（chat-html-support §6.4 D4「同一谓词」/ §6.9 D9）。
  */
 import path from 'node:path'
-import { statSync as fsStatSync } from 'node:fs'
+import { readFileSync as fsReadFileSync, statSync as fsStatSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { pathToFileURL } from 'node:url'
 import { isPathInAllowedPrefixes } from '../gateway/input-validators.js'
 import { expandLocalFilePath } from './path.js'
 
@@ -115,9 +116,25 @@ export interface LocalFileProbeResult extends LocalFileServableResult {
   resolvedPath: string
 }
 
-/** 探测用 fs 切面（缺省 node:fs；单测注入记录桩以断言「越界短路不触 fs」） */
+/**
+ * 探测用 fs 切面（缺省 node:fs；单测注入记录桩以断言「越界短路不触 fs」）。
+ *
+ * `statSync` 允许抛错（缺省实现 `throwIfNoEntry:false` 下「不存在」返回 undefined 不抛错，
+ * 能抛出的即 EACCES / EIO / ENOTDIR 等真异常）；谓词统一捕获并交 `onError` 旁路。
+ */
 export interface LocalFileProbeFs {
   statSync?: (filePath: string) => { isDirectory(): boolean; size: number } | undefined
+  /**
+   * 探测 / 读取异常旁路（EACCES / EIO 等读不到，非「不存在」）。
+   *
+   * 本模块是纯函数（无日志依赖），错误可见性由调用方注入：main 侧协议 handler 与
+   * servable IPC 注入 `mainLogger.warn`（chat-html-support §6.4 D4 子决策③「诊断细分由
+   * main 日志承载」）。`probeLocalFileServable` 的 stat 异常与 `readLocalFileContent`
+   * 的读取异常共用本旁路（catch 不静默吞掉）。reason 枚举仍是设计定义的三值，非 ENOENT
+   * 异常**就地映射**为 `not_found`（枚举内就近映射，不扩枚举）——UI 文案说「文件不存在」
+   * 时，真实原因（errno + 路径）只在此旁路可见。
+   */
+  onError?: (err: unknown, filePath: string) => void
 }
 
 /**
@@ -141,14 +158,23 @@ export function resolveLocalFilePath(rawPath: string): string {
   return path.resolve(expandLocalFilePath(rawPath))
 }
 
+/** 缺省探测：`throwIfNoEntry:false` 让「不存在」返回 undefined 而非抛错（存在性判定不靠异常）。
+ *  EACCES / EIO 等真异常不在此吞掉——向上抛给 probeLocalFileServable 统一旁路 `onError`。 */
 function defaultStat(filePath: string): { isDirectory(): boolean; size: number } | undefined {
-  try {
-    // throwIfNoEntry:false：不存在返回 undefined 而非抛错（存在性判定不靠异常）
-    return fsStatSync(filePath, { throwIfNoEntry: false })
-  } catch {
-    // 权限等异常同样降级为「不可服务」，不让协议 handler/IPC 抛错
-    return undefined
-  }
+  return fsStatSync(filePath, { throwIfNoEntry: false })
+}
+
+/**
+ * 规范化后的绝对路径 → `net.fetch` 取文件用的 `file://` URL（协议 handler 专用；§6.4 D4 编码规格）。
+ *
+ * **必须是编码形态**：预检拿到的是解码后的明文路径，裸拼 `file://${resolvedPath}` 会被 URL
+ * 解析吞掉 `#`（fragment 起点）/ `?`（query 起点）或错解码字面 `%`——`report#1.html` 裸拼后
+ * `net.fetch` 实际取 `report`（§11 检查点 4 实测：`new URL('file:///tmp/dir/hash#1.html').pathname
+ * === '/tmp/dir/hash'`）。`pathToFileURL` 按 file URL 规则逐段编码（`#`→`%23` / `%`→`%25` /
+ * `?`→`%3F`），与 renderer 侧路径段编码 + handler 侧 `decodeURIComponent` 构成完整来回。
+ */
+export function buildLocalFileFetchUrl(resolvedPath: string): string {
+  return pathToFileURL(resolvedPath).href
 }
 
 /**
@@ -170,17 +196,99 @@ export function probeLocalFileServable(
   if (!isPathInAllowedPrefixes(resolvedPath, allowedPrefixes)) {
     return { servable: false, reason: 'out_of_whitelist', resolvedPath: '' }
   }
-  const stat = (fs.statSync ?? defaultStat)(resolvedPath)
+  let stat: { isDirectory(): boolean; size: number } | undefined
+  try {
+    stat = (fs.statSync ?? defaultStat)(resolvedPath)
+  } catch (err) {
+    // 非 ENOENT 真异常（EACCES/EIO/ENOTDIR）：就地映射为 not_found（reason 三值枚举不扩），
+    // 真因交 onError 旁路承载（§6.4 D4 子决策③），不静默吞掉
+    fs.onError?.(err, resolvedPath)
+    return { servable: false, reason: 'not_found', resolvedPath }
+  }
   if (!stat) return { servable: false, reason: 'not_found', resolvedPath }
   if (stat.isDirectory()) return { servable: false, reason: 'is_dir', resolvedPath }
   return { servable: true, size: stat.size, resolvedPath }
 }
 
-/** 协议 handler 入口：URL pathname 解码后走同一谓词（与 IPC 入口判定一致） */
+/**
+ * URL 入口规范化：百分号解码 + `~` 形态前导 `/` 归一（两条入口共享同一套规范化管线的入口段）。
+ *
+ * URL pathname 恒带前导 `/`（renderer `encodeLocalFilePath` 把任意形态规范化为单个前导
+ * `/`，`~` 形态 → `/~...`），而 `expandLocalFilePath` 只认 `~` / `~/` 开头——不归一就会出现
+ * 「IPC 预检（明文 `~/...`）说可服务、iframe URL 入口 403」的分叉，违反 §6.4 D4 子决策②
+ * 「URL 入口与 IPC 入口共享同一套规范化管线（`~` 展开 + 解码 + resolve + 白名单判定）」。
+ *
+ * 只剥 `/~` / `/~/...` 的前导 `/`；绝对路径首 `/` 保留（`path.resolve` 依赖），其余原样交
+ * 白名单短路。renderer 不展开 `~`（不知道 home），展开职责在主进程谓词。
+ */
+export function normalizeLocalFileUrlPathname(pathname: string): string {
+  const decoded = decodeLocalFileUrlPathname(pathname)
+  return decoded === '/~' || decoded.startsWith('/~/') ? decoded.slice(1) : decoded
+}
+
+/** 协议 handler 入口：URL pathname 走同一规范化管线后复用同一谓词（与 IPC 入口判定一致） */
 export function probeLocalFileUrlPathname(
   pathname: string,
   allowedPrefixes: readonly string[],
   fs: LocalFileProbeFs = {},
 ): LocalFileProbeResult {
-  return probeLocalFileServable(decodeLocalFileUrlPathname(pathname), allowedPrefixes, fs)
+  return probeLocalFileServable(normalizeLocalFileUrlPathname(pathname), allowedPrefixes, fs)
+}
+
+// ── local-file 源码内容读取（chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」）──
+// 产物目录 `<dataDir>/artifacts/<sessionId>` 在 session cwd 外（设计 §6.7 D7 自述「产物在
+// cwd 外、在白名单内」），runtime `file.read` 的 cwd 守门（file-service.ts 越界抛
+// `out_of_cwd`）对主要产物路径不可达——源码态需要一条与 servable 预检**同一白名单谓词**的
+// 读取通道。准入判定复用 probeLocalFileServable（白名单先行短路 → 存在性 → 目录性），
+// 不新增白名单成员、不放宽准入；读出的内容只经 CodeBlock 文本插值渲染（禁 v-html），
+// 不构成脚本执行面扩大。
+
+/** 源码态读取上限（与 runtime `file.read` 的 MAX_FILE_SIZE 同语义：1 MiB，超出截断） */
+export const MAX_LOCAL_FILE_READ_BYTES = 1_048_576
+
+/** 读取失败原因：servable 三原因 + 读取本身失败（权限 / 解码等） */
+export type LocalFileReadReason = LocalFileServableReason | 'read_failed'
+
+/** 源码内容读取结果（IPC 出参面） */
+export type LocalFileReadResult =
+  | { ok: true; content: string; truncated: boolean }
+  | { ok: false; reason: LocalFileReadReason }
+
+/** 读取用 fs 切面（缺省 node:fs；单测注入桩） */
+export interface LocalFileReadFs {
+  readFileSync?: (filePath: string) => Uint8Array
+}
+
+function defaultReadFile(filePath: string): Uint8Array {
+  return fsReadFileSync(filePath)
+}
+
+/**
+ * 读白名单内文件内容（源码态通道）。
+ *
+ * 谓词与 servable 预检 / 协议 handler 同源（probeLocalFileServable）——越界路径一律
+ * `out_of_whitelist` 且不触 fs（检查顺序是安全性质，不构成存在性探测通道）。
+ *
+ * @param rawPath 绝对路径或 `~` 形态路径（IPC 入参）
+ * @param allowedPrefixes computeLocalFilePrefixes 产出（已带 trailing path.sep）
+ * @param fs 探测 / 读取切面（缺省 node:fs）
+ */
+export function readLocalFileContent(
+  rawPath: string,
+  allowedPrefixes: readonly string[],
+  fs: LocalFileProbeFs & LocalFileReadFs = {},
+): LocalFileReadResult {
+  const probe = probeLocalFileServable(rawPath, allowedPrefixes, fs)
+  if (!probe.servable) return { ok: false, reason: probe.reason ?? 'not_found' }
+  try {
+    const buf = (fs.readFileSync ?? defaultReadFile)(probe.resolvedPath)
+    const truncated = buf.byteLength > MAX_LOCAL_FILE_READ_BYTES
+    const content = new TextDecoder().decode(buf.subarray(0, MAX_LOCAL_FILE_READ_BYTES))
+    return { ok: true, content, truncated }
+  } catch (err) {
+    // 权限 / 读取异常降级为不可读，不让 IPC 边界抛错；真因经调用方注入的 onError
+    // 旁路（main 日志承载，与探针同类异常同一通道，不静默吞掉）
+    fs.onError?.(err, probe.resolvedPath)
+    return { ok: false, reason: 'read_failed' }
+  }
 }

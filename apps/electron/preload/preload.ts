@@ -1,7 +1,7 @@
 // apps/electron/preload/preload.ts
 import { contextBridge, ipcRenderer } from 'electron'
 import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult } from '@taiji/shared'
-import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE } from '@taiji/shared'
+import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ } from '@taiji/shared'
 
 /**
  * local-file servable 预检结果（chat-html-support §6.9 D9）。
@@ -16,6 +16,16 @@ export interface LocalFileServableResult {
   /** servable=true 时的文件字节数 */
   size?: number
 }
+
+/**
+ * local-file 源码内容读取结果（chat-html-support §8.2 S3 源码态）。
+ *
+ * 形状与 preload/index.d.ts 的 `LocalFileReadResult` 一致（同 LocalFileServableResult 的
+ * 先行类型面模式）。
+ */
+export type LocalFileReadResult =
+  | { ok: true; content: string; truncated: boolean }
+  | { ok: false; reason: 'not_found' | 'is_dir' | 'out_of_whitelist' | 'read_failed' }
 
 export interface ElectronAPI {
   /** 监听 runtime 端口事件 */
@@ -81,6 +91,13 @@ export interface ElectronAPI {
    * 入参 = 明文绝对路径（% 解码由 URL 入口承担，IPC 不重复解码）。
    */
   localFileServable(absPath: string): Promise<LocalFileServableResult>
+  /**
+   * 读白名单内文件内容（chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」）：
+   * DetailPane 「源码」态用——产物目录在 session cwd 外，runtime file.read 的 cwd 守门
+   * 不可达。谓词与 `localFileServable` / 协议 handler 同一白名单模块，越界返回
+   * `out_of_whitelist`（不触 fs）。
+   */
+  localFileRead(absPath: string): Promise<LocalFileReadResult>
   /** 监听 macOS 全屏状态变化 */
   onFullscreenChanged(callback: (payload: { isFullscreen: boolean }) => void): () => void
   // ── 窗口控制（win/linux 自绘圆点点击）─────────────────────────
@@ -297,8 +314,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }) => ipcRenderer.invoke('pick-file', options),
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
   revealInFolder: (filePath: string) => ipcRenderer.invoke('reveal-in-folder', filePath),
-  // 通道名与 main 侧 gateway/local-file-handlers 的 LOCAL_FILE_SERVABLE_CHANNEL 同字面量
-  localFileServable: (absPath: string) => ipcRenderer.invoke('localFile:servable', absPath),
+  // 通道名 SSOT = @taiji/shared 的 LOCAL_FILE_SERVABLE / LOCAL_FILE_READ
+  // （packages/shared/src/ipc-channels.ts）；main 侧 gateway/local-file-handlers 同 import
+  // ——两侧禁止字面量分叉
+  localFileServable: (absPath: string) => ipcRenderer.invoke(LOCAL_FILE_SERVABLE, absPath),
+  localFileRead: (absPath: string) => ipcRenderer.invoke(LOCAL_FILE_READ, absPath),
   onFullscreenChanged: (callback: (payload: { isFullscreen: boolean }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: { isFullscreen: boolean }) => callback(payload)
     ipcRenderer.on('fullscreen-changed', handler)

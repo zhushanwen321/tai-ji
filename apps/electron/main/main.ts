@@ -90,7 +90,7 @@ import { flushStderrSink } from './supervisor/process-control.js'
 import { initMainLogger, closeMainLogger, mainLogger } from './logs/main-logger.js'
 import { initCrashJournal, crashJournal } from './logs/crash-journal.js'
 import { startTriggerPatrol } from './diagnostics/trigger-patrol.js'
-import { probeLocalFileUrlPathname } from './utils/local-file-prefixes.js'
+import { buildLocalFileFetchUrl, probeLocalFileUrlPathname } from './utils/local-file-prefixes.js'
 import { resolveDevDataDir } from './utils/dev-data-dir.js'
 import { resolvePackagedDataDir } from './utils/packaged-data-dir.js'
 
@@ -373,17 +373,26 @@ app.whenReady().then(async () => {
   protocol.handle('local-file', async (request) => {
     const allowedPrefixes = getAllowedLocalFilePrefixes(isDev)
     // 渲染进程无法安全展开 ~，主进程统一处理（URL 可能含 ~/ + 百分号编码路径段）
-    const probe = probeLocalFileUrlPathname(new URL(request.url).pathname, allowedPrefixes)
+    const probe = probeLocalFileUrlPathname(new URL(request.url).pathname, allowedPrefixes, {
+      // 非 ENOENT 真异常（EACCES/EIO）就地映射仍是 not_found（三值 reason 枚举不扩），
+      // 真因由 main 日志承载（§6.4 D4 子决策③「诊断细分由 main 日志承载」）
+      onError: (err, filePath) =>
+        mainLogger.warn(`[main] local-file stat failed (${filePath}): ${errorText(err)}`),
+    })
     if (!probe.servable) {
       // 可读错误文档（§11 检查点 3）：父页面 opaque origin 读不到状态码，错误文档是
       // 用户在 iframe 内唯一的可见信号；消息不回显路径（无反射注入面）
       return buildLocalFileErrorResponse(probe.reason ?? 'not_found')
     }
     try {
-      const response = await net.fetch(`file://${probe.resolvedPath}`)
+      // pathToFileURL 而非裸拼：resolvedPath 是解码后的明文，含 `#`/`?`/`%` 时裸拼会被
+      // URL 解析吞成 fragment/query 或错解码到另一路径（§6.4 D4 编码规格 / §11 检查点 4）
+      const response = await net.fetch(buildLocalFileFetchUrl(probe.resolvedPath))
       return decorateLocalFileResponse(response, probe.resolvedPath)
-    } catch {
-      // 预检后文件被删 / 读取失败的残余窗口：降级为可读 404 文档
+    } catch (err) {
+      // 预检后文件被删 / 读取失败的残余窗口：降级为可读 404 文档。错误文档本身不回显路径
+      // （无反射注入面），诊断细分（errno + 路径）由 main 日志承载（§6.4 D4 子决策③）
+      mainLogger.warn(`[main] local-file fetch failed (${probe.resolvedPath}): ${errorText(err)}`)
       return buildLocalFileErrorResponse('not_found')
     }
   })

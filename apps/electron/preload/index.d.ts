@@ -36,14 +36,43 @@ export interface LocalFileServableChannel {
   /**
    * 预检绝对路径是否可经 local-file 协议服务（挂载前准入检查）。
    *
-   * @param absPath 绝对路径（`~` 展开 / 百分号解码 / 规范化由主进程谓词承担）
+   * @param absPath 绝对路径或 `~` 形态路径（`~` 展开 / 规范化由主进程谓词承担；IPC 入参为
+   *   明文路径，不做百分号解码——解码仅存在于 URL 入口）
    * @returns servable=true 时 `size` 附字节数；false 时 `reason` 指明降级原因
    */
   localFileServable(absPath: string): Promise<LocalFileServableResult>
 }
 
+/**
+ * local-file 源码内容读取结果（chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」）。
+ *
+ * 谓词与 `LocalFileServableResult` / 协议 handler 同一白名单模块：
+ * - `ok: true`  → `content` + `truncated`（超 1 MiB 截断，与 runtime `file.read` 同语义）
+ * - `ok: false` → `reason` ∈ servable 三原因 + `read_failed`（权限 / 读取失败）
+ */
+export type LocalFileReadResult =
+  | { ok: true; content: string; truncated: boolean }
+  | { ok: false; reason: 'not_found' | 'is_dir' | 'out_of_whitelist' | 'read_failed' }
+
+/**
+ * 源码内容读取通道的 electronAPI 方法面（IPC 通道名 `localFile:read`）。
+ *
+ * 消费方 = DetailPane 「源码」态：产物目录 `<dataDir>/artifacts/<sessionId>` 在 session cwd
+ * 外（§6.7 D7），runtime `file.read` 的 cwd 守门不可达，故源码内容走本条与 servable 同源
+ * （同一白名单谓词）的读取通道。
+ */
+export interface LocalFileReadChannel {
+  /**
+   * 读白名单内文件内容。
+   *
+   * @param absPath 绝对路径（`~` 展开 / 规范化由主进程谓词承担）
+   * @returns `ok: true` 时附 `content` / `truncated`；`ok: false` 时 `reason` 指明失败原因
+   */
+  localFileRead(absPath: string): Promise<LocalFileReadResult>
+}
+
 declare global {
   interface Window {
-    electronAPI: import('./preload').ElectronAPI & LocalFileServableChannel
+    electronAPI: import('./preload').ElectronAPI & LocalFileServableChannel & LocalFileReadChannel
   }
 }

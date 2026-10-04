@@ -11,21 +11,24 @@
  * servable 谓词与协议 handler 复用 utils/local-file-prefixes 的同一模块函数（非两份平行
  * 实现）；本模块只负责「取当次白名单前缀」与「IPC 边界输入防御」。
  *
- * 依赖方向：gateway/local-file-handlers → electron(app/ipcMain) + @taiji/shared/paths(getDataDir)
- *   + utils/local-file-prefixes + interfaces
+ * 依赖方向：gateway/local-file-handlers → electron(app/ipcMain) + @taiji/shared(getDataDir /
+ *   LOCAL_FILE_SERVABLE 通道名 SSOT) + utils/local-file-prefixes + utils/error-message +
+ *   logs/main-logger（探测异常旁路）+ interfaces
  */
 import { ipcMain, app } from 'electron'
 import { tmpdir } from 'node:os'
 import { getDataDir } from '@taiji/shared/paths'
+import { LOCAL_FILE_READ, LOCAL_FILE_SERVABLE } from '@taiji/shared'
 import type { IpcHandlerDeps } from '../interfaces.js'
+import { mainLogger } from '../logs/main-logger.js'
+import { toErrorMessage } from '../utils/error-message.js'
 import {
   computeLocalFilePrefixes,
   probeLocalFileServable,
+  readLocalFileContent,
+  type LocalFileReadResult,
   type LocalFileServableResult,
 } from '../utils/local-file-prefixes.js'
-
-/** 预检 IPC 通道名（preload.ts 同字面量；main 侧唯一注册点） */
-export const LOCAL_FILE_SERVABLE_CHANNEL = 'localFile:servable'
 
 /**
  * 取当次 local-file 白名单前缀（main.ts 协议 handler 与 servable IPC 的单一来源）。
@@ -54,7 +57,11 @@ export function getAllowedLocalFilePrefixes(isDev: boolean): string[] {
 }
 
 /**
- * 注册 localFile:servable 预检 IPC（形态对齐 privileged-handlers.ts 的 ipcMain.handle）。
+ * 注册 localFile:servable 预检 IPC 与 localFile:read 源码读取 IPC（形态对齐 privileged-handlers.ts
+ * 的 ipcMain.handle）。
+ *
+ * 通道名 SSOT = `@taiji/shared` 的 `LOCAL_FILE_SERVABLE` / `LOCAL_FILE_READ`
+ * （packages/shared/src/ipc-channels.ts），preload.ts 同 import——禁止两侧字面量分叉。
  *
  * 出参 = `{ servable, reason?, size? }`；检查顺序（白名单先行短路 → 存在性 → 目录性）
  * 由 probeLocalFileServable 保证——越界路径不触 fs，不构成任意路径的存在性探测通道。
@@ -62,14 +69,33 @@ export function getAllowedLocalFilePrefixes(isDev: boolean): string[] {
  */
 export function registerLocalFileHandlers(deps: IpcHandlerDeps): void {
   ipcMain.handle(
-    LOCAL_FILE_SERVABLE_CHANNEL,
+    LOCAL_FILE_SERVABLE,
     (_event, rawPath: unknown): LocalFileServableResult => {
       if (typeof rawPath !== 'string' || rawPath.length === 0) {
         return { servable: false, reason: 'out_of_whitelist' }
       }
-      const probe = probeLocalFileServable(rawPath, getAllowedLocalFilePrefixes(deps.isDev))
+      const probe = probeLocalFileServable(rawPath, getAllowedLocalFilePrefixes(deps.isDev), {
+        // EACCES/EIO 等真异常的就地映射仍是 not_found（三值 reason 枚举不扩）——真因由
+        // main 日志承载（§6.4 D4 子决策③），与协议 handler 同一旁路形态
+        onError: (err, filePath) =>
+          mainLogger.warn(`[main] local-file servable probe failed (${filePath}): ${toErrorMessage(err)}`),
+      })
       if (!probe.servable) return { servable: false, reason: probe.reason }
       return { servable: true, size: probe.size }
     },
   )
+
+  // localFile:read：DetailPane 「源码」态读内容（chat-html-support §8.2 S3「切换『源码』看到
+  // shiki 高亮」）。产物目录 `<dataDir>/artifacts/<sessionId>` 在 session cwd 外（§6.7 D7），
+  // runtime file.read 的 cwd 守门对主要产物路径不可达——本条与 servable 预检复用同一白名单
+  // 谓词（§6.9 D9「同一谓词」），准入不放宽；读取失败不抛错，回结构化原因。
+  ipcMain.handle(LOCAL_FILE_READ, (_event, rawPath: unknown): LocalFileReadResult => {
+    if (typeof rawPath !== 'string' || rawPath.length === 0) {
+      return { ok: false, reason: 'out_of_whitelist' }
+    }
+    return readLocalFileContent(rawPath, getAllowedLocalFilePrefixes(deps.isDev), {
+      onError: (err, filePath) =>
+        mainLogger.warn(`[main] local-file read probe failed (${filePath}): ${toErrorMessage(err)}`),
+    })
+  })
 }
