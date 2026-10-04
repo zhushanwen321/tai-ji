@@ -15,8 +15,33 @@
  * 不私自保留未知字段，保证「读到的就是模型声明的」。
  */
 
-/** pi message entry 的 role 域（窄联合：解析时值守卫收窄，非法 role 计坏行）。 */
-export type SessionMessageRole = 'user' | 'assistant' | 'toolResult'
+/**
+ * pi message entry 的 role 域（窄联合：解析时值守卫收窄，非法 role 计坏行）。
+ *
+ * 四值闭集与 pi 1.0 AgentMessage 的 role 全集对齐（pi-ai dist/types.d.ts SystemMessage/
+ * UserMessage/AssistantMessage/ToolResultMessage）。1.0 起 system 消息落盘
+ * （工具集变更高频追加），三值时代 role=system 的行在守卫处丢弃 message 字段
+ * （内容静默丢失）；四值放行后 expand/详情可读。
+ */
+export type SessionMessageRole = 'user' | 'assistant' | 'toolResult' | 'system'
+
+/**
+ * role 词表运行时值清单（isMessageRole 守卫取数源）+ 编译期穷尽断言（两层）：
+ * - satisfies 层：清单出现词表外的值即编译红；
+ * - Exclude 层：SessionMessageRole 扩展新成员而清单未同步时，Exclude 产出非 never
+ *   联合，`_ROLE_EXHAUSTIVE` 的条件类型落 `[_RoleExhaustive]` 不可赋 `true`——编译红，
+ *   强制新成员在清单显式归宿（类型与值清单单一事实源）。
+ */
+export const SESSION_MESSAGE_ROLES = [
+  'user',
+  'assistant',
+  'toolResult',
+  'system',
+] as const satisfies readonly SessionMessageRole[]
+
+type _RoleExhaustive = Exclude<SessionMessageRole, (typeof SESSION_MESSAGE_ROLES)[number]>
+const _ROLE_EXHAUSTIVE: _RoleExhaustive extends never ? true : [_RoleExhaustive] = true
+void _ROLE_EXHAUSTIVE
 
 export interface Entry {
   type: string

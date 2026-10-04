@@ -145,8 +145,9 @@ describe('parseSessionContent', () => {
   })
 
   it('message 缺/非法 role → 丢弃 message 字段但保留 entry', () => {
+    // role 样本用词表外的值（'bot'）——'system' 已随 pi 1.0 四值词表放行（session-core D9①）
     const content = [
-      line({ type: 'message', id: 'm1', parentId: null, message: { role: 'system', content: 'x' } }),
+      line({ type: 'message', id: 'm1', parentId: null, message: { role: 'bot', content: 'x' } }),
       line({ type: 'message', id: 'm2', parentId: null, message: { content: 'x' } }),
     ].join('\n')
 

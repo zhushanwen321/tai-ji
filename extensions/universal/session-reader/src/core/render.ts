@@ -343,6 +343,31 @@ function formatLine(b: TurnBrief, level: LineLevel, branchSize?: number): string
 // renderOutline
 // ---------------------------------------------------------------------------
 
+/**
+ * 对话语义条目判定（outline 折叠谓词，D9②）。
+ *
+ * pi 1.0 session 落盘 entry 九类（session-manager.js appendXxx 家族实装）中，参与
+ * 对话流的仅三类：message（role=user/assistant/toolResult）、compaction、
+ * custom_message（appendCustomMessageEntry——参与 LLM 上下文的注入消息）。其余
+ * ——usage（模型记账，appendUsage 明言不参与 LLM 上下文）/ session_info /
+ * model_change / thinking_level_change / context_edit / custom（扩展审计痕迹，
+ * appendCustomEntry）——是纯记录条目：单独成 turn 时（首条 user 前的孤儿堆、
+ * compaction 边界与下一 user 之间的记账堆）outline 渲染出只有 T 序号头的占位行，
+ * 轮次计数被记录条目膨胀。折叠 = 这类条目不产 outline 行；expand/detail 不受影响
+ * （仍按 T 序号完整可达），字节统计（leafParsedBytes/totalEntries）保持全量口径。
+ */
+function isConversationEntry(e: Entry): boolean {
+  if (e.type === 'compaction' || e.type === 'custom_message') return true
+  const msg = e.message
+  if (msg === undefined) return false
+  return msg.role === 'user' || msg.role === 'assistant' || msg.role === 'toolResult'
+}
+
+/** 对话 turn：含任一对话语义条目（纯记录条目 turn 被 outline 折叠，不占轮次）。 */
+function isConversationTurn(t: Turn): boolean {
+  return t.entries.some(isConversationEntry)
+}
+
 function sumBranchEntries(tree: TreeView): number {
   let s = 0
   for (const n of tree.branches.values()) s += n
@@ -423,36 +448,40 @@ export function renderOutline(
   const allBranches = options?.allBranches ?? false
   const granularity = options?.granularity ?? 'turn'
 
+  // 字节/条目统计保持全量口径（折叠是展示层行为，不丢数据面）；行与轮次计数走对话集
   const parsedBytes = leafParsedBytes(turns)
   const leafEntryCount = turns.reduce((s, t) => s + t.entries.length, 0)
   // totalEntries = leaf + 旁支子树 + 孤儿；totalBytes 无原始文件字节数（签名不含 ParseResult），
   // 以 leaf entry JSON 字节近似，精确值由 M2 工具层用 ParseResult.totalBytes 覆盖。
   const totalEntriesAll = leafEntryCount + sumBranchEntries(tree) + tree.orphans.length
+  // D9② 占位行折叠：纯记录条目 turn 不产 outline 行、不计入轮次（totalTurns = 对话轮数）；
+  // 保留原 turn.index 作 T 序号——outline 行是 expand/detail 的入口地址，重编号会切断对齐。
+  const dialogTurns = turns.filter(isConversationTurn)
   const stats: OutlineResult['stats'] = {
-    totalTurns: turns.length,
+    totalTurns: dialogTurns.length,
     totalEntries: totalEntriesAll,
     totalBytes: parsedBytes,
     parsedBytes,
     skippedLines: 0,
   }
 
-  if (turns.length === 0) {
+  if (dialogTurns.length === 0) {
     return { turns: [], lines: [], stats, tokenEstimate: 0 }
   }
 
   // granularity:entry —— 每 entry 一行，不聚合 turn（D-1 兜底）
   if (granularity === 'entry') {
-    return renderEntryGranularity(turns, tree, budget, allBranches, stats)
+    return renderEntryGranularity(dialogTurns, tree, budget, allBranches, stats)
   }
 
   // 1. 全量 brief
-  const briefs: TurnBrief[] = turns.map(computeBrief)
+  const briefs: TurnBrief[] = dialogTurns.map(computeBrief)
 
   // allBranches：标注 forkPoint
   if (allBranches) applyBranchLabels(briefs, turns, tree)
 
-  // 2. perTurnBudget（token → chars×4）
-  const perTurnCharBudget = (budget / turns.length) * CHARS_PER_TOKEN
+  // 2. perTurnBudget（token → chars×4；分母 = 对话轮数——折叠行不参与预算分配）
+  const perTurnCharBudget = (budget / dialogTurns.length) * CHARS_PER_TOKEN
 
   // 3. 降级序渲染：level 0 全有 → level 1 砍 assistantBrief → level 2 骨架
   const lineCache = renderDegradingLines(briefs, tree, perTurnCharBudget)
@@ -476,6 +505,8 @@ function renderEntryGranularity(
   let entryIdx = 0
   for (const t of turns) {
     for (const e of t.entries) {
+      // D9②：纯记录条目不产 outline 行（与 turn 粒度同谓词，entryIdx 只数对话条目）
+      if (!isConversationEntry(e)) continue
       const msg = e.message
       let text = ''
       if (msg !== undefined && (msg.role === 'user' || msg.role === 'assistant')) {

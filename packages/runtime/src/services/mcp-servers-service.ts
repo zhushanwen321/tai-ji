@@ -37,11 +37,19 @@ export class McpServersService {
     return this.mcpServers.update(name, entry)
   }
 
+  setEnabled(name: string, enabled: boolean): McpMutationResult {
+    return this.mcpServers.setEnabled(name, enabled)
+  }
+
   remove(name: string): McpMutationResult {
     return this.mcpServers.remove(name)
   }
 
   test(name: string): McpTestHandle {
     return this.mcpServers.test(name)
+  }
+
+  testCancel(testId: string): boolean {
+    return this.mcpServers.testCancel(testId)
   }
 }

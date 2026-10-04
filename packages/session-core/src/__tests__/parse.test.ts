@@ -61,11 +61,20 @@ describe('parseSessionContent', () => {
 
   it('非法 message role 计坏行（role 收窄失败 → 缺 message 但 id 合法时 entry 保留）', () => {
     const result = parseSessionContent(
-      JSON.stringify({ type: 'message', id: 'a', message: { role: 'system', content: 'x' } }),
+      JSON.stringify({ type: 'message', id: 'a', message: { role: 'bot', content: 'x' } }),
     )
     // role 非法 → message 字段丢弃，entry 本身（type/id 合法）保留
     expect(result.entries).toHaveLength(1)
     expect(result.entries[0]?.message).toBeUndefined()
+    expect(result.skippedLines).toBe(0)
+  })
+
+  it('system role 放行（pi 1.0 四值词表，D9①——旧三值时代该形态 message 静默丢失）', () => {
+    const result = parseSessionContent(
+      JSON.stringify({ type: 'message', id: 'a', message: { role: 'system', content: 'x' } }),
+    )
+    expect(result.entries).toHaveLength(1)
+    expect(result.entries[0]?.message).toEqual({ role: 'system', content: 'x' })
     expect(result.skippedLines).toBe(0)
   })
 
