@@ -13,6 +13,8 @@
  * - delivered：已入 transcript（reducer 权威），队列区隐去；
  * - queued / in-flight / failed：队列区一行（三态可见，G3「排队中/投递中」）。
  * 刷新/重连后队列区不丢：状态在 runtime 内核，state 帧重放即恢复（D7 效果项）。
+ * 谓词本体已下沉 core（remote-use U20：`@taiji/core` `deliveryQueueEntries`，queue-projection
+ * 单一定义点）——桌面消费点（本文件 + ActivityStrip）与移动壳队列条同源引用，防第二定义点。
  *
  * preview 直用帧值：runtime 帧装配（session-delivery-topic `deliveryPreview`）已剥投递标记
  * 并截断，帧契约测试断言无标记——显示层不再二次剥除（单点剥离，防双规则漂移）。
@@ -32,7 +34,7 @@
 import { computed, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Segment } from '@taiji/shared'
-import { getDeliveryProjectionRef } from '@taiji/core'
+import { deliveryQueueEntries, getDeliveryProjectionRef } from '@taiji/core'
 import type { DeliveryFrameEntry } from '@taiji/core'
 import { delivery } from '@/api/domains/delivery'
 import { useChatStore } from '@/stores/chat'
@@ -46,14 +48,6 @@ export interface QueueRow {
   preview: string
   /** 内核条目态：queued（排队中）/ in-flight（投递中）/ failed（重试耗尽，可重试） */
   state: DeliveryFrameEntry['state']
-}
-
-/**
- * 队列区条目过滤（**唯一定义点**，QueueBubble 行渲染与 ActivityStrip 副文案计数共用）：
- * 非 direct 车道且未 delivered 的内核条目，保持帧序（= 内核 FIFO 发送序）。
- */
-export function deliveryQueueEntries(entries: readonly DeliveryFrameEntry[]): DeliveryFrameEntry[] {
-  return entries.filter((e) => e.lane !== 'direct' && e.state !== 'delivered')
 }
 
 /** 队列区可见行数上限（v6 §8.5：多条显前 N 条 + 「+N」）。 */

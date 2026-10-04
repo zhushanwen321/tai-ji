@@ -26,7 +26,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { computed } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { getDeliveryProjectionRef } from '@taiji/core'
+import { deliveryQueueEntries, getDeliveryProjectionRef } from '@taiji/core'
 import type { DeliveryFrameEntry } from '@taiji/core'
 
 const deliveryMock = vi.hoisted(() => ({
@@ -41,7 +41,9 @@ vi.mock('@/api/domains/delivery', () => ({ delivery: deliveryMock }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => toastMock }))
 vi.mock('@/stores/chat', () => ({ useChatStore: () => ({ sessionPhase: phaseMock }) }))
 
-import { useQueueRows, deliveryQueueEntries, foldQueueRows, QUEUE_VISIBLE_MAX } from '@/composables/panel/useQueueRows'
+// deliveryQueueEntries 谓词自 U20 下沉 core（行为不变断言同迁——原断言改引 core 导出，
+// 队列区过滤行为锁定不变）；useQueueRows/foldQueueRows 仍是 renderer 壳层编排出处
+import { useQueueRows, foldQueueRows, QUEUE_VISIBLE_MAX } from '@/composables/panel/useQueueRows'
 
 function entry(
   clientUuid: string,
@@ -97,7 +99,7 @@ describe('useQueueRows · 单源投影过滤（D7）', () => {
     expect(rows.value[0]!.preview).toBe('排队消息 帧侧已剥标记')
   })
 
-  it('deliveryQueueEntries 是过滤口径唯一定义点（QueueBubble 行渲染与 ActivityStrip 计数共用）', () => {
+  it('deliveryQueueEntries 是过滤口径唯一定义点（core 下沉导出——QueueBubble 行渲染、ActivityStrip 计数与移动壳共用）', () => {
     const entries = [
       entry('d1', 'in-flight', 'direct'),
       entry('q1', 'queued', 'queued'),

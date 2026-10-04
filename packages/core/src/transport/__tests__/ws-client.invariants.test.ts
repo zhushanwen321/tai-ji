@@ -86,6 +86,7 @@ import {
   connect,
   disconnect,
   getState,
+  onGoingAway,
   onMessage,
   onQueueDrop,
   setFailed,
@@ -262,15 +263,62 @@ describe('ws-client 不变量 ② auth 握手', () => {
 })
 
 describe('ws-client 不变量 ③ close code 分流', () => {
-  // [C4 deferred] close code 分流属后续迁移 wave（close code 处理能力迁入 core 时激活）。
-  // 现行 onclose 不读 code 一律走退避重连；runtime 侧对 auth 握手失败发 close 1008
-  // （shared/protocol.ts auth.result 注释）。原稿断言点：1006（浏览器层异常关闭）→ 重连走
-  // ⑤ 退避；4001（服务端明确拒绝认证）→ 不重连、标记需重新认证；4xxx（服务端正常关闭如
-  // 4000/4003）→ 不重连、尊重服务端意图等用户手动重连。[漂移] 原稿「4001 不重连」与现行
-  // auth 拒绝行为（close → 重连链，等 use-connection 刷新 token）语义相反——激活时按现行
-  // 语义裁决分流表，不照搬原稿。分流判定必须集中在 ws-client 单点（不散落 routeInbound/
-  // domain），便于整体锁定行为。
-  it.todo('1006（异常关闭）触发重连走退避序列')
+  // [C4 deferred → 1001 段已激活（remote-use D8）] onclose 读 close code：1001（ Going
+  // Away = runtime 计划内关停，connection-manager stop 发给全部存量连接）触发 onGoingAway
+  // 文案信号（消费方 = 移动壳 connection-view「服务重启中」分流），重连退避机制不变；
+  // 其余 close code（1006 异常关闭等）不触发信号，照常退避重连。P6 探针（2026-10-03，
+  // Playwright Chromium + 与 connection-manager 同调用形态的 ws server）证实浏览器
+  // CloseEvent 可读 code/reason。原稿 4001/4xxx「不重连」分流仍属后续迁移 wave：
+  // [漂移] 原稿「4001 不重连」与现行 auth 拒绝行为（close → 重连链，等 use-connection
+  // 刷新 token）语义相反——激活时按现行语义裁决分流表，不照搬原稿。分流判定必须集中在
+  // ws-client 单点（不散落 routeInbound/domain），便于整体锁定行为。
+  let goingAwayCount: number
+  let removeGoingAway: () => void
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    installTestPlatform()
+    disconnect()
+    goingAwayCount = 0
+    removeGoingAway = onGoingAway(() => {
+      goingAwayCount++
+    })
+  })
+
+  afterEach(() => {
+    removeGoingAway()
+    disconnect()
+    vi.useRealTimers()
+  })
+
+  it('1001（服务端计划内关停）触发 onGoingAway 信号，重连退避照常（不升级 failed）', () => {
+    connect('ws://test', { auth: 'skip' })
+    latestFake().triggerOpen()
+    expect(goingAwayCount).toBe(0)
+
+    // 事件投影与真实 CloseEvent 对齐（P6 探针实测 {code:1001, reason, wasClean:true}）
+    latestFake().triggerClose({ code: 1001, reason: 'Server shutting down', wasClean: true })
+    expect(goingAwayCount).toBe(1)
+    // 文案信号不改重连机制：disconnected → 退避（1s）重连照走
+    expect(getState().value).toBe('reconnecting')
+    vi.advanceTimersByTime(1_000)
+    expect(fakes.length).toBe(2)
+    // 重连成功 → 恢复 connected（重启窗口内不升级 failed 全屏）
+    latestFake().triggerOpen()
+    expect(getState().value).toBe('connected')
+  })
+
+  it('非 1001（1006 异常关闭）不触发 onGoingAway，照常退避重连', () => {
+    connect('ws://test', { auth: 'skip' })
+    latestFake().triggerOpen()
+
+    latestFake().triggerClose({ code: 1006, reason: '', wasClean: false })
+    expect(goingAwayCount).toBe(0)
+    expect(getState().value).toBe('reconnecting')
+    vi.advanceTimersByTime(1_000)
+    expect(fakes.length).toBe(2)
+  })
+
   it.todo('4001（认证失效）不重连，标记需重新认证（壳降级 UI）')
   it.todo('4xxx（服务端正常关闭，如 4000/4003）不重连')
 })

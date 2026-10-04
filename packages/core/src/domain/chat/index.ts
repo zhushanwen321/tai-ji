@@ -28,6 +28,19 @@ export {
   findDeliveryEntry,
 } from './effects/user-delivery'
 export type { DeliveryFrameEntry, DeliverySubmitReply } from './api-port'
+// [remote-use D5] lifecycle-effects factory：exited/restored/restoreFailed 的 core 最小语义
+// 原语集合（双壳共享单一归属——桌面 useMessageEffects 叠壳扩展 / 移动壳 bootstrap 直接接线）
+export { createLifecycleEffects } from './lifecycle-effects'
+export type {
+  LifecycleEffects,
+  LifecycleEffectsDeps,
+  LifecycleSessionActions,
+  LifecycleNoticeTexts,
+} from './lifecycle-effects'
+
+// [remote-use D7/U20] 队列条目过滤谓词下沉（双壳同源：桌面 useQueueRows/ActivityStrip
+// 改引本导出，移动壳队列条随同源；防第二定义点）
+export * from './queue-projection'
 export { createChatStore } from './store'
 
 export type { ChatStoreOptions } from './store'
@@ -47,6 +60,10 @@ export * from './trace-window'
 export { createUseChat, ensureStreamSubscription, invalidateStreamSubscription, resetChatModuleStateForTest } from './useChat'
 // [投递所有权内核 u3b] submitQueuedEntry / SubmitQueuedEntryDeps 已随 defer flush 退役摘除
 export type { UseChatDeps, EnsureStreamSubDeps, SessionStoreLike } from './useChat'
+// [remote-use D2/U5] 驱逐退订复合入口：sessionEntry.evictLru 双壳共接（evictIfNeeded +
+// invalidateStreamSubscription + session.unsubscribe RPC 编排单点）
+export { evictLruWithUnsubscribe } from './useChat'
+export type { LruUnsubscribeDeps } from './useChat'
 // [u4d-truncated-ui] 历史预算截断窗口状态（D4：store SSOT + 响应归一；use-session 切入链消费归一函数）
 export { historyWindowFromReply } from './truncated-window'
 export type { HistoryWindow, HistoryWindowReply } from './truncated-window'

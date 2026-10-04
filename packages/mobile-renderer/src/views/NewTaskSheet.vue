@@ -6,6 +6,7 @@
 // 容器 + 顶部圆角），创建成功自动激活新 session 并上抛 created（App 切到聊天视图）。
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { randomUuid } from '@taiji/core'
 import { Button, Input, Textarea } from '@taiji/ui'
 import type { SessionSummary } from '@taiji/shared'
 import { createMobileTask } from '../shell/app-runtime'
@@ -24,16 +25,27 @@ const firstMessage = ref('')
 const submitting = ref(false)
 const errorText = ref('')
 
-// 打开时重置表单（关闭态保留 DOM 但字段清空，下次进入是干净表单）
+// [remote-use A17/U18] 创建流幂等键（per-open 黏滞槽）：uuid 按「意图」稳定——打开时生成
+// 一次存 ref，提交失败的原样重试复用同键（runtime 按 clientUuid 幂等返回已建 session，
+// 弱网超时重试不双建，对齐 core 黏滞槽语义 new-task-search/flow.ts takeClientUuidFor）；
+// 提交成功或关闭才重置（意图落定/放弃即换槽）。重置 = 换入新 uuid（非清空）：槽内恒为
+// 合法键，成功后未关窗口内的再次提交（新意图）自带新键；禁 per-call 生成——onSubmit 只
+// 读槽不生成，重试路径（失败）永不重置。
+const clientUuid = ref('')
+
+// 打开时重置表单 + 生成新意图键（关闭态保留 DOM 但字段清空，下次进入是干净表单）；
+// immediate 覆盖「挂载即开」的边角（open 初始 true 时 watcher 不触发的窗口）
 watch(
   () => props.open,
   (open) => {
+    clientUuid.value = randomUuid()
     if (open) {
       cwd.value = ''
       firstMessage.value = ''
       errorText.value = ''
     }
   },
+  { immediate: true },
 )
 
 async function onSubmit(): Promise<void> {
@@ -45,8 +57,14 @@ async function onSubmit(): Promise<void> {
   submitting.value = true
   errorText.value = ''
   try {
-    const session = await createMobileTask({ cwd: cwd.value, firstMessage: firstMessage.value })
+    const session = await createMobileTask({
+      cwd: cwd.value,
+      firstMessage: firstMessage.value,
+      clientUuid: clientUuid.value,
+    })
     if (session) {
+      // 提交成功 = 意图落定，槽重置（换入新键，见上方 clientUuid 注释）
+      clientUuid.value = randomUuid()
       emit('created', session)
       emit('close')
     } else {

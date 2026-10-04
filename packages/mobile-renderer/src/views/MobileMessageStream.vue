@@ -2,7 +2,8 @@
 // MobileMessageStream —— 移动壳消息流容器（remote-use D10「ChatViewDeps provide 义务」转移落点：
 // 桌面由 MessageStream.vue provide，该组件不复用 → 义务转移到本组件）。
 //
-// 构成：ui ChatView 展示子树（复用）+ 轻量滚动容器（overflow-y + 贴底跟随）。
+// 构成：ui ChatView 展示子树（复用）+ 轻量滚动容器（overflow-y + 贴底跟随）
+// + TruncatedHistoryBar 加载更早（A2：core loadMoreHistory 游标翻页消费，见 handleLoadMore）。
 // 不含 virtua/@wheel/TurnRail/fork-notice——桌面壳层编排语义不进移动壳（D10 被否①）。
 //
 // ChatViewDeps 四类分派（D10 全表逐字段）：
@@ -20,7 +21,7 @@
 //    mermaid 库不进移动壳 bundle，D7 图表行）
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChatView, ChatViewDepsKey } from '@taiji/ui'
+import { ChatView, ChatViewDepsKey, TruncatedHistoryBar } from '@taiji/ui'
 import type { ChatViewDeps } from '@taiji/ui'
 import { renderMarkdownSegments } from '@taiji/ui/features/chat/markdown'
 import {
@@ -31,6 +32,7 @@ import {
 import type { Message } from '@taiji/shared'
 import { chatStore, createTurnExpansion, useChatInstance } from '../shell/app-runtime'
 import { renderMermaidPlaceholder } from '../shell/mermaid-placeholder'
+import QueueStrip from './QueueStrip.vue'
 
 const props = defineProps<{ sessionId: string }>()
 
@@ -146,6 +148,41 @@ watch(
 
 const messages = computed<Message[]>(() => chatStore.getMessages(props.sessionId))
 const isSessionActive = computed(() => chatStore.isActive(props.sessionId))
+
+// ── 加载更早（A2：core loadMoreHistory 游标翻页消费 + TruncatedHistoryBar 接线）────
+// 显隐与「已加载最近 N 轮」的唯一来源 = store 截断窗口状态（per-session 分区），
+// 无独立布尔表（对齐 core hasMoreHistory 的 SSOT 派生口径）。
+
+const loadingMore = ref(false)
+const historyWindow = computed(() => chatStore.getHistoryWindow(props.sessionId))
+const showLoadMore = computed(() => historyWindow.value?.truncated ?? false)
+const loadedTurns = computed(() => historyWindow.value?.loadedTurns ?? 0)
+
+/**
+ * 「加载更早」：core loadMoreHistory 游标翻页（游标 = 分区最旧消息文件侧身份，
+ * 页响应前插更早轮次 + 窗口状态收敛；false = 失败，分区与窗口均不变，条保留可重试）。
+ *
+ * 前插保位（验收「滚动位置不跳」）：prepend 在分区头部增高 scrollHeight，不补偿会把
+ * 视口内容下推。非贴底阅读态 scrollTop += 高度增量；贴底态不补偿——既有贴底跟随
+ * 已把视口钉在底部，前插后「贴底」与「补偿后」收敛到同一 scrollTop，两路写入以
+ * nearBottom 单谓词互斥，无时序窗。
+ */
+async function handleLoadMore(): Promise<void> {
+  if (loadingMore.value || !showLoadMore.value) return
+  loadingMore.value = true
+  try {
+    const el = scrollEl.value
+    const prevScrollHeight = el?.scrollHeight ?? 0
+    const ok = await useChatInstance.loadMoreHistory(props.sessionId)
+    if (ok && el && !nearBottom.value) {
+      // 前插渲染落 DOM 后再读增量（真实浏览器下 nextTick 后 scrollHeight 才反映新内容）
+      await nextTick()
+      el.scrollTop += el.scrollHeight - prevScrollHeight
+    }
+  } finally {
+    loadingMore.value = false
+  }
+}
 </script>
 
 <template>
@@ -156,7 +193,21 @@ const isSessionActive = computed(() => chatStore.isActive(props.sessionId))
     @scroll.passive="onScroll"
   >
     <div ref="contentEl" class="flex flex-col gap-2 p-2">
+      <!-- [A2] 历史截断顶部条：显隐 = store 截断窗口状态 truncated（窗口记录缺失按无截断）；
+           分区为空时无翻页游标不渲染（对齐桌面 renderItems.length 条件）。
+           N = loadedTurns，文案由 ui 组件经壳 i18n（ui locale 单源）；「加载更早」走
+           handleLoadMore（core loadMoreHistory 游标翻页 + 前插保位补偿）。 -->
+      <TruncatedHistoryBar
+        v-if="showLoadMore && messages.length > 0"
+        :loaded-turns="loadedTurns"
+        :loading="loadingMore"
+        @load="handleLoadMore"
+      />
       <ChatView :messages="messages" :session-id="sessionId" :is-session-active="isSessionActive" />
+      <!-- [D7/U10] 流尾队列条：busy 期被 morph 移出对话流的排队消息可见可取消（与对话流
+           同视野——D7 不采用②「抽屉/独立页签」）；数据源/取消/回填编排内聚组件内，此处纯挂载，
+           空队列结构性不渲染 -->
+      <QueueStrip :session-id="sessionId" />
     </div>
   </div>
 </template>

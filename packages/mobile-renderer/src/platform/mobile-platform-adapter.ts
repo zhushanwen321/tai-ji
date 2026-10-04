@@ -16,7 +16,7 @@
 //
 // 设计依据：renderer-package-topology.md §9（移动壳拓扑与平台端口契约）、远程访问连接派生 D4（profile 三分支）/移动壳真实化 D10（adapter 真实化）。
 
-import type { KVStorage, PlatformPort, WebSocketFactory, WebSocketLike } from '@taiji/core'
+import type { KVStorage, PlatformPort, WebSocketCloseInfo, WebSocketFactory, WebSocketLike } from '@taiji/core'
 
 // LocalStorageKV —— KVStorage 的 localStorage 桥接实现。
 // KVStorage 契约为异步签名（Promise 返回），localStorage 为同步 API——按契约包 Promise。
@@ -66,7 +66,7 @@ class LocalStorageKV implements KVStorage {
 // 原生实例（WHATWG 数字常量，core WS_READY_STATE 对齐）。
 class NativeWebSocketAdapter implements WebSocketLike {
   onopen: (() => void) | null = null
-  onclose: (() => void) | null = null
+  onclose: ((event?: WebSocketCloseInfo) => void) | null = null
   onmessage: ((event: { data: unknown }) => void) | null = null
   onerror: ((err: unknown) => void) | null = null
 
@@ -75,7 +75,9 @@ class NativeWebSocketAdapter implements WebSocketLike {
   constructor(url: string) {
     this.native = new WebSocket(url)
     this.native.onopen = () => this.onopen?.()
-    this.native.onclose = () => this.onclose?.()
+    // D8：关闭信息投影透传（code/reason/wasClean）——ws-client onclose 读 close 1001
+    // 区分「服务重启中」与网络断；P6 探针证实浏览器 CloseEvent 可读该码
+    this.native.onclose = (ev: CloseEvent) => this.onclose?.({ code: ev.code, reason: ev.reason, wasClean: ev.wasClean })
     this.native.onmessage = (ev: MessageEvent) => this.onmessage?.({ data: ev.data })
     this.native.onerror = (ev: Event) => this.onerror?.(ev)
   }

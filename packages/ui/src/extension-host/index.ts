@@ -33,10 +33,13 @@ export {
 export { default as CompanionBand } from './CompanionBand.vue'
 export {
   DIALOG_REQUEST_SOURCE_KEY,
+  DIALOG_QUEUE_HANDLE_KEY,
   UI_RESPONSE_TRANSPORT_KEY,
   OVERLAY_LIFECYCLE_KEY,
+  type DialogQueueHandleRegistrar,
   type DialogRequest,
   type DialogRequestOption,
+  type DialogRequestQueue,
   type DialogRequestSource,
   type UiResponseTransport,
   type OverlayLifecycleSource,

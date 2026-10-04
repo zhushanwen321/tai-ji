@@ -7,6 +7,7 @@ export default {
   mobile: {
     connecting: '连接中…',
     reconnecting: '连接已断开，正在重连…',
+    restarting: '服务重启中，即将恢复…',
     connectionFailed: '连接失败',
     connectionFailedHint: '请刷新页面重试；若持续失败，回主机「设置 → 远程访问」重新扫码',
     tabs: {
@@ -17,9 +18,19 @@ export default {
       empty: '暂无会话',
       loadFailed: '加载失败，点击重试',
       newTask: '新建任务',
+      restore: '重新打开',
+      menuRename: '重命名',
+      menuDelete: '删除',
+      renameTitle: '重命名会话',
+      renamePlaceholder: '输入会话名称',
+      renameConfirm: '保存',
       status: {
-        active: '运行中',
-        idle: '空闲',
+        streaming: '生成中',
+        pending: '待确认',
+        compacting: '压缩中',
+        waiting: '等待输入',
+        retrying: '重试中',
+        working: '后台任务',
         dead: '已退出',
         done: '已完成',
         error: '出错',
@@ -44,6 +55,17 @@ export default {
       placeholder: '输入消息…',
       send: '发送',
       stop: '停止',
+      sendFailed: '未送达，请检查网络后重试',
+    },
+    queueStrip: {
+      stateQueued: '排队中',
+      stateInFlight: '投递中',
+      stateFailed: '重试耗尽',
+      cancel: '取消发送',
+      cancelFailed: '撤销失败：{msg}',
+      cancelUnavailable: '消息已投递，无法撤销',
+      cancelUnavailableWithReason: '无法撤销：{reason}',
+      restoreContentMissing: '消息已撤销，但原文未能取回——请重新输入',
     },
     tokenInput: {
       title: '需要访问凭据',
@@ -55,6 +77,13 @@ export default {
     },
     mermaid: {
       placeholder: '图表在桌面查看',
+    },
+    errorBar: {
+      responseNotDelivered: '回复未送达，连接恢复后可重试',
+      dismiss: '关闭',
+    },
+    subagentStatus: {
+      running: 'subagent 运行中：{slugs}',
     },
     formCard: {
       planReviewTitle: '计划待审批',
@@ -80,5 +109,6 @@ export const connectionZh = {
     disconnectedError: '连接已断开',
     runtimeRestarting: 'Runtime 正在重启',
     runtimeUnavailable: 'Runtime 不可用',
+    sessionRequestFailed: '会话请求失败：{message}',
   },
 }

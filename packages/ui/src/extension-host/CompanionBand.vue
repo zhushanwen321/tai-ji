@@ -21,7 +21,12 @@
  */
 import { computed, inject, ref, watch } from 'vue'
 import { createDialogRequestQueue } from './dialog-request-queue'
-import { DIALOG_REQUEST_SOURCE_KEY, UI_RESPONSE_TRANSPORT_KEY, OVERLAY_LIFECYCLE_KEY } from './companion-band-source'
+import {
+  DIALOG_REQUEST_SOURCE_KEY,
+  DIALOG_QUEUE_HANDLE_KEY,
+  UI_RESPONSE_TRANSPORT_KEY,
+  OVERLAY_LIFECYCLE_KEY,
+} from './companion-band-source'
 import type { OverlayState } from './companion-band-source'
 import { Button } from '../primitives/button'
 import { Input } from '../primitives/input'
@@ -39,6 +44,8 @@ const source = inject(DIALOG_REQUEST_SOURCE_KEY, null)
 const transport = inject(UI_RESPONSE_TRANSPORT_KEY, null)
 // OverlayLifecycle（IF9 状态机，arch-fix-v2 闭环）：inject 缺失 → null（静默，minimize/restore no-op）
 const overlayLifecycle = inject(OVERLAY_LIFECYCLE_KEY, null)
+// exited 分通道重置的句柄登记回调（remote-use U6）：inject 缺失（桌面壳不 provide）→ null（静默跳过）
+const registerQueueHandle = inject(DIALOG_QUEUE_HANDLE_KEY, null)
 
 /** sessionId prop → Ref<string|null>（queue 工厂契约：null = 无活跃 session） */
 const sessionIdRef = computed<string | null>(() => props.sessionId)
@@ -49,6 +56,10 @@ const sessionIdRef = computed<string | null>(() => props.sessionId)
 // unmount 后 listener 永不退订（重挂时累积翻倍）。inject 结果在 setup 期固定，普通 const 即可。
 const queue =
   !source || !transport ? null : createDialogRequestQueue(transport, sessionIdRef, source)
+
+// 句柄回传（U6）：壳 provide 登记回调时把 queue 实例交出（bootstrap 的 session.exited 编排
+// 经壳侧模块级句柄调 resetFor——dialog 通道 exited 具名重置的唯一样本来源）
+if (queue && registerQueueHandle) registerQueueHandle(queue)
 
 const currentRequest = computed(() => queue?.currentRequest.value)
 

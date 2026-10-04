@@ -13,16 +13,17 @@
 //   消费语义与桌面 useExtensionUI 同构：C4 放行面（form ∨ planReview）+ requestId dedup +
 //   per-session Map 分区 + requests-invalidated 失效摘除 + getPendingRequests 快照对账；
 // - bus 模块级私有单例（桌面走 getExtensionBus 惰性单例，来源选择是壳裁决）；
-// - 壳层能力回调不注入（无 pinia chat store / toast：onPiResponseSettled 空操作对齐
-//   「移动壳无 pendingSend 链」，notifyNotDelivered 静默——form 通道的未送达反馈经
-//   respond 返回 false 由 App 编排置内联错误行（MobileFormCard respondFailedId prop），
-//   console 留痕辅助，移动壳 v1 无 toast 组件）；
+// - 壳层能力回调按移动壳形态注入（remote-use A11/U14）：onPiResponseSettled 不注入
+//   （空操作，对齐「移动壳无 pendingSend 链」）；notifyNotDelivered 注入错误条提示
+//   （移动壳无 toast，form 通道另有 respond 返回 false → App 置 MobileFormCard 内联
+//   错误行的同源反馈）；onSessionError/onGlobalError 错误回调 + 错误条状态同居本模块
+//   （bootstrap effects 注入消费，见下方「全局错误条」段）；
 // - 权限/对话/form 三通道均模块级装配（bus 单例私居本模块；ESM 单次求值，listener 不会
 //   翻倍），App.vue provide + 挂 CompanionBand / PermissionRequestDialog / MobileFormCard。
 //
 // 回传走 core 既有通路（不新造协议）：pi 源 extension.ui_response（sendExtensionUIResponse）、
 // plugin 源 plugin.uiResponse（ws send）、审批源 plugin.approvePermissions/denyPermissions。
-import { computed, reactive, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, reactive, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { InternalEventBus, MessageBusBridge } from '@taiji/core/extension-host'
 import type { ExtensionInteractMethod } from '@taiji/shared'
 import {
@@ -30,9 +31,15 @@ import {
   createPermissionRequestController,
   createWsPluginMessageSource,
 } from '@taiji/ui/extension-host'
-import type { PermissionTransport, PermissionRequestState } from '@taiji/ui/extension-host'
+import type { DialogRequestQueue, PermissionTransport, PermissionRequestState } from '@taiji/ui/extension-host'
 import { getPendingRequests, sendExtensionUIResponse, type ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
+import { registerSessionCleanup } from '@taiji/core/foundation/use-session-scoped-state'
 import { isPlanReviewFrame, isRichInteractionFrame } from './form-protocol'
+import { chatStore } from './app-runtime'
+import { i18n } from '../i18n'
+
+// vue-i18n 的 t 复杂重载收窄为 (key, params?) => string（对齐 app-runtime 同款收窄）
+const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => string
 
 // ── bus + bridge 单例（模块级；dialog 反查表由共享 factory 单点持有，见 shell-adapters）──
 
@@ -51,12 +58,76 @@ export const __testing = {
   resetFormRequestsForTest(): void {
     formRequestsBySid.clear()
   },
+  /** 错误条跨用例隔离：清空单槽文本（模块级 ref，防错误残留泄漏到后续用例） */
+  resetErrorBarForTest(): void {
+    errorBarMessage.value = null
+  },
+  /** exited 重置通路跨用例隔离：清空 dialog queue 句柄（模块级 let，防句柄残留跨用例串扰） */
+  resetDialogQueueHandleForTest(): void {
+    dialogQueueHandle = null
+  },
+}
+
+// ── 全局错误条状态 + effects 错误回调（remote-use A7/U14；D5 去留表：错误条是 V5/V18
+// 作答失败反馈的唯一载体）──
+//
+// 状态承载 = 模块级 reactive 单例（本模块既有范式，formRequestsBySid 同式）；views/ErrorBar.vue
+// 纯展示消费（依赖方向 views → shell，与 App 消费 shell 状态同向），挂载与 effects 注入
+// 在 bootstrap/App（U6 接线）。单槽覆盖式 + 手动关闭（ErrorBar 关闭钮），不加自动消失
+// timer（时间平抑类逻辑红线）；onSessionError 的持久反馈在流内（markSessionError 追加
+// error 消息），错误条只是瞬态置顶补充——后到错误覆盖前条不丢持久反馈。
+
+/** 当前错误条文本（null = 不渲染；App/组件消费） */
+const errorBarMessage = ref<string | null>(null)
+
+function showErrorBar(text: string): void {
+  errorBarMessage.value = text
+}
+
+/** 关闭错误条（ErrorBar 关闭钮消费） */
+export function dismissErrorBar(): void {
+  errorBarMessage.value = null
+}
+
+/**
+ * onSessionError（A7，对齐桌面 handleSessionError）：带 sessionId 的 error envelope 兜底——
+ * markSessionError（session 级错误统一入口：追加 error assistant 消息 + finalize）进对话流，
+ * 错误条置顶保证切走的 session 也可感知。
+ */
+function handleSessionError(sessionId: string, payload: { code?: string; message?: string }): void {
+  const text = t('connection.sessionRequestFailed', { message: payload.message ?? 'Unknown error' })
+  chatStore.markSessionError(sessionId, text)
+  showErrorBar(text)
+}
+
+/** onGlobalError（A7）：无 sessionId 无 id 的 server-push error 直显错误条（桌面 toast 的移动形态）。 */
+function handleGlobalError(message: string): void {
+  showErrorBar(message)
+}
+
+/**
+ * dialog 作答未送达提示（A11，注入 createCompanionDialogAdapters.notifyNotDelivered——对齐
+ * 桌面 useExtensionHostBridge 注入形态）：移动壳无 toast，呈现用内联错误行范式落错误条
+ * （对齐 form 通道 respondFailedId 的 role=alert 细行）。请求保留可重试语义由
+ * shell-adapters 承接（respond 见 false 不出队，连接恢复后同 requestId 重发幂等）。
+ */
+function notifyDialogResponseNotDelivered(_sessionId?: string): void {
+  showErrorBar(t('mobile.errorBar.responseNotDelivered'))
+}
+
+/** bootstrap effects 注入面（U6 接线：`effects: { ...errorBarEffects, ... }`），签名对齐 core InboundEffects */
+export const errorBarEffects = {
+  onSessionError: handleSessionError,
+  onGlobalError: handleGlobalError,
 }
 
 // companion 数据源/回传对（App.vue provide 消费；G1 反查表泄漏语义两壳同持，见 shell-adapters）
-const companionDialog = createCompanionDialogAdapters(bus)
+const companionDialog = createCompanionDialogAdapters(bus, {
+  notifyNotDelivered: notifyDialogResponseNotDelivered,
+})
 export const mobileDialogRequestSource = companionDialog.source
 export const mobileUiResponseTransport = companionDialog.transport
+export { errorBarMessage }
 
 // ── permissionRequest 审批通道（D7 审批行，App 挂 PermissionRequestDialog）──
 //
@@ -156,6 +227,53 @@ void bus.on('requests-invalidated', (e) => {
   if (!e.sessionId) return
   removeFormRequests(e.sessionId, e.requestIds)
 })
+
+// ── session.exited 分通道重置编排（remote-use U6 / D5 exited 分区清理段 + 「exited 清理与
+//    拦截解绑」段）──
+//
+// exited 的壳扩展清理 = 两通道具名重置（M8 防御：死会话残留 dialog/form 请求不重弹、
+// 作答不再发给新进程后石沉大海，V18），语义对齐桌面 extensionUIStore.clearSession 的
+// exited 具名清理形态。**禁走 triggerSessionCleanups**（销毁语义）：它把 sid 记入
+// deletedSids 迟到写拦截，崩溃恢复窗口内该会话的新 dialog 请求会被 updateFor 首行静默
+// 丢弃（发起方无限等待，G3 失效）——exited ≠ 删除，清理与拦截必须解绑。删除路径
+// （U12）才走销毁语义注册表。
+//
+// dialog 通道载体 = CompanionBand setup 内创建的组件私有 queue 实例（MF-5：queue 须在
+// 组件 setup 顶层创建），bootstrap 的 effects 回调无现成通道拿实例——经
+// DIALOG_QUEUE_HANDLE_KEY provide/inject 登记回调回传（App.vue provide，ui 定义 key），
+// 本模块持句柄、exited 编排经下方出口调 resetFor。
+
+/** dialog 通道 queue 句柄（CompanionBand mount 后经登记回调写入） */
+let dialogQueueHandle: DialogRequestQueue | null = null
+
+/** queue 句柄登记入口（App.vue provide DIALOG_QUEUE_HANDLE_KEY 消费；重复登记覆盖——
+ * CompanionBand 移动壳单实例挂载，正常时序仅一次） */
+export function registerDialogQueueHandle(queue: DialogRequestQueue): void {
+  dialogQueueHandle = queue
+}
+
+/** form 通道具名清理（直调 Map.delete，幂等；不触注册表广播） */
+function clearFormRequestsForSession(sid: string): void {
+  formRequestsBySid.delete(sid)
+}
+
+// [remote-use U12] form 分区删除路径注册（销毁语义）：session 永久删除时经删除编排
+// （deleteSession → core triggerSessionCleanups）清分区——已删会话的残留请求不再可作答
+// （M8 防御）。与 exited 分通道重置（resetCompanionChannelsForExitedSession，重置语义）
+// 是两份独立清单，语义分界见设计 D5「exited 清理与拦截解绑」段：exited 不走本注册
+// （deletedSids 迟到写拦截会吞恢复期新请求）；新增请求类 per-session 通道须两处各登记一条
+// （exited 分通道重置 + 本注册表），D9② 白名单登记该扩展义务。
+registerSessionCleanup(clearFormRequestsForSession)
+
+/**
+ * exited 分通道重置出口（bootstrap onSessionExited 壳扩展段消费）：dialog resetFor +
+ * form 具名清理。句柄未登记（exited 早于 CompanionBand 挂载）跳过 dialog 通道——exited
+ * 只达已订阅连接、订阅建立必晚于挂载，实际不达（设计 U6 resetFor 句柄通路段）。
+ */
+export function resetCompanionChannelsForExitedSession(sid: string): void {
+  dialogQueueHandle?.resetFor(sid)
+  clearFormRequestsForSession(sid)
+}
 
 export type MobileFormRequests = {
   /** 队首 form 类请求（form 帧 / legacy 归一帧；桌面 currentFormRequest 同式取 first） */

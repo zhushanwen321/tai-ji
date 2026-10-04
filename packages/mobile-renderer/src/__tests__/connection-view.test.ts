@@ -7,6 +7,8 @@
 //   - failed 终态（非 token-input 前提下）
 //   - connected 置 hasConnectedOnce 后断连不复位（BM5 布局粘滞锚点）
 //   - onAuthRejected 仅「提交中」才写 tokenSubmit.error（非提交路径拒绝不误报）
+//   - D8 重启感知：onGoingAway（close 1001）置 runtimeRestarting + 文案切 restarting、
+//     非 1001 断线维持现状文案、重连成功复位
 //
 // 运行：cd packages/mobile-renderer && npx vitest run src/__tests__/connection-view.test.ts
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -15,12 +17,14 @@ import type { ConnectionState } from '@taiji/core'
 import type { ConnectionCredentialController } from '../platform/connection-profile'
 
 // vi.hoisted：mock 工厂被 hoist 到 import 前，工厂内引用的变量须经 vi.hoisted 创建
-const { mockGetState, mockDisconnect, mockInitConnection, mockResetSuppression } = vi.hoisted(() => ({
-  mockGetState: vi.fn(),
-  mockDisconnect: vi.fn(),
-  mockInitConnection: vi.fn(),
-  mockResetSuppression: vi.fn(),
-}))
+const { mockGetState, mockDisconnect, mockInitConnection, mockResetSuppression, mockOnGoingAway } =
+  vi.hoisted(() => ({
+    mockGetState: vi.fn(),
+    mockDisconnect: vi.fn(),
+    mockInitConnection: vi.fn(),
+    mockResetSuppression: vi.fn(),
+    mockOnGoingAway: vi.fn(),
+  }))
 
 vi.mock('@taiji/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@taiji/core')>()
@@ -30,13 +34,16 @@ vi.mock('@taiji/core', async (importOriginal) => {
     disconnect: mockDisconnect,
     initConnection: mockInitConnection,
     resetAuthRejectionSuppression: mockResetSuppression,
+    onGoingAway: mockOnGoingAway,
   }
 })
 
 import {
+  connectionBannerI18nKey,
   hasConnectedOnce,
   notifyAuthRejected,
   notifyTokenInputRequired,
+  runtimeRestarting,
   setupConnectionView,
   shellConnectionState,
   submitRemoteToken,
@@ -113,6 +120,58 @@ describe('connection-view 转移优先级（三信号不变量）', () => {
     tokenSubmit.value = { submitting: true, error: null }
     notifyAuthRejected()
     expect(tokenSubmit.value).toEqual({ submitting: false, error: 'invalid' })
+  })
+})
+
+describe('D8 重启感知：close 1001 → 重启文案分流（不升级 failed 全屏）', () => {
+  // setupConnectionView（文件顶层）注册的 onGoingAway 回调（mock 捕获）——模拟 ws-client
+  // onclose 读到 close 1001（runtime 计划内关停）时的信号触发
+  function triggerGoingAway(): void {
+    expect(mockOnGoingAway).toHaveBeenCalledTimes(1)
+    const cb = mockOnGoingAway.mock.calls[0]?.[0]
+    expect(typeof cb).toBe('function')
+    ;(cb as () => void)()
+  }
+
+  beforeEach(() => {
+    shellConnectionState.value = 'connecting'
+    hasConnectedOnce.value = false
+    runtimeRestarting.value = false
+    coreState.value = 'disconnected'
+  })
+
+  it('close 1001：runtimeRestarting 置位 + 文案切 restarting；重连中间态不升级 failed', async () => {
+    // 断线初态：现状文案（reconnecting）
+    expect(runtimeRestarting.value).toBe(false)
+    expect(connectionBannerI18nKey.value).toBe('mobile.reconnecting')
+
+    triggerGoingAway()
+    expect(runtimeRestarting.value).toBe(true)
+    expect(connectionBannerI18nKey.value).toBe('mobile.restarting')
+
+    // 重启窗口内的重连中间态：视图停留 connecting（非 failed 全屏），重启文案保持
+    await toCoreState('reconnecting')
+    expect(shellConnectionState.value).toBe('connecting')
+    expect(shellConnectionState.value).not.toBe('failed')
+    expect(connectionBannerI18nKey.value).toBe('mobile.restarting')
+  })
+
+  it('非 1001 断线（onGoingAway 未触发）：文案维持现状 reconnecting 不变', async () => {
+    await toCoreState('connected')
+    // 网络断（close code 非 1001，无 goingAway 信号）→ 掉回重连态
+    await toCoreState('reconnecting')
+    expect(runtimeRestarting.value).toBe(false)
+    expect(shellConnectionState.value).toBe('connecting')
+    expect(connectionBannerI18nKey.value).toBe('mobile.reconnecting')
+  })
+
+  it('重启完成重连成功（connected）：runtimeRestarting 复位，文案回现状', async () => {
+    triggerGoingAway()
+    expect(connectionBannerI18nKey.value).toBe('mobile.restarting')
+
+    await toCoreState('connected')
+    expect(runtimeRestarting.value).toBe(false)
+    expect(connectionBannerI18nKey.value).toBe('mobile.reconnecting')
   })
 })
 

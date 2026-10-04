@@ -187,7 +187,7 @@ function onCancel(): void {
   if (req) emit('cancel', { requestId: req.requestId })
 }
 
-// ── choice 选项交互（单选互斥 / 多选 toggle / Other 卡片化；桌面 ChoiceQuestion 同语义）──
+// ── choice 选项交互（单选互斥 / 多选 toggle / Other 合成选项卡；桌面 ChoiceQuestion 同语义）──
 
 function isOptionSelected(q: FormQuestion, label: string): boolean {
   return q.type === 'choice' && (states[questionKey(q)]?.selectedValues.includes(label) ?? false)
@@ -215,9 +215,15 @@ function toggleOption(q: FormQuestion, label: string): void {
   states[key] = { selectedValues: deselect ? [] : [label], otherText }
 }
 
-/** Other 输入框显隐（选中占位符即展开；无 options 退化 choice 无 Other） */
+/** Other 合成选项卡显隐（对齐桌面 ChoiceQuestion.showOther：有 options 且 allowOther !== false；
+ *  无 options 退化 choice 不合成，自由文本走 Textarea 分支） */
+function showOtherTab(q: FormQuestion): boolean {
+  return q.type === 'choice' && q.options.length > 0 && q.allowOther !== false
+}
+
+/** Other 输入框显隐（绑定 Other 选中态——选中占位符即展开） */
 function showOtherInput(q: FormQuestion): boolean {
-  return q.type === 'choice' && q.options.length > 0 && q.allowOther !== false && isOptionSelected(q, OTHER_VALUE)
+  return showOtherTab(q) && isOptionSelected(q, OTHER_VALUE)
 }
 </script>
 
@@ -288,6 +294,24 @@ function showOtherInput(q: FormQuestion): boolean {
               />
               <span class="min-w-0 flex-1 text-[13px] leading-1.5 text-neutral-fg">{{ opt.label }}</span>
               <span v-if="opt.description" class="text-[12px] leading-1.5 text-neutral-dim">{{ opt.description }}</span>
+            </div>
+            <!-- Other 合成选项卡（allowOther !== false 时合成于选项末尾；桌面 ChoiceQuestion
+                 同语义：toggle 交互与普通选项同构，选中后展开输入框） -->
+            <div
+              v-if="showOtherTab(q)"
+              :data-testid="`mobile-form-option-${OTHER_VALUE}`"
+              role="checkbox"
+              :aria-checked="isOptionSelected(q, OTHER_VALUE)"
+              :tabindex="0"
+              class="flex cursor-pointer items-start gap-2 rounded px-2.5 py-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              :class="isOptionSelected(q, OTHER_VALUE) ? 'bg-accent-soft' : 'bg-surface-2'"
+              @click="toggleOption(q, OTHER_VALUE)"
+            >
+              <span
+                class="mt-0.5 size-4 shrink-0 border-2 transition-colors"
+                :class="[q.multi ? 'rounded-sm' : 'rounded-full', isOptionSelected(q, OTHER_VALUE) ? 'border-accent bg-accent' : 'border-border-strong']"
+              />
+              <span class="min-w-0 flex-1 text-[13px] leading-1.5 text-neutral-fg">{{ t('extensionUI.other') }}</span>
             </div>
             <div v-if="showOtherInput(q)" class="px-0.5">
               <Input

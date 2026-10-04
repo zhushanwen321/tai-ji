@@ -323,17 +323,27 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // （store.ts 不在 u3b 领地）。
     const prev = messages.value.get(sid)?.value ?? []
     const messageId = readString(payload, 'messageId') ?? `a-${randomUuid()}`
-    commitMessages(messages, sid, [
-      ...prev,
-      {
-        id: messageId,
-        role: 'assistant',
-        content: '',
-        status: 'streaming',
-        timestamp: Date.now(),
-        contentBlocks: [],
-      },
-    ])
+    // [D1 回放重复防御] 同 id 气泡已存在 → 复用该气泡不 append（同源重复帧：订阅失败
+    // 重订的全量回放 / 重连回拉重叠段——两次投递都来自 runtime 消息流，messageId 相同）。
+    // 查重命中仅跳过 append：不改已有气泡 status（已终结保持终态——sealed guard 使后续
+    // delta 幂等丢弃，内容不丢；流式中保持 streaming，delta 由「最后一条 streaming
+    // assistant」定位继续累积到原气泡）；clearPendingSend 照常执行——此处早返回会跳过
+    // clear，把乐观态卡在 pending 窗口。防御射程 = 同源重复帧；跨源重复（getHistory
+    // 基线 id 与回放 messageId 是不相交 id 空间）归 D2 链时序对齐，不归本查重。
+    // （messageId 缺省 fallback 随机 id 必不与既有 id 相同，查重判定天然不影响缺省分支。）
+    if (!prev.some((m) => m.id === messageId)) {
+      commitMessages(messages, sid, [
+        ...prev,
+        {
+          id: messageId,
+          role: 'assistant',
+          content: '',
+          status: 'streaming',
+          timestamp: Date.now(),
+          contentBlocks: [],
+        },
+      ])
+    }
     // 空窗结束：clearPendingSend（接管 dispatching 语义）
     clearPendingSend(sid)
   },

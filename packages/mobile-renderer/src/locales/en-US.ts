@@ -5,6 +5,7 @@ export default {
   mobile: {
     connecting: 'Connecting…',
     reconnecting: 'Disconnected, reconnecting…',
+    restarting: 'Server restarting, will be back…',
     connectionFailed: 'Connection failed',
     connectionFailedHint: 'Refresh this page to retry; if it keeps failing, re-scan the QR code on your desktop',
     tabs: {
@@ -15,9 +16,19 @@ export default {
       empty: 'No sessions yet',
       loadFailed: 'Load failed, tap to retry',
       newTask: 'New task',
+      restore: 'Reopen',
+      menuRename: 'Rename',
+      menuDelete: 'Delete',
+      renameTitle: 'Rename session',
+      renamePlaceholder: 'Enter session name',
+      renameConfirm: 'Save',
       status: {
-        active: 'Running',
-        idle: 'Idle',
+        streaming: 'Generating',
+        pending: 'Pending',
+        compacting: 'Compacting',
+        waiting: 'Waiting for input',
+        retrying: 'Retrying',
+        working: 'Background work',
         dead: 'Exited',
         done: 'Done',
         error: 'Error',
@@ -42,6 +53,17 @@ export default {
       placeholder: 'Type a message…',
       send: 'Send',
       stop: 'Stop',
+      sendFailed: 'Not delivered — check your connection and retry',
+    },
+    queueStrip: {
+      stateQueued: 'Queued',
+      stateInFlight: 'Delivering',
+      stateFailed: 'Retries exhausted',
+      cancel: 'Cancel delivery',
+      cancelFailed: 'Cancel failed: {msg}',
+      cancelUnavailable: 'Message already delivered — cannot cancel',
+      cancelUnavailableWithReason: 'Cannot cancel: {reason}',
+      restoreContentMissing: 'Message cancelled, but its original text could not be recovered — please retype it',
     },
     tokenInput: {
       title: 'Credentials required',
@@ -53,6 +75,13 @@ export default {
     },
     mermaid: {
       placeholder: 'View chart on desktop',
+    },
+    errorBar: {
+      responseNotDelivered: 'Reply not delivered — retry after the connection is restored',
+      dismiss: 'Dismiss',
+    },
+    subagentStatus: {
+      running: 'Subagents running: {slugs}',
     },
     formCard: {
       planReviewTitle: 'Plan awaiting review',
@@ -78,5 +107,6 @@ export const connectionEn = {
     disconnectedError: 'Connection lost',
     runtimeRestarting: 'Runtime is restarting',
     runtimeUnavailable: 'Runtime unavailable',
+    sessionRequestFailed: 'Session request failed: {message}',
   },
 }

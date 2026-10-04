@@ -19,16 +19,19 @@
 //      storage 失效凭据，不误报错误）
 //   ③ onTokenInputRequired（profile 凭据处置尾部，经 notifyTokenInputRequired）：
 //      无条件落 token-input（凭据缺失与其他验身失败同视图同出口）
+//   ④ onGoingAway（ws-client onclose 读 close 1001，D8）：置 runtimeRestarting 提示态
+//      （断线条文案分流 restarting），不参与 shellConnectionState 转移；复位 = connected
 //
 // 依赖方向：bootstrap → connection-view（本模块不反向 import bootstrap；profile
 // controller 由 bootstrap 创建后经 setupConnectionView 注入——闭包倒转，submitRemoteToken
 // 与 auth 成功处置的操作面）。
 
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   disconnect,
   getState,
   initConnection,
+  onGoingAway,
   resetAuthRejectionSuppression,
 } from '@taiji/core'
 import type { ConnectionCredentialController } from '../platform/connection-profile'
@@ -61,6 +64,25 @@ export const tokenSubmit = ref<{ submitting: boolean; error: 'invalid' | 'failed
   error: null,
 })
 
+/**
+ * 信号入口④（D8 重启感知）：服务端计划内关停窗口（ws-client onclose 读 close 1001 →
+ * onGoingAway，P6 探针证实可读）置位；复位点 = 重连成功（watch connected 分支统一收口——
+ * 服务回来了）。置位期间重连退避照常（ws-client 侧不改重连机制），本态只影响断线条文案
+ * 分流（connectionBannerI18nKey），不改变 shellConnectionState 转移（不升级 failed 全屏）。
+ */
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态）：重启窗口提示态（断线条文案分流依据）
+export const runtimeRestarting = ref(false)
+
+/**
+ * 断线条文案 key 投影（App.vue banner 消费 `t(connectionBannerI18nKey)`）：重启窗口显示
+ * restarting 文案，其余断线维持现状 reconnecting 文案（D8 文案区分，不改重连机制）。
+ * key 的权威源 = src/locales/ 双侧文件（mobile.restarting / mobile.reconnecting），
+ * 双侧对齐由 __tests__/mobile-locale.test.ts 守卫。
+ */
+export const connectionBannerI18nKey = computed(() =>
+  runtimeRestarting.value ? 'mobile.restarting' : 'mobile.reconnecting',
+)
+
 /** setup 注入的凭据控制器（submitRemoteToken / auth 成功处置的操作面） */
 let profileController: ConnectionCredentialController | null = null
 
@@ -72,16 +94,23 @@ let profileController: ConnectionCredentialController | null = null
 export function setupConnectionView(controller: ConnectionCredentialController): void {
   profileController = controller
 
+  // 信号入口④接线（D8）：服务端计划内关停（close 1001）→ 置「重启中」提示态；
+  // ws-client 侧重连退避照常，此处只落文案分流状态（不碰 shellConnectionState）。
+  onGoingAway(() => {
+    runtimeRestarting.value = true
+  })
+
   // auth 结果 → UI 态（D4 处置接线）：connected = 验身成功（落 storage / 抹地址栏的时机，
-  // 同时收口 token 提交 submitting）；token-input 由 notifyAuthRejected /
-  // notifyTokenInputRequired 侧写入，不被中间连接态覆盖（重试连接期间保持输入视图，
-  // auth 结果落地时切换）；failed = 重连预算用尽（终态，UI 落可行动指引），token-input
-  // 优先级高于 failed。
+  // 同时收口 token 提交 submitting + 复位重启提示态——服务回来了）；token-input 由
+  // notifyAuthRejected / notifyTokenInputRequired 侧写入，不被中间连接态覆盖（重试连接
+  // 期间保持输入视图，auth 结果落地时切换）；failed = 重连预算用尽（终态，UI 落可行动
+  // 指引），token-input 优先级高于 failed。
   watch(getState(), (s) => {
     if (s === 'connected') {
       hasConnectedOnce.value = true
       shellConnectionState.value = 'connected'
       tokenSubmit.value.submitting = false
+      runtimeRestarting.value = false
       void controller.handleAuthSuccess()
       return
     }

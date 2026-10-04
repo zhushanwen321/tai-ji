@@ -20,9 +20,15 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { i18n } from './i18n'
-import { chatStore } from './shell/app-runtime'
+import { createLifecycleEffects } from '@taiji/core'
+import { chatStore, sessionStore } from './shell/app-runtime'
+import {
+  errorBarEffects,
+  resetCompanionChannelsForExitedSession,
+} from './shell/companion-bridge'
 import { initConnection, providePlatform, restoreSessions, setConnectionPorts } from '@taiji/core'
 import App from './App.vue'
+import { applySubagentRecords } from './views/SubagentStatusLine.vue'
 import { createConnectionProfilePort } from './platform/connection-profile'
 import { createMobilePlatformAdapter } from './platform/mobile-platform-adapter'
 import {
@@ -30,6 +36,49 @@ import {
   notifyTokenInputRequired,
   setupConnectionView,
 } from './shell/connection-view'
+
+// vue-i18n 的 t 复杂重载收窄为 (key, params?) => string（对齐 app-runtime 同款收窄）
+const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => string
+
+// session 生命周期 core 语义实例（remote-use D5/U6）：exited/restored/restoreFailed 的
+// 最小语义（markSessionError/markDead/流式终结/订阅簿记失效/恢复窗口订阅/revive/重订阅/
+// 恢复提示条两形态）单一归属 core factory。文案 bootstrap 期一次求值即可——移动壳无语言
+// 切换链（locale 由 navigator.language 启动检测定死），与桌面逐回调 t() 求值的差异仅在此。
+const lifecycleEffects = createLifecycleEffects(
+  { chat: chatStore, session: sessionStore },
+  {
+    restored: t('panel.message.respawnRestored'),
+    restoreFailed: t('panel.message.respawnFailed'),
+  },
+)
+
+// 壳层 effects 回调集（remote-use D5/U6/U15；模块级提取供 __testing 装配断言消费）。
+// 全 optional call（core InboundEffects 回调全可选）。三段来源：
+// - 生命周期三回调 = core lifecycle factory（上文 lifecycleEffects）；
+// - onSessionExited 壳扩展段 = exited 分通道重置（companion-bridge 出口：dialog
+//   queue.resetFor + form Map 具名清理，M8 防御；禁走 triggerSessionCleanups 销毁语义）；
+// - onSessionError/onGlobalError = U14 错误条回调（errorBarEffects）；
+// - onSubagents = 壳侧直挂 applySubagentRecords（U15/A9：写 subagent 分区驱动运行状态行；
+//   factory 不含 subagent 语义，接线位在壳扩展层，D5 去留表）。
+// D5 去留表：onMessageComplete/onWorkflowUpdate/onSubagentEntries 本波不接
+//（W4 通知体系 / 桌面面板族）。
+const shellEffects = {
+  ...errorBarEffects,
+  onSessionExited: (sessionId: string, payload: { code: number | null; reason: string }) => {
+    // core 序列先落（错误消息/dead 态 UI 反馈先行，factory 保序契约），随后壳扩展清理，
+    // 末尾恢复窗口订阅（restored/restoreFailed live 送达的唯一通路，D5 单一归属 factory）
+    lifecycleEffects.markSessionDead(sessionId, payload.reason)
+    resetCompanionChannelsForExitedSession(sessionId)
+    lifecycleEffects.openRestoreWindow(sessionId)
+  },
+  onSessionRestored: lifecycleEffects.onSessionRestored,
+  onSessionRestoreFailed: lifecycleEffects.onSessionRestoreFailed,
+  onSubagents: applySubagentRecords,
+}
+
+// 测试后门命名空间（生产代码禁止消费，对齐 app-runtime __testing 先例）：
+// 壳 effects 装配断言入口——接线位断言（onSubagents 与壳模块导出同源直挂、非 factory 内）。
+export const __testing = { shellEffects }
 
 // bootstrap —— mobile 壳启动编排。
 export async function bootstrap(): Promise<void> {
@@ -75,10 +124,10 @@ export async function bootstrap(): Promise<void> {
       notifyAuthRejected()
       void profile.handleAuthFailure()
     },
-    // effects = session 生命周期 / subagent / workflow 类下行的壳层接线点（桌面
-    // useMessageEffects 注入）；移动壳 v1 无对应消费面（D7 面板族 Phase 2），回调全 optional
-    // call，空对象安全。对话流主链不经此处（streamSubscribe per-session 通道 + config.sessions）。
-    effects: {},
+    // effects = session 生命周期 / 错误类下行 / subagent 运行态的壳层接线点
+    //（remote-use D5/U6/U15；此前 S6 全弃——`effects: {}` 使会话崩溃不 markDead、流式无人
+    // 终结、无恢复提示）。回调集来源见上方 shellEffects 定义段。
+    effects: shellEffects,
     // t 必须真实现而非 key 透传：core 用它构造断连错误消息（connection.disconnectedError /
     // runtimeRestarting / runtimeUnavailable），消息经 session store listLoadError / pending
     // reject 流入用户可见 UI（列表 loadError role=alert）。透传 key 会把裸 key 直出给用户。

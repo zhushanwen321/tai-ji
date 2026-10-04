@@ -1,12 +1,14 @@
 // MobileSessionList 组件测试（remote-use D7 列表行；审计缺口补齐：整组件此前无测试）。
 //
-// 行为面（按组件实装）：lastActiveAt 倒序排序、时间文案（今天 HH:mm 补零 / 跨日 M/D）、
+// 行为面（按组件实装）：runtime 组序排序（A13：客户端零重排）、时间文案（今天 HH:mm 补零 / 跨日 M/D）、
 // 状态点配色 + 状态文案、加载失败态（role=alert 错误行 + 点击重试）、空态占位、
 // 点选回调（selectSession → open-chat）、新建入口（new-task）、选中态高亮。
 //
-// app-runtime 模块级 mock：组件消费的 4 个导出（sessionStore.listLoadError / activeId、
-// sessionList、loadSessions、selectSession）替换为测试可写 ref + vi.fn，隔离 core WS
-// 依赖（测试禁触网络）。ref 在 mock 工厂内创建，测试经 import 拿到同一实例驱动场景。
+// app-runtime 模块级 mock：组件消费的导出（sessionStore.listLoadError / activeId、
+// sessionList、loadSessions、selectSession、chatStore）替换为测试可写 ref + vi.fn，隔离
+// core WS 依赖（测试禁触网络）。ref 在 mock 工厂内创建，测试经 import 拿到同一实例驱动
+// 场景。chatStore 是 A14 状态派生的输入源（u20）——轻量判定面 mock（DeriveStatusChat +
+// isActive/isCompacting），派生行为矩阵归 core session-derivations.test.ts。
 //
 // 运行：cd packages/mobile-renderer && npx vitest run src/__tests__/mobile-session-list.spec.ts
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -16,7 +18,17 @@ import type { SessionSummary } from '@taiji/shared'
 // 写入走此可写实例（mock 工厂与用例共用同一对象，类型零断言）
 const testState = await vi.hoisted(async () => {
   const { ref } = await import('vue')
-  return { list: ref<SessionSummary[]>([]) }
+  const { vi: hoistedVi } = await import('vitest')
+  return {
+    list: ref<SessionSummary[]>([]),
+    chatStore: {
+      isActive: hoistedVi.fn((_sid: string) => false),
+      isCompacting: hoistedVi.fn((_sid: string) => false),
+      isGenerating: hoistedVi.fn((_sid: string) => false),
+      getMessages: hoistedVi.fn((_sid: string): unknown[] => []),
+      getRetryState: hoistedVi.fn((_sid: string) => undefined),
+    },
+  }
 })
 
 vi.mock('../shell/app-runtime', async () => {
@@ -27,6 +39,7 @@ vi.mock('../shell/app-runtime', async () => {
       activeId: ref<string | null>(null),
     },
     sessionList: testState.list,
+    chatStore: testState.chatStore,
     loadSessions: vi.fn(async () => {}),
     selectSession: vi.fn(async () => {}),
   }
@@ -34,6 +47,7 @@ vi.mock('../shell/app-runtime', async () => {
 
 import MobileSessionList from '../views/MobileSessionList.vue'
 import { i18n } from '../i18n'
+import { applySubagentRecords, resetSubagentPartitionsForTest } from '../views/SubagentStatusLine.vue'
 import { loadSessions, selectSession, sessionStore } from '../shell/app-runtime'
 
 function mountList() {
@@ -78,13 +92,20 @@ describe('MobileSessionList 会话列表（D7 列表行）', () => {
     testState.list.value = []
     sessionStore.listLoadError.value = null
     sessionStore.activeId.value = null
+    testState.chatStore.isActive.mockReturnValue(false)
+    testState.chatStore.isCompacting.mockReturnValue(false)
+    testState.chatStore.isGenerating.mockReturnValue(false)
+    testState.chatStore.getMessages.mockReturnValue([])
+    testState.chatStore.getRetryState.mockReturnValue(undefined)
+    resetSubagentPartitionsForTest()
     vi.mocked(loadSessions).mockClear()
     vi.mocked(selectSession).mockClear()
     vi.mocked(loadSessions).mockResolvedValue(undefined)
     vi.mocked(selectSession).mockResolvedValue(undefined)
   })
 
-  it('排序：lastActiveAt 倒序渲染（最近活跃在前），与数据源顺序无关', () => {
+  it('排序：runtime 组序原样渲染（A13 统一裁决——客户端 lastActiveAt 重排已删除），与数据源顺序一致', () => {
+    // 数据源故意按 lastActiveAt 乱序注入：客户端不重排，行序 = 数据源（runtime 组序投影）
     testState.list.value = [
       makeSummary({ id: 's-mid', lastActiveAt: todayAt(TODAY_HOUR, TODAY_MINUTE) }),
       makeSummary({ id: 's-old', lastActiveAt: new Date(PAST_YEAR, PAST_MONTH_INDEX, PAST_DAY).getTime() }),
@@ -92,9 +113,9 @@ describe('MobileSessionList 会话列表（D7 列表行）', () => {
     ]
     const wrapper = mountList()
     expect(itemIdsInOrder(wrapper)).toEqual([
-      'mobile-session-item-s-new',
       'mobile-session-item-s-mid',
       'mobile-session-item-s-old',
+      'mobile-session-item-s-new',
     ])
     wrapper.unmount()
   })
@@ -110,18 +131,46 @@ describe('MobileSessionList 会话列表（D7 列表行）', () => {
     wrapper.unmount()
   })
 
-  it('运行状态可见：状态点配色（active=bg-accent / idle=bg-neutral-dim）+ 状态文案', () => {
+  it('运行状态可见（A14 派生态）：streaming 输入 → bg-accent + 生成中；未 hydrate meta idle → 已完成；dead → 红点已退出', () => {
     testState.list.value = [
-      makeSummary({ id: 's-active', status: 'active', lastActiveAt: Date.now() }),
+      makeSummary({ id: 's-streaming', status: 'active', lastActiveAt: Date.now() }),
       makeSummary({ id: 's-idle', status: 'idle', lastActiveAt: Date.now() }),
+      makeSummary({ id: 's-dead', status: 'dead', lastActiveAt: Date.now() }),
     ]
+    // streaming 输入 = isGenerating（core chat store occupancy，移动输入子集之一）
+    testState.chatStore.isGenerating.mockImplementation((sid: string) => sid === 's-streaming')
     const wrapper = mountList()
-    const activeItem = wrapper.get('[data-testid="mobile-session-item-s-active"]')
+    const streamingItem = wrapper.get('[data-testid="mobile-session-item-s-streaming"]')
     const idleItem = wrapper.get('[data-testid="mobile-session-item-s-idle"]')
-    expect(activeItem.get('.rounded-full').classes()).toContain('bg-accent')
-    expect(activeItem.text()).toContain('运行中')
-    expect(idleItem.get('.rounded-full').classes()).toContain('bg-neutral-dim')
-    expect(idleItem.text()).toContain('空闲')
+    const deadItem = wrapper.get('[data-testid="mobile-session-item-s-dead"]')
+    expect(streamingItem.get('.rounded-full').classes()).toContain('bg-accent')
+    expect(streamingItem.text()).toContain('生成中')
+    // meta idle 未 hydrate（无消息分区）→ 谓词终态兜底 done（桌面侧栏同语义）
+    expect(idleItem.get('.rounded-full').classes()).toContain('bg-success')
+    expect(idleItem.text()).toContain('已完成')
+    // dead 是进程态非对话派生态——红点特判权威于派生（A3 分流视觉锚）
+    expect(deadItem.get('.rounded-full').classes()).toContain('bg-danger')
+    expect(deadItem.text()).toContain('已退出')
+    wrapper.unmount()
+  })
+
+  it('working 态输入链（A14/U20：A9 subagent 运行态分区 → hasBackgroundWork → 后台任务）', () => {
+    testState.list.value = [makeSummary({ id: 's-working', status: 'idle', lastActiveAt: Date.now() })]
+    // 真实 SubagentStatusLine 分区（无 mock）：推送 running 记录 → 移动 working 输入源成立
+    applySubagentRecords('s-working', [
+      {
+        subagentId: 'sa-1',
+        sessionFile: null,
+        agent: 'coder',
+        slug: 'coder',
+        task: 'do work',
+        status: 'running',
+      },
+    ])
+    const wrapper = mountList()
+    const workingItem = wrapper.get('[data-testid="mobile-session-item-s-working"]')
+    expect(workingItem.get('.rounded-full').classes()).toContain('bg-accent')
+    expect(workingItem.text()).toContain('后台任务')
     wrapper.unmount()
   })
 
@@ -176,6 +225,16 @@ describe('MobileSessionList 会话列表（D7 列表行）', () => {
     const wrapper = mountList()
     expect(wrapper.get('[data-testid="mobile-session-item-s-1"]').classes()).toContain('bg-accent-soft')
     expect(wrapper.get('[data-testid="mobile-session-item-s-2"]').classes()).not.toContain('bg-accent-soft')
+    wrapper.unmount()
+  })
+
+  it('模型/思考档标签：行内可见 modelId 与 thinkingLevel（u13/A5，V11 列表行面）', () => {
+    testState.list.value = [
+      makeSummary({ id: 's-1', modelId: 'm-list', thinkingLevel: 'high', lastActiveAt: Date.now() }),
+    ]
+    const wrapper = mountList()
+    const modelLine = wrapper.get('[data-testid="mobile-session-item-s-1"] [data-testid="mobile-session-model-line"]')
+    expect(modelLine.text()).toBe('m-list · high')
     wrapper.unmount()
   })
 })

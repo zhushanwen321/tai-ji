@@ -54,7 +54,7 @@
  */
 import { ref, readonly } from 'vue'
 import type { ClientMessage, ServerMessage } from '@taiji/shared'
-import { getPlatform, WS_READY_STATE, type WebSocketLike } from '../platform/port'
+import { getPlatform, WS_READY_STATE, type WebSocketCloseInfo, type WebSocketLike } from '../platform/port'
 
 export type ConnectionState =
   | 'disconnected'
@@ -84,6 +84,14 @@ const HEARTBEAT_INTERVAL_MS = 15_000
 const RECONNECT_BASE_DELAY_MS = 1_000
 const RECONNECT_BACKOFF_EXPONENT = 2
 const MAX_RECONNECT_DELAY_MS = 30_000
+/**
+ * WS 1001 Going Away（RFC 6455）——runtime 计划内关停（connection-manager stop）发给
+ * 全部存量连接的 close 码，客户端据此区分「服务重启中」与网络断（remote-use D8，文案
+ * 信号 onGoingAway；重连机制不变）。与 runtime 侧 WS_CLOSE_GOING_AWAY 同码，协议值
+ * 同源 RFC，两侧常量各自就近维护。可读性 P6 探针已证（2026-10-03，Chromium 收
+ * close(1001,'Server shutting down') 后 onclose event.code===1001）。
+ */
+const WS_CLOSE_GOING_AWAY = 1001
 /** 重连总时长上限（ms）：超过即放弃，置 failed 待用户手动重试，避免长时间无意义重试占用资源。
  *  说明：曾配 attempts 计数上限（MAX_RECONNECT_ATTEMPTS=20），但指数退避（1+2+4+8+16+30…）
  *  累积约第 6-7 次即跨 60s → duration cap 先触发，attempts 永不可达，该常量为死代码已删除。
@@ -182,6 +190,25 @@ export function onAuthRejected(cb: () => void): () => void {
   authRejectedHandler = cb
   return () => {
     if (authRejectedHandler === cb) authRejectedHandler = null
+  }
+}
+
+// ── 服务端计划内关停信号（remote-use D8）──────────────────────────
+
+/**
+ * 计划内关停回调（单槽，对齐 onAuthRejected 体例）：onclose 读到 close 1001（runtime
+ * 计划内停机）时、先于重连调度触发。消费方 = connection-view（移动壳断线条「服务重启中」
+ * 文案分流）；桌面形态不注册 = 信号无人消费，重连链行为逐字节不变。P6 探针（设计 §5.4
+ * 检查点 1）证实浏览器 CloseEvent 可读 code 1001；读不到（无事件形态/异常环境）不触发，
+ * 消费方维持现状文案——降级安全。
+ */
+let goingAwayHandler: (() => void) | null = null
+
+/** 注册服务端计划内关停回调，返回取消函数。 */
+export function onGoingAway(cb: () => void): () => void {
+  goingAwayHandler = cb
+  return () => {
+    if (goingAwayHandler === cb) goingAwayHandler = null
   }
 }
 
@@ -473,8 +500,12 @@ export function connect(url: string, credentials: ConnectCredentials): void {
     messageHandler?.(parsed)
   }
 
-  ws.onclose = () => {
+  ws.onclose = (event?: WebSocketCloseInfo) => {
     if (gen !== wsGeneration) return // 旧 WS 残余回调，不干扰新连接
+    // D8 close code 分流（只读码不加协议）：1001 = runtime 计划内关停 → 先触发消费方
+    // 文案信号再进重连链（顺序对齐 authRejected「先置位再 close」——信号先落，重连链
+    // 行为不变）；无事件形态（mock 桩）或非 1001 不触发，走现状断线路径。
+    if (event?.code === WS_CLOSE_GOING_AWAY) goingAwayHandler?.()
     state.value = 'disconnected'
     stopHeartbeat()
     clearAuthTimer()

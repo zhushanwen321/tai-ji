@@ -161,6 +161,16 @@
   --popover-foreground: var(--neutral-fg);
   --input: var(--border);              /* border-input */
   --ring: var(--accent);               /* ring-ring（focus，主色）*/
+
+  /* ── 视口安全区（A16：刘海屏/Home Indicator 避让）──────────
+     env() 消费唯一定义点：组件经 Tailwind arbitrary value（如
+     pt-[var(--safe-area-top)]）消费这些变量，不直写 env()——0px 回退保证
+     不支持 env() 的环境与无刘海设备下 padding 归零无视觉影响。
+     前提：index.html viewport 须含 viewport-fit=cover（否则 env() 恒 0）。 */
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
 }
 
 

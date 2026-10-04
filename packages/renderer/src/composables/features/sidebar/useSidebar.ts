@@ -91,6 +91,15 @@ export function resetAppBootstrap(): void {
 }
 
 /**
+ * 测试后门命名空间（生产代码禁止消费，对齐 useExtensionHostBridge / app-runtime __testing
+ * 先例）：装配检查断言入口——sessionEntry 端口束原始注入面（composable 内构造，useSidebar()
+ * 调用时填充）。remote-use D9/U21 装配检查 helper 双壳测试的桌面壳断言源：未来重构 useSidebar
+ * 静默删 sessionEntry 注入时，core helper 断言在测试期报红（生产零消费由 assembly-check
+ * grep 断言守护，出口不扩大 API 面常驻语义）。
+ */
+export const __testing: { sessionEntry?: SessionEntryPort } = {}
+
+/**
  * 未读两源同点清除（D9 合流）：① session 标记（后台完成 → markUnread，localStorage）；
  * ② fork 分支角标（useForkBranchNotify 模块级单例，SessionItemDisplay 同一枚 dot 读两源）。
  *
@@ -222,6 +231,8 @@ export function useSidebar() {
     // panelSessionId 由 core 链在步 11 已完成 recency 刷新后透传；壳实现执行驱逐本体即可
     evictLru: () => chat.evictIfNeeded(),
   }
+  // [remote-use D9/U21] 装配检查断言源填充（见模块级 __testing 注释；非消费，仅出口登记）
+  __testing.sessionEntry = sessionEntry
 
   // ── sessionStore：pinia useSessionStore cast 成 core factory 类型（ADR-0059 cast 接缝）──
   // pinia setup store unwrap ref（外部拿值非 ref），与 core createSessionStore 返回的 ref 类型不兼容。

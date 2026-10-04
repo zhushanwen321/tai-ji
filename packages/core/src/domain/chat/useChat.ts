@@ -28,6 +28,7 @@ import {
 } from '../../coordination/subscription-state'
 import type { ChatStoreInstance } from './store'
 import { historyWindowFromReply } from './truncated-window'
+import { isVirtualKey } from './lru'
 import { disposeImageCacheForSession } from './image-cache'
 import { toErrorMessage } from '../../utils/error-message'
 import type { EnsureStreamSubDeps, SessionStoreLike, UseChatDeps } from './use-chat-types'
@@ -1295,4 +1296,65 @@ export function invalidateStreamSubscription(sessionId: string): void {
   // invalidateSubscription（非 clearSubscription）：额外清 in-flight 去重条目，防 respawn 后
   // 首次 ensureStreamSubscription 复用死 Promise 而不重发 subscribe RPC
   invalidateSubscription(sessionId)
+}
+
+/**
+ * 驱逐退订复合入口的 RPC 通道（remote-use D2/U5）：壳侧注入 session.unsubscribe
+ * transport 函数（双壳注入同一实现——core domain 层零 transport 值级依赖，订阅 RPC
+ * 同款注入形态先例 = coordination/subscription-state 的 setSubscriptionPorts）。
+ */
+export interface LruUnsubscribeDeps {
+  /** session.unsubscribe RPC（ack 型，reply void，renderer 不消费 payload） */
+  unsubscribe(sessionId: string): Promise<void> | void
+}
+
+/**
+ * 读 chat store 消息分区 keys（factory / pinia 双形态归一，D2 双壳共接同一入口）。
+ * core factory 产物 messages = ShallowRef<Map>；桌面 pinia setup store 解包产物 = Map
+ * 本体（ADR-0059 类型鸿沟）。instanceof 运行时判定是双形态的唯一归一点。
+ */
+function readPartitionKeys(chat: ChatStoreInstance): Set<string> {
+  const carrier: unknown = chat.messages
+  const map = carrier instanceof Map
+    ? carrier
+    : (carrier as { value: Map<string, unknown> }).value
+  return new Set(map.keys())
+}
+
+/**
+ * LRU 驱逐 + 连带退订复合入口（remote-use D2/U5）——sessionEntry.evictLru 的统一实现，
+ * 双壳共接（桌面 useSidebar 现状裸接 chat.evictIfNeeded() 的改接同落此函数，防双壳分叉）。
+ *
+ * 编排 = chat.evictIfNeeded()（驱逐本体，语义不变）+ 对被驱逐会话：
+ * ① invalidateStreamSubscription——本地两层簿记失效（events handler 退订 + subscribe 幂等
+ *   标记失效）。不退订的后果（D2 采用段）：被驱逐会话订阅仍在，后续消息经 commitMessages
+ *   重建分区——驱逐白做；且订阅数量随打开会话数线性增长（LAN 流量 + 锁屏探活电量同增）。
+ * ② session.unsubscribe RPC（fire-and-forget）——服务端停发该会话 live push。
+ * 切回被驱逐会话重走 12 步切入链（步 5 订阅 + 步 9 基线合并清洗），既有重复防御就位。
+ *
+ * 「谁被驱逐」的观测 = 驱逐前后分区 keys 差集：evictIfNeeded 是同步函数（阈值判定 +
+ * 逐个删除全同步），单线程同步执行内无并发窗口，差集即被驱逐集合（含联动驱逐的派生键）。
+ * 派生键（subagent:/agentcall: 前缀）无订阅簿记（ensureStreamSubscription 只以真实 sid
+ * 调用），跳过——簿记失效是 no-op，退订是纯冗余 RPC。
+ *
+ * 与 disposeSession（删除路径）的分工：disposeSession 走 clearSubscription 全清（session
+ * 永久消失）；本入口走 invalidateStreamSubscription（session 仍存在，重切时订阅须可重建）。
+ */
+export function evictLruWithUnsubscribe(
+  chat: ChatStoreInstance,
+  deps: LruUnsubscribeDeps,
+): void {
+  const before = readPartitionKeys(chat)
+  chat.evictIfNeeded()
+  const after = readPartitionKeys(chat)
+  for (const sid of before) {
+    if (after.has(sid)) continue
+    if (isVirtualKey(sid)) continue
+    invalidateStreamSubscription(sid)
+    // fire-and-forget：ack 型 RPC，停发副作用由 runtime 侧体现；失败仅 warn——
+    // 簿记失效已同步完成（先于 RPC），RPC 失败不回滚驱逐（下次驱逐再试，幂等）
+    void Promise.resolve(deps.unsubscribe(sid)).catch((e) => {
+      console.warn(`[useChat] unsubscribe evicted session ${sid} failed:`, e)
+    })
+  }
 }

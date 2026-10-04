@@ -9,7 +9,7 @@
  * - P1.5 组件黑盒·横线分隔行族（compacting 行自通栏带降级回归本族 / A4+A7）：四行同构
  *   （system-notice + content-col 保留，行内左右各一条渐隐 hairline）、待发 chip count =
  *   内核投递投影里「非 direct 且未 delivered」条目数（[u3c/D7] 单源化——原 useCompactQueue
- *   未提交条目口径随队列退役，口径唯一定义点 = useQueueRows.deliveryQueueEntries）、
+ *   未提交条目口径随队列退役，口径唯一定义点 = core deliveryQueueEntries（U20 下沉））、
  *   count=0 隐藏 chip、bash/thinking/settling 行同构形态
  * - P2 组件黑盒·优先级堆叠：compacting + bash 并存 → 两行且 compacting 在上；
  *   thinking 与 compacting/bash 互斥（「无以上但有 dispatching turn」才显示）；

@@ -1,11 +1,14 @@
 /**
- * DialogRequestQueue 单测（W1 · 8 用例覆盖 IF2 契约全行为面）。
+ * DialogRequestQueue 单测（W1 · 8 用例覆盖 IF2 契约全行为面 + U6 resetFor 三用例）。
  *
  * 运行：cd packages/ui && npx vitest run src/extension-host/
  *
- * 契约来源：S4 slice plan IF1/IF2/DM1/DM2/ERR1/ERR2 + clarify Q1-Q4。
+ * 契约来源：S4 slice plan IF1/IF2/DM1/DM2/ERR1/ERR2 + clarify Q1-Q4；
+ * resetFor 契约来源：remote-use D5 exited 分区清理段（exited 分通道重置，重置语义非销毁）。
  * Mock 策略：MockDialogRequestSource（vi.fn 返回 unsubscribe 间谍）+ MockTransport（双通道 vi.fn）；
- * 不 mock useSessionScopedState（Map 分区是验收对象）；effectScope.run 包裹 + scope.stop() 隔离订阅状态。
+ * 不 mock useSessionScopedState（Map 分区是验收对象）——唯一的例外是文件级 init 计数透明包装
+ * （TC-14「不建分区」的可观测锚点：真实工厂语义零变化，仅对 init 加计数，见下方 vi.mock 块）；
+ * effectScope.run 包裹 + scope.stop() 隔离订阅状态。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { effectScope, ref } from 'vue'
@@ -17,6 +20,24 @@ import {
   type DialogRequestSource,
   type UiResponseTransport,
 } from '../dialog-request-queue'
+
+// TC-14 观测锚点：init 调用计数（「分区是否被建立」的唯一可区分信号——分区建立与否在
+// 队列公开 API 上行为同形，内存常驻差异只能经 init 计数观测）。vi.hoisted 供 mock 工厂
+// （hoist 到 import 前）与用例体共享同一引用。
+const initCounter = vi.hoisted(() => ({ count: 0 }))
+
+// 透明包装：其余导出原样透传，仅对工厂的 init 参数加计数——真实 Map 分区语义仍是验收对象
+vi.mock('@taiji/core/foundation/use-session-scoped-state', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@taiji/core/foundation/use-session-scoped-state')>()
+  return {
+    ...actual,
+    useSessionScopedState: <T>(sid: Ref<string | null>, init: () => T) =>
+      actual.useSessionScopedState<T>(sid, () => {
+        initCounter.count += 1
+        return init()
+      }),
+  }
+})
 
 // ── Mocks ────────────────────────────────────────────────────────────
 
@@ -73,6 +94,7 @@ function createHarness(sessionIdRef?: Ref<string | null>) {
 describe('DialogRequestQueue', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    initCounter.count = 0
   })
 
   it('TC-1 入队串行展示：连续两个 ui-request，队首为第一个；respond 第一个后切换为第二个', () => {
@@ -293,6 +315,68 @@ describe('DialogRequestQueue', () => {
       q.respond('r-p', 'opt')
       expect(q.pendingCount.value).toBe(0)
       expect(transport.sendPluginResponse).toHaveBeenCalledTimes(2)
+    } finally {
+      scope.stop()
+    }
+  })
+
+  // ── U6 resetFor：exited 分通道重置（remote-use D5 exited 分区清理段，重置语义非销毁） ──
+
+  it('TC-12 resetFor 清空分区内容：pending/responding 写入空态，迟到 respond 无回传（ERR1）', () => {
+    const sid = ref<string | null>('A')
+    const { source, transport, scope, getQueue } = createHarness(sid)
+    try {
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r2' })
+      const q = getQueue()
+      expect(q.pendingCount.value).toBe(2)
+
+      q.resetFor('A')
+      // 空态：队首无请求、计数归零；残留 requestId 的 respond 走 ERR1 静默忽略（无回传）
+      expect(q.pendingCount.value).toBe(0)
+      expect(q.currentRequest.value).toBeUndefined()
+      q.respond('r1', true)
+      expect(transport.sendPiResponse).not.toHaveBeenCalled()
+    } finally {
+      scope.stop()
+    }
+  })
+
+  it('TC-13 重置语义非销毁：resetFor 后同 sid 新请求照常入队（不进 deletedSids，无迟到写拦截）', () => {
+    const sid = ref<string | null>('A')
+    const { source, scope, getQueue } = createHarness(sid)
+    try {
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'old' })
+      const q = getQueue()
+      q.resetFor('A')
+      expect(q.pendingCount.value).toBe(0)
+
+      // exited ≠ 删除（会话继续存在并恢复）：恢复期新请求（新 requestId）必须可达——
+      // 若误用销毁语义（cleanup → deletedSids），此处 updateFor 首行拦截，入队静默丢弃
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'post-reset' })
+      expect(q.pendingCount.value).toBe(1)
+      expect(q.currentRequest.value?.requestId).toBe('post-reset')
+    } finally {
+      scope.stop()
+    }
+  })
+
+  it('TC-14 resetFor 对不存在分区 no-op：不建分区（init 不被触发，前置存在性检查）', () => {
+    const sid = ref<string | null>('A')
+    const { source, scope, getQueue } = createHarness(sid)
+    try {
+      source.triggerUiRequest({ sessionId: 'A', requestId: 'r1' })
+      expect(initCounter.count).toBe(1) // A 分区建立
+
+      initCounter.count = 0
+      const q = getQueue()
+      expect(q.resetFor('never-existed')).toBeUndefined()
+      // 守卫生效：清理动作未制造常驻空分区（照搬 updateFor 会经 getOrCreatePartition 惰性 init）
+      expect(initCounter.count).toBe(0)
+      // 守卫是「不存在才跳过」而非恒 no-op：对已存在的 A resetFor 正常清空
+      q.resetFor('A')
+      expect(q.pendingCount.value).toBe(0)
+      expect(initCounter.count).toBe(0) // 已有分区的清空不触发 init
     } finally {
       scope.stop()
     }
