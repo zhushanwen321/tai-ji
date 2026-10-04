@@ -9,17 +9,16 @@
  * - handoffBoxClass / handoffPlaceholder：handoff 模式派生的 class 与 placeholder 文案
  * - handleHandoffEsc：Esc 退出（清空输入 + exitHandoffMode），返回是否已消费
  * - handleHandoffSend：handoff 模式发送（调 handoff(srcId, text) + 退出），返回是否已消费
- * - handoffModeRef：{ value: boolean } 包装对象，给 defineExpose 用（避免 Vue 解包顶层 ref）
  *
  * 与 fork 模式互斥：进 handoff 前退出 fork（deps.exitForkMode）；fork 模式自身进 handoff 时也对称退出。
  *
  * [D8 泛化] fork 与 handoff 曾约 75% 逐字镜像（设计 §2 例 5）。行为骨架已收敛到
  * createStagingMode（./staging-mode），本模块 = handoff 配置对象 + 薄包装：公开 API
- * （返回面 9 项）与 HandoffDeps 注入契约保持不变，消费方零改动。handoff 差异全部经
+ * （返回面 8 项）与 HandoffDeps 注入契约保持不变，消费方零改动。handoff 差异全部经
  * 配置表达（P2 清单见 staging-mode.ts 头注）：
  * - enterGuard：isSessionActive 入口拦截（源 session streaming 中 handoff 必然失败，toast 而非英文 RPC 错）
  * - beforeEnter：互斥退出 fork 模式（forkSource 残留指向错误 session）
- * - beforeSend：发送兑底守卫（兑入口拦截后 session 才变 streaming 的竞态窗口；返回 true 已消费，
+ * - beforeSend：发送兜底守卫（兑入口拦截后 session 才变 streaming 的竞态窗口；返回 true 已消费，
  *   不清草稿不退模式——回复结束后可直接重发）
  * - sendAction：reply = text.trim() || undefined（空备注允许，runtime 只发 template）
  * - isInProgress / abort：B 阶段（handoff turn 在源 session 跑，可取消）
@@ -45,8 +44,6 @@ interface HandoffSourceShape {
 /** useComposerHandoffMode 返回类型（从函数内联类型提取为命名 interface，便于复用 + 阅读） */
 export interface ComposerHandoffModeReturn {
   handoffMode: Ref<boolean>
-  /** { value: boolean } 包装对象，给 defineExpose 用（不被 Vue 解包） */
-  handoffModeRef: { readonly value: boolean }
   enterHandoffMode: (srcSessionId: string) => void
   exitHandoffMode: () => void
   /** handoff 模式 composer-box class（accent 边 + glow + accent-soft 底）；非 handoff 模式返回空串 */
@@ -104,7 +101,7 @@ export interface HandoffDeps {
    *  需要源 session 空闲跑一个 handoff turn，pi 的 prompt 在 turn 进行中会拒绝
    *  （"Agent is already processing"，pi 源码锚点 agent-session.ts:1181，已核对实装
    *  0.84.1 dist/core/agent-session.js:833 同语义），streaming 中 handoff 必然失败——入口直接拦截 +
-   *  发送时兑底（兑入口后 session 才变 active 的竞态窗口），toast 友好提示而非英文 RPC 错 */
+   *  发送时兜底（兑入口后 session 才变 active 的竞态窗口），toast 友好提示而非英文 RPC 错 */
   isSessionActive: (sessionId: string) => boolean
   /** 跨组件触发通道 signal（原 useHandoffModeChannel signal；Sidebar ⌘J 请求） */
   handoffEnterSignal: Ref<{ srcSessionId: string } | null>
@@ -151,7 +148,7 @@ export function useComposerHandoffMode(
     beforeEnter: () => {
       deps.exitForkMode()
     },
-    // 兑底守卫（入口拦截后的竞态窗口：进入模式后 session 才变 streaming）。返回 true 已消费
+    // 兜底守卫（入口拦截后的竞态窗口：进入模式后 session 才变 streaming）。返回 true 已消费
     // （不走普通 send），不清草稿不退模式——回复结束后可直接重发。
     beforeSend: (_text, source) => {
       if (deps.isSessionActive(source.srcSessionId)) {
@@ -180,7 +177,6 @@ export function useComposerHandoffMode(
 
   return {
     handoffMode: staging.mode,
-    handoffModeRef: staging.modeRef,
     enterHandoffMode: (srcSessionId) => staging.enter({ srcSessionId }),
     exitHandoffMode: staging.exit,
     handoffBoxClass: staging.boxClass,

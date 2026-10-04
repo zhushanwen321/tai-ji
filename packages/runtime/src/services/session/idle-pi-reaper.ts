@@ -196,7 +196,7 @@ export interface ReclaimExemptions {
   hasInflightRelayChildren(sessionId: string): boolean
   /** #4 handoff 进行中。 */
   hasHandoffInflight(sessionId: string): boolean
-  /** #5 delivery 内核有排队投递（completion-backflow 回流）。 */
+  /** #5 delivery 内核有排队投递（session_manager send 排队/直投在途；[notify-once] 完成回流已废弃，豁免语义收窄为仅 send 类投递——depth>0 恒由 send/直投消息产生）。 */
   hasQueuedDeliveries(sessionId: string): boolean
   /** #6 最近被查看的时间戳；undefined = 从未被查看（不豁免，非 0——0 是合法 epoch）。 */
   getLastViewedAt(sessionId: string): number | undefined
@@ -364,7 +364,7 @@ interface ReapTickContext {
   hasInflightRelayChildren(sid: string): boolean
 }
 
-/** 构造一拍上下文（阈值/窗口/tick 默认值内联兑底，权威值由 u3 装配传入 config）。 */
+/** 构造一拍上下文（阈值/窗口/tick 默认值内联兜底，权威值由 u3 装配传入 config）。 */
 function createReapTickContext(options: IdlePiReaperOptions): ReapTickContext {
   const { seat, exemptions } = options
   const tickSnapshots = new Map<string, RuntimeCheckpointRefresh>()

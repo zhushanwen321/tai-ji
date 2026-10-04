@@ -12,6 +12,9 @@ import { readFirstJsonlLineSync } from '@zhushanwen/session-core'
 import { atomicWrite } from '../../utils/fs-utils.js'
 import { parseJsonlWarnOnMalformed, readTailEntries } from '../../utils/jsonl.js'
 import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
+// 活跃路径裁剪纯函数（message-revoke U6a 交付的导出 SSOT——runtime 派生读者按 census §4.1
+// 复用，不自含重复实现）
+import { computeActivePathEntries } from './session-entry-mapper.js'
 // 逆序分块读工具（u4b 交付物，D5 共享 IO 形态）。infra → services 依赖倒挂豁免（同
 // session-lifecycle.ts 的 R3 ports 倒挂惯例）：D5③ 消费方在本文件（infra/pi），共享
 // 工具落点在 u4b 领地（services/session）；工具零业务依赖，无循环引用。
@@ -151,6 +154,11 @@ export function readSessionEndMeta(filePath: string): SessionEndSidecarMeta | nu
  * 从 .jsonl 文件提取最后一个 session_info 的 name 字段。
  * pi 的 session 会 append 多条 session_info，取最后一条作为当前名称。
  *
+ * [message-revoke U6d 已知边界·照实] 会话名是已发生事实，撤回不回滚——被撤子树若含
+ * rename（session_info），本提取按文件事实照实取物理尾最后一条，侧栏名可能残影
+ * （census §4.3 照实豁免族 + §7 边界 ②，G2 二分的「已发生事实照实」腿）。刻意不接
+ * 活跃路径裁剪。
+ *
  * W2 尾读优化：先尾读（readTailEntries）找尾部最后一条 session_info。
  * pi 对 session_info 的持久化是 append（[HISTORICAL] taiji 侧同名直写函数已于 W11
  * 删除，append 语义现仅指 pi 自身的落盘行为），晚期 rename 的 session_info 在尾部可命中。
@@ -269,7 +277,7 @@ export function projectSidecarPath(filePath: string): string {
  * 跟 session 走（删除 session 归属自动消失，fork 继承父归属）。
  *
  * [规则 #6] session JSONL 文件不存在时**绝不创建 sidecar**（与 persistPresetBinding 同守则）：
- * pi 延迟写入窗口内 existsSync=false → 静默跳过；active session 归属经内存态兑底
+ * pi 延迟写入窗口内 existsSync=false → 静默跳过；active session 归属经内存态兜底
  *（ManagedSession.projectId），不阻断主流程。例外：create 路径经 opts.skipJsonlExistsGuard
  * 放行（session 由本进程刚创建必然真实，见 PersistBindingSidecarOpts）。
  *
@@ -280,7 +288,7 @@ export function projectSidecarPath(filePath: string): string {
 export function persistProjectBinding(filePath: string, projectId: string, opts?: PersistBindingSidecarOpts): void {
   if (!filePath) return
   // 空 projectId（归回默认项目）= 删除绑定 sidecar。readProjectBinding 以 sidecar 为权威（无 sidecar
-  // 兑底 undefined → 展示层归入默认项目），若只 return 不删，已存在的 .project.json 会继续生效——
+  // 兜底 undefined → 展示层归入默认项目），若只 return 不删，已存在的 .project.json 会继续生效——
   // 重启后 session 归属回退到旧命名项目（review MF-2 回归）。删除不创建文件，不违反规则 #6，
   // 因此不依赖 JSONL 存在性，放在公共写入（其 existsSync 守卫）之前执行。
   if (!projectId) {
@@ -429,6 +437,10 @@ export function readPresetBinding(filePath: string): string | undefined {
 /**
  * 从 .jsonl 文件提取最后一条 session_end 的 outcome（W4，ADR 0042）。
  *
+ * [message-revoke U6d 已知边界·照实] 结局是已发生事实，撤回不回滚——被撤子树若含
+ * session_end 侧影，JSONL fallback 按文件事实照实提取（census §4.3 + §7 边界 ②）。
+ * 刻意不接活跃路径裁剪。
+ *
  * W2 尾读优化：先尾读找尾部最后一条 session_end。persistSessionEnd 是 session 结束时
  * 最后写入的 entry → session_end 始终在文件最尾部 → 尾读几乎必中。
  * 未命中（理论可能：session_end 后又有别的 runtime 写入）→ fallback 全量读兜底。
@@ -483,10 +495,42 @@ export function extractSessionOutcome(filePath: string): SessionOutcome | null {
  * 错误对等（INVAR-tail-7）：ENOENT/EACCES/JSON parse 错误与原实现一致不抛，直接返回，
  * 由调用方按各自未命中默认值（null / undefined）处理。
  */
-function scanJsonlFromTail(filePath: string, visit: (entry: Record<string, unknown>) => boolean): void {
+/**
+ * 逆序分块逐行 parse + visit（visit 返回 true 即止）——D5③ oversize 扫描段（从
+ * scanJsonlFromTail 骨架拆出的共用件：「分块逆序、块内倒序、损坏行跳过、命中即止」语义）。
+ */
+function forEachReversedParsedEntry(filePath: string, visit: (entry: Record<string, unknown>) => boolean): void {
+  forEachReversedLineChunk(filePath, { maxTotalBytes: READ_PRECHECK_MAX_BYTES }, (chunk) => {
+    // 块内倒序（文件尾方向优先）——「最后一条」= 更靠近文件尾的命中行
+    for (let i = chunk.lines.length - 1; i >= 0; i--) {
+      const line = chunk.lines[i]
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      let entry: unknown
+      try {
+        entry = JSON.parse(trimmed)
+      } catch {
+        continue // 损坏行跳过（parseJsonl 同语义；含块边界 UTF-8 残缺的污染行——见工具注释）
+      }
+      if (typeof entry === 'object' && entry !== null && visit(entry as Record<string, unknown>)) {
+        return false // 命中即止（当前块内更早行不再交付）
+      }
+    }
+  })
+}
+
+function scanJsonlFromTail(
+  filePath: string,
+  visit: (entry: Record<string, unknown>) => boolean,
+  opts?: { activePath?: boolean },
+): void {
+  // [message-revoke U6d] activePath 腿的喂数变换（缺省恒等——照实族 findLastEntryField
+  // 零行为变化）：尾读窗口与全量读两段先裁剪再交付；oversize 分块段不裁（活跃路径需
+  // 全量 parent 链，分块窗口构造不出——census §7 边界 4 登记口径）
+  const scope = (raw: unknown[]): unknown[] => (opts?.activePath === true ? trimFileEntriesToActivePath(raw) : raw)
   // 尾读阶段
   const tailEntries = readTailEntries(filePath)
-  if (tailEntries !== null && scanEntriesReversed(tailEntries, visit)) return
+  if (tailEntries !== null && scanEntriesReversed(scope(tailEntries), visit)) return
   // D5③ 预检分流：超阈值禁全量读（原 fallback 的 readFileSync 全量同步读是崩溃收尾
   // 路径上的内存尖峰触发器），改逆序分块扫命中即止。
   let size = -1
@@ -496,30 +540,14 @@ function scanJsonlFromTail(filePath: string, visit: (entry: Record<string, unkno
     return // 文件不存在/不可读：与原 readFileSync 抛错 → catch 等价（INVAR-tail-7）
   }
   if (size > READ_PRECHECK_MAX_BYTES) {
-    forEachReversedLineChunk(filePath, { maxTotalBytes: READ_PRECHECK_MAX_BYTES }, (chunk) => {
-      // 块内倒序（文件尾方向优先）——「最后一条」= 更靠近文件尾的命中行
-      for (let i = chunk.lines.length - 1; i >= 0; i--) {
-        const line = chunk.lines[i]
-        const trimmed = line.trim()
-        if (!trimmed) continue
-        let entry: unknown
-        try {
-          entry = JSON.parse(trimmed)
-        } catch {
-          continue // 损坏行跳过（parseJsonl 同语义；含块边界 UTF-8 残缺的污染行——见工具注释）
-        }
-        if (typeof entry === 'object' && entry !== null && visit(entry as Record<string, unknown>)) {
-          return false // 命中即止（当前块内更早行不再交付）
-        }
-      }
-    })
+    forEachReversedParsedEntry(filePath, visit)
     return
   }
   // ≤阈值：原全量读 fallback 保留（INVAR-tail-2: 尾读未命中，目标可能在文件头部）
   try {
     // RT-8#13：畸形行 dropCount 累计 + warn-once（附文件路径）——半截 JSONL 的字段
     // 提取（session 名/outcome 等）静默降级不可观测
-    scanEntriesReversed(parseJsonlWarnOnMalformed(readFileSync(filePath, 'utf-8'), filePath), visit)
+    scanEntriesReversed(scope(parseJsonlWarnOnMalformed(readFileSync(filePath, 'utf-8'), filePath)), visit)
   } catch {
     return
   }
@@ -546,6 +574,55 @@ function findLastEntryField<R>(
     return true
   })
   return found.length > 0 ? found[0] : null
+}
+
+/**
+ * 文件源 entries → 活跃路径子集（message-revoke U6d，文件腿裁剪喂数单点）。
+ *
+ * 步骤（对齐 U6a convertWindowEntries 的文件腿模式，session-history.ts 同款）：
+ * 1. 剥 session header 行——pi `getEntries()` 本身排除 header（dist/core/session-manager.js
+ *    `filter(e => e.type !== 'session')`，0.84.4 实锚），header 是文件级元数据非树节点（有
+ *    id 无 parentId）；不剥则 header + 真 根 entry 会被 computeActivePathEntries 的单根
+ *    守卫判成多根病态树而降级不裁剪（被撤分支照常命中）。
+ * 2. 取（剥 header 后）**最后一条** entry 的 id 作 leafId——pi 树重放规则（重启后叶子 =
+ *    文件最后一条 entry；PS-60 实锚 dist/core/session-manager.js:673 `_buildIndex`
+ *    文件序循环置 leafId=entry.id、:616 `_setSessionFile` 加载路径）保证文件尾即活跃
+ *    叶子；撤回后 label 锚落文件尾，被撤子树条目按文件序先于 label，经 parentId 回溯滤除。
+ *
+ * 降级契约（两守卫，G2 宁多显不少显——树不可靠时物理序兜底 = 现行为，降级即 warn 留痕，
+ * 措辞对齐 computeActivePathEntries 的降级口径）：
+ * - 末条 entry 无 string id（畸形文件尾 / 全量无 id 的 legacy 形态）→ warn 后不裁剪；
+ * - **混合缺 id**（部分 entry 无 id）：真实 pi 文件全部 entry 均带 id（append* 统一
+ *   generateId，含 session_info；0.84.4 实锚），混合形态属 legacy/外部产出——树结构不可
+ *   靠，warn 后不裁剪（computeActivePathEntries 的投影语义会静默滤掉无 id 条目，对字段
+ *   提取 = 丢数据）。
+ *
+ * 消费方：extractLatestModelFromJsonl（model binding 随树腿）、plan-state-extractor
+ * extractPlanStateFromSessionFile（冷启动腿）。增量/窗口切片语义（链在集合边界终止是正常
+ * 边界）由 computeActivePathEntries 契约承载——窗口内活跃链 = 真活跃路径的后缀切片，
+ * 逆扫命中语义不损失。
+ */
+export function trimFileEntriesToActivePath(entries: unknown[]): unknown[] {
+  const scoped = entries.filter((e) => typeof e === 'object' && e !== null && (e as Record<string, unknown>).type !== 'session')
+  if (scoped.length === 0) return scoped // 空文件/纯 header 文件（pi 延迟写入合法形态）——无可裁物非降级，不发 warn
+  const last = scoped.at(-1) as { id?: unknown } | undefined
+  const leafId = typeof last?.id === 'string' ? last.id : undefined
+  if (leafId === undefined) {
+    // 降级即显形（静默不裁剪 = 活跃路径裁剪断链不可观测——被撤分支照常命中无信号）
+    console.warn(
+      `[session-file-utils] trimFileEntriesToActivePath: last of ${scoped.length} entries has no string id`
+      + ` — skipping active-path trim (malformed file tail or legacy id-less entries; showing full set)`,
+    )
+    return scoped
+  }
+  if (scoped.some((e) => typeof (e as { id?: unknown }).id !== 'string')) {
+    console.warn(
+      `[session-file-utils] trimFileEntriesToActivePath: ${scoped.length} entries with mixed missing ids`
+      + ` (valid pi files tag every entry) — skipping active-path trim (legacy/external file; showing full set)`,
+    )
+    return scoped
+  }
+  return computeActivePathEntries(scoped as Array<{ id?: unknown; parentId?: unknown }>, leafId)
 }
 
 // ── session 模型信息反向读（缓存治理批 3 U7，sidecar model 家族退役第一步）──
@@ -611,22 +688,26 @@ function scanEntriesReversed(entries: unknown[], collect: (e: Record<string, unk
  * 反向读 session JSONL 提取最近生效的模型绑定（scanSessionMeta 第七读的数据源：U7 起由
  * `.model.json` sidecar 切换为 JSONL 真源，U8 随 sidecar 模块退役改为本模块直调）。
  *
- * 解析语义对齐 pi 实装 getSessionContextSettings（见 modelEntryValueOf）；pi 恢复是沿当前
- * 分支正序取最后一条（后写覆盖前写），反向读「从尾向前第一条」与之等价。modelId 与
- * thinkingLevel 是 pi 侧两个独立跟踪的变量（单条 entry 只更新其一），各取物理尾方向第一条。
+ * [message-revoke U6d] 取数改**活跃路径逆读**（等价 pi buildSessionPath 的活跃路径语义，
+ * census §4.2 随树腿）：pi 恢复是沿当前分支正序取最后一条（后写覆盖前写）——「物理尾逆读
+ * 与 pi 恢复等价」的不变量**仅线性文件下成立**，分支文件下命中被撤子树的 model_change
+ * 即与 pi 真实生效值漂移（被撤回合切过模型的显示残留）。故尾读窗口与 ≤阈值全量两段都先经
+ * trimFileEntriesToActivePath（剥 header + 文件尾 leaf 回溯）裁剪再逆扫。
  *
- * 复用 scanJsonlFromTail 骨架（尾读 32KB → stat 预检分流 → ≤READ_PRECHECK_MAX_BYTES 全量
- * 倒序 / 超阈值 forEachReversedLineChunk 逆序分块，总读取量 ≤ 32MB 上限）：单值「命中即止」
- * 签名承载不了双维度独立收集（只命中 model 即止会漏掉更早区域的 thinking_level_change；
- * 分两次调用则尾读/分流成本 ×2）——经 visit 回调按同骨架单遍扫描，两维度都在手才提前止。
- * 混合分支文件取物理尾第一条（§3.3.3 已知语义边界 1，显示用途与现状 sidecar 等价或更好）。
+ * 解析语义对齐 pi 实装 getSessionContextSettings（见 modelEntryValueOf）；modelId 与
+ * thinkingLevel 是 pi 侧两个独立跟踪的变量（单条 entry 只更新其一），各取**活跃路径**逆序
+ * 第一条（两维度都在手才提前止——只命中 model 即止会漏掉更早区域的 thinking_level_change）。
+ *
+ * 扫描流 = scanJsonlFromTail 骨架 + `{ activePath: true }` 裁剪选项：尾读 32KB 窗口与
+ * ≤阈值全量读两段先裁剪再逆扫（无 id 的存量/fixture 形态 leafId undefined 直通 = 现行为
+ * 降级，见 trimFileEntriesToActivePath）；oversize 段物理尾逆序分块不裁（骨架注释口径）。
  *
  * 失效语义（数据流图 2 方案 A 成立的关键）：缓存键 = JSONL (mtimeMs, size)，pi append 后
- * 必 miss → 重扫——反向读成本只在文件变化时发生一次。损坏行跳过继续扫（findLastEntryField
- * 分块路径同语义）；全程无模型信息 → undefined（与「sidecar 不存在」现状语义一致）。
+ * 必 miss → 重扫——读取成本只在文件变化时发生一次。损坏行跳过继续扫；错误对等
+ * （INVAR-tail-7）不抛：文件不存在/不可读 → undefined。全程无模型信息 → undefined；
  * thinkingLevel 无 entry → 返回 pi 默认 'off'（PI_DEFAULT_THINKING_LEVEL 注释）。
  *
- * @returns { modelId, thinkingLevel }；无 model_change /
+ * @returns { modelId, thinkingLevel }；活跃路径无 model_change /
  *          assistant entry（含文件不存在/损坏）→ undefined
  */
 export function extractLatestModelFromJsonl(filePath: string): { modelId: string; thinkingLevel: string } | undefined {
@@ -645,10 +726,10 @@ export function extractLatestModelFromJsonl(filePath: string): { modelId: string
     return hits.modelId !== null && hits.thinkingLevel !== null
   }
 
-  // 单遍骨架扫描（scanJsonlFromTail）：model_change / assistant / thinking_level_change
-  // 都是 pi append 落盘，活跃会话的最近生效值大概率在尾部 32KB 窗口内；双维度集齐即
-  // 提前止（尾读阶段命中即不走 stat 分流）。
-  scanJsonlFromTail(filePath, collect)
+  // 单遍骨架扫描（scanJsonlFromTail + activePath 裁剪选项）：model_change / assistant /
+  // thinking_level_change 都是 pi append 落盘，活跃会话的最近生效值大概率在尾部 32KB 窗口
+  // 内且在活跃路径上；双维度集齐即提前止（尾读阶段命中即不走 stat 分流）。
+  scanJsonlFromTail(filePath, collect, { activePath: true })
   // 组装：无模型信息 → undefined；thinkingLevel 无 entry → pi 默认 'off'
   if (hits.modelId === null) return undefined
   return { modelId: hits.modelId, thinkingLevel: hits.thinkingLevel ?? PI_DEFAULT_THINKING_LEVEL }
@@ -863,7 +944,7 @@ export interface ScannedSessionMeta extends ModelBindingFields {
   launchPresetId?: string
   /**
    * 归属 project id（从 .project.json sidecar 读，D14 语义修正 2026-08-04）。
-   * undefined = 未归类（展示层归入默认项目 proj-default 兑底）。
+   * undefined = 未归类（展示层归入默认项目 proj-default 兜底）。
    */
   projectId?: string
   /**
@@ -913,6 +994,10 @@ export function invalidateSessionMetaCache(filePath: string): void {
  * 1. statSync 拿 mtimeMs + size，查缓存 (path, mtimeMs, size)
  * 2. 命中（INVAR-cache-3）→ 返回缓存 meta（零文件读取）
  * 3. miss → parseSessionHeader + extractSessionName + extractSessionOutcome 一次提取全部 → 写缓存
+ *
+ * [message-revoke U6d 已知边界·照实] 本汇总按文件事实提取（census §4.3 + §7 边界 ②）：
+ * name / outcome / handedOffTo / 各 binding sidecar 均为已发生事实，撤回不回滚、残影
+ * 可接受；唯一随树腿 = model binding（第七读 extractLatestModelFromJsonl，活跃路径逆读）。
  *
  * 三读合一（FR-three-read-merge）：原 scanPiSessions 调 parseSessionHeader（全量读首行）
  * + extractSessionName（尾读），scannedToSummary 再调 extractSessionOutcome（第 3 次全量读）。

@@ -12,17 +12,50 @@
 // 轮次语义演进（SP-5 升级链、A-lite 展示位、U7 统计口径的轮终快照）集中在此。
 // binding settle 快照本体在终态原语轴（record-store-terminal.ts），本文件消费。
 //
-// [D7 写面约束] 同终态轴：`.state` 写函数与 manifest 落盘均经 RoundsCtx 注入
-//（persistSettledState / writeDerivedManifest，注入名避开七名），本文件零 R1 字面、
-// 零七名 import。依赖方向单向：rounds → {terminal, rebuild}，不回 import store。
+// [D7 写面约束] 同终态轴：`.state` 写函数与两个 manifest 物化面（轮终派生投影
+// writeDerivedManifest / bound 物化 materializeBoundManifest）均经 ctx 或写面构造
+// 参数注入，本文件零 R1 字面、零写函数 import（manifest-store 写函数调用字面只留
+// record-store.ts——写面检查 R1 的豁免面）。依赖方向单向：rounds → {terminal, rebuild}，
+// 不回 import store。
 
 import { getLogger } from "../../core/logger.ts";
 
 import { updateFromEvent } from "./execution-record.ts";
 import { zcodeAnchorBasePath } from "./state-marker.ts";
 import { persistSettleSnapshot } from "./record-store-terminal.ts";
+import { summarizeResultForJournal } from "./record-entry-write.ts";
 import { zcodeRefOf } from "./record-store-rebuild.ts";
-import type { AgentEvent, ExecutionRecord, StopReason } from "../assembly/types.ts";
+// [W1 / U2a] 事件文件写面接线层（fold 缓存 + 写点幂等判定 + 物化编排）的依赖面：
+// u0 契约层原语（词表/fold/seq 单源）+ terminal 轴载荷构造 + manifest 物化写面。
+import * as fs from "node:fs";
+
+import { SUBAGENT_RECORD_CUSTOM_TYPE } from "./record-entry.ts";
+import {
+  INITIAL_RECORD_EVENT_FOLD_STATE,
+  applyRecordEvent,
+  createRecordEventStream,
+  foldRecordEvents,
+  parseRecordEventFileLine,
+  recordEventsPath,
+} from "./record-events.ts";
+import type {
+  RecordEventStream,
+  RecordEvent,
+  RecordEventInput,
+  RecordEventFoldState,
+} from "./record-events.ts";
+import {
+  buildBoundEventPayload,
+  buildCreatedEventPayload,
+  buildSettledEventPayload,
+  isBoundSignatureUnchanged,
+  settledEntrySourceOf,
+  toRegisteredEntryData,
+  toSettledEntryData,
+} from "./record-entry-write.ts";
+import type { StopReason } from "../domain/record-types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { AgentEvent } from "../assembly/types.ts";
 import type { RoundSettlementOutcome } from "./finalize-record.ts";
 
 const logger = getLogger("subagents");
@@ -35,8 +68,6 @@ const logger = getLogger("subagents");
 export interface RoundsCtx {
   /** 内存 record 表（RecordStore.records 的共享引用）。 */
   records: Map<string, ExecutionRecord>;
-  /** `.state` settle 收条写（writeSettledState 注入位）。 */
-  persistSettledState: (sessionFile: string, payload: { stopReason?: StopReason; endedAt?: number }) => boolean;
   /**
    * [B2 / 簿记⑫] 轮终派生 manifest 投影写（record-store.ts 构造点绑定
    * writeManifestPersisted(derivedManifestRecord(recordToSubagent(rec)))）——轮终留内存
@@ -49,6 +80,13 @@ export interface RoundsCtx {
   /** pending-notifications 轮终注销（发射点②；未注入时容器侧 no-op）。 */
   emitPendingUnregister: (id: string, status: string) => void;
   reportRecordTransition: (record: ExecutionRecord) => void;
+  /**
+   * [W1 / D3 表行 3/4] record 事件追加注入位（markRoundStarted 的
+   * record-round-started 帧 / markRoundIdle 的 record-round-idle 帧——record 轮次
+   * 粒度事件进 journal 是 D5 增量裁决：不进则 .state 仍是事实源，事实源介质数
+   * 降不到 1）。幂等/落盘收在被调侧（容器 appendJournal 单点）。
+   */
+  appendJournalEvent: (record: ExecutionRecord, input: RecordEventInput) => void;
   notifyChange: () => void;
 }
 
@@ -82,16 +120,50 @@ export function appendEventImpl(id: string, event: AgentEvent, ctx: RoundsCtx): 
  * 的上轮停因（markRoundIdleImpl 簿记⑩）不清则第 2+ 轮在飞 record 被确定性误排除
  * （A2 第二轮 spinner+badge+1 必挂）。代价裁决（two-state-convergence §3.1）：在飞期
  * 上轮停因不可见（与「stopReason=上轮停因」语义的显式冲突裁决）。revive 格同步清
- * （conversation-continuation reviveOrThrow）与本清点同族。归口写点：热路径轮始与
- * 冷启动 resume 续轮（subagent-service，U3 迁移）。
+ * （conversation-continuation reviveOrThrow）与本清点同族。归口写点：Continuation
+ * 派发主干 dispatchRoundAsync（chat-rounds ContinuationHost 接线——含首轮 / 续轮 /
+ * 冷启动 resume 续轮，resume 编排已迁 Continuation）。
+ *
+ * [轮次轴 CAS] 终态冻结门：endedAt 已设（真终态簿记已落——写点只有 markFinalized /
+ * markCancelled / completeLegacyClosed 真终态族；markRoundIdle 刻意不写本位，轮终
+ * 留内存 idle 可续聊）时轮始 = 复活终态，fail-fast 抛错（对齐 markRoundIdle A3
+ * 断言）。全部合法解冻序列都在轮始**前**清 endedAt——markResurrected →
+ * resurrectClosed（idle→running 翻边并清终态位）、reviveOrThrow（tryEnterRunning
+ * 后手动清 endedAt）——「先轮始后解冻」的序列不存在，本门不拦 revive 链。
+ *
+ * [轮次轴 CAS·无 running 在途门的判定依据] 与 markRoundIdle 在途门（`status!==
+ * running` 拒绝）的对偶差异：轮终合法前提唯一（running），status 可作判据；轮始
+ * 合法前提横跨 running（首轮出生 / 续轮 tryEnterRunning 翻边后 / revive 清位后
+ * ——三种来源与「在途双轮始」的内存形态完全同形：running + stopReason/result/
+ * endedAt 全 undefined）∪ idle（轮终后直接轮始 / reopen 后——markReopened 保持
+ * idle 翻边归轮始），且 onAbandoned→drain（acquire 被打断、无 run 产生、不终态化）
+ * 的合法连续轮始连事件面 fold 也同形（同 round 双 started 帧无 idle 帧）。原语层
+ * 加「running 拒绝门」只能拒绝全部合法轮始（误伤首轮/续轮/revive 主链）或写成
+ * 永不触发的检查。双轮始的生产防护在 Continuation 编排层构造性成立
+ * （dispatchRoundGuarded 的 activeRunId 单飞窗 + 终态门 + 复查到轮始之间无 await
+ * 的同步段），本原语不设不可判定的门。
  *
  * @returns false = id 不在内存（debug 留痕，无副作用）。
+ * @throws Error record 终态簿记已冻结（endedAt 已设——复活终态的调用即 bug，
+ *         fail-fast，对齐 markRoundIdle A3 断言；生产链经 voidRoundFinalChain
+ *         承接为 error 留痕，不升格未处理拒绝）。
  */
 export function markRoundStartedImpl(id: string, ctx: RoundsCtx): boolean {
   const rec = ctx.records.get(id);
   if (rec === undefined) {
     logger.debug("[subagents] markRoundStarted: record not in memory", { detail: { id } });
     return false;
+  }
+  // [轮次轴 CAS] 终态冻结门（判定依据见方法头）：endedAt 已设 = 真终态簿记已落，
+  // 此刻轮始即复活终态 = 调用方 bug。合法 revive 链经 resurrectClosed /
+  // reviveOrThrow 在轮始前清本位，不会触达本门。
+  if (rec.endedAt !== undefined) {
+    throw new Error(
+      `markRoundStarted(${id}): terminal bookkeeping already frozen ` +
+        `(status: ${rec.status}${rec.closedReason !== undefined ? `/${rec.closedReason}` : ""}, endedAt: ${rec.endedAt}) — ` +
+        `round-start would resurrect a finalized record. ` +
+        `Recovery: caller must gate on record.status before dispatching a round; revived records must clear endedAt via markResurrected/reviveOrThrow first.`,
+    );
   }
   rec.status = "running";
   rec.result = undefined;
@@ -100,6 +172,14 @@ export function markRoundStartedImpl(id: string, ctx: RoundsCtx): boolean {
   // [modeless 波1] 上轮失败 error 随轮始清点（失败轮 markRoundIdle 写入的镜像清除）。
   rec.stopReason = undefined;
   rec.error = undefined;
+  // [W1 / D3 表行 3] record-round-started 帧（resumeRound / reopen 后续轮——首轮经
+  // created→bound 隐含，续轮显式落账；round = 将要跑的轮次计数）。
+  ctx.appendJournalEvent(rec, {
+    type: "record-round-started",
+    ts: Date.now(),
+    round: rec.round ?? 0,
+    epoch: rec.epoch ?? 0,
+  });
   ctx.reportRecordTransition(rec);
   ctx.notifyChange();
   return true;
@@ -116,9 +196,9 @@ export function markRoundStartedImpl(id: string, ctx: RoundsCtx): boolean {
  *   ① status 写 idle；② result 按 outcome 写入（成功=content / 失败=前值??
  *      失败摘要 + lastError）；③ round+1；④ closedReason 清除（[S10]）；⑤ resumable
  *      字段已退役（[U5/D4] idle 即 resumable——字段从 record/entry 契约整体删除，
- *      无簿记动作）；⑥ idleSince 刷新
- *      （idle-GC 判据锚）；⑦ **`.alive` 保留**
- *      （D3a 跨轮延续——写权声明至 release 两出口[终态原语/idle-GC 回收]，轮终
+ *      无簿记动作）；⑥ idleSince 已退役（30 天空闲回收判据锚，ADR-0081，无簿记动作）；
+ *      ⑦ **`.alive` 保留**
+ *      （D3a 跨轮延续——写权声明至 release 单出口[终态原语 markSettledOut]，轮终
  *      record 随时续聊 spawn 写同一 sessionFile，删则轮后跨进程防御
  *      空窗）；⑧ pending 注销发射点②（进程已死，从活跃后代差集移除——经
  *      setPendingUnregister 注入，未注入时跳过）；⑨ reportRecordTransition（entry
@@ -133,10 +213,87 @@ export function markRoundStartedImpl(id: string, ctx: RoundsCtx): boolean {
  * worktree/通知等副作用编排留调用方。
  *
  * @param outcome 轮终结果（kind 判别：success=content / 失败=reason）
- * @returns false = id 不在内存（debug 留痕，无副作用）。
+ * @returns false = id 不在内存（debug 留痕，无副作用）或**在途门拒绝**（状态已非
+ *          running——warn 留痕，零副作用；见下方 CAS 段）。
  * @throws Error record 终态簿记已冻结（endedAt 已设——复活终态的调用即 bug，
  *         fail-fast，对齐 doFinalizeRoundToIdle A3 断言）。
  */
+/**
+ * ② result 写入规则（markRoundIdleImpl 拆出，D7）：成功轮 = content（chat 空 content
+ * 兜底占位）；失败轮 = 前值保真 ?? 失败摘要 + lastError/error 写失败原因。返回
+ * nextResult（调用方写入 rec.result 并供 journal 摘要锚消费）。
+ */
+function settleRoundResult(rec: ExecutionRecord, outcome: RoundSettlementOutcome): string | undefined {
+  if (outcome.kind === "failed") {
+    rec.lastError = outcome.reason;
+    // [modeless 波1] 失败轮同步写 rec.error（投影/通知 outcome 派生消费——
+    // toNotifyRecord 的 deriveOutcome(closedReason, error) 判 failed；旧 one-shot
+    // 路径经 finalizeFailed → completeLegacyClosed 写 error 的等价承接）。
+    rec.error = outcome.reason;
+    return rec.result ?? `round did not complete: ${outcome.reason}`;
+  }
+  // [modeless 波1] 成功轮统一 chat 占位语义（旧 one-shot 分支
+  // `content || rec.result || "(empty)"` 随 chatMode 消亡）。
+  return outcome.content || "(no output this round)";
+}
+
+/**
+ * ⑪ 轮终磁盘面（markRoundIdleImpl 拆出，[A-lite / U7 统计口径]）：锚分派对齐
+ * markSettled 写法——pi 腿 sessionFile 快照 / zcode 腿 transcriptRef 派生锚键 /
+ * 无锚 warn 留痕。正常轮终后宿主崩溃 → markResurrected 的 revive 水合需 binding
+ * 快照在场（turns/tokens 不归零，U7 目标在最常见形态成立）。`.state` 收条 = 轮收口
+ * idle 形态（U4 翻边后内存面与磁盘面同词——重建单规则「一律 idle」不再有桥接例外）。
+ * best-effort 语义同 markSettled（失败 warn 留痕不抛——内存态已收口，磁盘面滞后由
+ * 下次收口/接管补写）。
+ */
+function persistRoundSettleDiskFace(rec: ExecutionRecord, id: string): void {
+  const zcodeAnchor = rec.sessionFile === undefined ? zcodeRefOf(rec) : undefined;
+  if (rec.sessionFile !== undefined) {
+    // `.state` 轮终收条已退场（③）：轮终停因由 record-round-idle 事件承载，读侧从折叠取。
+    persistSettleSnapshot(rec.sessionFile, rec);
+  } else if (zcodeAnchor !== undefined) {
+    // zcode 腿（无 pi 文件锚是常态形态非异常，不 warn——对齐 markSettled）：
+    // 快照/收条承载 = transcriptRef 派生锚键；`.state` 无文件锚不写。
+    persistSettleSnapshot(zcodeAnchorBasePath(zcodeAnchor), rec, zcodeAnchor);
+  } else {
+    logger.warn("[subagents] markRoundIdle: no sessionFile anchor, binding snapshot skipped", {
+      detail: { id },
+    });
+  }
+}
+
+/**
+ * [W1 / D3 表行 4] record-round-idle 帧载荷组装（markRoundIdleImpl 拆出）：轮终收条
+ * ——stopReason + 轮统计快照 + result 摘要锚 + 失败原因原文；.state 降级为本事件的
+ * 落盘物化投影，D2 sidecar 裁决表 .state 行。摘要锚与 record-settled 同款截断
+ * （summarizeResultForJournal 单源）——承接 v1 轮终 result 显示信号（U8b），本轮
+ * rec.result 已在②定稿。error 原文锚（W1 终态同步 F2-2 裁决）：失败轮承载
+ * outcome.reason——v1 rec.error 显示信号的 journal 承接；成功轮缺席。「轮始清残留
+ * 死因」的投影侧语义由供源分流保证（round-started 后 lastEvent 非 round-idle，
+ * 本值不透传）。
+ */
+function buildRoundIdleEvent(
+  rec: ExecutionRecord,
+  stopReason: StopReason,
+  nextResult: string | undefined,
+  outcome: RoundSettlementOutcome,
+): Extract<RecordEventInput, { type: "record-round-idle" }> {
+  return {
+    type: "record-round-idle",
+    ts: Date.now(),
+    // 轮终时点的累计轮数（[② 读侧换源] ——revive 水合 round 的折叠源，原 binding
+    // round 快照的承载接替；③ increment 已在上方法簿记③完成）。
+    round: rec.round ?? 0,
+    stopReason,
+    turns: rec.turnCount,
+    totalTokens: rec.totalTokens,
+    resultSummary: summarizeResultForJournal(nextResult),
+    error: outcome.kind === "failed" ? outcome.reason : undefined,
+    // 事件流自承载绑定侧独有字段（.record-binding 退场的前置）：轮被弃置的标记。
+    ...(rec.lastAbandonedRound !== undefined ? { lastAbandonedRound: rec.lastAbandonedRound } : {}),
+  };
+}
+
 export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, ctx: RoundsCtx): boolean {
   const rec = ctx.records.get(id);
   if (rec === undefined) {
@@ -151,28 +308,28 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
         `Recovery: caller must gate on record.status === "running" before settling a round.`,
     );
   }
-  // ② result 写入规则（D7）：成功轮 = content（chat 空 content 兜底占位）；失败轮 =
-  // 前值保真 ?? 失败摘要 + lastError 写失败原因（字段⑨）。
-  let nextResult: string | undefined;
-  if (outcome.kind === "failed") {
-    rec.lastError = outcome.reason;
-    // [modeless 波1] 失败轮同步写 rec.error（投影/通知 outcome 派生消费——
-    // toNotifyRecord 的 deriveOutcome(closedReason, error) 判 failed；旧 one-shot
-    // 路径经 finalizeFailed → completeRecord 写 error 的等价承接）。
-    rec.error = outcome.reason;
-    nextResult = rec.result ?? `round did not complete: ${outcome.reason}`;
-  } else {
-    // [modeless 波1] 成功轮统一 chat 占位语义（旧 one-shot 分支
-    // `content || rec.result || "(empty)"` 随 chatMode 消亡）。
-    nextResult = outcome.content || "(no output this round)";
+  // [轮次轴 CAS] 在途门：只在「在途（running）」时允许轮终。此前唯一保护是上面的
+  // endedAt 终态冻结检查——cancel（markSettled 有意不写 endedAt）或迟到应答把 record
+  // 收成 idle 后再轮终，会静默多推一轮：round 二次递增 + `.state` 收条被覆写 +
+  // 多写一条 record-round-idle 事件行（事件流事实源被污染）。三类生产调用链
+  // （settleOneShotOutcome / finalizeFailed / chat 域 onRunSettled）均在 running 门下，
+  // 本段为原语级兜底（chat 域的门与轮终之间隔着 settleRoundXxx 的 await 边界）。
+  // 拒绝语义对齐 markReopened / markSettled：warn 留痕 + 返回 false，不抛错——调用
+  // 链是 `void settleRoundXxx(...)` 的断头 promise 形式，抛错会升级为无人接的
+  // promise 拒绝（而不是被上层的 status 门接住）。
+  if (rec.status !== "running") {
+    logger.warn("[subagents] markRoundIdle: CAS rejected (record not running)", {
+      detail: { id, status: rec.status, stopReason: rec.stopReason },
+    });
+    return false;
   }
-  rec.result = nextResult;
-  // ①③④⑥：轮终翻边 idle（[two-state-convergence U4/D3] 收口权威词）+ 轮次推进 +
-  // 清残留死因 + idle 锚。resumable 字段已退役（[U5/D4]，见方法头⑤）。
+  rec.result = settleRoundResult(rec, outcome);
+  // ①③④：轮终翻边 idle（[two-state-convergence U4/D3] 收口权威词）+ 轮次推进 +
+  // 清残留死因；⑥ idleSince 已退役（30 天空闲回收判据锚，ADR-0081）。resumable 字段已
+  // 退役（[U5/D4]，见方法头⑤）。
   rec.status = "idle";
   rec.closedReason = undefined;
   rec.round = (rec.round ?? 0) + 1;
-  rec.idleSince = Date.now();
   // ⑩ [A-lite / 区1-U1+区3-U1] 轮终停因展示位：成功轮 completed / 失败轮 failed
   //（「上一轮为什么停」——任务卡片 failed 状态词 + 排障有词；投影随 ⑨
   // entry/recordToSubagent 自动携带）。status 已翻 idle（U4 翻边）；中断族走
@@ -181,32 +338,16 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
   // markSettled「非终态不写 endedAt」先例），收条时间戳只进磁盘面。
   const stopReason: StopReason = outcome.kind === "failed" ? "failed" : "completed";
   rec.stopReason = stopReason;
-  // ⑪ [A-lite / U7 统计口径] 轮终磁盘面（锚分派对齐 markSettled 写法）：
-  // 正常轮终后宿主崩溃 → markResurrected 的 revive 水合需 binding 快照在场
-  //（turns/tokens 不归零，U7 目标在最常见形态成立）。`.state` 收条 = 轮收口 idle
-  // 形态（U4 翻边后内存面与磁盘面同词——重建单规则「一律 idle」不再有桥接例外）。
-  // best-effort 语义同 markSettled（失败 warn 留痕不抛——内存态已收口，磁盘面
-  // 滞后由下次收口/接管补写）。
-  const zcodeAnchor = rec.sessionFile === undefined ? zcodeRefOf(rec) : undefined;
-  if (rec.sessionFile !== undefined) {
-    ctx.persistSettledState(rec.sessionFile, { stopReason, endedAt: Date.now() });
-    persistSettleSnapshot(rec.sessionFile, rec);
-  } else if (zcodeAnchor !== undefined) {
-    // zcode 腿（无 pi 文件锚是常态形态非异常，不 warn——对齐 markSettled）：
-    // 快照/收条承载 = transcriptRef 派生锚键；`.state` 无文件锚不写。
-    persistSettleSnapshot(zcodeAnchorBasePath(zcodeAnchor), rec, zcodeAnchor);
-  } else {
-    logger.warn("[subagents] markRoundIdle: no sessionFile anchor, .state/binding faces skipped", {
-      detail: { id },
-    });
-  }
+  persistRoundSettleDiskFace(rec, id);
   // ⑦ `.alive` 保留——无删除动作（D3a 跨轮延续，见方法头）。
   // ⑧ pending 注销发射点②（已接线 SubagentService 装配点；未注入时跳过——纯内存
   // 测试形态 no-op）。第二参数是注销 reason 字面量（notify-host emitPendingUnregister
   // 契约），非状态投影——轮终翻边不改变该字面量（U4 保留簿记，行为零变更）。
   ctx.emitPendingUnregister(id, "running");
-  // ⑨ entry 上报（best-effort 过程面）。
+  // ⑨ entry 上报（best-effort 过程面）→ [W1 / D2 停写写点] reportRecordTransition
+  // 不再落 v1 快照 entry，只做引擎域回填感知（record-bound 帧）。
   ctx.reportRecordTransition(rec);
+  ctx.appendJournalEvent(rec, buildRoundIdleEvent(rec, stopReason, rec.result, outcome));
   // ⑫ [B2] 轮终派生 manifest 投影（session-reader manifest 直读主路径的数据源）：
   // 轮终 record 留内存 idle（U4 翻边），不经任何终态/回收写点——缺本写则 records/
   // 目录长期缺席该 record，外部直读只能落 entry 慢兜底。写的是派生投影（缓存性质，
@@ -217,12 +358,13 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
 }
 
 /**
- * 意图原语：引擎死亡收养（字段⑩——error/result/stopReason 三写，[U5/D4] W4 新态
+ * 意图原语：引擎死亡收养（字段⑩——error/result/stopReason 三写，[U5/D4] 新态
  * entry = running + error + stopReason=failed + result=∅——status 保持 running，core
- * 机器语义不变（supervisor 接管链照旧），展示面靠 stopReason 子句排除（U6 终态判据
- * isOccupied 消费）；禁 completed 谎报 / closed 直接终局）。归口写点：
- * adoptResumableAfterEngineDeath（run-orchestration——已随 U2b 修复轮迁移）；
- * 监督器 adoptOnProcessDeath 编排留调用方。
+ * 机器语义不变，展示面靠 stopReason 子句排除（U6 终态判据
+ * isOccupied 消费）；禁 completed 谎报 / closed 直接终局）。归口调用面已随 adopt
+ * 派发链退役：one-shot engine-run 编排不再经本原语收口（原归口调用点随 U2b 修复轮
+ * 移除），现仅测试直调可达（run-orchestration-write-lease.test.ts 用例 2/5 为退役
+ * 与归口语义锚）。
  *
  * @returns false = id 不在内存（debug 留痕，无副作用）。
  */
@@ -241,4 +383,164 @@ export function adoptEngineDeathImpl(id: string, opts: { error: string }, ctx: R
   ctx.reportRecordTransition(rec);
   ctx.notifyChange();
   return true;
+}
+
+
+// ============================================================
+// [W1 / U2a] RecordEventsWriteFace——record 事件文件写面接线层
+// ============================================================
+//
+// 为什么在本文件：事件落账的调用面主体 = RoundsCtx/TerminalCtx 注入位（轮次粒度
+// 帧 / reopened / settled 均经轴文件 ctx 写入）——face 是这些注入位的共享写面
+// 基础设施，与轮次簿记同文件聚合（容器经薄转发消费，见 record-store.ts 各写点）。
+//
+// 同步性设计（写点是同步方法，pi 工具 handler 同步链直调）：
+// - foldOf **同步**返回——缓存 miss 时 readFileSync 全量 fold 装载（u0 scan 的
+//   async 形态面向 U3 tail 消费；写点判定链需要同步值，此处用导出的
+//   parseRecordEventFileLine + foldRecordEvents 组合同义装载，行解析与
+//   fold 语义单源复用，不重复实现）；
+// - append 走 u0 原语（createRecordEventStream——seq 分配权与头行契约单点），
+//   fire-and-forget 但落盘同步完成（appendFileSync 在调用轮内执行）；缓存增量
+//   推进同步预推进 + then 校验（见 appendEvent）。
+// - 写失败（fs 错）响亮 error 日志——事件文件是唯一事实源，静默丢失不可接受；
+//   主流程不中断（同步写点无重抛通道，缓存回滚 = 状态如实滞后，下次全量装载自愈）。
+
+const faceLogger = getLogger("subagents");
+
+export class RecordEventsWriteFace {
+  private readonly journal: RecordEventStream;
+  /** id → fold 当前态（写点幂等判定与 append 增量推进的单点状态；dispose/revive
+   *  由容器调 resetFoldCache 重置——事件文件可能已被外部/清理通道改变）。 */
+  private readonly foldCache = new Map<string, RecordEventFoldState>();
+
+  constructor(
+    /** recordsDir（与 manifest 同目录——D3 落点，事件文件 = `<dir>/<sa-id>.events`）。 */
+    private readonly recordsDir: string,
+    /** 主 session 条目上报通道（v2 两条款经 pi appendEntry 落主 session——D1）。 */
+    private readonly appendEntry: (customType: string, data: unknown) => void,
+    /** bound manifest 物化写面（D2 决策 9）——record-store.ts 构造点绑定
+     *  materializeBoundRecordManifest(recordsDir, derivedManifestRecord(recordToSubagent(rec)))。
+     *  经构造参数注入的理由同 RoundsCtx 的 writeDerivedManifest：manifest 写函数调用
+     *  字面只留 record-store.ts（R1 豁免面），本文件不 import 写函数。 */
+    private readonly materializeBoundManifest: (record: ExecutionRecord) => void,
+  ) {
+    this.journal = createRecordEventStream(recordsDir);
+  }
+
+  // ── fold 读面 ─────────────────────────────────────────────
+
+  /** 同步 fold（缓存 miss → 文件全量装载；文件缺 ENOENT = 空 journal 态）。 */
+  foldOf(id: string): RecordEventFoldState {
+    const hit = this.foldCache.get(id);
+    if (hit !== undefined) return hit;
+    let content: string;
+    try {
+      content = fs.readFileSync(recordEventsPath(this.recordsDir, id), "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        faceLogger.warn("[subagents] record event journal read failed (treated as empty)", { detail: { id, error: err instanceof Error ? err.message : String(err) } });
+      }
+      this.foldCache.set(id, INITIAL_RECORD_EVENT_FOLD_STATE);
+      return INITIAL_RECORD_EVENT_FOLD_STATE;
+    }
+    const events: RecordEvent[] = [];
+    for (const line of content.split("\n")) {
+      const event = parseRecordEventFileLine(line);
+      if (event !== undefined) events.push(event); // 空行/头行/坏行跳过（u0 行解析器内消化）
+    }
+    const state = foldRecordEvents(events);
+    this.foldCache.set(id, state);
+    return state;
+  }
+
+  /** dispose / revive 后的缓存复位（事件文件可能已被改变，按需重装载）。 */
+  resetFoldCache(): void {
+    this.foldCache.clear();
+  }
+
+  // ── 写点（幂等判定在 face，容器零判定逻辑）────────────────
+
+  /**
+   * register 写点（D3 表行 1）：record-created 帧（唯一事实写）+ v2 注册条目
+   * （身份与锚点）。幂等：事件文件已有创建帧（revive / 重启后重注册）时跳过
+   * 两面——事件文件是「已注册」的判定权威。
+   */
+  syncCreation(record: ExecutionRecord): void {
+    if (this.foldOf(record.id).identity !== undefined) return;
+    this.appendEvent(record.id, buildCreatedEventPayload(record));
+    this.appendEntry(SUBAGENT_RECORD_CUSTOM_TYPE, toRegisteredEntryData(record));
+  }
+
+  /**
+   * reportRecordTransition 写点（D2 停写写点的接替面 / D3 表行 2）：引擎域
+   * （sessionFile/engine/engineHandle）相对已落账 bound 帧变化时落 record-bound
+   * 帧（spawn 回填）+ bound manifest 物化一次（D2 决策 9：zcode 运行窗口锚定；
+   * 锚定就绪守卫与写失败降级在 materializeBoundRecordManifest）。引擎域未变
+   * （高频 turns 归约后的过渡调用）时零写入。
+   */
+  syncBoundEvent(record: ExecutionRecord): void {
+    const { sessionFile, engine, engineHandle } = record;
+    // 全缺 = spawn 未回填（无锚可落账）：零写入（transition 的过程面消费到此为止）。
+    if (sessionFile === undefined && engineHandle === undefined && engine === undefined) return;
+    if (isBoundSignatureUnchanged(this.foldOf(record.id).bound, sessionFile, engine, engineHandle)) {
+      return; // 引擎域签名未变：零追加（事件面不随过程调用放大）
+    }
+    this.appendEvent(record.id, buildBoundEventPayload(record));
+    // bound manifest 物化（与轮终簿记⑫同款派生投影——manifest 是物化投影不是
+    // 条目；守卫（pi 子文件存在性 / zcode 零探查）与写失败降级在被调函数内）。
+    // 经构造参数注入调用（本文件不 import manifest 写函数，见构造函数注释）。
+    this.materializeBoundManifest(record);
+  }
+
+  /**
+   * 终局写点（D3 表行 5；markSettled 与 archive 真终局共用注入位）：record-settled
+   * 帧 + v2 终态条目（终态条目是 result 全文的唯一落点——事件行只存摘要锚）。
+   * 幂等：fold 已 settled 即跳过两面（archive 真终局在 markSettled 之后的重复
+   * 终局写点不再追加）。
+   */
+  settleViaJournal(record: ExecutionRecord, endedAt: number): void {
+    if (this.foldOf(record.id).settled !== undefined) return;
+    this.appendEvent(record.id, buildSettledEventPayload(record, endedAt));
+    this.appendEntry(SUBAGENT_RECORD_CUSTOM_TYPE, toSettledEntryData(settledEntrySourceOf(record), endedAt));
+  }
+
+  /** 通用事件追加注入位（round-started / round-idle / reopened / 收编 settled——
+   *  轴文件 ctx 注入与容器收编入口共用；幂等判定由调用方先行）。 */
+  appendJournal(id: string, input: RecordEventInput): void {
+    this.appendEvent(id, input);
+  }
+
+  /**
+   * append 单点（同步预推进 + 落盘校验双层）：
+   * - **同步预推进**：seq 预测 = 缓存水位 + 1，立即应用进缓存。必须同步：写点是
+   *   同步方法，同一调用链中下一个写点的幂等判定（foldOf）在本调用返回前执行——
+   *   缓存等微任务推进会读到滞后态（实测：轮次轴 markRoundStarted →
+   *   reportRecordTransition 链中 bound 帧被重复落账）。
+   * - **then 校验**：断层（full.seq > 水位+1）= 外部写入，作废缓存重装载；恰落后
+   *   一格 = 按落盘真值补齐；≤ 水位 = 缓存已含或已领先（同步段连续 append 正常态）。
+   * - fs 错误响亮 error（唯一事实源写失败不可静默），缓存回滚（预推进撤销——
+   *   落盘未发生，缓存不得持有幽灵事件）。
+   */
+  private appendEvent(id: string, input: RecordEventInput): Promise<void> {
+    const cur = this.foldOf(id);
+    const predicted = { ...input, seq: cur.lastSeq + 1 } as RecordEvent;
+    this.foldCache.set(id, applyRecordEvent(cur, predicted));
+    return this.journal
+      .append(id, input)
+      .then((full) => {
+        const now = this.foldCache.get(id);
+        if (now === undefined || full.seq <= now.lastSeq) return; // 并发清理 / 缓存已含或已领先（连续 append 正常态）
+        if (full.seq > now.lastSeq + 1) {
+          this.foldCache.delete(id); // 断层：外部写入——作废缓存，下次如实重装载
+          return;
+        }
+        this.foldCache.set(id, applyRecordEvent(now, full)); // 恰落后一格：按落盘真值补齐
+      })
+      .catch((err: unknown) => {
+        this.foldCache.delete(id);
+        faceLogger.error(
+          `[subagents] record event journal append failed (id=${id}, type=${String(input.type)}) — fact source write lost: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+  }
 }

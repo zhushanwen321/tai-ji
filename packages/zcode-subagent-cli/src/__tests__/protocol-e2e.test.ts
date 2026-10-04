@@ -37,7 +37,9 @@ beforeAll(() => {
   dataDir = path.join(root, "engine-data");
   fakeHome = path.join(root, "fake-home");
   mkdirSync(path.join(fakeHome, ".zcode", "v2"), { recursive: true });
-  // 合成凭据（fake 值，仅满足 preparer 的 v2 单源校验形态——不是真实凭据）
+  // 合成凭据（fake 值，仅满足 preparer 的校验形态——不是真实凭据）。两份：
+  // v2 config = launcher 凭据注入源；provider_config = 模型解析源（2026-09-29
+  // account 体系迁移后引擎侧校验对齐 app-server 注册表实况——个人 provider 单源）
   writeFileSync(
     path.join(fakeHome, ".zcode", "v2", "config.json"),
     JSON.stringify({
@@ -45,6 +47,24 @@ beforeAll(() => {
         "test-provider": {
           options: { apiKey: "synthetic-e2e-key", baseURL: "https://t.example" },
           models: { m1: {} },
+        },
+      },
+    }),
+  );
+  writeFileSync(
+    path.join(fakeHome, ".zcode", "v2", "provider_config.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      config: {
+        providerOrder: ["test-provider"],
+        providerConfigRules: {
+          providerRules: [
+            {
+              providerId: "test-provider",
+              providerName: "test",
+              config: { access: { type: "api-key", apiKey: "synthetic-e2e-key" }, personalModelIds: ["m1"] },
+            },
+          ],
         },
       },
     }),

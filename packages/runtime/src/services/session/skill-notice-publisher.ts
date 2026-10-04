@@ -10,18 +10,17 @@
  * 之后才调用——提示描述的注入形态此时才成立；发送失败路径不发（用户可见错误已由
  * 各自的错误通路覆盖）。
  */
+import { MSG_ID_TAG_RE } from '@taiji/shared'
 import type { SkillNotice } from './skill-injector.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
 
 /**
- * clientUuid 从发送文本提取（`<!--taiji:msg:<uuid>-->`，与 pi 侧 msg-id-mapper TAG_MATCH
- * 同款全文正则——全文匹配使降级拼接把块放到标记之后也不影响提取）。[双侧同构字面量]
- * 标记格式 SSOT = extensions/taiji/msg-id-mapper/src/index.ts（TAG_MATCH 常量，写入/剥离
- * 两端协议），本正则是消费侧同构镜像，禁单侧修改——不收敛 shared：extension 独立发布
- * 体系不依赖 @taiji/shared（S4 裁决，注释互指替代）。纯文本消息与
- * steer/followUp 路径无此标记 → payload 缺省该字段（类型可空，u5 按可空消费）。
+ * clientUuid 从发送文本提取：正则 SSOT = @taiji/shared 的 MSG_ID_TAG_RE（全文匹配，
+ * 降级拼接把标记块放到文本之后也不影响提取；双形态 `u-<uuid>` 与裸 `<uuid>` 指向同一
+ * clientUuid——捕获组 2 = 裸 uuid，i 旗标覆盖大写十六进制，消费方统一 toLowerCase 归一）。
+ * payload 的 clientUuid 恒出 renderer 气泡 id 形态（`u-<uuid>`），与既有消费方（notice →
+ * 气泡锚定）契约逐字一致；无标记（生成 id / steer 通路）→ 字段缺省（类型可空，u5 按可空消费）。
  */
-const MSG_ID_TAG_RE = /<!--taiji:msg:(u-[0-9a-fA-F-]{36})-->/
 
 /**
  * 逐条定向发布 skill 注入提示（session.skillNotice，payload 契约见 protocol.ts）。
@@ -35,7 +34,8 @@ export function publishSkillNotices(
   notices: SkillNotice[],
 ): void {
   if (notices.length === 0) return
-  const clientUuid = sentText.match(MSG_ID_TAG_RE)?.[1]
+  const matched = sentText.match(MSG_ID_TAG_RE)?.[2]
+  const clientUuid = matched !== undefined ? `u-${matched.toLowerCase()}` : undefined
   for (const notice of notices) {
     bus?.publish(sessionId, {
       type: 'session.skillNotice',

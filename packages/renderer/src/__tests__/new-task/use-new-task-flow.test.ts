@@ -24,7 +24,8 @@ import type { SessionSummary, SessionGroup } from '@taiji/shared'
 
 const apiMock = vi.hoisted(() => ({
   create: vi.fn(
-    // 六参签名（D14 projectId 透传断言用，原 session-project-attribution.test.ts 并入）
+    // 调用契约六参（cwd/label/presetId/projectId/modelOverride/thinkingOverride），
+    // mock 只命名前四参；projectId 透传断言用第 4 参
     (cwd?: string, _label?: string, _presetId?: string, projectId?: string): Promise<SessionSummary> =>
       Promise.resolve({
         id: `s-${Math.random().toString(36).slice(2, 8)}`,
@@ -38,11 +39,18 @@ const apiMock = vi.hoisted(() => ({
       }),
   ),
   remove: vi.fn((): Promise<void> => Promise.resolve()),
-  // submitFirstMessage → useChat.send → chatApi.send/streamSubscribe 需要 mock 占位
+  // submitFirstMessage → useChat.send → chatApi.submitDelivery（[u3c/D1] 统一提交）+ streamSubscribe
   chatSend: vi.fn((): Promise<void> => Promise.resolve()),
+  chatSubmitDelivery: vi.fn(async (sessionId: string, _content: string, clientUuid: string) => ({
+    clientUuid,
+    state: 'in-flight' as const,
+    lane: 'direct' as const,
+    sessionId,
+  })),
   streamSubscribe: vi.fn((): (() => void) => () => {}),
   // composer-bash-execute: landing 态 bash 首发 → useChat.sendBash → chatApi.bash
-  chatBash: vi.fn((): Promise<void> => Promise.resolve()),
+  // 回执契约（dmg-r1-2）：默认 = 已执行并收口
+  chatBash: vi.fn((): Promise<{ status: 'settled' }> => Promise.resolve({ status: 'settled' })),
   chatAbortBash: vi.fn((): Promise<void> => Promise.resolve()),
 }))
 
@@ -52,7 +60,7 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
   // 给空返回避免 unhandled rejection
   file: { tree: vi.fn().mockResolvedValue([]), expand: vi.fn().mockResolvedValue([]) },
   git: { status: vi.fn().mockResolvedValue({ isRepo: false }) },
-  chat: { send: apiMock.chatSend, streamSubscribe: apiMock.streamSubscribe, bash: apiMock.chatBash, abortBash: apiMock.chatAbortBash },
+  chat: { send: apiMock.chatSend, submitDelivery: apiMock.chatSubmitDelivery, streamSubscribe: apiMock.streamSubscribe, bash: apiMock.chatBash, abortBash: apiMock.chatAbortBash },
   workspace: { detect: vi.fn().mockResolvedValue({ mode: 'not-repo', isBareMode: false, wsRoot: '', repoRoot: '' }) },
   worktree: { list: vi.fn().mockResolvedValue([]) },
 }))
@@ -240,6 +248,7 @@ describe('useNewTaskFlow 状态机', () => {
   describe('submitFirstMessage bash 首发（landing 态 !/!! 前缀）', () => {
     beforeEach(() => {
       apiMock.chatSend.mockClear()
+      apiMock.chatSubmitDelivery.mockClear()
       apiMock.chatBash.mockClear()
     })
 
@@ -255,7 +264,8 @@ describe('useNewTaskFlow 状态机', () => {
       )
       expect(apiMock.chatBash).toHaveBeenCalledTimes(1)
       expect(apiMock.chatBash).toHaveBeenCalledWith(expect.any(String), 'echo hi', false)
-      // 关键：不调 chat.send（bash 不走 LLM turn）
+      // 关键：不提交消息（bash 不走 LLM turn）——统一提交入口与旧 send 均未被调
+      expect(apiMock.chatSubmitDelivery).not.toHaveBeenCalled()
       expect(apiMock.chatSend).not.toHaveBeenCalled()
     })
 
@@ -296,13 +306,14 @@ describe('useNewTaskFlow 状态机', () => {
       expect(labelArg!.startsWith('!')).toBe(false)
     })
 
-    it('无 bashCommand → 仍走 chat.send（普通首发，回归防护）', async () => {
+    it('无 bashCommand → 走统一提交（普通首发，回归防护）', async () => {
       setGroups([gitSession({ id: 'hist', cwd: '/repo', lastActiveAt: 1 })])
       workspaceStoreMock.defaultCwd = '/repo'
       const flow = useNewTaskFlow()
       await flow.startFlow()
       await flow.submitFirstMessage(textToSegments('hello'))
-      expect(apiMock.chatSend).toHaveBeenCalledTimes(1)
+      // [u3c/D1] 首发与正常 send 同通路：delivery.submit（clientUuid 三参）
+      expect(apiMock.chatSubmitDelivery).toHaveBeenCalledTimes(1)
       expect(apiMock.chatBash).not.toHaveBeenCalled()
     })
   })
@@ -608,9 +619,7 @@ describe('useNewTaskFlow 状态机', () => {
 //    非法态守卫覆盖，不再重复）──
 describe('create 透传归属 projectId（D14 语义修正，原 session-project-attribution 并入）', () => {
   function seedHistGroup(cwd: string): void {
-    useSessionStore().applySnapshot({ groups: [
-      { cwd, sessions: [{ id: 'hist', label: 'hist', cwd, status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0 }] },
-    ] as SessionGroup[] })
+    setGroups([{ id: 'hist', label: 'hist', cwd, status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0 }])
   }
 
   it('命名 project 下新建任务 → create 第 4 参数携带 activeProjectId', async () => {

@@ -70,7 +70,7 @@ beforeAll(async () => {
       if (mode.kind === 'error') {
         ws.send(JSON.stringify({ type: 'error', id: msg.id, payload: { code: mode.code, message: mode.message } }))
       } else {
-        ws.send(JSON.stringify({ type: 'config.providerUpdated', id: msg.id, payload: {} }))
+        ws.send(JSON.stringify({ type: 'config.providerUpdated', id: msg.id, payload: { providerId: 'cli-test' } }))
       }
     })
   })

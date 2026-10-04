@@ -15,8 +15,9 @@
 //   - 写侧（saveIndex）：tmp(pid+seq)+fsync+rename+目录 fsync 原子写（逐环复刻
 //     ManifestStore.writeManifest 的生产模式）。失败本身向上抛；fire-and-forget 的
 //     .catch 兜底在 RecordStore 侧。
-//   - 损坏/降级走 logger.debug（PI_EXT_DEBUG=1 可见，默认 no-op），不 console.error
-//     ——索引是纯性能缓存，降级自愈不应告警。
+//   - 损坏/降级走 logger.warn（含文件路径与原因）：索引是纯性能缓存，回退空索引 +
+//     本轮全量重扫是自愈路径，但「缓存被弃用」与「本来就没有缓存」必须可区分——
+//     损坏静默回退会把性能回退与外部改写掩盖成正常首跑。
 //
 // 无状态纯函数模块：不依赖 RecordStore 任何内部状态。
 
@@ -27,7 +28,7 @@ import { getLogger } from "../../core/logger.ts";
 import { writeAtomicFile } from "../../shared/atomic-write.ts";
 import { errorCodeOf } from "../../shared/fs-error.ts";
 
-import type { ExecutionMode, RecordOrigin } from "../assembly/types.ts";
+import type { ExecutionMode, RecordOrigin } from "../domain/record-types.ts";
 
 const logger = getLogger("subagents");
 
@@ -39,7 +40,7 @@ const logger = getLogger("subagents");
 export const INDEX_FILENAME = "sessions-index.json";
 
 /** 索引格式版本。schema 变更必须递增：低版本文件整体丢弃（空索引，下轮 dirty 重写自愈）；高版本整体忽略（higherVersion，不重写）。 */
-export const INDEX_VERSION = 1;
+export const INDEX_VERSION = 3;
 
 /** 两次成功落盘的最小墙钟间隔（节流：overlay 打开期间的高频扫描不放大磁盘写）。 */
 export const INDEX_WRITE_MIN_INTERVAL_MS = 60_000;
@@ -87,6 +88,26 @@ export interface SessionsIndexEntry {
   origin?: RecordOrigin;
   /** origin="workflow" 时所属 workflow run id（undefined = 缺失/tool 来源）。 */
   parentRunId?: string;
+  /**
+   * 事件文件（`<recordsDir>/<id>.events`）戳——缓存键第四维（v2 引入）。轮终收条写在
+   * jsonl 末次写入之后，只比 jsonl 会把过期终态判成新鲜。undefined = 无事件文件。
+   */
+  eventsMtimeMs?: number;
+  eventsSize?: number;
+  /**
+   * 终态收条（v2 引入）：索引自承终态域，快路径零内容读取即可回答「为什么停/何时停」，
+   * 不必再读 `.state` sidecar。缺席（无收条事件）= 在途中断语义。
+   */
+  receipt?: { stopReason: string; endedAt: number };
+  /**
+   * 收条统计域（v3 引入）：[② 读侧换源] 后 light 的 turns/totalTokens 来自折叠收条
+   * （record-settled / record-round-idle 帧）——索引自承后快路径零内容读取即可回答
+   * 「停时多少量」，不必读事件文件。与 receipt 同生同灭（有收条才有统计）；缺席 =
+   * 无收条（在途中断）或 v2 存量索引（消费侧 undefined 容忍，下轮戳变化重探补齐）。
+   * round 不入索引（既有缺口，见 record-store.buildEntryFromIndex 消费侧登记）。
+   */
+  turns?: number;
+  totalTokens?: number;
 }
 
 /**
@@ -99,9 +120,12 @@ export interface SessionsIndexNegativeEntry {
   size: number;
 }
 
+/** 磁盘 JSON 格式版本（唯一写点 = 索引重建；读侧按 it 拒旧格式）。 */
+export const SESSIONS_INDEX_VERSION = 3;
+
 /** 磁盘 JSON 顶层结构（key = jsonl basename 不含路径）。 */
 export interface SessionsIndexFile {
-  version: 1;
+  version: typeof SESSIONS_INDEX_VERSION;
   pid: number;
   entries: Record<string, SessionsIndexEntry | SessionsIndexNegativeEntry>;
 }
@@ -171,6 +195,24 @@ function hasModelFields(v: Record<string, unknown>): boolean {
   );
 }
 
+/** 事件戳 + 终态收条 + 收条统计域字段组（v2/v3；undefined 合法 = 无事件文件/无收条/存量 v2 索引）。 */
+function hasReceiptFields(v: Record<string, unknown>): boolean {
+  if (v.eventsMtimeMs !== undefined && typeof v.eventsMtimeMs !== "number") return false;
+  if (v.eventsSize !== undefined && typeof v.eventsSize !== "number") return false;
+  if (v.receipt === undefined) {
+    // v3 收条统计域与 receipt 同生同灭：receipt 缺席时统计字段也必须缺席
+    //（有值 = 形态损坏，丢弃条目走重探自愈）。
+    return v.turns === undefined && v.totalTokens === undefined;
+  }
+  if (typeof v.receipt !== "object" || v.receipt === null) return false;
+  const r = v.receipt as Record<string, unknown>;
+  if (typeof r.stopReason !== "string" || typeof r.endedAt !== "number") return false;
+  return (
+    (v.turns === undefined || typeof v.turns === "number") &&
+    (v.totalTokens === undefined || typeof v.totalTokens === "number")
+  );
+}
+
 /** 正条目类型谓词：镜像 isIdentityData（session-reconstructor.ts:244-253）的字段检查 + 索引特有戳/形态字段。 */
 function isPositiveIndexEntry(raw: unknown): raw is SessionsIndexEntry {
   if (typeof raw !== "object" || raw === null) return false;
@@ -180,7 +222,8 @@ function isPositiveIndexEntry(raw: unknown): raw is SessionsIndexEntry {
     hasSessionDescFields(v) &&
     hasOptionalStringFields(v) &&
     hasOriginFields(v) &&
-    hasModelFields(v)
+    hasModelFields(v) &&
+    hasReceiptFields(v)
   );
 }
 
@@ -214,29 +257,36 @@ type ValidIndexTop = {
 };
 
 /** 读索引文件文本。读失败 → null：ENOENT = 正常首跑保持静默；其余读失败（EACCES 等
- * 长期权限异常）留 debug 线索——空索引回退本身可自愈，但权限类异常不会自己消失，需可诊断。 */
+ * 长期权限异常）warn——索引缺失会被当作「无缓存」全量重扫，权限类异常不会自己消失，
+ * 需要可诊断信号区分「首跑无缓存」与「缓存读不到」。 */
 function readIndexFile(indexPath: string, encDir: string): string | null {
   try {
     return fs.readFileSync(indexPath, "utf-8");
   } catch (err) {
     const code = errorCodeOf(err);
     if (code !== "ENOENT") {
-      logger.debug("[subagents] sessions-index read failed, fallback to empty", {
-        detail: { dir: encDir, code },
+      logger.warn("[subagents] sessions-index read failed, fallback to empty index and rescan", {
+        detail: { path: indexPath, dir: encDir, code },
       });
     }
     return null;
   }
 }
 
-/** JSON.parse 索引内容。损坏（截断/外部编辑）→ null，走 debug：可降级自愈场景，不 console.error。 */
+/** JSON.parse 索引内容。损坏（截断/外部编辑）→ null：索引是纯性能缓存，回退空索引后
+ * 本轮全量重扫并重写；warn 是「缓存损坏已被弃用」的唯一可见信号（与「文件不存在」的
+ * 静默首跑区分）。 */
 function parseIndexJson(raw: string, indexPath: string): unknown {
   try {
     return JSON.parse(raw);
   } catch (err) {
-    logger.debug("[subagents] sessions-index corrupted JSON, fallback to empty", {
-      detail: { path: indexPath, error: err instanceof Error ? err.message : String(err) },
-    });
+    logger.warn(
+      "[subagents] sessions-index corrupted JSON — falling back to an empty index " +
+        "(rebuilt after this scan)",
+      {
+        detail: { path: indexPath, error: err instanceof Error ? err.message : String(err) },
+      },
+    );
     return null;
   }
 }
@@ -251,19 +301,24 @@ function isIndexTopHeader(v: Record<string, unknown>): v is ValidIndexTop {
   );
 }
 
-/** 顶层结构校验（DM1）。不符 → null（两条 debug 文案与判定条件一一对应）。 */
+/** 顶层结构校验（DM1）。不符 → null（两条 warn 文案与判定条件一一对应）。
+ * 缓存形态坏 = 整份索引弃用并本轮重扫，warn 留痕（否则与「无缓存首跑」不可区分）。 */
 function readTopLevel(parsed: unknown, indexPath: string): ValidIndexTop | null {
   if (typeof parsed !== "object" || parsed === null) {
-    logger.debug("[subagents] sessions-index invalid top-level shape, fallback to empty", {
-      detail: { path: indexPath },
-    });
+    logger.warn(
+      "[subagents] sessions-index invalid top-level shape — falling back to an empty index " +
+        "(rebuilt after this scan)",
+      { detail: { path: indexPath } },
+    );
     return null;
   }
   const top = parsed as Record<string, unknown>;
   if (!isIndexTopHeader(top)) {
-    logger.debug("[subagents] sessions-index invalid header fields, fallback to empty", {
-      detail: { path: indexPath },
-    });
+    logger.warn(
+      "[subagents] sessions-index invalid header fields — falling back to an empty index " +
+        "(rebuilt after this scan)",
+      { detail: { path: indexPath } },
+    );
     return null;
   }
   return top;

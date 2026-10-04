@@ -1,0 +1,152 @@
+/**
+ * tool-shared.ts — workflow / subagents / workflow-script 三个 tool 的同粒度共享构件。
+ *
+ * 抽取边界（findings g11a-F1/F2/F3）：
+ * - `assertNotAborted` / `optionSlugSuffix` / `renderTextResult`：三处逐字重复的
+ *   入口前置与渲染片段（同粒度小函数）。
+ * - `buildRunSpecFromScript`：RunSpec 组装字面量——RunSpec 是 core 启动契约，
+ *   字面量漏改即静默丢字段。
+ * - `withGuiAttach`：RPC 模式给 details 附加 `__gui__` 的唯一实现（workflow-script /
+ *   subagent 两个 tool 的 attach 点收敛于此，组件构造回调由调用方提供；workflow /
+ *   subagents 走 isWorkflow 块分支不消费 `__gui__`，不构造——D8）。
+ * - `throwPrefixed`：catch 内 `<前缀>: <msg>` 重抛（pi 的 execute-throw 契约，
+ *   toErrorMessage 规整单点）。
+ *
+ * 「可用脚本清单」串不在本文件：已并入 core 单源
+ *（@zhushanwen/subagent-core 的 formatAvailableWorkflowRefs，经 barrel 消费）。
+ *
+ * **不**把 execute 包成 HOF：reentry-guard.ts 文件头已裁决（HOF 包装会破坏 union
+ * 返回类型推断），本文件只放同粒度小函数，guard 的 check → try/finally release
+ * 顺序仍留在各 tool 的 execute 里显式可见。
+ *
+ * 层归属：Interface（依赖 Pi SDK 的 AbortSignal / Theme / Text 宿主概念，不下沉 core）。
+ */
+
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
+
+import type { GuiComponent, GuiContext, GuiRenderResult } from "@zhushanwen/extension-protocol";
+import { guiResult, isGuiCapable } from "@zhushanwen/extension-protocol";
+import type { RunSpec, WorkflowScript } from "@zhushanwen/subagent-core";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
+import { renderTextFallback } from "../format/format.ts";
+
+/** renderResult 回调的宽入参形态（content 可缺省，由 renderTextFallback 兜底）。 */
+export interface RenderableToolResult {
+  content?: Array<{ type: string; text?: string }>;
+}
+
+/**
+ * 入口 abort 前置：已被取消则 throw。
+ *
+ * pi 只对 execute throw 置 isError:true（返回值里的 isError 被 agent-loop 丢弃，
+ * agent-loop.js:453-483）——错误一律 throw。
+ */
+export function assertNotAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new Error("Operation aborted before start");
+  }
+}
+
+/**
+ * renderCall 的可选 slug 后缀片段：` · <slug>`（dim 分隔 + accent 值）。
+ *
+ * 非字符串或空白串视为未提供 → 空串（调用方直接拼接）。
+ */
+export function optionSlugSuffix(slug: unknown, theme: Theme): string {
+  return typeof slug === "string" && slug.trim()
+    ? `${theme.fg("dim", " · ")}${theme.fg("accent", String(slug))}`
+    : "";
+}
+
+/** renderResult 统一形态：单 Text 元素（左上角原点），文本走 renderTextFallback。 */
+export function renderTextResult(result: RenderableToolResult): Text {
+  return new Text(renderTextFallback(result), 0, 0);
+}
+
+/**
+ * buildRunSpecFromScript 的调用方差异项（两个 tool 的取值域不同，用参数保留）：
+ * - args：subagents 由 handler 从顶层 tasks/agents/aggregate 组装；workflow 用 params.args
+ * - slug：subagents 可能是 handler 生成的 `<script>-<时间短码>`；workflow 用 params.slug
+ * - budgetTokens / budgetTimeMs：分别来自各 tool 的 tokens / time 字段
+ */
+export interface RunSpecFromScriptOptions {
+  args: Record<string, unknown>;
+  budgetTokens?: number | undefined;
+  budgetTimeMs?: number | undefined;
+  slug?: string | undefined;
+  model?: string | undefined;
+  thinkingLevel?: string | undefined;
+}
+
+/**
+ * 从已解析脚本 + 归一化选项组装 RunSpec（core 启动契约的结构字面量单点）。
+ *
+ * 键序与两个 tool 原字面量逐字一致（parameters 从 script.meta 整对象透传——
+ * chokepoint 校验用；漏拷即校验静默退化为「不校验」，m3 防过的坑）。
+ */
+export function buildRunSpecFromScript(
+  script: WorkflowScript,
+  opts: RunSpecFromScriptOptions,
+): RunSpec {
+  return {
+    scriptSource: script.toExecutable(),
+    args: opts.args,
+    budgetTokens: opts.budgetTokens,
+    budgetTimeMs: opts.budgetTimeMs,
+    scriptName: script.name,
+    slug: opts.slug,
+    scriptPath: script.path,
+    description: script.meta.description,
+    parameters: script.meta.parameters,
+    model: opts.model,
+    thinkingLevel: opts.thinkingLevel,
+  };
+}
+
+/** withGuiAttach 的 details 约束：已声明 `__gui__?`（消费 attach 的 details union 均满足）。 */
+interface GuiAttachableDetails {
+  __gui__?: GuiRenderResult;
+}
+
+/**
+ * GUI attach 单点：RPC 模式（isGuiCapable，仅 mode==="rpc"）下为 details 附加
+ * `__gui__`，其余模式原样返回；details 为 undefined 时原样返回（过载签名区分
+ * 可空/非空入参，非空入参的返回不带 undefined——调用方无需收窄）。
+ *
+ * 组件构造是各 tool 特有逻辑，经 build 回调注入——回调只在 attach 分支被调用
+ * （非 RPC 模式零构造成本）。union 各成员已声明 `__gui__?`，spread + 补字段类型
+ * 安全，无需强转。
+ */
+export function withGuiAttach<Details extends GuiAttachableDetails>(
+  details: Details,
+  ctx: GuiContext | undefined,
+  build: (details: Details) => GuiComponent,
+): Details;
+export function withGuiAttach<Details extends GuiAttachableDetails>(
+  details: Details | undefined,
+  ctx: GuiContext | undefined,
+  build: (details: Details) => GuiComponent,
+): Details | undefined;
+export function withGuiAttach<Details extends GuiAttachableDetails>(
+  details: Details | undefined,
+  ctx: GuiContext | undefined,
+  build: (details: Details) => GuiComponent,
+): Details | undefined {
+  if (!details) return details;
+  if (ctx && isGuiCapable(ctx)) {
+    return { ...details, __gui__: guiResult(build(details)) };
+  }
+  return details;
+}
+
+/**
+ * catch 内重抛单点：`<prefix>: <msg>`（msg 经 toErrorMessage 规整）。
+ *
+ * pi 只对 execute throw 置 isError:true——返回值里的 isError 被 agent-loop 丢弃
+ * （agent-loop.js:453-483），错误一律 throw，本函数是四个 catch 点共享的唯一包装
+ * 形态；前缀是 LLM 可见文案，调用方逐字保持既有形态。
+ */
+export function throwPrefixed(prefix: string, err: unknown): never {
+  throw new Error(`${prefix}: ${toErrorMessage(err)}`);
+}

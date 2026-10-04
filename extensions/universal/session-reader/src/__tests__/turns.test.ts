@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { segmentTurns } from '../core/turns.js'
-import { parseSessionFile, type Entry } from '@zhushanwen/session-core'
+import type { Entry } from '@zhushanwen/session-core'
 import { buildTreeView } from '../core/tree.js'
-import { REAL_SESSION, HAS_REAL_SESSION } from './real-data.js'
 
 // ---- Entry 构造助手（turns.ts 只消费 type/id/parentId/message.role） ----
 
@@ -120,23 +119,26 @@ describe('segmentTurns', () => {
     expect(turns[0].startTime).toBe('2026-05-28T03:17:12.844Z')
   })
 
-  it.skipIf(!HAS_REAL_SESSION)('真实 019e6c96：leaf 视图分段（26 user + 5 compaction + 1 前置 = 32 turn）', async () => {
-    // 注：design P-outline / plan T1.3 基线为 26（仅数 user 的旧定义）。
-    // 本实现按冻结接口 Turn.isCompaction + design §3.5 算法 3 规则 2（compaction 独立成 turn）
-    // + 规则 4（首 user 前的 model_change/thinking_level_change 成 preface turn），
-    // 真实数据为 32 turn。26 基线早于 compaction-split 细化，详见交接说明。
-    const parsed = await parseSessionFile(REAL_SESSION)
-    const tree = buildTreeView(parsed.entries)
-    const turns = segmentTurns(parsed.entries, new Set(tree.leafPath))
+  it('leaf 视图分段结构形态：preface（首 user 前的 model_change）+ user turns + compaction turn', () => {
+    // 合成分段结构形态（1 preface + 1 compaction + 2 user turn）：
+    // 规则 2（compaction 独立成 turn）+ 规则 4（首 user 前的 model_change/thinking_level_change
+    // 成 preface turn，无 userEntry）
+    const entries = [
+      entry('MC', null, 'model_change'),
+      msg('U1', 'MC', 'user'),
+      msg('A1', 'U1', 'assistant'),
+      entry('C1', 'A1', 'compaction'),
+      msg('U2', 'C1', 'user'),
+      msg('A2', 'U2', 'assistant'),
+    ]
+    const tree = buildTreeView(entries)
+    const turns = segmentTurns(entries, new Set(tree.leafPath))
 
-    expect(turns.length).toBe(32)
-    // 首个 turn 是 preface（model_change/thinking_level_change），无 userEntry
+    expect(turns.length).toBe(4)
+    // 首 turn 是 preface（model_change），无 userEntry、非 compaction
     expect(turns[0].userEntry).toBeUndefined()
     expect(turns[0].isCompaction).toBe(false)
-    // 其中有 5 个 compaction turn
-    expect(turns.filter((t) => t.isCompaction).length).toBe(5)
-    // 其中有 26 个 user turn
-    expect(turns.filter((t) => t.userEntry !== undefined).length).toBe(26)
-    // 5.6MB 全量解析在并发/高负载下可能超 vitest 默认 5s，显式放宽
-  }, 60000)
+    expect(turns.filter((t) => t.isCompaction).length).toBe(1)
+    expect(turns.filter((t) => t.userEntry !== undefined).length).toBe(2)
+  })
 })

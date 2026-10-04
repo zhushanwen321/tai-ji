@@ -25,6 +25,7 @@
  */
 import type {
   Message, ModelInfo, ServerMessage, ServerMessageMap, ServerMessageUnion, SessionSummary, SessionGroup, ProviderInfo, BuiltinProviderTemplate,
+  BashDispatchReceipt,
   SkillInfo, AgentInfo, PluginInfo, SetProviderData,
   SkillDirConfig, FileNode, RecommendedExtension, SubagentRecord, WorkflowRunRecord,
   SystemPromptConfig,
@@ -38,9 +39,12 @@ import type {
   LlmRetryConfig,
   ScannedSkillInfo,
   ScannedAgentInfo,
+  RenameMode,
+  UsageStatsResult,
   UiLocale,
+  Segment,
 } from '@taiji/shared'
-import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS } from '@taiji/shared'
+import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS, DELIVERY_PREVIEW_MAX_CHARS } from '@taiji/shared'
 import { createSession, fixtureMessages, fixtureSessions, e2eTestSession } from './data'
 import { fixtureProviders, fixtureSkills, fixtureAgents, fixtureExtensions, toCandidate } from './settings-data'
 import { MOCK_MODELS, mockModelToInfo, FILE_CANDIDATES } from './composer-data'
@@ -66,9 +70,10 @@ import * as wsClient from '../ws-client'
 // ② AssertExact<DomainParamsExact<...>> —— 可赋值性抓不到「少可选参」（少参函数可赋给多参函数类型），
 //    须逐方法比较 Parameters 元组全等（identity）。断言别名 export：未导出的 unused 类型
 //    别名会被 lint no-unused-vars 拦截（tsc 侧本包未开 noUnusedLocals，不设防）。
-// 已锚定：session/chat/config/model/plugin/composer/workspace/quota/project/preset/btw（11 域）。
-// 未锚定（mock 保真度登记见 docs/TEST-STRATEGY.md §5）：settings（7 成员子集转发器，
-// real 是 40+ 方法全域）/ extension（onExtensions 宽类型为登记过的有意偏差，W08 收口）/
+// 已锚定：session/chat/config/model/plugin/composer/workspace/quota/project/preset/btw/usage（12 域）。
+// 未锚定（mock 保真度登记见 docs/TEST-STRATEGY.md §5）：settings（[C3] 字段读写已补齐为
+// 内存态 fixture 全域，但 onExtensions 转发沿用 extension 的宽类型偏差——锚定受其阻塞，
+// W08 收口时一并锚定）/ extension（onExtensions 宽类型为登记过的有意偏差，W08 收口）/
 // search（real 侧无单源 domain，编排归 useSearchModalDeps）/ git、file（独立 mock 文件，
 // 待后续同法锚定）。
 import type * as realSessionDomain from '../api/domains/session'
@@ -83,6 +88,10 @@ import type * as realProjectDomain from '../api/domains/project'
 import type * as realPresetDomain from '../api/domains/preset'
 import type * as realBtwDomain from '../api/domains/btw'
 
+import type * as realUsageDomain from '../api/domains/usage'
+import type * as realTtsDomain from '../api/domains/tts'
+
+
 /** real 域形状单点（mock 锚定源；散函数模块的 namespace 类型即域接口） */
 export type SessionDomain = typeof realSessionDomain
 export type ChatDomain = typeof realChatDomain
@@ -96,23 +105,29 @@ export type ProjectDomain = typeof realProjectDomain
 export type PresetDomain = typeof realPresetDomain
 export type BtwDomain = typeof realBtwDomain
 
-/** 去 tuple 标签（Parameters 产 labeled tuple；参数名是修饰不是类型身份，归一后再比对） */
-type PlainTuple<T extends unknown[]> = { [K in keyof T]: T[K] }
+export type UsageDomain = typeof realUsageDomain
+export type TtsDomain = typeof realTtsDomain
+
+
+/** 去 tuple 标签（Parameters 产 labeled tuple；参数名是修饰不是类型身份，归一后再比对）。导出：被导出的 SameTuple / DomainParamsExact 引用 */
+export type PlainTuple<T extends unknown[]> = { [K in keyof T]: T[K] }
 /**
  * 元组类型全等（identity 比对而非可赋值性——可赋值性抓不到可选元素的增删）。
  * 判别臂用字符串字面量（非数值）：同为 identity 探针的两臂标记，避免 no-magic-numbers warning。
+ * 导出：被导出的 DomainParamsExact 引用（fallow private-type-leaks）。
  */
-type SameTuple<A extends unknown[], B extends unknown[]> =
+export type SameTuple<A extends unknown[], B extends unknown[]> =
   (<T>() => T extends PlainTuple<A> ? 'eq' : 'ne') extends (<T>() => T extends PlainTuple<B> ? 'eq' : 'ne') ? true : false
-/** 断言恒真（类型实参不满足 true 约束时在使用处报编译错） */
-type AssertExact<T extends true> = T
+/** 断言恒真（类型实参不满足 true 约束时在使用处报编译错；导出：被导出别名 *ParamsExact 引用） */
+export type AssertExact<T extends true> = T
 /**
  * 逐方法比较 mock 实现与 real 域的 Parameters 元组全等（identity）；任一方法少参/多参/错型，
  * 结果联合含 false。抓的正是「注解可赋值性放行」的漂移：mock 少声明一个可选参，TS 结构化
  * 比较视为合法（少参函数可赋给多参函数类型）。用法：AssertExact<DomainParamsExact<D, M>>——
  * 泛型定义内不能直接套 AssertExact（未解析泛型上约束不可证，会在定义处误报）。
+ * 导出：被导出别名 *ParamsExact 引用（fallow private-type-leaks）。
  */
-type DomainParamsExact<Real, Mock extends Real> = {
+export type DomainParamsExact<Real, Mock extends Real> = {
   [K in keyof Real]: Real[K] extends (...args: infer P) => unknown
     ? Mock[K] extends (...args: infer Q) => unknown
       ? SameTuple<P, Q>
@@ -251,7 +266,6 @@ const DEFAULT_TIMING: Timing = {
   toolGap: 90, // tool_call 各阶段间隔（进度感）
   fileChangesGap: 120, // accumulating → ready 间隔
   retryGap: 800, // auto_retry_start → end 间隔（让指示位可见）
-  steerDrain: 1500, // steer/followUp 入队 → 模拟 drain（pi 投递）间隔，让 QueueBubble 可见
   bashDelay: 2000, // bashStart→bashResult 间隔（loading 态可见）
 }
 /** 运行时时序（对象引用共享给 run-send-stream/branches——注入走原地 merge，消费点运行时读） */
@@ -291,18 +305,31 @@ const cancelled = new Set<string>()
 /** 运行中的 setTimeout 句柄，resolve 后自动移除，避免 Set 无限增长 */
 // taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：mock 定时器句柄集合
 const timers = new Set<ReturnType<typeof setTimeout>>()
+// session.delivery mock 帧的 preview 截断长度（展示投影字段，非全文——与真实 runtime 帧同语义）。
+// 值 SSOT = @taiji/shared DELIVERY_PREVIEW_MAX_CHARS（msg-pipeline-debloat D5-5 下沉：
+// runtime transport 与本 mock 同源同值，原「注释互指」双定义删除）。
+
 /**
- * mock 队列状态镜像（steer/followUp pending）。
- * steer/followUp 入队时 push + emit 全量 queue_update（QueueBubble 渲染），
- * 延迟后 splice 模拟 drain（pi 投递）+ emit 全量（移除该项）→ drainPending 取 segments + appendUser（complete user 进对话流）。
+ * 已广播 in-flight 投递条目、且流式序列尚未走完的 session（abort 终态帧依据）。
+ * submitDelivery 登记、runSendStream settle（complete 或 aborted 中断退出）时清除——
+ * abort 据此区分「有在飞投递可补终态帧」与「流已自然走完」（后者 abort 不补帧，保持既有行为）。
  */
-// taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：mock 队列缓冲
-const mockQueues = new Map<string, { steering: string[]; followUp: string[] }>()
+// taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：在飞投递条目跟踪（abort 终态帧依据，非 GUI 数据）
+const inflightDeliveryEntries = new Map<string, { clientUuid: string; preview: string }>()
+
+/** 在飞 sleep 的 resolve 句柄（__clearTimers teardown 时统一 settle，防在飞 runSendStream 永久悬挂在 await sleep） */
+// taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：在飞 sleep resolve 句柄（teardown settle 用，非 GUI 数据）
+const pendingSleepResolves = new Set<() => void>()
 
 /** 清理所有未触发的 timer（测试 teardown / 模块卸载时调用） */
 export function __clearTimers(): void {
   for (const t of timers) clearTimeout(t)
   timers.clear()
+  // 清 timer 的同时 settle 全部挂起的 sleep promise：只 clearTimeout 不 settle 会把在飞的
+  // runSendStream 永久悬挂在 await sleep（promise 泄漏）；settle 后其下一轮 cancelled
+  // 检查静默退出，teardown 不悬挂。
+  for (const resolve of [...pendingSleepResolves]) resolve()
+  pendingSleepResolves.clear()
 }
 
 let idSeq = 0
@@ -313,59 +340,34 @@ function nextId(prefix: string): string {
 }
 
 function emit(sessionId: string, msg: ServerMessageUnion): void {
-  streamHandlers.get(sessionId)?.forEach((h) => h(msg))
-}
-
-/** emit 全量 queue_update（steering + followUp 镜像），驱动 QueueBubble 渲染 */
-function emitQueueUpdate(sessionId: string): void {
-  const q = mockQueues.get(sessionId)
-  // 发副本而非活引用：drain splice 会原地改 q.steering，按引用 emit 会让订阅方
-  // 已收到的入队帧事后被改空（快照语义）
-  const steering = q?.steering.length ? [...q.steering] : undefined
-  const followUp = q?.followUp.length ? [...q.followUp] : undefined
-  // 两者皆空时仍 emit（空 payload），让 store 侧 queue_update handler delete queueState
-  // pendingMessageCount = steering + followUp 条数和（W8 契约必填，对齐 event-adapter 翻译口径）
-  emit(sessionId, {
-    type: 'message.queue_update',
-    payload: {
-      sessionId,
-      steering,
-      followUp,
-      pendingMessageCount: (q?.steering.length ?? 0) + (q?.followUp.length ?? 0),
-    },
-  })
-}
-
-/**
- * steer/followUp drain（pi 投递）后补发 assistant turn（m4）：message_start → text_delta×N → complete。
- *
- * drain 只 emit queue_update 会让用户消息入流后无后续 assistant——dangling streaming bubble
- * （demo / E2E 下 steer 后看不到回复）。补一个最小 assistant turn 让 mock 与真实 pi 行为同构
- * （pi drain steer 后开新一轮 LLM turn，发 message_start + 流式回复 + complete）。
- * 内容简化为固定文案逐字流式，让 streaming 气泡可见；全程检查 cancelled。
- */
-async function emitDrainAssistantTurn(sessionId: string, steeredText: string): Promise<void> {
-  const messageId = nextId('m')
-  emit(sessionId, { type: 'message.message_start', id: messageId, payload: { sessionId, messageId } })
-  await sleep(TIMING.startGap)
-  const reply = `（mock）已处理："${steeredText}"`
-  for (const ch of reply) {
-    if (cancelled.has(sessionId)) return
-    await sleep(TIMING.chunk)
-    emit(sessionId, { type: 'message.text_delta', id: messageId, payload: { sessionId, messageId, delta: ch } })
+  const handlers = streamHandlers.get(sessionId)
+  if (!handlers) return
+  for (const h of handlers) {
+    try {
+      h(msg)
+    } catch (e) {
+      // 订阅者异常隔离，语义对齐 real 侧 events.ts safeForEach（M4）：单 handler 抛错不中断
+      // 同通道其余订阅者，也不穿透 runSendStream——否则 mock 流以「无 complete/error 帧」的
+      // 合法形态中断，isGenerating 卡至 pendingSend 30s 兜底才复位。console.error 留痕非静默吞。
+      console.error(`[mock] stream handler threw for session ${sessionId}, continuing dispatch:`, e)
+    }
   }
-  if (cancelled.has(sessionId)) return
-  await sleep(TIMING.done)
-  emit(sessionId, { type: 'message.complete', id: messageId, payload: { sessionId, messageId, stopReason: 'complete' } })
 }
+
+// [u5a 退役] mock 的 `queue_update` 镜像链（mockQueues / emitQueueUpdate /
+// emitDrainAssistantTurn + TIMING.steerDrain）已随 `chat.steer` / `chat.followUp` 删除——
+// 该链唯一职责是喂 QueueBubble 的 queue_update 快照（u3b 退役该消费腿，u3c 转 session.delivery
+// 单源），删除后 mock 轨的提交链路只剩 submitDelivery（与真实 runtime 同通道）。
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     const t = setTimeout(() => {
       timers.delete(t)
+      pendingSleepResolves.delete(resolve)
       resolve()
     }, ms)
     timers.add(t)
+    pendingSleepResolves.add(resolve)
   })
 }
 
@@ -409,6 +411,39 @@ function zcodeMockCandidates(): import('@taiji/shared').ImportCandidate[] {
   }))
 }
 
+// ── 发现 B（create 幂等化）mock 面：clientUuid → 已建 session ─────────────────
+// 行为对齐 runtime create-idempotency（同 uuid 重试返回已建 session 不重复建号 +
+// TTL 保留 + 容量上限驱逐最老）；mock 无 spawn，登记面即内存投影。保持签名/行为
+// 双同构，防 mock 轨（VITE_MOCK UI 开发）把真实面已修的重复建号 bug 重新演一遍。
+const MOCK_CREATE_IDEMPOTENCY_TTL_MS = 600_000
+const MOCK_CREATE_IDEMPOTENCY_MAX_ENTRIES = 256
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：create clientUuid 幂等去重表
+// （mock 面行为对齐 runtime create-idempotency，容量上限 256 + TTL 10min，非 GUI 数据）
+const mockCreateByClientUuid = new Map<string, { session: SessionSummary; expiresAt: number }>()
+
+/** 幂等命中（TTL 内）→ 返回已建 session 副本；未命中/过期 → undefined（调用方新建并登记）。 */
+function dedupeMockCreate(clientUuid: string): SessionSummary | undefined {
+  const now = Date.now()
+  for (const [key, rec] of mockCreateByClientUuid) {
+    if (rec.expiresAt <= now) mockCreateByClientUuid.delete(key)
+  }
+  const hit = mockCreateByClientUuid.get(clientUuid)
+  return hit ? { ...hit.session } : undefined
+}
+
+/** 新建后登记（容量上限驱逐最老，同 runtime 回收策略）。 */
+function recordMockCreate(clientUuid: string, session: SessionSummary): void {
+  while (mockCreateByClientUuid.size >= MOCK_CREATE_IDEMPOTENCY_MAX_ENTRIES) {
+    const oldest = mockCreateByClientUuid.keys().next().value
+    if (oldest === undefined) break
+    mockCreateByClientUuid.delete(oldest)
+  }
+  mockCreateByClientUuid.set(clientUuid, {
+    session: { ...session },
+    expiresAt: Date.now() + MOCK_CREATE_IDEMPOTENCY_TTL_MS,
+  })
+}
+
 const sessionImpl = {
   /**
    * session trace 台账全量（session-trace，design D4）。mock 轨道无真实 JSONL/pi 进程，
@@ -441,19 +476,26 @@ const sessionImpl = {
   },
 
   /**
-   * [G4 锚定 SessionDomain] 参数与 real 域 create 全等（含 override 四参）。
+   * [G4 锚定 SessionDomain] 参数与 real 域 create 全等（含 override 四参 + clientUuid）。
    * override 生效面（对齐 real 关键语义，落 SessionSummary 可断言）：
    * presetId → launchPresetId（real create 即锁预设进 summary）、projectId → projectId
    * （D14 归属）、modelOverride → modelId、thinkingOverride → thinkingLevel（Landing Chip
    * 覆盖值）。mock 无 pi/runtime，仅内存投影，不追求全仿真。
+   * clientUuid（发现 B）：同 uuid 幂等命中返回已建 session（不重复建号/不重复广播），
+   * 见本文件 mockCreateByClientUuid 说明。
    */
-  async create(cwd?: string, label?: string, presetId?: string, projectId?: string, modelOverride?: string, thinkingOverride?: ThinkingLevel): Promise<SessionSummary> {
+  async create(cwd?: string, label?: string, presetId?: string, projectId?: string, modelOverride?: string, thinkingOverride?: ThinkingLevel, clientUuid?: string): Promise<SessionSummary> {
     await sleep(TIMING.ack)
+    if (clientUuid !== undefined) {
+      const existing = dedupeMockCreate(clientUuid)
+      if (existing) return existing
+    }
     const s = createSession(cwd, label)
     if (presetId !== undefined) s.launchPresetId = presetId
     if (projectId !== undefined) s.projectId = projectId
     if (modelOverride !== undefined) s.modelId = modelOverride
     if (thinkingOverride !== undefined) s.thinkingLevel = thinkingOverride
+    if (clientUuid !== undefined) recordMockCreate(clientUuid, s)
     fixtureSessions.push(s)
     // 模拟 runtime create 后 broadcastSessionList（server-push 全量分组）
     pushSessionList()
@@ -757,6 +799,16 @@ const sessionImpl = {
     const normalized = raw.replace(/^sess_/, '').replace(/_/g, '-')
     return { sessionId: normalized, targetPath: `/mock/taiji/sessions/zcode-demo/${normalized}.jsonl` }
   },
+
+  /**
+   * [U5 消息撤回] mock 无 runtime 编排（无树回退），协议合法最小响应 = no-mapping 错误臂
+   * （cancelDelivery mock 同款「不伪造事实」哲学：撤回能力在 mock 模式如实不可用，
+   * 消费侧按 D8 no-mapping 呈现兜底 toast，不谎报撤销成功）。
+   */
+  async revokeMessage(sessionId: string, _targetId: string): Promise<import('@taiji/shared').SessionRevokeMessageReply> {
+    await sleep(TIMING.ack)
+    return { sessionId, revoked: false, error: 'no-mapping' }
+  },
 }
 
 // [G4] 参数全等断言：mock session 任一方法少参/多参/错型（含 override 参数）在此行编译失败
@@ -829,27 +881,19 @@ const chatImpl = {
     return { messages, truncated: false, loadedTurns: messages.filter((m) => m.role === 'user').length, totalTurnsEstimate: messages.filter((m) => m.role === 'user').length }
   },
 
-  // options.clientUuid（session-occupancy D2）：mock 不模拟 send.rejected，参数仅签名对齐
-  // real 域（门面三元要求两侧同构），运行时忽略。
+  /**
+   * [降级 stub] u3b 统一提交后生产零调用，协议镜像保留：core 编排侧发送链已收敛
+   * submitDelivery（useChat / new-task 全走 composable 提交通路），本方法仅剩门面三元
+   * 同构要求（G4 锚定成员存在、签名不动）。实现降为 ack stub——不再驱动流式序列
+   * （mock 流式演示由 submitDelivery 承担，同一 runSendStream 流）。
+   */
   async send(
-    sessionId: string,
-    text: string,
+    _sessionId: string,
+    _text: string,
     _images?: Array<{ data: string; mimeType: string }>,
     _options?: { clientUuid?: string },
   ): Promise<void> {
-    cancelled.delete(sessionId)
-    // ack 语义：仅模拟 pi 接收命令，立即 resolve；流式序列 fire-and-forget（不 await）。
-    // isStreaming 由 message_start/complete 事件驱动（useChat.ts），不受此处 resolve 时机影响，
-    // 故 Composer :disabled=isSending 不会全程 true，流式中可 steer/retry。
     await sleep(TIMING.ack)
-    void runSendStream(sessionId, text, {
-      nextId,
-      emit,
-      sleep,
-      pushSession,
-      isCancelled: (s) => cancelled.has(s),
-      TIMING,
-    })
   },
 
   /**
@@ -869,6 +913,21 @@ const chatImpl = {
   async abort(sessionId: string): Promise<void> {
     // 标记取消，send 循环下一轮检测后退出
     cancelled.add(sessionId)
+    // [mock 投递状态机不悬挂] abort 时对在飞的 submitDelivery 条目补发终态帧：state 取
+    // 'failed'——shared DeliveryFrameEntry 投影态无 'aborted'（D5③ cancelled 不投影），
+    // 'delivered' 会伪造送达事实，'failed' 是唯一诚实表达「未送达」的投影终态。仅当该
+    // session 有未走完的投递流时发（流已自然走完的 session abort 保持既有行为，不补帧）。
+    const delivery = inflightDeliveryEntries.get(sessionId)
+    if (delivery) {
+      inflightDeliveryEntries.delete(sessionId)
+      emit(sessionId, {
+        type: 'session.delivery',
+        payload: {
+          sessionId,
+          entries: [{ clientUuid: delivery.clientUuid, preview: delivery.preview, state: 'failed', lane: 'direct' }],
+        },
+      })
+    }
     emit(sessionId, {
       type: 'message.complete',
       payload: { sessionId, stopReason: 'aborted' },
@@ -881,7 +940,9 @@ const chatImpl = {
   // 让开发者能看到 loading 态（spinner + 取消按钮）。
   // 不模拟真实 shell 输出（与 send 的 mock 策略一致——只驱动 UI 状态机，不验证业务逻辑）。
   // happy path：普通命令 → exitCode:0 + '(mock) <command>'（保留原有行为，不破坏）。
-  async bash(sessionId: string, command: string, excludeFromContext?: boolean): Promise<void> {
+  // 回执（bash 投递可靠性契约）：mock 全分支都「已执行并收口」→ settled（与 real 轨
+  // ChatApiPort.bash 同契约）。
+  async bash(sessionId: string, command: string, excludeFromContext?: boolean): Promise<BashDispatchReceipt> {
     await sleep(TIMING.ack)
     emit(sessionId, {
       type: 'message.bashStart',
@@ -903,65 +964,94 @@ const chatImpl = {
         timestamp: Date.now(),
       },
     })
+    return { status: 'settled' }
   },
 
   async abortBash(sessionId: string): Promise<void> {
     await sleep(TIMING.ack)
+    // 兜底终态走独立帧 message.bashAborted（msg-pipeline-debloat D4-3，与 runtime
+    // BashDispatcher.abortBash 同形）——原 bashResult{command:''} 哨兵形态已退役。
     emit(sessionId, {
-      type: 'message.bashResult',
-      payload: {
-        sessionId,
-        command: '',
-        output: '',
-        exitCode: null,
-        cancelled: true,
-        truncated: false,
-        excludeFromContext: false,
-        timestamp: Date.now(),
-      },
+      type: 'message.bashAborted',
+      payload: { sessionId, timestamp: Date.now() },
     })
   },
 
   /**
-   * steer：ack 后推 queue_update（steering 入队），延迟后模拟 drain（pi 投递：splice 移除 + emit）。
-   * 入队 → QueueBubble 渲染；drain → drainPending 取 segments + appendUser（complete user 进对话流）。
-   * drain 时机简化为固定延迟（真实 pi 在「当前回合工具调用结束后、下次 LLM 调用前」）。
+   * [投递所有权内核 u3b] 统一提交 mock：与 send 同流（ack + 流式序列），并广播一条
+   * session.delivery 快照帧（direct/in-flight）供前端投影/morph 链路在 mock 模式可见。
+   * 内核状态机不在 mock 层复刻（真实形态由 runtime 侧 u2/u3a 提供）——mock 只保证
+   * 「提交 → 快照帧 → 回执」三帧在 mock 模式可达。
    */
-  async steer(sessionId: string, text: string): Promise<void> {
+  async submitDelivery(
+    sessionId: string,
+    text: string,
+    clientUuid: string,
+    _images?: Array<{ data: string; mimeType: string }>,
+    _segments?: Segment[],
+  ): Promise<ServerMessageMap['delivery.submit']> {
+    cancelled.delete(sessionId)
     await sleep(TIMING.ack)
-    const q = mockQueues.get(sessionId) ?? { steering: [], followUp: [] }
-    q.steering.push(text)
-    mockQueues.set(sessionId, q)
-    emitQueueUpdate(sessionId)
-    // 延迟模拟 drain（投递后移除该项）+ 补发 assistant turn（m4：避免 dangling streaming bubble）
-    const t = setTimeout(() => {
-      const cur = mockQueues.get(sessionId)
-      if (!cur || cancelled.has(sessionId)) return
-      const idx = cur.steering.indexOf(text)
-      if (idx !== -1) cur.steering.splice(idx, 1)
-      emitQueueUpdate(sessionId)
-      void emitDrainAssistantTurn(sessionId, text)
-    }, TIMING.steerDrain)
-    timers.add(t)
+    emit(sessionId, {
+      type: 'session.delivery',
+      payload: {
+        sessionId,
+        entries: [{ clientUuid, preview: text.slice(0, DELIVERY_PREVIEW_MAX_CHARS), state: 'in-flight', lane: 'direct' }],
+      },
+    })
+    // 登记在飞条目（abort 终态帧依据）：流序列 settle（complete 或 cancelled 退出）即清，
+    // 避免流走完后 session 再 abort 被误补 failed 帧。
+    inflightDeliveryEntries.set(sessionId, { clientUuid, preview: text.slice(0, DELIVERY_PREVIEW_MAX_CHARS) })
+    // fire-and-forget 补 .catch 留痕（红线 1）：内部异常不落成无痕 unhandled rejection
+    void runSendStream(sessionId, text, {
+      nextId,
+      emit,
+      sleep,
+      pushSession,
+      isCancelled: (s) => cancelled.has(s),
+      TIMING,
+    })
+      .catch((e) => {
+        console.error('[mock] send stream failed:', e)
+      })
+      .finally(() => {
+        if (inflightDeliveryEntries.get(sessionId)?.clientUuid === clientUuid) {
+          inflightDeliveryEntries.delete(sessionId)
+        }
+      })
+    return { clientUuid, state: 'in-flight', lane: 'direct' }
   },
 
-  /** followUp：ack 后推 queue_update（followUp 入队），延迟后模拟 drain。语义同 steer。 */
-  async followUp(sessionId: string, text: string): Promise<void> {
+  /**
+   * [u5a 收编] cancel / drain / resync 三方法的 mock 实现（前身由 renderer 侧
+   * `api/domains/delivery.ts` 自建临时分支承担——core mock 缺方法致门面三元无法取自 mock，
+   * u5a 补齐后回归「门面只做 real/mock 切换」的既有范式）。
+   *
+   * 协议合法最小响应，**不伪造投递事实**：mock 无服务端内核（条目只由 submitDelivery 帧
+   * 产生，无收回语义），故——
+   * - cancel：cancelled=false → UI 走「已投递不可撤」文案（§3.4 合法分支），不谎报撤销成功、
+   *   不产生「草稿凭空回填」的假象；
+   * - drain：空条目集 → forceQuit 提示 N=0 不显示（与「队列本就没有条目」同形）；
+   * - resync：空去重集 → 无本地残留可去重。
+   */
+  async cancelDelivery(sessionId: string, clientUuid: string): Promise<ServerMessageMap['delivery.cancel']> {
     await sleep(TIMING.ack)
-    const q = mockQueues.get(sessionId) ?? { steering: [], followUp: [] }
-    q.followUp.push(text)
-    mockQueues.set(sessionId, q)
-    emitQueueUpdate(sessionId)
-    const t = setTimeout(() => {
-      const cur = mockQueues.get(sessionId)
-      if (!cur || cancelled.has(sessionId)) return
-      const idx = cur.followUp.indexOf(text)
-      if (idx !== -1) cur.followUp.splice(idx, 1)
-      emitQueueUpdate(sessionId)
-      void emitDrainAssistantTurn(sessionId, text)
-    }, TIMING.steerDrain)
-    timers.add(t)
+    return { clientUuid, cancelled: false, reason: `mock: no kernel backing for ${sessionId}` }
   },
+
+  async drainDelivery(sessionId: string): Promise<ServerMessageMap['delivery.drain']> {
+    await sleep(TIMING.ack)
+    return { sessionId, entries: [] }
+  },
+
+  async resyncDelivery(sessionId: string, _clientUuids: string[]): Promise<ServerMessageMap['delivery.resync']> {
+    await sleep(TIMING.ack)
+    return { sessionId, deduped: [] }
+  },
+
+  // [u5a/MF-1-8 退役] `steer` / `followUp` mock 镜像已删除（连同其 queue_update 镜像链，见上方注）：
+  // u3b 统一 submit 化后 core 编排零调用，u3c 后队列区数据源 = session.delivery 帧，本链
+  // 无任何消费方。协议侧 message.steer / message.follow_up 条目已随 runtime 通路删除同批退役。
 
   streamSubscribe(sessionId: string, handler: (msg: ServerMessageUnion) => void): () => void {
     let set = streamHandlers.get(sessionId)
@@ -996,6 +1086,15 @@ const providersSubWithScoped = makeMockSubscription(() => ({
 const skillsSub = makeMockSubscription(() => fixtureSkills.map((s) => ({ ...s })))
 const agentsSub = makeMockSubscription(() => fixtureAgents.map((a) => ({ ...a })))
 const defaultsSub = makeMockSubscription(() => 'Anthropic/claude-sonnet-4.5')
+
+/** 向 skills 订阅者广播最新 fixture 快照（模拟 runtime 动作后广播；同 broadcastProviders 先例） */
+function broadcastSkills(): void {
+  skillsSub.broadcast(fixtureSkills.map((s) => ({ ...s })))
+}
+/** 向 agents 订阅者广播最新 fixture 快照（同 broadcastProviders 先例） */
+function broadcastAgents(): void {
+  agentsSub.broadcast(fixtureAgents.map((a) => ({ ...a })))
+}
 
 // ADR-0021 §1 discovery 加载路径配置（v2 嵌套 project/global，UI 层 A 勾选/↑↓ 用）。
 // preset 直接引 shared SSOT（PRESET_*_DIRS），scope 按路径特征拆（相对→project / ~或/开头→global），
@@ -1174,6 +1273,8 @@ const configImpl = {
       }
     }
     broadcastProviders()
+    // 对齐 real reply 形状（config.providerUpdated 载荷消费型）：mock 不模拟额度自动开启
+    return {}
   },
   async deleteProvider(providerId: ProviderId) {
     await sleep(TIMING.ack)
@@ -1235,7 +1336,7 @@ const configImpl = {
   async scanSkills(_sources: string[]): Promise<ScannedSkillInfo[]> {
     await sleep(TIMING.ack)
     // 扫描后广播当前 skills 快照（runtime scan 后会刷新 config.skills）
-    skillsSub.broadcast(fixtureSkills.map((s) => ({ ...s })))
+    broadcastSkills()
     return []
   },
   // W2（ADR-0051）：按 session cwd 拉 project skill。mock 返回空（mock 模式无真实文件系统扫描）。
@@ -1258,24 +1359,24 @@ const configImpl = {
     await sleep(TIMING.ack)
     mockSkillDirs = dirs.map((d) => ({ ...d }))
     skillDirsSub.broadcast(buildMockDirConfigs(mockSkillDirs, PRESET_SKILL_DIRS_PROJECT, PRESET_SKILL_DIRS_GLOBAL).map((d) => ({ ...d })))
-    skillsSub.broadcast(fixtureSkills.map((s) => ({ ...s })))
+    broadcastSkills()
   },
   async setSkill(skill: SkillInfo) {
     await sleep(TIMING.ack)
     const idx = fixtureSkills.findIndex((s) => s.id === skill.id)
     if (idx >= 0) fixtureSkills[idx] = { ...skill }
-    skillsSub.broadcast(fixtureSkills.map((s) => ({ ...s })))
+    broadcastSkills()
   },
   async deleteSkill(skillId: string) {
     await sleep(TIMING.ack)
     const idx = fixtureSkills.findIndex((s) => s.id === skillId)
     if (idx >= 0) fixtureSkills.splice(idx, 1)
-    skillsSub.broadcast(fixtureSkills.map((s) => ({ ...s })))
+    broadcastSkills()
   },
   /** [G4 锚定 ConfigDomain] 返回类型补齐（同 scanSkills——real 返回 ScannedAgentInfo[]，mock 无扫描返回空） */
   async scanAgents(_sources: string[]): Promise<ScannedAgentInfo[]> {
     await sleep(TIMING.ack)
-    agentsSub.broadcast(fixtureAgents.map((a) => ({ ...a })))
+    broadcastAgents()
     return []
   },
   /**
@@ -1323,7 +1424,7 @@ const configImpl = {
     await sleep(TIMING.ack)
     mockAgentDirs = dirs.map((d) => ({ ...d }))
     agentDirsSub.broadcast(buildMockDirConfigs(mockAgentDirs, PRESET_AGENT_DIRS_PROJECT, PRESET_AGENT_DIRS_GLOBAL).map((d) => ({ ...d })))
-    agentsSub.broadcast(fixtureAgents.map((a) => ({ ...a })))
+    broadcastAgents()
   },
   /** Phase 4 目录级管道写入（v2 scope 穿越）：更新 mock extensionDirs + 广播目录配置（靠后端权威值推回） */
   async setExtensionDirs(dirs: SkillDirConfig[]) {
@@ -1335,13 +1436,13 @@ const configImpl = {
     await sleep(TIMING.ack)
     const idx = fixtureAgents.findIndex((a) => a.id === agent.id)
     if (idx >= 0) fixtureAgents[idx] = { ...agent }
-    agentsSub.broadcast(fixtureAgents.map((a) => ({ ...a })))
+    broadcastAgents()
   },
   async deleteAgent(agentId: string) {
     await sleep(TIMING.ack)
     const idx = fixtureAgents.findIndex((a) => a.id === agentId)
     if (idx >= 0) fixtureAgents.splice(idx, 1)
-    agentsSub.broadcast(fixtureAgents.map((a) => ({ ...a })))
+    broadcastAgents()
   },
   // ── 系统提示词配置（W6 FR-4/FR-5，与 real domains/config 同构）──
   // mock 持内存默认配置；setSystemPrompt 广播 config.systemPrompt，与 runtime 行为一致。
@@ -1436,12 +1537,17 @@ export const model: ModelDomain = modelImpl
 
 const extensionsSub = makeMockSubscription(() => fixtureExtensions.map((e) => ({ ...e })))
 
+/** 向 extensions 订阅者广播最新 fixture 快照（同 broadcastProviders 先例） */
+function broadcastExtensions(): void {
+  extensionsSub.broadcast(fixtureExtensions.map((e) => ({ ...e })))
+}
+
 export const extension = {
   onExtensions: (h: GlobalHandler<unknown>) => extensionsSub.subscribe(h),
   /** 主动重拉（对齐 runtime extension.list → 广播 config.extensions 刷新） */
   async scan() {
     await sleep(TIMING.ack)
-    extensionsSub.broadcast(fixtureExtensions.map((e) => ({ ...e })))
+    broadcastExtensions()
   },
   async toggle(name: string, enabled: boolean): Promise<{ extensions: ReturnType<typeof toCandidate>[] }> {
     await sleep(TIMING.ack)
@@ -1452,7 +1558,7 @@ export const extension = {
     // （toCandidate 覆盖 ExtensionInfo 必需字段，类型可赋给 Ref<ExtensionInfo[]>）。
     // broadcast 保留以模拟连接级 onExtensions 推送（幂等，值一致）。
     const snapshot = fixtureExtensions.map(toCandidate)
-    extensionsSub.broadcast(fixtureExtensions.map((e) => ({ ...e })))
+    broadcastExtensions()
     return { extensions: snapshot }
   },
   /**
@@ -1467,13 +1573,13 @@ export const extension = {
     if (!fixtureExtensions.some((e) => e.name === name)) {
       fixtureExtensions.push({ name, version: '0.0.0', description: `mock-installed: ${name}`, enabled: true, tools: [] })
     }
-    extensionsSub.broadcast(fixtureExtensions.map((e) => ({ ...e })))
+    broadcastExtensions()
   },
   async uninstall(name: string) {
     await sleep(TIMING.ack)
     const idx = fixtureExtensions.findIndex((e) => e.name === name)
     if (idx >= 0) fixtureExtensions.splice(idx, 1)
-    extensionsSub.broadcast(fixtureExtensions.map((e) => ({ ...e })))
+    broadcastExtensions()
   },
   /** dir/git 多步第一步：返回发现的候选（mock 把现有 fixture 当候选） */
   async installDir(_path: string) {
@@ -1487,7 +1593,7 @@ export const extension = {
   /** 多步第二步：选中即视为已装（mock 已在 fixture 中，仅广播刷新） */
   async finishInstall(_tempDir: string, _selected: string[]) {
     await sleep(TIMING.ack)
-    extensionsSub.broadcast(fixtureExtensions.map((e) => ({ ...e })))
+    broadcastExtensions()
   },
   async cancelInstall(_tempDir: string) {
     await sleep(TIMING.ack)
@@ -1603,6 +1709,24 @@ export const search = {
 /* ── Settings mock（对齐新契约：转发 config/extension 订阅 + 复用 real 的 localStorage 偏好）── */
 /* 必须在 config/extension 块之后（转发引用它们） */
 
+// [C3] system 设置项字段内存态（worktree / 自动重命名 / 智能上下文）：mock 无持久化，
+// get 返回当前内存值、set 写内存后回显生效值；real 侧这些字段同样无独立广播通道。
+const MOCK_WORKTREE_TIMEOUT_SECONDS = 60
+const mockWorktreePrefs = {
+  rootDir: '',
+  setupScript: '',
+  bareSetupScript: '',
+  timeout: MOCK_WORKTREE_TIMEOUT_SECONDS,
+  baseBranch: '',
+}
+const mockAutoRenamePrefs = { enabled: false, mode: 'first-stop' as RenameMode, model: '' }
+const mockSmartContextPrefs = {
+  enabled: false,
+  compactModel: '',
+  reminderThresholds: [] as number[],
+  excludedModels: [] as string[],
+}
+
 export const settings = {
   // 订阅（转发到 mock sub）
   onProviders: config.onProviders,
@@ -1614,6 +1738,92 @@ export const settings = {
   listProviders: config.listProviders,
   // 动作
   setProvider: config.setProvider,
+
+  // ── [C3] system 设置项字段（worktree）：内存态 fixture（不持久化）──
+  async getWorktreeRootDir(): Promise<ServerMessageMap['config.worktreeRootDir']> {
+    return { dir: mockWorktreePrefs.rootDir }
+  },
+  async setWorktreeRootDir(dir: string): Promise<ServerMessageMap['config.worktreeRootDir']> {
+    mockWorktreePrefs.rootDir = dir
+    return { dir }
+  },
+  async getSetupScript(): Promise<ServerMessageMap['config.setupScript']> {
+    return { script: mockWorktreePrefs.setupScript }
+  },
+  async setSetupScript(script: string): Promise<ServerMessageMap['config.setupScript']> {
+    mockWorktreePrefs.setupScript = script
+    return { script }
+  },
+  async getBareSetupScript(): Promise<ServerMessageMap['config.bareSetupScript']> {
+    return { script: mockWorktreePrefs.bareSetupScript }
+  },
+  async setBareSetupScript(script: string): Promise<ServerMessageMap['config.bareSetupScript']> {
+    mockWorktreePrefs.bareSetupScript = script
+    return { script }
+  },
+  async getWorktreeTimeout(): Promise<ServerMessageMap['config.worktreeTimeout']> {
+    return { timeout: mockWorktreePrefs.timeout }
+  },
+  async setWorktreeTimeout(timeout: number): Promise<ServerMessageMap['config.worktreeTimeout']> {
+    mockWorktreePrefs.timeout = timeout
+    return { timeout }
+  },
+  async getDefaultBaseBranch(): Promise<ServerMessageMap['config.defaultBaseBranch']> {
+    return { baseBranch: mockWorktreePrefs.baseBranch }
+  },
+  async setDefaultBaseBranch(baseBranch: string): Promise<ServerMessageMap['config.defaultBaseBranch']> {
+    mockWorktreePrefs.baseBranch = baseBranch
+    return { baseBranch }
+  },
+
+  // ── [C3] system 设置项字段（自动重命名）：内存态 fixture ──
+  async getAutoRenameEnabled(): Promise<ServerMessageMap['config.autoRenameEnabled']> {
+    return { enabled: mockAutoRenamePrefs.enabled }
+  },
+  async setAutoRenameEnabled(enabled: boolean): Promise<ServerMessageMap['config.autoRenameEnabled']> {
+    mockAutoRenamePrefs.enabled = enabled
+    return { enabled }
+  },
+  async getRenameMode(): Promise<ServerMessageMap['config.renameMode']> {
+    return { mode: mockAutoRenamePrefs.mode }
+  },
+  async setRenameMode(mode: RenameMode): Promise<ServerMessageMap['config.renameMode']> {
+    mockAutoRenamePrefs.mode = mode
+    return { mode }
+  },
+  async getRenameModel(): Promise<ServerMessageMap['config.renameModel']> {
+    return { model: mockAutoRenamePrefs.model }
+  },
+  async setRenameModel(model: string): Promise<ServerMessageMap['config.renameModel']> {
+    mockAutoRenamePrefs.model = model
+    return { model }
+  },
+
+  // ── [C3] system 设置项字段（智能上下文）：内存态 fixture ──
+  async getSmartContextConfig(): Promise<ServerMessageMap['config.smartContextConfig']> {
+    return {
+      enabled: mockSmartContextPrefs.enabled,
+      compactModel: mockSmartContextPrefs.compactModel,
+      reminderThresholds: [...mockSmartContextPrefs.reminderThresholds],
+      excludedModels: [...mockSmartContextPrefs.excludedModels],
+    }
+  },
+  async setSmartContextEnabled(enabled: boolean): Promise<ServerMessageMap['config.smartContextEnabled']> {
+    mockSmartContextPrefs.enabled = enabled
+    return { enabled }
+  },
+  async setSmartContextCompactModel(model: string): Promise<ServerMessageMap['config.smartContextCompactModel']> {
+    mockSmartContextPrefs.compactModel = model
+    return { model }
+  },
+  async setSmartContextThresholds(thresholds: number[]): Promise<ServerMessageMap['config.smartContextThresholds']> {
+    mockSmartContextPrefs.reminderThresholds = [...thresholds]
+    return { thresholds: [...thresholds] }
+  },
+  async setSmartContextExcludedModels(models: string[]): Promise<ServerMessageMap['config.smartContextExcludedModels']> {
+    mockSmartContextPrefs.excludedModels = [...models]
+    return { models: [...models] }
+  },
 }
 
 // Mock workspace domain（W3：最近工作区记录，mock 返回 3 条 records 供 E2E 验证）
@@ -1659,6 +1869,43 @@ const quotaImpl = {
 export type QuotaDomainParamsExact = AssertExact<DomainParamsExact<QuotaDomain, typeof quotaImpl>>
 export const quota: QuotaDomain = quotaImpl
 
+/* ── Usage mock（[C3] usage.getStats seam 收编配套：settings 页用量统计全 seam 可用）── */
+// mock 无 session JSONL 扫描，返回小型 fixture（2 条日级用量行）让 UsagePage 演示链路完整；
+// real 轨扫真实会话聚合。
+const MOCK_USAGE_INPUT_TOKENS = 12_000
+const MOCK_USAGE_OUTPUT_TOKENS = 3_400
+const MOCK_USAGE_CACHE_READ_TOKENS = 8_000
+const MOCK_USAGE_CACHE_WRITE_TOKENS = 500
+const MOCK_USAGE_COST_USD = 0.42
+const MOCK_USAGE_MESSAGES = 26
+const MOCK_USAGE_SESSION_COUNT = 2
+const usageImpl = {
+  async getUsageStats(): Promise<UsageStatsResult> {
+    await sleep(TIMING.ack)
+    const metrics = {
+      input: MOCK_USAGE_INPUT_TOKENS,
+      output: MOCK_USAGE_OUTPUT_TOKENS,
+      cacheRead: MOCK_USAGE_CACHE_READ_TOKENS,
+      cacheWrite: MOCK_USAGE_CACHE_WRITE_TOKENS,
+      costUSD: MOCK_USAGE_COST_USD,
+      messages: MOCK_USAGE_MESSAGES,
+    }
+    return {
+      rows: [
+        { ...metrics, date: '2026-09-24', provider: 'anthropic', model: 'claude-sonnet-4.5', project: 'mock-project' },
+        { ...metrics, date: '2026-09-23', provider: 'compaction', model: 'compaction', project: 'mock-project' },
+      ],
+      scannedAt: Date.now(),
+      sessionCount: MOCK_USAGE_SESSION_COUNT,
+      skippedLines: 0,
+    }
+  },
+}
+
+// [G4] 参数全等断言：mock usage 任一方法少参/多参/错型在此行编译失败
+export type UsageDomainParamsExact = AssertExact<DomainParamsExact<UsageDomain, typeof usageImpl>>
+export const usage: UsageDomain = usageImpl
+
 const workspaceImpl = {
   async listRecent(): Promise<import('@taiji/shared').RecentWorkspaceRecord[]> {
     return listRecentRecords()
@@ -1667,10 +1914,6 @@ const workspaceImpl = {
   async record(_cwd: string): Promise<import('@taiji/shared').RecentWorkspaceRecord[]> {
     // Mock record：模拟写入后返回最新列表（与 listRecent 一致，简化实现）
     return listRecentRecords()
-  },
-  // detectBare：mock 恒返非 bare（landing 态 isBare 演示由 real 轨驱动，mock 轨无需真实检测）
-  async detectBare(_cwd: string): Promise<{ isBare: boolean; wsRoot: string; barePath: string }> {
-    return { isBare: false, wsRoot: '', barePath: '' }
   },
   // detect：mock 恒返 not-repo（三态检测，real 轨驱动）
   async detect(_cwd: string): Promise<import('@taiji/shared').ServerMessageMap['workspace.detected']> {
@@ -1783,3 +2026,62 @@ const btwImpl = {
 // [G4] 参数全等断言：mock btw 任一方法少参/多参/错型在此行编译失败
 export type BtwDomainParamsExact = AssertExact<DomainParamsExact<BtwDomain, typeof btwImpl>>
 export const btw: BtwDomain = btwImpl
+
+// ── tts 域 mock（ai-voice-tts 设计 §7.5，M0）────────────────────────────────
+// 与 real 域同接口（门面三元要求两侧同构）。行为（设计 §7.5）：speak 恒以
+// tts_not_configured 失败（mock 无 runtime 合成链，错误路径驱动按钮/toast 状态机）；
+// getCapabilities 回 mock 内嵌静态演示数据（tts-data.ts 三家最小 TtsFormModel）；
+// getConfig/configure 持内存态（u4 保存/读取往返单测依赖 configure → getConfig 回读一致）。
+// taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：mock tts 配置态
+import { MOCK_TTS_FORMS, mockDefaultTtsConfig } from './tts-data'
+import type { SanitizedTtsConfig, TtsProviderId, TtsConfig } from '@taiji/shared'
+type MockTtsState = SanitizedTtsConfig
+const mockTtsState: MockTtsState = mockDefaultTtsConfig()
+
+const ttsImpl = {
+  /** 读脱敏配置投影：mock 内存态快照（深拷贝——调用方突变不污染 mock 态，fixture 惯例）。 */
+  async getConfig(): Promise<ServerMessageMap['tts.getConfig:result']> {
+    await sleep(TIMING.ack)
+    return { config: JSON.parse(JSON.stringify(mockTtsState)) as SanitizedTtsConfig }
+  },
+
+  /**
+   * 保存配置：更新内存态（providerId 条目 + activeProvider）后回脱敏投影。mock 不做
+   * runtime 写路校验（真实校验在 TtsService，ok 恒 true 与 quota mock「不模拟失败」口径一致）；
+   * apiKeys 语义照协议（字符串非空 = 写入、null/空串 = 清除、'from-provider' = 模拟联动带入成功）。
+   */
+  async configure(payload: realTtsDomain.TtsConfigurePayload): Promise<ServerMessageMap['tts.configure:result']> {
+    await sleep(TIMING.ack)
+    const entry = mockTtsState.providers[payload.providerId]
+    entry.config = JSON.parse(JSON.stringify(payload.config)) as TtsConfig
+    mockTtsState.activeProvider = payload.providerId
+    for (const [id, key] of Object.entries(payload.apiKeys ?? {})) {
+      const provider = id as TtsProviderId
+      const target = mockTtsState.providers[provider]
+      if (key === null || key === '') target.hasApiKey = false
+      else target.hasApiKey = true // 字符串写入 / 'from-provider'（mock 无凭据链，联动恒成功）
+    }
+    return { ok: true, config: JSON.parse(JSON.stringify(mockTtsState)) as SanitizedTtsConfig }
+  },
+
+  /** 拉三家表单投影：mock 内嵌静态演示数据（mock 本职 = 模拟 runtime，设计 §7.5）。 */
+  async getCapabilities(): Promise<ServerMessageMap['tts.getCapabilities:result']> {
+    await sleep(TIMING.ack)
+    return {
+      forms: JSON.parse(JSON.stringify(MOCK_TTS_FORMS)) as ServerMessageMap['tts.getCapabilities:result']['forms'],
+    }
+  },
+
+  /**
+   * mock 恒以 tts_not_configured 失败（与 real 轨「未配置」错误路径同形，供按钮/toast
+   * 状态机与错误码→i18n 映射在 mock 轨开发；真实合成链验收归 runtime 轨）。
+   */
+  async speak(_payload: { sessionId?: string; text: string }): Promise<ServerMessageMap['tts.speak:result']> {
+    await sleep(TIMING.ack)
+    throw Object.assign(new Error('Speech service is not configured (mock)'), { code: 'tts_not_configured' })
+  },
+}
+
+// [G4] 参数全等断言：mock tts 任一方法少参/多参/错型在此行编译失败
+export type TtsDomainParamsExact = AssertExact<DomainParamsExact<TtsDomain, typeof ttsImpl>>
+export const tts: TtsDomain = ttsImpl

@@ -3,7 +3,7 @@
 // 同构成败推导收敛到 execution-record.ts 的 deriveOutcome/projectOutcome（单一权威）。
 // 本文件锚定：① 权威函数行为；② core 侧消费方（execution/notify/notifier.ts buildLlmContent）
 // 源码不得写回手写同构 switch。
-// [u1-move 拆分] 壳侧消费方（interface/bg-notify-render.ts renderRecordLines）的守卫段
+// [u1-move 拆分] 壳侧消费方（interface/gui/bg-notify-render.ts renderRecordLines）的守卫段
 // 随壳件留守 pi extension 包：src/__tests__/derive-closed-display-parity-interface.test.ts。
 
 import { readFileSync } from "node:fs";

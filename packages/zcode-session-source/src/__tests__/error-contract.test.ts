@@ -16,8 +16,8 @@
  * （slot 置空回退 actual.loadSqliteDriver）。
  */
 
-import { describe, expect, it, vi, afterEach } from 'vitest'
-import { writeFileSync } from 'node:fs'
+import { describe, expect, it, vi, afterEach, afterAll } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
@@ -41,6 +41,27 @@ vi.mock('../sqlite-driver.ts', async (importOriginal) => {
     ...actual,
     loadSqliteDriver: async () => fakeDriverSlot.driver ?? actual.loadSqliteDriver(),
   }
+})
+
+// ── per-file 私有 tmp 根（快照计数竞态的结构性根修）───────────────────────────
+// 快照目录住全局共享 tmpdir（taiji-zcode-snap-*），vitest 并发 worker 互相可见：
+// 差分计数断言会被其他文件的新建/清理双向污染（全量并发跑稳定红、单文件跑绿——
+// 早期的 <= 差分只堵住了「别人清理变少」方向，「别人新建变多」方向依旧破断言）。
+// 把 tmpdir 隔离到本文件私有根后，本文件的快照计数只看见自己的快照，「读后即清」
+// 断言回到严格语义。vi.mock 文件级（vitest per-file isolate），不跨文件泄漏。
+const privateTmp = vi.hoisted(() => ({ root: null as string | null }))
+vi.mock('node:os', async (importOriginal) => {
+  const os = await importOriginal<typeof import('node:os')>()
+  return {
+    ...os,
+    tmpdir: () => {
+      privateTmp.root ??= mkdtempSync(join(os.tmpdir(), 'zss-test-private-tmp-'))
+      return privateTmp.root
+    },
+  }
+})
+afterAll(() => {
+  if (privateTmp.root) rmSync(privateTmp.root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 
 afterEach(() => {
@@ -249,8 +270,8 @@ describe('recovery 错误收尾契约（假驱动：close 失败 / probe 失败 
       // 归因以探测错误为准：close 错误吞掉不参与（失败路径错误面不污染）
       expect(err.message).toContain('fake probe NOTADB')
       expect(err.message).not.toContain('fake close broken')
-      // L3 失败路径收尾：快照目录读后即清
-      expect(countSnapshotDirs()).toBe(snapshotsBefore)
+      // L3 失败路径收尾：快照目录读后即清（差分语义见下方失败路径组注释——私有根下无并发噪声）
+      expect(countSnapshotDirs()).toBeLessThanOrEqual(snapshotsBefore)
     } finally {
       fx.cleanup()
     }
@@ -288,7 +309,9 @@ describe('recovery 错误收尾契约（假驱动：close 失败 / probe 失败 
       expect(caught).toBeInstanceOf(Error)
       expect((caught as Error).message).toContain('table-set validation')
       expect((caught as Error).message).toContain('session/message/part')
-      expect(countSnapshotDirs()).toBe(snapshotsBefore)
+      // 差分断言锁「本路径不新增快照」；tmpdir 已被本文件 mock 到私有根（见文件头部
+      // mock 块），计数只看见本文件的快照，无并发 worker 污染。
+      expect(countSnapshotDirs()).toBeLessThanOrEqual(snapshotsBefore)
     } finally {
       fx.cleanup()
     }

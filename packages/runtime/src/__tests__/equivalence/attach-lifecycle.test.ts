@@ -447,7 +447,7 @@ describe.skipIf(!FAUX_PI_READY)(
       // 无 CLI model 附着 → entry 终态生效；带 CLI model 附着 → CLI 压过 entry
       //（后者同时是差异归因对照：证明恢复差异源于 CLI flag 本身，而非附着其他副作用）。
       // faux 轨演员（L2.5 翻轨）：CLI 默认 = faux/faux-1（spawnPiFixture faux 通道强制），
-      // 切换目标 = 同 provider 兄弟 faux/faux-1-reasoning（原真实模型 mimo-v2.5 的
+      // 切换目标 = 同 provider 兄弟 faux/faux-1-reasoning（真实模型的
       // 确定性等价演员；被测优先级语义不变）。set_model 参数 = 裸 provider + 裸 modelId
       //（broadcast-getstate.test.ts 同款口径）
       const [defProvider, defModelId] = ['faux', 'faux-1']

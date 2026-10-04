@@ -1,12 +1,12 @@
 /**
  * extractor 读侧降级 warn 显形测试（code-harden RT-5#6）。
  *
- * 锁定三处 catch→null 降级不再静默（共享 utils/warn-once 的按 key 去重范式）：
- * - workflow-extractor：state 文件损坏/为空 → 该 run 从列表消失前 warn（含路径）；
+ * 锁定两处 catch→null 降级不再静默（共享 utils/warn-once 的按 key 去重范式）：
  * - history-rebuild-cache：segments.json sidecar 损坏 → 全降级占位文本前 warn；
  * - warn-once 去重：同 key 第二次降级不重复出声。
  * （subagent-extractor 的同款 warn 与前两处共用同一 helper；其链路级集成测试因 legacy
  * entries 构造成本未覆盖，由 utils/warn-once 单测保证机制。）
+ * （workflow-extractor 的 state 文件降级 warn 随 [ADR-0095] v1/legacy 读面删除一并移除。）
  *
  * 测试框架：vitest。运行：cd packages/runtime && npx vitest run src/services/session/__tests__/extractor-warn.test.ts
  */
@@ -15,7 +15,6 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { extractWorkflowsFromSessionFile } from '../workflow-extractor.js'
 import { SessionHistoryReader } from '../history-rebuild-cache.js'
 import { scanSubagentEntries } from '../subagent-extractor.js'
 import { getAttachmentsDir } from '@taiji/shared/paths'
@@ -36,53 +35,6 @@ beforeEach(() => {
 afterEach(() => {
   warnSpy.mockRestore()
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-})
-
-function stateLinkEntry(runId: string, path: string): string {
-  return JSON.stringify({
-    type: 'custom',
-    id: 'e1',
-    parentId: null,
-    timestamp: '2026-01-01T00:00:00Z',
-    customType: 'workflow-state-link',
-    data: { runId, path },
-  })
-}
-
-describe('workflow-extractor：state 文件降级 warn（RT-5#6）', () => {
-  it('损坏 JSON 的 state 文件 → run 不再列出前 warn（含路径），同路径去重', () => {
-    const statePath = join(dir, 'wf-state.jsonl')
-    writeFileSync(statePath, '{not-json', 'utf-8')
-    const jsonl = join(dir, 'session.jsonl')
-    writeFileSync(jsonl, `${stateLinkEntry('run-1', statePath)}\n`, 'utf-8')
-
-    const first = extractWorkflowsFromSessionFile(jsonl)
-    expect(first.records).toEqual([])
-    const msg = warnSpy.mock.calls.map((c) => String(c[0])).find((m) => m.includes('JSON parse failed'))
-    expect(msg).toBeDefined()
-    expect(msg).toContain(statePath)
-
-    // warn-once：同路径第二次降级不重复出声
-    warnSpy.mockClear()
-    extractWorkflowsFromSessionFile(jsonl)
-    expect(warnSpy.mock.calls.filter((c) => String(c[0]).includes('JSON parse failed'))).toHaveLength(0)
-  })
-
-  it('空 state 文件（rewrite mode 异常形态）→ warn；ENOENT（已清理）保持安静', () => {
-    const emptyState = join(dir, 'wf-empty.jsonl')
-    writeFileSync(emptyState, '', 'utf-8')
-    const jsonlEmpty = join(dir, 'session-empty.jsonl')
-    writeFileSync(jsonlEmpty, `${stateLinkEntry('run-2', emptyState)}\n`, 'utf-8')
-    extractWorkflowsFromSessionFile(jsonlEmpty)
-    expect(warnSpy.mock.calls.map((c) => String(c[0])).some((m) => m.includes('is empty'))).toBe(true)
-
-    // ENOENT：state 文件被清理链删除是常态，不告警
-    warnSpy.mockClear()
-    const jsonlGone = join(dir, 'session-gone.jsonl')
-    writeFileSync(jsonlGone, `${stateLinkEntry('run-3', join(dir, 'cleaned-up.jsonl'))}\n`, 'utf-8')
-    extractWorkflowsFromSessionFile(jsonlGone)
-    expect(warnSpy).not.toHaveBeenCalled()
-  })
 })
 
 describe('history-rebuild-cache：segments.json sidecar 降级 warn（RT-5#6）', () => {

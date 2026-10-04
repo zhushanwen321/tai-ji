@@ -15,8 +15,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { lintAgentMeta, lintScript } from "../script-lint.ts";
-import type { LintFinding } from "../script-lint.ts";
+import { lintAgentMeta, lintScript } from "../../shared/script-lint.ts";
+import type { LintFinding } from "../../shared/script-lint.ts";
 import { parseResourceMeta } from "../../shared/meta-parser.ts";
 
 const WORKFLOWS_DIR = join(__dirname, "../../../workflows");

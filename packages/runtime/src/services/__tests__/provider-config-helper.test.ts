@@ -23,7 +23,7 @@ import { TaijiProviderStore } from '../provider-extras-store.js'
 import { applyProviderWritePolicy, listProviders } from '../provider-config-helper.js'
 import { ProviderCredentialResolver } from '../auth/provider-credential-resolver.js'
 import type { IConfigStore } from '../ports/config.js'
-import type { AuthStorage } from '../auth/auth-storage.js'
+import type { AuthStorage, CredentialWriter } from '../auth/auth-storage.js'
 import type { IProviderCredentialResolver } from '../ports/provider-credential-resolver.js'
 
 type FullAuthPick = Pick<AuthStorage, 'remove' | 'hasOAuth' | 'hasOAuthSync' | 'set' | 'hasCredentialSync' | 'listCredentialIds'>
@@ -443,6 +443,7 @@ describe('M2b: listProviders 凭据判定走 resolver 批量 sync 版（链 5）
       hasProviderCredential: vi.fn(() => false),
       listCredentialBackedProviderIds: vi.fn(() => new Set(ids)),
       resolveProviderCredential: vi.fn(async () => undefined),
+      resolveProviderBaseUrl: vi.fn(() => undefined),
     }
     return resolver
   }
@@ -528,6 +529,7 @@ describe('M4: catalog 展示字段（网关优先 + 派生兜底）', () => {
     hasProviderCredential: () => false,
     listCredentialBackedProviderIds: () => new Set<string>(),
     resolveProviderCredential: async () => undefined,
+    resolveProviderBaseUrl: () => undefined,
   }
 
   /** 只读 store：providers 即 models.json 全量（catalog id 出现在其中即进入 catalog 聚合） */
@@ -627,6 +629,7 @@ describe('D12: 删除链 quota 清理（排序约束 + warn-only）', () => {
     hasProviderCredential: () => false,
     listCredentialBackedProviderIds: () => new Set<string>(),
     resolveProviderCredential: async () => undefined,
+    resolveProviderBaseUrl: () => undefined,
   }
 
   /** 真实 TaijiProviderStore（tmpdir providers.json）+ 最小 mock IConfigStore，走 ConfigService 删除链。 */
@@ -796,5 +799,123 @@ describe('U6① 模型 id 规则（id 类毒化收口：可强转则强转、不
     const result = applyProviderWritePolicy(merged, { name: 'p4' }, 'custom', 'settings', 'p4')
     expect(result.merged.models).toEqual([{ id: 'existing' }])
     expect(result.droppedModels).toBeUndefined()
+  })
+})
+
+describe('coding-plan 额度显示自动开启（新增即默认同意，quota-auto-enable）', () => {
+  /**
+   * setProvider 路径 harness：新建（getProviderConfig 恒 undefined）+ 真实 TaijiProviderStore
+   * （extras quota 落盘/读回断言走真文件）。hasWriter=false 模拟 credentialWriter 未注入
+   * （catalog apiKey 丢弃，M5-01）。
+   */
+  function makeAutoEnableService(opts: { hasWriter?: boolean; existing?: Record<string, unknown> } = {}) {
+    const upsertProvider = vi.fn((_providerId: string, _merged: Record<string, unknown>) => ({}))
+    const store = {
+      getProviderConfig: vi.fn(() => opts.existing),
+      applyTypeTranslation: vi.fn((t: string) => t),
+      upsertProvider,
+      ensureProviderInWhitelist: vi.fn(),
+      getEnabledModels: vi.fn(() => []),
+    } as unknown as IConfigStore
+    const extras = new TaijiProviderStore(extrasPath)
+    const svc = new ConfigService('/tmp/project', store, makeAuth(), extras)
+    if (opts.hasWriter !== false) {
+      svc.setCredentialWriter({ saveCredential: vi.fn().mockResolvedValue(undefined) } as unknown as CredentialWriter)
+    }
+    return { svc, extras }
+  }
+
+  /** 「不自动开启」标准腿：固定 zai-coding-cn 明文 setProvider → quotaAutoEnabled 与 quota extras 双 undefined 断言。 */
+  async function setPlainZaiAndExpectNoAutoEnable(svc: ConfigService, extras: TaijiProviderStore): Promise<void> {
+    const res = await svc.setProvider('zai-coding-cn', { name: 'Z.AI Coding CN', apiKey: 'sk-plain' })
+
+    expect(res.quotaAutoEnabled).toBeUndefined()
+    expect(extras.getExtrasSync('zai-coding-cn')?.quota).toBeUndefined()
+  }
+
+  it('quick-setup 形态 catalog 新建（明文 key，不回传模板 baseUrl）→ 写 quota { enabled, fetcher: zhipu }（模板身份匹配）', async () => {
+    const { svc, extras } = makeAutoEnableService()
+
+    const res = await svc.setProvider('zai-coding-cn', { name: 'Z.AI Coding CN', apiKey: 'sk-plain' })
+
+    expect(res.quotaAutoEnabled).toBe(true)
+    expect(extras.getExtrasSync('zai-coding-cn')?.quota).toEqual({ enabled: true, fetcher: 'zhipu' })
+  })
+
+  it('kimi-coding 新建 → fetcher 按模板 baseUrl 命中 kimi-coding preset', async () => {
+    const { svc, extras } = makeAutoEnableService()
+
+    const res = await svc.setProvider('kimi-coding', { name: 'Kimi For Coding', apiKey: 'sk-plain' })
+
+    expect(res.quotaAutoEnabled).toBe(true)
+    expect(extras.getExtrasSync('kimi-coding')?.quota).toEqual({ enabled: true, fetcher: 'kimi-coding' })
+  })
+
+  it('custom 新建（name/baseUrl 命中 api-key 类 preset + 明文 key）→ 自动开启', async () => {
+    const { svc, extras } = makeAutoEnableService()
+
+    const res = await svc.setProvider('my-glm-router', {
+      name: 'glm router',
+      baseUrl: 'https://my-router.example/v1',
+      apiKey: 'sk-plain',
+    })
+
+    expect(res.quotaAutoEnabled).toBe(true)
+    expect(extras.getExtrasSync('my-glm-router')?.quota).toEqual({ enabled: true, fetcher: 'zhipu' })
+  })
+
+  it('env 占位 key（$VAR）/ !command → 不自动开启（quota 凭证链不解占位）', async () => {
+    const a = makeAutoEnableService()
+    const resA = await a.svc.setProvider('zai-coding-cn', { name: 'Z.AI Coding CN', apiKey: '$MY_KEY' })
+    expect(resA.quotaAutoEnabled).toBeUndefined()
+    expect(a.extras.getExtrasSync('zai-coding-cn')?.quota).toBeUndefined()
+
+    const b = makeAutoEnableService()
+    const resB = await b.svc.setProvider('zai-coding-cn', { name: 'Z.AI Coding CN', apiKey: '!printenv KEY' })
+    expect(resB.quotaAutoEnabled).toBeUndefined()
+    expect(b.extras.getExtrasSync('zai-coding-cn')?.quota).toBeUndefined()
+  })
+
+  it('带前后空白的 env 占位串 → 不自动开启（isPlaintextCredential 函数内 trim 后仍命中 $ 前缀；调用点防线②只同视空串、不剥非空值空白）', async () => {
+    const { svc, extras } = makeAutoEnableService()
+
+    const res = await svc.setProvider('zai-coding-cn', { name: 'Z.AI Coding CN', apiKey: ' $MY_KEY ' })
+
+    expect(res.quotaAutoEnabled).toBeUndefined()
+    expect(extras.getExtrasSync('zai-coding-cn')?.quota).toBeUndefined()
+  })
+
+  it('cookie 类 preset（xiaomi-token-plan-cn → mimo）→ 不自动开启（无 cookie 可复用）', async () => {
+    const { svc, extras } = makeAutoEnableService()
+
+    const res = await svc.setProvider('xiaomi-token-plan-cn', { name: 'Xiaomi Token Plan CN', apiKey: 'sk-plain' })
+
+    expect(res.quotaAutoEnabled).toBeUndefined()
+    expect(extras.getExtrasSync('xiaomi-token-plan-cn')?.quota).toBeUndefined()
+  })
+
+  it('用户已有 enabled 决定（手动关闭）→ 不覆盖不复活', async () => {
+    const { svc, extras } = makeAutoEnableService()
+    await extras.modify('zai-coding-cn', current => ({
+      ...current,
+      quota: { enabled: false, fetcher: 'zhipu' },
+    }))
+
+    const res = await svc.setProvider('zai-coding-cn', { name: 'Z.AI Coding CN', apiKey: 'sk-plain' })
+
+    expect(res.quotaAutoEnabled).toBeUndefined()
+    expect(extras.getExtrasSync('zai-coding-cn')?.quota).toEqual({ enabled: false, fetcher: 'zhipu' })
+  })
+
+  it('编辑既有条目（非新建）→ 不自动开启（只对新增生效）', async () => {
+    const { svc, extras } = makeAutoEnableService({ existing: { name: 'Z.AI Coding CN' } })
+
+    await setPlainZaiAndExpectNoAutoEnable(svc, extras)
+  })
+
+  it('catalog + credentialWriter 未注入（apiKey 被丢弃，M5-01）→ 不自动开启（无凭证可用只会有 no-credential）', async () => {
+    const { svc, extras } = makeAutoEnableService({ hasWriter: false })
+
+    await setPlainZaiAndExpectNoAutoEnable(svc, extras)
   })
 })

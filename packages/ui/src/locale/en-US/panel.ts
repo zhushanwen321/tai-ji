@@ -53,13 +53,12 @@ export default {
     send: 'Send',
     stop: 'Stop',
     queueSend: 'Queue to send',
-    commandQueuedRejected: 'Session busy, commands are disabled until it is free',
     sending: 'Sending…',
     sendBusy: 'Session is busy, please wait before sending',
     sendEmptyHint: 'Type something before sending',
     sendHint: 'Type and send',
-    steerHint: 'Add to current task with ⏎ · Queue for next turn with Alt+⏎…',
-    inputHint: 'Describe what you want AI to do, or # file, / command…',
+    steerHint: 'Add to current task with ⏎ · Queue for next turn with Alt+⏎ · Shift+⏎ newline…',
+    inputHint: 'Describe what you want AI to do… (/ command · $ file · # session · {\'@\'} subagent · ! bash · Shift+⏎ newline · ↑/↓ history · Shift+Tab thinking · Ctrl+P/Ctrl+Shift+P model)',
     addContent: 'Add content (attachment / command)',
     attach: 'Attachment',
     image: 'Image',
@@ -71,7 +70,6 @@ export default {
     handoffHint: 'Enter text to send as the first message in the new session (optional)… (⏎ handoff & send, Esc to exit)',
     handoffChip: 'Hand off to new session · your input goes to the new session',
     handoffSend: 'Hand off & send to new session',
-    handoffBusy: 'Reply in progress — wait for it to finish or stop it before handing off',
     handoffExit: 'Exit handoff mode',
     bashPlaceholder: 'Run bash command… (!! prefix excludes from context)',
     // Composer shortcut action table copy feedback (composer-pi-shortcuts decision 4 / §3.5)
@@ -113,6 +111,9 @@ export default {
     handoffFailed: 'Handoff failed: {error}',
     handoffAbortFailed: 'Abort handoff failed: {error}. Handoff is still running.',
     editReplace: 'Edit (replace and resend)',
+    // [U5 message revoke D6 / D2 side ruling] revoke button tooltips (default + generating-disabled)
+    revoke: 'Revoke (back to before sending, text restored to draft)',
+    revokeGenerating: 'Generating — stop the turn to revoke',
     editAfterReplace: 'Edit then replace and resend',
     cancel: 'Cancel',
     viewCommandDoc: 'View command docs',
@@ -189,6 +190,20 @@ export default {
     // in-row observation of the run after the command moved to the hover detail
     executingBashElapsed: '{elapsed} elapsed',
     // no hardcoded threshold — user-adjustable, a literal would drift)
+    // ── Speech reading (ai-voice-tts; key consumers = useTtsPlayer + TurnSummary button states) ──
+    // Toast wording mirrors design §5.4 failure table; four title keys = speak button state machine (design §5.1).
+    speakTitle: 'Read aloud',
+    speakCancel: 'Cancel',
+    speakStop: 'Stop',
+    speakStreaming: 'Reply is still generating',
+    speakEmpty: 'No readable text',
+    speakTooLong: 'Text too long ({count} chars), reading not supported yet',
+    speakNotConfigured: 'Speech service not configured',
+    speakAuthFailed: 'Speech service authentication failed',
+    speakQuotaExceeded: 'Speech synthesis quota exhausted',
+    speakVendorError: 'Speech synthesis failed: {detail}',
+    speakNetworkError: 'Speech synthesis request failed: network error',
+    speakFailed: 'Reading failed, please retry later',
   },
   git: {
     commit: 'Commit',
@@ -208,6 +223,8 @@ export default {
     unavailableTitle: 'Git unavailable, repository status cannot be read',
   },
   context: {
+    // Metrics aggregate entry (W3a single-icon button; hover opens the capacity/speed/cache aggregate page) title
+    metricsAggregateTitle: 'Metrics',
     capacity: 'Context capacity',
     used: 'Used',
     total: 'Total',
@@ -311,8 +328,6 @@ export default {
     subagentNoOutcome: '(no outcome recorded)',
     engineBadgeTitle: 'Engine: {engine}',
     subagentStopReason: 'Why the last round stopped (display only)',
-    engineFallbackBadge: 'Requested {from} → fell back to {to}',
-    engineFallbackHint: 'Engine {from} probe failed and fell back to {to}; fix {from} and start a new session to retry',
     backToWorkflow: 'Back to workflow',
     subagentLoadFailed: 'Load failed',
     subagentRetry: 'Retry',
@@ -398,6 +413,8 @@ export default {
     searchPlaceholder: 'Search models…',
     noMatch: 'No matching models',
     placeholder: '\u2026',
+    // Model + thinking aggregate entry (W3a single-icon button; click opens model list + thinking levels) title
+    modelThinkingAggregateTitle: 'Model · Thinking',
   },
   thinkingLevel: {
     title: 'Thinking level',
@@ -437,19 +454,25 @@ export default {
     loading: 'Loading',
     noMatches: 'No matches',
   },
-  deferQueue: {
+  queueBubble: {
     pendingHint: 'Will be sent when the session is free',
     // [D1] occupancy-typed hover hints (long bash occupation makes "what ends" actionable)
     pendingHintCompacting: 'Will be sent after context compaction completes',
     pendingHintBash: 'Will be sent after the command finishes',
     pendingHintSettling: 'Will be sent after the current turn ends',
+    // Kernel entry state labels (G3: every undelivered message has an explicit shape + state)
+    stateQueued: 'Queued',
+    stateInFlight: 'Sending',
+    stateFailed: 'Failed',
     cancelQueued: 'Cancel queued message',
-    chipBadge: '+{count}',
-    chipBadgeHint: 'Contains {count} attachment/reference chip(s), sent along with the message',
-    // [compact-defer-composer-queue u1] defer row occupancy chip (After compact / After command / Later)
-    deferChipCompacting: 'After compact',
-    deferChipBash: 'After command',
-    deferChipFallback: 'Later',
+    cancelUnavailable: 'Already delivered — cannot be cancelled',
+    cancelUnavailableWithReason: 'Cannot cancel: {reason}',
+    cancelFailed: 'Cancel failed: {msg}',
+    // Post-cancel draft-restore failure variants (each failure domain gets its own copy: RPC vs restore vs missing text)
+    restoreDraftFailed: 'Cancelled, but restoring to the composer failed: {msg}',
+    restoreContentMissing: 'Message cancelled, but its original text could not be recovered — please re-enter it',
+    retry: 'Retry sending',
+    retryFailed: 'Retry failed: {msg}',
   },
   contextChips: {
     removeFromContext: 'Remove from context',

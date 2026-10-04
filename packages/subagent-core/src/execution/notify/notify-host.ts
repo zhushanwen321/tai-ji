@@ -5,13 +5,16 @@
 // 注销协议，只改本文件；Service 只保留编排与依赖注入（getPi / listRunning / isIdle）。
 
 import { displayAgentName } from "../../shared/agent-ref.ts";
-import { snapshot } from "../persistence/execution-record.ts";
+import { isLegacyClosedSettled, snapshot } from "../persistence/execution-record.ts";
 import { hasIdleTimer } from "../lifecycle/lifecycle-manager.ts";
 import { hasLiveProcessHandle, hasArmedIdleTimer, isResumable } from "../lifecycle/lifecycle-predicates.ts";
+// [§1.4 (b)] pi 通知通道 best-effort 执行（stale 分诊 + 留痕不冒泡）。
+import { bestEffortPiCall } from "../assembly/best-effort.ts";
 import type { BgNotifier, NotifierHost } from "./notifier.ts";
 import { createNotifier } from "./notifier.ts";
 import type { BgNotifyRecord } from "./notifier.ts";
-import type { ExecutionRecord, RecordSnapshot } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { RecordSnapshot } from "../assembly/types.ts";
 
 /** Pi ExtensionAPI 的最小接口（duck-typed）——原定义于 subagent-service.ts，随通知簇
  *  （piAdapter / emitPending* 的依赖）搬移至此并导出（Service 的 session 注入参数仍引用）。
@@ -65,12 +68,17 @@ export interface NotifyHost {
 
 /** pending-notifications 注册/注销 helper（避免重复代码）。
  *  name 是 GUI pending 通知的显示名——取 basename 短名（displayAgentName），
- *  完整路径仍走 record.agent（env 注入 / 持久化）。 */
+ *  完整路径仍走 record.agent（env 注入 / 持久化）。
+ *  [§1.4 (b)] emit 经 bestEffortPiCall 包装：可选链只防 null 不防 stale（会话替换窗内
+ *  旧句柄每个方法 assertActive 抛错，PS-30）——stale 抛错留痕（warn 一次）不冒泡，
+ *  不得升格为未处理 promise 拒绝（pi rpc 模式无未处理拒绝处理器，Node 默认 exit 1）。 */
 function emitPendingRegister(pi: PiLike | null, id: string, name?: string): void {
-  pi?.events.emit("pending:register", {
-    id,
-    type: "subagent",
-    name: name ? displayAgentName(name) : id,
+  bestEffortPiCall(pi, "pending:register emit", (active) => {
+    active.events.emit("pending:register", {
+      id,
+      type: "subagent",
+      name: name ? displayAgentName(name) : id,
+    });
   });
 }
 
@@ -79,9 +87,11 @@ function emitPendingUnregister(
   id: string,
   reason: string,
 ): void {
-  pi?.events.emit("pending:unregister", {
-    id,
-    reason,
+  bestEffortPiCall(pi, `pending:unregister emit (id=${id})`, (active) => {
+    active.events.emit("pending:unregister", {
+      id,
+      reason,
+    });
   });
 }
 
@@ -92,7 +102,10 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
   const piAdapter = (): NotifierHost => {
     return {
       sendMessage: (message, options) => {
-        deps.getPi()?.sendMessage(message, options);
+        // [§1.4 (b)] best-effort：stale pi 抛错留痕不冒泡（§1.4 (b) 同款理由）。
+        bestEffortPiCall(deps.getPi(), "notifier sendMessage", (active) => {
+          active.sendMessage(message, options);
+        });
       },
       hasRunningBackground: () => {
         // [M3] 「在跑的 background 工作」= 有活进程且非等待续聊（idle timer armed）。
@@ -107,7 +120,12 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
       isIdle: () => deps.getIsIdle()?.() ?? true,
       // [must-fix #4 / D8] settled 边沿订阅，与 isIdle 同源（session_start 注入的 pi）。
       // 只注入原生订阅能力；disposed 标志包装（退订语义）在 notifier 的 port 装配完成。
-      onAgentSettled: (handler) => { deps.getPi()?.on?.("agent_settled", handler); },
+      // [§1.4 (b)] best-effort：stale pi 抛错留痕不冒泡。
+      onAgentSettled: (handler) => {
+        bestEffortPiCall(deps.getPi(), "agent_settled subscribe", (active) => {
+          active.on?.("agent_settled", handler);
+        });
+      },
     };
   };
 
@@ -132,11 +150,11 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
     // adopt 豁免对 workflow record 零触发。
     if (record.origin === "workflow") return undefined;
     const snap = snapshot(record);
-    // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态状态机
-    // 迁移不变量）。[U5] 新 settle 路径（markSettled/markRoundIdle）产的 idle/resumable
+    // [W2/V3 D5 桥接判据收敛] 旧「closed 终态」读形态 ⟺ isLegacyClosedSettled（唯一
+    // 权威谓词，execution-record.ts）。[U5] 新 settle 路径（markSettled/markRoundIdle）产的 idle/resumable
     // 不携带 closedReason——gate 三元组（notifier.notifyGateAllowsDelivery）在消费点
     // 承担归档静默/放弃轮标记阻断，本映射只管载荷形态。
-    const legacyClosed = record.status === "idle" && record.closedReason !== undefined;
+    const legacyClosed = isLegacyClosedSettled(record);
     // [N1] isResumable 放行：SP-5 one-shot 成功完成后 markRoundIdle 收口——失败轮
     // settle 同形态（[U5] 万物可续），失败通知可达。在跑轮的 record 有活进程，不会被
     // 误放行。

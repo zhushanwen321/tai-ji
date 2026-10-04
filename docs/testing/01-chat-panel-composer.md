@@ -39,7 +39,8 @@ testid 以组件 template 内 `data-testid` / `test-id` 属性为准（下表为
 
 | testid | 所在组件 | 触发/可见条件 |
 |--------|---------|--------------|
-| `new-task-landing` | Landing.vue | Landing 态恒显 |
+| `new-task-landing` | Landing.vue | Landing 态恒显（根容器；首发提交创建中仍在场，内容态被 v-show 隐藏） |
+| `new-task-creating` | Landing.vue | 仅首发提交创建中（`flow.isInflight=true`）显示——跳转先行过渡视图（perf-landing） |
 | `chip-directory` | Landing.vue | Landing 态恒显（directory chip 行） |
 | `chip-branch` | Landing.vue | 仅 git 目录（`gitInfo != null`）显示 |
 | `retry-history` | Landing.vue | 仅 `historyError=true`（getHistory 失败）时显示 |
@@ -54,6 +55,7 @@ testid 以组件 template 内 `data-testid` / `test-id` 属性为准（下表为
 | `branch-name-error` | CreateBranchModal.vue | 新建分支名校验错误 |
 | `submit-btn` | CreateBranchModal.vue | 新建分支提交按钮 |
 | `composer-box` | Composer.vue | composer 容器（Landing + Panel 态都有） |
+| `msg-revoke-button` | packages/ui `UserBubble.vue` | hover user 气泡显示；生成中 `aria-disabled=true` + title「生成中，停止后可撤回」（消息撤回，ADR-0076） |
 
 ## 4. 状态机（useNewTaskFlow）
 
@@ -117,7 +119,7 @@ cd packages/renderer && npx vitest run src/__tests__/new-task/
 - `startFlow()` 后 `state.value === 'landing'`，`currentSessionId.value === null`（延迟 create）
 - `selectWorkspace(cwd)` 只更新 `pendingCwd`，不调 `sessionApi.create`
 - `submitFirstMessage(text)` 调用链：`sessionApi.create(cwd)` → `session.appendSession` → `session.activeId =` → `panel.loadSession` → `chat.send` → `transition('completed')`
-- 双击并发守卫：`createInFlight` 防止 create 调两次
+- 双击并发检查：`createInFlight` 防止 create 调两次
 
 ### 5.3 集成测试如何 mock
 
@@ -170,6 +172,7 @@ pnpm dev
 | E2E-NT-2：点 directory chip 弹出选目录浮层 | `dir-select-popover` / `workspace-item` | popover 可见，含工作区项 |
 | E2E-NT-3：选目录后 chip 回灌 | `chip-directory` 含目录名文本 | 文本从「选择目录」变为目录名 |
 | E2E-NT-4：首发提交进入对话流 | `new-task-landing` 消失，MessageStream 出现 | Landing 不再可见，对话流可见 |
+| E2E-NT-5：首发提交跳转先行（perf-landing） | 点击同帧 `new-task-creating` 出现（创建中过渡视图），create 完成后 Landing 卸载 | 点击后立即离开 landing 内容态，不等 pi boot（warm ~1.6s / cold ~4.2s） |
 
 ### 7.2 完整 E2E 示例代码
 
@@ -208,7 +211,7 @@ test.describe('新建任务 E2E', () => {
     // 若点 .first()（sample-project），与预填 cwd 相同 → selectWorkspace 走 noop 分支
     //（useNewTaskFlow：cwd===currentCwd 仅关 popover 不改 chip）→ 测不出回灌。
     // 故点 .nth(1)（第 2 个，fixtureSessions 去 cwd 重后 = taiji，s1/s2/s5 的 cwd
-    // ~/Code/taiji 末段）。
+    // <家目录>/Code/taiji 末段）。
     await page.getByTestId('chip-directory').click()
     await expect(page.getByTestId('dir-select-popover')).toBeVisible({ timeout: 5_000 })
     // 点第 2 个工作区（非预填的 sample-project）
@@ -261,7 +264,7 @@ test.describe('新建任务 E2E', () => {
 |------|------|---------|--------|
 | 选目录后取消 | 点 directory chip → ESC 关 popover → cwd 不变 | E2E（popover 关闭断言） | 中 |
 | OS dialog 路径 | `action-open-dir` → Electron `dialog.showOpenDialog` | `[需手工]`（OS 原生 dialog 无法自动化） | 中 |
-| 并发守卫 | 双击发送按钮 → `createInFlight` 防 create 调两次 | 集成测试（flow-integration.test.ts 已覆盖），E2E 难模拟快速双击 | 低 |
+| 并发检查 | 双击发送按钮 → `createInFlight` 防 create 调两次 | 集成测试（flow-integration.test.ts 已覆盖），E2E 难模拟快速双击 | 低 |
 | 非 git 目录 branch chip 隐藏 | 选非 git 目录 → `chip-branch` 不渲染 | E2E（需 fixture 非 git 工作区） | 中 |
 | create 失败恢复 | `session.create` reject → 草稿恢复 + state 留 landing | 集成测试（flow-integration.test.ts E2/E3 已覆盖），mock 不模拟失败 | 低 |
 | 重试历史 | `historyError=true` → `retry-history` 按钮可见 + 点击重试 | E2E（需触发 getHistory 失败，mock 难造） | 低 |
@@ -317,23 +320,24 @@ testid 以组件 template 内 data-testid 属性为准。
 | testid | 触发/可见条件 |
 |--------|--------------|
 | `composer-box` | 恒显（composer 容器） |
-| *(密度类)* | 见 §3.1 单点登记（`composer-bar` / `composer-overflow-menu` / `composer-capacity-merged` / `composer-model-merged`）；本表不重复登记，避免两处漂移 |
+| *(密度类)* | 见 §3.1 单点登记（`composer-bar` / `composer-metrics-aggregate` / `composer-model-thinking-aggregate`）；本表不重复登记，避免两处漂移 |
 | `composer-mode-chip` / `composer-handoff-chip` | 仅 fork / handoff staging 态（与「模式」概念无关，是 staging chip 的历史命名） |
 | `fork-send-btn` / `handoff-send-btn` | staging 态发送位 |
 
 ### 3.1 底栏密度 / 任务托盘 / 模式可见性 testid（u6 / u4 / u5 落地）
 
-> 覆盖决策：模式体系设计 D5（可见性）/ D6（密度）/ D7（托盘第 4 件）。组件：`Composer.vue` · `packages/renderer/src/components/panel/composer-density.ts`（纯状态机）· `packages/renderer/src/components/panel/tray/ComposerTray.vue` · `packages/renderer/src/components/panel/PresetChip.vue` · `packages/renderer/src/components/panel/ModeDeclarationRow.vue`。
+> 覆盖决策：模式体系设计 D5（可见性）/ D6（密度，**2026-09-25 修订为「三步聚合 + 锚点保护」**：640/520 tier 轴、`»` 溢出菜单、88/56px 模型名截断、simplified/iconic 中间态全部退役）/ D7（托盘第 4 件）。组件：`Composer.vue` · `packages/renderer/src/components/panel/composer-density.ts`（纯状态机）· `packages/renderer/src/components/panel/tray/use-composer-bar-density.ts`（实测回路）· `packages/renderer/src/components/panel/ComposerMetricsAggregate.vue` · `packages/renderer/src/components/panel/ModelThinkingAggregate.vue` · `packages/renderer/src/components/panel/tray/ComposerTray.vue` · `packages/renderer/src/components/panel/PresetChip.vue` · `packages/renderer/src/components/panel/ModeDeclarationRow.vue`。
 
-**底栏三簇 + 按序退化 + 溢出菜单**：
+**底栏三簇 + 三步聚合 + 锚点保护**：
 
 > **btw 按钮密度登记（2026-09-22 btw-question）**：`COMPOSER_BTW_BUTTON_DEGRADATION_ORDER = 0`（序 0 不退化，三档常驻——badge 是后台回复唯一通知载体），守护测试 = `composer-bar-density-wiring` 三档常驻断言；落点 `tray/use-composer-bar-density.ts`，未动纯状态机 `composer-density.ts`。
 
 | testid | 所在组件 | 触发/可见条件 |
 |--------|---------|--------------|
-| `composer-bar` | Composer.vue | 恒显；容器 `flex-nowrap`（永不换行） |
-| `composer-overflow-menu` | Composer.vue | 序 3 生效且有被收起项（零贡献插件 toolbar 时不渲染，不留死入口） |
-| `composer-capacity-merged` / `composer-model-merged` | Composer.vue | 序 1 / 序 2 合流态（`density.slots.* === 'merged'`） |
+| `composer-bar` | Composer.vue | 恒显；容器 `flex-nowrap`（永不换行）；`data-fit`（0–3）/ `data-anchor-protected` / `data-slot-left-cluster` / `data-slot-metrics` / `data-slot-model-thinking` 与状态机输出同步（形态断言首选用 data 属性） |
+| `composer-metrics-aggregate` | ComposerMetricsAggregate.vue | 序 2 生效（`data-slot-metrics === 'aggregated'`，实测指标放不下）；单图标指标聚合按钮（hover 弹聚合页） |
+| `composer-model-thinking-aggregate` | ModelThinkingAggregate.vue | 序 3 生效（`data-slot-model-thinking === 'aggregated'`，实测完整模型名+档位放不下）；单图标模型聚合按钮（click 弹层，hover 行内切换） |
+| [HISTORICAL] `composer-overflow-menu` / `composer-overflow-capacity-metrics` / `composer-capacity-merged` / `composer-model-merged` | — | 已随三步聚合退役（`»` 入口与合流/截断态删除，2026-09-25）——存量测试/脚本再遇这些 id 即为旧代码 |
 
 **任务托盘（built-in 四件 + 协议 widget 区）**：
 
@@ -342,7 +346,7 @@ testid 以组件 template 内 data-testid 属性为准。
 | `composer-tray` | 有 sessionId（panel 态）；landing 态不渲染 |
 | `tray-builtin-button` | built-in 每件一个（`data-kind` = `bash` / `subagent` / `workflow` / `session`，`data-state` = `running` / `idle`） |
 | `tray-builtin-pulse` / `tray-builtin-count` | 该类有进行中（`running > 0`）才渲染（归零不虚亮） |
-| `tray-aggregate-button` | 序 4 生效（`<520px`）且托盘有条目（`hasTrayItems`）；聚合入口 = 层叠图标 + 运行数 |
+| `tray-aggregate-button` | fit L1 生效（实测左簇放不下，`data-slot-left-cluster === 'aggregated'`）且（托盘有条目 或 插件 toolbar 有贡献）；聚合入口 = **单图标** + 运行数数字角标（禁多 icon 重叠） |
 | `tray-aggregate-pulse` / `tray-aggregate-count` | 聚合态且有运行中 |
 | `tray-aggregate-panel` / `tray-aggregate-section-{kind}` / `tray-aggregate-count-{kind}` | 聚合面板内分段展示全部类别 |
 | `tray-session-panel` / `tray-session-header` / `tray-session-row` / `tray-session-dot` / `tray-session-meta` / `tray-session-empty` | 第 4 件「子会话」面板（扁平列表，非分桶槽）：数据 = `parentAgentSessionId === 当前 sessionId`；行内操作仅 pin 态（打开 / 停止两段确认，停止 testid = `tray-session-stop` 与确认态 `tray-session-stop-confirm`） |
@@ -723,8 +727,8 @@ testid 以组件 template 内 data-testid 属性为准。对话流相关已落�
 
 ```
 Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑定，不读全局 session.activeId，防 standby panel 串台）
-  ├─ 守卫1: segmentsToPrompt(segments).trim() 空 → return
-  ├─ 守卫2: chat.isActive(sid) === true → 自动转 steer(sid, segments)（busy 时追加上下文，不丢弃）
+  ├─ 检查1: segmentsToPrompt(segments).trim() 空 → return
+  ├─ 检查2（投递所有权内核 D1）：不再本地判车道——统一乐观气泡 + delivery.submit，lane 判定在 runtime 内核（busy 期由内核 queued/steer 承接，气泡按 session.delivery 帧 lane morph 为队列条目）
   ├─ chat.appendUser(sid, segments)           ← 立即写 user 消息；返回 clientUuid（segments 数组 + clientUuid↔pi 映射 + inflight 占位挂钩）
   ├─ ensureStreamSubscription(sid, chat)     ← 幂等：首次订阅，二次 no-op
   │    └─ chatApi.streamSubscribe(sid, handler)
@@ -733,7 +737,7 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
   │           + 按类型翻转 isStreaming:
   │             message.message_start → setStreaming(true)
   │             message.complete / error / stream_error → setStreaming(false)
-  └─ await chatApi.send(sid, promptText)      ← ack（pi 已接收，非生成完成）
+  └─ await chatApi.submitDelivery(sid, content, clientUuid, images?)   ← 受理回执（reply 携带初始 lane + 条目态；送达由 message_end(user) 裸标记回执照会，状态演进经 session.delivery 帧）
 ```
 
 ### 4.2 关键设计点（[HISTORICAL]）
@@ -748,8 +752,8 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
 |------|------|------|
 | `chat.appendUser(sid, segments)` | `(sid, segments: Segment[])` | messages Map[sid] 追加 `{id:'u-{uuid}', role:'user', status:'complete'}`；返回 clientUuid |
 | `chatApi.streamSubscribe(sid, handler)` | `(sid, handler)` | 返回 unsub 函数；handler 接收 ServerMessage |
-| `chatApi.send(sid, text)` | `(sid, text)` | `Promise<void>`（ack 即 resolve） |
-| mock `chat.send` | `(sid, text)` | sleep(40ms) → resolve；同时 `void runSendStream(...)` fire-and-forget |
+| `chatApi.submitDelivery(sid, content, clientUuid, images?)` | `(sid, content, clientUuid, images?)` | `Promise<DeliverySubmitReply>`（受理回执：初始 lane + 条目态） |
+| mock `chat.submitDelivery` | 同上 | sleep(40ms) → 协议合法最小响应；同时 `void runSendStream(...)` fire-and-forget |
 
 ## 5. ServerMessage 类型表（流式 chunk）
 
@@ -757,7 +761,7 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
 
 | type | payload 关键字段 | 前端处理 |
 |------|----------------|---------|
-| `message.message_start` | `{ sessionId, messageId }` | 新建 streaming assistant（status:'streaming', content=''）；G-023 条件清 queueState（仅快照深度==0 才清 + 同点僵尸清理；快照是腿 2 includes 判据源） |
+| `message.message_start` | `{ sessionId, messageId }` | 新建 streaming assistant（status:'streaming', content=''）；无队列区副作用（队列区数据源 = `session.delivery` 内核状态帧，queueStates 分区已退役） |
 | `message.text_delta` | `{ sessionId, delta }` | content += delta（追加最后 assistant） |
 | `message.thinking_start` | `{ sessionId, thinkingId }` | 追加 ThinkingBlock（content:'', collapsed:true） |
 | `message.thinking_delta` | `{ sessionId, delta }` | 追加最后 ThinkingBlock.content |
@@ -765,7 +769,7 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
 | `message.tool_call_start` | `{ sessionId, toolCallId, toolName, input }` | 追加 ToolCall（status:'running'） |
 | `message.tool_call_end` | `{ sessionId, toolCallId, output, status, error }` | **按 toolCallId 锚定**更新（非最后 assistant） |
 | `message.tool_call_update` | `{ sessionId, toolCallId, detail }` | 按 toolCallId 锚定更新 detail |
-| `message.complete` | `{ sessionId, messageId, stopReason, usage }` | status → complete/error；收口残留 running toolCall；回填 usage |
+| `message.complete` | `{ sessionId, messageId, stopReason, usage }` | status → complete/error；收敛残留 running toolCall；回填 usage |
 | `message.error` | `{ sessionId, message }` | 最后 streaming assistant → status:'error' + 并入 errorText；否则新建 error 消息 |
 | `message.stream_error` | `{ sessionId, content }` | 无前置流则合成 error；有则 content 追加 + status:'error' |
 | `message.bashExecution` | `{ sessionId, command, exitCode, ... }` | 新建 system 消息 |
@@ -773,7 +777,7 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
 | `message.file_changes` | `{ sessionId, messageId, fileChanges[], changeSetStatus, isFullSet }` | accumulating 增量合并 / ready 全集替换 |
 | `message.auto_retry_start` | `{ sessionId, attempt, maxAttempts?, ... }` | 写 retryStates[sid] |
 | `message.auto_retry_end` | `{ sessionId, success, attempt, ... }` | 清 retryStates[sid] |
-| `message.queue_update` | `{ sessionId, steering?, followUp? }` | 写/清 queueStates[sid] |
+| `message.queue_update` | `{ sessionId, steering?, followUp? }` | 内核内部回执（受理/滞留判定用），不直驱 UI——队列区渲染读 `session.delivery` 状态帧（内核条目投影） |
 
 **ToolCall.status 枚举**：`'running' | 'completed' | 'error' | 'end_not_received'`
 **ChangeSetStatus 5 态**：`'accumulating' | 'ready' | 'partially-reviewed' | 'resolved' | 'superseded'`
@@ -844,7 +848,7 @@ message.complete {messageId, stopReason:'complete', usage:{inputTokens:1280, out
 - ❌ 错误流（mock 永远成功；错误路径只能单测注入 `message.error`）
 - ❌ deleted fileChanges（只 modified/added/unmerged）
 - ✅ retry（仅当输入含 'retry' 关键词触发）
-- ✅ md-table（仅当输入含 `md[-_ ]?table` 哨兵词触发：text 回复体从 CANNED_REPLY 换成复刻宽表 TABLE_REPLY——CJK 短标签列 + 长 inline code token 组合，表格前留空行分段；供 e2e/markdown-table-layout.spec.ts 的列宽地板布局守卫取数。哨兵词取 ASCII 形态避免自然语言误触发，同 'ui-select' 纪律）
+- ✅ md-table（仅当输入含 `md[-_ ]?table` 哨兵词触发：text 回复体从 CANNED_REPLY 换成复刻宽表 TABLE_REPLY——CJK 短标签列 + 长 inline code token 组合，表格前留空行分段；供 e2e/markdown-table-layout.spec.ts 的列宽地板布局检查取数。哨兵词取 ASCII 形态避免自然语言误触发，同 'ui-select' 纪律）
 
 ## 8. MOCK 模式测试
 
@@ -852,7 +856,7 @@ message.complete {messageId, stopReason:'complete', usage:{inputTokens:1280, out
 
 | 测试文件 | 覆盖 |
 |---------|------|
-| [`__tests__/useChat.test.ts`](../../packages/renderer/src/__tests__/useChat.test.ts) | ensureStreamSubscription 幂等；send 三守卫；事件驱动 setStreaming；compact 状态机 |
+| [`__tests__/useChat.test.ts`](../../packages/renderer/src/__tests__/useChat.test.ts) | ensureStreamSubscription 幂等；send 三检查；事件驱动 setStreaming；compact 状态机 |
 | [`__tests__/chat-streaming-reset.test.ts`](../../packages/renderer/src/__tests__/chat-streaming-reset.test.ts) | **规则#3 复位**：error 路径重置 streaming/streamingMessage（否则 UI 卡死） |
 | [`__tests__/fg5-message-stream.test.ts`](../../packages/renderer/src/__tests__/fg5-message-stream.test.ts)（18KB 最全） | applyChunk 全分支：thinking/tool/error/retry/queue/fileChanges；session 隔离；system 消息；历史 fixture |
 | [`__tests__/panel/block-working.test.ts`](../../packages/renderer/src/__tests__/panel/block-working.test.ts) | Block working 态折叠（thinking/tool/end_not_received） |
@@ -1096,7 +1100,7 @@ expect(m.tableScrollW).toBeLessThanOrEqual(m.hostW + 1)         // 不撑爆宿�
 | tool 失败流式 | tool_call_end status='error' → 红框 + 强制展开 | 集成测试（block-working.test.ts U8），E2E 用 s1 历史 fixture（CF-5 已覆盖静态态） | 低 |
 | thinking 完整文本 | 收起态点展开 → 完整 thinking 可见 | E2E（点击「思考」header toggle 后断言全文） | 低 |
 | ChangeSetCard 审查交互 | 用户 Accept/Reject → partially-reviewed/resolved | E2E（需补 ChangeSetCard testid + 审查按钮锚点） | 中 |
-| queue steer/followUp | 流式中 steer → queue_update → QueueBubble 指示 | E2E（需补 QueueBubble testid） | 低 |
+| queue steer/followUp | 流式中发送 → 内核判 lane=steer → 队列条目（in-flight 行）→ 送达回执入流 | E2E（队列区 testid 已备：`queue-bubble` / `queue-item-<uuid>`） | 低 |
 
 ## 12. 约束与盲区
 

@@ -77,8 +77,10 @@ describe.skipIf(!LIVE)("conformance run 层（协议客户端 × 引擎包 CLI�
     // 测试侧宿主扩展隔离（Gate B F1.2 裁决）：pi spawn 会加载宿主 ~/.pi/agent/npm
     // 全局扩展，本机版本破碎（subagent-workflow 8.7.0 × subagent-core 0.2.0 exports
     // 失配）时 pi 启动即退出 code 1——真机门要验的是引擎链路不是宿主扩展环境。
-    // main.ts 忽略 argv，argv-mirror 会把 --no-extensions 镜像给 pi 子进程（与
-    // pi 官方 hint "pi -ne" 同参）。产品镜像语义不动（正常宿主扩展照常加载）。
+    // 隔离由引擎 CLI 的恒定基座保证：buildSpawnArgs 无条件给 pi 子进程注入
+    // --no-extensions（pi -ne 语义：settings 清单 discovery 禁用、显式 --extension
+    // 白名单仍生效），宿主 settings 发现的扩展不进子进程；CLI 入口自身不解析
+    // 扩展 flag，下行 args 的 --no-extensions 无引擎侧消费者。
     const client = new EngineClient({
       engineId: "pi",
       command: process.execPath,

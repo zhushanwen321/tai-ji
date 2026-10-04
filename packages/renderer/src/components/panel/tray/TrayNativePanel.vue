@@ -168,12 +168,18 @@
               <div class="flex items-center gap-2">
                 <Loader2 v-if="record.status === 'running'" data-testid="tray-workflow-spinner"
                   class="size-[13px] shrink-0 animate-spin text-accent" />
-                <span v-else class="size-2 shrink-0 rounded-full" :class="workflowToneClass(record)" />
+                <span v-else class="size-2 shrink-0 rounded-full" :class="workflowToneClass(record)"
+                  :title="workflowStatusLabel(record)" />
                 <span class="min-w-0 flex-1 truncate text-[length:var(--text-xs)] font-medium leading-[1.35] text-neutral-fg">
                   {{ record.scriptName }}
                 </span>
                 <span v-if="record.slug" data-testid="tray-workflow-slug"
                   class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-mid">{{ record.slug }}</span>
+                <!-- [D2] 中断 run 人读状态文案（可见文本——场景 25 CDP 断言 innerText 承载位）：
+                     「已中断（可续跑）」非「运行中」；状态点色调归 workflowToneClass 中性暗档，
+                     hover title 不承载（workflowStatusLabel 出终态文案，interrupted 非终局） -->
+                <span v-if="record.status === 'interrupted'" data-testid="tray-workflow-interrupted"
+                  class="shrink-0 text-[length:var(--text-3xs)] text-neutral-dim">{{ t('panel.tray.workflowInterrupted') }}</span>
                 <!-- 行内操作（仅 pin 态）：running 态 abort 两段式。workflow 一次性生命周期
                      （subagent-workflow D-2）：pause/resume 已在扩展侧移除，宿主不再暴露 -->
                 <template v-if="pinned && record.status === 'running'">
@@ -273,7 +279,8 @@ import { useTwoStepConfirm } from '@/composables/useTwoStepConfirm'
 import { useWorkflowAction } from '@/composables/features/workflow/useWorkflowAction'
 import { TRAY_BUCKETS, useTrayCountsContext } from '@/components/panel/tray/useTrayCounts'
 import type { TrayBucketValue } from '@/components/panel/tray/useTrayCounts'
-import { isRunningProjection } from '@/lib/subagent-bucket'
+import { isRunningProjection, subagentDotClass } from '@/lib/subagent-bucket'
+import { workflowStatusLabel, workflowToneClass } from '@/components/panel/tray/tray-tone'
 import { backgroundTaskBucket, backgroundTaskStatusIcon } from '@/lib/background-task-bucket'
 import type { BackgroundTaskEntry, BackgroundTaskIconState, BackgroundTaskStatusKey } from '@/lib/background-task-bucket'
 import { formatTokens as formatTokensK } from '@/lib/token-format'
@@ -445,10 +452,10 @@ function workflowElapsed(record: WorkflowRunRecord): string {
 }
 
 // ── running bash 行实时计时（1s tick；仅驱动 elapsedLabel 重算，测试用 fake timers）──
-// tick 仅在有可见 live bash 行时挂载（subagent / workflow 面板恒无消费者，bash 面板无
-// running 行 / 停在已结束桶时同样无）——面板随 Popover 开合反复挂载且 split mode 下多实例
-// 并存，各实例独立 gate：live 行出现即建、消失即撤，空闲实例零 interval。watch 为 pre flush
-// 先于渲染，回调内先同步 now 再建 timer，切桶回来首帧耗时即准确（与常驻 tick 行为一致）。
+// tick 仅在有可见 live 行时挂载（bash 面板无 running 行 / 停在已结束桶时同样无）
+// ——面板随 Popover 开合反复挂载且 split mode 下多实例并存，各实例独立 gate：live 行
+// 出现即建、消失即撤，空闲实例零 interval。watch 为 pre flush 先于渲染，回调内先同步
+// now 再建 timer，切桶回来首帧耗时即准确（与常驻 tick 行为一致）。
 const NOW_TICK_INTERVAL_MS = 1000
 const now = ref(Date.now())
 let tickTimer: ReturnType<typeof setInterval> | null = null
@@ -456,7 +463,8 @@ let tickTimer: ReturnType<typeof setInterval> | null = null
 const hasLiveBashRow = computed(() =>
   props.kind === 'bash' && bashRows.value.some((entry) => !isEnded(entry)),
 )
-watch(hasLiveBashRow, (live) => {
+const hasLiveRow = hasLiveBashRow
+watch(hasLiveRow, (live) => {
   if (tickTimer !== null) {
     clearInterval(tickTimer)
     tickTimer = null
@@ -482,30 +490,13 @@ function elapsedLabel(entry: BackgroundTaskEntry): string {
   return formatClockDuration(ms, { padHours: false })
 }
 
-// ── subagent 行状态点（表驱动；承自侧栏任务卡片状态表的复制迁移件——源组件已随退役批次
-//    删除，本表为唯一实现）：失败红 / 中断灰先于完成绿兜底，顺序即语义 ──
-const INTERRUPTED_STOP_REASONS = new Set(['cancelled', 'interrupted', 'interrupted-by-restart', 'interrupted-by-parent'])
-type SubagentDotRule = { match: (record: SubagentRecord) => boolean; cls: string }
-const SUBAGENT_DOT_RULES: SubagentDotRule[] = [
-  { match: (r) => r.status === 'running' && r.stopReason === 'failed', cls: 'bg-danger' },
-  { match: (r) => r.status === 'idle' && r.stopReason === 'failed', cls: 'bg-danger' },
-  { match: (r) => r.status === 'idle' && r.stopReason !== undefined && INTERRUPTED_STOP_REASONS.has(r.stopReason), cls: 'bg-neutral-dim opacity-50' },
-  { match: (r) => r.status === 'idle', cls: 'bg-success' },
-]
+// ── subagent 行状态点 / workflow 行色档：规则与映射单点在 lib/subagent-bucket
+//    （状态点规则表，[W2 D8] 迁入 + status 全集锁）与 tray-tone（outcome tone 映射 +
+//    中文词表文案，[W2 D8] 全集锁）；本组件只消费，不再自持判定表 ──
 /** 执行态判据 = SSOT 谓词（isRunningProjection），与计数/徽标同源不漂移 */
 const isRunningSubagent = isRunningProjection
-function subagentDotClass(record: SubagentRecord): string {
-  const hit = SUBAGENT_DOT_RULES.find((entry) => entry.match(record))
-  return hit ? hit.cls : 'bg-accent'
-}
-
-// ── workflow 行色档（状态点与进度条同源；承自侧栏 workflow 列表的复制迁移件）──
-function workflowToneClass(record: WorkflowRunRecord): string {
-  if (record.status === 'done') return record.reason === 'completed' ? 'bg-success' : 'bg-danger'
-  return 'bg-accent'
-}
 function completedAgentCount(record: WorkflowRunRecord): number {
-  return record.agentCalls.filter((call) => call.status === 'completed' || call.status === 'failed').length
+  return record.agentCalls.filter((call) => call.status === 'done' || call.status === 'failed').length
 }
 function workflowPercent(record: WorkflowRunRecord): number {
   if (record.agentCalls.length === 0) return 0

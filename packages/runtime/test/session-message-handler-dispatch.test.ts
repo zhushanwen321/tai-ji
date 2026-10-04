@@ -9,7 +9,7 @@
  * - session.restore 三错误分支（MODEL_NOT_CONFIGURED / SESSION_NOT_FOUND / RESTORE_FAILED 兜底）
  * - session.handoff 本体（unsupported / 成功 sent / handoff_failed）
  * - session.unsubscribe（bus 未注入 unsupported / 正常 ack）
- * - message.abort 成功 ack / message.follow_up 成功 queued
+ * - message.abort 成功 ack（[MF-1-8] message.follow_up 路由已退役，随 delivery.submit 收敛）
  * - config.sessions / session.getCommands / session.getContext（null payload 分支）/
  *   session.rename 等纯转发抽样
  * - 未知 type 落空（不发任何消息、不抛错）
@@ -38,7 +38,6 @@ function makeHandler(overrides: Record<string, ReturnType<typeof vi.fn>> = {}, c
     fetchContext: vi.fn().mockResolvedValue(null),
     renameSession: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(undefined),
-    followUpMessage: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
   const ctx = {
@@ -187,21 +186,13 @@ describe('SessionMessageHandler 分发路由（W1 表驱动重构回归锚定）
     })
   })
 
-  describe('message.abort / message.follow_up 成功路径（失败路径已有回归测试）', () => {
+  describe('message.abort 成功路径（失败路径已有回归测试）', () => {
     it('message.abort → abort(sid) + reply message.status{aborted}（pending ack 契约）', async () => {
       const { ctx, cap, handler } = makeHandler()
       await handler.handleSessionMessage(msg('message.abort', { sessionId: 's1' }), WS)
       expect(ctx.sessionService.abort).toHaveBeenCalledWith('s1')
       expect(cap.replies[0]).toMatchObject({ id: 'm1', type: 'message.status', payload: { sessionId: 's1', status: 'aborted' } })
       expect(ctx.invalidatePendingUiRequests).toHaveBeenCalledWith('s1', 'turn-aborted')
-      expect(cap.errors).toHaveLength(0)
-    })
-
-    it('message.follow_up 成功 → reply message.status{queued}', async () => {
-      const { ctx, cap, handler } = makeHandler()
-      await handler.handleSessionMessage(msg('message.follow_up', { sessionId: 's1', content: 'next' }), WS)
-      expect(ctx.sessionService.followUpMessage).toHaveBeenCalledWith('s1', 'next')
-      expect(cap.replies[0]).toMatchObject({ id: 'm1', type: 'message.status', payload: { sessionId: 's1', status: 'queued' } })
       expect(cap.errors).toHaveLength(0)
     })
   })

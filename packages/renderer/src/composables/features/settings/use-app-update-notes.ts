@@ -1,10 +1,10 @@
 /**
- * useAppUpdate 的 releaseNotes 多语言提取 + 渲染轴。
+ * useAppUpdate 的 releaseNotes 多语言提取 + 渲染轴工厂。
  *
  * - extractLocalizedNotes：从多语言 release body 中提取当前语言段落（<!-- LANG:xx --> 标记，
- *   无标记向后兼容返回原文）
- * - renderReleaseNotes：提取 + renderMarkdown（markdown-it + shiki WASM 异步渲染）+
- *   写入单例 state.releaseNotesHtml。checkForUpdate 调用方传 guard 做防陈旧丢弃
+ *   无标记向后兼容返回原文）。纯函数，普通导出。
+ * - createNotesAxis：渲染轴工厂，产出的 renderReleaseNotes 写入所属控制器的
+ *   state.releaseNotesHtml。checkForUpdate 调用方传 guard 做防陈旧丢弃
  *   （渲染期间又发了新 checkForUpdate 则丢弃本次 html），restore 链无并发检测不传。
  *
  * 依赖方向：本模块 → use-app-update-state（写 releaseNotesHtml），被
@@ -12,7 +12,7 @@
  */
 import { renderMarkdown } from '@taiji/ui/features/chat/markdown'
 import { getLocale } from '@/i18n'
-import { updateState } from './use-app-update-state'
+import type { UpdateStateContainer } from './use-app-update-state'
 
 /**
  * 多语言 release notes 分隔标记。
@@ -96,14 +96,23 @@ export function extractLocalizedNotes(releaseNotes: string): string {
   return enSection?.content ?? sections[0]?.content ?? releaseNotes
 }
 
-/**
- * 渲染 release notes 并写入单例 state.releaseNotesHtml（异步，不阻塞 UI）。
- * guard 返回 false 时丢弃本次解析（防陈旧：渲染期间状态已被更新的检测覆盖）。
- */
-export function renderReleaseNotes(releaseNotes: string, guard?: () => boolean): void {
-  const localizedNotes = extractLocalizedNotes(releaseNotes)
-  void renderMarkdown(localizedNotes).then((html) => {
-    if (guard && !guard()) return
-    updateState.releaseNotesHtml = html
-  })
+/** releaseNotes 渲染轴：渲染 markdown 并写入所属控制器的 state */
+export interface NotesAxis {
+  /**
+   * 渲染 release notes 并写入 state.releaseNotesHtml（异步，不阻塞 UI）。
+   * guard 返回 false 时丢弃本次解析（防陈旧：渲染期间状态已被更新的检测覆盖）。
+   */
+  renderReleaseNotes(releaseNotes: string, guard?: () => boolean): void
+}
+
+/** 创建 releaseNotes 渲染轴（绑定到指定 state 容器；check/restore 轴各自装配） */
+export function createNotesAxis(state: UpdateStateContainer): NotesAxis {
+  function renderReleaseNotes(releaseNotes: string, guard?: () => boolean): void {
+    const localizedNotes = extractLocalizedNotes(releaseNotes)
+    void renderMarkdown(localizedNotes).then((html) => {
+      if (guard && !guard()) return
+      state.state.releaseNotesHtml = html
+    })
+  }
+  return { renderReleaseNotes }
 }

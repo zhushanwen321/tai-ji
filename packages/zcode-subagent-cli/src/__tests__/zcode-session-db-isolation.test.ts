@@ -123,7 +123,7 @@ describe("API 链集合成员判定（EnginePort.read，D2 第二站点）", () 
     expect(view.source).toBe("native");
   });
 
-  it("dbPath = 集合外绝对路径 → 拒绝①级（reader 零触达），journalPath 缺失落 outcome-only（防任意文件读）", async () => {
+  it("dbPath = 集合外绝对路径 → 拒绝①级（reader 零触达），eventsPath 缺失落 outcome-only（防任意文件读）", async () => {
     const view = await engine.read(makeHandle({ sessionId: "sess-1", dbPath: "/tmp/attacker-chosen/db.sqlite" }));
     expect(mockedRead).not.toHaveBeenCalled();
     expect(view.source).toBe("outcome-only");
@@ -210,12 +210,14 @@ describe("env 注入（探针④：create 帧后子进程 env 快照）", () => 
   let tmpRoot: string;
   let dataDir: string;
   let v2Path: string;
+let personalPath: string;
 
   beforeEach(() => {
     engines = [];
     tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "zcode-iso-env-"));
     dataDir = path.join(tmpRoot, "data");
     v2Path = path.join(tmpRoot, "v2.json");
+  personalPath = path.join(tmpRoot, "personal.json");
     fs.mkdirSync(path.dirname(v2Path), { recursive: true });
     fs.writeFileSync(
       v2Path,
@@ -223,6 +225,20 @@ describe("env 注入（探针④：create 帧后子进程 env 快照）", () => 
         provider: { [PROVIDER]: { options: { apiKey: "k", baseURL: "https://t.example" }, models: { m1: {} } } },
       }),
     );
+    fs.writeFileSync(
+      personalPath,
+      JSON.stringify({
+        config: {
+          providerOrder: [PROVIDER],
+          providerConfigRules: {
+            providerRules: [
+              { providerId: PROVIDER, providerName: "t", config: { access: { type: "api-key", apiKey: "k" }, personalModelIds: ["m1"] } },
+            ],
+          },
+        },
+      }),
+    );
+
   });
 
   afterEach(async () => {
@@ -248,7 +264,7 @@ describe("env 注入（探针④：create 帧后子进程 env 快照）", () => 
     const deps: ZcodeEngineDeps = {
       engineDataDir: () => dataDir,
       cliPath: FAKE_CLI,
-      sources: { v2ConfigPath: v2Path },
+      sources: { v2ConfigPath: v2Path, personalProviderConfigPath: personalPath, builtinCatalogPath: path.join(tmpRoot, "absent-catalog.json") },
       processEnv: {
         PATH: process.env.PATH ?? "",
         HOME: "/fake-host-home",

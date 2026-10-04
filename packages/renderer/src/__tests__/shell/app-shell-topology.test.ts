@@ -7,7 +7,10 @@
  *    MainPanel rounded-[10px]（float-panel 圆角与窗口共线）
  *  - 折叠态 !gap-0（强制覆盖 gap-3），展开态无
  *  - TrafficLight 挂载在 AsideRegion 内（2026-08 二次裁决：恢复刻意调整形态——trafficLightPosition {8,8}、
- *    aside 顶 y=4，left-0/top-4 = 窗口 (8,8)，与 mac OS 红黄绿同位）
+ *    aside 顶 y=4，left-0/top-4 = 窗口 (4,8)：y8 与 mac 同位；x4 与 mac x8 有 4px 预期差（§11:883））
+ *  - 平台两态成对（跨平台窗口外壳 u-shell-chrome）：非 mac 根节点无 rounded-[10px]（修复证明面：方形窗口下
+ *    应用内圆角只会产生四角色差方块）+ 渲染 aside-drag-strip 拖拽条带；mac 根节点保留 rounded-[10px]
+ *    （零变化面）+ 不渲染条带（mac 拖拽由系统提供）
  *
  * Mock 策略（沿用 sidebar-layout / session-status-icons 既有模式，避免全局副作用）：
  *  - useSettingsShell 置空（AppShell 壳副作用，非拓扑被测面）
@@ -21,6 +24,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
+import { platformChromeMock, expectFullscreenChromePairing } from '@/__tests__/helpers/platform-chrome-mock'
 
 vi.mock('@/composables/shell/useSettingsShell', () => ({
   useSettingsShell: () => {},
@@ -38,22 +42,11 @@ vi.mock('@/composables/features/sidebar/useSidebar', () => ({
   useSidebar: () => ({ syncSessionToPanel: vi.fn() }),
 }))
 
-/** usePlatformChrome mock：可控 isFullscreen ref（全屏态 TrafficLight 成对类断言）。
- *  真实模块 isFullscreen 是模块级单例 ref 未导出，测试无法直接改值，故 mock 模块。
- *  与 PanelHeader.test.ts L29-37 同范式：vi.hoisted 共享同一 ref——mock 若不共享，
- *  组件读到的恒为 false，测试会在两类全缺失下静默通过。detectPlatform 固定 'mac'
- *  （jsdom 下真实模块也回退 'mac'，行为一致，不影响本文件其他用例）。 */
-const platformChromeMock = vi.hoisted(() => ({
-  isFullscreen: { value: false } as { value: boolean },
-}))
+/** usePlatformChrome mock：共享态在 helpers/platform-chrome-mock（isFullscreen 换装真 ref + detectPlatform 可切换；
+ *  TrafficLight.test.ts 同范式）。本文件默认平台 mac（jsdom 下真实模块也回退 'mac'，行为一致）。 */
 vi.mock('@/composables/effects/usePlatformChrome', async () => {
-  const { ref } = await import('vue')
-  const isFullscreen = ref(false)
-  platformChromeMock.isFullscreen = isFullscreen
-  return {
-    usePlatformChrome: () => ({ isFullscreen }),
-    detectPlatform: () => 'mac',
-  }
+  const { installPlatformChromeMock } = await import('@/__tests__/helpers/platform-chrome-mock')
+  return installPlatformChromeMock('mac')
 })
 
 import AppShell from '@/components/shell/AppShell.vue'
@@ -62,6 +55,7 @@ import { useSidebarStore } from '@/stores/sidebar'
 beforeEach(() => {
   setActivePinia(createPinia())
   platformChromeMock.isFullscreen.value = false
+  platformChromeMock.detectPlatform.mockReturnValue('mac')
 })
 
 describe('AppShell 拓扑渲染 gate（刻意调整形态回归防线）', () => {
@@ -98,10 +92,10 @@ describe('AppShell 拓扑渲染 gate（刻意调整形态回归防线）', () =>
     expect(wrapper.find('[data-testid="app-shell"]').classes()).toContain('!gap-0')
   })
 
-  it('TrafficLight 挂载在 AsideRegion 内：left-0/top-4 相对 aside 顶 y=4 = 窗口 (8,8) 与 mac 同位', () => {
+  it('TrafficLight 挂载在 AsideRegion 内：left-0/top-4 相对 aside 顶 y=4 = 窗口 (4,8)，y8 与 mac 同位；x4 与 mac x8 有 4px 预期差（§11:883）', () => {
     const wrapper = mount(AppShell)
 
-    // traffic-light 在 aside 内（刻意调整形态：aside 是 offset parent，left-0/top-4 → 窗口 (8,8)）
+    // traffic-light 在 aside 内（刻意调整形态：aside 是 offset parent，left-0/top-4 → 窗口 (4,8)）
     const tl = wrapper.find('.traffic-light')
     expect(tl.exists()).toBe(true)
     expect(tl.element.parentElement).toBe(
@@ -111,24 +105,45 @@ describe('AppShell 拓扑渲染 gate（刻意调整形态回归防线）', () =>
 
   it('TrafficLight 全屏态 opacity-0 + pointer-events-none 成对（review MF-1）', async () => {
     const wrapper = mount(AppShell)
-    const tl = wrapper.find('.traffic-light')
-    expect(tl.exists()).toBe(true)
+    expect(wrapper.find('.traffic-light').exists()).toBe(true)
+    await expectFullscreenChromePairing(wrapper.find('.traffic-light'), async (v) => {
+      platformChromeMock.isFullscreen.value = v
+      await nextTick()
+    })
+  })
+})
 
-    // 非全屏：两类均无（圆点可见且可点）
-    expect(tl.classes()).not.toContain('opacity-0')
-    expect(tl.classes()).not.toContain('pointer-events-none')
+describe('AppShell 平台两态成对（跨平台窗口外壳 u-shell-chrome）', () => {
+  it.each(['win', 'linux'] as const)(
+    '%s 态：根节点无 rounded-[10px]（修复证明面）+ 渲染 aside-drag-strip 拖拽条带',
+    (platform) => {
+      platformChromeMock.detectPlatform.mockReturnValue(platform)
+      const wrapper = mount(AppShell)
 
-    // 全屏：opacity-0 与 pointer-events-none 必须成对——单独任一都会让隐形圆点
-    // （absolute z-10）重新劫持窗口控制点击（折叠+全屏下悬浮在 PanelHeader chrome 之上）
-    platformChromeMock.isFullscreen.value = true
-    await nextTick()
-    expect(tl.classes()).toContain('opacity-0')
-    expect(tl.classes()).toContain('pointer-events-none')
+      // 修复证明面：win/linux 是不透明方形窗口，应用内圆角只会产生四角色差小方块——
+      // DOM 上必须无 rounded-[10px] 类（类绑定分支，设计 §6.2）
+      const shell = wrapper.find('[data-testid="app-shell"]')
+      expect(shell.classes()).not.toContain('rounded-[10px]')
 
-    // 退出全屏：成对消失，恢复可交互
-    platformChromeMock.isFullscreen.value = false
-    await nextTick()
-    expect(tl.classes()).not.toContain('opacity-0')
-    expect(tl.classes()).not.toContain('pointer-events-none')
+      // 拖拽条带仅非 mac 渲染：44px（h-11）drag 面（设计 §6.3）
+      const strip = wrapper.find('[data-testid="aside-drag-strip"]')
+      expect(strip.exists()).toBe(true)
+      expect(strip.classes()).toContain('h-11')
+      expect(strip.classes()).toContain('[-webkit-app-region:drag]')
+
+      // 既有拓扑在非 mac 态不回归：p-1 / aside pt-11 恒定
+      expect(shell.classes()).toContain('p-1')
+      expect(wrapper.find('[data-testid="app-shell-aside"]').classes()).toContain('pt-11')
+    },
+  )
+
+  it('mac 态：根节点保留 rounded-[10px]（零变化面）+ 不渲染 aside-drag-strip', () => {
+    platformChromeMock.detectPlatform.mockReturnValue('mac')
+    const wrapper = mount(AppShell)
+
+    const shell = wrapper.find('[data-testid="app-shell"]')
+    expect(shell.classes()).toContain('rounded-[10px]')
+    // mac 顶部拖拽由系统提供，条带 v-if 不渲染（A6 mac 回归剧本断言面）
+    expect(wrapper.find('[data-testid="aside-drag-strip"]').exists()).toBe(false)
   })
 })

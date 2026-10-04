@@ -29,7 +29,14 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { parseResourceMetaDetailed } from "../shared/meta-parser.ts";
+import { checkWorkflowScriptSyntax } from "./script-syntax.ts";
 import { DEFAULT_WORKFLOW_TMP_DIR } from "./workflow-files.ts";
+
+// 宿主预声明名字清单与语法闸本体已抽至 ./script-syntax.ts（第二消费方 = 派发期
+// 闸 lifecycle.runWorkflow / resume-run 出现后，工具留在本文件会形成创作管线与
+// 运行管线的反向 import）。此处 re-export 维持既有 import 路径（测试与下游消费方
+// 不变），清单同步义务与语义见该模块头注。
+export { WORKER_IIFE_HOST_DECLARED_NAMES } from "./script-syntax.ts";
 
 /** generate 目录注入参数：tmp 落盘目录宿主注入（缺省 DEFAULT_WORKFLOW_TMP_DIR）。 */
 export interface GenerateWorkflowScriptOptions {
@@ -84,18 +91,6 @@ function checkAgentUsage(stripped: string): string | undefined {
   return undefined;
 }
 
-/** 闸 4：语法检查（包 async IIFE，与 runtime 包裹形态一致）。 */
-function checkSyntax(script: string): string | undefined {
-  const cjsScript = script.replace(/\bexport\s+const\s+meta\b/, "const meta");
-  try {
-    new Function(`(async () => { ${cjsScript} })();`);
-    return undefined;
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return `Syntax error in script: ${msg}`;
-  }
-}
-
 /** 闸 4b：round-trip——@pi-meta 存在时 parseResourceMetaDetailed 校验 YAML（报行列）。 */
 function checkMetaRoundTrip(script: string, hasPiMeta: boolean): string | undefined {
   if (!hasPiMeta) return undefined;
@@ -137,7 +132,7 @@ export function generateWorkflowScript(
   if (agentError) return { ok: false, error: agentError };
 
   // 4. Syntax check (wrap in async IIFE like runtime)
-  const syntaxError = checkSyntax(script);
+  const syntaxError = checkWorkflowScriptSyntax(script);
   if (syntaxError) return { ok: false, error: syntaxError };
 
   // 4b. Round-trip: validate /* @pi-meta */ YAML before writing (v5 §4.7 / ERR4 — report linePos, don't write bad files)

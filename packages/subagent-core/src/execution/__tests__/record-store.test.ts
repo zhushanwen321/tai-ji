@@ -36,17 +36,31 @@ vi.mock("../persistence/sessions-index.ts", async (importOriginal) => {
 });
 
 import { writeAliveMarker } from "../persistence/alive-store.ts";
-import { completeRecord, createRecord, projectOutcome, tryTransition } from "../persistence/execution-record.ts";
-import { writeCancelledState, writeFinalizedState, writeSettledState } from "../persistence/state-marker.ts";
+// [W1 / U2a] record 事件文件观察点（u0 契约层 scan/路径原语——被测面独立性）。
+import { createRecordEventStream, recordEventsPath } from "../persistence/record-events.ts";
+import type { RecordEvent } from "../persistence/record-events.ts";
+import { completeLegacyClosed, createRecord, projectOutcome, trySettleLegacyClosed } from "../persistence/execution-record.ts";
 import type { ManifestRecord } from "../persistence/manifest-store.ts";
 import { ManifestStore } from "../persistence/manifest-store.ts";
 import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
-import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE, SUBAGENT_RECORD_ENTRY_VERSION } from "../persistence/record-entry.ts";
 import type { StatusFilter } from "../persistence/record-store.ts";
 import { RecordStore } from "../persistence/record-store.ts";
-import { manifestToSubagent, rebuildEntryRecord } from "../persistence/record-store-rebuild.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import { seedTerminalRecord, seedTerminalRecordForSessionFile } from "./helpers/seed-terminal-record.ts";
+import {
+  baselineStatisticsFromFold,
+  manifestToSubagent,
+  receiptStatisticsFromFold,
+  stateMarkerFromFold,
+  v2PairToRecord,
+} from "../persistence/record-store-rebuild.ts";
+import type { V2EntryPair } from "../persistence/record-store-rebuild.ts";
+import { foldRecordEvents } from "../persistence/record-events.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
 import { writeLegacyCancelledSidecar, writeLegacyFinalizedSidecar } from "./helpers/legacy-sidecar.ts";
+// [登记 §3.3] v2 两条款条目播种辅助（v1 全量快照写点已随兼容层删除）。
+import { v2RegisteredEntry, v2SettledEntry } from "./helpers/v2-record-entry.ts";
 
 /** 构造 ExecutionRecord（base 默认 running，over 覆盖任意字段）。 */
 function makeRecord(over: Partial<ExecutionRecord> = {}): ExecutionRecord {
@@ -61,6 +75,33 @@ function makeRecord(over: Partial<ExecutionRecord> = {}): ExecutionRecord {
     // 对齐生产 register 路径（subagent-service createRecord：one-shot 显式 false）
   });
   return { ...base, ...over };
+}
+
+/**
+ * 构造最小 SubagentRecord（[登记 §3.3] v2 条目播种辅助的入参——helpers/v2-record-entry.ts
+ * 只消费身份域 + 终局域字段；其余字段给合法缺省）。
+ */
+function makeSubagentRecord(over: Partial<SubagentRecord> = {}): SubagentRecord {
+  return {
+    id: "sa-base",
+    agent: "worker",
+    task: "t",
+    slug: "s",
+    status: "running",
+    mode: "background",
+    startedAt: 1000,
+    rootSessionId: "sess-current",
+    parentRecordId: undefined,
+    depth: 0,
+    endedAt: undefined,
+    turns: 0,
+    totalTokens: 0,
+    model: undefined,
+    thinkingLevel: undefined,
+    eventLog: [],
+    displayItems: [],
+    ...over,
+  };
 }
 
 /**
@@ -188,18 +229,6 @@ describe("RecordStore", () => {
       expect(full?.status).toBe("idle"); // 单规则在全量路径同样套用
     });
 
-    it("磁盘 session.jsonl + .state sidecar（finalized） → idle", () => {
-      const sessionFile = path.join(tmpDir, "2026-01-01-uuid-b.jsonl");
-      writeSessionJsonl(sessionFile, {
-        id: "bg-2", agent: "worker", mode: "background", task: "do it", startedAt: 5000,
-      });
-      writeFinalizedState(sessionFile);
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === "bg-2");
-      expect(found).toBeDefined();
-      expect(found?.status).toBe("idle");
-    });
-
     it("statusFilter='running' 只剩内存 running（§3.2.4：磁盘重建恒 idle，running 只在轮次在飞时有意义）", () => {
       const sessionFile = path.join(tmpDir, "2026-01-01-uuid-a.jsonl");
       writeSessionJsonl(sessionFile, {
@@ -276,21 +305,6 @@ describe("RecordStore", () => {
   // ============================================================
   // cancelled tombstone override
   // ============================================================
-  describe("cancelled tombstone", () => {
-    it("有 .state sidecar（cancelled） → status override 为 closed + closedReason=cancelled", () => {
-      const sessionFile = path.join(tmpDir, "2026-01-01-uuid-a.jsonl");
-      writeSessionJsonl(sessionFile, {
-        id: "bg-1", agent: "worker", mode: "background", task: "do it", startedAt: 5000,
-      });
-      writeCancelledState(sessionFile, 6000);
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === "bg-1");
-      // v4 B-1：cancelled 折入 closed，closedReason='cancelled' 保留用户取消语义
-      expect(found?.status).toBe("idle");
-      expect(found?.closedReason).toBe("cancelled");
-      expect(found?.error).toBe("cancelled by user");
-    });
-  });
 
   // ============================================================
   // compareRecords 排序稳定性（内存 running record）
@@ -298,15 +312,19 @@ describe("RecordStore", () => {
   describe("compareRecords 排序", () => {
     it("status priority（running < closed）", () => {
       const store = new RecordStore(tmpDir);
-      // 内存 running record
+      // 被测对象 = compareRecords 的状态优先级：两条内存记录即可表达（磁盘终态投影
+      // 已由事件流承载，与本用例的比较逻辑无关——不再借 sidecar fixture 造形态）。
       const running = makeRecord({ id: "run-1", mode: "background", startedAt: 3000, status: "running" });
-      store.register(running);
-      // 磁盘 closed record（.state sidecar（finalized） → closed，v4 B-1 统一终态）
-      const doneFile = path.join(tmpDir, "a.jsonl");
-      writeSessionJsonl(doneFile, {
-        id: "done-1", agent: "w", mode: "background", task: "t", startedAt: 5000,
+      const closed = makeRecord({
+        id: "done-1",
+        mode: "background",
+        startedAt: 5000,
+        status: "idle",
+        stopReason: "completed",
+        closedReason: "gc",
       });
-      writeFinalizedState(doneFile);
+      store.register(running);
+      store.register(closed);
       const ids = store.collectRecords(100).map((r) => r.id);
       expect(ids[0]).toBe("run-1"); // running(0) 排在 closed(3) 前
     });
@@ -406,29 +424,6 @@ describe("RecordStore", () => {
     }
 
     // ── 输入 1: 新格式收条 {status:"idle", stopReason, endedAt}（writeSettledState 写面）──
-    it(".state 新格式收条 → idle + stopReason=收口 reason；closedReason/endedAt 不投影（live ≡ reload）", () => {
-      const sessionFile = writeBaseSession();
-      writeSettledState(sessionFile, { stopReason: "interrupted", endedAt: 6000 });
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("idle");
-      expect(found?.stopReason).toBe("interrupted");
-      // 桥接不变量新侧：settle 产出的 idle 无旧终态遗留位（与内存 markSettled 一致）
-      expect(found?.closedReason).toBeUndefined();
-      // 非终态语义：endedAt 不投影（收条时间不冒充终态结束时间）
-      expect(found?.endedAt).toBeUndefined();
-      expect(found?.error).toBeUndefined();
-    });
-
-    it(".state 新格式收条无 stopReason → idle + interrupted-by-restart 兜底", () => {
-      const sessionFile = writeBaseSession();
-      writeSettledState(sessionFile, { endedAt: 6000 });
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("idle");
-      expect(found?.stopReason).toBe("interrupted-by-restart");
-    });
-
     it(".state 新格式 stopReason 非法值（外部损坏）→ idle + interrupted-by-restart 兜底", () => {
       const sessionFile = writeBaseSession();
       fs.writeFileSync(`${sessionFile}.state`, JSON.stringify({ status: "idle", reason: "garbage-reason" }), "utf-8");
@@ -439,43 +434,9 @@ describe("RecordStore", () => {
     });
 
     // ── 输入 2: 旧 finalized → idle + closedReason/stopReason=reason（上行映射）──
-    it(".state 旧 finalized（携 reason）→ idle + stopReason=closedReason=reason", () => {
-      const sessionFile = writeBaseSession();
-      writeFinalizedState(sessionFile, "user-close");
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("idle");
-      expect(found?.closedReason).toBe("user-close");
-      expect(found?.stopReason).toBe("user-close");
-    });
-
     // ── 输入 2b: 旧 finalized 空 reason（死因不可考）→ disconnected 兜底 ──
-    it(".state 旧 finalized（空 reason）→ idle + disconnected 兜底（旧数据兼容回归）", () => {
-      const sessionFile = writeBaseSession();
-      writeFinalizedState(sessionFile);
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("idle");
-      expect(found?.closedReason).toBe("disconnected");
-      expect(found?.stopReason).toBe("disconnected");
-    });
-
     // ── 输入 3: 旧 cancelled → idle + closedReason=cancelled（legacy 投影判据）
     //    + stopReason=interrupted（§3.2.4 上行映射）──
-    it(".state 旧 cancelled → idle + stopReason=interrupted + closedReason=cancelled（双写与 U2 桥接对齐）", () => {
-      const sessionFile = writeBaseSession();
-      writeCancelledState(sessionFile, 6000);
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("idle");
-      expect(found?.stopReason).toBe("interrupted");
-      // closedReason 保留旧词：U2 桥接判据（idle ∧ closedReason 有值 → legacy
-      // closed/cancelled 投影，旧 session-reader 兼容面）依赖此值
-      expect(found?.closedReason).toBe("cancelled");
-      expect(found?.error).toBe("cancelled by user");
-      expect(found?.endedAt).toBe(6000);
-    });
-
     // ── 输入 4: 无 sidecar → idle + interrupted-by-restart（崩溃在途 / 尚未收口）──
     it("无任何 sidecar → idle + interrupted-by-restart（§3.2.4「文件不存在」行；.alive 不影响判定）", () => {
       const sessionFile = writeBaseSession();
@@ -500,31 +461,7 @@ describe("RecordStore", () => {
     });
 
     // ── 兼容读回归：存量旧名共存时 .cancelled 优先于 .finalized ──
-    it("兼容读：旧 .cancelled 优先于旧 .finalized（存量共存形态，优先级对齐合并前）", () => {
-      const sessionFile = writeBaseSession();
-      writeLegacyFinalizedSidecar(sessionFile);
-      writeLegacyCancelledSidecar(sessionFile, {
-        id: SESSION_ID, status: "cancelled", agent: "worker", startedAt: STARTED_AT, endedAt: 6000,
-      });
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("idle");
-      expect(found?.closedReason).toBe("cancelled");
-      expect(found?.stopReason).toBe("interrupted");
-    });
-
     // ── 新名权威：.state 与存量旧名共存时 .state 胜出 ──
-    it(".state 优先于存量旧名（新写侧权威，旧文件残留不覆盖新收口）", () => {
-      const sessionFile = writeBaseSession();
-      writeLegacyCancelledSidecar(sessionFile, {
-        id: SESSION_ID, status: "cancelled", agent: "worker", startedAt: STARTED_AT, endedAt: 6000,
-      });
-      writeFinalizedState(sessionFile, "user-close");
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("idle");
-      expect(found?.closedReason).toBe("user-close");
-    });
   });
 
   // ============================================================
@@ -605,26 +542,11 @@ describe("RecordStore", () => {
 
   // ============================================================
   // endedAt 重建（问题 2 修复：终态耗时不再随墙钟增长）
+  // [② 读侧换源] 统计域源 = 折叠收条（record-settled / 轮终收条帧）：
+  //   idle 收条形态 → 正向断言（值来自折叠）；在途/中断无收条形态 → 保持 undefined。
   // ============================================================
   describe("endedAt 重建（耗时不再无限增长）", () => {
-    it(".state（finalized）→ light endedAt 用 mtime 近似，全量 endedAt 为最后 entry 时间戳", () => {
-      const sessionFile = path.join(tmpDir, "fin.jsonl");
-      writeSessionJsonl(sessionFile, {
-        id: "bg-1", agent: "w", mode: "background", task: "t",
-        startedAt: 5000, lastTs: 9000, rootSessionId: "sess-A",
-      });
-      writeFinalizedState(sessionFile);
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100, "all", "sess-A").find((r) => r.id === "bg-1");
-      // [perf] light 分支 2：endedAt 用 jsonl mtime 近似（finalize 后文件不再变化，
-      // 与最后 entry ts 差 <1s）——不是 entry ts 9000，也不是随墙钟无限增长的 now 基准。
-      expect(found?.endedAt).toBeDefined();
-      expect(found?.endedAt).toBeGreaterThan(5000);
-      // 全量（getFullRecord）：精确用最后 entry 时间戳（非 now）。
-      expect(store.getFullRecord("bg-1")?.endedAt).toBe(9000);
-    });
-
-    it("无 sidecar（idle, §3.2.4 单规则）→ endedAt 保持 undefined（非终态，与内存 settle 形态一致）", () => {
+    it("无收条事件（在途中断）→ endedAt 保持 undefined（非终态，与内存 settle 形态一致）", () => {
       const sessionFile = path.join(tmpDir, "crash.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "bg-1", agent: "w", mode: "background", task: "t",
@@ -648,6 +570,79 @@ describe("RecordStore", () => {
       const found = store.collectRecords(100, "all", "sess-A").find((r) => r.id === "bg-1");
       expect(found?.status).toBe("idle");
       expect(found?.endedAt).toBeUndefined();
+    });
+
+    it("[② 读侧换源] record-settled 收条在场 → endedAt/turns/totalTokens 正向取折叠终值", () => {
+      const sessionFile = path.join(tmpDir, "settled.jsonl");
+      const recordsDir = path.join(tmpDir, "records");
+      writeSessionJsonl(sessionFile, {
+        id: "bg-1", agent: "w", mode: "background", task: "t",
+        startedAt: 5000, lastTs: 9000, rootSessionId: "sess-A",
+      });
+      seedTerminalRecordForSessionFile(sessionFile, recordsDir, {
+        stopReason: "completed",
+        endedAt: 9000,
+        turns: 4,
+        totalTokens: 60725,
+      });
+      const store = new RecordStore(tmpDir, undefined, undefined, recordsDir);
+      const found = store.collectRecords(100, "all", "sess-A").find((r) => r.id === "bg-1");
+      expect(found?.status).toBe("idle");
+      expect(found?.stopReason).toBe("completed");
+      expect(found?.endedAt).toBe(9000);
+      expect(found?.turns).toBe(4);
+      expect(found?.totalTokens).toBe(60725);
+    });
+
+    it("[② 读侧换源] 轮终收条是最后一条事件 → endedAt 取 round-idle ts（轮终留存形态）", () => {
+      const sessionFile = path.join(tmpDir, "round-idle.jsonl");
+      const recordsDir = path.join(tmpDir, "records");
+      writeSessionJsonl(sessionFile, {
+        id: "bg-1", agent: "w", mode: "background", task: "t",
+        startedAt: 5000, lastTs: 9000, rootSessionId: "sess-A",
+      });
+      seedTerminalRecordForSessionFile(sessionFile, recordsDir, {
+        stopReason: "completed",
+        idleRound: { round: 2, ts: 8800, turns: 2, totalTokens: 300 },
+      });
+      const store = new RecordStore(tmpDir, undefined, undefined, recordsDir);
+      const found = store.collectRecords(100, "all", "sess-A").find((r) => r.id === "bg-1");
+      expect(found?.status).toBe("idle");
+      expect(found?.endedAt).toBe(8800);
+      expect(found?.turns).toBe(2);
+      expect(found?.totalTokens).toBe(300);
+      expect(found?.round).toBe(2);
+    });
+
+    it("[② 读侧换源] 轮终收条之后又轮开始（在途续轮）→ 统计不投影（0/undefined，round 取当前轮）", () => {
+      const sessionFile = path.join(tmpDir, "round-idle-then-start.jsonl");
+      writeSessionJsonl(sessionFile, {
+        id: "bg-1", agent: "w", mode: "background", task: "t",
+        startedAt: 5000, lastTs: 9000, rootSessionId: "sess-A",
+      });
+      // 手写帧序：created → round-started(1) → round-idle → round-started(2)——在途续轮。
+      const id = "bg-1";
+      const frames = [
+        JSON.stringify({ type: "record-created", seq: 1, ts: 5000, id, agent: "w", task: "t", slug: "s", origin: "tool", rootSessionId: "sess-A", depth: 0, mode: "background", startedAt: 5000 }),
+        JSON.stringify({ type: "record-round-started", seq: 2, ts: 5100, round: 1, epoch: 0 }),
+        JSON.stringify({ type: "record-round-idle", seq: 3, ts: 5200, round: 1, stopReason: "completed", turns: 7, totalTokens: 999 }),
+        JSON.stringify({ type: "record-round-started", seq: 4, ts: 5300, round: 2, epoch: 0 }),
+      ];
+      fs.mkdirSync(path.join(tmpDir, "records"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "records", `${id}.events`),
+        `${JSON.stringify({ type: "record-events", id })}\n${frames.join("\n")}\n`,
+        "utf-8",
+      );
+      const store = new RecordStore(tmpDir, undefined, undefined, path.join(tmpDir, "records"));
+      const found = store.collectRecords(100, "all", "sess-A").find((r) => r.id === "bg-1");
+      expect(found?.status).toBe("idle"); // 重建单规则兜底（无收条 → interrupted-by-restart 展示）
+      expect(found?.stopReason).toBe("interrupted-by-restart");
+      // 上一轮的统计不投影（lastEvent 守卫）；round 取当前轮（round-started 携带）。
+      expect(found?.endedAt).toBeUndefined();
+      expect(found?.turns).toBe(0);
+      expect(found?.totalTokens).toBe(0);
+      expect(found?.round).toBe(2);
     });
   });
 
@@ -756,83 +751,93 @@ describe("RecordStore", () => {
     });
 
     // TC-2: 旧 .state marker（finalized） → idle（上行映射不回归）
-    it("TC-2: .state marker（finalized） → idle（旧值上行映射不回归）", () => {
-      const sessionFile = path.join(tmpDir, "sp2-tc2.jsonl");
-      writeSessionJsonl(sessionFile, {
-        id: "sa-sp2-2", agent: "worker", mode: "background", task: "finalized task",
-        startedAt: 2000, rootSessionId: "sess-sp2",
-      });
-      writeFinalizedState(sessionFile);
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100, "all", "sess-sp2").find((r) => r.id === "sa-sp2-2");
-      expect(found).toBeDefined();
-      expect(found?.status).toBe("idle");
-      expect(found?.endedAt).toBeDefined();
-    });
-
     // TC-2b: 旧 .state marker（cancelled） → idle + closedReason=cancelled + stopReason=interrupted
-    it("TC-2b: .state marker（cancelled） → idle + closedReason=cancelled + stopReason=interrupted（旧值映射不回归）", () => {
-      const sessionFile = path.join(tmpDir, "sp2-tc2b.jsonl");
-      writeSessionJsonl(sessionFile, {
-        id: "sa-sp2-2b", agent: "worker", mode: "background", task: "cancelled task",
-        startedAt: 3000, rootSessionId: "sess-sp2",
-      });
-      writeCancelledState(sessionFile, 4000);
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100, "all", "sess-sp2").find((r) => r.id === "sa-sp2-2b");
-      expect(found).toBeDefined();
-      expect(found?.status).toBe("idle");
-      expect(found?.closedReason).toBe("cancelled");
-      expect(found?.stopReason).toBe("interrupted");
-    });
   });
 
   // ============================================================
-  // [U3 / §3.2.4] 孤儿恢复简化：entry 面纠偏（一律保留 idle，锚在等 revive）
+  // [U3 / §3.2.4 + 登记 §3.3] 孤儿恢复两入口：journal 在场收编（recoverOrphanRecords）
+  // 与 entry-only 纠偏（recoverEntryOnlyOrphans）——一律保留 idle，锚在等 revive。
+  // 播种全部走 v2 两条款（注册条目定界 + 非 interrupted 终态条目构成收口证据）。
   // ============================================================
   describe("recoverOrphanRecords 孤儿 entry 纠偏", () => {
-    /** 带真实磁盘 fixture + appendEntry 捕获的 store。 */
+    /** 播种用 SubagentRecord（孤儿场景缺省 rootSessionId=sess-orphan）。 */
+    function seedRecord(over: Partial<SubagentRecord> = {}): SubagentRecord {
+      return makeSubagentRecord({ rootSessionId: "sess-orphan", task: "orphan task", ...over });
+    }
+
+    /** 带真实磁盘 fixture + appendEntry 捕获的 store（recordsDir 接线 = 事件 journal 面在场）。 */
     function makeRecoveryStore(): { store: RecordStore; appended: Array<{ customType: string; data: Record<string, unknown> }> } {
       const appended: Array<{ customType: string; data: Record<string, unknown> }> = [];
+      const recordsDir = path.join(rootDir, "records");
+      fs.mkdirSync(recordsDir, { recursive: true });
       const store = new RecordStore(tmpDir, undefined, {
         appendEntry: (customType: string, data: unknown) => {
           appended.push({ customType, data: data as Record<string, unknown> });
         },
-      } as never);
+      } as never, recordsDir);
       return { store, appended };
     }
 
-    /** 写主 session fixture（含指定 subagent-record entry 序列）。 */
-    function writeMainSession(entries: Array<Record<string, unknown>>): string {
+    /** 写主 session fixture（含指定 v2 subagent-record entry 序列）。 */
+    function writeMainSession(entries: unknown[]): string {
       const mainFile = path.join(tmpDir, "main-session.jsonl");
-      const lines = entries.map((d) => JSON.stringify({ type: "custom", id: `e-${Math.random()}`, parentId: null, customType: "subagent-record", data: d }));
+      const lines = entries.map((d) => JSON.stringify({ type: "custom", id: `e-${Math.random()}`, parentId: null, customType: SUBAGENT_RECORD_CUSTOM_TYPE, data: d }));
       fs.writeFileSync(mainFile, lines.join("\n") + "\n", "utf-8");
       return mainFile;
     }
 
-    it("in-flight 孤儿（entry 残留 running）→ 纠正 idle entry + interrupted-by-restart，无直断无 sidecar（[F3] 旧 closed+gc+error 直断退役）", () => {
+    /**
+     * [登记 §3.3] 给 record 播种真实事件 journal（收编入口 recoverOrphanRecords 的在场
+     * 前提）：created 帧携带身份域 → fold 的 lastSeq>0 且 identity 在场，收编可落地。
+     */
+    function seedRecordJournal(id: string, over: Record<string, unknown> = {}): void {
+      const recordsDir = path.join(rootDir, "records");
+      fs.mkdirSync(recordsDir, { recursive: true });
+      const created = {
+        type: "record-created",
+        seq: 1,
+        ts: 1000,
+        id,
+        agent: "worker",
+        task: "orphan task",
+        slug: "s",
+        origin: "tool",
+        rootSessionId: "sess-orphan",
+        depth: 0,
+        mode: "background",
+        startedAt: 1000,
+        ...over,
+      };
+      fs.writeFileSync(
+        recordEventsPath(recordsDir, id),
+        `${JSON.stringify({ type: "record-events", id })}\n${JSON.stringify(created)}\n`,
+        "utf-8",
+      );
+    }
+
+    it("in-flight 孤儿（注册条目残留 running + journal 在场）→ 收编 idle entry + interrupted-by-restart，无直断无 sidecar（[F3] 旧 closed+gc+error 直断退役）", () => {
       const sessionFile = path.join(tmpDir, "orphan-done.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "sa-orphan-1", agent: "worker", mode: "background", task: "orphan done",
         startedAt: 1000, rootSessionId: "sess-orphan",
       });
+      seedRecordJournal("sa-orphan-1", { task: "orphan done" });
       const mainFile = writeMainSession([
-        { id: "sa-orphan-1", agent: "worker", task: "orphan done", startedAt: 1000, status: "running" },
+        v2RegisteredEntry(seedRecord({ id: "sa-orphan-1", task: "orphan done", startedAt: 1000 })),
       ]);
       const { store, appended } = makeRecoveryStore();
       store.recoverOrphanRecords("sess-orphan", mainFile);
 
       const entry = appended.find((c) => c.data.id === "sa-orphan-1");
       expect(entry?.customType).toBe("subagent-record");
-      // 一律保留 idle（锚在，等 revive）：不终态化、不写死因 error
+      // 收编产物 = v2 终态条目；一律保留 idle（锚在，等 revive）：不写死因 error
+      expect(entry?.data.kind).toBe("settled");
       expect(entry?.data.status).toBe("idle");
-      expect(entry?.data.closedReason).toBeUndefined();
       expect(entry?.data.stopReason).toBe("interrupted-by-restart");
       expect(entry?.data.error).toBeUndefined();
-      expect(entry?.data.endedAt).toBeUndefined();
       // 不写 .state 防重锚（writeFinalizedState(file,"gc") 写点已删——磁盘重建面已收敛 idle）
       expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
-      // 幂等：纠正 entry 落盘后末条变 idle，判据自然不再命中
+      // 幂等：收编追加 record-settled 帧后 fold 已 settled，二次调用自然不再命中
       const again = [...appended];
       store.recoverOrphanRecords("sess-orphan", mainFile);
       expect(appended.length).toBe(again.length);
@@ -840,34 +845,38 @@ describe("RecordStore", () => {
       expect(found?.status).toBe("idle");
     });
 
-    it("SP-5 完成态残留（running + result）→ 同款 idle 纠正，merge 保留 result（直断分支退役）", () => {
+    it("SP-5 完成态残留（注册条目 + journal 在场）→ 同款 idle 收编；result 全文落点迁至子 session 文件（v1 快照 merge 已随兼容层删除）", () => {
       const sessionFile = path.join(tmpDir, "orphan-sp5.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "sa-orphan-sp5", agent: "worker", mode: "background", task: "sp5 done",
         startedAt: 6000, rootSessionId: "sess-orphan",
-      });
+      }, "final answer text");
+      seedRecordJournal("sa-orphan-sp5", { task: "sp5 done", startedAt: 6000 });
       const mainFile = writeMainSession([
-        { id: "sa-orphan-sp5", agent: "worker", task: "sp5 done", startedAt: 6000, status: "running", result: "final answer text" },
+        v2RegisteredEntry(seedRecord({ id: "sa-orphan-sp5", task: "sp5 done", startedAt: 6000 })),
       ]);
       const { store, appended } = makeRecoveryStore();
       store.recoverOrphanRecords("sess-orphan", mainFile);
 
       const entry = appended.find((c) => c.data.id === "sa-orphan-sp5");
       expect(entry?.data.status).toBe("idle");
-      expect(entry?.data.closedReason).toBeUndefined();
-      // merge 保真：末条 entry 的 result 保留（覆写是状态迁移不是信息重建）
-      expect(entry?.data.result).toBe("final answer text");
+      expect(entry?.data.stopReason).toBe("interrupted-by-restart");
       expect(entry?.data.error).toBeUndefined();
+      // v2 下 result 全文的载体 = 子 session 文件（收编是状态迁移不是信息重建）：读面仍拿得到
+      const found = store.collectRecords(100, "all", "sess-orphan").find((r) => r.id === "sa-orphan-sp5");
+      expect(found?.status).toBe("idle");
+      expect(store.getFullRecord("sa-orphan-sp5")?.result).toBe("final answer text");
     });
 
-    it("在飞残留 running（无产出）→ idle 纠正（[U5/D4] resumable 字段退役——可续聊资格由 idle 直读承载）", () => {
+    it("在飞残留 running（无产出）→ 收编 idle（[U5/D4] resumable 字段退役——可续聊资格由 idle 直读承载）", () => {
       const sessionFile = path.join(tmpDir, "orphan-resumable.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "sa-orphan-res", agent: "worker", mode: "background", task: "resumable orphan",
         startedAt: 7000, rootSessionId: "sess-orphan",
       });
+      seedRecordJournal("sa-orphan-res", { task: "resumable orphan", startedAt: 7000 });
       const mainFile = writeMainSession([
-        { id: "sa-orphan-res", agent: "worker", task: "resumable orphan", startedAt: 7000, status: "running" },
+        v2RegisteredEntry(seedRecord({ id: "sa-orphan-res", task: "resumable orphan", startedAt: 7000 })),
       ]);
       const { store, appended } = makeRecoveryStore();
       store.recoverOrphanRecords("sess-orphan", mainFile);
@@ -878,20 +887,14 @@ describe("RecordStore", () => {
       expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
     });
 
-    it("[P4-② ⛔ two-state-convergence U5] W4 纳管态孤儿（running + stopReason=failed + error，entry-born 无锚）跨重启 → 纠偏 idle 等 revive + stopReason=failed 不被兜底覆盖", () => {
-      // W4 新态 = adoptEngineDeath 纳管产物（[U5/D4] error/result/stopReason 三写、
-      // status 保持 running）。跨重启孤儿纠偏（finalizeEntryOnlyOrphan）
-      // 一律 idle 等 revive，stopReason 兜底只对空值（?? interrupted-by-restart）——
-      // failed 停因保留展示（红点等续聊）。
+    it("[P4-② ⛔ two-state-convergence U5] W4 纳管态孤儿（failed/error 只在内存，entry-born 无锚）跨重启 → entry-only 纠偏 idle + interrupted-by-restart", () => {
+      // W4 新态 = adoptEngineDeath 纳管产物（[U5/D4] error/result/stopReason 三写、status
+      // 保持 running）——[W1/D2] 过程 entry 停写：failed/error 只在内存，跨重启后的 v2
+      // 注册条目结构上不承载它们，entry-only 纠偏恒落 interrupted-by-restart。
       // 设计 D6a 登记：W4 跨重启归宿 = 孤儿纠偏 idle 等 revive（非 readopt——
       // isBootReadoptable 现状空转）。
       const mainFile = writeMainSession([
-        {
-          v: 1, id: "sa-orphan-w4", agent: "worker", task: "w4 adopt orphan", slug: "w4",
-          status: "running", mode: "background", startedAt: 8000, rootSessionId: "sess-orphan",
-          depth: 0, turns: 2, totalTokens: 40, model: "prov/child-m", eventLog: [], displayItems: [],
-          error: "engine died mid-round", stopReason: "failed",
-        },
+        v2RegisteredEntry(seedRecord({ id: "sa-orphan-w4", task: "w4 adopt orphan", slug: "w4", startedAt: 8000 })),
       ]);
       const { store, appended } = makeRecoveryStore();
       // entry-born 无子文件锚形态 → recoverEntryOnlyOrphans（finalizeEntryOnlyOrphan）
@@ -900,15 +903,13 @@ describe("RecordStore", () => {
       const entry = appended.find((c) => c.data.id === "sa-orphan-w4");
       // 纠偏 idle 等 revive（非 readopt、非直断）——message 冷查链 idle 全候选可复活
       expect(entry?.data.status).toBe("idle");
-      expect(entry?.data.closedReason).toBeUndefined();
-      // stopReason=failed 保留（?? 兜底不覆盖在场值）——失败红点等续聊的展示信号
-      expect(entry?.data.stopReason).toBe("failed");
-      expect(entry?.data.error).toBe("engine died mid-round");
+      expect(entry?.data.stopReason).toBe("interrupted-by-restart");
+      expect(entry?.data.error).toBeUndefined();
       // [U5/D4] resumable 字段退役——可续聊复活资格由 idle 直读承载，无需独立信号位
       expect(entry?.data.status).toBe("idle");
     });
 
-    it("子文件末行截断 → 纠偏与子文件正文解耦：照常 idle、无截断 error（末行判读路径已删）", () => {
+    it("子文件末行截断 → 收编与子文件正文解耦：照常 idle、无截断 error（末行判读路径已删）", () => {
       const sessionFile = path.join(tmpDir, "orphan-truncated.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "sa-orphan-2", agent: "worker", mode: "background", task: "orphan truncated",
@@ -916,8 +917,9 @@ describe("RecordStore", () => {
       });
       // 制造截断：append 半行 JSON（无换行结尾）——旧实现判「truncated」落 error
       fs.appendFileSync(sessionFile, '{"type":"message","id":"msg-2","pare', "utf-8");
+      seedRecordJournal("sa-orphan-2", { task: "orphan truncated", startedAt: 2000 });
       const mainFile = writeMainSession([
-        { id: "sa-orphan-2", agent: "worker", task: "orphan truncated", startedAt: 2000, status: "running" },
+        v2RegisteredEntry(seedRecord({ id: "sa-orphan-2", task: "orphan truncated", startedAt: 2000 })),
       ]);
       const { store, appended } = makeRecoveryStore();
       store.recoverOrphanRecords("sess-orphan", mainFile);
@@ -928,14 +930,15 @@ describe("RecordStore", () => {
       expect(entry?.data.error).toBeUndefined();
     });
 
-    it("chatMode 孤儿 → 同款 idle 纠正（无 running/chatMode 分流），chatMode 域保留", () => {
+    it("chatMode 孤儿 → 同款 idle 收编（无 running/chatMode 分流），entry 无 chatMode 残留键", () => {
       const sessionFile = path.join(tmpDir, "orphan-chat.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "sa-orphan-3", agent: "worker", mode: "background", task: "orphan chat",
         startedAt: 3000, rootSessionId: "sess-orphan", chatMode: true,
       });
+      seedRecordJournal("sa-orphan-3", { task: "orphan chat", startedAt: 3000 });
       const mainFile = writeMainSession([
-        { id: "sa-orphan-3", agent: "worker", task: "orphan chat", startedAt: 3000, status: "running", chatMode: true },
+        v2RegisteredEntry(seedRecord({ id: "sa-orphan-3", task: "orphan chat", startedAt: 3000 })),
       ]);
       const { store, appended } = makeRecoveryStore();
       store.recoverOrphanRecords("sess-orphan", mainFile);
@@ -948,21 +951,25 @@ describe("RecordStore", () => {
       expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
     });
 
-    it("entry 已收口（末条非 running）/ 无 entry 残留 → 不进判定（零 append）", () => {
+    it("entry 已收口（注册 + 非 interrupted 终态）/ 无 entry 残留 → 不进判定（零 append）", () => {
       const closedFile = path.join(tmpDir, "orphan-closed.jsonl");
       writeSessionJsonl(closedFile, {
         id: "sa-orphan-4", agent: "worker", mode: "background", task: "already settled",
         startedAt: 4000, rootSessionId: "sess-orphan",
       });
-      writeFinalizedState(closedFile);
+      seedTerminalRecord(path.join(rootDir, "records"), { id: "sa-orphan-4", startedAt: 4000, stopReason: "disconnected" });
       const noEntryFile = path.join(tmpDir, "orphan-noentry.jsonl");
       writeSessionJsonl(noEntryFile, {
         id: "sa-orphan-6", agent: "worker", mode: "background", task: "no main entry",
         startedAt: 4500, rootSessionId: "sess-orphan",
       });
+      // sa-orphan-6 的收口证据 = 注册 + 非 interrupted 终态条目；journal 也在场
+      //（终态证据判据回归则收编被放行 → 本用例红）。
+      seedRecordJournal("sa-orphan-6", { task: "no main entry", startedAt: 4500 });
       const mainFile = writeMainSession([
-        // sa-orphan-4 无 entry；sa-orphan-6 末条已收口（idle）
-        { id: "sa-orphan-6", agent: "worker", task: "no main entry", startedAt: 4500, status: "idle" },
+        // sa-orphan-4 无注册条目；sa-orphan-6 注册 + completed 终态
+        v2RegisteredEntry(seedRecord({ id: "sa-orphan-6", task: "no main entry", startedAt: 4500, status: "idle", stopReason: "completed" })),
+        v2SettledEntry(seedRecord({ id: "sa-orphan-6", task: "no main entry", startedAt: 4500, status: "idle", stopReason: "completed", endedAt: 4600 })),
       ]);
       const { store, appended } = makeRecoveryStore();
       store.recoverOrphanRecords("sess-orphan", mainFile);
@@ -970,9 +977,9 @@ describe("RecordStore", () => {
       expect(appended.find((c) => c.data.id === "sa-orphan-6")).toBeUndefined();
     });
 
-    it("entry-born 孤儿（无子文件，spawn 窗口期死亡）→ idle + interrupted-by-restart（直断 closed+gc+error 退役）", () => {
+    it("entry-born 孤儿（无子文件 + 无 journal，spawn 窗口期死亡）→ idle + interrupted-by-restart（直断 closed+gc+error 退役）", () => {
       const mainFile = writeMainSession([
-        { v: 1, id: "sa-entryonly-1", agent: "worker", task: "spawn interrupted", slug: "s", status: "running", mode: "background", startedAt: 6000, rootSessionId: "sess-orphan", depth: 0, turns: 0, totalTokens: 0, model: "m", eventLog: [], displayItems: [] },
+        v2RegisteredEntry(seedRecord({ id: "sa-entryonly-1", task: "spawn interrupted", slug: "s", startedAt: 6000 })),
       ]);
       const { store, appended } = makeRecoveryStore();
       store.recoverEntryOnlyOrphans(mainFile, "sess-orphan");
@@ -981,7 +988,6 @@ describe("RecordStore", () => {
       // 保持 idle 可见（无锚判据的续聊拒绝文案归 U4 准入判据，不在恢复面直断）
       expect(entry?.data.status).toBe("idle");
       expect(entry?.data.stopReason).toBe("interrupted-by-restart");
-      expect(entry?.data.closedReason).toBeUndefined();
       expect(entry?.data.error).toBeUndefined();
       // 防重：orphanJudged 缓存拦截二次判定
       const count = appended.length;
@@ -991,7 +997,7 @@ describe("RecordStore", () => {
 
     it("entry-born 各形态统一 idle（原 chatMode-resumable 分流并入单规则）", () => {
       const mainFile = writeMainSession([
-        { v: 1, id: "sa-entryonly-2", agent: "worker", task: "chat spawn interrupted", slug: "s", status: "running", mode: "background", startedAt: 7000, rootSessionId: "sess-orphan", depth: 0, turns: 0, totalTokens: 0, model: "m", eventLog: [], displayItems: [], chatMode: true },
+        v2RegisteredEntry(seedRecord({ id: "sa-entryonly-2", task: "chat spawn interrupted", slug: "s", startedAt: 7000 })),
       ]);
       const { store, appended } = makeRecoveryStore();
       store.recoverEntryOnlyOrphans(mainFile, "sess-orphan");
@@ -1009,9 +1015,10 @@ describe("RecordStore", () => {
         startedAt: 8000, rootSessionId: "sess-orphan",
       });
       const mainFile = writeMainSession([
-        { v: 1, id: "sa-anchored", agent: "worker", task: "has file", slug: "s", status: "running", mode: "background", startedAt: 8000, rootSessionId: "sess-orphan", depth: 0, turns: 0, totalTokens: 0, model: "m", eventLog: [], displayItems: [] },
-        { v: 1, id: "sa-settled", agent: "worker", task: "settled", slug: "s", status: "closed", mode: "background", startedAt: 8100, rootSessionId: "sess-orphan", depth: 0, turns: 1, totalTokens: 0, model: "m", eventLog: [], displayItems: [] },
-        { v: 1, id: "sa-foreign", agent: "worker", task: "other session", slug: "s", status: "running", mode: "background", startedAt: 8200, rootSessionId: "sess-other", depth: 0, turns: 0, totalTokens: 0, model: "m", eventLog: [], displayItems: [] },
+        v2RegisteredEntry(seedRecord({ id: "sa-anchored", task: "has file", slug: "s", startedAt: 8000 })),
+        v2RegisteredEntry(seedRecord({ id: "sa-settled", task: "settled", slug: "s", startedAt: 8100, status: "idle", stopReason: "completed" })),
+        v2SettledEntry(seedRecord({ id: "sa-settled", task: "settled", slug: "s", startedAt: 8100, status: "idle", stopReason: "completed", endedAt: 8200 })),
+        v2RegisteredEntry(seedRecord({ id: "sa-foreign", task: "other session", slug: "s", startedAt: 8200, rootSessionId: "sess-other" })),
       ]);
       const { store, appended } = makeRecoveryStore();
       store.recoverEntryOnlyOrphans(mainFile, "sess-orphan");
@@ -1021,11 +1028,16 @@ describe("RecordStore", () => {
     });
 
     it("[A11] 损坏 entry（身份域缺失）→ warn 留痕跳过：不抛错、不纠偏、不重判", () => {
-      // task 缺失 = rebuildEntryRecord 拒绝重建（null）——末条 running 的损坏 entry
-      // 意味着该 record 永远无法被纠偏落 idle，静默 continue 会把损坏伪装成
-      // 「无孤儿可判」，排障无从下手（warn 必须含 id）。
+      // task 缺失 = v2PairToRecord 拒绝重建（null）——注册条目身份域损坏的 record
+      // 永远无法被纠偏落 idle，静默 continue 会把损坏伪装成「无孤儿可判」，
+      // 排障无从下手（warn 必须含 id）。
       const mainFile = writeMainSession([
-        { v: 1, id: "sa-corrupt-1", agent: "worker", status: "running", mode: "background", startedAt: 9000, rootSessionId: "sess-orphan", depth: 0, turns: 0, totalTokens: 0, model: "m", eventLog: [], displayItems: [] },
+        {
+          v: SUBAGENT_RECORD_ENTRY_VERSION, kind: "registered", id: "sa-corrupt-1",
+          agent: "worker", slug: "s", origin: "tool",
+          rootSessionId: "sess-orphan", depth: 0, startedAt: 9000,
+          // task 缺失 = 身份域损坏
+        },
       ]);
       const { store, appended } = makeRecoveryStore();
       expect(() => store.recoverEntryOnlyOrphans(mainFile, "sess-orphan")).not.toThrow();
@@ -1066,7 +1078,7 @@ describe("RecordStore", () => {
   // ============================================================
   // W16 [D4]：subagent-record 自描述 appendEntry 上报（状态迁移点）
   // ============================================================
-  describe("W16 subagent-record 自描述 appendEntry 上报", () => {
+  describe("[W1/D1] subagent-record v2 两条款 appendEntry 上报（W16 v1 快照停写）", () => {
     /** appendEntry 捕获（RecordStorePi 最小实现）。 */
     interface AppendedCall {
       customType: string;
@@ -1090,7 +1102,7 @@ describe("RecordStore", () => {
       return d as Record<string, unknown>;
     }
 
-    it("register：append subagent-record entry，data = v1 + SubagentRecord 完整快照 schema", () => {
+    it("register：append v2 注册条目（kind=registered，身份域字段集；运行态/死字节零携带）", () => {
       const { store, appended } = makeStoreWithPi();
       store.register(makeRecord());
 
@@ -1098,68 +1110,58 @@ describe("RecordStore", () => {
       // 写点字面量与 record-entry.ts 常量等值（钉住双源一致性）
       expect(appended[0]?.customType).toBe(SUBAGENT_RECORD_CUSTOM_TYPE);
       // [E2E 实测教训] 必须先 JSON 序列化再断言：appendEntry 捕获的是内存对象，
-      // undefined 值的键名仍在（旧 27-key 断言因此漏检 recordToSubagent 丢
-      // chatMode 的 bug）；真实 JSONL 会丢 undefined 值键，此处对齐生产行为。
+      // undefined 值的键名仍在；真实 JSONL 会丢 undefined 值键，此处对齐生产行为。
       const data = asEntryData(JSON.parse(JSON.stringify(appended[0]?.data)));
-      // register 时点序列化存活字段（undefined 值字段按生产序列化丢弃）：
-      // chatMode 必须显式在场（one-shot=false）——renderer isDone 判据依赖它。
+      // [W1/D1] v2 注册条目字段集 = 身份与锚点（D1 条目契约表）；turns/status/
+      // eventLog/displayItems 等运行态与死字节零携带（turns 投影停写点）。
       expect(Object.keys(data).sort()).toEqual([
-        "agent", "depth", "displayItems", "eventLog",
-        "id", "mode", "model", "rootSessionId", "round", "slug", "startedAt",
-        "status", "task", "totalTokens", "turns", "v", "worktree",
+        "agent", "depth", "id", "kind", "origin",
+        "rootSessionId", "slug", "startedAt", "task", "v",
       ]);
       expect(data).toMatchObject({
-        v: 1,
+        v: 2,
+        kind: "registered",
         id: "r1",
         agent: "worker",
         task: "t",
-        status: "running",
-        mode: "background",
         startedAt: 1000,
         rootSessionId: "sess-current",
-        turns: 0,
-        totalTokens: 0,
-        model: "m",
-        eventLog: [],
-        displayItems: [],
+        origin: "tool",
+        depth: 0,
       });
     });
 
-    it("archive：append 终态完整快照（result/endedAt/closedReason）；one-shot 生命周期共 2 次 append", () => {
+    it("archive：真终局（endedAt 已冻结）append v2 终态条目；one-shot 生命周期共 2 次 append", () => {
       const { store, appended } = makeStoreWithPi();
       const r = makeRecord();
       store.register(r);
-      // 模拟正常终态路径：tryTransition CAS → completeRecord 冻结 → archive（D-017 时序）
-      tryTransition(r, "closed", "gc");
-      completeRecord(r, { text: "task done", turns: 1, durationMs: 500, success: true, sessionId: "r1", toolCalls: [] }, "closed", "gc");
+      // 模拟正常终态路径：trySettleLegacyClosed CAS → completeLegacyClosed 冻结 → archive（D-017 时序）
+      trySettleLegacyClosed(r, "gc");
+      completeLegacyClosed(r, { text: "task done", turns: 1, durationMs: 500, success: true, sessionId: "r1", toolCalls: [] }, "gc");
       store.archive(r);
 
       // 探针基线（单测级）：one-shot 生命周期 = register + archive = 2 次 append
       expect(appended).toHaveLength(2);
-      const data = asEntryData(appended[1]?.data);
+      const data = asEntryData(JSON.parse(JSON.stringify(appended[1]?.data)));
       expect(data).toMatchObject({
-        v: 1,
+        v: 2,
+        kind: "settled",
         id: "r1",
         status: "idle",
-        closedReason: "gc",
+        stopReason: "gc",
         result: "task done",
         endedAt: expect.any(Number) as number,
       });
     });
 
-    it("reportRecordTransition：类外恢复写点上报（chatMode 续轮 round 携带）", () => {
+    it("reportRecordTransition：[W1/D2 停写写点] 零 entry 追加（过程面改走事件文件通道）", () => {
       const { store, appended } = makeStoreWithPi();
       const r = makeRecord({ round: 1 });
       store.reportRecordTransition(r);
 
-      expect(appended).toHaveLength(1);
-      expect(appended[0]?.customType).toBe(SUBAGENT_RECORD_CUSTOM_TYPE);
-      expect(asEntryData(appended[0]?.data)).toMatchObject({
-        v: 1,
-        id: "r1",
-        status: "running",
-        round: 1,
-      });
+      // v1 快照 entry（turns/engineHandle 过程投影）停写——可观测面移交事件文件
+      // （record-bound 帧引擎域感知，record-store-v2-journal.test.ts 覆盖）。
+      expect(appended).toHaveLength(0);
     });
 
     it("pi 未注入（session_start 前）：三写点均安全降级不抛错", () => {
@@ -1237,29 +1239,30 @@ describe("RecordStore", () => {
 // undefined，不再以 `?? ""` 复活——「压掉 defaultModelSelection」的空串复活链切断）
 // ============================================================
 describe("model 水合往返（record-store-rebuild 读侧归一）", () => {
+  // [登记 §3.3] entry 读侧通道已 v2 化（v1 全量快照重建 rebuildEntryRecord 已删）：
+  // 身份域在注册条目，model 归终局域——有值时落 v2 终态条目携带；空串/缺席归一仍是
+  // v2PairToRecord 内的 modelOrUndefined（R4/D6③ 空串复活链切断）。
   it.each([
-    { label: "无 model 键（新写侧缺席形态）", entryModel: "absent", expected: undefined },
-    { label: "model=\"\"（旧写侧空串残留）", entryModel: "", expected: undefined },
-    { label: "model 有值（显式留痕）", entryModel: "prov/model-1", expected: "prov/model-1" },
-  ])("entry 投影：$label → $expected", ({ entryModel, expected }) => {
-    const data: Record<string, unknown> = {
-      v: 1,
-      id: "sa-model-roundtrip",
-      agent: "worker",
-      task: "t",
-      slug: "s",
-      status: "running",
-      mode: "background",
-      startedAt: 1000,
-      rootSessionId: "sess-m",
-      depth: 0,
-      turns: 0,
-      totalTokens: 0,
-      eventLog: [],
-      displayItems: [],
-    };
-    if (entryModel !== "absent") data.model = entryModel;
-    const rec = rebuildEntryRecord("sa-model-roundtrip", data);
+    { label: "无 model（注册条目 + 无终态条目，新写侧缺席形态）", model: undefined, expected: undefined },
+    { label: "model=\"\"（旧写侧空串残留）", model: "", expected: undefined },
+    { label: "model 有值（显式留痕）", model: "prov/model-1", expected: "prov/model-1" },
+  ])("entry 投影：$label → $expected", ({ model, expected }) => {
+    const registered = v2RegisteredEntry(
+      makeSubagentRecord({ id: "sa-model-roundtrip", rootSessionId: "sess-m" }),
+    );
+    const pair: V2EntryPair =
+      model === undefined
+        ? { registered }
+        : {
+            registered,
+            settled: {
+              ...v2SettledEntry(
+                makeSubagentRecord({ id: "sa-model-roundtrip", rootSessionId: "sess-m", status: "idle", stopReason: "completed" }),
+              ),
+              model,
+            },
+          };
+    const rec = v2PairToRecord("sa-model-roundtrip", pair);
     expect(rec).not.toBeNull();
     expect(rec?.model).toBe(expected);
   });
@@ -1278,5 +1281,671 @@ describe("model 水合往返（record-store-rebuild 读侧归一）", () => {
     expect(manifestToSubagent(base)?.model).toBeUndefined();
     expect(manifestToSubagent({ ...base, model: "" })?.model).toBeUndefined();
     expect(manifestToSubagent({ ...base, model: "prov/model-1" })?.model).toBe("prov/model-1");
+  });
+});
+
+// ── [W1 / U2a] v2 写点断言段专属 helper（v2* 前缀防与上文重名）──────
+
+function v2MakeRecord(over: Partial<ExecutionRecord> = {}): ExecutionRecord {
+  const base = createRecord("bg-v2", {
+    agent: "worker",
+    model: "m",
+    mode: "background",
+    task: "t",
+    slug: "v2-journal",
+    startedAt: 1000,
+    rootSessionId: "sess-v2",
+  });
+  return { ...base, ...over };
+}
+
+function v2CapturePi(captured: unknown[]): { appendEntry: (customType: string, data: unknown) => void } {
+  return {
+    appendEntry: (customType: string, data: unknown) => {
+      captured.push({ customType, data });
+    },
+  };
+}
+
+function v2ScanEvents(recordsDir: string, id: string): Promise<readonly RecordEvent[]> {
+  return createRecordEventStream(recordsDir).scan(id);
+}
+
+function v2ReadEventLines(recordsDir: string, id: string): RecordEvent[] {
+  const content = fs.readFileSync(recordEventsPath(recordsDir, id), "utf8");
+  const out: RecordEvent[] = [];
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    out.push(JSON.parse(trimmed) as RecordEvent);
+  }
+  return out;
+}
+
+describe("record 写侧 v2：事件写点映射逐点（W1 D3 表对照）", () => {
+  let rootDir: string;
+  let sessionsDir: string;
+  let recordsDir: string;
+
+  beforeEach(() => {
+    rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-v2-journal-"));
+    sessionsDir = path.join(rootDir, "sessions");
+    recordsDir = path.join(rootDir, "records");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    fs.mkdirSync(recordsDir, { recursive: true });
+  });
+  afterEach(() => {
+    fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  function makeStore(captured: unknown[] = []): RecordStore {
+    const store = new RecordStore(sessionsDir, undefined, v2CapturePi(captured), recordsDir);
+    return store;
+  }
+
+  it("register → record-created 帧 + v2 注册条目（同点双写：事件是事实、条目是锚）", async () => {
+    const captured: unknown[] = [];
+    const store = makeStore(captured);
+    store.register(
+      v2MakeRecord({ id: "sa-v2-reg", origin: "workflow", parentRunId: "run-1", stepIndex: 2 }),
+    );
+
+    const events = await v2ScanEvents(recordsDir, "sa-v2-reg");
+    const created = events.find((e) => e.type === "record-created");
+    expect(created).toMatchObject({
+      type: "record-created",
+      id: "sa-v2-reg",
+      agent: "worker",
+      origin: "workflow",
+      parentRunId: "run-1",
+      stepIndex: 2,
+      rootSessionId: "sess-v2",
+      depth: 0,
+      mode: "background",
+      startedAt: 1000,
+    });
+
+    // v2 注册条目：身份与锚点，无 turns/engineHandle 等运行态（D1 契约字段集）。
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toMatchObject({
+      customType: "subagent-record",
+      data: {
+        v: 2,
+        kind: "registered",
+        id: "sa-v2-reg",
+        origin: "workflow",
+        parentRunId: "run-1",
+        stepIndex: 2,
+        rootSessionId: "sess-v2",
+        startedAt: 1000,
+      },
+    });
+    // 首行头行形态（D3：无 .jsonl 后缀的自描述补偿）。
+    const firstLine = fs
+      .readFileSync(recordEventsPath(recordsDir, "sa-v2-reg"), "utf8")
+      .split("\n")[0]!;
+    expect(JSON.parse(firstLine)).toEqual({ type: "record-events", id: "sa-v2-reg" });
+  });
+
+  it("register 幂等：revive / 重启后重注册不重复落 created 帧与注册条目", async () => {
+    const captured: unknown[] = [];
+    const storeA = makeStore(captured);
+    storeA.register(v2MakeRecord({ id: "sa-v2-idem" }));
+
+    // 模拟重启：全新 store 实例（fold 缓存空），同 id register（markResurrected → register 链）。
+    const capturedB: unknown[] = [];
+    const storeB = makeStore(capturedB);
+    storeB.register(v2MakeRecord({ id: "sa-v2-idem" }));
+
+    const events = await v2ScanEvents(recordsDir, "sa-v2-idem");
+    expect(events.filter((e) => e.type === "record-created")).toHaveLength(1);
+    expect(capturedB).toHaveLength(0); // 注册条目不重复写（journal 已有创建帧）
+  });
+
+  it("spawn 回填（reportRecordTransition 引擎域感知）→ record-bound 帧 + bound manifest 物化", async () => {
+    const captured: unknown[] = [];
+    const store = makeStore(captured);
+    const rec = v2MakeRecord({ id: "sa-v2-bound", engine: "pi" });
+    store.register(rec);
+
+    // spawn 应答回填：sessionFile + engineHandle（writeBindingForRecord 之后的
+    // reportRecordTransition 感知链）。
+    const sessionFile = path.join(sessionsDir, "sa-v2-bound.jsonl");
+    fs.writeFileSync(sessionFile, '{"type":"session","version":3}\n', "utf8"); // 锚定就绪（子文件在盘）
+    rec.sessionFile = sessionFile;
+    store.reportRecordTransition(rec);
+
+    const events = await v2ScanEvents(recordsDir, "sa-v2-bound");
+    expect(events.map((e) => e.type)).toEqual(["record-created", "record-bound"]);
+    expect(events[1]).toMatchObject({
+      type: "record-bound",
+      sessionFile,
+      engine: "pi",
+      epoch: 0,
+    });
+
+    // bound manifest 物化（D2 决策 9）：running 投影落 records/<id>.json。
+    const manifestPath = path.join(recordsDir, "sa-v2-bound.json");
+    expect(fs.existsSync(manifestPath)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(manifestPath, "utf8") as string)).toMatchObject({
+      id: "sa-v2-bound",
+      status: "running",
+      executionStatus: "running",
+      sessionFile,
+    });
+
+    // 引擎域未变的重复 transition：零追加（高频 turns 归约不放大事件面）。
+    store.reportRecordTransition(rec);
+    const eventsAfter = await v2ScanEvents(recordsDir, "sa-v2-bound");
+    expect(eventsAfter).toHaveLength(2);
+  });
+
+  it("markRoundStarted → record-round-started 帧；markRoundIdle → record-round-idle 帧（轮统计快照）", async () => {
+    const store = makeStore();
+    const rec = v2MakeRecord({ id: "sa-v2-round" });
+    store.register(rec);
+    const sessionFile = path.join(sessionsDir, "sa-v2-round.jsonl");
+    fs.writeFileSync(sessionFile, '{"type":"session","version":3}\n', "utf8");
+    rec.sessionFile = sessionFile;
+    store.reportRecordTransition(rec);
+
+    store.markRoundStarted("sa-v2-round");
+    // 轮内 usage 累积（updateFromEvent 归约的近似——直接写字段等价）。
+    rec.turnCount = 3;
+    rec.totalTokens = 4200;
+    store.markRoundIdle("sa-v2-round", { kind: "success", content: "round output" });
+
+    const events = await v2ScanEvents(recordsDir, "sa-v2-round");
+    expect(events.map((e) => e.type)).toEqual([
+      "record-created",
+      "record-bound",
+      "record-round-started",
+      "record-round-idle",
+    ]);
+    expect(events[2]).toMatchObject({ type: "record-round-started", round: 0, epoch: 0 });
+    expect(events[3]).toMatchObject({
+      type: "record-round-idle",
+      stopReason: "completed",
+      turns: 3,
+      totalTokens: 4200,
+    });
+
+    // 轮终收条 = record-round-idle 帧（③：`.state` 已退场，收条不再落 sidecar）。
+    expect(events[3]).toMatchObject({ type: "record-round-idle", stopReason: "completed" });
+  });
+
+  it("markSettled → record-settled 帧 + v2 终态条目；archive 真终局同款（endedAt 判定）", async () => {
+    const captured: unknown[] = [];
+    const store = makeStore(captured);
+    const rec = v2MakeRecord({ id: "sa-v2-settled" });
+    store.register(rec);
+    const sessionFile = path.join(sessionsDir, "sa-v2-settled.jsonl");
+    fs.writeFileSync(sessionFile, '{"type":"session","version":3}\n', "utf8");
+    rec.sessionFile = sessionFile;
+    store.reportRecordTransition(rec);
+    rec.result = "final output text";
+
+    store.markSettled(rec, "interrupted");
+
+    let events = await v2ScanEvents(recordsDir, "sa-v2-settled");
+    expect(events.map((e) => e.type)).toEqual([
+      "record-created",
+      "record-bound",
+      "record-settled",
+    ]);
+    expect(events[2]).toMatchObject({
+      type: "record-settled",
+      stopReason: "interrupted",
+      turns: 0,
+      totalTokens: 0,
+    });
+    const settledEntry = captured.at(-1);
+    expect(settledEntry).toMatchObject({
+      customType: "subagent-record",
+      data: {
+        v: 2,
+        kind: "settled",
+        id: "sa-v2-settled",
+        status: "idle",
+        stopReason: "interrupted",
+        sessionFile,
+        result: "final output text",
+      },
+    });
+
+    // 幂等：settled 后重复终局写点（archive 真终局）不再追加——fold settled 守卫。
+    rec.endedAt = Date.now();
+    store.archive(rec);
+    events = await v2ScanEvents(recordsDir, "sa-v2-settled");
+    expect(events.filter((e) => e.type === "record-settled")).toHaveLength(1);
+  });
+
+  it("archive 真终局（completeLegacyClosed 已冻结 endedAt）→ record-settled 帧；内存回收（endedAt 未设）零事件", async () => {
+    const captured: unknown[] = [];
+    const store = makeStore(captured);
+    const rec = v2MakeRecord({ id: "sa-v2-arch" });
+    store.register(rec);
+    // completeLegacyClosed 桥接形态：冻结终局字段（含 endedAt）。
+    rec.status = "idle";
+    rec.stopReason = "completed";
+    rec.outcome = "completed";
+    rec.endedAt = 12345;
+    rec.result = "done text";
+    rec.turnCount = 2;
+    rec.totalTokens = 300;
+    store.archive(rec);
+
+    const events = await v2ScanEvents(recordsDir, "sa-v2-arch");
+    expect(events.map((e) => e.type)).toEqual(["record-created", "record-settled"]);
+    expect(events[1]).toMatchObject({
+      type: "record-settled",
+      stopReason: "completed",
+      outcome: "completed",
+      endedAt: 12345,
+      turns: 2,
+      totalTokens: 300,
+    });
+    expect(captured.at(-1)).toMatchObject({
+      data: { v: 2, kind: "settled", id: "sa-v2-arch", endedAt: 12345, turns: 2, totalTokens: 300, result: "done text" },
+    });
+
+    // 非终局 archive（endedAt 未设）：零事件零条目。
+    const captured2: unknown[] = [];
+    const store2 = makeStore(captured2);
+    const rec2 = v2MakeRecord({ id: "sa-v2-evict" });
+    store2.register(rec2);
+    store2.archive(rec2);
+    const events2 = await v2ScanEvents(recordsDir, "sa-v2-evict");
+    expect(events2.map((e) => e.type)).toEqual(["record-created"]);
+  });
+
+  it("markReopened → record-reopened 帧（epoch 递增 + round 归零）；重开后 round-started 清除 settled", async () => {
+    const store = makeStore();
+    const rec = v2MakeRecord({ id: "sa-v2-reopen" });
+    store.register(rec);
+    const sessionFile = path.join(sessionsDir, "sa-v2-reopen.jsonl");
+    fs.writeFileSync(sessionFile, '{"type":"session","version":3}\n', "utf8");
+    rec.sessionFile = sessionFile;
+    store.reportRecordTransition(rec);
+    store.markSettled(rec, "completed");
+
+    const newSessionFile = path.join(sessionsDir, "sa-v2-reopen-2.jsonl");
+    fs.writeFileSync(newSessionFile, '{"type":"session","version":3}\n', "utf8");
+    expect(
+      store.markReopened(rec, { engine: "pi", sessionFile: newSessionFile }),
+    ).toBe(true);
+
+    let events = await v2ScanEvents(recordsDir, "sa-v2-reopen");
+    expect(events.map((e) => e.type)).toEqual([
+      "record-created",
+      "record-bound",
+      "record-settled",
+      "record-reopened",
+    ]);
+    expect(events[3]).toMatchObject({ type: "record-reopened", epoch: 1, round: 0 });
+
+    // 重开后的新轮：round-started 帧（fold 侧清除 settled——可续实体回边）。
+    store.markRoundStarted("sa-v2-reopen");
+    events = await v2ScanEvents(recordsDir, "sa-v2-reopen");
+    expect(events.at(-1)).toMatchObject({ type: "record-round-started", round: 0, epoch: 1 });
+  });
+
+  it("seq 单调递增（record 侧对称断言）：全部事件行 seq 严格递增且自 1 起", async () => {
+    const store = makeStore();
+    const rec = v2MakeRecord({ id: "sa-v2-seq" });
+    store.register(rec);
+    const sessionFile = path.join(sessionsDir, "sa-v2-seq.jsonl");
+    fs.writeFileSync(sessionFile, '{"type":"session","version":3}\n', "utf8");
+    rec.sessionFile = sessionFile;
+    store.reportRecordTransition(rec);
+    store.markRoundStarted("sa-v2-seq");
+    store.markRoundIdle("sa-v2-seq", { kind: "failed", reason: "boom" });
+    // 下一轮在飞中断：round-started → markSettled（CAS 仅 running 可收口）。
+    store.markRoundStarted("sa-v2-seq");
+    store.markSettled(rec, "interrupted-by-parent");
+
+    const events = v2ReadEventLines(recordsDir, "sa-v2-seq").filter(
+      (e) => (e.type as string) !== "record-events",
+    );
+    // 事件行（排除头行后 6 条）seq = 1..6 严格递增。
+    expect(events.map((e) => e.seq)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(events.map((e) => e.type)).toEqual([
+      "record-created",
+      "record-bound",
+      "record-round-started",
+      "record-round-idle",
+      "record-round-started",
+      "record-settled",
+    ]);
+  });
+
+  it("验收②：主 session 新写 entry 无 eventLog/displayItems 字节", async () => {
+    const captured: unknown[] = [];
+    const store = makeStore(captured);
+    const rec = v2MakeRecord({ id: "sa-v2-bytes" });
+    store.register(rec);
+    store.markRoundIdle("sa-v2-bytes", { kind: "success", content: "r" });
+    rec.endedAt = Date.now();
+    store.archive(rec);
+
+    // 捕获的全部 subagent-record 条目（注册 + 终态）序列化产物不含死字节键。
+    for (const { data } of captured as Array<{ customType: string; data: unknown }>) {
+      if ((data as { kind?: string }).kind === undefined) continue;
+      const serialized = JSON.stringify(data);
+      expect(serialized).not.toContain("eventLog");
+      expect(serialized).not.toContain("displayItems");
+    }
+    // 两条款恰两条（注册 + 终态）——markRoundIdle 等过程写点零条目。
+    expect(captured).toHaveLength(2);
+  });
+});
+
+// ============================================================
+// created 事件自承载绑定侧独有字段（.record-binding 退场的前置）
+// ============================================================
+
+describe("record-created 帧承载绑定侧独有字段（model / thinkingLevel / worktree）", () => {
+  let fieldRoot: string;
+  let fieldSessions: string;
+  let fieldRecords: string;
+
+  beforeEach(() => {
+    fieldRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-created-fields-"));
+    fieldSessions = path.join(fieldRoot, "sessions");
+    fieldRecords = path.join(fieldRoot, "records");
+    fs.mkdirSync(fieldSessions, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(fieldRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  function makeStoreForFields(): RecordStore {
+    return new RecordStore(fieldSessions, undefined, v2CapturePi([]), fieldRecords);
+  }
+
+  it("指定模型/档位且启用 worktree → 三个字段进 created 帧", async () => {
+    const store = makeStoreForFields();
+    store.register(
+      v2MakeRecord({
+        id: "sa-v2-fields",
+        model: "prov/model-a",
+        thinkingLevel: "xhigh",
+        hadWorktree: true,
+      }),
+    );
+
+    const created = (await v2ScanEvents(fieldRecords, "sa-v2-fields")).find(
+      (e) => e.type === "record-created",
+    );
+    expect(created).toMatchObject({
+      type: "record-created",
+      model: "prov/model-a",
+      thinkingLevel: "xhigh",
+      worktree: true,
+    });
+  });
+
+  it("未指定模型/档位、未启用 worktree → 不落键（缺省语义，不写空值）", async () => {
+    const store = makeStoreForFields();
+    store.register(v2MakeRecord({ id: "sa-v2-fields-empty", model: undefined }));
+
+    const created = (await v2ScanEvents(fieldRecords, "sa-v2-fields-empty")).find(
+      (e) => e.type === "record-created",
+    ) as Record<string, unknown> | undefined;
+    expect(created).toBeDefined();
+    expect(created).not.toHaveProperty("model");
+    expect(created).not.toHaveProperty("thinkingLevel");
+    expect(created).not.toHaveProperty("worktree");
+  });
+});
+
+// ============================================================
+// 折叠 → 终态收条投影（.state sidecar 退场的桥，① 读侧换源）
+// ============================================================
+
+describe("stateMarkerFromFold（折叠状态 → 终态收条）", () => {
+  const idleEvent = {
+    type: "record-round-idle" as const,
+    seq: 2,
+    ts: 2000,
+    round: 1,
+    stopReason: "completed" as const,
+    turns: 1,
+    totalTokens: 10,
+  };
+  const settledEvent = {
+    type: "record-settled" as const,
+    seq: 3,
+    ts: 3000,
+    stopReason: "completed" as const,
+    endedAt: 3000,
+    turns: 1,
+    totalTokens: 10,
+  };
+
+  it("settled 在场 → 终局收条（reason/endedAt 取 settled）", () => {
+    const fold = foldRecordEvents([idleEvent, settledEvent]);
+    expect(stateMarkerFromFold(fold)).toEqual({
+      status: "idle",
+      reason: "completed",
+      endedAt: 3000,
+    });
+  });
+
+  it("仅 round-idle 在场 → 轮终收条（endedAt 取该事件时间）", () => {
+    const fold = foldRecordEvents([idleEvent]);
+    expect(stateMarkerFromFold(fold)).toEqual({
+      status: "idle",
+      reason: "completed",
+      endedAt: 2000,
+    });
+  });
+
+  it("轮终收条之后又有轮开始 → undefined（续轮记录不继承上一轮停因）", () => {
+    const fold = foldRecordEvents([
+      idleEvent,
+      { type: "record-round-started", seq: 3, ts: 3000, round: 2, epoch: 0 },
+    ]);
+    expect(stateMarkerFromFold(fold)).toBeUndefined();
+  });
+
+  it("无收条事件 / 无折叠 → undefined（在途中断，与 sidecar 缺席同语义）", () => {
+    expect(stateMarkerFromFold(undefined)).toBeUndefined();
+    expect(stateMarkerFromFold(foldRecordEvents([]))).toBeUndefined();
+  });
+});
+
+describe("[② 读侧换源] receiptStatisticsFromFold / baselineStatisticsFromFold（统计域投影）", () => {
+  const created = {
+    type: "record-created" as const,
+    seq: 1,
+    ts: 1000,
+    id: "sa-stats",
+    agent: "w",
+    task: "t",
+    slug: "s",
+    origin: "tool" as const,
+    rootSessionId: "root",
+    depth: 0,
+    mode: "background" as const,
+    startedAt: 1000,
+  };
+  const roundIdle = {
+    type: "record-round-idle" as const,
+    seq: 2,
+    ts: 2000,
+    round: 1,
+    stopReason: "completed" as const,
+    turns: 3,
+    totalTokens: 450,
+  };
+  const settled = {
+    type: "record-settled" as const,
+    seq: 3,
+    ts: 3000,
+    stopReason: "completed" as const,
+    endedAt: 3000,
+    turns: 5,
+    totalTokens: 900,
+  };
+
+  it("收条形（receiptStatistics）：settled 在场 → 终值 turns/tokens + endedAt=settled.endedAt", () => {
+    const stats = receiptStatisticsFromFold(foldRecordEvents([created, roundIdle, settled]));
+    // round 取 round-idle 帧自带的累计轮数（[② 读侧换源] 轮终收条承载轮计数）。
+    expect(stats).toEqual({ round: 1, turns: 5, totalTokens: 900, endedAt: 3000 });
+  });
+
+  it("收条形：仅轮终收条且是最后一条事件 → 轮终快照（endedAt 取 round-idle ts）", () => {
+    const stats = receiptStatisticsFromFold(foldRecordEvents([created, roundIdle]));
+    expect(stats).toEqual({ round: 1, turns: 3, totalTokens: 450, endedAt: 2000 });
+  });
+
+  it("收条形：轮终收条之后又有轮开始（在途续轮）→ 统计不投影、round 仍携带", () => {
+    const stats = receiptStatisticsFromFold(
+      foldRecordEvents([created, roundIdle, { type: "record-round-started", seq: 3, ts: 3000, round: 2, epoch: 0 }]),
+    );
+    expect(stats).toEqual({ round: 2, turns: undefined, totalTokens: undefined, endedAt: undefined });
+  });
+
+  it("收条形：无收条 / 无折叠 → 全 undefined（在途中断不误投影）", () => {
+    expect(receiptStatisticsFromFold(undefined)).toEqual({
+      round: undefined,
+      turns: undefined,
+      totalTokens: undefined,
+      endedAt: undefined,
+    });
+    expect(receiptStatisticsFromFold(foldRecordEvents([created]))).toEqual({
+      round: undefined,
+      turns: undefined,
+      totalTokens: undefined,
+      endedAt: undefined,
+    });
+  });
+
+  it("基线形（baselineStatistics）：无 last-event 守卫——轮中崩溃取最近轮终快照（revive 水合语义）", () => {
+    // round-idle 之后又 round-started（轮中崩溃形态）：基线仍取上一条 round-idle。
+    const inFlightCrash = foldRecordEvents([
+      created,
+      roundIdle,
+      { type: "record-round-started", seq: 3, ts: 3000, round: 2, epoch: 0 },
+    ]);
+    expect(baselineStatisticsFromFold(inFlightCrash)).toEqual({
+      round: 2,
+      turns: 3,
+      totalTokens: 450,
+      endedAt: 2000,
+    });
+    // settled 在场取终值。
+    expect(baselineStatisticsFromFold(foldRecordEvents([created, settled]))).toEqual({
+      round: undefined,
+      turns: 5,
+      totalTokens: 900,
+      endedAt: 3000,
+    });
+    expect(baselineStatisticsFromFold(undefined)).toEqual({
+      round: undefined,
+      turns: undefined,
+      totalTokens: undefined,
+      endedAt: undefined,
+    });
+  });
+});
+
+// ============================================================
+// [④ 纯索引水位] manifest 水位（写侧嵌入 + 读侧校验）
+// ============================================================
+
+describe("[④ 纯索引水位] manifest 水位（写侧嵌入 + 读侧校验）", () => {
+  let wmDir: string;
+  let wmSessions: string;
+  let wmRecords: string;
+
+  beforeEach(() => {
+    wmDir = fs.mkdtempSync(path.join(os.tmpdir(), "sa-manifest-watermark-"));
+    wmSessions = path.join(wmDir, "sessions");
+    wmRecords = path.join(wmDir, "records");
+    fs.mkdirSync(wmSessions, { recursive: true });
+    fs.mkdirSync(wmRecords, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(wmDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  const manifestPath = (id: string): string => path.join(wmRecords, `${id}.json`);
+
+  /** 生产形态 store（manifestStore + manifestDir 双接线——水位校验的前提）。 */
+  function newWmStore(): RecordStore {
+    return new RecordStore(wmSessions, new ManifestStore(wmRecords), undefined, wmRecords);
+  }
+
+  /** 播种 settled record（created + settled 帧，无子 session 文件——manifest 源独占可见）。 */
+  function seedSettledRecord(id: string): void {
+    seedTerminalRecord(wmRecords, {
+      id,
+      startedAt: 1000,
+      stopReason: "completed",
+      turns: 2,
+      totalTokens: 120,
+    });
+  }
+
+  it("markSettled 物化嵌 <id>.events 水位（写点构造性新鲜——先事件后投影写序）", () => {
+    const store = newWmStore();
+    const rec = makeRecord({ id: "sa-wm" });
+    store.register(rec);
+    expect(store.markSettled(rec, "gc")).toBe(true);
+
+    const manifest = JSON.parse(fs.readFileSync(manifestPath("sa-wm"), "utf-8")) as {
+      eventsStamp?: { mtimeMs: number; size: number };
+    };
+    expect(manifest.eventsStamp).toBeDefined();
+    // 水位 = settled 帧落盘后的事件文件 stat（先事件后投影 → 构造性新鲜）。
+    const events = fs.statSync(path.join(wmRecords, "sa-wm.events"));
+    expect(manifest.eventsStamp?.size).toBe(events.size);
+    expect(manifest.eventsStamp?.mtimeMs).toBe(events.mtimeMs);
+    store.dispose();
+  });
+
+  it("水位不符（半更新窗）→ manifest 源跳过（陈旧快照不投影）；无水位存量 → 照常投影", () => {
+    seedSettledRecord("sa-wm-fresh");
+    seedSettledRecord("sa-wm-stale");
+    seedSettledRecord("sa-wm-legacy");
+
+    // fresh：手写带正确水位的 manifest → 投影。
+    const events = fs.statSync(path.join(wmRecords, "sa-wm-fresh.events"));
+    fs.writeFileSync(
+      manifestPath("sa-wm-fresh"),
+      JSON.stringify({
+        id: "sa-wm-fresh", rootSessionId: "sess-current", agentName: "worker",
+        status: "running", createdAt: 1000,
+        eventsStamp: { mtimeMs: events.mtimeMs, size: events.size },
+      }),
+      "utf-8",
+    );
+    // stale：手写错水位（半更新窗形态）→ 跳过。
+    fs.writeFileSync(
+      manifestPath("sa-wm-stale"),
+      JSON.stringify({
+        id: "sa-wm-stale", rootSessionId: "sess-current", agentName: "worker",
+        status: "running", createdAt: 1000,
+        eventsStamp: { mtimeMs: 1, size: 1 },
+      }),
+      "utf-8",
+    );
+    // legacy：无水位（存量形态）→ 照常投影（宽容存量，行为零变化）。
+    fs.writeFileSync(
+      manifestPath("sa-wm-legacy"),
+      JSON.stringify({
+        id: "sa-wm-legacy", rootSessionId: "sess-current", agentName: "worker",
+        status: "running", createdAt: 1000,
+      }),
+      "utf-8",
+    );
+
+    const store = newWmStore();
+    const ids = store.collectRecords(10, "all").map((r) => r.id).sort();
+    expect(ids).toEqual(["sa-wm-fresh", "sa-wm-legacy"]);
   });
 });

@@ -14,8 +14,9 @@
  *    aria-label 可定位 + aria-checked 随点击翻转 + 翻转结果透传进 save payload
  *
  * 与 renderer 端 provider-edit-body-phase-b.test.ts 的差异（mock 层全部换 injection stub）：
- *  - USE_QUOTA_CONFIGURE_KEY provide 最小 stub 工厂（对齐 injection-keys.ts 的
- *    QuotaConfigureState 契约逐字段），零 renderer import（ui 包铁律）
+ *  - QUOTA_CONFIGURE_FACTORY_KEY provide 最小 QuotaConfigureModule 桩工厂（对齐 core
+ *    quota-configure-module.ts 契约），零 renderer import（ui 包铁律）；quota 行为级覆盖
+ *    （齐备性 / payload / carry-in 文案）归 renderer 端真实 module 集成测试
  *  - SETTINGS_TOAST_KEY provide vi.fn stub（save 成功 toast 断言）
  *  - provideSettingsTransport / providePlatform（@taiji/core 模块级单例注入，
  *    useProviderEdit 的 setProvider/discoverModels 经 transport spy 断言）
@@ -29,36 +30,29 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
-import { nextTick, ref } from 'vue'
-import type { Ref } from 'vue'
 import type {
   ProviderInfo,
   ProviderId,
   SetProviderData,
-  QuotaPreset,
-  QuotaAuthKind,
-  QuotaCredentialSource,
-  QuotaFetchFailureReason,
-  NormalizedQuotaRow,
 } from '@taiji/shared'
 import {
   providePlatform,
   provideSettingsTransport,
+  provideSettingsStore,
+  createSettingsStore,
   __resetPlatformForTesting,
-  __resetSettingsStoreForTesting,
-  __resetSettingsTransportForTesting,
   type SettingsTransport,
   type DiscoverModelsResponse,
 } from '@taiji/core'
+import { makeSettingsTransportStub } from '@taiji/core/testing'
 import ProviderEditBody from '../provider/ProviderEditBody.vue'
 import {
   SETTINGS_TOAST_KEY,
-  USE_QUOTA_CONFIGURE_KEY,
+  QUOTA_CONFIGURE_FACTORY_KEY,
   type SettingsToast,
-  type QuotaConfigureState,
-  type QuotaTestStatus,
-  type ReadinessMissing,
 } from '../injection-keys'
+import { inMemoryStorage, pickSelectOption, expectTestHints } from './helpers'
+import { makeQuotaModuleStub } from '@taiji/core/testing'
 
 // ── fixture ──
 
@@ -156,43 +150,11 @@ const CATALOG_GATEWAY_P: ProviderInfo = {
   baseUrl: CATALOG_GATEWAY_URL,
 }
 
-// ── injection stub（零 renderer import：契约对齐 injection-keys.ts）──
+// ── injection stub（零 renderer import：契约对齐 core quota-configure-module.ts）──
 
-/** QuotaConfigureState 最小 stub：字段逐一对齐契约 v2（ProviderEditBody 解构后全量透传给 CodingPlanSection） */
-function makeQuotaState(): QuotaConfigureState {
-  return {
-    fetcherId: ref<string | undefined>(undefined),
-    fetcherOptions: [],
-    enabled: ref(false),
-    cookieInput: ref(''),
-    apiKeyInput: ref(''),
-    credentialSource: ref<QuotaCredentialSource>('provider'),
-    providerCredentialAvailable: ref(false),
-    quotaApiKeyConfigured: ref(false),
-    providerCredentialPendingSave: ref(false),
-    workspaceInput: ref(''),
-    workspaceConfigured: ref(false),
-    needsWorkspace: ref(false),
-    readiness: ref<{ ready: boolean; missing: ReadinessMissing[] }>({ ready: false, missing: [] }),
-    testStatus: ref<QuotaTestStatus>('idle'),
-    testError: ref(''),
-    quotaData: ref<NormalizedQuotaRow | null>(null),
-    lastFetchAt: ref<number | null>(null),
-    isCookieAuth: ref(false),
-    authKinds: ref<readonly QuotaAuthKind[]>([]),
-    testFailReason: ref<QuotaFetchFailureReason | null>(null),
-    helpUrl: ref<string | undefined>(undefined),
-    helpText: ref<string | undefined>(undefined),
-    configuring: ref(false),
-    configureError: ref(''),
-    setEnabled: async () => {},
-    saveAndTest: async () => {},
-    reset: () => {},
-  }
-}
-
-/** USE_QUOTA_CONFIGURE_KEY stub 工厂（vi.fn 包装供「注入被真实消费」断言） */
-const quotaFactoryStub = vi.fn((_preset: Ref<QuotaPreset | undefined>, _providerRef: Ref<ProviderInfo | null>) => makeQuotaState())
+/** QUOTA_CONFIGURE_FACTORY_KEY stub 工厂（vi.fn 包装供「注入被真实消费」断言；契约门由
+ *  makeQuotaModuleStub 的 QuotaConfigureModule 返回标注承担） */
+const quotaFactoryStub = vi.fn(() => makeQuotaModuleStub({ state: 'ready' }))
 
 const toastInfoSpy = vi.fn()
 const toastStub: SettingsToast = {
@@ -203,50 +165,23 @@ const toastStub: SettingsToast = {
 
 // ── transport / platform stub（core 模块级单例注入）──
 
-const setProviderSpy = vi.fn(async (_id: string, _data: SetProviderData) => undefined)
+const setProviderSpy = vi.fn(async (_id: string, _data: SetProviderData) => ({}))
 /** 显式标注返回类型：M4 场景 ⑨ 需按用例注入 results / error（类型推断会把返回值收窄成 models: never[]） */
 const discoverModelsSpy = vi.fn(async (): Promise<DiscoverModelsResponse> => ({ success: true, models: [] }))
 
+/** [C3] 共享 seam 桩工厂（@taiji/core/testing，全方法面中性默认）+ 本文件两个 spy。 */
 function makeTransport(): SettingsTransport {
-  const noop = (): void => {}
-  return {
-    listProviders: vi.fn(async () => ({ providers: [] })),
-    listModels: vi.fn(async () => []),
-    setScopedModels: vi.fn(async () => [] as string[]),
+  return makeSettingsTransportStub({
     setProvider: setProviderSpy,
     discoverModels: discoverModelsSpy,
-    setSkillDirs: vi.fn(async () => undefined),
-    setAgentDirs: vi.fn(async () => undefined),
-    setExtensionDirs: vi.fn(async () => undefined),
-    onProviders: () => noop,
-    onModels: () => noop,
-    onSkills: () => noop,
-    onAgents: () => noop,
-    onExtensions: () => noop,
-    onSkillDirs: () => noop,
-    onAgentDirs: () => noop,
-    onExtensionDirs: () => noop,
-    onDefaults: () => noop,
-    onSystemPrompt: () => noop,
-    onTerminalConfig: () => noop,
-  }
-}
-
-function inMemoryStorage() {
-  const map = new Map<string, string>()
-  return {
-    get: async (k: string) => map.get(k) ?? null,
-    set: async (k: string, v: string) => { map.set(k, v) },
-    remove: async (k: string) => { map.delete(k) },
-  }
+  })
 }
 
 let wrapper: VueWrapper | null = null
 
 beforeEach(() => {
   __resetPlatformForTesting()
-  __resetSettingsStoreForTesting()
-  __resetSettingsTransportForTesting()
+  provideSettingsStore(createSettingsStore())
   providePlatform({
     kind: 'mock',
     storage: inMemoryStorage(),
@@ -261,8 +196,8 @@ beforeEach(() => {
 
 afterEach(() => {
   wrapper?.unmount()
-  wrapper = null
   document.body.innerHTML = ''
+  wrapper = null
 })
 
 /** mount ProviderEditBody（provide injection stub；attachTo 供 Dialog teleport 查询） */
@@ -273,7 +208,7 @@ function mountBody(provider: ProviderInfo, props: Record<string, unknown> = {}):
     global: {
       provide: {
         [SETTINGS_TOAST_KEY]: toastStub,
-        [USE_QUOTA_CONFIGURE_KEY]: quotaFactoryStub,
+        [QUOTA_CONFIGURE_FACTORY_KEY]: quotaFactoryStub,
       },
     },
   })
@@ -310,7 +245,7 @@ describe('凭证区条件化：oauth 型 provider', () => {
     expect(wrapper.find('[data-testid="oauth-logout-btn"]').exists()).toBe(true)
     // oauth 形态不渲染 apiKey 输入
     expect(wrapper.find('[data-testid="provider-edit-apikey"]').exists()).toBe(false)
-    // USE_QUOTA_CONFIGURE_KEY 注入被真实消费（非 noop fallback）
+    // QUOTA_CONFIGURE_FACTORY_KEY 注入被真实消费（非 noop fallback）
     expect(quotaFactoryStub).toHaveBeenCalledTimes(1)
   })
 
@@ -693,115 +628,6 @@ describe('添加模型表单：reasoning 思考开关（D4）', () => {
   })
 })
 
-// ══ 场景 ⑦：Coding Plan 接线（契约 v2：workspace 回写 + R4 carry-in 槽位哨兵排除）══════
-
-describe('quota 接线注入态（契约 v2 透传）', () => {
-  it('CodingPlanSection 上抛 update:workspaceInput → 写回注入的 quotaWorkspaceInput ref', async () => {
-    // 捕获注入的 quota state（ProviderEditBody 透传给 CodingPlanSection 的 workspace 真源）
-    let state: QuotaConfigureState | undefined
-    quotaFactoryStub.mockImplementationOnce(() => {
-      state = makeQuotaState()
-      return state
-    })
-    wrapper = mountBody(OAUTH_P)
-    await flushPromises()
-
-    // cookie 类 + 资源维度 fetcher → CodingPlanSection 渲染 workspace 块
-    // （契约 v2：D8 要求类型已选才渲染参数区，故先给出 fetcherId）
-    state!.fetcherId.value = 'opencode-go'
-    state!.isCookieAuth.value = true
-    state!.needsWorkspace.value = true
-    await nextTick()
-    const input = document.body.querySelector<HTMLInputElement>('[data-testid="quota-workspace-input"]')
-    expect(input).toBeTruthy()
-
-    input!.value = 'wrk_9'
-    input!.dispatchEvent(new Event('input'))
-    await nextTick()
-
-    expect(state!.workspaceInput.value).toBe('wrk_9')
-  })
-
-  /**
-   * R4（impl-plan §5）：providerCredentialPendingSave 是 carry-in 可写 ref，由 ProviderEditBody
-   * 按 `form.apiKey !== '' && !== API_KEY_CLEAR_SENTINEL` 写入。判定式排除哨兵是必须的：
-   * 用户点「清除」时 form.apiKey === '__CLEAR__'（非空但语义是无凭据），只用 `!== ''` 会让
-   * UI 显示与事实相反的「已填写，保存后即可查询」（§7.4 两套文案）。
-   */
-  it('provider 表单填 API Key → pendingSave=true 且 UI 渲染「已填写，保存后即可查询」文案', async () => {
-    let state: QuotaConfigureState | undefined
-    quotaFactoryStub.mockImplementationOnce(() => {
-      state = makeQuotaState()
-      return state
-    })
-    wrapper = mountBody(APIKEY_P)
-    await flushPromises()
-
-    // 注入态：选中 api-key 类类型、来源=provider、provider 侧无可用凭据 → 警告文案可见
-    state!.fetcherId.value = 'zhipu'
-    state!.credentialSource.value = 'provider'
-    state!.providerCredentialAvailable.value = false
-    await nextTick()
-    // 草稿为空 → 「还没有可用的 API Key」
-    expect(wrapper.text()).toContain('settings.providerEdit.quotaProviderCredentialMissing')
-    expect(state!.providerCredentialPendingSave.value).toBe(false)
-
-    // 表单里填 Key（尚未保存 provider）→ carry-in ref 翻转 + 文案切换（用户可见）
-    await wrapper.find('[data-testid="provider-edit-apikey"]').setValue('sk-draft-key')
-    await flushPromises()
-    expect(state!.providerCredentialPendingSave.value).toBe(true)
-    expect(wrapper.text()).toContain('settings.providerEdit.quotaProviderCredentialPendingSave')
-    expect(wrapper.text()).not.toContain('settings.providerEdit.quotaProviderCredentialMissing')
-  })
-
-  it('点「清除」写入 __CLEAR__ 哨兵 → pendingSave 回 false，文案退回「还没有可用的 API Key」', async () => {
-    let state: QuotaConfigureState | undefined
-    quotaFactoryStub.mockImplementationOnce(() => {
-      state = makeQuotaState()
-      return state
-    })
-    wrapper = mountBody(APIKEY_P)
-    await flushPromises()
-
-    state!.fetcherId.value = 'zhipu'
-    state!.credentialSource.value = 'provider'
-    state!.providerCredentialAvailable.value = false
-    await wrapper.find('[data-testid="provider-edit-apikey"]').setValue('sk-draft-key')
-    await flushPromises()
-    expect(state!.providerCredentialPendingSave.value).toBe(true)
-
-    // 清除按钮（provider.apiKeySet=true 时才渲染）→ form.apiKey = API_KEY_CLEAR_SENTINEL
-    const clearBtn = wrapper.find('button[aria-label="settings.providerEdit.clearKey"]')
-    expect(clearBtn.exists()).toBe(true)
-    await clearBtn.trigger('click')
-    await flushPromises()
-
-    // 哨兵非空，但语义 = 无凭据：pendingSave 必须回 false，否则文案与事实相反
-    expect(state!.providerCredentialPendingSave.value).toBe(false)
-    expect(wrapper.text()).toContain('settings.providerEdit.quotaProviderCredentialMissing')
-    expect(wrapper.text()).not.toContain('settings.providerEdit.quotaProviderCredentialPendingSave')
-  })
-
-  it('provider 表单草稿清空（删除已输入内容）→ pendingSave 回 false', async () => {
-    let state: QuotaConfigureState | undefined
-    quotaFactoryStub.mockImplementationOnce(() => {
-      state = makeQuotaState()
-      return state
-    })
-    wrapper = mountBody(APIKEY_P)
-    await flushPromises()
-
-    const input = wrapper.find('[data-testid="provider-edit-apikey"]')
-    await input.setValue('sk-draft-key')
-    await flushPromises()
-    expect(state!.providerCredentialPendingSave.value).toBe(true)
-
-    await input.setValue('')
-    await flushPromises()
-    expect(state!.providerCredentialPendingSave.value).toBe(false)
-  })
-})
-
 // ══ 场景 ⑧：M4 catalog 展示对齐 pi 真实语义（设计 D5/D7）════════════════════
 
 /**
@@ -1050,10 +876,7 @@ describe('M3b 接线：测试连接分组结果与模型发现门控（应用级
     expect(wrapper.find('[data-testid="provider-test-overall-error"]').exists()).toBe(false)
 
     // 失败指引的 {baseUrl} = 宿主下发的生效端点（默认 '' 时 mock 不 append，故此断言即接线证据）
-    const hints = wrapper.find('[data-testid="provider-test-hints"]')
-    expect(hints.exists()).toBe(true)
-    expect(hints.text()).toContain('settings.providerEdit.testHintHttpError')
-    expect(hints.text()).toContain(CATALOG_GATEWAY_URL)
+    expectTestHints(wrapper, 'settings.providerEdit.testHintHttpError', CATALOG_GATEWAY_URL)
   })
 
   it('测试连接整体失败（success=false）→ 编辑体内渲染整体失败原因 + 指引（testError 接线）', async () => {
@@ -1089,26 +912,13 @@ describe('M3b 接线：测试连接分组结果与模型发现门控（应用级
 // ══ 场景 ⑩：R4 review 增量补口（coverage Gate 复跑实测 4 行未覆盖）════════════════════
 
 /**
- * R4 补口（实测 uncovered 行）：custom 类型 Select 的 v-model handler、quota 事件透传
- * （update:fetcherId / update:credentialSource → 注入 ref 回写）、providerApi computed
+ * R4 补口（实测 uncovered 行）：custom 类型 Select 的 v-model handler、quota seam 消费
+ * （module 实例经注入提供给 CodingPlanSection）、providerApi computed
  * （compat 编辑器展开时经 ModelListSection.resolveApi 惰性求值，isCatalog=false 走 form.api 分支）。
  * 三视角：黑盒 = 交互后用户可见状态 / payload；白盒 = 注入 state ref 回写断言（不窥组件内部）；
  * 观察者 = 全部 DOM / payload / 注入 stub 断言，无组件内部 spy。
  */
-describe('R4 补口：类型 Select / quota 事件接线 / compat providerApi', () => {
-  /** reka Select 交互（happy-dom 需显式 pointer 事件；同 renderer rename-model 测试模式） */
-  async function pickSelectOption(triggerEl: HTMLElement, label: string): Promise<void> {
-    triggerEl.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
-    triggerEl.click()
-    await flushPromises()
-    const target = Array.from(document.body.querySelectorAll('[role="option"]'))
-      .find((el): el is HTMLElement => (el.textContent ?? '').includes(label))
-    expect(target).toBeTruthy()
-    target!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
-    target!.click()
-    await flushPromises()
-  }
-
+describe('R4 补口：类型 Select / compat providerApi', () => {
   it('custom 类型 Select 可改：选 openai-responses → dirty → payload.type 跟随', async () => {
     wrapper = mountBody(CUSTOM_P)
     await flushPromises()
@@ -1123,46 +933,6 @@ describe('R4 补口：类型 Select / quota 事件接线 / compat providerApi', 
     await wrapper.find('[data-testid="provider-save-btn"]').trigger('click')
     await flushPromises()
     expect(savePayload().type).toBe('openai-responses')
-  })
-
-  it('quota 类型下拉透传：CodingPlanSection 上抛 update:fetcherId → 注入 state.fetcherId 回写', async () => {
-    let state: QuotaConfigureState | undefined
-    quotaFactoryStub.mockImplementationOnce(() => {
-      state = makeQuotaState()
-      state.fetcherOptions = [
-        { value: 'alpha', label: 'Alpha Plan' },
-        { value: 'beta', label: 'Beta Plan' },
-      ]
-      return state
-    })
-    wrapper = mountBody(OAUTH_P)
-    await flushPromises()
-
-    // D8 类型未定态类型下拉也恒渲染；选中后事件经宿主 handler 回写注入 ref
-    const trigger = wrapper.find('[data-testid="quota-type-select"]').element as HTMLElement
-    await pickSelectOption(trigger, 'Beta Plan')
-
-    expect(state!.fetcherId.value).toBe('beta')
-  })
-
-  it('quota 凭证来源透传：点 exclusive 项 → 注入 state.credentialSource 回写', async () => {
-    let state: QuotaConfigureState | undefined
-    quotaFactoryStub.mockImplementationOnce(() => {
-      state = makeQuotaState()
-      return state
-    })
-    wrapper = mountBody(APIKEY_P)
-    await flushPromises()
-
-    // D8 参数区渲染前置：类型已选 + api-key 类 + 来源可用（exclusive 项可点）
-    state!.fetcherId.value = 'zhipu'
-    state!.authKinds.value = ['api-key']
-    state!.credentialSource.value = 'provider'
-    state!.providerCredentialAvailable.value = true
-    await nextTick()
-
-    await wrapper.find('[data-testid="quota-source-exclusive-btn"]').trigger('click')
-    expect(state!.credentialSource.value).toBe('exclusive')
   })
 
   it('compat 展开触发 providerApi 求值（custom：form.api 分支）→ CompatEditor 渲染', async () => {
@@ -1181,5 +951,62 @@ describe('R4 补口：类型 Select / quota 事件接线 / compat providerApi', 
     // providerApi（custom 走 form.api='openai-completions'）回落链）
     expect(wrapper.find('.compat-editor').exists()).toBe(true)
     expect(wrapper.find('.compat-editor').text()).toContain('settings.compat.essential')
+  })
+})
+
+// ══ 场景 ⑪：行级模型 Select 守卫透传（onCtxSelect / onStrategySelect）════════
+
+/**
+ * ModelListSection 行级 Select 的 update:modelValue payload 是 reka 宽联合，组件以运行时
+ * 守卫收窄后才进 core module（ModelListSection onCtxSelect / onStrategySelect，typeof 收窄
+ * + 成员校验）。本组断言**组件级**透传：真实用户交互（开下拉 → 点选项）后守卫把合法值
+ * 放行进 module → 行视图显示更新 → save payload 落盘。守卫早退分支（非 number / 非法策略
+ * key）属 reka 内部不变量——Select 只会 emit 已注册 option 的 value，正常交互不可达，
+ * 不强行锁（core 层 updateCtx/pickStrategy 行为已由 provider-edit-models.test.ts 直接单测）。
+ *
+ * 三视角：
+ * - 黑盒用户视角（主）：点选后行内 Select trigger 显示更新（128K / 策略文案），保存后
+ *   payload 携带新值（用户最终持久化数据）。
+ * - 构建者白盒（佐证）：payload 的 contextWindow / thinkingLevelMap 是 updateCtx/pickStrategy
+ *   写入 localModels 后经 buildModelsPayload 回传的结果，透传链路端到端可证。
+ * - 观察者形态：全部 DOM / payload 断言，无组件内部 spy。
+ */
+describe('行级模型 Select：ctx / 策略守卫透传', () => {
+  it('行内 ctx Select 选 128K → trigger 显示更新；策略 Select 选 On/Off → payload 双字段落盘', async () => {
+    wrapper = mountBody(APIKEY_P)
+    await flushPromises()
+
+    // 行级两个 combobox（ctx + 策略）；排除 CodingPlanSection 的 quota-type-select
+    const rowCombos = wrapper.findAll('button[role="combobox"]')
+      .filter((c) => c.attributes('data-testid') !== 'quota-type-select')
+    expect(rowCombos.length).toBe(2)
+    const ctxTrigger = rowCombos[0]!
+    const strategyTrigger = rowCombos[1]!
+
+    // ctx：override 条目出厂未设 contextWindow → trigger 显示占位符
+    expect(ctxTrigger.text()).toBe('—')
+
+    // 点选 128K → 行视图显示更新（用户可见）
+    await pickSelectOption(ctxTrigger.element as HTMLElement, '128K')
+    expect(ctxTrigger.text()).toBe('128K')
+
+    // 策略：t() mock 返回 key → 选项与 trigger 文案即 i18n key
+    await pickSelectOption(strategyTrigger.element as HTMLElement, 'composable.thinkingStrategy.onOff')
+    expect(strategyTrigger.text()).toBe('composable.thinkingStrategy.onOff')
+
+    // 改名称制造 dirty → 保存 → payload 携带守卫放行后的双字段（透传进 module 的落盘证据）
+    await wrapper.find('[data-testid="provider-edit-name"]').setValue('Renamed')
+    await wrapper.find('[data-testid="provider-save-btn"]').trigger('click')
+    await flushPromises()
+
+    const models = savePayload().models as Array<{
+      id: string
+      contextWindow?: number
+      thinkingLevelMap?: Record<string, string | null>
+    }>
+    const row = models.find((m) => m.id === 'my-glm-alias')
+    expect(row).toBeTruthy()
+    expect(row!.contextWindow).toBe(128000)
+    expect(row!.thinkingLevelMap).toEqual({ off: 'off', high: 'high', minimal: null, low: null, medium: null, xhigh: null, max: null })
   })
 })

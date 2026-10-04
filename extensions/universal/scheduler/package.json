@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-scheduler",
-  "version": "0.9.1",
+  "version": "0.9.3",
   "type": "module",
   "main": "index.ts",
   "taiji": {
@@ -58,6 +58,7 @@
     "@zhushanwen/pi-ext-guards": "workspace:*",
     "@zhushanwen/pi-extension-logger": "workspace:*",
     "@zhushanwen/pi-llm-shared": "workspace:*",
+    "@zhushanwen/pi-session-path": "workspace:*",
     "croner": "^9.0.0"
   }
 }

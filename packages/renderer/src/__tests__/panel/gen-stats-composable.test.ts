@@ -14,6 +14,7 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/gen-stats-composable.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { commandMock, transportApiCommandModule } from '../helpers/transport-command-mock'
 import { defineComponent, h, ref, nextTick } from 'vue'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import * as events from '@taiji/core/transport/api'
@@ -24,35 +25,23 @@ import {
 } from '@/composables/useSessionScopedState'
 import {
   useGenStats,
-  genStatsModelMatches,
   __clearInFlightGenStatsForTest,
   type UseGenStatsReturn,
 } from '@/composables/features/model/useGenStats'
 import type { GenStatsFrame } from '@taiji/shared'
+import { genStatsFrame } from '../helpers/gen-stats-mount'
 
 // ── mock 边界：getGenStats RPC mock 掉（u3 未接线，恢复腿用受控 deferred 驱动）──
-// mock 目标 = 实现 import 的权威路径（u5 re-anchor 删除 @/api/request bridge 后）；
-// spread actual 只换 command/超时常量：useSessionEvents 经主模块 events.on 订阅，须保留
-// 真实 events 通道（测试侧 dispatchSession 与实现侧订阅经同一真实 events 模块实例，注册表
-// 共享），否则帧链路断
-const commandMock = vi.hoisted(() => vi.fn())
-vi.mock('@taiji/core/transport/api', async (importActual) => {
-  const actual = await importActual<typeof import('@taiji/core/transport/api')>()
-  return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
-})
+// spread-actual mock 体单源在 helpers/transport-command-mock.ts（events 真实通道保留，
+// RPC_BACKSTOP_TIMEOUT_MS 透传 30_000；commandMock 为该 helper 导出的文件内单例，
+// beforeEach 编排受控 deferred）。
+vi.mock('@taiji/core/transport/api', () => transportApiCommandModule())
 
 // ── 共享测试基建 ─────────────────────────────────────────────
 
-/** 帧工厂：合法全量帧为基线（含 ttft，composer-genstats-ttft U4），用例按需覆写 */
+/** 帧工厂：共享基线（helpers/gen-stats-mount）+ model 覆写 'm1'（本文件 model 匹配用例口径） */
 function genFrame(sessionId: string, overrides: Partial<GenStatsFrame> = {}): GenStatsFrame {
-  return {
-    sessionId,
-    speed: { current: 35, day: 28, d7: 22, d30: 19 },
-    cacheRatio: { current: 91, day: 87 },
-    ttft: { current: 820, day: 900, d7: 1100, d30: 1300 },
-    model: 'm1',
-    ...overrides,
-  }
+  return genStatsFrame(sessionId, { model: 'm1', ...overrides })
 }
 
 /** 真实 events.dispatchSession 通道派发 session.stats_update 帧 */
@@ -161,18 +150,17 @@ describe('帧 handler：写入分区与 model 校验兜底', () => {
     expect(host.gen.current.value?.ttft).toEqual({ current: 820, day: 900, d7: 1100, d30: 1300 })
   })
 
-  it('帧内 model 与当前 modelId 不匹配 → 丢弃（分区保持 null）', async () => {
+  it('帧内 model 与 renderer 当前 modelId 不匹配 → 仍落地（A4/S18 纯显示：归属权威在 runtime 推帧侧）', async () => {
     const host = mountHost('A', 'prov-a/m1')
     await settle()
 
-    // 脏映射空窗的脏帧：session 已切 m2，旧模型 m1 的帧到达 → 无害丢弃
     dispatchFrame('A', genFrame('A', { model: 'prov-b/m2' }))
     await settle()
 
-    expect(host.gen.current.value).toBeNull()
+    expect(host.gen.current.value?.model).toBe('prov-b/m2')
   })
 
-  it('帧内 model 缺省 → 丢弃（live 推帧路径均有 model，缺省即异常）', async () => {
+  it('帧内 model 缺省 → 仍落地（A4/S18 纯显示：renderer 不做缺省/匹配校验）', async () => {
     const host = mountHost('A', 'prov-a/m1')
     await settle()
 
@@ -181,7 +169,7 @@ describe('帧 handler：写入分区与 model 校验兜底', () => {
     dispatchFrame('A', noModel)
     await settle()
 
-    expect(host.gen.current.value).toBeNull()
+    expect(host.gen.current.value).not.toBeNull()
   })
 
   it('帧内 model 为裸 id、当前 modelId 为复合 id（后缀段相等）→ 接受（帧 model 格式待验证检查点的双形态兼容）', async () => {
@@ -204,13 +192,6 @@ describe('帧 handler：写入分区与 model 校验兜底', () => {
     expect(host.gen.current.value?.model).toBe('prov-b/m2')
   })
 
-  it('genStatsModelMatches：精确相等 / 复合后缀相等 / 其余不匹配', () => {
-    expect(genStatsModelMatches('prov-a/m1', 'prov-a/m1')).toBe(true)
-    expect(genStatsModelMatches('m1', 'prov-a/m1')).toBe(true)
-    expect(genStatsModelMatches('prov-a/m1', 'prov-a/m2')).toBe(false)
-    expect(genStatsModelMatches('m2', 'prov-a/m1')).toBe(false)
-    expect(genStatsModelMatches('m1', 'm1-extra')).toBe(false)
-  })
 })
 
 // ── 恢复腿（RPC + in-flight 去重 + recency 守卫）────────────

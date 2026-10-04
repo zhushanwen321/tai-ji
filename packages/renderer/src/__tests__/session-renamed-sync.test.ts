@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * session push → store 同步测试（renamed / state_changed / thinkingLevelSet 三类推送；
  * 原 session-state-changed-sync.test.ts 已并入本文件——同 SUT ensureStreamSubscription
@@ -23,22 +25,23 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { SessionSummary, SessionGroup } from '@taiji/shared'
 import { textToSegments } from '@taiji/shared'
+// '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的 import（useChat 链）求值
+import { apiProjectMock } from './helpers/api-facade-mock'
+import { makeStreamSubscribeMock } from './helpers/stream-subscribe-mock'
+// mock 实例（工厂内创建）的清除入口：经 mock 后的 '@/api' 取引用（同 settings quota 域范式）
+import { chat as apiChatMock } from '@/api'
 
 type StreamCb = (msg: { type: string; payload: Record<string, unknown> }) => void
 
-// vi.mock factory 是 hoisted 的，不能引用外部变量；用 vi.hoisted 提升共享状态
-const { streamCbHolder, streamSubscribeMock } = vi.hoisted(() => ({
-  streamCbHolder: { current: null as StreamCb | null },
-  streamSubscribeMock: vi.fn((_sid: string, cb: StreamCb) => {
-    streamCbHolder.current = cb
-    return () => {
-      streamCbHolder.current = null
-    }
-  }),
-}))
+// vi.hoisted 工厂被 hoist 到 import 之前执行，不能引用 import 绑定（TDZ）；
+// streamSubscribe mock 本体经 helper 在 '@/api' 工厂内创建（工厂惰性执行期才解引用 import）
+const streamCbHolder = vi.hoisted(() => ({ current: null as StreamCb | null }))
 
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: { send: vi.fn(), streamSubscribe: streamSubscribeMock },
+vi.mock('@/api', () => ({
+  // project 域空载基座单源在 helpers/api-facade-mock（mount 链 onMounted 消费 project.load）
+  project: apiProjectMock(),
+  // streamSubscribe 捕获回调脚手架单源在 helpers/stream-subscribe-mock
+  chat: { send: vi.fn(), streamSubscribe: makeStreamSubscribeMock(streamCbHolder) },
   // w5：useChat 薄包装 import session.writeSegments（写 segments sidecar），mock 补全
   session: {
     writeSegments: vi.fn(() => Promise.resolve()),
@@ -51,7 +54,7 @@ import { useSessionStore } from '@/stores/session'
 beforeEach(() => {
   setActivePinia(createPinia())
   streamCbHolder.current = null
-  streamSubscribeMock.mockClear()
+  vi.mocked(apiChatMock.streamSubscribe).mockClear()
 })
 
 /** 往 session store 填一个 session（按 cwd 归组） */

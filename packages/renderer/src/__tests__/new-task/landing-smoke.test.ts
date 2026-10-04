@@ -25,6 +25,8 @@ const flowMock = vi.hoisted(() => ({
   currentModel: { value: null as string | null },
   gitInfo: { value: { branch: 'main' } as { branch: string } | null },
   state: { value: 'landing' as string },
+  // [perf-landing] 首发提交飞行标记（Landing 创建中过渡视图判据）
+  isInflight: { value: false as boolean },
   mode: { value: 'plain-repo' as string },
   worktreeItems: { value: [] as Array<{ path: string; branch: string; HEAD: boolean; bare: boolean }> },
   startFlow: vi.fn(),

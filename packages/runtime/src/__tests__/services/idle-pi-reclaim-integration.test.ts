@@ -49,6 +49,7 @@ import { fileURLToPath } from 'node:url'
 import type { SessionSummary } from '@taiji/shared'
 import { FAUX_PI_READY, FAUX_PI_SKIP_REASON } from '../equivalence/pi-fixture.js'
 import { ProcessManager } from '../../infra/pi/process-manager.js'
+import type { RpcClient } from '../../infra/pi/rpc-client.js'
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import { PiSessionStore } from '../../infra/pi/session-store.js'
 import { EventAdapter } from '../../infra/pi/event-adapter.js'
@@ -58,6 +59,7 @@ import type { PiTranslatedEvent, ScannedSession } from '../../services/session/t
 import { SessionHistoryReader } from '../../services/session/history-rebuild-cache.js'
 import { MessageBus } from '../../services/message-bus/message-bus.js'
 import type { BusClient } from '../../services/message-bus/types.js'
+import type { ProviderId } from '@taiji/shared'
 import { EventInterpreter } from '../../services/session/event-interpreter.js'
 import { ReclaimSeat, startIdlePiReaper, type IdlePiReaperHandle } from '../../services/session/idle-pi-reaper.js'
 import type { IPiEngine } from '../../services/ports/pi-engine.js'
@@ -74,6 +76,12 @@ const TEST_TIMEOUT_MS = 900_000
 const OCCUPANCY_IDLE_TIMEOUT_MS = 30_000
 /** occupancy 轮询间隔 */
 const POLL_INTERVAL_MS = 100
+/** restore 后 faux 模型就位确认的轮询上限（被等的异步刷新链正常亚秒级，留慢机余量） */
+const MODEL_READY_TIMEOUT_MS = 5_000
+/** faux 可用快照轮询总上限：正常一拍内完成（探针实测 <20ms），满载下 pi 后台可用性刷新可拖长，放宽不缩窄 */
+const FAUX_READY_TIMEOUT_MS = 60_000
+/** 单次 get_available_models 探针 RPC 超时（毫秒级只读 RPC，10s 对齐 L6 fast 档口径） */
+const FAUX_PROBE_RPC_TIMEOUT_MS = 10_000
 
 /** faux 演员（L2.5）：create 覆盖模型与 configStore 默认模型（pi-fixture FAUX_MODEL 同款） */
 const FAUX_MODEL_REF = 'faux/faux-1'
@@ -160,6 +168,38 @@ async function runTurn(client: IPiEngine, message: string, timeoutMs: number): P
   await ended
 }
 
+/**
+ * 等 pi 侧 faux provider 进入可用模型快照（get_available_models ⊇ faux/faux-1）再放行 prompt。
+ *
+ * 为什么需要：pi 的 registerProvider 只同步挂 provider，prompt 预检 hasConfiguredAuth 读的
+ * configuredProviders 快照字段要等后台 refresh({allowNetwork:false}) 的可用性刷新异步落地
+ * （pi 0.84.x dist/core/model-runtime.js：函数形 auth.apiKey 不命中 provisional 配置分支；
+ * RpcClient.start 只等固定 500ms 启动窗口，负载下 prompt 可先于刷新到达 → pi 报
+ * "No API key found for faux … docs/models.md"——满并行 gate 运行时偶发失败的同族竞态，
+ * 池隔离只消除满并行干扰、未消除本窗口）。探针消费的 getAvailableSnapshot 与 prompt 预检
+ * 读的是同一快照字段：就绪后放行 = 结构性不重赛，不靠墙钟碰运气。
+ */
+async function waitForFauxModelReady(client: RpcClient, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  let lastObservation = '(probe not run)'
+  while (Date.now() < deadline) {
+    try {
+      const res = await client.sendCommand('get_available_models', {}, FAUX_PROBE_RPC_TIMEOUT_MS)
+      const models = (res.data?.['models'] ?? []) as Array<{ provider?: string; id?: string }>
+      if (models.some((m) => m.provider === FAUX_PROVIDER && m.id === FAUX_MODEL_ID)) return
+      lastObservation = `available=[${models.map((m) => `${m.provider}/${m.id}`).join(', ') || '(none)'}]`
+    } catch (e) {
+      lastObservation = e instanceof Error ? e.message : String(e)
+    }
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
+  }
+  throw new Error(
+    `faux provider 未在 ${timeoutMs}ms 内进入 pi 可用快照（${lastObservation}）——prompt 预检将报 No API key。`
+    + `恢复：确认 spawn --extension 注入 faux-llm-ext（getExtensionPaths fake）与 pi 版本未漂移`
+    + `（pi 0.84.x registerProvider/availability-refresh 语义）`,
+  )
+}
+
 /** 轮询等 occupancy 回 idle（turn 完成 → agent_settled → idle 转移，事件驱动挂点回写 session 记录） */
 async function waitOccupancyIdle(lifecycle: SessionLifecycle, sid: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs
@@ -174,6 +214,46 @@ async function waitOccupancyIdle(lifecycle: SessionLifecycle, sid: string, timeo
 /** 收集到的帧中带 seq 的最大值（无带 seq 帧时返回 0——seq 从 1 起分配） */
 function maxSeq(frames: BusFrame[]): number {
   return frames.reduce((max, f) => (typeof f.seq === 'number' && f.seq > max ? f.seq : max), 0)
+}
+
+/** get_state 的 model 字段是否已就位为 faux 演员（运行时收窄后比对 provider/id） */
+function fauxModelActive(state: Record<string, unknown> | undefined): boolean {
+  const model = state?.model
+  if (typeof model !== 'object' || model === null) return false
+  const m = model as Record<string, unknown>
+  return m.provider === FAUX_PROVIDER && m.id === FAUX_MODEL_ID
+}
+
+/**
+ * restore 后、第二 turn 前：轮询确认 pi 当前模型已恢复为 faux；未就位则 setModel 补救。
+ *
+ * 为什么需要：faux 经 pi.registerProvider 的 native 形态注册，pi 进程内「provider 已配置
+ * 鉴权」的集合（configuredProviders）由注册尾部一轮**不等待**的异步刷新落地（pi
+ * model-runtime.js registerNativeProvider → void refresh()）；restore spawn 不带
+ * --model（inheritSessionModel 被测语义），若 switch_session 内的模型恢复判定
+ * hasConfiguredAuth('faux') 赶在刷新落地前执行，模型静默回落 fallback 且**不自愈**
+ * （判定只在 switch_session 重建时做一次），第二 turn 的前置鉴权检查即报
+ * "No API key found for the selected model."（CI run 36586910056 慢机偶发）。
+ * setModel 补救同受该窗口影响（pi 侧 set_model 从可用模型快照找模型，快照被同一
+ * 集合过滤，未落地时报 Model not found）——确认与补救都重试到超时。
+ */
+async function ensureFauxModelReady(client: IPiEngine, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (fauxModelActive(await client.getState())) return
+    try {
+      // 品牌类型边界提升（provider.ts design D5：字面量拆分的编译期已知串，同 pi-provider-store 惯例）
+      await client.setModel(FAUX_PROVIDER! as ProviderId, FAUX_MODEL_ID!)
+    } catch {
+      // 可用模型快照尚未含 faux（鉴权集合未落地）——下一轮重试
+    }
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
+  }
+  const finalState = await client.getState()
+  expect(
+    fauxModelActive(finalState),
+    `faux model not ready within ${timeoutMs}ms after restore (last model: ${JSON.stringify(finalState?.model)})`,
+  ).toBe(true)
 }
 
 describe.skipIf(!FAUX_PI_READY)(
@@ -240,7 +320,6 @@ describe.skipIf(!FAUX_PI_READY)(
         },
         getMessageBus: () => bus,
         broadcastGlobal: () => {},
-        notifyMessageComplete: () => {},
       }
       const pm = new ProcessManager(tmpdir())
       lifecycle = new SessionLifecycle(
@@ -262,6 +341,9 @@ describe.skipIf(!FAUX_PI_READY)(
         expect(sid).toBeTruthy()
         const firstClient = pm.getClient(sid)
         expect(firstClient).toBeDefined()
+        // prompt 前等 faux 进入可用快照（registerProvider 同步挂载 ≠ configuredProviders 落地，
+        // 见 waitForFauxModelReady 注释；create 与 restore 两次 spawn 各等一次）
+        await waitForFauxModelReady(firstClient!, FAUX_READY_TIMEOUT_MS)
 
         // bus 订阅（renderer 全量订阅形态的等价物）：第一轮事件即从此订阅者经过
         const frames: BusFrame[] = []
@@ -302,7 +384,6 @@ describe.skipIf(!FAUX_PI_READY)(
           seat,
           listRelayChildrenByMainSession: () => [],
           reapBackgroundTasks: async () => {},
-          clearPendingReload: () => {},
         }
         const broadcastSpy = vi.fn()
         reaper = startIdlePiReaper({
@@ -370,6 +451,8 @@ describe.skipIf(!FAUX_PI_READY)(
         expect(restoredClient).not.toBe(firstClient)
         expect(restoredClient!.exited).toBe(false)
         expect(lifecycle!.has(sid)).toBe(true)
+        // 恢复进程是全新 spawn（faux provider 重新注册 + 后台可用性刷新），阶段 5 prompt 前同样等就绪
+        await waitForFauxModelReady(restoredClient!, FAUX_READY_TIMEOUT_MS)
 
         // ══ 阶段 4：P7 收益门（记录式断言）+ 历史完整 ══
         // 捕获窗口内日志，判定恢复后首次 getHistory 走的分支：
@@ -400,6 +483,10 @@ describe.skipIf(!FAUX_PI_READY)(
         // P1 历史无损（不管 P7 走哪条分支，恢复后的历史都必须与回收前基线等价）
         expect(postRestore.messages.length).toBe(baseline.messages.length)
         expect(JSON.stringify(postRestore.messages)).toContain('reclaim-seed-alpha')
+
+        // 模型就位确认 + 条件补救（机制见 ensureFauxModelReady 注释；正常路径第一拍即
+        // 确认——「模型由 session 文件恢复」的语义仍被完整验证，setModel 只兜慢机窗口）
+        await ensureFauxModelReady(restoredClient!, MODEL_READY_TIMEOUT_MS)
 
         // ══ 阶段 5：新回复流式到达（P3）══
         const framesBeforeSecondTurn = frames.length

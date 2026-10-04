@@ -3,52 +3,20 @@ import * as path from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
+// 技能执行门禁（resolveSkills + SkillResolution）单源在 ADR-0074 共享包
+// @zhushanwen/pi-exec-skills（plan-mode-audit-remediation 批次 4②b 迁入，含空请求
+// fail-fast 契约）；经此处 re-export 维持既有消费路径（tool.ts / command.ts / 测试
+// import "./enter.js"）不动
+export { resolveSkills } from "@zhushanwen/pi-exec-skills";
+export type { SkillResolution } from "@zhushanwen/pi-exec-skills";
+
 import { buildPlanModePrompt } from "./prompts.js";
 import type { SkillRef } from "./prompts.js";
 import type { PlanSessionMap, PlanState } from "./state.js";
-import { capPlanRequirement, getPlanState, persistPlanState, PLAN_MODE_TOOLS } from "./state.js";
+import { applyPlanEvent, capPlanRequirement, clearRoundFields, getPlanState, persistPlanState, PLAN_MODE_TOOLS } from "./state.js";
 import { updatePlanWidget } from "./widget.js";
 
 export const MAX_SLUG_LENGTH = 30;
-
-/** E1 技能解析结果：ok=false 时携带缺失项与可用清单（fail-fast 回复的材料） */
-export type SkillResolution =
-  | { ok: true; resolved: SkillRef[] }
-  | { ok: false; available: string[]; missing: string[] };
-
-/**
- * 技能名归一：剥掉 pi 命令命名空间前导 `skill:` 前缀，得到自然技能名。
- * pi.getCommands() 枚举 skill 类命令时 name 带 `skill:` 前缀（如 `skill:tech-design`），
- * 这是 pi 的实现细节，不得泄漏到输入面——slash `--skills` 与 plan(enter) 的 skills 参数
- * 都用自然技能名。枚举侧与输入侧双向剥前缀后比对，兼容两种形态。
- */
-export function normalizeSkillName(name: string): string {
-  return name.startsWith("skill:") ? name.slice("skill:".length) : name;
-}
-
-/**
- * E1 校验：pi.getCommands() 过滤 source === "skill" 枚举比对（技能枚举与路径
- * 经 pi 取得，不自扫描目录——D2）。比对前双向剥 `skill:` 前缀归一：resolved/missing
- * 用归一后的短名；available 维持枚举原形态（错误信息里可直接复制为 pi 命令）。
- * slash 命令与 plan(enter) tool 两入口共用（自 command.ts 迁入 enter.ts）。
- */
-export function resolveSkills(pi: ExtensionAPI, requested: string[]): SkillResolution {
-  const skillCommands = pi.getCommands().filter((c) => c.source === "skill");
-  const byShortName = new Map(skillCommands.map((c) => [normalizeSkillName(c.name), c.sourceInfo.path]));
-  const available = skillCommands.map((c) => c.name);
-  const resolved: SkillRef[] = [];
-  const missing: string[] = [];
-  for (const raw of requested) {
-    const name = normalizeSkillName(raw);
-    const skillPath = byShortName.get(name);
-    if (skillPath === undefined) {
-      missing.push(name);
-    } else {
-      resolved.push({ name, skillPath });
-    }
-  }
-  return missing.length > 0 ? { ok: false, available, missing } : { ok: true, resolved };
-}
 
 /** 进入 plan 模式的归一入参（slash 命令与 plan(enter) tool 两入口共用） */
 export interface ActivatePlanModeInput {
@@ -80,7 +48,8 @@ export interface ActivatePlanModeOutcome {
  * 副作用顺序钉死：状态字段 → persistPlanState（entry 落盘）→ updatePlanWidget →
  * setActiveTools → 构造 prompt。persist 先于工具收拢，保证「已持久 isActive 但工具未收」
  * 的半进入态不可达（崩溃窗口内重开 session 经 entry 恢复 isActive，session_start hook
- * 会补 setActiveTools）。
+ * 会补 setActiveTools）。生命周期写唯一通道 = applyPlanEvent('enter')（D1：idle|终态
+ * --enter--> planning 新一轮）。
  */
 export function activatePlanMode(
   pi: ExtensionAPI,
@@ -104,17 +73,29 @@ export function activatePlanMode(
   state.planFilePath = planFilePath;
   // state/entry/plan 帧侧 requirement 64KB 封顶（帧有界前提）；prompt 仍用未封顶全文直达模型
   state.requirement = capPlanRequirement(requirement);
-  // --template 直传：templateName = 去扩展名 basename（GUI / /plan status 展示）；
-  // 直传事实另落 templateProvidedPath（select-template 防御的判定信号，D7）
-  state.templateName = input.template ? path.basename(input.template.absPath, ".md") : "";
-  state.templateProvidedPath = input.template?.absPath;
+  // --template 直传：templateName = 去扩展名 basename（GUI / /plan status 展示，值域不变）；
+  // 直传事实落独立布尔字段 templateProvided（select-template 防御的判定信号，D7——
+  // 双字段合并后的形态，双向版本错配登记见 PlanState.templateProvided 注释）
+  if (input.template) {
+    state.templateName = path.basename(input.template.absPath, ".md");
+    state.templateProvided = true;
+  } else {
+    state.templateName = "";
+    delete state.templateProvided;
+  }
   state.skills = skills.map((s) => s.name);
   state.docs = [];
-  // 新轮次重置：reviewState、来源标记与指纹基线随进入失效（与 resetPlanState 对齐；
-  // reviewStateSource 残留会让新一轮降级态渲染上一轮来源文案——C-U2 同型残留）
-  delete state.reviewState;
-  delete state.reviewStateSource;
-  delete state.lastSubmitReviewDocsFingerprint;
+  // 新轮次重置：per-round 字段随进入失效（D4 单函数出口，与 resetPlanState 同源——
+  // 跨轮残留会误触新鲜度门 / 渲染上一轮降级文案（C-U2 同型残留））
+  clearRoundFields(state);
+
+  // 状态写走 transition()（D1 'enter' 边：idle|终态
+  // --enter--> planning 新一轮）。不一致格 isActive=false 且 state 落活跃族
+  //（仅坏数据/旧映射残留可达，P-6 单写入方下正常不可达）按 ok:false 落穿：不归一、不重试，
+  // 后续副作用照常（persist 携带现值）——原「归一 idle 再进」自愈分支已随
+  // plan-mode-audit-remediation 批次 3 删除（行为变更仅坏数据格可达，V5 对账归垃圾格口径）；
+  // 正常路径恒单通道 applyPlanEvent。
+  applyPlanEvent(state, "enter");
 
   persistPlanState(pi, state);
   updatePlanWidget(ctx, state);

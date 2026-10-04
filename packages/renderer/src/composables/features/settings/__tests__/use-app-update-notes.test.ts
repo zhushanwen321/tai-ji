@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * extractLocalizedNotes 单测（release notes 双语解析器，review round1 MF1）。
  *
@@ -23,7 +25,8 @@ vi.mock('@taiji/ui/features/chat/markdown', () => ({
   renderMarkdown: vi.fn(async (md: string) => `<p>${md}</p>`),
 }))
 
-import { extractLocalizedNotes } from '../use-app-update-notes'
+import { createUpdateState } from '../use-app-update-state'
+import { createNotesAxis, extractLocalizedNotes } from '../use-app-update-notes'
 
 const BILINGUAL_BODY = '<!-- LANG:en -->\n- Fix bug X\n\n<!-- LANG:zh -->\n- 修复 bug X\n'
 
@@ -93,7 +96,8 @@ describe('renderReleaseNotes — 传值矩阵「更新日志」行（设计 mark
 
   it('renderMarkdown 不携带 env（resourceBaseDir 恒 undefined——release notes 无相对资源语义，不回归）', async () => {
     const markdown = await import('@taiji/ui/features/chat/markdown')
-    const { renderReleaseNotes } = await import('../use-app-update-notes')
+    // 容器化后渲染轴经工厂持有 state（C5）：测试建独立容器实例，无需单例复位
+    const { renderReleaseNotes } = createNotesAxis(createUpdateState())
     renderReleaseNotes(BILINGUAL_BODY)
     // 既有行为回归断言：UpdateButton 渲染面调 renderMarkdown 只传内容不传 env（env 缺省 →
     // 净化 hook 的 resourceBaseDir undefined → 相对 src 不重写、④路 preventDefault 无动作）

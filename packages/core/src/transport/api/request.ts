@@ -14,7 +14,7 @@
 import type { ClientMessage, ClientMessageMap, ReplyPayloadMap } from '@taiji/shared'
 import * as pending from './pending'
 import { send } from '../ws-client'
-import { transportUnavailableError } from '../errors'
+import { notDeliveredError } from '../errors'
 
 /**
  * 发送 RPC 请求并等待 reply（类型化原语）。
@@ -57,7 +57,9 @@ export async function command<K extends keyof ReplyPayloadMap>(
     // 请求发出时本就处于断开态则后续永不触发，promise 只能等 65s sweep 超时——期间调用方
     // 的 in-flight 标记（如文件树 inFlight/loading）持续拦截用户操作（V8 实测：runtime
     // 重启窗口内点击目录零反馈，reload 才恢复）。立即 reject 让调用方进入可重试的 error 态。
-    pending.reject(id, transportUnavailableError('transport unavailable (ws not open)'))
+    // 未送达标记（notDelivered）：此处可证明请求没离机——与断连 rejectAll 的同 code 错误
+    // （可能已送达）区分，bash 等「执行与否」判据消费方据它走「可证明未执行」路径。
+    pending.reject(id, notDeliveredError('transport unavailable (ws not open)'))
   }
   return result
 }

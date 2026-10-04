@@ -8,10 +8,25 @@
 //
 // 测试用 mock theme（bg 记录调用色 token），不依赖真实 Pi Theme。
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
-import { renderBgNotifyMessage } from "../interface/bg-notify-render.ts";
+import { renderBgNotifyMessage } from "../interface/gui/bg-notify-render.ts";
+
+const here = dirname(fileURLToPath(import.meta.url));
+/** 壳侧消费方源码（同构成败推导已收敛删除）。 */
+const CONSUMER_SOURCE = join(here, "..", "interface", "gui", "bg-notify-render.ts");
+
+/**
+ * 手写同构 switch 的源码特征 token：出现即说明有人把收敛删除的成败推导又写了回去。
+ * （"gc" 是 ClosedReason 专属字面量——outcome 三态不含它，消费方合法代码不会出现
+ * `?? "gc"` / `=== "gc"`；cancelled 比较不列入——outcome === "cancelled" 是合法消费。）
+ */
+const LEGACY_DERIVATION_TOKENS = [/\?\?\s*["']gc["']/, /===\s*["']gc["']/] as const;
 
 /**
  * 构造 mock theme：bg 记录被调用的色 token，fg/bold 透传文本。
@@ -144,7 +159,7 @@ describe("renderBgNotifyMessage", () => {
     expect(joined).toContain("cancelled");
   });
 
-  it("[U3] 升级前旧消息重放（details 无 outcome，仅 closedReason+error）→ deriveOutcome 兑底不崩溃", () => {
+  it("[U3] 升级前旧消息重放（details 无 outcome，仅 closedReason+error）→ deriveOutcome 兜底不崩溃", () => {
     const { theme } = makeTheme();
     const comp = renderBgNotifyMessage(
       {
@@ -160,7 +175,7 @@ describe("renderBgNotifyMessage", () => {
     expect(joined).toContain("legacy boom");
   });
 
-  it("[U3] 非法 outcome 值按缺失处理（防御性收窄，不崩溃，兑底派生）", () => {
+  it("[U3] 非法 outcome 值按缺失处理（防御性收窄，不崩溃，兜底派生）", () => {
     const { theme } = makeTheme();
     const comp = renderBgNotifyMessage(
       {
@@ -305,3 +320,81 @@ describe("renderBgNotifyMessage", () => {
   });
 });
 
+// ── 同构 switch 残留守卫（收敛删除后不得写回）——迁自 derive-closed-display-parity-interface.test.ts ──
+//
+// 同构成败推导收敛到 core execution-record.ts 的 deriveOutcome/projectOutcome（单一权威），
+// 本守卫锚定壳侧消费方源码不得写回手写同构 switch。（原文件的 fail-loud 前置条
+// 「消费方源码可读」属 D 裁决删除项：readFileSync 失败时下方守卫自身即红，前置条冗余。）
+describe("同构 switch 残留守卫（收敛删除后不得写回）— 壳侧消费方", () => {
+  it("bg-notify-render renderRecordLines 无 closedReason 成败推导特征", () => {
+    const src = readFileSync(CONSUMER_SOURCE, "utf-8");
+    for (const token of LEGACY_DERIVATION_TOKENS) {
+      expect(
+        token.test(src),
+        `[render] 检出旧同构推导特征 /${token.source}/——成败判定应只读 outcome 或调用 ` +
+          `execution-record.ts 的 deriveOutcome/projectOutcome（单一权威），禁止手写 switch 写回。` +
+          `若确属新增合法用法，请同步更新本护栏的特征提取。`,
+      ).toBe(false);
+    }
+    // 消费方必须经由单一权威实现
+    expect(
+      src.includes("deriveOutcome"),
+      "[render] 未引用 deriveOutcome——outcome 兜底派生必须复用单一权威函数。",
+    ).toBe(true);
+  });
+});
+
+
+// ============================================================
+// [§2.2] 通知字形与 outcome 同源（失败不再画绿勾）
+// ============================================================
+describe("通知字形（§2.2 回归）", () => {
+  it("failed（outcome 一等字段）→ ✗ + error 色，与 failed 文案同源", () => {
+    const { theme, fgColors } = makeTheme();
+    const comp = renderBgNotifyMessage(
+      { details: { status: "closed", outcome: "failed", agent: "scout", id: "bg-g1", error: "boom" } },
+      { expanded: false },
+      theme,
+    );
+    const joined = comp!.render(80).join("\n");
+    // 修复前：statusGlyph("closed") 返回 ✓ success，与同一行派生的 "failed" 文案自相矛盾
+    expect(joined).toContain("✗");
+    expect(joined).not.toContain("✓");
+    expect(fgColors).toContain("error");
+  });
+
+  it("failed（派生路径：无 outcome，仅 closedReason/error）同款 ✗", () => {
+    const { theme, fgColors } = makeTheme();
+    const comp = renderBgNotifyMessage(
+      { details: { status: "closed", closedReason: "gc", error: "legacy", agent: "w", id: "bg-g2" } },
+      { expanded: false },
+      theme,
+    );
+    expect(comp!.render(80).join("\n")).toContain("✗");
+    expect(fgColors).toContain("error");
+  });
+
+  it("cancelled → ■（无正文行），completed → ✓ success", () => {
+    const cancelled = (() => {
+      const { theme, fgColors } = makeTheme();
+      const comp = renderBgNotifyMessage(
+        { details: { status: "closed", outcome: "cancelled", agent: "w", id: "bg-g3" } },
+        { expanded: false },
+        theme,
+      );
+      return { joined: comp!.render(80).join("\n"), fgColors };
+    })();
+    expect(cancelled.joined).toContain("■");
+    expect(cancelled.fgColors).toContain("muted");
+
+    const { theme, fgColors } = makeTheme();
+    const comp = renderBgNotifyMessage(
+      { details: { status: "closed", outcome: "completed", agent: "w", id: "bg-g4", result: "ok" } },
+      { expanded: false },
+      theme,
+    );
+    const joined = comp!.render(80).join("\n");
+    expect(joined).toContain("✓");
+    expect(fgColors).toContain("success");
+  });
+});

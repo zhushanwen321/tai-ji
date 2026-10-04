@@ -34,6 +34,7 @@ vi.mock('../../ws-client', () => ({
 
 import * as btw from '../domains/btw'
 import * as chat from '../domains/chat'
+import { notDeliveredError, transportUnavailableError } from '../../errors'
 import * as composer from '../domains/composer'
 import * as config from '../domains/config'
 import * as extension from '../domains/extension'
@@ -47,12 +48,18 @@ import * as quota from '../domains/quota'
 import * as session from '../domains/session'
 import * as settings from '../domains/settings'
 import * as terminal from '../domains/terminal'
+import * as tts from '../domains/tts'
 import * as usage from '../domains/usage'
 import * as workspace from '../domains/workspace'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  // resetAllMocks（非 clearAllMocks）：mockClear 只清 calls/results，不清
+  // mockResolvedValueOnce 队列——前测中断残留的 Once 值会在下测前几次调用顶掉兜底
+  // 实现，失败原因指向被测函数而非前测残留。reset 连实现一并清，基线 stub 在下
+  // 一行重播；各用例对 mockOn / mockOnGlobalType / mockWsSend 均为用例内显式配置，
+  // 无需在 beforeEach 重建。vi.mock 工厂内的箭头函数转发层非 vi.fn 本体，reset 不影响。
+  vi.resetAllMocks()
   mockCommand.mockImplementation(async () => ({}))
 })
 
@@ -93,13 +100,11 @@ describe('chat 域 RPC 封装', () => {
     expect(mockCommand.mock.calls[0][1]).toEqual({ sessionId: 's1', content: 'hi', images })
   })
 
-  it('steer / followUp / abort 走对应 type', async () => {
-    await chat.steer('s1', 't')
-    expect(mockCommand.mock.calls[0]).toEqual(['message.steer', { sessionId: 's1', content: 't' }, RPC_BACKSTOP_TIMEOUT_MS])
-    await chat.followUp('s1', 't')
-    expect(mockCommand.mock.calls[1][0]).toBe('message.follow_up')
+  // [u5a 退役] 前身用例「steer / followUp / abort 走对应 type」已删：前两方法的客户端封装随
+  // u5a 退役（u3b 统一 submit 化后零活调用方；协议条目存续原因见 shared/protocol.ts u5a 裁决）。
+  it('abort 走对应 type', async () => {
     await chat.abort('s1')
-    expect(mockCommand.mock.calls[2]).toEqual(['message.abort', { sessionId: 's1' }, RPC_BACKSTOP_TIMEOUT_MS])
+    expect(mockCommand.mock.calls[0]).toEqual(['message.abort', { sessionId: 's1' }, RPC_BACKSTOP_TIMEOUT_MS])
   })
 
   it('compact 超时 = COMPACT_RPC_TIMEOUT_MS + RENDERER_RPC_MARGIN_MS（校准链不变量）', async () => {
@@ -107,7 +112,9 @@ describe('chat 域 RPC 封装', () => {
     const [type, payload, timeout] = mockCommand.mock.calls[0]
     expect(type).toBe('session.compact')
     expect(payload).toEqual({ sessionId: 's1', customInstructions: 'instr' })
-    expect(timeout).toBeGreaterThan(RPC_BACKSTOP_TIMEOUT_MS)
+    // 钉字面毫秒值（COMPACT_RPC_TIMEOUT_MS 1_800_000 + RENDERER_RPC_MARGIN_MS 60_000）：
+    // 不引用同批常量防镜像互证，compact/bash 两档互换（1860s ↔ 3660s）即红
+    expect(timeout).toBe(1_860_000)
   })
 
   it('bash：excludeFromContext 未传时不带该键，传了透传；超时用 BASH 档', async () => {
@@ -115,12 +122,49 @@ describe('chat 域 RPC 封装', () => {
     expect(mockCommand.mock.calls[0][1]).toEqual({ sessionId: 's1', command: 'ls' })
     await chat.bash('s1', 'ls', true)
     expect(mockCommand.mock.calls[1][1]).toEqual({ sessionId: 's1', command: 'ls', excludeFromContext: true })
-    expect(mockCommand.mock.calls[1][2]).toBeGreaterThan(RPC_BACKSTOP_TIMEOUT_MS)
+    // 钉字面毫秒值（BASH_RPC_TIMEOUT_MS 3_600_000 + RENDERER_RPC_MARGIN_MS 60_000），同上防镜像互证
+    expect(mockCommand.mock.calls[1][2]).toBe(3_660_000)
+  })
+
+  it('bash 回执契约（dmg-r1-2）：回执透传；未送达错误翻译为 rejected 回执；其余 reject 原样抛出', async () => {
+    // 回执透传（status 携带执行状态——消费方判定是否恢复草稿的权威依据）
+    mockCommand.mockResolvedValueOnce({ status: 'settled' })
+    await expect(chat.bash('s1', 'ls')).resolves.toEqual({ status: 'settled' })
+    // 消息未送达 runtime（可证明未执行）→ 翻译为 rejected 回执（消费方恢复草稿安全）
+    mockCommand.mockRejectedValueOnce(notDeliveredError('transport unavailable (ws not open)'))
+    await expect(chat.bash('s1', 'ls')).resolves.toEqual({ status: 'rejected', error: 'transport unavailable (ws not open)' })
+    // 回执不可达（断连 rejectAll 等同 code 错误：命令可能已执行）→ 原样抛出，消费方保守处置
+    mockCommand.mockRejectedValueOnce(transportUnavailableError('disconnected'))
+    await expect(chat.bash('s1', 'ls')).rejects.toMatchObject({ code: 'disconnected' })
   })
 
   it('abortBash 走 message.abortBash', async () => {
     await chat.abortBash('s1')
     expect(mockCommand.mock.calls[0][0]).toBe('message.abortBash')
+  })
+
+  // ── [投递所有权内核 u3b/D5] delivery 四面封装 ──
+  it('delivery.submit：type/payload 透传（无 images 不带键）+ reply 解包', async () => {
+    mockCommand.mockImplementation(async () => ({ clientUuid: 'u-x', state: 'in-flight', lane: 'direct' }))
+    const r = await chat.submitDelivery('s1', 'hi', 'u-x')
+    expect(mockCommand.mock.calls[0][0]).toBe('delivery.submit')
+    expect(mockCommand.mock.calls[0][1]).toEqual({ sessionId: 's1', content: 'hi', clientUuid: 'u-x' })
+    expect(mockCommand.mock.calls[0][2]).toBe(RPC_BACKSTOP_TIMEOUT_MS)
+    expect(r).toEqual({ clientUuid: 'u-x', state: 'in-flight', lane: 'direct' })
+    const images = [{ data: 'abc', mimeType: 'image/png' }]
+    await chat.submitDelivery('s1', 'hi', 'u-x', images)
+    expect(mockCommand.mock.calls[1][1]).toEqual({ sessionId: 's1', content: 'hi', images, clientUuid: 'u-x' })
+  })
+
+  it('delivery.cancel / drain / resync 走对应 type + payload 形状', async () => {
+    mockCommand.mockImplementation(async () => ({ sessionId: 's1', entries: [] }))
+    await chat.cancelDelivery('s1', 'u-x')
+    expect(mockCommand.mock.calls[0]).toEqual(['delivery.cancel', { sessionId: 's1', clientUuid: 'u-x' }, RPC_BACKSTOP_TIMEOUT_MS])
+    await chat.drainDelivery('s1')
+    expect(mockCommand.mock.calls[1][0]).toBe('delivery.drain')
+    expect(mockCommand.mock.calls[1][1]).toEqual({ sessionId: 's1' })
+    await chat.resyncDelivery('s1', ['u-a', 'u-b'])
+    expect(mockCommand.mock.calls[2]).toEqual(['delivery.resync', { sessionId: 's1', clientUuids: ['u-a', 'u-b'] }, RPC_BACKSTOP_TIMEOUT_MS])
   })
 
   it('streamSubscribe 经 events.on 注册并返回其取消函数', () => {
@@ -450,6 +494,11 @@ describe('session 域 请求-响应', () => {
     mockCommand.mockResolvedValueOnce({ session: { id: 's2' } })
     await session.create('/a', 'L', 'preset-1', 'pj', 'p/m', 'high')
     expect(mockCommand.mock.calls[2][1]).toEqual({ cwd: '/a', label: 'L', presetId: 'preset-1', projectId: 'pj', modelOverride: 'p/m', thinkingOverride: 'high' })
+
+    // clientUuid 幂等键透传（发现 B）：传入时 payload 含 clientUuid；缺省省略（见上例，向后兼容）
+    mockCommand.mockResolvedValueOnce({ session: { id: 's3' } })
+    await session.create('/a', 'L', 'preset-1', 'pj', 'p/m', 'high', 'u-create-1')
+    expect(mockCommand.mock.calls[3][1]).toEqual({ cwd: '/a', label: 'L', presetId: 'preset-1', projectId: 'pj', modelOverride: 'p/m', thinkingOverride: 'high', clientUuid: 'u-create-1' })
   })
 
   it('switchSession / restoreSession / forceQuit / fork', async () => {
@@ -709,17 +758,11 @@ describe('workspace 域', () => {
     expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['workspace.record', { cwd: '/b' }])
   })
 
-  it('detect 三态透传；detectBare 映射 isBare', async () => {
+  it('detect 三态透传', async () => {
     const bareReply = { mode: 'bare-workspace', wsRoot: '/ws', barePath: '/bare', repoRoot: '', defaultBranch: 'main' }
     mockCommand.mockResolvedValueOnce(bareReply)
     await expect(workspace.detect('/ws/proj')).resolves.toEqual(bareReply)
     expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['workspace.detect', { cwd: '/ws/proj' }])
-
-    mockCommand.mockResolvedValueOnce(bareReply)
-    await expect(workspace.detectBare('/ws/proj')).resolves.toEqual({ isBare: true, wsRoot: '/ws', barePath: '/bare' })
-
-    mockCommand.mockResolvedValueOnce({ mode: 'plain-repo', wsRoot: '', barePath: '', repoRoot: '/r', defaultBranch: 'main' })
-    await expect(workspace.detectBare('/r')).resolves.toMatchObject({ isBare: false })
   })
 })
 
@@ -948,5 +991,44 @@ describe('btw 域 RPC 封装（D6 3 控制帧）', () => {
   it('remove：type/payload { vid }，ack 型（command 返回 void，完成即 resolve）', async () => {
     await btw.remove('btw:pi-1')
     expect(mockCommand).toHaveBeenCalledWith('btw.remove', { vid: 'btw:pi-1' }, RPC_BACKSTOP_TIMEOUT_MS)
+  })
+})
+
+// ── tts 域（ai-voice-tts 设计 §7.5，M0 四 RPC）────────────────────────────
+describe('tts 域 RPC 封装', () => {
+  it('getConfig / getCapabilities：空 payload + backstop 超时 + reply 原样透传', async () => {
+    const cfg = { config: { activeProvider: 'minimax', providers: {} } }
+    mockCommand.mockResolvedValueOnce(cfg)
+    await expect(tts.getConfig()).resolves.toEqual(cfg)
+    expect(mockCommand).toHaveBeenCalledWith('tts.getConfig', {}, RPC_BACKSTOP_TIMEOUT_MS)
+
+    const forms = { forms: { stepfun: { capabilities: {} }, minimax: { capabilities: {} }, mimo: { capabilities: {} } } }
+    mockCommand.mockResolvedValueOnce(forms)
+    await expect(tts.getCapabilities()).resolves.toEqual(forms)
+    expect(mockCommand).toHaveBeenCalledWith('tts.getCapabilities', {}, RPC_BACKSTOP_TIMEOUT_MS)
+  })
+
+  it('configure：payload 整对象透传 + 解包 ok/error', async () => {
+    const payload = {
+      providerId: 'minimax' as const,
+      config: { baseUrl: 'https://api.minimax.cn/v1', model: 'speech-2.6-hd', voice: 'male-qn-qingse', vendor: {} },
+      apiKeys: { minimax: 'sk-test' },
+    }
+    mockCommand.mockResolvedValueOnce({ ok: true, config: { activeProvider: 'minimax', providers: {} } })
+    await expect(tts.configure(payload)).resolves.toMatchObject({ ok: true })
+    expect(mockCommand).toHaveBeenCalledWith('tts.configure', payload, RPC_BACKSTOP_TIMEOUT_MS)
+
+    mockCommand.mockResolvedValueOnce({ ok: false, error: 'invalid_payload' })
+    await expect(tts.configure({ ...payload, apiKeys: undefined })).resolves.toEqual({ ok: false, error: 'invalid_payload' })
+  })
+
+  it('speak：payload 含可选 sessionId 透传；超时传 0（任务级不限时，§7.5 要点 2）', async () => {
+    mockCommand.mockResolvedValueOnce({ filePath: '/data/tts-cache/abc.wav' })
+    await expect(tts.speak({ sessionId: 's1', text: '你好' })).resolves.toEqual({ filePath: '/data/tts-cache/abc.wav' })
+    expect(mockCommand.mock.calls[0]).toEqual(['tts.speak', { sessionId: 's1', text: '你好' }, 0])
+
+    mockCommand.mockResolvedValueOnce({ filePath: '/x.wav' })
+    await tts.speak({ text: '设置页测试样句' })
+    expect(mockCommand.mock.calls[1]).toEqual(['tts.speak', { text: '设置页测试样句' }, 0])
   })
 })

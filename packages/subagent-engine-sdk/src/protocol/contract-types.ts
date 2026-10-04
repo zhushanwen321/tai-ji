@@ -135,12 +135,19 @@ export interface Turn {
 }
 
 /**
- * 引擎事件（9 种，协议 event.params.event 逐字序列化——「事件与 handle 序列化逐字
+ * 引擎事件（10 种，协议 event.params.event 逐字序列化——「事件与 handle 序列化逐字
  * 兼容」不变量 3 的类型面）。语义锚点 = pi（ACP 词汇对照见 core execution/assembly/types.ts 注释）。
  *
  * activity = 纯活性信号：双侧 reducer no-op、不开 turn、不写状态、不落 journal
- * （core journal-wiring 对其豁免 append），只承诺「引擎活跃时周期性出现」——供宿主
+ * （core event-journal-wiring 对其豁免 append），只承诺「引擎活跃时周期性出现」——供宿主
  * 无进展守护刷新判活（长工具执行期）。节流属生产者实现细节，不进协议承诺。
+ *
+ * armed = [D3 协议版 P6] schema 强制武装确认回执：引擎在启动期武装断言通过 +
+ * 孙进程 spawn 成功后上报一次（仅 native 引擎、仅 schema 任务；emulated 引擎无
+ * 孙进程 env/扩展依赖，「武装」概念不适用，恒不上报）。宿主是独立信号源（引擎
+ * 自查断言之外的第二道防线——监控信号不与施控同源）：native schema 任务的 run
+ * 在等待窗（宿主侧常量）内未收到本事件即 fail-fast。载荷 = 已核验的武装事实
+ * （env 变量名 + 必备扩展包名），经宿主落 run 事件 journal（RunArmedEvent.frame）。
  *
  * 每个成员的 type 经 `EventName<"…">` 受词表约束（编译锁①，见下方词表节）。
  */
@@ -153,14 +160,15 @@ export type AgentEvent =
   | { type: EventName<"message_end">; usage?: AgentUsage; error?: string }
   | { type: EventName<"compaction"> }
   | { type: EventName<"activity"> }
-  | { type: EventName<"error">; message: string };
+  | { type: EventName<"error">; message: string }
+  | { type: EventName<"armed">; schemaEnvVar: string; extensionPkg: string };
 
 // ============================================================
 // 事件词表锁（AgentEvent ⟷ AGENT_EVENT_TYPE_NAMES 同源互证）
 // ============================================================
 
 /**
- * 事件类型词表（协议事件全集 9 种，运行时 SSOT）：schema 事件 `type.enum` 从本表
+ * 事件类型词表（协议事件全集 10 种，运行时 SSOT）：schema 事件 `type.enum` 从本表
  * 派生（schema.ts），测试取值遍历本表（protocol-schema.test.ts / contract-closure.test.ts）
  * ——新增事件变体不再手写第三处。
  *
@@ -191,6 +199,7 @@ export const AGENT_EVENT_TYPE_NAMES = [
   "compaction", // noop-safe: 事件无载荷且现行 reducer 即直接 return——丢弃与处理零差异
   "activity", // noop-safe: 纯活性信号，双侧 reducer 恒 no-op（协议语义见 AgentEvent 头注），丢弃零差异
   "error", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺 lastError 诊断留痕，已写状态不回滚
+  "armed", // noop-safe: 旧宿主无武装等待窗消费点（fail-fast 属宿主新增逻辑），丢弃仅缺武装留痕，schema 强制第一道防线（引擎自查断言）不受损
 ] as const satisfies readonly AgentEvent["type"][];
 
 /** 词表派生的事件名联合（编译锁②/③的词表侧源；schema enum 与测试取值同源）。 */
@@ -226,7 +235,7 @@ export interface EngineHandleData {
    * [池抽象降级 2026-09-13] 原 poolKey 字段已删除——两引擎 poolKey 恒 'shared'
    * （SDK SHARED_POOL_KEY），journal 固定落 engines/<engineId>/shared/，字段零信息量。
    */
-  journalPath?: string;
+  eventsPath?: string;
   /** probe 实测版本（漂移排查锚点）。 */
   engineVersion?: string;
   /** 适配器版本（golden 样本对齐排查）。 */
@@ -245,7 +254,7 @@ export interface ResumeAnchor {
   /** 引擎定位键（pi = { recordId?, sessionFile? }；zcode = { sessionId, dbPath }）。 */
   sessionRef: Record<string, string>;
   /** journal 绝对路径（read 降级链第②级数据源；无 journal 缺省）。 */
-  journalPath?: string;
+  eventsPath?: string;
 }
 
 /** Turn → ReplayedTurn：剥离内部态（closed 恒 true——重放物无进行时语义）。 */
@@ -276,9 +285,25 @@ export interface SessionView {
 // ============================================================
 
 /**
+ * 引擎进程形态（manifest `taiji.subagentEngine.processModel` 声明字面量；设计
+ * pi-workflow-run-resource-model §3.3 决策 3）。语义：
+ *   - 'per-window'：窗口作用域实例——引擎薄壳进程随派发窗口（workflow run /
+ *     chat record 轮次）生灭，窗口内复用、窗口收尾 dispose；
+ *   - 'shared-service'：进程级懒加载单例——薄壳（及所辖重服务）随宿主（taiji）
+ *     存活，跨一切窗口共享。
+ * **不是任务能力字段**——能力字段服务 run 前资格判定，本字段服务宿主的实例
+ * 管理（实例挂窗口还是挂注册表单例），刻意不进 EngineCapabilities（混放会让
+ * 能力协商面——握手应答对照、gate 位——误消费）。缺省 = 'per-window'
+ * （轻壳是引擎适配包的常态，重服务是显式特例），解析侧 engine-manifest.ts 落实。
+ */
+export type EngineProcessModel = "per-window" | "shared-service";
+
+/**
  * 引擎能力声明（11 位）。三级：native / emulated / unsupported。
  * 声明的是本仓 subagent 链路实际接通的能力，不是引擎 RPC 层的理论能力。
  * 同步权威 = manifest（注册期直读）；握手应答仅诊断（§3.3「同步成员清单」）。
+ * 进程形态声明是独立字段（上方 EngineProcessModel——manifest 契约面，不在本
+ * 接口内），两套字段服务不同裁决（任务能力 vs 宿主实例管理）。
  */
 export interface EngineCapabilities {
   /** native: --json-schema/--output-schema/env 注入。 */
@@ -365,7 +390,7 @@ export interface WorktreeHandle {
 
 /**
  * 一次引擎执行的终态（协议 run 终态应答的 outcome 载荷）。锚定 core
- * orchestration AgentResult 并追加引擎层字段（engineId / engineFallback / exitCode）。
+ * orchestration AgentResult 并追加引擎层字段（engineId / exitCode）。
  */
 export interface AgentOutcome {
   content: string;
@@ -383,12 +408,29 @@ export interface AgentOutcome {
   /** 仅诊断——目录可能已被 finalize 清理，不得作为 cwd 复用。 */
   worktreePath?: string;
   toolCalls?: ToolCallEntry[];
-  /** 实际执行引擎（fallback 后可能 ≠ 请求值）。 */
+  /** 实际执行引擎。 */
   engineId: string;
-  /** fallback 留痕（record 同步投影，GUI 警告条数据源）。 */
-  engineFallback?: { from: string; reason: string };
   /** null = 被信号杀死（杀链/abort 合成终态的判据）。 */
   exitCode?: number | null;
+  /**
+   * [D5 诊断引用落账] 失败时子进程 stderr tee 文件绝对路径（引擎侧 W11 已有落盘）。
+   *
+   * 通道裁决（协议演进宪法 ADR-0071 判据链，2026-09-22 一致性审查 P1 修复登记）：stderr
+   * tee 路径是引擎产生的诊断事实，宿主不可靠推导（文件名格式/dataDir 解析/轮转
+   * rename 后的真实名只有引擎知道，两引擎前缀不同——判据③「推导会分叉」）→ 上协议。
+   * 承载形态选 run 终态应答（本类型）的字段扩展而非 AgentEvent 词表变体，判据：
+   * ① 失败伴随路径的语义本就是终态诊断引用，与终态应答同帧（引擎应答 failed /
+   *    进程异常退出路径才上报；成功不报）；
+   * ② 一 run 一应答，宿主按构造与 ask 一一对应——事件通道虽经 runId 路由具备
+   *    run 级归属面（2026-09-22 定向复审更正：event 通知帧 params required
+   *    ["runId","seq","event"]，runId=taskId 即 ask 粒度），但终态诊断引用与终态
+   *    应答同帧单源直达（outcome → outcomeToWorkflowResult → call.result →
+   *    agent-settled 载荷），经事件通道中转反而多一跳；
+   * ③ additive 可选字段向后兼容（不支持的引擎不设值 = 零行为差；旧宿主未知字段
+   *    容忍），不触发事件词表 C3 四步义务（词表/schema enum 零改动）。
+   * 仅诊断引用——文件受引擎侧尺寸轮转与过期清理管辖，读侧不得假设其永存。
+   */
+  stderrTeePath?: string;
 }
 
 // ============================================================
@@ -400,7 +442,7 @@ export interface AgentOutcome {
  * 协议面 = initialize 应答 models? 与 listModels 应答 models 的元素型；
  * manifest 解析与生成（gen:model-catalog）归 W4/W5 实装。
  */
-export interface ModelCatalogEntry {
+export interface ModelCatalogEntry { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   id: string;
   aliases?: string[];
   canonicalRef?: string;
@@ -410,15 +452,35 @@ export interface ModelCatalogEntry {
  * 单次 agent 调用的任务声明——引擎面子集（协议 run.params.task；core 全量
  * AgentCallOpts 22 字段留 core，core 侧反向 re-export 保消费面）。
  *
- * 字段裁决（对照 core orchestration/models/types.ts AgentCallOpts，2026-09-09）：
- * - 入选 = 引擎消费面：任务语义（prompt/schema/thinkingLevel/skill/skillPath/agent/persona 注入）、
- *   轮次预算（maxTurns/graceTurns/idleTimeoutMs）、隔离与权限（worktree/
- *   fork/forkSource/denyTools/permissionMode）、诊断（description/scene）；
- * - 排除并改挂 run.params.ctx（协议层已单列，task 内双写会分叉）：model（→ctx.model）、
- *   schemaEnv（→ctx.schemaEnv）、cwd（→ctx.cwd）、engineFallback（→ctx.engineFallback）；
- * - 排除（宿主侧消费，无引擎语义）：engine（路由决策已完成，收到的引擎即选中值）、
- *   timeoutMs（宿主超时链 mergeTimeoutSignal → cancel 帧，非引擎参数）、returnMeta
- *   （core 注释明确「dropped at the pi boundary」，非引擎消费）。
+ * 字段归属判据（协议演进宪法 ADR-0071 成文，权威源
+ * docs/architecture/subagent-engine-protocolization.md §3.3「协议演进宪法」与
+ * docs/adr/decisions.md ADR-0071；
+ * 本注释是判据与存量结论的投影，新增字段按决策树依序裁决后在此登记）：
+ *   ① 引擎不消费它任务能否正确完成？能 → 宿主自持不上协议（「正确」含满足字段
+ *      声明携带的约束面——轮次预算/超时等约束被引擎忽略即任务语义受损，视为消费）；
+ *   ② 描述「任务是什么」(what) 还是「在什么环境跑/怎么跑」(where/how)？
+ *      what → task（预算/验收类约束 = 任务自带语义归 task，宿主偏好参数走③）；
+ *   ③ 引擎能否自行推导该环境值且与宿主恒等？能 → 不上协议（推导权归引擎，设计期
+ *      以两引擎实装逐一对照验证恒等）；不能（推导会分叉）→ run.params.ctx
+ *      （存疑即视为会分叉，取 ctx 保守侧）；
+ *   ④ 【绝对条款】双写禁令——同一语义不得在 task 与 ctx 各挂一份，取值源必须唯一
+ *      （机器锁见 contract-closure.test.ts 的 keyof 交集 = never 断言；禁令钉 wire
+ *      类型，port-contract.ts 的进程内合回形态不在此列）；
+ *   ⑤ 能力绑定——字段有效性依赖能力位时双向注释互指（先例 streamMode ↔
+ *      eventGranularity），宿主据此派发前预检。存量不搬家不重判：判据只约束新增。
+ *
+ * 存量字段结论表（判据 1-3 回判与现状一致）：
+ *   - 判据② task（任务语义）：prompt / schema / thinkingLevel / scene /
+ *     maxTurns / graceTurns / idleTimeoutMs / skill / skillPath / agent /
+ *     appendSystemPrompt；
+ *   - 判据② task（隔离与权限随任务声明）：worktree / fork / forkSource /
+ *     denyTools / permissionMode；
+ *   - 判据② task（诊断元数据）：description；
+ *   - 判据③ ctx（环境值，引擎自推导与宿主不恒等）：model / cwd
+ *     （对照 core orchestration/models/types.ts AgentCallOpts，协议层单列）；
+ *   - 判据① 宿主自持不上协议：engine（路由决策已完成，收到的引擎即选中值）、
+ *     timeoutMs（宿主超时链 mergeTimeoutSignal → cancel 帧，非引擎参数）、
+ *     returnMeta（core 注释明确「dropped at the pi boundary」，非引擎消费）。
  *
  * W2 实装 EngineClient run 帧时以本类型为 params.task；core 侧全量 → 子集的方向性
  * 收窄（多余字段宿主自持不透传）不构成类型漂移（断言方向见 contract-closure 测试样板）。

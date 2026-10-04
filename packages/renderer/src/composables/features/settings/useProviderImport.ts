@@ -6,11 +6,11 @@
  *
  * 数据流：
  *   onImportSelect(source)
- *     → config.previewImportProviders(source)
+ *     → getSettingsTransport().previewImportProviders(source)
  *     → 成功：存 importId + importPreview，转入 'previewing'
  *     → 失败（envelope error 或 transport reject）：toast 报错，回 'idle'
  *   onImportConfirm(selectedIds)
- *     → config.applyImportProviders(importId, selectedIds)
+ *     → getSettingsTransport().applyImportProviders(importId, selectedIds)
  *     → 成功：toast 导入/跳过/失败统计 + key 缺失提示；有失败项保留 preview 供回查（RD-4#12），
  *       全部成功才复位 idle
  *     → 失败（envelope error 或 transport reject）：保持 'previewing' 允许重试
@@ -22,7 +22,7 @@
  * 依赖方向：@taiji/shared 类型 + @/api(config) + useToast + i18n。
  */
 import { ref } from 'vue'
-import { config } from '@/api'
+import { getSettingsTransport } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
 import i18n from '@/i18n'
 import type {
@@ -64,7 +64,7 @@ export function useProviderImport() {
     importState.value = 'loading-preview'
     importError.value = ''
     try {
-      const result = await config.previewImportProviders(source)
+      const result = await getSettingsTransport().previewImportProviders(source)
       if ('error' in result) {
         importError.value = result.error.message
         importState.value = 'idle'
@@ -90,7 +90,7 @@ export function useProviderImport() {
     importState.value = 'applying'
     importError.value = ''
     try {
-      const result = await config.applyImportProviders(importId.value, selectedIds)
+      const result = await getSettingsTransport().applyImportProviders(importId.value, selectedIds)
       if ('error' in result) {
         importError.value = result.error.message
         importState.value = 'previewing'

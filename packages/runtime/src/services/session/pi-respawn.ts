@@ -25,8 +25,9 @@
  * 熔断：连续失败 2 次（spawn/附着失败——含文件头损坏等极端形态的 MissingSessionCwdError，
  * cwd 死路径常态已由附着前最小规范化的首行 cwd fallback 修复，见 restore-seeding）
  * → 停止自动重试，session 保持 dead，推 willRetry=false 的 session.restoreFailed（前端
- * 切失败态提示条 + 手动重试按钮）；任一次自动恢复成功 → 计数清零（notifyRestored，
- * 挂在 facade.restoreSession 成功路径——手动恢复成功同样清零，保证未来崩溃获得全新
+ * 切失败态提示条 + 手动重试按钮）；任一次恢复成功 → session.restored 发布 + 计数清零
+ * 统一走 facade.restoreSession 成功尾部的三合一出口（onRestoreSuccess，msg-pipeline-debloat
+ * D3：本 facade 是恢复四入口的真实汇合点，手动/惰性成功同样清零，保证未来崩溃获得全新
  * 自动恢复额度）。
  *
  * 消息推送（仓规规则 7）：session.restored / session.restoreFailed 必带 sessionId，
@@ -65,6 +66,39 @@ export interface RespawnDeps {
   publish: (sessionId: string, msg: ServerMessage) => void
 }
 
+/**
+ * respawn 终态命运事件（notify-once D5 death 收口挂点）：组合根 index.ts 据以判定
+ * 子会话进程死亡是否发声——
+ * - 'retry-pending'：respawn 链接管（5s 重试已挂）——静默，claim 悬挂交 TTL 清扫（E8）；
+ * - 'recovered'：session 活跃/恢复中/恢复成功——静默，丢弃退出现场 stash；
+ * - 'terminal'：熔断（连续失败达阈值）或调度前已熔断——按不可恢复 crash 发声
+ *   （携原 crash 的 exitCode/stderrTail stash，同 deathSeq 递增）。
+ * 模块级订阅（组合根单消费方）；无订阅者时零开销，测试构造的 orchestrator 实例不受扰。
+ */
+export type RespawnFate = 'retry-pending' | 'recovered' | 'terminal'
+export interface RespawnFateEvent {
+  sessionId: string
+  fate: RespawnFate
+}
+const respawnFateListeners = new Set<(e: RespawnFateEvent) => void>()
+
+/** 订阅 respawn 终态命运（返回退订函数；组合根 notify-once 接线）。 */
+export function onRespawnFate(cb: (e: RespawnFateEvent) => void): () => void {
+  respawnFateListeners.add(cb)
+  return () => { respawnFateListeners.delete(cb) }
+}
+
+function emitRespawnFate(sessionId: string, fate: RespawnFate): void {
+  for (const cb of [...respawnFateListeners]) {
+    try {
+      cb({ sessionId, fate })
+    } catch (e: unknown) {
+      // 订阅者异常不得阻断恢复编排（best-effort 留痕，可回溯）
+      console.error(`[pi-respawn] respawn-fate listener error (sessionId=${sessionId}, fate=${fate}):`, e)
+    }
+  }
+}
+
 export class RespawnOrchestrator {
   private readonly deps: RespawnDeps
   /** pending 恢复 timer（sessionId → handle）。取消语义的状态载体。 */
@@ -78,6 +112,13 @@ export class RespawnOrchestrator {
    * 让位检查，一处状态两方消费，不再可能漂移。
    */
   private readonly restoringSessions = new Map<string, Promise<void>>()
+  /**
+   * 本次 restore 是否由 attemptRespawn 发起（per-session 布尔，msg-pipeline-debloat D3
+   * 发布判别信号②）。置位点钉死在 attemptRespawn 三守卫全过之后、ensureRestored 之前；
+   * finally 清除。缺此信号则自动恢复首试成功（timer 已删 + 计数 0）在 facade 出口三信号
+   * 落空不发布——活 session 永久 dead 置灰且无解锁通道。
+   */
+  private readonly attemptInFlight = new Set<string>()
 
   constructor(deps: RespawnDeps) {
     this.deps = deps
@@ -95,13 +136,21 @@ export class RespawnOrchestrator {
    * 决策日志（D6-⑥ 同款「谁触发、对谁、为什么」）：每次调度落一行，崩溃恢复链路可归因。
    */
   schedule(sessionId: string): void {
-    if (this.deps.isActive(sessionId)) return
+    if (this.deps.isActive(sessionId)) {
+      // 进程仍活（防御位）：非死亡终态，丢弃退出现场 stash（notify-once D5）
+      emitRespawnFate(sessionId, 'recovered')
+      return
+    }
     if (this.isRestoring(sessionId)) {
       console.log(`[pi-respawn] session ${sessionId} has in-flight restore — skip auto respawn (join semantics, D7-3)`)
+      // 惰性恢复在跑 = session 将复活（respawn 链同族）——静默
+      emitRespawnFate(sessionId, 'recovered')
       return
     }
     if (this.isTripped(sessionId)) {
       console.log(`[pi-respawn] session ${sessionId} respawn breaker tripped (${this.consecutiveFailures.get(sessionId)} consecutive failures) — skip auto respawn`)
+      // 已熔断的后续死亡：session 保持 dead → 不可恢复 crash 发声（前次熔断时已销账则空转）
+      emitRespawnFate(sessionId, 'terminal')
       return
     }
     this.clearTimer(sessionId)
@@ -117,6 +166,7 @@ export class RespawnOrchestrator {
       sessionId,
       detailDigest: `attempt=${attempt + 1} delayMs=${RESPAWN_DELAY_MS}`,
     })
+    emitRespawnFate(sessionId, 'retry-pending')
     this.armTimer(sessionId)
   }
 
@@ -124,7 +174,8 @@ export class RespawnOrchestrator {
    * 单次自动恢复尝试（timer 触发）。触发时复查守卫（5s 窗口内状态可能已变：
    * 用户惰性恢复已完成 / 用户已删除 session / 熔断已触发）。
    *
-   * 成功 → 计数清零 + 推 session.restored；
+   * 成功 → session.restored 发布与计数清零由 facade 成功尾部三合一出口承担（D3，
+   * 本方法的 restore 内核 = facade，成功时其尾部必然执行）；
    * 失败 → 计数 +1 + 推 session.restoreFailed{willRetry}；未达熔断阈值时续排下一次
    * 尝试（同 RESPAWN_DELAY_MS 间隔——兼作重试退避）。restore 本身抛错不外泄
    *（fire-and-forget 链，失败走 restoreFailed 推送 + error 日志）。
@@ -132,6 +183,8 @@ export class RespawnOrchestrator {
   private async attemptRespawn(sessionId: string): Promise<void> {
     if (this.deps.isActive(sessionId) || this.isRestoring(sessionId)) {
       console.log(`[pi-respawn] session ${sessionId} already active/restoring at timer fire — skip auto respawn`)
+      // 5s 窗内已复活（惰性恢复完成/进行中）——respawn 链静默，丢弃退出现场 stash
+      emitRespawnFate(sessionId, 'recovered')
       return
     }
     if (this.isTripped(sessionId)) return
@@ -145,6 +198,10 @@ export class RespawnOrchestrator {
       sessionId,
       detailDigest: `attempt=${attempt}/${RESPAWN_MAX_CONSECUTIVE_FAILURES}`,
     })
+    // [D3] attemptInFlight 置位点钉死：三守卫全过之后、ensureRestored 之前。上方 early
+    // return 路径（active/restoring 让位、熔断让位）一律不置位——标志泄漏会让后续普通
+    // 懒 spawn 在 facade 出口误命中信号②发假「崩溃恢复」帧。
+    this.attemptInFlight.add(sessionId)
     try {
       // 经 ensureRestored 执行（不直呼 deps.restore）：恢复期间登记 in-flight 注册表，
       // spawn+attach 秒级窗口内用户发消息（ensureActive→ensureRestored）join 同一
@@ -175,12 +232,19 @@ export class RespawnOrchestrator {
         console.log(`[pi-respawn] session ${sessionId} retry scheduled in ${RESPAWN_DELAY_MS}ms (attempt ${attempt + 1})`)
         this.armTimer(sessionId)
       } else {
+        // 熔断 = 不可恢复 crash（notify-once D5：按死亡发声，携原 crash 退出现场 stash）
+        emitRespawnFate(sessionId, 'terminal')
         console.warn(`[pi-respawn] session ${sessionId} respawn breaker tripped — session stays dead, waiting for user action (manual retry / lazy restore)`)
       }
       return
+    } finally {
+      // [D3] 无论成败清除发起标志：泄漏会让恢复完成后的后续无上下文 restore 在 facade
+      // 出口误命中信号②（假「崩溃恢复」帧）。
+      this.attemptInFlight.delete(sessionId)
     }
-    // 成功：计数清零（连续失败语义归零）+ 推 restored（前端插恢复提示条 + 复位 dead 态）。
-    this.consecutiveFailures.delete(sessionId)
+    // 成功：日志 + D1 台账「success」态。session.restored 发布与计数清零不在此——
+    // [D3] 统一由 facade.restoreSession 成功尾部三合一出口（onRestoreSuccess）承担
+    //（旧发布点删于 msg-pipeline-debloat，防双发；验收 S3①「恰好一条」可拦截回归）。
     console.log(`[pi-respawn] session ${sessionId} auto restore succeeded (attempt ${attempt})`)
     // D1 台账「success」态：reason=succeeded 与 failed 态事件（auto-respawn-failed）可区分。
     getCrashJournal().append({
@@ -190,14 +254,40 @@ export class RespawnOrchestrator {
       sessionId,
       detailDigest: `attempt=${attempt}`,
     })
-    this.deps.publish(sessionId, {
-      type: 'session.restored',
-      payload: { sessionId, attempts: attempt },
-    })
+    // 自动恢复成功 = respawn 链静默收口（notify-once D5），丢弃退出现场 stash。
+    // session.restored 发布不在此——[U-B1 D3] 统一由 facade.restoreSession 成功尾部
+    // 三合一出口承担；本点只上报 respawn 链 fate（notify-once 订阅面）。
+    emitRespawnFate(sessionId, 'recovered')
   }
 
-  /** 任一次自动恢复成功（含用户手动恢复，挂 facade.restoreSession 成功路径）→ 计数清零。 */
-  notifyRestored(sessionId: string): void {
+  /**
+   * 恢复成功三合一出口（msg-pipeline-debloat D3）：判别 → 发布 session.restored → 清连续
+   * 失败计数，一顺完成。生产唯一调用点 = facade.restoreSession 成功尾部（四入口真实汇合点：
+   * 自动 respawn / 惰性 ensureActive / 手动 RPC / startup-reattach 的 restore 内核都是该
+   * facade）；组装级测试的 restoreSession 替身按同一契约在成功尾部调用。
+   *
+   * 发布判别（三信号任一命中 = respawn 编排上下文命中，restored 帧语义「崩溃恢复完成」；
+   * 读取必须先于清零——信号③依赖清零前的计数）：
+   * ① pending respawn timer 在册（fire 前惰性抢占命中）；
+   * ② attemptInFlight（本次 restore 由 attemptRespawn 发起——含首试成功：timer 已删 +
+   *   计数 0 时唯此信号可发布）；
+   * ③ 连续失败计数 > 0（含熔断态——手动/惰性恢复于重试或熔断窗口命中）。
+   * 三信号皆空 = 普通懒 spawn / startup-reattach，静默恢复不发布（不插「崩溃恢复」提示条）。
+   */
+  onRestoreSuccess(sessionId: string): void {
+    const inRespawnContext =
+      this.pendingTimers.has(sessionId)
+      || this.attemptInFlight.has(sessionId)
+      || (this.consecutiveFailures.get(sessionId) ?? 0) > 0
+    if (inRespawnContext) {
+      // attempts 语义（D3 实施期定义；renderer 仅 console.debug 消费，零用户可见面）：
+      // 本次恢复成功前的连续失败次数 + 1（首试成功 = 1；1 次失败后成功 = 2；熔断 2 次
+      // 失败后手动恢复 = 3）。
+      this.deps.publish(sessionId, {
+        type: 'session.restored',
+        payload: { sessionId, attempts: (this.consecutiveFailures.get(sessionId) ?? 0) + 1 },
+      })
+    }
     if (this.consecutiveFailures.delete(sessionId)) {
       console.log(`[pi-respawn] session ${sessionId} restored — consecutive failure count reset`)
     }
@@ -243,7 +333,8 @@ export class RespawnOrchestrator {
    * 只清 timer 不清失败计数：removeSessionEntry 汇聚点被 restoreSession 清场复用
    *（lifecycle.restoreSession 对 existing 的 detach+destroy+remove），在 attempt 中途
    * 清计数会破坏熔断（失败计数归零 → willRetry 恒真 → 无限重试）。计数清零唯一入口 =
-   * notifyRestored（成功）；残留计数随 session 生命周期自然消亡（进程结束 / 恢复成功）。
+   * onRestoreSuccess（成功，facade 尾部三合一出口）；残留计数随 session 生命周期自然
+   * 消亡（进程结束 / 恢复成功）。
    */
   cancel(sessionId: string): void {
     this.clearTimer(sessionId)

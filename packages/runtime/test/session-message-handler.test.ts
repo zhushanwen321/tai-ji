@@ -19,8 +19,6 @@ function makeHandler(sessionOverrides: Record<string, ReturnType<typeof vi.fn>> 
   const cap: Captured = { replies: [], errors: [] }
   const sessionService = {
     sendMessage: vi.fn().mockResolvedValue({ blocked: false }),
-    steerMessage: vi.fn().mockResolvedValue(undefined),
-    followUpMessage: vi.fn().mockResolvedValue(undefined),
     ensureActive: vi.fn().mockResolvedValue(undefined),
     compact: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(undefined),
@@ -71,26 +69,8 @@ describe('SessionMessageHandler — error envelope 回归', () => {
     })
   })
 
-  describe('message.steer', () => {
-    it('失败 → sendError(steer_failed)', async () => {
-      const { cap, handler } = makeHandler({ steerMessage: vi.fn().mockRejectedValue(new Error('no active pi')) })
-      await handler.handleSessionMessage(msg('message.steer', { sessionId: 's1', content: 'x' }), WS)
-      expect(cap.errors[0]).toMatchObject({ id: 'm1', code: 'steer_failed', details: { sessionId: 's1' } })
-    })
-    it('成功 → reply queued... 实为 steered', async () => {
-      const { cap, handler } = makeHandler()
-      await handler.handleSessionMessage(msg('message.steer', { sessionId: 's1', content: 'x' }), WS)
-      expect(cap.replies[0].payload).toMatchObject({ status: 'steered' })
-    })
-  })
-
-  describe('message.follow_up', () => {
-    it('失败 → sendError(follow_up_failed)', async () => {
-      const { cap, handler } = makeHandler({ followUpMessage: vi.fn().mockRejectedValue(new Error('boom')) })
-      await handler.handleSessionMessage(msg('message.follow_up', { sessionId: 's1', content: 'x' }), WS)
-      expect(cap.errors[0]).toMatchObject({ code: 'follow_up_failed', details: { sessionId: 's1' } })
-    })
-  })
+  // [MF-1-8 退役] message.steer / message.follow_up 路由已删除（u5a 退役条件兑现）：
+  // 发送统一收敛 delivery.submit，error envelope 用例随路由一并退役。
 
   describe('session.compact', () => {
     it('ensureActive 失败 → sendError(compact_failed)', async () => {

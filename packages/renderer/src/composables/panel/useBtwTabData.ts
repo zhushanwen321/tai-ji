@@ -20,17 +20,20 @@
  *   （useSessionEvents 实例订阅）。两路同帧形同式收敛，幂等可重入。
  * - **异步回写一律 `updateFor(capturedSid)`**（AGENTS 规则 8）：焦点切走后迟到响应只写
  *   旧分区；同分区旧响应用 loadSeq 丢弃（乱序守卫，BtwPanel 同款）。
- * - **未读计数**：per-线 watch chatStore 分区消息数增长（WS → routeInbound → chatStore
- *   的下游观察点，handler 捕获线归属 sid 后 updateFor 回写）；非视口增长 Σ 计数，视口内
- *   到达不计。**清除 = 线内容进入视口**（D8 终态表「未读」行 SSOT）：drawer 开在 btw tab
- *   且选中该线、绑定 sid = 线归属主会话 ⇒ 视口命中，进入即清。
+ * - **未读计数 = 消息事件按 vid 路由 + updateFor 写分区**（D3 收敛形态）：线消息帧经
+ *   `ensureStreamSubscription(vid)` 写入 chatStore 分区（renderer 侧线内容的唯一聚合点，
+ *   MessageBus 会话订阅制下 events 层单独挂 vid 订阅收不到未订阅线的帧，badge 通道也不
+ *   该重复消费 message.* 帧），本模块以**单条** scope 内 watch 观察观察集全线的分区消息
+ *   数，增长 delta 按 vid 反查归属主会话后 `updateFor(归属)` 写分区；非视口增长 Σ 计数，
+ *   视口内到达不计。**清除 = 线内容进入视口**（D8 终态表「未读」行 SSOT）：drawer 开在
+ *   btw tab 且选中该线、绑定 sid = 线归属主会话 ⇒ 视口命中，进入即清。
  * - **虚拟 key 清理登记 + 消费面**（文件底部）：`mainSid → [线 vid]` 映射登记结构——
  *   登记先写后读（M3-b），消费已随 M4-a 接线：deleteSession 级联腿（useSidebar
  *   hooks.evictVirtualKeys 枚举 getBtwVirtualIdsByMain → disposeBtwLinePartitions →
  *   clearBtwVirtualKeyMapping）+ 关线腿（本文件 reconcile 出册同拍 dispose）。
  *
- * D8 终态机簿记（badge「待处理」态 + 挂起请求生命周期四张表）在
- * `./btw-pending-bookkeeping`（纯状态域，store 层 stores/btw-replay 直接消费）；本文件持有
+ * D8 终态机簿记（badge「待处理」态 + 挂起请求生命周期三张表）在
+ * `./btw-pending-bookkeeping`（纯状态域）；本文件持有
  * 其**订阅壳与 transport 半边**——`ensureBtwPendingBookkeeping`（bus 'ui-request' /
  * 'requests-invalidated' / state 帧三订阅 → 簿记入账/失效薄委托）与 `respondBtwDialog`
  * （dialog 族应答，送达才出队出账）。BtwPanel 线列表主数据仍是面板自身拉取（M3-a 形态），
@@ -38,7 +41,7 @@
  * 若落在非视口会计入；视口内重放/到达由视口清除支收敛）——对齐 PanelContainer AC-13 未读
  * 先例的取口径。
  */
-import { computed, defineComponent, inject, onErrorCaptured, onScopeDispose, reactive, ref, watch } from 'vue'
+import { computed, defineComponent, inject, onErrorCaptured, reactive, ref, watch } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import { isBtwVirtualId, extractBtwPiSessionId } from '@taiji/shared'
 import { disposeLruEntry, isVirtualKeyOf } from '@taiji/core'
@@ -71,8 +74,6 @@ import {
   invalidateBtwRequests,
   isBtwDialogRequest,
   isBtwPending,
-  noteBtwRequestResolved,
-  registerBtwPendingRequest,
   removeBtwDialogReq,
   setBtwReclaimReminder,
 } from '@/composables/panel/btw-pending-bookkeeping'
@@ -195,9 +196,10 @@ export function ensureBtwPendingBookkeeping(): void {
   const offUiRequest = bus.on('ui-request', (e) => {
     const sid = e.sessionId
     if (!sid || !isBtwVirtualId(sid) || !isBtwDialogRequest(e)) return
-    registerBtwPendingRequest(sid, e.request.requestId)
+    // 新请求顶掉既有失效提示（清除支之一：表单重新可达，提示失义）
+    clearBtwExpiredNotice(sid)
     const r = e.request as { form?: unknown; planReview?: unknown }
-    if (r.form === true || r.planReview === true) return // store 族载荷在 extensionUIStore（本簿记只记 id）
+    if (r.form === true || r.planReview === true) return // store 族载荷在 extensionUIStore，不经本簿记
     enqueueBtwDialogReq(sid, convertToDialogRequest(e))
   })
   const offInvalidated = bus.on('requests-invalidated', (e) => {
@@ -234,7 +236,6 @@ export function respondBtwDialog(
     : dialogTransport.sendPluginResponse(target.requestId, result)
   if (!delivered) return false // 保持挂起（transport 已 toast），连接恢复后可重投
   removeBtwDialogReq(vid, requestId)
-  noteBtwRequestResolved(vid, requestId)
   return true
 }
 
@@ -257,9 +258,8 @@ export interface UseBtwTabDataReturn {
 }
 
 /**
- * 接线 btw badge 数据通道。**必须在组件 setup 同步调用**（watch 立即拉取与 onScopeDispose
- * 依赖实例上下文；per-线消息 watch 在拉取 resolve 后创建（无组件实例），由本函数的
- * onScopeDispose 统一停——disposed 闸防「卸载后在途拉取补建 watch」泄漏）。
+ * 接线 btw badge 数据通道。**必须在组件 setup 同步调用**（watch 立即拉取与未读观察
+ * watcher 均挂实例 effect scope，随组件卸载自动停，无需手动编排）。
  *
  * @param sidRef 焦点主会话 id（Composer 的 sessionId prop 包装 computed）
  */
@@ -304,9 +304,6 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
     return total
   })
 
-  /** scope dispose 闸：onScopeDispose 后在途拉取不得再补建 per-线 watch（防泄漏） */
-  let disposed = false
-
   // ── 视口判定 / 未读清除（D8 终态表「未读」行：线内容进入视口即清）────────────────
 
   /**
@@ -327,45 +324,91 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
     })
   }
 
-  // ── per-线未读观察（线归属 sid 在拉取时捕获；handler 回写恒 updateFor(captured)）──
+  // ── 未读信号路由（消息事件按 vid 路由 + updateFor 写分区，D3 收敛形态）──────────────
 
-  /** vid → { 归属 sid, stop }（实例级；线出册 / scope dispose 时停） */
-  const threadWatchers = new Map<string, { sid: string; stop: () => void }>()
+  /** 观察集：vid → 归属主会话（实例级；refresh 成功后登记增删，无挂/停编排——出册线
+   *  剪出登记后签名源收缩即停计，观察本体是下方单条 scope 内 watch，随实例自动停） */
+  const lineOwners = new Map<string, string>()
+  /** 登记版本号（Map 非响应式，由它承担观察集变化的响应式触发——diff 源的合法依赖） */
+  const lineOwnersVersion = ref(0)
 
-  function syncThreadWatchers(captured: string, threads: BtwThreadInfo[]): void {
-    if (disposed) return
-    // 出册线：停观察（关线/级联移除后其分区不再产生 badge 信号）
-    const alive = new Set(threads.map((th) => th.vid))
-    for (const [vid, entry] of threadWatchers) {
-      if (entry.sid === captured && !alive.has(vid)) {
-        entry.stop()
-        threadWatchers.delete(vid)
+  /** refresh 成功后同步观察集（纯登记：入册 set / 本主出册 delete；切走主会话的线保留
+   *  登记——后台照常累计未读，D7③） */
+  function syncWatchedLines(captured: string, threads: BtwThreadInfo[]): void {
+    let touched = false
+    for (const th of threads) {
+      if (lineOwners.get(th.vid) !== captured) {
+        lineOwners.set(th.vid, captured)
+        touched = true
       }
     }
-    for (const th of threads) {
-      if (threadWatchers.has(th.vid)) continue
-      const owner = captured
-      const vid = th.vid
-      // 消息数增长（WS 下游观察点）：视口内到达 → 清（不计）；非视口 → Σ 计数。
-      // watch 创建于拉取 resolve 之后（无组件实例上下文）→ 不自动随 scope 停，
-      // 由 onScopeDispose 遍历 threadWatchers 统一 stop。
-      const stop = watch(
-        () => chatStore.getMessages(vid).length,
-        (len, prev) => {
-          if (len <= prev) return
-          // 回收提醒清除支（D8 第四行）：线内容增长 = 用户续问/活动已发生，提醒即清
-          setBtwReclaimReminder(vid, false)
-          if (isThreadInView(owner, vid)) {
-            clearUnread(owner, vid)
-            return
-          }
-          scoped.updateFor(owner, (s) => {
-            s.unreadByVid[vid] = (s.unreadByVid[vid] ?? 0) + (len - prev)
-          })
-        },
-      )
-      threadWatchers.set(vid, { sid: owner, stop })
+    const alive = new Set(threads.map((th) => th.vid))
+    for (const [vid, owner] of lineOwners) {
+      if (owner === captured && !alive.has(vid)) {
+        lineOwners.delete(vid)
+        touched = true
+      }
     }
+    if (touched) lineOwnersVersion.value++
+  }
+
+  /** 签名串解析（`vid\0len;vid\0len` → vid → 分区消息数；与下方源构造互逆） */
+  function parseLineLens(sig: string): Map<string, number> {
+    const lens = new Map<string, number>()
+    if (!sig) return lens
+    for (const part of sig.split(';')) {
+      if (!part) continue
+      const sep = part.indexOf('\u0000')
+      if (sep < 0) continue // 无 vid\0len 结构的残段不成条目
+      lens.set(part.slice(0, sep), Number(part.slice(sep + 1)))
+    }
+    return lens
+  }
+
+  /**
+   * 未读信号源 = 观察集全线的 chatStore 分区消息数（线消息事件的 renderer 唯一聚合点，
+   * 见文件头）。单条 watch（D3 收敛：消 per-线 watcher 的挂/停/差集/disposed 闸编排）：
+   * 签名串值比较——prev 无该 vid = 新观察基线不计（对齐 per-线 watcher 创建时基线语义）；
+   * 增长 delta 经 routeUnreadGrowth 按 vid 路由。
+   * **flush: 'sync'**：diff 逐次写入即时收敛，无批处理合并窗口——跨窗口合并会让「视口
+   * 内到达不计」的清除支失真（中间态被跳过即漏清）；源是轻量签名串（线数十量级），
+   * 同步 diff 成本可忽略。登记版本号入源依赖：入册/出册（syncWatchedLines）即时反映
+   * 到观察范围，不依赖 threads 赋值的先后顺序。
+   */
+  watch(
+    () => {
+      void lineOwnersVersion.value
+      const parts: string[] = []
+      for (const vid of lineOwners.keys()) {
+        parts.push(`${vid}\u0000${chatStore.getMessages(vid).length}`)
+      }
+      parts.sort()
+      return parts.join(';')
+    },
+    (curr, prev) => {
+      const base = parseLineLens(prev)
+      for (const [vid, len] of parseLineLens(curr)) {
+        const was = base.get(vid)
+        if (was === undefined || len <= was) continue
+        routeUnreadGrowth(vid, len - was)
+      }
+    },
+    { flush: 'sync' },
+  )
+
+  /** 单线未读增长路由（回收提醒清除支 + 视口清除 / 非视口累计，D8 终态表口径） */
+  function routeUnreadGrowth(vid: string, delta: number): void {
+    const owner = lineOwners.get(vid)
+    if (!owner) return // 出册线：登记已剪，无 badge 信号（对齐「观察已停不再计数」）
+    // 回收提醒清除支（D8 第四行）：线内容增长 = 用户续问/活动已发生，提醒即清
+    setBtwReclaimReminder(vid, false)
+    if (isThreadInView(owner, vid)) {
+      clearUnread(owner, vid)
+      return
+    }
+    scoped.updateFor(owner, (s) => {
+      s.unreadByVid[vid] = (s.unreadByVid[vid] ?? 0) + delta
+    })
   }
 
   // ── 主动拉取（captured 分区回写 + loadSeq 乱序守卫）────────────────────────────
@@ -393,7 +436,7 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
       })
       if (!fresh) return // 旧响应：不触碰观察面与登记面（新响应各自负责）
       syncReclaimReminders(threads)
-      syncThreadWatchers(captured, threads)
+      syncWatchedLines(captured, threads)
       reconcileBtwVirtualKeys(
         captured,
         threads.map((th) => th.vid),
@@ -442,9 +485,10 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
     },
   )
 
-  // ③ 抽屉活动重拉：新建线（面板侧 btw.create）入册 / 关线剪枝 / 新选中线挂观察。
-  //    线列表数据只登记拉取触发面（badge 通道线列表以拉取为唯一数据源，见文件头）；
-  //    回收提醒 state 帧广播的订阅独立存在（global + session 双通道，见 setup 头部）。
+  // ③ 抽屉活动重拉：新建线（面板侧 btw.create）入册 / 关线剪枝（观察集随登记同步收敛，
+  //    无独立挂观察动作——新线入册即进签名源）。线列表数据只登记拉取触发面（badge 通道
+  //    线列表以拉取为唯一数据源，见文件头）；回收提醒 state 帧广播的订阅独立存在
+  //    （global + session 双通道，见 setup 头部）。
   watch(
     () => {
       const drawer = getDrawerControlState()
@@ -456,12 +500,6 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
     },
   )
 
-  onScopeDispose(() => {
-    disposed = true
-    for (const entry of threadWatchers.values()) entry.stop()
-    threadWatchers.clear()
-  })
-
   return { state, totalUnread, totalPending, refresh }
 }
 
@@ -470,8 +508,8 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
 
 /**
  * 接线 drawer 面板的交互表面（BtwPanel setup 同步调用）：
- * - 失效行内提示读取/关闭（终态机失效支，badge 清 + 撤下 + 提示三路合并收口
- *   （事件 / 快照对账 / 回放悬空）的提示半边）；
+ * - 失效行内提示读取/关闭（终态机失效支——事件帧失效一路的提示半边，badge 清 + 撤下
+ *   同源于 invalidateBtwRequests 单入口）；
  * - 第四面状态区（setStatus/setWidget 的 per-session 源读 vid 分区；inject 缺失静默空态；
  *   toolbar/tab-bar 无 session 帧不在路由面——V4⑤ 结论）；
  * - 运行期错误边界：onErrorCaptured 绑定调用方组件实例（BtwPanel），Guard 子组件为全部

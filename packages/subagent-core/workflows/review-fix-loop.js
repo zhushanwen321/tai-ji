@@ -11,19 +11,19 @@
 // 修复范围 = 全部等级（must-fix + suggestion/minor）；批内某 agent 已无任何等级问题
 // （must-fix 与 suggestion 全 0）则后续轮跳过，优化 token 效率。终止/收敛判定仍以
 // must-fix 为主驱动，但任何「成功类」终止（clean/converged/A4 全降级）都要求 suggestion 也为 0。
-// stuck 检测只看 must-fix（suggestion 主观新冒不谈 stuck，由 maxRounds 硬顶兑底）。
+// stuck 检测只看 must-fix（suggestion 主观新冒不谈 stuck，由 maxRounds 硬顶兜底）。
 //
-// 台账守门（假 clean 防护）：state.issues 是「问题是否全部解决」的唯一权威——四个
+// 问题清单守门（假 clean 防护）：state.issues 是「问题是否全部解决」的唯一权威——四个
 // 成功收工点（全员 clean 早退 / all-clean / converged / A4 全降级）统一前置
-// hasOpenResidue：本轮观测（reviewer 报数 / 聚合活跃条目）为 0 不蕴涵台账已清。
-// 残留时重派追账（台账未结条目注入 R2+ prompt），reviewer 的 reconciliation 申报
-// fixed（带 evidence）→ reconcileIssues 清账；not-fixed → openStreak 增长走 stuck；
-// 无视 → maxRounds 兜底——任何路径不再产出「clean 终态 + 台账 open 残留」的自相矛盾。
+// hasOpenResidue：本轮观测（reviewer 报数 / 聚合活跃条目）为 0 不蕴涵清单已清。
+// 残留时重派追账（清单未结条目注入 R2+ prompt），reviewer 的 reconciliation 申报
+// fixed（带 evidence）→ reconcileIssues 关闭条目；not-fixed → openStreak 增长走 stuck；
+// 无视 → maxRounds 兜底——任何路径不再产出「clean 终态 + 清单 open 残留」的自相矛盾。
 //
 // 身份对齐（编号+标题三级）：aggregator 编号跨轮不稳定（紧凑化重排 / 同题换号），
-// 表格号不直接当台账主键——merge 时 resolveIssueIdentity 三级对齐（L1 编号+标题
+// 表格号不直接当清单主键——merge 时 resolveIssueIdentity 三级对齐（L1 编号+标题
 // 双命中沿用 / L2 标题归一唯一命中沿用旧键 / L3 避让分配），改键条目记入
-// state.idMap（本轮表格号→台账键），fix 写入与下轮对账经 translateId 翻译
+// state.idMap（本轮表格号→清单键），fix 写入与下轮对账经 translateId 翻译
 // （ES3 集合比较双侧保持表格号空间不翻译）。title 随条目落 issues/dormant。
 //
 // 用法：
@@ -36,8 +36,9 @@
 // S4 路径统一：batch1..batchN/fixAgent 值 = agentRef（.md 绝对路径，<available_subagents> 的
 // <location>）；fallowScan=true 独立参数前置插入静态分析批次（不占 batchN）。
 // ⚠️ 唯一带写操作的内置 workflow：fix 阶段会修改文件（autoCommit=true 时 commit）。
-// ⚠️ lintScript 约束（本脚本已遵守）：含 parallel() 入口，禁止 bare IIFE；
-//    agent() 调用顺序确定（批次按配置顺序稳定排序，callId 重放安全）。
+// ⚠️ lintScript 约束（本脚本已遵守）：含 agent() 编排入口，禁止 bare IIFE；
+//    agent() 调用顺序确定（批次按配置顺序稳定排序，callId 重放安全；批内 fan-out
+//    经 failFastAgent 包装后 Promise.all，map 序 = 派发序）。
 //
 // ⚠️ 与 main 的 4.0.0 版分叉（merge 时 add/add 冲突，刻意决策记录）：
 //    本版（feat-recursive-optimize）保留——纯函数拆到 review-fix-loop-utils.cjs（vitest 覆盖）、
@@ -101,7 +102,13 @@ function fail(msg) {
 // （D1 加固），缺席即 fail-fast，不回退 cwd——消除从用户目录误加载/被植入同名
 // review-fix-loop-utils.cjs 的代码加载面。
 // 校验先于 $ARGS 白名单执行；fail 为函数声明（提升可用），沿用同一失败输出协议。
-if (typeof workerData === "undefined" || !workerData || typeof workerData.scriptPath !== "string") {
+// 空串形态 = record 流为 scriptPath 载荷落地前的旧格式（resume 重建无锚可恢复），
+// 与缺席同拦——不回退 cwd 的安全语义不变。
+if (typeof workerData === "undefined" || !workerData || typeof workerData.scriptPath !== "string" || workerData.scriptPath === "") {
+  if (workerData && typeof workerData.scriptPath === "string") {
+    fail("core_module_load_failed: workerData.scriptPath 为空串（record 流为旧格式，无 scriptPath 载荷），无法定位 review-fix-loop-utils.cjs。" +
+      "恢复动作：重跑该 workflow——旧 run 不支持 resume 续跑。");
+  }
   fail("core_module_load_failed: workerData.scriptPath 缺失，无法定位 review-fix-loop-utils.cjs。" +
     "恢复动作：worker 宿主（WorkerHost）启动 worker 时必须经 workerData 注入 scriptPath" +
     "（指向本脚本真实路径，注入点见 src/orchestration/worker-host.ts 的 workerData 组装处），" +
@@ -138,7 +145,6 @@ const {
   findNeedsRedesign,
   parseResult,
   normalizeAggregatorResult,
-  parseAggregatedMd,
   resolveRunRoot,
   computeOrigin,
   recordDormant,
@@ -161,6 +167,38 @@ const {
   planReviewerOrder,
   parseDiffStats,
 } = require(require("path").dirname(workerData.scriptPath) + "/review-fix-loop-utils.cjs");
+
+// 结构化失败终判恢复指引：结构化返回是必须满足的前提（fail-fast，无降级通道），
+// 错误信息带恢复动作是要求而非兜底。两处终判分支共用（结构化 error / 结果无效），
+// 追加到 finalMessage 末尾，文风对齐 fixer 终判既有「恢复动作：」格式
+//（错误 → 权威源 → 重试闭环）。
+const REVIEWER_RECOVERY_HINT = "；恢复动作：检查该 agent 的结构化返回链路——agent 定义 tools 白名单须放行 structured-output（受限 tools 会过滤 schema 工具致返回缺 must_fix）、引擎须支持 schema 结构化返回（旧引擎信封丢失形态同症）；修正后重跑 workflow";
+
+// reviewer 解析失败的原位重试后缀（对齐 dev-merge-gates 同源机制 2026-09-30）：追加到
+// 原 prompt 重新派发一次——agent() 为一次性派发（无跨调用上下文），重试 = 增强提示重问；
+// 报告通常已写盘，重试只需重出有效 schema JSON。仍败才 review-failure 终判（偶发返回
+// 畸形不再终止整个 run）。
+const REVIEWER_RETRY_SUFFIX = "\n\n[RETRY] Your previous response failed schema validation (missing/invalid must_fix, or malformed JSON). Re-output ONLY a valid response matching the required schema. If your report file is already written, keep it unchanged and just return the valid structured response.";
+
+// fail-fast 批内包装（B1/B2）：结构化返回是必须满足的前提，agent() 失败 resolve 的
+// {value, error} 信封（worker-script-builder 归一化，B4）在此转为 reject——Promise.all
+// 在第一个失败处立即收敛，后续 chunk 不再派发（外层循环由 catch 的结构化终判 break）。
+// 同 chunk 在跑的调用不可从脚本侧取消（abortRun 只能由宿主发起，脚本侧无 RPC 入口），
+// 跑完后结果被丢弃。层次裁决：不用抛 WorkflowAbortedError 收敛——未捕获脚本错误走
+// handleScriptError 重试矩阵（整脚本重放），确定性失败会重复烧 token 且最终 failed
+// 终态丢失 review-failure/fix-failure 结构化语义；Promise.all 收敛 + 结构化终判
+// 保「终态语义清晰 + 不污染状态」（在跑的跑完丢弃是已接受取舍）。
+// failedLabel 供 catch 终判 message 定位失败 agent（reviewer=agent 名 / fixer=组名）。
+function failFastAgent(call, failedLabel) {
+  return agent(call).then((raw) => {
+    if (raw && typeof raw === "object" && raw.error) {
+      const err = new Error(String(raw.error));
+      err.failedLabel = failedLabel;
+      throw err;
+    }
+    return raw;
+  });
+}
 
 // 白名单校验：未知参数名（防 batchX 拼错如 batchl）→ 报错
 for (const key of Object.keys($ARGS)) {
@@ -223,7 +261,7 @@ const convergeRounds = coerceInt($ARGS.convergeRounds, 2);
 const MODEL = $MODEL;
 // rfl aggregator 降档（tier-1 6.4，T8）：聚合是机械去重/格式化工作，可降档到便宜
 // 模型。模型路由参考全局/项目 AGENTS.md（当前用户全局有条目：
-// xiaomi-token-plan-cn/mimo-v2.5-pro，thinking 开非 max）；无条目请先与主人确认
+// xiaomi-token-plan-cn/mimo-v2.6-flash，thinking 开非 max）；无条目请先与主人确认
 // 并写入 AGENTS.md。缺省回退主模型（行为与现状一致）。
 const AGG_MODEL = resolveAggregatorModel($ARGS.aggregatorModel, MODEL);
 
@@ -622,7 +660,7 @@ function buildFallowReviewCall(base, def, header, roundDir) {
       "",
       "Steps:",
       "1. Check if fallow is installed: `which fallow`",
-      "2. If NOT installed: write the report with a one-line note, must_fix=0, suggestion=0.",
+      "2. If NOT installed: write the report with a one-line note saying so.",
       "3. If installed, run: `fallow audit --base " + lockedBase.base + " --format json --quiet`",
       "4. Extract: complexity hotspots, dead code, unused exports, circular deps",
       "5. Classify findings: critical/major count into must_fix; minor into suggestion.",
@@ -640,8 +678,8 @@ function buildR2ReviewCall(base, def, header, round, max, roundDir, batchIndex) 
   // all-clean 轮不聚合（round-1 目录无 aggregated.md），残留 continue 后需回溯到
   // 最近存在的报告，否则 reviewer 收到必败的 read 指令。
   const aggRef = (state.lastAggPath && round > 1) ? state.lastAggPath : prevRoundDir + "/aggregated.md";
-  // 台账未结条目（假 clean 防护的信息通路）：open/regressed 条目显式注入 R2+ prompt，
-  // 不依赖上轮 aggregated.md——漏报条目不在报告里，reviewer 无从对账，查台账守门
+  // 清单未结条目（假 clean 防护的信息通路）：open/regressed 条目显式注入 R2+ prompt，
+  // 不依赖上轮 aggregated.md——漏报条目不在报告里，reviewer 无从对账，查问题清单守门
   // 就成了零调用的空转。条目带 title（B 链）/severity/evidence。
   const openLedgerIssues = Object.entries(state.issues || {})
     .filter(([, i]) => i.status === "open" || i.status === "regressed")
@@ -753,11 +791,6 @@ function buildReviewCall(def, round, max, batchIndex, roundDir, scoped) {
   };
 }
 
-// S4：agentRef = 路径，主线程按路径加载（systemPrompt 注入）；无名字查找，无需前缀兜底
-async function runReviewAgent(call) {
-  return agent(call);
-}
-
 // ── Main loop: batches (serial) × rounds (per-batch) ────────────────
 
 const state = loadState();
@@ -788,7 +821,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
   // 剥离后，批 2 的 fix-attempted 被误反转 fixed；且批 1 dormant 持续注入批 2+ prompt。
   // dormant 必须与 issues 同点做批作用域重置。
   state.dormant = [];
-  // 身份翻译层（编号+标题三级对齐）：idMap = 最近一次聚合的 {表格号→台账键}，
+  // 身份翻译层（编号+标题三级对齐）：idMap = 最近一次聚合的 {表格号→清单键}，
   // lastAggPath = 最近一次聚合报告路径（all-clean 轮 continue 后 round-1 无聚合，
   // 对账段引用需回溯到最近存在的报告）。批作用域重置防跨批残留。
   state.idMap = null;
@@ -823,10 +856,10 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     }
 
     if (active.length === 0) {
-      // 台账守门（第四收工点）：全员 clean/skip 但台账有 open/regressed 残留时不得
-      // 收工——全员已进 cleanNames、无人可派，注入的台账清单会没有消费方。清空批内
+      // 问题清单守门（第四收工点）：全员 clean/skip 但问题清单有 open/regressed 残留时不得
+      // 收工——全员已进 cleanNames、无人可派，注入的清单会没有消费方。清空批内
       // clean 名单强制全体重派追账（跨批 skip 状态 state.agentStatus 不动，重派后再
-      // clean 会幂等刷新）。reviewer 对注入条目申报 fixed → 清账正常收工；申报
+      // clean 会幂等刷新）。reviewer 对注入条目申报 fixed → 条目关闭后正常收工；申报
       // not-fixed → openStreak 增长走 stuck 诚实终止；无视 → maxRounds 兜底。
       if (hasOpenResidue(state.issues)) {
         log("All agents clean/skipped but ledger has unresolved issue(s) — re-dispatching all agents to reconcile.");
@@ -845,7 +878,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     // 报告路径全部按派发序走，一一对应保持；每轮探测当轮 diff 形态（fix 后 diff 会
     // 变），探测失败/非 git-diff 场景降级默认池序。
     if (targetType === "git-diff") {
-      // 变量名避开 plan/analysis 等 agent()-返回值守卫模式（builtin-workflows-structure
+      // 变量名避开 plan/analysis 等 agent()-返回值检查模式（builtin-workflows-structure
       // U2 按变量名文本扫描 null-guard）——本返回值来自纯函数恒非 null
       const dispatchPlan = planReviewerOrder(active, probeDiffStats(lockedBase.base));
       active = dispatchPlan.order;
@@ -857,18 +890,42 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     const calls = active.map((def) => buildReviewCall(def, round, maxRounds, batchIndex, roundDir, scopedClean.has(def.name)));
     const phaseTimings = { review: null, aggregate: null, fix: null };
     const reviewT0 = Date.now();
+    // 轮级结果容器声明前置：fail-fast catch（结构化终判）在消费循环之前执行，
+    // 引用 agentRoundResults 不能落在声明之后（TDZ → 脚本错误 → 重试矩阵）。
+    const reviewResults = [];
+    const agentRoundResults = [];
     // 分批并行（REVIEWER_BATCH 个一批，批间串行）：allRaw 与 calls 保持一一对应
     // （分批 push 顺序 = calls 顺序），下游 per-agent 结果区分与 recordCall 不受影响。
+    // fail-fast（B1）：Promise.all + failFastAgent——第一个结构化失败立即收敛进 catch
+    // 落 review-failure 终判，后续 chunk 不再派发（不等全批跑完）。
     const allRaw = [];
     for (let ci = 0; ci < calls.length; ci += REVIEWER_BATCH) {
       const chunk = calls.slice(ci, ci + REVIEWER_BATCH);
       log("  review batch " + (Math.floor(ci / REVIEWER_BATCH) + 1) + "/" + Math.ceil(calls.length / REVIEWER_BATCH)
         + ": " + chunk.map((c) => c.description).join(", "));
-      const part = await parallel(chunk.map(runReviewAgent));
-      allRaw.push(...part);
+      try {
+        const part = await Promise.all(chunk.map((call, j) => failFastAgent(call, active[ci + j].name)));
+        allRaw.push(...part);
+      } catch (e) {
+        // 结构化终止（MF-3）：saveState + terminated=review-failure，保证 state.json 有
+        // 记录、调用方拿到结构化结果而非裸异常。F3：聚合未发生，mustFix/suggestion 是
+        // 未知而非 0（null，消费侧 ?? "-" 兜底）；agents 为已收敛 chunk 的空集（消费循环
+        // 未进入），aggregate/fix 相位 null 是如实采集（未到达）。同 chunk 已成功的调用
+        // 结果随收敛丢弃（在跑的跑完丢弃是 fail-fast 已接受取舍）。
+        phaseTimings.review = [reviewT0, Date.now()];
+        batchRounds.push({ round, mustFix: null, suggestion: null, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+        state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
+        saveState(state);
+        terminated = "review-failure";
+        finalMessage = "Batch " + batchIndex + " round " + round + ": 审查 agent 调用失败 " + (e && e.failedLabel ? e.failedLabel : "")
+          + " — " + (e && e.message ? e.message : String(e)) + REVIEWER_RECOVERY_HINT;
+        batchIndex = BATCHES.length + 1; // 终止外层循环
+        break;
+      }
     }
+    if (terminated === "review-failure") break; // 已结构化终止，退出 round 循环（MF-3）
     phaseTimings.review = [reviewT0, Date.now()];
-    // rfl 仪表：本轮全部 reviewer 调用落 calls[]（allRaw 与 calls 一一对应，parallel 语义）
+    // rfl 仪表：本轮全部 reviewer 调用落 calls[]（allRaw 与 calls 一一对应，Promise.all 保序语义）
     for (let i = 0; i < allRaw.length; i++) {
       recordCall(buildCallRecord({
         batch: batchIndex, round, role: "reviewer",
@@ -879,33 +936,39 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       }));
     }
 
-    // per-agent 结果区分：parallel 结果与 calls 一一对应
-    const reviewResults = [];
-    const agentRoundResults = [];
+    // per-agent 结果区分：Promise.all 结果与 calls 一一对应
+    //（fail-fast 后 allRaw 只含成功信封——error 形态已在上方 Promise.all catch 终判）
     const reconSeen = new Set(); // R2+ reconciliation 声明的上轮 ID（status !== fixed）——stuck ID 驱动数据源（5.1）
     const reconEscalate = new Set(); // 5.1-5 escalate 声明：deferred 条目上下文改变 → 重新 open
-    const reconFixed = new Set(); // reconciliation 声明 fixed 且 evidence 非空（verify-first 申报）——open/regressed 条目的清账通道（不再丢弃）
+    const reconFixed = new Set(); // reconciliation 声明 fixed 且 evidence 非空（verify-first 申报）——open/regressed 条目的条目关闭通道（不再丢弃）
     const reconAll = new Set(); // M2: 所有 status 条目（含 fixed）的 prev_id 去重——reconcile 门控数据源
     for (let i = 0; i < allRaw.length; i++) {
       const raw = allRaw[i];
-      if (raw && typeof raw === "object" && raw.error) {
-        // 审查 agent 调用失败（含 AgentRegistry not found / 超时）。不裸 throw——与
-        // aggregator-failure/stuck/fix-failure 路径一致：saveState + terminated 结构化终止，
-        // 保证 state.json 有记录、调用方拿到结构化结果而非裸异常（MF-3）。
-        // W8：失败轮的当前轮条目也落 batchRounds（该轮 phase 时长不因结构化终止
-        // 从时间线消失）；F3：聚合未发生/失败，mustFix/suggestion 是未知而非 0——
-        // 落 0 会被时间线误读为 clean 轮（rfl.mjs 消费侧 `mustFix ?? "-"` 对 null
-        // 显示 "-"，suggestion 无消费点，null 安全）；agents 为已收集的部分结果，
-        // aggregate/fix 相位 null 是如实采集（未到达）。
-        batchRounds.push({ round, mustFix: null, suggestion: null, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
-        state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
-        saveState(state);
-        terminated = "review-failure";
-        finalMessage = "Batch " + batchIndex + " round " + round + ": 审查 agent 调用失败 " + active[i].name + " — " + raw.error;
-        batchIndex = BATCHES.length + 1; // 终止外层循环
-        break;
+      let parsed = normalizeReviewResult(raw.value);
+      if (!parsed) {
+        // 解析失败 → 原位重试一次（对齐 dev-merge-gates 同源机制 2026-09-30）：回注失败
+        // 说明重新派发同一 reviewer——报告通常已写盘，重试只需重出有效 schema JSON；
+        // 重试调用/解析仍败才走下方 review-failure 终判（偶发返回畸形不再终止整个 run）
+        log("review result invalid for " + active[i].name + " (round " + round + ") — retrying once with failure note");
+        try {
+          const retryCall = Object.assign({}, calls[i], {
+            prompt: calls[i].prompt + REVIEWER_RETRY_SUFFIX,
+            description: calls[i].description + "-retry",
+          });
+          const retryRaw = await failFastAgent(retryCall, active[i].name + "-retry");
+          recordCall(buildCallRecord({
+            batch: batchIndex, round, role: "reviewer",
+            name: active[i].name, model: calls[i].model,
+            prompt: retryCall.prompt,
+            promptMode: scopedClean.has(active[i].name) ? "scoped" : "full",
+            meta: retryRaw,
+          }));
+          parsed = normalizeReviewResult(retryRaw.value);
+          if (parsed) log("retry succeeded for " + active[i].name);
+        } catch (retryErr) {
+          log("retry failed for " + active[i].name + ": " + (retryErr && retryErr.message ? retryErr.message : String(retryErr)));
+        }
       }
-      const parsed = normalizeReviewResult(raw.value);
       if (parsed) {
         // 5.8 通用落盘：schema-only agent（report_content 无 report_file，如 doc-reviewer）→
         // workflow 写盘到 <roundDir>/<def.report>.md 并填入 report_file（aggregator 读取路径不变）。
@@ -945,15 +1008,16 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         }
         agentRoundResults.push({ name: def.name, must_fix: parsed.must_fix, suggestion: parsed.suggestion ?? 0, clean: agentAllClean });
       } else {
-        // tools 受限的 agent（如 tools: read）会过滤掉 structured-output → schema 失效，
-        // 结果缺 must_fix。结构化终止（MF-3），raw 完整 dump 便于定位。
-        // W8：同 review-failure——当前轮条目落 batchRounds（phase 时长保留在时间线）；
+        // (b) 无 error + 值解析失败 → 直接终判（弱格式恢复已拆除）：tools 受限的 agent
+        //（如 tools: read）会过滤掉 structured-output → schema 失效，结果缺 must_fix；
+        // 或旧引擎信封丢失形态（value 为多轮拼接文本）。结构化终止（MF-3），raw 完整
+        // dump 便于定位。W8：当前轮条目落 batchRounds（phase 时长保留在时间线）；
         // F3：聚合未发生，mustFix/suggestion 未知非 0（null，消费侧 ?? "-" 兜底）。
         batchRounds.push({ round, mustFix: null, suggestion: null, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
         state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
         saveState(state);
         terminated = "review-failure";
-        finalMessage = "Batch " + batchIndex + " round " + round + ": 审查 agent 结果无效（缺 must_fix） " + active[i].name + " raw=" + JSON.stringify(raw.value).slice(0, 400);
+        finalMessage = "Batch " + batchIndex + " round " + round + ": 审查 agent 结果无效（缺 must_fix） " + active[i].name + " raw=" + JSON.stringify(raw.value).slice(0, 400) + REVIEWER_RECOVERY_HINT;
         batchIndex = BATCHES.length + 1; // 终止外层循环
         break;
       }
@@ -983,16 +1047,16 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
         saveState(state);
         terminated = "stuck";
-        finalMessage = "Batch " + batchIndex + " round " + round + ": 全员 clean 但台账问题 " + cleanStuck.stuckIds.join(", ")
+        finalMessage = "Batch " + batchIndex + " round " + round + ": 全员 clean 但清单问题 " + cleanStuck.stuckIds.join(", ")
           + " 连续 " + stuckThreshold + " 轮未收敛（clean 轮对账判定）。残留: "
           + (state.knownRemaining && state.knownRemaining.length ? state.knownRemaining.join("; ") : "无 deferred");
         batchIndex = BATCHES.length + 1;
         break;
       }
-      // 台账守门（backfill 清账后再查——先消费本轮 fixed 申报，避免已清零的残留
+      // 问题清单守门（backfill 条目关闭后再查——先消费本轮 fixed 申报，避免已清零的残留
       // 触发空转一轮）：仍有 open/regressed 残留时不收工——本轮全员报 0 只是观测，
-      // 不蕴涵台账已清。清空批内 clean 名单重派追账（注入段给 reviewer 台账清单），
-      // 下轮申报 fixed → 清账收工 / not-fixed → openStreak 增长 / 无视 → maxRounds 兜底。
+      // 不蕴涵清单已清。清空批内 clean 名单重派追账（注入段给 reviewer 问题清单），
+      // 下轮申报 fixed → 条目关闭后收工 / not-fixed → openStreak 增长 / 无视 → maxRounds 兜底。
       if (hasOpenResidue(state.issues)) {
         const residueIds = Object.entries(state.issues)
           .filter(([, i]) => i.status === "open" || i.status === "regressed")
@@ -1022,8 +1086,8 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         ? state.fixResults[state.fixResults.length - 1]
         : null,
       // S-5：上一轮标题注入——「keep the title close to the previous wording」此前无
-      // 材料可依。取台账（issues + dormant）条目的 id: title 清单。
-      // R3 S-1：清单截尾（最近 50 条）——长循环台账单调膨胀只造成 prompt token 膨胀。
+      // 材料可依。取问题清单（issues + dormant）条目的 id: title 清单。
+      // R3 S-1：清单截尾（最近 50 条）——长循环问题清单单调膨胀只造成 prompt token 膨胀。
       prevTitles: round > 1
         ? [
             ...Object.entries(state.issues || {}).map(([id, i]) => (i && typeof i.title === "string" && i.title ? id + ": " + i.title : null)),
@@ -1050,17 +1114,16 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     let agg = normalizeAggregatorResult(aggValue);
 
     if (!agg || typeof agg.must_fix !== "number") {
-      // 重试先于 md 兜底（C 修复）：聚合失败最常见形态 = md 报告已写好 + JSON 尾部
-      // 格式漂移——此时 md 兜底「成功」但降级为 numeric-only（丢 must_fix_ids 整条
-      // 数据链：merge 跳过 / fixed 重报转 regressed 链断 / dormant 不落 / W5 门控
-      // 退化），代价高于一次重试调用。先原 prompt 重试争取完整恢复。
+      // 原 prompt 重试一次争取完整恢复（重试失败即终判，无 md 兜底——弱格式降级
+      // 通道已整体拆除）：numeric-only 兜底会丢 must_fix_ids 整条数据链（merge 跳过 /
+      // fixed 重报转 regressed 链断 / dormant 不落 / W5 门控退化），不可接受。
       log("Aggregator JSON invalid (len=" + (typeof aggValue === "string" ? aggValue.length : 0) + ") — retrying once with the same prompt.");
       aggRaw = await agent({
         prompt: aggPrompt,
         model: AGG_MODEL,
         schema: aggregatorSchema,
         description: "aggregate",
-        timeoutMs: 1_200_000, // 20min：确定性失败（context overflow 等）不该在 md 兜底前再烧 1h（S-4）
+        timeoutMs: 1_200_000, // 20min：确定性失败（context overflow 等）不该在终判前再烧 1h（S-4）
         returnMeta: true,
       });
       recordCall(buildCallRecord({
@@ -1074,36 +1137,26 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     if (!agg || typeof agg.must_fix !== "number") {
       const rawPreview = (aggValue === undefined ? "undefined" : typeof aggValue === "string" ? aggValue : JSON.stringify(aggValue)).slice(0, 200);
       log("Aggregator retry failed (len=" + (typeof aggValue === "string" ? aggValue.length : 0) + "): " + rawPreview);
-      const fallbackPath = (agg && agg.report_file) || (roundDir + "/aggregated.md");
-      try {
-        const content = fs.readFileSync(fallbackPath, "utf-8");
-        const parsed = parseAggregatedMd(content);
-        if (parsed && typeof parsed.must_fix === "number") {
-          agg = { report_file: fallbackPath, must_fix: parsed.must_fix, suggestion: parsed.suggestion ?? 0 };
-          log("Fallback parsed from " + fallbackPath + ": must_fix=" + agg.must_fix);
-        }
-      } catch { /* fallback read failed */ }
-
-      if (!agg || typeof agg.must_fix !== "number") {
-        log("Aggregator failed and fallback failed, stopping.");
-        // W8：aggregator-failure 轮的当前轮条目落 batchRounds——review/aggregate 相位
-        // 时长已实测（fix 相位 null 如实采集）；F3：聚合失败，mustFix/suggestion 未知
-        // 非 0（null，消费侧 ?? "-" 兜底，不误读为 clean 轮）。
-        batchRounds.push({ round, mustFix: null, suggestion: null, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
-        state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
-        saveState(state);
-        terminated = "aggregator-failure";
-        finalMessage = "Batch " + batchIndex + " round " + round + ": aggregator 失败且 fallback 解析失败"
-          + (aggRaw && typeof aggRaw === "object" && aggRaw.error ? " — " + aggRaw.error : "");
-        batchIndex = BATCHES.length + 1; // 终止外层循环
-        break;
-      }
+      // fail-fast 终判：md 兜底解析已随弱格式降级通道整体拆除——重试失败即终止，
+      // 不从报告 md 猜计数（numeric-only 丢失 must_fix_ids 整条数据链：merge 跳过 /
+      // fixed 重报转 regressed 链断 / dormant 不落 / W5 门控退化，代价高于终止重跑）。
+      // W8：aggregator-failure 轮的当前轮条目落 batchRounds——review/aggregate 相位
+      // 时长已实测（fix 相位 null 如实采集）；F3：聚合失败，mustFix/suggestion 未知
+      // 非 0（null，消费侧 ?? "-" 兜底，不误读为 clean 轮）。
+      batchRounds.push({ round, mustFix: null, suggestion: null, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+      state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
+      saveState(state);
+      terminated = "aggregator-failure";
+      finalMessage = "Batch " + batchIndex + " round " + round + ": aggregator 失败（重试后仍无效）"
+        + (aggRaw && typeof aggRaw === "object" && aggRaw.error ? " — " + aggRaw.error : "");
+      batchIndex = BATCHES.length + 1; // 终止外层循环
+      break;
     }
 
     const mustFix = agg.must_fix;
     const suggestion = agg.suggestion ?? 0;
     log("Aggregated: " + mustFix + " must-fix + " + suggestion + " suggestion(s).");
-    // 最近一次聚合报告路径（含 numeric-only fallback）：all-clean 轮不聚合（round-1
+    // 最近一次聚合报告路径：all-clean 轮不聚合（round-1
     // 目录无 aggregated.md），残留 continue 后下轮对账段需回溯到最近存在的报告。
     state.lastAggPath = (typeof agg.report_file === "string" && agg.report_file.trim()) || (roundDir + "/aggregated.md");
     state.lastAggRound = round; // S-3：对账段标注报告轮号（与 fixResult 轮号可能不同轮）
@@ -1128,7 +1181,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     // guidance/evidence 随条目落 issues（fixer 免侦查 + 裁决可追踪）。
     // 身份对齐（编号+标题三级）：R1 时 issues/dormant 均空（批开始重置），解析恒走
     // L3 直接沿用表格号——统一入口调用保持一致性（fallow 前置批等未来变化下防御）。
-    // title 随条目落储（跨轮身份锚点 + 台账注入段展示原料）。
+    // title 随条目落储（跨轮身份锚点 + 清单注入段展示原料）。
     if (round === 1 && agg.must_fix_ids && agg.must_fix_ids.length > 0) {
       if (!state.issues) state.issues = {};
       const activeIds = new Set(filterActiveIds(agg.must_fix_ids));
@@ -1165,8 +1218,8 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     const dormantExcludeIds = new Set(Object.keys(state.issues || {}));
     // rfl dormant（tier-1 6.3）：adjudication 降级条目落盘（含裁决理由），R2+ prompt
     // 注入复活通道——「降级即消失」的修复。每轮聚合后统一记录（同 id 幂等）。
-    // 执行点在 merge 三级对齐之后（R2+ 路径）：excludeIds 需含「翻译后仍在台账活跃的
-    // 表格号」——L2/L3 改键后，活跃条目的表格号 ≠ 台账键，仅用 issues 键做 exclude
+    // 执行点在 merge 三级对齐之后（R2+ 路径）：excludeIds 需含「翻译后仍在问题清单活跃的
+    // 表格号」——L2/L3 改键后，活跃条目的表格号 ≠ 清单键，仅用 issues 键做 exclude
     // 会把活跃追踪中的条目误落 dormant（exec-review 修复场景的改键形态复发）。
     function recordDormantThisRound() {
       if (!(agg.must_fix_ids && agg.must_fix_ids.length > 0)) return;
@@ -1194,7 +1247,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     // 5.1-2 R2+ 新发现 ID 契约（M2 移出 reconcile 分支，独立执行；F1 扩展为
     // 「重新报告 = 未修复」转换）：aggregator 的 must_fix_ids 中
     //   a) 三级身份对齐（L1 编号+标题双命中沿用 / L2 标题归一唯一命中沿用旧键 /
-    //      L3 避让分配）解析出台账键——不在 issues → 创建为新条目（firstSeen=round）
+    //      L3 避让分配）解析出清单键——不在 issues → 创建为新条目（firstSeen=round）
     //   b) 已存在且（fix-attempted 或 fixed）且本轮无对账数据（reconCount===0，
     //      doc-reviewer 场景）→ 重新报告 = 修复失败：转 regressed + fixAttempts+1 + openStreak+1
     //      （RC-7 needs-redesign 出口在无对账配置下可达；reconciliation 场景由
@@ -1206,8 +1259,8 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     // 触碰文件相交 = regression，否则 new；无 files 不可归因 WARN）；重新上报的
     // dormant 条目 → revived=true 回修复队列；本轮降级条目不建 issue（同 R1 过滤）。
     // 身份对齐（编号+标题）：LLM 编号跨轮不稳定（紧凑化重排会把新问题排到旧号上、
-    // 同题重报会换号），表格号不再直接当台账主键——resolveIssueIdentity 三级对齐后
-    // 改键条目记入 state.idMap（本轮表格号→台账键），fix 写入与下轮对账经 translateId
+    // 同题重报会换号），表格号不再直接当清单主键——resolveIssueIdentity 三级对齐后
+    // 改键条目记入 state.idMap（本轮表格号→清单键），fix 写入与下轮对账经 translateId
     // 翻译（ES3 的 mustFixIds↔fixes 集合比较保持表格号空间，不翻译）。
     // 对账翻译用「上一轮」idMap 快照（MF-1）：reviewer 的 prev_id 抄自上一轮
     // aggregated.md，须用产出该报告那轮的表格号空间翻译。必须在下方 merge 块
@@ -1226,7 +1279,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         //（对账通道 reconcileIssues 才是 fix-attempted → regressed 的权威转换点），
         // 也不落 dormant（在 issues 活跃追踪，recordDormant 的 excludeIds 排除）。
         if (!activeIds.has(id)) continue;
-        // 三级身份对齐：resolved.key = 台账键（mapped=true 时 ≠ 表格号，记入 idMap）
+        // 三级身份对齐：resolved.key = 清单键（mapped=true 时 ≠ 表格号，记入 idMap）
         const resolved = resolveIssueIdentity(
           typeof entry === "string" ? { id } : entry,
           { issues: state.issues, dormant: state.dormant || [] },
@@ -1234,7 +1287,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         if (resolved.mapped) roundIdMap[id] = resolved.key;
         const tracked = state.issues[resolved.key];
         if (tracked) {
-          dormantExcludeIds.add(id); // 翻译后仍在台账活跃的表格号 → dormant exclude
+          dormantExcludeIds.add(id); // 翻译后仍在问题清单活跃的表格号 → dormant exclude
           if (reconCount === 0 && (tracked.status === "fix-attempted" || tracked.status === "fixed")) {
             tracked.status = "regressed";
             tracked.fixAttempts = (tracked.fixAttempts || 0) + 1;
@@ -1281,11 +1334,11 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
 
     let stuck = { stuck: false };
     if (round > 1 && (reconCount > 0 || hasFixAttempted || reconFixed.size > 0)) {
-      // 对账 id 翻译（表格号→台账键，台账键优先——注入段清单的 id 即台账键）：
+      // 对账 id 翻译（表格号→清单键，清单键优先——注入段清单的 id 即清单键）：
       // L2/L3 改键后 reviewer 从 aggregated.md 抄的表格号需经 prevIdMap（上一轮
       // idMap 快照，MF-1）翻译才能
-      // 命中台账。冲突互斥（not-fixed/escalate 优先于 fixed，保守方向）：多 reviewer
-      // 并行对同一 prev_id 申报矛盾时，采信「未修好」侧——误转 fixed 会销账真问题，
+      // 命中问题清单。冲突互斥（not-fixed/escalate 优先于 fixed，保守方向）：多 reviewer
+      // 并行对同一 prev_id 申报矛盾时，采信「未修好」侧——误转 fixed 会把真问题误关，
       // 误留 open 只多跑一轮，可由下轮对账纠正。
       {
         translateReconSets(reconSeen, reconEscalate, reconFixed, prevIdMap, state.issues);
@@ -1308,7 +1361,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       }
     } else {
       // A9（regression 回填边缘缺口）：else 分支 = reconCount===0 且无 fix-attempted
-      //（aggregator numeric-only fallback 等无对账数据场景）——上轮 fix 的 regressed
+      //（aggregator 未输出条目级数据等无对账数据场景）——上轮 fix 的 regressed
       // 数本轮不可判定，此前该场景的 regression entry 永缺。以 unverifiable 模式补
       // 确定性 entry（regression=null，不诚实造 10 分）。unverifiable 为终态（W3）：
       // 回填只匹配最近一次 fix 的 entry、永不重访旧轮，该轮 regression 维度永久
@@ -1399,14 +1452,14 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
 
     // A4（全降级轮不驱动 fix，设计 §6.3 省轮次的兑现）：reviewer 原始计数有 must-fix
     // 但 aggregator 裁决后全部降级（mustFix===0 且活跃条目为 0）且 suggestion 也为 0 时，
-    // all-clean break（reviewer 原始计数口径，见上方 every 判定）拦不住本路径——不守卫
+    // all-clean break（reviewer 原始计数口径，见上方 every 判定）拦不住本路径——此处无检查
     // 会空转派发 fixer（fixCount++ 且无问题可修）。suggestion>0 时不得在此 break
     //（修复范围全等级，建议级问题仍需走 fix 修复），fall through 到下方 fix 阶段。
     if (mustFix === 0
       && suggestion === 0
       && reviewResults.some((r) => r.must_fix > 0)
       && (agg.must_fix_ids ? filterActiveIds(agg.must_fix_ids).length : 0) === 0) {
-      // 台账守门（第三收工点）：本轮聚合活跃条目为 0 不蕴涵台账已清——上轮 open
+      // 问题清单守门（第三收工点）：本轮聚合活跃条目为 0 不蕴涵清单已清——上轮 open
       // 条目本轮聚合漏报时残留仍在，此时收工 = 假 clean。有残留则跳过 fix（修复
       // 队列为空，派 fixer 只会对着全降级报告乱动）继续轮追账，且不授予 W5 跨批
       // clean 补记（本轮没真正干净，clean 补记会喂大下轮全员 skip → 注入段无消费方）。
@@ -1420,7 +1473,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         continue;
       }
       log("All reviewer must-fix entries adjudicated down this round — no active fix queue, skipping fix stage.");
-      // F4：此处不需要 backfillFixRegression 调用（原死防御已删）。第 3 轮探针实证
+      // F4：此处不需要 backfillFixRegression 调用（原永远命不中的防御机制已删）。第 3 轮探针实证
       // 其恒为逐字节 no-op：能到达 A4 的 R2+ 轮（round>1 且 fixResults 非空），上方
       // stuck 检测的 if/else 两分支已在相同门控与相同匹配键（round-1/batch）下分别
       // 回填过——reconcile 路径（reconCount>0 或有 fix-attempted）mode=normal、无对账
@@ -1432,9 +1485,9 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       // recordAgentClean（快照语义对齐常规调用点：lastCleanBatch + 当时 fixCount），
       // 让「裁决降级=噪声」也推进跨批 skip（否则同 agent 后续批每批全价重扫）。
       // 本轮无 fix（fixCount 不变），批后快照比较成立。
-      // F2：agg.must_fix_ids 缺失（aggregator JSON 无效走 parseAggregatedMd numeric
-      // fallback 的 agg 无此键）时无条目级裁决证据——「must_fix=0」只是 md 里的一行
-      // 数字，不能证明 reviewer 的 must-fix 是被裁决降级的噪声。此时弱证据不授予
+      // F2：agg.must_fix_ids 缺失（aggregator 合法返回可不含条目级数据——schema 可选）
+      // 时无条目级裁决证据——「must_fix=0」只是聚合方的一行自报数字，不能证明
+      // reviewer 的 must-fix 是被裁决降级的噪声。此时弱证据不授予
       // 跨批 clean-skip（否则「跳一轮」被 shouldSkipAgent 放大为「跳到底」且该 agent
       // 永不再重扫），留待后续批全价复核。
       for (const a of agentRoundResults) {
@@ -1540,15 +1593,33 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       returnMeta: true,
       ...(FIX_DEF && FIX_DEF.path ? { agent: FIX_DEF.path } : {}),
     }));
-    // 分批并行（FIXER_CONCURRENCY 组一批，批间串行）；fixRaws 与 groupCalls 一一对应
+    // 分批并行（FIXER_CONCURRENCY 组一批，批间串行）；fixRaws 与 groupCalls 一一对应。
+    // fail-fast（B2）：Promise.all + failFastAgent——第一个结构化失败立即收敛进 catch
+    // 落 fix-failure 终判，后续批不再派发（不等全批跑完）。
     const fixRaws = [];
     for (let fi = 0; fi < groupCalls.length; fi += FIXER_CONCURRENCY) {
       const chunk = groupCalls.slice(fi, fi + FIXER_CONCURRENCY);
       log("  fix batch " + (Math.floor(fi / FIXER_CONCURRENCY) + 1) + "/" + Math.ceil(groupCalls.length / FIXER_CONCURRENCY)
         + ": " + chunk.map((c) => c.description).join(", "));
-      const part = await parallel(chunk.map((c) => agent(c)));
-      fixRaws.push(...part);
+      try {
+        const part = await Promise.all(chunk.map((call) => failFastAgent(call, call.description)));
+        fixRaws.push(...part);
+      } catch (e) {
+        // 结构化终止（MF-3）：与 review 路径同语义——结构化返回是必须满足的前提，
+        // 不再按 F-1 前缀分诊降级（弱格式降级通道已整体拆除）。改动在工作区的组
+        //（已跑完/在跑的组）如实提示接管动作。
+        phaseTimings.fix = [fixT0, Date.now()];
+        batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+        state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
+        saveState(state);
+        terminated = "fix-failure";
+        finalMessage = "Batch " + batchIndex + " round " + round + ": fix agent 调用失败 (" + (e && e.failedLabel ? e.failedLabel : "") + ") — " + (e && e.message ? e.message : String(e))
+          + "；部分组改动可能已留在工作区（未提交），恢复动作：git status 检查后手动 add+commit 或重跑 workflow";
+        batchIndex = BATCHES.length + 1;
+        break;
+      }
     }
+    if (terminated === "fix-failure") break; // 已结构化终止，退出 round 循环（MF-3）
     phaseTimings.fix = [fixT0, Date.now()];
     for (let i = 0; i < fixRaws.length; i++) {
       recordCall(buildCallRecord({
@@ -1557,28 +1628,16 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       }));
     }
 
-    // returnMeta 下 fxRaw = {value, error}：先查 error（失败分支可达，MF-1），再对 value 做
-    // parseResult；各组逐个检查后合并（单组时与旧单 fixer 行为等价）。
+    // returnMeta 信封经 failFastAgent 过滤（error 形态已在上方 catch 终判），此处只对
+    // value 做 parseResult；各组逐个检查后合并（单组时与旧单 fixer 行为等价）。
     const perGroupResults = [];
     for (let gi = 0; gi < fixRaws.length; gi++) {
       const raw = fixRaws[gi];
-      if (raw && typeof raw === "object" && raw.error) {
-        // fix agent 调用失败（AgentRegistry not found / 超时等）。
-        // 与 review 路径（raw.error → review-failure）对齐：结构化终止而非静默当成功——
-        // 否则 fixed_count 缺失被 `?? mustFix` 回退，totalFixed 虚增且 must_fix 不降白跑轮次（MF-1）。
-        log("Fix agent failed (" + groupCalls[gi].description + "), stopping.");
-        batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
-        state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
-        saveState(state);
-        terminated = "fix-failure";
-        finalMessage = "Batch " + batchIndex + " round " + round + ": fix agent 调用失败 (" + groupCalls[gi].description + ") — " + raw.error
-          + "；部分组改动可能已留在工作区（未提交），恢复动作：git status 检查后手动 add+commit 或重跑 workflow";
-        batchIndex = BATCHES.length + 1;
-        break;
-      }
       const fxOne = parseResult(raw.value);
       const rOne = fxOne ? normalizeFixResult(fxOne) : null;
       if (!rOne) {
+        // value 解析失败 → 终判（弱格式降级续跑已拆除——「改动以下轮重审为权威」的
+        // 续跑形态不再存在，结构化返回失败即终止，由上游修环境后重跑）。
         log("Fix agent result invalid (" + groupCalls[gi].description + "), stopping.");
         batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
         state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
@@ -1606,10 +1665,11 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     // 塞进 deferred 的逃逸路径在追踪表面前失效（追踪 severity 为准）。
     // rfl（tier-1 6.3）：mustFixIds 传 filterActiveIds 结果——降级条目不占修复队列
     //（must_fix 计数由 aggregator 按非降级条目报，两侧口径一致）。
-    // idMap（本轮表格号→台账键）只翻译 deferred 交叉核对的查表输入；mustFixIds 与
+    // idMap（本轮表格号→清单键）只翻译 deferred 交叉核对的查表输入；mustFixIds 与
     // fixes[].issue_id 的集合比较双侧保持表格号空间（同源 aggregated.md，翻译即误杀）。
     const fixIdMap = (state.idMap && state.idMap.round === round && state.idMap.map) || {};
-    const es3Violations = validateFixResult(fixResult, filterActiveIds(agg.must_fix_ids), state.issues, fixIdMap);
+    const es3MustFixIds = filterActiveIds(agg.must_fix_ids);
+    const es3Violations = validateFixResult(fixResult, es3MustFixIds, state.issues, fixIdMap);
     if (es3Violations.length > 0) {
       // m7: violation 分四类——deferred 非 minor / must-fix 漏修（must-fix-not-fixed）/
       // disputed 申述格式非法（untracked / no-evidence），finalMessage 文案区分：
@@ -1618,7 +1678,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         v.severity === "must-fix-not-fixed"
           ? "must-fix 未在 fixes[]/disputed[] 中处理（漏修）— " + v.issue_id
           : v.severity === "disputed-untracked"
-            ? "disputed 申述未命中台账条目 — " + v.issue_id
+            ? "disputed 申述未命中问题清单条目 — " + v.issue_id
             : v.severity === "disputed-no-evidence"
               ? "disputed 申述缺实质反证（需 file:line + 聚合方核实遗漏点）— " + v.issue_id
               : "deferred 含非 minor 条目（must-fix 不得 defer）— " + v.issue_id + "(" + v.severity + ")"
@@ -1662,16 +1722,52 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
           require("child_process").execFileSync("git", commitPlan.commitArgs, { encoding: "utf-8", timeout: 60_000 });
           log("Unified commit (" + commitPlan.stagePaths.length + " files): " + commitPlan.commitMsg);
         } catch (e) {
+          // 提交前自动检查（pre-commit hook）拦截 → 环境恢复 agent 读报错、执行报错写明的
+          // 环境恢复命令，然后重跑同一 commit 计划（对齐 dev-merge-gates 同源机制
+          // 2026-09-30）。职责边界：agent 只做环境恢复，git 命令仍由脚本执行——重跑结果
+          // 即裁判；需要改文件内容/检查器本身才能恢复的失败照常 fix-failure 终判交人工。
           const stderrText = e && e.stderr ? String(e.stderr).trim() : "";
           const errMsg = (e && e.message ? e.message : String(e)) + (stderrText ? " | stderr: " + stderrText : "");
-          log("Unified git add/commit failed: " + errMsg);
-          batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
-          state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
-          saveState(state);
-          terminated = "fix-failure";
-          finalMessage = "Batch " + batchIndex + " round " + round + ": 统一 commit 失败（改动在工作区/staged，未提交；恢复动作：人工检查 git status 后补提交或修 git 环境）— " + errMsg;
-          batchIndex = BATCHES.length + 1;
-          break;
+          log("Unified git add/commit failed: " + errMsg + " — dispatching env-fix agent then retrying");
+          let envNote = "";
+          try {
+            const envRaw = await agent({
+              prompt: [
+                "git add/commit 被提交前自动检查（pre-commit hook）拦截，报错输出如下。",
+                "若报错文本写明了恢复动作（环境修复命令，如包管理器存储路径修复），执行它们，然后回复「已执行：<命令与结果>」；",
+                "若需要修改仓库内任何文件才能恢复，不要动手——回复「需人工处置：<原因>」。",
+                "红线：绝不修改任何文件内容；绝不执行 git add/commit；绝不跳过检查（禁 --no-verify 与 SKIP_* 变量）；无法靠环境命令解决的失败如实说明，绝不绕过。",
+                "",
+                "失败命令：git " + commitPlan.addArgs.join(" ") + " && git " + commitPlan.commitArgs.join(" "),
+                "报错输出：" + errMsg.slice(0, 4000),
+              ].join("\n"),
+              description: "commit-env-fix-b" + batchIndex + "-r" + round,
+              model: MODEL,
+              timeoutMs: 600_000,
+              returnMeta: true,
+            });
+            envNote = envRaw && typeof envRaw.value === "string" ? envRaw.value : "";
+            log("env-fix agent replied: " + envNote.slice(-200));
+          } catch (envErr) {
+            envNote = "env-fix agent failed: " + (envErr && envErr.message ? envErr.message : String(envErr));
+            log(envNote);
+          }
+          try {
+            require("child_process").execFileSync("git", commitPlan.addArgs, { stdio: "pipe", timeout: 30_000 });
+            require("child_process").execFileSync("git", commitPlan.commitArgs, { encoding: "utf-8", timeout: 60_000 });
+            log("Unified commit succeeded after env fix (" + commitPlan.stagePaths.length + " files): " + commitPlan.commitMsg);
+          } catch (e2) {
+            const stderrText2 = e2 && e2.stderr ? String(e2.stderr).trim() : "";
+            const errMsg2 = (e2 && e2.message ? e2.message : String(e2)) + (stderrText2 ? " | stderr: " + stderrText2 : "");
+            log("Unified git add/commit failed after env fix: " + errMsg2);
+            batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+            state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
+            saveState(state);
+            terminated = "fix-failure";
+            finalMessage = "Batch " + batchIndex + " round " + round + ": 统一 commit 环境恢复重试后仍失败（改动在工作区/staged，未提交；恢复动作：人工检查 git status 后补提交或修 git 环境；环境恢复 agent 回复末段：" + envNote.slice(-200) + "）— " + errMsg2;
+            batchIndex = BATCHES.length + 1;
+            break;
+          }
         }
       }
     }
@@ -1681,15 +1777,15 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     // 不过滤存在性：impact 语义是"fixer 声称触碰过"，误报路径也应进 recheck 观察面）
     state.fixImpactFiles = collectAffectedFiles(fixResult.fixes);
 
-    // m4: 先初始化容器——aggregator JSON 无效走 parseAggregatedMd 回退时 agg 无
-    // must_fix_ids → R1 初始化跳过 → state.issues undefined；此处初始化保证 deferred
+    // m4: 先初始化容器——aggregator 合法返回可不含 must_fix_ids（schema 可选）→
+    // R1 初始化跳过 → state.issues undefined；此处初始化保证 deferred
     // 写入与 knownRemaining 同步链路生效（否则 knownRemaining 恒空，deferred 跨轮继承整链失效）
     if (!state.issues) state.issues = {};
-    // 5.1：fix 结果标记 fix-attempted（ID 对账驱动）+ fixResults 落库（R2+ prompt 输入）
+    // 5.1：fix 结果标记 fix-attempted（ID 对账驱动）+ fixResults 写入状态存档（R2+ prompt 输入）
     // 归一化查表（findIssueKey，与 ES3 同键空间）：fix agent ID 漂移（"mf-1"/
     // "MF-1 (fixed)"）不再丢匹配——精确键查表时 issue 停留 open，reconcile 无
     // fix-attempted 可转 fixed/regressed，needs-redesign 出口对该类 ID 静默失效。
-    // 查表前先经 idMap 翻译（fixer 申报表格号，L2/L3 改键后需翻译到台账键；翻译
+    // 查表前先经 idMap 翻译（fixer 申报表格号，L2/L3 改键后需翻译到清单键；翻译
     // miss 回退原值走归一化兜底 = 现状行为）。
     for (const f of fixResult.fixes) {
       if (f && typeof f.issue_id === "string") {
@@ -1720,7 +1816,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         };
       }
     }
-    // 2026-09-23 disputed 申述落账：格式合法的申述（ES3 已把关）转 status=disputed 并记
+    // 2026-09-23 disputed 申述写入记录：格式合法的申述（ES3 已把关）转 status=disputed 并记
     // state.disputed——不阻塞收敛（hasOpenResidue/活跃判定只认 open/regressed；reviewer
     // 不再重报则条目自然退出视野，重报则按既有 dedup 复活进修复队列，滥用被 stuck 熔断
     // 兜住）。收敛/clean 终态存在未裁决申述时升级 needs-human（见脚本尾部）。
@@ -1746,10 +1842,19 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     // （不依赖下轮 reconcile 才生成——否则滞后一轮，reviewer 本轮看不到 deferred 清单）
     state.knownRemaining = computeKnownRemaining(state.issues);
     if (!state.fixResults) state.fixResults = [];
-    state.fixResults.push({ ...fixResult, round }); // round 供对账段标注轮号（S-3）
+    // 每轮单条目；fixResults 三处消费点（R2 prompt / 打分回填 / 对账段标注）全取
+    // [length-1] 当上轮结果，双条目会让一侧信息静默丢失。
+    state.fixResults.push({
+      ...fixResult,
+      round, // round 供对账段标注轮号（S-3）
+    });
 
+    // `?? mustFix` 回退：normalizeFixResult 保证 fixed_count 为 number（fail-fast 后
+    // 不存在降级轮 fixed_count 缺失形态），回退仅防御归一化边缘。
     const fixedCount = fixResult.fixed_count ?? mustFix;
     totalFixed += fixedCount;
+    // fixCount++ / roundHasFix 照常——保守方向（fix-attempted 已发生），
+    // clean agent 不因此跨批跳过、recheckAfterFix 强回归重派打开，未验证的 fix 逃不过重审
     state.fixCount++;
     roundHasFix = true;
 
@@ -1839,7 +1944,7 @@ return {
   runDir: RUN_ROOT,
   // B2：残留问题结构化清单（消费方可机器判定「converged 却 remaining 非空」类矛盾终态）
   remaining,
-  // disputed 申述清单（needs-human 终态的主要消费面；人类按 evidence 逐项裁决）
+  // disputed 申述清单（needs-human 终态的主要消费方；人类按 evidence 逐项裁决）
   disputed: disputedOutstanding,
   // 5.9 terminated 透出：非 clean 时 message 含终止原因 + 残留 ID 清单 + deferred 理由
   // （stuck/needs-redesign/converged/max-rounds/*-failure 均由 finalMessage 承载）。

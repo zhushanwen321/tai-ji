@@ -164,10 +164,16 @@ export function sweepEnginePidfiles(args: {
 }
 
 /**
- * 进程存活三态探测：true（存活）/ false（ESRCH = 已死）/ undefined（不确定，
+ * 进程存活三态探测：true（存活）/ false（ESRCH = 已死）/ undefined（探测失败，
  * 如 EPERM——清扫方必须保守跳过）。
+ *
+ * [§2.1 改名] 本函数原名 `isProcessAlive`，与 persistence/alive-store.ts 的同名二态
+ * 探测（true = 活，含 EPERM 保守判活 / false = 死，**无 undefined 档**）撞名异义。
+ * 改名后两者可检索区分：本函数是**三态**（探测失败如 EPERM 显式回流 undefined，由
+ * 清扫方保守跳过），alive-store 是**二态**（EPERM 判活是安全方向）；语义差异真实，
+ * 刻意不合并。
  */
-export function isProcessAlive(pid: number): boolean | undefined {
+export function probePidAliveness(pid: number): boolean | undefined {
   try {
     process.kill(pid, 0);
     return true;
@@ -180,13 +186,12 @@ export function isProcessAlive(pid: number): boolean | undefined {
 }
 
 /**
- * 读目标 pid 的完整命令行（macOS + Linux 通用的 `ps -p <pid> -o command=`）。
+ * `ps -p <pid> -o <column>=` 探测共用实现（command= / lstart= 同款语义）。
  * 返回 undefined：ps 失败 / 超时 / 空输出（进程刚死等）——调用方按「不确定」保守跳过。
- * 复用 pi/session-runner.ts:595 readProcessCmdline 先例（同实现、同超时、同失败语义）。
  */
-function readProcessCmdline(pid: number): string | undefined {
+function readPsColumn(pid: number, column: string): string | undefined {
   try {
-    const r = spawnSync("ps", ["-p", String(pid), "-o", "command="], {
+    const r = spawnSync("ps", ["-p", String(pid), "-o", column], {
       encoding: "utf-8",
       timeout: CMDLINE_PROBE_TIMEOUT_MS,
     });
@@ -199,23 +204,21 @@ function readProcessCmdline(pid: number): string | undefined {
 }
 
 /**
+ * 读目标 pid 的完整命令行（macOS + Linux 通用的 `ps -p <pid> -o command=`）。
+ * 复用 pi/session-runner.ts:595 readProcessCmdline 先例（同实现、同超时、同失败语义）。
+ */
+function readProcessCmdline(pid: number): string | undefined {
+  return readPsColumn(pid, "command=");
+}
+
+/**
  * 读目标 pid 的 OS 级启动时间（`ps -p <pid> -o lstart=`，macOS/Linux 通用文本形态，
  * 如 "Mon Sep  8 21:14:32 2026"）。R9-3b 的 pid 复用识别数据源：同 cmdline 的 pid
  * 复用启动时间必不同。读不到 → undefined（保守跳过）。Windows 无可移植等价 →
  * 调用方按平台分流（win32 不杀只删）。
  */
 export function readProcessStartTime(pid: number): string | undefined {
-  try {
-    const r = spawnSync("ps", ["-p", String(pid), "-o", "lstart="], {
-      encoding: "utf-8",
-      timeout: CMDLINE_PROBE_TIMEOUT_MS,
-    });
-    if (r.error || r.status !== 0) return undefined;
-    const out = typeof r.stdout === "string" ? r.stdout.trim() : "";
-    return out.length > 0 ? out : undefined;
-  } catch {
-    return undefined;
-  }
+  return readPsColumn(pid, "lstart=");
 }
 
 /** 清扫结果（诊断/测试可观测）。 */
@@ -295,7 +298,7 @@ function sweepOnePidfile(
     return;
   }
 
-  const hostAlive = isProcessAlive(content.hostPid);
+  const hostAlive = probePidAliveness(content.hostPid);
   if (hostAlive === undefined) {
     result.skipped.push({ file, reason: "host-pid-probe-uncertain" });
     return;
@@ -330,7 +333,7 @@ function reapDeadHostEngine(
     return;
   }
 
-  const engineAlive = isProcessAlive(content.enginePid);
+  const engineAlive = probePidAliveness(content.enginePid);
   if (engineAlive === undefined) {
     result.skipped.push({ file, reason: "engine-pid-probe-uncertain" });
     return;

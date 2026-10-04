@@ -524,7 +524,7 @@ describe('W2-testProxy-public-hostunreach 公网 EHOSTUNREACH 代理语境话术
     expect(result.suggestion).toContain('检查代理')
     expect(result.suggestion).not.toContain('本地网络')
 
-    // 兑底清理：清掉本用例经 handler 落在 update-error.log 路径上的记录
+    // 兜底清理：清掉本用例经 handler 落在 update-error.log 路径上的记录
     const { getUpdateErrorLog } = await import('../update/constants.js')
     if (existsSync(getUpdateErrorLog())) unlinkSync(getUpdateErrorLog())
   })

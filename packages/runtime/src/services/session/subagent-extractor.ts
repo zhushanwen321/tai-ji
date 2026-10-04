@@ -9,7 +9,7 @@
  * 数据来源优先级：
  * 1. **自描述 `subagent-record` entry（W16 v1，权威）**：pi-subagent-workflow 在 record 状态
  *    迁移点（register/archive/reportRecordTransition）经 pi.appendEntry 落完整快照（customType
- *    常量 = shared SUBAGENT_RECORD_CUSTOM_TYPE）。读取方无需逆向解析 toolCall/toolResult。
+ *    常量 = @zhushanwen/subagent-core 的 SUBAGENT_RECORD_CUSTOM_TYPE，经 barrel 消费）。读取方无需逆向解析 toolCall/toolResult。
  * 2. **legacy 解析（降级兜底）**：无自描述 entry 命中（W16 改造前创建的旧 session）时走
  *    旧双管线的磁盘解析逻辑——从 toolCall/toolResult/bg-notify 配对重建。降级表现 = 旧
  *    session 数据滞后但可用（登记表 #8 标注）。
@@ -38,8 +38,16 @@
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, basename } from 'node:path'
 import { getSubagentSessionDir } from '../../infra/pi/pi-paths.js'
-import { parseBgNotifyDetails, SUBAGENT_RECORD_CUSTOM_TYPE } from '@taiji/shared'
-import { parseEngineHandle } from '@zhushanwen/subagent-core'
+import { parseBgNotifyDetails } from '@taiji/shared'
+// notify 通道 customType 词表单源（extension-protocol，与壳写点同源）
+import { SUBAGENT_BG_NOTIFY_CUSTOM_TYPE } from '@zhushanwen/extension-protocol'
+// subagent-record 词表已收 core 单源（runtime 投影经 core barrel 消费；shared 副本仅剩 renderer 消费）
+import {
+  classifySubagentRecordEntryData,
+  SUBAGENT_RECORD_CUSTOM_TYPE,
+  type SubagentRecordRegisteredEntryData,
+  type SubagentRecordSettledEntryData,
+} from '@zhushanwen/subagent-core'
 import { extractRecordsFromSessionFile, type SessionFileExtraction } from './session-file-extraction.js'
 import { normalizeSubagentStatus } from './subagent-status.js'
 import { isEnoent } from '../../utils/errors.js'
@@ -129,24 +137,13 @@ function isPlainRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /**
- * entry data.engineFallback → shared engineFallback（U1）。坏形状（非 plain object /
- * from/reason 非 string）不投影该字段——防御降级不抛，消费端按无 fallback 处理。
- */
-function projectEngineFallback(v: unknown): { from: string; reason: string } | undefined {
-  if (!isPlainRecord(v)) return undefined
-  const from = optString(v.from)
-  const reason = optString(v.reason)
-  return from !== undefined && reason !== undefined ? { from, reason } : undefined
-}
-
-/**
  * entry data.engineHandle → shared engineHandle（U1）。守卫已收敛到 core 单一实现
  * parseEngineHandle（dual-track-convergence D1 双守卫收敛：此前本文件的
  * projectEngineHandle 与 subagent-engine-history 的 extractRecordEngineHandle 两份
  * guard 各自演进，收敛取本侧的严格语义——sessionRef 含非 string 值整体拒绝）：
  * - poolKey 缺失/非 string/空串 → 整个字段不投影（定位符不完整，读侧降级 outcome-only）
  * - sessionRef 非 plain object 或含非 string 值 → 整个字段不投影；键不枚举整体透传
- * - journalPath optString（可选）
+ * - eventsPath optString（可选）
  */
 
 /** JSONL 中的 message entry 结构（简化） */
@@ -189,47 +186,111 @@ export function scanSubagentEntries(entries: unknown[]): SubagentRecord[] {
 }
 
 /**
- * 收集自描述 subagent-record entry（W16 v1）。
+ * 收集自描述 subagent-record entry（登记 §3.3 后 = v2 注册/终态条目对）。
  *
- * data schema = extensions/universal/subagent-workflow/src/execution/record-entry.ts 的
- * SubagentRecordEntryData（v1；跨包依赖方向不允许 import extensions/ 源码，此处按
- * 防御式逐字段守卫消费——runtime 只取 shared SubagentRecord 投影需要的字段，
- * eventLog/displayItems 等扩展内部字段不进 runtime 契约）。
+ * data schema = core record-entry.ts 的 v2 条目契约（registered / settled）——与
+ * events-projection 的 scanV2RecordEntries 消费同一 classify 单源；runtime 只取
+ * shared SubagentRecord 投影需要的字段（eventLog/displayItems 等扩展内部字段不进
+ * runtime 契约）。
  *
  * @returns null = 无有效命中（走 legacy 兜底）；SubagentRecord[] = 命中（同 id 后到覆盖）。
  * 版本不认识的 entry 跳过并 warn（可观测，对齐 workflow-extractor R4 版本漂移语义）；
  * 全部无效视同无命中。
  */
 function collectSelfDescribedSubagentRecords(entries: unknown[]): SubagentRecord[] | null {
-  const records = new Map<string, SubagentRecord>()
-  for (const entry of entries) {
-    const record = parseSelfDescribedSubagentRecord(entry)
-    if (record) records.set(record.subagentId, record)
+  const pairs = new Map<string, V2SubagentPair>()
+  for (const entry of entries) collectV2SubagentPair(entry, pairs)
+  const records: SubagentRecord[] = []
+  for (const [id, pair] of pairs) {
+    const record = projectV2SubagentRecord(id, pair)
+    if (record !== null) records.push(record)
   }
-  return records.size > 0 ? Array.from(records.values()) : null
+  return records.length > 0 ? records : null
+}
+
+/** 每 id 的 v2 条目对（registered 定身份 / settled 定终局，后到覆盖）。 */
+interface V2SubagentPair {
+  registered?: SubagentRecordRegisteredEntryData
+  settled?: SubagentRecordSettledEntryData
 }
 
 /**
- * 单条 entry → SubagentRecord（type/customType/data/版本/必填字段逐层守卫，坏 entry 返回
- * null）。同 id 后到覆盖（entry 顺序 = 时间顺序，extension 在状态迁移点 append，后者更新）。
- * 版本不认识的 entry warn（可观测，对齐 workflow-extractor R4 版本漂移语义）。
+ * 单条 entry → v2 条目对（type/customType/data/版本逐层守卫，坏 entry 静默丢弃）。
+ * 版本不认识（missing-v / future-v / unknown-kind）或旧形态 warn 留证——与
+ * events-projection 的 scanV2RecordEntries 同一 classify 判定。
  */
-function parseSelfDescribedSubagentRecord(entry: unknown): SubagentRecord | null {
-  if (typeof entry !== 'object' || entry === null) return null
+function collectV2SubagentPair(entry: unknown, pairs: Map<string, V2SubagentPair>): void {
+  if (typeof entry !== 'object' || entry === null) return
   const e = entry as JsonlCustomEntry
-  if (e.type !== 'custom' || e.customType !== SUBAGENT_RECORD_CUSTOM_TYPE) return null
-  const data = e.data
-  if (typeof data !== 'object' || data === null) return null
-  const d = data as Record<string, unknown>
-  if (d.v !== 1) {
-    console.warn(
-      `[subagent-extractor] subagent-record entry schema version '${String(d.v)}' unsupported (expected 1) — ` +
-        `extension/runtime version skew, skip this entry. Fix: align schema with ` +
-        `extensions/universal/subagent-workflow/src/execution/record-entry.ts (W16 v1).`,
-    )
-    return null
+  if (e.type !== 'custom' || e.customType !== SUBAGENT_RECORD_CUSTOM_TYPE) return
+  const classification = classifySubagentRecordEntryData(e.data)
+  if (!classification.ok) {
+    if (classification.reason !== 'wrong-type') {
+      console.warn(
+        `[subagent-extractor] subagent-record entry not consumable (reason=${classification.reason}, v=${String((e.data as { v?: unknown } | null | undefined)?.v)}) — ` +
+          `extension/runtime version skew, or a removed legacy shape; skip this entry. Fix: align schema with ` +
+          `packages/subagent-core/src/execution/persistence/record-entry.ts (v2 current).`,
+      )
+    }
+    return
   }
-  return projectSelfDescribedSubagentRecord(d)
+  const v2 = classification.entry
+  if (typeof v2.id !== 'string') return
+  const pair = pairs.get(v2.id) ?? {}
+  if (v2.kind === 'registered') pair.registered = v2
+  else pair.settled = v2
+  pairs.set(v2.id, pair)
+}
+
+/**
+ * settled 终态条目 → 投影字段块（projectV2SubagentRecord 拆出）：终局统计与结果域
+ * 缺省 undefined、sessionFile 缺省 null（与 legacy 投影同形）、status 按终态条目
+ * 在场性归一（idle / running）。
+ */
+function v2SettledProjection(
+  settled: SubagentRecordSettledEntryData | undefined,
+): Pick<SubagentRecord, 'sessionFile' | 'status' | 'stopReason' | 'turns' | 'totalTokens' | 'model' | 'thinkingLevel' | 'endedAt' | 'error' | 'result'> {
+  return {
+    sessionFile: settled?.sessionFile ?? null,
+    status: settled !== undefined ? 'idle' : 'running',
+    stopReason: settled?.stopReason,
+    turns: settled?.turns,
+    totalTokens: settled?.totalTokens,
+    model: settled?.model,
+    thinkingLevel: settled?.thinkingLevel,
+    endedAt: settled?.endedAt,
+    error: settled?.error,
+    result: settled?.result,
+  }
+}
+
+/**
+ * v2 条目对 → SubagentRecord（身份取注册条目，终局取终态条目）。缺注册条目的终态行
+ * 不成实体（身份无所出）→ null。v2 契约不承载的字段（closedReason / worktree /
+ * patchFile 等）缺席——权威源在 manifest 与子 session 文件。（settled 域组装拆见
+ * v2SettledProjection。）
+ */
+function projectV2SubagentRecord(id: string, pair: V2SubagentPair): SubagentRecord | null {
+  const registered = pair.registered
+  if (registered === undefined) return null
+  const settled = pair.settled
+  const startedAt = registered.startedAt
+  const endedAt = settled?.endedAt
+  return {
+    subagentId: id,
+    agent: registered.agent,
+    slug: registered.slug,
+    task: registered.task,
+    startedAt,
+    endedAt,
+    elapsedSeconds: deriveElapsedSeconds(startedAt, endedAt),
+    origin: projectOrigin(registered.origin),
+    parentRunId: registered.parentRunId,
+    stepIndex: registered.stepIndex,
+    ...v2SettledProjection(settled),
+    ...(settled?.engine !== undefined ? { engine: settled.engine } : {}),
+    ...(settled?.engineHandle !== undefined ? { engineHandle: settled.engineHandle } : {}),
+  }
 }
 
 /**
@@ -243,81 +304,6 @@ function deriveElapsedSeconds(startedAt: number | undefined, endedAt: number | u
     : undefined
 }
 
-/**
- * U1 engine 三字段条件投影：投影层只透传（engine 非空才投影），缺省=pi 由读侧
- * extractRecordEngine 映射（不在此填默认值）；engineFallback 坏形状字段级降级不抛
- * （undefined 不进字段）；engineHandle 守卫 = core parseEngineHandle 单一实现。
- */
-function projectEngineSpreadFields(
-  d: Record<string, unknown>,
-): Pick<SubagentRecord, 'engine' | 'engineFallback' | 'engineHandle'> {
-  const engineRaw = optString(d.engine)
-  const engine = engineRaw !== undefined && engineRaw.length > 0 ? engineRaw : undefined
-  const engineFallback = projectEngineFallback(d.engineFallback)
-  const engineHandle = parseEngineHandle(d.engineHandle)
-  return {
-    ...(engine !== undefined ? { engine } : {}),
-    ...(engineFallback !== undefined ? { engineFallback } : {}),
-    ...(engineHandle !== undefined ? { engineHandle } : {}),
-  }
-}
-
-/**
- * 已守卫版本的 entry data → SubagentRecord 投影（必填 id/status 守卫 + 可选字段逐个 typeof
- * 守卫缺省，与 legacy 路径同构）。runtime 只取 shared SubagentRecord 投影需要的字段
- * （eventLog/displayItems 等扩展内部字段不进 runtime 契约）；缺必填字段视为坏 entry 返回 null。
- *
- * [U6/D5] 状态归一在此扩参承载：①legacy 值映射的展示位合成（derivedStopReason/
- * derivedClosedReason——entry 自带字段恒优先，合成仅兜缺失；chatMode 形态位已随
- * modeless 波4 字段消亡删除）；②第五归一上下文 resumable（存量桥接 entry 专有，[U5] 后新 entry 无此字段）。
- */
-function projectSelfDescribedSubagentRecord(d: Record<string, unknown>): SubagentRecord | null {
-  if (typeof d.id !== 'string' || typeof d.status !== 'string') return null
-  const norm = normalizeSubagentStatus(d.status, {
-    resumable: d.resumable === true,
-    closedReason: optString(d.closedReason),
-    error: optString(d.error),
-  })
-  const status = norm.status
-  const startedAt = optNumber(d.startedAt)
-  const endedAt = optNumber(d.endedAt)
-  return {
-    subagentId: d.id,
-    sessionFile: optString(d.sessionFile) ?? null,
-    agent: optString(d.agent) ?? 'general-purpose',
-    slug: optString(d.slug) ?? '',
-    task: optString(d.task) ?? '',
-    status,
-    // [U6] closed 遗留诊断位：归一明细仅 closed 分支返回（防 running + closedReason
-    // 脏组合的守卫内化到归一层——closed 已不存在于两态词表，原始字面守卫随之退役）。
-    closedReason: norm.derivedClosedReason,
-    // [U8 / 永久会话模型 §3.2.8] 展示维度下行投影：stopReason 有值即投影——string
-    // 宽松透传（shared 契约：extension 新增展示值读侧不因收窄丢字段）。[U6] entry
-    // 自带 stopReason 恒优先（A-lite 轮终展示位 / W4 failed 等真实数据），归一合成
-    // （legacy 值映射）仅兜缺失。[2026-09-16 裁决] intent 意愿维度已全链路删除——
-    // 旧 entry 残留 intent 键在此被忽略（读侧容忍）。
-    stopReason: optString(d.stopReason) ?? norm.derivedStopReason,
-    turns: optNumber(d.turns),
-    totalTokens: optNumber(d.totalTokens),
-    model: optString(d.model),
-    thinkingLevel: optString(d.thinkingLevel),
-    startedAt,
-    endedAt,
-    elapsedSeconds: deriveElapsedSeconds(startedAt, endedAt),
-    error: optString(d.error),
-    // 轮终结果文本：entry v1 的轮终迁移写点恒写非空。[U4 翻边] 轮终权威词 = idle，
-    // result 回归纯数据职责（「running-resumable 轮终信号」判据已随 U6 谓词终态化
-    // 退役为 status+stopReason 直读）。
-    result: optString(d.result),
-    // [modeless 波4] chatMode 投影已随字段消亡删除：新 entry 不再携带该键，旧 entry
-    // 残留键在此被忽略（读侧容忍——万物可续后「模式」不再是执行态判据）。
-    // record 来源身份（H2 R3-1 修复）：'tool' | 'workflow' 字面量透传（缺省 undefined =
-    // tool 语义）。此前投影白名单漏此字段 → renderer 过滤面 origin 恒 undefined，
-    // workflow record 运行期虚亮 badge / 绑架 hasRunning / 混入 GUI 列表。
-    origin: projectOrigin(d.origin),
-    ...projectEngineSpreadFields(d),
-  }
-}
 
 /**
  * 从主 session JSONL 文件提取 SubagentRecord[]（冷启动 / getSubagents RPC 路径）。
@@ -375,7 +361,7 @@ function extractSubagentsFromEntriesLegacy(entries: unknown[]): SubagentRecord[]
     // 处理 custom_message entry：找 subagent-bg-notify
     // 用 parseBgNotifyDetails 统一解析 single + batch 两种形态（pi notifier 滑动窗口 60s 合并），
     // 避免 batch 形态 {batch:true, items:[...]} 时 details.id 为 undefined 整批被丢弃。
-    if (e.type === 'custom_message' && e.customType === 'subagent-bg-notify') {
+    if (e.type === 'custom_message' && e.customType === SUBAGENT_BG_NOTIFY_CUSTOM_TYPE) {
       collectLegacyBgNotifies(e.details, bgNotifies)
     }
   }
@@ -710,7 +696,11 @@ function listSubagentJsonlFiles(mainCwd: string): { dir: string; files: string[]
 
   let files: string[]
   try {
-    files = readdirSync(dir).filter((f) => f.endsWith('.jsonl') && !f.endsWith('.finalized'))
+    // [W1 / D3] 后缀白名单结构性忽略 *.events 文件族（record 事件文件无 .jsonl 后缀
+    // ——与 records 目录同 cwd 树相邻，防御性按后缀排除：误读会拿事件行当 session 行）
+    files = readdirSync(dir).filter(
+      (f) => f.endsWith('.jsonl') && !f.endsWith('.finalized') && !f.endsWith('.events'),
+    )
   } catch (e) {
     if (!isEnoent(e)) {
       warnOnce(

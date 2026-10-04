@@ -11,8 +11,11 @@
  *    （name 字段与 package.json.name 精确一致，防改名/误删/错目录）
  * 2. 反向：extensions/{taiji,universal}/ 下每个 @zhushanwen/pi-* 包
  *    必须出现在文件中，directory 与磁盘目录一致
- * 3. 引用：dependsOn.package 为 workspace 内包（@zhushanwen/pi-* / @taiji/*）
- *    时必须可解析（条目、extensions/shared/ 下包、或 packages/ 下包），防悬空引用
+ * 3. 引用（双向）：正向——dependsOn.package 为 workspace 内包（@zhushanwen/pi-* /
+ *    @taiji/*）时必须可解析（条目、extensions/shared/ 下包、或 packages/ 下包），
+ *    防悬空引用；反向——包 package.json dependencies/peerDependencies 声明的
+ *    @zhushanwen/* / @taiji/* 包必须登记进该条目 dependsOn，防漏登记
+ *    （ADR-0074/C-ext-30 依赖登记方向机器防线）
  * 4. 分组：包必须在 taiji/（taiji 集成）或 universal/（独立通用）分组下；
  *    package.json 的 taiji.role 必须与所在分组一致；role=taiji 的包必须在
  *    mandatory-extensions.json（taiji 集成包随应用打包，见 docs/extensions/extension-conventions.md）
@@ -111,6 +114,41 @@ for (const entry of entries) {
   }
 }
 
+// ── 3b. 反向：package.json 声明的内部依赖必须登记进 dependsOn ──────
+// 正向（检查项 3）只防「登记了不存在的包」，防不了「真实依赖不登记」——依赖
+// 漏登记会让 ADR-0074/C-ext-30 的「依赖登记方向」只剩 review 兜底（extensions
+// 未经登记即可消费共享包/他包，绕过登记审计面）。反向闭环 = dependencies/
+// peerDependencies 声明的 @zhushanwen/* / @taiji/* 包必须出现在该条目
+// dependsOn，漏登记即红（type 不限：package/optional/runtime 均为合法登记形态）。
+const internalDep = (name) => name?.startsWith('@zhushanwen/') || name?.startsWith('@taiji/')
+const reverseCheckTargets = [
+  ...diskPackages,
+  ...scanPackageDirs(SHARED_DIR).map((p) => ({ ...p, directory: `extensions/shared/${p.dir}` })),
+]
+for (const pkg of reverseCheckTargets) {
+  if (!internalDep(pkg.name)) continue
+  const entry = entries.find((e) => e.name === pkg.name)
+  if (!entry) {
+    // 分组包缺条目已由检查项 2 报过，不重复计数；shared 库缺条目此前无检查
+    // 覆盖（检查项 2 只扫分组目录）——包存在却无条目 = 依赖图节点缺失，
+    // 其 dependsOn 无处登记，在此一并拦截
+    if (pkg.directory.startsWith('extensions/shared/')) {
+      fail(`shared 库 ${pkg.name}（${pkg.directory}）无 extension-dependencies.json 条目（依赖图节点缺失，无法登记其 dependsOn）`)
+    }
+    continue
+  }
+  const registered = new Set((entry.dependsOn ?? []).map((d) => d.package))
+  const declared = [
+    ...Object.keys(pkg.pkg.dependencies ?? {}),
+    ...Object.keys(pkg.pkg.peerDependencies ?? {}),
+  ].filter(internalDep)
+  for (const dep of declared) {
+    if (!registered.has(dep)) {
+      fail(`包 ${pkg.name} 的 package.json 依赖 ${dep} 未登记进该条目 dependsOn（依赖漏登记，见 docs/extensions/extension-conventions.md「Extension 依赖管理」）`)
+    }
+  }
+}
+
 // ── 4. 分组：目录位置 ↔ taiji.role ↔ mandatory 清单 ───────────
 const mandatoryNames = new Set(
   JSON.parse(readFileSync(MANDATORY_FILE, 'utf-8')).map((e) => e.name),
@@ -139,6 +177,14 @@ for (const pkg of diskPackages) {
 //   - (?<!\w)：排除 abcextensions/xxx 之类的子串前缀误匹配
 //   - (?<!docs/)：排除 docs/extensions/<name>/... 文档目录路径（topic 目录与包名
 //     同名时——如 smart-context 设计文档目录——不是包路径引用）
+//   - (?<!src/)：排除包内 `src/extensions/<pkg>/` 模块命名空间——extension-protocol 的
+//     plan 契约模块 `src/extensions/plan/` 与仓库根旧单层路径 extensions/<pkg>/ 撞名。
+//     [HISTORICAL] 2026-09-24 plan 状态机契约落地时，本检查（一层路径残留）把指向契约
+//     模块的简写注释（形如 `extensions/<pkg>/review-contract.ts` 的简写指向 src/extensions/plan/
+//     模块，6 文件 8 处）误报为旧一层路径残留、拦下 U2 提交——根因 = 简写未含 `src/`
+//     落进匹配域；处置 = 误报后简写已改无歧义全限定形（含 `src/`），并加本豁免防模块
+//     命名空间再次被误判。真正的一层路径残留（extensions/<pkg>/ 前无 src/）仍按原样拦截，
+//     检测面不减。（本注释自身用 <pkg> 占位描述匹配形，避免自命中——同上方各条先例。）
 //   - (?![\w-]) 终止黑名单：包名边界 = 后面不是字母数字/连字符。不用白名单枚举
 //     （[/\s"'\`,)\]]|$）——白名单漏全角标点/英文句点，中文文档全角括号包路径的
 //     高频写法会逃逸（2026-08-22 审查实证，扩大后即抓出 6 处漏网）
@@ -153,7 +199,7 @@ for (const dir of readdirSync(SHARED_DIR)) {
   if (existsSync(join(SHARED_DIR, dir, 'package.json'))) knownNames.add(dir)
 }
 
-const staleRe = new RegExp(`(?<!\\w)(?<!\\./)(?<!agent/)(?<!packages/extensions/)(?<!docs/)extensions/(${[...knownNames].join('|')})(?![\\w-])`)
+const staleRe = new RegExp(`(?<!\\w)(?<!\\./)(?<!agent/)(?<!packages/extensions/)(?<!docs/)(?<!src/)extensions/(${[...knownNames].join('|')})(?![\\w-])`)
 // 历史记录判定：CHANGELOG / ADR / 验收报告 / 包内 docs 设计记录 / 历史事故文档
 // （包内 docs 的分组名用 GROUPS 构建，新增分组单点同步）
 const groupDocsRe = new RegExp(`^extensions/(${GROUPS.join('|')})/[^/]+/docs/`)

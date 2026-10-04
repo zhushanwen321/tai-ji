@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  completeRecord,
+  completeLegacyClosed,
   computeElapsedSeconds,
   createRecord,
   extractLabelFromArgs,
@@ -11,19 +11,22 @@ import {
   getEventLog,
   getFullText,
   getTotalUsage,
-  jsonlToAgentEvent,
+  isLegacyClosedSettled,
   markReconstructedStatus,
   resurrectClosed,
   deriveOutcome,
   projectOutcome,
   project,
-  projectLiveProgress,
   snapshot,
-  tryTransition,
+  trySettleLegacyClosed,
   updateFromEvent,
 } from "../persistence/execution-record.ts";
-import type { AgentResult, ExecutionRecord, SubagentRecord, Turn } from "../assembly/types.ts";
-import { toSubagentRecordEntry } from "../persistence/record-entry.ts";
+import type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord, Turn } from "../assembly/types.ts";
+// [v1 兼容层删除] v1 全量快照写点（toSubagentRecordEntry）已整体删除——现行主 session
+// 条目契约 = 「注册 + 终态两条小条目」（record-entry.ts v2），终局域（engine/engineHandle）
+// 的条目载体 = 终态条目，测试播种经 helpers/v2-record-entry.ts。
+import { v2SettledEntry } from "./helpers/v2-record-entry.ts";
 
 // ── 常量（与源码 module-private 值对齐，测试用字面量）──
 const TURN_SUMMARY_MAX = 80;
@@ -656,36 +659,55 @@ describe("getTotalUsage", () => {
 });
 
 // ============================================================
-// tryTransition — CAS lock
+// trySettleLegacyClosed — CAS lock（[W2/V3] 说谎签名退役后的诚实原语）
 // ============================================================
-describe("tryTransition", () => {
-  it("returns true and sets status when transitioning from running", () => {
+describe("trySettleLegacyClosed", () => {
+  it("returns true and sets status when settling from running", () => {
     const r = makeRecord({ status: "running" });
-    expect(tryTransition(r, "closed")).toBe(true);
+    expect(trySettleLegacyClosed(r)).toBe(true);
     expect(r.status).toBe("idle");
   });
 
-  it("returns false when already terminal (closed)", () => {
+  it("returns false when already legacy-closed settled", () => {
     const r = makeRecord({ status: "idle" });
-    expect(tryTransition(r, "closed")).toBe(false);
+    expect(trySettleLegacyClosed(r)).toBe(false);
     expect(r.status).toBe("idle");
   });
 
-  it("returns false when already terminal (closed, cancelled reason)", () => {
+  it("returns false when already legacy-closed settled (cancelled reason)", () => {
     const r = makeRecord({ status: "idle", closedReason: "cancelled" });
-    expect(tryTransition(r, "closed")).toBe(false);
+    expect(trySettleLegacyClosed(r)).toBe(false);
   });
 
-  it("returns false when already terminal (closed, gc reason)", () => {
+  it("returns false when already legacy-closed settled (gc reason)", () => {
     const r = makeRecord({ status: "idle", closedReason: "gc" });
-    expect(tryTransition(r, "closed")).toBe(false);
+    expect(trySettleLegacyClosed(r)).toBe(false);
   });
 
-  it("first transition wins in concurrent race (running → closed is one-way)", () => {
+  it("first settle wins in concurrent race (running → legacy closed is one-way)", () => {
     const r = makeRecord({ status: "running" });
-    expect(tryTransition(r, "closed")).toBe(true);
-    expect(tryTransition(r, "closed")).toBe(false);
+    expect(trySettleLegacyClosed(r)).toBe(true);
+    expect(trySettleLegacyClosed(r)).toBe(false);
     expect(r.status).toBe("idle");
+  });
+
+  it("legacy closed 收口写入 closedReason（显式值与缺省 gc）", () => {
+    const explicit = makeRecord({ status: "running" });
+    expect(trySettleLegacyClosed(explicit, "cancelled")).toBe(true);
+    expect(explicit.status).toBe("idle");
+    expect(explicit.closedReason).toBe("cancelled");
+
+    const defaulted = makeRecord({ status: "running" });
+    expect(trySettleLegacyClosed(defaulted)).toBe(true);
+    expect(defaulted.closedReason).toBe("gc");
+  });
+
+  it("CAS 拒绝后 closedReason 不被覆盖（首次终态 reason 保持）", () => {
+    const r = makeRecord({ status: "running" });
+    trySettleLegacyClosed(r, "cancelled");
+    expect(trySettleLegacyClosed(r, "gc")).toBe(false);
+    expect(r.status).toBe("idle");
+    expect(r.closedReason).toBe("cancelled");
   });
 
   it("running 入态时 resurrectClosed 防御性 no-op（终态回边仅限 closed）", () => {
@@ -729,13 +751,13 @@ describe("markReconstructedStatus", () => {
 });
 
 // ============================================================
-// completeRecord
+// completeLegacyClosed（[W2/V3] 说谎签名退役后的诚实原语）
 // ============================================================
-describe("completeRecord", () => {
+describe("completeLegacyClosed", () => {
   it("writes outcome fields without resetting turnCount/totalTokens", () => {
     const r = makeRecord({ turnCount: 5, totalTokens: 42 });
     r.status = "idle";
-    completeRecord(r, SAMPLE_RESULT, "closed");
+    completeLegacyClosed(r, SAMPLE_RESULT);
     expect(r.status).toBe("idle");
     expect(r.endedAt).toBeTypeOf("number");
     expect(r.agentResult).toBe(SAMPLE_RESULT);
@@ -749,32 +771,31 @@ describe("completeRecord", () => {
     const r = makeRecord();
     r.status = "idle";
     const failedResult: AgentResult = { ...SAMPLE_RESULT, success: false, error: "oops" };
-    completeRecord(r, failedResult, "closed");
+    completeLegacyClosed(r, failedResult);
     expect(r.error).toBe("oops");
   });
 
-  // ── U3 C-outcome：completeRecord 唯一写入点冻结 outcome ──
+  // ── U3 C-outcome：completeLegacyClosed 唯一写入点冻结 outcome ──
 
   it("[U3] 唯一写入点冻结 outcome：completed / failed / cancelled", () => {
     const ok = makeRecord();
     ok.status = "idle";
-    completeRecord(ok, SAMPLE_RESULT, "closed", "gc");
+    completeLegacyClosed(ok, SAMPLE_RESULT, "gc");
     expect(ok.outcome).toBe("completed");
     expect(ok.closedReason).toBe("gc");
 
     const failed = makeRecord();
     failed.status = "idle";
     const failedResult: AgentResult = { ...SAMPLE_RESULT, success: false, error: "oops" };
-    completeRecord(failed, failedResult, "closed", "gc");
+    completeLegacyClosed(failed, failedResult, "gc");
     expect(failed.outcome).toBe("failed");
 
     // 取消优先于 error（abort 合成 result 可能携带 error，取消语义优先）
     const cancelled = makeRecord();
     cancelled.status = "idle";
-    completeRecord(
+    completeLegacyClosed(
       cancelled,
       { ...SAMPLE_RESULT, success: false, error: "aborted by user" },
-      "closed",
       "cancelled",
     );
     expect(cancelled.outcome).toBe("cancelled");
@@ -785,22 +806,54 @@ describe("completeRecord", () => {
     // ——语义为「父进程关闭时子 agent 未完成即失败」，选定行为而非疏漏。
     const r = makeRecord();
     r.status = "idle";
-    completeRecord(
+    completeLegacyClosed(
       r,
       { ...SAMPLE_RESULT, success: false, error: "closed due to parent-shutdown" },
-      "closed",
       "parent-shutdown",
     );
     expect(r.outcome).toBe("failed");
   });
 
-  it("[U3] patchFile 语义不变：completeRecord 不触碰 patchFile/result，仅新增 outcome", () => {
+  it("[U3] patchFile 语义不变：completeLegacyClosed 不触碰 patchFile/result，仅新增 outcome", () => {
     const r = makeRecord({ patchFile: "/tmp/patches/sa-x.patch" });
     r.status = "idle";
-    completeRecord(r, SAMPLE_RESULT, "closed", "gc");
+    completeLegacyClosed(r, SAMPLE_RESULT, "gc");
     expect(r.patchFile).toBe("/tmp/patches/sa-x.patch");
     expect(r.result).toBe("done");
     expect(r.outcome).toBe("completed");
+  });
+});
+
+// ============================================================
+// isLegacyClosedSettled（[W2/V3 D5] 桥接判据单一谓词——历史 9 处手抄的权威实现）
+// ============================================================
+describe("isLegacyClosedSettled（桥接判据单一谓词）", () => {
+  it("命中：idle ∧ closedReason 有值（旧 closed 终态遗留——D7 例外族/监督器放弃/v1 数据）", () => {
+    const r = makeRecord({ closedReason: "gc" });
+    r.status = "idle";
+    expect(isLegacyClosedSettled(r)).toBe(true);
+    expect(isLegacyClosedSettled({ status: "idle", closedReason: "cancelled" })).toBe(true);
+  });
+
+  it("不命中：running（活跃）/ 轮间 idle 无 closedReason（markSettled 新侧语义——非终态）", () => {
+    expect(isLegacyClosedSettled(makeRecord())).toBe(false);
+    const roundIdle = makeRecord();
+    roundIdle.status = "idle";
+    roundIdle.closedReason = undefined;
+    expect(isLegacyClosedSettled(roundIdle)).toBe(false);
+  });
+
+  it("结构子集入参：SubagentRecord（磁盘投影）与 entry 快照形态同式判定（9 处读点统一消费）", () => {
+    const disk = { status: "idle" as const, closedReason: "user-close" as const };
+    expect(isLegacyClosedSettled(disk)).toBe(true);
+    expect(isLegacyClosedSettled({ status: "running" as const, closedReason: undefined })).toBe(false);
+  });
+
+  it("与 projectOutcome 联动：谓词不命中 → outcome 不投影（undefined）", () => {
+    const roundIdle = makeRecord();
+    roundIdle.status = "idle";
+    roundIdle.closedReason = undefined;
+    expect(projectOutcome(roundIdle)).toBeUndefined();
   });
 });
 
@@ -844,12 +897,12 @@ describe("projectOutcome（投影唯一出口）", () => {
     expect(projectOutcome({ status: "idle", closedReason: "gc", outcome: "cancelled" })).toBe("cancelled");
   });
 
-  it("closed + 无 outcome（存量/重建 record）→ deriveOutcome(closedReason, error) 兑底", () => {
+  it("closed + 无 outcome（存量/重建 record）→ deriveOutcome(closedReason, error) 兜底", () => {
     expect(projectOutcome({ status: "idle", closedReason: "gc", error: "boom" })).toBe("failed");
     expect(projectOutcome({ status: "idle", closedReason: "cancelled" })).toBe("cancelled");
     expect(projectOutcome({ status: "idle", closedReason: "gc" })).toBe("completed");
     // 连 closedReason/error 都缺失的最旧存量：兜底为 completed（与旧 closedReason??'gc'
-    // 兑底显示语义一致）
+    // 兜底显示语义一致）
     expect(projectOutcome({ status: "idle", closedReason: "gc" })).toBe("completed");
   });
 });
@@ -894,7 +947,7 @@ describe("projections", () => {
       expect(d.sessionFile).toBe("bg-1-abc.jsonl");
     });
 
-    it("[U3] project 投影携带 outcome：一等字段直读 / 存量兑底 / running undefined", () => {
+    it("[U3] project 投影携带 outcome：一等字段直读 / 存量兜底 / running undefined", () => {
       const done = makeRecord({ status: "idle", outcome: "completed", closedReason: "gc" });
       expect(project(done).outcome).toBe("completed");
       const legacy = makeRecord({ status: "idle", closedReason: "gc", error: "boom" });
@@ -1043,45 +1096,6 @@ describe("computeElapsedSeconds", () => {
 });
 
 // ============================================================
-// T3.21: projectLiveProgress 迁移保留（wave-3）
-// ============================================================
-describe("projectLiveProgress (T3.21)", () => {
-  it("projects live progress snapshot from running record", () => {
-    const record = makeRecord({
-      mode: "background",
-      task: "test task",
-      startedAt: 1000,
-      status: "running",
-      turnCount: 2,
-      totalTokens: 500,
-      lastError: undefined,
-      turns: [
-        { ...emptyTurn(), closed: true, text: "turn 1", closedTs: 2000 },
-        { ...emptyTurn(), closed: false, text: "turn 2 in progress" },
-      ],
-    });
-
-    const result = projectLiveProgress(record);
-    expect(result.status).toBe("running");
-    expect(result.turns).toBe(2);
-    expect(result.totalTokens).toBe(500);
-    expect(result.elapsedSeconds).toBeGreaterThanOrEqual(0);
-    expect(result.eventLog).toBeInstanceOf(Array);
-    expect(result.currentActivity).toBeDefined();
-    expect(result.lastError).toBeUndefined();
-  });
-
-  it("projectLiveProgress returns lastError when set", () => {
-    const record = makeRecord({
-      mode: "background", task: "failing", startedAt: 0, status: "running",
-      lastError: "something went wrong",
-    });
-    const result = projectLiveProgress(record);
-    expect(result.lastError).toBe("something went wrong");
-  });
-});
-
-// ============================================================
 // tool_end running 索引 [perf]
 // ============================================================
 // 索引弹尾必须与旧实现「倒序全扫找最后一个 running 同名」语义等价：
@@ -1133,11 +1147,11 @@ describe("tool_end running index [perf]", () => {
 });
 
 // ============================================================
-// P4 引擎留痕字段（engine / engineFallback，D9①）
+// P4 引擎留痕字段（engine，D9①）
 // ============================================================
 
 describe("createRecord 引擎留痕字段（P4）", () => {
-  it("identity 带 engine/engineFallback 时进 record，JSON 序列化保留（持久化语义）", () => {
+  it("identity 带 engine 时进 record，JSON 序列化保留（持久化语义）", () => {
     const record = createRecord("sa-engine-1", {
       agent: "reviewer",
       model: "p/m",
@@ -1146,16 +1160,13 @@ describe("createRecord 引擎留痕字段（P4）", () => {
       slug: "s",
       startedAt: 1,
       engine: "pi",
-      engineFallback: { from: "zcode", reason: "engine_probe_failed" },
     });
     expect(record.engine).toBe("pi");
-    expect(record.engineFallback).toEqual({ from: "zcode", reason: "engine_probe_failed" });
     const serialized = JSON.parse(JSON.stringify(record)) as Record<string, unknown>;
     expect(serialized["engine"]).toBe("pi");
-    expect(serialized["engineFallback"]).toEqual({ from: "zcode", reason: "engine_probe_failed" });
   });
 
-  it("不传时两字段缺省（存量 record 消费方零影响——序列化后无键产生）", () => {
+  it("不传时 engine 缺省（存量 record 消费方零影响——序列化后无键产生）", () => {
     const record = createRecord("sa-engine-2", {
       agent: "worker",
       model: "p/m",
@@ -1165,13 +1176,11 @@ describe("createRecord 引擎留痕字段（P4）", () => {
       startedAt: 1,
     });
     expect(record.engine).toBeUndefined();
-    expect(record.engineFallback).toBeUndefined();
     const serialized = JSON.parse(JSON.stringify(record)) as Record<string, unknown>;
     expect("engine" in serialized).toBe(false);
-    expect("engineFallback" in serialized).toBe(false);
   });
 
-  it("SubagentRecord → entry 投影保留两字段（record-entry 持久化链）", () => {
+  it("SubagentRecord → v2 终态条目投影保留 engine（record-entry 持久化链）", () => {
     const base: SubagentRecord = {
       id: "sa-engine-3",
       agent: "reviewer",
@@ -1191,151 +1200,10 @@ describe("createRecord 引擎留痕字段（P4）", () => {
       eventLog: [],
       displayItems: [],
     };
-    const entry = toSubagentRecordEntry({ ...base, engine: "pi", engineFallback: { from: "zcode", reason: "engine_probe_failed" } });
+    const entry = v2SettledEntry({ ...base, engine: "pi" });
     expect(entry.engine).toBe("pi");
-    expect(entry.engineFallback).toEqual({ from: "zcode", reason: "engine_probe_failed" });
     // 存量 record（无字段）投影后同样缺省——消费方按 pi 投影，零迁移
-    expect(toSubagentRecordEntry(base).engine).toBeUndefined();
-  });
-});
-
-// ============================================================
-// jsonlToAgentEvent — subprocess JSONL → AgentEvent 翻译
-// ============================================================
-describe("jsonlToAgentEvent（JSONL → AgentEvent 翻译）", () => {
-  it("不映射类型（session/message_start/turn_start）→ 空数组", () => {
-    expect(jsonlToAgentEvent({ type: "session" })).toEqual([]);
-    expect(jsonlToAgentEvent({ type: "message_start" })).toEqual([]);
-    expect(jsonlToAgentEvent({ type: "turn_start" })).toEqual([]);
-  });
-
-  it("tool_execution_update → activity（纯活性信号，与 pi 侧 TOOL_ACTIVITY_EVENT 同语义）", () => {
-    expect(jsonlToAgentEvent({ type: "tool_execution_update" })).toEqual([{ type: "activity" }]);
-  });
-
-  it("未知类型 → 空数组（落空语义）", () => {
-    expect(jsonlToAgentEvent({ type: "something_new" })).toEqual([]);
-  });
-
-  it("tool_execution_start → tool_start（toolName/args 透传）", () => {
-    expect(jsonlToAgentEvent({ type: "tool_execution_start", toolName: "read", args: { path: "/x.ts" } })).toEqual([
-      { type: "tool_start", toolName: "read", args: { path: "/x.ts" } },
-    ]);
-  });
-
-  it("tool_execution_start：toolName 非字符串归一空串", () => {
-    expect(jsonlToAgentEvent({ type: "tool_execution_start", toolName: 42 })).toEqual([
-      { type: "tool_start", toolName: "", args: undefined },
-    ]);
-  });
-
-  it("tool_execution_end → tool_end（isError === true 才成立，result 透传）", () => {
-    const result = { content: [{ type: "text", text: "out" }] };
-    expect(
-      jsonlToAgentEvent({ type: "tool_execution_end", toolName: "bash", args: { command: "ls" }, result, isError: true }),
-    ).toEqual([
-      { type: "tool_end", toolName: "bash", args: { command: "ls" }, result, isError: true },
-    ]);
-    // isError 非 true（字符串 "yes" / 缺失）→ false
-    expect(
-      jsonlToAgentEvent({ type: "tool_execution_end", toolName: "bash", isError: "yes" })[0],
-    ).toMatchObject({ isError: false });
-    expect(
-      jsonlToAgentEvent({ type: "tool_execution_end", toolName: "bash" })[0],
-    ).toMatchObject({ isError: false });
-  });
-
-  it("message_update：thinking_delta（delta 字符串透传 / 非字符串归一空串）", () => {
-    expect(
-      jsonlToAgentEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "hmm" } }),
-    ).toEqual([{ type: "thinking_delta", delta: "hmm" }]);
-    expect(
-      jsonlToAgentEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: 42 } }),
-    ).toEqual([{ type: "thinking_delta", delta: "" }]);
-  });
-
-  it("message_update：text_delta（delta 非字符串 String() 归一）", () => {
-    expect(
-      jsonlToAgentEvent({ type: "message_update", assistantMessageEvent: { delta: "txt" } }),
-    ).toEqual([{ type: "text_delta", delta: "txt" }]);
-    expect(
-      jsonlToAgentEvent({ type: "message_update", assistantMessageEvent: { delta: 42 } }),
-    ).toEqual([{ type: "text_delta", delta: "42" }]);
-  });
-
-  it("message_update：ame 缺失 / delta 缺失 → 不产出", () => {
-    expect(jsonlToAgentEvent({ type: "message_update" })).toEqual([]);
-    expect(jsonlToAgentEvent({ type: "message_update", assistantMessageEvent: undefined })).toEqual([]);
-    expect(jsonlToAgentEvent({ type: "message_update", assistantMessageEvent: { type: "other" } })).toEqual([]);
-  });
-
-  it("turn_end → [{type:'turn_end'}]", () => {
-    expect(jsonlToAgentEvent({ type: "turn_end" })).toEqual([{ type: "turn_end" }]);
-  });
-
-  it("message_end：usage 拍平 + cost.total 提取 + stopReason=error 额外产 error 事件（双事件）", () => {
-    const events = jsonlToAgentEvent({
-      type: "message_end",
-      message: {
-        usage: { input: 10, output: 20, cacheRead: 5, cacheWrite: 3, cost: { total: 0.5 } },
-        stopReason: "error",
-        errorMessage: "boom",
-      },
-    });
-    expect(events).toEqual([
-      { type: "message_end", usage: { input: 10, output: 20, cacheRead: 5, cacheWrite: 3, cost: 0.5 } },
-      { type: "error", message: "boom" },
-    ]);
-  });
-
-  it("message_end：stopReason=aborted 无 errorMessage → raw.reason fallback，再兜底 String(stopReason)", () => {
-    expect(
-      jsonlToAgentEvent({ type: "message_end", message: { stopReason: "aborted" }, reason: "user aborted" }),
-    ).toEqual([
-      { type: "error", message: "user aborted" },
-    ]);
-    expect(
-      jsonlToAgentEvent({ type: "message_end", message: { stopReason: "aborted" } }),
-    ).toEqual([
-      { type: "error", message: "aborted" },
-    ]);
-  });
-
-  it("message_end：usage 缺 cost → cost undefined；stopReason=stop 不产 error 事件", () => {
-    const events = jsonlToAgentEvent({
-      type: "message_end",
-      message: { usage: { input: 1, output: 1 }, stopReason: "stop" },
-    });
-    expect(events).toEqual([
-      { type: "message_end", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: undefined } },
-    ]);
-  });
-
-  it("message_end：message 缺失 / stopReason 正常 → 空数组或仅 usage", () => {
-    expect(jsonlToAgentEvent({ type: "message_end" })).toEqual([]);
-    expect(jsonlToAgentEvent({ type: "message_end", message: {} })).toEqual([]);
-  });
-
-  it("compaction_start → [{type:'compaction'}]", () => {
-    expect(jsonlToAgentEvent({ type: "compaction_start" })).toEqual([{ type: "compaction" }]);
-  });
-
-  it("翻译产物喂 updateFromEvent 与 live 事件同构（text/tool/turn 收口进 turns[]）", () => {
-    const r = makeRecord();
-    for (const event of [
-      ...jsonlToAgentEvent({ type: "tool_execution_start", toolName: "read", args: { path: "/a.ts" } }),
-      ...jsonlToAgentEvent({ type: "message_update", assistantMessageEvent: { delta: "answer" } }),
-      ...jsonlToAgentEvent({ type: "tool_execution_end", toolName: "read", args: { path: "/a.ts" }, result: { content: [] }, isError: false }),
-      ...jsonlToAgentEvent({ type: "message_end", message: { usage: { input: 7, output: 3, cacheRead: 0, cacheWrite: 0, cost: { total: 0.1 } } } }),
-      ...jsonlToAgentEvent({ type: "turn_end" }),
-    ]) {
-      updateFromEvent(r, event);
-    }
-    expect(r.turns[0]?.text).toBe("answer");
-    expect(r.turns[0]?.toolCalls[0]).toMatchObject({ toolName: "read", _status: "done" });
-    expect(r.turns[0]?.usageDelta).toEqual({ input: 7, output: 3, cacheRead: 0, cacheWrite: 0, cost: 0.1 });
-    expect(r.totalTokens).toBe(10);
-    expect(r.turnCount).toBe(1);
+    expect(v2SettledEntry(base).engine).toBeUndefined();
   });
 });
 
@@ -1353,9 +1221,9 @@ describe("addUsage 分支语义（message_end 累积路径）", () => {
 });
 
 // ============================================================
-// U1 engine 三字段 entry 往返（engineHandle 贯通）
+// U1 engine 字段 entry 往返（engineHandle 贯通；v2 终态条目载体）
 // ============================================================
-describe("SubagentRecord ↔ subagent-record entry 往返（U1 engineHandle）", () => {
+describe("SubagentRecord ↔ subagent-record v2 终态条目往返（U1 engineHandle）", () => {
   const base: SubagentRecord = {
     id: "sa-engine-4",
     agent: "reviewer",
@@ -1375,37 +1243,30 @@ describe("SubagentRecord ↔ subagent-record entry 往返（U1 engineHandle）",
     eventLog: [],
     displayItems: [],
   };
-  const handle = { sessionRef: { sessionId: "s-1", dbPath: "pool/zcode.db" }, journalPath: "/abs/journal.jsonl", poolKey: "p1" };
+  const handle = { sessionRef: { sessionId: "s-1", dbPath: "pool/zcode.db" }, eventsPath: "/abs/journal.jsonl", poolKey: "p1" };
 
-  it("record 含三字段 → entry JSON → 解析回 deep equal（sessionRef 键不枚举整体透传）", () => {
-    const entry = toSubagentRecordEntry({ ...base, engine: "zcode", engineFallback: { from: "zcode", reason: "engine_probe_failed" }, engineHandle: handle });
+  it("record 含 engine/engineHandle → 终态条目 JSON → 解析回 deep equal（sessionRef 键不枚举整体透传）", () => {
+    const entry = v2SettledEntry({ ...base, engine: "zcode", engineHandle: handle });
     const roundTripped = JSON.parse(JSON.stringify(entry));
     expect(roundTripped).toEqual({
-      v: 1,
+      v: 2,
+      kind: "settled",
       id: "sa-engine-4",
-      agent: "reviewer",
-      task: "t",
-      slug: "s",
-      status: "running",
-      mode: "background",
-      startedAt: 1,
-      depth: 0,
+      status: "idle",
+      stopReason: "interrupted-by-restart",
+      endedAt: 1,
       turns: 0,
       totalTokens: 0,
       model: "p/m",
-      eventLog: [],
-      displayItems: [],
       engine: "zcode",
-      engineFallback: { from: "zcode", reason: "engine_probe_failed" },
       engineHandle: handle,
     });
-    expect(toSubagentRecordEntry({ ...base, engineHandle: handle }).engineHandle).toEqual(handle);
+    expect(v2SettledEntry({ ...base, engineHandle: handle }).engineHandle).toEqual(handle);
   });
 
-  it("record 无三字段 → entry JSON 不含对应键（undefined 经 JSON.stringify 自然省略，存量零迁移）", () => {
-    const serialized = JSON.parse(JSON.stringify(toSubagentRecordEntry(base))) as Record<string, unknown>;
+  it("record 无 engine/engineHandle → 条目 JSON 不含对应键（undefined 经 JSON.stringify 自然省略，存量零迁移）", () => {
+    const serialized = JSON.parse(JSON.stringify(v2SettledEntry(base))) as Record<string, unknown>;
     expect("engine" in serialized).toBe(false);
-    expect("engineFallback" in serialized).toBe(false);
     expect("engineHandle" in serialized).toBe(false);
   });
 });

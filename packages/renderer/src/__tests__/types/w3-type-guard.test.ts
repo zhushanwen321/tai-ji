@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * W3 验收测试 - 类型守卫
  *

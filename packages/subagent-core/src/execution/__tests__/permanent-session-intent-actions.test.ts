@@ -55,7 +55,7 @@ vi.mock("../engine/host/spawned-children.ts", async (importOriginal) => {
 });
 
 const { mockLoad, mockAdd, mockRemove, registryEntries } = vi.hoisted(() => {
-  type Entry = { repo: string; branch: string; checkout: string; pid: number; createdAt: number; sessionFile?: string };
+  type Entry = { repo: string; branch: string; checkout: string; pid: number; createdAt: number };
   const entries: Entry[] = [];
   return {
     registryEntries: entries,
@@ -75,7 +75,6 @@ const { mockLoad, mockAdd, mockRemove, registryEntries } = vi.hoisted(() => {
 vi.mock("../worktree/worktree-registry.ts", () => ({
   WorktreeRegistry: class {
     add = mockAdd;
-    updatePid = vi.fn();
     remove = mockRemove;
     load = mockLoad;
   },
@@ -261,7 +260,7 @@ describe("[U5 / §3.2.5] worktree 续聊重建三失败形态（WorktreeManager.
 import * as path from "node:path";
 import { RecordLifecycle, type RecordLifecycleDeps } from "../service/record-lifecycle.ts";
 import { createRecord } from "../persistence/execution-record.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 import type { WorktreeManager as WorktreeManagerType } from "../worktree/worktree-manager.ts";
 
 function makeIntentRecord(id: string, overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
@@ -377,7 +376,6 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
       },
       notifyRecord: vi.fn(),
       killStaleChild: async () => {},
-      killRoundChild: vi.fn(),
       engineSupportsConversation: () => true,
       reviveClosedRecord: vi.fn(),
       reopenRecord: () => true,
@@ -412,7 +410,6 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
       notifyComplete: vi.fn(),
       notifyRecord: vi.fn(),
       killStaleChild: async () => {},
-      killRoundChild: vi.fn(),
       engineSupportsConversation: () => true,
       reviveClosedRecord: vi.fn(),
       reopenRecord: () => true,
@@ -463,7 +460,6 @@ describe("[U5 / §3.2.2 事件表] 已收口会话 + message → revive 翻 runn
       notifyComplete: vi.fn(),
       notifyRecord: vi.fn(),
       killStaleChild: async () => {},
-      killRoundChild: vi.fn(),
       engineSupportsConversation: () => true,
       reviveClosedRecord: vi.fn(),
       reopenRecord: () => true,
@@ -535,7 +531,6 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
       notifyComplete: vi.fn(),
       notifyRecord: (n) => calls.notified.push(n),
       killStaleChild: async () => {},
-      killRoundChild: vi.fn(),
       engineSupportsConversation: () => gateAllows,
       reviveClosedRecord: vi.fn(),
       reopenRecord: () => true,
@@ -636,6 +631,35 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
     expect(calls.dispatched[0]!.task).toBe("running dispatch bypasses gate");
     expect(calls.notified).toEqual([]); // gate=false 不产生失败通知（gate 未参与 running 直派）
     expect(record.status).toBe("running");
+  });
+
+  it("[§4 在途门] 重建 await 窗口内 cancel 抢先收口 → 本轮作废，不走轮始簿记（不把已收口 record 翻回 running）", async () => {
+    const handle = Object.freeze({ path: "/tmp/wt-race", branch: "pi-sub-sa-wt-race", baseCommit: "abc", mainCwd: "/repo" });
+    const record = makeIntentRecord("sa-wt-race", { hadWorktree: true, worktreeHandle: undefined });
+    const { host, calls } = makeTestRig(record, async () => {
+      // 窗口内 cancel 抢先收口（markSettledOut 语义：status → idle，有意不写 endedAt
+      // ——正是轮终原语 endedAt 门与轮始原语 status 判据都拦不住的形态）。
+      record.status = "idle";
+      record.stopReason = "interrupted";
+      return { kind: "rebuilt", handle };
+    });
+    const roundStarts: string[] = [];
+    host.markRoundStarted = (rec) => {
+      roundStarts.push(rec.id);
+    };
+    const { ConversationContinuation } = await import("../assembly/conversation-continuation.ts");
+    const cont = new ConversationContinuation(record, host);
+
+    cont.onMessage("continue during cancel");
+
+    await new Promise((r) => {
+      setTimeout(r, 10);
+    });
+    expect(roundStarts).toEqual([]); // 轮始簿记不发生
+    expect(calls.dispatched).toEqual([]); // 本轮作废（不派发）
+    expect(record.status).toBe("idle"); // 内存态与磁盘收口一致——不被翻回 running
+    // handle 回填发生在 await 之内（真实重建产物，留用无害）——本轮废弃不回滚句柄。
+    expect(record.worktreeHandle).toBe(handle);
   });
 });
 

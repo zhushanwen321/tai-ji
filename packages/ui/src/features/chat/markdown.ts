@@ -28,10 +28,10 @@
  * linkify fuzzyLink:false：只识别带 scheme（http(s)://、ftp://、//）的 URL，不识别裸域名，
  * 避免 .md/.io 等 ccTLD 把文件名误判成 URL（见 getMarkdown 内注释）。
  *
- * 增量流式轴（D-5/W22-W23：findStableBoundary / renderIncremental / shouldFinalizeStreamingFence
- * 及块扫描私有辅助）在 ./markdown-incremental（自本文件拆出，R4 源码简化，2026-09），
- * 消费方直接从该模块导入；渲染协议类型（MarkdownSegment / MarkdownEnv 等）SSOT 在
- * ./markdown-types。
+ * 增量流式轴（D-5/W22-W23：findStableBoundary / renderIncremental
+ * 及块扫描私有辅助）已拆至 ./markdown-incremental（源码简化 R4，2026-09），消费方直接从该模块
+ * 导入（曾用 re-export shim 维持旧路径，因与增量轴的反向 import 形成循环依赖已拆除）；
+ * 渲染协议类型（MarkdownSegment / MarkdownEnv 等）SSOT 在 ./markdown-types。
  *
  * i18n 解耦（D10 迁移配套）：本模块不 import 任何壳层 i18n 单例（ui 包无 `@/i18n` 可址），
  * 代码块复制按钮文案（copyLabel）经 MarkdownEnv.copyLabel 由宿主壳在渲染入口注入

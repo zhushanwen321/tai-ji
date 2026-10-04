@@ -229,12 +229,12 @@ describe('SettingsMessageHandler 分发路由（W1 表驱动重构回归锚定�
     expect(broadcasts).toHaveLength(0)
   })
 
-  it('config.setToolPermissions → updateToolPermissions + reply config.providerUpdated { saved: true }', async () => {
+  it('config.setToolPermissions → updateToolPermissions + reply config.toolPermissionsSaved { saved: true }', async () => {
     const { ctx, replies, handler } = makeHandler()
     const handled = await handler.handleSettingsMessage(msg('config.setToolPermissions', { permissions: { bash: 'allow' } }), WS)
     expect(handled).toBe(true)
     expect(ctx.configService.updateToolPermissions).toHaveBeenCalledWith({ bash: 'allow' })
-    expect(replies[0]).toMatchObject({ type: 'config.providerUpdated', payload: { saved: true } })
+    expect(replies[0]).toMatchObject({ type: 'config.toolPermissionsSaved', payload: { saved: true } })
   })
 
   it('未知 type（非 tool.* 占位）→ 查表落空返回 false（server 发 unknown_type 兜底）', async () => {

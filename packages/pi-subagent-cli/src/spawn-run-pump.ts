@@ -6,6 +6,7 @@
 // close 收尾时三路全 miss = 应响亮报错的异常信号，warn 留痕不自动认领。
 
 import type { ChildProcess } from "node:child_process";
+import os from "node:os";
 
 import { isBrokenPipeError } from "@zhushanwen/pi-rpc";
 import { getLogger, pumpNdjsonLines } from "@zhushanwen/subagent-engine-sdk";
@@ -22,15 +23,20 @@ import {
   type SpawnSessionHeader,
 } from "./spawn-event-adapter.ts";
 import type { SpawnRunCallbacks } from "./spawn-runner.ts";
-import { recordEpipeFailure } from "./stdin-writer.ts";
 
 const logger = getLogger("session-runner");
 
 /** 无效 stdout 行的日志截断长度（够诊断、不刷屏）。 */
 const INVALID_LINE_LOG_CHARS = 160;
 
-/** 信号退出码合成值（close 无 code 只有 signal 时按 128+ 约定折算非零）。 */
+/** 信号退出码合成基值（close 无 code 只有 signal 时按 POSIX 128+signo 约定折算非零）。 */
 const SIGNAL_EXIT_CODE_BASE = 128;
+
+/** 信号名 → 编号（SIGTERM=15 等）。os.constants.signals 反查；未知信号回退 0（保持裸 128 口径）。 */
+function signalNumberOf(signal: NodeJS.Signals): number {
+  const signals = os.constants.signals as Record<string, number>;
+  return signals[signal] ?? 0;
+}
 
 /**
  * child 'error' 事件（spawn 失败——子进程从未运行）的收尾退出码。POSIX
@@ -52,10 +58,16 @@ export interface RunEndState {
   childErrorMessage?: string;
   /** agent_settled 的 run resolve 句柄（exitPromise executor 内落位）。 */
   resolveChatRun?: (code: number) => void;
+  /**
+   * resolve 时刻的真实轮数快照（agent_settled 传出，见 SdkTranslatorOpts.onAgentSettled）。
+   * agent_settled 消费面随后按轮清零 record.turnCount（SP-9），收集面以本快照恢复
+   * 成功 run 的真实轮数；undefined = agent_settled 未到达（失败路径），record 值即真实值。
+   */
+  settledTurnCount?: number;
 }
 
 /** session 身份回填状态机（三路写同源；get_state 监听表随行持有）。 */
-export interface SessionIdentityTracker {
+export interface SessionIdentityTracker { // oe-exempt:20260930:framework:CLI 泵与 spawn 编排之间的接缝契约（唯一实装 createSessionIdentityTracker；非投机抽象，后续新增引擎会带来第二实装）
   readonly sessionId: string | undefined;
   readonly sessionFile: string | undefined;
   /** header 行：id + session 文件路径全量落位（handleReady 双字段条件展开）。 */
@@ -207,13 +219,15 @@ function reportChildExited(
   });
 }
 
-/** close 退出码口径：轮终主动收割 = 0；其余 signal 退出按 128+ 折算（异常判据）。 */
+/** close 退出码口径：轮终主动收割 = 0；其余 signal 退出按 POSIX 128+signo 折算（异常判据）。 */
 function normalizeExitCode(
   endedCleanly: boolean,
   code: number | null,
   signal: NodeJS.Signals | null,
 ): number {
-  return endedCleanly ? 0 : code ?? (signal !== null ? SIGNAL_EXIT_CODE_BASE : 0);
+  return endedCleanly
+    ? 0
+    : code ?? (signal !== null ? SIGNAL_EXIT_CODE_BASE + signalNumberOf(signal) : 0);
 }
 
 /**
@@ -306,11 +320,14 @@ export function wireChildStdoutPump(deps: StdoutPumpDeps): Promise<number> {
       deps.runEnd.childErrorMessage = toErrorMessage(err);
       onClose(null, null);
     });
-    // stdin 异步 error（EPIPE 半面②）：计数留痕（热路径投递据此判死）。
-    // 判别经 pi-rpc isBrokenPipeError 单源（同步半面①在 stdin-writer writeStdinLine）。
+    // stdin 异步 error 监听器必挂：'error' 事件无监听即进程级 uncaught exception。
+    // 原 EPIPE 失败计数器（热路径投递判死的消费面）已随协议化删除，此处仅 debug
+    // 留痕；不能 warn——agent_settled 收割（killPiProcess）每次正常 run 都会断
+    // stdin 管道触发 EPIPE，属正常路径。判别经 pi-rpc isBrokenPipeError 单源
+    // （同步半面①在 stdin-writer writeStdinLine 的 EPIPE throw）。
     child.stdin?.on("error", (err) => {
       if (isBrokenPipeError(err)) {
-        recordEpipeFailure(deps.recordId);
+        logger.debug(`[session-runner] stdin EPIPE for ${deps.recordId} (expected on reap/exit; ignored)`);
       }
     });
   });

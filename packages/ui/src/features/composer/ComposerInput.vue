@@ -235,8 +235,7 @@ defineExpose({
   insertImageBadge,
   removeImageChip,
   clearSlashQueryText,
-  clearHashQueryText,
-  /** # query 段清除（session 语义，dom-core 实现名保持 clearHashQueryText） */
+  /** # query 段清除（session 语义；expose 单名——dom-core 实现名保持 clearHashQueryText） */
   clearSessionQueryText: clearHashQueryText,
   clearDollarFileQueryText,
   clearSubagentQueryText,

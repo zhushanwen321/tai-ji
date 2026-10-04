@@ -59,13 +59,14 @@ pi --tools todo,goal_control,workflow,subagent,ask_user
 
 系统内置 `n = 10` 深度护栏（`MAX_FORK_DEPTH`，fork 链与通用嵌套两个计数器共享上限、取严者生效）：fork 链超限抛 `ForkDepthExceededError`，通用嵌套护栏报 `nested_spawn_rejected`。实测建议控制在 **3-4 层**以内——更深层会因上下文逐层压缩导致信息失真。
 
-## Workflow 生命周期（one-shot）
+## Workflow 生命周期
 
-Workflow run 是一次性执行，状态机两态：`running → done`（`done` 唯一终态，reason 区分 completed / aborted / failed / budget_limited / time_limited）。`workflow` tool 仅 3 个 action：`run` / `status` / `abort`。run 的 `name` 接受 `<available_workflows>` 列出的 workflow 名（内置 chain / parallel / map-reduce / scatter-gather / review-fix-loop 或已保存脚本）或 `.js` 绝对路径。一次性执行、无 pause/resume：提前停止只有 abort 一条路，要新结果就重新 run。
+Workflow run 有两类结束形态：**终局**（`done`，outcome 区分 done / failed / cancelled / time_limited——成败已定）与**中断**（`interrupted` 暂停态——执行被打断但可续跑）。`workflow` tool 共 4 个 action：`run` / `status` / `abort` / `resume`。run 的 `name` 接受 `<available_workflows>` 列出的 workflow 名（内置 chain / parallel / map-reduce / scatter-gather / review-fix-loop 或已保存脚本）或 `.js` 绝对路径。
 
-- **abort 是唯一的提前停止方式**：`{"action":"abort","runId":"<id>"}`（可选 `"error":"<reason>"`）。不存在 pause/resume action，调用会被 pi schema 校验拒绝（`Validation failed for tool "workflow"`）；`/workflows pause|resume <id>` 返回 removed 提示
-- **session 切换/关闭时**，所有 running run 当即作废转 `done,failed`（state.error 为 `Session switched: run terminated` / `Session shutdown: run terminated`），已投入的 token 作废；需要结果就重新 run
-- **快照格式 `wf-run-v2`**（status 两态、无 `pausedAt`）；旧 `wf-run-v1` 文件加载时静默跳过
+- **abort（主动取消）**：`{"action":"abort","runId":"<id>"}`（可选 `"error":"<reason>"`）→ `cancelled` 终局。要新结果就重新 run
+- **resume（断点续跑）**：`{"action":"resume","runId":"<id>"}`（可选 args 校验一致性与时间预算）——对 interrupted run 从断点恢复：已完成的调用回放缓存零 token、未完成的按三档恢复（会话完整 → 捞回结果；请求未完成 → 同会话续写；会话不在 → 整跑）；`/workflows resume <id>` 同能力
+- **session 切换/关闭时**，所有 running run 转 `interrupted` 暂停态（被打断不记失败）——回原 session 可 resume 续跑
+- **持久化 = record 事件流**（`<runId>.record.jsonl`，append-only 单一事实源）：状态由事件流折叠得出；旧 `wf-run-v1`/`wf-run-v2` 快照文件为历史遗留，读取面不消费
 - **worker 崩溃自动重建重试**（默认 3 次）：重建时在飞 agent 调用被清除重跑，已完成的调用保留 replay 缓存，不重复消耗 token
 
 ## 性能：sessions-index.json 持久化索引

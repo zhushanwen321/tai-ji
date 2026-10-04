@@ -50,10 +50,9 @@
         <span v-if="subagentMeta?.slug" class="min-w-0 shrink-0 truncate font-mono text-xs text-neutral-dim">
           · {{ subagentMeta.slug }}
         </span>
-        <!-- 引擎 badge（U3 D9）：常态引擎名；engineFallback 存在 → 警告态 + 回退文案 -->
+        <!-- 引擎 badge（U3 D9）：常态引擎名（运行期不换引擎，无回退态） -->
         <span
-          class="shrink-0 rounded-sm px-1 font-mono text-[length:var(--text-3xs)] leading-4"
-          :class="subagentMeta?.engineFallback ? 'bg-warn-soft text-warn' : 'border border-hairline text-neutral-dim'"
+          class="shrink-0 rounded-sm border border-hairline px-1 font-mono text-[length:var(--text-3xs)] leading-4 text-neutral-dim"
           :title="engineBadgeTitle"
           data-testid="subagent-engine-badge"
         >{{ engineBadgeText }}</span>
@@ -159,7 +158,7 @@ function findAgentCall(acsId: string): WorkflowAgentCall | undefined {
 }
 
 /** 标题栏元信息（响应式：records 变化时重算） */
-const subagentMeta = computed<{ agent: string; slug?: string; meta?: string; engine?: string; engineFallback?: { from: string; reason: string }; stopReason?: string } | null>(() => {
+const subagentMeta = computed<{ agent: string; slug?: string; meta?: string; engine?: string; stopReason?: string } | null>(() => {
   const vid = selectedSubagentId.value
   if (!vid) return null
 
@@ -176,7 +175,6 @@ const subagentMeta = computed<{ agent: string; slug?: string; meta?: string; eng
       slug: record.slug || undefined,
       meta: metaParts.length > 0 ? metaParts.join(' · ') : undefined,
       engine: record.engine || undefined,
-      engineFallback: record.engineFallback,
       // 停因词（U8b §3.2.8）：有值即投影——idle 与 A-lite 轮终 running-resumable 均携带
       // 合法停因；「为什么停」一句话解释，不参与资格判定
       stopReason: record.stopReason,
@@ -196,22 +194,15 @@ const subagentMeta = computed<{ agent: string; slug?: string; meta?: string; eng
   return null
 })
 
-/** 引擎 badge 文案（U3 D9）：常态引擎名（缺省 pi）；fallback 警告态显示回退链 */
+/** 引擎 badge 文案（U3 D9）：常态引擎名（缺省 pi；运行期不会换引擎，无回退态） */
 const engineBadgeText = computed<string>(() => {
   const meta = subagentMeta.value
-  const engine = meta?.engine || DEFAULT_ENGINE_ID
-  if (meta?.engineFallback) {
-    return t('panel.sideDrawer.engineFallbackBadge', { from: meta.engineFallback.from, to: engine })
-  }
-  return engine
+  return meta?.engine || DEFAULT_ENGINE_ID
 })
 
-/** 引擎 badge title：常态 = 引擎名；fallback = 恢复指引 */
+/** 引擎 badge title：常态 = 引擎名 */
 const engineBadgeTitle = computed<string>(() => {
   const meta = subagentMeta.value
-  if (meta?.engineFallback) {
-    return t('panel.sideDrawer.engineFallbackHint', { from: meta.engineFallback.from, to: meta.engine || DEFAULT_ENGINE_ID })
-  }
   return t('panel.sideDrawer.engineBadgeTitle', { engine: meta?.engine || DEFAULT_ENGINE_ID })
 })
 

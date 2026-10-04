@@ -9,6 +9,14 @@
  *   - R1 豁免：载体定义文件的 export function / async function 定义行、注释行
  *   - R2 命中：appendEntry + customType "subagent-record" 同行写形态（store 外）
  *   - R2 豁免：record-entry.ts 常量定义面
+ *   - R3 命中：白名单外 workflow-record entry 写（字面量 + 常量双形态）
+ *   - R4 命中：白名单外 toSubagentRecordEntry 调用（v1 快照投影构造器）
+ *   - R5 命中：workflow-record 写点窗口内 v:1 / snapshot 载荷形态；
+ *     豁免：窗口内注释行提及触发词
+ *   - R6 命中：entry 载荷 eventLog:/displayItems: 死字节字段写形态；
+ *     豁免：窗口内注释行提及触发词
+ *   - R7 命中：双写者外 appendFile × `.events` 直写（单行 + prettier 拆行）；
+ *     豁免：注释行字面量与非 .events 目标
  *
  * fixture 全落 tmpdir（scanRecordWriteSurface(roots) 注入扫描根，同
  * check-publish-surface.test.mjs 惯例），不依赖真实仓库状态。
@@ -22,6 +30,8 @@ import {
   collectTsFiles,
   WRITE_FN_RE,
   RECORD_ENTRY_WRITE_RE,
+  APPEND_FILE_CALL_RE,
+  EVENTS_PATH_LITERAL_RE,
   isCommentLine,
   scanRecordWriteSurface,
 } from '../check-record-write-surface.mjs'
@@ -65,16 +75,25 @@ describe('collectTsFiles 遍历边界', () => {
 // ── 正则/判定原语 ──────────────────────────────────────────────────────
 
 describe('规则原语', () => {
-  it('WRITE_FN_RE 命中七名真实导出（含 .alive 写/删两名 + U2 轮收口写面）', () => {
-    for (const name of ['writeFinalizedState', 'writeCancelledState', 'writeSettledState', 'writeManifest', 'saveIndex', 'writeAliveMarker', 'removeAliveMarker']) {
+  it('WRITE_FN_RE 命中八名真实导出（含 .alive 写/删两名 + U2 轮收口写面 + bound 物化写面）', () => {
+    for (const name of ['writeFinalizedState', 'writeCancelledState', 'writeSettledState', 'writeManifest', 'materializeBoundRecordManifest', 'saveIndex', 'writeAliveMarker', 'removeAliveMarker']) {
       expect(WRITE_FN_RE.test(`${name}(f)`)).toBe(true)
     }
     expect(WRITE_FN_RE.test('writeStateMarker(f)')).toBe(false) // v1 假绿教训：模块私有名不命中
+    expect(WRITE_FN_RE.test('materializeManifest(f)')).toBe(false) // 近名不命中：名单须精确到真实导出名
   })
 
   it('RECORD_ENTRY_WRITE_RE 双向同行形态命中，读面不命中', () => {
     expect(RECORD_ENTRY_WRITE_RE.test('pi.appendEntry({ customType: "subagent-record", data })')).toBe(true)
     expect(RECORD_ENTRY_WRITE_RE.test(`data.customType === 'subagent-record' && onAppendEntry()`)).toBe(false)
+  })
+
+  it('R7 两段原语：APPEND_FILE_CALL_RE 锚调用行（含 Sync），EVENTS_PATH_LITERAL_RE 锚引号内 .events', () => {
+    expect(APPEND_FILE_CALL_RE.test('appendFileSync(line)')).toBe(true)
+    expect(APPEND_FILE_CALL_RE.test('await appendFile(fh, line)')).toBe(true)
+    expect(APPEND_FILE_CALL_RE.test('import { appendFileSync } from "node:fs"')).toBe(false)
+    expect(EVENTS_PATH_LITERAL_RE.test('join(dir, id + ".events")')).toBe(true)
+    expect(EVENTS_PATH_LITERAL_RE.test("appendFileSync(path, line)")).toBe(false)
   })
 
   it('isCommentLine：// 与块注释前缀豁免', () => {
@@ -146,6 +165,154 @@ describe('scanRecordWriteSurface R2', () => {
   it('customType 非本域（notify-ledger 等）天然不命中', () => {
     const root = makeFixture({
       'pkg/src/other/notify.ts': 'export function emit(pi: unknown, data: unknown) {\n  pi.appendEntry({ customType: "notify-ledger", data });\n}',
+    })
+    expect(scanRecordWriteSurface([join(root, 'pkg', 'src')])).toEqual([])
+  })
+})
+
+// ── R3：workflow-record entry 写面白名单（三写点宿主外违规）──────────
+
+describe('scanRecordWriteSurface R3', () => {
+  it('白名单外宿主 appendEntry + customType "workflow-record" → 违规', () => {
+    const root = makeFixture({
+      'pkg/src/other/emitter.ts': 'export function emit(pi: unknown, data: unknown) {\n  pi.appendEntry({ customType: "workflow-record", data });\n}',
+    })
+    const violations = scanRecordWriteSurface([join(root, 'pkg', 'src')])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('[R3]')
+  })
+
+  it('常量形态 WORKFLOW_RECORD_CUSTOM_TYPE 窗口内同现（拆行）→ 违规', () => {
+    const root = makeFixture({
+      'pkg/src/other/emitter.ts': [
+        'import { WORKFLOW_RECORD_CUSTOM_TYPE } from "...";',
+        'export function emit(pi: unknown, data: unknown) {',
+        '  pi.appendEntry({',
+        '    customType: WORKFLOW_RECORD_CUSTOM_TYPE,',
+        '    data });',
+        '}',
+      ].join('\n'),
+    })
+    const violations = scanRecordWriteSurface([join(root, 'pkg', 'src')])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('[R3]')
+  })
+})
+
+// ── R4：v1 快照投影构造器白名单（定义 + v1 兼容层外违规）────────────
+
+describe('scanRecordWriteSurface R4', () => {
+  it('白名单外 toSubagentRecordEntry 调用 → 违规（import 行无括号不命中）', () => {
+    const root = makeFixture({
+      'pkg/src/other/snapshot.ts': [
+        'import { toSubagentRecordEntry } from "...";',
+        'export const entry = toSubagentRecordEntry(rec);',
+      ].join('\n'),
+    })
+    const violations = scanRecordWriteSurface([join(root, 'pkg', 'src')])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('[R4]')
+  })
+})
+
+// ── R5：workflow-record v1 快照载荷形态（全域拒绝，含窗口形态）────────
+
+describe('scanRecordWriteSurface R5', () => {
+  it('写点窗口内 v:1 / snapshot 载荷形态 → R5 红（R3 同报）', () => {
+    const root = makeFixture({
+      'pkg/src/other/wf-v1.ts': [
+        'export function emit(pi: unknown) {',
+        '  pi.appendEntry({ customType: "workflow-record",',
+        '    data: { v: 1, snapshot: snap } });',
+        '}',
+      ].join('\n'),
+    })
+    const violations = scanRecordWriteSurface([join(root, 'pkg', 'src')])
+    const tags = violations.map((v) => v.match(/\[R\d\]/)?.[0])
+    expect(tags).toContain('[R3]')
+    expect(tags).toContain('[R5]')
+  })
+
+  it('窗口内注释行提及 snapshot 触发词不构成 R5 违规', () => {
+    const root = makeFixture({
+      'pkg/src/other/noted.ts': [
+        'export function emit(pi: unknown, data: unknown) {',
+        '  pi.appendEntry({ customType: "workflow-record", data });',
+        '  // v1 snapshot 直传已停写',
+        '}',
+      ].join('\n'),
+    })
+    const violations = scanRecordWriteSurface([join(root, 'pkg', 'src')])
+    // tmpdir 路径非三写点宿主 → R3 照红；snapshot 在注释行，R5 不红
+    expect(violations.map((v) => v.match(/\[R\d\]/)?.[0])).toEqual(['[R3]'])
+  })
+})
+
+// ── R6：entry 载荷死字节字段（eventLog:/displayItems:，全域拒绝）──────
+
+describe('scanRecordWriteSurface R6', () => {
+  it('写点窗口内 eventLog: 字段写形态 → R6 红（R2 同报）', () => {
+    const root = makeFixture({
+      'pkg/src/other/dead-bytes.ts': [
+        'export function emit(pi: unknown, data: unknown) {',
+        '  pi.appendEntry({ customType: "subagent-record",',
+        '    data: { ...data, eventLog: [], displayItems: [] } });',
+        '}',
+      ].join('\n'),
+    })
+    const violations = scanRecordWriteSurface([join(root, 'pkg', 'src')])
+    const tags = violations.map((v) => v.match(/\[R\d\]/)?.[0])
+    expect(tags).toContain('[R2]')
+    expect(tags).toContain('[R6]')
+  })
+
+  it('窗口内注释行提及 eventLog: 触发词不构成 R6 违规', () => {
+    const root = makeFixture({
+      'pkg/src/other/noted.ts': [
+        'export function emit(pi: unknown, data: unknown) {',
+        '  pi.appendEntry({ customType: "subagent-record", data });',
+        '  // 注意勿写 eventLog: 与 displayItems: 字段',
+        '}',
+      ].join('\n'),
+    })
+    const violations = scanRecordWriteSurface([join(root, 'pkg', 'src')])
+    // eventLog: 在注释行，R6 不红（R2 照红——store 外写点本身仍拦）
+    expect(violations.map((v) => v.match(/\[R\d\]/)?.[0])).toEqual(['[R2]'])
+  })
+})
+
+// ── R7：事件文件直写（.events 路径字面量，双写者外违规）──────────────
+
+describe('scanRecordWriteSurface R7', () => {
+  it('单行 appendFileSync × `.events` 字面量 → 违规', () => {
+    const root = makeFixture({
+      'pkg/src/other/evil.ts': 'appendFileSync(join(dir, id + ".events"), line);\n',
+    })
+    const violations = scanRecordWriteSurface([join(root, 'pkg', 'src')])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('[R7]')
+  })
+
+  it('prettier 拆行形态（.events 字面量在调用行之后）→ 违规', () => {
+    const root = makeFixture({
+      'pkg/src/other/evil-multiline.ts': [
+        'appendFileSync(',
+        '  join(dir, id + ".events"),',
+        '  line,',
+        ');',
+      ].join('\n'),
+    })
+    const violations = scanRecordWriteSurface([join(root, 'pkg', 'src')])
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain('[R7]')
+  })
+
+  it('注释行的 .events 字面量与非 .events 目标不命中', () => {
+    const root = makeFixture({
+      'pkg/src/other/benign.ts': [
+        '// appendFileSync(join(dir, id + ".events"), line);',
+        'appendFileSync(join(dir, "other.log"), line);',
+      ].join('\n'),
     })
     expect(scanRecordWriteSurface([join(root, 'pkg', 'src')])).toEqual([])
   })

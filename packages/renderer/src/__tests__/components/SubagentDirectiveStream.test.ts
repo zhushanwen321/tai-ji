@@ -14,69 +14,19 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/SubagentDirectiveStream.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { chatViewDepsModule } from '@/__tests__/helpers/chat-stream-mount'
+import '@/__tests__/helpers/message-stream-shell-mount'
+import { virtuaVueMockModule, resetMessageStreamEnv } from '@/__tests__/helpers/chat-stream-mount'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick, effectScope } from 'vue'
-import { createPinia, setActivePinia } from 'pinia'
 import { createUseChat, resetChatModuleStateForTest } from '@taiji/core'
 import type { ChatStoreInstance, UseChatDeps } from '@taiji/core'
 import type { ServerMessage, Segment } from '@taiji/shared'
 import { useChatStore } from '@/stores/chat'
 import MessageStream from '@/components/panel/MessageStream.vue'
 
-// ── virtua mock：Virtualizer → 全量渲染 scoped slot 的 stub（对齐 MessageStream-kind.test.ts；
-//    happy-dom 无真实布局，真 <Virtualizer> viewportSize=0 不渲染任何项）──
-vi.mock('virtua/vue', async () => {
-  const { defineComponent, h } = await import('vue')
-  return {
-    Virtualizer: defineComponent({
-      name: 'MockVirtualizer',
-      props: { data: { type: Array, default: () => [] } },
-      setup() {
-        return {
-          scrollSize: 600,
-          scrollOffset: 0,
-          viewportSize: 400,
-          cache: {},
-          scrollToIndex: vi.fn(),
-          getItemOffset: vi.fn(() => 0),
-          getItemSize: vi.fn(() => 200),
-          findItemIndex: vi.fn(() => 0),
-          scrollTo: vi.fn(),
-          scrollToItem: vi.fn(),
-          scrollBy: vi.fn(),
-        }
-      },
-      render(ctx: { data: unknown[]; $slots: { default?: (args: { item: unknown; index: number }) => unknown[] } }) {
-        return h(
-          'div',
-          { class: 'mock-virtualizer' },
-          ctx.data.map((item, index) => ctx.$slots.default?.({ item, index }) ?? []),
-        )
-      },
-    }),
-  }
-})
-
-// ── 壳依赖 mock（对齐 kind 测试；MessageStream 消息读取走真 pinia chatStore，不经这些 mock）──
-vi.mock('@/composables/panel/useChatViewDeps', () => chatViewDepsModule())
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({
-    editAndResend: vi.fn(),
-    loadMoreHistory: vi.fn(),
-    hasMoreHistory: () => false,
-  }),
-  resetChatModuleState: vi.fn(),
-}))
-vi.mock('@/composables/features/sidebar/useSidebar', () => ({
-  useSidebar: () => ({ forkSession: vi.fn(), abortHandoff: vi.fn() }),
-}))
-
-class NoopResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
+// ── virtua mock（helpers/chat-stream-mount.ts 简化版：Virtualizer stub 全量渲染
+//    scoped slot；对齐 MessageStream-kind.test.ts，happy-dom 无真实布局）──
+vi.mock('virtua/vue', () => virtuaVueMockModule())
 
 /** stub 仅外围组件；SystemNotice 刻意不 stub——定向气泡 DOM 是断言对象 */
 const globalStubs = {
@@ -121,10 +71,10 @@ function makeFixture(sid: string): Fixture {
     // pinia store → core ChatStoreInstance 的类型鸿沟 cast（renderer useChat.ts 同款，运行时等价）
     getChatStore: () => chatStore as unknown as ChatStoreInstance,
     getSessionStore: () => ({ applySnapshot: vi.fn() }),
-    // [session-dead 第三环] warning：defer 重投熔断提示的注入面（本用例不触发）
+    // [session-dead 第三环] warning 注入面（本用例不触发）
     toast: { error: vi.fn(), warning: vi.fn() },
     t: (k: string) => k,
-    getCompactQueue: () => ({ flush: vi.fn().mockResolvedValue(true) }),
+    // [u3c] getCompactQueue 注入已随 useCompactQueue 退役摘除（UseChatDeps 无该成员）
   }
   const useChat = createUseChat(deps)
   return {
@@ -151,8 +101,7 @@ function directiveMsg(sid: string, slug: string, text: string): ServerMessage {
 
 describe('subagent.directive live 广播 → 聊天流定向气泡（U2b 集成）', () => {
   beforeEach(() => {
-    vi.stubGlobal('ResizeObserver', NoopResizeObserver)
-    setActivePinia(createPinia())
+    resetMessageStreamEnv()
     resetChatModuleStateForTest()
   })
 

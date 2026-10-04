@@ -8,9 +8,9 @@
  * worker-message-pump 循环依赖：2 个 engine 函数文件各自独立，共用同一组
  * 依赖签名（D-12）。
  *
- * 层归属：Engine。零 infra 依赖（AC-1）。
+ * 层归属：Engine。零 infra 依赖（反向边由包级值依赖环检查拦截）。
  */
-import type { SubagentStream } from "../../execution/assembly/stream-sink.ts";
+import type { AgentStreamSink } from "../../shared/agent-stream.ts";
 import type { AgentEvent } from "../../shared/agent-event.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 import type { RunSpec } from "./run-spec.ts";
@@ -29,25 +29,30 @@ import type { WorkflowRun } from "./workflow-run.ts";
  * 刷新源），生产 pump 侧恒 undefined。
  *
  * D-005: onEvent 签名从 raw Record<string,unknown> 升级为 AgentEvent——委托后不再有
- * raw JSONL 中间层（executeAndAwait 直接出 AgentEvent，session-runner handleSdkEvent 出口）。
+ * raw JSONL 中间层（executeAndAwait 直接出 AgentEvent）。
  */
 export interface AgentRunner {
-  run(opts: AgentCallOpts, signal: AbortSignal, onEvent?: (event: AgentEvent) => void, stream?: SubagentStream): Promise<AgentResult>;
+  run(opts: AgentCallOpts, signal: AbortSignal, onEvent?: (event: AgentEvent) => void, stream?: AgentStreamSink): Promise<AgentResult>;
 }
 
 // ── Port 2: RunStore ──────────────────────────────────────────
 
 /**
- * WorkflowRun 持久化 port。Infra 实现：JsonlRunStore。
+ * WorkflowRun 持久化 port（写侧语义）。生产唯一实现 = pi 壳 JsonlRunStore
+ * （session 锚定；core 侧通用文件写实现已随写身份退役删除）。
  *
- * save 在每次状态变更后持久化整个 WorkflowRun（聚合根）；
- * loadAll 在 session_start 时重水合（D-5：JSONL 不向后兼容旧 session，旧格式返回空）。
- * stateFilePath 返回 run 状态文件的绝对路径（供 overlay/GUI 暴露给用户）。
+ * save = 显式 no-op（state 快照已删，唯一事实源 = record 事件流，ADR-0082 D1；
+ * 接口保留为 port 契约）；loadAll 在 session_start 折叠 record 流重建 run 聚合。
+ * stateFilePath 返回 run record 流文件的绝对路径（供 overlay/GUI 暴露给用户）。
+ *
+ * 读侧职责不经本 port：终局证据判定核与保留期维护位于
+ * execution/persistence/run-state-evidence.ts（journal/manifest 事实源直读，
+ * 对账 sweep 与启动扫描枚举共用同一份判据）。
  */
 export interface RunStore {
   save(run: WorkflowRun): Promise<void>;
   loadAll(): Promise<WorkflowRun[]>;
-  /** 返回 run 状态快照文件的绝对路径：<sessionDir>/workflow-state/<runId>.jsonl */
+  /** 返回 run record 流文件的绝对路径：<sessionDir>/workflow-state/<runId>.record.jsonl（供 overlay/GUI 暴露） */
   stateFilePath(runId: string): string;
 }
 
@@ -74,7 +79,8 @@ export interface WorkerHost {
  * 构造并注入。2 个 engine 文件（lifecycle / worker-message-pump）共用此签名，
  * 避免各自定义形状不一致的 handler bag（打破循环依赖）。
  *
- * 所有回调返回 Promise——允许 engine 层在回调内做 await persistState 等异步操作。
+ * 所有回调返回 Promise——允许 engine 层在回调内做 await 终局编排等异步操作
+ *（record 事件流落账；store.save 现为 no-op 契约保留，见 Port 2）。
  */
 export interface WorkerHandlers {
  /** Worker → Main 的业务消息（agent-call / return / error / log）。 */
@@ -100,9 +106,10 @@ export interface WorkerHandlers {
  * - runs: 内存中的活动 run 聚合根索引（runId → WorkflowRun），替代旧 6 张并行 map
  * - onRunDone?: run 到达 done 终态时的回调（C-4 修复，可选）。由 Interface 层
  * factory 注入（notifyDone —— 唤醒 parent agent 消费结果）。Engine 层不依赖
- * Pi SDK，通过 callback 把完成信号外推到 Interface 层。所有 transition("done", ...)
- * 路径（handleReturn / handleWorkerError / handleScriptError / abortRun /
- * dispatchAgentCall budget 终止）调完 transition + save 后触发本回调。
+ * Pi SDK，通过 callback 把完成信号外推到 Interface 层。所有终局路径
+ * （handleReturn / handleWorkerError / handleScriptError / abortRun /
+ * dispatchAgentCall budget 终止）在终局编排后触发本回调（record 事件流落账；
+ * store.save 为 no-op 契约保留，不承担持久化）。
  */
 export interface LifecycleDeps {
   store: RunStore;
@@ -117,7 +124,7 @@ export interface LifecycleDeps {
  * runWorkflow 启动时 emit pending:register，经本端口（Engine 不直接依赖 Pi SDK）。
  * 可选——无 pending-notifications 扩展时 no-op（向后兼容）。
  *
- * [reload-closeout D4] transition("done") 路径的 pending:unregister 持久化不再走
+ * [reload-closeout D4] 终局路径的 pending:unregister 持久化不走
  * 本端口（emit→内存 listener 是易失跳：reload 转换窗/多 extension factory 顺序窗
  * 内丢失即注销 entry 永缺位）——finalizeRun 改经下方 appendEntry 直落权威面。
  */
@@ -155,20 +162,6 @@ export interface LifecycleDeps {
     budgetTimeMs: number,
   ) => ReturnType<typeof setTimeout> | undefined;
  /**
- * workflow() 嵌套调用回调（可选）。Worker 脚本内调 workflow(name, args) 时触发。
- *
- * 由 Interface 层 makeDeps 注入（闭包捕获 registry + deps）。Engine 层的
- * worker-message-pump.handleWorkerMessage 收到 workflow-call 消息后调本回调，
- * 拿到子 workflow 执行结果后 postMessage(workflow-result) 回 worker。
- *
- * 不注入时 workflow() 返回 error result（向后兼容，不影响非嵌套场景）。
- */
-  onWorkflowCall?: (
-    name: string,
-    args: Record<string, unknown>,
-    parentRun: WorkflowRun,
-  ) => Promise<unknown>;
- /**
   * [H2 W3] workflow 域 agent() 统一派发入口（SubagentService.executeWorkflowAgent 的
   * deps 注入形态，设计 §3.5 终态数据流）。窄函数类型——不引 execution 层具体类，
   * 保持本 ports 文件零 infra/execution 依赖。由组合根（extension index.ts makeDeps）
@@ -178,10 +171,16 @@ export interface LifecycleDeps {
   * SAR 已掏空为纯转调 executeWorkflowAgent，两分支执行体归一非双轨，差异仅 parentRunId
   * 来源：注入 = 真实 run.runId，回退 = SAR_UNATTACHED_PARENT_RUN_ID 占位；生产装配
   * 两字段同时注入，dispatch 恒优先）。
+  *
+  * [W0 / D1] stepIndex（可选尾参）：origin="workflow" 时在 run 内的步骤索引，
+  * pump dispatch 处以 msg.callId 单源传入（taskIndex 同源），随 originFields 进
+  * record——run 视图按 (parentRunId, stepIndex) 关联 record 的关联键之一。显式
+  * 参数而非 opts 成员：opts 是 worker 脚本的 API 面，内部键不污染脚本契约。
   */
   workflowAgentDispatch?: (
     opts: AgentCallOpts,
     parentRunId: string,
     signal?: AbortSignal,
+    stepIndex?: number,
   ) => Promise<AgentResult>;
 }

@@ -5,12 +5,16 @@
   },
   "include": [
     "src/__tests__/api/rpc-type-pairing.test.ts",
-    "src/__tests__/helpers/quota-state-stub.ts",
+    "src/__tests__/composables/use-quota-configure.test.ts",
     "src/__tests__/api/events-safe-forEach.test.ts",
     "src/__tests__/useSidebar-get-commands.test.ts",
     "src/__tests__/settings/settings-modal-smoke.test.ts",
     "src/__tests__/settings/settings-modal-skill-dirs.test.ts",
     "src/components/settings/extension/__tests__/PluginContributionsPage.test.ts",
+    "src/__tests__/panel/composer-metrics-aggregate.test.ts",
+    "src/__tests__/panel/context-usage-display.test.ts",
+    "src/__tests__/panel/context-capacity-quota.test.ts",
+    "src/__tests__/panel/gen-stats-triggers.test.ts",
     "src/**/*.d.ts",
     "../../apps/electron/preload/index.d.ts"
   ],

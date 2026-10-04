@@ -1,11 +1,12 @@
-// workflow-run-summary.test.ts —— runSummary 投影 + isScriptRunning 判定测试（U7/B5/D8）。
+// workflow-run-summary.test.ts —— runSummary 投影测试（U7/B5/D8）。
 //
 // 覆盖（验收条款③）：
 // - runSummary：字段投影全断言（running / done 两形态；slug/error/completedAt 缺省透传）
-// - isScriptRunning：真（同名 running）/ 假（同名 done、异名 running、空 Map）两分支
 import { describe, expect, it } from "vitest";
 
-import { isScriptRunning, runSummary } from "../workflow-run-summary.ts";
+import { runSummary } from "../workflow-run-summary.ts";
+import { doneReasonToRunOutcome } from "../run-events.ts";
+import { noteRebuiltSettlement } from "../terminal-actions.ts";
 import { Budget } from "../models/budget.ts";
 import type { RunSpec } from "../models/run-spec.ts";
 import { Trace } from "../models/trace.ts";
@@ -13,7 +14,7 @@ import { WorkflowRun } from "../models/workflow-run.ts";
 
 function makeSpec(scriptName: string, slug?: string): RunSpec {
   return {
-    scriptSource: "execute() {}",
+    scriptSource: "async function execute() {}",
     args: {},
     scriptName,
     ...(slug !== undefined ? { slug } : {}),
@@ -24,6 +25,7 @@ function makeSpec(scriptName: string, slug?: string): RunSpec {
 function makeRun(
   runId: string,
   opts: {
+    /** fixture 建模选择器：done = 重水合终局 run（同步注入注册表条目 + reason）。 */
     status?: "running" | "done";
     scriptName?: string;
     slug?: string;
@@ -31,14 +33,14 @@ function makeRun(
     error?: string;
     startedAt?: string;
     completedAt?: string;
+    interruptedAt?: string;
   } = {},
 ): WorkflowRun {
   const status = opts.status ?? "running";
-  return WorkflowRun.reconstruct(
+  const run = WorkflowRun.reconstruct(
     runId,
     makeSpec(opts.scriptName ?? "deploy-site", opts.slug),
     {
-      status,
       ...(status === "done" ? { reason: opts.reason ?? "completed" } : {}),
       budget: new Budget({ maxTokens: 1000 }),
       calls: new Map(),
@@ -49,8 +51,19 @@ function makeRun(
     {
       startedAt: opts.startedAt ?? "2026-08-30T00:00:00.000Z",
       ...(opts.completedAt !== undefined ? { completedAt: opts.completedAt } : {}),
+      ...(opts.interruptedAt !== undefined ? { interruptedAt: opts.interruptedAt } : {}),
     },
   );
+  // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态 fixture 建模「重水合
+  // done run」时必须携带注册表条目（生产 = 壳重建点 noteRebuiltSettlement 注入），
+  // settledAt = 快照 completedAt（重水合 run 的条目 = run-settled 帧时序）。
+  if (status === "done") {
+    noteRebuiltSettlement(runId, {
+      outcome: doneReasonToRunOutcome(opts.reason ?? "completed"),
+      settledAt: opts.completedAt !== undefined ? Date.parse(opts.completedAt) : 0,
+    });
+  }
+  return run;
 }
 
 describe("runSummary — 字段投影（字段以 core WorkflowRun 为准）", () => {
@@ -89,31 +102,18 @@ describe("runSummary — 字段投影（字段以 core WorkflowRun 为准）", (
       error: "agent timeout",
     });
   });
-});
 
-describe("isScriptRunning — 真假两分支", () => {
-  it("真：同名 script 仍在 running", () => {
-    const runs = new Map<string, WorkflowRun>([
-      ["wf-1", makeRun("wf-1", { status: "done", scriptName: "other-wf" })],
-      ["wf-2", makeRun("wf-2", { status: "running", scriptName: "deploy-site" })],
-    ]);
+  it("interrupted run（meta.interruptedAt 置位）：status 投影 'interrupted'——中断态经 meta 在投影面表达", () => {
+    // [U10 回归] 重水合中断 run（loadAll fold / 收编链写 meta.interruptedAt）在
+    // CLI/TUI 展示投影三态：不再显示僵尸「运行中」（与 shared WorkflowRunStatus
+    // 三态、场景 25 中断显示语义同词）。resume 资格判据在 core fold lifecycle，
+    // 不受本投影影响。
+    const run = makeRun("wf-i1", { status: "running", interruptedAt: "2026-08-30T05:00:00.000Z" });
 
-    expect(isScriptRunning(runs, "deploy-site")).toBe(true);
-  });
-
-  it("假：同名但已 done（running 状态白名单）", () => {
-    const runs = new Map<string, WorkflowRun>([
-      ["wf-1", makeRun("wf-1", { status: "done", scriptName: "deploy-site" })],
-    ]);
-
-    expect(isScriptRunning(runs, "deploy-site")).toBe(false);
-  });
-
-  it("假：异名 running / 空 Map", () => {
-    const runs = new Map<string, WorkflowRun>([
-      ["wf-1", makeRun("wf-1", { status: "running", scriptName: "other-wf" })],
-    ]);
-    expect(isScriptRunning(runs, "deploy-site")).toBe(false);
-    expect(isScriptRunning(new Map(), "deploy-site")).toBe(false);
+    expect(runSummary(run).status).toBe("interrupted");
+    // 终局优先于中断标记（settled/done → done——中断标记不遮蔽终局）
+    const settledRun = makeRun("wf-i2", { status: "done", reason: "failed", interruptedAt: "2026-08-30T05:00:00.000Z" });
+    expect(runSummary(settledRun).status).toBe("done");
   });
 });
+

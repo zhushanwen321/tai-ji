@@ -5,7 +5,7 @@
  *
  * 职责链（检查流 §4.2①-⑥，fetch+normalize 收敛在源适配层 release-sources.ts，
  * checker 消费其 fetchSourceRelease 完整产物出口）：
- *   1. 缓存命中检查（1h，force 可绕过；正/负缓存同 TTL）
+ *   1. 缓存命中检查（15min，force 可绕过；正/负缓存同 TTL）
  *   2. 源顺序解析：构造注入的 resolveSourceOrder(settings.updateSource)（D4；
  *      测试可替换，未注入时回退真实实现）
  *   3. 按 SourceOrder 逐源执行完整判定（fetch + 三重防御 + 版本比较，循环内 per-source 生效）：
@@ -116,8 +116,10 @@ export class ReleaseRateLimitedError extends Error {
   }
 }
 
-/** 缓存有效期（1h） */
-const CACHE_TTL_MS = SECONDS_PER_MINUTE * MINUTES_PER_HOUR * MS_PER_SECOND
+/** 缓存有效期分钟数（2026-10-01 用户裁决：自动检查周期收紧到 15min，缓存 TTL 同步收紧——
+ *  更长 TTL 会让 renderer 侧 15min 周期检查命中缓存、真实联网频率仍停留在旧周期）。 */
+const CACHE_TTL_MINUTES = 15
+const CACHE_TTL_MS = CACHE_TTL_MINUTES * SECONDS_PER_MINUTE * MS_PER_SECOND
 
 /**
  * 严格版本号校验（strip 前导 v 后）——拒绝 rc/beta 等后缀。

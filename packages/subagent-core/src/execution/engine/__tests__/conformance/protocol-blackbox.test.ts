@@ -164,7 +164,8 @@ describe("协议黑盒：9 正向方法 × fake 引擎回放", () => {
       )) as { entries: unknown[] };
       expect(Array.isArray(view.entries)).toBe(true);
 
-      await h.client.ping(); // 诊断面：不 throw 即通
+      // ping 协议方法往返（诊断面：不 throw 即通——客户端便捷方法已删，走裸 request）
+      await h.client.request("ping", {}, { timeoutMs: 5_000 });
     } finally {
       await h.client.dispose();
     }
@@ -304,15 +305,15 @@ describe("协议黑盒：fixture 回放结构等价（基线三层①）", () =>
       assertAgentEventInvariants(h.events, { granularity: "stream", content: result.outcome.content });
 
       // ⑤ journal 往返保真（回放层事件落 journal 后重读等价）
-      const journalPath = join(dataDir, "blackbox-journal.jsonl");
+      const eventsPath = join(dataDir, "blackbox-journal.jsonl");
       const writer = new JournalWriter({
-        path: journalPath,
+        path: eventsPath,
         taskId: "w10-blackbox",
         engineId: fixture.engineId,
       });
       for (const event of h.events) writer.append(event);
       await writer.close();
-      const replayed = replayJournal(journalPath) as AgentEvent[];
+      const replayed = replayJournal(eventsPath) as AgentEvent[];
       expect(replayed.map((e) => e.type)).toEqual(h.events.map((e) => e.type));
       expect(JSON.stringify(replayed)).toBe(JSON.stringify(h.events));
     } finally {

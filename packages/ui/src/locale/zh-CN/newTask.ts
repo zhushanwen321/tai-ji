@@ -78,9 +78,19 @@ export default {
     retryHistory: '重试加载历史',
     gitRepo: 'Git 仓库',
   },
+  // [perf-landing 跳转先行] 首发提交 → session 创建中的过渡视图（点击同帧离开 landing 内容态）
+  creating: {
+    hint: '正在创建新任务…',
+    cancellingHint: '正在取消…',
+  },
+  // [E/F12] 创建中切走后消息后台投递进新 session 的可发现性通知
+  backgroundDelivered: '消息已发送到新任务',
+  // [E] 取消收尾删除失败的可见反馈（C-proc-21）：残留 session 会留在侧栏，须告知用户手动删除
+  abandonCleanupFailed: '取消清理失败：新任务未能删除，可在侧栏手动删除',
   presetSelect: {
     title: '选择启动模式',
     setAsDefault: '设为默认',
+    setDefaultFailed: '设为默认失败：{message}，请稍后重试',
     alreadyDefault: '已是默认',
     presetLockedTooltip: '此会话以「{name}」创建，不可更改',
     legacySessionTooltip: '（历史会话，未记录模式）',

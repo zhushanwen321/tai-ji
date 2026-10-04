@@ -5,6 +5,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
+import { filterActivePath } from "@zhushanwen/pi-session-path";
 
 import {
 	migrateTodo,
@@ -50,8 +51,13 @@ export function buildBeforeAgentStartMessage(state: TodoSessionState): { message
 
 // ── 状态重建 ────────────────────────────────────────
 
+// 活跃路径裁剪（leafId 沿 parentId 回溯，撤回后被撤子树的 todo 快照不进重建输入）
+// 收敛于 @zhushanwen/pi-session-path 单一实现（四包同构副本收编，防御语义与回退
+// 口径见该包 filterActivePath 注释；runtime 侧 entry-tree-builder 保持独立——
+// extension 不能 import runtime 包）。
+
 /**
- * 回放最后一条 todo toolResult 重建 state（纯读，不修改 entries）。
+ * 回放活跃路径内最后一条 todo toolResult 重建 state（纯读，不修改 entries）。
  *
  * H1（C2 决策）：pi 的 SessionManager.getEntries() 返回的是 filter-copy，原先的
  * splice GC 段对副本操作无效，且修改传入 entries 是反模式。删除整段 splice，只保留
@@ -65,7 +71,7 @@ export function reconstructState(state: TodoSessionState, ctx: ExtensionContext)
 	state.completionSteered = false;
 	state.pendingSteerMessage = null;
 
-	const entries = ctx.sessionManager.getEntries();
+	const entries = filterActivePath(ctx.sessionManager);
 
 	for (let i = 0; i < entries.length; i++) {
 		const entry = entries[i];

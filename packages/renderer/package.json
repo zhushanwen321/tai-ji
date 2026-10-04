@@ -41,6 +41,8 @@
     "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-vue": "^6",
     "@vitest/coverage-v8": "^4.1.9",
+    "@vue/compiler-dom": "^3.5.39",
+    "@vue/compiler-sfc": "^3.5.39",
     "@vue/test-utils": "^2.4.10",
     "autoprefixer": "^10",
     "happy-dom": "^20.9.0",

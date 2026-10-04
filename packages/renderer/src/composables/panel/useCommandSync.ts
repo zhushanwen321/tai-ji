@@ -8,14 +8,14 @@
  *
  * 触发点（D1）：
  * 1. watch(sessionIdRef, immediate) —— sid 变化 / 挂载即拉（null/undefined 不拉）
- * 2. onOpenPull() —— 浮层打开时调用（CommandPopover watch open && type==='slash'）。
- *    注意：浮层 open 边沿拉取实际统一由 command-popover-open-fetch 承接（带 1s 节流），
- *    不经本处——双路并存会重复 RPC（dev-0.9.9 补拉闭环 × dev-0.9.8 符号系统 open-fetch
- *    合并产物）
- * 3. 推路：订阅 session.commands（D8 走 session 通道）→ 写 commandStore（跨组件重建
+ * 2. 推路：订阅 session.commands（D8 走 session 通道）→ 写 commandStore（跨组件重建
  *    持久化；u20 自 command-popover-delivery 并回——同「命令投递」域）。FM4 修复
  *    （ADR-0049）：使用 useSessionEvents 注入的第二参数 sid（订阅时捕获，不随调用方
  *    ref 实时值变化），消除切 sid 时序竞态导致的跨分区污染。
+ *
+ * 浮层 open 边沿拉取由 command-popover-open-fetch 承接（带 1s 节流），不经本处——
+ * 双路并存会重复 RPC（dev-0.9.9 补拉闭环 × dev-0.9.8 符号系统 open-fetch 合并产物）；
+ * 原/onOpenPull 出口随批次 3 C1 删除（零组件调用方的死出口）。
  *
  * 数据模式（D5）：打开即拉（权威透传 pi）+ SWR 旧值先行。拉取应答 ms 级回写覆盖。
  *
@@ -54,15 +54,12 @@ export function __clearInFlightCommandsFetchForTest(): void {
 }
 
 /**
- * slash 命令补拉 composable。
+ * slash 命令补拉 composable（副作用型：拉取/订阅均在 setup 内自挂，无返回出口）。
  *
  * @param sessionIdRef sessionId 的 ref（string | null | undefined）。
  *   变化时自动拉取（null/undefined 不拉）。ref 可来自 props（组件 setup 内 toRef(props,'sessionId')）。
- * @returns onOpenPull —— 浮层打开时调用，触发一次拉取（fire-and-forget）。
  */
-export function useCommandSync(
-  sessionIdRef: Ref<string | null | undefined>,
-): { onOpenPull: () => void } {
+export function useCommandSync(sessionIdRef: Ref<string | null | undefined>): void {
   const commandStore = useCommandStore()
 
   /**
@@ -108,18 +105,10 @@ export function useCommandSync(
     { immediate: true },
   )
 
-  // D1 触发点 3：推路订阅——session.commands 广播写 store（第二参数 sid 是订阅时捕获的
+  // D1 触发点 2：推路订阅——session.commands 广播写 store（第二参数 sid 是订阅时捕获的
   // 消息所属分区，写它而非当前 ref 值，FM4/ADR-0049 跨分区污染防护）
   const onMessage = useSessionEvents(sessionIdRef)
   onMessage('session.commands', (msg, sid) => {
     commandStore.applyCommands(sid, msg.payload.commands as RawCommand[])
   })
-
-  // D1 触发点 2：浮层打开时调用（CommandPopover watch open && type==='slash'）
-  function onOpenPull(): void {
-    const sid = sessionIdRef.value
-    if (sid) pull(sid)
-  }
-
-  return { onOpenPull }
 }

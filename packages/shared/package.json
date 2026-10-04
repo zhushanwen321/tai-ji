@@ -28,9 +28,11 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@zhushanwen/extension-protocol": "workspace:*"
+  },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.9",
-    "@zhushanwen/extension-protocol": "workspace:*",
     "tailwindcss": "^3.4",
     "typescript": "^5.8"
   }

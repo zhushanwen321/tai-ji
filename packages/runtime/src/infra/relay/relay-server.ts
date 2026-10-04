@@ -28,6 +28,8 @@ export interface RelayServerOptions {
   publish: (sessionId: string, msg: ServerMessage) => void
   /** spawn 命令覆盖（测试注入假 pi）。 */
   piCommand?: string
+  /** 孤儿收割杀链宽限（测试注入小值；缺省 RELAY_KILL_GRACE_MS），透传 registry。 */
+  orphanKillGraceMs?: number
 }
 
 interface RelayServerState {
@@ -112,6 +114,7 @@ export async function initRelayServer(opts: RelayServerOptions): Promise<void> {
     dataDir,
     publish: opts.publish,
     piCommand: opts.piCommand,
+    orphanKillGraceMs: opts.orphanKillGraceMs,
   })
 
   const server = net.createServer((conn) => {

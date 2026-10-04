@@ -937,10 +937,11 @@ describe("index assembly fork (D1)", () => {
     const pi = createMockPi();
     await loadExtension(pi, SCHEMA);
 
-    // setupWorkflowHook 注册 tool_execution_end + turn_end 两个 handler
+    // setupWorkflowHook 注册 tool_execution_end / turn_end 各一个 handler（D2 单 listener 契约）——
+    // 锁「恰好一个」：回退双 listener 重复记账（D2 要消灭的 terminal 失步结构条件）时此处红灯
     const registeredEvents = pi.on.mock.calls.map((c) => c[0]);
-    expect(registeredEvents).toContain("tool_execution_end");
-    expect(registeredEvents).toContain("turn_end");
+    expect(registeredEvents.filter((e) => e === "tool_execution_end")).toHaveLength(1);
+    expect(registeredEvents.filter((e) => e === "turn_end")).toHaveLength(1);
   });
 
   it("env 无值 → registerTool 收到日常双参数形态，不注册 hook", async () => {

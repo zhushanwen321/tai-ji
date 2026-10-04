@@ -18,7 +18,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 import { parsePlanArgs, registerPlanCommand } from "../command.js";
 import { resolveSkills } from "../enter.js";
-import { PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
+import { createPlanCtx, PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
 
@@ -132,13 +132,22 @@ describe("resolveSkills（E1 技能枚举比对，双向剥 skill: 前缀归一�
       expect(resolution.missing).toEqual(["tech-desig"]);
     }
   });
+
+  it("empty request = 同族 fail-fast：ok:false + 全量 available + 空 missing（空 --skills 报错材料复用本函数产出）", () => {
+    const resolution = resolveSkills(pi, []);
+    expect(resolution.ok).toBe(false);
+    if (!resolution.ok) {
+      // missing 空 → 报错器走「no skill names followed it」文案分支；available 同源枚举
+      expect(resolution.missing).toEqual([]);
+      expect(resolution.available).toEqual(["skill:tech-design", "skill:dev-flow", "skill:code review"]);
+    }
+  });
 });
 
 describe("E1 fail-fast via /plan handler", () => {
   let pi: ExtensionAPI;
   let ctx: ExtensionContext;
   let handler: (args: string, ctx: ExtensionContext) => Promise<void>;
-  let controllers: Map<string, AbortController>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -157,6 +166,7 @@ describe("E1 fail-fast via /plan handler", () => {
       cwd: "/tmp/test-project",
       sessionManager: {
         getSessionId: () => "test-session",
+        getLeafId: () => null,
         getEntries: () => [] as unknown[],
       },
       ui: {
@@ -166,8 +176,7 @@ describe("E1 fail-fast via /plan handler", () => {
         theme: { fg: (_t: string, text: string) => text },
       },
     } as unknown as ExtensionContext;
-    controllers = new Map();
-    registerPlanCommand(pi, new Map(), controllers);
+    registerPlanCommand(pi, createPlanCtx());
     handler = capturedHandler!;
   });
 
@@ -221,7 +230,7 @@ describe("E1 fail-fast via /plan handler", () => {
   it("valid skills: enters plan mode, persists skills and injects skill paths in the prompt", async () => {
     await handler("重构 auth --skills tech-design,code review", ctx);
 
-    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan", "ask_user"]);
     // slug 只保留 [a-z0-9]：「重构 auth」→ "auth"
     expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/test-project/.tmp/plans/auth", { recursive: true });
     expect(pi.appendEntry).toHaveBeenCalledWith(

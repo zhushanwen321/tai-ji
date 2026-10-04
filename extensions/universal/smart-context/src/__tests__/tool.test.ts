@@ -9,7 +9,7 @@ vi.mock("../pure.js", async (importOriginal) => {
 	};
 });
 
-import { DEFAULT_SMART_CONTEXT_CONFIG, COMPACT_RESULT_CUSTOM_TYPE, loadSmartContextConfig } from "../pure.js";
+import { DEFAULT_SMART_CONTEXT_CONFIG, loadSmartContextConfig } from "../pure.js";
 import { registerCompactContextTool } from "../tool.js";
 import { countCompactions } from "../pure.js";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -26,12 +26,13 @@ type CompactOpts = {
 	onError: (e: Error) => void;
 };
 
-function makePi(): { pi: ExtensionAPI & { sendMessage: ReturnType<typeof vi.fn> }; tools: RegisteredTool[] } {
+function makePi(): { pi: ExtensionAPI & { sendMessage: ReturnType<typeof vi.fn>; sendUserMessage: ReturnType<typeof vi.fn> }; tools: RegisteredTool[] } {
 	const tools: RegisteredTool[] = [];
 	const pi = {
 		registerTool: (t: RegisteredTool) => tools.push(t),
 		sendMessage: vi.fn(),
-	} as unknown as ExtensionAPI & { sendMessage: ReturnType<typeof vi.fn> };
+		sendUserMessage: vi.fn(),
+	} as unknown as ExtensionAPI & { sendMessage: ReturnType<typeof vi.fn>; sendUserMessage: ReturnType<typeof vi.fn> };
 	return { pi, tools };
 }
 
@@ -94,20 +95,24 @@ describe("compact_context 工具（R2 降级态：fire-and-forget + 结果注入
 		expect(result.details).toMatchObject({ mode: "same-model", launched: true, fellBack: false, compactionCount: 1 });
 	});
 
-	it("onComplete 兑现后 sendMessage custom message 注入结果（customType/display/triggerTurn 三要素；模式/前后 tokens/成本；降智提示按次数）", async () => {
+	it("onComplete 兑现后 nextTurn 注入结果（含模式/前后 tokens/成本；降智提示按次数）", async () => {
 		const { pi, tools } = makePi();
 		registerCompactContextTool(pi, { getEntries: () => [{ type: "compaction" }, { type: "compaction" }] });
 		await tools[0].execute("t1", {}, undefined, undefined, makeCtx());
 		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
-		const [message, options] = pi.sendMessage.mock.calls[0]!;
-		expect(message).toMatchObject({ customType: COMPACT_RESULT_CUSTOM_TYPE, display: true });
-		expect(String(message.content)).toContain("压缩完成");
-		expect(String(message.content)).toContain("same-model");
-		expect(String(message.content)).toContain("500K");
-		expect(String(message.content)).toContain("24K");
-		expect(String(message.content)).toContain("compacted multiple times");
-		// A6 投递时机：triggerTurn:true 唤醒轮次消费压缩结果（streaming 时 pi 缺省走 steer 队列）
-		expect(options).toEqual({ triggerTurn: true });
+		const [message, options] = pi.sendMessage.mock.calls[0];
+		// D4①：nextTurn 化——custom role 消息 + 不自起 run 的投递车道
+		expect(message.customType).toBe("smart-context");
+		expect(message.details).toEqual({ source: "compact-complete" });
+		expect(options).toEqual({ triggerTurn: false, deliverAs: "nextTurn" });
+		const text = message.content as string;
+		expect(text).toContain("压缩完成");
+		expect(text).toContain("same-model");
+		expect(text).toContain("500K");
+		expect(text).toContain("24K");
+		expect(text).toContain("compacted multiple times");
+		// 旧车道（自起 run 的 user 消息）已退役：不再调用 sendUserMessage（mock 挂 spy，被调用即断言红）
+		expect(pi.sendUserMessage).not.toHaveBeenCalled();
 	});
 
 	it("onComplete 无 engine 标记 → 注入消息含回退说明与修复指引（D7）", async () => {
@@ -116,20 +121,19 @@ describe("compact_context 工具（R2 降级态：fire-and-forget + 结果注入
 		const ctx = makeCtx((options) => options.onComplete({ tokensBefore: 1, estimatedTokensAfter: 1 }));
 		await tools[0].execute("t1", {}, undefined, undefined, ctx);
 		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
-		expect(String(pi.sendMessage.mock.calls[0]![0].content)).toContain("回退");
+		expect(pi.sendMessage.mock.calls[0][0].content).toContain("回退");
 	});
 
-	it("onError → 注入失败消息带重试指引（display:true 失败必须用户可见 + triggerTurn:true）", async () => {
+	it("onError → 注入失败消息带重试指引（display:true 失败必须用户可见 + nextTurn 车道不自起 run）", async () => {
 		const { pi, tools } = makePi();
 		registerCompactContextTool(pi);
 		const ctx = makeCtx((options) => options.onError(new Error("Nothing to compact")));
 		await tools[0].execute("t1", {}, undefined, undefined, ctx);
-		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
-		const [message, options] = pi.sendMessage.mock.calls[0]!;
-		expect(message).toMatchObject({ customType: COMPACT_RESULT_CUSTOM_TYPE, display: true });
-		expect(String(message.content)).toContain("压缩失败");
-		expect(String(message.content)).toContain("Nothing to compact");
-		expect(options).toEqual({ triggerTurn: true });
+		const [message, options] = pi.sendMessage.mock.calls[0];
+		expect(message.content).toContain("压缩失败");
+		expect(message.content).toContain("Nothing to compact");
+		expect(message.details).toEqual({ source: "compact-failed" });
+		expect(options).toEqual({ triggerTurn: false, deliverAs: "nextTurn" });
 	});
 
 	it("custom_instructions 透传给 ctx.compact", async () => {

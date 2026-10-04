@@ -80,15 +80,16 @@ describe("U5-A3 tool-schema", () => {
 	});
 
 	describe("list_my_sessions", () => {
-		it("has no required parameters", () => {
-			const s = schemas.list_my_sessions;
-			expect(s.type).toBe("object");
-			const required = s.required as string[] | undefined;
-			// No required fields (empty object or no required array)
-			if (required) {
-				expect(required).toHaveLength(0);
-			}
-		});
+	it("has no required parameters", () => {
+		const s = schemas.list_my_sessions;
+		expect(s.type).toBe("object");
+		// TypeBox 对空 Object 省略 required 键（探针核实：Type.Object({}) →
+		// { type:"object", properties:{} }，无 required 字段）——「无必填参数」语义 =
+		// required 缺省或空数组，二者都必须被断言覆盖（原 if 条件断言在缺省形态下
+		// 零断言执行，永不失败）
+		const required = s.required as string[] | undefined;
+		expect(required ?? []).toHaveLength(0);
+	});
 	});
 
 	describe("get_session_status", () => {

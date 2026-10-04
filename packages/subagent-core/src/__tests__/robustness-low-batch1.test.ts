@@ -13,25 +13,31 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { handleScriptError, handleWorkerMessage } from "../orchestration/worker-message-pump.ts";
+import {
+  handleScriptError,
+  handleWorkerMessage,
+} from "../orchestration/worker-message-pump.ts";
+import {
+  dispatchRunCreated,
+  isRunSettled,
+  settledRecordOf,
+} from "../orchestration/terminal-actions.ts";
 import type { LifecycleDeps, WorkerHandlers } from "../orchestration/models/ports.ts";
-import type { DoneReason, RunStatus } from "../orchestration/models/types.ts";
 import type { WorkflowRun } from "../orchestration/models/workflow-run.ts";
 
 // ── helpers ──────────────────────────────────────────────────
 
 /**
- * 构造一个 status="running" 的 mock WorkflowRun。
+ * 构造一个活体（未终局）mock WorkflowRun。
  *
  * 关键：errorLogs 必须是真实数组（push/slice 会操作它），不能用 vi.fn 占位。
- * transition 把 status 切到 done——调用方可通过 resetRunning() 重置回 running
- * 以便多次触发 handleReturn（每条 return 消息都会 transition done）。
  */
-function makeRunningRun(): WorkflowRun & { resetRunning(): void } {
+let runSeqL9 = 0;
+function makeRunningRun(): WorkflowRun {
   const run = {
-    runId: "run-test",
+    // [W2/V1] 模块级活体态/终局注册表按 runId 键控——唯一化防跨测试污染
+    runId: `run-test-${++runSeqL9}`,
     state: {
-      status: "running" as const,
       reason: undefined as string | undefined,
       budget: { usedTokens: 0, usedCost: 0 },
       // 真实数组——push/slice 直接作用于它
@@ -47,25 +53,17 @@ function makeRunningRun(): WorkflowRun & { resetRunning(): void } {
     },
     spec: {
       scriptName: "test-wf",
-      scriptSource: "execute() {}",
+      scriptSource: "async function execute() {}",
       args: {},
     },
     runtime: {
       worker: { postMessage: vi.fn() },
     },
-    transition(this: WorkflowRun, target: RunStatus, reason?: DoneReason): void {
-      this.state.status = target;
-      if (target === "done") this.state.reason = reason;
-    },
     replaceRuntime(this: WorkflowRun, rt: NonNullable<WorkflowRun["runtime"]>): void {
       this.runtime = rt;
     },
-    // 多次触发 handleReturn 时把状态从 done 重置回 running
-    resetRunning(this: WorkflowRun): void {
-      this.state.status = "running";
-      this.state.reason = undefined;
-    },
-  } as unknown as WorkflowRun & { resetRunning(): void };
+    releaseRuntime: vi.fn(),
+  } as unknown as WorkflowRun;
   return run;
 }
 
@@ -177,6 +175,7 @@ describe("L9: handleReturn 追加 errorLogs（非覆盖）", () => {
   it("已有 2 条 errorLogs 后 handleReturn 再追加 1 条 → 长度 3", async () => {
     const run = makeRunningRun();
     const deps = makeDeps();
+    await dispatchRunCreated(run); // [W2/V1] 六态机引导（run-created 首帧——终局裁决前置）
 
     // 先用 scriptError 累积 2 条诊断日志
     const p1 = handleScriptError(
@@ -201,8 +200,7 @@ describe("L9: handleReturn 追加 errorLogs（非覆盖）", () => {
 
     expect(run.state.errorLogs).toHaveLength(2);
 
-    // handleReturn 经 handleWorkerMessage 触发——它内部会 transition("done","completed")
-    run.resetRunning();
+    // handleReturn 经 handleWorkerMessage 触发——它内部走 finalizeRun 终局 coda
     await handleWorkerMessage(
       run,
       { type: "return", result: "final-result", workerLogs: [{ level: "log", message: "final-return-log" }] },
@@ -217,8 +215,9 @@ describe("L9: handleReturn 追加 errorLogs（非覆盖）", () => {
     });
     // scriptResult 也被正确写入（验证未破坏其他字段）
     expect(run.state.scriptResult).toBe("final-result");
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("completed");
+    // [W2/V1] 终局断言换源（两态机字段停更——终局经注册表判定）
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "done" });
   });
 });
 

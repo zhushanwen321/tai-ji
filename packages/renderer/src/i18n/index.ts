@@ -13,6 +13,9 @@ const SYSTEM_KEY = 'taiji:system-settings'
 const LEGACY_LOCALE_KEY = 'taiji-locale'
 
 function readInitialLocale(): Locale {
+  // 非浏览器环境（node）没有 localStorage：纯逻辑测试经 import 链拉入本模块时，
+  // 模块顶层的同步读取不能抛错，直接落默认 locale
+  if (typeof localStorage === 'undefined') return 'zh-CN'
   try {
     const raw = localStorage.getItem(SYSTEM_KEY)
     if (raw) {

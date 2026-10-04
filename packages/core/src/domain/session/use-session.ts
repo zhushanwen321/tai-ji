@@ -383,9 +383,10 @@ export function createUseSession(deps: UseSessionDeps) {
   }
 
   /**
-   * 新建 session（延迟 create 语义，C-W3-2）：委托 NewTaskFlowPort.startFlow 编排状态机
-   * （startFlow 本身不建 session——首次启动 AC-1.7 路径），流程产出 session 再 selectSession 载入。
-   * 返回新 session id；延迟 create 时返回 null（Panel 渲染 landing 空态）。
+   * 新建 session（延迟 create 终态，C-W3-2）：委托 NewTaskFlowPort.startFlow 编排状态机。
+   * startFlow 恒不建 session（session 由首发提交 submitFirstMessage 创建并绑定，startFlow
+   * 末尾恒 bindCurrentSession(null)），故本方法恒进 chat view 让 Panel 渲染 landing 空态，
+   * 恒返回 null。返回类型保持 string | null 对齐端口契约形状（调用方均不消费返回值）。
    *
    * per-instance in-flight 守卫（renderer 同构：6+ 组件实例各自独立守卫，模块级会互相阻塞）。
    * flow 未接线（deps.flow 缺省）时返回 null 降级——壳（w5）接线后语义完整。
@@ -397,15 +398,9 @@ export function createUseSession(deps: UseSessionDeps) {
     newTaskInFlight = true
     try {
       await deps.flow.startFlow(presetCwd)
-      const created = deps.flow.currentSession()
-      if (!created) {
-        // 首次启动延迟 create（AC-1.7）：无 session 可选，进 chat view 让 Panel 渲染 landing 空态
-        navigation.push({ view: 'chat' })
-        return null
-      }
-      // startFlow 已负责 appendSession + activeId 同步；此处只补 panel 载入 + history hydrate
-      await selectSession(created.id)
-      return created.id
+      // 延迟 create（AC-1.7）：无 session 可选，进 chat view 让 Panel 渲染 landing 空态
+      navigation.push({ view: 'chat' })
+      return null
     } finally {
       newTaskInFlight = false
     }

@@ -327,6 +327,34 @@ describe("maybeCleanupExpiredSessionFiles", () => {
     maybeCleanupExpiredSessionFiles(tmpAgentDir, "/cwd");
     expect(fs.existsSync(tmp)).toBe(true);
   });
+
+  // ---- [W1 D5] journal 事件文件族显式忽略（清理归统一保留维护轮）----
+
+  it("[W1 D5] never deletes record event journal (*.events) inside records/, even beyond TTL", () => {
+    // record 事件文件不是 session 文件——清理归统一保留维护轮（fold 终态 + 保留
+    // 窗口判据，run-state-evidence.ts 单源），GC 零触碰。超龄形态也不删（防未来通配
+    // 规则回归的显式忽略规则）。
+    forceCleanupTrigger();
+    const events = createSessionFile(
+      path.join("--Users-x-proj--", "records", "sa-x.events"),
+      31,
+    );
+    maybeCleanupExpiredSessionFiles(tmpAgentDir, "/cwd");
+    expect(fs.existsSync(events)).toBe(true);
+  });
+
+  it("[W1 D5 → D1] never deletes run record stream (*.record.jsonl) even beyond TTL", () => {
+    // run journal 以 .jsonl 结尾、若进入扫描树会命中 .jsonl 分支——显式排除
+    // （run journal 位于 workflow-state，正常不在本 GC 树内；本用例锁「即使
+    // 在树内也不触碰」的显式规则）。
+    forceCleanupTrigger();
+    const runJournal = createSessionFile(
+      path.join("--Users-x-proj--", "sessions", "wf-x.record.jsonl"),
+      31,
+    );
+    maybeCleanupExpiredSessionFiles(tmpAgentDir, "/cwd");
+    expect(fs.existsSync(runJournal)).toBe(true);
+  });
 });
 
 describe("[D8] 引擎池 TTL 兜底（maybeCleanupExpiredSessionFiles 挂载 cleanupExpiredJournals）", () => {

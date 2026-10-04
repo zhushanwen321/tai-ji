@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * PR#116 review chat store 层修复回归测试（B1 / B2 / M1 / M2）。
  *
@@ -14,14 +16,17 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+// '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的 import（useChat 链）求值
+import { apiProjectMock } from '../helpers/api-facade-mock'
 
 // ── api mock（B2 用：abortBash reject 触发 catch）──
 const apiMock = vi.hoisted(() => ({
-  bash: vi.fn(() => Promise.resolve()),
+  // bash 回执契约（dmg-r1-2）：默认 = 已执行并收口
+  bash: vi.fn(() => Promise.resolve({ status: 'settled' as const })),
   abortBash: vi.fn(() => Promise.resolve()),
   streamSubscribe: vi.fn((_sid: string, _handler: (msg: ServerMessage) => void) => () => {}),
 }))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: apiProjectMock(),
   chat: {
     bash: apiMock.bash,
     abortBash: apiMock.abortBash,

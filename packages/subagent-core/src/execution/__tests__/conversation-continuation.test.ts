@@ -44,26 +44,37 @@ import type { AgentOutcome, EngineCapabilities, EngineHandle } from "../engine/t
 import type { EnginePort, EngineRunResult, RunContext } from "../engine/port.ts";
 import { registerFakePiEngine, FakeRun, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
 import { emptyRegistry } from "./helpers/model-registry-mock.ts";
+import { getSubagentRecordsDir } from "../assembly/path-encoding.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
+
+
+/** [W1/D3] 读 record 事件文件全部事件行（journal 落点 = getSubagentRecordsDir——
+ *  观察面独立于被测 store；usage-feed 集成块消费）。 */
+function scanRecordEventsFor(agentDir: string, id: string): Array<Record<string, unknown>> {
+  const recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+  try {
+    const content = fs.readFileSync(path.join(recordsDir, `${id}.events`), "utf8");
+    return content
+      .split("\n")
+      .filter((l) => l.trim().length > 0)
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .filter((e) => e.type !== "record-events");
+  } catch {
+    return [];
+  }
+}
 import { clearEngines, registerEngine } from "../engine/registry.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import {
-  armMidRoundNoProgress,
-  getSettledWatchdogPhase,
-  hasSettledWatchdog,
-  _resetSettledWatchdogsForTest,
-  _setMidRoundNoProgressWindowMsForTest,
-} from "../lifecycle/settled-watchdog.ts";
 import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
 import {
   _resetCoreSpawnedChildrenMirrorForTest,
   registerSpawnedChildForRecord,
 } from "../engine/host/spawned-children.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
-import { SUBAGENT_RECORD_CUSTOM_TYPE, type SubagentRecordEntryData } from "../persistence/record-entry.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE, type SubagentRecordEntryV2 } from "../persistence/record-entry.ts";
 
 // [U4] 锚可解析性 fixture（模块级——makeRecord 缺省锚消费）：每个用例独立 tmp 文件。
 beforeEach(() => {
@@ -86,7 +97,6 @@ interface HostCalls {
   routed: string[];
   notified: BgNotifyRecord[];
   killStale: string[];
-  killedRound: Array<{ recordId: string; source: string }>;
   revived: string[];
   /** [U4 / §3.2.3] reopen 降级原语委托达点（host.reopenRecord → store.markReopened）。 */
   reopened: string[];
@@ -137,7 +147,6 @@ function makeHost(record: ExecutionRecord, overrides: Partial<HostCalls> = {}): 
     routed: [],
     notified: [],
     killStale: [],
-    killedRound: [],
     revived: [],
     reopened: [],
     reopenAllowed: true,
@@ -176,9 +185,6 @@ function makeHost(record: ExecutionRecord, overrides: Partial<HostCalls> = {}): 
     killStaleChild: async (id) => {
       calls.order.push(`killStale:${id}`);
       calls.killStale.push(id);
-    },
-    killRoundChild: (id, source) => {
-      calls.killedRound.push({ recordId: id, source });
     },
     engineSupportsConversation: () => calls.gateAllows,
     reviveClosedRecord: (rec) => {
@@ -636,35 +642,6 @@ describe("ConversationContinuation — 轮末分流（D7）与通知面", () => 
     expect(calls.routed.length).toBe(0);
   });
 
-  it("settle 交棒次序：onRunSettled 内 noteRoundSettledFromProtocol 先于轮终簿记（watchdog phase 观察）", async () => {
-    const record = makeRecord({});
-    const { host, calls } = makeHost(record);
-    // 模拟泛化主干 arm（acquire 后挂中段——真实 arm 点在 kickOffChatRound）
-    armMidRoundNoProgress(record.id, {
-      onMidTimeout: () => {},
-      onSettleTimeout: () => {},
-    });
-    expect(getSettledWatchdogPhase(record.id)).toBe("mid-round");
-
-    // finalize mock 内观察：交棒（mid-round → settled）先于簿记
-    let phaseAtFinalize: string | undefined;
-    const origFinalize = host.finalizeRoundOutcome;
-    const spyHost: ContinuationHost = {
-      ...host,
-      finalizeRoundOutcome: async (rec, outcome) => {
-        phaseAtFinalize = getSettledWatchdogPhase(rec.id);
-        await origFinalize(rec, outcome);
-      },
-    };
-    const cont = new ConversationContinuation(record, spyHost);
-    cont.onRunSettled(makeOutcome({ content: "text" }));
-
-    await vi.waitFor(() => expect(calls.finalized.length).toBe(1));
-    expect(phaseAtFinalize).toBe("settled"); // 交棒先于簿记（watchdog 停表早于状态写）
-    // 轮终簿记后两段一并清（不残留 armed——收尾段 fire 会对已收敛轮误发 kill）
-    await vi.waitFor(() => expect(hasSettledWatchdog(record.id)).toBe(false));
-  });
-
   it("成功分支不写 roundBaseTurnIndex（base 死记账退役——负向断言）", async () => {
     const record = makeRecord({ turnCount: 5 });
     const { host, calls } = makeHost(record);
@@ -690,21 +667,6 @@ describe("ConversationContinuation — 轮末分流（D7）与通知面", () => 
     expect(calls.order.indexOf(`killStale:${record.id}`)).toBeLessThan(
       calls.order.indexOf(`dispatch:${record.id}`),
     );
-  });
-
-  it("watchdog fire → killRoundChild + abort 轮 signal（run 收敛后失败分支统一收口）", async () => {
-    const record = makeRecord({});
-    const { host, calls } = makeHost(record);
-    const cont = new ConversationContinuation(record, host);
-    cont.startFirstRound({ task: "round 1", slug: "cont" });
-    await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
-    const signal = calls.dispatched[0]!.signal;
-
-    cont.onWatchdogFire({ phase: "mid-round", waitedMs: 1000 });
-
-    expect(calls.killedRound).toEqual([{ recordId: record.id, source: "settled watchdog (mid-round)" }]);
-    expect(signal.aborted).toBe(true);
-    expect(record.status).toBe("running"); // kill 本身不终态化——收口归 run 应答
   });
 
   it("派发前轮始簿记（[U2b/D2] 归口 store.markRoundStarted——host 委托达点先于 dispatch）", async () => {
@@ -913,7 +875,6 @@ describe("集成：chat 轮末分流（D7）——成功轮 / 失败轮 / 空正
     service.dispose();
     clearEngines();
     _resetLifecycleState();
-    _resetSettledWatchdogsForTest();
     _resetCoreSpawnedChildrenMirrorForTest();
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
@@ -1044,7 +1005,6 @@ describe("集成：close 优雅收口（[U5] §3.2.5 close = 收口落账：在�
     service.dispose();
     clearEngines();
     _resetLifecycleState();
-    _resetSettledWatchdogsForTest();
     _resetCoreSpawnedChildrenMirrorForTest();
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
@@ -1130,7 +1090,6 @@ describe("集成：[S1 P1] cancel 后续聊——被取消轮迟到 run 应答�
     service.dispose();
     clearEngines();
     _resetLifecycleState();
-    _resetSettledWatchdogsForTest();
     _resetCoreSpawnedChildrenMirrorForTest();
     fs.rmSync(agentDir, {
       recursive: true,
@@ -1198,7 +1157,6 @@ describe("集成：one-shot（非 chatMode）settleOneShotOutcome 四分支零�
     service.dispose();
     clearEngines();
     _resetLifecycleState();
-    _resetSettledWatchdogsForTest();
     _resetCoreSpawnedChildrenMirrorForTest();
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
@@ -1304,19 +1262,13 @@ describe("集成：引擎死亡 → Continuation 单发失败通知（D8 监督�
     service.dispose();
     clearEngines();
     _resetLifecycleState();
-    _resetSettledWatchdogsForTest();
     _resetCoreSpawnedChildrenMirrorForTest();
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("chatMode 轮 run reject（engine_crashed）→ 失败通知单发 + record 落 idle 可续聊（不走监督器接管）", async () => {
+  it("chatMode 轮 run reject（engine_crashed）→ 失败通知单发 + record 落 idle 可续聊", async () => {
     const record = makeChatRecord("sa-engine-death", agentDir);
     store.register(record);
-    const adoptSpy = vi.spyOn(
-      (service as unknown as { roundSupervisor: { adoptOnProcessDeath: (r: ExecutionRecord, m: string) => void } })
-        .roundSupervisor,
-      "adoptOnProcessDeath",
-    );
 
     await service.chatActions.deliverChatMessage(record, "risky round");
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
@@ -1329,9 +1281,7 @@ describe("集成：引擎死亡 → Continuation 单发失败通知（D8 监督�
     // MF-6：record 轮终落 idle 可续聊（容器不被销毁——用户再 message 自动 resume；
     // [two-state-convergence U4/D3] 翻边后 idle 即 resumable）
     await vi.waitFor(() => expect(record.status).toBe("idle"));
-    // D8 豁免维持：chatMode 不进监督域接管链（adopt 调用 gate = chatMode !== true）
-    expect(adoptSpy).not.toHaveBeenCalled();
-    // 单发：Continuation 失败通知恰一条（不存在 supervisor merged notice 双发面）
+    // 单发：Continuation 失败通知恰一条
     await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalledTimes(1));
     const calls = pi.sendMessage.mock.calls;
     expect(calls[0]?.[0]?.content).toContain("engine process exited unexpectedly");
@@ -1356,7 +1306,6 @@ describe("集成：stale-child 派发前兜底（红线②）", () => {
     clearEngines();
     vi.useRealTimers();
     _resetLifecycleState();
-    _resetSettledWatchdogsForTest();
     _resetCoreSpawnedChildrenMirrorForTest();
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
@@ -1388,82 +1337,6 @@ describe("集成：stale-child 派发前兜底（红线②）", () => {
   });
 });
 
-describe("集成：[A1] one-shot（非 chatMode）pi background 轮楔死熔断回归（G3 行为零变化恢复）", () => {
-  let agentDir: string;
-  let service: SubagentService;
-  let store: RecordStore;
-  let pi: PiMock;
-  let fake: FakePiEnginePort;
-
-  beforeEach(() => {
-    vi.restoreAllMocks();
-    killChildSpy.mockClear();
-    ({ agentDir, service, store, pi, fake } = makeService());
-  });
-
-  afterEach(() => {
-    service.dispose();
-    clearEngines();
-    _resetLifecycleState();
-    _resetSettledWatchdogsForTest();
-    _resetCoreSpawnedChildrenMirrorForTest();
-    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-  });
-
-  it("楔死轮 arm（轮开跑即挂中段守护）+ fire → kill + abort + [U5] 失败轮 settle + 失败通知单发（[modeless 波1] one-shot/chat 统一 Continuation 流）", async () => {
-    // 测试注入秒级窗（M6 seam）——fire 走真实 timer 全链（arm → mid-round 到期 → 处置）。
-    // 窗值须大于 vi.waitFor 轮询间隔（50ms），保证 arm 断言先于 fire 到期。
-    _setMidRoundNoProgressWindowMsForTest(120);
-    // 杀链收敛建模：轮 signal abort → run reject（真实链路 = cancel 帧驱动引擎进程
-    // 死亡 → engine_crashed reject；settle 单写者 = run 应答一条路）。
-    fake.autoRejectOnAbort = true;
-    const handle = await service.execute({ task: "wedged task", slug: "oneshot-wedge" });
-    const record = store.getMutable(handle.subagentId);
-    expect(record).toBeDefined();
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
-
-    // arm 断言（回归锚点：H1 重构曾误删——修复前本断言红，楔死 run 无恢复计时）
-    await vi.waitFor(() => expect(hasSettledWatchdog(record!.id)).toBe(true));
-    expect(getSettledWatchdogPhase(record!.id)).toBe("mid-round");
-
-    // fire（在途 run 永悬 = 楔死形态）→ 处置：kill + abort 轮 signal → run 收敛
-    //（reject）→ Continuation 失败分支统一收口（[U5] markRoundIdle 落 idle 不终态化；
-    // watchdog 杀轮非用户放弃，失败通知必须送达；[two-state-convergence U4/D3]
-    // 翻边后 idle 即 resumable）
-    await vi.waitFor(() => expect(record!.status).toBe("idle"));
-    expect(record!.closedReason).toBeUndefined();
-    expect(killChildSpy).toHaveBeenCalledWith(record!.id, "settled watchdog (mid-round)");
-    // 失败文案：lastError = run reject 原因（杀链收敛面）；result = 失败摘要 +
-    // 恢复指引（markRoundIdleImpl failed 写入规则）。
-    expect(record!.lastError).toContain("engine run aborted");
-    expect(record!.result).toContain("round did not complete");
-    // 失败通知发出（独立载荷过 notifyGate 门 → notifyHost.notify）
-    await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalledTimes(1));
-    const calls = pi.sendMessage.mock.calls;
-    expect(calls[0]?.[0]?.content).toContain(`Subagent "general-purpose" (${record!.id}) failed`);
-    expect(calls[0]?.[0]?.content).toContain("round did not complete");
-    expect(calls[0]?.[0]?.content).toContain("Recovery");
-    const details = calls[0]?.[0]?.details as { outcome?: string } | undefined;
-    expect(details?.outcome).toBe("failed");
-  });
-
-  it("chat 轮路径零变化：continuation 轮 arm 仍走 onWatchdogFire（fire 不触发 one-shot 处置）", async () => {
-    _setMidRoundNoProgressWindowMsForTest(300);
-    const record = makeChatRecord("sa-chat-wedge", agentDir);
-    store.register(record);
-    await service.chatActions.deliverChatMessage(record, "long round");
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
-    await vi.waitFor(() => expect(hasSettledWatchdog(record.id)).toBe(true));
-
-    // fire → Continuation.onWatchdogFire（kill + abort，收口归 run 应答）——record 不终态化
-    await vi.waitFor(() => expect(killChildSpy).toHaveBeenCalledWith(record.id, "settled watchdog (mid-round)"));
-    // abort 的是轮级 signal（run ctx.signal——引擎侧杀链驱动），非 record 级 controller
-    expect(fake.runs[0]!.ctx.signal?.aborted).toBe(true);
-    expect(record.status).toBe("running");
-    expect(pi.sendMessage).not.toHaveBeenCalled();
-  });
-});
-
 describe("集成：[A5] message 资格引擎轴判定本体直测（engineSupportsConversation——此前仅被 mock；[modeless 波1] 记录级升级门删除）", () => {
   let agentDir: string;
   let service: SubagentService;
@@ -1476,7 +1349,6 @@ describe("集成：[A5] message 资格引擎轴判定本体直测（engineSuppor
     service.dispose();
     clearEngines();
     _resetLifecycleState();
-    _resetSettledWatchdogsForTest();
     _resetCoreSpawnedChildrenMirrorForTest();
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
@@ -1507,7 +1379,7 @@ describe("集成：[A5] message 资格引擎轴判定本体直测（engineSuppor
 //   1. chat 轮（kickOffChatRound chatMode 分支）：实时累积 + 轮终 entry 保真 + 跨轮持续
 //      （Continuation 轮间共用同一 record 实例）+ close 终态 entry 保真；
 //   2. pi one-shot（kickOffChatRound 非 chatMode 分支——修复前连 onEvent 都不传）：
-//      实时累积 + outcome 写入不重置（completeRecord 只读不重置契约）；
+//      实时累积 + outcome 写入不重置（completeLegacyClosed 只读不重置契约）；
 //   3. 非 pi 引擎（one-shot 派发——修复前事件只喂 journal）：
 //      实时累积 + 终态 entry 保真（非 pi one-shot 一次 run 即终态化）。
 // 红锚：任一形态喂入行移除即转红（totalTokens 恒 0）。
@@ -1573,7 +1445,7 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
   let store: RecordStore;
   let pi: PiMock;
   let fake: FakePiEnginePort;
-  let entries: SubagentRecordEntryData[];
+  let entries: SubagentRecordEntryV2[];
   let prevDataDirEnv: string | undefined;
 
   beforeEach(() => {
@@ -1596,7 +1468,7 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     entries = [];
     pi.appendEntry.mockImplementation(
       (customType: string, data: unknown) => {
-        if (customType === SUBAGENT_RECORD_CUSTOM_TYPE) entries.push(data as SubagentRecordEntryData);
+        if (customType === SUBAGENT_RECORD_CUSTOM_TYPE) entries.push(data as SubagentRecordEntryV2);
       },
     );
     service.initSession({ pi, sessionId: "root-session" });
@@ -1607,7 +1479,6 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     service.dispose();
     clearEngines();
     _resetLifecycleState();
-    _resetSettledWatchdogsForTest();
     _resetCoreSpawnedChildrenMirrorForTest();
     if (prevDataDirEnv === undefined) delete process.env["TAIJI_AGENT_DATA_DIR"];
     else process.env["TAIJI_AGENT_DATA_DIR"] = prevDataDirEnv;
@@ -1615,8 +1486,9 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
   });
 
   /** 本 record 的 entry 序列（appendEntry 捕获投影）。 */
-  function entriesFor(id: string): SubagentRecordEntryData[] {
-    return entries.filter((e) => (e as { id?: string }).id === id);
+  function entriesFor(id: string): SubagentRecordEntryV2[] {
+    // id 是 v2 两族（registered / settled）共有字段，无需按 kind 窄化。
+    return entries.filter((e) => e.id === id);
   }
 
   it("chat 轮：message_end(usage) → totalTokens/turnCount 实时累积；轮终 entry 保真；跨轮持续；close 终态 entry 保真", async () => {
@@ -1639,12 +1511,17 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     expect(record.totalTokens).toBe(190); // (100+50+20+10) + (7+3)
     expect(record.turnCount).toBe(1);
 
-    // 轮终 settle → 轮终簿记 entry 携带非零 usage（chat 域轮终不终态——终态 = close）
+    // 轮终 settle → [W1/D3 表行 4] record-round-idle 帧携带非零轮统计快照（chat 域
+    // 轮终不终态——终态 = close；v1 轮终 entry 过程面已停写）。
     fake.runs[0]!.settle({ content: "round one reply" });
     await vi.waitFor(() => expect(record.round).toBe(2));
     expect(record.totalTokens).toBe(190);
-    const roundEntry = entriesFor(record.id).at(-1);
-    expect(roundEntry).toMatchObject({ id: record.id, totalTokens: 190 });
+    await vi.waitFor(() => {
+      const idleEvents = scanRecordEventsFor(agentDir, record.id).filter(
+        (e) => e.type === "record-round-idle",
+      );
+      expect(idleEvents.at(-1)).toMatchObject({ stopReason: "completed", totalTokens: 190 });
+    });
 
     // 跨轮持续：Continuation 轮间共用同一 record 实例，第二轮继续累积
     await service.chatActions.deliverChatMessage(record, "round two");
@@ -1662,9 +1539,16 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     fake.runs[1]!.settle({ content: "round two reply" });
     await vi.waitFor(() => expect(record.round).toBe(3));
     await service["closeSubagent"](record, false);
-    // idle record close = 立即收口落账（同步完成）——收口 entry 落账形态即完成信号。
-    const finalEntry = entriesFor(record.id).at(-1);
-    expect(finalEntry).toMatchObject({ id: record.id, status: "idle", totalTokens: 200, turns: 2 });
+    // idle record close = 立即收口落账（同步完成）。[W1/D3] close 收口（markSettledOut
+    // ——release + manifest 投影）不在 D3 事件表（record 未终局，message 可续）：
+    // 统计终值的持久化锚 = 第二轮 round-idle 帧（200/2），close 本身零新增事件行。
+    const eventsAfterClose = scanRecordEventsFor(agentDir, record.id);
+    expect(eventsAfterClose.filter((e) => e.type === "record-round-idle").at(-1)).toMatchObject({
+      stopReason: "completed",
+      totalTokens: 200,
+      turns: 2,
+    });
+    expect(eventsAfterClose.some((e) => e.type === "record-settled")).toBe(false);
   });
 
   it("pi one-shot：message_end(usage) → totalTokens/turnCount 实时累积；outcome 写入不重置", async () => {
@@ -1682,7 +1566,7 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     expect(record!.totalTokens).toBe(180);
     expect(record!.turnCount).toBe(1);
 
-    // settle → outcome 字段写入不重置 turns/totalTokens（completeRecord 只读契约）
+    // settle → outcome 字段写入不重置 turns/totalTokens（completeLegacyClosed 只读契约）
     fake.runs[0]!.settle({ content: "done" });
     await vi.waitFor(() => expect(record!.result).toBe("done"));
     expect(record!.totalTokens).toBe(180);
@@ -1704,12 +1588,16 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     expect(record).toBeDefined();
     expect(record!.totalTokens).toBe(42); // 修复前：事件只喂 journal，record 恒 0
 
-    // 非 pi one-shot 一次 run 即轮末收口（Continuation markRoundIdle：idle 翻边 +
-    // entry 落盘；旧 finalizeEngineOutcome closed/gc 终态化已删）
+    // 非 pi one-shot 一次 run 即轮末收口（Continuation markRoundIdle：idle 翻边；
+    // [W1/D3 表行 4] round-idle 帧承载统计快照——旧 finalizeEngineOutcome closed/gc
+    // 终态化已删，v1 轮终 entry 过程面停写）。
     zcode.runs[0]!.settle("done");
     await vi.waitFor(() => expect(record!.status).toBe("idle"));
-    const finalEntry = entriesFor(record!.id).at(-1);
-    expect(finalEntry).toMatchObject({ id: record!.id, status: "idle", totalTokens: 42 });
+    await vi.waitFor(() => {
+      expect(
+        scanRecordEventsFor(agentDir, record!.id).filter((e) => e.type === "record-round-idle").at(-1),
+      ).toMatchObject({ stopReason: "completed", totalTokens: 42 });
+    });
   });
 });
 
@@ -1924,7 +1812,6 @@ describe("集成：锚失效处置真链（pi reopen 链 + U1b 循环专防 + D1
     service.dispose();
     clearEngines();
     _resetLifecycleState();
-    _resetSettledWatchdogsForTest();
     _resetCoreSpawnedChildrenMirrorForTest();
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     fs.rmSync(zcodeDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
@@ -2092,5 +1979,79 @@ describe("集成：锚失效处置真链（pi reopen 链 + U1b 循环专防 + D1
     expect(zcode.runs[0]!.task.prompt).toBe("无模型续聊");
     // 与首轮同语义：任务不带 model 键（缺席交 zcode 自身缺省解析）
     expect("model" in zcode.runs[0]!.task).toBe(false);
+  });
+});
+
+// ============================================================
+// [§1.4 (c)] 轮终链断头保护：链上异常降级 error 留痕，不升格为未处理 promise 拒绝
+// （pi rpc 模式无未处理拒绝处理器 → Node 默认 exit 1——登记 §1.4 死亡通道；成因不限
+// stale pi 一种）。vitest 对未处理拒绝默认判红 = 本组用例的隐式断言面。
+// ============================================================
+
+describe("[§1.4 (c)] 轮终链断头保护（voidRoundFinalChain）", () => {
+  it("onRunSettled 成功形态：finalizeRoundOutcome 抛错（stale pi 文案）→ error 留痕，不崩、不通知、不 drain", async () => {
+    loggerMock.error.mockClear();
+    const record = makeRecord({});
+    const { host, calls } = makeHost(record);
+    host.finalizeRoundOutcome = async () => {
+      throw new Error("This extension ctx is stale after session replacement or reload.");
+    };
+    const cont = new ConversationContinuation(record, host);
+
+    cont.onRunSettled(makeOutcome({ content: "ok" }));
+
+    await vi.waitFor(() => expect(loggerMock.error).toHaveBeenCalled());
+    const [msg, detail] = loggerMock.error.mock.calls.at(-1)! as [string, { detail: unknown }];
+    expect(msg).toContain("settleRoundSuccess (onRunSettled) (round-final chain)");
+    expect(String(detail.detail)).toContain("stale after session replacement");
+    // 链在簿记步降级：通知不达、后续 drain 不执行。
+    expect(calls.routed).toEqual([]);
+    expect(calls.dispatched).toEqual([]);
+  });
+
+  it("onRunSettled 失败形态与 onRoundRejected：settleRoundFailed 抛错同样降级留痕", async () => {
+    loggerMock.error.mockClear();
+    const record = makeRecord({ id: "sa-cont-fail" });
+    const { host } = makeHost(record);
+    host.finalizeRoundOutcome = async () => {
+      throw new Error("bookkeeping exploded");
+    };
+    const cont = new ConversationContinuation(record, host);
+
+    cont.onRunSettled(makeOutcome({ content: "", error: "engine_run_failed" }));
+    await vi.waitFor(() => expect(loggerMock.error).toHaveBeenCalled());
+    expect(String(loggerMock.error.mock.calls.at(-1)?.[0])).toContain(
+      "settleRoundFailed (onRunSettled) (round-final chain)",
+    );
+
+    const record2 = makeRecord({ id: "sa-cont-reject" });
+    const host2 = makeHost(record2).host;
+    host2.finalizeRoundOutcome = async () => {
+      throw new Error("bookkeeping exploded 2");
+    };
+    const cont2 = new ConversationContinuation(record2, host2);
+    cont2.onRoundRejected(new Error("prepare failed"));
+    await vi.waitFor(() =>
+      expect(String(loggerMock.error.mock.calls.at(-1)?.[0])).toContain(
+        "settleRoundFailed (onRoundRejected) (round-final chain)",
+      ),
+    );
+  });
+
+  it("dispatchRoundAsync：主干同步段之外（markRoundStarted）抛错 → error 留痕，不升格未处理拒绝", async () => {
+    loggerMock.error.mockClear();
+    const record = makeRecord({ id: "sa-cont-dispatch" });
+    const { host } = makeHost(record);
+    host.markRoundStarted = () => {
+      throw new Error("round-start bookkeeping exploded");
+    };
+    const cont = new ConversationContinuation(record, host);
+
+    cont.onMessage("hello");
+
+    await vi.waitFor(() => expect(loggerMock.error).toHaveBeenCalled());
+    const [msg, detail] = loggerMock.error.mock.calls.at(-1)! as [string, { detail: unknown }];
+    expect(msg).toContain("dispatchRoundAsync (round-final chain)");
+    expect(String(detail.detail)).toContain("round-start bookkeeping exploded");
   });
 });

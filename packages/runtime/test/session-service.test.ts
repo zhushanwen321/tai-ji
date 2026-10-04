@@ -13,7 +13,7 @@
  * - existsSync 用真实 node:fs，测试数据用真实存在的 cwd（tmpdir）。
  *
  * 覆盖分类（对应 plan 归属表）：
- * - dispatcher：sendMessage / abort / steerMessage / followUpMessage / compact
+ * - dispatcher：sendMessage / abort / compact（steerMessage/followUpMessage 已随 MF-1-8 退役）
  *   （[HISTORICAL] sendSubagentMessage 已随 marker 通道废弃删除，composer 四符号设计 D2）
  * - lifecycle：create / delete / renameSession / restoreSession
  * - Facade：switchModel / setThinkingLevel / getHistory / hasActiveSession / getRpcClient /
@@ -22,7 +22,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { SESSION_NOT_FOUND } from '../src/utils/errors.js'
-import type { MockInstance } from 'vitest'
+import type { Mock, MockInstance } from 'vitest'
 import { tmpdir, homedir } from 'node:os'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
@@ -37,22 +37,26 @@ import type {
 import type { IMessageBus } from '../src/services/message-bus/message-bus.js'
 import type { IProcessManager, IPiEngine, PiEventListener } from '../src/services/ports/pi-engine.js'
 import type { SessionSummary, SessionGroup, Message, ServerMessage, ProviderId, SegmentsMetadataEntry, SegmentsMetadataFile } from '@taiji/shared'
-import { HISTORY_BUDGET } from '@taiji/shared'
+import { HISTORY_BUDGET, decodeNewlineEscapes } from '@taiji/shared'
 import { getAttachmentsDir } from '@taiji/shared/paths'
+import { flushDelivery } from './helpers/flush-delivery.js'
 
 // ── vi.hoisted：在 vi.mock 工厂执行前就绪的 mock 句柄 ───────────────
 
+/** scanPiSessions mock 的行形状（pushScannedSession helper 与 hoisted 声明共用）。 */
+interface MockScannedSession {
+  id: string
+  filePath: string
+  cwd: string
+  name: string | null
+  lastModified: number
+  timestamp: string
+  size: number
+  outcome: 'done' | 'error' | 'stopped' | null
+}
+
 const mocks = vi.hoisted(() => ({
-  mockScannedSessions: [] as Array<{
-    id: string
-    filePath: string
-    cwd: string
-    name: string | null
-    lastModified: number
-    timestamp: string
-    size: number
-    outcome: 'done' | 'error' | 'stopped' | null
-  }>,
+  mockScannedSessions: [] as Array<MockScannedSession>,
   // 可重新赋值：null 表示未配置 model
   defaultModel: {
     value: { provider: 'test-provider', modelId: 'test-model' } as
@@ -113,6 +117,9 @@ vi.mock('../src/services/session-history.js', () => ({
 // ── Mock 之后再 import 被测对象 ─────────────────────────────────────
 
 import { SessionService } from '../src/services/session/session-service.js'
+import {
+  createSessionDeliveryRegistry,
+} from '../src/services/session/session-delivery-registry.js'
 import { SCALAR_STATE_DEBOUNCE_MS } from '../src/services/session/replicated-states.config.js'
 import { encodeDirectiveText } from '../src/services/session/session-records.js'
 import { PiConfigStore } from '../src/infra/pi/pi-config-store.js'
@@ -217,6 +224,8 @@ interface Setup {
   clientMap: Map<string, MockClient>
   /** mock 的 IGitInfoReader（readGitInfo 恒 undefined → 摘要 git 字段留空）。供 localSession 复用。 */
   gitInfoReader: IGitInfoReader
+  /** [u2] 投递所有权内核注册表（dispatcher 只提交，出站交接在适配层）。 */
+  deliveryRegistry: ReturnType<typeof createSessionDeliveryRegistry>
   triggerExit: (sessionId: string, code: number | null, stderr?: string) => void
   /** 直接挂载一个 client 到 clientMap（不走 create），用于 dispatcher 类测试。 */
   mountClient: (sessionId: string, client?: MockClient) => MockClient
@@ -231,6 +240,21 @@ interface Setup {
 }
 
 let autoId = 0
+
+/**
+ * per-session replicated-state 实例组的 teardown 登记表。
+ *
+ * 播种 refetch 失败（mock 缺 wire 字段）的实例以真时钟 1s/5s 退避重试；用例结束无人
+ * dispose 时定时器穿越文件生命周期，全包跑撞上 vitest worker teardown →
+ * EnvironmentTeardownError: Closing rpc while "onUserConsoleLog" was pending（exit=1）。
+ * 每个创建点（createSetup / 局部 new SessionService）经 trackScalarStates 登记，
+ * afterEach 统一 dispose 四实例停止全部定时器。
+ */
+const liveScalarStateOwners: Array<{ service: SessionService; sids: () => Iterable<string> }> = []
+
+function trackScalarStates(service: SessionService, sids: () => Iterable<string>): void {
+  liveScalarStateOwners.push({ service, sids })
+}
 
 function createSetup(): Setup {
   const clientMap = new Map<string, MockClient>()
@@ -319,6 +343,19 @@ function createSetup(): Setup {
   )
   service.setMessageBus(messageBus)
 
+  // [u2 投递所有权内核] 出站交接经内核适配层（dispatcher 只提交；交接异步落在注册表）——
+  // fixture 按真实组合根装配接内核：session 视图 / ensureActive / workspace.record / bus 同源。
+  // 未接线时 dispatcher 的 submitToKernel 显式失败（message.error「delivery registry not wired」）。
+  const deliveryRegistry = createSessionDeliveryRegistry({
+    getSession: (sid) => service.getSession(sid),
+    ensureActive: (sid) => service.ensureActive(sid),
+    subscribeAgentSettled: () => () => {},
+    recordWorkspace: (cwd) => workspaceService.record(cwd),
+    getMessageBus: () => messageBus,
+  })
+  // [MF-1-7] 注册表后置注入 SessionService（活动槽已退役）
+  service.setDeliveryRegistry(deliveryRegistry)
+
   const mountClient = (sessionId: string, client?: MockClient): MockClient => {
     const c = client ?? makeMockClient()
     clientMap.set(sessionId, c)
@@ -341,12 +378,19 @@ function createSetup(): Setup {
     return { id: piSid, client }
   }
 
-  return {
+  trackScalarStates(service, () => clientMap.keys())
+
+  const setup: Setup = {
     service, pm, broker, messageBus, extensionService, clientMap, gitInfoReader,
     triggerExit: (sid, code, stderr = '') => exitCb?.(sid, code, stderr),
-    mountClient, seedSession,
+    mountClient, seedSession, deliveryRegistry,
   }
+  lastCreatedSetup = setup
+  return setup
 }
+
+/** 最近一次 createSetup 的装置（用例间清理注册表 timer 用）。 */
+let lastCreatedSetup: Setup | undefined
 
 /** 辅助：找指定 type 的已发布消息（按 type 收窄返回 payload 类型）。
  * wave:perf-w09（D1-2）双通道查询：session 级消息走 bus.publish（call[1]），
@@ -404,10 +448,117 @@ async function waitForSnapshotPublish(): Promise<void> {
   vi.useRealTimers()
 }
 
+/**
+ * 向 scanPiSessions mock 追加一条 scanned session（补默认字段：name/outcome null、
+ * lastModified/timestamp 取当下）。listPersistedSessions 排序类断言需要稳定值时显式传。
+ */
+function pushScannedSession(input: {
+  id: string
+  filePath: string
+  cwd: string
+  name?: string | null
+  lastModified?: number
+  timestamp?: string
+}): MockScannedSession {
+  const row: MockScannedSession = {
+    id: input.id,
+    filePath: input.filePath,
+    cwd: input.cwd,
+    name: input.name ?? null,
+    lastModified: input.lastModified ?? Date.now(),
+    timestamp: input.timestamp ?? new Date().toISOString(),
+    size: 0,
+    outcome: null,
+  }
+  mockScannedSessions.push(row)
+  return row
+}
+
+/**
+ * 让下一次 pm.createSession 返回给定 client。默认 mockResolvedValueOnce（单次）；
+ * `persistent` 走 mockResolvedValue（同 id 二次 restore 等需要持续返回的场景）。
+ * mockResolvedValueOnce 会绕过 createSession 默认实现（后者负责写 clientMap），
+ * 需要 ensureActive/getClient 取到该 client 时传 `clientMapId` 手动关联。
+ */
+function stubNextCreatedClient(
+  target: Setup,
+  client: MockClient,
+  opts?: { persistent?: boolean; clientMapId?: string },
+): void {
+  const mocked = vi.mocked(target.pm.createSession)
+  if (opts?.persistent) mocked.mockResolvedValue(client as unknown as IPiEngine)
+  else mocked.mockResolvedValueOnce(client as unknown as IPiEngine)
+  if (opts?.clientMapId !== undefined) target.clientMap.set(opts.clientMapId, client)
+}
+
+/**
+ * 建真实临时 session 文件（mkdtemp + writeFileSync），用例体跑完无论成败都递归清理
+ * （rmSync 参数单点化）。fn 收到目录与文件路径——restoreSession/delete 等直读 JSONL
+ * 的路径必须用真实文件（existsSync / stripEnd 语义）。
+ */
+async function withTempSessionFile(
+  dirPrefix: string,
+  fileName: string,
+  content: string,
+  fn: (dir: string, filePath: string) => Promise<void>,
+): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), dirPrefix))
+  try {
+    const filePath = join(dir, fileName)
+    writeFileSync(filePath, content)
+    await fn(dir, filePath)
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  }
+}
+
+/**
+ * 双 createSetup 用例（adapter detach/attach 可观测断言）的第二套装置：在独立 setup 上
+ * 手动装配 SessionService，adapter 工厂注入 spy（attach/detach 调用可断言），
+ * workspace 桩与 createSetup 同形（record no-op / list 空）。
+ */
+function createServiceWithSpyAdapters(
+  base: Setup,
+  attachSpy: Mock<() => void>,
+  detachSpy: Mock<() => void>,
+): SessionService {
+  return new SessionService(
+    base.pm,
+    base.broker,
+    () => ({ attach: attachSpy, detach: detachSpy }),
+    '/tmp',
+    base.extensionService,
+    new PiConfigStore(),
+    new PiSessionStore(),
+    base.gitInfoReader,
+    { record: vi.fn(), list: vi.fn().mockReturnValue([]) } as unknown as ConstructorParameters<typeof SessionService>[8],
+  )
+}
+
 // 保险：waitForSnapshotPublish 契约外的 fake timers 泄漏防护（用例中途 fail 时未及还原，
 // useRealTimers 幂等，真 timers 下 no-op——不影响 2062 行自管 fake timers 的既有用例）
 afterEach(() => {
   vi.useRealTimers()
+  // 停掉全部登记实例组的退避/防抖/周期定时器（见 liveScalarStateOwners JSDoc——
+  // 泄漏定时器在文件 teardown 后 fire 会撞 vitest worker 关闭，报 unhandled rejection）
+  for (const { service, sids } of liveScalarStateOwners) {
+    for (const sid of sids()) {
+      const states = service.getScalarReplicatedStates(sid)
+      if (states) {
+        states.thinkingLevel.dispose()
+        states.modelId.dispose()
+        states.usage.dispose()
+        states.commands.dispose()
+      }
+    }
+  }
+  liveScalarStateOwners.length = 0
+})
+
+// [u2] 用例间清理投递内核：释放 30s watchdog（持有期轮询已事件化，无轮询 timer）
+afterEach(() => {
+  lastCreatedSetup?.deliveryRegistry.disposeAll()
+  lastCreatedSetup = undefined
 })
 
 // ───────────────────────────────────────────────────────────────────
@@ -427,7 +578,13 @@ describe('SessionService · dispatcher', () => {
     it('calls client.prompt with the user content on normal send', async () => {
       const client = setup.mountClient('sid-1')
       await setup.service.sendMessage('sid-1', 'hello pi')
-      expect(client.prompt).toHaveBeenCalledWith('hello pi', undefined)
+      await flushDelivery()
+      // [u2 投递所有权内核] 出站交接在适配层：正文 + 裸标记身份（D2），无图片、direct 车道
+      expect(client.prompt).toHaveBeenCalledTimes(1)
+      const [text, images] = client.prompt.mock.calls[0] as unknown as [string, unknown]
+      expect(text).toContain('hello pi')
+      expect(text).toMatch(/<!--taiji:msg:[^>]+-->$/) // 裸标记 id（D2 身份）
+      expect(images).toBeUndefined()
     })
 
     it('does not call prompt when hook blocks, and broadcasts message.error with reason', async () => {
@@ -451,14 +608,18 @@ describe('SessionService · dispatcher', () => {
       const client = setup.mountClient('sid-1')
       setup.service.setSendMessageHook(async () => ({ blocked: false }))
       await setup.service.sendMessage('sid-1', 'go')
-      expect(client.prompt).toHaveBeenCalledWith('go', undefined)
+      await flushDelivery()
+      expect(client.prompt).toHaveBeenCalledTimes(1)
+      expect((client.prompt.mock.calls[0] as unknown as [string])[0]).toContain('go')
     })
 
     it('passes through when hook returns null', async () => {
       const client = setup.mountClient('sid-1')
       setup.service.setSendMessageHook(async () => null)
       await setup.service.sendMessage('sid-1', 'go')
-      expect(client.prompt).toHaveBeenCalledWith('go', undefined)
+      await flushDelivery()
+      expect(client.prompt).toHaveBeenCalledTimes(1)
+      expect((client.prompt.mock.calls[0] as unknown as [string])[0]).toContain('go')
     })
 
     // Fix-1：onBeforeSendMessage 的 transform 语义消费侧——hook 返回 modifiedContent
@@ -470,8 +631,11 @@ describe('SessionService · dispatcher', () => {
         modifiedContent: content.replace('!important', 'IMPORTANT'),
       }))
       await setup.service.sendMessage('sid-1', 'hello !important world')
+      await flushDelivery()
       expect(client.prompt).toHaveBeenCalledTimes(1)
-      expect(client.prompt).toHaveBeenCalledWith('hello IMPORTANT world', undefined)
+      const sentText = (client.prompt.mock.calls[0] as unknown as [string])[0]
+      expect(sentText).toContain('hello IMPORTANT world')
+      expect(sentText).not.toContain('!important') // 改写生效（原文未送出）
     })
 
     it('blocks take precedence over modifiedContent (no prompt sent)', async () => {
@@ -501,13 +665,18 @@ describe('SessionService · dispatcher', () => {
       const client = setup.mountClient('sid-1')
       client.prompt.mockRejectedValueOnce(new Error('pi down'))
       await setup.service.sendMessage('sid-1', 'go')
+      await flushDelivery()
+      // [u2] 非 busy 受理失败的错误面出口 = 内核失败出口（适配层 onDeliveryFailure），
+      // 文案带「消息投递失败」前缀但错因逐字可见（本轮迁移仅前缀演化，断言按错因收窄）
       const err = findBroadcast(setup, 'message.error')
-      expect(err?.payload).toMatchObject({ sessionId: 'sid-1', message: 'pi down' })
+      expect(err?.payload).toMatchObject({ sessionId: 'sid-1' })
+      expect(String(err?.payload.message)).toContain('pi down')
     })
 
     it('marks session isGenerating when session is active (via create)', async () => {
       const { id } = await setup.seedSession()
       await setup.service.sendMessage(id, 'hi')
+      await flushDelivery() // 三副作用置位在 prompt 受理之后（D-18）
       const summary = setup.service.getSummary(id)
       expect(summary?.status).toBe('active')
     })
@@ -546,25 +715,10 @@ describe('SessionService · dispatcher', () => {
       await expect(setup.service.abort('missing')).rejects.toThrow('Session missing not found')
     })
 
-    it('steerMessage calls client.steer with content', async () => {
-      const client = setup.mountClient('sid-s')
-      await setup.service.steerMessage('sid-s', 'steer me')
-      expect(client.steer).toHaveBeenCalledWith('steer me')
-    })
-
-    it('steerMessage throws when session not active', async () => {
-      await expect(setup.service.steerMessage('missing', 'x')).rejects.toThrow('not active')
-    })
-
-    it('followUpMessage calls client.followUp with content', async () => {
-      const client = setup.mountClient('sid-f')
-      await setup.service.followUpMessage('sid-f', 'follow')
-      expect(client.followUp).toHaveBeenCalledWith('follow')
-    })
-
-    it('followUpMessage throws when session not active', async () => {
-      await expect(setup.service.followUpMessage('missing', 'x')).rejects.toThrow('not active')
-    })
+    // [MF-1-8 退役] steerMessage / followUpMessage 用例已删除：renderer/core 消费方经
+    // delivery.submit 统一提交（u3b 内核化），dispatcher/sessionService 转发腿与协议条目
+    // message.steer / message.follow_up 同批退役——同语义覆盖由 sendMessage（steer 车道）
+    // 与 useChat 提交链测试承接。
   })
 
   describe('compact', () => {
@@ -669,7 +823,7 @@ describe('SessionService · lifecycle', () => {
       const stateless = makeMockClient({
         getState: vi.fn<() => Promise<Record<string, unknown> | undefined>>().mockResolvedValue({}),
       })
-      vi.mocked(setup.pm.createSession).mockResolvedValueOnce(stateless as unknown as IPiEngine)
+      stubNextCreatedClient(setup, stateless)
       await expect(setup.service.create(tmpdir())).rejects.toThrow('did not return a session ID')
       expect(setup.pm.destroySession).toHaveBeenCalledTimes(1)
     })
@@ -707,19 +861,11 @@ describe('SessionService · lifecycle', () => {
 
     it('trashes the session file when it exists on disk (non-active scanned)', async () => {
       // 用真实临时文件让 existsSync 返回 true
-      const dir = mkdtempSync(join(tmpdir(), 'del-'))
-      try {
-        const filePath = join(dir, 's.jsonl')
-        writeFileSync(filePath, '{}')
-        mockScannedSessions.push({
-          id: 'scan-del', filePath, cwd: dir, name: null,
-          lastModified: Date.now(), timestamp: new Date().toISOString(), size: 0, outcome: null,
-        })
+      await withTempSessionFile('del-', 's.jsonl', '{}', async (dir, filePath) => {
+        pushScannedSession({ id: 'scan-del', filePath, cwd: dir })
         await setup.service.delete('scan-del')
         expect(mocks.trashMock).toHaveBeenCalledWith(filePath)
-      } finally {
-        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      }
+      })
     })
 
     it('throws when session neither active nor scanned', async () => {
@@ -749,10 +895,7 @@ describe('SessionService · lifecycle', () => {
     })
 
     it('non-active session：短命 pi 附着后 set_session_name RPC（W11：直写全删）', async () => {
-      mockScannedSessions.push({
-        id: 'scan-ren', filePath: '/fake/scan-ren.jsonl', cwd: tmpdir(), name: null,
-        lastModified: Date.now(), timestamp: new Date().toISOString(), size: 0, outcome: null,
-      })
+      pushScannedSession({ id: 'scan-ren', filePath: '/fake/scan-ren.jsonl', cwd: tmpdir() })
       const ephemeral = makeMockClient()
       vi.mocked(setup.pm.withEphemeralPi).mockImplementationOnce(async (_f, fn) =>
         fn(ephemeral as unknown as IPiEngine))
@@ -766,24 +909,21 @@ describe('SessionService · lifecycle', () => {
   describe('restoreSession', () => {
     it('reuses scanned sessionId and sends switch_session with file path', async () => {
       // B7: restoreSession 直读 JSONL 文件（stripSessionEnd 已删），需真实文件
-      const dir = mkdtempSync(join(tmpdir(), 'restore-'))
-      const filePath = join(dir, 'persist-1.jsonl')
-      writeFileSync(filePath, JSON.stringify({ type: 'session_info', name: 'old' }))
-      try {
-        mockScannedSessions.push({
-          id: 'persist-1', filePath, cwd: dir, name: 'old',
-          lastModified: Date.now(), timestamp: new Date().toISOString(), size: 0, outcome: null,
-        })
-        const client = makeMockClient()
-        vi.mocked(setup.pm.createSession).mockResolvedValueOnce(client as unknown as IPiEngine)
-        const summary = await setup.service.restoreSession('persist-1')
-        expect(summary.id).toBe('persist-1')
-        // [W1 语义变更：直附着正式文件] switchSession 收到原 filePath（不再写
-        // $TMPDIR tmpFile 后切 tmp——pi switch_session 永久重绑读写目标）
-        expect(client.switchSession).toHaveBeenCalledWith(filePath)
-      } finally {
-        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      }
+      await withTempSessionFile(
+        'restore-',
+        'persist-1.jsonl',
+        JSON.stringify({ type: 'session_info', name: 'old' }),
+        async (dir, filePath) => {
+          pushScannedSession({ id: 'persist-1', filePath, cwd: dir, name: 'old' })
+          const client = makeMockClient()
+          stubNextCreatedClient(setup, client)
+          const summary = await setup.service.restoreSession('persist-1')
+          expect(summary.id).toBe('persist-1')
+          // [W1 语义变更：直附着正式文件] switchSession 收到原 filePath（不再写
+          // $TMPDIR tmpFile 后切 tmp——pi switch_session 永久重绑读写目标）
+          expect(client.switchSession).toHaveBeenCalledWith(filePath)
+        },
+      )
     })
 
     it('throws when persisted session not found', async () => {
@@ -791,10 +931,7 @@ describe('SessionService · lifecycle', () => {
     })
 
     it('throws when no default model configured', async () => {
-      mockScannedSessions.push({
-        id: 'persist-2', filePath: '/fake/p2.jsonl', cwd: tmpdir(), name: null,
-        lastModified: Date.now(), timestamp: new Date().toISOString(), size: 0, outcome: null,
-      })
+      pushScannedSession({ id: 'persist-2', filePath: '/fake/p2.jsonl', cwd: tmpdir() })
       mocks.defaultModel.value = null
       await expect(setup.service.restoreSession('persist-2')).rejects.toThrow('No model configured')
     })
@@ -802,87 +939,70 @@ describe('SessionService · lifecycle', () => {
     // W3 事件监听器所有权（自 session-pool-restoresession.test.ts 归并）：
     // 同 id 二次 restore 必须先 detach 第一次的 adapter（EventAdapter 是 pi 事件监听唯一 owner）
     it('detaches the first adapter when the same sessionId is restored twice', async () => {
-      const dir = mkdtempSync(join(tmpdir(), 'restore-detach-'))
-      const filePath = join(dir, 'persist-detach.jsonl')
-      writeFileSync(filePath, JSON.stringify({ type: 'session_info' }))
-      try {
-        mockScannedSessions.push({
-          id: 'persist-detach', filePath, cwd: dir, name: null,
-          lastModified: Date.now(), timestamp: new Date().toISOString(), size: 0, outcome: null,
-        })
-        const detachSpy = vi.fn()
-        const attachSpy = vi.fn()
-        const localSetup = createSetup()
-        // 用可观测的 adapter 工厂捕获 detach（同 Facade 组 onSessionExited detach 先例）
-        const localService = new SessionService(
-          localSetup.pm,
-          localSetup.broker,
-          () => ({ attach: attachSpy, detach: detachSpy }),
-          '/tmp',
-          localSetup.extensionService,
-          new PiConfigStore(),
-          new PiSessionStore(),
-          localSetup.gitInfoReader,
-          { record: vi.fn(), list: vi.fn().mockReturnValue([]) } as unknown as ConstructorParameters<typeof SessionService>[8],
-        )
-        const client = makeMockClient()
-        vi.mocked(localSetup.pm.createSession).mockResolvedValue(client as unknown as IPiEngine)
+      await withTempSessionFile(
+        'restore-detach-',
+        'persist-detach.jsonl',
+        JSON.stringify({ type: 'session_info' }),
+        async (dir, filePath) => {
+          pushScannedSession({ id: 'persist-detach', filePath, cwd: dir })
+          const detachSpy = vi.fn()
+          const attachSpy = vi.fn()
+          const localSetup = createSetup()
+          // 用可观测的 adapter 工厂捕获 detach（同 Facade 组 onSessionExited detach 先例）
+          const localService = createServiceWithSpyAdapters(localSetup, attachSpy, detachSpy)
+          stubNextCreatedClient(localSetup, makeMockClient(), { persistent: true })
+          // 防泄漏登记（notify-once review must-fix）：localService 的 replicated-state
+          // 实例定时器需 afterEach 统一 dispose，否则撞 vitest worker teardown
+          trackScalarStates(localService, () => ['persist-detach'])
 
-        await localService.restoreSession('persist-detach')
-        expect(detachSpy).not.toHaveBeenCalled()
+          await localService.restoreSession('persist-detach')
+          expect(detachSpy).not.toHaveBeenCalled()
 
-        // 同 id 二次 restore——应先 detach 第一次的 adapter
-        await localService.restoreSession('persist-detach')
-        expect(detachSpy).toHaveBeenCalledTimes(1)
-        expect(attachSpy).toHaveBeenCalledTimes(2)
-      } finally {
-        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      }
+          // 同 id 二次 restore——应先 detach 第一次的 adapter
+          await localService.restoreSession('persist-detach')
+          expect(detachSpy).toHaveBeenCalledTimes(1)
+          expect(attachSpy).toHaveBeenCalledTimes(2)
+        },
+      )
     })
 
     // cwd fallback（自 session-pool-restoresession.test.ts 归并）：死路径 cwd → homedir 兜底
     it('falls back to home dir when the scanned session cwd does not exist', async () => {
-      const dir = mkdtempSync(join(tmpdir(), 'restore-cwd-'))
-      const filePath = join(dir, 'persist-cwd.jsonl')
-      writeFileSync(filePath, JSON.stringify({ type: 'session_info' }))
-      try {
-        const nonexistentCwd = join(dir, 'taiji-test-cwd-nonexistent')
-        mockScannedSessions.push({
-          id: 'persist-cwd', filePath, cwd: nonexistentCwd, name: null,
-          lastModified: Date.now(), timestamp: new Date().toISOString(), size: 0, outcome: null,
-        })
-        const client = makeMockClient()
-        vi.mocked(setup.pm.createSession).mockResolvedValueOnce(client as unknown as IPiEngine)
+      await withTempSessionFile(
+        'restore-cwd-',
+        'persist-cwd.jsonl',
+        JSON.stringify({ type: 'session_info' }),
+        async (dir, filePath) => {
+          const nonexistentCwd = join(dir, 'taiji-test-cwd-nonexistent')
+          pushScannedSession({ id: 'persist-cwd', filePath, cwd: nonexistentCwd })
+          const client = makeMockClient()
+          stubNextCreatedClient(setup, client)
 
-        await setup.service.restoreSession('persist-cwd')
+          await setup.service.restoreSession('persist-cwd')
 
-        // createSession 收到的 cwd 不含死路径（F3 归一化兜底 homedir）
-        expect(vi.mocked(setup.pm.createSession).mock.calls[0]?.[1]).not.toContain('taiji-test-cwd-nonexistent')
-      } finally {
-        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      }
+          // createSession 收到的 cwd 不含死路径（F3 归一化兜底 homedir）
+          expect(vi.mocked(setup.pm.createSession).mock.calls[0]?.[1]).not.toContain('taiji-test-cwd-nonexistent')
+        },
+      )
     })
 
     it('destroys created session when switch_session fails', async () => {
       // B7: restoreSession 直读 JSONL 文件，需真实文件
-      const dir = mkdtempSync(join(tmpdir(), 'restore-fail-'))
-      const filePath = join(dir, 'persist-3.jsonl')
-      writeFileSync(filePath, JSON.stringify({ type: 'session_info' }))
-      try {
-        mockScannedSessions.push({
-          id: 'persist-3', filePath, cwd: dir, name: null,
-          lastModified: Date.now(), timestamp: new Date().toISOString(), size: 0, outcome: null,
-        })
-        const client = makeMockClient({
-          // W2 收口后 restoreSession 用 client.switchSession，失败时抛错触发清理
-          switchSession: vi.fn<(sessionPath: string) => Promise<void>>().mockRejectedValue(new Error('switch failed')),
-        })
-        vi.mocked(setup.pm.createSession).mockResolvedValueOnce(client as unknown as IPiEngine)
-        await expect(setup.service.restoreSession('persist-3')).rejects.toThrow('switch failed')
-        expect(setup.pm.destroySession).toHaveBeenCalledWith('persist-3')
-      } finally {
-        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      }
+      await withTempSessionFile(
+        'restore-fail-',
+        'persist-3.jsonl',
+        JSON.stringify({ type: 'session_info' }),
+        async (dir, filePath) => {
+          pushScannedSession({ id: 'persist-3', filePath, cwd: dir })
+          const client = makeMockClient({
+            // W2 收口后 restoreSession 用 client.switchSession，失败时抛错触发清理
+            switchSession: vi.fn<(sessionPath: string) => Promise<void>>().mockRejectedValue(new Error('switch failed')),
+          })
+          stubNextCreatedClient(setup, client)
+          await expect(setup.service.restoreSession('persist-3')).rejects.toThrow('switch failed')
+          expect(setup.pm.destroySession).toHaveBeenCalledWith('persist-3')
+        },
+      )
     })
   })
 })
@@ -1194,7 +1314,8 @@ describe('SessionService · Facade', () => {
 
     it('handleTurnEndSideEffects 复位 isGenerating（agent_end 迁移）', async () => {
       const { id } = await setup.seedSession()
-      await setup.service.sendMessage(id, 'hi') // 标记 generating
+      await setup.service.sendMessage(id, 'hi') // 标记 generating（受理后三副作用置位，D-18）
+      await flushDelivery()
       expect(setup.service.getSummary(id)?.status).toBe('active')
       setup.service.handleTurnEndSideEffects(id)
       expect(setup.service.getSummary(id)?.status).toBe('idle')
@@ -1325,15 +1446,10 @@ describe('SessionService · Facade', () => {
     })
 
     it('restores session when client missing and returns new client', async () => {
-      mockScannedSessions.push({
-        id: 'persist-ens', filePath: '/fake/ens.jsonl', cwd: tmpdir(), name: null,
-        lastModified: Date.now(), timestamp: new Date().toISOString(), size: 0, outcome: null,
-      })
+      pushScannedSession({ id: 'persist-ens', filePath: '/fake/ens.jsonl', cwd: tmpdir() })
       const client = makeMockClient()
-      // mockResolvedValueOnce 会绕过 createSession 默认实现（后者负责写 clientMap），
-      // 因此手动把 client 关联进 clientMap，让 ensureActive 末尾的 getClient 能取到。
-      vi.mocked(setup.pm.createSession).mockResolvedValueOnce(client as unknown as IPiEngine)
-      setup.clientMap.set('persist-ens', client)
+      // 手动把 client 关联进 clientMap，让 ensureActive 末尾的 getClient 能取到。
+      stubNextCreatedClient(setup, client, { clientMapId: 'persist-ens' })
       const got = await setup.service.ensureActive('persist-ens')
       expect(got).toBe(client)
     })
@@ -1487,11 +1603,9 @@ describe('SessionService · Facade', () => {
 
   describe('listPersistedSessions', () => {
     it('groups persisted sessions by cwd', () => {
-      mockScannedSessions.push(
-        { id: 'a', filePath: '/fake/a.jsonl', cwd: '/proj', name: null, lastModified: 1, timestamp: '', size: 0, outcome: null },
-        { id: 'b', filePath: '/fake/b.jsonl', cwd: '/proj', name: null, lastModified: 2, timestamp: '', size: 0, outcome: null },
-        { id: 'c', filePath: '/fake/c.jsonl', cwd: '/other', name: null, lastModified: 3, timestamp: '', size: 0, outcome: null },
-      )
+      pushScannedSession({ id: 'a', filePath: '/fake/a.jsonl', cwd: '/proj', lastModified: 1, timestamp: '' })
+      pushScannedSession({ id: 'b', filePath: '/fake/b.jsonl', cwd: '/proj', lastModified: 2, timestamp: '' })
+      pushScannedSession({ id: 'c', filePath: '/fake/c.jsonl', cwd: '/other', lastModified: 3, timestamp: '' })
       const groups = setup.service.listPersistedSessions() as SessionGroup[]
       const projGroup = groups.find(g => g.cwd === '/proj')
       expect(projGroup?.sessions.map(s => s.id).sort()).toEqual(['a', 'b'])
@@ -1500,10 +1614,7 @@ describe('SessionService · Facade', () => {
 
     it('includes active sessions and excludes their duplicate file entries', async () => {
       const { id } = await setup.seedSession({ sessionFile: '/fake/dup.jsonl', cwd: tmpdir() })
-      mockScannedSessions.push({
-        id, filePath: '/fake/dup.jsonl', cwd: tmpdir(), name: null,
-        lastModified: 1, timestamp: '', size: 0, outcome: null,
-      })
+      pushScannedSession({ id, filePath: '/fake/dup.jsonl', cwd: tmpdir(), lastModified: 1, timestamp: '' })
       const groups = setup.service.listPersistedSessions()
       const allIds = groups.flatMap(g => g.sessions.map(s => s.id))
       // 活跃 session 出现一次，持久化副本被过滤
@@ -1563,7 +1674,7 @@ describe('SessionService · Facade', () => {
 
     // ── 换行编码（转义协议，composer 四符号 §3.3.3 / 探针 P3）──
     // 命令必须单行：真实换行编码为字面 \n 两字符，原生反斜杠编码为 \\（防歧义），
-    // extension 侧 decodeNewlineEscapes 互逆还原（两侧测试对同一 wire 协议双向钉死）。
+    // extension 侧经 shared decodeNewlineEscapes 互逆还原（规范实现单源，见下方互逆断言）。
 
     it('message text 含真实换行 → 编码为字面 \\n（命令保持单行）', async () => {
       const { id, client } = await setup.seedSession()
@@ -1586,19 +1697,16 @@ describe('SessionService · Facade', () => {
       expect(client.prompt).toHaveBeenCalledWith('/subagents start my-slug 任务一\\n任务二')
     })
 
-    // ── 转义协议互逆（encode ↔ extension decodeNewlineEscapes）──
-    // decode 镜像：extension 侧 decodeNewlineEscapes 的等价实现（runtime 不依赖
-    // extension 包，互逆性靠两侧测试对同一 wire 协议各自钉死）。
-    const decodeMirror = (s: string): string =>
-      s.replace(/\\\\|\\n/g, (m) => (m === '\\\\' ? '\\' : '\n'))
-
+    // ── 转义协议互逆（encode（runtime 自写）↔ decodeNewlineEscapes（@taiji/shared 规范实现））──
+    // 真单源断言：decode 不再用本文件手工镜像（双侧同错假绿形态），直接消费 shared
+    // 导出的规范实现（extension command-actions 同语义），encode 与 decode 分属两处实现。
     it.each([
       ['原文含字面 \\n（反斜杠+n）', '路径 C:\\new folder'],
       ['原文含反斜杠（非 n 前缀）', '正则 \\d+ 与 \\\\server\\share'],
       ['原文含真实换行', '第一行\n第二行'],
       ['混合：反斜杠 + 真实换行 + 字面 \\n 同文', 'C:\\new\n正则 \\d+\n收尾'],
     ])('encodeDirectiveText 互逆（%s）→ decode(encode(x)) === x', (_label, original) => {
-      expect(decodeMirror(encodeDirectiveText(original))).toBe(original)
+      expect(decodeNewlineEscapes(encodeDirectiveText(original))).toBe(original)
     })
 
     it('encodeDirectiveText 产物不含真实换行（命令单行不变式）', () => {
@@ -1704,17 +1812,10 @@ describe('SessionService · onSessionExit callback', () => {
     const attachSpy = vi.fn()
     const localSetup = createSetup()
     // 替换 adapterFactory：直接 new 一个带 spy 的 service
-    const localService = new SessionService(
-      localSetup.pm,
-      localSetup.broker,
-      () => ({ attach: attachSpy, detach: detachSpy }),
-      '/tmp',
-      localSetup.extensionService,
-      new PiConfigStore(),
-      new PiSessionStore(),
-      localSetup.gitInfoReader,
-      { record: vi.fn(), list: vi.fn().mockReturnValue([]) } as unknown as ConstructorParameters<typeof SessionService>[8],
-    )
+    const localService = createServiceWithSpyAdapters(localSetup, attachSpy, detachSpy)
+    // 防泄漏登记（notify-once review must-fix）：localService 的 replicated-state
+    // 实例定时器需 afterEach 统一 dispose，否则撞 vitest worker teardown
+    trackScalarStates(localService, () => localSetup.clientMap.keys())
     const piSid = 'pi-detach-1'
     const client = makeMockClient({
       // W2 收口后 create 用 client.getState()，返回归一后的 state 对象
@@ -1722,8 +1823,7 @@ describe('SessionService · onSessionExit callback', () => {
         sessionId: piSid, sessionFile: `/fake/${piSid}.jsonl`,
       }),
     })
-    vi.mocked(localSetup.pm.createSession).mockResolvedValueOnce(client as unknown as IPiEngine)
-    localSetup.clientMap.set(piSid, client)
+    stubNextCreatedClient(localSetup, client, { clientMapId: piSid })
     await localService.create(tmpdir(), 'l')
     expect(attachSpy).toHaveBeenCalledTimes(1)
     localSetup.triggerExit(piSid, 0)
@@ -2102,5 +2202,27 @@ describe('SessionService · 业务持久化写安全守卫（W2 ipc-converge-a3 
       expect(existsSync(join(dir, 'segments.json'))).toBe(true)
       expect(existsSync(join(dir, 'segments.json.tmp'))).toBe(false)
     })
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────
+// revokeMessage facade（message-revoke D2/U4：七步编排经 RevokeOrchestrator 委派）
+// ───────────────────────────────────────────────────────────────────
+
+describe('SessionService · revokeMessage', () => {
+  let setup: Setup
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetMockState()
+    autoId = 0
+    setup = createSetup()
+  })
+
+  it('facade 委派编排全链可用：空树定位 miss → no-mapping（deps 窄注入经真实装配跑通）', async () => {
+    setup.mountClient('sid-r1')
+    const reply = await setup.service.revokeMessage('sid-r1', 'u-missing-target')
+    // mock client 默认空 entries（getEntries → {entries:[], leafId:null}）→ 通道 a/b 均
+    // miss → no-mapping（六码之一；走完 hold/空闲/workflow 检查 + ensureActive + 读树）
+    expect(reply).toEqual({ sessionId: 'sid-r1', revoked: false, error: 'no-mapping' })
   })
 })

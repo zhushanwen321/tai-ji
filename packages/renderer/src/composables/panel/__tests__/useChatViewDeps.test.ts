@@ -34,7 +34,6 @@ vi.mock('@taiji/ui/features/chat/markdown', () => ({
 vi.mock('@taiji/ui/features/chat/markdown-incremental', () => ({
   createIncrementalRenderCache: () => ({ boundary: 0, prefixText: '', prefixSegments: [], nextSegId: 0 }),
   renderIncremental: (...args: unknown[]) => mockRenderIncremental(...(args as [string, unknown, unknown, unknown])),
-  shouldFinalizeStreamingFence: () => true,
   STREAMING_FENCE_SILENCE_MS: 200,
 }))
 vi.mock('@taiji/ui/features/chat/mermaid', () => ({

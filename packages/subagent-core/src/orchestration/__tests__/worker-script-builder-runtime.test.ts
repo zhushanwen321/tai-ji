@@ -11,7 +11,6 @@
  * - 脚本 throw → {type:"error"} 消息 + workerLogs（诊断不丢）
  * - agent() 调用链路：postMessage(agent-call) ↔ postMessage(agent-result)
  * - abort 消息：pending agent() reject → WorkflowAbortedError
- * - workflow() 嵌套调用链路
  * - module.exports.execute() 自动调用入口
  * - _safePost 的 DataCloneError 防御分支
  *
@@ -31,13 +30,6 @@ interface AgentCallMsg {
   callId: number;
   opts: { prompt: string; description?: string; schema?: unknown; [k: string]: unknown };
   phase?: string;
-}
-/** workflow-call 消息：worker 请求主线程执行嵌套 workflow。 */
-interface WorkflowCallMsg {
-  type: "workflow-call";
-  callId: number;
-  name: string;
-  args: Record<string, unknown>;
 }
 /** return 消息：脚本正常结束，带回结果。 */
 interface ReturnMsg {
@@ -71,9 +63,6 @@ function hasType<T extends string>(m: unknown, type: T): boolean {
 function isAgentCall(m: unknown): m is AgentCallMsg {
   return hasType(m, "agent-call");
 }
-function isWorkflowCall(m: unknown): m is WorkflowCallMsg {
-  return hasType(m, "workflow-call");
-}
 function isReturn(m: unknown): m is ReturnMsg {
   return hasType(m, "return");
 }
@@ -103,8 +92,6 @@ interface RunResult {
   workerError?: string;
   /** 收到的 agent-call 消息列表。 */
   agentCalls: AgentCallMsg[];
-  /** 收到的 workflow-call 消息列表。 */
-  workflowCalls: WorkflowCallMsg[];
 }
 
 /** workerLogs 条目守卫收窄 + message 包含判定（元素类型 unknown，断言前先收窄）。 */
@@ -125,8 +112,6 @@ interface RunOptions {
    *  用于 returnMeta 测试：回发包含 sessionFile/worktreePath/error 的完整 result，
    *  worker handler 会原样取这些字段 resolve。未提供该项的索引退回 {content:"fallback", parsedOutput: agentResults[idx]}。 */
   agentResultObjects?: Record<string, unknown>[];
-  /** 主线程对收到的 workflow-call 的处理：回发 workflow-result。 */
-  handleWorkflowCall?: (msg: WorkflowCallMsg) => unknown;
   /** 是否在收到首个 agent-call 后立即发 abort（测 abort 路径）。 */
   abortAfterFirstAgentCall?: { reason: string };
   /** 超时（S9：CI 环境放宽，规避真实 Worker 启动慢导致的假阳）。 */
@@ -166,7 +151,7 @@ function runWorker(userScript: string, opts: RunOptions = {}): Promise<RunResult
     // S8：创建后立即登记，afterEach 兜底清理（防止 promise 泄漏导致 Worker 未终止）
     createdWorkers.push(worker);
 
-    const result: RunResult = { agentCalls: [], workflowCalls: [], logMessages: [] };
+    const result: RunResult = { agentCalls: [], logMessages: [] };
     let agentCallIdx = 0;
     let resolved = false;
     const timer = setTimeout(() => {
@@ -199,10 +184,6 @@ function runWorker(userScript: string, opts: RunOptions = {}): Promise<RunResult
           result: fullResult ?? { content: "fallback", parsedOutput: parsed },
           cached: false,
         });
-      } else if (isWorkflowCall(raw)) {
-        result.workflowCalls.push(raw);
-        const wfResult = opts.handleWorkflowCall ? opts.handleWorkflowCall(raw) : { ok: true };
-        worker.postMessage({ type: "workflow-result", callId: raw.callId, result: wfResult });
       } else if (isLog(raw)) {
         // [OR-6/T7④] 独立 log 消息收集（主线程真实 runtime 当前无消费 case，测试
         // harness 收集以断言「协议消息仍发出」通路不被回退）。
@@ -311,7 +292,7 @@ describe("buildWorkerScript runtime — _safePost scope regression (exit code 1 
   it("[F1] execute() 返回不可克隆值 → 回发可克隆 error 消息（不再静默 exit(0)），DataCloneError 详情在 workerLogs", async () => {
     // 修复前：return 值含 function → _safePost 吞掉 DataCloneError 返回 false → 无任何
     // 消息发出 → worker 静默 exit(0) → 主线程 handleWorkerExit(0) no-op → run 永久
-    // running、runAndWait 悬挂（runWorker 会 2s 超时 reject，即本测试修复前会红）。
+    // running、无终态（runWorker 会 2s 超时 reject，即本测试修复前会红）。
     // 修复后：.then 检测 _safePost 失败，回发可克隆 error 消息接管。
     const script = `return { ok: true, fn: () => 1 };`;
     const res = await runWorker(script);
@@ -344,21 +325,6 @@ describe("buildWorkerScript runtime — 之前缺失的路径覆盖", () => {
     expect(res.agentCalls).toHaveLength(1);
     expect(res.workerError).toBeUndefined();
     expect(res.errorMessage).toMatch(/Workflow aborted/);
-    expect(res.exitCode).not.toBe(1);
-  });
-
-  it("S5 workflow() 嵌套调用：workflow-call ↔ workflow-result 链路正常", async () => {
-    const script = `
-      const r = await workflow("sub-wf", { x: 1 });
-      return { nested: r };
-    `;
-    const res = await runWorker(script, {
-      handleWorkflowCall: (msg) => ({ echo: msg.args, name: msg.name }),
-    });
-    expect(res.workflowCalls).toHaveLength(1);
-    expect(res.workflowCalls[0]!.name).toBe("sub-wf");
-    expect(res.workerError).toBeUndefined();
-    expect(res.returnValue).toEqual({ nested: { echo: { x: 1 }, name: "sub-wf" } });
     expect(res.exitCode).not.toBe(1);
   });
 
@@ -619,7 +585,7 @@ describe("buildWorkerScript runtime — P3/P4 run-level model/thinkingLevel over
 
 describe("buildWorkerScript runtime — string 分支 maxTurns ?? 语义保真（F-2）", () => {
   // 旧实现 `(cond && secondArg.maxTurns) || undefined` 把显式 0 抹成 undefined →
-  // 落 runSpawn 的 env 兑底（SPAWN_WATCHDOG env 设置时误挂 watchdog），与对象分支
+  // 落 runSpawn 的 env 兜底（SPAWN_WATCHDOG env 设置时误挂 watchdog），与对象分支
   // （直接透传保真）语义分裂。锁定运行时行为：string 分支传 0 → postMessage
   // opts.maxTurns === 0。
   it("agent(str, { maxTurns: 0 }) → postMessage opts.maxTurns === 0（不被抹成 undefined）", async () => {
@@ -638,3 +604,68 @@ describe("buildWorkerScript runtime — string 分支 maxTurns ?? 语义保真�
   });
 });
 
+
+describe("buildWorkerScript runtime — schema 出口契约（ADR-0092 保留项）", () => {
+  // [ADR-0092] 带 schema 却既无 parsedOutput 也无显式 error = 结果出口断裂：
+  // 对象形态是 schema 调用唯一合法结果，无文本回落选项——出口不得静默把正文
+  // 文本当结果（脚本无感知）。违规出口 resolve 错误说明（returnMeta 走 error 字段）。
+
+  it("带 schema + 无 parsedOutput + 无 error → resolve 错误说明（不静默回落正文文本）", async () => {
+    const script = `
+      const v = await agent({ prompt: "p", schema: { type: "object" } });
+      return { got: v };
+    `;
+    const res = await runWorker(script, { agentResultObjects: [{ content: "plain prose" }] });
+    expect(res.workerError).toBeUndefined();
+    expect(res.returnValue).toEqual({
+      got: expect.stringMatching(/neither a parsed object nor an explicit error/),
+    });
+  });
+
+  it("带 schema + returnMeta → error 字段带说明、value 同串（脚本可判错）", async () => {
+    const script = `
+      const r = await agent({ prompt: "p", schema: { type: "object" }, returnMeta: true });
+      return r;
+    `;
+    const res = await runWorker(script, { agentResultObjects: [{ content: "plain prose" }] });
+    expect(res.workerError).toBeUndefined();
+    const ret = res.returnValue as { error?: string; value?: string };
+    expect(ret.error).toMatch(/ADR-0092/);
+    expect(ret.value).toMatch(/neither a parsed object nor an explicit error/);
+  });
+
+  it("无 schema + 无 parsedOutput → content 回落不变（容错策略不受影响）", async () => {
+    const script = `
+      const v = await agent({ prompt: "p" });
+      return { got: v };
+    `;
+    const res = await runWorker(script, { agentResultObjects: [{ content: "plain prose" }] });
+    expect(res.returnValue).toEqual({ got: "plain prose" });
+  });
+
+  it("带 schema + 显式 error → content 回落不变（失败 resolve 容错形态保留）", async () => {
+    const script = `
+      const v = await agent({ prompt: "p", schema: { type: "object" } });
+      return { got: v };
+    `;
+    const res = await runWorker(script, {
+      agentResultObjects: [{ content: "fallback text", error: "boom" }],
+    });
+    expect(res.returnValue).toEqual({ got: "fallback text" });
+  });
+
+  it("缓存命中路径同判：带 schema + 无 parsedOutput 无 error 的缓存结果 → 错误说明", async () => {
+    const script = `
+      const v = await agent({ prompt: "p", schema: { type: "object" } });
+      return { got: v };
+    `;
+    // callCache 预填 = 重放命中（callId 0）；缓存条目无 parsedOutput 无 error。
+    const res = await runWorker(script, {
+      callCache: new Map([[0, { content: "cached prose" }]]),
+    });
+    expect(res.workerError).toBeUndefined();
+    expect(res.returnValue).toEqual({
+      got: expect.stringMatching(/neither a parsed object nor an explicit error/),
+    });
+  });
+});

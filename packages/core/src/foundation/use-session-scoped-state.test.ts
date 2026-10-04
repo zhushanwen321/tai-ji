@@ -6,27 +6,36 @@
  * - current 按 sid 查分区
  * - update(updater) 操作当前分区
  * - cleanup(sid) 移除分区
+ * - D-B2-1：cleanup 后 updateFor 对已删分区 no-op（迟到写拦截）+ 重新 init 出列后
+ *   updateFor 恢复写入（删后同 id 重建不丢写）+ isDeleted 查询同生命周期
+ *  （分区外辅助表的迟到写守卫口径延伸）
  * - 切 sid 后 current 切分区（不丢旧数据，切回恢复）
  * - null sid 返回默认实例不写 Map（防 null key 污染）
  * - registerSessionCleanup / triggerSessionCleanups 注册触发机制
  * - C-1 条件注册守卫三分支（有 scope dispose 反注册 / 无 scope 不 warn 不抛 /
  *   无 scope 时 cleanup 保留在注册表 = 前提 2）
- * - C-1 census 静态锁（全仓非测试调用点清单 = 16 处实测快照，清单外新调用点即红）
+ * - C-1 census 静态锁（扫描设施与快照单一源 = scripts/check-session-scoped-state-census.mjs，
+ *   本文件薄包装消费其导出保持 CI 覆盖；快照 15 文件各 1 处，清单外新调用点即红）
+
  *
  * 运行：cd packages/core && npx vitest run src/foundation/use-session-scoped-state.test.ts
  * 禁止 node:test / tsx --test。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { effectScope, ref, nextTick } from 'vue'
-import { readdirSync, readFileSync } from 'node:fs'
-import { dirname, join, relative, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import {
   useSessionScopedState,
   registerSessionCleanup,
   triggerSessionCleanups,
   __clearSessionCleanupRegistryForTest,
 } from './use-session-scoped-state'
+// @ts-expect-error —— 无类型 .mjs 守卫脚本（Node 直跑形态），core 不为测试引入 allowJs；类型边界见下方别名
+import { collectCallSites, compareCensusToSnapshot } from '../../../../scripts/check-session-scoped-state-census.mjs'
+
+/** census 脚本（无类型 .mjs）的类型边界：仓库相对路径 → 非测试调用点次数 */
+type CensusCallSites = Record<string, number>
+const collectCensusCallSites = collectCallSites as () => CensusCallSites
+const censusDiffToSnapshot = compareCensusToSnapshot as (actual: CensusCallSites) => string[] | null
 
 // 模块级 cleanup registry 跨测试可能残留（未包 effectScope 的用例无法触发反注册），
 // 每个用例前清空，防污染下游断言
@@ -147,6 +156,61 @@ describe('W1 useSessionScopedState: Map 分区工厂', () => {
     // 再次访问 a → 重新 init，状态重置
     expect(result.current.value).toEqual({ n: 0 })
     expect(init).toHaveBeenCalledTimes(2)
+  })
+
+  it('D-B2-1：cleanup 后 updateFor 对已删分区 no-op（迟到写不复活分区）', () => {
+    const init = vi.fn(() => ({ v: 0 }))
+    const sid = ref<string | null>('late-write')
+    const { result } = runWithScope(() => useSessionScopedState(sid, init))
+
+    void result.current.value // 建立 'late-write' 分区
+    result.update((s) => { s.v = 42 })
+    expect(init).toHaveBeenCalledTimes(1)
+
+    // session 销毁（cleanup：分区删除 + deletedSids 记入）后，迟到的 RPC resolve /
+    // 广播经 updateFor 到达：拦截 no-op，不重建分区、不写入
+    result.cleanup('late-write')
+    result.updateFor('late-write', (s) => { s.v = 99 })
+    expect(init).toHaveBeenCalledTimes(1) // updateFor 未触发分区重建
+
+    // 佐证迟到写未落地：current 路径读分区 = 重建点，新实例从初始值开始（而非 99）
+    expect(result.current.value.v).toBe(0)
+    expect(init).toHaveBeenCalledTimes(2)
+  })
+
+  it('D-B2-1 出列规则锚：cleanup 后经 current 重新 init，updateFor 恢复写入落新分区', () => {
+    const sid = ref<string | null>('reborn')
+    const { result } = runWithScope(() => useSessionScopedState(sid, () => ({ v: 0 })))
+
+    void result.current.value
+    result.update((s) => { s.v = 1 })
+    result.cleanup('reborn')
+
+    // 重建点即出列点：current 路径重新 init（update 路径共享 getOrCreatePartition 单点，
+    // 出列行为同构），同 sid 删除后重建（重导入等边缘形态）进入新生命周期
+    expect(result.current.value.v).toBe(0)
+
+    // 出列后 updateFor 恢复写入：删后同 id 重建不丢写
+    result.updateFor('reborn', (s) => { s.v = 42 })
+    expect(result.current.value.v).toBe(42)
+  })
+
+  it('D-B2-1 口径延伸 isDeleted：与 updateFor 拦截同生命周期（cleanup 置 true / 重建出列复位 false / 未删恒 false）', () => {
+    const sid = ref<string | null>('aux-map')
+    const { result } = runWithScope(() => useSessionScopedState(sid, () => ({ v: 0 })))
+
+    // 未删分区（含从未建立过分区的 sid）→ false：辅助表写入点照常放行
+    expect(result.isDeleted('aux-map')).toBe(false)
+    expect(result.isDeleted('never-created')).toBe(false)
+
+    // cleanup（session 销毁）→ true：分区外辅助表的迟到写守卫生效（与 updateFor 拦截同源）
+    result.cleanup('aux-map')
+    expect(result.isDeleted('aux-map')).toBe(true)
+
+    // 分区重建（同 id 新生命周期，重导入等边缘形态）→ 出列复位 false：辅助表恢复写入，
+    // 与 updateFor 的「删后同 id 重建不丢写」语义一致（自建登记无此出列，会永久误拦）
+    void result.current.value
+    expect(result.isDeleted('aux-map')).toBe(false)
   })
 
   it('切 sid 不丢旧数据，切回恢复（AC-2 隐含契约）', () => {
@@ -334,83 +398,16 @@ describe('C-1 条件注册守卫（console-noise-triage D1：if (getCurrentScope
 })
 
 describe('C-1 census 静态锁（守卫后误调用的唯一入口拦，新调用点即红）', () => {
-  // 仓库根：本文件位于 <repo>/packages/core/src/foundation/ 下
-  const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..')
-  // 双形态锁模式：裸括号 `useSessionScopedState(` 与泛型 `useSessionScopedState<T>(`，
-  // 含空白变体（\s*）。10/14 调用点为泛型形态——只锁裸括号即击穿「即红」。
-  const CALL_PATTERN = /useSessionScopedState\s*[<(]/
-  // 计数用全局变体（非 g 的 match 只返回首个匹配，同行多调用会少计；g 版仅用于
-  // count、不用于 .test——g 标志的 lastIndex 状态会让重复 .test 结果交替翻转）
-  const CALL_PATTERN_G = new RegExp(CALL_PATTERN.source, 'g')
-  // 扫描产物目录 / 依赖目录（源码快照锁的盲区，与 census 无关）
-  const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', 'test-results'])
+  // 扫描设施 + 快照单一源 = scripts/check-session-scoped-state-census.mjs（与 pre-commit
+  // 干跑同一实现，零双口径）；匹配口径（双形态锁模式 / 工厂定义行排除 / 扫描剪枝）与
+  // 快照修正流程登记在脚本头注释。锁模式回归（如漏掉泛型形态）会表现为 census 计数
+  // 下降 → 下方双向对账 diff 非空即红，无需独立自检用例。
+  it('全仓非测试调用点 census 与快照逐文件一致（15 文件各 1 处，清单外新调用点即红）', () => {
+    const actual = collectCensusCallSites()
+    // 双向对账：新增 / 消失 / 计数变化任一即非 null（逐文件清单而非总数——防
+    // 「+1 新调用 +1 删除」净额抵消漏检）
+    expect(censusDiffToSnapshot(actual)).toBeNull()
+    expect(Object.keys(actual)).toHaveLength(15)
 
-  /**
-   * 实测快照（console-noise-triage §2 前提 3 census 机制 + C-1 实施期复测自校验）：
-   * 16 个文件各 1 处非测试调用点（泛型 12 / 裸括号 4）；含模块级 2 处
-   * （drawer/control.ts + useSessionTrace.ts，即 CDP 捕获的恒现 2 条 warn 源头）。
-   * 清单外出现新调用点（新文件，或已有文件内第 2 处）即红 → 审阅其 scope 上下文。
-   * 锁的是「误调用类」的入口边界：守卫后无 scope 误调用零运行时信号（观测损失已登记）。
-   */
-  const CENSUS_SNAPSHOT: Record<string, number> = {
-    'packages/core/src/domain/drawer/control.ts': 1,
-    'packages/dom-core/src/composer/input/history.ts': 1,
-    'packages/renderer/src/components/panel/BtwPanel.vue': 1,
-    'packages/renderer/src/components/panel/MessageStream.vue': 1,
-    'packages/renderer/src/components/panel/tray/TrayNativePanel.vue': 1,
-    'packages/renderer/src/composables/features/file-tree/useGitStatus.ts': 1,
-    'packages/renderer/src/composables/features/model/useContextUsage.ts': 1,
-    'packages/renderer/src/composables/features/model/useGenStats.ts': 1,
-    'packages/renderer/src/composables/features/sidebar/useBackgroundTasks.ts': 1,
-    'packages/renderer/src/composables/features/trace/useSessionTrace.ts': 1,
-    'packages/renderer/src/composables/panel/composer-shell.ts': 1,
-    'packages/renderer/src/composables/panel/useBtwTabData.ts': 1,
-    'packages/renderer/src/composables/panel/useCompactQueue.ts': 1,
-    'packages/renderer/src/composables/panel/useSkillNoticeStream.ts': 1,
-    'packages/renderer/src/stores/plan-store.ts': 1,
-    'packages/ui/src/extension-host/dialog-request-queue.ts': 1,
-  }
-
-  /** 收集全仓非测试源码（.ts/.tsx/.vue）中的工厂调用点：path → 调用次数 */
-  function collectCallSites(): Record<string, number> {
-    const out: Record<string, number> = {}
-    const selfPath = fileURLToPath(import.meta.url)
-    const walk = (dir: string): void => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const abs = join(dir, entry.name)
-        if (entry.isDirectory()) {
-          if (SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) continue
-          walk(abs)
-          continue
-        }
-        if (!entry.isFile()) continue
-        if (!/\.(ts|tsx|vue)$/.test(entry.name)) continue
-        if (/\.(spec|test)\.(ts|tsx|vue)$/.test(entry.name)) continue // 测试文件
-        if (abs === selfPath) continue // 本测试文件
-        if (abs.includes(`${sep}__tests__${sep}`)) continue
-        const lines = readFileSync(abs, 'utf8').split('\n')
-        let count = 0
-        for (const line of lines) {
-          if (!CALL_PATTERN.test(line)) continue
-          // 工厂定义行非调用点（`export function useSessionScopedState<T>(` 同样命中锁模式）
-          if (line.includes('function useSessionScopedState')) continue
-          count += (line.match(CALL_PATTERN_G) ?? []).length
-        }
-        if (count > 0) out[relative(REPO_ROOT, abs)] = count
-      }
-    }
-    walk(REPO_ROOT)
-    return out
-  }
-
-  it('全仓非测试调用点清单 = 16 处实测快照（清单外新调用点即红）', () => {
-    expect(collectCallSites()).toEqual(CENSUS_SNAPSHOT)
-  })
-
-  it('锁模式自检：裸括号 / 泛型 / 空白变体双形态命中，import 引用不误报', () => {
-    expect(CALL_PATTERN.test('const s = useSessionScopedState(sid, init)')).toBe(true)
-    expect(CALL_PATTERN.test('const s = useSessionScopedState<Partition>(')).toBe(true)
-    expect(CALL_PATTERN.test('const s = useSessionScopedState <Partition>(')).toBe(true)
-    expect(CALL_PATTERN.test("import { useSessionScopedState } from './x'")).toBe(false)
   })
 })

@@ -11,8 +11,6 @@ import {
   CRASH_REBUILD_BACKOFF_MS,
   CRASH_REBUILD_MAX_ATTEMPTS,
   ENGINE_PROTOCOL_VERSION,
-  ENGINE_EVENT_COALESCE_DEFAULT,
-  ENGINE_EVENT_COALESCE_ENV,
   HANDSHAKE_TIMEOUT_MS,
   REVERSE_REQUEST_TIMEOUT_MS,
   STDERR_TAIL_CHARS,
@@ -109,11 +107,6 @@ describe("量级常量（impl-plan §2.1 逐项写死）", () => {
 
   it("stderr 崩溃现场尾部 400 字符", () => {
     expect(STDERR_TAIL_CHARS).toBe(400);
-  });
-
-  it("事件合并默认关闭（TAIJI_ENGINE_EVENT_COALESCE=0，A1 逐字段等价前提）", () => {
-    expect(ENGINE_EVENT_COALESCE_ENV).toBe("TAIJI_ENGINE_EVENT_COALESCE");
-    expect(ENGINE_EVENT_COALESCE_DEFAULT).toBe("0");
   });
 });
 
@@ -303,5 +296,25 @@ describe("run.params.ctx 增量字段（Option C sessionDir：宿主权威 subag
   it("v1 形态（无 sessionDir）零破坏——additive 可选，旧引擎走 [LEGACY] fallback", () => {
     const run: RunParams = { runId: "run-1", task: { prompt: "do" }, ctx: v1Ctx };
     expect(run.ctx.sessionDir).toBeUndefined();
+  });
+});
+
+describe("schema 载体统一（D1：schema 跨进程只经 wire task.schema 单字段）", () => {
+  /** keyof 判定形态 true/false（编译期可锁），供下方退役断言复用。 */
+  type HasKey<T, K extends PropertyKey> = K extends keyof T ? true : false;
+
+  it("RunContextParams 不含 schemaEnv 键（编译期锁——重新引入该字段即编译红）", () => {
+    const retired: AssertMutuallyAssignable<HasKey<RunContextParams, "schemaEnv">, false> = true;
+    expect(retired).toBe(true);
+  });
+
+  it("schema 本体经 task.schema 承载、ctx 不出现 schemaEnv 键（运行时帧形态）", () => {
+    const run: RunParams = {
+      runId: "run-1",
+      task: { prompt: "do", schema: { type: "object" } },
+      ctx: { cwd: "/tmp" },
+    };
+    expect(run.task.schema).toEqual({ type: "object" });
+    expect("schemaEnv" in run.ctx).toBe(false);
   });
 });

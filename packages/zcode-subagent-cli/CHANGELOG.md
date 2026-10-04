@@ -1,5 +1,23 @@
 # @zhushanwen/zcode-subagent-cli
 
+## 0.4.4
+
+### Patch Changes
+
+- 0d36077d4: Server frame loop consolidates onto the shared SDK server entry (classify/handle helpers); engine-specific ack semantics unchanged.
+
+## 0.4.3
+
+### Patch Changes
+
+- 8aa4b40e8: chore: refresh dependency range (triggered by @zhushanwen/subagent-engine-sdk@0.7.0 → @zhushanwen/subagent-engine-sdk@0.7.1)
+
+## 0.4.2
+
+### Patch Changes
+
+- 50f31a73c: Fire-and-forget reverse requests (`host/streamDelta`, `host/handleReady`) no longer risk crashing the engine process via unhandled rejection: a failed reverse request now logs a warning and the run continues without that channel report. A synchronous write failure (e.g. closed stdout) inside a reverse request is contained — the pending entry and its timer are cleaned up and the call rejects with an actionable message. The retired `schemaEnv` context channel is dropped from run-context restoration; schema enforcement now travels as the wire `task.schema` field.
+
 ## 0.4.1
 
 ### Patch Changes

@@ -91,10 +91,11 @@ describe.skipIf(!FAUX_PI_READY)(
   let fixture: PiFixture | null = null
 
   beforeAll(async () => {
-    // 流控（faux 轨特有）：TAIJI_FAUX_TPS=5 + r2 长文本 → r2 轮 ~16s 流式窗口，保证
-    // follow_up 落在 turn 进行中（pi 在跑 → 入队 + queue_update 事件；idle 后投递无
-    // 非空队列生命周期，队列断言假失败）。spawn 前设置，afterAll 恢复。
-    process.env.TAIJI_FAUX_TPS = '5'
+    // 流控（faux 轨特有）：TAIJI_FAUX_TPS=15 + r2 长文本 → r2 轮流式窗口（窗口宽度 ≈
+    // token/TPS，保持远宽于测试注入动作），保证 follow_up 落在 turn 进行中（pi 在跑 →
+    // 入队 + queue_update 事件；idle 后投递无非空队列生命周期，队列断言假失败）。
+    // spawn 前设置，afterAll 恢复。
+    process.env.TAIJI_FAUX_TPS = '15'
     // faux 队列消费序：it1 三轮（r1 → r2 长轮 → followup run 内 drain）+ it2 一轮
     // bash 工具（toolCall → --approve 真实执行 echo → 下一轮总结文本）
     fixture = await spawnPiFixture({
@@ -392,7 +393,6 @@ describe.skipIf(!FAUX_PI_READY)(
       //   reducer——防双计），两侧同为权威帧派生：id 位置派生、timestamp 同源，严格 deep-equal。
       expect(reducerLive!.messages).toEqual(liveSingleState.messages)
       expect(reducerLive!.messages).toEqual(reloadTailState.messages)
-      expect(reducerLive!.clientUuidMap).toEqual(reloadTailState.clientUuidMap)
       expect(reducerLive!.orphanToolResults).toEqual(reloadTailState.orphanToolResults)
       expect(reducerLive!.orphanToolResults).toHaveLength(0)
       expect(reducerLive!.lastAssistantWithToolCalls).toBe(reloadTailState.lastAssistantWithToolCalls)

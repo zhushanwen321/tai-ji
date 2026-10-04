@@ -26,7 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createRecord } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 
 /** 构造 ExecutionRecord（running 基线，over 覆盖）。 */
 function makeRecord(id: string, over: Partial<ExecutionRecord> = {}): ExecutionRecord {
@@ -61,7 +61,7 @@ describe("markRoundIdle 轮终派生 manifest 投影（B2 簿记⑫）", () => {
     manifestDir = path.join(tmpDir, "records");
     store = makeStore(sessionsDir, manifestDir);
     sessionFile = path.join(sessionsDir, "2026-01-01_uuid.jsonl");
-    fs.writeFileSync(sessionFile, "{}\n", "utf-8"); // pi 锚文件在盘（writeSettledState 写 sidecar 同目录）
+    fs.writeFileSync(sessionFile, "{}\n", "utf-8"); // pi 锚文件在盘（binding 快照写 sidecar 同目录）
   });
 
   afterEach(() => {
@@ -120,7 +120,7 @@ describe("markRoundIdle 轮终派生 manifest 投影（B2 簿记⑫）", () => {
 
   it("回归对照：markFinalized 终态路径产物形态不变（closed + closedReason）", () => {
     const record = makeRecord("bg-final", { sessionFile });
-    // 终态内存冻结留调用方（completeRecord/tryTransition 桥接——markFinalized 只吸收
+    // 终态内存冻结留调用方（completeLegacyClosed/trySettleLegacyClosed——markFinalized 只吸收
     // 持久化面，不回写 record.closedReason，见 record-store 方法头）。
     record.closedReason = "gc";
     store.register(record);
@@ -136,8 +136,11 @@ describe("markRoundIdle 轮终派生 manifest 投影（B2 簿记⑫）", () => {
   it("跨轮幂等：多轮轮终重复写派生投影（缓存性质），manifest 恒为最新合法 idle 形态", () => {
     const record = makeRecord("bg-multi", { sessionFile });
     store.register(record);
-    store.markRoundIdle("bg-multi", { kind: "success", content: "r1" });
-    store.markRoundIdle("bg-multi", { kind: "success", content: "r2" });
+    expect(store.markRoundIdle("bg-multi", { kind: "success", content: "r1" })).toBe(true);
+    // 第二轮（[§4] 轮终原语的同状态在途门：须先过轮始门）——派生投影重写幂等，
+    // manifest 恒为最新合法 idle 形态。
+    expect(store.markRoundStarted("bg-multi")).toBe(true);
+    expect(store.markRoundIdle("bg-multi", { kind: "success", content: "r2" })).toBe(true);
 
     const raw = readManifest("bg-multi");
     expect(raw["id"]).toBe("bg-multi");

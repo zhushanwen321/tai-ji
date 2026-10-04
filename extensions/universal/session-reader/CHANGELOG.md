@@ -1,5 +1,23 @@
 # @zhushanwen/pi-session-reader
 
+## 0.9.0
+
+### Minor Changes
+
+- 0d36077d4: workflow run 发现链收敛为单档：只识别 workflow-record v2 注册条目（recordPath 锚点指向 record 流），v1 全量快照条目与旧 workflow-state-link 指针条目不再被识别——历史格式 run 从读取面静默消失（不拒读、不报错；ADR-0095 裁决：项目未上线无历史数据，不迁移不兼容）。zcode 锚同步只认 v2 终态条，v1 快照形态不再命中。
+
+## 0.8.1
+
+### Patch Changes
+
+- 8aa4b40e8: chore: refresh dependency range (triggered by @zhushanwen/zcode-session-source@0.2.1 → @zhushanwen/zcode-session-source@0.2.2)
+
+## 0.8.0
+
+### Minor Changes
+
+- 50f31a73c: Teach session_read to discover and overview workflow runs recorded in the new v2 record-stream format: workflow refs now resolve through a three-tier entry chain (v2 workflow-record journal anchor > v1 snapshot > legacy workflow-state-link pointer), `.record.jsonl` streams are parsed directly into run overviews with three-state status (running | interrupted | done), and zcode session anchors additionally accept v2 settled subagent-record entries while keeping v1 snapshot reads compatible.
+
 ## 0.7.0
 
 ### Minor Changes

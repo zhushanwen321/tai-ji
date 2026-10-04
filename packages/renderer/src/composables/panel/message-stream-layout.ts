@@ -1,5 +1,5 @@
 /**
- * MessageStream 布局常量族（virta 布局 + ActivityStrip 行高 + dev 断言阈值）。
+ * MessageStream 布局常量族（virta 布局 + load-more 预留高度 + dev 断言阈值）。
  *
  * [D6 死路径清理 2026-09-09] 原本与常量同住的 useMessageStreamNotices composable
  * （isCompacting / isDispatching / hasWorkingTurn / forkNoticeBaseTop 状态聚合）已随
@@ -48,6 +48,7 @@ export const COMPACTING_NOTICE_HEIGHT = 32
 export const EXECUTING_BASH_NOTICE_HEIGHT = 32
 
 /**
+
  * 像素常量（design §4.1 附录 A）：itemSize 是 virta 的初始估算 hint（非强制，virta 自动从
  * 实测项重估）。与原手写虚拟滚动的 ESTIMATED_TURN_HEIGHT 一致，平滑迁移期减少首屏估算误差。
  * （[cw wave w3] 自 MessageStream.vue 随 ≤300 行拆分迁入——virta 布局常量族同源聚拢。）

@@ -105,6 +105,94 @@ export type WorktreeRebuildOutcome =
    */
   | { kind: "degrade-reopen"; reason: string };
 
+/** git 命令执行器签名（原语注入点；生产实现 = WorktreeManager.gitRunAsync）。 */
+export type WorktreeGitRunner = (args: string[], opts: { cwd: string }) => Promise<string>;
+
+/** addWorktreeWithStaleRecovery 入参。 */
+export interface AddWorktreeRecoveryOptions {
+  /** 主仓库根目录（git cwd）。 */
+  repo: string;
+  /** 目标分支名（`pi-sub-<recordId>`）——删残留分支的判据键。 */
+  branch: string;
+  /**
+   * `worktree add` 之后的完整 git 参数（是否带 `-b` 新建由调用方决定）：
+   * create = `["-b", branch, worktreePath, "HEAD"]`；reconstruct = `[worktreePath, branch]`。
+   */
+  addArgs: string[];
+  /**
+   * 首次 add 失败后是否删除同名残留分支（[1.3] 恢复序列的形态差异点）：
+   *   - true（create 的 `-b` 新建形态）：残留分支会让重试仍报
+   *     `a branch named '<b>' already exists`（git 2.52 实测：只 prune 无效），
+   *     必须删掉残留分支才能重试成功；
+   *   - false（reconstruct 的既有分支检出形态）：分支是重建依据（既有资产），
+   *     且「检出既有分支」形态下分支存在从来不是 add 失败原因——删掉后重试只会
+   *     报 `fatal: invalid reference: <b>`（git 2.52 实测），徒然销毁重建依据。
+   */
+  deleteStaleBranch: boolean;
+}
+
+/**
+ * [1.3 共享原语] 执行 `worktree add`，失败时按「prune →（可选）删残留分支 → 重试
+ * 一次」恢复陈旧 git 元数据；重试仍失败则照原样上抛（保持失败形态③「响亮上抛」语义）。
+ *
+ * 恢复对象：`<commonDir>/worktrees/<branch>` 陈旧登记（上次 create 回滚的
+ * `worktree remove` 被 bestEffort 吞掉 / checkout 目录被外部 rm 未 prune）——此时首次
+ * add 恒失败（既有分支形态报 `'<b>' is already used by worktree at ...`，`-b` 新建
+ * 形态报 `a branch named '<b>' already exists`）。create 与 reconstruct 共用本序列，
+ * 仅入参（是否带 `-b`）与 `deleteStaleBranch` 由调用方决定。
+ *
+ * 删分支的安全性依据（仅 `deleteStaleBranch=true` 时走到）：分支名 = `pi-sub-<recordId>`，
+ * 而 recordId 是 `sa-${crypto.randomUUID()}`（record-access.ts:371）产生的新 id，create
+ * 只在新 record 上跑——同名分支不可能是其他 record / 他人的资产，只可能是上次 create
+ * 回滚失败或 keepBranch 回收后的残留，故删除安全。
+ *
+ * prune 自身失败只记日志（不改变主流程：多数形态 prune 后重试即可）；走恢复分支时记
+ * 一条 debug 日志（便于真机排查陈旧元数据形态）。
+ */
+export async function addWorktreeWithStaleRecovery(
+  gitRun: WorktreeGitRunner,
+  opts: AddWorktreeRecoveryOptions,
+): Promise<void> {
+  const { repo, branch, addArgs, deleteStaleBranch } = opts;
+  try {
+    await gitRun(["worktree", "add", ...addArgs], { cwd: repo });
+    return;
+  } catch (addErr) {
+    // 恢复分支 debug 留痕（真机排查：陈旧 .git/worktrees/<branch> 登记形态）
+    logger.debug("[worktree] worktree add failed, attempting stale-metadata recovery", {
+      repo,
+      branch,
+      addArgs,
+      deleteStaleBranch,
+      error: addErr instanceof Error ? addErr.message : addErr,
+    });
+  }
+  try {
+    await gitRun(["worktree", "prune"], { cwd: repo });
+  } catch (pruneErr) {
+    bestEffort(pruneErr, "worktree prune (stale recovery)");
+  }
+  if (deleteStaleBranch) {
+    let branchExists = false;
+    try {
+      await gitRun(["rev-parse", "--verify", branch], { cwd: repo });
+      branchExists = true;
+    } catch {
+      // 分支不在（只有陈旧登记）——prune 已清，直接走重试
+      branchExists = false;
+    }
+    if (branchExists) {
+      try {
+        await gitRun(["branch", "-D", branch], { cwd: repo });
+      } catch (delErr) {
+        bestEffort(delErr, "branch delete (stale recovery)");
+      }
+    }
+  }
+  // 重试一次：仍失败照原样抛错（GitRunError——失败形态③ 响亮上抛，调用方按工具错误面重试）
+  await gitRun(["worktree", "add", ...addArgs], { cwd: repo });
+}
+
 export class WorktreeManager {
   // 全局注册表：跨 repo 记录所有活 worktree，reaper 遍历此表判孤儿。
   private readonly registry: WorktreeRegistry;
@@ -181,9 +269,18 @@ export class WorktreeManager {
       }
     }
 
-    await this.gitRunAsync(["worktree", "add", "-b", branch, worktreePath, "HEAD"], {
-      cwd: mainCwd,
-    });
+    // [1.3] worktree add 经共享原语：失败 → prune →（残留分支存在则 branch -D）→ 重试
+    // 一次（陈旧 .git/worktrees/<branch> 登记 / 上次回滚未删净的残留分支）。
+    await addWorktreeWithStaleRecovery(
+      (args, opts) => this.gitRunAsync(args, opts),
+      {
+        repo: mainCwd,
+        branch,
+        addArgs: ["-b", branch, worktreePath, "HEAD"],
+        // `-b` 新建形态：同名分支只可能是残留（recordId 是新 uuid），删除安全且必要。
+        deleteStaleBranch: true,
+      },
+    );
 
     // 注册到全局表，pid = 宿主（core）进程 pid。孤儿判据 = 宿主进程死活：回收
     // 责任在 core（finalizeRecord 正常路径清理；core 崩溃/重启后由 reaper 按 pid
@@ -282,6 +379,15 @@ export class WorktreeManager {
     // checkout 路径按 create() 同款约定派生（不读注册表——收口 cleanup 后注册表
     // 条目已删，重建依据 = 命名约定 + 入参 repoPath）。
     const worktreePath = path.join(os.tmpdir(), "pi-subagents", encodeCwd(repo), branch);
+    // [1.2] patch 备份存在性判定前置：该判定只依赖入参路径，必须排在一切副作用
+    //（rmSync 残留清理 / worktree add / registry.add / node_modules 软链）之前——
+    // patch 丢失形态与分支不存在形态一样零副作用返回 degrade-reopen。否则已重建的
+    // checkout + 注册表条目 + 软链全被丢弃并留存到宿主进程死亡（reaper 才收敛），
+    // 且消费方对 degrade-reopen 不接收 handle（conversation-continuation.ts:618 按
+    // kind 分流）→ 每续轮重复整套 git 重建再丢弃。
+    if (patchFile !== undefined && !fs.existsSync(patchFile)) {
+      return { kind: "degrade-reopen", reason: `patch backup file is gone: ${patchFile}` };
+    }
     // 前置清理残留 checkout 目录（同 create——上次 remove 未删净 / 外部残留）。
     if (fs.existsSync(worktreePath)) {
       try {
@@ -291,18 +397,17 @@ export class WorktreeManager {
       }
     }
     const baseCommit = (await this.gitRunAsync(["rev-parse", branch], { cwd: repo })).trim();
-    try {
-      await this.gitRunAsync(["worktree", "add", worktreePath, branch], { cwd: repo });
-    } catch {
-      // checkout 元数据残留（目录被外部 rm 未 prune）→ prune 清元数据后重试一次；
-      // 再失败 = 形态③（GitRunError 响亮上抛）。
-      try {
-        await this.gitRunAsync(["worktree", "prune"], { cwd: repo });
-      } catch (pruneErr) {
-        bestEffort(pruneErr, "worktree prune (reconstruct retry)");
-      }
-      await this.gitRunAsync(["worktree", "add", worktreePath, branch], { cwd: repo });
-    }
+    // [1.3] 同 create 的共享原语（去掉原内联 prune+重试）：既有分支检出形态，
+    // deleteStaleBranch=false——分支是重建依据（既有资产），删了就无分支可检出。
+    await addWorktreeWithStaleRecovery(
+      (args, opts) => this.gitRunAsync(args, opts),
+      {
+        repo,
+        branch,
+        addArgs: [worktreePath, branch],
+        deleteStaleBranch: false,
+      },
+    );
     // 补注册表条目（pid = 宿主进程 pid；add 成功后才登记，回滚对称 create MF#3——
     // 重建链后续失败不回滚 worktree/分支（分支是既有资产），仅注册表条目由 reaper
     // 按宿主进程死活收敛，无需显式回滚）。
@@ -330,10 +435,6 @@ export class WorktreeManager {
       mainCwd: repo,
     });
     if (patchFile !== undefined) {
-      if (!fs.existsSync(patchFile)) {
-        // 形态①：patch 备份丢失（收口后被外部清理）——未提交改动不可恢复。
-        return { kind: "degrade-reopen", reason: `patch backup file is gone: ${patchFile}` };
-      }
       try {
         // --check 干跑探测可应用性：退出非 0 = 冲突/上下文不匹配（形态②）。
         await this.gitRunAsync(["apply", "--check", patchFile], { cwd: worktreePath });
@@ -434,8 +535,9 @@ export class WorktreeManager {
    * 判据（唯一不删条件 = 进程还活着）：
    *   pid > 0 且 isProcessAlive(pid)   → 跳过（活进程，绝不删）
    *   pid > 0 且进程已死                → 孤儿（正常退出未 cleanup / 崩溃残留）
-   *   pid == 0 且超 SPAWN_GRACE_MS      → 孤儿（create 后崩溃，pid 永未补全）
-   *   pid == 0 且未超宽限               → 跳过（可能正在 spawn）
+   *   pid == 0 且超 SPAWN_GRACE_MS      → 孤儿（历史遗留条目/异常路径——正常路径
+   *                                       add 恒写宿主 pid，不再产生 pid=0）
+   *   pid == 0 且未超宽限               → 跳过（宽限防误清）
    *
    * 阶段二（D5b）：物理面（tmpdir checkout + 分支）与注册表双向 diff 收敛——
    * 兑现 worktree-registry.ts 头注释声称的「tmpdir + 分支对账兜底」。全流程
@@ -458,16 +560,19 @@ export class WorktreeManager {
   }
 
   /**
-   * 判孤儿：pid 死活为主判据。pid=0 走 SPAWN_GRACE 宽限（create→spawn 窗口）。
+   * 判孤儿：pid 死活为主判据。pid=0 = 历史遗留条目（inproc 时代的占位形态）或
+   * 异常路径（正常路径 add 恒写宿主 pid，见 create 的注册注释），走 SPAWN_GRACE
+   * 宽限后判孤儿清理。
    */
   private isOrphan(entry: WorktreeEntry, now: number): boolean {
     if (entry.pid === 0) {
-      // create→spawn 窗口：超过宽限期仍未补 pid = create 后崩溃
+      // 超宽限期仍 pid=0 = 历史遗留/异常条目。正常路径不产生 pid=0（add 时直接
+      // 写宿主 pid），命中即诊断信号（registry save 失败的 warn / 陈旧注册表数据）。
       const expired = now - entry.createdAt > SPAWN_GRACE_MS;
       if (expired) {
-        // [worktree-reaper-fix] pid=0 超宽限 = create 后 spawn 前崩溃（或补全链路再次断链）。
-        // 正常路径 spawn 返回后 pid 已同步补全，此处不应命中活 worktree；命中即诊断信号，
-        // 与 updatePid 写盘失败的 warn 日志呼应（补全失败可观测闭环）。
+        // [worktree-reaper-fix] pid=0 超宽限 = 历史遗留/异常条目（inproc 时代占位
+        // 形态的残留数据，或注册表写入异常）。正常路径 add 恒写宿主 pid，此处不应
+        // 命中活 worktree；命中即诊断信号，与 registry save 失败的 warn 日志呼应。
         logger.warn(
           "[worktree] orphan reaper: pid=0 entry exceeded SPAWN_GRACE_MS, treating as orphan",
           { branch: entry.branch, checkout: entry.checkout, createdAt: entry.createdAt, now },

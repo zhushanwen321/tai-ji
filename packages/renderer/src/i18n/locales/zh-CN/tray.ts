@@ -57,6 +57,12 @@ export default {
     abort: '终止',
     abortConfirm: '确认终止？',
     workflowOpFailed: '工作流操作失败：{msg}',
+    /**
+     * [D2] 中断 run 的人读状态文案（workflow 行可见文本 + WorkflowTab header 徽标，
+     * 字面量与场景 25 CDP 断言对齐）：中断 run 显示「已中断（可续跑）」而非「运行中」
+     * ——非终局（不进 outcome 终态文案词表），暂停态可经 resume 复活。
+     */
+    workflowInterrupted: '已中断（可续跑）',
     /** 行摘要单位与标签 */
     agentsLabel: '{done}/{total}',
     turnsUnit: 'turns',
@@ -75,11 +81,9 @@ export default {
     /** 面板顶部提示条（bash） */
     corruptBanner: '任务数据损坏，已忽略（.corrupt 保留现场）',
     disconnectBanner: '连接断开，重连后自动刷新',
-    /** 序 3 溢出入口（`»` 省略号；与聚合入口的层叠图标是两个语义，见 Composer.vue 底栏注释） */
-    more: '更多工具',
-    /** 序 4 聚合入口（层叠图标 + 运行数）：title / aria-label 带运行数插值 */
+    /** 序 4 聚合入口（单图标 layers + 运行数数字角标，W3a）：title / aria-label 恒为「全部工具」（运行数走角标不进 title） */
     aggregate: {
-      title: '任务托盘 · {running} 项进行中',
+      allTools: '全部工具',
     },
     /**
      * 第 4 件「子会话」（u7，设计 mode-system-composer-density §6.7 D7）。

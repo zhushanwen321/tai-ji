@@ -5,6 +5,7 @@
 // - core/                  通用协议层（所有 extension 共用：GuiComponent + 布局原语 + 传输编码 + 双模 widget helper）
 // - extensions/            有运行时定制逻辑的 extension（marker + helper）
 //   - ask-user/            富交互（select 通道 + marker）
+//   - plan/                plan 生命周期状态机 + 审阅回传值域契约（纯数据 + 纯函数，零 pi 依赖）
 //   - scheduler/           scheduler 任务条目契约 + 折叠器 + 时间格式化（扩展与插件同源单实现，零 pi/node 依赖）
 //   - scheduler-create/    scheduler 创建确认共享资产（类型 + 形状/时间折叠守卫）
 //   - ui-form/             统一提问表单协议（类型 + marker + 交互 helper + 守卫）
@@ -113,6 +114,37 @@ export {
   onceCronToDate,
 } from './extensions/scheduler-create/helpers'
 
+// ── ./extensions/plan：plan 模式生命周期状态机（D1：states/events/transition/derivePhase）+
+// 审阅回传值域契约（D3①⑤/D9③：值域守卫 + error envelope + selfReview 有界截断）+
+// 旧 entry legacy 读取（D-B4-1：lifecycle/resumeHint 映射 + entry customType 常量单源）——
+// 纯数据 + 纯函数零 pi 依赖，pi-plan 扩展（转移接管）/ runtime（派生归一）/ renderer（呈现映射）三层共用；
+// 消费面勾销锚 = src/extensions/plan/consumers.md ──
+export type {
+  PlanLifecycleState,
+  PlanLifecycleEvent,
+  PlanTransitionResult,
+  PlanPhase,
+} from './extensions/plan/state-machine'
+export {
+  PLAN_LIFECYCLE_STATES,
+  PLAN_LIFECYCLE_EVENTS,
+  transition,
+  derivePhase,
+} from './extensions/plan/state-machine'
+export type { PlanReviewResponseEnvelope } from './extensions/plan/review-contract'
+export {
+  PLAN_SELF_REVIEW_MAX_BYTES,
+  truncateSelfReview,
+  isPlanReviewRequest,
+  isPlanReviewResponse,
+  parsePlanReviewResponse,
+} from './extensions/plan/review-contract'
+export {
+  PLAN_STATE_CUSTOM_TYPE,
+  readLifecycleState,
+  readResumeHint,
+} from './extensions/plan/legacy-entries'
+
 // ── ./extensions/ui-form：统一提问表单协议（plan / scheduler / ask-user 三方提问的统一入口：select 通道 + marker + 类型化问题集；设计 ui-presentation-protocol，ask-user / scheduler-create 两定制协议随 u5/u6 迁移退役）──
 export type {
   FormQuestion,
@@ -140,6 +172,7 @@ export type {
   SessionManagerStatusParams,
   SessionManagerListParams,
   SessionManagerAbortParams,
+  SessionManagerWatchParams,
   SessionManagerCreateResult,
   SessionManagerSendResult,
   SessionManagerHistoryResult,
@@ -148,6 +181,8 @@ export type {
   SessionManagerSessionSummary,
   SessionManagerAbortResult,
   SessionManagerErrorResult,
+  SessionManagerWatchReason,
+  SessionManagerWatchRespondPayload,
 } from './extensions/session-manager/types'
 export {
   isSessionManagerCreateParams,
@@ -156,6 +191,9 @@ export {
   isSessionManagerStatusParams,
   isSessionManagerListParams,
   isSessionManagerAbortParams,
+  isSessionManagerNotifyId,
+  isSessionManagerWatchParams,
+  isSessionManagerWatchRespondPayload,
 } from './extensions/session-manager/types'
 export { SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS } from './extensions/session-manager/marker'
 
@@ -169,6 +207,15 @@ export {
   isSubagentInFlightReport,
   isInFlightReportAck,
 } from './extensions/subagent-inflight/types'
+
+// ── subagent-notify 词表（subagent-workflow 通知通道 custom_message customType 单源：
+// 写侧 = 壳 sendMessage / subagent-core notifier+ledger，读侧 = shared/runtime/core；
+// 等值锁在壳 __tests__/contract.notify-custom-types.test.ts）──
+export {
+  WORKFLOW_RESULT_CUSTOM_TYPE,
+  SUBAGENT_BG_NOTIFY_CUSTOM_TYPE,
+  SUBAGENT_DIRECTIVE_CUSTOM_TYPE,
+} from './extensions/subagent-notify/custom-types'
 
 // ── plugin-bridge 协议（plugin system bridge：插件工具/事件/拦截经 select 通道 + marker 桥接；实现在 extensions/taiji/plugin-bridge + runtime bridge-handler）──
 export type {

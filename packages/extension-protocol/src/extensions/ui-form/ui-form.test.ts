@@ -31,7 +31,7 @@ const draft: ScheduleDraft = {
   schedule: '0 9 19 9 *',
   prompt: '总结昨天的工作进展',
   models: ['deepseek-flash'],
-  currentModel: 'mimo-v2.5-pro',
+  currentModel: 'mimo-v2.6-flash',
 }
 
 describe('uiFormInteract：类型双路径（payload 构造 / answers 解析）', () => {

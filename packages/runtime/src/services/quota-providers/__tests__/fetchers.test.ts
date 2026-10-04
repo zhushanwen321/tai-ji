@@ -152,14 +152,66 @@ describe('kimiFetcher', () => {
     }
   })
 
-  it('窗口字段类型漂移（字符串数值）→ parse（guard 收到字段级）', async () => {
+  // ── wire 形态实测锚点（2026-09-24，api.kimi.com/coding/v1/usages 真响应）──
+  // 真响应的数值字段以**字符串数值**下发（`"100"`）、detail 提供 `used` 而非 `remaining`，
+  // 顶层还有 booster_wallet / usages 等未知字段。曾按「纯 number + remaining 形态」收紧
+  // guard（假想 wire），拒真响应归 parse → 额度查询恒「获取失败」。本组锁定真实形态。
+
+  it('真响应形态：字符串数值 + detail.used（无 remaining）→ 正确窗口，未知字段放行', async () => {
+    const out = await fetchOk(kimiFetcher, {
+      usage: { limit: '100', used: '71', remaining: '29', resetTime: '2026-08-24T12:00:00.001143Z' },
+      limits: [
+        {
+          window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
+          detail: { limit: '100', used: '100', resetTime: '2026-08-23T12:00:00.001143Z' },
+        },
+      ],
+      booster_wallet: { id: 'opaque', balance: { amount: '20000000000' } },
+    })
+    expect(out).toEqual({
+      ok: true,
+      data: {
+        label: 'Kimi Coding',
+        wins: [
+          { pct: 100, used: 100, limit: 100, unit: 'requests', resetSec: 7200 },
+          { pct: 71, used: 71, limit: 100, unit: 'requests', resetSec: 93600 },
+          { pct: null, resetSec: null },
+        ],
+      },
+    })
+  })
+
+  it('used 显式提供时优先于 remaining 折算（两者并存）', async () => {
+    const out = await fetchOk(kimiFetcher, {
+      limits: [{ detail: { limit: 100, used: 25, remaining: 60 } }],
+      usage: { limit: 100, used: 25, remaining: 75 },
+    })
+    expect(out.ok).toBe(true)
+    if (out.ok) {
+      expect(out.data.wins[0]).toMatchObject({ pct: 25, used: 25, limit: 100 })
+      expect(out.data.wins[1]).toMatchObject({ pct: 25, used: 25, limit: 100 })
+    }
+  })
+
+  it('数值字段无法解析为数值（非数值串/空串/空白串/布尔/嵌套对象）→ parse；limits 元素非对象 → parse', async () => {
     expect(await fetchOk(kimiFetcher, {
-      limits: [{ detail: { limit: '100', remaining: 60 } }],
-      usage: { limit: 2000, used: 500 },
+      limits: [{ detail: { limit: 'abc' } }],
+      usage: {},
+    })).toEqual({ ok: false, reason: 'parse' })
+    // 空串/空白串：numericField trim 后为空 → undefined（空串非合法 wire 数值，等同漂移）
+    expect(await fetchOk(kimiFetcher, {
+      limits: [{ detail: { limit: '' } }],
+      usage: {},
     })).toEqual({ ok: false, reason: 'parse' })
     expect(await fetchOk(kimiFetcher, {
-      limits: [{ detail: { limit: 100, remaining: 60 } }],
-      usage: { limit: 2000, used: '500' },
+      limits: [{ detail: { limit: '   ' } }],
+      usage: {},
+    })).toEqual({ ok: false, reason: 'parse' })
+    expect(await fetchOk(kimiFetcher, {
+      usage: { limit: 100, used: true },
+    })).toEqual({ ok: false, reason: 'parse' })
+    expect(await fetchOk(kimiFetcher, {
+      limits: [{ detail: { remaining: { value: 1 } } }],
     })).toEqual({ ok: false, reason: 'parse' })
     // limits 元素非对象（原 Array.isArray 只校容器不校元素）
     expect(await fetchOk(kimiFetcher, { limits: ['x'], usage: { limit: 1, used: 0 } })).toEqual({ ok: false, reason: 'parse' })
@@ -616,6 +668,52 @@ describe('zhipuFetcher', () => {
     expect(await fetchOk(zhipuFetcher, {
       success: true,
       data: { limits: [{ type: 'TOKENS_LIMIT', percentage: '5' as unknown as number }] },
+    })).toEqual({ ok: false, reason: 'parse' })
+  })
+
+  // ── wire 形态实测锚点（2026-09-24，bigmodel.cn/api/monitor/usage/quota/limit 真响应）──
+  // 真响应的 nextResetTime 以 **number epoch-ms** 下发（非字符串），limits 还含 TIME_LIMIT
+  // 条目（带 usage/remaining/usageDetails 等未校字段）。曾按「纯 string」收紧该字段（假想
+  // wire），拒真响应归 parse → 额度查询恒「获取失败」。本组锁定真实形态。
+
+  it('真响应形态：number epoch-ms nextResetTime + TIME_LIMIT 条目（未知字段放行）→ TOKENS_LIMIT 窗口', async () => {
+    const out = await fetchOk(zhipuFetcher, {
+      code: 200,
+      msg: '操作成功',
+      success: true,
+      data: {
+        limits: [
+          {
+            type: 'TIME_LIMIT', unit: 5, number: 1, usage: 1000, currentValue: 155, remaining: 845,
+            percentage: 15, nextResetTime: NOW_MS + 3600_000,
+            usageDetails: [{ modelCode: 'search-prime', usage: 139 }],
+          },
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 42, nextResetTime: NOW_MS + 7200_000 },
+        ],
+        level: 'pro',
+      },
+    })
+    expect(out).toEqual({
+      ok: true,
+      data: {
+        label: 'Z.ai-pro',
+        wins: [
+          { pct: 42, resetSec: 7200 },
+          { pct: null, resetSec: null },
+          { pct: null, resetSec: null },
+        ],
+      },
+    })
+  })
+
+  it('nextResetTime 非法类型（布尔/对象）→ parse（仅 number|string 放行）', async () => {
+    expect(await fetchOk(zhipuFetcher, {
+      success: true,
+      data: { limits: [{ type: 'TOKENS_LIMIT', percentage: 5, nextResetTime: true }] },
+    })).toEqual({ ok: false, reason: 'parse' })
+    expect(await fetchOk(zhipuFetcher, {
+      success: true,
+      data: { limits: [{ type: 'TOKENS_LIMIT', percentage: 5, nextResetTime: { ms: 1 } }] },
     })).toEqual({ ok: false, reason: 'parse' })
   })
 })

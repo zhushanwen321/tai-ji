@@ -16,7 +16,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { ref } from 'vue'
 import { useComposerBash, type ComposerBashOptions } from './bash'
 
-/** 构造可控 opts（默认 sessionId='s1', sendBash resolve undefined） */
+/** 构造可控 opts（默认 sessionId='s1', sendBash 默认成功） */
 // mock 成员 = 真实签名 & vi.fn 能力（裸 Mock 无法赋给具体签名字段）
 // 返回类型 = 真实 Options（vi.fn 带实现签名后与具体签名结构兼容；断言经断言侧
 // mock 视图取，不在返回类型里交叉 Mock——vitest 4 Mock 泛型与交叉类型不稳定）
@@ -26,9 +26,10 @@ function makeOpts(overrides?: Partial<ComposerBashOptions>): ComposerBashOptions
     clearInput: vi.fn<() => void>(() => {}),
     isSending: ref(false),
     sessionId: () => 's1',
-    sendBash: vi.fn<(sessionId: string, command: string, excludeFromContext: boolean) => Promise<void>>(
-      (_sessionId, _command, _excludeFromContext) => Promise.resolve(undefined),
+    sendBash: vi.fn<(sessionId: string, command: string, excludeFromContext: boolean) => Promise<boolean>>(
+      (_sessionId, _command, _excludeFromContext) => Promise.resolve(true),
     ),
+    restoreInput: vi.fn<(text: string) => void>(() => {}),
     ...overrides,
   }
 }
@@ -110,6 +111,26 @@ describe('useComposerBash.trySendBash', () => {
     expect(opts.sendBash).toHaveBeenCalledWith('s1', 'ls -la', false)
     // finally 复位 isSending
     expect(opts.isSending.value).toBe(false)
+  })
+
+  it('sendBash 显式 false（可证明未执行）→ 原文经 restoreInput 还回输入框（含前缀）', async () => {
+    const opts = makeOpts({
+      sendBash: vi.fn<(sessionId: string, command: string, excludeFromContext: boolean) => Promise<boolean>>(
+        () => Promise.resolve(false),
+      ),
+    })
+    const { trySendBash } = useComposerBash(opts)
+    const handled = await trySendBash('!ls -la')
+    expect(handled).toBe(true)
+    expect(opts.restoreInput).toHaveBeenCalledTimes(1)
+    expect(opts.restoreInput).toHaveBeenCalledWith('!ls -la')
+  })
+
+  it('sendBash 成功（true）→ 不调 restoreInput', async () => {
+    const opts = makeOpts()
+    const { trySendBash } = useComposerBash(opts)
+    await trySendBash('!ls -la')
+    expect(opts.restoreInput).not.toHaveBeenCalled()
   })
 
   it('command (sessionId=null) → 返回 false，sendBash 不调', async () => {

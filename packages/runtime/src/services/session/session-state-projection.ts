@@ -95,8 +95,8 @@ export interface SessionStateProjectionDeps {
   hasSession(sessionId: string): boolean
   /** MessageBus 当前值（Facade setter 晚期注入，未注入时 null → 广播 no-op）。 */
   getMessageBus(): IMessageBus | null
-  /** Facade 保留域方法（fetchContext：ISessionService 对外查询，usage 失效在 Facade 侧经 getReplicatedStates 改道）。 */
-  fetchContext(sessionId: string): Promise<{ inputTokens: number; contextLimit: number; usagePercent: number } | null>
+  /** Facade 保留域方法（fetchContext：ISessionService 对外查询，usage 失效在 Facade 侧经 getReplicatedStates 改道）。usagePercent 可选（[RT-4#7] 无值纪律）。 */
+  fetchContext(sessionId: string): Promise<{ inputTokens: number; contextLimit: number; usagePercent?: number } | null>
   /** Facade 保留域方法（session_end 终态写入，message-dispatcher 窄接口同款消费——单一实现留 Facade）。 */
   persistSessionOutcome(sessionId: string, outcome: SessionOutcome, reason?: string): void
   /** Facade 私有 helper（project sidecar 兜底补写，唯一消费方 = 本域 handleTurn* 两方法）。 */

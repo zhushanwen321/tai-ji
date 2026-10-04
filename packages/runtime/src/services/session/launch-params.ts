@@ -20,16 +20,8 @@ import type { PresetService, PresetResolution } from '../preset-service.js'
 import { BUILTIN_EXTENSIONS_MISSING, toErrorMessage } from '../../utils/errors.js'
 
 /**
- * thinkingLevel 合法值集合（S-RT-5；W2 值域 SSOT 派生，A-03 修复）。
- *
- * 值 = shared PI_THINKING_LEVELS（pi 0.84.1 全集 7 值，锚点见 pi-preset.ts），
- * 不再手写数组——手写值域曾缺 'max' 导致 composer 最高档被静默丢弃。
- * 用 readonly 数组做运行时校验：buildPresetClientOptions 透传 thinkingOverride 到
- * pi 前先校验，非法值 warn 后忽略（不传给 pi，避免 pi 报错或行为异常）。
- *
- * 「shared 常量 ↔ pi-protocol PiThinkingLevel」的编译期双向防漂移锁随 S6 迁至
- * pi-protocol.ts 的 ThinkingLevelDriftGuard（比对双方的概念自然家；本文件不再
- * import Pi 侧类型——check_pi_type_leak 边界规则）。
+ * thinkingLevel 合法值集合（S-RT-5；值域 = shared PI_THINKING_LEVELS 全集，不手写数组
+ * ——手写值域曾缺 'max' 导致 composer 最高档被静默丢弃，A-03）。
  */
 const VALID_THINKING_LEVELS: readonly ThinkingLevel[] = PI_THINKING_LEVELS
 
@@ -228,6 +220,7 @@ export interface PresetClientOptions {
   noSkills?: boolean
   noContextFiles?: boolean
   model?: string
+  /** 档位（resolveEffectiveThinking 已按词表校验，非合法值不落此字段）。 */
   thinkingLevel?: ThinkingLevel
 }
 
@@ -251,9 +244,15 @@ export interface PresetClientOptions {
  * S-RT-5：thinkingOverride 校验合法值，非法值 warn 后忽略（不透传给 pi）。
  */
 /**
- * S-RT-5：thinkingLevel 校验合法值。Landing 传入与 preset 字段都可能是非法值
- *（如前端未约束 / preset JSON 手改），透传给 pi 会触发 pi 报错或静默忽略，统一在此拦截。
- * 非法值 warn 后忽略（返回 undefined，不透传给 pi）。
+ * S-RT-5：thinkingLevel 入口层校验。Landing 传入与 preset 字段都可能是非法值
+ * （前端未约束 / preset JSON 手改），统一在此拦截：合法值原样透传，非法值 warn
+ * 留痕后返回 undefined（不透传，回退「未指定」语义——pi 走缺省档）。
+ *
+ * 为什么入口层拦而不透传给 pi：pi 对非法 --thinking **不报错**——仅 push
+ * type:"warning" diagnostic 且不设置档位，进程照常以缺省档启动
+ * （pi 0.84.4 node_modules/@earendil-works/pi-coding-agent/dist/cli/args.js:112-121；
+ * diagnostics 处理仅 type==="error" 才 exit(1)：dist/main.js:476-478）。
+ * 透传 = 用户显式档位被静默换成缺省档的假成功，宿主侧零留痕。
  */
 function resolveEffectiveThinking(rawThinking: string | undefined): ThinkingLevel | undefined {
   // widening cast（与 shared isPiLaunchPreset 的 TOOL_MODES 同款惯例）：includes 收窄参数类型，

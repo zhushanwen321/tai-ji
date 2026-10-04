@@ -350,7 +350,7 @@ function setWidgetDual(ctx: GuiContext, key: string, content: DualWidgetContent 
 }
 ```
 
-**⚠️ `guiSetWidget` 无 mode 守卫（不是 no-op）**：它只查 `ctx.ui?.setWidget` 是否存在——TUI/json/print 模式下误调会把 marker 编码行推进 pi 原生 widget，表现为乱码。模式判定与分支只由 `setWidgetDual` 内部经 `isGuiCapable(ctx)` 单点承担，extension 不得自行复写 isGui 判定（全仓只此一处说明，见协议包 `helpers.ts` 的「守卫单点化」块）。no-op 只发生在「`ctx.ui.setWidget` 不存在」（headless）这一种情形。
+**⚠️ `guiSetWidget` 无 mode 检查（不是 no-op）**：它只查 `ctx.ui?.setWidget` 是否存在——TUI/json/print 模式下误调会把 marker 编码行推进 pi 原生 widget，表现为乱码。模式判定与分支只由 `setWidgetDual` 内部经 `isGuiCapable(ctx)` 单点承担，extension 不得自行复写 isGui 判定（全仓只此一处说明，见协议包 `helpers.ts` 的「检查单点化」块）。no-op 只发生在「`ctx.ui.setWidget` 不存在」（headless）这一种情形。
 
 **为什么不需要 shim**（审查结论）：extension 本就要改代码调协议 helper，helper 内部直接调原生 `ctx.ui.setWidget(key, [MARKER+JSON])` 就能走通整条链路。shim 的唯一潜在价值是透明拦截未引入协议包的第三方 extension，但第三方传的是 string[]（ANSI 文本），不触发 GuiRenderResult 分支，shim 无所作为。
 
@@ -486,10 +486,10 @@ export { GUI_WIDGET_MARKER }
 // ── core helper ──
 export { isGuiCapable }       // 检测 RPC 模式
 export { isGuiComponent }     // 鸭子类型校验（runtime 用）
-export { isGuiRenderResult }  // v1.1 信封守卫（event-adapter 区分信封与 v1 裸 component）
+export { isGuiRenderResult }  // v1.1 信封检查（event-adapter 区分信封与 v1 裸 component）
 export { guiResult }          // 构造 GuiRenderResult（component + 可选 meta）
 export { guiComponent }       // 构造 GuiComponent（带类型推断）
-export { guiSetWidget }       // 推送 GUI 臂（marker 编码 GuiRenderResult；无 mode 守卫）
+export { guiSetWidget }       // 推送 GUI 臂（marker 编码 GuiRenderResult；无 mode 检查）
 export { setWidgetDual }      // 双模 widget 推送唯一入口（内部做 isGuiCapable 分派）
 export { validateWidgetIconPaths }  // 校验 meta.icon 自定义 paths（白名单，见 §3.5）
 export { extractGui }         // 从 details 提取 __gui__（前端用）
@@ -502,7 +502,7 @@ export { callMarkerRpc, isChannelErrorResult, formatChannelErrorText }
 // ── extensions/ask-user（legacy 解码契约，见 §6）──
 export type { AskUserQuestion, AskUserOption, AskUserAnswers }
 export { ASK_USER_MARKER }   // legacy 帧识别（D7 退役窗口末清理）
-export { getAskUserAnswer, getAskUserOther, isAskUserQuestion }  // 答案解析与守卫
+export { getAskUserAnswer, getAskUserOther, isAskUserQuestion }  // 答案解析与检查
 
 // ── extensions/ui-form（统一提问表单，见 §6）──
 export type {
@@ -514,7 +514,7 @@ export { uiFormInteract }    // 双向交互（select+marker 通道，四态判�
 export { isFormQuestion, isFormAnswers }
 ```
 
-包出口不止上面这些：session-manager / plugin-bridge / subagent-inflight / subagent-engine / pending-entries / background-task 等子协议同样是包出口（完整清单见 `packages/extension-protocol/src/index.ts`，各自语义见对应模块头注与专项文档）。`background-task` 的行为原语（进程处置 / registry 文件 IO / output tail）走独立子出口 `./background-task`，不进桶出口——renderer/core 等浏览器消费面结构性不触达 node 内建。
+包出口不止上面这些：session-manager / plugin-bridge / subagent-inflight / subagent-engine / pending-entries / background-task 等子协议同样是包出口（完整清单见 `packages/extension-protocol/src/index.ts`，各自语义见对应模块头注与专项文档）。`background-task` 的行为原语（进程处置 / registry 文件 IO / output tail）走独立子出口 `./background-task`，不进桶出口——renderer/core 等浏览器消费方结构性不触达 node 内建。
 
 ### 5.2 辅助函数签名
 
@@ -533,7 +533,7 @@ function guiComponent<T extends GuiComponentType>(
 ): GuiComponent<T>
 
 /** 推送 widget 的 GUI 臂：marker 编码 GuiRenderResult 信封进 string[]，undefined 清除。
- *  ⚠️ 无 mode 守卫（仅查 ctx.ui?.setWidget 存在性）——TUI/json/print 误调会推 marker 行造成乱码；
+ *  ⚠️ 无 mode 检查（仅查 ctx.ui?.setWidget 存在性）——TUI/json/print 误调会推 marker 行造成乱码；
  *  正常路径一律走 setWidgetDual（模式分派单点，见 §4.3） */
 function guiSetWidget(
   ctx: GuiContext,
@@ -561,7 +561,7 @@ function extractGui(details: Record<string, unknown> | undefined): GuiRenderResu
 /** 鸭子类型校验（runtime event-adapter 用） */
 function isGuiComponent(value: unknown): value is GuiComponent
 
-/** v1.1 信封守卫：v === PROTOCOL_VERSION 且 component 为合法 GuiComponent（meta 不校验深度） */
+/** v1.1 信封检查：v === PROTOCOL_VERSION 且 component 为合法 GuiComponent（meta 不校验深度） */
 function isGuiRenderResult(value: unknown): value is GuiRenderResult
 
 /** pi toolResult 通用形状提取：content[0] 为 text 块时取其 text，否则空串 */
@@ -582,7 +582,7 @@ function firstContentText(result: { content: Array<{ type: string; text?: string
 
 ### 6.2 统一提问表单协议（ui-form）
 
-原 ask-user 定制富交互（`askUserInteract` + `ASK_USER_MARKER` + AskUserOverlay）已升级为**统一提问表单协议（ui-form）**：ask-user / scheduler / plan 三方提问收口为一个协议、一个渲染器。权威描述（问题类型/答案格式/回包四态表/完整调用示例/内置消费方）见 [gui-protocol-guide.md §3.4](../extensions/gui-protocol-guide.md)，要点：
+原 ask-user 定制富交互（`askUserInteract` + `ASK_USER_MARKER` + AskUserOverlay）已升级为**统一提问表单协议（ui-form）**：ask-user / scheduler / plan 三方提问收敛为一个协议、一个渲染器。权威描述（问题类型/答案格式/回包四态表/完整调用示例/内置消费方）见 [gui-protocol-guide.md §3.4](../extensions/gui-protocol-guide.md)，要点：
 
 - **交互入口**：`uiFormInteract(ctx, form, opts?): Promise<UiFormInteractResult>`（`packages/extension-protocol/src/extensions/ui-form/helpers.ts`），marker = `UI_FORM_MARKER`，复用 select 双向通道（传输核 `callMarkerRpc`）。不走 `details.__gui__`——那是单向渲染通道，无法承载双向交互；select 是 pi 原生双向通道，复用它获得队列/超时/abort 能力。
 - **问题集**：`FormQuestion` 判别联合（`choice` / `text` / `schedule`），wire 帧 `form: true` + `formQuestions`；legacy `ASK_USER_MARKER` 帧由 runtime event-adapter 分支直接归一为同款 `form: true` + `formQuestions` 帧（type 推断映射，scheduleCreate 源保留源键分流应答形状）进同一渲染器（版本偏斜窗口期现状，随 D7 窗口末清理）。
@@ -750,7 +750,7 @@ const msg: Message = {
 
 ### 8.5 ToolCall 类型（不改，但提供 helper）
 
-`ToolCall.details` 已是 `Record<string, unknown>`，不需改。但前端读 `__gui__` 需类型守卫（审查 S7/C3）：
+`ToolCall.details` 已是 `Record<string, unknown>`，不需改。但前端读 `__gui__` 需类型检查（审查 S7/C3）：
 
 ```typescript
 // @zhushanwen/extension-protocol 提供
@@ -882,7 +882,7 @@ export function useExtensionStatus(sessionId: Ref<string | null>) {
 
 **ExtensionUIDialog**（`components/extension/ExtensionUIDialog.vue`）：渲染 pi 原生的 confirm/select/input/editor 对话框。消费 `useExtensionUI().currentDialogRequest`（非表单类请求）。
 
-**FormOverlay**（`components/extension/form/FormOverlay.vue`）：渲染统一提问表单（ask-user / scheduler / plan 三方提问收口）。在 `Panel.vue` inline 集成（非 ExtensionUIDialog），覆盖 composer 位置。
+**FormOverlay**（`components/extension/form/FormOverlay.vue`）：渲染统一提问表单（ask-user / scheduler / plan 三方提问收尾）。在 `Panel.vue` inline 集成（非 ExtensionUIDialog），覆盖 composer 位置。
 
 两者通过 `useExtensionUI` 分流：`form === true` → FormOverlay（legacy `askUser === true` 帧由 renderer 归一层归一后同走 FormOverlay），否则 → ExtensionUIDialog。
 
@@ -944,7 +944,7 @@ pi 的 Box 组件**不画 Unicode 边框**（只做 padding + 背景），所以
 - `ask-user/src/component.ts:124-129`——box `┌┐└┘─│`
 - `subagents/src/tui/bg-notify-render.ts:114-177`——`╭╮╰╯─│`（注释明确「为何不用 Box 组件：Box 不画 Unicode 边框」）
 - `subagents/src/tui/list-component.ts:255-361`——`│├┬┴┤─` 双列表格
-- `workflow/src/interface/views/WorkflowsView.ts:107-109,547-599`——完整 `╭╮╰╯├┤│─` + sidebar divider
+- `workflow/src/interface/tui/views/WorkflowsView.ts:107-109,547-599`——完整 `╭╮╰╯├┤│─` + sidebar divider
 - `todo/src/render.ts:88-107`——双列 `│` 分隔
 - `goal/src/projection/widget.ts:76-80`——progress bar `█░`
 
@@ -1170,7 +1170,7 @@ v1-draft 经 4 路并行技术审查（shim 可行性 / 交互层 / 数据链路
 |---|---|---|
 | **C1** | shim extension | 砍掉（见 S1）|
 | **C2** | undefined 序列化约定缺失 | guiResult() helper strip undefined（协议层约定）|
-| **C3** | extractGui() 类型守卫 helper | §8.5 提供 |
+| **C3** | extractGui() 类型检查 helper | §8.5 提供 |
 | **C4** | ToolCall.details vs detail 命名陷阱 | §8.5 显式标注 |
 | **C5** | statusMap 绑死 SideDrawer | §9.4 提取 useExtensionStatus() composable |
 | **C6** | WS payload 大小防御 | 协议层约定 GuiComponent 体积上限 |

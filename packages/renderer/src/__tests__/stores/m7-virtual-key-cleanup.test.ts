@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * M7 虚拟 key 三段式 + deleteSession 清理链路测试（数据加载层）。
  *

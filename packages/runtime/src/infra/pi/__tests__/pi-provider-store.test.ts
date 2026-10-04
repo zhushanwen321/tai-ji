@@ -138,6 +138,7 @@ describe('M2c 链 3：catalog 凭据判定经注入 resolver（无私有裸读�
       hasProviderCredential,
       listCredentialBackedProviderIds,
       resolveProviderCredential: async () => undefined,
+      resolveProviderBaseUrl: () => undefined,
     })
 
     const r = findValidDefaultModel()
@@ -157,6 +158,7 @@ describe('M2c 链 3：catalog 凭据判定经注入 resolver（无私有裸读�
       hasProviderCredential: () => false,
       listCredentialBackedProviderIds: () => new Set<string>(),
       resolveProviderCredential: async () => undefined,
+      resolveProviderBaseUrl: () => undefined,
     })
 
     expect(findValidDefaultModel().result).toBeNull()

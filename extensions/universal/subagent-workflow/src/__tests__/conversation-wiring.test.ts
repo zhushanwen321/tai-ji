@@ -12,11 +12,12 @@
 //      （messageHandler 唯一门槛）——「一次性 record 不可续」的记录级形态已消亡，
 //      不依赖任何派发参数
 //
-// 两层验证：
-//   1. 接线层：真实 SubagentService.execute（fake 引擎 run 永不 settle——阻断 detached
-//      收尾，record 停在 running）→ 断言 record 创建字段集合 + 派发链（resume 锚点）
-//   2. 透传层：startHandler + mock service → 断言 execute 收到 idleTimeoutMs 原值
-//      （参数名漂移 / 透传丢失即红）
+// 两层验证收敛为一层：
+//   接线层：真实 SubagentService.execute（fake 引擎 run 永不 settle——阻断 detached
+//   收尾，record 停在 running）→ 断言 record 创建字段集合 + 派发链（resume 锚点）。
+//   startHandler → execute 的透传契约由 core `subagent-actions-core.test.ts` 以
+//   execute 入参全字段 toEqual 严格锁定（含 idleTimeoutMs/ctxModel/signal），壳侧
+//   objectContaining 弱断言不再重复承担。
 //
 // [W3 改写] 原(mock inproc session-runner.runSpawn 永挂) 随 inproc pi 引擎目录删除消亡；
 // 换 registerFakePiEngine 协议替身（FakeRun promise 永不 settle 同语义），派发观测点
@@ -35,12 +36,10 @@ vi.mock( "@zhushanwen/subagent-core/core/logger.ts", () => ({ getLogger: () => l
 
 import { registerFakePiEngine, type FakePiEnginePort } from "@zhushanwen/subagent-core/testing/execution/__tests__/helpers/fake-engine-port.ts";
 import { clearEngines } from "@zhushanwen/subagent-core/execution/engine/registry.ts";
-import { startHandler } from "../interface/subagent-actions.ts";
 import { ModelConfigService } from "@zhushanwen/subagent-core";
 import type { ModelInfo, ModelRegistryLike } from "@zhushanwen/subagent-core/execution/assembly/model-resolver.ts";
 import { RecordStore } from "@zhushanwen/subagent-core";
 import { SubagentService } from "@zhushanwen/subagent-core";
-import type { ExecutionHandle, SubagentToolDetails } from "@zhushanwen/subagent-core/execution/assembly/types.ts";
 
 const STUB_MODEL: ModelInfo = { id: "test-model", name: "Test", provider: "test", reasoning: false };
 
@@ -140,73 +139,5 @@ describe("[modeless] idleTimeoutMs 接线：execute → createRecordForMode", ()
     // 缺省派发同权可续——「一次性 record 不可续」的记录级形态已消亡（原
     // chatMode === false 断言的等价承接）
     expect(service.engineSupportsConversation(record!)).toBe(true);
-  });
-});
-
-// ============================================================
-// 2. 透传层：startHandler(service, {idleTimeoutMs}) → service.execute
-//    参数逐字透传——接线回归保护（参数名漂移 / 透传丢失即红）
-// ============================================================
-
-function makeHandle(subagentId: string): ExecutionHandle {
-  const details: SubagentToolDetails = {
-    status: "running",
-    mode: "background",
-    agent: "worker",
-    model: "test/model",
-    thinkingLevel: undefined,
-    slug: "conv-test",
-    turns: 0,
-    totalTokens: 0,
-    elapsedSeconds: 0,
-    eventLog: [],
-    displayItems: [],
-    result: undefined,
-  };
-  return { mode: "background", subagentId, sessionFile: undefined, details };
-}
-
-function makeService(): SubagentService & { execute: ReturnType<typeof vi.fn> } {
-  return {
-    execute: vi.fn(async () => makeHandle("sa-conv-1")),
-    findRecord: vi.fn(() => undefined),
-    cancel: vi.fn(() => false),
-    collectRecords: vi.fn(() => []),
-    getFullRecord: vi.fn(() => undefined),
-    // [U1/U2] collect 契约面：startHandler 解析链必调；stub 回缺省 async
-    getCollectSyncDefault: vi.fn(() => "async" as const),
-  } as unknown as SubagentService & { execute: ReturnType<typeof vi.fn> };
-}
-
-describe("[modeless] startHandler 透传：idleTimeoutMs → execute 入参", () => {
-  it("idleTimeoutMs:12345 原值透传给 service.execute", async () => {
-    const svc = makeService();
-    const result = await startHandler(
-      svc,
-      { task: "chat task", slug: "conv-pass", idleTimeoutMs: 12345 },
-      undefined,
-    );
-
-    expect(svc.execute).toHaveBeenCalledTimes(1);
-    expect(svc.execute).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: "chat task",
-        slug: "conv-pass",
-        idleTimeoutMs: 12345,
-      }),
-    );
-    // bg 响应回执（LLM 可见）：detached + running
-    expect(result.kind).toBe("bg");
-    expect(result.subagentId).toBe("sa-conv-1");
-    expect(result.response.status).toBe("running");
-  });
-
-  it("idleTimeoutMs 缺省 → execute 入参 idleTimeoutMs===undefined（不误置）", async () => {
-    const svc = makeService();
-    await startHandler(svc, { task: "plain task", slug: "plain-pass" }, undefined);
-
-    expect(svc.execute).toHaveBeenCalledWith(
-      expect.objectContaining({ idleTimeoutMs: undefined }),
-    );
   });
 });

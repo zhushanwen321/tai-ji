@@ -18,7 +18,6 @@ import { parseResourceMeta } from "../../shared/meta-parser.ts";
 import {
   argKeysFromMeta,
   findFlattenedArgKeys,
-  normalizeArgsByMeta,
 } from "../args-meta.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -146,6 +145,11 @@ describe("argKeysFromMeta（schema → 已知参数键集）", () => {
     expect(keys.patterns).toHaveLength(1);
     expect(keys.patterns[0].source).toBe("^ok\\d+$");
   });
+
+  it("map-reduce oneOf 契约：oneOf 不参与键集（properties 才是键集来源——与 pi 等值）", () => {
+    const { exact } = argKeysFromMeta(MAP_REDUCE_PARAMS);
+    expect([...exact].sort()).toEqual(["agents", "items", "itemsJson", "operation"]);
+  });
 });
 
 describe("findFlattenedArgKeys（args 平铺检测——pi-sw 行为等值对照）", () => {
@@ -230,129 +234,5 @@ describe("findFlattenedArgKeys（args 平铺检测——pi-sw 行为等值对照
     expect(
       piFindFlattened({ action: "run", name: "chain", args: "oops", task: "x" }, CHAIN_PARAMS),
     ).toEqual(["task"]);
-  });
-});
-
-describe("normalizeArgsByMeta（归一组装 + 警告收集）", () => {
-  it("正常嵌套：args 原样归一、无警告（chain 真实契约）", () => {
-    const r = normalizeArgsByMeta(
-      { action: "run", name: "chain", args: { task: "x", agents: "/a.md" } },
-      CHAIN_PARAMS,
-      { reservedKeys: PI_TOOL_TOP_LEVEL },
-    );
-    expect(r.args).toEqual({ task: "x", agents: "/a.md" });
-    expect(r.warnings).toEqual([]);
-  });
-
-  it("args 缺省归一为空对象（params.args ?? {}——pi actionRun 等值）", () => {
-    const r = normalizeArgsByMeta(
-      { action: "run", name: "chain" },
-      CHAIN_PARAMS,
-      { reservedKeys: PI_TOOL_TOP_LEVEL },
-    );
-    expect(r.args).toEqual({});
-    expect(r.warnings).toEqual([]);
-  });
-
-  it("平铺误用：flattened_args 警告含键名列表（机读 keys + 中立 message）", () => {
-    const r = normalizeArgsByMeta(
-      { action: "run", name: "chain", task: "x" },
-      CHAIN_PARAMS,
-      { reservedKeys: PI_TOOL_TOP_LEVEL },
-    );
-    expect(r.args).toEqual({}); // 平铺键不静默收编（pi 现行为是 throw，修复动作留宿主）
-    expect(r.warnings).toEqual([
-      {
-        code: "flattened_args",
-        message: "Detected task at top level — they belong inside 'args'.",
-        keys: ["task"],
-      },
-    ]);
-  });
-
-  it("平铺 + args 共存：args-排除生效，无警告（与 pi TC3c 对齐）", () => {
-    const r = normalizeArgsByMeta(
-      { action: "run", name: "x", args: { task: "x" }, task: "y" },
-      CHAIN_PARAMS,
-      { reservedKeys: PI_TOOL_TOP_LEVEL },
-    );
-    expect(r.args).toEqual({ task: "x" });
-    expect(r.warnings).toEqual([]);
-  });
-
-  it("未知键：不产生警告（检测只对已知键——类型错误归 args-validator）", () => {
-    const r = normalizeArgsByMeta(
-      { action: "run", name: "chain", unknownKey: "v" },
-      CHAIN_PARAMS,
-      { reservedKeys: PI_TOOL_TOP_LEVEL },
-    );
-    expect(r.args).toEqual({});
-    expect(r.warnings).toEqual([]);
-  });
-
-  it("空 meta：no_parameter_contract 警告 + args 仍归一（M-2 显式信号）", () => {
-    const r = normalizeArgsByMeta({ action: "run", name: "legacy", args: { task: "x" } }, undefined);
-    expect(r.args).toEqual({ task: "x" });
-    expect(r.warnings).toEqual([
-      { code: "no_parameter_contract", message: "未声明参数契约（或解析为空）——平铺检测跳过，args 不校验" },
-    ]);
-  });
-
-  it("pattern 键平铺：batch1 经 pattern 命中进警告（review-fix-loop 真实契约）", () => {
-    const r = normalizeArgsByMeta(
-      { action: "run", name: "review-fix-loop", batch1: "reviewer" },
-      RFL_PARAMS,
-      { reservedKeys: PI_TOOL_TOP_LEVEL },
-    );
-    expect(r.warnings).toEqual([
-      {
-        code: "flattened_args",
-        message: "Detected batch1 at top level — they belong inside 'args'.",
-        keys: ["batch1"],
-      },
-    ]);
-  });
-
-  it("reservedKeys 撞名：workflow 声明 model 参数时顶层 model 不误报（宿主键集注入生效）", () => {
-    const synthetic = {
-      type: "object",
-      properties: { model: { type: "string" }, task: { type: "string" } },
-    };
-    const withReserved = normalizeArgsByMeta(
-      { action: "run", model: "ds-flash", task: "x" },
-      synthetic,
-      { reservedKeys: PI_TOOL_TOP_LEVEL },
-    );
-    expect(withReserved.warnings[0]).toMatchObject({ code: "flattened_args", keys: ["task"] });
-    // 不注入 reservedKeys（core 中性形态）：model 是已知参数 → 平铺报 model+task
-    const bare = normalizeArgsByMeta({ action: "run", model: "ds-flash", task: "x" }, synthetic);
-    expect(bare.warnings[0]).toMatchObject({ code: "flattened_args", keys: ["model", "task"] });
-  });
-
-  it("多键平铺按 Object.keys 序产出（与 pi throw 文案键序一致）", () => {
-    const r = normalizeArgsByMeta(
-      { action: "run", name: "review-fix-loop", targetType: "git-diff", target: "main" },
-      RFL_PARAMS,
-      { reservedKeys: PI_TOOL_TOP_LEVEL },
-    );
-    expect(r.warnings[0]).toMatchObject({ code: "flattened_args", keys: ["targetType", "target"] });
-    expect((r.warnings[0] as { message: string }).message).toBe(
-      "Detected targetType, target at top level — they belong inside 'args'.",
-    );
-  });
-
-  it("params 非对象：args = {}，无警告（防御分支，不抛）", () => {
-    expect(normalizeArgsByMeta(null, CHAIN_PARAMS)).toEqual({ args: {}, warnings: [] });
-    expect(normalizeArgsByMeta(undefined, CHAIN_PARAMS)).toEqual({ args: {}, warnings: [] });
-  });
-
-  it("args 为非对象标量：原样透传（类型校验责任在 args-validator，不发明约束）", () => {
-    const r = normalizeArgsByMeta({ action: "run", name: "chain", args: "oops" }, CHAIN_PARAMS);
-    expect(r.args).toBe("oops");
-  });
-
-  it("map-reduce oneOf 契约：oneOf 不参与键集（properties 才是键集来源——与 pi 等值）", () => {
-    const { exact } = argKeysFromMeta(MAP_REDUCE_PARAMS);
-    expect([...exact].sort()).toEqual(["agents", "items", "itemsJson", "operation"]);
   });
 });

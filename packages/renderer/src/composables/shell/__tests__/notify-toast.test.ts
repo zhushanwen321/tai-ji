@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * notify-toast 单测 —— extension notify 的壳层编排（session 定位行 + 前台/后台分级过滤）。
  *

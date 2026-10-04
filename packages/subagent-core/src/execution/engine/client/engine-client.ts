@@ -3,7 +3,8 @@
 // EngineClient：协议客户端（W2，impl-plan §2.2；与 zcode AppServerConnection 同型
 // 但引擎无关）。职责 = spawn 引擎 CLI / NDJSON 帧编解码 / 请求-应答 id 关联 /
 // 反向请求路由（见 reverse-router.ts）/ 崩溃重建（≤3 次指数退避 1s/2s/4s）/
-// dispose / killAll / stdout 行解析 + stderr 常驻排空（仅内存环缓冲尾 400 字符）。
+// dispose / killAll / stdout 行解析（半行残片有上限，见 MAX_LINE_BYTES）+
+// stderr 常驻排空（仅内存环缓冲尾 400 字符）。
 //
 // spawn 平台参数（impl-plan §2.2 必写死）：POSIX 引擎 CLI 以独立进程组 spawn
 // （detached:true，进程组收割前提）；Windows detached:false + windowsHide:true，
@@ -97,6 +98,13 @@ const DISPOSE_GRACE_MS = 3_000;
 const SIGKILL_REAP_TIMEOUT_MS = 10_000;
 /** 协议帧违规日志的回显截断长度（非 NDJSON 行 / 未知帧的诊断留痕）。 */
 const FRAME_ECHO_MAX_CHARS = 200;
+/**
+ * stdout 半行残片上限（1 MiB 量级；按 UTF-16 code unit 计——NDJSON 载荷以 ASCII
+ * 为主，与字节数同阶）。引擎持续输出不含换行的数据时残片本会无界增长：超限丢头
+ * 留尾 + warn 一次（每引擎进程）；被截断的行在换行到达后必无法 JSON.parse，由
+ * handleLine 的非 NDJSON 分支丢弃留痕（上限约束的是内存驻留，不是协议合法性）。
+ */
+const MAX_LINE_BYTES = 1_048_576;
 
 /** 客户端连接状态。 */
 export type EngineClientState =
@@ -166,13 +174,6 @@ export class EngineClient {
   private nextRequestId = 1;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly runRoutes = new Map<string, RunRoute>();
-  /**
-   * [stdout-wedge self-heal] runId → 已收引擎→宿主 event 通知帧计数（旁路观测）。
-   * 生命周期与 run 路由同拍：路由注销 / teardownProcess 清表时一并清理（防 runId
-   * 键无界累积）。计数不参与任何路由 / 生命周期决策——settled-watchdog fire 时经
-   * eventsReceivedForRun 读取，区分「零事件楔死」与「有事件正常超时」。
-   */
-  private readonly runEventCounts = new Map<string, number>();
   private stderrTail = "";
   private unavailableReason: EngineSdkError | undefined;
   private connectInFlight: Promise<void> | undefined;
@@ -183,6 +184,8 @@ export class EngineClient {
   private lastPartialHandle: { sessionRef: Record<string, string> } | undefined;
   private initializeDiagnostics: InitializeResult | undefined;
   private stdoutBuffer = "";
+  /** 半行残片截断告警已发标记（每引擎进程一次，attachFrameReader 重置）。 */
+  private stdoutOverflowWarned = false;
 
   constructor(opts: EngineClientOptions) {
     this.opts = opts;
@@ -227,26 +230,6 @@ export class EngineClient {
   /** 最近一次 host/handleReady 回填（RemoteEngine 崩溃合成 handle 用）。 */
   getPartialHandle(): { sessionRef: Record<string, string> } | undefined {
     return this.lastPartialHandle;
-  }
-
-  /**
-   * [stdout-wedge self-heal] 某 run 已收引擎→宿主 event 通知帧计数（旁路观测面）。
-   * 0 = 该 run 全静默——引擎 stdout 腿楔死判据；路由不存在（未注册 / 已注销 / 已
-   * teardown）同样返回 0。设计依据（2026-09-15 实证事故）：单一 TaiJi-as-node 引擎
-   * 进程（stdio socketpair）前 3 个 run 的引擎→宿主事件通知全部静默丢失（宿主零
-   * journal、run() 永不 resolve、settled-watchdog 30 分钟后 fire 误报失败），同一
-   * 引擎后续 run 又全部正常——传输层物理完好，事件在引擎侧写出后丢失（疑似 Bun×
-   * Electron-as-node×socketpair 冷启动楔死）。调用方（chat-rounds settled-watchdog
-   * fire 处置）以零事件为判据把静默楔死变成自愈 + 可诊断。
-   */
-  eventsReceivedForRun(runId: string): number {
-    return this.runEventCounts.get(runId) ?? 0;
-  }
-
-  /** [stdout-wedge self-heal] 当前在册 run 路由数（fire 侧「仅本 run 在册」判据——
-   *  杀引擎不连坐并发 run 的前置检查；计数面 = 本引擎的 client，跨引擎 run 不在册）。 */
-  activeRunCount(): number {
-    return this.runRoutes.size;
   }
 
   /** initialize 应答（诊断面；RemoteEngine 诊断留痕用）。 */
@@ -460,6 +443,7 @@ export class EngineClient {
 
   private attachFrameReader(): void {
     this.stdoutBuffer = "";
+    this.stdoutOverflowWarned = false;
   }
 
   private onStdoutData(chunk: string): void {
@@ -471,7 +455,20 @@ export class EngineClient {
       if (line.trim().length > 0) this.handleLine(line);
       newlineIndex = this.stdoutBuffer.indexOf("\n");
     }
-    // 帧间残片留 buffer（OS 管道背压语义：不做无界缓存——残片即半行，有界）。
+    // 帧间残片留 buffer（OS 管道背压语义）。残片有上限：引擎持续输出不含换行的
+    // 数据时残片本会无界增长——超限丢头留尾，首截断 warn 一次、后续静默截断；
+    // 被截断的行在换行到达后由 handleLine 按 non-NDJSON 丢弃（协议契约 stdout 只
+    // 允许 NDJSON，无换行输出本身就是引擎侧违规，不构成需要保真的数据）。
+    if (this.stdoutBuffer.length > MAX_LINE_BYTES) {
+      this.stdoutBuffer = this.stdoutBuffer.slice(this.stdoutBuffer.length - MAX_LINE_BYTES);
+      if (!this.stdoutOverflowWarned) {
+        this.stdoutOverflowWarned = true;
+        logger.warn(
+          `[engine-client:${this.engineId}] stdout partial line exceeded ${MAX_LINE_BYTES} chars `
+            + `— dropping head and keeping tail (engine emitting non-newline output without completing a line?)`,
+        );
+      }
+    }
   }
 
   private handleLine(line: string): void {
@@ -522,9 +519,6 @@ export class EngineClient {
   }
 
   private onEventNotification(runId: string, event: unknown): void {
-    // [stdout-wedge self-heal] 旁路观测：收到任意 event 通知帧即 +1（含无路由时的
-    // 迟到帧——到达本身即证明 stdout 腿活着）。不改变下方路由行为。
-    this.runEventCounts.set(runId, (this.runEventCounts.get(runId) ?? 0) + 1);
     this.runRoutes.get(runId)?.onEvent?.(event);
   }
 
@@ -580,21 +574,14 @@ export class EngineClient {
     });
   }
 
-  /** 注册 run 作用域反向通知路由；返回注销函数（路由与事件计数一并清理）。 */
+  /** 注册 run 作用域反向通知路由；返回注销函数。 */
   registerRunRoute(runId: string, route: RunRoute): () => void {
     this.runRoutes.set(runId, route);
     return () => {
       if (this.runRoutes.get(runId) === route) {
         this.runRoutes.delete(runId);
-        this.runEventCounts.delete(runId);
       }
     };
-  }
-
-  /** 健康检查（ADR-0047：静默 ≠ 卡死，不据此杀任务）。 */
-  async ping(): Promise<void> {
-    await this.ensureConnected();
-    await this.request("ping", {});
   }
 
   /** cancel 受理窗口 = CANCEL_SETTLE_GRACE_MS；终态收敛由调用方（RemoteEngine）等 run 应答。 */
@@ -605,7 +592,7 @@ export class EngineClient {
   // ── 收割 / 停机 ──────────────────────────────────────────────────────────
 
   /**
-   * 宿主收割入口（D8 killAllSpawnedChildren 落点）：组杀引擎 CLI（POSIX 负 pid 组杀 /
+   * 宿主收割入口（D8 markAllSpawnedChildrenDead 落点）：组杀引擎 CLI（POSIX 负 pid 组杀 /
    * Windows taskkill /T /F）+ 镜像整体置死 + pidfile 清理。在途请求以 engine_crashed
    * 失败。「零残留」断言范围 = 一代子进程 + 组内后代（引擎自身 detached 后代不覆盖，
    * impl-plan §7.2 R9-1 / 设计 §3.9 已接受代价）。
@@ -618,20 +605,6 @@ export class EngineClient {
       await waitForChildExit(child, SIGKILL_REAP_TIMEOUT_MS);
     }
     this.teardownProcess(reason);
-  }
-
-  /**
-   * [stdout-wedge self-heal] stdout 腿楔死自愈杀链：复用 killAll 组杀引擎进程，下次
-   * 派发经 ensureConnected respawn 新引擎（killAll 后 state 回落 exited，非
-   * unavailable——连接状态机允许重建）。warn 诊断含 reason，供排障区分「宿主收割」
-   * 与「楔死自愈」。设计依据（2026-09-15 实证事故，详见 eventsReceivedForRun 注释）：
-   * fire 时段的 kill 操作疑似「踢活」了楔死的流，主动杀 = 以 respawn 换确定性恢复。
-   */
-  async killEngineForStdoutWedge(reason: string): Promise<void> {
-    logger.warn(
-      `[engine-client:${this.engineId}] [stdout-wedge self-heal] killing engine process for stdout-leg wedge recovery (${reason}); next dispatch respawns a fresh engine`,
-    );
-    await this.killAll(reason);
   }
 
   /**
@@ -689,7 +662,6 @@ export class EngineClient {
     }
     this.pending.clear();
     this.runRoutes.clear();
-    this.runEventCounts.clear(); // [stdout-wedge self-heal] 观测面随路由清空（引擎已死，计数无意义）
     this.lastPartialHandle = undefined;
     this.killLeakedAliveChild(detail);
     if (this.state !== "unavailable" && this.state !== "disposed") {

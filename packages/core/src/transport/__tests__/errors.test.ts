@@ -8,7 +8,7 @@
  * use-connection-queue-drop.test.ts（message + code 形状）经调用方覆盖。
  */
 import { describe, it, expect } from 'vitest'
-import { transportUnavailableError } from '../errors'
+import { transportUnavailableError, notDeliveredError, isNotDeliveredError } from '../errors'
 
 describe('transportUnavailableError（D10① 工厂单点）', () => {
   it('Error 实例 + message 透传 + code === "disconnected"', () => {
@@ -30,5 +30,22 @@ describe('transportUnavailableError（D10① 工厂单点）', () => {
     expect(a).not.toBe(b)
     expect(a.message).toBe('a')
     expect(b.message).toBe('b')
+  })
+})
+
+describe('notDeliveredError / isNotDeliveredError（「可证明未送达」标记，bash 投递可靠性）', () => {
+  it('notDeliveredError 保留 code="disconnected" 契约 + notDelivered 标记', () => {
+    const error = notDeliveredError('transport unavailable (ws not open)')
+    expect(error).toBeInstanceOf(Error)
+    expect(error.code).toBe('disconnected') // 既有识别方契约不破坏
+    expect(error.notDelivered).toBe(true)
+  })
+
+  it('isNotDeliveredError 只认 notDelivered 标记：普通 transportUnavailableError / 其他错误不命中', () => {
+    expect(isNotDeliveredError(notDeliveredError('x'))).toBe(true)
+    // 断连 rejectAll 的同 code 错误（可能已送达）不得被当成「未送达」
+    expect(isNotDeliveredError(transportUnavailableError('disconnected'))).toBe(false)
+    expect(isNotDeliveredError(new Error('other'))).toBe(false)
+    expect(isNotDeliveredError(undefined)).toBe(false)
   })
 })

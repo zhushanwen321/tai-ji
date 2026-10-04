@@ -22,7 +22,7 @@ import type { IMessageBus } from '../../message-bus/message-bus.js'
 import { createProjectionBusView } from '../projection-bus-view.js'
 
 const SID = 'sess-1'
-const MODEL_ID = 'xiaomi-token-plan-cn/mimo-v2.5-pro'
+const MODEL_ID = 'xiaomi-token-plan-cn/mimo-v2.6-flash'
 
 interface FakeBus {
   publish: ReturnType<typeof vi.fn>

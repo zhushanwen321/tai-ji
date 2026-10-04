@@ -2,16 +2,15 @@
 //
 // W2: 主线程层 postMessage 防御测试。
 //
-// 背景：主线程有 3 处 run.runtime?.worker.postMessage(...) 调用（经 helper 函数），
+// 背景：主线程有 2 处 run.runtime?.worker.postMessage(...) 调用（经 helper 函数），
 // 全部没有 try/catch。若 result 对象含不可克隆成员（function/Symbol/循环引用），
 // postMessage 同步抛 DataCloneError：
 // - postAgentResult：result 是 agent 返回值，不可克隆概率最高。DataCloneError 冒泡到
 //   dispatchAgentCall 的 .then 回调，中断后续 postBudgetUpdate/store.save/budget 检查，
 //   run 卡在 running。
 // - postBudgetUpdate：payload 是 number，风险低但无兜底。
-// - dispatchWorkflowCall 的 postResult：result 是子 workflow 任意返回值。
 //
-// 修复后三处均包 try/catch + fallback。本测试通过 mock worker.postMessage 抛
+// 修复后均包 try/catch + fallback。本测试通过 mock worker.postMessage 抛
 // DataCloneError，验证：
 // 1. 调用方不抛错（流程不中断）
 // 2. fallback result（纯字符串，必可克隆）被发送
@@ -75,7 +74,7 @@ function makeAlwaysFailingPostMessage(): ReturnType<typeof vi.fn> {
   });
 }
 
-/** 构造 status="running" 的 mock WorkflowRun，postMessage 由调用方注入。 */
+/** 构造活体（未终局）mock WorkflowRun，postMessage 由调用方注入。 */
 function makeRunningRun(postMessage: ReturnType<typeof vi.fn>): WorkflowRun {
   return {
     state: { status: "running" },
@@ -83,12 +82,12 @@ function makeRunningRun(postMessage: ReturnType<typeof vi.fn>): WorkflowRun {
   } as unknown as WorkflowRun;
 }
 
-/** LifecycleDeps 只需 onWorkflowCall（dispatchWorkflowCall 唯一消费的 dep）。 */
-function makeDeps(onWorkflowCall?: LifecycleDeps["onWorkflowCall"]): LifecycleDeps {
-  return { onWorkflowCall } as unknown as LifecycleDeps;
+/** LifecycleDeps 最小 mock（handleWorkerMessage 的 agent-call 路径不读执行 deps）。 */
+function makeDeps(): LifecycleDeps {
+  return {} as unknown as LifecycleDeps;
 }
 
-/** WorkerHandlers 占位（workflow-call 路径不触发 handler 回调）。 */
+/** WorkerHandlers 占位（postMessage 防御路径不触发 handler 回调）。 */
 function makeHandlers(): WorkerHandlers {
   return {
     onMessage: vi.fn(async () => {}),
@@ -127,8 +126,7 @@ describe("W2a: postBudgetUpdate 防御 DataCloneError", () => {
       const postMessage = makeAlwaysFailingPostMessage();
       const run = {
         state: {
-          status: "running",
-          budget: { usedTokens: 42, usedCost: 0.5 },
+            budget: { usedTokens: 42, usedCost: 0.5 },
         },
         runtime: { worker: { postMessage } },
       } as unknown as WorkflowRun;
@@ -146,8 +144,7 @@ describe("W2a: postBudgetUpdate 防御 DataCloneError", () => {
       const postMessage = makeAlwaysFailingPostMessage();
       const run = {
         state: {
-          status: "running",
-          budget: { usedTokens: 42, usedCost: 0.5 },
+            budget: { usedTokens: 42, usedCost: 0.5 },
         },
         runtime: { worker: { postMessage } },
       } as unknown as WorkflowRun;
@@ -167,7 +164,6 @@ describe("W2a: postBudgetUpdate 防御 DataCloneError", () => {
     const postMessage = vi.fn();
     const run = {
       state: {
-        status: "running",
         budget: { usedTokens: 42, usedCost: 0.5 },
       },
       runtime: { worker: { postMessage } },
@@ -183,97 +179,15 @@ describe("W2a: postBudgetUpdate 防御 DataCloneError", () => {
   });
 });
 
-// ── W2b: dispatchWorkflowCall postResult 闭包防御 ──
-
-describe("W2b: dispatchWorkflowCall postResult 防御 DataCloneError", () => {
-  it("result 不可克隆 → 回发纯字符串 fallback result", async () => {
-    const restore = silenceConsoleError();
-    try {
-      // 第 1 次 postMessage 抛 DataCloneError（原始 result 不可克隆），
-      // 第 2 次（fallback）成功。
-      const postMessage = makeFailingPostMessage(1);
-      const onWorkflowCall = vi.fn(async () => ({ nonCloneable: () => {} }));
-      const run = makeRunningRun(postMessage);
-      const deps = makeDeps(onWorkflowCall);
-
-      await handleWorkerMessage(
-        run,
-        { type: "workflow-call", callId: 9, name: "sub", args: {} },
-        deps,
-        makeHandlers(),
-      );
-      await flushMicrotasks();
-
-      // 调用两次：1 原始（失败）+ 1 fallback（成功）
-      expect(postMessage).toHaveBeenCalledTimes(2);
-      const fallback = postedAt(postMessage, 1);
-      expect(fallback.type).toBe("workflow-result");
-      expect(fallback.callId).toBe(9);
-      expect(fallback.result?.content).toBe("");
-      expect(fallback.result?.error).toContain("Workflow result serialization failed");
-    } finally {
-      restore();
-    }
-  });
-
-  it("postResult 不抛错到调用方（不中断 onWorkflowCall 链路）", async () => {
-    const restore = silenceConsoleError();
-    try {
-      const postMessage = makeAlwaysFailingPostMessage();
-      const onWorkflowCall = vi.fn(async () => ({ bad: () => {} }));
-      const run = makeRunningRun(postMessage);
-      const deps = makeDeps(onWorkflowCall);
-
-      // handleWorkerMessage 自身不应抛——postResult 内部已 catch
-      await expect(
-        handleWorkerMessage(
-          run,
-          { type: "workflow-call", callId: 10, name: "sub", args: {} },
-          deps,
-          makeHandlers(),
-        ),
-      ).resolves.toBeUndefined();
-      await flushMicrotasks();
-    } finally {
-      restore();
-    }
-  });
-
-  it("fallback 也失败 → console.error 记录 worker pending 将挂起", async () => {
-    const restore = silenceConsoleError();
-    try {
-      const postMessage = makeAlwaysFailingPostMessage();
-      const onWorkflowCall = vi.fn(async () => ({ bad: () => {} }));
-      const run = makeRunningRun(postMessage);
-      const deps = makeDeps(onWorkflowCall);
-
-      await handleWorkerMessage(
-        run,
-        { type: "workflow-call", callId: 11, name: "sub", args: {} },
-        deps,
-        makeHandlers(),
-      );
-      await flushMicrotasks();
-
-      // 至少 2 次尝试（原始 + fallback），fallback 失败也记日志
-      expect(postMessage.mock.calls.length).toBeGreaterThanOrEqual(2);
-      const errorCalls = loggerMock.error.mock.calls.map((c) => c[0] as string);
-      expect(errorCalls.some((s) => s.includes("fallback also failed"))).toBe(true);
-    } finally {
-      restore();
-    }
-  });
-});
-
 // ── W2c: postAgentResult 防御（经 handleWorkerMessage 触发） ──
 //
-// postAgentResult 是私有函数，通过 workflow-call 路径无法触发。但它可经 agent-call
-// 路径的「cached replay」分支触发：dispatchAgentCall 发现 run.state.calls.get(callId)
+// postAgentResult 是私有函数。它可经 agent-call 路径的「cached replay」分支触发：
+// dispatchAgentCall 发现 run.state.calls.get(callId)
 // 已是 done 时，直接 postAgentResult(run, callId, cached.result, true)（无需 spawn
 // 子进程）。利用这一点构造行为测试——往 cached.result 里塞不可克隆值（function），
 // mock postMessage 在首次发送 agent-result 时抛 DataCloneError，验证 fallback 路径。
 //
-// 另外补充：验证 worker-message-pump.ts 源码中三处 postMessage 调用点都有 try/catch 包裹，
+// 另外补充：验证 worker-message-pump.ts 源码中 postMessage 调用点都有 try/catch 包裹，
 // 防止未来重构误删防御（类似 worker-script-builder.test.ts 的源码字符串断言模式）。
 
 /** 构造 status="running" 且 calls 已含一个 done 结果（含不可克隆成员）的 mock run。
@@ -287,7 +201,6 @@ function makeRunningRunWithCachedDone(
   calls.set(callId, { status: "done", result });
   return {
     state: {
-      status: "running",
       calls,
       trace: { append: vi.fn(), update: vi.fn() },
       budget: { isExceeded: vi.fn(() => false) },
@@ -391,14 +304,60 @@ describe("W2c: postAgentResult 防御（源码结构断言）", () => {
     expect(match, "postBudgetUpdate 函数定义应存在").toBeTruthy();
     expect(hasTryCatchAroundPostMessage(match![0])).toBe(true);
   });
+});
 
-  it("dispatchWorkflowCall postResult 闭包包含 try/catch + fallback", () => {
-    // postResult 是 const 闭包，匹配到下一个 }; 结尾
-    const match = WORKER_MESSAGE_PUMP_SRC.match(/const postResult = \(result[\s\S]*?\n  \};/);
-    expect(match, "postResult 闭包定义应存在").toBeTruthy();
-    expect(hasTryCatchAroundPostMessage(match![0])).toBe(true);
-    expect(match![0]).toContain("Workflow result serialization failed");
-    // 防御变量名遮蔽：错误变量用 err 而非 msg（外层参数名 msg）
-    expect(match![0]).toMatch(/catch \(err\)/);
+// ── [加固] malformed 消息回发 error result ──
+//
+// 原 malformed agent-call 仅 logger 后 return：worker 内按 callId 等
+// 待的 pending Promise 永不 resolve（无墙钟兜底覆盖）。加固后 callId 合法（worker 侧
+// 存在对应 pending）即回发可克隆 error result；callId 非法无法定向回发，仅日志。
+
+describe("[加固] malformed 消息回发 error result（worker pending 收敛）", () => {
+  it("malformed agent-call（opts 缺失）+ callId 合法 → 回发 agent-result error result（malformed message dropped）", async () => {
+    const restore = silenceConsoleError();
+    try {
+      const postMessage = vi.fn();
+      const run = makeRunningRun(postMessage);
+
+      await handleWorkerMessage(
+        run,
+        { type: "agent-call", callId: 5 } as never, // opts 缺失 = malformed
+        makeDeps(),
+        makeHandlers(),
+      );
+      await flushMicrotasks();
+
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      const posted = postedAt(postMessage, 0);
+      expect(posted.type).toBe("agent-result");
+      expect(posted.callId).toBe(5);
+      expect(posted.result?.content).toBe("");
+      expect(posted.result?.error).toContain("malformed message dropped");
+      expect(posted.cached).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it("malformed agent-call + callId 非法 → 无法定向回发（零 postMessage），仅日志", async () => {
+    const restore = silenceConsoleError();
+    try {
+      const postMessage = vi.fn();
+      const run = makeRunningRun(postMessage);
+
+      await handleWorkerMessage(
+        run,
+        { type: "agent-call", callId: "not-a-number" } as never,
+        makeDeps(),
+        makeHandlers(),
+      );
+      await flushMicrotasks();
+
+      expect(postMessage).not.toHaveBeenCalled();
+      const errorCalls = loggerMock.error.mock.calls.map((c) => c[0] as string);
+      expect(errorCalls.some((s) => s.includes("malformed agent-call message"))).toBe(true);
+    } finally {
+      restore();
+    }
   });
 });

@@ -1,45 +1,12 @@
 /**
- * buildWorkerScript — workflow() 全局函数注入测试。
+ * buildWorkerScript — 生成源契约测试。
  *
- * 验证生成的 worker 源码字符串包含 workflow 嵌套调用所需的全部契约：
- * - workflow() 全局函数声明
- * - workflow-call 消息（Worker → Main）
- * - workflow-result 消息处理（Main → Worker）
- * - execute() context 包含 workflow
- * - name 参数校验
+ * （历史上本文件头部是 workflow() 嵌套调用注入契约测试——该 API 已随嵌套
+ * workflow() 编排 API 退役删除，相关 describe 一并移除。）
  */
 import { describe, expect, it } from "vitest";
 
 import { buildWorkerScript } from "../worker-script-builder.ts";
-
-describe("buildWorkerScript — workflow() global injection", () => {
-  const script = buildWorkerScript("// noop user script");
-
-  it("injects workflow() global function", () => {
-    expect(script).toContain("async function workflow");
-  });
-
-  it('workflow() sends workflow-call message', () => {
-    expect(script).toContain('type: "workflow-call"');
-  });
-
-  it('handles workflow-result message', () => {
-    // worker 是 workflow-result 的接收方，用条件分支处理（非对象字面量）
-    expect(script).toContain('msg.type === "workflow-result"');
-  });
-
-  it("execute() context includes workflow", () => {
-    expect(script).toContain(
-      "module.exports.execute({ agent, parallel, pipeline, phase, log, workflow, $ARGS, $WORKSPACE, $BUDGET })",
-    );
-  });
-
-  it("workflow() validates name argument", () => {
-    expect(script).toContain(
-      "workflow() requires a workflow name string as first argument",
-    );
-  });
-});
 
 // ── H3: agent() task/agent 分支 skill 字段传递 ──
 
@@ -89,12 +56,6 @@ describe("buildWorkerScript — W1 postMessage defense & parallel degrade", () =
     });
   });
 
-  describe("workflow() uses _safePost", () => {
-    it("workflow-call postMessage guarded by _safePost", () => {
-      expect(script).toContain("_safePost({ type: \"workflow-call\"");
-    });
-  });
-
   describe("return/error use _safePost", () => {
     it("return postMessage uses _safePost", () => {
       expect(script).toContain('_safePost({ type: "return"');
@@ -124,10 +85,6 @@ describe("buildWorkerScript — W1 postMessage defense & parallel degrade", () =
     it("single-arg mode logs stage errors before re-throwing", () => {
       expect(script).toContain("[pipeline stage ");
       expect(script).toContain("_pushWorkerLog(\"error\"");
-    });
-
-    it("cartesian mode logs stage errors instead of silent swallow", () => {
-      expect(script).toContain("[pipeline cartesian stage failed");
     });
   });
 });
@@ -176,12 +133,19 @@ describe("buildWorkerScript — W2 agent() returnMeta mode", () => {
       expect(handlerBlock![0]).toContain("value: _value");
       expect(handlerBlock![0]).toContain("sessionFile: msg.result.sessionFile");
       expect(handlerBlock![0]).toContain("worktreePath: msg.result.worktreePath");
-      expect(handlerBlock![0]).toContain("error: msg.result.error");
+      expect(handlerBlock![0]).toContain("error: _schemaGap ? _value : msg.result.error");
     });
 
-    it("fallback resolve single value uses msg.result.parsedOutput ?? msg.result.content", () => {
+    it("fallback resolve single value uses parsedOutput ?? content, gated by schema-gap (ADR-0092)", () => {
+      // 判定源 = pending.hasSchema（agent-result 段在 worker 顶层，opts 不在作用域）
       expect(script).toContain(
-        "const _value = msg.result.parsedOutput ?? msg.result.content;",
+        "const _schemaGap = pending.hasSchema && msg.result.parsedOutput === undefined && msg.result.error === undefined;",
+      );
+      expect(script).toContain(
+        "hasSchema: opts.schema !== undefined",
+      );
+      expect(script).toContain(
+        ": (msg.result.parsedOutput ?? msg.result.content);",
       );
     });
   });
@@ -203,12 +167,15 @@ describe("buildWorkerScript — W2 agent() returnMeta mode", () => {
       expect(cacheBlock![0]).toContain("value: _cachedValue");
       expect(cacheBlock![0]).toContain("sessionFile: cached.sessionFile");
       expect(cacheBlock![0]).toContain("worktreePath: cached.worktreePath");
-      expect(cacheBlock![0]).toContain("error: cached.error");
+      expect(cacheBlock![0]).toContain("error: _schemaGap ? _cachedValue : cached.error");
     });
 
-    it("cache replay fallback uses cached.parsedOutput ?? cached.content", () => {
+    it("cache replay fallback uses cached.parsedOutput ?? cached.content, gated by schema-gap (ADR-0092)", () => {
       expect(script).toContain(
-        "const _cachedValue = cached.parsedOutput ?? cached.content;",
+        "const _schemaGap = opts.schema !== undefined && cached.parsedOutput === undefined && cached.error === undefined;",
+      );
+      expect(script).toContain(
+        ": (cached.parsedOutput ?? cached.content);",
       );
     });
   });

@@ -34,30 +34,38 @@ import { tryEnterRunning } from "../persistence/execution-record.ts";
 import { type RoundSettlementOutcome } from "../persistence/finalize-record.ts";
 export type { RoundSettlementOutcome };
 import { engineConversationMessageUnsupportedError } from "../engine/common/capability-gate.ts";
+import { resolveEngineRouteId } from "../engine/common/session-view-service.ts";
 import { type BgNotifyRecord, notifyGateAllowsDelivery } from "../notify/notifier.ts";
-// [u7a 生产补挂] idle timer 原语（lifecycle-manager 叶子模块，与 settled-watchdog
-// 同层直接 import 惯例）：轮终 arm（翻入保活）+ 新轮 disarm（翻回正在执行）是 D5
-// 在途双谓词（hasLiveProcessHandle && !hasIdleTimer）的 idle 分支数据源。
+// [u7a 生产补挂] idle timer 原语（lifecycle-manager 叶子模块）：轮终 arm（翻入保活）
+// + 新轮 disarm（翻回正在执行）是 D5 在途双谓词（hasLiveProcessHandle &&
+// !hasIdleTimer）的 idle 分支数据源。
 import { DEFAULT_IDLE_TIMEOUT_MS, armIdleTimer, disarmIdleTimer } from "../lifecycle/lifecycle-manager.ts";
-import {
-  type SettledWatchdogFireInfo,
-  disarmRoundFromProtocol,
-  noteRoundSettledFromProtocol,
-} from "../lifecycle/settled-watchdog.ts";
 // [U4 / §3.2.3] 准入判据单点消费：锚可解析性判据（判据一）定义在 cold-lookup.ts。
 // [U6 / §3.2.6] transcriptAnchorOf = 锚派生单点（zcode 经 engineHandle.sessionRef），
 // resumeAnchor 构造与锚缺失/失效分流共用。
 import { isAnchorResolvable, transcriptAnchorOf } from "./cold-lookup.ts";
 // [U5 / §3.2.5] worktree 续聊重建 outcome（三失败形态判别联合）。
 import type { WorktreeRebuildOutcome } from "../worktree/worktree-manager.ts";
-import type { ExecutionRecord } from "./types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 
 const logger = getLogger("subagents");
 
-/** 失败通知的恢复指引尾段（[T2-③/LC-1] 可达性语义——失败原因 + 恢复指引必须可达宿主）。 */
-const FAILURE_RECOVERY_TAIL =
-  "Recovery: re-send your message (action:'message') to continue — the conversation " +
-  "context is preserved (session file intact), or use action:'close' to discard it.";
+/**
+ * [§1.4 (c)] 轮终链 fire-and-forget 的统一断头保护：链上任何异常（stale pi 抛错、
+ * 簿记/通知失败等，成因不限）降级为 error 留痕，不得升格为未处理 promise 拒绝——
+ * pi rpc 模式没有安装未处理拒绝处理器（0.84.4 只在交互模式注册），Node 默认 exit 1，
+ * 后果 = 当轮 record 丢失、manifest 投影未执行（登记 §1.4 死亡通道）。
+ */
+function voidRoundFinalChain(promise: Promise<void>, what: string): void {
+  promise.catch((err: unknown) => {
+    bestEffort(err, `${what} (round-final chain)`, "error");
+  });
+}
+
+// [T2-③/LC-1] 失败恢复指引尾段：定义在 notify/notifier.ts（notifier 与本文件
+// 互相消费——尾段放 notifier 侧保持依赖方向单一：本文件已 import notifier）。
+import { FAILURE_RECOVERY_TAIL } from "../notify/notifier.ts";
+export { FAILURE_RECOVERY_TAIL };
 
 /** [U4 / §3.2.3] reopen 降级首轮的历史摘要 prompt（模板单点，单测锁定 §3.2.3 摘要
  *  来源契约：binding 快照域 task/agent/round/totalTokens/turns + 上一轮 result）。
@@ -91,6 +99,32 @@ export function buildReopenSummaryPrompt(input: {
 }
 
 /**
+ * resume 锚点构造（引擎分派单点，[U6 / §3.2.6 要点 3]；[U4 pi-workflow-run-resource-model]
+ * 上提为模块函数——chat Continuation 续轮与 workflow 成员续写轮共用，防两处漂移）：
+ *   - zcode：sessionRef = {sessionId, dbPath}（transcriptAnchorOf 派生单源）——
+ *     引擎侧消费 = session/resume 读历史 + session/create 新 session 注入（P-1
+ *     选型，原地 resume 续写被 -32031 卡死不可用），新 sessionRef 经
+ *     onHandleReady 回传；
+ *   - pi（缺省）：recordId + sessionFile 续写原文件。
+ * [池抽象降级 2026-09-13] 原 poolKey 字段已随 ResumeAnchor 协议面退役删除——
+ * 两引擎恒 'shared'，锚点补全 handle 无需池定位。
+ */
+export function resumeAnchorOf(record: ExecutionRecord): ResumeAnchor {
+  const anchor = transcriptAnchorOf(record);
+  if (anchor !== undefined && anchor.engine === "zcode") {
+    return {
+      sessionRef: { sessionId: anchor.sessionId, dbPath: anchor.dbPath },
+    };
+  }
+  return {
+    sessionRef: {
+      recordId: record.id,
+      ...(record.sessionFile !== undefined ? { sessionFile: record.sessionFile } : {}),
+    },
+  };
+}
+
+/**
  * 泛化派发主干的轮次回调面（service.kickOffChatRound 泛化参数，D6）。
  * run resolve（= agent_settled）/ run reject（prepare 期失败）/ acquire 被打断
  * （无 run 产生）三分，全部回流 Continuation 单点收口。
@@ -102,9 +136,6 @@ export interface ContinuationRoundHandlers {
   onRejected(err: unknown): void;
   /** acquire 排队窗被打断/取消（无 run 产生）：不终态化、不通知，直接 drain。 */
   onAbandoned(): void;
-  /** settled-watchdog fire（中段无进展 / 收尾段上界）：kill 在途轮，run 收敛后
-   *  经 onSettled/onRejected 走失败分支统一收口。 */
-  onWatchdogFire(fire: SettledWatchdogFireInfo): void;
 }
 
 /** dispatchRound ④ 经泛化派发主干发起 run 的入参（每轮语义载荷）。 */
@@ -131,7 +162,7 @@ export interface ContinuationDispatchInput {
  */
 export interface ContinuationHost {
   /** 泛化派发主干（D6：kickOffChatRound 共享部分——pool acquire / stream / chat 键
-   *  组装 / armMidRoundNoProgress），应答经 handlers 回流。 */
+   *  组装），应答经 handlers 回流。 */
   dispatchChatRound(record: ExecutionRecord, input: ContinuationDispatchInput): void;
   /** 轮终簿记（doFinalizeRoundToIdle wrapper，D7 outcome 入参）。 */
   finalizeRoundOutcome(record: ExecutionRecord, outcome: RoundSettlementOutcomeAlias): Promise<void>;
@@ -143,8 +174,6 @@ export interface ContinuationHost {
   notifyRecord(record: BgNotifyRecord): void;
   /** 红线②派发前兜底：镜像在途子进程活着 → kill 等退出（引擎存活期状态错配）。 */
   killStaleChild(recordId: string): Promise<void>;
-  /** watchdog fire 的 kill 手段（kill + 协议 cancel——run 收敛由杀链驱动）。 */
-  killRoundChild(recordId: string, source: string): void;
   /** [modeless 波1] message 资格的引擎能力轴判据（conversation 位；unsupported /
    *  未注册 = false）——与 record 形态无关（万物可续，无升级概念）。 */
   engineSupportsConversation(record: ExecutionRecord): boolean;
@@ -324,21 +353,18 @@ export class ConversationContinuation {
       this.queue.length = 0;
       return;
     }
-    // settle 段交棒（run 应答驱动，D7 v5 轻形态——零协议扩展）：先于轮终簿记，
-    // watchdog 停表早于状态写。resource 未挂载时幂等 no-op。
-    noteRoundSettledFromProtocol(this.record.id);
     if (outcome.error !== undefined) {
-      void this.settleRoundFailed(outcome.error);
+      voidRoundFinalChain(this.settleRoundFailed(outcome.error), "settleRoundFailed (onRunSettled)");
       return;
     }
-    void this.settleRoundSuccess(outcome);
+    voidRoundFinalChain(this.settleRoundSuccess(outcome), "settleRoundSuccess (onRunSettled)");
   }
 
   /** run reject（prepare 期失败——进程创建前）：合成失败轮末分流。 */
   onRoundRejected(err: unknown): void {
     this.clearActiveRound();
     if (this.record.status !== "running") return;
-    void this.settleRoundFailed(toErrorMessage(err));
+    voidRoundFinalChain(this.settleRoundFailed(toErrorMessage(err)), "settleRoundFailed (onRoundRejected)");
   }
 
   /** acquire 被打断/排队窗取消（无 run 产生）：不终态化、不通知，直接 drain。 */
@@ -346,14 +372,6 @@ export class ConversationContinuation {
     this.clearActiveRound();
     if (this.record.status !== "running") return;
     this.drain();
-  }
-
-  /** settled-watchdog fire：kill 在途轮（协议 cancel + 镜像置死）+ abort 轮 signal
-   *  ——run 收敛（进程退出）后经 onSettled/onRejected 走失败分支统一收口（含失败
-   *  通知），不在回调内直接簿记（单写者：收口只走 run 应答一条路）。 */
-  onWatchdogFire(fire: SettledWatchdogFireInfo): void {
-    this.host.killRoundChild(this.record.id, `settled watchdog (${fire.phase})`);
-    this.activeController?.abort();
   }
 
   // ── 派发（§3.4 dispatchRound）────────────────────────────────────
@@ -432,7 +450,12 @@ export class ConversationContinuation {
     // 首轮/续聊/drain 三路派发的唯一同步入口，单挂点覆盖全部「翻回正在执行」）。
     disarmIdleTimer(record.id);
     notifyInFlightChanged();
-    void this.dispatchRoundAsync(msgs, firstRound, freshSession, summaryPrefix, firstRoundSpec);
+    // [§1.4 (c) 同族] 派发链同样断头保护：主干同步段 try/catch 之外的 await 段
+    //（worktree 重建 / markRoundStarted 前）抛错时不得升格为未处理拒绝。
+    voidRoundFinalChain(
+      this.dispatchRoundAsync(msgs, firstRound, freshSession, summaryPrefix, firstRoundSpec),
+      "dispatchRoundAsync",
+    );
   }
 
   private async dispatchRoundAsync(
@@ -469,6 +492,19 @@ export class ConversationContinuation {
     freshSession = rebuild.freshSession;
     summaryPrefix = rebuild.summaryPrefix;
     const worktreeNotice = rebuild.worktreeNotice;
+
+    // [轮次轴在途门 / §4 补强] :472 的重建 await 是终态门（:460）之后唯一的挂起点：
+    // 窗口内 cancel/close 抢先收口时 record 已离 running，而轮始原语的判据不能是
+    // status（首轮出生即 running、reopen 后仍是 idle 也要允许轮始——store 侧无法
+    // 单靠 status 判「已有在途轮」），继续走 markRoundStarted 会把已收口的 record
+    // 静默翻回 running：内存态与磁盘已落的 stopReason / `.state` 收条分叉。
+    // 此处同步复查（本行到 markRoundStarted 之间无 await，同 tick 内不可被抢占，
+    // 由结构本身保证）；处置与 :460 的终态门逐字同形。
+    if (record.status !== "running") {
+      this.clearActiveRound();
+      this.queue.length = 0;
+      return;
+    }
 
     // ② 载荷组装：轮级 signal（record controller 级联 + 打断通道）。
     //    model 身份重建 / resume 锚点 / chat 键组装 / sessionRootId 注入 / pool
@@ -546,7 +582,6 @@ export class ConversationContinuation {
             if (isStaleRoundArrival("onAbandoned")) return;
             this.onRoundAbandoned();
           },
-          onWatchdogFire: (fire) => this.onWatchdogFire(fire),
         },
       });
     } catch (err) {
@@ -649,45 +684,20 @@ export class ConversationContinuation {
   }
 
   /**
-   * resume 锚点（引擎分派，[U6 / §3.2.6 要点 3]）：
-   *   - zcode：sessionRef = {sessionId, dbPath}（transcriptAnchorOf 派生单源）——
-   *     引擎侧消费 = session/resume 读历史 + session/create 新 session 注入（P-1
-   *     选型，原地 resume 续写被 -32031 卡死不可用），新 sessionRef 经
-   *     onHandleReady 回传；
-   *   - pi（缺省）：recordId + sessionFile 续写原文件。
-   * [池抽象降级 2026-09-13] 原 poolKey 字段已随 ResumeAnchor 协议面退役删除——
-   * 两引擎恒 'shared'，锚点补全 handle 无需池定位。
+   * resume 锚点（引擎分派，构造单点 = 模块级 {@link resumeAnchorOf}——[U4
+   * pi-workflow-run-resource-model] 起 workflow 成员续写轮共用同一构造，防两处漂移）。
    */
   private resumeAnchor(): ResumeAnchor {
-    const anchor = transcriptAnchorOf(this.record);
-    if (anchor !== undefined && anchor.engine === "zcode") {
-      return {
-        sessionRef: { sessionId: anchor.sessionId, dbPath: anchor.dbPath },
-      };
-    }
-    return {
-      sessionRef: {
-        recordId: this.record.id,
-        ...(this.record.sessionFile !== undefined ? { sessionFile: this.record.sessionFile } : {}),
-      },
-    };
+    return resumeAnchorOf(this.record);
   }
 
   // ── 轮末分流（D7）────────────────────────────────────────────────
-
-  /** 轮终守护清理（旧 idle 相位帧 disarmRoundFromProtocol 语义的 run 应答驱动承接）：
-   *  轮终簿记完成 = 本轮等待窗口终结，两段守护一并清（收尾段不残留 armed——fire 会对
-   *  已收敛轮误发 kill/cancel）。drain 派发下一轮时 armMidRoundNoProgress 重挂新窗。 */
-  private disarmRoundWatchdog(): void {
-    disarmRoundFromProtocol(this.record.id);
-  }
 
   /** 成功分支：轮终簿记（success）→ notifyGate 三元组门 → route（次序：route 晚于簿记）
    *  → closeAfterRound 归档消费（[U5] 顺序约束：通知送达后才归档）。 */
   private async settleRoundSuccess(outcome: AgentOutcome): Promise<void> {
     const record = this.record;
     await this.host.finalizeRoundOutcome(record, { kind: "success", content: outcome.content });
-    this.disarmRoundWatchdog();
     // [u7a 生产补挂] 轮终簿记完成 = 「正在执行 → 保活」翻转边界（与旧 idle 相位帧
     //（H1 U6 已退役）同一时点语义：成功轮收敛进 idle 稳态，活句柄交 idle timer 保活）
     // ——arm 后推最新在途计数（D5 双谓词：保活不计在途）。失败轮不 arm（旧 idle
@@ -722,7 +732,6 @@ export class ConversationContinuation {
   private async settleRoundFailed(reason: string): Promise<void> {
     const record = this.record;
     await this.host.finalizeRoundOutcome(record, { kind: "failed", reason });
-    this.disarmRoundWatchdog();
     if (!notifyGateAllowsDelivery(record)) {
       this.drain();
       return;
@@ -833,8 +842,10 @@ export class ConversationContinuation {
    * [u7a 生产补挂] 轮终翻入保活：arm idle timer + 推送最新在途计数（语义承接旧
    * armChatIdleTimer 的挂载降级链——配置值 throw 时回落 DEFAULT，arm 失败不得打断
    * 轮末分流链：本方法运行在 fire-and-forget 的 settle 后续链上，逃逸 throw 即
-   * unhandled rejection）。超时处置 = host.closeNow（无在跑轮 record 的终态化收口
-   * ——kill 链记账/disarm/finalize/notifyClosed 全含，幂等成分对已死形态无害）。
+   * unhandled rejection）。超时处置 = host.closeNow（接线 = idleTimeoutRecycle，
+   * [U5] 进程回收不收口——disarm + kill 保活进程，record 保持 idle 随时可续聊；
+   * 收口是用户动作，归档是用户意愿位，超时不是用户动作——表述对齐
+   * lifecycle-manager.ts 头注）。
    */
   private armIdleKeepalive(): void {
     const record = this.record;
@@ -924,7 +935,7 @@ export class ConversationContinuation {
     // 引擎能力轴的 message 资格检查保留（与 record 无关：pi native / zcode cold
     // 均可续；unsupported 引擎硬拒 + fork/重派指引，防续聊行为悬空）。
     if (!this.host.engineSupportsConversation(record)) {
-      throw engineConversationMessageUnsupportedError(record.engine ?? "pi");
+      throw engineConversationMessageUnsupportedError(resolveEngineRouteId(record, record.id));
     }
     if (!tryEnterRunning(record)) {
       // 判据刚确认 idle——竞态窗口（close/cancel 抢先翻位）的防御分支。

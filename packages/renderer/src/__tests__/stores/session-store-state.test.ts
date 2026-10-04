@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * sessionStore 状态单测（applySnapshot 快照合并 + markDead/revive dead 态管理；
  * 原 session-store-dead-revive.test.ts 已并入本文件——同 SUT 同 seed 模式）。

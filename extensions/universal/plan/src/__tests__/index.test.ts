@@ -1,31 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// index.ts 只做装配：mock 掉子模块注册函数，只捕获 pi.on 的 hook 与 controllers 注册表
+// index.ts 只做装配：mock 掉子模块注册函数，只捕获 pi.on 的 hook 与 planCtx 注册表
 vi.mock("../tool.js", () => ({
   registerPlanTool: vi.fn(
-    (_pi: unknown, _sessions: unknown, controllers: Map<string, AbortController>) => {
-      captured.controllers = controllers;
+    (_pi: unknown, planCtx: { controllers: Map<string, AbortController> }) => {
+      captured.planCtx = planCtx;
     },
   ),
-  PLAN_MODE_TOOLS: ["read", "bash", "grep", "find", "ls", "plan"],
+  PLAN_MODE_TOOLS: ["read", "bash", "grep", "find", "ls", "plan", "ask_user"],
+  // E3 宿主分流（F-W3-1）依赖：与 tool.ts 实装同源的一行 env 读（受 vi.stubEnv 控制）
+  isTaijiHost: () => process.env.TAIJI_AGENT_EXT_LOG === "1",
 }));
 vi.mock("../command.js", () => ({ registerPlanCommand: vi.fn() }));
-vi.mock("../compact.js", () => ({ registerPlanEventHandlers: vi.fn() }));
 vi.mock("../widget.js", () => ({ updatePlanWidget: vi.fn() }));
-
-// MF-1-8：注入失败日志必须走 extension-logger（stderr 仅 logger 自身抛错的内层兜底）——
-// 捕获 warn spy 断言落盘通道
-const { loggerWarn } = vi.hoisted(() => ({ loggerWarn: vi.fn() }));
-vi.mock("@zhushanwen/pi-extension-logger", () => ({
-  getLogger: () => ({ warn: loggerWarn, error: vi.fn() }),
-}));
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import planExtension from "../index.js";
 import { PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 
-const captured: { controllers?: Map<string, AbortController> } = {};
+const captured: { planCtx?: { controllers: Map<string, AbortController> } } = {};
 
 type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
 
@@ -44,10 +38,12 @@ function setup() {
   return { handlers, pi };
 }
 
-function makeCtx(entries: unknown[]): ExtensionContext {
+function makeCtx(entries: unknown[], mode?: string): ExtensionContext {
   return {
+    mode,
     sessionManager: {
       getSessionId: () => "test-session",
+      getLeafId: () => null,
       getEntries: () => entries,
     },
     ui: { setWidget: vi.fn(), setStatus: vi.fn(), theme: { fg: (_t: string, text: string) => text } },
@@ -60,7 +56,7 @@ function planStateEntry(data: Record<string, unknown>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  captured.controllers = undefined;
+  captured.planCtx = undefined;
   vi.stubEnv("TAIJI_AGENT_EXT_LOG", "");
 });
 
@@ -68,8 +64,8 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("session_start hook（E3：awaiting 重挂提醒）", () => {
-  it("awaiting + no live select → steers the agent to re-call submit-review (pi 懒重生之后跑)", async () => {
+describe("session_start hook（E3：按 state 查表恢复）", () => {
+  it("reviewing + no live select → steers the agent to re-call submit-review with 上轮 selfReview 全文（D9④）", async () => {
     const { handlers, pi } = setup();
     const ctx = makeCtx([
       planStateEntry({
@@ -79,13 +75,14 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
         templateName: "",
         skills: ["tech-design"],
         docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "tech-design", version: 1 }],
-        reviewState: "awaiting",
+        state: "reviewing",
+        selfReview: "3 requirements covered; 2 assumptions verified.",
       }),
     ]);
 
     await handlers.get("session_start")!({ type: "session_start" }, ctx);
 
-    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan", "ask_user"]);
     // custom message 三要素 + streaming steer options 断言（A6）
     expect(pi.sendMessage).toHaveBeenCalledWith(
       {
@@ -95,11 +92,104 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
       },
       { deliverAs: "steer", triggerTurn: true },
     );
-    // E3 重挂即落盘（§3.4 降级两源：该处曾只发 steer 不落盘——不落盘则 renderer 冷启动
-    // 扫描的 View 恒无 source、恒渲染通用文案）
+    // D9④：steer 携带上轮 selfReview 全文 + 原样回传指令（豁免只在「自审内容」，过门义务不豁免）
+    const steerContent = (pi.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0].content as string;
+    expect(steerContent).toContain("3 requirements covered; 2 assumptions verified.");
+    expect(steerContent).toContain("VERBATIM");
+    expect(steerContent).toContain("selfReview");
+    // E3 重挂即落盘（§3.4 降级两源）：resumeHint='resubmit'（旧 reviewStateSource 语义取代）
     expect(pi.appendEntry).toHaveBeenCalledWith(
       "plan-state",
-      expect.objectContaining({ isActive: true, reviewState: "awaiting", reviewStateSource: "resubmit" }),
+      expect.objectContaining({ isActive: true, state: "reviewing", resumeHint: "resubmit" }),
+    );
+  });
+
+  it("旧 entry（reviewState='awaiting' 无 state 字段）经映射同样落 reviewing 重挂分支（D2 读方①）", async () => {
+    const { handlers, pi } = setup();
+    const ctx = makeCtx([
+      planStateEntry({
+        isActive: true,
+        planFilePath: "/p/plan.md",
+        requirement: "r",
+        templateName: "",
+        skills: [],
+        docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "", version: 1 }],
+        reviewState: "awaiting",
+      }),
+    ]);
+
+    await handlers.get("session_start")!({ type: "session_start" }, ctx);
+
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("submit-review") }),
+      expect.anything(),
+    );
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "plan-state",
+      expect.objectContaining({ state: "reviewing", resumeHint: "resubmit" }),
+    );
+  });
+
+  it("taiji GUI 宿主（signal=1 + mode=rpc）reviewing → 不自动 steer 重挂（F-W3-1 审批条复活拦截），只落 resumeHint 交 degraded 按钮恢复", async () => {
+    vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
+    const { handlers, pi } = setup();
+    const ctx = makeCtx(
+      [
+        planStateEntry({
+          isActive: true,
+          planFilePath: "/p/plan.md",
+          requirement: "r",
+          templateName: "",
+          skills: [],
+          docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "", version: 1 }],
+          state: "reviewing",
+          selfReview: "carried conclusions",
+        }),
+      ],
+      "rpc",
+    );
+
+    await handlers.get("session_start")!({ type: "session_start" }, ctx);
+
+    // 审批条不自动复活：E3 不得无人值守重提审批（steer triggerTurn = 自动重提通道）
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+    // 工具集收拢照常（E3 的非交互恢复职责保留）
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan", "ask_user"]);
+    // resumeHint 落盘：renderer degraded 分支（reviewing ∧ 无挂起）据此呈现
+    // 「审批提问已随会话重启失效 + 重新提交审批」按钮——恢复触发权归用户
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "plan-state",
+      expect.objectContaining({ isActive: true, state: "reviewing", resumeHint: "resubmit" }),
+    );
+  });
+
+  it("taiji 宿主 env 泄漏到非 rpc 形态（signal=1 + mode=tui）→ steer 照旧（与 executeSubmitReview 的 E8 分流对齐）", async () => {
+    vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
+    const { handlers, pi } = setup();
+    const ctx = makeCtx(
+      [
+        planStateEntry({
+          isActive: true,
+          planFilePath: "/p/plan.md",
+          requirement: "r",
+          templateName: "",
+          skills: [],
+          docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "", version: 1 }],
+          state: "reviewing",
+        }),
+      ],
+      "tui",
+    );
+
+    await handlers.get("session_start")!({ type: "session_start" }, ctx);
+
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("submit-review") }),
+      { deliverAs: "steer", triggerTurn: true },
+    );
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "plan-state",
+      expect.objectContaining({ state: "reviewing", resumeHint: "resubmit" }),
     );
   });
 
@@ -113,13 +203,13 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
         templateName: "",
         skills: ["tech-design"],
         docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "tech-design", version: 1 }],
-        reviewState: "revising",
+        state: "revising",
       }),
     ]);
 
     await handlers.get("session_start")!({ type: "session_start" }, ctx);
 
-    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan"]);
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan", "ask_user"]);
     expect(pi.sendMessage).toHaveBeenCalledWith(
       {
         customType: PLAN_CONTEXT_CUSTOM_TYPE,
@@ -128,9 +218,41 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
       },
       { deliverAs: "steer", triggerTurn: true },
     );
-    // revising 恢复不落 source 标记（'resubmit' 只描述 awaiting 降级等待；revising 由
+    // revising 恢复不落 resumeHint（'resubmit' 只描述 reviewing 降级等待；revising 由
     // steer triggerTurn 立即开轮接续，恢复期间显示的 revising 是真实进行中）
     expect(pi.appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("dispatching + no live select → review_aborted 边落 approved + steer 重调 complete（D5 E3 新支）", async () => {
+    const { handlers, pi } = setup();
+    const ctx = makeCtx([
+      planStateEntry({
+        isActive: true,
+        planFilePath: "/p/plan.md",
+        requirement: "r",
+        templateName: "",
+        skills: [],
+        docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "", version: 1 }],
+        state: "dispatching",
+      }),
+    ]);
+
+    await handlers.get("session_start")!({ type: "session_start" }, ctx);
+
+    // 崩溃消散的表单 = 无选择解散极端形态：dispatching --review_aborted--> approved 落盘
+    //（批准事实保留，且使重调 complete 的 approve 边合法）
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "plan-state",
+      expect.objectContaining({ state: "approved", isActive: true }),
+    );
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      {
+        customType: PLAN_CONTEXT_CUSTOM_TYPE,
+        content: expect.stringContaining("plan(action='complete')"),
+        display: false,
+      },
+      { deliverAs: "steer", triggerTurn: true },
+    );
   });
 
   it("stale controllers are cleared on session rebuild (禁复用已 abort 的 controller)", async () => {
@@ -138,14 +260,14 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
     const ctx = makeCtx([]);
     // 同进程 reload 场景：注册表里残留旧 controller——hook 重建 session 时必须清掉
     // （残留的已 abort controller 禁止复用：发起新挂起 select 会 fresh 新建，此处是防御清理）
-    captured.controllers!.set("test-session", new AbortController());
+    captured.planCtx!.controllers.set("test-session", new AbortController());
 
     await handlers.get("session_start")!({ type: "session_start" }, ctx);
 
-    expect(captured.controllers!.has("test-session")).toBe(false);
+    expect(captured.planCtx!.controllers.has("test-session")).toBe(false);
   });
 
-  it("active without awaiting (in progress) → no reminder", async () => {
+  it("active without pending review (in progress) → no reminder", async () => {
     const { handlers, pi } = setup();
     const ctx = makeCtx([
       planStateEntry({
@@ -162,7 +284,28 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
 
     expect(pi.setActiveTools).toHaveBeenCalled();
     expect(pi.sendMessage).not.toHaveBeenCalled();
-    // 非 awaiting 不落盘：E3 source 标记只在 awaiting 重挂分支写
+    // 非 reviewing/dispatching 不落盘：E3 resumeHint 只在 reviewing 重挂分支写
+    expect(pi.appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("approved（later 后重开）不打扰：无 E3 重挂（S16「重开 session 无 E3 重挂打扰」）", async () => {
+    const { handlers, pi } = setup();
+    const ctx = makeCtx([
+      planStateEntry({
+        isActive: true,
+        planFilePath: "/p/plan.md",
+        requirement: "r",
+        templateName: "",
+        skills: [],
+        docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "", version: 1 }],
+        state: "approved",
+      }),
+    ]);
+
+    await handlers.get("session_start")!({ type: "session_start" }, ctx);
+
+    expect(pi.setActiveTools).toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
     expect(pi.appendEntry).not.toHaveBeenCalled();
   });
 
@@ -177,52 +320,9 @@ describe("session_start hook（E3：awaiting 重挂提醒）", () => {
   });
 });
 
-describe("before_agent_start hook（D9：taiji 形态引导注入）", () => {
-  const basePrompt = "You are a helpful coding agent.";
-
-  it("no host signal (standalone pi) → undefined, prompt untouched", () => {
+describe("进入引导单源（systemPrompt 注入面已收敛到 tool promptSnippet）", () => {
+  it("before_agent_start 钩子不注册：taiji 宿主注入面与 tool 描述面不再同时含进入引导（C1 行为变更组锚）", () => {
     const { handlers } = setup();
-    const result = handlers.get("before_agent_start")!(
-      { type: "before_agent_start", prompt: "hi", systemPrompt: basePrompt },
-      makeCtx([]),
-    );
-    expect(result).toBeUndefined();
-  });
-
-  it("TAIJI_AGENT_EXT_LOG=1 → appends the plan-mode suggestion (not TAIJI_RUNTIME_TOKEN — 出站 deny list 剥除)", () => {
-    vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
-    const { handlers } = setup();
-    const result = handlers.get("before_agent_start")!(
-      { type: "before_agent_start", prompt: "hi", systemPrompt: basePrompt },
-      makeCtx([]),
-    ) as { systemPrompt?: string } | undefined;
-
-    expect(result?.systemPrompt).toContain(basePrompt);
-    // agent 自助进入引导在场（enter action + 无需确认）
-    expect(result?.systemPrompt).toContain("plan(action='enter'");
-    expect(result?.systemPrompt).toContain("Do not ask for permission to enter");
-    // 旧的「建议 + 需确认」措辞已移除（enter 是 tool action，无需确认闸门）
-    expect(result?.systemPrompt).not.toContain("Do NOT enter plan mode without the user's confirmation");
-  });
-
-  it("注入失败（systemPrompt 读取抛错）→ logger.warn 落盘 + 返回 undefined，不阻塞 agent loop（MF-1-8）", () => {
-    vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
-    const { handlers } = setup();
-    const evilEvent = {
-      type: "before_agent_start",
-      get systemPrompt(): string {
-        throw new Error("boom");
-      },
-    };
-
-    const result = handlers.get("before_agent_start")!(evilEvent, makeCtx([]));
-
-    // Never block the agent loop：吞错返回 undefined
-    expect(result).toBeUndefined();
-    // 日志走 extension-logger 文件通道（~/.pi/agent/logs/），不再 stderr 直写
-    expect(loggerWarn).toHaveBeenCalledWith(
-      "plan: before_agent_start injection failed",
-      expect.objectContaining({ error: expect.stringContaining("boom") }),
-    );
+    expect(handlers.has("before_agent_start")).toBe(false);
   });
 });

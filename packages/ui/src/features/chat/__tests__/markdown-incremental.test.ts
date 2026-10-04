@@ -14,7 +14,7 @@
  * - 拼接等价判据（正确性的唯一定义）：分段渲染拼接与全文渲染 DOM 等价
  * - renderIncremental：前缀缓存引用恒等（零重渲染）/ 边界前进 / 边界回退降级 /
  *   segId 单调递增稳定 / 未闭合 fence 占位段 / finalize 转完整渲染 / env 签名失效
- * - shouldFinalizeStreamingFence：静默期/complete 触发条件
+ * - STREAMING_FENCE_SILENCE_MS：finalize 静默阈值常量（谓词注入已删，审计候选 18）
  *
  * mock 策略与 markdown.test.ts 一致：stub shiki，测试聚焦边界逻辑而非真实高亮。
  *
@@ -840,18 +840,16 @@ describe('renderIncremental — 缓存协议 / segId / 降级 / 占位', () => {
   })
 })
 
-describe('shouldFinalizeStreamingFence — 静默期/complete 触发条件', () => {
+// [审计候选 18] 原 shouldFinalizeStreamingFence 谓词（complete ∨ 静默 ≥ 阈值）已删——
+// 判定式收敛在 ui useMarkdownStreaming，由 ui MarkdownRenderer.test.ts 的阈值化用例承接；
+// 此处仅锁阈值常量本身（200ms 起点，dev 实测 tuning）。
+describe('STREAMING_FENCE_SILENCE_MS — finalize 静默阈值常量', () => {
   beforeEach(() => {
     vi.resetModules()
   })
 
-  it('complete 或静默 ≥ 阈值（200ms 起点，dev 实测 tuning）时转完整渲染', async () => {
+  it('阈值为 200ms（08 §5.4 实施期 A/B 起点，非结论值）', async () => {
     const m = await freshModule()
     expect(m.STREAMING_FENCE_SILENCE_MS).toBe(200)
-    expect(m.shouldFinalizeStreamingFence({ complete: true, silenceMs: 0 })).toBe(true)
-    expect(m.shouldFinalizeStreamingFence({ complete: false, silenceMs: 0 })).toBe(false)
-    expect(m.shouldFinalizeStreamingFence({ complete: false, silenceMs: 199 })).toBe(false)
-    expect(m.shouldFinalizeStreamingFence({ complete: false, silenceMs: 200 })).toBe(true)
-    expect(m.shouldFinalizeStreamingFence({ complete: false, silenceMs: 5000 })).toBe(true)
   })
 })

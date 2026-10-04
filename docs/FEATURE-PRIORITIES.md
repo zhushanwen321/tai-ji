@@ -28,7 +28,7 @@
 
 跨级调用点的判定：P0/P1 主流程调用 P2/P3 能力时，**接入点按被调功能的契约降级隔离**（调用方不因辅助功能故障而崩），被调功能内部按自身级的契约处理。
 
-执行抓手：PR 审查维度见 `pr-cr-fix/agents/review-business-logic.md`（grading-error-policy 类别）；流水线审查见 dev-flow 阶段 3 reviewer 模板。
+执行切入点：分支审查维度见 `dev-merge/agents/review-business-logic.md`（grading-error-policy 类别）；流水线审查见 dev-flow 阶段 3 reviewer 模板。
 
 ## 2. P0 — 必不可少（挂了 = harness 对用户毫无价值）
 
@@ -51,11 +51,11 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 模型与 thinking level | 能力注册表、生效回执（RPC 状态化）、模型切换 | 用户控制 agent 智能水平/成本的核心旋钮；锁死单模型不可用 |
 | 中断/取消 | turn 取消链、取消后状态一致性 | 失控 agent 无法停止 = 持续烧 token 不可用 |
 | Markdown 渲染 | shiki 高亮、HTML 分通道净化（可信段摘出回填 + 用户 HTML DOMPurify 白名单）、相对资源通道（resourceBaseDir 双通道）、CSP 兼容、降级路径 | 对话内容呈现主体；纯文本降级已属不可读（曾 CSP 事故） |
-| 扩展装载框架 | builtin 21 包装载、分组守卫（infrastructure 不可禁）、worker 隔离 | 所有进阶能力的装载底座，挂了 feature 扩展全灭 |
+| 扩展装载框架 | builtin 21 包装载、分组门禁（infrastructure 不可禁）、worker 隔离 | 所有进阶能力的装载底座，挂了 feature 扩展全灭 |
 | subagent/workflow 面板与派发 | composer 任务托盘的 subagent/workflow 列表与运行计数（含 built-in 第 4 件「子会话」观察入口——调度模式派发进度的主视图；含行内取消/中止——workflow 一次性生命周期 abort-only，pause/resume 已随扩展 D-2 移除）、drawer 详情 tab、workflow 面板、通知链 | agent 生产力的核心形态（边界判例 #2，2026-09-12 升 P0）；2026-09-16 观察入口自侧栏 Agents/Flows tab 迁 composer 任务托盘（侧栏收敛三 tab，入口唯一化） |
 | 设置页 | provider/API key 管理、系统提示词编辑、**模式（预设）编辑 + 模式提示词卡**、主题 | provider 配置是首次使用必经路径，配不了连会话都起不了 |
 | 插件系统 | PluginService、trusted/sandbox 隔离、statusBar、交互点位（headerAction 顶栏按钮区 / modal 弹层 / action-bar 交互原语 + 条目镜像数据面） | harness 可扩展能力主体（testing 13）；交互点位是管理面类需求的规范底座，modal/徽标链路挂了 = 插件无法提供任何可交互入口 |
-| 统一提问表单 FormOverlay | agent 提问浮层（ask-user/scheduler/plan 三方收口）、Other 保留、pi 恢复 turn | agent↔用户交互闭环的唯一通道（边界判例 #3，2026-09-12 升 P0） |
+| 统一提问表单 FormOverlay | agent 提问浮层（ask-user/scheduler/plan 三方统一）、Other 保留、pi 恢复 turn | agent↔用户交互闭环的唯一通道（边界判例 #3，2026-09-12 升 P0） |
 
 ## 3. P1 — 核心体验（挂了 = 大体能用，体验非常差）
 
@@ -64,6 +64,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 文件树与文件查看 | 懒加载、过滤、git 角标、文件预览 | testing 04；主链路（对话+agent 干活）完整 |
 | 工具调用过程展示 | bash/edit/read 过程与结果渲染、变更集展示 | 挂了只见黑盒 |
 | 权限审批闭环 | permission extension + GUI 审批浮层、approve/deny 透传 | yolo 模式不经审批；approve 模式下挂了工具卡死（边界判例 #7） |
+| 消息撤回 | direct/steer 车道撤回、草稿回填、派生面板随树重建（plan/todo/goal/scheduler）、上下文裁剪（撤回后模型不引用被撤内容）、定时任务不复活 | ADR-0076（产品承诺方向：会话树）；挂了 = 发错消息无法补救 + 派生残影误导（P1 契约 = 六错误码 fail-fast + 结构化 warn，已按此实现） |
 
 ## 4. P2 — 常用辅助（挂了 = 基本可用，稍微忍受）
 
@@ -75,7 +76,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | zcode 引擎 | app-server RPC、会话库隔离、凭据注入（边界判例 #4） |
 | session-reader | 通知链 session_read 指针解析、跨进程读（pi 与 zcode 引擎 subagent 均覆盖） |
 | smart-context | 自动压缩、双模式摘要接管、分档提醒（手动 compact 兜底） |
-| structured-output / plan / todo 面板 | workflow 结构化输出、计划面板、todo 渲染、plan 执行方式选择（develop 内置 / plan-exec skill / goal） |
+| structured-output / plan / todo 面板 | workflow 结构化输出、计划面板（审批闸口三决策：修订/执行/搁置 + 降级「重新提交审批」），todo 渲染、plan 执行方式选择（无 plan-exec 技能时直通不弹表单；goal 桥派发 / plan-exec skill / goal） |
 | i18n | zh/en 切换、消息键完整（边界判例 #1） |
 | 快捷键与 side drawer | 全局快捷键、composer pi 对齐快捷键（shift+tab 档位循环 / ctrl+p、ctrl+shift+p 模型双向循环 / ctrl+x 复制最后回复）、文件预览/diff/git tab（testing 05） |
 | session 导入 | 多源统一入口：来源选择（pi/zcode）、候选列表、导入；zcode 源真实宿主库只读转换（session-import-sources 指南；SessionImportSource SPI） |
@@ -83,6 +84,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 对话流时间戳 | 行尾耗时·时刻槽、TurnMeta 首末区间、reload endTime 回填（chat-flow-timestamp；TurnMeta/Block/apply-entry-convert 单测 + live≡reload 等价性） |
 | btw 旁路提问（drawer 辅助对话流） | composer btw 按钮入口、fork 快照线（独立 pi 进程 / `btw:` 虚拟 id / `btw/<encodeCwd>/<mainSid>/` 目录隔离）、消息分区、主删级联与持久恢复、交互 drawer 路由（D8）。**挂掉后果 = 主对话链路完整可用**（btw 创建/提问/面板失效仅损失辅助提问面，不动 P0 对话主链；设计原文口径「触及最高 P 级 P2——btw 为常用辅助面，挂掉后主链路完整可用」）。错误处理按 §1「P2/P3 降级隔离不拖垮核心」契约：接入点 catch + 日志 + 功能关闭/占位兜底，禁向上传播打断 P0/P1 主流程，降级 ≠ 吞错（运行时错误码 `fork_failed / spawn_state_invalid / state_mismatch / line_not_found / thread_file_missing` 供 runtime 分流与日志归因；renderer 呈现 = 通用降级文案 + 原因透传 + 行内可重试入口，不按码分流——2026-09-22 一致性审查对账修正） |
 | 远程访问（手机浏览器经 LAN 直连） | 设置→远程访问开关与 token 轮换、移动壳同源托管、remote token 验身（关态默认纯回环零暴露） |
+| 语音朗读（TTS） | assistant 回复朗读按钮三态（idle/loading/playing，生成中置灰）、设置页「语音」菜单（三家 provider 表单：凭据/基础/音频/风格/长尾，Key 联动带入 + MiMo baseUrl 集群预填）、runtime `tts.*` 四 RPC（三家 driver + 分句合成 + WAV 缓存 + 双条件 FIFO 封顶）、错误码 toast 分流（§5.4 六码）。**挂掉后果 = 对话主链路完整可用**（朗读按钮不渲染/合成失败仅损失听觉通道，不动 P0 对话主链；ai-voice-tts 设计原文口径 P2）。错误处理按 §1 P2 降级隔离契约：u6 播放器 catch + 错误码 toast + 回 idle，runtime `tts_*` 错误码词表（`tts_not_configured / tts_auth_failed / tts_quota_exceeded / tts_vendor_error / tts_network_error / tts_text_too_long / tts_empty_text`），缓存写失败日志不阻断（磁盘治理失败下次写入收敛）。总开关关闭时 idle 朗读本地拦截不发 RPC（data-source-registry #45） |
 
 ## 5. P3 — 特定人群/低影响
 
@@ -95,7 +97,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | rename-session | 会话重命名 | 全体但低频、有手动路径 |
 | system-prompt-trace | taiji:system-prompt 留痕 | 观测/调试 |
 | 用量统计页 | Settings → 用量 W1-W5 | 配额敏感用户 |
-| 视觉细节与动画 | 过渡动画、traffic light 布局数值 | 全体但纯视觉 |
+| 视觉细节与动画 | 过渡动画、traffic light 布局数值；跨平台窗口外壳（win/linux 自绘圆点交互态/拖拽条带/圆角策略/窗口尺寸持久化） | 全体但纯视觉 |
 | 生成指标触发器（gen-stats） | composer 工具带速度 t/s · 缓存命中率 · TTFT 首字延迟三触发器 + 浮层 p50 聚合（`GenStatsTriggers` + runtime gen-stats 管道，设计 docs/design/composer-genstats-ttft.md） | 观测敏感用户（挂掉仅指标缺失，对话主链路不受影响——gen-stats 接入点均降级边界 + warn 日志） |
 | Mock 开发轨 | VITE_MOCK 拦截层 | 仅开发者 |
 
@@ -117,7 +119,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | provider-live-sync | universal | **P0** | 挂了 = 运行中会话看不到新增/变更的 provider·模型·凭据，切新模型报 `Model not found` 且只能重开会话（模型控制主链路的实时性前提；与 ask-user/subagent-workflow 同族的「能力静默失效」形态，故 tier=infrastructure 不可禁） |
 | system-prompt | taiji | P1 | 挂了 agent 裸人格、所有会话质量崩 |
 | pending-notifications | universal | P2 | 通知汇聚 |
-| plan | universal | P2 | 面板能力 + 执行方式选择 |
+| plan | universal | P2 | 面板能力 + 审批闸口（修订/执行/搁置 + 降级重新提交）+ 执行方式选择（2026-09-24 状态机显式化后行为描述核对：挂掉后果不变，P 级语义不变） |
 | session-reader | universal | P2 | 通知链依赖（2026-09-21 起覆盖 zcode 引擎 subagent 回读；挂掉后果不变，zcode 引擎自身 P2 封顶） |
 | smart-context | universal | P2 | 手动 compact 兜底 |
 | structured-output | universal | P2 | workflow 模式依赖 |

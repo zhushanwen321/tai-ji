@@ -1,9 +1,12 @@
 /**
  * useChat 集成测试（T1.4/T1.5/T5.1）—— send 全链 + 失败回滚 + editAndResend pendingSend 对称。
  *
- * T1.4: idle + send(text) → appendUser + addPendingSend + api.send → message_start → clearPendingSend
- * T1.5: send + api.send reject → clearPendingSend（[W2] 不 throw，toast 消化错误）
- * T5.1: editAndResend → truncate + appendUser + addPendingSend + send, catch → clearPendingSend
+ * T1.4: idle + send(text) → appendUser + addPendingSend + submitDelivery → message_start → clearPendingSend
+ * T1.5: submitDelivery reject → 返回 false + clearPendingSend（[W2] 不 throw，toast 消化错误）
+ * T5.1: editAndResend → truncate + appendUser + addPendingSend + submitDelivery，失败 → false + clearPendingSend
+ *
+ * 五方法返回契约（Promise<boolean>）：true = 提交成功或无事发生（busy/空白早退无丢失面）；
+ * false = RPC 失败（内部已 toast 且乐观副作用已回滚，调用方据此恢复草稿）。
  *
  * [MANDATORY] 集成用例补 DOM 断言：mount(Composer) 验证 send 全链/失败后 composer-box 可见 + 用户可重试态。
  *
@@ -25,10 +28,13 @@ const apiMock = vi.hoisted(() => {
       return () => { holder.handler = null }
     }),
     send: vi.fn(() => Promise.resolve()),
+    // [u3c/D1] 统一提交入口（core submitSegments → delivery.submit）
+    submitDelivery: vi.fn(() =>
+      Promise.resolve({ clientUuid: 'u-mock', state: 'in-flight' as const, lane: 'direct' as const }),
+    ),
     getHistory: vi.fn(() => Promise.resolve([])),
     abort: vi.fn(() => Promise.resolve()),
     compact: vi.fn(() => Promise.resolve()),
-    steer: vi.fn(() => Promise.resolve()),
     followUp: vi.fn(() => Promise.resolve()),
   }
 })
@@ -37,10 +43,10 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
   chat: {
     streamSubscribe: apiMock.streamSubscribe,
     send: apiMock.send,
+    submitDelivery: apiMock.submitDelivery,
     getHistory: apiMock.getHistory,
     abort: apiMock.abort,
     compact: apiMock.compact,
-    steer: apiMock.steer,
     followUp: apiMock.followUp,
   },
   file: {
@@ -73,16 +79,29 @@ vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ toasts: { value: [] }, error: vi.fn(), remove: vi.fn() }),
 }))
-vi.mock('@/composables/panel/useComposerModelThinking', () => ({
-  useComposerModelThinking: () => ({
-    currentModelId: { value: '' },
-    currentThinkingLevel: { value: undefined },
-    currentThinkingLevelMap: { value: undefined },
-    localThinkingLevel: { value: undefined },
-    onModelSelect: vi.fn(),
-    onThinkingSelect: vi.fn(),
-  }),
-}))
+// useComposerModelThinking 实装已迁 core（@taiji/core/domain/composer，composer 迁移）；
+// 部分 mock 注入与 composer-shell-model-toast.test.ts 同款：importOriginal 保其余导出实装，
+// stub 面覆盖 composer-shell 消费的全部返回字段（switching 等——缺字段在 Composer 渲染 computed 炸）
+vi.mock('@taiji/core/domain/composer', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>()
+  const { ref } = await import('vue')
+  return {
+    ...actual,
+    useComposerModelThinking: () => ({
+      currentModelId: ref(''),
+      currentThinkingLevel: ref(undefined),
+      currentThinkingLevelMap: ref(undefined),
+      currentSupportedLevels: ref(undefined),
+      localThinkingLevel: ref(undefined),
+      switching: ref(null),
+      onModelSelect: vi.fn(),
+      onThinkingSelect: vi.fn(),
+      enterStagingMode: vi.fn(),
+      exitStagingMode: vi.fn(),
+      getStagingConfig: vi.fn(() => null),
+    }),
+  }
+})
 
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
@@ -143,14 +162,15 @@ describe('T1.4 useChat.send 全链', () => {
     expect(msgs.some((m) => m.role === 'user' && normalizeContent(m.content) === 'hello')).toBe(true)
     // 2. addPendingSend：isActive=true（空窗期）
     expect(chat.isActive('s-fullchain')).toBe(true)
-    // 3. api.send 被调（图片走路径模式，send 第二参数 promptText，无 images 通道）
-    // 纯文本轮不加 clientUuid 标记后缀（最小写入：textToSegments 降级渲染等价，无需映射）
-    // 第 4 参 options.clientUuid（session-occupancy D2）经 ChatApiPort 适配转发，等于乐观气泡 id
-    expect(apiMock.send).toHaveBeenCalledWith(
+    // 3. chatApi.submitDelivery 被调（[u3c/D1] 统一提交：图片走路径模式，promptText 二参，
+    // 第三参 clientUuid = 乐观气泡 id；纯文本轮不加标记后缀（最小写入）；
+    // [MF-1-2] 纯文本轮 segments 快照不上网（第五参 undefined——与 sidecar 同谓词门控））
+    expect(apiMock.submitDelivery).toHaveBeenCalledWith(
       's-fullchain',
       'hello',
+      msgs.find((m) => m.role === 'user')!.id,
       undefined,
-      { clientUuid: msgs.find((m) => m.role === 'user')!.id },
+      undefined,
     )
     // 4. message_start 到达 → clearPendingSend
     emit({ type: 'message.message_start', payload: { sessionId: 's-fullchain', messageId: 'a1' } })
@@ -160,21 +180,21 @@ describe('T1.4 useChat.send 全链', () => {
   })
 })
 
-describe('T1.5 send api.send 失败回滚', () => {
-  it('api.send reject → clearPendingSend（[W2] 不 throw，toast 消化错误）', async () => {
+describe('T1.5 send 提交失败回滚', () => {
+  it('submitDelivery reject → clearPendingSend（[W2] 不 throw，toast 消化错误）', async () => {
     const chat = useChatStore()
     const { send } = useChat()
-    apiMock.send.mockRejectedValueOnce(new Error('ws disconnected'))
-    // [W2] send 失败不再 throw（与 steer/followUp/abort 对齐：clearPendingSend + toast，不 throw）；
-    // [form-hang-fix] send 契约 Promise<boolean>：直发失败已 toast 消化 → true（false 仅属 B 策略）
-    await expect(send('s-fail', textToSegments('hello'))).resolves.toBe(true)
+    apiMock.submitDelivery.mockRejectedValueOnce(new Error('ws disconnected'))
+    // [W2] send 失败不再 throw（与 followUp/abort 对齐：clearPendingSend + toast，不 throw）；
+    // 失败信号经返回值传递（false = RPC 失败，调用方据此恢复草稿）
+    await expect(send('s-fail', textToSegments('hello'))).resolves.toBe(false)
     // clearPendingSend：isActive 恢复 false（无 streaming entity + 无 pendingSend）
     expect(chat.isActive('s-fail')).toBe(false)
   })
 })
 
 describe('T5.1 editAndResend pendingSend 对称', () => {
-  it('editAndResend → truncate + appendUser + addPendingSend + send', async () => {
+  it('editAndResend → truncate + appendUser + addPendingSend + 统一提交', async () => {
     const session = useSessionStore()
     session.activeId = 's-edit'
     const chat = useChatStore()
@@ -183,29 +203,26 @@ describe('T5.1 editAndResend pendingSend 对称', () => {
     const userMsg = chat.getMessages('s-edit').find((m) => m.role === 'user')!
     const { editAndResend } = useChat()
     // 阶段 3a：editAndResend 签名从 (sid, id, text: string) 改为 (sid, id, segments: Segment[])，
-    // 内部委托 submitSegments（走 segmentsToPrompt + chatApi.send）。
+    // 内部委托 submitSegments（走 segmentsToPrompt + delivery.submit）。
     await editAndResend('s-edit', userMsg.id, textToSegments('edited text'))
-    // api.send 被调（editAndResend 内部走 submitSegments → chatApi.send）
+    // [u3c/D1] submitDelivery 被调，第三参 clientUuid = 编辑重发的新乐观气泡 id
     // 纯文本轮不加 clientUuid 标记后缀（最小写入，与 send 同通路）
-    // 第 4 参 options.clientUuid（session-occupancy D2）= 编辑重发的新乐观气泡 id
     const resentUserMsg = chat.getMessages('s-edit').filter((m) => m.role === 'user').at(-1)!
-    expect(apiMock.send).toHaveBeenCalledWith('s-edit', 'edited text', undefined, {
-      clientUuid: resentUserMsg.id,
-    })
+    expect(apiMock.submitDelivery).toHaveBeenCalledWith('s-edit', 'edited text', resentUserMsg.id, undefined, undefined)
     // addPendingSend：isActive=true（空窗期）
     expect(chat.isActive('s-edit')).toBe(true)
   })
 
-  it('editAndResend api.send 失败 → clearPendingSend（[W2] 不 throw，不留孤儿）', async () => {
+  it('editAndResend 提交失败 → clearPendingSend（[W2] 不 throw，不留孤儿）', async () => {
     const session = useSessionStore()
     session.activeId = 's-edit-fail'
     const chat = useChatStore()
     chat.appendUser('s-edit-fail', textToSegments('原问题'))
     const userMsg = chat.getMessages('s-edit-fail').find((m) => m.role === 'user')!
-    apiMock.send.mockRejectedValueOnce(new Error('ws disconnected'))
+    apiMock.submitDelivery.mockRejectedValueOnce(new Error('ws disconnected'))
     const { editAndResend } = useChat()
-    // [W2] editAndResend 失败不再 throw（与 steer/followUp/abort 对齐）
-    await expect(editAndResend('s-edit-fail', userMsg.id, textToSegments('text'))).resolves.toBeUndefined()
+    // [W2] editAndResend 失败不再 throw（与 followUp/abort 对齐）；false = RPC 失败信号
+    await expect(editAndResend('s-edit-fail', userMsg.id, textToSegments('text'))).resolves.toBe(false)
     // 失败后 pendingSend 被清（isActive=false，无 streaming）
     expect(chat.isActive('s-edit-fail')).toBe(false)
   })
@@ -217,9 +234,9 @@ describe('T5.1 editAndResend pendingSend 对称', () => {
     chat.addPendingSend('s-edit-busy')
     expect(chat.isActive('s-edit-busy')).toBe(true)
     const { editAndResend } = useChat()
-    // busy 时早退，不 throw，不调 send
-    await expect(editAndResend('s-edit-busy', 'msg-id', textToSegments('text'))).resolves.toBeUndefined()
-    expect(apiMock.send).not.toHaveBeenCalled()
+    // busy 时早退：不 throw、不提交，返回 true（「无事发生」——早退无丢失面，调用方不恢复草稿）
+    await expect(editAndResend('s-edit-busy', 'msg-id', textToSegments('text'))).resolves.toBe(true)
+    expect(apiMock.submitDelivery).not.toHaveBeenCalled()
   })
 })
 
@@ -260,19 +277,19 @@ describe('T1.4/T1.5 send 全链 Composer DOM 断言（用户可见行为）', ()
     const session = useSessionStore()
     session.activeId = 's-dom-fail'
     const chat = useChatStore()
-    // api.send reject（useChat.send 内部 catch + clearPendingSend，[W2] 不 throw）
-    apiMock.send.mockRejectedValueOnce(new Error('ws disconnected'))
+    // submitDelivery reject（useChat.send 内部 catch + clearPendingSend，[W2] 不 throw）
+    apiMock.submitDelivery.mockRejectedValueOnce(new Error('ws disconnected'))
     const wrapper = mountComposer('s-dom-fail')
     // 用户输入 → Enter 触发 send
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', '要发的消息')
     await wrapper.vm.$nextTick()
     wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', new KeyboardEvent('keydown', { key: 'Enter' }))
-    // flushPromises 排空全部 microtask（含 submitSegments await chatApi.send 的 reject + catch
-    // + clearPendingSend 后的 render flush），不依赖固定 nextTick 计数（同上注释）。
+    // flushPromises 排空全部 microtask（含 submitSegments await chatApi.submitDelivery 的 reject
+    // + catch + clearPendingSend 后的 render flush），不依赖固定 nextTick 计数（同上注释）；
+    // 单次调用即排空 store 状态与 DOM 渲染两阶段，无需二次冲洗
     await flushPromises()
     // store 侧：pendingSend 已清，无 streaming → isActive=false（用户可重试）
     expect(chat.isActive('s-dom-fail')).toBe(false)
-    await flushPromises()
     // DOM 断言 1：composer-box 仍渲染（输入区未消失）
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)
     // DOM 断言 2：无停止按钮（非活跃态，用户可重新发送）

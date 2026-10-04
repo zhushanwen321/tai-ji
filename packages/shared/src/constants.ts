@@ -32,32 +32,16 @@ export const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set(['subagent'])
 export const WORKFLOW_TOOL_NAMES: ReadonlySet<string> = new Set(['workflow', 'subagents'])
 
 /**
- * W16/W17 [D4]：subagent/workflow 自描述持久化 entry 的 customType（runtime 侧消费值）。
+ * W16 [D4]：subagent 自描述持久化 entry 的 customType。
  *
- * 权威源在 extensions/universal/subagent-workflow（跨包依赖方向不允许 runtime import extensions/
- * 源码，只能在此复制字面量并保持等值——同 workflow-extractor SNAPSHOT_VERSION 的本地
- * 副本模式）：
- * - `subagent-record`：extensions/universal/subagent-workflow/src/execution/record-entry.ts 的
- *   SUBAGENT_RECORD_CUSTOM_TYPE（record 状态迁移点 append 完整快照，data schema v1）
- * - `workflow-record`：extensions/universal/subagent-workflow/src/orchestration/jsonl-run-store.ts 的
- *   WORKFLOW_RECORD_CUSTOM_TYPE（每次成功 flush append 完整 RunSnapshot，data schema v1）
- *
- * 消费方：event-adapter（entry_appended 失效过滤）、subagent/workflow-extractor（entry
- * 扫描的自描述分支）。extension 升级 customType 值时必须同步此处。
+ * 权威源 = @zhushanwen/subagent-core 的 SUBAGENT_RECORD_CUSTOM_TYPE
+ * （execution/persistence/record-entry.ts；runtime 三个消费模块与壳写点均经
+ * core barrel 消费，不经本文件）。本常量是 renderer（浏览器 bundle，不依赖
+ * Node 侧 core 包）的镜像副本：等值由双侧字面量锁钉住——shared 侧
+ * __tests__/constants.test.ts、core 侧 record-entry-collect.test.ts，任一侧
+ * 改值即双侧红灯。
  */
 export const SUBAGENT_RECORD_CUSTOM_TYPE = 'subagent-record'
-export const WORKFLOW_RECORD_CUSTOM_TYPE = 'workflow-record'
-
-/**
- * plan-state 自描述持久化 entry 的 customType（plan 模式重设计 D1①，runtime 侧消费值）。
- *
- * 权威源与 subagent/workflow 两常量同层登记：extension 侧（extensions/universal/plan）自带
- * 同字面量、runtime 不 import extensions/ 源码，故此处为 runtime 侧唯一登记处（跨层消费方
- * infra/event-adapter 与 services/plan-state-extractor 共用，禁止 infra import services 层
- * 模块——分层依赖方向 infra → shared 合法、infra → services 违规）。extension 升级字面量时
- * 必须同步此处。
- */
-export const PLAN_STATE_CUSTOM_TYPE = 'plan-state'
 
 /** pi 支持的 provider api 标识全集（前后端共享 SSOT）。
  *  runtime 的 applyTypeTranslation 改为透传后，前端 Select 必须直接发送此集合内的终值。
@@ -516,6 +500,22 @@ export const TAIJI_SESSION_ACTIVATE_TIMEOUT_MS = 'TAIJI_SESSION_ACTIVATE_TIMEOUT
 export const DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS = 15 * 1000
 
 // ── 滚动重启计划内退出码（crash-forensics-and-watchdog §3.3 D5 ④，u7c）──
+
+/**
+ * 朗读（TTS）上限与缓存封顶常量（设计 .tmp/tech-design/ai-voice-tts.md §7.6，SSOT）。
+ *
+ * 量化依据：中文约 4 字/秒 → MAX_SPEAK_CHARS（4000 字）≈ 17 分钟音频 ≈ 48MB WAV
+ *（24kHz 16-bit mono = 48KB/s），即单次朗读的成本/体积上限与缓存单文件最坏体积；
+ * 超限报 tts_text_too_long。缓存双条件 FIFO 封顶（文件数与总字节同时满足才停删）：
+ * 只按文件数封顶时最坏 100 × 48MB ≈ 4.8GB 不可接受，字节条件才是真实磁盘上界
+ *（512MB ≈ 典型文件 3–6MB 的百个容量、最坏 48MB 长文约 10 个）。
+ */
+// eslint-disable-next-line no-magic-numbers -- 设计标定阈值（§7.6），校准依据见上方 JSDoc
+export const MAX_SPEAK_CHARS = 4000 as const
+// eslint-disable-next-line no-magic-numbers -- 设计标定阈值（§7.6），校准依据见上方 JSDoc
+export const TTS_CACHE_MAX_FILES = 100 as const
+// eslint-disable-next-line no-magic-numbers -- 设计标定阈值（§7.6：512MB 磁盘上界），校准依据见上方 JSDoc
+export const TTS_CACHE_MAX_BYTES: number = 512 * 1024 * 1024
 
 /**
  * runtime 滚动重启计划内退出的专用退出码（86）。supervisor（classifyRuntimeExit

@@ -143,13 +143,16 @@ function makeUnregisterEntry(id: string): MockSessionEntry {
 
 describe("state pure functions", () => {
 	describe("normalizePendingType", () => {
-		it("subagent/bash 直通，其余（缺失/未知/大小写不符）归 workflow", () => {
+		it("subagent/bash/session 直通，其余（缺失/未知/大小写不符）归 workflow", () => {
 			expect(normalizePendingType("subagent")).toBe("subagent");
 			expect(normalizePendingType("bash")).toBe("bash");
 			expect(normalizePendingType("workflow")).toBe("workflow");
+			// notify-once D6：词表真身在此（写侧归一成 workflow 会展示错标 [workflow]）
+			expect(normalizePendingType("session")).toBe("session");
 			expect(normalizePendingType(undefined)).toBe("workflow");
 			expect(normalizePendingType("scheduler")).toBe("workflow");
 			expect(normalizePendingType("Bash")).toBe("workflow");
+			expect(normalizePendingType("Session")).toBe("workflow");
 		});
 	});
 });

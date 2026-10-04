@@ -135,13 +135,9 @@ def check_locale_pair(zh_dir: Path, en_dir: Path) -> list[str]:
         missing_in_en = sorted(zh_keys - en_keys)
         extra_in_en = sorted(en_keys - zh_keys)
         if missing_in_en:
-            preview = missing_in_en[:5]
-            suffix = '...' if len(missing_in_en) > 5 else ''
-            errors.append(f'{name} — en-US 缺失 {len(missing_in_en)} key: {preview}{suffix}')
+            errors.append(f'{name} — en-US 缺失 {len(missing_in_en)} key: {missing_in_en}')
         if extra_in_en:
-            preview = extra_in_en[:5]
-            suffix = '...' if len(extra_in_en) > 5 else ''
-            errors.append(f'{name} — en-US 多余 {len(extra_in_en)} key: {preview}{suffix}')
+            errors.append(f'{name} — en-US 多余 {len(extra_in_en)} key: {extra_in_en}')
 
     if not errors:
         print(f'{GREEN}[OK] {zh_dir} 双侧 key 对齐（{len(common)} 个子模块，zh-CN === en-US）{NC}')
@@ -166,7 +162,7 @@ def main() -> int:
     print(f'  在缺失的一侧 locale 文件补充对应 key，保持 zh-CN/en-US 结构完全镜像。')
     print(f'  跑 pnpm --filter @taiji/frontend check:i18n 可用 vitest 验证。')
     print()
-    print(f'\033[0;31m[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。\033[0m')
+    print(f'\033[0;31m[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。\033[0m')
     return 2
 
 

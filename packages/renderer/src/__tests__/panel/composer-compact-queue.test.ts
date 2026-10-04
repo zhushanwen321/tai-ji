@@ -1,40 +1,39 @@
 /**
- * Composer defer 队列 UI 集成测试（compact-queued-messages W2 → session-occupancy u4b/u6b）。
+ * Composer 队列区 UI 集成测试（compact-queued-messages W2 → 投递所有权内核 u3c 迁移）。
  *
- * 验证（入队行为 + 发送位 queue 态；队列可见性由 composer 上方 QueueBubble 的 defer 行承接——独立 badge
- * 组件已随 u6b/D7 展示统一移除，撤销/预览 UI 由 __tests__/panel/queue-bubble-s8.test.ts 的 defer 行分支覆盖）：
- * - TC11: compact 期间 ⏎ 发送 → 入队 + 输入清空 + 发送位 queue 态（时钟角标按钮）
- * - TC12: compact 期间发送按钮点击 → 入队（按钮可点非 spinner，title=「排队发送 · ⏎」）
- * - TC13: compact 期间 `/` 前缀文本 → 拒绝入队 + toast + draft 保留
- * - TC13b: compact 期间 `!`/`!!` 前缀 bash 命令 → 拒绝入队 + toast + draft 保留（对称于 `/`）
- * - TC15: compacted 成功（flush 清空）→ 提交确认驱动出队
- * - TC16: compacted 失败（队列保留）→ 队列不清
- * - TC17: compact 态无输入 → 发送按钮 disabled + title=sendHint + 点击不入队
- * - TC18: compact 期间 Alt+⏎ → 入队而非 followUp
- * （原 TC14 badge 条数/预览/逐条取消为 badge 专属 UI，随组件移除；× 撤销在
- *   queue-bubble-s8.test.ts 的 defer 行分支覆盖）
+ * [u3c/D7 迁移] 原断言（compact 期间 Enter → 本地入队 + flush 提交 + `/`·`!` 拒绝入队）随
+ * 「renderer 只提交不判定」（D1）与 defer 队列退役整体改写：
+ * - 发送：占用期（compacting）Enter / 发送按钮 → 与 idle 同路径的**统一提交**（useChat.send
+ *   → 乐观气泡 + delivery.submit），lane 由 runtime 内核判定（queued/steer 由内核承接）；
+ *   占用期不再有 `/`·`!` 例外拒绝分支（命令文本与 idle 态同语义，bash/slash 守卫不变）。
+ * - 队列区：数据源 = session.delivery 帧投影（core getDeliveryProjectionRef），真 QueueBubble
+ *   渲染 → 行可见 + 状态 chip（排队中/投递中/发送失败）
+ * - × 撤销：真 QueueBubble 点击 → useQueueRows.onCancelEntry → delivery.cancel RPC；
+ *   成功回草稿（cancel reply 全文 + segments → ComposerInput.setText）
+ * - failed 行重试钮：点击 → delivery.resync 单条重报
  *
  * 策略（对齐 composer-bash-mode.test.ts 结构范本）：
- * - 真 pinia + 真 chatStore（[u5b] isCompacting 由 occupancy 投影派生——驱动方式 =
- *   chat.setOccupancy(sid, { turn:'idle', compacting:true, bash:false })，D6 defer 路由同源）
- * - mock useChat（spy 化 send/steer/followUp/compact...）+ useToast（断言 toastError）
- * - mock ComposerInput（emit input 设 draft + emit keydown Enter 触发 onSend）
- * - stub 子组件；每用例 useCompactQueue()._clearAllForTest() + resetChatModuleState() 隔离
+ * - 真 pinia + 真 chatStore（occupancy 投影驱动发送位与 sessionPhase）
+ * - 真 QueueBubble / 真 useQueueRows（DOM 断言面）+ mock useChat（spy 化 send/...）
+ * - mock '@/api/domains/delivery'（cancel/resync RPC 断言面）+ useToast（断言 toastError）
+ * - mock ComposerInput（emit input 设 draft + emit keydown Enter 触发 onSend；expose
+ *   setText/getSegments 供撤销回草稿断言）
+ * - 帧到达模拟：直接写 core 投影 ref（帧消费链路由 core useChat handler 承担，u3b 已覆盖）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-compact-queue.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, effectScope, ref } from 'vue'
+import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
-import { useCompactQueue } from '@/composables/panel/useCompactQueue'
+import { getDeliveryProjectionRef } from '@taiji/core'
+import type { DeliveryFrameEntry } from '@taiji/core'
 import { useChatStore } from '@/stores/chat'
 
-// ── mock useChat（spy 化 send / steer / followUp / compact）+ useToast ──
+// ── mock useChat（spy 化 send / followUp / compact）+ useToast + delivery 域 ──
 const chatApiMock = vi.hoisted(() => ({
   send: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
   followUp: vi.fn(() => Promise.resolve()),
   abort: vi.fn(() => Promise.resolve()),
   compact: vi.fn(() => Promise.resolve()),
@@ -44,6 +43,11 @@ const chatApiMock = vi.hoisted(() => ({
   abortBash: vi.fn(() => Promise.resolve()),
 }))
 const toastMock = vi.hoisted(() => ({ error: vi.fn(), info: vi.fn(), warning: vi.fn() }))
+const deliveryMock = vi.hoisted(() => ({
+  cancelDelivery: vi.fn(),
+  resyncDelivery: vi.fn(),
+  drainDelivery: vi.fn(),
+}))
 
 vi.mock('@/composables/features/chat/useChat', () => ({
   useChat: () => chatApiMock,
@@ -52,14 +56,13 @@ vi.mock('@/composables/features/chat/useChat', () => ({
 vi.mock('@/composables/useToast', () => ({
   useToast: () => toastMock,
 }))
+vi.mock('@/api/domains/delivery', () => ({ delivery: deliveryMock }))
 vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
   useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, setPendingModel: vi.fn(), currentCwd: ref(null) }),
   resetNewTaskFlow: vi.fn(),
 }))
 vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  // chat: useCompactQueue.flush 依赖（TC15 flush 真实路径，非仅 useChat mock）；
-  // [u4b] flush 经 submitQueuedEntry 编排（ensureStreamSubscription）需 streamSubscribe
-  chat: { send: chatApiMock.send, steer: chatApiMock.steer, streamSubscribe: vi.fn(() => () => {}) },
+  chat: { send: chatApiMock.send, streamSubscribe: vi.fn(() => () => {}) },
   model: { switchModel: vi.fn() },
   session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
   composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
@@ -84,14 +87,17 @@ const ComposerInputMock = defineComponent({
   },
   setup(_, { expose }) {
     const clear = vi.fn()
-    const setText = vi.fn()
-    expose({ clear, setText, insertSlashChip: vi.fn(), getSegments: () => textToSegments(lastInputText.value) })
+    const setText = vi.fn((text: string) => {
+      lastInputText.value = text
+    })
+    expose({ clear, setText, insertSlashChip: vi.fn(), getText: () => lastInputText.value, getSegments: () => textToSegments(lastInputText.value) })
     return { clear, setText }
   },
   template: '<div data-testid="composer-input" />',
 })
 
 const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
+// QueueBubble 不 stub：队列区 DOM 断言走真组件（单源化后行渲染是 u3c 验收面）
 const otherStubs = {
   ComposerInput: ComposerInputMock,
   CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
@@ -101,23 +107,27 @@ const otherStubs = {
   ModelSelectPopover: SIMPLE,
   ThinkingLevelPopover: SIMPLE,
   RetryIndicator: SIMPLE,
-  QueueBubble: SIMPLE,
 }
 
 import Composer from '@/components/panel/Composer.vue'
 // resetChatModuleState 来自被 mock 的 useChat 模块（vi.fn，测试隔离占位）
 import { resetChatModuleState } from '@/composables/features/chat/useChat'
 
+/** 写投递投影（模拟内核 session.delivery 帧到达后的投影状态） */
+function setProjection(sid: string, entries: DeliveryFrameEntry[]): void {
+  const projection = getDeliveryProjectionRef()
+  const next = new Map(projection.value)
+  next.set(sid, entries)
+  projection.value = next
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
   lastInputText.value = ''
-  // 单例首次创建放 active effect scope（onScopeDispose 注册 cleanup，对齐 W1 测试契约）
-  effectScope().run(() => {
-    useCompactQueue()
-  })
-  // 单例跨用例共享，不 reset 会泄漏到下一用例
-  useCompactQueue()._clearAllForTest()
+  getDeliveryProjectionRef().value = new Map()
+  deliveryMock.cancelDelivery.mockResolvedValue({ clientUuid: 'u-1', cancelled: true, content: '被撤销的文本' })
+  deliveryMock.resyncDelivery.mockResolvedValue({ sessionId: 's1', deduped: [] })
   resetChatModuleState()
 })
 
@@ -125,40 +135,45 @@ function mountComposer(props: { sessionId: string | null; variant?: 'panel' | 'l
   return mount(Composer, { props, global: { stubs: otherStubs } })
 }
 
-/** 模拟用户输入文本 + Enter 发送 */
-async function typeAndEnter(wrapper: ReturnType<typeof mountComposer>, text: string): Promise<void> {
+/** 模拟用户输入文本（不触发发送；按钮路径 TC12 复用） */
+async function typeText(wrapper: ReturnType<typeof mountComposer>, text: string): Promise<void> {
   wrapper.findComponent(ComposerInputMock).vm.$emit('input', text)
   await wrapper.vm.$nextTick()
-  wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', new KeyboardEvent('keydown', { key: 'Enter' }))
+}
+
+/** 模拟用户输入文本 + Enter 发送（mods 透传 KeyboardEventInit，如 Alt+⏎） */
+async function typeAndEnter(
+  wrapper: ReturnType<typeof mountComposer>,
+  text: string,
+  mods: KeyboardEventInit = {},
+): Promise<void> {
+  await typeText(wrapper, text)
+  wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', new KeyboardEvent('keydown', { key: 'Enter', ...mods }))
   await wrapper.vm.$nextTick()
   await wrapper.vm.$nextTick() // onSend 是 async，需 flush
 }
 
-describe('Composer compact 待发队列（TC11-TC18）', () => {
-  it('TC11: compact 期间 ⏎ 发送 → 入队 + 输入清空 + 发送位 queue 态', async () => {
+describe('Composer compact 期间发送（u3c/D1：统一提交，占用不拦截）', () => {
+  it('TC11: compact 期间 ⏎ → 走统一提交（useChat.send）+ 输入清空 + 发送位 queue 态', async () => {
     const chat = useChatStore()
     chat.setOccupancy('s1', { turn: 'idle', compacting: true, bash: false })
     const wrapper = mountComposer({ sessionId: 's1' })
     await typeAndEnter(wrapper, 'hello')
 
-    // 入队 'hello'（peek 含该文本）
-    expect(useCompactQueue().peek('s1').map((m) => m.text)).toContain('hello')
+    // 统一提交：占用期不再本地判定车道（lane 归内核），提交链与 idle 同路径
+    expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('hello'))
     // 输入已清空（clearInput → ComposerInput.clear）
     expect(wrapper.findComponent(ComposerInputMock).vm.clear).toHaveBeenCalled()
     // DOM：发送位为 queue 态（时钟角标按钮）
     expect(wrapper.find('.queue-send-btn').exists()).toBe(true)
-    // 未走真实发送（send 未被调）
-    expect(chatApiMock.send).not.toHaveBeenCalled()
   })
 
-  it('TC12: compact 期间发送按钮点击 → 入队（按钮可点非 spinner，title=排队发送 · ⏎）', async () => {
+  it('TC12: compact 期间发送按钮点击 → 统一提交（按钮可点非 spinner，title=排队发送 · ⏎）', async () => {
     const chat = useChatStore()
     chat.setOccupancy('s1', { turn: 'idle', compacting: true, bash: false })
     const wrapper = mountComposer({ sessionId: 's1' })
-    wrapper.findComponent(ComposerInputMock).vm.$emit('input', 'world')
-    await wrapper.vm.$nextTick()
+    await typeText(wrapper, 'world')
 
-    // 发送位在 compact 态是可点击 queue 按钮（title=queueSend「排队发送 · ⏎」），非 disabled
     const sendBtn = wrapper.find('.queue-send-btn')
     expect(sendBtn.exists()).toBe(true)
     expect(sendBtn.attributes('title')).toBe('排队发送 · ⏎')
@@ -168,114 +183,115 @@ describe('Composer compact 待发队列（TC11-TC18）', () => {
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
 
-    // 入队 'world'
-    expect(useCompactQueue().peek('s1').map((m) => m.text)).toContain('world')
+    expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('world'))
   })
 
-  it('TC13: compact 期间 `/` 前缀文本 → 拒绝入队 + toast + draft 保留', async () => {
-    const chat = useChatStore()
-    chat.setOccupancy('s1', { turn: 'idle', compacting: true, bash: false })
-    const wrapper = mountComposer({ sessionId: 's1' })
-    await typeAndEnter(wrapper, '/compact')
-
-    // 队列为空（enqueue 未被调）+ compact RPC 未被调
-    expect(useCompactQueue().count('s1')).toBe(0)
-    expect(chatApiMock.compact).not.toHaveBeenCalled()
-    // toast 拒绝提示（zh-CN commandQueuedRejected，R3-doc1 泛化：占用维度中性措辞）
-    expect(toastMock.error).toHaveBeenCalledWith('会话占用中，命令请等待完成后使用')
-    // draft 未清空（clear 未被调）
-    expect(wrapper.findComponent(ComposerInputMock).vm.clear).not.toHaveBeenCalled()
-  })
-
-  it('TC13b: compact 期间 `!` 前缀 bash 命令 → 拒绝入队 + toast + draft 保留', async () => {
-    const chat = useChatStore()
-    chat.setOccupancy('s1', { turn: 'idle', compacting: true, bash: false })
-    const wrapper = mountComposer({ sessionId: 's1' })
-    await typeAndEnter(wrapper, '!ls')
-
-    // 队列为空（enqueue 未被调）+ sendBash 未被调（未静默降级为纯文本，也未执行 bash）
-    expect(useCompactQueue().count('s1')).toBe(0)
-    expect(chatApiMock.sendBash).not.toHaveBeenCalled()
-    // toast 拒绝提示（与 `/` 命令同一文案，zh-CN commandQueuedRejected，R3-doc1 泛化）
-    expect(toastMock.error).toHaveBeenCalledWith('会话占用中，命令请等待完成后使用')
-    // draft 未清空（clear 未被调）
-    expect(wrapper.findComponent(ComposerInputMock).vm.clear).not.toHaveBeenCalled()
-  })
-
-  it('TC15: compacted 成功 → flush 提交（确认帧驱动出队）', async () => {
-    const chat = useChatStore()
-    const queue = useCompactQueue()
-    const wrapper = mountComposer({ sessionId: 's1' })
-    queue.enqueue('s1', 'm1')
-    await wrapper.vm.$nextTick()
-
-    // compacted 成功链路：flush 提交成功（send mock resolve）——[u4b] 提交 ≠ 出队（E2 退役），
-    // 条目等确认帧；压缩态结束（[u5b] occupancy compacting=false 驱动）
-    await expect(queue.flush('s1')).resolves.toBe(true)
-    chat.setOccupancy('s1', { turn: 'idle', compacting: false, bash: false })
-    await wrapper.vm.$nextTick()
-
-    expect(queue.count('s1')).toBe(1)
-
-    // 投递确认帧（core ① → confirmDelivery 出队）→ 队列清空
-    chat.applyMessageEvent('s1', { type: 'message.message_end', payload: { sessionId: 's1', entry: {
-      type: 'message', id: `e-${crypto.randomUUID()}`, parentId: null, timestamp: new Date().toISOString(),
-      message: { role: 'user', content: [{ type: 'text', text: 'm1' }], timestamp: Date.now() },
-    } } })
-    await wrapper.vm.$nextTick()
-
-    expect(queue.count('s1')).toBe(0)
-  })
-
-  it('TC16: compacted 失败（队列保留）→ 队列不清', async () => {
-    const chat = useChatStore()
-    chat.setOccupancy('s1', { turn: 'idle', compacting: true, bash: false })
-    const queue = useCompactQueue()
-    const wrapper = mountComposer({ sessionId: 's1' })
-    queue.enqueue('s1', 'm1')
-    await wrapper.vm.$nextTick()
-    expect(queue.count('s1')).toBe(1)
-
-    // compacted 失败：压缩态结束但队列未 flush（保留待下次重试；[u5b] 本用例直接驱动
-    // store 投影不经 useChat handler，occupancy idle 的 flush 触发在 handler 集成测试覆盖）
-    chat.setOccupancy('s1', { turn: 'idle', compacting: false, bash: false })
-    await wrapper.vm.$nextTick()
-
-    expect(queue.count('s1')).toBe(1)
-  })
-
-  it('TC17: compact 态无输入 → 发送按钮 disabled + title=sendHint + 点击不入队', async () => {
+  it('TC17: compact 态无输入 → 发送按钮 disabled + title=sendHint + 点击不提交', async () => {
     const chat = useChatStore()
     chat.setOccupancy('s1', { turn: 'idle', compacting: true, bash: false })
     const wrapper = mountComposer({ sessionId: 's1' })
     await wrapper.vm.$nextTick()
 
-    // 无输入时 canSend=false：发送位为 disabled Button，title 为 sendHint「输入内容后发送」
-    // （TC12 覆盖有输入可点击态 title=queueSend，本用例是负分支）
     const sendBtn = wrapper.find('[title="输入内容后发送"]')
     expect(sendBtn.exists()).toBe(true)
     expect(sendBtn.attributes('disabled')).toBeDefined()
 
-    // 点击不入队（onSend 入口 !canSend 守卫拦截）：count 0
     await sendBtn.trigger('click')
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
 
-    expect(useCompactQueue().count('s1')).toBe(0)
+    expect(chatApiMock.send).not.toHaveBeenCalled()
   })
 
-  it('TC18: compact 期间 Alt+⏎ → 入队而非 followUp', async () => {
+  it('TC18: compact 期间 Alt+⏎ → 统一提交（非 steer 路由行，不 followUp）', async () => {
     const chat = useChatStore()
     chat.setOccupancy('s1', { turn: 'idle', compacting: true, bash: false })
     const wrapper = mountComposer({ sessionId: 's1' })
-    wrapper.findComponent(ComposerInputMock).vm.$emit('input', 'alt-msg')
+    await typeAndEnter(wrapper, 'alt-msg', { altKey: true })
+
+    // sendRoute 在 compacting 行是 queued（UI 预测）→ Alt+⏎ 走统一提交；followUp 不被调
+    expect(chatApiMock.followUp).not.toHaveBeenCalled()
+    expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('alt-msg'))
+  })
+})
+
+describe('Composer 队列区单源渲染 + 撤销 / 重试（u3c/D7 + V9/V10）', () => {
+  it('帧投影到达 → 真 QueueBubble 渲染行（状态 chip = 排队中 / 投递中，用户可见）', async () => {
+    const wrapper = mountComposer({ sessionId: 's1' })
+    expect(wrapper.find('[data-testid="queue-bubble"]').exists()).toBe(false)
+
+    setProjection('s1', [
+      { clientUuid: 'u-a', preview: '第一条排队消息', state: 'queued', lane: 'queued' },
+      { clientUuid: 'u-b', preview: '第二条投递中', state: 'in-flight', lane: 'steer' },
+    ])
     await wrapper.vm.$nextTick()
-    wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', new KeyboardEvent('keydown', { key: 'Enter', altKey: true }))
+
+    expect(wrapper.find('[data-testid="queue-bubble"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('第一条排队消息')
+    expect(wrapper.text()).toContain('排队中')
+    expect(wrapper.text()).toContain('第二条投递中')
+    expect(wrapper.text()).toContain('投递中')
+  })
+
+  it('direct 车道与已 delivered 条目不出现在队列区（气泡原位 / 已入流）', async () => {
+    const wrapper = mountComposer({ sessionId: 's1' })
+    setProjection('s1', [
+      { clientUuid: 'u-d', preview: 'direct 待确认气泡', state: 'in-flight', lane: 'direct' },
+      { clientUuid: 'u-x', preview: '已送达', state: 'delivered', lane: 'steer' },
+    ])
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="queue-bubble"]').exists()).toBe(false)
+  })
+
+  it('V9 撤销：点击 × → delivery.cancel(sid, clientUuid) + 文本回输入框（setText DOM 载体）', async () => {
+    deliveryMock.cancelDelivery.mockResolvedValueOnce({
+      clientUuid: 'u-a',
+      cancelled: true,
+      content: '被撤销的文本',
+      segments: [{ type: 'text', text: '被撤销的文本' }],
+    })
+    const wrapper = mountComposer({ sessionId: 's1' })
+    setProjection('s1', [{ clientUuid: 'u-a', preview: '被撤销的文本', state: 'queued', lane: 'queued' }])
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('[data-testid="queue-cancel-u-a"]').trigger('click')
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
 
-    // followUp 未被调（重路由到 onSend → 入队）
-    expect(chatApiMock.followUp).not.toHaveBeenCalled()
-    expect(useCompactQueue().peek('s1').map((m) => m.text)).toContain('alt-msg')
+    expect(deliveryMock.cancelDelivery).toHaveBeenCalledWith('s1', 'u-a')
+    // 草稿回填：空输入态 → restoreSegments 整段恢复（ComposerInput.setText = 输入框可见内容）
+    expect(wrapper.findComponent(ComposerInputMock).vm.setText).toHaveBeenCalledWith('被撤销的文本')
+    expect(toastMock.error).not.toHaveBeenCalled()
+  })
+
+  it('V10 不可撤（cancelled=false）→ toast 反馈，不回草稿', async () => {
+    deliveryMock.cancelDelivery.mockResolvedValueOnce({ clientUuid: 'u-a', cancelled: false, reason: 'already delivered' })
+    const wrapper = mountComposer({ sessionId: 's1' })
+    setProjection('s1', [{ clientUuid: 'u-a', preview: '已交付的消息', state: 'in-flight', lane: 'steer' }])
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('[data-testid="queue-cancel-u-a"]').trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    expect(toastMock.error).toHaveBeenCalledWith('无法撤销：already delivered')
+    expect(wrapper.findComponent(ComposerInputMock).vm.setText).not.toHaveBeenCalled()
+  })
+
+  it('failed 行 → 重试钮可见；点击 → delivery.resync 单条重报', async () => {
+    const wrapper = mountComposer({ sessionId: 's1' })
+    setProjection('s1', [{ clientUuid: 'u-f', preview: '重试耗尽的文本', state: 'failed', lane: 'queued' }])
+    await wrapper.vm.$nextTick()
+
+    // DOM：红色标识 + 重试钮
+    expect(wrapper.find('[data-testid="queue-state-u-f"]').text()).toBe('发送失败')
+    const retry = wrapper.find('[data-testid="queue-retry-u-f"]')
+    expect(retry.exists()).toBe(true)
+
+    await retry.trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    expect(deliveryMock.resyncDelivery).toHaveBeenCalledWith('s1', ['u-f'])
   })
 })

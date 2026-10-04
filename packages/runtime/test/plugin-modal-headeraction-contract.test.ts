@@ -328,9 +328,6 @@ describe('sendMessage 回执映射（D6/AP-4 两步之②）', () => {
   })
 
   it.each([
-    'busy',
-    'compacting',
-    'bash',
     'command-missing',
     'hook-blocked',
     'error',

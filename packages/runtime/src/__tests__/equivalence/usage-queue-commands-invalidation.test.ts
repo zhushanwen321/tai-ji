@@ -4,9 +4,9 @@
  * 验收对照（.taiji-harness/2026-08-19-data-source-governance-p1p4/acceptance/w8-acceptance.md）：
  * - 「事件风暴（模拟丢 context.update）后实例值收敛 get_session_stats 快照」→ describe
  *   「mock RPC 层」it 1 + describe「真实 pi 子进程」it 1（真实 get_session_stats 权威源）
- * - queue 深度实例用例已随实例撤销删除（PR #185 MF2：.get() 生产零消费，深度真值 =
- *   queue_update 帧内 pendingMessageCount 推送投影，renderer 对账直读帧值——帧翻译
- *   覆盖见 mock it 4）
+ * - queue 深度实例用例已随实例撤销删除（PR #185 MF2：.get() 生产零消费；queue_update
+ *   帧投影随后整链退役 u5a，队列深度展示归 session.delivery 快照帧——原帧翻译用例
+ *   改写为 mock it 4「NULL_EVENTS no-op」防线用例）
  * - commands 快照与失效（getCommands 全部调用路径 = 失效源）→ mock it 2 + it 3
  * - RPC 频率采样（P0.5② 终判输入）：usage/commands 实例的快照 RPC 次数与 p95 延迟 →
  *   真实 pi it 2（数字 console.log 输出，写进 builder 汇报做量化终判；落登记表由主 agent
@@ -52,6 +52,9 @@ function makeClient(state: StatsShape, commands: unknown[] = []) {
     getState: vi.fn(async () => state),
     getSessionStats: vi.fn(async () => makeStats()),
     setModel: vi.fn(async () => undefined),
+    // bg-task-notify 补投触发：getCommands 必经 maybeTriggerBgReconcile → client.prompt
+    // （fire-and-forget），本文件被测语义不含补投，mock 空实现即可
+    prompt: vi.fn(async () => undefined),
   }
 }
 
@@ -173,29 +176,21 @@ describe('W8 usage / queue / commands 失效接线（mock RPC 层）', () => {
     expect(states!.commands.get()?.commands).toEqual([{ name: 'cmd-a' }])
   })
 
-  it('translate(queue_update) 输出附深度：pendingMessageCount = steering + followUp 条数和（= pi 队列深度的推送投影）', () => {
-    const event = {
-      type: 'queue_update',
-      steering: ['steer-1'],
-      followUp: ['follow-1', 'follow-2'],
-    } as PiQueueUpdateEvent
-    const translated = translate(event, 's-depth')
-    expect(translated).toHaveLength(1)
-    const frame = translated[0]
-    if (frame.kind !== 'message') throw new Error(`expected message kind, got ${frame.kind}`)
-    expect(frame.message.type).toBe('message.queue_update')
-    expect(frame.message.payload).toEqual({
-      sessionId: 's-depth',
-      steering: ['steer-1'],
-      followUp: ['follow-1', 'follow-2'],
-      pendingMessageCount: 3, // 1 steering + 2 followUp（pi pendingMessageCount 同源公式）
-    })
-
-    // 空队列：深度 0（合法值，非空值语义）
-    const empty = translate({ type: 'queue_update', steering: [], followUp: [] } as PiQueueUpdateEvent, 's-empty')
-    const emptyFrame = empty[0]
-    if (emptyFrame.kind !== 'message') throw new Error(`expected message kind, got ${emptyFrame.kind}`)
-    expect((emptyFrame.message.payload as { pendingMessageCount: number }).pendingMessageCount).toBe(0)
+  it('queue_update 已退役（u5a）：translate no-op（NULL_EVENTS 登记防线——pi 仍恒发该事件，不得落 default warn）', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    let translated: ReturnType<typeof translate>
+    try {
+      translated = translate(
+        { type: 'queue_update', steering: ['steer-1'], followUp: ['follow-1', 'follow-2'] } as PiQueueUpdateEvent,
+        's-depth',
+      )
+      // 防线双断言在 mockRestore 之前（restore 清空 mock.calls）：no-op 之外还不得落入
+      // default 分支的 Unhandled warn（NULL_EVENTS 漏登记时此断言红）
+      expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('Unhandled pi event type'))).toBe(false)
+    } finally {
+      warnSpy.mockRestore()
+    }
+    expect(translated).toEqual([])
   })
 })
 

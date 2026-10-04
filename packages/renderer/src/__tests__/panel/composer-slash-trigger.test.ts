@@ -22,38 +22,19 @@ import { nextTick, defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import * as events from '@taiji/core/transport/api'
 import type { ServerMessage } from '@taiji/shared'
+import { composerApiModule, composerChatModule, composerFlowModule } from '../helpers/composer-mount'
 
-// ── Composer 路径 mock（U9-U10）—— vi.mock factory 必须早于 import ──
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({
-    send: vi.fn(),
-    steer: vi.fn(),
-    followUp: vi.fn(),
-    abort: vi.fn(),
-    compact: vi.fn(),
-    editAndResend: vi.fn(),
-    hydrateHistory: vi.fn(),
-  }),
-}))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, currentCwd: ref(null), setPendingModel: vi.fn() }),
-  resetNewTaskFlow: vi.fn(),
-}))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })), getCommands: vi.fn().mockResolvedValue({ sessionId: '', commands: [] }) },
-  // CommandPopover.loadCandidates onMounted 调 composer.getMentionCandidates/getFileCandidates，
-  // mock 遗漏会导致 unhandled rejection（test 期间的 4 个 unhandled errors 根因）
-  composer: {
-    getMentionCandidates: vi.fn().mockResolvedValue([]),
-    getFileCandidates: vi.fn().mockResolvedValue([]),
-  },
-  config: {
-    getGlobalSkills: vi.fn().mockResolvedValue([]),
-    getProjectSkills: vi.fn().mockResolvedValue([]),
-    onSkillCacheInvalidated: () => () => {},
-  },
-}))
+// ── Composer 路径 mock（U9-U10）—— vi.mock factory 必须早于 import；骨架单源
+//    helpers/composer-mount.ts（composer.getMentionCandidates/getFileCandidates 亦在骨架内，
+//    CommandPopover.loadCandidates onMounted 消费，缺失会 unhandled rejection）──
+vi.mock('@/composables/features/chat/useChat', () => composerChatModule())
+vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
+vi.mock('@/api', () => {
+  // session 域追加 getCommands（CommandPopover slash 候选真源）
+  const api = composerApiModule()
+  api.session.getCommands = vi.fn().mockResolvedValue({ sessionId: '', commands: [] })
+  return api
+})
 
 import { ComposerInput, ComposerInputDepsKey } from '@taiji/ui/features/composer'
 import CommandPopover from '@/components/panel/CommandPopover.vue'

@@ -10,10 +10,11 @@
  * 端口适配映射（C-NT-2 / C-SS-2 / D8 裁决）：
  * - createSessionFlow：core domain/session createSessionFlow(ctx, input) 包一层
  *   （ctx 的 store/api/defaultCwd/onCwdFallback 由本壳组装）
- * - chat：useChat().send / sendBash
+ * - chat：useChat().send / sendBash（判真 `r !== false`；A 消费侧保稿依赖 false 语义）
  * - navigation：useSessionStore().activeId + usePanelStore().loadSession +
  *   useNavigationStore().push + useWorkspaceStore().defaultCwd
- * - toast：useToast().error / warning
+ * - toast：useToast().error / warning / info（info = 后台投递可发现性 F12）
+ * - session：@/api session.remove（E 取消收尾删已建 session，best-effort）
  * - fileTree：useFileTree().loadTree + useFileTreeStore().selectFile
  * - t：i18n.global.t
  * - migrateImage：sessionApi.migrateImage
@@ -23,7 +24,7 @@
  * - gitApi：@/api git domain（checkout/checkoutByCwd/createBranch）
  * - directoryPicker：lib/ipc pickDirectory
  * - workspaceApi：@/api workspace.detect + worktreeApi.list
- * - workspaceState：useWorkspaceStore().defaultCwd / record
+ * - workspaceState：useWorkspaceStore().record
  *
  * 公共 API 兼容：useNewTaskFlow() 返回类型与旧版逐字段对齐（core flow 返回面一致）；
  * resetNewTaskFlow / NewTaskFlowState / GitInfo 重导出改从 @taiji/core（旧消费方
@@ -85,9 +86,9 @@ function buildLaunchConfigPort(
     getInput: () => ({
       presets: presetStore.presets,
       defaultPresetId: presetStore.defaultPresetId || null,
-      providers: settings.providers?.value,
+      providers: settings.providers.value,
       defaultModel: settings.defaultModel.value,
-      getSupportedLevels: (modelId) => supportedLevelsOf(modelId, settings.providers?.value ?? []),
+      getSupportedLevels: (modelId) => supportedLevelsOf(modelId, settings.providers.value),
       lastUsedModel: lookupLastUsedModel(),
       getRememberedThinkingLevel: (modelId) => lookupRememberedLevel(modelId),
     }),
@@ -106,7 +107,7 @@ export function useNewTaskFlow() {
   const panel = usePanelStore()
   const navigation = useNavigationStore()
   const chat = useChat()
-  const { error: toastError, warning: toastWarning } = useToast()
+  const { error: toastError, warning: toastWarning, info: toastInfo } = useToast()
   // [U2d] launch 配置解析数据源：preset store（presets/defaultPresetId）+ 惰性加载编排
   //（usePiPresets.loadPresets 内部 allSettled 永不 reject——E1/E4 收敛语义）+ settings
   // 单例（与显示链 composer-shell 同一 getSettingsStore，两链同源）
@@ -134,7 +135,7 @@ export function useNewTaskFlow() {
           }
           // D14 语义修正（2026-08-04）：归属 project 经 input 透传——创建时归属当前
           // activeProject（与 cwd 无关，project 可跨目录）。默认项目不传（undefined = 未归类，
-          // 读取侧统一兑底默认项目，不写 sidecar）。fork 路径不走 createSessionFlow
+          // 读取侧统一兜底默认项目，不写 sidecar）。fork 路径不走 createSessionFlow
           //（useForkActions 直接 sessionApi.fork），fork 在 runtime 侧继承父归属。
           const result = await createSessionFlow(ctx, {
             ...input,
@@ -145,8 +146,12 @@ export function useNewTaskFlow() {
       },
       chat: {
         send: (sid, segments) => chat.send(sid, segments),
-        sendBash: (sid, command, excludeFromContext) =>
-          chat.sendBash(sid, command, excludeFromContext),
+        // [A 兼容形态] sendBash boolean 化过渡：r 为 boolean 后即真透传；当前 void→true
+        // 即现状「不可知=当作已投递」语义（chat.send 已是 Promise<boolean> 直透传）
+        sendBash: async (sid, command, excludeFromContext) => {
+          const r: unknown = await chat.sendBash(sid, command, excludeFromContext)
+          return r !== false
+        },
       },
       navigation: {
         activePanelId: () => panel.activePanelId,
@@ -161,11 +166,15 @@ export function useNewTaskFlow() {
           session.activeId = sid
         },
         pushChat: (sid) => navigation.push({ view: 'chat', sessionId: sid }),
-        defaultCwd: () => workspaceStore.defaultCwd ?? null,
       },
       toast: {
         error: (msg) => toastError(msg),
         warning: (msg) => toastWarning(msg),
+        info: (msg) => toastInfo(msg),
+      },
+      // [E] 取消收尾：删除本次提交已建的 session（防幽灵任务烧 token，best-effort）
+      session: {
+        remove: (sessionId: string) => sessionApi.remove(sessionId),
       },
       fileTree: {
         loadTree: (sid) => useFileTree().loadTree(sid),
@@ -189,7 +198,6 @@ export function useNewTaskFlow() {
       listWorktrees: (cwd) => worktreeApi.list(cwd),
     },
     workspaceState: {
-      defaultCwd: () => workspaceStore.defaultCwd ?? null,
       record: (cwd) => workspaceStore.record(cwd),
     },
   })

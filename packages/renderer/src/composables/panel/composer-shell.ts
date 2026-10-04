@@ -13,17 +13,19 @@
  *   useComposerContextChips / useComposerDragDrop / useComposerRestore / useComposerForkMode /
  *   useComposerHandoffMode / useComposerStaging / useComposerBash / useComposerSubmit / useComposerSend
  * - renderer store/composable：useChatStore / useSessionStore / useSettingsStore / useNewTaskFlow /
- *   useModel / useHandoffActions / useCompactQueue / useSidebar / useToast / useForkModeChannel /
+ *   useModel / useHandoffActions / useSidebar / useToast / useForkModeChannel /
  *   useHandoffModeChannel / useImageAttachment / useI18n
+ *   [u3c 退役] useCompactQueue 已随投递所有权内核退役（队列区数据源 = session.delivery 帧投影，
+ *   见 composables/panel/useQueueRows.ts）；本文件的残留职责仅剩「撤销/回收文本回输入区」。
  *
  * 视觉派生（D1「视觉派生留壳」）：useComposerBoxClass + useComposerModeVisual 的逻辑并入本文件
  * （boxClass 三级链：staging > bash > 流式 steer 呼吸 > 聚焦 ring；placeholder 三级链：
- * staging > bash > steerHint/inputHint），删除原 2 文件（无独立复用点，仅 Composer.vue 消费）。
+ * staging > bash > steerHint > inputHint），删除原 2 文件（无独立复用点，仅 Composer.vue 消费）。
  */
-import { computed, reactive, type ComputedRef, type Ref } from 'vue'
+import { computed, onMounted, reactive, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GitFork, Upload } from '@lucide/vue'
-import type { ProviderId, Segment, Message } from '@taiji/shared'
+import type { ProviderId, Segment } from '@taiji/shared'
 import { normalizeContent } from '@taiji/shared'
 import {
   useComposerModelThinking,
@@ -35,6 +37,7 @@ import {
   useComposerBash,
   useComposerSubmit,
   useComposerSend,
+  takeOrphanedDraft,
   resolveSendRoute,
   IDLE_SESSION_PHASE,
   type SendRoute,
@@ -61,7 +64,6 @@ import { supportedLevelsOf } from '@/composables/features/new-task/supported-lev
 import { useModel } from '@/composables/features/model/useModel'
 import { useHandoffActions } from '@/composables/features/fork-handoff/useHandoffActions'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
-import { useCompactQueue } from './useCompactQueue'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import { useToast } from '@/composables/useToast'
 import { useComposerShortcutActions } from './composer-shortcut-actions'
@@ -101,8 +103,7 @@ export interface ShellInputInstance {
   insertImageBadge: (path: string, fileName: string, displayName: string, needsMigrate?: boolean) => void
   removeImageChip: (chipId: string) => void
   clearSlashQueryText: () => void
-  clearHashQueryText: () => void
-  /** # query 段清除（session 语义，expose 别名 = clearHashQueryText） */
+  /** # query 段清除（session 语义；ComposerInput expose 别名 = dom-core 的 clearHashQueryText） */
   clearSessionQueryText: () => void
   clearDollarFileQueryText: () => void
   clearSubagentQueryText: () => void
@@ -141,26 +142,15 @@ export interface ComposerShellParams {
 }
 
 /**
- * 历史派生的引用键缓存（ADR-0039 兑现）：chat store 消息不可变替换（commitMessages 整体
- * 替换分区内层 ref，无原地写入）⇒ 源数组引用同则内容同。↑/↓ 长按导航（~30Hz keydown）下
- * 跳过全量 messages 重遍历 + 每条 normalizeContent 重建。键为源数组本身（WeakMap 弱引用）：
- * 分区数组被替换后旧键随 GC 回收，无 per-session 生命周期管理；getMessages 空分区每次
- * 新建 []，天然 miss（重算 O(1) 无害）。
- */
-// @data-owner #7 —— #7 消息列表的 composer 历史派生缓存（引用键纯派生，非第二写方）
-const historyDeriveCache = new WeakMap<Message[], string[]>()
-
-/**
  * 历史条目派生（替代 chatStore.getMessages 直读，core history 模块经 deps 注入）。
  * 倒序 + role==='user' + status==='complete' + 去重连续相同文本（原 shim 逻辑平移）。
- * 结果按源数组引用缓存（见 historyDeriveCache）并返回缓存实例——消费方
- * （core input/history computed）只读遍历（.length / 索引读取），实例复用安全。
- * 导出供单测（缓存刷新语义）。
+ * 纯派生函数（无自带缓存）：唯一消费链是 core history 模块内的 Vue computed，
+ * 记忆化由 computed 承担（↑/↓ 长按期间 messages 未变 → 直接命中 computed 缓存；
+ * messages 变化 → 数组引用必换 → 重算），派生层不再叠第二层缓存。
+ * 导出供单测（派生语义基线）。
  */
 export function deriveHistoryFromChatStore(chatStore: ReturnType<typeof useChatStore>, sid: string): string[] {
   const msgs = chatStore.getMessages(sid)
-  const cached = historyDeriveCache.get(msgs)
-  if (cached) return cached
   const result: string[] = []
   for (let i = msgs.length - 1; i >= 0; i--) {
     const m = msgs[i]
@@ -169,7 +159,6 @@ export function deriveHistoryFromChatStore(chatStore: ReturnType<typeof useChatS
     if (result.length > 0 && result[result.length - 1] === text) continue
     result.push(text)
   }
-  historyDeriveCache.set(msgs, result)
   return result
 }
 
@@ -186,10 +175,9 @@ export function useComposerShell(params: ComposerShellParams) {
   const settingsStore = getSettingsStore()
   const flow = useNewTaskFlow()
   const { info: toastInfo, error: toastError } = useToast()
-  const { send, steer, followUp, abort, compact, sendBash } = useChat()
+  const { send, followUp, abort, compact, sendBash } = useChat()
   const { handoff: handoffAction, abortHandoff: abortHandoffAction } = useHandoffActions(sessionIdRef)
   const { switchModel, setThinkingLevel } = useModel()
-  const compactQueue = useCompactQueue()
   const sidebar = useSidebar()
   const { signal: forkEnterSignal } = useForkModeChannel()
   const { signal: handoffEnterSignal } = useHandoffModeChannel()
@@ -218,24 +206,24 @@ export function useComposerShell(params: ComposerShellParams) {
     // [U4r2] 显式 preset 选择进 chip 侧 resolve 输入（D1 pending 三兄弟补齐）：flow
     // pendingPreset 只读视图（Landing.onPresetSelect 写入）——chip 显示与 submit 透传
     // 同源同输入，显式 preset 捆绑字段不再只在 submit 侧生效（显示 ≠ 生效破口修复）。
-    // 视图缺失（部分测试 mock 的 flow 简化形态）= 无显式选择 → null，不阻断 chip 解析
-    pendingPreset: () => flow.pendingPreset?.value ?? null,
+    // 仅 landing 态消费（core model-thinking 内部按 sessionId 门控）
+    pendingPreset: () => flow.pendingPreset.value,
     setPendingModel: (model: string) => flow.setPendingModel(model),
     switchModel,
     setThinkingLevel,
     getThinkingLevelMap: (modelId: string) => {
       // 旧版守卫：无 '/' 的 modelId（如空串/非完整模型 id）直接返回 undefined（all-levels），
-      // 不碰 providers（测试 mock 的 settingsStore 可能无 providers）。
+      // 不碰 providers。
       if (!modelId.includes('/')) return undefined
       const [providerId, modelName] = modelId.split('/')
-      const provider = settingsStore.providers?.value?.find((p: { id: string }) => p.id === providerId)
+      const provider = settingsStore.providers.value.find((p: { id: string }) => p.id === providerId)
       return provider?.models.find((m: { id: string }) => m.id === modelName)?.thinkingLevelMap
     },
     getSupportedLevels: (modelId: string) => {
       // 与 submit 侧 supportedLevelsOf 即同一函数（U6：runtime 注册表 pi 同源计算的
       // view-ready 下发，可用档判定唯一权威，不再本地推算）。曾与本文件各持一份实现，
       // 显示侧漏 enabled 检查 → 禁用 provider 下显示档与生效档发散（F5 统一）。
-      return supportedLevelsOf(modelId, settingsStore.providers?.value ?? [])
+      return supportedLevelsOf(modelId, settingsStore.providers.value)
     },
     // [U2d] landing 显示链完整解析数据注入（D1 单一解析层）：preset 档可达（preset 档
     // 此前在 core 无镜像，显示恒跳过）+ D4 lastUsedModel 校验获得 providers 能力表。
@@ -245,7 +233,7 @@ export function useComposerShell(params: ComposerShellParams) {
     launchData: {
       presets: () => presetStore.presets,
       defaultPresetId: () => presetStore.defaultPresetId || null,
-      providers: () => settingsStore.providers?.value,
+      providers: () => settingsStore.providers.value,
     },
   })
 
@@ -258,12 +246,13 @@ export function useComposerShell(params: ComposerShellParams) {
   })
 
   // ── 输入历史导航（↑/↓ shell 风格，core input/history）──
-  const { handleArrowUp, handleArrowDown, resetBrowsing, isBrowsing } = useComposerHistory(sessionIdRef, {
-    getText: () => inputRef.value?.getText() ?? '',
-    setText: (text, caretPosition) => inputRef.value?.setText(text, caretPosition),
-    clear: () => inputRef.value?.clear(),
-    getHistoryEntries: (sid: string) => deriveHistoryFromChatStore(chatStore, sid),
-  })
+  const { handleArrowUp, handleArrowDown, resetBrowsing, isBrowsingFor, getSavedDraft } =
+    useComposerHistory(sessionIdRef, {
+      getText: () => inputRef.value?.getText() ?? '',
+      setText: (text, caretPosition) => inputRef.value?.setText(text, caretPosition),
+      clear: () => inputRef.value?.clear(),
+      getHistoryEntries: (sid: string) => deriveHistoryFromChatStore(chatStore, sid),
+    })
 
   // ── 已附上下文 chip 行（core context/context-chips）──
   const { attachedItems, refreshAttachedItems, onRemoveContextChip } = useComposerContextChips(inputRef)
@@ -279,6 +268,17 @@ export function useComposerShell(params: ComposerShellParams) {
     inputRef,
     drafts,
     sessionId: sessionIdRef,
+  })
+
+  // [robustness P2/③b] orphan 草稿取回：上次 landing 首发失败且 Composer 已卸载（create 飞行
+  // 中切 session 等）时 sendLandingFirstMessage catch 只能把草稿暂存 orphan 槽；下次 landing
+  // composer 挂载时取回恢复（text + 全类 chip，image 段含 needsMigrate 标志）。仅 landing
+  // （sid null）消费——session composer 草稿走 drafts store（Composer.vue watch(sessionId)）。
+  // onMounted 时机 = 子组件 ComposerInput 已挂载、inputRef 就绪（chip 插入需要活实例）。
+  onMounted(() => {
+    if (sessionIdRef.value) return
+    const orphan = takeOrphanedDraft()
+    if (orphan && orphan.length > 0) restoreSegments(orphan)
   })
 
   // ── Fork 提问模式（core dispatch/fork-mode）──
@@ -370,32 +370,33 @@ export function useComposerShell(params: ComposerShellParams) {
     isSending,
     sessionId: () => sessionIdRef.value,
     sendBash,
+    restoreInput,
   })
   const isBashMode = composerBash.isBashMode
 
   // ── 提交动作（core dispatch/submit）──
-  const { onSteer, onFollowUp, onAbort } = useComposerSubmit({
+  const { onFollowUp, onAbort } = useComposerSubmit({
     hasInput,
-    isActive,
-    draft,
     inputRef,
     sessionIdRef,
     clearInput,
-    restoreInput,
-    // [D2] onSteer 失败恢复完整草稿（text + chips，与 send.ts routeSteer 同款）
     restoreSegments,
-    steer,
     followUp,
     abort,
   })
 
-  /** 忙时（流式/派发/发送中）—— canSend 共用守卫（不含 isCompacting：压缩期允许排队）。
-   *  仅约束普通 send；staging 发送不受 isActive 拦（fork-ask 对源只读，streaming 中合法） */
-  const isBusy = computed(() => isActive.value || isSending.value)
-  const canSend = computed(() => hasInput.value && !isBusy.value)
+  /**
+   * [u3c / D1 语义收窄] canSend = 「可提交」（hasInput ∧ ¬isSending 双发锁）——**占用不再拦截**：
+   * lane 判定收归 runtime 内核（D1），settling/compacting/bash/turn 活跃期发送合法（内核排队/
+   * 入槽），禁令只剩空输入与本地双发锁两类（toast 分型见 core dispatch/send 的 routeStaging）。
+   * [HISTORICAL] 前身 isBusy = isActive ∨ isSending——isActive 半边是 renderer 侧车道判定的残留
+   * （占用即拦截），随 D1「renderer 只提交不判定」退役（u3b 收 core send.ts 的 canSend 语义，
+   * 壳层派生同批收窄归 u3c）。
+   * 仅约束普通 send；staging 发送不受本守卫拦（fork-ask 对源只读，streaming 中合法）。 */
+  const canSend = computed(() => hasInput.value && !isSending.value)
   /** 可提交：staging 活跃时只看本地双发锁（isSending）——streaming 中 fork 提交合法，
-   *  handoff 的 streaming 拦截在入口（enterHandoffMode）+ 兑底（handleHandoffSend）。
-   *  非 staging 态维持原 canSend（hasInput ∧ ¬isBusy）。 */
+   *  handoff 的 streaming 拦截在入口（enterHandoffMode）+ 兜底（handleHandoffSend）。
+   *  非 staging 态维持 canSend（hasInput ∧ ¬isSending）。 */
   const canSubmit = computed(() => {
     const active = staging.activeStaging.value
     if (active) return (hasInput.value || active.allowsEmptySend) && !isSending.value
@@ -419,7 +420,6 @@ export function useComposerShell(params: ComposerShellParams) {
             : ''),
     isSending.value && 'opacity-[0.55]',
   ])
-  /** placeholder 三级链：staging > bash > 流式 steerHint / 普通 inputHint */
   const placeholder = computed(
     () =>
       stagingPlaceholder.value
@@ -430,14 +430,12 @@ export function useComposerShell(params: ComposerShellParams) {
           : t('panel.composer.inputHint')),
   )
 
-  // ── 发送分流（core dispatch/send；D6 统一分发器：staging > steer 路由 > canSend > staging.send >
-  //    defer 路由 > landing > bash > /compact > send）──
+  // ── 发送分流（core dispatch/send；[u3c/D1] 统一分发器：staging > canSend 守卫 >
+  //    staging.send > landing（含 bash）> bash > /compact > send（统一 submit））──
   const { onSend } = useComposerSend({
     staging: { hasActiveStaging: staging.hasActiveStaging, send: staging.send, activeStaging: staging.activeStaging },
-    getStagingConfig,
     canSend,
     hasInput,
-    getSendRoute: () => sendRoute.value,
     draft,
     inputRef,
     sessionIdRef,
@@ -449,19 +447,47 @@ export function useComposerShell(params: ComposerShellParams) {
     flow,
     localThinkingLevel,
     send,
-    steer,
     compact,
-    enqueueCompact: (sessionId: string, text: string, segments: Segment[]) =>
-      compactQueue.enqueue(sessionId, text, segments),
     toastError,
     t: t as (key: string, params?: Record<string, unknown>) => string,
   })
 
+  /**
+   * [u3c / D7] 队列条目撤销（×）的文本回输入区——delivery.cancel reply 的全文 + segments
+   * 快照落回草稿（ADR-0043 Segment[] 模型）。
+   *
+   * 空输入（无文本且无 chip）→ restoreSegments 整段恢复（text + image/file/skill/session chip，
+   * 与发送失败回滚同通路）；已有输入 → 追加不覆盖：走 composerInjectionStore 单值槽位 +
+   * '\n\n' 累积语义（与 useSidebarSessionActions 的 forceQuit 回收同款）——用户正在输入的内容
+   * 不丢（此前 forceQuit 路径已验证的取舍）。无 segments 快照（纯文本提交 / rebuild / adopt
+   * 条目，runtime 不带键）→ 纯文本落草稿。注入通道不携带 segments，追加分支只回文本
+   * （已登记 deviations）。
+   */
+  function restoreToDraft(payload: { text: string; segments?: Segment[] }): void {
+    const text = payload.text
+    const segments = payload.segments
+    const currentText = (inputRef.value?.getText() ?? draft.value).trim()
+    const hasChips = (inputRef.value?.getSegments() ?? []).some((s) => s.type !== 'text')
+    if (currentText.length === 0 && !hasChips) {
+      if (segments && segments.length > 0) restoreSegments(segments)
+      else if (text.trim()) restoreInput(text)
+      return
+    }
+    const sid = sessionIdRef.value
+    if (!sid || !text.trim()) return
+    const pendingText = composerInjectionStore.pendingInjection.value?.text
+    composerInjectionStore.requestInjection({
+      target: 'current',
+      sessionId: sid,
+      text: pendingText ? `${pendingText}\n\n${text}` : text,
+    })
+  }
+
   // ── Composer 命令动作表（composer-pi-shortcuts U1③组装；分发链「动作表」分支消费）──
   // enabledModels = settingsStore.models 经 enabled 兜底过滤（与 ModelSelectPopover 双保险
   // 同款：runtime aggregateModels 已过滤一遍，同源广播未过滤时兜底；序 = scopedModels 白名单
-  // 重排的显示序，即模型循环序）。models?. 同款防御：测试 mock 的 settingsStore 可能缺字段。
-  const enabledModels = computed(() => (settingsStore.models?.value ?? []).filter((m) => m.enabled !== false))
+  // 重排的显示序，即模型循环序）。
+  const enabledModels = computed(() => settingsStore.models.value.filter((m) => m.enabled !== false))
   /** staging 活跃只读信号（R2：从既有 staging.activeStaging 派生，零 core 改动） */
   const isStaging = computed(() => staging.activeStaging.value !== null)
   /**
@@ -520,7 +546,6 @@ export function useComposerShell(params: ComposerShellParams) {
     currentThinkingLevel,
     currentThinkingLevelMap,
     currentSupportedLevels,
-    localThinkingLevel,
     /**
      * 「切换中」只读真值（U4）：`{ kind, sessionId, target } | null`。
      * 消费侧（Composer.vue）**必须判 sessionId 等值**再显示/禁用（切走 session 后不得残留旧面板态）。
@@ -528,14 +553,12 @@ export function useComposerShell(params: ComposerShellParams) {
     switching,
     onModelSelect: onModelSelectUi,
     onThinkingSelect: onThinkingSelectUi,
-    enterStagingMode,
-    exitStagingMode,
-    getStagingConfig,
     // history
     handleArrowUp,
     handleArrowDown,
     resetBrowsing,
-    isBrowsing,
+    isBrowsingFor,
+    getSavedDraft,
     // context chips
     attachedItems,
     refreshAttachedItems,
@@ -544,32 +567,25 @@ export function useComposerShell(params: ComposerShellParams) {
     onDragOver,
     onDragLeave,
     onDrop,
-    // restore
-    clearInput,
-    restoreInput,
-    restoreSegments,
     // fork / handoff / staging
-    fork,
-    handoff,
     staging,
     // bash
-    composerBash,
     isBashMode,
     // submit
-    onSteer,
     onFollowUp,
     onAbort,
     // send
     onSend,
+    // [u3c] 队列条目撤销回草稿（useQueueRows 的行撤销 handler 注入本回调）
+    restoreToDraft,
     // composer 命令动作表（composer-pi-shortcuts：分发链「动作表」分支消费）
     shortcutActions,
-    // D6 发送路由 + 发送位四态（u5b 导出：分发器路由 / P4 发送位与 ActivityStrip 同源消费）
+    // D6 发送路由 + 发送位四态（u5b 导出：分发器路由 / P4 发送位与 ActivityStrip 同源消费）。
+    // [u3c/D1] sendRoute 保留为**发送位 UI 预测**（不再是投递决策——决策权在内核），
+    // Alt+⏎ 的 followUp 保留语义按它分流（composer-keydown）。
     sendRoute,
     sendButtonState,
     // 派生状态
-    hasInput,
-    isBusy,
-    canSend,
     canSubmit,
     // 视觉
     boxClass,

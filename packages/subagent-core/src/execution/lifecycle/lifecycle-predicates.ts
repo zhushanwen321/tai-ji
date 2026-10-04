@@ -26,7 +26,7 @@ import { hasIdleTimer } from "./lifecycle-manager.ts";
 // （engine/host/spawned-children.ts），不再深路径 import inproc pi 引擎目录 内部——
 // 行为不变（镜像 ∪ inproc 权威 map 并读，见该文件头注释的过渡桥语义）。
 import { hasLiveProcessHandleCore } from "../engine/host/spawned-children.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 
 /**
  * 活进程句柄是否存在（isResumable 子判据）。
@@ -60,10 +60,7 @@ export function hasArmedIdleTimer(record: ExecutionRecord): boolean {
  * 单一权威实现）。
  *
  * [U5 判据迁移] 旧判据「running 且无活进程句柄」依赖 U4 已退役的轮终桥接形态
- * （轮终现已真实写 idle）；新判据 = status 直读。消费方行为变化（设计 D4 数据级
- * 已裁决）：idle-GC 候选从「running 桥接形态」扩张到全部 idle（含中断族 idle、
- * `.state` 重建 idle——范围扩张已接受）；W4 死亡纳管态（running）自然退出 GC
- * 候选（supervisor 接管链 settle 后落 idle 回到候选集）。notify-host 放行子句中
+ * （轮终现已真实写 idle）；新判据 = status 直读。notify-host 放行子句中
  * 本谓词被 `status !== 'idle'` 前置子句短路吸收（冗余但无害）。
  *
  * [v4 A-6] 签名泛化为 Pick<"id"|"status">：ExecutionRecord（活态）与 SubagentRecord

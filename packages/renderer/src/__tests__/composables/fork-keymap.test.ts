@@ -16,6 +16,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { apiProjectMock, chatApiMethodsMock } from '../helpers/api-facade-mock'
 
 // Sidebar.vue 引用构建期 vite define 注入的 __APP_VERSION__，测试环境无定义 → mount 抛 ReferenceError。
 // 先在 globalThis 声明，让 mount 成功，从而让真实断言（fork 未被调用）成为失败点。
@@ -54,15 +55,11 @@ vi.mock('@taiji/core/transport/api', () => ({
   onGlobalType: vi.fn(() => () => {}),
   dispatchSession: vi.fn(),
 }))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: apiProjectMock(),
   extension: { scan: vi.fn() },
   // w5：useChat 薄包装的 chatApiPort 组装需 chat 全部 10 方法 + session.writeSegments
   chat: {
-    send: vi.fn(() => Promise.resolve()),
-    steer: vi.fn(() => Promise.resolve()),
-    followUp: vi.fn(() => Promise.resolve()),
-    abort: vi.fn(() => Promise.resolve()),
-    compact: vi.fn(() => Promise.resolve()),
+    ...chatApiMethodsMock(),
     bash: vi.fn(() => Promise.resolve()),
     abortBash: vi.fn(() => Promise.resolve()),
     getHistory: vi.fn(() => Promise.resolve({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })),

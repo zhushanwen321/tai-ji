@@ -33,8 +33,7 @@ import {
   composerChildStubs,
 } from '../helpers/composer-mount'
 
-// ── mock composable / api / store（公共骨架收敛到 helpers/composer-mount.ts 单源；
-//    W4 currentCwd 真 ref 修复单点落在 helper）──
+// ── mock 段：工厂委托共享 helper（单源；ComposerInput stub 下方自留——expose 断言面专属）──
 vi.mock('@/composables/features/chat/useChat', () => composerChatModule())
 vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
 vi.mock('@/api', () => composerApiModule())

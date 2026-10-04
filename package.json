@@ -1,11 +1,11 @@
 {
   "name": "taiji",
-  "version": "0.10.4",
+  "version": "0.10.9",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.27.0",
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=24"
   },
   "scripts": {
     "dev": "pnpm --filter @taiji/electron dev",

@@ -4,7 +4,7 @@
  *
  * F1 背景：execute() 返回不可克隆值（function/Symbol/循环引用）→ worker 侧 _safePost 吞掉
  * DataCloneError → return 消息从未发出 → worker exit(0)。旧实现 handleWorkerExit 对
- * code===0 no-op → run 永久 running、runAndWait 无限挂起。
+ * code===0 no-op → run 永久 running、无终态（消费方无限等待）。
  *
  * 修复语义（本文件锚定）：
  * - exit(0) 且本 runtime 代际未收到 return/error 消息 → transition done,failed +
@@ -28,10 +28,14 @@ import {
   handleScriptError,
   handleWorkerError,
 } from "../worker-message-pump.ts";
+import {
+  dispatchRunCreated,
+} from "../terminal-actions.ts";
 import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
-import type { DoneReason, RunStatus } from "../models/types.ts";
 import type { WorkflowRun } from "../models/workflow-run.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
+// [W2/V1] 六态机引导 + 终局断言换源（两态机字段停更——终局经注册表判定/派生）。
+import { isRunSettled, noteRebuiltSettlement, settledRecordOf } from "../terminal-actions.ts";
 
 /** [F1] 归因文案——与 worker-message-pump.ts 常量一致（不直接 import 常量以锚定对外文案）。 */
 const EXITED_WITHOUT_RESULT_MSG =
@@ -46,12 +50,15 @@ interface RunMockOpts {
   receivedTerminalMessage?: boolean;
 }
 
-/** 构造一个 status="running" 的 mock WorkflowRun。 */
+/** 构造一个 status="running" 的 mock WorkflowRun。
+ *  [W2/V1] runId 唯一化（模块级 liveRunStates/终局注册表按 runId 键控——常量 id
+ *  会跨测试污染）+ releaseRuntime 桩（finalizeRun 显式释放，原两态机 transition
+ *  内联副作用随写点删除上提）。 */
+let runSeq = 0;
 function makeRunningRun(opts: RunMockOpts = {}): WorkflowRun {
   return {
-    runId: "wf-test",
+    runId: `wf-test-${++runSeq}`,
     state: {
-      status: "running",
       budget: { usedTokens: 0, usedCost: 0, isExceeded: () => false },
       errorLogs: [],
       calls: new Map(),
@@ -64,20 +71,17 @@ function makeRunningRun(opts: RunMockOpts = {}): WorkflowRun {
     },
     spec: {
       scriptName: "test-wf",
-      scriptSource: "execute() {}",
+      scriptSource: "async function execute() {}",
       args: {},
     },
     runtime: {
       worker: { postMessage: vi.fn() },
       receivedTerminalMessage: opts.receivedTerminalMessage,
     },
-    transition(this: WorkflowRun, target: RunStatus, reason?: DoneReason): void {
-      this.state.status = target;
-      if (target === "done") this.state.reason = reason;
-    },
     replaceRuntime(this: WorkflowRun, rt: NonNullable<WorkflowRun["runtime"]>): void {
       this.runtime = rt;
     },
+    releaseRuntime: vi.fn(),
   } as unknown as WorkflowRun;
 }
 
@@ -114,19 +118,28 @@ function makeHandle(isCurrent = true): WorkerHandle {
 
 // ── [F1] handleWorkerExit：exit(0) 无终态消息 → failed ──────────────
 
+
+/** [W2/V1] 六态机引导：journal 首帧（run-created）落账——finalizeRun/abortRun 等
+ *  活体终局入口的六态机裁决要求 created→dispatched 已在链上（生产链路由
+ *  runWorkflow 正点发射承接；直测终局入口的用例经本 helper 补齐同一引导）。 */
+async function seedRunCreated(run: WorkflowRun): Promise<void> {
+  await dispatchRunCreated(run);
+}
+
 describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
   it("exit(0) 且未收到 return/error → run 转 done,failed，归因 structured-cloneable，unregister + onRunDone", async () => {
     const run = makeRunningRun();
+    await seedRunCreated(run);
     const deps = makeDeps();
 
     await handleWorkerExit(run, 0, makeHandle(), deps, makeHandlers());
 
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("failed");
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(run.state.error).toBe(EXITED_WITHOUT_RESULT_MSG);
     expect(deps.appendEntry).toHaveBeenCalledWith(
       "pending:unregister",
-      expect.objectContaining({ id: "wf-test", reason: "failed", status: "failed" }),
+      expect.objectContaining({ id: run.runId, reason: "failed", status: "failed" }),
     );
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
     expect(deps.store.save).toHaveBeenCalledTimes(1);
@@ -134,11 +147,12 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
 
   it("exit(0) 但已收到终态消息（script-error 重试退避窗口）→ no-op，不被误判 failed", async () => {
     const run = makeRunningRun({ receivedTerminalMessage: true });
+    await seedRunCreated(run);
     const deps = makeDeps();
 
     await handleWorkerExit(run, 0, makeHandle(), deps, makeHandlers());
 
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
     expect(deps.store.save).not.toHaveBeenCalled();
     expect(deps.eventBus.emit).not.toHaveBeenCalled();
     expect(deps.appendEntry).not.toHaveBeenCalled();
@@ -147,22 +161,27 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
 
   it("stale handle（isCurrent=false）仍被丢弃——修复不破坏 G-025", async () => {
     const run = makeRunningRun();
+    await seedRunCreated(run);
     const deps = makeDeps();
 
     await handleWorkerExit(run, 0, makeHandle(false), deps, makeHandlers());
 
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
     expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 
   it("已终态（done）的 run 不受影响", async () => {
     const run = makeRunningRun();
-    run.transition("done", "completed");
+    await seedRunCreated(run);
+    // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：终局 fixture 注入注册表条目
+    // （生产经 dispatch 链 note）——stale 守卫据此判「已终态」。
+    noteRebuiltSettlement(run.runId, { outcome: "done", settledAt: Date.now() });
     const deps = makeDeps();
 
     await handleWorkerExit(run, 0, makeHandle(), deps, makeHandlers());
 
-    expect(run.state.reason).toBe("completed");
+    // 终局事实保持原 outcome=done（映射 reason completed），未被 exit 路径改写
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "done" });
     expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 
@@ -171,6 +190,7 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
     vi.useFakeTimers();
     try {
       const run = makeRunningRun();
+    await seedRunCreated(run);
       const deps = makeDeps();
       const handlers = makeHandlers();
 
@@ -179,7 +199,7 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
       await pending;
 
       // 未超限 → rebuild（workerHost.start 重建），run 保持 running、不判 failed
-      expect(run.state.status).toBe("running");
+      expect(isRunSettled(run)).toBe(false);
       expect(run.meta.workerErrorCount).toBe(1);
       expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
       expect(deps.onRunDone).not.toHaveBeenCalled();
@@ -200,6 +220,7 @@ describe("handleWorkerError — [R4-F1] 同代际双事件幂等", () => {
     vi.useFakeTimers();
     try {
       const run = makeRunningRun();
+    await seedRunCreated(run);
       const deps = makeDeps();
       const handlers = makeHandlers();
 
@@ -213,7 +234,7 @@ describe("handleWorkerError — [R4-F1] 同代际双事件幂等", () => {
       // 双事件只处理一次：计数 +1（非 +2）、单次 rebuild、run 保持 running
       expect(run.meta.workerErrorCount).toBe(1);
       expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
-      expect(run.state.status).toBe("running");
+      expect(isRunSettled(run)).toBe(false);
       expect(deps.onRunDone).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
@@ -224,6 +245,7 @@ describe("handleWorkerError — [R4-F1] 同代际双事件幂等", () => {
     vi.useFakeTimers();
     try {
       const run = makeRunningRun();
+    await seedRunCreated(run);
       const deps = makeDeps();
       const handlers = makeHandlers();
 
@@ -254,6 +276,7 @@ describe("handleWorkerError — [R4-F1] 同代际双事件幂等", () => {
     try {
       // 预置 workerErrorCount = MAX（3）：本次 error 计数到 4 → 超限 → done,failed
       const run = makeRunningRun({ workerErrorCount: 3 });
+    await seedRunCreated(run);
       const deps = makeDeps();
       const handlers = makeHandlers();
 
@@ -262,10 +285,17 @@ describe("handleWorkerError — [R4-F1] 同代际双事件幂等", () => {
       await Promise.all([p1, p2]);
 
       expect(run.meta.workerErrorCount).toBe(4); // 只 +1
-      expect(run.state.status).toBe("done");
-      expect(run.state.reason).toBe("failed");
+      expect(isRunSettled(run)).toBe(true);
+      expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
       expect(deps.onRunDone).toHaveBeenCalledTimes(1);
-      expect(deps.appendEntry).toHaveBeenCalledTimes(1); // 单次 unregister 直落，无重复
+      // [W1] 终局 coda 现含两条 entry（workflow-record 终态条目 + unregister）——
+      // 幂等锚点 = unregister 恰一次（无重复直落），workflow-record 也恰一次
+      expect(
+        deps.appendEntry.mock.calls.filter((c) => c[0] === "pending:unregister"),
+      ).toHaveLength(1);
+      expect(
+        deps.appendEntry.mock.calls.filter((c) => c[0] === "workflow-record"),
+      ).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }
@@ -277,13 +307,14 @@ describe("handleWorkerError — [R4-F1] 同代际双事件幂等", () => {
 describe("handleWorkerMessage — [F1] 终态消息标记", () => {
   it("return 消息将 runtime.receivedTerminalMessage 置 true，随后正常 transition done,completed", async () => {
     const run = makeRunningRun();
+    await seedRunCreated(run);
     const deps = makeDeps();
 
     await handleWorkerMessage(run, { type: "return", result: { ok: 1 } }, deps, makeHandlers());
 
     expect((run.runtime as { receivedTerminalMessage?: boolean }).receivedTerminalMessage).toBe(true);
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("completed");
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "done" });
   });
 
   it("error 消息同样置 true——在 rebuild 前的退避窗口内捕获（replaceRuntime 前 start 时刻）", async () => {
@@ -294,6 +325,7 @@ describe("handleWorkerMessage — [F1] 终态消息标记", () => {
     vi.useFakeTimers();
     try {
       const run = makeRunningRun();
+    await seedRunCreated(run);
       const deps = makeDeps();
       let flagAtRebuildStart: boolean | undefined;
       (deps.workerHost.start as ReturnType<typeof vi.fn>).mockImplementation(() => {
@@ -317,6 +349,7 @@ describe("handleWorkerMessage — [F1] 终态消息标记", () => {
 describe("store.save 抛错（ENOSPC 等）— [SW-DATA-3] 不阻断终态推进", () => {
   it("handleReturn（经 handleWorkerMessage return 分支）：save reject 被吸收，unregister + onRunDone 照常", async () => {
     const run = makeRunningRun();
+    await seedRunCreated(run);
     const deps = makeDeps();
     deps.store.save.mockRejectedValue(new Error("ENOSPC: no space left on device"));
 
@@ -326,16 +359,17 @@ describe("store.save 抛错（ENOSPC 等）— [SW-DATA-3] 不阻断终态推进
       handleWorkerMessage(run, { type: "return", result: { ok: 1 } }, deps, makeHandlers()),
     ).resolves.toBeUndefined();
 
-    expect(run.state.status).toBe("done");
+    expect(isRunSettled(run)).toBe(true);
     expect(deps.appendEntry).toHaveBeenCalledWith(
       "pending:unregister",
-      expect.objectContaining({ id: "wf-test" }),
+      expect.objectContaining({ id: run.runId }),
     );
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
   });
 
   it("handleWorkerError 重试超限：save reject 被吸收，终态 + 通知照常", async () => {
     const run = makeRunningRun({ workerErrorCount: 3 });
+    await seedRunCreated(run);
     const deps = makeDeps();
     deps.store.save.mockRejectedValue(new Error("ENOSPC: no space left on device"));
 
@@ -343,17 +377,18 @@ describe("store.save 抛错（ENOSPC 等）— [SW-DATA-3] 不阻断终态推进
       handleWorkerError(run, new Error("worker crash"), deps, makeHandlers()),
     ).resolves.toBeUndefined();
 
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("failed");
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(deps.appendEntry).toHaveBeenCalledWith(
       "pending:unregister",
-      expect.objectContaining({ id: "wf-test", reason: "failed" }),
+      expect.objectContaining({ id: run.runId, reason: "failed" }),
     );
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
   });
 
   it("handleScriptError 重试超限：save reject 被吸收，终态 + 通知照常", async () => {
     const run = makeRunningRun({ scriptErrorCount: 3 });
+    await seedRunCreated(run);
     const deps = makeDeps();
     deps.store.save.mockRejectedValue(new Error("ENOSPC: no space left on device"));
 
@@ -361,11 +396,11 @@ describe("store.save 抛错（ENOSPC 等）— [SW-DATA-3] 不阻断终态推进
       handleScriptError(run, "script boom", [], deps, makeHandlers()),
     ).resolves.toBeUndefined();
 
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("failed");
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(deps.appendEntry).toHaveBeenCalledWith(
       "pending:unregister",
-      expect.objectContaining({ id: "wf-test", reason: "failed" }),
+      expect.objectContaining({ id: run.runId, reason: "failed" }),
     );
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
   });

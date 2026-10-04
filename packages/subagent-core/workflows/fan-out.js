@@ -62,9 +62,14 @@ if (tasks.some((t) => typeof t !== "string" || t.trim() === "")) {
 // 1 个 = 所有任务，N 个 = 与 tasks 一一对应，缺省 = 不指定 agent（默认执行者）
 // worker 沙箱为 eval 模式：require 相对路径以 cwd 为基准（非脚本目录），
 // 必须用 workerData.scriptPath 锚定脚本目录（parallel/review-fix-loop 同模式）；
-// scriptPath 注入是 worker 契约的显式前提（D1 加固），缺席即 fail-fast，
+// scriptPath 注入是 worker 契约的显式前提（D1 加固），缺席或为空串即 fail-fast
+// （空串 = record 流为 scriptPath 载荷落地前的旧格式，resume 重建无锚可恢复），
 // 不回退 cwd——消除从用户目录误加载/被植入同名 _shared/agent-refs.cjs 的代码加载面。
-if (typeof workerData === "undefined" || !workerData || typeof workerData.scriptPath !== "string") {
+if (typeof workerData === "undefined" || !workerData || typeof workerData.scriptPath !== "string" || workerData.scriptPath === "") {
+  if (workerData && typeof workerData.scriptPath === "string") {
+    throw new Error("fan-out: core_module_load_failed: workerData.scriptPath is an empty string (record stream predates the scriptPath field); cannot locate workflows/_shared/agent-refs.cjs. " +
+      "Recovery: re-run the workflow (runs recorded before the field existed cannot be resumed).");
+  }
   throw new Error("fan-out: core_module_load_failed: workerData.scriptPath is missing; cannot locate workflows/_shared/agent-refs.cjs. " +
     "Recovery: the worker host (WorkerHost) must inject scriptPath via workerData when launching the worker " +
     "(the real path of this script; injection point: the workerData assembly in src/orchestration/worker-host.ts). " +

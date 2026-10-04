@@ -78,35 +78,13 @@ vi.mock('@/composables/features/chat/useChat', () => ({
   resetChatModuleState: vi.fn(),
 }))
 
-// 壳 deps mock（MessageStream 装配 useChatViewDeps，本测不关心块渲染）
-const chatDepsMock = vi.hoisted(() => ({
-  getMessages: vi.fn(() => []),
-  isActive: vi.fn(() => false),
-  isHandingOff: vi.fn(() => false),
-  getChangeSetStatus: vi.fn(() => undefined),
-  isExpanded: vi.fn(() => false),
-  isTakeover: vi.fn(() => false),
-  isPendingSend: vi.fn(() => false),
-  toggleExpand: vi.fn(),
-  collapse: vi.fn(),
-  setTakeover: vi.fn(),
-  abortBash: vi.fn(),
-  editAndResend: vi.fn(),
-  onFork: vi.fn(),
-  onForkAsk: vi.fn(),
-  onHandoff: vi.fn(),
-  onHandoffAsk: vi.fn(),
-  openDrawer: vi.fn(),
-  onFileClick: vi.fn(),
-  onAmbiguousSelect: vi.fn(),
-  loadFileCandidates: vi.fn(() => Promise.resolve([])),
-  renderMarkdown: vi.fn(() => Promise.resolve([])),
-  renderMermaid: vi.fn(() => Promise.resolve({ svg: '' })),
-  toMarkdown: vi.fn(() => ''),
-}))
-vi.mock('@/composables/panel/useChatViewDeps', () => ({
-  useChatViewDeps: () => chatDepsMock,
-}))
+// 壳 deps mock（MessageStream 装配 useChatViewDeps，本测不关心块渲染）：
+// 单例取 helpers/chat-stream-mount 的 chatDepsMock（工厂内动态 import——vi.mock 工厂
+// 惰性执行，静态导入绑定在此时已初始化）
+vi.mock('@/composables/panel/useChatViewDeps', async () => {
+  const { chatDepsMock } = await import('@/__tests__/helpers/chat-stream-mount')
+  return { useChatViewDeps: () => chatDepsMock }
+})
 vi.mock('@/composables/features/sidebar/useSidebar', () => ({
   useSidebar: () => ({ forkSession: vi.fn(), abortHandoff: vi.fn() }),
 }))

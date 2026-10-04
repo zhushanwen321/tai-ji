@@ -241,8 +241,9 @@ describe('U4-E2 manage e2e probe', () => {
     {
       action: 'send',
       params: { sessionId: 's1', prompt: 'hello' },
-      // sd-u5：send 走 delivery.sendChecked——idle 直投受理即回，busy 入队也回 queued
-      expected: { queued: true },
+      // sd-u5：send 走 delivery.sendChecked——idle 直投受理即回，busy 入队也回 queued；
+      // notify-once：probe 未带 notifyId → willNotify:false
+      expected: { queued: true, willNotify: false },
     },
     {
       action: 'history',
@@ -258,7 +259,7 @@ describe('U4-E2 manage e2e probe', () => {
     {
       action: 'status',
       params: { sessionId: 's1' },
-      expected: { status: 'active', modelId: 'openai/gpt-4' },
+      expected: { status: 'active', modelId: 'openai/gpt-4', undeliveredResults: 0 },
     },
     {
       action: 'list',
@@ -274,6 +275,7 @@ describe('U4-E2 manage e2e probe', () => {
             parentAgentSessionId: 'sid-parent',
           },
         ],
+        undeliveredResults: 0,
       },
     },
     {
@@ -347,6 +349,16 @@ describe('U4-E3 malformed e2e probe', () => {
 
   it('marker 翻译：options[0] 非法 JSON 时 action 仍为 __malformed__（不 fall-through 普通分支）', () => {
     const events = translate(JSON.parse(buildMalformedUiRequestLine('req-m')) as PiEvent, 'sid-parent')
+    const uiEvent = events.find((e) => e.kind === 'session-manager-ui')
+    expect(uiEvent).toBeDefined()
+    if (uiEvent?.kind !== 'session-manager-ui') return
+    expect(uiEvent.action).toBe('__malformed__')
+    expect(uiEvent.params).toEqual({})
+  })
+
+  it('marker 翻译：action 不在 SESSION_MANAGER_ACTIONS 枚举 → 折叠 __malformed__ 哨兵（枚举守卫）', () => {
+    // JSON 合法但 action 是非枚举值——与上一条（JSON 解析失败）不同的 malformed 输入维度
+    const events = translate(JSON.parse(buildUiRequestLine('req-enum-guard', 'evil', {})) as PiEvent, 'sid-parent')
     const uiEvent = events.find((e) => e.kind === 'session-manager-ui')
     expect(uiEvent).toBeDefined()
     if (uiEvent?.kind !== 'session-manager-ui') return

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * W1 数据层 —— 流式 chunk 填充 contentBlocks 测试。
  *
@@ -24,7 +26,6 @@ function makeCtx(initial: Message[] = []): MessageEffectContext {
   return {
     messages: ref(new Map([[SID, shallowRef(initial)]])),
     retryStates: ref(new Map()),
-    queueStates: ref(new Map()),
     applyFileChanges: vi.fn(),
     markChangeSetsSuperseded: vi.fn(),
     finalizeSession: vi.fn(),

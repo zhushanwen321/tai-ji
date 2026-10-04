@@ -86,6 +86,36 @@ export async function clickSendOrSubmit(page) {
 }
 
 /**
+ * 划选注入（环节③ 新姿势，plan 划选评论类场景）：在 rootSelector 容器内选中包含
+ * substring 的首个文本片段（DOM Range + Selection），随后浮层/触发钮随 mouseup/selectionchange
+ * 语义由场景脚本自行点击。substring 不含在容器文本内时抛错（防静默空选）。
+ * 函数自包含（page.evaluate 序列化无闭包），与 probeSendButton 同纪律。
+ */
+export async function selectTextInElement(page, rootSelector, substring) {
+  return page.evaluate(({ rootSelector, substring }) => {
+    const root = document.querySelector(rootSelector)
+    if (!root) return { ok: false, reason: `root not found: ${rootSelector}` }
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+    let node = walker.nextNode()
+    while (node) {
+      const idx = (node.textContent || '').indexOf(substring)
+      if (idx >= 0) {
+        const range = document.createRange()
+        range.setStart(node, idx)
+        range.setEnd(node, idx + substring.length)
+        const sel = window.getSelection()
+        sel.removeAllRanges()
+        sel.addRange(range)
+        root.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+        return { ok: true, selected: sel.toString() }
+      }
+      node = walker.nextNode()
+    }
+    return { ok: false, reason: `substring not found in ${rootSelector}: ${substring.slice(0, 40)}` }
+  }, { rootSelector, substring })
+}
+
+/**
  * 等待渲染稳定：图片全部完成加载（naturalWidth > 0）或无图 + 布局静默。
  * img.naturalWidth 是图片加载完成的唯一可靠信号——complete 属性在加载失败时
  * 也为 true（2026-09 验收 403 缺陷即以此区分 0x0 失败与真实加载）。

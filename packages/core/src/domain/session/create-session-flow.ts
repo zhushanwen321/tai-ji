@@ -135,7 +135,7 @@ export interface CreateSessionFlowInput {
   presetId?: string | null
   /** landing 态选定的模型（"provider/modelId" 复合串；经 create modelOverride 快照化生效） */
   pendingModel?: string | null
-  /** 归属 project id（D14 语义修正 2026-08-04：创建时归属当前 activeProject；空 = 默认项目兑底） */
+  /** 归属 project id（D14 语义修正 2026-08-04：创建时归属当前 activeProject；空 = 默认项目兜底） */
   projectId?: string | null
   /** 首发消息段（含 text/image/skill 等；label 从首条 text 段取、trim 空时回退首个 slash 段，
    * image 段需迁移） */
@@ -144,6 +144,14 @@ export interface CreateSessionFlowInput {
   bashCommand?: { command: string; excludeFromContext: boolean } | null
   /** landing 态选定的思考等级（透传 session.create，session 创建即带正确等级） */
   pendingThinkingLevel?: ThinkingLevel | null
+  /**
+   * create 幂等键（发现 B，与调用方的接口约定字段名，勿改名）：同一次「新建任务」的网络
+   * 重试（backstop 超时/WS 断连后重发）复用同一 uuid，runtime 按其去重返回已建 session，
+   * 不重复 spawn/建号。本函数只做透传（→ api.create 最后一参）——uuid 的生成与「同一用户
+   * 重试复用同一 uuid」黏滞逻辑由调用方（壳层 new-task flow）负责。缺省 = 旧行为（每次
+   * create 独立创建）。
+   */
+  clientUuid?: string
 }
 
 /** createSessionFlow 的返回值（非 null 分支；null = guard 命中未创建）。 */
@@ -179,7 +187,8 @@ function hasSubmittableContent(input: CreateSessionFlowInput, trimmed: string): 
   return Boolean(trimmed) || hasNonTextSegment || input.bashCommand != null
 }
 
-/** step 4：调 api.create（null 参数归一 undefined；override 优先级见 createSessionFlow 注释）。 */
+/** step 4：调 api.create（null 参数归一 undefined；override 优先级见 createSessionFlow 注释；
+ * 末参 clientUuid = 发现 B 幂等键透传，缺省 undefined 时 payload 不含该键）。 */
 async function createSessionRecord(
   ctx: CreateSessionFlowCtx,
   input: CreateSessionFlowInput,
@@ -193,6 +202,7 @@ async function createSessionRecord(
     input.projectId ?? undefined,
     input.pendingModel ?? undefined,
     input.pendingThinkingLevel ?? undefined,
+    input.clientUuid,
   )
 }
 
@@ -227,7 +237,8 @@ async function migrateSegments(segments: Segment[], sessionId: string, api: Sess
  * 1. guard：无 text trim 且无非 text 段且无 bashCommand → 返回 null（不创建）
  * 2. cwd 兜底：input.cwd ?? ctx.defaultCwd
  * 3. label 派生：bashCommand ? command : trimmed（codePoint 前 10 + 省略号）
- * 4. create：api.create(cwd, label, presetId, projectId, modelOverride, thinkingOverride)
+ * 4. create：api.create(cwd, label, presetId, projectId, modelOverride, thinkingOverride, clientUuid)
+ *    （clientUuid = 发现 B 幂等键透传，缺省省略；去重在 runtime 侧）
  * 5. INV-7 降级 + E7 两空：created.cwd !== cwd（含 cwd 空串落 homedir）→ onCwdFallback?.(cwd, created.cwd)
  * 6. appendSession：store.appendSession(created)
  * 7. migrateImages：needsMigrate image 段经 api.migrateImage 迁移，更新 path + 重置 needsMigrate

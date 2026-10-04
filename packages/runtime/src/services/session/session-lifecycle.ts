@@ -59,6 +59,50 @@ import { applySessionOccupancyTransition, userStoppedGate } from './event-interp
 // 自本文件迁出（max-lines 行数合规），函数体逐字节等价，见 restore-seeding.ts。
 import { normalizeInactiveSessionFileIfNeeded, readEffectiveModelFromState, seedRestoreMetaOverride } from './restore-seeding.js'
 
+// ─── notify-once D5 死亡处置登记（组合根 index.ts 订阅消费）──────────────
+// 汇聚点先于杀进程立 latch（设计检查点①：delete 在 pm.destroySession 之前），
+// 防 delete→exit 双事件响应序竞态（exit 腿抢先 respond 则 'deleted' 不保证胜出）。
+// - 'delete'：终局删除——组合根收到即 onSessionDeath('delete')+clearSession 发声销账，
+//   随后 removeSessionEntry 的销毁回调查无记录自然静默（幂等空转）。
+// - 'suppress'：非终局杀（restore 清场——同 id 随即重开）——组合根标记静默，
+//   销毁回调据此跳过，不产生伪造死亡通知（respawn/restore 链静默同族）。
+// 回收（reclaim）与 destroyAll 刻意不经本登记：前者不走 removeSessionEntry 汇聚点、
+// 后者随进程内存消亡，均无销毁回调需抑制。
+// detail.hasDestroySink（审查 unreasonable#3）：本次处置之后**是否必有 removeSessionEntry
+// 销毁回调**——组合根的 suppressedDeaths 抑制标只在 true 时立（标由该回调消费）。
+// 判据 = 目标 session 是否在册：在册（active 主删；btw 活线同在册——onLineTerminated
+// 镜像 detach → removeSessionEntry 收尾序，同样消费标）⇒ 有消费点；scanned / 未找到
+// throw / 冷线（从未注册，终结扇出早退）不在册 ⇒ 无销毁回调，无差别立标 = stale id
+// 无界滞留。
+export type SessionDeathDisposition = 'delete' | 'suppress'
+
+/** 处置详情（fire 点按控制流判定，订阅方消费——判定归属在发起方，不靠订阅侧同图反推）。 */
+export interface SessionDeathDispositionDetail {
+  /** 随后必经 removeSessionEntry 销毁回调（抑制标必被消费；false = 立标必滞留）。 */
+  hasDestroySink: boolean
+}
+
+const deathDispositionSubscribers = new Set<(sessionId: string, disposition: SessionDeathDisposition, detail: SessionDeathDispositionDetail) => void>()
+
+/** 订阅死亡处置登记（返回退订函数；组合根接线，多订阅者隔离由扇出侧 try/catch 保证）。 */
+export function subscribeSessionDeathDisposition(
+  cb: (sessionId: string, disposition: SessionDeathDisposition, detail: SessionDeathDispositionDetail) => void,
+): () => void {
+  deathDispositionSubscribers.add(cb)
+  return () => { deathDispositionSubscribers.delete(cb) }
+}
+
+function fireDeathDisposition(sessionId: string, disposition: SessionDeathDisposition, detail: SessionDeathDispositionDetail): void {
+  for (const cb of [...deathDispositionSubscribers]) {
+    try {
+      cb(sessionId, disposition, detail)
+    } catch (e: unknown) {
+      // 订阅者异常不得阻断删除/清场主链（best-effort 留痕，可回溯）
+      console.error(`[session-lifecycle] death-disposition subscriber error (sessionId=${sessionId}, disposition=${disposition}):`, e)
+    }
+  }
+}
+
 // [arch 技术债登记，R3 ports 依赖倒置待收口] 下方四个 infra/pi 值 import（getSessionsDir /
 // cleanupMigrateResidues / hydrateBindingMeta / assertPiSessionFile）
 // 违反「services 禁止 import infra」三层规则（见 docs/architecture/runtime-layering.md 阶段 R3）。
@@ -80,6 +124,8 @@ import { clearRemovedSessionData } from '../plugin-service/session-data-store.js
 // 空闲回收占座原语与编排依赖类型（idle-pi-reclamation D6-2/D3，u2）。ReclaimSeat 是
 // reaper 判定循环与 reclaimManagedSession 共享的互斥状态（同实例注入，u3 装配）。
 import type { ReclaimSeat } from './idle-pi-reaper.js'
+// create 幂等化（发现 B）：clientUuid 去重登记表（in-flight 共用 Promise + 成功 TTL 保留）
+import { CreateIdempotencyRegistry } from './create-idempotency.js'
 import { cleanupMigrateResidues } from '../../infra/pi/session-file-utils.js'
 // 绑定字段注册表模块（BINDING_FIELDS / hydrateBindingMeta / CREATE_DERIVED_CALLERS SSOT）
 import { hydrateBindingMeta } from '../../infra/pi/session-binding-fields.js'
@@ -116,7 +162,7 @@ interface CreateOptions {
   hidden?: boolean
   /** Launch preset id（设计文档 §5，绑定到新 session 并解析为 pi 启动参数）。 */
   presetId?: string
-  /** 归属 project id（D14 语义修正，2026-08-04）：创建时归属当前 activeProject；空 = 默认项目兑底。 */
+  /** 归属 project id（D14 语义修正，2026-08-04）：创建时归属当前 activeProject；空 = 默认项目兜底。 */
   projectId?: string
   /**
    * 模型覆盖。D5 契约快照化：landing 新建路径恒传 renderer resolveLaunchConfig 解析
@@ -126,6 +172,12 @@ interface CreateOptions {
   modelOverride?: string
   /** thinkingLevel 覆盖，语义同 modelOverride（覆盖 preset.thinkingLevel，C-RL-6 优先级）。 */
   thinkingOverride?: string
+  /**
+   * create 幂等键（发现 B，session.create RPC 透传）：同 uuid 重复到达（网络重试）→
+   * 返回已建 session，不重复 spawn/建号（去重在 create 入口，见 CreateIdempotencyRegistry）。
+   * 缺省（undefined）逐次独立创建——fork/handoff/agent-managed 等内部入口旧行为不变。
+   */
+  clientUuid?: string
   /** 发起来源：'user' | 'agent'。agent-managed session 标记。 */
   spawnSource?: 'user' | 'agent'
   /** 父 agent session id（spawnSource='agent' 时必填）。 */
@@ -238,8 +290,6 @@ export interface ReclaimSessionDeps {
    * （复用 background-task-reaper 单 session 入口，与 removeSessionEntry 汇聚点同款触发面）。
    */
   reapBackgroundTasks?(sessionId: string): Promise<void>
-  /** pendingReload 定向清（D3 第 6 步）——u3 装配绑 ReloadOrchestrator.clearPending。 */
-  clearPendingReload?(sessionId: string): void
   /**
    * 定向清挂起 UI 请求（v6 第四案纵深防御）——只清属于**被回收代际**的 pending。
    * 挂点 = 下方代际校验通过后的成功分支（`this.get(sessionId) !== session ||
@@ -383,12 +433,6 @@ export class SessionLifecycle implements ISessionRegistry {
         this.registerDeps.getMessageBus()?.publish(sid, msg)
       } else {
         this.registerDeps.broadcastGlobal(msg)
-      }
-      // W5：message.complete 广播后通知 reload-orchestrator（消费 pendingReload 队）。
-      // 覆盖所有 message.complete 路径（event-interpreter turn-end 主路径 + dispatcher abort
-      // 手动广播）。onMessageComplete 未注入时为 no-op。
-      if (msg.type === 'message.complete' && sid) {
-        this.registerDeps.notifyMessageComplete(sid)
       }
     }
     // #8 G1：传 cwd 给 EventAdapter（write added/modified 判定 + agent_end git 对账用）
@@ -546,7 +590,31 @@ export class SessionLifecycle implements ISessionRegistry {
     }
   }
 
+  /** create 幂等登记表（发现 B）：随本实例生命周期，回收策略见 CreateIdempotencyRegistry。 */
+  private readonly createIdempotency = new CreateIdempotencyRegistry()
+
+  /**
+   * create 入口（发现 B 修复：clientUuid 幂等化）。
+   *
+   * **客户端放弃 ≠ 服务端放弃**：create 请求已发出、runtime 正在 spawn pi（冷启动/hang 可超过
+   * renderer 的 RPC_BACKSTOP_TIMEOUT_MS≈65s）时，客户端 backstop 超时或 WS 断连会 reject 并
+   * 提示「创建失败」，但 runtime 不受影响照常建号——若不去重，用户重试会产生重复 session +
+   * config.sessions 幻影空壳。按 clientUuid 去重后：同 uuid 重试（含 in-flight 中到达）复用
+   * 同一 Promise，返回已建 session，不重复 spawn/建号。
+   *
+   * 缺省 clientUuid（fork/handoff/agent-managed 等内部入口）→ 直走 createNew，逐次独立
+   * 创建（与旧版行为一致）。登记面回收（TTL/失败即清/容量上限）见 CreateIdempotencyRegistry。
+   */
   async create(cwd?: string, label?: string, options?: CreateOptions): Promise<SessionSummary> {
+    const clientUuid = options?.clientUuid
+    if (clientUuid === undefined) {
+      return this.createNew(cwd, label, options)
+    }
+    return this.createIdempotency.run(clientUuid, () => this.createNew(cwd, label, options))
+  }
+
+  /** create 的单次创建体（原 create 全体，行为保持；幂等登记在 create 入口收口）。 */
+  private async createNew(cwd?: string, label?: string, options?: CreateOptions): Promise<SessionSummary> {
     const tempId = crypto.randomUUID()
     const sessionCwd = resolveCreateCwd(cwd)
 
@@ -805,7 +873,7 @@ export class SessionLifecycle implements ISessionRegistry {
       this.sessionStore.persistPresetBinding(session.sessionFilePath, presetId, sidecarOpts)
     }
     // 持久化归属 project 到 .project.json sidecar（D14 语义修正，2026-08-04）。
-    // 空 projectId（默认项目创建）不写 sidecar——等价于未归类，读取侧一致兑底默认项目。
+    // 空 projectId（默认项目创建）不写 sidecar——等价于未归类，读取侧一致兜底默认项目。
     if (options?.projectId && session.sessionFilePath) {
       this.sessionStore.persistProjectBinding(session.sessionFilePath, options.projectId, sidecarOpts)
     }
@@ -936,19 +1004,39 @@ export class SessionLifecycle implements ISessionRegistry {
     // 一并停——active 分支的 removeSessionEntry 只停环不清标记，本调用补齐标记清理）。
     // 两分支共用（非 active 分支不经过 removeSessionEntry 也必须清）。
     userStoppedGate.disposeForDelete(sessionId)
+    // 在册先行只读判定（hasDestroySink 判据，见 fireDeathDisposition 处登记）：抑制标只能
+    // 立在随后必经 removeSessionEntry 销毁回调的处置上——判据 = session 是否在册：scanned /
+    // 未找到 throw 不在册无消费点，无差别立标 = stale id 无界滞留（审查 unreasonable#3；
+    //「delete 失败提前 throw」同型滞留由本判定收口：not-found throw 天然不立标）；btw 活线
+    // 在册（onLineTerminated → removeSessionEntry 同样消费标）、冷线不在册且终结扇出早退，
+    // 均按在册判据如实取值。
+    // btwOps 本地 const 捕获：供 isBtwLine 别名判定在 if 处收窄（模块级 let 不走别名收窄）。
+    const btwOps = btwCascadeOps
+    const isBtwLine = isBtwVirtualId(sessionId) && btwOps !== null
+    const session = this.get(sessionId)
+    // [notify-once D5] 死亡汇聚点立 latch（先于任何杀进程/文件处置，覆盖 active 与
+    // scanned 两分支——检查点①：pm.destroySession 之前）：'delete' 发声销账 + clearSession，
+    // 随后 active 分支的 pm.destroySession 即便漏出 exit 事件也查无记录（'deleted' 必胜出）。
+    // 发声两分支恒执行（检查点①语义不动）；抑制标仅在册立——主会话在册分支 destroySession
+    //（内部全 catch）与 removeSessionEntry（步隔离扇出）均不抛，btw 活线分支的销毁回调
+    //（closeLine → onLineTerminated → removeSessionEntry）被 fireLineTerminated 步隔离，
+    // 标必被销毁回调消费。唯一例外 = adapter.detach 抛错，两形态落点不同：主会话在 delete
+    // 主链直接传播（删除整体失败）；btw 活线在 onLineTerminated 内先于 removeSessionEntry
+    // 发生、被 fireLineTerminated 捕获（删除不整体失败但销毁回调被跳过）——两形态标滞留
+    // 同为单条 bounded，净风险不变。
+    fireDeathDisposition(sessionId, 'delete', { hasDestroySink: session !== undefined })
     // [M4-a / btw-question D4+D9④] btw 线直删分支（下一段）：deleteByCwd 收集面「故意含 hidden」的
     // 既有不变量保留（活跃线 vid 进批内 cwdSessions），本分支让直删与级联/btw.remove
     // **三路收敛单入口 closeLine**——杀进程 + 注册表移除 + 线文件删除（路径限定 btw 根内）
     // 全在 btw 侧完成，不落主会话 trash/sidecar 清理面；线已不在（并发双删 / 主删级联先行 /
     // 重复调用）= 幂等 no-op 不抛——deleteByCwd 批内不得因重复处置记 failed。
     // 未注入 ops（存量测试装配）→ fall through 既有两分支，行为零变更。
-    if (isBtwVirtualId(sessionId) && btwCascadeOps !== null) {
-      await btwCascadeOps.closeLine(sessionId, { deleteSessionFile: true })
+    if (isBtwLine) {
+      await btwOps.closeLine(sessionId, { deleteSessionFile: true })
       return
     }
-    const session = this.get(sessionId)
     // [M4-a] 级联 cwd 解析（两分支各取真值；分支抛出则级联随之跳过——主已删形态由
-    // 启动孤儿补账兑底清理线目录）。
+    // 启动孤儿补账兜底清理线目录）。
     let cascadeCwd: string | undefined
     if (session) {
       cascadeCwd = session.cwd
@@ -976,7 +1064,7 @@ export class SessionLifecycle implements ISessionRegistry {
     // cleanupSessionState 的 evictVirtualKeys 腿——m7/agentcall 先例同构，本处只管 runtime
     // 半边）。单入口收敛：closeAllForMain 内部逐线转调 closeLine（与 btw.remove / 批内直删
     // 同一原语），三路并发处置幂等不重复；abort 幂等 = pm.destroySession 无条目静默跳过。
-    // best-effort：级联失败只 warn 不阻断主删除（P2 降级隔离；漏删残留由启动孤儿补账兑底）。
+    // best-effort：级联失败只 warn 不阻断主删除（P2 降级隔离；漏删残留由启动孤儿补账兜底）。
     if (btwCascadeOps && cascadeCwd !== undefined) {
       try {
         await btwCascadeOps.closeAllForMain(sessionId, cascadeCwd)
@@ -1184,6 +1272,12 @@ export class SessionLifecycle implements ISessionRegistry {
   private async clearExistingSessionForRestore(sessionId: string): Promise<void> {
     const existing = this.get(sessionId)
     if (!existing) return
+    // [notify-once D5] 非终局杀立 'suppress' latch（先于 kill）：同 id 随即重开（restore
+    // 清场），销毁回调据此静默——不产生伪造死亡通知（respawn/restore 链静默同族）。
+    // hasDestroySink 恒 true：本方法仅从 active 在册发起（上方 existing 守卫），随后
+    // detach → safeDestroy（内部 catch）→ removeSessionEntry 必经，标必被销毁回调消费
+    //——除 adapter.detach 抛错致清场整体失败外（此时标滞留为单条 bounded，与父提交同暴露面）。
+    fireDeathDisposition(sessionId, 'suppress', { hasDestroySink: true })
     console.warn(`[session-lifecycle] killing active pi before restore, session ${sessionId} (kill_source=restore_clear | who: restore request while old pi still active (session.restore RPC / ensureActive) | chain: detach -> safeDestroy old pi -> respawn + switch_session)`)
     this.detachSession(sessionId)
     await this.safeDestroy(sessionId)
@@ -1360,10 +1454,8 @@ export class SessionLifecycle implements ISessionRegistry {
         console.warn(`[session-lifecycle] reclaim ${sessionId} cancelled: session was re-created concurrently (generation check, D6-3)`)
         return false
       }
-      // ⑥b 最小摘除：lifecycle sessions Map 删条目 + pendingReload 定向清（防御性 no-op：
-      // pendingReload 有条目 ⇒ session busy ⇒ 恒非回收候选，真发生的窗口极窄）。
+      // ⑥b 最小摘除：lifecycle sessions Map 删条目。
       this.removeEntry(sessionId)
-      deps.clearPendingReload?.(sessionId)
       // v6 第四案：回收定向清挂起 UI 请求（防 stale pending 在重激活时拉回死表单）。
       // 挂代际校验通过后的分支：此处必为被回收的旧代际（新进程存在 ⇒ 上方校验已返回 false），
       // 并发的取消分支不执行本步——新进程的活请求不被误清。
@@ -1618,19 +1710,21 @@ export class SessionLifecycle implements ISessionRegistry {
    * fork 的继承绑定解析（preset + 归属 project）。
    *
    * W-RT-5：优先读 active 源 session 的内存态 launchPresetId（pi 延迟写入窗口下
-   * sidecar 未写时，内存态兜底——getSession 返回 ManagedSession 实例，as 读 launchPresetId 字段），
+   * sidecar 未写时，内存态兜底——launchPresetId 已收编进 IManagedSessionView，直接读），
    * 再 fallback 到扫描结果的 sidecar 值（source.launchPresetId），
    * 最后兜底 'builtin:full'（FR-10，历史 session 无 sidecar）。
    *
    * fork 继承源 session 的归属 project（D14 语义修正，2026-08-04）：
-   * 与 preset 同模式——active 内存态兑底（延迟写入窗口），fallback 扫描 sidecar 值。
+   * 与 preset 同模式——active 内存态兜底（延迟写入窗口），fallback 扫描 sidecar 值。
    * 无归属（undefined）= 默认项目，不写 fork sidecar。
    */
   private resolveForkInheritedBindings(srcSessionId: string, source: ScannedSession): {
     forkPresetId: string
     forkProjectId: string | undefined
   } {
-    const active = this.get(srcSessionId) as { launchPresetId?: string; projectId?: string } | undefined
+    // launchPresetId/projectId 已收编进 IManagedSessionView（照 handedOffTo 先例），
+    // Registry 记录直接读，无需 as-cast。
+    const active = this.get(srcSessionId)
     return {
       forkPresetId: active?.launchPresetId ?? source.launchPresetId ?? BUILTIN_PRESET_IDS.FULL,
       forkProjectId: active?.projectId ?? source.projectId,

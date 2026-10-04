@@ -1,19 +1,36 @@
-// engine-awareness 单测（[engine-awareness U3]）
+// engine-awareness 单测（[engine-awareness U3]；engine 域合并宿主）
 //
-// 覆盖（设计 docs/design/subagent-engine-awareness-injection.md（已删除，git 可追溯）验收挂钩 D1/D1b/D2/D3/D5）：
-// 1. normalizeEngineId：缺省/空白归一到 'pi'（单一权威源 registry.ts，直连导入）
-// 2. buildEngineChangeNotice：§3.1 文案骨架、pi/非 pi 指路段分界、不含任何模型清单（D4）
-// 3. runEngineAwarenessTurn 编排：
+// 覆盖（设计 docs/design/subagent-engine-awareness-injection.md（已删除，git 可追溯）
+// 验收挂钩 D1/D1b/D2/D3/D4/D5/D7/D8）：
+// 1. buildEngineChangeNotice：§3.1 文案骨架、pi/非 pi 指路段分界、不含任何模型清单（D4）
+// 2. runEngineAwarenessTurn 编排：
 //    - 变更触发 apply + 通知（D2 顺序硬约束：提交缓存先于通知先于记账）
 //    - applyRead 收到的参数与 readConfig 返回值引用相等（构造性同源，消灭双读分叉）
-//    - 无变更无事
-//    - 读失败保持 lastEngine 不动、不发通知（D5 态 3，防 torn write 伪通知）
-//    - ENOENT（absent）= 合法缺省 pi，正常触发变更（D5 态 2）
-//    - 首 turn lastEngine === undefined 静默基线化，无伪通知（D1b）
-//    - 通知消息形态（customType / display / details，D3+D8 对齐 notifier 约定）
-//    - 多 session 各自独立 lastEngine（per-session diff 基准互不干扰）
+//    - 无变更无事 / 读失败保持 lastEngine 不动（D5 态 3）/ ENOENT=合法缺省（D5 态 2）
+//    - 首 turn 静默基线化（D1b）/ 通知消息形态（D3+D8）/ 多 session 独立 lastEngine
+// 3. 引擎切换只变尾部（A8 前置）：provider models 段前缀不变，变化只发生在链尾
+//    engine 段——断的是「切换前后 prompt 的稳定头部逐字节不变」，复刻 index.ts
+//    装配形态（BASE + provider models 段 + engine 追加段）；注册序本身由
+//    src/__tests__/injector-chain-order.test.ts 的源码锚点守卫。
+// 4. setupModelListInjector handler（provider models 段生产渲染路径）：注入 append /
+//    空列表不干预链 / registry 异常 fail-safe。
+// 5. formatModelList guide 全量快照：MODEL_LIST_GUIDE 是壳自有文案，core 测试用假
+//    guide 不锁本文案——此处是唯一字节锁（guide 改写即红灯）。
+//
+// normalizeEngineId 缺省归一契约（undefined/空白 → 'pi'、非 pi 透传）归 core
+// registry.test.ts（单一权威源所在地直测）。
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import {
+	buildEngineModelsPromptAppend,
+	buildSubagentEngineSection,
+	formatModelList,
+	type EnginePort,
+	type GlobalConfigReadResult,
+	type ModelEntry,
+} from "@zhushanwen/subagent-core";
+import { clearEngines, registerEngine } from "@zhushanwen/subagent-core/execution/engine/registry.ts";
 
 import {
 	buildEngineChangeNotice,
@@ -22,12 +39,9 @@ import {
 	type EngineAwarenessDeps,
 	type EngineAwarenessOutcome,
 } from "../engine-awareness";
-// dev 1b05be6f9 删壳 engine-awareness 的 normalizeEngineId 再导出面后，测试直连
-// core barrel（与生产 engine-awareness.ts 的 import 形态一致）
-import { normalizeEngineId } from "@zhushanwen/subagent-core";
-import type { GlobalConfigReadResult } from "@zhushanwen/subagent-core";
+import { MODEL_LIST_GUIDE, setupModelListInjector } from "../model-list-injector.ts";
 
-// ── 测试数据 ────────────────────────────────────────────
+// ── 测试数据（engine-awareness 编排面）──────────────────
 
 /** ok 态读取结果工厂（config 形状与 sanitize 输出一致）。 */
 function okRead(defaultEngine: string | undefined): GlobalConfigReadResult {
@@ -62,22 +76,6 @@ function makeDeps(overrides: Partial<EngineAwarenessDeps> = {}) {
 	};
 	return { deps, calls, sent, applied, getLast: () => lastEngine };
 }
-
-// ── normalizeEngineId ──────────────────────────────────
-
-describe("normalizeEngineId", () => {
-	it("undefined 缺省归一到 'pi'", () => {
-		expect(normalizeEngineId(undefined)).toBe("pi");
-	});
-
-	it("空白字符串归一到 'pi'（sanitize 会拦非字符串，但防御空白透传）", () => {
-		expect(normalizeEngineId("   ")).toBe("pi");
-	});
-
-	it("非 pi 引擎透传", () => {
-		expect(normalizeEngineId("zcode")).toBe("zcode");
-	});
-});
 
 // ── buildEngineChangeNotice（D4 不含模型清单）────────────
 
@@ -290,5 +288,210 @@ describe("runEngineAwarenessTurn 多 session 独立 lastEngine", () => {
 		expect(notices[0].sid).toBe("s1");
 		expect(lastEngines.get("s1")).toBe("pi");
 		expect(lastEngines.get("s2")).toBe("pi");
+	});
+});
+
+// ──────────────────────────────────────────────────────────────
+// 引擎切换只变尾部（A8 前置）：复刻 index.ts 装配形态（BASE + provider models
+// 段 + engine 追加段），断言切换前后稳定头部逐字节不变、engine 段恒居尾。
+// 注册序事实由 injector-chain-order.test.ts 源码锚点守卫，本处不重复。
+// ──────────────────────────────────────────────────────────────
+
+/** pi registry 风格条目（provider models 段数据源；同时充当 ctx.modelRegistry 快照）。 */
+const PROVIDER_ENTRIES: ModelEntry[] = [
+	{
+		provider: "zai-coding-cn",
+		id: "glm-5.3",
+		name: "GLM 5.3",
+		reasoning: true,
+		input: ["text"],
+		contextWindow: 200_000,
+	},
+	{
+		provider: "minimax-cn",
+		id: "MiniMax-M3",
+		name: "MiniMax M3",
+		reasoning: true,
+		input: ["text", "image"],
+		contextWindow: 1_000_000,
+	},
+];
+
+/** zcode 引擎清单（v2 registry 风格 id）。 */
+const ZCODE_MODELS: Array<{ id: string; name?: string }> = [
+	{ id: "builtin:bigmodel-coding-plan/GLM-5.3", name: "GLM-5.3" },
+	{ id: "builtin:bigmodel-coding-plan/GLM-5.3-Flash" },
+];
+
+/** 模拟 pi 核心 system prompt（engine 追加段之外的全部内容）。 */
+const BASE = "You are a coding agent.\n\n# System\nCore prompt body.";
+
+/** index.ts 尾部追加模板的分隔符（`${event.systemPrompt}\n\n${append}`）。 */
+const APPEND_SEPARATOR = "\n\n";
+
+/**
+ * engine handler 的追加段拼装（与 engine-awareness.ts setupEngineAwarenessInjector
+ * 内 handler 同款：状态段 + 清单段、空段剔除、\n\n 连接）。复刻保真由
+ * injector-chain-order.test.ts 的源码锚点断言保证。
+ */
+function composeEngineAppend(defaultEngine: string | undefined): string {
+	return [buildSubagentEngineSection(defaultEngine), buildEngineModelsPromptAppend(defaultEngine)]
+		.filter((part) => part !== "")
+		.join("\n\n");
+}
+
+/** 合成一个 turn 的 system prompt 尾部：BASE + provider models 段 + engine 追加段。 */
+function composeTurn(defaultEngine: string | undefined): string {
+	const providerSection = formatModelList(PROVIDER_ENTRIES, { guide: MODEL_LIST_GUIDE });
+	const afterProvider = providerSection === "" ? BASE : BASE + providerSection;
+	const append = composeEngineAppend(defaultEngine);
+	return append === "" ? afterProvider : `${afterProvider}${APPEND_SEPARATOR}${append}`;
+}
+
+/** 最大公共前缀长度（逐码元比较；用于「分叉点不早于稳定头部」断言）。 */
+function commonPrefixLength(a: string, b: string): number {
+	const n = Math.min(a.length, b.length);
+	let i = 0;
+	while (i < n && a[i] === b[i]) i++;
+	return i;
+}
+
+/** 最小 fake 引擎（engine 注入链只用 listModels；其余面走不到）。 */
+function fakeEngine(id: string, models: Array<{ id: string; name?: string }>): EnginePort {
+	return {
+		id,
+		capabilities: () => ({ conversation: "unsupported", steer: "unsupported", sandbox: "none" }),
+		probe: async () => ({ ok: true, engineVersion: "test" }),
+		run: async () => {
+			throw new Error("not used in this test");
+		},
+		read: async () => ({ engineId: id, turns: [], source: "outcome-only" }),
+		// 每次调用返回新数组实例（模拟 registry 每 turn 现值）——渲染必须与实例无关
+		listModels: () => models.map((m) => ({ ...m })),
+	};
+}
+
+/**
+ * 断言「从 from 切到 to 时变化只发生在尾部 engine 段」：
+ *   - provider models 段及其之前的头部逐字节不变（公共前缀 toBe 级断言）；
+ *   - 剥离尾部 engine 追加段后两串余部逐字节相等且恰为稳定头部；
+ *   - 分叉点不早于稳定头部末尾（差异绝不侵入 provider models 段）；
+ *   - 切换后的引擎追加段恰居 prompt 尾部。
+ */
+function expectOnlyTailDiffers(from: string | undefined, to: string | undefined): void {
+	const stableHead = BASE + formatModelList(PROVIDER_ENTRIES, { guide: MODEL_LIST_GUIDE });
+	const before = composeTurn(from);
+	const after = composeTurn(to);
+	const beforeAppend = composeEngineAppend(from);
+	const afterAppend = composeEngineAppend(to);
+
+	expect(before).not.toBe(after);
+	expect(before.startsWith(stableHead)).toBe(true);
+	expect(after.startsWith(stableHead)).toBe(true);
+	expect(before.slice(0, before.length - beforeAppend.length - APPEND_SEPARATOR.length)).toBe(
+		stableHead,
+	);
+	expect(after.slice(0, after.length - afterAppend.length - APPEND_SEPARATOR.length)).toBe(
+		stableHead,
+	);
+	expect(commonPrefixLength(before, after)).toBeGreaterThanOrEqual(stableHead.length);
+	expect(after.endsWith(afterAppend)).toBe(true);
+}
+
+describe("引擎切换只变尾部（A8 前置：变化只断尾部 cache 前缀）", () => {
+	beforeEach(() => {
+		clearEngines();
+		registerEngine("zcode", () => fakeEngine("zcode", ZCODE_MODELS));
+	});
+
+	afterEach(() => {
+		clearEngines();
+	});
+
+	it("zcode → pi：provider models 段前缀不变，变化只发生在 engine 段（尾部）", () => {
+		expectOnlyTailDiffers("zcode", "pi");
+	});
+
+	it("pi → zcode（反向切换）：同款只变尾部", () => {
+		expectOnlyTailDiffers("pi", "zcode");
+	});
+
+	it("zcode → ghost（配置手误形态）：G4 降级段同样只替换尾部，不破坏前缀", () => {
+		expectOnlyTailDiffers("zcode", "ghost");
+	});
+});
+
+// ──────────────────────────────────────────────────────────────
+// setupModelListInjector handler：provider models 段的生产渲染路径。
+// model-list-injector 无模块级状态（每次 setup 注册新 handler），静态 import 直测。
+// ──────────────────────────────────────────────────────────────
+
+describe("setupModelListInjector", () => {
+	type Handler = (event: unknown, ctx: unknown) => Promise<unknown>;
+
+	function setupWithRegistry(models: ModelEntry[], fail = false): Handler {
+		const handlers: Record<string, Handler> = {};
+		const pi = {
+			on: (name: string, fn: Handler) => {
+				handlers[name] = fn;
+			},
+		} as unknown as Parameters<typeof setupModelListInjector>[0];
+		setupModelListInjector(pi);
+		const registry = fail
+			? { getAvailable: vi.fn(() => { throw new Error("registry boom"); }) }
+			: { getAvailable: vi.fn(() => models) };
+		const handler = handlers["before_agent_start"];
+		if (!handler) throw new Error("before_agent_start handler not registered");
+		return (event: unknown) => handler(event, { modelRegistry: registry });
+	}
+
+	it("注册 before_agent_start handler，注入 append 到 systemPrompt 尾部", async () => {
+		const handler = setupWithRegistry([entry()]);
+		const result = (await handler({ systemPrompt: "BASE" }, {})) as {
+			systemPrompt: string;
+		};
+		expect(result.systemPrompt.startsWith("BASE")).toBe(true);
+		expect(result.systemPrompt).toContain("<available_provider_models>");
+		expect(result.systemPrompt).toContain("zai-coding-cn/glm-5.2");
+	});
+
+	it("空模型列表返回 undefined（不返回 systemPrompt，不干预链）", async () => {
+		const handler = setupWithRegistry([]);
+		const result = await handler({ systemPrompt: "BASE" }, {});
+		expect(result).toBeUndefined();
+	});
+
+	it("registry 异常被吞掉（fail-safe，不阻断 agent turn）", async () => {
+		const handler = setupWithRegistry([], true);
+		const result = await handler({ systemPrompt: "BASE" }, {});
+		expect(result).toBeUndefined();
+	});
+});
+
+// ── formatModelList guide 全量快照（壳自有文案唯一字节锁）──
+
+function entry(overrides: Partial<ModelEntry> = {}): ModelEntry {
+	return {
+		provider: "zai-coding-cn",
+		id: "glm-5.2",
+		name: "GLM 5.2",
+		reasoning: true,
+		input: ["text"],
+		contextWindow: 200_000,
+		...overrides,
+	};
+}
+
+describe("formatModelList guide 全量快照（MODEL_LIST_GUIDE 唯一字节锁）", () => {
+	it("guide 文案全量锚定：骨架 + 引导语 + 条目模板测试内硬编码快照（改写 MODEL_LIST_GUIDE 即红灯）", () => {
+		// 渲染算法契约（排序/caps/转义/空列表）由 core injection-render byte-exact
+		// parity 承载；本条锁壳侧 guide 文案本体（期望值不插值生产常量——文案两侧
+		// 同源插值时漂移无守卫，故硬编码）
+		const out = formatModelList([
+			entry({ provider: "p", id: "m", name: "N" }),
+		], { guide: MODEL_LIST_GUIDE });
+		expect(out).toBe(
+			`\n\n<available_provider_models>\nThe following models are available (auth-configured). Use these ids when delegating via the subagent/workflow \`model\` param ("provider/modelId" format) to match the task (e.g. vision models for screenshots, strong reasoners for architecture). Do NOT switch the main conversation model mid-session — per-call model override on delegates only (switching the main model is cache-hostile); use the /model command only when the user explicitly asks to change it.\n  <model><id>p/m</id><name>N</name><caps>reasoning</caps><contextWindow>200000</contextWindow></model>\n</available_provider_models>`,
+		);
 	});
 });

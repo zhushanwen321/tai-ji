@@ -186,7 +186,7 @@ describe('RpcClient.prompt streamingBehavior 透传（U1: session-delivery）', 
     const client = new RpcClient({ ...clientOpts, cwd: '/tmp', sessionId: 'arity-check' })
     // prompt.length 是声明参数数（不含有默认值的参数），4 个参数 = arity 4。
     // 第 4 参 options（SendCommandOptions）为 R8① maintenance 透传（idle-pi-reclamation D1）：
-    // promptReload 维护通道经 prompt 语义方法发起，maintenance 标记直达 sendCommand touch 排除，
+    // 维护通道经 prompt 语义方法发起，maintenance 标记直达 sendCommand touch 排除，
     // 已提交的设计演化——本断言由 3 同步为 4。
     expect(client.prompt.length).toBe(4)
   })

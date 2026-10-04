@@ -43,7 +43,7 @@ export function useBrowserRectSync(
   let lastRectPushTs = 0
   /** 待推的 rAF id（null 表示无待执行帧） */
   let rectRafId: number | null = null
-  /** 节流窗口内兑底 setTimeout id（null 表示无挂起 timer；dispose 清理） */
+  /** 节流窗口内兜底 setTimeout id（null 表示无挂起 timer；dispose 清理） */
   let rectTimerId: number | null = null
   /** viewport 尺寸监听器（disconnect 释放） */
   let resizeObserver: ResizeObserver | null = null
@@ -77,8 +77,8 @@ export function useBrowserRectSync(
   function scheduleRectPush(): void {
     const now = Date.now()
     if (now - lastRectPushTs < RECT_PUSH_THROTTLE_MS) {
-      // 节流窗口内：setTimeout 兑底，保证窗口结束后再推一次（避免最后一次 resize 丢失）。
-      // 去重：窗口内已有兑底 timer 时不重复新建（高频 resize 会反复进入本分支）。
+      // 节流窗口内：setTimeout 兜底，保证窗口结束后再推一次（避免最后一次 resize 丢失）。
+      // 去重：窗口内已有兜底 timer 时不重复新建（高频 resize 会反复进入本分支）。
       if (rectTimerId !== null) return
       rectTimerId = window.setTimeout(() => {
         rectTimerId = null

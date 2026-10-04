@@ -18,7 +18,7 @@ import type { AgentCallOpts, AgentResult, ExecutionTraceNode } from "./types.ts"
 export type AgentCallStatus = "pending" | "running" | "done";
 
 /**
- * AgentCall 实体（在 RunState.calls Map 内）。
+ * AgentCall 实体（在 RunExecutionSnapshot.calls Map 内）。
  *
  * 不变式：
  * - status 转换严格 pending→running→done，反向抛错

@@ -1,0 +1,26 @@
+{
+  "name": "abort-unanswered",
+  "description": "abort 无应答（F4② 前置构造）：abort 命令到达后既不应答也不解散 select——runtime abort RPC 60s 超时阶梯 / renderer 65s backstop 的时序窗口构造。",
+  "params": {
+    "selectRegisterDelayMs": 0,
+    "abortMode": "silent"
+  },
+  "onPrompt": {
+    "planStateEntry": {
+      "isActive": true,
+      "planFilePath": "/fixture/plans/fixture-requirement/plan.md",
+      "requirement": "给设置页加主题切换",
+      "templateName": null,
+      "skills": [],
+      "docs": [{ "fileName": "plan.md", "absPath": "/fixture/plans/fixture-requirement/plan.md", "sourceSkill": "", "version": 1 }],
+      "reviewState": "awaiting"
+    },
+    "assistant": ["计划文档已写好并登记，提交审批。"],
+    "select": {
+      "kind": "plan-review",
+      "id": "pr-abort-silent",
+      "docs": [{ "fileName": "plan.md", "absPath": "/fixture/plans/fixture-requirement/plan.md", "sourceSkill": "", "version": 1 }]
+    },
+    "agentEnd": false
+  }
+}

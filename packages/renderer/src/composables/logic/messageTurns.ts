@@ -7,8 +7,6 @@
 export type { MessageTurn, RenderItem, OrderedBlock, TurnRenderCache } from '@taiji/core/domain/chat'
 export {
   renderKey,
-  filterDisplayableMessages,
-  groupTurns,
   toRenderItems,
   toRenderItemsIncremental,
   createTurnRenderCache,

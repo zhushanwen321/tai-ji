@@ -182,7 +182,7 @@ describe("wrapper 合并语义（v2 注入优先）", () => {
     expect(cfg.model.main).toBe("shared/model-a");
   });
 
-  it("real 无 model.main 时以 v2.model.main / FALLBACK 兜底注入", () => {
+  it("real 与 v2 均无 model.main 时不伪造（缺省解析归 CLI——plan 家族 id 已不可用）", () => {
     const h = setupHome({
       v2: { provider: { p1: providerEntry("k1") } },
       real: { provider: { p2: providerEntry("k2") } },
@@ -190,10 +190,10 @@ describe("wrapper 合并语义（v2 注入优先）", () => {
     const res = h.run();
     expect(res.status).toBe(0);
     const cfg = JSON.parse(h.state().syncUtf8.text as string);
-    expect(cfg.model.main).toBe("builtin:bigmodel-coding-plan/GLM-5.3");
+    expect(cfg.model).toBeUndefined();
   });
 
-  it("v2.model.main 存在时优先于 FALLBACK", () => {
+  it("real 无 model.main 而 v2.model.main 存在时透传注入", () => {
     const h = setupHome({
       v2: { provider: { p1: providerEntry("k1") }, model: { main: "p1/model-x" } },
       real: {},

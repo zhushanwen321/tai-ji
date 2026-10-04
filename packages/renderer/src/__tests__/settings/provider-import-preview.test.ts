@@ -23,6 +23,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { ProviderImportPreview, ProviderPreviewItem, ProviderPreviewOrphanItem } from '@taiji/shared'
 
 import { ProviderImportPreviewDialog } from '@taiji/ui/features/settings'
+import { clickBody } from '../helpers/body-portal-harness'
 
 let wrapper: ReturnType<typeof mount> | null = null
 
@@ -34,13 +35,6 @@ afterEach(() => {
   wrapper = null
   document.body.innerHTML = ''
 })
-
-/** body 内元素点击（portal 内容触发 Vue @click） */
-function clickBody(selector: string): void {
-  const el = document.body.querySelector<HTMLElement>(selector)
-  if (!el) throw new Error(`body 元素未找到: ${selector}`)
-  el.click()
-}
 
 /** 构造组 1 项（models.json provider）。 */
 function g1(overrides: Partial<ProviderPreviewItem> = {}): ProviderPreviewItem {

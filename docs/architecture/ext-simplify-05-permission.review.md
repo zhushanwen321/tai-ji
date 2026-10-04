@@ -39,7 +39,7 @@
 | low | classifier barrel 22 行 13 导出，唯一消费者 production.ts:29 | classifier/index.ts 22 行、13 个符号；`classifier/index` 生产消费仅 production.ts:29（createClassifier）；model-resolver 的 3 个消费方（index.ts:27/commands.ts:16/model-picker.ts:25）全走深路径 | 属实 |
 | low | pipeline 5 个 export 仅测试消费 | pipeline.test.ts:22-28 import 4 个（applyAutoApproveOverrides/buildApprovalRequest/matchNonBashTool/runLayer2）+ :617/:634 动态 import runLayer3WithRacing；e2e-modes.test.ts 只 import checkPermission；包外（extensions/apps/packages 其他处）零消费 | 属实 |
 | low | runLayer2ForArgvList 纯转发薄封装 + :558 幽灵 @param signal | pipeline.ts:613-622 单行委托 runLayer2，唯一调用点 :592；:558 JSDoc `@param signal` 列了 checkPermission 签名（:560-568）中不存在的参数（signal 在 ctxBase :449 内） | 属实 |
-| low | matchRules toolName 守卫不可达 | matcher.ts:145-147 守卫在；生产调用点 pipeline.ts:144/:163 恒传字面量 `"bash"`；pipeline.ts:71-73 注释明示「不依赖 matchRules 的非 bash 路径」 | 属实 |
+| low | matchRules toolName 检查不可达 | matcher.ts:145-147 检查在；生产调用点 pipeline.ts:144/:163 恒传字面量 `"bash"`；pipeline.ts:71-73 注释明示「不依赖 matchRules 的非 bash 路径」 | 属实 |
 | low | winner 循环×3 | matcher.ts:98-104（matchRulesForArgv）、:152-158（matchRules）、pipeline.ts:96-107（matchNonBashTool，双条件变体） | 属实 |
 | low | SelectItem re-export 连测试都未引用 | approval.ts:353-354；approval.test.ts import 块（:7-14）不含 SelectItem，全包无 `import … SelectItem … from approval` | 属实 |
 | low | rerender() 零调用 | approval.ts:263-266 private；approve/deny/cancel/handleInput 均直达 done，constructor 只调 invalidate | 属实 |

@@ -30,7 +30,6 @@ import {
   toRenderItemsIncremental,
   createTurnRenderCache,
   turnStableId,
-  groupTurns,
 } from '../message-turns'
 import type { RenderItem, TurnRenderCache } from '../message-turns'
 import { useSessionScopedState } from '../../../foundation/use-session-scoped-state'
@@ -61,7 +60,7 @@ function bashMsg(id: string, over: Partial<Message> = {}): Message {
   })
 }
 
-/** 隐藏完成通知（subagent-bg-notify / workflow-result，display:false——生产端覆写形态） */
+/** 隐藏完成通知（subagent-bg-notify / workflow-result / managed-session-notify，display:false——生产端覆写形态） */
 function notifyMsg(id: string, customType = 'subagent-bg-notify'): Message {
   return makeMsg({ id, role: 'system', customType, display: false, content: '' })
 }
@@ -75,6 +74,23 @@ function liveWarnMsg(id: string): Message {
 function turnOf(item: RenderItem) {
   if (item.kind !== 'turn') throw new Error(`expected turn item, got ${item.kind}`)
   return item.turn
+}
+
+/** R2 组共用场景骨架：一问一答 turn → 隐藏完成通知边界（数量/形态由调用方给）→ 续跑 assistant */
+function qaThenNotify(notices: Message[]): Message[] {
+  return [
+    makeMsg({ id: 'u1', role: 'user', content: 'q1' }),
+    makeMsg({ id: 'a1', role: 'assistant', content: 'r1' }),
+    ...notices,
+    makeMsg({ id: 'a2', role: 'assistant', content: '续跑结果' }),
+  ]
+}
+
+/** R2 断言简写：第 2 个渲染项为 bg-notify 触发的 trigger turn，assistants 恰为给定 id 序列 */
+function expectBgNotifyTriggerTurn(items: RenderItem[], assistantIds: string[]): void {
+  const t2 = turnOf(items[1])
+  expect(t2.trigger).toBe('bg-notify')
+  expect(t2.assistants.map((m) => m.id)).toEqual(assistantIds)
 }
 
 /** 混合 fixture：turn / systemNotice / bashExecution 全 kind 覆盖。
@@ -474,29 +490,18 @@ describe('groupRenderInput 分组规则 v2 —— R2 隐藏完成通知 = turn �
     expect(t2.assistants.map((m) => m.id)).toEqual(['a2'])
   })
 
-  it('R2 常量源：workflow-result 同属 COMPLETE_NOTIFY_CUSTOM_TYPES（shared SSOT，无第二份判定）', () => {
-    const items = toRenderItems([
-      makeMsg({ id: 'u1', role: 'user', content: 'q' }),
-      makeMsg({ id: 'a1', role: 'assistant', content: 'r' }),
+  it('R2 常量源：workflow-result / managed-session-notify 同属 COMPLETE_NOTIFY_CUSTOM_TYPES（shared SSOT，无第二份判定）', () => {
+    const items = toRenderItems(qaThenNotify([
       notifyMsg('n1', 'workflow-result'),
-      makeMsg({ id: 'a2', role: 'assistant', content: '续跑' }),
-    ])
-    expect(turnOf(items[1]).trigger).toBe('bg-notify')
-    expect(turnOf(items[1]).assistants.map((m) => m.id)).toEqual(['a2'])
+      notifyMsg('n2', 'managed-session-notify'),
+    ]))
+    expectBgNotifyTriggerTurn(items, ['a2'])
   })
 
   it('R2 空 turn 折叠：连续边界折叠为一个 trigger turn（后续 assistant 归入该组）', () => {
-    const items = toRenderItems([
-      makeMsg({ id: 'u1', role: 'user', content: 'q1' }),
-      makeMsg({ id: 'a1', role: 'assistant', content: 'r1' }),
-      notifyMsg('n1'),
-      notifyMsg('n2'),
-      notifyMsg('n3'),
-      makeMsg({ id: 'a2', role: 'assistant', content: '续跑结果' }),
-    ])
+    const items = toRenderItems(qaThenNotify([notifyMsg('n1'), notifyMsg('n2'), notifyMsg('n3')]))
     expect(items.map((i) => i.kind)).toEqual(['turn', 'turn']) // 三个边界折叠为一
-    expect(turnOf(items[1]).trigger).toBe('bg-notify')
-    expect(turnOf(items[1]).assistants.map((m) => m.id)).toEqual(['a2'])
+    expectBgNotifyTriggerTurn(items, ['a2'])
   })
 
   it('R2 空 turn 折叠：边界后紧跟 user 不产出空 trigger turn', () => {
@@ -650,7 +655,6 @@ describe('groupRenderInput 分组规则 v2 —— 纯函数等价性（W6 等价
     const msgs = richFixture()
     const snapshot = JSON.parse(JSON.stringify(msgs))
     expect(toRenderItems(msgs)).toEqual(toRenderItems(msgs))
-    expect(groupTurns(msgs)).toEqual(groupTurns(msgs))
     // 交叉组合也稳定：forceWorking 双态各自两次调用一致
     expect(toRenderItems(msgs, true)).toEqual(toRenderItems(msgs, true))
     expect(JSON.parse(JSON.stringify(msgs))).toEqual(snapshot) // 输入不可变（纯函数）

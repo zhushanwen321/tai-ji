@@ -30,6 +30,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
+import { truncateCommand } from "./command-display.ts";
 import type { BackgroundTask, BackgroundTaskEndReason } from "./types.ts";
 
 const logger = getLogger("base-tool-enhance");
@@ -39,24 +40,6 @@ const logger = getLogger("base-tool-enhance");
  * §3.1 用户视角「对话流中以 custom entry 形式出现」）。
  */
 export const BACKGROUND_BASH_CUSTOM_TYPE = "background-bash";
-
-/**
- * pending register 的 name 截断长度（§3.5 数据流 ⑤「command 前 80 字符」）。
- * 与 spawn-background COMMAND_DISPLAY_LIMIT 同值但刻意不共享 import——notify 被
- * spawn-background import，反向 import 会造成 spawn ↔ notify 循环依赖；两处语义
- * （pending 列表展示 / 错误文案展示）各自独立演化，仅数值对齐。
- */
-const PENDING_NAME_LIMIT = 80;
-
-/**
- * 命令文案截断（pending register 的 name 与完成通知 head 行共用同一口径）：
- * 超 PENDING_NAME_LIMIT 取前 80 字符 + 省略号。
- */
-function truncateCommand(command: string): string {
-	return command.length > PENDING_NAME_LIMIT
-		? `${command.slice(0, PENDING_NAME_LIMIT)}…`
-		: command;
-}
 
 /** 模块级「当前 pi 引用」（D17 核心可变状态，见文件头）。 */
 let currentPi: ExtensionAPI | undefined;
@@ -180,6 +163,17 @@ function sendTaskFinishedMessage(task: BackgroundTask): void {
 }
 
 /**
+ * 通知文案函数的参数面：只依赖终态渲染所需字段。收窄为结构子集（而非完整
+ * BackgroundTask）使补投路径可直接传 registry 终态条目（RegistryEntry——无
+ * registryPath 等运行时字段），文案组装逻辑主路径与补投路径共用一份。完整
+ * BackgroundTask 满足该子集，既有调用方不受影响。
+ */
+export type NotificationTaskLike = Pick<
+	BackgroundTask,
+	"taskId" | "command" | "outputFile" | "durationMs" | "exitCode" | "reason" | "tailSummary"
+>;
+
+/**
  * 通知文案（§3.1 终态样例）：
  *
  *   [background-bash] bt-x finished (exit 0, 3m12s): pnpm test
@@ -189,7 +183,7 @@ function sendTaskFinishedMessage(task: BackgroundTask): void {
  * 失败任务 head 行标 failed（exit code 即 error 摘要，尾部输出佐证）；timeout 标
  * timed out；tailSummary 为空（无输出/文件丢失）时省略 Last lines 行。
  */
-export function buildNotificationContent(task: BackgroundTask): string {
+export function buildNotificationContent(task: NotificationTaskLike): string {
 	const duration = formatDurationMs(task.durationMs ?? 0);
 	const command = truncateCommand(task.command);
 	let head: string;
@@ -238,10 +232,10 @@ export interface BackgroundBashDetails {
  * 完成通知 details（D1）：终态字段与 buildNotificationContent 同源——durationMs
  * 同用 `?? 0` 归一（终态条目必已物化，缺省仅防御）。
  *
- * command 取原始终态值不截断：截断（PENDING_NAME_LIMIT）是 content 行宽约束，结构化
+ * command 取原始终态值不截断：截断（COMMAND_DISPLAY_LIMIT）是 content 行宽约束，结构化
  * 消费方的行宽由渲染层自己决定（旧数据无 details 时仍走 content 原文兜底）。
  */
-export function buildNotifyDetails(task: BackgroundTask): BackgroundBashDetails {
+export function buildNotifyDetails(task: NotificationTaskLike): BackgroundBashDetails {
 	return {
 		taskId: task.taskId,
 		command: task.command,
@@ -249,6 +243,21 @@ export function buildNotifyDetails(task: BackgroundTask): BackgroundBashDetails 
 		endReason: task.reason === "timeout" ? "timeout" : "natural",
 		exitCode: task.exitCode ?? null,
 	};
+}
+
+/**
+ * 收殓终态（exited process-exit / orphaned）的补投文案行（bg-task-notify-durability
+ * 设计决策 3/4）——主路径不产这类消息（process-exit 收殓不 sendMessage），仅供补投：
+ *
+ *   [background-bash] bt-x was terminated when the session went down (exit code unknown): <command>. Output file: <path>; use bash_output to check the output before rerunning.
+ *
+ * 措辞统一为「结果未知、先查输出再决定是否重跑」：不区分被补杀/自行退出（orphaned
+ * 的成因不在 reason 枚举内，二分须补 registry 字段，与零格式变更矛盾）；省略时长
+ * （orphaned 的 durationMs 含属主死后滞留时长，展示误导）；不谎报完成/失败。
+ */
+export function buildTerminatedNotificationLine(task: Pick<NotificationTaskLike, "taskId" | "command" | "outputFile">): string {
+	const command = truncateCommand(task.command);
+	return `[background-bash] ${task.taskId} was terminated when the session went down (exit code unknown): ${command}. Output file: ${task.outputFile}; use bash_output to check the output before rerunning.`;
 }
 
 /** 耗时换算常量（毫秒/秒/分/时 + 时分两位补零宽度）。 */

@@ -33,6 +33,8 @@ import type { SkillRegistry } from '../services/skill-registry.js'
 import type { IMessageBus } from '../services/message-bus/message-bus.js'
 import { createSessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
+// notify-once U3：通知债权状态机（组合根 index.ts 构造，经 optional 注入 SessionManagerHandler）
+import type { ClaimLedger } from '../services/session/notify-claims.js'
 import { ExtensionTimeoutManager } from '../services/extension-timeout-manager.js'
 import type { PendingUIRequest, PendingUIRequestResolved } from '../services/extension-timeout-manager.js'
 import { ConnectionManager, type ConnectionManagerOptions } from './connection-manager.js'
@@ -49,6 +51,7 @@ import { ProjectMessageHandler } from './project-message-handler.js'
 import { WorktreeMessageHandler } from './worktree-message-handler.js'
 import { TerminalMessageHandler } from './terminal-message-handler.js'
 import { QuotaMessageHandler } from './quota-message-handler.js'
+import { TtsMessageHandler } from './tts-message-handler.js'
 import { UsageMessageHandler } from './usage-message-handler.js'
 import { PresetMessageHandler } from './preset-message-handler.js'
 import { SessionManagerHandler } from './session-manager-handler.js'
@@ -65,6 +68,7 @@ import type { ImportService } from '../services/session/import-service.js'
 import type { GenStatsService } from '../services/session/gen-stats-service.js'
 import type { ITerminalService } from '../services/ports/terminal-service.js'
 import type { QuotaService } from '../services/quota-service.js'
+import type { TtsService } from '../services/tts-service.js'
 import type { IProviderCredentialResolver } from '../services/ports/provider-credential-resolver.js'
 import type { IModelConnectionTester } from '../services/ports/model-connection-tester.js'
 import { UsageStatsService } from '../services/usage/usage-stats-service.js'
@@ -88,6 +92,8 @@ export interface RuntimeServerOptionalServices {
   worktree?: IWorktreeService
   terminal?: ITerminalService
   quota?: QuotaService
+  /** 语音合成朗读编排服务（ai-voice-tts 设计 §7.4）：tts.getConfig/configure/speak/getCapabilities 路由依赖。可选：未注入时该批 case 落 unknown_type。 */
+  tts?: TtsService
   handoff?: HandoffService
   preset?: PresetService
   auth?: IAuthService
@@ -105,6 +111,11 @@ export interface RuntimeServerOptionalServices {
   connectionTester?: IModelConnectionTester
   project?: ProjectStore
   delivery?: SessionDeliveryRegistry
+  /**
+   * notify-once 通知债权状态机（组合根 index.ts 构造后注入）。缺席时 SessionManagerHandler
+   * 按停用象限运行（不 arm / willNotify:false / watch fail-closed——测试与退化装配面）。
+   */
+  claims?: ClaimLedger
   /** 导入 pi 会话服务（import-session D5/U2）：session.importCandidates / session.import 路由依赖。可选：未注入时该 case 报 unsupported。 */
   importService?: ImportService
   /** 生成指标服务（composer-gen-stats D4）：session.getGenStats 恢复腿路由依赖。可选：未注入时该 case 报 unsupported。 */
@@ -184,6 +195,8 @@ export class RuntimeServer implements IMessageBroker {
   private worktreeMessageHandler?: WorktreeMessageHandler
   private terminalMessageHandler?: TerminalMessageHandler
   private quotaMessageHandler!: QuotaMessageHandler
+  /** tts 四 RPC handler（ai-voice-tts）：optional.tts 注入时装配（可选批次，btw 同款缺省语义）。 */
+  private ttsMessageHandler?: TtsMessageHandler
   private usageMessageHandler!: UsageMessageHandler
   private presetMessageHandler!: PresetMessageHandler
   private sessionManagerHandler!: SessionManagerHandler
@@ -279,6 +292,9 @@ export class RuntimeServer implements IMessageBroker {
       // 审批条/表单不知道请求已死）。覆盖主动删 / 进程退出 / restore 清场全部销毁路径。
       this.invalidatePendingUiRequests(summary.id, 'session-destroyed')
       this.clearExtensionTimeoutsForSession(summary.id)
+      // delivery 域（u3a）：解绑该 session 的 session.delivery onChange 订阅（per-session 资源
+      // 生命周期）；内核条目本身由组合根的 registry.dispose 清理（同一销毁汇聚点，各自一类资源）。
+      this.sessionHandler?.releaseDeliveryTopic(summary.id)
     })
     // P2-2 失效链（MF-1-7 abortPlan 编排下沉）：session.abortPlan prompt 成功后经回调
     // 上抛至此——失效链消费保持 server.ts 单一出口（与 session-destroyed 同点注册）。
@@ -385,6 +401,9 @@ export class RuntimeServer implements IMessageBroker {
       importService: this.importService,
       // composer-gen-stats（u3）：session.getGenStats 恢复腿 RPC 路由依赖。
       genStatsService: this.genStatsService,
+      // 投递所有权内核（u3a）：delivery.* 四 RPC + session.delivery state topic 装配。
+      // 与 SessionManagerHandler 同一注册表实例（sessionId 单例约束，见 assembleSessionManagerHandler）。
+      deliveryRegistry: optional.delivery,
       // wave:runtime-wiring：注入 MessageBus 供 session.subscribe/unsubscribe RPC 用。
       messageBus: this.messageBus,
       nextPushId: () => this.broker.nextPushId(),
@@ -411,7 +430,7 @@ export class RuntimeServer implements IMessageBroker {
    * usage / preset——按对应 service 是否注入条件装配，守卫条件与原实现一致。
    */
   private assembleOptionalHandlers(messaging: MessageHandlerContext, optional: RuntimeServerOptionalServices): void {
-    const { workspace, project, worktree, terminal, quota, preset, btw } = optional
+    const { workspace, project, worktree, terminal, quota, preset, btw, tts } = optional
     if (this.gitService) {
       this.gitMessageHandler = new GitMessageHandler({
         ...messaging,
@@ -471,6 +490,12 @@ export class RuntimeServer implements IMessageBroker {
         broadcastProviderList: () => this.broker.broadcastProviderList(),
       })
     }
+    if (tts) {
+      this.ttsMessageHandler = new TtsMessageHandler({
+        ...messaging,
+        ttsService: tts,
+      })
+    }
     // UsageStatsService 构造参数有默认值 getSessionsDir()，无需外部注入
     this.usageMessageHandler = new UsageMessageHandler({
       ...messaging,
@@ -497,7 +522,7 @@ export class RuntimeServer implements IMessageBroker {
 
   /** SessionManagerHandler：agent-managed session 请求处理（select 通道 + SESSION_MANAGER_MARKER）。 */
   private assembleSessionManagerHandler(optional: RuntimeServerOptionalServices): void {
-    const { delivery, workspace } = optional
+    const { delivery, workspace, claims } = optional
     // 不走 WS 路由表——由 EventInterpreter.onSessionManagerRequest fire-and-forget 调用。
     // sd-u5：delivery（send 排队投递 + create 直投）必注入——组合根装配 sessionId 单例注册表；
     // 缺省时现场构造无 settled 订阅的退化实例（内核自动退化为退避轮询，D8 兜底），仅兜测试装配遗漏。
@@ -521,12 +546,17 @@ export class RuntimeServer implements IMessageBroker {
         }),
       sendExtensionUiResponse: (sessionId, requestId, response, method) => {
         // requestId 只在发起方 pi 进程的 pending 表有效——按 sessionId 直发，
-        // 不能遍历找「第一个可用 client」（多 active session 会错发 → 发起方 select 挂到超时）
-        this.sessionService.getRpcClient(sessionId)?.sendExtensionUiResponse(requestId, response, method)
+        // 不能遍历找「第一个可用 client」（多 active session 会错发 → 发起方 select 挂到超时）。
+        // D7① boolean 传导：rpc-client 返回值透传（true = 已写入发起方 pi 进程 stdin，
+        // 非 pi 侧消费确认；语义锚见 session-manager-handler WatchRespondFn JSDoc），
+        // `?.` 缺失分支（client 不在）显式归 false 计入 respond 失败（watch 回执 → orphaned）。
+        return this.sessionService.getRpcClient(sessionId)?.sendExtensionUiResponse(requestId, response, method) ?? false
       },
       broadcastSessionList: () => {
         this.broker.broadcastSessionList()
       },
+      // notify-once U3：债权状态机透传（缺席 = 停用象限，见 SessionManagerHandlerOptions.claims）
+      claims,
     })
   }
 
@@ -542,10 +572,11 @@ export class RuntimeServer implements IMessageBroker {
     const worktreeHandler = this.worktreeMessageHandler
     const terminalHandler = this.terminalMessageHandler
     const quotaHandler = this.quotaMessageHandler
+    const ttsHandler = this.ttsMessageHandler
     const usageHandler = this.usageMessageHandler
     const presetHandler = this.presetMessageHandler
     const btwHandler = this.btwMessageHandler
-    return new Map([
+    const entries = [
       ['ping', (msg, ws) => this.broker.reply(ws, msg.id, 'pong', {})],
       // u7c（crash-forensics D5）：滚动重启状态只读查询（与 request 同名 reply；provider
       // 缺席回 idle 形态——renderer 拉到 idle 即「横幅不重现」，见 RollingRestartStatusPayload）。
@@ -562,11 +593,24 @@ export class RuntimeServer implements IMessageBroker {
       ...(worktreeHandler ? worktreeHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => worktreeHandler.handleWorktreeMessage(msg, ws)] as const) : []),
       ...(terminalHandler ? terminalHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => terminalHandler.handleTerminalMessage(msg, ws)] as const) : []),
       ...(quotaHandler ? quotaHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => quotaHandler.handleQuotaMessage(msg, ws)] as const) : []),
+      ...(ttsHandler ? ttsHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => ttsHandler.handleTtsMessage(msg, ws)] as const) : []),
       ...usageHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => usageHandler.handleUsageMessage(msg, ws)] as const),
       ...(presetHandler ? presetHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => presetHandler.handlePresetMessage(msg, ws)] as const) : []),
       // btw 三帧（btw-question M2-b / D6）：create/list/remove → BtwMessageHandler。
       ...(btwHandler ? btwHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => btwHandler.handleBtwMessage(msg, ws)] as const) : []),
-    ] as Array<[ClientMessageType, (msg: ClientMessage, ws: WsType) => Promise<unknown> | unknown]>)
+    ] as Array<[ClientMessageType, (msg: ClientMessage, ws: WsType) => Promise<unknown> | unknown]>
+    // b26-F2：Map 构造对重复 key 后写覆盖——两 handler 的 handles 清单重叠时后者静默接管
+    //（错误路由以合法形态运行，编译零信号）。装配期撞键 fail-fast，错误信息列出全部撞键名。
+    const seen = new Set<ClientMessageType>()
+    const duplicates = entries.map(([type]) => type).filter((type) => {
+      if (seen.has(type)) return true
+      seen.add(type)
+      return false
+    })
+    if (duplicates.length > 0) {
+      throw new Error(`[server] duplicate route registration: ${duplicates.join(', ')} — handler handles lists must be disjoint (check the handles arrays of all message handlers)`)
+    }
+    return new Map(entries)
   }
 
   // ── IMessageBroker 委托（index.ts 把 server 当 broker 注入 PluginService/SessionService）──
@@ -609,6 +653,10 @@ export class RuntimeServer implements IMessageBroker {
         this.broker.sendError(ws, 'unknown_type', `Unknown message type: ${rawMsg.type}`, msg.id, { sessionId: rawMsg.payload?.sessionId })
       }
     } catch (e) {
+      // S-1（b22）：服务端留痕——error envelope 只达当前 ws（关闭/刷新即丢），runtime
+      // 落盘日志是唯一持久取证面；一行覆盖全部裸跑 handler 异常族（对照同文件
+      // steer/follow_up 局部 console.error 先例）。
+      console.error(`[server] handler error: type=${msg.type} id=${msg.id}:`, e)
       const message = toErrorMessage(e)
       // RT-1#3：payload 可能缺省/为原始值（畸形帧已过 JSON.parse 层）——`'sessionId' in msg.payload`
       // 在 undefined 上抛 TypeError，会替换掉原 handler 异常（catch 内二次抛）。可选链消除二次抛。
@@ -632,15 +680,15 @@ export class RuntimeServer implements IMessageBroker {
   // ── Extension UI request lifecycle delegation ─────────────────────
 
   registerExtensionTimeout(sessionId: string, requestId: string, method: string, payload: Record<string, unknown>): void {
-    // 只做 session 跟踪登记 + pending 缓存：交互式 UI 请求无超时（2026-07-16 取消），
-    // block 等待用户决策，session 结束由 clearExtensionTimeoutsForSession 统一清理
-    this.extensionTimeoutMgr.trackUiRequest(sessionId, requestId, method)
-    // 缓存 pending 请求（ask-user 等阻塞式请求），session 重新激活时推送
-    this.extensionTimeoutMgr.cachePendingRequest(sessionId, requestId, method, payload)
+    // 挂起单表登记（D-B2-2：session 跟踪 + pending 缓存合一 entry，一次登记）：
+    // 交互式 UI 请求无超时（2026-07-16 取消），block 等待用户决策，session 结束由
+    // clearExtensionTimeoutsForSession 统一清理；缓存的 pending 请求在 session 重新
+    // 激活时推送
+    this.extensionTimeoutMgr.registerRequest(sessionId, requestId, method, payload)
   }
 
   clearExtensionTimeout(requestId: string): void {
-    this.extensionTimeoutMgr.clearTimeout(requestId)
+    this.extensionTimeoutMgr.removeRequest(requestId)
   }
 
   clearExtensionTimeoutsForSession(sessionId: string): void {
@@ -727,8 +775,35 @@ export class RuntimeServer implements IMessageBroker {
   }
 
   async stop(): Promise<void> {
-    if (this.pluginService) await this.pluginService.shutdown()
-    await this.sessionService.destroyAll()
-    await this.conn.stop()
+    // A9（b26-F1）：三段清理逐段隔离——单段失败不跳过其余段（pluginService.shutdown 抛错
+    // 不得跳过 pi 进程收割与 WS 优雅关闭），逐段留痕后聚合上抛（组合根 shutdown 大 catch
+    // 接住，后续 closeCrashJournal/closeLogger 收口链照走）。
+    const failures: unknown[] = []
+    if (this.pluginService) {
+      try {
+        await this.pluginService.shutdown()
+      } catch (e) {
+        failures.push(e)
+        console.error('[server] stop: pluginService.shutdown failed:', e)
+      }
+    }
+    try {
+      await this.sessionService.destroyAll()
+    } catch (e) {
+      failures.push(e)
+      console.error('[server] stop: sessionService.destroyAll failed:', e)
+    }
+    try {
+      await this.conn.stop()
+    } catch (e) {
+      failures.push(e)
+      console.error('[server] stop: conn.stop failed:', e)
+    }
+    if (failures.length > 0) {
+      throw new Error(
+        `[server] stop completed with ${failures.length} failure(s): ${failures.map((f) => toErrorMessage(f)).join('; ')}`,
+        { cause: failures[0] },
+      )
+    }
   }
 }

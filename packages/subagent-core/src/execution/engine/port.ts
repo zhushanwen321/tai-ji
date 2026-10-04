@@ -16,6 +16,10 @@
 //     快照面自交付起 runtime 进程内零接线（引擎池活在 pi 进程），四段零调用链连同
 //     zcode 实现一并删除；引擎宿主迁入 runtime 侧时按 git 历史恢复。原设计权威源：
 //     docs/architecture/crash-forensics-and-watchdog.md §3.3 D5（zcode 侧注记）。
+//   - [已删除 2026-09-23 oe-audit] RunContext.onChildSpawned?——ChildProcess 全句柄注册
+//     钩子零生产调用（引擎注册表只装 cli descriptor，RemoteEngine 不经协议传进程句柄；
+//     引擎侧唯一数据消费者只读 pid/killed 窄载荷），三处宿主侧死注册一并删除。生命周期
+//     谓词自 W6 起读协议镜像（childSpawned/childStateChanged，EngineClient）。
 //
 // 三个能力面（D1；[H1 U6] interact 面已随 chat 域退役删除——续聊统一为新 run + resume）：
 //   run        —— 主语义：一次性 fire-to-completion 任务执行（会话形态续聊轮同走 run，
@@ -24,13 +28,12 @@
 //   probe      —— 探针（D7：二进制存在/版本解析/干跑校验）。
 // capabilities() 同步无副作用——「调用前拒绝」（D11 处置三级）的判据。
 
-import type { ChildProcess } from "node:child_process";
-
 import type { ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentCallOpts } from "../../orchestration/models/types.ts";
 import type { ModelInfo } from "../assembly/model-resolver.ts";
-import type { SubagentStream } from "../assembly/stream-sink.ts";
+import type { ExecutionMode } from "../domain/record-types.ts";
+import type { AgentStreamSink } from "../../shared/agent-stream.ts";
 import type { AgentEvent } from "../assembly/types.ts";
 import type {
   AgentOutcome,
@@ -74,21 +77,7 @@ export interface RunContext {
    * agentEvent 出口注释）。pi 回填期承载 AgentRunner port 的 stream 透传（行为零变化），
    * 语义上是宿主设施而非引擎专有——未来引擎的 text_delta 同样可走此通道。
    */
-  stream?: SubagentStream;
-  /**
-   * [P1 pi 回填透传] 调用方已持有的 schema 激活预编码值（AgentCallOpts.schemaEnv 直传
-   * 形态）。生产路径中 resolveAgentOpts 恒耦合产出 schema+schemaEnv（值 = JSON.stringify
-   * (schema)），引擎从 task.schema 派生即可逐字节等值；解耦形态（有 schemaEnv 无
-   * schema）生产不可达、仅见于直构调用，派生无源——本字段是其唯一透交通道。
-   * 引擎在 task.schema 存在时忽略此值（派生优先，设计 §3.3.5 删字段去向）。
-   */
-  schemaEnv?: string;
-  /**
-   * [P4 D9①] 引擎 fallback 留痕（probe 失败路由回默认引擎）。路由层（routing.ts）
-   * 产出，引擎投影到 outcome.engineFallback（zcode 等无 record 通路的引擎以此留痕；
-   * pi 引擎另经 ExecuteOptions 投影进 record）。
-   */
-  engineFallback?: { from: string; reason: string };
+  stream?: AgentStreamSink;
   /**
    * [F6] 根 session id（SubagentService.sessionRootId 注入）——pi 引擎 relay 归属键
    * SESSION_ID 的权威来源（经 wire ctx.sessionRootId → server 还原 → SpawnRunParams
@@ -109,6 +98,15 @@ export interface RunContext {
    */
   sessionDir?: string;
   /**
+   * [D4 record 身份信封] 协议 `run.params.ctx.identity` 的宿主侧值（唯一构造点 =
+   * `identityEnvelopeOf`）——引擎据此写任务子进程身份 env 的 slug / startedAt / mode。
+   */
+  identity?: {
+    slug?: string;
+    startedAt?: number;
+    mode?: string;
+  };
+  /**
    * [R4 §3.4 不变量 3] 运行中句柄回填通道：引擎在「session/create 应答到达后」
    * 立即回调（早于 run resolve——stream 引擎的 run 生命周期远长于会话建立）。
    * 编排层收到后立即回填 record.engineHandle 并落 entry——运行中的 GUI 经 entry
@@ -119,19 +117,6 @@ export interface RunContext {
    * 'shared'（journal 固定落 engines/<id>/shared/），回调零信息量。
    */
   onHandleReady?: (partial: Pick<EngineHandleData, "sessionRef">) => void;
-  /**
-   * [U0 D10] 引擎 spawn 的子进程句柄注册钩子（宿主终止链记账）。引擎在 spawn 成功后
-   * 同步回调（与 pi runSpawn 的 spawnedChildren.set 同构时机）；宿主据此把 child 注册进
-   * session-runner 的 spawnedChildren Map（cancel SIGTERM / dispose 收割兜底 / killAll
-   * 全量清理对非 pi 引擎 record 生效）。close/error 后由宿主按句守卫移除。可选：引擎
-   * 内部不 spawn 进程（如未来常驻 driver host 实现）时不调用，宿主记账自然为空。
-   *
-   * 边界声明（R1 D6）：本钩子只用于 per-record 一次性 spawn（一任务一进程模态）。
-   * 引擎持有的常驻进程（跨任务共享，如 app-server 常驻连接）不经本钩子注册、不进
-   * spawnedChildren Map——其生命周期完全归引擎 dispose 管理（防 per-record 重复
-   * SIGTERM / 单任务 abort 误杀共享进程）。
-   */
-  onChildSpawned?: (child: ChildProcess) => void;
   /**
    * [W3 v1.x → H1 U6 终态] 会话形态参数（协议 run.params.resume 的 RunContext
    * 承载位，键已随 U6 键切换从 `chat` 泛化为 `resume`）：
@@ -168,8 +153,11 @@ export interface EngineRunResult {
 // ============================================================
 
 /**
- * subagent 执行引擎的唯一契约点（D1）。实现方：PiEngine（回填）/ ZcodeEngine（P3）/
- * 未来各引擎适配器。上层（工具面/workflow 引擎/GUI）只消费中立类型，不感知引擎。
+ * subagent 执行引擎的唯一契约点（D1）。core 侧唯一实现 = RemoteEngine（cli 形态引擎的
+ * 宿主侧协议适配，engine/registry 只装 cli descriptor）——把本接口成员映射到
+ * EngineClient 协议请求；引擎进程内各引擎（pi-subagent-cli / zcode-subagent-cli）实现
+ * 各自本地 port-types 同构契约经协议暴露，与 core 契约的结构互证由 implements 关系在
+ * typecheck 期承载。上层（工具面/workflow 引擎/GUI）只消费中立类型，不感知引擎。
  *
  * 贯穿纪律（设计 §3.3.1）：宿主编排——引擎只当单 agent 执行器，六家原生多 agent 机制
  * 一律禁用不依赖。
@@ -210,7 +198,8 @@ export interface EnginePort {
    * 「引擎与模型不配套」错误，见 engine/model-validation.ts）。
    *
    * modelRef undefined = 查询引擎缺省模型（D2-1：主 agent 的 pi id 不透传给非 pi 引擎，
-   * 缺省语义归引擎——zcode 落 ZCODE_FALLBACK_DEFAULT_MODEL）。缺席输入的裁决值仅作
+   * 缺省语义归引擎——zcode 裁决为空串 = create 帧省略 model 键、CLI 自身缺省解析，
+   * 2026-09-29 account 体系迁移后不再有可用的 plan 家族兜底 id）。缺席输入的裁决值仅作
    * 诊断呈现，不进留痕；显式 model 经裁决 canonicalRef 盖章（alias 解析产物），
    * 缺席不产生留痕（resolveIdentityForEngine 条件留空，R4/D6-②）。
    * [W3 契约变更④] 协议化后 canonicalRef 允许**无斜杠**形态
@@ -219,17 +208,58 @@ export interface EnginePort {
    *
    * 未实现：model 透传，引擎自身 prepare 期校验兜底（现状语义）；pi 不实现（pi 链走
    * 既有三层解析 + assertCanonicalModelRef 裁决，搬迁是大重构，设计 D2-2 被否②）。
+   *
+   * [⑦ 模型引用三元组化 · 字符串边界裁决] 本成员的 modelRef 参数**刻意保持字符串**，
+   * 是 ModelRef 结构体传导链上保留的两类边界入口之一：
+   *   ① 输入域是**未裁决词形**（用户原始串：alias 短名 / 缺省 provider 形态 / 待剥的
+   *      `:thinking` 后缀）——解析成 {provider, id} 会伪造 provider 空串的三元组、
+   *      丢掉 alias 裁决语义；裁决正是本成员的职责，产物侧才结构体化（裁决产物经
+   *      model-validation.ts validateModelForEngine 收敛为 SplitModelRef 三元组，
+   *      core 内部不再以裸串穿层）。
+   *   ② 跨包镜像面：SDK `@zhushanwen/subagent-engine-sdk` port-contract 的 EnginePort
+   *      同签名镜像 + 协议 validateModel 帧（{modelRef?: string}）同形，签名变更会
+   *      波及引擎包实现（清单外）。
+   * 输入词形统一用 EngineModelSelectorInput 别名表达（契约派生，禁裸 string 重写）。
    */
-  validateModel?(modelRef: string | undefined): { canonicalRef: string };
+  validateModel?(modelRef: EngineModelSelectorInput): { canonicalRef: string };
 
   /**
    * [R1 D6] 可选停机面：释放引擎持有的常驻资源（如 app-server 常驻进程 / 长连接）。
    * 幂等契约（§3.4 不变量 4）：重复调用无副作用；dispose 后首个 run 自动重建（与
    * 「进程死后重建」同一代码路径）。可选成员保持向后兼容——无常驻资源的引擎（pi
    * 现状 spawn 单轮）不必实现。等待策略（D6①「触发不等待」）：宿主收割入口
-   * （registry disposeEngines → killAllSpawnedChildren）只同步调用拿 Promise 不
+   * （registry disposeEngines → markAllSpawnedChildrenDead）只同步调用拿 Promise 不
    * await，引擎实现须自行保证同步面（立即 fire close 帧 + 同步 SIGTERM）在返回
    * Promise 前完成；grace→SIGKILL 升级序列属异步面（promise 段）。
    */
   dispose?(): Promise<void>;
+}
+
+/**
+ * [⑦ 模型引用三元组化] 跨引擎边界的模型**词形**（未裁决用户串）：EnginePort.validateModel
+ * 的输入域。本别名是该域的唯一权威定义——内部新代码禁再手写裸 `string | undefined`
+ * 表达同一域（穿层是否越界由类型名可检索：结构体传导见 model-validation.ts
+ * validateModelForEngine；跨包镜像面见 EnginePort.validateModel 注释的边界裁决）。
+ */
+export type EngineModelSelectorInput = string | undefined;
+
+/**
+ * [D4] record → 身份信封（宿主侧**唯一构造点**）：引擎把它整封写进任务子进程的
+ * 身份 env（SDK `SUBAGENT_IDENTITY_ENV` 的 slug / startedAt / mode）。
+ *
+ * 三处 run 组装点（workflow 派发 / 会话轮 / chat 轮）共用本函数——身份字段的取值
+ * 口径只有一处，避免「某条派发链漏填某个键 → 该链的子代理身份条目缺字段」。
+ * `slug` 空串不上 wire（record 允许空 slug）；`startedAt` / `mode` 是 record 不变式
+ * 字段，恒有值。
+ */
+export function identityEnvelopeOf(record: {
+  slug: string;
+  startedAt: number;
+  mode: ExecutionMode;
+}): RunContext["identity"] {
+  return {
+    ...(record.slug !== "" ? { slug: record.slug } : {}),
+    startedAt: record.startedAt,
+    mode: record.mode,
+  };
 }

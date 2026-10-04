@@ -16,6 +16,7 @@
  * 实例模式（构造传 filePath），组合根创建单例注入消费方——与 AuthStorage 同构。
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { isModelRef } from '@zhushanwen/subagent-core'
 import { dirname } from 'node:path'
 import type { QuotaCredentialSource } from '@taiji/shared'
 import { withFileLockAsync } from '../utils/file-lock.js'
@@ -85,10 +86,10 @@ const SCHEMA_SNIPPET_MAX = 120
  * （无 compromise 检测，行为变化声明见 file-lock.ts 模块头）。锁前 ensureFileExists
  * 建空结构（写路径专用；读路径不持锁不物化文件）。
  */
-async function withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
+async function withFileLock<T>(filePath: string, fn: () => Promise<T>, minRetryTimeoutMs?: number): Promise<T> {
   return withFileLockAsync(
     filePath,
-    { ensure: () => ensureFileExists(filePath), logTag: 'provider-extras-store' },
+    { ensure: () => ensureFileExists(filePath), logTag: 'provider-extras-store', minRetryTimeoutMs },
     fn,
   )
 }
@@ -103,10 +104,6 @@ function ensureFileExists(filePath: string): void {
     writeFileSync(filePath, JSON.stringify(EMPTY_FILE, null, JSON_INDENT), 'utf-8')
   }
 }
-
-/** scopedModels 条目格式契约（provider/modelId）：写侧校验（settings-message-handler
- * config.setScopedModels）与读侧 sanitize（sanitizeScopedModels）共用同一正则。 */
-export const SCOPED_MODEL_REGEX = /^[^/]+\/.+$/
 
 /**
  * scopedModels 读侧独立容错（design §3.2 兼容性 / §风险矩阵）：非 string[] 或条目非
@@ -134,7 +131,7 @@ function sanitizeScopedModels(value: unknown): string[] {
       console.warn('[provider-extras-store] scopedModels: non-string entry filtered out:', entry)
       continue
     }
-    if (!SCOPED_MODEL_REGEX.test(entry)) {
+    if (!isModelRef(entry)) {
       console.warn('[provider-extras-store] scopedModels: invalid entry format (expected provider/modelId):', entry)
       continue
     }
@@ -198,9 +195,15 @@ function writeInternal(filePath: string, file: ProviderExtrasFile): void {
   atomicWrite(filePath, JSON.stringify({ ...file, version: 1 }, null, JSON_INDENT))
 }
 
+/** 锁参数注入（测试压缩退避等待用；缺省走 file-lock 默认，生产行为不变）。 */
+export interface TaijiProviderStoreOptions {
+  /** ELOCKED 指数退避的下限等待 ms（透传 withFileLockAsync；缺省 100）。 */
+  lockMinRetryTimeoutMs?: number
+}
+
 /** providers.json 的唯一读写者。所有写入必须经 modify/delete（RMW 锁内）。 */
 export class TaijiProviderStore {
-  constructor(private readonly filePath: string) {}
+  constructor(private readonly filePath: string, private readonly opts?: TaijiProviderStoreOptions) {}
 
   /**
    * 同步读全部扩展数据。同步契约的消费方（listProviders 聚合层，
@@ -231,7 +234,7 @@ export class TaijiProviderStore {
       result = fn(file.providers[providerId])
       file.providers[providerId] = result
       writeInternal(this.filePath, file)
-    })
+    }, this.opts?.lockMinRetryTimeoutMs)
     return result!
   }
 
@@ -246,7 +249,7 @@ export class TaijiProviderStore {
       if (!(providerId in file.providers)) return
       delete file.providers[providerId]
       writeInternal(this.filePath, file)
-    })
+    }, this.opts?.lockMinRetryTimeoutMs)
   }
 
   /**
@@ -273,7 +276,7 @@ export class TaijiProviderStore {
       result = fn(sanitizeScopedModels(file.scopedModels))
       file.scopedModels = result
       writeInternal(this.filePath, file)
-    })
+    }, this.opts?.lockMinRetryTimeoutMs)
     return result!
   }
 

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useCommandPopoverTrigger 单测（session/subagent 触发 + + 菜单 attach/image，同 SUT 单文件）。
  *

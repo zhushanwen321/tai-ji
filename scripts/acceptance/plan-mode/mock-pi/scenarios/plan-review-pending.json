@@ -1,0 +1,31 @@
+{
+  "name": "plan-review-pending",
+  "description": "基础剧本：plan-state(reviewState=awaiting) 落盘 + 审批 select 挂起（turn 保持打开）。abort=dissolve：select 解散、不落新 entry（现版 cancelled 分支形态）。",
+  "params": {
+    "selectRegisterDelayMs": 0,
+    "abortMode": "dissolve"
+  },
+  "onPrompt": {
+    "planStateEntry": {
+      "isActive": true,
+      "planFilePath": "/fixture/plans/fixture-requirement/plan.md",
+      "requirement": "给设置页加主题切换",
+      "templateName": null,
+      "skills": [],
+      "docs": [{ "fileName": "plan.md", "absPath": "/fixture/plans/fixture-requirement/plan.md", "sourceSkill": "", "version": 1 }],
+      "reviewState": "awaiting"
+    },
+    "assistant": ["计划文档已写好并登记，提交审批。"],
+    "select": {
+      "kind": "plan-review",
+      "id": "pr-fixture-1",
+      "docs": [{ "fileName": "plan.md", "absPath": "/fixture/plans/fixture-requirement/plan.md", "sourceSkill": "", "version": 1 }]
+    },
+    "agentEnd": false
+  },
+  "onAbort": {
+    "planStateEntry": null,
+    "assistant": ["已停止审阅流程。"],
+    "agentEnd": true
+  }
+}

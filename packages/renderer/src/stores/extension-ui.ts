@@ -16,8 +16,8 @@
  * - recordsOf(sessionId): ComputedRef —— 响应式视图，组件订阅用
  * - getRequestsBySession(sessionId): ExtensionUIRequest[] —— 非响应式读（无则空数组）
  * - hasPendingBlockingOverlay / hasPendingDialog: 非响应式 getter，供 derivedStatus
- *   computed 内调（hasPendingBlockingOverlay 语义 = 有 pending 统一表单 overlay：
- *   form 键，见函数注释）
+ *   computed 内调（hasPendingBlockingOverlay 语义 = 有 pending 阻塞型交互 overlay：
+ *   form 键 + planReview 键，D12 拓宽，见函数注释）
  * - applyRecords / addRequest / removeRequest / retainOnly: 不可变 Map 写（new Map(...).set(...)）
  * - clearSession: deleteSession 精确释放分区（防泄漏）
  * - clearAllPending: runtime 重连全局清理（R3/T5）
@@ -55,34 +55,35 @@ export const useExtensionUIStore = defineStore('extension-ui', () => {
   }
 
   /**
-   * 该 session 是否有统一表单 overlay 请求 pending（form 键；核心查询，
-   * 对称 subagent.ts hasRunning）。三消费方（经本 getter 扩义自动联动）：
-   * deriveStatus waiting 状态点判定源（useSessionDerivations）；原 TurnProgressBar warn 豁免消费方已随 remove-turn-progress-bar 移除
-   * （getAwaitingUser 回调——scheduler 确认等待同样 block turn，漏接则等待超
-   * 10min 被误挂「turn 超时」警示）；③ usePanelView 挂载判据（经 currentFormRequest
-   * computed，同谓词）。
-   *
-   * 判定键（ui-presentation-protocol D5 收敛）：form 键——全部表单族帧（新 form /
-   * legacy askUser / scheduleCreate marker）由 runtime event-adapter 分支统一产出
-   *（归一上移 runtime 后 store 记录原生带 form 键，renderer 无侧归一挂点）。
+   * 该 session 是否有阻塞型交互 overlay 请求 pending（核心查询，对称 subagent.ts hasRunning）。
+   * 判定键（D12 拓宽）：form 键 + planReview 键——两者都是「agent 阻塞等用户应答」的挂起
+   * 形态，同计入侧栏 waiting 态（多 session 下后台 session 的 plan 审批挂起可见，F15）。
+   * - form 键：全部表单族帧（新 form / legacy askUser / scheduleCreate marker）由 runtime
+   *   event-adapter 分支统一产出（归一上移 runtime 后 store 记录原生带 form 键）
+   * - planReview 键：runtime event-adapter 检测 PLAN_REVIEW_MARKER 后附加（plan 审批挂起）
+   * 消费方（经本 getter 扩义自动联动）：① deriveStatus waiting 状态点判定源
+   * （useSessionDerivations）；②原 TurnProgressBar warn 豁免消费方已随 remove-turn-progress-bar
+   * 移除（getAwaitingUser 回调——scheduler 确认等待同样 block turn，漏接则等待超 10min 被误挂
+   * 「turn 超时」警示；plan 审批同理）；③ usePanelView 挂载判据不经本 getter
+   *（经 currentFormRequest computed 的 formFilter，只认 form 键，不受本拓宽影响）。
    *
    * 非响应式普通函数：供 derivedStatus computed 内调用，computed 通过其引用的响应式
    * requestsBySession 建立依赖（写入时不可变替换 ref，触发重算）。
    */
   function hasPendingBlockingOverlay(sessionId: string): boolean {
     return getRequestsBySession(sessionId).some(
-      (r) => r.form === true,
+      (r) => r.form === true || (r as { planReview?: unknown }).planReview === true,
     )
   }
 
   /**
    * 该 session 是否有非 overlay 类的简单原语 dialog pending（供外部消费者查询；当前无消费方，
-   * 公共接口保留）。对称判据：form 类富交互 overlay 不归 dialog（漏排会把它误归
+   * 公共接口保留）。对称判据：form / planReview 两类富交互 overlay 不归 dialog（漏排会误归
    * dialog 类，与 hasPendingBlockingOverlay 双真）。
    */
   function hasPendingDialog(sessionId: string): boolean {
     return getRequestsBySession(sessionId).some(
-      (r) => r.form !== true,
+      (r) => r.form !== true && (r as { planReview?: unknown }).planReview !== true,
     )
   }
 

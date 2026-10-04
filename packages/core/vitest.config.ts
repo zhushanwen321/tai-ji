@@ -6,5 +6,8 @@ import { taijiTestConfig } from '../../test-guard/factory.ts'
 export default taijiTestConfig({
   test: {
     environment: 'node',
+    // 用例级耗时报告（docs/TEST-STRATEGY.md 统一约定：default + junit 落盘，慢用例用 grep/sort 排查）
+    reporters: ['default', 'junit'],
+    outputFile: { junit: './test-results/vitest-junit.xml' },
   },
 })

@@ -18,7 +18,7 @@ import { test, expect } from './fixtures/launch-app'
  * 激活指定 label 的 session（等目标 session 可见 → 点 → 等 composer 渲染）。
  *
  * sidebar.activeTab 默认 'sessions'，session list 通常已随 AppShell 挂载渲染，故先直接等目标 session
- * 文本可见（避开冷启动期「会话」tab 按钮偶发不可点的时序问题）；短时未现再点「会话」tab 兑底。
+ * 文本可见（避开冷启动期「会话」tab 按钮偶发不可点的时序问题）；短时未现再点「会话」tab 兜底。
  */
 async function activateSession(page: import('@playwright/test').Page, label: string): Promise<void> {
   const sessionItem = page.getByText(label)
@@ -26,7 +26,7 @@ async function activateSession(page: import('@playwright/test').Page, label: str
   try {
     await expect(sessionItem).toBeVisible({ timeout: 6_000 })
   } catch {
-    // 兑底：activeTab 被持久化为非 sessions 时，点「会话」tab 切回
+    // 兜底：activeTab 被持久化为非 sessions 时，点「会话」tab 切回
     await page.getByRole('button', { name: /^会话/ }).click()
     await expect(sessionItem).toBeVisible({ timeout: 10_000 })
   }

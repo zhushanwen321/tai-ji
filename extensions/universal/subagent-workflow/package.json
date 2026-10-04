@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-subagent-workflow",
-  "version": "8.14.7",
+  "version": "9.1.0",
   "type": "module",
   "main": "index.ts",
   "description": "Unified subagent execution and multi-agent workflow orchestration for Pi — spawned-process agent runtime with sync/background modes, stateful workflow management with persistence, state machine, and execution tracing.",
@@ -25,7 +25,10 @@
     "src/index.ts",
     "src/jsonl-run-store.ts",
     "src/session-lifecycle.ts",
+    "src/model-events.ts",
+    "src/subagents-events.ts",
     "src/workflow-events.ts",
+    "src/workflow-notify.ts",
     "src/host/",
     "src/injectors/",
     "src/interface/"
@@ -64,6 +67,7 @@
     "@zhushanwen/session-delivery": "workspace:*",
     "@zhushanwen/pi-ext-guards": "workspace:*",
     "@zhushanwen/pi-extension-logger": "workspace:*",
+    "@zhushanwen/pi-notify-ledger-host": "workspace:*",
     "@zhushanwen/subagent-core": "workspace:*",
     "@zhushanwen/pi-subagent-cli": "workspace:*",
     "@zhushanwen/zcode-subagent-cli": "workspace:*"
@@ -87,6 +91,7 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^4.1.9",
+    "@zhushanwen/subagent-engine-sdk": "workspace:*",
     "vitest": "^4.1.8"
   }
 }

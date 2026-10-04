@@ -33,7 +33,7 @@ import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { notifyGateAllowsDelivery, SubagentService } from "../subagent-service.ts";
 import { MAX_TIMER_DELAY_MS } from "../../shared/timer-delay.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 
 function makeTmpAgentDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "svc-notify-gate-"));

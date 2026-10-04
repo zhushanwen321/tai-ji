@@ -122,7 +122,7 @@ def main() -> int:
         print("  " + " -> ".join(c))
     print("\n[INFO] 子模块改用 runtime/src/interfaces.ts 的接口（如 ISessionServiceInternal）；")
     print("        组合根 Facade 装配的具体类 import 不算循环（单向依赖）。")
-    print("\033[0;31m[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。\033[0m")
+    print("\033[0;31m[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。\033[0m")
     return 2
 
 

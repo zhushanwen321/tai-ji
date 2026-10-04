@@ -17,6 +17,8 @@ export default defineConfig({
   entry: {
     index: 'src/index.ts',
     'protocol/index': 'src/protocol/index.ts',
+    // [§2.11] 引擎协议服务器共享零件（两引擎共同消费；后续批次迁入主循环）
+    'server/index': 'src/server/index.ts',
     'schema-emulation': 'src/schema-emulation.ts',
     'nesting-guard': 'src/nesting-guard.ts',
     logger: 'src/logger.ts',

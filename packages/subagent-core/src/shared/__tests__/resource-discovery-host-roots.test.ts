@@ -1,7 +1,7 @@
 // src/shared/__tests__/resource-discovery-host-roots.test.ts
 //
 // C2-core-discovery（convergence W2）单元测试：发现链扩面四工作项的行为锁定。
-// 覆盖：async 链 realpath 去重（W2①）、project-host 槽位（W2②）、hostRoots 同标签
+// 覆盖：async 链 realpath 去重（W2①）、hostRoots 同标签
 // 多根语义（W2④，Map→列表 + 硬编码槽合并原根后置）、单层扫描维持（红线 3）、
 // pi 单条目形态回归快照（回归红线：Map→列表是行为敏感改动）。
 import * as fs from "node:fs";
@@ -262,91 +262,6 @@ describe("C2 W2④: hostRoots 同标签多根语义", () => {
     expect(result).toHaveLength(1);
     expect(result[0]?.path).toBe(hardFile);
     expect(result[0]?.source).toBe("project-agents");
-  });
-
-  it("project-host 标签同标签多根依注入序生效（project-host 支持列表语义）", async () => {
-    const r1 = path.join(ws, "ph-root-a");
-    const r2 = path.join(ws, "ph-root-b");
-    writeFile(r1, "ph1.md", "one");
-    writeFile(r2, "ph2.md", "two");
-
-    const result = await discoverResources({
-      kind: "agents",
-      workspaceRoot: ws,
-      hostRoots: [
-        { dir: r1, source: "project-host" },
-        { dir: r2, source: "project-host" },
-      ],
-    });
-
-    const ph = result.filter((r) => r.source === "project-host");
-    expect(ph.map((r) => path.basename(r.path)).sort()).toEqual(["ph1.md", "ph2.md"]);
-  });
-});
-
-// ============================================================
-// W2②: project-host 槽位序位
-// ============================================================
-
-describe("C2 W2②: project-host 槽位序位", () => {
-  let ws: string;
-  let agentDir: string;
-  let hostRoot: string;
-
-  beforeEach(() => {
-    ws = tmpWorkspace();
-    agentDir = path.join(ws, ".fake-agent");
-    hostRoot = path.join(ws, ".zcode", "agents");
-  });
-  afterEach(() => {
-    fs.rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-  });
-
-  it("project-host 同名被 project-agents 遮蔽（project-agents 是项目级最高逃生门）", async () => {
-    writeFile(hostRoot, "clash.md", "host-body");
-    writeFile(path.join(ws, ".agents", "agents"), "clash.md", "proj-body");
-
-    const result = await discoverResources({
-      kind: "agents",
-      workspaceRoot: ws,
-      hostRoots: [
-        ...piHostRoots(agentDir, "agents"),
-        { dir: hostRoot, source: "project-host" },
-      ],
-    });
-
-    const clash = result.find((r) => path.basename(r.path) === "clash.md");
-    expect(clash?.source).toBe("project-agents");
-    expect(clash?.path).toBe(path.join(ws, ".agents", "agents", "clash.md"));
-  });
-
-  it("project-host 压过 project-pi（序位：project-pi < project-pi-tmp < project-host）", async () => {
-    writeFile(path.join(ws, ".pi", "agents"), "ph.md", "pi-body");
-    writeFile(hostRoot, "ph.md", "host-body");
-
-    const result = await discoverResources({
-      kind: "agents",
-      workspaceRoot: ws,
-      hostRoots: [
-        ...piHostRoots(agentDir, "agents"),
-        { dir: hostRoot, source: "project-host" },
-      ],
-    });
-
-    const ph = result.find((r) => path.basename(r.path) === "ph.md");
-    expect(ph?.source).toBe("project-host");
-    expect(ph?.path).toBe(path.join(hostRoot, "ph.md"));
-  });
-
-  it("宿主未注入 project-host 标签时槽位缺席（输出无 project-host 条目）", async () => {
-    writeFile(path.join(ws, ".pi", "agents"), "only.md", "body");
-    const result = await discoverResources({
-      kind: "agents",
-      workspaceRoot: ws,
-      hostRoots: piHostRoots(agentDir, "agents"),
-    });
-    expect(result.filter((r) => r.source === "project-host")).toEqual([]);
-    expect(result.map((r) => path.basename(r.path))).toEqual(["only.md"]);
   });
 });
 

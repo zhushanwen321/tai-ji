@@ -25,6 +25,8 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick, defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import * as events from '@taiji/core/transport/api'
+import { provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import type { ServerMessage } from '@taiji/shared'
 import type { SkillInfo } from '@taiji/shared'
 
@@ -41,7 +43,7 @@ vi.mock('@/composables/features/chat/useChat', () => ({
   }),
 }))
 vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, currentCwd: ref(null), setPendingModel: vi.fn() }),
+  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, currentCwd: ref(null), setPendingModel: vi.fn(), pendingPreset: ref(null) }),
   resetNewTaskFlow: vi.fn(),
 }))
 // P7 用：getProjectSkills 可控 mock（vi.hoisted 提升供断言/改返回值）
@@ -67,6 +69,9 @@ import { useSessionStore } from '@/stores/session'
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  // [C3] 打 seam：P7 断言 getProjectSkills 拉取参数（getProjectSkillsMock 可控）——
+  // useProjectSkills 走 getSettingsTransport()（非 @/api 门面），不打桩则 P7 拉取恒 0 次
+  provideSettingsTransport(makeSettingsTransportStub({ getProjectSkills: getProjectSkillsMock }))
 })
 
 // ─────────────────────── W 组：Composer wiring（真实 ComposerInput + stub CommandPopover） ───────────────────────

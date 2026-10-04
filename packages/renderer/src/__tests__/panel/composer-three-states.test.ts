@@ -2,91 +2,41 @@
  * Composer 三态 UI + B 策略 E2E 测试（T2.2/T2.3/T2.5/T9.14）。
  *
  * 锁定 fix-state-tearing 的 UI 层核心：
- * - D-001 B 策略：busy 时 Enter / 点发送位 → 调 steer（不调 send）
+ * - u3c/D1 统一提交：busy 时 Enter / 点发送位 → 调 send（lane 判定归 runtime 内核；
+ *   曾有的「busy Enter 本地转 steer」B 策略已随统一提交退役）
  * - T2.5：busy 时停止按钮始终可见（isActive 驱动 v-if="isActive"）
  * - T9.14：Composer 三态渲染回归（idle=发送按钮 / sending=spinner / busy=停止按钮）
  *
  * 策略：
  * - 真实 chat store（测的就是 store 的派生 isActive 行为）
- * - mock useChat（send/steer/abort/followUp/compact/editAndResend），保留 spy 断言调用
- * - mock useNewTaskFlow（landing 态 submitFirstMessage）
+ * - mock 骨架单源 helpers/composer-mount.ts（@/api 工厂 + ComposerInput mock + 壳 stub），
+ *   useChat / useNewTaskFlow / stores/session 经 composer-shell-mount 注册；useChat spy
+ *   断言引用 composerChatApiSpy 单例
  * - 子组件 stub（CommandPopover 保留 slot，其余空 div）
- * - ComposerInput mock：defineExpose + emit keydown/input（用于触发 Enter → steer）
+ * - ComposerInput mock：defineExpose + emit keydown/input（用于触发 Enter 提交）
  *
  * 运行：npx vitest run src/__tests__/panel/composer-three-states.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
-import { defineComponent, ref } from 'vue'
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
-
-// ── mock useChat（spy 化 send/steer/abort）──
-const chatApiMock = {
-  send: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
-  followUp: vi.fn(() => Promise.resolve()),
-  abort: vi.fn(() => Promise.resolve()),
-  compact: vi.fn(() => Promise.resolve()),
-  editAndResend: vi.fn(),
-  hydrateHistory: vi.fn(),
-}
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => chatApiMock,
-}))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, setPendingModel: vi.fn(), currentCwd: ref(null) }),
-  resetNewTaskFlow: vi.fn(),
-}))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
-  composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
-  config: { getGlobalSkills: vi.fn().mockResolvedValue([]), getProjectSkills: vi.fn().mockResolvedValue([]), onSkillCacheInvalidated: () => () => {} },
-}))
-vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
-}))
-
-// ── ComposerInput mock：defineExpose + emit ──
-// 追踪 input 事件携带的文本（Composer.onSend/onSteer 调 inputRef.getSegments() 取结构化 segments）。
-// 通过 emits 验证器捕获 input payload，getSegments 用 textToSegments 还原（ADR-0043）。
-const lastInputText = ref('')
-const ComposerInputMock = defineComponent({
-  name: 'ComposerInput',
-  emits: {
-    input: (val: string) => {
-      lastInputText.value = val
-      return true
-    },
-    keydown: null,
-    'slash-trigger': null,
-    'file-trigger': null,
-  },
-  setup(_, { expose }) {
-    const clear = vi.fn()
-    const setText = vi.fn()
-    expose({ clear, setText, insertSlashChip: vi.fn(), getSegments: () => textToSegments(lastInputText.value) })
-    return { clear, setText }
-  },
-  template: '<div data-testid="composer-input" />',
-})
-
-const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
-const otherStubs = {
-  ComposerInput: ComposerInputMock,
-  CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
-  AddMenuPopover: SIMPLE,
-  ContextChipsBar: SIMPLE,
-  ContextCapacityPopover: SIMPLE,
-  ModelSelectPopover: SIMPLE,
-  ThinkingLevelPopover: SIMPLE,
-  RetryIndicator: SIMPLE,
-  QueueBubble: SIMPLE,
-}
-
+// helper import 必须先于组件链（vi.mock 只 hoist 注册不重排 import，工厂执行期 helper
+// 绑定须已初始化）；composer-shell-mount import 即注册壳 mock（useChat/flow/session 三枚单源）
+import '../helpers/composer-shell-mount'
+import { composerApiModule, composerChatApiSpy, composerChildStubs, makeComposerInputMock } from '../helpers/composer-mount'
 import Composer from '@/components/panel/Composer.vue'
 import { useChatStore } from '@/stores/chat'
+
+// ── api mock 单源 helpers/composer-mount.ts；useChat 断言引用 composerChatApiSpy 单例 ──
+vi.mock('@/api', () => composerApiModule())
+
+// ── ComposerInput mock：defineExpose + emit（共用面工厂单源 helpers/composer-mount）──
+// 追踪 input 事件携带的文本（Composer.onSend 调 inputRef.getSegments() 取结构化 segments）。
+// 通过 emits 验证器捕获 input payload，getSegments 用 textToSegments 还原（ADR-0043）。
+const { lastInputText, ComposerInputMock } = makeComposerInputMock()
+
+const otherStubs = { ComposerInput: ComposerInputMock, ...composerChildStubs }
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -94,7 +44,12 @@ beforeEach(() => {
   lastInputText.value = ''
 })
 
-function mountComposer(props: { sessionId: string | null; variant?: 'panel' | 'landing' }) {
+/** 经 ComposerInput mock 发键盘事件（IME 用例经 isComposing 驱动 composition 态） */
+function emitKeydown(wrapper: VueWrapper, key: string, isComposing = false): void {
+  wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', new KeyboardEvent('keydown', { key, isComposing }))
+}
+
+function mountComposer(props: { sessionId: string | null; variant?: 'panel' | 'landing' }): VueWrapper {
   return mount(Composer, { props, global: { stubs: otherStubs } })
 }
 
@@ -150,8 +105,8 @@ describe('T2.5 busy 时停止按钮始终可见', () => {
   })
 })
 
-describe('T2.2 B 策略：busy 时 Enter → steer（不调 send）', () => {
-  it('busy 时 Enter → 调 steer，不调 send', async () => {
+describe('[u3c/D1] busy 时 Enter → 统一提交（B 策略本地转 steer 已退役）', () => {
+  it('busy 时 Enter → 调 send（lane 判定收归内核），不调 steer', async () => {
     const chat = useChatStore()
     const sid = 's-steer-enter'
     // 制造 busy 态
@@ -162,17 +117,17 @@ describe('T2.2 B 策略：busy 时 Enter → steer（不调 send）', () => {
     const wrapper = mountComposer({ sessionId: sid })
     expect(chat.isActive(sid)).toBe(true)
 
-    // 输入文本（让 hasInput=true，steer guard 放行）
+    // 输入文本（让 hasInput=true）
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', '补充内容')
     await wrapper.vm.$nextTick()
 
     // 模拟 Enter 键
-    wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', new KeyboardEvent('keydown', { key: 'Enter' }))
-    await wrapper.vm.$nextTick()
-    await wrapper.vm.$nextTick() // steer 是 async，需 flush
+    emitKeydown(wrapper, 'Enter')
+    // onSend 是多层 async 链（core D6 分发器），统一单 flushPromises 清空整条 microtask
+    // 链后再断言（拍数式 nextTick 不够 flush，全文件断言前统一此形态）
+    await flushPromises()
 
-    expect(chatApiMock.steer).toHaveBeenCalledWith('s-steer-enter', textToSegments('补充内容'))
-    expect(chatApiMock.send).not.toHaveBeenCalled()
+    expect(composerChatApiSpy.send).toHaveBeenCalledWith(sid, textToSegments('补充内容'))
   })
 })
 
@@ -182,16 +137,11 @@ describe('T2.3 B 策略：idle 时 Enter → send', () => {
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', '第一条消息')
     await wrapper.vm.$nextTick()
 
-    wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', new KeyboardEvent('keydown', { key: 'Enter' }))
-    await wrapper.vm.$nextTick()
-    await wrapper.vm.$nextTick()
-    // u5b D6 分发器（core dispatch/send）onSend 是多层 async 链（routeSteer → routeStaging →
-    // sendActiveMessage → trySendBash，约 4 个 microtask 拍才到 deps.send）——两拍 nextTick
-    // 不够 flush，必须 flushPromises 清空整条 microtask 链后再断言
+    emitKeydown(wrapper, 'Enter')
+    // 同 [u3c/D1] 用例：单 flushPromises 清空 D6 分发器整条 async 链后再断言
     await flushPromises()
 
-    expect(chatApiMock.send).toHaveBeenCalledWith('s-send-enter', textToSegments('第一条消息'))
-    expect(chatApiMock.steer).not.toHaveBeenCalled()
+    expect(composerChatApiSpy.send).toHaveBeenCalledWith('s-send-enter', textToSegments('第一条消息'))
   })
 })
 
@@ -202,17 +152,13 @@ describe('T2.x IME composition 中 Enter 不触发 send/steer', () => {
     await wrapper.vm.$nextTick()
 
     // compositionstart（模拟中文输入法开始）
-    wrapper.findComponent(ComposerInputMock).vm.$emit('keydown',
-      new KeyboardEvent('keydown', { key: 'Process' }))
+    emitKeydown(wrapper, 'Process')
     // Enter + isComposing: true（拼音未确认）
-    wrapper.findComponent(ComposerInputMock).vm.$emit('keydown',
-      new KeyboardEvent('keydown', { key: 'Enter', isComposing: true }))
-    await wrapper.vm.$nextTick()
-    await wrapper.vm.$nextTick()
+    emitKeydown(wrapper, 'Enter', true)
+    await flushPromises()
 
     // 不应调 send
-    expect(chatApiMock.send).not.toHaveBeenCalled()
-    expect(chatApiMock.steer).not.toHaveBeenCalled()
+    expect(composerChatApiSpy.send).not.toHaveBeenCalled()
   })
 
   it('idle 态 composition 结束后 Enter 正常 send', async () => {
@@ -221,20 +167,16 @@ describe('T2.x IME composition 中 Enter 不触发 send/steer', () => {
     await wrapper.vm.$nextTick()
 
     // compositionstart → Enter (isComposing, 不触发)
-    wrapper.findComponent(ComposerInputMock).vm.$emit('keydown',
-      new KeyboardEvent('keydown', { key: 'Enter', isComposing: true }))
+    emitKeydown(wrapper, 'Enter', true)
     await wrapper.vm.$nextTick()
-    expect(chatApiMock.send).not.toHaveBeenCalled()
+    expect(composerChatApiSpy.send).not.toHaveBeenCalled()
 
     // compositionend → 正常 Enter (isComposing=false, 触发 send)
-    wrapper.findComponent(ComposerInputMock).vm.$emit('keydown',
-      new KeyboardEvent('keydown', { key: 'Enter', isComposing: false }))
-    await wrapper.vm.$nextTick()
-    await wrapper.vm.$nextTick()
-    // 同上：D6 分发器 async 链需 flushPromises 清空后才到 deps.send
+    emitKeydown(wrapper, 'Enter', false)
+    // 同 [u3c/D1] 用例：单 flushPromises 清空 D6 分发器整条 async 链后再断言
     await flushPromises()
 
-    expect(chatApiMock.send).toHaveBeenCalledWith('s-ime-idle-end', textToSegments('你好世界'))
+    expect(composerChatApiSpy.send).toHaveBeenCalledWith('s-ime-idle-end', textToSegments('你好世界'))
   })
 
   it('busy 态 composition 中 Enter 不触发 steer', async () => {
@@ -248,14 +190,11 @@ describe('T2.x IME composition 中 Enter 不触发 send/steer', () => {
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', '补充')
     await wrapper.vm.$nextTick()
 
-    // composition 中 Enter → 不触发 steer
-    wrapper.findComponent(ComposerInputMock).vm.$emit('keydown',
-      new KeyboardEvent('keydown', { key: 'Enter', isComposing: true }))
-    await wrapper.vm.$nextTick()
-    await wrapper.vm.$nextTick()
+    // composition 中 Enter → 不触发提交
+    emitKeydown(wrapper, 'Enter', true)
+    await flushPromises()
 
-    expect(chatApiMock.steer).not.toHaveBeenCalled()
-    expect(chatApiMock.send).not.toHaveBeenCalled()
+    expect(composerChatApiSpy.send).not.toHaveBeenCalled()
   })
 })
 
@@ -269,6 +208,6 @@ describe('停止按钮点击 → abort', () => {
     })
     const wrapper = mountComposer({ sessionId: sid })
     await wrapper.find('.stop-btn').trigger('click')
-    expect(chatApiMock.abort).toHaveBeenCalled()
+    expect(composerChatApiSpy.abort).toHaveBeenCalled()
   })
 })

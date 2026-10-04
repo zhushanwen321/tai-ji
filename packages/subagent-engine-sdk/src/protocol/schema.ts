@@ -187,7 +187,7 @@ export const runSessionParamsSchema = {
       properties: {
         // ResumeAnchor.sessionRef = Record<string, string>（引擎定位键值对）
         sessionRef: { type: "object", additionalProperties: { type: "string" } },
-        journalPath: { type: "string" },
+        eventsPath: { type: "string" },
       },
     },
   },

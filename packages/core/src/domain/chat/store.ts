@@ -34,34 +34,18 @@ import type {
   Segment,
   ServerMessage,
   ServerMessageMap,
-  SteerFollowUpMode,
   SubagentDirectiveData,
   ToolCall,
 } from '@taiji/shared'
-import { normalizeContent, segmentsToText, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, PI_RESPAWN_NOTICE_CUSTOM_TYPE } from '@taiji/shared'
+import { segmentsToText, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, PI_RESPAWN_NOTICE_CUSTOM_TYPE } from '@taiji/shared'
 import type { PiRespawnNoticeVariant } from '@taiji/shared'
-import type { RetryState, QueueState, FinalizeReason } from './store-types'
+import type { RetryState, FinalizeReason } from './store-types'
 import { isDevMode } from '../../platform/dev-mode'
 import { randomUuid } from '../../utils/random-uuid'
 // [btw-question D5/AU1] 查看态豁免源：drawer 域公开 barrel（AC10 包名单层放行；drawer
 // 域不回指 chat，无域间环）。装配进 LruEvictDeps.viewedVids——evictIfNeeded 入口对
 // viewed 中非虚拟成员（正在查看的 btw 线）刷新 recency，查看中不落阈值驱逐。
 import { getViewedVids } from '@taiji/core/domain/drawer'
-
-/**
- * pendingBuffer 单项（m1 数据层，steer/follow-up 暂存）。
- *
- * text 仅供 abortPending 文本匹配（RPC 失败回滚有准确原文——renderer 自己的提交，
- * 未经 pi skill 展开）。[W14] 投递定位不再按 text 匹配：pi 入队存展开后文本 ≠ 提交
- * 原文（D6），文本匹配在该场景必挂，改计数 FIFO（drainN 按条数取）。
- * segments 是原始 Segment[]，drain 时取出交 appendUser 进对话流（m2 接线，m1 不接）。
- * sendMode 区分 steer / follow-up，驱动气泡配色。
- */
-interface PendingItem {
-  text: string
-  segments: Segment[]
-  sendMode: SteerFollowUpMode
-}
 
 /**
  * [session-occupancy u5b / D1+D3] occupancy 的 renderer 投影三维（wire 契约提取，shared
@@ -311,6 +295,9 @@ export interface ChatStoreOptions {
   agentCallEvictionsOf?: (mainSid: string) => string[]
 }
 
+/** pendingSend 空窗期 timer 阈值（D-015/F4，接管 dispatchingTimer 30s 语义）。导出供测试 import（禁魔数复制漂移） */
+export const PENDING_SEND_TIMEOUT_MS = 30_000
+
 export function createChatStore(options: ChatStoreOptions = {}) {
   /** 按 sessionId 分区的消息表（UC-2 隔离） */
   // W10 D-1 容器范式：`ShallowRef<Map<string, ShallowRef<Message[]>>>`——外层 Map 恒等稳定
@@ -365,42 +352,28 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   const { handingOffSessions, isHandingOff, setHandingOff, clearHandingOffTimer } = handoff
   /** 按 sessionId 分区的自动重试态（W06-B，auto_retry_start/end） */
   const retryStates = ref<Map<string, RetryState>>(new Map())
-  /** 按 sessionId 分区的消息队列态（W06-B，queue_update） */
-  const queueStates = ref<Map<string, QueueState>>(new Map())
-  /**
-   * steer/follow-up 暂存缓冲（m1 数据层）。
-   *
-   * 与 messages 解耦——pushPending 只写本 buffer，不写 messages（pending 不进对话流）。
-   * 投递信号 queue_update 到达时，drainN 按计数 FIFO 取出 segments 交 appendUser 进
-   * 对话流（m2 接线，W14 计数 FIFO）。
-   * 与 queueStates 同层 ref<Map<string, T>>，disposeSession 一并清理（T2）。
-   *
-   * [M4 queue 子域归位契约] queue 纯状态（queueStates pi 快照 + pendingBuffer 前端暂存）
-   * 全部归位 core 本 store，renderer 无副本（stores/chat.ts 仅 defineStore 薄包装）。
-   * flush/取消的编排（调 chatApi.send/steer）留在 renderer shell（useCompactQueue.ts），
-   * core 只经 deps.getCompactQueue() 注入调用——core 域文件不 import renderer api。
-   * 组件消费点唯一：QueueBubble 经 Composer → chatStore.getQueueState 读 queueStates；
-   * compact 暂存经 useCompactQueue() 单例读（[u6b] 原 badge 展示组件已移除，composer 上方 QueueBubble defer 行承接）。
-   * pendingBuffer 属 drain
-   * 恢复机制留在 store（SSOT 检查点 2 裁决：不强行并入统一视图）。
-   */
-  const pendingBuffer = ref<Map<string, PendingItem[]>>(new Map())
+  // [u5a 退役] `queueStates` 分区 + `getQueueState` / `clearQueueState` 已删除：唯一写方
+  // （message.queue_update handler）随投递所有权内核 u3b 退役（内核排队取代 pi 快照），队列区
+  // 展示数据源改为 session.delivery 状态帧单一来源（u3c：useQueueRows 读内核投影）——本分区
+  // 恒空、读面恒 undefined、clearQueueState 恒 no-op（u3b/u3c 已把「分区与 API 收尾」挂账 u5）。
+  // [B1 退役] `pendingBuffer` 分区 + `pushPending` / `drainN` / `reconcilePending` /
+  // `abortPending` 已删除：计数腿被设计 §3.1 删除面明列退役（投递所有权内核 u3b 后零生产
+  // 消费方，队列区数据源 = session.delivery 状态帧；提交侧统一 submit 直发，无暂存形态）。
+  // 历史见 git（steer-followup-user-bubble-display D2 / W14 D6）。
   /**
    * [steer-bubble u0 / D2]
-   * per-session inflight 投递确认计数（Map 分区，对齐 queueStates/pendingBuffer 惯例，
-   * 不可变写保证响应式）。
+   * per-session inflight 投递确认计数（Map 分区，对齐 retryStates 惯例，不可变写保证响应式）。
    *
-   * 语义 = **已显示待确认的投递数**：steer/followUp 气泡已进对话流（腿 1 drain 消费）
-   * 或 send 乐观插入，但其确认帧 message_end(user) 未到。不变式 inflight ≥ 0
-   * （decrementInflight 钳制，配额漂移不产生负值）；正常路径逐投递归零——pi 投递
-   * 时序保证 drain 帧先于 message_end，无欠账可累积。
+   * 语义 = **已挂账待确认的投递数**（投递所有权内核 u3b 后）：统一提交（统一 submit）的
+   * 每条乐观气泡在提交点 +1，其确认帧 message_end(user) 到达时 −1。不变式 inflight ≥ 0
+   * （decrementInflight 钳制，配额漂移不产生负值）；正常路径逐投递归零。
    *
-   * 三个维护点（本单元只建 state 与 action 面，不接线调用方——后续单元接）：
-   * 1. 腿 1 消费：queue_update drain 帧 drainN 实取 m 条 → +m（drain 帧即投递证据，
-   *    未显示的不确认，u2 接）
-   * 2. send 乐观：appendUser 乐观插入 +1 / RPC 失败 catch 回滚 −1（挂 useChat send
-   *    调用点，不在 appendUser 内防双计，u2 接）
-   * 3. message_end(user) 确认：−1（inflight > 0 抵消跳过腿 2 兜底，u1 接）
+   * 维护点两处：
+   * 1. 统一提交挂账：appendUser 乐观插入 +1 / RPC 失败 catch 回滚 −1（挂 useChat
+   *    submitNewMessage 调用点，不在 appendUser 内防双计）。
+   * 2. 标记回执回收：message_end(user) 帧命中内核裸标记（送达回执主分支）即 −1；
+   *    ② 纯计数兜底（帧无标记/标记不命中投影时 inflight > 0）服务 direct 车道等
+   *    无回执命中形态，同一 −1 语义。
    *
    * 清零挂点（D4 生命周期闭合）：abort（message.complete{stopReason:'aborted'}）与
    * disposeSession——pi 队列确定性作废后确认基线一并作废，防残留吞掉后续投递的确认
@@ -438,8 +411,6 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    */
   const { historyWindows, setHistoryWindow, getHistoryWindow, clearHistoryWindow } = createTruncatedWindowController()
 
-  /** pendingSend 空窗期 timer 阈值（D-015/F4，接管 dispatchingTimer 30s 语义） */
-  const PENDING_SEND_TIMEOUT_MS = 30_000
   /**
    * pendingSend 空窗期 timer（按 sessionId 隔离）。
    *
@@ -465,7 +436,6 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     occupancies,
     handingOffSessions,
     retryStates,
-    queueStates,
     pendingSend,
     clearOccupancy,
     setHandingOff,
@@ -544,18 +514,14 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    *  D-3：deleteStreamingFlag 注入——deleteMessageKey 删 key 时同步清 streaming flag 派生缓存。
    *  W19 review Fix-2：deleteChangeSetStatusesFor 注入——删 messages 分区时同步清该 sid 的
    *  changeSetStatuses 前缀条目（此前仅 disposeSession 清理，LRU 驱逐不清 → map 泄漏）。
-   *  W21：同回调内联清 entryStates 分区（reducer 累积态随 messages 分区同生共死——
-   *  entryStates 是实时侧累积态：hydrate 只重建 messages ref（entry 重放在 runtime
-   *  wire 层消费、不回填本 Map），清空后由下一条实时 entry 从空态重新累积；残留旧
-   *  累积会与重建后的 messages 分区错位（W22 对账基线陈旧））。
-   *  [steer-bubble D4 豁免声明] 本驱逐回调刻意**不**清 pendingBuffer / queueStates /
-   *  inflightCounts——与「disposeSession 同点全清」的既有清理惯例不一致是有意为之
-   *  （steer-bubble D4「刻意保留」）：这三者是不可
-   *  重建状态（segments 暂存与 inflight 确认基线仅存在于前端，清了即永久丢失/漂移），
-   *  且驱逐重进后腿 1 暂存与腿 2 判定仍依赖它们；entryStates/hydrated 是重建型
-   *  （entryStates 清后实时帧重新累积、hydrated 清后 hydrate 重注入）才随驱逐清理。
-   *  断连收口（clearIndependentTransient）同理豁免
-   *  pendingBuffer 与 inflight，见该处注释。后续维护勿按惯例顺手补清。 */
+   *  W21：同回调内联清 entryStates 分区（reducer 累积态随 messages 分区同生共死——驱逐重进后
+   *  由 hydrate 全量重放重建，残留旧累积会造成 W22 对账基线陈旧）。
+   *  [steer-bubble D4 豁免声明] 本驱逐回调刻意**不**清 inflightCounts——与「disposeSession
+   *  同点全清」的既有清理惯例不一致是有意为之（steer-bubble D4「刻意保留」）：
+   *  inflight 确认基线是不可重建状态（仅存在于前端，清了即永久丢失/漂移），
+   *  且驱逐重进后标记回执回收仍依赖它；entryStates/anchors/hydrated 是重建型（hydrate 重放可
+   *  恢复）才随驱逐清理。断连收口（clearIndependentTransient）同理豁免 inflight，见该处注释。
+   *  后续维护勿按惯例顺手补清。 */
   const lruEvictDeps = makeLruEvictDeps(
     messages,
     hydrated,
@@ -583,27 +549,10 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     return retryStates.value.get(sessionId)
   }
 
-  /** 取指定 session 的消息队列态（无则 undefined） */
-  function getQueueState(sessionId: string): QueueState | undefined {
-    return queueStates.value.get(sessionId)
-  }
-
-  /**
-   * 清指定 session 的 queueStates 快照（forceQuit 编排调用，session-dead G1）。
-   *
-   * 为什么独立于 disposeSession：forceQuit 后 session 仍存在（dead 占位可 restore 重开），
-   * 只清 pi 快照展示态——steer 队列随 pi 进程死亡确定性作废，restore 后无 queue_update
-   * 帧会再清它，残留即「气泡挂着却永远发不出去」的状态撒谎（Gate B 实测）。LRU 驱逐 /
-   * 断连收口对 queueStates 的豁免（D4 / finalizeAllStreaming 各自声明）不受影响——本方法
-   * 仅由用户显式 forceQuit 入口编排，不并入上述收口路径。
-   */
-  function clearQueueState(sessionId: string): void {
-    if (queueStates.value.has(sessionId)) {
-      const next = new Map(queueStates.value)
-      next.delete(sessionId)
-      queueStates.value = next
-    }
-  }
+  // [u5a 退役] 前身 getQueueState / clearQueueState（queueStates 分区的读写面）已删除——
+  // 分区已无生产写方（见上方 queueStates 退役注记），两方法分别为恒 undefined 读与恒 no-op 写。
+  // forceQuit 编排（renderer useSidebarSessionActions）不再调用 clearQueueState：steer 队列快照
+  // 展示态本身已不存在，pi 槽位的真实回收由 delivery.drain 承担（u3c）。
 
   /** 是否已加载历史（用于决定是否调 api.chat.getHistory） */
   function isHydrated(sessionId: string): boolean {
@@ -725,19 +674,24 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * [W2 fix-chat-flow-order D6 → 后修 overlay-only] 消息形态从 user message entry 派生（形态
    * 对照 apply-entry user 分支——segments 原样放 message.content，applyEntry 空态派生），但
    * **不喂 reducer**：reducer 的 user entry 唯一来源 = 真实 message_end(user) 帧（见实现内
-   * 注释——乐观 entry 也喂会双计，W22 等价性测试捕获）。乐观 send 与 drainN 投递两个调用方
-   * 零改动，返回值保持 `u-<uuid>` 形态（clientUuid 映射链不断）。
+   * 注释——乐观 entry 也喂会双计，W22 等价性测试捕获）。调用方两处（统一提交的乐观气泡 +
+   * 送达回执的 ② 纯文本降级入流），返回值保持 `u-<uuid>` 形态（clientUuid 映射链不断）。
    *
    * overlay content 覆写回原 segments：entry 反解 content 是纯文本窄化
-   * （skill/file/mention/image badge 不可从 entry 重放推导——重开侧由 segments sidecar +
+   *（skill/file/mention/image badge 不可从 entry 重放推导——重开侧由 segments sidecar +
    * clientUuidMap 回填，textToSegments 已知限制），live 渲染层必须保留原始 segments；
-   * 引用原样透传（drainN FIFO 取出的 segments 原引用直接进消息流）。
+   * 引用原样透传（morph 暂存段经送达回执取出的原引用直接进消息流）。
    * piEntryId 同点剥除（见实现内注释：客户端 entry id 非真实 pi entry id，防 fork 误定位）。
+   *
+   * [消息撤回 U8] 可选 id：送达回执入流重建时传提交 clientUuid 保号（气泡 id 与内核
+   * 条目 id / morph 前乐观气泡 id 对齐——live 窗口撤回定位的锚，见 effect-types
+   * appendUser 注释）；缺省自生成（乐观插入现行为）。id 任意形态照用（外来条目可能为
+   * 内核裸 uuid），无 u- 前缀校验——保号语义优先于形态约束。
    */
-  function appendUser(sessionId: string, segments: Segment[]): string {
+  function appendUser(sessionId: string, segments: Segment[], id?: string): string {
     const entry: PiMessageEntry = {
       type: 'message',
-      id: `u-${randomUuid()}`,
+      id: id ?? `u-${randomUuid()}`,
       parentId: null,
       timestamp: new Date().toISOString(),
       message: { role: 'user', content: segments, timestamp: Date.now() },
@@ -758,92 +712,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     return derivedMsg.id
   }
 
-  /**
-   * 暂存 steer/follow-up segments 到 pendingBuffer（m1 数据层）。
-   *
-   * 不碰 messages——pending 不进对话流（核心目标）。投递时 drainN 按计数 FIFO 取出
-   * segments 交 appendUser（m2 接线）。text = segmentsToText(segments).trim()，仅供
-   * abortPending 文本匹配（W14：投递不再依赖 text）。
-   */
-  function pushPending(sessionId: string, segments: Segment[], sendMode: SteerFollowUpMode): void {
-    const text = segmentsToText(segments).trim()
-    const prev = pendingBuffer.value.get(sessionId) ?? []
-    pendingBuffer.value = new Map(pendingBuffer.value).set(sessionId, [...prev, { text, segments, sendMode }])
-  }
-
-  /**
-   * [W14] 计数 FIFO：按入队顺序取出 sendMode 匹配的前 n 条 pending（D1 表末行 + D6）。
-   *
-   * 投递定位不再按文本匹配——pi 入队存 skill 展开后文本 ≠ 提交原文，文本相等匹配在该
-   * 场景必挂（消息永久丢失）；queue_update 差集（registry countDrained）算出被投递条数
-   * N，本方法直接取前 n 条，不看文本。FIFO 与 pi splice 移除顺序一致。
-   *
-   * n 超过匹配存量时取尽即止（n 截断到存量）——扩展注入例外下队列深度可大于前端暂存
-   * （见 reconcilePending），取尽即止保证队列清空时暂存同步清零、偏差收敛。
-   * 非 sendMode 匹配的项保留原相对顺序（steer 与 follow-up 各自差集各自计数，防跨类型误取）。
-   */
-  function drainN(sessionId: string, sendMode: SteerFollowUpMode, n: number): Segment[][] {
-    const prev = pendingBuffer.value.get(sessionId)
-    if (!prev || prev.length === 0 || n <= 0) return []
-    const drained: Segment[][] = []
-    const remaining: PendingItem[] = []
-    for (const item of prev) {
-      if (drained.length < n && item.sendMode === sendMode) drained.push(item.segments)
-      else remaining.push(item)
-    }
-    pendingBuffer.value = new Map(pendingBuffer.value).set(sessionId, remaining)
-    return drained
-  }
-
-  /**
-   * [W14] 深度结构性对账（D6：深度权威 = pi pendingMessageCount）。
-   *
-   * [steer-bubble u2 / D4] **投递侧
-   * （queue_update 每帧）裁剪已移除**：drain 后立即裁到深度会吃掉腿 2（message_end(user)）
-   * 还没回填的 segments，且是丢消息的不可逆放大器（F3：断连 prev 缺失时以本帧深度裁空
-   * buffer，内容永久删除）。现调用点（均经 ctx 注入 registry，非 queue_update）：
-   * - G-023 时点（message_start(assistant)）僵尸清理：buffer 存量 > 快照深度时裁残量
-   *   （深度 0 = 快照已空/无条目形态，对账到零）。
-   *
-   * [steer-bubble D4 修订 2026-08-30] abort 调用点已移除：pi abort() 不清队列（Gate B
-   * 实测残余投递），pendingBuffer 随 pi 存活队列保留，两腿在下一 prompt 照常消费。
-   *
-   * 不变式：renderer 提交数 − pi 队列深度 = 已投递数，pendingBuffer 存量 = 提交数 −
-   * 已投递数 = 深度。偏差语义：
-   * - buffer > 深度：队列中已不存在的暂存（僵尸项——永不被投递且污染后续 FIFO 计数），
-   *   裁剪到深度（保留最早的，与 FIFO 取出顺序一致）。
-   * - buffer < 深度：pi 队列存在 renderer 未提交的条目（扩展 deliverAs 注入，D6 已知
-   *   例外——taiji 自研扩展禁用，第三方扩展残余风险）——无法凭空补 segments，接受有界
-   *   偏差；队列清空时 drainN 取尽即止，结构偏差随之收敛，内容偏差由 queue_update
-   *   全量数组（queueStates 整体替换）收敛。
-   */
-  function reconcilePending(sessionId: string, depth: number): void {
-    const prev = pendingBuffer.value.get(sessionId)
-    if (!prev || prev.length <= depth) return
-    pendingBuffer.value = new Map(pendingBuffer.value).set(sessionId, prev.slice(0, depth))
-  }
-
-  /**
-   * 移除匹配的 pending item（m1 数据层，steer/followUp RPC 失败回滚）。
-   *
-   * [W14 D6 差异标注] 保留文本匹配（normalizeContent + trim 归一化）：回滚场景有准确
-   * 原文——renderer 自己的提交原文（未经 pi skill 展开），且不走 pi 队列投递路径，文本
-   * 相等在此可靠；投递定位已改计数 FIFO（drainN，登记表 D6 条目标注此差异）。
-   * FIFO 移除第一条匹配项；无匹配 no-op（幂等）。sendMode 必填——abort 明确指定回滚的目标模式。
-   */
-  function abortPending(sessionId: string, text: string, sendMode: SteerFollowUpMode): void {
-    const prev = pendingBuffer.value.get(sessionId)
-    if (!prev || prev.length === 0) return
-    const target = normalizeContent(text).trim()
-    const idx = prev.findIndex(
-      (item) => normalizeContent(item.text).trim() === target
-        && item.sendMode === sendMode,
-    )
-    if (idx === -1) return
-    pendingBuffer.value = new Map(pendingBuffer.value).set(sessionId, prev.filter((_, i) => i !== idx))
-  }
-
-  // ── inflight 投递确认计数（[steer-bubble u0/D2] 契约层：state 见上，调用方接线归 u1/u2）──
+  // ── inflight 挂账/回收（[steer-bubble u0/D2] 契约层：state 见上，调用方接线归 u1/u2）──
 
   /** 读 per-session inflight 计数。无记录 = 0（归零即删条目，正常路径 Map 多数时间无该 sid）。 */
   function getInflight(sessionId: string): number {
@@ -851,8 +720,8 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   }
 
   /**
-   * inflight += n（默认 1）。腿 1 消费按 drainN 实取数传 m（u2），send 乐观 +1（u2）。
-   * n ≤ 0 no-op——实取数为 0（drain 差集 > 0 但暂存无匹配货）时不产生零值条目。
+   * inflight += n（默认 1）。统一提交乐观挂账 +1（useChat submitNewMessage 调用点）。
+   * n ≤ 0 no-op。
    */
   function incrementInflight(sessionId: string, n = 1): void {
     if (n <= 0) return
@@ -958,17 +827,13 @@ export function createChatStore(options: ChatStoreOptions = {}) {
       {
         messages,
         retryStates,
-        queueStates,
         applyFileChanges,
         markChangeSetsSuperseded,
         finalizeSession,
         clearPendingSend,
         appendUser,
-        drainN,
-        reconcilePending,
         applyEntryFrame,
         getInflight,
-        incrementInflight,
         decrementInflight,
         clearInflight,
       },
@@ -997,13 +862,13 @@ export function createChatStore(options: ChatStoreOptions = {}) {
 
   /**
    * 多 session 统一收口（断连 / runtime 重启兜底）：遍历瞬态 session，逐个调 resetTransientStates。
-   * 遍历范围是 messages.keys() ∪ compactingSessions ∪ retryStates ∪ queueStates 并集
-   *（不能只遍历 messages——compacting/retry/queue 可独立于消息存在）。详见 ./README.md。
+   * 遍历范围是 messages.keys() ∪ compactingSessions ∪ retryStates ∪ pendingSend 并集
+   *（不能只遍历 messages——compacting/retry/pendingSend 可独立于消息存在）。详见 ./README.md。
    */
   function finalizeAllStreaming(reason: FinalizeReason): void {
     const candidateSids = streamingStateMachine.collectFinalizeCandidates()
     for (const sid of candidateSids) {
-      if (isGenerating(sid) || isCompacting(sid) || isHandingOff(sid) || retryStates.value.has(sid) || queueStates.value.has(sid) || pendingSend.value.has(sid)) {
+      if (isGenerating(sid) || isCompacting(sid) || isHandingOff(sid) || retryStates.value.has(sid) || pendingSend.value.has(sid)) {
         resetTransientStates(sid, reason)
       }
     }
@@ -1116,18 +981,13 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     occupancies.value = next
   }
 
-  /** [u5b / D1] 读 occupancy 投影。无记录（未收到任何帧 / 已断连收口）= 全 idle 缺省。 */
-  function getOccupancy(sessionId: string): SessionOccupancyState {
-    return occupancies.value.get(sessionId) ?? { turn: 'idle', compacting: false, bash: false }
-  }
-
   /**
-   * [u5b / D1] sessionPhase —— occupancy 投影的等价读口（P4 ActivityStrip / 发送位四态 /
-   * 发送分发器 getSendRoute 的单一数据源）。与 getOccupancy 同值（语义命名面向消费方：
-   * P4 从「phase」取展示态，分发器从「occupancy」算路由）。
+   * [u5b / D1] sessionPhase —— occupancy 投影读口（P4 ActivityStrip / 发送位四态 /
+   * 发送分发器 getSendRoute 的单一数据源；语义命名面向消费方）。无记录（未收到任何帧 /
+   * 已断连收口）= 全 idle 缺省。原 getOccupancy 读口已删（生产外部消费 0，同值双读口收敛本口）。
    */
   function sessionPhase(sessionId: string): SessionOccupancyState {
-    return getOccupancy(sessionId)
+    return occupancies.value.get(sessionId) ?? { turn: 'idle', compacting: false, bash: false }
   }
 
   /** 设置/清除 compacting reason 文案源（session.compacting{reason} 写 / session.compacted 清）。
@@ -1243,17 +1103,17 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   /** 截断 session 消息到 messageId（编辑重发用）。委托 chat-mutations.truncateMessagesFrom。 */
   const truncateFrom = (sessionId: string, messageId: string, inclusive: boolean): void => truncateMessagesFrom(messages, sessionId, messageId, inclusive)
 
-  /** 清理指定 session 的全部 per-session 状态（deleteSession 调用，S3）：messages/hydrated/pendingSend/compactingSessions/retryStates/queueStates/failedHistory/changeSetStatuses + timer + LRU 记录。背景见 ./README.md。 */
+  /** 清理指定 session 的全部 per-session 状态（deleteSession 调用，S3）：messages/hydrated/pendingSend/compactingSessions/retryStates/failedHistory/changeSetStatuses + timer + LRU 记录 + premature timeout 快照（u10/G4）。背景见 ./README.md。 */
   function disposeSession(sessionId: string): void {
     // Map ref：不可变写保证响应式（new Map + delete + 赋值新 Map）。
     // D-1 后 messages 的 Map entry 是 per-session ShallowRef 分区——本循环删的是 Map entry
     // （该 sid 分区连同其内层 ref 整体移除），减 key 属外层 Map 合法替换情形（07 §3.3.2）。
-    // retryStates/queueStates 是深 ref，此写法同样正确触发。统一用"构造新 Map → delete → 赋值"范式。
+    // retryStates 是深 ref，此写法同样正确触发。统一用"构造新 Map → delete → 赋值"范式。
     // 显式结构类型（对齐原 disposeSession 编排参数）：数组元素统一为 Map<string, unknown>，
     // 避免 TS 将不同 Map 元素推断为具体联合类型导致 new Map(ref.value) 不兼容。
     // inflightCounts（[steer-bubble D4]）：disposeSession 同步清 inflight——确认基线随分区
     // 销毁作废（与 LRU 驱逐的刻意豁免不同，见 lruEvictDeps 处声明注释）。
-    const mapRefs: { value: Map<string, unknown> }[] = [messages, retryStates, queueStates, pendingBuffer, inflightCounts, compactingReasons, occupancies, historyWindows]
+    const mapRefs: { value: Map<string, unknown> }[] = [messages, retryStates, inflightCounts, compactingReasons, occupancies, historyWindows]
     const setRefs: { value: Set<string> }[] = [hydrated, pendingSend, handingOffSessions, failedHistory, respawnPending]
     for (const ref of mapRefs) {
       if (ref.value.has(sessionId)) {
@@ -1292,14 +1152,12 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     occupancies,
     handingOffSessions,
     retryStates,
-    queueStates,
-    pendingBuffer,
     inflightCounts,
     changeSetStatuses,
     failedHistory,
     hydrated,
     getMessages,
-    getRetryState, getQueueState, clearQueueState,
+    getRetryState,
     getChangeSetStatus, setChangeSetStatus,
     markChangeSetsSuperseded,
     isHydrated, markHistoryFailed, clearHistoryError,
@@ -1311,10 +1169,6 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     finalizeSubagentStream: (virtualId: string) => streamingStateMachine.finalizeSubagentStream(virtualId),
     applySubagentEntries,
     appendUser,
-    pushPending,
-    drainN,
-    reconcilePending,
-    abortPending,
     getInflight,
     incrementInflight,
     decrementInflight,
@@ -1332,7 +1186,6 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     isCompacting,
     setOccupancy,
     clearOccupancy,
-    getOccupancy,
     sessionPhase,
     setCompactingReason,
     getCompactingReason,
@@ -1390,14 +1243,14 @@ export type ChatStoreInstance = ReturnType<typeof createChatStore>
 export type ChatStoreReaders = Pick<
   ChatStoreInstance,
   | 'messages' | 'pendingSend' | 'handingOffSessions'
-  | 'retryStates' | 'queueStates' | 'pendingBuffer' | 'changeSetStatuses'
+  | 'retryStates' | 'changeSetStatuses'
   | 'failedHistory' | 'hydrated' | 'inflightCounts'
   | 'occupancies'
   | 'historyWindows'
-  | 'getMessages' | 'getRetryState' | 'getQueueState' | 'getChangeSetStatus'
+  | 'getMessages' | 'getRetryState' | 'getChangeSetStatus'
   | 'isHydrated' | 'isGenerating' | 'isActive'
   | 'isCompacting' | 'getCompactingReason' | 'isHandingOff'
-  | 'getOccupancy' | 'sessionPhase' | 'isPendingSend'
+  | 'sessionPhase' | 'isPendingSend'
   | 'isRespawnPending'
   | 'getInflight'
   | 'getHistoryWindow'
@@ -1415,8 +1268,8 @@ export type ChatStoreOps = Pick<
   | 'setChangeSetStatus' | 'markChangeSetsSuperseded' | 'markHistoryFailed'
   | 'clearHistoryError' | 'hydrate' | 'setMessages' | 'reconcileHistory'
   | 'prependHistory' | 'applySubagentStreamDelta' | 'finalizeSubagentStream'
-  | 'applySubagentEntries' | 'appendUser' | 'pushPending' | 'drainN'
-  | 'reconcilePending' | 'abortPending' | 'applyMessageEvent' | 'finalizeSession'
+  | 'applySubagentEntries' | 'appendUser'
+  | 'applyMessageEvent' | 'finalizeSession'
   | 'finalizeAllStreaming' | 'resetTransientStates' | 'addPendingSend'
   | 'clearPendingSend' | 'markSessionError' | 'setHandingOff'
   | 'setOccupancy' | 'clearOccupancy' | 'setCompactingReason'
@@ -1426,7 +1279,6 @@ export type ChatStoreOps = Pick<
   | 'touchLru' | 'evictIfNeeded' | 'evictSessionWithVirtual' | 'evictVirtualKey'
   | 'incrementInflight' | 'decrementInflight' | 'clearInflight'
   | 'setHistoryWindow' | 'clearHistoryWindow'
-  | 'clearQueueState'
   | 'testInternals'
 >
 

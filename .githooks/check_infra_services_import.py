@@ -11,7 +11,7 @@ infra 层反向 import services 层检查（C-comm-01 三层单向依赖的机�
 历史缺口（2026-09-20 补）：check_no_service_cycle.py 只扫 services 内部环、
 check_services_infra_import.py 只拦 services→infra，infra→services 方向此前无任何
 机器拦截（infra/event-adapter 曾经 services/plan-state-extractor import 常量——该次
-修复把常量移入 @taiji/shared 后落地本守卫堵向）。
+修复把常量移入 @taiji/shared 后落地本检查堵向）。
 
 白名单（受控例外，存量基线 2026-09-20 登记，新增 services value import 直接拦）：
   git-executor / shell-runner：infra 实现对应 port 契约所需引用的 Error 类

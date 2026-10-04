@@ -18,6 +18,7 @@
 // inproc pi 引擎目录 删除消亡。
 
 import type { ChildProcess } from "node:child_process";
+import { GLOBAL_SLOT_KEYS } from "../../../shared/global-slots.ts";
 
 // 镜像项（recordId 键 + killed 判据，与 client/mirror.ts 载荷契约同构）。
 export interface SpawnedChildMirrorEntry {
@@ -81,9 +82,7 @@ class CoreSpawnedChildrenMirror {
   }
 }
 
-const MIRROR_SLOT_KEY = Symbol.for(
-  "@zhushanwen/pi-subagent-workflow.coreSpawnedChildrenMirror",
-);
+const MIRROR_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.coreSpawnedChildrenMirror);
 
 function coreMirrorSlot(): CoreSpawnedChildrenMirror {
   let slot = Reflect.get(globalThis, MIRROR_SLOT_KEY) as CoreSpawnedChildrenMirror | undefined;
@@ -118,8 +117,13 @@ export function killRecordChildWithEscalation(recordId: string, _source: string)
   coreMirrorSlot().markKilled(recordId);
 }
 
-/** 全量收割记账（dispose / parent-shutdown）：镜像整体置死。 */
-export function killAllSpawnedChildren(_signal: NodeJS.Signals = "SIGTERM"): number {
+/**
+ * 全量收割记账（dispose / parent-shutdown）：镜像整体置死。
+ *
+ * 命名如实标注语义（只动镜像记账，不发任何进程信号）——真实回收链 = 子进程
+ * stdin-EOF 自灭（宿主退出 / EngineClient 销毁）+ disposeEngines()（registry）。
+ */
+export function markAllSpawnedChildrenDead(): number {
   const before = coreMirrorSlot().snapshot().length;
   coreMirrorSlot().killAll();
   return before;

@@ -39,10 +39,9 @@ import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engi
 import { emptyRegistry } from "./helpers/model-registry-mock.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { clearEngines } from "../engine/registry.ts";
-import { _resetSettledWatchdogsForTest } from "../lifecycle/settled-watchdog.ts";
 import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
 import { _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 
 interface ServiceInternals {
   store: RecordStore;
@@ -108,7 +107,6 @@ describe("集成：cancel × closeAfterRound（[区1-U2] cancel / 编排性关�
     service.dispose();
     clearEngines();
     _resetLifecycleState();
-    _resetSettledWatchdogsForTest();
     _resetCoreSpawnedChildrenMirrorForTest();
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });

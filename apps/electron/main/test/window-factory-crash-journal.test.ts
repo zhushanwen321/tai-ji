@@ -101,6 +101,8 @@ vi.mock('electron', () => ({
   app: { getAppPath: vi.fn(() => '/fake/app/root'), isPackaged: false },
   BrowserWindow: FakeBrowserWindow,
   shell: { openExternal: vi.fn(() => Promise.resolve()) },
+  // 非 mac 分支取主屏工作区算默认尺寸（mac 跑测不触达，为 CI linux 跑测补跨平台 mock）
+  screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }) },
 }))
 
 const mainLoggerStubs = {

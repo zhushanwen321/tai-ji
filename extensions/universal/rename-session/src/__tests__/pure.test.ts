@@ -301,8 +301,10 @@ describe("normalizeRenameConfig", () => {
 		expect(normalizeRenameConfig({ thinkingLevel: "off" }).thinkingLevel).toBe("off");
 	});
 
-	it("thinkingLevel 非法（未知值 / 非字符串）→ 回默认 off", () => {
-		expect(normalizeRenameConfig({ thinkingLevel: "ultra" }).thinkingLevel).toBe("off");
+	it("thinkingLevel：非空字符串原样采信（含词表外值），非字符串/缺失 → 默认 off", () => {
+		// 词表不在本层（合法性归写入侧 UI 与 pi）：显式写了未知档位不再被静默换成缺省档
+		expect(normalizeRenameConfig({ thinkingLevel: "ultra" }).thinkingLevel).toBe("ultra");
+		expect(normalizeRenameConfig({ thinkingLevel: "xhigh" }).thinkingLevel).toBe("xhigh");
 		expect(normalizeRenameConfig({ thinkingLevel: 5 }).thinkingLevel).toBe("off");
 		expect(normalizeRenameConfig({ thinkingLevel: null }).thinkingLevel).toBe("off");
 		// 缺失字段 → 默认 off（旧配置文件兼容：无 thinkingLevel 字段的存量配置自动回填）

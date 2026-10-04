@@ -42,7 +42,6 @@ gateway 侧请求参数权威：`SessionsSendParamsSchema`（`packages/gateway-p
 | ctx.streamMode | bus 推送恒 stream 粒度（assistant/thinking/tool 流） | §3 | 无 coarse 开关，适配器侧自行节流 |
 | ctx.sessionRootId | 无对等（源用 sessionKey 归属） | — | 丢弃 |
 | ctx.sessionDir | 会话文件由 gateway 按 agentId 固定布局落盘（`<state>/agents/<agentId>/sessions/`） | src/config/sessions/paths.ts:10-18 | 不可指定，忽略 |
-| ctx.engineFallback | `AgentCommandResultMetaOverrides.fallbackFrom/fallbackReason` | command/types.ts:20-25 | 诊断回填 |
 | resume.recordId | runId 体系：`idempotencyKey` 兼作 clientRunId | chat.ts:2968 | 关联键换成 runId |
 | resume.sessionRef | sessions.send `key`（sessionKey 指向既有会话即原地续聊）+ `sessionId` 定位 | schema/sessions.ts:144-146；config/sessions/types.ts:207-209 | 见 §6 |
 | resume.journalPath | 无 journal 概念 | — | 缺省 |
@@ -182,4 +181,4 @@ exec.approvals.*（get/set 配置面，`src/gateway/server-methods/exec-approval
 - 消息渠道本位的 persona：persona 由 workspace 文件（SOUL.md/AGENTS.md）按 agentId 解析，非 per-run .md 路径参数；task.agent 需做「路径 → 预注册 agentId」的注册表换算。
 - thinkingLevel 传参形态：源是 message 前缀命令 `/think`（chat.ts:3306-3308）不是结构化参数，且 per-session patch（sessions.patch thinkingLevel）另一条路——双通道并存。
 - run 生命周期：源 run 状态机由 `chat` 事件 state(final/error) + lifecycle phase(end/error) 双面表达，与 taiji「run 应答即终态」单点不同；`sessions.send` 的应答是受理 ack（runId）而非终态，适配器须把 WS 终态事件桥接为 run 应答 resolve。
-- turn 边界：taiji turn_end 语义锚定「一次 assistant 响应闭合」，源的 turn 是 loop 内部概念（bus 不直接发 turn 事件），需从 assistant message 序列合成 turn 边界。
+- turn 边界：taiji turn_end 语义锚定「一次 assistant 响应完成」，源的 turn 是 loop 内部概念（bus 不直接发 turn 事件），需从 assistant message 序列合成 turn 边界。

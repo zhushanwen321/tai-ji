@@ -23,11 +23,10 @@
  *
  * 生成的源码通过 `new Worker(code, { eval: true, workerData })` 在隔离的 Worker 线程运行。
  *
- * 通信协议（AC-4 契约，逐字保留）：
+ * 通信协议（AC-4 契约；[D3] 新增 phase 消息）：
  * Worker → Main (postMessage):
  * { type: "agent-call", callId: number, opts: AgentCallOpts }
- * { type: "workflow-call", callId: number, name: string, args: Record<string, unknown> }
- * { type: "return", runId: string, result: unknown }
+ * { type: "return", result: unknown }
  * { type: "error", runId: string, error: string }
  * { type: "log", phase: string, message: string }
  *   —— log() 的唯一通路：主线程 handleWorkerMessage 的 log case 即时消费（push 进
@@ -35,10 +34,15 @@
  *   记入 _workerLogs 随 return/error 消息再带回一份——同一日志在 errorLogs 占两格、
  *   TUI 双份，已退役。崩溃场景（return/error 消息未发出）丢 log 条目可接受：
  *   log 是 T7 补充可观测，非持久化权威。
+ * { type: "phase", phase: string }
+ *   —— [D3] phase() 切换的唯一通路：主线程 handleWorkerMessage 的 phase case 经
+ *   dispatchPhaseStarted 落 record（phase 状态机转移事件，重启折叠重建）。postMessage
+ *   异步通道固有竞态（worker 执行 phase() 后、消息送达壳侧前死亡 → 转移事件缺失）
+ *   由 fold 自愈规则承接（agent-started 载荷的 phase 字段驱动 pending → running）；
+ *   持久修复通道 = resume 后脚本确定性重放重新执行 phase() 补落事件。
  *
  * Main → Worker (parentPort.on("message")):
  * { type: "agent-result", callId: number, result: AgentResult, cached: boolean }
- * { type: "workflow-result", callId: number, result: unknown }
  * { type: "budget-update", budget: unknown }
  * { type: "abort", reason: string }
  *   —— [OR-3] 主线程在 abortRun/terminateRunningRuns 终止 run 时、worker.terminate
@@ -50,8 +54,7 @@
  * 超时——主线程对 agent-call 永不回话（畸形消息丢弃 / postMessage 双重失败 / runner
  * 不 settle）时 pending 以错误 resolve（对齐 agent-result 失败容错策略：不 reject、
  * 不放大成脚本 error → rebuild）。缺省（未传 timeoutMs）= 不限，与 runner 侧
- * per-call timeout 语义一致。workflow() 无 timeout 协议字段，不接线（其 pending
- * 由 abort 广播与嵌套 run 自身上界兜底）。
+ * per-call timeout 语义一致。
  */
 
 // ── Build worker source ─────────────────────────────────────
@@ -89,7 +92,7 @@ const WORKER_TEMPLATE_PRE = [
   '// ── safePostMessage wrapper: 统一 postMessage 防御（DataCloneError 等）──',
   '// Module-scope so the outer .then/.catch return/error handlers can use it.',
   '// context 取值约定（诊断标识）：固定为消息类型字面量——',
-  '// "agent-call" / "workflow-call" / "return" / "error"，调用方据此在日志里',
+  '// "agent-call" / "return" / "error"，调用方据此在日志里',
   '// 一眼定位是哪类 postMessage 失败。新增调用点必须传对应 context。',
   'function _safePost(msg, context) {',
   '  try { _parentPort.postMessage(msg); return true; }',
@@ -174,16 +177,24 @@ const WORKER_TEMPLATE_PRE = [
   '        // 需要检查错误时请用 returnMeta:true（resolve 值含 error 字段）。',
   '        // parsedOutput: validated data object from structured-output execute().',
   '        // Fallback to content (raw text) when no schema was requested or on error.',
+  '        // [ADR-0092] 带 schema 却既无 parsedOutput 也无显式 error = 结果出口断裂：',
+  '        // 对象形态是 schema 调用唯一合法结果，无文本回落选项——拒绝静默回落，',
+  '        // resolve 错误说明（非 returnMeta 单值，对齐 B-5 超时错误形态；returnMeta',
+  '        // 走 error 字段），脚本容错循环（parse 失败 → skip）自然接管。与缓存重放',
+  '        // 出口（_callCache 命中分支）同一判定，两处必须同批修改。',
   '        // W2 改动 9(b)：returnMeta===true 时 resolve {value,sessionFile,worktreePath,error,usage,durationMs,sessionId}',
   '        // （对称缓存重放 9c）；否则单值。usage/durationMs/sessionId 为 rfl 仪表透传（tier-1 §7.1，',
   '        // AgentResult 已含、此处原样转发，缺省 undefined 兼容旧主线程）。',
-  '        const _value = msg.result.parsedOutput ?? msg.result.content;',
+  '        const _schemaGap = pending.hasSchema && msg.result.parsedOutput === undefined && msg.result.error === undefined;',
+  '        const _value = _schemaGap',
+  '          ? "[agent] schema call produced neither a parsed object nor an explicit error; text fallback is rejected (schema results must be object-shaped, ADR-0092). Recovery: rerun this agent call."',
+  '          : (msg.result.parsedOutput ?? msg.result.content);',
   '        if (pending.returnMeta) {',
   '          pending.resolve({',
   '            value: _value,',
   '            sessionFile: msg.result.sessionFile,',
   '            worktreePath: msg.result.worktreePath,',
-  '            error: msg.result.error,',
+  '            error: _schemaGap ? _value : msg.result.error,',
   '            usage: msg.result.usage,',
   '            durationMs: msg.result.durationMs,',
   '            sessionId: msg.result.sessionId,',
@@ -191,14 +202,6 @@ const WORKER_TEMPLATE_PRE = [
   '        } else {',
   '          pending.resolve(_value);',
   '        }',
-  '      }',
-  '    } else if (msg.type === "workflow-result") {',
-  '      const pending = _pendingCalls.get(msg.callId);',
-  '      if (pending) {',
-  '        _pendingCalls.delete(msg.callId);',
-  '        // [OR-3] 结果已到，清除 per-call 超时 timer（workflow() 当前不挂 timer，防御性对称清理）',
-  '        if (pending.timer) { clearTimeout(pending.timer); }',
-  '        pending.resolve(msg.result);',
   '      }',
   '    } else if (msg.type === "abort") {',
   '      // [OR-3] 主线程 abortRun/terminateRunningRuns 的优雅解阻广播：全部 pending',
@@ -215,8 +218,15 @@ const WORKER_TEMPLATE_PRE = [
   '  });',
   '',
   // ── phase global ──
+  // [D3] phase() 事件化：切换 = 更新模块级当前 phase（agent-call 消息的归属快照
+  // 供源）+ postMessage 通知壳侧落 phase-started 转移事件。通知失败（_safePost
+  // 返回 false）只记 workerLogs 不中断脚本——转移事件缺失由 fold 自愈规则承接
+  // （agent-started 载荷的 phase 字段驱动 pending → running）。
   '  let _currentPhase = "";',
-  '  function phase(name) { _currentPhase = String(name); }',
+  '  function phase(name) {',
+  '    _currentPhase = String(name);',
+  '    _safePost({ type: "phase", phase: _currentPhase }, "phase");',
+  '  }',
   '',
   // ── log global ──
   '  function log(msg) {',
@@ -239,8 +249,8 @@ const WORKER_TEMPLATE_PRE = [
   '        scene: (secondArg && typeof secondArg === "object" && secondArg.scene) || undefined,\n' +
       '        phase: (secondArg && typeof secondArg === "object" && secondArg.phase) || undefined,',
   '        thinkingLevel: (secondArg && typeof secondArg === "object" && secondArg.thinkingLevel) || $THINKING_LEVEL,',
-  '        // step 级 turn 上限（turn limiter；显式 0/负 = 显式不限，压过 spawn watchdog env 兑底，SP-6）\n' +
-      '        // ?? 语义保真：仅 null/undefined 归 undefined（走 env 兑底），显式 0 保留（U5 参数 > env）',
+  '        // step 级 turn 上限（turn limiter；显式 0/负 = 显式不限，压过 spawn watchdog env 兜底，SP-6）\n' +
+      '        // ?? 语义保真：仅 null/undefined 归 undefined（走 env 兜底），显式 0 保留（U5 参数 > env）',
   '        maxTurns: (secondArg && typeof secondArg === "object" ? secondArg.maxTurns : undefined) ?? undefined,',
   '        // [OR-3] per-call timeoutMs 透传（string 分支此前丢弃该字段——对象分支已有；',
   '        // worker pending 消息层超时依赖它流到 agent-call 消息）',
@@ -298,13 +308,17 @@ const WORKER_TEMPLATE_PRE = [
   '      // 见 agent-result 消息处理的注释：拒绝传播失败到 agent 外部。',
   '      // W2 改动 9(c)：returnMeta 分支（对称 handler 9b），opts 仍在闭包作用域。',
   '      if (!cached) return undefined;',
-  '      const _cachedValue = cached.parsedOutput ?? cached.content;',
+  '      // [ADR-0092] schema 出口契约，与 agent-result 活体处理同判（见该处注释，两处同批修改）。',
+  '      const _schemaGap = opts.schema !== undefined && cached.parsedOutput === undefined && cached.error === undefined;',
+  '      const _cachedValue = _schemaGap',
+  '        ? "[agent] schema call produced neither a parsed object nor an explicit error; text fallback is rejected (schema results must be object-shaped, ADR-0092). Recovery: rerun this agent call."',
+  '        : (cached.parsedOutput ?? cached.content);',
   '      if (opts.returnMeta === true) {',
   '        return {',
   '          value: _cachedValue,',
   '          sessionFile: cached.sessionFile,',
   '          worktreePath: cached.worktreePath,',
-  '          error: cached.error,',
+  '          error: _schemaGap ? _cachedValue : cached.error,',
   '          usage: cached.usage,',
   '          durationMs: cached.durationMs,',
   '          sessionId: cached.sessionId,',
@@ -320,7 +334,9 @@ const WORKER_TEMPLATE_PRE = [
   '      return Promise.reject(new Error("postMessage failed for agent-call (callId=" + callId + "): see workerLogs"));',
   '    }',
   '    return new Promise((resolve, reject) => {',
-  '      const _pending = { resolve: resolve, reject: reject, returnMeta: opts.returnMeta === true, timer: undefined };',
+  '      // hasSchema：agent-result 处理段（worker 顶层，opts 不在作用域）做 schema 出口',
+  '      // 契约判定（ADR-0092）用——调用点闭包里的 opts.schema 不可达，随 pending 存取。',
+  '      const _pending = { resolve: resolve, reject: reject, returnMeta: opts.returnMeta === true, hasSchema: opts.schema !== undefined, timer: undefined };',
   '      // [OR-3] per-call timeoutMs：消息层自己的超时——主线程对 agent-call 永不回话',
   '      //（畸形消息丢弃 / postMessage 双重失败 / runner 不 settle）时 pending 不再永挂',
   '      //（旧实现零超时 → agent() 永挂 → worker 不退出 → run 永久 running）。',
@@ -399,43 +415,7 @@ const WORKER_TEMPLATE_PRE = [
   '      }',
   '      return result;',
   '    }',
-  '    // Cartesian product mode: pipeline([items], stage1, stage2, ...)',
-  '    if (Array.isArray(firstArg) && restStages.length > 0 && typeof restStages[0] === "function") {',
-  '      const results = [];',
-  '      for (let idx = 0; idx < firstArg.length; idx++) {',
-  '        const item = firstArg[idx];',
-  '        let val = item;',
-  '        let failed = false;',
-  '        for (const stage of restStages) {',
-  '          if (failed) break;',
-  '          try { val = await stage(val); }',
-  '          catch (e) {',
-  '          const msg = e && e.message ? e.message : String(e);',
-  '          _pushWorkerLog("error", ["[pipeline cartesian stage failed for item " + (idx + 1) + "]", msg]);',
-  '          val = null; failed = true;',
-  '          }',
-  '        }',
-  '        results.push(val);',
-  '      }',
-  '      return results;',
-  '    }',
-  '    throw new Error("pipeline() expects pipeline([stage1, ...]) or pipeline([items], stage1, ...)");',
-  '  }',
-  '',
-  '  // ── workflow global — nested workflow invocation ──',
-  '  async function workflow(name, args) {',
-  '    if (typeof name !== "string" || name.length === 0) {',
-  '      throw new Error("workflow() requires a workflow name string as first argument");',
-  '    }',
-  '    const workflowArgs = (typeof args === "object" && args !== null) ? args : {};',
-  '    const callId = _callIdCounter;',
-  '    _callIdCounter++;',
-  '    if (!_safePost({ type: "workflow-call", callId, name, args: workflowArgs }, "workflow-call")) {',
-  '      return Promise.reject(new Error("postMessage failed for workflow-call (name=" + name + "): see workerLogs"));',
-  '    }',
-  '    return new Promise((resolve, reject) => {',
-  '      _pendingCalls.set(callId, { resolve, reject });',
-  '    });',
+  '    throw new Error("pipeline() expects pipeline([stage1, ...])");',
   '  }',
   '',
   '  // ── User workflow script ──',
@@ -445,14 +425,14 @@ const WORKER_TEMPLATE_PRE = [
 const WORKER_TEMPLATE_POST = [
   '  // ── Auto-invoke execute() for module.exports pattern ──',
   '  if (typeof module !== "undefined" && module.exports && typeof module.exports.execute === "function") {',
-  '    return await module.exports.execute({ agent, parallel, pipeline, phase, log, workflow, $ARGS, $WORKSPACE, $BUDGET });',
+  '    return await module.exports.execute({ agent, parallel, pipeline, phase, log, $ARGS, $WORKSPACE, $BUDGET });',
   '  }',
   '})().then((result) => {',
   '  const runId = (_workerData.args && typeof _workerData.args === "object" && _workerData.args._runId) || "";',
-  '  if (!_safePost({ type: "return", runId, result, workerLogs: _workerLogs }, "return")) {',
+  '  if (!_safePost({ type: "return", result, workerLogs: _workerLogs }, "return")) {',
   '    // [F1] return 值不可克隆（含 function/Symbol/循环引用 → DataCloneError）时 _safePost',
   '    // 只能记日志返回 false——若不补救，worker 将静默 exit(0)，主线程收不到任何终态消息，',
-  '    // run 永久 running、runAndWait 悬挂。回发可克隆的 error 消息（DataCloneError 详情',
+  '    // run 永久 running、无终态。回发可克隆的 error 消息（DataCloneError 详情',
   '    // 已由 _safePost 记入 _workerLogs 随消息带回），让主线程 handleScriptError 接管，',
   '    // run 经既有重试矩阵收敛到终态 failed。',
   '    _safePost({ type: "error", runId, error: "Workflow return value could not be delivered (structured-clone failed) — see workerLogs for the postMessage error", workerLogs: _workerLogs }, "error");',

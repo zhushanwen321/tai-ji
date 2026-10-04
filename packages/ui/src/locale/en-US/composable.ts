@@ -1,14 +1,25 @@
 export default {
-  agentProcessing: 'Agent is processing',
-  // Defer-retry circuit breaker (session-dead part 3): actionable notice — stall suspicion + escape hatch
-  deferFlushStalled: 'pi is still processing, the message may be stuck: auto-retry stopped. Right-click the session in the sidebar to force quit it, then send again',
   sendFailed: 'Failed to send message: {msg}',
-  sendAutoRequeued: 'Message was temporarily rejected; it has been automatically re-queued for retry',
-  supplementSendFailed: 'Failed to send supplement: {msg}',
   nextTurnSendFailed: 'Failed to send next turn: {msg}',
   stopFailed: 'Failed to stop: {msg}',
   compactFailed: 'Failed to compact: {msg}',
   bashFailed: 'Failed to run bash: {msg}',
+  // [U5 message revoke D8] revoke orchestration toasts (D8 spec table is the presentation SSOT;
+  // keys map 1:1 to core useChat REVOKE_ERROR_TOAST_KEYS) + pending-cancel leg and RPC failures
+  revokeFailed: 'Revoke failed: {msg}',
+  revokeCancelFailed: 'Failed to cancel delivery: {msg}',
+  revokeDeliveredRace: 'Message was just delivered — click revoke again',
+  revokeRestoreContentMissing: 'Revoked, but the original text could not be restored',
+  revokeBusy: 'Generating — stop the turn to revoke',
+  revokeNoMapping: 'Message cannot be revoked. Try refreshing the conversation and retry.',
+  revokeExtensionMissing: 'Revoke component not ready — restart the session',
+  revokeNavFailed: 'Revoke incomplete — please retry',
+  revokePiReclaimed: 'Session process was reclaimed and could not be restored — please retry',
+  revokeWorkflowRunning: 'Background task running — finish or stop it before revoking',
+
+  // Receipt unreachable (disconnect / timeout): the command may have started — never say
+  // "failed" (invites a re-run = double execution); recovery = check the conversation first.
+  bashOutcomeUnknown: 'Bash command state unknown: it may have started. Check the conversation before running it again ({msg})',
   // `@` directive messages (U2b): empty-text guard + RPC failure (readable error, S8)
   subagentDirectiveEmpty: 'Directive message is empty, please type content for the subagent',
   subagentDirectiveFailed: 'Failed to send directive message: {msg}',
@@ -26,8 +37,6 @@ export default {
   cwdFallbackToHome: 'No directory selected, created in home directory',
   imageMigratePartialFailed: '{count} image(s) failed to migrate (temp file may be cleaned), will try original path',
   loadFailed: 'Load failed',
-  contextCompacted: 'Context compacted',
-  branched: 'Branched',
   copyLabel: 'Copy',
   removeLabel: 'Remove',
   // skill chip tooltip (C5): injection behavior + size cap (50KB = injection budget cap)

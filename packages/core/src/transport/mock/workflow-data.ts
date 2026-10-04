@@ -21,8 +21,8 @@ export const fixtureWorkflows: WorkflowRunRecord[] = [
     usedTokens: 50000,
     totalCallCount: 2,
     agentCalls: [
-      { id: 0, agent: 'dev-W1', status: 'completed', phase: 'Dev', sessionId: 'sess-agent-mock-1' },
-      { id: 1, agent: 'review-W1', status: 'completed', phase: 'Review', sessionId: 'sess-agent-mock-2' },
+      { id: 0, agent: 'dev-W1', status: 'done', phase: 'Dev', sessionId: 'sess-agent-mock-1' },
+      { id: 1, agent: 'review-W1', status: 'done', phase: 'Review', sessionId: 'sess-agent-mock-2' },
     ],
     stateFilePath: '/data/wf-mock-001.jsonl',
   },

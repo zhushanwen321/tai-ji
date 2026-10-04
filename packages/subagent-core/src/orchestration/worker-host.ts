@@ -14,7 +14,7 @@
  * handlers.onExit(code, handle)，调用方用 handle.isCurrent 做竞态防护（C.3 + G-025）。
  * - eval:true + 内联 buildWorkerScript 源码字符串（C.2：不用不存在的 bootstrap 文件）。
  * - workerData: { scriptPath, args, workspace, meta }（不含 callCache/budget——
- * 这些是 RunState 字段，由 lifecycle 在调用 start 前注入到 args 或独立处理）。
+ * 这些是 RunLifecycleState 字段，由 lifecycle 在调用 start 前注入到 args 或独立处理）。
  * - temp file 清理逻辑移到 Engine lifecycle，本处不管。
  */
 

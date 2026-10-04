@@ -3,7 +3,7 @@
  *
  * 构建者白盒 + 使用者黑盒：经 plugin-sdk createMockAgentAPI mock 驱动 activate()
  * 与注册的 command handlers，覆盖八块：
- * ① handleWrite 回执分支矩阵（accepted/busy/compacting/bash/command-missing/其余
+ * ① handleWrite 回执分支矩阵（accepted/command-missing/其余（hook-blocked/error）
  *    + 无效 id + TASK_NOT_FOUND 自愈）
  * ② doRefresh 的 E11 游标失效全量重拉与 E4 恢复两态（terminal vs recovering）
  * ③ 重试预算耗尽态稳定（不重试不清零，外部信号重置预算）
@@ -16,6 +16,8 @@
  *    ensureMirror 为新 sid 补挂）
  * ⑧ 展示层三态分支（已过期「即将触发」两态文案 / 上次成败标记 + 失败原因行 /
  *    成功标记且无原因行——经 handleOpen 推树断言）
+ * ⑨ 撤回信号镜像重建（'taiji:revoked' → 丢弃累计 + 全量重拉，折叠不含被撤任务；
+ *    任务域订阅仍走增量不误重建）
  *
  * 隔离：被测模块持有模块级状态（mirrors Map / focusSessionId），每条用例
  * vi.resetModules() 后动态 import 取 fresh 模块。timer 面（防抖 200ms / 重试 2s）
@@ -34,10 +36,11 @@ import type {
 import type { PluginContext } from '../../../../packages/runtime/src/services/plugin-service/plugin-types.js'
 import type { GuiComponent, ScheduledTask, TreeItem } from '../../../../packages/extension-protocol/src/index.ts'
 
-/** sendMessage 回执 reason 词表（与 SDK sendMessage 签名的闭集同源） */
+/** sendMessage 回执 reason 词表（与 SDK sendMessage 签名的闭集同源 = SendPromptReason 三值；
+ *  busy/compacting/bash 退役值已删，运行面不再产出，mock 不得注入） */
 type SendReceipt = {
   accepted: boolean
-  reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error'
+  reason?: 'command-missing' | 'hook-blocked' | 'error'
 }
 
 type PluginModule = typeof import('../index.ts')
@@ -108,8 +111,8 @@ interface Harness {
   api: ReturnType<typeof createMockAgentAPI>
   /** activate() 注册的 command handlers（id → handler） */
   handlers: Map<string, (args?: unknown) => unknown>
-  /** onEntriesInvalidated 捕获的失效回调（外部信号注入口） */
-  invalidate: (sessionId: string) => void
+  /** onEntriesInvalidated 捕获的失效回调（外部信号注入口；customType 缺省 = 任务域） */
+  invalidate: (sessionId: string, customType?: string) => void
   /** readEntries 调用记录 */
   readCalls: Array<{ sessionId: string; opts: { customType: string; sinceEntryId?: string } }>
   /** sendMessage 调用记录 */
@@ -205,14 +208,16 @@ async function setup(opts: {
   )
   api.ui.updateHeaderAction = vi.fn(async () => ({ updated: true }))
 
-  let invalidateHandler: ((sessionId: string, customType: string) => void) | null = null
+  let invalidateHandlers = new Map<string, (sessionId: string, customType: string) => void>()
   api.sessions.onEntriesInvalidated = vi.fn(
     (
       _sessionId: string,
-      _customType: string,
+      customType: string,
       handler: (sessionId: string, customType: string) => void,
     ): { dispose: () => void } => {
-      invalidateHandler = handler
+      // 按 customType 分键捕获（插件对 TASK_ENTRY_TYPE 与 'taiji:revoked' 各订一条，
+      // 同一 mock 承载双订阅；dispose 注入错误对两条订阅同样生效）
+      invalidateHandlers.set(customType, handler)
       return {
         dispose: () => {
           if (opts.invalidateDisposeError) throw opts.invalidateDisposeError
@@ -273,7 +278,8 @@ async function setup(opts: {
     mod,
     api,
     handlers,
-    invalidate: (sessionId: string) => invalidateHandler?.(sessionId, TASK_ENTRY_TYPE),
+    invalidate: (sessionId: string, customType: string = TASK_ENTRY_TYPE) =>
+      invalidateHandlers.get(customType)?.(sessionId, customType),
     readCalls,
     sendCalls,
     showModalCalls,
@@ -400,12 +406,8 @@ describe('handleWrite: 回执分支矩阵', () => {
     })
   }
 
-  it.each([
-    ['busy', '会话正在忙，操作未生效（可手敲 /schedule off aaaabbbb）'],
-    ['compacting', '会话正在忙，操作未生效（可手敲 /schedule off aaaabbbb）'],
-    ['bash', '会话正在忙，操作未生效（可手敲 /schedule off aaaabbbb）'],
-  ] as const)('reason=%s → 忙碌文案 + 命令已发出', async (reason, expected) => {
-    const h = await writeSetup({ accepted: false, reason })
+  it('reason=error → 命令已发出 + 通用重试文案', async () => {
+    const h = await writeSetup({ accepted: false, reason: 'error' })
     await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
 
     await h.handlers.get('scheduler-manager.toggle')?.({ id: TASK, enabled: false })
@@ -419,7 +421,7 @@ describe('handleWrite: 回执分支矩阵', () => {
         requireCommand: 'schedule',
       },
     ])
-    expect(ansiLines(h.lastTree())).toContain(expected)
+    expect(ansiLines(h.lastTree())).toContain('操作未生效，请重试')
   })
 
   it('reason=command-missing → 扩展检查指引文案', async () => {
@@ -657,7 +659,7 @@ describe('handleOpen: modal 开合链', () => {
 
 describe('onModalClosed / onDidDestroySession: 生命周期', () => {
   const TASK = 'aaaabbbb'
-  const BUSY_LINE = '会话正在忙，操作未生效（可手敲 /schedule off aaaabbbb）'
+  const RETRY_LINE = '操作未生效，请重试'
 
   it('本 modal 关闭清 notice；别的 modal 关闭不清', async () => {
     const h = await setup({
@@ -665,19 +667,19 @@ describe('onModalClosed / onDidDestroySession: 生命周期', () => {
         { sessionFile: SESSION_FILE, entries: [upsertEntry(TASK, true, 'e1')], leafEntryId: 'e1' },
         { sessionFile: SESSION_FILE, entries: [], leafEntryId: 'e1' },
       ],
-      sendMessageReceipt: { accepted: false, reason: 'busy' },
+      sendMessageReceipt: { accepted: false, reason: 'error' },
     })
     await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
 
-    // 制造行内 notice（忙碌文案）
+    // 制造行内 notice（失败重试文案）
     await h.handlers.get('scheduler-manager.toggle')?.({ id: TASK, enabled: false })
-    expect(ansiLines(h.lastTree())).toContain(BUSY_LINE)
+    expect(ansiLines(h.lastTree())).toContain(RETRY_LINE)
 
     // 别的 modal 关闭：notice 保留（下一轮失效刷新后仍可见）
     h.closeModal('other-plugin.modal')
     h.invalidate('s-1')
     await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
-    expect(ansiLines(h.lastTree())).toContain(BUSY_LINE)
+    expect(ansiLines(h.lastTree())).toContain(RETRY_LINE)
 
     // 本 modal 关闭：notice 清除（重开首帧干净，树中无 ansi 行）
     h.closeModal('scheduler-manager.panel')
@@ -814,6 +816,57 @@ describe('onDidActivateSession: 焦点切换 + ensureMirror 补挂', () => {
     const lastCall = vi.mocked(h.api.views.update).mock.calls.at(-1)
     expect(lastCall?.[0]).toBe('modal-scheduler-manager-scheduler-manager.panel')
     expect(lastCall?.[2]).toEqual({ sessionId: 's-2' })
+  })
+})
+
+// ── ⑨ 撤回信号镜像重建（U7：'taiji:revoked' → 丢弃累计 + 全量重拉）────────────
+
+describe('onEntriesInvalidated(taiji:revoked): 树回退镜像重建', () => {
+  const REVOKED = 'taiji:revoked'
+
+  it('创建任务 op 累计后撤回信号到达 → 丢弃累计 + 无游标全量重拉 → 折叠不含被撤任务', async () => {
+    const h = await setup({
+      readScript: [
+        // 首拉全量：任务 op 在累计镜像内（缺陷形态：被撤任务残留启用态徽标 1）
+        { sessionFile: SESSION_FILE, entries: [upsertEntry('aaaabbbb', true, 'e1')], leafEntryId: 'e1' },
+        // 撤回后全量重拉：runtime 活跃路径过滤使被撤 op 不在回包（空集 + 新游标）
+        { sessionFile: SESSION_FILE, entries: [], leafEntryId: 'L-e2' },
+      ],
+    })
+    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
+    expect(h.readCalls).toHaveLength(1)
+    expect(lastHeaderAction(h.api).badge).toBe('1')
+
+    // 撤回信号（runtime 树回退确认后广播）→ 镜像重建路径
+    h.invalidate('s-1', REVOKED)
+    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
+
+    // 全量重拉（无 sinceEntryId——累计与游标均已丢弃，不带走被撤 op 的增量基线）
+    expect(h.readCalls).toHaveLength(2)
+    expect(h.readCalls[1]?.opts).toEqual({ customType: TASK_ENTRY_TYPE })
+    // 折叠结果 = 干净集合：徽标清空、面板回空态提示、零任务操作条
+    expect(lastHeaderAction(h.api).badge).toBeUndefined()
+    expect(h.lastTree().filter((n) => n.type === 'action-bar')).toHaveLength(0)
+    expect(ansiLines(h.lastTree())).toContain(
+      '本会话还没有定时任务 —— 在对话里说，或手敲 /schedule <排期> <内容> 创建。',
+    )
+  })
+
+  it('任务域订阅与撤回域订阅并存：TASK_ENTRY_TYPE 信号仍走增量（不误重建）', async () => {
+    const h = await setup({
+      readScript: [
+        { sessionFile: SESSION_FILE, entries: [upsertEntry('aaaabbbb', true, 'e1')], leafEntryId: 'e1' },
+        // 任务域失效 → 增量 append（游标仍在，不全量）
+        { sessionFile: SESSION_FILE, entries: [upsertEntry('ccccdddd', false, 'e2')], leafEntryId: 'e2' },
+      ],
+    })
+    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
+
+    h.invalidate('s-1') // TASK_ENTRY_TYPE（缺省）
+    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
+
+    expect(h.readCalls[1]?.opts.sinceEntryId).toBe('e1')
+    expect(lastHeaderAction(h.api).badge).toBe('1')
   })
 })
 

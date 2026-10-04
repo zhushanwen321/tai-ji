@@ -1,0 +1,29 @@
+{
+  "name": "crash-on-abort",
+  "description": "崩溃注入（F4① 前置构造）：审批 select 挂起后收到 abort 即 SIGKILL 自杀——abort RPC 无应答、pi 不在活跃表，『pending 残留而 abort 无法完成』形态。",
+  "params": {
+    "selectRegisterDelayMs": 0,
+    "abortMode": "crash"
+  },
+  "onPrompt": {
+    "planStateEntry": {
+      "isActive": true,
+      "planFilePath": "/fixture/plans/fixture-requirement/plan.md",
+      "requirement": "给设置页加主题切换",
+      "templateName": null,
+      "skills": [],
+      "docs": [{ "fileName": "plan.md", "absPath": "/fixture/plans/fixture-requirement/plan.md", "sourceSkill": "", "version": 1 }],
+      "reviewState": "awaiting"
+    },
+    "assistant": ["计划文档已写好并登记，提交审批。"],
+    "select": {
+      "kind": "plan-review",
+      "id": "pr-crash-abort",
+      "docs": [{ "fileName": "plan.md", "absPath": "/fixture/plans/fixture-requirement/plan.md", "sourceSkill": "", "version": 1 }]
+    },
+    "agentEnd": false
+  },
+  "onAbort": {
+    "exit": { "signal": "SIGKILL" }
+  }
+}

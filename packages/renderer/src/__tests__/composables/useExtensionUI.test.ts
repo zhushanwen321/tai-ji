@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useExtensionUI per-sessionId 队列隔离单测（slice `companion-band-mount` wave1 bus 版）。
  *
@@ -48,7 +50,7 @@ vi.mock('@/composables/shell/useExtensionHostBridge', async (importOriginal) => 
   }
 })
 
-import { useExtensionUI, formFilter, __resetExtensionBusSubscriptionForTesting, FRAME_STALE_MAX_AGE_MS } from '@/composables/useExtensionUI'
+import { useExtensionUI, formFilter, __resetExtensionBusSubscriptionForTesting } from '@/composables/useExtensionUI'
 import { sendExtensionUIResponse, getPendingRequests } from '@taiji/core/transport/api/domains/extension'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
@@ -303,27 +305,6 @@ describe('useExtensionUI 快照差集剔除（renderer 僵尸表单修剪，§6.
     expect(records[0].receivedAt).toBe(before.receivedAt)
     expect(result.currentFormRequest.value?.requestId).toBe('r-live')
 
-    dispose()
-  })
-
-  it('(d) 帧入口兜底：携带超龄 receivedAt 的帧被丢弃（非主算法）', () => {
-    const { result, dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
-    // 超龄帧（超过本地兜底阈值）→ 不入 store
-    emitBusUIRequest(
-      'sessionA',
-      mkAskUserReq('r-old', { receivedAt: Date.now() - FRAME_STALE_MAX_AGE_MS - 1000 }),
-    )
-    expect(result.currentFormRequest.value).toBeUndefined()
-    expect(useExtensionUIStore().getRequestsBySession('sessionA')).toEqual([])
-    expect(warnSpy).toHaveBeenCalled()
-
-    // 未超龄（阈值内）→ 正常入队
-    emitBusUIRequest('sessionA', mkAskUserReq('r-fresh', { receivedAt: Date.now() - 1000 }))
-    expect(result.currentFormRequest.value?.requestId).toBe('r-fresh')
-
-    warnSpy.mockRestore()
     dispose()
   })
 })

@@ -41,8 +41,8 @@ export class RunRuntime {
  *
  * [F1] worker exit(0) 且本标记为 false = worker 静默退出、未交付任何终态——最常见根因
  * 是 execute() 返回值不可克隆，worker 侧 _safePost 吞掉 DataCloneError 后 return 消息
- * 根本没发出。旧实现 handleWorkerExit 对 code===0 no-op → run 永久 running、runAndWait
- * 悬挂。handleWorkerExit 据此判定转 done,failed。
+ * 根本没发出。旧实现 handleWorkerExit 对 code===0 no-op → run 永久 running、无终态。
+ * handleWorkerExit 据此判定转 done,failed。
  *
  * 按代际归零：字段挂在 RunRuntime（每代际 new 一个实例）而非 run.meta——script-error
  * 重试退避窗口内（error 消息已收到、run 仍 running、旧 worker exit(0)）必须 no-op 等

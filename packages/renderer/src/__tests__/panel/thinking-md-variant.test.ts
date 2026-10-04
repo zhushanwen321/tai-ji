@@ -24,6 +24,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick, h } from 'vue'
 import { Block, MarkdownRenderer } from '@taiji/ui'
+import type { IncrementalMarkdownCache, IncrementalMarkdownResult } from '@taiji/ui'
 import { mockChatProvide } from '@/__tests__/helpers/chat-view-deps'
 
 // renderMarkdown 经 deps 注入：同步返回 markdown 结构段（绕过 shiki 异步加载）
@@ -62,12 +63,23 @@ function mockMarkdownSegments(html: string): void {
   mockRenderMarkdown.mockReturnValue([{ type: 'text', content: html }])
 }
 
-/** mount 公共 deps（renderMarkdown mock + 子组件 stub） */
+/** mount 公共 deps（renderMarkdown mock + 子组件 stub）。
+ *  [D6 收敛] renderMarkdownIncremental 必填后渲染走增量通道：桥接 mockRenderMarkdown 输出
+ *  为单帧增量 tail，使 mockMarkdownSegments 喂的段真实进渲染树。 */
 function mountWithDeps(comp: unknown, props: Record<string, unknown>) {
+  const renderMarkdownIncremental = vi.fn(
+    async (source: string, cache: IncrementalMarkdownCache | null): Promise<IncrementalMarkdownResult & { cache: IncrementalMarkdownCache }> => ({
+      prefixSegments: [],
+      tailSegments: await mockRenderMarkdown(source),
+      stableBoundary: 0,
+      mode: 'incremental' as const,
+      cache: cache ?? { boundary: 0, prefixText: '', prefixSegments: [], nextSegId: 0 },
+    }),
+  )
   return mount(comp as never, {
     props,
     global: {
-      provide: mockChatProvide({ renderMarkdown: mockRenderMarkdown }),
+      provide: mockChatProvide({ renderMarkdown: mockRenderMarkdown, renderMarkdownIncremental }),
       stubs: { MermaidRenderer: MermaidStub, AmbiguousFilePopover: AmbiguousPopoverStub },
     },
   })

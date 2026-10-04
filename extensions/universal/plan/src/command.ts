@@ -7,9 +7,9 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { activatePlanMode, resolveSkills } from "./enter.js";
 import type { SkillResolution } from "./enter.js";
 import type { SkillRef } from "./prompts.js";
-import type { PlanAbortControllers, PlanSessionMap, PlanState } from "./state.js";
-import { PLAN_CONTEXT_CUSTOM_TYPE, getPlanState, resetPlanState } from "./state.js";
-import { updatePlanWidget } from "./widget.js";
+import { exitPlanMode } from "./tool.js";
+import type { PlanCtx, PlanState } from "./state.js";
+import { PLAN_CONTEXT_CUSTOM_TYPE, getPlanState } from "./state.js";
 
 /** /plan 参数解析产物：requirement = 最早 flag 标记前的自由文本；skills / templatePath 为 undefined = 未提供对应 flag */
 export interface ParsedPlanArgs {
@@ -96,8 +96,7 @@ export function resolveTemplateFile(raw: string, projectDir: string): TemplateFi
 
 export function registerPlanCommand(
   pi: ExtensionAPI,
-  sessions: PlanSessionMap,
-  controllers: PlanAbortControllers,
+  planCtx: PlanCtx,
 ): void {
   pi.registerCommand("plan", {
     description:
@@ -118,11 +117,11 @@ export function registerPlanCommand(
     handler: async (args: string, ctx: ExtensionContext) => {
       const trimmed = args.trim();
       const sessionId = ctx.sessionManager.getSessionId();
-      const state = getPlanState(sessions, sessionId, ctx);
+      const state = getPlanState(planCtx.states, sessionId, ctx);
 
       // Subcommand: abort
       if (trimmed === "abort") {
-        await handleAbort(pi, sessions, controllers, sessionId, ctx, state);
+        await handleAbort(pi, planCtx, sessionId, ctx, state);
         return;
       }
 
@@ -164,35 +163,26 @@ export function registerPlanCommand(
       }
 
       // Enter plan mode
-      handleEnterPlanMode(pi, sessions, sessionId, ctx, state, args);
+      handleEnterPlanMode(pi, planCtx, sessionId, ctx, state, args);
     },
   });
 }
 
-/** Handle /plan abort subcommand */
+/**
+ * Handle /plan abort subcommand——exit 链单入口（D-B1-1）的 command 路投影：
+ * 动作清单（解散挂起/转移落盘/widget/工具集恢复/反馈文案）全在 exitPlanMode 内，
+ * 本函数只把 ExitResult 投影为 notify。非活跃格全谱（idle/终态）统一 warn 纠偏
+ * 文案（原 isActive 前置守卫的 info no-op 已由单入口守卫极性取代，D-B1-1 行为变更）。
+ */
 async function handleAbort(
   pi: ExtensionAPI,
-  sessions: PlanSessionMap,
-  controllers: PlanAbortControllers,
+  planCtx: PlanCtx,
   sessionId: string,
   ctx: ExtensionContext,
   state: PlanState,
 ): Promise<void> {
-  if (!state.isActive) {
-    ctx.ui.notify("No active plan mode.", "info");
-    return;
-  }
-  // E10 顺序不可反（因果链）：controller.abort() → 挂起 select resolve undefined →
-  // tool execute 走「已取消」分支返回 → turn 正常结束 → agent_settled 到达 →
-  // busy defer 队列恢复投递。若先 reset 后 abort，挂起 select 无人 resolve 且
-  // runtime 不超时 → pi turn 永占用 → 后续消息永 defer → session 只能 forceQuit。
-  controllers.get(sessionId)?.abort();
-  controllers.delete(sessionId);
-  const updatedState = resetPlanState(pi, sessions, sessionId, ctx);
-  updatePlanWidget(ctx, updatedState);
-  // Restore full tool set (SDK does NOT support undefined)
-  pi.setActiveTools(pi.getAllTools().map((t: { name: string }) => t.name));
-  ctx.ui.notify("Plan mode aborted.", "info");
+  const result = exitPlanMode(pi, planCtx, sessionId, ctx, state, "command");
+  ctx.ui.notify(result.message, result.level);
 }
 
 /** Handle /plan status subcommand */
@@ -270,7 +260,7 @@ function reportTemplateFlagError(pi: ExtensionAPI, problem: string): void {
 /** Handle entering plan mode */
 function handleEnterPlanMode(
   pi: ExtensionAPI,
-  sessions: PlanSessionMap,
+  planCtx: PlanCtx,
   sessionId: string,
   ctx: ExtensionContext,
   state: PlanState,
@@ -312,7 +302,14 @@ function handleEnterPlanMode(
   // --skills E1 校验（互斥已判过后，走到这里 templatePath 必为 undefined）
   const requested = parsed.skills ?? [];
   if (parsed.skills !== undefined && requested.length === 0) {
-    reportUnknownSkills(pi, { ok: false, available: pi.getCommands().filter((c) => c.source === "skill").map((c) => c.name), missing: [] });
+    // 空 --skills 报错复用 resolveSkills 单源（C1 去重：空请求 → ok:false + 全量
+    // available + 空 missing，报错文案不变）。TS 无法静态收窄「空请求恒 ok:false」，
+    // 运行时 fail-fast 承载该不变量（tool.ts switch default 不可达断言同风格）
+    const failed = resolveSkills(pi, requested);
+    if (failed.ok) {
+      throw new Error("plan: empty --skills must fail skill resolution (invariant)");
+    }
+    reportUnknownSkills(pi, failed);
     return;
   }
   let resolved: SkillRef[] = [];
@@ -329,7 +326,7 @@ function handleEnterPlanMode(
   // 进入核心收敛到 enter.ts（plan(enter) tool 与 slash 命令共用）；本入口只负责
   // flag 解析/校验（上方）与提示词投递（下方 sendMessage custom message 注入）。
   // state 由 activatePlanMode 就地改 + persist（getPlanState 缓存同一对象）。
-  const { prompt } = activatePlanMode(pi, sessions, sessionId, ctx, {
+  const { prompt } = activatePlanMode(pi, planCtx.states, sessionId, ctx, {
     requirement,
     skills: resolved,
     projectDir: ctx.cwd,

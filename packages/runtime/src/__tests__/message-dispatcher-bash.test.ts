@@ -2,7 +2,7 @@
  * MessageDispatcher bash 执行链路测试（composer-bash-execute W1 + W2 并发放宽）。
  *
  * 锁定：
- * - T4: sendBash busy 时（isBashRunning=true）→ 广播 send.rejected{reason:'busy'} + 不调 client.bash + 返回 {blocked:true, rejected:true}
+ * - T4: sendBash busy 时（isBashRunning=true）→ 广播 send.rejected{reason:'busy'} + 不调 client.bash + 返回回执 rejected
  * - T4c: sendBash isCompacting=true → 同样 reject（bash↔compact 互斥仍保留）
  * - T4b(w2+W1): sendBash isGenerating=true → 允许并发（不 reject）+ 双分支延迟：bashStart 即时，
  *           bashResult 压入 per-session 待落列（镜像 pi _pendingBashMessages），flush 时按序发布。
@@ -10,10 +10,11 @@
  *           live 入流位置对齐 pi 落盘位置（级联末）。仅保留 bash↔bash（T4）/ bash↔compacting（T4c）互斥。
  * - T4b-flush / T4b-flush-noop / T4b-error-immediate：待落列 flush 顺序 / no-op / 错误帧不延迟。
  * - T5: sendBash 正常 → 广播 message.bashStart → client.bash resolve → 广播 message.bashResult（完整字段）+ finally isBashRunning 复位 false
- * - T6: sendBash client.bash reject → 广播 message.error + finally isBashRunning 复位 + 返回 {blocked:true}
+ * - T6: sendBash client.bash reject → 广播 message.error + finally isBashRunning 复位 + 返回回执 settled+error
  * - T7: sendMessage 互斥（isBashRunning=true 时 sendMessage → 广播 send.rejected + 不调 client.prompt）—— G1 修复
  *       注意：sendMessage 预检本期不放宽（spec OQ-1），isGenerating/isBashRunning/isCompacting 三者仍互斥。
- * - T8: abortBash → client.abortBash() 调用 + 广播 message.bashResult{cancelled:true} + isBashRunning 复位
+ * - T8: abortBash → client.abortBash() 调用 + 广播 message.bashAborted 兜底终态（D4-3 独立帧，
+ *       原 bashResult{command:''} 哨兵退役）+ isBashRunning 复位
  *
  * mock 模式参考 test/message-dispatcher-precheck.test.ts（makeMocks/makeMockSession），
  * 扩展：client 加 bash/abortBash，session.isBashRunning 需可设。
@@ -33,11 +34,15 @@ import type { WorkspaceService } from '../services/workspace/workspace-service.j
 /** bash 相关广播消息的类型收窄（ServerMessage 是泛型 interface 非 union，find 无法自动收窄 payload） */
 type BashStartMsg = ServerMessage<'message.bashStart'>
 type BashResultMsg = ServerMessage<'message.bashResult'>
+type BashAbortedMsg = ServerMessage<'message.bashAborted'>
 function findBashStart(b: ServerMessage[]): BashStartMsg | undefined {
   return b.find((m) => m.type === 'message.bashStart') as BashStartMsg | undefined
 }
 function findBashResult(b: ServerMessage[]): BashResultMsg | undefined {
   return b.find((m) => m.type === 'message.bashResult') as BashResultMsg | undefined
+}
+function findBashAborted(b: ServerMessage[]): BashAbortedMsg | undefined {
+  return b.find((m) => m.type === 'message.bashAborted') as BashAbortedMsg | undefined
 }
 
 function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManagedSessionView {
@@ -131,7 +136,7 @@ function makeMocks(opts: MockOpts = {}) {
 describe('MessageDispatcher sendBash —— busy 预检（T4）', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('T4: isBashRunning=true → 广播 send.rejected{reason:"busy"} + 不调 client.bash + 返回 {blocked:true, rejected:true}', async () => {
+  it('T4: isBashRunning=true → 广播 send.rejected{reason:"busy"} + 不调 client.bash + 返回回执 rejected', async () => {
     const { dispatcher, bashFn, broadcasts } = makeMocks({ isBashRunning: true })
     const result = await dispatcher.sendBash('s1', 'git status', false)
 
@@ -142,13 +147,13 @@ describe('MessageDispatcher sendBash —— busy 预检（T4）', () => {
     expect(rejected).toBeDefined()
     expect(rejected!.payload).toMatchObject({ sessionId: 's1', reason: 'busy' })
     // 返回值
-    expect(result).toEqual({ blocked: true, rejected: true })
+    expect(result).toEqual({ status: 'rejected' }) // 回执 rejected（未执行）
   })
 
   // 注意：原 T4b（isGenerating → reject）已反转 → 移至下方
   // describe('MessageDispatcher sendBash —— 并发放宽（w2, 对齐 pi-tui）') 块（W2 放宽 bash↔streaming 并发）。
 
-  it('T4c: isCompacting=true → 广播 send.rejected{reason:"busy"} + 不调 client.bash + 返回 {blocked:true, rejected:true}', async () => {
+  it('T4c: isCompacting=true → 广播 send.rejected{reason:"busy"} + 不调 client.bash + 返回回执 rejected', async () => {
     const { dispatcher, bashFn, broadcasts } = makeMocks({ isCompacting: true })
     const result = await dispatcher.sendBash('s1', 'echo hi', false)
 
@@ -156,7 +161,7 @@ describe('MessageDispatcher sendBash —— busy 预检（T4）', () => {
     const rejected = broadcasts.find((m) => m.type === 'send.rejected')
     expect(rejected).toBeDefined()
     expect(rejected!.payload).toMatchObject({ sessionId: 's1', reason: 'busy' })
-    expect(result).toEqual({ blocked: true, rejected: true })
+    expect(result).toEqual({ status: 'rejected' }) // 回执 rejected（未执行）
   })
 })
 
@@ -198,7 +203,7 @@ describe('MessageDispatcher sendBash —— 并发放宽 + 双分支延迟（w2 
     // finally isBashRunning 复位
     expect(session.isBashRunning).toBe(false)
     // 正常返回
-    expect(result).toEqual({ blocked: false })
+    expect(result).toEqual({ status: 'settled' }) // 回执 settled（已执行并收口）
 
     // 级联结束（agent_settled → flushPendingBashResults）→ 按序以帧发布 + 清空待落列
     dispatcher.flushPendingBashResults('s1')
@@ -290,10 +295,10 @@ describe('MessageDispatcher sendBash —— 正常路径（T5）', () => {
     })
     expect(typeof end!.payload.timestamp).toBe('number')
 
-    // isBashRunning 复位 false（finally 兑底）
+    // isBashRunning 复位 false（finally 兜底）
     expect(session.isBashRunning).toBe(false)
     // 正常返回
-    expect(result).toEqual({ blocked: false })
+    expect(result).toEqual({ status: 'settled' }) // 回执 settled（已执行并收口）
   })
 
   it('T5b: excludeFromContext=true 透传到 bashStart/bashResult', async () => {
@@ -317,7 +322,7 @@ describe('MessageDispatcher sendBash —— 正常路径（T5）', () => {
 describe('MessageDispatcher sendBash —— 错误路径（T6, S2 对称兜底）', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('T6: client.bash reject → 广播 message.error{message} + 补发 bashResult 终态（S2 对称兜底）+ finally isBashRunning 复位 + 返回 {blocked:true}', async () => {
+  it('T6: client.bash reject → 广播 message.error{message} + 补发 bashResult 终态（S2 对称兜底）+ finally isBashRunning 复位 + 返回回执 settled+error', async () => {
     const { dispatcher, broadcasts, session } = makeMocks({ bashError: new Error('pi boom') })
     const result = await dispatcher.sendBash('s1', 'git status')
 
@@ -341,15 +346,15 @@ describe('MessageDispatcher sendBash —— 错误路径（T6, S2 对称兜底�
     expect(end!.payload.output).toContain('pi boom')
     // finally isBashRunning 复位
     expect(session.isBashRunning).toBe(false)
-    // 返回 blocked（无 rejected 字段——执行失败非预检拒绝）
-    expect(result).toEqual({ blocked: true })
+    // 回执 settled+error（已执行并收口——执行失败非预检拒绝，消费方不得恢复草稿）
+    expect(result).toEqual({ status: 'settled', error: 'pi boom' })
   })
 })
 
 describe('MessageDispatcher sendBash —— bash RPC 超时诚实终态（timeout-slow-flow-wallclock D2）', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('D2-1: RpcTimeoutError → 合成终态 output 换诚实文案（三步恢复指引）+ 不自动 abortBash + 置孤儿标记 + 返回 blocked', async () => {
+  it('D2-1: RpcTimeoutError → 合成终态 output 换诚实文案（三步恢复指引）+ 不自动 abortBash + 置孤儿标记 + 返回回执 started', async () => {
     const { dispatcher, abortBashFn, broadcasts, session } = makeMocks({
       bashError: new RpcTimeoutError('bash', 3_600_000),
     })
@@ -379,7 +384,9 @@ describe('MessageDispatcher sendBash —— bash RPC 超时诚实终态（timeou
     expect(session.orphanBashRunning).toBe(true)
     // finally isBashRunning 复位（slot 释放，后续 bash 不被 busy 拒绝）
     expect(session.isBashRunning).toBe(false)
-    expect(result).toEqual({ blocked: true })
+    // 回执 started：超时 = 停止等待不是处决，pi 侧孤儿仍在跑（未收口，消费方不得恢复草稿）
+    expect(result).toMatchObject({ status: 'started' })
+    expect(result.error).toContain('timed out')
   })
 
   it('D2-2: 文案如实反映 env 自定义超时（90s → 「90 秒」；1h → 「1 小时」）', async () => {
@@ -411,29 +418,27 @@ describe('MessageDispatcher sendBash —— bash RPC 超时诚实终态（timeou
   })
 })
 
-describe('MessageDispatcher —— bash/message 双向互斥（T7, G1 修复）', () => {
+describe('MessageDispatcher —— bash/message 双向互斥（T7 迁移：内核持有承接，u2）', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('T7: isBashRunning=true 时 sendMessage → 广播 send.rejected + 不调 client.prompt', async () => {
+  it('T7: isBashRunning=true 时 sendMessage → 零 send.rejected + 不调 client.prompt（内核持有等 bash 结束）', async () => {
     const { dispatcher, promptFn, broadcasts } = makeMocks({ isBashRunning: true })
     const result = await dispatcher.sendMessage('s1', 'hello')
 
-    // client.prompt 未被调用（G1 修复：bash 进行中不允许发消息）
+    // client.prompt 未被调用（bash 进行中不允许发消息——语义保持，实现从「拒绝」改为「内核持有」）
     expect(promptFn).not.toHaveBeenCalled()
-    // 广播 send.rejected
-    const rejected = broadcasts.find((m) => m.type === 'send.rejected')
-    expect(rejected).toBeDefined()
-    expect(rejected!.payload).toMatchObject({ sessionId: 's1', reason: 'busy' })
-    // 返回 rejected
-    expect(result.rejected).toBe(true)
-    expect(result.blocked).toBe(true)
+    // send.rejected 退役（D5 排队取代拒绝）：busy 度不再产生拒绝广播
+    expect(broadcasts.find((m) => m.type === 'send.rejected')).toBeUndefined()
+    // 受理口径：RPC 不再收到 rejected ack（消息由内核 FIFO 承接，bash 结束后投递）
+    expect(result.blocked).toBe(false)
+    expect(result.rejected).toBeUndefined()
   })
 })
 
 describe('MessageDispatcher abortBash（T8 + P6 断言④孤儿形态）', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('T8: abortBash → client.abortBash() 调用 + 广播 message.bashResult{cancelled:true} + isBashRunning 复位 + sent:true', async () => {
+  it('T8: abortBash → client.abortBash() 调用 + 广播 message.bashAborted 兜底终态 + isBashRunning 复位 + sent:true', async () => {
     const { dispatcher, abortBashFn, broadcasts, session } = makeMocks({ isBashRunning: true })
 
     const result = await dispatcher.abortBash('s1')
@@ -442,30 +447,26 @@ describe('MessageDispatcher abortBash（T8 + P6 断言④孤儿形态）', () =>
     expect(abortBashFn).toHaveBeenCalledTimes(1)
     // abort_bash 发出且 pi 确认 → sent:true（回执真实化，调用方可据此回 aborted）
     expect(result).toEqual({ sent: true })
-    // 兑底广播 message.bashResult{cancelled:true}
-    const end = findBashResult(broadcasts)
-    expect(end).toBeDefined()
-    expect(end!.payload).toMatchObject({
-      sessionId: 's1',
-      cancelled: true,
-      output: '',
-      exitCode: null,
-      truncated: false,
-    })
-    // isBashRunning 复位（finally 兑底）
+    // 兜底广播 message.bashAborted（wire 形态 = shared ServerMessageMap['message.bashAborted']，
+    // 消费侧契约锁在 core bash-effects.test.ts bashAbortedEffect 用例）
+    const aborted = findBashAborted(broadcasts)
+    expect(aborted).toBeDefined()
+    expect(aborted!.payload).toMatchObject({ sessionId: 's1' })
+    expect(typeof aborted!.payload.timestamp).toBe('number')
+    // isBashRunning 复位（finally 兜底）
     expect(session.isBashRunning).toBe(false)
   })
 
-  it('T8b: client.abortBash 抛异常 → 不向上抛 + sent:false（回执真实化：不得据此回 aborted）+ 兑底广播', async () => {
+  it('T8b: client.abortBash 抛异常 → 不向上抛 + sent:false（回执真实化：不得据此回 aborted）+ 兜底广播', async () => {
     const { dispatcher, broadcasts, session } = makeMocks({ isBashRunning: true, abortBashError: new Error('rpc dead') })
 
     // 不该 throw，且 sent=false（abort_bash 未被 pi 确认）
     await expect(dispatcher.abortBash('s1')).resolves.toEqual({ sent: false })
 
-    // 兑底终态仍广播
-    const end = findBashResult(broadcasts)
-    expect(end).toBeDefined()
-    expect(end!.payload.cancelled).toBe(true)
+    // 兜底终态仍广播（message.bashAborted 独立帧，与 pi 确认与否无关）
+    const aborted = findBashAborted(broadcasts)
+    expect(aborted).toBeDefined()
+    expect(aborted!.payload.sessionId).toBe('s1')
     // isBashRunning 仍复位
     expect(session.isBashRunning).toBe(false)
   })
@@ -486,11 +487,12 @@ describe('MessageDispatcher abortBash（T8 + P6 断言④孤儿形态）', () =>
     // pi 确认取消 → 孤儿标记清除 + sent:true（handler 回 aborted 合理）
     expect(session.orphanBashRunning).toBe(false)
     expect(result).toEqual({ sent: true })
-    // 兑底 cancelled 哨兵帧广播（前端 executingBash 幂等清态）。broadcasts 含两条 bashResult
-    // （超时合成终态 cancelled:false + abort 哨兵 cancelled:true），取最后一条（哨兵后发）。
-    const sentinel = findBashResult([...broadcasts].reverse())
-    expect(sentinel).toBeDefined()
-    expect(sentinel!.payload.cancelled).toBe(true)
+    // 兜底 bashAborted 独立帧广播（前端 executingBash 幂等清态，msg-pipeline-debloat D4-3）。
+    // broadcasts 含一条 bashResult（超时合成终态 cancelled:false）+ 一条 bashAborted（abort 兜底）。
+    expect(findBashResult(broadcasts)!.payload.cancelled).toBe(false)
+    const aborted = findBashAborted(broadcasts)
+    expect(aborted).toBeDefined()
+    expect(aborted!.payload).toMatchObject({ sessionId: 's1' })
   })
 
   it('D2-7: 无 bash 且无孤儿 → 守卫短路 { sent:false } + 不调 client.abortBash（回执真实化：不得回 aborted）', async () => {
@@ -500,8 +502,8 @@ describe('MessageDispatcher abortBash（T8 + P6 断言④孤儿形态）', () =>
 
     expect(abortBashFn).not.toHaveBeenCalled()
     expect(result).toEqual({ sent: false })
-    // 短路不广播 cancelled 哨兵（既有行为：无条件广播会污染无 bash 场景）
-    expect(findBashResult(broadcasts)).toBeUndefined()
+    // 短路不广播 bashAborted 兜底终态（既有行为：无条件广播会污染无 bash 场景）
+    expect(findBashAborted(broadcasts)).toBeUndefined()
     expect(session.isBashRunning).toBe(false)
   })
 
@@ -518,5 +520,23 @@ describe('MessageDispatcher abortBash（T8 + P6 断言④孤儿形态）', () =>
 
     // 标记保留：下次 abortBash 再发一次幂等 abort_bash，比误清（谎称无孤儿）更诚实
     expect(session.orphanBashRunning).toBe(true)
+  })
+})
+
+describe('MessageDispatcher sendBash 空命令（D4-3 哨兵不变式守卫删除）', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it("D4-3: 空命令不再哨兵早退——sendBash('') 正常走执行链（哨兵帧退役为独立 message.bashAborted 后，空命令守卫的「保哨兵形态不变式」职责消灭）", async () => {
+    const { dispatcher, bashFn, broadcasts, session } = makeMocks({})
+
+    // 旧守卫：console.warn + 拒绝回执早退——它存在的唯一理由是保证 bashResult 帧
+    // command 恒非空、与 command:'' 哨兵帧永不混淆。哨兵帧退役为独立帧类型后不变式不再需要。
+    const result = await dispatcher.sendBash('s1', '', false)
+
+    expect(bashFn).toHaveBeenCalledWith('', false)
+    expect(findBashStart(broadcasts)).toBeDefined()
+    expect(findBashResult(broadcasts)).toBeDefined()
+    expect(session.isBashRunning).toBe(false)
+    expect(result).toEqual({ status: 'settled' })
   })
 })

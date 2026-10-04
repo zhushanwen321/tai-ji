@@ -29,7 +29,7 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 import { createNotifyHost, type NotifyHost, type PiLike } from "../notify/notify-host.ts";
 import type { BgNotifyRecord } from "../notify/notifier.ts";
 import { createRecord } from "../persistence/execution-record.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 import { makePi } from "./helpers/pi-mock.ts";
 
 /** 冻结时钟（投影时刻断言基准）。 */

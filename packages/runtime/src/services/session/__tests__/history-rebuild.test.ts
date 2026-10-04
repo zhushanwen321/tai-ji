@@ -296,3 +296,49 @@ describe('inflight 合并与 onSessionDisposed', () => {
     expect(() => reader.onSessionDisposed('s-none')).not.toThrow()
   })
 })
+
+// ════════════════════════════════════════════════════════════════════
+// 活跃路径裁剪接入（message-revoke U6a）：调用点契约 = 仅全量重建裁剪、增量不裁剪
+// ════════════════════════════════════════════════════════════════════
+// get_entries 返回全文件 entries + leafId；全量重建路径（rebuildFullHistoryAndCache）在
+// 调用点预过滤（port 签名不含 leafId，预过滤与 rebuildHistoryFromEntries 第三参等价——
+// 同一 computeActivePathEntries SSOT）。缓存基线 = 完整活跃路径投影。
+
+describe('活跃路径裁剪接入（message-revoke U6a）', () => {
+  it('全量重建调用点：有分支 entries + leafId → rebuild 收到裁剪后 entries，旧分支不进缓存基线', async () => {
+    const { reader, client, rebuild } = makeReader()
+    // 单根链式树：e1(root) → e2(旧分支尾) / b1(e1) → b2(新分支尾，leafId)
+    client.getEntries.mockResolvedValue({
+      data: { entries: [entry('e1', null), entry('e2', 'e1'), entry('b1', 'e1'), entry('b2', 'b1')], leafId: 'b2' },
+    })
+    const result = await reader.getHistory('s1')
+
+    // rebuild（port 直通 mock）收到的是裁剪后活跃路径子集（e2 旧分支被滤）
+    expect(rebuild).toHaveBeenCalledTimes(1)
+    expect(rebuild).toHaveBeenCalledWith([entry('e1', null), entry('b1', 'e1'), entry('b2', 'b1')], null)
+    expect(result.messages.map((m) => m.id)).toEqual(['m-e1', 'm-b1', 'm-b2'])
+  })
+
+  it('全量重建调用点：leafId null（缺省）→ rebuild 收到全量 entries（现行为回归）', async () => {
+    const { reader, client, rebuild } = makeReader()
+    const full = [entry('e1', null), entry('e2', 'e1')]
+    client.getEntries.mockResolvedValue({ data: { entries: full, leafId: null } })
+    await reader.getHistory('s1')
+    expect(rebuild).toHaveBeenCalledWith(full, null)
+  })
+
+  it('增量路径不裁剪（反直觉契约锚）：delta 条目原样进 rebuild，不做 leafId 回溯', async () => {
+    // 契约（设计 D3/U6 定死）：delta 是活跃路径的后缀切片（Fix-2 不变量保证首条 parent =
+    // 缓存 leafId），构造性全在活跃路径上；裁剪是「回溯到根」的全树语义，在窗口切片上
+    // 执行会把窗口边界误当树边界。canary 构造：delta 内混一条 parent 指向集合外的条目
+    // （d2.parent=missing）——若增量被误接 leafId 裁剪，d2 的回溯链在窗口内断裂会把 d1
+    // 误滤（链 missing→d2 只含 d2）；不裁剪时 d1/d2 全部进入合并。
+    const { reader, client } = makeReader()
+    client.getEntries.mockResolvedValueOnce({ data: { entries: [entry('e1', null), entry('e2', 'e1')], leafId: 'e2' } })
+    await reader.getHistory('s1') // 建缓存 {leafId: e2}
+    client.getEntries.mockResolvedValueOnce({ data: { entries: [entry('d1', 'e2'), entry('d2', 'missing')], leafId: 'd2' } })
+    const second = await reader.getHistory('s1')
+    // 增量条目全量并入（d1 不因窗口内回溯断裂被滤）
+    expect(second.messages.map((m) => m.piEntryId)).toEqual(['e1', 'e2', 'd1', 'd2'])
+  })
+})

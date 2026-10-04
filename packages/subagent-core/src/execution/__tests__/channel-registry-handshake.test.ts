@@ -5,7 +5,7 @@
 // 测试对象：extensions/universal/subagent-workflow/src/execution/channel-registry-access.ts
 //
 // 协议契约（与 ask-user 侧严格对齐）：
-//   key 字面量：     "@zhushanwen/pi-subagents.channelHandshake"
+//   key 字面量：     "@zhushanwen/subagent-core.channelHandshake"
 //   handshake 形状： { version: 1, registry?: UiChannelRegistry, pending: [{channel,handler}] }
 //   canonical 唯一创建点：getOrCreateChannelRegistry（仅 subagent-workflow 侧创建）
 //

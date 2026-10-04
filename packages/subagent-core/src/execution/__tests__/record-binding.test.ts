@@ -1,28 +1,28 @@
 // src/execution/__tests__/record-binding.test.ts
 //
-// [UF-1] 跨重启续聊绑定修复（U4 真机基线 S6 ❌）：record↔sessionFile 映射落盘与消费。
+// [UF-1] 跨重启续聊绑定（record↔sessionFile 映射）写面与事件流重建源。
 //
-// 缺陷背景：engine-CLI 化后子 session 文件只含 {session, model_change,
+// 背景：engine-CLI 化后子 session 文件只含 {session, model_change,
 // thinking_level_change, message} 条目族（无身份 entry），旧
 // PI_SUBAGENT_SELF_RECORD_ID 注入链消失 → collectRecords/findLightById 失去
 // id→file 工件 → 跨重启 message 一律「not found or not owned」（展示层 entry
 // 扫描源可见 3 条 record、message 链全部 not-found 的双注册表不同源形态）。
 //
-// 修复面（本套件锁定）：
-//   ① 写入：sessionFile 回填点（轮应答 / idle 帧锚点 / run 域 outcome）经
+// 现行形态（[身份换源第二步] 后，本套件锁定）：
+//   ① 写面：sessionFile 回填点（轮应答 / idle 帧锚点 / run 域 outcome）经
 //      writeBindingForRecord 落 `<sessionFile>.record-binding`（best-effort，
-//      写失败 warn 不阻断派发主路径）；
-//   ② 消费：record-store scanFile 在 identity miss 时据绑定重建 light record
-//      （模拟重启后空内存），findLightById/collectRecords 恢复 id→file 解析；
-//   ③ 全链：getRecordForAction（coldLookupForAction）→ 绑定重建 → register →
+//      写失败 warn 不阻断派发主路径）——写面保留（读侧已换源事件流，绑定剩
+//      戳职责与跨进程负缓存击穿职责）；
+//   ② 读面：record-store scanFile 在 identity miss 时据事件流折叠重建 light
+//      （created 身份域 + bound.sessionFile 反查键，模拟重启后空内存），
+//      findLightById/collectRecords 恢复 id→file 解析；
+//   ③ 全链：getRecordForAction（coldLookupForAction）→ 折叠重建 → register →
 //      deliverChatMessage 续聊发起（resume 锚点续写原文件）；
-//   ④ 终态不冲突：.state 优先级高于绑定的 running 形态（buildRecord 既有分支
-//      矩阵构造性保证）；终态后绑定保留（resurrect 回边删 .state 后绑定仍在，
-//      再崩溃仍可恢复）——保留选项由此套件锁定；
+//   ④ 终态不冲突：折叠收条优先于绑定的 running 形态（buildRecord 既有分支
+//      矩阵构造性保证）；终态后绑定保留——保留选项由此套件锁定；
 //   ⑤ 绑定写失败（只读目录）不阻塞派发主路径。
-//   ⑥ [H2 Gate B round-2] binding 携带 origin/parentRunId（身份面，S3 收口）+
-//      终态快照 totalTokens/turns/endedAt（A3 收口，updateRecordBinding merge）——
-//      本套件 record-binding/sessions-index 相关 describe 锁定。
+//   ⑥ [H2 S3] origin/parentRunId/stepIndex 身份域随 record-created 帧往返保真
+//      （原 binding 身份面职责已随读侧换源移入事件载荷）。
 //
 // fixture 一律 mkdtempSync 自建自删（tmpdir），不触碰真实数据目录。
 
@@ -41,23 +41,22 @@ import { clearEngines } from "../engine/registry.ts";
 import { _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
-import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import { getSubagentSessionDir, getSubagentRecordsDir } from "../assembly/path-encoding.ts";
 import { RecordStore } from "../persistence/record-store.ts";
-import { _resetSettledWatchdogsForTest } from "../lifecycle/settled-watchdog.ts";
+import { seedTerminalRecord } from "./helpers/seed-terminal-record.ts";
 import {
   readRecordBinding,
   updateRecordBinding,
-  writeFinalizedState,
   writeRecordBinding,
   RECORD_BINDING_SIDECAR_EXT,
 } from "../persistence/state-marker.ts";
 import type { RecordBinding } from "../persistence/state-marker.ts";
+import { fullBindingPayload } from "../persistence/record-store-terminal.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
 import { makePi } from "./helpers/pi-mock.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
-
 // 身份 env 清理（同 get-record-for-action-restart.test.ts：测试进程可能继承
 // subagent env，污染 rootCwd 编码目录与 sessionRootId 基线）。
 const IDENTITY_ENV_KEYS = [
@@ -201,16 +200,18 @@ describe("[UF-1] record 绑定 sidecar 读写（state-marker）", () => {
 });
 
 // ============================================================
-// B. record-store 消费面（模拟重启后空内存）
+// B. record-store 消费面（模拟重启后空内存——事件流折叠重建源）
 // ============================================================
 
-describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场景）", () => {
+describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场景）", () => {
   let agentDir: string;
   let sessionsDir: string;
+  let recordsDir: string;
 
   beforeEach(() => {
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-binding-store-"));
     sessionsDir = getSubagentSessionDir(agentDir, agentDir);
+    recordsDir = getSubagentRecordsDir(agentDir, agentDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
   });
 
@@ -219,20 +220,34 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("collectRecords：无 identity 子文件 + 绑定 → 重建 idle light（id/rootSessionId/round/sessionFile）", () => {
+  /** 播种 in-flight 事件流（created 身份域 + bound 反查键，无收条帧）。 */
+  function seedInFlightEvents(file: string, over: Partial<Parameters<typeof seedTerminalRecord>[1]> = {}): void {
+    seedTerminalRecord(recordsDir, {
+      id: "sa-bind-1",
+      startedAt: STARTED_AT,
+      agent: "general-purpose",
+      task: "binding task",
+      slug: "bind-test",
+      rootSessionId: "root-session",
+      boundSessionFile: file,
+      inFlight: true,
+      ...over,
+    });
+  }
+
+  it("collectRecords：无 identity 子文件 + 事件流（bound 反查键）→ 重建 idle light（id/rootSessionId/sessionFile）", () => {
     const file = writePlainChildSession(sessionsDir);
-    writeBindingFixture(file);
-    const store = new RecordStore(sessionsDir);
+    seedInFlightEvents(file);
+    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
 
     const records = store.collectRecords(10, "all", undefined);
     expect(records).toHaveLength(1);
     const rec = records[0]!;
     expect(rec.id).toBe("sa-bind-1");
-    // [U3 / §3.2.4 重建单规则] 无 .state → idle + interrupted-by-restart 兜底
+    // [U3 / §3.2.4 重建单规则] 无收条事件 → idle + interrupted-by-restart 兜底
     expect(rec.status).toBe("idle");
     expect(rec.stopReason).toBe("interrupted-by-restart");
     expect(rec.rootSessionId).toBe("root-session");
-    expect(rec.round).toBe(1);
     expect(rec.sessionFile).toBe(file);
     expect(rec.agent).toBe("general-purpose");
     expect(rec.task).toBe("binding task");
@@ -240,8 +255,8 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
 
   it("findLightById：冷启动空索引先 miss → collectRecords 全扫填充 → 索引命中（coldLookup 步骤 1 链）", () => {
     const file = writePlainChildSession(sessionsDir);
-    writeBindingFixture(file);
-    const store = new RecordStore(sessionsDir);
+    seedInFlightEvents(file);
+    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
 
     // 重启后 idToFile 未热：直查 miss
     expect(store.findLightById("sa-bind-1")).toBeUndefined();
@@ -254,59 +269,74 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
     expect(light?.status).toBe("idle");
   });
 
-  it("rootSessionId 过滤仍生效：异树过滤排除绑定 record（session 隔离不因绑定旁路）", () => {
+  it("rootSessionId 过滤仍生效：异树过滤排除折叠 record（session 隔离不因反查旁路）", () => {
     const file = writePlainChildSession(sessionsDir);
-    writeBindingFixture(file);
-    const store = new RecordStore(sessionsDir);
+    seedInFlightEvents(file);
+    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
 
     expect(store.collectRecords(10, "all", "other-root")).toHaveLength(0);
     expect(store.collectRecords(10, "all", "root-session")).toHaveLength(1);
   });
 
-  it("终态优先级：绑定 + .state(finalized) → closed/gc（.state 胜过绑定的 running 形态）；绑定保留在盘", () => {
-    const file = writePlainChildSession(sessionsDir);
-    writeBindingFixture(file);
-    writeFinalizedState(file, "gc");
-    const store = new RecordStore(sessionsDir);
-
-    const records = store.collectRecords(10, "all", undefined);
-    expect(records).toHaveLength(1);
-    expect(records[0]!.status).toBe("idle");
-    expect(records[0]!.closedReason).toBe("gc");
-    // 保留选项锁定：终态后绑定不删——resurrect 回边删 .state 后绑定仍在，再崩溃仍可恢复
-    expect(fs.existsSync(`${file}${RECORD_BINDING_SIDECAR_EXT}`)).toBe(true);
+  it("无 identity 无事件流 → 不重建（负缓存语义保持，不误建幽灵 record）", () => {
+    writePlainChildSession(sessionsDir);
+    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    expect(store.collectRecords(10, "all", undefined)).toHaveLength(0);
+    expect(store.findLightById("sa-bind-1")).toBeUndefined();
   });
 
-  it("负缓存打破：先仅子文件（无绑定）扫描为空 → 绑定后到落盘 → 再次扫描命中", () => {
+  it("[②B] 负缓存事件侧信号：bound 帧追加进既有事件文件且无 binding 写 → 下次扫描必须可见", () => {
+    // 时序（生产形态：spawn 未回填 → 首扫负缓存 → 回填落账）：负缓存条目没有 id、
+    // 不能按 `<id>.events` 取戳，jsonl/binding 戳全不变——若无事件侧反查，回填后的
+    // record 在磁盘扫描层永久不可见（列表面有内存源遮蔽，archive 除名后即暴露）。
     const file = writePlainChildSession(sessionsDir);
-    const store = new RecordStore(sessionsDir);
-    expect(store.collectRecords(10, "all", undefined)).toHaveLength(0); // 无身份无绑定 → 负缓存
+    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    // ① register（无 sessionFile——spawn 未回填）：事件文件只有 created 帧。
+    const rec = createRecord("sa-bind-1", {
+      agent: "general-purpose",
+      model: undefined,
+      mode: "background",
+      task: "binding task",
+      slug: "bind-test",
+      startedAt: STARTED_AT,
+      rootSessionId: "root-session",
+    });
+    store.register(rec);
+    // 首扫：内存源可见（running），但文件层身份反查 miss → 负缓存条目成形。
+    const firstScan = store.collectRecords(10, "all", undefined);
+    expect(firstScan).toHaveLength(1);
+    expect(firstScan[0]!.sessionFile).toBeUndefined();
 
-    writeBindingFixture(file); // run 应答回填点后到：绑定戳变化
+    // ② 回填：sessionFile 确定 + reportRecordTransition → record-bound 帧追加进既有
+    //    事件文件（syncBoundEvent 只追加事件，不写 binding；同进程 noteFileToRecordId
+    //    增量维护反查索引）。
+    rec.sessionFile = file;
+    store.reportRecordTransition(rec);
+
+    // ③ 信号只能来自事件侧：`<file>.record-binding` 不存在（证明 binding 戳不可能
+    //    是打破负缓存的信号源）。
+    expect(fs.existsSync(`${file}${RECORD_BINDING_SIDECAR_EXT}`)).toBe(false);
+
+    // ④ 除名内存源（archive 对 running record = 纯内存除名，零写面），让末次扫描
+    //    只走磁盘层：反查命中 → 打破负缓存 → 正常探测重建 → 可见。
+    store.archive(rec);
     const records = store.collectRecords(10, "all", undefined);
     expect(records).toHaveLength(1);
     expect(records[0]!.id).toBe("sa-bind-1");
-  });
-
-  it("无 identity 无绑定 → 不重建（负缓存语义保持，不误建幽灵 record）", () => {
-    writePlainChildSession(sessionsDir);
-    const store = new RecordStore(sessionsDir);
-    expect(store.collectRecords(10, "all", undefined)).toHaveLength(0);
-    expect(store.findLightById("sa-bind-1")).toBeUndefined();
+    expect(records[0]!.sessionFile).toBe(file);
   });
 });
 
 // ============================================================
-// D. [H2 S3] 来源身份（origin/parentRunId）经 binding 身份面往返保真
+// D. [H2 S3] 来源身份（origin/parentRunId）往返保真（写面载荷 + 事件流读侧）
 // ============================================================
 //
-// Gate B S3 FAIL 根因：引擎子文件身份面（binding sidecar）重建丢 origin →
-// 归档/重启后 workflow record 逃过 D1 投影过滤（默认 list / TUI overlay 显示
-// 已归档 workflow record）。本套件锁定：写（writeBindingForRecord 载荷）→
-// 读（readRecordBinding 守卫）→ 重建（identityFromBinding → buildRecord）→
-// 过滤（collectRecords 缺省排除 / includeWorkflow + parentRunId 下钻可见）全链。
+// [身份换源第二步] 后读侧身份源 = 事件流（identityFromFold 守卫归一，D 套件锁定）；
+// binding 写面载荷单源（identityBindingPayload）与 merge 更新（updateRecordBinding）
+// 仍是生产写面——本节锁定写面守卫归一行为（读侧守卫 readRecordBinding 仍被
+// merge-or-create 写点消费，损坏残留不误判成合法载荷）。
 
-describe("[H2 S3] binding 身份面 origin/parentRunId 往返保真", () => {
+describe("[H2 S3] binding 身份面 origin/parentRunId 往返保真（写面载荷）", () => {
   let dir: string;
 
   beforeEach(() => {
@@ -376,13 +406,24 @@ describe("[H2 S3] binding 身份面 origin/parentRunId 往返保真", () => {
   });
 });
 
-describe("[H2 S3] record-store 据绑定重建 origin（D1 投影过滤端到端）", () => {
+// ============================================================
+// D2. [H2 S3] 来源身份经事件载荷往返保真（读侧——折叠重建端到端）
+// ============================================================
+//
+// Gate B S3 FAIL 根因的现行承载（[身份换源第二步] 后）：origin/parentRunId 随
+// record-created 帧落事件流，读侧守卫归一在 identityFromFold（折叠身份投影）。
+// 本套件锁定：帧载荷 → 折叠重建 → 过滤（collectRecords 缺省排除 / includeWorkflow
+// + parentRunId 下钻可见）链路。binding 写面的同字段载荷单源性由 E 套件锁定。
+
+describe("[H2 S3] record-store 据事件流重建 origin（D1 投影过滤端到端）", () => {
   let agentDir: string;
   let sessionsDir: string;
+  let recordsDir: string;
 
   beforeEach(() => {
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-binding-origin-store-"));
     sessionsDir = getSubagentSessionDir(agentDir, agentDir);
+    recordsDir = getSubagentRecordsDir(agentDir, agentDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
   });
 
@@ -390,10 +431,17 @@ describe("[H2 S3] record-store 据绑定重建 origin（D1 投影过滤端到端
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("binding(workflow) → collectRecords 重建 origin/parentRunId 保真；缺省过滤排除；includeWorkflow / parentRunId 下钻可见", () => {
+  it("created 帧(workflow) → collectRecords 重建 origin/parentRunId 保真；缺省过滤排除；includeWorkflow / parentRunId 下钻可见", () => {
     const file = writePlainChildSession(sessionsDir);
-    writeBindingFixture(file, { origin: "workflow", parentRunId: "wf-run-1" });
-    const store = new RecordStore(sessionsDir);
+    seedTerminalRecord(recordsDir, {
+      id: "sa-bind-1",
+      startedAt: STARTED_AT,
+      origin: "workflow",
+      parentRunId: "wf-run-1",
+      boundSessionFile: file,
+      inFlight: true,
+    });
+    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
 
     // 默认 list（includeWorkflow 缺省 false）：workflow record 被排除（S3 FAIL 的验收面）
     expect(store.collectRecords(10, "all", undefined)).toHaveLength(0);
@@ -406,22 +454,33 @@ describe("[H2 S3] record-store 据绑定重建 origin（D1 投影过滤端到端
     expect(store.collectRecordsByParentRunId("wf-run-1", 10).map((r) => r.id)).toEqual(["sa-bind-1"]);
   });
 
-  it("binding(tool 缺省) → 重建 origin undefined，默认 list 保留（零迁移）", () => {
+  it("created 帧(tool 缺省) → 重建 origin undefined，默认 list 保留（零迁移）", () => {
     const file = writePlainChildSession(sessionsDir);
-    writeBindingFixture(file); // 不带 origin（存量形态）
-    const store = new RecordStore(sessionsDir);
+    seedTerminalRecord(recordsDir, {
+      id: "sa-bind-1",
+      startedAt: STARTED_AT,
+      boundSessionFile: file,
+      inFlight: true,
+    });
+    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
 
     const records = store.collectRecords(10, "all", undefined);
     expect(records).toHaveLength(1);
-    expect(records[0]!.origin).toBeUndefined();
+    expect(records[0]!.origin).toBe("tool"); // 事件帧词表恒显式（created.origin 必填）——tool 缺省形态落盘即显式 "tool"
     expect(records[0]!.parentRunId).toBeUndefined();
   });
 
-  it("归档（.state finalized）后重建仍保 origin：终态 workflow record 默认 list 不出现（S3 真机场景）", () => {
+  it("归档（settled 收条）后重建仍保 origin：终态 workflow record 默认 list 不出现（S3 真机场景）", () => {
     const file = writePlainChildSession(sessionsDir);
-    writeBindingFixture(file, { origin: "workflow", parentRunId: "wf-run-2" });
-    writeFinalizedState(file, "gc"); // 模拟归档/重启后终态重建
-    const store = new RecordStore(sessionsDir);
+    seedTerminalRecord(recordsDir, {
+      id: "sa-bind-1",
+      startedAt: STARTED_AT,
+      origin: "workflow",
+      parentRunId: "wf-run-2",
+      boundSessionFile: file,
+      stopReason: "disconnected",
+    });
+    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
 
     expect(store.collectRecords(10, "all", undefined)).toHaveLength(0);
     const visible = store.collectRecords(10, "all", undefined, true);
@@ -431,13 +490,20 @@ describe("[H2 S3] record-store 据绑定重建 origin（D1 投影过滤端到端
     expect(visible[0]!.parentRunId).toBe("wf-run-2");
   });
 
-  it("[H2 A3] 终态快照补投影：collectRecords 重建 light 恢复 totalTokens/turns/endedAt（list 面不再恒 0）", () => {
+  it("[② 读侧换源] 收条事件承载统计：collectRecords 重建 light 恢复 totalTokens/turns/endedAt（list 面不再恒 0）", () => {
     const file = writePlainChildSession(sessionsDir);
-    writeBindingFixture(file, { origin: "workflow", parentRunId: "wf-run-u" });
-    // 终态写点同款：.state + binding usage 快照
-    writeFinalizedState(file, "gc");
-    updateRecordBinding(file, { totalTokens: 60725, turns: 4, endedAt: STARTED_AT + 55_000 });
-    const store = new RecordStore(sessionsDir);
+    seedTerminalRecord(recordsDir, {
+      id: "sa-bind-1",
+      startedAt: STARTED_AT,
+      origin: "workflow",
+      parentRunId: "wf-run-u",
+      boundSessionFile: file,
+      stopReason: "disconnected",
+      turns: 4,
+      totalTokens: 60725,
+      endedAt: STARTED_AT + 55_000,
+    });
+    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
 
     const visible = store.collectRecords(10, "all", undefined, true);
     expect(visible).toHaveLength(1);
@@ -446,16 +512,155 @@ describe("[H2 S3] record-store 据绑定重建 origin（D1 投影过滤端到端
     expect(visible[0]!.endedAt).toBe(STARTED_AT + 55_000);
   });
 
-  it("[H2 A3] 快照缺省（存量 binding）→ 不投影，保持 light 缺省 0/0/undefined（零迁移）", () => {
+  it("[② 读侧换源] 在途无收条（存量形态）→ 不投影，保持 light 缺省 0/0/undefined", () => {
     const file = writePlainChildSession(sessionsDir);
-    writeBindingFixture(file);
-    const store = new RecordStore(sessionsDir);
+    seedTerminalRecord(recordsDir, {
+      id: "sa-bind-1",
+      startedAt: STARTED_AT,
+      boundSessionFile: file,
+      inFlight: true,
+    });
+    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
 
     const records = store.collectRecords(10, "all", undefined);
     expect(records).toHaveLength(1);
     expect(records[0]!.totalTokens).toBe(0);
     expect(records[0]!.turns).toBe(0);
     expect(records[0]!.endedAt).toBeUndefined();
+  });
+});
+
+// ============================================================
+// E. [W0 / D1] binding 轴 stepIndex 往返（生产构造点 → 载荷）+ 折叠重建读侧
+// ============================================================
+//
+// 禁经 state-marker 原语（writeRecordBinding）手构 fixture 断言——原语只验证
+// schema/normalize 白名单（U0 已覆盖），载荷构造才是生产链路。本套件锁定两个
+// 生产构造点的载荷含 stepIndex（写面——run 视图关联键的落盘面），以及读侧
+// （[身份换源第二步] 后 = created 帧折叠重建）不丢字段。
+
+describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与折叠重建读侧", () => {
+  let agentDir: string;
+  let sessionsDir: string;
+  let recordsDir: string;
+  let service: SubagentService;
+
+  beforeEach(() => {
+    for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
+    agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-binding-stepidx-"));
+    sessionsDir = getSubagentSessionDir(agentDir, agentDir);
+    recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    clearEngines();
+    registerFakePiEngine();
+    const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
+    service = new SubagentService({ cwd: agentDir, modelService });
+    service.initSession({ pi: makePi(), sessionId: "root-session" });
+  });
+
+  afterEach(() => {
+    service.dispose();
+    clearEngines();
+    _resetLifecycleState();
+    _resetCoreSpawnedChildrenMirrorForTest();
+    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
+  });
+
+  /** workflow record fixture（sessionFile 预先落盘并回填 record——锚基底可写）。 */
+  function makeWorkflowRecord(id: string, sessionFile: string, stepIndex: number): ExecutionRecord {
+    const base = createRecord(id, {
+      agent: "general-purpose",
+      model: "prov/model-1",
+      mode: "background",
+      task: "workflow task",
+      slug: "wf-step",
+      startedAt: STARTED_AT,
+      rootSessionId: "root-session",
+      controller: new AbortController(),
+    });
+    fs.writeFileSync(sessionFile, "{}\n", "utf-8");
+    // 锚基底回填（run 应答回填点的等价形态——writeBindingForRecord 从 record.sessionFile 取锚）
+    base.sessionFile = sessionFile;
+    return { ...base, origin: "workflow", parentRunId: "wf-run-step", stepIndex };
+  }
+
+  it("writeBindingForRecord 载荷含 stepIndex（spawn 回填点生产构造器）", () => {
+    const sessionFile = path.join(agentDir, "wf-step-write.jsonl");
+    const record = makeWorkflowRecord("sa-step-write", sessionFile, 4);
+    // 生产构造点：run 应答回填点统一入口（RunOrchestration.writeBindingForRecord）
+    const runOrchestration = (service as unknown as {
+      runOrchestration: { writeBindingForRecord(r: ExecutionRecord): void };
+    }).runOrchestration;
+    runOrchestration.writeBindingForRecord(record);
+
+    const binding = readRecordBinding(sessionFile);
+    expect(binding).toMatchObject({
+      recordId: "sa-step-write",
+      origin: "workflow",
+      parentRunId: "wf-run-step",
+      stepIndex: 4,
+    });
+  });
+
+  it("fullBindingPayload 载荷含 stepIndex（settle merge-or-create 的 create 腿 / reopen 新锚构造器）", () => {
+    const sessionFile = path.join(agentDir, "wf-step-full.jsonl");
+    const record = makeWorkflowRecord("sa-step-full", sessionFile, 12);
+    const payload = fullBindingPayload(record, undefined);
+    expect(payload.stepIndex).toBe(12);
+    expect(payload.origin).toBe("workflow");
+    expect(payload.parentRunId).toBe("wf-run-step");
+    // 无 stepIndex record（tool 来源 / 旧调用方）→ 载荷 undefined（序列化自然缺省）
+    const toolRecord = createRecord("sa-step-none", {
+      agent: "general-purpose",
+      model: "prov/model-1",
+      mode: "background",
+      task: "tool task",
+      slug: "tool",
+      startedAt: STARTED_AT,
+      rootSessionId: "root-session",
+      controller: new AbortController(),
+    });
+    expect(fullBindingPayload(toolRecord, undefined).stepIndex).toBeUndefined();
+  });
+
+  it("[身份换源第二步] 折叠重建保字段：无 identity entry 子文件 + created 帧（origin/stepIndex）→ collectRecords 重建 stepIndex 保真", () => {
+    // engine-CLI 化子文件（无身份 entry）——身份域来自事件流 created 帧。
+    const file = writePlainChildSession(sessionsDir);
+    seedTerminalRecord(recordsDir, {
+      id: "sa-bind-1",
+      startedAt: STARTED_AT,
+      origin: "workflow",
+      parentRunId: "wf-run-step",
+      stepIndex: 2,
+      boundSessionFile: file,
+      inFlight: true,
+    });
+
+    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const visible = store.collectRecords(10, "all", undefined, true);
+    expect(visible).toHaveLength(1);
+    expect(visible[0]!.origin).toBe("workflow");
+    expect(visible[0]!.parentRunId).toBe("wf-run-step");
+    expect(visible[0]!.stepIndex).toBe(2);
+  });
+
+  it("created 帧无 stepIndex（tool 来源形态）→ 重建归一 undefined（run 视图守卫的上游形态）", () => {
+    const file = writePlainChildSession(sessionsDir);
+    seedTerminalRecord(recordsDir, {
+      id: "sa-bind-1",
+      startedAt: STARTED_AT,
+      origin: "workflow",
+      parentRunId: "wf-run-old",
+      boundSessionFile: file,
+      inFlight: true,
+    });
+    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+
+    const visible = store.collectRecords(10, "all", undefined, true);
+    expect(visible).toHaveLength(1);
+    expect(visible[0]!.origin).toBe("workflow");
+    expect(visible[0]!.stepIndex).toBeUndefined();
   });
 });
 
@@ -513,7 +718,6 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
     service.dispose();
     clearEngines();
     _resetLifecycleState();
-    _resetSettledWatchdogsForTest();
     _resetCoreSpawnedChildrenMirrorForTest();
     // 只读目录先恢复权限再删（⑤用例的绑定写失败面）
     if (readOnlyDir !== undefined) {
@@ -578,11 +782,19 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
     );
   });
 
-  it("③ 跨重启全链：绑定 fixture → getRecordForAction 重建 register → deliverChatMessage 续写原文件", async () => {
+  it("③ 跨重启全链：事件流 fixture → getRecordForAction 重建 register → deliverChatMessage 续写原文件", async () => {
     const file = writePlainChildSession(sessionsDir);
-    writeBindingFixture(file, { recordId: "sa-bind-1", rootSessionId: "root-session" });
+    // 身份源 = 事件流（[身份换源第二步]）：created 身份域 + bound 反查键（在途形态，
+    // 与重启前「等待续聊」语义一致）。
+    seedTerminalRecord(getSubagentRecordsDir(agentDir, agentDir), {
+      id: "sa-bind-1",
+      startedAt: STARTED_AT,
+      rootSessionId: "root-session",
+      boundSessionFile: file,
+      inFlight: true,
+    });
 
-    // 重启形态：内存空，冷查链（findLightById miss → collectRecords 绑定重建）命中
+    // 重启形态：内存空，冷查链（findLightById miss → collectRecords 折叠重建）命中
     const record = service.chatActions.getRecordForAction("sa-bind-1");
     expect(record.sessionFile).toBe(file);
     expect(record.rootSessionId).toBe("root-session");
@@ -598,12 +810,18 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
     expect(chatParams?.recordId).toBe("sa-bind-1");
   });
 
-  it("④ [U4 万物可续] 绑定 + .state(旧终态遗留位) → getRecordForAction 重建放行（binding 不再被终态位阻断）", async () => {
+  it("④ [U4 万物可续] 折叠终态（settled 收条）→ getRecordForAction 重建放行（终态单向语义随终态概念消亡）", async () => {
     const file = writePlainChildSession(sessionsDir);
     writeBindingFixture(file);
-    writeFinalizedState(file, "gc");
+    seedTerminalRecord(getSubagentRecordsDir(agentDir, agentDir), {
+      id: "sa-bind-1",
+      startedAt: STARTED_AT,
+      rootSessionId: "root-session",
+      boundSessionFile: file,
+      stopReason: "disconnected",
+    });
 
-    // [U4 / §3.2.3] 旧终态遗留位只是展示位：binding 身份在 + 锚可解析 → 冷查重建
+    // [U4 / §3.2.3] 终态收条只是展示位：折叠身份在 + 锚可解析 → 冷查重建
     // 注册放行（终态单向语义随终态概念消亡），续聊 resume 续写原文件。
     const record = service.chatActions.getRecordForAction("sa-bind-1");
     expect(record.status).toBe("running");

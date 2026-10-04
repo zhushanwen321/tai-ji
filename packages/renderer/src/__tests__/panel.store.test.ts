@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * Panel store 单测 —— 单 panel 状态（v2：移除 split 后退化）。
  *

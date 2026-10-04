@@ -214,7 +214,7 @@ export interface BtwServiceDeps {
   /**
    * 交互中转 pending 快照（BU2/D1 闲置豁免的派生**解除**通道）：respond / expired / 失效
    * 三终态的共同落点 = ExtensionTimeoutManager 的 per-session pending 表（respond →
-   * removePendingRequest、失效 → invalidatePendingForSession），组合根经
+   * removeRequest、失效 → invalidatePendingForSession），组合根经
    * server.getPendingUiRequests 薄委托注入（主 idle reaper 豁免 #8 同款先例）。idleTick 见
    * 「已置位但中转已空」即派生解除——三终态统一覆盖，无须逐终态推挽接线（置位推送通道见
    * index.ts onExtensionUIRequest）。缺省缺席 = 纯推送形态（解除走结构腿/显式调用）。
@@ -541,7 +541,7 @@ export class BtwService {
       return { vid, mainSid, snapshotKind, sessionFilePath }
     } catch (e) {
       // 与 create/restore 的 init catch 同构：注册半途失败 → 收尸进程，不留半截条目。
-      // 两处 destroy 均 best-effort：收尸失败不掩盖原始错误（进程表退出回调兑底）。
+      // 两处 destroy 均 best-effort：收尸失败不掩盖原始错误（进程表退出回调兜底）。
       await this.deps.processes.destroySession(registeredKey).catch(() => {})
       if (registeredKey !== tempKey) await this.deps.processes.destroySession(tempKey).catch(() => {})
       throw e
@@ -601,7 +601,7 @@ export class BtwService {
       this.markActivity(vid)
       return client
     } catch (e) {
-      // best-effort 收尸：两键都试（rekey 前后），失败不掩盖原始附着错误（退出回调兑底）。
+      // best-effort 收尸：两键都试（rekey 前后），失败不掩盖原始附着错误（退出回调兜底）。
       await this.deps.processes.destroySession(tempKey).catch(() => {})
       await this.deps.processes.destroySession(vid).catch(() => {})
       throw e
@@ -663,7 +663,7 @@ export class BtwService {
         rmSync(rec.sessionFilePath, { force: true })
       } catch (e) {
         // best-effort：删文件失败降级为警告——注册表条目已移除，残留由 M4-a 启动
-        // 孤儿补账兑底（主会话已不存在的线目录清理），不阻断关线主链。
+        // 孤儿补账兜底（主会话已不存在的线目录清理），不阻断关线主链。
         console.warn(`[btw] closeLine file removal failed (${rec.sessionFilePath}): ${toErrorMessage(e)}`)
       }
     }
@@ -677,14 +677,14 @@ export class BtwService {
    * 快照后并发关线只会让后续 closeLine 幂等返 false，不漏杀不重杀）→ ②逐线转调 closeLine
    *（单入口；abort 幂等）→ ③按 cwd+mainSid 推导整目录删除（**不依赖注册表完备**——
    * 不可解析文件的残留目录同样清；路径限定 btw 根内）。
-   * best-effort：逐段失败 warn 不上抛（调用方是删除主链，P2 降级隔离；漏删由启动孤儿补账兑底）。
+   * best-effort：逐段失败 warn 不上抛（调用方是删除主链，P2 降级隔离；漏删由启动孤儿补账兜底）。
    */
   async closeAllForMain(mainSid: string, cwd: string): Promise<void> {
     for (const rec of this.listLines(mainSid)) {
       try {
         await this.closeLine(rec.vid)
       } catch (e) {
-        // best-effort：删线失败不上抛（主删链 P2 降级隔离），漏删由启动孤儿补账兑底
+        // best-effort：删线失败不上抛（主删链 P2 降级隔离），漏删由启动孤儿补账兜底
         console.warn(`[btw] closeAllForMain line close failed (${rec.vid}): ${toErrorMessage(e)}`)
       }
     }
@@ -694,7 +694,7 @@ export class BtwService {
         rmSync(threadDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
       }
     } catch (e) {
-      // best-effort：删线目录失败不上抛（主删链 P2 降级隔离），漏删由启动孤儿补账兑底
+      // best-effort：删线目录失败不上抛（主删链 P2 降级隔离），漏删由启动孤儿补账兜底
       console.warn(`[btw] closeAllForMain dir removal failed (mainSid=${mainSid}): ${toErrorMessage(e)}`)
     }
   }
@@ -735,7 +735,7 @@ export class BtwService {
     try {
       this.deps.onWillReclaim?.(vid)
     } catch (e) {
-      // best-effort：提醒挂点异常不打断回收主链（提醒兑底 = 回收分支 catch-up 补发），留痕可归因
+      // best-effort：提醒挂点异常不打断回收主链（提醒兜底 = 回收分支 catch-up 补发），留痕可归因
       console.warn(`[btw] onWillReclaim hook failed (${vid}): ${toErrorMessage(e)}`)
     }
   }

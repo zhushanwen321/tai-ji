@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EngineClient, type RunRoute } from "../engine-client.ts";
-import { isProcessAlive, pidfilePath, readPidfile, writePidfileAtomic } from "../pid-file.ts";
+import { probePidAliveness, pidfilePath, readPidfile, writePidfileAtomic } from "../pid-file.ts";
 import {
   _resetCoreSpawnedChildrenMirrorForTest,
   hasLiveProcessHandleCore,
@@ -107,13 +107,6 @@ describe("EngineClient 帧往返与握手", () => {
     expect(content?.engineStartTime).not.toBeNull(); // POSIX 真值（R9-3b）
     await cleanup();
     expect(existsSync(path)).toBe(false);
-  });
-
-  it("ping 往返（请求-应答 id 关联；不设墙钟）", async () => {
-    const { client, cleanup } = makeClient();
-    await client.ping();
-    expect(client.currentState).toBe("ready");
-    await cleanup();
   });
 
   it("版本协商越界：engine_protocol_mismatch（含双方版本 + 升级指引）+ 该引擎标记不可用", async () => {
@@ -241,6 +234,43 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
     expect(client.currentState).toBe("ready");
     await cleanup();
   });
+});
+
+describe("stdout 半行上限（MAX_LINE_BYTES：残片丢头留尾，防无界增长）", () => {
+  it("引擎持续输出无换行数据 → 残片截断 + 首截断 warn 一次；换行冲刷后垃圾行丢弃，后续合法帧照常解析", async () => {
+    const warnMessages: string[] = [];
+    const { client, cleanup } = makeClient({
+      args: [
+        FAKE_ENGINE,
+        "--run-actions",
+        // 1.5 MiB 无换行垃圾（> 1 MiB 上限）分片写 + 换行冲刷；run 终态应答在垃圾
+        // 之后到达且是独立完整行——必须照常解析（截断不得破坏后续帧边界）。
+        JSON.stringify([{ op: "rawStdout", bytes: 1_572_864, terminateNewline: true }]),
+      ],
+    });
+    const original = console.warn;
+    console.warn = (...parts: unknown[]) => {
+      warnMessages.push(parts.join(" "));
+    };
+    let outcome: { content: string } | undefined;
+    try {
+      await client.ensureConnected();
+      const result = (await client.request("run", {
+        runId: "run-1",
+        task: { prompt: "p" },
+        ctx: { cwd: dataDir },
+      })) as { outcome: { content: string } };
+      outcome = result.outcome;
+    } finally {
+      console.warn = original;
+    }
+    expect(outcome?.content).toBe("fake-content-run-1");
+    // 残片经多次 data 事件反复超限——截断告警只发首截断一次
+    expect(warnMessages.filter((m) => m.includes("stdout partial line exceeded"))).toHaveLength(1);
+    // 冲刷出的垃圾行（截断尾部 + 换行）按 non-NDJSON 丢弃留痕
+    expect(warnMessages.some((m) => m.includes("dropped non-NDJSON stdout line"))).toBe(true);
+    await cleanup();
+  }, 20_000);
 });
 
 describe("镜像桥接 → core 镜像投影（u7a 数据面桥接）", () => {
@@ -410,7 +440,7 @@ describe("超时域二分（fake timers，R9-2 / R9-2b）", () => {
     // ack 已回（引擎继续跑），handler 挂起不触发任何杀链
     expect(client.currentState).toBe("ready");
     expect(client.enginePid).toBe(enginePid);
-    expect(isProcessAlive(enginePid)).toBe(true);
+    expect(probePidAliveness(enginePid)).toBe(true);
     // 负向断言完成后必须走杀链收尾：不 dispose = 引擎进程泄漏为常驻孤儿
     // （fake 引擎 stdin EOF 后保活不自灭），且带 exit 监听的 client 跨文件存活。
     vi.useRealTimers(); // 杀链（dispose 帧 3s 上界 / SIGKILL 收尸）走真实时钟
@@ -442,7 +472,7 @@ describe("引擎崩溃与重建（A8①③）", () => {
       return true;
     });
     expect(client.currentState).toBe("exited");
-    expect(client.mirror.size).toBe(0); // 崩溃后镜像清空（isResumable 回落「无句柄」）
+    expect(client.mirror.size).toBe(0); // 崩溃后镜像清空（读点回落「无句柄」）
     await waitFor(() => !existsSync(path)); // pidfile 随引擎死亡清理
     await cleanup();
   });
@@ -519,12 +549,12 @@ describe("收割（POSIX 进程组；范围 = 一代子进程 + 组内后代，R
     await waitFor(() => client.mirror.size > 0);
     const grandchildPid = client.mirror.snapshot()[0]!.pid;
     const enginePid = client.enginePid!;
-    expect(isProcessAlive(grandchildPid)).toBe(true);
+    expect(probePidAliveness(grandchildPid)).toBe(true);
 
     await client.killAll("test harvest");
     // 组内双亡（detached 后代不覆盖——R9-1 已接受代价，不在断言范围）
-    await waitFor(() => isProcessAlive(grandchildPid) === false);
-    await waitFor(() => isProcessAlive(enginePid) === false);
+    await waitFor(() => probePidAliveness(grandchildPid) === false);
+    await waitFor(() => probePidAliveness(enginePid) === false);
     expect(client.mirror.size).toBe(0);
     expect(existsSync(pidfilePath(dataDir, "fake", "test", process.pid))).toBe(false);
     unregister();
@@ -535,7 +565,7 @@ describe("收割（POSIX 进程组；范围 = 一代子进程 + 组内后代，R
     await client.ensureConnected();
     const enginePid = client.enginePid!;
     await client.dispose();
-    await waitFor(() => isProcessAlive(enginePid) === false);
+    await waitFor(() => probePidAliveness(enginePid) === false);
     expect(existsSync(pidfilePath(dataDir, "fake", "test", process.pid))).toBe(false);
     await expect(client.dispose()).resolves.toBeUndefined(); // 幂等
     await expect(client.killAll("again")).resolves.toBeUndefined();
@@ -565,58 +595,4 @@ describe("pidfile 启动期清扫（EngineClient 接线，R9-3）", () => {
   });
 });
 
-describe("[stdout-wedge self-heal] run 事件计数旁路观测 + 引擎自愈杀链", () => {
-  // 设计依据（2026-09-15 实证事故）：单一 TaiJi-as-node 引擎进程前 3 个 run 的
-  // 引擎→宿主事件通知全部静默丢失（settled-watchdog 30 分钟误报），同引擎后续 run
-  // 又全部正常——计数面把「零事件楔死」从不可见变成 fire 时可判可自愈。
 
-  it("事件计数：未收帧 0 →（emit 1 帧）→ 1；注销后计数清理；未知 runId 恒 0；activeRunCount 随注册/注销增减", async () => {
-    const { client, cleanup } = makeClient({
-      args: [
-        FAKE_ENGINE,
-        "--run-actions",
-        JSON.stringify([{ op: "emit", seq: 1, event: { type: "text_delta", delta: "hello" } }]),
-      ],
-    });
-    const unregister = client.registerRunRoute("run-1", {});
-    // 路由行为零变化：旁路观测面只计数，不改路由决策。
-    expect(client.eventsReceivedForRun("run-1")).toBe(0); // 注册后未收帧 = 0
-    expect(client.eventsReceivedForRun("never-registered")).toBe(0); // 未知 runId 恒 0
-    expect(client.activeRunCount()).toBe(1);
-    await client.ensureConnected();
-    await client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } });
-    // fixture 的 run 处理器固定先回一帧 run-params 回显事件（seq 0），再加 emit 帧——
-    // 1 次 emit = 2 帧（回显帧也是 event 通知，计数面不区分语义，到达即 +1）。
-    expect(client.eventsReceivedForRun("run-1")).toBe(2);
-    unregister();
-    expect(client.activeRunCount()).toBe(0);
-    expect(client.eventsReceivedForRun("run-1")).toBe(0); // 注销后计数随路由清理
-    await cleanup();
-  });
-
-  it("killEngineForStdoutWedge：复用既有 killAll 杀链（mock 验证透传 reason）", async () => {
-    const { client, cleanup } = makeClient();
-    await client.ensureConnected();
-    const killAllSpy = vi.spyOn(client, "killAll").mockResolvedValue(undefined);
-    await client.killEngineForStdoutWedge("wedge-test reason");
-    expect(killAllSpy).toHaveBeenCalledTimes(1);
-    expect(killAllSpy).toHaveBeenCalledWith("wedge-test reason");
-    killAllSpy.mockRestore();
-    await cleanup();
-  });
-
-  it("killEngineForStdoutWedge：真实杀链杀引擎进程 + state 离开 ready（下次派发 respawn 前提）", async () => {
-    const { client, cleanup } = makeClient();
-    await client.ensureConnected();
-    const enginePid = client.enginePid!;
-    expect(client.currentState).toBe("ready");
-    await client.killEngineForStdoutWedge("real wedge kill");
-    await waitFor(() => isProcessAlive(enginePid) === false); // 引擎进程被杀
-    expect(client.currentState).not.toBe("ready"); // killAll 收口（非 unavailable——可重建）
-    // 自愈语义闭环：杀后 ensureConnected respawn 新引擎（新 pid）。
-    await client.ensureConnected();
-    expect(client.currentState).toBe("ready");
-    expect(client.enginePid).not.toBe(enginePid);
-    await cleanup();
-  }, 20_000);
-});

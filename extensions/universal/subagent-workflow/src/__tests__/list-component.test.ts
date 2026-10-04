@@ -2,19 +2,25 @@
 //
 // SubagentsListComponent 单元测试（循环依赖消除后的新结构）。
 //
+// subagents overlay 域两面合一（同 overlay、互补无断言重叠）：
+//   1. SubagentsListComponent 组件分发面——render 三分支调度 / hasRunning / 左列
+//      视口窗口 / 右列预览兜底链 / handleInput exit|changed|none 分支 / render 缓存 /
+//      detailMode 切换 / 帧缓存，按键处理用 stub keyHandler 注入；
+//   2. processKey（list-view）键位直测面——阶段 1（list）/ 阶段 2（detail）全键位
+//      纯函数直测（见文末 describe）。
+//
 // 被测组件 list-component.ts 不再 import list-view——按键处理经第 7 个构造函数参数
 // keyHandler 注入（list-view factory 的 processKey），状态经第 4 参数 ViewState 注入。
-// 本测试覆盖 render 三分支调度 / hasRunning / 左列视口窗口 / 右列预览兜底链 /
-// handleInput exit|changed|none 分支 / render 缓存 / detailMode 切换。
 //
 // Mock 策略：theme 透传为纯文本（断言业务文本而非 ANSI 码），service 只 stub collectRecords，
 // keyHandler 由各用例注入返回 KeyResult。spinner 帧 Date.now() 驱动 → fake timers 锁定。
 
 import { afterEach,beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ThemeLike } from "../interface/format.ts";
-import { SubagentsListComponent } from "../interface/list-component.ts";
-import type { KeyHandler, KeyResult, TuiLike, ViewState } from "../interface/list-shared.ts";
+import type { ThemeLike } from "../interface/format/format.ts";
+import { SubagentsListComponent } from "../interface/tui/list-component.ts";
+import { processKey } from "../interface/tui/list-view.ts";
+import type { DetailKeyContext, KeyHandler, KeyResult, NotifyFn, TuiLike, ViewState } from "../interface/tui/list-shared.ts";
 import type { SubagentService } from "@zhushanwen/subagent-core";
 import type { SubagentRecord } from "@zhushanwen/subagent-core";
 
@@ -23,6 +29,20 @@ import type { SubagentRecord } from "@zhushanwen/subagent-core";
 const KEY_NONE: KeyResult = { changed: false, exit: false };
 const KEY_CHANGED: KeyResult = { changed: true, exit: false };
 const KEY_EXIT: KeyResult = { changed: false, exit: true };
+
+// ── 键序列（pi-tui 实装，processKey 直测用；node_modules @earendil-works/pi-tui/dist/
+//    keys.js LEGACY_KEY_SEQUENCES + KEY_CODES，与运行时 matchesKey 判定同源） ──
+
+const ESC = "\x1b";
+const UP = "\x1b[A";
+const DOWN = "\x1b[B";
+const ENTER = "\r";
+const RETURN = "\n";
+const BACKSPACE = "\x7f";
+const PAGE_UP = "\x1b[5~";
+const PAGE_DOWN = "\x1b[6~";
+const HOME = "\x1b[H";
+const END = "\x1b[F";
 
 // ── stub 工厂 ──
 
@@ -38,7 +58,7 @@ function makeTheme(): ThemeLike {
 
 /** service stub：list-component 只调 collectRecords(limit) 单参数 + getFullRecord（[perf]
  *  选中项详情懒加载，mock 回 undefined → fullRecordOf 回退 light record，与旧行为一致）。
- *  与 tool-action.test.ts 同模式：部分对象直接断言为 SubagentService（duck-type）。
+ *  部分对象直接断言为 SubagentService（duck-type）。
  *  [D4 聚合跟随] 读面经 service.queries（成员与平铺键同引用，spy 断言不受影响）。 */
 function makeService(records: SubagentRecord[] = []): SubagentService {
   const collectRecords = vi.fn(() => records);
@@ -56,7 +76,12 @@ function makeService(records: SubagentRecord[] = []): SubagentService {
   } as unknown as SubagentService;
 }
 
-/** record fixture（参考 tool-action.test.ts，字段见 types.ts SubagentRecord）。 */
+/** processKey 直测的最小 service stub：两阶段键位只触达 cancel。 */
+function makeCancelService(cancel: (id: string) => boolean = () => true): SubagentService {
+  return { cancel } as unknown as SubagentService;
+}
+
+/** record fixture（字段见 types.ts SubagentRecord）。 */
 function makeRecord(over: Partial<SubagentRecord> = {}): SubagentRecord {
   return {
     id: "run-1",
@@ -89,7 +114,7 @@ function makeRecords(n: number): SubagentRecord[] {
   );
 }
 
-interface MakeOpts {
+type MakeOpts = {
   records?: SubagentRecord[];
   rows?: number;
   selectedIdx?: number;
@@ -423,5 +448,234 @@ describe("SubagentsListComponent", () => {
       expect(joined).toContain("children:");
       expect(vi.mocked(service.collectRecords)).toHaveBeenCalledTimes(1); // buildLines + children 同帧合一
     });
+  });
+});
+
+// ============================================================
+// processKey（list-view）纯函数直接单测——两阶段焦点按键分发。
+// 重构前该函数无直接测试（仅经上方 keyHandler 注入间接触达），
+// 以下补齐阶段 1（list）/ 阶段 2（detail）全键位覆盖。
+// 键序列取 pi-tui 实装（见文件头部键序列常量注释），与运行时 matchesKey 判定同源。
+// ============================================================
+
+// ── fixture 工厂（对齐上方 list-component 用例形态，makeRecord 共用） ──
+
+function makeState(over: Partial<ViewState> = {}): ViewState {
+  return {
+    selectedIdx: 0,
+    scrollOffset: 0,
+    filterText: "",
+    detailMode: false,
+    disposed: false,
+    ...over,
+  };
+}
+
+function makeNotify() {
+  // vi.fn() 可调用形态与 NotifyFn 结构兼容；断言走 .mock.calls
+  return vi.fn();
+}
+
+function call(
+  data: string,
+  state: ViewState,
+  opts: {
+    records?: SubagentRecord[];
+    selected?: SubagentRecord | null;
+    service?: SubagentService | null;
+    detailCtx?: DetailKeyContext;
+    notify?: NotifyFn;
+  } = {},
+) {
+  return processKey(
+    data,
+    opts.records ?? [makeRecord()],
+    state,
+    opts.selected ?? null,
+    opts.service ?? null,
+    opts.detailCtx,
+    opts.notify,
+  );
+}
+
+// ============================================================
+// 阶段 1（list 焦点，detailMode=false）
+// ============================================================
+describe("processKey — 阶段 1（list）", () => {
+  it("escape with filter clears it and resets selection (changed, no exit)", () => {
+    const state = makeState({ filterText: "wo" });
+    const r = call(ESC, state);
+    expect(state.filterText).toBe("");
+    expect(state.selectedIdx).toBe(0);
+    expect(r).toEqual({ changed: true, exit: false });
+  });
+
+  it("escape without filter exits the overlay (no change)", () => {
+    const r = call(ESC, makeState());
+    expect(r).toEqual({ changed: false, exit: true });
+  });
+
+  it("up clamps at 0", () => {
+    const state = makeState({ selectedIdx: 0 });
+    const r = call(UP, state);
+    expect(state.selectedIdx).toBe(0);
+    expect(r).toEqual({ changed: true, exit: false });
+  });
+
+  it("up moves selection up", () => {
+    const state = makeState({ selectedIdx: 2 });
+    call(UP, state);
+    expect(state.selectedIdx).toBe(1);
+  });
+
+  it("down clamps at records.length - 1", () => {
+    const records = [makeRecord(), makeRecord({ id: "run-2" })];
+    const state = makeState({ selectedIdx: 1 });
+    const r = call(DOWN, state, { records });
+    expect(state.selectedIdx).toBe(1);
+    expect(r).toEqual({ changed: true, exit: false });
+  });
+
+  it("enter with selected record enters detail mode top-aligned", () => {
+    const selected = makeRecord();
+    const state = makeState({ selectedIdx: 0, scrollOffset: 7 });
+    const r = call(ENTER, state, { selected });
+    expect(state.detailMode).toBe(true);
+    expect(state.scrollOffset).toBe(0);
+    expect(r).toEqual({ changed: true, exit: false });
+  });
+
+  it("return key behaves identically to enter", () => {
+    const state = makeState();
+    const r = call(RETURN, state, { selected: makeRecord() });
+    expect(state.detailMode).toBe(true);
+    expect(r).toEqual({ changed: true, exit: false });
+  });
+
+  it("enter without selection is a no-op (none)", () => {
+    const state = makeState();
+    const r = call(ENTER, state, { records: [], selected: null });
+    expect(state.detailMode).toBe(false);
+    expect(r).toEqual({ changed: false, exit: false });
+  });
+
+  it("backspace deletes last filter char; without filter is none", () => {
+    const state = makeState({ filterText: "abc" });
+    const r = call(BACKSPACE, state);
+    expect(state.filterText).toBe("ab");
+    expect(state.selectedIdx).toBe(0);
+    expect(r).toEqual({ changed: true, exit: false });
+
+    const empty = makeState();
+    const r2 = call(BACKSPACE, empty);
+    expect(r2).toEqual({ changed: false, exit: false });
+  });
+
+  it("printable ascii char appends to filter", () => {
+    const state = makeState({ filterText: "ru" });
+    const r = call("n", state);
+    expect(state.filterText).toBe("run");
+    expect(r).toEqual({ changed: true, exit: false });
+  });
+
+  it("unhandled multi-char sequence (pageUp) in list stage is none, not filter input", () => {
+    const state = makeState();
+    const r = call(PAGE_UP, state);
+    expect(state.filterText).toBe("");
+    expect(r).toEqual({ changed: false, exit: false });
+  });
+});
+
+// ============================================================
+// 阶段 2（detail 焦点，detailMode=true）
+// ============================================================
+describe("processKey — 阶段 2（detail）", () => {
+  const detailCtx: DetailKeyContext = { viewportHeight: 5, contentLines: 10 };
+
+  it("escape returns to list and resets scroll to top", () => {
+    const state = makeState({ detailMode: true, scrollOffset: 4 });
+    const r = call(ESC, state);
+    expect(state.detailMode).toBe(false);
+    expect(state.scrollOffset).toBe(0);
+    expect(r).toEqual({ changed: true, exit: false });
+  });
+
+  it("up/down scroll by single step, clamped to [0, max]", () => {
+    const state = makeState({ detailMode: true, scrollOffset: 3 });
+    expect(call(UP, state, { detailCtx })).toEqual({ changed: true, exit: false });
+    expect(state.scrollOffset).toBe(2);
+
+    const bottom = makeState({ detailMode: true, scrollOffset: 5 });
+    call(DOWN, bottom, { detailCtx });
+    expect(bottom.scrollOffset).toBe(5); // max = contentLines - viewportHeight = 5
+
+    const mid = makeState({ detailMode: true, scrollOffset: 2 });
+    call(DOWN, mid, { detailCtx });
+    expect(mid.scrollOffset).toBe(3);
+  });
+
+  it("pageUp/pageDown scroll by viewport height with clamping", () => {
+    const state = makeState({ detailMode: true, scrollOffset: 4 });
+    call(PAGE_UP, state, { detailCtx });
+    expect(state.scrollOffset).toBe(0); // max(0, 4-5)
+
+    const state2 = makeState({ detailMode: true, scrollOffset: 2 });
+    call(PAGE_DOWN, state2, { detailCtx });
+    expect(state2.scrollOffset).toBe(5); // min(max=5, 2+5)
+  });
+
+  it("home/end jump to top/bottom", () => {
+    const state = makeState({ detailMode: true, scrollOffset: 3 });
+    call(HOME, state, { detailCtx });
+    expect(state.scrollOffset).toBe(0);
+
+    const state2 = makeState({ detailMode: true, scrollOffset: 1 });
+    call(END, state2, { detailCtx });
+    expect(state2.scrollOffset).toBe(5);
+  });
+
+  it("pageUp without detailCtx falls back to PAGE_SCROLL_DEFAULT", () => {
+    const state = makeState({ detailMode: true, scrollOffset: 3 });
+    call(PAGE_UP, state);
+    // PAGE_SCROLL_DEFAULT 来自 tui-kit（终端兜底步长）——只断言未越界为负即可钉住回退路径
+    expect(state.scrollOffset).toBe(0);
+  });
+
+  it("x stops a running record via service.cancel and notifies info", () => {
+    const cancel = vi.fn(() => true);
+    const notify = makeNotify();
+    const selected = makeRecord({ id: "run-9", status: "running" });
+    const state = makeState({ detailMode: true });
+    const r = call("x", state, { selected, service: makeCancelService(cancel), notify });
+    expect(cancel).toHaveBeenCalledWith("run-9");
+    expect(notify.mock.calls.some(([msg]) => msg === "Requested stop for run-9")).toBe(true);
+    expect(r).toEqual({ changed: true, exit: false });
+  });
+
+  it("x on a non-running record only warns and does not change", () => {
+    const cancel = vi.fn(() => true);
+    const notify = makeNotify();
+    const selected = makeRecord({ id: "run-9", status: "closed" });
+    const state = makeState({ detailMode: true });
+    const r = call("x", state, { selected, service: makeCancelService(cancel), notify });
+    expect(cancel).not.toHaveBeenCalled();
+    expect(notify.mock.calls.some(([msg]) => msg.startsWith("Cannot stop: record is closed"))).toBe(true);
+    expect(r).toEqual({ changed: false, exit: false });
+  });
+
+  it("x without service notifies error and does not change", () => {
+    const notify = makeNotify();
+    const state = makeState({ detailMode: true });
+    const r = call("x", state, { selected: makeRecord({ status: "running" }), service: null, notify });
+    expect(notify.mock.calls.some(([msg]) => msg === "Runtime not ready, cannot stop")).toBe(true);
+    expect(r).toEqual({ changed: false, exit: false });
+  });
+
+  it("unhandled key in detail stage is none (no state change)", () => {
+    const state = makeState({ detailMode: true, scrollOffset: 1 });
+    const r = call("z", state, { detailCtx });
+    expect(r).toEqual({ changed: false, exit: false });
+    expect(state.scrollOffset).toBe(1);
+    expect(state.detailMode).toBe(true);
   });
 });

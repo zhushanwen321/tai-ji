@@ -1,150 +1,255 @@
 /**
- * MessageDispatcher 三入口 skill 注入器挂载单测（composer-multi-skill-injection D9）。
+ * MessageDispatcher × 投递所有权内核（u2 内核化）验收测试。
  *
- * 覆盖：sendPrompt/steerMessage/followUpMessage 各恰好调用注入器一次（结构化幂等）、
- * 调用点在 BeforeSend hook 之后 / client.prompt/steer/followUp 之前（顺序断言）、
- * session.skillNotice 广播 payload 形状符合 protocol 契约（含 clientUuid 提取与
- * steer/followUp 无 clientUuid 的缺省形态）、失败路径不发布提示。
- * 另含 busy 预检裁决单测（session-dead-structural-fixes D2 settling 预检裁决，u3b 验收③）：
- * 预检读 occupancy 投影，settling 计为忙 → send.rejected{busy}。
- * 全部协作对象 fake 注入，不 spawn pi 进程。
+ * 迁移自「sendPrompt 骨架 + SkillInjector 挂载」测试族（原断言锁定已退役行为：注入器在
+ * dispatcher 内部调用、busy 预检拒绝、prompt 调用参数形态）。u2 迁移后的口径：
+ * - **职责划分**：dispatcher = 入口 touch + BeforeSend hook（提交前唯一 veto）+ 内核提交；
+ *   出站交接（ensureActive → skill 注入 → prompt → 三副作用置位）在 delivery registry 适配层。
+ * - **断言强度保持**：hook 审核原文 / hook 改写的 transform 语义 / blocked 面 / 注入恰好一次
+ *   且先于 prompt / notices 逐条发布（clientUuid 从裸标记提取）/ 投递失败不发 notice
+ *   ——逐条迁移，非删除。
+ * - **退役面显式断言**（原测试的否定面转正）：busy 预检与 send.rejected 退役后，busy 维度
+ *   不再产生拒绝广播、不再拦提交（排队取代拒绝，D5），消息由内核在册持有。
+ *
+ * 本文件是「busy 退役断言」与 dispatcher 投递错误路径的唯一归宿（原 message-dispatcher-precheck.test.ts
+ * 的独有断言已收编：prompt 失败 isGenerating 复位并入投递失败用例、workspace.record 降级单列；
+ * send-rejection 侧同构用例已删除，仅存 clientUuid 透传用例）。
+ *
+ * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/message-dispatcher.test.ts
  */
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { MessageDispatcher } from '../message-dispatcher.js'
 import {
-  MessageDispatcher,
-} from '../message-dispatcher.js'
-import { OCCUPANCY_SETTLE_WINDOW_MS, occupancySettleWindow } from '../event-interpreter.js'
-import type { SkillInjector, SkillNotice, SkillInjectionResult } from '../skill-injector.js'
+  createSessionDeliveryRegistry,
+  type SessionDeliveryDeps,
+} from '../session-delivery-registry.js'
+import { applySessionOccupancyTransition, OCCUPANCY_SETTLE_WINDOW_MS, occupancySettleWindow } from '../event-interpreter.js'
 import type { IDispatcherSessionOps } from '../session-internal.js'
+import type { IManagedSessionView } from '../types.js'
 import type { IPiEngine, IProcessManager } from '../../ports/pi-engine.js'
 import type { IMessageBus } from '../../message-bus/message-bus.js'
 import type { ServerMessage } from '@taiji/shared'
-
-// ── fakes ──
+import type { WorkspaceService } from '../../workspace/workspace-service.js'
+import type { SkillInjectionResult, SkillInjector, SkillNotice } from '../skill-injector.js'
 
 const CLIENT_UUID = 'u-12345678-1234-1234-1234-1234567890ab'
 
-interface Harness {
-  dispatcher: MessageDispatcher
-  calls: string[]
-  client: { prompt: ReturnType<typeof vi.fn>; steer: ReturnType<typeof vi.fn>; followUp: ReturnType<typeof vi.fn> }
-  published: ServerMessage[]
-  injectMock: ReturnType<typeof vi.fn>
-  hookMock: ReturnType<typeof vi.fn>
-  /** 注入器 spy 的可配置返回（不替换实现，保住 calls 调用序记录）。 */
-  injectState: { notices: SkillNotice[] }
+function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManagedSessionView {
+  return {
+    id: 's1',
+    cwd: '/test/workspace',
+    label: 'test',
+    modelId: 'm1',
+    createdAt: 1,
+    lastActiveAt: 1,
+    tokenCount: 0,
+    inputTokens: 0,
+    isGenerating: false,
+    isCompacting: false,
+    isBashRunning: false,
+    bashRunToken: undefined,
+    occupancy: { turn: 'idle', compacting: false, bash: false },
+    ...overrides,
+  }
 }
 
 interface HarnessOptions {
   hookModifiedContent?: string
+  hookBlocked?: boolean
   promptError?: Error
-  sessionByClient?: Record<string, unknown>
-  /** [A1 接线] svc.getSession 的返回视图（steer/followUp 的 cwd 透传断言用；缺省 undefined 同既有行为）。 */
-  sessionView?: Record<string, unknown>
+  sessionByClient?: Partial<IManagedSessionView>
+  /** [CP6 移植] deps.getSession 的返回视图（收口窗回调重查/置位断言用；缺省同 session）。 */
+  sessionView?: unknown
+  /** workspace.record 同步抛错（best-effort 副作用的降级路径用例注入）。 */
+  recordWorkspaceError?: Error
 }
 
-/**
- * 组装被测 dispatcher：注入器 spy 产 `INJECTED::` 前缀文本（与输入可区分），调用序
- * 统一记入 calls 数组供顺序断言（hook → inject → prompt/steer/followUp）。
- */
-function makeHarness(opts: HarnessOptions = {}): Harness {
+function makeHarness(opts: HarnessOptions = {}) {
   const calls: string[] = []
   const client = {
-    prompt: vi.fn(async () => {
+    prompt: vi.fn(async (..._args: unknown[]) => {
       calls.push('prompt')
       if (opts.promptError) throw opts.promptError
       return {}
     }),
-    steer: vi.fn(async () => {
-      calls.push('steer')
-      return {}
-    }),
-    followUp: vi.fn(async () => {
-      calls.push('followUp')
-      return {}
-    }),
-    // touchActivity：sendPrompt 入口同步 touch（idle-pi-reclamation D6-1）经 pm.getClient
-    // 到达 fake client——fake 须补齐该接口成员
+    // 入口同步 touch（idle-pi-reclamation D6-1）经 pm.getClient 到达本 fake
     touchActivity: vi.fn(),
+    getEntries: vi.fn(async () => ({ data: { entries: [] } })),
+    clearQueue: vi.fn(async () => ({ steering: [], followUp: [] })),
+    onEvent: vi.fn(() => () => {}),
   }
+  const session = makeMockSession(opts.sessionByClient ?? {})
   const svc = {
     ensureActive: vi.fn(async () => {
       calls.push('ensureActive')
       return client as unknown as IPiEngine
     }),
-    getSessionByClient: vi.fn(() => opts.sessionByClient as never),
+    getSessionByClient: vi.fn(() => session),
     persistSessionOutcome: vi.fn(),
-    getSession: vi.fn(() => opts.sessionView as never),
+    getSession: vi.fn(() => session),
     removeSessionEntry: vi.fn(),
     detachSession: vi.fn(),
   } as unknown as IDispatcherSessionOps
   const pm = { getClient: vi.fn(() => client as unknown as IPiEngine) } as unknown as IProcessManager
-  const workspaceService = { record: vi.fn() } as never
+  const workspaceService = {
+    record: vi.fn(() => {
+      calls.push('record')
+      if (opts.recordWorkspaceError) throw opts.recordWorkspaceError
+    }),
+  } as unknown as WorkspaceService
   const published: ServerMessage[] = []
-  const messageBus = { publish: vi.fn((_sid: string, msg: ServerMessage) => published.push(msg)) } as unknown as IMessageBus
-  const hookMock = vi.fn(async () => {
-    calls.push('hook')
-    // SendMessageHook 契约：blocked 必填（hookResult?.modifiedContent 为 transform 语义可选字段）
-    return opts.hookModifiedContent !== undefined
-      ? { blocked: false, modifiedContent: opts.hookModifiedContent }
-      : { blocked: false }
-  })
+  const messageBus = {
+    publish: vi.fn((_sid: string, msg: ServerMessage) => published.push(msg)),
+  } as unknown as IMessageBus
   const injectState = { notices: [] as SkillNotice[] }
   const injectMock = vi.fn(async (_client: IPiEngine, text: string): Promise<SkillInjectionResult> => {
     calls.push('inject')
     return { text: `INJECTED::${text}`, notices: injectState.notices }
   })
-  const injector = { inject: injectMock } as unknown as SkillInjector
-  const dispatcher = new MessageDispatcher(svc, pm, workspaceService, messageBus, injector)
+
+  // 投递内核装配（出站交接点 = registry 适配层；活动注册表槽供 dispatcher 取用）
+  let sessionForGet: unknown = opts.sessionView !== undefined ? opts.sessionView : session
+  const deps: SessionDeliveryDeps = {
+    getSession: (sid) => (sid === 's1' ? (sessionForGet as IManagedSessionView) : undefined),
+    ensureActive: svc.ensureActive as (sid: string) => Promise<IPiEngine>,
+    subscribeAgentSettled: () => () => {},
+    recordWorkspace: (cwd) => workspaceService.record(cwd),
+    getMessageBus: () => messageBus,
+  }
+  const registry = createSessionDeliveryRegistry(deps, { inject: injectMock } as unknown as SkillInjector)
+  const hookMock = vi.fn(async () => {
+    calls.push('hook')
+    if (opts.hookBlocked) return { blocked: true, reason: '被插件拦截' }
+    return opts.hookModifiedContent !== undefined
+      ? { blocked: false, modifiedContent: opts.hookModifiedContent }
+      : { blocked: false }
+  })
+  const dispatcher = new MessageDispatcher(svc, pm, workspaceService, messageBus)
+  dispatcher.setDeliveryRegistry(registry)
   dispatcher.setSendMessageHook(hookMock)
-  return { dispatcher, calls, client, published, injectMock, hookMock, injectState }
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 40; i += 1) await Promise.resolve()
+  }
+  const promptArgs = (): unknown[] => (client.prompt.mock.calls[0] ?? []) as unknown[]
+  return {
+    dispatcher, registry, session, client, published, calls, injectMock, hookMock, injectState, flush, promptArgs,
+    /** [CP6 移植] 模拟回收/重建竞态：fire 时重查 getSession 已查不到该 session。 */
+    setGetSessionResult: (v: unknown): void => { sessionForGet = v },
+  }
 }
+
+beforeEach(() => {
+  vi.useFakeTimers()
+})
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 const notice = (reason: SkillNotice['reason'], skills: string[]): SkillNotice => ({ reason, skills })
 
-describe('MessageDispatcher × SkillInjector 挂载（D9）', () => {
-  it('sendPrompt：注入器恰好一次，调用顺序 hook → inject → ensureActive 之后 prompt 之前，prompt 收注入文本', async () => {
+describe('MessageDispatcher × 内核出站交接（u2）', () => {
+  it('sendMessage：hook 审核原文 → 内核通道 ensureActive → inject → prompt（顺序与迁移前一致）', async () => {
     const h = makeHarness()
     const result = await h.dispatcher.sendMessage('s1', '原始 <taiji-skill name="a"/> 文本')
-    expect(result).toEqual({ blocked: false })
+    // 受理回执透出（must-fix ①：delivery.submit reply 经组合点消费，不经第二个提交通道）
+    expect(result.blocked).toBe(false)
+    expect(result.receipt).toMatchObject({ clientUuid: expect.any(String), lane: 'direct', state: 'queued' })
+    await h.flush()
     expect(h.injectMock).toHaveBeenCalledTimes(1)
     expect(h.client.prompt).toHaveBeenCalledTimes(1)
-    expect(h.client.prompt).toHaveBeenCalledWith('INJECTED::原始 <taiji-skill name="a"/> 文本', undefined)
-    // hook 审核原文 → 注入器处理 hook 产物 → 最后 client.prompt
-    expect(h.calls).toEqual(['hook', 'ensureActive', 'inject', 'prompt'])
-    expect(h.hookMock).toHaveBeenCalledWith('s1', '原始 <taiji-skill name="a"/> 文本')
+    // hook 审核原文 → 注入器处理出站文本（含内核裸标记）→ prompt → 三副作用置位
+    expect(h.calls).toEqual(['hook', 'ensureActive', 'inject', 'prompt', 'record'])
+    expect((h.promptArgs()[0] as string)).toContain('INJECTED::原始 <taiji-skill name="a"/> 文本')
   })
 
-  it('sendPrompt：hook 改写文本时注入器收到改写后文本（hook 之后语义）', async () => {
+  it('sendMessage：hook 改写文本时注入器收到改写后文本（hook 之后语义保持）', async () => {
     const h = makeHarness({ hookModifiedContent: '改写后 <taiji-skill name="a"/>' })
     await h.dispatcher.sendMessage('s1', '用户原文')
-    expect(h.injectMock).toHaveBeenCalledWith(expect.anything(), '改写后 <taiji-skill name="a"/>', undefined)
-    expect(h.client.prompt).toHaveBeenCalledWith('INJECTED::改写后 <taiji-skill name="a"/>', undefined)
+    await h.flush()
+    expect(h.injectMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringContaining('改写后 <taiji-skill name="a"/>'),
+      '/test/workspace',
+    )
   })
 
-  it('sendPrompt / steer：session cwd 作 inject 第三参透传（A1 接线，D7 project 扫描基准）', async () => {
-    // sendPrompt 走 activeSession.cwd（getSessionByClient 视图）；视图缺失（默认 harness）= undefined（global-only 映射，宁缺毋错）
-    const h = makeHarness({ sessionByClient: { cwd: '/w/s1', occupancy: { turn: 'idle', compacting: false, bash: false } } })
-    await h.dispatcher.sendMessage('s1', '文本')
-    expect(h.injectMock).toHaveBeenCalledWith(expect.anything(), '文本', '/w/s1')
-    // steer / followUp 走 svc.getSession(sessionId)?.cwd
-    const h2 = makeHarness({ sessionView: { cwd: '/w/s2' } })
-    await h2.dispatcher.steerMessage('s1', 'steer 文本')
-    expect(h2.injectMock).toHaveBeenCalledWith(expect.anything(), 'steer 文本', '/w/s2')
-    await h2.dispatcher.followUpMessage('s1', 'followUp 文本')
-    expect(h2.injectMock).toHaveBeenCalledWith(expect.anything(), 'followUp 文本', '/w/s2')
+  it('sendMessage：hook 拦截 → blocked + 零投递（提交前唯一 veto 面）', async () => {
+    const h = makeHarness({ hookBlocked: true })
+    const result = await h.dispatcher.sendMessage('s1', '被拦的消息')
+    await h.flush()
+    expect(result.blocked).toBe(true)
+    expect(h.client.prompt).not.toHaveBeenCalled()
+    expect(h.injectMock).not.toHaveBeenCalled()
+    expect(h.published.some((m) => m.type === 'message.error')).toBe(true)
   })
 
-  it('sendPrompt：notices 在 prompt 成功后逐条发布，payload 含 clientUuid（从发送文本标记提取）', async () => {
+  it('并发提交 per-session 串行：hook 完成序不可重排内核提交序（到达序 = 提交序，复审 R2）', async () => {
+    const h = makeHarness()
+    const order: string[] = []
+    const gates: Array<() => void> = []
+    h.dispatcher.setSendMessageHook(async (_sid: string, content: string) => {
+      order.push(`hook:${content}`)
+      await new Promise<void>((resolve) => gates.push(resolve))
+      order.push(`hook-done:${content}`)
+      return { blocked: false }
+    })
+
+    const p1 = h.dispatcher.sendMessage('s1', 'msg-1')
+    const p2 = h.dispatcher.sendMessage('s1', 'msg-2')
+    await h.flush()
+
+    // 第二条在前驱 hook 完成前不得进入受理段（串行链生效——不串行时两条 hook 并发启动）
+    expect(order).toEqual(['hook:msg-1'])
+    gates[0]?.()
+    await h.flush()
+    expect(order).toEqual(['hook:msg-1', 'hook-done:msg-1', 'hook:msg-2'])
+    gates[1]?.()
+    const [r1, r2] = await Promise.all([p1, p2])
+    expect(r1.blocked).toBe(false)
+    expect(r2.blocked).toBe(false)
+
+    // 用户可见断言：内核按到达序投递（prompt 序 = msg-1 先于 msg-2）
+    const prompts = h.client.prompt.mock.calls.map((c) => String(c[0]))
+    expect(prompts).toHaveLength(2)
+    expect(prompts[0]).toContain('msg-1')
+    expect(prompts[1]).toContain('msg-2')
+  })
+
+  it('前驱 hook 否决不毒化链：blocked 正常返回，后继提交照常受理', async () => {
+    const h = makeHarness()
+    h.dispatcher.setSendMessageHook(async (_sid: string, content: string) =>
+      content === 'msg-1' ? { blocked: true, reason: '插件拦截' } : { blocked: false },
+    )
+
+    const [r1, r2] = await Promise.all([
+      h.dispatcher.sendMessage('s1', 'msg-1'),
+      h.dispatcher.sendMessage('s1', 'msg-2'),
+    ])
+    await h.flush()
+
+    expect(r1.blocked).toBe(true)
+    expect(r2.blocked).toBe(false)
+    expect(r2.receipt).toMatchObject({ lane: 'direct' })
+    // 唯一 msg-2 进入内核投递（msg-1 被否决零投递）
+    const prompts = h.client.prompt.mock.calls.map((c) => String(c[0]))
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toContain('msg-2')
+  })
+
+  it('notices 在投递受理后逐条发布，clientUuid 取裸标记（u- 前缀剥离形态）', async () => {
     const h = makeHarness()
     h.injectState.notices = [notice('budget_exceeded', ['skill-a']), notice('skill_missing', ['ghost'])]
-    const sentText = `正文\n<!--taiji:msg:${CLIENT_UUID}-->`
-    await h.dispatcher.sendMessage('s1', sentText)
+    await h.dispatcher.sendMessage('s1', '正文', undefined, CLIENT_UUID)
+    await h.flush()
     const skillNotices = h.published.filter((m) => m.type === 'session.skillNotice')
     expect(skillNotices).toHaveLength(2)
-    expect(skillNotices[0]).toEqual({
-      type: 'session.skillNotice',
-      payload: { sessionId: 's1', clientUuid: CLIENT_UUID, reason: 'budget_exceeded', skills: ['skill-a'] },
+    // 内核出站标记 id = clientUuid 的裸 uuid 形态（u3b 回执契约）；notice 提取后归一为
+    // renderer 气泡 id 形态（`u-<uuid>`，与迁移前 payload 逐字一致）
+    expect(skillNotices[0]?.payload).toEqual({
+      sessionId: 's1',
+      clientUuid: CLIENT_UUID,
+      reason: 'budget_exceeded',
+      skills: ['skill-a'],
     })
     expect(skillNotices[1]?.payload).toEqual({
       sessionId: 's1',
@@ -154,131 +259,145 @@ describe('MessageDispatcher × SkillInjector 挂载（D9）', () => {
     })
   })
 
-  it('sendPrompt：纯文本消息（无 clientUuid 标记）payload 缺省该字段', async () => {
+  it('未传 clientUuid（老协议调用方，内核生成条目 id）：notice payload 缺省该字段（无气泡可锚定）', async () => {
     const h = makeHarness()
     h.injectState.notices = [notice('context_window_unavailable', ['skill-a'])]
     await h.dispatcher.sendMessage('s1', '纯文本，非 segments 序列化')
+    await h.flush()
     const msg = h.published.find((m) => m.type === 'session.skillNotice')
+    // 迁移前口径保持：clientUuid 只在调用方传入 renderer 气泡 id 时提取（内部生成 id 无气泡）
     expect(msg?.payload).toEqual({ sessionId: 's1', reason: 'context_window_unavailable', skills: ['skill-a'] })
     expect('clientUuid' in (msg?.payload ?? {})).toBe(false)
   })
 
-  it('sendPrompt：prompt 失败不发布 skillNotice（message.error 已覆盖，提示不空投）', async () => {
+  it('投递失败（prompt 抛错）→ message.error 广播 + isGenerating 复位 + 不发 skillNotice（提示不空投）', async () => {
     const h = makeHarness({ promptError: new Error('rpc dead') })
     h.injectState.notices = [notice('skill_missing', ['ghost'])]
-    const result = await h.dispatcher.sendMessage('s1', '带 skill 的消息')
-    expect(result.blocked).toBe(true)
+    await h.dispatcher.sendMessage('s1', '带 skill 的消息')
+    await h.flush()
     expect(h.published.filter((m) => m.type === 'session.skillNotice')).toHaveLength(0)
+    expect(h.published.some((m) => m.type === 'message.error')).toBe(true)
+    // busy 态复位（原 precheck 用例收编）：turn 没跑起来，不得滞留 dispatching/isGenerating
+    expect(h.session.isGenerating).toBe(false)
+    expect(h.session.occupancy?.turn).toBe('idle')
   })
 
-  it('sendPrompt：无 notices 时不发布任何 skillNotice', async () => {
+  it('workspace.record 抛同步异常 → 注册表 best-effort catch（warn 留痕）+ 投递不受阻（原 precheck W6 收编）', async () => {
+    const h = makeHarness({ recordWorkspaceError: new Error('cache boom') })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const result = await h.dispatcher.sendMessage('s1', 'hello')
+      await h.flush()
+      // 不向上抛，prompt 正常受理（record 失败不阻断发消息主流程）
+      expect(result.blocked).toBe(false)
+      expect(h.client.prompt).toHaveBeenCalledTimes(1)
+      // prompt 成功置位不回退（record 副作用失败不影响状态机）
+      expect(h.session.isGenerating).toBe(true)
+      // 有诊断信号（非 fail-silent）
+      expect(warnSpy).toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('无 notices 时不发布任何 skillNotice', async () => {
     const h = makeHarness()
     await h.dispatcher.sendMessage('s1', '普通消息')
-    expect(h.published).toHaveLength(0)
+    await h.flush()
+    expect(h.published.filter((m) => m.type === 'session.skillNotice')).toHaveLength(0)
+    // 投递受理会写 occupancy 'dispatching'（三副作用之一，D7 保留）——非 notice/error 帧
+    expect(h.published.filter((m) => m.type !== 'session.occupancy')).toHaveLength(0)
   })
 
-  it('sendPrompt：busy 预检拒绝时注入器不被调用（消息不发送，无需注入）', async () => {
-    // [u3b 预检改读 occupancy] 预检输入 = occupancy 投影（D1 立场），turn='generating' 计忙
-    const h = makeHarness({ sessionByClient: { occupancy: { turn: 'generating', compacting: false, bash: false } } })
-    const result = await h.dispatcher.sendMessage('s1', '消息')
-    expect(result).toEqual({ blocked: true, rejected: true, reason: 'busy' })
-    expect(h.injectMock).not.toHaveBeenCalled()
-    expect(h.client.prompt).not.toHaveBeenCalled()
-  })
-
-  it('steerMessage：注入器恰好一次且在 client.steer 之前，notices payload 无 clientUuid 字段', async () => {
-    const h = makeHarness()
-    h.injectState.notices = [notice('marker_malformed', [])]
-    await h.dispatcher.steerMessage('s1', 'steer 文本')
-    expect(h.injectMock).toHaveBeenCalledTimes(1)
-    expect(h.calls).toEqual(['inject', 'steer'])
-    expect(h.client.steer).toHaveBeenCalledWith('INJECTED::steer 文本')
-    expect(h.published).toHaveLength(1)
-    // steer 路径无 sidecar/clientUuid 链路：字段缺省（类型可空，u5 按可空消费）
-    expect(h.published[0]).toEqual({
-      type: 'session.skillNotice',
-      payload: { sessionId: 's1', reason: 'marker_malformed', skills: [] },
-    })
-  })
-
-  it('followUpMessage：注入器恰好一次且在 client.followUp 之前，注入文本透传', async () => {
-    const h = makeHarness()
-    await h.dispatcher.followUpMessage('s1', 'followUp 文本')
-    expect(h.injectMock).toHaveBeenCalledTimes(1)
-    expect(h.calls).toEqual(['inject', 'followUp'])
-    expect(h.client.followUp).toHaveBeenCalledWith('INJECTED::followUp 文本')
-    expect(h.published).toHaveLength(0)
-  })
+  // [MF-1-8 退役] steerMessage / followUpMessage 转发腿测试已删除：消费方经 delivery.submit
+  // 统一提交（u3b 内核化保持），协议侧 message.steer / message.follow_up 条目同批退役。
 })
 
 /**
- * busy 预检裁决单测（session-dead-structural-fixes D2 settling 预检裁决，u3b 验收条款③）。
- *
- * 预检门改读 occupancy 投影（D1 立场「occupancy 为体」）：turn !== 'idle' / compacting / bash
- * 任一命中即拒。关键行为变更 = **settling 计为忙**（原三布尔读法在 settling 窗口 isGenerating
- * 已复位 false → 误判闲放行，与前端 D1 双门相反），拒绝转 send.rejected{busy} → 前端 defer
- * 队列入队 → agent_settled idle 帧自动投递。
+ * busy 维度退役（u2 显式断言）：预检与 send.rejected 的**否定面**——busy 各维度不再拒绝、
+ * 不再广播 send.rejected、prompt 不立即调用（内核持有等时机）。原「拒绝转 send.rejected」测试族
+ * 的断言强度平移到「排队承接」面（消息不丢 = 内核条目在册）。
  */
-describe('MessageDispatcher busy 预检裁决（D2 settling 计忙，u3b）', () => {
-  it.each([
-    ['dispatching', 'busy'],
-    ['generating', 'busy'],
-    ['settling', 'busy'],
-  ] as const)('turn=%s 计忙：拒绝转 send.rejected{reason:%s}，prompt 不发送', async (turn, reason) => {
-    const h = makeHarness({ sessionByClient: { occupancy: { turn, compacting: false, bash: false } } })
-    const result = await h.dispatcher.sendMessage('s1', 'settling 窗口内的消息')
-    expect(result).toEqual({ blocked: true, rejected: true, reason: 'busy' })
-    expect(h.client.prompt).not.toHaveBeenCalled()
-    expect(h.published).toContainEqual({
-      type: 'send.rejected',
-      payload: { sessionId: 's1', reason, message: 'Agent 正在处理' },
-    })
-  })
+describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () => {
+  it('turn=generating：零 send.rejected + 内核按 steer 车道即时投递（turn 边界注入，不等拒绝）', async () => {
 
-  it('settling 且三布尔全 false（pi post-run 窗口）→ 拒绝（旧读法会放行）', async () => {
     const h = makeHarness({
       sessionByClient: {
-        isGenerating: false,
-        isCompacting: false,
-        isBashRunning: false,
-        occupancy: { turn: 'settling', compacting: false, bash: false },
+        occupancy: { turn: 'generating', compacting: false, bash: false },
+        isGenerating: true,
       },
     })
-    const result = await h.dispatcher.sendMessage('s1', '消息')
-    expect(result).toEqual({ blocked: true, rejected: true, reason: 'busy' })
+    const result = await h.dispatcher.sendMessage('s1', '活跃 run 期消息')
+    await h.flush()
+    expect(result).toMatchObject({ blocked: false })
+    expect(h.published.filter((m) => m.type === 'send.rejected')).toHaveLength(0)
+    // 迁移前该形态被预检拒绝（send.rejected → renderer defer 队列）；现由内核按 lane=steer
+    // 直接经 pi streamingBehavior 入队（D1/D3：单一所有者，消息不丢且不失序）
+    expect(h.client.prompt).toHaveBeenCalledTimes(1)
+    expect(h.promptArgs()[2]).toBe('steer')
+    expect(h.registry.entries('s1')?.active[0]?.state).toBe('in-flight')
+  })
+
+  it('turn=settling（pi post-run 窗口）：零 send.rejected + 持有（settling 非投递窗口，检查点 4）', async () => {
+    const h = makeHarness({
+      sessionByClient: { occupancy: { turn: 'settling', compacting: false, bash: false } },
+    })
+    const result = await h.dispatcher.sendMessage('s1', 'settling 窗口消息')
+    await h.flush()
+    expect(result).toMatchObject({ blocked: false })
+    expect(h.published.filter((m) => m.type === 'send.rejected')).toHaveLength(0)
+
     expect(h.client.prompt).not.toHaveBeenCalled()
-    expect(h.injectMock).not.toHaveBeenCalled()
+    expect(h.registry.entries('s1')?.active).toHaveLength(1) // 内核在册（消息不丢）
   })
 
-  it('compacting 命中：分型保持 reason=compacting（renderer 兜底入队触发源）', async () => {
+  it('compacting 命中：零拒绝广播 + 持有；compaction 结束后自动投递', async () => {
     const h = makeHarness({
-      sessionByClient: { occupancy: { turn: 'idle', compacting: true, bash: false } },
+      sessionByClient: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } },
+
     })
-    const result = await h.dispatcher.sendMessage('s1', '消息')
-    expect(result).toEqual({ blocked: true, rejected: true, reason: 'compacting' })
-    expect(h.published).toContainEqual({
-      type: 'send.rejected',
-      payload: { sessionId: 's1', reason: 'compacting', message: '压缩进行中，消息将自动排队' },
-    })
+    const result = await h.dispatcher.sendMessage('s1', '压缩中消息')
+    await h.flush()
+    expect(result).toMatchObject({ blocked: false })
+    expect(h.published.filter((m) => m.type === 'send.rejected')).toHaveLength(0)
+    expect(h.client.prompt).not.toHaveBeenCalled()
+
+    // [MF-1-9] 持有等待已事件化：view 维度复位后显式触发边沿（生产 = dispatcher
+    // compacting-end 转移后经 notifyHoldRelease 驱动）
+    applySessionOccupancyTransition(h.session, null, 'compacting-end')
+    h.registry.notifyHoldRelease('s1')
+    await vi.advanceTimersByTimeAsync(1)
+    await h.flush()
+    expect(h.client.prompt).toHaveBeenCalledTimes(1) // 压缩结束 → 自动投递
   })
 
-  it('bash 命中：回执 reason=bash（D6/u5a 三态拆分），广播线保持 busy 词表', async () => {
+  it('bash 命中：零拒绝广播 + 持有（bash 与 prompt 互斥由内核持有承接）', async () => {
+
     const h = makeHarness({
-      sessionByClient: { occupancy: { turn: 'idle', compacting: false, bash: true } },
+      sessionByClient: { isBashRunning: true, occupancy: { turn: 'idle', compacting: false, bash: true } },
     })
-    const result = await h.dispatcher.sendMessage('s1', '消息')
-    expect(result).toEqual({ blocked: true, rejected: true, reason: 'bash' })
-    expect(h.published).toContainEqual(expect.objectContaining({ type: 'send.rejected' }))
+    const result = await h.dispatcher.sendMessage('s1', 'bash 期间消息')
+    await h.flush()
+    expect(result).toMatchObject({ blocked: false })
+    expect(h.published.filter((m) => m.type === 'send.rejected')).toHaveLength(0)
+    expect(h.client.prompt).not.toHaveBeenCalled()
+
   })
 
-  it('occupancy 全 idle：预检放行（对照组——直发成功不受影响，V7④）', async () => {
-    const h = makeHarness({
-      sessionByClient: { occupancy: { turn: 'idle', compacting: false, bash: false } },
-    })
+  it('occupancy 全 idle：直发成功（对照组——空闲路径不受影响）', async () => {
+    const h = makeHarness()
     const result = await h.dispatcher.sendMessage('s1', '空闲期消息')
-    expect(result).toEqual({ blocked: false })
+    await h.flush()
+    expect(result).toMatchObject({ blocked: false })
     expect(h.client.prompt).toHaveBeenCalledTimes(1)
     expect(h.published.filter((m) => m.type === 'send.rejected')).toHaveLength(0)
+  })
+
+  it('入口同步 touch 保持（hook 执行窗口内不显空闲，防 idle 回收误伤）', async () => {
+    const h = makeHarness()
+    const touch = h.client.touchActivity as unknown as { mock: { calls: unknown[] } }
+    await h.dispatcher.sendMessage('s1', '消息')
+    expect(touch.mock.calls.length).toBeGreaterThanOrEqual(1)
   })
 })
 
@@ -313,7 +432,8 @@ describe('CP6 命令-only prompt occupancy 收口（短窗 + 幂等门）', () =
     const view: FakeView = { id: 's1', cwd: '/w/s1', occupancy: { turn: 'idle', compacting: false, bash: false } }
     const h = makeHarness({ sessionByClient: view, sessionView: view })
     const result = await h.dispatcher.sendMessage('s1', '/any-command')
-    expect(result).toEqual({ blocked: false })
+    expect(result).toMatchObject({ blocked: false })
+    await h.flush() // 内核投递是异步腿：prompt resolve + 武装收口窗在此完成
     // prompt resolve 后仍在 dispatching（窗口未到期）
     expect(view.occupancy.turn).toBe('dispatching')
     // 短窗到期 → 回落 idle（幂等门允许：turn === dispatching）
@@ -330,6 +450,7 @@ describe('CP6 命令-only prompt occupancy 收口（短窗 + 幂等门）', () =
     const view = makeView()
     const h = makeHarness({ sessionByClient: view, sessionView: view })
     await h.dispatcher.sendMessage('s1', '/slow-command')
+    await h.flush()
     await vi.advanceTimersByTimeAsync(OCCUPANCY_SETTLE_WINDOW_MS - 1)
     expect(view.occupancy.turn).toBe('dispatching')
   })
@@ -338,6 +459,7 @@ describe('CP6 命令-only prompt occupancy 收口（短窗 + 幂等门）', () =
     const view = makeView()
     const h = makeHarness({ sessionByClient: view, sessionView: view })
     await h.dispatcher.sendMessage('s1', '真实 turn 的 prompt')
+    await h.flush()
     expect(view.occupancy.turn).toBe('dispatching')
     // interpreter 的 turn-start / agent_start 挂点即调此取消（与生产同一入口）
     occupancySettleWindow.cancel('s1')
@@ -352,6 +474,7 @@ describe('CP6 命令-only prompt occupancy 收口（短窗 + 幂等门）', () =
     const view = makeView()
     const h = makeHarness({ sessionByClient: view, sessionView: view })
     await h.dispatcher.sendMessage('s1', 'turn already generating')
+    await h.flush()
     // 模拟 "turn 事件已写状态但取消失败" 的竞态：只改状态不取消
     view.occupancy = { turn: 'settling', compacting: false, bash: false }
     await vi.advanceTimersByTimeAsync(OCCUPANCY_SETTLE_WINDOW_MS)
@@ -363,10 +486,13 @@ describe('CP6 命令-only prompt occupancy 收口（短窗 + 幂等门）', () =
 
   it('session 已不在（回收/重建竞态）：回调静默 no-op，不报错', async () => {
     const view = makeView()
-    const h = makeHarness({ sessionByClient: view, sessionView: undefined })
+    const h = makeHarness({ sessionByClient: view, sessionView: view })
     await h.dispatcher.sendMessage('s1', '/cmd')
+    await h.flush()
+    expect(view.occupancy.turn).toBe('dispatching')
+    // 投递后 session 被回收（getSession 已查不到）→ 窗口到期时回调早退，原视图不被回写
+    h.setGetSessionResult(undefined)
     await vi.advanceTimersByTimeAsync(OCCUPANCY_SETTLE_WINDOW_MS)
-    // getSession undefined → 早退；原视图不被回写
     expect(view.occupancy.turn).toBe('dispatching')
   })
 })

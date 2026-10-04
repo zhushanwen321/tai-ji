@@ -40,7 +40,7 @@ import {
 import { SessionLifecycle, setMigrationGate } from '../session-lifecycle.js'
 import { PresetService } from '../../preset-service.js'
 import { ExtensionService } from '../../extension-service.js'
-import type { ILifecycleSessionOps, ISessionRegisterDeps, ManagedSession } from '../session-internal.js'
+import type { ILifecycleSessionOps, ISessionRegisterDeps } from '../session-internal.js'
 import type { IConfigStore } from '../../ports/config.js'
 import type { IExtensionService, IConfigService } from '../../../interfaces.js'
 import type { PresetService as PresetServiceType, PresetResolution } from '../../preset-service.js'
@@ -307,17 +307,33 @@ describe('buildPresetClientOptions', () => {
     expect(result.thinkingLevel).toBe('high')
   })
 
-  it('S-RT-5：非法 thinking 值（override 或 preset 侧）warn 后忽略', () => {
+  it('S-RT-5：非法 thinking 值（override 或 preset 侧）warn 后忽略（不透传，pi 对非法档位不报错只 warning）', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
-      const result = buildPresetClientOptions(
-        undefined,
-        undefined,
-        'ultra-max' as never,
-      )
-      expect(result.thinkingLevel).toBeUndefined()
-      expect(result).toEqual({})
+      // override 侧非法值
+      const fromOverride = buildPresetClientOptions(undefined, undefined, 'ultra-max' as never)
+      expect(fromOverride.thinkingLevel).toBeUndefined()
+      expect(fromOverride).toEqual({})
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('invalid thinking level'))
+      // preset 侧非法值（Landing 未传 override 时 preset 字段直达本函数）
+      warn.mockClear()
+      const fromPreset = buildPresetClientOptions(
+        { toolArgs: {}, flags: {}, thinkingLevel: 'ultra-max' } as unknown as PresetResolution,
+        undefined,
+        undefined,
+      )
+      expect(fromPreset.thinkingLevel).toBeUndefined()
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('invalid thinking level'))
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('空串 thinking 值 → 不落字段（不在词表，同走非法值路径）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const result = buildPresetClientOptions(undefined, undefined, '' as never)
+      expect(result.thinkingLevel).toBeUndefined()
     } finally {
       warn.mockRestore()
     }
@@ -442,7 +458,6 @@ function makeL2Env() {
     adapterFactory: () => ({ attach: vi.fn(), detach: vi.fn() }) as unknown as IEventAdapter,
     getMessageBus: () => null,
     broadcastGlobal: () => {},
-    notifyMessageComplete: () => {},
   }
   const lifecycle = new SessionLifecycle(svc, pm, configStore, sessionStore, workspaceService, registerDeps)
   return { lifecycle, getState }
@@ -585,8 +600,8 @@ function makeP2Env(userPresetsFile?: unknown) {
     toSummary: (s: IManagedSessionView): SessionSummary => ({
       id: s.id, label: 'test', cwd: s.cwd, status: 'idle', lastActiveAt: Date.now(),
       modelId: s.modelId, tokenCount: 0,
-      // binding 扩展字段经 as 读取（ManagedSession 既有 patch 模式，session-internal.ts）
-      launchPresetId: (s as ManagedSession).launchPresetId,
+      // launchPresetId 已收编进 IManagedSessionView（types.ts），直接读
+      launchPresetId: s.launchPresetId,
     }),
     notifySessionCreated: vi.fn(),
     findScannedSession: () => undefined,
@@ -613,7 +628,6 @@ function makeP2Env(userPresetsFile?: unknown) {
     adapterFactory: () => ({ attach: vi.fn(), detach: vi.fn() }) as unknown as IEventAdapter,
     getMessageBus: () => null,
     broadcastGlobal: () => {},
-    notifyMessageComplete: () => {},
   }
   const lifecycle = new SessionLifecycle(svc, pm, configStore, sessionStore, workspaceService, registerDeps)
   return {

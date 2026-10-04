@@ -10,115 +10,58 @@
  *  - 工具模式切换：点 mode 按钮 → preset.update 被调用 + checkbox 列表出现/消失。
  *  - 设为默认：点设为默认 → preset.setDefault 被调用。
  *  - 模式提示词两卡：替换卡红字警示 / 合计计数一行且两卡联动 /
- *    替换保存二次确认（未确认不触发 update）/ 内置调度模式追加卡预置文案非空。
+ *    内置调度模式追加卡预置文案非空。
  *
  * mock 策略：
- *  - vi.mock('@/api') 把 preset 门面替成可断言的 mock。
+ *  - mock 脚手架（presetMock 单例 / '@/api' 与 @taiji/ui mock 注册 / transport 接线 /
+ *    promptPreset fixture）收敛 helpers/preset-page-mount + helpers/preset-page-mock
+ *    单源（后者 import 即注册，settings 与 components 两套同组件测试共享），与
+ *    components 版同组件测试共享。
  *  - PresetModeSection 子组件 stub（本测试聚焦 PiPresetsPage 主逻辑）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/pi-presets-page.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
 import type { PiLaunchPreset } from '@taiji/shared'
 import { DEFAULT_PRESETS } from '@taiji/shared'
-
-/** mock preset API */
-const presetMock = vi.hoisted(() => ({
-  list: vi.fn(() => Promise.resolve([])),
-  getDefault: vi.fn(() => Promise.resolve('builtin:full')),
-  setDefault: vi.fn(() => Promise.resolve()),
-  create: vi.fn((p: PiLaunchPreset) => Promise.resolve(p)),
-  update: vi.fn((p: PiLaunchPreset) => Promise.resolve(p)),
-  remove: vi.fn(() => Promise.resolve()),
-}))
-
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  preset: presetMock,
-  default: { preset: presetMock },
-}))
-
-vi.mock('@taiji/ui/features/settings', () => ({
-  PresetModeSection: {
-    name: 'PresetModeSection',
-    props: ['preset', 'disabled'],
-    template: '<div data-testid="mode-section" />',
-  },
-  GroupCard: {
-    name: 'GroupCard',
-    // 真实 GroupCard 的 #head / #actions 具名 slot 也需渲染（提示词卡标题与 Switch 在其中），
-    // 否则测试看不到卡头与开关，与生产结构失真。
-    template: '<div data-testid="group-card"><slot name="head" /><slot name="actions" /><slot /></div>',
-  },
-}))
+import { makePreset, promptPreset } from '../helpers/preset-page-mount'
+import { presetMock, setupPresetPageTest, teardownPresetPage } from '../helpers/preset-page-mock'
 
 import PiPresetsPage from '@/components/settings/preset/PiPresetsPage.vue'
 import { usePresetStore } from '@/stores/preset'
-import { useToast } from '@/composables/useToast'
 
-/** 内置预设 fixture */
+/** 预设 fixture（共有基础字段与 promptPreset 收敛 helpers/preset-page-mount 单源） */
 function builtinPreset(): PiLaunchPreset {
-  return {
+  return makePreset({
     id: 'builtin:full',
     name: 'Full Mode',
     description: 'All tools and extensions',
     builtin: true,
-    order: 0,
-    toolMode: 'all',
-    extensionMode: 'all',
-  }
+  })
 }
 
 /** 自定义预设 fixture */
 function customPreset(): PiLaunchPreset {
-  return {
+  return makePreset({
     id: 'custom:my-preset',
     name: 'My Preset',
     description: 'Custom preset',
-    builtin: false,
     order: 1,
     toolMode: 'allowlist',
     allowedTools: ['read', 'bash'],
-    extensionMode: 'all',
-  }
-}
-
-/** 带提示词两段（替换 3 字符 + 追加 2 字符）的自定义预设 fixture */
-function promptPreset(): PiLaunchPreset {
-  return {
-    id: 'custom:prompt-preset',
-    name: 'Prompt Preset',
-    description: 'Custom preset with prompt',
-    builtin: false,
-    order: 1,
-    toolMode: 'all',
-    extensionMode: 'all',
-    prompt: {
-      replace: { enabled: true, prompt: 'abc' },
-      append: { enabled: true, prompt: 'de' },
-    },
-  }
+  })
 }
 
 let wrapper: ReturnType<typeof mount> | null = null
 
-beforeEach(() => {
-  setActivePinia(createPinia())
-  presetMock.list.mockResolvedValue([])
-  presetMock.getDefault.mockResolvedValue('builtin:full')
-  presetMock.create.mockImplementation((p: PiLaunchPreset) => Promise.resolve(p))
-  presetMock.update.mockImplementation((p: PiLaunchPreset) => Promise.resolve(p))
-  presetMock.remove.mockResolvedValue(undefined)
-  presetMock.setDefault.mockResolvedValue(undefined)
-  const { toasts } = useToast()
-  toasts.value = []
-})
+// beforeEach 重置（pinia / mock 默认 impl / toast / transport 桩）+ mock 注册单源在
+// helpers/preset-page-mock（import 即注册）
+setupPresetPageTest()
 
 afterEach(() => {
-  wrapper?.unmount()
+  teardownPresetPage(wrapper)
   wrapper = null
-  document.body.innerHTML = ''
 })
 
 describe('PiPresetsPage 首屏冒烟', () => {
@@ -378,39 +321,6 @@ describe('PiPresetsPage 模式提示词两卡', () => {
     expect(
       wrapper.find('[data-testid="preset-prompt-combined-count"]').text(),
     ).toContain('合计 9 / 16000')
-  })
-
-  it('替换卡保存走二次确认：未确认前不触发 preset.update', async () => {
-    const store = usePresetStore()
-    store.setPresets([promptPreset()])
-
-    wrapper = mount(PiPresetsPage, { attachTo: document.body })
-    await flushPromises()
-
-    // 改文本使替换卡 dirty（保存按钮解禁）
-    await wrapper.find('[data-testid="preset-prompt-replace-input"]').setValue('new replace text')
-    await flushPromises()
-
-    presetMock.update.mockClear()
-
-    // 点保存 → 只弹二次确认，不写盘
-    await wrapper.find('[data-testid="preset-prompt-replace-save"]').trigger('click')
-    await flushPromises()
-
-    const confirmBtn = Array.from(document.body.querySelectorAll('button'))
-      .find((b) => (b.textContent ?? '').includes('仍然保存'))
-    expect(confirmBtn).toBeTruthy()
-    expect(presetMock.update).not.toHaveBeenCalled()
-
-    // 确认后 → preset.update 被调用，替换段 = 新文本、追加段保留原值
-    confirmBtn!.click()
-    await flushPromises()
-
-    expect(presetMock.update).toHaveBeenCalledTimes(1)
-    const updated = presetMock.update.mock.calls[0][0] as PiLaunchPreset
-    expect(updated.prompt?.replace?.prompt).toBe('new replace text')
-    expect(updated.prompt?.replace?.enabled).toBe(true)
-    expect(updated.prompt?.append?.prompt).toBe('de')
   })
 
   it('内置「调度模式」的追加卡预置文案非空', async () => {

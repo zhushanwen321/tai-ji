@@ -15,8 +15,8 @@
     <SystemAppearanceSection :system="system" @update="emit('update', $event)" />
     <SystemSoundSection :system="system" @update="emit('update', $event)" />
     <SystemShortcutSection :system="system" @update="emit('update', $event)" />
-    <SystemAutoRenameSection :system="system" @update="emit('update', $event)" />
-    <SystemSmartContextSection :system="system" @update="emit('update', $event)" />
+    <SystemAutoRenameSection />
+    <SystemSmartContextSection />
     <SystemLlmRetrySection />
     <SystemDiagnosticsSection />
   </div>

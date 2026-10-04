@@ -25,6 +25,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { stripComments } from './helpers/pi-dist-fn-extract.js'
 import { locatePiDist } from './helpers/pi-semantics-probe.js'
 
 const RPC_DIST = locatePiDist('pi-coding-agent', 'config.js')
@@ -52,47 +53,6 @@ const FORBIDDEN_EFFECTS: Array<{ pattern: RegExp; what: string }> = [
   { pattern: /\boutput\s*\(/, what: 'stdout 帧输出 output()' },
 ]
 
-/** 去注释（保留字符串字面量内容），后续全部分析基于去注释文本——注释里提及的效应词不构成命中。 */
-function stripComments(src: string): string {
-  const n = src.length
-  let out = ''
-  let i = 0
-  while (i < n) {
-    const c = src[i]
-    const d = i + 1 < n ? src[i + 1] : ''
-    if (c === '/' && d === '/') {
-      while (i < n && src[i] !== '\n') i++
-      continue
-    }
-    if (c === '/' && d === '*') {
-      i += 2
-      while (i < n && !(src[i] === '*' && i + 1 < n && src[i + 1] === '/')) i++
-      i += 2
-      continue
-    }
-    if (c === "'" || c === '"' || c === '`') {
-      const q = c
-      out += c
-      i++
-      while (i < n) {
-        if (src[i] === '\\') {
-          out += src[i] + (i + 1 < n ? src[i + 1] : '')
-          i += 2
-          continue
-        }
-        out += src[i]
-        const closed = src[i] === q
-        i++
-        if (closed) break
-      }
-      continue
-    }
-    out += c
-    i++
-  }
-  return out
-}
-
 /** 跳过从 start 开始的字符串字面量，返回闭引号后下标。 */
 function skipString(src: string, start: number): number {
   const q = src[start]
@@ -108,6 +68,12 @@ function skipString(src: string, start: number): number {
   return i
 }
 
+/** 前进一个代码字符：src[i] 是字符串字面量开引号则跳过整个字面量，否则走 1 字符。 */
+function advancePastStrings(src: string, i: number): number {
+  const c = src[i]
+  return c === "'" || c === '"' || c === '`' ? skipString(src, i) : i + 1
+}
+
 /** 从 start（指向 '{'）做括号配对，返回块文本（含首尾花括号）与闭合后下标。 */
 function matchBrace(src: string, start: number): { text: string; end: number } | null {
   let depth = 0
@@ -115,16 +81,12 @@ function matchBrace(src: string, start: number): { text: string; end: number } |
   const n = src.length
   while (i < n) {
     const c = src[i]
-    if (c === "'" || c === '"' || c === '`') {
-      i = skipString(src, i)
-      continue
-    }
     if (c === '{') depth++
     else if (c === '}') {
       depth--
       if (depth === 0) return { text: src.slice(start, i + 1), end: i + 1 }
     }
-    i++
+    i = advancePastStrings(src, i)
   }
   return null
 }
@@ -139,13 +101,9 @@ function extractBlock(src: string, from: number): { text: string; end: number } 
   const n = src.length
   while (i < n) {
     const c = src[i]
-    if (c === "'" || c === '"' || c === '`') {
-      i = skipString(src, i)
-      continue
-    }
     if (c === ';' || c === '}') return null
     if (c === '{') return matchBrace(src, i)
-    i++
+    i = advancePastStrings(src, i)
   }
   return null
 }

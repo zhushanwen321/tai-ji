@@ -6,8 +6,12 @@
  * - subagent 进程（R6）：不注册工具、不提醒（宁缺勿污）
  * - session_before_compact：双模式接管（compact-handler）
  * - session_compact：重置提醒 fired（D3）
- * - agent_settled：越档检查 + marker 持久化 + 静默注入（D3/D4/D15）
- * - model_select：跨界通知 + downshift 提醒（D5）
+ * - agent_settled：越档检查 + marker 持久化（D15）+ nextTurn 投递一次性提醒（D3/D4①）
+ * - model_select：跨界通知 + downshift 提醒（D5/D4①）
+ *
+ * 通知注入车道（D4①，delivery-ownership-kernel）：四类通知全部经 notices.ts 的
+ * sendSmartContextNotice 走 nextTurn（随下一次 prompt 注入、不自起 run）——通知 run 不再
+ * 抢占用户消息投递跑道；被压缩掐断的 turn 由 runtime 续跑投递兜底（D4②）。
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -20,6 +24,7 @@ import {
 	debugLog,
 	type TakeoverState,
 } from "./compact-handler.js";
+import { sendSmartContextNotice } from "./notices.js";
 import { buildDownshiftNotice, buildSwitchNotice, buildThresholdReminder } from "./reminder.js";
 import { registerCompactContextTool } from "./tool.js";
 import {
@@ -30,9 +35,6 @@ import {
 	getCurrentModelId,
 	isGatingActive,
 	loadSmartContextConfig,
-	SWITCH_NOTICE_CUSTOM_TYPE,
-	DOWNSHIFT_NOTICE_CUSTOM_TYPE,
-	THRESHOLD_REMINDER_CUSTOM_TYPE,
 	type EntryLike,
 } from "./pure.js";
 
@@ -151,7 +153,7 @@ export default function smartContextExtension(pi: ExtensionAPI): void {
 	// 守卫的前置代际检查恒不生效。wrapper 每次调用读闭包当前绑定。
 	registerCompactContextTool(pi, { isCtxStale: () => isCtxStale() });
 
-	// ── 阈值提醒（D3/D4/D4'）：agent_settled 越档检查 + 静默注入（不触发 turn） ──
+	// ── 阈值提醒（D3/D4）：agent_settled 越档检查 + marker 持久化 + nextTurn 一次性投递 ──
 	pi.on("agent_settled", (_event, ctx) => {
 		const config = loadSmartContextConfig();
 		const modelId = getCurrentModelId(ctx.model);
@@ -178,18 +180,13 @@ export default function smartContextExtension(pi: ExtensionAPI): void {
 			label: "smart-context:fired-marker",
 			onStale: (error) => debugLog(`fired marker skipped (stale ctx): ${toErrorMessage(error)}`),
 		});
-		// D4'：静默注入——custom message + triggerTurn:false = 只进 LLM 上下文，不触发新 turn、
-		// 不进对话流（display:false）。不再用 sendUserMessage（pi 语义：user message 恒触发
-		// 一轮），避免用户已收工时被提醒强行唤醒烧一整轮全量上下文。
-		// 用户继续对话时，模型在下一轮自然看到本提醒并自行决定是否 compact。
-		// 防循环：crossed 全部已标记 fired，marker 也不会产生新 turn。
+		// D4①：nextTurn（随下一次 prompt 作为 custom role 上下文注入，不自起 run）——原 followUp
+		// 会在 agent 空闲后自起一个提醒 run，与用户消息同抢 prompt 跑道（故事 C 的三重放大器之一）。
+		// 防循环：crossed 全部已标记 fired，marker 与提醒触发的 settled 不会重复发。
 		// 事件回调内直接调用捕获的 pi——session 替换窗口可能 stale（crash-resilience D1
 		// 普查接入点），守卫 stale 静默降级（不杀 pi 进程），非 stale 错误原样上抛。
 		guardStaleCtx(() => {
-			pi.sendMessage(
-				{ customType: THRESHOLD_REMINDER_CUSTOM_TYPE, content: message, display: false },
-				{ triggerTurn: false },
-			);
+			sendSmartContextNotice(pi, message, "threshold-reminder");
 		}, {
 			isCtxStale,
 			label: "smart-context:threshold-reminder",
@@ -216,10 +213,7 @@ export default function smartContextExtension(pi: ExtensionAPI): void {
 			// 调整（compact 工具 execute 有运行时门控校验兜底），不为通知烧一整轮全量上下文。
 			// session 替换窗口可能 stale（D1 普查接入点）——守卫 stale 静默降级
 			guardStaleCtx(() => {
-				pi.sendMessage(
-					{ customType: SWITCH_NOTICE_CUSTOM_TYPE, content: notice, display: false },
-					{ triggerTurn: false },
-				);
+				sendSmartContextNotice(pi, notice, "model-switch");
 			}, {
 				isCtxStale,
 				label: "smart-context:switch-notice",
@@ -240,10 +234,7 @@ export default function smartContextExtension(pi: ExtensionAPI): void {
 			// "建议"非紧急（同 S1 裁决）：triggerTurn:false 不唤醒轮次，用户继续对话时
 			// LLM 自行决策是否先压缩。session 替换窗口可能 stale（D1 普查接入点）——守卫 stale 静默降级
 			guardStaleCtx(() => {
-				pi.sendMessage(
-					{ customType: DOWNSHIFT_NOTICE_CUSTOM_TYPE, content: downshift, display: false },
-					{ triggerTurn: false },
-				);
+				sendSmartContextNotice(pi, downshift, "model-downshift");
 			}, {
 				isCtxStale,
 				label: "smart-context:downshift-notice",

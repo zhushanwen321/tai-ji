@@ -26,8 +26,8 @@
  * - run 存活反证串：`[relay] connection lost, killing child (kill-on-disconnect)` 与
  *   `[relay] child exited recordId=... code=143`（infra/relay/relay-registry.ts:465/459）。
  * - workflow-record 权威 entry：主 session JSONL `{"customType":"workflow-record","data":
- *   {v:1,snapshot}}`，snapshot.state.status ∈ 'running'|'done'（orchestration/models/types.ts:34
- *   两态；终态 flush 永不节流），读取形态同 workflow-thinkinglevel-real.spec.ts findWorkflowRecord。
+ *   {v:1,snapshot}}`，snapshot.state.status ∈ 'running'|'done'（v1 冻结历史格式——
+ *   终态 flush 永不节流），读取形态同 workflow-thinkinglevel-real.spec.ts findWorkflowRecord。
  * - composer skill 浮层候选行：CommandPopover.vue:95 `.cmd-row`（portal 到 body，00-overview §6.4），
  *   skill 项 displayName = 裸名（command-popover-skill-candidates.ts:68，`/skill:` 前缀已去）。
  *   触发 = 行中空白后 `/`（非换行空白 + `/`，空 query 合法——dom-core skill-trigger.test.ts 锁定语义）。

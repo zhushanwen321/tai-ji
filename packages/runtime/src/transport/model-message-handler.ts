@@ -11,7 +11,7 @@
 import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage } from '@taiji/shared'
 import type { SettingsHandlerContext } from './settings-message-handler.js'
-import { SCOPED_MODEL_REGEX } from '../services/provider-extras-store.js'
+import { isModelRef, parseModelSelector } from '@zhushanwen/subagent-core'
 import { toErrorMessage } from '../utils/errors.js'
 import { PROVIDER_CONNECTION_TEST_ERRORS } from '../services/model-service.js'
 import type { ProviderConnectionTestOutcome } from '../services/model-service.js'
@@ -69,11 +69,14 @@ export class ModelMessageHandler {
     // 仍为按请求值回显（旧行为兜底），但正常路径 readEffectiveModelId 的返回恒为
     // 'provider/id' 复合串，该分支实际不可达。
     const effectiveModel = await this.ctx.modelService.switchModel(sessionId, provider, modelId)
-    const slash = effectiveModel.indexOf('/')
+    // 生效值应为 'provider/id' 复合串（切分规则单点 = core 的 parseModelSelector）；
+    // 读回形态异常（无 '/'、任一侧为空）时保持既有防御：按请求值回显。
+    const parsed = parseModelSelector(effectiveModel)
+    const resolved = parsed.provider !== '' && parsed.id !== ''
     this.ctx.reply(ws, msg.id, 'model.switched', {
       sessionId,
-      provider: slash === -1 ? provider : effectiveModel.slice(0, slash),
-      modelId: slash === -1 ? modelId : effectiveModel.slice(slash + 1),
+      provider: resolved ? parsed.provider : provider,
+      modelId: resolved ? parsed.id : modelId,
     })
     return true
   }
@@ -116,8 +119,8 @@ export class ModelMessageHandler {
       this.ctx.sendError(ws, 'invalid_payload', 'models 必须是字符串数组', msg.id)
       return true
     }
-    // 格式契约与读侧 sanitize 单点（provider-extras-store SCOPED_MODEL_REGEX）
-    const invalid = (models as string[]).filter(m => !SCOPED_MODEL_REGEX.test(m))
+    // 格式契约与读侧 sanitize 单点（core 的 isModelRef：provider 与 id 都非空）
+    const invalid = (models as string[]).filter(m => !isModelRef(m))
     if (invalid.length > 0) {
       this.ctx.sendError(ws, 'invalid_scoped_models', `以下模型格式非法（需 provider/modelId）：${invalid.join(', ')}`, msg.id)
       return true

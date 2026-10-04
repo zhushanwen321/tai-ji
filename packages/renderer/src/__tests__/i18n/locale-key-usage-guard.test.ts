@@ -1,5 +1,7 @@
+// @vitest-environment node
+
 /**
- * 反向守卫：`panel.*` 与 `settings.providerEdit.*` 的 locale 叶子 key 必须被源码消费。
+ * 反向守卫：`panel.*` / `settings.providerEdit.*` / `composable.*` 的 locale 叶子 key 必须被源码消费。
  *
  * 存在动机：
  * 仓库已有「引用 → 存在」守卫（provider-edit-key-existence.test.ts，防裸 key 透出），
@@ -29,6 +31,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import zhPanel from '@taiji/ui/locale/zh-CN/panel'
 import zhSettings from '@taiji/ui/locale/zh-CN/settings'
+import zhComposable from '@taiji/ui/locale/zh-CN/composable'
 
 type LocaleNode = { [key: string]: string | LocaleNode }
 
@@ -104,32 +107,35 @@ function collectLiteralRefs(namespaces: readonly string[]): Set<string> {
   return refs
 }
 
-const NAMESPACES = ['panel', 'settings.providerEdit'] as const
+const NAMESPACES = ['panel', 'settings.providerEdit', 'composable'] as const
 const LEAVES: Record<(typeof NAMESPACES)[number], string[]> = {
   panel: flattenLeaves(zhPanel as unknown as LocaleNode, 'panel'),
   'settings.providerEdit': flattenLeaves(
     (zhSettings as unknown as { providerEdit: LocaleNode }).providerEdit,
     'settings.providerEdit',
   ),
+  composable: flattenLeaves(zhComposable as unknown as LocaleNode, 'composable'),
 }
 
 /**
  * 扫描通路自证下界（防空集合恒绿）。数值取当前真实量的安全打折值：
- * panel 369 / providerEdit 165 叶子、全仓扫到 500+ 引用——下界留在明显低于实况的档位，
- * 避免正常增删 key 触发假红，又足以在扫描根写错/正则失效时立刻暴露。
+ * panel 369 / providerEdit 165 / composable 40 叶子、全仓扫到 500+ 引用——下界留在明显低于
+ * 实况的档位，避免正常增删 key 触发假红，又足以在扫描根写错/正则失效时立刻暴露。
  */
 const MIN_PANEL_LEAVES = 300
 const MIN_PROVIDER_EDIT_LEAVES = 100
+const MIN_COMPOSABLE_LEAVES = 30
 const MIN_SCANNED_REFS = 300
 
 const REFS = collectLiteralRefs(NAMESPACES)
 const UNREFERENCED = NAMESPACES.flatMap((ns) => LEAVES[ns].filter((key) => !REFS.has(key)))
 const ALLOWED = new Set(ALLOWLIST.map((entry) => entry.key))
 
-describe('locale 反向守卫：panel.* / settings.providerEdit.* 无零引用死键', () => {
+describe('locale 反向守卫：panel.* / settings.providerEdit.* / composable.* 无零引用死键', () => {
   it('扫描通路有效：叶子 key 与被引用数量都有合理下界（防空集合恒绿）', () => {
     expect(LEAVES.panel.length).toBeGreaterThan(MIN_PANEL_LEAVES)
     expect(LEAVES['settings.providerEdit'].length).toBeGreaterThan(MIN_PROVIDER_EDIT_LEAVES)
+    expect(LEAVES.composable.length).toBeGreaterThan(MIN_COMPOSABLE_LEAVES)
     expect(REFS.size).toBeGreaterThan(MIN_SCANNED_REFS)
   })
 

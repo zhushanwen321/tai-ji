@@ -31,18 +31,18 @@ import {
   getSettingsStore,
   useSettings,
 } from '@taiji/core'
+import type { Translate } from '@taiji/core'
 import { provideSettingsTransport } from '@taiji/core/domain/settings'
 import {
   SETTINGS_TOAST_KEY,
-  USE_QUOTA_CONFIGURE_KEY,
-  SETTINGS_CONFIG_API_KEY,
+  QUOTA_CONFIGURE_FACTORY_KEY,
   applySystemToDom,
 } from '@taiji/ui/features/settings'
 import { createSettingsTransport } from './settings-transport-adapter'
 import { useToast } from '@/composables/useToast'
-import { useQuotaConfigure } from '@/composables/features/model/useQuotaConfigure'
+import { useQuotaConfigure } from '@/composables/features/settings/useQuotaConfigure'
 import { config } from '@/api'
-import { setLocale } from '@/i18n'
+import i18n, { setLocale } from '@/i18n'
 import type { Locale } from '@/i18n'
 
 /**
@@ -84,8 +84,10 @@ export function useSettingsShell(): void {
     info: (m: string) => toast.info(m),
     warning: (m: string) => toast.warning(m),
   })
-  provide(USE_QUOTA_CONFIGURE_KEY, useQuotaConfigure)
-  provide(SETTINGS_CONFIG_API_KEY, { detectSources: () => config.detectSources() })
+  // quota 工厂包装注入 t（i18n 与 provider-edit 五模块 deps.t 同范式；业务输入仍归
+  // ProviderEditBody 物化点装配）。vue-i18n global.t 是宽重载签名，窄化到 Translate
+  // 最小结构类型（cast 语义同原 useQuotaConfigure 模块级窄化，落点移到壳侧装配）。
+  provide(QUOTA_CONFIGURE_FACTORY_KEY, (inputs) => useQuotaConfigure({ ...inputs, t: i18n.global.t as Translate }))
 
   // matchMedia 系统色监听 + applySystemToDom 兜底
   const store = getSettingsStore()

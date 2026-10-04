@@ -67,13 +67,29 @@ describe("孤儿恢复与子文件末行内容解耦（超长末行 / 截断行�
     const middle = JSON.stringify({ type: "message", role: "assistant", content: "mid" });
     const body = [identity, middle, lastLine].join("\n") + (opts.trailingNewline === false ? "" : "\n");
     fs.writeFileSync(file, body, "utf8");
-    // 主 session 末条 entry 残留 running——entry 纠偏判据的命中前提
+    // 主 session 末条 entry = v2 注册条（登记 §3.3：v1 快照形态已删）——收编定界的命中前提
     const mainFile = path.join(rootDir, "main-session.jsonl");
     const mainEntry = JSON.stringify({
       type: "custom", id: `e-${id}`, parentId: null, customType: "subagent-record",
-      data: { id, agent: "worker", task: "t", startedAt: 1000, status: "running" },
+      data: {
+        v: 2, kind: "registered", id, agent: "worker", task: "t", slug: "s", origin: "tool",
+        rootSessionId: "session-main", depth: 0, startedAt: 1000,
+      },
     });
     fs.writeFileSync(mainFile, mainEntry + "\n", "utf8");
+    // 子文件锚在场 → 收编走 journal 面（recoverOrphanRecords）：写首帧 record-created
+    fs.mkdirSync(path.join(rootDir, "records"), { recursive: true });
+    fs.writeFileSync(
+      path.join(rootDir, "records", `${id}.events`),
+      [
+        JSON.stringify({ type: "record-events", id }),
+        JSON.stringify({
+          type: "record-created", seq: 1, ts: 1000, id, agent: "worker", task: "t", slug: "s",
+          origin: "tool", rootSessionId: "session-main", depth: 0, mode: "background", startedAt: 1000,
+        }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
     return mainFile;
   }
 
@@ -83,7 +99,7 @@ describe("孤儿恢复与子文件末行内容解耦（超长末行 / 截断行�
     pi.appendEntry.mockImplementation((type: string, entry: unknown) => {
       entries.push({ type, data: entry as Record<string, unknown> });
     });
-    const store = new RecordStore(sessionsDir, new ManifestStore(path.join(rootDir, "records")), pi);
+    const store = new RecordStore(sessionsDir, new ManifestStore(path.join(rootDir, "records")), pi, path.join(rootDir, "records"));
     store.recoverOrphanRecords("session-main", mainFile);
     const hits = entries.filter((e) => e.data && (e.data as { id?: string }).id === id);
     if (hits.length === 0) throw new Error("orphan record not reported for " + id);
@@ -142,9 +158,24 @@ describe("孤儿恢复与子文件末行内容解耦（超长末行 / 截断行�
     const mainFile = path.join(rootDir, "main-session.jsonl");
     const mainEntry = JSON.stringify({
       type: "custom", id: "e-orphan-empty", parentId: null, customType: "subagent-record",
-      data: { id: "orphan-empty", agent: "worker", task: "t", startedAt: 1000, status: "running" },
+      data: {
+        v: 2, kind: "registered", id: "orphan-empty", agent: "worker", task: "t", slug: "s",
+        origin: "tool", rootSessionId: "session-main", depth: 0, startedAt: 1000,
+      },
     });
     fs.writeFileSync(mainFile, mainEntry + "\n", "utf8");
+    fs.mkdirSync(path.join(rootDir, "records"), { recursive: true });
+    fs.writeFileSync(
+      path.join(rootDir, "records", "orphan-empty.events"),
+      [
+        JSON.stringify({ type: "record-events", id: "orphan-empty" }),
+        JSON.stringify({
+          type: "record-created", seq: 1, ts: 1000, id: "orphan-empty", agent: "worker", task: "t",
+          slug: "s", origin: "tool", rootSessionId: "session-main", depth: 0, mode: "background", startedAt: 1000,
+        }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
 
     const rec = recovered("orphan-empty", mainFile);
     expect(rec.status).toBe("idle");

@@ -17,22 +17,16 @@ export {
   mapAssistantMessageDelta,
   parseSpawnModelRef,
   type SpawnModelRef,
-  type ThinkingLevel,
 } from "./spawn-args.ts";
 export { getPiInvocation, type PiInvocation } from "./pi-invocation.ts";
 export {
   respond,
   sendPromptCommand,
   sendGetStateCommand,
-  recordEpipeFailure,
-  clearEpipeFailure,
-  resetAllEpipeFailures,
-  EPIPE_FAILURE_THRESHOLD,
 } from "./stdin-writer.ts";
 export { parseChannel, type ParsedChannel } from "./ui-channels.ts";
 export { createUiRequestQueue, type UiRequestQueueDeps } from "./ui-request-queue.ts";
 export { parseSpawnLine, deriveSessionFilePath, findSessionFileByHeaderId } from "./spawn-event-adapter.ts";
-export { mirrorMainProcessFlags, type MirrorFlags } from "./argv-mirror.ts";
 export { createTurnLimiter, WRAP_UP_HINT } from "./turn-limiter.ts";
 export {
   performGetStateHandshake,

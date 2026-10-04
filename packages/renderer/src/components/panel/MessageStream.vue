@@ -326,8 +326,7 @@ const vlistRef = shallowRef<VirtualizerHandle | null>(null)
  *  useMessageStreamRail（closest('section') 算 panelRightEdge）。 */
 const scrollEl = ref<HTMLElement | null>(null)
 
-/** B2 dev-only 常量漂移检测：ResizeObserver 实测 vs 像素常量，不匹配 console.warn。生产裁剪零开销。
- *  [u6a] COMPACTING/EXECUTING_BASH 两常量的断言 ref 随指示行迁入 ActivityStrip 内部，此处仅剩 load-more。 */
+/** B2 dev-only 常量漂移检测：ResizeObserver 实测 vs 像素常量，不匹配 console.warn。生产裁剪零开销。 */
 const [loadMoreEl] = useConstantHeightAssert([
   { name: 'LOAD_MORE_RESERVED_HEIGHT', expected: LOAD_MORE_RESERVED_HEIGHT },
 ]).els

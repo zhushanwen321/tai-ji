@@ -19,6 +19,8 @@ export interface LoggerSink {
   log(level: LogLevel, component: string, message: string, data?: unknown): void;
 }
 
+import { ENGINE_SDK_SLOT_KEYS } from "./global-slots.ts";
+
 /** 日志级别。对齐 core logger 的 LogLevel（三值，无 info）。 */
 export type LogLevel = "debug" | "warn" | "error";
 
@@ -31,7 +33,7 @@ export interface CoreLogger {
 
 // sink 配置态：globalThis[Symbol.for] slot（core host-services 同款范式）——模块级
 // `let` 在 dist 双形态 / CJS 多 entry 内联副本下会被分裂，slot 形态跨副本一致。
-const SINK_SLOT_KEY = Symbol.for("@zhushanwen/subagent-engine-sdk.logger-sink");
+const SINK_SLOT_KEY = Symbol.for(ENGINE_SDK_SLOT_KEYS.loggerSink);
 
 type SinkSlot = { current: LoggerSink | undefined };
 

@@ -10,7 +10,7 @@
 //     → kickOffEngineRun（已删）→ runEngineTask（已删）catch（engine.run prepare
 //       期 reject，含协议握手 engine_capability_mismatch 形态；该中段随 one-shot
 //       engine-run 编排坍缩删除，现行 catch 面 = kickOffChatRound 主干）
-//     → finalizeFailed（CAS tryTransition closed/gc 抢到锁）
+//     → finalizeFailed（CAS trySettleLegacyClosed 抢到锁）
 //     → finalizeRecord → doFinalizeRecord Step 3b cleanupWorktreeIfBound
 //     → worktreeManager.cleanup(record.worktreeHandle)。
 //   前置副作用唯一实体 = worktree（并发池槽在 kickOffChatRound finally 自回收；journal
@@ -20,7 +20,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { doFinalizeRecord, type FinalizeDeps } from "../../persistence/finalize-record.ts";
-import type { AgentResult, ExecutionRecord, WorktreeHandle } from "../../assembly/types.ts";
+import type { AgentResult, ExecutionRecord } from "../../domain/record-model.ts";
+import type { WorktreeHandle } from "../../assembly/types.ts";
 
 /** 最小 record（worktree 绑定可注入；status running 供终态迁移）。 */
 function makeRecord(worktreeHandle?: WorktreeHandle): ExecutionRecord {

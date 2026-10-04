@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * bashStart / bashResult effect 单测（composer-bash-execute W3 TK7 → W1 fix-chat-flow-order 语义更新）。
  *
@@ -87,25 +89,19 @@ describe('bash effect（message.bashStart / message.bashResult）', () => {
     expect(msgs[0].bashExecution?.cancelled).toBe(true)
   })
 
-  it('T4: abortBash 合成哨兵帧（command:"" + cancelled:true）→ 不建消息（无文件对应物，防空命令卡片）', () => {
+  it('T4: abortBash 兜底终态 message.bashAborted（D4-3 独立帧）→ 不建消息，executingBash 清（UI 中止态）', () => {
     const store = useChatStore()
     const sid = 's-bash-4'
     store.applyMessageEvent(sid, {
       type: 'message.bashStart',
       payload: { sessionId: sid, command: 'sleep 5', excludeFromContext: false, timestamp: 1000 },
     } as ServerMessage)
+    // wire 载荷与 runtime BashDispatcher.abortBash 广播形态一致（shared
+    // ServerMessageMap['message.bashAborted']）；经 store.applyMessageEvent 全链
+    //（registry effect 表 → bashAbortedEffect）驱动。
     store.applyMessageEvent(sid, {
-      type: 'message.bashResult',
-      payload: {
-        sessionId: sid,
-        command: '',
-        output: '',
-        exitCode: null,
-        cancelled: true,
-        truncated: false,
-        excludeFromContext: false,
-        timestamp: 2000,
-      },
+      type: 'message.bashAborted',
+      payload: { sessionId: sid, timestamp: 2000 },
     } as ServerMessage)
 
     expect(store.getMessages(sid)).toHaveLength(0)

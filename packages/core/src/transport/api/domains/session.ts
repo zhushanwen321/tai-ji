@@ -7,9 +7,32 @@
  * 注：ServerMessage(id) → pending.resolve 的回灌由 features 层 dispatcher 串联（Wave 3）。
  *      mock 模式下不走本域（api/index 切到 mock 门面）。
  */
-import type { SessionSummary, SessionGroup, SubagentRecord, WorkflowRunRecord, Message, BatchDeleteResult, ServerMessage, ThinkingLevel, ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply } from '@taiji/shared'
+import type { SessionSummary, SessionGroup, SubagentRecord, WorkflowRunRecord, Message, BatchDeleteResult, ServerMessage, ThinkingLevel, ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply, SessionRevokeMessageReply } from '@taiji/shared'
+import { PI_THINKING_LEVELS } from '@taiji/shared'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 import { command } from '../request'
+
+/** PI_THINKING_LEVELS 成员判定（shared 权威词表，string → ThinkingLevel 类型收窄） */
+function isPiThinkingLevel(value: string): value is ThinkingLevel {
+  return (PI_THINKING_LEVELS as readonly string[]).includes(value)
+}
+
+/**
+ * Staging thinkingOverride 边界收窄：composer 暂存链路是自由 string（model-thinking
+ * stagingThinking），shared 协议已把 session.fork/handoff 的 thinkingOverride 收窄为
+ * ThinkingLevel（PI_THINKING_LEVELS 权威词表）。transport 边界按词表校验：合法值原样
+ * 放行，非法值 fail-fast（UI 候选集已过 isThinkingLevel 过滤，非法值只可能来自协议
+ * 漂移/代码 bug——静默丢弃会复现 A-03「override 不生效」silent bug）。
+ */
+function narrowThinkingOverride(value: string | undefined): ThinkingLevel | undefined {
+  if (value === undefined) return undefined
+  if (!isPiThinkingLevel(value)) {
+    throw new Error(
+      `thinkingOverride "${value}" 不在 PI_THINKING_LEVELS 值域（${PI_THINKING_LEVELS.join('/')}），session RPC 拒发`,
+    )
+  }
+  return value
+}
 
 /**
  * handoff RPC 超时：对齐 runtime HandoffService.HANDOFF_TIMEOUT_MS（600s）+ 60s 余量（agent_end 后的 create/broadcast）。
@@ -33,6 +56,8 @@ export async function list(): Promise<SessionGroup[]> {
  * 创建新 session（#1 cwd 透传，位置参数 create(cwd?, label?)，issues #1 方案 A）。
  * cwd=undefined → payload 不含 cwd 键（runtime 回退 process.cwd()，AC-1.2 回归）。
  * presetId：session 创建时锁定的 pi 启动预设 id（设计文档 §4.1），透传给 runtime。
+ * clientUuid（发现 B，create 幂等化）：客户端幂等 id，同一次「新建任务」的网络重试复用
+ * 同一 uuid，runtime 按其去重返回已建 session；缺省省略（旧行为，逐次独立创建）。
  * reply envelope 是 { session }，解包 .session。
  */
 export async function create(
@@ -42,18 +67,21 @@ export async function create(
   projectId?: string,
   modelOverride?: string,
   thinkingOverride?: ThinkingLevel,
+  clientUuid?: string,
 ): Promise<SessionSummary> {
-  const payload: { cwd?: string; label?: string; presetId?: string; projectId?: string; modelOverride?: string; thinkingOverride?: ThinkingLevel } = {}
+  const payload: { cwd?: string; label?: string; presetId?: string; projectId?: string; modelOverride?: string; thinkingOverride?: ThinkingLevel; clientUuid?: string } = {}
   if (cwd !== undefined) payload.cwd = cwd
   if (label !== undefined) payload.label = label
   if (presetId !== undefined) payload.presetId = presetId
-  // D14 语义修正（2026-08-04）：创建时归属当前 activeProject（空 = 默认项目兑底）。
+  // D14 语义修正（2026-08-04）：创建时归属当前 activeProject（空 = 默认项目兜底）。
   if (projectId !== undefined) payload.projectId = projectId
   // B3：透传 modelOverride / thinkingOverride（Landing Chip 覆盖值）。
   // 优先级：Landing Chip override > preset.modelOverride/thinkingLevel > 全局默认。
   // session 创建即带正确模型，消除 config.sessions 广播覆盖的竞态。
   if (modelOverride !== undefined) payload.modelOverride = modelOverride
   if (thinkingOverride !== undefined) payload.thinkingOverride = thinkingOverride
+  // 发现 B（create 幂等化）：clientUuid 幂等键透传 runtime（缺省省略，向后兼容）。
+  if (clientUuid !== undefined) payload.clientUuid = clientUuid
   const reply = await command('session.create', payload, RPC_BACKSTOP_TIMEOUT_MS)
   return reply.session
 }
@@ -115,7 +143,7 @@ export async function fork(
     includeFrom: opts.includeFrom,
     label: opts.label,
     modelOverride: opts.modelOverride,
-    thinkingOverride: opts.thinkingOverride,
+    thinkingOverride: narrowThinkingOverride(opts.thinkingOverride),
   }, RPC_BACKSTOP_TIMEOUT_MS)
   return reply.session
 }
@@ -167,7 +195,8 @@ export function removeByCwd(cwd: string): Promise<BatchDeleteResult> {
 
 /**
  * 设置 session 的思考等级，返回 pi 实际生效值（回执修型 U6）。
- * level 是前端 6 级枚举字符串（off/low/medium/high/xhigh/max，见 thinking-levels.ts）。
+ * level 是前端 7 级枚举字符串（off/minimal/low/medium/high/xhigh/max，
+ * 集合来源 @taiji/shared PI_THINKING_LEVELS，见 thinking-levels.ts）。
  * reply { sessionId, level }：level 是 runtime set→get_state 读回的生效档（pi 钳制时 ≠ 请求值）。
  */
 export function setThinkingLevel(sessionId: string, level: string): Promise<{ sessionId: string; level: string }> {
@@ -285,7 +314,7 @@ export function handoff(
     sessionId,
     reply,
     modelOverride: options?.modelOverride,
-    thinkingOverride: options?.thinkingOverride,
+    thinkingOverride: narrowThinkingOverride(options?.thinkingOverride),
   }, HANDOFF_RPC_TIMEOUT_MS)
 }
 
@@ -295,6 +324,16 @@ export function handoff(
  */
 export function abortHandoff(sessionId: string): Promise<void> {
   return command('session.abortHandoff', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/**
+ * 撤回已送达消息（消息撤回设计 §3.3 D2/D8）：runtime 七步编排（树内回退）的 renderer 入口。
+ * targetId = 消息 id 原样（live 态 `u-<uuid>` clientUuid 空间 / 基线与重开态 pi entryId 空间，
+ * 形态分派在 runtime）。reply 判别字段 revoked：成功臂 content = transcript entry 原文（含
+ * 投递裸标记，剥标记与整批切条在消费侧 revoke-restore.ts）；错误臂 error 六码闭集按 D8 呈现。
+ */
+export function revokeMessage(sessionId: string, targetId: string): Promise<SessionRevokeMessageReply> {
+  return command('session.revokeMessage', { sessionId, targetId }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
 /**

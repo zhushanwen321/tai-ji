@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * usePermissionRequest.test.ts —— 桌面壳装配薄接线 smoke。
  *

@@ -32,8 +32,8 @@ type AssertHasKey<T, K extends keyof T> = never
 type AssertExtends<A, B> = A extends B ? never : never
 
 // ClientMessageMap 新增 key 存在性
+// [R3-b33 退役] workspace.detectBare / workspace.bareDetected 别名族断言已随协议条目删除
 type _Assert_Client_detect = AssertHasKey<ClientMessageMap, 'workspace.detect'>
-type _Assert_Client_detectBare = AssertHasKey<ClientMessageMap, 'workspace.detectBare'>
 type _Assert_Client_listBranches = AssertHasKey<ClientMessageMap, 'worktree.listBranches'>
 type _Assert_Client_list = AssertHasKey<ClientMessageMap, 'worktree.list'>
 type _Assert_Client_setWorktreeRootDir = AssertHasKey<ClientMessageMap, 'config.setWorktreeRootDir'>
@@ -43,7 +43,6 @@ type _Assert_Client_getSetupScript = AssertHasKey<ClientMessageMap, 'config.getS
 
 // ServerMessageMapBase 新增 key 存在性
 type _Assert_Server_detected = AssertHasKey<ServerMessageMapBase, 'workspace.detected'>
-type _Assert_Server_bareDetected = AssertHasKey<ServerMessageMapBase, 'workspace.bareDetected'>
 type _Assert_Server_branches = AssertHasKey<ServerMessageMapBase, 'worktree.branches'>
 type _Assert_Server_listResult = AssertHasKey<ServerMessageMapBase, 'worktree.list:result'>
 type _Assert_Server_worktreeRootDir = AssertHasKey<ServerMessageMapBase, 'config.worktreeRootDir'>
@@ -51,7 +50,6 @@ type _Assert_Server_setupScript = AssertHasKey<ServerMessageMapBase, 'config.set
 
 // ReplyPayloadMap 新增 key 存在性
 type _Assert_Reply_detect = AssertHasKey<ReplyPayloadMap, 'workspace.detect'>
-type _Assert_Reply_detectBare = AssertHasKey<ReplyPayloadMap, 'workspace.detectBare'>
 type _Assert_Reply_listBranches = AssertHasKey<ReplyPayloadMap, 'worktree.listBranches'>
 type _Assert_Reply_list = AssertHasKey<ReplyPayloadMap, 'worktree.list'>
 type _Assert_Reply_setWorktreeRootDir = AssertHasKey<ReplyPayloadMap, 'config.setWorktreeRootDir'>

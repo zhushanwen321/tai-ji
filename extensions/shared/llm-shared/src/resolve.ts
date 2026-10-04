@@ -6,7 +6,7 @@
  * 不通过 ModelSelector 表达非精确语义。
  */
 
-import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isRecord } from "@zhushanwen/pi-ext-guards";
 
@@ -36,32 +36,18 @@ export function normalizeModelSelector(raw: unknown): ModelSelector | null {
 	return null;
 }
 
-// ──────────────────────── thinking level 校验 ────────────────────────
+// ──────────────────────── thinking level 归一 ────────────────────────
 
 /**
- * 合法 thinking 级别清单（与 pi-ai ModelThinkingLevel 七值联合一致；normalize 校验用）。
- * Set 免 as 断言。
- */
-const THINKING_LEVELS: ReadonlySet<string> = new Set([
-	"off",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-]);
-
-/**
- * 类型谓词：unknown 是否为合法 thinking 级别（配置 normalize 校验用，单点断言）。
- * Set.has 运行时兜底 + 类型收窄，调用方无需再断言。
+ * thinkingLevel 配置值归一：非空字符串原样返回，其余 undefined（调用方落自己的缺省）。
  *
- * extensions 侧唯一副本（ext-simplify-17 D5）；与 packages/subagent-core 的
- * THINKING_ORDER（src/shared/model-ref.ts）注释互指，不建跨包 import（分层约束：
- * universal 角色包禁 import subagent-core，反向则 shared 库依赖 packages/ 破坏分层）。
+ * **不做白名单校验**：档位词表的唯一归属是入口层（宿主 core 的 THINKING_ORDER），
+ * 扩展配置的合法性由写入方（UI 依模型 supportedLevels 数据）与 pi 运行时判定——
+ * 在这里再挂一份静态表既是第四份副本，也会把「显式写了非法档位」静默换成缺省档
+ * （用户以为改了档，实际没改）。
  */
-export function isThinkingLevel(raw: unknown): raw is ModelThinkingLevel {
-	return typeof raw === "string" && THINKING_LEVELS.has(raw);
+export function normalizeThinkingLevel(raw: unknown): string | undefined {
+	return typeof raw === "string" && raw.length > 0 ? raw : undefined;
 }
 
 // ──────────────────────── 模型解析 ────────────────────────

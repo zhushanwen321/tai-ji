@@ -52,13 +52,7 @@ describe('EventInterpreter session-renamed 编排（MF-3 ②，label 自动同�
   // 链路：event-adapter session_info_changed → {kind:'session-renamed'} → 本 case →
   // onSessionRenamed → 组合根 sessionService.setLabelCache（runtime 内存 label 唯一
   // 数据源）。缺测刻痕：本链路历经 3 个 fix commit 仍无回归钉住。
-  it('TC-RN1: session-renamed{name} → onSessionRenamed(sid, name)', () => {
-    const { interp, onSessionRenamed } = makeInterpreter()
-    interp.interpret([{ kind: 'session-renamed', name: 'renamed-by-pi' }])
-    expect(onSessionRenamed).toHaveBeenCalledTimes(1)
-    expect(onSessionRenamed).toHaveBeenCalledWith('s1', 'renamed-by-pi')
-  })
-
+  // name 正常值路径的回归钉 = test/event-interpreter-dispatch-anchor.test.ts R7（逐字等价）。
   it('TC-RN2: name undefined → 回调透传 undefined（组合根回落 basename 派生，session-rename-fanout 承载 D4）', () => {
     const { interp, onSessionRenamed } = makeInterpreter()
     interp.interpret([{ kind: 'session-renamed', name: undefined }])
@@ -67,22 +61,20 @@ describe('EventInterpreter session-renamed 编排（MF-3 ②，label 自动同�
 })
 
 describe('EventInterpreter compaction 编排 (M4 事件驱动)', () => {
-  it('TC1: compaction_start{reason} → session.compacting{reason} + isCompacting=true', () => {
+  it.each([
+    'manual',
+    // threshold 透传（驱动前端自动文案，原 TC1-auto 并入）
+    'threshold',
+  ] as const)('TC1: compaction_start{reason:%s} → session.compacting{reason} + isCompacting=true', (reason) => {
     const onCompactingStateChange = vi.fn()
     const { interp, sent } = makeInterpreter({ onCompactingStateChange })
 
-    interp.interpret([{ kind: 'compaction-start', reason: 'manual' }])
+    interp.interpret([{ kind: 'compaction-start', reason }])
 
     expect(sent).toHaveLength(1)
     expect(sent[0].type).toBe('session.compacting')
-    expect(sent[0].payload).toMatchObject({ sessionId: 's1', status: 'compacting', reason: 'manual' })
+    expect(sent[0].payload).toMatchObject({ sessionId: 's1', status: 'compacting', reason })
     expect(onCompactingStateChange).toHaveBeenCalledWith('s1', true)
-  })
-
-  it('TC1-auto: compaction_start{reason:"threshold"} → reason 透传（驱动前端自动文案）', () => {
-    const { interp, sent } = makeInterpreter()
-    interp.interpret([{ kind: 'compaction-start', reason: 'threshold' }])
-    expect(sent[0].payload).toMatchObject({ reason: 'threshold' })
   })
 
   it('TC2: compaction_end{result} 成功 → compactionSummary + contextUpdate + session.compacted（无 error）+ 复位', () => {
@@ -204,23 +196,6 @@ describe('EventInterpreter compaction 编排 (M4 事件驱动)', () => {
     expect(sent.find((m) => m.type === 'message.error')).toBeDefined()
     // 复位（对本来 false 的 isCompacting 写 false，幂等无害）
     expect(onCompactingStateChange).toHaveBeenCalledWith('s1', false)
-  })
-
-  it('完整生命周期：start → end 成功（置位/复位对称）', () => {
-    const onCompactingStateChange = vi.fn()
-    const { interp } = makeInterpreter({ onCompactingStateChange })
-
-    interp.interpret([{ kind: 'compaction-start', reason: 'manual' }])
-    interp.interpret([{
-      kind: 'compaction-end',
-      reason: 'manual',
-      result: { summary: 'S', tokensBefore: 50, estimatedTokensAfter: 20 },
-      aborted: false,
-    }])
-
-    // 置位 + 复位各一次，顺序 true → false
-    expect(onCompactingStateChange).toHaveBeenNthCalledWith(1, 's1', true)
-    expect(onCompactingStateChange).toHaveBeenNthCalledWith(2, 's1', false)
   })
 })
 

@@ -22,7 +22,7 @@
  */
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, screen, shell } from 'electron'
 import type { WindowOptions } from '../interfaces.js'
 import { isAllowedAppNavigation, isValidExternalUrl } from '../gateway/input-validators.js'
 import { mainLogger } from '../logs/main-logger.js'
@@ -30,6 +30,13 @@ import { crashJournal } from '../logs/crash-journal.js'
 import { handleRendererConsoleMessage, isRendererConsoleDisabled } from '../logs/renderer-console-handler.js'
 import { RecoveryPolicy } from './recovery-policy.js'
 import { getDataDir } from '@taiji/shared/paths'
+import {
+  createMainWindowStatePersistence,
+  pickInitialSize,
+  type Size,
+  type WindowState,
+  type WindowStatePersistence,
+} from './window-state.js'
 
 /** Dev 模式 Vite URL（TAIJI_VITE_DEV_URL 可覆盖：多 worktree 并行 dev 时错开端口，如 1421）。
  *  注意：本常量同时是 will-navigate 导航白名单的 devOrigin（createWindow 内
@@ -289,9 +296,30 @@ export async function createWindow(
 ): Promise<{ win: BrowserWindow; windowId: string }> {
   const windowId = options?.windowId ?? deps.generateId()
 
+  // ── u-window-state §6.4：默认尺寸取值 + 持久化恢复（仅非 mac 平台有计算面）────
+  // darwin 分支零计算零 IO：恒 1200×800，创建参数逐字不动（mac 首启/重启尺寸行为与
+  // 现状一致，§2 目标 5）。非 mac：有合法持久化态（仅主窗口读）→ clamp 后恢复；
+  // 无 → 主屏工作区比例取值（62%/75%，cap 1440×960，纯函数见 window-state.ts）。
+  // 持久化/恢复仅主窗口（options.isMainWindow 门）：create-window IPC 迁移窗口不读
+  // 不挂——window-state.json 全局单写者，last-writer-wins 互踩被结构性消除。
+  const isMac = process.platform === 'darwin'
+  const isMainWindow = options?.isMainWindow === true
+  let restoredWindowState: WindowState | null = null
+  let windowStatePersistence: WindowStatePersistence | null = null
+  let initialSize: Size = { width: 1200, height: 800 }
+  if (!isMac) {
+    const workArea = screen.getPrimaryDisplay().workArea
+    if (isMainWindow) {
+      windowStatePersistence = createMainWindowStatePersistence()
+      restoredWindowState = windowStatePersistence.load()
+    }
+    initialSize = pickInitialSize(workArea, restoredWindowState)
+  }
+
   const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    // u-window-state §6.4：darwin 分支恒 1200×800（逐字不动）；非 mac = 比例取值或
+    // clamp 后的持久化尺寸，下限由 minWidth/minHeight 兜底
+    ...(isMac ? { width: 1200, height: 800 } : initialSize),
     minWidth: 800,
     minHeight: 600,
     show: false,
@@ -305,7 +333,7 @@ export async function createWindow(
     //   AppNavControls top-[5px] → 按钮中线 y=16（≈ 红黄绿实测中线 y15.75 对齐）；left-[72px]（右缘 60 + 12 呼吸）。
     //   取舍：不再追求与 PanelHeader 中线(y=32)对齐——原生 mac 应用红黄绿在 titlebar 顶部、
     //   工具栏按钮在其下方，二者本就不同高；折叠态 PanelHeader chrome 在 header 中线，与红黄绿有高度差属预期。
-    // win/linux：frame:false 应用自绘圆点 mimic mac（renderer TrafficLight.vue left-0/top-0，aside 顶已在窗口 y=8）。
+    // win/linux：frame:false 应用自绘圆点 mimic mac（renderer TrafficLight.vue left-0/top-[4px]：aside 顶 y=4 → 圆点 y8 与 mac 同位；x=4 与 mac x8 有 4px 预期差（DESIGN §11））。
     ...(process.platform === 'darwin'
       ? {
         titleBarStyle: 'hidden' as const,
@@ -359,7 +387,19 @@ export async function createWindow(
     } else {
       win.show()
     }
+    // u-window-state §6.4：持久化态 isMaximized:true → show 后恢复最大化（位置不
+    // 持久化，Electron 默认居中 show）。mac / 迁移窗口 restoredWindowState 恒 null → no-op。
+    if (restoredWindowState?.isMaximized) {
+      win.maximize()
+    }
   })
+
+  // u-window-state §6.4：尺寸持久化仅挂主窗口（isMainWindow 门已过滤迁移窗口；darwin
+  // 平台 windowStatePersistence 恒 null——持久化仅非 mac 生效）。resize/move 防抖写、
+  // 最大化/全屏跳过、close 同步 flush 语义见 window-state.ts。
+  if (windowStatePersistence) {
+    windowStatePersistence.attach(win)
+  }
 
   // W7 加载失败 / 渲染进程崩溃监听（webContents 创建后立即挂，覆盖 loadFile/loadURL 全过程）：
   //   - did-fail-load：loadURL/loadFile 失败（如 Vite 重启中、构建产物损坏）。打 error 日志。

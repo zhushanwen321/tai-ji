@@ -35,7 +35,7 @@ cw run --root <slug> --spawn pi
 
 - `cw run` 前台阻塞直至收束，多 unit 任务常以小时计——**用 bash-async 的 background 模式跑**，不要同步等待
 - 并行上限 `--max-concurrency`（默认 3）；reviewer 模型 `--reviewer-model <m>` 或环境变量 `CW_REVIEWER_MODEL`
-- developer/designer 模型走环境变量 `CW_AGENT_MODEL`（缺省 `xiaomi-token-plan-cn/mimo-v2.5-pro`）——**不继承当前主 agent 的模型**，与 pi subagent 的模型继承机制无关
+- developer/designer 模型走环境变量 `CW_AGENT_MODEL`（缺省由 cw CLI 决定，未设置时以 `cw --help` 输出为准）——**不继承当前主 agent 的模型**，与 pi subagent 的模型继承机制无关
 
 ### 3. 监控
 

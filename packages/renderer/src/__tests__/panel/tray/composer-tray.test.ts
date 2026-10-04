@@ -34,6 +34,7 @@ import { computed, nextTick, reactive } from 'vue'
 import type { Ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
+import type { ViewHostSource } from '@taiji/ui/extension-host'
 import { ansiLine, makeEntry, makeWidgetSource } from './tray-view-host-mock'
 import type { MockWidgetSource } from './tray-view-host-mock'
 import { makeTrayCountsStub } from './tray-counts-stub'
@@ -295,6 +296,16 @@ async function realClick(node: DOMWrapper<Element>): Promise<void> {
 async function advance(ms: number): Promise<void> {
   await vi.advanceTimersByTimeAsync(ms)
   await nextTick()
+}
+
+/**
+ * 聚合面板用例公共开场：aggregated 形态挂载 + 真实点击聚合入口 + 面板键断言
+ * （原三用例逐字重复的「开聚合面板」段单源；面板段内容差异留在各用例）。
+ */
+async function openAggregatedPanel(): Promise<void> {
+  mountTray(makeWidgetSource(SID), SID, true)
+  await realClick(row().find('[data-testid="tray-aggregate-button"]'))
+  expect(panelKeys()).toEqual(['aggregate'])
 }
 
 beforeEach(() => {
@@ -844,7 +855,10 @@ describe('ComposerTray 数据面单例（U1：面板不自建实例、开合不�
     const loadWfSpy = vi.spyOn(workflowStore, 'loadWorkflows').mockResolvedValue(undefined)
     // 拉取腿被替身 → 数据直接种入分区（外壳三态与面板行集都读同一分区）
     subagentStore.applyRecords(SID, [makeSubagent({ subagentId: 'sa-1', status: 'running' })])
-    workflowStore.applyRecords(SID, [makeWorkflow({ runId: 'wf-1', status: 'running' })])
+    // workflow 种数据：applyRecords 已私有化，直写分区 ref
+    workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(SID, [
+      makeWorkflow({ runId: 'wf-1', status: 'running' }),
+    ])
 
     mountTray(makeWidgetSource(SID))
     await flushPromises()
@@ -913,15 +927,18 @@ describe('ComposerTray 首帧即列表（U2：hover 打开不闪加载态）', (
 // ── 序 4 聚合入口（u6b / D6：「层叠图标 + 运行数」→ 面板内分段展示全部类别）──
 
 describe('ComposerTray 序 4 聚合单入口（aggregated）', () => {
-  it('aggregated + 有进行中条目 → 单入口按钮（层叠图标 + 运行数），逐件按钮不再渲染', () => {
+  it('aggregated + 有进行中条目 → 单入口按钮（单图标 + 运行数数字角标），逐件按钮不再渲染', () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' }), makeTask({ taskId: 'bt-2' })]
     trayState.subagentEnded = [makeSubagent({ subagentId: 'sa-e1', status: 'completed' })]
     mountTray(makeWidgetSource(SID), SID, true)
 
     const aggregate = row().find('[data-testid="tray-aggregate-button"]')
     expect(aggregate.exists()).toBe(true)
-    // 层叠图标：两个类别 icon（bash + subagent）重叠于入口内
-    expect(aggregate.findAll('svg').length).toBeGreaterThanOrEqual(2)
+    // 单图标硬约束（W3a 禁多 icon 重叠）：入口内只有一个 svg（layers），运行数走数字角标
+    expect(aggregate.findAll('svg')).toHaveLength(1)
+    // title = 「全部工具」（运行数不进 title，只在角标）
+    expect(aggregate.attributes('title')).toBe(zhTray.tray.aggregate.allTools)
+    expect(aggregate.attributes('aria-label')).toBe(zhTray.tray.aggregate.allTools)
     // 运行数 = 进行中合计（仅历史件不计入）
     expect(aggregate.find('[data-testid="tray-aggregate-count"]').text()).toBe('2')
     expect(aggregate.find('[data-testid="tray-aggregate-pulse"]').exists()).toBe(true)
@@ -933,11 +950,8 @@ describe('ComposerTray 序 4 聚合单入口（aggregated）', () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     trayState.bashEnded = [makeTask({ taskId: 'bt-e1', state: 'exited', reason: 'natural' })]
     trayState.workflowEnded = [makeWorkflow({ runId: 'wf-e1' })]
-    mountTray(makeWidgetSource(SID), SID, true)
+    await openAggregatedPanel()
 
-    await realClick(row().find('[data-testid="tray-aggregate-button"]'))
-
-    expect(panelKeys()).toEqual(['aggregate'])
     expect(panelContentNodes('tray-aggregate-panel')).toHaveLength(1)
     // 段 = 有记录的类别（bash + workflow），全无记录的类别不出段
     expect(panelContentNodes('tray-aggregate-section-bash')).toHaveLength(1)
@@ -954,6 +968,48 @@ describe('ComposerTray 序 4 聚合单入口（aggregated）', () => {
 
     expect(row().find('[data-testid="tray-aggregate-button"]').exists()).toBe(false)
     expect(row().findAll('[data-testid="tray-builtin-button"]')).toHaveLength(0)
+  })
+
+  // ── W3a：聚合入口可见条件扩展 + 聚合面板承接插件 toolbar ──
+
+  it('aggregated + 托盘全无条目但插件 toolbar 有贡献 → 聚合入口仍渲染；面板含发丝分隔 + toolbar ViewHost', async () => {
+    // 挂载点视图只经 getView 可见、不进 getViewIds 枚举（聚合入口可见条件的独立判定面）
+    const toolbarSource: ViewHostSource = {
+      getViewIds: () => [],
+      getView: (sid, viewId) =>
+        sid === SID && viewId === 'composer.toolbar'
+          ? makeEntry('composer.toolbar', [ansiLine('toolbar body')])
+          : undefined,
+    }
+    wrapper = mount(ComposerTray, {
+      props: { sessionId: SID, aggregated: true },
+      global: { provide: { [VIEW_HOST_SOURCE_KEY as symbol]: toolbarSource } },
+      attachTo: document.body,
+    })
+
+    // 基线（只看托盘条目）下此场景不渲染聚合入口——可见条件已扩为「或插件有贡献」
+    const aggregate = row().find('[data-testid="tray-aggregate-button"]')
+    expect(aggregate.exists()).toBe(true)
+
+    await realClick(aggregate)
+    expect(panelKeys()).toEqual(['aggregate'])
+    const panel = panelNodes()[0]
+    // toolbar 承接：ViewHost 渲染贡献内容（用户可见 DOM）
+    expect(panel?.querySelector('[data-testid="view-host"]')).not.toBeNull()
+    expect(panel?.textContent ?? '').toContain('toolbar body')
+    // 发丝分隔存在（h-px + bg-border-strong，紧邻 ViewHost 包装容器之前）
+    expect(panel?.querySelector('span.h-px.bg-border-strong')).not.toBeNull()
+  })
+
+  it('aggregated + 插件零贡献 → 面板无发丝分隔、无 toolbar ViewHost（不留死分隔）', async () => {
+    trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
+    await openAggregatedPanel()
+
+    const panel = panelNodes()[0]
+    expect(panel?.querySelector('[data-testid="view-host"]')).toBeNull()
+    expect(panel?.querySelector('span.h-px.bg-border-strong')).toBeNull()
+    // 既有托盘分段不受影响
+    expect(panel?.querySelector('[data-testid="tray-aggregate-section-bash"]')).not.toBeNull()
   })
 
   it('widget-only（无 built-in 记录）→ 聚合入口仍渲染（通用图标兜底）且面板含 widget 段', async () => {
@@ -1038,10 +1094,8 @@ describe('ComposerTray 第 4 件「子会话」（u7）', () => {
   it('聚合入口共存（序 4）：聚合面板含 session 段，且段内复用 TraySessionPanel', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     trayState.sessionChildren = [makeChild({ id: 'c-1', status: 'active' })]
-    mountTray(makeWidgetSource(SID), SID, true)
+    await openAggregatedPanel()
 
-    await realClick(row().find('[data-testid="tray-aggregate-button"]'))
-    expect(panelKeys()).toEqual(['aggregate'])
     expect(panelContentNodes('tray-aggregate-section-session')).toHaveLength(1)
     expect(panelContentNodes('tray-session-panel')).toHaveLength(1)
     // bash 段仍走 TrayNativePanel（分流未改变）

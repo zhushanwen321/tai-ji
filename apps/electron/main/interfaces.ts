@@ -163,6 +163,9 @@ export type CreateWindowFn = (options?: WindowOptions) => Promise<BrowserWindow>
 export interface WindowOptions {
   windowId?: string
   sessionId?: string
+  /** bootstrap 主窗口标记（u-window-state §6.4）：仅主窗口挂尺寸持久化 + 恢复——
+   *  create-window IPC 迁移窗口不传（不读不挂），window-state.json 单写者结构性保证 */
+  isMainWindow?: boolean
 }
 
 // ── Release Checker ────────────────────────────────────────────────

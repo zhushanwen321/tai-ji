@@ -67,8 +67,7 @@ const SUBAGENTS_DIRNAME = 'subagents'
 /**
  * `[live]` 规范化（§6.1/§7B 要点 3）：`getSessionDir()` 在纯 pi 返回按 cwd 编码的子目录
  *（`<agentDir>/sessions/--Users-x--`），在 taiji 覆盖态返回根本身。判据：basename
- * 匹配 encodeCwd 形态（`--` 开头 `--` 结尾，实证见 `~/.pi/agent/sessions/` 全部子目录
- * 与 real-data.ts）则取 dirname，否则取自身。
+ * 匹配 encodeCwd 形态（`--` 开头 `--` 结尾）则取 dirname，否则取自身。
  */
 export function normalizeLiveSessionDir(liveSessionDir: string): string {
   const base = basename(liveSessionDir)

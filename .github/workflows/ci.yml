@@ -94,6 +94,18 @@ jobs:
       - name: TypeCheck - shared
         run: pnpm --filter @taiji/shared run typecheck
 
+      # 协议演进宪法 D11 机器锁执行点：C3 事件词表 / C4 双写禁令 / C2 能力位必填
+      # 全部是 SDK 包内编译期断言，缺本步则锁为纸面（与 pre-commit SDK typecheck 段同口径）。
+      - name: TypeCheck - subagent-engine-sdk
+        run: pnpm --filter @zhushanwen/subagent-engine-sdk run typecheck
+
+      # C-proc-23 引擎协议词表锁 core 侧锚点执行点：SDK SSOT ↔ core 镜像类型双向可赋值
+      # + engine-manifest 能力位两表键集互等，断言在 protocol-closure.test.ts（编译期）。
+      # SDK 类型改动只编译 SDK 恒绿，缺本步则 core 镜像锁为纸面（与 pre-commit 双侧
+      # typecheck 段同口径）。
+      - name: TypeCheck - subagent-core
+        run: pnpm --filter @zhushanwen/subagent-core run typecheck
+
       - name: TypeCheck - pi extensions
         run: pnpm extensions:typecheck
 
@@ -199,7 +211,7 @@ jobs:
         # [HISTORICAL] 同 test-runtime：exec 直传参数（pnpm@10 `--` 透传令 CLI flag 全失效，
         # 其中 --coverage 自落地起从未真正执行过，coverage 阈值门禁形同虚设）。
         # coverage 门禁不在此跑：插桩 ~2x 会把本 job 推到 ~5min 关键路径——迁往
-        # coverage.yml（nightly + 手动）由每日快照兑底，TEST-STRATEGY.md §7 同步更新。
+        # coverage.yml（nightly + 手动）由每日快照兜底，TEST-STRATEGY.md §7 同步更新。
         run: pnpm --filter @taiji/frontend exec vitest run --shard=${{ matrix.shard-index }}/${{ matrix.shard-total }}
 
       - name: Upload test results
@@ -271,6 +283,17 @@ jobs:
       # + checkManifest 6 失败分支）依赖 prepare-builtin-extensions.sh 预产出的 staged 产物
       #（gitignored，fresh checkout 不存在）——先 prepare 再跑。pnpm exec 同 taste-lint step
       # 理由（显式本地 bin，防 npx registry 静默拉版）。
+      # .agents 实体已脱离 git 跟踪（workspace 根单一实体 + worktree symlink，ADR 见
+      # docs/adr/decisions.md）——CI 从 skills snapshot ref 物化出 .agents 树供守卫读取；
+      # snapshot 缺失时 fail-fast 给修复指引（设计 cross-worktree-skill-sync.md D4/U4）。
+      - name: Materialize .agents from skills snapshot
+        run: |
+          if ! git fetch origin refs/skills-snapshot:refs/skills-snapshot; then
+            echo "::error::refs/skills-snapshot missing - run bash .githooks/snapshot-skills.sh in any worktree and push the ref, then rerun CI"
+            exit 1
+          fi
+          git archive refs/skills-snapshot | tar -x
+
       - name: Prepare builtin extensions (staged bundles)
         run: bash scripts/prepare-builtin-extensions.sh
 
@@ -301,8 +324,11 @@ jobs:
       # render-sampling 管道判定层单测同批追加（MF-1-22：复用管道判定逻辑出错 = 静默
       # 产物污染，抽取自 scripts/render-sampling/decisions.mjs，jsdom 直测浏览器侧
       # 同一函数体，不依赖 staged 产物）。
+      # 领域类型路径单源守卫测试同批追加（D2：守卫本体已接线 pre-commit 与上方 CI step
+      # 而自测漏登记则 CI 零执行面，tmpdir 自建树 × --root 注入直测守卫本体，
+      # 不依赖 staged 产物）。
       - name: Test - scripts guards
-        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs scripts/__tests__/check-guide-contract-projection.test.mjs scripts/__tests__/check-infra-services-import.test.mjs scripts/__tests__/verify-scheduler-e2e.test.mjs scripts/__tests__/render-sampling-decisions.test.mjs
+        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-subagent-core-value-cycles.test.mjs scripts/__tests__/check-global-slot-keys.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs scripts/__tests__/check-guide-contract-projection.test.mjs scripts/__tests__/check-infra-services-import.test.mjs scripts/__tests__/verify-scheduler-e2e.test.mjs scripts/__tests__/render-sampling-decisions.test.mjs scripts/__tests__/check-domain-type-path.test.mjs
 
   # E2E 视觉回归（mock 轨 visual-chromium）：只跑像素 diff baseline（S2 W3 交付的
   # visual-chromium project，testMatch **/visual/** + chromium.launch + spawn vite @ VITE_MOCK=true）。
@@ -456,6 +482,17 @@ jobs:
 
       # 非 workspace 结构接线对账（S1，PR #20 组 D 守卫化；与 pre-commit 结构接线段同源——
       # D7 通则：pre-commit 之外的 CI 面同源拦截，防本地 hook 被绕过）
+      # .agents 实体已脱离 git 跟踪（workspace 根单一实体 + worktree symlink，ADR 见
+      # docs/adr/decisions.md）——CI 从 skills snapshot ref 物化出 .agents 树供守卫读取；
+      # snapshot 缺失时 fail-fast 给修复指引（设计 cross-worktree-skill-sync.md D4/U4）。
+      - name: Materialize .agents from skills snapshot
+        run: |
+          if ! git fetch origin refs/skills-snapshot:refs/skills-snapshot; then
+            echo "::error::refs/skills-snapshot missing - run bash .githooks/snapshot-skills.sh in any worktree and push the ref, then rerun CI"
+            exit 1
+          fi
+          git archive refs/skills-snapshot | tar -x
+
       - name: Structure wiring check (non-workspace packages)
         run: node scripts/check-structure-wiring.mjs
 
@@ -579,6 +616,12 @@ jobs:
       - name: pi sync derived anchors guard
         run: node scripts/check-pi-sync.mjs
 
+      # pi 引擎域资产模型引用漂移守卫（workflow-architecture-redesign D8，与 pre-commit
+      # 同源直调）：extensions/ agent 资产 frontmatter model 声明 vs 内置 provider 目录
+      # 快照 diff。CI 无 staged 上下文——脚本本身即全量扫描模式，PR 面等价拦截（D7 通则）。
+      - name: Model reference drift guard (D8)
+        run: node scripts/check-model-references.mjs
+
       # G3 思考档位差分探针（pi-boundary-reliability D7-G3「CI invariants 同步」）：
       # 能力注册表计算路径 vs pi-ai 同源函数直调逐模型比对——防 registry 自身漂移
       #（U6 删 resolveAvailableLevels 后探针改守卫 registry，见脚本头注）。
@@ -596,6 +639,19 @@ jobs:
       # 同上行 G4 的挂载理由）。
       - name: Subagent-core closure guard (D9-①)
         run: node scripts/check-subagent-core-closure.mjs
+
+      # C-data-26 subagent-core 包内值依赖环守卫（与 pre-commit 同源直调）：整包值
+      # import 图零环，类型擦除边豁免——CI 面是全量等价拦截点（D7 通则）。
+      - name: Subagent-core value-cycle guard (C-data-26)
+        run: node scripts/check-subagent-core-value-cycles.mjs
+
+      # C-state-20 进程级全局槽键归属守卫（与 pre-commit 同源直调）：Symbol.for 字面量
+      # 只允许出现在两处声明文件，前缀/唯一性同时校验。
+      - name: Global slot-key ownership guard (C-state-20)
+        run: node scripts/check-global-slot-keys.mjs
+
+      - name: 领域类型路径单源（D2 守卫）
+        run: node scripts/check-domain-type-path.mjs
 
       # H3 subagent-service 聚合边界守卫（与 pre-commit 同源直调；守卫全量扫描
       # SERVICE_DIR 不依赖 staged 上下文）：聚合间值 import 禁 / 聚合→壳 import 禁 /

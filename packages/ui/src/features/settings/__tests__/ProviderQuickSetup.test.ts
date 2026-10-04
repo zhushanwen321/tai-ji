@@ -254,9 +254,13 @@ describe('onSave authMethod（TC6，I6 契约）', () => {
     input.dispatchEvent(new Event('input'))
     await flushPromises()
     ;(query('[data-testid="provider-quick-setup-save"]')! as HTMLElement).click()
-    const save = w.emitted('save')![0][0] as { providerId: string; data: { apiKey?: string; authMethod?: string } }
+    const save = w.emitted('save')![0][0] as { providerId: string; data: Record<string, unknown> }
     expect(save.data.authMethod).toBe('api_key')
     expect(save.data.apiKey).toBe('sk-abc')
+    // name = template.name（catalog 模板导入保留 name 作 provider 标识）
+    expect(save.data.name).toBe('Test Provider')
+    // 方案 B 占位：不写 models
+    expect(save.data.models).toBeUndefined()
     w.unmount()
   })
 
@@ -279,10 +283,13 @@ describe('onSave authMethod（TC6，I6 契约）', () => {
     w.unmount()
   })
 
-  it('OAuth 未授权 → 保存禁用', async () => {
+  it('OAuth 未授权 → 保存禁用（点击不产生 save emit）', async () => {
     const w = await mountSetup({ template: tpl({ authMode: 'oauth', envVars: [] }), oauthAuthorized: false })
     const saveBtn = query('[data-testid="provider-quick-setup-save"]') as HTMLButtonElement
     expect(saveBtn.disabled).toBe(true)
+    ;(saveBtn as HTMLElement).click()
+    await flushPromises()
+    expect(w.emitted('save')).toBeFalsy()
     w.unmount()
   })
 

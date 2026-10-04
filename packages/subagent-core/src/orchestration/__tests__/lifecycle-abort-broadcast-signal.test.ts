@@ -27,13 +27,22 @@ import type { RunSpec } from "../models/run-spec.ts";
 import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
 import type { AgentResult, ExecutionTraceNode } from "../models/types.ts";
 import { WorkflowRun } from "../models/workflow-run.ts";
+// [W2/V1] 终局断言换源：两态机字段停更，经终局记录注册表判定/派生。
+import {
+  settledRecordOf,
+} from "../terminal-actions.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 
 // ── helpers ──────────────────────────────────────────────────
 
+/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+function findByStep(trace: Trace, stepIndex: number): ExecutionTraceNode | undefined {
+  return trace.toArray().find((n) => n.stepIndex === stepIndex);
+}
+
 function makeSpec(): RunSpec {
   return {
-    scriptSource: "execute() {}",
+    scriptSource: "async function execute() {}",
     args: {},
     scriptName: "test-wf",
     scriptPath: "/fake/test.js",
@@ -100,7 +109,7 @@ describe("[OR-3] abort 广播（abortRun / terminateRunningRuns）", () => {
     // 顺序锚：广播先于 terminate（terminate 后广播发不进去）
     expect(terminate).toHaveBeenCalledTimes(1);
     expect(post.mock.invocationCallOrder[0]).toBeLessThan(terminate.mock.invocationCallOrder[0]);
-    expect(deps.runs.get(runId)?.state.reason).toBe("aborted");
+    expect(settledRecordOf(runId)).toMatchObject({ outcome: "cancelled" });
   });
 
   it("abortRun 未传 reason：广播 reason 带 doneReason（time_limited 场景可归因）", async () => {
@@ -126,7 +135,7 @@ describe("[OR-3] abort 广播（abortRun / terminateRunningRuns）", () => {
     await expect(abortRun(runId, deps, "abort despite dead worker")).resolves.toBeUndefined();
 
     // transition / 持久化照常完成（save 2 次 = runWorkflow 启动 1 次 + abortRun 1 次）
-    expect(deps.runs.get(runId)?.state.reason).toBe("aborted");
+    expect(settledRecordOf(runId)).toMatchObject({ outcome: "cancelled" });
     expect(deps.store.save).toHaveBeenCalledTimes(2);
     expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", expect.anything());
   });
@@ -138,7 +147,7 @@ describe("[OR-3] abort 广播（abortRun / terminateRunningRuns）", () => {
     run.runtime = undefined;
 
     await expect(abortRun(runId, deps, "no runtime")).resolves.toBeUndefined();
-    expect(run.state.reason).toBe("aborted");
+    expect(settledRecordOf(runId)).toMatchObject({ outcome: "cancelled" });
   });
 
   it("terminateRunningRuns：每个 running run 各自广播（先于 terminate）", async () => {
@@ -154,8 +163,12 @@ describe("[OR-3] abort 广播（abortRun / terminateRunningRuns）", () => {
 
     expect(postSpy(handleA)).toHaveBeenCalledWith({ type: "abort", reason: "Session switched: run terminated" });
     expect(postSpy(handleB)).toHaveBeenCalledWith({ type: "abort", reason: "Session switched: run terminated" });
-    expect(deps.runs.get(idA)?.state.reason).toBe("failed");
-    expect(deps.runs.get(idB)?.state.reason).toBe("failed");
+    // [D11] 统一中断语义：terminate 不再落 failed 终局，run 转 interrupted 暂停态（可 resume）
+    expect(settledRecordOf(idA)).toBeUndefined();
+    expect(settledRecordOf(idB)).toBeUndefined();
+    const runA = deps.runs.get(idA)!;
+    expect(runA.state.error).toBe("Session switched: run terminated");
+    expect(runA.runtime).toBeUndefined();
   });
 
   it("[OR-8] abortRun 收口残留 in-flight call：先收口再落盘，快照无 running 节点", async () => {
@@ -180,7 +193,7 @@ describe("[OR-3] abort 广播（abortRun / terminateRunningRuns）", () => {
     // 收口：call done + trace failed（Cancelled 文案；[H2 W3] trace.live 已删除）
     expect(call.status).toBe("done");
     expect(call.result?.error).toContain("Cancelled");
-    expect(run.state.trace.find(1)?.status).toBe("failed");
+    expect(findByStep(run.state.trace, 1)?.status).toBe("failed");
     // 落盘在收口之后：save 时 run 已无 running 节点
     expect(run.state.trace.toArray().every((n) => n.status !== "running")).toBe(true);
   });
@@ -243,7 +256,7 @@ describe("[OR-7] signal abort listener run 终态移除", () => {
     const handlers = deps.workerHost.start.mock.calls[0]?.[2] as WorkerHandlers;
     await handlers.onMessage({ type: "return", result: { ok: true } });
 
-    expect(deps.runs.get(runId)?.state.reason).toBe("completed");
+    expect(settledRecordOf(runId)).toMatchObject({ outcome: "done" });
     expect(removed).toEqual([added[0]]);
     expect(postSpy(handle).mock.calls.some((c) => (c[0] as { type?: string })?.type === "abort")).toBe(false);
   });
@@ -268,7 +281,7 @@ describe("[OR-7] signal abort listener run 终态移除", () => {
     controller.abort();
 
     await vi.advanceTimersByTimeAsync(0);
-    expect(deps.runs.get(runId)?.state.reason).toBe("aborted");
+    expect(settledRecordOf(runId)).toMatchObject({ outcome: "cancelled" });
     expect(removed).toEqual([added[0]]);
   });
 
@@ -310,12 +323,12 @@ describe("[OR-7] signal abort listener run 终态移除", () => {
     // 正常完成
     const handlers = deps.workerHost.start.mock.calls[0]?.[2] as WorkerHandlers;
     await handlers.onMessage({ type: "return", result: "ok" });
-    expect(deps.runs.get(runId)?.state.reason).toBe("completed");
+    expect(settledRecordOf(runId)).toMatchObject({ outcome: "done" });
 
     // 完成后外部 signal 才 abort——listener 已移除，run 保持 completed（不被改写）
     controller.abort();
     await vi.advanceTimersByTimeAsync(0);
-    expect(deps.runs.get(runId)?.state.reason).toBe("completed");
+    expect(settledRecordOf(runId)).toMatchObject({ outcome: "done" });
     expect(deps.store.save).toHaveBeenCalledTimes(2); // runWorkflow 启动 + return 各 1 次
   });
 });
@@ -397,7 +410,7 @@ describe("[D3] makeHandlers deps 视图保持 volatile 成员现读（reload 后
 
     await handlers.onMessage({ type: "return", result: { ok: true } });
 
-    expect(deps.runs.get(runId)?.state.reason).toBe("completed");
+    expect(settledRecordOf(runId)).toMatchObject({ outcome: "done" });
     // 新 append 面收到注销直落——函数体现读生效
     expect(appendFace).toHaveBeenCalledWith("pending:unregister", {
       id: runId,
@@ -443,7 +456,7 @@ describe("[D3] makeHandlers deps 视图保持 volatile 成员现读（reload 后
     appendFace = vi.fn();
     await handlers.onMessage({ type: "return", result: { ok: true } });
 
-    expect(base.runs.get(runId)?.state.reason).toBe("completed");
+    expect(settledRecordOf(runId)).toMatchObject({ outcome: "done" });
     // 新 append 面收到注销直落——原型 getter 现读生效
     expect(appendFace).toHaveBeenCalledWith(
       "pending:unregister",

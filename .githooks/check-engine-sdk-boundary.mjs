@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // check-engine-sdk-boundary.mjs
 //
-// 引擎 SDK 边界守卫（W1 交付，impl-plan §2.1「守卫基线」：新增 SDK 代码前先建守卫）。
+// 引擎 SDK 边界检查（W1 交付，impl-plan §2.1「检查基线」：新增 SDK 代码前先建检查）。
 // 设计权威源：docs/architecture/subagent-engine-protocolization.md §3.5.1 不变量 +
-// docs/design/subagent-engine-protocolization.impl-plan.md §2.1 末「守卫基线」（impl-plan 已删除，git 可追溯）。
+// docs/design/subagent-engine-protocolization.impl-plan.md §2.1 末「检查基线」（impl-plan 已删除，git 可追溯）。
 //
 // 不变量（设计 §3.10 实施不变量 1）：**SDK 不得 import core**——否则 core → SDK → core
-// 成环。本守卫扫描 @zhushanwen/subagent-engine-sdk 的源码与 dist：
+// 成环。本检查扫描 @zhushanwen/subagent-engine-sdk 的源码与 dist：
 //   1. 不得出现 core 包名 `@zhushanwen/subagent-core`（import/require/dynamic import
 //      的模块说明符形态）；
 //   2. 不得出现指向 `packages/subagent-core/**` 的越界相对路径（相对说明符解析后
@@ -16,7 +16,7 @@
 //   - 源码：packages/subagent-engine-sdk/src/**/*.ts（含测试；测试 import core 会把
 //     边界依赖带进类型闭包，同样违规）；
 //   - dist：packages/subagent-engine-sdk/dist/**/*.{js,cjs,mjs}（存在才扫；构建后
-//     守卫必须重跑——bundle 产物把依赖内联，源码干净不代表产物干净）；
+//     检查必须重跑——bundle 产物把依赖内联，源码干净不代表产物干净）；
 //   - 只检查模块说明符（import/require/export from/dynamic import），不扫注释文本——
 //     源文件头部的「源 = packages/subagent-core/src/...」参照注释是合法的迁移留痕。
 //

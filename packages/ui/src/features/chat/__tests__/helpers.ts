@@ -13,10 +13,9 @@ import { Block, ChatViewDepsKey } from '@taiji/ui'
 import type { ChatViewDeps } from '@taiji/ui'
 import type { ToolCall } from '@taiji/shared'
 
-/** 构造 mock ChatViewDeps（所有字段 vi.fn 或合理默认，零真 store） */
+/** 构造 mock ChatViewDeps（所有字段 vi.fn 或合理默认，零真 store；ChatViewDeps 全字段必填） */
 export function createMockDeps(overrides: Partial<ChatViewDeps> = {}): ChatViewDeps {
   return {
-    getMessages: () => [],
     isActive: () => false,
     isHandingOff: () => false,
     getChangeSetStatus: () => undefined,
@@ -24,20 +23,36 @@ export function createMockDeps(overrides: Partial<ChatViewDeps> = {}): ChatViewD
     isTakeover: () => false,
     // [D3] submitEdit 双发锁默认放行（不互斥）；互斥用例经 overrides 注入
     isPendingSend: () => false,
+
+    sessionCwdOf: () => undefined,
+    // ai-voice-tts §5.1：朗读按钮默认可渲染（idle 态）；「未 provide 不渲染」用例经
+    // overrides 显式传 undefined 注销
+    onSpeak: vi.fn(),
+    speakStateOf: () => 'idle',
+
     toggleExpand: vi.fn(),
     collapse: vi.fn(),
     setTakeover: vi.fn(),
     abortBash: vi.fn(),
     editAndResend: vi.fn(),
-    onFork: vi.fn(),
+    // [U5 消息撤回 D6] 撤回统一单入口（路由判定在 core，mock 默认 spy——用例直取断言）
+    onRevokeMessage: vi.fn(),
     onForkAsk: vi.fn(),
-    onHandoff: vi.fn(),
     onHandoffAsk: vi.fn(),
     openDrawer: vi.fn(),
     onFileClick: vi.fn(),
-    onAmbiguousSelect: vi.fn(),
     loadFileCandidates: vi.fn().mockResolvedValue([]),
     renderMarkdown: vi.fn().mockResolvedValue([]),
+    renderMarkdownIncremental: vi.fn().mockResolvedValue({
+      prefixSegments: [],
+      tailSegments: [],
+      stableBoundary: 0,
+      mode: 'incremental',
+      cache: { boundary: 0, prefixText: '', prefixSegments: [], nextSegId: 0 },
+    }),
+    // [审计候选 18] finalize 判定收单阈值字段；默认取大阈值 = 静默路径不触发
+    // （需要静默行为的用例显式覆写）
+    streamingFenceSilenceMs: 60_000,
     renderMermaid: vi.fn().mockResolvedValue({ svg: '' }),
     toMarkdown: vi.fn().mockReturnValue(''),
     ...overrides,

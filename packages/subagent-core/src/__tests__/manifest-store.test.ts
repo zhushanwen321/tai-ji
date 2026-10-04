@@ -6,15 +6,30 @@ import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ManifestStore } from "../execution/persistence/manifest-store";
+import {
+  materializeBoundRecordManifest,
+  readRunTerminalManifest,
+} from "../execution/persistence/manifest-store";
+import type { ManifestRecord } from "../execution/persistence/manifest-store";
+// [W1 / U2a] bound 物化守卫断言的观察面（RecordStore 写点 → records/<id>.json 投影）。
+import { createRecord } from "../execution/persistence/execution-record";
+import { createRecordEventStream, recordEventsPath } from "../execution/persistence/record-events";
+import type { RecordEvent } from "../execution/persistence/record-events";
+import { RecordStore } from "../execution/persistence/record-store";
+import type { ExecutionRecord } from "../execution/domain/record-model.ts";
 
 // [C10] 磁盘满测试需要可控的 fs.promises.rename（拖 ENOSPC/EACCES）。
 // hoisted flag + vi.mock 透传：默认 renameErrorRef.current=null 走真实 rename，
 // 磁盘满 it 里置入 Error 让 rename 拖出（拖一次后自动重置），其它 it 不受影响。
-const { renameErrorRef, dirSyncErrorPathRef } = vi.hoisted(() => ({
+const { renameErrorRef, dirSyncErrorPathRef, loggerMock } = vi.hoisted(() => ({
   renameErrorRef: { current: null as NodeJS.ErrnoException | null },
   // T-fsync：设置为目标 dir 路径后，open(dir, "r") 返回的 handle.sync() 会抛错
   dirSyncErrorPathRef: { current: null as string | null },
+  // 读面可诊断性断言：manifest-store 的 warn 通道（JSON 损坏留证；ENOENT 静默）。
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
+
+vi.mock("../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof fsPromises>();
@@ -365,6 +380,215 @@ describe("ManifestStore", () => {
       // tmp 已被 rename 消费（不存在）
       const tmpFiles = fs.readdirSync(tmpDir).filter((f) => f.includes(".tmp."));
       expect(tmpFiles.length).toBe(0);
+    });
+  });
+});
+
+// ── [W1 / U2a] bound 物化守卫段专属 helper（v2* 前缀防重名）────────
+
+function v2ReadEventLines(recordsDir: string, id: string): RecordEvent[] {
+  const content = fs.readFileSync(recordEventsPath(recordsDir, id), "utf8");
+  const out: RecordEvent[] = [];
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    out.push(JSON.parse(trimmed) as RecordEvent);
+  }
+  return out;
+}
+
+function v2MakeRecord(over: Partial<ExecutionRecord> = {}): ExecutionRecord {
+  const base = createRecord("bg-v2", {
+    agent: "worker",
+    model: "m",
+    mode: "background",
+    task: "t",
+    slug: "v2-journal",
+    startedAt: 1000,
+    rootSessionId: "sess-v2",
+  });
+  return { ...base, ...over };
+}
+
+describe("bound 物化守卫三断言（W1 D2 决策 9）", () => {
+  let rootDir: string;
+  let sessionsDir: string;
+  let recordsDir: string;
+
+  beforeEach(() => {
+    rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-v2-bound-guard-"));
+    sessionsDir = path.join(rootDir, "sessions");
+    recordsDir = path.join(rootDir, "records");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    fs.mkdirSync(recordsDir, { recursive: true });
+  });
+  afterEach(() => {
+    fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  function makeStore(): RecordStore {
+    return new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+  }
+
+  it("断言一（family 不误标）：运行中 record（bound manifest 已写）不被标已清理——manifest 在盘即 running 投影", () => {
+    const store = makeStore();
+    const rec = v2MakeRecord({ id: "sa-guard-family" });
+    store.register(rec);
+    const sessionFile = path.join(sessionsDir, "sa-guard-family.jsonl");
+    fs.writeFileSync(sessionFile, '{"type":"session","version":3}\n', "utf8");
+    rec.sessionFile = sessionFile;
+    store.reportRecordTransition(rec);
+
+    // 家族扫描前提不变量：manifest 在盘且非 closed/cancelled——running record 的
+    // sessionFile 存活（未被 GC），扫描不产 cleanedUp 误标。
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(recordsDir, "sa-guard-family.json"), "utf8") as string,
+    ) as { status: string; sessionFile: string };
+    expect(manifest.status).toBe("running");
+    expect(fs.existsSync(manifest.sessionFile)).toBe(true);
+  });
+
+  it("断言二（跳过自愈）：锚定未就绪时本轮不写 manifest、下一物化点（轮终）自愈补写", () => {
+    const store = makeStore();
+    const rec = v2MakeRecord({ id: "sa-guard-heal" });
+    store.register(rec);
+    // spawn 回填但子 session 文件未落盘（bound 早于首笔写入的窗口）——守卫跳过。
+    const sessionFile = path.join(sessionsDir, "sa-guard-heal.jsonl");
+    rec.sessionFile = sessionFile; // 文件不存在
+    store.reportRecordTransition(rec);
+    expect(fs.existsSync(path.join(recordsDir, "sa-guard-heal.json"))).toBe(false);
+
+    // 事件文件已落 bound 帧（事实源不受守卫影响——守卫只管 manifest 投影）。
+    const events = v2ReadEventLines(recordsDir, "sa-guard-heal");
+    expect(events.some((e) => e.type === "record-bound")).toBe(true);
+
+    // 下一物化点（轮终 markRoundIdle 的 writeDerivedManifest）自愈补写。
+    fs.writeFileSync(sessionFile, '{"type":"session","version":3}\n', "utf8");
+    store.markRoundIdle("sa-guard-heal", { kind: "success", content: "ok" });
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(recordsDir, "sa-guard-heal.json"), "utf8") as string,
+    ) as { executionStatus: string };
+    expect(manifest.executionStatus).toBe("idle");
+  });
+
+  it("断言三（zcode 粒度）：sessionRef 双键在场即物化（会话行级判读，非 dbPath 文件存在级）", () => {
+    const store = makeStore();
+    const rec = v2MakeRecord({ id: "sa-guard-zcode", engine: "zcode" });
+    store.register(rec);
+    // zcode 回填：engineHandle.sessionRef 双键（dbPath 指向不存在的文件——粒度
+    // 断言：不查 dbPath 存在性，bound 产生点晚于引擎会话建立的裁决面）。
+    rec.engineHandle = {
+      sessionRef: { sessionId: "sess-zc-1", dbPath: path.join(rootDir, "nonexistent", "db.sqlite") },
+      poolKey: "shared",
+    };
+    store.reportRecordTransition(rec);
+
+    const manifestPath = path.join(recordsDir, "sa-guard-zcode.json");
+    expect(fs.existsSync(manifestPath)).toBe(true);
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8") as string) as {
+      status: string;
+      engine: string;
+      engineHandle: { sessionRef: { sessionId: string; dbPath: string } };
+    };
+    expect(manifest.status).toBe("running");
+    expect(manifest.engine).toBe("zcode");
+    expect(manifest.engineHandle.sessionRef.sessionId).toBe("sess-zc-1");
+    // zcode 分支零探查的直接证据：dbPath 文件不存在仍物化。
+    expect(fs.existsSync(manifest.engineHandle.sessionRef.dbPath)).toBe(false);
+  });
+});
+
+// ── [W1 / D2] record 域 manifest 落盘写面自由函数段 ─────────────
+//
+// materializeBoundRecordManifest（守卫降级档：写失败记日志跳过）。
+// 写失败触发手法：blockedDir() 把目标路径的父段用文件占住——writeAtomicFileSync
+// 的 mkdirSync(recursive) 对「路径段中被文件占据」抛 ENOTDIR（不 mock fs）。
+
+describe("record 域 manifest 写面自由函数（W1/U2a/D2）", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "manifest-wface-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  function makeManifest(id: string): ManifestRecord {
+    return { id, rootSessionId: "sess-w1", agentName: "worker", status: "running", createdAt: 1234 };
+  }
+
+  /** 目标父段被文件挡住的目录路径：writeAtomicFileSync（ensureDir 默认）抛 ENOTDIR。 */
+  function blockedDir(): string {
+    const blocker = path.join(dir, "blocker");
+    fs.writeFileSync(blocker, "occupied");
+    return path.join(blocker, "sub");
+  }
+
+  describe("materializeBoundRecordManifest（守卫降级档）", () => {
+    it("守卫通过但落点不可写 → false 不抛（下一物化点自愈）", () => {
+      const sessionFile = path.join(dir, "sess.jsonl");
+      fs.writeFileSync(sessionFile, "{}");
+      const m: ManifestRecord = { ...makeManifest("w1-bound"), sessionFile };
+      expect(materializeBoundRecordManifest(blockedDir(), m)).toBe(false);
+    });
+  });
+
+  describe("读面 IO 故障分通道（ENOENT 静默降级 / 其余留痕后降级）", () => {
+    it("readManifest：非 ENOENT 读错误（ENOTDIR——父段被文件占据）→ null 不抛", async () => {
+      const store = new ManifestStore(dir);
+      fs.writeFileSync(path.join(dir, "sub"), "occupied");
+      await expect(store.readManifest("sub/blocked")).resolves.toBeNull();
+    });
+
+    it("readRunTerminalManifest：非 ENOENT 读错误 → null 不抛", async () => {
+      const blocker = path.join(dir, "file-blocker");
+      fs.writeFileSync(blocker, "occupied");
+      await expect(readRunTerminalManifest(blocker, "wf-1")).resolves.toBeNull();
+    });
+  });
+
+  describe("读面损坏 JSON 的可诊断性（损坏 warn / ENOENT 静默）", () => {
+    it("readManifest：ENOENT → null 且零 warn（合法缺省静默）", async () => {
+      const store = new ManifestStore(dir);
+      loggerMock.warn.mockClear();
+      await expect(store.readManifest("missing")).resolves.toBeNull();
+      expect(loggerMock.warn).not.toHaveBeenCalled();
+    });
+
+    it("readManifest：JSON 损坏 → null + warn（含文件路径与「视为不存在、等待重建」）", async () => {
+      const store = new ManifestStore(dir);
+      const filePath = path.join(dir, "torn.json");
+      fs.writeFileSync(filePath, "{ torn", "utf8");
+      loggerMock.warn.mockClear();
+
+      await expect(store.readManifest("torn")).resolves.toBeNull();
+
+      expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+      const [message] = loggerMock.warn.mock.calls[0] as [string];
+      expect(message).toContain("readManifest: corrupted JSON, treated as absent");
+      expect(message).toContain("awaits rebuild");
+      expect(message).toContain(filePath);
+    });
+
+    it("readRunTerminalManifest：JSON 损坏 → null + warn（含文件路径）", async () => {
+      const filePath = path.join(dir, "wf-corrupt.json");
+      fs.writeFileSync(filePath, "{ torn", "utf8");
+      loggerMock.warn.mockClear();
+
+      await expect(readRunTerminalManifest(dir, "wf-corrupt")).resolves.toBeNull();
+
+      expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+      const [message] = loggerMock.warn.mock.calls[0] as [string];
+      expect(message).toContain("readRunTerminalManifest: corrupted JSON, treated as absent");
+      expect(message).toContain(filePath);
+    });
+
+    it("readRunTerminalManifest：ENOENT → null 且零 warn（未终局/已清理静默）", async () => {
+      loggerMock.warn.mockClear();
+      await expect(readRunTerminalManifest(dir, "wf-absent")).resolves.toBeNull();
+      expect(loggerMock.warn).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * watchFileChangesForInvalidation 单测（W19 / D-9 ready 帧驱动失效 + overlay 回写）。
  *

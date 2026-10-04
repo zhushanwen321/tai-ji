@@ -3,7 +3,8 @@
  *
  * [归位] 纯逻辑（ThinkingLevel/THINKING_LEVELS/isThinkingLevel/normalizeSupportedLevels/
  * resolveThinkingValue/resolveThinkingKey/highestAvailableLevel/isSameThinkingScheme/
- * isOnOffMap）已迁 @taiji/core/domain/composer/thinking-levels（W3）。
+ * isOnOffMap）已迁 @taiji/core/domain/composer/thinking-levels（W3）；档位集合与顺序的
+ * 唯一来源 = @taiji/shared PI_THINKING_LEVELS（core 从它派生，本 shim 只转发 core）。
  *
  * getDisplayLabel 依赖 i18n（@/i18n 全局实例），留在 renderer（core 零 renderer import）。
  * 其余全部 re-export core。旧调用方（ThinkingLevelPopover.vue 等）零改动。

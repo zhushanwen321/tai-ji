@@ -8,12 +8,23 @@
  * 把 UI 档位名转换成 pi 认识的值，发给 runtime 的是 value。
  * 展示是展示，传递 value 是 value——两回事。
  *
+ * [词表单一来源] 档位**集合与顺序**派生自 `@taiji/shared` 的 PI_THINKING_LEVELS
+ * （前端侧唯一来源，本文件不再手写第二份字面量数组/联合）。本文件保留的只有：
+ * - 展示数据（label / labelKey / en）——展示，不是词表；
+ * - key↔value 解析纯逻辑。
+ * 「某模型支持哪些档」不在这里：唯一权威是 runtime 下发的 supportedLevels
+ * （normalizeSupportedLevels 只做归一，零 pi 语义推断）。
+ *
  * [W3 迁移] 本文件是 core 纯逻辑部分（迁自 renderer components/panel/thinking-levels.ts）。
  * getDisplayLabel 留 renderer，因依赖 i18n（@/i18n）；isOnOffMap 作为纯逻辑函数随迁，
  * 当前无 core 内消费者，留作 getDisplayLabel 后续以注入 t 方式迁入时复用 + T14 shim
  * 后 renderer 可从 core re-import。
  */
-export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+import { PI_THINKING_LEVELS, type ThinkingLevel } from '@taiji/shared'
+
+// 渲染层沿用本模块的 import 面（thinking-levels shim 只 re-export 本模块）——
+// 档位类型与常量同源，不再让消费方猜该从 shared 还是 core 取。
+export type { ThinkingLevel }
 
 export interface ThinkingLevelOption {
   level: ThinkingLevel
@@ -25,34 +36,48 @@ export interface ThinkingLevelOption {
   available: boolean
 }
 
-export const THINKING_LEVELS: ThinkingLevelOption[] = [
-  { level: 'off', label: '关', labelKey: 'composable.thinkingLevel.off', en: 'off', available: true },
-  { level: 'minimal', label: '极简', labelKey: 'composable.thinkingLevel.minimal', en: 'minimal', available: true },
-  { level: 'low', label: '低', labelKey: 'composable.thinkingLevel.low', en: 'low', available: true },
-  { level: 'medium', label: '中', labelKey: 'composable.thinkingLevel.medium', en: 'medium', available: true },
-  { level: 'high', label: '高', labelKey: 'composable.thinkingLevel.high', en: 'high', available: true },
-  { level: 'xhigh', label: '极高', labelKey: 'composable.thinkingLevel.xhigh', en: 'xhigh', available: true },
-  { level: 'max', label: '最高', labelKey: 'composable.thinkingLevel.max', en: 'max', available: true },
-]
-
-/** ThinkingLevel 全枚举表（isThinkingLevel 的判定依据，对齐 pi EXTENDED_THINKING_LEVELS 序；
- *  数值强度排序职责已由 PI_LEVEL_ORDER 的数组顺序承担，本表不再用于排序） */
-const LEVEL_STRENGTH: Record<ThinkingLevel, number> = {
-  off: 0, minimal: 1, low: 2, medium: 3, high: 4, xhigh: 5, max: 6,
+/**
+ * 档位展示数据（label / i18n key / 英文名）——展示而非词表，故留在本文件。
+ *
+ * 类型是全键 Record：pi 升级新增档位时（shared 数组跟随后）此处缺键直接编译失败，
+ * 不会出现「新档位无 label 静默走 default」。
+ */
+const THINKING_LEVEL_LABELS: Record<ThinkingLevel, { label: string; labelKey: string; en: string }> = {
+  off: { label: '关', labelKey: 'composable.thinkingLevel.off', en: 'off' },
+  minimal: { label: '极简', labelKey: 'composable.thinkingLevel.minimal', en: 'minimal' },
+  low: { label: '低', labelKey: 'composable.thinkingLevel.low', en: 'low' },
+  medium: { label: '中', labelKey: 'composable.thinkingLevel.medium', en: 'medium' },
+  high: { label: '高', labelKey: 'composable.thinkingLevel.high', en: 'high' },
+  xhigh: { label: '极高', labelKey: 'composable.thinkingLevel.xhigh', en: 'xhigh' },
+  max: { label: '最高', labelKey: 'composable.thinkingLevel.max', en: 'max' },
 }
+
+/** 全档位选项表：集合与顺序 = shared PI_THINKING_LEVELS（前端唯一来源）。 */
+export const THINKING_LEVELS: ThinkingLevelOption[] = PI_THINKING_LEVELS.map((level) => ({
+  level,
+  ...THINKING_LEVEL_LABELS[level],
+  available: true,
+}))
+
+/** 合法值集合（isThinkingLevel 判定依据，从 shared 词表派生，不再手写枚举表） */
+const THINKING_LEVEL_SET: ReadonlySet<string> = new Set(PI_THINKING_LEVELS)
 
 /** 判断字符串是否为合法 ThinkingLevel 枚举值 */
 export function isThinkingLevel(v: string): v is ThinkingLevel {
-  return v in LEVEL_STRENGTH
+  return THINKING_LEVEL_SET.has(v)
 }
 
 /**
- * pi EXTENDED_THINKING_LEVELS 全序（pi-ai 0.84.1 dist/models.js 实装值，勿改顺序）。
+ * pi 档位全序（= shared PI_THINKING_LEVELS 顺序，低→高，勿改）。
+ * 归一按此序输出，故数组顺序本身就是强度序语义。
  */
-const PI_LEVEL_ORDER: ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+const PI_LEVEL_ORDER: readonly ThinkingLevel[] = PI_THINKING_LEVELS
 
-/** 下发档位集缺失/空时的归一结果（off..high 五档，对齐 pi 无 map 模型的默认档）。 */
-const DEFAULT_SUPPORTED_LEVELS: readonly ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high']
+/** 默认档位集长度：pi 无 map 模型默认 off..high 五档（= PI_LEVEL_ORDER 前五） */
+const DEFAULT_SUPPORTED_LEVEL_COUNT = 5
+
+/** 下发档位集缺失/空时的归一结果（off..high 五档，对齐 pi 无 map 模型的默认档） */
+const DEFAULT_SUPPORTED_LEVELS: readonly ThinkingLevel[] = PI_THINKING_LEVELS.slice(0, DEFAULT_SUPPORTED_LEVEL_COUNT)
 
 /**
  * 归一 runtime 下发的档位可用集（ProviderInfo.models[].supportedLevels，U5 注册表同源计算）。
@@ -151,6 +176,31 @@ export function resolveThinkingKey(
 export function highestAvailableLevel(supportedLevels?: string[] | null): ThinkingLevel {
   const levels = normalizeSupportedLevels(supportedLevels)
   return levels[levels.length - 1] ?? 'off'
+}
+
+/**
+ * 当前档位的 UI key：runtime 返回的 value 反查（ThinkingLevelPopover / ModelThinkingAggregate
+ * 的高亮基准同语义）。value 缺失（runtime 未回传）时回退 'max'。
+ */
+export function currentThinkingLevelKey(
+  value: string | undefined,
+  map?: Record<string, string | null>,
+  supportedLevels?: string[] | null,
+): ThinkingLevel {
+  return value ? resolveThinkingKey(value, map, highestAvailableLevel(supportedLevels)) : 'max'
+}
+
+/**
+ * 档位可用集对应的选项列表（THINKING_LEVELS 只保留可用档，保持全序）。
+ *
+ * 可用档位列表渲染的唯一来源（ThinkingLevelPopover / ModelThinkingAggregate 的
+ * availableOptions）：只渲染可用的，不灰显不可用档位；可用集来自 supportedLevels 下发。
+ */
+export function availableThinkingLevelOptions(
+  supportedLevels?: string[] | null,
+): ThinkingLevelOption[] {
+  const available = new Set(normalizeSupportedLevels(supportedLevels))
+  return THINKING_LEVELS.filter((opt) => available.has(opt.level))
 }
 
 /**

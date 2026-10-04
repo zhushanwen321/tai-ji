@@ -6,8 +6,10 @@
  * writer（写 runtime + pi + plugin-worker 事件）共用本类型，禁止各自复制定义
  * （实施计划 crash-forensics-and-watchdog.impl-plan.md u1b/u1c）。
  *
- * 枚举口径（设计 D1 schema JSON 块逐字对齐）：
- * - event：20 值闭合枚举。孤儿值删除先例：unclean-exit（v8，是 reason 值不是 event
+ * 枚举口径（设计 D1 schema JSON 块对齐 + 实装扩展）：
+ * - event：21 值闭合枚举。设计文档行 20 值逐字对齐，外加 1 个实装扩展值
+ *   frame-unserializable（message-bus publish 序列化失败丢帧——与 registry-miss 同为
+ *   核心链整帧丢弃，丢弃必须落台账）。孤儿值删除先例：unclean-exit（v8，是 reason 值不是 event
  *   值——main 自身 crash 经 clean-exit marker 下次启动补记为 layer=main, event=crash,
  *   reason=unclean-exit，见 D1 写入点矩阵「main 自身 crash」行）；oom（2026-09-12
  *   裁决，偏差 #32②——零生产者：renderer OOM 实际形态 = reload 事件 + Electron
@@ -26,7 +28,10 @@
 /** 事件产生层（schema layer 行，5 值）。 */
 export type CrashJournalLayer = 'pi' | 'runtime' | 'renderer' | 'main' | 'plugin-worker'
 
-/** 事件名（schema event 行，20 值闭合枚举，顺序与设计文档行逐字一致）。 */
+/**
+ * 事件名（闭合枚举：设计 D1 schema event 行 20 值 + 实装扩展 frame-unserializable，
+ * 共 21 值；设计行内顺序保持逐字一致，扩展值随 frame-truncated 同族紧随其位）。
+ */
 export type CrashJournalEventName =
   | 'crash'
   | 'unresponsive'
@@ -43,8 +48,10 @@ export type CrashJournalEventName =
   | 'reattach-skipped'
   | 'checkpoint-corrupt'
   | 'reaped'
+  | 'reap-failed'
   | 'inbound-frame-dropped'
   | 'frame-truncated'
+  | 'frame-unserializable'
   | 'registry-miss'
   | 'watermark-daily'
   | 'trigger-review'
@@ -96,6 +103,8 @@ export const CRASH_JOURNAL_KNOWN_REASONS = [
   // registry-miss（message-bus 出站守卫 dropReason 闭合二值）
   'registry_miss',
   'still_oversize_after_truncate',
+  // frame-unserializable（message-bus publish 序列化失败丢帧）
+  'serialize-failed',
   // rolling-restart-forced / deferred（rolling-restart.ts）
   'hard-threshold',
   'defer-limit',
@@ -156,9 +165,9 @@ export interface CrashJournalEvent {
 
   // ── 扩展字段登记面（开放语义：新增须在此登记，见接口头注）─────────────
 
-  /** [reaped] 被收殓的孤儿 pi 进程 pid（reap-orphan-pi.ts 杀链命中行）。 */
+  /** [reaped/reap-failed] 被收殓（成功/失败）的孤儿 pi 进程 pid（reap-orphan-pi.ts 杀链命中行）。 */
   pid?: number | null
-  /** [reaped] 收殓时刻的 ppid（恒 1 = reparent 证据，归因复核判据；reap-orphan-pi.ts）。 */
+  /** [reaped/reap-failed] 收殓时刻的 ppid（恒 1 = reparent 证据，归因复核判据；reap-orphan-pi.ts）。 */
   ppid?: number | null
   /** [reclaimed] 回收判定时的空闲时长 now - lastActivityAt（idle-pi-reaper.ts 摘除步）。 */
   idleMs?: number | null
@@ -227,8 +236,10 @@ export const CRASH_JOURNAL_EVENTS = [
   'reattach-skipped',
   'checkpoint-corrupt',
   'reaped',
+  'reap-failed',
   'inbound-frame-dropped',
   'frame-truncated',
+  'frame-unserializable',
   'registry-miss',
   'watermark-daily',
   'trigger-review',

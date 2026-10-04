@@ -119,31 +119,6 @@ export function renderKey(item: RenderItem): string {
   return item.kind === 'turn' ? `t-${turnStableId(item.turn)}` : `s-${item.message.id}`
 }
 
-/** 不在对话流渲染的 customType 判定已删除 [M2 display 前置]：完成通知由生产端（registry
- *  customStart / runtime mapper）统一写 display:false，不再维护 customType 黑名单
- *  （conversation-renderer-model-unification §3.3.2，supersede ADR-0048）。
- *  消息仍进 chat store 供 fork/compact/replay，agent 仍能读到；此处仅过滤渲染，不丢消息。
- *  [W3·D3 演进] display 过滤从「分组前置」挪到渲染项输出层（toRenderItems 内建）——
- *  隐藏完成通知须参与分组边界语义，不能再在分组前滤除。分组路径不再消费本函数
- *  （toRenderItemsIncremental 的 filter 参数占位已于 W4 移除）；保留供调用方独立
- *  过滤场景使用。 */
-
-/** 过滤掉不在对话流展示的消息（display===false：完成通知由生产端写死，
- *  goal/todo context 由 pi 扩展声明——纯字段过滤，无 customType 黑名单）。
- *  [W3·D3] 注意：分组（groupTurns/toRenderItems/toRenderItemsIncremental）已改为消费
- *  全量数组并在输出侧内建同等过滤，调用方不再需要先 filter 再分组。 */
-export function filterDisplayableMessages(messages: Message[]): Message[] {
-  return messages.filter((m) => m.display !== false)
-}
-
-/** 全量数组 → turn 列表（分组规则 v2 消费全量数组——隐藏完成通知参与边界语义，
- *  隐藏项经输出侧过滤不产出渲染项，见文件头）。 */
-export function groupTurns(messages: Message[]): MessageTurn[] {
-  return toRenderItems(messages)
-    .filter((item): item is { kind: 'turn'; turn: MessageTurn } => item.kind === 'turn')
-    .map((item) => item.turn)
-}
-
 // ── D-4 turn 派生增量（08-render-layer §3.3.1，perf W21）──────────────────────────
 
 /**
@@ -216,8 +191,8 @@ function isHiddenCompleteNotify(msg: Message): boolean {
 }
 
 /** inline notice 判定（D4 规则 4）：bash 执行记录（有 bashExecution 字段）或 liveOnly
- *  消息（stream_warn 健康警告，无 entry 无 replay 对应物，W2 创建点打标）→ turn 内部语义，
- *  不切断 turn。 */
+ *  消息（stream_warn 非终结提示——pi 静默卡死健康警告 / busy 拒绝等，无 entry 无 replay
+ *  对应物，W2 创建点打标）→ turn 内部语义，不切断 turn。 */
 function isInlineNotice(msg: Message): boolean {
   return msg.bashExecution !== undefined || msg.liveOnly === true
 }
@@ -307,7 +282,7 @@ function appendInlineNotice(
  * 两处分组逻辑漂移会导致增量输出与全量输出不等价。
  *
  * 分组不变量（设计文档 D-A5）：static 槽位结构性不含 display:false 消息，依赖分支顺序
- * （透明分支先于 isInlineNotice 与规则 5 拦截）——新增 static 产出分支须同步尾部快车道过滤义务。
+ * （透明分支先于 isInlineNotice 与规则 5 拦截）——新增 static 产出分支须保持该分支顺序前提。
  *
  * from = 起始下标（尾部快车道 D-4 用：从末位 turn 的起始下标重跑子数组分组——该下标处
  * 分组状态归零，子重跑与全量路径在该区间逐字一致）。starts = 各 turn 组的最早成员下标
@@ -345,7 +320,7 @@ function groupRenderInput(
       appendHiddenNotify(msg, current)
     } else if (msg.display === false) {
       // 隐藏非完成通知消息（todo-context 等）透明：不参与边界、不产出渲染项——现状语义
-      // （分组前被 filterDisplayableMessages 滤除）原样保留。消息仍在 store，不丢。
+      // 原样保留。消息仍在 store，不丢。
       continue
     } else if (isInlineNotice(msg)) {
       // 规则 4：inline notice → 归当前 turn 内部（分支体见 appendInlineNotice）。
@@ -363,14 +338,6 @@ function groupRenderInput(
   // 数组结束时仍挂起的空 trigger turn 不产出（空 turn 折叠）
   closeTurn(current, groups, slots, starts)
   return { slots, groups, starts }
-}
-
-/** D3 输出侧 display 过滤：隐藏消息（display===false）不产出渲染项。分组层已把隐藏完成
- *  通知消化为 trigger turn 边界语义、隐藏非通知消息透明跳过——此处是不变量守卫（正常路径
- *  零命中），防御未来新增消息类型绕过分组规则直接产出 static 项。turn 项不过滤：
- *  user/assistant 无 display:false 写入点，隐藏成员属 turn 内部不可整组丢弃。 */
-function filterInvisibleItems(items: RenderItem[]): RenderItem[] {
-  return items.filter((item) => item.kind === 'turn' || item.message.display !== false)
 }
 
 /** turn 派生字段：isStreaming（turn 级「文本正在流式生成」，仅末位 turn 可为 true） */
@@ -651,8 +618,8 @@ function fullRescan(
     turnObjects[i] = reuseOrRebuildTurn(cache, sig, g, i, i === lastGroupIdx, forceWorking)
   }
 
-  const items = filterInvisibleItems(
-    slots.map((s) => (s.slot === 'turn' ? { kind: 'turn', turn: turnObjects[s.group] } : s.item)),
+  const items: RenderItem[] = slots.map((s) =>
+    s.slot === 'turn' ? { kind: 'turn', turn: turnObjects[s.group] } : s.item,
   )
 
   cache.lastSourceRef = sourceMessages
@@ -710,8 +677,8 @@ export function toRenderItems(
     isStreaming: computeIsStreaming(g.assistants, i === groups.length - 1, forceWorking),
     hasFoldable: computeHasFoldable(g.assistants),
   }))
-  return filterInvisibleItems(
-    slots.map((s) => (s.slot === 'turn' ? { kind: 'turn', turn: turns[s.group] } : s.item)),
+  return slots.map((s): RenderItem =>
+    s.slot === 'turn' ? { kind: 'turn', turn: turns[s.group] } : s.item,
   )
 }
 

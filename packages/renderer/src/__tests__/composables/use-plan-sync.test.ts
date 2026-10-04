@@ -7,7 +7,8 @@
  * - WS 帧驱动状态流转：awaiting → revising → 无值（reviewing → reviewing → writing）
  * - updateFor 分区断言：session A 帧不污染 session B 分区；capturedSid 与切焦点竞态模拟
  *   （切换的异步退订窗口内旧 sid 迟到帧只写旧分区）
- * - 评论草稿 per-session 隔离与清理链（triggerSessionCleanups → 分区重置，其他 session 保留）
+ * - 评论草稿转发接线 + 清理编排（triggerSessionCleanups → 分区重置，其他 session 保留；
+ *   分区语义本体归 plan-store.test.ts，此处不重复）
  *
  * 范式照抄 gen-stats-composable.test.ts：
  * - mock 边界：command 部分 mock（spread actual 保留 events 真实通道——useSessionEvents 经
@@ -22,6 +23,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { defineComponent, h, ref, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { mount, type VueWrapper } from '@vue/test-utils'
+import { commandMock, transportApiCommandModule } from '../helpers/transport-command-mock'
 import * as events from '@taiji/core/transport/api'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
 import {
@@ -29,14 +31,13 @@ import {
   __clearSessionCleanupRegistryForTest,
 } from '@/composables/useSessionScopedState'
 import { usePlanState, type UsePlanStateReturn } from '@/composables/use-plan-sync'
+import { PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS } from '@/stores/plan-store'
 import type { PlanDocMeta, PlanStateView } from '@taiji/shared'
 
 // ── mock 边界：getPlanState RPC mock 掉（runtime 侧 u1-rpc 未接线，受控 deferred 驱动）──
-const commandMock = vi.hoisted(() => vi.fn())
-vi.mock('@taiji/core/transport/api', async (importActual) => {
-  const actual = await importActual<typeof import('@taiji/core/transport/api')>()
-  return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
-})
+// spread-actual mock 体单源在 helpers/transport-command-mock.ts（events 真实通道保留，
+// RPC_BACKSTOP_TIMEOUT_MS 透传 30_000；commandMock 为该 helper 导出的文件内单例）
+vi.mock('@taiji/core/transport/api', () => transportApiCommandModule())
 
 // ── 共享测试基建 ─────────────────────────────────────────────
 
@@ -54,6 +55,7 @@ function planStateOf(sid: string, overrides: Partial<PlanStateView> = {}): PlanS
     planFilePath: `/data/${sid}/.tmp/plans/auth/plan.md`,
     requirement: '重构 auth 模块',
     templateName: 'default',
+    state: 'planning', // 真形态基线：归一 View 恒携带 state（批次 3 条目 1 后缺失格落 idle）
     ...overrides,
   }
 }
@@ -208,31 +210,31 @@ describe('首拉：watch immediate', () => {
 // ── WS 帧驱动状态流转（updateFor 分区写）─────────────────────
 
 describe('WS 帧：状态流转与分区隔离', () => {
-  it('帧驱动 reviewState 流转：awaiting → revising → 无值（reviewing → reviewing → writing）', async () => {
+  it('帧驱动状态流转（真形态：View 携带 state）：reviewing → ③；revising → ②；planning → ②', async () => {
     const host = mountHost('A')
     await settle()
 
-    dispatchPlanState('A', planStateOf('A', { docs: [DOC], reviewState: 'awaiting' }))
+    // 回归契约（真实链路形态）：归一点产出的 View 恒携带 state（批次 3 条目 1 后旧字段已退出契约）
+    dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'reviewing' }))
     await settle()
     expect(host.plan.stage.value).toBe('reviewing')
-    expect(host.plan.view.value?.reviewState).toBe('awaiting')
+    expect(host.plan.view.value?.state).toBe('reviewing')
 
-    dispatchPlanState('A', planStateOf('A', { docs: [DOC], reviewState: 'revising' }))
-    await settle()
-    expect(host.plan.stage.value).toBe('reviewing')
-    expect(host.plan.view.value?.reviewState).toBe('revising')
-
-    // 修订完成重新提交前的过渡帧（reviewState 无值）——D1 三步推导落回 ②
-    dispatchPlanState('A', planStateOf('A', { docs: [DOC] }))
+    // revising 归 phase 'planning'（derivePhase 单点接线）→ 文档撰写档（②）
+    dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'revising' }))
     await settle()
     expect(host.plan.stage.value).toBe('writing')
-    expect(host.plan.view.value?.reviewState).toBeUndefined()
+
+    // 修订完成重新提交前的过渡帧（state=planning）——D1 三步推导落回 ②
+    dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'planning' }))
+    await settle()
+    expect(host.plan.stage.value).toBe('writing')
   })
 
   it('isActive=false 帧驱动 plan 态消失语义（stage → null）', async () => {
     const host = mountHost('A')
     await settle()
-    dispatchPlanState('A', planStateOf('A', { docs: [DOC], reviewState: 'awaiting' }))
+    dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'reviewing' }))
     await settle()
     expect(host.plan.stage.value).toBe('reviewing')
 
@@ -247,7 +249,7 @@ describe('WS 帧：状态流转与分区隔离', () => {
     // 本用例断言切焦点后「新焦点分区为空、旧分区数据保留」的可见语义。
     const host = mountHost('A')
     await settle()
-    dispatchPlanState('A', planStateOf('A', { docs: [DOC], reviewState: 'awaiting' }))
+    dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'reviewing' }))
     await settle()
     expect(host.plan.stage.value).toBe('reviewing')
 
@@ -260,7 +262,7 @@ describe('WS 帧：状态流转与分区隔离', () => {
     // 切回 A：分区缓存保留（首拉在途也不丢显示）
     host.sidRef.value = 'A'
     await settle()
-    expect(host.plan.view.value?.reviewState).toBe('awaiting')
+    expect(host.plan.view.value?.state).toBe('reviewing')
   })
 
   it('capturedSid 与切焦点竞态：切换的异步退订窗口内旧 sid 迟到帧只写旧 sid 分区', async () => {
@@ -270,7 +272,7 @@ describe('WS 帧：状态流转与分区隔离', () => {
     // 切焦点到 B：watch flush 前向 A 派发迟到帧（useSessionEvents 尚未退订 A，
     // handler 收到的 sid 是订阅时捕获的 'A'，不是当前焦点）
     host.sidRef.value = 'B'
-    dispatchPlanState('A', planStateOf('A', { docs: [DOC], reviewState: 'revising' }))
+    dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'revising' }))
     await settle()
 
     // 焦点 B：迟到 A 帧不污染 B 分区
@@ -280,13 +282,193 @@ describe('WS 帧：状态流转与分区隔离', () => {
     // 切回 A：迟到帧确实写入了 A 分区（而非被丢弃或写错分区）
     host.sidRef.value = 'A'
     await settle()
-    expect(host.plan.view.value?.reviewState).toBe('revising')
+    expect(host.plan.view.value?.state).toBe('revising')
   })
 })
 
-// ── 评论草稿：per-session 隔离与清理链 ───────────────────────
+// ── 活动补拉：新 session 首拉窗口丢帧补偿（2026-09-25 真机缺陷）──────────────
 
-describe('评论草稿：per-session 隔离与清理链', () => {
+/**
+ * 缺陷时序（真机双形态实证）：session 创建即首拉 → plan-state entry 未落盘，reply
+ * INACTIVE 落分区 → session.planState 帧早于订阅送达或 runtime 水位竞态未发布 →
+ * 两条腿全断且无再拉触发点 → 状态带永不渲染（需手动切走切回）。补偿锚点 =
+ * assistant 消息活动（message_start = turn 内最早边沿；message.complete 兜底；/plan
+ * 写 entry 是 turn 前置动作，必然早于消息开始，补拉必得真值）。限频双门（非活跃 +
+ * 冷却）内聚 plan-store。
+ */
+describe('活动补拉：首拉早于 entry 落盘 + 帧不可靠窗口的丢帧补偿', () => {
+  /** assistant 消息活动帧（message_start 首选；payload 形状本 handler 不消费） */
+  function dispatchActivity(sid: string, type: 'message.message_start' | 'message.complete' = 'message.message_start'): void {
+    events.dispatchSession(sid, { type, payload: { sessionId: sid } })
+  }
+
+  it('首拉回 INACTIVE + planState 帧全程未达 → 消息活动触发补拉 → 真值恢复 view', async () => {
+    const host = mountHost('A')
+    await settle()
+    // 首拉 reply = INACTIVE（真机形态：plan-state entry 尚未落盘时冷读）
+    resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { isActive: false }) })
+    await settle()
+    expect(host.plan.view.value?.isActive).toBe(false)
+
+    // session.planState 帧不 dispatch（真机：帧早于订阅送达 / 未发布——两条腿全断）
+
+    // assistant 消息开始（turn 内最早活动信号）→ 补拉发出
+    dispatchActivity('A')
+    await settle()
+    expect(commandMock).toHaveBeenCalledTimes(2) // 首拉 + 补拉
+
+    // 补拉 reply = planning（entry 已落盘后的冷读真值）→ view 恢复活跃
+    resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A') })
+    await settle()
+    expect(host.plan.view.value?.isActive).toBe(true)
+    expect(host.plan.stage.value).not.toBeNull()
+  })
+
+  it('message.complete 同样触发补拉（长 turn 多消息兜底锚点）', async () => {
+    const host = mountHost('A')
+    await settle()
+    resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { isActive: false }) })
+    await settle()
+
+    dispatchActivity('A', 'message.complete')
+    await settle()
+    expect(commandMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('冷却门：冷却窗口内的后续活动信号不重复补拉（频率上限）', async () => {
+    const host = mountHost('A')
+    await settle()
+    resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { isActive: false }) })
+    await settle()
+
+    dispatchActivity('A')
+    await settle()
+    expect(commandMock).toHaveBeenCalledTimes(2)
+    resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { isActive: false }) })
+    await settle()
+
+    // 冷却窗口内第二条活动信号：不再补（PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS 未过）
+    dispatchActivity('A')
+    await settle()
+    expect(commandMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('非活跃门：view 已被 live 帧点亮时活动信号不触发补拉（活跃态由帧链自持）', async () => {
+    const host = mountHost('A')
+    await settle()
+    dispatchPlanState('A', planStateOf('A')) // live 帧点亮
+    await settle()
+    expect(host.plan.view.value?.isActive).toBe(true)
+
+    dispatchActivity('A')
+    await settle()
+    expect(commandMock).toHaveBeenCalledTimes(1) // 仅首拉，无补拉
+  })
+
+  it('活跃冻结检测（F-W3-2）：view 活跃但帧链无进展时，冷却后的消息边沿触发补拉', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const host = mountHost('A')
+      await settle()
+      // live 帧点亮 view（②形态：planning + docs，frameRev=1）——真机 6c3：此后帧链再无帧到达
+      dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'planning' }))
+      await settle()
+      expect(host.plan.view.value?.state).toBe('planning')
+
+      // 首条消息边沿：只立帧基准，不补拉（健康链路常态 turn 不产生补拉）
+      dispatchActivity('A')
+      await settle()
+      expect(commandMock).toHaveBeenCalledTimes(1)
+
+      // 冷却期过后第二/第三条边沿：frameRev 无增长 = planState 帧链疑死 → 补拉直读磁盘
+      vi.setSystemTime(Date.now() + PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS + 1)
+      dispatchActivity('A')
+      await settle()
+      expect(commandMock).toHaveBeenCalledTimes(2)
+
+      // 补拉 reply = 恢复后的磁盘真值（dispatching）→ 阶段指示收敛 ③已批准
+      resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { docs: [DOC], state: 'dispatching' }) })
+      await settle()
+      expect(host.plan.view.value?.state).toBe('dispatching')
+      expect(host.plan.stage.value).toBe('approved')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('帧链恢复自动静默：frameRev 增长（planState 帧到达）后，消息边沿不再补拉', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const host = mountHost('A')
+      await settle()
+      dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'planning' }))
+      await settle()
+      dispatchActivity('A')
+      await settle()
+      expect(commandMock).toHaveBeenCalledTimes(1)
+
+      // 帧链恢复：新 planState 帧到达（frameRev 增长）
+      dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'reviewing' }))
+      await settle()
+
+      // 冷却期后消息边沿：rev 有进展 → 不补拉（活跃态重新由帧链自持）
+      vi.setSystemTime(Date.now() + PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS + 1)
+      dispatchActivity('A')
+      await settle()
+      expect(commandMock).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('补拉走 updateFor(sid)：焦点 session 的活动信号补拉写自身分区（capturedSid 语义）', async () => {
+    const host = mountHost('A')
+    await settle()
+    resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { isActive: false }) })
+    await settle()
+
+    // 切焦点到 B（A 的订阅退订，A 分区数据保留；后台 session 无消费面=无活动信号转发）
+    host.sidRef.value = 'B'
+    await settle()
+    resolveLatestForSid('B', { sessionId: 'B', planState: planStateOf('B', { isActive: false }) })
+    await settle()
+
+    // 焦点 B 的活动信号正常补拉且只写 B 分区
+    dispatchActivity('B')
+    await settle()
+    expect(commandMock).toHaveBeenCalledTimes(3) // A 首拉 + B 首拉 + B 补拉
+    resolveLatestForSid('B', { sessionId: 'B', planState: planStateOf('B') })
+    await settle()
+    expect(host.plan.view.value?.isActive).toBe(true)
+  })
+})
+
+// ── 崩溃恢复对账：session.restored 边沿冷拉（F-W3-2 恢复链重确认）──────────────
+
+describe('崩溃恢复对账：session.restored 边沿冷拉', () => {
+  it('restored 帧到达即冷拉磁盘真值（不切换焦点也有重确认触发点）', async () => {
+    const host = mountHost('A')
+    await settle()
+    // view 停在恢复前的旧形态（首拉 deferred 未 resolve，分区为 null 也可——本用例断言拉取触发）
+    events.dispatchSession('A', {
+      type: 'session.restored',
+      payload: { sessionId: 'A', attempts: 1 },
+    })
+    await settle()
+    expect(commandMock).toHaveBeenCalledTimes(2) // 首拉 + restored 冷拉
+
+    resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { docs: [DOC], state: 'dispatching' }) })
+    await settle()
+    expect(host.plan.view.value?.state).toBe('dispatching')
+  })
+})
+
+// ── 评论草稿：usePlanState 转发接线 + 清理编排增量 ───────────────
+// 草稿的焦点分区语义本体（加/删/清只作用焦点、跨区隔离、null 焦点 no-op）归
+// plan-store.test.ts「评论草稿：焦点分区操作与 per-session 隔离」；此处只测
+// composable 转发接线（removeDraft 唯一杀伤点）与 cleanup 编排（重拉增量）。
+
+describe('评论草稿：usePlanState 转发接线 + 清理编排增量', () => {
   it('草稿按焦点分区隔离：A/B 各自累积、切回恢复、删除只作用焦点', async () => {
     const host = mountHost('A')
     await settle()
@@ -307,21 +489,6 @@ describe('评论草稿：per-session 隔离与清理链', () => {
     expect(host.plan.drafts.value).toEqual([{ quote: '引文一', comment: '补充边界条件' }])
   })
 
-  it('clearDrafts 清空焦点分区，其他分区保留', async () => {
-    const host = mountHost('A')
-    await settle()
-    host.plan.addDraft({ quote: 'q1', comment: 'c1' })
-    host.sidRef.value = 'B'
-    await settle()
-    host.plan.addDraft({ quote: 'q2', comment: 'c2' })
-    host.plan.clearDrafts()
-    expect(host.plan.drafts.value).toEqual([])
-
-    host.sidRef.value = 'A'
-    await settle()
-    expect(host.plan.drafts.value).toEqual([{ quote: 'q1', comment: 'c1' }])
-  })
-
   it('cleanup 链：triggerSessionCleanups(A) → A 分区重置（草稿/view 清空），B 保留', async () => {
     const host = mountHost('A')
     await settle()
@@ -336,7 +503,7 @@ describe('评论草稿：per-session 隔离与清理链', () => {
 
     host.sidRef.value = 'B'
     await settle()
-    dispatchPlanState('B', planStateOf('B', { docs: [DOC], reviewState: 'awaiting' }))
+    dispatchPlanState('B', planStateOf('B', { docs: [DOC], state: 'reviewing' }))
     await settle()
     host.plan.addDraft({ quote: 'q2', comment: 'c2' })
     await settle()
@@ -356,6 +523,6 @@ describe('评论草稿：per-session 隔离与清理链', () => {
     await settle()
     // B 分区不受 A 清理影响
     expect(host.plan.drafts.value).toEqual([{ quote: 'q2', comment: 'c2' }])
-    expect(host.plan.view.value?.reviewState).toBe('awaiting')
+    expect(host.plan.view.value?.state).toBe('reviewing')
   })
 })

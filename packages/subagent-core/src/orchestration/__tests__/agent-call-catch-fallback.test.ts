@@ -21,6 +21,11 @@ import { flushMicrotasks } from "./helpers/flush-microtasks.ts";
 
 // ── helpers ──────────────────────────────────────────────────
 
+/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+function findByStep(trace: Trace, stepIndex: number) {
+  return trace.toArray().find((n) => n.stepIndex === stepIndex);
+}
+
 /** 构造 status="running" 的 mock WorkflowRun，含 trace/budget/calls/runtime。
  *  worker.postMessage 为 vi.fn spy，便于断言回发内容。gate.withSlot 直接 await fn()
  *  让异常透传到外层 .catch（模拟 executeAgentCall 抛错的真实链路）。 */
@@ -138,7 +143,7 @@ describe("U7a: catch 分支兜底回发 agent-result（非 Abort 异常）", () 
       // state 一致性三件套（review should_fix；[H2 W3] trace.live 字段已删除，
       // 「live 清除」由类型层面收敛——节点无运行期附属对象）：
       // trace node 标 failed（不遗留 running 幽灵节点）
-      const traceNode = run.state.trace.find(2);
+      const traceNode = findByStep(run.state.trace, 2);
       expect(traceNode?.status).toBe("failed");
       expect(traceNode?.result?.error).toBe("runner exploded");
       // 持久化（catch 是最需留证的场景）

@@ -1,5 +1,5 @@
 /**
- * W2 入口 + 行为层红灯测试（TDD：实现缺失，测试必须 fail）。
+ * W2 入口 + 行为层测试。
  *
  * 覆盖 U7-U11：
  * - U7  首屏冒烟：streaming/pending 态每条 assistant 有 fork 后台 + fork 提问按钮
@@ -8,7 +8,6 @@
  * - U10 ForkNotice 反馈行 transient 渲染 + 查看降级（sessionDeleted 时纯文本不可点）
  * - U11 ForkConfirmModal 已删除（文件不存在 + Turn.vue 无 import）
  *
- * 红灯预期：W2 未实现，下列用例应全 fail（import 失败 / 门控未放宽 / 函数未新增 / 组件未删除）。
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/fork-entry-behavior.test.ts
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -19,6 +18,7 @@ import path from 'node:path'
 import type { MessageTurn } from '@/composables/logic/messageTurns'
 import type { Message } from '@taiji/shared'
 import { useToast } from '@/composables/useToast'
+import ForkNotice from '@/components/panel/ForkNotice.vue'
 
 // useChat mock（Turn 编辑路径依赖；forkSessionAsk 复用其 ensureStreamSubscription/disposeSession）。
 // disposeSession 用模块级 spy，让 U9 W7 断言可断言「回滚时被调」（拆流式订阅 + 清 store per-session 状态）。
@@ -118,20 +118,18 @@ describe('U7 首屏冒烟：fork 按钮恒渲染（门控已放宽）', () => {
       makeAssistant({ id: 'a2', content: '第二条回复' }),
     ])
     const wrapper = mountTurn(turn, 's-idle')
-    // fork 统一为 fork-ask-btn（与复制/复制MD/handoff 并列同行）
+    // fork 统一为 fork-ask-btn（与复制/复制MD/朗读/handoff 并列同行）
     expect(wrapper.findAll('[data-testid="fork-background-btn"]').length).toBe(0)
     expect(wrapper.findAll('[data-testid="fork-ask-btn"]').length).toBe(1)
-    // fork 按钮与复制按钮在同一容器（action 行，4 个并列按钮）
+    // fork 按钮与复制按钮在同一容器（action 行，5 个并列按钮：ai-voice-tts §5.1 朗读按钮加入后）
     const actionRow = wrapper.find('.turn-summary .mt-1\\.5')
     expect(actionRow.exists()).toBe(true)
     expect(actionRow.find('[data-testid="fork-ask-btn"]').exists()).toBe(true)
-    expect(actionRow.findAll('button').length).toBe(4)
+    expect(actionRow.findAll('button').length).toBe(5)
   })
 })
 
 // ── U8：forkSession 后台 fork 不切焦点（W2 fast-fork） ──────────────────────
-// 历史背景：v1 forkSession 内部调 panel.split() 把 fork 切到 standby panel（切焦点）。
-// v2 移除 split 后退化：openInStandby 选项保留为契约但行为恒为「不切焦点」（useForkActions.ts）。
 describe('U8：forkSession 后台 fork 不切焦点（不切 activeId）', () => {
   it('fork 后台后焦点留在原 session（不切焦点）', async () => {
     // 直接对真实 useSidebar 行为做断言：forkSession 后 activeId 应保持不变。
@@ -147,17 +145,17 @@ describe('U8：forkSession 后台 fork 不切焦点（不切 activeId）', () =>
     chatStore.hydrate(sid, [makeAssistant({ id: 'm1', piEntryId: 'e1' })])
 
     // mock fork RPC 返回新 session；先 append 进 sessionStore 让 selectSession 不炸
-    const forked = { id: 'new-fork', label: 'fork', cwd: '/tmp' } as never
+    const forked = { id: 'new-fork', label: 'fork', cwd: '/tmp' }
     vi.spyOn(sessionApi, 'fork').mockResolvedValue(forked)
     // 预注册新 session 到 store（appendSession 入组），并 mock switchSession 避免命中 mock runtime
     sessionStore.appendSession(forked)
-    vi.spyOn(sessionApi, 'switchSession' as never).mockResolvedValue(undefined as never)
-    vi.spyOn(sessionApi, 'getCommands' as never).mockResolvedValue({ commands: [] } as never)
-    vi.spyOn(sessionApi, 'getContext' as never).mockResolvedValue({} as never)
+    vi.spyOn(sessionApi, 'switchSession').mockResolvedValue(undefined)
+    vi.spyOn(sessionApi, 'getCommands').mockResolvedValue({ sessionId: 'new-fork', commands: [] })
+    vi.spyOn(sessionApi, 'getContext').mockResolvedValue({ sessionId: 'new-fork' })
 
     const beforeActive = sessionStore.activeId
 
-    await sidebar.forkSession(sid, 'm1', { includeFrom: true, openInStandby: true })
+    await sidebar.forkSession(sid, 'm1', { includeFrom: true })
 
     // activeId 不应变（后台 fork 不切焦点，W2 fast-fork）
     expect(sessionStore.activeId).toBe(beforeActive)
@@ -172,7 +170,7 @@ describe('U9：forkSessionAsk send 失败自动回滚（disposeSession + session
 
     const sessionApi = (await import('@/api')).session
     const sessionStore = (await import('@/stores/session')).useSessionStore()
-    const removeSpy = vi.spyOn(sessionApi, 'remove').mockResolvedValue(undefined as never)
+    const removeSpy = vi.spyOn(sessionApi, 'remove').mockResolvedValue(undefined)
     const removeFromListSpy = vi.spyOn(sessionStore, 'removeFromList')
 
     // fork 成功（创建占位 session），但随后 send reject
@@ -180,9 +178,10 @@ describe('U9：forkSessionAsk send 失败自动回滚（disposeSession + session
       id: 'fork-placeholder',
       label: 'fork',
       cwd: '/tmp',
-    } as never)
+    })
     const chatApi = (await import('@/api')).chat
-    vi.spyOn(chatApi, 'send' as never).mockRejectedValue(new Error('send failed') as never)
+    // [u3c/D1] fork 首发走统一提交（delivery.submit）——失败注入点随之迁移
+    vi.spyOn(chatApi, 'submitDelivery').mockRejectedValue(new Error('send failed'))
 
     // [W1] forkSessionAsk 现在 rethrow 而非吞错 resolve（错误反馈职责上移到调用方）。
     // 资源清理（disposeSession + remove + removeFromList）仍在 catch 内 rethrow 前执行。
@@ -197,14 +196,7 @@ describe('U9：forkSessionAsk send 失败自动回滚（disposeSession + session
 
 // ── U10：ForkNotice 反馈行 transient 渲染 + 查看降级 ─────────────────────
 describe('U10：ForkNotice 反馈行（transient，非 banner）+ 查看降级', () => {
-  // ForkNotice.vue 是 W2 新建组件，当前不存在 → import 失败（红灯）。
-  // 用动态拼接的 specifier 让 Vite 不在构建期静态解析（否则整个文件 collection 失败），
-  // 只让 U10 两个用例在运行期 import 时单独抛错失败。
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const noticePath = ('@/components' + '/panel/ForkNotice.vue') as any
-
   it('ForkNotice 渲染为反馈行（fork-notice class），含查看链接', async () => {
-    const ForkNotice = (await import(noticePath)).default
     const wrapper = mount(ForkNotice, {
       props: { sessionDeleted: false },
       global: { plugins: [createPinia()] },
@@ -219,7 +211,6 @@ describe('U10：ForkNotice 反馈行（transient，非 banner）+ 查看降级',
   })
 
   it('sessionDeleted=true 时查看降级为纯文本不可点', async () => {
-    const ForkNotice = (await import(noticePath)).default
     const wrapper = mount(ForkNotice, {
       props: { sessionDeleted: true },
       global: { plugins: [createPinia()] },

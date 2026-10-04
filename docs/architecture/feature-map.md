@@ -15,7 +15,7 @@
 ### 当前状态（截至本快照）
 
 - 设计已实施全单元落毕（U1-U9 + u-foundation + U6b/U8a/U8b，dev-flow），偏差 40+ 条登记于 impl-plan §5（`.taiji-harness/`，不入库）；约束已回写 C-data-20 / C-data-22 / C-proc-13。
-- 验收（phase 5）已收官：三个真实缺陷 P1（cancel settle-window 重校准 + stale round-arrival 守卫）/ P2（resurrectColdRecord 补 engine/engineHandle 水合）/ P3（worktree 重建闭环）已修复（`d01f0f225` / `5dcb99453` / `8ea19681e`），scripts PASS（`a2a1f0df4`）。
+- 验收（phase 5）已收官：三个真实缺陷 P1（cancel settle-window 重校准 + stale round-arrival 检查）/ P2（resurrectColdRecord 补 engine/engineHandle 水合）/ P3（worktree 重建闭环）已修复（`d01f0f225` / `5dcb99453` / `8ea19681e`），scripts PASS（`a2a1f0df4`）。
 - 工作分支 `feat-subagent-continuout-chat-refactor`（已合流 dev-0.9.19 基线）。
 
 ---
@@ -24,15 +24,15 @@
 
 ### 功能概述
 
-按崩溃面设五道防线，目标「单个组件出错不再杀死 session、崩溃后用户能自动恢复、每次崩溃都有日志可查」：extension 异步回调守卫（消灭 9/3 实锤的最大崩溃源）、renderer 错误边界与崩溃自动恢复（熔断防循环）、出站帧传输预算、历史读取/传输双层内存预算（游标分页）、pi 崩溃自动 respawn（join 语义 + 用户可见）。设计与实施计划已删除（git 历史可追溯）——crash-resilience.md（v9，独有档案已并入 crash-forensics-and-watchdog.md 附录 D）/ crash-resilience.impl-plan.md（13 单元 5 Wave + 偏差 D1-D19）。
+按崩溃面设五道防线，目标「单个组件出错不再杀死 session、崩溃后用户能自动恢复、每次崩溃都有日志可查」：extension 异步回调检查（消灭 9/3 实锤的最大崩溃源）、renderer 错误边界与崩溃自动恢复（熔断防循环）、出站帧传输预算、历史读取/传输双层内存预算（游标分页）、pi 崩溃自动 respawn（join 语义 + 用户可见）。设计与实施计划已删除（git 历史可追溯）——crash-resilience.md（v9，独有档案已并入 crash-forensics-and-watchdog.md 附录 D）/ crash-resilience.impl-plan.md（13 单元 5 Wave + 偏差 D1-D19）。
 
 ### 关键落点
 
 | 防线 | 载体 |
 |------|------|
-| D1 extension 守卫 | `extensions/shared/ext-guards/src/index.ts`（guardStaleCtx：代际检查主判 + stale 文案兜底分诊）；6 包接入（smart-context / plan / scheduler / structured-output / subagent-workflow）；21 包普查判定表 [stale-ctx-audit.md](../../../extensions/shared/ext-guards/docs/stale-ctx-audit.md)；PS-30 文案门禁探针（pi-semantics.json + check-pi-semantics.mjs）；约束 C-pi-17（2026-09-13 改号）|
+| D1 extension 检查 | `extensions/shared/ext-guards/src/index.ts`（guardStaleCtx：代际检查主判 + stale 文案兜底分诊）；6 包接入（smart-context / plan / scheduler / structured-output / subagent-workflow）；21 包普查判定表 [stale-ctx-audit.md](../../../extensions/shared/ext-guards/docs/stale-ctx-audit.md)；PS-30 文案门禁探针（pi-semantics.json + check-pi-semantics.mjs）；约束 C-pi-17（2026-09-13 改号）|
 | D2 renderer 恢复 | `apps/electron/main/window/recovery-policy.ts`（60s 滑窗 ≤3 次熔断）+ `window-factory.ts`（render-process-gone 自动 reload / 静态错误页）；错误捕获三件套 + renderer-log IPC 落盘（`apps/electron/main/logs/`，限流合并）；恢复提示条 `useCrashRecoveryNotice.ts` + CrashRecoveredBar；约束 C-proc-16 |
-| D3 出站帧守卫 | `packages/runtime/src/services/message-bus/outbound-frame-registry.ts`（8 条大字段穷举）+ `message-bus.ts` push 截断（seq 语义内，drop 时 rollbackSeq）+ `transport/message-broker.ts` reply 超限 envelope；8MB 告警 / 32MB 截断双档；约束 C-comm-14 |
+| D3 出站帧检查 | `packages/runtime/src/services/message-bus/outbound-frame-registry.ts`（8 条大字段穷举）+ `message-bus.ts` push 截断（seq 语义内，drop 时 rollbackSeq）+ `transport/message-broker.ts` reply 超限 envelope；8MB 告警 / 32MB 截断双档；约束 C-comm-14 |
 | D4/D5 历史预算 | 读侧：`services/session-history.ts` + `services/session/history-reverse-read.ts` + `infra/pi/session-file-streaming.ts`（32MB 预检五档 + 逆序分块尾读）；传输侧：20 turns / 640KB 双预算 + 游标分页（`session.history` RPC cursor 参数，core `useChat.ts` 翻页 + `truncated-window.ts` 窗口态 SSOT）；「加载更早」prepend + **触顶自动续载**（renderer `useLoadMoreHistory.onScrollOffset`，2026-09-19） |
 | D5 entryStates 截断 | `packages/core/src/domain/chat/apply-entry-utils.ts`（64KB 条目截断，live/reload 共用同一截断层） |
 | D6 取证与水位 | `packages/runtime/src/infra/logger.ts`（主日志 date+size 双策略轮转 + pi-crash 崩溃上下文落盘 + 5min 内存水位行）+ `apps/electron/main/logs/main-logger.ts` / `log-retention.ts`（main 侧 stderr rotation + 每日保留期复扫） |
@@ -45,7 +45,7 @@
 
 ### 功能概述
 
-根治「30 天进程足迹只增不减」（实测 33 进程 3080MB，~10 个空闲 pi 各 80-141MB 常驻）：空闲 2h 且 30min 内未被查看的用户可见 session 由 reaper「最小摘除」（杀 pi 进程、保留 bus 分区订阅 seq 连续 + HistoryRebuildCache），下次使用惰性 restore（增量恢复，Gate B 实测 544ms）。维护通道（promptReload skill 变更风暴）出站+回程双腿豁免不重置空闲时钟；relay 子进程豁免（kill-on-disconnect 自理）；默认生效无需 opt-in（env `TAIJI_RUNTIME_PI_RECLAIM_*` 可调）。设计与实施计划已删除（git 历史可追溯）——idle-pi-reclamation.md / idle-pi-reclamation.impl-plan.md（u1a/u1b/u2/u3a/u3b/u4 + 偏差 R1-R14）。
+根治「30 天进程足迹只增不减」（实测 33 进程 3080MB，~10 个空闲 pi 各 80-141MB 常驻）：空闲 2h 且 30min 内未被查看的用户可见 session 由 reaper「最小摘除」（杀 pi 进程、保留 bus 分区订阅 seq 连续 + HistoryRebuildCache），下次使用惰性 restore（增量恢复，Gate B 实测 544ms）。维护通道（promptReload skill 变更风暴）出站+回程双路径豁免不重置空闲时钟；relay 子进程豁免（kill-on-disconnect 自理）；默认生效无需 opt-in（env `TAIJI_RUNTIME_PI_RECLAIM_*` 可调）。设计与实施计划已删除（git 历史可追溯）——idle-pi-reclamation.md / idle-pi-reclamation.impl-plan.md（u1a/u1b/u2/u3a/u3b/u4 + 偏差 R1-R14）。
 
 ### 关键落点
 
@@ -55,7 +55,7 @@
 | 查看窗口 | `lastViewedAt` per-sid map + `session.switch` 记录 + `RelayRegistry.hasByMainSessionId` 豁免（u1b acc603d4d） |
 | reaper | `packages/runtime/src/services/session/idle-pi-reaper.ts`（5min tick，豁免查询走 u3a 只读 accessor） |
 | 摘除编排 | `session-lifecycle.ts` `reclaimManagedSession`（七步：占座 reclaimInflight → 代际校验 → 最小摘除，绝不复用 removeSessionEntry） |
-| 阈值 SSOT | `packages/shared/src/constants.ts`（tick/idle/viewed，与 reaper fallback 双源一致性有守卫测试） |
+| 阈值 SSOT | `packages/shared/src/constants.ts`（tick/idle/viewed，与 reaper fallback 双源一致性有检查测试） |
 | 前提约束 | C-state-12（replicated-state pollTimer 全关 = 回收保留 projection 的前提） |
 | 集成测试 | `packages/runtime/test/`（real-pi 端到端回收集成用例，CI 侧 TAIJI_SKIP_REAL_PI=1 仅本机真跑） |
 
@@ -65,29 +65,29 @@
 
 ### 功能概述
 
-补齐专项最后断链「取证与兜底」：统一崩溃台账（双文件 append-only JSONL + 条件信号事件化，评估器唯一输入）+ 触发条件评估器（附录 A 20 条暗债的纯函数消费端）+ 诊断一键导出（E7 用户出口）+ checkpoint 自动恢复（E5a 无条件档，runtime 死后活跃 session 自动 reattach）+ 看门狗与滚动重启（E5b/c 代码完整交付、武装挂 Gate W 数据门默认 off）。批次补课 4 小项随附（tee size 轮转 / 入站 parse 守卫 / 截断反转 supersession / 审计覆盖守卫）。设计 [crash-forensics-and-watchdog.md](crash-forensics-and-watchdog.md)（v9），实施 crash-forensics-and-watchdog.impl-plan.md（21 单元 8 Wave + 偏差 #1-#32；已删除，git 可追溯）。
+补齐专项最后断链「取证与兜底」：统一崩溃登记（双文件 append-only JSONL + 条件信号事件化，评估器唯一输入）+ 触发条件评估器（附录 A 20 条暗债的纯函数消费端）+ 诊断一键导出（E7 用户出口）+ checkpoint 自动恢复（E5a 无条件档，runtime 死后活跃 session 自动 reattach）+ 看门狗与滚动重启（E5b/c 代码完整交付、武装挂 Gate W 数据门默认 off）。批次补课 4 小项随附（tee size 轮转 / 入站 parse 检查 / 截断反转 supersession / 审计覆盖检查）。设计 [crash-forensics-and-watchdog.md](crash-forensics-and-watchdog.md)（v9），实施 crash-forensics-and-watchdog.impl-plan.md（21 单元 8 Wave + 偏差 #1-#32；已删除，git 可追溯）。
 
 ### 关键落点
 
 | 块 | 载体 |
 |------|------|
-| E1 崩溃台账 | `packages/shared/src/crash-journal-schema.ts`（event 20 值枚举 SSOT，v7 删 oom）+ runtime writer `packages/runtime/src/infra/crash-journal.ts`（10MB×3 段级联）+ main 双胞胎 `apps/electron/main/logs/crash-journal.ts`；写入点矩阵接线（session 生命周期 / 收割回收 / 条件信号 / supervisor 判别式四挂点 / marker 补记）；约束 C-data-21（2026-09-13 改号）|
-| 触发条件评估器 | `apps/electron/main/diagnostics/trigger-evaluator.ts`（附录 A 20 条全状态表纯函数）+ main 每日巡检（越线 WARN + trigger-review 台账事件） |
+| E1 崩溃登记 | `packages/shared/src/crash-journal-schema.ts`（event 20 值枚举 SSOT，v7 删 oom）+ runtime writer `packages/runtime/src/infra/crash-journal.ts`（10MB×3 段级联）+ main 双胞胎 `apps/electron/main/logs/crash-journal.ts`；写入点矩阵接线（session 生命周期 / 收割回收 / 条件信号 / supervisor 判别式四挂点 / marker 补记）；约束 C-data-21（2026-09-13 改号）|
+| 触发条件评估器 | `apps/electron/main/diagnostics/trigger-evaluator.ts`（附录 A 20 条全状态表纯函数）+ main 每日巡检（越线 WARN + trigger-review 登记事件） |
 | 诊断导出（E7） | `apps/electron/main/diagnostics/export-diagnostic-bundle.ts` + IPC（零新依赖 zip，缺文件降级）+ 设置页 SystemDiagnosticsSection + Panel.vue 死态块入口 + 知情文案三方共用 |
 | E5a checkpoint 恢复 | `packages/runtime/src/services/session/runtime-checkpoint.ts`（五契约：删除属主双轨 / staleness / tmp+rename / 失败现场保留 3 份 / 风暴防护）+ `startup-reattach.ts`（真补集过滤 + 收割 promise 等待 + 高水位即时查询延迟 + 并发 2）+ `infra/mem-pressure.ts` + main 侧冷启动可信度（resolveColdStartTrust / isolateStaleCheckpoint）；约束 C-proc-17 |
 | E5b 看门狗 | `packages/runtime/src/infra/watchdog.ts`（60s 采样环 + 70%/85% 两级阈值 + relief 持续性条件 + armed 门）；renderer `useMemoryPressure`（refCount 单订阅 + core `setLruMaxSessions` 可变窗压窗）；约束 C-proc-19（`TAIJI_RUNTIME_WATCHDOG_ARMED` 默认 off = Gate W 纯观测） |
 | E5c 滚动重启 | `packages/runtime/src/services/session/rolling-restart.ts`（在途谓词推迟【extension 聚合上报镜像 ∪ EnginePort 快照 ∪ relay-registry】+ 30min defer 上限 + 双维硬升级 92%/memPressure + SHUTDOWN_STEP_SEQUENCE 13 步打点 + 退出码 86）+ supervisor recordPlanned 零退避零计数 + RollingRestartBanner 四态横幅 + 只读 status RPC；约束 C-proc-18 |
 | 在途上报通道 | `packages/extension-protocol/src/extensions/subagent-inflight/`（marker + 绝对计数 schema + ack）+ subagent-workflow 聚合上报 + runtime `inflight-mirror.ts`（五 spawn 形态预置 0 + 生命周期对账 + absent-report errs 判别） |
-| 批次补课 | tee size 轮转：`infra/logger.ts`（gzip `.1.gz` 单代 + `TAIJI_LOG_MAX_BYTES` 单旋钮，C-build-09，2026-09-13 改号）；入站 parse 守卫：core `ws-client.ts` 80MB + 单 session 终止阀（C-comm-15）；O3-C superseded-by 注记 + `scripts/check-stale-ctx-audit-coverage.mjs` 审计覆盖守卫；reap 判据 v2 marker 化（C-proc-20） |
-| Gate 状态 | Gate A 通过（六包 typecheck 0 + 七组测试全绿 + 全量 lint 0，1 真回归已修）；Gate B **终判通过**（8 PASS / 1 BLOCKED / 3 SCALED，`a266e42f1`）——A4 滚动重启退出链挂死已根修（stop 时关存续 WS 连接，`3220a351c`）并真机复验（61 次 planned_rolling_restart 退出码 86、零 liveness 误杀）/ A6 BLOCKED（无生产注入钩子，单元级覆盖；u7a push 链生产悬挂已修 `90cdbefe6`，复验挂 swap 水位回落窗口）/ A5·A8 SCALED·替代口径；u8 Gate W 挂数据（V6 soak 约 2026-09-18） |
+| 批次补课 | tee size 轮转：`infra/logger.ts`（gzip `.1.gz` 单代 + `TAIJI_LOG_MAX_BYTES` 单旋钮，C-build-09，2026-09-13 改号）；入站 parse 检查：core `ws-client.ts` 80MB + 单 session 终止阀（C-comm-15）；O3-C superseded-by 注记 + `scripts/check-stale-ctx-audit-coverage.mjs` 审计覆盖检查；reap 判据 v2 marker 化（C-proc-20） |
+| Gate 状态 | Gate A 通过（六包 typecheck 0 + 七组测试全绿 + 全量 lint 0，1 真回归已修）；Gate B **终判通过**（8 PASS / 1 BLOCKED / 3 SCALED，`a266e42f1`）——A4 滚动重启退出链挂死已从根源修复（stop 时关存续 WS 连接，`3220a351c`）并真机复验（61 次 planned_rolling_restart 退出码 86、零 liveness 误杀）/ A6 BLOCKED（无生产注入钩子，单元级覆盖；u7a push 链生产悬挂已修 `90cdbefe6`，复验挂 swap 水位回落窗口）/ A5·A8 SCALED·替代口径；u8 Gate W 挂数据（V6 soak 约 2026-09-18） |
 
 ---
 
 ## 四、边界与登记残留（下一 Phase 启动前须知）
 
-- **V6 七天长跑 soak**（约 2026-09-18 到期）：足迹平台期 / 重启一致性 / PTY 存活 + P4 relay 真机腿 + 阈值校准——登记于 idle impl-plan §6，无自动提醒；到期后同为 crash-forensics u8 Gate W 武装复审的输入。
-- **未交付面**：架构阶段二 E1/E7 与阶段三 E5 已由 crash-forensics-and-watchdog 交付（见第三节；E5b/c 武装挂 Gate W 未裁决）；仍 out-of-scope：E3/E4 架构级增量（崩溃分类差异化 respawn、在途 turn 一键重发、草稿持久化、面板级错误边界、getAppMetrics 联动）与 base64 剥离——各带书面重审触发条件，等台账数据驱动立项。
-- **crash-forensics Gate B 遗留**（终判通过后的残留，详见 impl-plan §7 v7，git 可追溯）：A6 BLOCKED 三条子断言——u7a push 链生产悬挂（已根修 `90cdbefe6`，复验挂 swap 水位回落到 mem-pressure 阈值以下的窗口）与真实系统 swap 压力（97.7% ≥ 95% 阈值且无 env 旋钮，mock 违反 A4 no-mock 判据，双根因已登记）；A1 导出 zip 环节受 dev 窗口焦点自动化限制（打包逻辑有 15 用例）；A3 excluded 过滤路径不写 reattach-skipped 台账行（待裁决补行或改措辞）。
+- **V6 七天长跑 soak**（约 2026-09-18 到期）：足迹平台期 / 重启一致性 / PTY 存活 + P4 relay 真机路径 + 阈值校准——登记于 idle impl-plan §6，无自动提醒；到期后同为 crash-forensics u8 Gate W 武装复审的输入。
+- **未交付面**：架构阶段二 E1/E7 与阶段三 E5 已由 crash-forensics-and-watchdog 交付（见第三节；E5b/c 武装挂 Gate W 未裁决）；仍 out-of-scope：E3/E4 架构级增量（崩溃分类差异化 respawn、在途 turn 一键重发、草稿持久化、面板级错误边界、getAppMetrics 联动）与 base64 剥离——各带书面重审触发条件，等登记数据驱动立项。
+- **crash-forensics Gate B 遗留**（终判通过后的残留，详见 impl-plan §7 v7，git 可追溯）：A6 BLOCKED 三条子断言——u7a push 链生产悬挂（已从根源修复 `90cdbefe6`，复验挂 swap 水位回落到 mem-pressure 阈值以下的窗口）与真实系统 swap 压力（97.7% ≥ 95% 阈值且无 env 旋钮，mock 违反 A4 no-mock 判据，双根因已登记）；A1 导出 zip 环节受 dev 窗口焦点自动化限制（打包逻辑有 15 用例）；A3 excluded 过滤路径不写 reattach-skipped 登记行（待裁决补行或改措辞）。
 - **待用户裁决**：A3 打包版复验（挂 prerelease）；CI real-pi 凭据注入。
 
 ## 五、继承条目
@@ -108,5 +108,5 @@
 | 设计 | `docs/design/crash-resilience.md`（v9，已删除，git 可追溯；独有档案已并入 crash-forensics-and-watchdog.md 附录 D）· `docs/design/idle-pi-reclamation.md`（已删除，git 可追溯）· `docs/architecture/crash-forensics-and-watchdog.md`（v9） |
 | 实施计划 | `crash-resilience.impl-plan.md`（13 单元 + Gate A/B 记录，已删除，git 可追溯）· `idle-pi-reclamation.impl-plan.md`（6 单元 + Gate A/B 记录，已删除，git 可追溯）· `crash-forensics-and-watchdog.impl-plan.md`（21 单元 + Gate A/B 记录 + Gate B verdict 表；已删除，git 可追溯） |
 | 架构裁决修订 | `pi-exit-notification-and-respawn.md`（v6：§6.2 lazy → bounded proactive；已删除，git 可追溯） |
-| 约束登记 | C-pi-17（stale 守卫，2026-09-13 改号）· C-state-12（pollTimer 全关）· C-comm-14（出站帧守卫）· C-proc-16（renderer 熔断）· C-data-21 / C-proc-17~20 / C-comm-15 / C-build-09（crash-forensics 批，2026-09-13 改号）——[constraints.json](../constraints.json) SSOT |
+| 约束登记 | C-pi-17（stale 检查，2026-09-13 改号）· C-state-12（pollTimer 全关）· C-comm-14（出站帧检查）· C-proc-16（renderer 熔断）· C-data-21 / C-proc-17~20 / C-comm-15 / C-build-09（crash-forensics 批，2026-09-13 改号）——[constraints.json](../constraints.json) SSOT |
 | 旧版地图 | 2026-09-06.md · 2026-08-28.md · 2026-08-25.md · 2026-06-20.md（均已删除，git 可追溯） |

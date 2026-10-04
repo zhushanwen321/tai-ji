@@ -90,7 +90,9 @@ describe('Tool API — registerToolRpcHandlers', () => {
 
   // ── 重复注册 ──────────────────────────────────────────────────
 
-  it('register duplicate tool name → throws TOOL_NAME_CONFLICT error', async () => {
+  // 生产实装（tool-api.ts 重名注册分支）无专用错误码，用 INTERNAL_ERROR（-32603）
+  // 兜底；dispatch 对数值 code 原样透传，响应 error.code 可精确断言
+  it('register duplicate tool name → 拒绝且 code=INTERNAL_ERROR，message 含 already registered', async () => {
     // 先注册一次
     toolRegistry.set('my-plugin:my-tool', {
       pluginId: 'my-plugin',
@@ -113,6 +115,7 @@ describe('Tool API — registerToolRpcHandlers', () => {
     const resp = extractLastResponse(port)
     expect(resp.id).toBe(2)
     expect('error' in resp).toBeTruthy()
+    expect(resp.error!.code).toBe(PluginRpcErrorCodes.INTERNAL_ERROR)
     expect(resp.error!.message.includes('already registered')).toBeTruthy()
     // 注册表大小不变
     expect(toolRegistry.size).toBe(1)

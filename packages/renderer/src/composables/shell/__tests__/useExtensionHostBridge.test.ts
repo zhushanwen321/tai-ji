@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useExtensionHostBridge.test.ts —— ExtensionHost renderer 接线装配单测。
  *

@@ -27,7 +27,7 @@ const logger = getLogger("ask-user");
  * 完全一致——两边用同一字符串确保拿到同一 slot 实例。改名必须两侧同步。
  */
 export const CHANNEL_HANDSHAKE_KEY = Symbol.for(
-	"@zhushanwen/pi-subagents.channelHandshake",
+	"@zhushanwen/subagent-core.channelHandshake",
 );
 
 /** 握手协议版本号。读写 slot 时校验 version !== 1 视为不兼容（warn + 重建 slot）。 */

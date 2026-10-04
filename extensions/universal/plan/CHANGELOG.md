@@ -1,5 +1,35 @@
 # @zhushanwen/pi-plan
 
+## 1.0.0
+
+### Major Changes
+
+- 0d36077d4: State reconstruction now follows the session tree's active path after a rewind (message revoke via `__taiji_nav__`, or a manual tree jump), so rewinded-away content no longer leaks back into the agent:
+
+  - `pi-goal`: new `session_tree` handler rebuilds goal state and refreshes the widget immediately; the reconstruction input is clipped to the active path, so revoked goals are no longer injected round after round via `before_agent_start` and no longer linger in the widget when revoked before goal creation
+  - `pi-plan`: same `session_tree` handler closes the stale `getPlanState` cache window after a rewind; plan-state replay is clipped to the active path, so revoked requirements no longer surface in compaction summaries or the plan widget
+  - `pi-scheduler`: task folding is clipped to the active path and re-folded when the tree is rewound (new optional `SchedulerBackend.onSessionTree` hook), so revoked tasks no longer come back as pending and no longer fire a real turn when due
+  - `pi-todo`: todo-state replay is clipped to the active path, so revoked todo snapshots no longer ride into model context via `<todo_context>`
+
+  The rewind handlers are pure rebuilds — no messages sent, no entries appended — preserving the "revoked content never happened" semantics. Legacy linear session files without tree info keep the previous whole-file replay behavior; the scheduler interface additions are optional so custom backends and test doubles are unaffected.
+
+- 0d36077d4: Adds the `@zhushanwen/pi-exec-skills` dependency: execution-mode selection now discovers plan-exec skills through the exec-skills registry (`detectExecSkills`) and builds the exec-mode options from them; when no skills are registered the plan completes with the default execute mode directly, without the exec-mode form.
+
+  Further public-surface changes in this release:
+
+  - Removes the `isolation` parameter from the `plan` tool schema (the compact|direct two-tier dispatch is gone; a single direct-delivery path remains).
+  - `submit-review` now hard-requires a non-empty `selfReview` (agent self-review conclusions, no exemption — including re-submissions after revisions): missing input gets a corrective error instead of an open review, and re-submitting changed documents with a byte-identical selfReview is rejected as stale.
+  - Review decisions gain a third key `dismiss` (non-destructive shelve: plan mode stays active, no state lost, the shelved approval does not come back) alongside approve / revise.
+  - `complete` is now gated on user approval as a structural guarantee: calling it without a pending approval (e.g. straight from planning state) fails with `out-of-order` and is steered back to `submit-review`.
+  - The `plan-state` session entry writes the unified `state` field (eight-value lifecycle) plus `selfReview` / `resumeHint`; the legacy `reviewState` / `reviewStateSource` fields are no longer written (read-side mapping keeps old sessions readable).
+  - `/plan abort` on an already-inactive plan now answers with a corrective warning instead of a silent no-op.
+
+## 0.5.2
+
+### Patch Changes
+
+- 8aa4b40e8: chore: refresh dependency range (triggered by @zhushanwen/extension-protocol@0.15.0 → @zhushanwen/extension-protocol@0.16.0, @zhushanwen/pi-goal@0.14.8 → @zhushanwen/pi-goal@0.14.9)
+
 ## 0.5.1
 
 ### Patch Changes

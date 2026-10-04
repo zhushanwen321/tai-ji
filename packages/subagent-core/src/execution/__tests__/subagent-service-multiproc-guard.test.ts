@@ -35,7 +35,7 @@ vi.mock("../persistence/alive-store.ts", () => ({
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
-import { ResurrectDeniedError } from "../assembly/types.ts";
+import { ResurrectDeniedError } from "../domain/record-types.ts";
 import { makePi } from "./helpers/pi-mock.ts";
 
 function makeTmpAgentDir(): string {

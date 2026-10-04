@@ -293,7 +293,7 @@ describe('bridge-handler: sendExtensionUiResponse 序列化形状', () => {
 // ── bridgeRequestIds 登记 ──
 
 describe('bridgeRequestIds 登记（marker 命中 → timeout-manager 有记录）', () => {
-  it('handleBridgeRequest 到达即登记（含 malformed），B6 应答即删，clearForSession 兑底仍有效', async () => {
+  it('handleBridgeRequest 到达即登记（含 malformed），B6 应答即删，clearForSession 兜底仍有效', async () => {
     const mgr = new ExtensionTimeoutManager()
     const addSpy = vi.spyOn(mgr, 'addBridgeRequest')
     const handler = new BridgeHandler(null, mgr)
@@ -328,7 +328,7 @@ describe('bridgeRequestIds 登记（marker 命中 → timeout-manager 有记录�
     await pending
     expect(mgr.isBridgeRequest('req-inflight')).toBe(false)
 
-    // session 级跟踪：clearForSession（session 销毁兑底路径）仍清理 bridgeRequestIds
+    // session 级跟踪：clearForSession（session 销毁兜底路径）仍清理 bridgeRequestIds
     mgr.addBridgeRequest('sess-1', 'req-manual')
     mgr.clearForSession('sess-1')
     expect(mgr.isBridgeRequest('req-manual')).toBe(false)
@@ -363,32 +363,9 @@ describe('bridgeRequestIds 登记（marker 命中 → timeout-manager 有记录�
   })
 })
 
-// ── addBridgeRequest：marker 通道唯一的 bridge 登记路径 ──
-
-describe('ExtensionTimeoutManager.addBridgeRequest', () => {
-  it('登记 bridgeRequestIds + session 跟踪，clearForSession 清理（marker 通道唯一登记路径）', () => {
-    const mgr = new ExtensionTimeoutManager()
-    mgr.addBridgeRequest('sess-1', 'req-a')
-    mgr.addBridgeRequest('sess-2', 'req-b')
-
-    expect(mgr.isBridgeRequest('req-a')).toBe(true)
-    expect(mgr.isBridgeRequest('req-b')).toBe(true)
-
-    // session 级跟踪：按各自 session 清理互不影响
-    mgr.clearForSession('sess-1')
-    expect(mgr.isBridgeRequest('req-a')).toBe(false)
-    expect(mgr.isBridgeRequest('req-b')).toBe(true)
-  })
-
-  it('trackUiRequest 不登记 bridge 请求（旧 bridge: 前缀分支已删，防回归）', () => {
-    const mgr = new ExtensionTimeoutManager()
-    // 旧通道入参形态（防御性锁定）：trackUiRequest 只服务 extension-ui kind，
-    // bridge 登记责任单落在 BridgeHandler 入口的 addBridgeRequest——误传 bridge:
-    // method 不得再进 bridgeRequestIds（否则前端误发拦截依据出现第二来源）
-    mgr.trackUiRequest('sess-x', 'req-old-style', 'bridge:sync')
-    expect(mgr.isBridgeRequest('req-old-style')).toBe(false)
-  })
-})
+// 「ExtensionTimeoutManager.addBridgeRequest 登记/clearForSession」「registerRequest 不产生
+// bridge 语义」两例已删：manager 纯单元行为，归属 test/extension-timeout-manager.test.ts
+//（含逐字相同的防回归断言）；经 handler 的登记链用例保留在上方「bridgeRequestIds 登记」组。
 
 afterEach(() => {
   vi.restoreAllMocks()

@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/subagent-engine-sdk",
-  "version": "0.6.1",
+  "version": "0.8.0",
   "description": "Engine-side SDK for the subagent engine protocol: NDJSON stdio contract types, engine primitives (schema emulation, nesting guard, kill chain, journal replay projection, data-dir/paths resolution) — the shared contract root between subagent-core and engine CLI packages (engines import SDK only, never core)",
   "type": "module",
   "license": "MIT",
@@ -32,6 +32,17 @@
         "default": "./dist/protocol/index.cjs"
       },
       "default": "./src/protocol/index.ts"
+    },
+    "./server": {
+      "import": {
+        "types": "./src/server/index.ts",
+        "default": "./src/server/index.ts"
+      },
+      "require": {
+        "types": "./dist/server/index.d.cts",
+        "default": "./dist/server/index.cjs"
+      },
+      "default": "./src/server/index.ts"
     }
   },
   "publishConfig": {
@@ -60,6 +71,17 @@
           "default": "./dist/protocol/index.cjs"
         },
         "default": "./dist/protocol/index.js"
+      },
+      "./server": {
+        "import": {
+          "types": "./dist/server/index.d.ts",
+          "default": "./dist/server/index.js"
+        },
+        "require": {
+          "types": "./dist/server/index.d.cts",
+          "default": "./dist/server/index.cjs"
+        },
+        "default": "./dist/server/index.js"
       }
     }
   },

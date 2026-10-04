@@ -28,7 +28,7 @@ vi.mock("node:os", async (importOriginal) => {
 import { AgentRegistry, parseAgentFrontmatter, parseAgentWithMeta } from "../assembly/agent-registry.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
 import type { EnginePort } from "../engine/port.ts";
-import { lintAgentMeta } from "../../orchestration/script-lint.ts";
+import { lintAgentMeta } from "../../shared/script-lint.ts";
 import { parseResourceMeta } from "../../shared/meta-parser.ts";
 
 // ============================================================

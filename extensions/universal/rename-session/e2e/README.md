@@ -2,7 +2,7 @@
 
 E2E wave（P0 探针 + T1 harness + A1-A7 场景）的探针结论与运行指南。
 
-- 测试模型固定 `xiaomi-token-plan-cn/mimo-v2.5-pro`（项目规范，禁 kimi）
+- 测试模型固定 `xiaomi-token-plan-cn/mimo-v2.6-flash`（项目规范，禁 kimi）
 - 本 E2E 定位为**本地人工触发的验收资产**（真实模型 API，不进常规 CI）
 - 场景 runner：`node e2e/run-a1.mjs` ~ `node e2e/run-a7.mjs`（单场景独立可跑）、`node e2e/run-all.mjs`（顺序全跑 + 汇总 + exit code），harness 见 `e2e/harness.mjs`
 - run-all 两种模式：默认全量 A1-A7（真实 pi + 真实模型，约 2-15 分钟，人工验收用）；`E2E_QUICK=1` 只跑 harness 断言工具单测（秒级，cw test gate 用——cw testRunner 硬编码 120s 命令超时，真实模型全量必超；E2E 场景正式验收证据 = RESULTS.md + 各场景跑记录）；vitest 入口等价物：`npx vitest run --config e2e/vitest.e2e.config.ts`（A1-A7 各一个 test；专用 e2e config 的 include 才含 scenarios.test.mjs，根 vitest.config.ts 白名单不含，不带 `--config` 直跑会 No test files found）
@@ -23,11 +23,11 @@ E2E wave（P0 探针 + T1 harness + A1-A7 场景）的探针结论与运行指�
 TMP=$(mktemp -d /tmp/rename-e2e.XXXXXX)
 mkdir -p $TMP/agent $TMP/sessions
 cp ~/.pi/agent/auth.json $TMP/agent/auth.json          # 唯一必需的迁移物
-printf '%s' '{"enabledModels":["xiaomi-token-plan-cn/mimo-v2.5-pro"],"retry":{"enabled":false}}' > $TMP/agent/settings.json
+printf '%s' '{"enabledModels":["xiaomi-token-plan-cn/mimo-v2.6-flash"],"retry":{"enabled":false}}' > $TMP/agent/settings.json
 touch $TMP/agent/auto-rename-enabled                    # rename 开关 flag（live 覆盖源）
 env PI_CODING_AGENT_DIR=$TMP/agent TAIJI_AGENT_DEBUG=1 PI_SKIP_VERSION_CHECK=1 \
   <repo>/node_modules/.bin/pi --mode rpc --session-dir $TMP/sessions \
-  --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve \
+  --model xiaomi-token-plan-cn/mimo-v2.6-flash --approve \
   --extension <repo>/extensions/universal/rename-session
 # stdin: {"id":"p-1","type":"prompt","message":"1+1等于几？只回答数字。"}
 ```
@@ -67,7 +67,7 @@ env PI_CODING_AGENT_DIR=$TMP/agent TAIJI_AGENT_DEBUG=1 PI_SKIP_VERSION_CHECK=1 \
 F=<tmp>/sessions/2026-08-15T..._<uuid>.jsonl
 env PI_CODING_AGENT_DIR=$TMP/agent TAIJI_AGENT_DEBUG=1 \
   <repo>/node_modules/.bin/pi --mode rpc --session-dir $TMP/sessions \
-  --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve \
+  --model xiaomi-token-plan-cn/mimo-v2.6-flash --approve \
   --extension <repo>/extensions/universal/rename-session --session "$F"
 # get_state → sessionFile===F；prompt 第二条 → turn_end(stop) → stderr: skip: count=2
 ```
@@ -118,7 +118,7 @@ env PI_CODING_AGENT_DIR=$TMP/agent TAIJI_AGENT_DEBUG=1 \
 ```
 
 2. `settings.json` 的 `enabledModels` 追加 `"stub-hang/hang-model"`
-3. `agentDir/config/rename-session-ext-config.json` 写 `"model": {"type":"ref","ref":"stub-hang/hang-model"}`（标题模型指向 stub；主对话 `--model mimo-v2.5-pro` 不受影响）
+3. `agentDir/config/rename-session-ext-config.json` 写 `"model": {"type":"ref","ref":"stub-hang/hang-model"}`（标题模型指向 stub；主对话 `--model mimo-v2.6-flash` 不受影响）
 
 实测（A5 全链路语义）：主 round 正常完成（`turn_end` stop + `agent_settled`）；rename LLM request 发出后 hang，**约 30s 超时**；失败日志 entry（appendEntry 通道）为：
 

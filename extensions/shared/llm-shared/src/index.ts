@@ -8,7 +8,7 @@ export {
 	parseModelRef,
 	getCurrentModelId,
 	normalizeModelSelector,
-	isThinkingLevel,
+	normalizeThinkingLevel,
 	type ModelSelector,
 } from "./resolve.ts";
 export { callLLM, joinTextBlocks, extractText, type CallLLMOptions, type CallLLMResult } from "./call.ts";

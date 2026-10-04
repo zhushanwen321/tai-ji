@@ -17,8 +17,12 @@
 // 满足本视图（W2 双向可赋值断言验证）。重放场景不需要 identity 字段（agent/model/
 // task 等只服务投影与持久化，reducer 不触碰），不搬 createRecord 全量 identity。
 //
-// 设计决策（重放等价性）：journal 重放与 live 通路共用同一 reducer（updateFromEvent 范式），不引入第二套
-// 解析器；conformance C5 断言重放 turns 与 live 一致。
+// 重放等价性现状（2026-09-30 核实更正）：设计目标是「重放与 live 共用同一 reducer」，
+// 实现上仍是两份逐字同形的副本（本文件与 core execution-record.ts 各一份）。生产证
+// 据 = core `execution/__tests__/reducer-parity.test.ts` 的差分对拍（同一事件序列分喂
+// 两侧、逐字段断言等价）——conformance C5 只跑本文件这一侧，不构成漂移防线。
+// 收敛为单源的尝试（core 委托本文件）已回退：经 SDK barrel 引入会把 spawn/env/
+// child_process 整图拖进 core 持久化模块，与测试的 vi.mock("node:child_process") 冲突。
 //
 // CJS 多 entry 内联副本的实例分裂影响 = runningToolIndex WeakMap（按 record 实例
 // 隔离）各自为政，无跨实例语义。
@@ -103,7 +107,7 @@ export function createReplayRecord(): ReplayRecordView {
 }
 
 // ============================================================
-// 事件更新（唯一更新点；core updateFromEvent 私有结构逐字等价）
+// 事件更新（本侧唯一更新点；与 core 那份逐字等价，由 reducer-parity 差分对拍锁定）
 // ============================================================
 
 /**
@@ -350,6 +354,12 @@ export function updateFromEvent(record: ReplayRecordView, event: AgentEvent): vo
 
     // ── activity：纯活性信号，reducer no-op（协议语义见 contract-types）──
     case "activity":
+      return;
+
+    // ── armed：武装确认回执（[D3 协议版 P6]，协议语义见 contract-types）——监控
+    //    信号不进 record 投影，消费方 = 宿主等待门 + run 事件 journal（C3 第④步
+    //    双侧 reducer no-op 义务的 SDK 侧）
+    case "armed":
       return;
 
     default: {

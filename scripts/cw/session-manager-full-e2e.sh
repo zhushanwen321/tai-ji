@@ -5,7 +5,7 @@
 #
 # 测试链路（一次 vitest 运行覆盖两个验收场景）：
 #   spawn 真 pi（--mode rpc + --extension extensions/universal/session-manager，model
-#   xiaomi-token-plan-cn/mimo-v2.5-pro，--session-dir 用 mktmp 目录、名字带 u9-smoke）
+#   xiaomi-token-plan-cn/mimo-v2.6-flash，--session-dir 用 mktmp 目录、名字带 u9-smoke）
 #   → stdin JSONL prompt 写死指令驱动 agent 调 create_managed_session
 #   → pi stdout extension_ui_request（SESSION_MANAGER_MARKER）
 #   → 仓库真实代码（event-adapter translate + EventInterpreter + SessionManagerHandler；

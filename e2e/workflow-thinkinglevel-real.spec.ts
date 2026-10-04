@@ -6,8 +6,10 @@
  * thinkingLevel 端到端真实生效。观测表面全部是 pi 自己写的文件（零 taiji
  * 代码介入，无日志钩子）：
  *
- * - TC1: workflow state JSONL 的 state.calls[0].opts —— 扩展持久化的脚本请求值
- *        （jsonl-run-store.ts serializeRun 持久化完整 AgentCallOpts）
+ * - TC1: 主 session JSONL 的 workflow-record v2 条目（registered/settled 投影锚，
+ *        runId 关联）+ record 事件流 agent-started 帧 input（规范化 opts 的
+ *        canonical JSON 全文落账）——脚本请求值的现行持久化面（[D1] record 单源，
+ *        jsonl-run-store.ts 头注；旧 v1 全量快照条目已停写）
  * - TC2: 子进程 session JSONL 的 thinking_level_change / model_change entry ——
  *        pi 收到 --model provider/id:high 后真实落盘的状态（核心，确定性）
  * - TC3: session.workflowUpdate done 信号 + 子进程 JSONL 有 assistant 消息
@@ -27,13 +29,13 @@
  * 拆成独立字段落盘（session-manager.ts appendModelChange/appendThinkingLevelChange）
  * —— 断言必须查独立字段 thinkingLevel:"high"，禁止 grep ":high" 后缀。
  *
- * 文件定位链：
+ * 文件定位链（[D1] record 单源后）：
  * 主 session JSONL（session.create reply 的 sessionFile）
- *   → "workflow-state-link" custom entry 的 data.path → stateFile
- *     （<sessionDir>/workflow-state/<runId>.jsonl，jsonl-run-store.ts:233-253）
- *   → state.calls[0].sessionId → 全量扫描 dataDir 下 sessions/*.jsonl 按首行
- *     session.id 匹配子进程文件（session-service.ts:1178-1193 findAgentCallFile
- *     同策略，但用递归全扫替代精确编码 cwd，更健壮）
+ *   → workflow-record v2 registered 条目的 data.journalPath → record 事件流
+ *     （<sessionDir>/workflow-state/<runId>.record.jsonl，jsonl-run-store.ts）
+ *   → agent-settled 帧 result.sessionFile → 子进程 session 文件
+ *     （缺失时全量扫描 dataDir 下 sessions/*.jsonl 按首行 session.id 匹配，
+ *     session-service.ts findAgentCallFile 同策略，更健壮）
  */
 import { test, expect } from '@playwright/test'
 import {
@@ -155,20 +157,20 @@ function findSubagentSessionFiles(dataDir: string): string[] {
 }
 
 /**
- * 定位子进程 session 文件。优先用 state.calls[0].sessionFile（精确绝对路径，
- * execution-record.ts serialize 持久化）；缺失时 fallback 全量扫描：排除主 session
- * 文件 + cwd 为 sample-project + mtime 最新。
+ * 定位子进程 session 文件。优先用 record 流 agent-settled 帧的 result.sessionFile
+ * （精确绝对路径，[D1] result 全文落账承载）；缺失时 fallback 全量扫描：排除主
+ * session 文件 + cwd 为 sample-project + mtime 最新。
  *
- * 注意：不能用 calls[0].sessionId（sa-<uuid> 是 subagent-workflow 扩展的 record id，
+ * 注意：不能用 recordId（sa-<uuid> 是 subagent-workflow 扩展的 record id，
  * 非 pi session id——pi 的 session id 是 uuidv7，JSONL 首行 session.id），两者不同源。
  */
 function locateSubagentSessionFile(
   dataDir: string,
-  call0: any,
+  settledSessionFile: string | undefined,
   mainSessionFile: string | null,
 ): string | null {
-  if (typeof call0?.sessionFile === 'string' && fs.existsSync(call0.sessionFile)) {
-    return call0.sessionFile
+  if (typeof settledSessionFile === 'string' && fs.existsSync(settledSessionFile)) {
+    return settledSessionFile
   }
   // fallback：非主 session 文件中 cwd 匹配 sample-project 且 mtime 最新
   const files = findSubagentSessionFiles(dataDir).filter((f) => f !== mainSessionFile)
@@ -194,31 +196,87 @@ function readSessionEntries(file: string): any[] | null {
 }
 
 /**
- * 从主 session JSONL 提取最后一条 workflow-record entry（W17 D4 自描述通道）。
+ * 主 session JSONL 的 workflow-record v2 条目提取（[D1] record 单源后的投影锚）。
  *
- * pi 侧落盘形状 {"type":"custom","customType":"workflow-record","data":{v:1,
- * snapshot: RunSnapshot, updatedAt}}——snapshot 含完整 run（runId/state.calls/...），
- * 是 workflow 数据持久化权威（state 文件降级为性能缓存；旧 workflow-state-link
- * 指针 entry 已退役）。每次成功 flush append 一条，取最后一条（终态 flush 永不
- * 节流，done 后必有终态 entry）。
+ * pi 侧落盘形状（workflow-record-entry.ts v2 schema）：主 session 每 run 两条小
+ * 条目——registered（`{v:2, kind:"registered", runId, journalPath, ...}`，含 record
+ * 流绝对路径锚点）与 settled（`{v:2, kind:"settled", runId, status, ...}`）。唯一
+ * 事实源 = journalPath 指向的 record 事件流（`<sessionDir>/workflow-state/
+ * <runId>.record.jsonl`，jsonl-run-store.ts 头注），条目本身可随时从 record 重建。
+ *
+ * 返回 null = 主 session 文件不可读；内层字段 null = 文件可读但对应条目缺失
+ * （两者区分诊断）。
  */
-function findWorkflowRecord(mainSessionFile: string): { runId: string; snapshot: any } | null {
+function findWorkflowRecordV2Entries(mainSessionFile: string): {
+  registered: { runId: string; journalPath: string } | null;
+  settled: { runId: string; status: string } | null;
+} | null {
   let lines: string[]
   try {
     lines = fs.readFileSync(mainSessionFile, 'utf-8').trim().split('\n')
   } catch {
     return null
   }
-  let latest: { runId: string; snapshot: any } | null = null
+  let registered: { runId: string; journalPath: string } | null = null
+  let settled: { runId: string; status: string } | null = null
   for (const line of lines) {
     try {
       const entry = JSON.parse(line)
-      if (entry?.customType === 'workflow-record' && entry?.data?.v === 1 && entry?.data?.snapshot) {
-        latest = { runId: entry.data.snapshot.runId, snapshot: entry.data.snapshot }
+      if (entry?.customType !== 'workflow-record' || entry?.data?.v !== 2) continue
+      const data = entry.data
+      if (data.kind === 'registered' && typeof data.runId === 'string' && typeof data.journalPath === 'string') {
+        registered = { runId: data.runId, journalPath: data.journalPath }
+      } else if (data.kind === 'settled' && typeof data.runId === 'string') {
+        settled = { runId: data.runId, status: String(data.status) }
       }
     } catch { /* 非 JSON 行忽略 */ }
   }
-  return latest
+  return { registered, settled }
+}
+
+/**
+ * record 事件流读取（journalPath 指向的 `<runId>.record.jsonl`，每行一个事件帧
+ * JSON.parse）。不可读/缺失返回 null——record 流是 [D1] 后唯一事实源，缺失即
+ * workflow 数据链断裂（fail，不静默）。
+ */
+function readRecordEvents(journalPath: string): any[] | null {
+  try {
+    return fs.readFileSync(journalPath, 'utf-8')
+      .trim().split('\n')
+      .filter((l) => l.trim() !== '')
+      .map((l) => JSON.parse(l))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * record 流 agent-started 帧的入参全文解析（`input` 字段 = resolveAgentOpts
+ * 规范化后 opts 的 canonical JSON——terminal-actions dispatchAgentStarted 落账；
+ * 脚本 agent() 的 model/thinkingLevel 请求值在此可观测）。无 agent-started 帧
+ * 返回 null。
+ */
+function agentStartedInputOf(recordEvents: any[]): any | null {
+  const started = recordEvents.find((e) => e.type === 'agent-started' && typeof e.input === 'string')
+  if (!started) return null
+  try {
+    return JSON.parse(started.input)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * record 流 agent-settled 帧的子进程 session 文件路径（`result.sessionFile`——
+ * [D1] result 全文落账后兼承载执行树家族链数据源，run-events.ts AgentSettledEvent
+ * 注释）。旧 v1 snapshot 的 calls[0].sessionFile 通道随快照删除退役，本字段是
+ * 现行唯一精确锚。无携带帧返回 undefined（fallback 全量扫描由调用方承接）。
+ */
+function settledSessionFileOf(recordEvents: any[]): string | undefined {
+  const settledWithFile = recordEvents.find(
+    (e) => e.type === 'agent-settled' && typeof e.result?.sessionFile === 'string',
+  )
+  return settledWithFile?.result.sessionFile as string | undefined
 }
 
 /** 失败诊断落盘（文件链断裂时写 /tmp/<tc>-diag.json） */
@@ -246,7 +304,7 @@ function writeDiag(tc: string, dataDir: string, events: any[], extra: Record<str
  * workflow run 完成时 pi-subagent-workflow 发 workflow-result customStart，
  * runtime event-interpreter handleWorkflowResult 广播 session.workflowUpdate
  * {status:'done', runId, reason}（event-interpreter.ts:514-530）。
- * done 到达 = workflow 完整跑完（stateFile 已持久化最终快照）——TC1/TC2/TC3 都以
+ * done 到达 = workflow 完整跑完（v2 settled 条目与 record 终局帧已落盘）——TC1/TC2/TC3 都以
  * 它为文件读取触发点。
  *
  * @returns ctx：doneUpdate 为空 = workflow 链路断裂（fail，faux 下无 flaky 容忍）
@@ -315,9 +373,9 @@ async function runProbeWorkflow(tc: string): Promise<{
   return ctx
 }
 
-// ── TC1: workflow state 请求值（确定性） ───────────────────────────────
+// ── TC1: 脚本请求值持久化（确定性） ───────────────────────────────
 
-test('TC1: state.calls[0].opts.thinkingLevel === "high"（脚本请求值 → 扩展持久化）', async () => {
+test('TC1: record 流 agent-started 帧 input 含 thinkingLevel/model（脚本请求值 → record 单源落账）', async () => {
   test.setTimeout(150_000)
   const ctx = await runProbeWorkflow('tc1')
   try {
@@ -327,7 +385,7 @@ test('TC1: state.calls[0].opts.thinkingLevel === "high"（脚本请求值 → �
     expect(ctx.doneUpdate, 'workflow 应跑完（faux 队列预设 workflow toolCall → done）——未 done 见 /tmp/tc1-diag.json').toBeDefined()
 
     // 主 session JSONL：create reply 的 sessionFile。pi 延迟写入策略下文件可能
-    // 稍后才落盘——workflow 已 done（主 session 有 assistant 消息 + custom entry
+    // 稍后才落盘——workflow 已 done（主 session 有 assistant 消息 + v2 条目
     // flush 过），轮询等文件出现即可。
     let mainFile = ctx.mainSessionFile
     const fileDeadline = Date.now() + 15_000
@@ -337,26 +395,42 @@ test('TC1: state.calls[0].opts.thinkingLevel === "high"（脚本请求值 → �
     expect(mainFile, '主 session JSONL 路径应存在（session.created reply）').toBeTruthy()
     expect(fs.existsSync(mainFile!), '主 session JSONL 文件应已写入').toBe(true)
 
-    // 定位链 1（W17）：主 session JSONL 的 workflow-record entry → snapshot
-    const rec = findWorkflowRecord(mainFile!)
-    if (!rec) {
+    // 断言 ①：主 session JSONL 含 workflow-record v2 两条小条目（[D1] 投影锚）
+    const rec = findWorkflowRecordV2Entries(mainFile!)
+    if (!rec || !rec.registered || !rec.settled) {
       writeDiag('tc1', ctx.dataDir, ctx.events, {
         mainSessionFile: mainFile,
         mainSessionTail: fs.readFileSync(mainFile!, 'utf-8').split('\n').slice(-10),
       })
     }
-    expect(rec, '主 session JSONL 应含 workflow-record entry（终态 flush 永不节流）').toBeTruthy()
+    expect(rec, '主 session JSONL 应可读').toBeTruthy()
+    expect(rec!.registered, '主 session JSONL 应含 v2 registered 条目（runId + journalPath 锚点）').toBeTruthy()
+    expect(rec!.registered!.runId, 'registered.runId 应非空').toBeTruthy()
+    expect(rec!.settled, '主 session JSONL 应含 v2 settled 条目（终态 coda 写入）').toBeTruthy()
+    expect(rec!.settled!.runId, 'settled.runId 应与 registered 同 run（runId 关联）').toBe(rec!.registered!.runId)
+    expect(rec!.settled!.status, 'settled.status 应为 done（终局收敛词）').toBe('done')
 
-    // 断言：state.calls[0].opts 是脚本请求值的完整持久化（run-snapshot codec）
-    const snapshot = rec!.snapshot
-    const calls = snapshot?.state?.calls
-    expect(Array.isArray(calls), 'state.calls 应为数组').toBe(true)
-    expect(calls.length, '至少 1 个 agent call').toBeGreaterThan(0)
-    const call0 = calls[0]
-    expect(call0.opts.thinkingLevel, 'calls[0].opts.thinkingLevel 应为 high（脚本请求值）').toBe('high')
-    expect(call0.opts.model, 'calls[0].opts.model 应与 fixture 一致').toBe(PROBE_MODEL)
-    expect(call0.sessionId, 'calls[0].sessionId 应存在（TC2 子进程文件定位依赖）').toBeTruthy()
-    console.log(`[TC1] state 请求值验证通过: model=${call0.opts.model}, thinkingLevel=${call0.opts.thinkingLevel}, runId=${rec!.runId}`)
+    // 断言 ②：record 事件流（唯一事实源）的 agent-started 帧 input 含脚本请求值。
+    // input = resolveAgentOpts 规范化后 opts 的 canonical JSON（dispatchAgentStarted
+    // 全文落账）——脚本 agent({model, thinkingLevel}) 的请求值在此可观测。
+    const recordEvents = readRecordEvents(rec!.registered!.journalPath)
+    if (!recordEvents) {
+      writeDiag('tc1', ctx.dataDir, ctx.events, { journalPath: rec!.registered!.journalPath })
+    }
+    expect(recordEvents, `record 事件流应可读（${rec!.registered!.journalPath}）——[D1] 后唯一事实源`).toBeTruthy()
+    expect(recordEvents!.some((e) => e.type === 'run-created'), 'record 流应含 run-created 首帧').toBe(true)
+
+    const startedInput = agentStartedInputOf(recordEvents!)
+    if (!startedInput) {
+      writeDiag('tc1', ctx.dataDir, ctx.events, {
+        journalPath: rec!.registered!.journalPath,
+        recordEventTypes: recordEvents!.map((e) => e.type),
+      })
+    }
+    expect(startedInput, 'record 流应含 agent-started 帧且 input 可解析').toBeTruthy()
+    expect(startedInput.thinkingLevel, 'agent-started input.thinkingLevel 应为 high（脚本请求值）').toBe('high')
+    expect(startedInput.model, 'agent-started input.model 应与 fixture 一致').toBe(PROBE_MODEL)
+    console.log(`[TC1] 请求值验证通过: model=${startedInput.model}, thinkingLevel=${startedInput.thinkingLevel}, runId=${rec!.registered!.runId}`)
   } finally {
     ctx.listenWs?.close()
     await ctx.cleanup()
@@ -375,7 +449,8 @@ test('TC2: 子进程 JSONL 含 thinking_level_change high + model_change（pi �
     }
     expect(ctx.doneUpdate, 'workflow 应跑完（faux 队列预设）——未 done 见 /tmp/tc2-diag.json').toBeDefined()
 
-    // 定位链 1+2（W17）：主 session JSONL → workflow-record entry → snapshot.calls[0]
+    // 定位链 1+2（[D1]）：主 session JSONL → v2 registered 条目 → journalPath
+    // → record 流 → agent-settled 帧 result.sessionFile
     let mainFile = ctx.mainSessionFile
     const fileDeadline = Date.now() + 15_000
     while ((!mainFile || !fs.existsSync(mainFile)) && Date.now() < fileDeadline) {
@@ -384,19 +459,19 @@ test('TC2: 子进程 JSONL 含 thinking_level_change high + model_change（pi �
     expect(mainFile, '主 session JSONL 路径应存在').toBeTruthy()
     expect(fs.existsSync(mainFile!), '主 session JSONL 文件应已写入').toBe(true)
 
-    const rec = findWorkflowRecord(mainFile!)
-    expect(rec, '主 session JSONL 应含 workflow-record entry').toBeTruthy()
+    const rec = findWorkflowRecordV2Entries(mainFile!)
+    expect(rec?.registered, '主 session JSONL 应含 workflow-record v2 registered 条目（journalPath 锚点）').toBeTruthy()
+    const recordEvents = readRecordEvents(rec!.registered!.journalPath)
+    expect(recordEvents, `record 事件流应可读（${rec!.registered!.journalPath}）`).toBeTruthy()
+    const settledSessionFile = settledSessionFileOf(recordEvents!)
 
-    const snapshot = rec!.snapshot
-    const call0 = snapshot?.state?.calls?.[0]
-
-    // 定位链 3：优先 calls[0].sessionFile（pi 子进程 session 文件绝对路径，
-    // execution-record serialize 持久化）；缺失时全量扫描排除主 session 取最新
-    const subFile = locateSubagentSessionFile(ctx.dataDir, call0, ctx.mainSessionFile)
+    // 定位链 3：优先 agent-settled 帧 result.sessionFile（pi 子进程 session 文件
+    // 绝对路径，[D1] result 全文落账承载）；缺失时全量扫描排除主 session 取最新
+    const subFile = locateSubagentSessionFile(ctx.dataDir, settledSessionFile, ctx.mainSessionFile)
     if (!subFile) {
       const candidates = findSubagentSessionFiles(ctx.dataDir)
       writeDiag('tc2', ctx.dataDir, ctx.events, {
-        call0: { sessionId: call0?.sessionId, sessionFile: call0?.sessionFile },
+        settledSessionFile,
         candidateCount: candidates.length,
         candidates: candidates.slice(0, 10).map((f) => path.basename(f)),
       })
@@ -443,12 +518,16 @@ async function waitForMainSessionJsonl(mainSessionFile: string | null): Promise<
 }
 
 /** TC3 子进程 session 文件未命中时的诊断（diag 落盘 + 日志；断言由调用方继续）。 */
-function diagnoseMissingSubFileTc3(dataDir: string, events: any[], call0: any, snapshot: any): void {
+function diagnoseMissingSubFileTc3(
+  dataDir: string,
+  events: any[],
+  settledSessionFile: string | undefined,
+  runId: string,
+): void {
   writeDiag('tc3', dataDir, events, {
-    call0: { sessionId: call0?.sessionId, sessionFile: call0?.sessionFile },
+    settledSessionFile,
+    runId,
     candidates: findSubagentSessionFiles(dataDir).slice(0, 10).map((f) => path.basename(f)),
-    runStatus: snapshot?.state?.status,
-    callStatus: call0?.status,
   })
   console.log(`[TC3] 未找到子进程 session 文件，diag → /tmp/tc3-diag.json`)
 }
@@ -480,20 +559,23 @@ test('TC3: workflowUpdate done + 子进程 JSONL 有 assistant 消息（完整�
     console.log(`[TC3] workflowUpdate done 信号到达: runId=${update.runId}, reason=${update.reason ?? '(无)'}`)
 
     // 核心断言 2：子进程 JSONL 有 assistant 消息（faux 演员跑完产出）
-    // 定位链同 TC2：主 session JSONL → stateFile → calls[0].sessionId → 全量扫描匹配
+    // 定位链同 TC2：主 session JSONL → v2 registered 条目 → journalPath → record 流
+    // → agent-settled 帧 result.sessionFile → 全量扫描 fallback
     const mainFile = await waitForMainSessionJsonl(ctx.mainSessionFile)
     expect(mainFile, '主 session JSONL 路径应存在').toBeTruthy()
     expect(fs.existsSync(mainFile!), '主 session JSONL 文件应已写入').toBe(true)
 
-    const rec = findWorkflowRecord(mainFile!)
-    expect(rec, '主 session JSONL 应含 workflow-record entry').toBeTruthy()
+    const rec = findWorkflowRecordV2Entries(mainFile!)
+    expect(rec?.registered, '主 session JSONL 应含 workflow-record v2 registered 条目').toBeTruthy()
+    const runId = rec!.registered!.runId
+    const recordEvents = readRecordEvents(rec!.registered!.journalPath)
+    expect(recordEvents, `record 事件流应可读（${rec!.registered!.journalPath}）`).toBeTruthy()
+    const settledSessionFile = settledSessionFileOf(recordEvents!)
 
-    const { snapshot, call0 } = { snapshot: rec!.snapshot, call0: rec!.snapshot?.state?.calls?.[0] }
-
-    // 定位链 3：同 TC2——优先 calls[0].sessionFile，fallback 全量扫描
-    const subFile = locateSubagentSessionFile(ctx.dataDir, call0, ctx.mainSessionFile)
+    // 定位链 3：同 TC2——优先 agent-settled 帧 result.sessionFile，fallback 全量扫描
+    const subFile = locateSubagentSessionFile(ctx.dataDir, settledSessionFile, ctx.mainSessionFile)
     if (!subFile) {
-      diagnoseMissingSubFileTc3(ctx.dataDir, ctx.events, call0, snapshot)
+      diagnoseMissingSubFileTc3(ctx.dataDir, ctx.events, settledSessionFile, runId)
     }
     expect(subFile, '应能找到子进程 session 文件').toBeTruthy()
 

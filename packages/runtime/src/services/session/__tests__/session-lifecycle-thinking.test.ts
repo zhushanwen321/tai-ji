@@ -6,7 +6,8 @@
  *   'max' 必须通过校验并透传到 spawn 参数（A-03：曾缺 max 被 silent drop，
  *   composer 最高档实际永不生效）。
  * - 全集任一值经 create → pm.createSession options.thinkingLevel 原样透传。
- * - 非法值 warn 后丢弃（不透传 thinkingLevel 字段）。
+ * - 非法值 warn 后丢弃（不透传 thinkingLevel 字段）——pi 对非法 --thinking 不报错
+ *   （仅 warning diagnostic 后照常以缺省档启动），非法档位必须在宿主入口层拦下。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/session-lifecycle-thinking.test.ts
  */
@@ -70,7 +71,6 @@ function makeEnv() {
     adapterFactory: () => ({ attach: vi.fn(), detach: vi.fn() }) as unknown as IEventAdapter,
     getMessageBus: () => null,
     broadcastGlobal: () => {},
-    notifyMessageComplete: () => {},
   }
 
   const lifecycle = new SessionLifecycle(svc, pm, configStore, sessionStore, workspaceService, registerDeps)
@@ -120,16 +120,19 @@ describe('thinking 值域校验（W2 A-03：max 全通）', () => {
     rmSync(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
-  it('非法值 warn 后丢弃（spawn 参数无 thinkingLevel 字段）', async () => {
+  it('非法值 warn 后丢弃（spawn 参数无 thinkingLevel 字段；pi 不报错故必须在宿主拦）', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const { lifecycle, createSession } = makeEnv()
-    const cwd = mkdtempSync(join(tmpdir(), 'w2-think-bogus-'))
-    await lifecycle.create(cwd, 't', { thinkingOverride: 'ultra' })
-    const options = createSession.mock.calls[0][2] as { thinkingLevel?: string }
-    expect(options.thinkingLevel).toBeUndefined()
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('ultra'))
-    warnSpy.mockRestore()
-    rmSync(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    try {
+      const { lifecycle, createSession } = makeEnv()
+      const cwd = mkdtempSync(join(tmpdir(), 'w2-think-bogus-'))
+      await lifecycle.create(cwd, 't', { thinkingOverride: 'ultra' })
+      const options = createSession.mock.calls[0][2] as { thinkingLevel?: string }
+      expect(options.thinkingLevel).toBeUndefined()
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('ultra'))
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 
   it('Landing override 优先于 preset 字段（C-RL-6）：override=max preset=high → max', async () => {

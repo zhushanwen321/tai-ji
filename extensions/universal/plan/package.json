@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-plan",
-  "version": "0.5.1",
+  "version": "1.0.0",
   "description": "Lightweight plan mode for Pi coding agent",
   "type": "module",
   "main": "index.ts",
@@ -55,8 +55,10 @@
   ],
   "dependencies": {
     "@zhushanwen/extension-protocol": "workspace:*",
+    "@zhushanwen/pi-exec-skills": "workspace:*",
     "@zhushanwen/pi-ext-guards": "workspace:*",
     "@zhushanwen/pi-extension-logger": "workspace:*",
-    "@zhushanwen/pi-llm-shared": "workspace:*"
+    "@zhushanwen/pi-llm-shared": "workspace:*",
+    "@zhushanwen/pi-session-path": "workspace:*"
   }
 }

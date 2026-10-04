@@ -56,6 +56,23 @@ describe("帧 schema 有效性（draft-07，ajv 编译 + 样本校验）", () =>
       .properties.type.enum;
     expect(new Set(eventTypeEnum)).toEqual(new Set(AGENT_EVENT_TYPE_NAMES));
     expect(eventTypeEnum).toHaveLength(AGENT_EVENT_TYPE_NAMES.length);
+    // [D3 协议版 P6] armed 武装回执变体显式编解码用例：完整载荷过帧 schema +
+    // NDJSON 逐字序列化往返等值（「事件逐字序列化」不变量 3 的显式锚定——
+    // 词表派生循环只覆盖 {type} 形态，本用例锚定 armed 的载荷字段）
+    const armedFrame = {
+      method: "event",
+      params: {
+        runId: "wf-armed-1",
+        seq: 1,
+        event: {
+          type: "armed",
+          schemaEnvVar: "PI_WORKFLOW_SCHEMA",
+          extensionPkg: "@zhushanwen/pi-structured-output",
+        },
+      },
+    } as const;
+    expect(validate(armedFrame)).toBe(true);
+    expect(JSON.parse(JSON.stringify(armedFrame))).toEqual(armedFrame);
     // 词表外的未知 event.type 拒
     expect(validate({
       method: "event",

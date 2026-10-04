@@ -4,7 +4,7 @@
  * 锁定：runtime session.occupancy state topic 帧（live 广播 + subscribeSession 的
  * stateSnapshot 回放共用 useChat.ensureStreamSubscription 的同一 handler 通路）驱动
  * chat store 的 sessionPhase 投影：
- * - turn 四态帧序列 → getOccupancy/sessionPhase/isCompacting（compacting 维度派生）跟随
+ * - turn 四态帧序列 → sessionPhase/isCompacting（compacting 维度派生）跟随
  * - 快照恢复（重连 resubscribeAll / 切回 session 的 stateSnapshot 回放）→ 投影收敛到帧值
  * - setCompacting 双轨通路无残留引用（grep 断言，验收⑥）
  *
@@ -18,10 +18,12 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { readFileSync, readdirSync } from 'node:fs'
+import { flushPromises } from '@vue/test-utils'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ServerMessage } from '@taiji/shared'
 import { textToSegments } from '@taiji/shared'
+import { walkFiles } from '../helpers/walk-files'
 
 type StreamCb = (msg: ServerMessage) => void
 
@@ -37,7 +39,13 @@ const { streamCbHolder, streamSubscribeMock, sendMock } = vi.hoisted(() => ({
 }))
 
 vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: { send: sendMock, steer: vi.fn(() => Promise.resolve()), streamSubscribe: streamSubscribeMock },
+  chat: {
+    send: sendMock,
+    steer: vi.fn(() => Promise.resolve()),
+    streamSubscribe: streamSubscribeMock,
+    // [u3c] 发送链统一走 delivery.submit（core submitSegments）；send 仅存续至 u5 协议退役
+    submitDelivery: vi.fn(() => Promise.resolve({ clientUuid: 'u-mock', state: 'in-flight', lane: 'direct' })),
+  },
   session: { writeSegments: vi.fn(() => Promise.resolve()) },
 }))
 
@@ -69,7 +77,7 @@ describe('session.occupancy 帧 → sessionPhase 投影（D1）', () => {
 
     streamCbHolder.current!(occupancyMsg('o1', 'dispatching', false, false))
     expect(chat.sessionPhase('o1')).toEqual({ turn: 'dispatching', compacting: false, bash: false })
-    expect(chat.getOccupancy('o1').turn).toBe('dispatching')
+    expect(chat.sessionPhase('o1').turn).toBe('dispatching')
 
     streamCbHolder.current!(occupancyMsg('o1', 'generating', false, false))
     expect(chat.sessionPhase('o1').turn).toBe('generating')
@@ -159,57 +167,34 @@ describe('occupancy 快照恢复（G4：重连 resubscribeAll / 切回 session�
   })
 })
 
-describe('occupancy idle × defer 队列非空 → flush 触发（D6 sendRoute 解除）', () => {
-  it('占用帧不触发投递，idle 帧触发（bash 维度参与判定）', async () => {
-    const { effectScope } = await import('vue')
+describe('occupancy 帧不再触发投递（[u3c] renderer 侧投递时机职责已退役）', () => {
+  /**
+   * [u3c 退役] 前身「occupancy idle × defer 队列非空 → flush 触发」用例随 defer 队列整体退役
+   * （设计 §3.1 删除面）：投递时机由 runtime 内核驱动（occupancy 边沿是内核 lane 再判定触发源），
+   * renderer 不再持队列、不再触发 flush。本用例改为锁定「occupancy 帧只写投影、不产生任何提交
+   * RPC」——旧触发腿不存在，正交确认其不复活。
+   */
+  it('occupancy 帧序列（settling/idle+bash/idle）→ 零提交 RPC，投影照常跟随', async () => {
     const chat = useChatStore()
-    // 预创建 compactQueue 单例（绑定测试 effect scope，对齐 useChat-compacting-fallback 契约）
-    const queueMod = await import('@/composables/panel/useCompactQueue')
-    effectScope(true).run(() => queueMod.useCompactQueue())
-    const queue = queueMod.useCompactQueue()
-    queue._clearAllForTest()
     await subscribe('f1')
-    // subscribe 阶段的 send（触发订阅）不计入投递断言；并收口其乐观 pendingSend——
-    // 否则 flush 的 channel 判定见 isActive=true 全部走 steer（本用例锁定 send 通道）
     sendMock.mockClear()
     chat.clearPendingSend('f1')
-    queue.enqueue('f1', '待投递')
 
-    // settling（行 4）：不投递
     streamCbHolder.current!(occupancyMsg('f1', 'settling', false, false))
-    await Promise.resolve()
-    expect(sendMock).not.toHaveBeenCalled()
-
-    // idle + bash（行 6 形态）：不投递
     streamCbHolder.current!(occupancyMsg('f1', 'idle', false, true))
-    await Promise.resolve()
-    expect(sendMock).not.toHaveBeenCalled()
-
-    // 全 idle（行 1）：投递（send 携 clientUuid=条目 id；[簇 A2] 提交文本尾附加确认标记）
-    const entry = queue.peek('f1')[0]!
     streamCbHolder.current!(occupancyMsg('f1', 'idle', false, false))
-    await vi.waitFor(() => {
-      expect(sendMock).toHaveBeenCalledWith('f1', `待投递\n<!--taiji:msg:${entry.id}-->`, undefined, { clientUuid: entry.id })
-    })
-    void chat
+
+    // 帧序列发完后统一排空全部微任务再断言负向（[R2-b15-F7]）：逐帧单微任务冲洗对
+    // 「延迟提交」实现会假绿——flushPromises 排空后「零提交 RPC」才成立
+    await flushPromises()
+
+    // 投影跟随（帧驱动）而零提交 RPC：投递时机不在 renderer
+    expect(chat.sessionPhase('f1')).toEqual({ turn: 'idle', compacting: false, bash: false })
+    expect(sendMock).not.toHaveBeenCalled()
   })
 })
 
 describe('setCompacting 双轨通路无残留（验收⑥，grep 断言）', () => {
-  /** 递归收集目录下 .ts/.vue 文件（不含 __tests__） */
-  function collectSourceFiles(dir: string, acc: string[] = []): string[] {
-    for (const name of readdirSync(dir)) {
-      const p = join(dir, name)
-      if (name === '__tests__' || name === 'node_modules') continue
-      if (readdirSync(dir, { withFileTypes: true }).find((e) => e.name === name)?.isDirectory()) {
-        collectSourceFiles(p, acc)
-      } else if (name.endsWith('.ts') || name.endsWith('.vue')) {
-        acc.push(p)
-      }
-    }
-    return acc
-  }
-
   it('renderer + core 生产源码零 `.setCompacting(` 调用（通路废弃，u5b 收口）', () => {
     const roots = [
       join(__dirname, '../../composables'),
@@ -220,7 +205,8 @@ describe('setCompacting 双轨通路无残留（验收⑥，grep 断言）', () 
     ]
     const offenders: string[] = []
     for (const root of roots) {
-      for (const file of collectSourceFiles(root)) {
+      // 共享遍历 helper（__tests__/helpers/walk-files）：跳 __tests__/node_modules，收 .ts/.vue
+      for (const file of walkFiles(root, { extensions: ['.ts', '.vue'], skipDirs: ['__tests__', 'node_modules'] })) {
         const content = readFileSync(file, 'utf-8')
         if (/\.setCompacting\(/.test(content)) offenders.push(file)
       }

@@ -12,106 +12,37 @@
  * 轮终用例红（isStreaming 误 true）。
  *
  * virtua mock / 壳 deps mock 与 MessageStream-kind.test.ts 同款（该文件头有
- * 完整论证：happy-dom 无布局，Virtualizer stub 全量渲染 scoped slot）。
+ * 完整论证：happy-dom 无布局，Virtualizer stub 全量渲染 scoped slot）；简化版
+ * virtua mock 工厂在 helpers/chat-stream-mount.ts，壳 mock 三连经
+ * helpers/message-stream-shell-mount.ts 顶层注册。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/MessageStream-subagent-force-working.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { chatViewDepsModule } from '@/__tests__/helpers/chat-stream-mount'
+import '@/__tests__/helpers/message-stream-shell-mount'
+import { virtuaVueMockModule, messageStreamStubs, resetMessageStreamEnv, makeStreamMessageFactory } from '@/__tests__/helpers/chat-stream-mount'
 import { mount } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/stores/chat'
 import { useSubagentStore, subagentVirtualId } from '@/stores/subagent'
 import MessageStream from '@/components/panel/MessageStream.vue'
 import { SUBAGENT_OUTCOME_PLACEHOLDER } from '@taiji/shared'
 import type { Message, SubagentRecord } from '@taiji/shared'
 
-vi.mock('virtua/vue', async () => {
-  const { defineComponent, h } = await import('vue')
-  const { vi: vitest } = await import('vitest')
-  return {
-    Virtualizer: defineComponent({
-      name: 'MockVirtualizer',
-      props: {
-        data: { type: Array, default: () => [] },
-        // [U3 适配] 吸收 MessageStream U2 起的 :scroll-ref prop（D3），
-        // 与 MessageStream-kind.test.ts mock 同款；不声明则落 reactive attrs 触发挂载期自渲染
-        // （本文件无收集器断言，仅契约对齐消除 artifact 源头）。
-        scrollRef: { type: Object, default: null },
-      },
-      setup() {
-        return {
-          scrollSize: 600,
-          scrollOffset: 0,
-          viewportSize: 400,
-          cache: {},
-          scrollToIndex: vitest.fn(),
-          getItemOffset: vitest.fn(() => 0),
-          getItemSize: vitest.fn(() => 200),
-          findItemIndex: vitest.fn(() => 0),
-          scrollTo: vitest.fn(),
-          scrollBy: vitest.fn(),
-        }
-      },
-      render(ctx) {
-        return h(
-          'div',
-          { class: 'mock-virtualizer' },
-          (ctx.data as unknown[]).map((item, index) => ctx.$slots.default?.({ item, index }) ?? []),
-        )
-      },
-    }),
-  }
-})
-
-// 壳 deps mock（对齐 MessageStream-kind.test.ts：测试聚焦 forceWorking 接线不需真 deps）
-vi.mock('@/composables/panel/useChatViewDeps', () => chatViewDepsModule())
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({
-    editAndResend: vi.fn(),
-    loadMoreHistory: vi.fn(),
-    hasMoreHistory: () => false,
-  }),
-  resetChatModuleState: vi.fn(),
-}))
-vi.mock('@/composables/features/sidebar/useSidebar', () => ({
-  useSidebar: () => ({ forkSession: vi.fn(), abortHandoff: vi.fn() }),
-}))
-
-// happy-dom 不提供真实 ResizeObserver 布局测量
-class NoopResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
+vi.mock('virtua/vue', () => virtuaVueMockModule())
 
 /** Turn stub：透出末位 turn.isStreaming（forceWorking 的接线终点，Turn prop 形态） */
-const globalStubs = {
-  Turn: {
-    name: 'Turn',
-    props: { turn: { type: Object, required: true } },
-    template: '<div data-testid="turn-stub" :data-streaming="String(turn.isStreaming)" />',
-  },
-  SystemNotice: { name: 'SystemNotice', template: '<div />' },
-  BashOutputBlock: { name: 'BashOutputBlock', template: '<div />' },
-  ForkNotice: { name: 'ForkNotice', template: '<div />' },
-  Button: { name: 'Button', template: '<button><slot /></button>' },
-}
+const globalStubs = messageStreamStubs({
+  name: 'Turn',
+  props: { turn: { type: Object, required: true } },
+  template: '<div data-testid="turn-stub" :data-streaming="String(turn.isStreaming)" />',
+})
 
 const MAIN_SID = 's-fw-main'
 const SUB_ID = 'sub-fw-1'
 const VIRTUAL_ID = subagentVirtualId(MAIN_SID, SUB_ID)
 
-function makeMsg(over: Partial<Message>): Message {
-  return {
-    id: 'm1',
-    role: 'assistant',
-    content: '',
-    status: 'complete',
-    timestamp: Date.now(),
-    ...over,
-  } as Message
-}
+/** 消息工厂：role 缺省 assistant（本文件聚焦 turn 末位 isStreaming 接线） */
+const makeMsg = makeStreamMessageFactory('assistant')
 
 /** 虚拟分区消息：历史拉取形态（user + assistant 均 complete——JSONL 读出 status 恒 complete） */
 function virtualHistory(): Message[] {
@@ -154,9 +85,7 @@ async function mountAndReadStreaming(): Promise<string> {
 
 describe('MessageStream 虚拟 session forceWorking 接线（R1-遗留-1）', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
-    vi.stubGlobal('ResizeObserver', NoopResizeObserver)
-    HTMLElement.prototype.scrollTo = vi.fn()
+    resetMessageStreamEnv()
     // 虚拟分区注入历史（fetchAndInject 形态：均 complete，streaming 态完全由 forceWorking 驱动）
     useChatStore().hydrate(VIRTUAL_ID, virtualHistory())
   })
@@ -245,11 +174,7 @@ describe('MessageStream → ActivityStrip subagentThinking 接线（u3-thinking 
  * drawer-blank T3 既有断言（上方「末位 turn 无 assistant → thinking 行出现」）不动。
  */
 describe('MessageStream subagentThinking 占位反例（D6）', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    vi.stubGlobal('ResizeObserver', NoopResizeObserver)
-    HTMLElement.prototype.scrollTo = vi.fn()
-  })
+  beforeEach(resetMessageStreamEnv)
 
   it('末位 assistant 为占位（③级 result/error 双缺投影）→ thinking 行仍出现', async () => {
     const sidP = subagentVirtualId(MAIN_SID, 'sub-fw-ph')

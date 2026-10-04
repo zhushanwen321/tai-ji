@@ -5,7 +5,8 @@
     凭据（名称/类型/baseUrl/凭证区[OAuth 状态 | apiKey]/authHeader/headers）+ Coding Plan 额度 +
     测试/发现 + 模型清单（custom=ModelListSection / catalog=混合列表）+ sticky save-bar。
 
-    业务编排全在 useProviderEdit composable（core 域），本组件只做展示 + 事件绑定。
+    业务编排全在 core 编辑 session（[C4] 三组 module：表单+dirty / discover / 模型 CRUD），
+    本组件只做展示 + 事件绑定。
     OAuth 状态机不在此组件（ui 零 renderer import 铁律）：凭证区登录/切换按钮经
     @oauth-login 上抛父组件（ProviderPage 共享单实例 useProviderOAuth，无双 listener）。
     dirty 状态经 @dirty-change 上抛父组件做展开切换守卫；保存/取消经 @saved/@cancel 通知父收起。
@@ -124,7 +125,7 @@
             <Eye v-else class="size-4" />
           </Button>
           <Button
-            v-if="provider?.apiKeySet && form.apiKey !== '__CLEAR__'"
+            v-if="provider?.apiKeySet && form.apiKey !== API_KEY_CLEAR_SENTINEL"
             variant="ghost"
             class="size-8 shrink-0 rounded-sm p-0 text-neutral-dim hover:bg-danger-soft hover:text-danger"
             :aria-label="t('settings.providerEdit.clearKey')"
@@ -158,7 +159,7 @@
           :model-value="form.authHeader"
           data-testid="auth-header-switch"
           :aria-label="t('settings.providerEdit.fieldAuthHeader')"
-          @update:model-value="form.authHeader = $event as boolean"
+          @update:model-value="onAuthHeaderChange"
         />
       </div>
 
@@ -205,39 +206,10 @@
         </Button>
       </div>
 
-      <!-- Coding Plan 额度查询（契约 v2 接线：D3 凭证来源 / D1 齐备性 / D4 开关 / D2 保存并测试） -->
-      <CodingPlanSection
-        :fetcher-id="quotaFetcherId"
-        :fetcher-options="quotaFetcherOptions"
-        :enabled="quotaEnabled"
-        :cookie-input="quotaCookieInput"
-        :api-key-input="quotaApiKeyInput"
-        :credential-source="quotaCredentialSource"
-        :provider-credential-available="quotaProviderCredentialAvailable"
-        :provider-credential-pending-save="quotaProviderCredentialPendingSave"
-        :workspace-input="quotaWorkspaceInput"
-        :needs-workspace="quotaNeedsWorkspace"
-        :readiness="quotaReadiness"
-        :test-status="quotaTestStatus"
-        :test-error-msg="quotaTestError"
-        :quota-row="quotaData"
-        :last-fetch-at="quotaLastFetchAt"
-        :is-cookie-auth="quotaIsCookieAuth"
-        :configuring="quotaConfiguring"
-        :configure-error-msg="quotaConfigureError"
-        :auth-kinds="quotaAuthKinds"
-        :oauth-ready="oauthPresent"
-        :test-fail-reason="quotaTestFailReason"
-        :help-url="quotaHelpUrl"
-        :help-text="quotaHelpText"
-        @update:fetcher-id="quotaFetcherId = $event"
-        @update:enabled="quotaSetEnabled"
-        @update:credential-source="quotaCredentialSource = $event"
-        @save-and-test="quotaSaveAndTest"
-        @update:cookie-input="quotaCookieInput = $event"
-        @update:api-key-input="quotaApiKeyInput = $event"
-        @update:workspace-input="quotaWorkspaceInput = $event"
-      />
+      <!-- Coding Plan 额度查询（契约 v2 接线：D3 凭证来源 / D1 齐备性 / D4 开关 / D2 保存并测试）。
+           [C1] 零 props 接线：本组件把 quota configure module 实例 provide 给子组件，
+           CodingPlanSection 跨 seam 直接持有（原 23 props + 7 emits 逐名管道已删）。 -->
+      <CodingPlanSection v-if="quota" />
 
       <!-- 测试连接 / 自动发现（纯展示块抽为 ProviderTestDiscoverSection，编排仍在 useProviderEdit）。
            props 经 useCatalogDisplay().testDiscoverProps 整体接线（含 M3b 的 providerKind /
@@ -359,8 +331,10 @@ import {
 import { matchQuotaPreset } from '@taiji/shared'
 
 import type { ProviderInfo } from '@taiji/shared'
-import { useProviderEdit, API_KEY_CLEAR_SENTINEL } from '@taiji/core'
-import { useQuotaConfigureFactory as useQuotaConfigure } from '../injection-keys'
+// API_KEY_CLEAR_SENTINEL：清除哨兵常量与 core save 链同源（MF-1-9：模板判断不再手写
+// 同值字面量，哨兵值变更时按钮显隐与 save 语义不背离）
+import { API_KEY_CLEAR_SENTINEL, useProviderEdit } from '@taiji/core'
+import { MODEL_LIST_DEPS_KEY, QUOTA_CONFIGURE_MODULE_KEY, useQuotaConfigureFactory } from '../injection-keys'
 import CodingPlanSection from '../coding-plan/CodingPlanSection.vue'
 import ModelListSection from '../common/ModelListSection.vue'
 import ProviderTestDiscoverSection from './ProviderTestDiscoverSection.vue'
@@ -375,8 +349,9 @@ const props = defineProps<{
   oauthSupported?: boolean
 }>()
 const emit = defineEmits<{
-  /** 保存成功（wroteApiKey=本次写入非空 apiKey，父组件据此做「配置完即自动启用」） */
-  saved: [payload?: { wroteApiKey: boolean }]
+  /** 保存成功（wroteApiKey=本次写入非空 apiKey，父组件据此做「配置完即自动启用」；
+   * quotaAutoEnabled=新建分支自动开启 coding-plan 额度显示写成功，父组件 toast） */
+  saved: [payload?: { wroteApiKey: boolean; quotaAutoEnabled?: boolean }]
   cancel: []
   /** dirty 状态变化（true=有未保存改动）。父组件用于展开切换守卫 */
   dirtyChange: [value: boolean]
@@ -402,77 +377,46 @@ const matchedPreset = computed(() => {
   return matchQuotaPreset({ baseUrl: p?.baseUrl, name: p?.name })
 })
 
-const quotaFactory = useQuotaConfigure()
-
-const {
-  fetcherId: quotaFetcherId,
-  fetcherOptions: quotaFetcherOptions,
-  enabled: quotaEnabled,
-  cookieInput: quotaCookieInput,
-  apiKeyInput: quotaApiKeyInput,
-  credentialSource: quotaCredentialSource,
-  providerCredentialAvailable: quotaProviderCredentialAvailable,
-  providerCredentialPendingSave: quotaProviderCredentialPendingSave,
-  workspaceInput: quotaWorkspaceInput,
-  needsWorkspace: quotaNeedsWorkspace,
-  readiness: quotaReadiness,
-  testStatus: quotaTestStatus,
-  testError: quotaTestError,
-  testFailReason: quotaTestFailReason,
-  quotaData,
-  lastFetchAt: quotaLastFetchAt,
-  isCookieAuth: quotaIsCookieAuth,
-  authKinds: quotaAuthKinds,
-  helpUrl: quotaHelpUrl,
-  helpText: quotaHelpText,
-  configuring: quotaConfiguring,
-  configureError: quotaConfigureError,
-  setEnabled: quotaSetEnabled,
-  saveAndTest: quotaSaveAndTest,
-} = quotaFactory(matchedPreset, toRef(props, 'provider'))
-
-// 业务编排全在 composable。整份返回值留作 edit：展示接线 composable 从这里读 test 状态与模型数
-// （test/discover 结果不再逐个解构到本组件——第 1 轮抽走展示逻辑后本组件行数余量已用尽）。
+// 业务编排全在 core 三组 module（[C4] 31 成员扁平返回面收敛为 form / discover / models 三组
+// 子 interface，调用方按组消费）。整份 session 传给展示接线 composable（useCatalogDisplay
+// 按组读 test 状态与模型数）；本组件每组只解构模板绑定所需成员，不再逐名消费 28 名扁平面。
 const edit = useProviderEdit(toRef(props, 'provider'), { t })
+const { form: formEdit, discover, models } = edit
+// form 组：表单草稿 + dirty/快照 + headers CRUD + save（模板 v-model 绑 draft）。
+// setActionError/clearActionError 是动作错误唯一写入口（MF-1-7：带来源标签，
+// headers 来源错误的清除按 source 判定）
 const {
-  form,
-  newModel,
-  localModels,
+  draft: form,
   headerRows,
   showKey,
-  showAddModel,
   saving,
   actionError,
+  setActionError,
+  clearActionError,
   isDirty,
-  expandedCompat,
-  getStrategyFromMap,
-  testConnection,
-  autoDiscover,
   save,
   clearApiKey,
-  toggleInput,
-  toggleNewInput,
-  updateCtx,
-  pickStrategy,
-  addModel,
-  removeModel,
-  toggleCompatExpand,
   addHeader,
   removeHeader,
   syncHeadersFromRows,
-} = edit
+} = formEdit
+// discover 组：探活编排（结果状态经 useCatalogDisplay 转 testDiscoverProps）
+const { testConnection, autoDiscover } = discover
+// models 组：清单 CRUD（addModel 抛错由 onAddModel 捕获填 actionError）
+const { showAddModel, addModel } = models
 
-// R4：providerCredentialPendingSave 是 carry-in ref（useQuotaConfigure 的输入只有 preset + providerRef，
-// 看不到 provider 表单草稿），由本组件按 §7.4 判定式写入——漏接则「已填未保存」文案区分不生效。
-// 判定式必须排除清除哨兵：用户点「清除」时 form.apiKey === API_KEY_CLEAR_SENTINEL（非空但语义是
-// 无凭据），只用 `!== ''` 会显示与事实相反的「已填写，保存后即可查询」。
-watch(
-  () => form.apiKey,
-  (v) => {
-    quotaProviderCredentialPendingSave.value = v !== '' && v !== API_KEY_CLEAR_SENTINEL
-  },
-  { immediate: true },
-)
+// [C1] quota configure module 实例：经注入的工厂（renderer 实现）按当前编辑体物化，
+// provide 给 CodingPlanSection 跨 seam 直接持有。工厂缺失（壳未接线）时不渲染该区块
+// （v-if），不留 noop 兼容层。输入里的 providerApiKeyDraft 是 §7.4「已填未保存」文案的
+// carry-in 槽位（表单草稿归 useProviderEdit，判定式含清除哨兵语义，在 module 内）。
+const quotaFactory = useQuotaConfigureFactory()
+const quota = quotaFactory?.({
+  provider: toRef(props, 'provider'),
+  preset: matchedPreset,
+  providerOauthPresent: computed(() => props.oauthPresent === true),
+  providerApiKeyDraft: toRef(form, 'apiKey'),
+})
+if (quota) provide(QUOTA_CONFIGURE_MODULE_KEY, quota)
 
 // catalog 展示字段（类型只读派生文案 + 端点自定义网关；设计 D5）+ 测试连接区 props 接线（M3b）
 // ——逻辑在同目录 composable（受本组件行数约束抽出；runtime 已下发派生值，此处只做展示转译）
@@ -514,37 +458,37 @@ function confirmAuthSwitch(): void {
   }
 }
 
-// ModelListSection 经 provide('modelListDeps') 拿到状态/方法（与原 ProviderEditModal 同构）
-provide('modelListDeps', {
-  newModel,
-  localModels,
-  toggleNewInput,
-  toggleInput,
-  updateCtx,
-  pickStrategy,
-  getStrategyFromMap,
-  removeModel,
-  expandedCompat,
-  toggleCompatExpand,
-  // providerApi（ModelListSection 据此选 compat 字段集，design D5 消费点表）：
-  // catalog 的 provider 级协议 = runtime 派生值（ProviderInfo.api；混合协议 → undefined），
-  // **不取 form.api**——composable 对 catalog 的回填是 `p.api ?? 'anthropic-messages'`
-  // （三值 Select 历史兜底，对 catalog 无用户语义），拿它会把混合 provider 误判成
-  // anthropic-messages 的 compat 字段集；undefined 时 ModelListSection 走通用字段集，
-  // 并由模型自身 api 回落（见 ModelListSection compat 判定）。
+// reka Switch 的 update:modelValue payload 是宽联合，先运行时守卫收窄再进表单写入
+// （对齐 ModelListSection onCtxSelect/onStrategySelect 的 unknown+guard 范式），不用模板
+// as 断言把非法 payload 直接放行。
+function onAuthHeaderChange(value: unknown): void {
+  if (typeof value !== 'boolean') return
+  form.authHeader = value
+}
+
+// ModelListSection 经 MODEL_LIST_DEPS_KEY typed seam 拿到模型 CRUD module（C4：原
+// provide('modelListDeps') 11 成员无型缝收编为整 module + providerApi 派生）。
+// providerApi（ModelListSection 据此选 compat 字段集，design D5 消费点表）：
+// catalog 的 provider 级协议 = runtime 派生值（ProviderInfo.api；混合协议 → undefined），
+// **不取 form.api**——composable 对 catalog 的回填是 `p.api ?? 'anthropic-messages'`
+// （三值 Select 历史兜底，对 catalog 无用户语义），拿它会把混合 provider 误判成
+// anthropic-messages 的 compat 字段集；undefined 时 ModelListSection 走通用字段集，
+// 并由模型自身 api 回落（见 ModelListSection compat 判定）。
+provide(MODEL_LIST_DEPS_KEY, {
+  ...models,
   providerApi: computed(() => isCatalog.value ? props.provider?.api : form.api),
 })
 
 // dirty 上抛父组件（展开切换守卫）。immediate 让父组件初始即知当前 dirty 态
 watch(isDirty, (v) => emit('dirtyChange', v), { immediate: true })
 
-/** 添加模型：捕获 addModel 校验错填到 actionError（save-bar 显示） */
+/** 添加模型：捕获 addModel 校验错填到 actionError（save-bar 显示；来源标签 models，MF-1-7） */
 function onAddModel(): void {
-  actionError.value = ''
+  clearActionError()
   try {
     addModel()
   } catch (e) {
-    actionError.value = e instanceof Error ? e.message : String(e)
+    setActionError('models', e instanceof Error ? e.message : String(e))
   }
 }
 
@@ -556,7 +500,7 @@ async function onSave(): Promise<void> {
   const result = await save()
   if (result.ok) {
     toastInfo(t('settings.saved'))
-    emit('saved', { wroteApiKey: result.wroteApiKey })
+    emit('saved', { wroteApiKey: result.wroteApiKey, quotaAutoEnabled: result.quotaAutoEnabled })
   }
 }
 </script>

@@ -14,7 +14,7 @@
 // 2. 转发壳写法：壳保留同名私有 getter（字段面）与同名方法（方法面）单行转发；
 //    聚合公共面 = 壳转发面 + 测试改写后的聚合路径，两面同源零漂移。
 // 3. 跨聚合边收敛：他域直写本域字段的写点收敛为显式接口方法（本聚合：
-//    disposeSessionUi ← 壳 dispose 直写 uiRequestHandler/uiObservability，清单① C-3）；
+//    disposeSessionUi ← 壳 dispose 直写 uiRequestHandler，清单① C-3）；
 //    本域直写他域字段的写点收敛为 deps 显式回调（[modeless 波3] resetSettledRescan
 //    随 E1 退役删除——历史写点见 git）
 //    直写 settledRescanState，清单① C-2；R2 抽取后回调改指其聚合显式接口）。
@@ -36,6 +36,7 @@ import { UiRequestObservability } from "../ui/ui-request-observability.ts";
 // [R6/D-R3-2] ENV_SELF_RECORD_ID 因跨聚合消费（record-access）归位常量叶子文件，
 // 本聚合 initSession 消费改经 import（聚合→支撑文件方向合法）。
 import { ENV_SELF_RECORD_ID } from "./service-constants.ts";
+import { SUBAGENT_IDENTITY_ENV } from "@zhushanwen/subagent-engine-sdk";
 
 const logger = getLogger("subagents");
 
@@ -51,9 +52,10 @@ const logger = getLogger("subagents");
  *  迁入本聚合并 export——壳经 import 消费（壳→聚合正向合法），禁聚合→壳反向 import（D4）。
  *  [R6/D-R3-2] ENV_SELF_RECORD_ID 因 record-access 跨聚合消费归位 service-constants.ts
  *  （消费主体单一且在本聚合时留驻，跨聚合时迁叶子文件——消除 R5 台账合法边①）。 */
-export const ENV_ROOT_SESSION_ID = "PI_SUBAGENT_ROOT_SESSION_ID";
-export const ENV_DEPTH = "PI_SUBAGENT_DEPTH";
-export const ENV_ROOT_CWD = "PI_SUBAGENT_ROOT_CWD";
+/** [§2.7] 键名单源 = SDK `identity-env.ts`。 */
+export const ENV_ROOT_SESSION_ID = SUBAGENT_IDENTITY_ENV.rootSessionId;
+export const ENV_DEPTH = SUBAGENT_IDENTITY_ENV.depth;
+export const ENV_ROOT_CWD = SUBAGENT_IDENTITY_ENV.rootCwd;
 
 /** dispose 后注入的 stub UI 请求 handler。
  *
@@ -67,9 +69,8 @@ export const ENV_ROOT_CWD = "PI_SUBAGENT_ROOT_CWD";
  * stub 始终返回 {cancelled:true}，不调 ctx.ui、不捕获任何 ctx，让 trailing ui_request
  * 干净降级为 cancelled（等价于子进程主动取消）。
  *
- * 不置 undefined —— 那会让 trailing ui_request 走 inproc UI 请求队列（已删） 的 handler-missing
- * 分支触发 notifyMissingHandlerGlobal warn，噪声性质从 threw-error 变 missing-handler，
- * 没真正解决。
+ * 不置 undefined——那会让 trailing ui_request 找不到 handler 接管，降级路径不明确；
+ * stub 化让行为固定为 cancelled。
  *
  * [R1] 自壳文件迁入（消费点 = disposeSessionUi + 壳 dispose 的应答端 stub 替换）。 */
 export const disposedUiRequestStub: UiRequestHandler = () => Promise.resolve({ cancelled: true });
@@ -118,24 +119,26 @@ export interface SubagentServiceSessionInit {
  * - 复活回调（reviveDisposed）：initSession 对壳旗标的写点显式化。
  *   [modeless 波3] 旧 resetSettledRescan 回调（#5 SyncCollect 的 settledRescanState
  *   复活重置，清单① C-2）随 E1 恢复面退役删除。
- * - 跨域编排回调（getStore/getNotifyHost/recoverOrphans/bootRoundSupervisor/
- *   runPendingReconcileSweep）：initSession 复活后的跨域编排时序（R3/R4 域）以回调
- *   注入，聚合→壳零 import（D4）；R3/R4 抽取后同点改指聚合显式接口。
+ * - 跨域编排回调（getStore/getNotifyHost/recoverOrphans/runPendingReconcileSweep）：
+ *   initSession 复活后的跨域编排时序（R3/R4 域）以回调注入，聚合→壳零 import（D4）；
+ *   R3/R4 抽取后同点改指聚合显式接口。
  */
 export interface SessionBaselinesDeps {
-  /** [D4 late-bound getter] assertReady 断言状态快照源（pi 运行时注入 + 声明周期 disposed 旗标）。 */
-  readonly readAssertState: () => { pi: PiLike | null; disposed: boolean };
+  /** [D4 late-bound getter] assertReady 断言状态快照源（pi 运行时注入 + 生命周期 disposed 旗标
+   *  + pi 绑定代际）。piGeneration 随 initSession 注入递增（见 _piGeneration 字段注释）——
+   *  断言状态携带代际，供消费方/测试核对读到的句柄属于当前代际。 */
+  readonly readAssertState: () => { pi: PiLike | null; disposed: boolean; piGeneration: number };
   /** session 复活：壳 `_disposed` 置 false（dispose 的逆操作，/resume /fork /new 后）。 */
   readonly reviveDisposed: () => void;
-  /** RecordStore 窄门面（setPi 同步注入 + revive；store 为 #1 留壳共享依赖）。 */
-  readonly getStore: () => { setPi(pi: PiLike): void; revive(): void };
+  /** RecordStore 窄门面（setPi 同步注入 + revive；store 为 #1 留壳共享依赖）。
+   *  [§1.4 (a)] setPi 参数含 null：invalidatePiBinding 作废时同步清空 store 的句柄快照
+   *  （RecordStore.setPi 本就接受 null——RecordStorePi 联合含 null）。 */
+  readonly getStore: () => { setPi(pi: PiLike | null): void; revive(): void };
   /** NotifyHost 窄门面（revive；通知面 #1 留壳）。 */
   readonly getNotifyHost: () => { revive(): void };
   /** [跨域编排回调] 孤儿终态恢复（#3 RecordLifecycle 域方法；R3 改指聚合显式接口）。 */
   readonly recoverOrphans: () => void;
-  /** [跨域编排回调] 轮次监督器 boot 分区（#14 协作面；R4 改指聚合显式接口）。 */
-  readonly bootRoundSupervisor: () => void;
-  /** [跨域编排回调] 注册对账 sweep（#14 service-binding 模块函数 + #18 finalize 委托闭包，壳装配）。 */
+  /** [跨域编排回调] 注册对账 sweep（#14 registry-reconcile/sweep-binding 模块函数，壳装配）。 */
   readonly runPendingReconcileSweep: () => void;
 }
 
@@ -171,6 +174,26 @@ export class SessionBaselines {
 
   private _pi: PiLike | null = null;
 
+  /** [§1.4 (a) 代际机制] pi 绑定代际：initSession 注入新句柄时 +1。作废（invalidatePiBinding）
+   *  不递增——代际唯一标识「第几次注入的句柄」，作废只翻转可用性旗标；「等新代际注入」
+   *  的有界等待（waitForUsablePi）以代际变化为准绳。 */
+  private _piGeneration = 0;
+
+  /** [§1.4 (a)] 当前代际句柄的可用性。initSession 置 true；invalidatePiBinding 置 false。
+   *  pi 会话替换（newSession / fork / switchSession / reload）后旧 runner 已失效
+   *  （pi 语义断言 PS-30：每个方法首行 assertActive 抛错，文案含
+   *  "stale after session replacement"），而本聚合的 late-bound 读面在新 initSession
+   *  之前仍持旧句柄引用——可用性旗标把该窗口内的读统一降级为 null，
+   *  杜绝把已失效句柄传进 pi 调用。 */
+  private _piUsable = false;
+
+  /** [§1.4 (a)] 作废后已做过 debug 留痕的代际（防同一作废窗内每次读都刷 debug）。 */
+  private staleReadLoggedGeneration = -1;
+
+  /** [§1.4 (a)] waitForUsablePi 的唤醒集（initSession 注入完成时逐一唤醒）。 */
+  private readonly piBindWaiters = new Set<() => void>();
+
+
   /** 当前 Pi session ID（本进程 pi session，事件路由等用；record 过滤不用它）。initSession 时注入。 */
   private _sessionId: string | null = null;
 
@@ -181,7 +204,7 @@ export class SessionBaselines {
    *  子进程 = env PI_SUBAGENT_ROOT_SESSION_ID 贯穿的真 ROOT（initSession 读取）。
    *  与 sessionId 正交：sessionId 是本进程 pi session（事件路由等），sessionRootId 是所属根
    *  （collectRecords filter 用，与 createRecordForMode 的 rootSessionId 盖章同源——子进程
-   *  因此看到整棵 ROOT 树）。设计见 recursive-subagent-visibility.md 决策 3。 */
+   *  因此看到整棵 ROOT 树）。现行机制见 docs/architecture/subagent-identity-and-recursive-visibility.md（决策 3：rootSessionId 取环境优先）。 */
   private _sessionRootId: string | null = null;
 
   /**
@@ -228,7 +251,20 @@ export class SessionBaselines {
   // [R1 打样模式 2] 壳侧同名私有 getter 逐个透传到这些成员；写点全部收口在本聚合
   // 方法内（D1 单写者）。getter 与存储字段分离 = 壳/测试只读，防写路径旁路聚合。
 
-  get pi(): PiLike | null { return this._pi; }
+  get pi(): PiLike | null {
+    // [§1.4 (a)] 代际校验消费面：绑定被作废（session 替换窗 / dispose 后）时一律返回
+    // null——late-bound 读面是把句柄传进 pi 调用的唯一通道，此处收口即全部
+    // `pi?.` / `getPi()?.` 调用点不再触达失效句柄（PS-30 assertActive 抛错的根源消窗口）。
+    if (this._piUsable) return this._pi;
+    if (this._pi !== null && this.staleReadLoggedGeneration !== this._piGeneration) {
+      this.staleReadLoggedGeneration = this._piGeneration;
+      logger.debug(
+        "[subagents] pi binding invalidated (session replacement window) — pi reads return null until next initSession re-injects",
+      );
+    }
+    return null;
+  }
+  get piGeneration(): number { return this._piGeneration; }
   get sessionId(): string | null { return this._sessionId; }
   get mainSessionFile(): string | undefined { return this._mainSessionFile; }
   get sessionRootId(): string | null { return this._sessionRootId; }
@@ -257,7 +293,11 @@ export class SessionBaselines {
    *  跨域编排（store.setPi/revive、通知面 revive、孤儿恢复、监督器 boot、对账 sweep）经
    *  deps 回调按原时序逐行执行——时序语义与抽取前逐行等价，见各回调注释。 */
   initSession(init: SubagentServiceSessionInit): void {
+    // [§1.4 (a)] 新代际注入：代际 +1 + 可用性翻真（作废窗结束）。句柄写点全文唯一
+    //（与字段注释一致），等待中的轮终收尾（waitForUsablePi）由此恢复正常路径写。
+    this._piGeneration += 1;
     this._pi = init.pi;
+    this._piUsable = true;
     // 同步注入 pi 到 RecordStore（构造时 pi 为 null，session_start 后才有真实 handle）。
     // RecordStore 跳过损坏 manifest 时调 appendEntry 上报用户可见——若不重新注入，
     // 上报通道永远是 no-op，事故排查依然静默。
@@ -273,7 +313,6 @@ export class SessionBaselines {
     this._uiObservability.setMode(init.mode);
     if (init.uiRequestHandler !== undefined) {
       this.uiRequestHandler = init.uiRequestHandler ?? undefined;
-      this._uiObservability.resetMissingHandlerWarnings();
       // [W6 R3 MF-A] session 级覆盖同步进壳侧应答端登记（三态：null = 显式清空）。
       setHostUiRequestEndpoint(this.uiRequestHandler);
     }
@@ -283,7 +322,7 @@ export class SessionBaselines {
       this.dialogQueue = init.dialogQueue;
     }
     this.initForkDepthBaseline();
-    // [递归可见性] 跨进程身份贯穿（设计 recursive-subagent-visibility.md）。
+    // [递归可见性] 跨进程身份贯穿（现行机制 docs/architecture/subagent-identity-and-recursive-visibility.md）。
     // 父进程 spawn 时注入 env 描述「子进程自己的身份」（rootSessionId / selfRecordId /
     // depth / rootCwd），语义与基线建立见 initExecContextBaseline。根进程无 env →
     // sessionRootId = init.sessionId（自己是 root），execCtxAls 不 enterWith（顶层）。
@@ -300,13 +339,13 @@ export class SessionBaselines {
     // 孤儿终态恢复（放 initSession 末尾：setPi 已注入（appendEntry 可用）、
     // sessionRootId 已建立（过滤当前根的 record）；单扫描者判据见 recoverOrphansIfRootProcess）
     this.deps.recoverOrphans();
-    // [W4] boot 分区 + 注册对账 sweep（须在孤儿恢复之后——依赖关系见两方法注释：
-    // 孤儿恢复把「重启前在途」record 一律纠偏 idle 等 revive（[U5/D4 MF-1] 重认领
-    // 谓词已随死代码清理删除——磁盘重建单规则恒 idle，boot 候选门后恒空，W4 跨重启
-    // 归宿 = idle 等 revive 非重认领）；sweep 再对终态 record 补发注销落盘——表 3 行 2
-    // 「注销经对账 sweep 保证落盘」的编排点）。
-    this.deps.bootRoundSupervisor();
+    // 注册对账 sweep（须在孤儿恢复之后——孤儿恢复把「重启前在途」record 一律纠偏
+    // idle 等 revive（[U5/D4 MF-1]：磁盘重建单规则恒 idle）；sweep 再对终态 record
+    // 补发注销落盘——「注销经对账 sweep 保证落盘」的编排点）。
     this.deps.runPendingReconcileSweep();
+    // [§1.4 (a)] 注入编排收尾才唤醒等待者（store.setPi / 孤儿恢复 / sweep 全部就位），
+    // 被唤醒的轮终收尾读到的绑定是完整就绪态。
+    this.wakePiBindWaiters();
   }
 
   /**
@@ -349,16 +388,83 @@ export class SessionBaselines {
     }
   }
 
-  /** [C-3 显式接口收敛] dispose 时的 UI 面 stub 化：uiRequestHandler 换 stub +
-   *  缺失告警去重重置。原壳 dispose 直写本聚合两个字段，R1 收敛为本显式方法
-   *  （壳 dispose 编排调用；壳侧应答端登记 setHostUiRequestEndpoint(stub) 仍留壳）。
+  /** [C-3 显式接口收敛] dispose 时的 UI 面 stub 化：uiRequestHandler 换 stub。
+   *  R1 收敛为本显式方法（壳 dispose 编排调用；壳侧应答端登记 setHostUiRequestEndpoint(stub)
+   *  仍留壳）。
    *
    *  stub 化时序契约（原壳 dispose 注释）：第一时间换 stub，防 trailing ui_request 调到
    *  stale handler 闭包（仍持有 disposed session 的 ctx）产生误导性 console.error；
    *  必须在 emit/abort 之前——这些步骤可能同步触发 trailing pump。 */
   disposeSessionUi(): void {
     this.uiRequestHandler = disposedUiRequestStub;
-    this._uiObservability.resetMissingHandlerWarnings();
+  }
+
+  /**
+   * [§1.4 (a)] 显式作废 pi 句柄绑定（可用性旗标翻假 + 同步作废 RecordStore 的句柄快照）。
+   *
+   * 两个调用面（语义都是「pi 会话替换已发生或即将发生，旧句柄不再可信」）：
+   *   - dispose（quit/new/resume/fork 的 session_shutdown 链）：壳 dispose 编排末尾调用；
+   *   - reload 分支（workflow-events session_shutdown reason=reload）：reload 有意跳过
+   *     dispose（在途 run 交给 reload 后 adoption 接管），但旧句柄的可用性判定必须作废
+   *     ——作废的是句柄可用性，不是在途 run 的纳管。
+   *
+   * 不递增代际（代际只在 initSession 注入时递增）；不抛错（调用方无需围栏）。
+   * 此后 `pi` getter 返回 null（debug 留痕一次），下一次 initSession 注入新代际句柄恢复。
+   */
+  invalidatePiBinding(reason: string): void {
+    if (this._pi === null) return; // 从未注入：无可作废（headless / 纯内存测试形态）
+    if (!this._piUsable) return; // 已作废：幂等（不重复留痕）
+    this._piUsable = false;
+    // RecordStore 持有句柄快照（initSession setPi 注入），不随 getter 走——作废时同步
+    // 置空，其 7 处 `pi?.appendEntry?.` 条目写点与 getter 消费面同规则降级跳过。
+    this.deps.getStore().setPi(null);
+    logger.debug(`[subagents] pi binding invalidated: ${reason} — reads return null until next initSession`);
+  }
+
+  /**
+   * [§1.4 (a)] 轮终收尾的「句柄就绪」有界等待：绑定可用 → 立即返回句柄（正常路径，
+   * 零等待）；绑定已作废（reload/替换窗）→ 挂起等待下一次 initSession 注入新代际
+   * （事件驱动唤醒，无轮询）；超时 → 返回 null（调用方降级为跳过 pi 写——磁盘 journal
+   * / manifest 面不依赖 pi，已在等待前落盘的语义不受影响）。
+   *
+   * 量级 = 控制面单请求粒度（秒级以内，调用方传参定死）：等待命中 = 窗口内轮终条目
+   * 写不丢（落进 reload 后的新权威 session）；超时 = 极端情况降级，warn 留痕含恢复指引。
+   *
+   * 从未注入过句柄（_pi === null，headless / 纯内存测试形态）→ 不等待（没有「新代际
+   * 注入」可等），立即返回 null——与注入前 `pi?.` 可选链跳过的现状语义一致。
+   */
+  waitForUsablePi(timeoutMs: number, context: string): Promise<PiLike | null> {
+    const current = this.pi;
+    if (current !== null) return Promise.resolve(current);
+    if (this._pi === null) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (pi: PiLike | null, timedOut: boolean): void => {
+        if (settled) return;
+        settled = true;
+        this.piBindWaiters.delete(wake);
+        clearTimeout(timer);
+        if (timedOut) {
+          logger.warn(
+            `[subagents] pi re-bind wait timed out after ${timeoutMs}ms (context=${context}) — ` +
+              "pi entry/event writes skipped for this step (disk journal/manifest writes are pi-independent and already done); " +
+              "recovery: none required — the next session_start re-binds pi and subsequent rounds write normally",
+          );
+        }
+        resolve(pi);
+      };
+      const wake = (): void => finish(this.pi, false);
+      const timer = setTimeout(() => finish(null, true), timeoutMs);
+      this.piBindWaiters.add(wake);
+    });
+  }
+
+  /** [§1.4 (a)] initSession 注入编排收尾的等待者唤醒（逐一唤醒后清集）。 */
+  private wakePiBindWaiters(): void {
+    if (this.piBindWaiters.size === 0) return;
+    const waiters = [...this.piBindWaiters];
+    this.piBindWaiters.clear();
+    for (const wake of waiters) wake();
   }
 
   /**
@@ -377,16 +483,26 @@ export class SessionBaselines {
    * 会持过期引用破 session 复活（initSession 复活用例锁定该语义）。
    */
   assertReady(): void {
-    const { pi, disposed } = this.deps.readAssertState();
-    if (pi === null) {
-      throw new Error("pi not injected (initSession not called?)");
-    }
+    const { pi, disposed, piGeneration } = this.deps.readAssertState();
+    // disposed 判据先行：dispose 后（pi 已作废 + _disposed 翻真）错误必须报 disposed
+    // 生命周期态（既有错误文案契约，测试锁定 /disposed/），不落入下方作废分支。
     if (disposed) {
       throw new Error(
         "subagents service disposed (session ended). " +
           "This happens after session shutdown when the follow-up session_start did not arrive. " +
           "Recovery: start a new session or run /new to revive the subagents runtime.",
       );
+    }
+    if (pi === null) {
+      // [§1.4 (a)] 区分「从未注入」与「已作废」（作废窗内 getter 统一降级 null）：
+      // 作废态的错误必须可操作（指向替换完成后的自然恢复），不能伪装成漏注入。
+      if (this._pi !== null && !this._piUsable) {
+        throw new Error(
+          `pi binding invalidated (session replacement in progress after generation ${piGeneration}). ` +
+            "Recovery: retry after the replacement completes — the next session_start re-injects pi and the binding revives.",
+        );
+      }
+      throw new Error("pi not injected (initSession not called?)");
     }
   }
 }

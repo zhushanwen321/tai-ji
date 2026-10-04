@@ -105,8 +105,8 @@
             kind="skill"
             :items="skills"
             :dirs="skillDirs"
-            :save-error="skillDirsSaveError"
-            @update-dirs="onUpdateSkillDirs"
+            :save-error="saveSkillDirs.saveError.value"
+            @update-dirs="saveSkillDirs.run"
           />
           <div v-else-if="activeMenu === 'agent'" :key="activeMenu" class="flex flex-col gap-4">
             <!-- [U7] 子代理引擎选择（engines.json 动态清单；置顶为该页第一配置） -->
@@ -115,8 +115,8 @@
               kind="agent"
               :items="agents"
               :dirs="agentDirs"
-              :save-error="agentDirsSaveError"
-              @update-dirs="onUpdateAgentDirs"
+              :save-error="saveAgentDirs.saveError.value"
+              @update-dirs="saveAgentDirs.run"
             />
           </div>
           <ExtensionPage v-else-if="activeMenu === 'extension' && extensionView === 'main'" :key="activeMenu" :extensions="extensions" @open-contributions="extensionView = 'contributions'" />
@@ -125,6 +125,7 @@
           <SystemPromptPage v-else-if="activeMenu === 'system-prompt'" :key="activeMenu" />
           <TerminalPage v-else-if="activeMenu === 'terminal'" :key="activeMenu" />
           <PiPresetsPage v-else-if="activeMenu === 'preset'" :key="activeMenu" />
+          <TtsPage v-else-if="activeMenu === 'tts'" :key="activeMenu" />
           <WorktreePage v-else-if="activeMenu === 'worktree'" :key="activeMenu" />
           <UpdatePage v-else-if="activeMenu === 'update'" :key="activeMenu" />
           <RemoteAccessPage v-else-if="activeMenu === 'remote-access'" :key="activeMenu" />
@@ -140,10 +141,11 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, X, Download, Palette, BarChart3, ArrowLeft, ArrowRight, PanelLeftClose, Wifi } from '@lucide/vue'
+import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, Volume2, X, Download, Palette, BarChart3, ArrowLeft, ArrowRight, PanelLeftClose, Wifi } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { getSettingsStore, useSettings, type SystemSettings } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
+import { createMirrorSave } from '@/composables/features/settings/setting-field'
 import type { SkillDirConfig } from '@taiji/shared'
 import ProviderPage from './provider/ProviderPage.vue'
 import SettingsResourcePage from './resource/SettingsResourcePage.vue'
@@ -155,6 +157,7 @@ import SystemPromptPage from './system/SystemPromptPage.vue'
 import TerminalPage from './terminal/TerminalPage.vue'
 import WorktreePage from './worktree/WorktreePage.vue'
 import PiPresetsPage from './preset/PiPresetsPage.vue'
+import TtsPage from './tts/TtsPage.vue'
 import UpdatePage from './update/UpdatePage.vue'
 import RemoteAccessPage from './remote-access/RemoteAccessPage.vue'
 import UsagePage from './usage/UsagePage.vue'
@@ -169,6 +172,7 @@ const menus = [
   { id: 'system-prompt', labelKey: 'settings.menu.systemPrompt', icon: ScrollText },
   { id: 'terminal', labelKey: 'settings.menu.terminal', icon: TerminalSquare },
   { id: 'preset', labelKey: 'settings.menu.preset', icon: ClipboardList },
+  { id: 'tts', labelKey: 'settings.menu.tts', icon: Volume2 },
   { id: 'worktree', labelKey: 'settings.menu.worktree', icon: GitBranch },
   { id: 'update', labelKey: 'settings.menu.update', icon: Download },
   { id: 'remote-access', labelKey: 'settings.menu.remoteAccess', icon: Wifi },
@@ -327,31 +331,11 @@ async function onSystemUpdate(patch: Partial<SystemSettings>): Promise<void> {
   }
 }
 
-// RD-4#1 路径保存失败常驻态（per-kind 各一份）：失败置位 → LoadPaths 回弹至最近落盘值 +
-// 常驻红字；每次保存尝试起点复位（成功即消、再失败再亮）。store 不做乐观更新（靠广播推回），
-// 失败时无广播，故由该标志驱动 LoadPaths 从 store 镜像（最近落盘值）强制重拉回弹。
-const skillDirsSaveError = ref(false)
-const agentDirsSaveError = ref(false)
-
-async function onUpdateSkillDirs(dirs: SkillDirConfig[]): Promise<void> {
-  skillDirsSaveError.value = false
-  try {
-    await settingsStore.setSkillDirs(dirs)
-  } catch (e) {
-    skillDirsSaveError.value = true
-    toastError(e instanceof Error ? e.message : String(e))
-  }
-}
-
-async function onUpdateAgentDirs(dirs: SkillDirConfig[]): Promise<void> {
-  agentDirsSaveError.value = false
-  try {
-    await settingsStore.setAgentDirs(dirs)
-  } catch (e) {
-    agentDirsSaveError.value = true
-    toastError(e instanceof Error ? e.message : String(e))
-  }
-}
+// RD-4#1 路径保存（per-kind 各一份，setting-field module · createMirrorSave）：失败置位 →
+// LoadPaths 回弹至最近落盘值 + 常驻红字；每次保存尝试起点复位（成功即消、再失败再亮）。
+// store 不做乐观更新（靠广播推回），失败时无广播，标志是唯一回弹信号（契约见 module 实现注释）。
+const saveSkillDirs = createMirrorSave((dirs: SkillDirConfig[]) => settingsStore.setSkillDirs(dirs))
+const saveAgentDirs = createMirrorSave((dirs: SkillDirConfig[]) => settingsStore.setAgentDirs(dirs))
 
 // 卸载路径的焦点还原（与上方 watch else 分支互补，见其选型说明）：懒加载宿主（AppShell
 // v-if 门控）关闭即卸载，props.open 观察不到 false 转变，还原在此承接。卸载时 open 仍为

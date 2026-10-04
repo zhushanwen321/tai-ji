@@ -105,7 +105,7 @@
       <MarkdownRenderer v-if="!userSegments.length && typeof turn.user?.content === 'string'" :content="turn.user!.content" :session-id="sessionId" />
       </div>
     </div>
-    <!-- hover actions：复制常驻 hover；编辑仅 AI 停止（非活跃态）时显示。 -->
+    <!-- hover actions：复制常驻 hover；编辑仅 AI 停止（非活跃态）时显示；撤回单入口（D6，路由判定在 core）。 -->
     <div
       v-if="!isEditingThisUser"
       class="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/user:opacity-100 group-focus-within/user:opacity-100"
@@ -130,6 +130,21 @@
       >
         <Pencil class="size-3" />
       </Button>
+      <!-- [U5 消息撤回 D6] 撤回按钮：生成中（isActive 置灰 + tooltip，D2 附带裁决）用伪禁用
+           （aria-disabled + click 守卫）而非 disabled attribute——disabled 元素不触发 hover，
+           tooltip 会被一并吞掉。 -->
+      <Button
+        variant="ghost"
+        size="icon"
+        class="size-6 text-neutral-dim"
+        :class="isRevokeDisabled ? 'cursor-not-allowed opacity-40' : 'hover:text-neutral-fg'"
+        :aria-disabled="isRevokeDisabled"
+        data-testid="msg-revoke-button"
+        :title="isRevokeDisabled ? t('panel.message.revokeGenerating') : t('panel.message.revoke')"
+        @click="onRevokeClick"
+      >
+        <Undo2 class="size-3" />
+      </Button>
     </div>
   </div>
 </template>
@@ -137,7 +152,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowRight, Check, Copy, FileText, Pencil } from '@lucide/vue'
+import { ArrowRight, Check, Copy, FileText, Pencil, Undo2 } from '@lucide/vue'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
 // barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
@@ -173,7 +188,8 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const { editAndResend, openDrawer, onFileClick, isPendingSend } = useChatViewDeps()
+const chatViewDeps = useChatViewDeps()
+const { editAndResend, openDrawer, onFileClick, isPendingSend } = chatViewDeps
 
 /** 点击 skill badge → 打开 drawer Doc tab */
 function openCommandDoc(commandName: string): void {
@@ -246,6 +262,26 @@ function boundarySpaceBefore(i: number): boolean {
 const { copied, copy } = useCopy()
 const userCopyKey = computed(() => `user-${props.turn.user?.id ?? props.turn.index}`)
 
+/* ── [U5 消息撤回 D6] 撤回单入口：UI 透传 targetId，路由判定（在途 cancel / 已送达回退）
+      只在 core useChat.revokeMessage 单点（内核投影复核分派）；UI 仅用 isActive 谓词做
+      展示态（生成中置灰 + tooltip）。 ── */
+
+/** 撤回 targetId = 消息 id 原样（live 态 `u-<uuid>` clientUuid / 基线重开态 pi entryId，形态分派在 runtime） */
+const revokeTargetId = computed(() => props.turn.user?.id ?? null)
+
+/**
+ * 生成中置灰（D2 附带裁决）：isActive = isGenerating ∨ pendingSend 的保守超集——撤回编排
+ * 前置 = session 空闲，提交在途的空窗同样拦截（比 isGenerating 严一档，防撤回撞 turn 开启）。
+ */
+const isRevokeDisabled = computed(() => chatViewDeps.isActive(props.sessionId))
+
+/** 撤回点击：生成中守卫（伪禁用兜底）→ 单回调透传，路由分派在 core */
+function onRevokeClick(): void {
+  const id = revokeTargetId.value
+  if (!id || isRevokeDisabled.value) return
+  chatViewDeps.onRevokeMessage(props.sessionId, id)
+}
+
 /* ── 编辑（= fork）：编辑 user 消息后 fork 新会话 ── */
 const editingUserId = ref<string | null>(null)
 const draftText = ref('')
@@ -295,8 +331,7 @@ async function submitEdit(): Promise<void> {
   // return 忽略——与 Composer isSending 语义对齐，防 editAndResend 与 send 并发覆盖
   // useChat 的 pendingDirectSends（per-sid 单条 Map，后写覆盖前写致 rejected 帧误回滚）。
   // 早退置于 editingUserId=null 之前：编辑态保持、草稿不丢，用户可在提交收口后重试。
-  // （isPendingSend 经 ChatViewDeps 注入，旧壳层未 provide 时不互斥，兼容降级）
-  if (isPendingSend?.(props.sessionId)) return
+  if (isPendingSend(props.sessionId)) return
   editingUserId.value = null
   const segments = rebuildSegmentsWithEditedText(user.content, text)
   await editAndResend(props.sessionId, user.id, segments)

@@ -53,13 +53,12 @@ export default {
     send: '发送',
     stop: '停止',
     queueSend: '排队发送',
-    commandQueuedRejected: '会话占用中，命令请等待完成后使用',
     sending: '发送中…',
     sendBusy: '会话正在处理中，请稍候再发送',
     sendEmptyHint: '请输入内容后再发送',
     sendHint: '输入内容后发送',
-    steerHint: '想补充什么？⏎ 加入当前任务 · Alt+⏎ 排到下一轮…',
-    inputHint: '描述你想让 AI 做什么，或 # 文件、/ 命令…',
+    steerHint: '想补充什么？⏎ 加入当前任务 · Alt+⏎ 排到下一轮 · Shift+⏎ 换行…',
+    inputHint: '描述你想让 AI 做什么…（/ 命令 · $ 文件 · # 会话 · {\'@\'} 子代理 · ! bash · Shift+⏎ 换行 · ↑/↓ 历史 · Shift+Tab 思考档 · Ctrl+P/Ctrl+Shift+P 模型）',
     addContent: '添加内容（附件 / 命令）',
     attach: '附件',
     image: '图片',
@@ -71,7 +70,6 @@ export default {
     handoffHint: '输入内容将作为新 session 的首条消息发送给 AI（可选）…（⏎ 交接并发送，Esc 退出）',
     handoffChip: '交接到新 session · 当前输入将发送到新会话',
     handoffSend: '交接并发送到新 session',
-    handoffBusy: '正在回复中，请等待当前回复完成或先停止后再交接',
     handoffExit: '退出交接模式',
     bashPlaceholder: '运行 bash 命令…（!! 前缀排除出上下文）',
     // composer 命令动作表复制反馈（composer-pi-shortcuts 决策 4 / §3.5）
@@ -112,6 +110,9 @@ export default {
     handoffFailed: '交接失败：{error}',
     handoffAbortFailed: '取消交接失败：{error}，交接仍在进行中。',
     editReplace: '编辑（替换并重新发送）',
+    // [U5 消息撤回 D6/D2 附带裁决] 撤回按钮 tooltip（默认态 + 生成中置灰态）
+    revoke: '撤回（回到发送前，原文回草稿）',
+    revokeGenerating: '生成中，停止后可撤回',
     editAfterReplace: '编辑后替换并重新发送',
     cancel: '取消',
     viewCommandDoc: '查看命令文档',
@@ -185,6 +186,20 @@ export default {
     // 详情后，行内保留计时观察维持执行期可见性
     executingBashElapsed: '已 {elapsed}',
     // 不写死阈值数字——阈值用户可调，写死会漂移）
+    // ── 语音朗读（ai-voice-tts，key 消费方 = useTtsPlayer + TurnSummary 按钮态）──
+    // toast 文案与设计 §5.4 失败表逐字对齐；title 四键 = 朗读按钮状态机（设计 §5.1）。
+    speakTitle: '朗读',
+    speakCancel: '取消',
+    speakStop: '停止',
+    speakStreaming: '回复生成中',
+    speakEmpty: '没有可朗读的文本',
+    speakTooLong: '文本过长（{count} 字符），暂不支持朗读',
+    speakNotConfigured: '语音服务未配置',
+    speakAuthFailed: '语音服务鉴权失败',
+    speakQuotaExceeded: '语音合成额度不足',
+    speakVendorError: '语音合成失败：{detail}',
+    speakNetworkError: '语音合成请求失败：网络异常',
+    speakFailed: '朗读失败，请稍后重试',
   },
   git: {
     commit: '提交',
@@ -204,6 +219,8 @@ export default {
     unavailableTitle: 'Git 不可用，无法读取仓库状态',
   },
   context: {
+    // 指标聚合入口（W3a 单图标聚合按钮，hover 出容量+速度+缓存聚合页）title
+    metricsAggregateTitle: '指标',
     capacity: '上下文容量',
     used: '已用',
     total: '总量',
@@ -306,8 +323,6 @@ export default {
     subagentNoOutcome: '（无结果记录）',
     engineBadgeTitle: '执行引擎：{engine}',
     subagentStopReason: '上一轮为什么停（停因词，仅展示）',
-    engineFallbackBadge: '请求 {from} → 已回退 {to}',
-    engineFallbackHint: '引擎 {from} 探针失败，已自动回退 {to}；修复 {from} 后新建会话即可恢复',
     backToWorkflow: '返回工作流',
     subagentLoadFailed: '加载失败',
     subagentRetry: '重试',
@@ -390,6 +405,8 @@ export default {
     searchPlaceholder: '搜索模型…',
     noMatch: '无匹配模型',
     placeholder: '\u2026',
+    // 模型聚合入口（W3a 单图标聚合按钮，click 出模型列表+思考档位）title
+    modelThinkingAggregateTitle: '模型 · 思考等级',
   },
   thinkingLevel: {
     title: '思考级别',
@@ -429,19 +446,25 @@ export default {
     loading: '加载中',
     noMatches: '无匹配项',
   },
-  deferQueue: {
+  queueBubble: {
     pendingHint: '占用结束后发送',
     // [D1] 按占用类型分档的 hover 文案（小时级 bash 等长占用下「等什么结束」可操作）
     pendingHintCompacting: '等待上下文压缩完成后发送',
     pendingHintBash: '等待命令执行结束后发送',
     pendingHintSettling: '等待当前回合结束后发送',
+    // 内核条目态文案（G3：每条未送达消息有明确形态与状态）
+    stateQueued: '排队中',
+    stateInFlight: '投递中',
+    stateFailed: '发送失败',
     cancelQueued: '撤销排队',
-    chipBadge: '+{count}',
-    chipBadgeHint: '含 {count} 个附件/引用，将随消息一并发送',
-    // [compact-defer-composer-queue u1] defer 行占用分档 chip（压缩后 / 命令后 / 稍后发送）
-    deferChipCompacting: '压缩后',
-    deferChipBash: '命令后',
-    deferChipFallback: '稍后发送',
+    cancelUnavailable: '消息已投递，无法撤销',
+    cancelUnavailableWithReason: '无法撤销：{reason}',
+    cancelFailed: '撤销失败：{msg}',
+    // 撤销成功后的回草稿失败分型（失败域各自留痕：RPC ≠ 回草稿 ≠ 契约缺文本）
+    restoreDraftFailed: '已撤销，但恢复到输入框失败：{msg}',
+    restoreContentMissing: '消息已撤销，但原文未能取回——请重新输入',
+    retry: '重试发送',
+    retryFailed: '重试失败：{msg}',
   },
   contextChips: {
     removeFromContext: '从上下文移除',

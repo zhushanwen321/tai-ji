@@ -151,11 +151,11 @@ const [r1, r2, r3] = await parallel([
 ]);
 ```
 
-并发默认上限 6（ConcurrencyPool 限流，`maxConcurrent=6` 来源 ADR-030 决策 3），超出自动排队。元素也可以是返回 Promise 的函数，会被直接调用：
+并发默认上限 6（ConcurrencyPool 限流，`maxConcurrent=6` 来源 ADR-030 决策 3），超出自动排队。元素也可以是返回 Promise 的函数，会被直接调用。
 
 ### `pipeline(...)` — Execute stages sequentially
 
-**模式一：顺序模式** — 传入 stage 数组，每个 stage 收到上一个 stage 的结果：
+传入 stage 数组，每个 stage 收到上一个 stage 的结果：
 
 ```javascript
 const final = await pipeline([
@@ -163,60 +163,6 @@ const final = await pipeline([
   (prev) => agent({ prompt: `Write tests for: ${prev}`, description: 'test-gen' }),
 ]);
 ```
-
-**模式二：笛卡尔积模式** — 传入 items 数组 + 多个 stage，对每个 item 依次跑完所有 stage（批处理杀手锏）：
-
-```javascript
-// 对每个 file 依次跑 review → fix
-await pipeline(
-  files,                                      // items
-  (file) => agent({ prompt: `Review ${file}`, description: 'review', schema: {...} }),
-  (review, file) => agent({ prompt: `Fix ${file}: ${JSON.stringify(review)}`, description: 'fix' }),
-);
-// stage 函数签名：(prevResult, currentItem) => result；第一个 stage 只收 currentItem
-```
-
-### `workflow(name, args?)` — Call another workflow (nested orchestration)
-
-调用已定义的子 workflow（by name），实现 workflow 嵌套编排（顺序 chain / 并行 parallel / scatter-gather / map-reduce）。被调用的 workflow 必须已通过 `workflow-script save` 或放在 `.pi/workflows/` / `~/.pi/agent/workflows/` 可被发现。
-
-**签名**：`workflow(name: string, args?: object) => Promise<AgentResult>`
-
-**参数**：
-- `name` — 目标 workflow 的名称（`meta.name`，即文件名 stem）
-- `args` — 传给子 workflow 的参数对象，子 workflow 内通过 `$ARGS` 读取
-
-**返回值**：`AgentResult`，与 `agent()` 返回结构同构：
-- `content: string` — 子 workflow 的 return 值（字符串化）
-- `parsedOutput?: unknown` — 子 workflow return 的对象（当 return 是对象时）
-- `usage?: {...}` — token 消耗
-- `error?: string` — 失败原因（成功时无此字段）
-
-**嵌套配额**：`workflow()` 调用走同一 ConcurrencyPool，按 depth 分层分配配额（`max(1, 6 - depth)`，保底 1 槽防饿死）。`parallel()` 内的 `workflow()` 调用共享父 workflow 的配额池，超出自动排队（不报错）。嵌套深度受 `MAX_FORK_DEPTH` 护栏保护（见 ADR-030 决策 3）。
-
-**返回值**：`workflow()` 返回 `AgentResult` 对象（与 `agent()` 一致）：
-- 成功：`{ content: string, parsedOutput?: object }`——content 是子 workflow execute() 返回值的 JSON 字符串；parsedOutput 是返回值为对象时的原样回传
-- 失败：`{ content: "", error: string }`——子 workflow 未找到/lint 失败/执行异常/被 abort
-
-**循环检测**：`workflow()` 自动追踪调用链（A→B→C），如果目标 name 已在当前调用链中（如 A→B→A），立即返回 error result（`Circular workflow call detected: A → B → A`），不执行子 workflow。
-
-**预算继承**：子 workflow 的 token 预算继承父 workflow 的剩余预算。子 workflow 消耗的 tokens/cost 执行后累加回父 workflow 的预算池。父 workflow abort 时子 workflow 级联 abort。
-
-**chain 基础示例**（顺序：每步输出作下步输入）：
-```javascript
-const a = await workflow("extract", { source: inputPath });
-const b = await workflow("transform", { raw: a.content });
-const c = await workflow("load", { normalized: b.content });
-```
-
-**parallel 基础示例**（并行：多个独立子 workflow 同时跑）：
-```javascript
-const results = await parallel(
-  tasks.map((t) => workflow(t, { target }))
-);
-```
-
-> 内置通用编排 workflow（chain / parallel / scatter-gather / map-reduce / review-fix-loop，可直接 `workflow run`，用 `agent()` 自包含实现）见 `extensions/universal/subagent-workflow/workflows/`。本段教 `workflow()` 嵌套 API，workflows 目录是开箱即用的通用编排工具（用 `agent()` 而非 `workflow()` 嵌套）。
 
 ### Other globals
 

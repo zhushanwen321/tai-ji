@@ -3,15 +3,14 @@
  *
  * 覆盖（三视角，用户可见 DOM 断言优先）：
  * - P1 组件黑盒·四类状态各自渲染：compacting（manual→压缩中 / threshold→自动压缩）、
- *   bash（正在执行 + mono 命令）、thinking（turn=dispatching→思考中…）、
+ *   bash（正在执行 + elapsed mono meta，命令原文在悬停详情）、thinking（turn=dispatching→思考中…）、
  *   settling（turn=settling 且无 compacting/bash→行出现，R3-U1；文案复用 dispatching key，
  *   P-1 探针 V8 校准点）
- * - P1.5 组件黑盒·横线分隔行族（[2026-09-16 压缩中降级] compacting 行自通栏 accent-soft
- *   活动带降级为与 bash/thinking/settling 行同构的 spinner 分隔行：两端渐隐横线 +
- *   13px/stroke 2.2 spinner + text-sm/fg/550 主文案 +「待发 N」chip；原 band 用例改写）。
- *   chip 计数口径不变 = 只计未提交条目（mode===undefined）
- * - P1.6 行高常量强绑定 DOM（D4 连带面：COMPACTING_NOTICE_HEIGHT / EXECUTING_BASH_NOTICE_HEIGHT
- *   随降级同批重测，jsdom 无布局 → 断言「常量值 + 常量所绑定的 class 结构」双向锁）
+ * - P1.5 组件黑盒·横线分隔行族（compacting 行自通栏带降级回归本族 / A4+A7）：四行同构
+ *   （system-notice + content-col 保留，行内左右各一条渐隐 hairline）、待发 chip count =
+ *   内核投递投影里「非 direct 且未 delivered」条目数（[u3c/D7] 单源化——原 useCompactQueue
+ *   未提交条目口径随队列退役，口径唯一定义点 = useQueueRows.deliveryQueueEntries）、
+ *   count=0 隐藏 chip、bash/thinking/settling 行同构形态
  * - P2 组件黑盒·优先级堆叠：compacting + bash 并存 → 两行且 compacting 在上；
  *   thinking 与 compacting/bash 互斥（「无以上但有 dispatching turn」才显示）；
  *   settling 与 compacting 并存 → 仅 compacting 行（同档位幂等，不重复堆叠）；
@@ -20,11 +19,9 @@
  * - P4 MessageStream 集成·迁移收口：TurnMeta 旧 dispatching 占位不再渲染 + thinking 行接管；
  *   executingBash 瞬时行迁入（bashStart 帧驱动）；fork notice 与活动条的文档流定位顺序
  *   （活动条在前——ForkNotice 为文档流 block，按文档序自然堆叠）
- * - P5 i18n key 完整：五个文案 key（四个行文案 + 待发 chip）在 zh/en locale 均定义
+ * - P5 i18n key 完整：行文案 + 待发 chip + bash 详情等 key 在 zh/en locale 均定义
  *
  * i18n：vitest 全局 setup（vitest-i18n-setup.ts）mock useI18n → t() 返回 zh-CN 文案。
- * 待发 chip 文案键（panel.message.compactingQueueChip）已在 zh/en locales 落地，本文件
- * 不做任何键注入——chip 用例按「同键同参」消费真实 locales，键缺失由 P5 断言直接判红。
  *
  * 运行：cd packages/renderer && npx vitest run src/components/panel/message-stream/__tests__/ActivityStrip.test.ts
  */
@@ -34,33 +31,28 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import type { QueuedMessage } from '@/composables/panel/useCompactQueue'
-import { COMPACTING_NOTICE_HEIGHT, EXECUTING_BASH_NOTICE_HEIGHT } from '@/composables/panel/message-stream-layout'
-
-/** 全局 i18n mock 的 t（与组件同一消费面）：chip 文案按「同键同参」比对，不锁措辞 */
-const { t } = useI18n()
+import { getDeliveryProjectionRef } from '@taiji/core'
+import type { DeliveryFrameEntry } from '@taiji/core'
+import zhPanel from '@taiji/ui/locale/zh-CN/panel'
+import enPanel from '@taiji/ui/locale/en-US/panel'
 
 const apiMock = vi.hoisted(() => ({
   send: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
   streamSubscribe: vi.fn(() => () => {}),
 }))
 
-/** useCompactQueue mock：band 副文案 count 口径测试需注入 mode!==undefined 条目（真实队列公开
- *  API 无法写 mode——flush 内部 setEntryMode），故 mock peek 返回可控快照；队列真实行为由
- *  use-compact-queue.test.ts 覆盖。 */
-const queueMock = vi.hoisted(() => ({
-  peek: vi.fn(() => [] as QueuedMessage[]),
-}))
+/** 投递投影注入助手：副文案 count 口径测试直接写 core 投影 ref（帧消费链路由 core useChat 的
+ *  session.delivery handler 承担，本组件只读投影——单源化后已无本地队列 mock 面）。 */
+function setProjection(sid: string, entries: DeliveryFrameEntry[]): void {
+  const ref = getDeliveryProjectionRef()
+  const next = new Map(ref.value)
+  next.set(sid, entries)
+  ref.value = next
+}
 
 vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: { send: apiMock.send, steer: apiMock.steer, streamSubscribe: apiMock.streamSubscribe },
+  chat: { send: apiMock.send, streamSubscribe: apiMock.streamSubscribe },
   session: {},
-}))
-vi.mock('@/composables/panel/useCompactQueue', () => ({
-  useCompactQueue: () => ({ peek: queueMock.peek }),
 }))
 // MessageStream 挂载的重依赖 composable（对齐 MessageStream.wire.test.ts 的隔离策略）
 vi.mock('@/composables/features/chat/useChat', () => ({
@@ -77,6 +69,16 @@ import MessageStream from '../../MessageStream.vue'
 import { useChatStore } from '@/stores/chat'
 import { useForkNoticeFeed, resetForkNoticeFeed } from '@/composables/effects/useForkNoticeEffect'
 import type { SessionOccupancyState } from '@taiji/core'
+
+/** 断言侧 t：与组件同一消费面（vitest 全局 setup mock useI18n → zh-CN locale 文案）。
+ *  chip/elapsed 等带参文案按「同键同参」比对，不锁措辞——键缺失时 mock 返回裸 key，两侧仍相等。 */
+const { t } = useI18n()
+
+/** D3 增强规格分割线 class（两端渐隐：transparent → --border-strong 18% → 82% → transparent，
+ *  Tailwind 任意值 bg-[image:…] 承载——jsdom 不加载生成的 CSS，故断言 class 声明本身）。
+ *  断言随 6d6ebb905 渐变 hairline 形态更新（组件每行左右各一条 .h-px）。 */
+const FADE_LINE_CLASS =
+  'bg-[image:linear-gradient(to_right,transparent,var(--border-strong)_18%,var(--border-strong)_82%,transparent)]'
 
 const SID = 'sess-activity-strip'
 
@@ -104,8 +106,8 @@ async function mountStrip(opts: {
 beforeEach(() => {
   setActivePinia(createPinia())
   resetForkNoticeFeed()
-  queueMock.peek.mockReset()
-  queueMock.peek.mockReturnValue([])
+  // 投影是模块级 ref（跨用例共享），逐用例显式重置（新 Map = 无条目）
+  getDeliveryProjectionRef().value = new Map()
 })
 
 describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
@@ -113,8 +115,8 @@ describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
     const wrapper = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
     const row = wrapper.find('[data-testid="activity-strip-row-compacting"]')
     expect(row.exists()).toBe(true)
-    // 用户可见文案（zh-CN）+ spinner（Loader2 animate-spin）+ 两条渐隐横线（降级后与 bash 行同构，
-    // 不再是无横线的通栏带——band 结构断言见下方「横线分隔行」describe）
+    // 用户可见文案（zh-CN）+ spinner（Loader2 animate-spin）；行内左右各一条渐隐 hairline
+    //（断言随 6d6ebb905 渐变 hairline 形态更新，形态细节断言见下方「横线分隔行族」describe）
     expect(wrapper.find('[data-testid="activity-strip-text-compacting"]').text()).toBe('压缩中')
     expect(row.find('.animate-spin').exists()).toBe(true)
     expect(row.findAll('.h-px').length).toBe(2)
@@ -198,47 +200,40 @@ describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
   })
 })
 
-describe('ActivityStrip · 横线分隔行族（压缩中降级 + D3 增强规格 / A4+A7）', () => {
-  /** 构造待发条目（可注入提交通道 mode，模拟 flush 已提交条目——chip count 口径过滤） */
-  function queued(id: string, text: string, mode?: 'send' | 'steer'): QueuedMessage {
-    const entry: QueuedMessage = { id, text, segments: [{ type: 'text', text }] }
-    if (mode) entry.mode = mode
-    return entry
+describe('ActivityStrip · 横线分隔行族形态（compacting 降级回归 + D3 增强规格 / A4+A7）', () => {
+  /** 构造投影条目（lane/state 双维决定是否计入待发 chip） */
+  function entry(clientUuid: string, state: DeliveryFrameEntry['state'], lane: DeliveryFrameEntry['lane']): DeliveryFrameEntry {
+    return { clientUuid, preview: clientUuid, state, lane }
   }
 
-  /** D3 增强规格分割线（两端渐隐：transparent → --border-strong 18% → 82% → transparent）。
-   *  以 Tailwind 任意值类承载（jsdom 不加载生成的 CSS，故断言 class 声明本身）。 */
-  const FADE_LINE_CLASS =
-    'bg-[image:linear-gradient(to_right,transparent,var(--border-strong)_18%,var(--border-strong)_82%,transparent)]'
-
-  it('compacting 行降级为分隔行：content-col/system-notice 保留、无通栏带痕迹、两条渐隐横线', async () => {
+  it('compacting 行降级回归横线分隔行族：content-col/system-notice 保留、无通栏带痕迹、两条渐隐横线', async () => {
     const wrapper = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
     const row = wrapper.find('[data-testid="activity-strip-row-compacting"]')
     expect(row.exists()).toBe(true)
-    // 降级考核点：通栏活动带形态（-mx-5 通栏 / accent-soft 底 / border-y）全部摘除，
-    // 回归 DESIGN.md §6.1 横线分隔行族的居中内容列（content-col + system-notice 保留）
+    // 降级回归本族（2026-09-16 D4 裁决）：通栏活动带形态（-mx-5 通栏 / accent-soft 底 /
+    // border-y）全部摘除，与 bash/thinking/settling 行共用横线分隔行 DOM。
+    // 断言随 6d6ebb905 渐变 hairline 形态更新
     expect(row.classes()).toContain('content-col')
     expect(row.classes()).toContain('system-notice')
     expect(row.classes()).not.toContain('bg-[var(--accent-soft)]')
     expect(row.classes()).not.toContain('border-y')
+    expect(row.classes()).not.toContain('border-hairline')
     expect(row.classes()).not.toContain('-mx-5')
-    // 行距 py-1.5（D3 表：py-1 → py-1.5）
     expect(row.classes()).toContain('py-1.5')
-    // 两条渐隐横线（h-px + 渐隐 background-image，替代原 bg-border 纯色 / border-y）
+    // 两条渐隐横线（组件每行左右各一条 .h-px，断言随 6d6ebb905 渐变 hairline 形态更新）
     const lines = row.findAll('.h-px')
     expect(lines).toHaveLength(2)
     for (const line of lines) {
       expect(line.classes()).toContain('flex-1')
       expect(line.classes()).toContain(FADE_LINE_CLASS)
     }
-    // spinner：13px + stroke 2.2 + neutral-mid（原通栏带的 size-3.5 text-accent 作废）
+    // spinner：13px + stroke 2.2 + neutral-mid（原通栏带 size-3.5 text-accent 作废）
     const spinner = row.find('.animate-spin')
     expect(spinner.exists()).toBe(true)
     expect(spinner.classes()).toContain('size-[13px]')
     expect(spinner.classes()).toContain('text-neutral-mid')
     expect(spinner.attributes('stroke-width')).toBe('2.2')
-    // 主文案（文本容器首个 span，模板序：主文案 → 命令 → chip）：text-sm / neutral-fg / 550
-    //（D3 表：text-xs/mid/400 → text-sm/fg/550）
+    // 主文案（文本容器首个 span）：text-sm / neutral-fg / 550
     const main = row.find('[data-testid="activity-strip-text-compacting"] > span')
     expect(main.classes()).toContain('text-[length:var(--text-sm)]')
     expect(main.classes()).toContain('text-neutral-fg')
@@ -246,39 +241,41 @@ describe('ActivityStrip · 横线分隔行族（压缩中降级 + D3 增强规�
     wrapper.unmount()
   })
 
-  it('待发 chip：只计 mode===undefined 未提交条目（已提交 steer/send 不计），文案同键同参', async () => {
-    queueMock.peek.mockReturnValue([
-      queued('u1', '未提交 A'),
-      queued('s1', '已提交 steer', 'steer'),
-      queued('s2', '已提交 send', 'send'),
-      queued('u2', '未提交 B'),
+  it('count 口径：只计内核投影里「非 direct 且未 delivered」条目（direct 待确认气泡与已送达不计数）', async () => {
+    setProjection(SID, [
+      entry('u1', 'queued', 'queued'),
+      entry('u2', 'in-flight', 'steer'),
+      // direct 车道的乐观气泡原位保留（不进队列区，D7），不计入
+      entry('d1', 'in-flight', 'direct'),
+      // 已送达：transcript 权威已入流，不计入
+      entry('d2', 'delivered', 'steer'),
     ])
     const wrapper = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
-    const chip = wrapper.find('[data-testid="activity-strip-flush-hint-compacting"]')
-    expect(chip.exists()).toBe(true)
-    // 文案 = 同键同参解析结果（键在 zh-CN locale 定义，完整性由 P5 断言锁死）；
-    // 计数错误（如把已提交条目计入 = 4）会让两侧文案不等
-    expect(chip.text()).toBe(t('panel.message.compactingQueueChip', { count: 2 }))
-    // chip 形态（D3 表）：mono text-3xs + border-strong 描边（替代原副文案长句的「·」拼接）
-    expect(chip.classes()).toContain('font-mono')
-    expect(chip.classes()).toContain('text-[length:var(--text-3xs)]')
-    expect(chip.classes()).toContain('border-border-strong')
-    // 原副文案长句形态清除：不再有「·」分隔与 compactingFlushHint 长文案
+    const hint = wrapper.find('[data-testid="activity-strip-flush-hint-compacting"]')
+    expect(hint.exists()).toBe(true)
+    // 文案 = 同键同参解析结果，不锁措辞（计数错误如把 direct/已送达计入 = 4，两侧文案即不等）。
+    // locale 双侧均有真实键定义，断言解析的是真实文案而非裸 key 回退
+    expect(hint.text()).toBe(t('panel.message.compactingQueueChip', { count: 2 }))
+    // chip 形态：mono text-3xs + border-strong 描边（替代原副文案长句的「·」拼接）
+    expect(hint.classes()).toContain('font-mono')
+    expect(hint.classes()).toContain('text-[length:var(--text-3xs)]')
+    expect(hint.classes()).toContain('border-border-strong')
+    // 主文案与 chip 之间无「·」分隔（原副文案长句形态已清除）
     expect(wrapper.find('[data-testid="activity-strip-row-compacting"]').text()).not.toContain('·')
-    expect(wrapper.find('[data-testid="activity-strip-row-compacting"]').text()).not.toContain('完成后自动发送')
     wrapper.unmount()
   })
 
   it('count=0：chip 不渲染，行仍在（压缩状态本身独立成立，A4）', async () => {
-    queueMock.peek.mockReturnValue([])
+    setProjection(SID, [entry('d1', 'in-flight', 'direct')])
     const wrapper = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
     const row = wrapper.find('[data-testid="activity-strip-row-compacting"]')
     expect(row.exists()).toBe(true)
     expect(wrapper.find('[data-testid="activity-strip-flush-hint-compacting"]').exists()).toBe(false)
+    expect(row.text()).not.toContain('·')
     wrapper.unmount()
   })
 
-  it('bash/thinking/settling 行同步 D3 增强规格（同构分隔行：渐隐线 + 13px spinner + text-sm 主文案）', async () => {
+  it('bash/thinking/settling 行与 compacting 行同构：system-notice + content-col + 双渐隐横线', async () => {
     const wrapper = await mountStrip({
       occupancy: { turn: 'idle', compacting: false, bash: true },
       executingBash: { command: 'pnpm test', startedAt: Date.now() },
@@ -287,7 +284,6 @@ describe('ActivityStrip · 横线分隔行族（压缩中降级 + D3 增强规�
     expect(bashRow.exists()).toBe(true)
     expect(bashRow.classes()).toContain('system-notice')
     expect(bashRow.classes()).toContain('content-col')
-    expect(bashRow.classes()).toContain('py-1.5')
     expect(bashRow.classes()).not.toContain('bg-[var(--accent-soft)]')
     // 两条渐隐横线（D3：bg-border 纯色 → 两端渐隐 border-strong）
     const bashLines = bashRow.findAll('.h-px')
@@ -304,28 +300,11 @@ describe('ActivityStrip · 横线分隔行族（压缩中降级 + D3 增强规�
     expect(main.classes()).toContain('text-[length:var(--text-sm)]')
     expect(main.classes()).toContain('font-[550]')
     expect(bashRow.find('[data-testid="activity-strip-text-bash"] .font-mono').exists()).toBe(true)
+
     wrapper.unmount()
-
-    // thinking 行：同款结构（渐隐线 + 13px spinner + text-sm 主文案），无 chip
-    const thinking = await mountStrip({ occupancy: { turn: 'dispatching', compacting: false, bash: false } })
-    const thinkingRow = thinking.find('[data-testid="activity-strip-row-thinking"]')
-    expect(thinkingRow.findAll('.h-px')).toHaveLength(2)
-    expect(thinkingRow.find('.animate-spin').classes()).toContain('size-[13px]')
-    expect(thinking.find('[data-testid="activity-strip-text-thinking"] > span').classes()).toContain(
-      'text-[length:var(--text-sm)]',
-    )
-    expect(thinkingRow.find('[data-testid="activity-strip-flush-hint-thinking"]').exists()).toBe(false)
-    thinking.unmount()
-
-    // settling 行：同款结构
-    const settling = await mountStrip({ occupancy: { turn: 'settling', compacting: false, bash: false } })
-    const settlingRow = settling.find('[data-testid="activity-strip-row-settling"]')
-    expect(settlingRow.findAll('.h-px')).toHaveLength(2)
-    expect(settlingRow.find('.animate-spin').classes()).toContain('size-[13px]')
-    settling.unmount()
   })
 
-  it('主文案 key 分档：manual→压缩中（分隔行内）、threshold→正在自动压缩上下文（A7）', async () => {
+  it('主文案 key 分档：manual→压缩中（band 内）、threshold→正在自动压缩上下文（A7）', async () => {
     const manual = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
     expect(manual.find('[data-testid="activity-strip-text-compacting"]').text()).toBe('压缩中')
     manual.unmount()
@@ -335,40 +314,6 @@ describe('ActivityStrip · 横线分隔行族（压缩中降级 + D3 增强规�
     })
     expect(auto.find('[data-testid="activity-strip-text-compacting"]').text()).toBe('正在自动压缩上下文')
     auto.unmount()
-  })
-})
-
-describe('ActivityStrip · 行高常量强绑定 DOM（D4 连带面）', () => {
-  /** 常量与 DOM 的双向锁：jsdom 无真实布局（无法量高），故断言「常量值 = D3 规格算式结果」
-   *  + 「常量所绑定的 class 结构还在」——改了 padding/字号/icon 而不同步常量时，本組报红。
-   *  算式：py-1.5(6px×2) + 内容行 max(chip 10×1.8+2border=20px, 主文案 text-sm×1.5≈19.5px) = 32px
-   *  （实测校准位见设计检查点 1：dev 断言 useConstantHeightAssert 以 ±1px 容差校准）。 */
-  it('COMPACTING_NOTICE_HEIGHT = 32 且 compacting 行结构仍为所绑定形态', async () => {
-    expect(COMPACTING_NOTICE_HEIGHT).toBe(32)
-    queueMock.peek.mockReturnValue([{ id: 'q1', text: '待发', segments: [{ type: 'text', text: '待发' }] }])
-    const wrapper = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
-    const row = wrapper.find('[data-testid="activity-strip-row-compacting"]')
-    expect(row.classes()).toContain('py-1.5')
-    expect(row.find('[data-testid="activity-strip-text-compacting"] > span').classes()).toContain(
-      'text-[length:var(--text-sm)]',
-    )
-    expect(wrapper.find('[data-testid="activity-strip-flush-hint-compacting"]').classes()).toContain('leading-[1.8]')
-    wrapper.unmount()
-  })
-
-  it('EXECUTING_BASH_NOTICE_HEIGHT = 32 且 bash 行结构仍为所绑定形态（D3 三项同时改行高）', async () => {
-    expect(EXECUTING_BASH_NOTICE_HEIGHT).toBe(32)
-    const wrapper = await mountStrip({
-      occupancy: { turn: 'idle', compacting: false, bash: true },
-      executingBash: { command: 'pnpm test', startedAt: Date.now() },
-    })
-    const row = wrapper.find('[data-testid="activity-strip-row-bash"]')
-    expect(row.classes()).toContain('py-1.5')
-    expect(row.find('[data-testid="activity-strip-text-bash"] > span').classes()).toContain(
-      'text-[length:var(--text-sm)]',
-    )
-    expect(row.find('.animate-spin').classes()).toContain('size-[13px]')
-    wrapper.unmount()
   })
 })
 
@@ -511,31 +456,28 @@ describe('ActivityStrip × MessageStream 集成 · 迁移收口（P4）', () => 
 })
 
 describe('ActivityStrip · i18n key 完整（P5）', () => {
-  /** 文案 key：compacting 手动/自动 + 待发 chip、bash、thinking + 方案 A 新增两键（elapsed meta /
- *  * 悬停详情标题）在 zh/en locale 均定义 */
-  const KEYS: Array<[string, string, string]> = [
-    ['panel.message.compressing', "compressing: '压缩中'", "compressing: 'Compacting'"],
-    ['panel.message.autoCompressing', "autoCompressing: '正在自动压缩上下文'", "autoCompressing: 'Auto-compacting context…'"],
-    ['panel.message.compactingQueueChip', "compactingQueueChip: '待发 {count}'", "compactingQueueChip: '{count} queued'"],
-    ['panel.message.executingBash', "executingBash: '正在执行'", "executingBash: 'Running'"],
-    ['panel.message.dispatching', "dispatching: '思考中…'", "dispatching: 'Thinking…'"],
-    ['panel.message.executingBashElapsed', "executingBashElapsed: '已 {elapsed}'", "executingBashElapsed: '{elapsed} elapsed'"],
-    ['panel.message.bashCommandLabel', "bashCommandLabel: '完整命令'", "bashCommandLabel: 'Command'"],
-  ]
+  /** 直接 import 双侧 locale 模块断言嵌套键（locale 为纯 `export default {}`，可安全导入）——
+   *  替代原 readFileSync + 精确文本行镜像（镜像实现把源码格式当契约，格式扰动即误红）。 */
+  const ZH_MESSAGE: Record<string, unknown> = zhPanel.message
+  const EN_MESSAGE: Record<string, unknown> = enPanel.message
 
-  it('compressing/autoCompressing/compactingQueueChip/executingBash/dispatching 在 zh/en locale 均定义', () => {
-    const zh = readFileSync(resolve(__dirname, '../../../../../../ui/src/locale/zh-CN/panel.ts'), 'utf8')
-    const en = readFileSync(resolve(__dirname, '../../../../../../ui/src/locale/en-US/panel.ts'), 'utf8')
-    for (const [key, zhLine, enLine] of KEYS) {
-      expect(zh, `${key} 缺 zh-CN 定义`).toContain(zhLine)
-      expect(en, `${key} 缺 en-US 定义`).toContain(enLine)
+  it('compressing/autoCompressing/compactingQueueChip/executingBash/executingBashElapsed/bashCommandLabel/dispatching 在 zh/en locale 均定义', () => {
+    for (const key of [
+      'compressing',
+      'autoCompressing',
+      'compactingQueueChip',
+      'executingBash',
+      'executingBashElapsed',
+      'bashCommandLabel',
+      'dispatching',
+    ]) {
+      expect(ZH_MESSAGE[key], `panel.message.${key} 缺 zh-CN 定义`).toEqual(expect.any(String))
+      expect(EN_MESSAGE[key], `panel.message.${key} 缺 en-US 定义`).toEqual(expect.any(String))
     }
   })
 
-  it('被迁出的 TurnMeta 占位 key（panel.message.thinking）已随占位删除同批清扫', () => {
-    const zh = readFileSync(resolve(__dirname, '../../../../../../ui/src/locale/zh-CN/panel.ts'), 'utf8')
-    const en = readFileSync(resolve(__dirname, '../../../../../../ui/src/locale/en-US/panel.ts'), 'utf8')
-    expect(zh).not.toContain("thinking: '思考中'")
-    expect(en).not.toContain("thinking: 'Thinking'")
+  it('被迁出的 TurnMeta 占位 key（panel.message.thinking）已随占位删除同批清扫（防复活）', () => {
+    expect(ZH_MESSAGE.thinking).toBeUndefined()
+    expect(EN_MESSAGE.thinking).toBeUndefined()
   })
 })

@@ -276,6 +276,101 @@ describe('U7 语义切换锚定：sidecar 不再是读取来源（U8 后 readMod
   })
 })
 
+// ════════════════════════════════════════════════════════════════════
+// 活跃路径逆读（message-revoke U6d）：model binding = 未来状态随树——分支下旧子树
+// model_change 不命中（等价 pi buildSessionPath 活跃路径语义；census §4.2）
+// ════════════════════════════════════════════════════════════════════
+// fixture = 真实 pi 文件形态：首行 header（有 id 无 parentId，pi getEntries() 排除、
+// 文件直读包含——trimFileEntriesToActivePath 剥离后才不触发 computeActivePathEntries
+// 单根守卫降级）+ 带 id/parentId 链的 entries。撤回形态 = 被撤子树按文件序先于 label 锚。
+
+describe('U6d 活跃路径逆读：分支下旧子树 model_change 不命中', () => {
+  /** 带树链的行（真实 pi entry 均有 id；parentId 指向当时叶子）。 */
+  function idLine(id: string, parentId: string | null, base: Record<string, unknown>): string {
+    return JSON.stringify({ id, parentId, ...base })
+  }
+
+  function userMsgLine(id: string, parentId: string | null): string {
+    return idLine(id, parentId, { type: 'message', message: { role: 'user', content: 'x' } })
+  }
+
+  function assistantModelLine(id: string, parentId: string | null, provider: string, model: string): string {
+    return idLine(id, parentId, { type: 'message', message: { role: 'assistant', provider, model, content: 'ok' } })
+  }
+
+  function modelChangeTreeLine(id: string, parentId: string | null, provider: string, modelId: string): string {
+    return idLine(id, parentId, { type: 'model_change', provider, modelId })
+  }
+
+  function thinkingTreeLine(id: string, parentId: string | null, level: string): string {
+    return idLine(id, parentId, { type: 'thinking_level_change', thinkingLevel: level })
+  }
+
+  function labelLine(id: string, parentId: string | null, targetId: string): string {
+    return idLine(id, parentId, { type: 'label', label: 'taiji:revoked', targetId })
+  }
+
+  it('被撤子树的 model_change（物理上更靠尾）不命中 → 取活跃路径生效值（fork 前的 assistant）', () => {
+    // 布局：q(assistant, 活跃) → m(被撤 user) → mc(model_change, 被撤子树)；lbl 锚 parent=q 落文件尾。
+    // 物理尾逆读（旧行为）会命中 mc → prov-revoked；活跃路径逆读命中 q → prov-active。
+    const filePath = write('branched-model.jsonl', [
+      headerLine(),
+      assistantModelLine('q', null, 'prov-active', 'model-active'),
+      userMsgLine('m', 'q'),
+      modelChangeTreeLine('mc', 'm', 'prov-revoked', 'model-revoked'),
+      labelLine('lbl', 'q', 'm'),
+    ])
+
+    expect(extractLatestModelFromJsonl(filePath)).toEqual({ modelId: 'prov-active/model-active', thinkingLevel: 'off' })
+  })
+
+  it('被撤子树的 thinking_level_change 不命中 → 取活跃路径生效值（fork 前 thinking）', () => {
+    const filePath = write('branched-thinking.jsonl', [
+      headerLine(),
+      thinkingTreeLine('t0', null, 'low'), // 活跃路径（fork 前）
+      userMsgLine('m', 't0'),
+      thinkingTreeLine('t1', 'm', 'high'), // 被撤子树（物理更靠尾）
+      labelLine('lbl', 't0', 'm'),
+    ])
+
+    expect(extractLatestModelFromJsonl(filePath)).toBeUndefined() // 活跃路径无 model 信息
+    // thinking 单独验证：给活跃路径补一条 model entry，断言 thinking 取活跃值 low
+    const withModel = write('branched-thinking-model.jsonl', [
+      headerLine(),
+      modelChangeTreeLine('mc0', null, 'prov-a', 'model-a'),
+      thinkingTreeLine('t0', 'mc0', 'low'),
+      userMsgLine('m', 't0'),
+      thinkingTreeLine('t1', 'm', 'high'),
+      labelLine('lbl', 't0', 'm'),
+    ])
+    expect(extractLatestModelFromJsonl(withModel)).toEqual({ modelId: 'prov-a/model-a', thinkingLevel: 'low' })
+  })
+
+  it('撤回后新分支（label 锚之后）的 model_change 生效——裁剪不过度移除当前分支', () => {
+    const filePath = write('branched-new-branch.jsonl', [
+      headerLine(),
+      assistantModelLine('q', null, 'prov-old', 'model-old'),
+      userMsgLine('m', 'q'),
+      modelChangeTreeLine('mc', 'm', 'prov-revoked', 'model-revoked'),
+      labelLine('lbl', 'q', 'm'),
+      modelChangeTreeLine('mc-new', 'lbl', 'prov-new', 'model-new'), // 撤回后用户切换模型
+    ])
+
+    expect(extractLatestModelFromJsonl(filePath)).toEqual({ modelId: 'prov-new/model-new', thinkingLevel: 'off' })
+  })
+
+  it('无分支真实文件形态（header + 链式 entries）→ 行为与物理尾一致（回归）', () => {
+    const filePath = write('linear-chained.jsonl', [
+      headerLine(),
+      modelChangeTreeLine('mc1', null, 'prov-1', 'model-1'),
+      assistantModelLine('a1', 'mc1', 'prov-2', 'model-2'),
+      thinkingTreeLine('t1', 'a1', 'medium'),
+    ])
+
+    expect(extractLatestModelFromJsonl(filePath)).toEqual({ modelId: 'prov-2/model-2', thinkingLevel: 'medium' })
+  })
+})
+
 describe('U7 >32MB 大文件：forEachReversedLineChunk 分块路径', () => {
   function bigPaddingLines(count: number): string[] {
     const lines: string[] = []

@@ -110,7 +110,78 @@ export function applyEntryEndTimes(messages: Message[], entries: PiSessionEntry[
 }
 
 /**
+ * 活跃路径裁剪纯函数（message-revoke U6a；导出 SSOT——runtime 派生读者按 census §4.1
+ * 复用本函数，不自含重复实现）。
+ *
+ * 语义：pi session 文件是 append-only 树（每个 entry 带 parentId，根为 null；pi 全部
+ * append* 统一 `parentId = this.leafId` 追加）；模型/对话流视角的「活跃上下文」= 从叶子
+ * 沿 parentId 回溯到根的链（pi 树重放规则：重启后叶子 = 文件最后一条 entry——PS-60
+ * 实锚 dist/core/session-manager.js:673 `_buildIndex` 文件序循环置 leafId=entry.id、
+ * :616 `_setSessionFile` 加载路径）。撤回
+ * （navigateTree 回退）后被撤子树仍在文件里（审计保留）但不在活跃路径上——本函数把
+ * entries 投影为活跃路径子集，供历史重建链喂入既有映射（被撤分支不渲染，G2 二分的
+ * 「未来状态随树」腿）。
+ *
+ * 契约：
+ * - leafId === undefined → 原数组原样返回（同一引用）：缺省 = 现行为（全文件），
+ *   既有无分支 session 行为构造性不变；
+ * - leafId 不在 entries 的 id 集合中 → warn 后原样返回（fail-safe：leafId 与 entries
+ *   不匹配属上游异常，宁可多显示也不清空历史）；
+ * - 病态树降级：无父链接（parentId null / 非 string）的 entry 多于一个 → warn 后原样
+ *   返回。合法 pi 文件恰一个根（首条 entry）；多根 = 文件损坏/非 pi 产出，活跃路径
+ *   语义未定义，退回裁剪前行为（顺带覆盖截断链路的中间损坏形态——断链残根同判）；
+ * - 输出保持输入顺序（文件序 = 根→叶正序），只做成员过滤不做重排；
+ * - 回溯链在 parentId === null（到达根）、parentId 指向集合外节点（增量/截断窗口的
+ *   正常边界，如尾读窗口首条的父亲在窗口外）时终止；环状 parentId（文件损坏）由
+ *   已访问集防御，不死循环。
+ *
+ * 泛型结构约束宽松（id/parentId 运行时校验）：调用方可能持 port 收窄类型（如
+ * get_entries 响应的域内收窄）而非完整 PiSessionEntry——按原类型透传；id 非 string 的
+ * entry 不可被索引/命中，不在活跃路径上（投影语义，非垃圾容忍契约）。
+ */
+export function computeActivePathEntries<T extends { id?: unknown; parentId?: unknown }>(
+  entries: T[],
+  leafId: string | undefined,
+): T[] {
+  if (leafId === undefined) return entries
+  const entryById = new Map<string, T>()
+  let rootLikeCount = 0
+  for (const e of entries) {
+    if (typeof e.id !== 'string') continue
+    entryById.set(e.id, e)
+    if (typeof e.parentId !== 'string') rootLikeCount++
+  }
+  if (!entryById.has(leafId)) {
+    console.warn(
+      `[session-entry-mapper] computeActivePathEntries: leafId ${leafId} not found among ${entries.length} entries — skipping active-path trim (unexpected response shape; showing full set)`,
+    )
+    return entries
+  }
+  if (rootLikeCount > 1) {
+    console.warn(
+      `[session-entry-mapper] computeActivePathEntries: ${rootLikeCount} entries without parent link (valid pi tree has exactly one root) — skipping active-path trim (malformed tree; showing full set)`,
+    )
+    return entries
+  }
+  const active = new Set<string>()
+  let cursor: string | undefined = leafId
+  while (cursor !== undefined && !active.has(cursor)) {
+    const e = entryById.get(cursor)
+    if (e === undefined) break // 父节点在集合外（窗口边界/文件损坏）→ 链终止
+    active.add(cursor)
+    cursor = typeof e.parentId === 'string' ? e.parentId : undefined
+  }
+  return entries.filter((e) => typeof e.id === 'string' && active.has(e.id))
+}
+
+/**
  * 把 pi session JSONL entry 数组映射为 { messages, entryIds, customDataEntries }。
+ *
+ * [message-revoke U6a] leafId 可选参数：提供时先经 computeActivePathEntries 裁剪为活跃
+ * 路径再映射（RPC 全量重建与文件直读两链在此共用同一裁剪语义——mapper 是两路 reload
+ * 链的共享单点，裁剪收在同一单点保证 by construction 一致）；缺省 = 现行为（全文件）。
+ * 增量窗口调用方不传 leafId（delta 是活跃路径后缀切片，裁剪是全树语义——见
+ * history-rebuild-cache getIncrementalHistory 的契约注释）。
  *
  * 映射规则（迁移自 mapEntriesToPiMessages）：
  * - message → 透传 message 体（不注入 __entryId，改用平行 entryIds）
@@ -127,7 +198,10 @@ export function applyEntryEndTimes(messages: Message[], entries: PiSessionEntry[
  *
  * 畸形降级：custom_message 无 content → 默认空串，不抛错（session JSONL 可能被截断/损坏）。
  */
-export function mapSessionEntries(entries: PiSessionEntry[]): MappedSessionEntries {
+export function mapSessionEntries(entries: PiSessionEntry[], leafId?: string): MappedSessionEntries {
+  // [message-revoke U6a] 活跃路径裁剪：leafId 缺省时 computeActivePathEntries 原样返回
+  //（同一引用），既有调用零开销零行为变化
+  const scoped = computeActivePathEntries(entries, leafId)
   const messages: unknown[] = []
   const entryIds: string[] = []
   const customDataEntries: PiSessionCustomEntry[] = []
@@ -142,7 +216,7 @@ export function mapSessionEntries(entries: PiSessionEntry[]): MappedSessionEntri
     return ms
   }
 
-  for (const entry of entries) {
+  for (const entry of scoped) {
     switch (entry.type) {
       case 'message': {
         // 透传 message 体（不注入 __entryId，改用平行 entryIds）

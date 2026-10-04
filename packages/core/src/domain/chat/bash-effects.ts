@@ -14,6 +14,8 @@
  *   entry（形态对照 apply-entry.ts bashExecution case 消费的 PiEntry 结构）→
  *   applyEntryFrameWithOverlay 骨架（喂 per-session reducer state + overlay 投影 + commit，
  *   effects/entry-overlay.ts——[u6.2 D13 联动] 从本文件与 registry 三处 effect 内联收敛）。
+ * - message.bashAborted（dispatcher.abortBash 兜底终态，msg-pipeline-debloat D4-3 独立帧化）：
+ *   只清 executingBash（UI 中止态），无 pi 文件对应物不产 entry。
  *
  * 探针 ①（0.84.1 dist 实测，excludeFromContext bash 是否写 session entry）：**写**。
  * recordBashResult 对 exclude 无分支（agent-session.js:2225-2248，excludeFromContext 只是
@@ -46,8 +48,8 @@ type Payload = Record<string, unknown>
 // 「读方签名不变」约束）；架构目标以「cleanup 编排可达」达成——store.disposeSession 同点
 // 调 clearExecutingBash（session 删除无残留，与 messages 分区同编排清理）。
 // 不进 messages、不持久化（live 瞬时态）。
-// 唯一写方（成对保证）：bashStartEffect 置 / bashResultEffect 清 / markBashError 清
-// （abortBash RPC 失败的前端兜底错误路径）。
+// 唯一写方（成对保证）：bashStartEffect 置 / bashResultEffect 清 / bashAbortedEffect 清
+// （abortBash 兜底终态）/ markBashError 清（abortBash RPC 失败的前端兜底错误路径）。
 
 /** 执行中 bash 的最小瞬时态（渲染「命令 + 转圈」行用）。 */
 export interface ExecutingBash {
@@ -121,23 +123,17 @@ export const bashStartEffect: MessageEffectHandler = (_ctx: MessageEffectContext
  *
  * dispatcher 的双分支（streaming 待落列延迟到 agent_settled / 空闲立即）保证本帧到达时序
  * 构造性等于 pi 落盘时序——本 handler 无论延迟或立即到达都走同一条 entry 化路径。
+ *
+ * [D1 closure] cancelled=true 的真实 abort 结果照常 entry 化（与 pi recordBashResult 落盘
+ * 同位同值，原「live/file 分歧」例外①消灭）；abortBash 的兜底终态是独立帧
+ * message.bashAborted（msg-pipeline-debloat D4-3，无文件对应物不产 entry），与本 handler
+ * 无交集——原 command:'' 哨兵形态判别随帧类型化删除。收窄例外保留：sendBash catch 分支
+ *（transport 抛错，无真实数据可发布）跳过发布，live 无 cancelled entry 而 pi 进程独立落盘
+ * 有——触发条件「abort 且 transport 抛错」，登记 data-source-registry #7。
  */
 export const bashResultEffect: MessageEffectHandler = (ctx: MessageEffectContext, sid: string, payload: Payload) => {
   const command = readString(payload, 'command') ?? ''
   const cancelled = readBool(payload, 'cancelled')
-  // abortBash 合成哨兵帧（command:'' + cancelled:true，dispatcher.abortBash 兜底广播，
-  // 见 message-dispatcher abortBash）：无文件对应物，只清 executingBash，不产 entry。
-  // [D1 closure] 正常 abort 路径 live/file 已一致：sendBash await 返回的真实 cancelled 结果
-  // 照常发布并 entry 化（与 pi recordBashResult 落盘同位同值，原「live/file 分歧」例外①
-  // 消灭）。command === '' 独占哨兵形态是结构性不变式（dispatcher sendBash 入口空命令
-  // 早退守卫保证，r3 审查补）——真实帧 command 恒非空，两类帧永不混淆。
-  // 收窄例外（仅剩场景）：sendBash catch 分支（transport 抛错，无真实数据可发布）跳过
-  // 发布，live 无 cancelled entry 而 pi 进程独立落盘有——触发条件「abort 且 transport
-  // 抛错」，登记 data-source-registry #7。
-  if (command === '' && cancelled) {
-    clearExecutingBash(sid)
-    return
-  }
   const ts = readNumber(payload, 'timestamp') ?? Date.now()
   const fullOutputPath = readString(payload, 'fullOutputPath')
   // entry 形态对齐 apply-entry.ts bashExecution case 消费的 PiMessageEntry（探针 ①：
@@ -169,10 +165,20 @@ export const bashResultEffect: MessageEffectHandler = (ctx: MessageEffectContext
   clearExecutingBash(sid)
 }
 
+/**
+ * message.bashAborted：abortBash 兜底终态（dispatcher.abortBash 无论 pi 是否确认都广播，
+ * msg-pipeline-debloat D4-3 独立帧化）。无 pi 文件对应物——只清 executingBash（UI 中止态：
+ * 瞬时执行行消失），不产 entry、不动 messages。
+ */
+export const bashAbortedEffect: MessageEffectHandler = (_ctx: MessageEffectContext, sid: string): void => {
+  clearExecutingBash(sid)
+}
+
 /** 供 messageEffects 表展开的类型化入口 */
 export const bashEffects: Partial<Record<ServerMessage['type'], MessageEffectHandler>> = {
   'message.bashStart': bashStartEffect,
   'message.bashResult': bashResultEffect,
+  'message.bashAborted': bashAbortedEffect,
 }
 
 /**

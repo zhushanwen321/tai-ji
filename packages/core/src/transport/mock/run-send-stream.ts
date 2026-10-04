@@ -25,7 +25,6 @@ export interface Timing {
   toolGap: number;
   fileChangesGap: number;
   retryGap: number;
-  steerDrain: number;
   /** bashStart→bashResult 间隔（loading 态可见）；timeout 分支在此之上 +1s 强调到期节奏 */
   bashDelay: number;
 }

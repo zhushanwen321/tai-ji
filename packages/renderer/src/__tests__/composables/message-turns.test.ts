@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * expandAssistantBlocks 纯函数单测 —— 单条 assistant Message 内部块按真实时序展开。
  *
@@ -18,7 +20,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   expandAssistantBlocks,
-  filterDisplayableMessages,
   renderKey,
   toRenderItems,
   toRenderItemsIncremental,
@@ -31,108 +32,10 @@ function makeMsg(over: Partial<Message> = {}): Message {
   return { id: 'a1', role: 'assistant', content: '', status: 'complete', timestamp: Date.now(), ...over }
 }
 
-describe('filterDisplayableMessages —— 按 display 字段过滤（FR-5 / AC-1/2/3）', () => {
-  // [HISTORICAL] pi CustomMessage.display 是必填 boolean（false=隐藏不渲染）。
-  // pi-goal/pi-todo 的 context 消息（<goal_context>/<todo_context>）声明 display:false。
-  // 本次修复 message-converter/session-history/customStart 三路径透传 display 后，
-  // filterDisplayableMessages 从 HIDDEN_CUSTOM_TYPES 黑名单改为读 m.display !== false。
-  // 过滤只在渲染层（本函数），chat store 保留完整 messages（关键规则 9 fork/compact/replay）。
-  it('display:false 的消息过滤掉（goal/todo context 类）', () => {
-    const messages: Message[] = [
-      makeMsg({ id: 'u1', role: 'user', content: '开始' }),
-      makeMsg({ id: 's1', role: 'system', customType: 'goal-context', display: false, content: '<goal_context>...' }),
-      makeMsg({ id: 'a1', role: 'assistant', content: '好的' }),
-      makeMsg({ id: 's2', role: 'system', customType: 'todo-context', display: false, content: '<todo_context>...' }),
-      makeMsg({ id: 's3', role: 'system', customType: 'goal-context-exceeded', display: false, content: '超限' }),
-    ]
-    const filtered = filterDisplayableMessages(messages)
-    expect(filtered.map((m) => m.id)).toEqual(['u1', 'a1'])
-  })
-
-  // [M2 display 前置] customType 黑名单已删（§3.3.2 收敛为 display 单一判别），完成通知
-  // （subagent-bg-notify / workflow-result）由生产端（core apply-entry custom_message case：
-  // 实时 customStart 喂 entry 与重开 replay 同一覆写点 / runtime mapper）
-  // 统一写 display:false，filter 只按 display===false 纯字段过滤。用例输入对齐生产端契约。
-  // 消息仍进 store 供 fork/compact/replay（filter 不丢消息）。
-  it('subagent-bg-notify 完成通知（display:false）被过滤', () => {
-    const messages: Message[] = [
-      makeMsg({ id: 'u1', role: 'user', content: 'hi' }),
-      makeMsg({ id: 'n1', role: 'system', customType: 'subagent-bg-notify', display: false, content: '子代理完成' }),
-      makeMsg({ id: 'a1', role: 'assistant', content: 'ok' }),
-    ]
-    const filtered = filterDisplayableMessages(messages)
-    expect(filtered.map((m) => m.id)).toEqual(['u1', 'a1'])
-  })
-
-  it('workflow-result 完成通知（display:false）被过滤', () => {
-    const messages: Message[] = [
-      makeMsg({ id: 'u1', role: 'user', content: 'hi' }),
-      makeMsg({ id: 'w1', role: 'system', customType: 'workflow-result', display: false, content: 'done' }),
-      makeMsg({ id: 'a1', role: 'assistant', content: 'ok' }),
-    ]
-    const filtered = filterDisplayableMessages(messages)
-    expect(filtered.map((m) => m.id)).toEqual(['u1', 'a1'])
-  })
-
-  it('完成通知 customType 但 display:true/undefined 时保留（filter 只认 display 字段，不按 customType 拉黑）', () => {
-    // 黑名单删除后的关键回归：filter 不得再按 customType 过滤（M2 前置后 customType
-    // 语义回归普通 systemNotice——兼容旧数据/非 taiji 消费方写入的 display:true 完成通知）。
-    const messages: Message[] = [
-      makeMsg({ id: 'n1', role: 'system', customType: 'subagent-bg-notify', display: true, content: '子代理完成' }),
-      makeMsg({ id: 'w1', role: 'system', customType: 'workflow-result', content: 'done' }),
-    ]
-    const filtered = filterDisplayableMessages(messages)
-    expect(filtered.map((m) => m.id)).toEqual(['n1', 'w1'])
-  })
-
-  it('普通 customType 消息（display:true）仍保留', () => {
-    const messages: Message[] = [
-      makeMsg({ id: 'u1', role: 'user', content: 'hi' }),
-      // 非完成通知 customType，display:true → 保留
-      makeMsg({ id: 'x1', role: 'system', customType: 'future-extension-notify', display: true, content: '显示' }),
-      makeMsg({ id: 'a1', role: 'assistant', content: 'ok' }),
-    ]
-    const filtered = filterDisplayableMessages(messages)
-    expect(filtered.map((m) => m.id)).toEqual(['u1', 'x1', 'a1'])
-  })
-
-  it('display:undefined 保留（普通消息无 display 字段，按 !== false 判断安全）', () => {
-    const messages: Message[] = [
-      makeMsg({ id: 'u1', role: 'user', content: 'hi' }),
-      makeMsg({ id: 'a1', role: 'assistant', content: 'hello' }),
-      // compactionSummary / branchSummary 走独立字段，无 customType 无 display
-      makeMsg({ id: 'c1', role: 'system', content: '压缩记录' }),
-    ]
-    const filtered = filterDisplayableMessages(messages)
-    expect(filtered.map((m) => m.id)).toEqual(['u1', 'a1', 'c1'])
-  })
-
-  it('AC-3 双层：原数组含 display:false（store 保留）+ filter 后不含（渲染过滤）', () => {
-    const messages: Message[] = [
-      makeMsg({ id: 'u1', role: 'user', content: 'hi' }),
-      makeMsg({ id: 'h1', role: 'system', customType: 'todo-context', display: false, content: '隐藏' }),
-      makeMsg({ id: 'a1', role: 'assistant', content: 'ok' }),
-    ]
-    // store 层：原数组完整保留 display:false 消息（filter 不改原数组，不丢消息）
-    expect(messages.map((m) => m.id)).toEqual(['u1', 'h1', 'a1'])
-    expect(messages.find((m) => m.id === 'h1')?.display).toBe(false)
-    // 渲染层：filter 后不含 display:false
-    const filtered = filterDisplayableMessages(messages)
-    expect(filtered.map((m) => m.id)).toEqual(['u1', 'a1'])
-    expect(filtered.find((m) => m.display === false)).toBeUndefined()
-  })
-
-  // 关键红灯验证：customType 不在旧黑名单、但 display:false 的消息也必须被过滤。
-  // 证明 filter 读的是 display 字段而非 customType 黑名单（旧实现会漏这个）。
-  it('customType 未知的 display:false 消息也被过滤（证明读 display 字段非黑名单）', () => {
-    const messages: Message[] = [
-      makeMsg({ id: 'x1', role: 'system', customType: 'future-extension-context', display: false, content: '隐藏' }),
-      makeMsg({ id: 'y1', role: 'system', customType: 'future-extension-notify', display: true, content: '显示' }),
-    ]
-    const filtered = filterDisplayableMessages(messages)
-    expect(filtered.map((m) => m.id)).toEqual(['y1'])
-  })
-})
+// [W3·D3 演进] display 过滤已内化到分组输出层：隐藏完成通知消化为 trigger turn 边界、
+// 隐藏非通知消息在 groupRenderInput 透明跳过——独立的 filterDisplayableMessages 死导出
+// 随过度设计审计候选 1 删除，其行为由「分组规则 v2」用例（core message-turns.incremental）
+// 经 toRenderItems 输出侧锁定。
 
 describe('expandAssistantBlocks —— 单条 assistant 内部块按时序展开', () => {
   it('B1: 有 contentBlocks → 严格按其顺序输出（thinking→text→tool→thinking 交替）', () => {

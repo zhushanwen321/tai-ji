@@ -4,8 +4,8 @@
 //
 // [U4a / D3 v7] 角色重定义（D3d 模块头权威表述）：
 //   - 宿主 resurrect/接管归口写：写权声明 acquire（markResurrected/acquireWriteLease）
-//     / release（[永久会话模型] 现行主出口两点 = markSettledOut（close 收口落账）+
-//     markIdleEvicted（内存回收 30 天）；markFinalized/markCancelled 仅剩
+//     / release（[永久会话模型] 现行主出口单点 = markSettledOut（close 收口落账）；
+//     markFinalized/markCancelled 仅剩
 //     workflow-origin D7 例外族与监督器放弃族——legacy 例外，内部删）；
 //   - 判活 = pid 单判据（findForeignLiveInstance：self-pid 排除 + isProcessAlive，
 //     软超时已退役——谱系 #12，跨轮保留 × startedAt 一次性不刷新的组合下超时会
@@ -17,7 +17,7 @@ import * as fs from "node:fs";
 
 import { getLogger } from "../../core/logger.ts";
 
-import type { AliveMarker } from "../assembly/types.ts";
+import type { AliveMarker } from "../domain/record-types.ts";
 
 const logger = getLogger("subagents");
 

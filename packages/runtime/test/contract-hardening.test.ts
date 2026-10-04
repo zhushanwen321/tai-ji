@@ -68,6 +68,7 @@ import { NotifyRateLimiter, registerNotifyRpcHandler } from '../src/services/plu
 import { StatusBarRegistry } from '../src/services/plugin-service/status-bar-registry.js'
 import { asBoundedString, asSafeKey, asString } from '../src/services/plugin-service/validation.js'
 import { PLUGIN_NOTIFY_LIMITS } from '@taiji/shared'
+import type { SendPromptReason } from '@taiji/shared'
 import type { SessionInfo } from '../src/services/plugin-service/plugin-types.js'
 import { PluginService } from '../src/services/plugin-service/plugin-service.js'
 import { createAgentAPI } from '../src/services/plugin-service/plugin-bootstrap.js'
@@ -159,7 +160,6 @@ function makeLifecycleEnv() {
     adapterFactory: () => ({ attach: vi.fn(), detach: vi.fn() }) as unknown as IEventAdapter,
     getMessageBus: () => null,
     broadcastGlobal: () => {},
-    notifyMessageComplete: () => {},
   }
 
   const lifecycle = new SessionLifecycle(svc, pm, configStore, sessionStore, workspaceService, registerDeps)
@@ -811,7 +811,7 @@ describe('CT-U1 api 入口窄校验层（畸形输入 → INVALID_* 结构化错
     configSet: ReturnType<typeof vi.fn<(pluginId: string, key: string, value: unknown) => Promise<void>>>
     storageSet: ReturnType<typeof vi.fn<(pluginId: string, key: string, value: unknown, scope: 'global' | 'workspace') => void>>
     sessionDataSet: ReturnType<typeof vi.fn<(sessionId: string, key: string, value: unknown) => void>>
-    messageSent: ReturnType<typeof vi.fn<(sessionId: string, role: string, content: string, requireCommand?: string) => Promise<{ blocked: boolean; reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error' }>>>
+    messageSent: ReturnType<typeof vi.fn<(sessionId: string, role: string, content: string, requireCommand?: string) => Promise<{ blocked: boolean; reason?: SendPromptReason }>>>
     notifySent: ReturnType<typeof vi.fn<(pluginId: string, level: string, message: string) => void>>
     statusBarSet: ReturnType<typeof vi.fn<(pluginId: string, id: string, text: string, options?: Record<string, unknown>) => Promise<void>>>
     viewUpdated: ReturnType<typeof vi.fn<(pluginId: string, viewId: string, guiTree: unknown[]) => void>>
@@ -830,7 +830,7 @@ describe('CT-U1 api 入口窄校验层（畸形输入 → INVALID_* 结构化错
       configSet: vi.fn<(pluginId: string, key: string, value: unknown) => Promise<void>>(),
       storageSet: vi.fn<(pluginId: string, key: string, value: unknown, scope: 'global' | 'workspace') => void>(),
       sessionDataSet: vi.fn<(sessionId: string, key: string, value: unknown) => void>(),
-      messageSent: vi.fn<(sessionId: string, role: string, content: string, requireCommand?: string) => Promise<{ blocked: boolean; reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error' }>>(),
+      messageSent: vi.fn<(sessionId: string, role: string, content: string, requireCommand?: string) => Promise<{ blocked: boolean; reason?: SendPromptReason }>>(),
       notifySent: vi.fn<(pluginId: string, level: string, message: string) => void>(),
       statusBarSet: vi.fn<(pluginId: string, id: string, text: string, options?: Record<string, unknown>) => Promise<void>>(),
       viewUpdated: vi.fn<(pluginId: string, viewId: string, guiTree: unknown[]) => void>(),
@@ -1058,30 +1058,39 @@ describe('CT-D3 限流与防毒化（notify 令牌桶 / 大小上限 / statusbar
   })
 
   it('CT-D3 plugin.notify 超限丢弃并记日志（真实 dispatch 链路，20/s 打满后第 21 条丢弃 + warn）', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const rpc = new PluginRpcServer()
-    const port = createMockPort()
-    rpc.registerWorker('w1', port)
-    const notify = vi.fn()
-    registerNotifyRpcHandler(rpc, { notify })
+    // fake Date 钉死时钟（toFake 精确限定 Date，不动 setTimeout）：guardNotifyParams
+    // 默认 nowMs=Date.now()，令牌桶按真实 elapsed 墙钟补充令牌——满并行 + coverage
+    // 插桩下 21 条 await dispatch 的墙上耗时可能 >1s，桶被补满后第 21 条意外放行
+    // （gate-suite round 2 实测时序脆弱）。钉死后放行/丢弃仅由条数决定，与调度快慢无关。
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const rpc = new PluginRpcServer()
+      const port = createMockPort()
+      rpc.registerWorker('w1', port)
+      const notify = vi.fn()
+      registerNotifyRpcHandler(rpc, { notify })
 
-    const dispatchNotify = (i: number) =>
-      rpc.dispatch('w1', {
-        jsonrpc: '2.0',
-        id: 700000 + i,
-        method: 'plugin.notify',
-        params: { pluginId: 'storm', level: 'info', message: `m${i}` },
-      })
+      const dispatchNotify = (i: number) =>
+        rpc.dispatch('w1', {
+          jsonrpc: '2.0',
+          id: 700000 + i,
+          method: 'plugin.notify',
+          params: { pluginId: 'storm', level: 'info', message: `m${i}` },
+        })
 
-    for (let i = 0; i < 20; i++) await dispatchNotify(i)
-    expect(notify).toHaveBeenCalledTimes(20)
+      for (let i = 0; i < 20; i++) await dispatchNotify(i)
+      expect(notify).toHaveBeenCalledTimes(20)
 
-    await dispatchNotify(20)
-    expect(notify, '超限第 21 条被丢弃（notify 不再被调用）').toHaveBeenCalledTimes(20)
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('rate limit 20/s exceeded'))
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('storm'))
+      await dispatchNotify(20)
+      expect(notify, '超限第 21 条被丢弃（notify 不再被调用）').toHaveBeenCalledTimes(20)
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('rate limit 20/s exceeded'))
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('storm'))
 
-    warnSpy.mockRestore()
+      warnSpy.mockRestore()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('CT-D3 notify message >8KB 拒（INVALID_MESSAGE），8KB 整放行', async () => {

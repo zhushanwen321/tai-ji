@@ -16,8 +16,13 @@
  *   node scripts/select-affected-e2e.mjs --release        # trigger ∈ {on-release, on-pi-bump}
  *   node scripts/select-affected-e2e.mjs --layer L3       # 叠加层过滤（可与 --base/--release 同用）
  *   node scripts/select-affected-e2e.mjs --check          # 门禁模式：未登记的 watched 文件 → exit 1
+ *   node scripts/select-affected-e2e.mjs --staged         # pre-commit 门禁：输入源换为暂存文件
+ *                                                         #（git diff --cached），防「新增 e2e
+ *                                                         # 资产但漏改 e2e-map.json」——与 --check
+ *                                                         # 同判定（unregisteredWatchedFiles），
+ *                                                         # 不渲染受影响清单
  *
- * 退出码：0 成功 / 1 --check 检出未登记文件 / 2 环境错误（map 缺失、git ref 无效）
+ * 退出码：0 成功 / 1 --check、--staged 检出未登记文件 / 2 环境错误（map 缺失、git ref 无效）
  */
 
 import { readFileSync } from "node:fs";
@@ -110,12 +115,27 @@ function loadMap() {
 
 function changedFiles(base) {
   try {
-    return execSync(`git diff --name-only ${base}...HEAD`, { cwd: REPO_ROOT, encoding: "utf8" })
+    // --diff-filter=d 排除已删除文件：删除不产生 coverage 义务（磁盘已不存在，
+    // 无法登记——validate-e2e-map 的 existsSync 强校验会拒绝死资产条目）
+    return execSync(`git diff --name-only --diff-filter=d ${base}...HEAD`, { cwd: REPO_ROOT, encoding: "utf8" })
       .split("\n")
       .filter(Boolean);
   } catch {
     console.error(`[select-affected-e2e] git diff ${base}...HEAD 失败：base ref 不存在或仓库状态异常`);
     console.error(`  恢复动作：git fetch origin main 后重试，或显式指定存在的 ref：node scripts/select-affected-e2e.mjs --base <ref>`);
+    process.exit(2);
+  }
+}
+
+/** --staged 输入源：暂存文件（pre-commit 场景——HEAD 尚未包含本次提交，base...HEAD diff 取不到） */
+function stagedFiles() {
+  try {
+    // 与 changedFiles 同款 --diff-filter=d：删除不产生登记义务
+    return execSync("git diff --cached --name-only --diff-filter=d", { cwd: REPO_ROOT, encoding: "utf8" })
+      .split("\n")
+      .filter(Boolean);
+  } catch {
+    console.error("[select-affected-e2e] git diff --cached 失败：仓库状态异常");
     process.exit(2);
   }
 }
@@ -156,6 +176,21 @@ function main() {
   }
 
   const map = loadMap();
+
+  // --staged：pre-commit 门禁形态——只做防漏登记判定，不渲染受影响清单（与 --check 同判定逻辑）
+  if (args.includes("--staged")) {
+    const unregistered = unregisteredWatchedFiles(map, stagedFiles());
+    if (unregistered.length > 0) {
+      console.error("[select-affected-e2e] --staged FAIL：以下暂存文件落在 e2e-map 看护目录内但无任何 rule 覆盖（防漏登记）：");
+      for (const f of unregistered) console.error(`  - ${f}`);
+      console.error("  恢复动作：在 docs/testing/e2e-map.json 为该文件新增 rule（E2E-<域>-<序号>），或扩展既有 rule 的 scope/assets 后重试提交。");
+      console.error("  若该目录不应被看护：先修订造成 watched root 的 scope/asset 登记，再重试。");
+      process.exit(1);
+    }
+    console.log("e2e-map staged check PASS");
+    return;
+  }
+
   const files = release ? [] : changedFiles(base);
 
   if (release) {

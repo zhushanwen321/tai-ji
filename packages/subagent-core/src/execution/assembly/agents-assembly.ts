@@ -4,7 +4,7 @@
 // 去重 → 码点序，warn 口径内聚。workflow 侧 discoverWorkflows（config-loader）的
 // 对称面——第三宿主仅凭该函数即可「列 agents」（G3/S5），无需复刻装配循环。
 //
-// 与 pi 壳装配循环（subagent-list-injector.discoverAllAgents）的等值口径：
+// 与 pi 壳注入器（subagent-list-injector 经工厂 assemble 槽委托本函数，U11 单源）的等值口径：
 // - 清单可见性 = IF1 严格层（profile.meta !== null）——缺 name/description 的资产
 //   不进清单（注入投影「路由可见性」双轨语义，D3 定稿；宽容解析只服务执行消费面）；
 // - warn 口径内聚：仅「有 frontmatter 但严格校验未通过」才 warn——README 等无

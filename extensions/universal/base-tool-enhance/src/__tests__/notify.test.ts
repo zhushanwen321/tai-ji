@@ -135,13 +135,13 @@ describe("register emit (data flow ⑤)", () => {
 	it("emits pending:register {id, type:'bash', name} with NO expiresAt key after successful spawn", () => {
 		const pi = createMockPi();
 		attach(pi);
-		const spawned = spawnBg("sleep 0.5 && echo hi");
+		const spawned = spawnBg("sleep 0.1 && echo hi");
 		if (!spawned.ok) throw new Error(spawned.error);
 
 		expect(pi.events.emit).toHaveBeenCalledWith("pending:register", {
 			id: spawned.task.taskId,
 			type: "bash",
-			name: "sleep 0.5 && echo hi",
+			name: "sleep 0.1 && echo hi",
 		});
 		// process 档（D16）：emit 不携带 expiresAt——键级断言防字段悄悄混入
 		const payload = pi.events.emit.mock.calls.find((c) => c[0] === "pending:register")?.[1] as Record<
@@ -178,7 +178,7 @@ describe("exit-edge notification (⑧⑨, poll edge wiring)", () => {
 		const pi = createMockPi();
 		attach(pi);
 		setOnTaskExit(handleTaskExit);
-		const spawned = spawnBg("sleep 0.3 && echo done");
+		const spawned = spawnBg("sleep 0.1 && echo done");
 		if (!spawned.ok) throw new Error(spawned.error);
 		const { task } = spawned;
 
@@ -207,7 +207,7 @@ describe("exit-edge notification (⑧⑨, poll edge wiring)", () => {
 		const finalizedEntry = getTask(task.taskId);
 		expect(message.details).toMatchObject({
 			taskId: task.taskId,
-			command: "sleep 0.3 && echo done",
+			command: "sleep 0.1 && echo done",
 			endReason: "natural",
 			exitCode: 0,
 		});
@@ -254,7 +254,8 @@ describe("exit-edge notification (⑧⑨, poll edge wiring)", () => {
 		const pi = createMockPi();
 		attach(pi);
 		setOnTaskExit(handleTaskExit);
-		const spawned = spawnBg("sleep 0.3; exit 3");
+		// 断言只看 reason=failed 与文案 exit code，不依赖命令时长
+		const spawned = spawnBg("sleep 0.1; exit 3");
 		if (!spawned.ok) throw new Error(spawned.error);
 		const { task } = spawned;
 
@@ -401,8 +402,9 @@ describe("D17: pi reference refresh (session replacement takeover)", () => {
 		attach(stale);
 		setOnTaskExit(handleTaskExit);
 
-		const first = spawnBg("sleep 0.3 && echo one");
-		const second = spawnBg("sleep 0.3 && echo two");
+		// 断言只看双任务终态化与异常吞没，不依赖命令时长
+		const first = spawnBg("sleep 0.1 && echo one");
+		const second = spawnBg("sleep 0.1 && echo two");
 		if (!first.ok || !second.ok) throw new Error("spawn failed");
 		// 边沿回调内部全捕获：轮询到两条任务都完成终态化（每迭代 tick 后查）
 		await pollUntilTicked(

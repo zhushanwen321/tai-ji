@@ -10,7 +10,7 @@ VERDICT: NEEDS-FIX (must-fix 5 / suggestion 4)
 
 ## 总评
 
-方案的三个主干裁决（D1 行为原语下沉 protocol、D3-B 差集规则下沉 protocol、D3-M5 setWidgetDual 组合 helper）方向正确且有真实漂移证据支撑（tail 已实际分叉、LRU 四份、守卫注释三处复制）——**不是投机抽象，是对已发生漂移的收口**。但设计起草后被六份已实施设计（尤其 12 号）改变了其所引用的现状，导致 D5 裁决前提失效、E6 落点描述与 12 号终态结构错位；另有根因章节一处事实失实、探针面缺口、D2 方案缺口三处独立问题。5 条 must-fix 全部修完前不建议进入实施。
+方案的三个主干裁决（D1 行为原语下沉 protocol、D3-B 差集规则下沉 protocol、D3-M5 setWidgetDual 组合 helper）方向正确且有真实漂移证据支撑（tail 已实际分叉、LRU 四份、检查注释三处复制）——**不是投机抽象，是对已发生漂移的收敛**。但设计起草后被六份已实施设计（尤其 12 号）改变了其所引用的现状，导致 D5 裁决前提失效、E6 落点描述与 12 号终态结构错位；另有根因章节一处事实失实、探针面缺口、D2 方案缺口三处独立问题。5 条 must-fix 全部修完前不建议进入实施。
 
 ---
 
@@ -28,19 +28,19 @@ VERDICT: NEEDS-FIX (must-fix 5 / suggestion 4)
 | F6 | 原子写 `atomicWriteRegistry` bte registry.ts:154-171 与 reaper:306-321 逐字相同（§2.1 例 3） | registry.ts:154-171 与 reaper.ts:306-321 核实，逐字相同（tmp 名 = pid + 36 进制随机段 + rename） | 属实 |
 | F7 | 解析防御（corrupt 隔离）bte registry.ts:72-126 与 reaper:237-291 同构（§2.1 例 3） | registry.ts:72-126（parseRegistryContent + corruptPathFor + readRegistry）与 reaper.ts:237-291（parseRegistryContent + corruptPathFor + readRegistryEntriesWithStatus）同构；runtime 返回 `{entries, corrupted}` 超集——设计 D2 已识别该超集 | 属实 |
 | F8 | bte 本地 `isValidRegistryEntry`（registry.ts:56-69）与 protocol `isBackgroundTaskRegistryEntry`（background-task.ts:113-126）逐字相同（§2.1 例 3） | 两处均 8 字段 typeof 检查（taskId/pid/command/outputFile/startedAt/state/ownerPiPid/sessionId），逐字相同 | 属实 |
-| F9 | bt- 差集双写：bte 对账判据（pending-reconcile.ts:75-93）与 pending 守卫判据（**state.ts:177** countActiveFromEntries）同构；pending 侧 W4 翻档在 **state.ts:28-44**（§2.1 例 4 / §3.3） | 同构属实（bte collectUnsettledTaskIds :77-95 与 pending countActiveFromEntries 语义等价，id 全局唯一前提下成立）；**但行号全部失效**：12 号实施重排 state.ts——countActiveFromEntries 现为 **:98-111**，:28-44 现为 PendingEntry 接口区，文件头 :10-17 明示「历史的内存 registry、session_start 重建、TTL 与 shutdown 机器已删除」 | 部分属实（同构属实；行号与「W4 翻档」引用已被 12 号终态取代） |
+| F9 | bt- 差集双写：bte 对账判据（pending-reconcile.ts:75-93）与 pending 检查判据（**state.ts:177** countActiveFromEntries）同构；pending 侧 W4 翻档在 **state.ts:28-44**（§2.1 例 4 / §3.3） | 同构属实（bte collectUnsettledTaskIds :77-95 与 pending countActiveFromEntries 语义等价，id 全局唯一前提下成立）；**但行号全部失效**：12 号实施重排 state.ts——countActiveFromEntries 现为 **:98-111**，:28-44 现为 PendingEntry 接口区，文件头 :10-17 明示「历史的内存 registry、session_start 重建、TTL 与 shutdown 机器已删除」 | 部分属实（同构属实；行号与「W4 翻档」引用已被 12 号终态取代） |
 | F10 | D5：pending-reconcile.ts:133-141 尽力 emit 路径；补注释前提「pending 内存 registry 仅在其自身 session_start rebuild 后非空」（§3.5 D5） | emit 路径存在（现为 **:138-144**）；**前提已失效**：12 号删除该机制后，pending unregister listener 落盘前置 `isPendingActive` 对 entries 现算（pending index.ts:186-191），bte 的 appendEntry 同步入账后 emit 到达即判「已注销」跳过——emit 的落盘效果**恒 no-op**。且 pending-reconcile.ts 文件头 :15-18 与 :135-137 的注释**已被 12 号同步改写为新口径**（「其内存 registry/rebuild 已随 ext-simplify-12 删除」） | **失实（前提已被 12 号终态推翻）** → MF1 |
 | F11 | runtime tsup noExternal 已含 protocol（tsup.config.ts:57）；bte dependencies 已含 protocol（§3.2 证据） | runtime `tsup.config.ts:57` 精确命中；bte package.json dependencies 含 `"@zhushanwen/extension-protocol": "workspace:*"`；protocol 有 publishConfig（发 npm dist/index.mjs）——bte「独立 pi 用户可单独安装」定位不受新增影响（无新增依赖边） | 属实 |
 | F12 | reaper :6-9 自认「实现独立于 extension 源码——契约类型一律取 extension-protocol」（§3.2 证据） | reaper.ts:8-11（行号轻微偏移），内容属实；:92 段注释「pid 探测 / 处置原语」存在 | 属实 |
 | F13 | **extensions/shared 组的包 runtime 也不消费（file-lock 即两套并存：utils/file-lock.ts vs @zhushanwen/pi-file-lock）**（§2.3 根因） | **失实**：runtime `src/utils/file-lock.ts:46` 实际 `import { acquireLock, acquireLockSync } from '@zhushanwen/pi-file-lock/core'`（extensions/shared 包的子入口），:15 注释自述「extension 侧 @zhushanwen/pi-file-lock 与本模块同源 lock-core——不再是『孪生』」；runtime tsup noExternal :57 亦列有该包 | **失实** → MF3 |
-| F14 | M5：todo `index.ts:48-65`（makeRefreshDisplay，:24/:52 import isGuiCapable，:44-46 守卫注释）；goal `projection/widget.ts:232-262`（updateWidget 3 处 2×2）；goal `adapters/ports.ts:53-55` 守卫注释；helpers.ts:59-60 无守卫自述 + :65-78 清屏死分支（§2.1 例 5 / 审计修正 4） | todo `src/index.ts:48-65` 精确命中（:24 import、:44-46 注释、:52-63 四分支）；goal widget.ts 实为 **:200-230**（03 号实施后偏移）——3 处 2×2 在 :206-207 / :218-219 / :224-229 属实；adapters/ports.ts:52-54 注释属实；helpers.ts:59-60 与 :65-78（guiSetWidget undefined 双分支均落 `ctx.ui.setWidget(key, undefined)`——清屏死分支实证）属实 | 基本属实（goal 行号漂移） |
+| F14 | M5：todo `index.ts:48-65`（makeRefreshDisplay，:24/:52 import isGuiCapable，:44-46 检查注释）；goal `projection/widget.ts:232-262`（updateWidget 3 处 2×2）；goal `adapters/ports.ts:53-55` 检查注释；helpers.ts:59-60 无检查自述 + :65-78 清屏死分支（§2.1 例 5 / 审计修正 4） | todo `src/index.ts:48-65` 精确命中（:24 import、:44-46 注释、:52-63 四分支）；goal widget.ts 实为 **:200-230**（03 号实施后偏移）——3 处 2×2 在 :206-207 / :218-219 / :224-229 属实；adapters/ports.ts:52-54 注释属实；helpers.ts:59-60 与 :65-78（guiSetWidget undefined 双分支均落 `ctx.ui.setWidget(key, undefined)`——清屏死分支实证）属实 | 基本属实（goal 行号漂移） |
 | F15 | goal UiPort setWidget 的 `string` 臂零调用方（§3.4 E9） | 生产代码调用点全核：widget.ts:207/:219（undefined）、:228（renderWidgetLines 返回 `string[]`，:154 签名核实）、session.ts:129（undefined）——单 string 臂生产零调用 | 属实 |
 | F16 | D4 证据：tool-error-audit.ts:7/:76；ext-simplify-01 :32/:153/:167/:198；CHANGELOG.md:48/:61；README.md:3（§3.5 D4） | tool-error-audit.ts:7（「M6 摘除旧包时消费方无感」）与 :76（appendEntry 字符串）精确命中；01 号 :32（关键协议承诺）/ :153-167（P-protocol 探针 + 验收场景 5）命中，:198→实为 **:202**（「协议字符串 SSOT」，附录 A 白名单表内，01 号实施修订致漂移）；CHANGELOG 引文（"same type as the deprecated unified-hooks extension so history stays queryable"）实为 **:56/:69**（非 :48/:61）；README.md:3 属实 | 属实（2 处行号漂移，引文内容精确） |
 | F17 | D3-A 证据：goal/subagent-workflow 已有静态强依赖先例（extension-dependencies.json:24-26/:55-57 登记「代码层静态 import countActiveFromEntries……是强依赖」）（§3.3） | subagent-workflow→pending 的登记存在（`extension-dependencies.json` :30-34 区域，引文匹配该条目）；goal 静态 import pending 属实（`goal/src/adapters/event-handlers/agent-end.ts:23`）**但 goal 的 dependsOn 未登记 pending**（仅 extension-protocol + todo optional，:50-62）——:55-57 实际是 goal→extension-protocol 的登记 | 部分属实（先例成立；证据行号归属错位 + goal→pending 登记缺口） → S2 |
 | F18 | bte 对 pending 是 optional peer（peerDependenciesMeta optional: true）；notify.ts:17-24 D16 静态声明（§3.3） | bte package.json `peerDependenciesMeta."@zhushanwen/pi-pending-notifications".optional: true` 属实；notify.ts D16 段落实为 :22-27（行号偏移），「运行时检测降级为静态声明 + 检测机制否决」内容属实；base-tool-enhance.md :175 D16 拍板原文属实 | 属实（行号偏移） |
 | F19 | protocol background-task.ts:60 已把 bt- 前缀写进契约注释（§3.3 证据） | background-task.ts:60-61「任务 id（表内唯一键；`bt-` 前缀，对账差集只认该前缀）」 | 属实 |
 | F20 | E6：pending `scanPendingEntries`（state.ts:251-268）内部委托 protocol 核心，types/normalize/sessionId 过滤层不动（§3.3 E6 / §5.4） | 行号失效（现为 :141-158，私有函数）；12 号终态下结构为 scanPendingEntries（分流）+ filterActiveRegisters（过滤）两层；**设计的 protocol API `collectActivePendingIds`（差集 Set）与 scanPendingEntries 的委托需求（分流产物 registerEntries 列表）形状对不上** | **部分属实 + 结构错位** → MF2 |
-| F21 | protocol 消费面「extension 侧 6 包与 runtime/core/renderer 侧 6 包共同 import」（§1.1 SCQA） | 实测：extension 侧 **7** 个包（plugin-bridge/ask-user/base-tool-enhance/goal/session-manager/subagent-workflow/todo，非测试源码）；runtime 侧 **5** 个包（runtime/core/renderer/shared/subagent-core） | 基本属实（计数偏差，不影响结论；renderer/core 消费面是 MF4 的关键证据） |
+| F21 | protocol 消费方「extension 侧 6 包与 runtime/core/renderer 侧 6 包共同 import」（§1.1 SCQA） | 实测：extension 侧 **7** 个包（plugin-bridge/ask-user/base-tool-enhance/goal/session-manager/subagent-workflow/todo，非测试源码）；runtime 侧 **5** 个包（runtime/core/renderer/shared/subagent-core） | 基本属实（计数偏差，不影响结论；renderer/core 消费方是 MF4 的关键证据） |
 | F22 | 移交 code-simplify 清单 5 条（§3.6）：getTask 零生产调用 / 包装链 3 消费方 / config 4 处 warn 内联 + 定义点注释不实 / POLL_INTERVAL_MS 去 export / types.ts re-export 垫片维持现状 | task-store.ts:53-55 getTask 仅测试引用（background-lifecycle.test.ts 等），生产零调用属实；bash-output-tool.ts:84 与 bash-kill-tool.ts:65 均 `getAllTasks().find(...)` 属实；包装链消费方 poller.ts（pollTick 内 getActiveTasks）/ process-exit-guard.ts:76-77 / spawn-background.ts:115-116 全部属实；config.ts 定义点 :47-50 注释「诊断文案与测试用」与 4 处 warn 全部内联 `getLlmSharedConfigPath`（warnInvalid/clamped/forcePatterns/normalize 四处）不调用该函数——「声明不实」属实；poller.ts:23 export 属实；types.ts:24-33 re-export 垫片属实 | 属实 |
 | F23 | relay 域第 4 份 isPidAlive（relay-registry.ts:128）不属 M12 面，移交 code-simplify（§1.2 Out-of-scope） | relay-registry.ts:128-135 存在本地 isPidAlive；**与 bte/runtime 版有实质差异**（无 `Number.isInteger(pid) || pid <= 0` 输入校验）——非逐字同源，「三处同源复制」口径中 relay 一处只是语义相似 | 属实（且佐证设计将其划出的正确性） |
 | F24 | 「审计/索引称 M12 三处复制」与本设计「两侧各一份」口径 | 索引 13 号行写「M12 registry 行为原语三处复制」；实际逐字同源 = bte + runtime **2 处**，relay 为变体第 3 处（F23）。设计文档自身口径（两侧）准确，未把 relay 计入下沉面 | 设计文档口径准确（索引转述口径不精确，非本设计缺陷） |
@@ -72,7 +72,7 @@ VERDICT: NEEDS-FIX (must-fix 5 / suggestion 4)
 - **问题**（两层）：
   1. **形状错位**：bte 需要「差集」（Set）、pending 需要「分流」（registerEntries 列表）——两个消费者的需求形状不同，单一差集函数无法同时服务。按 E4 的 API 落地后，E6「scanPendingEntries 内部委托 protocol 核心」在结构上不可实施（差集 Set 反推不出 registerEntries 流水）。设计需把 protocol API 定为两层（底层 scan 分流原语 + 上层差集组合：bte 用上层、E6 用底层），或改 E6 为 `countActiveFromEntries` 顶层委托形态。
   2. **价值声称不实**：§3.3 称「若 E6 暂缓，bte↔goal 的原始漂移面（M13 的风险面）已由本设计消除」——不成立：E6 暂缓时规则本体仍是两份（protocol 版供 bte + pending 版供 goal/subagent-workflow，goal 消费的是 `countActiveFromEntries` 而非 protocol 新函数），F2（pending 侧规则演化后 bte 对账停留旧语义）**原样保留**，只是把其中一份换了位置。E4 落地时 `collectActivePendingIds` 真实调用方仅 1 个（bte 对账）——「同源」的 G2 目标与 F2 消灭的声称都依赖 E6 落地。
-- **为什么必须修**：E4/E5 是直接执行项，E6 是协调项——按当前设计先落地 E4/E5，实施者会发现 E6 无法按描述对接，protocol 新函数成为单调用方抽象且 G2 验收（V1「对账与 goal 守卫对同一 session 文件得出一致活跃集」）测的仍是两份独立实现的一致性巧合。12 号已完成（state.ts 重排落地、领地已释放），§5.4 的分支规则（「12 号先落地 → E6 随该设计执行」）现在可以也应当收死为确定执行项。
+- **为什么必须修**：E4/E5 是直接执行项，E6 是协调项——按当前设计先落地 E4/E5，实施者会发现 E6 无法按描述对接，protocol 新函数成为单调用方抽象且 G2 验收（V1「对账与 goal 检查对同一 session 文件得出一致活跃集」）测的仍是两份独立实现的一致性巧合。12 号已完成（state.ts 重排落地、领地已释放），§5.4 的分支规则（「12 号先落地 → E6 随该设计执行」）现在可以也应当收死为确定执行项。
 - **建议修法**：① E4 API 蓝图改为两层（`scanPendingEntries` 同形分流原语 + `collectActivePendingIds` 差集组合），或明确 E6 改为 countActiveFromEntries 顶层委托；② E6 行号与结构描述按 12 号终态刷新（:141-158 / scan+filter 两层）；③ §5.4 分支规则收敛——12 号已落地，E6 定为本设计必做收尾（M5 阶段从「协调项」改为确定项），并修正 §3.3「漂移面已消除」的表述为「E6 落地后才消除」。
 
 ### MF3. §2.3 根因声称失实：runtime 并非不消费 extensions/shared 包（pi-file-lock/core 反例）
@@ -92,7 +92,7 @@ VERDICT: NEEDS-FIX (must-fix 5 / suggestion 4)
   - `packages/extension-protocol/package.json` **无 `sideEffects` 声明**——vite/rollup 默认按有副作用保守处理，浏览器构建对桶出口内 node 内建模块的 tree-shake/externalize 行为不确定（vite 对 `node:` 前缀默认 externalize 为空 polyfill + warning，import 本身不崩、但保守 tree-shake 下新模块代码可能进 bundle）
 - **问题**：E1 主方案把三个含 node 内建依赖的模块放进 protocol 的 index 桶出口，而 protocol 的 12 个消费包里有 2 个运行在浏览器/同构环境（renderer/core）。P1 的探针清单不含 renderer dev 启动 / production build（vite）与 core 构建——「零行为变更」声称（G4）在 renderer 侧当前不可证伪。
 - **为什么必须修**：若 vite 构建因 node:fs 报错或空 polyfill 进产物，renderer 侧回归将发生在实施 M1 之后才暴露，触发整个 D1 的降级路径回退——这正是 P1 探针门（⛔ M0 不通过不开工）要前置拦截的问题，但当前探针面漏了这个环境。
-- **建议修法**（三选一，前两个更稳）：① P1 探针面增加「renderer `pnpm dev` 启动 + `pnpm build`（vite production）+ core 构建」验证；② 将「独立子入口」（exports 增 `./background-task` 等）从降级路径提升为主方案——renderer 消费面结构性不触达原语模块，消除对 tree-shake 行为的依赖；③ 若坚持 index 出口，protocol package.json 补 `"sideEffects": false` 并把该标记的验证纳入 P1。
+- **建议修法**（三选一，前两个更稳）：① P1 探针面增加「renderer `pnpm dev` 启动 + `pnpm build`（vite production）+ core 构建」验证；② 将「独立子入口」（exports 增 `./background-task` 等）从降级路径提升为主方案——renderer 消费方结构性不触达原语模块，消除对 tree-shake 行为的依赖；③ 若坚持 index 出口，protocol package.json 补 `"sideEffects": false` 并把该标记的验证纳入 P1。
 
 ### MF5. D2 日志通道归一缺口：registry-file 与 output-tail 两模块的落盘日志没有归一方案，与「零行为变更」冲突
 
@@ -118,13 +118,13 @@ VERDICT: NEEDS-FIX (must-fix 5 / suggestion 4)
 
 - **设计位置**：§3.3（「goal/subagent-workflow 已有同款静态强依赖先例（extension-dependencies.json:24-26/:55-57 登记『代码层静态 import countActiveFromEntries……是强依赖』）」）
 - **证据**：引文「countActiveFromEntries」只匹配 subagent-workflow→pending 条目（`extension-dependencies.json` :30-34 区域）；`:55-57` 实为 goal→**extension-protocol** 的登记；goal→pending 的静态 import 属实（`goal/src/adapters/event-handlers/agent-end.ts:23`）**但未在 dependsOn 登记**（goal 条目仅 extension-protocol + todo optional，:50-62）。
-- **建议**：引文归属拆开表述（「subagent-workflow 有登记先例；goal 有事实 import（agent-end.ts:23）但登记缺口」），并把补 goal→pending 登记列为 E 系列顺带项（该 json 由 `scripts/check-extension-dependencies.mjs` 校验，登记面完整性是机器可查的）。
+- **建议**：引文归属拆开表述（「subagent-workflow 有登记先例；goal 有事实 import（agent-end.ts:23）但登记缺口」），并把补 goal→pending 登记列为 E 系列顺带项（该 json 由 `scripts/check-extension-dependencies.mjs` 校验，登记表完整性是机器可查的）。
 
 ### S3. 「零行为变更」限定为用户/LLM 可见面，内部 API 归一列为有意变化
 
 - **设计位置**：§1.2 G4、§3.2 D2、开篇 A
 - **证据**：D2 的 tail 归一使 bte 侧 `TailResult` 字段名 `output`→`text`（内部 API 变更，消费方 bash-output-tool / readTailSummary 同步改，用户可见的工具输出内容不变）；`onFallback` 回调也改变两侧日志的调用形态（bte 现为 `logger.debug(msg, {detail})` 结构化形态，回调签名 `(step, err)` 是格式收窄）。均为等价替换中的有意内部变化，与「零行为变更」的字面表述有张力。
-- **建议**：G4 表述改为「用户/LLM 可见行为与 registry.json 字节形态零变化；内部 API 签名归一与日志通道适配为有意变化（清单见 D2）」——使 V2/V4 的验收口径与承诺口径一致。
+- **建议**：G4 表述改为「用户/LLM 可见行为与 registry.json 字节形态零变化；内部 API 签名归一与日志通道适配为有意变化（清单见 D2）」——使 V2/V4 的验收敛径与承诺口径一致。
 
 ### S4. E1 描述更新范围补 protocol README；E9 dual payload 构造可留 lazy 自由度
 
@@ -143,19 +143,19 @@ VERDICT: NEEDS-FIX (must-fix 5 / suggestion 4)
 | N3 | bte 独立安装定位是否被 protocol 依赖破坏（方向 A vs B 核心取舍） | 不破坏：bte package.json dependencies **已含** `@zhushanwen/extension-protocol: workspace:*`（现状，非本设计新增）；protocol 有 publishConfig（dist/index.mjs，version 0.9.0）随发布管线发 npm，独立用户安装时为普通传递依赖。「两侧零新增依赖边」声称属实 |
 | N4 | D3-B 选 B 否 A 的论证 | 成立：方案 A（bte 静态 import pending）与 optional peer 拍板正面冲突——静态 top-level import 在 pending 缺失时模块加载即抛 = bash 工具整体不可用（bte `peerDependenciesMeta.optional: true` 属实）；notify.ts:22-27「运行时检测降级为静态声明 + 检测机制否决」属实；base-tool-enhance.md:175 D16 拍板原文属实。先例辨析（goal/swf 的 pending 是核心功能、bte 仅通知增强）与 agent-end.ts:23 / pi-host.ts:36 事实一致（登记缺口见 S2，不动摇论点） |
 | N5 | 差集双写是否真同构（bt- 前缀 unregister 过滤 vs 全局抵消） | 同构成立：bte collectUnsettledTaskIds（:77-95）的 unregister 集只收 bt- 前缀 id，pending 侧全局收集——id 全局唯一（task_id 编码 ts+rand）前提下对 bt- id 的抵消效果一致；register 首见去重两侧同构。设计 §5.4 待验证①已登记「register→unregister→register 同 id 复用」契约测试，边界意识在位 |
-| N6 | M5 四分支等价性（setWidgetDual 塌缩是否行为等价） | 等价：todo makeRefreshDisplay（index.ts:48-65，行号精确）四分支中清屏分支两路均落 `ctx.ui.setWidget(key, undefined)`（helpers.ts:72-77 else 分支实证）——清屏模式判别是死分支，塌缩无行为差；goal 三处 2×2（widget.ts:206-207/:218-219/:224-229）同构；E9 的 hasUI 守卫留调用方（widget.ts:201 / session.ts:126-130 现状核实）与 dual undefined 兼容（session.ts:129 传 undefined）；before-agent-start.ts:97 直呼 ctx.ui.setWidget（port/ctx 双通道惯例）不受 E9 影响 |
+| N6 | M5 四分支等价性（setWidgetDual 塌缩是否行为等价） | 等价：todo makeRefreshDisplay（index.ts:48-65，行号精确）四分支中清屏分支两路均落 `ctx.ui.setWidget(key, undefined)`（helpers.ts:72-77 else 分支实证）——清屏模式判别是死分支，塌缩无行为差；goal 三处 2×2（widget.ts:206-207/:218-219/:224-229）同构；E9 的 hasUI 检查留调用方（widget.ts:201 / session.ts:126-130 现状核实）与 dual undefined 兼容（session.ts:129 传 undefined）；before-agent-start.ts:97 直呼 ctx.ui.setWidget（port/ctx 双通道惯例）不受 E9 影响 |
 | N7 | D4（customType 不改名）裁决 | 成立：01 号 :32 把「保持原 customType 字符串」立为删包关键协议承诺（P-protocol 探针 + 验收场景 5 + :202 协议字符串 SSOT 白名单条目）；bte CHANGELOG.md:56/:69 英文承诺原文精确命中；README.md:3 属实。「改名」与已实施的 01 号正面冲突，D4 不改名正确。E10 修注释方向正确（:7「消费方无感」确与「无代码消费方」的现状认知不符） |
 | N8 | 移交 code-simplify 清单 5 条的事实基础 | 全部属实（F22）：getTask 生产零调用（仅 background-lifecycle.test.ts 等）、包装链三函数各有唯一生产消费方（poller/process-exit-guard:76-77/spawn-background:115-116）、config 4 处 warn 内联 + 定义点注释不实、POLL_INTERVAL_MS 仅本文件消费、types.ts:24-33 re-export 垫片维持现状的裁决合理 |
 | N9 | 07 号移交与 03 号划界的双向一致性 | 一致：07 号 :33（「M5……按索引归入 13 号设计，修复点在 protocol 组合 helper」）与 03 号 :184 区域（「E3 与设计 13 的联动边界：本次只加 theme 成员声明……模式分发归 13」）双向登记吻合；goal ports.ts:68-69 theme 成员已存在（03 号已实施），E9 的「theme 不动」划界仍有效 |
 | N10 | 验收场景与阶段编排 | 合理：V1-V6 覆盖双端真实协作（pi CLI 实测 + 桌面 dev + 独立安装负面 + TUI marker 负面 + registry 字节 diff），M1 先行立单一实现避免中间态两份新实现，M2/M3 并行无耦合判断正确（u2/u3 文件集无交集）；净行数估算与实测规模相符（kill-tree 152 行整删 vs protocol 新增 ~280） |
-| N11 | protocol 现有结构是否容许承载新域模块 | 容许：protocol 已是多域契约包（core GUI 原语 + ask-user/session-manager/subagent-inflight/plugin-bridge/subagent-engine 各域 + background-task），「GUI 渲染协议」的旧描述早已名不副实（index.ts:2 与 README 均待更新，E1 方向正确）；行为原语模块与 background-task.ts 契约分文件（D1 否决混装）的论证成立——契约（形状+guard）与行为（spawnSync/IO）变化轴不同 |
+| N11 | protocol 现有结构是否容许承载新域模块 | 容许：protocol 已是多域契约包（core GUI 原语 + ask-user/session-manager/subagent-inflight/plugin-bridge/subagent-engine 各域 + background-task），「GUI 渲染协议」的旧描述早已名不副实（index.ts:2 与 README 均待更新，E1 方向正确）；行为原语模块与 background-task.ts 契约分文件（D1 否决混装）的论证成立——契约（形状+guard）与行为（spawnSync/IO）变化原因不同 |
 | N12 | 「protocol 零运行时依赖」纪律在新模块下是否可守 | 可守（在 MF5 修复的前提下）：进程原语仅依赖 node:child_process（内建）、registry-file/output-tail 仅依赖 node:fs（内建）——无 npm 运行时依赖新增；日志经回调注入（MF5 要求补全两模块的注入设计后成立） |
 
 ## 5. 方案自身过度设计检查结论（四问汇总）
 
 - **D1（三原语模块）**：四问全过（N2），非投机抽象。风险全部集中在工程面（MF4 打包 / MF5 日志），非方案方向问题。
-- **D3-B（pending-entries）**：方向成立（真实双写 + W4 活动决策证据），但**当前 API 蓝图是按单一消费者（bte）需求画的**，E6 的第二消费者需求形状不同（MF2）——修复后两条腿都站得住，不修复则是单调用方抽象 + 空转的「同源」声称。
-- **D3-M5（setWidgetDual）**：四问全过——2 个真实调用方 + 既有 helper 层补全（guiSetWidget 无守卫是已登记的坑，helpers.ts:59-60 自述）+ 死分支消灭（N6）；~15 行 helper 换两包样板塌缩，无 second-system 信号（未夹带「未来 widget 类型」等投机扩展点）。
+- **D3-B（pending-entries）**：方向成立（真实双写 + W4 活动决策证据），但**当前 API 蓝图是按单一消费者（bte）需求画的**，E6 的第二消费者需求形状不同（MF2）——修复后两条路径都站得住，不修复则是单调用方抽象 + 空转的「同源」声称。
+- **D3-M5（setWidgetDual）**：四问全过——2 个真实调用方 + 既有 helper 层补全（guiSetWidget 无检查是已登记的坑，helpers.ts:59-60 自述）+ 死分支消灭（N6）；~15 行 helper 换两包样板塌缩，无 second-system 信号（未夹带「未来 widget 类型」等投机扩展点）。
 - **D4/D5（contested low）**：D4 成立（N7）；D5 前提失效（MF1）。
 - **未见** inner-platform / abstraction inversion / Greenspun 信号；无 pass-through 层新增（两侧薄壳有形态增值）。
 - bte 包内被审计判定「本质复杂度」的机制（poller/task-store 两层存储、force-patterns、config 5 键）不在本设计范围，本审查未推翻该判定（抽查 task-store 的 D6-en 不变量登记 :16-28 与两层存储分工注释自洽）。
@@ -168,4 +168,4 @@ VERDICT: NEEDS-FIX (must-fix 5 / suggestion 4)
 - protocol：`src/background-task.ts`、`src/core/helpers.ts`、`src/index.ts`、`package.json`、`README.md` 首段
 - pending：`src/index.ts`、`src/state.ts` 全文（12 号终态）
 - todo / goal：`todo/src/index.ts`（全文 83 行）、`goal/src/ports.ts`、`goal/src/adapters/ports.ts`、`goal/src/projection/widget.ts`（:150-230）、`goal/src/session.ts`（:120-135）、goal 全包 setWidget/isGui 消费点 grep
-- 其他：`extension-dependencies.json`、`docs/design/base-tool-enhance.md`（D16 :175 / §3.5 接入细则 4 :122）、protocol 消费面全仓 grep（extensions 7 包 + runtime 侧 5 包）
+- 其他：`extension-dependencies.json`、`docs/design/base-tool-enhance.md`（D16 :175 / §3.5 接入细则 4 :122）、protocol 消费方全仓 grep（extensions 7 包 + runtime 侧 5 包）

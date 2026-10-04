@@ -11,6 +11,7 @@ import type {
   SessionManagerStatusParams,
   SessionManagerListParams,
   SessionManagerAbortParams,
+  SessionManagerWatchParams,
   SessionManagerCreateResult,
   SessionManagerSendResult,
   SessionManagerHistoryResult,
@@ -44,7 +45,7 @@ describe('U1-A2 marker 精确值 + 类型覆盖', () => {
     expect(SESSION_MANAGER_MARKER).not.toBe(GUI_WIDGET_MARKER)
   })
 
-  it('U1-A2 SessionManagerAction 包含全部 6 个 action', () => {
+  it('U1-A2 SessionManagerAction 包含全部 7 个 action（含 notify-once watch）', () => {
     const actions: SessionManagerAction[] = [
       'create',
       'send',
@@ -52,8 +53,9 @@ describe('U1-A2 marker 精确值 + 类型覆盖', () => {
       'status',
       'list',
       'abort',
+      'watch',
     ]
-    expect(actions).toHaveLength(6)
+    expect(actions).toHaveLength(7)
   })
 
   it('U1-A2 请求为嵌套形状：{action, params}（params 不携带 action 字段）', () => {
@@ -65,8 +67,9 @@ describe('U1-A2 marker 精确值 + 类型覆盖', () => {
       { action: 'status', params: { sessionId: 's' } },
       { action: 'list', params: {} },
       { action: 'abort', params: { sessionId: 's' } },
+      { action: 'watch', params: { notifyId: 'sm-123e4567-e89b-12d3-a456-426614174000' } },
     ]
-    expect(requests).toHaveLength(6)
+    expect(requests).toHaveLength(7)
     for (const req of requests) {
       expect(req.params).not.toHaveProperty('action')
     }
@@ -114,26 +117,45 @@ describe('U1-A2 各 action 请求 params 类型结构（嵌套契约）', () => 
     const req: SessionManagerAbortParams = { sessionId: 'abc' }
     expect(req.sessionId).toBe('abc')
   })
+
+  it('U1-A2 SessionManagerWatchParams：封闭单键 notifyId（parentSid 协议面不定义）', () => {
+    const req: SessionManagerWatchParams = { notifyId: 'sm-123e4567-e89b-12d3-a456-426614174000' }
+    expect(req.notifyId).toContain('sm-')
+    // 单键寻址：类型面无任何第二字段可声明（parentSid 由 runtime 取连接身份）
+    const keys = Object.keys(req)
+    expect(keys).toEqual(['notifyId'])
+  })
 })
 
 describe('U1-A2 各 action 结果类型结构', () => {
-  it('U1-A2 SessionManagerCreateResult 必含 sessionId/status，modelId 可选', () => {
+  it('U1-A2 SessionManagerCreateResult：sessionId/status + willNotify + lifetimeNotifyId', () => {
+    // notify-once D6 注入后必红适配：willNotify/lifetimeNotifyId 为必填 additive 字段
     const res: SessionManagerCreateResult = {
       sessionId: 'abc',
       status: 'created',
+      willNotify: true,
+      lifetimeNotifyId: 'sm-123e4567-e89b-12d3-a456-426614174000',
     }
     const withModel: SessionManagerCreateResult = {
       sessionId: 'abc',
       status: 'created',
       modelId: 'p/m',
+      // create 无 prompt → 完成通知不 arm，但 lifetime（死亡通知）键恒在——两键正交
+      willNotify: false,
+      lifetimeNotifyId: 'sm-123e4567-e89b-12d3-a456-426614174001',
     }
     expect(res.status).toBe('created')
     expect(withModel.modelId).toBe('p/m')
+    expect(withModel.willNotify).toBe(false)
+    expect(withModel.lifetimeNotifyId).toContain('sm-')
+    // wire 往返（handler respond 经 select 通道）
+    expect(JSON.parse(JSON.stringify(res))).toEqual(res)
   })
 
-  it('U1-A2 SessionManagerSendResult 必含 queued: true', () => {
-    const res: SessionManagerSendResult = { queued: true }
+  it('U1-A2 SessionManagerSendResult 必含 queued: true + willNotify', () => {
+    const res: SessionManagerSendResult = { queued: true, willNotify: true }
     expect(res.queued).toBe(true)
+    expect(res.willNotify).toBe(true)
   })
 
   it('U1-A2 SessionManagerHistoryResult 必含 messages/truncated', () => {
@@ -144,14 +166,17 @@ describe('U1-A2 各 action 结果类型结构', () => {
     expect(res.messages).toHaveLength(1)
   })
 
-  it('U1-A2 SessionManagerStatusResult：status 字符串 + modelId 可选', () => {
-    const active: SessionManagerStatusResult = { status: 'active', modelId: 'p/m' }
-    const idle: SessionManagerStatusResult = { status: 'idle' }
+  it('U1-A2 SessionManagerStatusResult：status + modelId 可选 + undeliveredResults 事实计数', () => {
+    const active: SessionManagerStatusResult = { status: 'active', modelId: 'p/m', undeliveredResults: 0 }
+    const idle: SessionManagerStatusResult = { status: 'idle', undeliveredResults: 2 }
     expect(active.status).toBe('active')
     expect(idle.modelId).toBeUndefined()
+    // 事实计数（非警示布尔）：可为 0，无清除语义
+    expect(active.undeliveredResults).toBe(0)
+    expect(idle.undeliveredResults).toBe(2)
   })
 
-  it('U1-A2 SessionManagerListResult sessions 摘要含 spawnSource/parentAgentSessionId', () => {
+  it('U1-A2 SessionManagerListResult sessions 摘要 + undeliveredResults', () => {
     const res: SessionManagerListResult = {
       sessions: [
         {
@@ -163,8 +188,10 @@ describe('U1-A2 各 action 结果类型结构', () => {
           parentAgentSessionId: 'parent',
         } satisfies SessionManagerSessionSummary,
       ],
+      undeliveredResults: 1,
     }
     expect(res.sessions[0].spawnSource).toBe('agent')
+    expect(res.undeliveredResults).toBe(1)
   })
 
   it('U1-A2 SessionManagerAbortResult 必含 success', () => {

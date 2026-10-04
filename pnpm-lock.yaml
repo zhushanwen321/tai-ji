@@ -106,6 +106,22 @@ importers:
         specifier: ^4.1.6
         version: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.3(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
 
+  extensions/shared/exec-skills:
+    dependencies:
+      '@zhushanwen/pi-extension-logger':
+        specifier: workspace:*
+        version: link:../extension-logger
+    devDependencies:
+      '@earendil-works/pi-coding-agent':
+        specifier: 0.84.4
+        version: 0.84.4(ws@8.21.0)(zod@3.25.76)
+      '@vitest/coverage-v8':
+        specifier: ^4.1.9
+        version: 4.1.9(vitest@4.1.9)
+      vitest:
+        specifier: ^4.1.8
+        version: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.3(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
+
   extensions/shared/ext-guards:
     devDependencies:
       '@vitest/coverage-v8':
@@ -162,6 +178,37 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.4
         version: 0.84.4(ws@8.21.0)(zod@3.25.76)
+      '@vitest/coverage-v8':
+        specifier: ^4.1.9
+        version: 4.1.9(vitest@4.1.9)
+      vitest:
+        specifier: ^4.1.8
+        version: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.3(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
+
+  extensions/shared/notify-ledger-host:
+    dependencies:
+      '@zhushanwen/pi-ext-guards':
+        specifier: workspace:*
+        version: link:../ext-guards
+    devDependencies:
+      '@earendil-works/pi-coding-agent':
+        specifier: 0.84.4
+        version: 0.84.4(ws@8.21.0)(zod@3.25.76)
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.2
+      '@vitest/coverage-v8':
+        specifier: ^4.1.9
+        version: 4.1.9(vitest@4.1.9)
+      '@zhushanwen/subagent-core':
+        specifier: workspace:*
+        version: link:../../../packages/subagent-core
+      vitest:
+        specifier: ^4.1.8
+        version: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.3(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
+
+  extensions/shared/session-path:
+    devDependencies:
       '@vitest/coverage-v8':
         specifier: ^4.1.9
         version: 4.1.9(vitest@4.1.9)
@@ -396,6 +443,9 @@ importers:
       '@zhushanwen/pi-pending-notifications':
         specifier: workspace:*
         version: link:../pending-notifications
+      '@zhushanwen/pi-session-path':
+        specifier: workspace:*
+        version: link:../../shared/session-path
       typebox:
         specifier: '*'
         version: 1.3.7
@@ -480,6 +530,9 @@ importers:
       '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
+      '@zhushanwen/pi-exec-skills':
+        specifier: workspace:*
+        version: link:../../shared/exec-skills
       '@zhushanwen/pi-ext-guards':
         specifier: workspace:*
         version: link:../../shared/ext-guards
@@ -492,6 +545,9 @@ importers:
       '@zhushanwen/pi-llm-shared':
         specifier: workspace:*
         version: link:../../shared/llm-shared
+      '@zhushanwen/pi-session-path':
+        specifier: workspace:*
+        version: link:../../shared/session-path
       typebox:
         specifier: '*'
         version: 1.3.7
@@ -570,6 +626,9 @@ importers:
       '@zhushanwen/pi-llm-shared':
         specifier: workspace:*
         version: link:../../shared/llm-shared
+      '@zhushanwen/pi-session-path':
+        specifier: workspace:*
+        version: link:../../shared/session-path
       croner:
         specifier: ^9.0.0
         version: 9.1.0
@@ -598,9 +657,18 @@ importers:
       '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
+      '@zhushanwen/pi-ext-guards':
+        specifier: workspace:*
+        version: link:../../shared/ext-guards
       '@zhushanwen/pi-extension-logger':
         specifier: workspace:*
         version: link:../../shared/extension-logger
+      '@zhushanwen/pi-notify-ledger-host':
+        specifier: workspace:*
+        version: link:../../shared/notify-ledger-host
+      '@zhushanwen/subagent-core':
+        specifier: workspace:*
+        version: link:../../../packages/subagent-core
       typebox:
         specifier: '*'
         version: 1.3.7
@@ -725,6 +793,9 @@ importers:
       '@zhushanwen/pi-extension-logger':
         specifier: workspace:*
         version: link:../../shared/extension-logger
+      '@zhushanwen/pi-notify-ledger-host':
+        specifier: workspace:*
+        version: link:../../shared/notify-ledger-host
       '@zhushanwen/pi-pending-notifications':
         specifier: workspace:*
         version: link:../pending-notifications
@@ -753,6 +824,9 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^4.1.9
         version: 4.1.9(vitest@4.1.9)
+      '@zhushanwen/subagent-engine-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/subagent-engine-sdk
       vitest:
         specifier: ^4.1.8
         version: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.3(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
@@ -774,6 +848,9 @@ importers:
       '@zhushanwen/pi-extension-logger':
         specifier: workspace:*
         version: link:../../shared/extension-logger
+      '@zhushanwen/pi-session-path':
+        specifier: workspace:*
+        version: link:../../shared/session-path
       typebox:
         specifier: '*'
         version: 1.3.7
@@ -958,6 +1035,9 @@ importers:
 
   packages/plugin-sdk:
     dependencies:
+      '@taiji/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../extension-protocol
@@ -1043,6 +1123,12 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^4.1.9
         version: 4.1.9(vitest@4.1.9)
+      '@vue/compiler-dom':
+        specifier: ^3.5.39
+        version: 3.5.39
+      '@vue/compiler-sfc':
+        specifier: ^3.5.39
+        version: 3.5.39
       '@vue/test-utils':
         specifier: ^2.4.10
         version: 2.4.11(@vue/compiler-dom@3.5.39)(@vue/server-renderer@3.5.39(vue@3.5.39(typescript@5.9.3)))(vue@3.5.39(typescript@5.9.3))
@@ -1199,13 +1285,14 @@ importers:
         version: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.3(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
 
   packages/shared:
+    dependencies:
+      '@zhushanwen/extension-protocol':
+        specifier: workspace:*
+        version: link:../extension-protocol
     devDependencies:
       '@vitest/coverage-v8':
         specifier: ^4.1.9
         version: 4.1.9(vitest@4.1.9)
-      '@zhushanwen/extension-protocol':
-        specifier: workspace:*
-        version: link:../extension-protocol
       tailwindcss:
         specifier: ^3.4
         version: 3.4.19(tsx@4.23.0)(yaml@2.9.0)
@@ -3097,6 +3184,7 @@ packages:
   '@xmldom/xmldom@0.8.13':
     resolution: {integrity: sha512-KRYzxepc14G/CEpEGc3Yn+JKaAeT63smlDr+vjB8jRfgTBBI9wRj/nkQEO+ucV8p8I9bfKLWp37uHgFrbntPvw==}
     engines: {node: '>=10.0.0'}
+    deprecated: this version has critical issues, please update to the latest version
 
   '@xterm/addon-fit@0.10.0':
     resolution: {integrity: sha512-UFYkDm4HUahf2lnEyHvio51TNGiLK66mqP2JoATy7hRZeXaGMRDr00JiSF7m63vR5WKATF605yEggJKsw0JpMQ==}

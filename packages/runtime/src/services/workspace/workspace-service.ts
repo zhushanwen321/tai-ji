@@ -11,13 +11,9 @@
 import { homedir } from 'node:os'
 import type { RecentWorkspaceRecord } from '@taiji/shared'
 import type { RecentWorkspacesStore } from './recent-workspaces-store.js'
-import type { WorkspaceDetector, WorkspaceDetectResult } from '../worktree/workspace-detector.js'
 
 export class WorkspaceService {
-  constructor(
-    private readonly store: RecentWorkspacesStore,
-    private readonly detector: WorkspaceDetector,
-  ) {}
+  constructor(private readonly store: RecentWorkspacesStore) {}
 
   /**
    * 记录一次工作区使用。INV-1 主守卫：空串/undefined/whitespace 静默跳过。
@@ -37,16 +33,5 @@ export class WorkspaceService {
    */
   list(): RecentWorkspaceRecord[] {
     return this.store.list()
-  }
-
-  /**
-   * 检测 cwd 是否位于 bare repo + worktree 结构（复用 WorkspaceDetector.detect）。
-   *
-   * 返回 detector 原始结构 `{isBareMode, wsRoot, barePath}`——`isBareMode → isBare` 的字段映射
-   * 由 transport handler 负责（handler.reply payload 字段名对齐 workspace.bareDetected 协议）。
-   * landing 态由 useNewTaskDirSelect watch pendingCwd 主动调用。
-   */
-  detectBare(cwd: string): WorkspaceDetectResult {
-    return this.detector.detectSync(cwd)
   }
 }

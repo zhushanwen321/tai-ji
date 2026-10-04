@@ -3,7 +3,6 @@
  *
  * 覆盖（plan.md W23 验收 ①②③ 的组件逻辑面；真实 renderIncremental 集成在 renderer 侧
  * markdown-renderer-incremental.test.ts）：
- * - 壳未提供增量能力 → 回退 renderMarkdown 全量渲染（mock 壳兼容，等价旧版）
  * - 增量渲染树 = 前缀段 + 尾段；前缀段 DOM 引用跨帧稳定（v-for :key=segId 复用）
  * - streaming-fence 占位：语言名可见 + 不加载 mermaid（R-20 占位形态）
  * - 静默 ≥阈值 / streaming 翻 false → finalizeOpenFence:true 转完整渲染
@@ -97,16 +96,6 @@ function finalizeAwareMock() {
   return { calls, renderMarkdownIncremental }
 }
 
-describe('W23: 壳未提供增量能力 → 回退全量渲染（mock 壳兼容）', () => {
-  it('无 renderMarkdownIncremental 时走 deps.renderMarkdown，段正常渲染', async () => {
-    const renderMarkdown = vi.fn().mockResolvedValue([{ type: 'text', content: '<p>hello</p>' }])
-    const wrapper = mountMd({ content: 'hello' }, { renderMarkdown })
-    await flushRaf()
-    expect(renderMarkdown).toHaveBeenCalledWith('hello', undefined)
-    expect(wrapper.find('.md-render > div').html()).toContain('<p>hello</p>')
-  })
-})
-
 describe('W23 ①: 增量更新只重渲染尾段（前缀段 DOM 引用跨帧稳定）', () => {
   it('前缀段 DOM 节点引用恒等，尾段节点重建', async () => {
     const segA = seg('text', '<p>para one</p>', 0)
@@ -190,12 +179,9 @@ describe('W23 ③: 静默/complete 转完整渲染（finalizeOpenFence:true）',
   it('token 静默 ≥ 阈值 → 定时器触发 finalize 完整渲染', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const { calls, renderMarkdownIncremental } = finalizeAwareMock()
-    const shouldFinalizeStreamingFence = vi.fn(({ complete, silenceMs }: { complete: boolean; silenceMs: number }) =>
-      complete || silenceMs >= 200,
-    )
     const wrapper = mountMd(
       { content: '```ts\ncode', streaming: true },
-      { renderMarkdownIncremental, shouldFinalizeStreamingFence, streamingFenceSilenceMs: 200 },
+      { renderMarkdownIncremental, streamingFenceSilenceMs: 200 },
     )
     await flushRaf()
     expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(true)
@@ -215,10 +201,9 @@ describe('W23 ③: 静默/complete 转完整渲染（finalizeOpenFence:true）',
 
   it('streaming true→false（消息 complete）→ 立即 finalize，不等静默', async () => {
     const { calls, renderMarkdownIncremental } = finalizeAwareMock()
-    const shouldFinalizeStreamingFence = vi.fn(({ complete }: { complete: boolean; silenceMs: number }) => complete)
     const wrapper = mountMd(
       { content: '```ts\ncode', streaming: true },
-      { renderMarkdownIncremental, shouldFinalizeStreamingFence, streamingFenceSilenceMs: 200 },
+      { renderMarkdownIncremental, streamingFenceSilenceMs: 200 },
     )
     await flushRaf()
     expect(calls[0].finalize).toBe(false)
@@ -230,17 +215,16 @@ describe('W23 ③: 静默/complete 转完整渲染（finalizeOpenFence:true）',
     expect(wrapper.find('.md-codeblock').exists()).toBe(true)
   })
 
-  it('壳未提供静默阈值 → 仅 complete 触发 finalize（不安排静默定时器）', async () => {
+  it('静默未达阈值（远大于观测窗）→ 静默路径不触发，仅 complete 触发 finalize', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const { calls, renderMarkdownIncremental } = finalizeAwareMock()
-    const shouldFinalizeStreamingFence = vi.fn(({ complete }: { complete: boolean; silenceMs: number }) => complete)
     mountMd(
       { content: '```ts\ncode', streaming: true },
-      { renderMarkdownIncremental, shouldFinalizeStreamingFence },
+      { renderMarkdownIncremental, streamingFenceSilenceMs: 60_000 },
     )
     await flushRaf()
     await vi.advanceTimersByTimeAsync(500)
-    // 静默路径未激活：仍只有首帧渲染，无 finalize
+    // 静默路径未命中（阈值 60s >> 500ms）：仍只有首帧渲染，无 finalize
     expect(calls).toHaveLength(1)
     expect(calls[0].finalize).toBe(false)
   })
@@ -250,12 +234,9 @@ describe('W23 review Fix-1: finalize 粘滞（停顿后继续不回占位横跳�
   it('finalize 后新 token 到达 → 保持完整渲染不回占位（DOM 断言）', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const { calls, renderMarkdownIncremental } = finalizeAwareMock()
-    const shouldFinalizeStreamingFence = vi.fn(({ complete, silenceMs }: { complete: boolean; silenceMs: number }) =>
-      complete || silenceMs >= 200,
-    )
     const wrapper = mountMd(
       { content: '```ts\ncode', streaming: true },
-      { renderMarkdownIncremental, shouldFinalizeStreamingFence, streamingFenceSilenceMs: 200 },
+      { renderMarkdownIncremental, streamingFenceSilenceMs: 200 },
     )
     await flushRaf()
     expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(true)
@@ -281,12 +262,9 @@ describe('W23 review Fix-1: finalize 粘滞（停顿后继续不回占位横跳�
   it('finalize 后 content 被改写（非 append-only 延长）→ 粘滞解除，finalize 保持 false 回占位', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const { calls, renderMarkdownIncremental } = finalizeAwareMock()
-    const shouldFinalizeStreamingFence = vi.fn(({ complete, silenceMs }: { complete: boolean; silenceMs: number }) =>
-      complete || silenceMs >= 200,
-    )
     const wrapper = mountMd(
       { content: '```ts\ncode', streaming: true },
-      { renderMarkdownIncremental, shouldFinalizeStreamingFence, streamingFenceSilenceMs: 200 },
+      { renderMarkdownIncremental, streamingFenceSilenceMs: 200 },
     )
     await flushRaf()
     expect(calls[0].finalize).toBe(false)
@@ -472,12 +450,20 @@ describe('W23: 增量渲染失败降级（等价旧版兜底 + 缓存作废）',
 // ── ④路相对链接分流（设计 markdown-html-sanitize-render D4，U3）──
 // 渲染含 <a href> 的 text 段，点击冒泡到 .md-render 根的 onClick 委托，断言分流与 openDrawer 参数。
 describe('D4 ④路: 相对链接分流（preventDefault + resolve + openDrawer detail）', () => {
-  /** 挂载含单个 <a href> 文档的 MarkdownRenderer，收集冒泡 click 事件供 defaultPrevented 断言 */
+  /** 挂载含单个 <a href> 文档的 MarkdownRenderer，收集冒泡 click 事件供 defaultPrevented 断言。
+   *  renderMarkdownIncremental 必填（D6 收敛后无全量回退路径）：桥接 renderMarkdown 输出为
+   *  单帧增量返回，使 depsOverrides 里 renderMarkdown 喂的内容真实进渲染树。 */
   async function mountWithAnchor(href: string, props: Record<string, unknown> = {}, depsOverrides: Partial<ChatViewDeps> = {}) {
     const renderMarkdown = vi.fn().mockResolvedValue([
       { type: 'text', content: `<p><a href="${href}">doc link</a></p>` },
     ])
-    const wrapper = mountMd({ content: 'x', ...props }, { renderMarkdown, ...depsOverrides })
+    const renderMarkdownIncremental = vi.fn(
+      async (source: string, cache: IncrementalMarkdownCache | null): Promise<IncrementalMarkdownResult & { cache: IncrementalMarkdownCache }> => {
+        const tailSegments = (await renderMarkdown(source)) as MarkdownSegment[]
+        return { prefixSegments: [], tailSegments, stableBoundary: 0, mode: 'incremental', cache: cache ?? emptyCache(0) }
+      },
+    )
+    const wrapper = mountMd({ content: 'x', ...props }, { renderMarkdown, renderMarkdownIncremental, ...depsOverrides })
     await flushRaf()
     const clicks: Event[] = []
     wrapper.element.addEventListener('click', (e: Event) => clicks.push(e))
@@ -567,10 +553,18 @@ describe('D4 ④路: 相对链接分流（preventDefault + resolve + openDrawer 
 // ── ①②③路事件委托路由（复制按钮 / 文件路径 / 歧义 basename——D4 ④路之外的三路
 //    存量行为；因 onClick 重构拆具名函数而成为本 diff 新增行，此处钉住用户可见行为）──
 describe('①②③路: v-html 点击委托路由（copy / filepath / ambiguous）', () => {
-  /** 挂载渲染任意 html text 段并收集冒泡 click 事件（供 defaultPrevented 断言） */
+  /** 挂载渲染任意 html text 段并收集冒泡 click 事件（供 defaultPrevented 断言）。
+   *  renderMarkdownIncremental 必填（D6 收敛后无全量回退路径）：桥接 renderMarkdown 输出为
+   *  单帧增量返回，使 depsOverrides 里 renderMarkdown 喂的内容真实进渲染树。 */
   async function mountWithHtml(html: string, props: Record<string, unknown> = {}, depsOverrides: Partial<ChatViewDeps> = {}) {
     const renderMarkdown = vi.fn().mockResolvedValue([{ type: 'text', content: html }])
-    const wrapper = mountMd({ content: 'x', ...props }, { renderMarkdown, ...depsOverrides })
+    const renderMarkdownIncremental = vi.fn(
+      async (source: string, cache: IncrementalMarkdownCache | null): Promise<IncrementalMarkdownResult & { cache: IncrementalMarkdownCache }> => {
+        const tailSegments = (await renderMarkdown(source)) as MarkdownSegment[]
+        return { prefixSegments: [], tailSegments, stableBoundary: 0, mode: 'incremental', cache: cache ?? emptyCache(0) }
+      },
+    )
+    const wrapper = mountMd({ content: 'x', ...props }, { renderMarkdown, renderMarkdownIncremental, ...depsOverrides })
     await flushRaf()
     const clicks: Event[] = []
     wrapper.element.addEventListener('click', (e: Event) => clicks.push(e))
