@@ -150,6 +150,26 @@ describe('DetailPane HTML 渲染态 · 降级占位', () => {
   })
 })
 
+describe('DetailPane HTML 渲染态 · 独占内容区', () => {
+  it('渲染态 → 不并存 detail-content / detail-code（内容区不照常渲染空 CodeBlock）', async () => {
+    const wrapper = mountDetailPane()
+    expect(wrapper.find('[data-testid="detail-html-preview"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="detail-content"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="detail-code"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="detail-error"]').exists()).toBe(false)
+  })
+
+  it('源码态加载失败后再切回渲染态（status 仍为 error）→ 错误占位不与 iframe 并列', async () => {
+    const fx = await fixture()
+    fx.state.value = { ...fx.state.value, status: 'error', error: 'out_of_cwd' }
+
+    const wrapper = mountDetailPane()
+    expect(wrapper.find('[data-testid="detail-html-preview"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="detail-error"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="detail-content"]').exists()).toBe(false)
+  })
+})
+
 describe('DetailPane HTML 渲染态 · iframe 与源码态', () => {
   it('ready → sandbox iframe 挂载（只给 allow-scripts）+ 刷新按钮出现', async () => {
     const fx = await fixture()

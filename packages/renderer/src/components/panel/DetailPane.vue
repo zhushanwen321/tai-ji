@@ -127,7 +127,11 @@
     </div>
 
     <!-- HTML 渲染态（chat-html-support §6.4 D4）：servable 预检 pending / 不可服务占位
-         （带原因 + 重试）/ sandbox iframe——三态互斥，落 HtmlPreviewPane。 -->
+         （带原因 + 重试）/ sandbox iframe——三态互斥，落 HtmlPreviewPane。
+         **渲染态独占内容区**：本条是下方 loading/error/idle/binary/内容区 v-if 链的头节点。
+         渲染态下 useDetailPane 刻意不载内容（status='content'），若内容区照常渲染会落一个空
+         CodeBlock 与 iframe 平分抽屉高度；源码态加载失败遗留的 status='error' 也会与 iframe
+         并列——纳入同一互斥链构造性排除。 -->
     <HtmlPreviewPane
       v-if="state.kind === 'html' && state.viewMode === 'preview' && htmlView === 'rendered'"
       :status="htmlPreviewStatus"
@@ -138,7 +142,7 @@
 
     <!-- 加载态（骨架，AC-6.6/T6.7：异步返回前非空白） -->
     <div
-      v-if="state.status === 'loading'"
+      v-else-if="state.status === 'loading'"
       class="flex flex-1 flex-col items-center justify-center gap-2 p-4"
       data-testid="detail-loading"
     >

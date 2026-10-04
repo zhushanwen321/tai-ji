@@ -22,7 +22,7 @@ import { useSideDrawer } from '@/composables/features/drawer/useSideDrawer'
 import { file as fileApi, git as gitApi } from '@/api'
 import { detectFileKind, type FileKind } from '@/composables/logic/file-type'
 import { createHtmlPreviewController, type HtmlViewMode } from '@/composables/features/file-tree/html-preview'
-import { localFileServable } from '@/lib/ipc'
+import { localFileRead, localFileServable, type LocalFileReadReason } from '@/lib/ipc'
 import { parseDiff } from '@/composables/logic/parseDiff'
 import { resolvePreviewPath } from '@/lib/path-utils'
 import i18n from '@/i18n'
@@ -225,12 +225,16 @@ export function useDetailPane(sessionId: Ref<string | null>) {
   /**
    * HTML 渲染态「预览 | 源码」切换（§6.4 D4）。
    * - rendered：重走挂载序列（预检 + 开 iframe）
-   * - source：既有 shiki 源码高亮——需 file.read 内容（cwd 守门；失败走既有错误态）
+   * - source：既有 shiki 源码高亮（白名单通道优先，越界回落 cwd 通道）
    */
   async function setHtmlView(mode: HtmlViewMode): Promise<void> {
     if (state.value.kind !== 'html') return
     if (mode === 'rendered') {
       htmlView.value = 'rendered'
+      // 渲染态状态由 htmlPreview 状态机承载（pending / unavailable / ready 自渲染占位）；
+      // 源码态加载失败遗留的 status='error' 在此清掉，防旧态残留（§6.4 D4 渲染态独占内容区）
+      state.value.status = 'content'
+      state.value.error = ''
       await reloadHtmlPreview()
       return
     }
@@ -241,8 +245,49 @@ export function useDetailPane(sessionId: Ref<string | null>) {
     const token = ++loadToken
     state.value.status = 'loading'
     state.value.error = ''
+    await loadHtmlSourceContent(sid, path, token)
+  }
+
+  /**
+   * 源码态内容加载（chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」）。
+   *
+   * 两条准入通道，按「白名单先行」判定：
+   * - 白名单内路径（产物目录 `<dataDir>/artifacts/<sessionId>` 在 session cwd 外，
+   *   file.read 的 cwd 守门会拒）→ localFile:read（与 servable 预检同一白名单谓词，
+   *   main 侧单一实现；§6.9 D9「同一谓词」）
+   * - 白名单外路径（项目目录内文件——§5.2 恢复指引「在项目内直接看源码」）→ 既有
+   *   file.read cwd 守门通道（loadContent）
+   *
+   * 只有 `out_of_whitelist` 才落 cwd 通道；not_found / is_dir / read_failed 是真实失败，
+   * 直接进错误态（不静默吞掉）。IPC 通道不可用（mock / 旧 preload）同样落 cwd 通道。
+   */
+  async function loadHtmlSourceContent(sid: string, path: string, token: number): Promise<void> {
+    const abs = htmlAbsolutePath()
+    if (abs) {
+      // 白名单读取通道不可用（mock / 旧 preload 的 IPC reject）→ null → 落既有 cwd 通道
+      const result = await localFileRead(abs).catch(() => null)
+      if (token !== loadToken) return
+      if (result?.ok) {
+        state.value.content = result.content
+        state.value.truncated = result.truncated
+        state.value.status = 'content'
+        return
+      }
+      if (result && result.reason !== 'out_of_whitelist') {
+        state.value.status = 'error'
+        state.value.error = htmlSourceErrorText(result.reason)
+        return
+      }
+    }
     const resolved = resolvePreviewPath(sessionCwd(sid) ?? '', path)
     await loadContent(sid, path, resolved.relative, 'preview', token)
+  }
+
+  /** 源码态读取失败原因 → 用户可见文案（复用既有 i18n 词条，不新增 key） */
+  function htmlSourceErrorText(reason: Exclude<LocalFileReadReason, 'out_of_whitelist'>): string {
+    if (reason === 'not_found') return t('panel.detail.htmlReasonNotFound')
+    if (reason === 'is_dir') return t('panel.detail.htmlReasonIsDir')
+    return t('composable.loadFailed')
   }
 
   /** 清空预览（关闭 drawer / 取消选中时） */

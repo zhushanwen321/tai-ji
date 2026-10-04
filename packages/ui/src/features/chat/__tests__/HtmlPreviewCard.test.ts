@@ -102,6 +102,16 @@ describe('路径解析矩阵（resourceBaseDir 覆盖优先 / sessionCwdOf 兜�
     expect(sessionCwdOf).not.toHaveBeenCalled()
   })
 
+  it('`~` 家目录形态 → 直用（不拼 cwd，与 resolvePreviewPath / servable 入参域对齐）', async () => {
+    const probeArtifact = vi.fn().mockResolvedValue({ servable: false, reason: 'out_of_whitelist' })
+    const sessionCwdOf = vi.fn(() => '/cwd')
+    const wrapper = mountCard({ path: '~/secret/x.html', sessionId: 's1' }, { probeArtifact, sessionCwdOf })
+    await flush()
+    expect(probeArtifact).toHaveBeenCalledWith('~/secret/x.html')
+    expect(sessionCwdOf).not.toHaveBeenCalled()
+    expect(metaOf(wrapper)).toBe('panel.htmlPreview.outOfWhitelist')
+  })
+
   it('相对路径 + resourceBaseDir 与 sessionCwdOf 皆在 → resourceBaseDir 优先', async () => {
     const probeArtifact = vi.fn().mockResolvedValue({ servable: true })
     const sessionCwdOf = vi.fn(() => '/cwd')

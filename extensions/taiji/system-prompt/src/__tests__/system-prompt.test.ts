@@ -517,7 +517,7 @@ describe('capability 段 ①② 渲染锁定（文案 = 常量渲染产物，手
     expect(runHook('BASE-PROMPT')).toBeUndefined()
   })
 
-  it('清单常量成员与渲染管线白名单同域（包内自锚：52 标签 / 76 属性，泛型合法 sid 形态）', () => {
+  it('清单常量成员与渲染管线白名单同域（包内自锚：52 标签 / 76 属性）', () => {
     expect(Object.values(CAPABILITY_INLINE_TAG_FAMILIES).flat()).toHaveLength(52)
     expect(CAPABILITY_PRESENTATION_ATTRS).toHaveLength(76)
     // 族归类不重复：每个标签恰出现一次

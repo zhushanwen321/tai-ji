@@ -20,6 +20,7 @@ import { createPinia, setActivePinia } from 'pinia'
 const mockFileRead = vi.fn()
 const mockGitGetDiff = vi.fn()
 const mockServable = vi.fn()
+const mockLocalFileRead = vi.fn()
 
 vi.mock('@/api', () => ({
   project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
@@ -31,6 +32,7 @@ vi.mock('@/stores/session', () => ({
 }))
 vi.mock('@/lib/ipc', () => ({
   localFileServable: (...args: unknown[]) => mockServable(...(args as [string])),
+  localFileRead: (...args: unknown[]) => mockLocalFileRead(...(args as [string])),
 }))
 
 import { useDetailPane } from '@/composables/features/file-tree/useDetailPane'
@@ -46,6 +48,8 @@ beforeEach(() => {
   resetSideDrawer()
   vi.clearAllMocks()
   mockServable.mockResolvedValue({ servable: true, size: 2048 })
+  // 缺省：白名单外（未命中白名单读取通道的用例走既有 file.read cwd 通道）
+  mockLocalFileRead.mockResolvedValue({ ok: false, reason: 'out_of_whitelist' })
 })
 
 describe('useDetailPane · .html 默认渲染态', () => {
@@ -116,5 +120,80 @@ describe('useDetailPane · .html 默认渲染态', () => {
     expect(state.value.kind).toBe('code')
     expect(state.value.viewMode).toBe('diff')
     expect(mockServable).not.toHaveBeenCalled()
+  })
+})
+
+describe('useDetailPane · .html 源码态（白名单读取通道，§8.2 S3）', () => {
+  it('产物目录文件（cwd 外、白名单内）→ localFile:read 读内容，不落 file.read cwd 守门', async () => {
+    const sid = 's1'
+    const path = '/Users/demo/.taiji-dev/artifacts/s1/report.html'
+    mockLocalFileRead.mockResolvedValue({ ok: true, content: '<html>artifact</html>', truncated: false })
+
+    const sessionId = ref<string | null>(sid)
+    const { state, htmlView, htmlPreviewStatus, setHtmlView } = useDetailPane(sessionId)
+    useFileTreeStore().selectFile(path)
+    await nextTick()
+    await vi.waitFor(() => expect(htmlPreviewStatus.value).toBe('ready'))
+
+    await setHtmlView('source')
+    expect(htmlView.value).toBe('source')
+    expect(state.value.status).toBe('content')
+    expect(state.value.content).toBe('<html>artifact</html>')
+    expect(mockLocalFileRead).toHaveBeenCalledWith(path)
+    expect(mockFileRead).not.toHaveBeenCalled()
+  })
+
+  it('白名单外项目文件 → 回落 file.read cwd 通道（§5.2「在项目内直接看源码」）', async () => {
+    const sid = 's1'
+    const path = 'docs/report.html'
+    mockLocalFileRead.mockResolvedValue({ ok: false, reason: 'out_of_whitelist' })
+    mockFileRead.mockResolvedValue({ content: '<html>project</html>', truncated: false })
+
+    const sessionId = ref<string | null>(sid)
+    const { state, setHtmlView, htmlPreviewStatus } = useDetailPane(sessionId)
+    useFileTreeStore().selectFile(path)
+    await nextTick()
+    await vi.waitFor(() => expect(htmlPreviewStatus.value).toBe('ready'))
+
+    await setHtmlView('source')
+    expect(state.value.status).toBe('content')
+    expect(state.value.content).toBe('<html>project</html>')
+    expect(mockFileRead).toHaveBeenCalledWith(path, sid)
+  })
+
+  it('白名单读取真实失败（not_found）→ 错误态，不静默回落 file.read', async () => {
+    const sid = 's1'
+    const path = '/Users/demo/.taiji-dev/artifacts/s1/gone.html'
+    mockLocalFileRead.mockResolvedValue({ ok: false, reason: 'not_found' })
+
+    const sessionId = ref<string | null>(sid)
+    const { state, setHtmlView, htmlPreviewStatus } = useDetailPane(sessionId)
+    useFileTreeStore().selectFile(path)
+    await nextTick()
+    await vi.waitFor(() => expect(htmlPreviewStatus.value).toBe('ready'))
+
+    await setHtmlView('source')
+    expect(state.value.status).toBe('error')
+    expect(mockFileRead).not.toHaveBeenCalled()
+  })
+
+  it('源码态加载失败后切回渲染态 → 清掉遗留 error 态（渲染态状态归 htmlPreview 状态机）', async () => {
+    const sid = 's1'
+    const path = '/Users/demo/.taiji-dev/artifacts/s1/gone.html'
+    mockLocalFileRead.mockResolvedValue({ ok: false, reason: 'not_found' })
+
+    const sessionId = ref<string | null>(sid)
+    const { state, htmlView, setHtmlView, htmlPreviewStatus } = useDetailPane(sessionId)
+    useFileTreeStore().selectFile(path)
+    await nextTick()
+    await vi.waitFor(() => expect(htmlPreviewStatus.value).toBe('ready'))
+
+    await setHtmlView('source')
+    expect(state.value.status).toBe('error')
+
+    await setHtmlView('rendered')
+    expect(htmlView.value).toBe('rendered')
+    expect(state.value.status).toBe('content')
+    expect(state.value.error).toBe('')
   })
 })

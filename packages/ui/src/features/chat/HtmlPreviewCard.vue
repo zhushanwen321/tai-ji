@@ -1,8 +1,9 @@
 <!--
   HtmlPreviewCard —— html-preview fence 的卡片（chat-html-support §6.3 D3 / §7「卡片组件」行）。
 
-  形态：fence info 首词为 `html-preview`、内容为被预览 HTML 文件路径（绝对路径直用；相对路径
-  按 resourceBaseDir ?? sessionCwdOf(sessionId) 矩阵解析，与 MarkdownRenderer ④路同一传值矩阵）。
+  形态：fence info 首词为 `html-preview`、内容为被预览 HTML 文件路径（绝对路径直用——
+  含 `~` 家目录形态；相对路径按 resourceBaseDir ?? sessionCwdOf(sessionId) 矩阵解析，与
+  MarkdownRenderer ④路同一传值矩阵）。
   单动作形态：唯一按钮「打开预览」→ deps.openDrawer('detail', { filePath: 绝对路径 })——不设
   「显示源码」第二按钮（抽屉「预览 | 源码」切换已覆盖，设计 §6.3 已否决）。
 
@@ -52,7 +53,8 @@
 <script setup lang="ts">
 /**
  * HtmlPreviewCard（chat-html-support §6.3 D3）。
- * - 路径解析矩阵：绝对路径直用；相对路径按 resourceBaseDir ?? sessionCwdOf(sessionId) 解析
+ * - 路径解析矩阵：绝对路径直用（含 `~` 家目录形态）；相对路径按 resourceBaseDir ??
+ *   sessionCwdOf(sessionId) 解析
  *   （与 MarkdownRenderer ④路同标准的纯函数镜像，ui→renderer 依赖禁令不可直接 import）；
  *   两者皆缺 → 降级态「无法解析路径」（不静默猜基准）。
  * - 非法判定：fence 内容 trim 后为空或含换行 → 降级态「路径非法」。
@@ -94,9 +96,14 @@ type ProbeState =
 
 const probeState = ref<ProbeState>({ kind: 'pending' })
 
-/** 绝对路径判定（POSIX 根 / Windows 盘符；产物目录形态恒为 POSIX 绝对路径） */
+/** 绝对路径判定（POSIX 根 / Windows 盘符 / `~` 家目录形态）。
+ *  `~` 归入绝对路径 = 与消费侧入参域对齐（设计 §6.3 D3 路径解析矩阵「绝对路径直用」）：
+ *  renderer `lib/path-utils.isAbsolutePath` 与 servable IPC 入参域（preload 契约「`~` 展开
+ *  由主进程谓词承担」）均接受 `~` 形态——不认则 `~/x.html` 被当相对路径拼到 cwd 下
+ *  （`/cwd/~/x.html`），落白名单内时预检得 not_found，降级原因与设计 §8.2 S8③ 断言
+ *  （out_of_whitelist）不符。`~` 展开由主进程 expandLocalFilePath 承担。 */
 function isAbsolutePath(p: string): boolean {
-  return p.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(p)
+  return p.startsWith('/') || p.startsWith('~') || /^[a-zA-Z]:[\\/]/.test(p)
 }
 
 /**
