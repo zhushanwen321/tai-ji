@@ -19,10 +19,14 @@
 import { BASE_PORT, MAX_PORT } from '@taiji/shared'
 
 /**
- * 带值 flag 的裸名集合（缺值判定用）：裸名（无 `=`）不匹配「flag + 有后续值」分支而
- * 走到兜底 = 孤立出现在 argv 末尾缺值。
+ * 带值 flag 描述：各 flag 的双形态解析语义同构（空格形态取 i+1、`=` 形态按首个 =
+ * 切分），差异仅在取值入口——port 走整数校验，其余原样字符串。表驱动展开使
+ * 解析分支数不随 flag 数量增长（逐 flag if-else 展开曾致圈复杂度 19 > 15 门禁红）。
  */
-const VALUE_FLAGS = new Set(['--port', '--project-root', '--builtin-plugins-dir', '--mobile-dist'])
+interface ValueFlagSpec {
+  flag: string
+  apply: (raw: string) => void
+}
 
 /** `--flag=value` 形态取值：按首个 = 切分，取 = 后全部（路径含 = 不截断）。 */
 function valueAfterEquals(arg: string, flag: string): string {
@@ -52,35 +56,33 @@ export function parseRuntimeArgs(argv: string[]) {
   let builtinPluginsDir: string | undefined
   let remoteAccess = false
   let mobileDist: string | undefined
+  const valueFlags: ValueFlagSpec[] = [
+    { flag: '--port', apply: (raw) => { port = parseIntArg(raw, 'port') } },
+    { flag: '--project-root', apply: (raw) => { projectRoot = raw } },
+    { flag: '--builtin-plugins-dir', apply: (raw) => { builtinPluginsDir = raw } },
+    { flag: '--mobile-dist', apply: (raw) => { mobileDist = raw } },
+  ]
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
-    if (arg === '--port' && i + 1 < argv.length) {
-      port = parseIntArg(argv[i + 1], 'port')
-    } else if (arg.startsWith('--port=')) {
-      port = parseIntArg(valueAfterEquals(arg, '--port'), 'port')
-    } else if (arg === '--project-root' && i + 1 < argv.length) {
-      projectRoot = argv[i + 1]
-    } else if (arg.startsWith('--project-root=')) {
-      projectRoot = valueAfterEquals(arg, '--project-root')
-    } else if (arg === '--builtin-plugins-dir' && i + 1 < argv.length) {
-      builtinPluginsDir = argv[i + 1]
-    } else if (arg.startsWith('--builtin-plugins-dir=')) {
-      builtinPluginsDir = valueAfterEquals(arg, '--builtin-plugins-dir')
+    const spec = valueFlags.find((f) => arg === f.flag || arg.startsWith(`${f.flag}=`))
+    if (spec) {
+      if (arg !== spec.flag) {
+        // `=` 形态：按首个 = 切分，取 = 后全部（路径含 = 不截断，code-harden P2）。
+        spec.apply(valueAfterEquals(arg, spec.flag))
+      } else if (i + 1 < argv.length) {
+        // 空格形态：取后续值。
+        spec.apply(argv[i + 1])
+      } else {
+        // 兜底（code-harden P2）：孤立出现在 argv 末尾缺值 → warn 提示（不 throw）。
+        console.warn(`[runtime] ${spec.flag} 缺值（孤立出现在 argv 末尾），已忽略并使用默认值`)
+      }
     } else if (arg === '--remote-access') {
       // 布尔 flag（remote-access D9）：出现即开，supervisor 按配置 enabled 拼参（U1.2）。
       remoteAccess = true
-    } else if (arg === '--mobile-dist' && i + 1 < argv.length) {
-      mobileDist = argv[i + 1]
-    } else if (arg.startsWith('--mobile-dist=')) {
-      mobileDist = valueAfterEquals(arg, '--mobile-dist')
     } else if (arg.startsWith('--')) {
-      // 兜底分支（code-harden P2）：此前静默忽略的两类形态改为 warn 提示。
+      // 兜底分支（code-harden P2）：未知 flag（如拼错 --remote-acces）→ warn 提示。
       // 解析结果不受影响——值不赋、不覆盖、不中断循环，仅补可观测。
-      if (VALUE_FLAGS.has(arg)) {
-        console.warn(`[runtime] ${arg} 缺值（孤立出现在 argv 末尾），已忽略并使用默认值`)
-      } else {
-        console.warn(`[runtime] unknown flag: ${arg} — 已忽略（不生效）；若为 remote-access 相关请核对拼写`)
-      }
+      console.warn(`[runtime] unknown flag: ${arg} — 已忽略（不生效）；若为 remote-access 相关请核对拼写`)
     }
   }
   return { port, projectRoot, builtinPluginsDir, remoteAccess, mobileDist
