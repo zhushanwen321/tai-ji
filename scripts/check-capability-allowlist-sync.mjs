@@ -15,8 +15,10 @@
  *      缺失 = 白名单新增未告知）；
  *   ② 正面属性清单 === ALLOWED_ATTR 字面量集合（同款双向）；
  *   ③ 负面清单与剥除语义一致：禁用标签均不在 ALLOWED_TAGS；禁用属性（含 data-* / on* 通配）
- *      均不在 ALLOWED_ATTR；`data-*` 通配的存在要求净化层 ALLOW_DATA_ATTR === false
- *      （构造性全剥的语义锚点）。
+ *      均不在 ALLOWED_ATTR；`data-*` 通配的存在要求净化层 ALLOW_DATA_ATTR === false，
+ *      `aria-*` 面要求净化层 ALLOW_ARIA_ATTR === false（两者的构造性收窄语义锚点——
+ *      DOMPurify 两旗标均默认 true 且判定优先于 ALLOWED_ATTR，不关掉则通配越过声明面放行，
+ *      声明清单 ≠ 有效放行面）。
  *
  * 形态照搬 scripts/check-thinking-levels.mjs（双清单对拍先例）。
  *
@@ -312,6 +314,22 @@ function main() {
             '——恢复动作：核对净化配置（否则 data-* 实际放行，声明失实）',
         )
       }
+    }
+
+    // aria-* 面的语义锚点（与 data-* 锚点同型）：净化层必须显式 ALLOW_ARIA_ATTR=false。
+    // DOMPurify 的 ALLOW_ARIA_ATTR 默认 true 且 _isValidAttribute 判定优先于 ALLOWED_ATTR
+    // 白名单（3.4.11 实装核实）——不关掉则任意 aria-* 越过声明面放行，属性面「声明清单 =
+    // 有效放行面」失实，而第 ② 步（正面属性清单 === ALLOWED_ATTR）仍绿（ALLOWED_ATTR 字面量
+    // 未变）。故有效放行面按默认 true 计入 aria-*：须显式置 false 收窄为声明面，否则红灯。
+    if (/ALLOW_ARIA_ATTR\s*:\s*false/.test(stripComments(sanitizeText))) {
+      const ariaDeclared = allowedAttrs.values.filter((a) => a.startsWith('aria-'))
+      ok(`aria-* 面以 ALLOW_ARIA_ATTR=false 收窄（有效放行面 = 声明面，含 ${ariaDeclared.length} 项 aria 白名单）`)
+    } else {
+      fail(
+        `${SANITIZE_SRC} 未显式 ALLOW_ARIA_ATTR: false` +
+          '——恢复动作：核对净化配置（DOMPurify 默认 true 时任意 aria-* 越过 ALLOWED_ATTR 放行，' +
+          '声明清单 ≠ 有效放行面；若确需放开 aria-*，须同步 capability 属性面声明并重议本锚点）',
+      )
     }
   }
 

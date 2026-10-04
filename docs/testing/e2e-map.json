@@ -1898,7 +1898,8 @@
       "id": "E2E-CAPALLOW-01",
       "summary": "capability 清单成员一致性对账守卫（capability-allowlist-sync）：system prompt 扩展的正面/负面清单常量字面量（CAPABILITY_INLINE_TAG_FAMILIES / CAPABILITY_PRESENTATION_ATTRS / CAPABILITY_FORBIDDEN）× markdown-sanitize.ts 的 ALLOWED_TAGS / ALLOWED_ATTR 白名单字面量零漂移机检（双侧源文本机械提取，零散文解析——跨包不可 import，编译期拦截不可行）",
       "scope": [
-        "scripts/check-capability-allowlist-sync.mjs"
+        "scripts/check-capability-allowlist-sync.mjs",
+        "scripts/__tests__/check-capability-allowlist-sync.test.mjs"
       ],
       "layer": "L1",
       "assets": [
@@ -1912,13 +1913,14 @@
       "run": "node scripts/check-capability-allowlist-sync.mjs",
       "owner": "extensions/taiji/system-prompt",
       "authority": "scripts/check-capability-allowlist-sync.mjs",
-      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（触发面 = 本脚本自身 + extensions/taiji/system-prompt/src/index.ts + packages/renderer/src/composables/logic/markdown-sanitize.ts，见 .githooks/install-hooks.sh 同名段；看护对象是两清单载体文件而非本脚本；退出码契约 0=一致 / 非 0=漂移或输入故障）；本表 run = 自含冒烟（与 pre-commit 同一命令）。新清单成员在常量登记表登记并同步触发面 pathspec；无独立约束/ADR 登记，设计决策（清单以结构化常量承载 + 文案由常量渲染 + 双侧字面量对拍而非 import）记录在脚本头注释块与设计文档 §6.1 D1，故 authority 自指"
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（触发面 = 本脚本自身 + extensions/taiji/system-prompt/src/index.ts + packages/renderer/src/composables/logic/markdown-sanitize.ts，见 .githooks/install-hooks.sh 同名段；看护对象是两清单载体文件而非本脚本；退出码契约 0=一致 / 非 0=漂移或输入故障）；本表 run = 自含冒烟（与 pre-commit 同一命令）；纯函数自检（--self-test）与守卫非恒绿证明（清单多出/缺失 + 文件缺失各一例红）由 scripts/__tests__/check-capability-allowlist-sync.test.mjs 回归测试覆盖（同面登记 scope）。新清单成员在常量登记表登记并同步触发面 pathspec；无独立约束/ADR 登记，设计决策（清单以结构化常量承载 + 文案由常量渲染 + 双侧字面量对拍而非 import）记录在脚本头注释块与设计文档 §6.1 D1，故 authority 自指"
     },
     {
       "id": "E2E-ARTDIR-01",
       "summary": "会话产物目录公式双实现对账守卫（artifact-dir-formula-sync）：shared paths.ts 的 getSessionArtifactsDir 段名字面量与 sessionId 校验正则字面量 × system-prompt 扩展内镜像推导（SESSION_ARTIFACTS_DIR_SEGMENT + resolveSessionArtifactsDir）零漂移机检（跨包不可 import——extensions 不依赖 @taiji/shared，源文本字面量对拍）",
       "scope": [
-        "scripts/check-artifact-dir-formula-sync.mjs"
+        "scripts/check-artifact-dir-formula-sync.mjs",
+        "scripts/__tests__/check-artifact-dir-formula-sync.test.mjs"
       ],
       "layer": "L1",
       "assets": [
@@ -1932,7 +1934,7 @@
       "run": "node scripts/check-artifact-dir-formula-sync.mjs",
       "owner": "packages/runtime",
       "authority": "scripts/check-artifact-dir-formula-sync.mjs",
-      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（触发面 = 本脚本自身 + packages/shared/src/paths.ts + extensions/taiji/system-prompt/src/index.ts，见 .githooks/install-hooks.sh 同名段；看护对象是两侧公式载体文件而非本脚本；退出码契约 0=一致 / 非 0=漂移或输入故障）；本表 run = 自含冒烟（含 --self-test 9 例，与 pre-commit 同一命令）。公式段名/校验正则变更须双侧同步并同步触发面；无独立约束/ADR 登记，设计决策（为何镜像而非 import：extensions 包边界 + shared getDataDir 对打包态 pi 进程 throw）记录在脚本头注释块与设计文档 §6.7 D7，故 authority 自指"
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（触发面 = 本脚本自身 + packages/shared/src/paths.ts + extensions/taiji/system-prompt/src/index.ts，见 .githooks/install-hooks.sh 同名段；看护对象是两侧公式载体文件而非本脚本；退出码契约 0=一致 / 非 0=漂移或输入故障）；本表 run = 自含冒烟（与 pre-commit 同一命令，均为不带 --self-test 的常规校验）；三条比较的非恒绿证明（段名漂移/正则漂移/镜像旁路字面量/文件缺失各一例红）由 scripts/__tests__/check-artifact-dir-formula-sync.test.mjs 回归测试覆盖（同面登记 scope）。公式段名/校验正则变更须双侧同步并同步触发面；无独立约束/ADR 登记，设计决策（为何镜像而非 import：extensions 包边界 + shared getDataDir 对打包态 pi 进程 throw）记录在脚本头注释块与设计文档 §6.7 D7，故 authority 自指"
     }
   ]
 }
