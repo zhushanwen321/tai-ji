@@ -214,6 +214,22 @@ FIX_HINT = """[fix] 用户内容出站必须经 SkillInjector（packages/runtime
       设计依据: adversarial-review-fixes.md §3.2 A2（已删除，git 可追溯）"""
 
 
+def staged_files():
+    """暂存区文件清单（仓库根相对 posix 路径）。非 git 环境返回 None = 回退全目录扫描。"""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "-z"],
+            capture_output=True, cwd=REPO_ROOT,
+        )
+    except OSError:
+        return None
+    if out.returncode != 0:
+        return None
+    return {p for p in out.stdout.decode("utf-8", errors="replace").split("\0") if p}
+
+
 def run(scan_root):
     if not validate_whitelist():
         return 1
@@ -221,8 +237,17 @@ def run(scan_root):
     exempt_hits = []  # (rel_path, lineno)
     unreadable_dirs = []  # os.walk onerror 收集（不可读目录 = 漏扫面，须显形）
     files = sorted(iter_ts_files(scan_root, unreadable_dirs))
+    staged = staged_files()  # 扫描面 = staged ∩ 规则树；提交者对自己提交的面负责
+    scanned = 0
 
     for path in files:
+        rel_repo = os.path.relpath(path, REPO_ROOT).replace(os.sep, "/")
+        if staged is not None:
+            if rel_repo not in staged:
+                continue
+            if not os.path.exists(path):  # staged 删除项无可扫描内容
+                continue
+        scanned += 1
         rel_path = os.path.relpath(path, scan_root).replace(os.sep, "/")
         try:
             with open(path, encoding="utf-8") as f:
@@ -251,6 +276,9 @@ def run(scan_root):
         + (f" | 目录不可读跳过 {len(unreadable_dirs)} 个" if unreadable_dirs else "")
     )
 
+    if staged is not None and scanned == 0:
+        print("[prompt-outposts] staged 无 packages/runtime/src 规则树文件，跳过扫描")
+        return 0
     if violations:
         print("")
         print("[FAIL] 以下用户内容出站方法调用点未在白名单登记:")

@@ -8,6 +8,11 @@ PiXxx 类型泄漏检查（C-comm-02）——落实 runtime 三层设计「PiXxx
   pi 协议类型只允许出现在 infra/pi/ 内部，pi 原始事件必须经 infra/pi/pi-events.ts
   翻译为内部类型后才进 services。
 
+扫描面 = 本次提交（staged）触及的文件 ∩ 规则目录。提交者对自己提交的面负责；
+未暂存的在途改动归属其作者，其作者提交时本检查同样拦截——工作区他人的
+中间态不阻塞无关提交（与 oe-assert 只扫 staged 新增行、前端 ESLint 只扫
+staged 文件同构）。非 git 环境回退全仓扫描。
+
 存量基线（2026-08-22 首次接入时登记，ALLOWLIST 之外的文件违规即拦）：
   三层设计落地后 services 层存在 25 个历史引用文件（ports 接口 / migration 解析器 /
   plugin-types / session 子模块等）。本检查以「文件级 allowlist + 增量拦截」上线：
@@ -17,6 +22,7 @@ PiXxx 类型泄漏检查（C-comm-02）——落实 runtime 三层设计「PiXxx
 """
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -87,19 +93,53 @@ def rel_to_runtime_src(p: Path) -> str:
     return p.relative_to(PROJECT_ROOT / "packages/runtime/src").as_posix()
 
 
+def staged_files() -> set[str] | None:
+    """暂存区文件清单（仓库根相对 posix 路径）。非 git 环境返回 None = 回退全仓扫描。"""
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "-z"],
+            capture_output=True, cwd=PROJECT_ROOT,
+        )
+    except OSError:
+        return None
+    if out.returncode != 0:
+        return None
+    return {p for p in out.stdout.decode("utf-8", errors="replace").split("\0") if p}
+
+
 def main() -> int:
+    staged = staged_files()
     violations = []
+    scanned = 0
     for scan_dir in SCAN_DIRS:
         for f in sorted(scan_dir.rglob("*.ts")):
             if f.name.endswith(".test.ts") or "__tests__" in f.parts:
                 continue
             rel = rel_to_runtime_src(f)
+            if staged is not None:
+                repo_rel = f"packages/runtime/src/{rel}"  # staged 清单为仓库根相对基准
+                if repo_rel not in staged:
+                    continue
+                if not f.exists():  # staged 删除项无可扫描内容
+                    continue
             if rel in ALLOWLIST_FILES:
                 continue
+            scanned += 1
             stripped = strip_comments(f.read_text(encoding="utf-8", errors="replace"))
             for m in PI_TYPE_RE.finditer(stripped):
                 violations.append(f"{rel}: 标识符 `{m.group(0)}`（PiXxx 类型只许 infra/pi 内部，翻译后进 services）")
                 break  # 每文件报首个即可
+
+    if staged is not None and scanned == 0:
+        print("[check_pi_type_leak] staged 无 packages/runtime/src/{services,transport} 规则目录文件，跳过扫描")
+        return 0
+    if violations:
+        print("[check_pi_type_leak] 发现 PiXxx 类型泄漏（docs/architecture/runtime-layering.md 边界规则）：")
+        for v in violations:
+            print(f"  - {v}")
+        print("修复方向：pi 原始类型/事件经 infra/pi/pi-events.ts 翻译为内部类型后供 services 消费。")
+        return 2
+    return 0
 
     if violations:
         print("[check_pi_type_leak] 发现 PiXxx 类型泄漏（docs/architecture/runtime-layering.md 边界规则）：")

@@ -95,17 +95,44 @@ ALLOWED_MODULES = DOCUMENTED_MODULES | BASELINE_MODULES
 IMPORT_RE = re.compile(r"""^\s*import\s+\{[^}]*\}\s+from\s+['"]([^'"]*infra/[^'"]+)['"]""", re.MULTILINE)
 
 
+def staged_files() -> set[str] | None:
+    """暂存区文件清单（仓库根相对 posix 路径）。非 git 环境返回 None = 回退全目录扫描。"""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "-z"],
+            capture_output=True, cwd=PROJECT_ROOT,
+        )
+    except OSError:
+        return None
+    if out.returncode != 0:
+        return None
+    return {p for p in out.stdout.decode("utf-8", errors="replace").split("\0") if p}
+
+
 def main() -> int:
+    staged = staged_files()
     violations = []
+    scanned = 0
     for f in sorted(SERVICES_ROOT.rglob("*.ts")):
         if f.name.endswith(".test.ts") or "__tests__" in f.parts:
             continue
         rel = f.relative_to(PROJECT_ROOT).as_posix()
+        if staged is not None:
+            if rel not in staged:
+                continue
+            if not f.exists():  # staged 删除项无可扫描内容
+                continue
+        scanned += 1
         for m in IMPORT_RE.finditer(f.read_text(encoding="utf-8", errors="replace")):
             module = Path(m.group(1)).stem
             if module not in ALLOWED_MODULES:
                 violations.append(f"{rel}: value import infra/{module}（services 层 IO 须经 port 接口）")
 
+    if staged is not None and scanned == 0:
+        print("[check_services_infra_import] staged 无 services 规则目录文件，跳过扫描")
+        return 0
     if violations:
         print("[check_services_infra_import] services 层存在白名单外的 infra value import（三层设计「跨切面例外」）：")
         for v in violations:
