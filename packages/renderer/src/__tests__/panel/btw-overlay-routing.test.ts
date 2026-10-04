@@ -126,11 +126,12 @@ function emitInvalidated(sid: string, requestIds: string[], reason = 'turn-abort
   mockBus.emit({ kind: 'requests-invalidated', sessionId: sid, requestIds, reason } as never)
 }
 
-/** form 帧（runtime marker 分支统一产出形状） */
+/** form 帧（runtime marker 分支统一产出形状，经 bridge 归一后的 bus request 形态） */
 function formFrame(requestId: string, question = '要做什么？') {
   return {
     requestId,
-    method: 'select',
+    dialogKind: 'select',
+    kind: 'select',
     pluginId: '',
     form: true,
     formQuestions: [{ type: 'text', question }],
@@ -138,14 +139,18 @@ function formFrame(requestId: string, question = '要做什么？') {
   }
 }
 
-/** planReview 帧（PLAN_REVIEW_MARKER 检测形状：无 title/options） */
+/** planReview 帧（PLAN_REVIEW_MARKER 检测形状：dialogKind select，无 title/options） */
 function planFrame(requestId: string) {
-  return { requestId, method: 'select', pluginId: '', planReview: true }
+  return { requestId, dialogKind: 'select', kind: 'select', pluginId: '', planReview: true }
 }
 
-/** 简单 dialog 帧（confirm / select——权限审批 ctx.ui.select 同通道） */
+/** 简单 dialog 帧（confirm / select——权限审批 ctx.ui.select 同通道；经 bridge 归一后的
+ *  bus request 形态：dialogKind 判别字段 + kind 归一字段，pi method 已止点于 event-adapter） */
 function dialogFrame(requestId: string, extra: Record<string, unknown> = {}) {
-  return { requestId, pluginId: '', method: 'confirm', title: '允许执行？', message: 'rm -rf /tmp/x', ...extra }
+  return {
+    requestId, pluginId: '', dialogKind: 'confirm', kind: 'confirm',
+    title: '允许执行？', message: 'rm -rf /tmp/x', ...extra,
+  }
 }
 
 enableAutoUnmount(afterEach)
@@ -200,7 +205,8 @@ describe('① vid 路由：五类请求 drawer 内联确认条 + 主视图零浮
     const band = mountMainBand(MAIN)
     await settle(w)
     emitUIRequest(VID, dialogFrame('r-perm', {
-      method: 'select',
+      dialogKind: 'select',
+      kind: 'select',
       options: ['Approve (once)', 'Deny'],
     }))
     await settle(w)
@@ -260,7 +266,8 @@ describe('① vid 路由：五类请求 drawer 内联确认条 + 主视图零浮
     await settle(w)
     emitUIRequest(VID, {
       requestId: 'r-sched',
-      method: 'select',
+      dialogKind: 'select',
+      kind: 'select',
       pluginId: '',
       form: true,
       formQuestions: [{

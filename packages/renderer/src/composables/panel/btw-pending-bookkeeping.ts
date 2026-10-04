@@ -60,11 +60,16 @@ const reclaimReminderVids = reactive(new Set<string>())
 
 type UiRequestEvent = Extract<InternalEvent, { kind: 'ui-request' }>
 
-/** D8 请求范围判定（调用方已保证 sid 是 btw vid） */
+/** D8 请求范围判定（调用方已保证 sid 是 btw vid）。
+ *  判别字段双源兼容（pi1-disposition-chat-flow D6）：bus request 的对话框判别字段
+ *  dialogKind（pi 源——extension.dialog 帧经 bridge parseExtensionUiRequest 归一，
+ *  pi method 止点于 event-adapter、帧与归一产物均无 method）?? method（plugin 源——
+ *  plugin:uiRequest 归一产物保留的 plugin 协议自有字段）。 */
 export function isBtwDialogRequest(e: UiRequestEvent): boolean {
-  const r = e.request as { form?: unknown; planReview?: unknown; method?: unknown }
+  const r = e.request as { form?: unknown; planReview?: unknown; dialogKind?: unknown; method?: unknown }
   if (r.form === true || r.planReview === true) return true
-  return typeof r.method === 'string' && BTW_DIALOG_METHODS.includes(r.method)
+  const kind = typeof r.dialogKind === 'string' ? r.dialogKind : r.method
+  return typeof kind === 'string' && BTW_DIALOG_METHODS.includes(kind)
 }
 
 /** dialog 族渲染载荷入队（requestId dedup——实时帧到达时入账，订阅壳调用） */

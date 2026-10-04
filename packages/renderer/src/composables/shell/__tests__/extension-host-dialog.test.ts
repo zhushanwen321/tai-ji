@@ -111,11 +111,14 @@ describe('convertToDialogRequest（AC2）', () => {
     expect(convertToDialogRequest(e2).options).toEqual([{ label: 'x', value: '1', description: 'desc' }])
   })
 
-  it('TC4: method 超界恢复 + receivedAt 补齐——原始 method 优先（editor 透传），无 method 用 kind', () => {
+  it('TC4: dialogKind 超界透传 + receivedAt 补齐——dialogKind 优先（editor 透传），无 dialogKind 用 kind 兜底', () => {
+    // pi1-disposition-chat-flow D6：bus request 的判别字段 = dialogKind（bridge
+    // parseExtensionUiRequest 归一产物，editor 超界原样透传），convertToDialogRequest
+    // 不再读 method（pi 词汇止点于 event-adapter）
     const e1 = makeUiRequestEvent({ kind: 'input' }) as Extract<InternalEvent, { kind: 'ui-request' }> & {
       request: Record<string, unknown>
     }
-    e1.request.method = 'editor'
+    e1.request.dialogKind = 'editor'
     const req1 = convertToDialogRequest(e1)
     expect(req1.method).toBe('editor')
     expect(typeof req1.receivedAt).toBe('number')

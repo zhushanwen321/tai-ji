@@ -18,6 +18,19 @@ import type { ExtensionContext, MessageEndEvent } from "@earendil-works/pi-codin
 import { applyEvent } from "../../service";
 import type { GoalSession } from "../../session";
 
+/**
+ * 畸形防御读取 message.role（D13①）：pi 事件经 JSON 解析，message 缺失 / 非对象 /
+ * 缺 role 的畸形形态不得崩 handler——一律按「非对话轴形态」拒绝（测试契约：
+ * toolResult / 缺 role / 缺 message 同走拒绝）。typeof + in 收窄替代 as 全可选
+ * 结构断言（后者任何对象都能通过，等于无校验）。
+ */
+function readMessageRole(event: MessageEndEvent): unknown {
+	const message: unknown = event.message;
+	if (typeof message !== "object" || message === null) return undefined;
+	if (!("role" in message)) return undefined;
+	return message.role;
+}
+
 export async function handleMessageEnd(
 	session: GoalSession,
 	ctx: ExtensionContext,
@@ -28,7 +41,7 @@ export async function handleMessageEnd(
 	if (ctx.signal?.aborted) return;
 
 	// D13① role 过滤：仅对话轴两形态（AgentMessage role 域为开放联合，宽比较）
-	const role: unknown = (event as { message?: { role?: unknown } }).message?.role;
+	const role = readMessageRole(event);
 	if (role !== "user" && role !== "assistant") return;
 
 	applyEvent(session, "message_end", event);

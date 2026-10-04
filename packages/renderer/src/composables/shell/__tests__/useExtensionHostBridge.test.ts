@@ -7,9 +7,10 @@
  * MessageBusBridge → bus。经 events 正规通道全链路验证（ADR-0060：source 双订阅 onGlobal +
  * onCrossSession，crossSession 通道注入可触发 source adapt，与 global 等价）。
  *
- * 覆盖：TC1 plugin:uiRequest 前缀放行 / TC2 extension.ui_request 白名单放行（归一 kind=ui-request）/
+ * 覆盖：TC1 plugin:uiRequest 前缀放行 / TC2 extension.dialog 白名单放行（归一 kind=ui-request）/
  * TC3 extension.error 非白名单拒绝 / TC4 plugin:statusBarUpdate 前缀回归 /
- * TC5 白名单字面量 + 行为级验证（防与 core EXTENSION_HANDLERS 漂移；P2-2 起含 requestsInvalidated 共 6 项）。
+ * TC5 白名单字面量 + 行为级验证（防与 core EXTENSION_HANDLERS 漂移；含 requestsInvalidated
+ * 与 extension.dialog 共 6 项）。
  * M17 追加：TC7 VIEW_HOST_SOURCE_KEY provide 值的 getViewIds 纯透传
  * （extension:widgetGui 帧 → ViewHostStore → provide 枚举一致）。
  * M17 wave2 追加（D5：废弃 sidebar 动态 view 发现，getViews 纯静态）：
@@ -139,14 +140,14 @@ describe('createWsPluginMessageSource 过滤条件（FR1/AC1）', () => {
     expect(emitted[0]).not.toMatchObject({ kind: 'error' })
   })
 
-  it('TC2: extension.ui_request 白名单放行 → bus 收到 kind=ui-request（与 plugin:uiRequest 归一）', () => {
+  it('TC2: extension.dialog 白名单放行 → bus 收到 kind=ui-request（与 plugin:uiRequest 归一）', () => {
     const { bus, bridge: b } = makeBridge()
     bridge = b
     const { emitted } = spyEmit(bus)
 
     dispatchCrossSession({
-      type: 'extension.ui_request',
-      payload: { sessionId: 's1', requestId: 'r1', method: 'confirm', title: '确认?' },
+      type: 'extension.dialog',
+      payload: { sessionId: 's1', requestId: 'r1', dialogKind: 'confirm', title: '确认?' },
     })
 
     expect(emitted).toHaveLength(1)
@@ -184,14 +185,16 @@ describe('createWsPluginMessageSource 过滤条件（FR1/AC1）', () => {
   it('TC5: EXTENSION_BRIDGE_TYPES 字面量 6 项 + 每项行为级验证（进 bridge 产出非 error 事件）', () => {
     // 字面量锁：EXTENSION_BRIDGE_TYPES 已是 core SSOT（派生自 EXTENSION_HANDLERS keys），
     // 锁项数防 handlers 增删时白名单悄悄漂移（消费方 source filter 行为随之变化无信号）。
-    // 第 6 项 extension:requestsInvalidated 为 P2-2 失效链（runtime 非 respond 终结挂起的广播）
+    // 第 5 项 extension:requestsInvalidated 为 P2-2 失效链（runtime 非 respond 终结挂起的广播）；
+    // 第 6 项 extension.dialog 为 pi1-disposition-chat-flow D6 对话框族帧（取代原
+    // extension.ui_request，载荷判别字段 dialogKind）
     expect(EXTENSION_BRIDGE_TYPES).toEqual([
       'extension:widget',
       'extension:widgetGui',
       'extension:status',
       'extension:notify',
       'extension:requestsInvalidated',
-      'extension.ui_request',
+      'extension.dialog',
     ])
 
     // 行为级一致性：白名单每项经全链路都产出对应 kind 事件（非 kind=error）。
@@ -203,7 +206,7 @@ describe('createWsPluginMessageSource 过滤条件（FR1/AC1）', () => {
       { type: 'extension:status', payload: { sessionId: 's1', statusKey: 'k', text: 'ready' } },
       { type: 'extension:notify', payload: { sessionId: 's1', message: 'hi', level: 'info' } },
       { type: 'extension:requestsInvalidated', payload: { sessionId: 's1', requestIds: ['r9'], reason: 'turn-aborted' } },
-      { type: 'extension.ui_request', payload: { sessionId: 's1', requestId: 'r1', method: 'select' } },
+      { type: 'extension.dialog', payload: { sessionId: 's1', requestId: 'r1', dialogKind: 'select' } },
     ]
     for (const s of samples) {
       const { bus, bridge: b } = makeBridge()

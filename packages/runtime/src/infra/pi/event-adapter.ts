@@ -107,13 +107,14 @@ const INTERACTIVE_UI_METHODS = new Set(
  * 扩展交互表面 kind 词表（pi1-disposition-chat-flow D6①，三值）：dialog / notify / widget——
  * 每值物化于一族 WS 消息并驱动前端路由（值值有消费点，无死值；setStatus/set_editor_text 是
  * runtime/前端内部状态上报，不进本词表、出口与载荷维持现状——见映射表各行归类）。
- * 词表止点：本常量是 kind 词表在仓内的唯一驻留点（合法持有点），taiji 协议侧（WS 载荷、
+ * 词表止点：本类型是 kind 词表在仓内的唯一驻留点（合法持有点），taiji 协议侧（WS 载荷、
  * 前端路由）不出现 kind 字段——kind 经下方帧类型映射物化为消息类型本身。
+ * 以类型联合驻留而非值常量 + typeof 派生：三出口按 pi method 分发、帧类型经
+ * EXTENSION_UI_KIND_FRAME 静态映射，词表无运行时值消费点（type-only 值常量是 lint 红形态）。
  * [HISTORICAL] bridge 通道分支（bridgeEvent/bridgeIntercept 候选值）随 plugin-bridge 整体
  * 退役消失（D7①），终态需求方为零，词表按实有值声明。
  */
-const EXTENSION_UI_KINDS = ['dialog', 'notify', 'widget'] as const
-type ExtensionUiKind = (typeof EXTENSION_UI_KINDS)[number]
+type ExtensionUiKind = 'dialog' | 'notify' | 'widget'
 
 /**
  * kind → WS 消息族主帧类型（D6②：三值各对应一族 WS 消息；消费点 = 下方三个翻译出口经本表
