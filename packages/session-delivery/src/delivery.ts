@@ -290,6 +290,21 @@ function buildBatchPayload(messages: DeliveryMessage[]): DeliveryMessage {
 }
 
 /**
+ * 命令条目组批隔离（pi1-disposition-chat-flow U7/D2② 组批面补全）：命令条目不注标出站
+ * （D2②，出站文本 = 裸命令），与普通条目合批会被 buildBatchPayload 以 BATCH_SEP 拼为
+ * 一条出站文本——pi 命令解析（首个空格前段剥斜杠逐字精确匹配）对拼接文本必然 miss，
+ * 命令退化为普通文本开 LLM 回合（★2 同构缺陷复发，D2② 效果主张落空）；两条命令互拼
+ * 同样 miss。故批内含命令条目时只取队首命令条目单独成批（单条 composed = 裸命令文本，
+ * 适配器无标记分支全文匹配回条目身份，handled 终局可达）；其余条目留守，随下一轮
+ * pump/doSend 出站。代价：命令条目与其后的普通条目出站顺序倒置（两类条目不可共用一次
+ * port.send，结构必然）；同类条目内 FIFO 保持。
+ */
+function isolateCommandEntry(batch: KernelEntry[]): KernelEntry[] {
+  const firstCommand = batch.find((e) => e.isCommand)
+  return firstCommand !== undefined ? [firstCommand] : batch
+}
+
+/**
  * settle 属于 batch 的 checked waiter（原地更新 checkedPending）。
  * 成功（err undefined）：resolve；失败：reject 并返回被 reject 的条目集合
  * （这些条目不再参与错误重试——入口即拦语义，失败已同步交给调用方）。
@@ -799,7 +814,10 @@ export function createDelivery(
         if (inRegistry(w.entry) && w.entry.state === 'queued') batch.push(w.entry)
       }
       if (batch.length > 0) {
-        inflightBatch = batch
+        // 命令条目组批隔离（U7）：在途窗口（上一条 prompt RPC 往返 / 压缩等待）内连发的
+        // 多条 checked 挂账经本处汇成一批——批内含命令条目时只取队首命令条目单独出站，
+        // 防裸命令文本与普通条目被分隔符拼接为一条 composed（pi 命令解析必然 miss）。
+        inflightBatch = isolateCommandEntry(batch)
         inFlight = true
         sendAttempts = 0
         attemptSend()
@@ -817,8 +835,10 @@ export function createDelivery(
   function doSend(): void {
     if (disposed || inFlight) return
 
-    // 锁定全部 queued 条目为出站批次：port.send 失败时留守重试（受理成功才转移）
-    const batch = active.filter((e) => e.state === 'queued')
+    // 候选批 = 全部 queued 条目（port.send 失败时留守重试，受理成功才转移）；命令条目
+    // 组批隔离（U7）：busy park 积累的队列中命令条目与普通条目同批时只取队首命令条目
+    // 单独出站（同 pump，防拼接文本使命令解析 miss），普通条目留守待下一轮。
+    const batch = isolateCommandEntry(active.filter((e) => e.state === 'queued'))
     if (batch.length === 0) return
     inFlight = true
     inflightBatch = batch

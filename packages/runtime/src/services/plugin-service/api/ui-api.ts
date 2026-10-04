@@ -83,7 +83,7 @@ export const DEFAULT_UI_REQUEST_TIMEOUT_MS =
 /**
  * Node setTimeout delay 安全上限（2^31-1）：超域 delay 被 Node 塌缩为 1ms 立即触发
  * （语义反转）。权威源 @zhushanwen/subagent-core/shared/timer-delay.ts——与
- * bridge-interop（D1）同取「本地同值定义」惯例（平台常量无漂移面），避免首创跨包深路径耦合。
+ * tool-timeout（D1）同取「本地同值定义」惯例（平台常量无漂移面），避免首创跨包深路径耦合。
  */
 export const MAX_TIMER_DELAY_MS = 2_147_483_647
 

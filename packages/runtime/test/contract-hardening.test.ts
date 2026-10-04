@@ -263,20 +263,15 @@ describe('tool/hook 注销归属隔离（D7）', () => {
   let toolRegistry: Map<string, unknown>
   let hookRegistry: Map<string, Array<{ pluginId: string; handlerId: string; priority: number }>>
   let port: ReturnType<typeof createMockPort>
-  let syncCalls: number
 
   beforeEach(() => {
     rpc = new PluginRpcServer()
     toolRegistry = new Map()
     hookRegistry = new Map()
-    syncCalls = 0
     port = createMockPort()
     rpc.registerWorker('w1', port)
     registerToolRpcHandlers(rpc, {
       toolRegistry: toolRegistry as never,
-      syncToolsToBridge: async () => {
-        syncCalls++
-      },
     })
     registerHookRpcHandlers(rpc, {
       hookRegistry: hookRegistry as never,
@@ -308,15 +303,13 @@ describe('tool/hook 注销归属隔离（D7）', () => {
       params: { pluginId: 'B', toolKey: 'A:xxx' },
     })
     expect(toolRegistry.has('A:xxx')).toBe(true)
-    expect(syncCalls).toBe(0)
 
-    // B 注销自身工具 → 删除 + sync
+    // B 注销自身工具 → 删除
     await rpc.dispatch('w1', {
       jsonrpc: '2.0', id: 2, method: 'plugin.tools.unregister',
       params: { pluginId: 'B', toolKey: 'B:yyy' },
     })
     expect(toolRegistry.has('B:yyy')).toBe(false)
-    expect(syncCalls).toBe(1)
   })
 
   it('tools.unregister：sandbox 通道身份覆写后 B 伪冒 pluginId="A" 仍无法删 A 的工具', async () => {
@@ -329,7 +322,6 @@ describe('tool/hook 注销归属隔离（D7）', () => {
       params: { pluginId: 'A', toolKey: 'A:xxx' },
     })
     expect(toolRegistry.has('A:xxx')).toBe(true)
-    expect(syncCalls).toBe(0)
   })
 
   it('hooks.unregister：插件 B 传 hook_A_1 → no-op，A 的条目不受影响；B 注销自身正常删除', async () => {
@@ -893,7 +885,6 @@ describe('CT-U1 api 入口窄校验层（畸形输入 → INVALID_* 结构化错
     })
     registerToolRpcHandlers(rpc, {
       toolRegistry: toolRegistry as never,
-      syncToolsToBridge: effects.syncTools,
     })
     registerHookRpcHandlers(rpc, {
       hookRegistry: hookRegistry as never,

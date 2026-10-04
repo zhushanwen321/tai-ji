@@ -186,7 +186,7 @@ session 的语义内容——对话历史、项目知识（AGENTS.md 等）、sk
 
 ### Marker RPC（select+marker 通道原语，2026-09-14）
 
-extension 与 taiji runtime 之间的请求-回包通道原语（`packages/extension-protocol/src/core/select-rpc.ts` 的 `callMarkerRpc`）：extension 侧以 `ctx.ui.select(MARKER, [payload])` 发起（payload 为已序列化字符串），runtime 侧对应 handler 响应同一 marker。回包是判别联合 `MarkerRpcResult`——`{ok:true, value}`（value 恒 raw string，JSON 合法性由原语检测但 parse 消费留调用方）或 `{ok:false, reason}` 四态失败（`cancelled` / `timeout` / `channel-error` / `non-json`，由 `signal.aborted` 反推区分）。mode 门控（裸 TUI 下不发）留在调用方。现役消费方：session-manager / plugin-bridge / subagent-workflow inflight-reporter / ui-form（统一表单协议，见下节）；错误回包形状单源为 `ChannelErrorResult`。
+extension 与 taiji runtime 之间的请求-回包通道原语（`packages/extension-protocol/src/core/select-rpc.ts` 的 `callMarkerRpc`）：extension 侧以 `ctx.ui.select(MARKER, [payload])` 发起（payload 为已序列化字符串），runtime 侧对应 handler 响应同一 marker。回包是判别联合 `MarkerRpcResult`——`{ok:true, value}`（value 恒 raw string，JSON 合法性由原语检测但 parse 消费留调用方）或 `{ok:false, reason}` 四态失败（`cancelled` / `timeout` / `channel-error` / `non-json`，由 `signal.aborted` 反推区分）。mode 门控（裸 TUI 下不发）留在调用方。现役消费方：session-manager / subagent-workflow inflight-reporter / ui-form（统一表单协议，见下节）；错误回包形状单源为 `ChannelErrorResult`。
 
 ### 统一表单协议（ui-form，2026-09-19）
 
@@ -508,14 +508,9 @@ taiji 管理的 extension 存储目录（`<dataDir>/extensions/`，本地/Git �
 runtime 侧服务模块（`packages/runtime/src/services/extension-service.ts`，接口 `IExtensionService`），管理 pi extension 生命周期：发现扫描（用户安装目录 `<dataDir>/extensions/`、npm 目录 `<dataDir>/npm/`）、settings.json `packages[]` 与 `disabled-packages.json` 启停管理、npm / 本地目录 / Git 三种安装来源、将 extension 路径注入 pi 进程启动参数。builtin pi-extensions 的打包内置清单 SSOT = `packages/shared/src/mandatory-extensions.json`（infrastructure 组不可禁、feature 组可禁）。
 
 ### Plugin
-taiji 自己的插件系统，由 PluginService 统一管理（`packages/runtime/src/services/plugin-service/`，接口 `IPluginService`）。宿主双轨：trusted 插件共享 Worker Thread（≤10 插件/Worker，`plugin-host.ts`），sandbox 插件独占 fork 子进程（`plugin-host-process.ts`，`ELECTRON_RUN_AS_NODE=1`）。使用 agentAPI（非 pi ExtensionAPI）。数据（storage KV、权限授予）存储在 `<dataDir>/plugins/` 下。与 pi Extension 是完全不同的概念。
+taiji 自己的插件系统，由 PluginService 统一管理（`packages/runtime/src/services/plugin-service/`，接口 `IPluginService`）。宿主双轨：trusted 插件共享 Worker Thread（≤10 插件/Worker，`plugin-host.ts`），sandbox 插件独占 fork 子进程（`plugin-host-process.ts`，`ELECTRON_RUN_AS_NODE=1`）。使用 agentAPI（非 pi ExtensionAPI）。数据（storage KV、权限授予）存储在 `<dataDir>/plugins/` 下。与 pi Extension 是完全不同的概念。插件工具接入 pi 的通路暂缺，见 [docs/todo/plugin-tool-access-gap.md](todo/plugin-tool-access-gap.md)。
 
 **避免使用**: "扩展"（Extension）——Extension 指 pi 的扩展，Plugin 指 taiji 的插件。
-
-### Plugin Bridge（`@zhushanwen/pi-plugin-bridge`）
-taiji plugin 系统与 pi 引擎之间的桥（`extensions/taiji/plugin-bridge/`，builtin 清单 infrastructure 组）。机制：runtime PluginService 的插件工具清单经 select + BRIDGE_MARKER 通道（pi 公开承诺的 dialog 帧契约）同步进 pi 注册（registerTool），工具 execute、pi 事件转发与 intercept 经同一通道往返 runtime；runtime 侧识别/回包在 `packages/runtime/src/transport/bridge-handler.ts`，协议 v2 形状 SSOT 在 `@zhushanwen/extension-protocol` 的 plugin-bridge 协议模块。Bridge 是插件系统内唯一感知 pi 存在的模块。
-
-> **术语演进**：原「Pi Bridge Extension」基于私有通道（extension_ui_request）的旧方案已废弃重写（bridge-rewrite-pi-0.84）；其「代理 pi.appendEntry()」职责随 sessionData 存储迁移（见下）消亡。
 
 ### sessionData
 Plugin 的 per-session KV 存储 API（`api.sessionData`）。由 runtime 侧 `SessionDataStore` 承载（`packages/runtime/src/services/plugin-service/session-data-store.ts`）：内存 write-back 缓存（500ms debounce flush）+ 退出前 `flushAll` 落盘，持久化在 `<dataDir>/session-data/` 下按 sessionId 分区，单 session 容量上限 10MB。与 PluginStorage（global/workspace scope，`<dataDir>/plugins/<pluginId>/` 下的 `globalState.json` / `workspace-<cwdHash>.json`）不同。

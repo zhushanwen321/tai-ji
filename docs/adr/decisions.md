@@ -48,6 +48,32 @@ btw 旁路提问（主对话旁开 drawer 辅助对话流）的会话形态定�
 
 **登记**：无新约束族。实装 = `packages/runtime/src/infra/pi/pi-codemode-settings.ts`（启动迁移 + 字段域 + 损坏 fail-fast 跳过告警）+ `packages/runtime/src/infra/pi/pi-settings-store.ts`（'tools' scope 与损坏检测单点）+ `packages/pi-rpc/src/spawn-args.ts`（恒带旗标）+ WS 通道（`packages/runtime/src/services/ports/codemode-settings.ts` / `packages/runtime/src/transport/codemode-message-handler.ts`）+ `packages/renderer/src/components/settings/system/SystemCodemodeSection.vue`。机制现状另登记于 [docs/CONTEXT.md](../CONTEXT.md)（codemode / defaultTools 词条）、[docs/FEATURE-PRIORITIES.md](../FEATURE-PRIORITIES.md) 与 [docs/architecture/data-source-registry.md](../architecture/data-source-registry.md) §6；设计文档 `.tmp/tech-design/codemode.md`（不入库，过程产物），本条即该裁决的现行登记处。
 
+### ADR-0108 出站结果回程契约：disposition 终局 + handled 通知 + 孤儿对账 + 命令出站形态（2026-10-04 设计裁决，pi1-disposition-chat-flow D1/D2）
+**决策**：出站条目的终局判定由 pi disposition 响应与投递标记回执双通道承接，终局事实一对一通知前端：
+1. **disposition 接线 + handled tombstone 终局**：出站 prompt（`promptWithBusyRetry`）读响应 disposition（rpc-client 出口经 `parseInputDisposition` 归一）；extension 命令被 pi 接管（disposition=handled）的条目不进 in-flight 等待，直接写入 `DeliveryTombstone`——终态固定为 delivered，语义从「送达事实」扩为「离开系统的事实」（不新造终态形态；cancelled 保持用户撤销专用——被接管混入撤销判据面会破坏 `isUserReclaimRejection` 双信号判据与「已投递不可撤」语义），继承断线重连 resync 判重防线。
+2. **终局通知**：内核经 WS 消息 `session.deliveryHandled { sessionId, clientUuid }`（一次性事件消息，非 last-value 快照）一对一通知前端；前端静默回滚三件套（移除乐观气泡 + 清空空窗计时器 + 递减在途计数），无错误提示。不采用快照消息承载（消息缺席无法区分取消/接管/丢失）与受理回执携带（受理回执必须即刻返回，等处置会让 reply 时延顶到 pi 处置时长、且把受理口径按车道割裂）。
+3. **孤儿对账**：`session.delivery` 快照到达（含断线重连回放）时，本地在途气泡的 clientUuid **曾经在场**（曾出现于任一帧投影——必要条件，防连发场景误清第二条气泡）且已离开在途（终态判据双分支：不在当前投影 / 在投影呈 delivered 终态）、本端无取消操作 → 按 handled 同形态静默清除。数据源 = delivery 快照投影而非 transcript 投影（pi 1.0 首次 flush 前会话文件不存在，transcript 口径不可判定；且仍在内核排队的条目会被误清）。曾见集合随对应气泡移除、上界 = 活跃气泡数；页面刷新后退化为「不清除」（保守方向，误清零风险），悬挂残留由重开 session 恢复。
+4. **命令识别 + 出站形态分型**：session 建立时经 `get_commands` 拉清单缓存；识别规则 = 文本 `/` 开头 + 首空格前段剥前导 `/` 后与清单 name 逐字精确匹配 + `source === 'extension'`（pi 侧接管判定只查扩展注册命令，匹配集与匹配口径两侧构造性一致）。识别为命令的条目出站**不尾附投递标记**（裸命令文本），终局凭据 = disposition 本身；未识别的 `/` 开头条目按普通消息带标记出站（实际被接管则 handled 仍驱动终局，纯单词漏识别则退化普通回合、与现状一致）；skill 与 prompt 模板输入恒走普通消息链路（注标出站 + message_end 回执——两类输入在 pi 侧展开开回合、不返回 handled，剥标记即无终局凭据）。清单拉取失败时全量按普通消息出站（兜底分支）。
+
+**效果**：命令终局时效从「永等 → 30s 超时」变为「响应即终局」；普通消息出站形态与送达回执链路零变化（pi 无输入持久化回执，标记 + message_end 命中是唯一送达凭据）。实装 = `packages/runtime/src/services/session/session-delivery-registry.ts` + `packages/session-delivery/`（内核）+ `packages/shared/src/protocol.ts`（`session.deliveryHandled` 消息）+ 前端消费（useChat / store）。登记无新约束族（ADR-0074 投递所有权内核的回程通道延伸）。设计文档 `.tmp/tech-design/pi1-disposition-chat-flow.md`（不入库，过程产物），本条即该契约的现行登记处。
+
+### ADR-0109 occupancy 事实驱动 + CP6 回落窗退役（2026-10-04 设计裁决，pi1-disposition-chat-flow D3）
+**决策**：occupancy（dispatching/generating/idle 投影）回落由事实凭据驱动，2 秒定时回落窗（CP6）退役：
+1. `deliverOne` 前置换位加 `turn === 'idle'` 条件——生成中出站保持 generating 不覆盖；handled 响应到达即主动回落 dispatching → idle（pi 权威回答取代时间窗猜测）。
+2. CP6 删除后的防悬挂承接 = `sweepInFlight` 对账扫描补 occupancy 收尾：confirm 分支（transcript 命中）与命令清单静默终局分支在清空该 session 最后一笔在途条目时，若 `turn === 'dispatching'` 则转移 idle（幂等门 = 仅 dispatching 才回落，不覆盖 generating/settling；真误判由 turn 事件自愈）。凭据 = transcript 命中 / 命令清单命中的事实（事件驱动），触发时机随既有 10s 宽限对账轮，不新增定时窗；requeue 分支（transcript 未命中重投）条目仍在途、不做收尾。
+3. **时间平抑红线登记**：CP6 的退役条件 = pi 提供权威去向事实——由 ADR-0108 的 disposition 接线达成。sweep 收尾动作的根因 = 「started 形态下回合事件异常不可达但 transcript 已有事实凭据」的残余形态兜底，退役条件 = pi 提供回合事件必达保证或输入级回执。
+
+**效果**：时间平抑类机制净减一；空闲发命令不干扰原回合生成状态。实装 = `packages/runtime/src/services/session/event-interpreter.ts`（CP6 删除 + sweep 收尾）+ `session-delivery-registry.ts`（前置条件 + handled 回落）。登记无新约束族。设计文档同 ADR-0108（不入库，过程产物），本条即该退役决策的现行登记处。
+
+### ADR-0110 pi 词汇合法持有点清单 + 泄漏机器检查（2026-10-04 设计裁决，pi1-disposition-chat-flow D5）
+**决策**：pi 词汇（pi 系 import / 事件名字面量 / 拒绝文案 / pi 方法名 / 协议类型）只允许出现在两层**合法持有点清单**内，清单外由 `.githooks/check_pi_type_leak.py` 五项机器检查拦截（类型项 + import / 事件名 / 文案 / 方法名四项）。**本条即清单 SSOT，与检查器文件头注同源维护——两处改一处必同步**：
+1. **合法持有点清单（两层）**：runtime 内 = `packages/runtime/src/infra/pi/**`（infra 门面层）+ `packages/runtime/src/services/session/session-delivery-registry.ts`（文件头封闭声明）；仓内 pi 系镜像层 = `packages/pi-rpc/**`（RPC 消息契约镜像）+ `packages/pi-subagent-cli/**`（pi spawn 事件直接适配器）。文案项更严：唯一驻留点 = `infra/pi`（消费方经 `infra/pi/pi-rejection.ts` 导入常量，清单内其他文件亦不得持有）。与类型项存量 ALLOWLIST（2026-08-22 过渡基线，独立专项治理）互不取代、不合并维护——两套白名单分管两类词汇。
+2. **事件名词表界定规则**：扫描词表 = `packages/runtime/src/infra/pi/pi-protocol.ts` 的 `PI_EVENT_NAMES` 常量数组值域（字面量唯一驻留点，兼作检查器词表派生载体——检查器启动解析提取，定位失败或空表 fail-fast 退出非 0，摘要行输出词表基数）。等价关系「常量表值域 ≡ PiEvent 联合判别值全集 − 同形剔除集」由同文件两层编译期断言机器强制（`as const satisfies` 子集层 + `PiEventNameDriftGuard` 的 ExpectNever 穷尽层）——联合扩成员而常量表与剔除集均未收即 tsc 红，剔除集扩容路径由该红灯获得机器触发入口；检查器 python 侧零第二套词表（扩联合后下次运行自动取到新词表，检查器代码零改动）。services 层引用 pi 事件名一律经 `PI_EVENT` 具名常量导入，字面量直写即违规。
+3. **同形剔除集（6 词，不进扫描词表防误报，与 pi-protocol.ts `PiEventNameHomoglyphExempt` 同源）**：trace-trigger 联合判别值 3 词（message_end / agent_settled / entry_appended——pi 原始事件名作 taiji 侧触发标签，已属 taiji 自有词表成员）+ compaction_end（taiji 判别值是连字符 'compaction-end'，pi 原词经 onTraceSync 宽 string 传值——该词无类型约束防线，防线下限 = 唯一用途点单点存在 + 评审承接）+ 通用词 2 词（status / error——taiji 通用词汇大面积同形）。
+4. **「检不出」盲区声明（口径边界，登记备查）**：(a) taiji 复合消息类型尾段（如 'message.message_start'）——字符串完整值 ≠ 词表词，属整串相等口径的选型理由而非盲区；(b) 无引号对象键形态（`{ agent_start: ... }`）——标识符键非字符串字面量，检不出（该形态的现存实例已随 plugin-bridge 退役删除；未来再现时扩「对象键」匹配形态为纯增量动作，检查器头注即重审触发器）；(c) 日志模板串内嵌——完整值 ≠ 词表词不命中，日志文本非协议穿透通道，保留原文。剔除代价如实登记：剔除集 6 词上的 L2 型泄漏（services 层直听 pi 原始事件流）检不住。
+
+**效果**：pi 升级的代码审查范围 = 合法持有点清单（类型项另含存量 ALLOWLIST 过渡基线）；检查上线以泄漏修法族落地为前置，首检红灯仅限设计登记的预期存量（整串口径）。同源对端 = `.githooks/check_pi_type_leak.py` 文件头注（白名单 / 词表派生规则 / 剔除集 / 盲区声明的检查器侧副本）与 `pi-protocol.ts` 剔除集断言红灯指引。登记无新约束族（既有 C-comm-02 延伸）。设计文档同 ADR-0108（不入库，过程产物），本条即该清单的现行登记处。
+
 ## 通信与协议
 
 ### ADR-0055 MessageBus：per-session 消息分发 SSOT
@@ -171,6 +197,14 @@ managed session 完成通知从「每次 settle 无条件回流（CompletionBack
 **关键不采用**：① per-session「已通知」布尔 flag——推导性质不应物化为状态，多债权合并时语义破碎；② extension 侧轮询子会话状态——有事件源禁周期 pull（ADR-0064 轮询精简准则），且「谁的完成算数」仍绕不开债权模型；③ 扩 notify-ledger 外部通道合批——P0 设施改动连带 workflow-result 通知形态回归，合批改 extension 侧 50ms 微窗；④ 死亡新闻槽「槽释放后新 claim 自带」的时间基判定——extension 无从知晓死亡事件响应笔数，arm→watch 微窗竞态下迟到 watch 会二次发声，(sessionId, deathSeq) 槽键序无关消解。已接受代价全集（本节即登记处，四要素：量级/恢复路径/重审条件/判定）：C-1 create 失败路径死亡通知缺失（罕见 throw 窗，poll/重试恢复，月级 1 次即重审）；C-2 >50ms 跨窗拆条 + 单笔 +50ms 延迟（幂等不破，A6 口径「至多一条、总数守恒」，用户可感知多条即重审）；C-3 象限2 混装整体退化（同 bundle 不可达，once 日志观测，锚失守即重审）；C-4 arm→watch 微窗通知缺位（毫秒级×父死并发，登记如实，实测可感知即重审）；C-5 arm↔register 非原子窗口（毫秒级自愈）；C-6 放弃旧文本通道 outbox 排队补投（持久化二期根治，丢失高发即提前排期）；C-7 runtime 重启账本全失（shutdown warn 裁决做 + poll 可发现，二期根治）；C-8 宿主 JSONL 写入面线性增长（每 send 2 行 pending+每通知 ≥3 行，goal 每 turn 全量扫描，实施期测基线定阈值，compaction P-B4 实测丢 entry 即重审）；C-9 respond 失败窗口 register 残留（下次 session_start 收尾路径清理，长命 session 残留堆积即扩口对账心跳）。
 
 过程设计文档为不入库产物（已随交付弃置）——**本 ADR 即决策现行登记处**，实施记录 git 可追溯（commit d06d9464a 起）。
+
+### ADR-0111 extension_ui_request 通路结构化契约（2026-10-04 设计裁决，pi1-disposition-chat-flow D6）
+**决策**：extension UI 交互通路按结构化字段路由，bridge 中介零驻留（plugin-bridge 已整体退役，RPC 事件 payload 是 event-adapter 对 pi 事件的直接消费，无转发注入）：
+1. event-adapter 从 pi RPC 事件 payload 派生结构化字段：`method`（pi 1.0 RPC 实发全集 9 个：select / confirm / input / editor / notify / setStatus / setWidget / setTitle / set_editor_text）、`extensionName`、`kind`。
+2. **kind 词表三值（dialog / notify / widget），值值有消费点**：dialog 族 = `extension.dialog`（载荷 dialogKind ∈ select/confirm/input/editor，需回包族）；notify 族 = `extension.notify`；widget 族 = `extension.widget`。setStatus / set_editor_text 与 select 的 marker 家族（session-manager 通道 / inflight 上报）属 runtime/前端内部状态上报——**不进 kind 词表、保持特化出口**（进词表判据 = 该值物化于某族 WS 消息载荷并驱动路由，防词表死分支；亦避免与 event-adapter 内部路由字段 PiTranslatedEvent.kind 撞名）。setTitle 无出口：warn 留痕 + noop（pi 升级语义变化可诊断）。
+3. transport handler 与前端按消息类型路由（取代 marker 字符串分支识别）；marker 约定 → 结构化 kind 的翻译职责收敛在 event-adapter（合法持有点内，见 ADR-0110），title 降级为纯展示。
+
+**效果**：新通道接入 = 声明一处；kind 词表与 9 method 映射表即终态实有值（无死分支），可作实施对账底表；taiji 协议零 pi 专有方法名穿透（由 ADR-0110 方法名项检查拦截）。实装 = `packages/runtime/src/infra/pi/event-adapter.ts`（派生与分发）+ transport handler 消息类型路由 + `packages/core/src/transport/api/domains/extension.ts`（前端消费）。登记无新约束族。设计文档同 ADR-0108（不入库，过程产物），本条即该契约的现行登记处。
 
 ## 状态管理范式（renderer/core）
 

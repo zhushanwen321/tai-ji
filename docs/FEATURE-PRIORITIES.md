@@ -105,6 +105,8 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 
 已移除条目（2026-09-12 用户裁决，功能已不存在）：双 Panel / split mode（UI 无活跃实现，仅 store 层 PanelTree 类型残留）；cw-tool / coding-workflow。
 
+已移除条目（2026-10-04 用户裁决「直接废除 bridge」，功能已不存在）：plugin-bridge（插件工具接入 pi 的通路暂缺，见 docs/todo/plugin-tool-access-gap.md）。
+
 ## 6. 引擎与 extension 分级表
 
 **引擎**：pi 引擎接入 = **P0**（主力，唯一不可替代）；zcode 引擎 = **P2**（第二引擎，边界判例 #4）。
@@ -112,7 +114,6 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 包 | 组 | 分级 | 依据 |
 |----|----|------|------|
 | ask-user | universal | **P0** | 边界判例 #3（2026-09-12 用户裁决升 P0） |
-| plugin-bridge | taiji | **P0** | 跟随插件系统（P0） |
 | subagent-workflow | universal | **P0** | 边界判例 #2（2026-09-12 用户裁决升 P0） |
 | agent-ext | taiji | P1 | taiji 集成基座，挂了集成能力降级但 pi 主链路存活 |
 | base-tool-enhance | universal | P1 | bash 前台链挂了 agent 失去执行能力（原生回退仅保底） |

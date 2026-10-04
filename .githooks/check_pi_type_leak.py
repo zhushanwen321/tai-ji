@@ -74,7 +74,9 @@ pi1-disposition-chat-flow 设计 D5「pi 词汇合法持有点清单 + 泄漏并
 
   取数失败 fail-fast：常量定位不到（改名 / 重构 / 文件移动）或提取结果为空表时，
   本检查器报错退出非 0 而非以空词表照跑（防空词表 → 事件名项零命中全通过的死检查）；
-  每次运行摘要行输出词表基数（首检对账与验收核对词表的既定观察通道）。
+  每次运行摘要行输出词表基数（首检对账与验收核对词表的既定观察通道）；
+  词表全文经开关打印（PI_LEAK_DUMP_VOCAB=1，基数对账出现偏差时核对解析结果
+  的现成通道——设计 D5⑤实装口径⑤「词表输出口径」）。
 
 存量基线（第 1 项类型，2026-08-22 首次接入时登记，ALLOWLIST 之外的文件违规即拦）：
   三层设计落地后 services 层存在 25 个历史引用文件（ports 接口 / migration 解析器 /
@@ -84,6 +86,7 @@ pi1-disposition-chat-flow 设计 D5「pi 词汇合法持有点清单 + 泄漏并
 退出码: 0 通过 / 2 发现泄漏 / 3 事件名词表取数失败（fail-fast）
 """
 
+import os
 import re
 import subprocess
 import sys
@@ -331,6 +334,12 @@ def main() -> int:
         f"[check_pi_type_leak] 词表基数 = {len(event_names)}"
         f"（取数路径：解析 packages/runtime/src/infra/pi/pi-protocol.ts 的 {EVENT_NAMES_CONST}）"
     )
+
+    # 词表全文输出口径（PI_LEAK_DUMP_VOCAB=1，头注「词表输出口径」）——按常量表声明
+    # 顺序输出，即解析结果原样呈现，不排序不加工（不构成第二套词表数据）
+    if os.environ.get("PI_LEAK_DUMP_VOCAB") == "1":
+        vocab_lines = "\n".join(f"  - {name}" for name in event_names)
+        print(f"[check_pi_type_leak] 词表全文（{len(event_names)} 词，声明顺序）：\n{vocab_lines}")
 
     if violations:
         print("[check_pi_type_leak] 发现 pi 词汇泄漏（docs/architecture/runtime-layering.md 边界规则 + D5 合法持有点清单）：")

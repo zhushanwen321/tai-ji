@@ -1508,5 +1508,22 @@
       "test": "packages/runtime/src/infra/pi/__tests__/pi-codemode-settings.test.ts"
     },
     "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-71",
+    "claim": "扩展 slash 命令 handler 抛错的 extension_error 载荷标记契约：agent-session.js _tryExecuteExtensionCommand 的 catch 分支恒 emitError({ extensionPath: `command:${commandName}`, event: \"command\", error })——event:\"command\" 在该文件全量唯一出现（其余错误来源用各自事件名/生命周期标记：register_provider、message_end、skill_expansion 等，extensions/runner.js emitError 各调用点 + _expandSkillCommand）。runtime event-adapter handleExtensionError 原样透传为 extension.error WS 消息的 errorEvent 字段（extensionPath 改名 extensionName）；packages/core/src/domain/chat/useChat.ts handleExtensionErrorFrame 以 errorEvent !== 'command' 做命令失败 toast 的放行过滤（pi1-disposition-chat-flow D10③：非命令来源保持静默），并以 extensionName 的 \"command:\" 前缀剥出可读命令名。pi 改标记值 → 过滤静默失效（命令失败零反馈，D10③ 盲区回归）；改前缀模板 → toast 显示原始 extensionPath",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "_tryExecuteExtensionCommand 的 catch 分支 emitError 载荷",
+        "note": ":1614-1622 —— :1617 extensionPath: `command:${commandName}`；:1618 event: \"command\"；:1619 error: err instanceof Error ? err.message : String(err)；非命令对照 _expandSkillCommand :1648 event: \"skill_expansion\"【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-extension-command-error.test.ts"
+    },
+    "verifiedWith": "1.0.0"
   }
 ]
