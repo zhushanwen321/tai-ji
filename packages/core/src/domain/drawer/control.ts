@@ -6,9 +6,16 @@
  * 而是模块级占位 + 显式绑定（bindDrawerSessionId），由 renderer 兼容层注入
  * `computed(() => usePanelStore().focusedSessionId)`（惰性 computed，首次求值 pinia 已 active）。
  *
- * 分层（C4 单向依赖）：本文件（control）= 纯控制态原语，不感知 pendingOpen 守卫 / 瞬时参数
- * （那些是 coordination 层职责）。coordination → control → foundation/use-session-scoped-state，
- * 禁止 control → coordination 循环。
+ * 分层（C4 单向依赖）：本文件（control）= 纯控制态原语（isOpen/activeTab + 分区键），
+ * 不感知 pendingOpen 守卫 / 瞬时参数 / 选中态（那是 coordination 与 selection 层职责）。
+ * coordination → control → foundation/use-session-scoped-state；selection/<域> → control
+ * （drawerSessionKey）；control 不 import coordination/selection（无环）。
+ *
+ * [display-containers §6.6 W0 状态还债] DrawerControlState 收窄为 { isOpen, activeTab }：
+ * 选中态五字段迁出至 selection/ 各内容域分区（selectedSubagentId/enteredFrom → subagent、
+ * selectedWorkflowName → workflow、selectedBackgroundTaskId → bashTask、selectedBtwVid → btw），
+ * 瞬时参数（selectedCommandName/detailFilePath）迁 selection/transient.ts 按会话分区；
+ * docked 死状态全链删除（display-containers §7.6）。复合谓词读取单一源 = selection/predicates.ts。
  *
  * 单实例（Q2=A 单例）：模块级单例（控制态物理只有一份），SideDrawer 单实例跟随 active panel。
  *
@@ -17,7 +24,7 @@
 import { ref, computed, reactive } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import { useSessionScopedState } from '../../foundation/use-session-scoped-state'
-import type { SideDrawerTab, DrawerControlState } from './types'
+import type { RightDrawerTab, DrawerControlState } from './types'
 
 // ── 分区键占位 + 绑定（headless 不直接读 pinia）──
 // boundSid 存绑定目标 ref（初始 null = 未绑定，模块级 API 按 null sid no-op 语义）。
@@ -26,9 +33,15 @@ import type { SideDrawerTab, DrawerControlState } from './types'
 // 直接变成 Ref<string|null>|null，`.value` 链断裂。显式注解强制 Ref 包装。
 // sidRef = boundSid.value?.value ?? null：boundSid.value 是响应式读（绑定时 sidRef 失效重算），
 // 内层 .value 是绑定 ref 的响应式读（focusedSessionId 变化时 sidRef 跟随），两种变化都正确传播。
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：drawer 绑定 sid 单例 ref（12 类未覆盖）
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，已登记）：drawer 绑定 sid 单例 ref（W24 基线存量，dmg-r1-1 草稿表述清理）
 const boundSid: Ref<Ref<string | null> | null> = ref(null)
 const sidRef = computed<string | null>(() => boundSid.value?.value ?? null)
+
+/**
+ * drawer 域分区键（selection/ 各内容域分区共用同一键——五字段迁出后选中态分区与
+ * 控制态分区同键不同表，切 session 同步换区）。只读暴露给 selection/<域> 工厂。
+ */
+export const drawerSessionKey: ComputedRef<string | null> = sidRef
 
 /**
  * 绑定模块级分区键（幂等：同 ref 重复绑定不报错；新 ref 覆盖）。
@@ -49,20 +62,31 @@ export function getDrawerControlState(): DrawerControlState {
   return controlState.current.value
 }
 
+/**
+ * 按 sid 读控制态分区（复合谓词 selection/predicates.ts 跨域读取用）。
+ * updateFor 语义：已删 sid no-op（返回 undefined，不复活分区）；分区不存在时惰性建默认空分区。
+ */
+export function readDrawerControlFor<R>(sid: string, read: (s: DrawerControlState) => R): R | undefined {
+  let out: R | undefined
+  controlState.updateFor(sid, (s) => {
+    out = read(s)
+  })
+  return out
+}
+
 // ── per-session 分区状态（useSessionScopedState）──
 /**
  * 新 session 的默认控制态。[HISTORICAL] 必须返回 reactive 容器——plain object 的 mutate
  * 不触发下游 computed 重算，导致 sid 稳定时手动 open() 失效（drawer 打不开）。
  * 违反 useSessionScopedState 响应式契约曾导致 todo/goal 自动打开能开、手动点击打不开。
+ *
+ * 默认 activeTab = 'git'（display-containers §7.1：terminal 迁底抽屉后 git 是 L1 图标序首位
+ * 且高频——「首开右抽屉呈现 git」由 u-w1-layout S10 断言）。
  */
 function createDefaultControlState(): DrawerControlState {
   return reactive({
     isOpen: false,
-    activeTab: 'terminal',
-    docked: false,
-    selectedSubagentId: null,
-    selectedWorkflowName: null,
-    enteredFrom: null,
+    activeTab: 'git',
   })
 }
 
@@ -74,78 +98,44 @@ const controlState = useSessionScopedState<DrawerControlState>(
 /**
  * 内部原语命名空间（coordination 层专用，公开 API 之外的薄封装）。
  *
- * ⚠️ 直接调用会跳过瞬时参数写入（selectedCommandName/detailFilePath）——
- * 业务代码应使用 coordination 层的 openDrawerTab / closeDrawer / toggleDrawer /
- * setDrawerTab / toggleDrawerDock（C2 契约）。
+ * ⚠️ 直接调用会跳过瞬时参数写入（selectedCommandName/detailFilePath）与选中态写入
+ * （selection/ 各内容域分区）——业务代码应使用 coordination 层的 openDrawerTab /
+ * closeDrawer / toggleDrawer / setDrawerTab / openSubagent / openWorkflowInDrawer /
+ * setBtwView / selectBackgroundTask（C2 契约）。
  *
- * 与 renderer 原 openInternal 的差异：瞬时参数（selectedCommandName/detailFilePath）
- * 不在此写入——它们是 coordination 层职责（opts 归 coordination.openDrawerTab），
- * control 保持纯控制态（C4 单向依赖防循环）。
+ * drawerControl 现行职责：只写纯控制态（isOpen/activeTab）——瞬时参数与选中态不在此
+ * 写入，它们是 coordination 层职责（opts 归 coordination.openDrawerTab，选中态归
+ * selection/<域>），control 保持纯控制态（C4 单向依赖防循环）。
  */
 export const drawerControl = {
   /** 打开抽屉（当前分区），可指定初始 tab */
-  open(tab?: SideDrawerTab): void {
+  open(tab?: RightDrawerTab): void {
     const cur = controlState.current.value
     if (tab) cur.activeTab = tab
     cur.isOpen = true
   },
-  /** 关闭抽屉（钉住态亦可手动关闭） */
+  /** 关闭抽屉 */
   close(): void {
     controlState.current.value.isOpen = false
   },
   /** 切换 tab（抽屉关闭时仅改 activeTab，不自动打开） */
-  setTab(tab: SideDrawerTab): void {
+  setTab(tab: RightDrawerTab): void {
     controlState.current.value.activeTab = tab
-  },
-  /** 切换钉住态（仅当前分区） */
-  toggleDock(): void {
-    controlState.current.value.docked = !controlState.current.value.docked
-  },
-  /** 设置 subagent tab 视图：切到 subagent tab + 记录选中的 subagent 虚拟 id + 进入来源 + 打开 drawer（D4）。
-   *  virtualId 由调用方算好（subagentVirtualId/agentCallVirtualId），core 不感知 id 结构。 */
-  setSubagentView(virtualId: string, enteredFrom: 'chat' | 'workflow'): void {
-    const cur = controlState.current.value
-    cur.activeTab = 'subagent'
-    cur.selectedSubagentId = virtualId
-    cur.enteredFrom = enteredFrom
-    cur.isOpen = true
-  },
-  /** 设置 workflow tab 视图：切到 workflow tab + 记录 workflow 名 + 打开 drawer */
-  setWorkflowView(workflowName: string): void {
-    const cur = controlState.current.value
-    cur.activeTab = 'workflow'
-    cur.selectedWorkflowName = workflowName
-    cur.isOpen = true
-  },
-  /** 登记当前查看的 btw 线 vid（btw-question D7/D5，M3-a）：BtwPanel 选中线时写入 vid、
-   *  清空选中/关线时传 undefined。纯字段写入（不切 tab 不开 drawer——面板本就挂在 btw tab
-   *  上，由 openDrawerTab('btw') 入口负责），消费方 = getViewedVids 的 btw 豁免分支。 */
-  setBtwView(vid: string | undefined): void {
-    controlState.current.value.selectedBtwVid = vid
   },
 }
 
 /**
  * 控制态视图：读当前分区字段（切 session 切分区，响应式自动跟随）。
  * 供新代码直接消费（renderer 兼容层 useSideDrawer() 返回形状由此派生）。
+ * 选中态/瞬时参数不在本视图（各回各的内容域，见 selection/）。
  */
 export function useDrawerControl(): {
   isOpen: ComputedRef<boolean>
-  activeTab: ComputedRef<SideDrawerTab>
-  docked: ComputedRef<boolean>
-  selectedSubagentId: ComputedRef<string | null>
-  selectedWorkflowName: ComputedRef<string | null>
-  enteredFrom: ComputedRef<'chat' | 'workflow' | null>
-  selectedBtwVid: ComputedRef<string | undefined>
+  activeTab: ComputedRef<RightDrawerTab>
   } {
   return {
     isOpen: computed(() => controlState.current.value.isOpen),
     activeTab: computed(() => controlState.current.value.activeTab),
-    docked: computed(() => controlState.current.value.docked),
-    selectedSubagentId: computed(() => controlState.current.value.selectedSubagentId),
-    selectedWorkflowName: computed(() => controlState.current.value.selectedWorkflowName),
-    enteredFrom: computed(() => controlState.current.value.enteredFrom),
-    selectedBtwVid: computed(() => controlState.current.value.selectedBtwVid),
   }
 }
 
@@ -155,61 +145,4 @@ export function useDrawerControl(): {
  */
 export function _resetDrawerControlForTest(): void {
   controlState._clearAllForTest()
-}
-
-// ── [B9 agentcall LRU 联动] panel 枚举豁免查询源（memory-leak-remediation §3.3-B9）──
-
-/** 全部 panel 的 focusedSessionId 列表源（split 恢复时多 panel 全查；单 panel 恒 1 元素） */
-type ViewedPanelsSource = Ref<readonly (string | null)[]>
-
-/**
- * panel 枚举绑定（headless 模式，对齐 bindDrawerSessionId）：panel 枚举是 renderer
- * 数据（panel store），core 不 import renderer——renderer 装配模块（composables/
- * features/chat/agentcall-lru-linkage.ts）注册 computed(() => usePanelStore().panels
- * .map(p => p.sessionId))。惰性求值（首次读发生在 LRU 驱逐时，pinia 已 active）。
- * 幂等：同 ref 重复绑定无副作用；新 ref 覆盖（测试隔离重绑定用）。
- * 未绑定时 getViewedVids 返回空集（驱逐无豁免，安全默认）。
- */
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，已登记 §4 ⑧ 2026-09-15）：panel 枚举绑定单例 ref
-const boundViewedPanels: Ref<ViewedPanelsSource | null> = ref(null)
-
-/** 绑定 panel 枚举源（renderer 装配层调用；重绑定覆盖旧源） */
-export function bindViewedVidPanels(source: ViewedPanelsSource): void {
-  boundViewedPanels.value = source
-}
-
-/**
- * [B9] 当前正在查看的 subagent/agentcall 虚拟 id 集（LRU 联动驱逐的豁免源）。
- * [D5 btw-question M3-a] 同源扩含 btw 线：drawer 开在 btw tab 且正在查看某线时，
- * 该线 vid 同样计入豁免（查看中不驱逐；btw 分区被驱逐时的派生键同驱归 M2-c）。
- *
- * 组合链（查询源钉死 panel 枚举，R2 S1）：逐 panel → focusedSessionId → 该 sid 的
- * drawer 分区 → 当前选中 vid。每族三分量同时满足才计入豁免：
- * - isOpen：关闭 drawer 后焦点切走，分区应可驱逐（A6「关闭 drawer 后再切走，分区释放」）；
- * - activeTab === 'subagent' / 'btw'：drawer 开在其他 tab 时对应面板未挂载，不算正在查看
- *   （切回 tab 会重挂，白屏自愈路径不破坏）；
- * - selectedSubagentId / selectedBtwVid 非空：实际选中的虚拟 id。
- *
- * [禁止] drawer 分区全枚举：曾开过 drawer 的 session 焦点切走后分区保留（isOpen/
- * selectedSubagentId 不被 LRU 清），全枚举会把全部历史 agentcall 分区永久豁免，
- * B9 对重度用户静默失效。分区读取经 updateFor（updater 零写入，纯读；分区不存在时
- * 惰性建默认空分区，量级 = panel 数 × 几十字节，接受）。
- */
-export function getViewedVids(): Set<string> {
-  const viewed = new Set<string>()
-  const panels = boundViewedPanels.value?.value ?? []
-  for (const sid of panels) {
-    if (!sid) continue
-    controlState.updateFor(sid, (p) => {
-      if (p.isOpen && p.activeTab === 'subagent' && p.selectedSubagentId) {
-        viewed.add(p.selectedSubagentId)
-      }
-      // btw 线查看保护（D5：查看中不驱逐——本集经 chat store 注入 evictIfNeeded，入口刷新
-      // 该线 recency 恒排保留区，阈值驱逐不落选；未查看的线照常参与阈值驱逐，文件持久可回填）
-      if (p.isOpen && p.activeTab === 'btw' && p.selectedBtwVid) {
-        viewed.add(p.selectedBtwVid)
-      }
-    })
-  }
-  return viewed
 }

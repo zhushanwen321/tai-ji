@@ -3,8 +3,10 @@
 /**
  * useSideDrawer per-session 控制态隔离单测（W3: U1-U10）。
  *
- * 验证从模块级单例 isOpen/activeTab/docked 重构为 per-session Map 分区后
- * （U2 切回恢复三态/U4 docked 不污染/U10 reactive 容器契约与 core
+ * 验证从模块级单例 isOpen/activeTab 重构为 per-session Map 分区后
+ * （U2 切回恢复控制态/U10 reactive 容器契约与 core
+ * [display-containers §6.6 W0] docked 死状态已全链删除（§7.6）——本文件的 U4 docked
+ * 不污染用例随迁 core（后已删）；选中态五字段迁出后本层只余控制态转发。
  * domain/drawer/__tests__/control.test.ts 逐字重复，已删——经兼容层转发以外的
  * renderer 侧增量保留）：
  * - U1 (AC-1): 跨 session 不干扰——切走/切回不互相污染
@@ -79,7 +81,7 @@ describe('useSideDrawer U1 (AC-1) 跨 session 不干扰', () => {
 
     // B 的 drawer 不被弹开
     expect(isOpen.value).toBe(false)
-    expect(activeTab.value).toBe('terminal')
+    expect(activeTab.value).toBe('git')
   })
 })
 
@@ -94,7 +96,7 @@ describe('useSideDrawer U5 (AC-5) deleteSession 清理分区', () => {
     // A 分区重置：切到 A 应是默认态（isOpen=false）
     focusSession('A')
     expect(useSideDrawer().isOpen.value).toBe(false)
-    expect(useSideDrawer().activeTab.value).toBe('terminal')
+    expect(useSideDrawer().activeTab.value).toBe('git')
   })
 })
 
@@ -129,7 +131,7 @@ describe('useSideDrawer U9 (AC-9) 双 panel standby 无独立状态', () => {
     focusSession('B')
     const drawer = useSideDrawer()
     expect(drawer.isOpen.value).toBe(false) // B 默认态
-    expect(drawer.activeTab.value).toBe('terminal')
+    expect(drawer.activeTab.value).toBe('git')
 
     // 切回 P1（A），A 分区状态保留
     focusSession('A')

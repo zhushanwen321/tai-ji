@@ -39,6 +39,9 @@ import {
   waitForExtensionsReady,
   type WsFrame,
 } from './fixtures/launch-app-real'
+// 轨道判据共享（launch-app-real.ts assertRealRendererBundle 同源导出）：mock/real 两轨共用
+// apps/electron/renderer/dist，MOCK_BUNDLE_MARKER 是「当前产物是 mock 构建」的判据
+import { RENDERER_DIST_ASSETS, MOCK_BUNDLE_MARKER } from './fixtures/launch-app'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
@@ -57,6 +60,26 @@ const SESSION_LABEL = 'wf-disconnect-recovery'
 
 /** 稳态观察窗：覆盖一个完整 15s 对账定时腿周期 + 1s 余量（u1 落地后定时腿周期） */
 const STEADY_WINDOW_MS = 16_000
+
+/**
+ * 轨道自保护（batch-* 的 TAIJI_PI_LIVE 门同款范式）：mock bundle 在场时本 faux 真实 app 轨
+ * 不适用，返回 skip 理由（null = 轨道正确，不 skip）。判据与 fixtures/launch-app-real.ts 的
+ * assertRealRendererBundle 同源（MOCK_BUNDLE_MARKER 单一判据，注释见 fixtures/launch-app.ts）。
+ * mock 在场时 launchRealApp 会 fail-fast 抛错——此处先行带理由 skip，防轨道错配（mock 轨
+ * 剧本误收本 spec 等）以失败信号冒充产品缺陷；产物缺失不在此拦，交 fail-fast 响亮报错。
+ */
+function mockBundleSkipReason(): string | null {
+  if (!fs.existsSync(RENDERER_DIST_ASSETS)) return null
+  const mockAsset = fs
+    .readdirSync(RENDERER_DIST_ASSETS)
+    .filter((f) => f.endsWith('.js'))
+    .find((f) => fs.readFileSync(path.join(RENDERER_DIST_ASSETS, f), 'utf8').includes(MOCK_BUNDLE_MARKER))
+  if (!mockAsset) return null
+  return (
+    `轨道自保护：当前 renderer 产物是 mock bundle（assets/${mockAsset} 含 mock fixture 标记），` +
+    '本 faux 真实 app 轨需 real bundle——rebuild with: VITE_E2E=true pnpm run build:e2e（不传 VITE_MOCK）后再跑'
+  )
+}
 
 function makeStreamText(tag: string): string {
   const unit = `${tag} disconnect probe stream line. `
@@ -152,6 +175,10 @@ function removeTempDirs(projectDir: string, dataDir: string): void {
 
 test('A2: WS 断开期间 run 完成 → 重连后 stateSnapshot 回放/冷拉恢复 + GUI 收敛', async () => {
   test.setTimeout(300_000)
+  // 轨道自保护门（batch-* TAIJI_PI_LIVE 门同款）：mock bundle 在场 → skip 不 fail（置于
+  // mkdtemp 之前，skip 不留临时目录）
+  const bundleSkip = mockBundleSkipReason()
+  test.skip(bundleSkip !== null, bundleSkip ?? '')
   // 前缀须短：<dataDir>/run/relay-<pid>.sock 受 macOS UDS 路径 104B 上限约束（S1b 同款教训）
   const projectDir = makeTempDir('taiji-wf-disc-proj-')
   const dataDir = makeTempDir('taiji-wf-disc-data-')

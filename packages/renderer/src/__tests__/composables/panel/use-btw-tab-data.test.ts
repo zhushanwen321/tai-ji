@@ -25,6 +25,7 @@ import {
   bindDrawerSessionId,
   drawerControl,
   openDrawerTab,
+  setBtwView,
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
 import {
@@ -243,7 +244,7 @@ describe('未读计数与视口清除（D8 终态表「未读」行）', () => {
 
     // 进视口（drawer 开 btw tab + 选中该线）→ 清
     openDrawerTab('btw')
-    drawerControl.setBtwView('btw:t1')
+    setBtwView('btw:t1')
     await settle(w)
     expect(text(w, 'unread')).toBe('0')
 

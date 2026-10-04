@@ -4,10 +4,14 @@
  * 🔒 三层架构：services/terminal/terminal-service.ts 实现 ports/terminal-service.ts。
  *
  * 职责：
- * 1. per-session PTY 映射（ptyMap: Map<sessionId, IPty>）
- * 2. spawn：node-pty spawn shell → onData 发布 terminal.data（transient）→ onExit 发布 terminal.exit + 清理 → 发布 terminal.alive（wave:perf-w07 接 MessageBus）
- * 3. write/resize/kill/attach：转发到对应 PTY（无 PTY 时 no-op）
- * 4. destroyPty：session 销毁时 kill + 清理
+ * 1. 实例注册表（ptyMap: Map<terminalId, IPty>，terminalId = `term:<sessionId>:<序号>`）
+ *    ——**键集即存活实例全集**，不另建平行注册结构（spawn 写入、onExit 即删）
+ * 2. spawn：node-pty spawn shell → onData 发布 terminal.data（transient）→ onExit 发布
+ *    terminal.exit + 清理 → 发布 terminal.alive（wave:perf-w07 接 MessageBus）
+ * 3. write/resize/kill/attach：按实例编号转发（实例不存在 = unknown_terminal_id 明确错误，
+ *    退役「静默 no-op」语义）
+ * 4. 会话级序号计数器（单次 runtime 生命周期内单调递增、实例关闭后不回填，设计 §2.3 不变量①）
+ * 5. destroySessionPties / destroyAllPties：实例回收
  *
  * shell 解析（Phase 6）：
  *   config.terminal.json 的 shell 字段（deps.configService 注入）→ fallback 登录 shell
@@ -15,14 +19,17 @@
  *   仅对新 spawn 的 PTY 生效。
  *
  * 错误模式：扁平 `Object.assign(new Error(msg), { code })`（仿 worktree-service），
- * code 为 TerminalErrorCode。write/resize/kill/attach 对不存在 sid 是 no-op（不抛错）。
+ * code 为 TerminalErrorCode：未知实例 = unknown_terminal_id（否定回执），会话段不一致 =
+ * terminal_id_session_mismatch（交叉校验拒绝）；两者与 handler 发出的 terminal_id_required
+ * （畸形帧拒绝）构成路由三码，只有 unknown_terminal_id 触发 renderer 关闭沿回收
+ * （见设计 §3.3「网络消息」末条）。
  *
  * 日志：直接用 console.*（initLogger 已 patch 全局，tee 到文件，见架构约定 #4）。
  */
 import * as pty from 'node-pty'
 import { execFileSync } from 'node:child_process'
 import { buildOutboundChildEnv } from '../../infra/spawn-env.js'
-import type { ServerMessage } from '@taiji/shared'
+import { isTerminalIdOfSession, terminalIdPrefixOf, type ServerMessage, type TerminalInstanceSummary } from '@taiji/shared'
 import type { ITerminalService } from '../ports/terminal-service.js'
 import { toErrorMessage } from '../../utils/errors.js'
 
@@ -84,26 +91,48 @@ function nextPushId(): string {
 const KILL_ESCALATION_MS = 5000
 
 export class TerminalService implements ITerminalService {
+  /** 实例注册表：键 = terminalId（`term:<sid>:<n>`），值 = PTY 句柄。键集即存活实例全集。 */
   private readonly ptyMap = new Map<string, pty.IPty>()
   /**
-   * 已发过 terminal.writeFailed 的 sid（RT-8#10）。write 失败几乎总是「PTY 已死/管道关闭」，
-   * 之后每次击键都会再失败——若逐次 publish 会被击键流刷屏。每 PTY 生命周期至多报一次：
-   * spawn（新周期）与 onExit（周期结束）时清除。
+   * 已发过 terminal.writeFailed 的 terminalId（RT-8#10）。write 失败几乎总是「PTY 已死/
+   * 管道关闭」，之后每次击键都会再失败——若逐次 publish 会被击键流刷屏。每 PTY 生命周期
+   * 至多报一次：spawn（新周期）与 onExit/回收（周期结束）时清除该实例键。
+   * [多实例] 按实例分键（原按 sid）——同会话两实例各自可上报一次，跨实例互不吞。
    */
   private readonly writeFailedReported = new Set<string>()
+  /**
+   * 会话级序号计数器（设计 §3.3「实例注册表与恢复」）：pure memory、单次 runtime 生命周期内
+   * 只增不减——实例关闭后序号不回填、实例死绝也不回落（不变量①）。
+   * **否决「live 键 max+1 纯函数派生」**：实例死绝后 max 回落会复用「终端 1」，同号键无隔离，
+   * 迟到 exit 帧会误清新实例分区。会话删除时**不清计数**（同 id 会话不会重现，删了反而给
+   * 「假想重现」留回落口子）。
+   */
+  private readonly terminalCounters = new Map<string, number>()
 
   constructor(private deps: TerminalServiceDeps) {}
 
-  async spawn(sid: string, cwd: string | undefined, cols: number, rows: number): Promise<void> {
-    // 幂等：已有 PTY 则 no-op（防 TerminalView 重挂载重复 spawn）
-    if (this.ptyMap.has(sid)) {
-      console.log(`[terminal] spawn no-op (already alive): sid=${sid}`)
-      return
+  /**
+   * spawn 双形态（设计 §3.3「网络消息」）：
+   * - 不带 terminalId = 新建：分配编号 → spawn → 返回分配的 terminalId（编号收口 runtime）
+   * - 带 terminalId = 指定：实例存活则幂等 no-op；不存在 → unknown_terminal_id
+   * 两形态都先做会话段交叉校验（不一致 → terminal_id_session_mismatch）。
+   */
+  async spawn(sid: string, cwd: string | undefined, cols: number, rows: number, terminalId?: string): Promise<string> {
+    if (terminalId !== undefined) {
+      // 会话段不一致 → terminal_id_session_mismatch；会话段一致但实例不在注册表 → unknown_terminal_id
+      if (this.requireInstance(sid, terminalId) === null) {
+        throw terminalError('unknown_terminal_id', `Unknown terminal instance: terminalId=${terminalId}`)
+      }
+      console.log(`[terminal] spawn no-op (already alive): terminalId=${terminalId}`)
+      return terminalId
     }
 
+    const allocated = this.allocateTerminalId(sid)
     const { shell, shellArgs } = this.resolveShell()
     const spawnCwd = cwd ?? process.cwd()
-    console.log(`[terminal] spawn: sid=${sid} shell=${shell} cwd=${spawnCwd} cols=${cols} rows=${rows}`)
+    console.log(
+      `[terminal] spawn: sid=${sid} terminalId=${allocated} shell=${shell} cwd=${spawnCwd} cols=${cols} rows=${rows}`,
+    )
 
     let proc: pty.IPty
     try {
@@ -116,31 +145,31 @@ export class TerminalService implements ITerminalService {
       })
     } catch (e) {
       const msg = toErrorMessage(e)
-      console.error(`[terminal] spawn failed: sid=${sid} shell=${shell}`, serializeError(e))
+      console.error(`[terminal] spawn failed: sid=${sid} terminalId=${allocated} shell=${shell}`, serializeError(e))
       throw terminalError('spawn_failed', `Failed to spawn terminal: ${msg}`)
     }
 
-    this.ptyMap.set(sid, proc)
-    this.writeFailedReported.delete(sid)
+    this.ptyMap.set(allocated, proc)
+    this.writeFailedReported.delete(allocated)
 
     // PTY 输出 → 发布 terminal.data（transient 高频流：不占 seq 不入 ring）
     proc.onData((data) => {
       this.deps.publish(sid, {
         type: 'terminal.data',
         id: nextPushId(),
-        payload: { sessionId: sid, data },
+        payload: { sessionId: sid, terminalId: allocated, data },
       })
     })
 
-    // PTY 退出 → 发布 terminal.exit（stream：入 ring 可回放）+ 清理 ptyMap
+    // PTY 退出 → 发布 terminal.exit（stream：入 ring 可回放）+ 清理注册表
     proc.onExit(({ exitCode }) => {
-      console.log(`[terminal] exit: sid=${sid} exitCode=${exitCode}`)
-      this.ptyMap.delete(sid)
-      this.writeFailedReported.delete(sid)
+      console.log(`[terminal] exit: terminalId=${allocated} exitCode=${exitCode}`)
+      this.ptyMap.delete(allocated)
+      this.writeFailedReported.delete(allocated)
       this.deps.publish(sid, {
         type: 'terminal.exit',
         id: nextPushId(),
-        payload: { sessionId: sid, exitCode },
+        payload: { sessionId: sid, terminalId: allocated, exitCode },
       })
     })
 
@@ -148,124 +177,178 @@ export class TerminalService implements ITerminalService {
     this.deps.publish(sid, {
       type: 'terminal.alive',
       id: nextPushId(),
-      payload: { sessionId: sid },
+      payload: { sessionId: sid, terminalId: allocated },
     })
+
+    return allocated
   }
 
-  write(sid: string, data: string): void {
-    const proc = this.ptyMap.get(sid)
-    if (!proc) return // no-op：PTY 未就绪或已退出（竞态安全）
+  write(sid: string, terminalId: string, data: string): void {
+    const proc = this.requireInstanceOrThrow(sid, terminalId)
     try {
       proc.write(data)
     } catch (e) {
       // 进程已退出/管道关闭时 write 失败属预期竞态，onExit 回调会清理——本地不抛
       //（ack 语义保持：击键流不该被单个失败打断）。但输入字节已丢，必须让前端知道
-      //（RT-8#10）：每 PTY 生命周期 publish 一次 terminal.writeFailed（防击键流刷屏，
-      // spawn/onExit 清 writeFailedReported），renderer 收到后 toast「输入可能丢失」。
+      //（RT-8#10）：每实例生命周期 publish 一次 terminal.writeFailed（防击键流刷屏，
+      // spawn/onExit/回收 清该实例键），renderer 收到后按实例 toast「输入可能丢失」。
       // publish 是唯一上报通道（不再叠加本地 console.error——publish 帧已含 message，
       // 根因由 terminal.exit 广播 + onExit 日志独立承载，避免双通道重复记录同事件）。
-      if (!this.writeFailedReported.has(sid)) {
-        this.writeFailedReported.add(sid)
+      if (!this.writeFailedReported.has(terminalId)) {
+        this.writeFailedReported.add(terminalId)
         this.deps.publish(sid, {
           type: 'terminal.writeFailed',
           id: nextPushId(),
-          payload: { sessionId: sid, message: toErrorMessage(e) },
+          payload: { sessionId: sid, terminalId, message: toErrorMessage(e) },
         })
       }
     }
   }
 
-  resize(sid: string, cols: number, rows: number): void {
-    const proc = this.ptyMap.get(sid)
-    if (!proc) return
+  resize(sid: string, terminalId: string, cols: number, rows: number): void {
+    const proc = this.requireInstanceOrThrow(sid, terminalId)
     try {
       proc.resize(cols, rows)
     } catch (e) {
       // best-effort：进程已退出时 resize 抛错属预期竞态，下次 spawn 会重建，不传播
-      console.error(`[terminal] resize failed: sid=${sid}`, serializeError(e))
+      console.error(`[terminal] resize failed: terminalId=${terminalId}`, serializeError(e))
     }
   }
 
-  kill(sid: string): void {
-    const proc = this.ptyMap.get(sid)
-    if (!proc) return
+  kill(sid: string, terminalId: string): void {
+    const proc = this.requireInstanceOrThrow(sid, terminalId)
     try {
       proc.kill()
     } catch (e) {
-      // 重复 kill 或进程已退出时抛错，onExit 回调幂等清理 ptyMap + 广播 terminal.exit
-      console.error(`[terminal] kill failed: sid=${sid}`, serializeError(e))
+      // 重复 kill 或进程已退出时抛错，onExit 回调幂等清理注册表 + 广播 terminal.exit
+      console.error(`[terminal] kill failed: terminalId=${terminalId}`, serializeError(e))
       return
     }
-    // onExit 回调会清理 ptyMap + 广播 terminal.exit；SIGTERM 被忽略时升级兜底
-    this.scheduleKillEscalation(sid, proc, 'kill')
+    // onExit 回调会清理注册表 + 广播 terminal.exit；SIGTERM 被忽略时升级兜底
+    this.scheduleKillEscalation(terminalId, proc, 'kill')
   }
 
-  attach(_sid: string): void {
-    // 预留：流量控制（高频 terminal.data 拥塞时仅推活跃 sid）。当前 no-op。
+  attach(sid: string, terminalId: string): void {
+    // 成员资格校验是本帧的实质职责：renderer 以 unknown_terminal_id 否定回执回收幽灵条目
+    //（attach 是回收触发入口之一，见设计 §3.3）。预留给流量控制（高频 terminal.data
+    // 拥塞时仅推活跃实例），当前无额外动作。
+    this.requireInstanceOrThrow(sid, terminalId)
   }
 
-  destroyPty(sid: string): void {
-    const proc = this.ptyMap.get(sid)
-    if (!proc) return
-    this.killAndUntrack(sid, proc, 'destroyPty (session delete)')
+  listInstances(sid: string): TerminalInstanceSummary[] {
+    const instances: TerminalInstanceSummary[] = []
+    for (const terminalId of this.ptyMap.keys()) {
+      // 精确前缀匹配（设计 §0.5 P7）：`term:<sid>:` 后必须紧邻序号——
+      // 不做冒号切分取段，避免含冒号 sid 形态跨会话误匹配。
+      if (isTerminalIdOfSession(terminalId, sid)) {
+        instances.push({ terminalId, alive: true })
+      }
+    }
+    return instances
+  }
+
+  destroySessionPties(sid: string): void {
+    const targets: Array<[string, pty.IPty]> = []
+    for (const [terminalId, proc] of this.ptyMap) {
+      // 与 listInstances 同口径（精确前缀 + 序号段）：sid 含冒号时不误杀他会话实例
+      if (isTerminalIdOfSession(terminalId, sid)) targets.push([terminalId, proc])
+    }
+    if (targets.length === 0) return
+    console.log(`[terminal] destroySessionPties: sid=${sid} count=${targets.length}`)
+    for (const [terminalId, proc] of targets) {
+      this.destroyInstance(terminalId, proc)
+    }
+  }
+
+  destroyAllPties(): void {
+    const targets = [...this.ptyMap.entries()]
+    if (targets.length === 0) return
+    console.log(`[terminal] destroyAllPties: count=${targets.length}`)
+    for (const [terminalId, proc] of targets) {
+      this.destroyInstance(terminalId, proc)
+    }
+  }
+
+  /** 分配会话内下一个编号并推进计数器（实例关闭后不回填；分配即消耗，spawn 失败也不复用）。 */
+  private allocateTerminalId(sid: string): string {
+    const next = (this.terminalCounters.get(sid) ?? 0) + 1
+    this.terminalCounters.set(sid, next)
+    return `${terminalIdPrefixOf(sid)}${next}`
   }
 
   /**
-   * 销毁全部存活 PTY（runtime shutdown 链 dispose-terminal-ptys 步骤，孤儿 shell
-   * 加固③）。逐 PTY 复用 kill + untracked 升级 + 清 map 语义，快照迭代。幂等：空表
-   * no-op，shutdown 双信号重入（SIGTERM 后未退再入 / 未捕获异常路径再入）安全。
+   * 实例路由校验（顺序钉死：交叉校验先于注册表查存——若先查存，`term:<他会话>:1` 会命中
+   * 他会话的存活实例并被错误写入）。返回 PTY 句柄；不存在 / 会话段不一致抛扁平错误。
    */
-  destroyAll(): void {
-    const entries = [...this.ptyMap.entries()]
-    if (entries.length === 0) return
-    console.log(`[terminal] destroyAll (runtime shutdown): ${entries.length} PTY(s)`)
-    for (const [sid, proc] of entries) {
-      this.killAndUntrack(sid, proc, 'destroyAll (runtime shutdown)')
+  private requireInstanceOrThrow(sid: string, terminalId: string): pty.IPty {
+    const proc = this.requireInstance(sid, terminalId)
+    if (proc === null) {
+      throw terminalError('unknown_terminal_id', `Unknown terminal instance: terminalId=${terminalId}`)
     }
+    return proc
   }
 
-  /** kill + 清 map + untracked 升级兜底（destroyPty / destroyAll 共用主体，label 供日志归因）。 */
-  private killAndUntrack(sid: string, proc: pty.IPty, label: string): void {
-    console.log(`[terminal] ${label}: sid=${sid}`)
+  /**
+   * 校验并查注册表：会话段不一致 → terminal_id_session_mismatch（**独立码**，不触发 renderer
+   * 回收）；会话段一致但不在注册表 → 返回 null（调用方按语义抛 unknown_terminal_id 或走幂等分支）。
+   */
+  private requireInstance(sid: string, terminalId: string): pty.IPty | null {
+    // 交叉校验与判归属/枚举同口径（精确前缀 + 序号段校验），不用裸 startsWith：
+    // sid `a` 收到键 `term:a:1:1`（实属 sid `a:1`）时必须判 mismatch，裸前缀会放行后在
+    // 注册表命中他会话实例、被错误路由写入。
+    if (!isTerminalIdOfSession(terminalId, sid)) {
+      throw terminalError(
+        'terminal_id_session_mismatch',
+        `terminalId session segment mismatch: terminalId=${terminalId} sessionId=${sid}`,
+      )
+    }
+    return this.ptyMap.get(terminalId) ?? null
+  }
+
+  /**
+   * 回收单个实例：kill + 清注册表 + 清写失败标记 + SIGKILL 升级兜底（untracked）。
+   */
+  private destroyInstance(terminalId: string, proc: pty.IPty): void {
     try {
       proc.kill()
     } catch (e) {
-      // 进程已退出时 kill 抛错，紧接的 ptyMap.delete 会兜底清理，不阻塞调用方
-      console.error(`[terminal] ${label} kill failed: sid=${sid}`, serializeError(e))
+      // 进程已退出时 kill 抛错，紧接的 ptyMap.delete 会兜底清理，不阻塞销毁
+      console.error(`[terminal] destroyInstance kill failed: terminalId=${terminalId}`, serializeError(e))
     }
-    this.ptyMap.delete(sid)
-    // session 销毁 / shutdown 不广播 terminal.exit（前端分别在 session.deleted 与退出
-    // 流程清理）。SIGTERM 被忽略时仍需升级（fd 残留与 session 存亡无关）。此时 ptyMap
-    // 已删，升级 timer 不能靠 map 判活——untracked 模式下进程已退出时 kill 会抛错被吞
-    // （无害）。误杀新 PTY 的风险不存在：两条调用路径（session 销毁 / runtime 退出）
-    // 后同 sid 都不会再 re-spawn。
-    this.scheduleKillEscalation(sid, proc, label, { untracked: true })
+    this.ptyMap.delete(terminalId)
+    this.writeFailedReported.delete(terminalId)
+    // destroyInstance 不主动 publish exit；进程真正退出时 spawn 期注册的 onExit 回调仍会广播
+    // terminal.exit（消费侧按缺条目 / 幂等静默收敛——renderer 已在 session.deleted / 关闭沿清理分区）。
+    // SIGTERM 被忽略时仍需升级（fd 残留与销毁原因无关）。此时注册表已删，升级 timer 不能靠
+    // map 判活——untracked 模式下进程已退出时 kill 会抛错被吞（无害）；误杀风险不存在：
+    // terminalId 永不复用，同 id 不会 re-spawn。
+    this.scheduleKillEscalation(terminalId, proc, 'destroyInstance', { untracked: true })
   }
 
   /**
    * kill 的 SIGKILL 升级兜底（RT-8#10）：SIGTERM 后 KILL_ESCALATION_MS 仍未退出
    * （shell trap 捕获/忽略 SIGTERM、子进程不在同进程组）时强杀，防孤儿进程 + fd 残留。
-   * tracked 模式（用户 kill）：onExit 清理 ptyMap 后本 timer 自然 no-op——同 sid 重新
-   * spawn 了新 PTY 时 `ptyMap.get(sid) !== proc` 守卫防止误杀新 PTY。
+   * tracked 模式（用户 kill）：onExit 清理注册表后本 timer 自然 no-op——同 terminalId 是
+   * 绝不复用的，守卫 `ptyMap.get(terminalId) !== proc` 只作防御式兜背（防实现漂移）。
    */
   private scheduleKillEscalation(
-    sid: string,
+    terminalId: string,
     proc: pty.IPty,
     label: string,
     opts?: { untracked?: boolean },
   ): void {
     const timer = setTimeout(() => {
-      if (!opts?.untracked && this.ptyMap.get(sid) !== proc) return
+      if (!opts?.untracked && this.ptyMap.get(terminalId) !== proc) return
       try {
         proc.kill('SIGKILL')
         console.warn(
-          `[terminal] ${label}: SIGTERM 后 ${KILL_ESCALATION_MS}ms 未退出，已升级 SIGKILL: sid=${sid}`,
+          `[terminal] ${label}: SIGTERM 后 ${KILL_ESCALATION_MS}ms 未退出，已升级 SIGKILL: terminalId=${terminalId}`,
         )
       } catch (e) {
         // SIGKILL 也失败（极罕见：进程已死时 node-pty 抛错属预期 no-op；真失败则子进程/fd
         // 残留）——上报带恢复动作，不留静默断链
         console.error(
-          `[terminal] ${label}: SIGKILL 升级失败，子进程/fd 可能残留（恢复动作：重启应用回收）: sid=${sid}`,
+          `[terminal] ${label}: SIGKILL 升级失败，子进程/fd 可能残留（恢复动作：重启应用回收）: terminalId=${terminalId}`,
           serializeError(e),
         )
       }

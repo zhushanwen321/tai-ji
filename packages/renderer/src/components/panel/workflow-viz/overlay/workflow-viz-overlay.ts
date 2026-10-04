@@ -2,10 +2,14 @@
  * workflow-viz overlay 控制器（workflow-visualization U6）——模块级单例状态 + 数据接线。
  *
  * 职责（设计 §3.3-D1/D10/D11）：
- * - overlay 开关：全局单例（开新 run 切换内容，SearchModal 范式；split mode 下盖全屏、
- *   绑定发起 pane 的 session——D11⑤）。关闭只切 open 标志：事件流缓存归 workflowStore
- *   （D11② overlay 关闭不清）、DAG 侧 runtime 按 runId 缓存（仅成功），本模块不持第二份
- *   数据缓存（open 时无条件重拉，代价 = 一次 RPC ack 延迟）。
+ * - overlay 开关：**开合态 SSOT 已迁 core/domain/overlay（u-w1-core，唯一权威）**——
+ * 本模块不再持有 overlayOpen / overlayCurrent 模块级 ref（已退役），开关/当前内容经
+ * core 的 openOverlay / closeOverlay / getOverlayControlState 读写；本模块保留 DAG 缓存
+ * （overlayDag / overlayDagError，设计 §7.1「DAG 缓存留 renderer」）。全局单例语义不变
+ * （开新 run 切换内容，SearchModal 范式；split mode 下盖全屏、绑定发起 pane 的 session
+ * ——D11⑤）。关闭只切 open 标志：事件流缓存归 workflowStore（D11② overlay 关闭不清）、
+ * DAG 侧 runtime 按 runId 缓存（仅成功），本模块不持第二份数缓存（open 时无条件重拉，
+ * 代价 = 一次 RPC ack 延迟）。
  * - 入口改向桥接（D1）：core coordination.openWorkflow 改向为开 overlay——core headless
  *   不感知 renderer，经 bindWorkflowOverlayOpener/bindWorkflowRunLookup 注入（本模块
  *   顶层装配；绑定动作在模块加载时执行，函数体首次执行在用户交互时刻，pinia 已 active）。
@@ -26,20 +30,15 @@ import {
   bindWorkflowRunLookup,
   openWorkflowInDrawer,
 } from '@taiji/core/domain/drawer'
+import { closeOverlay, getOverlayControlState, openOverlay } from '@taiji/core/domain/overlay'
 import { session as sessionApi } from '@/api'
 import { usePanelStore } from '@/stores/panel'
 import { useWorkflowStore } from '@/stores/workflow'
 import { normalizeWorkflowScriptName } from '../run-name'
 import type { WorkflowVizDagLoadError } from './types'
 
-// ── 模块级单例状态（overlay 全局单例，D8；导出供 Host 容器消费）───────────────
+// ── 模块级状态（DAG 缓存留 renderer；overlay 开合态 SSOT 在 core/domain/overlay）──────
 
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记 §4 ⑧ 2026-10-02）：overlay 开关
-/** overlay 开关（Host 壳 open prop 源）。 */
-export const overlayOpen = ref(false)
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记 §4 ⑧ 2026-10-02）：overlay 当前 run 换指针
-/** 当前查看的 run（null = 未打开）。开新 run 换指即「切换内容」。 */
-export const overlayCurrent = ref<{ sessionId: string; runId: string } | null>(null)
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记 §4 ⑧ 2026-10-02）：overlay DAG 态槽
 /** DAG 蓝图（成功臂；null + dagError=null = 解析中）。 */
 export const overlayDag = ref<WorkflowDag | null>(null)
@@ -74,11 +73,10 @@ function findRun(sessionId: string, nameOrRunId: string, slug?: string): Workflo
 
 // ── 开关 + DAG 拉取 ──────────────────────────────────────────────────────────
 
-/** 打开 overlay（入口改向与编程打开的唯一入口）：换指当前 run + 重置 DAG 态 + 拉取。 */
+/** 打开 overlay（入口改向与编程打开的唯一入口）：换内容当前 run + 重置 DAG 态 + 拉取。 */
 export function openWorkflowVizOverlay(sessionId: string, runId: string): void {
   if (!sessionId || !runId) return
-  overlayCurrent.value = { sessionId, runId }
-  overlayOpen.value = true
+  openOverlay({ kind: 'workflow', payload: { sessionId, runId } })
   overlayDag.value = null
   overlayDagError.value = null
   void loadDag(sessionId, runId)
@@ -86,12 +84,13 @@ export function openWorkflowVizOverlay(sessionId: string, runId: string): void {
 
 /** 关闭 overlay（三通道统一出口）：仅切标志——缓存清理由 store 生命周期承担（D11②）。 */
 export function closeWorkflowVizOverlay(): void {
-  overlayOpen.value = false
+  closeOverlay()
 }
 
 /** session 删除编排（SessionCleanupHooks.closeWorkflowOverlay）：删除的是发起 session 时关。 */
 export function closeWorkflowVizOverlayForSession(sessionId: string): void {
-  if (overlayCurrent.value?.sessionId === sessionId) closeWorkflowVizOverlay()
+  const cur = getOverlayControlState().current
+  if (cur?.kind === 'workflow' && cur.payload.sessionId === sessionId) closeWorkflowVizOverlay()
 }
 
 /**
@@ -119,17 +118,18 @@ async function loadDag(sessionId: string, runId: string): Promise<void> {
 
 /** 在途丢弃判据（当前活跃组合 = 本拉取的组合）。 */
 function isActive(sessionId: string, runId: string): boolean {
-  const cur = overlayCurrent.value
-  return cur !== null && cur.sessionId === sessionId && cur.runId === runId
+  const cur = getOverlayControlState().current
+  return cur !== null && cur.kind === 'workflow'
+    && cur.payload.sessionId === sessionId && cur.payload.runId === runId
 }
 
 /** parse_failed 重试（失败不缓存故可重试；重拉当前 run）。 */
 export function retryDagParse(): void {
-  const cur = overlayCurrent.value
-  if (cur === null) return
+  const cur = getOverlayControlState().current
+  if (cur === null || cur.kind !== 'workflow') return
   overlayDag.value = null
   overlayDagError.value = null
-  void loadDag(cur.sessionId, cur.runId)
+  void loadDag(cur.payload.sessionId, cur.payload.runId)
 }
 
 // ── core 桥接装配（模块顶层，bindDrawerSessionId 同款先例）────────────────────

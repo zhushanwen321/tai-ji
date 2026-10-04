@@ -2,11 +2,12 @@
  * DrawerPanel 测试（W3 · p3-strangler-domains::drawer，AC9/AC12 冒烟载体）。
  *
  * 三视角：
- * - 使用者（黑盒）：mount DrawerPanel（isOpen:true）断言 5 基础 tab 按钮 + 展开态内容区
+ * - 使用者（黑盒）：mount DrawerPanel（isOpen:true）断言注册表投影的 8 个 L1 tab 按钮 + 展开态内容区
  *   在 DOM 中存在；点关闭按钮触发 close emit（父组件消费 → isOpen=false → 收起）
  * - 构建者（白盒）：无内容面板 slot → 空态占位（icon + emptyText/emptyHint）；
  *   内容面板 slot 注入替换（无 fallback 双渲染）
- * - 观察者（形态）：isOpen=false 时 aside 不渲染；5 基础 tab 常驻（[P4 s5 w2] tasks 条件 tab 已随 tasks 域删除）
+ * - 观察者（形态）：isOpen=false 时 aside 不渲染；L1 tab = 右抽屉容器声明（display-containers
+ *   §7.2 单一权威——u-w1-layout 起 terminal 迁底抽屉、u-w2-browser-mount 起 browser 走浮层，tab 10→8）
  *
  * [P4 s5 drawer-widget-removal] widget 三态（gui/lines/空态）+ status footer 用例已删：
  * 旧 extension:widget/widgetGui/status 通道由 PluginViewContainer 承接，DrawerPanel 不再接收
@@ -21,25 +22,28 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { DrawerPanel } from '../index'
-import type { SideDrawerTab } from '@taiji/core/domain/drawer'
+import type { RightDrawerTab } from '@taiji/core/domain/drawer'
 
-/** 展开态基础 props（控制态四字段，widget 数据走默认空 → 空态分支） */
+/** 展开态基础 props（控制态三字段，widget 数据走默认空 → 空态分支；display-containers
+ *  §6.6③ W0：docked 死状态删除，props 面同步收窄；默认 activeTab = 'git'（§7.1）） */
 function baseProps<T extends object>(overrides: T = {} as T) {
   return {
     isOpen: true as boolean,
-    activeTab: 'terminal' as SideDrawerTab,
-    docked: false as boolean,
+    activeTab: 'git' as RightDrawerTab,
     sessionId: 's1',
     ...overrides,
   }
 }
 
 describe('DrawerPanel (AC9/AC12 首屏冒烟)', () => {
-  it('展开态：5 基础 tab 按钮 + 展开态内容区 DOM 存在', () => {
+  it('展开态：注册表投影的 8 个 L1 tab 按钮（terminal 迁底抽屉、browser 走浮层）+ 展开态内容区 DOM 存在', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps() })
-    for (const key of ['terminal', 'browser', 'git', 'doc', 'detail']) {
+    for (const key of ['git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask', 'plan', 'btw']) {
       expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)
     }
+    expect(wrapper.find('[data-testid="drawer-tab-terminal"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="drawer-tab-browser"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-testid^="drawer-tab-"]')).toHaveLength(8)
     expect(wrapper.find('[data-testid="drawer-content"]').exists()).toBe(true)
   })
 
@@ -85,20 +89,22 @@ describe('DrawerPanel (内容区 slot + 空态 fallback)', () => {
 describe('DrawerPanel (tab 交互)', () => {
   it('tab 点击 emit set-tab', async () => {
     const wrapper = mount(DrawerPanel, { props: baseProps() })
-    await wrapper.find('[data-testid="drawer-tab-browser"]').trigger('click')
-    expect(wrapper.emitted('set-tab')).toEqual([['browser']])
+    await wrapper.find('[data-testid="drawer-tab-doc"]').trigger('click')
+    expect(wrapper.emitted('set-tab')).toEqual([['doc']])
   })
 
-  it('钉住按钮 emit toggle-dock', async () => {
+  it('docked 死状态删除（display-containers §6.6③）：pin 按钮不存在、无 toggle-dock emit（UI 行为零变化——改前按钮仅图标变色无行为）', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps() })
-    await wrapper.find('[data-testid="drawer-pin"]').trigger('click')
-    expect(wrapper.emitted('toggle-dock')).toHaveLength(1)
+    expect(wrapper.find('[data-testid="drawer-pin"]').exists()).toBe(false)
+    expect(wrapper.emitted('toggle-dock')).toBeUndefined()
+    // 关闭按钮仍常驻（唯一收起通道不回退）
+    expect(wrapper.find('[data-testid="drawer-close"]').exists()).toBe(true)
   })
 
-  it('activeTab 高亮：当前 tab 应用选中样式（bg-surface-hover）', () => {
+  it('activeTab 高亮：当前 tab 应用选中样式（bg-bg-elevated）', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps({ activeTab: 'git' }) })
     const gitTab = wrapper.find('[data-testid="drawer-tab-git"]')
-    expect(gitTab.classes()).toContain('bg-surface-hover')
+    expect(gitTab.classes()).toContain('bg-bg-elevated')
   })
 })
 
@@ -121,11 +127,11 @@ describe('DrawerPanel (header-extra slot，W4 壳层挂载点)', () => {
 // bashTask tab（2026-09 background-task-sidebar-view D5②）：tabs 加第 8 个 TabMeta。
 // 内容面板由壳层（PanelContainer）slot 注入，本组件只负责 tab 元信息与空态 fallback。
 describe('DrawerPanel (bashTask tab，background-task-sidebar-view D5②)', () => {
-  it('bashTask tab 按钮 DOM 存在（8 tab 常驻）', () => {
+  it('bashTask tab 按钮 DOM 存在（terminal 迁出后其余 tab 无回归）', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps() })
     expect(wrapper.find('[data-testid="drawer-tab-bashTask"]').exists()).toBe(true)
-    // 既有 7 tab 不回退（终端/浏览器/Git/文档/详情/子代理/工作流 + 后台命令）
-    for (const key of ['terminal', 'browser', 'git', 'doc', 'detail', 'subagent', 'workflow']) {
+    // 既有 tab 不回退（浏览器/Git/文档/详情/子代理/工作流 + 后台命令）
+    for (const key of ['git', 'doc', 'detail', 'subagent', 'workflow']) {
       expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)
     }
   })
@@ -136,9 +142,9 @@ describe('DrawerPanel (bashTask tab，background-task-sidebar-view D5②)', () =
     expect(wrapper.emitted('set-tab')).toEqual([['bashTask']])
   })
 
-  it('activeTab=bashTask：应用选中样式（bg-surface-hover）', () => {
+  it('activeTab=bashTask：应用选中样式（bg-bg-elevated）', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps({ activeTab: 'bashTask' }) })
-    expect(wrapper.find('[data-testid="drawer-tab-bashTask"]').classes()).toContain('bg-surface-hover')
+    expect(wrapper.find('[data-testid="drawer-tab-bashTask"]').classes()).toContain('bg-bg-elevated')
   })
 
   it('bashTask 无内容面板 slot：空态 fallback 渲染 i18n key（t mock 返回 key，断言 key 引用）', () => {
@@ -155,10 +161,10 @@ describe('DrawerPanel (bashTask tab，background-task-sidebar-view D5②)', () =
 // 落 plan 域文件 plan.drawer.*，icon 与 PlanModeBar 同源 SquareCheckBig）。内容面板由壳层
 // （PanelContainer）slot 注入空骨架（PlanDocsPanel 归 u1-docs-panel），本组件只负责 tab 元信息。
 describe('DrawerPanel (plan tab，plan 模式重设计 u1-drawer-tab)', () => {
-  it('plan tab 按钮 DOM 存在（9 tab 常驻，既有 8 tab 无回归）', () => {
+  it('plan tab 按钮 DOM 存在（既有 tab 无回归）', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps() })
     expect(wrapper.find('[data-testid="drawer-tab-plan"]').exists()).toBe(true)
-    for (const key of ['terminal', 'browser', 'git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask']) {
+    for (const key of ['git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask']) {
       expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)
     }
   })
@@ -182,9 +188,9 @@ describe('DrawerPanel (plan tab，plan 模式重设计 u1-drawer-tab)', () => {
     expect(wrapper.emitted('set-tab')).toEqual([['plan']])
   })
 
-  it('activeTab=plan：应用选中样式（bg-surface-hover）', () => {
+  it('activeTab=plan：应用选中样式（bg-bg-elevated）', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps({ activeTab: 'plan' }) })
-    expect(wrapper.find('[data-testid="drawer-tab-plan"]').classes()).toContain('bg-surface-hover')
+    expect(wrapper.find('[data-testid="drawer-tab-plan"]').classes()).toContain('bg-bg-elevated')
   })
 
   it('plan 无内容面板 slot：空态 fallback 渲染 plan 域 i18n key（t mock 返回 key，断言 key 引用）', () => {
@@ -201,10 +207,10 @@ describe('DrawerPanel (plan tab，plan 模式重设计 u1-drawer-tab)', () => {
 // 落 btw 域文件 btw.drawer.*，icon 用 MessagesSquare）。内容面板由壳层（PanelContainer）
 // slot 注入 BtwPanel（面板单元落地前本组件空态 fallback 承载），延续留壳 slot 模式。
 describe('DrawerPanel (btw tab，btw-question D7 M3-a)', () => {
-  it('btw tab 按钮 DOM 存在（10 tab 常驻，既有 9 tab 无回归）', () => {
+  it('btw tab 按钮 DOM 存在（既有 tab 无回归）', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps() })
     expect(wrapper.find('[data-testid="drawer-tab-btw"]').exists()).toBe(true)
-    for (const key of ['terminal', 'browser', 'git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask', 'plan']) {
+    for (const key of ['git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask', 'plan']) {
       expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)
     }
   })
@@ -227,9 +233,9 @@ describe('DrawerPanel (btw tab，btw-question D7 M3-a)', () => {
     expect(wrapper.emitted('set-tab')).toEqual([['btw']])
   })
 
-  it('activeTab=btw：应用选中样式（bg-surface-hover，drawer L1 icon tab 登记例外形态）', () => {
+  it('activeTab=btw：应用选中样式（bg-bg-elevated，§3.4 标准 tab 型——三卡化后 L1 例外前提消失）', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps({ activeTab: 'btw' }) })
-    expect(wrapper.find('[data-testid="drawer-tab-btw"]').classes()).toContain('bg-surface-hover')
+    expect(wrapper.find('[data-testid="drawer-tab-btw"]').classes()).toContain('bg-bg-elevated')
   })
 
   it('btw 无内容面板 slot：空态 fallback 渲染 btw 域 i18n key（t mock 返回 key，断言 key 引用）', () => {

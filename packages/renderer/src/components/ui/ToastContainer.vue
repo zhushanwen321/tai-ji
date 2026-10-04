@@ -5,7 +5,7 @@
     挂载点两分支（互斥）：PanelContainer main-area（chat 主区）/ MainPanel
     （settings view 兜底）。
   -->
-  <div class="absolute inset-x-4 top-4 z-[9999] flex flex-col items-end gap-2.5 pointer-events-none">
+  <div ref="containerRef" class="absolute inset-x-4 top-4 z-[9999] flex flex-col items-end gap-2.5 pointer-events-none">
     <!-- RD-3#7 溢出折叠摘要：droppedCount 消费方——在列上限丢弃的通知以「还有 N 条」显形，
          不再只 console.warn 无 UI 留痕。可关闭（resetDropped 归零，给累计计数一个重置出口）。 -->
     <div
@@ -72,10 +72,13 @@
 
       <div class="flex min-w-0 flex-1 flex-col gap-1">
         <!-- session 定位行：点击跳转该 session（后台通知的行动闭环） -->
-        <button
+        <!-- session 定位行：点击跳转该 session（后台通知的行动闭环）。Button 组件形态
+             （禁原生 button）；class 覆写压掉变体默认（tw-merge 后者胜），视觉与原形态一致。 -->
+        <Button
           v-if="t.sessionLabel && t.sessionId"
+          variant="ghost"
           :data-testid="`toast-session-${t.id}`"
-          class="flex max-w-full items-center gap-1 self-start rounded-sm text-left text-[11px] leading-4 text-neutral-dim transition-colors hover:text-neutral-fg focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+          class="h-auto max-w-full justify-start gap-1 self-start rounded-sm px-0 py-0 text-left text-[11px] font-normal leading-4 text-neutral-dim hover:bg-transparent hover:text-neutral-fg focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent focus-visible:shadow-none active:scale-100 [&_svg]:h-3 [&_svg]:w-3"
           @click.stop="onJump(t.sessionId, t.id)"
         >
           <span class="truncate">{{ t.sessionLabel }}</span>
@@ -89,7 +92,7 @@
             stroke-linecap="round"
             stroke-linejoin="round"
           ><line x1="7" y1="17" x2="17" y2="7" /><polyline points="7 7 17 7 17 17" /></svg>
-        </button>
+        </Button>
         <!-- 消息体：pre-line 渲染 \n，最多 5 行 -->
         <p
           :data-testid="`toast-message-${t.id}`"
@@ -111,14 +114,34 @@
 </template>
 
 <script setup lang="ts">
+import { onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
+import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
 import { useToast } from '@/composables/useToast'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 
 const { t } = useI18n()
 const { toasts, remove, pause, resume, droppedCount, resetDropped } = useToast()
 const { selectSession } = useSidebar()
+
+// 模态表面聚合注册（§6.7 Toast 族）：非阻塞通知不入让位族（显示期 Esc 照常走层级序），
+// 只入 view 遮蔽族（shieldsView intersecting——几何相交才隐藏 view）。开合态绑通知态本体
+// （在列数 + 溢出折叠摘要——任一可见即「表面开着」）；rect 读容器根元素实测（在列通知
+// 的实际占位几何）。旗标组由登记表按 id 读取。
+const containerRef = ref<HTMLElement | null>(null)
+function containerRect(): { x: number; y: number; width: number; height: number } | null {
+  if (!containerRef.value) return null
+  const r = containerRef.value.getBoundingClientRect()
+  return { x: r.x, y: r.y, width: r.width, height: r.height }
+}
+const disposeSurfaceRegistration = registerModalSurface({
+  surface: 'toast-container',
+  key: 'toast-container',
+  isOpen: () => toasts.value.length > 0 || droppedCount.value > 0,
+  rect: containerRect,
+})
+onBeforeUnmount(disposeSurfaceRegistration)
 
 /** toast 类型 → 边框强调色（背景统一 bg-surface，克制：色彩只落在 icon 与正文） */
 function toastClass(type: 'error' | 'info' | 'warning'): string {

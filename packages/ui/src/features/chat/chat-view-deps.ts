@@ -94,6 +94,13 @@ export interface ChatViewDeps {
   onSpeak?: (sessionId: string, message: Message) => void
   /** 打开 drawer tab（useSideDrawer.open 经壳桥接，opts 携带 filePath/commandName） */
   openDrawer: (tab: string, opts?: DrawerOpenOptions) => void
+  /**
+   * 打开浮层浏览器页（display-containers §7.4 URL 注入链）：MarkdownRenderer ⑤路判定
+   * http(s) localhost/127.0.0.1 链接命中后调用（其余链接维持系统浏览器）。
+   * 壳实现 = core openBrowser(url, sessionId)（浮层单例换内容 + BrowserPane 挂浮层壳）；
+   * sessionId = 发起会话（props.sessionId，view 键 + 会话删除级联 + 显示谓词事实源）。
+   */
+  openBrowser: (url: string, sessionId: string) => void
   /** 点击文件路径（useFileTree.selectFile 经壳桥接） */
   onFileClick: (path: string) => void
 

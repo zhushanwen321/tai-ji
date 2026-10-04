@@ -29,8 +29,10 @@
         {{ t('panel.workflowViz.retry') }}
       </Button>
     </div>
-    <!-- 对话流（D3 硬约束：直接挂主对话流同一个 MessageStream，不重写任何渲染树） -->
-    <MessageStream v-else :session-id="virtualId" />
+    <!-- 对话流（D3 硬约束：直接挂主对话流同一个 MessageStream，不重写任何渲染树）；
+         mainSessionId 显式传 props.sessionId（D11⑤ 归属绑定发起 session）——agentcall 快照
+         视图的 file 白名单/markdown 路径 cwd 解析用它回真实 session（fileSearch vid 修复） -->
+    <MessageStream v-else :session-id="virtualId" :main-session-id="sessionId" />
   </div>
 </template>
 

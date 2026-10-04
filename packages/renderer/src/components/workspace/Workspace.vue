@@ -56,7 +56,8 @@ const { formatKbd } = usePlatformShortcut()
 const flow = useNewTaskFlow()
 // Browser drawer view swap：切 session 时通知主进程切换可见 WebContentsView（Wave 4 per-session 隔离）
 useBrowserFocusSync()
-// Cmd/Ctrl+W：drawer 打开时优先关 drawer，drawer 关时关窗口（before-input-event 拦截转发）
+// ⌘W：编排器层级序逐层关容器（浮层→底抽屉→右抽屉），全关后关窗；让位守卫见
+// key-orchestrator（before-input-event 拦截转发，display-containers §7.5）
 useCloseShortcut()
 
 /** 是否有焦点 session（决定渲染 panel 还是空态，跟随 panel focus） */

@@ -58,6 +58,7 @@ import {
 
 import { mergeWorkflowStepRecords } from './workflow-step-merge.js'
 import { projectV2Workflow } from "./workflow-record-projection.js"
+import { logger } from '../../infra/logger.js'
 
 // ── run journal 行解析（域无关 tail 原语的 run 域注入）─────────
 
@@ -510,9 +511,11 @@ export class SessionEventProjection {
   workflows: Map<string, WorkflowRunRecord> = new Map()
 
   private readonly sessionId: string
-  private readonly recordTailer: EventDirectoryTailer | undefined
-  private readonly runTailer: EventDirectoryTailer | undefined
+  private recordTailer: EventDirectoryTailer | undefined
+  private runTailer: EventDirectoryTailer | undefined
   private readonly onProjectionChange: () => void
+  /** 构造时注入的 tailer 周期复查间隔（attachEventSources 升级补建的 tailer 同值）。 */
+  private readonly recheckIntervalMs: number | undefined
   private disposed = false
   /** entry 批应用期间的回调抑制（发布归调用方统一执行）。 */
   private applyingEntryBatch = false
@@ -521,34 +524,69 @@ export class SessionEventProjection {
     this.sessionId = opts.sessionId
     this.onProjectionChange = opts.onProjectionChange
     // undefined 直传 = tailer 缺省值（30s，周期复查兜底上界）
-    const recheck: number | undefined = opts.recheckIntervalMs
+    this.recheckIntervalMs = opts.recheckIntervalMs
     if (opts.recordsDir !== undefined) {
-      this.recordTailer = createEventDirectoryTailer({
-        dir: opts.recordsDir,
-        filter: (name) => name.endsWith(RECORD_EVENTS_SUFFIX),
-        parseLine: parseRecordEventFileLine,
-        onEvents: (filename, events) => this.applyRecordEvents(filename, events),
-        onSkippedLines: (filename, count) =>
-          console.warn(`[events-projection] record events skipped ${count} bad lines: ${filename}`),
-        onReset: (filename) => {
-          this.sources.recordFolds.delete(recordIdOfFilename(filename))
-        },
-        recheckIntervalMs: recheck,
-      })
+      this.recordTailer = this.createRecordTailer(opts.recordsDir)
     }
     if (opts.runJournalDir !== undefined) {
-      this.runTailer = createEventDirectoryTailer({
-        dir: opts.runJournalDir,
-        filter: (name) => name.endsWith(RUN_EVENTS_SUFFIX),
-        parseLine: parseWorkflowRunEventFileLine,
-        onEvents: (filename, events) => this.applyRunEvents(filename, events),
-        onSkippedLines: (filename, count) =>
-          console.warn(`[events-projection] run journal skipped ${count} bad lines: ${filename}`),
-        onReset: (filename) => {
-          this.sources.runFolds.delete(runIdOfFilename(filename))
-        },
-        recheckIntervalMs: recheck,
-      })
+      this.runTailer = this.createRunTailer(opts.runJournalDir)
+    }
+  }
+
+  private createRecordTailer(dir: string): EventDirectoryTailer {
+    return createEventDirectoryTailer({
+      dir,
+      filter: (name) => name.endsWith(RECORD_EVENTS_SUFFIX),
+      parseLine: parseRecordEventFileLine,
+      onEvents: (filename, events) => this.applyRecordEvents(filename, events),
+      onSkippedLines: (filename, count) =>
+        console.warn(`[events-projection] record events skipped ${count} bad lines: ${filename}`),
+      onReset: (filename) => {
+        this.sources.recordFolds.delete(recordIdOfFilename(filename))
+      },
+      recheckIntervalMs: this.recheckIntervalMs,
+    })
+  }
+
+  private createRunTailer(dir: string): EventDirectoryTailer {
+    return createEventDirectoryTailer({
+      dir,
+      filter: (name) => name.endsWith(RUN_EVENTS_SUFFIX),
+      parseLine: parseWorkflowRunEventFileLine,
+      onEvents: (filename, events) => this.applyRunEvents(filename, events),
+      onSkippedLines: (filename, count) =>
+        console.warn(`[events-projection] run journal skipped ${count} bad lines: ${filename}`),
+      onReset: (filename) => {
+        this.sources.runFolds.delete(runIdOfFilename(filename))
+      },
+      recheckIntervalMs: this.recheckIntervalMs,
+    })
+  }
+
+  /**
+   * [降级闩死修复 2026-10-02] 事件源目录是否尚有缺席（任一 tailer 未建）。创建时
+   * meta 不可得（pi flush 前窗口 / 扫描竞态）会建出 entry-only 降级投影——调用方
+   * （session-records.ensureProjection）据本面驱动 attachEventSources 升级，降级
+   * 形态不再终身闩死。
+   */
+  needsEventSources(): boolean {
+    return this.recordTailer === undefined || this.runTailer === undefined
+  }
+
+  /**
+   * [降级闩死修复 2026-10-02] 补建缺席的事件源 tailer（幂等：已接线的源 no-op；
+   * disposed no-op）。补建的 tailer 立即 rescan 冷读全量（与 attach 同一冷启动语义：
+   * offset 从文件头读，双源幂等）——fold 结果经 recompute + fireChange 走既有发布腿。
+   */
+  attachEventSources(opts: { recordsDir?: string; runJournalDir?: string }): void {
+    if (this.disposed) return
+    if (opts.recordsDir !== undefined && this.recordTailer === undefined) {
+      this.recordTailer = this.createRecordTailer(opts.recordsDir)
+      this.recordTailer.rescan()
+    }
+    if (opts.runJournalDir !== undefined && this.runTailer === undefined) {
+      this.runTailer = this.createRunTailer(opts.runJournalDir)
+      this.runTailer.rescan()
     }
   }
 
@@ -612,15 +650,25 @@ export class SessionEventProjection {
     // 初值；seq 守卫去重 + 坏帧保守停帧归 core 单点）。坏帧出声（warn 归消费方
     // 注入——停帧后骨架停在最近一致态，截断重建走 onReset 清 fold 全量重放）。
     const current = this.sources.runFolds.get(runId) ?? INITIAL_RUN_EVENT_FOLD
-    this.sources.runFolds.set(
+    const checkpoint = foldRunEventCheckpoint(events, (err, lastType) => {
+      console.warn(
+        `[events-projection] run journal fold stopped at a broken frame (file=${filename}, ` +
+          `lastType=${lastType}): ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }, current)
+    this.sources.runFolds.set(runId, checkpoint)
+    // [可观测性 2026-10-02] tail 读活动显形（workflow 详情空窗事故的第一定位锚）：
+    // journal 已写盘而本日志缺席 = tailer 没读到（watch 静默丢事件 + recheck 未生效）；
+    // 日志在场而 GUI 仍无步骤 = 故障在发布/GUI 腿——与发布归因行（trigger=
+    // event-projection）配套，两行即可二分。journal 只在 agent/phase 边界追加，
+    // 量级 = 每 agent 两行以内，info 档无噪声顾虑。
+    logger.info('[events-projection] run journal events applied', {
       runId,
-      foldRunEventCheckpoint(events, (err, lastType) => {
-        console.warn(
-          `[events-projection] run journal fold stopped at a broken frame (file=${filename}, ` +
-            `lastType=${lastType}): ${err instanceof Error ? err.message : String(err)}`,
-        )
-      }, current),
-    )
+      events: events.length,
+      lastSeq: checkpoint.lastSeq,
+      lifecycle: checkpoint.state.lifecycle,
+      asks: checkpoint.asks.size,
+    })
     this.recompute()
     this.fireChange()
   }

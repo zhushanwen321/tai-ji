@@ -1041,6 +1041,46 @@ describe('SessionEventProjection（冷启动 + 增量 + dispose）', () => {
     rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
+  it('[降级闩死修复 2026-10-02] attachEventSources 补建缺席 tailer 并冷读全量 → fold/投影/onChange 恢复；幂等', () => {
+    writeFileSync(
+      join(runDir, 'wf-1.record.jsonl'),
+      [
+        JSON.stringify({ type: 'run-created', runId: 'wf-1', workflowName: 'f', argsSummary: '', ts: 1000 }),
+        JSON.stringify({ type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100 }),
+      ].join('\n') + '\n',
+    )
+    let changes = 0
+    // meta 不可得形态：两目录均缺席 → entry-only 降级投影（无 tailer）
+    const projection = new SessionEventProjection({
+      sessionId: 's1',
+      recordsDir: undefined,
+      runJournalDir: undefined,
+      onProjectionChange: () => {
+        changes += 1
+      },
+      recheckIntervalMs: 50,
+    })
+    try {
+      expect(projection.needsEventSources()).toBe(true)
+      projection.applyEntryBatch([workflowRegisteredEntry('wf-1')])
+      projection.attach() // 无 tailer：冷启动 no-op
+      expect(projection.workflows.get('wf-1')?.agentCalls).toHaveLength(0) // 降级形态：fold 缺席 agentCalls 空
+
+      // meta 可得后升级：补建两域 tailer 并冷读（rescan 从文件头全量）
+      projection.attachEventSources({ recordsDir, runJournalDir: runDir })
+      expect(projection.needsEventSources()).toBe(false)
+      expect(projection.workflows.get('wf-1')?.agentCalls).toHaveLength(1)
+      expect(projection.workflows.get('wf-1')?.status).toBe('running')
+      expect(changes).toBeGreaterThan(0) // fold 结果经 fireChange 走既有发布腿
+
+      // 幂等：同源再调不重建不重复回调
+      projection.attachEventSources({ recordsDir, runJournalDir: runDir })
+      expect(projection.workflows.get('wf-1')?.agentCalls).toHaveLength(1)
+    } finally {
+      projection.dispose()
+    }
+  })
+
   it('冷启动：attach 全量读两域事件流 → 合并快照（entry 批先行喂 v2 条目）', () => {
     writeFileSync(join(recordsDir, 'sa-1.events'), recordJournalLines('sa-1', [createdEvent('sa-1')]).join('\n') + '\n')
     writeFileSync(

@@ -436,3 +436,61 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **登记**：无新约束族（推拉纪律承 ADR-0097）；实装 = `packages/shared/src/protocol.ts`（两 RPC 契约与错误码闭集）+ `packages/runtime/src/services/session/session-records.ts`（指纹扩维）。设计文档 `.tmp/tech-design/workflow-visualization.md`（不入库，过程产物）；本条即该决策的现行登记处。
 
+
+### ADR-0107 展示容器三形态拓扑与内容归属：右抽屉 / 底抽屉 / 浮层，容器注册表为唯一权威（2026-10-03 设计裁决，display-containers §6.1/§7.1/§7.2）
+**决策**：展示型内容按内容形状分进三个固定容器——右抽屉（竖长阅读型，终态 8 tab：git/doc/detail/subagent/bashTask/plan/btw + workflow 回落载体）、底抽屉（横宽输出流，本期仅 terminal 一种内容、不预设 tab 枚举——第二种横向内容出现时它才从「终端面板」升格为「容器」）、浮层（全画布：browser/workflow）。内容归属的声明处 = 容器注册表（core 纯数据 + 图标标识串，ui 层映射组件），DrawerPanel 硬编码 tabs 数组改注册表驱动；注册表为唯一权威，ui 壳组件与 core 协调函数都读它、禁止各自文字化。workflow tab 保留作 [ADR-0104](#adr-0104-workflow-可视化入口语义分立openworkflow-改向-overlay--openworkflowindrawer-显式-drawer-语义2026-10-02-设计裁决workflow-visualization-d1) 回落链载体（L1 常驻第 8 图标，主入口仍浮层；回落触发面 = 浮层装载/渲染失败，render-error 链实装已核实）。TraceInspector 临时上下文页不入 L1 注册表（slot 首位注入绕过 activeTab 体系），在老能力映射表登记保位。右抽屉默认 activeTab 从 'terminal' 改 'git'（枚举收窄后首项且高频）。控制态粒度：开合态 per-session 分区（useSessionScopedState 范式）；尺寸类（底抽屉 heightPct）= 全局布局值全局单键 `taiji:bottom-drawer-height` 持久化（对齐右抽屉宽度 `taiji:drawer-width` 先例，姊妹容器同构尺寸同粒度）、显示期 clamp 不写回持久值、拖拽区间 15%–70%。
+
+**依据**：不采用「单抽屉优化」——terminal 半宽折行与 browser 死腔证明竖长容器承载不了形状错配的内容，容器级问题抽屉内优化无解；不采用「自由 docking 互移」——见 ADR-0109。注册表机制的证据 = 10 tab 硬编码已拥挤 + browser 死腔无人发现（归属无声明处）。
+
+**登记**：无新约束族（拓扑经注册表数据结构自承载）；实装 = `packages/core/src/domain/drawer/registry.ts`（新）+ `packages/core/src/domain/bottom-drawer/` + `packages/core/src/domain/overlay/`，W0-W2 分波（W0 注册表先载旧 10 条行为不变）。设计文档 `.tmp/tech-design/display-containers.md`（不入库，过程产物）；本条即该决策的现行登记处。
+
+### ADR-0108 tab 两层上限：类型层容器拥有，实例层内容拥有，二选一不叠加（2026-10-03 设计裁决，display-containers §6.3）
+**决策**：任何容器内可见 tab 最多两层。L1 类型层（固定图标列表，回答「这是什么类型的东西」）由容器拥有；L2 实例层（文档式 tab 条或组件内部导航，回答「具体是哪一个」）由内容拥有；**实例层要么在组件内部、要么用容器统一实例条，二选一不叠加**。本期唯一新增实例层 = detail 多文件 tab（做在 detail 面板内顶部；keep-alive 多实例共存——切换不丢滚动位置与 diff/preview 模式态；注入语义 = 入口命中未开文件新增 tab 并激活、命中已开仅激活、不设打开上限）；PlanDocsPanel 文档切换条与 BtwPanel 线列表属组件内部导航，维持不变。
+
+**依据**：不采用「容器层统一实例条」——与组件已有内部导航叠成三层，tab 套 tab 是公认混淆源；DESIGN.md §6.3「形态 B：icon 一级 + 各 tab 自治二级」既有方向；现状 PlanDocsPanel 证明组件内部导航够用。
+
+**登记**：无新约束族；实装 = `packages/renderer/src/composables/features/file-tree/useDetailPane.ts`（单值→map）等，W3（顺带承接 detail 展示链 per-session 化终局解——selectedPath 全局单值串线与 DetailPane 单实例清空）。设计文档同 ADR-0107；本条即该决策的现行登记处。
+
+### ADR-0109 固定家 + 显式双入口，否决内容自由互移（2026-10-03 设计裁决，display-containers §6.4，承 ADR-0104 模式推广）
+**决策**：每种内容一个固定归属容器；个别内容多一个备用容器，靠内容标题栏上的显式动作（「浮层展开」/「收回抽屉」）切换；入口函数语义分立——`openX` 与 `openXInDrawer` 两个函数、不叫同一函数传参区分（ADR-0104 已验证模式的推广）。本期双入口只给 workflow（既有）；subagent 浮层 trace 模式（左右分栏）为 W4 后续，本期 SubagentTab 零改动，「浮层展开」动作位随 W4 trace 模式一并设计（不预埋不可见的视觉占位，display-containers §5.4）。
+
+**依据**：不采用自由拖拽互移——①多数内容只在一种形状里是对的（browser 在竖长抽屉里的死腔即证据）；②移动要迁移运行态（终端 PTY 不能死、浏览器 view 要重挂定位），成本 = 内容数 × 容器数；③ VS Code 的视图自由移动是其最复杂、使用率最低的功能之一。用户要的不是互移，是「这个实例此刻需要更大空间」——尺寸拖拽 + 展开/收回动作已覆盖。
+
+**登记**：无新约束族；W4 实装 subagent trace 模式时落动作位。设计文档同 ADR-0107；本条即该决策的现行登记处。
+
+### ADR-0110 键盘栈序：Esc 固定层级序唯一属主 + 模态表面聚合双键旗标 + 局部表面执行序两档 + view 转发键清单（2026-10-03 设计裁决，display-containers §6.7）
+**决策**：① Esc/⌘W 关闭序 = **固定层级序**（浮层 → 底抽屉 → 右抽屉，不按开序时间记账、状态模型不存开序）；全关后 ⌘W 才关窗口。② Esc 唯一属主 = AppShell 层栈序编排器（window keydown bubble 监听、根 setup 首位注册，isComposing 前置守卫；存量 WorkflowVizOverlay 与抽屉侧 Esc 监听拆除——现状双裸监听同按双关已核实）。焦点所有权五层分派：焦点所在内容自消费 Esc 时编排器让位（未收编模态族 / staging 活跃态与地址栏编辑态 / 底抽屉终端聚焦——xterm 5.5 Escape cancel 实装 stopPropagation 事件到不了 window、禁 capture 接管 / 浮层浏览器页面内——Esc 归页面自身语义）。③ **模态表面聚合**（AppShell 级开合态注册单一事实源）成员带旗标组：`yieldsEsc` / `yields⌘W`（两键让位各自独立）与 `shieldsView`（原生 view 遮蔽联动）。弹出层族（reka DismissableLayer 托管的 Popover/Select/ContextMenu）**只让 Esc 不让 ⌘W**——reka 不以 ⌘W dismiss，让位即死键（按键无动作且无递进）；模态族（有未提交输入保护理由）双键均让位。指针驱动瞬态表面（HoverCard/Tooltip 类）显式豁免双旗标（hover 中按 Esc 双动作登记为已知可接受边界）。④ **局部表面 Esc 消费方按相对编排器执行序两档分流**：先行档（capture 相任意节点 / document 级（树序压倒注册序）/ 元素级冒泡先达）= 消费即 preventDefault 约定；后行档（window bubble 且注册晚于编排器，全仓唯一 = SessionList escCount）= 入聚合让位登记，开合态绑删除确认态本体（SessionItem 确认态 / folderConfirmingCwd 聚合谓词），非 escCount 广播计数器（单调递增非状态本体，误绑 = 全局 Esc 死键）。⑤ `` ⌃` `` = 底抽屉开关，主进程 before-input-event **窗口级**拦截（⌘W 同款转发链；不经 shortcut-registry/globalShortcut——那是系统级全局键，会全系统占用并抢走其它应用同键；失焦时无动作）。⑥ 焦点进入浮层浏览器 WebContentsView 后，三键（⌃`/⌘W）连同 app 快捷键族（⌘K/⌘,/⌘[ 等，renderer 注册处 IPC 上报）经 **view 转发键清单**接管（双端匹配配对契约 + 键矩阵单测）；**Esc 不入清单**（页面所有权优先）。焦点契约：任一容器关闭后焦点回 composer；staging 活跃态与浮层浏览器地址栏编辑态聚焦时 Esc 优先服务输入语义（不触发容器栈序）；裸 composer 输入态无 Esc 消费面、Esc 走层级序（第 5 层，与现状一致）。
+
+**依据**：现状 Esc 双裸监听（overlay 仅 preventDefault 不阻断传播 + PanelContainer 裸挂）同按双关——统一编排必须拆其一；⌘J 已被 fast-handoff 占用（选键历史注释明言）；VS Code `` ⌃` `` 为窗口级（肌肉记忆现成）；弹出层族 wrapper 补 preventDefault 方案被否决（反杀 reka 自身 dismiss——`if (!event.defaultPrevented) dismiss` 判定在前，须再手动关闭的组合改造逐 wrapper 侵入）；「聚合注册同步于开关动作」硬约束对 reka 托管弹层无自然钩子，降档为 flush 时序 + 注册序前提（编排器根 setup 先注册，FIFO 同相位先执行让位判定）。
+
+**登记**：门禁项 = Esc 消费方扫描脚本化（先行档无 preventDefault / 不在任一档登记即红；reka 原语 import 纳入扫描锚点防直接组装盲区）随 W1 单测族或交付后落地；实装 = 编排器/聚合新模块 + 局部表面改造 + window-factory ⌃` 拦截，W1。设计文档同 ADR-0107；本条即该决策的现行登记处。
+
+### ADR-0111 docked 死状态删除（2026-10-03 设计裁决，display-containers §6.6③）
+**决策**：`DrawerControlState.docked` 与其全链（pin 图标 / emit 链 / toggleDrawerDock / useSideDrawer re-export / i18n key）整体删除——全仓唯一消费方是 pin 图标变色与 title 切换，无任何行为逻辑（close() 无 docked 门、无条件置 isOpen=false），死状态机械清扫，无行为回归。
+
+**依据**：保留 = 假功能信号（用户点 pin 期待行为、实际无任何效果）；删除安全性经源码核实（单消费方）。
+
+**登记**：无新约束族；实装 = W0 状态还债单元（与选中态迁出、瞬时参数分区同批）。设计文档同 ADR-0107；本条即该决策的现行登记处。
+
+### ADR-0112 原生 view 层级共存守卫与显示收口（browser 浮层复活配套，2026-10-03 设计裁决，display-containers §7.4）
+**决策**：WebContentsView 恒渲染于宿主全部 DOM 之上（z-index 不可穿越），配套四条守卫：① **显示收口谓词**——view 显示当且仅当「浮层开 ∧ 内容 browser ∧ 无错误态 ∧ 无相交 shieldsView 面」；错误态（页面加载失败 / create 失败 reject / render-process-gone）主动 `browserHide`（keep-alive 幂等），三触发恢复动作一律收敛到对该单一谓词求值、禁止各触发独立 show（防恢复通道竞态）。② **shieldsView 几何相交双阈值空间滞回**——进入隐藏 = 遮蔽面与 view 原始矩形相交；退出隐藏 = 与外扩矩形（外扩 N px）仍完全不相交；缓冲带内两切换条件皆假、双向状态保持（施密特结构）；显式不采用 debounce / 时间滞回（时间平抑红线——空间解可达成同一目的）；重算触发面 = resize + rect 推送链 + 成员开态内 rect 变化 + 浮层内容切换。③ **浮层随行**——浮层开着切 session 时 view 换显豁免（内容与 view 保持发起会话的，视口不空白）；`focus()` 收口：非「浮层开 ∧ 内容 browser」态只隐藏不显示（实装 `focus(sessionId)` 无条件 `_showEntry` 与「恢复现状语义」矛盾——关浮层→切走→切回的残影旁路，主进程/renderer 改动项；browserFocus 生产调用面唯一已核实）。④ **会话删除级联**——仅发起会话触发浮层关闭 + view 销毁（SessionCleanupHooks browser 分支 + browserDestroy）。错误通道：`browserCreate` IPC 失败改 reject（现状 create 失败仅主进程 warn 静默）；池满不是失败（LRU 自动淘汰）。
+
+**依据**：仓内 view 池 hide() 残留事故前科（[HISTORICAL] 注释在案）；Toast 相交隐藏期重开浮层的 show 竞态、关浮层后切回的复显反例（逐路径推演 + 实装核实）。
+
+**登记**：无新约束族；实装 = `apps/electron/main/browser/browser-view-manager.ts` 等主进程半边，W2；S9/S10 真机断言对账（含滞回两半边）。设计文档同 ADR-0107；本条即该决策的现行登记处。
+
+### ADR-0113 终端多实例：实例编号贯通四层 + runtime 为注册表与序号分配事实源 + 世代判据 = token 变化（2026-10-04 交付，terminal-multi-instance）
+
+**决策**：一个会话内可并行多个终端，主键由「会话 id」升为「实例编号」——① **编号格式** `term:<会话id>:<序号>`：序号由后台按会话维度分配、会话内单调递增、**实例关闭后不复用**（复用会让迟到 exit 帧误清新实例分区、清理到达前的旧残留串入新分区）；枚举/归属校验一律取**精确前缀 `term:<sid>:` + 序号段数字校验（`^\d+$`）**，禁按冒号切分取段；由编号反解 sid / 序号则取最后一个冒号前的余段 + 数字校验（sid 域不含冒号由格式保证；该口径把「sid 域不含冒号」从必要条件降级为防御项）。② **事实源 = runtime**：注册表 = 重键后的 `ptyMap` 派生视图（键集即存活实例全集，不建平行结构）+ 会话级序号计数器；**否决「live 键 max+1 纯函数派生」**（实例死绝后 max 回落会复用编号，竞态窗口无键隔离）；界面经新增查询帧 `terminal.list` 在**三触发点**（⌘R 刷新 / 会话激活 / 世代变更重连）对账恢复，对账范围钉死为被查会话（他会话键不参与增删）。③ **世代判据 = auth token 是否变化**（端口值不可靠——`findAvailablePort` 重启常落回原端口；`runtime-port` 广播沿是世代变更的保守超集，含无新进程的幂等分支）；**重置触发面收窄为世代变更**，同世代 WS 闪断不重置（宽触发会清空仍有效的输出历史、且派生无触发点的订阅重建义务）；重置枚举含输出分区、写队列状态机（滞留命令丢弃 + 提示）、**模块级订阅表先退订再清空**（跨世代同形键会命中幂等守卫致新世代订阅静默 no-op）；旧 token 不可得时保守判为世代变更。④ **关闭语义**：主动关闭与自然退出（exit/崩溃）同语义——切换条移除 + 三腿清理（输出分区 / 写队列实例态 / 模块级订阅退订）；「最后一个实例禁用关闭」是 **UI 供养规则而非域不变量**（唯一实例可自然退出归零至空态）；会话删除与 runtime shutdown 均级联全量杀链（新增 shutdown 步骤 `dispose-terminal-pties`，紧随 `server-stop`）。⑤ **三码互斥**：`unknown_terminal_id`（注册成员资格的否定回执，**唯一触发回收**的码）、`terminal_id_required`（缺编号 / 编号类型非法的畸形帧）、`terminal_id_session_mismatch`（编号会话段与请求会话不一致）——后两者走普通错误通道、不触发回收（同码会把仍存活的实例误判为幽灵并清理）。⑥ **ack 残窗双通道回收**：`spawn` 完成到界面建档之间可丢 `terminal.data`（首屏输出）与 `terminal.exit`（假阳幽灵条目）；回收靠「首个否定回执守卫」+「`terminal.list` 对账」两通道并列（均幂等、先到先回收、**无排序契约**），可达性不据仓内推导下断言、实施期探针留痕。
+
+**依据**：并行长任务是终端典型用法（服务常驻 + 测试跑批），而会话是重量级对象（各带对话与模型上下文），「多开会话」不解决同一工作上下文内并行；「单终端分屏」是伪并行（一个 PTY 不可能同时跑两个交互命令）。编号唯一性与不回填的立法理由 = 迟到帧与清理窗口的竞态隔离；世代判据取 token 而非端口/沿的理由 = 两者均可证伪（端口可复用、沿含幂等分支）。
+
+**登记**：约束登记 = C-proc-18 的 shutdown 步序 SSOT 同步为 15 步（新增终端 PTY 全量清理紧随 `server-stop`）；e2e 资产 = `E2E-TERMINAL-01`（`e2e/terminal-multi-instance.spec.ts`，L2/on-diff/serial，覆盖 T1/T2/T4/T8/T9/T10/T13；T3/T5 走 L4 真机、T6/T7/T11/T12 归单测）。设计文档 = `.tmp/tech-design/terminal-multi-instance.md`（过程产物，不入 git）；实施与验收证据 = `.tmp/dev-flow/terminal-multi-instance.*`。同族未落地项（浏览器多页面、浮层实例 tab 条）依赖本编号先例，另立项。
+
+### ADR-0114 主区三卡化：内容区各自成卡 + 实例 tab 条范式统一 + 终端头部一行化（2026-10-04 用户裁决，drawer-cardification）
+
+**决策**：① 对话流 / 右抽屉 / 底抽屉三块内容区各自持 float-panel 壳（surface + border + 10px 圆角 + shadow-1），卡间 8px 缝，卡内底色统一——**推翻 D2「一体化生长」裁决**（原右抽屉从主面板右缘生长、共享外壳与横跨 header）；PanelHeader / StatusBar 保持横跨工具条/状态条语义，不属任何卡。② 右抽屉 L1 栏选中态回归 §3.4 标准 tab 型（bg-elevated + neutral-fg）——原「bg-surface-hover 例外」以「drawer 与 main 同 surface」为前提，三卡化后前提消失。③ 终端面板头部一行化：实例切换条（tab 条 + 右簇「+」/收起按钮）单行承载，原第二行工具栏（清屏/终止）移除——终止与 tab 关闭叉同义，清屏功能退役（用户裁决接受）。④ 终端区收起语义 = 收起非销毁（实例保留、重开走对账恢复），入口 = 头部收起按钮 + 顶栏开关 + `⌃`` ` 三通道。⑤ 终端开关迁 PanelHeader 顶栏（右抽屉开关左边），StatusBar trailing 原生动作通道退役，StatusBar 回落「有状态项才显示」纯显隐。⑥ 实例 tab 条范式统一（§5.3.1）：终端实例 tab / detail 文件 tab / plugin L2 tab 三族同构——非激活 bg-input+border、激活 bg-elevated+border-strong、关闭叉常驻命中 ≥20px（原「hover 才显现」形态因可发现性差被用户裁决推翻）；pin 功能全链移除（L2TabBar/L2TabItem/PluginViewContainer/WorkflowLivePanel，用户裁决：不需要该功能）。⑦ TurnRail 定位从 fixed 视口垂直居中改为 absolute 于对话流容器右缘——fixed 不感知底抽屉高度，窗口矮/抽屉高时叠进终端卡（跨区缺陷）；absolute 后随对话流卡 overflow 裁剪，跨区构造性不可能。
+
+**依据**：用户 2026-10-04 对底/右抽屉的 5 点产品反馈（三区分割缺失、开关位置、头部两行、tab 可区分性、tab 关闭叉）+ critique 补充发现（TurnRail 跨区、tab 条无横向滚动、空态黑块、最后实例禁用叉伪装可点、composer 窄宽叠字）。一体化生长的「同 surface 无缝」语言在多容器并存场景不可辨识（三区边界靠 1px 拖拽线不可发现），卡片化是分区可见性的直接解；代价 = 卡缝占 8px×2 垂直空间与推翻 D2 的回写成本，收益 = 分区心智清晰 + tab 范式全局一致 + 跨区缺陷构造性消除。
+
+**登记**：设计 SSOT = docs/DESIGN.md §3.4/§4.1/§5.3.1/§6.1/§6.3/§6.4（2026-10-04 同批回写）；CONTEXT.md「底抽屉」词条开关入口同步。实现落点 = MainPanel（壳下沉）/ PanelContainer（三卡 + 卡缝 handle）/ DrawerPanel（卡片化）/ TerminalView + TerminalInstanceBar（head 一行）/ TerminalToggleButton（原 StatusBarTerminalToggle 迁移）/ DetailPane / L2TabBar / TurnRail。

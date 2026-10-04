@@ -133,6 +133,9 @@ import { useBtwTabData, getBtwVirtualIdsByMain } from '@/composables/panel/useBt
 import { useChatStore } from '@/stores/chat'
 import { useWorkflowStore } from '@/stores/workflow'
 import { registerSessionCleanup, __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
+// [display-containers §7.4 发起会话删除级联 browser 分支] 浮层开合态（core SSOT）真身：
+// 断言删除发起会话才关浮层（S5 反向断言 = 删非发起会话浮层不动）
+import { openBrowser, getOverlayControlState, _resetOverlayForTest } from '@taiji/core/domain/overlay'
 
 function makeSummary(id: string): SessionSummary {
   return { id, label: id, cwd: '/proj', status: 'idle', lastActiveAt: 1, modelId: 'm1', tokenCount: 0 }
@@ -200,10 +203,11 @@ describe('useSidebar deleteSession 跨 store 清理（W1 / S3）', () => {
     const sidebar = scope.run(() => useSidebar())!
     seedSessions([{ cwd: '/proj', ids: ['s1', 's2'] }])
 
-    // seed 三分区（s1 + 相邻 s2 对照）
+    // seed 三分区（s1 + 相邻 s2 对照）——terminal 写队列按**实例编号**分键（多实例 u2）
     const terminalQueue = useTerminalWriteQueueStore()
-    terminalQueue.markAlive('s1')
-    terminalQueue.markAlive('s2')
+    terminalQueue.markAlive('term:s1:1')
+    terminalQueue.markAlive('term:s1:2')
+    terminalQueue.markAlive('term:s2:1')
     const commands = useCommandStore()
     commands.applyCommands('s1', [{ name: '/compact', source: 'builtin' }])
     commands.applyCommands('s2', [{ name: '/goal', source: 'builtin' }])
@@ -211,19 +215,21 @@ describe('useSidebar deleteSession 跨 store 清理（W1 / S3）', () => {
     pushForkNoticeAsk('s2', 'n2', '相邻分支预览')
     const feed = useForkNoticeFeed()
     // 前置：seed 生效（防假绿——断言前确认三分区非空）
-    expect(terminalQueue.isPtyAlive('s1')).toBe(true)
+    expect(terminalQueue.isPtyAlive('term:s1:1')).toBe(true)
+    expect(terminalQueue.isPtyAlive('term:s1:2')).toBe(true)
     expect(commands.getCommands('s1')).toHaveLength(1)
     expect(feed.notices('s1')).toHaveLength(1)
 
     await sidebar.deleteSession('s1')
 
-    // s1 三分区归零：terminal 写队列（removeSession——isPtyAlive 回落 false 佐证条目已删）、
-    // slash 命令历史（clearCommands）、fork 通知 feed（clearSession）
-    expect(terminalQueue.isPtyAlive('s1')).toBe(false)
+    // s1 三分区归零：terminal 写队列（removeSession 按精确前缀 `term:<sid>:` 扇出——
+    // 该会话**全部**实例键回落 false 佐证条目已删）、slash 命令历史、fork 通知 feed
+    expect(terminalQueue.isPtyAlive('term:s1:1')).toBe(false)
+    expect(terminalQueue.isPtyAlive('term:s1:2')).toBe(false)
     expect(commands.getCommands('s1')).toHaveLength(0)
     expect(feed.notices('s1')).toHaveLength(0)
     // 相邻 session 分区不受误伤
-    expect(terminalQueue.isPtyAlive('s2')).toBe(true)
+    expect(terminalQueue.isPtyAlive('term:s2:1')).toBe(true)
     expect(commands.getCommands('s2')).toHaveLength(1)
     expect(feed.notices('s2')).toHaveLength(1)
 
@@ -459,5 +465,42 @@ describe('useSidebar deleteSession 级联前端腿：btw 线虚拟分区 + 派�
 
     scope.stop()
     host.unmount()
+  })
+})
+
+describe('useSidebar deleteSession 级联 browser 分支（display-containers §7.4 发起会话删除的浮层终态）', () => {
+  beforeEach(() => {
+    _resetOverlayForTest()
+  })
+
+  it('删发起会话（浮层正开该会话的浏览器页）→ 关浮层（overlay 态复位）+ browserDestroy 该会话 view', async () => {
+    openBrowser('http://localhost:1420/', 's1')
+    expect(getOverlayControlState().isOpen).toBe(true)
+
+    const scope = effectScope()
+    const sidebar = scope.run(() => useSidebar())!
+    seedSessions([{ cwd: '/proj', ids: ['s1', 's2'] }])
+    await sidebar.deleteSession('s1')
+
+    expect(getOverlayControlState().isOpen).toBe(false)
+    expect(getOverlayControlState().current).toBeNull()
+    expect(browserDestroyMock).toHaveBeenCalledWith('s1')
+    scope.stop()
+  })
+
+  it('S5 反向断言：删非发起会话 → 浮层不动（仍开、内容不变）', async () => {
+    openBrowser('http://localhost:1420/', 's1')
+
+    const scope = effectScope()
+    const sidebar = scope.run(() => useSidebar())!
+    seedSessions([{ cwd: '/proj', ids: ['s1', 's2'] }])
+    await sidebar.deleteSession('s2')
+
+    const state = getOverlayControlState()
+    expect(state.isOpen).toBe(true)
+    expect(state.current).toEqual({ kind: 'browser', payload: { url: 'http://localhost:1420/', sessionId: 's1' } })
+    // 被删会话自身的 view 仍照常销毁（B4 语义），不构成过宽清场
+    expect(browserDestroyMock).toHaveBeenCalledWith('s2')
+    scope.stop()
   })
 })

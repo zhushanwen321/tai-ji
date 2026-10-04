@@ -15,7 +15,7 @@
  * - T4.1: 过滤命中 → 节点过滤
  * - T4.2: 无匹配 → 空态
  * - T4.5: 清空 → 恢复完整树
- * - T6.12: 已开 drawer 点新文件 → 切换
+ * - T6.12: 已开 drawer 点新文件 → 新增 tab；已开文件再点仅激活（W3 注入语义）
  * - T6.7: 异步前 → 骨架态
  */
 import { test, expect } from './fixtures/launch-app'
@@ -83,20 +83,26 @@ test.describe('文件树 E2E', () => {
     await expect(content).toContainText('export function')
   })
 
-  test('E2E-3c (T6.12): drawer 已开点新文件 → 切换非新开', async ({ page }) => {
+  test('E2E-3c (T6.12): drawer 已开点新文件 → 新增 tab；已开文件再点仅激活', async ({ page }) => {
     await gotoFileTree(page)
     await page.getByTestId('file-tree-dir-src').click()
-    // 点第一个文件打开 drawer
+    // 点第一个文件打开 drawer（首个文件 tab）
     await page.getByTestId('file-tree-file-src/index.ts').click()
     await expect(page.getByTestId('detail-pane')).toBeVisible({ timeout: 5_000 })
+    await expect(page.getByTestId('detail-tab')).toHaveCount(1)
     // 记录 drawer 数量（应为 1）
     const drawerCountBefore = await page.getByTestId('detail-pane').count()
-    // 点第二个文件（切换）
+    // 点第二个文件（注入语义：未开文件新增 tab 并激活）
     await page.getByTestId('file-tree-file-src/existing.ts').click()
+    await expect(page.getByTestId('detail-tab')).toHaveCount(2)
     await expect(page.getByTestId('detail-pane')).toBeVisible({ timeout: 5_000 })
-    // drawer 仍只有 1 个（切换非新开）
+    // drawer 仍只有 1 个（tab 是实例层，不是新 drawer）
     const drawerCountAfter = await page.getByTestId('detail-pane').count()
     expect(drawerCountAfter).toBe(drawerCountBefore)
+    // 已开文件再点 → 仅激活（tab 计数不变，激活态切到该 tab）
+    await page.getByTestId('file-tree-file-src/index.ts').click()
+    await expect(page.getByTestId('detail-tab')).toHaveCount(2)
+    await expect(page.getByTestId('detail-tab').first()).toHaveAttribute('data-active', 'true')
   })
 
   test('E2E-4 (AC-3.5): 切 session 再切回 → 展开态恢复', async ({ page }) => {

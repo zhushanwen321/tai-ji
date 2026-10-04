@@ -81,6 +81,7 @@ import {
   type PluginModalClosedReason,
 } from '@taiji/core'
 import { Button } from '@/components/ui/button'
+import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
 import { ViewHost } from '@taiji/ui/extension-host'
 import { PLUGIN_MODAL_SOURCE_KEY } from '@/composables/shell/useExtensionHostBridge'
 
@@ -103,6 +104,17 @@ const isHostOwner = claimed
 
 const slot = computed(() => getPluginModalSlot())
 const rootEl = ref<HTMLElement | null>(null)
+
+// 模态表面聚合注册（§6.7）：开合态绑「owner 接管 ∧ 槽非空」状态本体（getPluginModalSlot
+// 读模块级 shallowRef 镜像，响应式）；旗标组由登记表按 id 读取（模态族双键均让位）。
+// 非 owner 实例恒报关——全局单例层只有接管实例的 DOM 在场，重复注册会让非 owner 实例
+// 的注册在槽非空时误报全屏面开着。
+const disposeSurfaceRegistration = registerModalSurface({
+  surface: 'plugin-modal-host',
+  key: 'plugin-modal-host',
+  isOpen: () => isHostOwner && getPluginModalSlot() !== null,
+})
+onBeforeUnmount(disposeSurfaceRegistration)
 
 // ── title/width 单一解析源（renderer）──
 const declaration = computed(() => {

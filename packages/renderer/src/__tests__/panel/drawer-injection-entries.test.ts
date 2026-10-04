@@ -19,7 +19,12 @@ import { createPinia, setActivePinia } from 'pinia'
 vi.mock('@/composables/features/file-tree/useDetailPane', () => ({
   useDetailPane: () => ({
     state: ref({ path: 'src/foo.ts', content: '', viewMode: 'preview', kind: 'code', status: 'success', hasGitChange: false }),
+    tabs: ref([]),
+    activePath: ref(null),
     toggleView: vi.fn(),
+    activateTab: vi.fn(),
+    closeTab: vi.fn(),
+    saveScroll: vi.fn(),
     sessionCwd: () => '/cwd',
   }),
 }))

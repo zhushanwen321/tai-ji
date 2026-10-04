@@ -29,32 +29,34 @@ describe('terminal 协议契约', () => {
     expect((msg.payload as { cwd?: string }).cwd).toBeUndefined()
   })
 
-  it('terminal.data 广播含 sessionId + data', () => {
+  it('terminal.data 广播含 sessionId + terminalId + data', () => {
     const msg: ServerMessage<'terminal.data'> = {
       type: 'terminal.data',
       id: 'p1',
-      payload: { sessionId: 's1', data: 'hello\r\n' },
+      payload: { sessionId: 's1', terminalId: 'term:s1:1', data: 'hello\r\n' },
     }
     expect(msg.payload.sessionId).toBe('s1')
+    expect(msg.payload.terminalId).toBe('term:s1:1')
     expect(msg.payload.data).toBe('hello\r\n')
   })
 
-  it('terminal.alive 广播含 sessionId', () => {
+  it('terminal.alive 广播含 sessionId + terminalId', () => {
     const msg: ServerMessage<'terminal.alive'> = {
       type: 'terminal.alive',
       id: 'p2',
-      payload: { sessionId: 's1' },
+      payload: { sessionId: 's1', terminalId: 'term:s1:1' },
     }
-    expect(msg.payload).toEqual({ sessionId: 's1' })
+    expect(msg.payload).toEqual({ sessionId: 's1', terminalId: 'term:s1:1' })
   })
 
-  it('terminal.exit 广播含 sessionId + exitCode', () => {
+  it('terminal.exit 广播含 sessionId + terminalId + exitCode', () => {
     const msg: ServerMessage<'terminal.exit'> = {
       type: 'terminal.exit',
       id: 'p3',
-      payload: { sessionId: 's1', exitCode: 0 },
+      payload: { sessionId: 's1', terminalId: 'term:s1:1', exitCode: 0 },
     }
     expect(msg.payload.exitCode).toBe(0)
+    expect(msg.payload.terminalId).toBe('term:s1:1')
   })
 
   it('TerminalConfig 含全部必填字段', () => {
@@ -99,10 +101,12 @@ describe('terminal 协议契约', () => {
     expect(msg.type).toBe('config.setTerminalConfig')
   })
 
-  it('TerminalEnvelopeCode 覆盖业务码 + 兜底', () => {
+  it('TerminalEnvelopeCode 覆盖业务码 + 实例路由码 + 兜底', () => {
     const codes: TerminalEnvelopeCode[] = [
-      'spawn_failed', 'not_found', 'resize_failed', 'kill_failed', 'terminal_failed',
+      'spawn_failed', 'not_found', 'resize_failed', 'kill_failed',
+      'unknown_terminal_id', 'terminal_id_session_mismatch', 'terminal_id_required',
+      'terminal_failed',
     ]
-    expect(codes).toHaveLength(5)
+    expect(codes).toHaveLength(8)
   })
 })

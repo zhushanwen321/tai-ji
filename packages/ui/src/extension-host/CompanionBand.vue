@@ -19,10 +19,11 @@
  * 无请求时根元素 v-if 自隐藏（不占位）；inject 缺失（source/transport 任一未 provide）时
  * 静默空态不崩（design-review R3，先例 StatusBar/ViewHost）。
  */
-import { computed, inject, ref, watch } from 'vue'
+import { computed, inject, onUnmounted, ref, watch } from 'vue'
 import { createDialogRequestQueue } from './dialog-request-queue'
 import { DIALOG_REQUEST_SOURCE_KEY, UI_RESPONSE_TRANSPORT_KEY, OVERLAY_LIFECYCLE_KEY } from './companion-band-source'
 import type { OverlayState } from './companion-band-source'
+import { registerUiModalSurface } from '../modal-surface-registrar'
 import { Button } from '../primitives/button'
 import { Input } from '../primitives/input'
 import { Textarea } from '../primitives/textarea'
@@ -152,6 +153,16 @@ function onCancel(): void {
   queue?.cancel(r.requestId)
 }
 
+// 模态表面聚合注册（§6.7 companion-band 族，经 renderer 注册桥——层级方向见
+// modal-surface-registrar.ts 文件头）：表面 = expanded 待决确认态（inline z var(--z-dialog)
+// 高于 modal、阻塞交互），开合态绑「有请求 ∧ overlayState==='expanded'」状态本体；
+// minimized/restored（z-overlay 低层级）不入聚合。未装配桥（ui 单测 / 非 taiji 宿主）静默跳过。
+const disposeSurfaceRegistration = registerUiModalSurface({
+  surface: 'companion-band',
+  key: 'companion-band',
+  isOpen: () => currentRequest.value !== null && overlayState.value === 'expanded',
+})
+onUnmounted(disposeSurfaceRegistration)
 </script>
 
 <template>

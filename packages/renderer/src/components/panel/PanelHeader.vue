@@ -139,6 +139,10 @@
         <FileText v-else class="size-3 opacity-60" />
         <span>{{ shortFileName }}</span>
       </Button>
+      <!-- 终端开关（三卡化 2026-10-04 迁入：原 StatusBar 底栏落点退役，鼠标路径入口与其它
+           容器开关同区，位于右侧抽屉开关左边）。恒显（不随折叠态 chrome 迁移、不随 sessionId
+           消失——landing 态也开终端区，与原 StatusBar 按钮行为对齐）。 -->
+      <TerminalToggleButton />
       <!-- SideDrawer toggle（always-visible，不依赖 git 仓库）。
            非折叠态显此按钮；折叠态 chrome 按钮组已含侧栏切换。 -->
       <Button
@@ -187,6 +191,7 @@ import { useNavigationStore } from '@/stores/navigation'
 import { useSidebarStore } from '@/stores/sidebar'
 import { usePlatformChrome } from '@/composables/effects/usePlatformChrome'
 import { useCopy } from '@/composables/panel/useCopy'
+import TerminalToggleButton from './TerminalToggleButton.vue'
 import { useSessionTrace, setTraceView } from '@/composables/features/trace/useSessionTrace'
 import TraceViewToggle from './trace/TraceViewToggle.vue'
 import HeaderActionsHost from '@/components/extension/HeaderActionsHost.vue'

@@ -16,7 +16,7 @@ export type {
   CompactErrorCode,
   // hook 否决类分类码（message.send / message.bash / delivery.submit blocked）：同上跨包共用
   MessageBlockedCode,
-  TerminalConfig, TerminalErrorCode, TerminalUnknownErrorCode, TerminalEnvelopeCode,
+  TerminalConfig, TerminalInstanceSummary, TerminalRoutingErrorCode, TerminalErrorCode, TerminalUnknownErrorCode, TerminalEnvelopeCode,
   SkillCacheScope, SkillCacheInvalidatedPayload,
   SessionTraceHeaderPayload, SessionTraceMalformedLine, SessionTraceSessionEndPayload,
   SessionViewSnapshot,
@@ -201,7 +201,17 @@ export {
   btwVirtualId,
   isBtwVirtualId,
   extractBtwPiSessionId,
+  resolveVirtualSessionId,
 } from './virtual-session-id'
+// 终端实例编号格式谓词（`term:<sid>:<seq>`，terminal-multi-instance §0.5 P7 精确前缀口径）——
+// runtime terminal-service / renderer terminal-instance-registry / core terminal-write-queue 三包共用 SSOT
+export {
+  TERMINAL_ID_ROOT,
+  terminalIdPrefixOf,
+  isTerminalIdOfSession,
+  sessionIdOfTerminalId,
+  seqOfTerminalId,
+} from './terminal-id'
 // Coding Plan 额度查询类型
 export type {
   QuotaWindow,

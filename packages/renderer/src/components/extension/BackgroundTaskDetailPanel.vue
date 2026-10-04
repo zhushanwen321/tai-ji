@@ -6,7 +6,8 @@
   分支④⑤ toast）。u-drawer 单元。
 
   数据面（不自持 listener，AGENTS 规则 2）：
-  - 控制态：selectedBackgroundTaskId 经 core getDrawerControlState() 读 per-session 分区
+  - 控制态：selectedBackgroundTaskId 经 core useBashTaskSelection()（selection/bash-task.ts，
+    display-containers §6.6① 迁出后落点）读 per-session 分区
     （undefined=未选中 → PanelContainer 不注入本组件，DrawerPanel 空态 fallback 承载）；
   - 任务条目：useBackgroundTasks 分区只读（分区状态根由 u-renderer-store 持有；本组件不拉
     list、不挂广播——广播刷新由 store 编排）；条目从分区消失（registry LRU 淘汰/损坏自愈清表）
@@ -149,7 +150,7 @@ import { useI18n } from 'vue-i18n'
 import { Check, Copy, FileText, SquareTerminal, X } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import { isActiveBackgroundTaskState } from '@zhushanwen/extension-protocol'
-import { getDrawerControlState } from '@taiji/core/domain/drawer'
+import { useBashTaskSelection } from '@taiji/core/domain/drawer'
 import { usePanelStore } from '@/stores/panel'
 import { useBackgroundTasks } from '@/composables/features/sidebar/useBackgroundTasks'
 import { backgroundTaskStatusIcon } from '@/lib/background-task-bucket'
@@ -169,8 +170,9 @@ const panelStore = usePanelStore()
 /** 焦点 session（split mode per-pane 场景 drawer 单实例跟随 active panel，同 SubagentTab） */
 const focusedSid = computed(() => panelStore.focusedSessionId)
 
-// bashTask tab 选中任务（core per-session 分区直读；写入方 = 列表 item 点击，D5④）
-const selectedTaskId = computed(() => getDrawerControlState().selectedBackgroundTaskId)
+// bashTask tab 选中任务（bashTask 内容域选中态 selection/bash-task.ts，display-containers
+// §6.6① 五字段迁出后的落点；写入方 = 列表 item 点击，D5④）
+const { selectedBackgroundTaskId: selectedTaskId } = useBashTaskSelection()
 
 /** 任务分区只读（状态根由 useBackgroundTasks 持有；本组件零 listener） */
 const { current: partition } = useBackgroundTasks(focusedSid)
