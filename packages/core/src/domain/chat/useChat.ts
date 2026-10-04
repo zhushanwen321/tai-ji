@@ -31,7 +31,7 @@ import { historyWindowFromReply } from './truncated-window'
 import { disposeImageCacheForSession } from './image-cache'
 import { toErrorMessage } from '../../utils/error-message'
 import type { EnsureStreamSubDeps, SessionStoreLike, UseChatDeps } from './use-chat-types'
-import type { DeliveryFrameEntry, DeliveryCancelReply } from './api-port'
+import type { DeliveryFrameEntry, DeliveryCancelReply, DeliverySubmitReply } from './api-port'
 import type { RevokeMessageErrorCode } from '@taiji/shared'
 import { createDevOnceFrameWarn } from './effects/registry'
 import {
@@ -153,6 +153,59 @@ const BLOCKED_CLASSIFIED_CODE: MessageBlockedCode = MESSAGE_BLOCKED_CODE
 const bashTerminalFrameCounts = new Map<string, number>()
 
 /**
+ * [pi1-disposition-chat-flow U2①② / D1③⑤] 本地提交的命令条目登记表（sid → clientUuid →
+ * 投影在场标记）。登记点 = submitNewMessage 收到受理回执 `isCommand === true`（内核 D2 识别
+ * 结果随回执返回，U1⑨）。登记成员 = 唯一「永无 message_end 标记回执」的条目族（命令条目
+ * D2② 不注标出站），其气泡终局只可能来自两路：
+ * - 终局通知 session.deliveryHandled（D1③，主路径）→ handleSessionDeliveryHandled 静默清除；
+ * - 通知丢失（断线窗口）/ runtime 重启（tombstone 内存态丢失 D14①）→ 孤儿对账兜底（D1⑤，
+ *   判据 =「曾经在场」+ 终态双分支「不在投影 ∨ delivered 终态在场」）。
+ *
+ * 操作域刻意收窄为登记在册的命令条目：普通消息条目终局必有 transcript 痕迹，气泡去留由
+ * 回执链管（direct 原位保留 / morph 段重建入流）——孤儿对账若操作普通条目，会在「快照帧
+ * 先于 message_end 回执到达」窗口把已送达的气泡清掉且降级入流被 direct 车道豁免，构成
+ * 文本丢失面。命令条目撤销后清除恒正确（cancel 成功 → 内核删条目 → 下一帧「不在投影」
+ * 分支清气泡，原文已回填草稿；cancel 竞态落败 → delivered 在场 → 命令已执行，清气泡同样
+ * 正确），故无需单独的「本端取消中」豁免集合。
+ *
+ * 成员删除点：handled 通知 / 孤儿清除 / disposeSession / resetChatModuleStateForTest。
+ * 生命周期上界 = 命令条目终局即摘除，无长会话膨胀形态。
+ */
+// taste:allow-no-data-owner W24-EX-C（进程内流程状态——命令条目终局登记，无 GUI 直接消费方；
+// 登记于登记表 §4 ⑧ W24-EX-C 条目，队列条目本体归主表 #6 投影/内核）
+const handledDeliveryTargets = new Map<string, Map<string, { seenInProjection: boolean }>>()
+
+/** 登记一个本地提交的命令条目（submitNewMessage 受理回执 isCommand 时调）。 */
+function registerHandledDeliveryTarget(sid: string, clientUuid: string): void {
+  let partition = handledDeliveryTargets.get(sid)
+  if (!partition) {
+    partition = new Map()
+    handledDeliveryTargets.set(sid, partition)
+  }
+  // 受理回执晚于首帧快照到达的时序差形态（广播路径快于 RPC reply）：投影已有该条目时直接
+  // 补记「曾经在场」，防首帧证据丢失使孤儿判定保守悬挂一轮。
+  partition.set(clientUuid, { seenInProjection: findDeliveryEntry(sid, clientUuid) !== undefined })
+}
+
+/**
+ * [pi1-disposition-chat-flow U2③ / D10③] extension.error 命令来源 toast 的同 key 限频窗：
+ * 同 key（extensionName + error 文本）弹出后 60s 内不重复弹。量级取 goal 循环事故回合间隔
+ * （2026-09-08：64 分钟约 320 回合 ≈ 12s/回合）的数倍，覆盖命令循环重试刷屏形态（D10③；
+ * 参数为模块常量，实施期可校准）。导出供测试 import（禁魔数复制漂移，对齐
+ * PENDING_SEND_TIMEOUT_MS 先例）。
+ */
+export const EXTENSION_COMMAND_ERROR_RATE_LIMIT_MS = 60_000
+
+/** 同 key 最近弹出时刻（key = extensionName + '\n' + error 文本，不含 sessionId——同 key
+ * 跨 session 去重，D10③「同 key（extensionName + error 文本）」）。过期条目在写入前惰性
+ * 清扫（无定时器，对齐 user-delivery morphSegmentsBySession TTL 先例）。清理挂点：
+ * resetChatModuleStateForTest（测试隔离，与同文件其余模块级 Map 同模式）。
+ */
+// taste:allow-no-data-owner W24-EX-C（进程内流程状态——toast 展示层限频时刻，非数据一致性
+// 事实；错误数据本体已逐条完整留痕 runtime 日志 + extension.error WS 消息，D10③ 时间平抑登记）
+const extensionCommandErrorLastShownAt = new Map<string, number>()
+
+/**
  * [RD-1#9 / R1-B12 双轨收敛] 未列 session.* 帧类型的一次性 dev warn（观测补齐，非行为变更）。
  *
  * streamSubscribe 回调的 session.* switch default 对「有意 no-op」的帧（exited/restored/
@@ -201,6 +254,10 @@ export function resetChatModuleStateForTest(): void {
   // [消息投递可靠性 A-bash] 清 bash 终态帧观测计数（残留计数会让下一用例的 sendBash
   // 误判「本次窗口已见终态」，错误地抑制失败提示）
   bashTerminalFrameCounts.clear()
+  // [pi1-disposition-chat-flow U2] 清命令条目登记表 + extension.error 限频表（残留成员会把
+  // 上一用例的命令条目/限频状态带进下一用例的 handled/孤儿对账/toast 断言）
+  handledDeliveryTargets.clear()
+  extensionCommandErrorLastShownAt.clear()
   // [u4d] 截断窗口状态随 chat store per-instance，无需模块级 reset
   // [投递所有权内核 u3b] 清内核投影 + morph 段（测试间不 reset 会把上一用例的
   // session.delivery 投影带进下一用例的回执/morph 断言）
@@ -233,6 +290,134 @@ export function resetChatModuleStateForTest(): void {
  */
 
 /**
+ * [pi1-disposition-chat-flow U2② / D1⑤] 孤儿对账——handled 终局通知丢失后的静默清除兜底。
+ *
+ * 触发面：session.delivery 快照帧到达（含断线重连 stateSnapshot 回放，同一 handler 路径）。
+ * 判据（三条同时成立才清除，操作域 = handledDeliveryTargets 登记在册的命令条目）：
+ * ①「曾经在场」正向证据（seenInProjection——曾出现在此前任一帧投影；受理窗口内快照不含
+ *   新条目属正常态，无此条件的「不在投影即清除」会在连发场景误清未受理气泡，设计 V8 反向）；
+ * ② 终态判据双分支：已不在当前投影（runtime 重启 tombstone 内存态丢失 D14①），或在当前
+ *   投影中呈 delivered 终态（tombstone 仍在 50 条 delivered 窗口内——通知丢失 + runtime
+ *   存活的重连形态 D14①b）；
+ * ③ 操作域已在登记点收窄为命令条目（见 handledDeliveryTargets 注——普通条目由回执链管，
+ *   不进本判据）。
+ *
+ * 与下方 morph 循环是同函数相邻分支（impl-plan U2 检查点）：对账只清登记在册的命令条目、
+ * morph 只处理非 direct 车道的活跃条目，操作域互斥不重叠。
+ * 清除动作 = finalizeHandledEntry（handled 同形态静默清除：移除乐观气泡 + 清空窗计时器 +
+ * 递减在途计数，无错误提示 D1④）。
+ */
+function reconcileHandledOrphans(
+  sid: string,
+  chat: ChatStoreInstance,
+  entries: DeliveryFrameEntry[],
+): void {
+  const partition = handledDeliveryTargets.get(sid)
+  if (!partition || partition.size === 0) return
+  const projectionIds = new Set(entries.map((e) => e.clientUuid))
+  for (const [clientUuid, mark] of partition) {
+    if (!mark.seenInProjection) continue
+    const inProjection = projectionIds.has(clientUuid)
+    if (inProjection) {
+      const state = entries.find((e) => e.clientUuid === clientUuid)?.state
+      if (state !== 'delivered') continue
+    }
+    // 双分支命中：不在投影（分支 A）∨ delivered 终态在场（分支 B）
+    partition.delete(clientUuid)
+    if (partition.size === 0) handledDeliveryTargets.delete(sid)
+    finalizeHandledEntry(sid, clientUuid, chat)
+  }
+}
+
+/** [D1⑤] 「曾经在场」证据标记（投影替换点记录）：本帧 entries 命中的登记成员置位，
+ * 供后续帧孤儿判定。本帧不计入本帧判定（reconcileHandledOrphans 先于本函数执行）——
+ * 「曾出现在此前任一帧投影」的严格语义，首见即 delivered 的帧保守不清（悬挂至下一帧，
+ * 误清零风险优先，D1⑤ 保守方向）。 */
+function markHandledTargetsSeenInProjection(sid: string, entries: DeliveryFrameEntry[]): void {
+  const partition = handledDeliveryTargets.get(sid)
+  if (!partition || partition.size === 0) return
+  for (const entry of entries) {
+    const mark = partition.get(entry.clientUuid)
+    if (mark) mark.seenInProjection = true
+  }
+}
+
+/**
+ * [pi1-disposition-chat-flow U2① / D1③④] session.deliveryHandled 终局通知消费：命令条目
+ * 被 pi 接管（handled disposition）后内核一对一通知，前端按 handled 同形态静默清除——
+ * 回滚三件套（移除乐观气泡 + 清空窗计时器 + 递减在途计数），**无错误提示**（handled =
+ * 命令已执行，非失败形态；执行结果经 pi 回合事件正常入流）。
+ * 只对登记在册成员动作：外来命令条目（plugin send_to_session / 收养等无本地乐观面的提交）
+ * 无气泡可移除、无挂账可回收，误动 clearPendingSend/decrementInflight 会误伤同 session
+ * 其他在途提交。
+ * [ADR-0049] per-session 隔离：payload.sessionId 校验（对齐 handleSubagentDirective 防御层）。
+ */
+function handleSessionDeliveryHandled(
+  sid: string,
+  chat: ChatStoreInstance,
+  msg: ServerMessage<'session.deliveryHandled'>,
+): void {
+  if (msg.payload.sessionId !== sid) return
+  const partition = handledDeliveryTargets.get(sid)
+  if (!partition?.has(msg.payload.clientUuid)) return
+  partition.delete(msg.payload.clientUuid)
+  if (partition.size === 0) handledDeliveryTargets.delete(sid)
+  finalizeHandledEntry(sid, msg.payload.clientUuid, chat)
+}
+
+/**
+ * [D1④] handled 形态静默清除三件套（U2① 终局通知与 U2② 孤儿对账共用，「按 handled 同
+ * 形态」的单一实现）：① 移除乐观气泡（truncateFrom 幂等：已 morph / 不存在的 id no-op）；
+ * ② 清空窗计时器 + dispatching 占位（clearPendingSend）；③ 递减在途计数（钳制幂等）。
+ * 无错误提示（handled = 命令已执行的正常终局）。
+ */
+function finalizeHandledEntry(sid: string, clientUuid: string, chat: ChatStoreInstance): void {
+  chat.truncateFrom(sid, clientUuid, true)
+  chat.clearPendingSend(sid)
+  chat.decrementInflight(sid, 1)
+}
+
+/**
+ * [pi1-disposition-chat-flow U2③ / D10③] extension.error 帧消费——命令失败 toast（白名单
+ * 放行的最小通路）。放行判据 = 仅 `errorEvent === 'command'`（pi 命令 handler 抛错的固定
+ * 标记，agent-session.js `_tryExecuteExtensionCommand` catch 分支；事件 handler 抛错为
+ * 事件名、生命周期错误为 register_provider 等标记，其余来源保持现状静默——完整失败体验
+ * 归 D14④ 独立立项）。同 key（extensionName + error 文本）去重 + 限频窗见
+ * EXTENSION_COMMAND_ERROR_RATE_LIMIT_MS。
+ * [ADR-0049] per-session 隔离：payload.sessionId 校验。payload 在 shared 为
+ * Record<string, unknown> 占位（ServerMessageMapBase 未收录），字段经守卫收窄（禁 any）。
+ */
+function handleExtensionErrorFrame(
+  sid: string,
+  msg: ServerMessage<'extension.error'>,
+  deps: EnsureStreamSubDeps,
+): void {
+  const p = msg.payload as {
+    sessionId?: unknown
+    extensionName?: unknown
+    error?: unknown
+    errorEvent?: unknown
+  }
+  if (p.errorEvent !== 'command') return
+  if (p.sessionId !== sid) return
+  const rawName = typeof p.extensionName === 'string' ? p.extensionName : ''
+  const rawError = typeof p.error === 'string' ? p.error : p.error == null ? '' : String(p.error)
+  const key = `${rawName}\n${rawError}`
+  const now = Date.now()
+  // 惰性清扫过期条目（无定时器；防长会话不同 key 累积无上界）
+  for (const [k, at] of extensionCommandErrorLastShownAt) {
+    if (now - at >= EXTENSION_COMMAND_ERROR_RATE_LIMIT_MS) extensionCommandErrorLastShownAt.delete(k)
+  }
+  const lastShownAt = extensionCommandErrorLastShownAt.get(key)
+  if (lastShownAt !== undefined && now - lastShownAt < EXTENSION_COMMAND_ERROR_RATE_LIMIT_MS) return
+  extensionCommandErrorLastShownAt.set(key, now)
+  // extensionName 形态 = "command:<命令名>"（D10③ 载荷锚定：extensionPath 语义经
+  // runtime event-adapter 改名入 extensionName 字段）——剥前缀补 "/" 得用户可读命令名。
+  const name = rawName.startsWith('command:') ? `/${rawName.slice('command:'.length)}` : rawName
+  deps.toast.error(deps.t('composable.extensionCommandFailed', { name, msg: rawError }))
+}
+
+/**
  * [投递所有权内核 u3b / D7] session.delivery 帧消费（state topic 全量快照，last-value）：
  * ① 投影整体替换（effects/user-delivery 模块级 ref，队列区/气泡 morph 的单一数据源，
  * u3c QueueBubble 单源化消费）；② 乐观气泡 morph 编排——非 direct 车道（steer/queued）的
@@ -241,6 +426,8 @@ export function resetChatModuleStateForTest(): void {
  * direct 车道气泡保持待确认（送达回执经 message_end ① 标记匹配抵消占位，D7「既有
  * inflightCounts 抵消机制保留服务 direct」）；delivered 条目无 morph 面（其 transcript
  * 权威由 reducer 喂入，回执/快照两侧幂等）。
+ * [pi1-disposition-chat-flow U2②] 投影替换后插入孤儿对账相邻分支 + 「曾经在场」证据标记
+ * （见 reconcileHandledOrphans / markHandledTargetsSeenInProjection）。
  *
  * 倒序 morph：多条连发气泡在流内连续尾排，truncateFrom(inclusive) 会截掉其后内容——
  * 从最后一条起逐条截，防前条 morph 误删后条气泡（气泡恒尾排：appendUser 尾插 +
@@ -257,6 +444,10 @@ function handleSessionDelivery(
   if (!Array.isArray(rawEntries)) return
   const entries = rawEntries as DeliveryFrameEntry[]
   replaceDeliveryProjection(sid, entries)
+  // [U2② / D1⑤] 孤儿对账（handled 通知丢失兜底）→ 本帧证据标记——先判定后标记，
+  // 「曾经在场」不含本帧（严格「此前任一帧」语义）；两分支与下方 morph 循环操作域互斥。
+  reconcileHandledOrphans(sid, chat, entries)
+  markHandledTargetsSeenInProjection(sid, entries)
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i]!
     // direct → 待确认气泡保持；delivered → transcript 权威已入流（reducer），无 morph 面
@@ -615,6 +806,17 @@ export function ensureStreamSubscription(
         handleSessionDelivery(sid, chat, msg)
         break
       }
+      // [pi1-disposition-chat-flow U2① / D1③] handled 终局通知：命令条目静默清除
+      case 'session.deliveryHandled': {
+        handleSessionDeliveryHandled(sid, chat, msg)
+        break
+      }
+      // [pi1-disposition-chat-flow U2③ / D10③] extension.error 白名单放行（最小通路）：
+      // 仅 errorEvent === 'command' 来源进 toast（同 key 去重 + 限频），其余静默
+      case 'extension.error': {
+        handleExtensionErrorFrame(sid, msg, deps)
+        break
+      }
       case 'session.renamed': {
         handleSessionRenamed(sid, sessionStore, msg)
         break
@@ -698,13 +900,15 @@ export function createUseChat(deps: UseChatDeps) {
    *                            !text.trim() 守卫保证）。必传：唯一调用点 submitNewMessage
    *                            恒传；原「缺省时内部兜底重算」的分支无运行时命中且会掩盖
    *                            调用方契约违反（S4 修复目的即消除重复计算），已删。
+   * @returns 受理回执 DeliverySubmitReply（[pi1-disposition-chat-flow U2⑤] 调用方消费
+   *                            isCommand 命令标志做 pendingSend 计时器豁免 + 命令条目登记）。
    */
   async function submitSegments(
     sessionId: string,
     segments: Segment[],
     clientUuid: string,
     precomputedPromptText: string,
-  ): Promise<void> {
+  ): Promise<DeliverySubmitReply> {
     const promptText = precomputedPromptText
     // 最小写入：纯文本消息（全部 segment 为 text）跳过 sidecar + 标记——重开时 textToSegments
     // 降级与结构化回填渲染等价，只有非纯文本段（image/file/skill/mention/handoff）的 badge
@@ -741,7 +945,7 @@ export function createUseChat(deps: UseChatDeps) {
     // reply 仅受理确认，权威状态演进经 session.delivery 状态帧（handleSessionDelivery 消费）。
     // [MF-1-2 / ADR-0043] segments 快照随提交上网（仅富消息——与 sidecar 写入同一 needsBackfill
     // 谓词门控）：runtime 按 clientUuid 持有，cancel/drain 回草稿时随全文返回（chips 完整恢复）。
-    await deps.chatApi.submitDelivery(
+    return await deps.chatApi.submitDelivery(
       sessionId,
       markedPromptText,
       clientUuid,
@@ -772,7 +976,17 @@ export function createUseChat(deps: UseChatDeps) {
     chat.addPendingSend(sid)
     try {
       // S4：复用调用方算过的 promptText，避免 submitSegments 内部再调一次 segmentsToPrompt。
-      await submitSegments(sid, segments, clientUuid, promptText)
+      const reply = await submitSegments(sid, segments, clientUuid, promptText)
+      // [pi1-disposition-chat-flow U2⑤ / D14③ G3 闸③] 命令条目（受理回执 isCommand，内核
+      // D2 识别结果）30s 空窗计时器豁免：撤 timer 保留 pendingSend 置位——命令挂起语义成立
+      // （`/permission` 交互挂起不被切成失败形态），收尾凭据 = session.deliveryHandled 终局
+      // 通知（U2①）或命令失败 toast（U2③）；普通消息计时器行为不变。同时登记 handled
+      // 通知/孤儿对账的操作域（命令条目 = 永无 message_end 回执的唯一条目族，见
+      // handledDeliveryTargets 注）。isCommand 缺省（旧 runtime）= 普通消息，链路零变化。
+      if (reply.isCommand === true) {
+        chat.disarmPendingSendTimer(sid)
+        registerHandledDeliveryTarget(sid, clientUuid)
+      }
     } catch (e) {
       // RPC 失败回滚（三件套）：pi/内核侧无消息、送达回执永不到来——
       // ① 乐观气泡移除（[u3b] 前身靠 send.rejected 兜底回滚，内核化后无拒绝帧，必须在
@@ -1242,6 +1456,9 @@ export function createUseChat(deps: UseChatDeps) {
     clearDeliveryProjection(sessionId)
     // [消息投递可靠性 A-bash] 帧观测计数随 session 销毁回收（防 Map 永久增长 + 跨 session 误判）
     bashTerminalFrameCounts.delete(sessionId)
+    // [pi1-disposition-chat-flow U2] 命令条目登记表随 session 销毁回收（session 已删除，
+    // handled/孤儿清除不再有意义）
+    handledDeliveryTargets.delete(sessionId)
     // wave:renderer-subscribe：清除 MessageBus 订阅状态（SubscriptionState）。
     // 与 streamSubscriptions.delete 配对——session 删除后若不清，routeInbound 的 gap 检测
     // 仍会读残留 state（lastSeenSeq 基线 stale），且 Map 永久增长。

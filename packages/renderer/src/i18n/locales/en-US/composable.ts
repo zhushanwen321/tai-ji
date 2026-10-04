@@ -23,6 +23,9 @@ export default {
   // `@` directive messages (U2b): empty-text guard + RPC failure (readable error, S8)
   subagentDirectiveEmpty: 'Directive message is empty, please type content for the subagent',
   subagentDirectiveFailed: 'Failed to send directive message: {msg}',
+  // Extension command failure toast (pi1-disposition-chat-flow U2③ / D10③): command-source
+  // errors only (useChat filters errorEvent === 'command'); {name} = command name without prefix
+  extensionCommandFailed: 'Command failed: {name} — {msg}',
   providerNameRequired: 'Provider name is required',
   oauthSwitchNeedsKey: 'Switching to API Key requires a new API Key (it replaces the OAuth credential on save)',
   duplicateHeaderKey: 'Duplicate header key detected, the last value will be used',

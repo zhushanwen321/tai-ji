@@ -911,6 +911,20 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     clearPendingSendTimer(sessionId)
   }
 
+  /**
+   * [G3 闸③ pi1-disposition-chat-flow U2⑤ / D14③] 命令条目空窗计时器豁免：撤除该 session
+   * 已挂的 pendingSend 30s 空窗 timer（PENDING_SEND_TIMEOUT_MS），**保留 pendingSend 置位**。
+   *
+   * 命令判定依据 = delivery.submit 受理回执 isCommand（内核 D2 识别结果随回执返回，U1⑨；
+   * 向后兼容可选字段）。命令条目挂起语义成立（D14③：`/permission rule` 交互挂起多久都不得
+   * 被 30s 墙钟切成失败形态）——30s 计时器对它不挂表；收尾凭据 = session.deliveryHandled
+   * 终局通知（handled → clearPendingSend 全清，U2①）或命令失败 toast（U2③）。普通消息
+   * 计时器行为不变（addPendingSend 无条件挂表）。
+   */
+  function disarmPendingSendTimer(sessionId: string): void {
+    clearPendingSendTimer(sessionId)
+  }
+
   /** [D3] pendingSend 投影查询（「正在提交直发」瞬时态——send/editAndResend 置、message_start
    *  清）。语义窄于 isActive（= isGenerating ∨ pendingSend）：UserBubble submitEdit 双发锁
    *  消费（与 Composer isSending 对齐的「正在提交」信号），不含「生成中」（编辑入口本身
@@ -1185,6 +1199,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     resetTransientStates,
     addPendingSend,
     clearPendingSend,
+    disarmPendingSendTimer,
     isPendingSend,
     markSessionError,
     isCompacting,
@@ -1275,7 +1290,7 @@ export type ChatStoreOps = Pick<
   | 'applySubagentEntries' | 'appendUser'
   | 'applyMessageEvent' | 'finalizeSession'
   | 'finalizeAllStreaming' | 'resetTransientStates' | 'addPendingSend'
-  | 'clearPendingSend' | 'markSessionError' | 'setHandingOff'
+  | 'clearPendingSend' | 'disarmPendingSendTimer' | 'markSessionError' | 'setHandingOff'
   | 'setOccupancy' | 'clearOccupancy' | 'setCompactingReason'
   | 'appendSystemNotice' | 'appendRespawnNotice' | 'appendSubagentDirective' | 'truncateFrom'
   | 'markRespawnPending' | 'clearRespawnPending'
