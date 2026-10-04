@@ -367,9 +367,10 @@ export interface TerminalInstanceSummary {
  *   即「该 terminalId 不在 runtime 注册表」的否定回执，renderer 据此执行关闭沿三腿清理；
  * - `terminal_id_session_mismatch`：terminalId 的会话段与请求 sessionId 不一致（交叉校验拒绝）——
  *   走普通错误通道，**不触发回收**（实例仍活）；
- * - `terminal_id_required`：既有实例操作帧（write/resize/kill/attach）缺 terminalId 的**畸形帧拒绝**
- *   （设计 §3.3「缺 terminalId 即拒」防御，由 runtime handler 发出）——无编号可归属、不是注册成员
- *   资格裁决，走普通错误通道，**不触发回收**。
+ * - `terminal_id_required`：编号缺失（既有实例操作帧 write/resize/kill/attach）**或编号类型非法**
+ *   （非字符串——数字 / null / 布尔 / 对象，含 `terminal.spawn` 指定形态）的**畸形帧拒绝**（设计 §3.3
+ *   「缺 terminalId 即拒」防御 + 类型维度 fail-fast，由 runtime handler 发出）——不静默归一为「新建」、
+ *   不是注册成员资格裁决，走普通错误通道，**不触发回收**。
  * 命名口径：仓库惯例 snake_case（对齐既有 `terminal_failed` / `record_not_found`）；设计文档已按
  * 实现回写为 snake_case（impl-plan §5 偏差表 D1），实现不得改写为 camelCase。
  */
