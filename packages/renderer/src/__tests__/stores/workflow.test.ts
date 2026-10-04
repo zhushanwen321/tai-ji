@@ -10,12 +10,12 @@
  *   空列表直接覆盖 / oversize 降级保留旧分区）
  * - clearWorkflows 清空 records + 清 agentcall 映射；clearSession per-session 分区释放（ADR-0049）
  * - registerAgentCall / getAgentCallVirtualIdsByMain / clearAgentCallMapping agentcall 清理映射（U7 MUST_FIX 1）
- * - triggerWorkflowReload 信号驱动重拉 + 500ms 延迟重试 + W15 定时器防御性清理（去重 / $dispose）
+ * - triggerWorkflowReload 信号到达即拉一次（待裁决项 5 根治：running 不再有 500ms 延迟
+ *   重试，构造性时序依据见 stores/workflow.ts 的 [时间平抑红线登记]）
  * - [W0/D4] 拉取收敛 10 用例：per-session in-flight 合并（并发失效共享一次拉取）+ 可再武装
  *   dirty 补拉（起步竞态 / 终态吞没 / 补拉在途窗口再武装 / 失败分支同样 drain）+ 簿记三点
  *   清理（clearSession / clearWorkflows / $dispose 完成后无幻影补拉——已删 session 的 dirty
- *   不复活）+ 两 sid 并发互不吞（per-session 键粒度）+ clearSession 补齐 reload timer 清理
- *   缺口（已删 session 的 500ms 重试不再触发）
+ *   不复活）+ 两 sid 并发互不吞（per-session 键粒度）
  * - [P3/D6] agentCallElapsedMs 投影消费纯函数（每 ask 已执行时长）
  *
  * [HISTORICAL] overlay 相关用例（selectAgentCall/backFromAgentCall/isViewing/getViewingAgentCallId/
@@ -330,7 +330,7 @@ describe('workflow store — clearSession（per-session 分区释放，ADR-0049 
   })
 })
 
-describe('workflow store — triggerWorkflowReload / W15 定时器防御性清理', () => {
+describe('workflow store — triggerWorkflowReload 信号到达即拉一次（待裁决项 5 根治）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -340,67 +340,41 @@ describe('workflow store — triggerWorkflowReload / W15 定时器防御性清�
     vi.restoreAllMocks()
   })
 
-  it('running 信号：立即拉一次 + 500ms 延迟重试一次（workflow-state-link 延迟 flush 兜底）', async () => {
+  it('running 信号：立即拉一次，无定时重试（推进 600ms 虚拟时间不产生第二次调用）', async () => {
     vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [makeRecord()], oversize: false })
     const store = useWorkflowStore()
 
-    store.triggerWorkflowReload('session-1', 'running')
+    store.triggerWorkflowReload('session-1')
     // 立即拉取（微任务 flush）
     await vi.advanceTimersByTimeAsync(0)
     expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(1)
+    expect(sessionApi.getWorkflows).toHaveBeenCalledWith('session-1')
 
-    // 延迟重试在 RUNNING_RETRY_MS=500 后触发
-    await vi.advanceTimersByTimeAsync(500)
-    expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(2)
-    expect(sessionApi.getWorkflows).toHaveBeenNthCalledWith(2, 'session-1')
+    // 原 RUNNING_RETRY_MS=500 的盲等重试已删除：时间推进无第二次拉取
+    //（构造性时序依据：信号由 runtime 投影发出时数据已可读，见 [时间平抑红线登记]）
+    await vi.advanceTimersByTimeAsync(600)
+    expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(1)
   })
 
-  it('非 running 信号：只立即拉一次，不安排延迟重试', async () => {
+  it('终态信号与 running 同待遇：只立即拉一次（status 不再区分重试分支）', async () => {
     vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [makeRecord()], oversize: false })
     const store = useWorkflowStore()
 
-    store.triggerWorkflowReload('session-1', 'done')
+    store.triggerWorkflowReload('session-1')
     await vi.advanceTimersByTimeAsync(0)
     await vi.advanceTimersByTimeAsync(600)
     expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(1)
   })
 
-  it('同 sid 连续 running 信号去重：只保留最后一次重试 timer', async () => {
+  it('store $dispose 后无幻影定时拉取（原重试 timer 簿记已随盲等重试删除，无定时器即无清理义务）', async () => {
     vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [makeRecord()], oversize: false })
     const store = useWorkflowStore()
 
-    store.triggerWorkflowReload('session-1', 'running')
-    store.triggerWorkflowReload('session-1', 'running')
-    await vi.advanceTimersByTimeAsync(0)
-    await vi.advanceTimersByTimeAsync(600)
-    // 2 次立即拉取 + 1 次去重后的延迟重试（旧 timer 被 clearTimeout）
-    expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(3)
-  })
-
-  it('W15 兜底：store $dispose → 在途重试 timer 被清，不再触发 loadWorkflows', async () => {
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [makeRecord()], oversize: false })
-    const store = useWorkflowStore()
-
-    store.triggerWorkflowReload('session-1', 'running')
+    store.triggerWorkflowReload('session-1')
     await vi.advanceTimersByTimeAsync(0)
     expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(1)
 
-    // 作用域销毁（HMR / store dispose）→ 定时器防御性清理
     store.$dispose()
-    await vi.advanceTimersByTimeAsync(600)
-    expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(1)
-  })
-
-  it('[W0/D4] clearSession 补齐 reload timer 清理缺口：已删 session 的 500ms 重试不再触发', async () => {
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [makeRecord()], oversize: false })
-    const store = useWorkflowStore()
-
-    store.triggerWorkflowReload('session-1', 'running')
-    await vi.advanceTimersByTimeAsync(0)
-    expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(1)
-
-    // 原实现 timer 只在 clearWorkflows/onScopeDispose 清——clearSession 后重试照发（既有缺口）
-    store.clearSession('session-1')
     await vi.advanceTimersByTimeAsync(600)
     expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(1)
   })

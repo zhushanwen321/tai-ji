@@ -896,7 +896,11 @@ export class SessionRecords {
       frames.push('session.subagents')
     }
 
-    const workflowSignals = workflowSignalsAgainstPublished(cache.workflows, cache.publishedWorkflows)
+    // [待裁决项 5 根治] 发射前可读性门：只公告读路径当前可返回的 run（见 gate JSDoc）。
+    const workflowSignals = filterReadableWorkflowSignals(
+      workflowSignalsAgainstPublished(cache.workflows, cache.publishedWorkflows),
+      cache.projection?.workflows ?? null,
+    )
     const workflowSignalRunIds = workflowSignals.map((s) => s.runId)
     for (const update of workflowSignals) {
       bus.publish(sessionId, {
@@ -1386,6 +1390,34 @@ function workflowSignalsAgainstPublished(current: Map<string, WorkflowRunRecord>
     }
   }
   return updates
+}
+
+/**
+ * [待裁决项 5 根治 2026-10-04] workflowUpdate 信号发射前可读性门（publishRecordChanges
+ * 单点接线，本文件唯一发射点）。
+ *
+ * 读路径事实（代码实态）：getWorkflows 正常路径直读 cache.projection.workflows（同一
+ * 实例）；信号构造源 = cache.workflows = 投影镜像（syncCacheFromProjection）。故「信号
+ * 发出时数据必然可读」在现行调用图下结构性成立，本门常态零拦截——它是发射点的显式
+ * 不变量：未来新增发布腿 / 信号源与读源解耦时在此拦截，替代消费侧时间兜底（renderer
+ * 的 500ms running 信号盲等重试已随本项删除）。
+ *
+ * 不可读 run 不进本轮发布 = 推迟到下一轮触发（不给定时器）：publishedWorkflows 水位只在
+ * workflowSignals 非空时推进，被过滤 run 的水位差残留 → 下一轮投影变更 / 对账腿
+ * （agent_settled / 15s 定时）重新进入 diff 自然重试。
+ *
+ * readableRunIds null（投影不可得；现行调用图不可达的防御读法）→ 放行：判据缺失不拦截
+ * 信号（宁可多发一次让消费侧拉取证实，不静默吞信号）。
+ *
+ * oversize 读路径（>32MB 旧格式惰性提取）不经本门：发射前按该路径回读 = 双倍全文扫描；
+ * 该路径的「列表不可用」语义由 [RT-4#8] 降级提示承接，与本门正交。
+ */
+export function filterReadableWorkflowSignals(
+  signals: WorkflowUpdateSignal[],
+  readableRunIds: ReadonlyMap<string, unknown> | null,
+): WorkflowUpdateSignal[] {
+  if (readableRunIds === null) return signals
+  return signals.filter((s) => readableRunIds.has(s.runId))
 }
 
 /**
