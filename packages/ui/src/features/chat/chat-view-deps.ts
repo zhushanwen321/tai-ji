@@ -75,8 +75,10 @@ export interface ChatViewDeps {
    *  绝对路径，出参 = 文件全文。消费方 = HtmlPreviewInline 源码态（容器头部切「源码」→
    *  iframe 卸载、内容走 MarkdownRenderer 的 shiki fence 高亮通道）；通道 = 主进程
    *  `localFile:read`（产物目录在 session cwd 外，runtime file.read 的 cwd 守门不可达，
-   *  与 servable 预检同一白名单谓词）。读取失败 reject（reason 由 provide 实现折叠进错误
-   *  消息），容器显错误占位 + 重试。
+   *  与 servable 预检同一白名单谓词）。读取失败 reject，Error 携带结构化 reason 属性
+   *  （`err.reason` ∈ not_found / is_dir / out_of_whitelist / read_failed，与通道错误码
+   *  同源）——容器按原因显具体文案（复用 panel.detail.htmlReason* 词条），未携带（mock /
+   *  非契约实现）→ 固定占位文案，均附重试。
    *  optional，同 probeArtifact：未 provide（测试 mock 壳）→「源码」按钮隐藏（容器只有
    *  预览态）；renderer useChatViewDeps 运行时总 provide 真实实现。 */
   readArtifact?: (absPath: string) => Promise<{ content: string }>

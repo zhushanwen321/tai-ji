@@ -148,11 +148,15 @@ export function useChatViewDeps(
     /** 产物源码读取（chat-html-support v16 §6.3「源码态」/ §6.9 D9 localFile:read 通道）：
      *  HtmlPreviewInline 切「源码」后经此读产物文件全文（产物目录在 session cwd 外，runtime
      *  file.read 的 cwd 守门不可达）。lib/ipc 的结构化失败原因（not_found / is_dir /
-     *  out_of_whitelist / read_failed）折叠进 Error message——deps 契约面是 Promise reject，
-     *  容器按「读取失败」显错误占位 + 重试；无 IPC（web/mock）同样 reject。 */
+     *  out_of_whitelist / read_failed）以 err.reason 结构化属性附于 reject 的 Error（message
+     *  保留供 console 诊断）——容器按原因显具体文案（复用 panel.detail.htmlReason* 词条，
+     *  not_found「产物已被保留期回收」等真实原因用户侧可见）；无 IPC（web/mock）同样 reject
+     *  （无 reason 属性 → 容器 fallback 固定占位文案）。 */
     readArtifact: async (absPath: string) => {
       const result = await localFileRead(absPath)
-      if (!result.ok) throw new Error(`localFileRead failed: ${result.reason}`)
+      if (!result.ok) {
+        throw Object.assign(new Error(`localFileRead failed: ${result.reason}`), { reason: result.reason })
+      }
       return { content: result.content }
     },
 

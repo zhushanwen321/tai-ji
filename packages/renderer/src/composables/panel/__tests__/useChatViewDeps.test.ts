@@ -308,9 +308,12 @@ describe('useChatViewDeps — 产物预检与源码读取接线（chat-html-supp
     expect(mockLocalFileRead).toHaveBeenCalledWith('/data/artifacts/s1/x.html')
   })
 
-  it('readArtifact 结构化失败（not_found）→ reject 折叠 reason（容器显错误占位 + 重试）', async () => {
+  it('readArtifact 结构化失败（not_found）→ reject 附 reason 结构化属性 + message 保留诊断（容器按原因显文案）', async () => {
     mockLocalFileRead.mockResolvedValue({ ok: false, reason: 'not_found' })
     const deps = assemble(ref('s1'))
+    // 结构化透传：容器（HtmlPreviewInline）按 err.reason 显具体原因文案（panel.detail.htmlReason*）
+    await expect(deps.readArtifact('/data/artifacts/s1/gone.html')).rejects.toMatchObject({ reason: 'not_found' })
+    // message 保留：console 诊断仍可见原始原因
     await expect(deps.readArtifact('/data/artifacts/s1/gone.html')).rejects.toThrow('not_found')
   })
 })

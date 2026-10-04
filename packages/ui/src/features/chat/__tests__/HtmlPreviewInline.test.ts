@@ -7,7 +7,8 @@
  * - 预检降级三原因（not_found / is_dir / out_of_whitelist）+ 路径非法（空 / 多行）+
  *   路径无法解析：降级占位文案可见、无 iframe、无操作按钮
  * - 源码态切换与 readArtifact 注入：切「源码」→ iframe 卸载 + 宿主 #source 插槽桩收到
- *   fence 包裹源码；readArtifact reject → 错误占位 + 重试；未 provide → 切换整组隐藏
+ *   fence 包裹源码；readArtifact reject → 错误占位 + 重试（附结构化 reason → 错误行显
+ *   对应原因词条，无结构化 reason → 固定占位文案）；未 provide → 切换整组隐藏
  * - 刷新 ?r=n 递增：servable 重检 → ?r=2；文件已删（not_found）→ 刷新落降级占位
  * - 懒挂载（IntersectionObserver mock）：进视口前不挂 iframe、loading 占位；进视口后挂载；
  *   卸载时 disconnect
@@ -342,10 +343,33 @@ describe('源码态（deps.readArtifact 注入 + 宿主 #source 插槽）', () =
         .mockResolvedValueOnce({ content: '<html>ok</html>' })
       const wrapper = await mountAndSwitchToSource(readArtifact)
       expect(wrapper.find('[data-testid="html-preview-source-error"]').exists()).toBe(true)
+      // 纯 Error（无结构化 reason 属性，非契约 reject）→ fallback 固定占位文案（不猜原因）
+      expect(wrapper.find('[data-testid="html-preview-source-error"]').text()).toContain('panel.htmlPreview.sourceLoadFailed')
       await wrapper.find('[data-testid="html-preview-source-retry"]').trigger('click')
       await flush()
       expect(wrapper.find('[data-testid="html-preview-source"]').exists()).toBe(true)
       expect(readArtifact).toHaveBeenCalledTimes(2)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it.each([
+    ['not_found', 'panel.detail.htmlReasonNotFound'],
+    ['is_dir', 'panel.detail.htmlReasonIsDir'],
+    ['out_of_whitelist', 'panel.htmlPreview.outOfWhitelist'],
+    ['read_failed', 'panel.htmlPreview.sourceLoadFailed'],
+  ] as const)('reject 附结构化 reason=%s → 错误行显对应词条 %s', async (reason, key) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      // deps 契约形态：reason 结构化属性附于 reject 的 Error（useChatViewDeps 实装形态）
+      const readArtifact = vi.fn()
+        .mockRejectedValue(Object.assign(new Error(`localFileRead failed: ${reason}`), { reason }))
+      const wrapper = await mountAndSwitchToSource(readArtifact)
+      const errorLine = wrapper.find('[data-testid="html-preview-source-error"]')
+      expect(errorLine.exists()).toBe(true)
+      // t() mock 返回 key：断言 key 字面量即断言映射到位（真文案由 locale 双侧承载）
+      expect(errorLine.text()).toContain(key)
     } finally {
       warn.mockRestore()
     }

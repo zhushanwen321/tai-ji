@@ -183,7 +183,8 @@ export function useDetailPane(sessionId: Ref<string | null>) {
     state.value.truncated = result.truncated
   }
 
-  /** 白名单读取真实失败原因 → 用户可见文案（复用既有 i18n 词条，不新增 key） */
+  /** 白名单读取真实失败原因 → 用户可见文案（panel.detail.htmlReasonNotFound/htmlReasonIsDir
+   *  为本分支新增键，非存量复用；read_failed 无专用词条落通用 loadFailed） */
   function sourceReadErrorText(reason: Exclude<LocalFileReadReason, 'out_of_whitelist'>): string {
     if (reason === 'not_found') return t('panel.detail.htmlReasonNotFound')
     if (reason === 'is_dir') return t('panel.detail.htmlReasonIsDir')

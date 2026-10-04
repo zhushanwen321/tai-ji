@@ -158,7 +158,7 @@
           class="flex flex-col items-center gap-1.5 px-3 py-6 text-center"
           data-testid="html-preview-source-error"
         >
-          <span class="text-[length:var(--text-2xs)] text-danger">{{ t('panel.htmlPreview.sourceLoadFailed') }}</span>
+          <span class="text-[length:var(--text-2xs)] text-danger">{{ sourceErrorText }}</span>
           <Button
             variant="ghost"
             size="sm"
@@ -187,9 +187,11 @@
  * - 预检经 deps.probeArtifact（可选）：未 provide / 通道失败 → 跳过预检（不显示大小）。
  * - 懒挂载：IntersectionObserver（threshold 0.1）进视口才设 src；已挂载不卸载（离视口
  *   保留，避免来回滚动反复重执行脚本）；卸载时断开 observer。
- * - 源码态经 deps.readArtifact（可选）：未 provide →「源码」按钮隐藏；读取失败 → 错误
- *   占位 + 重试。源码内容由宿主经 #source 作用域插槽渲染（markdown 槽参 = fence 包裹后
- *   的源码，走宿主的高亮通道）；插槽未提供（宿主无渲染能力）时「源码」切换同样隐藏。
+ * - 源码态经 deps.readArtifact（可选）：未 provide →「源码」按钮隐藏；读取失败 → 按
+ *   reject Error 携带的结构化 reason 显具体原因文案（DEGRADE_LABEL_KEYS 同款映射，复用
+ *   panel.detail.htmlReason* 词条），无结构化原因 → 固定占位文案，均附重试。源码内容由
+ *   宿主经 #source 作用域插槽渲染（markdown 槽参 = fence 包裹后的源码，走宿主的高亮
+ *   通道）；插槽未提供（宿主无渲染能力）时「源码」切换同样隐藏。
  */
 import { computed, onMounted, onUnmounted, ref, watch, useSlots } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -376,10 +378,37 @@ async function refresh(): Promise<void> {
 
 // ── 源码态（deps.readArtifact → MarkdownRenderer fence 高亮通道）──
 
-type SourceState = { kind: 'idle' | 'loading' | 'content' | 'error'; content: string }
+/** error 态附带的读取失败原因（deps 契约：readArtifact reject 的 Error 携带 err.reason，
+ *  ∈ not_found / is_dir / out_of_whitelist / read_failed；非契约 reject → undefined） */
+type SourceState = { kind: 'idle' | 'loading' | 'content' | 'error'; content: string; reason?: string }
 const sourceState = ref<SourceState>({ kind: 'idle', content: '' })
 
-/** 源码态内容加载；失败显错误占位 + 重试（出声不静默） */
+/** 源码态读取失败原因 → i18n key（DEGRADE_LABEL_KEYS 同款字面全路径映射，防 locale 反向
+ *  守卫死键误判；复用既有词条不新增 key——not_found / is_dir 用 panel.detail.htmlReason*，
+ *  out_of_whitelist 沿用预览白名单提示词条；read_failed 等无专用词条 → fallback 固定文案） */
+const SOURCE_ERROR_LABEL_KEYS: Readonly<Record<string, string>> = {
+  not_found: 'panel.detail.htmlReasonNotFound',
+  is_dir: 'panel.detail.htmlReasonIsDir',
+  out_of_whitelist: 'panel.htmlPreview.outOfWhitelist',
+}
+
+/** 错误占位文案：已知原因显具体原因，未映射原因（read_failed / mock reject）→ 固定文案 */
+const sourceErrorText = computed(() => {
+  if (sourceState.value.kind !== 'error') return ''
+  const key = sourceState.value.reason !== undefined ? SOURCE_ERROR_LABEL_KEYS[sourceState.value.reason] : undefined
+  return t(key ?? 'panel.htmlPreview.sourceLoadFailed')
+})
+
+/** deps 契约错误的结构化 reason 提取（unknown 运行时窄化，禁断言直取） */
+function readReasonOf(e: unknown): string | undefined {
+  if (e !== null && typeof e === 'object' && 'reason' in e) {
+    const r = (e as { reason: unknown }).reason
+    if (typeof r === 'string') return r
+  }
+  return undefined
+}
+
+/** 源码态内容加载；失败显错误占位（携带结构化原因）+ 重试（出声不静默） */
 async function loadSource(): Promise<void> {
   const path = resolvedPath.value
   const read = deps.readArtifact
@@ -390,7 +419,7 @@ async function loadSource(): Promise<void> {
     sourceState.value = { kind: 'content', content: r.content }
   } catch (e) {
     console.warn('[HtmlPreviewInline] readArtifact failed:', e)
-    sourceState.value = { kind: 'error', content: '' }
+    sourceState.value = { kind: 'error', content: '', reason: readReasonOf(e) }
   }
 }
 
