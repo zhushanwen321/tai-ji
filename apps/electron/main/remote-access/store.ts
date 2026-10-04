@@ -71,10 +71,17 @@ function resolveRemoteAccessFilePath(dataDir?: string): string {
   return join(dataDir ?? getDataDir(), REMOTE_ACCESS_FILENAME)
 }
 
+/** Node 错误形态收窄（unknown → ErrnoException：携带 string code 的 Error，运行时守卫替代 any）。 */
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && typeof (error as { code?: unknown }).code === 'string'
+}
+
 /**
  * 读取当前配置。
  *
- * - 缺文件 → 默认关态配置（内存返回，不落盘——首次开启/轮换时才产生文件）；
+ * - 缺文件（ENOENT）→ 默认关态配置（内存返回，不落盘——首次开启/轮换时才产生文件）；
+ * - 其他读失败（EACCES/EISDIR 等路径异常）→ 响亮日志照记（降级 ≠ 吞错，对齐 E10 处理
+ *   强度）+ 按缺文件同形态降级为默认关态（fail-closed 不变，文件未被改动，不写回）；
  * - 文件损坏 → E10 重建：写回默认配置 + 响亮日志（ensureRemoteAccessIntegrity）。
  *
  * @param dataDir 可选数据根目录（测试注入）；缺省读 getDataDir()
@@ -83,8 +90,16 @@ export function readRemoteAccessConfig(dataDir?: string): RemoteAccessConfig {
   let raw: string
   try {
     raw = readFileSync(resolveRemoteAccessFilePath(dataDir), 'utf-8')
-  } catch {
-    // 缺文件（ENOENT 等）是首次启动的正常形态：默认关态，不报错不落盘
+  } catch (error) {
+    // 缺文件是首次启动的正常形态：静默降级，不报错不落盘
+    if (isErrnoException(error) && error.code === 'ENOENT') {
+      return createDefaultRemoteAccessConfig()
+    }
+    const detail = isErrnoException(error) ? `${error.code}: ${error.message}` : String(error)
+    console.error(
+      `[remote-access] ${REMOTE_ACCESS_FILENAME} 读取失败（${detail}）— 按缺文件降级为默认关态配置（本进程内生效，原文件未被改动）。` +
+        '恢复：检查文件权限/占用（权限异常时 chmod 600 归位）后重启应用；或回桌面端 设置 → 远程访问面板 重新开启（将重写文件并重启 runtime 生效）',
+    )
     return createDefaultRemoteAccessConfig()
   }
   return ensureRemoteAccessIntegrity(raw, dataDir)

@@ -42,6 +42,12 @@ export default {
       send: '发送',
       stop: '停止',
     },
+    tokenInput: {
+      title: '需要访问凭据',
+      hint: '回主机「设置 → 远程访问」重新扫码，或在下方粘贴 token',
+      placeholder: '粘贴访问 token',
+      submit: '连接',
+    },
     mermaid: {
       placeholder: '图表在桌面查看',
     },

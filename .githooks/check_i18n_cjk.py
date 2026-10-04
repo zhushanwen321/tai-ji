@@ -10,7 +10,7 @@ i18n CJK 残留检测（维度 B）
 
 调用方式:
   python3 .githooks/check_i18n_cjk.py <file1.vue> <file2.vue> ...
-  （无参数时扫全量 packages/renderer/src/components/**/*.vue）
+  （无参数时扫全量 packages/renderer/src/components + packages/mobile-renderer/src 的 .vue）
 
 退出码:
   0 — 通过
@@ -26,7 +26,12 @@ GREEN = '\033[0;32m'
 YELLOW = '\033[1;33m'
 NC = '\033[0m'
 
-RENDERER_COMPONENTS = Path('packages/renderer/src/components')
+# 扫描根：桌面 renderer 组件 + 移动壳 src 全部 .vue（双壳并列消费面；
+# mobile-renderer 缺席是 TokenInputView 硬编码中文漏网的盲区根因）
+SCAN_ROOTS = (
+    Path('packages/renderer/src/components'),
+    Path('packages/mobile-renderer/src'),
+)
 
 # 文件级豁免清单（含 CJK 但属于合理使用：mock fixtures / 数据值非 UI 文案）
 # 继承自 locale-sync-check.test.ts U8 的 ALLOW_FILES
@@ -70,8 +75,8 @@ def main() -> int:
     if args:
         files = [Path(a) for a in args if a.endswith('.vue')]
     else:
-        # 无参数时扫全量（CI / 手动调用场景）
-        files = sorted(RENDERER_COMPONENTS.rglob('*.vue'))
+        # 无参数时扫全量（CI / 手动调用场景）：双扫描根去重合并
+        files = sorted({f for root in SCAN_ROOTS for f in root.rglob('*.vue')})
 
     if not files:
         print(f"{GREEN}[OK] 无 .vue 文件需要检查{NC}")
@@ -79,11 +84,12 @@ def main() -> int:
 
     violations: dict[str, list[tuple[int, str]]] = {}
     for f in files:
-        # 计算相对 packages/renderer/src/ 的路径用于 ALLOW_FILES 匹配
-        try:
-            rel = str(f).split('/packages/renderer/src/', 1)[-1] if '/packages/renderer/src/' in str(f) else str(f)
-        except Exception:
-            rel = str(f)
+        # 计算相对所属壳 src/ 的路径用于 ALLOW_FILES 匹配（双壳各自剥离自家前缀）
+        rel = str(f)
+        for marker in ('/packages/renderer/src/', '/packages/mobile-renderer/src/'):
+            if marker in rel:
+                rel = rel.split(marker, 1)[-1]
+                break
         if rel in ALLOW_FILES:
             continue
         if not f.exists():

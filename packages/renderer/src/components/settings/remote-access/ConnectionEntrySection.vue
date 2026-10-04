@@ -119,7 +119,9 @@ watch(fullUrl, async (url) => {
   }
   try {
     qrDataUrl.value = await QRCode.toDataURL(url, { width: 280, margin: 1 })
-  } catch {
+  } catch (e) {
+    // 降级占位不变：生成失败不阻断链接/复制通路，warn 留排障依据（QR 空白时可归因）
+    console.warn('[remote-access] QRCode.toDataURL failed:', e)
     qrDataUrl.value = ''
   }
 }, { immediate: true })

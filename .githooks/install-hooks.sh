@@ -1276,8 +1276,9 @@ fi
 I18N_CJK_CHECKER=".githooks/check_i18n_cjk.py"
 
 if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_I18N_CJK_CHECK" != "1" ]; then
-    # 仅当 staged 含 .vue 文件时检查
-    STAGED_VUE=$(echo "$STAGED_FILES" | grep -E "^packages/renderer/src/.*\.vue$" || true)
+    # 仅当 staged 含 .vue 文件时检查（双根与 check_i18n_cjk.py 的 SCAN_ROOTS 对齐；
+    # mobile-renderer 根缺席曾致其下 .vue 不触发守卫）
+    STAGED_VUE=$(echo "$STAGED_FILES" | grep -E "^packages/(renderer/src|mobile-renderer/src)/.*\.vue$" || true)
     if [ -n "$STAGED_VUE" ]; then
         echo -e "${BLUE}[INFO] 运行 i18n CJK 残留检测...${NC}"
 

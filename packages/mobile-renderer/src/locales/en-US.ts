@@ -40,6 +40,12 @@ export default {
       send: 'Send',
       stop: 'Stop',
     },
+    tokenInput: {
+      title: 'Credentials required',
+      hint: 'Re-scan the QR code on your desktop (Settings → Remote Access), or paste a token below',
+      placeholder: 'Paste access token',
+      submit: 'Connect',
+    },
     mermaid: {
       placeholder: 'View chart on desktop',
     },

@@ -10,16 +10,22 @@
 //
 // companion 区挂 ui CompanionBand（AskUserForm 是其 askUser method 的内部子组件）；
 // source/transport 经 companion-bridge provide（回传走 core 既有通路，D7 ask-user 行）。
+// 权限审批弹窗（D7「手机可批」行）全局挂根：bus 'plugin-permission-request' →
+// companion-bridge 弹窗状态 → PermissionRequestDialog；回传经 provide 的
+// PermissionTransport（plugin.approvePermissions/revokePermissions 既有通路）。
 // zone 容器 data-testid（zone-*//bottom-tab-bar）延续 AC5 结构断言锚点。
 import { computed, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@taiji/ui'
-import { CompanionBand } from '@taiji/ui/extension-host'
+import { CompanionBand, PermissionRequestDialog } from '@taiji/ui/extension-host'
 import {
   DIALOG_REQUEST_SOURCE_KEY,
+  PERMISSION_TRANSPORT_KEY,
   UI_RESPONSE_TRANSPORT_KEY,
   mobileDialogRequestSource,
+  mobilePermissionTransport,
   mobileUiResponseTransport,
+  useMobilePermissionRequest,
 } from './shell/companion-bridge'
 import { activeSessionId, loadSessions } from './shell/app-runtime'
 import { shellConnectionState, submitRemoteToken } from './bootstrap'
@@ -34,6 +40,11 @@ import NewTaskSheet from './views/NewTaskSheet.vue'
 // companion 数据源/回传通道（App 级 provide，CompanionBand 经 inject 消费）
 provide(DIALOG_REQUEST_SOURCE_KEY, mobileDialogRequestSource)
 provide(UI_RESPONSE_TRANSPORT_KEY, mobileUiResponseTransport)
+// 审批回传通道（D7 权限审批行）：PermissionRequestDialog 经 inject 调 transport RPC
+provide(PERMISSION_TRANSPORT_KEY, mobilePermissionTransport)
+
+// 权限审批弹窗状态（companion-bridge bus 订阅驱动，全局单例 session 无关）
+const permission = useMobilePermissionRequest()
 
 const { t } = useI18n()
 
@@ -118,5 +129,12 @@ watch(isConnected, (connected) => {
       <BottomTabBar v-model="activeTab" />
       <NewTaskSheet :open="newTaskOpen" @close="newTaskOpen = false" @created="onTaskCreated" />
     </template>
+
+    <!-- 权限审批弹窗（D7「手机可批」）：全局单例挂根，视图态无关；pending 驱动开合 -->
+    <PermissionRequestDialog
+      :plugin-id="permission.pluginId"
+      :permissions="permission.permissions"
+      :pending="permission.pending"
+    />
   </div>
 </template>

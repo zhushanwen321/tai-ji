@@ -3,6 +3,7 @@
  *
  * 覆盖：
  * - 缺文件 → 默认关态配置（不报错、不落盘）
+ * - 非 ENOENT 读失败（EACCES 形态）→ 响亮日志含恢复指引 + 默认关态降级（不落盘）
  * - generateToken：64 位小写 hex
  * - write：原子写语义（同目录 .tmp 临时文件 + rename，写后无 .tmp 残留、无半截 JSON）+
  *   0600 权限（含覆写已存在文件后仍 0600——writeFileSync mode 仅创建时生效的兜底）
@@ -88,6 +89,30 @@ describe('readRemoteAccessConfig', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
     })
     expect(errorSpy).not.toHaveBeenCalled()
+  })
+
+  it('非 ENOENT 读失败（路径被目录占位，EISDIR 形态）→ 响亮日志含恢复指引 + 默认关态降级（不写回）', () => {
+    // 真实 fs 形态制造读失败（vi.spyOn 对 node:fs ESM namespace 不可 redefine）：
+    // 配置文件路径被目录占位 → readFileSync 抛 EISDIR（非 ENOENT）
+    mkdirSync(FILE_PATH)
+    try {
+      const config = readRemoteAccessConfig(TMP_DATA_DIR)
+      // 行为降级语义不变：关态 fail-closed（与缺文件同形态），token 契约照常
+      expect(config.enabled).toBe(false)
+      expect(config.token).toMatch(/^[0-9a-f]{64}$/)
+      expect(config.createdAt).toBeTruthy()
+      // 降级 ≠ 吞错：响亮日志（读失败原因 + 恢复指引），对齐 E10 处理强度
+      expect(errorSpy).toHaveBeenCalledTimes(1)
+      const message = String(errorSpy.mock.calls[0]?.[0])
+      expect(message).toContain(REMOTE_ACCESS_FILENAME)
+      expect(message).toContain('EISDIR')
+      expect(message).toContain('恢复')
+      expect(message).toContain('远程访问面板')
+      // 读失败降级不写回（目录占位原样留存；若误触写回，rename 落目录路径会失败）
+      expect(existsSync(FILE_PATH)).toBe(true)
+    } finally {
+      rmSync(FILE_PATH, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
   })
 })
 

@@ -13,8 +13,7 @@
 //
 // 凭据派生（D4 三分支）在 platform/connection-profile.ts；auth 拒绝信号消费（D8：落 token
 // 输入视图 + 凭据来源分支处置）经 ports.onAuthRejected 接线。连接态 / token 态以模块级响应式
-// 状态 shellConnectionState 暴露；App.vue 多视图接线与 TokenInputView 挂载归 U1.4c（本单元
-// 不重排 App.vue），token 重试入口 = submitRemoteToken。
+// 状态 shellConnectionState 暴露（App.vue 多视图消费），token 重试入口 = submitRemoteToken。
 
 import { createApp, ref, watch } from 'vue'
 import { createPinia } from 'pinia'
@@ -37,14 +36,14 @@ import { createMobilePlatformAdapter } from './platform/mobile-platform-adapter'
 import { MOBILE_MOUNT_POINTS, registerMountPoint } from './shell/mount-points'
 
 /**
- * 移动壳连接装配 UI 态（模块级响应式；App.vue 多视图消费归 U1.4c）：
+ * 移动壳连接装配 UI 态（模块级响应式；App.vue 多视图消费）：
  * - 'connecting'：未连接（编排已提交 / 握手 auth 中 / 断线重连中）初值
  * - 'connected'：auth 通过（凭据有效）
  * - 'token-input'：凭据缺失或验身失败（D8 信号 / D4 皆无分支）——落 token 输入视图
  */
 export type MobileShellConnectionState = 'connecting' | 'connected' | 'token-input'
 
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态）：移动壳连接装配三态（U1.4c 多视图切换消费）
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态）：移动壳连接装配三态（App.vue 多视图切换消费）
 export const shellConnectionState = ref<MobileShellConnectionState>('connecting')
 
 /** bootstrap 装配的凭据控制器（token 重试路径 submitRemoteToken 的操作面） */
@@ -109,10 +108,14 @@ export async function bootstrap(): Promise<void> {
     onAuthRejected: () => {
       void profile.handleAuthFailure()
     },
+    // effects = session 生命周期 / subagent / workflow 类下行的壳层接线点（桌面
+    // useMessageEffects 注入）；移动壳 v1 无对应消费面（D7 面板族 Phase 2），回调全 optional
+    // call，空对象安全。对话流主链不经此处（streamSubscribe per-session 通道 + config.sessions）。
     effects: {},
-    // 移动壳 vue-i18n 装配归 U1.4c；过渡期 key 原文兜底（错误文案可辨识，不阻断 pending reject）
+    // key 原文透传是终态而非兜底：t 消费的 connection 域留守桌面壳 locale（无 ui 组件消费，
+    // 不入 ui locale 下沉域），移动壳 messages 无此域——透传 key 落在 pending reject 错误消息
+    // 里，移动壳消费面 console-only（app-runtime toast 降级 console），可辨识不崩，无需装配文案
     t: (key: string) => key,
-    // U1.4c 壳层对话流清理接线点（chat finalize / extension UI pending）；本单元无对话流消费面
     onRuntimeUnavailable: () => {},
   })
 
