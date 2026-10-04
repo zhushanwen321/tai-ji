@@ -111,6 +111,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown, Plus, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import { instanceLabel } from '@/composables/features/terminal/terminal-instance-registry'
 
 /**
  * 切换条条目（u2 契约）：terminalId 为实例编号 `term:<sid>:<seq>`；seq 由父组件从编号派生
@@ -143,9 +144,9 @@ function isActive(inst: TerminalInstanceBarItem): boolean {
   return inst.terminalId === props.activeTerminalId
 }
 
-/** 默认实例名「终端 <seq>」（i18n 双侧）；重命名设计明示后置，本单元不做 */
+/** 默认实例名「终端 <seq>」（i18n 双侧，registry 单一源）；重命名设计明示后置，本单元不做 */
 function labelFor(inst: TerminalInstanceBarItem): string {
-  return t('panel.terminal.instanceName', { seq: inst.seq })
+  return instanceLabel(inst.terminalId)
 }
 
 function onSelect(terminalId: string): void {

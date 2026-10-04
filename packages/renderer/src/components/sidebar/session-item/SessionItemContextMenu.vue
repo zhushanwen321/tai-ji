@@ -77,7 +77,7 @@ import {
   ContextMenuContent,
   ContextMenuItem,
 } from 'reka-ui'
-import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
+import { registerModalSurface, surfaceRectOf } from '@/composables/features/app/modal-surface-registry'
 
 const props = defineProps<{
   sessionId: string
@@ -121,19 +121,14 @@ function onMenuOpenChange(open: boolean): void {
 // 模态表面聚合注册（§6.7 弹出层族）：右键菜单是键盘可感知的 reka 托管弹层（Esc 让位
 // ——reka DismissableLayer 不 preventDefault，走聚合让位档），开合态绑 update:open
 // 镜像 ref（ContextMenuRoot open 状态本体的官方通知通道，非广播计数器）；实例级 key
-// 按 session（N 个 SessionItem 各持一棵菜单树，同 session 单实例）。旗标组由登记表按 id 读取。
+// 按 session（N 个 SessionItem 各持一棵菜单树，同 session 单实例）。旗标组由登记表按
+// id 读取；几何读点取菜单内容组件实例 $el（未挂载/非元素 → null，主进程保守按相交）。
 const menuContentRef = ref<{ $el?: unknown } | null>(null)
-function menuRect(): { x: number; y: number; width: number; height: number } | null {
-  const el = menuContentRef.value?.$el
-  if (!(el instanceof HTMLElement)) return null
-  const r = el.getBoundingClientRect()
-  return { x: r.x, y: r.y, width: r.width, height: r.height }
-}
 const disposeSurfaceRegistration = registerModalSurface({
   surface: 'session-item-context-menu',
   key: `session-context-menu-${props.sessionId}`,
   isOpen: () => menuOpen.value,
-  rect: menuRect,
+  rect: () => surfaceRectOf(menuContentRef.value),
 })
 onBeforeUnmount(disposeSurfaceRegistration)
 /** 停止首击进入确认态并阻止菜单关闭（reka select event cancelable）；再击 emit 并复位。 */

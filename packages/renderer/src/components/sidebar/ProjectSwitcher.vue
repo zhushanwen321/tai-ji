@@ -38,7 +38,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/ui/dialog'
-import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
+import { registerModalSurface, surfaceRectOf } from '@/composables/features/app/modal-surface-registry'
 import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { computeProjectSessionCounts } from '@/composables/logic/project-session'
@@ -127,17 +127,11 @@ function setCardMenuContentRef(el: Element | ComponentPublicInstance | null): vo
   const root = (el as { $el?: unknown } | null)?.$el ?? el
   cardMenuContentEl.value = root instanceof HTMLElement ? root : null
 }
-function cardMenuRect(): { x: number; y: number; width: number; height: number } | null {
-  const el = cardMenuContentEl.value
-  if (!el) return null
-  const r = el.getBoundingClientRect()
-  return { x: r.x, y: r.y, width: r.width, height: r.height }
-}
 const disposeSurfaceRegistration = registerModalSurface({
   surface: 'project-switcher-menu',
   key: 'project-switcher-menu',
   isOpen: () => contextMenuOpen.value,
-  rect: cardMenuRect,
+  rect: () => surfaceRectOf(cardMenuContentEl.value),
 })
 onBeforeUnmount(disposeSurfaceRegistration)
 

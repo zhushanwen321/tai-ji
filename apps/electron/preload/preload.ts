@@ -1,6 +1,6 @@
 // apps/electron/preload/preload.ts
 import { contextBridge, ipcRenderer } from 'electron'
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, ShieldsFacesPayload } from '@taiji/shared'
 import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE } from '@taiji/shared'
 
 export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
@@ -111,13 +111,7 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
   /** 显示收口事实源之一（§5.1 规则 6② / §6.7）：shieldsView 遮蔽面**全量**上报（替换语义）。
    *  fullscreen=true 无条件隐藏 view；非全屏面与 view 矩形几何相交才隐藏（双阈值空间滞回），
    *  成员开态内 rect 变化（横幅改宽）也须重报。非法 payload reject（error envelope） */
-  browserSetShields(payload: {
-    faces: Array<{
-      id: string
-      fullscreen: boolean
-      rect?: { x: number; y: number; width: number; height: number }
-    }>
-  }): Promise<void>
+  browserSetShields(payload: ShieldsFacesPayload): Promise<void>
   /** 转发键清单全量上报（§7.4 [MANDATORY]）：初始化 / settings 重录快捷键 / renderer 重载时调。
    *  入清单约束：仅 mod 前缀组合（mod=meta||ctrl，可带 shift）；裸键/shift-only/alt 组合/Esc
    *  一律拒绝入清单（rejected 返回）。页面聚焦态命中清单的键由主进程转发回本窗处理链 */
@@ -344,13 +338,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     content: 'browser' | 'workflow' | null
     sessionId: string | null
   }) => ipcRenderer.invoke('browser:overlay-state', state),
-  browserSetShields: (payload: {
-    faces: Array<{
-      id: string
-      fullscreen: boolean
-      rect?: { x: number; y: number; width: number; height: number }
-    }>
-  }) => ipcRenderer.invoke('browser:shields', payload),
+  browserSetShields: (payload: ShieldsFacesPayload) => ipcRenderer.invoke('browser:shields', payload),
   browserSetForwardKeys: (keys: string[]) => ipcRenderer.invoke('browser:forward-keys', { set: keys }),
   browserUpdateForwardKeys: (delta: { add?: string[]; remove?: string[] }) =>
     ipcRenderer.invoke('browser:forward-keys', { add: delta.add, remove: delta.remove }),

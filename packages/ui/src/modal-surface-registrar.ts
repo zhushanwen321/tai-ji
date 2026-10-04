@@ -41,6 +41,17 @@ export interface UiModalSurfaceRegistration { // oe-exempt:20261003:framework:�
 /** 注册函数形态：返回注销函数（幂等）；未装配注册桥时 renderer 侧不会调用本类型 */
 export type ModalSurfaceRegistrar = (registration: UiModalSurfaceRegistration) => () => void
 
+/**
+ * 表面几何读点的统一构造（本包表面宿主共用）：值 = 组件实例（reka 单根内容组件等，取其
+ * $el）或裸元素；非元素 / 未挂载（关态）→ null（不带 rect 上报，main 侧保守按相交处理）。
+ */
+export function uiSurfaceRectOf(value: unknown): UiSurfaceRect | null {
+  const node = (value as { $el?: unknown } | null | undefined)?.$el ?? value
+  if (!(node instanceof HTMLElement)) return null
+  const r = node.getBoundingClientRect()
+  return { x: r.x, y: r.y, width: r.width, height: r.height }
+}
+
 /** ui 包表面宿主 inject 的注册桥键（renderer App.vue provide 实函数） */
 export const MODAL_SURFACE_REGISTRAR_KEY: InjectionKey<ModalSurfaceRegistrar> = Symbol(
   'taiji:modal-surface-registrar',

@@ -25,6 +25,7 @@ import {
   seqOfTerminalId,
   terminalIdPrefixOf,
 } from '@taiji/shared'
+import i18n from '@/i18n'
 
 // 编号格式谓词上移 shared 单点后本模块 re-export：既有消费方（useTerminal /
 // stores/terminal-write-queue / 测试）导入路径不变，实现单源。
@@ -42,10 +43,19 @@ export type TerminalInstanceEntry = {
   terminalId: string
   /** 所属会话 id（由编号会话段解析）。 */
   sessionId: string
-  /** 会话内序号（显示名「终端 <seq>」由 u3-bar 组件按 i18n 拼装）。 */
+  /** 会话内序号（显示名经本模块 instanceLabel() 拼装）。 */
   seq: number
   /** PTY 存活镜像（ack 建档置 true / alive 帧幂等置 true / 回收后条目消失）。 */
   alive: boolean
+}
+
+/** i18n.global.t 的类型窄化 cast（先例：useConnection.ts 同款）。 */
+const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => string
+
+/** 实例显示名「终端 <seq>」（切换条 / 写队列 toast 共用单一源）；非法编号回退原始编号。 */
+export function instanceLabel(terminalId: string): string {
+  const seq = seqOfTerminalId(terminalId)
+  return seq > 0 ? t('panel.terminal.instanceName', { seq }) : terminalId
 }
 
 /**

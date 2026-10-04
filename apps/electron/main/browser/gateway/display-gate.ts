@@ -31,18 +31,11 @@ export interface DisplayRect { // oe-exempt:20261003:framework:类型契约先�
   height: number
 }
 
-/**
- * shieldsView 遮蔽面（模态表面聚合 §6.7 的 view 遮蔽族成员，renderer 聚合侧上报）。
- * - fullscreen=true：全屏阻塞面（遮罩盖满视口）→ 无条件隐藏 view
- * - fullscreen=false：非全屏面（Toast / CrashRecoveredBar / memory bar / RollingRestartBanner /
- *   弹出层族）→ 与 view 矩形几何相交才隐藏；rect 缺失按相交保守处理（宁可隐藏 view 也不让
- *   阻塞交互被盖住——上报考勤违约时的 fail-safe 方向）。
- */
-export interface ShieldFace { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
-  id: string
-  fullscreen: boolean
-  rect?: DisplayRect
-}
+// shieldsView 遮蔽面形状（browser:shields payload 契约）SSOT 在 @taiji/shared
+// ipc-payloads.ts——preload ElectronAPI 签名 / renderer 聚合上报 / 本模块校验解析三方
+// 共用同一形态声明防漂移；既有导入路径（browser-view-manager / 测试）经此 re-export 不变。
+export type { ShieldFace } from '@taiji/shared'
+import type { ShieldFace, ShieldRect } from '@taiji/shared'
 
 /** 浮层内容种类（core overlay 域同词表） */
 export type OverlayContentKind = 'browser' | 'workflow'
@@ -173,7 +166,7 @@ export function parseShieldFacesPayload(payload: unknown): ShieldFace[] {
       throw new Error(`[browser:shields] faces[${index}].rect must be { x, y, width, height } with finite numbers`)
     }
     const parsed: ShieldFace = { id: face.id, fullscreen: face.fullscreen }
-    if (face.rect !== undefined) parsed.rect = face.rect as DisplayRect
+    if (face.rect !== undefined) parsed.rect = face.rect as ShieldRect
     return parsed
   })
 }

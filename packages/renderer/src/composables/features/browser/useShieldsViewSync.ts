@@ -31,17 +31,9 @@
 import { onScopeDispose, watchEffect } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { useOverlayControl } from '@taiji/core/domain/overlay'
+import type { ShieldsFacesPayload } from '@taiji/shared'
 import { openShieldingSurfaces } from '@/composables/features/app/modal-surface-registry'
 import { browserSetShields } from '@/lib/ipc'
-
-/** browser:shields payload 形状（与 lib/ipc.browserSetShields / main display-gate ShieldFace 对齐） */
-export interface ShieldsFacesPayload { // oe-exempt:20261003:framework:聚合/view 联动契约层——payload 与 ui 桥数据契约，消费面为本批 D1/D2 单元
-  faces: Array<{
-    id: string
-    fullscreen: boolean
-    rect?: { x: number; y: number; width: number; height: number }
-  }>
-}
 
 /** 收集当前遮蔽面全集（§7.4 payload 形状：fullscreen 面不带 rect；非全屏面带实测 rect；
  *  rect 缺失（成员未提供几何读点）按缺省省略——主进程保守按相交处理） */

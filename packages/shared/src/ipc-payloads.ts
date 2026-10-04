@@ -197,3 +197,35 @@ export type DiagnosticExportBundleResult =
   }
   | { status: 'canceled' }
   | { status: 'error'; error: DiagnosticExportError }
+
+// ── shieldsView 遮蔽面上报（browser:shields invoke 通道，display-containers §6.7）──
+
+/** 几何矩形（视口坐标 CSS px，getBoundingClientRect 同空间；view rect 链同一坐标系） */
+export interface ShieldRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * shieldsView 遮蔽面单项（模态表面聚合 §6.7 的 view 遮蔽族成员，renderer 聚合侧上报；
+ * 主进程消费方语义：无条件隐藏 / 几何相交隐藏双档，见 display-gate.ts）。
+ * - fullscreen=true：全屏阻塞面（遮罩盖满视口）→ 无条件隐藏 view
+ * - fullscreen=false：非全屏面（横幅/弹出层族）→ 与 view 矩形几何相交才隐藏；rect 缺失
+ *   按相交保守处理（宁可隐藏 view 也不让阻塞交互被盖住——fail-safe 方向）。
+ */
+export interface ShieldFace {
+  id: string
+  fullscreen: boolean
+  rect?: ShieldRect
+}
+
+/**
+ * renderer → main 遮蔽面**全量**上报 payload（browser:shields invoke 通道，替换语义）。
+ * preload ElectronAPI 签名 / renderer ipc 封装与聚合上报 / main handler 校验（runtime
+ * 再校验，类型不作信任依据）三方共用同一形态声明，防漂移。
+ */
+export interface ShieldsFacesPayload {
+  faces: ShieldFace[]
+}

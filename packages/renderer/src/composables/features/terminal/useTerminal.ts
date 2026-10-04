@@ -51,12 +51,12 @@ import {
   activeTerminalIdOf,
   allTerminalIds,
   hasInstance,
+  instanceLabel,
   isTerminalIdOfSession,
   listInstances,
   registerInstance,
   resetTerminalInstanceRegistry,
   sessionIdOfTerminalId,
-  seqOfTerminalId,
   setActiveTerminalId,
   setInstanceAlive,
   terminalIdsOfSession,
@@ -191,12 +191,6 @@ function removePartition(terminalId: string): void {
 
 /** i18n.global.t 的类型窄化 cast（先例：useConnection.ts 同款）。 */
 const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => string
-
-/** 实例显示名（「终端 <seq>」，重命名后置）；非法编号回退原始编号。 */
-function instanceLabel(terminalId: string): string {
-  const seq = seqOfTerminalId(terminalId)
-  return seq > 0 ? t('panel.terminal.instanceName', { seq }) : terminalId
-}
 
 /**
  * 「输入可能丢失」提示（对齐 runtime terminal.writeFailed 的 toast 范式，设计 §3.3）：

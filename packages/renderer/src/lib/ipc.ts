@@ -7,7 +7,7 @@
  *
  * 依赖方向：无下游（读全局 window.electronAPI，类型经 declare global 自动可用）
  */
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, ShieldsFacesPayload } from '@taiji/shared'
 import type { ImageCacheWritePort } from '@taiji/core'
 
 /** preload 注入的 electronAPI（web/mock / node 测试环境为 undefined——后者连
@@ -246,13 +246,7 @@ export function browserSetOverlayState(state: {
  * 成员开态内 rect 变化（横幅文案随 level 改宽）也须重报——重算触发面归 useShieldsViewSync。
  * 非法 payload 主进程 reject（error envelope）。无 IPC（web/mock）静默 no-op。
  */
-export function browserSetShields(payload: {
-  faces: Array<{
-    id: string
-    fullscreen: boolean
-    rect?: { x: number; y: number; width: number; height: number }
-  }>
-}): Promise<void> {
+export function browserSetShields(payload: ShieldsFacesPayload): Promise<void> {
   return api?.browserSetShields(payload) ?? Promise.resolve()
 }
 

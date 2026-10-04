@@ -134,6 +134,10 @@ export {
   type DiagnosticExportError,
   type DiagnosticExportBundleResult,
 } from './ipc-payloads'
+// browser:shields 遮蔽面上报通道契约（display-containers §6.7：payload 形状 /
+// ShieldFace 单项——preload ElectronAPI 签名、renderer ipc 封装与聚合上报、
+// main display-gate 校验三方共用同一形态声明，防漂移）。
+export type { ShieldRect, ShieldFace, ShieldsFacesPayload } from './ipc-payloads'
 // 崩溃台账事件 Schema SSOT（docs/architecture/crash-forensics-and-watchdog.md §3.3 D1，
 // 实施计划 u1a：layer/event/reason 枚举 + 字段集 + writer 接口——u1b runtime 与
 // u1c main 两 writer 共用，禁止复制定义；纯类型/常量无 node 依赖，barrel 安全）。

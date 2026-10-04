@@ -34,6 +34,17 @@ export interface ModalSurfaceRect {
   height: number
 }
 
+/**
+ * 表面几何读点的统一构造：值 = 组件实例（reka 单根内容组件等，取其 $el）或裸元素；
+ * 非元素 / 未挂载（关态）→ null（不带 rect 上报，main 侧保守按相交处理）。
+ */
+export function surfaceRectOf(value: unknown): ModalSurfaceRect | null {
+  const node = (value as { $el?: unknown } | null | undefined)?.$el ?? value
+  if (!(node instanceof HTMLElement)) return null
+  const r = node.getBoundingClientRect()
+  return { x: r.x, y: r.y, width: r.width, height: r.height }
+}
+
 /** 单个表面实例的注册描述 */
 export interface ModalSurfaceRegistration { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
   /** 登记表内的表面 id（manifest.ts；未登记 id 直接抛错） */

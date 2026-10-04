@@ -32,19 +32,13 @@ import { useToast } from '@/composables/useToast'
 import i18n from '@/i18n'
 import {
   hasInstance,
+  instanceLabel,
   isTerminalIdOfSession,
-  seqOfTerminalId,
   sessionIdOfTerminalId,
 } from '@/composables/features/terminal/terminal-instance-registry'
 
 /** i18n.global.t 的类型窄化 cast（先例：useConnection.ts / useSkillNoticeStream.ts 同款）。 */
 const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => string
-
-/** 实例显示名（「终端 <seq>」，与 useTerminal.instanceLabel 同 i18n 键）；非法编号回退原始编号。 */
-function instanceLabel(terminalId: string): string {
-  const seq = seqOfTerminalId(terminalId)
-  return seq > 0 ? t('panel.terminal.instanceName', { seq }) : terminalId
-}
 
 /**
  * drop toast 聚合窗口：队列满时入队方可能连发（AI 批量「在终端运行」），逐条 toast 会刷屏——

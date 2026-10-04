@@ -11,7 +11,7 @@ import {
   useForwardPropsEmits,
 } from 'reka-ui'
 import { cn } from '@/lib/utils'
-import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
+import { registerModalSurface, surfaceRectOf } from '@/composables/features/app/modal-surface-registry'
 
 /**
  * SelectContent —— 下拉浮层。样式与 PopoverContent 对齐（冷蓝暗色 elevated 浮层）。
@@ -37,20 +37,15 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
 const selectRootContext = injectSelectRootContext(null)
 
 /** 内容根元素读点（view 遮蔽几何上报用）：内层 reka SelectContent 单根渲染，组件实例
- *  $el 即浮层 DOM；未挂载（关态）/非元素时 null → 上报不带 rect（主进程保守按相交）。 */
+ *  $el 即浮层 DOM；未挂载（关态）/非元素时 surfaceRectOf 返回 null → 上报不带 rect
+ *  （主进程保守按相交）。 */
 const contentRef = ref<{ $el?: unknown } | null>(null)
-function contentRect(): { x: number; y: number; width: number; height: number } | null {
-  const el = contentRef.value?.$el
-  if (!(el instanceof HTMLElement)) return null
-  const r = el.getBoundingClientRect()
-  return { x: r.x, y: r.y, width: r.width, height: r.height }
-}
 
 const disposeSurfaceRegistration = registerModalSurface({
   surface: 'select-content',
   key: `select-content-${getCurrentInstance()?.uid ?? 0}`,
   isOpen: () => selectRootContext?.open.value ?? false,
-  rect: contentRect,
+  rect: () => surfaceRectOf(contentRef.value),
 })
 onBeforeUnmount(disposeSurfaceRegistration)
 </script>

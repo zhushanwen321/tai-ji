@@ -24,6 +24,7 @@ export {
   openShieldingSurfaces,
   isModalSurfaceOpen,
   resetModalSurfaceRegistry,
+  surfaceRectOf,
   type ModalSurfaceRegistration,
   type ModalSurfaceRect,
 } from './registry'
