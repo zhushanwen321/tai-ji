@@ -55,7 +55,7 @@
 ### 待裁决（产品口径）
 
 - **T10「重置后空态」产品口径**：实装为世代变更重连后重挂载腿自动新建本世代默认实例（空态窗口 ~50-150ms 不可稳定观测）。若产品须保留「重置后空态、由用户点「+」新建」，需产品侧抑制挂载腿自动新建（改动落 TerminalView/useTerminal，非验收资产可解）。
-- **I-A1「+」是否自动激活新实例（已裁决 2026-10-04）**：产品裁决 = **点「+」自动切换 active 并聚焦新实例输入区**（点「+」是显式用户意图，与「首挂载不夺焦」不冲突）；`terminal.list` 对账路径仍不抢 active。已落实现：`TerminalView.onCreate` 在 ack 建档拿到编号后显式 `selectInstance` + `focus`（`createWithToast` 返回编号），`registerInstance` 仍仅在 active 为空时落位；设计 §3.1/§3.3/§4 T1 已同步回写。断言：单测 TV-11/TV-15 + RC-5/REG-3（对账不抢 active 防回归）+ e2e T1/T8/T9（新建后直接可写、焦点在新实例）。
+- **I-A1「+」是否自动激活新实例（已裁决 2026-10-04）**：产品裁决 = **点「+」自动切换 active 并聚焦新实例输入区**（点「+」是显式用户意图，与「首挂载不夺焦」不冲突）；`terminal.list` 对账路径仍不抢 active。已落实现：`TerminalView.onCreate` 在 ack 建档拿到编号后显式 `selectInstance` + `focus`（`createWithToast` 返回编号），`registerInstance` 仍仅在 active 为空时落位；设计 §3.1/§3.3/§4 T1 已同步回写。断言：单测 TV-11/TV-15 + RC-5/REG-3/REG-4（对账不抢 active、active 回空后重新落位防回归）+ e2e T1/T8/T9（新建后直接可写、焦点在新实例）。
 - **I-A5 O1-O2 redraw 观察**：一次「删除已显示终端的会话→新建会话→重开」观察到旧会话命令文本叠在新会话提示符行；受控复现（不删除前会话）未复现，超 A5 单实例范围，登记待裁决。
 - **世代判据是否需显式透出 token 拉取失败（F1-56 分支②）**：F1-56 取分支①（文档对齐实装——世代判据不可表达拉取失败）后，备选分支②「`use-connection` 显式透出 token 拉取失败并保守重置终端域」留待裁决。现文档口径 = 拉取失败不可表达（`getCurrentToken()` 同步只读、无失败态；token 拉取失败时 use-connection 回落 `connectWs(url, undefined)`，ws-client 保留旧 token，连接沿读旧值判「未变、不重置」，该场景由 auth 失败/重连链覆盖），与设计 §0.5 P6 段一致。若采纳分支②：实施面 = `use-connection` 拉取失败态透出 + `getCurrentToken` 语义扩展 + 重置触发面复核（防把「拉取失败」误当世代变更清空有效历史）；触发条件 = 真机出现「世代变更未被 token 判据捕获」症状。
 
