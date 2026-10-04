@@ -8,6 +8,9 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { expect, vi } from 'vitest'
+
+import { SNAPSHOT_TMP_PREFIX } from '../recovery.ts'
 
 export const isBun = typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined'
 
@@ -241,4 +244,40 @@ export function defaultTranscriptSeeds(): {
 /** 断言辅助：路径存在性。 */
 export function expectFileExists(p: string, expected: boolean): boolean {
   return existsSync(p) === expected
+}
+
+/**
+ * 快照目录名集合（tmpdir 全局共享命名空间下的 SNAPSHOT_TMP_PREFIX 现量）。
+ * readdir 失败必须上抛、不得静默返空——静默空集会把「零残留」差分断言退化为恒真（假绿），
+ * 测试必须显式红而非静默绿。
+ */
+export function snapshotDirNameSet(): Set<string> {
+  return new Set(readdirSync(tmpdir()).filter((n) => n.startsWith(SNAPSHOT_TMP_PREFIX)))
+}
+
+/**
+ * 「本路径零新增快照残留」断言（并发噪声免疫形态，替代旧的 countSnapshotDirs()
+ * 计数相等 / ≤ 差分）。
+ *
+ * SNAPSHOT_TMP_PREFIX 住全局共享 tmpdir，全仓套件下有两路合法并发变更者——
+ * ① 同包 error-contract 假驱动 L3 族（并行 worker：驱动 mock 只接管 open/probe，
+ * openViaSnapshot 的 mkdtemp/清理是真实 fs 动作）；② runtime import-source-zcode
+ * dispose 契约用例（独立 vitest 进程，同前缀真建目录）。它们在任意测试「基线→终态」
+ * 采样窗口内的创建/清理都会打破计数相等（≤ 形态挡得住清理噪声、挡不住创建噪声）
+ * ——与被测行为无关的偶发红（2026-09 Gate A 两轮实挂 + 负载复现「规模门」用例 +1：
+ * 该用例自身零建目录，+1 只能来自外部变更者，归因定谳）。
+ *
+ * 本断言只锁「不出现基线之外的新名字」＝被测路径不留快照残留：外部清理噪声不再能
+ * 掩盖真实泄漏（比计数差分更强，不是放宽）；vi.waitFor 吸收两端瞬态——①删除后
+ * readdir 可见性滞后 ②外部目录的短存续窗口（等条件成立，非固定时长，无 sleep）。
+ * 默认 10s 上界 < 包级 30s 测试超时。
+ */
+export async function expectNoNewSnapshotDirs(before: ReadonlySet<string>, timeoutMs = 10_000): Promise<void> {
+  await vi.waitFor(
+    () => {
+      const fresh = [...snapshotDirNameSet()].filter((n) => !before.has(n))
+      expect(fresh).toEqual([])
+    },
+    { timeout: timeoutMs, interval: 100 },
+  )
 }

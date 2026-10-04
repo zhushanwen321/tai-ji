@@ -9,6 +9,8 @@
  *
  * 4 facet per-session（D-019 rehydrate）：tree / expandedPaths / nodeStates / gitOverlay 都按 sessionId
  * 分桶，切回 session 时展开态恢复（graceful 跳过已删路径）。
+ * [display-containers W3 §7.1] 展示链两个全局点一并 per-session 化：selectedPaths（选中态，
+ * 消除跨会话串线）与 detailTabs（detail 多文件 tab 分区，切回恢复文件详情）——见下方各字段注释。
  *
  * [W15/D-7.1] dirChangeCounts 是 gitOverlay 的预聚合派生（sid → dirPath → count，随 setGitOverlay
  * 一次构建）——非独立权威源，getDirChangeCount 行级读取 O(1)。
@@ -23,10 +25,11 @@
  *
  * stores 间禁止互相 import（与 chat.ts/sidebar.ts 一致）。
  */
-import { ref, computed, type Ref, type ComputedRef } from 'vue'
+import { ref, reactive, type Ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { FileNode, GitFileStatus } from '@taiji/shared'
 import { findNodeByPath, nodeMatchesFilter } from '@/composables/logic/file-tree-utils'
+import { detectFileKind, type FileKind } from '@/composables/logic/file-type'
 
 /** 节点加载态（②§5 状态机：5 态） */
 type LoadStatus = 'unloaded' | 'loading' | 'loaded' | 'error' | 'invalidated'
@@ -36,7 +39,7 @@ type LoadStatus = 'unloaded' | 'loading' | 'loaded' | 'error' | 'invalidated'
  * - status：5 态加载状态机
  * - reason：仅 error 态非空，来自 WS error envelope 的 code（routeInbound 透传到 Error.code）
  */
-export interface NodeState {
+export interface NodeState { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
   status: LoadStatus
   /** error code（如 'out_of_cwd' / 'permission_denied' / 'timeout'），仅 status='error' 时有意义 */
   reason?: string
@@ -49,8 +52,79 @@ type SessionPathMap<T> = Map<string, PathMap<T>>
 /** Map<sessionId, T> 的 per-session 单值分桶（tree 用：每 session 一个 FileNode[]） */
 type SessionMap<T> = Map<string, T>
 
+// ── detail 多文件 tab 状态（display-containers W3 §6.3 实例层：单值→map，keep-alive 多实例）──
+
+/** 预览加载态 */
+export type DetailStatus = 'idle' | 'loading' | 'content' | 'error'
+
+/** 预览视图模式（diff=显示 git patch，preview=显示文件原始内容） */
+export type DetailViewMode = 'diff' | 'preview'
+
+/**
+ * detail 单文件 tab 实例状态（keep-alive 多实例的「实例」本体）。
+ *
+ * [display-containers §6.3/§7.1 W3] 旧 useDetailPane 是单值 state（全局单实例）：点新文件即
+ * 清空重载，切走再切回不恢复、跨 session 串线。终态改为 per-session Map<path, 实例>：
+ * 每个打开的文件是一条独立实例记录，切 tab 不丢滚动位置（scrollTop）与面板内模式态
+ * （viewMode diff/preview），已开实例再次命中仅激活、不重载不新增（§6.3 注入语义）。
+ */
+export interface DetailTabState { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+  /** 文件路径（tab 实例 key；tab 条显示 basename） */
+  path: string
+  /** 加载态：'idle' = 已注入待加载（DetailPane 挂载后由 useDetailPane 编排拉起） */
+  status: DetailStatus
+  /** 文件内容（preview 模式）或 diff patch（diff 模式） */
+  content: string
+  /** 是否截断（>1MB，file.read 返回） */
+  truncated: boolean
+  /** 是否二进制文件（git.diff 返回 binary=true） */
+  binary: boolean
+  /** 错误信息（status='error' 时） */
+  error: string
+  /** 当前视图模式（per-tab 保持，切 tab 回来不丢） */
+  viewMode: DetailViewMode
+  /** 该文件是否有 git 改动（决定默认 viewMode：改动→diff，未改动→preview） */
+  hasGitChange: boolean
+  /** 文件渲染类别（preview 模式渲染器选择依据；diff 模式统一 DiffView） */
+  kind: FileKind
+  /**
+   * 强制 diff 注入（变更集卡 / 消息链接入口）：加载恒走 diff 模式，绕过 gitOverlay
+   * 误判（overlay 未刷新时变更文件会被误判 preview）。已开实例再次命中仅激活不改模式。
+   */
+  forceDiff: boolean
+  /** keep-alive 滚动锚点：滚动即存、切 tab 恢复（S4「切 tab 不丢滚动位置」） */
+  scrollTop: number
+}
+
+/** per-session detail 展示分区（打开的 tab 列表（开序）+ 当前激活） */
+export interface DetailTabsPartition { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+  tabs: DetailTabState[]
+  activePath: string | null
+}
+
+/** 空 tab 列表常量（只读面缺分区时返回，避免每次新建数组） */
+const EMPTY_DETAIL_TABS: DetailTabState[] = []
+
+/** 新 tab 实例（openDetailTab 创建用）：viewMode 初值按 forceDiff，加载时再按 gitOverlay 终判 */
+function createDetailTab(path: string, forceDiff: boolean): DetailTabState {
+  // reactive 容器契约（ADR-0049 W2 教训）：plain object 的 mutate 不触发下游 computed 重算
+  return reactive({
+    path,
+    status: 'idle' as DetailStatus,
+    content: '',
+    truncated: false,
+    binary: false,
+    error: '',
+    viewMode: (forceDiff ? 'diff' : 'preview') as DetailViewMode,
+    hasGitChange: false,
+    kind: detectFileKind(path),
+    forceDiff,
+    scrollTop: 0,
+  })
+}
+
 /** [W2] 文件行数结构：tracked 改动 {add/del}，untracked 降级 {size}，无数据 null */
-interface LineStats {
+interface LineStats { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
   add?: number
   del?: number
   size?: number
@@ -66,7 +140,7 @@ interface LineStats {
  * 旧递归组件对「已展开目录」按 nodeStates 渲染 loading/error/empty 三类子区占位行，
  * 扁平化后必须显式建模，否则展开在途/空目录的 UI 反馈丢失（行为回归）。
  */
-export interface VisibleRow {
+export interface VisibleRow { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
   /** 节点相对路径（SSOT key；hint 行 = 所属目录 path） */
   path: string
   /** 显示名（hint 行为空串） */
@@ -238,7 +312,7 @@ export function projectVisibleRows(
 }
 
 export const useFileTreeStore = defineStore('fileTree', () => {
-  // ── State（4 facet per-session + showIgnored + selectedPath）──
+  // ── State（4 facet per-session + showIgnored + 展示链分区（selectedPaths/detailTabs））──
 
   /** 文件树缓存：sessionId → 顶层 FileNode[]（dir 的 children 随展开 merge 进去） */
   const tree: Ref<SessionMap<FileNode[]>> = ref(new Map())
@@ -256,8 +330,18 @@ export const useFileTreeStore = defineStore('fileTree', () => {
   const dirChangeCounts: Ref<Map<string, Map<string, number>>> = ref(new Map())
   /** 显示忽略项开关（D-020，默认 false） */
   const showIgnored = ref(false)
-  /** 当前选中文件路径（全局，非 per-session——单选焦点） */
-  const selectedPath = ref<string | null>(null)
+  /**
+   * 当前选中文件路径（per-session 分区，W3 display-containers §7.1「selectedPath 串线终局解」）。
+   * [HISTORICAL] 旧值是全局单值（单选焦点）：A 会话点文件会被 B 会话的 DetailPane 读到（跨会话
+   * 串线），且切 session 即丢。现按 sessionId 分桶，各会话各自的选择互不干扰、切回恢复。
+   */
+  const selectedPaths: Ref<Map<string, string>> = ref(new Map())
+  /**
+   * detail 多文件 tab 分区（W3 §6.3 实例层）：sessionId → { tabs（开序）, activePath }。
+   * 与 tree 等 facet 同款 per-session 分桶；session 删除经 clearSession 精确释放（防大 diff
+   * 内容实例泄漏，§11-9 内存锚点）。
+   */
+  const detailTabs: Ref<Map<string, DetailTabsPartition>> = ref(new Map())
   /** 过滤关键词（#4 文件名过滤） */
   const filterText = ref('')
 
@@ -336,16 +420,50 @@ export const useFileTreeStore = defineStore('fileTree', () => {
     return dirChangeCounts.value.get(sessionId)?.get(dirPath) ?? 0
   }
 
-  /** 当前选中文件节点（computed，跨 tree 查找——selectedPath 全局，tree per-session） */
-  const currentFile: ComputedRef<FileNode | null> = computed(() => {
-    if (!selectedPath.value) return null
-    // 在所有 session 的 tree 中查找选中路径对应的节点（扁平搜索，selectedPath 全局焦点）
-    for (const nodes of tree.value.values()) {
-      const found = findNodeByPath(nodes, selectedPath.value)
-      if (found) return found
+  /** 当前选中文件节点（per-session 查找：selectedPaths 按 session 分桶，tree 同步分桶） */
+  function getCurrentFile(sessionId: string): FileNode | null {
+    const path = selectedPaths.value.get(sessionId)
+    if (!path) return null
+    const nodes = tree.value.get(sessionId)
+    return nodes ? findNodeByPath(nodes, path) : null
+  }
+
+  /** 取 session 的选中文件路径（无则 null） */
+  function getSelectedPath(sessionId: string): string | null {
+    return selectedPaths.value.get(sessionId) ?? null
+  }
+
+  // ── detail 多文件 tab（W3 §6.3 注入语义：未开新增并激活 / 已开仅激活 / 不设上限）──
+
+  /** 取 session 的 detail 分区（无则 undefined——只读面不隐式建分区） */
+  function getDetailPartition(sessionId: string): DetailTabsPartition | undefined {
+    return detailTabs.value.get(sessionId)
+  }
+
+  /** 取/建 session 的 detail 分区（写入面用；reactive 容器，mutate 触发下游） */
+  function detailPartition(sessionId: string): DetailTabsPartition {
+    let partition = detailTabs.value.get(sessionId)
+    if (!partition) {
+      partition = reactive({ tabs: [], activePath: null })
+      detailTabs.value.set(sessionId, partition)
     }
-    return null
-  })
+    return partition
+  }
+
+  /** 取 session 打开的 tab 列表（开序；无则空数组常量） */
+  function getDetailTabs(sessionId: string): DetailTabState[] {
+    return getDetailPartition(sessionId)?.tabs ?? EMPTY_DETAIL_TABS
+  }
+
+  /** 取 session 当前激活 tab 的 path（无则 null） */
+  function getDetailActivePath(sessionId: string): string | null {
+    return getDetailPartition(sessionId)?.activePath ?? null
+  }
+
+  /** 按 path 取 tab 实例（无则 undefined） */
+  function getDetailTab(sessionId: string, path: string): DetailTabState | undefined {
+    return getDetailPartition(sessionId)?.tabs.find((t) => t.path === path)
+  }
 
   // ── Actions ──
 
@@ -425,9 +543,91 @@ export const useFileTreeStore = defineStore('fileTree', () => {
     expandedPaths.value = new Map(expandedPaths.value)
   }
 
-  /** 设置选中文件路径 */
-  function selectFile(path: string | null): void {
-    selectedPath.value = path
+  /**
+   * 设置选中文件路径（per-session）+ 注入 detail tab（W3 注入语义单一入口）。
+   *
+   * 「点文件 → 展示文件详情」的唯一写入口：选中态（树行高亮）与 detail 展示态（tab 实例）
+   * 同点落位，注入同步发生——旧链路依赖 useDetailPane 的 watch(selectedPath)（组件挂载才存在），
+   * 从 git tab / 消息链接等 DetailPane 未挂载的入口点文件会丢注入；现由本 action 同步写 tab 分区，
+   * DetailPane 只是分区的视图（挂载后拉起待加载实例）。
+   *
+   * 注入语义（§6.3）：命中未开文件 = 新增 tab 并激活；命中已开文件 = 仅激活（不重载不新增）；
+   * 不设打开上限。
+   *
+   * @param sessionId 归属会话（点击上下文的会话；null = 无会话（landing 等），no-op）
+   * @param path 选中文件路径（null = 清除该会话选中态，不动 tab）
+   */
+  function selectFile(sessionId: string | null, path: string | null): void {
+    if (!sessionId) return
+    if (path === null) {
+      selectedPaths.value.delete(sessionId)
+      selectedPaths.value = new Map(selectedPaths.value)
+      return
+    }
+    selectedPaths.value.set(sessionId, path)
+    selectedPaths.value = new Map(selectedPaths.value)
+    openDetailTab(sessionId, path)
+  }
+
+  /**
+   * 注入一个 detail tab（§6.3 注入语义）。
+   *
+   * @param opts.forceDiff 强制 diff 模式（变更集卡/消息链接入口，绕过 gitOverlay 误判）。
+   *   已开未加载（status='idle'）的实例升级为 diff；在途加载（'loading'/'error'）的模式修正
+   *   由 useDetailPane.ensureDiffMode 收敛（事件序无关，作废重拉）；已展示内容的实例仅激活
+   *   （用户可见的已开 tab 不被改模式，§6.3）。
+   */
+  function openDetailTab(sessionId: string, path: string, opts?: { forceDiff?: boolean }): void {
+    const partition = detailPartition(sessionId)
+    const existing = partition.tabs.find((t) => t.path === path)
+    if (existing) {
+      partition.activePath = path
+      if (opts?.forceDiff && existing.status === 'idle') {
+        existing.forceDiff = true
+        existing.viewMode = 'diff'
+      }
+      return
+    }
+    // 不设打开上限（同编辑器 tab 惯例）——内存锚点见 display-containers §11-9
+    partition.tabs = [...partition.tabs, createDetailTab(path, opts?.forceDiff ?? false)]
+    partition.activePath = path
+  }
+
+  /** 激活已开 tab（不存在则 no-op；不重载——keep-alive 实例状态原样保持） */
+  function activateDetailTab(sessionId: string, path: string): void {
+    const partition = getDetailPartition(sessionId)
+    if (!partition || !partition.tabs.some((t) => t.path === path)) return
+    partition.activePath = path
+  }
+
+  /**
+   * 关闭 tab：激活者关闭时激活右邻（无则左邻，全关则空态）；关闭选中文件同步清选中态
+   * （防树行高亮悬空 + 防 DetailPane 重挂载时把已关 tab 复活）。
+   */
+  function closeDetailTab(sessionId: string, path: string): void {
+    const partition = getDetailPartition(sessionId)
+    if (!partition) return
+    const idx = partition.tabs.findIndex((t) => t.path === path)
+    if (idx < 0) return
+    partition.tabs = partition.tabs.filter((t) => t.path !== path)
+    if (partition.activePath === path) {
+      const next = partition.tabs[idx] ?? partition.tabs[idx - 1] ?? null
+      partition.activePath = next ? next.path : null
+    }
+    if (getSelectedPath(sessionId) === path) {
+      selectedPaths.value.delete(sessionId)
+      selectedPaths.value = new Map(selectedPaths.value)
+    }
+  }
+
+  /**
+   * 更新 tab 实例字段（加载回写/模式切换/滚动锚点）。分区或 tab 不存在则 no-op——
+   * 迟到的 RPC 回写不得复活已删 session 的分区（同 useSessionScopedState.updateFor 的 D-B2-1 口径）。
+   */
+  function updateDetailTab(sessionId: string, path: string, patch: Partial<DetailTabState>): void {
+    const tab = getDetailTab(sessionId, path)
+    if (!tab) return
+    Object.assign(tab, patch)
   }
 
   /** 设置 git overlay（per-session，git.status 变化时只更新 overlay 不触发树重建） */
@@ -471,18 +671,22 @@ export const useFileTreeStore = defineStore('fileTree', () => {
     nodeStates.value = new Map(nodeStates.value)
   }
 
-  /** 清理 session 的所有状态（session 删除时） */
+  /** 清理 session 的所有状态（session 删除时；detail tab 实例含大 diff 内容，随分区精确释放） */
   function clearSession(sessionId: string): void {
     tree.value.delete(sessionId)
     expandedPaths.value.delete(sessionId)
     nodeStates.value.delete(sessionId)
     gitOverlay.value.delete(sessionId)
     dirChangeCounts.value.delete(sessionId)
+    selectedPaths.value.delete(sessionId)
+    detailTabs.value.delete(sessionId)
     tree.value = new Map(tree.value)
     expandedPaths.value = new Map(expandedPaths.value)
     nodeStates.value = new Map(nodeStates.value)
     gitOverlay.value = new Map(gitOverlay.value)
     dirChangeCounts.value = new Map(dirChangeCounts.value)
+    selectedPaths.value = new Map(selectedPaths.value)
+    detailTabs.value = new Map(detailTabs.value)
   }
 
   return {
@@ -494,10 +698,15 @@ export const useFileTreeStore = defineStore('fileTree', () => {
     // [W28/D-7.2] dirChangeCounts 暴露（投影 computed 的依赖源；9 文档「投影函数 + dirChangeCounts 暴露」）
     dirChangeCounts,
     showIgnored,
-    selectedPath,
+    selectedPaths,
+    detailTabs,
     filterText,
     // getters
-    currentFile,
+    getCurrentFile,
+    getSelectedPath,
+    getDetailTabs,
+    getDetailActivePath,
+    getDetailTab,
     getTree,
     getExpanded,
     getNodeState,
@@ -512,6 +721,10 @@ export const useFileTreeStore = defineStore('fileTree', () => {
     addExpanded,
     removeExpanded,
     selectFile,
+    openDetailTab,
+    activateDetailTab,
+    closeDetailTab,
+    updateDetailTab,
     setGitOverlay,
     setFilter,
     toggleShowIgnored,

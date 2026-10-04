@@ -29,7 +29,9 @@ import type { ChatStoreInstance } from '../store'
 import { isVirtualKey, isVirtualKeyOf, _resetLruForTest, _lruSizeForTest } from '../lru'
 // [AU1 D5] 查看态豁免真实链（同 core 包跨域测试引用；测试目录不受 AC10 收集）：
 // 分区键绑定 + panel 枚举绑定 + 选中写入，与生产 getViewedVids 组合同源。
-import { bindDrawerSessionId, bindViewedVidPanels, getViewedVids, drawerControl } from '../../drawer/control'
+// [display-containers §6.6①] 选中态迁出后经 selection/（setBtwView）+ coordination（openSubagent 族）驱动。
+import { bindDrawerSessionId } from '../../drawer/control'
+import { bindViewedVidPanels, getViewedVids, setBtwView } from '../../drawer/selection'
 import { openDrawerTab, setDrawerTab, _resetDrawerForTest } from '../../drawer/coordination'
 
 /** 构造最小 Message（内容参与 deep 断言，默认值不参与任何其他用例语义）。 */
@@ -254,7 +256,7 @@ describe('AU1 D5 查看态保护：查看中的 btw 线不落阈值驱逐（evic
     const sid = ref<string | null>('A')
     bindDrawerSessionId(sid)
     openDrawerTab('btw') // 写 A 分区 isOpen + activeTab='btw'
-    drawerControl.setBtwView(vid)
+    setBtwView(vid)
     bindViewedVidPanels(ref<Array<string | null>>(['A']))
   }
 
@@ -294,7 +296,7 @@ describe('AU1 D5 查看态保护：查看中的 btw 线不落阈值驱逐（evic
     try {
       seedNineCandidates(h)
       startViewing('btw:pi-view')
-      setDrawerTab('terminal') // 切走 btw tab → 三分量破 → viewed 清空
+      setDrawerTab('git') // 切走 btw tab → 三分量破 → viewed 清空
       expect(getViewedVids()).toEqual(new Set())
 
       h.store.evictIfNeeded() // 无查看保护 → 最旧的 btw 线照常被逐

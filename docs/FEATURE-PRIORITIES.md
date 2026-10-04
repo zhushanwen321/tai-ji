@@ -52,7 +52,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 中断/取消 | turn 取消链、取消后状态一致性 | 失控 agent 无法停止 = 持续烧 token 不可用 |
 | Markdown 渲染 | shiki 高亮、HTML 分通道净化（可信段摘出回填 + 用户 HTML DOMPurify 白名单）、相对资源通道（resourceBaseDir 双通道）、CSP 兼容、降级路径 | 对话内容呈现主体；纯文本降级已属不可读（曾 CSP 事故） |
 | 扩展装载框架 | builtin 21 包装载、分组检查（infrastructure 不可禁）、worker 隔离 | 所有进阶能力的装载底座，挂了 feature 扩展全灭 |
-| subagent/workflow 面板与派发 | composer 任务托盘的 subagent/workflow 列表与运行计数（含 built-in 第 4 件「子会话」观察入口——调度模式派发进度的主视图；含行内取消/中止——workflow 一次性生命周期 abort-only，pause/resume 已随扩展 D-2 移除）、workflow 可视化 overlay（2026-10-02：双入口改向全屏 overlay——左 DAG 蓝图 + 右多级 tab 实况面板，挂掉回落 drawer WorkflowTab 对冲）、drawer 详情 tab（回落载体）、通知链 | agent 生产力的核心形态（边界判例 #2，2026-09-12 升 P0）；2026-09-16 观察入口自侧栏 Agents/Flows tab 迁 composer 任务托盘（侧栏收敛三 tab，入口唯一化） |
+| subagent/workflow 面板与派发 | composer 任务托盘的 subagent/workflow 列表与运行计数（含 built-in 第 4 件「子会话」观察入口——调度模式派发进度的主视图；含行内取消/中止——workflow 一次性生命周期 abort-only，pause/resume 已随扩展 D-2 移除）、workflow 可视化 overlay（2026-10-02：双入口改向全屏 overlay——左 DAG 蓝图 + 右多级 tab 实况面板，挂掉回落 drawer WorkflowTab 对冲）、drawer 详情 tab（回落载体）、通知链 | agent 生产力的核心形态（边界判例 #2，2026-09-12 升 P0）；2026-09-16 观察入口自侧栏 Agents/Flows tab 迁 composer 任务托盘（侧栏收敛三 tab，入口唯一化）；展示承载层 = 展示容器体系（右抽屉 8 tab / 底抽屉 / 浮层统一壳 + 键盘栈序编排器，display-containers）——容器体系挂掉 = P0 面板内容不可见，属 P0 链路一环（不另立独立条目） |
 | 设置页 | provider/API key 管理、系统提示词编辑、**模式（预设）编辑 + 模式提示词卡**、主题 | provider 配置是首次使用必经路径，配不了连会话都起不了 |
 | 插件系统 | PluginService、trusted/sandbox 隔离、statusBar、交互点位（headerAction 顶栏按钮区 / modal 弹层 / action-bar 交互原语 + 条目镜像数据面） | harness 可扩展能力主体（testing 13）；交互点位是管理面类需求的规范底座，modal/徽标链路挂了 = 插件无法提供任何可交互入口 |
 | 统一提问表单 FormOverlay | agent 提问浮层（ask-user/scheduler/plan 三方统一）、Other 保留、pi 恢复 turn | agent↔用户交互闭环的唯一通道（边界判例 #3，2026-09-12 升 P0） |
@@ -78,7 +78,8 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | smart-context | 自动压缩、双模式摘要接管、分档提醒（手动 compact 兜底） |
 | structured-output / plan / todo 面板 | workflow 结构化输出、计划面板（审批闸口三决策：修订/执行/搁置 + 降级「重新提交审批」），todo 渲染、plan 执行方式选择（无 plan-exec 技能时直通不弹表单；goal 桥派发 / plan-exec skill / goal） |
 | i18n | zh/en 切换、消息键完整（边界判例 #1） |
-| 快捷键与 side drawer | 全局快捷键、composer pi 对齐快捷键（shift+tab 档位循环 / ctrl+p、ctrl+shift+p 模型双向循环 / ctrl+x 复制最后回复）、文件预览/diff/git tab（testing 05） |
+| 快捷键与 side drawer | 全局快捷键、composer pi 对齐快捷键（shift+tab 档位循环 / ctrl+p、ctrl+shift+p 模型双向循环 / ctrl+x 复制最后回复）、文件预览/diff/git tab（testing 05）；终端展示容器（右抽屉迁底抽屉）：底抽屉全宽开关（`` ⌃` `` / StatusBar 按钮）双入口，终端**多实例**（关键用例组：多实例并行——实例切换条新建/切换/关闭/空态与实例间输出隔离；实例级生命周期——主动关闭·自然退出·会话删除级联·runtime shutdown 级联；刷新与世代恢复——⌘R 对账重建·runtime 重启世代重置·同世代闪断不重置） |
+| 浮层浏览器（应用内网页预览） | 对话流 localhost 链接点击进浮层（OverlayShell + BrowserPane）、地址栏/复制链接/在系统浏览器打开、错误占位与重试、切 session 浮层随行。**挂掉后果 = dev server 链接退回系统浏览器打开，预览能力基本可用但上下文切换中断**（基本可用稍可忍受） |
 | session 导入 | 多源统一入口：来源选择（pi/zcode）、候选列表、导入；zcode 源真实宿主库只读转换（session-import-sources 指南；SessionImportSource SPI） |
 | 后台命令观察面（composer 任务托盘 bash 面板） | background task 展示（testing 02） |
 | 对话流时间戳 | 行尾耗时·时刻槽、TurnMeta 首末区间、reload endTime 回填（chat-flow-timestamp；TurnMeta/Block/apply-entry-convert 单测 + live≡reload 等价性） |

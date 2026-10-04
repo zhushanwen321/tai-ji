@@ -1,13 +1,17 @@
 /**
- * useBrowserRectSync —— BrowserPane viewport rect 同步（Wave 3）。
+ * useBrowserRectSync —— BrowserPane viewport rect 同步（Wave 3；display-containers §7.4
+ * 「rect 同步目标改浮层视口」适配后观测浮层视口）。
  *
  * 职责：监听 viewport 元素尺寸/位置变化 → 节流推 browserSetRect 到主进程。
  * 抽出 composable 让 BrowserPane 聚焦布局，rect 同步逻辑独立可测。
  *
- * 触发源：
- * - ResizeObserver：viewport 尺寸变化（drawer 开合 / 模式切换 / 元素 reflow）
+ * 触发源（观测目标 = 浮层视口内的 BrowserPane viewport 元素）：
+ * - ResizeObserver：viewport 尺寸/位置变化（浮层开合挂载 / 元素 reflow）
  * - window resize：拖窗口（元素尺寸可能不变但位置变，RO 不一定捕获）
- * - 'taiji:splitter-layout' CustomEvent：Splitter 拖动（RO 在 reka-ui 高频拖动下触发不可靠，补充路径）
+ *
+ * [HISTORICAL] 抽屉时代的 'taiji:splitter-layout' 补充路径已随挂载点迁浮层删除：
+ * 浮层面板是 fixed 定位（88%×92% 居中），抽屉横向/纵向变化不移动浮层视口——纵轴
+ * 派发无消费方（§7.3 明令不造无人读的事件），横向派发与 view rect 亦无关。
  *
  * 节流策略：rAF 合并同帧 + 33ms 时间下限（~30fps）。
  * - 拖窗口 resize 每秒可触发 60+ 次，不加节流会让同步 IPC 阻塞主进程单线程
@@ -99,7 +103,7 @@ export function useBrowserRectSync(
     })
   }
 
-  // 监听 viewport 尺寸变化（drawer 开合 / 模式切换）
+  // 监听 viewport 尺寸变化（浮层视口布局变化）
   watch(
     viewportEl,
     (el, _prev, onCleanup) => {
@@ -116,15 +120,11 @@ export function useBrowserRectSync(
 
   // window resize（拖窗口，高频）：RO 不一定捕获（元素尺寸可能不变但位置变）
   window.addEventListener('resize', scheduleRectPush)
-  // Splitter @layout → PanelContainer 派发的 CustomEvent（drawer 宽度拖动调整）。
-  // RO 在 SplitterPanel overflow:hidden + reka-ui 高频拖动下触发不可靠，此为补充路径。
-  window.addEventListener('taiji:splitter-layout', scheduleRectPush)
 
   function dispose(): void {
     resizeObserver?.disconnect()
     resizeObserver = null
     window.removeEventListener('resize', scheduleRectPush)
-    window.removeEventListener('taiji:splitter-layout', scheduleRectPush)
     if (rectRafId !== null) {
       cancelAnimationFrame(rectRafId)
       rectRafId = null

@@ -12,6 +12,7 @@
   <Transition name="crash-bar">
     <div
       v-if="visible"
+      ref="barRef"
       data-testid="crash-recovered-bar"
       class="fixed left-1/2 top-3 z-[9999] flex max-w-[min(520px,calc(100vw-6rem))] -translate-x-1/2 items-center gap-2 rounded-[var(--radius)] border border-border bg-surface py-2 pl-3 pr-2 shadow-lg"
     >
@@ -33,14 +34,32 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CheckCircle2, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
 import { useCrashRecoveryNotice } from '@/composables/useCrashRecoveryNotice'
 
 const { t } = useI18n()
 const { visible, reason, dismiss } = useCrashRecoveryNotice()
+
+// 模态表面聚合注册（§6.7 横幅族）：非阻塞横幅不入让位族，只入 view 遮蔽族（shieldsView
+// intersecting——与 view 矩形几何相交才隐藏）。开合态绑 visible 状态本体；rect 读横幅根
+// 元素实测（文案随 reason 变化的几何在重渲染后由上报链重测）。旗标组由登记表按 id 读取。
+const barRef = ref<HTMLElement | null>(null)
+function barRect(): { x: number; y: number; width: number; height: number } | null {
+  if (!barRef.value) return null
+  const r = barRef.value.getBoundingClientRect()
+  return { x: r.x, y: r.y, width: r.width, height: r.height }
+}
+const disposeSurfaceRegistration = registerModalSurface({
+  surface: 'crash-recovered-bar',
+  key: 'crash-recovered-bar',
+  isOpen: () => visible.value,
+  rect: barRect,
+})
+onBeforeUnmount(disposeSurfaceRegistration)
 
 // reason → 用户可读文案：设计 T2 只定义了 oom 措辞（「内存不足」），其余 render-process-gone
 // reason 值（killed/crashed/…）统一 fallback「未知原因」——不向用户暴露英文技术值

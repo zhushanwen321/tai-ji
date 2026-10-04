@@ -377,6 +377,16 @@ pi 边界可靠性设计的测试范围落地（2026-08-27 事故对 → 四支�
 
 `[HISTORICAL]` 案例锚（pgrep 全机扫描跨包互踩）：base-tool-enhance 包原 kill-tree.test.ts 曾用 `pgrep -f "sleep 30"` 全机扫描验证子进程无残留——扫描范围覆盖全机进程，与并行运行的其他测试/无关进程互踩；载体文件已随 ext-simplify-13（进程原语下沉 extension-protocol）删除，现行承接方是 extension-protocol 包的 background-task-process.test.ts（限定 pid 的探针）。规则不变：验证「自己 spawn 的进程已死」应限定 pid/进程组（`pgrep -P <pid>`）或读自有句柄，禁止全机模式扫描做断言。
 
+### vitest 拆卸竞态假红与供应商补丁（2026-10-03）
+
+**现象**：全仓 `pnpm test` 间歇「全绿 + exit 1」——每个包 Test Files / Tests 全 passed，退出码非 0，归属文件每轮漂移（排查时易误判某用例坏了）。**根因**：上游 vitest#11153，池 worker 拆卸机器（birpc `$rejectPendingCalls` / pool-runner rpc `$close`）抛出的迟到 rejection 经 `VITEST_TEST_PATH` 归属到测试文件、落入 `state.errors` 致 `exitCode = 1`，**与用户代码无关**。
+
+**处置**：供应商补丁 `patches/vitest.patch`（登记 `pnpm-workspace.yaml` 的 `patchedDependencies`；pnpm 10 忽略 package.json 的 `pnpm` 字段）。防卫门双条件：**全绿** 且 **每条错误逐条命中拆卸竞态签名**（`EnvironmentTeardownError` / `[vitest-worker]:` 前缀 / `[vitest-pool-runner]: Pending methods while closing rpc`）；worker 崩溃族（`Worker exited unexpectedly` / `emitted error`）、`EPIPE`、`Unhandled Error` 类型**刻意不吞**（吞了会掩盖丢文件的假绿）。命中打 suppressed 行、未命中打 `ARCHIVE THIS LINE as race evidence` 行——两条日志通道自证。**退役条件**：上游修复后移除补丁 + 20 轮全仓探针复验零假红；补丁用裸键登记，升级打不上即 install 报错（响亮失败优于静默跳过）。完整登记见 [docs/todo/vitest-teardown-race-vendor-patch.md](todo/vitest-teardown-race-vendor-patch.md)。
+
+**负载型超时（同批实测，误判陷阱）**：全仓 46 包并发下，长窗等待型用例（如 subagent-core `remote-engine.test.ts` 用 15s 超时度量收敛窗）可能因 CPU 饱和超时——2026-10-03 第 08 轮即此形态（单独复跑同文件 31/31 通过 / 7.7s）。归因法：**先单独复跑可疑文件**，再判是否回归；此时补丁 `suppressed=0`（真失败没被吞）也是「这不是假红」的正向信号。
+
+**测试卫生同批修复**：`AsyncErrorFallback.test.ts` 的 `void retry.loader()` 泄漏 unhandled rejection（稳定制造 exit 1、淹没补丁验证）→ 改显式 `.catch()`。规则："故意不 await 的 promise" 必须显式接住 rejection——`void` 不阻止 unhandledRejection。
+
 ## 测试耗时基线与压缩裁决（2026-09-15 全仓 sweep 收尾）
 
 > 记录在案来源：注入缝修复（commit `8a9a0b4a3`，消除 ~87s 纯 sleep）后的三项跟进实测。先立判据再谈优化，防止按求和值误判「慢」、按错误机理选错方案。

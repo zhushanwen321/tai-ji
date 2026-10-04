@@ -58,7 +58,9 @@ export default {
     sendEmptyHint: 'Type something before sending',
     sendHint: 'Type and send',
     steerHint: 'Add to current task with ⏎ · Queue for next turn with Alt+⏎ · Shift+⏎ newline…',
-    inputHint: 'Describe what you want AI to do… (/ command · $ file · # session · {\'@\'} subagent · ! bash · Shift+⏎ newline · ↑/↓ history · Shift+Tab thinking · Ctrl+P/Ctrl+Shift+P model)',
+    // Cardification 2026-10-04: shortcut hints removed from placeholder — absolutely-positioned
+    // pseudo-element overflows the min-height box when wrapped narrow; triggers stay discoverable via popovers
+    inputHint: 'Describe what you want AI to do…',
     addContent: 'Add content (attachment / command)',
     attach: 'Attachment',
     image: 'Image',
@@ -299,8 +301,6 @@ export default {
   },
   sideDrawer: {
     title: 'Side drawer',
-    pin: 'Pin',
-    unpin: 'Unpin',
     close: 'Close',
     noTerminal: 'No terminal output',
     terminalHint: 'Real-time output appears after extension pushes terminal widget',
@@ -369,6 +369,9 @@ export default {
     bashTaskWriteFailed: 'Operation did not take effect (failed to write data); please retry',
   },
   browserPane: {
+    overlayTitle: 'Browser',
+    overlayClose: 'Close',
+    createFailed: 'Failed to open embedded browser',
     back: 'Back',
     forward: 'Forward',
     reload: 'Reload',
@@ -383,8 +386,6 @@ export default {
     guideHint: 'Links now open here, without leaving the app',
   },
   terminal: {
-    clear: 'Clear',
-    kill: 'Kill terminal process',
     sendToAI: 'Send to AI',
     writeRpcFailed: 'Failed to send terminal command: {error}',
     writeFailed: 'Terminal input may be lost: {message}',
@@ -392,6 +393,17 @@ export default {
     // RD-5#2: inline error bar for a failed PTY spawn (mirrors FileView error state)
     spawnFailed: 'Failed to start terminal: {error}',
     retry: 'Retry',
+    // dmg-r1-4: kill RPC channel-class failure (non unknown_terminal_id) — PTY still running, user-visible feedback
+    closeFailed: 'Failed to close terminal {message}; the instance is still running',
+    // Cardification 2026-10-04: toggle button moved to PanelHeader (old StatusBar slot retired)
+    toggle: 'Toggle terminal',
+    // terminal-multi-instance §3.1: instance switch bar (TerminalInstanceBar, single-row head)
+    instanceName: 'Terminal {seq}',
+    instanceCreate: 'New terminal',
+    instanceClose: 'Close terminal',
+    instanceCloseDisabled: 'Cannot close the last instance',
+    instanceEmpty: 'No terminal instances',
+    collapse: 'Collapse terminal area',
   },
   mermaid: {
     rendering: 'Rendering diagram…',

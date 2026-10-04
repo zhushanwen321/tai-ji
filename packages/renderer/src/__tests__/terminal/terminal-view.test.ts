@@ -1,15 +1,15 @@
 /**
- * TerminalView 组件级测试（Phase 3 V3.1）。
+ * TerminalView 组件级测试（多实例 u2）。
  *
  * mock 策略：
  * - vi.mock('@xterm/xterm' / addon-*) —— happy-dom 无 canvas，xterm.open() 会抛错，必须 mock
- * - vi.mock('@/composables/features/terminal/useTerminal') —— 隔离 PTY 逻辑（useTerminal 的 WS 订阅已在 use-terminal.test.ts 覆盖）
+ * - vi.mock('@/composables/features/terminal/useTerminal') —— 隔离实例域/PTY 逻辑
  * - vi.mock('@/stores/session') —— getSessionCwd 依赖
  *
  * 三视角（规则 5-8）：
- * - 观察者：DOM 渲染（terminal-view / terminal-xterm / toolbar / clear+kill 按钮存在）
- * - 使用者：交互（clear / kill 点击）
- * - 构建者：mount 后 spawn 被调
+ * - 观察者：DOM 渲染（terminal-view / terminal-xterm / toolbar / 实例切换条）
+ * - 使用者：交互（clear / kill / 切换实例 / 关闭实例）
+ * - 构建者：mount 后对账 + 自动新建（首挂载不夺焦）；切换实例后焦点落当前实例输入区
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/terminal/terminal-view.test.ts
  */
@@ -27,9 +27,9 @@ class MockResizeObserver {
 ;(globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver
 
 // ── mock xterm（happy-dom 无 canvas，Terminal.open() 会抛）────────────────
-// 每次 new Terminal() 返回新实例，避免多 mount/unmount 复用同一 mock 导致状态错乱
+const xtermInstances = vi.hoisted(() => [] as Array<Record<string, ReturnType<typeof vi.fn>>>)
 function createMockTerminal() {
-  return {
+  const instance = {
     onData: vi.fn(),
     onResize: vi.fn(),
     onSelectionChange: vi.fn(),
@@ -38,15 +38,18 @@ function createMockTerminal() {
     write: vi.fn(),
     clear: vi.fn(),
     dispose: vi.fn(),
+    focus: vi.fn(),
+    hasSelection: vi.fn(() => false),
     getSelection: vi.fn(() => ''),
     getSelectionPosition: vi.fn(() => ({ start: { x: 0, y: 0 }, end: { x: 5, y: 0 } })),
     unicode: { activeVersion: '6' },
   }
+  xtermInstances.push(instance)
+  return instance
 }
 vi.mock('@xterm/xterm', () => ({
   Terminal: function MockTerminal() { return createMockTerminal() },
 }))
-// addon 用普通函数（可 new 调用），vi.fn 箭头函数不能 new
 vi.mock('@xterm/addon-fit', () => ({
   FitAddon: function MockFitAddon() {
     return { fit: vi.fn(), proposeDimensions: () => ({ cols: 80, rows: 24 }) }
@@ -61,10 +64,9 @@ vi.mock('@xterm/addon-search', () => ({
 vi.mock('@xterm/addon-unicode11', () => ({
   Unicode11Addon: function MockUnicode11Addon() { return {} },
 }))
-// xterm CSS import 在 vitest 无需真实加载
 vi.mock('@xterm/xterm/css/xterm.css', () => ({}))
 
-// ── mock useTerminal（隔离 PTY 逻辑）──────────────────────────────────────
+// ── mock useTerminal（隔离实例域/PTY 逻辑）──────────────────────────────
 // TerminalView 用 terminal.current（ComputedRef）访问状态，模板自动 unwrap，需用真 ref。
 const mockState = {
   buffer: { chunks: [] as string[], version: 0 },
@@ -73,26 +75,34 @@ const mockState = {
   ptyAlive: false,
   cols: 80,
   rows: 24,
-  pendingWrites: [] as string[],
 }
 const currentRef = ref(mockState)
+const instancesRef = ref<Array<{ terminalId: string; seq: number; alive: boolean }>>([])
+const activeRef = ref<string | null>(null)
+// 类型契约：spawnTerminal 返回 Promise<string>（spawn-feedback 链 .catch）；
+// spawnTerminalAuto 同一替身：自动新建腿经互斥入口仍委托同一 spawn 面（dmg-r1-3）
+const spawnTerminalMock = vi.fn(async () => 'term:test-session:1')
 const useTerminalMock = {
   current: currentRef,
-  // 类型契约：UseTerminalReturn.spawnTerminal 返回 Promise（spawn-feedback 链 .catch），
-  // 裸 vi.fn() 返回 undefined 会抛 TypeError 且成为 Unhandled Rejection
-  spawnTerminal: vi.fn(async () => {}),
+  instances: instancesRef,
+  activeTerminalId: activeRef,
+  spawnTerminal: spawnTerminalMock,
+  spawnTerminalAuto: spawnTerminalMock,
+  selectInstance: vi.fn((terminalId: string) => {
+    activeRef.value = terminalId
+  }),
+  closeInstance: vi.fn(),
+  reconcileInstances: vi.fn(async () => ({ ok: true, count: 0 })),
   writeToTerminal: vi.fn(),
   resizeTerminal: vi.fn(),
   killTerminal: vi.fn(),
-  clearTerminal: vi.fn(),
   attachTerminal: vi.fn(),
-  enqueueWrite: vi.fn(),
+  partitionOf: vi.fn(() => mockState),
   registerFlushListener: vi.fn(() => () => {}),
 }
 vi.mock('@/composables/features/terminal/useTerminal', () => ({
   useTerminal: () => useTerminalMock,
-  // D-6.2：TerminalView 挂载回放调用 replayChunks（分批版 replayChunksBatched）——
-  // mock 返回 null（无可回放，本文件聚焦渲染/交互视角，回放内容由 raf-queue 测试覆盖）
+  // 回放纯函数：mock 返回 null（无可回放；回放内容由 raf-queue 测试覆盖）
   replayChunks: () => null,
   replayChunksBatched: () => null,
 }))
@@ -110,18 +120,23 @@ let wrapper: ReturnType<typeof mount> | null = null
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  // 重置 mock 状态（每例隔离）
   mockState.buffer = { chunks: [], version: 0 }
   mockState.outputQueue = []
   mockState.rafPending = false
   mockState.ptyAlive = false
   mockState.cols = 80
   mockState.rows = 24
-  mockState.pendingWrites = []
+  xtermInstances.length = 0
+  instancesRef.value = []
+  activeRef.value = null
   useTerminalMock.spawnTerminal.mockClear()
+  useTerminalMock.spawnTerminal.mockResolvedValue('term:test-session:1')
   useTerminalMock.attachTerminal.mockClear()
   useTerminalMock.killTerminal.mockClear()
-  useTerminalMock.writeToTerminal.mockClear()
+  useTerminalMock.selectInstance.mockClear()
+  useTerminalMock.closeInstance.mockClear()
+  useTerminalMock.reconcileInstances.mockClear()
+  useTerminalMock.reconcileInstances.mockResolvedValue({ ok: true, count: 0 })
   useTerminalMock.registerFlushListener.mockClear()
 })
 
@@ -131,99 +146,239 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-describe('TerminalView 渲染 gate（观察者视角，规则 8）', () => {
-  it('TV-1: mount 后 DOM 含 terminal-view + terminal-xterm + toolbar', async () => {
-    wrapper = mount(TerminalView, {
-      props: { sessionId: 'test-session' },
-      attachTo: document.body,
-    })
+describe('TerminalView 渲染 gate（观察者视角）', () => {
+  it('TV-1: mount 后 DOM 含 terminal-view + terminal-xterm + head 一行（实例切换条含收起按钮，无独立工具栏行）', async () => {
+    wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
     await flushPromises()
 
     expect(document.body.querySelector('[data-testid="terminal-view"]')).toBeTruthy()
     expect(document.body.querySelector('[data-testid="terminal-xterm"]')).toBeTruthy()
-    expect(document.body.querySelector('[data-testid="terminal-toolbar"]')).toBeTruthy()
+    expect(document.body.querySelector('[data-testid="terminal-instance-bar"]')).toBeTruthy()
+    // head 一行（三卡化 2026-10-04）：收起按钮在位、独立工具栏行不复存在
+    expect(document.body.querySelector('[data-testid="terminal-collapse"]')).toBeTruthy()
+    expect(document.body.querySelector('[data-testid="terminal-toolbar"]')).toBeNull()
   })
 
-  it('TV-2: 工具栏含 clear + kill 按钮', async () => {
-    wrapper = mount(TerminalView, {
-      props: { sessionId: 'test-session' },
-      attachTo: document.body,
-    })
+  it('TV-2: 空态下收起按钮可用；原工具栏（clear/kill）随 head 一行化不复存在', async () => {
+    wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
     await flushPromises()
 
-    expect(document.body.querySelector('[data-testid="terminal-btn-clear"]')).toBeTruthy()
-    expect(document.body.querySelector('[data-testid="terminal-btn-kill"]')).toBeTruthy()
+    const collapse = document.body.querySelector('[data-testid="terminal-collapse"]') as HTMLButtonElement
+    expect(collapse).toBeTruthy()
+    expect(collapse.disabled).toBe(false)
+    expect(document.body.querySelector('[data-testid="terminal-btn-clear"]')).toBeNull()
+    expect(document.body.querySelector('[data-testid="terminal-btn-kill"]')).toBeNull()
   })
 })
 
-describe('TerminalView spawn 编排（构建者视角）', () => {
-  it('TV-3: mount 且 PTY 未活时调用 spawnTerminal（含 session cwd）', async () => {
-    wrapper = mount(TerminalView, {
-      props: { sessionId: 'test-session' },
-      attachTo: document.body,
-    })
+describe('TerminalView 实例激活（构建者视角）', () => {
+  it('TV-3: mount → 对账；成功空清单 → 自动新建默认实例（存量会话无感）', async () => {
+    wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
+    await flushPromises()
+
+    expect(useTerminalMock.reconcileInstances).toHaveBeenCalledTimes(1)
+    expect(useTerminalMock.spawnTerminal).toHaveBeenCalledTimes(1)
+    expect(useTerminalMock.spawnTerminal.mock.calls[0]![0]).toBe('/tmp/test-cwd')
+  })
+
+  it('TV-13: 首挂载自动新建（ack 异步建档落位）不夺焦（设计目标 5：开面板体感不变）', async () => {
+    // 生产时序：spawn RPC 异步往返，ack 建档晚于挂载轮——用受控 deferred 复现该时序
+    const deferred: { resolve?: (terminalId: string) => void } = {}
+    useTerminalMock.spawnTerminal.mockImplementation(
+      () => new Promise<string>((resolve) => { deferred.resolve = resolve }),
+    )
+    wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
+    await flushPromises() // 挂载轮（对账 → 发起自动新建）完成
+
+    activeRef.value = 'term:test-session:1' // ack 建档：active 落位
+    deferred.resolve?.('term:test-session:1')
+    await flushPromises()
+
+    // 实例 xterm 已建立，但首挂载建档沿不落焦（非用户手势）
+    expect(xtermInstances.length).toBeGreaterThan(0)
+    for (const inst of xtermInstances) expect(inst.focus).not.toHaveBeenCalled()
+  })
+
+  it('TV-14: 面板先以 sessionId=null 挂载、后经 loadSession 绑上会话 → 绑定轮不夺焦，绑定完成后切换实例按焦点规则落新实例输入区', async () => {
+    // 真实路径：stores/panel.ts initialLeaf.sessionId=null → loadSession(null)（面板先挂载）
+    // → 后续 loadSession(sid) 绑上会话（prop 变化）。
+    const w = mount(TerminalView, { props: { sessionId: null }, attachTo: document.body })
+    wrapper = w
+    await flushPromises()
+    expect(useTerminalMock.reconcileInstances).not.toHaveBeenCalled()
+
+    // 受控 deferred 复现 ack 异步建档落位（spawn RPC 往返晚于绑定轮）
+    const deferred: { resolve?: (terminalId: string) => void } = {}
+    useTerminalMock.spawnTerminal.mockImplementation(
+      () => new Promise<string>((resolve) => { deferred.resolve = resolve }),
+    )
+
+    // 绑上会话（loadSession → sessionId prop 变化）：对账 → 自动新建（ack 挂起）
+    await w.setProps({ sessionId: 'test-session' })
+    await flushPromises()
+    expect(useTerminalMock.reconcileInstances).toHaveBeenCalledTimes(1)
+
+    // ack 建档落位：实例清单 + active 落位
+    instancesRef.value = [{ terminalId: 'term:test-session:1', seq: 1, alive: true }]
+    activeRef.value = 'term:test-session:1'
+    deferred.resolve?.('term:test-session:1')
+    await flushPromises()
+
+    // 绑定轮内不夺焦（首挂载语义，设计目标 5）
+    expect(xtermInstances.length).toBeGreaterThan(0)
+    for (const inst of xtermInstances) expect(inst.focus).not.toHaveBeenCalled()
+
+    // 绑定完成（ack 建档、可写）→ 交互门置位：用户手势切换实例 → 焦点落新显示实例
+    // （未置位时本条必红：watcher 因 interactive=false 不调 focus）
+    instancesRef.value = [
+      { terminalId: 'term:test-session:1', seq: 1, alive: true },
+      { terminalId: 'term:test-session:2', seq: 2, alive: true },
+    ]
+    await flushPromises()
+    const items = document.body.querySelectorAll('[data-testid="terminal-instance-item"]')
+    expect(items).toHaveLength(2)
+    ;(items[1] as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    expect(useTerminalMock.selectInstance).toHaveBeenCalledWith('term:test-session:2')
+    const xterm = xtermInstances[xtermInstances.length - 1]!
+    expect(xterm.focus).toHaveBeenCalled()
+  })
+
+  it('TV-4: 对账清单非空 → 不自动新建（复用后台存活实例）', async () => {
+    instancesRef.value = [{ terminalId: 'term:test-session:1', seq: 1, alive: true }]
+    activeRef.value = 'term:test-session:1'
+    useTerminalMock.reconcileInstances.mockResolvedValue({ ok: true, count: 1 })
+    wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
+    await flushPromises()
+
+    expect(useTerminalMock.reconcileInstances).toHaveBeenCalledTimes(1)
+    expect(useTerminalMock.spawnTerminal).not.toHaveBeenCalled()
+    expect(useTerminalMock.attachTerminal).toHaveBeenCalled()
+  })
+
+  it('TV-5: 对账拉取失败 → 不自动新建（不与后台存活实例撞号并存）', async () => {
+    useTerminalMock.reconcileInstances.mockResolvedValue({ ok: false, count: -1 })
+    wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
+    await flushPromises()
+
+    expect(useTerminalMock.spawnTerminal).not.toHaveBeenCalled()
+  })
+
+  it('TV-6: sessionId 为 null 时不渲染 xterm、不对账、不 spawn', async () => {
+    wrapper = mount(TerminalView, { props: { sessionId: null }, attachTo: document.body })
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-testid="terminal-view"]')).toBeTruthy()
+    expect(useTerminalMock.reconcileInstances).not.toHaveBeenCalled()
+    expect(useTerminalMock.spawnTerminal).not.toHaveBeenCalled()
+  })
+})
+
+describe('TerminalView 交互（使用者视角）', () => {
+  it('TV-8: 切换条条目点击 → selectInstance（焦点随 active 变化落当前实例输入区）', async () => {
+    instancesRef.value = [
+      { terminalId: 'term:test-session:1', seq: 1, alive: true },
+      { terminalId: 'term:test-session:2', seq: 2, alive: true },
+    ]
+    activeRef.value = 'term:test-session:1'
+    useTerminalMock.reconcileInstances.mockResolvedValue({ ok: true, count: 2 })
+    wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
+    await flushPromises()
+
+    const items = document.body.querySelectorAll('[data-testid="terminal-instance-item"]')
+    expect(items).toHaveLength(2)
+    ;(items[1] as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    expect(useTerminalMock.selectInstance).toHaveBeenCalledWith('term:test-session:2')
+    // 切换实例 → 新 xterm 重建并落焦点
+    const xterm = xtermInstances[xtermInstances.length - 1]!
+    expect(xterm.focus).toHaveBeenCalled()
+  })
+
+  it('TV-9: 关闭实例按钮在当前实例非最后时可用 → closeInstance', async () => {
+    instancesRef.value = [
+      { terminalId: 'term:test-session:1', seq: 1, alive: true },
+      { terminalId: 'term:test-session:2', seq: 2, alive: true },
+    ]
+    activeRef.value = 'term:test-session:1'
+    useTerminalMock.reconcileInstances.mockResolvedValue({ ok: true, count: 2 })
+    wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
+    await flushPromises()
+
+    const closeBtns = document.body.querySelectorAll('[data-testid="terminal-instance-close"]')
+    expect(closeBtns).toHaveLength(2)
+    ;(closeBtns[1] as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(useTerminalMock.closeInstance).toHaveBeenCalledWith('term:test-session:2')
+  })
+
+  it('TV-10: 最后实例关闭按钮禁用态沿用 u3-bar 组件行为（不 emit close）', async () => {
+    instancesRef.value = [{ terminalId: 'term:test-session:1', seq: 1, alive: true }]
+    activeRef.value = 'term:test-session:1'
+    useTerminalMock.reconcileInstances.mockResolvedValue({ ok: true, count: 1 })
+    wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
+    await flushPromises()
+
+    const closeBtn = document.body.querySelector('[data-testid="terminal-instance-close"]') as HTMLButtonElement
+    expect(closeBtn.disabled).toBe(true)
+    closeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(useTerminalMock.closeInstance).not.toHaveBeenCalled()
+  })
+
+  it('TV-11: 「+」点击 → spawnTerminal 新建 + 自动切到新实例并聚焦其输入区', async () => {
+    instancesRef.value = [{ terminalId: 'term:test-session:1', seq: 1, alive: true }]
+    activeRef.value = 'term:test-session:1'
+    useTerminalMock.reconcileInstances.mockResolvedValue({ ok: true, count: 1 })
+    wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
+    await flushPromises()
+    useTerminalMock.spawnTerminal.mockClear()
+    useTerminalMock.selectInstance.mockClear()
+
+    // ack 回传新实例编号（终端 2）——不再停留在终端 1
+    useTerminalMock.spawnTerminal.mockResolvedValue('term:test-session:2')
+    const create = document.body.querySelector('[data-testid="terminal-instance-create"]') as HTMLButtonElement
+    create.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushPromises()
 
     expect(useTerminalMock.spawnTerminal).toHaveBeenCalledTimes(1)
-    const args = useTerminalMock.spawnTerminal.mock.calls[0]!
-    // 第一个参数是 cwd（取 session.cwd = /tmp/test-cwd）
-    expect(args[0]).toBe('/tmp/test-cwd')
+    // 2026-10-04 产品裁决：点「+」自动切到新实例
+    expect(useTerminalMock.selectInstance).toHaveBeenCalledWith('term:test-session:2')
+    expect(activeRef.value).toBe('term:test-session:2')
+    // 视图重建到新实例并聚焦其输入区
+    const xterm = xtermInstances[xtermInstances.length - 1]!
+    expect(xterm.focus).toHaveBeenCalled()
   })
 
-  it('TV-4: PTY 已活时 mount 不重复 spawn', async () => {
-    mockState.ptyAlive = true
-    wrapper = mount(TerminalView, {
-      props: { sessionId: 'test-session' },
-      attachTo: document.body,
-    })
+  it('TV-15: 空态点「+」→ 自动激活新实例并聚焦（active 原为 null 也不落空）', async () => {
+    instancesRef.value = []
+    activeRef.value = null
+    useTerminalMock.reconcileInstances.mockResolvedValue({ ok: true, count: 0 })
+    // 挂载轮空清单自动新建（mock 的 spawn 不建条目、不置 active）→ 空态、不夺焦
+    useTerminalMock.spawnTerminal.mockResolvedValueOnce('term:test-session:1')
+    wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
+    await flushPromises()
+    useTerminalMock.spawnTerminal.mockClear()
+    useTerminalMock.selectInstance.mockClear()
+    xtermInstances.length = 0
+
+    // 空态下点「+」新建得终端 2（序号不回落由 runtime 保证，此处只断自动激活+聚焦）
+    useTerminalMock.spawnTerminal.mockResolvedValueOnce('term:test-session:2')
+    const create = document.body.querySelector('[data-testid="terminal-instance-create"]') as HTMLButtonElement
+    create.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushPromises()
 
-    expect(useTerminalMock.spawnTerminal).not.toHaveBeenCalled()
-  })
-})
-
-describe('TerminalView 交互（使用者视角，规则 5）', () => {
-  it('TV-5: 点击 kill 按钮调用 killTerminal', async () => {
-    mockState.ptyAlive = true
-    wrapper = mount(TerminalView, {
-      props: { sessionId: 'test-session' },
-      attachTo: document.body,
-    })
-    await flushPromises()
-
-    const killBtn = document.body.querySelector('[data-testid="terminal-btn-kill"]') as HTMLButtonElement
-    expect(killBtn).toBeTruthy()
-    killBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flushPromises()
-
-    expect(useTerminalMock.killTerminal).toHaveBeenCalledTimes(1)
+    expect(useTerminalMock.selectInstance).toHaveBeenCalledWith('term:test-session:2')
+    expect(activeRef.value).toBe('term:test-session:2')
+    const xterm = xtermInstances[xtermInstances.length - 1]!
+    expect(xterm.focus).toHaveBeenCalled()
   })
 
-  it('TV-6: sessionId 为 null 时不渲染 xterm（无活跃 session）', async () => {
-    wrapper = mount(TerminalView, {
-      props: { sessionId: null },
-      attachTo: document.body,
-    })
+  it('TV-12: 无选区时浮动按钮不显示', async () => {
+    wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
     await flushPromises()
-
-    // terminal-view 容器存在，但 xterm 不初始化（onMounted 早退）
-    expect(document.body.querySelector('[data-testid="terminal-view"]')).toBeTruthy()
-    // spawn 不应被调用
-    expect(useTerminalMock.spawnTerminal).not.toHaveBeenCalled()
-  })
-})
-
-describe('TerminalView 选区浮动按钮（Phase 4 联动 1）', () => {
-  it('TV-7: 无选区时浮动按钮不显示', async () => {
-    wrapper = mount(TerminalView, {
-      props: { sessionId: 'test-session' },
-      attachTo: document.body,
-    })
-    await flushPromises()
-
     expect(document.body.querySelector('[data-testid="terminal-send-to-ai"]')).toBeNull()
   })
-
-  // （TV-8 已删：「mount 不因选区逻辑报错」是恒真倾向弱断言，且「浮动按钮初始不显示」
-  //  与 TV-7 重复；完整选区→按钮→注入链路归 UI E2E 验收 G5。）
 })

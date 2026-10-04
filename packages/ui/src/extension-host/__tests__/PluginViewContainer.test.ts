@@ -121,22 +121,6 @@ describe('PluginViewContainer', () => {
     wrapper.unmount()
   })
 
-  it('TC3c: pin 切换本地 ref（data-pinned DOM 断言），不持久化', async () => {
-    const source = makeSource(TASKS_VIEWS)
-    const wrapper = mountContainer(source)
-    await wrapper.vm.$nextTick()
-
-    expect(wrapper.find('[data-testid="l2-tab-pin-goal"]').attributes('data-pinned')).toBe('false')
-    await wrapper.find('[data-testid="l2-tab-pin-goal"]').trigger('click')
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('[data-testid="l2-tab-pin-goal"]').attributes('data-pinned')).toBe('true')
-    // 再点一次取消
-    await wrapper.find('[data-testid="l2-tab-pin-goal"]').trigger('click')
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('[data-testid="l2-tab-pin-goal"]').attributes('data-pinned')).toBe('false')
-    wrapper.unmount()
-  })
-
   it('R3: 无 source 注入 → 静默空态不崩', async () => {
     const wrapper = mountContainer(undefined)
     await wrapper.vm.$nextTick()

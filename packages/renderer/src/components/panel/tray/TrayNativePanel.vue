@@ -270,7 +270,7 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { getState } from '@taiji/core/transport/ws-client'
-import { getDrawerControlState, openDrawerTab, openSubagent, openWorkflow } from '@taiji/core/domain/drawer'
+import { selectBackgroundTask, openSubagent, openWorkflow } from '@taiji/core/domain/drawer'
 import { subagentVirtualId, useSubagentStore } from '@/stores/subagent'
 import { useToast } from '@/composables/useToast'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
@@ -509,8 +509,8 @@ function openSubagentRow(record: SubagentRecord): void {
   openSubagent({ virtualId: subagentVirtualId(props.sessionId, record.subagentId), enteredFrom: 'chat' })
 }
 function openBashTask(entry: BackgroundTaskEntry): void {
-  getDrawerControlState().selectedBackgroundTaskId = entry.taskId
-  openDrawerTab('bashTask')
+  // 选中态落 bashTask 内容域分区（selection/bash-task.ts，§6.6①）+ 切 tab + 开 drawer
+  selectBackgroundTask(entry.taskId)
 }
 /** workflow 行传 runId（drawer WorkflowTab 先按 runId 精确匹配，后回退 scriptName 取最新） */
 function openWorkflowRow(record: WorkflowRunRecord): void {

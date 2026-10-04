@@ -394,6 +394,21 @@ export function connect(url: string, token?: string): void {
   }
 }
 
+/**
+ * 当前连接凭据只读取值面（terminal-multi-instance 设计 §0.5 P6）。
+ *
+ * 用途：终端域的「runtime 世代变更」核对判据——renderer 在 WS 连接建立边沿比较本值与
+ * 上一次连接建立时保存的值，**变化即世代变更**（每次 spawn 重新生成 randomBytes token，
+ * 旧 token 对新进程必失效）；未变即同世代（WS 闪断 / 无新进程的幂等 `runtime-port` 广播沿），
+ * 终端域不重置。端口值不构成世代信号（`findAvailablePort` 重启常落回原端口）。
+ *
+ * 语义：模块私有 `currentToken` 的只读快照——`connect(url, token)` 传 token 时更新、
+ * 未传（内部退避重连 / visibility 重连）时保留上次值、mock url 强制 null。
+ */
+export function getCurrentToken(): string | null {
+  return currentToken
+}
+
 /** 主动断开（不触发重连） */
 export function disconnect(): void {
   // 递增 generation 使旧 WS 的回调失效

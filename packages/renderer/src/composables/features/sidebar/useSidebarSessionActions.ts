@@ -244,7 +244,7 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
   })
   function onOpenSearchDrawer(tab: string): void {
     const { open } = useSideDrawer()
-    // SearchModal drawerTab（'tasks'|'sideDrawer'|'detail'）→ SideDrawerTab；实际 file 跳转恒 'detail'，'sideDrawer' 历史抽象值映射 undefined。
+    // SearchModal drawerTab（'tasks'|'sideDrawer'|'detail'）→ RightDrawerTab；实际 file 跳转恒 'detail'，'sideDrawer' 历史抽象值映射 undefined。
     open(tab === 'sideDrawer' ? undefined : (tab as Parameters<typeof open>[0]))
   }
 

@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import type { SelectContentEmits, SelectContentProps } from 'reka-ui'
+import { getCurrentInstance, onBeforeUnmount, ref } from 'vue'
 import type { HTMLAttributes } from 'vue'
 import { reactiveOmit } from '@vueuse/core'
 import {
   SelectContent,
   SelectPortal,
   SelectViewport,
+  injectSelectRootContext,
   useForwardPropsEmits,
 } from 'reka-ui'
 import { cn } from '../../lib/utils'
+import { registerUiModalSurface, uiSurfaceRectOf } from '../../modal-surface-registrar'
 
 /**
  * SelectContent —— 下拉浮层。样式与 PopoverContent 对齐（冷蓝暗色 elevated 浮层）。
@@ -25,11 +28,32 @@ const props = withDefaults(
 const emits = defineEmits<SelectContentEmits>()
 const delegatedProps = reactiveOmit(props, 'class')
 const forwarded = useForwardPropsEmits(delegatedProps, emits)
+
+// 模态表面聚合注册（§6.7 弹出层族，经 renderer 注册桥——层级方向见
+// modal-surface-registrar.ts 文件头）：本原语常驻挂载（消费方模板恒含），开合态绑 reka
+// SelectRoot context 的 open ref 状态本体（动作时刻直读，§6.7 R4 时序前提）；未在
+// SelectRoot 内使用时 context 为 null。旗标组由登记表按 id 读取（Esc 让位、⌘W 不让位、
+// shieldsView intersecting——view 遮蔽联动按几何相交，rect 读内容根元素实测）。
+const selectRootContext = injectSelectRootContext(null)
+
+/** 内容根元素读点（view 遮蔽几何上报用）：内层 reka SelectContent 单根渲染，实例 $el
+ *  即浮层 DOM；未挂载（关态）/非元素时 uiSurfaceRectOf 返回 null → 上报不带 rect
+ *  （主进程保守按相交）。 */
+const contentRef = ref<{ $el?: unknown } | null>(null)
+
+const disposeSurfaceRegistration = registerUiModalSurface({
+  surface: 'select-content',
+  key: `select-content-${getCurrentInstance()?.uid ?? 0}`,
+  isOpen: () => selectRootContext?.open.value ?? false,
+  rect: () => uiSurfaceRectOf(contentRef.value),
+})
+onBeforeUnmount(disposeSurfaceRegistration)
 </script>
 
 <template>
   <SelectPortal>
     <SelectContent
+      ref="contentRef"
       v-bind="forwarded"
       :class="
         cn(

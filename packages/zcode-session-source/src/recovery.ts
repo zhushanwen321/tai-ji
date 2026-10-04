@@ -36,7 +36,7 @@
  * 见该条目处置列——跨包 API 变更，另批裁决。
  */
 
-import { copyFileSync, existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -126,16 +126,6 @@ function closeQuietly(db: SqliteDb): void {
     // [HISTORICAL] 只读连接 close 失败（WAL 并发读常见）不影响读取结果——吞掉继续
     console.debug('recovery: readonly connection close failed (best-effort)', err)
   }
-}
-
-/**
- * 当前 tmpdir 下已存在的快照目录数（测试断言「零拷贝/读后即清」的计数基线）。
- * 测试支撑件（住生产 src 仅因与恢复阶梯共用 SNAPSHOT_TMP_PREFIX 单一来源，位置不另立）：
- * readdir 失败必须上抛、不得静默返 0——静默 0 会把「零残留」差分断言退化为恒真（假绿），
- * 测试必须显式红而非静默绿。
- */
-export function countSnapshotDirs(): number {
-  return readdirSync(tmpdir()).filter((n) => n.startsWith(SNAPSHOT_TMP_PREFIX)).length
 }
 
 /** 阶梯开库产物：连接 + 实际命中的级别 + 统一 dispose（close + L3 快照清理）。 */

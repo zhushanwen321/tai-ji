@@ -228,7 +228,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   private modelCapabilityReconciler: ((sessionId: string) => Promise<unknown>) | null = null
 
   /**
-   * session 删除回调（组合根注入 terminalService.destroyPty）。
+   * session 删除回调（组合根注入 terminalService.destroySessionPties）。
    * 主动 delete（lifecycle.delete）和进程异常退出（onSessionExit）均经 removeSessionEntry
    * 汇聚触发，同步销毁该 session 绑定的 PTY。
    */
@@ -744,7 +744,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     this.btwService = btwService
   }
 
-  /** session 删除回调注入（组合根绑 terminalService.destroyPty）。 */
+  /** session 删除回调注入（组合根绑 terminalService.destroySessionPties）。 */
   setOnSessionDelete(handler: (sessionId: string) => void): void {
     this.onSessionDelete = handler
   }
@@ -1131,7 +1131,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     if (existing && !existing.exited) return existing
     // 占座让路（idle-pi-reclamation D6-2）：回收编排进行中（seat 命中）→ 等待释放后走
     // 既有 restore，绝不抢跑——抢跑的 restoreSession 对未完成摘除的 session 走 existing
-    // 清场分支 = 死亡清理汇聚点被完整触发（bus.clearSession 断流 + destroyPty 连杀 +
+    // 清场分支 = 死亡清理汇聚点被完整触发（bus.clearSession 断流 + destroySessionPties 连杀 +
     // didDestroy 投递，被否谱系「超时抢跑」）。等待的确定性由 reclaim 的 finally 释放保证。
     // [u2 回归根因] 同步短路守卫：seat 未命中时必须零微任务让步。awaitReclaimSeatRelease
     // 是 async 函数，无条件 `await` 即使内部同步 return 也让 restore 入口晚一个微任务，

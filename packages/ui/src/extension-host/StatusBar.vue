@@ -7,9 +7,11 @@
  * （大→左/前，spec §2 A4「聚合按 alignment(left/right) + priority 排序」）；
  * 同 priority 保持合并顺序（per-session 在前 global 在后）。
  *
- * 自隐藏（clarify Q4 双级）：text 空串/纯空白的项不渲染（builtin statusline
- * 初始 text:'' 由 runtime 广播填充，填充前不可见）；两 scope 合并后无任何可渲染项
- * 时根元素 v-if 隐藏（不占位）。
+ * 自隐藏（clarify Q4 双级，display-containers §5.1 规则 4 扩展）：text 空串/纯空白的项不渲染
+ * （builtin statusline 初始 text:'' 由 runtime 广播填充，填充前不可见）；根元素 v-if 条件 =
+ * 「有状态项**或有原生动作**」——trailing 具名 slot（原生动作通道，如终端开关按钮）存在时
+ * 根元素常驻（干净安装无插件无 statusline 项时按钮仍可见，防纯键盘不可发现）；否则两 scope
+ * 合并后无任何可渲染项时根元素 v-if 隐藏（不占位）。
  *
  * A4 视觉（spec §2 A4）：容器 26px 高 bg-elevated text-xs；每项前置 7px 状态点
  * （ok=success / warn=warn / danger=danger / neutral=neutral-ico / plugin-src=accent），
@@ -23,8 +25,10 @@
  * 数据源经 inject 注入（STATUS_BAR_SOURCE_KEY），壳 provide 真实实现，单测
  * global.provide mock；无注入时静默空态不崩（design-review R3）。
  */
-import { computed, inject } from 'vue'
+import { computed, inject, useSlots } from 'vue'
 import { STATUS_BAR_SOURCE_KEY, type StatusBarEntry, type StatusDot } from './status-bar-source'
+
+const slots = useSlots()
 
 const props = withDefaults(
   defineProps<{
@@ -49,6 +53,12 @@ const DOT_CLASS: Record<StatusDot, string> = {
 
 const dotClass = (status?: StatusDot) => (status ? DOT_CLASS[status] : '')
 
+/** 原生动作存在性（trailing slot）：有则根元素常驻（自隐藏条件扩展，§5.1 规则 4）。
+ *  函数而非 computed：slots 是渲染期快照、无响应式依赖，computed 会缓存首次求值结果。 */
+function hasNativeAction(): boolean {
+  return slots.trailing !== undefined
+}
+
 /** 两 scope 合并 + 空 text 过滤 + A4 排序（left/right 两段，段内 priority 降序） */
 const visibleItems = computed<StatusBarEntry[]>(() => {
   if (!source) return []
@@ -65,9 +75,9 @@ const visibleItems = computed<StatusBarEntry[]>(() => {
 
 <template>
   <div
-    v-if="visibleItems.length > 0"
+    v-if="visibleItems.length > 0 || hasNativeAction()"
     data-testid="status-bar"
-    class="status-bar flex h-[26px] items-center gap-2 overflow-x-auto bg-elevated px-3 text-xs"
+    class="status-bar flex h-[26px] items-center gap-2 overflow-x-auto bg-elevated px-3 text-xs [scrollbar-width:none]"
   >
     <span
       v-for="item in visibleItems"
@@ -89,14 +99,22 @@ const visibleItems = computed<StatusBarEntry[]>(() => {
       />
       {{ item.text }}
     </span>
+    <!-- trailing 原生动作区（可选具名 slot，§5.1 规则 4）：宿主注入常驻图标按钮（终端开关），
+         零项时仍可见；按钮本体与行为归宿主（本组件零动作语义） -->
+    <span
+      v-if="hasNativeAction()"
+      data-testid="status-bar-trailing"
+      class="ml-auto flex shrink-0 items-center gap-1"
+    >
+      <slot name="trailing" />
+    </span>
   </div>
 </template>
 
 <style scoped>
-/* A4 溢出：容器横向滚动但隐藏滚动条（scrollbar 伪元素 Tailwind 无法表达，escape hatch） */
-.status-bar {
-  scrollbar-width: none;
-}
+/* A4 溢出：容器横向滚动但隐藏滚动条。scrollbar-width:none 走 Tailwind 任意属性类
+ * （[scrollbar-width:none]，规则检查器不放行自定义样式块）；::-webkit-scrollbar 伪元素
+ * 是 Tailwind 无法表达的合法 escape hatch */
 .status-bar::-webkit-scrollbar {
   display: none;
 }

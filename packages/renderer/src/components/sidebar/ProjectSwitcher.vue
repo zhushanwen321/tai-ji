@@ -25,7 +25,7 @@
  * 数据层：session 按 projectId 直接关联过滤（SSOT 见 shared/project.ts）；列表持久化
  * runtime projects.json（deep watch → 全量 save，userOrder 随之持久化，跨重启稳定）。
  */
-import { computed, nextTick, ref, type ComponentPublicInstance } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, type ComponentPublicInstance } from 'vue'
 import { Plus, Trash2 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -38,6 +38,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/ui/dialog'
+import { registerModalSurface, surfaceRectOf } from '@/composables/features/app/modal-surface-registry'
 import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { computeProjectSessionCounts } from '@/composables/logic/project-session'
@@ -108,6 +109,32 @@ const pendingDeleteName = computed(
   () => projectStore.projects.find((p) => p.id === pendingDeleteId.value)?.name ?? '',
 )
 
+// ── 模态表面聚合注册（§6.7 弹出层族：项目右键删除菜单）───────
+// 右键菜单是键盘可感知的 reka 托管弹层（Esc 让位——DismissableLayer 不 preventDefault，
+// 走聚合让位档）。N 张卡各持一棵 ContextMenuRoot，开合态绑 update:open 镜像 ref
+// （ContextMenuRoot open 状态本体的官方通知通道，非广播计数器）；同帧内至多一棵菜单
+// 开着（reka 互斥），镜像取「任一开着」语义。旗标组由登记表按 id 读取。
+const contextMenuOpen = ref(false)
+function onCardMenuOpenChange(open: boolean): void {
+  contextMenuOpen.value = open
+}
+// rect 读点（函数 ref 单槽位）：v-for 作用域内 string ref 会被 Vue 运行时填充为**数组**
+// （compiler-dom ref_for 路径），`.$el` 恒 undefined → rect 恒 null（fail-safe 保守相交，
+// 几何精度损失）。reka 菜单内容仅开态挂载且同帧至多一棵开着，单槽位语义 =「当前打开的
+// 那棵菜单内容元素」：开态挂载写入、关态卸载置空。
+const cardMenuContentEl = ref<HTMLElement | null>(null)
+function setCardMenuContentRef(el: Element | ComponentPublicInstance | null): void {
+  const root = (el as { $el?: unknown } | null)?.$el ?? el
+  cardMenuContentEl.value = root instanceof HTMLElement ? root : null
+}
+const disposeSurfaceRegistration = registerModalSurface({
+  surface: 'project-switcher-menu',
+  key: 'project-switcher-menu',
+  isOpen: () => contextMenuOpen.value,
+  rect: () => surfaceRectOf(cardMenuContentEl.value),
+})
+onBeforeUnmount(disposeSurfaceRegistration)
+
 function canDelete(p: { name: string }): boolean {
   return Boolean(p.name) && projectStore.projects.length > 1
 }
@@ -157,7 +184,7 @@ function cancelCreate() {
     <div class="grid grid-cols-2 gap-1" data-testid="project-grid">
       <template v-for="p in projectStore.recentProjects" :key="p.id">
         <!-- 右键菜单（删除入口；默认项目卡无菜单项 → Portal 条件渲染，不吞右键） -->
-        <ContextMenuRoot>
+        <ContextMenuRoot @update:open="onCardMenuOpenChange">
           <ContextMenuTrigger as-child>
             <!-- 卡片：div role=button（旧列表项同范式，避免 button 嵌套 input/触发器）；
                  active 态沿用侧栏既有范式 bg-surface + text-accent（SessionItem/旧列表一致）。 -->
@@ -208,6 +235,7 @@ function cancelCreate() {
           </ContextMenuTrigger>
           <ContextMenuPortal v-if="canDelete(p)">
             <ContextMenuContent
+              :ref="setCardMenuContentRef"
               data-testid="project-context-menu"
               class="z-[1100] min-w-[160px] rounded-md border border-border-strong bg-bg-elevated p-1 text-neutral-fg shadow-2 outline-none"
             >

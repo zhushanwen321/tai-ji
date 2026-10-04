@@ -24,7 +24,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { computed, reactive, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
-import { bindDrawerSessionId, getDrawerControlState, _resetDrawerForTest } from '@taiji/core/domain/drawer'
+import { bindDrawerSessionId, setBackgroundTaskView, _resetDrawerForTest } from '@taiji/core/domain/drawer'
 import BackgroundTaskDetailPanel from '@/components/extension/BackgroundTaskDetailPanel.vue'
 import * as backgroundTaskApi from '@taiji/core/transport/api/domains/background-task'
 import { useToast } from '@/composables/useToast'
@@ -87,9 +87,10 @@ function outputReply(overrides: Partial<{ text: string; truncated: boolean; lost
   return { sessionId: SID, taskId: TASK_ID, text: 'tail line', truncated: false, lost: false, ...overrides }
 }
 
-/** 选中任务（列表点击的写入动作，D5④；本组件读 selectedBackgroundTaskId） */
+/** 选中任务（列表点击的写入动作，D5④；bashTask 内容域选中态 selection/bash-task.ts，
+ *  display-containers §6.6① 迁出后落点；本组件读 useBashTaskSelection） */
 function selectTask(taskId: string | undefined): void {
-  getDrawerControlState().selectedBackgroundTaskId = taskId
+  setBackgroundTaskView(taskId)
 }
 
 function mountDetail() {

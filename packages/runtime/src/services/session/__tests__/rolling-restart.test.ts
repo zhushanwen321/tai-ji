@@ -14,7 +14,8 @@
  * - A4 planned 边不进计数状态机（main 侧测试，见 restart-policy-planned.test.ts）。
  * - A5 shutdown 步骤打点序列：SHUTDOWN_STEP_SEQUENCE SSOT 断言（首步取消推迟定时器；
  *   engine-pool-dispose 位于 server-stop 与 close-logger 之间；close-crash-journal
- *   位于 close-logger 之前——D1 台账尾部 flush 先于 logger 关闭）。
+ *   位于 close-logger 之前——D1 台账尾部 flush 先于 logger 关闭；
+ *   dispose-terminal-pties [terminal-multi-instance u4] 紧随 server-stop）。
  * - B2 Gate W：armed=false 时编排零动作。
  * - 推迟循环：在途清零 → countdown（T-30s 广播）→ 执行（journal event=rolling-restart）。
  * - resolveRollingRestartConfig env 解析（合法/非法/上界）。
@@ -461,6 +462,18 @@ describe('A5 shutdown 步骤打点序列 SSOT（SHUTDOWN_STEP_SEQUENCE）', () =
     expect(closeLoggerIdx).toBeGreaterThan(journalIdx)
   })
 
+  it('dispose-terminal-pties 紧随 server-stop（先关入口再杀子进程），且早于 engine-pool-dispose / close-logger', () => {
+    const seq = SHUTDOWN_STEP_SEQUENCE as readonly string[]
+    const terminalIdx = seq.indexOf('dispose-terminal-pties')
+    const serverStopIdx = seq.indexOf('server-stop')
+    const engineIdx = seq.indexOf('engine-pool-dispose')
+    const closeLoggerIdx = seq.indexOf('close-logger')
+    expect(terminalIdx).toBeGreaterThan(-1)
+    expect(terminalIdx).toBe(serverStopIdx + 1)
+    expect(engineIdx).toBeGreaterThan(terminalIdx)
+    expect(closeLoggerIdx).toBeGreaterThan(terminalIdx)
+  })
+
   it('完整序列含既有 shutdown 链全部步骤（逐行继承的机械对照面）', () => {
     expect([...SHUTDOWN_STEP_SEQUENCE]).toEqual([
       'cancel-rolling-restart',
@@ -475,6 +488,7 @@ describe('A5 shutdown 步骤打点序列 SSOT（SHUTDOWN_STEP_SEQUENCE）', () =
       'dispose-terminal-ptys',
       'deinit-relay-server',
       'server-stop',
+      'dispose-terminal-pties',
       'engine-pool-dispose',
       'close-crash-journal',
       'close-logger',

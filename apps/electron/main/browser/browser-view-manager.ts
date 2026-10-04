@@ -9,7 +9,10 @@
  *
  * 1. 零信任嵌入：创建 view 时显式 webPreferences
  *    { contextIsolation: true, nodeIntegration: false, sandbox: true }，
- *    无 preload、零注入——被嵌入页不能访问 Node / Electron API。
+ *    无 preload、无持久注入——被嵌入页不能访问 Node / Electron API。仅限主进程一次性
+ *    executeJavaScript 白名单用途（viewport meta 注入 / autoFit 读数 / getSelection，
+ *    均一次性只读或幂等 meta 补齐，无常驻脚本面；与 §6.7④ 否决的常驻 preload 探测面
+ *    是两类风险，不构成「已有注入先例」的边界松动）。
  *
  * 2. WebContentsView 是 Electron 42 原生 API（`import { WebContentsView } from 'electron'`），
  *    不是已废弃的 BrowserView。
@@ -35,11 +38,29 @@
  *    「无 LRU 上限（W4 再加淘汰策略）」，2026-09-14 内存审计（B4 browserDestroy 接线）
  *    复核时按实装修正。
  *
+ * 8. 显示收口谓词（display-containers §7.4 show 统一谓词，R3 收口）：view 显示的唯一触发 =
+ *    「浮层开 ∧ 内容 browser ∧ 无错误态 ∧ 无相交 shieldsView 面」，收敛在 applyDisplay 单点
+ *    （show / focus / 错误态 / shieldsView / 浮层开合与内容切换 / rect 推送全触发面经它求值），
+ *    禁止各触发点独立 show——否则 shieldsView 相交隐藏期间重开浮层会「show 竞态盖住模态」。
+ *    focus() 收口：非该态只隐藏不显示（防「关浮层 → 切走 → 切回」残影经 focus sync 旁路复活）；
+ *    浮层随行豁免（§5.1 规则 5）：浮层开 ∧ 内容 browser 时 focus 换显整体豁免。策略纯函数在
+ *    gateway/display-gate.ts（含双阈值空间滞回——禁时间滞回）。
+ *
+ * 9. create 失败 reject（§7.4 错误通道）：window 失联 / 窗口已销毁时抛出（ipcMain.handle 自然
+ *    变成 invoke rejection，renderer caller catch 落错误占位）；[HISTORICAL] 原实现仅 console.warn
+ *    静默降级，创建失败对 renderer 不可见。render-process-gone 补 handler 落同一占位族
+ *    （state.processGone 推送 + 错误态隐藏 view）；页面加载失败维持 state.error 推送语义。
+ *
+ * 10. view 转发键清单（§7.4 [MANDATORY]）：create 时对 view.webContents 挂 before-input-event
+ *    （gateway/forward-keys.ts 的 attachForwardKeyBridge），命中清单键统一转发主窗口处理链。
+ *    Esc 不入清单（页面自身语义优先，§6.7 所有权第 4 层）。
+ *
  * 状态暂存：webContents 事件（did-navigate / did-fail-load / isLoading）W1 先暂存到
  * manager 内部 entry，W2 经 IPC 回传 renderer。
  *
  * 依赖方向：browser-view-manager → electron(WebContentsView/shell) + interfaces(type-only)
  * + input-validators（D2b setWindowOpenHandler 的 http/https 白名单）
+ * + gateway/display-gate（显示收口谓词 + 滞回纯函数）+ gateway/forward-keys（转发桥）
  * （will-download 拦截用 view.webContents.session 实例属性，不需 electron 的 session 模块导入）
  */
 import { WebContentsView, shell } from 'electron'
@@ -47,6 +68,15 @@ import type { Rectangle } from 'electron'
 import type { IWindowManager } from '../interfaces.js'
 import { URL_PREVIEW_MAX_LENGTH, isAllowedNavigateUrl, isDangerousScheme } from '../gateway/url-scheme-validators.js'
 import { isValidExternalUrl } from '../gateway/input-validators.js'
+import {
+  CLOSED_OVERLAY,
+  computeShouldShow,
+  isOverlayBrowserActive,
+  nextShieldHidden,
+  type OverlayDisplayState,
+  type ShieldFace,
+} from './gateway/display-gate.js'
+import { attachForwardKeyBridge } from './gateway/forward-keys.js'
 
 /** 隐藏占位 rect（0,0,0,0） */
 const HIDDEN_RECT: Rectangle = { x: 0, y: 0, width: 0, height: 0 }
@@ -67,13 +97,17 @@ const AUTO_FIT_MIN = 0.5
 const AUTO_FIT_MAX = 1.0
 
 /** 暂存的 view 状态（W2 经 IPC 回传 renderer） */
-export interface BrowserViewState {
+export interface BrowserViewState { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
   /** 当前 URL（did-navigate / did-navigate-in-page 更新） */
   currentUrl: string
   /** 是否加载中 */
   isLoading: boolean
   /** 最近一次加载错误（did-fail-load 记录；成功导航后清空） */
   error: { errorCode: number; errorDescription: string; validatedURL: string } | null
+  /** render-process-gone 后非 null（进程崩溃原因；成功导航后清空）。
+   *  renderer 落「创建失败」占位族（§5.3 两类占位区分：创建失败 vs 页面加载失败），
+   *  重试 = create + show + navigate。 */
+  processGone: { reason: string } | null
   /** 是否可后退（did-navigate 等事件后同步 webContents.navigationHistory，供 renderer 更新 back 按钮 disabled 态） */
   canGoBack: boolean
   /** 是否可前进 */
@@ -83,7 +117,7 @@ export interface BrowserViewState {
 }
 
 /** 单个 sessionId 对应的托管条目 */
-interface ManagedView {
+interface ManagedView { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
   view: WebContentsView
   windowId: string
   /** 最近 rect（show 时恢复；W3 由 renderer 经 setRect 推送真实 rect） */
@@ -130,6 +164,13 @@ interface ManagedView {
 export class BrowserViewManager {
   private views = new Map<string, ManagedView>()
 
+  /** 浮层开合态（renderer 经 browser:overlay-state 上报；显示收口谓词事实源之一） */
+  private overlayState: OverlayDisplayState = { ...CLOSED_OVERLAY }
+  /** shieldsView 遮蔽面集合（renderer 经 browser:shields 上报；全量替换语义） */
+  private shieldFaces: ShieldFace[] = []
+  /** 双阈值空间滞回状态（per session；gateway/display-gate.ts nextShieldHidden 的状态位） */
+  private shieldHidden = new Map<string, boolean>()
+
   constructor(
     private readonly windows: IWindowManager,
     private readonly onStateChange?: (sessionId: string, state: BrowserViewState) => void,
@@ -140,6 +181,10 @@ export class BrowserViewManager {
    *
    * 初始 setBounds({0,0,0,0}) 隐藏（renderer show 前不可见），isVisible=false。
    * 若 sessionId 已存在则幂等复用（不重复创建）。
+   *
+   * create 失败 reject（§7.4 错误通道，不变量 9）：window 失联 / 窗口已销毁时抛出——
+   * renderer caller catch 落错误占位（重试 = create + show + navigate）。
+   * 池满不是失败（LRU 自动淘汰）。
    */
   create(sessionId: string, windowId: string): void {
     // 幂等：已存在直接复用，避免重复 attach 造成 view 泄漏。
@@ -158,11 +203,13 @@ export class BrowserViewManager {
     }
 
     const win = this.windows.get(windowId)
-    if (!win) {
+    if (!win || win.isDestroyed()) {
       // [W1] 降级 error → warn：windowId 找不到通常意味着 renderer 启动时 URL 注入 windowId 为空（W4 防护），
       // 或窗口已被销毁。是预期失败路径而非异常，不应 spam error 级别。
-      console.warn(`[browser-view] create: window not found windowId=${windowId} sessionId=${sessionId}`)
-      return
+      // §7.4 错误通道：失败必须 reject（原静默 return 对 renderer 不可见，占位/重试链无从触发）。
+      const reason = win ? `window already destroyed windowId=${windowId}` : `window not found windowId=${windowId}`
+      console.warn(`[browser-view] create: ${reason} sessionId=${sessionId}`)
+      throw new Error(`[browser-view] create failed: ${reason} sessionId=${sessionId}`)
     }
 
     // 零信任嵌入：contextIsolation + sandbox + 无 nodeIntegration + 无 preload
@@ -182,11 +229,15 @@ export class BrowserViewManager {
       currentUrl: '',
       isLoading: false,
       error: null,
+      processGone: null,
       canGoBack: false,
       canGoForward: false,
       zoomFactor: 1.0,
     }
     this.bindWebContentsEvents(view, state, sessionId)
+
+    // 转发键清单桥（不变量 10）：命中清单键转发主窗口处理链（Esc 不入清单）
+    attachForwardKeyBridge(view.webContents, () => this.windows.get(windowId))
 
     // attach 到目标窗口
     const entry: ManagedView = {
@@ -273,12 +324,17 @@ export class BrowserViewManager {
     if (entry.isVisible) {
       entry.view.setBounds(rect)
     }
+    // 谓词重算触发面（§7.4 R4）：view rect 变化（resize）→ 滞回与相交判定重算
+    this.applyDisplay()
   }
 
   /**
    * 隐藏 view：从 contentView 移除 + setBounds {0,0,0,0} + isVisible=false。
    * keep-alive 语义：view 对象还在 Map 中，webContents 不销毁，show 时重新挂载。
    * 幂等：sessionId 不存在时无操作。
+   *
+   * 显式强制隐藏（不经谓词）；可见性由显示收口谓词统一支配（applyDisplay），
+   * 后续触发面重算时若谓词为真会恢复显示（不变量 8）。
    *
    * [HISTORICAL] 修复浏览器页面残留问题：原实现只调 setBounds({0,0,0,0})，view 仍然
    * attach 在 contentView 树上。多次 session 切换后，如果状态管理出错，view 会意外显示。
@@ -295,11 +351,9 @@ export class BrowserViewManager {
   }
 
   /**
-   * 显示 view：重新挂载到 contentView + 恢复最近 rect + isVisible=true。
-   * show 前若 setRect 推过真实 rect，lastRect 即真实值；否则为 HIDDEN_RECT。
-   * 幂等：sessionId 不存在时无操作。
-   *
-   * [HISTORICAL] 与 hide 配对：hide 时 removeChildView，show 时 addChildView 重新挂载。
+   * 显示请求：收敛到显示收口谓词（§7.4 show 统一谓词，不变量 8）——
+   * show 当且仅当「浮层开 ∧ 内容 browser ∧ 无错误态 ∧ 无相交 shieldsView 面」，
+   * 谓词为假时只保持/进入隐藏（不报错：这是语义门控不是失败）。幂等：sessionId 不存在时无操作。
    */
   show(sessionId: string): void {
     const entry = this.views.get(sessionId)
@@ -308,11 +362,33 @@ export class BrowserViewManager {
       return
     }
     console.log(`[browser-view] show: sessionId=${sessionId}, lastRect=`, entry.lastRect)
-    this._showEntry(entry, entry.lastRect)
+    this.applyDisplay()
+  }
+
+  /**
+   * 浮层开合/内容切换上报（browser:overlay-state IPC）。
+   * 谓词重算触发面（§7.4 R4）：重开浮层 → 恢复显示；关闭/换出 browser 内容 → 隐藏（keep-alive）。
+   */
+  setOverlayState(state: OverlayDisplayState): void {
+    this.overlayState = state
+    console.log(`[browser-view] overlay-state: ${JSON.stringify(state)}`)
+    this.applyDisplay()
+  }
+
+  /**
+   * shieldsView 遮蔽面全量上报（browser:shields IPC；模态表面聚合 §6.7 的 view 遮蔽族）。
+   * 全量替换语义（上报是事件提示 + 全量收敛，不做增量簿记/时间窗兑底）。
+   * 谓词重算触发面：成员开合 + 成员开态内 rect 变化（横幅文案随 level 改宽）都经此触发。
+   */
+  setShieldsViewFaces(faces: ShieldFace[]): void {
+    this.shieldFaces = faces
+    this.applyDisplay()
   }
 
   /**
    * 销毁 view：先 removeChildView 再 webContents.destroy。
+   * 会话删除级联（§7.4）：发起会话被删除 → 调此销毁 view，且浮层当前内容是该会话时
+   * 浮层态同步复位（关浮层）；其它会话的 view / 浮层不动（防过宽清场）。
    * 幂等：sessionId 不存在时无操作。
    */
   destroy(sessionId: string): void {
@@ -333,6 +409,12 @@ export class BrowserViewManager {
       view.webContents.close()
     }
     this.views.delete(sessionId)
+    this.shieldHidden.delete(sessionId)
+    // 级联边界（§7.4）：仅浮层当前内容的发起会话被销毁才复位浮层态；
+    // 删除其它会话不动浮层、不销毁其它会话 view（S5 反向断言防过宽清场）。
+    if (this.overlayState.open && this.overlayState.sessionId === sessionId) {
+      this.overlayState = { ...CLOSED_OVERLAY }
+    }
   }
 
   /**
@@ -403,39 +485,79 @@ export class BrowserViewManager {
     entry.view.setBounds(rect)
   }
 
+  /** 错误态（§7.4 联动①）：页面加载失败 / render-process-gone 任一非 null 即错误占位态 */
+  private hasError(entry: ManagedView): boolean {
+    return entry.state.error !== null || entry.state.processGone !== null
+  }
+
+  /**
+   * 单 session 的显示收口谓词求值（含双阈值滞回状态位推进）。
+   * 滞回状态即使不显示也推进（状态机与显隐解耦，事件序重放收敛一致）。
+   */
+  private evaluateShouldShow(sessionId: string, entry: ManagedView): boolean {
+    const shieldHidden = nextShieldHidden(this.shieldHidden.get(sessionId) ?? false, this.shieldFaces, entry.lastRect)
+    this.shieldHidden.set(sessionId, shieldHidden)
+    return computeShouldShow({
+      overlay: this.overlayState,
+      sessionId,
+      hasError: this.hasError(entry),
+      shieldHidden,
+    })
+  }
+
+  /**
+   * 显示收口单点（不变量 8）：全部可见性触发面（show 请求 / focus / 错误态 / shieldsView /
+   * 浮层开合与内容切换 / rect 推送）收敛到此，按谓词补齐显隐差额（只在状态翻转时 actuator，
+   * 避免重复 setBounds）。
+   */
+  private applyDisplay(): void {
+    for (const [sid, entry] of this.views) {
+      const want = this.evaluateShouldShow(sid, entry)
+      if (want && !entry.isVisible) {
+        this._showEntry(entry, entry.lastRect)
+      } else if (!want && entry.isVisible) {
+        this._hideEntry(entry)
+      }
+    }
+  }
+
   /**
    * 切换可见 view 到指定 session（Wave 4 per-session 隔离）。
    *
-   * 行为：遍历所有 entry，隐藏当前 isVisible=true 的 entry（除 target 外），显示 target。
-   * - 若 target 存在：更新 lastUsed（LRU 提升优先级），isVisible=true，setBounds(lastRect)
-   * - 其他 isVisible=true 的 entry：hide（setBounds HIDDEN_RECT + isVisible=false，keep-alive）
-   * - 若 target 不存在（view 池里没有，如 LRU 被淘汰或从未创建）：仅隐藏所有可见 view，
-   *   renderer 侧 BrowserPane 会经 create + show 重建
+   * 浮层随行豁免（§5.1 规则 5 / §7.4）：浮层开 ∧ 内容 browser 时换显动作整体豁免——
+   * 浮层内容与 view 保持发起会话的（切走不关浮层、视口不空白）；浮层关闭后豁免解除。
    *
-   * 幂等：target 已是唯一可见 view 时无操作（仅更新 lastUsed）。
-   * 场景：renderer watch(focusedSessionId) → browser:focus(newSid)。切 session 时屏幕只显示新 sid 的 view。
+   * 显示收口（§7.4 R3，不变量 8）：非「浮层开 ∧ 内容 browser ∧ 无错误态 ∧ 无相交 shieldsView」态
+   * 只隐藏不显示（含浮层开但内容为 workflow 的换显场景，R4 对齐收口谓词）——
+   * [HISTORICAL] 原实装无条件 _showEntry(target, lastRect)（注释自述「切 session 时
+   * 屏幕只显示新 sid 的 view」），「恢复现状语义」不安全：关浮层 → 切走 → 切回 → 池内 view 以浮层旧
+   * rect 复显盖住对话流（残影经 focus sync 旁路复活，正是 §5.1 规则 6③ 要防的形态）。
+   * 实现取设计锚两选项中的收口强形态：不提供「调用方自报谓词」的显式参数（那会开旁路、
+   * 形成两处收口点双权威）——focus 恒只隐藏不显示，显示唯一触发 = applyDisplay 的统一谓词。
+   *
+   * 场景：renderer watch(focusedSessionId) → browser:focus(newSid)。
    */
   focus(sessionId: string): void {
+    // 浮层随行豁免：不换显、不隐藏任何 view
+    if (isOverlayBrowserActive(this.overlayState)) {
+      console.log(`[browser-view] focus: exempt (overlay browser active) sessionId=${sessionId}`)
+      return
+    }
+
     const target = this.views.get(sessionId)
-    console.log(`[browser-view] focus: sessionId=${sessionId}, target exists=${!!target}, views=`, 
-      Array.from(this.views.entries()).map(([sid, e]) => ({ sid, isVisible: e.isVisible, isAttached: e.isAttached })))
-    
-    // 隐藏所有当前可见的 entry（除 target 外）
-    for (const [sid, entry] of this.views) {
-      if (sid === sessionId) continue
+    if (!target) {
+      console.debug(`[browser-view] focus: target not found sessionId=${sessionId} (LRU evict or pending create)`)
+    }
+    if (target) {
+      target.lastUsed = Date.now() // LRU 提升优先级（防最近用的 session 被淘汰）
+    }
+
+    // 收口：只隐藏不显示（显示唯一触发 = applyDisplay 的统一谓词，不变量 8）
+    for (const entry of this.views.values()) {
       if (entry.isVisible) {
         this._hideEntry(entry)
       }
     }
-    
-    // 显示 target（若存在）
-    if (target) {
-      target.lastUsed = Date.now()
-      this._showEntry(target, target.lastRect)
-      return
-    }
-    
-    console.debug(`[browser-view] focus: target not found sessionId=${sessionId} (LRU evict or pending create)`)
   }
 
   /**
@@ -582,12 +704,17 @@ export class BrowserViewManager {
     wc.on('did-navigate', (_e, url: string) => {
       state.currentUrl = url
       state.error = null
+      state.processGone = null
       notify()
+      // 谓词重算触发面（§7.4 联动①）：重试成功/导航成功 → 错误态清空，谓词为真则恢复显示
+      this.applyDisplay()
     })
     wc.on('did-navigate-in-page', (_e, url: string) => {
       state.currentUrl = url
       state.error = null
+      state.processGone = null
       notify()
+      this.applyDisplay()
     })
     wc.on('did-fail-load', (_e, errorCode: number, errorDescription: string, validatedURL: string) => {
       // [HISTORICAL] ERR_ABORTED(-3)：重定向过程中的正常取消（被新导航抢占），非真错误，过滤。
@@ -595,6 +722,18 @@ export class BrowserViewManager {
       if (errorCode === ERR_ABORTED) return
       state.error = { errorCode, errorDescription, validatedURL }
       notify()
+      // 层级共存守卫①（§5.1 规则 6）：错误态进入即主动隐藏 view（keep-alive），DOM 错误占位才可见
+      this.applyDisplay()
+    })
+    // render-process-gone（§7.4 错误通道）：渲染进程崩溃 → 落「创建失败」占位族（state.processGone
+    // 推送，重试 = create + show + navigate）+ 错误态隐藏 view（守卫①，DOM 占位不被原生 view 盖住）。
+    // [HISTORICAL] 本 handler 为 W2 新增：原实装无 render-process-gone 处理，进程崩溃后
+    // view 以死 webContents 残留覆盖 DOM（C-proc-12 只覆盖主窗口 renderer 崩溃恢复链）。
+    wc.on('render-process-gone', (_e, details: { reason?: string }) => {
+      state.processGone = { reason: typeof details?.reason === 'string' ? details.reason : 'unknown' }
+      console.warn(`[browser-view] render-process-gone: sessionId=${sessionId}, reason=${state.processGone.reason}`)
+      notify()
+      this.applyDisplay()
     })
     // dom-ready：注入 viewport meta + autoFit 自动缩放（链式，保证 viewport reflow 完成后再读 scrollWidth）。
     //

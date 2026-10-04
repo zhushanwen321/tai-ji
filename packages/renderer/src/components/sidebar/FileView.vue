@@ -106,7 +106,7 @@
           <FileTreeRow
             :key="visibleRowKey(item)"
             :row="item"
-            :selected="item.type === 'file' && item.path === store.selectedPath"
+            :selected="item.type === 'file' && item.path === selectedPath"
             @toggle="onToggleRow"
             @select="onSelectRow"
           />
@@ -144,6 +144,8 @@ const props = defineProps<{
 }>()
 
 const store = useFileTreeStore()
+/** 选中行高亮（per-session 选中态，W3 selectedPath 串线终局解——各会话各自的选择互不干扰） */
+const selectedPath = computed(() => store.getSelectedPath(props.sessionId))
 const { loadTree, setFilter, setupInvalidation, toggleShowIgnored, expandNode, collapseNode, selectFile } = useFileTree()
 const drawer = useSideDrawer()
 
@@ -236,11 +238,11 @@ function onToggleRow(row: VisibleRow): void {
 
 /**
  * 选中文件（#6 预览触发，code-architecture §4 功能3 时序：点文件→SideDrawer.openDetailPane）。
- * selectFile 设 store.selectedPath（useDetailPane watch 自动加载内容），
- * drawer.open('detail') 打开抽屉切到 detail tab（DetailPane 挂载）。
+ * selectFile 设 store.selectedPaths[sessionId] 并同步注入 detail tab（W3 注入语义，
+ * useDetailPane 拉起加载），drawer.open('detail') 打开抽屉切到 detail tab（DetailPane 渲染）。
  */
 function onSelectRow(row: VisibleRow): void {
-  selectFile(row.path)
+  selectFile(props.sessionId, row.path)
   drawer.open('detail')
 }
 
