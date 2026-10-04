@@ -55,6 +55,7 @@ import {
 import { renderMermaid } from '@/composables/logic/mermaid'
 import { assistantToMarkdown } from '@/composables/logic/messageFormat'
 import { collectBasenames, collectFilePaths } from '@/lib/file-basename'
+import { localFileRead, localFileServable } from '@/lib/ipc'
 
 /** Set 内容等价（大小 + 逐成员），白名单去重赋值的判等基础 */
 function setsEqual(a: Set<string>, b: Set<string>): boolean {
@@ -207,6 +208,25 @@ export function useChatViewDeps(
     // resourceBaseDir env 装配共用 sessionCwdOf 单一实现；override 存在时 env 与 deps
     // 字段取值不同是有意的——override 只覆盖 env 通道，deps 恒按 id 查 session cwd）
     sessionCwdOf,
+    /** 产物 servable 预检（chat-html-support §6.3 D3「跨层依赖注入」/ §6.9 D9）：HtmlPreviewInline
+     *  挂载前经此调主进程 localFile:servable 判定（白名单 ∪ 存在 ∪ 非目录，与协议 handler
+     *  同谓词）。electronAPI 消费收敛在 lib/ipc（唯一适配点）；无 IPC（web/mock）时 reject，
+     *  容器按「预检不可用」跳过预检直接挂载（不阻塞预览入口，真实服务判定在协议 handler）。 */
+    probeArtifact: (absPath: string) => localFileServable(absPath),
+    /** 产物源码读取（chat-html-support v16 §6.3「源码态」/ §6.9 D9 localFile:read 通道）：
+     *  HtmlPreviewInline 切「源码」后经此读产物文件全文（产物目录在 session cwd 外，runtime
+     *  file.read 的 cwd 守门不可达）。lib/ipc 的结构化失败原因（not_found / is_dir /
+     *  out_of_whitelist / read_failed）以 err.reason 结构化属性附于 reject 的 Error（message
+     *  保留供 console 诊断）——容器按原因显具体文案（复用 panel.detail.htmlReason* 词条，
+     *  not_found「产物已被保留期回收」等真实原因用户侧可见）；无 IPC（web/mock）同样 reject
+     *  （无 reason 属性 → 容器 fallback 固定占位文案）。 */
+    readArtifact: async (absPath: string) => {
+      const result = await localFileRead(absPath)
+      if (!result.ok) {
+        throw Object.assign(new Error(`localFileRead failed: ${result.reason}`), { reason: result.reason })
+      }
+      return { content: result.content }
+    },
 
     // ── 操作回调 ──
     toggleExpand: (turnKey: string): void => turnExpansion.toggle(turnKey),

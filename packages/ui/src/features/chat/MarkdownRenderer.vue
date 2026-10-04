@@ -35,6 +35,28 @@
         <span class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" />
         <span data-testid="md-streaming-fence-lang" class="font-mono text-[length:var(--text-2xs)] font-semibold lowercase tracking-[0.08em] text-neutral-dim">{{ seg.lang }}</span>
       </div>
+      <!-- html-preview 段（chat-html-support §6.3 D3，v16 内联容器）：纯路径载荷走
+           HtmlPreviewInline 组件（不经 v-html/净化信任槽）；路径解析矩阵与 ④路同源——
+           props.resourceBaseDir 覆盖优先、缺省由容器经 deps.sessionCwdOf 拿 session cwd。
+           源码态经 #source 作用域插槽由本组件承接渲染（fence 高亮通道）：渲染能力由宿主
+           单向下供，容器不反向 import 本组件（无组件间静态循环依赖）。插槽内容里的
+           <MarkdownRenderer> 是 SFC 文件名隐式自引用——递归有界：容器把源码包进 html
+           fence，包裹后不再是 html-preview 语法区，嵌套实例不会命中本分支。 -->
+      <HtmlPreviewInline
+        v-else-if="seg.type === 'html-preview'"
+        :path="seg.content"
+        :session-id="props.sessionId"
+        :resource-base-dir="props.resourceBaseDir"
+      >
+        <template #source="{ markdown }">
+          <MarkdownRenderer
+            :content="markdown"
+            :session-id="props.sessionId"
+            class="p-1.5"
+            data-testid="html-preview-source"
+          />
+        </template>
+      </HtmlPreviewInline>
       <MermaidRenderer v-else :source="seg.content" />
     </template>
     <!-- 歧义文件选择浮层：裸 basename 多匹配时弹出（锚定到点击的 <a>，portal 到 body） -->
@@ -66,6 +88,7 @@ import type { MarkdownSegment } from './markdown-types'
 import { findByBasename } from '../../lib/file-basename'
 import { RUNNING_LOADER_SVG } from './block-icon'
 import AmbiguousFilePopover from './AmbiguousFilePopover.vue'
+import HtmlPreviewInline from './HtmlPreviewInline.vue'
 import MermaidRenderer from './MermaidRenderer.vue'
 import { useChatViewDeps } from './chat-view-deps'
 import { useMarkdownStreaming } from './composables/useMarkdownStreaming'
@@ -106,7 +129,8 @@ function decodeB64(b64: string): string {
  * v-for 段 key（W23 review Fix-2）：streaming-fence 占位段固定哨兵 'sf'——占位段的 segId
  * 在协议层每帧重分配（tail 段每帧重建），若 key 随帧变则占位 DOM 重建、loader 旋转动画
  * （1.4s 周期）每帧从头重启，视觉冻结在起转 18°。文档级至多一个未闭合 fence，哨兵不撞号。
- * 其余段沿用 segId（前缀段跨帧不变 → DOM 复用）/ index（全量降级路径）。
+ * 其余段沿用 segId（前缀段跨帧不变 → DOM 复用）/ index（全量降级路径）。html-preview 段
+ * （fence 闭合后才成段，属前缀/稳定区）走 segId——容器预检态随实例保活，不被重建重置。
  */
 function segKey(seg: MarkdownSegment, i: number): string {
   if (seg.type === 'streaming-fence') return 'sf'

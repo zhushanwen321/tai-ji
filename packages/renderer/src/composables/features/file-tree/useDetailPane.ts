@@ -18,6 +18,11 @@
  *   useDetailPane 拉起 idle 实例 → (gitOverlay 判定: 改动→git.getDiff / 未改动→file.read) →
  *   渲染（禁 v-html，文本插值/<pre>）
  *
+ * HTML 形态（chat-html-support v16 形态变更，§6.4 D4）：.html/.htm 恢复 code 类 shiki
+ * 源码高亮（渲染态退役，预览面收敛到消息流内联容器 HtmlPreviewInline）；产物目录文件
+ * （session cwd 外，runtime file.read 的 cwd 守门不可达）的抽屉源码读取走 localFile:read
+ * 白名单通道（§6.9 D9，readFileContent 两通道分发）。
+ *
  * 依赖方向：useDetailPane → fileTreeStore + api/domains（file/git）。不直接 import chat store。
  *
  * [NFR-AC-S4] 禁 v-html：本 composable 只负责取数据，渲染层 DetailPane.vue 用文本插值/<pre>，
@@ -31,6 +36,7 @@ import { registerSessionCleanup } from '@/composables/useSessionScopedState'
 import { file as fileApi, git as gitApi } from '@/api'
 import { parseDiff } from '@/composables/logic/parseDiff'
 import { resolvePreviewPath } from '@/lib/path-utils'
+import { localFileRead, type LocalFileReadReason } from '@/lib/ipc'
 import i18n from '@/i18n'
 
 export type { DetailViewMode, DetailTabState } from '@/stores/fileTree'
@@ -120,6 +126,39 @@ export function useDetailPane(sessionId: Ref<string | null>) {
   }
 
   /**
+   * preview 模式内容读取（两通道，「白名单先行」沿袭 chat-html-support §6.9 D9 源码读取语义）。
+   * cwd 内路径 → 既有 file.read cwd 守门通道；cwd 外路径（产物目录 <dataDir>/artifacts/<sessionId>
+   * 等——变更集卡/文件树可点开产物文件，runtime file.read 的 cwd 守门不可达）→ localFile:read
+   * 白名单通道（与 servable 预检同一白名单谓词，main 侧单一实现）。只有 out_of_whitelist 才回落
+   * cwd 通道；not_found / is_dir / read_failed 是真实失败，带原因直接进错误态（不静默吞掉）。
+   * IPC 通道不可用（mock / 旧 preload 的 reject）同样回落 cwd 通道。
+   */
+  async function readFileContent(
+    sid: string,
+    path: string,
+  ): Promise<{ content: string; truncated: boolean }> {
+    const resolved = resolvePreviewPath(sessionCwd(sid) ?? '', path)
+    if (resolved.relative !== null) return fileApi.read(path, sid)
+    const result = await localFileRead(resolved.absolute).catch((e) => {
+      console.warn('[useDetailPane] localFileRead failed, falling back to cwd channel:', e)
+      return null
+    })
+    if (result?.ok) return { content: result.content, truncated: result.truncated }
+    if (result && result.reason !== 'out_of_whitelist') {
+      throw new Error(sourceReadErrorText(result.reason))
+    }
+    return fileApi.read(path, sid)
+  }
+
+  /** 白名单读取真实失败原因 → 用户可见文案（panel.detail.htmlReasonNotFound/htmlReasonIsDir
+   *  为 chat-html-support 新增键；read_failed 无专用词条落通用 loadFailed） */
+  function sourceReadErrorText(reason: Exclude<LocalFileReadReason, 'out_of_whitelist'>): string {
+    if (reason === 'not_found') return t('panel.detail.htmlReasonNotFound')
+    if (reason === 'is_dir') return t('panel.detail.htmlReasonIsDir')
+    return t('composable.loadFailed')
+  }
+
+  /**
    * 取数据并回写 tab 实例（code-architecture §4 功能3 时序）。
    * - diff 模式 → git.getDiff(sid, gitPath ?? path)
    * - preview 模式 → file.read(path, sid) cwd 守门
@@ -151,7 +190,7 @@ export function useDetailPane(sessionId: Ref<string | null>) {
         // 仅初始加载（autoFallback=true）降级；toggleView 传 false，尊重用户主动选择 Diff。
         if (autoFallback && !result.binary && parseDiff(result.patch).hunks.length === 0) {
           store.updateDetailTab(sid, path, { viewMode: 'preview' })
-          const fileResult = await fileApi.read(path, sid)
+          const fileResult = await readFileContent(sid, path)
           if (stale()) return
           store.updateDetailTab(sid, path, {
             content: fileResult.content,
@@ -159,7 +198,7 @@ export function useDetailPane(sessionId: Ref<string | null>) {
           })
         }
       } else {
-        const result = await fileApi.read(path, sid)
+        const result = await readFileContent(sid, path)
         if (stale()) return
         store.updateDetailTab(sid, path, {
           content: result.content,

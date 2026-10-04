@@ -59,6 +59,29 @@ export interface ChatViewDeps {
    *  （fallback undefined → ④路 preventDefault 无动作），renderer useChatViewDeps 运行时
    *  总 provide 真实实现 */
   sessionCwdOf?: (sessionId: string) => string | undefined
+  /** 产物文件 servable 预检（chat-html-support §6.3 D3「跨层依赖注入」+ §6.9 D9）：入参
+   *  绝对路径，出参形状 = 主进程 `localFile:servable` 通道（白名单 ∪ 存在 ∪ 非目录三个
+   *  谓词同源；reason ∈ not_found / is_dir / out_of_whitelist 即降级原因，servable=true
+   *  时 size 附字节数供 HtmlPreviewInline 头部条展示文件名与大小）。
+   *  optional，同 sessionCwdOf：未 provide（测试 mock 壳）时容器跳过预检、不显示大小，
+   *  预检 pending 期间显中性加载态（不设墙钟超时）；renderer useChatViewDeps 运行时总
+   *  provide 真实实现（内部经 electronAPI 走主进程 IPC）。 */
+  probeArtifact?: (absPath: string) => Promise<{
+    servable: boolean
+    reason?: 'not_found' | 'is_dir' | 'out_of_whitelist'
+    size?: number
+  }>
+  /** 产物文件源码读取（chat-html-support v16 §6.3「源码态」+ §6.9 D9 读取通道）：入参
+   *  绝对路径，出参 = 文件全文。消费方 = HtmlPreviewInline 源码态（容器头部切「源码」→
+   *  iframe 卸载、内容走 MarkdownRenderer 的 shiki fence 高亮通道）；通道 = 主进程
+   *  `localFile:read`（产物目录在 session cwd 外，runtime file.read 的 cwd 守门不可达，
+   *  与 servable 预检同一白名单谓词）。读取失败 reject，Error 携带结构化 reason 属性
+   *  （`err.reason` ∈ not_found / is_dir / out_of_whitelist / read_failed，与通道错误码
+   *  同源）——容器按原因显具体文案（复用 panel.detail.htmlReason* 词条），未携带（mock /
+   *  非契约实现）→ 固定占位文案，均附重试。
+   *  optional，同 probeArtifact：未 provide（测试 mock 壳）→「源码」按钮隐藏（容器只有
+   *  预览态）；renderer useChatViewDeps 运行时总 provide 真实实现。 */
+  readArtifact?: (absPath: string) => Promise<{ content: string }>
   /** 查询某消息的朗读态（ai-voice-tts 设计 §5.1 按钮状态机数据面，TurnSummary 朗读按钮消费；
    *  三态与 renderer useTtsPlayer 的 SpeakStatus 结构同形——ui 不 import renderer，形状各自声明）。
    *  optional，同 onSpeak：两字段成对 provide/缺席，未 provide 时朗读按钮不渲染 */

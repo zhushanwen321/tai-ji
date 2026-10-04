@@ -12,7 +12,7 @@
  * - 持久介质断言 = W1 设计 .tmp/tech-design/w1-run-record-journal-authority.md §4.2 场景 1
  *   （介质归位）：run/record 运行态落 journal 事件流 + 主 session 每实体两条 v2 小条目，
  *   条目不带 eventLog/displayItems 死字节——run 结束后按新介质锚定断言：
- *   ① journal `wf-<runId>.events.jsonl` 存在（首帧 run-created、恰一帧 run-settled、seq 严格递增）；
+ *   ① journal `wf-<runId>.record.jsonl` 存在（首帧 run-created、恰一帧 run-settled、seq 严格递增）；
  *   ② 主 session JSONL workflow-record v2 条目 registered/settled 各恰 1，
  *     subagent-record v2 条目 registered/settled 各恰 2（两成员）；
  *   ③ v2 条目与 journal 的一致性锚（W1 D6「同实体冲突 journal 事件胜出」的终态投影面）：
@@ -240,7 +240,7 @@ async function settleS1Anchors(
   consoleCap: { errors: string[] },
 ): Promise<{ journalFile: string; runId: string; sessionFile: string }> {
   const agentDir = path.join(dataDir, 'agent')
-  const journalFound = await waitUntil(() => listFilesRecursive(agentDir, '.events.jsonl').length > 0, JOURNAL_TIMEOUT_MS)
+  const journalFound = await waitUntil(() => listFilesRecursive(agentDir, '.record.jsonl').length > 0, JOURNAL_TIMEOUT_MS)
   if (!journalFound) {
     writeDiag(testInfo, 'batch-s1-journal-missing.json', {
       agentTree: fs.existsSync(agentDir) ? fs.readdirSync(agentDir) : [],
@@ -249,10 +249,10 @@ async function settleS1Anchors(
       consoleErrors: consoleCap.errors,
     })
   }
-  expect(journalFound, `run journal (wf-*.events.jsonl) 应在 ${JOURNAL_TIMEOUT_MS}ms 内落盘于 <agentDir>/sessions/**/workflow-state/`).toBe(true)
-  const journalFile = listFilesRecursive(agentDir, '.events.jsonl')[0]
-  const runId = path.basename(journalFile).replace(/\.events\.jsonl$/, '')
-  expect(runId.startsWith('wf-'), `journal 文件名应为 <runId>.events.jsonl 且 runId 带 wf- 前缀，收到 "${runId}"`).toBe(true)
+  expect(journalFound, `run journal (wf-*.record.jsonl) 应在 ${JOURNAL_TIMEOUT_MS}ms 内落盘于 <agentDir>/sessions/**/workflow-state/`).toBe(true)
+  const journalFile = listFilesRecursive(agentDir, '.record.jsonl')[0]
+  const runId = path.basename(journalFile).replace(/\.record\.jsonl$/, '')
+  expect(runId.startsWith('wf-'), `journal 文件名应为 <runId>.record.jsonl 且 runId 带 wf- 前缀，收到 "${runId}"`).toBe(true)
 
   // ── 通知等待：notifyDone 送达 entry（customType=workflow-result，details.notifyId=wf-done:<runId>） ──
   const sessionFileFound = await waitUntil(

@@ -1,9 +1,13 @@
+<!-- split-justified: 文件预览抽屉单一语义域（类型分发 + 多态渲染 + 选区引用注入——渲染面与选区反推围绕同一预览上下文） -->
 <template>
   <!-- split-justified: detail 文件预览域（多文件 tab 实例层 + header 动作 + 四态内容渲染 + 选区反推行号——同一预览面板语义域；display-containers W3 tab 条接入后 script 超 300，按登记制放行） -->
   <!--
     DetailPane —— 文件预览面板（#6，UC-6，对齐 draft-detail-pane.html）。
     文件内容 / diff 预览，挂在 SideDrawer detail tab；顶部实例层 tab 条承载多文件
     （display-containers §6.3：detail 多文件 tab，keep-alive 多实例）。
+
+    HTML 形态（chat-html-support v16 形态变更，§6.4 D4）：.html/.htm 走 code 类 shiki
+    源码高亮（抽屉渲染态退役，预览面收敛到消息流内联容器 HtmlPreviewInline）。
 
     [NFR-AC-S4] 禁 v-html：内容用 <pre> + {{ }} 文本插值渲染，XSS 安全（T6.10）。
     data-testid 标注供 E2E 选择器。
@@ -134,7 +138,8 @@
       </div>
     </div>
 
-    <!-- 加载态（骨架，AC-6.6/T6.7：异步返回前非空白） -->
+    <!-- 加载态（骨架，AC-6.6/T6.7：异步返回前非空白；本条起是 loading/error/idle/binary/
+         内容区互斥 v-if 链——v16 前链头是 HTML 渲染态，退役后由 loading 领链） -->
     <div
       v-if="state.status === 'loading'"
       class="flex flex-1 flex-col items-center justify-center gap-2 p-4"
@@ -267,7 +272,7 @@
             <p class="font-mono text-[length:var(--text-3xs)] text-neutral-dim opacity-60">{{ state.path }}</p>
           </div>
         </div>
-        <!-- code：CodeBlock shiki 高亮 -->
+        <!-- code（含 .html/.htm——v16 后走 shiki 源码高亮）：CodeBlock shiki 高亮 -->
         <div
           v-else-if="state.kind === 'code'"
           class="p-2"

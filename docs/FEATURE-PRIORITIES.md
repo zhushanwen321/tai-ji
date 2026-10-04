@@ -50,7 +50,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 多会话管理 | 侧边栏会话列表、切换 12 步链、删除清理编排、LRU、未读标记 | harness 的本质 = 多 agent 工作流并行管理；单会话裸跑不构成工作台 |
 | 模型与 thinking level | 能力注册表、生效回执（RPC 状态化）、模型切换 | 用户控制 agent 智能水平/成本的核心旋钮；锁死单模型不可用 |
 | 中断/取消 | turn 取消链、取消后状态一致性 | 失控 agent 无法停止 = 持续烧 token 不可用 |
-| Markdown 渲染 | shiki 高亮、HTML 分通道净化（可信段摘出回填 + 用户 HTML DOMPurify 白名单）、相对资源通道（resourceBaseDir 双通道）、CSP 兼容、降级路径 | 对话内容呈现主体；纯文本降级已属不可读（曾 CSP 事故） |
+| Markdown 渲染 | shiki 高亮、HTML 分通道净化（可信段摘出回填 + 用户 HTML DOMPurify 白名单）、相对资源通道（resourceBaseDir 双通道）、html-preview 块渲染（对话流内联容器 HtmlPreviewInline，sandbox iframe 原位渲染，v16/ADR-0119）、产物文件抽屉恢复源码高亮（v16 渲染态退役）、CSP 兼容、降级路径 | 对话内容呈现主体；纯文本降级已属不可读（曾 CSP 事故） |
 | 扩展装载框架 | builtin 21 包装载、分组检查（infrastructure 不可禁）、worker 隔离 | 所有进阶能力的装载底座，挂了 feature 扩展全灭 |
 | subagent/workflow 面板与派发 | composer 任务托盘的 subagent/workflow 列表与运行计数（含 built-in 第 4 件「子会话」观察入口——调度模式派发进度的主视图；含行内取消/中止——workflow 一次性生命周期 abort-only，pause/resume 已随扩展 D-2 移除）、workflow 可视化 overlay（2026-10-02：双入口改向全屏 overlay——左 DAG 蓝图 + 右多级 tab 实况面板，挂掉回落 drawer WorkflowTab 对冲）、drawer 详情 tab（回落载体）、通知链 | agent 生产力的核心形态（边界判例 #2，2026-09-12 升 P0）；2026-09-16 观察入口自侧栏 Agents/Flows tab 迁 composer 任务托盘（侧栏收敛三 tab，入口唯一化）；展示承载层 = 展示容器体系（右抽屉 8 tab / 底抽屉 / 浮层统一壳 + 键盘栈序编排器，display-containers）——容器体系挂掉 = P0 面板内容不可见，属 P0 链路一环（不另立独立条目） |
 | 设置页 | provider/API key 管理、系统提示词编辑、**模式（预设）编辑 + 模式提示词卡**、主题 | provider 配置是首次使用必经路径，配不了连会话都起不了 |

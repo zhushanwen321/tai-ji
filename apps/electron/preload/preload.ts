@@ -1,7 +1,11 @@
 // apps/electron/preload/preload.ts
 import { contextBridge, ipcRenderer } from 'electron'
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, ShieldsFacesPayload } from '@taiji/shared'
-import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, ShieldsFacesPayload, LocalFileServableResult, LocalFileReadResult } from "@taiji/shared"
+import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ } from "@taiji/shared"
+
+// local-file 预检 / 源码读取的 payload 类型（LocalFileServableResult / LocalFileReadResult）
+// 定义 SSOT = `packages/shared/src/ipc-payloads.ts`（C-comm-22 唯一类型源），本文件只 import
+// 用于 ElectronAPI 方法签名——从前在此处另立一份副本会与 main / renderer 侧静默漂移。
 
 export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
   /** 监听 runtime 端口事件 */
@@ -60,6 +64,24 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
   /** 在文件管理器中显示文件（trace MALFORMED 行「打开所在目录」；main 校验绝对路径后
    *  shell.showItemInFolder，返回是否放行） */
   revealInFolder(filePath: string): Promise<boolean>
+  /**
+   * 预检绝对路径是否可服务（chat-html-support §6.9 D9）：内联预览容器 HtmlPreviewInline
+   * （经 deps `probeArtifact?`）挂载前预检（v16 唯一渲染面，ADR-0119）。谓词 = 准入前缀
+   * 成员资格（先行短路）→ 存在性 → 目录性，与 main 的 local-file 协议 handler 同一模块
+   * 函数；准入前缀 = 会话产物子树 `<dataDir>/artifacts/**`（读/预检通道收窄面，非协议
+   * handler 全量白名单——通道入参含模型消息文本路径载荷）。入参 = 明文绝对路径（% 解码
+   * 由 URL 入口承担，IPC 不重复解码）。
+   */
+  localFileServable(absPath: string): Promise<LocalFileServableResult>
+  /**
+   * 读产物子树内文件内容（chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」）：
+   * 消费方 = 内联容器源码态（deps `readArtifact`）与 DetailPane 变更集/文件树产物源码读取
+   * （useDetailPane `loadPreviewContent`）——产物目录在 session cwd 外，runtime file.read
+   * 的 cwd 守门不可达。谓词与 `localFileServable` 同一模块函数，准入前缀同为产物子树
+   * `<dataDir>/artifacts/**`（收窄面），越界返回 `out_of_whitelist`（不触 fs），消费方
+   * 回落既有 cwd 通道。
+   */
+  localFileRead(absPath: string): Promise<LocalFileReadResult>
   /** 监听 macOS 全屏状态变化 */
   onFullscreenChanged(callback: (payload: { isFullscreen: boolean }) => void): () => void
   // ── 窗口控制（win/linux 自绘圆点点击）─────────────────────────
@@ -310,6 +332,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }) => ipcRenderer.invoke('pick-file', options),
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
   revealInFolder: (filePath: string) => ipcRenderer.invoke('reveal-in-folder', filePath),
+  // 通道名 SSOT = @taiji/shared 的 LOCAL_FILE_SERVABLE / LOCAL_FILE_READ
+  // （packages/shared/src/ipc-channels.ts）；main 侧 gateway/local-file-handlers 同 import
+  // ——两侧禁止字面量分叉
+  localFileServable: (absPath: string) => ipcRenderer.invoke(LOCAL_FILE_SERVABLE, absPath),
+  localFileRead: (absPath: string) => ipcRenderer.invoke(LOCAL_FILE_READ, absPath),
   onFullscreenChanged: (callback: (payload: { isFullscreen: boolean }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: { isFullscreen: boolean }) => callback(payload)
     ipcRenderer.on('fullscreen-changed', handler)
