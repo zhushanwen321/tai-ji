@@ -16,7 +16,7 @@
  * - HTTP /health 端点（与 WS 同端口，简单存活探针；不要求 token——supervisor 探活用，
  *   响应只有 status/uptime，无敏感数据）。
  * - 移动壳静态托管分派（remote-access D3/E5，S3 拆分后）：静态实现与开态判定均在
- *   mobile-static.ts + 组合根，本类只持一个可空 handler 引用——注入时非 /health 请求
+ *   infra/mobile-static.ts + 组合根，本类只持一个可空 handler 引用——注入时非 /health 请求
  *   委托 handler 服务，未注入（null）时 /health 之外一律 404，与无远程访问形态
  *   逐字节一致。
  * - maxPayload：单条消息上限（超限连接被 close 1009，见 shared MAX_WS_PAYLOAD_BYTES 校准注释）。
@@ -24,22 +24,15 @@
  * 不含：消息路由（server.ts handleMessage）、消息发送（broker）、业务逻辑（handlers）。
  * 连接 auth 成功后把 ws + 解析出的 msg 通过注入的回调交给上层（RuntimeServer）处理。
  */
-import { createServer, type Server as HttpServer } from 'node:http'
+import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
-import * as fs from 'node:fs'
-import { join } from 'node:path'
 import { WebSocketServer, WebSocket, type WebSocket as WsType } from 'ws'
 import {
-  isRemoteAccessConfigShape,
   MAX_WS_PAYLOAD_BYTES,
-  REMOTE_ACCESS_FILENAME,
-  REMOTE_TOKEN_HEX64,
   type ClientMessage,
 } from '@taiji/shared'
-import { getDataDir } from '@taiji/shared/paths'
-import { errorCodeOf, toErrorMessage } from '../utils/errors.js'
+import { toErrorMessage } from '../utils/errors.js'
 import type { ErrorDetails } from './message-context.js'
-import type { MobileStaticHandler } from './mobile-static.js'
 
 const HTTP_OK = 200
 const HTTP_NOT_FOUND = 404
@@ -68,130 +61,19 @@ function tokenEquals(a: string, b: string): boolean {
   return timingSafeEqual(ba, bb)
 }
 
-// ── remote token 热读（remote-access D2/E10）───────────────────────────────
-// 读取通道形态与 index.ts resolveRuntimeToken 同构（fs.readFileSync + getDataDir() 推导），
-// 但触发时机不同：runtime-token 是启动期一次解析，remote token 是每次 WS auth 握手热读——
-// token 轮换 = main 重写 remote-access.json，下一次新握手即生效，无 runtime 重启（D2）。
-// 独立导出纯解析函数 + IO 包装：组合根（index.ts）import 即执行 main() 不可直测，
-// E10 三态（缺失/坏 JSON/坏字段）的 fail-closed 语义由本模块单测守卫。
-
-// ── 热读失败频控（code-harden P2：重连风暴降噪）────────────────────────────
-// 热读每次握手调用；文件持续缺失/损坏 + 移动壳客户端自动重连会逐次刷 error 放大
-// 噪音。频控语义：每进程**同因**首次失败响亮 error（含恢复指引），此后同因失败降为
-// debug 不再刷屏；任一次读取成功（解析出合法 token）即重置回「首次响亮」态——故障
-// 自愈后复发会再响亮，防长期降级掩盖复发。因变化（如 ENOENT → 坏 JSON）各自首次
-// 响亮：失败原因变化本身是值得注意的信号。
-let lastRemoteReadFailureCause: string | null = null
-
-/** 频控出口：同因首次响亮 console.error，重复降为 console.debug（语义见上方注释）。 */
-function reportRemoteReadFailure(cause: string, loudMessage: string): void {
-  if (lastRemoteReadFailureCause === cause) {
-    console.debug(
-      `[runtime] remote access: ${REMOTE_ACCESS_FILENAME} 同因失败重复发生（${cause}），降为 debug——首次 error 已含恢复指引`,
-    )
-    return
-  }
-  lastRemoteReadFailureCause = cause
-  console.error(loudMessage)
-}
-
-/** 读取成功（解析出合法 token）后重置频控，下次失败重新响亮。 */
-function markRemoteReadSuccess(): void {
-  lastRemoteReadFailureCause = null
-}
-
-/** 测试隔离用：重置频控状态（对齐 utils/warn-once.ts 的 _resetWarnOnceForTest 先例）。 */
-export function _resetRemoteReadGateForTest(): void {
-  lastRemoteReadFailureCause = null
-}
-
-/**
- * 解析 remote-access.json 内容为 remote token（E10 处置：任何不合法形态返回 null，
- * remote 集合退化为空——仅 spawn token 可认证，fail-closed）。
- *
- * - 坏 JSON / 非对象 / 字段不合法 → 频控 error 日志（首次响亮含恢复指引，同因重复
- *   降 debug，语义见上方频控注释）+ null；
- * - enabled=false → 关态文件留存是设计内合法产出（D2 配套规格③），console.log（注明
- *   debug 性质——prod 日志可观测，且非错误不刷 error）+ null（计算器分层：设计内
- *   合法产出不是错误）；
- * - 返回非 null token = 读取成功，重置失败频控。
- */
-export function parseRemoteAccessToken(raw: string): string | null {
-  let config: unknown
-  try {
-    config = JSON.parse(raw)
-  } catch {
-    reportRemoteReadFailure(
-      'bad-json',
-      `[runtime] remote access: ${REMOTE_ACCESS_FILENAME} 不是合法 JSON — remote token 不可用` +
-        '（fail-closed：仅 spawn token 可认证，远程客户端将全部被拒）。' +
-        '恢复：回桌面端 设置 → 远程访问面板 执行轮换（重写配置文件），或检查该文件内容',
-    )
-    return null
-  }
-  // shape 判据单源 = shared 的 isRemoteAccessConfigShape（main 写侧守卫 import 同一
-  // 谓词，判据不可能分叉）；本侧从宽策略（enabled=false 早退跳过 hex、enabled=true 才
-  // 校验 hex、任何不合法形态 fail-closed 返回 null）刻意保留在本地——与 main 写侧
-  // 从严恒校验的不对称是文档化的双侧策略差异，不上收、不参数化。
-  if (!isRemoteAccessConfigShape(config)) {
-    reportRemoteReadFailure(
-      'bad-shape',
-      `[runtime] remote access: ${REMOTE_ACCESS_FILENAME} 字段不合法（缺 enabled/token 或类型不符）— ` +
-        'remote token 不可用（fail-closed：仅 spawn token 可认证）。' +
-        '恢复：回桌面端 设置 → 远程访问面板 执行轮换（重写配置文件），或删除该文件后在面板重新开启',
-    )
-    return null
-  }
-  // 关态文件留存（D2 配套规格③）：开关关闭但文件还在，token 不入集合。这是开关切换
-  // 触发 runtime 重启前的正常窗口态，非错误。console.log（非 debug）使 prod 日志可
-  // 观测——关态入集合判定是安全相关事实，消息内注明其 debug 性质防误读为错误。
-  if (config.enabled === false) {
-    console.log(`[runtime] remote access: ${REMOTE_ACCESS_FILENAME} enabled=false（关态文件留存，debug 信息），remote token 不入鉴权集合`)
-    return null
-  }
-  if (!REMOTE_TOKEN_HEX64.test(config.token)) {
-    reportRemoteReadFailure(
-      'bad-token-format',
-      `[runtime] remote access: ${REMOTE_ACCESS_FILENAME} token 字段不符合契约（须为 64 位 hex 小写）— ` +
-        'remote token 不可用（fail-closed：仅 spawn token 可认证）。' +
-        '恢复：回桌面端 设置 → 远程访问面板 执行轮换（重新生成 token 并重写配置文件）',
-    )
-    return null
-  }
-  markRemoteReadSuccess()
-  return config.token
-}
-
 // ── 移动壳静态托管（remote-access D3/E4/E5）────────────────────────────────
-// 实现已抽至 mobile-static.ts（S3 拆分：静态托管与连接生命周期是正交变化轴）。
+// 实现已抽至 infra/mobile-static.ts（S3 拆分：静态托管与连接生命周期是正交变化轴；
+// 文件 IO 属 infra 领地——runtime-layering.md §2 transport 层不碰 node:fs）。
 // 开态判定（remote-access flag → dist 探测 → handler 构造）归组合根（index.ts），
 // 本模块只消费注入的 handler（见 ConnectionManagerOptions.mobileStaticHandler）。
 
 /**
- * 热读 `<getDataDir()>/<REMOTE_ACCESS_FILENAME>` 取 remote token（remote-access D2）。
- * 每次握手调用一次（auth 是低频事件），文件缺失/不可读按 E10 fail-closed 返回 null +
- * 频控 error 日志（首次响亮含恢复指引，同因重复降 debug——语义见上方频控注释）。
- * 组合根仅在 `--remote-access` 开态把本函数装配为 remoteTokenProvider——关态不装配，
- * 本函数不被调用（关态零 IO）。
+ * 移动壳静态 handler 注入形态（remote-access D3/S3）：实现居 infra/mobile-static.ts
+ * （createMobileStaticHandler 返回值与其结构兼容）。transport 不 import infra——边界
+ * 类型在消费侧本地声明，组合根装配点把 infra 实现注入本选项，签名失配由装配处
+ * typecheck 拦截（结构化类型系统的编译期对账）。
  */
-export function readRemoteAccessToken(): string | null {
-  const filePath = join(getDataDir(), REMOTE_ACCESS_FILENAME)
-  let raw: string
-  try {
-    raw = fs.readFileSync(filePath, 'utf-8')
-  } catch (error) {
-    // cause 含 fs error code（ENOENT/EACCES 等）——不含 error.message，其内嵌文件
-    // 绝对路径不重复落日志（filePath 已在首次响亮消息中）。
-    reportRemoteReadFailure(
-      `read-${errorCodeOf(error) ?? 'unknown'}`,
-      `[runtime] remote access: 读取 ${filePath} 失败（fs error code: ${errorCodeOf(error) ?? 'unknown'}）— ` +
-        'remote token 不可用（fail-closed：仅 spawn token 可认证，远程客户端将全部被拒）。' +
-        '恢复：回桌面端 设置 → 远程访问面板 确认开关并执行轮换（重新生成 token 并写回文件），或检查文件权限',
-    )
-    return null
-  }
-  return parseRemoteAccessToken(raw)
-}
+export type MobileStaticHandler = (req: IncomingMessage, res: ServerResponse) => Promise<void>
 
 /**
  * 连接事件回调（由 RuntimeServer 注入）。
@@ -216,7 +98,7 @@ export interface ConnectionCallbacks {
  */
 export interface ConnectionManagerOptions {
   /**
-   * 移动壳静态 handler（remote-access D3，S3 拆分后形态）：由 mobile-static.ts 的
+   * 移动壳静态 handler（remote-access D3，S3 拆分后形态）：由 infra/mobile-static.ts 的
    * createMobileStaticHandler 构造，组合根仅在 remote-access 开态且 dist 探测通过
    * （resolveMobileStaticRoot 非空）时注入；本类不感知静态细节，只按「是否注入」
    * 分派——未注入（关态/E5 禁用）时 /health 之外一律 404，与无远程访问形态逐字节
@@ -249,7 +131,7 @@ export class ConnectionManager {
   private preAuthWarned = new Set<WsType>()
   /**
    * 移动壳静态 handler（remote-access D3/E5，S3 拆分后）：组合根开态判定 + dist 探测
-   * 通过时注入，实现与生命周期在 mobile-static.ts。null = 关态或 E5 禁用，HTTP 分派
+   * 通过时注入，实现与生命周期在 infra/mobile-static.ts。null = 关态或 E5 禁用，HTTP 分派
    * 不进静态分支（与无远程访问形态逐字节一致）。
    */
   private readonly mobileStaticHandler: MobileStaticHandler | null
@@ -280,7 +162,7 @@ export class ConnectionManager {
         res.writeHead(HTTP_OK, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ status: 'ok', uptime: process.uptime() }))
       } else if (this.mobileStaticHandler !== null) {
-        // 静态实现委托注入的 handler（mobile-static.ts）；handler 所有分支都写完响应。
+        // 静态实现委托注入的 handler（infra/mobile-static.ts）；handler 所有分支都写完响应。
         void this.mobileStaticHandler(req, res)
       } else {
         res.writeHead(HTTP_NOT_FOUND)

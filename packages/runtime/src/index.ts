@@ -2,11 +2,12 @@
 import { RuntimeServer } from './transport/server.js'
 // remote-access U0.1（D2/D9）：remote token 热读函数——仅 --remote-access 开态装配为
 // ConnectionManager 的 remoteTokenProvider（每次 auth 握手调用）；关态不装配零 IO。
-import { readRemoteAccessToken } from './transport/connection-manager.js'
+// 层位：文件 IO 居 infra（runtime-layering.md §2 transport 层不碰 node:fs）。
+import { readRemoteAccessToken } from './infra/remote-access.js'
 // remote-access D3/E5（S3 拆分）：移动壳静态托管——开态判定（remoteAccess 判据 → dist
 // 探测 → handler 构造）收敛在组合根（见 main() Transport layer 装配段），实现与穿越
-// 防护（E4）在 mobile-static.ts。
-import { createMobileStaticHandler, resolveMobileStaticRoot } from './transport/mobile-static.js'
+// 防护（E4）在 infra/mobile-static.ts。
+import { createMobileStaticHandler, resolveMobileStaticRoot } from './infra/mobile-static.js'
 import { SessionService } from './services/session/session-service.js'
 import { REVOKED_SIGNAL_CUSTOM_TYPE } from './services/session/revoke-orchestrator.js'
 // BtwService 组合根接线（btw-question M2-b，B2 授权）：依赖六项按其 docstring 归位本文件。

@@ -27,7 +27,7 @@ import { join } from 'node:path'
 import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { WebSocket } from 'ws'
 import { ConnectionManager, type ConnectionManagerOptions } from '../connection-manager.js'
-import { createMobileStaticHandler, resolveMobileStaticPath, resolveMobileStaticRoot } from '../mobile-static.js'
+import { createMobileStaticHandler, resolveMobileStaticPath, resolveMobileStaticRoot } from '../../infra/mobile-static.js'
 
 const SPAWN_TOKEN = 'spawn-token'
 const REMOTE_TOKEN_A = 'a'.repeat(64)

@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer, request as httpRequest, type IncomingMessage, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { createMobileStaticHandler, resolveMobileStaticRoot } from '../mobile-static.js'
+import { createMobileStaticHandler, resolveMobileStaticRoot } from '../../infra/mobile-static.js'
 
 const INDEX_MARK = 'mobile-shell-index-marker'
 

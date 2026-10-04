@@ -23,13 +23,13 @@ import { join } from 'node:path'
 import type { Server as HttpServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { WebSocket, type WebSocket as WsType } from 'ws'
+import { ConnectionManager, type ConnectionManagerOptions } from '../connection-manager.js'
+// 读侧函数（parse/read/频控重置）居 infra/remote-access.ts（文件 IO 属 infra 领地）。
 import {
-  ConnectionManager,
   parseRemoteAccessToken,
   readRemoteAccessToken,
   _resetRemoteReadGateForTest,
-  type ConnectionManagerOptions,
-} from '../connection-manager.js'
+} from '../../infra/remote-access.js'
 import { REMOTE_ACCESS_FILENAME } from '@taiji/shared'
 
 const SPAWN_TOKEN = 'spawn-token'

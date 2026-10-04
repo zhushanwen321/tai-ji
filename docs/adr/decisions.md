@@ -369,7 +369,7 @@ GitHub issue #24（Windows 10 窗口外壳四问题）复核结论：用户抱�
 
 **决策**：远程访问（手机浏览器经局域网直连 runtime，词条见 [CONTEXT.md](../CONTEXT.md)）三个通道裁决：
 
-1. **remote token 凭据通道 = `<dataDir>/remote-access.json`（0600）跨进程文件**：main 是唯一写者（`apps/electron/main/remote-access/store.ts`，原子写 = 同目录 tmp + fsync + renameSync，防读侧撕裂），runtime **每次 WS auth 握手时读文件取当前值**（`packages/runtime/src/transport/connection-manager.ts` 的 `readRemoteAccessToken`，由组合根以 `remoteTokenProvider` 注入，关态不装配零 IO）——token 轮换 = main 重写文件即生效，不重启 runtime、不中断在途 turn；文件缺失/损坏 → remote 凭据成员为空、退化为仅 spawn token 可认证（fail-closed）+ 频控日志（同因首次响亮含恢复指引，读取成功即重置）。
+1. **remote token 凭据通道 = `<dataDir>/remote-access.json`（0600）跨进程文件**：main 是唯一写者（`apps/electron/main/remote-access/store.ts`，原子写 = 同目录 tmp + fsync + renameSync，防读侧撕裂），runtime **每次 WS auth 握手时读文件取当前值**（`packages/runtime/src/infra/remote-access.ts` 的 `readRemoteAccessToken`，由组合根以 `remoteTokenProvider` 注入，关态不装配零 IO）——token 轮换 = main 重写文件即生效，不重启 runtime、不中断在途 turn；文件缺失/损坏 → remote 凭据成员为空、退化为仅 spawn token 可认证（fail-closed）+ 频控日志（同因首次响亮含恢复指引，读取成功即重置）。
 2. **开启信号 = argv flag `--remote-access`（配套 `--mobile-dist=<path>`），新增 env 键 = 0**：listen host（`127.0.0.1` / `0.0.0.0`）是启动期一次性决策，supervisor 按 `remote-access.json` 的 enabled 在 spawn 时现读拼参（非快照）；argv 不经环境变量继承链——scripts 直跑、验证脚本、vitest e2e 池等非 supervisor 启动路径不传 flag 即天然关态，构造性免疫、无需任何剥除机制。
 3. **shape 判据单源 = shared**（`packages/shared/src/remote-access.ts` 的 `isRemoteAccessConfigShape` / `REMOTE_TOKEN_HEX64` / `REMOTE_ACCESS_FILENAME`）；main 写侧从严（hex + createdAt 全验）、runtime 读侧从宽（enabled=false 早退跳过 hex）的不对称是文档化刻意差异，不上收、不参数化。
 
