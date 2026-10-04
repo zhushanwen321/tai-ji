@@ -3,8 +3,13 @@
  *
  * ui 包镜像纪律（ui→renderer 依赖禁令不可直接 import）：
  * - isAbsolutePath / resolvePosixPath 与 MarkdownRenderer ④路 resolveHrefPath 同标准
- *   （base + rel 后逐段折叠 `.` / `..`）；renderer 侧镜像 = lib/path-utils.resolvePreviewPath，
- *   两侧改动需同批同步（镜像纪律同 markdown-types.ts 协议镜像注释）。
+ *   （base + rel 后逐段折叠 `.` / `..`）。POSIX resolve 折叠实现共三份逐字同款镜像：
+ *   本文件 resolvePosixPath / ui MarkdownRenderer.vue resolveHrefPath /
+ *   renderer composables/logic/markdown-sanitize.ts resolveResourcePath——改动需三处
+ *   同批同步（镜像纪律同 markdown-types.ts 协议镜像注释；漂移由
+ *   scripts/check-posix-resolve-mirror-sync.mjs 源文本字面量对拍机检拦截）。
+ *   renderer 的 lib/path-utils.resolvePreviewPath 不是本族镜像——相对路径仅前缀拼接
+ *   不折叠 `..`（git 查询用途），不得作为同步对象。
  * - encodeLocalFilePath / buildLocalFileUrl 与原 renderer 抽屉渲染态通道（html-preview.ts，
  *   v16 已随渲染态退役删除）同规格：handler 侧 `decodeURIComponent(new URL(url).pathname)`
  *   解码成对——文件名含 `#` / `?` / `%` / 空格时裸拼会被 URL 解析吞成 fragment/query

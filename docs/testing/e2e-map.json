@@ -1961,6 +1961,26 @@
       "owner": "packages/runtime",
       "authority": "scripts/check-pi-sync.mjs",
       "note": "R2 态：真实运行形态 = pre-commit 按路径触发 + ci.yml invariants（AGENTS.md C-build-07 同款口径；本表 run = 自含冒烟，纯读 node_modules 与仓库源文件，零网络）；呈报骨架共享于 scripts/lib/guard-report.mjs（同面登记）；--self-test 覆盖解析/版本比较/提取纯函数；无独立 ADR，版本门禁语义登记以 constraints.json 为准"
+    },
+    {
+      "id": "E2E-POSIXRESOLVE-01",
+      "summary": "POSIX resolve 折叠实现三份镜像字面量对拍守卫（posix-resolve-mirror-sync）：ui html-preview-path.ts resolvePosixPath（基准）× renderer markdown-sanitize.ts resolveResourcePath × ui MarkdownRenderer.vue resolveHrefPath 函数体逐字一致 + 折叠语义锚点在场机检（跨包不可 import——ui→renderer 依赖禁令，源文本字面量对拍；iframe 内联容器 src 与 markdown 相对链接点击落点共用同一相对路径解析语义，任一份漂移 = 两侧解析出不同绝对路径）",
+      "scope": [
+        "scripts/check-posix-resolve-mirror-sync.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-posix-resolve-mirror-sync.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-posix-resolve-mirror-sync.mjs",
+      "owner": "packages/ui",
+      "authority": "scripts/check-posix-resolve-mirror-sync.mjs",
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（触发面 = 本脚本自身 + packages/ui/src/features/chat/html-preview-path.ts + packages/renderer/src/composables/logic/markdown-sanitize.ts + packages/ui/src/features/chat/MarkdownRenderer.vue，见 .githooks/install-hooks.sh 同名段；看护对象是三份折叠实现载体文件而非本脚本；退出码契约 0=通过 / 1=漂移或提取失败）；本表 run = 自含冒烟（与 pre-commit 同一命令，均为不带 --self-test 的常规校验）；--self-test 纯函数自检内建非恒绿证明（漂移样例 ≠ 基准、三份一致退化样例被折叠语义锚点断言拦截——防「一致删空」对拍盲区）；renderer lib/path-utils.resolvePreviewPath 非本族镜像（相对路径仅前缀拼接不折叠 `..`，语义不同）；同族先例 = capability 清单（E2E-CAPALLOW-01）与产物目录公式（E2E-ARTDIR-01）对拍守卫，形态照搬 check-artifact-dir-formula-sync.mjs；无独立约束/ADR 登记，设计决策（为何镜像而非 import：ui→renderer 依赖禁令）记录在脚本头注释块，故 authority 自指"
     }
   ]
 }
