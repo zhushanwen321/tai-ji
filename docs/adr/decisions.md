@@ -455,3 +455,16 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **依据**：① 根因是四环缺失（能力契约 / 交付模式 / 预览链路 / 产物落点未约定），落点约定消除整类「白名单外不可读」问题，比事后放宽白名单（renderer 成为白名单输入方）代价更低；② 预览文档唯一需要的同源能力是相对子资源，而子资源经 local-file 协议加载不依赖 origin 同源，故 sandbox 可不给 `allow-same-origin`；③ 两条被否路线的击穿点——srcdoc 方案（file.read RPC + iframe srcdoc）能力死（继承主文档 CSP 致内联脚本不执行、相对子资源无基准地址，交互价值消失）；WebContentsView 方案在抽屉内可行，但与对话流内联预览方向冲突（窗口层原生覆盖视图不随虚拟滚动同步，需一整套滚动同步机制）。
 
 **登记**：约束 C-build-06 表述随本裁决收窄——scope 由「嵌入式网页」收窄为「嵌入第三方远程网页」，理由（`X-Frame-Options` / CSP `frame-ancestors` 硬伤）仅对远程站成立，本地 HTML 由应用自有 `protocol.handle` 服务、不携带这些头（见 ADR-0054 理由边界修正补记），登记 `docs/constraints.json` C-build-06；未新增约束族（预览隔离由 sandbox + 文档 CSP 构造性保证，落在 C-build-06 的 review-electron-build 面内）。设计文档 `.tmp/tech-design/chat-html-support.md`（不入库，过程产物）；实施 = 8 单元（u-foundation / u1-prompt / u2-infra / u-artifacts / u3-detailpane / u4-card / u5-docs / u6-acceptance）。
+
+### ADR-0108 html-preview 渲染形态 = 对话流内联容器（2026-10-04 用户裁决，chat-html-support v16）
+
+**决策**：`html-preview` fence 段在**对话流内直接渲染**（`HtmlPreviewInline.vue` 内联容器：头部条[文件名/大小/源码-预览切换/刷新/收起展开] + sandbox iframe 原位嵌入消息流）；原「预览卡片 → 点击 → DetailPane 渲染态」两级形态**退役**——DetailPane 对 `.html` 恢复基线源码高亮，相对链接不再承载预览。安全模型零变化：sandbox 权限面、`local-file` 协议白名单、`localFile:servable` 预检、CSP `frame-src`、内容级 CSP 全部平移适用（机制规格从原 D4 抽屉渲染态整体平移到容器）。
+
+**要点**：
+1. **单渲染面原则**：内联容器是唯一渲染面。抽屉保留渲染态会造成「同一文件两个渲染入口、两套挂载序列」的双轨；内联容器的展开/源码态已覆盖抽屉渲染态的全部用户价值。`localFile:read` 通道保留（消费方转容器源码态与变更集入口的产物源码读取）。
+2. **高度策略降级裁决**：内容高度自适应（iframe 内上报）三条通道均不可行——产物文档内协作脚本不可假设、opaque origin 收不到定向 postMessage、`sandbox` 无 `allow-same-origin` 时 `contentDocument` 恒 null——降级为固定 480px（展开 720px）、超限 iframe 内滚动；升级预案（协议 handler 注入上报脚本）登记设计文档 §6.3。
+3. **流式与降级形态保持**：finalize 仅由 fence 收尾/消息完成触发（静默不提前）；预检三原因降级占位形态延续（文件名 + 原因两行，恢复指引由失败路径表承载）。
+
+**依据**：用户裁决动机 = HTML 交付物在对话流内直接可见可交互，不经点击跳转（交互式图表/自包含组件的核心价值前置呈现）；ADR-0107 方案 A 本就预期「iframe 在 DOM 流内随滚动天然正确」，本裁决是该预期的终态化；已接受代价 = 对话流 turn 虚拟化使旧 turn 容器随滚动卸载/重挂载（脚本重执行，既有虚拟化行为的固有代价，实测无可感知卡顿阈值内）。
+
+**登记**：设计文档 v16（`.tmp/tech-design/chat-html-support.md` §6.3/§6.4）；实施 = u7-inline-refactor 单元（M1.5 批次）；验收 = v16 重跑四项（渲染/观感/安全负面/降级矩阵）+ 打包态，全部通过（2026-10-04）。S4 相对链接场景随之重定义为「链接 → 抽屉源码态（基线行为恢复）」；链接打开产物目录文件被基线 forceDiff 通道拒绝的存量缺口另登记 `docs/todo/message-link-artifact-file-force-diff-reject.md`。
