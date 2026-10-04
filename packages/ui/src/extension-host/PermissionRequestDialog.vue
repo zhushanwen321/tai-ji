@@ -81,7 +81,12 @@ function onRevoke(): void {
 
 <template>
   <Dialog :open="pending">
-    <DialogContent hide-close class="max-w-[420px]" data-testid="permission-dialog">
+    <!-- 小屏全宽留边防溢出（375px 视口下按钮可见），sm+ 恢复 420px 上限（桌面形态不变） -->
+    <DialogContent
+      hide-close
+      class="w-full max-w-[calc(100vw-2rem)] sm:max-w-[420px]"
+      data-testid="permission-dialog"
+    >
       <DialogHeader>
         <DialogTitle data-testid="permission-dialog-title">{{ pluginId }}</DialogTitle>
         <DialogDescription>{{ '插件申请了以下权限，批准后即可使用' }}</DialogDescription>

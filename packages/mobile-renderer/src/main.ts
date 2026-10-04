@@ -19,6 +19,10 @@ void i18n
 // 需要 CSS 变量有定义；tokens 提取自 renderer style.css（见 styles/tokens.css 头注释）。
 import './styles/tokens.css'
 
+// 浮层进出场过渡（dialog 居中依赖 translate(-50%,-50%)，缺失时弹窗出视口）。
+// styles/shell.css 是桌面 style.css 同段的 mobile 镜像副本，改动须同步两处。
+import './styles/shell.css'
+
 // W1 依赖边占位：bootstrap 内部会调 providePlatform，此处仅维持 main.ts 的
 // core import（TC-7 回归 + W1 ac1-dependency-edge 护栏）。
 void providePlatform
