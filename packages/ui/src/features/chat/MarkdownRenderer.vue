@@ -35,10 +35,10 @@
         <span class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" />
         <span data-testid="md-streaming-fence-lang" class="font-mono text-[length:var(--text-2xs)] font-semibold lowercase tracking-[0.08em] text-neutral-dim">{{ seg.lang }}</span>
       </div>
-      <!-- html-preview 段（chat-html-support §6.3 D3）：纯路径载荷走 HtmlPreviewCard 组件
-           （不经 v-html/净化信任槽）；路径解析矩阵与 ④路同源——props.resourceBaseDir 覆盖优先、
-           缺省由卡片经 deps.sessionCwdOf 拿 session cwd -->
-      <HtmlPreviewCard
+      <!-- html-preview 段（chat-html-support §6.3 D3，v16 内联容器）：纯路径载荷走
+           HtmlPreviewInline 组件（不经 v-html/净化信任槽）；路径解析矩阵与 ④路同源——
+           props.resourceBaseDir 覆盖优先、缺省由容器经 deps.sessionCwdOf 拿 session cwd -->
+      <HtmlPreviewInline
         v-else-if="seg.type === 'html-preview'"
         :path="seg.content"
         :session-id="props.sessionId"
@@ -75,7 +75,7 @@ import type { MarkdownSegment } from './markdown-types'
 import { findByBasename } from '../../lib/file-basename'
 import { RUNNING_LOADER_SVG } from './block-icon'
 import AmbiguousFilePopover from './AmbiguousFilePopover.vue'
-import HtmlPreviewCard from './HtmlPreviewCard.vue'
+import HtmlPreviewInline from './HtmlPreviewInline.vue'
 import MermaidRenderer from './MermaidRenderer.vue'
 import { useChatViewDeps } from './chat-view-deps'
 import { useMarkdownStreaming } from './composables/useMarkdownStreaming'

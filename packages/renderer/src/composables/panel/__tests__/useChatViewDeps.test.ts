@@ -27,6 +27,13 @@ const mockRenderIncremental = vi.fn(async () => ({
   stableBoundary: 0,
   mode: 'incremental' as const,
 }))
+const mockServable = vi.fn()
+const mockLocalFileRead = vi.fn()
+
+vi.mock('@/lib/ipc', () => ({
+  localFileServable: (...args: unknown[]) => mockServable(...(args as [string])),
+  localFileRead: (...args: unknown[]) => mockLocalFileRead(...(args as [string])),
+}))
 
 vi.mock('@/composables/logic/markdown', () => ({
   renderMarkdownSegments: (...args: unknown[]) => mockRenderMarkdownSegments(...(args as [string, unknown])),
@@ -283,5 +290,27 @@ describe('useChatViewDeps — 文件白名单代际守卫（RD-1#1：迟到 file
     await deps.renderMarkdown('after-late-failure')
     const env = mockRenderMarkdownSegments.mock.calls.at(-1)![1] as { filePaths: Set<string> }
     expect([...env.filePaths]).toEqual(['/proj-b/s2-file.ts'])
+  })
+})
+
+describe('useChatViewDeps — 产物预检与源码读取接线（chat-html-support §6.3 D3 / §6.9 D9）', () => {
+  it('probeArtifact 委托 lib/ipc.localFileServable（产物目录 cwd 外，预检落主进程）', async () => {
+    mockServable.mockResolvedValue({ servable: true, size: 2048 })
+    const deps = assemble(ref('s1'))
+    await expect(deps.probeArtifact('/data/artifacts/s1/x.html')).resolves.toEqual({ servable: true, size: 2048 })
+    expect(mockServable).toHaveBeenCalledWith('/data/artifacts/s1/x.html')
+  })
+
+  it('readArtifact 白名单命中 → { content }（HtmlPreviewInline 源码态消费）', async () => {
+    mockLocalFileRead.mockResolvedValue({ ok: true, content: '<html>x</html>', truncated: false })
+    const deps = assemble(ref('s1'))
+    await expect(deps.readArtifact('/data/artifacts/s1/x.html')).resolves.toEqual({ content: '<html>x</html>' })
+    expect(mockLocalFileRead).toHaveBeenCalledWith('/data/artifacts/s1/x.html')
+  })
+
+  it('readArtifact 结构化失败（not_found）→ reject 折叠 reason（容器显错误占位 + 重试）', async () => {
+    mockLocalFileRead.mockResolvedValue({ ok: false, reason: 'not_found' })
+    const deps = assemble(ref('s1'))
+    await expect(deps.readArtifact('/data/artifacts/s1/gone.html')).rejects.toThrow('not_found')
   })
 })

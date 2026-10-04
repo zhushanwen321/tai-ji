@@ -50,7 +50,7 @@ import {
 import { renderMermaid } from '@/composables/logic/mermaid'
 import { assistantToMarkdown } from '@/composables/logic/messageFormat'
 import { collectBasenames, collectFilePaths } from '@/lib/file-basename'
-import { localFileServable } from '@/lib/ipc'
+import { localFileRead, localFileServable } from '@/lib/ipc'
 
 /**
  * 装配 ChatViewDeps。
@@ -140,11 +140,21 @@ export function useChatViewDeps(
     // resourceBaseDir env 装配共用 sessionCwdOf 单一实现；override 存在时 env 与 deps
     // 字段取值不同是有意的——override 只覆盖 env 通道，deps 恒按 id 查 session cwd）
     sessionCwdOf,
-    /** 产物 servable 预检（chat-html-support §6.3 D3「跨层依赖注入」/ §6.9 D9）：HtmlPreviewCard
-     *  挂载时经此调主进程 localFile:servable 判定（白名单 ∪ 存在 ∪ 非目录，与协议 handler
+    /** 产物 servable 预检（chat-html-support §6.3 D3「跨层依赖注入」/ §6.9 D9）：HtmlPreviewInline
+     *  挂载前经此调主进程 localFile:servable 判定（白名单 ∪ 存在 ∪ 非目录，与协议 handler
      *  同谓词）。electronAPI 消费收敛在 lib/ipc（唯一适配点）；无 IPC（web/mock）时 reject，
-     *  卡片按「预检不可用」退回中性态（不阻塞预览入口，失败兜底归抽屉渲染态）。 */
+     *  容器按「预检不可用」跳过预检直接挂载（不阻塞预览入口，真实服务判定在协议 handler）。 */
     probeArtifact: (absPath: string) => localFileServable(absPath),
+    /** 产物源码读取（chat-html-support v16 §6.3「源码态」/ §6.9 D9 localFile:read 通道）：
+     *  HtmlPreviewInline 切「源码」后经此读产物文件全文（产物目录在 session cwd 外，runtime
+     *  file.read 的 cwd 守门不可达）。lib/ipc 的结构化失败原因（not_found / is_dir /
+     *  out_of_whitelist / read_failed）折叠进 Error message——deps 契约面是 Promise reject，
+     *  容器按「读取失败」显错误占位 + 重试；无 IPC（web/mock）同样 reject。 */
+    readArtifact: async (absPath: string) => {
+      const result = await localFileRead(absPath)
+      if (!result.ok) throw new Error(`localFileRead failed: ${result.reason}`)
+      return { content: result.content }
+    },
 
     // ── 操作回调 ──
     toggleExpand: (turnKey: string): void => turnExpansion.toggle(turnKey),

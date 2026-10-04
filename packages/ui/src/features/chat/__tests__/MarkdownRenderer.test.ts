@@ -680,20 +680,20 @@ describe('chat-html-support §6.3 D3: html-preview 段 finalize 分流（静默�
     // 首帧：占位（lang=html-preview）、无卡片
     expect(calls).toEqual([false])
     expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="html-preview-card"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="html-preview-inline"]').exists()).toBe(false)
 
     // 静默远超阈值：不挂定时器 → 无第二次渲染、占位保持（半截路径不产假降级卡片）
     await vi.advanceTimersByTimeAsync(1000)
     await nextTick()
     expect(calls).toEqual([false])
     expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="html-preview-card"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="html-preview-inline"]').exists()).toBe(false)
 
     // fence 收尾标记到达 → 一次成型成卡片
     await wrapper.setProps({ content: '```html-preview\n/abs/report.html\n```' } as never)
     await flushRaf()
     expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="html-preview-card"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="html-preview-inline"]').exists()).toBe(true)
   })
 
   it('mermaid fence 静默提前 finalize 保留不变（部分图形提前渲染有价值）', async () => {
@@ -733,7 +733,7 @@ describe('chat-html-support §6.3 D3: html-preview 段 finalize 分流（静默�
     await flushRaf()
     // 首帧 finalize=true 落了 html-preview 段 → 检出后撤回重渲染为占位（calls=[true,false]）
     expect(calls).toEqual([true, false])
-    expect(wrapper.find('[data-testid="html-preview-card"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="html-preview-inline"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(true)
   })
 })

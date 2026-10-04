@@ -3,12 +3,16 @@
  *
  * 职责（单一变化轴「文件预览内容加载」）：
  * - watch fileTreeStore.selectedPath + sessionId → openPreview
- * - openPreview：git 改动文件 → git.getDiff（patch）；未改动 → file.read（content）
+ * - openPreview：git 改动文件 → git.getDiff（patch）；未改动 → 读内容（content）
  * - viewMode 切换（diff/preview），当文件既有 git 改动又是普通文件可手动切换
  *
  * 数据流（code-architecture §4 功能3）：
  *   点文件 → store.selectFile → DetailPane 挂载 → useDetailPane.openPreview →
- *   (gitOverlay 判定: 改动→git.getDiff / 未改动→file.read) → 渲染（禁 v-html，文本插值/<pre>）
+ *   (gitOverlay 判定: 改动→git.getDiff / 未改动→读内容) → 渲染（禁 v-html，文本插值/<pre>）
+ *
+ * HTML 形态（chat-html-support v16 形态变更，§6.4 D4）：.html/.htm 恢复 code 类源码高亮
+ * （渲染态退役，预览面收敛到消息流内联容器 HtmlPreviewInline）；产物目录文件（session cwd
+ * 外，runtime file.read 的 cwd 守门不可达）的抽屉源码读取走 localFile:read 白名单通道（§6.9 D9）。
  *
  * 依赖方向：useDetailPane → fileTreeStore + api/domains（file/git）。不直接 import chat store。
  *
@@ -21,8 +25,7 @@ import { useSessionStore } from '@/stores/session'
 import { useSideDrawer } from '@/composables/features/drawer/useSideDrawer'
 import { file as fileApi, git as gitApi } from '@/api'
 import { detectFileKind, type FileKind } from '@/composables/logic/file-type'
-import { createHtmlPreviewController, type HtmlViewMode } from '@/composables/features/file-tree/html-preview'
-import { localFileRead, localFileServable, type LocalFileReadReason } from '@/lib/ipc'
+import { localFileRead, type LocalFileReadReason } from '@/lib/ipc'
 import { parseDiff } from '@/composables/logic/parseDiff'
 import { resolvePreviewPath } from '@/lib/path-utils'
 import i18n from '@/i18n'
@@ -85,27 +88,6 @@ export function useDetailPane(sessionId: Ref<string | null>) {
   let loadToken = 0
 
   /**
-   * HTML 渲染态（chat-html-support §6.4 D4）：预览 / 源码切换 + servable 预检 + sandbox iframe。
-   * 挂载 / 刷新 / 重试三者是同一挂载函数的重入（§6.4 子决策④「按钮语义归一」）。
-   */
-  const htmlView = ref<HtmlViewMode>('rendered')
-  const htmlPreview = createHtmlPreviewController(localFileServable)
-
-  /** 渲染态文件绝对路径（~ 不展开；无 cwd 且相对路径时由预检自然拒绝，不设 session 防御分支） */
-  function htmlAbsolutePath(): string | null {
-    const path = state.value.path
-    if (!path) return null
-    return resolvePreviewPath(sessionCwd(sessionId.value) ?? '', path).absolute
-  }
-
-  /** 重走整个挂载序列：servable 预检 + 重开 iframe（占位态 = 重试；已挂载态 = 刷新） */
-  async function reloadHtmlPreview(): Promise<void> {
-    const abs = htmlAbsolutePath()
-    if (!abs) return
-    await htmlPreview.mount(abs)
-  }
-
-  /**
    * 取当前 session 的 cwd 绝对路径（图片渲染拼 local-file:// URL 用）。
    * sessionStore.list 按 id 查 SessionSummary.cwd；无 session 返回 null。
    */
@@ -117,7 +99,7 @@ export function useDetailPane(sessionId: Ref<string | null>) {
   /**
    * 加载文件预览（code-architecture §4 功能3 时序）。
    * - git 改动文件（gitOverlay 有记录）→ git.getDiff，默认 viewMode='diff'
-   * - 未改动文件 → file.read(sessionId, path) cwd 守门，默认 viewMode='preview'
+   * - 未改动文件 → 读内容，默认 viewMode='preview'
    * - 加载在途 → status='loading'（DetailPane 显骨架态，AC-6.6/T6.7）
    * - 失败 → status='error'（AC-6.4/T6.4）
    *
@@ -153,10 +135,7 @@ export function useDetailPane(sessionId: Ref<string | null>) {
           state.value.truncated = fileResult.truncated
         }
       } else {
-        const result = await fileApi.read(path, sid)
-        if (token !== loadToken) return
-        state.value.content = result.content
-        state.value.truncated = result.truncated
+        await loadPreviewContent(sid, path, token)
       }
       state.value.status = 'content'
     } catch (e) {
@@ -164,6 +143,51 @@ export function useDetailPane(sessionId: Ref<string | null>) {
       state.value.status = 'error'
       state.value.error = (e as Error)?.message ?? t('composable.loadFailed')
     }
+  }
+
+  /**
+   * preview 模式内容加载（两通道，「白名单先行」判定沿袭 §6.9 D9 源码读取语义）。
+   *
+   * - 路径解析不出 cwd 内相对形态（产物目录 `<dataDir>/artifacts/<sessionId>` 等 cwd 外
+   *   绝对 / `~` 形态——变更集卡 / 文件树可点开产物文件，runtime file.read 的 cwd 守门
+   *   不可达）→ localFile:read 白名单通道（与 servable 预检同一白名单谓词，main 侧单一实现）
+   * - 白名单外路径（项目目录内文件）→ 既有 file.read cwd 通道
+   *
+   * 只有 `out_of_whitelist` 才落 cwd 通道；not_found / is_dir / read_failed 是真实失败，
+   * 直接进错误态（不静默吞掉）。IPC 通道不可用（mock / 旧 preload）同样落 cwd 通道。
+   */
+  async function loadPreviewContent(sid: string, path: string, token: number): Promise<void> {
+    const cwd = sessionCwd(sid) ?? ''
+    const resolved = resolvePreviewPath(cwd, path)
+    if (resolved.relative === null) {
+      // 白名单读取通道不可用（mock / 旧 preload 的 IPC reject）→ null → 落既有 cwd 通道
+      const result = await localFileRead(resolved.absolute).catch((e) => {
+        console.warn('[useDetailPane] localFileRead failed, falling back to cwd channel:', e)
+        return null
+      })
+      if (token !== loadToken) return
+      if (result?.ok) {
+        state.value.content = result.content
+        state.value.truncated = result.truncated
+        return
+      }
+      if (result && result.reason !== 'out_of_whitelist') {
+        // not_found / is_dir / read_failed 是真实失败，不静默回落（错误态带原因）
+        throw new Error(sourceReadErrorText(result.reason))
+      }
+      // out_of_whitelist → 落既有 cwd 通道（恢复指引「在项目内直接看源码」的读取语义）
+    }
+    const result = await fileApi.read(path, sid)
+    if (token !== loadToken) return
+    state.value.content = result.content
+    state.value.truncated = result.truncated
+  }
+
+  /** 白名单读取真实失败原因 → 用户可见文案（复用既有 i18n 词条，不新增 key） */
+  function sourceReadErrorText(reason: Exclude<LocalFileReadReason, 'out_of_whitelist'>): string {
+    if (reason === 'not_found') return t('panel.detail.htmlReasonNotFound')
+    if (reason === 'is_dir') return t('panel.detail.htmlReasonIsDir')
+    return t('composable.loadFailed')
   }
 
   async function openPreview(sid: string, path: string, forceDiff = false): Promise<void> {
@@ -179,22 +203,9 @@ export function useDetailPane(sessionId: Ref<string | null>) {
     // 文件渲染类别（preview 模式渲染器选择依据；diff 模式统一走 DiffView）
     const kind = detectFileKind(path)
     state.value.kind = kind
-    // 默认 viewMode：.html/.htm 恒默认预览（设计 §6.4 D4「默认预览」——含变更集卡入口的
-    // forceDiff：渲染态是点开 HTML 的压倒性意图，diff 仍可经「差异 | 预览」切换到达）；
-    // 其余：forceDiff（变更集卡等已知有改动的入口）优先，否则按 gitOverlay 判定
-    const mode: DetailViewMode = kind === 'html' ? 'preview' : forceDiff || gitStatus ? 'diff' : 'preview'
+    // 默认 viewMode：forceDiff（变更集卡等已知有改动的入口）优先，否则按 gitOverlay 判定
+    const mode: DetailViewMode = forceDiff || gitStatus ? 'diff' : 'preview'
     state.value.viewMode = mode
-    // HTML 渲染态（§6.4 D4）：预览不依赖 file.read——产物目录在 session cwd 外，file.read
-    // 的 cwd 守门会拒绝；准入由 servable 预检（白名单 ∪ 存在 ∪ 非目录）承担。
-    if (kind === 'html') {
-      htmlView.value = 'rendered'
-      htmlPreview.reset()
-      if (mode === 'preview') {
-        state.value.status = 'content'
-        void reloadHtmlPreview()
-        return
-      }
-    }
     await loadContent(sid, path, gitPath, mode, token, true)
   }
 
@@ -213,91 +224,12 @@ export function useDetailPane(sessionId: Ref<string | null>) {
     const cwd = sessionCwd(sid) ?? ''
     const resolved = resolvePreviewPath(cwd, path)
     const gitPath = resolved.relative
-    // 切回渲染态（html 默认预览态）：重走挂载序列；源码态内容按需加载
-    if (mode === 'preview' && state.value.kind === 'html' && htmlView.value === 'rendered') {
-      state.value.status = 'content'
-      void reloadHtmlPreview()
-      return
-    }
     await loadContent(sid, path, gitPath, mode, token)
-  }
-
-  /**
-   * HTML 渲染态「预览 | 源码」切换（§6.4 D4）。
-   * - rendered：重走挂载序列（预检 + 开 iframe）
-   * - source：既有 shiki 源码高亮（白名单通道优先，越界回落 cwd 通道）
-   */
-  async function setHtmlView(mode: HtmlViewMode): Promise<void> {
-    if (state.value.kind !== 'html') return
-    if (mode === 'rendered') {
-      htmlView.value = 'rendered'
-      // 渲染态状态由 htmlPreview 状态机承载（pending / unavailable / ready 自渲染占位）；
-      // 源码态加载失败遗留的 status='error' 在此清掉，防旧态残留（§6.4 D4 渲染态独占内容区）
-      state.value.status = 'content'
-      state.value.error = ''
-      await reloadHtmlPreview()
-      return
-    }
-    htmlView.value = 'source'
-    const sid = sessionId.value
-    const path = state.value.path
-    if (!sid || !path) return
-    const token = ++loadToken
-    state.value.status = 'loading'
-    state.value.error = ''
-    await loadHtmlSourceContent(sid, path, token)
-  }
-
-  /**
-   * 源码态内容加载（chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」）。
-   *
-   * 两条准入通道，按「白名单先行」判定：
-   * - 白名单内路径（产物目录 `<dataDir>/artifacts/<sessionId>` 在 session cwd 外，
-   *   file.read 的 cwd 守门会拒）→ localFile:read（与 servable 预检同一白名单谓词，
-   *   main 侧单一实现；§6.9 D9「同一谓词」）
-   * - 白名单外路径（项目目录内文件——§5.2 恢复指引「在项目内直接看源码」）→ 既有
-   *   file.read cwd 守门通道（loadContent）
-   *
-   * 只有 `out_of_whitelist` 才落 cwd 通道；not_found / is_dir / read_failed 是真实失败，
-   * 直接进错误态（不静默吞掉）。IPC 通道不可用（mock / 旧 preload）同样落 cwd 通道。
-   */
-  async function loadHtmlSourceContent(sid: string, path: string, token: number): Promise<void> {
-    const abs = htmlAbsolutePath()
-    if (abs) {
-      // 白名单读取通道不可用（mock / 旧 preload 的 IPC reject）→ null → 落既有 cwd 通道
-      const result = await localFileRead(abs).catch((e) => {
-        console.warn('[useDetailPane] localFileRead failed, falling back to cwd channel:', e)
-        return null
-      })
-      if (token !== loadToken) return
-      if (result?.ok) {
-        state.value.content = result.content
-        state.value.truncated = result.truncated
-        state.value.status = 'content'
-        return
-      }
-      if (result && result.reason !== 'out_of_whitelist') {
-        state.value.status = 'error'
-        state.value.error = htmlSourceErrorText(result.reason)
-        return
-      }
-    }
-    const resolved = resolvePreviewPath(sessionCwd(sid) ?? '', path)
-    await loadContent(sid, path, resolved.relative, 'preview', token)
-  }
-
-  /** 源码态读取失败原因 → 用户可见文案（复用既有 i18n 词条，不新增 key） */
-  function htmlSourceErrorText(reason: Exclude<LocalFileReadReason, 'out_of_whitelist'>): string {
-    if (reason === 'not_found') return t('panel.detail.htmlReasonNotFound')
-    if (reason === 'is_dir') return t('panel.detail.htmlReasonIsDir')
-    return t('composable.loadFailed')
   }
 
   /** 清空预览（关闭 drawer / 取消选中时） */
   function clearPreview(): void {
     state.value = initialState()
-    htmlView.value = 'rendered'
-    htmlPreview.reset()
   }
 
   /**
@@ -349,11 +281,5 @@ export function useDetailPane(sessionId: Ref<string | null>) {
     toggleView,
     clearPreview,
     sessionCwd,
-    htmlView,
-    htmlPreviewStatus: htmlPreview.status,
-    htmlPreviewReasonKey: htmlPreview.reasonKey,
-    htmlSrc: htmlPreview.src,
-    setHtmlView,
-    reloadHtmlPreview,
   }
 }

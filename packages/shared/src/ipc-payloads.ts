@@ -210,12 +210,12 @@ export type DiagnosticExportBundleResult =
 export type LocalFileServableReason = 'not_found' | 'is_dir' | 'out_of_whitelist'
 
 /**
- * `localFile:servable` 预检结果（卡片 `probeArtifact?` 与抽屉渲染态挂载前准入检查，
+ * `localFile:servable` 预检结果（HtmlPreviewInline `probeArtifact?` 挂载前准入检查，
  * §6.9 D9 入/出参面 SSOT）。
  *
  * 谓词 = 白名单成员资格（先行短路）→ 存在性 → 目录性，与 local-file 协议 handler
  * 复用主进程同一模块函数（越界路径不触 fs，不构成存在性探测通道）：
- * - `servable: true`  → `size` 附文件字节数（HtmlPreviewCard 显示文件名与大小）
+ * - `servable: true`  → `size` 附文件字节数（HtmlPreviewInline 头部条显示文件名与大小）
  * - `servable: false` → `reason` 指明降级原因
  */
 export interface LocalFileServableResult {

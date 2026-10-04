@@ -407,11 +407,17 @@ export default {
     fullscreenTitle: 'Mermaid diagram fullscreen',
     fullscreenDesc: 'Use zoom controls to view Mermaid diagram details.',
   },
-  // html-preview fence 卡片（chat-html-support §6.3 D3；降级原因码一一对应）
+  // html-preview fence inline preview container (chat-html-support §6.3 D3, v16 form change; degrade reason codes map one-to-one)
   htmlPreview: {
-    kind: 'HTML preview',
-    open: 'Open preview',
+    // Source | Preview toggle (default preview) + refresh + collapse/expand (height cap toggle)
+    tabPreview: 'Preview',
+    tabSource: 'Source',
+    refresh: 'Refresh',
+    expand: 'Expand',
+    collapse: 'Collapse',
     checking: 'Checking…',
+    // Source-mode read failure (deps.readArtifact reject → error placeholder + retry)
+    sourceLoadFailed: 'Failed to load source',
     // 路径非法：fence 内容 trim 后为空或含换行（单条路径语义）
     invalidPath: 'Invalid path',
     // 无法解析路径：相对路径 + resourceBaseDir / session cwd 皆缺（不静默猜基准）
@@ -542,14 +548,10 @@ export default {
     copyFilePath: 'Copy path',
     injectFileRef: 'Add file reference to composer',
     injectToNew: 'Reference in new chat',
-    // [chat-html-support §6.4 D4] HTML render state (preview/source toggle + servable precheck fallback)
-    htmlTabSource: 'Source',
-    htmlRefresh: 'Refresh',
-    htmlPreviewHint: 'Switch to "Source" to inspect the file; retry after confirming it is still inside the preview allowlist',
+    // [chat-html-support §6.9 D9] Artifact-dir source read (allowlist channel) real-failure reasons (error copy before falling back to the cwd channel;
+    // out_of_whitelist excluded — that reason falls back to the cwd channel; the preview-allowlist notice lives in the inline container's panel.htmlPreview)
     htmlReasonNotFound: 'File not found',
     htmlReasonIsDir: 'Target is a directory',
-    htmlReasonOutOfWhitelist: 'Not in the preview allowlist',
-    htmlReasonServiceUnavailable: 'Preview service unavailable',
   },
   panel: {
     sessionDead: 'Session process exited',

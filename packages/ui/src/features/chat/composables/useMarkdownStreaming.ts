@@ -60,7 +60,7 @@ function escapeHtmlForFallback(s: string): string {
  *
  * html-preview 分流（chat-html-support §6.3 D3 流式形态）：fenceLang = 上一帧结果的未闭合
  * fence 语言名（useMarkdownStreaming 持有）。首词为 html-preview 时静默/强制提前 finalize
- * 不生效——路径载荷是原子语义，半截路径只会产出假降级卡片；只由 fence 收尾标记到达 /
+ * 不生效——路径载荷是原子语义，半截路径只会产出假降级占位；只由 fence 收尾标记到达 /
  * 消息 complete 触发（complete 已在上方判定成立，fence 收尾后 openFence 消失、finalize
  * 不再参与尾段形态）。mermaid / 代码 fence 的静默提前 finalize 行为不变。
  */
@@ -203,9 +203,9 @@ export function useMarkdownStreaming(
       finalizeOpenFence: finalize,
     })
     incrementalCache = r.cache
-    // 首现竞态兜底（§6.3 D3「半截路径不产假降级卡片」）：上面的 openFenceLang 是上一帧结果的
+    // 首现竞态兜底（§6.3 D3「半截路径不产假降级占位」）：上面的 openFenceLang 是上一帧结果的
     // 回读——本轮才新开的 html-preview fence，在静默条件命中（判定层 fenceLang 尚为 null/旧值）
-    // 时会被误 finalize，tail 落成 html-preview 段即半截路径卡片闪现。检出「未 complete 却落了
+    // 时会被误 finalize，tail 落成 html-preview 段即半截路径降级占位闪现。检出「未 complete 却落了
     // html-preview 段」→ 撤回 finalize 以占位形态重渲染；fence 实际已闭合时无 open fence、
     // finalize 不参与尾段形态，两次输出等价（仅多一次渲染，且只在竞态帧发生）。
     if (finalize && !complete && r.tailSegments.some((s) => s.type === 'html-preview')) {

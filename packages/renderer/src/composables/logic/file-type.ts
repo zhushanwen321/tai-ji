@@ -16,21 +16,13 @@
  */
 
 /** 文件渲染类别（决定 DetailPane 用哪个渲染器） */
-export type FileKind = 'markdown' | 'image' | 'code' | 'html' | 'text'
+export type FileKind = 'markdown' | 'image' | 'code' | 'text'
 
 /** 图片扩展名集合（local-file:// 协议可加载的常见位图/矢量格式） */
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'])
 
 /** markdown 扩展名集合 */
 const MARKDOWN_EXTS = new Set(['md', 'markdown', 'mdx'])
-
-/**
- * HTML 扩展名集合（chat-html-support §6.4 D4「类型分发扩展」）。
- *
- * 命中即 DetailPane 顶部出现「预览 | 源码」切换、默认预览（sandbox iframe 渲染态）。
- * `.xml` 不纳入——它维持既有 code 类源码高亮（设计 §6.4 明示）。
- */
-const HTML_EXTS = new Set(['html', 'htm'])
 
 /** 扩展名 → shiki 语言名映射（code 类文件高亮用）。 */
 const EXT_TO_LANG: Record<string, string> = {
@@ -97,8 +89,8 @@ function extOf(path: string): string {
  * 判定文件渲染类别（按扩展名）。
  * - .md/.markdown/.mdx → markdown
  * - .png/.jpg/... → image
- * - .html/.htm → html（可预览渲染态；.xml 维持 code）
- * - .ts/.js/.vue/.json/... → code
+ * - .html/.htm/.ts/.js/.vue/.json/... → code（.html/.htm 走 shiki 源码高亮——chat-html-support
+ *   v16 形态变更后抽屉渲染态退役，预览面收敛到消息流内联容器，§6.4 D4）
  * - 其余（含无扩展名） → text
  *
  * 注意：不返回 'binary'——二进制判定由后端 git.getDiff 的 binary 标志负责，
@@ -108,7 +100,6 @@ export function detectFileKind(path: string): FileKind {
   const ext = extOf(path)
   if (MARKDOWN_EXTS.has(ext)) return 'markdown'
   if (IMAGE_EXTS.has(ext)) return 'image'
-  if (HTML_EXTS.has(ext)) return 'html'
   if (ext in EXT_TO_LANG) return 'code'
   return 'text'
 }

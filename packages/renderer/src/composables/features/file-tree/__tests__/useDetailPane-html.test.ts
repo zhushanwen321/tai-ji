@@ -1,15 +1,18 @@
 // @vitest-environment node
 
 /**
- * useDetailPane HTML 渲染态接线单测（chat-html-support §6.4 D4）。
+ * useDetailPane .html 行为回归单测（chat-html-support §6.4 D4，v16 抽屉渲染态退役）。
  *
  * 覆盖：
- * - .html 命中 → 默认预览（含变更集卡 forceDiff 入口：渲染态是压倒性意图）
- * - 渲染态不依赖 file.read / git.getDiff（产物目录在 cwd 外，file.read 的 cwd 守门会拒绝）
- * - servable 预检接线（lib/ipc）→ ready（iframe src）/ unavailable（原因）
+ * - .html 恢复实施前分发行为：git 改动 → diff（变更集卡 forceDiff 入口同）；无改动 →
+ *   preview 源码（file.read cwd 通道）——不再有「默认渲染态」与 servable 预检
+ * - 产物目录文件（cwd 外绝对路径）→ localFile:read 白名单通道（变更集入口可打开产物文件，
+ *   §6.9 D9 两通道语义保留）
+ * - 白名单读取真实失败（not_found）→ 错误态，不静默回落
+ * - servable 预检通道退役：useDetailPane 不再触碰 localFileServable
  *
  * mock 策略：同 src/__tests__/composables/useDetailPane.test.ts（@/api + @/stores/session），
- * 另 mock @/lib/ipc 的 localFileServable 预检通道。
+ * 另 mock @/lib/ipc 的 localFileRead / localFileServable。
  *
  * 运行：cd packages/renderer && npx vitest run src/composables/features/file-tree/__tests__/useDetailPane-html.test.ts
  */
@@ -47,65 +50,64 @@ beforeEach(() => {
   setActivePinia(createPinia())
   resetSideDrawer()
   vi.clearAllMocks()
-  mockServable.mockResolvedValue({ servable: true, size: 2048 })
   // 缺省：白名单外（未命中白名单读取通道的用例走既有 file.read cwd 通道）
   mockLocalFileRead.mockResolvedValue({ ok: false, reason: 'out_of_whitelist' })
 })
 
-describe('useDetailPane · .html 默认渲染态', () => {
-  it('有 git 改动的 .html → 默认 preview（渲染态）+ servable 预检 + iframe src', async () => {
+describe('useDetailPane · .html 恢复源码分发（渲染态退役）', () => {
+  it('有 git 改动的 .html → 默认 diff（实施前行为；渲染面归消息流内联容器）', async () => {
     const sid = 's1'
     const path = 'docs/report.html'
     setupSession(sid, path, 'modified')
+    mockGitGetDiff.mockResolvedValue({ patch: 'diff --git a/docs/report.html b/docs/report.html\n@@ -1 +1 @@\n-a\n+b', binary: false })
 
     const sessionId = ref<string | null>(sid)
-    const { state, htmlPreviewStatus, htmlSrc } = useDetailPane(sessionId)
+    const { state } = useDetailPane(sessionId)
     useFileTreeStore().selectFile(path)
     await nextTick()
-    await vi.waitFor(() => expect(htmlPreviewStatus.value).toBe('ready'))
+    await vi.waitFor(() => expect(state.value.status).toBe('content'))
 
-    expect(state.value.kind).toBe('html')
-    expect(state.value.viewMode).toBe('preview')
-    expect(state.value.status).toBe('content')
-    expect(htmlSrc.value).toBe('local-file:///Users/demo/proj/docs/report.html?r=1')
-    expect(mockServable).toHaveBeenCalledWith('/Users/demo/proj/docs/report.html')
-    // 渲染态不依赖 file.read / git.getDiff（产物目录在 cwd 外的准入由 servable 承担）
-    expect(mockFileRead).not.toHaveBeenCalled()
-    expect(mockGitGetDiff).not.toHaveBeenCalled()
+    expect(state.value.kind).toBe('code')
+    expect(state.value.viewMode).toBe('diff')
+    expect(mockGitGetDiff).toHaveBeenCalled()
   })
 
-  it('变更集卡入口（forceDiff）的 .html 仍默认渲染态（diff 经「差异 | 预览」切换到达）', async () => {
+  it('变更集卡入口（forceDiff）的 .html → diff（与 code 类文件同语义）', async () => {
     const sid = 's1'
     const path = 'docs/report.html'
     setupSession(sid, path, 'modified')
+    mockGitGetDiff.mockResolvedValue({ patch: 'diff --git a/docs/report.html b/docs/report.html\n@@ -1 +1 @@\n-a\n+b', binary: false })
 
     useSideDrawer().open('detail', { filePath: path })
     const sessionId = ref<string | null>(sid)
-    const { state, htmlPreviewStatus } = useDetailPane(sessionId)
+    const { state } = useDetailPane(sessionId)
     await nextTick()
-    await vi.waitFor(() => expect(htmlPreviewStatus.value).toBe('ready'))
+    await vi.waitFor(() => expect(state.value.status).toBe('content'))
 
-    expect(state.value.viewMode).toBe('preview')
-    expect(mockGitGetDiff).not.toHaveBeenCalled()
+    expect(state.value.kind).toBe('code')
+    expect(state.value.viewMode).toBe('diff')
   })
 
-  it('servable=false → 占位（原因 key）且不开 iframe', async () => {
-    mockServable.mockResolvedValue({ servable: false, reason: 'out_of_whitelist' })
+  it('无 git 改动的 .html → preview 源码（file.read cwd 通道），servable 预检不再被触碰', async () => {
     const sid = 's1'
     const path = 'docs/report.html'
-    setupSession(sid, path, 'modified')
+    mockFileRead.mockResolvedValue({ content: '<html>project</html>', truncated: false })
 
     const sessionId = ref<string | null>(sid)
-    const { htmlPreviewStatus, htmlPreviewReasonKey, htmlSrc } = useDetailPane(sessionId)
+    const { state } = useDetailPane(sessionId)
     useFileTreeStore().selectFile(path)
     await nextTick()
-    await vi.waitFor(() => expect(htmlPreviewStatus.value).toBe('unavailable'))
+    await vi.waitFor(() => expect(state.value.status).toBe('content'))
 
-    expect(htmlPreviewReasonKey.value).toBe('panel.detail.htmlReasonOutOfWhitelist')
-    expect(htmlSrc.value).toBeNull()
+    expect(state.value.kind).toBe('code')
+    expect(state.value.viewMode).toBe('preview')
+    expect(state.value.content).toBe('<html>project</html>')
+    expect(mockFileRead).toHaveBeenCalledWith(path, sid)
+    // 渲染态退役：servable 预检通道不再是抽屉的编排步骤
+    expect(mockServable).not.toHaveBeenCalled()
   })
 
-  it('.xml 不受影响：仍走 code 源码态（不触发 servable 预检）', async () => {
+  it('.xml 不受影响：仍走 code 类 + diff', async () => {
     const sid = 's1'
     const path = 'feed.xml'
     setupSession(sid, path, 'modified')
@@ -119,46 +121,41 @@ describe('useDetailPane · .html 默认渲染态', () => {
 
     expect(state.value.kind).toBe('code')
     expect(state.value.viewMode).toBe('diff')
-    expect(mockServable).not.toHaveBeenCalled()
   })
 })
 
-describe('useDetailPane · .html 源码态（白名单读取通道，§8.2 S3）', () => {
-  it('产物目录文件（cwd 外、白名单内）→ localFile:read 读内容，不落 file.read cwd 守门', async () => {
+describe('useDetailPane · 产物目录文件读取（白名单通道保留，§6.9 D9）', () => {
+  it('cwd 外绝对路径（产物目录）→ localFile:read 读内容，不落 file.read cwd 守门', async () => {
     const sid = 's1'
     const path = '/Users/demo/.taiji-dev/artifacts/s1/report.html'
     mockLocalFileRead.mockResolvedValue({ ok: true, content: '<html>artifact</html>', truncated: false })
 
     const sessionId = ref<string | null>(sid)
-    const { state, htmlView, htmlPreviewStatus, setHtmlView } = useDetailPane(sessionId)
+    const { state } = useDetailPane(sessionId)
     useFileTreeStore().selectFile(path)
     await nextTick()
-    await vi.waitFor(() => expect(htmlPreviewStatus.value).toBe('ready'))
+    await vi.waitFor(() => expect(state.value.status).toBe('content'))
 
-    await setHtmlView('source')
-    expect(htmlView.value).toBe('source')
-    expect(state.value.status).toBe('content')
+    expect(state.value.kind).toBe('code')
+    expect(state.value.viewMode).toBe('preview')
     expect(state.value.content).toBe('<html>artifact</html>')
     expect(mockLocalFileRead).toHaveBeenCalledWith(path)
     expect(mockFileRead).not.toHaveBeenCalled()
   })
 
-  it('白名单外项目文件 → 回落 file.read cwd 通道（§5.2「在项目内直接看源码」）', async () => {
+  it('cwd 外 `~` 形态路径同样走白名单通道', async () => {
     const sid = 's1'
-    const path = 'docs/report.html'
-    mockLocalFileRead.mockResolvedValue({ ok: false, reason: 'out_of_whitelist' })
-    mockFileRead.mockResolvedValue({ content: '<html>project</html>', truncated: false })
+    const path = '~/.taiji/artifacts/s1/report.html'
+    mockLocalFileRead.mockResolvedValue({ ok: true, content: '<html>tilde</html>', truncated: false })
 
     const sessionId = ref<string | null>(sid)
-    const { state, setHtmlView, htmlPreviewStatus } = useDetailPane(sessionId)
+    const { state } = useDetailPane(sessionId)
     useFileTreeStore().selectFile(path)
     await nextTick()
-    await vi.waitFor(() => expect(htmlPreviewStatus.value).toBe('ready'))
+    await vi.waitFor(() => expect(state.value.status).toBe('content'))
 
-    await setHtmlView('source')
-    expect(state.value.status).toBe('content')
-    expect(state.value.content).toBe('<html>project</html>')
-    expect(mockFileRead).toHaveBeenCalledWith(path, sid)
+    expect(mockLocalFileRead).toHaveBeenCalledWith(path)
+    expect(mockFileRead).not.toHaveBeenCalled()
   })
 
   it('白名单读取真实失败（not_found）→ 错误态，不静默回落 file.read', async () => {
@@ -167,33 +164,29 @@ describe('useDetailPane · .html 源码态（白名单读取通道，§8.2 S3）
     mockLocalFileRead.mockResolvedValue({ ok: false, reason: 'not_found' })
 
     const sessionId = ref<string | null>(sid)
-    const { state, setHtmlView, htmlPreviewStatus } = useDetailPane(sessionId)
+    const { state } = useDetailPane(sessionId)
     useFileTreeStore().selectFile(path)
     await nextTick()
-    await vi.waitFor(() => expect(htmlPreviewStatus.value).toBe('ready'))
+    await vi.waitFor(() => expect(state.value.status).toBe('error'))
 
-    await setHtmlView('source')
-    expect(state.value.status).toBe('error')
+    expect(state.value.error).toBe('文件不存在')
     expect(mockFileRead).not.toHaveBeenCalled()
   })
 
-  it('源码态加载失败后切回渲染态 → 清掉遗留 error 态（渲染态状态归 htmlPreview 状态机）', async () => {
+  it('白名单外（out_of_whitelist）→ 回落 file.read cwd 通道；通道不可用（reject）同款回落', async () => {
     const sid = 's1'
-    const path = '/Users/demo/.taiji-dev/artifacts/s1/gone.html'
-    mockLocalFileRead.mockResolvedValue({ ok: false, reason: 'not_found' })
+    const path = '/opt/outside/report.html'
+    mockLocalFileRead.mockResolvedValue({ ok: false, reason: 'out_of_whitelist' })
+    mockFileRead.mockResolvedValue({ content: '<html>fallback</html>', truncated: false })
 
     const sessionId = ref<string | null>(sid)
-    const { state, htmlView, setHtmlView, htmlPreviewStatus } = useDetailPane(sessionId)
+    const { state } = useDetailPane(sessionId)
     useFileTreeStore().selectFile(path)
     await nextTick()
-    await vi.waitFor(() => expect(htmlPreviewStatus.value).toBe('ready'))
+    await vi.waitFor(() => expect(state.value.status).toBe('content'))
 
-    await setHtmlView('source')
-    expect(state.value.status).toBe('error')
-
-    await setHtmlView('rendered')
-    expect(htmlView.value).toBe('rendered')
-    expect(state.value.status).toBe('content')
-    expect(state.value.error).toBe('')
+    expect(state.value.content).toBe('<html>fallback</html>')
+    expect(mockLocalFileRead).toHaveBeenCalledWith(path)
+    expect(mockFileRead).toHaveBeenCalledWith(path, sid)
   })
 })

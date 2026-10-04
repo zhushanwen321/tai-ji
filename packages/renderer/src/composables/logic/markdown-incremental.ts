@@ -595,7 +595,7 @@ function isHtmlPreviewFenceLang(lang: string): boolean {
 /**
  * fallback-full 路径的 html-preview 分流（chat-html-support §6.3 D3）：fallback 渲染整串
  * 不经 buildTailSegments 占位分支——未闭合的 html-preview fence 会被 fence 规则落成半截
- * 路径段（假降级卡片）。定位依据：未闭合 fence 吞掉其后全部内容，故其段必是最后一个
+ * 路径段（假降级占位）。定位依据：未闭合 fence 吞掉其后全部内容，故其段必是最后一个
  * html-preview 段；finalize 时不替换（完整渲染）。
  */
 function degradeOpenHtmlPreviewSegment(

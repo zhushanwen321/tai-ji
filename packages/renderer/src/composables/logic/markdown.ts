@@ -231,9 +231,9 @@ async function getMarkdown(): Promise<MarkdownIt> {
     }
 
     // html-preview 块（chat-html-support §6.2 D2）：输出纯路径占位容器，由 MarkdownRenderer
-    // 分发到 HtmlPreviewCard 组件（路径载荷不进 v-html/净化信任槽——卡片 DOM 由 Vue 模板产出）。
-    // 与 mermaid 同构：info 首词命中即识别（尾随 token 忽略），载荷 base64 进 data-path
-    // 杜绝引号/HTML 注入。内容合法性（空/多行 → 「路径非法」降级）由卡片判定（D3）。
+    // 分发到 HtmlPreviewInline 内联容器（路径载荷不进 v-html/净化信任槽——容器 DOM 由 Vue
+    // 模板产出）。与 mermaid 同构：info 首词命中即识别（尾随 token 忽略），载荷 base64 进
+    // data-path 杜绝引号/HTML 注入。内容合法性（空/多行 → 「路径非法」降级）由容器判定（D3）。
     if (lang.toLowerCase() === 'html-preview') {
       return stashTrusted(env, `<div class="md-html-preview" data-path="${encodeBase64(code)}"></div>`) + '\n'
     }
@@ -634,7 +634,7 @@ export async function renderMarkdown(content: string, env?: MarkdownEnv): Promis
  * D-5 增量渲染（W22）在 text/mermaid 之外扩展 `streaming-fence` 变体（未闭合 fence 的流式占位），
  * 并为段增加可选稳定键 `segId`（renderIncremental 首次产出时分配，前缀段跨帧不变）。
  * chat-html-support（§6.3 D3 / §7「fence 段」行）再扩展 `html-preview` 变体（载荷 = 被预览
- * HTML 文件路径字符串，卡片走 HtmlPreviewCard 组件、不进 sanitize 信任槽）。
+ * HTML 文件路径字符串，容器走 HtmlPreviewInline 组件、不进 sanitize 信任槽）。
  * 协议形状对齐 ui 层 MarkdownRenderer 的现有消费结构（ui/src/features/chat/markdown-types.ts，
  * W23 同步镜像扩展）。
  */
@@ -663,7 +663,7 @@ const SEGMENT_PLACEHOLDER_RE =
  * 把 markdown 渲染成 segment 数组：text 段（HTML）+ mermaid 段（源码）+ html-preview 段
  * （被预览 HTML 文件路径）交替。
  * MarkdownRenderer 用 v-for 渲染：text 走 v-html，mermaid 走 <MermaidRenderer> 组件，
- * html-preview 走 <HtmlPreviewCard> 组件（纯路径载荷，不进 v-html）。
+ * html-preview 走 <HtmlPreviewInline> 组件（纯路径载荷，不进 v-html）。
  * 替代 v-html 占位 + Vue render 函数动态挂载的脆弱模式——segments 让组件成为 template 里的
  * 正常组件，响应式可靠。
  */
