@@ -77,6 +77,7 @@ packages/runtime/src/
 | ③d | `infra/system/git-repo-resolver.ts` | 无状态只读 walk-up 路径解析（fs 只读遍历，无副作用、查询不 reject）；IGitRepoResolver port 已存在，value import 仅为注入缺省实例（sharedRepoObserver 单例 + git-state-service fallback） | git/repo-observer、git/git-state-service |
 | ③e | `infra/pi/argv-redact.ts` | **kernel 类纯函数**（无状态、无 IO、无副作用，纯字符串/数组遮蔽）：spawn 日志行与 crash journal 摘要出口共用的「日志回显前蔽值」变换 | reap-orphan-pi（crash journal 摘要；另一消费方 `infra/pi/rpc-client.ts` 本就在 infra 层） |
 | ③f | `infra/crash-correlation.ts` | 崩溃时刻机器面只读取证查询（无状态只读、best-effort 永不 reject），mem-pressure 同款横切关注点——定义 port 只会增加无意义间接层 | session-service pi crash 登记行（另一消费方 `infra/pi/rpc-client.ts` 本就在 infra 层） |
+| ③g | `infra/pi/pi-protocol.ts` + `infra/pi/pi-rejection.ts` + `infra/pi/event-adapter.ts` + `infra/pi/thinking-levels.ts` | **kernel 类纯函数/纯常量门面族**（无状态、无 IO、无副作用）：协议常量与解析（PI_EVENT 事件名词表 + 命令清单解析 + disposition 归一）、拒绝分型文案、结构化字段派生、thinking 档位词表——pi 1.0 对齐设计的 pi 词汇合法持有点清单（翻译层本体），为纯常量/纯函数定义 port 只会增加无意义间接层 | session-delivery-registry（命令识别/拒绝分型/disposition）、event-interpreter（事件名常量）、handoff-service（turn-end 帧）、model-capability（档位词表） |
 
 ### ④ node:fs 直用——基线债登记（非合规例外）
 

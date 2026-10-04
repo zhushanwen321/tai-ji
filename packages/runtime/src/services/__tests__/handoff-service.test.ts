@@ -1,9 +1,16 @@
 /**
  * HandoffService 单元测试（agent-driven）。
  *
- * 覆盖新流程：runHandoff 让源 session 跑 handoff turn → 从 agent_end 提取 doc →
+ * 覆盖新流程：runHandoff 让源 session 跑 handoff turn → 从 turn-end 终态帧提取 doc →
  * 新建 session + 注入 doc + 广播（无 doc/reply 字段，DM3）。abort / timeout /
- * 空文档 / 并发守卫 / extractFinalTextFromAgentEnd / buildHandoffPrompt 全覆盖。
+ * 空文档 / 并发守卫 / 重试过滤两分支（willRetry 跳过 / stopReason:error 拒绝，U3②
+ * D15.1 混合案 a+）/ buildHandoffPrompt 全覆盖。
+ *
+ * [U3②] 事件驱动形态：mock client emit pi 原始 agent_end 事件（onEvent 契约不变），
+ * handoff 内部经 event-adapter 翻译投影消费——原「首个 agent_end 即收尾」的重试误杀
+ * 由 willRetry 跳过 + stopReason 拒绝修复；原 extractFinalTextFromAgentEnd 直测族随
+ * 函数退役删除（提取逻辑迁 event-adapter extractFinalContent，text 非 string 畸形归一
+ * 语义以行为用例 TC-S1 锚定）。
  *
  * 测试框架：vitest（禁止 node:test）。
  */
@@ -11,7 +18,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   HandoffService,
   HANDOFF_TIMEOUT_MS,
-  extractFinalTextFromAgentEnd,
 } from '../handoff-service.js'
 import { HANDOFF_PROMPT_TEMPLATE, REPLY_MAX_LENGTH, buildHandoffPrompt, sanitizeReply } from '../handoff-prompt.js'
 import type { IMessageBroker } from '../../interfaces.js'
@@ -596,56 +602,106 @@ describe('HandoffService', () => {
     })
   })
 
-  describe('extractFinalTextFromAgentEnd', () => {
-    it('TC9a: 正常单 text block', () => {
-      const result = extractFinalTextFromAgentEnd([
-        { role: 'assistant', content: [{ type: 'text', text: 'hello' }] },
-      ])
-      expect(result).toBe('hello')
+  describe('U3② 重试过滤两分支（D15.1 混合案 a+）', () => {
+    /** 发起 runHandoff 并等监听注册完成。 */
+    /**
+     * 发起 runHandoff 并等监听注册完成。返回包装对象（不经 async return 展平 runPromise——
+     * async 函数 return promise 时调用方 await 会等到其 settle，emit 必须发生在 await 之前，
+     * 展平会让 emit 永远执行不到 = 测试死锁）。
+     */
+    async function startHandoff(): Promise<{ runPromise: Promise<void> }> {
+      const runPromise = service.runHandoff('src-1')
+      await new Promise((r) => setTimeout(r, 0))
+      return { runPromise }
+    }
+
+    it('TC-retry-skip: willRetry:true 中间失败帧跳过（不误杀），后续正常帧 resolve', async () => {
+      const runPromise = await startHandoff()
+
+      // pi 出错自动重试的中间失败帧：stopReason=error + willRetry=true + 空 messages
+      //（原实现「首个 agent_end 即收尾」在此误杀：空文档 reject）。现在必须跳过。
+      srcClient.emit({
+        type: 'agent_end',
+        messages: [],
+        willRetry: true,
+      })
+
+      // 跳过语义 = 仍 inflight 在途（无 reject/resolve）；发一条普通消息确认未被收尾
+      srcClient.emit({ type: 'message_update', message: { role: 'assistant', content: [] } })
+      await new Promise((r) => setTimeout(r, 0))
+      expect(sessionService.create).not.toHaveBeenCalled()
+
+      // 重试成功轮：正常终态帧 → resolve → create 新 session
+      srcClient.emit({
+        type: 'agent_end',
+        messages: [{ role: 'assistant', content: [{ type: 'text', text: 'doc after retry' }], stopReason: 'stop' }],
+        willRetry: false,
+      })
+      await runPromise
+      // runHandoff 在 agentEndPromise settle 后还有收尾链（create → ensureActive → 注入
+      // prompt），await runPromise 只等 agentEndPromise——补一个宏任务等收尾链跑完
+      await new Promise((r) => setTimeout(r, 0))
+      expect(sessionService.create).toHaveBeenCalledTimes(1)
+      expect(newClient.prompt).toHaveBeenCalledTimes(1)
+      expect(newClient.prompt.mock.calls[0]![0] as string).toContain('doc after retry')
     })
 
-    it('TC9b: 多 text block join', () => {
-      const result = extractFinalTextFromAgentEnd([
-        { role: 'assistant', content: [{ type: 'text', text: 'hello ' }, { type: 'text', text: 'world' }] },
-      ])
-      expect(result).toBe('hello world')
+    it('TC-retry-exhausted: 重试用尽终态（willRetry:false + stopReason:error）→ 拒绝，不建会话', async () => {
+      const { runPromise } = await startHandoff()
+
+      // 中间失败帧 ×2（均跳过）
+      srcClient.emit({ type: 'agent_end', messages: [], willRetry: true })
+      srcClient.emit({ type: 'agent_end', messages: [], willRetry: true })
+
+      // 重试用尽：最后一帧恒 willRetry=false + stopReason=error → 拒绝（干净 reject 优于脏数据）
+      srcClient.emit({
+        type: 'agent_end',
+        messages: [{ role: 'assistant', content: [{ type: 'text', text: 'partial error text' }], stopReason: 'error' }],
+        willRetry: false,
+      })
+
+      await expect(runPromise).rejects.toThrow('agent run failed')
+      expect(sessionService.create).not.toHaveBeenCalled()
+      expect(broker.broadcast).not.toHaveBeenCalled()
     })
 
-    it('TC9c: messages undefined → ""', () => {
-      expect(extractFinalTextFromAgentEnd(undefined)).toBe('')
-    })
+    it('TC-stopReason-error-reject: 终态 error 帧带非空正文 → 拒绝（错误文本不得当交接文档注入新会话，Q8 残余缺口）', async () => {
+      const { runPromise } = await startHandoff()
 
-    it('TC9d: messages 空数组 → ""', () => {
-      expect(extractFinalTextFromAgentEnd([])).toBe('')
-    })
+      srcClient.emit({
+        type: 'agent_end',
+        messages: [{ role: 'assistant', content: [{ type: 'text', text: 'mid-stream error output' }], stopReason: 'error' }],
+        willRetry: false,
+      })
 
-    it('TC9e: 末条 content 非 text（tool_use）→ ""', () => {
-      const result = extractFinalTextFromAgentEnd([
-        { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'write', input: {} }] },
-      ])
-      expect(result).toBe('')
+      await expect(runPromise).rejects.toThrow('handoff: agent run failed (stopReason=error)')
+      expect(sessionService.create).not.toHaveBeenCalled()
+      expect(newClient.prompt).not.toHaveBeenCalled()
     })
+  })
 
-    it('TC9f: content 是 string（非数组）→ ""', () => {
-      const result = extractFinalTextFromAgentEnd([
-        { role: 'assistant', content: 'plain string content' },
-      ])
-      expect(result).toBe('')
-    })
+  describe('终态帧文本提取（原 extractFinalTextFromAgentEnd 直测族的行为化改写，U3②）', () => {
+    it('TC-S1: 畸形 text block（{type:"text", text:123}）整块过滤 → 空文档 reject（不拼 "123"）', async () => {
+      const runPromise = service.runHandoff('src-1')
+      await new Promise((r) => setTimeout(r, 0))
 
-    it('TC9g: S1 text 字段非 string（{type:"text", text:123}）→ 过滤掉 → ""', () => {
-      // pi 若发畸形 {type:'text', text:123}，不应被拼成 "123"；归一化为空文档走 empty reject。
-      const result = extractFinalTextFromAgentEnd([
-        {
-          role: 'assistant',
-          content: [
-            { type: 'text', text: 123 as unknown as string },
-            { type: 'text', text: { nested: true } as unknown as string },
-          ],
-          stopReason: 'stop',
-        },
-      ])
-      expect(result).toBe('')
+      srcClient.emit({
+        type: 'agent_end',
+        messages: [
+          {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: 123 as unknown as string },
+              { type: 'text', text: { nested: true } as unknown as string },
+            ],
+            stopReason: 'stop',
+          },
+        ],
+        willRetry: false,
+      })
+
+      await expect(runPromise).rejects.toThrow('empty document')
+      expect(sessionService.create).not.toHaveBeenCalled()
     })
   })
 

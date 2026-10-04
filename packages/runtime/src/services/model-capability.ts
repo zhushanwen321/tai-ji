@@ -4,13 +4,16 @@
  * ── 格局声明（本仓首次反转，登记于此）────────────────────────────────
  * pi 系包此前刻意保持「仓库根 package.json 声明、runtime 包不可 import」格局
  * （见 infra/pi/__tests__/pi-paths-config-dir-contract.test.ts 头注：根声明仅供
- * 测试静态读 dist）。本模块是该格局的**首次反转**：runtime 由此出现 pi 系包的
+ * 测试静态读 dist）。能力注册表是该格局的**首次反转**：runtime 由此出现 pi 系包的
  * 运行时 import（@earendil-works/pi-ai）。反转正当性 = 注册表核心承诺——
  * 「这个模型支持什么档位」只有 pi 一个实现副本（pi-ai 自身），taiji 侧零影子
  * 推断（问题类判据 1 的结构性消除）。配套纪律：runtime package.json 的 pi-ai
  * 精确 pin 与根 pin 的双副本一致性不能靠 pnpm（多版本共存合法、frozen-lockfile
  * 不报错），由 D6 版本门禁（check-pi-semantics 四包一致性校验）机器保证；
  * pi-ai 已登记 runtime/tsup.config.ts noExternal（架构规则 #12 ②）。
+ * [pi1-disposition-chat-flow U3③] pi-ai 的 import 通路已收进 infra/pi/thinking-levels.ts
+ * 门面（pi 词汇合法持有点清单 D5①，import 项机器检查口径）——本模块零 pi 系 import，
+ * 经 getPiSupportedThinkingLevels 消费。
  *
  * ── 职责（D2 CR-hybrid：离线同源计算 + 在线 RPC 对账）────────────────
  * ① 离线计算：对配置聚合清单逐模型调 pi 同源 getSupportedThinkingLevels 算支持
@@ -26,7 +29,7 @@
  * 现调（settings-selector）；签名键记忆化只省微秒级计算却引入缓存容器与批量作废
  * 键的维护面（pi 版本 + 两个文件 mtime 三维度键），零收益机制整体退役。
  */
-import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
+import { getPiSupportedThinkingLevels } from '../infra/pi/thinking-levels.js'
 import type { ProviderInfo } from '@taiji/shared'
 import type { AvailableModelSnapshot } from '../infra/pi/rpc-client.js'
 import { logger } from '../infra/logger.js'
@@ -41,10 +44,10 @@ export interface ModelCapabilityInput {
 }
 
 /**
- * getSupportedThinkingLevels 入参的声明形状（pi-ai Model<TApi>），经函数签名派生——
- * 不在 services 引入 Pi 前缀命名的类型（check_pi_type_leak：此类命名只许 infra/pi 内部）。
+ * thinking levels 查询入参的声明形状（pi-ai Model<TApi>），经门面函数签名派生——
+ * 不在 services 引入 pi 系符号（check_pi_type_leak：pi 系 import 只许 infra/pi）。
  */
-type ThinkingLevelModelParam = Parameters<typeof getSupportedThinkingLevels>[0]
+type ThinkingLevelModelParam = Parameters<typeof getPiSupportedThinkingLevels>[0]
 
 /**
  * 离线计算模型支持的思考档位——pi 同源函数的唯一 taiji 侧入口。
@@ -56,7 +59,7 @@ type ThinkingLevelModelParam = Parameters<typeof getSupportedThinkingLevels>[0]
  * （pi-semantics）+ diff-probe 接线（改比对对象为本计算路径）持续守卫。
  */
 export function computeSupportedLevels(model: ModelCapabilityInput): string[] {
-  return getSupportedThinkingLevels(model as unknown as ThinkingLevelModelParam)
+  return getPiSupportedThinkingLevels(model as unknown as ThinkingLevelModelParam)
 }
 
 /**

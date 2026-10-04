@@ -64,7 +64,18 @@ DOCUMENTED_MODULES = {
     # 为它定义 port 只会增加无意义间接层（遮蔽是写日志的前置纯变换，非可替换的 IO 能力）。
     "argv-redact",
 # 登记同步见 docs/architecture/runtime-layering.md §3 ③e
-    
+    # infra/pi 门面族四模块（2026-10-04，pi1-disposition 设计 D2①/D5①⑥/D15.1 落地登记）：
+    # 全部 kernel 类纯函数/纯常量（无状态、无 IO、无副作用）——协议常量与解析（pi-protocol：
+    # PI_EVENT 词表 + 命令清单解析 + disposition 归一）、拒绝分型文案（pi-rejection）、
+    # 结构化字段派生（event-adapter）、thinking 档位词表（thinking-levels）。services 消费它们
+    # 是 pi 1.0 对齐设计的显式结构（pi 词汇合法持有点清单 D5 的「翻译层」就是这些门面），
+    # 为纯常量/纯函数定义 port 只会增加无意义间接层，同 argv-redact 裁决形态。
+    "pi-protocol",
+    "pi-rejection",
+    "event-adapter",
+    "thinking-levels",
+# 登记同步见 docs/architecture/runtime-layering.md §3 ③g
+
 }
 
 # 现状基线债（不在 §3 表；每项的裁决注释保留原位，待 ports 收编后移除）

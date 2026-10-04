@@ -13,8 +13,8 @@
  * 断言方式（P-D1 代码形态断言）：静态直读 dist/core/agent-session.js 的 prompt() 方法窗口，
  * 拒绝原文出现次数 + 所属分支位置断言，失真即红。dist 不可达时 skip 不 fail；不进
  * REAL_PI_TESTS 分池。pi 升级后红 = 文案/分支漂移，runtime 转译识别失效退化为普通
- * message.error——先复核锚点，同步 message-dispatcher 的 PI_REJECTION_* 常量与
- * classifyPromptRejection 后再更新 verifiedWith。
+ * message.error——先复核锚点，同步 infra/pi/pi-rejection.ts 的 PI_REJECTION_* 常量与
+ * classifyPromptRejection（文案唯一驻留点，U3① 下沉）后再更新 verifiedWith。
  *
  * 运行：cd packages/runtime && npx vitest run src/infra/pi/__tests__/pi-semantics-prompt-rejection.test.ts
  */
@@ -43,7 +43,7 @@ describe.skipIf(!PI_DIST)(
       // 原文全文恰出现 1 次（文案漂移即红——runtime classifyPromptRejection 按 includes 识别）
       expect(
         count(SESSION_SRC, 'Cannot submit a prompt while compaction is in progress'),
-        'PS-22 漂移：manual 压缩拒绝文案消失/变更——runtime 转译失效退化为 message.error，同步 message-dispatcher PI_REJECTION_COMPACTING 后更新 verifiedWith',
+        'PS-22 漂移：manual 压缩拒绝文案消失/变更——runtime 转译失效退化为 message.error，同步 infra/pi/pi-rejection.ts PI_REJECTION_COMPACTING 后更新 verifiedWith',
       ).toBe(1)
 
       // 分支位置：原文紧跟 _compactionAbortController !== undefined 检查（仍在 prompt() 窗口内）
@@ -71,7 +71,7 @@ describe.skipIf(!PI_DIST)(
       // 原文全文恰出现 1 次（文案漂移即红——runtime classifyPromptRejection 按 includes 识别）
       expect(
         count(SESSION_SRC, 'Agent is already processing'),
-        'PS-23 漂移：isStreaming 拒绝文案消失/变更——runtime 转译失效退化为 message.error，同步 message-dispatcher PI_REJECTION_PROCESSING 后更新 verifiedWith',
+        'PS-23 漂移：isStreaming 拒绝文案消失/变更——runtime 转译失效退化为 message.error，同步 infra/pi/pi-rejection.ts PI_REJECTION_PROCESSING 后更新 verifiedWith',
       ).toBe(1)
 
       // 分支位置：原文位于 if (this.isStreaming) { if (!options?.streamingBehavior) throw 链内
