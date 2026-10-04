@@ -85,8 +85,14 @@ def get_declared_deps() -> set[str]:
 def scan_imports() -> dict[str, set[str]]:
     """返回 {文件路径: {未豁免的 import 包名}}"""
     results: dict[str, set[str]] = {}
+    # [HISTORICAL] 2026-09-19 渲染链下沉（remote-use-mobile U1.4a）：env.d.ts 的
+    # declare module 块内 `import type MarkdownIt from 'markdown-it'` 是纯类型位置引用，
+    # 构建期恒被擦除，不构成运行时依赖（本守卫的目的即防运行时 Cannot find module），
+    # 且 markdown-it-katex 类型声明随 D10 下沉以双份形态存在（ui SSOT + renderer 编译
+    # 上下文副本），其内部 import type 不可作为「未声明依赖」判定依据——负向前瞻跳过
+    # type-only import，value import 仍受检。
     import_re = re.compile(
-        r'''^\s*import\s+(?:[^'"]+\s+from\s+)?['"]([^'"]+)['"]''',
+        r'''^\s*import(?!\s+type)\s+(?:[^'"]+\s+from\s+)?['"]([^'"]+)['"]''',
         re.MULTILINE,
     )
     dynamic_import_re = re.compile(r'''import\s*\(\s*['"]([^'"]+)['"]\s*\)''')

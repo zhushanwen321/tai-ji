@@ -1,4 +1,7 @@
 import { RuntimeServer } from './transport/server.js'
+// remote-access U0.1（D2/D9）：remote token 热读函数——仅 --remote-access 开态装配为
+// ConnectionManager 的 remoteTokenProvider（每次 auth 握手调用）；关态不装配零 IO。
+import { readRemoteAccessToken } from './transport/connection-manager.js'
 import { SessionService } from './services/session/session-service.js'
 import { GenStatsService } from './services/session/gen-stats-service.js'
 import { createSessionDeliveryRegistry } from './services/session/session-delivery-registry.js'
@@ -144,13 +147,25 @@ import { toErrorMessage } from './utils/errors.js'
 // 回收面之外，进程退出的兜底回收——设计 §3.6 退出钩子落点）。
 import { disposeRuntimeEngineClients } from './services/session/subagent-engine-history.js'
 
-function parseArgs(): { port: number; projectRoot?: string; builtinPluginsDir?: string } {
+interface ParsedArgs {
+  port: number
+  projectRoot?: string
+  builtinPluginsDir?: string
+  /** 远程访问开态（remote-access D9）：--remote-access flag 存在即开。argv 判据，无 env 通道（ambient 免疫）。 */
+  remoteAccess: boolean
+  /** 移动壳 dist 目录（remote-access D3）：--mobile-dist=<path>；静态托管消费归 U1.1。 */
+  mobileDist?: string
+}
+
+function parseArgs(): ParsedArgs {
   // eslint-disable-next-line no-magic-numbers -- argv[0] is node, argv[1] is script
   const args = process.argv.slice(2)
   const portOffset = Math.max(0, Math.min(parseInt(process.env.TAIJI_AGENT_PORT_OFFSET ?? '0', 10) || 0, MAX_PORT - BASE_PORT))
   let port = BASE_PORT + portOffset
   let projectRoot: string | undefined
   let builtinPluginsDir: string | undefined
+  let remoteAccess = false
+  let mobileDist: string | undefined
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--port' && i + 1 < args.length) {
       const parsed = parseInt(args[i + 1], 10)
@@ -174,9 +189,16 @@ function parseArgs(): { port: number; projectRoot?: string; builtinPluginsDir?: 
       builtinPluginsDir = args[i + 1]
     } else if (args[i].startsWith('--builtin-plugins-dir=')) {
       builtinPluginsDir = args[i].split('=')[1]
+    } else if (args[i] === '--remote-access') {
+      // 布尔 flag（remote-access D9）：出现即开，supervisor 按配置 enabled 拼参（U1.2）。
+      remoteAccess = true
+    } else if (args[i] === '--mobile-dist' && i + 1 < args.length) {
+      mobileDist = args[i + 1]
+    } else if (args[i].startsWith('--mobile-dist=')) {
+      mobileDist = args[i].split('=')[1]
     }
   }
-  return { port, projectRoot, builtinPluginsDir }
+  return { port, projectRoot, builtinPluginsDir, remoteAccess, mobileDist }
 }
 
 /**
@@ -279,7 +301,7 @@ function subscribeAgentSettledIn(
 }
 
 async function main(): Promise<void> {
-  const { port, projectRoot, builtinPluginsDir } = parseArgs()
+  const { port, projectRoot, builtinPluginsDir, remoteAccess, mobileDist } = parseArgs()
   const effectiveRoot = projectRoot ?? process.cwd()
   // perf W29（D8-1）启动耗时分解探针（06 §5 m-7）：listen 前各段打点，
   // 输出进日志文件供 D8 价值评估（基线实测：getPiVersion 1.1-1.3s 主导 listen 延迟）。
@@ -309,7 +331,18 @@ async function main(): Promise<void> {
   const pm = new ProcessManager(effectiveRoot)
 
   // Transport layer
-  const server = new RuntimeServer(port, projectRoot, runtimeToken)
+  // remote-access U0.1 装配（D1/D2/D3/D9）：
+  // - host：开态绑 0.0.0.0（LAN 可达，桌面 localhost 天然被覆盖）；关态 undefined =
+  //   ConnectionManager 默认 127.0.0.1（与现状逐字节一致）。
+  // - mobileDist：argv 唯一来源（main 侧解析绝对路径拼参归 U1.2），本单元仅透传。
+  // - remoteTokenProvider：仅开态装配——每次 auth 握手热读 remote-access.json（轮换
+  //   文件即生效）；关态不装配，ConnectionManager 不持有读取通道（零文件 IO，且不读
+  //   任何 env——D9 ambient 免疫，本设计新增 env 键 = 0）。
+  const server = new RuntimeServer(port, projectRoot, runtimeToken, {
+    host: remoteAccess ? '0.0.0.0' : undefined,
+    mobileDist,
+    remoteTokenProvider: remoteAccess ? readRemoteAccessToken : undefined,
+  })
 
   // MessageBus 单例（wave:runtime-wiring）：per-session 消息广播核心。
   // 在 server 构造后、setServices 前创建并注入——server 的 ConnectionManager.onDisconnect

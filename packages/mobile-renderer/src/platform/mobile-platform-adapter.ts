@@ -1,65 +1,76 @@
-// MobilePlatformAdapter —— §9 PlatformPort 三端口实现（mobile 壳侧）。
+// MobilePlatformAdapter —— PlatformPort 三端口 mobile 实装（remote-use D10 真实化）。
 //
-// 实现 core P0 已导出的 PlatformPort 接口（kind/storage/webSocket 三字段），
-// kind='mobile'。对接 core/src/platform/port.ts 的 providePlatform/getPlatform 注入点。
+// 实现 core P0 已导出的 PlatformPort 接口（kind/storage/webSocket 三字段），kind='mobile'。
+// 对接 core/src/platform/port.ts 的 providePlatform/getPlatform 注入点。
 //
-// pre-P0/P1 stub 形态：
-//   - storage：内存 Map（进程重启丢），get 不存在 key 返回 null（对齐 core KVStorage 契约）
-//   - webSocket：create(url) 返回不建立真实连接的 mock 对象（D2 远程 deferred）
+// real 实装（替换 pre-P0 stub）：
+//   - storage：localStorage 桥接（KVStorage 异步签名按契约保持——localStorage 为同步 API，
+//     以 Promise 包装；持久化支撑 D4「remote token 验身后落盘」= G3 免重扫的物理载体）
+//   - webSocket：原生 WebSocket 包装为 WebSocketLike（core ws-client 经 platform 端口建连，
+//     A8。原生实例的回调字段签名带事件对象（onmessage 收 MessageEvent 等），与 WebSocketLike
+//     的无参 / 纯 data 形态不结构兼容，故经适配壳中转：ws-client 的回调赋值落在壳字段，
+//     由壳转接到原生实例——两侧签名差异在此单点吸收）
 //
 // ipc 不在 PlatformPort（mobile 无 electron 主进程，桌面独占能力；electronAPI 实际
 // 访问点在 renderer 壳 lib/ipc.ts）。
 //
-// TODO(P1): websocket 对接 core transport（P1 ws-client 迁入 core 后，mobile D2
-// 远程连接落地时，create 返回真实 WebSocket 实例或远程代理）。
-//
-// 设计依据：renderer-package-topology.md §9、slice plan IF2。
+// 设计依据：renderer-package-topology.md §9（移动壳拓扑与平台端口契约）、远程访问连接派生 D4（profile 三分支）/移动壳真实化 D10（adapter 真实化）。
 
 import type { KVStorage, PlatformPort, WebSocketFactory, WebSocketLike } from '@taiji/core'
 
-// InMemoryStorage —— KVStorage 内存实现（get 不存在 key 返回 null，非抛错）。
-// 对齐 core KVStorage 契约。进程生命周期内有效，重启丢失（mobile 壳无持久化需求
-// 的场景用它；持久化属后续 D2 远程 + P0 PlatformPort storage 正式实现后）。
-class InMemoryStorage implements KVStorage {
-  private readonly map = new Map<string, string>()
-
+// LocalStorageKV —— KVStorage 的 localStorage 桥接实现。
+// KVStorage 契约为异步签名（Promise 返回），localStorage 为同步 API——按契约包 Promise。
+// get 不存在 key 返回 null（localStorage.getItem 天然语义，非抛错）。
+class LocalStorageKV implements KVStorage {
   async get(key: string): Promise<string | null> {
-    return this.map.has(key) ? (this.map.get(key) as string) : null
+    return localStorage.getItem(key)
   }
 
   async set(key: string, value: string): Promise<void> {
-    this.map.set(key, value)
+    localStorage.setItem(key, value)
   }
 
   async remove(key: string): Promise<void> {
-    this.map.delete(key)
+    localStorage.removeItem(key)
   }
 }
 
-// createMockWebSocket —— 返回不建连的 WebSocketLike stub（D2 远程 deferred）。
-// readyState=CLOSED(3)，send/close 为 noop，四回调为 null（调用方按需赋值）。
-// 让 core ws-client 若调 webSocket.create(url) 不崩，但看到立即关闭态。
-function createMockWebSocket(): WebSocketLike {
-  return {
-    readyState: 3, // CLOSED（WHATWG 对齐，core WS_READY_STATE.CLOSED）
-    send: () => {
-      // noop —— mock 不建连，send 丢弃
-    },
-    close: () => {
-      // noop
-    },
-    onopen: null,
-    onclose: null,
-    onmessage: null,
-    onerror: null,
+// NativeWebSocketAdapter —— 原生 WebSocket 的 WebSocketLike 适配壳。
+// 回调经自有字段中转（壳侧无参 / 纯 data 形态 → 原生实例的事件对象形态）；readyState 直读
+// 原生实例（WHATWG 数字常量，core WS_READY_STATE 对齐）。
+class NativeWebSocketAdapter implements WebSocketLike {
+  onopen: (() => void) | null = null
+  onclose: (() => void) | null = null
+  onmessage: ((event: { data: unknown }) => void) | null = null
+  onerror: ((err: unknown) => void) | null = null
+
+  private readonly native: WebSocket
+
+  constructor(url: string) {
+    this.native = new WebSocket(url)
+    this.native.onopen = () => this.onopen?.()
+    this.native.onclose = () => this.onclose?.()
+    this.native.onmessage = (ev: MessageEvent) => this.onmessage?.({ data: ev.data })
+    this.native.onerror = (ev: Event) => this.onerror?.(ev)
+  }
+
+  get readyState(): number {
+    return this.native.readyState
+  }
+
+  send(data: string): void {
+    this.native.send(data)
+  }
+
+  close(): void {
+    this.native.close()
   }
 }
 
-// MobileWebSocketFactory —— WebSocketFactory 的 mobile stub 实现。
+// MobileWebSocketFactory —— WebSocketFactory 的原生实装（浏览器全局 WebSocket）。
 class MobileWebSocketFactory implements WebSocketFactory {
-  create(_url: string): WebSocketLike {
-    // _url 前缀下划线：mock 不消费 url（D2 远程落地后才建连）
-    return createMockWebSocket()
+  create(url: string): WebSocketLike {
+    return new NativeWebSocketAdapter(url)
   }
 }
 
@@ -68,7 +79,7 @@ class MobileWebSocketFactory implements WebSocketFactory {
 export function createMobilePlatformAdapter(): PlatformPort {
   return {
     kind: 'mobile',
-    storage: new InMemoryStorage(),
+    storage: new LocalStorageKV(),
     webSocket: new MobileWebSocketFactory(),
   }
 }

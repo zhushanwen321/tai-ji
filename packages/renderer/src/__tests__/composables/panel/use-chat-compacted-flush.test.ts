@@ -280,8 +280,9 @@ describe('useChat occupancy 全 idle → flush 触发（session-occupancy u5b）
   })
 
   it('TC11d: composable.deferFlushStalled 中英双语语义一致（均含卡死嫌疑 + 侧栏强制退出指引）', async () => {
-    const zhCN = (await import('@/i18n/locales/zh-CN/composable')).default
-    const enUS = (await import('@/i18n/locales/en-US/composable')).default
+    // composable 域随 U1.4b 域文件级下沉迁移 ui locale 模块，此处跟随改址（文案语义断言不变）
+    const zhCN = (await import('@taiji/ui/locale/zh-CN/composable')).default
+    const enUS = (await import('@taiji/ui/locale/en-US/composable')).default
     // zh-CN：pi 仍在处理 / 可能已卡住 + 可操作指引（侧栏右键强制退出）
     expect(zhCN.deferFlushStalled).toContain('pi 仍在处理')
     expect(zhCN.deferFlushStalled).toContain('可能已卡住')

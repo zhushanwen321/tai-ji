@@ -3,29 +3,42 @@
  *
  * 职责：
  * - 持有 clients 连接池（Set<WebSocket>），供 broker.broadcast 遍历。
- * - WS 服务器生命周期：start（listen 127.0.0.1 + 注册 connection 回调）/ stop（关闭 wss + http）。
+ * - WS 服务器生命周期：start（listen 绑定地址参数化，默认 127.0.0.1——remote-access D1；
+ *   注册 connection 回调）/ stop（关闭 wss + http）。
  * - auth 握手（S1-W1，spec §3.3 D4）：连接建立后首条消息必须是 {type:'auth', payload:{token}}，
  *   校验通过（unauthed → authed）前不受理任何其他消息（静默丢弃）、10s 超时断开、
- *   失败以 close 1008。authToken=null 时 fail-closed（拒绝全部连接——组合根 env 与
- *   token 文件都缺失的场景，见 index.ts resolveRuntimeToken）。
+ *   失败以 close 1008。token 校验是集合成员比较（remote-access D2）：{spawn token} ∪
+ *   {remote token（仅开态、每次握手热读 provider）}；两个通道都缺失时 fail-closed
+ *   （拒绝全部连接——组合根 env 与 token 文件都缺失且无 remote 通道的场景，见 index.ts
+ *   resolveRuntimeToken 与 remoteTokenProvider 装配）。
  * - 心跳：每条消息重置计时器，超时关闭连接（防僵尸连接）。仅对 authed 连接生效——
  *   未认证连接由 authTimer 兜底，防「auth 前发 ping 刷心跳绕过认证超时」。
  * - HTTP /health 端点（与 WS 同端口，简单存活探针；不要求 token——supervisor 探活用，
  *   响应只有 status/uptime，无敏感数据）。
+ * - 移动壳静态托管（remote-access D3/E5，仅开态挂载）：同端口 GET/HEAD 托管
+ *   --mobile-dist 指向的移动壳构建产物，白名单化路径判定防目录穿越（E4），
+ *   访问/拒绝日志只记剥除 query 后的 pathname；关态 handler 不挂载，行为与
+ *   无远程访问形态逐字节一致。
  * - maxPayload：单条消息上限（超限连接被 close 1009，见 shared MAX_WS_PAYLOAD_BYTES 校准注释）。
  *
  * 不含：消息路由（server.ts handleMessage）、消息发送（broker）、业务逻辑（handlers）。
  * 连接 auth 成功后把 ws + 解析出的 msg 通过注入的回调交给上层（RuntimeServer）处理。
  */
-import { createServer, type Server as HttpServer } from 'node:http'
+import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
+import * as fs from 'node:fs'
+import { basename, extname, join, resolve, sep } from 'node:path'
 import { WebSocketServer, WebSocket, type WebSocket as WsType } from 'ws'
-import { MAX_WS_PAYLOAD_BYTES, type ClientMessage } from '@taiji/shared'
+import { MAX_WS_PAYLOAD_BYTES, REMOTE_ACCESS_FILENAME, type ClientMessage, type RemoteAccessConfig } from '@taiji/shared'
+import { getDataDir } from '@taiji/shared/paths'
 import { toErrorMessage } from '../utils/errors.js'
 import type { ErrorDetails } from './message-context.js'
 
 const HTTP_OK = 200
 const HTTP_NOT_FOUND = 404
+const HTTP_BAD_REQUEST = 400
+const HTTP_METHOD_NOT_ALLOWED = 405
+const HTTP_INTERNAL_ERROR = 500
 const MAX_WS_CLOSE_CODE = 4000
 const HEARTBEAT_TIMEOUT_MS = 45_000
 /** WS 1001 Going Away（RFC 6455）——服务端计划内关停时发给全部存量连接的 close 码。 */
@@ -40,12 +53,198 @@ const AUTH_TIMEOUT_MS = 10_000
 /** WS policy violation 关闭码（RFC 6455）——auth 失败 / fail-closed 拒绝统一用它。 */
 const WS_CLOSE_POLICY_VIOLATION = 1008
 
+/** 默认监听绑定地址（remote-access D1）：纯回环，与参数化前现状逐字节一致。 */
+export const DEFAULT_LISTEN_HOST = '127.0.0.1'
+
+/** remote token 契约形态（@taiji/shared RemoteAccessConfig）：64 位 hex 小写（32 字节随机值的 hex 编码）。 */
+const REMOTE_TOKEN_HEX64 = /^[0-9a-f]{64}$/
+
 /** 常量比较（抗时序攻击）：长度不等直接 false（token 长度非秘密）。 */
 function tokenEquals(a: string, b: string): boolean {
   const ba = Buffer.from(a, 'utf-8')
   const bb = Buffer.from(b, 'utf-8')
   if (ba.length !== bb.length) return false
   return timingSafeEqual(ba, bb)
+}
+
+// ── remote token 热读（remote-access D2/E10）───────────────────────────────
+// 读取通道形态与 index.ts resolveRuntimeToken 同构（fs.readFileSync + getDataDir() 推导），
+// 但触发时机不同：runtime-token 是启动期一次解析，remote token 是每次 WS auth 握手热读——
+// token 轮换 = main 重写 remote-access.json，下一次新握手即生效，无 runtime 重启（D2）。
+// 独立导出纯解析函数 + IO 包装：组合根（index.ts）import 即执行 main() 不可直测，
+// E10 三态（缺失/坏 JSON/坏字段）的 fail-closed 语义由本模块单测守卫。
+
+/**
+ * 解析 remote-access.json 内容为 remote token（E10 处置：任何不合法形态返回 null，
+ * remote 集合退化为空——仅 spawn token 可认证，fail-closed）。
+ *
+ * - 坏 JSON / 非对象 / 字段不合法 → error 日志（含恢复指引）+ null；
+ * - enabled=false → 关态文件留存是设计内合法产出（D2 配套规格③），debug 级 + null，
+ *   不按错误响亮（计算器分层：设计内合法产出不是错误）。
+ */
+export function parseRemoteAccessToken(raw: string): string | null {
+  let config: unknown
+  try {
+    config = JSON.parse(raw)
+  } catch {
+    console.error(
+      `[runtime] remote access: ${REMOTE_ACCESS_FILENAME} 不是合法 JSON — remote token 不可用` +
+        '（fail-closed：仅 spawn token 可认证，远程客户端将全部被拒）。' +
+        '恢复：回桌面端 设置 → 远程访问面板 执行轮换（重写配置文件），或检查该文件内容',
+    )
+    return null
+  }
+  if (typeof config !== 'object' || config === null || !isRemoteAccessConfigShape(config)) {
+    console.error(
+      `[runtime] remote access: ${REMOTE_ACCESS_FILENAME} 字段不合法（缺 enabled/token 或类型不符）— ` +
+        'remote token 不可用（fail-closed：仅 spawn token 可认证）。' +
+        '恢复：回桌面端 设置 → 远程访问面板 执行轮换（重写配置文件），或删除该文件后在面板重新开启',
+    )
+    return null
+  }
+  // 关态文件留存（D2 配套规格③）：开关关闭但文件还在，token 不入集合。这是开关切换
+  // 触发 runtime 重启前的正常窗口态，非错误。
+  if (config.enabled === false) {
+    console.debug(`[runtime] remote access: ${REMOTE_ACCESS_FILENAME} enabled=false（关态文件留存），remote token 不入鉴权集合`)
+    return null
+  }
+  if (!REMOTE_TOKEN_HEX64.test(config.token)) {
+    console.error(
+      `[runtime] remote access: ${REMOTE_ACCESS_FILENAME} token 字段不符合契约（须为 64 位 hex 小写）— ` +
+        'remote token 不可用（fail-closed：仅 spawn token 可认证）。' +
+        '恢复：回桌面端 设置 → 远程访问面板 执行轮换（重新生成 token 并重写配置文件）',
+    )
+    return null
+  }
+  return config.token
+}
+
+/** 结构守卫（禁 any 红线：unknown 经 shape 收窄后才按契约字段消费）。 */
+function isRemoteAccessConfigShape(value: object): value is Pick<RemoteAccessConfig, 'enabled' | 'token'> {
+  const record = value as Record<string, unknown>
+  return typeof record.enabled === 'boolean' && typeof record.token === 'string'
+}
+
+// ── 移动壳静态托管（remote-access D3/E4/E5）────────────────────────────────
+// runtime 同源静态托管移动壳构建产物（vite base:'./' 独立 web 构建，与 electron 产物
+// 无耦合）。dist 目录唯一来源 = argv --mobile-dist（组合根透传，路径知识 main 侧单侧
+// 持有，runtime 只消费不探测环境形态）。仅 GET/HEAD；白名单化路径判定防目录穿越；
+// 访问/拒绝日志只记 pathname（query 剥除）——`GET /?token=...` 的完整 URL 不落盘，
+// 防 remote token 经静态面日志形成第三落盘通道。
+
+const MOBILE_INDEX_FILENAME = 'index.html'
+
+/** 移动壳产物扩展名 → Content-Type 基础映射（vite web 构建产物 + katex 字体所需）。 */
+const MOBILE_STATIC_CONTENT_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.json': 'application/json',
+  '.map': 'application/json',
+  '.txt': 'text/plain; charset=utf-8',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.wasm': 'application/wasm',
+}
+
+/**
+ * 把 HTTP 请求的 URL path（query 已由调用方剥除）解析为 dist 内绝对路径；
+ * 白名单外返回 null（调用方 400）。
+ *
+ * 安全自审（穿越防护判定逻辑，E4）：
+ * 1. 输入是调用方剥除 query 后的**原始编码 pathname**（刻意不经过 URL parser——其
+ *    dot-segment 归一化会把 `/../`、`/%2e%2e/` 洗白成 `/`，见 serveMobileStatic 注释；
+ *    token 不进本函数也不进日志）；
+ * 2. 先 decodeURIComponent 再做白名单判定——`/%2e%2e/`、`/%2e%2e%2f` 等编码变体解码后
+ *    才暴露 `..` 段，判定置于解码之后使编码绕过无效；畸形百分号序列（decode 抛
+ *    URIError）与 NUL 字节直接拒绝。
+ * 2. path.resolve(distRoot, decoded) 消解全部 `..`/`.` 段得到绝对路径，再做前缀白名单
+ *    判定：结果必须恰为 distRoot，或以 `distRoot + sep` 为前缀（带分隔符防 `/dist-evil`
+ *    对 `/dist` 的前缀误命中）。
+ * 3. 白名单外一律返回 null 且本函数不发起任何 fs 调用——不读白名单外任何路径（E4）。
+ *    读取目标只可能是判定通过的 resolved 路径或 distRoot/index.html 兜底，无其他拼点。
+ * 已知不防：dist 内 symlink 指向外部——产物由本仓构建链生成、无 symlink，且非网络
+ * 输入面；产物来源变化时需复审。
+ */
+export function resolveMobileStaticPath(distRoot: string, pathname: string): string | null {
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(pathname)
+  } catch {
+    return null
+  }
+  if (decoded.includes('\0')) return null
+  const resolved = resolve(distRoot, decoded.startsWith('/') ? `.${decoded}` : `/${decoded}`)
+  if (resolved !== distRoot && !resolved.startsWith(distRoot + sep)) return null
+  return resolved
+}
+
+/**
+ * 解析移动壳静态托管根（启动期一次探测，remote-access D3/E5）。
+ * - 关态（remoteTokenProvider 未装配——组合根仅在 --remote-access 开态装配它，D9）
+ *   → null，静态 handler 不挂载，HTTP 分派与无远程访问形态逐字节一致；mobileDist
+ *   单独出现（手工只传 --mobile-dist 不开 flag）不构成开态。
+ * - 开态但未传 --mobile-dist / 目录不存在 → 响亮 error（含 pnpm build 与打包配置
+ *   指引）+ null：静态面禁用，WS 与桌面面不受影响、不拒启（E5）。
+ * 返回 resolve 后的绝对路径（argv 值可能相对 cwd，统一规范化后作白名单判定基准）。
+ */
+export function resolveMobileStaticRoot(options: ConnectionManagerOptions): string | null {
+  if (!options.remoteTokenProvider) return null
+  if (!options.mobileDist) {
+    console.error(
+      '[runtime] remote access: 已开启远程访问但未提供移动壳 dist（--mobile-dist），静态托管面已禁用（WS 与桌面面不受影响）。' +
+        '恢复：pnpm --filter @taiji/mobile-renderer build 产出移动壳产物，再经桌面端以 --mobile-dist=<绝对路径> 启动 runtime' +
+        '（正常由 supervisor 自动拼参；打包形态检查 electron-builder.yml 的 mobile-dist extraResources 条目）',
+    )
+    return null
+  }
+  const distRoot = resolve(options.mobileDist)
+  let isDirectory = false
+  try {
+    isDirectory = fs.statSync(distRoot).isDirectory()
+  } catch {
+    isDirectory = false
+  }
+  if (!isDirectory) {
+    console.error(
+      `[runtime] remote access: 移动壳 dist 目录不存在: ${distRoot}，静态托管面已禁用（WS 与桌面面不受影响）。` +
+        '恢复：pnpm --filter @taiji/mobile-renderer build 产出移动壳产物（vite outDir = packages/mobile-renderer/dist）后重启；' +
+        '打包形态检查 electron-builder.yml 的 mobile-dist extraResources 条目与打包编排是否先行执行移动壳构建',
+    )
+    return null
+  }
+  return distRoot
+}
+
+/**
+ * 热读 `<getDataDir()>/<REMOTE_ACCESS_FILENAME>` 取 remote token（remote-access D2）。
+ * 每次握手调用一次（auth 是低频事件），文件缺失/不可读按 E10 fail-closed 返回 null +
+ * 响亮日志（含恢复指引）。组合根仅在 `--remote-access` 开态把本函数装配为
+ * remoteTokenProvider——关态不装配，本函数不被调用（关态零 IO）。
+ */
+export function readRemoteAccessToken(): string | null {
+  const filePath = join(getDataDir(), REMOTE_ACCESS_FILENAME)
+  let raw: string
+  try {
+    raw = fs.readFileSync(filePath, 'utf-8')
+  } catch (error) {
+    console.error(
+      `[runtime] remote access: 读取 ${filePath} 失败（${toErrorMessage(error)}）— ` +
+        'remote token 不可用（fail-closed：仅 spawn token 可认证，远程客户端将全部被拒）。' +
+        '恢复：回桌面端 设置 → 远程访问面板 确认开关并执行轮换（重新生成 token 并写回文件），或检查文件权限',
+    )
+    return null
+  }
+  return parseRemoteAccessToken(raw)
 }
 
 /**
@@ -64,6 +263,26 @@ export interface ConnectionCallbacks {
   onDisconnect?(ws: WsType): void
 }
 
+/**
+ * 远程访问服务形态选项（remote-access U0.1）：组合根经 parseArgs（argv，D9）解析后
+ * 经 RuntimeServer 透传注入。全部可选——缺省即现状形态（纯回环 + 单 spawn token）。
+ */
+export interface ConnectionManagerOptions {
+  /**
+   * 移动壳 dist 目录（remote-access D3）：argv `--mobile-dist=<path>` 解析值。
+   * 仅在 --remote-access 开态由组合根拼参（U1.2 supervisor），本类开态探测其存在性
+   * 后挂载静态 handler 托管该目录；关态即使误传也不构成开态（handler 不挂载）。
+   */
+  mobileDist?: string
+  /**
+   * remote token 热读 provider（remote-access D2）：**每次 auth 握手时调用**，
+   * 返回值非 null 时作为集合第二成员参与校验（逐成员 tokenEquals）。
+   * 未注入 = 关态：不调用、remote 集合恒空、零文件 IO（D9 ambient 免疫的运行时半边）。
+   * 返回 null = E10（文件缺失/损坏，读侧已响亮日志），该次握手 remote 通道为空。
+   */
+  remoteTokenProvider?: () => string | null
+}
+
 export class ConnectionManager {
   private httpServer: HttpServer
   private wss: WebSocketServer
@@ -74,17 +293,29 @@ export class ConnectionManager {
   private authTimers = new Map<WsType, ReturnType<typeof setTimeout>>()
   /** 已通过 auth 的连接集合（与 clients 池同步维护）。 */
   private authedConnections = new Set<WsType>()
+  /**
+   * 移动壳静态托管根（remote-access D3/E5）：构造期启动探测一次。null = 关态或 E5
+   * 禁用，HTTP 分派不进静态分支（与无远程访问形态逐字节一致）。
+   */
+  private readonly mobileStaticRoot: string | null
 
   constructor(
     private port: number,
     private callbacks: ConnectionCallbacks,
-    /** auth token；null = fail-closed（拒绝全部连接）。 */
+    /** auth token（spawn 通道）；null = 该通道缺失（集合语义下是否 fail-closed 见 handleConnection）。 */
     private authToken: string | null,
+    /** 远程访问服务形态选项（remote-access U0.1）；缺省 = 现状形态（纯回环 + 单 spawn token）。 */
+    private options: ConnectionManagerOptions = {},
   ) {
+    this.mobileStaticRoot = resolveMobileStaticRoot(options)
     this.httpServer = createServer((req, res) => {
+      // 分派顺序固定：/health 探针先于静态托管（开态行为不变）；关态（root=null）
+      // 只有 /health 与 404 两条路径，与远程访问引入前逐字节一致。
       if (req.url === '/health') {
         res.writeHead(HTTP_OK, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ status: 'ok', uptime: process.uptime() }))
+      } else if (this.mobileStaticRoot !== null) {
+        void this.serveMobileStatic(req, res)
       } else {
         res.writeHead(HTTP_NOT_FOUND)
         res.end()
@@ -101,8 +332,12 @@ export class ConnectionManager {
     })
   }
 
-  /** 启动 HTTP + WS 监听（显式绑回环，不对局域网开放）；注册 connection 回调。 */
-  start(): Promise<void> {
+  /**
+   * 启动 HTTP + WS 监听；注册 connection 回调。
+   * 绑定地址参数化（remote-access D1）：默认 127.0.0.1 纯回环（与参数化前现状逐字节一致），
+   * 远程访问开态由组合根传 '0.0.0.0'。仍是同一个 HTTP+WS server、同一份连接池。
+   */
+  start(host: string = DEFAULT_LISTEN_HOST): Promise<void> {
     return new Promise((resolve, reject) => {
       this.wss.on('connection', (ws) => this.handleConnection(ws))
       this.httpServer.on('error', (err: NodeJS.ErrnoException) => {
@@ -114,11 +349,80 @@ export class ConnectionManager {
         }
         reject(err)
       })
-      this.httpServer.listen(this.port, '127.0.0.1', () => {
-        console.log(`[runtime] listening on 127.0.0.1:${this.port}`)
+      this.httpServer.listen(this.port, host, () => {
+        console.log(`[runtime] listening on ${host}:${this.port}`)
         resolve()
       })
     })
+  }
+
+  // ── 移动壳静态托管（remote-access D3）──────────────────────────
+
+  /**
+   * 移动壳静态文件服务。仅 mobileStaticRoot 就绪（开态且 dist 探测通过）时从 HTTP
+   * 分派进入；/health 探针先于本方法（探针行为不受静态托管影响）。
+   * 日志纪律（D3）：访问/拒绝日志只记 pathname（query 在入口剥除），完整 URL 不落盘。
+   */
+  private async serveMobileStatic(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const distRoot = this.mobileStaticRoot
+    if (distRoot === null) {
+      res.writeHead(HTTP_NOT_FOUND)
+      res.end()
+      return
+    }
+    try {
+      const method = req.method ?? 'GET'
+      // 仅 GET/HEAD（D3）：静态面无写语义；其余方法 405 + Allow 头指明合法方法。
+      if (method !== 'GET' && method !== 'HEAD') {
+        res.writeHead(HTTP_METHOD_NOT_ALLOWED, { Allow: 'GET, HEAD' })
+        res.end()
+        return
+      }
+      // 剥 query string：路径判定与日志都只用 pathname——`?token=` 从这里开始就不进
+      // 路径也不进日志。手工 split 而非 new URL().pathname：URL parser 会做 dot-segment
+      // 归一化（/../ 与 /%2e%2e/ 被洗白成 /），把穿越请求降级成 404、削弱 E4 的 400
+      // 拒绝语义，也让拒绝日志丢失攻击形态；白名单判定需要原始编码形态。
+      const pathname = (req.url ?? '/').split('?')[0] || '/'
+      const filePath = resolveMobileStaticPath(distRoot, pathname)
+      if (filePath === null) {
+        console.warn(`[runtime] mobile static: rejected (path traversal): ${pathname}`)
+        res.writeHead(HTTP_BAD_REQUEST)
+        res.end()
+        return
+      }
+      // 目录（含 `/`）回 index.html（D3 兜底）。不存在的普通路径 404——移动壳无前端
+      // 路由，不做任意路径 SPA fallback（那会把错误资产路径也回 HTML，Content-Type 混淆）。
+      let isDirectory = false
+      try {
+        isDirectory = (await fs.promises.stat(filePath)).isDirectory()
+      } catch {
+        isDirectory = false
+      }
+      const target = isDirectory ? join(distRoot, MOBILE_INDEX_FILENAME) : filePath
+      let content: Buffer
+      try {
+        content = await fs.promises.readFile(target)
+      } catch (error) {
+        // 探测与读取之间文件消失（race）或 index.html 缺失（产物被删）→ 404 兜底。
+        console.warn(`[runtime] mobile static: not found: ${pathname}（${toErrorMessage(error)}）`)
+        res.writeHead(HTTP_NOT_FOUND)
+        res.end()
+        return
+      }
+      const contentType = MOBILE_STATIC_CONTENT_TYPES[extname(target).toLowerCase()] ?? 'application/octet-stream'
+      // 访问日志只含 pathname（query 已剥）与产物内文件名（basename，非完整服务端路径）。
+      console.log(`[runtime] mobile static: ${method} ${pathname} -> ${basename(target)} (${content.length} bytes)`)
+      res.writeHead(HTTP_OK, { 'Content-Type': contentType, 'Content-Length': String(content.length) })
+      res.end(method === 'HEAD' ? undefined : content)
+    } catch (error) {
+      // httpServer request handler 内抛错会成 uncaughtException——失败路径收敛到这里回 500。
+      console.error(`[runtime] mobile static: internal error: ${toErrorMessage(error)}`)
+      try {
+        res.writeHead(HTTP_INTERNAL_ERROR)
+        res.end()
+      // eslint-disable-next-line taste/no-silent-catch -- socket may already be closed
+      } catch { /* 响应头可能已发出，无法补救 */ }
+    }
   }
 
   // ── Connection ────────────────────────────────────────────────
@@ -132,8 +436,10 @@ export class ConnectionManager {
       `[runtime] client connected (authenticated: ${this.authedConnections.size}, ` +
         `pending auth incl. this one: ${this.authTimers.size + 1})`,
     )
-    // fail-closed：无 token 配置时拒绝全部连接（组合根已落 warning，这里只拒绝）。
-    if (this.authToken === null) {
+    // fail-closed：两个凭据通道（spawn token / remote token 热读）都缺失时拒绝全部连接
+    // （组合根已落 warning，这里只拒绝）。开态 spawn token 缺失但 remote 通道在时仍走
+    // 正常握手——集合校验时 remote 也为空则 bad_token 拒绝，fail-closed 语义不破。
+    if (this.authToken === null && !this.options.remoteTokenProvider) {
       this.rejectAuth(ws, 'no_token_configured')
       return
     }
@@ -186,7 +492,7 @@ export class ConnectionManager {
       return
     }
     const token = (msg.payload as { token?: unknown } | undefined)?.token
-    if (typeof token !== 'string' || !tokenEquals(token, this.authToken ?? '')) {
+    if (typeof token !== 'string' || !this.isAcceptedToken(token)) {
       console.warn('[runtime] auth failed: bad token')
       this.rejectAuth(ws, 'bad_token')
       return
@@ -202,6 +508,20 @@ export class ConnectionManager {
     this.resetHeartbeat(ws)
     // 口径对齐上方 handleConnection：authenticated 只计已认证池（旧文案 total 同值但语义混用）
     console.log(`[runtime] client authenticated (authenticated: ${this.clients.size})`)
+  }
+
+  /**
+   * token 集合成员校验（remote-access D2）：{spawn token} ∪ {remote token}，逐成员
+   * 走 tokenEquals（timingSafeEqual）——单值扩集合不退化抗时序属性，禁 includes/Set.has。
+   * remote 通道每次握手热读（provider 调用点唯一在此，保证轮换文件即生效）；关态
+   * provider 未装配时短路返回（不调用、零文件 IO）。
+   */
+  private isAcceptedToken(token: string): boolean {
+    if (this.authToken !== null && tokenEquals(token, this.authToken)) return true
+    const provider = this.options.remoteTokenProvider
+    if (!provider) return false
+    const remote = provider()
+    return remote !== null && tokenEquals(token, remote)
   }
 
   /** 认证失败路径：回执结果 + close 1008。 */

@@ -22,6 +22,7 @@ import {
 import { findLastAssistantIndex } from './chunk-processor'
 import type { FinalizeReason } from './store-types'
 import type { SessionOccupancyState } from './store'
+import { randomUuid } from '../../utils/random-uuid'
 
 /**
  * finalizeMessages 的 per-message 终态映射助手（模块作用域纯函数，不依赖工厂闭包；
@@ -146,7 +147,7 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
       next[lastAssistantIdx] = { ...prevMsg, content: fullText, contentBlocks }
     } else {
       next.push({
-        id: `sa-${crypto.randomUUID()}`,
+        id: `sa-${randomUuid()}`,
         role: 'assistant',
         content: fullText,
         status: 'streaming',

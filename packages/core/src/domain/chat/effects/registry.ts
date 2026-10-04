@@ -77,6 +77,7 @@ import { findLastAssistantIndex, findToolCallOwner } from '../chunk-processor'
 import { commitMessages, REASON_FALLBACK_ERROR_TEXT, terminalMessagePatch } from '../mutations'
 import { truncateToolCall } from '../truncate-tool-output'
 import { bashStartEffect, bashResultEffect } from '../bash-effects'
+import { randomUuid } from '../../../utils/random-uuid'
 import { applyEntryFrameWithOverlay } from './entry-overlay'
 // [session-occupancy u4a] message_end(user) 三分支 ①（defer 分区 FIFO 匹配）与 ①③ 共用
 // helper 归位 effects/user-delivery.ts（机制独立成模块，u4b flush 确认驱动只扩展该文件）
@@ -289,7 +290,7 @@ function isLastAssistantStreaming(
  *    本次不落盘（thinking_end 的空 thinking 分支——原实现该处直接 return 不 commit）。
  *
  * 副作用顺序说明：6 处调用点中 5 处（text_delta / thinking_start / thinking_delta /
- * tool_call_start / tool_call_update）的 payload 读取与派生构造（含 randomUUID 兜底 id、
+ * tool_call_start / tool_call_update）的 payload 读取与派生构造（含 randomUuid 兜底 id、
  * Date.now 生成）整体前移到 guard 之前，与原内联顺序（guard → 定位 → 读 payload → 更新）
  * 相比是顺序前移而非一致——纯读取、无观察面调用，故与基线行为等价；留在 update 闭包内
  * 的读取仅 tool_call_update 的 readDetail（thinking_end 无 payload 读取）。约束：前移段
@@ -391,7 +392,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // 清残量防 FIFO 错位污染后续 steer。
     reconcilePending(sid, queueDepth)
     const prev = messages.value.get(sid)?.value ?? []
-    const messageId = readString(payload, 'messageId') ?? `a-${crypto.randomUUID()}`
+    const messageId = readString(payload, 'messageId') ?? `a-${randomUuid()}`
     commitMessages(messages, sid, [
       ...prev,
       {
@@ -452,7 +453,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
       // [M2 形态统一] 错误文本只住 error 字段，content 空（无崩溃前正文）
       commitMessages(messages, sid, [
         ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorMessage || REASON_FALLBACK_ERROR_TEXT.error, status: 'error', timestamp: Date.now() },
+        { id: `a-${randomUuid()}`, role: 'assistant', content: '', error: errorMessage || REASON_FALLBACK_ERROR_TEXT.error, status: 'error', timestamp: Date.now() },
       ])
     }
     // 统一收口（finalizeSession 幂等：entity 已改则 no-op，只清 pendingSend + timer）
@@ -488,7 +489,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
       // [M2 形态统一] 错误文本只住 error 字段，content 空
       commitMessages(messages, sid, [
         ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: Date.now() },
+        { id: `a-${randomUuid()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: Date.now() },
       ])
     }
   },
@@ -506,7 +507,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
       // [M2 形态统一] 错误文本只住 error 字段，content 空
       commitMessages(messages, sid, [
         ...prev,
-        { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: streamErrContent, status: 'error', timestamp: Date.now() },
+        { id: `a-${randomUuid()}`, role: 'assistant', content: '', error: streamErrContent, status: 'error', timestamp: Date.now() },
       ])
     }
   },
@@ -524,7 +525,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     const prev = messages.value.get(sid)?.value ?? []
     commitMessages(messages, sid, [
       ...prev,
-      { id: `s-${crypto.randomUUID()}`, role: 'system', content: warnContent, status: 'complete', timestamp: Date.now(), liveOnly: true },
+      { id: `s-${randomUuid()}`, role: 'system', content: warnContent, status: 'complete', timestamp: Date.now(), liveOnly: true },
     ])
   },
 
@@ -547,7 +548,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
   // ── thinking 流（折进 trace，W05 endTime）──
   'message.thinking_start': (ctx, sid, payload) => {
     // [D-010 sealed]
-    const blockId = readString(payload, 'thinkingId') ?? `th-${crypto.randomUUID()}`
+    const blockId = readString(payload, 'thinkingId') ?? `th-${randomUuid()}`
     const contentIndex = readNumber(payload, 'contentIndex')
     updateStreamingAssistant(ctx, sid, findLastAssistantIndex, (m) => {
       const thinking = [...(m.thinking ?? []), { id: blockId, content: '', collapsed: true, startTime: Date.now() }]
@@ -592,7 +593,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // toolCallId 缺失时 fallback 随机 id（迁移前同款宽容防御：异常事件不断流）。
     const entry = payload['entry'] as PiToolCallEntryForm | undefined
     if (entry === undefined) return
-    const callId = typeof entry.toolCallId === 'string' ? entry.toolCallId : `tc-${crypto.randomUUID()}`
+    const callId = typeof entry.toolCallId === 'string' ? entry.toolCallId : `tc-${randomUuid()}`
     const toolName = typeof entry.toolName === 'string' ? entry.toolName : 'tool'
     const call: ToolCall = {
       id: callId,
@@ -738,7 +739,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // 决策点 3），覆写归 reducer——本文件不再是覆写点。
     const entry: PiCustomMessageEntry = {
       type: 'custom_message',
-      id: `cm-${crypto.randomUUID()}`,
+      id: `cm-${randomUuid()}`,
       parentId: null,
       timestamp: new Date().toISOString(),
       customType: readString(payload, 'customType') ?? '',
@@ -779,7 +780,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     const summary = readCompactionSummary(payload)
     const entry: PiCompactionEntry = {
       type: 'compaction',
-      id: `cmp-${crypto.randomUUID()}`,
+      id: `cmp-${randomUuid()}`,
       parentId: null,
       timestamp: new Date(summary.timestamp ?? Date.now()).toISOString(),
       ...(summary.summary !== undefined && { summary: summary.summary }),
@@ -805,7 +806,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     const summary = readBranchSummary(payload)
     const entry: PiBranchSummaryEntry = {
       type: 'branch_summary',
-      id: `br-${crypto.randomUUID()}`,
+      id: `br-${randomUuid()}`,
       parentId: null,
       timestamp: new Date(summary.timestamp ?? Date.now()).toISOString(),
       ...(summary.summary !== undefined && { summary: summary.summary }),

@@ -8,10 +8,16 @@
  * - teardown()：取消全部监听 + 断开
  * - 模块级单例副作用 + initialised/dispatcherInstalled 幂等守卫（保持）
  *
- * 端口发现顺序（不变）：
- *   1. env.isMock → connect('mock://')（ws-client 经 platform 注入 mock factory）
- *   2. ipc.getRuntimePort()（main 已 spawn）→ connect(ws://localhost:port)
- *   3. fallback：BASE_PORT + offset（dev 模式 +DEV_PORT_OFFSET）
+ * 连接发现收口（renderer-package-topology §2.4「连接发现策略可插拔」，init() 分支唯一裁决处）：
+ *   1. mock 形态（env.isMock，优先分流现状不动）→ connect('mock://')（ws-client 经 platform 注入 mock factory）
+ *   2. 本地形态（ConnectionPorts.ipc 有值）→ ipc.getRuntimePort()（main 已 spawn）→
+ *      connect(localRuntimeUrl(port))，fallback BASE_PORT + offset（dev 模式 +DEV_PORT_OFFSET）
+ *   3. 远程形态（ipc 无值，移动壳）→ connectionProfile.resolve() 注入的连接目标；
+ *      未注入时显式失败（fail-fast，不静默降级）——profile 真实实现由移动壳装配注入
+ *
+ * 本地 URL 拼接单点在 ./local-runtime-url（勿在分支外内联重拼）。
+ * mock 优先于 ipc 存在性判别是桌面等价性要求：electron 装配恒注入 ipc（含 VITE_MOCK 构建），
+ * 若按 ipc 存在性先行会把 mock 构建导入本地分支（连真实 URL 而非 mock://）。
  *
  * headless 化改造（core 零 DOM / 零构建环境读取 / 零 renderer import，§10.2）：
  * - visibilityState / addEventListener → visibility 端口（isVisible/onVisibilityChange）
@@ -27,7 +33,17 @@
  */
 import { watch } from 'vue'
 import type { ServerMessage } from '@taiji/shared'
-import { connect, disconnect, getState, onMessage, onQueueDrop, setFailed, setRestarting } from './ws-client'
+import {
+  connect,
+  disconnect,
+  getState,
+  isAuthRejectedSuppressed,
+  onAuthRejected,
+  onMessage,
+  onQueueDrop,
+  setFailed,
+  setRestarting,
+} from './ws-client'
 import {
   configureRouteInbound,
   type InboundEffects,
@@ -35,17 +51,40 @@ import {
 import { resubscribeAll } from '../coordination/subscription-state'
 import * as pendingApi from './api/pending'
 import { transportUnavailableError } from './errors'
+import { localRuntimeUrl } from './local-runtime-url'
 import { BASE_PORT, DEV_PORT_OFFSET } from '@taiji/shared'
 
 // ── 端口契约（§10.2 D-1：renderer 装配点注入实现） ─────────────────
 
 /**
+ * 远程形态 profile 解析结果：WS 连接目标 + 可选凭据。
+ * token 省略时 ws-client 走无 token auth 路径（runtime 未配置 token 或壳层待摄取）。
+ */
+export interface ResolvedConnectionProfile {
+  url: string
+  token?: string
+}
+
+/**
+ * 远程形态连接 profile 端口（topology §2.4「远程 = profile」；移动壳装配点注入实现）。
+ * core 零 location / 零 storage 直读（headless 约束），URL 与凭据的解析全部委托壳层——
+ * profile 策略的凭据来源分支（URL query 验身落 storage / storage 兜底 / 皆无落 token
+ * 输入视图）在壳层实现内闭合，core 只消费解析结果。
+ */
+export interface ConnectionProfilePort {
+  resolve(): Promise<ResolvedConnectionProfile>
+}
+
+/**
  * use-connection 的壳层端口面（D3 收窄后：全部是真随壳变化的端口）。
  *
  * renderer（composables/useConnection.ts 装配点）注入实现：
- * - ipc → lib/ipc（getRuntimePort/getRuntimePortOffset/onRuntimePort/restartRuntime 等）
+ * - ipc → lib/ipc（getRuntimePort/getRuntimePortOffset/onRuntimePort/restartRuntime 等）。
+ *   可选字段 = 形态判别的一半（init 收口点）：有值 = 本地形态，无值 = 远程形态。
+ *   electron 装配恒注入（含 VITE_MOCK 构建——mock 由 env.isMock 优先分流，与 ipc 正交）
  * - visibility → visibilityState + visibilitychange 监听（壳层 DOM 实现）
  * - env → VITE_MOCK / DEV（core 不能读构建环境标志，由壳读）
+ * - connectionProfile → 远程形态专用（本地/mock 形态忽略）；移动壳装配注入
  * - effects → useMessageEffects（renderer 层 store 副作用，§11.4）
  * - t → 壳层 i18n
  * - onRuntimeUnavailable → runtime 崩溃/重启用尽时的对话流清理
@@ -54,7 +93,7 @@ import { BASE_PORT, DEV_PORT_OFFSET } from '@taiji/shared'
  * core transport/api 真实模块，不再经壳注入。
  */
 export interface ConnectionPorts {
-  ipc: {
+  ipc?: {
     getRuntimePort(): Promise<number | undefined>
     getRuntimePortOffset(): Promise<number | undefined>
     /**
@@ -75,11 +114,22 @@ export interface ConnectionPorts {
     isMock: boolean
     isDev: boolean
   }
+  /** 远程形态连接 profile 端口（ipc 无值时必须注入，见 connectRemoteProfile；U1.3 移动壳消费点） */
+  connectionProfile?: ConnectionProfilePort
+  /**
+   * auth 被拒回调（remote-use D8）：远程形态由 use-connection 注册 ws-client onAuthRejected
+   * 转发至此（移动壳实现 = 落 token 输入视图 + D4 凭据来源分支处置）。本地/mock 形态不注册
+   * 不调用（桌面零回归）；远程形态省略 = 仅置 ws-client 重连抑制位、壳层无 UI 感知。
+   */
+  onAuthRejected?: () => void
   effects: InboundEffects
   t(key: string, params?: Record<string, unknown>): string
   /** runtime 崩溃/重启用尽清理（renderer 实现：chat finalize + extension UI pending 清理） */
   onRuntimeUnavailable(reason: 'restart' | 'disconnect'): void
 }
+
+/** 本地形态 IPC 端口面（ipc 存在性判别收口后，本地分支内部使用的必有视图）。 */
+type RuntimeIpcPorts = NonNullable<ConnectionPorts['ipc']>
 
 // ── 端口注入（C1 范式：模块级实现变量 + 注入函数 + 未注入 warn 降级） ──
 
@@ -113,6 +163,8 @@ let removeStateWatch: (() => void) | null = null
 let removeQueueDropListener: (() => void) | null = null
 /** visibility 监听的取消函数（teardown 时调用；非空即已安装） */
 let removeVisibilityListener: (() => void) | null = null
+/** auth 拒绝信号监听的取消函数（远程形态注册，D8；teardown 时调用；非空即已安装） */
+let removeAuthRejectedListener: (() => void) | null = null
 /**
  * 最近一次 connect 使用的 url（W4 visibility 重连复用）。
  * 用户从后台切回前台且未连接时，用此 url 主动重连，不干等 ws-client 指数退避（最长 30s）。
@@ -203,11 +255,12 @@ function connectWs(url: string, token?: string): void {
 /**
  * 拉取最新 token 后连接（runtime 重启路径专用：supervisor 每次 spawn 重新生成 token，
  * 旧 token 对新 runtime 无效，auth 必失败——必须先 invoke 拿新值）。
+ * 仅本地形态调用（token 经 IPC 下发，S1-W1），ipc 由参数显式传入。
  */
-async function refreshTokenAndConnect(url: string): Promise<void> {
+async function refreshTokenAndConnect(ipc: RuntimeIpcPorts, url: string): Promise<void> {
   let token: string | null | undefined
   try {
-    token = await currentPorts().ipc.getRuntimeToken()
+    token = await ipc.getRuntimeToken()
   } catch (e) {
     console.warn('[core/use-connection] getRuntimeToken failed, connecting without token:', e)
     token = undefined
@@ -215,17 +268,49 @@ async function refreshTokenAndConnect(url: string): Promise<void> {
   connectWs(url, token ?? undefined)
 }
 
+/**
+ * 安装 auth 拒绝信号消费（remote-use D8，远程形态专用，幂等）：ws-client onAuthRejected
+ * 单槽注册一次，转发至壳层注入的 ports.onAuthRejected（经 currentPorts 取最新装配——重注入
+ * 后转发目标跟随）。注册即武装 ws-client 重连抑制位（拒绝 → 抑制 scheduleReconnect +
+ * visibility 两个自动重连触发点）；本地/mock 形态不走本函数 → 抑制位恒不置位 → 桌面重连链
+ * 零回归。
+ */
+function installAuthRejectionSignal(): void {
+  if (removeAuthRejectedListener) return
+  removeAuthRejectedListener = onAuthRejected(() => {
+    currentPorts().onAuthRejected?.()
+  })
+}
+
+/**
+ * 远程形态连接发起（topology §2.4「远程 = profile」分支）。
+ * 连接目标经注入的 connectionProfile 解析（一次 resolve 一次 connect）；auth 失败信号与
+ * 重连抑制（D8）在本分支注册消费。未注入 connectionProfile = 远程形态未装配 → 显式抛错
+ * （fail-fast，含恢复动作），不静默降级——静默会让移动壳以「连不上」的表象掩盖装配缺失，
+ * 排障无据。
+ */
+async function connectRemoteProfile(ports: ConnectionPorts): Promise<void> {
+  if (!ports.connectionProfile) {
+    throw new Error(
+      '[core/use-connection] remote connection mode active (ConnectionPorts.ipc absent) but no connectionProfile injected — provide { connectionProfile: { resolve(): Promise<{ url, token? }> } } via setConnectionPorts() at the shell assembly point (mobile shell; see renderer-package-topology.md §2.4)',
+    )
+  }
+  installAuthRejectionSignal()
+  const resolved = await ports.connectionProfile.resolve()
+  connectWs(resolved.url, resolved.token ?? undefined)
+}
+
 /** 当前注入端口（requirePorts 已在 init 校验，此处于事件回调内兜底取值） */
 function currentPorts(): ConnectionPorts {
   return portsImpl as ConnectionPorts
 }
 
-/** 获取 fallback 端口（考虑 dev 偏移） */
-async function resolveFallbackPort(ports: ConnectionPorts): Promise<number> {
-  const offset = await ports.ipc.getRuntimePortOffset()
+/** 获取 fallback 端口（考虑 dev 偏移）。仅本地形态调用（ipc 必有）。 */
+async function resolveFallbackPort(ipc: RuntimeIpcPorts, isDev: boolean): Promise<number> {
+  const offset = await ipc.getRuntimePortOffset()
   if (offset !== undefined) return BASE_PORT + offset
   // DEV 环境下 runtime 在 BASE_PORT+100，不能 fallback 到 prod 端口
-  if (ports.env.isDev) return BASE_PORT + DEV_PORT_OFFSET
+  if (isDev) return BASE_PORT + DEV_PORT_OFFSET
   return BASE_PORT
 }
 
@@ -250,6 +335,9 @@ export function useConnection() {
         if (getState().value === 'connected') return
         // 守卫 3：从未连过（无 url 复用）则不触发
         if (!lastConnectedUrl) return
+        // 守卫 4：auth 拒绝抑制位生效（remote-use D8 全触发点覆盖——退避链在 ws-client
+        // scheduleReconnect 短路，本守卫覆盖切前台主动重连）→ 不自动重连，等 token 重试路径。
+        if (isAuthRejectedSuppressed()) return
         connectWs(lastConnectedUrl)
       })
     }
@@ -257,7 +345,15 @@ export function useConnection() {
     if (initialised) {
       // HMR 后重连
       if (!ports.env.isMock) {
-        await refreshTokenAndConnect('ws://localhost:' + await resolveFallbackPort(ports))
+        if (ports.ipc) {
+          await refreshTokenAndConnect(
+            ports.ipc,
+            localRuntimeUrl(await resolveFallbackPort(ports.ipc, ports.env.isDev)),
+          )
+        } else {
+          // 远程形态：HMR 重连同走 profile 解析（未注入 → 显式失败，同首连）
+          await connectRemoteProfile(ports)
+        }
       }
       return
     }
@@ -325,13 +421,23 @@ export function useConnection() {
       return
     }
 
+    // ── 连接发现收口点（renderer-package-topology §2.4 / 连接派生 profile 策略 D4）──
+    // 三形态分支唯一裁决处：mock = VITE_MOCK 已在上方优先分流（现状不动，见文件头
+    // 等价性说明）；其余按 ConnectionPorts.ipc 存在性二分——有值 = 本地形态（IPC 端口
+    // 发现，下方现状逻辑），无值 = 远程形态（profile，移动壳装配注入 connectionProfile）。
+    if (!ports.ipc) {
+      await connectRemoteProfile(ports)
+      return
+    }
+    const ipc = ports.ipc
+
     // 监听 runtime 端口推送（runtime 重启成功后推新端口 → 断开重连）。
     // S1-W1：runtime 重启 = supervisor 重新 spawn = token 已刷新，重连前必须重新拉取
     // （旧 token 对新 runtime 的 auth 必失败 → 1008 → 重连循环直到 failed）。
-    removeRuntimePortListener = ports.ipc.onRuntimePort((newPort) => {
+    removeRuntimePortListener = ipc.onRuntimePort((newPort) => {
       if (newPort && state.value !== 'disconnected') {
         disconnect()
-        void refreshTokenAndConnect('ws://localhost:' + newPort)
+        void refreshTokenAndConnect(ipc, localRuntimeUrl(newPort))
       }
     })
 
@@ -341,25 +447,25 @@ export function useConnection() {
     // 不在此携带副本——网络断连与 IPC 崩溃两条路径同一处触发。
     // runtime 崩溃 = pi 子进程没了 = 流不可能继续，收口语义（chat 活跃态重置 + ask-user
     // pending 清空，T5）见 stateWatch / onRuntimeUnavailable 注释。
-    removeRuntimeRestartingListener = ports.ipc.onRuntimeRestarting(() => {
+    removeRuntimeRestartingListener = ipc.onRuntimeRestarting(() => {
       setRestarting()
     })
 
     // 监听 runtime 重启用尽（主进程放弃 → 进 failed 态，等用户手动重试）。
     // 同上：只置态，清理经 stateWatch 的 failed 迁移分支汇合触发。
-    removeRuntimeFailedListener = ports.ipc.onRuntimeFailed(() => {
+    removeRuntimeFailedListener = ipc.onRuntimeFailed(() => {
       setFailed()
     })
 
     // 尝试从主进程获取已知端口（S1-W1：连接前拉 token——auth 握手凭据经 IPC 下发）
-    const knownPort = await ports.ipc.getRuntimePort()
+    const knownPort = await ipc.getRuntimePort()
     if (knownPort) {
-      await refreshTokenAndConnect('ws://localhost:' + knownPort)
+      await refreshTokenAndConnect(ipc, localRuntimeUrl(knownPort))
       return
     }
 
     // Runtime 尚未启动：用 fallback 端口（ws-client 会自动重连，runtime 起来后连上）
-    await refreshTokenAndConnect('ws://localhost:' + await resolveFallbackPort(ports))
+    await refreshTokenAndConnect(ipc, localRuntimeUrl(await resolveFallbackPort(ipc, ports.env.isDev)))
   }
 
   /**
@@ -370,6 +476,14 @@ export function useConnection() {
   async function retryRuntime(): Promise<void> {
     const ports = requirePorts()
     if (!ports) return
+    // 重试 = 委托本地 supervisor 重启（远程形态无该通道，移动壳 v1 不渲染此按钮——
+    // token 失效走 profile 分支的凭据重摄路径）。warn 落日志不静默，防误接线无据可查。
+    if (!ports.ipc) {
+      console.warn(
+        '[core/use-connection] retryRuntime ignored — ConnectionPorts.ipc absent (remote profile mode has no runtime-restart channel)',
+      )
+      return
+    }
     await ports.ipc.restartRuntime()
   }
 
@@ -401,6 +515,11 @@ export function useConnection() {
     if (removeVisibilityListener) {
       removeVisibilityListener()
       removeVisibilityListener = null
+    }
+    // D8：卸载 auth 拒绝信号监听（与远程分支的注册配对；teardown 后不应再有转发回调）
+    if (removeAuthRejectedListener) {
+      removeAuthRejectedListener()
+      removeAuthRejectedListener = null
     }
     if (removeTransportListener) {
       removeTransportListener()

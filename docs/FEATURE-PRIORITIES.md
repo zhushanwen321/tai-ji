@@ -81,6 +81,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | session 导入 | ImportSessionDialog |
 | 后台命令观察面（composer 任务托盘 bash 面板） | background task 展示（testing 02） |
 | 对话流时间戳 | 行尾耗时·时刻槽、TurnMeta 首末区间、reload endTime 回填（chat-flow-timestamp；TurnMeta/Block/apply-entry-convert 单测 + live≡reload 等价性） |
+| 远程访问（手机浏览器经 LAN 直连） | 设置→远程访问开关与 token 轮换、移动壳同源托管、remote token 验身（关态默认纯回环零暴露） |
 
 ## 5. P3 — 特定人群/低影响
 

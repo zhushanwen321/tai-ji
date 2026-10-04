@@ -1,52 +1,122 @@
 <script setup lang="ts">
-// App.vue —— mobile 壳四要素布局（DM2）。
+// App.vue —— mobile 壳多视图布局（remote-use D10：单屏四 zone → 列表/聊天/token 输入多视图态）。
 //
-// 四 zone = message-stream（B 对话流）+ companion（B 伴随）+ slash（D 命令）
-// + bottom-tab-bar（壳 chrome，非挂载点）。前三个 zone 对应 §6.3 mobile 挂载点
-// 子集（IF1），bottom-tab-bar 是壳自身导航 chrome。
+// 三视图态（消费 bootstrap 的 shellConnectionState，U1.3 装配）：
+// - token-input：TokenInputView（D8 恢复入口，submit 走 submitRemoteToken 重试编排）
+// - connecting：轻量「连接中」呈现（无重 UI；D8 裁决③：不复用桌面 runtime 不可用状态条）
+// - connected：两 tab 视图——
+//     列表视图 = MobileSessionList + BottomTabBar（D10 三视图 zone 布局行）
+//     聊天视图 = message-stream + companion + slash（隐藏保留）+ 输入条 + BottomTabBar
 //
-// 四 zone 容器的 data-testid（zone-*/bottom-tab-bar）是 AC5 结构断言主锚点；
-// zone 内 stub 组件的 data-testid（stub-*）是辅助锚点（DM3）。stub 是 pre-P3/P4
-// 占位（slice D1 决议：结构骨架壳，非功能壳），P3/P4 落地后全局 grep 'TODO(Pn)'
-// 定位替换为 @taiji/ui 真实组件。
-//
-// 布局：纵向 flex，message-stream 占主体（flex-1），其余 zone shrink-0 固定。
-// 视觉精修属 D1 v6 移动设计 deferred，本 slice 仅结构 + 语义 token 占位。
-import MessageStreamStub from './shell/stubs/MessageStreamStub.vue'
+// companion 区挂 ui CompanionBand（AskUserForm 是其 askUser method 的内部子组件）；
+// source/transport 经 companion-bridge provide（回传走 core 既有通路，D7 ask-user 行）。
+// zone 容器 data-testid（zone-*//bottom-tab-bar）延续 AC5 结构断言锚点。
+import { computed, provide, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { Button } from '@taiji/ui'
+import { CompanionBand } from '@taiji/ui/extension-host'
+import {
+  DIALOG_REQUEST_SOURCE_KEY,
+  UI_RESPONSE_TRANSPORT_KEY,
+  mobileDialogRequestSource,
+  mobileUiResponseTransport,
+} from './shell/companion-bridge'
+import { activeSessionId, loadSessions } from './shell/app-runtime'
+import { shellConnectionState, submitRemoteToken } from './bootstrap'
+import BottomTabBar, { type MobileTab } from './shell/BottomTabBar.vue'
 import SlashBarStub from './shell/stubs/SlashBarStub.vue'
-import CompanionStub from './shell/stubs/CompanionStub.vue'
-import BottomTabBarStub from './shell/stubs/BottomTabBarStub.vue'
+import TokenInputView from './shell/TokenInputView.vue'
+import MobileComposer from './views/MobileComposer.vue'
+import MobileMessageStream from './views/MobileMessageStream.vue'
+import MobileSessionList from './views/MobileSessionList.vue'
+import NewTaskSheet from './views/NewTaskSheet.vue'
+
+// companion 数据源/回传通道（App 级 provide，CompanionBand 经 inject 消费）
+provide(DIALOG_REQUEST_SOURCE_KEY, mobileDialogRequestSource)
+provide(UI_RESPONSE_TRANSPORT_KEY, mobileUiResponseTransport)
+
+const { t } = useI18n()
+
+const activeTab = ref<MobileTab>('sessions')
+const newTaskOpen = ref(false)
+
+const isTokenInput = computed(() => shellConnectionState.value === 'token-input')
+const isConnected = computed(() => shellConnectionState.value === 'connected')
+const activeId = computed(() => activeSessionId.value)
+
+function onOpenChat(sessionId: string): void {
+  if (sessionId) activeTab.value = 'chat'
+}
+
+function onTaskCreated(): void {
+  activeTab.value = 'chat'
+}
+
+function onTokenSubmit(token: string): void {
+  void submitRemoteToken(token)
+}
+
+// 连接成功即拉取会话列表（首屏数据；后续 config.sessions 广播经 SessionApiPort 自动更新）
+watch(isConnected, (connected) => {
+  if (connected) void loadSessions()
+}, { immediate: true })
 </script>
 
 <template>
-  <div class="mobile-shell flex flex-col h-screen bg-bg" data-testid="mobile-shell">
-    <!-- 主内容区：message-stream（B 对话流），flex-1 占主体 -->
-    <main class="mobile-shell__main flex-1 overflow-y-auto p-2" data-testid="zone-message-stream">
-      <MessageStreamStub />
-    </main>
+  <div class="mobile-shell flex h-screen flex-col bg-bg" data-testid="mobile-shell">
+    <!-- token 输入视图（D8：凭据缺失/验身失败的恢复入口） -->
+    <TokenInputView v-if="isTokenInput" @submit="onTokenSubmit" />
 
-    <!-- companion（B 对话流伴随，mobile 终态抽屉/半屏，本 slice 占位区） -->
-    <section
-      class="mobile-shell__companion shrink-0 border-t border-[var(--border)] p-2"
-      data-testid="zone-companion"
-    >
-      <CompanionStub />
-    </section>
-
-    <!-- slash（D 命令，composer 命令栏） -->
+    <!-- connecting：轻量连接中呈现 -->
     <div
-      class="mobile-shell__slash shrink-0 border-t border-[var(--border)] p-2"
-      data-testid="zone-slash"
+      v-else-if="!isConnected"
+      class="flex h-screen flex-col items-center justify-center gap-2 bg-bg"
+      data-testid="shell-connecting"
     >
-      <SlashBarStub />
+      <p class="text-sm text-neutral-mid">{{ t('mobile.connecting') }}</p>
     </div>
 
-    <!-- 底部 tab 导航（壳 chrome，非挂载点） -->
-    <nav
-      class="mobile-shell__tabbar shrink-0 border-t border-[var(--border)] p-2"
-      data-testid="bottom-tab-bar"
-    >
-      <BottomTabBarStub />
-    </nav>
+    <!-- connected：列表 / 聊天 两 tab 视图 -->
+    <template v-else>
+      <MobileSessionList v-if="activeTab === 'sessions'" @new-task="newTaskOpen = true" @open-chat="onOpenChat" />
+
+      <template v-else>
+        <!-- 聊天视图空态：无激活 session 时给新建入口（G1 新建链路） -->
+        <div
+          v-if="!activeId"
+          class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3"
+          data-testid="mobile-chat-empty"
+        >
+          <p class="text-sm text-neutral-mid">{{ t('mobile.chat.empty') }}</p>
+          <Button variant="default" data-testid="mobile-chat-empty-new" @click="newTaskOpen = true">
+            {{ t('mobile.chat.start') }}
+          </Button>
+        </div>
+        <template v-else>
+          <!-- 主内容区：message-stream（B 对话流），flex-1 占主体 -->
+          <main class="mobile-shell__main flex min-h-0 flex-1 flex-col" data-testid="zone-message-stream">
+            <MobileMessageStream :session-id="activeId" />
+          </main>
+
+          <!-- companion（B 伴随）：ui CompanionBand（AskUserForm 随 askUser method 路由渲染；
+               无请求时组件 v-if 自隐藏，容器保留 testid 锚点） -->
+          <section class="mobile-shell__companion shrink-0" data-testid="zone-companion">
+            <CompanionBand :session-id="activeId" />
+          </section>
+
+          <!-- slash（D 命令，composer 命令栏）：隐藏保留占位（D10 stub 处置行） -->
+          <div class="mobile-shell__slash shrink-0" data-testid="zone-slash">
+            <SlashBarStub />
+          </div>
+
+          <!-- 输入条（发送/中断键在拇指区，D7 中断行） -->
+          <MobileComposer :session-id="activeId" />
+        </template>
+      </template>
+
+      <!-- 底部 tab 导航（壳 chrome，非挂载点） -->
+      <BottomTabBar v-model="activeTab" />
+      <NewTaskSheet :open="newTaskOpen" @close="newTaskOpen = false" @created="onTaskCreated" />
+    </template>
   </div>
 </template>

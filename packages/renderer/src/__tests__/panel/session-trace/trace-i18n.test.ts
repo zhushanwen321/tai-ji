@@ -21,8 +21,8 @@ import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
 import type { ServerMessageMap } from '@taiji/shared'
 import { _resetDrawerForTest } from '@taiji/core/domain/drawer'
 import i18n, { setLocale } from '@/i18n'
-import zhPanel from '@/i18n/locales/zh-CN/panel'
-import enPanel from '@/i18n/locales/en-US/panel'
+import zhPanel from '@taiji/ui/locale/zh-CN/panel'
+import enPanel from '@taiji/ui/locale/en-US/panel'
 
 // ── mock '@/api' 门面（store 只消费 session.getTraceEntries）──
 const apiMock = vi.hoisted(() => ({ getTraceEntries: vi.fn() }))

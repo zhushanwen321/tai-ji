@@ -40,6 +40,10 @@ vi.mock('../ws-client', () => ({
     }
   },
   onQueueDrop: vi.fn(() => () => {}),
+  // U1.3 D8：auth 拒绝信号消费面（use-connection 远程形态注册/查询）——本文件场景不触达，
+  // mock 缺省实现保 import 面完整
+  onAuthRejected: vi.fn(() => () => {}),
+  isAuthRejectedSuppressed: vi.fn(() => false),
 }))
 
 // ── 端口 mock ────────────────────────────────────────────────────

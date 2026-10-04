@@ -36,7 +36,7 @@ vi.mock('@/composables/useToast', () => ({
   }),
 }))
 
-vi.mock('@/composables/logic/markdown', () => ({
+vi.mock('@taiji/ui/features/chat/markdown', () => ({
   renderMarkdown: vi.fn(() => Promise.resolve('<p>test</p>')),
 }))
 

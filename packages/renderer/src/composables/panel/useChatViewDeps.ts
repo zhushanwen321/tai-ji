@@ -20,8 +20,9 @@
  * - useSideDrawer（open）→ openDrawer
  * - useFileTreeStore（selectFile）→ onFileClick
  * - useFileSearch（load）+ collectFilePaths/collectBasenames → loadFileCandidates + renderMarkdown env
- * - renderMarkdownSegments（markdown.ts，含 shiki 高亮 + 路径链接化）→ renderMarkdown
- * - renderMermaid（mermaid.ts）→ renderMermaid
+ * - renderMarkdownSegments（@taiji/ui/features/chat/markdown，D10 渲染链下沉，含 shiki 高亮 +
+ *   路径链接化 + copyLabel 文案注入）→ renderMarkdown
+ * - renderMermaid（@taiji/ui/features/chat/mermaid）→ renderMermaid
  * - assistantToMarkdown（messageFormat.ts）→ toMarkdown
  */
 import { ref, watch, type Ref } from 'vue'
@@ -37,14 +38,14 @@ import { useFileTreeStore } from '@/stores/fileTree'
 import { useFileSearch } from '@/composables/features/search/useFileSearch'
 import { triggerEnterForkMode } from '@/composables/panel/useForkModeChannel'
 import { triggerEnterHandoffMode } from '@/composables/panel/useHandoffModeChannel'
-import { renderMarkdownSegments } from '@/composables/logic/markdown'
+import { renderMarkdownSegments } from '@taiji/ui/features/chat/markdown'
 import {
   createIncrementalRenderCache,
   renderIncremental,
   shouldFinalizeStreamingFence,
   STREAMING_FENCE_SILENCE_MS,
-} from '@/composables/logic/markdown-incremental'
-import { renderMermaid } from '@/composables/logic/mermaid'
+} from '@taiji/ui/features/chat/markdown-incremental'
+import { renderMermaid } from '@taiji/ui/features/chat/mermaid'
 import { assistantToMarkdown } from '@/composables/logic/messageFormat'
 import { collectBasenames, collectFilePaths } from '@/lib/file-basename'
 import { useToast } from '@/composables/useToast'
@@ -158,12 +159,16 @@ export function useChatViewDeps(sessionId: Ref<string>): ChatViewDeps {
     loadFileCandidates: (sid: string): Promise<FileNode[]> => loadFileCandidates(sid),
 
     // ── 渲染桥接 ──
-    /** 渲染 markdown 为 segments（含 shiki 高亮 + 路径/basename 链接化，白名单由 refreshLocalFiles 维护） */
+    /** 渲染 markdown 为 segments（含 shiki 高亮 + 路径/basename 链接化，白名单由 refreshLocalFiles 维护）。
+     *  copyLabel 注入：ui 渲染模块不依赖壳 i18n 单例（D10 i18n 解耦），复制按钮 title 文案
+     *  每次调用求值传入（locale 切换下一帧生效；迁移前由渲染模块 bake 的 t('composable.copyLabel')
+     *  逐字等价——文案等价由 ui markdown.test.ts C1/C2 断言守卫）。 */
     renderMarkdown: (source: string, sid?: string) => {
       void sid // sid 仅作 sessionId 派生提示，实际白名单由 watch(sessionId) 统一刷新（单 session 壳）
       return renderMarkdownSegments(source, {
         filePaths: filePaths.value,
         localFiles: localFiles.value,
+        copyLabel: t('composable.copyLabel'),
       })
     },
     /** D-5 增量渲染（W22 协议 / W23 消费）：前缀段引用恒等缓存 + tail 段每帧重建 + streaming-fence
@@ -175,7 +180,7 @@ export function useChatViewDeps(sessionId: Ref<string>): ChatViewDeps {
       const result = await renderIncremental(
         source,
         c,
-        { filePaths: filePaths.value, localFiles: localFiles.value },
+        { filePaths: filePaths.value, localFiles: localFiles.value, copyLabel: t('composable.copyLabel') },
         opts,
       )
       return { ...result, cache: c }

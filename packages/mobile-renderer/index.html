@@ -2,6 +2,19 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
+  <!-- CSP（remote-access D5）：web 形态自带策略，指令结构对齐桌面 renderer index.html
+       既有语义（script-src 'self' 作为 XSS 第二道防线，移动形态不降级），差异两处——
+       ① 无 local-file:（无 Electron 自定义协议）且 connect-src 用裸 ws: scheme 源：
+          同源 ws 本可由 'self' 承担（Chromium 按 CSP3 http↔ws 同源匹配，桌面有实测
+          记录），追加 ws: 是构造性消除 iOS Safari 对 CSP3 同源覆盖的未核实残差
+          （连接目标由代码从 location 派生、页面同源无注入面，安全损失 ≈ 0）；
+       ② font-src data: 保留兼容共享渲染链的内联字体形态（katex 字体为同源文件，
+          'self' 覆盖）。
+       移动壳渲染链复用 ui 共享模块：katex 公式样式走 style-src 'unsafe-inline'
+       （Vue 运行时样式注入同类需要），代码高亮无 WASM（JS regex 引擎），无需
+       'wasm-unsafe-eval'。禁令：script-src 不放行 eval/wasm——能力变更须显式
+       决策并同步 .githooks/check_csp_compatibility.py 的判定范围。 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws:" />
   <!-- viewport-fit=cover：移动壳关键——刘海屏/圆角屏 safe-area 适配，W2 布局用 env(safe-area-inset-*) -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>taiji Mobile</title>

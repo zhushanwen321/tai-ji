@@ -5,9 +5,15 @@
 //     真实注入由 bootstrap() 内部完成（见 ./bootstrap.ts）。
 //   - UI_PACKAGE_NAME：ui 包占位常量，console 打印消费。
 // bootstrap 接管 App 挂载（W1 的内联 createApp 占位渲染已删除）。
+// vue-i18n 装配（remote-use D10 bootstrap 行）：i18n 实例在 ./i18n.ts 创建，
+// bootstrap 挂载链 .use(i18n)——本入口 import 维持装配点可见性。
 import { providePlatform } from '@taiji/core'
 import { UI_PACKAGE_NAME } from '@taiji/ui'
 import { bootstrap } from './bootstrap'
+import { i18n } from './i18n'
+
+// i18n 实例由 bootstrap 挂载链消费；此引用维持 main.ts 装配点可见（tree-shake 防护）
+void i18n
 
 // Design tokens 接线（M1d-02）：tailwind.config 的 var(--bg)/var(--border) 等映射
 // 需要 CSS 变量有定义；tokens 提取自 renderer style.css（见 styles/tokens.css 头注释）。

@@ -293,6 +293,20 @@ if [ -d "$OUTPUT_DIR/mac-arm64" ]; then
         if ! check_staged_engines "$APP_PATH/Contents/Resources/engines"; then
             FAILED=1
         fi
+        # 移动壳 dist（remote-access 静态托管资源）：packages/mobile-renderer 的 vite
+        # web 构建（build 编排 build:mobile 先行产出）+ electron-builder extraResources
+        # 复制 → <Resources>/mobile-dist。index.html 是 runtime 同源静态托管入口，
+        # 缺失 = 构建编排漏跑 build:mobile 或 extraResources 漏配（supervisor prod 分支
+        # 拼 --mobile-dist 时 runtime 启动会报 E5 静态面禁用，这里在产物级提前拦截）。
+        MOBILE_DIST_DIR="$APP_PATH/Contents/Resources/mobile-dist"
+        if [ -f "$MOBILE_DIST_DIR/index.html" ]; then
+            grep -q "Content-Security-Policy" "$MOBILE_DIST_DIR/index.html" \
+                && echo -e "  ${GREEN}✓${NC} mobile-dist/index.html in Resources（含 CSP meta）" \
+                || { echo -e "  ${RED}✗${NC} mobile-dist/index.html 缺 CSP meta（packages/mobile-renderer/index.html 回归）"; FAILED=1; }
+        else
+            echo -e "  ${RED}✗${NC} mobile-dist/index.html 缺失: ${MOBILE_DIST_DIR}（检查 build 编排 build:mobile + electron-builder.yml extraResources）"
+            FAILED=1
+        fi
         # builtin taiji plugins 完整性校验（resources/plugins/<name>，如 statusline）
         # prepare-builtin-plugins.sh 预编译 index.js + electron-builder extraResources 拷贝。
         # registry 打包后扫描 <cwd>/resources/plugins；缺入口文件则插件静默不被发现或
@@ -342,7 +356,8 @@ if [ -d "$OUTPUT_DIR/win-unpacked" ]; then
         "$WIN_UNPACKED/dist/runtime/plugin-bootstrap-process.cjs" \
         "$WIN_UNPACKED/dist/runtime/plugin-esm-loader.cjs" \
         "$WIN_RESOURCES/pi/pi-windows-x64.exe" \
-        "$WIN_RESOURCES/bin/taiji-settings"; do
+        "$WIN_RESOURCES/bin/taiji-settings" \
+        "$WIN_RESOURCES/mobile-dist/index.html"; do
         if [ -f "$required" ]; then
             echo -e "  ${GREEN}✓${NC} ${required#$WIN_ROOT/}"
         else
@@ -432,7 +447,8 @@ if [ -d "$OUTPUT_DIR/linux-unpacked" ]; then
             "$LINUX_UNPACKED/dist/runtime/index.cjs" \
             "$LINUX_UNPACKED/dist/runtime/plugin-bootstrap.cjs" \
             "$LINUX_RESOURCES/pi/pi-linux-x64" \
-            "$LINUX_RESOURCES/bin/taiji-settings"; do
+            "$LINUX_RESOURCES/bin/taiji-settings" \
+            "$LINUX_RESOURCES/mobile-dist/index.html"; do
             if [ -f "$required" ]; then
                 echo -e "  ${GREEN}✓${NC} ${required#$LINUX_ROOT/}"
             else

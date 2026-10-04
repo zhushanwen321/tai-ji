@@ -102,7 +102,7 @@ import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GitCompare } from '@lucide/vue'
 import { parseDiff, type ParsedDiff, type DiffHunk, type DiffLine, type DiffSegment } from '@/composables/logic/parseDiff'
-import { highlightCode } from '@/composables/logic/markdown'
+import { highlightCode } from '@taiji/ui/features/chat/markdown'
 import { extToLang } from '@/composables/logic/file-type'
 
 const { t } = useI18n()

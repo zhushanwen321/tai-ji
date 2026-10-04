@@ -323,6 +323,50 @@ export async function chooseDirectory(): Promise<string | null> {
   return api.chooseDirectory()
 }
 
+// ── 远程访问（设置面板连接信息：配置读取 / token 轮换 / 开关切换）─────────
+// 类型与 preload ElectronAPI 同构（同 pickDirectory 双侧内联先例）；契约权威在
+// main bridge-handlers 的 handler 返回形态。
+
+/** 远程访问连接信息（urls 为 `http://<ip>:<port>` 候选，不含 token，展示时拼 `?token=`） */
+export interface RemoteAccessConnectionInfo {
+  enabled: boolean
+  token: string
+  createdAt: string
+  urls: string[]
+}
+
+/** 开关切换结果：连接信息 + 本次切换是否触发了 runtime 重启（runtime 未跑时仅落盘） */
+export interface RemoteAccessToggleResult extends RemoteAccessConnectionInfo {
+  restarted: boolean
+}
+
+/** web/mock 降级空态：关态 + 空 token + 无候选地址（面板渲染关态说明，不产死链接） */
+const REMOTE_ACCESS_FALLBACK: RemoteAccessConnectionInfo = { enabled: false, token: '', createdAt: '', urls: [] }
+
+/** 读取远程访问配置 + LAN 地址候选。无 IPC（web/mock）返回关态空态 */
+export function getRemoteAccessInfo(): Promise<RemoteAccessConnectionInfo> {
+  return api?.getRemoteAccessInfo
+    ? api.getRemoteAccessInfo()
+    : Promise.resolve(REMOTE_ACCESS_FALLBACK)
+}
+
+/** 轮换 remote token（main 重写文件即生效不重启），返回最新连接信息。无 IPC 返回空态 */
+export function rotateRemoteAccessToken(): Promise<RemoteAccessConnectionInfo> {
+  return api?.rotateRemoteAccessToken
+    ? api.rotateRemoteAccessToken()
+    : Promise.resolve(REMOTE_ACCESS_FALLBACK)
+}
+
+/**
+ * 切换远程访问开关（开/关态变化且 runtime 在跑时 main 侧重启 runtime）。
+ * 无 IPC（web/mock）返回关态空态 + restarted=false，不抛错。
+ */
+export function setRemoteAccessEnabled(enabled: boolean): Promise<RemoteAccessToggleResult> {
+  return api?.setRemoteAccessEnabled
+    ? api.setRemoteAccessEnabled(enabled)
+    : Promise.resolve({ ...REMOTE_ACCESS_FALLBACK, restarted: false })
+}
+
 /** 获取当前代理配置。无 IPC 时返回默认配置 */
 export function getProxyConfig(): Promise<import('@taiji/shared').IProxyConfig> {
   return api?.getProxyConfig() ?? Promise.resolve({ mode: 'system' })

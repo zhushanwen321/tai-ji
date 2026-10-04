@@ -26,7 +26,7 @@ vi.mock('@/api/domains/settings', () => updateIpcModule(updateIpcBridge))
 
 // markdown mock 留文件内：默认 html 属本文件行为面（非 IPC 桥）
 const hoistedRenderMarkdown = vi.hoisted(() => vi.fn<(md: string) => Promise<string>>())
-vi.mock('@/composables/logic/markdown', () => ({
+vi.mock('@taiji/ui/features/chat/markdown', () => ({
   renderMarkdown: hoistedRenderMarkdown,
 }))
 

@@ -19,7 +19,7 @@ vi.mock('@/i18n', () => ({
   getLocale: vi.fn(() => i18nMock.locale),
 }))
 
-vi.mock('@/composables/logic/markdown', () => ({
+vi.mock('@taiji/ui/features/chat/markdown', () => ({
   renderMarkdown: vi.fn(async (md: string) => `<p>${md}</p>`),
 }))
 

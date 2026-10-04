@@ -503,8 +503,8 @@ describe('ActivityStrip · i18n key 完整（P5）', () => {
   ]
 
   it('compressing/autoCompressing/compactingQueueChip/executingBash/dispatching 在 zh/en locale 均定义', () => {
-    const zh = readFileSync(resolve(__dirname, '../../../../i18n/locales/zh-CN/panel.ts'), 'utf8')
-    const en = readFileSync(resolve(__dirname, '../../../../i18n/locales/en-US/panel.ts'), 'utf8')
+    const zh = readFileSync(resolve(__dirname, '../../../../../../ui/src/locale/zh-CN/panel.ts'), 'utf8')
+    const en = readFileSync(resolve(__dirname, '../../../../../../ui/src/locale/en-US/panel.ts'), 'utf8')
     for (const [key, zhLine, enLine] of KEYS) {
       expect(zh, `${key} 缺 zh-CN 定义`).toContain(zhLine)
       expect(en, `${key} 缺 en-US 定义`).toContain(enLine)
@@ -512,8 +512,8 @@ describe('ActivityStrip · i18n key 完整（P5）', () => {
   })
 
   it('被迁出的 TurnMeta 占位 key（panel.message.thinking）已随占位删除同批清扫', () => {
-    const zh = readFileSync(resolve(__dirname, '../../../../i18n/locales/zh-CN/panel.ts'), 'utf8')
-    const en = readFileSync(resolve(__dirname, '../../../../i18n/locales/en-US/panel.ts'), 'utf8')
+    const zh = readFileSync(resolve(__dirname, '../../../../../../ui/src/locale/zh-CN/panel.ts'), 'utf8')
+    const en = readFileSync(resolve(__dirname, '../../../../../../ui/src/locale/en-US/panel.ts'), 'utf8')
     expect(zh).not.toContain("thinking: '思考中'")
     expect(en).not.toContain("thinking: 'Thinking'")
   })

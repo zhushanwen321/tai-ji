@@ -734,6 +734,61 @@
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 已激活：A6 已执行 PASS 2026-09-17——dev 环境注入（kill 成员 relay 代理 → kill-on-disconnect 连坐）下 run 收口 done(failed)、通知照达恰一条、ledger wf-done: 落账/ack 销账各恰一条（ground truth = 会话文件 + runtime log）。账本基建 = NotifyLedger（record / attemptDeliver / checkReceipts / recoverFromSession 生命周期），断连窗口的重放恰一次性由 u9 mock 轨 12 断言锁定（helpers-notify-ledger.test.ts）"
+    },
+    {
+      "id": "E2E-REMOTE-01",
+      "summary": "远程访问真机/仿真验收 S2-S8：手机连接全链 / 鉴权负面 / 关闭即消失 / token 生命周期 / 断连恢复 / 新建任务 / ask-user 双端（真机 + 同 WiFi，CDP 移动仿真先行）",
+      "scope": [
+        "packages/runtime/src/transport/**",
+        "packages/core/src/transport/**",
+        "packages/mobile-renderer/src/**",
+        "apps/electron/main/remote-access/**",
+        "apps/electron/main/supervisor/process-control.ts",
+        "packages/renderer/src/components/settings/remote-access/**"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "harness",
+          "ref": "packages/runtime/src/transport/connection-manager.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "packages/mobile-renderer/src/platform/connection-profile.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（开发阶段手测链，已执行 2026-09-19 仿真验收——S2/S3/S4/S5/S7/S8 主链 PASS，两 blocker 见下）dev 实例（TAIJI_DEV_BACKGROUND=1）桌面面板开远程访问 → 取 LAN URL + token → 浏览器移动仿真（iPhone UA + 375x812 视口 + CDP 驱动）按设计 §4.2 场景逐条验：负面探针（curl 静态面/路径穿越 400/WS 无·错 token close 1008/pre-auth 静默 10s）可脚本化复跑",
+      "owner": "packages/mobile-renderer",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态（来源设计 .tmp/tech-design/remote-use-mobile.md §4.3：触发条件 = 触碰 connection-manager / use-connection / ws-client / 移动壳 / 远程访问配置面）。asset 锚 = 被验能力本体（token 集合+静态托管 / D4 三分支连接装配），非验证剧本。S2-S8 含真实 LLM 轮次（streaming / 新建任务 / ask-user 闭环）故 L3；S3/S4/S5 负面与生命周期子项可脚本化（curl + WS 探针 + CDP）。2026-09-19 仿真验收结论：S2 连接全链（列表/streaming/发送/中断/桌面同屏/图片粘贴降级占位）PASS、S3 鉴权负面全 PASS、S4 关闭即消失（回环复位 + LAN 拒绝 + ambient env 伪造免疫）PASS、S5 token 生命周期四子链（坏链接不毁 storage / 重启免重扫 / 轮换热读落 token 视图 / 重扫覆盖）PASS、S7 新建任务链（含桌面侧栏同步）PASS、S8 ask-user 双端闭环（任一端作答即闭环）PASS；S6 断网恢复以 runtime 重启断连 + visibility 切前台重连等价覆盖（CDP offline 模拟无法切断已建立 WS——工具限制，真机开关 WiFi 留用户补验）。两 blocker（不阻塞链路断言、阻塞视觉形态断言）：① 移动壳 main.ts 缺 Tailwind 样式入口（src/styles/tokens.css 无 @tailwind 指令且未被 import，构建产物 CSS 零工具类，移动壳 UI 全裸奔——U1.4c 领地缺陷）；② core pending/命令 id 用 crypto.randomUUID，LAN http 非 secure context 下 undefined 抛错（core transport 缺 insecure-context 兜底——真机必踩）。iOS Safari / Android Chrome 真机子项（CSP ws: 残差 / ITP / 触控体感）待用户补验"
+    },
+    {
+      "id": "E2E-REMOTE-02",
+      "summary": "远程访问打包态验收 S9：mobile-dist extraResources 服务 + postbuild 断言 + 安装包主链（prod 分支路径只在打包态存在）",
+      "scope": [
+        "apps/electron/electron-builder.yml",
+        "apps/electron/main/remote-access/mobile-dist.ts",
+        "scripts/postbuild-validate.sh"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/postbuild-validate.sh"
+        },
+        {
+          "kind": "harness",
+          "ref": "apps/electron/main/remote-access/mobile-dist.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "pnpm build && bash scripts/postbuild-validate.sh &&（安装包手工链：开远程 → 移动浏览器访问 prod 分支解析的 resources/mobile-dist → 发消息全链）",
+      "owner": "apps/electron",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态（来源设计 remote-use-mobile §4.3：触发条件 = electron-builder.yml / 移动壳 dist 解析链 / postbuild 脚本改动）。postbuild 存在性断言已自动化（postbuild-validate.sh 移动壳 dist extraResources 断言，U1.1 交付即挂打包链）；DMG 安装后真机扫码子项留用户补验。P3 体积量级锚点：mobile dist 3.2MB（JS 2.0MB + CSS 41KB + katex 字体族），DMG 增量远低于 20MB 重审线"
     }
   ]
 }

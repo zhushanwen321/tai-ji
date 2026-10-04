@@ -10,7 +10,7 @@
  * 依赖方向：本模块 → use-app-update-state（写 releaseNotesHtml），被
  * use-app-update-check / use-app-update-restore 消费。
  */
-import { renderMarkdown } from '@/composables/logic/markdown'
+import { renderMarkdown } from '@taiji/ui/features/chat/markdown'
 import { getLocale } from '@/i18n'
 import { updateState } from './use-app-update-state'
 

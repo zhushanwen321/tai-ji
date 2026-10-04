@@ -29,6 +29,7 @@ import type { Message, ServerMessage } from '@taiji/shared'
 import type { PiMessageEntry } from '@taiji/shared'
 import type { MessageEffectContext, MessageEffectHandler } from './effect-types'
 import { readString, readNumber, readBool } from './readers'
+import { randomUuid } from '../../utils/random-uuid'
 import { commitMessages, type MessagesRef } from './mutations'
 import { applyEntryFrameWithOverlay } from './effects/entry-overlay'
 import { shallowRef } from 'vue'
@@ -146,7 +147,7 @@ export const bashResultEffect: MessageEffectHandler = (ctx: MessageEffectContext
   // uuidv7 entry id——id 值异源属 W21 已裁决的 live/reload 差异类）。
   const entry: PiMessageEntry = {
     type: 'message',
-    id: `bash-${crypto.randomUUID()}`,
+    id: `bash-${randomUuid()}`,
     parentId: null,
     timestamp: new Date(ts).toISOString(),
     message: {

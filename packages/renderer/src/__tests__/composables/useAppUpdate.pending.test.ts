@@ -19,7 +19,7 @@
  * - vi.mock('@/api/domains/settings') 桩 update 相关方法（两阶段 updateDownload/updateInstall +
  *   预下载 getPreloaded + pending getPendingUpdate + checkForUpdate 等）。getPreloaded 默认
  *   null → initAutoCheck 先 restorePreloadedUpdate 无果，再走 restorePendingUpdate 路径
- * - vi.mock('@/composables/logic/markdown') 桩 renderMarkdown 避免 shiki WASM
+ * - vi.mock('@taiji/ui/features/chat/markdown') 桩 renderMarkdown 避免 shiki WASM
  * - effectScope 包 useAppUpdate（onScopeDispose 依赖活跃 scope）
  * - _resetForTest 在 beforeEach 重置 module-level 单例 state + pendingRestored flag
  *
@@ -36,7 +36,7 @@ vi.mock('@/api/domains/settings', () => updateIpcModule(updateIpcBridge))
 
 // markdown mock 留文件内：默认 html 属本文件行为面（非 IPC 桥）
 const hoistedRenderMarkdown = vi.hoisted(() => vi.fn<(md: string) => Promise<string>>())
-vi.mock('@/composables/logic/markdown', () => ({
+vi.mock('@taiji/ui/features/chat/markdown', () => ({
   renderMarkdown: hoistedRenderMarkdown,
 }))
 

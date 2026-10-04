@@ -42,6 +42,7 @@ import { normalizeContent, segmentsToText, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, PI_RE
 import type { PiRespawnNoticeVariant } from '@taiji/shared'
 import type { RetryState, QueueState, FinalizeReason } from './store-types'
 import { isDevMode } from '../../platform/dev-mode'
+import { randomUuid } from '../../utils/random-uuid'
 
 /**
  * pendingBuffer 单项（m1 数据层，steer/follow-up 暂存）。
@@ -81,7 +82,7 @@ function attachRunningToolCall(prev: Message[], form: PiToolCallEntryForm): Mess
   const idx = findLastAssistantIndex(prev)
   if (idx < 0) return prev
   const host = prev[idx]!
-  const callId = typeof form.toolCallId === 'string' ? form.toolCallId : `tc-${crypto.randomUUID()}`
+  const callId = typeof form.toolCallId === 'string' ? form.toolCallId : `tc-${randomUuid()}`
   const existing = host.toolCalls?.find((t) => t.id === callId)
   if (existing && (existing.output !== undefined || existing.status === 'error')) return prev
   const toolCalls = existing
@@ -728,7 +729,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   function appendUser(sessionId: string, segments: Segment[]): string {
     const entry: PiMessageEntry = {
       type: 'message',
-      id: `u-${crypto.randomUUID()}`,
+      id: `u-${randomUuid()}`,
       parentId: null,
       timestamp: new Date().toISOString(),
       message: { role: 'user', content: segments, timestamp: Date.now() },
@@ -1067,7 +1068,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     // 渲染端只有追加形态一种 error 形态（正文原色 + error 独立 danger 行）。
     commitMessages(messages, sessionId, [
       ...prev,
-      { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: Date.now() },
+      { id: `a-${randomUuid()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: Date.now() },
     ])
     clearPendingSend(sessionId)
   }
@@ -1148,7 +1149,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     commitMessages(messages, sessionId, [
       ...prev,
       {
-        id: `sys-${crypto.randomUUID()}`,
+        id: `sys-${randomUuid()}`,
         role: 'system',
         content: text,
         status: 'complete',
@@ -1170,7 +1171,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     commitMessages(messages, sessionId, [
       ...prev,
       {
-        id: `sys-${crypto.randomUUID()}`,
+        id: `sys-${randomUuid()}`,
         role: 'system',
         customType: PI_RESPAWN_NOTICE_CUSTOM_TYPE,
         content: fallbackText,
@@ -1221,7 +1222,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     commitMessages(messages, sessionId, [
       ...prev,
       {
-        id: `cm-${crypto.randomUUID()}`,
+        id: `cm-${randomUuid()}`,
         role: 'system',
         customType: SUBAGENT_DIRECTIVE_CUSTOM_TYPE,
         content: data.text,

@@ -104,8 +104,8 @@ describe('DetailPane header 文件路径查看与复制', () => {
 
 describe('DetailPane i18n 契约', () => {
   it('E1: 中英文 locale 均包含复制相关文案', async () => {
-    const { default: zh } = await import('@/i18n/locales/zh-CN/panel')
-    const { default: en } = await import('@/i18n/locales/en-US/panel')
+    const { default: zh } = await import('@taiji/ui/locale/zh-CN/panel')
+    const { default: en } = await import('@taiji/ui/locale/en-US/panel')
     expect(zh.detail.copyFilePath).toBe('复制路径')
     expect(zh.detail.copyFileName).toBe('复制文件名')
     expect(en.detail.copyFilePath).toBe('Copy path')

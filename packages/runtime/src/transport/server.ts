@@ -111,9 +111,24 @@ export interface RuntimeServerOptionalServices {
   replyGuardResolver?: (sessionId: string) => string | null | undefined
 }
 
+/**
+ * 远程访问服务形态选项（remote-access U0.1，D1/D2/D3/D9）：组合根经 parseArgs 解析
+ * argv 后注入，全部可选——缺省即现状形态（纯回环 + 单 spawn token）。
+ */
+export interface RuntimeServerOptions {
+  /** 监听绑定地址（D1）：undefined = ConnectionManager 默认 127.0.0.1；远程开态传 '0.0.0.0'。 */
+  host?: string
+  /** 移动壳 dist 目录（D3）：argv `--mobile-dist=<path>` 值；本单元仅透传，静态托管消费归 U1.1。 */
+  mobileDist?: string
+  /** remote token 热读 provider（D2）：每次 auth 握手调用；未注入 = 关态（remote 集合恒空、零 IO）。 */
+  remoteTokenProvider?: () => string | null
+}
+
 export class RuntimeServer implements IMessageBroker {
   private projectRoot: string
   private conn: ConnectionManager
+  /** 监听绑定地址（remote-access D1）：undefined = ConnectionManager 默认（start 时兜底）。 */
+  private listenHost: string | undefined
   private broker!: ServerMessageBroker
 
   private sessionService!: ISessionService
@@ -174,8 +189,11 @@ export class RuntimeServer implements IMessageBroker {
    */
   private routes!: Map<ClientMessageType, (msg: ClientMessage, ws: WsType) => Promise<unknown> | unknown>
 
-  constructor(port: number, projectRoot?: string, authToken: string | null = null) {
+  constructor(port: number, projectRoot?: string, authToken: string | null = null, options: RuntimeServerOptions = {}) {
     this.projectRoot = projectRoot ?? process.cwd()
+    // 远程访问服务形态（remote-access U0.1）：host 存字段供 start() 传入 ConnectionManager
+    //（undefined = 其默认 127.0.0.1，与参数化前现状逐字节一致）；其余选项透传构造选项。
+    this.listenHost = options.host
     // ConnectionManager 注入回调：连接通过 auth → broker 推送 initial state；
     // 消息到达（必然 authed）→ server.handleMessage 路由；解析/兜底错误 → broker.sendError；
     // 连接关闭 → bus.unsubscribeAll(ws) 清理该 ws 的所有 session 订阅（wave:runtime-wiring）。
@@ -186,7 +204,10 @@ export class RuntimeServer implements IMessageBroker {
       onMessage: (msg, ws) => this.handleMessage(msg, ws),
       sendError: (ws, code, message, id, details) => this.broker.sendError(ws, code, message, id, details),
       onDisconnect: (ws) => this.messageBus?.unsubscribeAll(ws as unknown as import('../services/message-bus/types.js').BusClient),
-    }, authToken)
+    }, authToken, {
+      mobileDist: options.mobileDist,
+      remoteTokenProvider: options.remoteTokenProvider,
+    })
   }
 
   /**
@@ -599,7 +620,8 @@ export class RuntimeServer implements IMessageBroker {
   // ── Lifecycle ──────────────────────────────────────────────────
 
   start(): Promise<void> {
-    return this.conn.start()
+    // host 参数化（remote-access D1）：undefined 时 ConnectionManager 默认 127.0.0.1。
+    return this.conn.start(this.listenHost)
   }
 
   async stop(): Promise<void> {

@@ -1,4 +1,17 @@
 /* ============================================================
+   taiji Mobile · 样式入口（Tailwind 三指令 + Design Tokens 共置一文件）
+   ────────────────────────────────────────────────────────────
+   组织形态对齐桌面 packages/renderer/src/style.css：@tailwind 三指令落点
+   + tokens 变量同文件。本文件是 mobile 壳唯一 Tailwind 入口——tailwindcss
+   postcss 插件只把「含 @tailwind 指令的 CSS」替换为生成的工具类；缺指令
+   则产物 CSS 零工具类（组件全裸奔，U1.6 P0 缺陷回归防线见
+   __tests__/mobile-shell.spec.ts 的样式入口断言）。
+   ============================================================ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
    taiji Mobile · Design Tokens（v6 太极）
    ────────────────────────────────────────────────────────────
    packages/renderer/src/style.css tokens 段（:root 玄 + 皓 light + 字体槽位）的

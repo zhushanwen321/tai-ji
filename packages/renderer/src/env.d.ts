@@ -11,8 +11,13 @@ declare module "*.vue" {
 
 /**
  * markdown-it-katex@2.0.3 无 TypeScript 类型（CJS 老包，仅注册 math_inline/math_block
- * 解析 + renderer 规则）。此处声明默认导出为 markdown-it 插件，renderer 由 markdown.ts 自行
+ * 解析 + renderer 规则）。声明默认导出为 markdown-it 插件，渲染链 markdown.ts 自行
  * 覆盖（调 katex.renderToString）以控制 displayMode 与错误降级。
+ *
+ * [D10 渲染链下沉] 声明的 SSOT 已随渲染链迁至 ui 包 env.d.ts；本文件保留同内容副本——
+ * ambient module declaration 无法跨包 import 共享，renderer tsc 跨包类型检查 ui 渲染
+ * 模块（renderer 源码 import '@taiji/ui/features/chat/markdown' 拉入 ui 源文件）时
+ * 本编译上下文需要自己的声明。两侧随 markdown-it-katex 版本（冻结 2.0.3）同步。
  */
 declare module 'markdown-it-katex' {
   import type MarkdownIt from 'markdown-it'

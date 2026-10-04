@@ -27,8 +27,8 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import zhPanel from '../../i18n/locales/zh-CN/panel'
-import zhSettings from '../../i18n/locales/zh-CN/settings'
+import zhPanel from '@taiji/ui/locale/zh-CN/panel'
+import zhSettings from '@taiji/ui/locale/zh-CN/settings'
 
 type LocaleNode = { [key: string]: string | LocaleNode }
 

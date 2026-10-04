@@ -3,6 +3,20 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult } from '@taiji/shared'
 import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE } from '@taiji/shared'
 
+/** remote-access 连接信息（bridge get-remote-access-info / rotate-remote-access-token 返回形态）。 */
+export interface RemoteAccessInfo {
+  enabled: boolean
+  token: string
+  createdAt: string
+  /** LAN 直连候选（`http://<ip>:<port>`，不含 token；runtime 未启动为空数组） */
+  urls: string[]
+}
+
+/** set-remote-access-enabled 返回形态：连接信息 + 本次切换是否触发了 runtime 重启。 */
+export interface RemoteAccessToggleResult extends RemoteAccessInfo {
+  restarted: boolean
+}
+
 export interface ElectronAPI {
   /** 监听 runtime 端口事件 */
   onRuntimePort(callback: (port: number) => void): () => void
@@ -157,6 +171,13 @@ export interface ElectronAPI {
    * 对齐 ui 层 ChooseDirectoryFn 契约（LoadPaths onChooseDirectory 消费）。
    */
   chooseDirectory(): Promise<string | null>
+  // ── remote-access（设置面板连接信息：配置读取 / token 轮换 / 开关切换）──
+  /** 读取远程访问配置 + LAN 地址候选（urls 不含 token，面板自行拼接 `?token=`） */
+  getRemoteAccessInfo(): Promise<RemoteAccessInfo>
+  /** 轮换 remote token（main 重写文件即生效，不触发重启），返回最新连接信息 */
+  rotateRemoteAccessToken(): Promise<RemoteAccessInfo>
+  /** 切换远程访问开关（开/关态变化且 runtime 在跑时触发重启），返回最新连接信息 + 是否已重启 */
+  setRemoteAccessEnabled(enabled: boolean): Promise<RemoteAccessToggleResult>
   getProxyConfig(): Promise<import('@taiji/shared').IProxyConfig>
   /** 保存代理配置 */
   setProxyConfig(config: import('@taiji/shared').IProxyConfig): Promise<void>
@@ -339,6 +360,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // v2 §3：chooseDirectory 薄包装 pick-directory handler，返回 path（canceled→null），对齐 ui ChooseDirectoryFn 契约
   chooseDirectory: () =>
     ipcRenderer.invoke('pick-directory').then((r: { canceled: boolean; path: string | null }) => r.path),
+  // ── remote-access（设置面板连接信息）────────────────────────
+  getRemoteAccessInfo: () => ipcRenderer.invoke('get-remote-access-info'),
+  rotateRemoteAccessToken: () => ipcRenderer.invoke('rotate-remote-access-token'),
+  setRemoteAccessEnabled: (enabled: boolean) => ipcRenderer.invoke('set-remote-access-enabled', enabled),
   getProxyConfig: () => ipcRenderer.invoke('update:getProxyConfig'),
   setProxyConfig: (config) => ipcRenderer.invoke('update:setProxyConfig', config),
   testProxy: (config) => ipcRenderer.invoke('update:testProxy', config),

@@ -130,6 +130,46 @@ export function onQueueDrop(cb: (msgs: ClientMessage[], reason: SendQueueDropRea
   }
 }
 
+// ── auth 拒绝显式信号 + 重连抑制位（remote-use D8）──────────────────
+
+/**
+ * auth 拒绝回调（单槽，对齐 onMessage 体例）：auth.result ok:false 时、**先于 ws.close()**
+ * 触发。消费方 = use-connection 远程 profile 分支（移动壳：落 token 输入视图 + 凭据来源
+ * 分支处置）；桌面形态不注册——不注册 = 拒绝不置抑制位 = close 走原重连链，行为逐字节不变。
+ */
+let authRejectedHandler: (() => void) | null = null
+
+/**
+ * auth 拒绝重连抑制位（D8「全触发点」）：仅当存在注册消费方时才会在拒绝时置位（桌面零回归
+ * by construction）。置位后两个自动重连触发点全部短路：ws-client scheduleReconnect（退避
+ * /onclose 链，下方守卫）+ use-connection 的 visibility 切前台主动重连（经
+ * isAuthRejectedSuppressed 查询）。解除 = markConnected（auth 成功 = 凭据已有效）或
+ * resetAuthRejectionSuppression（token 重试路径的显式入口）。
+ */
+let authRejectedSuppressed = false
+
+/** 注册 auth 拒绝回调，返回取消函数。注册本身即武装抑制位（未注册 = 行为不变）。 */
+export function onAuthRejected(cb: () => void): () => void {
+  authRejectedHandler = cb
+  return () => {
+    if (authRejectedHandler === cb) authRejectedHandler = null
+  }
+}
+
+/** auth 拒绝重连抑制位查询（use-connection 的 visibility 主动重连触发点检查用）。 */
+export function isAuthRejectedSuppressed(): boolean {
+  return authRejectedSuppressed
+}
+
+/**
+ * 显式解除 auth 拒绝重连抑制（token 重试路径专用）：移动壳 token 输入视图提交新凭据后、
+ * 重新发起连接前调用。markConnected（auth 成功）会自行复位，本入口覆盖「重试再次失败 →
+ * 换凭据再试」的循环。
+ */
+export function resetAuthRejectionSuppression(): void {
+  authRejectedSuppressed = false
+}
+
 // ── 入站帧守卫：类型 / 状态 / 公开 API（crash-forensics §3.3 D8）────
 
 /** 一次入站超界帧丢弃的通知载荷（onInboundFrameDropped 回调参数）。 */
@@ -308,6 +348,8 @@ export function connect(url: string, token?: string): void {
     reconnectAttempts = 0
     // 连接成功 → 重置重连计时窗口（下次掉线重新开始计数）
     reconnectStartedAt = null
+    // auth 成功 = 凭据已有效（D8）：复位重连抑制位，后续正常断线恢复自动重连
+    authRejectedSuppressed = false
     // G2 活性治理（docs/design/memory-leak-remediation.md §3.4）：重连路径增挂 in-flight
     // subscribe 簿记的 TTL sweep。断连使部分 subscribe reply 永不到达（重连后新 id 重订），
     // 原实现唯一 sweep 触发点在超界帧归因死路径，过期条目无人扫 → 簿记随工作流强度无界
@@ -365,6 +407,13 @@ export function connect(url: string, token?: string): void {
           // 新 token 由 use-connection 的 onRuntimePort 路径刷新；
           // pre-auth 队列清空 + 通知（入队消息的 pending 由 onQueueDrop 消费方快速 reject）
           dropPreAuthQueue('auth-failed')
+          // D8 显式信号：先置抑制位 + 触发消费方（移动壳切 token 输入视图），再 close——
+          // 抑制位对 onclose → scheduleReconnect 可见（先置位再 close 的顺序保证）。
+          // 桌面形态无注册消费方：不置位，close 走原重连链，行为不变。
+          if (authRejectedHandler) {
+            authRejectedSuppressed = true
+            authRejectedHandler()
+          }
           console.warn('[ws] auth rejected by runtime, closing for reconnect')
           ws?.close()
         }
@@ -596,6 +645,12 @@ function isServerMessage(x: unknown): x is ServerMessage {
 
 function scheduleReconnect(): void {
   if (!currentUrl) return
+  // D8 抑制位触发点 ①：auth 拒绝后不自动重连（凭据失效重连 100% 失败，纯烧日志；等 token
+  // 重试路径显式 reset + connect）。置位前提 = 存在注册消费方（桌面恒 false，重连链不变）。
+  if (authRejectedSuppressed) {
+    console.log('[ws] reconnect suppressed after auth rejection (waiting for credential retry)')
+    return
+  }
   // 重连时长上限兜底（设计文档 A4 §3.3）：总时长超 MAX_RECONNECT_DURATION_MS → 放弃自动重连，置 failed。
   if (reconnectStartedAt === null) reconnectStartedAt = Date.now()
   if (Date.now() - reconnectStartedAt > MAX_RECONNECT_DURATION_MS) {

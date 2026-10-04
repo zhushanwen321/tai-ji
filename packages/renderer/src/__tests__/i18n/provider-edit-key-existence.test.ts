@@ -22,10 +22,10 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, resolve, relative, sep } from 'node:path'
-import zhSettings from '../../i18n/locales/zh-CN/settings'
-import enSettings from '../../i18n/locales/en-US/settings'
-import zhPanel from '../../i18n/locales/zh-CN/panel'
-import enPanel from '../../i18n/locales/en-US/panel'
+import zhSettings from '@taiji/ui/locale/zh-CN/settings'
+import enSettings from '@taiji/ui/locale/en-US/settings'
+import zhPanel from '@taiji/ui/locale/zh-CN/panel'
+import enPanel from '@taiji/ui/locale/en-US/panel'
 
 const REPO_ROOT = resolve(__dirname, '../../../../..')
 /** providerEdit key 的源码消费根；locale 与测试自身不算消费方 */

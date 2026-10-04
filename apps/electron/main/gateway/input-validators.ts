@@ -56,6 +56,14 @@ export function isValidAbsolutePath(filePath: unknown): filePath is string {
 }
 
 /**
+ * 校验 remote-access 开关切换 IPC 的 enabled 输入（IPC 边界无类型保障，防御非 boolean）。
+ * 来源是 renderer 设置面板的开关状态；非 boolean 直接拒绝（handler 抛错，renderer 降级）。
+ */
+export function isValidRemoteAccessEnabled(value: unknown): value is boolean {
+  return typeof value === 'boolean'
+}
+
+/**
  * D2b 导航拦截（integrity-hardening §3.2）：判定主窗口 will-navigate 目标是否应用自身源。
  *
  * 为什么拦截：renderer 一旦被注入（XSS），`window.location = 'https://evil.com'` 整页

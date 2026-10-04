@@ -15,7 +15,7 @@
  *
  * Mock 策略：
  * - vi.mock('@/api/domains/settings') 桩 8 个 update 方法；onUpdateProgress/onUpdateError 捕获 cb 供测试手动触发
- * - vi.mock('@/composables/logic/markdown') 桩 renderMarkdown 避免加载 shiki WASM
+ * - vi.mock('@taiji/ui/features/chat/markdown') 桩 renderMarkdown 避免加载 shiki WASM
  * - effectScope 包 useAppUpdate（onScopeDispose 依赖活跃 scope）
  * - _resetForTest 在 beforeEach 重置 module-level 单例 state
  *
@@ -32,7 +32,7 @@ vi.mock('@/api/domains/settings', () => updateIpcModule(updateIpcBridge))
 
 // markdown mock 留文件内：默认 html 与调用断言属本文件行为面（非 IPC 桥）
 const hoistedRenderMarkdown = vi.hoisted(() => vi.fn<(md: string) => Promise<string>>())
-vi.mock('@/composables/logic/markdown', () => ({
+vi.mock('@taiji/ui/features/chat/markdown', () => ({
   renderMarkdown: hoistedRenderMarkdown,
 }))
 

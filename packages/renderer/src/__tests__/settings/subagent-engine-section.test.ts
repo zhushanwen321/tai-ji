@@ -23,7 +23,7 @@ const sessionApiMock = vi.hoisted(() => ({
 vi.mock('@taiji/core/transport/api/domains/session', () => sessionApiMock)
 
 import SubagentEngineSection from '@/components/settings/agent/SubagentEngineSection.vue'
-import zhCN from '@/i18n/locales/zh-CN/settings'
+import zhCN from '@taiji/ui/locale/zh-CN/settings'
 
 function makeI18n() {
   return createI18n({
