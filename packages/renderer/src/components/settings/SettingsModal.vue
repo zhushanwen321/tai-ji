@@ -143,6 +143,7 @@ import { useI18n } from 'vue-i18n'
 import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, Volume2, X, Download, Palette, BarChart3, ArrowLeft, ArrowRight, PanelLeftClose } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
+import { cycleTabFocus, getFocusableElements } from '@/composables/logic/focus-trap'
 import { getSettingsStore, useSettings, type SystemSettings } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
 import { createMirrorSave } from '@/composables/features/settings/setting-field'
@@ -274,27 +275,10 @@ function onKeydown(e: KeyboardEvent): void {
     return
   }
   if (e.key === 'Tab') {
-    handleTabCycle(e)
+    cycleTabFocus(e, getFocusables)
     return
   }
   handleNavItemNavigation(e)
-}
-
-/** Tab 焦点陷阱：焦点在末个且非 shift → 回首个；在首个且 shift → 跳末个；
- *  其余 Tab（中间元素间移动）不拦截，交给浏览器原生顺序。 */
-function handleTabCycle(e: KeyboardEvent): void {
-  const list = getFocusables()
-  if (list.length === 0) return
-  const first = list[0]
-  const last = list[list.length - 1]
-  const active = document.activeElement
-  if (active === last && !e.shiftKey) {
-    e.preventDefault()
-    first.focus()
-  } else if (active === first && e.shiftKey) {
-    e.preventDefault()
-    last.focus()
-  }
 }
 
 /** nav 内 ↑↓/Home/End 移动切换：焦点须在 .nav-item 上，否则放行；
@@ -316,15 +300,11 @@ function handleNavItemNavigation(e: KeyboardEvent): void {
   select(menus[next].id)
 }
 
+/** overlay 内可聚焦元素（Tab 循环三路语义见共享单元 focus-trap）。
+ *  整个 overlay（navRoot 的最近 dialog 容器）作为焦点陷阱范围 */
 function getFocusables(): HTMLElement[] {
-  // 整个 overlay（navRoot 的最近 dialog 容器）作为焦点陷阱范围
-  const root = navRootEl.value?.closest('.fso') as HTMLElement | null
-  if (!root) return []
-  return Array.from(
-    root.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    ),
-  )
+  const root = navRootEl.value?.closest('.fso')
+  return root ? getFocusableElements(root) : []
 }
 
 /** SystemPage 偏好更新 → 走 store（写 localStorage + 同步 DOM + i18n）+ toast 反馈。 */
