@@ -998,8 +998,13 @@ export class SessionLifecycle implements ISessionRegistry {
     // 公式单点 = shared getSessionArtifactsDir，含与 isPiSessionId 同域的 sessionId 穿越
     // 校验）。与上行 cache/images 级联同一落点、同一幂等形态（recursive + force），
     // best-effort 不阻断删除主链——残留由 artifact-retention 保留期扫描兜底。
-    // 目录的创建由 write 工具落盘时承担：P-2 探针（⛔ u-artifacts 门禁）实证真装版 pi
-    // write 工具在写入前 `mkdir(dir, {recursive:true})`（工具 description 亦声明），
+    // 目录的创建由 write 工具落盘时承担：真装版 pi write 工具在写入前
+    // `mkdir(dir, {recursive:true})`（工具 description 亦声明）——持久源码锚点
+    // @earendil-works/pi-coding-agent@0.84.4 dist/core/tools/write.js:22（
+    // defaultWriteOperations.mkdir recursive 实装）/ :141（description
+    // 「Automatically creates parent directories」声明）/ :160（execute 写前调用），
+    // 与 pi-semantics 探针族同口径可重验；P-2 探针（⛔ u-artifacts 门禁）同结论，
+    // 探针产物在 .tmp 不入库，仓内可复现证据以 dist 锚点为准。
     // 故不实现 runtime 会话激活预建降级。
     try { rmSync(getSessionArtifactsDir(sessionIdFromSessionFilePath(filePath)), { recursive: true, force: true }) } catch { void 0 }
     // W-Runtime4：清理 session 文件头解析缓存（infra session-file-utils 的 filePath 键
