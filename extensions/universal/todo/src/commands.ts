@@ -1,19 +1,21 @@
 /**
- * /todos 命令注册 — 进入 TodoListComponent TUI 视图（双列布局）。
+ * /todos 命令注册 — notify + widget 双通道反馈（D10①，Q1 裁决）。
  *
- * todo-context 消息不再需要 registerMessageRenderer，
- * 因为所有 context 通过 before_agent_start 的 display:false 注入，
- * 用户在 TUI 中不可见。
+ * 反馈通道从 ctx.ui.custom 的 TUI 组件视图改为双通道：
+ * - notify：formatTodoList 清单摘要（toast 在 taiji RPC 模式可达）；
+ * - widget：refreshDisplay 强推 todo 面板（与 tool/handlers 反馈同一通道）。
+ * ctx.ui.custom 在 RPC 模式恒 undefined（评估组 B 实测），原 TodoListComponent
+ * 组件视图整体退役（component.ts 已删除）。
  */
 
-import type { ExtensionAPI, ExtensionCommandContext, KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
-import type { TUI } from "@earendil-works/pi-tui";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
+import { formatTodoList } from "./model";
 import type { TodoSessionState } from "./state";
-import { TodoListComponent } from "./component";
+import type { RefreshDisplayFn } from "./handlers";
 
 /** 注册 /todos 命令到 pi */
-export function registerTodosCommand(pi: ExtensionAPI, state: TodoSessionState): void {
+export function registerTodosCommand(pi: ExtensionAPI, state: TodoSessionState, refreshDisplay: RefreshDisplayFn): void {
 	pi.registerCommand("todos", {
 		description: "View all todos for the current session",
 		handler: async (_args: string | undefined, ctx: ExtensionCommandContext) => {
@@ -22,13 +24,11 @@ export function registerTodosCommand(pi: ExtensionAPI, state: TodoSessionState):
 				return;
 			}
 
-			// ctx.ui.custom 的 factory 签名为
-			//   (tui: TUI, theme: Theme, keybindings: KeybindingsManager, done: (result) => void)
-			// 返回 Component & { dispose?(): void }。TodoListComponent 实现该形状，
-			// done 接收 result（此处忽略）。
-			await ctx.ui.custom((_tui: TUI, theme: Theme, _kb: KeybindingsManager, done: (result: unknown) => void) => {
-				return new TodoListComponent(state.todos, theme, () => done(undefined));
-			});
+			// widget 通道：强推清单面板（含 setStatus 状态行，空清单时清面板）
+			refreshDisplay(ctx as Parameters<RefreshDisplayFn>[0]);
+			// notify 通道：清单摘要 toast（空清单给显式空态文案，不弹空串）
+			const summary = formatTodoList(state.todos);
+			ctx.ui.notify(summary === "" ? "No todos for the current session" : summary, "info");
 		},
 	});
 }

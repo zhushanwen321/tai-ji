@@ -25,6 +25,8 @@ interface ToolExecutionEndLikeEvent {
 	isError: boolean;
 	toolName: string;
 	toolCallId: string;
+	/** 嵌套子调用标记（pi 1.0：另一工具（如 codemode 脚本）发起的调用携带） */
+	parentToolCallId?: string;
 	result?: unknown;
 }
 
@@ -65,6 +67,10 @@ export function setupToolErrorAudit(pi: ExtensionAPI): void {
 	pi.on("tool_execution_end", async (event: unknown) => {
 		const e = event as ToolExecutionEndLikeEvent;
 		if (!e.isError) return;
+		// D13②：嵌套子调用失败不单独记账——父工具的 tool_execution_end 是记账终点，
+		// 子调用（parentToolCallId 非空）再记一条 = session-manager 现役嵌套派发场景下
+		// 审计条目膨胀（一父 N 子记 N+1 条）。
+		if (typeof e.parentToolCallId === "string" && e.parentToolCallId.length > 0) return;
 
 		const errorText = extractErrorText(e.result);
 
