@@ -102,7 +102,10 @@ export function registerInstance(terminalId: string, alive: boolean): TerminalIn
   const order = registry.orderBySession[sessionId]
   if (order) order.push(terminalId)
   else registry.orderBySession[sessionId] = [terminalId]
-  // 首个实例自动成为当前显示实例（后续新建不抢占用户已选中的实例）
+  // 仅在会话「当前无显示实例」时落位（对账 / 挂载恢复语义）：批量注册不跳到最后一个条目、
+  // 也不抢占用户已选中的实例——刷新/世代重建后 active 保持用户选择；首个实例仍自动成 active。
+  // 用户点「+」新建的自动切换**不在此处隐式发生**，由创建路径（TerminalView.onCreate）在 ack
+  // 建档拿到编号后显式 setActiveTerminalId（2026-10-04 用户裁决：点「+」是显式用户意图）。
   if (registry.activeBySession[sessionId] == null) registry.activeBySession[sessionId] = terminalId
   return entry
 }

@@ -57,18 +57,23 @@ export function useTerminalSpawnFeedback(
 
   /**
    * 「+」手动新建（设计 §3.3「新建失败」）：失败经既有全局错误通道提示，
-   * 不占 inline 错误条、不影响既有实例。
+   * 不占 inline 错误条、不影响既有实例。成功时返回 ack 回传的新实例编号（调用方据此自动
+   * 切到新实例并聚焦其输入区——2026-10-04 用户裁决：点「+」是显式用户意图）；失败返回 null。
    * 入口先清 spawnError：挂载腿的 inline 错误条不得跨腿泄漏到已成功新建的场景
    *（挂载 spawn 失败留下错误条后，点「+」成功建档会让错误条覆盖在新实例之上）。
    */
-  function createWithToast(): void {
+  function createWithToast(): Promise<string | null> {
     spawnError.value = null
     const { cwd, cols, rows } = resolveDims()
-    void terminal.spawnTerminal(cwd, cols, rows).catch((e: unknown) => {
-      const message = e instanceof Error ? e.message : String(e)
-      console.warn('[terminal] 新建实例失败:', e)
-      useToast().error(t('panel.terminal.spawnFailed', { error: message }))
-    })
+    return terminal.spawnTerminal(cwd, cols, rows).then(
+      (terminalId) => terminalId,
+      (e: unknown) => {
+        const message = e instanceof Error ? e.message : String(e)
+        console.warn('[terminal] 新建实例失败:', e)
+        useToast().error(t('panel.terminal.spawnFailed', { error: message }))
+        return null
+      },
+    )
   }
 
   return { spawnError, spawnWithFeedback, retrySpawn, createWithToast }

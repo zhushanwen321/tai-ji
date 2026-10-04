@@ -337,18 +337,52 @@ describe('TerminalView 交互（使用者视角）', () => {
     expect(useTerminalMock.closeInstance).not.toHaveBeenCalled()
   })
 
-  it('TV-11: 「+」点击 → spawnTerminal 新建', async () => {
+  it('TV-11: 「+」点击 → spawnTerminal 新建 + 自动切到新实例并聚焦其输入区', async () => {
     instancesRef.value = [{ terminalId: 'term:test-session:1', seq: 1, alive: true }]
     activeRef.value = 'term:test-session:1'
     useTerminalMock.reconcileInstances.mockResolvedValue({ ok: true, count: 1 })
     wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
     await flushPromises()
     useTerminalMock.spawnTerminal.mockClear()
+    useTerminalMock.selectInstance.mockClear()
 
+    // ack 回传新实例编号（终端 2）——不再停留在终端 1
+    useTerminalMock.spawnTerminal.mockResolvedValue('term:test-session:2')
     const create = document.body.querySelector('[data-testid="terminal-instance-create"]') as HTMLButtonElement
     create.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushPromises()
+
     expect(useTerminalMock.spawnTerminal).toHaveBeenCalledTimes(1)
+    // 2026-10-04 产品裁决：点「+」自动切到新实例
+    expect(useTerminalMock.selectInstance).toHaveBeenCalledWith('term:test-session:2')
+    expect(activeRef.value).toBe('term:test-session:2')
+    // 视图重建到新实例并聚焦其输入区
+    const xterm = xtermInstances[xtermInstances.length - 1]!
+    expect(xterm.focus).toHaveBeenCalled()
+  })
+
+  it('TV-15: 空态点「+」→ 自动激活新实例并聚焦（active 原为 null 也不落空）', async () => {
+    instancesRef.value = []
+    activeRef.value = null
+    useTerminalMock.reconcileInstances.mockResolvedValue({ ok: true, count: 0 })
+    // 挂载轮空清单自动新建（mock 的 spawn 不建条目、不置 active）→ 空态、不夺焦
+    useTerminalMock.spawnTerminal.mockResolvedValueOnce('term:test-session:1')
+    wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
+    await flushPromises()
+    useTerminalMock.spawnTerminal.mockClear()
+    useTerminalMock.selectInstance.mockClear()
+    xtermInstances.length = 0
+
+    // 空态下点「+」新建得终端 2（序号不回落由 runtime 保证，此处只断自动激活+聚焦）
+    useTerminalMock.spawnTerminal.mockResolvedValueOnce('term:test-session:2')
+    const create = document.body.querySelector('[data-testid="terminal-instance-create"]') as HTMLButtonElement
+    create.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    expect(useTerminalMock.selectInstance).toHaveBeenCalledWith('term:test-session:2')
+    expect(activeRef.value).toBe('term:test-session:2')
+    const xterm = xtermInstances[xtermInstances.length - 1]!
+    expect(xterm.focus).toHaveBeenCalled()
   })
 
   it('TV-12: 无选区时浮动按钮不显示', async () => {

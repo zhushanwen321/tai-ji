@@ -11,7 +11,8 @@
   - 挂载与切 session（会话激活 / ⌘R 界面刷新腿）：`terminal.list` 对账；成功空清单且是
     本会话首开 → 自动新建默认实例（存量会话「行为与改造前一致」）；**拉取失败不自动新建**
     （否则与后台存活实例撞号并存），保留既有条目、下次触发自然重试；
-  - 焦点规则：切换实例后焦点落新显示实例输入区；关闭实例后焦点落其右侧相邻（无右取左，
+  - 焦点规则：切换实例后焦点落新显示实例输入区；**点「+」新建后自动切到新实例并聚焦其输入区**
+    （2026-10-04 用户裁决：点「+」是显式用户意图）；关闭实例后焦点落其右侧相邻（无右取左，
     active 落位在注册表层），首挂载不主动夺焦；
   - 新建失败：「+」走全局错误通道（toast）；挂载自动新建走 inline 错误条 + 重试。
 -->
@@ -151,9 +152,20 @@ const selectionPos = view.selectionPos
  */
 let interactive = false
 
-/** 「+」新建（u3-bar create）：失败经全局错误通道提示，不出现新条目、不影响既有实例。 */
-function onCreate(): void {
-  createWithToast()
+/**
+ * 「+」新建（u3-bar create）：失败经全局错误通道提示，不出现新条目、不影响既有实例。
+ * 成功后**自动把当前显示实例切到新实例并聚焦其输入区**（2026-10-04 产品裁决：点「+」是
+ * 用户显式意图，与「首挂载不夺焦」不冲突）。自动切换只走本路径显式 select——`terminal.list`
+ * 对账路径不抢 active（见 terminal-instance-registry.registerInstance 注释）。
+ */
+async function onCreate(): Promise<void> {
+  const terminalId = await createWithToast()
+  if (terminalId === null) return
+  terminal.selectInstance(terminalId)
+  // 显式同步视图 + 落焦：空态（active 本为 null）时 registerInstance 已把 active 置为新实例，
+  // 再 select 同值不会触发 active watcher，须在此直接复现「切换实例」的视图重建 + 焦点语义。
+  view.syncView()
+  view.focus()
 }
 
 /** 切换当前显示实例（u3-bar select）——焦点由 active 变化 watcher 落新实例输入区。 */

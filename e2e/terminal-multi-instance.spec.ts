@@ -197,6 +197,26 @@ async function selectInstance(
   if (opts.expectText) await expectTerminalOutput(page, opts.expectText)
 }
 
+/**
+ * 断言第 index 条实例已成为当前显示实例，且键盘焦点落其输入区（xterm helper textarea）。
+ * 「+」新建后自动切换 active 的落点判据（2026-10-04 用户裁决）；excludeText/expectText 兼作
+ * 「视图已真正切过去」的等待条件（语义同 selectInstance）。
+ */
+async function expectActiveInstance(
+  page: Page,
+  index: number,
+  opts: { expectText?: string; excludeText?: string } = {},
+): Promise<void> {
+  await expect(instanceItems(page).nth(index)).toHaveAttribute('data-active', 'true', {
+    timeout: INSTANCE_SETTLE_TIMEOUT_MS,
+  })
+  await expect(page.locator('[data-testid="terminal-xterm"] .xterm-helper-textarea')).toBeFocused({
+    timeout: INSTANCE_SETTLE_TIMEOUT_MS,
+  })
+  if (opts.excludeText) await expectTerminalTextExcludes(page, opts.excludeText)
+  if (opts.expectText) await expectTerminalOutput(page, opts.expectText)
+}
+
 /** 点「+」新建实例。 */
 async function createInstance(page: Page): Promise<void> {
   await page.getByTestId('terminal-instance-create').click()
@@ -379,8 +399,9 @@ test('T1: 双终端并行——「+」新建第二实例、两实例各自输出
     const id2 = await terminalIdAt(h.page, 1)
     expect(seqOf(id2), '新建实例应为终端 2').toBe(2)
 
-    // 新建即进入可写态：切到终端 2（等视图切过去），敲命令有回显、输出独立推进
-    await selectInstance(h.page, 1, { excludeText: T1_A.out })
+    // 新建即进入可写态（2026-10-04 产品裁决：自动切到新实例并聚焦其输入区，不再需点条目切换），
+    // 敲命令有回显、输出独立推进
+    await expectActiveInstance(h.page, 1, { excludeText: T1_A.out })
     await runInTerminal(h.page, T1_B.cmd)
     await expectTerminalOutput(h.page, T1_B.out)
     // 分区隔离：终端 2 看不到终端 1 的输出历史
@@ -529,7 +550,8 @@ test('T8: 关最后一个实例后新建不复用序号——新条目为终端 
     expect(seqOf(id2)).toBe(2)
 
     // 在被关闭的实例里留下输出（用于验证新实例输出区空白，无历史串入）
-    await selectInstance(h.page, 1, { excludeText: T8_UNIQ.out })
+    // 新建自动切到终端 2（产品裁决），直接可写
+    await expectActiveInstance(h.page, 1, { excludeText: T8_UNIQ.out })
     await runInTerminal(h.page, T8_MARK.cmd)
     await expectTerminalOutput(h.page, T8_MARK.out)
 
@@ -542,8 +564,8 @@ test('T8: 关最后一个实例后新建不复用序号——新条目为终端 
     const seqs = ids.map(seqOf).sort((a, b) => a - b)
     expect(seqs, '新建实例应为终端 3，不复用终端 2').toEqual([1, 3])
 
-    // 新实例输出区空白：无被关实例的历史输出串入（exclude T8_UNIQ = 已切到终端 3 视图）
-    await selectInstance(h.page, 1, { excludeText: T8_UNIQ.out })
+    // 新实例输出区空白：无被关实例的历史输出串入（exclude T8_UNIQ = 已自动切到终端 3 视图）
+    await expectActiveInstance(h.page, 1, { excludeText: T8_UNIQ.out })
     await expectTerminalTextExcludes(h.page, T8_MARK.out)
   } finally {
     await teardownHarness(h)
@@ -572,6 +594,8 @@ test('T9: 最后实例自然退出——exit 后空态 + 「+」可用、新建�
     await expectInstanceCount(h.page, 1)
     const id = await terminalIdAt(h.page, 0)
     expect(seqOf(id), '唯一实例自然退出后新建应得终端 2（序号不回落）').toBe(2)
+    // 新建自动切到新实例并聚焦其输入区（空态后新建的落点，产品裁决）
+    await expectActiveInstance(h.page, 0)
   } finally {
     await teardownHarness(h)
   }

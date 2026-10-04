@@ -354,6 +354,26 @@ describe('terminal.list 对账', () => {
     expect(warnSpy).toHaveBeenCalled()
     wrapper.unmount()
   })
+
+  it('RC-5: 对账批量建档多个新实例不改 active（刷新/世代重建不跳到最后一个条目）', async () => {
+    terminalApiMock.spawn.mockResolvedValue({ terminalId: T1 })
+    const { wrapper, terminal } = host('s1')
+    await terminal.spawnTerminal('/tmp', 80, 24)
+    expect(terminal.activeTerminalId.value).toBe(T1)
+
+    // 刷新/重连恢复：runtime 清单含两个 renderer 尚不知道的实例，按注册顺序批量建档
+    terminalApiMock.list.mockResolvedValue([
+      { terminalId: T1, alive: true },
+      { terminalId: 'term:s1:7', alive: true },
+      { terminalId: 'term:s1:8', alive: true },
+    ])
+    const result = await terminal.reconcileInstances()
+    expect(result).toEqual({ ok: true, count: 3 })
+    expect(terminal.instances.value.map((i) => i.terminalId)).toEqual([T1, 'term:s1:7', 'term:s1:8'])
+    // 对账路径不抢 active：仍停在此前选中的 T1（不跳到末条 term:s1:8）
+    expect(terminal.activeTerminalId.value).toBe(T1)
+    wrapper.unmount()
+  })
 })
 
 describe('世代变更失效重置（auth token 判据）', () => {
