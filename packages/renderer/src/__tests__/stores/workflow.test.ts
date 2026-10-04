@@ -6,7 +6,8 @@
  * 覆盖：
  * - records 初值空数组
  * - loadWorkflows 成功写入该 sid 分区；失败不覆盖现有分区、设 loadError（M1 契约）
- * - loadWorkflows 空结果守卫（连续空 strike 防误删 / RPC 失败重置 strike / oversize 降级保留旧分区）
+ * - loadWorkflows found 会话存在性判定（待裁决项 4：found=false 保留分区 / found=true
+ *   空列表直接覆盖 / oversize 降级保留旧分区）
  * - clearWorkflows 清空 records + 清 agentcall 映射；clearSession per-session 分区释放（ADR-0049）
  * - registerAgentCall / getAgentCallVirtualIdsByMain / clearAgentCallMapping agentcall 清理映射（U7 MUST_FIX 1）
  * - triggerWorkflowReload 信号驱动重拉 + 500ms 延迟重试 + W15 定时器防御性清理（去重 / $dispose）
@@ -27,7 +28,6 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/stores/workflow.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import type { MockInstance } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useWorkflowStore } from '@/stores/workflow'
 import { agentCallVirtualId } from '@taiji/shared'
@@ -127,16 +127,10 @@ describe('workflow store', () => {
     expect(store.getAgentCallVirtualIdsByMain('sess-1')).toEqual([])
   })
 
-  it('RD-3#12: clearWorkflows 补齐 loading/error/strike 三 facet（+ oversize），对齐 clearSession 全清', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  it('RD-3#12: clearWorkflows 补齐 loading/error 两 facet（+ oversize），对齐 clearSession 全清', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
       const store = useWorkflowStore()
-      seedRecords(store, 'sess-1', [makeRecord({ runId: 'wf-a' })])
-      vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false })
-      await store.loadWorkflows('sess-1') // strike 1/2：保留分区
-      expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
-
       seedRecords(store, 'sess-2', [makeRecord({ runId: 'wf-b' })])
       vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: true })
       await store.loadWorkflows('sess-2')
@@ -148,82 +142,63 @@ describe('workflow store', () => {
 
       store.clearWorkflows()
 
-      // 三 facet + oversize 全清（此前仅换 records Map，残留 loading/error/oversize/strike）
-      expect(store.getRecordsBySession('sess-1')).toEqual([])
-      expect(store.isLoadingOf('sess-1')).toBe(false)
+      // records + loading/error + oversize 全清
+      expect(store.getRecordsBySession('sess-2')).toEqual([])
+      expect(store.isLoadingOf('sess-2')).toBe(false)
       expect(store.loadErrorOf('sess-3')).toBeNull()
       expect(store.oversizeOf('sess-2')).toBe(false)
-
-      // strike 簿记已清：重新预置后首次空结果从 strike 1 重新计（保留分区）——漏清则残留 1 直接 2/2 误删空
-      seedRecords(store, 'sess-1', [makeRecord({ runId: 'wf-keep' })])
-      vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false })
-      await store.loadWorkflows('sess-1')
-      expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('empty strike 1/2'), 'sess-1')
     } finally {
-      warnSpy.mockRestore()
       errorSpy.mockRestore()
     }
   })
 })
 
-// ── 空结果守卫接线冒烟（R7 归一）：strike 机制全部行为（阈值计数 / 非空打断重置 /
-// reset 清零 / 分区空放行 / warn 文案结构）直测锁定在
-// __tests__/lib/partitioned-session-records.test.ts（守卫工厂单源，S4 A1；不 import store，无环）。
-// 此处只证明守卫经本 store 接线真实可达：strike 放行路径 + catch 重置路径；
-// clearSession 联动见下方 clearSession describe 的簿记用例。
-// 背景（sidebar-sync-plan P1 + R1 business-logic S3）：runtime getWorkflows 读盘失败时
-// catch 降级返回 []，连续 2 次空才判真实删空覆盖分区，瞬时读失败不得清掉分区历史。
+// ── found 会话存在性判定（待裁决项 4 行为锁，与 subagent store 同款）：runtime
+// getWorkflows 以 found=false 显式标记「会话不在册」，「读不到会话」保留分区不覆盖，
+// 「真实空列表」（found=true）直接覆盖。原连续空计数 strike 守卫随歧义根治整体退役。
 
-describe('workflow store — loadWorkflows 空结果守卫（接线冒烟）', () => {
-  let warnSpy: MockInstance
-
-  beforeEach(() => {
-    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-  })
-
-  afterEach(() => {
-    warnSpy.mockRestore()
-  })
-
-  it('连续第 2 次 RPC 空 → 判真实删空，清分区（strike 1/2 保留 → 2/2 放行全程经 store 可达 + 接线 tag）', async () => {
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false })
+describe('workflow store — loadWorkflows found 会话存在性判定（待裁决项 4 行为锁）', () => {
+  it('found=false（会话不在册）→ 保留分区不覆盖，不设 loadError（读不到 ≠ 数据为空）', async () => {
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false, found: false })
 
     const store = useWorkflowStore()
     seedRecords(store, 'sess-1', [makeRecord({ runId: 'wf-keep' })])
-    await store.loadWorkflows('sess-1') // strike 1/2：保留
+    await store.loadWorkflows('sess-1')
+
+    // 分区保留：延迟落盘窗口的空结果不清掉已有记录
     expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
-    // 接线参数：warn 前缀含 store 传入的 logTag + fetchLabel（文案结构归共享直测）
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[workflow-store] getWorkflows returned empty list'),
-      'sess-1',
-    )
-    await store.loadWorkflows('sess-1') // strike 2/2：真实删空判定，放行覆盖
+    expect(store.getRecordsBySession('sess-1')[0].runId).toBe('wf-keep')
+    // 「不在册」不是错误态：不设 loadError，oversize 降级标志不置位
+    expect(store.loadErrorOf('sess-1')).toBeNull()
+    expect(store.oversizeOf('sess-1')).toBe(false)
+    // 窗口结束后会话在册且数据为空（found=true）→ 正常覆盖（此时才是真实删空）
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false, found: true })
+    await store.loadWorkflows('sess-1')
     expect(store.getRecordsBySession('sess-1')).toEqual([])
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('clearing partition'),
-      'sess-1',
-    )
-    // 守卫不是错误态：不设 loadError（sid 必须与本用例一致，错 sid 走 ?? null 兜底恒真）
+  })
+
+  it('found=true 空列表 → 直接覆盖分区（真实删空语义，无需连续计数）', async () => {
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false, found: true })
+
+    const store = useWorkflowStore()
+    seedRecords(store, 'sess-1', [makeRecord({ runId: 'wf-gone' })])
+    await store.loadWorkflows('sess-1')
+
+    expect(store.getRecordsBySession('sess-1')).toEqual([])
     expect(store.loadErrorOf('sess-1')).toBeNull()
   })
 
-  it('RPC 失败（catch）→ strike 重置，不让连接故障累计出误清分区', async () => {
+  it('found 缺省（undefined，mock / 旧 runtime）→ 按 found 处理（空列表直接覆盖，兼容语义不变）', async () => {
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false })
+
     const store = useWorkflowStore()
-    seedRecords(store, 'sess-1', [makeRecord({ runId: 'wf-keep' })])
-
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false }) // strike 1/2
-    await store.loadWorkflows('sess-1')
-    vi.mocked(sessionApi.getWorkflows).mockRejectedValue(new Error('network'))
-    await store.loadWorkflows('sess-1') // catch → strike 重置
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false }) // 重新 strike 1/2，仍保留
+    seedRecords(store, 'sess-1', [makeRecord({ runId: 'wf-old' })])
     await store.loadWorkflows('sess-1')
 
-    expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
-    expect(store.getRecordsBySession('sess-1')[0].runId).toBe('wf-keep')
+    expect(store.getRecordsBySession('sess-1')).toEqual([])
   })
 
-  it('[RT-4#8] oversize=true：置降级标志 + 保留旧分区（不可用 ≠ 删空，不进 strike 守卫）', async () => {
+  it('[RT-4#8] oversize=true：置降级标志 + 保留旧分区（不可用 ≠ 删空）', async () => {
     const store = useWorkflowStore()
     seedRecords(store, 'sess-1', [makeRecord({ runId: 'wf-keep' })])
     vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: true })
@@ -332,38 +307,26 @@ describe('workflow store — clearSession（per-session 分区释放，ADR-0049 
     expect(() => store.clearSession('never')).not.toThrow()
   })
 
-  it('strike 簿记随分区清除：clearSession 后重新预置分区，strike 从 0 重新计（不残留旧计数）', async () => {
-    // R3 test-coverage S1 强化 + R7 接线冒烟：reset 语义（清零后重新计数）归共享直测
-    // （partitioned-session-records.test.ts），此处锁 clearSession 接线确实调了 reset——
-    // 若 clearSession 漏调 strikeGuard.reset，残留计数 1 会让下一次空结果直接
-    // strike 2/2 误判删空 → 分区保留断言红。
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  it('loading/error/oversize 三 facet 随分区一并清除（重新加载从干净态起步）', async () => {
     const store = useWorkflowStore()
-    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false })
-
-    // 预置非空分区 → strike 1/2：空结果保留
+    // oversize 标志置位
     seedRecords(store, 'session-1', [makeRecord({ runId: 'wf-keep' })])
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: true })
     await store.loadWorkflows('session-1')
-    expect(store.getRecordsBySession('session-1')).toHaveLength(1)
+    expect(store.oversizeOf('session-1')).toBe(true)
 
-    // clearSession：分区 + strike 簿记一并清除
     store.clearSession('session-1')
-    expect(store.getRecordsBySession('session-1')).toEqual([])
 
-    // 重新预置非空分区 → 第 1 次空结果必须从 strike 1 重新计（保留分区）。
-    // 残留计数场景（clearSession 漏删）此步为 strike 2/2 → 分区被清 → 断言红
-    seedRecords(store, 'session-1', [makeRecord({ runId: 'wf-keep-2' })])
-    await store.loadWorkflows('session-1')
-    expect(store.getRecordsBySession('session-1')).toHaveLength(1)
-    expect(store.getRecordsBySession('session-1')[0].runId).toBe('wf-keep-2')
-    // warn 明示 strike 1/2（从 0 重新计数的直接证据，而非残留的 2/2）
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('empty strike 1/2'), 'session-1')
+    // 三 facet 全清（残留 oversize 会让重开后面板误显降级提示）
+    expect(store.oversizeOf('session-1')).toBe(false)
+    expect(store.loadErrorOf('session-1')).toBeNull()
+    expect(store.isLoadingOf('session-1')).toBe(false)
 
-    // 再 1 次空 → strike 2/2 判真实删空放行（重新计数的完整语义闭环）
+    // 清除后重新加载：正常覆盖路径不受残留状态影响
+    vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [makeRecord({ runId: 'wf-new' })], oversize: false })
     await store.loadWorkflows('session-1')
-    expect(store.getRecordsBySession('session-1')).toEqual([])
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('clearing partition'), 'session-1')
-    warnSpy.mockRestore()
+    expect(store.getRecordsBySession('session-1')[0].runId).toBe('wf-new')
+    expect(store.oversizeOf('session-1')).toBe(false)
   })
 })
 

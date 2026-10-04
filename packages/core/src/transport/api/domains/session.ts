@@ -205,13 +205,15 @@ export function setThinkingLevel(sessionId: string, level: string): Promise<{ se
 
 /**
  * 获取 session 派生的 subagent 列表（runtime 从主 session JSONL 提取）。
- * reply payload 是 { sessionId, subagents, oversize? }——结构化返回：oversize=true
+ * reply payload 是 { sessionId, subagents, oversize?, found? }——结构化返回：oversize=true
  * （session 文件 >32MB 预检阈值）时 subagents 恒空且列表不可用，消费方（store）据此
  * 显示降级提示而非空列表；缺省 false（mock / 旧 runtime）。
+ * found=false = 会话不在册（pi 延迟落盘窗口 / 扫描竞态）——「读不到会话」与「会话存在
+ * 但列表为空」显式分形，store 拿 false 保留既有分区不覆盖；缺省 true。
  */
 export async function getSubagents(
   sessionId: string,
-): Promise<{ subagents: SubagentRecord[]; oversize?: boolean }> {
+): Promise<{ subagents: SubagentRecord[]; oversize?: boolean; found?: boolean }> {
   return command('session.getSubagents', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
@@ -241,12 +243,13 @@ export function setSubagentDefaultEngine(engineId: string): Promise<{ engineId: 
 
 /**
  * 获取 session 派生的 workflow 列表（runtime 从主 session JSONL 的 workflow-state-link 提取）。
- * reply payload 是 { sessionId, workflows, oversize? }——结构化返回（oversize 语义同
- * getSubagents：true = 文件过大列表不可用，恒空数组）。
+ * reply payload 是 { sessionId, workflows, oversize?, found? }——结构化返回（oversize 语义同
+ * getSubagents：true = 文件过大列表不可用，恒空数组；found 语义同 getSubagents：false =
+ * 会话不在册，store 保留既有分区）。
  */
 export async function getWorkflows(
   sessionId: string,
-): Promise<{ workflows: WorkflowRunRecord[]; oversize?: boolean }> {
+): Promise<{ workflows: WorkflowRunRecord[]; oversize?: boolean; found?: boolean }> {
   return command('session.getWorkflows', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 

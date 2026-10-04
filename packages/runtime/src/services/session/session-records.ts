@@ -207,13 +207,19 @@ interface WorkflowFoldEvidenceView {
 }
 
 /**
- * [RT-4#8] getSubagents/getWorkflows 的读面结果：records + oversize 降级标志。
+ * [RT-4#8] getSubagents/getWorkflows 的读面结果：records + oversize 降级标志 +
+ * found 会话存在性标志。
  * oversize=true（session 文件 >32MB 预检阈值）时 records 恒空数组——「列表不可用」
  * 与「无记录」显式分形，transport reply 透传 oversize 供 renderer 面板显示降级提示。
+ * [待裁决项 4] found=false = 主会话文件不在册（pi 首条消息前延迟落盘窗口 / 扫描
+ * 竞态）——「读不到会话」与「会话存在但列表为空」显式分形：renderer 拿到 found=false
+ * 保留既有分区不覆盖（空列表歧义的根治，替代消费侧连续空计数补救）；found=true 的
+ * 空列表是真实空（直接覆盖）。
  */
 export interface OversizeAwareResult<T> {
   records: T[]
   oversize: boolean
+  found: boolean
 }
 
 /** workflow 增量信号形状（session.workflowUpdate payload.update；status / reason / 步骤数 / stepStatuses（status@attempts）/ phasesFingerprint 任一变化一条）。 */
@@ -978,18 +984,20 @@ export class SessionRecords {
     // wave:perf-w26（plan M-3）：路径解析消费方 force 旁路 TTL（刚落盘 session 的
     // subagent 面板在窗口内不静默返回空）。
     const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
-    if (!target) return { records: [], oversize: false }
+    // [待裁决项 4] 会话不在册（延迟落盘窗口 / 扫描竞态）→ found=false 显式分形，
+    // 不再与「会话存在但真空列表」共用同一空返回（renderer 据此保留分区）。
+    if (!target) return { records: [], oversize: false, found: false }
     // [W1 / D6] 读请求只读内存投影；oversize（>32MB = v1 巨文件时代会话）走旧格式
     // 惰性兼容读路径（32MB 预检语义退役至此专属——extractor 预检在该路径降级空列表
     // + oversize 标志 + warn，[RT-4#8] 语义原样保留）。
     if (isSessionFileOversize(target.filePath)) {
       const { records, oversize } = extractSubagentsFromSessionFile(target.filePath)
       if (oversize) this.warnOversizeOnce(sessionId, 'subagents')
-      return { records, oversize }
+      return { records, oversize, found: true }
     }
     const cache = this.ensureRecordEntriesCache(sessionId)
     const projection = this.ensureProjection(sessionId, cache)
-    return { records: Array.from(projection.subagents.values()), oversize: false }
+    return { records: Array.from(projection.subagents.values()), oversize: false, found: true }
   }
 
   /**
@@ -1125,15 +1133,16 @@ export class SessionRecords {
   async getWorkflows(sessionId: string): Promise<OversizeAwareResult<WorkflowRunRecord>> {
     // wave:perf-w26（plan M-3）：路径解析消费方 force 旁路 TTL（与 getSubagents 同理）。
     const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
-    if (!target) return { records: [], oversize: false }
+    // [待裁决项 4] 会话不在册 → found=false 显式分形（与 getSubagents 同款）。
+    if (!target) return { records: [], oversize: false, found: false }
     if (isSessionFileOversize(target.filePath)) {
       const { records, oversize } = extractWorkflowsFromSessionFile(target.filePath)
       if (oversize) this.warnOversizeOnce(sessionId, 'workflows')
-      return { records, oversize }
+      return { records, oversize, found: true }
     }
     const cache = this.ensureRecordEntriesCache(sessionId)
     const projection = this.ensureProjection(sessionId, cache)
-    return { records: Array.from(projection.workflows.values()), oversize: false }
+    return { records: Array.from(projection.workflows.values()), oversize: false, found: true }
   }
 
   /**

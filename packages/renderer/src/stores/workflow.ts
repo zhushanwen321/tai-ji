@@ -40,7 +40,7 @@ export {
 } from '@taiji/shared'
 import { createInflightDedup } from '@taiji/core/foundation/create-inflight-dedup'
 import { session as sessionApi } from '@/api'
-import { createEmptyResultStrikeGuard, createPartitionedRecords } from '../lib/partitioned-session-records'
+import { createPartitionedRecords } from '../lib/partitioned-session-records'
 
 // ── [P3/D6] progress 投影消费（纯函数，drawer WorkflowTab 与托盘面板共用）──
 
@@ -197,14 +197,6 @@ export const useWorkflowStore = defineStore('workflow', () => {
     }
   }
 
-  /**
-   * loadWorkflows 空结果守卫（R1 business-logic S3，与 subagent.ts 同款）：达到 LIMIT 判
-   * 真实删空放行覆盖。strike 语义单源在 createEmptyResultStrikeGuard JSDoc
-   * （lib/partitioned-session-records），此处只声明本 store 的阈值与 log tag。
-   */
-  const EMPTY_RESULT_STRIKE_LIMIT = 2
-  const strikeGuard = createEmptyResultStrikeGuard(EMPTY_RESULT_STRIKE_LIMIT, 'workflow-store', 'getWorkflows')
-
   // [W15] 防御性清理：workflowReloadTimers 是模块级 Map（不在 ref 里），HMR / store dispose
   // 时若不主动 clearTimeout，在途的 running 重试 timer 仍会在 500ms 后触发 loadWorkflows(sid)
   // 操作已废弃的 store。参照 subagent.ts 的 onScopeDispose panelStreamUnsub 模式。
@@ -258,7 +250,6 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   /** 清除指定 session 的 workflow 列表分区（deleteSession 调，防泄漏，ADR-0049 AC-8） */
   function clearSession(sessionId: string): void {
-    strikeGuard.reset(sessionId)
     partition.clear(sessionId)
     loadingBySession.value.delete(sessionId)
     loadErrorBySession.value.delete(sessionId)
@@ -508,28 +499,20 @@ export const useWorkflowStore = defineStore('workflow', () => {
     loadErrorBySession.value.delete(sessionId)
     try {
       // [RT-4#8] 结构化返回：oversize=true（文件 >32MB 列表不可用）置降级标志 + 保留旧
-      // 分区数据（不经 strike guard——不可用 ≠ 删空）；面板显示降级提示而非空列表。
-      const { workflows: records, oversize } = await sessionApi.getWorkflows(sessionId)
+      // 分区数据（不可用 ≠ 删空）；面板显示降级提示而非空列表。
+      // [待裁决项 4] found=false = 会话不在册（pi 延迟落盘窗口 / 扫描竞态）——保留分区
+      // 不覆盖；found=true 的空列表是真实空，直接覆盖（原连续空计数 strike 守卫随歧义
+      // 根治退役）。缺省（undefined，mock / 旧 runtime）按 found 处理。推送路径不经本判定。
+      const { workflows: records, oversize, found } = await sessionApi.getWorkflows(sessionId)
       if (oversize) {
-        strikeGuard.reset(sessionId)
         oversizeBySession.value.set(sessionId, true)
         return
       }
       oversizeBySession.value.delete(sessionId)
-      // 空结果守卫（sidebar-sync-plan P1 + R1 business-logic S3，与 subagent.ts 同款）：
-      // strike 语义单源在 createEmptyResultStrikeGuard JSDoc（lib/partitioned-session-records），
-      // 此处只判定 + 覆盖前清零。推送路径是权威数据，不经此守卫。
-      if (
-        strikeGuard.shouldKeepExisting(sessionId, records.length, getRecordsBySession(sessionId).length)
-      ) {
-        return
-      }
-      strikeGuard.reset(sessionId)
+      if (found === false) return
       applyRecords(sessionId, records)
     } catch (e) {
-      // M1：失败不覆盖现有分区（保留旧数据），设该 sid 分区 loadError；strike 重置
-      //（「连续 RPC 成功且空」语义纯净，读失败与数据空不同通道，不让 RPC 故障累计出误清分区）
-      strikeGuard.reset(sessionId)
+      // M1：失败不覆盖现有分区（保留旧数据），设该 sid 分区 loadError
       const msg = e instanceof Error ? e.message : String(e)
       console.error('[workflow-store] loadWorkflows failed:', e)
       loadErrorBySession.value.set(sessionId, msg)
@@ -590,12 +573,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   /** 清空所有 workflow 分区 + 清 agentcall 映射（全局重置场景用） */
   function clearWorkflows(): void {
-    // RD-3#12：先按当前分区键重置 strike 簿记（strike 仅在对非空分区连续空结果时残留，
-    // recordsBySession 键即残留 strike 键全集），再整表替换 + 清 loading/error/oversize 三
-    // facet（+ oversize），与 clearSession 全清对齐——否则残留 loading=true → spinner 永转 /
-    // 残留 error → 错误态卡死 / 残留 strike → 重新预置后首次空结果误判删空。顺带清在途 running
+    // RD-3#12：整表替换 + 清 loading/error 两 facet（+ oversize），与 clearSession 全清对齐
+    // ——否则残留 loading=true → spinner 永转 / 残留 error → 错误态卡死。顺带清在途 running
     // 重试 timer（否则 500ms 后对已清空的 store 触发 loadWorkflows）。
-    for (const sid of partition.recordsBySession.value.keys()) strikeGuard.reset(sid)
     partition.recordsBySession.value = new Map()
     // W3-2：清非响应式的 mainSessionAgentCalls（registerAgentCall 写入，deleteSession/clearWorkflows 调本函数清）
     mainSessionAgentCalls.clear()

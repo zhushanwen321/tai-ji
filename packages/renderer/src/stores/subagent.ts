@@ -40,7 +40,7 @@ import { session as sessionApi } from '@/api'
 import * as events from '@taiji/core/transport/api'
 import { toErrorMessage } from '@taiji/core'
 import { isRunningProjection } from '@/lib/subagent-bucket'
-import { createEmptyResultStrikeGuard, createPartitionedRecords } from '../lib/partitioned-session-records'
+import { createPartitionedRecords } from '../lib/partitioned-session-records'
 
 /**
  * fetchAndInject 的 chat 注入回调类型。
@@ -101,14 +101,6 @@ export const useSubagentStore = defineStore('subagent', () => {
    * 同一 token 覆盖（subscribeStream 先 stopStream 再 set），drawer 单实例同一时刻只订阅一个 subagent。
    */
   const streamUnsub = new Map<string, () => void>()
-
-  /**
-   * loadSubagents 空结果守卫（R1 business-logic S3）：达到 LIMIT 判真实删空。
-   * strike 语义单源在 createEmptyResultStrikeGuard JSDoc（lib/partitioned-session-records），
-   * 此处只声明本 store 的阈值与 log tag。
-   */
-  const EMPTY_RESULT_STRIKE_LIMIT = 2
-  const strikeGuard = createEmptyResultStrikeGuard(EMPTY_RESULT_STRIKE_LIMIT, 'subagent-store', 'getSubagents')
 
   // 防御性清理：正常由 SubagentTab onBeforeUnmount→stopStream 清理，
   // 此处防止消费方未清的兜底。
@@ -179,7 +171,6 @@ export const useSubagentStore = defineStore('subagent', () => {
 
   /** 清除指定 session 的 subagent 列表分区（deleteSession 调，防泄漏，ADR-0049 AC-8） */
   function clearSession(sessionId: string): void {
-    strikeGuard.reset(sessionId)
     partition.clear(sessionId)
     loadingBySession.value.delete(sessionId)
     loadErrorBySession.value.delete(sessionId)
@@ -226,29 +217,21 @@ export const useSubagentStore = defineStore('subagent', () => {
     loadErrorBySession.value.delete(sessionId)
     try {
       // [RT-4#8] 结构化返回：oversize=true 时 records 恒空（文件 >32MB 列表不可用）——
-      // 置降级标志 + 保留旧分区数据（不可用 ≠ 删空，不经 strike guard），面板显示
-      // 降级提示而非空列表。
-      const { subagents: records, oversize } = await sessionApi.getSubagents(sessionId)
+      // 置降级标志 + 保留旧分区数据（不可用 ≠ 删空），面板显示降级提示而非空列表。
+      // [待裁决项 4] found=false = 会话不在册（pi 延迟落盘窗口 / 扫描竞态）——「读不到
+      // 会话」≠「会话数据为空」，保留分区不覆盖；found=true 的空列表是真实空，直接覆盖
+      // （真实删空语义；原连续空计数 strike 守卫随歧义根治退役）。缺省（undefined，mock /
+      // 旧 runtime）按 found 处理。推送路径是权威数据，不经本判定。
+      const { subagents: records, oversize, found } = await sessionApi.getSubagents(sessionId)
       if (oversize) {
-        strikeGuard.reset(sessionId)
         oversizeBySession.value.set(sessionId, true)
         return
       }
       oversizeBySession.value.delete(sessionId)
-      // 空结果守卫（sidebar-sync-plan P1 + R1 business-logic S3）：strike 语义单源在
-      // createEmptyResultStrikeGuard JSDoc（S4 A1），此处只判定 + 覆盖前清零。推送路径
-      // 是权威数据，不经此守卫。
-      if (
-        strikeGuard.shouldKeepExisting(sessionId, records.length, getRecordsBySession(sessionId).length)
-      ) {
-        return
-      }
-      strikeGuard.reset(sessionId)
+      if (found === false) return
       applyRecords(sessionId, records)
     } catch (e) {
-      // M1：失败不覆盖现有分区，设该 sid 分区 loadError；strike 重置（「连续 RPC 成功且空」语义纯净，
-      // 读失败与数据空不同通道，不让 RPC 故障累计出误清分区）
-      strikeGuard.reset(sessionId)
+      // M1：失败不覆盖现有分区，设该 sid 分区 loadError
       const msg = toErrorMessage(e)
       console.error('[subagent-store] loadSubagents failed:', e)
       loadErrorBySession.value.set(sessionId, msg)
@@ -262,11 +245,9 @@ export const useSubagentStore = defineStore('subagent', () => {
   /** 清空所有 subagent 分区 + 停止所有 streaming（全局重置场景用） */
   function clearSubagents(): void {
     for (const pid of streamUnsub.keys()) stopStream(pid)
-    // RD-3#12：全局重置须补齐 loading/error/strike 三 facet（+ oversize），与 clearSession
-    // 全清语义对齐——此前仅换 records Map，残留 loading=true → spinner 永转 / 残留 error →
-    // 错误态卡死 / 残留 strike → 重新预置后首次空结果误判删空。strike 仅在对非空分区连续空
-    // 结果时残留，故 recordsBySession 当前键即残留 strike 键全集，先按它 reset 再整表替换。
-    for (const sid of partition.recordsBySession.value.keys()) strikeGuard.reset(sid)
+    // RD-3#12：全局重置须补齐 loading/error 两 facet（+ oversize），与 clearSession
+    // 全清语义对齐——此前仅换 records Map，残留 loading=true → spinner 永转 / 残留
+    // error → 错误态卡死。
     partition.recordsBySession.value = new Map()
     loadingBySession.value = new Map()
     loadErrorBySession.value = new Map()
