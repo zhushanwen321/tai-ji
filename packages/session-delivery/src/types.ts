@@ -216,6 +216,11 @@ export interface DeliveryEntry {
  * cancelled tombstone 防「cancel 确认帧断连窗口丢失 → 已撤销消息被 resync 复活」。
  * 栖身 runtime 进程内存、不跨 runtime 重启；reattach 场景（判重表已清空）判重锚
  * 回落 transcript 全量标记扫描（D5②/§3.4）。
+ *
+ * 语义边界（pi1-disposition-chat-flow D1②）：tombstone 语义从「送达事实」扩为
+ * 「离开系统的事实」——handled 条目（pi 接管输入等受理即终局形态）复用送达确认
+ * 原语写入本记录，终态固定为 delivered（复用既有送达终态，不新造终态形态；对账器
+ * 见 tombstone 不重投，继承断线重连 resync 判重防线）。state 联合仅两值不变。
  */
 export interface DeliveryTombstone {
   id: string

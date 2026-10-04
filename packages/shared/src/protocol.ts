@@ -1077,6 +1077,12 @@ export type ServerMessageType =
   // 与 session.occupancy 同模式——重连/切回 session 自动恢复，不依赖广播时序）。
   // 数据源 = 内核 entries() 投影视图（D9②，D5③ 修剪规则）。QueueBubble 单一数据源（D7）。
   | 'session.delivery'
+  // session.deliveryHandled（pi1-disposition-chat-flow D1③）：出站条目被 pi 接管（handled
+  // disposition）的终局通知——一次性事件消息，非 last-value 快照（不登记 message-bus
+  // STATE_TYPE_KEY_MAP，无 stateSnapshot 重连回放；缺席即丢失，丢失后的收敛由孤儿对账
+  // 承接 D1⑤）。内核一对一通知前端，前端按 handled 同形态静默清除（移除乐观气泡 +
+  // 清空窗计时器 + 递减在途计数，无错误提示 U2①）。
+  | 'session.deliveryHandled'
   // session.revokeMessage（消息撤回设计 D2/D8）：revokeMessage RPC 的 reply type（与 request
   // 同名——delivery.* / session.subscribe 同款 payload 消费型同名模式）。
   | 'session.revokeMessage'
@@ -1767,6 +1773,14 @@ export interface DeliverySubmitReply {
   clientUuid: string
   state: DeliveryFrameEntry['state']
   lane: DeliveryFrameEntry['lane']
+  /**
+   * 命令标志（pi1-disposition-chat-flow U1⑨ / D14③ G3 闸③）：内核命令识别结果
+   * （D2①——文本以 `/` 开头且剥前导 `/` 后与 get_commands 清单 extension 命令逐字
+   * 精确命中）随受理回执返回。向后兼容可选字段：true = 识别为命令（前端 pendingSend
+   * 不挂 30s 空窗计时器 U2⑤；终局凭据 = session.deliveryHandled D1③ 或错误回执）；
+   * false/缺省 = 普通消息（旧 runtime 不发该字段，链路行为与升级前一致）。
+   */
+  isCommand?: boolean
 }
 
 /** delivery.cancel 的 reply：cancelled=false = 不可撤（已 delivered 或收回失败，§3.4——条目由对账器下轮兜底，前端提示「已投递不可撤」）。 */
@@ -2058,6 +2072,9 @@ export interface ServerMessageMapBase {
   // 仅最近 deliveredWindow 条完整条目；cancelled 不投影（D5③）——稳态帧体积有界。
   // QueueBubble 的单一数据源（D7）。
   'session.delivery': { sessionId: string; entries: DeliveryFrameEntry[] }
+  // session.deliveryHandled（pi1-disposition-chat-flow D1③）：handled 终局通知 payload——
+  // clientUuid 定位被接管的出站条目（= 提交时 clientUuid，与内核 tombstone id 同源 D1②）。
+  'session.deliveryHandled': { sessionId: string; clientUuid: string }
   // session.revokeMessage（消息撤回设计 D2/D8）：revokeMessage RPC 的 reply（与 request 同名，
   // payload 消费型）。形状见 SessionRevokeMessageReply——成功 = revoked:true + 消息原文
   //（草稿回填，D7）；错误 = revoked:false + error 六码闭集（D8 错误规格表 SSOT）。
