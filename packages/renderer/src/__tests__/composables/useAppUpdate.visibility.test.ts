@@ -30,7 +30,7 @@ import {
   type AppUpdateControllerInternal,
 } from '../helpers/app-update-mount'
 
-vi.mock('@/composables/logic/markdown', () => markdownStubModule())
+vi.mock('@taiji/ui/features/chat/markdown', () => markdownStubModule())
 
 setupAppUpdateLifecycle({
   fakeTimers: true,

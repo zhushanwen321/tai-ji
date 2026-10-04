@@ -1,0 +1,39 @@
+/* ============================================================
+   浮层进出场过渡（reka data-state 驱动）——mobile 壳必需段
+   ⚠ 本文件是桌面壳 packages/renderer/src/style.css「浮层进出场过渡」段的
+   mobile 镜像副本（双壳同步义务：改动任一侧必须同步另一侧）。
+   不可省略的原因：@taiji/ui 的 DialogContent 基类是 fixed left-1/2 top-1/2
+   （无 translate），dialog 居中依赖 .reka-dialog-transition[data-state=open]
+   的 translate(-50%, -50%)——桌面定义在 style.css，mobile 壳不引该文件，
+   缺失时 dialog 左上角钉在视口中心向右下延展，操作按钮出视口。
+   长期方向：收进 @taiji/ui 自包含（随组件携带，消除双壳同步负担）。
+   ============================================================ */
+
+/* dialog：居中缩放（modal 允许 center origin，transform 保留 translate 居中） */
+.reka-dialog-transition {
+  transition: opacity var(--duration) var(--ease), transform var(--duration) var(--ease);
+}
+.reka-dialog-transition[data-state='open'] {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+.reka-dialog-transition[data-state='closed'] {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.96);
+}
+@starting-style {
+  .reka-dialog-transition[data-state='open'] {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+}
+
+/* dialog 遮罩：纯 opacity */
+.reka-overlay-transition {
+  transition: opacity var(--duration) var(--ease);
+}
+.reka-overlay-transition[data-state='open'] { opacity: 1; }
+.reka-overlay-transition[data-state='closed'] { opacity: 0; }
+@starting-style {
+  .reka-overlay-transition[data-state='open'] { opacity: 0; }
+}

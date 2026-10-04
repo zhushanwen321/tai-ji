@@ -58,12 +58,13 @@ import { btw } from '@/api'
 import { onGlobalType } from '@taiji/core/transport/api'
 import { useSessionEvents } from '@/composables/features/chat/useSessionEvents'
 import type { ServerMessageMap } from '@taiji/shared'
-import { STATUS_BAR_SOURCE_KEY, VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
-import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
 import {
+  STATUS_BAR_SOURCE_KEY,
+  VIEW_HOST_SOURCE_KEY,
   convertToDialogRequest,
   createUiResponseTransport,
-} from '@/composables/shell/extension-host-dialog'
+} from '@taiji/ui/extension-host'
+import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
 import {
   __resetBtwPendingLedgerForTest,
   btwExpiredNoticeOf,
@@ -107,7 +108,7 @@ export interface BtwTabState {
 // 保证 deleteSession 任意时刻消费都能取到当时的全量 vid。
 // taste:allow-no-data-owner W24-EX-A（全局 sid 协调簿记，**已落定非草稿**——btw-question
 // M3-b 行内豁免，data-source-registry §4 ⑧ 已于 M4-a 收口批补登）：mainSid → btw 线 vid
-// 反查表，deleteSession 级联清理的枚举路由簿记（非 GUI 数据本体；对照 extension-host-dialog
+// 反查表，deleteSession 级联清理的枚举路由簿记（非 GUI 数据本体；对照 shell-adapters
 // requestIdSessions 先例）
 const btwVirtualKeysByMain = new Map<string, Set<string>>()
 
@@ -219,9 +220,9 @@ function syncReclaimReminders(threads: BtwThreadInfo[]): void {
 }
 
 /** dialog 族应答（D8 提交回路契约：送达才出队 + 出账；已终结目标的应答丢弃）。
- *  出队/出账原语在 btw-pending-bookkeeping；transport（回传双通道 + 断连 toast）是本模块
- *  职责——createUiResponseTransport 的依赖链（extension-host-dialog → stores/chat）不可进
- *  簿记模块（层级约束见其文件头）。 */
+ *  出队/出账原语在 btw-pending-bookkeeping；transport（回传双通道，断连提示经壳层回调
+ *  注入）是本模块职责——壳层依赖（stores/chat toast 回调）不可进簿记模块（层级约束见其
+ *  文件头），故独立 transport 不注入回调（表共管语义见 shell-adapters 模块级表注释）。 */
 const dialogTransport = createUiResponseTransport()
 export function respondBtwDialog(
   vid: string,

@@ -3,7 +3,7 @@
     "name": "taiji e2e 资产登记表（SSOT）",
     "description": "全部 e2e 资产与其触发面的机器可读登记：「改了哪个域 → 跑哪些 e2e」的对账依据。summary 仅导航；资产内容与执行口径的权威源是 authority 指向的文档与 asset 本体。收录以磁盘实际为准（脚本/目录改名或增删时同 commit 更新本表）。",
     "fields": {
-      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写面唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本、npm 发布面一致性检查）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域 cw 剧本族：mock 探针轨 + 真 pi 全链路真机冒烟轨）",
+      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写面唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本、npm 发布面一致性检查）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域 cw 剧本族：mock 探针轨 + 真 pi 全链路真机冒烟轨） / REMOTE（远程访问域：手机浏览器 LAN 直连真机/仿真验收）",
       "summary": "一句话摘要（仅导航）",
       "scope": "代码 glob 数组（触发面）。只支持两种形态：<prefix>/** 前缀通配与精确路径（与 scripts/select-constraints.mjs 同款零依赖匹配语义：prefix/** → startsWith，精确路径 → 全等）",
       "layer": "L1 = 零 token mock/smoke（CI 固定环节）| L2 = 真实进程非真实 LLM（真实 app/pi 进程、mock 构建或 mock 数据）| L2.5 = faux（真实进程 + faux LLM 演员，凭证无关零 token）| L3 = 真实 LLM",
@@ -280,9 +280,7 @@
       "run": "npx playwright test e2e/workspace-real.spec.ts e2e/ask-user-real.spec.ts e2e/tasks-drawer-real.spec.ts e2e/workflow-thinkinglevel-real.spec.ts",
       "owner": "packages/renderer",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-
       "note": "真实进程轨（真实 Electron app 启动），不进 CI 门禁；PR/merge 门禁不跑（AGENTS.md e2e 执行准则）。[2026-09-16 composer-task-tray 补 scope] 增补 `extensions/universal/**`：本 rule 的断言对象含 extension 侧的 GUI/协议形态（tasks-drawer-real R2/R3 断言 todo `__gui__` 根 tab-bar 双段 + meta icon/badge、goal `__gui__` group，并断言托盘 widget 区挂载），只按 spec 文件路径命中会漏掉「extension GUI 形态变更」这一改动面（本次 todo buildGui 单 list-tree → tab-bar 即该漏项实例）。补充覆盖后：改 extensions/universal/** 会选中本 rule，按改动面执行（real 轨空载串行，不因 scope 扩大而全跑）。[2026-09-19 ui-presentation-protocol] ask-user-real 断言已随统一表单迁移：testid 改 form-*，wire 键断言改 formQuestions ?? askUserQuestions 双读（form 帧（form:true + formQuestions，builtin ask-user 迁移后现行）/ legacy askUser 帧（版本偏斜窗口）双形态兼容，形态判定 form===true || askUser===true，不降断言强度）。；[2026-10-01 D5 终态同步] real 族 spec 发现通道 = playwright.config.ts electron-real project（REAL_TRACK_SPECS testMatch；electron project testIgnore 已排除 real 轨——mock/real 构建产物同 outDir 互斥由 assertRealRendererBundle fail-fast 把守）"
-
     },
     {
       "id": "E2E-BTW-01",
@@ -337,9 +335,7 @@
       "run": "npx playwright test e2e/workflow-disconnect-recovery.spec.ts",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-
       "note": "R2 归宿（来源设计 reload-closeout-reliability §4 A2，reload-closeout-reliability 流水线 u3a 编写 / u3b 执行）。传输兜底面回归非水位证明：断连下 publish 正常完成推进水位、重连后 diff 恒空（水位结构性不触发），恢复只能来自既有传输兜底——恢复来源双断言 = session.subscribe reply.stateSnapshot 携带 done workflowUpdate last-value 回放帧（message-bus state topic 写快照 + subscribe 回放既有机制）+ session.getWorkflows 冷拉 RPC 终态记录（renderer WS 重连冷拉同款）。断连载体 = spec 自备 WS 客户端（与 renderer 同协议面：auth + subscribe + 回放消费）；不强制 renderer 侧断网（CDP emulateNetworkConditions 在 Electron e2e 未经验证，不押注未验证工具行为），GUI 收敛以托盘 data-state idle 终态断言锚定。稳态 16s 窗断言无重复 done live 帧（A3 单测锁定结构属性的 e2e 面）。与 01/02/03 同 faux/L2.5 裁决与执行前置。scope 含 event-adapter.ts（record-reconcile 触发接线必经链）。；[2026-10-01 D5 终态同步] real 族 spec 发现通道 = playwright.config.ts electron-real project（REAL_TRACK_SPECS testMatch；electron project testIgnore 已排除 real 轨——mock/real 构建产物同 outDir 互斥由 assertRealRendererBundle fail-fast 把守）"
-
     },
     {
       "id": "E2E-EQUIV-01",
@@ -908,6 +904,26 @@
       "note": "R2 态（2026-09-20 阶段6收尾裁决，impl-plan 残留风险 #5 闭环）：开发期按改动范围手工跑（验收计划表回归项），不在 CI 门禁（真实 pi 子进程链路，CI 只跑 unit 轨同口径）；自含 pnpm install、隔离 TAIJI_AGENT_DATA_DIR、空载串行；CT-D1b 段 SDK API 未就位时 SKIP 不计失败（u5b 已落地转硬 PASS）；标记行协议与 exit code 一致；scope 含插件装载链两脚本（bundle-extensions 引擎副本重建 + prepare-builtin-plugins 插件装载前置，u6a 验收串联项）——链变更随契约脚本一并回归"
     },
     {
+      "id": "E2E-PLUGINCONTRACT-02",
+      "summary": "verify-plugin-e2e：插件系统非 mock 端到端验收轨（boot 自动激活/toggle/hook 真实执行/权限审批唤醒 + SEC-A1~A5 沙箱信任边界）",
+      "scope": [
+        "scripts/verify-plugin-e2e.sh"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/verify-plugin-e2e.sh"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "bash scripts/verify-plugin-e2e.sh",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态：开发期按改动范围手工跑（隔离 runtime + 真实插件文件 + 真实 WS 协议，CI 门禁不跑真实链路）；本条为防漏登记补录——脚本随 W5 权限 pong ack 重构改 E 场景断言时暴露零登记被 e2e-map --staged 门禁拦截；scope 收窄为脚本自身（改脚本须跑自验），生产面（plugin-service/transport）触发扩展留该域 owner 裁决"
+    },
+    {
       "id": "E2E-SAMPLING-01",
       "summary": "render-sampling 渲染采样管道：真机渲染验收/基线采集共用管道（设计期工具，R3 归档 docs/testing/render-sampling.md）",
       "scope": [
@@ -972,6 +988,61 @@
       "owner": "scripts/",
       "authority": "docs/architecture/zcode-session-db-isolation.md",
       "note": "R2 态：一次性迁移清理工具（设计 D7/W5a），行为由 fixture 测试零 token 锁定（mkdtempSync 假库 + BEFORE DELETE 触发器注入索引侧失败）；真实库执行属停机窗口人工操作（--plan 确认 + --confirm-count 受控旁路），不进自动化"
+    },
+    {
+      "id": "E2E-REMOTE-01",
+      "summary": "远程访问真机/仿真验收 S2-S8：手机连接全链 / 鉴权负面 / 关闭即消失 / token 生命周期 / 断连恢复 / 新建任务 / ask-user 双端（真机 + 同 WiFi，CDP 移动仿真先行）",
+      "scope": [
+        "packages/runtime/src/transport/**",
+        "packages/core/src/transport/**",
+        "packages/mobile-renderer/src/**",
+        "apps/electron/main/remote-access/**",
+        "apps/electron/main/supervisor/process-control.ts",
+        "packages/renderer/src/components/settings/remote-access/**"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "harness",
+          "ref": "packages/runtime/src/transport/connection-manager.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "packages/mobile-renderer/src/platform/connection-profile.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（开发阶段手测链，已执行 2026-09-19 仿真验收——S2/S3/S4/S5/S7/S8 主链 PASS，两 blocker 见下）dev 实例（TAIJI_DEV_BACKGROUND=1）桌面面板开远程访问 → 取 LAN URL + token → 浏览器移动仿真（iPhone UA + 375x812 视口 + CDP 驱动）按设计 §4.2 场景逐条验：负面探针（curl 静态面/路径穿越 400/WS 无·错 token close 1008/pre-auth 静默 10s）可脚本化复跑",
+      "owner": "packages/mobile-renderer",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态（来源设计 .tmp/tech-design/remote-use-mobile.md §4.3：触发条件 = 触碰 connection-manager / use-connection / ws-client / 移动壳 / 远程访问配置面）。asset 锚 = 被验能力本体（token 集合+静态托管 / D4 三分支连接装配），非验证剧本。S2-S8 含真实 LLM 轮次（streaming / 新建任务 / ask-user 闭环）故 L3；S3/S4/S5 负面与生命周期子项可脚本化（curl + WS 探针 + CDP）。2026-09-19 仿真验收结论：S2 连接全链（列表/streaming/发送/中断/桌面同屏/图片粘贴降级占位）PASS、S3 鉴权负面全 PASS、S4 关闭即消失（回环复位 + LAN 拒绝 + ambient env 伪造免疫）PASS、S5 token 生命周期四子链（坏链接不毁 storage / 重启免重扫 / 轮换热读落 token 视图 / 重扫覆盖）PASS、S7 新建任务链（含桌面侧栏同步）PASS、S8 ask-user 双端闭环（任一端作答即闭环）PASS；S6 断网恢复以 runtime 重启断连 + visibility 切前台重连等价覆盖（CDP offline 模拟无法切断已建立 WS——工具限制，真机开关 WiFi 留用户补验）。验收时点两 blocker（不阻塞链路断言、阻塞视觉形态断言；均已修复——① fix 8773e4f38：tokens.css 置顶 @tailwind 三指令补 Tailwind 入口，产物 CSS 工具类亲验恢复；② fix 280aa32bc：core utils/random-uuid 单一入口 + 19 处调用点全迁，非 secure context 走 RFC 4122 v4 fallback）。iOS Safari / Android Chrome 真机子项（CSP ws: 残差 / ITP / 触控体感）待用户补验"
+    },
+    {
+      "id": "E2E-REMOTE-02",
+      "summary": "远程访问打包态验收 S9：mobile-dist extraResources 服务 + postbuild 断言 + 安装包主链（prod 分支路径只在打包态存在）",
+      "scope": [
+        "apps/electron/electron-builder.yml",
+        "apps/electron/main/remote-access/mobile-dist.ts",
+        "scripts/postbuild-validate.sh"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/postbuild-validate.sh"
+        },
+        {
+          "kind": "harness",
+          "ref": "apps/electron/main/remote-access/mobile-dist.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "pnpm build && bash scripts/postbuild-validate.sh &&（安装包手工链：开远程 → 移动浏览器访问 prod 分支解析的 resources/mobile-dist → 发消息全链）",
+      "owner": "apps/electron",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态（来源设计 remote-use-mobile §4.3：触发条件 = electron-builder.yml / 移动壳 dist 解析链 / postbuild 脚本改动）。postbuild 存在性断言已自动化（postbuild-validate.sh 移动壳 dist extraResources 断言，U1.1 交付即挂打包链）；DMG 安装后真机扫码子项留用户补验。P3 体积量级锚点：mobile dist 3.2MB（JS 2.0MB + CSS 41KB + katex 字体族），DMG 增量远低于 20MB 重审线"
     },
     {
       "id": "E2E-PROP-01",

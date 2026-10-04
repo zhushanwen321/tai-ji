@@ -172,8 +172,11 @@ describe('abort RPC 超时三级阶梯 —— 正常收敛与阶梯 1（有界�
     expect(m.persistOutcomeFn).not.toHaveBeenCalled()
     const err = findBroadcast(m.broadcasts, 'message.error')
     expect(err).toBeDefined()
-    // 用户显式动作出口 + 后果说明（阶梯 2 广播三要素）
+    // 用户显式动作出口 + 后果说明（阶梯 2 广播三要素）；动作出口平台中性且如实：
+    // 指明桌面端侧边栏 + 移动端暂不支持（code-harden P2——移动壳无侧栏，旧文案双重失真）
+    expect((err?.payload as { message: string }).message).toContain('桌面端侧边栏')
     expect((err?.payload as { message: string }).message).toContain('强制退出')
+    expect((err?.payload as { message: string }).message).toContain('移动端暂不支持')
     expect((err?.payload as { message: string }).message).toContain('恢复')
     expect(findBroadcast(m.broadcasts, 'message.complete')).toBeUndefined()
     expect(findBroadcast(m.broadcasts, 'session.exited')).toBeUndefined()

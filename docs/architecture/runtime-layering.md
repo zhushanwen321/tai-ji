@@ -44,7 +44,8 @@ packages/runtime/src/
 ├── services/         # session/ config/ model/ git/ terminal/ quota/ ... + plugin-service/（黑盒）
 │   └── ports/        # ★ 依赖倒置载体：pi-engine / config / model / installer / git-* / workspace 等
 └── infra/            # pi/（rpc-client、process-manager、event-adapter、message-converter、session-store）
-                      # relay/ git/ fs/ installers/ system/ logger crash-journal mem-pressure watchdog ...
+                      # relay/ git/ fs/ installers/ system/ logger crash-journal mem-pressure watchdog
+                      # remote-access（remote token 热读） mobile-static（移动壳静态面）...
 ```
 
 > 命名注记：设计期曾用 pi-client/process-pool 等目标名，实际落地保留 `infra/pi/rpc-client.ts` / `process-manager.ts` 原名（实现 IPiEngine / IProcessManager）。
@@ -60,6 +61,8 @@ packages/runtime/src/
 | **infra** | 外部系统 + node: 内置 + shared | 不知道 WS 协议；不知道 session 业务语义 | 实现 ports；**PiXxx 类型仅在此层内部** |
 
 机器防线：`.githooks/check_services_infra_import.py` 拦截 services→infra 方向的 value import（白名单与基线模块清单见该脚本 docstring；约束登记 C-comm-03）。
+
+transport 层的磁盘读取面居 infra、经组合根注入：remote-access 的 remote token 热读（`infra/remote-access.ts`）与移动壳静态托管（`infra/mobile-static.ts`）由组合根以 `remoteTokenProvider` / `mobileStaticHandler` 注入 ConnectionManager——transport 层零 `node:fs` 直用（transport→infra 不建立 import，handler 边界类型在消费侧本地声明、装配点 typecheck 对账）。组合根 `index.ts` 自身的 `resolveRuntimeToken` 文件读取属装配点本地 IO，不在三层约束内。
 
 ---
 

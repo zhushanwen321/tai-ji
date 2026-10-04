@@ -740,6 +740,8 @@ export interface IPluginService {
   approvePermissions(pluginId: string, permissions: string[]): Promise<void>
   /** Revoke all permissions for a plugin */
   revokePermissions(pluginId: string): Promise<void>
+  /** 拒绝插件本次权限申请（不回收已授权限；无 pending 时幂等 no-op） */
+  denyPermissions(pluginId: string): Promise<void>
   /** Execute a command contributed by a plugin（S3-W1：返回插件 handler 的执行结果） */
   executeCommand(pluginId: string, commandId: string, args?: Record<string, unknown>): Promise<unknown>
   /** Get plugin config value(s) */

@@ -8,7 +8,8 @@
  * 公开 API（5 composable + DOM 辅助函数 + 类型）：
  * - useContenteditableInput：contenteditable 输入组合逻辑（委托 input-dom）
  * - useComposerChipCommands：chip DOM 创建/删除（renderIcon/t 注入）
- * - useComposerRestore：发送后清空/失败恢复
+ * - useComposerRestore：发送后清空/失败恢复（restoreSegmentsIntoInput = segments 回填
+ *   输入实例的唯一实现，ui ComposerInput.setSegments 同消费）
  * - useComposerHistory：历史导航状态机（getHistoryEntries 注入，per-session 经 useSessionScopedState）
  * - useComposerDragDrop：拖拽落位（pasteImage 注入）
  * - getSegmentsFromEl/findImageChipEl/findImageChipElById：DOM 辅助（外部消费）
@@ -21,7 +22,7 @@
  */
 export { useContenteditableInput } from './contenteditable'
 export { useComposerChipCommands } from './chip-commands'
-export { useComposerRestore } from './restore'
+export { useComposerRestore, restoreSegmentsIntoInput, type SegmentsRestoreTarget } from './restore'
 export { useComposerHistory } from './history'
 export { useComposerDragDrop } from './dragdrop'
 

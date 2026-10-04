@@ -128,6 +128,7 @@
           <TtsPage v-else-if="activeMenu === 'tts'" :key="activeMenu" />
           <WorktreePage v-else-if="activeMenu === 'worktree'" :key="activeMenu" />
           <UpdatePage v-else-if="activeMenu === 'update'" :key="activeMenu" />
+          <RemoteAccessPage v-else-if="activeMenu === 'remote-access'" :key="activeMenu" />
           <AppearancePage v-else-if="activeMenu === 'appearance'" :key="activeMenu" :system="system" @update="onSystemUpdate" />
           <UsagePage v-else-if="activeMenu === 'usage'" :key="activeMenu" />
         </div>
@@ -140,7 +141,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, Volume2, X, Download, Palette, BarChart3, ArrowLeft, ArrowRight, PanelLeftClose } from '@lucide/vue'
+import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, Volume2, X, Download, Palette, BarChart3, ArrowLeft, ArrowRight, PanelLeftClose, Wifi } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { getSettingsStore, useSettings, type SystemSettings } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
@@ -158,6 +159,7 @@ import WorktreePage from './worktree/WorktreePage.vue'
 import PiPresetsPage from './preset/PiPresetsPage.vue'
 import TtsPage from './tts/TtsPage.vue'
 import UpdatePage from './update/UpdatePage.vue'
+import RemoteAccessPage from './remote-access/RemoteAccessPage.vue'
 import UsagePage from './usage/UsagePage.vue'
 import AppearancePage from './appearance/AppearancePage.vue'
 
@@ -173,6 +175,7 @@ const menus = [
   { id: 'tts', labelKey: 'settings.menu.tts', icon: Volume2 },
   { id: 'worktree', labelKey: 'settings.menu.worktree', icon: GitBranch },
   { id: 'update', labelKey: 'settings.menu.update', icon: Download },
+  { id: 'remote-access', labelKey: 'settings.menu.remoteAccess', icon: Wifi },
   { id: 'system', labelKey: 'settings.menu.system', icon: SlidersHorizontal },
   { id: 'usage', labelKey: 'settings.menu.usage', icon: BarChart3 },
 ] as const

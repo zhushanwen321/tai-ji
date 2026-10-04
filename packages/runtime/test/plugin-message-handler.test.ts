@@ -61,6 +61,7 @@ function makeHandler(pluginServiceMethods: Record<string, ReturnType<typeof vi.f
     uninstallPlugin: vi.fn().mockResolvedValue([]),
     approvePermissions: vi.fn().mockResolvedValue(undefined),
     revokePermissions: vi.fn().mockResolvedValue(undefined),
+    denyPermissions: vi.fn().mockResolvedValue(undefined),
     executeCommand: vi.fn().mockResolvedValue(undefined),
     getPluginConfig: vi.fn().mockResolvedValue({}),
     setPluginConfig: vi.fn().mockResolvedValue(undefined),
@@ -134,20 +135,30 @@ describe('PluginMessageHandler — 查询/操作类 case', () => {
     expect(replies).toEqual([{ id: 'm1', type: 'config.plugins', payload: { plugins: uninstalled } }])
   })
 
-  it('plugin.approvePermissions → approvePermissions + reply 当前 plugins', async () => {
-    const discovered = [{ id: 'p4' }]
-    const { replies, handler, pluginService } = makeHandler({ getDiscoveredPlugins: vi.fn().mockReturnValue(discovered) })
+  it('plugin.approvePermissions → approvePermissions + reply pong（列表刷新经广播，不现算）', async () => {
+    const { replies, handler, pluginService } = makeHandler()
     await handler.handlePluginMessage(buildMsg('plugin.approvePermissions', { pluginId: 'p4', permissions: ['fs:read'] }), WS)
     expect(pluginService.approvePermissions).toHaveBeenCalledWith('p4', ['fs:read'])
-    expect(replies).toEqual([{ id: 'm1', type: 'config.plugins', payload: { plugins: discovered } }])
+    // reply = pong ack（对齐 plugin.executeCommand 先例）；插件列表刷新由
+    // plugin-service.approvePermissions 广播 config.plugins 承担，handler 不再现算
+    expect(pluginService.getDiscoveredPlugins).not.toHaveBeenCalled()
+    expect(replies).toEqual([{ id: 'm1', type: 'pong', payload: {} }])
   })
 
-  it('plugin.revokePermissions → revokePermissions + reply 当前 plugins', async () => {
-    const discovered: unknown[] = []
-    const { replies, handler, pluginService } = makeHandler({ getDiscoveredPlugins: vi.fn().mockReturnValue(discovered) })
+  it('plugin.revokePermissions → revokePermissions + reply pong（无列表刷新广播）', async () => {
+    const { replies, handler, pluginService } = makeHandler()
     await handler.handlePluginMessage(buildMsg('plugin.revokePermissions', { pluginId: 'p5' }), WS)
     expect(pluginService.revokePermissions).toHaveBeenCalledWith('p5')
-    expect(replies).toEqual([{ id: 'm1', type: 'config.plugins', payload: { plugins: discovered } }])
+    expect(pluginService.getDiscoveredPlugins).not.toHaveBeenCalled()
+    expect(replies).toEqual([{ id: 'm1', type: 'pong', payload: {} }])
+  })
+
+  it('plugin.denyPermissions → denyPermissions + reply pong（拒绝本次申请，不回收已授权限）', async () => {
+    const { replies, handler, pluginService } = makeHandler()
+    await handler.handlePluginMessage(buildMsg('plugin.denyPermissions', { pluginId: 'p5' }), WS)
+    expect(pluginService.denyPermissions).toHaveBeenCalledWith('p5')
+    expect(pluginService.getDiscoveredPlugins).not.toHaveBeenCalled()
+    expect(replies).toEqual([{ id: 'm1', type: 'pong', payload: {} }])
   })
 
   it('plugin.executeCommand → executeCommand + reply pong {}', async () => {
@@ -379,9 +390,10 @@ describe('PluginMessageHandler — 落空语义与 handles 清单', () => {
 
   it('handles 清单含全部 12 个 plugin.* type', () => {
     const { handler } = makeHandler()
-    expect(handler.handles).toHaveLength(12)
+    expect(handler.handles).toHaveLength(13)
     expect(handler.handles).toEqual(expect.arrayContaining([
       'plugin.list', 'plugin.toggle', 'plugin.uninstall', 'plugin.approvePermissions', 'plugin.revokePermissions',
+      'plugin.denyPermissions',
       'plugin.executeCommand', 'plugin.config.get', 'plugin.config.set', 'plugin.install', 'plugin.uiResponse',
       'plugin.mountPoints.sync', 'plugin.dismissModal',
     ]))

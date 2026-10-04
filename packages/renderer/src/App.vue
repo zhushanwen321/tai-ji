@@ -75,8 +75,8 @@
     </Button>
   </div>
   <!-- 权限请求弹窗（全局，session 无关）：bridge bus plugin-permission-request 驱动 pending；
-       transport 经 PERMISSION_TRANSPORT_KEY inject 调 WS approve/revoke（main.ts provide）。 -->
-  <PermissionRequestDialog :plugin-id="perm.pluginId" :permissions="perm.permissions" :pending="perm.pending" />
+       transport 经 PERMISSION_TRANSPORT_KEY inject 调 WS approve/deny（main.ts provide）。 -->
+  <PermissionRequestDialog :plugin-id="perm.pluginId" :permissions="perm.permissions" :pending="perm.pending" :error="perm.error" />
 </template>
 
 <script setup lang="ts">
@@ -171,7 +171,7 @@ bindSessionStreamSync()
 // ADR-0049）；App 层不挂任何队列单例。
 // 内存压力降级消费（crash-forensics-and-watchdog §3.3 D4，u7d / 偏差 #28② 的 renderer 半边）：
 // 窗口级单例挂载（refCount 订阅，onScopeDispose 随 App 卸载退订）——订阅 watchdog:memoryPressure，
-// warn 持续拍压窗 LRU 8→4 + evictIfNeeded 驱逐。Gate W 默认 off 时 runtime 不广播、零成本待命。
+// warn 持续拍压窗 LRU 8→4 + 复合入口驱逐退订（evictLruWithUnsubscribe，remote-use D2——被驱逐会话连带退订）。Gate W 默认 off 时 runtime 不广播、零成本待命。
 // 【oe-audit C2】此前全链零装配（hook 零调用方 = 双重休眠，impl-plan u7d「经 useRollingRestartStatus
 // 引用链生产挂载」登记失实——该文件仅注释引用范式）；本挂载补齐生产消费方。
 // 【RD-3#11】捕获 level 供上方提示条消费（此前返回值丢弃、level 无 UI 消费方——内存压力 warn 阶段
@@ -215,7 +215,7 @@ watch(connectionState, (s) => {
     bootstrapError.value = null
     void onConnected()
     // 兜底：连接后主动拉一次 models（对齐 refreshProviders 范式，防订阅时序竞态未来回归）。
-    // mock 模式 WS 不回 model.list reply（mockSend 仅 ping/pong）→ pending 65s 超时，跳过避免 boot 卡顿。
+    // mock 平台 WS 桩仅 ping/pong 不回 model.list reply → pending 65s 超时，跳过避免 boot 卡顿。
     if (import.meta.env.VITE_MOCK !== 'true') {
       void refreshModels()
     }

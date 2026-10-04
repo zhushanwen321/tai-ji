@@ -26,10 +26,11 @@ import { mount } from '@vue/test-utils'
 import CompanionBand from '../CompanionBand.vue'
 import {
   DIALOG_REQUEST_SOURCE_KEY,
+  DIALOG_QUEUE_HANDLE_KEY,
   UI_RESPONSE_TRANSPORT_KEY,
   OVERLAY_LIFECYCLE_KEY,
 } from '../companion-band-source'
-import type { DialogRequest, DialogRequestSource, UiResponseTransport } from '../dialog-request-queue'
+import type { DialogRequest, DialogRequestQueue, DialogRequestSource, UiResponseTransport } from '../dialog-request-queue'
 import type { OverlayLifecycleSource, OverlayState } from '../companion-band-source'
 
 // ── Mocks ────────────────────────────────────────────────────────────
@@ -79,7 +80,7 @@ function makeTransport(): UiResponseTransport {
   }
 }
 
-function mountBand(sessionId = 'A', overlay?: OverlayLifecycleSource) {
+function mountBand(sessionId = 'A', overlay?: OverlayLifecycleSource, registrar?: (q: unknown) => void) {
   const source = new MockDialogRequestSource()
   const transport = makeTransport()
   const wrapper = mount(CompanionBand, {
@@ -89,6 +90,7 @@ function mountBand(sessionId = 'A', overlay?: OverlayLifecycleSource) {
         [DIALOG_REQUEST_SOURCE_KEY as symbol]: source,
         [UI_RESPONSE_TRANSPORT_KEY as symbol]: transport,
         ...(overlay ? { [OVERLAY_LIFECYCLE_KEY as symbol]: overlay } : {}),
+        ...(registrar ? { [DIALOG_QUEUE_HANDLE_KEY as symbol]: registrar } : {}),
       },
     },
   })
@@ -324,5 +326,29 @@ describe('CompanionBand × OverlayLifecycle 契约（IF9）', () => {
     const band = wrapper.find('[data-testid="companion-band"]')
     expect(band.exists()).toBe(true)
     expect(band.attributes('style')).toBeFalsy()
+  })
+
+  // ── U6 句柄登记通路（remote-use D5 exited 分区清理段）：exited 编排经壳侧句柄调 resetFor ──
+
+  it('provide DIALOG_QUEUE_HANDLE_KEY：queue 创建后回传实例句柄（含 resetFor 成员，U6 exited 通路）', async () => {
+    const registrar = vi.fn()
+    const { wrapper, source } = mountBand('A', undefined, registrar)
+    // 回传恰一次，参数是 queue 实例（resetFor 是 U6 新增成员，结构断言防回传错误对象）
+    expect(registrar).toHaveBeenCalledTimes(1)
+    const handle = registrar.mock.calls[0]?.[0] as DialogRequestQueue
+    expect(typeof handle.resetFor).toBe('function')
+    expect(typeof handle.respond).toBe('function')
+    // 句柄可用：经回传的 queue 触发请求照常渲染（同一实例非旁路副本）
+    source.triggerUiRequest({ sessionId: 'A', requestId: 'r-handle', method: 'confirm', title: '句柄' })
+    await nextTick()
+    expect(wrapper.find('[data-testid="companion-band"]').exists()).toBe(true)
+  })
+
+  it('未 provide DIALOG_QUEUE_HANDLE_KEY（桌面壳形态）：静默跳过，组件照常渲染不崩', async () => {
+    const { wrapper, source } = mountBand('A')
+    source.triggerUiRequest({ sessionId: 'A', requestId: 'r-no-reg', method: 'confirm', title: '无登记' })
+    await nextTick()
+    // 不抛错、band 照常渲染（inject 缺失静默空态先例，source/transport 同款）
+    expect(wrapper.find('[data-testid="companion-band"]').exists()).toBe(true)
   })
 })

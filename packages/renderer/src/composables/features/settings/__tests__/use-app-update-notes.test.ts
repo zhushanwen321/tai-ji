@@ -21,7 +21,7 @@ vi.mock('@/i18n', () => ({
   getLocale: vi.fn(() => i18nMock.locale),
 }))
 
-vi.mock('@/composables/logic/markdown', () => ({
+vi.mock('@taiji/ui/features/chat/markdown', () => ({
   renderMarkdown: vi.fn(async (md: string) => `<p>${md}</p>`),
 }))
 
@@ -95,7 +95,7 @@ describe('renderReleaseNotes — 传值矩阵「更新日志」行（设计 mark
   })
 
   it('renderMarkdown 不携带 env（resourceBaseDir 恒 undefined——release notes 无相对资源语义，不回归）', async () => {
-    const markdown = await import('@/composables/logic/markdown')
+    const markdown = await import('@taiji/ui/features/chat/markdown')
     // 容器化后渲染轴经工厂持有 state（C5）：测试建独立容器实例，无需单例复位
     const { renderReleaseNotes } = createNotesAxis(createUpdateState())
     renderReleaseNotes(BILINGUAL_BODY)

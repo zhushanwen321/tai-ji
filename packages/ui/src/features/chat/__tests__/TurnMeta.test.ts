@@ -88,8 +88,8 @@ function mountMeta(props: {
 
 describe('W4TC1: TurnMeta badge 灰阶化', () => {
   it('i18n panel.message.working 在 zh/en 语言文件均定义（zh 工作中 / en Working…）', () => {
-    const zh = readFileSync(resolve(__dirname, '../../../../../renderer/src/i18n/locales/zh-CN/panel.ts'), 'utf8')
-    const en = readFileSync(resolve(__dirname, '../../../../../renderer/src/i18n/locales/en-US/panel.ts'), 'utf8')
+    const zh = readFileSync(resolve(__dirname, '../../../locale/zh-CN/panel.ts'), 'utf8')
+    const en = readFileSync(resolve(__dirname, '../../../locale/en-US/panel.ts'), 'utf8')
     expect(zh).toContain("working: '工作中'")
     expect(en).toContain("working: 'Working…'")
   })

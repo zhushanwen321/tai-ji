@@ -118,6 +118,10 @@
   "./transport/ws-client": {
    "types": "./src/transport/ws-client.ts",
    "import": "./src/transport/ws-client.ts"
+  },
+  "./utils/random-uuid": {
+   "types": "./src/utils/random-uuid.ts",
+   "import": "./src/utils/random-uuid.ts"
   }
  },
  "scripts": {

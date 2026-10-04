@@ -57,6 +57,8 @@
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { btwVirtualId } from '@taiji/shared'
+// 临时 key 生成走 core 唯一入口（禁直调 crypto.randomUUID，secure context/Node 版本防御）
+import { randomUuid } from '@taiji/core/utils/random-uuid'
 import { assertPiSessionFile } from '../../infra/pi/session-attach-assert.js'
 import { getBtwSessionsRoot, getBtwThreadDir, isPiSessionId } from '../../infra/pi/pi-paths.js'
 import type { IPiEngine, IProcessManager } from '../ports/pi-engine.js'
@@ -499,7 +501,7 @@ export class BtwService {
     options: BtwLineSpawnOptions,
   ): Promise<BtwCreateResult> {
     const { mainSid, cwd, snapshotKind } = ctx
-    const tempKey = `btw-create-${crypto.randomUUID()}`
+    const tempKey = `btw-create-${randomUuid()}`
     let registeredKey = tempKey
     try {
       const client = await this.deps.processes.createSession(tempKey, cwd, options)
@@ -576,7 +578,7 @@ export class BtwService {
     }
     const ctx: BtwLineSpawnContext = { mainSid: rec.mainSid, cwd: rec.cwd, threadDir: rec.threadDir, snapshotKind: rec.snapshotKind === 'unknown' ? 'forked' : rec.snapshotKind }
     const options = await this.buildEstablishOptions(ctx)
-    const tempKey = `btw-attach-${crypto.randomUUID()}`
+    const tempKey = `btw-attach-${randomUuid()}`
     try {
       const client = await this.deps.processes.createSession(tempKey, rec.cwd, options)
       await client.switchSession(rec.sessionFilePath)

@@ -135,7 +135,8 @@ export function captureMorphSegments(sid: string, clientUuid: string, segments: 
 
 /**
  * 送达回执消费（一次性）：条目投影转 delivered（队列区随即隐去）+ 返回捕获的 morph 段
- * （未 morph 过的条目返回 undefined——direct 气泡保持原位，无重复入流面）。
+ * （未 morph 过的条目返回 undefined——发送端本地气泡原位保持不重复入流；无气泡条目
+ * 的显示经 ② 降级入流承接，D4）。
  * 幂等：已 delivered 条目返回 undefined（重复回执不二次入流）。
  * [R2-b04-4] TTL：过期段不消费（视为无 morph 段，回执落 ② 纯文本降级链），就地清理不抛错。
  */
@@ -202,16 +203,19 @@ function extractUserContentText(entry: PiMessageEntry): string {
  *
  * 命中处理（三分支，单一 owner = 内核投影）：
  * - ① morph 段存在（本地乐观气泡被 morph 移除过）→ 按原 segments 入流（非降级恢复）。
- * - ② 无任何段恢复的帧里，无 morph 段且非 direct 车道且 ref 中无同 id 气泡的首个条目 →
+ * - ② 无任何段恢复的帧里，foreign 条目（无 morph 段且 ref 中无同 id 气泡）的首个命中 →
  *   整帧剥标记纯文本降级入流**一次**：外来注入（session_manager send / plugin-service /
  *   收养）与 runtime 重启 reattach 形态没有本地乐观气泡，其显示责任由本分支承接（前身
  *   = 已退役的腿 2 includes 兜底，见下方 [HISTORICAL] 注记）——文本按 reload 投影同
  *   规则剥标记 + trimEnd（同一正则同一变换，live ≡ reload 构造性成立）。多标记帧整帧
  *   文本涵盖全部条目内容，逐条目入流同一整帧文本会重复，故按帧只入流一次、保号挂首个
  *   降级条目；已有段恢复的帧不再整帧文本入流（与已恢复段重复显示），其中无段条目
- *   （外来/reattach 混批形态，三重低频）的显示由基线投影兜底。direct 车道豁免：其气泡
- *   原位保留，入流会双插。
- * - ③ 其余（direct 气泡原位 / 已有同 id 气泡）→ 不动 ref（防双插）。
+ *   （外来/reattach 混批形态，三重低频）的显示由基线投影兜底。[D4] 车道不参与豁免
+ *   （原 `lane !== 'direct'` 整体豁免退役——它只对发送端成立，观看端 direct 外来消息
+ *   因此无人显示，S4）：「双插」防御由 foreign 判定里的 hasLocalBubble 精确承接——
+ *   发送端有本地同 id 气泡 → foreign=false 不入流；观看端无气泡（含 direct 车道）→
+ *   入流补显。
+ * - ③ 其余（发送端本地气泡原位——foreign=false）→ 不动 ref（防双插）。
  * 共同收尾：投影转 delivered（幂等：已 delivered 命中即拒）+ inflight 占位回收（统一
  * submit 每条挂 1，命中 N 条 = 批量确认扣 N，钳制幂等机制兜底外来条目的挂账缺席）+
  * 返回 true（帧消费终止，调用方不再走 ② 计数兜底）。
@@ -277,7 +281,13 @@ export function confirmKernelDeliveryOnMessageEnd(
     anySegments = true
   }
   if (!anySegments) {
-    const degradeTarget = hits.find(({ hit, foreign }) => hit.lane !== 'direct' && foreign)
+    // [D4 foreign 入流豁免精确化] 谓词从 `lane !== 'direct' && foreign` 收敛为 `foreign`：
+    // foreign 判定（收集阶段、appendUser 前取值）已含 hasLocalBubble 否定——发送端 direct
+    // 有本地同 id 气泡 → foreign=false 不入流（原 lane 豁免防的双插由 id 判定精确承接，
+    // 语义不变）；观看端 foreign 无气泡（含 direct 车道）→ 入流补显（修前 direct 整体
+    // 豁免 = S4 缺陷：外来消息无人负责显示，切走切回才补显）。取值时机锚定见
+    // user-delivery.test.ts D4-AC6（appendUser 不得反噬同帧后续条目的 foreign 判定）。
+    const degradeTarget = hits.find(({ foreign }) => foreign)
     if (degradeTarget) {
       // ② 无本地气泡的投递（外来注入 / reattach 恢复）：纯文本降级可见，不静默丢显示；
       // 保号传 hit.clientUuid（内核条目 id——外来形态可能为裸 uuid，保号语义优先于形态）

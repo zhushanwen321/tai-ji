@@ -16,6 +16,7 @@
  * __APP_VERSION__ stub + markdown 桩 '<h2>新特性</h2>'（renderMarkdown 断言经
  * renderMarkdownMock）；场景前置收敛为文件内装置函数：enterAvailable（进入 available 态）、
  * makeDownloadStale（STALE 交错）、primePreloaded（预下载守卫）、launchWithResult（W4 toast）。
+ * markdown 桩挂 '@taiji/ui/features/chat/markdown'（渲染链下沉后 SUT 实际 import 的模块）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useAppUpdate.test.ts
  */
@@ -43,7 +44,7 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => toastFns,
 }))
 
-vi.mock('@/composables/logic/markdown', () => markdownStubModule())
+vi.mock('@taiji/ui/features/chat/markdown', () => markdownStubModule())
 
 setupAppUpdateLifecycle({ primeIpc: true, stubAppVersion: true, markdownHtml: '<h2>新特性</h2>' })
 

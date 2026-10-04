@@ -1,5 +1,13 @@
 // coverage-file-gate-exempt: 组合根装配接线面——决策逻辑在注入工厂（btw-line-spawn-options.ts 等，各有直测），本文件新增行是构造注入与回调接线，单测不可达（入口装配）；行为由 validate-runtime-bundle 与 runtime e2e 承载
 import { RuntimeServer } from './transport/server.js'
+// remote-access U0.1（D2/D9）：remote token 热读函数——仅 --remote-access 开态装配为
+// ConnectionManager 的 remoteTokenProvider（每次 auth 握手调用）；关态不装配零 IO。
+// 层位：文件 IO 居 infra（runtime-layering.md §2 transport 层不碰 node:fs）。
+import { readRemoteAccessToken } from './infra/remote-access.js'
+// remote-access D3/E5（S3 拆分）：移动壳静态托管——开态判定（remoteAccess 判据 → dist
+// 探测 → handler 构造）收敛在组合根（见 main() Transport layer 装配段），实现与穿越
+// 防护（E4）在 infra/mobile-static.ts。
+import { createMobileStaticHandler, resolveMobileStaticRoot } from './infra/mobile-static.js'
 import { SessionService } from './services/session/session-service.js'
 import { REVOKED_SIGNAL_CUSTOM_TYPE } from './services/session/revoke-orchestrator.js'
 // BtwService 组合根接线（btw-question M2-b，B2 授权）：依赖六项按其 docstring 归位本文件。
@@ -40,7 +48,7 @@ import type { IProviderCredentialResolver } from './services/ports/provider-cred
 import { PresetService } from './services/preset-service.js'
 import { ModelService } from './services/model-service.js'
 
-import { BASE_PORT, MAX_PORT, mandatoryExtensions, isBtwVirtualId } from '@taiji/shared'
+import { mandatoryExtensions, isBtwVirtualId } from '@taiji/shared'
 import type { ImportSourceKind } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 // startupSweep：启动收编扫描 core 装配单点（挂点见 main() 内 registerRuntimeInstance
@@ -164,39 +172,18 @@ import { spawnDataDirContractViolation } from './utils/runtime-env.js'
 // 回收面之外，进程退出的兜底回收——设计 §3.6 退出钩子落点）。
 import { disposeRuntimeEngineClients } from './services/session/subagent-engine-history.js'
 
-function parseArgs(): { port: number; projectRoot?: string; builtinPluginsDir?: string } {
-  // eslint-disable-next-line no-magic-numbers -- argv[0] is node, argv[1] is script
-  const args = process.argv.slice(2)
-  const portOffset = Math.max(0, Math.min(parseInt(process.env.TAIJI_AGENT_PORT_OFFSET ?? '0', 10) || 0, MAX_PORT - BASE_PORT))
-  let port = BASE_PORT + portOffset
-  let projectRoot: string | undefined
-  let builtinPluginsDir: string | undefined
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--port' && i + 1 < args.length) {
-      const parsed = parseInt(args[i + 1], 10)
-      if (isNaN(parsed)) {
-        console.error(`[runtime] invalid --port value: ${args[i + 1]}`)
-        process.exit(1)
-      }
-      port = parsed
-    } else if (args[i].startsWith('--port=')) {
-      const parsed = parseInt(args[i].split('=')[1], 10)
-      if (isNaN(parsed)) {
-        console.error(`[runtime] invalid --port value: ${args[i].split('=')[1]}`)
-        process.exit(1)
-      }
-      port = parsed
-    } else if (args[i] === '--project-root' && i + 1 < args.length) {
-      projectRoot = args[i + 1]
-    } else if (args[i].startsWith('--project-root=')) {
-      projectRoot = args[i].split('=')[1]
-    } else if (args[i] === '--builtin-plugins-dir' && i + 1 < args.length) {
-      builtinPluginsDir = args[i + 1]
-    } else if (args[i].startsWith('--builtin-plugins-dir=')) {
-      builtinPluginsDir = args[i].split('=')[1]
-    }
+// 组合根 argv 解析（remote-access D9）：解析逻辑与单测在 utils/runtime-args.ts（本文件
+// import 即执行 main() 不可直测，故提取；`=` 形态取值按首个 = 切分防路径含 = 截断）。
+import { parseRuntimeArgs } from './utils/runtime-args.js'
+
+function parseArgs(): ReturnType<typeof parseRuntimeArgs> {
+  try {
+    // eslint-disable-next-line no-magic-numbers -- argv[0] is node, argv[1] is script
+    return parseRuntimeArgs(process.argv.slice(2))
+  } catch (error) {
+    console.error(toErrorMessage(error))
+    process.exit(1)
   }
-  return { port, projectRoot, builtinPluginsDir }
 }
 
 /**
@@ -408,7 +395,7 @@ async function initRelayServerOrExit(projectRoot: string, messageBus: MessageBus
 }
 
 async function main(): Promise<void> {
-  const { port, projectRoot, builtinPluginsDir } = parseArgs()
+  const { port, projectRoot, builtinPluginsDir, remoteAccess, mobileDist } = parseArgs()
   const effectiveRoot = projectRoot ?? process.cwd()
 
   // spawn 数据目录契约校验（缺省反转护栏）：必须在任何 getDataDir() 消费（含下方
@@ -464,7 +451,24 @@ async function main(): Promise<void> {
   const pm = new ProcessManager(effectiveRoot)
 
   // Transport layer
-  const server = new RuntimeServer(port, projectRoot, runtimeToken)
+  // remote-access U0.1 装配（D1/D2/D3/D9）：
+  // - host：开态绑 0.0.0.0（LAN 可达，桌面 localhost 天然被覆盖）；关态 undefined =
+  //   ConnectionManager 默认 127.0.0.1（与现状逐字节一致）。
+  // - remoteTokenProvider：仅开态装配——每次 auth 握手热读 remote-access.json（轮换
+  //   文件即生效）；关态不装配，ConnectionManager 不持有读取通道（零文件 IO，且不读
+  //   任何 env——D9 ambient 免疫，本设计新增 env 键 = 0）。
+  // - mobileStaticHandler（S3 挂载裁决上移组合根）：remoteAccess 开态才探测 dist
+  //   （E5 时序等价：启动期一次 statSync，现状在 ConnectionManager 构造器内执行、
+  //   上移后在本行执行，同为 index 装配期）、探测通过才构造 handler 注入；关态
+  //   resolveMobileStaticRoot 首行短路（零探测副作用零日志）——mobileDist 单独出现
+  //   （手工只传 --mobile-dist 不开 flag）不构成开态。静态实现/穿越防护（E4）在
+  //   mobile-static.ts，ConnectionManager 只按「是否注入 handler」分派。
+  const mobileStaticRoot = resolveMobileStaticRoot({ remoteAccess, mobileDist })
+  const server = new RuntimeServer(port, projectRoot, runtimeToken, {
+    host: remoteAccess ? '0.0.0.0' : undefined,
+    remoteTokenProvider: remoteAccess ? readRemoteAccessToken : undefined,
+    mobileStaticHandler: mobileStaticRoot !== null ? createMobileStaticHandler(mobileStaticRoot) : undefined,
+  })
 
   // MessageBus 单例（wave:runtime-wiring）：per-session 消息广播核心。
   // 在 server 构造后、setServices 前创建并注入——server 的 ConnectionManager.onDisconnect

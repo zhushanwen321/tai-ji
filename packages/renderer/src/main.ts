@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import 'katex/dist/katex.min.css' // KaTeX 公式样式（第三方库 CSS，随 bundle 打包；math_inline/math_block 渲染产出 .katex/.katex-display 节点依赖此样式）
+// katex CSS 不在此全局引入（D10 渲染链下沉）：katex/dist/katex.min.css 随 ui 渲染模块
+// （@taiji/ui/features/chat/markdown）模块内 import，桌面壳 import 渲染链即构造性获得。
 import i18n from './i18n'
 import App from './App.vue'
 import { provideDevMode, setImageCacheWritePort } from '@taiji/core'
@@ -39,7 +40,7 @@ installRendererErrorReporting(app)
 // app.provide 注入 ui 组件数据源。须在 mount 前（provide 全局生效）。
 initExtensionHostBridge(app)
 // permissionRequest 闭环（audit §12.1）：订阅 bus plugin-permission-request → 驱动 Dialog →
-// app.provide 真实 PermissionTransport（转发 plugin.approvePermissions/revokePermissions WS 命令）。
+// app.provide 真实 PermissionTransport（转发 plugin.approvePermissions/denyPermissions WS 命令）。
 // 须在 mount 前 provide（Dialog 经 inject 取 transport）；复用 ExtensionHost 同一 bus 单例。
 initPermissionRequest(app, getExtensionBus())
 app.use(createPinia())

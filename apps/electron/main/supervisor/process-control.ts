@@ -47,6 +47,8 @@ import { getDataDir } from '@taiji/shared/paths'
 import { readMainLogMaxBytes, mainLogger } from '../logs/main-logger.js'
 import { buildSafeEnv } from './safe-env.js'
 import { terminateWindowsProcessTree } from './windows-process.js'
+import { readRemoteAccessConfig } from '../remote-access/store.js'
+import { resolveMobileDistEnv, resolveMobileDistPath, type MobileDistEnv } from '../remote-access/mobile-dist.js'
 
 /** stop() 默认超时：SIGTERM 后等待 exit，超时则 SIGKILL 进程树 */
 export const STOP_TIMEOUT_MS = 2000
@@ -85,10 +87,10 @@ function getStderrSink(): WriteStream | null {
   // 轮转窗口：getStderrSink 被 writeStderrSink 之外的场景调用也不得绕过窗口禁令
   if (stderrRotation) return null
   if (stderrSink) return stderrSink
+  const logsDir = path.join(getDataDir(), 'logs')
+  const file = path.join(logsDir, 'electron-runtime-stderr.log')
   try {
-    const logsDir = path.join(getDataDir(), 'logs')
     mkdirSync(logsDir, { recursive: true })
-    const file = path.join(logsDir, 'electron-runtime-stderr.log')
     // 打开前若既有文件已超帽（上次运行崩溃未轮转 / 历史大文件），先滚动一次——进程内
     // 字节计数不覆盖历史，此 stat 弥合跨重启的 size 上限（对齐 runtime openMainStream）。
     if (existsSync(file) && statSync(file).size > readMainLogMaxBytes()) {
@@ -96,8 +98,15 @@ function getStderrSink(): WriteStream | null {
     }
     stderrSink = createWriteStream(file, { flags: 'a' })
     stderrSinkFile = file
-  } catch {
+  } catch (e) {
     stderrSink = null
+    // 可观测性：建流失败（logs 目录不可写 / 只读卷 / 权限）时 runtime 原生崩溃期
+    // stderr 文件取证通道整体失效，必须留痕。console.error 走进程 stderr 不依赖
+    // 文件系统，无递归风险（对齐同文件其余失败路径的响亮日志形态）。
+    console.error(
+      `[runtime] stderr sink create failed for ${file}: ${e instanceof Error ? e.message : String(e)}`
+      + ' — stderr 文件取证不可用，仅进程控制台可见',
+    )
   }
   return stderrSink
 }
@@ -285,6 +294,29 @@ function issueRuntimeToken(): string {
 }
 
 /**
+ * 组装 remote-access 相关 runtime argv（remote-access D3/D9）。
+ *
+ * 开态（enabled=true）追加 `--remote-access` 与 `--mobile-dist=<main 按运行环境
+ * 解析的绝对路径>`；关态返回空数组（不拼任何 flag，argv 数组形态与既有完全一致）
+ * ——argv 是开启的唯一判据，不经 env 白名单继承链，ambient 免疫；非 supervisor
+ * 直跑路径不传 flag 即天然关态。
+ *
+ * enabled 是窄参数（只消费开关位，不传整个 config）：配置读取归调用方——
+ * spawnRuntimeProcess 在每次 spawn 时刻现读 readRemoteAccessConfig().enabled 传入
+ * （toggle 落盘 → 重启生效正依赖每次 spawn 现读语义，禁止改为快照传入）。
+ * 本函数因此是纯字符串拼参，无隐藏全局读。
+ *
+ * @param env 运行环境（isPackaged / resourcesPath / appPath），供 dist 路径 dev/prod 分支
+ * @param enabled remote-access 开关状态（调用方 spawn 时刻现读配置）
+ * @returns 追加到基础 argv 之后的参数数组（关态恒为空数组）
+ */
+export function buildRemoteAccessSpawnArgs(env: MobileDistEnv, enabled: boolean): string[] {
+  if (!enabled) return []
+  const mobileDist = resolveMobileDistPath(env)
+  return ['--remote-access', `--mobile-dist=${mobileDist}`]
+}
+
+/**
  * 启动 runtime 子进程（按打包状态选 spawn 方式）。
  *
  * 打包：process.execPath + ELECTRON_RUN_AS_NODE=1 运行 unpacked 的 index.cjs
@@ -306,6 +338,12 @@ export function spawnRuntimeProcess(port: number, onExit?: (code: number | null)
 
   // 根据打包状态选择 runtime 启动方式
   const projectRoot = app.getAppPath()
+  // remote-access（D3/D9）：开态追加 --remote-access + --mobile-dist=<绝对路径>，关态空数组不拼。
+  // enabled 在 spawn 时刻现读配置（非快照）：toggle 落盘 → 重启 runtime 生效正依赖此语义
+  const remoteAccessArgs = buildRemoteAccessSpawnArgs(
+    resolveMobileDistEnv(),
+    readRemoteAccessConfig().enabled,
+  )
   let cmd: string
   let args: string[]
 
@@ -327,7 +365,7 @@ export function spawnRuntimeProcess(port: number, onExit?: (code: number | null)
     // extraResources 拷贝目标 Resources/resources/plugins）。registry 收到后不再做
     // cwd 探测，防用户 repo 内预置同名目录冒充 built-in 插件获得 trusted 权限。
     const builtinPluginsDir = path.join(process.resourcesPath, 'resources', 'plugins')
-    args = [runtimeDist, `--port=${port}`, `--builtin-plugins-dir=${builtinPluginsDir}`]
+    args = [runtimeDist, `--port=${port}`, `--builtin-plugins-dir=${builtinPluginsDir}`, ...remoteAccessArgs]
     console.log(`[runtime] ${cmd} ${runtimeDist} --port=${port} --builtin-plugins-dir=${builtinPluginsDir}`)
   } else {
     // 开发环境：tsx 运行 TS 源码
@@ -367,8 +405,12 @@ export function spawnRuntimeProcess(port: number, onExit?: (code: number | null)
     // 与打包形态同参数名显式注入（registry 不做 cwd 探测）。
     const builtinPluginsDir = path.join(repoRoot, 'resources', 'plugins')
     cmd = 'node'
-    args = [tsxPath, runtimeEntry, `--port=${port}`, `--builtin-plugins-dir=${builtinPluginsDir}`]
+    args = [tsxPath, runtimeEntry, `--port=${port}`, `--builtin-plugins-dir=${builtinPluginsDir}`, ...remoteAccessArgs]
     console.log(`[runtime] node ${tsxPath} ${runtimeEntry} --port=${port} --builtin-plugins-dir=${builtinPluginsDir}`)
+  }
+
+  if (remoteAccessArgs.length > 0) {
+    console.log(`[runtime] remote access enabled: ${remoteAccessArgs.join(' ')}`)
   }
 
   // 打包后 app.getAppPath() 返回 app.asar（虚拟路径），不能作为 cwd
@@ -402,6 +444,12 @@ export function spawnRuntimeProcess(port: number, onExit?: (code: number | null)
     onExit?.(SPAWN_ERROR_EXIT_CODE)
   })
 
+  // 打包态 stderr 背压丢弃计数（dev 走 console 转发无此路径，恒 0）：闭包变量生命周期
+  // = 本次 spawn，对齐 stderrBytes 的「本次 spawn 累计」语义（与 writeStderrSink 的
+  // 文件级字节计数职责不同）。首丢 warn 一条 + 累计计数，exit（spawn 收尾）汇总一行，
+  // 可观测形态对齐轮转通道 stderrRotationDropped 的「窗口结束合并 warn」。
+  let stderrBackpressureDropped = 0
+
   // M5（perf-quick-batch）：runtime 日志转发按打包状态分流。
   // - dev：stdout + stderr 全量 console 转发（终端调试可见）
   // - prod：stdout 不转发（runtime initLogger 已 tee 落盘，console 转发会阻塞主进程）；
@@ -421,14 +469,28 @@ export function spawnRuntimeProcess(port: number, onExit?: (code: number | null)
     // eslint-disable-next-line no-magic-numbers -- 1MB stderr 背压上限（非业务常量）
     const WRITE_BUFFER_LIMIT = 1024 * 1024
     let stderrBytes = 0
+    let stderrDropWarned = false
     child.stderr?.on('data', (data: Buffer) => {
-      if (stderrBytes > WRITE_BUFFER_LIMIT) return
+      if (stderrBytes > WRITE_BUFFER_LIMIT) {
+        stderrBackpressureDropped++
+        if (!stderrDropWarned) {
+          stderrDropWarned = true
+          // 首丢留痕：超限后静默丢弃 = 取证通道部分失效，须可归因（热路径不逐 chunk 记）
+          console.warn(`[runtime] stderr backpressure: exceeded ${WRITE_BUFFER_LIMIT} bytes this session — dropping further stderr (total reported on exit)`)
+        }
+        return
+      }
       stderrBytes += data.length
       writeStderrSink(data)
     })
   }
   child.on('exit', (code) => {
     console.log(`[runtime] Process exited with code ${code}`)
+    // 背压丢弃汇总（spawn 收尾）：丢弃总数一行留痕，崩溃取证时 stderr 文件缺口有账可查
+    // （对齐轮转窗口 stderrRotationDropped 完成后合并 warn 的形态）
+    if (stderrBackpressureDropped > 0) {
+      console.warn(`[runtime] stderr backpressure: dropped ${stderrBackpressureDropped} stderr chunk(s) total this session`)
+    }
     // 通知 supervisor 清理 child/port 状态（自然退出/崩溃路径）
     onExit?.(code)
   })

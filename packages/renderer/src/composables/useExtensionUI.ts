@@ -42,7 +42,7 @@ import type { InternalEvent, DialogRequest } from '@taiji/core'
 import type { ExtensionInteractMethod } from '@taiji/shared'
 import type { PlanReviewRequest } from '@zhushanwen/extension-protocol'
 import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
-import { notifyUiResponseNotDelivered } from '@/composables/shell/extension-host-dialog'
+import { notifyUiResponseNotDelivered } from '@/composables/shell/ui-response-feedback'
 import i18n from '@/i18n'
 import { useToast } from '@/composables/useToast'
 import { sendExtensionUIResponse, getPendingRequests, type ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
@@ -57,7 +57,7 @@ export type UIRequestFilter = (req: ExtensionUIRequest) => boolean
  * 统一表单 overlay 请求过滤器（Panel inline 渲染用）：form 键（终态判定面，D5 收敛）。
  * 全部表单族帧（新 form marker / legacy askUser / scheduleCreate marker）由 runtime
  * event-adapter marker 分支统一产出 form:true。普通 dialog 请求仍由 CompanionBand 消费
- * bus 直连（extension-host-dialog C4 对称排除，零重叠契约）。
+ * bus 直连（shell-adapters C4 对称排除，零重叠契约）。
  */
 export const formFilter: UIRequestFilter = (req) => req.form === true
 
@@ -331,7 +331,7 @@ export function useExtensionUI(
     // 切 session 后旧 sid 迟到事件写旧分区，不污染新分区；事件自带归属，无需捕获订阅时 sid）。
     // C4 分流：富交互硬过滤先行（form / planReview 两标记请求入 store 分区——分别渲染
     // FormOverlay / PlanReviewBar；普通 dialog 由 CompanionBand 消费 bus，
-    // extension-host-dialog 侧对称排除，零重叠契约），filter 是第二道闸（实例只放各自
+    // shell-adapters 侧对称排除，零重叠契约），filter 是第二道闸（实例只放各自
     // 标记——store 共享，谁放行谁入队，requestId dedup 兜底双实例幂等）。
     // C2：事件 sid 缺失（无 sid 的 ui-request）跳过入队（warn）——渲染面依赖 session 分区。
     unsubFns.push(

@@ -79,6 +79,15 @@ vi.mock('@/composables/features/sidebar/useSidebar', () => ({
 vi.mock('@/components/shell/AppShell.vue', () => ({ default: { name: 'AppShell', template: '<div />' } }))
 vi.mock('@/components/ui/ToastContainer.vue', () => ({ default: { name: 'ToastContainer', template: '<div />' } }))
 
+// App.vue setup 调 usePermissionRequest()（permission 全局弹窗状态，App.vue:190）——真实实现
+// 要求 main.ts 先 initPermissionRequest（controller 模块级，测试环境无 init）→ 直接 throw。
+// 本用例只验 failed 屏真因呈现，与 permission 链路无关：mock 最小 state（对齐 App.vue :79
+// 消费面 pluginId/permissions/pending/error），init no-op。
+vi.mock('@/composables/shell/usePermissionRequest', () => ({
+  usePermissionRequest: () => ({ pluginId: '', permissions: [], pending: false, error: null }),
+  initPermissionRequest: vi.fn(),
+}))
+
 const effectSpies = vi.hoisted(() => ({
   bindForkNoticeEffect: vi.fn(),
   bindHandoffEffect: vi.fn(),

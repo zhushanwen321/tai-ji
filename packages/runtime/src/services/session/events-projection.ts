@@ -26,6 +26,10 @@
  * 流式扫描（session-file-extraction.ts 的 scanRecordFamilyEntriesFromSessionFile，
  * 按块读 + 行预过滤，扫描字节上界 = READ_PRECHECK_MAX_BYTES）；事件文件按
  * tail 原语只读完整行边界。
+ *
+ * 读者普查归类：census §4.4 / §6 N15（docs/architecture/session-readers-census.md）
+ * ——entry 源为 record 族已发生事实（照实），扫描不裁剪；喂入编排见
+ * session-records.ts（冷启动流式扫描 / 活跃 get_entries 游标两腿）。
  */
 
 import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'

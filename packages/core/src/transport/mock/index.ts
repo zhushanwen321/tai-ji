@@ -1647,13 +1647,16 @@ const pluginsSub = makeMockSubscription((): PluginInfo[] => [])
 
 const pluginImpl = {
   onPlugins: (h: (plugins: PluginInfo[]) => void) => pluginsSub.subscribe(h),
-  // 插件权限审批/回收（[G4 锚定补齐]：锚定前 mock 缺此二成员，门面三元下不可达）。
-  // mock 无插件运行时，ack 型 stub resolve 即可。revokePermissions 与 real 同为单参
-  // （回收即撤销插件全部授权，无 permissions 参数——锚定曾抓出 stub 多参，已对齐）。
+  // 插件权限审批/回收/拒绝（[G4 锚定补齐]：锚定前 mock 缺此族成员，门面三元下不可达）。
+  // mock 无插件运行时，ack 型 stub resolve 即可。revokePermissions / denyPermissions
+  // 与 real 同为单参（锚定曾抓出 stub 多参，已对齐）。
   async approvePermissions(_pluginId: string, _permissions: string[]): Promise<void> {
     await sleep(TIMING.ack)
   },
   async revokePermissions(_pluginId: string): Promise<void> {
+    await sleep(TIMING.ack)
+  },
+  async denyPermissions(_pluginId: string): Promise<void> {
     await sleep(TIMING.ack)
   },
 }

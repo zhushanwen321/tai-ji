@@ -24,7 +24,7 @@ packages/
   renderer/              # 桌面壳
     # Shell/Workspace 布局 + 桌面独占 view + ElectronPlatformAdapter + vite 入口
 
-  mobile-renderer/       # 移动壳
+  mobile-renderer/       # 移动壳（功能壳：连接装配 + 手机聊天 UI，经 runtime 同源静态托管服务）
     # 移动布局 + MobilePlatformAdapter + vite 入口
 
   runtime/               # pi 适配 + plugin-service + transport 服务器
@@ -90,11 +90,12 @@ routeInbound 只做三件事：pending 分流、seq 中间件、查表执行。*
 
 ### 2.4 T&C 双模式与多端的关键约束
 
-1. **连接发现策略可插拔**：本地 = IPC 端口发现（经 PlatformPort），远程 = profile（storage 经 PlatformPort），mock = VITE_MOCK。init() 分支在 coordination 一处，壳不感知。
+1. **连接发现策略可插拔（已实装）**：本地 = IPC 端口发现（经 PlatformPort），远程 = profile（storage 经 PlatformPort），mock = VITE_MOCK。形态判定收口在 transport 一处（`packages/core/src/transport/use-connection.ts` 的 resolveConnectionMode() 薄谓词，init 首连 / HMR 重连 / retryRuntime 三处消费；连接目标解析留在各分支原地），壳不感知。profile 的壳侧注入实现 = `packages/mobile-renderer/src/platform/connection-profile.ts`（D4 三分支：query token 验身落 storage + 抹地址栏 / storage 兜底 / 皆无落 token 输入视图；见 [CONTEXT.md](../CONTEXT.md)「profile 连接策略」词条）。移动壳 bootstrap 已对接该序列（platform 注入 → profile 分支 → restoreSessions）。
 2. **可靠投递语义不进 domain**：seq gap/reconcile/seqReset→reload 全部在 transport+coordination。domain store 只面对「已排序、已去重的消息流」。
 3. **send.rejected 是 reply 点对点**，不回退广播语义。
 4. **presence 弱可靠通道**：不入 seq 桶、靠 auth.ok/presence.list 兜底——在 `coordination/presence.ts` 注释并测试锁定，防未来误「修复」成入桶。
 5. **mobile 无 MANUAL_FORK**：移动壳的 connection-lifecycle 就是 coordination 的一个 mode（`platform: 'mobile'` 时本地分支不注册）。
+6. **auth 失败显式信号（移动壳消费）**：ws-client 导出 `onAuthRejected`（先于 close 触发）；远程形态由 use-connection 注册转发，移动壳据此抑制全部自动重连触发点并落 token 输入视图；桌面形态不消费该信号，重连链行为不变。
 
 ---
 

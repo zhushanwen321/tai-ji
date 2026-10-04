@@ -32,7 +32,7 @@ vi.mock('@/composables/useToast', () => ({
   }),
 }))
 
-vi.mock('@/composables/logic/markdown', () => markdownStubModule())
+vi.mock('@taiji/ui/features/chat/markdown', () => markdownStubModule())
 
 // mock t 返回 key：追加段断言 key 本身（真实文案断言在 update-manual-channel.test.ts）
 vi.mock('@/i18n', () => ({

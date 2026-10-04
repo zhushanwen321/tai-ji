@@ -175,7 +175,7 @@ export type ClientMessageType =
   | 'auth'
   | 'plugin.list' | 'plugin.toggle'
   | 'plugin.install' | 'plugin.uninstall'
-  | 'plugin.approvePermissions' | 'plugin.revokePermissions'
+  | 'plugin.approvePermissions' | 'plugin.revokePermissions' | 'plugin.denyPermissions'
   | 'plugin.executeCommand'
   | 'plugin.config.get' | 'plugin.config.set'
   | 'plugin.uiResponse'
@@ -726,6 +726,7 @@ export interface ClientMessageMap {
   'plugin.uninstall': { pluginId: string }
   'plugin.approvePermissions': { pluginId: string; permissions: string[] }
   'plugin.revokePermissions': { pluginId: string }
+  'plugin.denyPermissions': { pluginId: string }
   'plugin.executeCommand': { pluginId: string; commandId: string; args?: Record<string, unknown> }
   'plugin.config.get': { pluginId: string; key?: string }
   'plugin.config.set': { pluginId: string; key: string; value: unknown }
@@ -1128,6 +1129,12 @@ export type ServerMessageType =
   // 重触发 activation event 重新激活 + 重新弹审批）。前端收到后撤回该插件的审批弹窗；
   // 迟到批准对已删 pending noop 幂等（旧版前端未消费此帧时无异常回退，P-11）。
   | 'plugin:permissionRequestExpired'
+  // plugin:permissionRequestResolved：权限审批终局下行（runtime PluginActivator
+  // resolvePermissionApproval 命中挂起审批时生产——用户在任一连接端批准/拒绝后广播，
+  // 其余端据此撤回同一审批的弹窗）。approved=false 含显式拒绝与挂起期清理唤醒（终局
+  // 语义统一为「弹窗撤回」）；广播幂等（pending 命中即删，同一 requestId 至多一次）；
+  // 迟到审批对已删 pending miss noop 不产生本帧（该请求终局已由 expired 覆盖）。
+  | 'plugin:permissionRequestResolved'
   | 'plugin:viewUpdate'
   // plugin:modalState：plugin modal 开合帧（plugin-header-action-modal-points AP-2）。
   // runtime showModal/hideModal/dismissModal 仲裁后全局广播（槽与层都是全局单例，
@@ -1884,11 +1891,21 @@ export interface ServerMessageMapBase {
   // miss 须 noop 幂等，P-11：旧版前端未消费此帧时无异常回退）。
   'plugin:uiRequestExpired': { requestId: string; pluginId: string; sessionId?: string } & Record<string, unknown>
   // plugin:permissionRequestExpired：权限审批到期取消下行（timeout-plugin-service D3，
-  // runtime PluginActivator 审批等待超时生产）。pluginId 必带（前端按插件定位撤窗）。
+  // runtime PluginActivator 审批等待超时生产）。pluginId 必带；requestId 必带且与
+  // 本次审批 plugin:permissionRequest 广播同源（每次审批新生成）——前端按 requestId
+  // 精确撤回审批弹窗，同 pluginId 陈旧 expired 广播不误撤后到的新弹窗；payload 缺
+  // requestId（旧版 runtime 广播）时前端回退按 pluginId 匹配。
   // 与 D2 的 plugin:uiRequestExpired 同为「取消非替答」语义——插件置 UNLOADED（未装载
   // 态）而非「被拒」，重触发 activation event 即可重新激活 + 重新弹审批；前端撤窗
   // miss noop 幂等（P-11：旧版前端未消费此帧时无异常回退）。
-  'plugin:permissionRequestExpired': { pluginId: string } & Record<string, unknown>
+  'plugin:permissionRequestExpired': { pluginId: string; requestId: string } & Record<string, unknown>
+  // plugin:permissionRequestResolved：权限审批终局下行（runtime PluginActivator
+  // resolvePermissionApproval 生产）。pluginId 必带；requestId 与本次审批
+  // plugin:permissionRequest 广播同源（每次审批新生成）——前端按 requestId 精确撤回
+  // 对应弹窗，同 pluginId 陈旧 resolved 广播不误撤后到的新弹窗；payload 缺 requestId
+  // （旧版广播）时前端回退按 pluginId 匹配。approved=true 批准 / false 拒绝（含挂起期
+  // 清理唤醒）——撤窗语义两值一致，approved 供消费端审计/展示，不参与匹配。
+  'plugin:permissionRequestResolved': { pluginId: string; requestId: string; approved: boolean } & Record<string, unknown>
   'model.list': { models: ModelInfo[] }
   'config.sessions': { groups: SessionGroup[] }
   /** config.systemPrompt：reply + broadcast + 初始推送三用。corrupted=true 表示磁盘配置损坏已回退默认（SR5）。 */
@@ -2830,16 +2847,20 @@ export interface ReplyPayloadMap {
   'session.importCandidates': ServerMessageMap['session.importCandidates']
   'session.import': ServerMessageMap['session.import']
   // plugin.* RPC reply 映射（plugin-message-handler.ts 全部发 reply）：
-  //  - plugin.list / toggle / uninstall / install / approvePermissions / revokePermissions
-  //    → reply 'config.plugins' { plugins }（前端读 plugins 列表刷新 UI）
+  //  - plugin.list / toggle / uninstall / install → reply 'config.plugins' { plugins }（前端读 plugins 列表刷新 UI）
+  //  - 权限命令（approvePermissions / revokePermissions / denyPermissions）→ reply 'pong' {}
+  //    （ack 型，前端不读 payload）；插件列表刷新经 config.plugins 广播——approve 触发
+  //    activate（status discovered→active 真实变化）时由 plugin-service 广播；deny/revoke
+  //    不改 PluginInfo 任何字段，不广播
   //  - plugin.executeCommand → reply 'pong' {}（fire-and-forget ack，前端不读 payload）
   //  - plugin.config.get / set → reply 'plugin:config' { pluginId, config }（前端读 config 应用到设置面板）
   'plugin.list': ServerMessageMap['config.plugins']
   'plugin.toggle': ServerMessageMap['config.plugins']
   'plugin.uninstall': ServerMessageMap['config.plugins']
   'plugin.install': ServerMessageMap['config.plugins']
-  'plugin.approvePermissions': ServerMessageMap['config.plugins']
-  'plugin.revokePermissions': ServerMessageMap['config.plugins']
+  'plugin.approvePermissions': ServerMessageMap['pong']
+  'plugin.revokePermissions': ServerMessageMap['pong']
+  'plugin.denyPermissions': ServerMessageMap['pong']
   'plugin.executeCommand': ServerMessageMap['pong']
   'plugin.config.get': ServerMessageMap['plugin:config']
   'plugin.config.set': ServerMessageMap['plugin:config']

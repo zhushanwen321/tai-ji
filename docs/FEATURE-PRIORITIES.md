@@ -83,6 +83,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 后台命令观察面（composer 任务托盘 bash 面板） | background task 展示（testing 02） |
 | 对话流时间戳 | 行尾耗时·时刻槽、TurnMeta 首末区间、reload endTime 回填（chat-flow-timestamp；TurnMeta/Block/apply-entry-convert 单测 + live≡reload 等价性） |
 | btw 旁路提问（drawer 辅助对话流） | composer btw 按钮入口、fork 快照线（独立 pi 进程 / `btw:` 虚拟 id / `btw/<encodeCwd>/<mainSid>/` 目录隔离）、消息分区、主删级联与持久恢复、交互 drawer 路由（D8）。**挂掉后果 = 主对话链路完整可用**（btw 创建/提问/面板失效仅损失辅助提问面，不动 P0 对话主链；设计原文口径「触及最高 P 级 P2——btw 为常用辅助面，挂掉后主链路完整可用」）。错误处理按 §1「P2/P3 降级隔离不拖垮核心」契约：接入点 catch + 日志 + 功能关闭/占位兜底，禁向上传播打断 P0/P1 主流程，降级 ≠ 吞错（运行时错误码 `fork_failed / spawn_state_invalid / state_mismatch / line_not_found / thread_file_missing` 供 runtime 分流与日志归因；renderer 呈现 = 通用降级文案 + 原因透传 + 行内可重试入口，不按码分流——2026-09-22 一致性审查对账修正） |
+| 远程访问（手机浏览器经 LAN 直连） | 设置→远程访问开关与 token 轮换、移动壳同源托管、remote token 验身（关态默认纯回环零暴露） |
 | 语音朗读（TTS） | assistant 回复朗读按钮三态（idle/loading/playing，生成中置灰）、设置页「语音」菜单（三家 provider 表单：凭据/基础/音频/风格/长尾，Key 联动带入 + MiMo baseUrl 集群预填）、runtime `tts.*` 四 RPC（三家 driver + 分句合成 + WAV 缓存 + 双条件 FIFO 封顶）、错误码 toast 分流（§5.4 六码）。**挂掉后果 = 对话主链路完整可用**（朗读按钮不渲染/合成失败仅损失听觉通道，不动 P0 对话主链；ai-voice-tts 设计原文口径 P2）。错误处理按 §1 P2 降级隔离契约：u6 播放器 catch + 错误码 toast + 回 idle，runtime `tts_*` 错误码词表（`tts_not_configured / tts_auth_failed / tts_quota_exceeded / tts_vendor_error / tts_network_error / tts_text_too_long / tts_empty_text`），缓存写失败日志不阻断（磁盘治理失败下次写入收敛）。总开关关闭时 idle 朗读本地拦截不发 RPC（data-source-registry #45） |
 
 ## 5. P3 — 特定人群/低影响

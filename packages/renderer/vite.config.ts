@@ -60,10 +60,11 @@ export default defineConfig(({ mode }) => {
       // 分组（10 §3.4 四组 + 探针修正）：
       //   - xterm：TerminalView 静态 import @xterm/xterm + 4 addon，随 defineAsyncComponent 真正移出首屏
       //   - shiki：排除 @shikijs/langs（langs-bundle-full 内 235 个动态 import 的语言定义 chunk 必须保持
-      //     按需分离，不被本组吞并——shiki 4.3.1 源码实证）；首屏仍静态 import（markdown.ts），分组收益
+      //     按需分离，不被本组吞并——shiki 4.3.1 源码实证）；首屏仍静态 import（@taiji/ui 渲染链，
+      //     D10 下沉，分组按 node_modules 路径匹配与宿主包无关），分组收益
       //     = 与业务 chunk 的 parse 隔离（10 §3.4 审查修正）
       //     [HISTORICAL] 上文「235 个动态语言 chunk 按需分离」机制已随 2026-09 shiki fine-grained
-      //     改造（commit ac01fab47）终结：langs-bundle-full 已移出模块图，grammar 改为 markdown.ts
+      //     改造（commit ac01fab47）终结：langs-bundle-full 已移出模块图，grammar 改为渲染链
       //     静态 import 的具名 grammar 对象、随静态 import 链归并 vendor 组。shiki 组 regex 的
       //     (?!langs) 排除保留仅为不扰动既有分组，不再承担「保持按需分离」职责。
       //   - katex：katex + markdown-it-katex（静态 import，同 shiki 仅 parse 隔离）

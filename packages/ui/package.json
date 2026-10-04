@@ -29,6 +29,86 @@
     "./features/drawer": {
       "types": "./src/features/drawer/index.ts",
       "import": "./src/features/drawer/index.ts"
+    },
+    "./features/chat/markdown": {
+      "types": "./src/features/chat/markdown.ts",
+      "import": "./src/features/chat/markdown.ts"
+    },
+    "./features/chat/markdown-incremental": {
+      "types": "./src/features/chat/markdown-incremental.ts",
+      "import": "./src/features/chat/markdown-incremental.ts"
+    },
+    "./features/chat/mermaid": {
+      "types": "./src/features/chat/mermaid.ts",
+      "import": "./src/features/chat/mermaid.ts"
+    },
+    "./locale": {
+      "types": "./src/locale/index.ts",
+      "import": "./src/locale/index.ts"
+    },
+    "./locale/zh-CN": {
+      "types": "./src/locale/zh-CN.ts",
+      "import": "./src/locale/zh-CN.ts"
+    },
+    "./locale/en-US": {
+      "types": "./src/locale/en-US.ts",
+      "import": "./src/locale/en-US.ts"
+    },
+    "./locale/zh-CN/common": {
+      "types": "./src/locale/zh-CN/common.ts",
+      "import": "./src/locale/zh-CN/common.ts"
+    },
+    "./locale/zh-CN/settings": {
+      "types": "./src/locale/zh-CN/settings.ts",
+      "import": "./src/locale/zh-CN/settings.ts"
+    },
+    "./locale/zh-CN/panel": {
+      "types": "./src/locale/zh-CN/panel.ts",
+      "import": "./src/locale/zh-CN/panel.ts"
+    },
+    "./locale/zh-CN/newTask": {
+      "types": "./src/locale/zh-CN/newTask.ts",
+      "import": "./src/locale/zh-CN/newTask.ts"
+    },
+    "./locale/zh-CN/extensionUI": {
+      "types": "./src/locale/zh-CN/extensionUI.ts",
+      "import": "./src/locale/zh-CN/extensionUI.ts"
+    },
+    "./locale/zh-CN/search": {
+      "types": "./src/locale/zh-CN/search.ts",
+      "import": "./src/locale/zh-CN/search.ts"
+    },
+    "./locale/zh-CN/composable": {
+      "types": "./src/locale/zh-CN/composable.ts",
+      "import": "./src/locale/zh-CN/composable.ts"
+    },
+    "./locale/en-US/common": {
+      "types": "./src/locale/en-US/common.ts",
+      "import": "./src/locale/en-US/common.ts"
+    },
+    "./locale/en-US/settings": {
+      "types": "./src/locale/en-US/settings.ts",
+      "import": "./src/locale/en-US/settings.ts"
+    },
+    "./locale/en-US/panel": {
+      "types": "./src/locale/en-US/panel.ts",
+      "import": "./src/locale/en-US/panel.ts"
+    },
+    "./locale/en-US/newTask": {
+      "types": "./src/locale/en-US/newTask.ts",
+      "import": "./src/locale/en-US/newTask.ts"
+    },
+    "./locale/en-US/extensionUI": {
+      "types": "./src/locale/en-US/extensionUI.ts",
+      "import": "./src/locale/en-US/extensionUI.ts"
+    },
+    "./locale/en-US/search": {
+      "types": "./src/locale/en-US/search.ts",
+      "import": "./src/locale/en-US/search.ts"
+    },
+    "./locale/en-US/composable": {
+      "types": "./src/locale/en-US/composable.ts",
+      "import": "./src/locale/en-US/composable.ts"
     }
   },
   "scripts": {
@@ -37,6 +117,8 @@
   },
   "dependencies": {
     "@lucide/vue": "^1.21.0",
+    "@shikijs/langs": "^4.3.1",
+    "@shikijs/themes": "^4.3.1",
     "@vueuse/core": "^13",
     "@taiji/core": "workspace:*",
     "@taiji/dom-core": "workspace:*",
@@ -45,7 +127,13 @@
     "ansi_up": "^6.0.6",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2",
+    "dompurify": "^3.4.11",
+    "katex": "^0.18.1",
+    "markdown-it": "^14.2.0",
+    "markdown-it-katex": "^2.0.3",
+    "mermaid": "^11.16.0",
     "reka-ui": "^2.9.10",
+    "shiki": "^4.2.0",
     "tailwind-merge": "^3",
     "vue": "^3.5",
     "vue-i18n": "^10"

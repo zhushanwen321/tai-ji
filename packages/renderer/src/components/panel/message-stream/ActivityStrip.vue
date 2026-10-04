@@ -118,8 +118,8 @@ import type { ExecutingBash } from '@taiji/core'
 import { formatDurationHms } from '@taiji/ui'
 import { useChatStore } from '@/stores/chat'
 import { useConstantHeightAssert } from '@/composables/panel/useConstantHeightAssert'
-import { deliveryQueueEntries } from '@/composables/panel/useQueueRows'
-import { getDeliveryProjectionRef } from '@taiji/core'
+// 待发 chip 计数谓词 = core 单一定义点（remote-use U20 下沉——与 composer 队列区/移动壳同源）
+import { deliveryQueueEntries, getDeliveryProjectionRef } from '@taiji/core'
 import { COMPACTING_NOTICE_HEIGHT, EXECUTING_BASH_NOTICE_HEIGHT } from '@/composables/panel/message-stream-layout'
 import { Button } from '@/components/ui/button'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
@@ -154,8 +154,9 @@ interface ActivityRow {
 }
 
 /** 待发队列条目计数（chip 口径，[compact-defer-composer-queue §2.1 → u3c 内核化]）：
- *  数据源 = session.delivery 帧投影（内核权威），口径与 composer 队列区（useQueueRows 的
- *  deliveryQueueEntries）同源——非 direct 车道且未 delivered 的条目计待发。
+ *  数据源 = session.delivery 帧投影（内核权威），口径与 composer 队列区（useQueueRows）同源
+ *  ——谓词 = core deliveryQueueEntries（U20 下沉唯一定义点），非 direct 车道且未 delivered
+ *  的条目计待发。
  *  count === 0 时 chip 不渲染（活动行仍在，压缩状态本身独立成立）。 */
 const flushCount = computed(() => deliveryQueueEntries(getDeliveryProjectionRef().value.get(props.sessionId) ?? []).length)
 

@@ -44,7 +44,7 @@ vi.mock('@/composables/useToast', () => ({
 }))
 
 import SystemLlmRetrySection from '@/components/settings/system/SystemLlmRetrySection.vue'
-import zhCN from '@/i18n/locales/zh-CN/settings'
+import zhCN from '@taiji/ui/locale/zh-CN/settings'
 import type { LlmRetryConfig } from '@taiji/shared'
 
 function makeI18n() {

@@ -106,6 +106,32 @@ describe('SEC-U2 WS transport hardening (loopback + maxPayload + auth handshake)
     ws.close()
   })
 
+  it('SEC-U2 pre-auth 丢弃告警连接级频控——同一连接第二条非 auth 消息不再 warn', async () => {
+    // code-harden P2：10s 握手窗口内逐条 warn 可刷屏，改为每连接只 warn 首条。
+    // 断言按消息内容过滤计数（free-port helper 撞端口重试会 warn，不计入）。
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { conn, port } = await startManager(TEST_TOKEN)
+      cleanup.push(() => conn.stop())
+      const droppingCalls = () => warnSpy.mock.calls.filter((c) => String(c[0]).includes('dropping pre-auth'))
+
+      const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+      await new Promise<void>((resolve) => ws.once('open', () => resolve()))
+      // 首条非 auth 消息：warn 一次（含消息 type）
+      ws.send(JSON.stringify({ type: 'plugin.toggle', id: 'evil-1', payload: { pluginId: 'x', enabled: false } }))
+      await new Promise<void>((r) => setTimeout(r, 200))
+      expect(droppingCalls().length).toBe(1)
+      expect(String(droppingCalls()[0]?.[0])).toContain('type=plugin.toggle')
+      // 第二条：静默丢弃，不再 warn
+      ws.send(JSON.stringify({ type: 'plugin.toggle', id: 'evil-2', payload: { pluginId: 'x', enabled: false } }))
+      await new Promise<void>((r) => setTimeout(r, 200))
+      expect(droppingCalls().length).toBe(1)
+      ws.close()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
   it('SEC-U2 错误 token 被拒（auth.result ok=false + close 1008）', async () => {
     const { conn, port } = await startManager(TEST_TOKEN)
     cleanup.push(() => conn.stop())
