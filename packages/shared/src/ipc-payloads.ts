@@ -213,8 +213,9 @@ export type LocalFileServableReason = 'not_found' | 'is_dir' | 'out_of_whitelist
  * `localFile:servable` 预检结果（HtmlPreviewInline `probeArtifact?` 挂载前准入检查，
  * §6.9 D9 入/出参面 SSOT）。
  *
- * 谓词 = 白名单成员资格（先行短路）→ 存在性 → 目录性，与 local-file 协议 handler
- * 复用主进程同一模块函数（越界路径不触 fs，不构成存在性探测通道）：
+ * 谓词 = 准入前缀成员资格（先行短路）→ 存在性 → 目录性，与 local-file 协议 handler
+ * 复用主进程同一模块函数（越界路径不触 fs，不构成存在性探测通道）；通道准入前缀 =
+ * 会话产物子树 `<dataDir>/artifacts/**`（读/预检通道收窄面，非协议 handler 全量白名单）：
  * - `servable: true`  → `size` 附文件字节数（HtmlPreviewInline 头部条显示文件名与大小）
  * - `servable: false` → `reason` 指明降级原因
  */
@@ -234,7 +235,9 @@ export type LocalFileReadReason = LocalFileServableReason | 'read_failed'
 /**
  * `localFile:read` 源码内容读取结果（§8.2 S3「切换『源码』看到 shiki 高亮」）。
  *
- * 谓词与 `LocalFileServableResult` / 协议 handler 同一白名单模块（越界不触 fs）：
+ * 谓词与 `LocalFileServableResult` / 协议 handler 同一白名单模块（越界不触 fs）；通道
+ * 准入前缀 = 产物子树 `<dataDir>/artifacts/**`（读通道收窄面，非协议 handler 全量白名单
+ * ——`<dataDir>` 整前缀含 pi agent 目录凭据）：
  * - `ok: true`  → `content` + `truncated`（超 1 MiB 截断，与 runtime `file.read` 同语义）
  * - `ok: false` → `reason` 指明失败原因
  */

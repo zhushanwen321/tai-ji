@@ -16,6 +16,7 @@ import path from 'node:path'
 import { homedir } from 'node:os'
 import {
   computeLocalFilePrefixes,
+  computeLocalFileReadPrefixes,
   readLocalFileContent,
   MAX_LOCAL_FILE_READ_BYTES,
 } from '../utils/local-file-prefixes'
@@ -283,5 +284,47 @@ describe('readLocalFileContent: 源码态白名单读取通道（chat-html-suppo
     })
     expect(result).toEqual({ ok: false, reason: 'not_found' })
     expect(onError).toHaveBeenCalledWith(err, ARTIFACT)
+  })
+})
+
+describe('computeLocalFileReadPrefixes: 读/预检 IPC 通道准入收窄', () => {
+  // 通道消费域 = 产物子树（HtmlPreviewInline 源码态/size 预检、useDetailPane 抽屉产物
+  // 读取）；全量白名单含 <dataDir> 整前缀，读通道若复用 = 渲染进程可直读数据目录内
+  // 任意文件文本（含 pi agent 目录凭据）。本组用例锁定收窄面本身。
+  it('前缀 = <dataDir>/artifacts/ 且带 trailing path.sep（与全量白名单同构的误判防护）', () => {
+    expect(computeLocalFileReadPrefixes(DATA_DIR)).toEqual([path.join(DATA_DIR, 'artifacts') + path.sep])
+  })
+
+  it('产物路径命中、dataDir 内非产物子树不命中（attachments / cache/images / agent）', () => {
+    const readPrefixes = computeLocalFileReadPrefixes(DATA_DIR)
+    expect(isPathInAllowedPrefixes(`${DATA_DIR}/artifacts/s1/report.html`, readPrefixes)).toBe(true)
+    expect(isPathInAllowedPrefixes(`${DATA_DIR}/artifacts`, readPrefixes)).toBe(true)
+    expect(isPathInAllowedPrefixes(`${DATA_DIR}/attachments/sess-1/img.png`, readPrefixes)).toBe(false)
+    expect(isPathInAllowedPrefixes(`${DATA_DIR}/cache/images/x.png`, readPrefixes)).toBe(false)
+    expect(isPathInAllowedPrefixes(`${DATA_DIR}/agent/auth.json`, readPrefixes)).toBe(false)
+    // 兄弟目录不误伤（trailing sep 守护）
+    expect(isPathInAllowedPrefixes(`${DATA_DIR}/artifacts-extra/x.html`, readPrefixes)).toBe(false)
+  })
+
+  it('攻击面锁定：全量白名单内的 <dataDir>/agent/auth.json 经读通道前缀 out_of_whitelist 不触 fs', () => {
+    // 对照组证明攻击面真实存在：同一路径在全量白名单内可读
+    expect(isPathInAllowedPrefixes(`${DATA_DIR}/agent/auth.json`, packagedPrefixes())).toBe(true)
+    const stat = vi.fn()
+    const read = vi.fn()
+    const result = readLocalFileContent(`${DATA_DIR}/agent/auth.json`, computeLocalFileReadPrefixes(DATA_DIR), {
+      statSync: stat,
+      readFileSync: read,
+    })
+    expect(result).toEqual({ ok: false, reason: 'out_of_whitelist' })
+    expect(stat).not.toHaveBeenCalled()
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it('产物文件经读通道前缀正常读取（消费面不回归）', () => {
+    const result = readLocalFileContent(`${DATA_DIR}/artifacts/s1/report.html`, computeLocalFileReadPrefixes(DATA_DIR), {
+      statSync: () => ({ isDirectory: () => false, size: 11 }),
+      readFileSync: () => new TextEncoder().encode('<h1>hi</h1>'),
+    })
+    expect(result).toEqual({ ok: true, content: '<h1>hi</h1>', truncated: false })
   })
 })

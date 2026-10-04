@@ -34,11 +34,12 @@ export type {
 /**
  * servable 预检通道的 electronAPI 方法面（IPC 通道名 `localFile:servable`，
  * chat-html-support §6.9 D9）：内联预览容器 HtmlPreviewInline（经 deps `probeArtifact?`）
- * 挂载前预检（v16 唯一渲染面，ADR-0108）。
+ * 挂载前预检（v16 唯一渲染面，ADR-0108）。准入前缀 = 会话产物子树
+ * `<dataDir>/artifacts/**`（读/预检通道收窄面，非协议 handler 全量白名单）。
  */
 export interface LocalFileServableChannel {
   /**
-   * 预检绝对路径是否可经 local-file 协议服务（挂载前准入检查）。
+   * 预检绝对路径是否可服务（挂载前准入检查）。
    *
    * @param absPath 绝对路径或 `~` 形态路径（`~` 展开 / 规范化由主进程谓词承担；IPC 入参为
    *   明文路径，不做百分号解码——解码仅存在于 URL 入口）
@@ -53,11 +54,11 @@ export interface LocalFileServableChannel {
  * 消费方 = 内联容器源码态（deps `readArtifact`）与 DetailPane 变更集/文件树产物源码读取
  * （useDetailPane `loadPreviewContent`）：产物目录 `<dataDir>/artifacts/<sessionId>` 在
  * session cwd 外（§6.7 D7），runtime `file.read` 的 cwd 守门不可达，故源码内容走本条与
- * servable 同源（同一白名单谓词）的读取通道。
+ * servable 同源（同一谓词模块）的读取通道；准入前缀同为产物子树（收窄面）。
  */
 export interface LocalFileReadChannel {
   /**
-   * 读白名单内文件内容。
+   * 读产物子树内文件内容。
    *
    * @param absPath 绝对路径（`~` 展开 / 规范化由主进程谓词承担）
    * @returns `ok: true` 时附 `content` / `truncated`；`ok: false` 时 `reason` 指明失败原因

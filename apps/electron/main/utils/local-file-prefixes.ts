@@ -27,15 +27,17 @@
  *
  * 每项追加 path.sep 后缀，防止前缀误判（/Users/foo 匹配到 /Users/foobar）。
  *
- * 依赖方向：无下游（纯函数，node:path / node:os / node:fs + gateway/input-validators 的
- * 白名单前缀判定）；被 main.ts 的协议 handler 与 gateway/local-file-handlers 的 servable
- * 预检 IPC 共用（chat-html-support §6.4 D4「同一谓词」/ §6.9 D9）。
+ * 依赖方向：无下游（纯函数，node:path / node:os / node:fs）；白名单前缀判定
+ * isPathInAllowedPrefixes 与构造 computeLocalFilePrefixes 是同一白名单域的「判定/构造」
+ * 两半，同居本文件（原在 gateway/input-validators 属历史位置，下沉消解
+ * gateway→utils→gateway 模块环）。被 main.ts 的协议 handler 与
+ * gateway/local-file-handlers 的 servable/read IPC 共用（chat-html-support §6.4 D4
+ * 「同一谓词」/ §6.9 D9）。
  */
 import path from 'node:path'
 import { readFileSync as fsReadFileSync, statSync as fsStatSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
-import { isPathInAllowedPrefixes } from '../gateway/input-validators.js'
 import { expandLocalFilePath } from './path.js'
 import type {
   LocalFileReadReason,
@@ -109,6 +111,40 @@ export function computeLocalFilePrefixes(opts: LocalFilePrefixOptions): string[]
     ...userContentSubdirs,
   ]
   return prefixes.map(p => (p.endsWith(sep) ? p : p + sep))
+}
+
+/**
+ * 校验路径是否在允许的前缀目录内（防目录穿越）。
+ * 用于 local-file:// 协议 handler 与 local-file 两条 IPC 通道的准入判定。
+ *
+ * 两次匹配：resolved.startsWith(prefix) 或精确等于（resolved + sep === prefix）。
+ *
+ * @param filePath 待校验路径
+ * @param allowedPrefixes 允许的根目录列表（调用方负责追加 path.sep 后缀）
+ * @returns true=在白名单内 / false=越界
+ */
+export function isPathInAllowedPrefixes(filePath: string, allowedPrefixes: readonly string[]): boolean {
+  const sep = path.sep
+  const resolved = path.resolve(filePath)
+  // 前缀匹配（allowedPrefixes 已带 trailing sep）+ 精确匹配（resolved 本身就是允许目录）
+  return allowedPrefixes.some(p => resolved.startsWith(p))
+    || allowedPrefixes.some(p => resolved + sep === p)
+}
+
+/**
+ * localFile:servable / localFile:read 两条 IPC 通道的准入前缀（读/预检通道单独收窄）。
+ *
+ * 两条 IPC 的消费域 = 会话产物子树 `<dataDir>/artifacts/`（HtmlPreviewInline 挂载前
+ * size 预检 + 源码态读取、useDetailPane 抽屉产物源码读取——全部调用链只消费产物路径）。
+ * 与渲染面协议 handler 的全量白名单（computeLocalFilePrefixes）分离：通道入参含模型消息
+ * 文本承载的路径载荷（html-preview fence），全量白名单含 `<dataDir>` 整前缀（含 pi agent
+ * 目录的 auth.json 等凭据文件），读通道复用全量白名单 = 渲染进程可直读数据目录内任意
+ * 文件文本。cwd 外非产物路径返回 `out_of_whitelist`，由调用方回落既有通道（useDetailPane
+ * 的 cwd 通道 / 容器降级占位），不构成功能回退。
+ */
+export function computeLocalFileReadPrefixes(dataDir: string): string[] {
+  const artifactsPrefix = path.join(dataDir, 'artifacts')
+  return [artifactsPrefix.endsWith(path.sep) ? artifactsPrefix : artifactsPrefix + path.sep]
 }
 
 // ── local-file servable 预检谓词（chat-html-support §6.4 D4 子决策 / §6.9 D9）──────
@@ -244,10 +280,11 @@ export function probeLocalFileUrlPathname(
 // ── local-file 源码内容读取（chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」）──
 // 产物目录 `<dataDir>/artifacts/<sessionId>` 在 session cwd 外（设计 §6.7 D7 自述「产物在
 // cwd 外、在白名单内」），runtime `file.read` 的 cwd 守门（file-service.ts 越界抛
-// `out_of_cwd`）对主要产物路径不可达——源码态需要一条与 servable 预检**同一白名单谓词**的
-// 读取通道。准入判定复用 probeLocalFileServable（白名单先行短路 → 存在性 → 目录性），
-// 不新增白名单成员、不放宽准入；读出的内容只经 CodeBlock 文本插值渲染（禁 v-html），
-// 不构成脚本执行面扩大。
+// `out_of_cwd`）对主要产物路径不可达——源码态需要一条与 servable 预检**同一谓词函数**的
+// 读取通道。准入判定复用 probeLocalFileServable（白名单先行短路 → 存在性 → 目录性）；
+// IPC 通道侧前缀集 = computeLocalFileReadPrefixes 的产物子树（非协议 handler 全量白名单
+// ——通道入参含模型消息文本路径载荷，文本读取面限定在实际消费域）。读出的内容只经
+// CodeBlock 文本插值渲染（禁 v-html），不构成脚本执行面扩大。
 
 /** 源码态读取上限（与 runtime `file.read` 的 MAX_FILE_SIZE 同语义：1 MiB，超出截断） */
 export const MAX_LOCAL_FILE_READ_BYTES = 1_048_576
@@ -265,10 +302,12 @@ function defaultReadFile(filePath: string): Uint8Array {
  * 读白名单内文件内容（源码态通道）。
  *
  * 谓词与 servable 预检 / 协议 handler 同源（probeLocalFileServable）——越界路径一律
- * `out_of_whitelist` 且不触 fs（检查顺序是安全性质，不构成存在性探测通道）。
+ * `out_of_whitelist` 且不触 fs（检查顺序是安全性质，不构成存在性探测通道）。准入域由
+ * 调用方传入的前缀集裁决：IPC 读通道传 computeLocalFileReadPrefixes 的产物子树（收窄面），
+ * 协议 handler 面如需全文读取才传 computeLocalFilePrefixes 全量白名单。
  *
  * @param rawPath 绝对路径或 `~` 形态路径（IPC 入参）
- * @param allowedPrefixes computeLocalFilePrefixes 产出（已带 trailing path.sep）
+ * @param allowedPrefixes 准入前缀集（已带 trailing path.sep，见上方准入域说明）
  * @param fs 探测 / 读取切面（缺省 node:fs）
  */
 export function readLocalFileContent(

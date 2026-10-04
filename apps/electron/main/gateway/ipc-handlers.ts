@@ -30,9 +30,10 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): void {
   registerBrowserHandlers(deps.browserViewManager, deps.getMainWindow)
   registerUpdateHandlers(deps)
   registerSoundHandlers()
-  // local-file servable 预检 IPC（chat-html-support §6.9 D9）：卡片与抽屉渲染态
-  // 挂载前的准入检查，与 main.ts 的 local-file 协议 handler 共用同一谓词模块
-  registerLocalFileHandlers(deps)
+  // local-file servable 预检 + 源码读取 IPC（chat-html-support §6.9 D9）：挂载前准入
+  // 检查与源码态读取，谓词与 main.ts 的 local-file 协议 handler 同一模块；准入前缀 =
+  // 产物子树收窄面（computeLocalFileReadPrefixes），无需注入 deps
+  registerLocalFileHandlers()
   registerRendererLogHandler()
   // [D6-⑨ u7] toolResult 图片落盘（含启动清扫：孤儿扫描 + 软上限）
   registerImageCacheHandlers()
