@@ -7,7 +7,7 @@
 // thinkingLevel 显示原始值，移动壳无 models 列表消费面，不做 id→展示名映射）。
 // 状态点 = 派生态（remote-use A14/U20）：derivedStatus prop 由 MobileSessionList 经 core
 // deriveSessionStatus 按参数化输入计算（occupancy + subagent 运行态 + meta；blockingOverlay
-// 移动恒 false，D9③ 白名单）——与桌面侧栏同源 9 态，替代原 SessionStatus 6 态直渲染。
+// 移动恒 false，D9② 白名单）——与桌面侧栏同源 9 态，替代原 SessionStatus 6 态直渲染。
 // dead 是进程态非对话派生态（9 态词表无 dead）：保留红点 + 「已退出」特判（A3 dead 分流的
 // 视觉锚；桌面同场景 = 行级置灰表达，移动以点色/文案承载）。判据归 core 谓词，本组件的
 // 9 态色/文案映射是展示层（CSS 类属各壳自持，同桌面 DOT_CLASS/STATUS_ICON 分工）。

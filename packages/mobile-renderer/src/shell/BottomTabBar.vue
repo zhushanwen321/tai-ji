@@ -32,7 +32,7 @@ function onSelect(tab: MobileTab): void {
     data-testid="bottom-tab-bar"
     role="tablist"
   >
-    <!-- role="button" 条目（原生 button 由 vue_rules_checker 拦；先例 = CompanionBand role="radio"） -->
+    <!-- role="tab" 条目（tablist 导航 ARIA 形态，aria-selected 标当前；原生 button 由 vue_rules_checker 拦，非原生条目先例 = CompanionBand role="radio"） -->
     <div
       v-for="tab in TABS"
       :key="tab.id"

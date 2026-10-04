@@ -2,18 +2,22 @@
 // MobileComposer —— 移动壳输入条（ui ComposerInput 复用 + 发送/中断键拇指区）。
 //
 // ComposerInputDeps 注入（W4 C1 契约三字段）：
-// - pasteImage：web 降级实现（D7 图片粘贴行——返回文本占位「[图片粘贴：需桌面环境]」，
+// - pasteImage：web 降级实现（remote-use-mobile D7（移动壳 v1 功能集裁定）图片粘贴行——返回文本占位「[图片粘贴：需桌面环境]」，
 //   contenteditable 按 kind:'text' 走文本降级路径，消息正常发出）
-// - renderIcon：恒 false（移动壳不建命令浮层，slash chip 不可达；D7 slash bar Phase 2）
+// - renderIcon：恒 false（移动壳不建命令浮层，slash chip 不可达；remote-use-mobile D7 slash 命令 bar 行 Phase 2）
 // - t：vue-i18n（chip × 按钮 aria-label 文案，单源 ui locale 下沉域）
 //
 // 发送走 core useChat.send（乐观气泡/steer 路由/sidecar 写入均为 core send 编排内置）；
-// 中断键（isActive 时可见）调 useChat.abort（D7 中断行）。
+// 中断键（isActive 时可见）调 useChat.abort（remote-use-mobile D7 中断行）。
 //
 // 发送失败契约（D6，对齐 core R2-A5 失败信号）：send 返回 false = RPC 失败（内部已
 // 消化——乐观气泡已回滚、transport 级 toast 已发；契约内不 throw）→ ComposerInput
 // 回填原文本（setSegments）+ 内联错误行（复用 form 通道 respondFailedId 范式）；
 // comp.clear() 只在成功分支执行——失败不丢草稿（S5 修复，V5 验收面）。
+// 双通道并存口径（两类失败可见提示数不同）：传输级失败（断连/超时）= ErrorBar（core
+// toast 带原因，A7 通道）+ 本内联行（操作指引）同帧双提示；classified 否决级（hook
+// 否决）= core toast 抑制（runtime 已广播流内错误气泡），仅本内联行一条。是否收敛为
+// 单通道留 UX 复审裁决。
 import { computed, onMounted, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Send, Square } from '@lucide/vue'
@@ -32,7 +36,7 @@ const input = ref<InstanceType<typeof ComposerInput> | null>(null)
 
 const deps: ComposerInputDeps = {
   pasteImage: async (): Promise<HandleImagePasteResult> => {
-    // D7 图片粘贴降级：移动浏览器无 writeSessionImage IPC 落盘通路，文本占位语义
+    // remote-use-mobile D7 图片粘贴降级：移动浏览器无 writeSessionImage IPC 落盘通路，文本占位语义
     return { kind: 'text', text: t('mobile.pasteImageFallback') }
   },
   renderIcon: () => false,
@@ -84,7 +88,7 @@ async function onSend(): Promise<void> {
   comp.clear()
 }
 
-/** 中断当前回合（D7 中断行） */
+/** 中断当前回合（remote-use-mobile D7 中断行） */
 async function onStop(): Promise<void> {
   const sid = props.sessionId
   if (!sid) return

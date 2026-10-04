@@ -10,7 +10,7 @@
 //        桌面旧行为 = SessionList 对 groups 直渲染零排序；谓词输出必须与输入展平原序恒等。
 //   3. 移动列表状态点按参数化输入工作（core 侧半边 = 参数化输入契约可独立驱动各分支：
 //      blockingOverlay 缺省 false 与显式 false 同输出——移动壳无 extensionUI store 的
-//      D9③ 白名单语义在谓词层成立）
+//      D9② 白名单语义在谓词层成立）
 //
 // 运行：cd packages/core && npx vitest run src/domain/session/__tests__/session-derivations.test.ts
 import { describe, expect, it, beforeEach } from 'vitest'

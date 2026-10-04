@@ -12,7 +12,7 @@
  *
  * 注：session 派生状态的「纯判定谓词」自 U20 起在此导出（deriveSessionStatus，A14 参数化
  * 输入下沉——桌面全量投影 / 移动 occupancy + subagent 运行态子集，blockingOverlay 移动
- * 恒 false 见 D9③ 白名单）；跨 store 协调（chat 分区 + session 元数据的读取编排）仍是
+ * 恒 false 见 D9② 白名单）；跨 store 协调（chat 分区 + session 元数据的读取编排）仍是
  * 壳层职责，不在本 store factory 内。
  */
 import { computed, ref } from 'vue'
@@ -42,7 +42,7 @@ export function sessionsInRuntimeGroupOrder(groups: readonly SessionGroup[]): Se
  *   运行态分区）+ metaStatus；**hasBlockingOverlay 缺省 false**——移动壳无 extensionUI
  *   store（面板族裁剪），该输入源不存在，等待态只由 toolCall 分支达成。语义损失 =
  *   富交互表单 pending 在列表不显 waiting（移动表单呈现是页面级 MobileFormCard，列表
- *   状态点不承载该信号），已登记 D9③ 白名单（docs/todo，随本单元交付同 commit）。
+ *   状态点不承载该信号），已登记 D9② 白名单（docs/todo，随本单元交付同 commit）。
  */
 export interface SessionStatusInputs {
   /** pendingSend ∨ isGenerating（提交后到 message_start 空窗 + 流式占用的 UI 层 SSOT） */

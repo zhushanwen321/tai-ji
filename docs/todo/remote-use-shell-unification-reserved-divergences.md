@@ -31,3 +31,19 @@
 - **判定**：真差异（与桌面 useTurnExpansion 既有行为对齐的既定形态），不补。
 - **边界**：驱逐路径的另一残留（streamSubscriptions 订阅不随驱逐失效）不登记本清单——已由 D2 驱逐连带退订消除。
 - **退役/复审条件**：驱逐路径接入 session 级 cleanup 编排时，本条随之删除。
+
+## 5. 生命周期外三个 effects 回调移动壳不接（D5 去留表）
+
+- **差异**：`onMessageComplete` / `onWorkflowUpdate` / `onSubagentEntries` 三个 InboundEffects 回调——桌面全接（useMessageEffects：完成通知音/角标、workflow 状态投影、subagent entry 抽屉数据），移动壳 effects 装配不含（`packages/mobile-renderer/src/bootstrap.ts` shellEffects，注释明示「本波不接」）。
+- **差异根因**：三个回调的消费方移动 v1 均无承载——完成通知音/角标属 W4 通知体系（未立项），workflow 列表与 subagent entry 抽屉属桌面面板族（移动壳 Phase 2 裁剪形态）；无消费方时接线是空转注册。
+- **语义损失（登记的代价面）**：移动端轮次完成无提示音/角标、无 workflow 状态与 subagent entry 浏览面——消息主链与 subagent 运行状态行（onSubagents，已接）不受影响。
+- **判定**：真差异（消费方在移动壳形态下不存在，非漏接），不补。
+- **退役/复审条件**：W4/W5 通知体系立项时按通道接线（onMessageComplete 首个候选），面板族消费方若立项则随 UI 载体逐个接入，接入后删本条对应回调段；全部接入后删本条。
+
+## 6. 取消回填通道恒 text-only：reply.segments 快照移动壳不消费（D7）
+
+- **差异**：`delivery.cancel` reply 携带 `segments` 快照（提交时随 delivery.submit 上行、runtime 按 clientUuid 持有，`packages/shared/src/protocol.ts` 明示「供文本回输入框草稿」）——桌面取消回填走 `restoreToDraft`（`packages/renderer/src/composables/panel/composer-shell.ts`）：空输入分支 `restoreSegments` 整段恢复 text + image/file chip；移动壳 `QueueStrip.requestDraftRestore` 恒走 text-only `composerInjection` 通道，segments 快照被丢弃（文本仍恢复，chip 部分静默丢）。
+- **差异根因**：移动 composer 无 chip 呈现载体——`pasteImage` 无 IPC 落盘通路恒文本降级（`MobileComposer.vue`）、`renderIcon` 恒 false，结构性无法消费 segments；与图片粘贴文本降级同因。
+- **语义损失（登记的代价面）**：双端同看同一会话时，在手机上取消桌面发出的含 chip 条目，chip 部分不回草稿（文本恢复不受影响）。
+- **判定**：真差异（移动壳无 chip 消费方，非漏接），不补。
+- **退役/复审条件**：W4 图片粘贴真实化立项（移动 composer 获得 chip 呈现载体）时，回填通道随之接 segments 整段恢复并删本条。

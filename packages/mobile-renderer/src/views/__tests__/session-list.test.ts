@@ -154,7 +154,7 @@ describe('A14 状态点 = 参数化输入派生（core deriveSessionStatus 单�
   })
 
   it('blockingOverlay 输入缺省（移动壳无 extensionUI store）不产生 waiting 误判：同态与显式空输入一致', () => {
-    // 移动输入子集语义（D9③ 白名单）：列表渲染链不传 hasBlockingOverlay——谓词缺省 false，
+    // 移动输入子集语义（D9② 白名单）：列表渲染链不传 hasBlockingOverlay——谓词缺省 false，
     // 非 hydrate 会话照常落 meta 兜底（done），不因缺源走 waiting 分支
     seedList([makeSummary({ id: 'st-3', status: 'done', lastActiveAt: 1000 })])
     const wrapper = mountList()

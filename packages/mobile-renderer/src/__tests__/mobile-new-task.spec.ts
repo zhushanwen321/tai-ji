@@ -48,7 +48,7 @@ function mountSheet(open = true) {
   })
 }
 
-describe('NewTaskSheet 提交调 createSessionFlow（D7 新建任务行）', () => {
+describe('NewTaskSheet 提交调 createSessionFlow（remote-use-mobile D7（移动壳 v1 功能集裁定）新建任务行）', () => {
   beforeEach(() => {
     mockCreateSessionFlow.mockReset()
   })

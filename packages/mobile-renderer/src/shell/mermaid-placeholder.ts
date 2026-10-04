@@ -1,4 +1,4 @@
-// mermaid-placeholder —— 移动壳 mermaid 占位降级（remote-use D7 图表行 / D10 分派④）。
+// mermaid-placeholder —— 移动壳 mermaid 占位降级（remote-use-mobile D7（移动壳 v1 功能集裁定）mermaid 图表行 / 同文档 D10 分派④）。
 //
 // mermaid 库不进移动壳 bundle（体积），renderMermaid 桥接返回占位 svg。MarkdownRenderer
 // 期望 {svg} 结构（ui MermaidRenderer v-html 受控点注入）——纯 no-op 会破图，占位呈现

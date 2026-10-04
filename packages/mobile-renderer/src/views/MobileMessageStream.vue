@@ -14,11 +14,11 @@
 //    message complete ∨ token 静默 ≥ 阈值，谓词注入字段已随审计候选 18 收单删除）
 // ② 惰性（D10 移动壳无接管态——turn 展开分区只留展开集合，接管读写恒 false/no-op，
 //    与 ui 组件侧原兜底行为等价）：isTakeover/setTakeover
-// ③ no-op（hover 入口触屏不可见，D7）：onForkAsk/onHandoffAsk/editAndResend/toMarkdown
-// ④ no-op + D7 登记（面板族 Phase 2）：openDrawer/onFileClick +
+// ③ no-op（hover 入口触屏不可见，remote-use-mobile D7（移动壳 v1 功能集裁定）hover actions 行）：onForkAsk/onHandoffAsk/editAndResend/toMarkdown
+// ④ no-op + remote-use-mobile D7 登记（diff 详情/文件树面板族 Phase 2 行）：openDrawer/onFileClick +
 //    loadFileCandidates（空数组——路径链接化降级普通文本，env 白名单同步空集）
 // ⑤ 占位降级：renderMermaid 返回占位 svg（MarkdownRenderer 期望 {svg} 结构，纯 no-op 破图；
-//    mermaid 库不进移动壳 bundle，D7 图表行）
+//    mermaid 库不进移动壳 bundle，remote-use-mobile D7 mermaid 图表行）
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChatView, ChatViewDepsKey, TruncatedHistoryBar } from '@taiji/ui'
@@ -42,7 +42,7 @@ const { t } = useI18n()
 
 const expansion = createTurnExpansion(computed(() => props.sessionId))
 
-/** markdown 路径链接化 env：loadFileCandidates 空数组（D7 面板族降级）→ 白名单空集，
+/** markdown 路径链接化 env：loadFileCandidates 空数组（remote-use-mobile D7 面板族降级）→ 白名单空集，
  *  路径渲染为普通文本（与桌面 load 失败降级形态一致） */
 const EMPTY_ENV = { filePaths: new Set<string>(), localFiles: new Set<string>() }
 
@@ -70,14 +70,14 @@ const deps: ChatViewDeps = {
   onRevokeMessage: (sid, targetId) => {
     void useChatInstance.revokeMessage(sid, targetId)
   },
-  // hover 全族 no-op（D7：触屏不可见；恢复路径 = 桌面操作）
+  // hover 全族 no-op（remote-use-mobile D7：触屏不可见；恢复路径 = 桌面操作）
   editAndResend: () => {},
   onForkAsk: () => {},
   onHandoffAsk: () => {},
   openDrawer: () => {},
   onFileClick: () => {},
 
-  // 数据加载（D7 面板族 Phase 2：空候选 → 路径链接化降级普通文本）
+  // 数据加载（remote-use-mobile D7 面板族 Phase 2：空候选 → 路径链接化降级普通文本）
   loadFileCandidates: () => [],
 
   // 渲染桥接（渲染链下沉 ui 单源；copyLabel 注入——ui 渲染模块不依赖壳 i18n 单例）
@@ -88,12 +88,12 @@ const deps: ChatViewDeps = {
     return { ...result, cache: c }
   },
   streamingFenceSilenceMs: STREAMING_FENCE_SILENCE_MS,
-  // ④ 占位降级（D7 mermaid 行：图表在桌面查看；文案经 i18n，不养文案副本）
+  // ④ 占位降级（remote-use-mobile D7 mermaid 行：图表在桌面查看；文案经 i18n，不养文案副本）
   renderMermaid: (source, _theme) => {
     void source
     return renderMermaidPlaceholder(t('mobile.mermaid.placeholder'))
   },
-  // copy-as-MD 无消费者（D7 hover 全族），不可达
+  // copy-as-MD 无消费者（remote-use-mobile D7 hover 全族），不可达
   toMarkdown: () => '',
 }
 

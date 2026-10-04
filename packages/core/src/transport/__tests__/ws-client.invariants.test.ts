@@ -28,10 +28,11 @@
 //   markConnected 置位 + pre-auth 队列 flush（见 ⑥）。[漂移] 原稿「auth.reject 降级：标记
 //   连接不可用 + 壳降级 UI」——现行语义 = close 走重连链（新 token 由 use-connection 的
 //   onRuntimePort 路径刷新），非降级 UI。
-// ③ close code 分流：按 WebSocket close code 分流重连策略。能力未迁入 core（保持 it.todo）：
-//   现行 ws-client onclose 不读 code，一律走退避重连。原稿断言点：1006 异常关闭 → 退避重连；
-//   4001 认证失效 → 不重连；4000/4003 等服务端正常关闭 → 不重连；分流判定集中在 ws-client
-//   单点（不散落 routeInbound/domain）。[漂移] 原稿「4001 不重连」与现行 auth 拒绝行为
+// ③ close code 分流：按 WebSocket close code 分流重连策略。1001 段已激活（remote-use D8）：
+//   现行 ws-client onclose 读 close code，1001（runtime 计划内关停）触发 onGoingAway 文案
+//   信号、重连机制不变；1006 等异常关闭不触发信号，照常退避重连。4001/4xxx「不重连」分流
+//   仍 todo（后续 wave）；分流判定集中在 ws-client 单点（不散落 routeInbound/domain）。
+//   [漂移] 原稿「4001 不重连」与现行 auth 拒绝行为
 //   （close → 重连链，等 token 刷新）语义相反——激活时按现行语义裁决分流表，不照搬原稿。
 // ④ seq 回放（可靠投递语义）：session 通道消息带 seq，gap 检测后 reconcile 保证消息不丢。
 //   seq 机制全部在 transport + coordination（seqGate / subscription-state / route-inbound），
@@ -71,12 +72,14 @@
 //   ——规格先行，本注释块随实现漂移时同步修正。
 //
 // ── 激活范围（F4 → S-33 扩）──
-// 已激活：① 3 条 + ② 3 条 + ④ gap reconcile 1 条 + ⑤ 退避/时长上限 2 条（fake 注入 +
-//   vi.useFakeTimers）。② 原为 C4 deferred（「auth 能力迁入 core 时激活」），S-33 复审确认
-//   auth 握手已落地 core ws-client（connect(url, credentials) 凭据对象签名），defer 理由失效。
-// 保持 todo 范围（C4 deferred）：③ close code 分流 3 条、④ reconcile 回放断言 + presence
-//   2 条——close code / presence 能力未迁入 core，激活待后续 wave。⑤ visibility 重连的 todo
-//   已移除（行为已落地 use-connection 并有专门测试，见 ⑤ [漂移] 说明）。
+// 已激活：① 3 条 + ② 3 条 + ③ close code 分流 1001/1006 两条（remote-use D8——onclose 读
+//   close code，1001 触发 onGoingAway 文案信号，重连机制不变）+ ④ gap reconcile 1 条 +
+//   ⑤ 退避/时长上限 2 条（fake 注入 + vi.useFakeTimers）。② 原为 C4 deferred（「auth 能力
+//   迁入 core 时激活」），S-33 复审确认 auth 握手已落地 core ws-client（connect(url,
+//   credentials) 凭据对象签名），defer 理由失效。
+// 保持 todo 范围（C4 deferred）：③ 余 4001/4xxx 两条、④ reconcile 回放断言 + presence
+//   2 条——4001/4xxx「不重连」分流与 presence 能力未落地，激活待后续 wave。⑤ visibility
+//   重连的 todo 已移除（行为已落地 use-connection 并有专门测试，见 ⑤ [漂移] 说明）。
 // 超出原稿范围（规格按实现现状增补）：⑥ pre-auth 发送队列（review findings-confirmation #3）
 //   + 辅助状态（restarting/failed IPC 驱动）+ ⑦ 探活死链检测（remote 切前台补位，见 ⑦）。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'

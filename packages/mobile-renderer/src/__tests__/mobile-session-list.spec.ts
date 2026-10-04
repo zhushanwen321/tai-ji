@@ -1,4 +1,4 @@
-// MobileSessionList 组件测试（remote-use D7 列表行；审计缺口补齐：整组件此前无测试）。
+// MobileSessionList 组件测试（remote-use-mobile D7（移动壳 v1 功能集裁定）列表行；审计缺口补齐：整组件此前无测试）。
 //
 // 行为面（按组件实装）：runtime 组序排序（A13：客户端零重排）、时间文案（今天 HH:mm 补零 / 跨日 M/D）、
 // 状态点配色 + 状态文案、加载失败态（role=alert 错误行 + 点击重试）、空态占位、
@@ -85,7 +85,7 @@ function itemIdsInOrder(wrapper: ReturnType<typeof mountList>): string[] {
     .map((node) => node.attributes('data-testid') ?? '')
 }
 
-describe('MobileSessionList 会话列表（D7 列表行）', () => {
+describe('MobileSessionList 会话列表（remote-use-mobile D7 列表行）', () => {
   beforeEach(() => {
     // i18n 是模块级单例：同 worker 前序测试可能把 locale 切到 en-US，此处固定中文
     i18n.global.locale.value = 'zh-CN'

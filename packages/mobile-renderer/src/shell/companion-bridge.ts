@@ -1,7 +1,7 @@
 // companion-bridge —— 移动壳 companion 区（CompanionBand）的数据源与回传装配
-// （remote-use D7「ask-user 提问答复 ✅」行的壳侧拉通）+ 权限审批通道（D7「权限审批 ✅
-// 手机可批」行的壳侧拉通）+ form/planReview 类请求通道（D7 form 行恢复任务：统一表单与
-// plan 审批的移动壳消费面，消除「请求方无限等待」）。
+// （remote-use-mobile D7（移动壳 v1 功能集裁定）「ask-user 提问答复 ✅」行的壳侧拉通）+
+// 权限审批通道（同表「权限审批 ✅ 手机可批」行的壳侧拉通）+ form/planReview 类请求通道
+// （同表 form 行恢复任务：统一表单与 plan 审批的移动壳消费面，消除「请求方无限等待」）。
 //
 // 对话桥翻译层（WS source 适配 + dialog source/transport 工厂 + requestId 反查表）已下沉
 // @taiji/ui/extension-host shell-adapters（双壳逐字节共享，含 [G1] 反查表泄漏语义文档）；
@@ -122,7 +122,7 @@ export const mobileUiResponseTransport = companionDialog.transport
 // errorBarMessage/dismissErrorBar 消费点（ErrorBar.vue）改从 ./error-bar 直接 import——
 // 状态单例归属该模块，本模块不再中转 re-export
 
-// ── permissionRequest 审批通道（D7 审批行，App 挂 PermissionRequestDialog）──
+// ── permissionRequest 审批通道（remote-use-mobile D7（移动壳 v1 功能集裁定）「权限审批 ✅ 手机可批」行，App 挂 PermissionRequestDialog）──
 //
 // 状态机本体在 @taiji/ui/extension-host createPermissionRequestController（双壳共享，
 // 桌面 usePermissionRequest.ts 是同一 factory 的薄接线）；本模块只做移动壳装配：
@@ -139,7 +139,7 @@ export function useMobilePermissionRequest(): PermissionRequestState {
   return permissionController.state
 }
 
-// ── form/planReview 类请求通道（D7 form 行恢复：统一表单 + plan 审批的移动壳消费面）──
+// ── form/planReview 类请求通道（remote-use-mobile D7（移动壳 v1 功能集裁定）form 行恢复：统一表单 + plan 审批的移动壳消费面）──
 //
 // 消费语义与桌面 useExtensionUI 同构（桌面 per-panel 订阅 + pinia store SSOT；移动壳无
 // pinia，模块级 reactive Map 分区承接，ADR-0049 per-session Map 范式）：

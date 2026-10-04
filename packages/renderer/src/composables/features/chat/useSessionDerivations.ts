@@ -78,7 +78,7 @@ export function useSessionDerivations() {
         // 帧经归一层附加后统一命中（T3 + schedule-create U6 随判定键收敛自动联动）；planReview
         // 键由 runtime event-adapter PLAN_REVIEW_MARKER 分支附加。
         // 非响应式 getter，但 computed 通过其引用的 requestsBySession 响应式 ref 建立依赖。
-        //（core SessionStatusInputs.hasBlockingOverlay 承接该输入；移动壳无此源恒 false，D9③ 白名单）
+        //（core SessionStatusInputs.hasBlockingOverlay 承接该输入；移动壳无此源恒 false，D9② 白名单）
         const hasBlockingOverlay = extensionUIStore.hasPendingBlockingOverlay(id)
         // 判定谓词 = core deriveSessionStatus（U20 下沉单点，与移动列表同源）；
         // isActive/isCompacting 体内读取建立 chat 分区响应式依赖

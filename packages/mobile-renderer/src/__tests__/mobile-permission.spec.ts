@@ -1,4 +1,4 @@
-// 移动壳权限审批链装配 smoke（remote-use D7「权限审批 ✅ 手机可批」接线）。
+// 移动壳权限审批链装配 smoke（remote-use-mobile D7（移动壳 v1 功能集裁定）「权限审批 ✅ 手机可批」行接线）。
 //
 // 链路锁定：bus 'plugin-permission-request'（companion-bridge 模块级 controller）→
 // App 内 PermissionRequestDialog 渲染 → 勾选/批准/拒绝 → transport RPC
@@ -58,7 +58,7 @@ function emitPermissionRequest(pluginId: string, permissions: string[], sessionI
   })
 }
 
-describe('移动壳权限审批链装配（D7 手机可批）', () => {
+describe('移动壳权限审批链装配（remote-use-mobile D7「权限审批 ✅ 手机可批」行）', () => {
   let wrapper: ReturnType<typeof mountApp> | null = null
 
   beforeEach(() => {

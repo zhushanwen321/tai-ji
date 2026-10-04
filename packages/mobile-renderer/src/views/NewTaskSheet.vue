@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// NewTaskSheet —— 移动壳新建任务表单（core createSessionFlow 接线，D7 新建任务行）。
+// NewTaskSheet —— 移动壳新建任务表单（core createSessionFlow 接线，remote-use-mobile D7（移动壳 v1 功能集裁定）的新建任务行）。
 //
 // 两字段：项目路径（手输——移动唯一形态，无原生目录选择器；桌面 pickDirectory 手输
 // popover 兜底是同款先例 A11）+ 首条消息。底部 sheet 形态（太极纯灰：bg-bg-input 一体

@@ -40,7 +40,7 @@ function mountComposer(sessionId: string | null) {
   })
 }
 
-describe('MobileComposer 中断键（D7 中断行：isActive 时可见，点击调 useChat.abort）', () => {
+describe('MobileComposer 中断键（remote-use-mobile D7（移动壳 v1 功能集裁定）中断行：isActive 时可见，点击调 useChat.abort）', () => {
   beforeEach(() => {
     abortMock.mockClear()
     sendMock.mockClear()
@@ -90,7 +90,7 @@ describe('MobileComposer 中断键（D7 中断行：isActive 时可见，点击�
 // ── 图片粘贴降级链（真实 paste 事件 → dom-core onPaste → pasteImage 文本降级）──
 //
 // 链路（消费点在 dom-core 组件内部，非 deps 直调可观测）：MobileComposer provide 的
-// pasteImage（D7 降级：返回文本占位）经 ComposerInput inject 转发进 dom-core
+// pasteImage（remote-use-mobile D7 图片粘贴行降级：返回文本占位）经 ComposerInput inject 转发进 dom-core
 // useContenteditableInput.onPaste → pickClipboardImageItem 取剪贴板图片 File（入参 File 的
 // 判据：占位 badge 只在 getAsFile() 产出 File 后插入，纯文本粘贴不触发）→ await pasteImage →
 // kind:'text' 移除占位 + insertText 降级。断言落最近可观察面：占位 badge 生命周期 +

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * MobileFormCard —— 移动壳 form/planReview 类请求呈现面（remote-use D7 form 行恢复）。
+ * MobileFormCard —— 移动壳 form/planReview 类请求呈现面（remote-use-mobile D7（移动壳 v1 功能集裁定）的 form 行恢复）。
  *
  * 被 C4 门排除出 CompanionBand 的两类请求在此承接（通道装配在 companion-bridge form 通道，
  * 回传经 App 编排走 extension.ui_response 既有通路）：
@@ -11,7 +11,7 @@
  *   questions 源 submit 回传 FormAnswers JSON envelope。
  * - planReview 审批帧：自审结论展示 + 批准 / 搁置双键（payload 与桌面 PlanReviewBar 同契约
  *   JSON，经 submit 通道回传）；revise 键不呈现——修订须携带评论草稿（桌面经 plan docs
- *   drawer 收集），移动壳无该机制（D7 Phase 2+ 面），与桌面「零草稿时 revise 禁用」语义同向。
+ *   drawer 收集），移动壳无该机制（remote-use-mobile D7（移动壳 v1 功能集裁定）功能集表 form 面边界登记：planReview revise 不呈现——恢复路径 = 桌面 PlanReviewBar），与桌面「零草稿时 revise 禁用」语义同向。
  *
  * Submit 门与桌面同语义（allAnswered）；schedule 回显不可构造（无 initial / prompt 空 /
  * once cron 非法）→ 该题未答 → 仅可取消（请求方得 cancelled 应答，不无限等待）。

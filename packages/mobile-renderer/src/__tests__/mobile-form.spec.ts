@@ -1,4 +1,4 @@
-// 移动壳 form/planReview 类请求链装配（remote-use D7 form 行恢复：消除「请求方无限等待」）。
+// 移动壳 form/planReview 类请求链装配（remote-use-mobile D7（移动壳 v1 功能集裁定）form 行恢复：消除「请求方无限等待」）。
 //
 // 链路锁定：bus 'ui-request'（companion-bridge 模块级 form 通道，C4 门排除出 CompanionBand
 // 的富交互面）→ App 聊天视图 MobileFormCard 渲染 → 作答 → sendExtensionUIResponse 回传
@@ -70,7 +70,7 @@ function singleChoiceRequest(overrides: Record<string, unknown> = {}): Record<st
   }
 }
 
-describe('移动壳 form 请求链（D7 form 行恢复）', () => {
+describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', () => {
   let wrapper: ReturnType<typeof mountApp> | null = null
 
   beforeEach(() => {

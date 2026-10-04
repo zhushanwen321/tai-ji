@@ -9,7 +9,9 @@
 // - 取消钮 = delivery.cancel（app-runtime 透传出口；queued 立即移除 / in-flight 收回-重投 /
 //   不可撤判定全在 runtime 单点）。行随后续 session.delivery 状态帧消失（单源，无本地删除）。
 // - 取消成功后全文回输入框草稿（composerInjection 通道 → MobileComposer 消费端
-//   insertTextAtCursor 追加不覆盖——G5 同族语义：不回填即静默丢输入）。
+//   insertTextAtCursor 追加不覆盖——G5 同族语义：不回填即静默丢输入）。reply.segments
+//   快照不消费（移动 composer 无 chip 呈现载体，与图片粘贴文本降级同因）——桌面空输入分支的
+//   restoreSegments 整段恢复为双壳真差异（D9② 白名单 §6 登记）。
 //
 // 反馈通道：取消失败就近落条目级内联错误行（MobileComposer sendFailed 同款
 // respondFailedId 范式：role=alert + 专用 testid；新取消尝试时清空，不跨条目残留旧错；

@@ -26,7 +26,7 @@ const wiredSessionEntry: SessionEntryPort = {
   evictLru: (panelSessionId) => void panelSessionId,
 }
 
-/** D9③ 合法缺省成员的全键样例（类型标注 Required：接口加成员时此处编译红，强制显式归边） */
+/** D9② 合法缺省成员的全键样例（类型标注 Required：接口加成员时此处编译红，强制显式归边） */
 const allSessionEntryMembers: Required<SessionEntryPort> = {
   cancelActiveFlow: () => {},
   clearUnread: () => {},
@@ -77,7 +77,7 @@ describe('checkSessionEntryAssembly（D9① sessionEntry 端口束断言）', ()
     ])
   })
 
-  it('D9③ 合法缺省成员（cancelActiveFlow/preloadFileTree/clearUnread）不在断言清单——空实现不算问题', () => {
+  it('D9② 合法缺省成员（cancelActiveFlow/preloadFileTree/clearUnread）不在断言清单——空实现不算问题', () => {
     const mobileShape: SessionEntryPort = {
       ...wiredSessionEntry,
       cancelActiveFlow: () => {},
@@ -121,7 +121,7 @@ describe('checkInboundEffectsAssembly（D9① effects 最小集断言）', () =>
   })
 })
 
-describe('成员清单互斥覆盖（D9① 清单 × D9③ 白名单的对齐守护）', () => {
+describe('成员清单互斥覆盖（D9① 清单 × D9② 白名单的对齐守护）', () => {
   it('REQUIRED ∪ EXEMPT 恰好覆盖 SessionEntryPort 全成员（样例对象 Required 类型锁键集）', () => {
     const covered = new Set([...REQUIRED_SESSION_ENTRY_MEMBERS, ...EXEMPT_SESSION_ENTRY_MEMBERS])
     expect([...covered].sort()).toEqual(Object.keys(allSessionEntryMembers).sort())

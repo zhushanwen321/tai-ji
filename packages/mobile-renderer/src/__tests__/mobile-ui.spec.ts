@@ -1,7 +1,7 @@
 // 移动壳 UI 主体测试（remote-use U1.4c 新增面）：
 //   - ChatViewDeps provide 后 ChatView 子树（含 Turn）渲染无 inject 抛错（组件挂载测试）
 //   - copyLabel 注入：代码块复制按钮 title 来自 ui locale composable 域（i18n 单源）
-//   - renderMermaid 占位降级返回 {svg} 结构（D7 mermaid 行）
+//   - renderMermaid 占位降级返回 {svg} 结构（remote-use-mobile D7（移动壳 v1 功能集裁定）mermaid 图表行）
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { resetChatModuleStateForTest } from '@taiji/core'

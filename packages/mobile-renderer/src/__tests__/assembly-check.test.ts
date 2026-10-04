@@ -64,7 +64,7 @@ describe('D9② __testing 出口生产代码零消费（grep 断言）', () => {
     const offenders = listProductionFiles(srcRoot).filter((rel) => {
       const content = readFileSync(join(srcRoot, rel), 'utf-8')
       if (!content.includes('__testing')) return false
-      // 出口定义文件自证放行（export const __testing 形态统一，五处先例同款）
+      // 出口定义文件自证放行（各定义点同款形态：export const __testing）
       if (content.includes('export const __testing')) return false
       return !DOC_MENTION_ALLOWLIST.includes(rel as (typeof DOC_MENTION_ALLOWLIST)[number])
     })
