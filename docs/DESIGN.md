@@ -630,7 +630,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 ### 6.3 右侧 Drawer（三卡化 + 8 tab）
 
-- **三卡化**（2026-10-04 用户裁决，推翻 D2 一体化生长）：右抽屉是独立内容卡（`--surface` + border + 10px 圆角 + shadow-1），与对话流卡、底抽屉卡并列，卡间 8px 缝；**对话流卡默认撑满公共容器**（主区除侧栏外全部空间；二轮裁决——原「无 drawer 限宽 75% 居中」行为随卡片化退役，拉开 drawer 才让位）；**PanelHeader 是对话流卡的卡头**（二轮裁决：header 只与对话流构成整体——右抽屉卡有自己的 L1 栏、底抽屉卡有自己的实例切换条）；L1 栏选中态回归标准 tab 型（§3.4，原「bg-surface-hover 例外」随同 surface 前提消失退役）；关闭控件（X）居 L1 栏右簇最右。主面板:drawer 默认宽度比 1:1，可拖拽调整〔2026-09-13 自 v6-design.md 并入〕；宽度拖拽 handle = 卡缝本体（8px 缝内 1px 视觉线，hover `border-strong` / drag `accent`，`cursor: col-resize`）
+- **三卡化**（2026-10-04 用户裁决，推翻 D2 一体化生长）：右抽屉是独立内容卡（`--surface` + border + 10px 圆角 + shadow-1），与对话流卡、底抽屉卡并列，卡间缝 = a = 窗口边距 p-1 的 4px（2026-10-04 三轮裁决：横缝/纵缝/状态条间距统一 4px 实际边距，非叠加值）；**对话流卡默认撑满公共容器**（主区除侧栏外全部空间；二轮裁决——原「无 drawer 限宽 75% 居中」行为随卡片化退役，拉开 drawer 才让位）；**PanelHeader 是对话流卡的卡头**（二轮裁决：header 只与对话流构成整体——右抽屉卡有自己的 L1 栏、底抽屉卡有自己的实例切换条）；L1 栏选中态回归标准 tab 型（§3.4，原「bg-surface-hover 例外」随同 surface 前提消失退役）；关闭控件（X）居 L1 栏右簇最右。主面板:drawer 默认宽度比 1:1，可拖拽调整〔2026-09-13 自 v6-design.md 并入〕；宽度拖拽 handle = 卡缝本体（4px 缝内 1px 视觉线，hover `border-strong` / drag `accent`，`cursor: col-resize`）
 - **容器归属规则**：内容按形状分家——竖长阅读型归右抽屉、横宽输出流归底抽屉（§6.4）、全画布内容（网页/workflow 图）归浮层（§6.5）；归属声明唯一权威 = 容器注册表（`packages/core/src/domain/drawer/registry.ts`，core 纯数据，ui 层映射图标渲染）
 - **形态 B**：icon 一级 + 各 tab 自治二级（L1 列表由容器注册表驱动，8 条）
   - git/doc：无二级 tab
@@ -647,8 +647,8 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 ### 6.4 Bottom Drawer（底抽屉）
 
-- **位置**（三卡化）：独立内容卡（`--surface` + border + 10px 圆角 + shadow-1），split 行（对话流卡 + 右抽屉卡）之下、StatusBar 之上，横跨主区全宽；与上方卡列间距 **12px**（二轮裁决加大，区别于卡间横缝 8px）、与 StatusBar 间 8px；composer 在其上沿保持可见、随开合上移。与右抽屉可同时开（一挤宽度、一挤高度互不冲突；右抽屉开着时底抽屉全宽、右抽屉变矮）
-- **高度**：默认 35%；上沿拖拽手柄命中区跨进卡上方缝（12px，视觉线贴卡顶边 1px，hover `border-strong` / drag `accent`）；拖拽 clamp 15%–70%，高度为全局布局值单键持久化（`taiji:bottom-drawer-height`）；窗口过矮时显示期钳制保证对话流 + composer 最小可视区域，不写回持久值
+- **位置**（三卡化）：独立内容卡（`--surface` + border + 10px 圆角 + shadow-1），split 行（对话流卡 + 右抽屉卡）之下、StatusBar 之上，横跨主区全宽；与上方卡列间距 = a = 4px（三轮裁决：与横缝及窗口边距统一）、与 StatusBar 间 4px；composer 在其上沿保持可见、随开合上移。与右抽屉可同时开（一挤宽度、一挤高度互不冲突；右抽屉开着时底抽屉全宽、右抽屉变矮）
+- **高度**：默认 35%；上沿拖拽手柄命中区跨进卡上方缝（4px，视觉线贴卡顶边 1px，hover `border-strong` / drag `accent`）；拖拽 clamp 15%–70%，高度为全局布局值单键持久化（`taiji:bottom-drawer-height`）；窗口过矮时显示期钳制保证对话流 + composer 最小可视区域，不写回持久值
 - **内容**：terminal 唯一内容（不预设 tab 枚举）；终端面板头部一行 = **实例切换条**（tab 条 + 右簇）——多实例：条目切换（tab 范式见 §5.3.1）/ 「+」新建（新建即自动激活并聚焦新实例输入区，2026-10-04 产品裁决）/ tab 内**常驻**关闭叉（最后实例灰置禁用）/ 空态占位（文案如「终端 1」按序号命名）/ 右簇**收起按钮**（收起整个终端区，收起语义非销毁，实例保留、重开走对账恢复，焦点回 composer）；原第二行工具栏（清屏/终止）随 head 一行化移除，清屏功能退役；空态时 xterm 黑块容器不渲染；spawn 失败走 inline 错误条 + 重试，chunk 装载失败走 AsyncErrorFallback
 - **开关**：`` ⌃` ``（before-input-event 窗口级拦截，不经 globalShortcut——失焦无动作）+ **PanelHeader 顶栏终端按钮**（三卡化 2026-10-04 迁入：原 StatusBar 底栏 trailing 落点退役，鼠标路径入口与右抽屉开关同区、居其左；StatusBar 回落「有状态项才显示」纯显隐）；开合态按会话分区、不持久化；终端聚焦时 Esc 归终端输入，关抽屉走 `` ⌃` `` / 顶栏按钮 / 终端头部收起按钮
 

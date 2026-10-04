@@ -8,9 +8,10 @@
     各自持 float-panel 壳（border/radius/bg/shadow-[var(--shadow-1)]）；本组件与 MainPanel
     只做布局，不持卡片视觉。PanelHeader 是对话流卡的卡头（2026-10-04 二轮裁决：header 只与
     对话流构成整体，不横跨抽屉卡——右抽屉卡有自己的 L1 栏、底抽屉卡有自己的实例切换条）；
-    StatusBar 仍是横跨状态条。main 与 drawer 的宽度 handle 即卡缝本体（w-2 缝内 1px 视觉线，
-    hover/drag 染色）——drawer 关闭时 handle 随 v-if 消失，无缝无残线。间距：split 行与底抽屉
-    卡 12px（用户裁决二轮：底抽屉上沿边距加大）、底抽屉卡与 StatusBar 8px。
+    StatusBar 仍是横跨状态条。main 与 drawer 的宽度 handle 即卡缝本体（w-1 缝内 1px 视觉线，
+    hover/drag 染色）——drawer 关闭时 handle 随 v-if 消失，无缝无残线。卡间缝（横缝与纵缝）
+    统一 = a = 窗口边距 p-1 的 4px（三轮裁决：与左右边距一致，实际边距 4px 非叠加值）；
+    底抽屉卡与 StatusBar 间 4px。
 
     Drawer 协调（W4 drawer-shell-integration）：drawer 固定挂本容器（单实例），恒作 flex 子项与
     Panel 各占一半并排（mode='split'），贴右展开（direction='right'）。单 panel 下不再有 overlay
@@ -96,7 +97,7 @@
         role="separator"
         aria-orientation="vertical"
         tabindex="0"
-        class="relative w-2 shrink-0 cursor-col-resize touch-none select-none"
+        class="relative w-1 shrink-0 cursor-col-resize touch-none select-none"
         :data-state="isDragging ? 'drag' : undefined"
         data-testid="drawer-resize-handle"
         @pointerdown="onHandlePointerDown"
@@ -191,16 +192,17 @@
       data-testid="bottom-drawer"
       class="relative shrink-0 overflow-hidden"
       :class="bottomTransitionClass"
-      :style="{ height: bottomHeightStyle, marginTop: bottomOpen ? '12px' : '8px' }"
+      :style="{ height: bottomHeightStyle, marginTop: '4px' }"
     >
-      <!-- 上沿手柄（三卡化）：命中区跨进卡上方缝（-top-3 h-3 覆盖 12px，视觉线贴卡顶边）——
-           缝即拖拽区，可发现性与命中宽度一并解决（原 1px 线命中过窄）。 -->
+      <!-- 上沿手柄（三卡化）：命中区跨进卡上方缝（-top-1 h-1 覆盖 4px 缝，视觉线贴卡顶边）——
+           缝即拖拽区。卡间缝统一为窗口边距 a = p-1 的 4px（2026-10-04 三轮裁决：实际边距
+           4px，非叠加值）。 -->
       <div
         v-if="bottomOpen"
         role="separator"
         aria-orientation="horizontal"
         tabindex="0"
-        class="absolute inset-x-0 -top-3 z-10 h-3 cursor-row-resize touch-none select-none"
+        class="absolute inset-x-0 -top-1 z-10 h-1 cursor-row-resize touch-none select-none"
         :data-state="isBottomDragging ? 'drag' : undefined"
         data-testid="bottom-drawer-resize-handle"
         @pointerdown="onBottomHandlePointerDown"
@@ -232,7 +234,7 @@
          无数据时自隐藏；sessionId 绑定当前 leaf（per-session 项）。
          trailing 插槽不再注入（三卡化 2026-10-04：终端开关迁 PanelHeader，StatusBar 回落
          「有状态项才显示」的纯显隐形态）。 -->
-    <StatusBar class="mt-2" :session-id="leaf.sessionId ?? null" />
+    <StatusBar class="mt-1" :session-id="leaf.sessionId ?? null" />
   </div>
 </template>
 

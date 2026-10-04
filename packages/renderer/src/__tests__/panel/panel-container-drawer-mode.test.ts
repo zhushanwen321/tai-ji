@@ -500,7 +500,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     expect(wrapper.find('[data-testid="drawer-resize-handle"]').exists()).toBe(false)
   }, 60_000)
 
-  it('有 drawer（默认）：main = calc(100% - 50% - 8px) + margin 0 贴左 + 封顶解除不变，drawer = 50%，handle 挂载', async () => {
+  it('有 drawer（默认）：main = calc(100% - 50% - 4px) + margin 0 贴左 + 封顶解除不变，drawer = 50%，handle 挂载', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 's-width-open')
     openDrawerTab('git')
@@ -508,7 +508,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     const wrapper = await mountContainer()
     await nextTick()
 
-    expect(areaWidth(wrapper, 'main-area')).toBe('calc(100% - 50% - 8px)')
+    expect(areaWidth(wrapper, 'main-area')).toBe('calc(100% - 50% - 4px)')
     // split：main 贴左（drawer 贴右），margin 0；--content-max-w 两态恒 100%（开合无值切换跳变）
     const mainStyle = areaStyle(wrapper, 'main-area')
     expect(mainStyle).toContain('margin-left: 0')
@@ -592,7 +592,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     let wrapper = await mountContainer()
     await nextTick()
     expect(areaWidth(wrapper, 'drawer-area')).toBe('35%')
-    expect(areaWidth(wrapper, 'main-area')).toBe('calc(100% - 35% - 8px)')
+    expect(areaWidth(wrapper, 'main-area')).toBe('calc(100% - 35% - 4px)')
     wrapper.unmount()
 
     // 非法（NaN）→ 默认 50
@@ -633,7 +633,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     // 派发断言随行为删除——全仓零监听方后保留派发断言等于锁死死事件。
     openDrawerTab('git')
     await nextTick()
-    expect(areaWidth(wrapper, 'main-area')).toBe('calc(100% - 50% - 8px)')
+    expect(areaWidth(wrapper, 'main-area')).toBe('calc(100% - 50% - 4px)')
     expect(areaStyle(wrapper, 'main-area')).toContain('margin-left: 0')
     expect(areaWidth(wrapper, 'drawer-area')).toBe('50%')
   }, 60_000)

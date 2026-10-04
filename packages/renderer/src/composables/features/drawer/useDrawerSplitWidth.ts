@@ -9,7 +9,7 @@
  *
  * - 无 drawer：main 占 MAIN_STANDALONE_PCT% 且左右 margin calc 居中（两侧各 (100%-75%)/2 留白，
  *   对话流整体在工作区视觉居中），main 层 --content-max-w:100% 解除 720px 封顶（内容占满 75%）；
- * - 有 drawer：drawer 占 drawerPct%（默认 50），main 占剩侧（模板侧 calc(100% - drawerPct% - 8px)），
+ * - 有 drawer：drawer 占 drawerPct%（默认 50），main 占剩侧（模板侧 calc(100% - drawerPct% - 4px)），
  *   margin 0 贴左；--content-max-w 恒 100% 不随开合切换（内容 min(容器,容器)=容器，
  *   width/margin 全程可插值，开合动画无跳变）；
  * - 开合时双侧 width + margin transition（--duration-slow，与 DrawerPanel aside 淡入同时长）；
@@ -89,15 +89,15 @@ export function useDrawerSplitWidth(splitAreaEl: Ref<HTMLElement | null>, drawer
   /**
    * main-area 动态样式（宽度模型 SSOT，模板直连）：
    * - standalone：width 100%（撑满公共容器）+ margin 0；
-   * - split：width calc(100% - drawerPct% - 8px) + margin 0 贴左（8px = 卡缝宽，
-   *   handle 即缝本体；drawer 卡占 drawerPct%）。
+   * - split：width calc(100% - drawerPct% - 4px) + margin 0 贴左（4px = 卡缝宽 a，
+   *   与窗口边距 p-1 同值；handle 即缝本体；drawer 卡占 drawerPct%）。
    * --content-max-w 两态恒 100% 不切换：值不变 → 无过渡跳变，内容 width:100% 永远跟随容器，
    * 开合动画期间 min(容器,容器)=容器 全程连续。
    */
   const mainAreaStyle = computed<Record<string, string>>(() => ({
     '--content-max-w': '100%',
     ...(drawerOpen.value
-      ? { width: `calc(100% - ${drawerPct.value}% - 8px)`, marginLeft: '0', marginRight: '0' }
+      ? { width: `calc(100% - ${drawerPct.value}% - 4px)`, marginLeft: '0', marginRight: '0' }
       : { width: `${MAIN_STANDALONE_PCT}%`, marginLeft: MAIN_STANDALONE_MARGIN, marginRight: MAIN_STANDALONE_MARGIN }),
   }))
 
@@ -217,12 +217,11 @@ export function useBottomDrawerHeight(
     return `${bottomOpen.value ? pct : 0}%`
   })
 
-  /** 高度 + 上间距过渡（沿用现有 transition 体系加纵轴；marginTop 随开合 12px↔8px，
-   *  二轮裁决底抽屉上沿边距加大）：拖动期间移除过渡保证跟手 */
+  /** 高度过渡（沿用现有 transition 体系加纵轴）：拖动期间移除过渡保证跟手 */
   const bottomTransitionClass = computed(() =>
     isBottomDragging.value
       ? ''
-      : 'transition-[height,margin] duration-[var(--duration-slow)] ease-[var(--ease)]',
+      : 'transition-[height] duration-[var(--duration-slow)] ease-[var(--ease)]',
   )
 
   /** 上沿手柄拖动（pointer capture：同横轴，拖出元素外仍跟手；jsdom 兼容可选调用） */
