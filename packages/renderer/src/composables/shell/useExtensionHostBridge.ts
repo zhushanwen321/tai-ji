@@ -204,7 +204,8 @@ export type PluginModalDismissReason =
 
 /** PluginModalHost 数据源（声明侧元数据 fallback：E1 降级链 declaration 段）+
  *  C→S dismissModal 上报（经本 bridge 门面发出——D3/R4 WS send 统一门面，组件禁直调
- *  ws-client，check_no_direct_ws_send.py 白名单只有 bridge/dialog/singleton 三文件）。 */
+ *  ws-client，check_no_direct_ws_send.py 白名单登记本 bridge 与 ui 侧
+ *  extension-host/shell-adapters 两个出站桥接件）。 */
 export interface PluginModalSource {
   getDeclaration(
     pluginId: string,
