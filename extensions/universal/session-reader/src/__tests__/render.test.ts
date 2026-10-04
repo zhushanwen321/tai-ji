@@ -281,6 +281,26 @@ describe('renderOutline', () => {
     expect(result.turns).toHaveLength(1)
     expect(result.turns[0]?.userBrief).toBe('a')
   })
+
+  it('12. D9② branch_summary 归纯记录折叠：前置 turn 成 turn 不产行（pi 1.0 第十类）', () => {
+    // pi 1.0 dist branchWithSummary 落盘形态：{type:'branch_summary', id, parentId, fromId,
+    // summary, details, usage, fromHook}，无 message 字段。归类 = 纯记录（分叉操作痕迹，
+    // 非当前路径对话内容；taiji 无消息编辑入口不产生该形态）
+    const bs: Entry = { type: 'branch_summary', id: 'BS', parentId: null, summary: 'original path digest' }
+    const turns = [
+      turn(0, [bs]),
+      turn(1, [uEntry('U1', 'new branch question')], { userEntry: uEntry('U1', 'new branch question') }),
+    ]
+    const result = renderOutline(turns, emptyTree(), { budget: 2000 })
+    // 折叠：前置 turn 不产行，outline 只剩新路径对话 turn
+    expect(result.turns).toHaveLength(1)
+    expect(result.lines).toHaveLength(1)
+    expect(result.stats.totalTurns).toBe(1)
+    // T 序号保留原 turn.index（expand/detail 入口地址稳定）
+    expect(result.turns.map((b) => b.index)).toEqual([1])
+    // 字节/条目统计保持全量口径：BS + U1 = 2
+    expect(result.stats.totalEntries).toBe(2)
+  })
 })
 
 describe('renderExpand', () => {
