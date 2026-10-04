@@ -347,7 +347,7 @@ function switchToForm(): void {
 }
 
 type ParseResult =
-  | { ok: true; name: string | null; entry: McpServerEntryValue }
+  | { ok: true; name: string | null; entry: McpServerEntryValue; bare: boolean }
   | { ok: false; error: string }
 
 /**
@@ -355,7 +355,9 @@ type ParseResult =
  * - 包装形态 { "名称": { ... } }：名称自动取键名；编辑流键名 ≠ 被编辑名 → 拦截（改名 =
  *   删除后重建，D7 编辑态名称键语义；在切换/保存两个入口同样拦截，不静默丢弃改名意图）
  * - 裸条目值对象（含 command/url/type 顶层键）：编辑流可用（名称沿用被编辑条目名）；添加流
- *   无键名可取 → 提示包装形态（解析层照常接受输入，拒绝发生在保存校验链路，D7 添加态条款）
+ *   无键名可取（name null，bare 标记）——解析层照常接受输入（D7 添加态条款），拒绝发生在
+ *   保存校验链路（submit 对 bare 标记报包装形态指引）；切换到表单 tab 照常填充（名称空由
+ *   必填校验兜底），「裸形态切表单填名后表单路径保存」通路保留
  */
 function parseCodeText(): ParseResult {
   const text = codeText.value.trim()
@@ -373,10 +375,12 @@ function parseCodeText(): ParseResult {
   const record = obj as Record<string, unknown>
   const isBare = 'command' in record || 'url' in record || 'type' in record
   if (isBare) {
-    if (!props.editing) {
-      return { ok: false, error: t('settings.mcp.errCodeBareNeedsWrapper') }
+    return {
+      ok: true,
+      name: props.editing ? props.editing.name : null,
+      entry: record as McpServerEntryValue,
+      bare: true,
     }
-    return { ok: true, name: props.editing.name, entry: record as McpServerEntryValue }
   }
   const keys = Object.keys(record)
   if (keys.length !== 1) {
@@ -389,7 +393,7 @@ function parseCodeText(): ParseResult {
   if (props.editing && keys[0] !== props.editing.name) {
     return { ok: false, error: t('settings.mcp.errCodeRenameLocked', { name: props.editing.name }) }
   }
-  return { ok: true, name: keys[0], entry: value as McpServerEntryValue }
+  return { ok: true, name: keys[0], entry: value as McpServerEntryValue, bare: false }
 }
 
 // ── 校验（表单/代码共用链路；错误消息按「错误 → 修复动作」组织，D4）──
@@ -435,6 +439,12 @@ function submit(): void {
     const parsed = parseCodeText()
     if (!parsed.ok) {
       codeError.value = parsed.error
+      return
+    }
+    if (parsed.bare && !props.editing) {
+      // 添加流裸形态的保存校验层拒绝（D7 添加态名称来源写死条款）：解析层照常接受
+      //（切换 tab 不拦），保存时拦截并提示改用包装形态提供服务器名
+      codeError.value = t('settings.mcp.errCodeBareNeedsWrapper')
       return
     }
     candidateName = props.editing ? props.editing.name : (parsed.name ?? '')

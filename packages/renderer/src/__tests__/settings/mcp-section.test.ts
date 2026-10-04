@@ -8,9 +8,11 @@
  *  - 表单校验内联错误三形态（字符集 / 必填 / 互斥——错误消息含修复动作）+ 重名拦截（含 -/_
  *    归并同名，D4）+ 校验不过不调协议；
  *  - 双 tab：表单 → 代码自动序列化为包装形态；代码 → 表单解析成功才切换、失败留代码模式显示
- *    解析错误；添加流裸形态拦截（包装形态指引，D7）；编辑流名称锁定 + 改包装键名拦截（改名 =
- *    删除后重建，D7）；编辑流切换传输类型（§4 断言①用户入口：payload 只含新类型键，D7 键级切换）；
- *  - 启停切换调协议（update 写 enabled，服务端终态校准）；删除确认（取消不调协议，确认后删除）；
+ *    解析错误；添加流裸形态保存拦截（解析层照常接受、切表单照常填充，拒绝在保存校验链路——
+ *    包装形态指引，D7）；编辑流名称锁定 + 改包装键名拦截（改名 = 删除后重建，D7）；编辑流切换
+ *    传输类型（§4 断言①用户入口：payload 只含新类型键，D7 键级切换）；
+ *  - 启停切换调协议（setEnabled 专用操作，仅 name + enabled 不带条目投影回写，服务端终态校准）；
+ *    删除确认（取消不调协议，确认后删除）；
  *  - 连接测试按钮调协议 + 「测试中」过程态徽标；
  *  - 状态徽标三类来源（D8）：config「配置有误」/ ui-local「未测试·测试中·测试超时」/ probe
  *    「已连接（N 个工具）·连接失败（详情展开 error 全文）·超时保留上次结果」；
@@ -290,7 +292,7 @@ describe('McpSection（pi-mcp-management U3）', () => {
     wrapper?.unmount()
   })
 
-  it('添加流裸形态拦截：无键名可取 → 报错含包装形态指引（D7 添加态名称来源）', async () => {
+  it('添加流裸形态保存拦截：无键名可取 → 报错含包装形态指引（拒绝在保存校验层，D7 添加态名称来源）', async () => {
     const w = mountSection()
     await flushPromises()
     await openAddForm()
@@ -302,6 +304,34 @@ describe('McpSection（pi-mcp-management U3）', () => {
 
     expect(q('[data-testid="mcp-form-code-error"]').text()).toContain('包装形态')
     expect(mcpDomainMock.addMcpServer).not.toHaveBeenCalled()
+    wrapper?.unmount()
+  })
+
+  it('添加流裸形态切表单照常（解析层接受，D7）：切换成功 + command 填充，表单填名后保存走表单路径', async () => {
+    mcpDomainMock.addMcpServer.mockResolvedValue({ ok: true, entry: entryFixture('from-paste') })
+    const w = mountSection()
+    await flushPromises()
+    await openAddForm()
+    await q('[data-testid="mcp-form-tab-code"]').trigger('click')
+    await flushPromises()
+
+    // 裸形态粘贴（从其他客户端复制单条 value 的迁移路径）→ 点表单 tab：照常切换填充
+    await q<HTMLTextAreaElement>('[data-testid="mcp-form-code-text"]').setValue(JSON.stringify({ command: 'npx' }))
+    await q('[data-testid="mcp-form-tab-form"]').trigger('click')
+    await flushPromises()
+
+    expect(document.querySelector('[data-testid="mcp-form-fields"]')).not.toBeNull()
+    expect((q<HTMLInputElement>('[data-testid="mcp-form-command"]').element as HTMLInputElement).value).toBe('npx')
+
+    // 表单填名保存：addMcpServer 收到 name + 表单序列化 entry（裸形态迁移通路完整）
+    await q<HTMLInputElement>('[data-testid="mcp-form-name"]').setValue('from-paste')
+    await submitForm()
+
+    expect(mcpDomainMock.addMcpServer).toHaveBeenCalledTimes(1)
+    expect(mcpDomainMock.addMcpServer).toHaveBeenCalledWith({
+      name: 'from-paste',
+      entry: expect.objectContaining({ command: 'npx' }),
+    })
     wrapper?.unmount()
   })
 
@@ -437,7 +467,8 @@ describe('McpSection（pi-mcp-management U3）', () => {
 
     expect(mcpDomainMock.setMcpServerEnabled).toHaveBeenCalledTimes(1)
     // §3.1「写入 enabled 字段」最小语义：payload 只含 name + enabled（整条目回写会让
-    // 清单打开至切换之间的外部并发改动被旧投影覆盖，D2 丢失窗口失真——U4 修复锚定）
+    // 清单打开至切换之间的外部并发改动被旧投影覆盖，D2 丢失窗口失真——修复锚定见 R1
+    // 审查条目 U4 / 修复组 mcp-list-runtime-ops（runlog aggregate-r1.md 可溯））
     expect(mcpDomainMock.setMcpServerEnabled).toHaveBeenCalledWith({
       name: 'filesystem',
       enabled: false,

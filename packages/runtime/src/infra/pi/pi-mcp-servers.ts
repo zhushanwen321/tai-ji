@@ -59,6 +59,7 @@ import {
   runMcpProbe,
   type McpProbeOptions,
   type McpProbeResult,
+  type McpProbeServerReport,
 } from './pi-mcp-probe.js'
 import { getPiAgentDir } from './pi-paths.js'
 import {
@@ -126,7 +127,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * 文件原样值 → 协议条目值投影。非对象坏条目（读侧已标「配置必须是对象」）无法以
  * 对象类型承载，投影空对象——清单以 configError 标注为准（D8③，坏条目不阻塞其余
- * 条目管理）；对象条目照原样投影（外键/坏值原样，清单以文件为准，ADR-0075）。
+ * 条目管理）；对象条目照原样投影（外键/坏值原样，清单以文件为准，ADR-0097 拉为主推补充）。
  */
 function asEntryValue(config: unknown): McpServerEntryValue {
   return isRecord(config) ? (config as McpServerEntryValue) : {}
@@ -178,9 +179,11 @@ export type PiMcpServersOptions = {
   probeRunner?: McpProbeRunner
   /**
    * probe 终态回调（u5b 打回接线）：`mcp.test` 异步任务的完成侧通道——executeProbe 完成
-   * （含整体降级形态）后以此回调向 transport 层交付 `mcp:testResult` 广播素材。本类不依赖
-   * transport（infra 无向上依赖），广播帧的组装与发送归组合根（index.ts 经 server 暴露的
-   * broadcastServerMessage 接线）；缺省无回调 = 行为退回「仅日志留痕」（存量测试装配零感知）。
+   * （含整体降级形态）后以此回调向 transport 层逐条交付 `mcp:testResult` 广播素材（§3.1
+   * 全清单回填：ok 结果的全部条目报告逐条各发一帧；整体降级/异常只发触发行一帧）。本类
+   * 不依赖 transport（infra 无向上依赖），广播帧的组装与发送归组合根（index.ts 经 server
+   * 暴露的 broadcastServerMessage 接线）；缺省无回调 = 行为退回「仅日志留痕」（存量测试
+   * 装配零感知）。
    */
   onTestResult?: (event: McpTestResultEvent) => void
 }
@@ -252,8 +255,9 @@ export class PiMcpServers implements IMcpServers {
   test(name: string): McpTestHandle {
     // D3/前提 A4 异步任务形态：立即回句柄，真实连接测试后台执行（秒级以上，不占
     // request/reply 往返）。probe 终态经 onTestResult 回调交付组合根（→ mcp:testResult
-    // 广播帧 → renderer McpSection.applyProbeResult 回填 D8① 徽标）；未注入回调时退回
-    // 仅日志留痕（连接测试是辅助功能，失败/无出口不阻塞清单读写主流程）。
+    // 广播帧 → renderer McpSection.applyProbeResult 逐行回填 D8① 徽标——§3.1 全清单
+    // 回填：一次全量测试的结果逐条广播，用户无须逐行点击）；未注入回调时退回仅日志
+    // 留痕（连接测试是辅助功能，失败/无出口不阻塞清单读写主流程）。
     const testId = `mcp-test-${++this.testSeq}`
     void this.executeProbe(name, testId)
     return { testId }
@@ -269,7 +273,7 @@ export class PiMcpServers implements IMcpServers {
   }
 
   private async executeProbe(name: string, testId: string): Promise<void> {
-    let badge: McpServerStatusBadge | null = null
+    const outcomes: Array<{ name: string; badge: McpServerStatusBadge }> = []
     try {
       const result = await this.probeRunner({
         timeoutMs: computeProbeTimeoutMs(),
@@ -291,36 +295,50 @@ export class PiMcpServers implements IMcpServers {
         console.log(
           `[pi-mcp-servers] probe ${testId}（${name}）完成: exit=${result.exitCode} servers=${result.servers.length} failed=${failed} configErrors=${result.configErrors.length}`,
         )
-        badge = this.probeResultBadge(name, result)
+        // §3.1 全清单回填（「点按后显示每个服务器的连接状态与失败原因」）：CLI 一次
+        // 全量测试已得全部条目结果（D3 结构限制——单条目独立测试做不到），逐条投影逐条
+        // 交付，无须每行各自再触发一轮全量测试（墙钟 150 秒起）。条目名按 CLI 原名。
+        for (const report of result.servers) {
+          outcomes.push({ name: report.name, badge: this.probeReportBadge(report) })
+        }
+        if (!result.servers.some((s) => s.name === name)) {
+          // 触发行未命中（如测试期间被外部删除）：补 ui-local timeout（「本次无该条目
+          // 结果」，renderer 按 D3 语义保留上次成功结果）
+          outcomes.push({ name, badge: { source: 'ui-local', state: 'timeout' } })
+        }
       } else {
         console.warn(`[pi-mcp-servers] probe ${testId}（${name}）降级: kind=${result.kind}`)
-        badge = this.degradedProbeBadge(result)
+        // 整体降级（timeout/spawn-failed/invalid-output）= 本次测试整体没跑成，非某台
+        // 服务器的连接失败——只给触发行最小可见反馈（S4「其余服务器测试不受影响」），
+        // 其余行徽标不动
+        outcomes.push({ name, badge: this.degradedProbeBadge(result) })
       }
     } catch (error) {
       // runMcpProbe 契约不抛（全部降级为结果态）；此 catch 为纵深防御，留痕不打断主流程
       console.warn(`[pi-mcp-servers] probe ${testId}（${name}）异常（辅助功能降级）:`, error)
-      badge = {
-        source: 'probe',
-        state: 'failed',
-        errorDetail: error instanceof Error ? error.message : String(error),
-        testedAt: Date.now(),
-      }
+      outcomes.push({
+        name,
+        badge: {
+          source: 'probe',
+          state: 'failed',
+          errorDetail: error instanceof Error ? error.message : String(error),
+          testedAt: Date.now(),
+        },
+      })
     } finally {
       this.activeProbes.delete(testId)
     }
-    if (badge) this.options.onTestResult?.({ name, testId, badge })
+    for (const outcome of outcomes) {
+      this.options.onTestResult?.({ name: outcome.name, testId, badge: outcome.badge })
+    }
   }
 
   /**
-   * probe 全量结果 → 触发条目的 D8① 徽标投影（D8「pi 实测」来源；CLI 全量测试中投影
-   * 触发条目的报告，其余条目徽标由后续各自的测试触发交付）。条目名按 CLI 原名精确匹配
-   *（CLI 输出的 name = mcp.json 条目键原值，无归并改写）；未命中（触发行不在结果内，
-   * 如测试期间被外部删除）回退 ui-local timeout 徽标——「本次无该条目结果」，renderer
-   * 按 D3 语义保留上次成功结果。
+   * probe 单条报告 → D8① 徽标投影（D8「pi 实测」来源；CLI 输出的 name = mcp.json 条目
+   * 键原值，无归并改写）。§3.1 全清单回填下每条报告各投影一帧（executeProbe 逐条交付）；
+   * 触发行未命中的 ui-local timeout 回退由 executeProbe 补发。
    */
-  private probeResultBadge(name: string, result: Extract<McpProbeResult, { kind: 'ok' }>): McpServerStatusBadge {
-    const report = result.servers.find((s) => s.name === name)
-    if (!report) return { source: 'ui-local', state: 'timeout' }
+  private probeReportBadge(report: McpProbeServerReport): McpServerStatusBadge {
     const status = report.status
     if (status.kind === 'connected') {
       return { source: 'probe', state: 'connected', toolCount: status.toolsCount, testedAt: Date.now() }

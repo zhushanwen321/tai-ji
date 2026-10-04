@@ -1,5 +1,5 @@
 /**
- * McpMessageHandler 五操作分发与 reply 形状测试（pi-mcp-management 设计）。
+ * McpMessageHandler 七操作分发与 reply 形状测试（pi-mcp-management 设计）。
  *
  * 锁定（验收条款① handler 层：分发契约与 codemode-message-handler 同风格——命中返回
  * true、未命中返回 false）：

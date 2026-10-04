@@ -8,9 +8,10 @@
  * envelope——renderer 的内联错误渲染（D4「错误 → 原因 → 修复动作」）与损坏提示
  *（S6 路径 + 隔离副本提示）直接消费信封字段。
  *
- * 无广播：§3.1 打开时拉取一次 + D8 快照语义（ADR-0097 拉为主），清单变更的可见性由
- * renderer 以 reply 终态校准承担（本域无 server→client 广播帧），与 codemode 先例
- * 的「set 成功不广播」同构。
+ * 清单变更无广播帧：§3.1 打开时拉取一次 + D8 快照语义（ADR-0097 拉为主），清单变更的
+ * 可见性由 renderer 以 reply 终态校准承担，与 codemode 先例的「set 成功不广播」同构。
+ * 唯一例外 = 连接测试终态经 mcp:testResult 广播帧回填（probe 完成侧推送帧，允许丢失
+ * ——分区未打开时自然丢失，重开分区回落「未测试」，D8② 既定形态）。
  */
 import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage } from '@taiji/shared'

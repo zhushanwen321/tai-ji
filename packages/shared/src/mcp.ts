@@ -228,7 +228,7 @@ export interface McpTestCancelResult { // oe-exempt:20261004:framework:WS 协议
  * 重开分区回落「未测试」为既定形态，非缺陷）。
  */
 export interface McpTestResultEvent { // oe-exempt:20261004:framework:WS 协议契约类型（两端共同 import），协议形状先行单实现常态
-  /** 触发本次测试的条目名（`mcp.test` 请求 name 回显；probe 全量测试中投影该条目的结果） */
+  /** 本帧结果对应的条目名：probe ok = 全清单回填逐条目各发一帧（§3.1，CLI 全量测试一次得全部结果）；整体降级帧 = 触发条目名 */
   name: string
   /** 任务句柄 id（`mcp.test` reply 的 testId 回显，供 UI 关联「测试中」过程态） */
   testId: string

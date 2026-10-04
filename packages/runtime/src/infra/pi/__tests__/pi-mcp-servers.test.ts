@@ -459,7 +459,7 @@ describe('PiMcpServers.onTestResult（probe 终态回填回调，u5b 打回接�
     })
   })
 
-  it('触发条目不在结果内（外部删除窗口）→ ui-local timeout 徽标（D3 本次无结果语义）', async () => {
+  it('触发条目不在结果内（外部删除窗口）→ 其余条目照常逐条回填 + 触发行补 ui-local timeout（D3 本次无结果语义）', async () => {
     const { servers, events } = makeServersWithCallback({
       kind: 'ok',
       exitCode: 0,
@@ -469,8 +469,28 @@ describe('PiMcpServers.onTestResult（probe 终态回填回调，u5b 打回接�
       ],
     })
     servers.test('gone')
-    await vi.waitFor(() => expect(events).toHaveLength(1))
-    expect(events[0]).toMatchObject({ name: 'gone', badge: { source: 'ui-local', state: 'timeout' } })
+    await vi.waitFor(() => expect(events).toHaveLength(2))
+    expect(events[0]).toMatchObject({ name: 'other', badge: { source: 'probe', state: 'connected', toolCount: 1 } })
+    expect(events[1]).toMatchObject({ name: 'gone', badge: { source: 'ui-local', state: 'timeout' } })
+  })
+
+  it('probe ok 全清单回填（§3.1）：全部条目各发一帧（同一 testId），无须逐行触发', async () => {
+    const { servers, events } = makeServersWithCallback({
+      kind: 'ok',
+      exitCode: 1,
+      configErrors: [],
+      servers: [
+        { name: 'fs', scope: 'user', exposure: 'codemode', transport: 'npx', status: { kind: 'connected', toolsCount: 3, toolNames: ['a', 'b', 'c'] } },
+        { name: 'broken', scope: 'user', exposure: 'codemode', transport: 'x', status: { kind: 'failed', state: 'failed', errorDetail: 'spawn ENOENT' } },
+      ],
+    })
+    const handle = servers.test('fs')
+    await vi.waitFor(() => expect(events).toHaveLength(2))
+    for (const event of events) {
+      expect(event).toMatchObject({ testId: handle.testId })
+    }
+    expect(events[0]).toMatchObject({ name: 'fs', badge: { source: 'probe', state: 'connected', toolCount: 3 } })
+    expect(events[1]).toMatchObject({ name: 'broken', badge: { source: 'probe', state: 'failed', errorDetail: 'spawn ENOENT' } })
   })
 
   it('probe 整体超时 → ui-local timeout 徽标（D3 整体无本次结果）', async () => {

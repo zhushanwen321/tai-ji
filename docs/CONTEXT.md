@@ -455,6 +455,11 @@ pi 内置 MCP 扩展的用户级配置文件（`<agentDir>/mcp.json`，taiji 隔
 ### 暴露档位（exposure）
 服务器工具到达模型的方式（mcp.json 条目的 `exposure` 字段，pi 定义四档）：codemode（**默认**——工具不直接声明给模型，只供 [Code Mode](#code-modecodemode--脚本模式) 脚本调用）/ deferred（经工具检索加载后直接调用）/ direct（像内置工具一样直接声明给模型）/ hidden（注册但不可达）。默认 codemode 意味着「配置成功但工具不可直接调用」——不使用 codemode 的用户应选 direct 或 deferred（表单档位释义引导此选择）。与 [Code Mode](#code-modecodemode--脚本模式) 词条的职责边界：codemode 全局启用开关（settings.json `defaultTools`）归彼处，per-server 档位归本词条。
 
+### agent 目录（agent directory）
+pi 运行时读配置与存数据的目录（系统 pi = `~/.pi/agent`；taiji 隔离部署下 = `<数据目录>/agent/`，路径唯一来源 `getPiAgentDir()` 动态推导——spawn pi 子进程〔会话与 `pi mcp list --json` 连接测试〕经 `PI_CODING_AGENT_DIR` 注入同源值）。承载 pi 侧用户级配置与运行数据：settings.json / mcp.json / subagents/ / auth.json 等；与 taiji 自身的 extension 存储目录（`<dataDir>/extensions/`）完全分离（ADR-0009 隔离，见 [Extension Data Directory](#extension-data-directory)）。不采用别名：pi 目录。
+
+**代码映射**: `packages/runtime/src/infra/pi/pi-paths.ts`（`getPiAgentDir()`）。
+
 ### defaultTools
 pi settings.json 的默认工具集字段（数组，settings-manager 解析后决定新会话启动时激活哪些工具）：pi 侧两层合并（global/project）经 `mergeDefaultTools`、激活集解析经 `resolveDefaultTools`；字段缺失时 pi 会话层回落 `DEFAULT_TOOL_NAMES`（read/bash/edit/write）。taiji 读侧解析同构实现 = `resolveDefaultToolSet`（开关显示判定），对字段缺失/非数组坏值统一解析为空激活集（codemode 不在默认集，与 pi 侧「不激活」判定等价）。字段归属 = settings.json tools 字段域（[data-source-registry §6](architecture/data-source-registry.md)），写方全集 = taiji 启动迁移 + 设置页 Code Mode 开关，用户手工编辑始终被尊重（taiji 不把用户移除的条目写回）。
 

@@ -37,8 +37,9 @@ import type { ServerMessageMap, ReplyPayloadMap } from '@taiji/shared'
 const PROTOCOL_TS = resolve(fileURLToPath(import.meta.url), '..', '..', '..', '..', 'shared', 'src', 'protocol.ts')
 // codemode 域形状 SSOT（protocol.ts 头部登记约定：payload/reply 形状在 ./codemode）
 const CODEMODE_DOMAIN_SOURCE = readFileSync(resolve(PROTOCOL_TS, '..', 'codemode.ts'), 'utf8')
-// mcp 域形状 SSOT（protocol.ts 头部登记约定：mcp 域 payload/reply 形状在 ./mcp——本域无
-// server→client 广播帧，reply 经 :result 帧承载、payload 直引 ./mcp 具名类型）
+// mcp 域形状 SSOT（protocol.ts 头部登记约定：mcp 域 payload/reply 形状在 ./mcp——清单变更
+// 无 server→client 广播帧（reply 经 :result 帧承载、payload 直引 ./mcp 具名类型）；唯一广播 =
+// 连接测试终态 mcp:testResult，probe 完成侧推送帧，不在 mutation 登记范围）
 const MCP_DOMAIN_SOURCE = readFileSync(resolve(PROTOCOL_TS, '..', 'mcp.ts'), 'utf8')
 
 // ── 登记清单（SSOT：新增 mutation 必须在此登记，漏登记测试即红）──────────────
@@ -145,8 +146,9 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
   // 三条共用 McpMutationResult 判别联合 reply（:result 帧承载）：ok 分支 entry = 服务端
   // 落盘终态条目（renderer 以服务端终态校准清单）；ok:false 为拒入信封（error 含
   // 「错误 → 原因 → 修复动作」结构文案 + corruption 仅损坏拒入携带），错误态不走
-  // effectiveFields（config.setCodemodeEnabled 同款信封语义）。无广播帧——§3.1 打开时
-  // 拉取一次 + D8 快照语义（ADR-0097 拉为主），变更可见性由 reply 终态校准承担。──
+  // effectiveFields（config.setCodemodeEnabled 同款信封语义）。清单变更无广播帧——§3.1
+  // 打开时拉取一次 + D8 快照语义（ADR-0097 拉为主），变更可见性由 reply 终态校准承担
+  //（唯一广播 = 连接测试终态 mcp:testResult，非 mutation）。──
   {
     // mcp.add（D4）：校验通过原样写入（fail-fast 拒入不走变换，分支二），reply entry =
     // 写后落盘终态条目（echo 回显）。

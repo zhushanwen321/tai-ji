@@ -280,7 +280,7 @@ export type ClientMessageType =
   // 门禁（MUTATION_DOMAINS 只含 session/model/preset/config 四域）；错误统一走 sendError
   // 错误信封，错误码词表 TtsErrorCode 七值（tts-types.ts）。
   | 'tts.getConfig' | 'tts.configure' | 'tts.speak' | 'tts.getCapabilities'
-  // mcp.*（pi-mcp-management 设计，M0 七 RPC）：设置页 MCP 分区对 pi 用户级 mcp.json 的管理面——
+  // mcp.*（pi-mcp-management 设计 §5 U2，M0 七 RPC）：设置页 MCP 分区对 pi 用户级 mcp.json 的管理面——
   // list（清单 + 损坏错误态，拉取一次模型 §3.1）/ add / update（编辑写回契约 D7 归 runtime store）/
   // setEnabled（启停专用操作，仅翻转 enabled 键 §3.1 最小语义）/ remove / test（连接测试异步任务
   // 句柄，D3）/ testCancel（取消进行中的连接测试，D3「取消」按钮）。写入生效语义 = 新会话生效
@@ -975,7 +975,7 @@ export interface ClientMessageMap {
   'tts.speak': { sessionId?: string; text: string }
   /** tts.getCapabilities：设置页表单数据源（TtsFormModel 内嵌该家 TtsCapabilities，形状见 tts-types）。 */
   'tts.getCapabilities': Record<string, never>
-  // ── mcp.*（pi-mcp-management 设计，M0 七 RPC）请求 payload：形状 SSOT 在 ./mcp，此处仅登记
+  // ── mcp.*（pi-mcp-management 设计 §5 U2，M0 七 RPC）请求 payload：形状 SSOT 在 ./mcp，此处仅登记
   // type→payload 映射（u-foundation 补齐项——ClientMessageType 与 ReplyPayloadMap 已登记，
   // 本 map 缺登记会使 core 域函数 command() 的 payload 类型约束无法解析）。list 无参数。
   'mcp.list': Record<string, never>
@@ -1145,7 +1145,9 @@ export type ServerMessageType =
   // auth.result：auth 握手的结果回复（S1-W1，ConnectionManager 传输层生产，见 ClientMessageMap 'auth'）。
   | 'auth.result'
   | 'pong' | 'error'
-  | 'extension.ui_request' | 'extension.error'
+  // extension.dialog：对话框族帧（pi1-disposition-chat-flow D6——按 kind 分发的 WS 消息族之一；
+  // 取代原 extension.ui_request，pi 词汇止点于 event-adapter，帧判别字段 dialogKind 为 taiji 自有词表）
+  | 'extension.dialog' | 'extension.error'
   | 'extension.discovered' | 'extension.installCancelled'
   | 'extension.recommended'
   | 'extension.pendingRequests'
@@ -2017,35 +2019,38 @@ export interface ServerMessageMapBase {
   // 摘除 runtime pending 缓存时推给 renderer——renderer 按帧移除本屏对应请求（审批条/
   // 表单），消除「僵尸 ready 审批条点击静默无效」的残留窗口
   'extension:requestsInvalidated': { sessionId: string; requestIds: string[]; reason: string }
-  // extension.ui_request：交互对话框请求（select/confirm/input/editor + ask-user 富交互）。
-  // ask-user 扩展字段（askUser/askUserQuestions/allowCancel）仅在 method='select' + askUser=true 时存在。
-  // askUserQuestions 用 unknown[] 保持 shared 包依赖最小化（与 extension:widgetGui 的 gui:unknown 先例一致），
-  // 前端消费时用类型守卫收窄为 AskUserQuestion[]。
-  // schedule-create 扩展字段（scheduleCreate/scheduleDraft）仅在 method='select' + scheduleCreate=true 时存在
-  // （runtime event-adapter 第 4 marker 分支翻译 SCHEDULE_CREATE_MARKER select，U5）；
-  // scheduleDraft 用 unknown 保持 shared 依赖最小化，前端用 extension-protocol 的 isScheduleDraft 守卫收窄。
-  'extension.ui_request': {
+  // extension.dialog：交互对话框请求（dialogKind ∈ select/confirm/input/editor 四变体 + 富交互标志）。
+  // pi1-disposition-chat-flow D6：pi 词汇止点于 event-adapter——帧判别字段 dialogKind 是 taiji
+  // 自有词表（值域与 pi method 同形、权威在 taiji 侧，复用 ExtensionInteractMethod 类型承载），
+  // 富交互路由（form/planReview/scheduleCreate 标志）与 title 均随帧透传，title 仅纯展示。
+  // dialogKind='select' + 富交互标志时的扩展字段：
+  // ask-user（askUser/askUserQuestions/allowCancel）；askUserQuestions 用 unknown[] 保持 shared 包
+  // 依赖最小化（与 extension:widgetGui 的 gui:unknown 先例一致），前端用类型守卫收窄为 AskUserQuestion[]。
+  // schedule-create（scheduleCreate/scheduleDraft，runtime event-adapter 第 4 marker 分支翻译
+  // SCHEDULE_CREATE_MARKER select，U5）；scheduleDraft 用 unknown 保持 shared 依赖最小化，
+  // 前端用 extension-protocol 的 isScheduleDraft 守卫收窄。
+  'extension.dialog': {
     sessionId: string
     requestId: string
-    method: ExtensionInteractMethod
+    dialogKind: ExtensionInteractMethod
     title?: string
     message?: string
     options?: string[]
     default?: string
     level?: 'info' | 'warn' | 'error'
     prefill?: string
-    // ask-user 富交互扩展（仅 method='select' + askUser=true 时存在）
+    // ask-user 富交互扩展（仅 dialogKind='select' + askUser=true 时存在）
     askUser?: boolean
     askUserQuestions?: unknown[]
     allowCancel?: boolean
-    // schedule 创建确认富交互扩展（仅 method='select' + scheduleCreate=true 时存在）
+    // schedule 创建确认富交互扩展（仅 dialogKind='select' + scheduleCreate=true 时存在）
     scheduleCreate?: boolean
     scheduleDraft?: unknown  // ScheduleDraft（@zhushanwen/extension-protocol），前端守卫收窄
-    // planReview 审批扩展（仅 method='select' + planReview=true 时存在；plan 模式重设计 D5：
+    // planReview 审批扩展（仅 dialogKind='select' + planReview=true 时存在；plan 模式重设计 D5：
     // PLAN_REVIEW_MARKER select 通道，前端 C4 分流给 PlanReviewBar 不落 CompanionBand）。
     // 审批条文档清单由 usePlanState 投影链（session.planState）承载，本帧不携带 docs。
     planReview?: boolean
-    // 统一提问表单扩展（仅 method='select' + form=true 时存在；ui-presentation-protocol D1：
+    // 统一提问表单扩展（仅 dialogKind='select' + form=true 时存在；ui-presentation-protocol D1：
     // UI_FORM_MARKER select 通道，前端 C4 分流给 FormOverlay 渲染类型化问题集）。
     // formQuestions 用 unknown[] 保持 shared 依赖最小化（与 askUserQuestions 同款先例），
     // 前端消费时用 extension-protocol 的 isFormQuestion 守卫收窄为 FormQuestion[]。
@@ -2732,10 +2737,11 @@ export interface ServerMessageMapBase {
   'tts.speak:result': { filePath: string }
   /** tts.getCapabilities:result：三家表单投影（数据权威在 runtime driver，renderer 不 import 数据表）。 */
   'tts.getCapabilities:result': { forms: Record<TtsProviderId, TtsFormModel> }
-  // ── mcp.*（pi-mcp-management 设计，五 RPC reply，payload 直引 ./mcp 具名类型）──
+  // ── mcp.*（pi-mcp-management 设计，七 RPC reply，payload 直引 ./mcp 具名类型）──
   // 清单/写入走 RPC reply 承载（§3.1 打开时拉取一次 + D8 快照语义），帧仅作 reply 承载，
-  // 形状 SSOT 在 ./mcp（mcp.list:result 清单 + 损坏错误态两态；add/update/remove 共用
-  // McpMutationResult 两态信封——写后落盘终态条目 / 拒入信封 error+corruption；test 回异步任务句柄）。
+  // 形状 SSOT 在 ./mcp（mcp.list:result 清单 + 损坏错误态两态；add/update/setEnabled/remove
+  // 共用 McpMutationResult 两态信封——写后落盘终态条目 / 拒入信封 error+corruption；test 回
+  // 异步任务句柄，testCancel 回取消结果）。
   'mcp.list:result': McpListResult
   'mcp.add:result': McpMutationResult
   'mcp.update:result': McpMutationResult
@@ -2975,7 +2981,8 @@ export interface ReplyPayloadMap {
   'config.getCodemodeEnabled': ServerMessageMap['config.codemodeEnabled']
   'config.setCodemodeEnabled': ServerMessageMap['config.codemodeSetEnabled']
   // mcp 域七命令（pi-mcp-management 设计）：reply 经 :result 帧承载（ServerMessageMapBase 登记，
-  // payload 直引 ./mcp 具名类型——本域无 server→client 广播帧，§3.1 打开时拉取一次 + D8 快照语义）。
+  // payload 直引 ./mcp 具名类型——清单变更无 server→client 广播帧，§3.1 打开时拉取一次 + D8 快照
+  // 语义；唯一广播 = 连接测试终态 mcp:testResult，probe 完成侧推送帧）。
   'mcp.list': ServerMessageMap['mcp.list:result']
   'mcp.add': ServerMessageMap['mcp.add:result']
   'mcp.update': ServerMessageMap['mcp.update:result']
