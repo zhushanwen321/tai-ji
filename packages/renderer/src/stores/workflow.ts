@@ -40,7 +40,7 @@ export {
 } from '@taiji/shared'
 import { createInflightDedup } from '@taiji/core/foundation/create-inflight-dedup'
 import { session as sessionApi } from '@/api'
-import { createPartitionedRecords } from '../lib/partitioned-session-records'
+import { createPartitionedLoadState, createPartitionedRecords } from '../lib/partitioned-session-records'
 
 // ── [P3/D6] progress 投影消费（纯函数，drawer WorkflowTab 与托盘面板共用）──
 
@@ -119,32 +119,16 @@ export const useWorkflowStore = defineStore('workflow', () => {
    */
   const partition = createPartitionedRecords<WorkflowRunRecord>()
 
-  /** 加载态（M1：loadWorkflows 在途时 true；per-session Map 分区，ADR-0049 派——
-   * split 模式双面板并行拉取时，任一 pane 的在途/失败不得遮蔽另一 pane 的状态） */
-  const loadingBySession = ref(new Map<string, boolean>())
-  /** 加载错误（M1：失败时设该 sid 分区错误消息；缺省 null = 无错误；records 保留旧数据不清空.
-   * 全局单值形态会把 pane A 的失败显示到 pane B 的面板（store 级串扰），分区化治根） */
-  const loadErrorBySession = ref(new Map<string, string | null>())
   /**
-   * [RT-4#8] oversize 降级标志（per-session 分区，语义同 subagent store）：session 文件
-   * >32MB 时列表不可用（records 恒空），面板显示降级提示；置位时保留旧分区数据。
+   * 每 session 加载态三件套（loading / loadError / oversize 分区，ADR-0049 派）。
+   * 实现单源在 lib/partitioned-session-records 的 createPartitionedLoadState
+   * （待裁决项 1 收敛 2026-10-04，原手抄 71 行退役）；facet 的领域语义注释保留在各
+   * 使用点——与 subagent store 同款（loading：split 双面板互不遮蔽；loadError：失败设
+   * 该 sid 分区错误消息、分区数据保留旧值不清空；oversize：[RT-4#8] 列表不可用降级提示，
+   * 置位时保留旧分区数据）。
    */
-  const oversizeBySession = ref(new Map<string, boolean>())
-
-  /** per-session 加载态读取（消费方 computed 内调用建立响应依赖） */
-  function isLoadingOf(sessionId: string): boolean {
-    return loadingBySession.value.get(sessionId) ?? false
-  }
-
-  /** per-session 加载错误读取 */
-  function loadErrorOf(sessionId: string): string | null {
-    return loadErrorBySession.value.get(sessionId) ?? null
-  }
-
-  /** [RT-4#8] per-session oversize 降级读取（面板降级提示判据） */
-  function oversizeOf(sessionId: string): boolean {
-    return oversizeBySession.value.get(sessionId) ?? false
-  }
+  const loadState = createPartitionedLoadState()
+  const { isLoadingOf, loadErrorOf, oversizeOf } = loadState
 
   /**
    * [M7 D6] mainSessionId → Set<agentCallVirtualId> 映射。
@@ -232,9 +216,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
   /** 清除指定 session 的 workflow 列表分区（deleteSession 调，防泄漏，ADR-0049 AC-8） */
   function clearSession(sessionId: string): void {
     partition.clear(sessionId)
-    loadingBySession.value.delete(sessionId)
-    loadErrorBySession.value.delete(sessionId)
-    oversizeBySession.value.delete(sessionId)
+    loadState.clear(sessionId)
     // [W0/D4] 拉取收敛簿记随分区一并释放（dirty 不复活已删分区）
     releaseLoadBookkeeping(sessionId)
     // [可视化 U5/D11⑤] 该 session 名下 run 的事件流缓存随分区一并释放；活跃 run 归属该
@@ -476,8 +458,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   /** 实际拉取执行体（loadWorkflows 收敛壳内调用；失败不抛——写 loadError 分区） */
   async function performLoadWorkflows(sessionId: string): Promise<void> {
-    loadingBySession.value.set(sessionId, true)
-    loadErrorBySession.value.delete(sessionId)
+    loadState.beginLoad(sessionId)
     try {
       // [RT-4#8] 结构化返回：oversize=true（文件 >32MB 列表不可用）置降级标志 + 保留旧
       // 分区数据（不可用 ≠ 删空）；面板显示降级提示而非空列表。
@@ -486,21 +467,19 @@ export const useWorkflowStore = defineStore('workflow', () => {
       // 根治退役）。缺省（undefined，mock / 旧 runtime）按 found 处理。推送路径不经本判定。
       const { workflows: records, oversize, found } = await sessionApi.getWorkflows(sessionId)
       if (oversize) {
-        oversizeBySession.value.set(sessionId, true)
+        loadState.setOversize(sessionId)
         return
       }
-      oversizeBySession.value.delete(sessionId)
+      loadState.clearOversize(sessionId)
       if (found === false) return
       applyRecords(sessionId, records)
     } catch (e) {
       // M1：失败不覆盖现有分区（保留旧数据），设该 sid 分区 loadError
       const msg = e instanceof Error ? e.message : String(e)
       console.error('[workflow-store] loadWorkflows failed:', e)
-      loadErrorBySession.value.set(sessionId, msg)
+      loadState.setLoadError(sessionId, msg)
     } finally {
-      // delete 而非 set(sid, false)：load 在途时 clearSession 已删分区的话，set 会
-      // 为已删 session 重生条目（残留）；get ?? false 缺省读取语义等价（无条目 = 不在途）
-      loadingBySession.value.delete(sessionId)
+      loadState.endLoad(sessionId)
     }
   }
 
@@ -549,14 +528,12 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   /** 清空所有 workflow 分区 + 清 agentcall 映射（全局重置场景用） */
   function clearWorkflows(): void {
-    // RD-3#12：整表替换 + 清 loading/error 两 facet（+ oversize），与 clearSession 全清对齐
-    // ——否则残留 loading=true → spinner 永转 / 残留 error → 错误态卡死。
+    // RD-3#12：整表替换 records + 全清 loading/error（+ oversize）三 facet，与 clearSession
+    // 全清对齐——残留 loading=true → spinner 永转 / 残留 error → 错误态卡死。
     partition.recordsBySession.value = new Map()
     // W3-2：清非响应式的 mainSessionAgentCalls（registerAgentCall 写入，deleteSession/clearWorkflows 调本函数清）
     mainSessionAgentCalls.clear()
-    loadingBySession.value = new Map()
-    loadErrorBySession.value = new Map()
-    oversizeBySession.value = new Map()
+    loadState.clearAll()
     // [W0/D4] 拉取收敛簿记一并清（同 clearSession / dispose 三点清理义务）
     inflightDedup.clear()
     dirtyWorkflows.clear()
