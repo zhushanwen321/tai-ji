@@ -69,6 +69,8 @@ const useTerminalMock = {
   instances: instancesRef,
   activeTerminalId: activeRef,
   spawnTerminal: spawnTerminalMock,
+  // spawnTerminalAuto 同一替身：自动新建腿经互斥入口仍委托同一 spawn 面（dmg-r1-3）
+  spawnTerminalAuto: spawnTerminalMock,
   selectInstance: vi.fn(),
   closeInstance: vi.fn(),
   reconcileInstances: vi.fn(async () => ({ ok: true, count: 0 })),

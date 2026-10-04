@@ -22,6 +22,8 @@
  * 工厂形态（per-instance sessions Map）：测试可独立构造（vi.fn() 注入 writeFn）；
  * renderer 兼容层 Pinia defineStore factory 内持有实例保持「跨组件共享单例」语义。
  */
+import { isTerminalIdOfSession } from '@taiji/shared'
+
 export interface TerminalSessionState {
   ptyAlive: boolean
   pendingWrites: string[]
@@ -170,13 +172,11 @@ export function createTerminalWriteQueue(
   }
 
   function removeSession(sessionId: string): number {
-    const prefix = `term:${sessionId}:`
     let dropped = 0
     for (const [terminalId, s] of sessions) {
-      // 精确前缀（设计 §0.5 P7）：前缀后必须紧邻纯数字序号——禁按冒号切分取段，
-      // 故 sid 含冒号的键（`term:a:1:1` 对 sid `a`）不误纳。
-      if (!terminalId.startsWith(prefix)) continue
-      if (!/^\d+$/.test(terminalId.slice(prefix.length))) continue
+      // 精确前缀口径（设计 §0.5 P7）实装在 shared terminal-id.ts 单点（跨层协议级约定，
+      // 与 runtime/renderer 同源）：sid 含冒号的键（`term:a:1:1` 对 sid `a`）不误纳。
+      if (!isTerminalIdOfSession(terminalId, sessionId)) continue
       dropped += s.pendingWrites.length
       sessions.delete(terminalId)
     }

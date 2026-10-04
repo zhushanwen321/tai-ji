@@ -63,8 +63,9 @@ export function resolveBottomDrawerDisplayPct(
 
 /**
  * 内存值：模块级单例（全局布局值——多面板/多容器共享一份，§7.1 全局粒度裁决）。
- * taste:allow-no-data-owner W24-EX-B（模块级单例 UI 偏好内存镜像，登记草稿）：
- * 权威源 = KVStorage 持久化单键（taiji:bottom-drawer-height），本 ref 为内存镜像
+ * taste:allow-no-data-owner W24-EX-B（模块级单例 UI 偏好内存镜像，已登记）：
+ * 权威源 = KVStorage 持久化单键（taiji:bottom-drawer-height，主表 #48，dmg-r1-1 落定非草稿），
+ * 本 ref 为内存镜像
  */
 const heightPct = ref(BOTTOM_DRAWER_HEIGHT_DEFAULT_PCT)
 

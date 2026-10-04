@@ -21,7 +21,7 @@ import type { BottomDrawerControlState } from './types'
 // ── 分区键占位 + 绑定（headless 不直接读 pinia；bindDrawerSessionId 同款）──
 // 必须显式注解变量类型：Vue 3.5 的 ref<T> 在 T 本身是 Ref 类型时返回 T 而非 Ref<T> 包装
 // （drawer/control.ts 同款注释——裸 `ref<Ref<string|null>|null>(null)` 会让 .value 链断裂）。
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：bottom-drawer 绑定 sid 单例 ref
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记）：bottom-drawer 绑定 sid 单例 ref（§4 ⑧ 2026-10-04 dmg-r1-1 补登落定非草稿）
 const boundSid: Ref<Ref<string | null> | null> = ref(null)
 const sidRef = computed<string | null>(() => boundSid.value?.value ?? null)
 

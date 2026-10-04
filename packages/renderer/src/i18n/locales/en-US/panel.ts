@@ -379,6 +379,8 @@ export default {
     // RD-5#2: inline error bar for a failed PTY spawn (mirrors FileView error state)
     spawnFailed: 'Failed to start terminal: {error}',
     retry: 'Retry',
+    // dmg-r1-4: kill RPC channel-class failure (non unknown_terminal_id) — PTY still running, user-visible feedback
+    closeFailed: 'Failed to close terminal {message}; the instance is still running',
     // Cardification 2026-10-04: toggle button moved to PanelHeader (old StatusBar slot retired)
     toggle: 'Toggle terminal',
     // terminal-multi-instance §3.1: instance switch bar (TerminalInstanceBar, single-row head)

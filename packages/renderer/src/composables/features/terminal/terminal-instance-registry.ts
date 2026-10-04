@@ -10,17 +10,31 @@
  * - 关闭沿 / 对账的条目集合（三腿清理与 `terminal.list` 增删对账）
  *
  * 键序与解析口径（设计 §0.5 P7）：会话 id 域不含冒号，枚举一律取**精确前缀**
- * `term:<sid>:`（后必须紧邻数字序号），**禁按冒号切分取段**——否则 sid 含冒号时
- * `term:a:` 会吞掉 sid 为 `a:1` 的键。
+ * `term:<sid>:`（后必须紧邻数字序号），**禁按冒号切分取段**——口径与谓词实装在
+ * `@taiji/shared` terminal-id.ts 单点（跨层协议级约定，三包共用，禁重复定义）。
  *
  * 状态性质（ADR-0049「全局 sid 协调器例外类」）：模块级单例、无 Vue setup 上下文、
  * 方法显式接收 terminalId、alive 镜像非业务数据。生命周期 = 应用进程；会话销毁 / 世代
  * 变更时经显式清理入口（unregisterInstanceBySession / resetTerminalInstanceRegistry）。
  */
 import { reactive } from 'vue'
+import {
+  TERMINAL_ID_ROOT,
+  isTerminalIdOfSession,
+  sessionIdOfTerminalId,
+  seqOfTerminalId,
+  terminalIdPrefixOf,
+} from '@taiji/shared'
 
-/** 实例编号根前缀（编号格式 `term:<会话id>:<序号>`，设计 §3.3「编号格式」）。 */
-export const TERMINAL_ID_ROOT = 'term:'
+// 编号格式谓词上移 shared 单点后本模块 re-export：既有消费方（useTerminal /
+// stores/terminal-write-queue / 测试）导入路径不变，实现单源。
+export {
+  TERMINAL_ID_ROOT,
+  terminalIdPrefixOf,
+  isTerminalIdOfSession,
+  sessionIdOfTerminalId,
+  seqOfTerminalId,
+}
 
 /** 注册表条目（镜像 runtime `TerminalInstanceSummary` + 界面派生子段）。 */
 export type TerminalInstanceEntry = {
@@ -32,47 +46,6 @@ export type TerminalInstanceEntry = {
   seq: number
   /** PTY 存活镜像（ack 建档置 true / alive 帧幂等置 true / 回收后条目消失）。 */
   alive: boolean
-}
-
-/** `term:<sid>:` 前缀（精确前缀枚举基准）。 */
-export function terminalIdPrefixOf(sessionId: string): string {
-  return `${TERMINAL_ID_ROOT}${sessionId}:`
-}
-
-/**
- * 精确前缀匹配（设计 §0.5 P7）：`term:<sid>:` 之后必须是纯数字序号段。
- * 负例：sid 含冒号时 `term:a:` 不匹配键 `term:a:1:1`（序号段为 `1:1` 非纯数字）。
- *
- * **参数顺序口径（跨包同名函数防错序的唯一抓手）**：`(terminalId, sessionId)`——被查编号在前、
- * 归属会话在后，与本包全部调用点及 runtime 同名函数（terminal-service.ts）显式一致。
- * 两包无编译期约束，顺序一致是调用点传错序时能被读出的唯一信号（两参数同为 string，
- * 传反不报错、静默恒 false）——改动本签名须同步 runtime 同名函数与全部调用点。
- */
-export function isTerminalIdOfSession(terminalId: string, sessionId: string): boolean {
-  const prefix = terminalIdPrefixOf(sessionId)
-  if (!terminalId.startsWith(prefix)) return false
-  return /^\d+$/.test(terminalId.slice(prefix.length))
-}
-
-/** 由 terminalId 解析会话段；非法编号返回 null（sid 域不含冒号，取最后一个冒号前的余段）。 */
-export function sessionIdOfTerminalId(terminalId: string): string | null {
-  if (!terminalId.startsWith(TERMINAL_ID_ROOT)) return null
-  const rest = terminalId.slice(TERMINAL_ID_ROOT.length)
-  const idx = rest.lastIndexOf(':')
-  if (idx <= 0) return null
-  if (!/^\d+$/.test(rest.slice(idx + 1))) return null
-  return rest.slice(0, idx)
-}
-
-/** 由 terminalId 解析会话内序号；非法编号返回 0（0 为无效序号，显示名回退原始编号）。 */
-export function seqOfTerminalId(terminalId: string): number {
-  if (!terminalId.startsWith(TERMINAL_ID_ROOT)) return 0
-  const rest = terminalId.slice(TERMINAL_ID_ROOT.length)
-  const idx = rest.lastIndexOf(':')
-  if (idx <= 0) return 0
-  const seq = rest.slice(idx + 1)
-  if (!/^\d+$/.test(seq)) return 0
-  return Number.parseInt(seq, 10)
 }
 
 /**

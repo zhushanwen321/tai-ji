@@ -65,9 +65,9 @@ interface RegistryEntry { // oe-exempt:20261003:framework:类型契约先行—�
  *  派生信号非独立数据源，owner 归属同一登记例外） */
 const membershipVersion = shallowRef(0)
 
-// taste:allow-no-data-owner W24-EX-A（模态表面聚合注册基建，登记草稿——同事件总线 handler
+// taste:allow-no-data-owner W24-EX-A（模态表面聚合注册基建，已登记——同事件总线 handler
 // 注册表形态：refCount 保护的表面开合态注册表，非 GUI 数据、非持久、无单一 owner；
-// 待并入 docs/architecture/data-source-registry.md §4 ⑧ 豁免清单计数）
+// §4 ⑧ 2026-10-04 dmg-r1-1 补登落定非草稿）
 const entries = new Map<string, RegistryEntry>()
 
 /** 注册一个表面实例；返回注销函数（幂等——重复调用只生效一次） */

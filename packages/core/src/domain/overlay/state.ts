@@ -17,8 +17,8 @@ import type { OverlayContent, OverlayControlState } from './types'
 
 /**
  * 浮层开合态（模块级单例，全局一份——§6.5 单例换内容）。
- * taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：
- * overlay 开合态 SSOT（display-containers §7.1 迁移落点，唯一权威）
+ * taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记）：overlay 开合态 SSOT
+ * （display-containers §7.1 迁移落点，唯一权威；§4 ⑧ 2026-10-04 dmg-r1-1 补登落定非草稿）
  */
 const overlayState = reactive<OverlayControlState>({
   isOpen: false,

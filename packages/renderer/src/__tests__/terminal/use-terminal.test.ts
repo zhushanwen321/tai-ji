@@ -278,6 +278,57 @@ describe('关闭沿与焦点落位', () => {
   })
 })
 
+describe('自动新建腿同会话互斥（dmg-r1-3）', () => {
+  it('MU-1: 同会话并发激活轮复用同一 spawn promise（只发一次 RPC），settle 后摘除', async () => {
+    let resolveSpawn!: (v: { terminalId: string }) => void
+    terminalApiMock.spawn.mockImplementationOnce(
+      () => new Promise<{ terminalId: string }>((res) => { resolveSpawn = res }),
+    )
+    const { wrapper, terminal } = host('s1')
+    // 模拟 terminal.list 往返窗口内两轮激活各见空清单：后到轮必须复用先到轮的 promise
+    const p1 = terminal.spawnTerminalAuto('/tmp', 80, 24)
+    const p2 = terminal.spawnTerminalAuto('/tmp', 80, 24)
+    expect(p2).toBe(p1)
+    expect(terminalApiMock.spawn).toHaveBeenCalledTimes(1)
+    resolveSpawn({ terminalId: T1 })
+    await expect(p1).resolves.toBe(T1)
+    await expect(p2).resolves.toBe(T1)
+
+    // settle 摘除：下一激活轮不再复用旧 promise（发新 RPC）
+    const p3 = terminal.spawnTerminalAuto('/tmp', 80, 24)
+    expect(terminalApiMock.spawn).toHaveBeenCalledTimes(2)
+    p3.catch(() => {}) // ack 缺编号 reject（本用例只断言互斥行为）
+    wrapper.unmount()
+  })
+
+  it('MU-2: 失败 settle 摘除 → 重试腿不复用失败 promise', async () => {
+    terminalApiMock.spawn.mockRejectedValueOnce(new Error('pty limit reached'))
+    const { wrapper, terminal } = host('s1')
+    await expect(terminal.spawnTerminalAuto('/tmp', 80, 24)).rejects.toThrow('pty limit reached')
+
+    terminalApiMock.spawn.mockResolvedValueOnce({ terminalId: T1 })
+    await expect(terminal.spawnTerminalAuto('/tmp', 80, 24)).resolves.toBe(T1)
+    expect(terminalApiMock.spawn).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('MU-3: 「+」显式新建不受互斥限制（同会话在途自动新建时仍发新 RPC）', async () => {
+    let resolveSpawn!: (v: { terminalId: string }) => void
+    terminalApiMock.spawn.mockImplementationOnce(
+      () => new Promise<{ terminalId: string }>((res) => { resolveSpawn = res }),
+    )
+    const { wrapper, terminal } = host('s1')
+    void terminal.spawnTerminalAuto('/tmp', 80, 24) // 自动腿在途
+    // 显式腿（createWithToast → spawnTerminal）是用户显式意图，不受互斥限制
+    terminalApiMock.spawn.mockResolvedValueOnce({ terminalId: T2 })
+    await expect(terminal.spawnTerminal('/tmp', 80, 24)).resolves.toBe(T2)
+    expect(terminalApiMock.spawn).toHaveBeenCalledTimes(2)
+    resolveSpawn({ terminalId: T1 })
+    await flushPromises()
+    wrapper.unmount()
+  })
+})
+
 describe('terminal.list 对账', () => {
   it('RC-1: 清单外条目按关闭沿三腿清理（含幽灵条目）', async () => {
     terminalApiMock.spawn.mockResolvedValueOnce({ terminalId: T1 }).mockResolvedValueOnce({ terminalId: T2 })
@@ -507,7 +558,7 @@ describe('unknown_terminal_id 平行守卫（提示与焦点按触发面分档�
     wrapper.unmount()
   })
 
-  it('UG-5: 交叉校验拒绝码不触发回收（实例仍活 + 走普通错误通道）', async () => {
+  it('UG-5: 交叉校验拒绝码不触发回收（实例仍活 + kill 失败有可见反馈）', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { wrapper, terminal } = await seedAlive()
     terminalApiMock.kill.mockRejectedValueOnce(rpcError('terminal_id_session_mismatch'))
@@ -515,7 +566,8 @@ describe('unknown_terminal_id 平行守卫（提示与焦点按触发面分档�
     await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled())
     expect(hasInstance(T1)).toBe(true)
     expect(terminal.instances.value.map((i) => i.terminalId)).toEqual([T1])
-    expect(useToast().toasts.value).toHaveLength(0)
+    // dmg-r1-4：kill 失败 = 终止动作未生效（PTY 仍存活），须给用户可见反馈
+    expect(useToast().toasts.value).toHaveLength(1)
     wrapper.unmount()
   })
 
@@ -534,6 +586,28 @@ describe('unknown_terminal_id 平行守卫（提示与焦点按触发面分档�
 
     expect(__terminalSubscriptionCountForTest()).toBe(0)
     expect(useToast().toasts.value).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('UG-7: kill 通道类失败（closeInstance 腿）→ toast 反馈 + 镜像条目重建（不等对账复活）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    terminalApiMock.spawn.mockResolvedValueOnce({ terminalId: T1 }).mockResolvedValueOnce({ terminalId: T2 })
+    const { wrapper, terminal } = host('s1')
+    await terminal.spawnTerminal('/tmp', 80, 24)
+    await terminal.spawnTerminal('/tmp', 80, 24)
+    terminal.selectInstance(T2)
+    terminalApiMock.kill.mockRejectedValueOnce(new Error('transport down'))
+
+    terminal.closeInstance(T2)
+    await vi.waitFor(() => expect(useToast().toasts.value.length).toBeGreaterThan(0))
+
+    // C-proc-21：关闭失败须有可见反馈；UI 与 runtime 实况即时一致（条目复活，PTY 未死）
+    expect(useToast().toasts.value.some((x) => x.type === 'warning')).toBe(true)
+    expect(hasInstance(T2)).toBe(true)
+    expect(terminal.instances.value.map((i) => i.terminalId)).toEqual([T1, T2])
+    // 关闭沿已落的 active（T1）不被重建抢占
+    expect(terminal.activeTerminalId.value).toBe(T1)
+    expect(warnSpy).toHaveBeenCalled()
     wrapper.unmount()
   })
 })

@@ -153,6 +153,18 @@ const subscriptionUnsubs = new Map<string, () => void>()
 // taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，已登记）：flush 监听器注册表（键 = terminalId）
 const flushListeners = new Map<string, Set<(buffer: TerminalBuffer) => void>>()
 
+// ── 自动新建腿同会话互斥（dev-merge review dmg-r1-3）────────────────────────
+// `terminal.list` RPC 往返窗口内快速切走再切回，两轮激活各见空清单各 spawn 一档 → 同会话
+// 双默认 PTY（多余进程持续存活需手动关闭；旧版「ptyMap.has(sid) → no-op」幂等防线已随
+// 多实例化删除）。per-sid in-flight 表：后到激活轮复用先到轮的 spawn promise（ack 建档
+// 四件事幂等，复用方 await 同一落定即可）；settle（含失败）即摘除——失败后重试
+// （retrySpawn）不复用旧失败 promise。互斥只覆盖自动新建腿：「+」显式新建
+// （createWithToast → spawnTerminal）是用户显式意图不受限，runtime 无状态分配语义不动。
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，已登记）：自动新建腿 per-sid in-flight
+// spawn promise 去重簿记（条目持 Promise 本体非 GUI 数据，对照 useGenStats inflightGenStatsFetch 先例；
+// 写方 = spawnTerminalAuto 单点 set / settle 摘除，cleanupSession 会话删除一并摘除；§4 ⑧ dmg-r1-1 补登）
+const autoSpawnInFlight = new Map<string, Promise<string>>()
+
 /**
  * 模块级分区读写（updateFor 语义，ADR-0049）：WS handler 用显式 terminalId，不读组件。
  * 分区创建（首次写入/建档）时 bump mapVersion——分区出现后各实例 current computed 失效重算。
@@ -293,6 +305,8 @@ function cleanupSession(sessionId: string): void {
     unsubscribeTerminal(terminalId)
   }
   unregisterInstanceBySession(sessionId)
+  // 在途自动新建标记一并摘除（会话已删，spawn 落定后互斥表不得再拦同 sid 后续激活轮）
+  autoSpawnInFlight.delete(sessionId)
   // write-queue 层再按前缀兜底一次（覆盖未建分区/订阅的幽灵条目）
   store.removeSession(sessionId)
 }
@@ -641,6 +655,23 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
     return terminalId
   }
 
+  /**
+   * 自动新建默认实例（挂载/激活腿专用，见 autoSpawnInFlight 注释）：同会话已有在途自动
+   * 新建时**复用其 promise**（后到激活轮等先到轮落定，不发第二个 spawn RPC）；settle
+   * （含失败）后摘除标记，重试腿可再发。失败 rethrow（反馈职责归调用方，同 spawnTerminal）。
+   */
+  function spawnTerminalAuto(cwd: string | undefined, cols: number, rows: number): Promise<string> {
+    const sid = sessionIdRef.value
+    if (!sid) return Promise.reject(new Error('terminal.spawn skipped: no active session'))
+    const inFlight = autoSpawnInFlight.get(sid)
+    if (inFlight) return inFlight
+    const tracked = spawnTerminal(cwd, cols, rows).finally(() => {
+      if (autoSpawnInFlight.get(sid) === tracked) autoSpawnInFlight.delete(sid)
+    })
+    autoSpawnInFlight.set(sid, tracked)
+    return tracked
+  }
+
   /** 切换当前显示实例（切换条 select）。 */
   function selectInstance(terminalId: string): void {
     const sid = sessionIdRef.value
@@ -652,6 +683,8 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
    * 关闭实例（切换条 close）：杀进程 + **同步**释放界面侧资源（三腿，不驻留）。
    * 进程终结后 runtime 的 terminal.exit 广播到达时走 handleInstanceExit（幂等收敛）。
    * 当前显示实例被关闭时 active 落相邻（无右取左，注册表内实现）。
+   * kill RPC 通道类失败（非 unknown_terminal_id）→ handleRoutingError kill 分档 toast 反馈
+   * 并按「实例仍活」重建镜像条目（dmg-r1-4：UI 不再显示已关而 PTY 仍存活的无反馈窗口）。
    */
   function closeInstance(terminalId: string): void {
     const sid = sessionIdRef.value
@@ -681,9 +714,16 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
    * - `write` 命中 → 经「输入可能丢失」通道告知（对齐死亡沿 pendingWrites 丢弃范式）
    *   + 迁焦点（焦点按关闭沿规则落相邻实例；**先告知后迁移**——prompt 在同步路径先发，
    *   焦点迁移由视图对 active 变化的异步 watcher 落地）；
-   * - `attach` / `kill` / `resize` 命中 → **静默回收**（不提示、不迁焦点）。
-   * 重复打击静默收敛（条目已回收 → 后续命中直接早退）；交叉校验拒绝码
-   * （`terminal_id_session_mismatch`）走普通错误通道、**不触发回收**（实例仍活）。
+   * - `attach` / `resize` 命中 → **静默回收**（不提示、不迁焦点）。
+   * - `kill` 命中 → **静默回收**（同上）。
+   * 重复打击静默收敛（条目已回收 → 后续命中直接早退）。
+   * **非 `unknown_terminal_id` 的失败分两档**（dmg-r1-4）：
+   * - `kill` 失败 = 用户「关闭/终止」动作未生效（PTY 仍存活继续产输出），必须给可见反馈
+   *   （toast「关闭失败，实例仍在运行」，C-proc-21）：closeInstance 腿此前已同步释放界面侧
+   *   资源，这里按「实例仍活」重建镜像条目（establishInstance 幂等），使 UI 与 runtime 实况
+   *   立即一致，不等下次 `terminal.list` 对账才「复活」；
+   * - `write` / `attach` / `resize` 走普通错误通道留痕即可——write 的输入丢失面由 runtime
+   *   `terminal.writeFailed` 帧覆盖，resize/attach 无用户动作成败语义。
    */
   function handleRoutingError(terminalId: string, e: unknown, trigger: 'write' | 'kill' | 'attach' | 'resize'): void {
     const code = (e as { code?: string } | null)?.code
@@ -698,7 +738,15 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
       releaseInstance(terminalId, { promptPendingWrites: false })
       return
     }
-    // 普通错误通道（含交叉校验拒绝码）：留痕即可，PTY 管道级故障由 runtime 广播覆盖
+    if (trigger === 'kill') {
+      // C-proc-21：kill 失败 ≠ 已关闭——PTY 仍在运行，用户必须得到可见反馈 + UI 即时对齐
+      //（条目重建幂等：killTerminal 腿条目未释放时仅刷新存活镜像；closeInstance 腿在此复活）
+      console.warn(`[terminal] kill RPC 失败（实例仍在运行）: terminalId=${terminalId}`, e)
+      useToast().warning(t('panel.terminal.closeFailed', { message: instanceLabel(terminalId) }))
+      establishInstance(terminalId, { alive: true })
+      return
+    }
+    // 普通错误通道（write/attach/resize，含交叉校验拒绝码）：留痕即可，PTY 管道级故障由 runtime 广播覆盖
     console.warn(`[terminal] ${trigger} RPC 失败: terminalId=${terminalId}`, e)
   }
 
@@ -764,6 +812,8 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
     current,
     /** 实例与 PTY 控制。 */
     spawnTerminal,
+    /** 自动新建默认实例（挂载/激活腿专用，带同会话 in-flight 互斥）。 */
+    spawnTerminalAuto,
     selectInstance,
     closeInstance,
     reconcileInstances,

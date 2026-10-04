@@ -29,7 +29,7 @@
 import * as pty from 'node-pty'
 import { execFileSync } from 'node:child_process'
 import { buildOutboundChildEnv } from '../../infra/spawn-env.js'
-import type { ServerMessage, TerminalInstanceSummary } from '@taiji/shared'
+import { isTerminalIdOfSession, terminalIdPrefixOf, type ServerMessage, type TerminalInstanceSummary } from '@taiji/shared'
 import type { ITerminalService } from '../ports/terminal-service.js'
 import { toErrorMessage } from '../../utils/errors.js'
 
@@ -59,28 +59,6 @@ export interface TerminalServiceDeps {
 /** terminal 业务错误工厂（扁平模式，仿 worktreeError）。 */
 function terminalError(code: string, message: string): Error {
   return Object.assign(new Error(message), { code })
-}
-
-/**
- * 实例编号的会话段前缀（精确前缀枚举口径，设计 §0.5 P7）：
- * 判归属 / 枚举 / 交叉校验一律用前缀 + 序号段校验，**禁按冒号切分取段**——
- * 该口径仅在 sid 域不含冒号时无歧义（否则 `term:a:` 会吞 sid 为 `a:1` 的键）。
- */
-function sessionPrefix(sid: string): string {
-  return `term:${sid}:`
-}
-
-/**
- * terminalId 是否属于会话 sid：前缀命中后序号段必须是纯数字（设计 §0.5 P7 精确前缀口径）。
- * 负例：sid `a` 不误纳键 `term:a:1:1`（序号段 `1:1` 非纯数字，实属 sid `a:1` 的实例）。
- * 与 renderer `isTerminalIdOfSession` / core `terminal-write-queue.removeSession` 同口径。
- * 参数顺序（terminalId 在前、sessionId 在后）与 renderer 同名函数显式对齐——跨包同名函数
- * 无编译期约束，顺序一致是调用点防错序的唯一抓手（两包参数顺序相反时调用点极易静默错序）。
- */
-function isTerminalIdOfSession(terminalId: string, sessionId: string): boolean {
-  const prefix = sessionPrefix(sessionId)
-  if (!terminalId.startsWith(prefix)) return false
-  return /^\d+$/.test(terminalId.slice(prefix.length))
 }
 
 /** 把 Error 序列化为 plain object，避免 logger 的 JSON.stringify 把 Error 实例变成 {}。
@@ -295,7 +273,7 @@ export class TerminalService implements ITerminalService {
   private allocateTerminalId(sid: string): string {
     const next = (this.terminalCounters.get(sid) ?? 0) + 1
     this.terminalCounters.set(sid, next)
-    return `${sessionPrefix(sid)}${next}`
+    return `${terminalIdPrefixOf(sid)}${next}`
   }
 
   /**

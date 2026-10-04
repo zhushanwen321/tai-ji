@@ -33,7 +33,7 @@ import type { RightDrawerTab, DrawerControlState } from './types'
 // 直接变成 Ref<string|null>|null，`.value` 链断裂。显式注解强制 Ref 包装。
 // sidRef = boundSid.value?.value ?? null：boundSid.value 是响应式读（绑定时 sidRef 失效重算），
 // 内层 .value 是绑定 ref 的响应式读（focusedSessionId 变化时 sidRef 跟随），两种变化都正确传播。
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：drawer 绑定 sid 单例 ref（12 类未覆盖）
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，已登记）：drawer 绑定 sid 单例 ref（W24 基线存量，dmg-r1-1 草稿表述清理）
 const boundSid: Ref<Ref<string | null> | null> = ref(null)
 const sidRef = computed<string | null>(() => boundSid.value?.value ?? null)
 

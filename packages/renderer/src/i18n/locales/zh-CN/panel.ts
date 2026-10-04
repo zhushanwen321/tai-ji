@@ -371,6 +371,8 @@ export default {
     // RD-5#2：PTY spawn 失败 inline 错误条（复用 FileView error 态范式）
     spawnFailed: '终端启动失败：{error}',
     retry: '重试',
+    // dmg-r1-4：kill RPC 通道类失败（非 unknown_terminal_id）——PTY 仍在运行，用户可见反馈
+    closeFailed: '终端 {message} 关闭失败，实例仍在运行',
     // 三卡化 2026-10-04：开关按钮挂 PanelHeader 顶栏（原 StatusBar 底栏落点退役）
     toggle: '开关终端',
     // terminal-multi-instance §3.1：实例切换条（TerminalInstanceBar，head 一行形态）

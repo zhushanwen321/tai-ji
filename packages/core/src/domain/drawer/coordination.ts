@@ -90,9 +90,9 @@ export type WorkflowOverlayOpener = (nameOrRunId: string, slug?: string, session
 /** workflow run 反查回调（renderer 注入）：从 workflowStore 分区读，(scriptName, slug) → record */
 export type WorkflowRunLookup = (sessionId: string, scriptName: string, slug?: string) => WorkflowRunRecord | undefined
 
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：overlay 桥接绑定单例 ref
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，已登记）：overlay 桥接绑定单例 ref（W24 基线存量，dmg-r1-1 草稿表述清理）
 const boundOverlayOpener = ref<WorkflowOverlayOpener | null>(null)
-// taste:allow-no-data-owner W24-EX-B（同上，同组桥接绑定的第二声明）
+// taste:allow-no-data-owner W24-EX-B（同上，同组桥接绑定的第二声明，已登记）
 const boundWorkflowRunLookup = ref<WorkflowRunLookup | null>(null)
 
 /**

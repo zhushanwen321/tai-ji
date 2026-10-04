@@ -36,13 +36,15 @@ export function useTerminalSpawnFeedback(
 
   /**
    * 挂载自动新建：清错误态后 spawn，失败置 inline 错误条（不出现新条目）。
+   * 走 `spawnTerminalAuto`（同会话 in-flight 互斥：terminal.list 往返窗口内快速切走再切回
+   * 的后到激活轮复用先到轮的 spawn promise，防同会话双默认 PTY——dmg-r1-3）。
    * 返回 spawn 落定（ack 建档 / 失败）即 resolve 的 promise——首挂载轮据此在置位交互门前
    * 等 ack 建档落位（见 TerminalView.activateSession「首挂载不夺焦」）。
    */
   function spawnWithFeedback(): Promise<void> {
     spawnError.value = null
     const { cwd, cols, rows } = resolveDims()
-    return terminal.spawnTerminal(cwd, cols, rows).then(
+    return terminal.spawnTerminalAuto(cwd, cols, rows).then(
       () => undefined,
       (e: unknown) => {
         spawnError.value = e instanceof Error ? e.message : String(e)
