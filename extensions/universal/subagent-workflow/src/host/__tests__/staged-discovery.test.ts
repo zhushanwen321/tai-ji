@@ -21,7 +21,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { discoverResources } from "@zhushanwen/subagent-core";
+import { discoverResources, isTargetFile } from "@zhushanwen/subagent-core";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 // pi 宿主协作件 mock：本文件只跑发现链，日志面给可调用桩（回退分支会走 debug）。
@@ -66,15 +66,11 @@ function makeStagedLayout(): { scopeDir: string; moduleUrl: string } {
   return { scopeDir: join(root, "@zhushanwen"), moduleUrl: pathToFileURL(indexJs).href };
 }
 
-/** 源目录内可发现文件的集合（与发现层同口径：workflows 只算 .js/.mjs、排除 `_` 前缀；
- *  agents 算 .md）。 */
+/** 源目录内可发现文件的集合——判据直接复用发现层导出的 isTargetFile（同一份
+ *  函数，发现层口径变化时期望集自动跟随，无双源）。 */
 function sourceExpected(kind: "workflows" | "agents"): string[] {
   return readdirSync(join(CORE_PKG, kind))
-    .filter((f) =>
-      kind === "workflows"
-        ? /\.(js|mjs)$/.test(f) && !f.startsWith("_")
-        : f.endsWith(".md"),
-    )
+    .filter((f) => isTargetFile(f, kind))
     .sort();
 }
 

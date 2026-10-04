@@ -711,6 +711,7 @@ export {
   findWorkspaceRoot,
   getCachedFileContent,
   getCachedParsed,
+  isTargetFile,
 } from "./shared/resource-discovery.ts";
 export type {
   DiscoveredResource,
