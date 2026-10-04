@@ -17,7 +17,7 @@
  *   - rename-config-message-handler.ts           会话自动重命名配置
  *   - smart-context-config-message-handler.ts    smart context 配置
  *   - codemode-message-handler.ts                codemode 开关（settings.json defaultTools 域）
- *   - mcp-message-handler.ts                     MCP 服务器管理（pi 用户级 mcp.json 五操作，pi-mcp-management）
+ *   - mcp-message-handler.ts                     MCP 服务器管理（pi 用户级 mcp.json 七命令，pi-mcp-management）
  */
 import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage, ClientMessageType, SkillCacheScope } from '@taiji/shared'
@@ -67,7 +67,7 @@ export interface SettingsHandlerContext extends MessageHandlerContext {
   /** W4：skillRegistry（全局 + 项目级 skill 缓存，带 watcher）。landing 全局 skill 经此拿 globalCache（FR-5）。 */
   skillRegistry: SkillRegistry
   /**
-   * MCP 服务器管理域服务（pi-mcp-management）：mcp.list/add/update/remove/test 五操作
+   * MCP 服务器管理域服务（pi-mcp-management）：mcp.list/add/update/setEnabled/remove/test/testCancel 七命令
    * 路由依赖。组合根构造 McpServersService（IMcpServers port 的 infra 实现 PiMcpServers）
    * 经 setServices 注入（生产恒注入）；测试装配缺省时本域 case 落 unknown_type（构造器
    * 条件装配，tts 批缺省语义同构）。
@@ -201,13 +201,15 @@ export class SettingsMessageHandler {
     // ── codemode 开关域（codemode-message-handler.ts）──
     'config.getCodemodeEnabled': (msg, ws) => this.codemodeHandler.handle(msg, ws),
     'config.setCodemodeEnabled': (msg, ws) => this.codemodeHandler.handle(msg, ws),
-    // ── MCP 服务器管理域（mcp-message-handler.ts，pi-mcp-management 五操作）──
+    // ── MCP 服务器管理域（mcp-message-handler.ts，pi-mcp-management 七命令）──
     // mcpServersService 缺省（退化测试装配）时委托落空返回 false → unknown_type（同 default）。
     'mcp.list': (msg, ws) => this.mcpHandler?.handle(msg, ws) ?? false,
     'mcp.add': (msg, ws) => this.mcpHandler?.handle(msg, ws) ?? false,
     'mcp.update': (msg, ws) => this.mcpHandler?.handle(msg, ws) ?? false,
+    'mcp.setEnabled': (msg, ws) => this.mcpHandler?.handle(msg, ws) ?? false,
     'mcp.remove': (msg, ws) => this.mcpHandler?.handle(msg, ws) ?? false,
     'mcp.test': (msg, ws) => this.mcpHandler?.handle(msg, ws) ?? false,
+    'mcp.testCancel': (msg, ws) => this.mcpHandler?.handle(msg, ws) ?? false,
   }
 
   async handleSettingsMessage(msg: ClientMessage, ws: WsType): Promise<boolean> {

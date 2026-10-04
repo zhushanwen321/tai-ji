@@ -1,7 +1,7 @@
 /**
- * SettingsMessageHandler mcp.* 五操作路由注册测试（pi-mcp-management 装配波 u2b 验收条款①）。
+ * SettingsMessageHandler mcp.* 七命令路由注册测试（pi-mcp-management 装配波 u2b 验收条款①）。
  *
- * 锁定：五 type（mcp.list/add/update/remove/test）经路由表查表命中并委托 McpMessageHandler
+ * 锁定：七 type（mcp.list/add/update/setEnabled/remove/test/testCancel）经路由表查表命中并委托 McpMessageHandler
  * （service 真实例 + fake IMcpServers port——u2a fake 形态复用），reply 对应 :result 帧；
  * mcpServersService 缺省（存量测试的退化装配面）时 mcp.* 落 unknown_type（handled=false，
  * 构造器条件装配语义，tts 批缺省同构）；未知 mcp type → false（unknown_type 兜底不变）。
@@ -22,11 +22,13 @@ const ENTRY: McpServerEntry = {
 /** fake IMcpServers（fake store/probe，u2a mcp-message-handler.test 同款形态）。 */
 function makeFakePort(overrides: Partial<IMcpServers> = {}): IMcpServers {
   return {
-    list: vi.fn(() => ({ servers: [ENTRY], corruption: null })),
+    list: vi.fn(() => ({ servers: [ENTRY], corruption: null, agentDir: '/data/agent' })),
     add: vi.fn(() => ({ ok: true, entry: ENTRY }) as const),
     update: vi.fn(() => ({ ok: true, entry: ENTRY }) as const),
+    setEnabled: vi.fn((_name: string, _enabled: boolean) => ({ ok: true, entry: ENTRY }) as const),
     remove: vi.fn(() => ({ ok: true, entry: ENTRY }) as const),
     test: vi.fn((_name: string) => ({ testId: 'test-1' })),
+    testCancel: vi.fn((_testId: string) => true),
     ...overrides,
   }
 }
@@ -62,13 +64,15 @@ function mockCtx(portOverrides: Partial<IMcpServers> = {}) {
 
 const WS = {} as never
 
-describe('SettingsMessageHandler · mcp.* 五操作路由（pi-mcp-management）', () => {
+describe('SettingsMessageHandler · mcp.* 七命令路由（pi-mcp-management）', () => {
   const CASES = [
     { type: 'mcp.list', payload: {}, replyType: 'mcp.list:result', spy: 'list' },
     { type: 'mcp.add', payload: { name: 'fs', entry: ENTRY.value }, replyType: 'mcp.add:result', spy: 'add' },
     { type: 'mcp.update', payload: { name: 'fs', entry: ENTRY.value }, replyType: 'mcp.update:result', spy: 'update' },
+    { type: 'mcp.setEnabled', payload: { name: 'fs', enabled: false }, replyType: 'mcp.setEnabled:result', spy: 'setEnabled' },
     { type: 'mcp.remove', payload: { name: 'fs' }, replyType: 'mcp.remove:result', spy: 'remove' },
     { type: 'mcp.test', payload: { name: 'fs' }, replyType: 'mcp.test:result', spy: 'test' },
+    { type: 'mcp.testCancel', payload: { testId: 'test-1' }, replyType: 'mcp.testCancel:result', spy: 'testCancel' },
   ] as const
 
   for (const c of CASES) {
@@ -90,13 +94,14 @@ describe('SettingsMessageHandler · mcp.* 五操作路由（pi-mcp-management）
 
   it('mcp.list reply payload = 清单 + 损坏错误态两态形状（透传 service 结果）', async () => {
     const { ctx, replies } = mockCtx({
-      list: vi.fn(() => ({ servers: [], corruption: { filePath: '/data/agent/mcp.json', corruptCopyPath: null } })),
+      list: vi.fn(() => ({ servers: [], corruption: { filePath: '/data/agent/mcp.json', corruptCopyPath: null }, agentDir: '/data/agent' })),
     })
     const handler = new SettingsMessageHandler(ctx)
     await handler.handleSettingsMessage({ type: 'mcp.list', payload: {}, id: 'm2' } as unknown as ClientMessage, WS)
     expect(replies[0].payload).toEqual({
       servers: [],
       corruption: { filePath: '/data/agent/mcp.json', corruptCopyPath: null },
+      agentDir: '/data/agent',
     })
   })
 

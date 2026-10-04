@@ -565,3 +565,33 @@ export function removeMcpServer(name: string): boolean {
     return true
   })
 }
+
+/**
+ * 启停切换专用操作（§3.1「可启停（写入 enabled 字段）」最小语义，写死）：锁内重读磁盘
+ * 最新内容后仅翻转该条目的 enabled 键，其余键一律不触——不走 update 的条目值回写路径
+ *（清单投影为底的全量替换会把「清单打开至切换之间」的外部并发改动（终端 pi mcp 命令 /
+ * 手编）静默覆盖，丢失窗口从 D2 声明的锁内亚秒级放大到 UI 会话级；混填条目亦不会被
+ * form 路径规范化改写）。false 落 enabled:false 键，true 删键（缺省启用，对齐 pi 自身
+ * 写路径与 buildFormConfig 语义）。不跑保存校验：本操作不改传输字段，条目合法性与
+ * 切换前一致（坏条目的启停同样只有 enabled 键语义，清单标注不阻塞管理，D4）。
+ * 条目不存在抛 not_found（清单可见性窗口内被外部删除）；条目非对象（坏条目）抛
+ * entry_not_object——enabled 键无处落。
+ */
+export function setMcpServerEnabled(name: string, enabled: boolean): void {
+  withMcpLock((state) => {
+    if (!(name in state.servers)) {
+      throw new McpStoreError('not_found', `服务器 "${name}" 不存在：可能已被删除，请刷新清单后重试`)
+    }
+    const current = state.servers[name]
+    if (!isRecord(current)) {
+      throw new McpStoreError(
+        'entry_not_object',
+        `服务器 "${name}" 的配置必须是对象，无法切换启停：请先在编辑弹层或文件中修复该条目`,
+      )
+    }
+    const next: Record<string, unknown> = { ...current }
+    if (enabled === false) next.enabled = false
+    else delete next.enabled
+    writeRawState(state, { ...state.servers, [name]: next })
+  })
+}

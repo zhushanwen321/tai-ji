@@ -1234,6 +1234,11 @@ export default {
     enabledLabel: '启用',
     testConnection: '测试连接',
     testing: '测试中',
+    cancelTest: '取消',
+    // I3 登录引导（needs-auth 条目：完整可复制登录命令 + PI_CODING_AGENT_DIR 环境变量指引）
+    loginCmdCopy: '复制登录命令',
+    loginCmdCopied: '登录命令已复制',
+    loginCmdHint: '在终端执行此命令完成 OAuth 登录：PI_CODING_AGENT_DIR 使凭据写入本应用数据目录（缺它凭据会写到 ~/.pi/agent，本应用会话读不到）',
     edit: '编辑',
     delete: '删除',
     deleteConfirmTitle: '删除 {name}？',

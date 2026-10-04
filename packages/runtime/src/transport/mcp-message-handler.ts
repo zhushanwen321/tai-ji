@@ -1,6 +1,6 @@
 /**
- * MCP 服务器管理域 message handler（mcp.list / mcp.add / mcp.update / mcp.remove /
- * mcp.test，5 条 case）。
+ * MCP 服务器管理域 message handler（mcp.list / mcp.add / mcp.update / mcp.setEnabled /
+ * mcp.remove / mcp.test / mcp.testCancel，7 条 case）。
  *
  * pi-mcp-management 设计的 runtime 端（先例：codemode-message-handler.ts 同款
  * class + handle() switch 形态）。错误语义与 retry 不同（shared mcp.ts 协议定死）：
@@ -53,6 +53,14 @@ export class McpMessageHandler {
         this.ctx.reply(ws, msg.id, 'mcp.update:result', result)
         return true
       }
+      case 'mcp.setEnabled': {
+        // 启停（§3.1「写入 enabled 字段」最小语义）：专用操作仅翻转 enabled 键、不带
+        // 清单投影回写（D2 丢失窗口保持锁内亚秒级），reply entry = 写后落盘终态。
+        const { name, enabled } = msg.payload
+        const result = this.ctx.mcpServersService.setEnabled(name, enabled)
+        this.ctx.reply(ws, msg.id, 'mcp.setEnabled:result', result)
+        return true
+      }
       case 'mcp.remove': {
         // 删除：reply ok 分支 entry = 被删条目删除前落盘值（回显），renderer 按名移除。
         const { name } = msg.payload
@@ -66,6 +74,15 @@ export class McpMessageHandler {
         const { name } = msg.payload
         const handle = this.ctx.mcpServersService.test(name)
         this.ctx.reply(ws, msg.id, 'mcp.test:result', handle)
+        return true
+      }
+      case 'mcp.testCancel': {
+        // 取消连接测试（D3「取消」按钮——等价于超时到点杀进程的主动形态）：cancelled
+        // true = 取消生效（probe 以 cancelled 终态收敛、不回填徽标，renderer 恢复取消前
+        // 徽标）；false = 任务已结束，结果徽标照常经 mcp:testResult 广播回填。
+        const { testId } = msg.payload
+        const cancelled = this.ctx.mcpServersService.testCancel(testId)
+        this.ctx.reply(ws, msg.id, 'mcp.testCancel:result', { cancelled })
         return true
       }
       default:

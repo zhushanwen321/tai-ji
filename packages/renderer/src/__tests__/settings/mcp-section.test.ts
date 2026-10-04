@@ -465,6 +465,45 @@ describe('McpSection（pi-mcp-management U3）', () => {
     wrapper?.unmount()
   })
 
+  it('启停失败（ok:false 无 corruption，如条目已被外部删除）→ store 错误文案走 toast 可见，不误转损坏态', async () => {
+    mcpDomainMock.listMcpServers.mockResolvedValue(listFixture([entryFixture('filesystem')]))
+    mcpDomainMock.setMcpServerEnabled.mockResolvedValue({
+      ok: false,
+      error: '服务器 "filesystem" 不存在：可能已被删除，请刷新清单后重试',
+    })
+    const w = mountSection()
+    await flushPromises()
+
+    await w.find('[data-testid="mcp-toggle-filesystem"]').trigger('click')
+    await flushPromises()
+
+    // 清单行失败反馈走 toast（formServerError 仅由编辑弹层渲染，写它则用户无任何可见反馈）
+    expect(toastMock.error).toHaveBeenCalledWith('服务器 "filesystem" 不存在：可能已被删除，请刷新清单后重试')
+    expect(w.find('[data-testid="mcp-corruption-error"]').exists()).toBe(false)
+    wrapper?.unmount()
+  })
+
+  it('删除失败（ok:false 无 corruption）→ store 错误文案走 toast，确认框关闭', async () => {
+    mcpDomainMock.listMcpServers.mockResolvedValue(listFixture([entryFixture('filesystem')]))
+    mcpDomainMock.removeMcpServer.mockResolvedValue({
+      ok: false,
+      error: '服务器 "filesystem" 不存在：可能已被删除，请刷新清单后重试',
+    })
+    const w = mountSection()
+    await flushPromises()
+
+    await w.find('[data-testid="mcp-remove-filesystem"]').trigger('click')
+    await flushPromises()
+    const confirmBtn = q('[role="dialog"]').findAll('button').find((b) => b.text() === '删除')
+    await confirmBtn!.trigger('click')
+    await flushPromises()
+
+    expect(toastMock.error).toHaveBeenCalledWith('服务器 "filesystem" 不存在：可能已被删除，请刷新清单后重试')
+    // 确认框已关闭（失败不挂死确认弹层）
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    wrapper?.unmount()
+  })
+
   it('删除确认：取消不调协议；确认后 remove 调用且行消失', async () => {
     mcpDomainMock.listMcpServers.mockResolvedValue(listFixture([entryFixture('filesystem')]))
     const w = mountSection()

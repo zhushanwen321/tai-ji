@@ -36,7 +36,7 @@ import { ConfigService } from './services/config-service.js'
 import { PiCodemodeSettings } from './infra/pi/pi-codemode-settings.js'
 // pi-mcp-management（装配波 u2b）：IMcpServers port 的 infra 实现（组合 pi-mcp-store
 // 唯一读写层 + pi-mcp-probe 连接测试通道）与 service 组合层，经 setServices 注入
-// SettingsMessageHandler ctx（mcp.* 五操作路由）。
+// SettingsMessageHandler ctx（mcp.* 七命令路由）。
 import { PiMcpServers } from './infra/pi/pi-mcp-servers.js'
 import { McpServersService } from './services/mcp-servers-service.js'
 import { AuthService } from './services/auth/auth-service.js'
@@ -1484,8 +1484,8 @@ async function main(): Promise<void> {
     providerCredentialResolver,
     // D-21 端口化接线：settingsHandler ctx 的测试连接 HTTP 适配器（mode=test 路由）。
     connectionTester,
-    // pi-mcp-management 接线：settingsHandler ctx 的 mcp.* 五操作路由（mcp.list/add/
-    // update/remove/test，经 McpServersService → PiMcpServers 组合 store/probe）。
+    // pi-mcp-management 接线：settingsHandler ctx 的 mcp.* 七命令路由（mcp.list/add/
+    // update/setEnabled/remove/test/testCancel，经 McpServersService → PiMcpServers 组合 store/probe）。
     mcpServersService,
     // sd-u5：sessionId 单例注册表（上方 createSessionDeliveryRegistry 装配）。
     // 缺席时 server 构造退化实例并 warn（违反单例约束，仅测试装配遗漏场景）。

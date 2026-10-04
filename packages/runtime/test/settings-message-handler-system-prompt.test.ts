@@ -94,11 +94,13 @@ function makeHandler() {
     // pi-mcp-management：ctx mcpServersService 构造必需（本文件用例不涉 mcp 域——miss 替身，
     // fake port 不触碰文件系统，形态同上方 providerCredentialResolver 替身先例）
     mcpServersService: new McpServersService({
-      list: () => ({ servers: [], corruption: null }),
+      list: () => ({ servers: [], corruption: null, agentDir: '/miss/agent' }),
       add: () => ({ ok: false, error: 'miss stub' }),
       update: () => ({ ok: false, error: 'miss stub' }),
+      setEnabled: () => ({ ok: false, error: 'miss stub' }),
       remove: () => ({ ok: false, error: 'miss stub' }),
       test: () => ({ testId: 'miss-stub' }),
+      testCancel: () => false,
     }),
     projectRoot: '/proj',
     nextPushId: vi.fn().mockReturnValue('push-1'),

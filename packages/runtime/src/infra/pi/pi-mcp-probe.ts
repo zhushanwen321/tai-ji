@@ -108,6 +108,8 @@ export type McpProbeResult =
     }
   /** 整体墙钟超时：本次测试无任何结果（D3 结构限制——CLI 一次性输出，无部分条目）。 */
   | { kind: 'timeout'; timeoutMs: number }
+  /** 主动取消（D3「取消」按钮——等价于超时到点杀进程的主动形态）：本次测试无任何结果。 */
+  | { kind: 'cancelled' }
   /** stdout 非法 JSON / 形状不符：降级错误态，rawExcerpt = 原始输出摘要。 */
   | { kind: 'invalid-output'; rawExcerpt: string }
   /** pi 二进制定位失败或 spawn 系统级错误（ENOENT 等）。 */
@@ -138,6 +140,13 @@ export interface McpProbeOptions { // oe-exempt:20261004:framework:probe 注入�
   piExecutable?: string
   /** spawn 实现注入（测试缝；缺省 node child_process.spawn）。 */
   spawnImpl?: McpProbeSpawnImpl
+  /**
+   * 取消句柄注册缝（D3「取消」按钮）：子进程 spawn 成功后同步调用一次，入参为取消函数
+   * ——杀 probe 子进程并使结果落 kind:'cancelled'（等价于超时到点杀进程的主动形态）。
+   * 取消函数返回 false = 进程已自行退出（取消晚到），结果照常解析——调用方按返回值决定
+   * 是否按「已取消」收敛。装配层（PiMcpServers）以此按 testId 登记进行中的 probe。
+   */
+  onStarted?: (cancel: () => boolean) => void
 }
 
 /**
@@ -177,6 +186,15 @@ export async function runMcpProbe(options: McpProbeOptions = {}): Promise<McpPro
     return { kind: 'spawn-failed', message: `启动 pi mcp list 失败：${errorMessage(error)}` }
   }
 
+  // D3「取消」按钮：kill 返回 true = 进程尚在、由本侧终止（结果落 cancelled）；false =
+  // 进程已自行退出（取消晚到），cancelled 置否——close 按正常路径解析结果。
+  let cancelled = false
+  const cancel = (): boolean => {
+    if (child.kill()) cancelled = true
+    return cancelled
+  }
+  options.onStarted?.(cancel)
+
   return await new Promise<McpProbeResult>((resolve) => {
     let stdout = ''
     let stderr = ''
@@ -208,6 +226,10 @@ export async function runMcpProbe(options: McpProbeOptions = {}): Promise<McpPro
       spawnError = error
     })
     child.on('close', (code) => {
+      if (cancelled) {
+        settle({ kind: 'cancelled' })
+        return
+      }
       if (timedOut) {
         settle({ kind: 'timeout', timeoutMs })
         return

@@ -23,6 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PROBE_TIMEOUT_MS, type McpProbeOptions, type McpProbeResult } from '../pi-mcp-probe.js'
 import { PiMcpServers } from '../pi-mcp-servers.js'
 import { setMcpStorePathForTest } from '../pi-mcp-store.js'
+import { getPiAgentDir } from '../pi-paths.js'
 import type { McpServerEntryValue } from '@taiji/shared'
 
 let tmpDir: string
@@ -59,7 +60,7 @@ const STDIO_ENTRY: McpServerEntryValue = { command: 'npx', args: ['-y', 'server-
 describe('PiMcpServers.list（读投影）', () => {
   it('文件不存在 = 空清单 + corruption null（与「文件存在但无条目」同形态，§3.1）', () => {
     const { servers, runner } = makeServers()
-    expect(servers.list()).toEqual({ servers: [], corruption: null })
+    expect(servers.list()).toEqual({ servers: [], corruption: null, agentDir: getPiAgentDir() })
   })
 
   it('正常条目投影：name + value 原样 + 无 configError；filePath 来自 activePath', () => {
@@ -201,7 +202,7 @@ describe('PiMcpServers.update（外键判别分叉两语义，ADR-0065 transform
     expect(result.entry.value).toEqual({ command: 'node', timeout: 60 })
   })
 
-  it('启停切换形态（整条目回写 + enabled 覆盖，u3 消费形态）：含外键原值原样回写', () => {
+  it('code 路径 verbatim：enabled 键随 entry 整体落盘（代码模式可见可改，非启停通道）', () => {
     writeRaw(JSON.stringify({
       mcpServers: { fs: { url: 'https://example.com', type: 'http', timeout: 5 } },
     }))
@@ -229,6 +230,79 @@ describe('PiMcpServers.update（外键判别分叉两语义，ADR-0065 transform
     expect(result.error).toContain('缺少传输参数')
     // 校验不过不落盘（fail-fast）
     expect(JSON.parse(readFileSync(mcpPath, 'utf-8')).mcpServers.fs).toEqual(STDIO_ENTRY)
+  })
+})
+
+describe('PiMcpServers.setEnabled（启停专用操作，§3.1「写入 enabled 字段」最小语义）', () => {
+  it('禁用：仅翻转 enabled 键（enabled:false 落键），其余键不触——外部并发形态保持', () => {
+    writeRaw(JSON.stringify({ mcpServers: { fs: { ...STDIO_ENTRY, description: 'kept' } } }))
+    const { servers, runner } = makeServers()
+    const result = servers.setEnabled('fs', false)
+    expect(result).toEqual({ ok: true, entry: { name: 'fs', value: { ...STDIO_ENTRY, description: 'kept', enabled: false } } })
+    expect(JSON.parse(readFileSync(mcpPath, 'utf-8')).mcpServers.fs).toEqual({
+      ...STDIO_ENTRY, description: 'kept', enabled: false,
+    })
+  })
+
+  it('启用：enabled 键删除（缺省启用，对齐 pi 写路径语义）', () => {
+    writeRaw(JSON.stringify({ mcpServers: { fs: { ...STDIO_ENTRY, enabled: false } } }))
+    const { servers, runner } = makeServers()
+    const result = servers.setEnabled('fs', true)
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('unreachable')
+    expect(result.entry.value.enabled).toBeUndefined()
+    expect(JSON.parse(readFileSync(mcpPath, 'utf-8')).mcpServers.fs).toEqual(STDIO_ENTRY)
+  })
+
+  it('带外键条目：外键原样保留（以锁内最新读为底，非清单旧投影）', () => {
+    writeRaw(JSON.stringify({
+      mcpServers: { fs: { url: 'https://example.com', type: 'http', timeout: 5, oauth: { clientId: 'c1' } } },
+    }))
+    const { servers, runner } = makeServers()
+    const result = servers.setEnabled('fs', false)
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('unreachable')
+    expect(result.entry.value).toEqual({
+      url: 'https://example.com', type: 'http', timeout: 5, oauth: { clientId: 'c1' }, enabled: false,
+    })
+  })
+
+  it('混填条目启停不被规范化改写（command/url 原样保留——互斥收紧只拦写路径新产物，D4）', () => {
+    writeRaw(JSON.stringify({ mcpServers: { mixed: { command: 'npx', url: 'https://example.com' } } }))
+    const { servers, runner } = makeServers()
+    const result = servers.setEnabled('mixed', false)
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('unreachable')
+    expect(result.entry.value).toEqual({ command: 'npx', url: 'https://example.com', enabled: false })
+  })
+
+  it('启停吃进锁内最新磁盘内容：清单打开后外部新增字段不被覆盖（D2 并发契约）', () => {
+    writeRaw(JSON.stringify({ mcpServers: { fs: STDIO_ENTRY } }))
+    const { servers, runner } = makeServers()
+    // 模拟「清单打开后外部（终端/手编）改动」：直接改文件
+    writeRaw(JSON.stringify({ mcpServers: { fs: { ...STDIO_ENTRY, description: 'external edit' } } }))
+    const result = servers.setEnabled('fs', false)
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('unreachable')
+    expect(result.entry.value).toEqual({ ...STDIO_ENTRY, description: 'external edit', enabled: false })
+  })
+
+  it('条目不存在 = ok:false 信封（修复动作指向清单刷新）', () => {
+    const { servers, runner } = makeServers()
+    const result = servers.setEnabled('ghost', false)
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.error).toContain('不存在')
+  })
+
+  it('损坏拒入信封：不触发写路径（S6，外部手编内容不被触碰）', () => {
+    writeRaw('{ broken')
+    const { servers, runner } = makeServers()
+    const result = servers.setEnabled('fs', false)
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.corruption?.filePath).toBe(mcpPath)
+    expect(readFileSync(mcpPath, 'utf-8')).toBe('{ broken')
   })
 })
 
@@ -290,6 +364,53 @@ describe('PiMcpServers.test（D3 异步任务形态 + 墙钟公式）', () => {
     const { servers, runner } = makeServers()
     servers.test('a')
     expect(runner.mock.calls[0]?.[0]?.timeoutMs).toBe(DEFAULT_PROBE_TIMEOUT_MS)
+  })
+})
+
+describe('PiMcpServers.testCancel（D3「取消」按钮——等价于超时到点杀进程的主动形态）', () => {
+  /**
+   * fake runner 复刻真 runMcpProbe 的登记缝时序：同步段调用 options.onStarted 登记
+   * 取消函数，登记后 probe 挂起（Promise 不 resolve），取消函数被调时以 cancelled 终态收敛。
+   */
+  function makeHangingRunner() {
+    let resolveProbe: ((r: McpProbeResult) => void) | null = null
+    const runner = vi.fn((options: McpProbeOptions): Promise<McpProbeResult> => new Promise((resolve) => {
+      resolveProbe = resolve
+      options.onStarted?.(() => {
+        resolveProbe?.({ kind: 'cancelled' })
+        return true
+      })
+    }))
+    return { runner }
+  }
+
+  it('取消生效：testCancel 返回 true，probe 以 cancelled 终态收敛且不回填徽标', async () => {
+    const events: unknown[] = []
+    const { runner } = makeHangingRunner()
+    const servers = new PiMcpServers({ probeRunner: runner, onTestResult: (e) => events.push(e) })
+    const handle = servers.test('fs')
+    expect(servers.testCancel(handle.testId)).toBe(true)
+    await vi.waitFor(() => expect(runner.mock.results[0]?.value).resolves.toEqual({ kind: 'cancelled' }))
+    // 收敛后微任务排空仍无徽标回填（cancelled 不广播——renderer 已在取消分支恢复原徽标）
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(events).toHaveLength(0)
+    // 句柄清退：重复取消返回 false
+    expect(servers.testCancel(handle.testId)).toBe(false)
+  })
+
+  it('任务自然收敛后取消晚到：testCancel 返回 false，结果徽标照常回填', async () => {
+    const events: unknown[] = []
+    const runner = makeProbeRunner({ kind: 'ok', exitCode: 0, servers: [], configErrors: [] })
+    const servers = new PiMcpServers({ probeRunner: runner, onTestResult: (e) => events.push(e) })
+    const handle = servers.test('fs')
+    await vi.waitFor(() => expect(runner.mock.results[0]?.value).resolves.toBeTruthy())
+    expect(servers.testCancel(handle.testId)).toBe(false)
+    expect(events).toHaveLength(1)
+  })
+
+  it('testId 不存在：返回 false（fake runner 未触发 onStarted 的存量装配形态同样安全）', () => {
+    const { servers } = makeServers()
+    expect(servers.testCancel('mcp-test-999')).toBe(false)
   })
 })
 

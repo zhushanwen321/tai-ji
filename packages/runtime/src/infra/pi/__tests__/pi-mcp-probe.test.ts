@@ -304,4 +304,35 @@ describe('runMcpProbe · spawn 通道编排（D3 契约）', () => {
       rawExcerpt: expect.stringContaining('pi-internal panic: not json'),
     })
   })
+
+  it('主动取消：cancel() 杀进程，kind=cancelled 无任何条目（D3「取消」按钮——等价于超时到点杀进程的主动形态）', async () => {
+    let capturedCancel: (() => boolean) | null = null
+    const harness = makeHarness()
+    const promise = runMcpProbe({ piExecutable: FAKE_PI, spawnImpl: harness.spawnImpl, onStarted: (cancel) => { capturedCancel = cancel } })
+    const child = harness.children[0]
+
+    expect(capturedCancel).not.toBeNull()
+    expect(capturedCancel!()).toBe(true)
+    expect(child.killSignals).toHaveLength(1)
+
+    child.emit('close', null, 'SIGTERM')
+    const result = await promise
+    expect(result).toEqual({ kind: 'cancelled' })
+  })
+
+  it('取消晚到（进程已自行退出）：kill 返回 false → 结果照常解析，不被标 cancelled', async () => {
+    let capturedCancel: (() => boolean) | null = null
+    const harness = makeHarness()
+    const promise = runMcpProbe({ piExecutable: FAKE_PI, spawnImpl: harness.spawnImpl, onStarted: (cancel) => { capturedCancel = cancel } })
+    const child = harness.children[0]
+
+    // kill 桩返回 false = 进程已退出（FakeChild.kill 恒 true，此处以子类覆写模拟晚到窗口）
+    child.kill = () => false
+    expect(capturedCancel!()).toBe(false)
+
+    child.stdout.emit('data', JSON.stringify(V2_FULL_OUTPUT))
+    child.emit('close', 0, null)
+    const result = await promise
+    expect(result.kind).toBe('ok')
+  })
 })

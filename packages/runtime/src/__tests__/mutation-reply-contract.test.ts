@@ -167,6 +167,17 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     effectiveFields: ['entry'],
   },
   {
+    // mcp.setEnabled（§3.1 启停最小语义）：store 锁内仅翻转 enabled 键——请求布尔值映射
+    // 为落盘形态（false 落 enabled:false 键 / true 删键，缺省启用），请求值 ≠ 落盘终态
+    //（分支一）；reply entry = 写后落盘终态条目（生效值）。专用操作不带清单投影回写，
+    // D2 丢失窗口保持锁内亚秒级（pi-mcp-store setMcpServerEnabled）。
+    type: 'mcp.setEnabled',
+    branch: 'transformable',
+    contract: 'effective-value',
+    replyKey: 'mcp.setEnabled:result',
+    effectiveFields: ['entry'],
+  },
+  {
     // mcp.remove：删除语义（分支二），reply entry = 被删条目的删除前落盘值（回显
     // 「删掉的是这个」；renderer 按 ok 分支从清单移除该 name，不渲染 entry 本体）。
     type: 'mcp.remove',

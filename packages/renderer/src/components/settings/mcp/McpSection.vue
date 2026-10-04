@@ -97,10 +97,13 @@
           :badges="badges"
           :last-probe="lastProbe"
           :busy-name="busyName"
+          :agent-dir="agentDir"
           @toggle="onToggle"
           @test="onTest"
+          @cancel-test="onTestCancel"
           @edit="openEdit"
           @remove="askRemove"
+          @copy-login="copyLoginCommand"
         />
       </div>
     </GroupCard>
@@ -135,18 +138,20 @@
  * 数据通道：直连 core transport 域（@taiji/core/transport/api/domains/mcp，设计 §2.4
  * 「表现层依赖 core transport 域」；不经 SettingsTransport seam——MCP 非 settings 域语义）。
  * 打开时经 mcp.list 拉取一次（§3.1 拉取一次模型：pi 无状态推送通道，运行期间外部改动不
- * 实时刷新，重开分区或保存后可见）。协议动作编排：启停（update 写 enabled）/ 删除（确认
- * 后 remove）/ 连接测试（test 发起，徽标转「测试中」）。写入生效语义 = 新会话生效（D1，
- * 页头说明）。
+ * 实时刷新，重开分区或保存后可见）。协议动作编排：启停（setEnabled 专用操作——runtime
+ * 仅翻转 enabled 键，不带清单投影回写，§3.1 最小语义）/ 删除（确认后 remove）/ 连接测试
+ *（test 发起，徽标转「测试中」；测试进行中按钮切「取消」→ testCancel 杀 probe 子进程，
+ * D3 主动终止形态）。写入生效语义 = 新会话生效（D1，页头说明）。I3 登录引导：needs-auth
+ * 条目的登录命令 PI_CODING_AGENT_DIR 值取自 mcp.list reply 的 agentDir，复制经 toast 反馈。
  *
- * probe 结果回填通道（u5b 打回接线）：协议面 test 只回异步句柄（McpTestHandle），终态经
- * runtime 的 `mcp:testResult` 广播帧回填——本组件挂载期间订阅该帧（onGlobalType 全局通道，
- * rollingRestart:* 先例同构）转交 applyProbeResult；分区未挂载窗口的广播结果自然丢失
- *（徽标是 UI 本地态，D8②「本次界面会话未跑过测试」，重开分区回落「未测试」为既定形态）。
- * applyProbeResult 同为 defineExpose 接缝（「测试超时」同样经此回填，D3 语义 = 整体无
- * 本次结果，保留上次成功测试结果展示）。
+ * probe 结果回填通道：协议面 test 只回异步句柄（McpTestHandle），终态经 runtime 的
+ * `mcp:testResult` 广播帧回填——连接测试三组状态（徽标 / 上次结果 / testId 登记）、广播
+ * 订阅与 applyProbeResult 接缝（defineExpose 透传；「测试超时」同样经此回填，D3 语义 =
+ * 整体无本次结果，保留上次成功测试结果展示）整体在 useMcpTestState（composables/ 同级
+ * 抽取）；分区未挂载窗口的广播结果自然丢失（徽标是 UI 本地态，D8②「本次界面会话未跑过
+ * 测试」，重开分区回落「未测试」为既定形态）。
  */
-import { computed, onMounted, onScopeDispose, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertTriangle, Copy, Plus } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
@@ -156,13 +161,15 @@ import McpServerList from './McpServerList.vue'
 import McpServerForm from './McpServerForm.vue'
 import {
   addMcpServer,
+  cancelMcpServerTest,
   listMcpServers,
   removeMcpServer,
+  setMcpServerEnabled,
   testMcpServer,
   updateMcpServer,
 } from '@taiji/core/transport/api/domains/mcp'
-import { onGlobalType } from '@taiji/core/transport/api'
-import type { McpConfigCorruption, McpServerEntry, McpServerEntryValue, McpServerStatusBadge } from '@taiji/shared'
+import type { McpConfigCorruption, McpServerEntry, McpServerEntryValue } from '@taiji/shared'
+import { useMcpTestState } from '@/composables/useMcpTestState'
 import { useToast } from '@/composables/useToast'
 
 const { t } = useI18n()
@@ -171,12 +178,25 @@ const { info: toastInfo, error: toastError } = useToast()
 const loadError = ref(false)
 const servers = ref<McpServerEntry[]>([])
 const corruption = ref<McpConfigCorruption | null>(null)
+/** pi agent 目录绝对路径（mcp.list reply 携带；I3 登录命令 PI_CODING_AGENT_DIR 值） */
+const agentDir = ref('')
 
-/** 条目当前展示徽标（name → badge；缺省未测试，经 McpServerList 缺省渲染） */
-const badges = ref<Record<string, McpServerStatusBadge>>({})
-/** 最近一次 probe 终态徽标（「测试超时」时保留展示，D3） */
-const lastProbe = ref<Record<string, McpServerStatusBadge>>({})
 const busyName = ref<string | null>(null)
+
+// 连接测试状态域（徽标三组 refs + probe 终态广播订阅 + 状态操作）整体在 useMcpTestState
+//（composable 抽取，useMcpServerForm 同款分工——协议调用编排与 busy 互斥留本组件）
+const {
+  badges,
+  lastProbe,
+  activeTestIds,
+  markTesting,
+  registerActiveTest,
+  clearActiveTest,
+  resetTestState,
+  clearBadgeState,
+  revertBadge,
+  applyProbeResult,
+} = useMcpTestState()
 
 const formOpen = ref(false)
 const editingName = ref<string | null>(null)
@@ -190,38 +210,48 @@ onMounted(() => {
   void refresh()
 })
 
-// probe 终态广播订阅（u5b 打回接线）：runtime probe 完成 → mcp:testResult 帧 → 徽标回填。
-// setup 同步订阅 + 作用域销毁注销（组件多实例防泄漏；applyProbeResult 是函数声明提升，
-// 订阅注册早于其定义位置亦可安全引用）。
-const offTestResult = onGlobalType('mcp:testResult', (msg) => {
-  applyProbeResult(msg.payload.name, msg.payload.badge)
-})
-onScopeDispose(offTestResult)
-
 async function refresh(): Promise<void> {
   loadError.value = false
   try {
     const res = await listMcpServers()
     servers.value = res.servers
     corruption.value = res.corruption
-    badges.value = {}
-    lastProbe.value = {}
+    agentDir.value = res.agentDir
+    resetTestState()
   } catch (e) {
     loadError.value = true
     console.warn('[McpSection] failed to load mcp servers:', e)
   }
 }
 
-/** 损坏拒入统一处理：携带 corruption 时关闭弹层转整页损坏态（先修复文件，S6） */
+/** 损坏拒入统一处理（清单行动作与表单保存共用）：转整页损坏态（先修复文件，S6）+ toast */
+function applyCorruptionFailure(corrupt: McpConfigCorruption): void {
+  formOpen.value = false
+  formServerError.value = null
+  corruption.value = corrupt
+  toastError(t('settings.mcp.saveRejected', { path: corrupt.filePath }))
+}
+
+/** 表单保存失败：损坏转整页损坏态；校验/拦截错误内联显示在编辑弹层（D4 失败样例语境） */
 function applyMutationFailure(err: string, corrupt: McpConfigCorruption | null | undefined): void {
   if (corrupt) {
-    formOpen.value = false
-    formServerError.value = null
-    corruption.value = corrupt
-    toastError(t('settings.mcp.saveRejected', { path: corrupt.filePath }))
+    applyCorruptionFailure(corrupt)
     return
   }
   formServerError.value = err
+}
+
+/**
+ * 清单行动作失败（启停/删除）：损坏转整页损坏态；其余错误走 toast——formServerError
+ * 仅由编辑弹层渲染（弹层未开时不可达），清单行失败写它则用户无任何可见反馈（错误
+ * 「错误 → 原因 → 修复动作」文案经 toast 到达用户，与 handleRpcError 同通道）
+ */
+function applyRowActionFailure(err: string, corrupt: McpConfigCorruption | null | undefined): void {
+  if (corrupt) {
+    applyCorruptionFailure(corrupt)
+    return
+  }
+  toastError(err)
 }
 
 // ── 清单行动作 ──
@@ -230,12 +260,14 @@ async function onToggle(entry: McpServerEntry, enabled: boolean): Promise<void> 
   if (busyName.value) return
   busyName.value = entry.name
   try {
-    // 整条目值带回（文件投影含表单外键）+ enabled 覆盖；合并契约归 runtime store（D7）
-    const res = await updateMcpServer({ name: entry.name, entry: { ...entry.value, enabled } })
+    // 启停专用操作（§3.1「写入 enabled 字段」最小语义）：runtime 锁内仅翻转 enabled 键，
+    // 不带清单投影回写——外部并发改动（终端 pi mcp 命令/手编）不被旧投影覆盖（D2 丢失
+    // 窗口保持锁内亚秒级）；reply entry = 写后落盘终态，服务端校准清单
+    const res = await setMcpServerEnabled({ name: entry.name, enabled })
     if (res.ok) {
       replaceEntry(res.entry)
     } else {
-      applyMutationFailure(res.error, res.corruption)
+      applyRowActionFailure(res.error, res.corruption)
     }
   } catch (e) {
     handleRpcError(e)
@@ -247,12 +279,34 @@ async function onToggle(entry: McpServerEntry, enabled: boolean): Promise<void> 
 async function onTest(name: string): Promise<void> {
   if (busyName.value) return
   busyName.value = name
-  badges.value = { ...badges.value, [name]: { source: 'ui-local', state: 'testing' } }
+  markTesting(name)
   try {
-    await testMcpServer({ name })
-    // 异步任务已受理；终态徽标经 applyProbeResult 回填（通道归 runtime 实施期接线）
+    const handle = await testMcpServer({ name })
+    // 异步任务已受理；终态徽标经 applyProbeResult 回填；testId 登记供「取消」按钮按句柄终止（D3）
+    registerActiveTest(name, handle.testId)
   } catch (e) {
     revertBadge(name)
+    handleRpcError(e)
+  } finally {
+    busyName.value = null
+  }
+}
+
+async function onTestCancel(name: string): Promise<void> {
+  if (busyName.value) return
+  const testId = activeTestIds.value[name]
+  if (testId === undefined) return
+  busyName.value = name
+  try {
+    const res = await cancelMcpServerTest({ testId })
+    if (res.cancelled) {
+      // 取消生效：probe 以 cancelled 终态收敛（不回填徽标），本侧恢复取消前徽标——
+      // 主动取消与 D3 超时同源语义（整体无本次结果），上次成功结果自然保留展示
+      clearActiveTest(name)
+      revertBadge(name)
+    }
+    // cancelled false = 任务已结束：结果徽标已经（或即将）经 mcp:testResult 回填，不动
+  } catch (e) {
     handleRpcError(e)
   } finally {
     busyName.value = null
@@ -279,7 +333,7 @@ async function doRemove(): Promise<void> {
       pendingRemoveName.value = null
     } else {
       pendingRemoveName.value = null
-      applyMutationFailure(res.error, res.corruption)
+      applyRowActionFailure(res.error, res.corruption)
     }
   } catch (e) {
     pendingRemoveName.value = null
@@ -335,37 +389,20 @@ function replaceEntry(next: McpServerEntry): void {
   servers.value = servers.value.map((s) => (s.name === next.name ? next : s))
 }
 
-function clearBadgeState(name: string): void {
-  const next = { ...badges.value }
-  delete next[name]
-  badges.value = next
-  const last = { ...lastProbe.value }
-  delete last[name]
-  lastProbe.value = last
-}
-
-function revertBadge(name: string): void {
-  const next = { ...badges.value }
-  if (lastProbe.value[name]) next[name] = lastProbe.value[name]
-  else delete next[name]
-  badges.value = next
-}
-
 function handleRpcError(e: unknown): void {
   const detail = e instanceof Error && e.message ? e.message : ''
   toastError(detail || t('settings.mcp.rpcFailed'))
 }
 
-/**
- * probe 终态徽标回填（defineExpose 接缝）：连接测试结果的唯一入口——来源通道（runtime 侧
- * 实施期登记的推送/拉取形态）落地后接到此处。timeout 态只更新当前展示徽标，lastProbe 保留
- * 上次成功结果（D3 超时语义）。
- */
-function applyProbeResult(name: string, badge: McpServerStatusBadge): void {
-  if (badge.source === 'probe' || badge.source === 'config') {
-    lastProbe.value = { ...lastProbe.value, [name]: badge }
+/** I3 登录引导：复制完整登录命令（含 PI_CODING_AGENT_DIR 隔离环境变量），toast 反馈 */
+async function copyLoginCommand(command: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(command)
+    toastInfo(t('settings.mcp.loginCmdCopied'))
+  } catch (e) {
+    // best-effort：复制失败不打断（命令在清单行完整可见，用户可手动选中复制，copyCorruptedPath 同款降级）
+    console.warn('[McpSection] failed to copy login command:', e)
   }
-  badges.value = { ...badges.value, [name]: badge }
 }
 
 async function copyCorruptedPath(): Promise<void> {

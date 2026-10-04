@@ -1235,6 +1235,11 @@ export default {
     enabledLabel: 'Enabled',
     testConnection: 'Test Connection',
     testing: 'Testing',
+    cancelTest: 'Cancel',
+    // I3 login guidance (needs-auth entries: copyable login command + PI_CODING_AGENT_DIR guidance)
+    loginCmdCopy: 'Copy Login Command',
+    loginCmdCopied: 'Login command copied',
+    loginCmdHint: 'Run this command in a terminal to complete OAuth login: PI_CODING_AGENT_DIR keeps credentials inside this app\'s data directory (without it they go to ~/.pi/agent where sessions cannot see them)',
     edit: 'Edit',
     delete: 'Delete',
     deleteConfirmTitle: 'Delete {name}?',

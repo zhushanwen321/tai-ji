@@ -16,17 +16,21 @@
  *     锁内对最新注册表执行（D4 不采用替换语义）。
  *   - update：按 entry 是否携带表单外键（type/timeout/toolExposure/auth/oauth 任一）
  *     分叉两种写死语义——
- *     ① 携带外键 = 代码模式解析产物或清单整条目回写（u3 启停切换发 {...entry.value,
- *     enabled}，文件投影含外键）：走 code 路径整体作为条目值（外键与显式 type 以
- *     entry 为准，不合并不剥离）。包装单键形态键名恒等于被编辑条目名，store 编辑态
- *     名称锁定校验恒通过；不包装的裸形态会踩 store 的病态重合歧义（单键 record 条目
- *     被误读为包装形态 → rename 误拦）。
+ *     ① 携带外键 = 代码模式解析产物（编辑弹层代码 tab / 表单 → 代码序列化，文件投影
+ *     含外键）：走 code 路径整体作为条目值（外键与显式 type 以 entry 为准，不合并
+ *     不剥离）。包装单键形态键名恒等于被编辑条目名，store 编辑态名称锁定校验恒通过；
+ *     不包装的裸形态会踩 store 的病态重合歧义（单键 record 条目被误读为包装形态 →
+ *     rename 误拦）。
  *     ② 无外键 = 表单模式产物（u3 formToEntry 只填表单映射键）：走 form 路径（D7
  *     编辑写回契约——底外键原样保留、type 无条件剥离、切换传输类型键级清理、清空
  *     即删键），ADR 登记 transformable（请求 entry ≠ 落盘终态）。
  *     两语义的判别边界：代码模式粘贴「无任何外键的裸条目」与表单产物在 WS 单一
  *     entry 形状下结构性不可区分，按 form 语义处理（底外键保留）——误保留可见可修
  *     （清单/代码模式可再编辑），误删除（丢 oauth 登录参数）静默不可恢复，宁保留。
+ *   - setEnabled（u3 清单行启停专用，§3.1「写入 enabled 字段」最小语义）：不经 update——
+ *     清单投影为底的条目值回写会把「清单打开至切换之间」的外部并发改动静默覆盖（丢失
+ *     窗口从 D2 的锁内亚秒级放大到 UI 会话级），且混填条目会被 form 路径规范化改写；
+ *     专用操作直落 store setMcpServerEnabled（锁内仅翻转 enabled 键）。
  *
  * 错误信封（S6/D4，协议定死错误数据在 reply 信封内不走 error envelope）：
  *   - store 校验/拦截类 McpStoreError → { ok:false, error }（error = store 的
@@ -56,11 +60,13 @@ import {
   type McpProbeOptions,
   type McpProbeResult,
 } from './pi-mcp-probe.js'
+import { getPiAgentDir } from './pi-paths.js'
 import {
   McpStoreError,
   addMcpServer,
   readMcpServers,
   removeMcpServer,
+  setMcpServerEnabled,
   updateMcpServer,
   type McpFormFields,
   type McpSaveInput,
@@ -182,6 +188,8 @@ export type PiMcpServersOptions = {
 export class PiMcpServers implements IMcpServers {
   private readonly probeRunner: McpProbeRunner
   private testSeq = 0
+  /** 进行中的连接测试（testId → 取消函数；D3「取消」按钮按 testId 杀 probe 子进程）。 */
+  private readonly activeProbes = new Map<string, () => boolean>()
 
   constructor(private readonly options: PiMcpServersOptions = {}) {
     this.probeRunner = options.probeRunner ?? runMcpProbe
@@ -195,6 +203,8 @@ export class PiMcpServers implements IMcpServers {
       corruption: snapshot.corrupted
         ? { filePath: snapshot.filePath, corruptCopyPath: null }
         : null,
+      // I3 登录引导数据源：needs-auth 条目的可复制登录命令 PI_CODING_AGENT_DIR 值
+      agentDir: getPiAgentDir(),
     }
   }
 
@@ -208,6 +218,14 @@ export class PiMcpServers implements IMcpServers {
   update(name: string, entry: McpServerEntryValue): McpMutationResult {
     return this.mutationEnvelope(name, () => {
       updateMcpServer(name, toStoreUpdateInput(name, entry))
+    })
+  }
+
+  setEnabled(name: string, enabled: boolean): McpMutationResult {
+    // §3.1「写入 enabled 字段」最小语义：专用操作直落 store（锁内仅翻转 enabled 键，
+    // 不带清单投影回写），reply entry = 写后落盘终态（mutationEnvelope 回读）。
+    return this.mutationEnvelope(name, () => {
+      setMcpServerEnabled(name, enabled)
     })
   }
 
@@ -241,13 +259,33 @@ export class PiMcpServers implements IMcpServers {
     return { testId }
   }
 
+  testCancel(testId: string): boolean {
+    // D3「取消」按钮（等价于超时到点杀进程的主动形态）：按 testId 杀 probe 子进程。
+    // 返回 false = 无进行中任务（fake runner 未触发 onStarted / 已收敛 / testId 不存在）
+    // 或进程已自行退出——两种形态结果徽标都照常经 mcp:testResult 广播回填。
+    const cancel = this.activeProbes.get(testId)
+    if (cancel === undefined) return false
+    return cancel()
+  }
+
   private async executeProbe(name: string, testId: string): Promise<void> {
     let badge: McpServerStatusBadge | null = null
     try {
       const result = await this.probeRunner({
         timeoutMs: computeProbeTimeoutMs(),
         ...(this.options.projectRoot !== undefined ? { projectRoot: this.options.projectRoot } : {}),
+        // onStarted 在 probeRunner 内部同步触发（spawn 成功即调）：test() 返回句柄前
+        // 取消函数已登记（真 runner 形态；fake runner 未触发则 testCancel 恒 false）
+        onStarted: (cancel) => {
+          this.activeProbes.set(testId, cancel)
+        },
       })
+      if (result.kind === 'cancelled') {
+        // D3 主动取消：本次无任何结果（与超时同源语义），不回填徽标——renderer 侧已在
+        // testCancel reply cancelled:true 分支恢复取消前徽标，广播补发会覆盖它。
+        console.log(`[pi-mcp-servers] probe ${testId}（${name}）已取消（D3 主动取消，无本次结果）`)
+        return
+      }
       if (result.kind === 'ok') {
         const failed = result.servers.filter((s) => s.status.kind === 'failed').length
         console.log(
@@ -267,6 +305,8 @@ export class PiMcpServers implements IMcpServers {
         errorDetail: error instanceof Error ? error.message : String(error),
         testedAt: Date.now(),
       }
+    } finally {
+      this.activeProbes.delete(testId)
     }
     if (badge) this.options.onTestResult?.({ name, testId, badge })
   }
@@ -299,8 +339,9 @@ export class PiMcpServers implements IMcpServers {
    * probe 整体降级 → 徽标投影：timeout = ui-local timeout（D3「整体无本次结果」，renderer
    * 保留上次成功结果展示）；spawn-failed / invalid-output / 异常 = failed 徽标携带降级原因
    *（用户点测试连接的最小可见反馈——「为什么连测试本身都没跑成」，详情入口展开全文）。
+   * cancelled 不进此函数（executeProbe 已提前返回，不回填徽标）。
    */
-  private degradedProbeBadge(result: Exclude<McpProbeResult, { kind: 'ok' }>): McpServerStatusBadge {
+  private degradedProbeBadge(result: Exclude<McpProbeResult, { kind: 'ok' | 'cancelled' }>): McpServerStatusBadge {
     if (result.kind === 'timeout') return { source: 'ui-local', state: 'timeout' }
     const detail =
       result.kind === 'spawn-failed'

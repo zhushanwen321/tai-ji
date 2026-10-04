@@ -1,9 +1,11 @@
 /**
  * MCP 域 —— 设置页 MCP 分区对 pi 用户级 mcp.json 的管理面（pi-mcp-management 设计）。
  *
- * 五操作：list（清单 + 损坏错误态，打开分区拉取一次，§3.1）/ add / update（编辑写回契约
+ * 七命令：list（清单 + 损坏错误态，打开分区拉取一次，§3.1）/ add / update（编辑写回契约
  * D7 归 runtime store：表单外键原样保留、清空即删键、`type` 键剥离、切换传输类型键级清理）/
- * remove / test（连接测试异步任务句柄，D3）。写入生效语义 = 新会话生效（D1）。
+ * setEnabled（启停专用操作，仅翻转 enabled 键，§3.1 最小语义）/ remove / test（连接测试异步
+ * 任务句柄，D3）/ testCancel（取消进行中的连接测试，D3「取消」按钮）。写入生效语义 = 新会话
+ * 生效（D1）。
  *
  * 组织方式对齐 settings.ts codemode 段先例：reply 类型直接 import shared ./mcp 具名类型
  *（消息类型字符串与 type→payload 映射登记在 shared protocol.ts，payload/reply 形状 SSOT 在
@@ -17,6 +19,9 @@ import type {
   McpListResult,
   McpMutationResult,
   McpRemoveRequest,
+  McpSetEnabledRequest,
+  McpTestCancelRequest,
+  McpTestCancelResult,
   McpTestHandle,
   McpTestRequest,
   McpUpdateRequest,
@@ -40,6 +45,14 @@ export async function updateMcpServer(req: McpUpdateRequest): Promise<McpMutatio
   return command('mcp.update', req, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
+/**
+ * 启停切换（§3.1「写入 enabled 字段」最小语义的专用操作）：runtime 仅翻转 enabled 键、
+ * 不带清单投影回写（D2 丢失窗口保持锁内亚秒级）；reply entry = 写后落盘终态。
+ */
+export async function setMcpServerEnabled(req: McpSetEnabledRequest): Promise<McpMutationResult> {
+  return command('mcp.setEnabled', req, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
 /** 删除服务器（界面侧删除确认归 renderer，D8 清单行操作）。 */
 export async function removeMcpServer(req: McpRemoveRequest): Promise<McpMutationResult> {
   return command('mcp.remove', req, RPC_BACKSTOP_TIMEOUT_MS)
@@ -52,4 +65,12 @@ export async function removeMcpServer(req: McpRemoveRequest): Promise<McpMutatio
  */
 export async function testMcpServer(req: McpTestRequest): Promise<McpTestHandle> {
   return command('mcp.test', req, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/**
+ * 取消进行中的连接测试（D3「取消」按钮——等价于超时到点杀进程的主动形态，按 testId 杀
+ * probe 子进程）。cancelled false = 任务已结束，结果徽标经 mcp:testResult 广播照常回填。
+ */
+export async function cancelMcpServerTest(req: McpTestCancelRequest): Promise<McpTestCancelResult> {
+  return command('mcp.testCancel', req, RPC_BACKSTOP_TIMEOUT_MS)
 }

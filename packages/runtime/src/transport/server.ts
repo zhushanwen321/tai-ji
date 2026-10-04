@@ -113,7 +113,7 @@ export interface RuntimeServerOptionalServices {
   /**
    * MCP 服务器管理域服务（pi-mcp-management）：组合根（index.ts）构造 McpServersService
    * （infra 实现 PiMcpServers 组合 pi-mcp-store + pi-mcp-probe）经本对象注入，
-   * assembleCoreHandlers 透传给 SettingsMessageHandler ctx（mcp.* 五操作路由依赖）。
+   * assembleCoreHandlers 透传给 SettingsMessageHandler ctx（mcp.* 七命令路由依赖）。
    * 生产恒注入；缺省（存量测试装配）时 mcp.* 落 unknown_type（handler 条件装配）。
    */
   mcpServersService?: McpServersService
@@ -365,7 +365,7 @@ export class RuntimeServer implements IMessageBroker {
       // D-21 端口化：测试连接 HTTP 适配器经组合根注入（恒注入前提同上——
       // 组合根 index.ts 保证传入，setServices 编排保证；transport 不 import infra 实现）。
       connectionTester: connectionTester!,
-      // pi-mcp-management：mcp.* 五操作路由依赖。生产恒注入（组合根保证传入）；
+      // pi-mcp-management：mcp.* 七命令路由依赖。生产恒注入（组合根保证传入）；
       // 缺省（存量测试装配）时 ctx 成员 undefined，SettingsMessageHandler 构造器
       // 条件装配跳过 mcp 域子 handler，mcp.* 落 unknown_type（非空断言同上两行先例）。
       mcpServersService: mcpServersService!,

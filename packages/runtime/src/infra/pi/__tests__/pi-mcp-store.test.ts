@@ -42,6 +42,7 @@ import {
   mcpServerNamespace,
   readMcpServers,
   removeMcpServer,
+  setMcpServerEnabled,
   setMcpStorePathForTest,
   updateMcpServer,
   validateMcpEntryForRead,
@@ -590,6 +591,71 @@ describe('§4 断言⑤ · 添加流代码模式裸形态拦截', () => {
     useFile()
     addMcpServer({ mode: 'code', parsed: { wrapped: { command: 'x' } } })
     expect(readMcpServers().servers[0]).toMatchObject({ name: 'wrapped', error: null })
+  })
+})
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 启停专用操作（§3.1「写入 enabled 字段」最小语义：仅翻转 enabled 键）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('setMcpServerEnabled · 启停专用操作（仅翻转 enabled 键，其余键不触）', () => {
+  it('禁用：enabled:false 落键，其余键（含表单外键）原样保留', () => {
+    useFile({
+      mcpServers: {
+        s: { command: 'npx', args: ['-y', 'pkg'], timeout: 30, oauth: { clientId: 'c1' }, description: 'd' },
+      },
+    })
+    setMcpServerEnabled('s', false)
+    const produced = JSON.parse(readFileSync(mcpPath, 'utf-8')).mcpServers.s
+    expect(produced).toEqual({
+      command: 'npx', args: ['-y', 'pkg'], timeout: 30, oauth: { clientId: 'c1' }, description: 'd', enabled: false,
+    })
+  })
+
+  it('启用：enabled 键删除（缺省启用，对齐 pi 写路径语义）', () => {
+    useFile({ mcpServers: { s: { command: 'npx', enabled: false, description: 'd' } } })
+    setMcpServerEnabled('s', true)
+    const produced = JSON.parse(readFileSync(mcpPath, 'utf-8')).mcpServers.s
+    expect(produced).toEqual({ command: 'npx', description: 'd' })
+    expect(produced.enabled).toBeUndefined()
+  })
+
+  it('吃进锁内最新磁盘内容：外部并发改动（新字段/新条目）不被清单旧投影覆盖（D2）', () => {
+    useFile({ mcpServers: { s: { command: 'npx' }, other: { url: 'https://x' } } })
+    // 模拟清单打开后外部手编改动
+    writeFileSync(
+      mcpPath,
+      `${JSON.stringify({ mcpServers: { s: { command: 'node', description: 'external' }, other: { url: 'https://x' }, fresh: { command: 'new' } } }, null, 2)}\n`,
+      'utf-8',
+    )
+    setMcpServerEnabled('s', false)
+    const produced = JSON.parse(readFileSync(mcpPath, 'utf-8')).mcpServers
+    expect(produced.s).toEqual({ command: 'node', description: 'external', enabled: false })
+    expect(produced.other).toEqual({ url: 'https://x' })
+    expect(produced.fresh).toEqual({ command: 'new' })
+  })
+
+  it('混填条目启停不被规范化改写（command/url 原样保留，D4 互斥只拦写路径新产物）', () => {
+    useFile({ mcpServers: { mixed: { command: 'npx', url: 'https://example.com' } } })
+    setMcpServerEnabled('mixed', false)
+    expect(JSON.parse(readFileSync(mcpPath, 'utf-8')).mcpServers.mixed)
+      .toEqual({ command: 'npx', url: 'https://example.com', enabled: false })
+  })
+
+  it('条目不存在 → not_found；坏条目（非对象）→ entry_not_object', () => {
+    useFile({ mcpServers: { s: { command: 'npx' }, weird: 'just a string' } })
+    expectStoreError('not_found', () => setMcpServerEnabled('ghost', false))
+    expectStoreError('entry_not_object', () => setMcpServerEnabled('weird', false))
+    // 拒绝后文件原样
+    expect(JSON.parse(readFileSync(mcpPath, 'utf-8')).mcpServers.s).toEqual({ command: 'npx' })
+  })
+
+  it('损坏拒入：损坏期间启停被拒且文件原样（S6，与全部写操作同口径）', () => {
+    useFile()
+    writeFileSync(mcpPath, '{ broken', 'utf-8')
+    expectStoreError('store_corrupted', () => setMcpServerEnabled('s', false))
+    expect(readFileSync(mcpPath, 'utf-8')).toBe('{ broken')
   })
 })
 
