@@ -4,7 +4,7 @@
  * 覆盖（v6-spec-shell SSOT）：
  *  - 三个拓扑 testid 存在：app-shell / app-shell-aside / app-shell-main
  *  - 关键类：AppShell p-1（4px 四周统一）、aside pt-11（44px traffic-light 安全区，恒定）、
- *    MainPanel rounded-[10px]（float-panel 圆角与窗口共线）
+ *    MainPanel 为透明布局容器（三卡化 2026-10-04：float-panel 壳下沉到三块内容卡）
  *  - 折叠态 !gap-0（强制覆盖 gap-3），展开态无
  *  - TrafficLight 挂载在 AsideRegion 内（2026-08 二次裁决：恢复刻意调整形态——trafficLightPosition {8,8}、
  *    aside 顶 y=4，left-0/top-4 = 窗口 (8,8)，与 mac OS 红黄绿同位）
@@ -65,7 +65,7 @@ beforeEach(() => {
 })
 
 describe('AppShell 拓扑渲染 gate（刻意调整形态回归防线）', () => {
-  it('展开态：三个拓扑 testid 存在 + 关键类（p-1 / aside pt-11 / main rounded-[10px]）', () => {
+  it('展开态：三个拓扑 testid 存在 + 关键类（p-1 / aside pt-11 / main 透明布局容器）', () => {
     const wrapper = mount(AppShell)
 
     // ① app-shell 根容器：p-1(4px) 四周统一 + relative 定位基准
@@ -79,10 +79,12 @@ describe('AppShell 拓扑渲染 gate（刻意调整形态回归防线）', () =>
     expect(aside.exists()).toBe(true)
     expect(aside.classes()).toContain('pt-11')
 
-    // ③ main float-panel：rounded-[10px]（与窗口圆角共线）
+    // ③ main 布局容器：三卡化后壳样式（rounded/border/bg）下沉到内容卡，本体透明
     const main = wrapper.find('[data-testid="app-shell-main"]')
     expect(main.exists()).toBe(true)
-    expect(main.classes()).toContain('rounded-[10px]')
+    expect(main.classes()).not.toContain('rounded-[10px]')
+    expect(main.classes()).not.toContain('border')
+    expect(main.classes()).not.toContain('bg-surface')
 
     // 展开态无 !gap-0（gap-3 生效）
     expect(shell.classes()).not.toContain('!gap-0')

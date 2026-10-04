@@ -6,8 +6,11 @@
   xterm 视图在 useTerminalXterm，PTY + per-instance scrollback 在 useTerminal。
 
   多实例（terminal-multi-instance 设计 §3.1 / §3.3）：
-  - 顶部实例切换条（u3-bar TerminalInstanceBar，纯 props/emits）——切换 / 「+」新建 /
-    悬停关闭；
+  - 头部一行（三卡化 2026-10-04）：实例切换条（TerminalInstanceBar）= tab 条 + 右簇
+    （「+」新建 / 收起按钮）；原第二行工具栏（清屏/终止）随 head 一行化删除——终止与
+    tab 关闭叉同义，清屏功能随之移除（用户裁决）；
+  - 收起按钮 = 收起整个终端区（toggleBottomDrawer，收起语义非销毁——实例保留，重开走
+    对账恢复），收起后焦点回 composer（§6.7 焦点契约，与 TerminalToggleButton 同款）；
   - 挂载与切 session（会话激活 / ⌘R 界面刷新腿）：`terminal.list` 对账；成功空清单且是
     本会话首开 → 自动新建默认实例（存量会话「行为与改造前一致」）；**拉取失败不自动新建**
     （否则与后台存活实例撞号并存），保留既有条目、下次触发自然重试；
@@ -18,39 +21,18 @@
 -->
 <template>
   <div data-testid="terminal-view" class="flex h-full flex-col">
-    <!-- 实例切换条（顶部；空态占位与「+」引导由 u3-bar 组件内建） -->
+    <!-- 头部一行：实例切换条 + 右簇（+/收起）；空态占位与「+」引导由 u3-bar 组件内建 -->
     <TerminalInstanceBar
       :instances="instances"
       :active-terminal-id="activeTerminalId"
       @select="onSelect"
       @create="onCreate"
       @close="onClose"
+      @collapse="onCollapseDrawer"
     />
-    <!-- 工具栏：clear / kill。跟随 drawer 深底、按钮 neutral 配色。 -->
-    <div data-testid="terminal-toolbar" class="flex items-center gap-1 px-2 py-1">
-      <Button
-        variant="ghost"
-        class="size-6 shrink-0 rounded-sm p-0 text-neutral-mid hover:text-neutral-fg"
-        :title="t('panel.terminal.clear')"
-        data-testid="terminal-btn-clear"
-        @click="view.clear()"
-      >
-        <Eraser class="size-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        class="size-6 shrink-0 rounded-sm p-0 text-neutral-mid hover:text-neutral-fg"
-        :class="state.ptyAlive ? '' : 'opacity-30'"
-        :disabled="!state.ptyAlive"
-        :title="t('panel.terminal.kill')"
-        data-testid="terminal-btn-kill"
-        @click="terminal.killTerminal()"
-      >
-        <Square class="size-3.5" />
-      </Button>
-    </div>
-    <!-- xterm 挂载点（relative 包裹浮动按钮）。纯黑圆角块嵌在 drawer 深底上。 -->
-    <div class="relative m-2 min-h-0 flex-1 rounded bg-black">
+    <!-- xterm 挂载点（relative 包裹浮动按钮）。纯黑圆角块嵌在卡片 surface 上；
+         空态（实例 0）时容器透明——黑块仅在有实例时呈现，空态不再悬无内容黑区。 -->
+    <div class="relative m-2 min-h-0 flex-1 rounded" :class="instances.length > 0 ? 'bg-black' : ''">
       <!-- RD-5#2：spawn 失败 inline 错误条（挂载自动新建腿；复用 FileView error 态范式） -->
       <div
         v-if="spawnError"
@@ -89,7 +71,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, toRef, nextTick } from 'vue'
-import { Eraser, Square, MessageSquare, AlertCircle } from '@lucide/vue'
+import { MessageSquare, AlertCircle } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import TerminalInstanceBar from '@/components/panel/TerminalInstanceBar.vue'
@@ -98,6 +80,8 @@ import { useTerminalXterm } from '@/composables/features/terminal/useTerminalXte
 import { useTerminalSpawnFeedback } from '@/composables/features/terminal/useTerminalSpawnFeedback'
 import { useSessionStore } from '@/stores/session'
 import { composerInjectionStore } from '@/composables/panel/composer-injection-store'
+import { toggleBottomDrawer } from '@taiji/core/domain/bottom-drawer'
+import { focusComposer } from '@/composables/features/app/key-orchestrator'
 
 const props = defineProps<{ sessionId: string | null }>()
 
@@ -176,6 +160,16 @@ function onSelect(terminalId: string): void {
 /** 关闭实例（u3-bar close，最后实例按钮禁用态由组件保证）——焦点落右侧相邻（无右取左）。 */
 function onClose(terminalId: string): void {
   terminal.closeInstance(terminalId)
+}
+
+/**
+ * 收起整个终端区（u3-bar collapse，三卡化 2026-10-04）：收起语义非销毁——实例保留，
+ * 重开走 terminal.list 对账恢复。本组件只在底抽屉展开态挂载，toggle 即收起；
+ * 焦点回 composer（§6.7 契约，与 TerminalToggleButton 关闭分支同款）。
+ */
+function onCollapseDrawer(): void {
+  toggleBottomDrawer()
+  focusComposer()
 }
 
 /** Phase 4 联动 1：选中文本 → 注入 composer「发给 AI」。 */

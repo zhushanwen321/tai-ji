@@ -93,7 +93,6 @@ const useTerminalMock = {
   writeToTerminal: vi.fn(),
   resizeTerminal: vi.fn(),
   killTerminal: vi.fn(),
-  clearTerminal: vi.fn(),
   attachTerminal: vi.fn(),
   partitionOf: vi.fn(() => mockState),
   registerFlushListener: vi.fn(() => () => {}),
@@ -145,24 +144,27 @@ afterEach(() => {
 })
 
 describe('TerminalView 渲染 gate（观察者视角）', () => {
-  it('TV-1: mount 后 DOM 含 terminal-view + terminal-xterm + toolbar + 实例切换条', async () => {
+  it('TV-1: mount 后 DOM 含 terminal-view + terminal-xterm + head 一行（实例切换条含收起按钮，无独立工具栏行）', async () => {
     wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
     await flushPromises()
 
     expect(document.body.querySelector('[data-testid="terminal-view"]')).toBeTruthy()
     expect(document.body.querySelector('[data-testid="terminal-xterm"]')).toBeTruthy()
-    expect(document.body.querySelector('[data-testid="terminal-toolbar"]')).toBeTruthy()
     expect(document.body.querySelector('[data-testid="terminal-instance-bar"]')).toBeTruthy()
+    // head 一行（三卡化 2026-10-04）：收起按钮在位、独立工具栏行不复存在
+    expect(document.body.querySelector('[data-testid="terminal-collapse"]')).toBeTruthy()
+    expect(document.body.querySelector('[data-testid="terminal-toolbar"]')).toBeNull()
   })
 
-  it('TV-2: 工具栏含 clear + kill 按钮；无存活实例时 kill 禁用', async () => {
+  it('TV-2: 空态下收起按钮可用；原工具栏（clear/kill）随 head 一行化不复存在', async () => {
     wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
     await flushPromises()
 
-    expect(document.body.querySelector('[data-testid="terminal-btn-clear"]')).toBeTruthy()
-    const kill = document.body.querySelector('[data-testid="terminal-btn-kill"]') as HTMLButtonElement
-    expect(kill).toBeTruthy()
-    expect(kill.disabled).toBe(true)
+    const collapse = document.body.querySelector('[data-testid="terminal-collapse"]') as HTMLButtonElement
+    expect(collapse).toBeTruthy()
+    expect(collapse.disabled).toBe(false)
+    expect(document.body.querySelector('[data-testid="terminal-btn-clear"]')).toBeNull()
+    expect(document.body.querySelector('[data-testid="terminal-btn-kill"]')).toBeNull()
   })
 })
 
@@ -271,20 +273,6 @@ describe('TerminalView 实例激活（构建者视角）', () => {
 })
 
 describe('TerminalView 交互（使用者视角）', () => {
-  it('TV-7: 点击 kill 按钮调用 killTerminal（PTY 存活时可用）', async () => {
-    mockState.ptyAlive = true
-    instancesRef.value = [{ terminalId: 'term:test-session:1', seq: 1, alive: true }]
-    activeRef.value = 'term:test-session:1'
-    useTerminalMock.reconcileInstances.mockResolvedValue({ ok: true, count: 1 })
-    wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
-    await flushPromises()
-
-    const killBtn = document.body.querySelector('[data-testid="terminal-btn-kill"]') as HTMLButtonElement
-    killBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flushPromises()
-    expect(useTerminalMock.killTerminal).toHaveBeenCalledTimes(1)
-  })
-
   it('TV-8: 切换条条目点击 → selectInstance（焦点随 active 变化落当前实例输入区）', async () => {
     instancesRef.value = [
       { terminalId: 'term:test-session:1', seq: 1, alive: true },

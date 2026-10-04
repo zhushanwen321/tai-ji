@@ -14,7 +14,9 @@
   <div class="flex h-full flex-col" data-testid="detail-pane">
     <!-- 实例层 tab 条（§6.3：文档式，做在 detail 面板内顶部；类型层容器 tab 在 DrawerPanel）。
          点击切换（keep-alive：实例内容/模式态/滚动锚点原样保持）；× 关闭（激活者关闭时
-         激活右邻/左邻）；不设打开上限（§6.3，内存锚点 §11-9）。 -->
+         激活右邻/左邻）；不设打开上限（§6.3，内存锚点 §11-9）。
+         tab 范式随实例 tab 条统一（三卡化 2026-10-04）：非激活 bg-input+border、激活
+         bg-elevated+border-strong；关闭叉常驻命中 20px（hover 染 danger）。 -->
     <div
       v-if="tabs.length > 0"
       class="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-hairline px-1 py-1"
@@ -26,8 +28,12 @@
         data-testid="detail-tab"
         :data-path="tab.path"
         :data-active="tab.path === activePath ? 'true' : 'false'"
-        class="flex shrink-0 cursor-pointer items-center gap-1 rounded-sm px-1.5 py-0.5 font-mono text-[length:var(--text-2xs)]"
-        :class="tab.path === activePath ? 'bg-bg-elevated text-neutral-fg' : 'text-neutral-mid hover:text-neutral-fg'"
+        class="flex shrink-0 cursor-pointer items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-[length:var(--text-2xs)] transition-colors"
+        :class="
+          tab.path === activePath
+            ? 'border-border-strong bg-bg-elevated text-neutral-fg'
+            : 'border-border bg-bg-input text-neutral-mid hover:bg-surface-2 hover:text-neutral-fg'
+        "
         :title="tab.path"
         @click="activateTab(tab.path)"
       >
@@ -35,11 +41,11 @@
         <Button
           variant="ghost"
           data-testid="detail-tab-close"
-          class="size-4 shrink-0 rounded-sm p-0"
+          class="size-5 shrink-0 rounded-sm p-0 text-neutral-dim hover:bg-danger-soft hover:text-danger"
           :title="t('panel.sideDrawer.close')"
           @click.stop="closeTab(tab.path)"
         >
-          <X class="size-3 text-neutral-dim" />
+          <X class="size-3" />
         </Button>
       </div>
     </div>

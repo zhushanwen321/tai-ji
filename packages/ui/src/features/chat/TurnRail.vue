@@ -25,8 +25,7 @@
   <div
     v-if="turns.length > 0"
     data-testid="turn-rail"
-    class="turn-rail group fixed top-1/2 z-20 h-[340px] w-1.5 -translate-y-1/2 transition-[width] duration-[var(--duration)] ease-[var(--ease)] hover:w-56 before:absolute before:-left-1.5 before:top-0 before:bottom-0 before:w-3 before:content-['']"
-    :style="railStyle"
+    class="turn-rail group absolute top-1/2 right-2 z-20 h-[340px] w-1.5 -translate-y-1/2 transition-[width] duration-[var(--duration)] ease-[var(--ease)] hover:w-56 before:absolute before:-left-1.5 before:top-0 before:bottom-0 before:w-3 before:content-['']"
   >
     <!-- 常驻窄条 spine：未 hover 时唯一可见区域。bg-surface-hover 保证在 bg 上明确可见（L1 入口可发现性）。 -->
     <div class="rail-spine absolute bottom-0 left-0 top-0 w-1.5 rounded-full bg-surface-hover" />
@@ -137,8 +136,6 @@ const props = defineProps<{
   activeTurnIndex: number
   /** 会话是否进行中（true 时禁用所有 toggle，避免 streaming 中 toggle 展开态） */
   sessionActive: boolean
-  /** 面板右边缘 px（可选）：未传时 rail 贴视口右侧 8px */
-  panelRightEdge?: number
   /** 已展开的 turn 稳定 key 集合（toggle 图标方向依据：展开=ChevronUp / 折叠=ChevronDown）。
    *  key = turnStableId(turn)（首条消息 id，M5 stable-key，不随消息插删漂移）。
    *  ReadonlySet：消费方只读（.has 查询），生产端 useMessageStreamRail 复用 EMPTY_SET 单例
@@ -202,13 +199,11 @@ function isPlaceholderVisible(_turn: MessageTurn, idx: number): boolean {
 }
 
 /**
- * rail 横向定位：根据 panelRightEdge 算 right 偏移。
- * panelRightEdge 给定时 → 贴面板右侧（内缩 8px，与「右侧导航 rail」语义一致）；
- * 缺省 → 贴视口右侧 8px（CSS fallback 路径，用于独立预览/无 panel 场景）。
+ * rail 横向定位（三卡化 2026-10-04）：absolute 于对话流容器右缘（right-2 class 恒定）。
+ * 不再用 fixed + 视口坐标计算——fixed 垂直居中于视口、不感知底抽屉高度，窗口矮或底抽屉
+ * 高时 rail 会叠进终端区（跨区缺陷根因）；absolute 后 rail 随对话流容器 overflow 裁剪，
+ * 跨区在结构上不可能。
  */
-const railStyle = computed(() => ({
-  right: props.panelRightEdge ? `calc(100vw - ${props.panelRightEdge}px + 8px)` : '8px',
-}))
 
 /** 百分比基数（CSS top/height 用 % 单位，100 是百分比满分母） */
 const PERCENT = 100

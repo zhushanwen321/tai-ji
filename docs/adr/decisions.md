@@ -477,3 +477,11 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **依据**：并行长任务是终端典型用法（服务常驻 + 测试跑批），而会话是重量级对象（各带对话与模型上下文），「多开会话」不解决同一工作上下文内并行；「单终端分屏」是伪并行（一个 PTY 不可能同时跑两个交互命令）。编号唯一性与不回填的立法理由 = 迟到帧与清理窗口的竞态隔离；世代判据取 token 而非端口/沿的理由 = 两者均可证伪（端口可复用、沿含幂等分支）。
 
 **登记**：约束登记 = C-proc-18 的 shutdown 步序 SSOT 同步为 15 步（新增终端 PTY 全量清理紧随 `server-stop`）；e2e 资产 = `E2E-TERMINAL-01`（`e2e/terminal-multi-instance.spec.ts`，L2/on-diff/serial，覆盖 T1/T2/T4/T8/T9/T10/T13；T3/T5 走 L4 真机、T6/T7/T11/T12 归单测）。设计文档 = `.tmp/tech-design/terminal-multi-instance.md`（过程产物，不入 git）；实施与验收证据 = `.tmp/dev-flow/terminal-multi-instance.*`。同族未落地项（浏览器多页面、浮层实例 tab 条）依赖本编号先例，另立项。
+
+### ADR-0114 主区三卡化：内容区各自成卡 + 实例 tab 条范式统一 + 终端头部一行化（2026-10-04 用户裁决，drawer-cardification）
+
+**决策**：① 对话流 / 右抽屉 / 底抽屉三块内容区各自持 float-panel 壳（surface + border + 10px 圆角 + shadow-1），卡间 8px 缝，卡内底色统一——**推翻 D2「一体化生长」裁决**（原右抽屉从主面板右缘生长、共享外壳与横跨 header）；PanelHeader / StatusBar 保持横跨工具条/状态条语义，不属任何卡。② 右抽屉 L1 栏选中态回归 §3.4 标准 tab 型（bg-elevated + neutral-fg）——原「bg-surface-hover 例外」以「drawer 与 main 同 surface」为前提，三卡化后前提消失。③ 终端面板头部一行化：实例切换条（tab 条 + 右簇「+」/收起按钮）单行承载，原第二行工具栏（清屏/终止）移除——终止与 tab 关闭叉同义，清屏功能退役（用户裁决接受）。④ 终端区收起语义 = 收起非销毁（实例保留、重开走对账恢复），入口 = 头部收起按钮 + 顶栏开关 + `⌃`` ` 三通道。⑤ 终端开关迁 PanelHeader 顶栏（右抽屉开关左边），StatusBar trailing 原生动作通道退役，StatusBar 回落「有状态项才显示」纯显隐。⑥ 实例 tab 条范式统一（§5.3.1）：终端实例 tab / detail 文件 tab / plugin L2 tab 三族同构——非激活 bg-input+border、激活 bg-elevated+border-strong、关闭叉常驻命中 ≥20px（原「hover 才显现」形态因可发现性差被用户裁决推翻）；pin 功能全链移除（L2TabBar/L2TabItem/PluginViewContainer/WorkflowLivePanel，用户裁决：不需要该功能）。⑦ TurnRail 定位从 fixed 视口垂直居中改为 absolute 于对话流容器右缘——fixed 不感知底抽屉高度，窗口矮/抽屉高时叠进终端卡（跨区缺陷）；absolute 后随对话流卡 overflow 裁剪，跨区构造性不可能。
+
+**依据**：用户 2026-10-04 对底/右抽屉的 5 点产品反馈（三区分割缺失、开关位置、头部两行、tab 可区分性、tab 关闭叉）+ critique 补充发现（TurnRail 跨区、tab 条无横向滚动、空态黑块、最后实例禁用叉伪装可点、composer 窄宽叠字）。一体化生长的「同 surface 无缝」语言在多容器并存场景不可辨识（三区边界靠 1px 拖拽线不可发现），卡片化是分区可见性的直接解；代价 = 卡缝占 8px×2 垂直空间与推翻 D2 的回写成本，收益 = 分区心智清晰 + tab 范式全局一致 + 跨区缺陷构造性消除。
+
+**登记**：设计 SSOT = docs/DESIGN.md §3.4/§4.1/§5.3.1/§6.1/§6.3/§6.4（2026-10-04 同批回写）；CONTEXT.md「底抽屉」词条开关入口同步。实现落点 = MainPanel（壳下沉）/ PanelContainer（三卡 + 卡缝 handle）/ DrawerPanel（卡片化）/ TerminalView + TerminalInstanceBar（head 一行）/ TerminalToggleButton（原 StatusBarTerminalToggle 迁移）/ DetailPane / L2TabBar / TurnRail。

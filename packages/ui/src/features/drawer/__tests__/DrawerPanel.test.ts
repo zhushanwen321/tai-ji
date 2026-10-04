@@ -101,10 +101,10 @@ describe('DrawerPanel (tab 交互)', () => {
     expect(wrapper.find('[data-testid="drawer-close"]').exists()).toBe(true)
   })
 
-  it('activeTab 高亮：当前 tab 应用选中样式（bg-surface-hover）', () => {
+  it('activeTab 高亮：当前 tab 应用选中样式（bg-bg-elevated）', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps({ activeTab: 'git' }) })
     const gitTab = wrapper.find('[data-testid="drawer-tab-git"]')
-    expect(gitTab.classes()).toContain('bg-surface-hover')
+    expect(gitTab.classes()).toContain('bg-bg-elevated')
   })
 })
 
@@ -142,9 +142,9 @@ describe('DrawerPanel (bashTask tab，background-task-sidebar-view D5②)', () =
     expect(wrapper.emitted('set-tab')).toEqual([['bashTask']])
   })
 
-  it('activeTab=bashTask：应用选中样式（bg-surface-hover）', () => {
+  it('activeTab=bashTask：应用选中样式（bg-bg-elevated）', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps({ activeTab: 'bashTask' }) })
-    expect(wrapper.find('[data-testid="drawer-tab-bashTask"]').classes()).toContain('bg-surface-hover')
+    expect(wrapper.find('[data-testid="drawer-tab-bashTask"]').classes()).toContain('bg-bg-elevated')
   })
 
   it('bashTask 无内容面板 slot：空态 fallback 渲染 i18n key（t mock 返回 key，断言 key 引用）', () => {
@@ -188,9 +188,9 @@ describe('DrawerPanel (plan tab，plan 模式重设计 u1-drawer-tab)', () => {
     expect(wrapper.emitted('set-tab')).toEqual([['plan']])
   })
 
-  it('activeTab=plan：应用选中样式（bg-surface-hover）', () => {
+  it('activeTab=plan：应用选中样式（bg-bg-elevated）', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps({ activeTab: 'plan' }) })
-    expect(wrapper.find('[data-testid="drawer-tab-plan"]').classes()).toContain('bg-surface-hover')
+    expect(wrapper.find('[data-testid="drawer-tab-plan"]').classes()).toContain('bg-bg-elevated')
   })
 
   it('plan 无内容面板 slot：空态 fallback 渲染 plan 域 i18n key（t mock 返回 key，断言 key 引用）', () => {
@@ -233,9 +233,9 @@ describe('DrawerPanel (btw tab，btw-question D7 M3-a)', () => {
     expect(wrapper.emitted('set-tab')).toEqual([['btw']])
   })
 
-  it('activeTab=btw：应用选中样式（bg-surface-hover，drawer L1 icon tab 登记例外形态）', () => {
+  it('activeTab=btw：应用选中样式（bg-bg-elevated，§3.4 标准 tab 型——三卡化后 L1 例外前提消失）', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps({ activeTab: 'btw' }) })
-    expect(wrapper.find('[data-testid="drawer-tab-btw"]').classes()).toContain('bg-surface-hover')
+    expect(wrapper.find('[data-testid="drawer-tab-btw"]').classes()).toContain('bg-bg-elevated')
   })
 
   it('btw 无内容面板 slot：空态 fallback 渲染 btw 域 i18n key（t mock 返回 key，断言 key 引用）', () => {

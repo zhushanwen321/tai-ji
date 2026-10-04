@@ -58,7 +58,9 @@ export default {
     sendEmptyHint: '请输入内容后再发送',
     sendHint: '输入内容后发送',
     steerHint: '想补充什么？⏎ 加入当前任务 · Alt+⏎ 排到下一轮 · Shift+⏎ 换行…',
-    inputHint: '描述你想让 AI 做什么…（/ 命令 · $ 文件 · # 会话 · {\'@\'} 子代理 · ! bash · Shift+⏎ 换行 · ↑/↓ 历史 · Shift+Tab 思考档 · Ctrl+P/Ctrl+Shift+P 模型）',
+    // 三卡化 2026-10-04：快捷键提示段移除——placeholder 伪元素脱文档流（光标语义），
+    // 长文案窄宽度换行必然溢出叠字（结构性约束）；命令/文件/子代理提示经触发符 popover 自带发现性
+    inputHint: '描述你想让 AI 做什么…',
     addContent: '添加内容（附件 / 命令）',
     attach: '附件',
     image: '图片',
@@ -362,8 +364,6 @@ export default {
     guideHint: '链接现在在此处打开，不会跳出应用',
   },
   terminal: {
-    clear: '清屏',
-    kill: '终止终端进程',
     sendToAI: '发给 AI',
     writeRpcFailed: '终端命令发送失败：{error}',
     writeFailed: '终端输入可能丢失：{message}',
@@ -371,13 +371,15 @@ export default {
     // RD-5#2：PTY spawn 失败 inline 错误条（复用 FileView error 态范式）
     spawnFailed: '终端启动失败：{error}',
     retry: '重试',
-    // display-containers §5.1：StatusBar 原生动作开关按钮（底抽屉）
+    // 三卡化 2026-10-04：开关按钮挂 PanelHeader 顶栏（原 StatusBar 底栏落点退役）
     toggle: '开关终端',
-    // terminal-multi-instance §3.1：实例切换条（TerminalInstanceBar）
+    // terminal-multi-instance §3.1：实例切换条（TerminalInstanceBar，head 一行形态）
     instanceName: '终端 {seq}',
     instanceCreate: '新建终端',
     instanceClose: '关闭终端',
+    instanceCloseDisabled: '最后一个实例不可关闭',
     instanceEmpty: '暂无终端实例',
+    collapse: '收起终端区',
   },
   mermaid: {
     rendering: '图表渲染中…',

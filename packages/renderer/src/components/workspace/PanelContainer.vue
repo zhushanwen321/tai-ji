@@ -4,10 +4,11 @@
     v2：移除 split 后恒单 Panel（撑满），不再有单/双 panel 状态机。
     active panel 的 sessionId 跟随 session store.activeId（sidebar 选 session → 载入 panel）。
 
-    共享 header（D2 一体化）：PanelHeader 提升到 SplitterGroup 之上，横跨 main + drawer 全宽。
-    main 与 drawer 共处 MainPanel 的统一 surface 外壳（border/radius/shadow 只在最外层 MainPanel），
-    drawer 从 main 右缘生长挤占 main 宽度，不再各有独立 header（对齐 demo ShellView 单外壳 + 单 header）。
-    SplitterGroup 仍用于 main/drawer 宽度调整，视觉上一体化（Panel section 与 DrawerPanel 均无自身 border/radius）。
+    三卡化（2026-10-04 用户裁决，推翻 D2 一体化生长）：对话流 / 右抽屉 / 底抽屉三块内容区
+    各自持 float-panel 壳（border/radius/bg/shadow-[var(--shadow-1)]），卡间 8px 缝由根容器
+    gap-2 承载；本组件与 MainPanel 只做布局，不持卡片视觉。PanelHeader / StatusBar 仍是
+    横跨工具条/状态条，不属任何卡。main 与 drawer 的宽度 handle 即卡缝本体（w-2 缝内
+    1px 视觉线，hover/drag 染色）——drawer 关闭时 handle 随 v-if 消失，无缝无残线。
 
     Drawer 协调（W4 drawer-shell-integration）：drawer 固定挂本容器（单实例），恒作 flex 子项与
     Panel 各占一半并排（mode='split'），贴右展开（direction='right'）。单 panel 下不再有 overlay
@@ -29,7 +30,7 @@
     useSideDrawer 兼容层模块顶层 bindDrawerSessionId 维持（C1：兼容层本 wave 保留）。
     [display-containers §6.6 W0] 选中态五字段迁出（各内容域 selection 分区）；docked 死状态删除。
   -->
-  <div class="panel-container flex h-full w-full flex-col overflow-hidden">
+  <div class="panel-container flex h-full w-full flex-col gap-2 overflow-hidden">
     <PanelHeader
       :session-label="sessionLabelOf(leaf)"
       :session-dir="sessionDirOf(leaf)"
@@ -61,7 +62,7 @@
     <div ref="splitAreaEl" data-testid="split-area" class="relative flex min-h-0 flex-1 overflow-hidden">
       <div
         data-fs-scope="chat"
-        class="relative h-full min-w-0 overflow-hidden"
+        class="relative h-full min-w-0 overflow-hidden rounded-[10px] border border-border bg-surface shadow-[var(--shadow-1)]"
         :class="splitTransitionClass"
         :style="mainAreaStyle"
         data-testid="main-area"
@@ -83,12 +84,15 @@
          内容显隐由 DrawerPanel 内部 aside v-if（Transition）承接。git 数据由本容器 provide，
          GitPanel inject。内容区按 activeTab 经默认 slot 注入桌面独占面板（C2 contract：该 tab
          无桌面面板时不注入 → DrawerPanel 空态 fallback 渲染）。 -->
+      <!-- 卡缝本体（三卡化）：8px 缝，视觉线居中（hover 显 / drag 染 accent）。
+           width 动画期间 transition:none 的语义保持（splitTransitionClass 不作用于本元素——
+           缝宽恒 8px，只有 main/drawer 两侧宽度动）。 -->
       <div
         v-if="drawerOpen"
         role="separator"
         aria-orientation="vertical"
         tabindex="0"
-        class="workspace-resize-handle relative w-px shrink-0 cursor-col-resize touch-none select-none bg-transparent transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-border-strong data-[state=drag]:bg-accent"
+        class="relative w-2 shrink-0 cursor-col-resize touch-none select-none"
         :data-state="isDragging ? 'drag' : undefined"
         data-testid="drawer-resize-handle"
         @pointerdown="onHandlePointerDown"
@@ -96,7 +100,12 @@
         @pointerup="onHandlePointerUp"
         @pointercancel="onHandlePointerUp"
         @keydown="onHandleKeydown"
-      />
+      >
+        <div
+          class="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] group-hover:bg-border-strong hover:bg-border-strong data-[state=drag]:bg-accent"
+          :data-state="isDragging ? 'drag' : undefined"
+        />
+      </div>
       <div
         data-fs-scope="drawer"
         class="h-full min-w-0 overflow-hidden"
@@ -180,12 +189,14 @@
       :class="bottomTransitionClass"
       :style="{ height: bottomHeightStyle }"
     >
+      <!-- 上沿手柄（三卡化）：命中区跨进卡上方 8px 缝（-top-2 h-2），视觉线贴卡顶边——
+           缝即拖拽区，可发现性与命中宽度一并解决（原 1px 线命中过窄）。 -->
       <div
         v-if="bottomOpen"
         role="separator"
         aria-orientation="horizontal"
         tabindex="0"
-        class="absolute inset-x-0 top-0 z-10 h-px cursor-row-resize touch-none select-none bg-transparent transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-border-strong data-[state=drag]:bg-accent"
+        class="absolute inset-x-0 -top-2 z-10 h-2 cursor-row-resize touch-none select-none"
         :data-state="isBottomDragging ? 'drag' : undefined"
         data-testid="bottom-drawer-resize-handle"
         @pointerdown="onBottomHandlePointerDown"
@@ -193,13 +204,18 @@
         @pointerup="onBottomHandlePointerUp"
         @pointercancel="onBottomHandlePointerUp"
         @keydown="onBottomHandleKeydown"
-      />
+      >
+        <div
+          class="absolute inset-x-0 bottom-0 h-px bg-transparent transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-border-strong data-[state=drag]:bg-accent"
+          :data-state="isBottomDragging ? 'drag' : undefined"
+        />
+      </div>
       <!-- 收合过渡期内容保挂载（U6 修复，§6.2 S1「开合动画平顺」）：壳 height 过渡逐帧收拢
            期间终端不同帧卸载（旧形态动画期空抽屉），卸载时机 = leave 过渡结束（Vue Transition
            事件顺序语义，无定时兜底）。Transition 直接子项用无 key 包装层：retry 的 :key 重挂
            留在内层，chunk 重试换件不经 leave/enter 过渡（chunk 失败占位链断言面不变）。 -->
       <Transition name="bottom-drawer-content">
-        <div v-if="bottomOpen" class="h-full">
+        <div v-if="bottomOpen" class="h-full overflow-hidden rounded-[10px] border border-border bg-surface shadow-[var(--shadow-1)]">
           <TerminalView
             :key="terminalRetryKey"
             :session-id="panelSessionId"
@@ -210,13 +226,9 @@
     </div>
     <!-- ExtensionHost 状态栏（audit §12.1）：数据经 app.provide STATUS_BAR_SOURCE_KEY 注入（useExtensionHostBridge），
          无数据时自隐藏；sessionId 绑定当前 leaf（per-session 项）。
-         trailing 原生动作通道（display-containers §5.1 规则 4）：终端开关按钮常驻
-         （干净安装无插件无 statusline 项时仍可见——防纯键盘不可发现）。 -->
-    <StatusBar :session-id="leaf.sessionId ?? null">
-      <template #trailing>
-        <StatusBarTerminalToggle />
-      </template>
-    </StatusBar>
+         trailing 插槽不再注入（三卡化 2026-10-04：终端开关迁 PanelHeader，StatusBar 回落
+         「有状态项才显示」的纯显隐形态）。 -->
+    <StatusBar :session-id="leaf.sessionId ?? null" />
   </div>
 </template>
 
@@ -261,7 +273,6 @@ import SubagentTab from '@/components/panel/SubagentTab.vue'
 import BackgroundTaskDetailPanel from '@/components/extension/BackgroundTaskDetailPanel.vue'
 import AsyncErrorFallback from '@/components/ui/AsyncErrorFallback.vue'
 import { createLazyChunkRetry } from '@/components/ui/lazy-chunk-retry'
-import StatusBarTerminalToggle from '@/components/statusbar/StatusBarTerminalToggle.vue'
 
 // D-8 懒加载（§3.3 边界判据：首屏不渲染 + 重依赖）：DetailPane（DiffView 等专属依赖）在抽屉
 // detail tab、TerminalView（xterm + 4 addon）在底抽屉，各自激活才挂载 → 首次激活才拉 chunk
@@ -386,9 +397,9 @@ function onDrawerSetTab(tab: Parameters<typeof setDrawerTab>[0]): void {
 
 /**
  * 鼠标路径关闭/开关的焦点契约包装（§6.7「任一容器关闭后焦点回 composer」，display-containers
- * 终态同步补齐右抽屉鼠标通道——键盘路径已由编排器 stack-order 承接，StatusBarTerminalToggle
+ * 终态同步补齐右抽屉鼠标通道——键盘路径已由编排器 stack-order 承接，TerminalToggleButton
  * 是底抽屉同款先例）：关闭分支关后 focusComposer（焦点原落在随即卸载的按钮上，不接续会
- * 流失到 body）；开关的打开分支不抢焦点（内容自取，镜像 StatusBarTerminalToggle.onToggle
+ * 流失到 body）；开关的打开分支不抢焦点（内容自取，镜像 TerminalToggleButton.onToggle
  * 的 wasOpen 判定）。
  */
 function onDrawerClose(): void {

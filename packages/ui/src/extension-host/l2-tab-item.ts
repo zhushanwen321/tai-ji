@@ -17,8 +17,6 @@ export interface L2TabItem {
   title: string
   /** 已解析的 lucide 图标组件（父层字典映射后传入）；无则纯文字 tab */
   icon?: Component
-  /** pinned 态（父层本地 ref 维护，不持久化）——pinned 时 pin 按钮 accent + 常显 */
-  pinned?: boolean
   /** builtin view（statusline / tasks plugin）不渲染 close 按钮 */
   builtin?: boolean
 }

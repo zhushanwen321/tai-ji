@@ -103,7 +103,7 @@ export function useTerminalXterm(opts: UseTerminalXtermOptions) {
   /** flush 监听回调：模块级 flush 完成后按本视图指针增量回放。 */
   function onFlushed(buffer: TerminalBuffer): void {
     if (buffer.version < replayedVersion) {
-      // version 单调只增，回退 = 被 clearPartition 重置（Fix-3）：清本视图 + 指针归零 + 丢挂起批次
+      // version 回退 = buffer 被外部重置（防御分支）：清本视图 + 指针归零 + 丢挂起批次
       xterm?.clear()
       replayedVersion = 0
       replayWriteQueue.length = 0
@@ -217,12 +217,6 @@ export function useTerminalXterm(opts: UseTerminalXtermOptions) {
     xterm?.focus()
   }
 
-  /** 清屏（清 xterm + 当前实例分区 buffer，Fix-3：切走切回历史不复活）。 */
-  function clear(): void {
-    xterm?.clear()
-    opts.terminal.clearTerminal()
-  }
-
   /** 当前选区文本（联动 1「发给 AI」）。 */
   function getSelection(): string {
     return xterm?.getSelection() ?? ''
@@ -265,7 +259,6 @@ export function useTerminalXterm(opts: UseTerminalXtermOptions) {
     selectionPos,
     syncView,
     focus,
-    clear,
     getSelection,
     dismissSelection,
     dispose,

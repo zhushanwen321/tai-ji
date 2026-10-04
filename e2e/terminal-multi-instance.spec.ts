@@ -147,7 +147,7 @@ async function selectSessionInSidebar(page: Page, label: string): Promise<void> 
 
 /** 打开底抽屉（StatusBar 终端开关；⌃` 的鼠标等价入口，设计 §3.3 双入口）。幂等。 */
 async function openTerminalDrawer(page: Page): Promise<void> {
-  const toggle = page.getByTestId('statusbar-terminal-toggle')
+  const toggle = page.getByTestId('terminal-toggle-button')
   await expect(toggle).toBeVisible({ timeout: SESSION_VISIBLE_TIMEOUT_MS })
   if ((await toggle.getAttribute('aria-pressed')) !== 'true') {
     await toggle.click()

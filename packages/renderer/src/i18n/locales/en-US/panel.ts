@@ -58,7 +58,9 @@ export default {
     sendEmptyHint: 'Type something before sending',
     sendHint: 'Type and send',
     steerHint: 'Add to current task with ⏎ · Queue for next turn with Alt+⏎ · Shift+⏎ newline…',
-    inputHint: 'Describe what you want AI to do… (/ command · $ file · # session · {\'@\'} subagent · ! bash · Shift+⏎ newline · ↑/↓ history · Shift+Tab thinking · Ctrl+P/Ctrl+Shift+P model)',
+    // Cardification 2026-10-04: shortcut hints removed from placeholder — absolutely-positioned
+    // pseudo-element overflows the min-height box when wrapped narrow; triggers stay discoverable via popovers
+    inputHint: 'Describe what you want AI to do…',
     addContent: 'Add content (attachment / command)',
     attach: 'Attachment',
     image: 'Image',
@@ -370,8 +372,6 @@ export default {
     guideHint: 'Links now open here, without leaving the app',
   },
   terminal: {
-    clear: 'Clear',
-    kill: 'Kill terminal process',
     sendToAI: 'Send to AI',
     writeRpcFailed: 'Failed to send terminal command: {error}',
     writeFailed: 'Terminal input may be lost: {message}',
@@ -379,13 +379,15 @@ export default {
     // RD-5#2: inline error bar for a failed PTY spawn (mirrors FileView error state)
     spawnFailed: 'Failed to start terminal: {error}',
     retry: 'Retry',
-    // display-containers §5.1: StatusBar native-action toggle button (bottom drawer)
+    // Cardification 2026-10-04: toggle button moved to PanelHeader (old StatusBar slot retired)
     toggle: 'Toggle terminal',
-    // terminal-multi-instance §3.1: instance switch bar (TerminalInstanceBar)
+    // terminal-multi-instance §3.1: instance switch bar (TerminalInstanceBar, single-row head)
     instanceName: 'Terminal {seq}',
     instanceCreate: 'New terminal',
     instanceClose: 'Close terminal',
+    instanceCloseDisabled: 'Cannot close the last instance',
     instanceEmpty: 'No terminal instances',
+    collapse: 'Collapse terminal area',
   },
   mermaid: {
     rendering: 'Rendering diagram…',

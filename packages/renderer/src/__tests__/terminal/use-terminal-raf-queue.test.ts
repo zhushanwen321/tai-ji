@@ -501,40 +501,6 @@ describe('W27 D-6.2 分区生命周期上提 + 版本回放', () => {
     }
   })
 
-  it('W27-7: clear 重置 buffer —— 切走切回历史为空（Fix-3）', async () => {
-    const wrapper = mount(TerminalView, { props: { sessionId: 's1' } })
-    wrappers.push(wrapper)
-    await flushPromises()
-    const xterm = xtermInstances[xtermInstances.length - 1]!
-
-    dispatchSession('s1', makeDataMsg('s1', T1, 'old-1'))
-    dispatchSession('s1', makeDataMsg('s1', T1, 'old-2'))
-    advanceFrame()
-    await flushPromises()
-    expect(xterm.write).toHaveBeenCalledTimes(1)
-    expect(xterm.write).toHaveBeenCalledWith('old-1old-2')
-
-    xterm.write.mockClear()
-    xterm.clear.mockClear()
-    await wrapper.find('[data-testid="terminal-btn-clear"]').trigger('click')
-    await flushPromises()
-    expect(xterm.clear).toHaveBeenCalled()
-
-    dispatchSession('s1', makeDataMsg('s1', T1, 'fresh'))
-    advanceFrame()
-    await flushPromises()
-    expect(xterm.write).toHaveBeenCalledTimes(1)
-    expect(xterm.write).toHaveBeenCalledWith('fresh')
-
-    await wrapper.setProps({ sessionId: 's2' })
-    await flushPromises()
-    await wrapper.setProps({ sessionId: 's1' })
-    await flushPromises()
-    const xterm2 = xtermInstances[xtermInstances.length - 1]!
-    expect(xterm2.write).toHaveBeenCalledTimes(1)
-    expect(xterm2.write).toHaveBeenCalledWith('fresh')
-  })
-
   it('W27-8: replayChunksBatched 纯函数 —— 分批边界 + 总内容等价 + 每批上限（Fix-5）', () => {
     expect(replayChunksBatched({ chunks: [], version: 0 }, 0)).toBeNull()
 

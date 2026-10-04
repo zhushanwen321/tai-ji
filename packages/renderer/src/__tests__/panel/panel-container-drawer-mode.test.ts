@@ -300,7 +300,7 @@ describe('PanelContainer 壳行为迁移（旧 side-drawer.test.ts 行为断言�
     expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
   }, 60_000)
 
-  it('点 drawer-close 关闭后焦点回 composer（§6.7 焦点契约右抽屉鼠标通道，StatusBarTerminalToggle 底抽屉同款）', async () => {
+  it('点 drawer-close 关闭后焦点回 composer（§6.7 焦点契约右抽屉鼠标通道，TerminalToggleButton（终端开关）同款）', async () => {
     // focusComposer 按 testid/class 查 document——测试内挂真实 composer 锚
     document.body.innerHTML = '<div class="composer-box" data-testid="composer-box" tabindex="0"></div>'
     const composer = document.querySelector('[data-testid="composer-box"]')
@@ -323,7 +323,7 @@ describe('PanelContainer 壳行为迁移（旧 side-drawer.test.ts 行为断言�
     }
   }, 60_000)
 
-  it('PanelHeader 开关按钮：关闭分支焦点回 composer，打开分支不抢焦点（镜像 StatusBarTerminalToggle）', async () => {
+  it('PanelHeader 开关按钮：关闭分支焦点回 composer，打开分支不抢焦点（镜像 TerminalToggleButton）', async () => {
     document.body.innerHTML = '<div class="composer-box" data-testid="composer-box" tabindex="0"></div>'
     const composer = document.querySelector('[data-testid="composer-box"]')
     // PanelHeader 已被 vi.mock 成空壳——经 stub 注入可点击的 toggle 发射器（同名替换）

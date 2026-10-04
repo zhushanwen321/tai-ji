@@ -173,7 +173,6 @@ describe('useTerminal 实例域（多实例）', () => {
     const { wrapper, terminal } = host('s1')
     terminal.writeToTerminal('x')
     terminal.killTerminal()
-    terminal.clearTerminal()
     expect(terminalApiMock.write).not.toHaveBeenCalled()
     expect(terminalApiMock.kill).not.toHaveBeenCalled()
     wrapper.unmount()

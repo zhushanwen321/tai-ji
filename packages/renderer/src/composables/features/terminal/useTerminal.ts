@@ -393,20 +393,6 @@ function notifyFlushListeners(terminalId: string, buf: TerminalBuffer): void {
 }
 
 /**
- * 清屏（Fix-3，TerminalView clear 按钮）：重置当前实例分区 buffer（chunks/version 归零）
- * + 清 pending 输出队列（防帧边界 flush 回填）+ 通知已注册 flush 监听器。
- */
-function clearPartition(terminalId: string): void {
-  const p = partitions.get(terminalId)
-  if (!p) return
-  p.buffer.chunks.length = 0
-  p.buffer.version = 0
-  p.outputQueue.length = 0
-  p.rafPending = false
-  notifyFlushListeners(terminalId, p.buffer)
-}
-
-/**
  * 版本回放纯函数（D-6.2）：从 fromVersion（含）之后 append 的 chunk 合并为单块。
  * fromVersion 是逻辑索引版本（= 已回放的 chunk 总数）；裁剪后物理起点
  * = fromVersion - 裁剪量，指针落后裁剪线时钳制到 0（保留区全量重放）。
@@ -750,13 +736,6 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
     })
   }
 
-  /** 清屏（TerminalView clear 按钮）：重置当前实例分区 buffer + 通知监听器（Fix-3）。 */
-  function clearTerminal(): void {
-    const terminalId = activeTerminalId.value
-    if (!terminalId) return
-    clearPartition(terminalId)
-  }
-
   /**
    * 通知 PTY 活跃（TerminalView mount / 切换实例调）。attach 保留「确保订阅」职责
    * （幂等兜底——现状 attachTerminal 同调 ensureTerminalSubscription；设计 §3.3 明示不退役）。
@@ -791,7 +770,6 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
     writeToTerminal,
     resizeTerminal,
     killTerminal,
-    clearTerminal,
     attachTerminal,
     partitionOf,
     /** flush 监听注册（TerminalView mount/unmount 编排）。 */

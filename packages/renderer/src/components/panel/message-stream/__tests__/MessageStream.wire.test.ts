@@ -6,7 +6,7 @@
  *
  * 策略（任务指引「务实优先」）：
  * - TC-w4-1/2/7/8：mount Turn.vue + 真实 useTurnExpansion（无 mock，验端到端接线）
- * - TC-w4-3：mount TurnRail.vue smoke test（TurnRail props 契约：5 props + 2 emit）
+ * - TC-w4-3：mount TurnRail.vue smoke test（TurnRail props 契约：4 props + 2 emit）
  * - TC-w4-3b/4/6：useMessageStreamRail composable 单元测试（验事件路由 handler → useTurnExpansion，
  *   rail 下标→MessageTurn.index 映射）
  * - TC-w4-9：mount MessageStream.vue 首屏冒烟（验 MessageStream 模板真的引用 TurnRail + emit 接线）。
@@ -253,7 +253,7 @@ describe('Turn.vue 接线 useTurnExpansion（w1）', () => {
 })
 
 /* ──────────────────────────────────────────────────────────────
- * TC-w4-3：TurnRail（w3）props 契约 smoke test（TurnRail props 契约：5 props + 2 emit）
+ * TC-w4-3：TurnRail（w3）props 契约 smoke test（TurnRail props 契约：4 props + 2 emit）
  * TC-w4-3b/4/6：useMessageStreamRail composable 单元测试（验事件路由 → useTurnExpansion，rail 下标→MessageTurn.index 映射）
  *
  * MessageStream.vue 整体 mount 的真接线性由 TC-w4-9（见文末 describe）覆盖：仅 mock useChat/
@@ -304,21 +304,19 @@ describe('MessageStream rail 接线（TurnRail props 契约 + useMessageStreamRa
   }
 
   /** mount TurnRail smoke test（验 props 契约：MessageStream 传给 TurnRail 的 5 个 props + 4 个 emit） */
-  it('TC-w4-3: TurnRail 接受 MessageStream 传入的 props 契约（turns/activeTurnIndex/sessionActive/panelRightEdge/expandedTurns）', () => {
+  it('TC-w4-3: TurnRail 接受 MessageStream 传入的 props 契约（turns/activeTurnIndex/sessionActive/expandedTurns）', () => {
     const turns = makeRenderItems().map((i) => (i.kind === 'turn' ? i.turn : null)).filter(Boolean) as MessageTurn[]
     const wrapper = mount(TurnRail, {
       props: {
         turns,
         activeTurnIndex: 1,
         sessionActive: false,
-        panelRightEdge: 800,
         expandedTurns: new Set(['u2']),
       },
     })
     expect(wrapper.find('[data-testid="turn-rail"]').exists()).toBe(true)
     // 验 rail 接受所有 props 不报错（MessageStream 传相同 shape）
     expect(wrapper.findAll('[data-testid="rail-node"]')).toHaveLength(3)
-    expect(wrapper.props('panelRightEdge')).toBe(800)
     // expandedTurns prop 透传（toggle 图标方向依据）
     expect(wrapper.props('expandedTurns')).toEqual(new Set(['u2']))
   })

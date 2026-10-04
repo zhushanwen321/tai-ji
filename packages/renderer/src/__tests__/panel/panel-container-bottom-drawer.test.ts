@@ -251,7 +251,7 @@ describe('底抽屉纵轴布局（S1/S2 形态：split 行之下、StatusBar 之
 
     // 用户可见：首开右抽屉是 git 内容 + git 图标高亮
     expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="drawer-tab-git"]').classes()).toContain('bg-surface-hover')
+    expect(wrapper.find('[data-testid="drawer-tab-git"]').classes()).toContain('bg-bg-elevated')
     expect(wrapper.find('[data-testid="drawer-tab-terminal"]').exists()).toBe(false)
   }, 60_000)
 

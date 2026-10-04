@@ -75,7 +75,6 @@ const useTerminalMock = {
   writeToTerminal: vi.fn(),
   resizeTerminal: vi.fn(),
   killTerminal: vi.fn(),
-  clearTerminal: vi.fn(),
   attachTerminal: vi.fn(),
   partitionOf: vi.fn(() => mockState),
   registerFlushListener: vi.fn(() => () => {}),

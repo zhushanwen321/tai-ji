@@ -23,18 +23,16 @@
   栈序编排器（唯一属主），不再是壳层 window keydown 职责（W1 修正注记在 PanelContainer 内）。
 -->
 <template>
-  <Transition name="drawer-slide-right">
+    <Transition name="drawer-slide-right">
     <aside
       v-if="isOpen"
-      class="relative flex h-full min-w-0 flex-col rounded-r bg-bg"
+      class="relative flex h-full min-w-0 flex-col rounded-[10px] border border-border bg-surface shadow-[var(--shadow-1)]"
       :aria-label="t('panel.sideDrawer.title')"
       data-testid="drawer-panel"
     >
-      <!-- L1 tab 栏：drawer 内部子区。2026-08-14 裁决遵循 v6-drawer-tabs-demo 层次语言
-           （推翻 spec D2 一体化同色）：aside 深底 bg（比 main surface 深一档）+ 右圆角
-           构成与 main 的色差分隔；L1 栏继承 aside 深底、无 border-b（demo .drawer-l1 无分隔线）。
-           [2026-09-09] 曾有的弱投影（--shadow-drawer）已删：父级 drawer-area overflow-hidden
-           会裁剪后代 box-shadow，该投影自布局收紧后从未实际可见（死样式）。 -->
+      <!-- L1 tab 栏：drawer 内部子区。三卡化（2026-10-04）后 aside 与 main 同为 surface 卡片，
+           「aside 深底 bg 色差分隔」的前提消失，L1 选中态回归 DESIGN §3.4 标准 tab 型
+           （bg-elevated + neutral-fg）；L1 栏无 border-b，与卡片内壁靠留白分隔。 -->
       <div class="flex items-center gap-1 px-2 py-1.5">
         <div class="flex flex-1 gap-0.5">
           <Button
@@ -42,7 +40,7 @@
             :key="tab.key"
             variant="ghost"
             class="size-[30px] shrink-0 justify-center rounded-sm p-0"
-            :class="activeTab === tab.key ? 'bg-surface-hover text-neutral-fg' : 'text-neutral-mid'"
+            :class="activeTab === tab.key ? 'bg-bg-elevated text-neutral-fg' : 'text-neutral-mid'"
             :title="tab.label"
             :data-testid="`drawer-tab-${tab.key}`"
             @click="emit('set-tab', tab.key)"
@@ -51,6 +49,11 @@
           </Button>
         </div>
 
+        <!-- header-extra：壳层注入点（W4）——unread badge 等桌面形态壳状态经此挂载（C3：壳层职责）。
+             可选具名 slot，无默认内容；ui 容器零 chatStore 感知（D3 纯净性）。 -->
+        <slot name="header-extra" />
+        <!-- 容器级关闭控件统一放右簇最右（2026-10-04 裁决：关闭语义控件恒在容器右缘最右，
+             与底抽屉收起按钮、终端 tab 关闭叉同一侧性）。 -->
         <Button
           variant="ghost"
           class="size-7 shrink-0 rounded-sm p-0 text-neutral-dim hover:text-neutral-fg"
@@ -60,9 +63,6 @@
         >
           <X class="size-3" />
         </Button>
-        <!-- header-extra：壳层注入点（W4）——unread badge 等桌面形态壳状态经此挂载（C3：壳层职责）。
-             可选具名 slot，无默认内容；ui 容器零 chatStore 感知（D3 纯净性）。 -->
-        <slot name="header-extra" />
       </div>
 
       <!-- 内容区：壳按 tab 经默认 slot 注入桌面独占面板（Git/Doc/Detail 等）；
@@ -177,6 +177,7 @@ const activeTabMeta = computed<TabMeta>(() => tabs.value.find((tab) => tab.key =
 </script>
 
 <style scoped>
+
 /* 抽屉从右缘滑入/滑回（panel/spec.md v2 + chat-flow-polish P1-1）。
    语义「从右缘来、回右缘去」（Spatial consistency）：opacity 淡入 + translateX(16px→0) 位移。
    transform 不触发布局（drawer 是 SplitterPanel，避免 width 动画引起 main reflow）。

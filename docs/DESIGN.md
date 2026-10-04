@@ -147,8 +147,8 @@ v6 审查发现「被选中」出现三种视觉语言，统一为二分：
 
 **accent-soft 仅留瞬时高亮**（fresh 新增项 / is-current popover 项），不作持久选中态。
 
-**三类已登记例外**（demo 落地取舍，非范式违反）：
-- **drawer L1 icon tab**：active 用 `bg-surface-hover`（非 bg-elevated）。理由：drawer 与 main 同 surface（D2 一体化），bg-elevated 会过亮；surface-hover + 蓝字足够区分。
+**两类已登记例外**（demo 落地取舍，非范式违反）；
+〔2026-10-04 三卡化〕原第三条「drawer L1 icon tab 用 bg-surface-hover」例外随 drawer 与 main 同 surface 的前提消失而退役——L1 tab 回归标准 tab 型（bg-elevated + neutral-fg）：
 - **TurnRail mini-map 节点**：active 用 `bg-accent-soft + inset accent-ring`（第三种视觉语言）。理由：mini-map 是「当前位置指示器」语义（非持久选中），且节点极小（224px 浮层内），accent-soft 染底 + ring 提供最强可见性。属瞬时高亮的延伸。
 - **SearchModal sm-item**：用 `bg-surface-hover` + accent 蓝字/蓝 icon（非列表项型默认的 bg-surface）。理由：dialog 底 = surface，sel 用 bg-surface 会同色淹没，改 surface-hover 靠蓝字区分（Linear/Raycast 范式）。
 
@@ -227,20 +227,20 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 ### 4.1 背景层级（阶梯上抬 + 加宽级差，暗端防糊）
 
 ```css
---bg:           #131316;   /* 画布色（侧栏/drawer/settings 内容区底）*/
---bg-sunken:    var(--bg); /* 同画布色（语义变更：不往黑推，靠主面板 surface 浮起分隔）*/
---bg-input:     #17171a;   /* 输入框/凹陷区（比 bg 更深）*/
+--bg:           #131316;   /* 画布色（侧栏/settings 内容区底）*/
+--bg-sunken:    var(--bg); /* 同画布色（语义变更：不往黑推，靠内容卡 surface 浮起分隔）*/
+--bg-input:     #17171a;   /* 输入框/凹陷区/实例 tab 非激活底（比 bg 更深）*/
 --bg-card:      #1b1b1e;   /* 设置分组卡片（介于 bg 与 surface）*/
---surface:      #1f1f22;   /* 主面板/drawer 浮起表面 */
+--surface:      #1f1f22;   /* 内容卡浮起表面（对话流/右抽屉/底抽屉三卡同色）*/
 --surface-2:    #27272a;   /* 次级表面（header 浮起分层 / SegmentedTab 内项 active）*/
 --bg-elevated:  #2b2b2e;   /* tab 型选中态浮起 / popover 浮层 */
 --surface-hover:#303033;   /* hover 态 */
 ```
 
-**三层明度**（D2 一体化后）：
+**三层明度**（2026-10-04 三卡化后）：
 - **stage 最深底**：`--bg-stage` `#0a0a0c`（tokens.css 新增，ShellView .stage 引用；三层明度在玄主题下完整保留）。**亮色（皓族）**：`--bg-stage` `#dbd9d4`（TAIJI_PAPER 未定义独立 stage，复用宣纸族最深暖灰；style.css `[data-theme=light]` 覆盖，避免泄漏暗色 #0a0a0c 形成黑框）
-- **画布层**：`--bg` `#131316`（aside/drawer/settings 内容区）
-- **surface 浮起**：`--surface` `#1f1f22`（main-panel + drawer 一体化共享，唯一带 border + shadow）
+- **画布层**：`--bg` `#131316`（aside/settings 内容区 + 三卡之间的缝）
+- **surface 浮起**：`--surface` `#1f1f22`（对话流 / 右抽屉 / 底抽屉三张内容卡同色共享，各卡自持 border + shadow）
 
 ### 4.2 文字 neutral 谱系（上抬，dim ~4.4:1）
 
@@ -426,6 +426,19 @@ active(tab 型): bg-bg-elevated text-neutral-fg, 6px 圆角（中性浮起，去
 hover: text-neutral-fg
 ```
 
+### 5.3.1 实例 tab 条范式（2026-10-04 三卡化统一）
+
+适用于「可关闭的多实例 tab」族：终端实例切换条 / detail 文件实例 tab / plugin L2 tab。
+
+```
+容器: 无底无边（tab 自持底色；tab 条超宽时 overflow-x-auto，动作簇 shrink-0 恒在可视区）
+tab 非激活: bg-bg-input + border-border + text-neutral-mid（hover: bg-surface-2 + text-neutral-fg）
+tab 激活:   bg-bg-elevated + border-border-strong + text-neutral-fg
+关闭叉:     常驻（不 hover 显现），命中 ≥20px，hover 染 danger-soft/danger；
+            不可关闭场景灰置禁用（disabled + tooltip 明示，不半透明伪装可点）
+pin:        不设（2026-10-04 用户裁决全链移除）
+```
+
 ### 5.4 列表项选中态（§3.2）
 
 ```
@@ -587,7 +600,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
   - **contenteditable + slash 触发**：光标位置检测 `/` 或 `#`（行首或空格后）触发 CommandPopover；选中插入 chip + 移除触发文本；IME 守卫见 §5.12
   - **comp-box 态**：`.has-input`(2px `color-mix(surface-hover 40%)` 透明微环) / `.focused`(border-accent + 3px accent-ring 外环) / `.staging`(border-accent + 3px ring + bg-accent-soft，独立于焦点)
 - **ContextBar**（composer 上方，goal/todo 摘要 + plugin foot 挂载点）：与 composer 同宽同中线居中；常态归零（无 goal/todo 时整条隐藏）；slim bar 24px `text-2xs neutral-dim`；点击展开 popover（goal 全文 + 3px 进度条 + todo checklist）
-- **TurnRail**（右侧 turn 导航 + 自定义滚动条接管）：spine(`surface-hover` 6px 暗条 340px，点击翻页) + thumb(`accent-soft + 2px accent border-left`，按滚动比例定位 min-h 24px，可拖拽，hover/active 三档色阶详见 §3.5.6)；hover 展开 mini-map(6px→224px，turn 节点两行：user 行 + agent 状态图标行，含**折展 toggle** ChevronUp/Down，active 节点常驻可见 toggle)；active 节点见 §3.4 例外
+- **TurnRail**（右侧 turn 导航 + 自定义滚动条接管）：spine(`surface-hover` 6px 暗条 340px，点击翻页) + thumb(`accent-soft + 2px accent border-left`，按滚动比例定位 min-h 24px，可拖拽，hover/active 三档色阶详见 §3.5.6)；hover 展开 mini-map(6px→224px，turn 节点两行：user 行 + agent 状态图标行，含**折展 toggle** ChevronUp/Down，active 节点常驻可见 toggle)；**定位 = absolute 于对话流容器右缘 8px**（2026-10-04 三卡化：原 fixed 视口垂直居中不感知底抽屉高度，窗口矮/抽屉高时叠进终端卡——absolute 后随对话流卡 overflow 裁剪，跨区构造性不可能）；active 节点见 §3.4 例外
   > **failed 节点色阶待统一**：§5.6B 规定 error=`--danger`，但 demo `TurnRail.vue` 当前 failed 节点用 `--warn`（`.warn` class，行 179/195/205）。demo 未对齐范式，实施时应按 §5.6B 改为 `--danger`
 - **ChangeSetCard**：去 border 改 `bg-surface` + 10px 圆角；5 态 badge 中 accumulating/ready/partially-reviewed/resolved 4 态用 `*-soft` 底 + 实色字，superseded 例外用 `bg-elevated + neutral-dim`（中性降级态，非彩色语义）
 - **PanelHeader**：去 `border-b`，用 `bg-elevated` 浮起分层
@@ -615,9 +628,9 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - **UserArea**（footer 钉底）：`margin-top:auto` + 20px accent 纯色头像（去装饰渐变）+ 用户名 + 设置齿轮(24px)
 - **QuickComposer**（workspace 快捷新建 spotlight）：SessionList group head hover「+」触发；spotlight 卡片 560px 宽 `bg-elevated + border-strong + shadow-2 + radius-lg`，backdrop `rgba(0,0,0,0.45)`（比 modal 0.8 轻）；预选 cwd chip + branch 去重；Enter 创建 / Esc 取消
 
-### 6.3 右侧 Drawer（D2 一体化 + 8 tab）
+### 6.3 右侧 Drawer（三卡化 + 8 tab）
 
-- **一体化生长**：drawer 与 main 共享 `--surface` 浮起体，从 main 右缘生长挤占 main 宽度；去 border-l。〔2026-09-09〕原「保留弱投影 `--shadow-drawer`(0.16) 分隔」已移除（overflow-hidden 裁剪，从未可见）。主面板:drawer 默认宽度比 1:1，可拖拽调整〔2026-09-13 自 v6-design.md 并入〕
+- **三卡化**（2026-10-04 用户裁决，推翻 D2 一体化生长）：右抽屉是独立内容卡（`--surface` + border + 10px 圆角 + shadow-1），与对话流卡、底抽屉卡并列，卡间 8px 缝；L1 栏选中态回归标准 tab 型（§3.4，原「bg-surface-hover 例外」随同 surface 前提消失退役）；关闭控件（X）居 L1 栏右簇最右。主面板:drawer 默认宽度比 1:1，可拖拽调整〔2026-09-13 自 v6-design.md 并入〕；宽度拖拽 handle = 卡缝本体（8px 缝内 1px 视觉线，hover `border-strong` / drag `accent`，`cursor: col-resize`）
 - **容器归属规则**：内容按形状分家——竖长阅读型归右抽屉、横宽输出流归底抽屉（§6.4）、全画布内容（网页/workflow 图）归浮层（§6.5）；归属声明唯一权威 = 容器注册表（`packages/core/src/domain/drawer/registry.ts`，core 纯数据，ui 层映射图标渲染）
 - **形态 B**：icon 一级 + 各 tab 自治二级（L1 列表由容器注册表驱动，8 条）
   - git/doc：无二级 tab
@@ -629,15 +642,15 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
   - workflow：phase 分组 + agent call 列表——**回落载体**（主入口浮层，L1 常驻第 8 图标；浮层装载失败回落本 tab）
 - **tasks tab 移除**（D3）：goal/todo 回归对话流
 - **GitPanel MVP 三功能**（v6-design 决策 #16 授权，2026-09-13 自 v6-design.md 并入）：per-file stage/unstage toggle / BranchSelectPopover 分支切换 / CreateBranchModal 新建分支 / commit 快捷键 `⌘/Ctrl+Enter`（见 §5.12 快捷键表）；零后端改动的纯前端能力
-- **L1 icon 栏结构**：`surface` 同色 + `border-bottom: 1px hairline`（0.05，方案 G 弱分隔）+ icon 30×30（active 见 §3.4 例外）+ spacer + unread badge（accent 胶囊 + 6px `accent-fg` 脉动点 + mono 计数）+ close 按钮
+- **L1 icon 栏结构**：`surface` 同色（无 border-bottom，与卡内壁靠留白分隔）+ icon 30×30（active = §3.4 标准 tab 型）+ spacer + unread badge（accent 胶囊 + 6px `accent-fg` 脉动点 + mono 计数）+ close 按钮（右簇最右）
 - **SplitterHandle**：6px 宽视觉 + 10px 命中区（margin 负值扩展）；1px transparent → hover `border-strong` → active `accent + 2px`；`cursor: col-resize`
 
 ### 6.4 Bottom Drawer（底抽屉）
 
-- **位置**：split 行（对话区 + 右抽屉）之下、StatusBar 之上，横跨全宽；composer 在其上沿保持可见、随开合上移。与右抽屉可同时开（一挤宽度、一挤高度互不冲突；右抽屉开着时底抽屉全宽、右抽屉变矮）
-- **高度**：默认 35%；上沿拖拽手柄（1px + `cursor: row-resize`，hover `border-strong` / drag `accent`，与 §6.3 SplitterHandle 同族）；拖拽 clamp 15%–70%，高度为全局布局值单键持久化（`taiji:bottom-drawer-height`）；窗口过矮时显示期钳制保证对话流 + composer 最小可视区域，不写回持久值
-- **内容**：terminal 唯一内容（不预设 tab 枚举）；终端面板顶部为**实例切换条**（多实例：条目切换 / 「+」新建 / 悬停关闭 / 最后实例禁用关闭 / 空态占位，文案如「终端 1」按序号命名）；spawn 失败走 inline 错误条 + 重试，chunk 装载失败走 AsyncErrorFallback
-- **开关**：`` ⌃` ``（before-input-event 窗口级拦截，不经 globalShortcut——失焦无动作）+ StatusBar 终端按钮（StatusBar 原生动作通道 trailing 区，根元素自隐藏条件扩展为「有状态项或有原生动作」，干净安装仍可见）；开合态按会话分区、不持久化；终端聚焦时 Esc 归终端输入，关抽屉走 `` ⌃` `` / StatusBar 按钮
+- **位置**（三卡化）：独立内容卡（`--surface` + border + 10px 圆角 + shadow-1），split 行（对话流卡 + 右抽屉卡）之下、StatusBar 之上，横跨主区全宽；composer 在其上沿保持可见、随开合上移。与右抽屉可同时开（一挤宽度、一挤高度互不冲突；右抽屉开着时底抽屉全宽、右抽屉变矮）
+- **高度**：默认 35%；上沿拖拽手柄命中区跨进卡上方 8px 缝（视觉线贴卡顶边 1px，hover `border-strong` / drag `accent`）；拖拽 clamp 15%–70%，高度为全局布局值单键持久化（`taiji:bottom-drawer-height`）；窗口过矮时显示期钳制保证对话流 + composer 最小可视区域，不写回持久值
+- **内容**：terminal 唯一内容（不预设 tab 枚举）；终端面板头部一行 = **实例切换条**（tab 条 + 右簇）——多实例：条目切换（tab 范式见 §5.3.1）/ 「+」新建（新建即自动激活并聚焦新实例输入区，2026-10-04 产品裁决）/ tab 内**常驻**关闭叉（最后实例灰置禁用）/ 空态占位（文案如「终端 1」按序号命名）/ 右簇**收起按钮**（收起整个终端区，收起语义非销毁，实例保留、重开走对账恢复，焦点回 composer）；原第二行工具栏（清屏/终止）随 head 一行化移除，清屏功能退役；空态时 xterm 黑块容器不渲染；spawn 失败走 inline 错误条 + 重试，chunk 装载失败走 AsyncErrorFallback
+- **开关**：`` ⌃` ``（before-input-event 窗口级拦截，不经 globalShortcut——失焦无动作）+ **PanelHeader 顶栏终端按钮**（三卡化 2026-10-04 迁入：原 StatusBar 底栏 trailing 落点退役，鼠标路径入口与右抽屉开关同区、居其左；StatusBar 回落「有状态项才显示」纯显隐）；开合态按会话分区、不持久化；终端聚焦时 Esc 归终端输入，关抽屉走 `` ⌃` `` / 顶栏按钮 / 终端头部收起按钮
 
 ### 6.5 Overlay（内容浮层）
 

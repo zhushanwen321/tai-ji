@@ -1,7 +1,7 @@
 <template>
   <!--
-    StatusBar 终端开关按钮（display-containers §5.1 规则 4 落点：鼠标路径入口，防纯键盘不可发现）。
-    经 StatusBar trailing 原生动作通道注入（干净安装无插件无 statusline 项时仍可见）。
+    终端开关按钮（三卡化 2026-10-04 起挂 PanelHeader 右簇、右侧抽屉开关左边——原 StatusBar
+    底栏落点随底抽屉卡片化退役，鼠标路径入口迁顶栏与其它容器开关同区）。
     点击 = toggleBottomDrawer()（core bottom-drawer 域协调函数，与 ⌃` 同一落点——本单元只接
     鼠标路径，快捷键接线归键盘编排单元）；aria-pressed 投影开合态（当前会话分区）。
     关闭分支焦点回 composer（§6.7 焦点契约与键盘通道同款——stack-order.closeTopContainer
@@ -9,14 +9,14 @@
   -->
   <Button
     variant="ghost"
-    class="size-6 shrink-0 rounded-sm p-0"
+    class="size-[22px] shrink-0 rounded-md p-0"
     :class="isOpen ? 'bg-surface-hover text-neutral-fg' : 'text-neutral-mid'"
     :aria-pressed="isOpen"
     :title="t('panel.terminal.toggle')"
-    data-testid="statusbar-terminal-toggle"
+    data-testid="terminal-toggle-button"
     @click="onToggle"
   >
-    <Terminal class="size-3.5" />
+    <Terminal class="size-[15px]" />
   </Button>
 </template>
 
