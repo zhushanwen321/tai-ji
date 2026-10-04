@@ -71,6 +71,7 @@ import type { QuotaService } from '../services/quota-service.js'
 import type { TtsService } from '../services/tts-service.js'
 import type { IProviderCredentialResolver } from '../services/ports/provider-credential-resolver.js'
 import type { IModelConnectionTester } from '../services/ports/model-connection-tester.js'
+import type { McpServersService } from '../services/mcp-servers-service.js'
 import { UsageStatsService } from '../services/usage/usage-stats-service.js'
 import type { PresetService } from '../services/preset-service.js'
 import { toErrorMessage } from '../utils/errors.js'
@@ -109,6 +110,13 @@ export interface RuntimeServerOptionalServices {
    * ctx（discoverModels mode=test 路由依赖）。生产恒注入，ctx 装配处断言非空。
    */
   connectionTester?: IModelConnectionTester
+  /**
+   * MCP 服务器管理域服务（pi-mcp-management）：组合根（index.ts）构造 McpServersService
+   * （infra 实现 PiMcpServers 组合 pi-mcp-store + pi-mcp-probe）经本对象注入，
+   * assembleCoreHandlers 透传给 SettingsMessageHandler ctx（mcp.* 五操作路由依赖）。
+   * 生产恒注入；缺省（存量测试装配）时 mcp.* 落 unknown_type（handler 条件装配）。
+   */
+  mcpServersService?: McpServersService
   project?: ProjectStore
   delivery?: SessionDeliveryRegistry
   /**
@@ -340,7 +348,7 @@ export class RuntimeServer implements IMessageBroker {
 
   /** 核心 handler 批：bridge / settings / session / extension / plugin（无条件装配）。 */
   private assembleCoreHandlers(messaging: MessageHandlerContext, optional: RuntimeServerOptionalServices): void {
-    const { auth, providerCredentialResolver, connectionTester } = optional
+    const { auth, providerCredentialResolver, connectionTester, mcpServersService } = optional
     // 第二参注入 extensionTimeoutMgr：marker 通道（method 恒 'select'）识别出的 bridge
     // 请求由 BridgeHandler 入口登记进 bridgeRequestIds（impl-plan 偏差 #5——生产装配点
     // 必须传，否则前端误发 ui_response 的拦截依据丢失）。
@@ -357,6 +365,10 @@ export class RuntimeServer implements IMessageBroker {
       // D-21 端口化：测试连接 HTTP 适配器经组合根注入（恒注入前提同上——
       // 组合根 index.ts 保证传入，setServices 编排保证；transport 不 import infra 实现）。
       connectionTester: connectionTester!,
+      // pi-mcp-management：mcp.* 五操作路由依赖。生产恒注入（组合根保证传入）；
+      // 缺省（存量测试装配）时 ctx 成员 undefined，SettingsMessageHandler 构造器
+      // 条件装配跳过 mcp 域子 handler，mcp.* 落 unknown_type（非空断言同上两行先例）。
+      mcpServersService: mcpServersService!,
       // W4：skillRegistry 必须注入（settings-handler 的 config.getGlobalSkills/getProjectSkills 依赖）。
       // 组合根 index.ts 保证传入；此处断言非空（setServices 编排保证）。若未来 skillRegistry 可选，handler 需守卫。
       skillRegistry: this.skillRegistry!,
@@ -615,6 +627,14 @@ export class RuntimeServer implements IMessageBroker {
    */
   broadcastSkillCacheInvalidated(scope: SkillCacheScope, cwd?: string, partial?: boolean): void { this.broker.broadcastSkillCacheInvalidated(scope, cwd, partial) }
   nextPushId(): string { return this.broker.nextPushId() }
+
+  /**
+   * 通用全局广播暴露（u5b 打回接线，mcp:testResult 首个消费方）：组合根把 PiMcpServers 的
+   * onTestResult 回调接到本方法完成 probe 终态回填（`mcp.test` 异步句柄的完成侧通道）。
+   * 仅承接 payload 无 sessionId 的纯全局帧（broker.broadcast 契约；带 sid 消息必须走
+   * IMessageBus.publish，见 broker 侧误用哨兵）。
+   */
+  broadcastServerMessage(msg: ServerMessage): void { this.broker.broadcast(msg) }
 
   // ── Message routing ───────────────────────────────────────────
 

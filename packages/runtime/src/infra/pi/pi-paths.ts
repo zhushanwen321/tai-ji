@@ -77,6 +77,15 @@ export function getSettingsPath(): string {
 }
 
 /**
+ * pi MCP 服务器配置（pi 1.0 起内置 MCP 扩展在会话启动时读取，taiji 经 pi-mcp-store
+ * 唯一读写）：`<agentDir>/mcp.json`。用户级文件；pi 另读项目级 `<cwd>/.pi/mcp.json`，
+ * 后者不经本 store（设计裁决 I4，taiji 不管理项目级）。
+ */
+export function getMcpConfigPath(): string {
+  return join(getPiAgentDir(), 'mcp.json')
+}
+
+/**
  * taiji 扩展域 providers.json 路径：`<piAgentDir>/config/providers.json`。
  *
  * 承载自 pi models.json 迁出的 taiji 私有字段（provider 级 quota/authMethod、

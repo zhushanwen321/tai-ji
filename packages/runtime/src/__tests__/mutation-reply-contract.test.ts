@@ -37,6 +37,9 @@ import type { ServerMessageMap, ReplyPayloadMap } from '@taiji/shared'
 const PROTOCOL_TS = resolve(fileURLToPath(import.meta.url), '..', '..', '..', '..', 'shared', 'src', 'protocol.ts')
 // codemode 域形状 SSOT（protocol.ts 头部登记约定：payload/reply 形状在 ./codemode）
 const CODEMODE_DOMAIN_SOURCE = readFileSync(resolve(PROTOCOL_TS, '..', 'codemode.ts'), 'utf8')
+// mcp 域形状 SSOT（protocol.ts 头部登记约定：mcp 域 payload/reply 形状在 ./mcp——本域无
+// server→client 广播帧，reply 经 :result 帧承载、payload 直引 ./mcp 具名类型）
+const MCP_DOMAIN_SOURCE = readFileSync(resolve(PROTOCOL_TS, '..', 'mcp.ts'), 'utf8')
 
 // ── 登记清单（SSOT：新增 mutation 必须在此登记，漏登记测试即红）──────────────
 
@@ -137,6 +140,40 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     contract: 'effective-value',
     replyKey: 'config.codemodeSetEnabled',
     effectiveFields: ['enabled'],
+  },
+  // ── 分支二 + 一（mcp 域）：mcp.json 条目 mutation（pi-mcp-management 设计 D4/D7/S6）。
+  // 三条共用 McpMutationResult 判别联合 reply（:result 帧承载）：ok 分支 entry = 服务端
+  // 落盘终态条目（renderer 以服务端终态校准清单）；ok:false 为拒入信封（error 含
+  // 「错误 → 原因 → 修复动作」结构文案 + corruption 仅损坏拒入携带），错误态不走
+  // effectiveFields（config.setCodemodeEnabled 同款信封语义）。无广播帧——§3.1 打开时
+  // 拉取一次 + D8 快照语义（ADR-0097 拉为主），变更可见性由 reply 终态校准承担。──
+  {
+    // mcp.add（D4）：校验通过原样写入（fail-fast 拒入不走变换，分支二），reply entry =
+    // 写后落盘终态条目（echo 回显）。
+    type: 'mcp.add',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'mcp.add:result',
+    effectiveFields: ['entry'],
+  },
+  {
+    // mcp.update（D7 编辑写回契约）：请求 entry 经合并变换后落盘——表单外键原样保留 +
+    // 清空即删键 + type 键剥离 + 切换传输类型键级清理，请求值 ≠ 落盘终态（分支一），
+    // reply entry = 合并后落盘终态（生效值）。
+    type: 'mcp.update',
+    branch: 'transformable',
+    contract: 'effective-value',
+    replyKey: 'mcp.update:result',
+    effectiveFields: ['entry'],
+  },
+  {
+    // mcp.remove：删除语义（分支二），reply entry = 被删条目的删除前落盘值（回显
+    // 「删掉的是这个」；renderer 按 ok 分支从清单移除该 name，不渲染 entry 本体）。
+    type: 'mcp.remove',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'mcp.remove:result',
+    effectiveFields: ['entry'],
   },
   {
     type: 'config.setSystemPrompt',
@@ -454,8 +491,9 @@ const CLIENT_MESSAGE_TYPES_BLOCK = extractBlock('export type ClientMessageType =
 const REPLY_PAYLOAD_MAP_BLOCK = extractBlock('export interface ReplyPayloadMap {')
 const SERVER_MESSAGE_MAP_BASE_BLOCK = extractBlock('export interface ServerMessageMapBase {')
 
-/** 谓词覆盖域（ADR-0065 范围边界）：session 配置状态 / model / preset / config 四域 */
-const MUTATION_DOMAINS = ['session', 'model', 'preset', 'config'] as const
+/** 谓词覆盖域（ADR-0065 范围边界）：session 配置状态 / model / preset / config / mcp 五域
+ *（mcp 为 pi-mcp-management 设计纳入——add/update/remove 是 mcp.json 配置状态 mutation） */
+const MUTATION_DOMAINS = ['session', 'model', 'preset', 'config', 'mcp'] as const
 
 /**
  * 改值动词形态（宽松 startsWith——宁可误红逼人显式归类，见文件头守卫取向声明）。
@@ -500,9 +538,9 @@ function extractMapValue(block: string, key: string): string | undefined {
 }
 
 /** 提取 reply 形状文本：内联 `{ ... }` 直接返回；具名引用则取该声明的 body。
- *  具名查找次序：protocol.ts → ./codemode 域文件（protocol.ts 头部登记约定：codemode 域
- *  payload/reply 形状 SSOT 在 ./codemode，本文件仅登记命令对）；interface 与 type 联合两种
- *  声明形态均支持。
+ *  具名查找次序：protocol.ts → ./codemode 域文件 → ./mcp 域文件（protocol.ts 头部登记约定：
+ *  codemode / mcp 域 payload/reply 形状 SSOT 在各自域文件，本文件仅登记命令对）；interface
+ *  与 type 联合两种声明形态均支持。
  *  ServerMessageMapBase 无该 replyKey 时回退取 ReplyPayloadMap 映射行的内联形状——适用
  *  wire reply 无具名广播条目的 RPC（如 config.setScopedModels 的 'config.scopedModels'）。 */
 function extractNamedDeclarationBody(source: string, base: string): string | null {
@@ -527,8 +565,9 @@ function extractReplyShape(replyKey: string, requestType: string): string {
     if (base.startsWith('{')) return base
     const body = extractNamedDeclarationBody(PROTOCOL_SOURCE, base)
       ?? extractNamedDeclarationBody(CODEMODE_DOMAIN_SOURCE, base)
+      ?? extractNamedDeclarationBody(MCP_DOMAIN_SOURCE, base)
     if (body === null) {
-      throw new Error(`reply '${replyKey}' 引用了具名类型 ${base}，但 protocol.ts / codemode 域文件中均未找到其声明`)
+      throw new Error(`reply '${replyKey}' 引用了具名类型 ${base}，但 protocol.ts / codemode / mcp 域文件中均未找到其声明`)
     }
     return body
   }
@@ -659,12 +698,15 @@ describe('MUTATION_RPC_REGISTRY 清单守卫（ADR-0065 / C-pi-14，D8 机器强
     const scopedModelsEffective: HasRequiredField<ReplyPayloadMap['config.setScopedModels'], 'scopedModels'> = true
     // setProvider echo-value：providerId 必需回显（quotaAutoEnabled optional 供 toast，不入契约）
     const providerUpdatedEcho: HasRequiredField<ServerMessageMap['config.providerUpdated'], 'providerId'> = true
+    // mcp 域（pi-mcp-management）：McpMutationResult 判别联合的 ok 分支 entry 必需——
+    // Extract 收窄到成功分支再断言（'entry' 非全联合公共键，keyof 交集只含判别字段）
+    const mcpMutationEntry: HasRequiredField<Extract<ServerMessageMap['mcp.add:result'], { ok: true }>, 'entry'> = true
 
     const assertions = [
       modelSwitchProvider, modelSwitchModelId, thinkingLevel,
       presetCreateEcho, presetUpdateEcho, engineIdEcho,
       smartContextEnabledEcho, terminalConfigEcho, scopedModelsEffective,
-      providerUpdatedEcho,
+      providerUpdatedEcho, mcpMutationEntry,
     ]
     expect(assertions, '类型断言清单意外为空——本用例失效，请检查').not.toHaveLength(0)
     expect(assertions.every(Boolean)).toBe(true)

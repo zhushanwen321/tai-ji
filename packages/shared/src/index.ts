@@ -98,6 +98,25 @@ export type {
   CodemodeSetEnabledRequest,
   CodemodeSetEnabledResult,
 } from './codemode'
+// mcp 域 WS 协议契约（pi-mcp-management 设计：五操作 mcp.list/add/update/remove/test + 条目/徽标/损坏错误态形状，renderer 与 runtime 共用）
+export type {
+  McpExposureLevel,
+  McpServerEntryValue,
+  McpOauthConfig,
+  McpServerEntry,
+  McpConfigCorruption,
+  McpListRequest,
+  McpListResult,
+  McpAddRequest,
+  McpUpdateRequest,
+  McpRemoveRequest,
+  McpMutationResult,
+  McpTestRequest,
+  McpTestHandle,
+  McpTestResultEvent,
+  McpProbeState,
+  McpServerStatusBadge,
+} from './mcp'
 // RPC 超时校准链常量 SSOT（timeout-slow-flow-wallclock D2/D3，renderer/runtime 双端编译期对齐）
 export { BASH_RPC_TIMEOUT_MS, COMPACT_RPC_TIMEOUT_MS, RENDERER_RPC_MARGIN_MS } from './timeouts'
 export * from './extension'

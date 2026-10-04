@@ -14,6 +14,12 @@
 // [HISTORICAL] 第二处有意偏离：codemode D8 起两模板恒带 `--extension builtin:codemode`
 // （pi 1.0 起 --no-extensions 连内置扩展一起排除，显式 -e 是唯一装载通道；随 pi 1.0
 // 升级同行，0.84.4 下该参数报 Unknown built-in extension）——快照值再增该 token 对。
+// [HISTORICAL] 第三处有意偏离：pi-mcp-management P11 起主 agent 模板基座再恒带
+// `--extension builtin:mcp`（内置 MCP 扩展是 mcp.json 的唯一消费方，不装载则界面
+// 保存的配置零生效）；subagent 模板不加（设计 §5 U1 辐射面裁决：N×M 连接放大 +
+// mcp_servers 提示词节 + direct 档首 prompt 延迟，subagent 消费 MCP 工具为零证据
+// 场景不预付）——本文件 subagent 段快照不含该 token，与 pi-subagent-cli 测试同为
+// 「subagent 不受传导」回归锚。
 
 import { describe, expect, it, vi, afterEach } from 'vitest'
 
@@ -33,9 +39,10 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('buildPiMainAgentArgs（主 agent 模板）', () => {
-  it('最小参数：基座 = --mode rpc --no-extensions --approve + --extension builtin:codemode（D8 恒带）', () => {
+  it('最小参数：基座 = --mode rpc --no-extensions --approve + builtin:codemode（D8）+ builtin:mcp（P11 配套，仅主模板）', () => {
     expect(buildPiMainAgentArgs({}, undefined)).toEqual([
-      '--mode', 'rpc', '--no-extensions', '--approve', '--extension', 'builtin:codemode',
+      '--mode', 'rpc', '--no-extensions', '--approve',
+      '--extension', 'builtin:codemode', '--extension', 'builtin:mcp',
     ])
   })
 
@@ -76,7 +83,8 @@ describe('buildPiMainAgentArgs（主 agent 模板）', () => {
   it('skillPaths/extensionPaths：每个路径独立 token、顺序保留', () => {
     const args = buildPiMainAgentArgs({ skillPaths: ['/s1', '/s2'], extensionPaths: ['/e1', '/e2'] }, undefined)
     expect(args).toEqual([
-      '--mode', 'rpc', '--no-extensions', '--approve', '--extension', 'builtin:codemode',
+      '--mode', 'rpc', '--no-extensions', '--approve',
+      '--extension', 'builtin:codemode', '--extension', 'builtin:mcp',
       '--skill', '/s1', '--skill', '/s2',
       '--extension', '/e1', '--extension', '/e2',
     ])
@@ -140,7 +148,8 @@ describe('buildPiMainAgentArgs（主 agent 模板）', () => {
       'prov/mid',
     )
     expect(args).toEqual([
-      '--mode', 'rpc', '--no-extensions', '--approve', '--extension', 'builtin:codemode',
+      '--mode', 'rpc', '--no-extensions', '--approve',
+      '--extension', 'builtin:codemode', '--extension', 'builtin:mcp',
       '--model', 'prov/mid',
       '--system-prompt', '\nsys',
       '--append-system-prompt', '\napp',
@@ -219,6 +228,11 @@ describe('buildPiSubagentSpawnArgs（subagent 模板）', () => {
     // 唯一的 --extension 是模板自带的 D8 旗标（-ne 下显式 -e 仍装载）。
     expect(args.filter((a) => a === '--extension')).toHaveLength(1)
     expect(args[args.indexOf('--extension') + 1]).toBe('builtin:codemode')
+  })
+
+  it('回归锚：subagent 模板不含 builtin:mcp（P11 仅主模板装载——subagent 装载会引入 N×M 连接放大与启动延迟，设计 §5 U1 辐射面裁决；本断言防未来误传导）', () => {
+    const args = buildPiSubagentSpawnArgs(baseParams)
+    expect(args).not.toContain('builtin:mcp')
   })
 
   it('快照锚定：典型全参数集 argv 形态（--no-extensions 等基座 flag 已退役由引擎侧拼装；D8 起尾部恒带 builtin:codemode）', () => {

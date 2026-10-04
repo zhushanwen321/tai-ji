@@ -3,6 +3,11 @@
 // 尾部恒带 `--extension builtin:codemode`（pi 1.0 起 --no-extensions 连内置扩展一起
 // 排除，显式 -e 是唯一装载通道；随 pi 1.0 升级同行）——包装层在其后追加
 // --no-extensions 与 --extension 白名单，二者并存（顺序无语义影响）。本包源码零改动。
+// [裁决锚] pi-mcp-management P11 的 `--extension builtin:mcp` 仅主 agent 模板装载
+// （subagent 装载 = N 个并行进程 × M 个启用服务器的连接放大 + mcp_servers 提示词节
+// + direct 档首 prompt 延迟，且 subagent 消费 MCP 工具为零证据场景，设计 §5 U1
+// 辐射面裁决不预付）——本包期望值**不**传导该 token，并显式断言不含（回归锚，
+// 防未来误传导）。
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -40,6 +45,11 @@ describe("buildSpawnArgs", () => {
     const args = buildSpawnArgs(baseParams);
     expect(args).not.toContain("-p");
     expect(args).not.toContain("--print");
+  });
+
+  it("回归锚：subagent 模板不含 builtin:mcp（P11 仅主 agent 模板装载，设计 §5 U1 辐射面裁决——本断言防未来误传导）", () => {
+    const args = buildSpawnArgs(baseParams);
+    expect(args).not.toContain("builtin:mcp");
   });
 
   it("modelRef → --model 值恒为 `${provider}/${id}`（全等拼接，不重写输入）", () => {

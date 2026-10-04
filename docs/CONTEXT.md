@@ -440,9 +440,20 @@ pi 引擎的可用模型集合及其能力（思考档位等）。能力判定�
 ## Settings 域
 
 ### Code Mode（codemode / 脚本模式）
-pi 1.0 内置扩展（builtin extension）提供的能力：模型编写 JavaScript 脚本调用工具，脚本内可并行调用多个工具、过滤过大的结果、生成图片，QuickJS 沙箱执行。taiji 侧常驻默认启用（零配置可用），设置页「系统」提供全局开关（SystemCodemodeSection，经 `config.getCodemodeEnabled` / `config.setCodemodeEnabled` 命令对）。激活判定 = settings.json `defaultTools` 解析出的激活工具集含 `codemode`（`isCodemodeActive`）；配置随新启动的会话读取。例外：会话以显式工具白名单启动时（launch preset `--tools` 或 subagent agentTools），pi 语义是白名单整体覆盖 `defaultTools`，该类会话 codemode 不激活。与 MCP 管理设计的职责边界：本词条域管 codemode 全局默认启用（settings.json `defaultTools`）；per-server 暴露档位（exposure）与 `autoEnableCodemode` 字段归 MCP 管理设计（`pi-mcp-management.md`）。
+pi 1.0 内置扩展（builtin extension）提供的能力：模型编写 JavaScript 脚本调用工具，脚本内可并行调用多个工具、过滤过大的结果、生成图片，QuickJS 沙箱执行。taiji 侧常驻默认启用（零配置可用），设置页「系统」提供全局开关（SystemCodemodeSection，经 `config.getCodemodeEnabled` / `config.setCodemodeEnabled` 命令对）。激活判定 = settings.json `defaultTools` 解析出的激活工具集含 `codemode`（`isCodemodeActive`）；配置随新启动的会话读取。例外：会话以显式工具白名单启动时（launch preset `--tools` 或 subagent agentTools），pi 语义是白名单整体覆盖 `defaultTools`，该类会话 codemode 不激活。与 MCP 管理的职责边界：本词条域管 codemode 全局默认启用（settings.json `defaultTools`）；per-server 暴露档位（exposure）与 mcp.json 的 `autoEnableCodemode` 字段归 [MCP 服务器条目](#mcp-服务器条目mcp-server-entry)词条。
 
 **代码映射**: `packages/runtime/src/infra/pi/pi-codemode-settings.ts`（解析/迁移/开关写入唯一写点）；渲染面 `packages/renderer/src/components/settings/system/SystemCodemodeSection.vue`。
+
+### MCP 服务器条目（MCP Server Entry）
+mcp.json 里一条具名配置：传输参数 + 启停（`enabled`）+ 暴露档位（`exposure`）+ 描述（`description`）。名称是聚合唯一键：全局唯一，仅含字母、数字、下划线、连字符（连字符与下划线归并同名，pi 比对前把连字符替换为下划线）；编辑态锁定名称——改名 = 删除后重建，不做原地改名。传输类型两种：stdio（本地子进程：`command`/`args`/`env`/`cwd`）或 http（远程流式 HTTP：`url`/`headers`），由传输字段有无表达、不落 `type` 键。管理入口 = 设置页 MCP 分区（清单、表单/代码双模式表单、启停/删除确认、连接测试）。
+
+**代码映射**: `packages/runtime/src/infra/pi/pi-mcp-store.ts`（读写与保存校验唯一入口）；渲染面 `packages/renderer/src/components/settings/mcp/`。
+
+### mcp.json
+pi 内置 MCP 扩展的用户级配置文件（`<agentDir>/mcp.json`，taiji 隔离部署下 = `<数据目录>/agent/mcp.json`，路径经 `getMcpConfigPath()` 动态推导；与 settings.json 的 [defaultTools](#defaulttools) 分属两个文件、两套字段域）。**生效语义 = 新会话读取**：会话启动时由 spawn 白名单装载的 `--extension builtin:mcp` 扩展读取并后台连接全部启用的服务器，运行中会话不感知配置变化——与扩展启停同属「写文件、新会话生效」模型，页头固定说明该语义。taiji 侧唯一读写层 = `packages/runtime/src/infra/pi/pi-mcp-store.ts`（跨进程磁盘锁内重读合并写入 + 保存校验 fail-fast + 文件损坏拒入不覆盖外部手编内容）；pi 官方写路径（`editMcpServers` / 终端 `pi mcp` 命令）与用户手编并存且无锁，锁协议与外部并发窗口登记见 [data-source-registry §6](architecture/data-source-registry.md)。项目级 `<会话cwd>/.pi/mcp.json` 在该会话中同名整条覆盖用户级——设置页清单只反映用户级文件（覆盖偏差由设置页页头说明声明）。`mcpServers` 之外的顶层键（如 `autoEnableCodemode`）taiji 写回时原样保留（丢顶层键会静默改变 codemode 激活行为）。
+
+### 暴露档位（exposure）
+服务器工具到达模型的方式（mcp.json 条目的 `exposure` 字段，pi 定义四档）：codemode（**默认**——工具不直接声明给模型，只供 [Code Mode](#code-modecodemode--脚本模式) 脚本调用）/ deferred（经工具检索加载后直接调用）/ direct（像内置工具一样直接声明给模型）/ hidden（注册但不可达）。默认 codemode 意味着「配置成功但工具不可直接调用」——不使用 codemode 的用户应选 direct 或 deferred（表单档位释义引导此选择）。与 [Code Mode](#code-modecodemode--脚本模式) 词条的职责边界：codemode 全局启用开关（settings.json `defaultTools`）归彼处，per-server 档位归本词条。
 
 ### defaultTools
 pi settings.json 的默认工具集字段（数组，settings-manager 解析后决定新会话启动时激活哪些工具）：pi 侧两层合并（global/project）经 `mergeDefaultTools`、激活集解析经 `resolveDefaultTools`；字段缺失时 pi 会话层回落 `DEFAULT_TOOL_NAMES`（read/bash/edit/write）。taiji 读侧解析同构实现 = `resolveDefaultToolSet`（开关显示判定），对字段缺失/非数组坏值统一解析为空激活集（codemode 不在默认集，与 pi 侧「不激活」判定等价）。字段归属 = settings.json tools 字段域（[data-source-registry §6](architecture/data-source-registry.md)），写方全集 = taiji 启动迁移 + 设置页 Code Mode 开关，用户手工编辑始终被尊重（taiji 不把用户移除的条目写回）。

@@ -34,6 +34,11 @@ import { fanOutSettled } from './services/session/agent-settled-fanout.js'
 import { createSessionRenamedHandler } from './services/session/session-rename-fanout.js'
 import { ConfigService } from './services/config-service.js'
 import { PiCodemodeSettings } from './infra/pi/pi-codemode-settings.js'
+// pi-mcp-management（装配波 u2b）：IMcpServers port 的 infra 实现（组合 pi-mcp-store
+// 唯一读写层 + pi-mcp-probe 连接测试通道）与 service 组合层，经 setServices 注入
+// SettingsMessageHandler ctx（mcp.* 五操作路由）。
+import { PiMcpServers } from './infra/pi/pi-mcp-servers.js'
+import { McpServersService } from './services/mcp-servers-service.js'
 import { AuthService } from './services/auth/auth-service.js'
 import { AuthStorage } from './services/auth/auth-storage.js'
 import { ProviderCredentialResolver } from './services/auth/provider-credential-resolver.js'
@@ -544,6 +549,19 @@ async function main(): Promise<void> {
   // ICodemodeSettings port 的实现：settings.json defaultTools 域开关读写（codemode 设计
   // D1/A1——损坏检查经 getSettingsCorruption 单点，字段域写入经 pi-codemode-settings）。
   const codemodeSettings = new PiCodemodeSettings()
+  // IMcpServers port 的实现 + service 组合层（pi-mcp-management 装配波 u2b）：mcp.json
+  // 唯一写入口 = PiMcpServers 内部的 pi-mcp-store（D2 结构保证——本装配后 taiji 内
+  // 不存在第二写入口）；projectRoot 同 ProcessManager 锚点（probe 二进制定位 findPiExecutable
+  // 入参，dev 模式 = apps/electron 目录）。onTestResult = probe 终态回填通道（u5b 打回
+  // 接线）：`mcp.test` 异步句柄的完成侧经 mcp:testResult 广播帧送达 renderer（server 于
+  // 本装配点之前构造，broadcastServerMessage 委托 broker 纯全局通道；回调在 WS 请求后才
+  // 会触发，broker 未装配窗口不可达）。
+  const mcpServers = new PiMcpServers({
+    projectRoot: effectiveRoot,
+    onTestResult: (event) =>
+      server.broadcastServerMessage({ id: server.nextPushId(), type: 'mcp:testResult', payload: event }),
+  })
+  const mcpServersService = new McpServersService(mcpServers)
   const extensionService = new ExtensionService({
     settingsDir: configStore.getPiAgentDir(),
     projectRoot: effectiveRoot,
@@ -1466,6 +1484,9 @@ async function main(): Promise<void> {
     providerCredentialResolver,
     // D-21 端口化接线：settingsHandler ctx 的测试连接 HTTP 适配器（mode=test 路由）。
     connectionTester,
+    // pi-mcp-management 接线：settingsHandler ctx 的 mcp.* 五操作路由（mcp.list/add/
+    // update/remove/test，经 McpServersService → PiMcpServers 组合 store/probe）。
+    mcpServersService,
     // sd-u5：sessionId 单例注册表（上方 createSessionDeliveryRegistry 装配）。
     // 缺席时 server 构造退化实例并 warn（违反单例约束，仅测试装配遗漏场景）。
     delivery: sessionDelivery,

@@ -143,13 +143,23 @@ function toInlinePromptValue(value: string): string {
  *   正是内置扩展——不显式 -e 则 settings.json defaultTools 通道不可达。恒带不带开关
  *   条件：spawn 参数与 settings.json 双通道条件同步会出现不一致窗口。builtin:codemode
  *   仅 pi ≥1.0 存在（0.84.4 报 Unknown built-in extension），本旗标随 pi 1.0 升级同行。
+ * - --extension builtin:mcp（恒带，pi-mcp-management P11 配套）：内置 MCP 扩展激活时
+ *   自行读取 mcp.json 并连接全部启用的服务器（loadMcpConfig 在 rpc 模式零引用，扩展
+ *   激活路径是 MCP 加载的唯一通路）——不装载则 mcp.json 无消费方，taiji 界面保存的
+ *   配置零生效。仅主 agent 模板装载（subagent 模板不加，设计 §5 U1 辐射面裁决：
+ *   N 个并行 subagent × M 个启用服务器的连接放大 + mcp_servers 提示词节 + direct 档
+ *   首 prompt 延迟，且 subagent 消费 MCP 工具为零证据场景，不预付；重评登记 docs/todo/）。
+ *   无启用服务器的会话零成本（pi 实装保证）。
  * - --approve：强制信任 cwd——RPC 模式无交互 UI，pi 原生信任流程在 hasUI=false 时
  *   默认拒绝会导致 <cwd>/.pi/ 下的 skill 被跳过；实际主要信任项目级 .pi/skills。
  *   TODO(follow-up): Project Trust UI 落地后移除全局 --approve。
  * - 不传 --session-dir：pi 走默认派生 <agentDir>/sessions/<encodeCwd>（B1 方案 B 布局）。
  */
 export function buildPiMainAgentArgs(options: PiMainAgentSpawnOptions, model: string | undefined): string[] {
-  const args = ['--mode', 'rpc', '--no-extensions', '--approve', '--extension', 'builtin:codemode']
+  const args = [
+    '--mode', 'rpc', '--no-extensions', '--approve',
+    '--extension', 'builtin:codemode', '--extension', 'builtin:mcp',
+  ]
   if (model) args.push('--model', model)
   // --system-prompt: 替换 pi 核心系统提示词（身份/工具列表/指引/pi 文档路径 4 段）。
   // 动态段（project_context/skills/日期/cwd）仍由 pi 照常拼接。空白/未传不拼。

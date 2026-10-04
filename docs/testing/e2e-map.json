@@ -3,7 +3,7 @@
     "name": "taiji e2e 资产登记表（SSOT）",
     "description": "全部 e2e 资产与其触发面的机器可读登记：「改了哪个域 → 跑哪些 e2e」的对账依据。summary 仅导航；资产内容与执行口径的权威源是 authority 指向的文档与 asset 本体。收录以磁盘实际为准（脚本/目录改名或增删时同 commit 更新本表）。",
     "fields": {
-      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写面唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本、npm 发布面一致性检查）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域 cw 剧本族：mock 探针轨 + 真 pi 全链路真机冒烟轨）",
+      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写面唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本、npm 发布面一致性检查）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域 cw 剧本族：mock 探针轨 + 真 pi 全链路真机冒烟轨） / MCP（MCP 服务器管理域真机子集）",
       "summary": "一句话摘要（仅导航）",
       "scope": "代码 glob 数组（触发面）。只支持两种形态：<prefix>/** 前缀通配与精确路径（与 scripts/select-constraints.mjs 同款零依赖匹配语义：prefix/** → startsWith，精确路径 → 全等）",
       "layer": "L1 = 零 token mock/smoke（CI 固定环节）| L2 = 真实进程非真实 LLM（真实 app/pi 进程、mock 构建或 mock 数据）| L2.5 = faux（真实进程 + faux LLM 演员，凭证无关零 token）| L3 = 真实 LLM",
@@ -1894,6 +1894,36 @@
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 态：真实运行形态 = pr-cr-fix 阶段 1.3 人工触发（真 push / gh pr create）；本表 run = 改脚本自身时的自含冒烟（--dry-run 不 push 不 create，入参校验与既有 PR 检测路径零网络执行）"
+    },
+    {
+      "id": "E2E-MCP-01",
+      "summary": "MCP 管理真机子集（人工真机形态）：S1 添加 stdio 服务器并真实调用 / S2 启停新会话生效语义 / S3 非法输入当场拦截",
+      "scope": [
+        "packages/renderer/src/components/settings/mcp/**",
+        "packages/runtime/src/infra/pi/pi-mcp-store.ts",
+        "packages/runtime/src/infra/pi/pi-mcp-probe.ts"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "harness",
+          "ref": "packages/renderer/src/components/settings/mcp/McpSection.vue"
+        },
+        {
+          "kind": "harness",
+          "ref": "packages/renderer/src/components/settings/mcp/McpServerForm.vue"
+        },
+        {
+          "kind": "harness",
+          "ref": "packages/renderer/src/components/settings/mcp/McpServerList.vue"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（人工真机形态，无脚本化资产——回归防线由单测承担）前置 = dev 实例（TAIJI_DEV_BACKGROUND=1 pnpm dev）+ 本机真实 pi 1.0.0 二进制 + 真实 LLM 凭证 + 真实 MCP 服务器（非 mock）；空载串行。S1 = 添加真实 stdio 服务器（npx @modelcontextprotocol/server-filesystem）→ 测试连接显示已连接与工具名 → 新建会话真实 prompt 触发 mcp__<服务器>__<工具> 调用且对话流正常渲染。S2 = 禁用后新会话中该工具不可用、重新启用后新会话恢复可用、旧会话全程不受影响。S3 = 非法名称 / 传输字段留空 / command 与 url 混填三种输入均内联报错含修复动作且不落盘。PR/merge/CI 门禁不跑（AGENTS.md e2e 执行准则）",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 归宿（pi-mcp-management 设计 §4 e2e 影响面评估：本功能新资产按改动范围触发登记、触发条件必填；S1-S3 为设计验收场景表的真机子集）。asset 锚 = 被验能力本体（BATCH-01 先例——验证剧本未落建，落建后同 commit 回填 spec）；runtime mcp 模块以精确路径 scope 覆盖（pi-mcp-store.ts / pi-mcp-probe.ts），不产生目录级看护根——infra/pi/ 属共享目录，避免泛化（watchedRoots 注释同款考量：孤资产不把整目录逼进登记）。S1/S2 需真实 LLM 与真实 MCP 服务器故 layer=L3、serial=true；S3 为纯前端校验拦截，随 S1 场景顺带执行。mcp-message-handler / spawn-args 等域内改动的回归由既有单测族承担（spawn argv 快照等），不在本 rule 触发面。"
     }
   ]
 }

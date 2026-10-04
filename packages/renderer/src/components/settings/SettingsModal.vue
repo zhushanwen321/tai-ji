@@ -124,6 +124,7 @@
           <SystemPage v-else-if="activeMenu === 'system'" :key="activeMenu" :system="system" @update="onSystemUpdate" />
           <SystemPromptPage v-else-if="activeMenu === 'system-prompt'" :key="activeMenu" />
           <TerminalPage v-else-if="activeMenu === 'terminal'" :key="activeMenu" />
+          <McpSection v-else-if="activeMenu === 'mcp'" :key="activeMenu" />
           <PiPresetsPage v-else-if="activeMenu === 'preset'" :key="activeMenu" />
           <TtsPage v-else-if="activeMenu === 'tts'" :key="activeMenu" />
           <WorktreePage v-else-if="activeMenu === 'worktree'" :key="activeMenu" />
@@ -140,7 +141,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, Volume2, X, Download, Palette, BarChart3, ArrowLeft, ArrowRight, PanelLeftClose } from '@lucide/vue'
+import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, Volume2, X, Download, Palette, BarChart3, ArrowLeft, ArrowRight, PanelLeftClose, Server } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { getSettingsStore, useSettings, type SystemSettings } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
@@ -154,6 +155,7 @@ import PluginContributionsPage from './extension/PluginContributionsPage.vue'
 import SystemPage from './system/SystemPage.vue'
 import SystemPromptPage from './system/SystemPromptPage.vue'
 import TerminalPage from './terminal/TerminalPage.vue'
+import McpSection from './mcp/McpSection.vue'
 import WorktreePage from './worktree/WorktreePage.vue'
 import PiPresetsPage from './preset/PiPresetsPage.vue'
 import TtsPage from './tts/TtsPage.vue'
@@ -169,6 +171,7 @@ const menus = [
   { id: 'extension', labelKey: 'settings.menu.extension', icon: Blocks },
   { id: 'system-prompt', labelKey: 'settings.menu.systemPrompt', icon: ScrollText },
   { id: 'terminal', labelKey: 'settings.menu.terminal', icon: TerminalSquare },
+  { id: 'mcp', labelKey: 'settings.menu.mcp', icon: Server },
   { id: 'preset', labelKey: 'settings.menu.preset', icon: ClipboardList },
   { id: 'tts', labelKey: 'settings.menu.tts', icon: Volume2 },
   { id: 'worktree', labelKey: 'settings.menu.worktree', icon: GitBranch },
