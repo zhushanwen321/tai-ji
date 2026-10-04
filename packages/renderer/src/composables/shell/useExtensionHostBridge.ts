@@ -3,7 +3,8 @@
  *
  * 职责：打通 plugin panels 渲染链路最后一公里——
  * - 把 renderer 的 WS 消息流（plugin:* 下行广播）适配成 PluginMessageSource
- *   （core/extension-host/plugin-message-source.ts 注释明确「壳把 transport 层适配成 source 注入」）
+ *   （@taiji/ui/extension-host shell-adapters 共享件，双壳逐字节同源；
+ *   core/extension-host/plugin-message-source.ts 注释明确「壳把 transport 层适配成 source 注入」）
  * - 创建 InternalEventBus + MessageBusBridge（归一 plugin:* → bus 事件）
  * - 创建 ViewHostStore + StatusBarController（消费 bus，ui 组件数据源）
  * - 注入 MountPointRegistry/ContributionRegistry 到 core bootstrap（setExtensionRegistries；
@@ -12,23 +13,22 @@
  *
  * 消息流：WS 下行 → route-inbound（events 正规通道）→ 本适配器 →
  * MessageBusBridge → bus 'extension-widget' → ViewHostStore → <ViewHost> getView。
- * （ADR-0060：数据源从 raw-message-tap 旁路改为 events 双订阅——onGlobal 收无 sid 的 plugin:*，
- * onCrossSession 收带 sid 的 extension:*。route-inbound 成为消息分发单一真相源。）
+ * （ADR-0060：数据源从 raw-message-tap 旁路改为 events 双订阅——详见 shell-adapters.ts。）
  *
  * OverlayLifecycle（IF9）装配：订阅同一 bus 的 ui-request 事件，per-session/per-requestId
  * 维护 overlay 状态机（expanded→minimized→restored）+ session-destroyed cleanup。状态机就绪
  * 供 CompanionBand 后续多 overlay z-index 编排（当前 CompanionBand 单 dialog 队首渲染，
  * z-index 消费依赖多 overlay 渲染能力，见 02-extension-host-wiring.md）。
  *
- * CompanionBand（plugin:uiRequest dialog）接线：createDialogRequestSource/createUiResponseTransport
- * 适配（见 extension-host-dialog.ts）经 DIALOG_REQUEST_SOURCE_KEY/UI_RESPONSE_TRANSPORT_KEY 注入。
+ * CompanionBand（plugin:uiRequest dialog）接线：createCompanionDialogAdapters 共享工厂
+ * （routeAskUser='panel'——askUser C4 分流给 Panel inline 独占，见 shell-adapters.ts）
+ * 经 DIALOG_REQUEST_SOURCE_KEY/UI_RESPONSE_TRANSPORT_KEY 注入。
  */
 import type { App } from 'vue'
 import { reactive, shallowReactive, watch } from 'vue'
 import {
   ContributionRegistry,
   createSessionScopedMap,
-  EXTENSION_BRIDGE_TYPES,
   InternalEventBus,
   MessageBusBridge,
   MountPointRegistry,
@@ -42,14 +42,14 @@ import {
   type ActivationTrigger,
   type CommandExecutor,
   type OverlayState,
-  type IncomingPluginMessage,
-  type PluginMessageSource,
   type SessionScopedMap,
   type ViewCacheEntry,
   type StatusBarSessionState,
 } from '@taiji/core'
 import { getState as getWsState, send } from '@taiji/core/transport/ws-client'
 import {
+  createCompanionDialogAdapters,
+  createWsPluginMessageSource,
   DIALOG_REQUEST_SOURCE_KEY,
   PluginSettingsDataSourceKey,
   STATUS_BAR_SOURCE_KEY,
@@ -60,58 +60,9 @@ import {
   type ContributionInfo,
 } from '@taiji/ui/extension-host'
 import { SLASH_COMMAND_SOURCE_KEY } from '@/components/panel/command-popover-source'
-import { createDialogRequestSource, createUiResponseTransport } from './extension-host-dialog'
-import type { ServerMessage } from '@taiji/shared'
-import { onCrossSession, onGlobal } from '@taiji/core/transport/api'
 import { onPlugins } from '@taiji/core/transport/api/domains/plugin'
 import { createNotifyToastHandler } from './notify-toast'
 import type { ContributionRecord } from '@taiji/core'
-
-/** 把 renderer 的 WS 消息流（events 通道的 plugin:/extension: 下行）适配成 PluginMessageSource。 */
-
-/**
- * extension:* 下行进 bridge 的精确白名单——core 导出 SSOT（D10②，派生自
- * message-bus-bridge.ts EXTENSION_HANDLERS 的 keys），本文件 import 同一份。
- * plugin:* 前缀全放行，extension:* 只放行白名单内 type——其余（如 extension.error）
- * 由 source filter 静默丢弃，不进 bridge（source 职责边界）。
- */
-
-/**
- * 过滤条件：plugin:* 前缀 OR EXTENSION_BRIDGE_TYPES 精确白名单。
- *
- * ADR-0060：数据源从 raw-message-tap 旁路改为 events 正规双订阅（route-inbound 单一真相源）：
- * - onGlobal：收无 sid 的 plugin:*（statusBarUpdate/notification/uiRequest 等走 global 通道）
- * - onCrossSession：收带 sid 的 extension:*（widget/widgetGui/status/notify/ui_request
- *   + plugin:uiRequest/plugin:viewUpdate，route-inbound 声明式条目 crossSession 字段分发，
- *   全局单例消费者 ExtensionHost 接收）
- * 经 source filter 后消息集合与旧 raw-tap 全量订阅等价（plugin:* 无 sid + extension.* 带 sid）。
- */
-export function createWsPluginMessageSource(): PluginMessageSource {
-  return {
-    subscribe(handler: (msg: IncomingPluginMessage) => void): () => void {
-      // 适配 raw ServerMessage → IncomingPluginMessage（source filter：plugin:* 前缀 OR 白名单 type）
-      const adapt = (msg: ServerMessage): void => {
-        if (
-          typeof msg.type === 'string' &&
-          (msg.type.startsWith('plugin:') || EXTENSION_BRIDGE_TYPES.includes(msg.type))
-        ) {
-          const payload = (msg.payload ?? {}) as { sessionId?: string }
-          handler({
-            type: msg.type,
-            sessionId: typeof payload.sessionId === 'string' ? payload.sessionId : undefined,
-            payload: msg.payload,
-          })
-        }
-      }
-      const offGlobal = onGlobal(adapt)
-      const offCrossSession = onCrossSession(adapt)
-      return () => {
-        offGlobal()
-        offCrossSession()
-      }
-    },
-  }
-}
 
 /**
  * 模块级共享 bus（IF1，slice companion-band-mount TC1）：惰性单例。
@@ -169,24 +120,25 @@ function createReactiveSessionScopedMap<T>(init: () => T): SessionScopedMap<T> {
 }
 
 /**
- * mountPoints.sync 上报的模块级单例注册（MF-1 R2 修复）。
+ * mountPoints.sync 上报的 connected 重放器（MF-1 R2 修复；R2-2 习语合流）。
  *
  * 不能在 initExtensionHostBridge 时立即 send：main.ts 模块体同步执行先于 app.mount，WS 唯一
  * 连接入口在 App.vue onMounted（异步建连），send 时 readyState 必非 OPEN → core ws-client
  * 非 OPEN 时 return false 静默丢弃（W4 fast-fail 契约，无缓冲队列）→ runtime mountPoints 恒 []。
  * 改为 watch connectionState：每次进入 connected（首次建连 + runtime 重启重连）补发；
- * runtime syncMountPoints 为 overwrite 语义（DM3），重复发送幂等。模块级守卫防重复注册
- * （HMR / 测试多次 init 只挂一个 watcher，避免重复发送）。
+ * runtime syncMountPoints 为 overwrite 语义（DM3），重复发送幂等。
+ *
+ * watcher 生命周期随 init dispose-and-rebuild（对齐 usePermissionRequest 习语）：返回 stop
+ * 句柄由 __testing.lastInitHandles.dispose 统一回收，重复 init 先 stop 旧 watcher 再挂新。
+ * [HISTORICAL] 旧实现的模块级布尔守卫使 watcher 永久闭包绑定第一次 init 的 registry 实例
+ * ——重复 init 后 setExtensionRegistries 已把 core 单例换新实例，注册进新实例、上报旧实例快照。
  */
-let mountPointsSyncWatchRegistered = false
-function ensureMountPointsSync(mountPoints: MountPointRegistry): void {
-  if (mountPointsSyncWatchRegistered) return
-  mountPointsSyncWatchRegistered = true
+function ensureMountPointsSync(mountPoints: MountPointRegistry): () => void {
   const sendSync = (): void => {
     send({ type: 'plugin.mountPoints.sync', payload: { mountPoints: mountPoints.list() } })
   }
   // immediate：init 时若已 connected（防御）立即发送；否则等待首次建连 / 重连进入 connected
-  watch(getWsState(), (s) => {
+  return watch(getWsState(), (s) => {
     if (s === 'connected') sendSync()
   }, { immediate: true })
 }
@@ -200,17 +152,14 @@ function ensureMountPointsSync(mountPoints: MountPointRegistry): void {
  * description 元数据）。改挂 watch(connected) 重放：bootstrap step5 由 await 链微任务接续，
  * 结构性先于 connected（真实分支 connected 需 WS onopen + auth 宏任务；mock 分支 200ms
  * setTimeout），connected 后声明必已就绪；消费点 CommandPopover 为用户交互，远晚于 connected。
- * 幂等（registerFromContribution 同 id 覆盖），重连/重跑无害。模块级守卫对齐
- * ensureMountPointsSync（HMR / 测试多次 init 只挂一个 watcher）。
+ * 幂等（registerFromContribution 同 id 覆盖），重连/重跑无害。watcher 生命周期随 init
+ * dispose-and-rebuild（同 ensureMountPointsSync）。
  */
-let commandDeclarationsSyncWatchRegistered = false
 function ensureCommandDeclarationsSync(
   contributions: ContributionRegistry,
   commandRegistry: CommandRegistry,
-): void {
-  if (commandDeclarationsSyncWatchRegistered) return
-  commandDeclarationsSyncWatchRegistered = true
-  watch(getWsState(), (s) => {
+): () => void {
+  return watch(getWsState(), (s) => {
     if (s !== 'connected') return
     for (const c of contributions.getContributions()) {
       if (c.type === 'command' || c.type === 'slashCommand') commandRegistry.registerFromContribution(c)
@@ -239,11 +188,17 @@ export function toContributionInfos(
 /**
  * 测试后门命名空间（生产代码禁止消费，与生产 import 面物理分离，audit 清理点#9 归整）。
  * - lastInitHandles：最近一次 initExtensionHostBridge 装配的测试所需句柄快照——init 返回
- *   void 后（生产调用方 main.ts 恒丢弃返回值），测试 afterEach dispose（bridge）与注册
- *   注入用例（contributions）取内部实例的唯一通道。仅存测试实际消费的两字段。
+ *   void 后（生产调用方 main.ts 恒丢弃返回值），测试 afterEach dispose 与注册注入用例
+ *   （contributions）取内部实例的唯一通道。dispose 回收本次装配（重复 init 前置调用 /
+ *   测试 afterEach，幂等）：stop 两个 connected 重放器 watcher + dispose bridge（防 bus
+ *   事件翻倍，项目规则#2；bus 上其余 controller 订阅随 app 生命周期存活，不在回收面）。
  */
 export const __testing = {
-  lastInitHandles: null as null | { bridge: MessageBusBridge; contributions: ContributionRegistry },
+  lastInitHandles: null as null | {
+    bridge: MessageBusBridge
+    contributions: ContributionRegistry
+    dispose: () => void
+  },
 }
 
 /**
@@ -251,9 +206,14 @@ export const __testing = {
  *
  * 生产语义返回 void：唯一调用方 main.ts 恒单语句调用、丢弃返回值（audit 清理点#9，
  * 原 9 字段返回对象系「供调试与后续接线」的未兑现赌注）。测试需要的内部句柄经
- * `__testing.lastInitHandles` 取（仅 bridge / contributions 两字段有测试消费）。
+ * `__testing.lastInitHandles` 取（仅 bridge / contributions / dispose 有测试消费）。
+ * 重复 init 幂等：dispose-and-rebuild（对齐 usePermissionRequest 习语）——先经
+ * lastInitHandles.dispose 回收上一次装配的重放器 watcher 与 bridge 订阅再重建。
  */
 export function initExtensionHostBridge(app: App): void {
+  // 幂等：重复初始化先回收上一次装配（HMR/测试场景防 watcher 闭包绑定旧 registry 实例
+  // 上报过期快照 + bridge 订阅翻倍，项目规则#2）
+  __testing.lastInitHandles?.dispose()
   const bus = getExtensionBus() // IF1：复用模块级惰性单例（不再局部 new）
   const source = createWsPluginMessageSource()
   // bridge 构造即订阅 source（source.subscribe → handleMessage → bus.emit）
@@ -307,7 +267,7 @@ export function initExtensionHostBridge(app: App): void {
   // builtin command + slashCommand 声明同步进 CommandRegistry（收编后是 slash 命令统一消费源，
   // 03 文档 D3-1：声明提供 description 元数据，执行仍走 pi）。装配期 contributions 尚空
   // （注册已收敛 bootstrap 第 5 步），改 connected 后重放同步（见 ensureCommandDeclarationsSync 注释）。
-  ensureCommandDeclarationsSync(contributions, commandRegistry)
+  const stopCommandDeclarationsSync = ensureCommandDeclarationsSync(contributions, commandRegistry)
   // CommandPopover 数据源：resolveSlashCommands 合并源（registry 声明 ∪ commandStore pi 真源）。
   // 壳提供真实 registry 实现，组件注入（单测 global.provide mock）。
   app.provide(SLASH_COMMAND_SOURCE_KEY, {
@@ -316,7 +276,7 @@ export function initExtensionHostBridge(app: App): void {
   // MF-3：把挂载点整表上报 runtime（AC10）——插件 views.listMountPoints() 依赖此中继查询，
   // 不上报则恒返回 []（registerMountPoints 内部同步注册，list() 已含全部挂载点）。
   // MF-1（R2）：发送时点见 ensureMountPointsSync——init 时 WS 未建连，send 必被静默丢弃。
-  ensureMountPointsSync(mountPoints)
+  const stopMountPointsSync = ensureMountPointsSync(mountPoints)
 
   // ui 组件数据源（ViewHost/StatusBar 经 inject 取，壳 provide 真实实现；形状对齐 IF10/IF5）
   app.provide(VIEW_HOST_SOURCE_KEY, {
@@ -370,9 +330,13 @@ export function initExtensionHostBridge(app: App): void {
     getContributions: (pluginId) =>
       toContributionInfos(contributions.getContributions({ pluginId }), mountPoints),
   })
-  // CompanionBand 数据源：bus 'ui-request' 适配（无 sid 跳过 / askUser 过滤）+ 回传双通道（FR2/FR7）
-  app.provide(DIALOG_REQUEST_SOURCE_KEY, createDialogRequestSource(bus))
-  app.provide(UI_RESPONSE_TRANSPORT_KEY, createUiResponseTransport())
+  // CompanionBand 数据源：共享工厂（bus 'ui-request' 适配 + 回传双通道，FR2/FR7）。
+  // routeAskUser='panel'（桌面壳唯一策略差异）：askUser C4 分流给 Panel inline 独占，
+  // 本层只投递非 askUser；requestIdSessions 反查表生命周期（G1）由 factory 单点持有，
+  // 泄漏语义文档见 shell-adapters.ts（双壳共同持有的同一不变量）。
+  const companionDialog = createCompanionDialogAdapters(bus, { routeAskUser: 'panel' })
+  app.provide(DIALOG_REQUEST_SOURCE_KEY, companionDialog.source)
+  app.provide(UI_RESPONSE_TRANSPORT_KEY, companionDialog.transport)
 
   // OverlayLifecycle（IF9，audit §12.1 接线闭环）：订阅同一 bus 的 ui-request → 自动建 per-session
   // per-requestId 分区（expanded 初始态）+ session-destroyed cleanup（ERR4）。bus 亶久持有 listener
@@ -402,5 +366,14 @@ export function initExtensionHostBridge(app: App): void {
   })
   notificationController.subscribe()
 
-  __testing.lastInitHandles = { bridge, contributions }
+  __testing.lastInitHandles = {
+    bridge,
+    contributions,
+    // 回收本次装配（init 开头前置调用 / 测试 afterEach；watch stop 与 bridge.dispose 均幂等）
+    dispose: () => {
+      stopMountPointsSync()
+      stopCommandDeclarationsSync()
+      bridge.dispose()
+    },
+  }
 }

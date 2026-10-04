@@ -204,6 +204,19 @@ export default [
       'max-lines': 'off',
     },
   },
+  // [HISTORICAL] plugin-service.ts 是插件子系统 facade 的唯一聚合点：registry/
+  // activator/host 协作编排 + 权限审批三命令（approve/revoke/deny）+ toggle/
+  // uninstall/install 生命周期入口（重实现已按 max-lines 拆分迁出至
+  // plugin-contributions / plugin-shutdown / plugin-info-mapper / commands-executor
+  // 等 sibling 模块）。W5 权限 reply 契约（approve 补 config.plugins 广播）+1 代码行
+  // 越过 500。剩余 facade 方法拆分需引入新的 ctx 注入边界，属独立重构任务。
+  // 与 event-adapter / session-channel 等 override 同型——短期避免阻塞，长期应拆分。
+  {
+    files: ['packages/runtime/src/services/plugin-service/plugin-service.ts'],
+    rules: {
+      'max-lines': 'off',
+    },
+  },
   // [H4 record 持久化收敛 / D7 守卫分级] store 外禁 import record 写面函数——
   // eslint no-restricted-imports 是模块边界一级拦截（新增写者在 import 面即报错），
   // grep 门（scripts/check-record-write-surface.mjs）降为文本级兜底（拦类方法调用

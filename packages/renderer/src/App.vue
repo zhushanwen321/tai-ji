@@ -139,7 +139,7 @@ watch(connectionState, (s) => {
   if (s === 'connected') {
     void onConnected()
     // 兜底：连接后主动拉一次 models（对齐 refreshProviders 范式，防订阅时序竞态未来回归）。
-    // mock 模式 WS 不回 model.list reply（mockSend 仅 ping/pong）→ pending 65s 超时，跳过避免 boot 卡顿。
+    // mock 平台 WS 桩仅 ping/pong 不回 model.list reply → pending 65s 超时，跳过避免 boot 卡顿。
     if (import.meta.env.VITE_MOCK !== 'true') {
       void refreshModels()
     }

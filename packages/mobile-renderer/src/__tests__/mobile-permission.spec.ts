@@ -1,8 +1,14 @@
-// 移动壳权限审批链测试（remote-use D7「权限审批 ✅ 手机可批」接线，阶段 3 一致性修复）。
+// 移动壳权限审批链装配 smoke（remote-use D7「权限审批 ✅ 手机可批」接线）。
 //
-// 链路锁定：bus 'plugin-permission-request'（companion-bridge 订阅）→ App 内
-// PermissionRequestDialog 渲染 → 勾选/批准/拒绝 → transport RPC
-// （plugin.approvePermissions / plugin.denyPermissions）→ pending/error 收口。
+// 链路锁定：bus 'plugin-permission-request'（companion-bridge 模块级 controller）→
+// App 内 PermissionRequestDialog 渲染 → 勾选/批准/拒绝 → transport RPC
+// （plugin.approvePermissions / plugin.denyPermissions）→ pending 收口。
+//
+// 状态机本体（畸形事件守卫 / permissions 拷贝 / BM3 失败保持 / D3 expired 撤窗 /
+// 新请求覆盖）单测在 packages/ui extension-host
+// __tests__/permission-request-controller.test.ts（双壳共享 factory）；错误行渲染
+// 归 PermissionRequestDialog 组件测试。本文件只钉移动壳装配（App.vue provide +
+// Dialog 挂载 + bus 单例接线）。
 //
 // mock 策略：
 // - plugin 域（approvePermissions/denyPermissions）模块级 vi.mock 隔离 WS（断言回传参数）；
@@ -11,17 +17,16 @@
 //
 // 协议事实锚定（「无 sessionId」用例方向）：runtime permissionRequest 广播 payload 协议性
 // 无 sessionId（plugin-service onPermissionRequest 直发 activator payload），审批弹窗全局
-// 单例 session 无关——无 sessionId 事件必须照常弹出，warn+skip 只适用于结构坏事件。
+// 单例 session 无关——无 sessionId 事件必须照常弹出。
 //
 // 运行：cd packages/mobile-renderer && npx vitest run src/__tests__/mobile-permission.spec.ts
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import { dispatchGlobal } from '@taiji/core/transport/api'
 import App from '../App.vue'
 import { i18n } from '../i18n'
-import { mobileExtensionBus, useMobilePermissionRequest } from '../shell/companion-bridge'
-import { shellConnectionState } from '../bootstrap'
+import { __testing, useMobilePermissionRequest } from '../shell/companion-bridge'
+import { shellConnectionState } from '../shell/connection-view'
 
 // vi.hoisted：mock 工厂被 hoist 到 import 前，工厂内引用的变量须经 vi.hoisted 创建
 const { mockApprove, mockDeny } = vi.hoisted(() => ({ mockApprove: vi.fn(), mockDeny: vi.fn() }))
@@ -46,14 +51,14 @@ function mountApp() {
 
 /** 发一条 bridge 归一后的合法 permission-request 事件（sessionId 可选，协议性缺省） */
 function emitPermissionRequest(pluginId: string, permissions: string[], sessionId?: string): void {
-  mobileExtensionBus.emit({
+  __testing.mobileExtensionBus.emit({
     kind: 'plugin-permission-request',
     ...(sessionId !== undefined ? { sessionId } : {}),
     request: { pluginId, permissions, requestId: `perm_${pluginId}` },
   })
 }
 
-describe('移动壳权限审批链（D7 手机可批）', () => {
+describe('移动壳权限审批链装配（D7 手机可批）', () => {
   let wrapper: ReturnType<typeof mountApp> | null = null
 
   beforeEach(() => {
@@ -118,40 +123,6 @@ describe('移动壳权限审批链（D7 手机可批）', () => {
     expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(false)
   })
 
-  it('拒绝 RPC 失败（BM3 假成功红线）：弹窗保持打开 + 错误行显形，重试成功后收口', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    try {
-      wrapper = mountApp()
-      emitPermissionRequest('p2', ['fs.write'])
-      await nextTick()
-
-      // 第一次拒绝：RPC reject → pending 保持 true（弹窗不关）+ error=true（错误行渲染）
-      mockDeny.mockRejectedValueOnce(new Error('rpc boom'))
-      await wrapper.find('[data-testid="permission-reject"]').trigger('click')
-      await flushPromises()
-
-      expect(mockDeny).toHaveBeenCalledTimes(1)
-      expect(useMobilePermissionRequest().pending).toBe(true)
-      expect(useMobilePermissionRequest().error).toBe(true)
-      expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(true)
-      const errorLine = wrapper.find('[data-testid="permission-dialog-error"]')
-      expect(errorLine.exists()).toBe(true)
-      expect(errorLine.attributes('role')).toBe('alert')
-
-      // 重试成功 → 正常收口（pending=false + error=false + 弹窗关闭）
-      mockDeny.mockResolvedValueOnce(undefined)
-      await wrapper.find('[data-testid="permission-reject"]').trigger('click')
-      await flushPromises()
-
-      expect(mockDeny).toHaveBeenCalledTimes(2)
-      expect(useMobilePermissionRequest().pending).toBe(false)
-      expect(useMobilePermissionRequest().error).toBe(false)
-      expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(false)
-    } finally {
-      warnSpy.mockRestore()
-    }
-  })
-
   it('无 sessionId 事件照常弹出（协议事实：permissionRequest 广播无 sessionId，审批全局单例）', async () => {
     wrapper = mountApp()
     emitPermissionRequest('p3', ['net.http'])
@@ -159,48 +130,5 @@ describe('移动壳权限审批链（D7 手机可批）', () => {
 
     expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="permission-dialog-title"]').text()).toBe('p3')
-  })
-
-  it('畸形事件 warn+skip 不崩：空 pluginId / permissions 非数组均不弹窗，后续合法事件照常', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    try {
-      wrapper = mountApp()
-
-      // 空 pluginId
-      emitPermissionRequest('', ['fs.read'])
-      await nextTick()
-      expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(false)
-      // permissions 非数组（测试注入坏形状，受控 cast）
-      mobileExtensionBus.emit({
-        kind: 'plugin-permission-request',
-        request: { pluginId: 'p4', permissions: 'fs.read' as unknown as string[], requestId: 'perm_p4' },
-      })
-      await nextTick()
-      expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(false)
-
-      expect(warnSpy).toHaveBeenCalledTimes(2)
-      // 守卫只 skip 不毒害状态：合法事件照常弹出
-      emitPermissionRequest('p5', ['fs.read'])
-      await nextTick()
-      expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(true)
-    } finally {
-      warnSpy.mockRestore()
-    }
-  })
-
-  it('审批等待超时撤窗（D3 取消非判拒）：同 pluginId expired 关弹窗；异 pluginId 不误撤', async () => {
-    wrapper = mountApp()
-    emitPermissionRequest('p6', ['fs.read'])
-    await nextTick()
-
-    // 异 pluginId 的陈旧 expired 广播：noop（不误撤新弹窗）
-    dispatchGlobal({ type: 'plugin:permissionRequestExpired', id: 't1', payload: { pluginId: 'other' } })
-    expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(true)
-
-    // 同 pluginId：撤窗
-    dispatchGlobal({ type: 'plugin:permissionRequestExpired', id: 't2', payload: { pluginId: 'p6' } })
-    expect(useMobilePermissionRequest().pending).toBe(false)
-    await nextTick()
-    expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(false)
   })
 })

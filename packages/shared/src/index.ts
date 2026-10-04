@@ -145,9 +145,11 @@ export type { RecentWorkspaceRecord } from './workspace'
 export type { Project, ProjectStoreState } from './project'
 export type { SubagentRecord, SubagentStatus, ClosedDisplayStatus } from './subagent'
 // 远程访问配置契约 SSOT（remote-access.json：main 写入侧与 runtime 握手热读侧共用；
-// 纯类型/常量无 node 依赖，barrel 安全）。
-export type { RemoteAccessConfig } from './remote-access'
-export { REMOTE_ACCESS_FILENAME, REMOTE_TOKEN_HEX64 } from './remote-access'
+// 含 IPC 信封类型 RemoteAccessInfo/RemoteAccessToggleResult，main/preload/renderer
+// 三端共同 import；含无策略 shape 谓词（main/runtime 双侧 shape 判据单源）；
+// 纯类型/常量/纯函数无 node 依赖，barrel 安全）。
+export type { RemoteAccessConfig, RemoteAccessInfo, RemoteAccessToggleResult } from './remote-access'
+export { REMOTE_ACCESS_FILENAME, REMOTE_TOKEN_HEX64, isRemoteAccessConfigShape } from './remote-access'
 // 导入 pi 会话 RPC 契约（设计 docs/design/import-session.md（已删除，git 可追溯）§3.3 D5，runtime/renderer 两端共同 import）
 export type {
   ImportWarning, ImportErrorCode,

@@ -4,14 +4,14 @@
  * 锁定 use-connection 的 refreshTokenAndConnect 编排半边（auth 链路的 renderer 侧）：
  * runtime 重启 = supervisor 重新 spawn = token 已刷新，旧 token 对新 runtime 的
  * auth 必失败（1008 → 重连循环直到 failed）。重连路径必须先经 IPC getRuntimeToken
- * 拿新值再 connect(url, newToken)——本文件钉住该编排，回归后果 = runtime 重启后
+ * 拿新值再 connect(url, 新 token 凭据对象)——本文件钉住该编排，回归后果 = runtime 重启后
  * 应用失联。
  *
  * 覆盖：
- * - TC-T1: init 已知端口路径——connect 前先 IPC 取 token，connect(url, token)
- * - TC-T2: onRuntimePort 推新端口 → disconnect + 重新拉 token + connect(newUrl, newToken)
- * - TC-T3: getRuntimeToken 抛错 → warn 落日志 + 降级无 token 连接（仍 connect(url, undefined)）
- * - TC-T4: getRuntimeToken 返回 null → connect(url, undefined)（无凭据不阻断重连）
+ * - TC-T1: init 已知端口路径——connect 前先 IPC 取 token，connect(url, {auth:'token', token})
+ * - TC-T2: onRuntimePort 推新端口 → disconnect + 重新拉 token + connect(newUrl, 新 token 凭据对象)
+ * - TC-T3: getRuntimeToken 抛错 → warn 落日志 + 降级空串 token 握手探测（仍发起连接，重连不阻断）
+ * - TC-T4: getRuntimeToken 返回 null → connect(url, {auth:'token', token:''})（同 T3 降级语义）
  *
  * 运行：cd packages/core && npx vitest run src/transport/__tests__/use-connection-token-refresh.test.ts
  */
@@ -102,7 +102,7 @@ describe('S1-W1: runtime 重启 token 刷新编排（refreshTokenAndConnect）',
     expect(inboundHandler).not.toBeNull()
     // 首连凭据经 IPC 下发：getRuntimeToken 先于 connect，token 透传
     expect(getRuntimeToken).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(connect)).toHaveBeenCalledWith('ws://localhost:4000', 'token-1')
+    expect(vi.mocked(connect)).toHaveBeenCalledWith('ws://localhost:4000', { auth: 'token', token: 'token-1' })
   })
 
   it('TC-T2: onRuntimePort 推新端口 → disconnect + 重新拉 token + connect(newUrl, newToken)', async () => {
@@ -113,7 +113,7 @@ describe('S1-W1: runtime 重启 token 刷新编排（refreshTokenAndConnect）',
     expect(vi.mocked(disconnect)).toHaveBeenCalledTimes(1)
     // runtime 重启 = token 已刷新：重连前必须重新拉取（不得复用旧 token）
     expect(getRuntimeToken).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(connect)).toHaveBeenCalledWith('ws://localhost:4500', 'token-2')
+    expect(vi.mocked(connect)).toHaveBeenCalledWith('ws://localhost:4500', { auth: 'token', token: 'token-2' })
   })
 
   it('TC-T3: getRuntimeToken 抛错 → warn 落日志 + 降级为无 token 连接（重连不被阻断）', async () => {
@@ -121,16 +121,17 @@ describe('S1-W1: runtime 重启 token 刷新编排（refreshTokenAndConnect）',
     getRuntimeToken.mockRejectedValue(new Error('ipc gone'))
     portCb!(4600)
     await flushAsync()
-    // warn 分支可见（排查依据），连接仍发起（undefined token 走无凭据路径）
+    // warn 分支可见（排查依据），连接仍发起（空串 token 握手探测：本地 runtime 恒配 token，
+    // 探测必被拒走重连链——S4 裁决，不因「拿不到凭据」假设 skip 假 connected）
     expect(warnSpy).toHaveBeenCalled()
-    expect(vi.mocked(connect)).toHaveBeenCalledWith('ws://localhost:4600', undefined)
+    expect(vi.mocked(connect)).toHaveBeenCalledWith('ws://localhost:4600', { auth: 'token', token: '' })
     warnSpy.mockRestore()
   })
 
-  it('TC-T4: getRuntimeToken 返回 null → connect(url, undefined)（无凭据不阻断重连）', async () => {
+  it('TC-T4: getRuntimeToken 返回 null → connect(url, {auth:"token", token:""})（无凭据不阻断重连）', async () => {
     getRuntimeToken.mockResolvedValue(null)
     portCb!(4700)
     await flushAsync()
-    expect(vi.mocked(connect)).toHaveBeenCalledWith('ws://localhost:4700', undefined)
+    expect(vi.mocked(connect)).toHaveBeenCalledWith('ws://localhost:4700', { auth: 'token', token: '' })
   })
 })

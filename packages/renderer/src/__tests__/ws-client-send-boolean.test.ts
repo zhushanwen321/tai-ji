@@ -37,7 +37,7 @@ describe('ws-client.send 壳侧 import 冒烟（W4 fast-fail 主覆盖在 core i
       ipc: null,
     }
     providePlatform(platform)
-    connect('ws://test')
+    connect('ws://test', { auth: 'skip' })
 
     const msg: ClientMessage = { type: 'ping', payload: {} }
     expect(typeof send(msg)).toBe('boolean')

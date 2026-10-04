@@ -270,6 +270,41 @@ describe('权限审批唤醒链路（approve / revoke / 挂起期清理）', () 
     expect((host.assignWorker as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0)
   })
 
+  // ── W5 广播契约：权限命令 reply pong ack，列表刷新经 config.plugins 广播 ──
+  // PluginInfo 不含权限字段（pluginId/version/displayName/description/status/
+  // trustLevel/enabled）——deny/revoke 后广播内容不变，不广播；approve 触发
+  // activate（status discovered→active 真实变化）才广播。
+  /** 数 broker.broadcast 中 type=config.plugins 的调用次数（列表刷新广播） */
+  function pluginListBroadcastCount(): number {
+    const broadcastMock = broker.broadcast as ReturnType<typeof vi.fn>
+    return broadcastMock.mock.calls.filter((c) => (c[0] as { type: string }).type === 'config.plugins').length
+  }
+
+  it('W5: approvePermissions → activate 完成后广播 config.plugins（恰一次）', async () => {
+    ;(broker.broadcast as ReturnType<typeof vi.fn>).mockClear()
+
+    await service.approvePermissions('wake-plugin', ['plugin.hooks.register'])
+
+    expect(activator.getState('wake-plugin')).toBe('ACTIVE')
+    expect(pluginListBroadcastCount()).toBe(1)
+  })
+
+  it('W5: denyPermissions（无 pending）→ 不广播 config.plugins', async () => {
+    ;(broker.broadcast as ReturnType<typeof vi.fn>).mockClear()
+
+    await service.denyPermissions('wake-plugin')
+
+    expect(pluginListBroadcastCount()).toBe(0)
+  })
+
+  it('W5: revokePermissions → 不广播 config.plugins（PluginInfo 字段无变化）', async () => {
+    ;(broker.broadcast as ReturnType<typeof vi.fn>).mockClear()
+
+    await service.revokePermissions('wake-plugin')
+
+    expect(pluginListBroadcastCount()).toBe(0)
+  })
+
   // ── 超时兜底仍在（唤醒是加速，超时是语义不变的兜底）──────────────
   it('无人批准时仍按 permissionTimeoutMs 超时回落 UNLOADED（唤醒不破坏兜底）', async () => {
     // 重建短超时 activator（service 内置 30s，这里直测 activator 层）

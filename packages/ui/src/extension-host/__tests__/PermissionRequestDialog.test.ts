@@ -14,11 +14,28 @@
  * Dialog 原语经 stub 内联渲染（reka-ui DialogContent 在 happy-dom 下 Teleport 到 body 且时序不稳定
  * —— ProviderEditModal.test.ts 先例，故 stub 掉 Dialog 家族让内容渲染在 wrapper 内，测试确定性）。
  * Dialog stub 尊重 open prop（pending=false 时内容不渲染）。
+ * i18n：组件文案走 useI18n（extensionUI 域权限审批 key），vi.mock 注入 i18nMock 字典
+ * （zh-CN 口径，值与 locale/zh-CN/extensionUI.ts 一致——Turn.test.ts 同款先例），
+ * BM3 错误行文案断言按真实 locale 文案进行。
  *
  * 运行：cd packages/ui && npx vitest run src/extension-host/
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
+
+// mock vue-i18n 的 useI18n：自包含 t（覆盖 vitest.setup.ts 的返回 key 默认口径，供文案断言）。
+// 字典直接 import 真实 zh-CN extensionUI 域并加前缀展开——文案演进时测试机械联动，无手抄漂移面
+// （共享 mock 口径见 helpers/i18n-mock，g9-F5）。
+vi.mock('vue-i18n', async () => {
+  const { i18nMock } = await import('../../__tests__/helpers/i18n-mock')
+  const extensionUI: Record<string, string> = (await import('../../locale/zh-CN/extensionUI')).default
+  const messages: Record<string, string> = {}
+  for (const [key, value] of Object.entries(extensionUI)) {
+    messages[`extensionUI.${key}`] = value
+  }
+  return i18nMock(messages)
+})
+
 import PermissionRequestDialog from '../PermissionRequestDialog.vue'
 import { PERMISSION_TRANSPORT_KEY } from '../permission-transport'
 import type { PermissionTransport } from '../permission-transport'
@@ -62,6 +79,12 @@ describe('PermissionRequestDialog', () => {
     expect(items).toHaveLength(2)
     expect(items[0]!.text()).toBe('fs.read')
     expect(items[1]!.text()).toBe('net.http')
+
+    // 文案走 i18n key（zh-CN 口径）：描述句 / 全选 / 拒绝 / 批准（key 拼错会渲染裸 key，在此抓）
+    expect(wrapper.text()).toContain('插件申请了以下权限，批准后即可使用')
+    expect(wrapper.find('[data-testid="permission-dialog-toggle-all"]').text()).toBe('全选')
+    expect(wrapper.find('[data-testid="permission-reject"]').text()).toBe('拒绝')
+    expect(wrapper.find('[data-testid="permission-approve"]').text()).toBe('批准')
   })
 
   it('TC-8 部分批准：勾选 fs.read → 点批准 → emit approve(["fs.read"]) + transport.approve("p1", ["fs.read"])（AC4）', async () => {

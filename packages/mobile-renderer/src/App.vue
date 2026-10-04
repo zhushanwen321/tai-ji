@@ -20,18 +20,21 @@
 import { computed, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@taiji/ui'
-import { CompanionBand, PermissionRequestDialog } from '@taiji/ui/extension-host'
 import {
+  CompanionBand,
   DIALOG_REQUEST_SOURCE_KEY,
+  PermissionRequestDialog,
   PERMISSION_TRANSPORT_KEY,
   UI_RESPONSE_TRANSPORT_KEY,
+} from '@taiji/ui/extension-host'
+import {
   mobileDialogRequestSource,
   mobilePermissionTransport,
   mobileUiResponseTransport,
   useMobilePermissionRequest,
 } from './shell/companion-bridge'
 import { activeSessionId, loadSessions } from './shell/app-runtime'
-import { hasConnectedOnce, shellConnectionState, submitRemoteToken, tokenSubmit } from './bootstrap'
+import { hasConnectedOnce, shellConnectionState, submitRemoteToken, tokenSubmit } from './shell/connection-view'
 import BottomTabBar, { type MobileTab } from './shell/BottomTabBar.vue'
 import SlashBarStub from './shell/stubs/SlashBarStub.vue'
 import TokenInputView from './shell/TokenInputView.vue'

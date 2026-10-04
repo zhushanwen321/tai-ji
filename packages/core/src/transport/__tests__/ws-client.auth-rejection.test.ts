@@ -62,9 +62,7 @@ describe('ws-client auth 拒绝信号与重连抑制（D8）', () => {
   })
   afterEach(() => {
     disconnect()
-    // currentToken 复位（invariants ② describe 同款体例：mock url 强制清空）
-    connect('mock://reset-token')
-    disconnect()
+    // 凭据经 connect 第二参显式传入（S4），无 currentToken 残留复位需求（invariants 同体例）
     resetAuthRejectionSuppression()
     vi.useRealTimers()
   })
@@ -74,7 +72,7 @@ describe('ws-client auth 拒绝信号与重连抑制（D8）', () => {
     const off = onAuthRejected(() => {
       observedAtSignal = `readyState=${latestFake().readyState} closeCalls=${latestFake().closeCalls}`
     })
-    connect('ws://test', 'tok-d8')
+    connect('ws://test', { auth: 'token', token: 'tok-d8' })
     latestFake().triggerOpen()
     latestFake().triggerMessage(authResult(false))
     // 信号触发瞬间：readyState=OPEN(1) 且 close 尚未调用——「先于 close」的直接证据
@@ -87,7 +85,7 @@ describe('ws-client auth 拒绝信号与重连抑制（D8）', () => {
   it('有注册消费方：拒绝置抑制位，onclose 后不调度重连（state 停 disconnected、无新 WS）', () => {
     const handler = vi.fn()
     const off = onAuthRejected(handler)
-    connect('ws://test', 'tok-d8')
+    connect('ws://test', { auth: 'token', token: 'tok-d8' })
     const f = latestFake()
     f.triggerOpen()
     f.triggerMessage(authResult(false))
@@ -102,7 +100,7 @@ describe('ws-client auth 拒绝信号与重连抑制（D8）', () => {
   })
 
   it('无注册消费方（桌面形态）：拒绝不置抑制位，close 走原退避重连链（行为不变）', () => {
-    connect('ws://test', 'tok-desktop')
+    connect('ws://test', { auth: 'token', token: 'tok-desktop' })
     const f = latestFake()
     f.triggerOpen()
     f.triggerMessage(authResult(false))
@@ -115,7 +113,7 @@ describe('ws-client auth 拒绝信号与重连抑制（D8）', () => {
 
   it('resetAuthRejectionSuppression 显式解除：重试 connect 可达、auth 成功复位抑制位、后续断线恢复自动重连', () => {
     const off = onAuthRejected(() => {})
-    connect('ws://test', 'tok-stale')
+    connect('ws://test', { auth: 'token', token: 'tok-stale' })
     let f = latestFake()
     f.triggerOpen()
     f.triggerMessage(authResult(false))
@@ -124,7 +122,7 @@ describe('ws-client auth 拒绝信号与重连抑制（D8）', () => {
 
     // token 重试路径形态：reset → 显式 connect（新凭据）
     resetAuthRejectionSuppression()
-    connect('ws://test', 'tok-new')
+    connect('ws://test', { auth: 'token', token: 'tok-new' })
     expect(fakes.length).toBe(2)
     f = latestFake()
     f.triggerOpen()

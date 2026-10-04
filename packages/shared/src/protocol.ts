@@ -2139,17 +2139,20 @@ export interface ReplyPayloadMap {
   'session.importCandidates': ServerMessageMap['session.importCandidates']
   'session.import': ServerMessageMap['session.import']
   // plugin.* RPC reply 映射（plugin-message-handler.ts 全部发 reply）：
-  //  - plugin.list / toggle / uninstall / install / approvePermissions / revokePermissions / denyPermissions
-  //    → reply 'config.plugins' { plugins }（前端读 plugins 列表刷新 UI）
+  //  - plugin.list / toggle / uninstall / install → reply 'config.plugins' { plugins }（前端读 plugins 列表刷新 UI）
+  //  - 权限命令（approvePermissions / revokePermissions / denyPermissions）→ reply 'pong' {}
+  //    （ack 型，前端不读 payload）；插件列表刷新经 config.plugins 广播——approve 触发
+  //    activate（status discovered→active 真实变化）时由 plugin-service 广播；deny/revoke
+  //    不改 PluginInfo 任何字段，不广播
   //  - plugin.executeCommand → reply 'pong' {}（fire-and-forget ack，前端不读 payload）
   //  - plugin.config.get / set → reply 'plugin:config' { pluginId, config }（前端读 config 应用到设置面板）
   'plugin.list': ServerMessageMap['config.plugins']
   'plugin.toggle': ServerMessageMap['config.plugins']
   'plugin.uninstall': ServerMessageMap['config.plugins']
   'plugin.install': ServerMessageMap['config.plugins']
-  'plugin.approvePermissions': ServerMessageMap['config.plugins']
-  'plugin.revokePermissions': ServerMessageMap['config.plugins']
-  'plugin.denyPermissions': ServerMessageMap['config.plugins']
+  'plugin.approvePermissions': ServerMessageMap['pong']
+  'plugin.revokePermissions': ServerMessageMap['pong']
+  'plugin.denyPermissions': ServerMessageMap['pong']
   'plugin.executeCommand': ServerMessageMap['pong']
   'plugin.config.get': ServerMessageMap['plugin:config']
   'plugin.config.set': ServerMessageMap['plugin:config']

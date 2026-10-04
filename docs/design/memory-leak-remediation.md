@@ -48,7 +48,7 @@ renderer 侧 session 销毁编排 `cleanupSessionState`（core/src/domain/sessio
 
 **背景事实**：browser drawer 生产入口自 2026-09-11 起休眠（`browserUrl` 零写入方，openDrawerTab 的 url 分支随死代码删除）——B4 接线是休眠面的预备修复 + 堵「同 id 复活脏旧页面」洞（create 幂等复用旧 entry，browser-view-manager.ts:143-148），非当前用户可感知路径。
 
-同型变体（非死 API 但清理面不全）：`useForkNoticeEffect.feedMap` 未挂 registerSessionCleanup；`extension-host-dialog.requestIdSessions` 唯一删除点在 `plugin:uiRequestExpired` 撤窗广播（extension-host-dialog.ts:155），**有效清理路径只有 respond**——`extension.ui_timeout` 是死链（registerTimeout 已不排定时器，extension-timeout-manager.ts:13-24 头注释登记）。
+同型变体（非死 API 但清理面不全）：`useForkNoticeEffect.feedMap` 未挂 registerSessionCleanup；`requestIdSessions`（@taiji/ui extension-host `shell-adapters.ts` createCompanionDialogAdapters factory 局部表）唯一删除点在 `plugin:uiRequestExpired` 撤窗广播，**有效清理路径只有 respond**——`extension.ui_timeout` 是死链（registerTimeout 已不排定时器，extension-timeout-manager.ts:13-24 头注释登记）。
 
 ### 2.2 模式二：条数有界、字节无界（4 处实例）
 
@@ -263,7 +263,7 @@ ADR-0049 checklist（docs/adr/decisions.md 的 ADR-0049 条目；原独立文件
 | u4 | B8 history-rebuild-cache 字节帽 + reclaim 驱逐 | history-rebuild-cache.ts、session-lifecycle.ts（reclaim 挂点） | - | 单测 + A9 |
 | u5 | B9 agentcall LRU 联动（两路径 + drawer control 豁免） | lru.ts、store.ts、workflow store 映射暴露、control.ts（豁免查询）、装配点 | - | A6 + 单测 |
 | u6 | B10 mermaid finally + B11 trace 台账 | mermaid.ts、useSessionTrace.ts、TraceView（降级分支） | - | A7/A8 |
-| u7 | G1 死 API 接线组 | terminal-write-queue.ts、command-store.ts、useForkNoticeEffect.ts、extension-host-dialog.ts、use-session.ts hooks | u2（同文件） | A3 |
+| u7 | G1 死 API 接线组 | terminal-write-queue.ts、command-store.ts、useForkNoticeEffect.ts、@taiji/ui extension-host/shell-adapters.ts、use-session.ts hooks | u2（同文件） | A3 |
 | u8 | G2 活性无界治理 + §2.5 注释行 | logger.ts、ws-client.ts、session-file-external-scan.ts（注释）、session-binding-sidecar-io.ts（注释）、git-state-service.ts（注释）、usage-stats-service.ts（注释）、bash-effects.ts（注释） | - | A9 |
 | u9 | G3 峰值组 | subagent-extractor.ts、workflow-extractor.ts、shell-runner.ts | - | A9 |
 | u10 | G4 杂项组 + ADR-0049 条目 | streaming-state-machine.ts、useChat.ts、quota types.ts、skill-registry.ts、useImportSession.ts、ADR-0049 文档 | - | A9 |

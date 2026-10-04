@@ -62,7 +62,7 @@
 // ── 激活范围（F4 → S-33 扩）──
 // 已激活：① 3 条 + ② 3 条 + ④ gap reconcile 1 条 + ⑤ 退避/时长上限 2 条（fake 注入 +
 //   vi.useFakeTimers）。② 原为 C4 deferred（「auth 能力迁入 core 时激活」），S-33 复审确认
-//   auth 握手已落地 core ws-client（connect(url, token) 双参），defer 理由失效。
+//   auth 握手已落地 core ws-client（connect(url, credentials) 凭据对象签名），defer 理由失效。
 // 保持 todo 范围（C4 deferred）：③ close code 分流 3 条、④ reconcile 回放断言 + presence
 //   2 条——close code / presence 能力未迁入 core，激活待后续 wave。⑤ visibility 重连的 todo
 //   已移除（行为已落地 use-connection 并有专门测试，见 ⑤ [漂移] 说明）。
@@ -125,14 +125,14 @@ describe('ws-client 不变量 ① 连接状态机', () => {
   })
 
   it('合法迁移 connecting → open 可达（onopen 触发）', () => {
-    connect('ws://test')
+    connect('ws://test', { auth: 'skip' })
     expect(getState().value).toBe('connecting')
     latestFake().triggerOpen()
     expect(getState().value).toBe('connected')
   })
 
   it('合法迁移 open → closed 可达（主动 disconnect，残余回调被摘除）', () => {
-    connect('ws://test')
+    connect('ws://test', { auth: 'skip' })
     latestFake().triggerOpen()
     expect(getState().value).toBe('connected')
 
@@ -149,12 +149,12 @@ describe('ws-client 不变量 ① 连接状态机', () => {
   })
 
   it('非法迁移 open → connecting 被拒绝（connect 幂等 no-op，不重置状态）', () => {
-    connect('ws://test')
+    connect('ws://test', { auth: 'skip' })
     latestFake().triggerOpen()
     expect(getState().value).toBe('connected')
     expect(fakes.length).toBe(1)
 
-    connect('ws://test-2') // 已连接，重复建连应被拒绝
+    connect('ws://test-2', { auth: 'skip' }) // 已连接，重复建连应被拒绝
     expect(fakes.length).toBe(1) // 未创建新 WS
     expect(getState().value).toBe('connected')
   })
@@ -173,11 +173,8 @@ describe('ws-client 不变量 ② auth 握手', () => {
   })
   afterEach(() => {
     disconnect()
-    // currentToken 是模块级残留（connect(url, token) 设置，disconnect 不清）：经 mock url
-    // 复位为 null（connect 对 mock: 前缀强制清空），避免本 describe 的 token 改变后续
-    // describe（④ seq / ⑤ 退避）connect('ws://test') 的无 token 行为
-    connect('mock://reset-token')
-    disconnect()
+    // 凭据经 connect 第二参显式传入（S4 凭据对象），无「undefined=保留上次」残留语义——
+    // 旧 currentToken 复位仪式（connect('mock://reset-token')）随之退役
     vi.useRealTimers()
   })
 
@@ -185,7 +182,7 @@ describe('ws-client 不变量 ② auth 握手', () => {
     const handler = vi.fn()
     const off = onMessage(handler)
 
-    connect('ws://test', 'tok-1')
+    connect('ws://test', { auth: 'token', token: 'tok-1' })
     const f = latestFake()
     f.triggerOpen()
     // open 后首条 send 是 auth 握手消息
@@ -212,13 +209,13 @@ describe('ws-client 不变量 ② auth 握手', () => {
     const handler = vi.fn()
     const off = onMessage(handler)
 
-    connect('ws://test', 'tok-2')
+    connect('ws://test', { auth: 'token', token: 'tok-2' })
     const f = latestFake()
     f.triggerOpen()
     expect(getState().value).toBe('connecting')
 
     f.triggerMessage(JSON.stringify({ type: 'auth.result', payload: { ok: false } }))
-    // 拒绝：不 markConnected（降级 = 主动断开走重连链，新 token 由上层 connect(url, newToken) 刷新）
+    // 拒绝：不 markConnected（降级 = 主动断开走重连链，新 token 由上层 connect(url, 新凭据对象) 刷新）
     expect(getState().value).toBe('connecting')
     expect(f.closeCalls).toBe(1)
 
@@ -233,7 +230,7 @@ describe('ws-client 不变量 ② auth 握手', () => {
   })
 
   it('auth 消息在 open 前不发（open 后首条 send 即 auth，含 payload.token 结构）', () => {
-    connect('ws://test', 'tok-3')
+    connect('ws://test', { auth: 'token', token: 'tok-3' })
     const f = latestFake()
     // open 前（CONNECTING）：不发送任何消息
     expect(f.sent).toHaveLength(0)
@@ -282,7 +279,7 @@ describe('ws-client 不变量 ④ seq 回放', () => {
     // 注册 dispatcher（模拟 renderer ensureDispatcher 安装：onMessage(configureRouteInbound(ports))）
     onMessage(configureRouteInbound(spyPorts))
 
-    connect('ws://test')
+    connect('ws://test', { auth: 'skip' })
     latestFake().triggerOpen()
 
     // 预置 subscribed state：经真实 subscribeSession（spy reply lastSeq=10 → state={10, true}）
@@ -330,7 +327,7 @@ describe('ws-client 不变量 ⑤ 重连退避', () => {
   })
 
   it('指数退避序列符合 base/cap 参数（1s/2s/4s… capped 30s）', () => {
-    connect('ws://test')
+    connect('ws://test', { auth: 'skip' })
     latestFake().triggerOpen()
 
     // attempt 1：base 1s
@@ -368,7 +365,7 @@ describe('ws-client 不变量 ⑤ 重连退避', () => {
   })
 
   it('连续重连失败达时长上限后停止重连（防无限重试）', () => {
-    connect('ws://test')
+    connect('ws://test', { auth: 'skip' })
     latestFake().triggerOpen()
 
     let guard = 0
@@ -406,9 +403,6 @@ describe('ws-client 不变量 ⑥ pre-auth 发送队列', () => {
   })
   afterEach(() => {
     disconnect()
-    // currentToken 复位（同 ② describe 体例）：避免 token 残留改变后续 describe 的无 token 行为
-    connect('mock://reset-token')
-    disconnect()
     vi.useRealTimers()
   })
 
@@ -418,7 +412,7 @@ describe('ws-client 不变量 ⑥ pre-auth 发送队列', () => {
   }
 
   it('pre-auth 窗口 send 入队（返回 true，不上 wire）；auth ok 后按序 flush', () => {
-    connect('ws://test', 'tok-q1')
+    connect('ws://test', { auth: 'token', token: 'tok-q1' })
     const f = latestFake()
     f.triggerOpen()
     expect(f.sent).toHaveLength(1) // 仅 auth 握手帧
@@ -448,7 +442,7 @@ describe('ws-client 不变量 ⑥ pre-auth 发送队列', () => {
       }
     })
 
-    connect('ws://test', 'tok-q2')
+    connect('ws://test', { auth: 'token', token: 'tok-q2' })
     const f = latestFake()
     f.triggerOpen()
     expect(send(rpcMsg('q-rej'))).toBe(true)
@@ -471,7 +465,7 @@ describe('ws-client 不变量 ⑥ pre-auth 发送队列', () => {
       for (const m of msgs) droppedIds.push(...msgs.map((m2) => String((m2 as { id?: string }).id)))
     })
 
-    connect('ws://test', 'tok-q3')
+    connect('ws://test', { auth: 'token', token: 'tok-q3' })
     const f = latestFake()
     f.triggerOpen()
     expect(send(rpcMsg('q-timeout'))).toBe(true)
@@ -491,7 +485,7 @@ describe('ws-client 不变量 ⑥ pre-auth 发送队列', () => {
       overflowIds.push(...msgs.map((m) => String((m as { id?: string }).id)))
     })
 
-    connect('ws://test', 'tok-q4')
+    connect('ws://test', { auth: 'token', token: 'tok-q4' })
     const f = latestFake()
     f.triggerOpen()
     for (let i = 0; i <= 256; i++) send(rpcMsg(`q-${i}`)) // 257 条 → 驱逐 q-0
@@ -506,7 +500,7 @@ describe('ws-client 不变量 ⑥ pre-auth 发送队列', () => {
   })
 
   it('已 auth 的连接 send 直发不入队（无回归）', () => {
-    connect('ws://test', 'tok-q5')
+    connect('ws://test', { auth: 'token', token: 'tok-q5' })
     const f = latestFake()
     f.triggerOpen()
     f.triggerMessage(JSON.stringify({ type: 'auth.result', payload: { ok: true } }))
@@ -529,7 +523,7 @@ describe('ws-client 辅助状态（restarting/failed IPC 驱动）', () => {
   })
 
   it('setFailed 停止自动重连并置 failed', () => {
-    connect('ws://test')
+    connect('ws://test', { auth: 'skip' })
     latestFake().triggerOpen()
     latestFake().triggerClose() // 触发重连调度
     expect(getState().value).toBe('reconnecting')
@@ -542,7 +536,7 @@ describe('ws-client 辅助状态（restarting/failed IPC 驱动）', () => {
   })
 
   it('setRestarting 断开当前连接并置 restarting', () => {
-    connect('ws://test')
+    connect('ws://test', { auth: 'skip' })
     latestFake().triggerOpen()
     setRestarting()
     expect(getState().value).toBe('restarting')
@@ -551,7 +545,7 @@ describe('ws-client 辅助状态（restarting/failed IPC 驱动）', () => {
   })
 
   it('send 在 OPEN 时发送并返回 true，非 OPEN 返回 false', () => {
-    connect('ws://test')
+    connect('ws://test', { auth: 'skip' })
     expect(send({ type: 'ping', payload: {} })).toBe(false) // CONNECTING 不可发送
     latestFake().triggerOpen()
     expect(send({ type: 'ping', payload: {} })).toBe(true)

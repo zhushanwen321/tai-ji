@@ -142,7 +142,7 @@ describe('连接发现收口：三形态分支选择（topology §2.4 / D4）', 
     const { ports, ipc } = makePorts({ isMock: true, knownPort: 4000 })
     await initFresh(ports)
     expect(connect).toHaveBeenCalledTimes(1)
-    expect(connect).toHaveBeenCalledWith('mock://localhost', undefined)
+    expect(connect).toHaveBeenCalledWith('mock://localhost', { auth: 'skip' })
     // mock 分支不做端口发现、不注册 runtime 事件监听（现状行为）
     expect(ipc?.getRuntimePort).not.toHaveBeenCalled()
     expect(ipc?.onRuntimePort).not.toHaveBeenCalled()
@@ -154,7 +154,7 @@ describe('连接发现收口：三形态分支选择（topology §2.4 / D4）', 
   it('TC-M2: ipc 无值 + isMock → 同样 mock://（ipc 存在性不改变 mock 行为）', async () => {
     const { ports, ipc } = makePorts({ isMock: true, withIpc: false })
     await initFresh(ports)
-    expect(connect).toHaveBeenCalledWith('mock://localhost', undefined)
+    expect(connect).toHaveBeenCalledWith('mock://localhost', { auth: 'skip' })
     expect(ipc).toBeNull()
     expect(connect).toHaveBeenCalledTimes(1)
   })
@@ -165,19 +165,21 @@ describe('连接发现收口：三形态分支选择（topology §2.4 / D4）', 
     // 本地分支完整装配：端口发现 + runtime 事件监听注册
     expect(ipc?.getRuntimePort).toHaveBeenCalledTimes(1)
     expect(ipc?.onRuntimePort).toHaveBeenCalledTimes(1)
-    expect(connect).toHaveBeenCalledWith('ws://localhost:4000', 'tok-1')
+    expect(connect).toHaveBeenCalledWith('ws://localhost:4000', { auth: 'token', token: 'tok-1' })
   })
 
   it('TC-M4: 本地分支 fallback（getRuntimePort→undefined）→ ws://localhost:3210（BASE_PORT，收口前等价）', async () => {
     const { ports } = makePorts({ knownPort: undefined, offset: undefined, token: 'tok-2' })
     await initFresh(ports)
-    expect(connect).toHaveBeenCalledWith('ws://localhost:3210', 'tok-2')
+    expect(connect).toHaveBeenCalledWith('ws://localhost:3210', { auth: 'token', token: 'tok-2' })
   })
 
   it('TC-M5: 本地分支 dev fallback（isDev + offset undefined）→ ws://localhost:3310（BASE_PORT+DEV_PORT_OFFSET，收口前等价）', async () => {
     const { ports } = makePorts({ isDev: true, offset: undefined, token: null })
     await initFresh(ports)
-    expect(connect).toHaveBeenCalledWith('ws://localhost:3310', undefined)
+    // IPC 拿不到 token（null）→ 降级空串 token 握手探测（S4 裁决：本地 runtime 恒配 token，
+    // skip 会在握手缺失下假 connected；探测必被拒走重连链，凭据恢复经 onRuntimePort 重拉）
+    expect(connect).toHaveBeenCalledWith('ws://localhost:3310', { auth: 'token', token: '' })
   })
 
   it('TC-M6: 本地分支 onRuntimePort 推送 → disconnect + 重拉 token + connect ws://localhost:4500（收口前等价）', async () => {
@@ -188,7 +190,7 @@ describe('连接发现收口：三形态分支选择（topology §2.4 / D4）', 
     portCb!(4500)
     await flushAsync()
     expect(disconnect).toHaveBeenCalledTimes(1)
-    expect(connect).toHaveBeenCalledWith('ws://localhost:4500', 'tok-3')
+    expect(connect).toHaveBeenCalledWith('ws://localhost:4500', { auth: 'token', token: 'tok-3' })
   })
 
   it('TC-M7: 本地分支 HMR 重连（重复 init）→ fallback URL ws://localhost:3210（收口前等价）', async () => {
@@ -196,15 +198,15 @@ describe('连接发现收口：三形态分支选择（topology §2.4 / D4）', 
     setConnectionPorts(ports)
     const conn = useConnection()
     await conn.init()
-    expect(connect).toHaveBeenCalledWith('ws://localhost:4000', 'tok-4')
+    expect(connect).toHaveBeenCalledWith('ws://localhost:4000', { auth: 'token', token: 'tok-4' })
     // initialised=true → HMR 路径：仅按 fallback 端口重连，不重复端口发现
     await conn.init()
-    expect(connect).toHaveBeenLastCalledWith('ws://localhost:3210', 'tok-4')
+    expect(connect).toHaveBeenLastCalledWith('ws://localhost:3210', { auth: 'token', token: 'tok-4' })
   })
 })
 
 describe('远程 profile 分支（U0.2 骨架，U1.3 移动壳消费点）', () => {
-  it('TC-M8: ipc 无值 + 非 mock + profile 注入 → resolve 一次 + connect(profile.url, token)', async () => {
+  it('TC-M8: ipc 无值 + 非 mock + profile 注入 → resolve 一次 + connect(profile.url, token 凭据对象)', async () => {
     const { ports, profile } = makePorts({
       withIpc: false,
       withProfile: true,
@@ -214,17 +216,16 @@ describe('远程 profile 分支（U0.2 骨架，U1.3 移动壳消费点）', () 
     await initFresh(ports)
     expect(profile?.resolve).toHaveBeenCalledTimes(1)
     expect(connect).toHaveBeenCalledTimes(1)
-    expect(connect).toHaveBeenCalledWith('ws://192.168.1.5:3210', 'remote-token')
+    expect(connect).toHaveBeenCalledWith('ws://192.168.1.5:3210', { auth: 'token', token: 'remote-token' })
   })
 
-  it('TC-M9: profile resolve 无 token → connect(url, "")（空串强制走 auth 握手，D8 恢复链可达）', async () => {
-    // 不传 undefined：ws-client 的 undefined 语义是「保留上次 token / 无 token 模式」，
-    // 首连会被判为无 auth 模式跳过握手 → runtime fail-closed 拒绝永远不可达（假 connected
-    // 超时循环，token 输入视图不可达）。空串使 runtime 回 bad_token → onAuthRejected 闭合。
+  it('TC-M9: profile resolve 无 token → connect(url, {auth:"token", token:""})（空串强制走 auth 握手，D8 恢复链可达）', async () => {
+    // 无凭据 ≠ skip：skip 会在握手缺失下假 connected，runtime fail-closed 拒绝永远不可达
+    // （U1.3 事故形态）；空串 token 走强制握手探测，runtime 回 bad_token → onAuthRejected 闭合。
     const { ports, profile } = makePorts({ withIpc: false, withProfile: true, profileToken: null })
     await initFresh(ports)
     expect(profile?.resolve).toHaveBeenCalledTimes(1)
-    expect(connect).toHaveBeenCalledWith('ws://192.168.1.5:3210', '')
+    expect(connect).toHaveBeenCalledWith('ws://192.168.1.5:3210', { auth: 'token', token: '' })
   })
 
   it('TC-M10: profile 未注入 → init 显式失败（含恢复指引）且不发起任何连接', async () => {

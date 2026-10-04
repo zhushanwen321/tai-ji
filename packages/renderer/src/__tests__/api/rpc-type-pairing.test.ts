@@ -117,19 +117,26 @@ describe('U1: ReplyPayloadMap — key 覆盖 RPC request type', () => {
     expect(Object.keys(_check)).toHaveLength(10)
   })
 
-  it('plugin.list/toggle/uninstall/install/approve/revoke/deny 映射到 config.plugins（含 plugins 字段）', () => {
-    // 7 个变更型请求都 reply 'config.plugins' { plugins }（plugin-message-handler.ts 分发表）
+  it('plugin.list/toggle/uninstall/install 映射到 config.plugins（含 plugins 字段）', () => {
+    // 4 个列表查询/变更型请求 reply 'config.plugins' { plugins }（plugin-message-handler.ts 分发表）
     type PluginsReply = ReplyPayloadMap['plugin.list']
     const sample: PluginsReply = { plugins: [] }
     expect(sample.plugins).toEqual([])
-    // 同类型引用一致性（任取其一即可代表其余 6 个）
+    // 同类型引用一致性（任取其一即可代表其余 3 个）
     const _t1: ReplyPayloadMap['plugin.toggle'] = sample
     const _t2: ReplyPayloadMap['plugin.uninstall'] = sample
     const _t3: ReplyPayloadMap['plugin.install'] = sample
-    const _t4: ReplyPayloadMap['plugin.approvePermissions'] = sample
-    const _t5: ReplyPayloadMap['plugin.revokePermissions'] = sample
-    const _t6: ReplyPayloadMap['plugin.denyPermissions'] = sample
-    void [_t1, _t2, _t3, _t4, _t5, _t6]
+    void [_t1, _t2, _t3]
+  })
+
+  it('plugin 权限三命令（approve/revoke/deny）映射到 pong（ack 型，列表刷新经广播）', () => {
+    // 权限命令 reply pong {}（对齐 plugin.executeCommand 先例）；插件列表刷新经
+    // config.plugins 广播（approve 触发 activate 状态变化时由 plugin-service 广播）
+    const sample: ReplyPayloadMap['plugin.approvePermissions'] = {}
+    expect(sample).toEqual({})
+    const _t1: ReplyPayloadMap['plugin.revokePermissions'] = sample
+    const _t2: ReplyPayloadMap['plugin.denyPermissions'] = sample
+    void [_t1, _t2]
   })
 
   it('plugin.executeCommand 映射到 pong（ack 型，无 payload 字段）', () => {

@@ -7,4 +7,9 @@ export default {
   selectPlaceholder: '请选择',
   additionalComment: '附加评论',
   commentPlaceholder: '选填，补充说明…',
+  permissionRequestDescription: '插件申请了以下权限，批准后即可使用',
+  permissionSelectAll: '全选',
+  permissionDeny: '拒绝',
+  permissionApprove: '批准',
+  permissionSubmitFailed: '审批提交失败，请检查连接后重试',
 }

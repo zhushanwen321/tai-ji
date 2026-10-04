@@ -7,7 +7,7 @@
  *
  * 依赖方向：无下游（读全局 window.electronAPI，类型经 declare global 自动可用）
  */
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, RemoteAccessConfig } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, RemoteAccessInfo, RemoteAccessToggleResult } from '@taiji/shared'
 import type { ImageCacheWritePort } from '@taiji/core'
 
 /** preload 注入的 electronAPI（web/mock 环境为 undefined） */
@@ -324,26 +324,11 @@ export async function chooseDirectory(): Promise<string | null> {
 }
 
 // ── 远程访问（设置面板连接信息：配置读取 / token 轮换 / 开关切换）─────────
-// 类型与 preload ElectronAPI 同构（同 pickDirectory 双侧内联先例）；契约权威在
-// main bridge-handlers 的 handler 返回形态。
-
-/**
- * 远程访问连接信息。配置字段 extends 契约 SSOT RemoteAccessConfig（禁止复制定义）；
- * urls 为 `http://<ip>:<port>` 候选，不含 token，展示时拼 `?token=`。
- */
-export interface RemoteAccessConnectionInfo extends RemoteAccessConfig {
-  urls: string[]
-  /** 移动壳 dist 产物就绪（bridge 读时探测；false = 静态面禁用，面板显形警告） */
-  mobileDistReady: boolean
-}
-
-/** 开关切换结果：连接信息 + 本次切换是否触发了 runtime 重启（runtime 未跑时仅落盘） */
-export interface RemoteAccessToggleResult extends RemoteAccessConnectionInfo {
-  restarted: boolean
-}
+// 类型经 shared SSOT（RemoteAccessInfo / RemoteAccessToggleResult）——契约权威在
+// main bridge-handlers 的 handler 返回形态，类型声明三端共同 import。
 
 /** web/mock 降级空态：关态 + 空 token + 无候选地址（面板渲染关态说明，不产死链接） */
-const REMOTE_ACCESS_FALLBACK: RemoteAccessConnectionInfo = {
+const REMOTE_ACCESS_FALLBACK: RemoteAccessInfo = {
   enabled: false, token: '', createdAt: '', urls: [], mobileDistReady: false,
 }
 
@@ -352,7 +337,7 @@ const REMOTE_ACCESS_FALLBACK: RemoteAccessConnectionInfo = {
  * 读降级是合法显形空态（面板按关态渲染，不产死链接）；写操作的降级是假成功，
  * 一律拒绝（见下方 rotate/set）。
  */
-export function getRemoteAccessInfo(): Promise<RemoteAccessConnectionInfo> {
+export function getRemoteAccessInfo(): Promise<RemoteAccessInfo> {
   return api?.getRemoteAccessInfo ? api.getRemoteAccessInfo() : Promise.resolve(REMOTE_ACCESS_FALLBACK)
 }
 
@@ -363,7 +348,7 @@ export function getRemoteAccessInfo(): Promise<RemoteAccessConnectionInfo> {
 const REMOTE_ACCESS_WRITE_UNAVAILABLE = '远程访问设置仅在桌面应用中可用'
 
 /** 轮换 remote token（main 重写文件即生效不重启），返回最新连接信息。无 IPC 拒绝（写操作不假成功） */
-export function rotateRemoteAccessToken(): Promise<RemoteAccessConnectionInfo> {
+export function rotateRemoteAccessToken(): Promise<RemoteAccessInfo> {
   return api?.rotateRemoteAccessToken
     ? api.rotateRemoteAccessToken()
     : Promise.reject(new Error(REMOTE_ACCESS_WRITE_UNAVAILABLE))

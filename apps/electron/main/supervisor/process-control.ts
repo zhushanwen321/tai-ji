@@ -48,7 +48,7 @@ import { readMainLogMaxBytes, mainLogger } from '../logs/main-logger.js'
 import { buildSafeEnv } from './safe-env.js'
 import { terminateWindowsProcessTree } from './windows-process.js'
 import { readRemoteAccessConfig } from '../remote-access/store.js'
-import { resolveMobileDistPath, type MobileDistEnv } from '../remote-access/mobile-dist.js'
+import { resolveMobileDistEnv, resolveMobileDistPath, type MobileDistEnv } from '../remote-access/mobile-dist.js'
 
 /** stop() 默认超时：SIGTERM 后等待 exit，超时则 SIGKILL 进程树 */
 export const STOP_TIMEOUT_MS = 2000
@@ -289,16 +289,22 @@ function issueRuntimeToken(): string {
 /**
  * 组装 remote-access 相关 runtime argv（remote-access D3/D9）。
  *
- * 开态（remote-access.json enabled=true）追加 `--remote-access` 与
- * `--mobile-dist=<main 按运行环境解析的绝对路径>`；关态返回空数组（不拼任何 flag，
- * argv 数组形态与既有完全一致）——argv 是开启的唯一判据，不经 env 白名单继承链，
- * ambient 免疫；非 supervisor 直跑路径不传 flag 即天然关态。
+ * 开态（enabled=true）追加 `--remote-access` 与 `--mobile-dist=<main 按运行环境
+ * 解析的绝对路径>`；关态返回空数组（不拼任何 flag，argv 数组形态与既有完全一致）
+ * ——argv 是开启的唯一判据，不经 env 白名单继承链，ambient 免疫；非 supervisor
+ * 直跑路径不传 flag 即天然关态。
+ *
+ * enabled 是窄参数（只消费开关位，不传整个 config）：配置读取归调用方——
+ * spawnRuntimeProcess 在每次 spawn 时刻现读 readRemoteAccessConfig().enabled 传入
+ * （toggle 落盘 → 重启生效正依赖每次 spawn 现读语义，禁止改为快照传入）。
+ * 本函数因此是纯字符串拼参，无隐藏全局读。
  *
  * @param env 运行环境（isPackaged / resourcesPath / appPath），供 dist 路径 dev/prod 分支
+ * @param enabled remote-access 开关状态（调用方 spawn 时刻现读配置）
  * @returns 追加到基础 argv 之后的参数数组（关态恒为空数组）
  */
-export function buildRemoteAccessSpawnArgs(env: MobileDistEnv): string[] {
-  if (!readRemoteAccessConfig().enabled) return []
+export function buildRemoteAccessSpawnArgs(env: MobileDistEnv, enabled: boolean): string[] {
+  if (!enabled) return []
   const mobileDist = resolveMobileDistPath(env)
   return ['--remote-access', `--mobile-dist=${mobileDist}`]
 }
@@ -325,12 +331,12 @@ export function spawnRuntimeProcess(port: number, onExit?: (code: number | null)
 
   // 根据打包状态选择 runtime 启动方式
   const projectRoot = app.getAppPath()
-  // remote-access（D3/D9）：开态追加 --remote-access + --mobile-dist=<绝对路径>，关态空数组不拼
-  const remoteAccessArgs = buildRemoteAccessSpawnArgs({
-    isPackaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
-    appPath: projectRoot,
-  })
+  // remote-access（D3/D9）：开态追加 --remote-access + --mobile-dist=<绝对路径>，关态空数组不拼。
+  // enabled 在 spawn 时刻现读配置（非快照）：toggle 落盘 → 重启 runtime 生效正依赖此语义
+  const remoteAccessArgs = buildRemoteAccessSpawnArgs(
+    resolveMobileDistEnv(),
+    readRemoteAccessConfig().enabled,
+  )
   let cmd: string
   let args: string[]
 

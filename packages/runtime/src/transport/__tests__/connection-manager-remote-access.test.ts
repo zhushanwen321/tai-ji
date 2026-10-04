@@ -191,15 +191,16 @@ describe('ConnectionManager remote-access (U0.1)', () => {
       expect((await tryAuth(harness.port, REMOTE_TOKEN_A)).ok).toBe(false)
     })
 
-    it('构造选项透传：mobileDist / remoteTokenProvider 到达 ConnectionManager', () => {
+    it('构造选项透传：mobileStaticHandler / remoteTokenProvider 到达 ConnectionManager', () => {
       const provider = (): string | null => REMOTE_TOKEN_A
+      const staticHandler = async (): Promise<void> => {}
       const conn = new ConnectionManager(0, {
         onConnect: () => {},
         onMessage: async () => {},
         sendError: () => {},
-      }, SPAWN_TOKEN, { mobileDist: '/tmp/some-dist', remoteTokenProvider: provider })
+      }, SPAWN_TOKEN, { mobileStaticHandler: staticHandler, remoteTokenProvider: provider })
       const opts = (conn as unknown as { options: ConnectionManagerOptions }).options
-      expect(opts.mobileDist).toBe('/tmp/some-dist')
+      expect(opts.mobileStaticHandler).toBe(staticHandler)
       expect(opts.remoteTokenProvider).toBe(provider)
     })
   })
@@ -212,8 +213,9 @@ describe('ConnectionManager remote-access (U0.1)', () => {
       const harness = await startManager(SPAWN_TOKEN, { remoteTokenProvider: readRemoteAccessToken })
       opened.push(harness)
       expect(readRemoteAccessToken()).toBeNull()
-      // U1.1 起，开态构造（provider 装配且未传 mobileDist）会额外产生一条 E5 静态托管
-      // 禁用日志（合法行为）——本测试只锚定 remote 文件读侧：按内容过滤后恰一条。
+      // S3 拆分后 CM 构造零探测副作用（dist 探测归组合根 resolveMobileStaticRoot），
+      // provider 装配不再触发 E5 静态日志——本测试只锚定 remote 文件读侧：按内容
+      // 过滤后恰一条（过滤防御未来无关 error 干扰断言语义）。
       const remoteFileErrors = errorSpy.mock.calls.filter((call: unknown[]) => String(call[0]).includes(REMOTE_ACCESS_FILENAME))
       expect(remoteFileErrors).toHaveLength(1)
       expect(String(remoteFileErrors[0]?.[0])).toContain('恢复')

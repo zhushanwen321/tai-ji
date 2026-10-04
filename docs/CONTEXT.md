@@ -196,7 +196,7 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 远程访问的持久凭据：64 位 hex 小写字符串（32 字节随机值的 hex 编码）。main 生成与轮换——重写 `remote-access.json` 即生效（runtime 每次 WS auth 握手热读文件，轮换不重启 runtime、不中断在途 turn）；文件缺失/损坏 → remote 集合为空退化为仅 spawn token（fail-closed）。存量已认证连接不随轮换踢除（auth 只门禁握手）——「怀疑泄漏」的完整处置 = 面板轮换（断新接入）+ 关开开关（重启 runtime 踢全部存量连接）。移动壳侧 token 经验身成功才写 localStorage（key `taiji.remote-access.token`）；URL query 携带的 token 验身失败**不动**既有 storage（坏链接不毁好凭据），storage 来源验身失败才清空（落 token 输入视图重扫恢复）。
 
 ### profile 连接策略（connection profile）
-连接发现三分支中的远程形态，收口在 coordination 的 init 分支（唯一裁决处）：**本地 = IPC** 端口发现（electronAPI 有值）、**远程 = profile**（移动壳）、**mock = VITE_MOCK**。profile 的注入实现 = `packages/mobile-renderer/src/platform/connection-profile.ts`：凭据采纳顺序 = URL query `?token=`（显式携带的新凭据 = 用户新意图，验身成功落 storage 并 `history.replaceState` 抹地址栏）→ storage（验身过的持久凭据，跨 runtime 重启免重扫）→ 皆无（不带凭据发起连接，runtime fail-closed 拒绝 → `onAuthRejected` 信号 → token 输入视图）。auth 被拒时移动壳抑制全部自动重连触发点（退避重连 + visibility 切前台主动重连）；连接失败（非凭据失败）维持重连等待态，不落 token 视图。
+连接发现三分支中的远程形态，形态判定收口在 `packages/core/src/transport/use-connection.ts` 的 resolveConnectionMode() 薄谓词（init 首连 / HMR 重连 / retryRuntime 三处消费；连接目标解析留在各分支原地）：**本地 = IPC** 端口发现（electronAPI 有值）、**远程 = profile**（移动壳）、**mock = VITE_MOCK**。profile 的注入实现 = `packages/mobile-renderer/src/platform/connection-profile.ts`：凭据采纳顺序 = URL query `?token=`（显式携带的新凭据 = 用户新意图，验身成功落 storage 并 `history.replaceState` 抹地址栏）→ storage（验身过的持久凭据，跨 runtime 重启免重扫）→ 皆无（不带凭据发起连接，runtime fail-closed 拒绝 → `onAuthRejected` 信号 → token 输入视图）。auth 被拒时移动壳抑制全部自动重连触发点（退避重连 + visibility 切前台主动重连）；连接失败（非凭据失败）维持重连等待态，不落 token 视图。
 
 ---
 

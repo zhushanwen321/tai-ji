@@ -71,18 +71,22 @@ async function handlePluginUninstall(ctx: PluginHandlerContext, msg: PluginMsgOf
 }
 
 async function handlePluginApprovePermissions(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.approvePermissions'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  // reply = pong ack（对齐 plugin.executeCommand 先例）；approve 触发 activate 状态变化时
+  // 由 plugin-service.approvePermissions 广播 config.plugins 刷新列表。
   await pluginService.approvePermissions(msg.payload.pluginId, msg.payload.permissions)
-  return ctx.reply(ws, msg.id, 'config.plugins', { plugins: pluginService.getDiscoveredPlugins() })
+  return ctx.reply(ws, msg.id, 'pong', {})
 }
 
 async function handlePluginRevokePermissions(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.revokePermissions'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  // reply = pong ack；revoke 不改 PluginInfo 任何字段，无列表刷新广播。
   await pluginService.revokePermissions(msg.payload.pluginId)
-  return ctx.reply(ws, msg.id, 'config.plugins', { plugins: pluginService.getDiscoveredPlugins() })
+  return ctx.reply(ws, msg.id, 'pong', {})
 }
 
 async function handlePluginDenyPermissions(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.denyPermissions'>, ws: WsType, pluginService: IPluginService): Promise<void> {
+  // reply = pong ack；deny 不改 PluginInfo 任何字段，无列表刷新广播。
   await pluginService.denyPermissions(msg.payload.pluginId)
-  return ctx.reply(ws, msg.id, 'config.plugins', { plugins: pluginService.getDiscoveredPlugins() })
+  return ctx.reply(ws, msg.id, 'pong', {})
 }
 
 async function handlePluginExecuteCommand(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.executeCommand'>, ws: WsType, pluginService: IPluginService): Promise<void> {

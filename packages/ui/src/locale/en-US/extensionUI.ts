@@ -7,4 +7,9 @@ export default {
   selectPlaceholder: 'Please select',
   additionalComment: 'Additional comment',
   commentPlaceholder: 'Optional, add a note…',
+  permissionRequestDescription: 'This plugin requests the following permissions. Approve to use them.',
+  permissionSelectAll: 'Select all',
+  permissionDeny: 'Deny',
+  permissionApprove: 'Approve',
+  permissionSubmitFailed: 'Failed to submit the approval. Check your connection and try again.',
 }

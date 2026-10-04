@@ -4,9 +4,9 @@
  * 覆盖：
  * - get-remote-access-info：配置 + LAN 候选（端口来自 supervisor 既有端口发现；null → 空列表）
  * - rotate-remote-access-token：轮换重写文件，返回新 token
- * - set-remote-access-enabled：
- *   - 开关状态变化且 runtime 在跑 → 触发 stop + start（既有 supervisor 重启链公开步骤）
- *     并广播 runtime-restarting / runtime-port 到全部窗口
+ * - set-remote-access-enabled：重启链纯委托 supervisor.restartForConfigChange
+ *   （stop→spawn→广播时序归 supervisor 单点，本层断言只验证委托调用与前置守卫）
+ *   - 开关状态变化且 runtime 在跑 → 委托重启（restarted=true）
  *   - 开关状态不变 → 不重启（幂等）
  *   - runtime 未跑（port=null，mock 模式）→ 只落盘不重启，下次启动自然生效
  *   - 非 boolean 输入 → 拒绝（isValidRemoteAccessEnabled guard）
@@ -26,7 +26,8 @@ import { REMOTE_ACCESS_FILENAME } from '@taiji/shared'
 // electron mock：ipcMain.handle 捕获 handler 供直接调用；getAllWindows 可控；
 // app 三元组供 mobileDistReady 探测（AM1）——getAppPath 可控指向临时 dist 根
 const handlers = new Map<string, (...args: unknown[]) => unknown>()
-// 返回类型放宽为 unknown[]：window 桩（makeWindow）作为广播目标注入
+// 返回类型放宽为 unknown[]：广播归 supervisor 单点后本文件无窗口桩注入，仅为
+// mock 形态与 start-concurrency 测试一致保留（getAllWindows 保持可 mock）
 const getAllWindowsMock = vi.hoisted(() => vi.fn((): unknown[] => []))
 const getAppPathMock = vi.hoisted(() => vi.fn((): string => '/mock-repo/apps/electron'))
 
@@ -102,14 +103,10 @@ function makeDeps(overrides: { port?: number | null } = {}): IpcHandlerDeps {
       start: vi.fn(async () => 43111),
       stop: vi.fn(async () => undefined),
       restartRuntime: vi.fn(async () => undefined),
+      restartForConfigChange: vi.fn(async () => 43111),
       startAndNotify: vi.fn(async () => 43111),
     } as unknown as IpcHandlerDeps['runtime'],
   }
-}
-
-/** 窗口桩（webContents.send 捕获广播断言）。 */
-function makeWindow(): { isDestroyed: () => boolean; webContents: { send: ReturnType<typeof vi.fn> } } {
-  return { isDestroyed: () => false, webContents: { send: vi.fn() } }
 }
 
 async function loadHandlers(deps: IpcHandlerDeps = makeDeps()): Promise<void> {
@@ -174,12 +171,10 @@ describe('remote-access 连接信息 IPC', () => {
     expect(JSON.parse(readConfigRaw()).token).toBe(info.token)
   })
 
-  it('set-remote-access-enabled：true 且 runtime 在跑 → stop + start + 广播 restarting/port', async () => {
+  it('set-remote-access-enabled：true 且 runtime 在跑 → 委托 restartForConfigChange 重启', async () => {
     seedConfig(false)
     const deps = makeDeps({ port: 3310 })
     await loadHandlers(deps)
-    const win = makeWindow()
-    getAllWindowsMock.mockReturnValue([win])
 
     const result = (await handlers.get('set-remote-access-enabled')!(undefined, true)) as {
       enabled: boolean
@@ -188,16 +183,15 @@ describe('remote-access 连接信息 IPC', () => {
 
     expect(result.enabled).toBe(true)
     expect(result.restarted).toBe(true)
-    expect(deps.runtime.stop).toHaveBeenCalledTimes(1)
-    expect(deps.runtime.start).toHaveBeenCalledTimes(1)
-    // 广播顺序：先 restarting（进重连等待态）后 port（新端口重连）
-    expect(win.webContents.send).toHaveBeenNthCalledWith(1, 'runtime-restarting', { attempt: 0 })
-    expect(win.webContents.send).toHaveBeenNthCalledWith(2, 'runtime-port', 43111)
+    // 纯委托：重启编排（stop→spawn→广播时序）归 supervisor，本层只调一次入口
+    expect(deps.runtime.restartForConfigChange).toHaveBeenCalledTimes(1)
+    expect(deps.runtime.stop).not.toHaveBeenCalled()
+    expect(deps.runtime.start).not.toHaveBeenCalled()
     // 落盘生效
     expect(JSON.parse(readConfigRaw()).enabled).toBe(true)
   })
 
-  it('set-remote-access-enabled：关闭且 runtime 在跑 → 同样触发重启（回纯回环）', async () => {
+  it('set-remote-access-enabled：关闭且 runtime 在跑 → 同样委托重启（回纯回环）', async () => {
     seedConfig(true)
     const deps = makeDeps({ port: 3310 })
     await loadHandlers(deps)
@@ -205,8 +199,7 @@ describe('remote-access 连接信息 IPC', () => {
     const result = (await handlers.get('set-remote-access-enabled')!(undefined, false)) as { restarted: boolean }
 
     expect(result.restarted).toBe(true)
-    expect(deps.runtime.stop).toHaveBeenCalledTimes(1)
-    expect(deps.runtime.start).toHaveBeenCalledTimes(1)
+    expect(deps.runtime.restartForConfigChange).toHaveBeenCalledTimes(1)
   })
 
   it('set-remote-access-enabled：状态不变（false→false）→ 不重启', async () => {
@@ -217,8 +210,7 @@ describe('remote-access 连接信息 IPC', () => {
     const result = (await handlers.get('set-remote-access-enabled')!(undefined, false)) as { restarted: boolean }
 
     expect(result.restarted).toBe(false)
-    expect(deps.runtime.stop).not.toHaveBeenCalled()
-    expect(deps.runtime.start).not.toHaveBeenCalled()
+    expect(deps.runtime.restartForConfigChange).not.toHaveBeenCalled()
   })
 
   it('set-remote-access-enabled：runtime 未跑（port=null）→ 只落盘不重启', async () => {
@@ -229,8 +221,7 @@ describe('remote-access 连接信息 IPC', () => {
     const result = (await handlers.get('set-remote-access-enabled')!(undefined, true)) as { restarted: boolean }
 
     expect(result.restarted).toBe(false)
-    expect(deps.runtime.stop).not.toHaveBeenCalled()
-    expect(deps.runtime.start).not.toHaveBeenCalled()
+    expect(deps.runtime.restartForConfigChange).not.toHaveBeenCalled()
     expect(JSON.parse(readConfigRaw()).enabled).toBe(true)
   })
 
@@ -241,7 +232,7 @@ describe('remote-access 连接信息 IPC', () => {
 
     await expect(handlers.get('set-remote-access-enabled')!(undefined, 'true')).rejects.toThrow('must be a boolean')
     await expect(handlers.get('set-remote-access-enabled')!(undefined, 1)).rejects.toThrow('must be a boolean')
-    expect(deps.runtime.stop).not.toHaveBeenCalled()
+    expect(deps.runtime.restartForConfigChange).not.toHaveBeenCalled()
     // 缺文件场景未落盘（guard 在写之前拒绝）
     expect(existsSync(CONFIG_PATH)).toBe(true) // seed 过，未被改写
     expect(JSON.parse(readConfigRaw()).enabled).toBe(false)

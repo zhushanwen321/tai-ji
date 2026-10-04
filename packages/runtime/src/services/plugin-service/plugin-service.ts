@@ -625,6 +625,8 @@ export class PluginService implements IPluginService {
     // - UNLOADED（等待早已超时回落 / 从未激活）→ 权限已 grant，新起激活不再挂起。
     await this.activator.activatePlugin(pluginId, { type: 'onStartupFinished' }, this.host)
     this.watchExternalIfActive(descriptor)
+    // approve 触发 activate（status 真实变化）→ 广播列表刷新（reply 是 pong ack；deny/revoke 不改 PluginInfo 字段，不广播）
+    this.broadcastPluginList()
   }
 
   async revokePermissions(pluginId: string): Promise<void> {

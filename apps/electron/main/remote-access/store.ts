@@ -8,8 +8,11 @@
  *   旧内容要么是完整新内容，runtime 热读永不撕裂；
  * - 0600：token 等同远程控制凭据，禁 group/other 读取（与 runtime-token 同级）；
  * - 字段契约：@taiji/shared 的 RemoteAccessConfig + REMOTE_ACCESS_FILENAME，
- *   校验语义与 runtime 侧 parseRemoteAccessToken 对齐（enabled boolean /
- *   token 64 位 hex 小写 / createdAt 非空字符串）。
+ *   shape 判据（对象 + enabled boolean + token string）复用 shared 的
+ *   isRemoteAccessConfigShape 单源（与 runtime 读侧 parseRemoteAccessToken
+ *   import 同一谓词）；本侧从严策略层（token 64 位 hex 小写 + createdAt 非空
+ *   字符串恒校验）叠加其上——从严 vs runtime 读侧 fail-closed 条件校验的
+ *   不对称是刻意的双侧策略差异，不上收。
  *
  * E10 main 侧：读取时发现文件损坏（非法 JSON / 字段不合法）→ 重建默认配置写回 +
  * 响亮日志（含恢复指引）。轮换是现成的人工恢复通道（重写文件）。
@@ -20,7 +23,7 @@
 import { randomBytes } from 'node:crypto'
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { REMOTE_ACCESS_FILENAME, REMOTE_TOKEN_HEX64, type RemoteAccessConfig } from '@taiji/shared'
+import { isRemoteAccessConfigShape, REMOTE_ACCESS_FILENAME, REMOTE_TOKEN_HEX64, type RemoteAccessConfig } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 
 /** remote token 熵：32 字节 = 256 bit（hex 编码后 64 字符），对齐 runtime-token 量级。 */
@@ -47,17 +50,17 @@ function createDefaultRemoteAccessConfig(): RemoteAccessConfig {
 
 /**
  * 结构守卫（禁 any 红线：unknown 经 shape 收窄后才按契约消费）。
- * 判据与 runtime 读侧对齐：enabled boolean / token 64 位 hex 小写 / createdAt 非空字符串。
- * 注意 runtime 读侧只强校验 enabled/token（hex 校验在 enabled=true 分支），本侧作为
- * 写侧守卫从严——不合法的配置不会被本模块写出。
+ * shape 判据（对象 + enabled boolean + token string）复用 shared 的
+ * isRemoteAccessConfigShape 单源（runtime 读侧 import 同一谓词，判据不可能分叉）；
+ * 本侧在其上叠加写侧从严策略：token 恒须 64 位 hex 小写（REMOTE_TOKEN_HEX64）+
+ * createdAt 恒须非空字符串——不合法的配置不会被本模块写出。runtime 读侧只强校验
+ * enabled/token（hex 校验在 enabled=true 分支），从严差是刻意的双侧策略差异。
  */
 export function isValidRemoteAccessConfig(value: unknown): value is RemoteAccessConfig {
-  if (typeof value !== 'object' || value === null) return false
+  if (!isRemoteAccessConfigShape(value)) return false
   const record = value as Record<string, unknown>
   return (
-    typeof record.enabled === 'boolean' &&
-    typeof record.token === 'string' &&
-    REMOTE_TOKEN_HEX64.test(record.token) &&
+    REMOTE_TOKEN_HEX64.test(value.token) &&
     typeof record.createdAt === 'string' &&
     record.createdAt.length > 0
   )

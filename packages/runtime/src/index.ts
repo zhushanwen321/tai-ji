@@ -2,6 +2,10 @@ import { RuntimeServer } from './transport/server.js'
 // remote-access U0.1（D2/D9）：remote token 热读函数——仅 --remote-access 开态装配为
 // ConnectionManager 的 remoteTokenProvider（每次 auth 握手调用）；关态不装配零 IO。
 import { readRemoteAccessToken } from './transport/connection-manager.js'
+// remote-access D3/E5（S3 拆分）：移动壳静态托管——开态判定（remoteAccess 判据 → dist
+// 探测 → handler 构造）收敛在组合根（见 main() Transport layer 装配段），实现与穿越
+// 防护（E4）在 mobile-static.ts。
+import { createMobileStaticHandler, resolveMobileStaticRoot } from './transport/mobile-static.js'
 import { SessionService } from './services/session/session-service.js'
 import { GenStatsService } from './services/session/gen-stats-service.js'
 import { createSessionDeliveryRegistry } from './services/session/session-delivery-registry.js'
@@ -334,14 +338,20 @@ async function main(): Promise<void> {
   // remote-access U0.1 装配（D1/D2/D3/D9）：
   // - host：开态绑 0.0.0.0（LAN 可达，桌面 localhost 天然被覆盖）；关态 undefined =
   //   ConnectionManager 默认 127.0.0.1（与现状逐字节一致）。
-  // - mobileDist：argv 唯一来源（main 侧解析绝对路径拼参归 U1.2），本单元仅透传。
   // - remoteTokenProvider：仅开态装配——每次 auth 握手热读 remote-access.json（轮换
   //   文件即生效）；关态不装配，ConnectionManager 不持有读取通道（零文件 IO，且不读
   //   任何 env——D9 ambient 免疫，本设计新增 env 键 = 0）。
+  // - mobileStaticHandler（S3 挂载裁决上移组合根）：remoteAccess 开态才探测 dist
+  //   （E5 时序等价：启动期一次 statSync，现状在 ConnectionManager 构造器内执行、
+  //   上移后在本行执行，同为 index 装配期）、探测通过才构造 handler 注入；关态
+  //   resolveMobileStaticRoot 首行短路（零探测副作用零日志）——mobileDist 单独出现
+  //   （手工只传 --mobile-dist 不开 flag）不构成开态。静态实现/穿越防护（E4）在
+  //   mobile-static.ts，ConnectionManager 只按「是否注入 handler」分派。
+  const mobileStaticRoot = resolveMobileStaticRoot({ remoteAccess, mobileDist })
   const server = new RuntimeServer(port, projectRoot, runtimeToken, {
     host: remoteAccess ? '0.0.0.0' : undefined,
-    mobileDist,
     remoteTokenProvider: remoteAccess ? readRemoteAccessToken : undefined,
+    mobileStaticHandler: mobileStaticRoot !== null ? createMobileStaticHandler(mobileStaticRoot) : undefined,
   })
 
   // MessageBus 单例（wave:runtime-wiring）：per-session 消息广播核心。

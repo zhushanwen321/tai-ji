@@ -36,13 +36,13 @@ vi.mock('qrcode', () => ({ default: qrMocks }))
 
 import RemoteAccessPage from '@/components/settings/remote-access/RemoteAccessPage.vue'
 import { useToast } from '@/composables/useToast'
-import type { RemoteAccessConnectionInfo, RemoteAccessToggleResult } from '@/lib/ipc'
+import type { RemoteAccessInfo, RemoteAccessToggleResult } from '@taiji/shared'
 
-function makeInfo(overrides: Partial<RemoteAccessConnectionInfo> = {}): RemoteAccessConnectionInfo {
+function makeInfo(overrides: Partial<RemoteAccessInfo> = {}): RemoteAccessInfo {
   return { enabled: false, token: '', createdAt: '2026-09-19T00:00:00Z', urls: [], mobileDistReady: true, ...overrides }
 }
 
-const ENABLED_INFO: RemoteAccessConnectionInfo = {
+const ENABLED_INFO: RemoteAccessInfo = {
   enabled: true,
   token: 'a'.repeat(64),
   createdAt: '2026-09-19T00:00:00Z',
@@ -200,7 +200,7 @@ describe('RemoteAccessPage 开关切换确认流', () => {
 describe('RemoteAccessPage 轮换流', () => {
   it('点轮换按钮：rotateRemoteAccessToken 被调、链接以新 token 重渲染、info toast 反馈', async () => {
     ipcMocks.getRemoteAccessInfo.mockResolvedValue(ENABLED_INFO)
-    const rotated: RemoteAccessConnectionInfo = { ...ENABLED_INFO, token: 'c'.repeat(64) }
+    const rotated: RemoteAccessInfo = { ...ENABLED_INFO, token: 'c'.repeat(64) }
     ipcMocks.rotateRemoteAccessToken.mockResolvedValue(rotated)
     wrapper = mount(RemoteAccessPage)
     await flushPromises()

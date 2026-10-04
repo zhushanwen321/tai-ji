@@ -84,10 +84,10 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCopy } from '@/composables/panel/useCopy'
-import type { RemoteAccessConnectionInfo } from '@/lib/ipc'
+import type { RemoteAccessInfo } from '@taiji/shared'
 
 const props = defineProps<{
-  info: RemoteAccessConnectionInfo
+  info: RemoteAccessInfo
 }>()
 
 const { t } = useI18n()

@@ -4,7 +4,7 @@
 // 锁定 use-connection 形态分支的信号消费面：
 // 1. 远程 profile 形态：connectRemoteProfile 注册 ws-client onAuthRejected → 转发
 //    ports.onAuthRejected + 抑制位置位；visibility 切前台触发点被抑制（不重连）；reset +
-//    visibility 再触发 → 重连恢复（复用 lastConnectedUrl 与 currentToken）
+//    visibility 再触发 → 重连恢复（显式复用 lastConnectedUrl 与 lastCredentials，S4）
 // 2. 本地 ipc 形态（桌面）：不注册信号 → ports.onAuthRejected 不被调、无抑制位、close 走
 //    原退避重连链（桌面零回归锚）
 // 3. teardown 拆卸信号监听：重装后转发目标跟随最新装配（不串台）
@@ -131,7 +131,7 @@ describe('use-connection auth 拒绝信号消费（D8）', () => {
     visibilityHandler?.()
     expect(fakes.length).toBe(1)
 
-    // token 重试路径：reset → visibility 再触发 → 重连恢复（复用 lastConnectedUrl + currentToken）
+    // token 重试路径：reset → visibility 再触发 → 重连恢复（显式复用 lastConnectedUrl + lastCredentials）
     resetAuthRejectionSuppression()
     visibilityHandler?.()
     expect(fakes.length).toBe(2)

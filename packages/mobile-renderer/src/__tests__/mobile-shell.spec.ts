@@ -19,10 +19,11 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import App from '../App.vue'
 import { i18n } from '../i18n'
-import { hasConnectedOnce, shellConnectionState } from '../bootstrap'
 import { sessionStore } from '../shell/app-runtime'
 import { createMobilePlatformAdapter } from '../platform/mobile-platform-adapter'
 import { bootstrap } from '../bootstrap'
+// 连接视图态（W6 起本体在 shell/connection-view；直改 ref 驱动视图断言的操纵形态不变）
+import { hasConnectedOnce, shellConnectionState } from '../shell/connection-view'
 
 // vitest 运行时 cwd 即包根（vitest.config.ts 所在目录）
 const pkgRoot = process.cwd()
@@ -76,7 +77,7 @@ describe('TC-1: AC5 多视图态结构断言（U1.4c 多视图重排）', () => 
   })
 
   it('connected 列表视图渲染列表容器 + bottom-tab-bar', () => {
-    // 直接置态复现 bootstrap watch 的置位序（connected 蕴含 hasConnectedOnce，BM5 分支锚点）
+    // 直接置态复现 connection-view watch 的置位序（connected 蕴含 hasConnectedOnce，BM5 分支锚点）
     hasConnectedOnce.value = true
     shellConnectionState.value = 'connected'
     wrapper = mountApp()
@@ -244,7 +245,7 @@ describe('BM5: 断线重连中保持 connected 布局 + 壳顶部断线条', () 
     wrapper = mountApp()
     await wrapper.get('[data-testid="mobile-tab-chat"]').trigger('click')
 
-    // 瞬时断连：connected → connecting（bootstrap watch 同款状态流转）
+    // 瞬时断连：connected → connecting（connection-view watch 同款状态流转）
     shellConnectionState.value = 'connecting'
     await nextTick()
 

@@ -1,12 +1,15 @@
 /**
  * remote-access U1.1：移动壳静态托管 handler（D3）+ 穿越防护（E4）+ dist 缺失处置（E5）。
+ * S3 拆分后形态：静态实现与开态判定（resolveMobileStaticRoot / createMobileStaticHandler）
+ * 在 mobile-static.ts，本文件锚定 ConnectionManager 消费面——注入 handler 后的 HTTP
+ * 分派行为；开态判定/纯函数/裸 handler 单测在 mobile-static.test.ts。
  *
  * 语义锚点（remote-access 设计 §3.3 D3 / §3.4 E4/E5）：
- * 1. D3：仅开态（--remote-access → 组合根装配 remoteTokenProvider）且 mobileDist 目录
- *    有效时挂载静态 handler——GET/HEAD、目录请求回退 index.html、404 兜底、/health
- *    先于静态分支行为不变；访问/拒绝日志只记剥除 query 的 pathname（remote token
- *    不经静态面日志落盘）；关态（无 provider）handler 不挂载，HTTP 行为与远程访问
- *    引入前逐字节一致（/health 之外一律 404 空 body），mobileDist 单独出现不构成开态。
+ * 1. D3：handler 注入（组合根开态装配：remoteAccess 判据 → dist 探测通过）后同端口
+ *    GET/HEAD 托管移动壳产物——目录请求回退 index.html、404 兜底、/health 先于静态
+ *    分支行为不变；访问/拒绝日志只记剥除 query 的 pathname（remote token 不经静态面
+ *    日志落盘）；handler 未注入（关态 / E5 禁用）HTTP 行为与远程访问引入前逐字节
+ *    一致（/health 之外一律 404 空 body）。
  * 2. E4：路径白名单化防目录穿越——解码（含 %2e%2e 编码变体）后 resolve 消解再前缀
  *    判定，白名单外 400 且不发起任何 fs 读取。
  * 3. E5：开态但 mobileDist 未传 / 目录不存在 / 指向普通文件 → 静态面禁用 + 响亮
@@ -23,11 +26,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { WebSocket } from 'ws'
-import {
-  ConnectionManager,
-  resolveMobileStaticPath,
-  type ConnectionManagerOptions,
-} from '../connection-manager.js'
+import { ConnectionManager, type ConnectionManagerOptions } from '../connection-manager.js'
+import { createMobileStaticHandler, resolveMobileStaticPath, resolveMobileStaticRoot } from '../mobile-static.js'
 
 const SPAWN_TOKEN = 'spawn-token'
 const REMOTE_TOKEN_A = 'a'.repeat(64)
@@ -73,9 +73,17 @@ async function startManager(authToken: string | null, options: ConnectionManager
   return { port: addr.port, conn }
 }
 
-/** 组合根开态装配形态：remoteTokenProvider 注入即开态（D9 argv 判据的运行时投影）。 */
+/**
+ * 组合根开态装配形态（S3 上移后）：remoteAccess=true 判据 → resolveMobileStaticRoot
+ * 探测（E5 日志在此发出）→ 探测通过才构造 handler 注入；探测失败（null）不注入
+ * （CM 关态分派 = 404）。与 index.ts Transport layer 装配段同构。
+ */
 function openStateOptions(mobileDist?: string): ConnectionManagerOptions {
-  return { mobileDist, remoteTokenProvider: () => REMOTE_TOKEN_A }
+  const root = resolveMobileStaticRoot({ remoteAccess: true, mobileDist })
+  return {
+    remoteTokenProvider: () => REMOTE_TOKEN_A,
+    mobileStaticHandler: root !== null ? createMobileStaticHandler(root) : undefined,
+  }
 }
 
 describe('ConnectionManager mobile static hosting (U1.1)', () => {
@@ -234,21 +242,14 @@ describe('ConnectionManager mobile static hosting (U1.1)', () => {
     })
   })
 
-  // ── D3：关态 handler 不挂载（行为与远程访问引入前逐字节一致）───────────────
+  // ── D3：handler 未注入 = 不挂载（行为与远程访问引入前逐字节一致）───────────────
+  // 开态守卫（mobileDist 单独出现不构成开态）已随挂载裁决上移组合根，归属
+  // mobile-static.test.ts 的 resolveMobileStaticRoot 关态用例。
 
-  describe('关态（无 --remote-access）handler 不挂载', () => {
-    it('mobileDist 未传：GET / → 404 空 body（现状形态），无 E5 error', async () => {
+  describe('handler 未注入（关态 / E5 禁用）不挂载', () => {
+    it('无 mobileStaticHandler：GET / → 404 空 body（现状形态），无 E5 error', async () => {
       const errorSpy = spyConsole('error')
       opened.push(await startManager(SPAWN_TOKEN))
-      const res = await rawRequest(opened[0].port, '/')
-      expect(res.status).toBe(404)
-      expect(res.body).toHaveLength(0)
-      expect(errorSpy).not.toHaveBeenCalled()
-    })
-
-    it('mobileDist 传入但无 remoteTokenProvider（手工只传 --mobile-dist 不开 flag）：仍 404 + 无 E5 error', async () => {
-      const errorSpy = spyConsole('error')
-      opened.push(await startManager(SPAWN_TOKEN, { mobileDist: distDir }))
       const res = await rawRequest(opened[0].port, '/')
       expect(res.status).toBe(404)
       expect(res.body).toHaveLength(0)
@@ -268,7 +269,8 @@ describe('ConnectionManager mobile static hosting (U1.1)', () => {
   describe('E5：开态但 mobileDist 缺失/无效', () => {
     it('未传 --mobile-dist → error 日志含 pnpm build 指引与打包配置提示；GET / 404；WS auth 正常', async () => {
       const errorSpy = spyConsole('error')
-      opened.push(await startManager(SPAWN_TOKEN, { remoteTokenProvider: () => REMOTE_TOKEN_A }))
+      // 开态形态但 mobileDist 缺失（组合根装配链：探测在 handler 构造前发出 E5 日志）
+      opened.push(await startManager(SPAWN_TOKEN, openStateOptions()))
       expect(errorSpy).toHaveBeenCalledTimes(1)
       const logged = String(errorSpy.mock.calls[0]?.[0])
       expect(logged).toContain('--mobile-dist')

@@ -89,15 +89,15 @@ import {
   getRemoteAccessInfo,
   rotateRemoteAccessToken,
   setRemoteAccessEnabled,
-  type RemoteAccessConnectionInfo,
 } from '@/lib/ipc'
+import type { RemoteAccessInfo } from '@taiji/shared'
 import { toErrorMessage } from '@taiji/core'
 
 const { t } = useI18n()
 const { info: toastInfo, error: toastError } = useToast()
 
 /** 远程访问配置 + LAN 候选（单一状态；onMounted 拉取，开关/轮换后由 IPC 返回值刷新） */
-const info = ref<RemoteAccessConnectionInfo>({ enabled: false, token: '', createdAt: '', urls: [], mobileDistReady: false })
+const info = ref<RemoteAccessInfo>({ enabled: false, token: '', createdAt: '', urls: [], mobileDistReady: false })
 
 /**
  * 移动壳 dist 缺失提示文案（E5 显形）：dev 指向本地恢复命令，prod 指向重装——

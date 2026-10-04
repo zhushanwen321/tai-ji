@@ -11,12 +11,14 @@
  * 4. generation 计数：新连接 ++generation，旧 WS 的残余回调（onopen/onclose/onmessage）
  *    检查 gen !== wsGeneration 时直接 return，不干扰新连接
  *
- * S1-W1 auth 握手（spec §3.3 D4）：connect(url, token) 传入 token 时，open 后首条消息发
- * {type:'auth'}，收到 auth.result {ok:true} 才置 connected（resubscribeAll / 心跳随 connected
- * 之后启动，重订阅消息不会被 runtime 当「auth 前消息」丢弃）。token 未传（mock 平台）保持
- * 旧行为。内部重连（退避 / visibility）复用 currentToken；runtime 重启换 token 由
- * use-connection 的 onRuntimePort 路径重新拉取后 connect(url, newToken) 覆盖。auth 5s 客户端
- * 超时（短于 runtime 侧 10s）：超时 close 走 onclose → 正常重连链。
+ * S1-W1 auth 握手（spec §3.3 D4）：connect(url, credentials) 凭据为 {auth:'token'} 时，
+ * open 后首条消息发 {type:'auth'}，收到 auth.result {ok:true} 才置 connected（resubscribeAll
+ * / 心跳随 connected 之后启动，重订阅消息不会被 runtime 当「auth 前消息」丢弃）。
+ * {auth:'skip'}（mock 平台）跳过握手，onopen 即 connected。token 空串是合法值——强制握手
+ * 探测语义（移动壳无凭据首连：握手必被拒 → onAuthRejected → D8 恢复链），与 skip 不可互代。
+ * 内部重连（退避）复用 currentCredentials；runtime 重启换 token 由 use-connection 的
+ * onRuntimePort 路径重新拉取后 connect(url, newCredentials) 覆盖。auth 5s 客户端超时（短于
+ * runtime 侧 10s）：超时 close 走 onclose → 正常重连链。
  *
  * 与 renderer 版的差异（迁移改造）：
  * - new WebSocket(url) → getPlatform().webSocket.create(url)（平台注入，mock 由 platform
@@ -60,6 +62,21 @@ export type ConnectionState =
   | 'restarting' // runtime 崩溃，主进程正在拉起新实例（来自 IPC runtime-restarting）
   | 'failed'     // runtime 重启用尽，需用户手动重试（来自 IPC runtime-failed）
 
+/**
+ * connect 凭据对象（S4 凭据语义显式化）：auth 意图由调用方显式声明，替代旧
+ * `token?: string` 三态隐式协议（undefined=保留上次 / ''=强制空串握手 / 值=正常握手——
+ * 三态靠调用方与实现共享的隐式约定，U1.3 假 connected 事故的根因形态）。
+ *
+ * - `{ auth: 'token', token }`：走 auth 握手（open 后首条 auth 帧，auth.result ok 才
+ *   connected）。token 空串 = 强制握手探测：必被 runtime 拒（bad_token）→
+ *   onAuthRejected → D8 恢复链。移动壳无凭据首连用它，不得因「空值≈无凭据」误读成 skip。
+ * - `{ auth: 'skip' }`：跳过握手，onopen 即 connected（mock 装配形态；URL 仅是
+ *   platform factory 的路由标识，ws-client 不解析 URL）。
+ */
+export type ConnectCredentials =
+  | { auth: 'token'; token: string }
+  | { auth: 'skip' }
+
 // ── 常量 ────────────────────────────────────────────────────
 const HEARTBEAT_INTERVAL_MS = 15_000
 const RECONNECT_BASE_DELAY_MS = 1_000
@@ -102,14 +119,16 @@ let authTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectAttempts = 0
 let wsGeneration = 0
 let currentUrl: string | null = null
-/** 本次连接凭据（S1-W1）：connect(url, token) 更新；内部重连复用；mock url 强制清空。 */
-let currentToken: string | null = null
+/** 本次连接凭据（S1-W1/S4）：connect(url, credentials) 更新（幂等 no-op 时也更新——与
+ *  currentUrl 同序，保持旧 currentToken 语义）；内部重连（scheduleReconnect）复用。
+ *  「保留上次凭据」是本模块内部行为，不在公开签名表达。 */
+let currentCredentials: ConnectCredentials | null = null
 /**
  * 本代连接是否已完成 auth（模块级真源，send() 的发送门槛）。
  * WS 握手完成即 readyState=OPEN，但 token 模式下要等 auth.result ok 才算完成——
  * TCP open → auth.result 窗口内 send() 真实送出的消息会被 runtime 设计性静默丢弃
  * （connection-manager handleUnauthedMessage，spec §3.3 D4），故未完成 auth 前入队。
- * connect() 开始时按「无 token 模式视为已完成」初始化；gen 检查保证只有当前代写入。
+ * connect() 开始时按凭据 kind 初始化（skip → onopen 即视为完成）；gen 检查保证只有当前代写入。
  */
 let connectionAuthed = false
 /** pre-auth 窗口入队的出站消息（FIFO；auth.result ok 后按序 flush） */
@@ -311,27 +330,26 @@ export function setFailed(): void {
 /**
  * 建立连接（已连接/连接中时幂等 no-op）。
  *
- * @param url   连接地址（mock 平台为 mock:// 前缀）
- * @param token WS auth token（S1-W1）。传入时 open 后先走 auth 握手（首条消息 auth，
- *              等 auth.result ok 才 connected）；不传（mock / 无 IPC）保持旧行为。
- *              未传时保留上次 token 供内部重连复用；mock url 一律清空。
+ * @param url         连接地址（纯路由标识，由 platform 的 webSocket factory 消费；mock 装配
+ *                    为 mock:// 前缀 URL，ws-client 不解析——mock 判别经 credentials 显式表达）
+ * @param credentials 凭据对象（S4 三态显式化）：{auth:'token', token} 走 auth 握手（open 后
+ *                    首条 auth 帧，auth.result ok 才 connected；token 空串 = 强制握手探测，
+ *                    必被拒 → onAuthRejected → D8 恢复链）；{auth:'skip'} 跳过握手，onopen
+ *                    即 connected。无「保留上次」态——内部重连（scheduleReconnect）复用
+ *                    currentCredentials，公开签名不表达。
  */
-export function connect(url: string, token?: string): void {
+export function connect(url: string, credentials: ConnectCredentials): void {
   currentUrl = url
-  if (url.startsWith('mock:')) {
-    currentToken = null
-  } else if (token !== undefined) {
-    currentToken = token
-  }
+  currentCredentials = credentials
 
   // 幂等：已连接或连接中，不重复建连
   if (ws && (ws.readyState === WS_READY_STATE.OPEN || ws.readyState === WS_READY_STATE.CONNECTING)) return
 
   state.value = 'connecting'
   const gen = ++wsGeneration
-  // 本代 auth 状态初始化（无 token 模式在 onopen 即视为完成）；后续读写都走模块级
+  // 本代 auth 状态初始化（skip 模式在 onopen 即视为完成）；后续读写都走模块级
   // connectionAuthed——send() 需要在 connect 闭包外感知 auth 进度（pre-auth 入队门槛）。
-  connectionAuthed = currentToken === null
+  connectionAuthed = credentials.auth === 'skip'
   ws = getPlatform().webSocket.create(url)
   console.log('[ws] connecting to', url)
 
@@ -342,7 +360,7 @@ export function connect(url: string, token?: string): void {
     }
   }
 
-  /** connected 化（auth 成功或无 token 模式）：置位状态 + 重连簿记 + 启动心跳 + flush 队列。 */
+  /** connected 化（auth 成功或 skip 模式）：置位状态 + 重连簿记 + 启动心跳 + flush 队列。 */
   const markConnected = () => {
     state.value = 'connected'
     reconnectAttempts = 0
@@ -363,8 +381,11 @@ export function connect(url: string, token?: string): void {
   ws.onopen = () => {
     if (gen !== wsGeneration) return // 旧 WS 残余回调，忽略
     if (!connectionAuthed) {
-      // S1-W1：首条消息必须是 auth；connected 推迟到 auth.result ok（心跳/重订阅随后）
-      ws!.send(JSON.stringify({ type: 'auth', payload: { token: currentToken } }))
+      // S1-W1：首条消息必须是 auth；connected 推迟到 auth.result ok（心跳/重订阅随后）。
+      // token 取自 currentCredentials（!connectionAuthed ⇔ 本代凭据为 {auth:'token'}；兜底
+      // 空串 = 探测语义，异常态凭据必被 runtime 拒走重连链，不会静默假 connected）
+      const token = currentCredentials?.auth === 'token' ? currentCredentials.token : ''
+      ws!.send(JSON.stringify({ type: 'auth', payload: { token } }))
       authTimer = setTimeout(() => {
         if (gen !== wsGeneration) return
         console.warn('[ws] auth handshake timeout, closing for reconnect')
@@ -665,7 +686,9 @@ function scheduleReconnect(): void {
   reconnectAttempts++
   state.value = 'reconnecting'
   console.log('[ws] reconnecting in', delay, 'ms (attempt', reconnectAttempts + ')')
-  reconnectTimer = setTimeout(() => connect(currentUrl!), delay)
+  // 「保留上次凭据」的内部实现（S4）：复用 currentCredentials 重新发起（currentCredentials
+  // 与 currentUrl 同在 connect 设置，非 null 由 currentUrl 守卫蕴含）
+  reconnectTimer = setTimeout(() => connect(currentUrl!, currentCredentials!), delay)
 }
 
 function startHeartbeat(): void {

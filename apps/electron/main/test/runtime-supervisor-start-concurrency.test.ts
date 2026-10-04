@@ -2,9 +2,13 @@
  * RuntimeSupervisor start() 并发串行化回归测试（AM2：TOCTOU 双 spawn 根修）。
  *
  * 背景：start() 原实现幂等守卫后 `await this.stop()` 再 spawn——toggle 入口
- * （restartRuntimeForRemoteAccess）与启动链/崩溃重启并发时双方都通过守卫 →
+ * （restartForConfigChange）与启动链/崩溃重启并发时双方都通过守卫 →
  * 双 spawn 抢端口。修复 = promise 链串行队列（join 会让 toggle 拿到旧配置的
  * 启动结果，故串行而非共享）。
+ *
+ * 第二组 describe 覆盖 restartForConfigChange 本体（toggle 重启编排收口进
+ * supervisor）：广播时序（restarting 先于 stop）、队列并发不双 spawn、
+ * 失败补 runtime-failed 终态广播后 reject 上抛，不进崩溃退避链。
  *
  * Mock 策略对齐 runtime-supervisor-crash-restart.test.ts：stub 全链
  * （spawn/stop/health/port/liveness/main-logger），spawnRuntimeProcess 返回恒活 fake child。
@@ -14,13 +18,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // mock 必须在 import 之前（vitest hoist）
-vi.mock('electron', () => {
-  const getAllWindows = vi.fn(() => [])
-  return {
-    BrowserWindow: Object.assign(vi.fn(), { getAllWindows }),
-    app: { getPath: vi.fn(() => '/tmp'), getName: vi.fn(() => 'test') },
-  }
-})
+// 返回类型放宽为 unknown[]（对齐 remote-access-handlers.test.ts 先例）：
+// 广播窗口桩（makeEventWindow）作为广播目标注入，不满足完整 BrowserWindow 形状
+const getAllWindowsMock = vi.hoisted(() => vi.fn((): unknown[] => []))
+
+vi.mock('electron', () => ({
+  BrowserWindow: Object.assign(vi.fn(), { getAllWindows: getAllWindowsMock }),
+  app: { getPath: vi.fn(() => '/tmp'), getName: vi.fn(() => 'test') },
+}))
 
 vi.mock('../supervisor/port-discoverer.js', () => ({
   findAvailablePort: vi.fn(async () => 43110),
@@ -62,7 +67,7 @@ vi.mock('../logs/main-logger.js', () => ({
 }))
 
 import { RuntimeSupervisor } from '../supervisor/runtime-supervisor.js'
-import { spawnRuntimeProcess } from '../supervisor/process-control.js'
+import { spawnRuntimeProcess, stopRuntimeProcess } from '../supervisor/process-control.js'
 
 const spawnMock = vi.mocked(spawnRuntimeProcess)
 
@@ -73,6 +78,8 @@ describe('RuntimeSupervisor start() 并发串行化（AM2）', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    // 广播窗口桩恢复空集（防跨用例泄漏——clearAllMocks 不清 mockReturnValue）
+    getAllWindowsMock.mockReturnValue([])
   })
 
   it('两个 start() 同时发起：spawnRuntimeProcess 只被调一次，两端拿到同一端口', async () => {
@@ -119,5 +126,67 @@ describe('RuntimeSupervisor start() 并发串行化（AM2）', () => {
     // 后续重启尝试经同一串行入口运行：child 已活 → 幂等短路，不叠加 spawn
     await vi.advanceTimersByTimeAsync(1_000)
     expect(spawnMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('RuntimeSupervisor restartForConfigChange（toggle 重启编排收口）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    getAllWindowsMock.mockReturnValue([])
+  })
+
+  /** 窗口桩：send 与 stopRuntimeProcess 都记入同一事件序列，断言广播时序。 */
+  function makeEventWindow(events: string[]): { isDestroyed: () => boolean; webContents: { send: (channel: string) => void } } {
+    return {
+      isDestroyed: () => false,
+      webContents: { send: (channel: string) => { events.push(`send:${channel}`) } },
+    }
+  }
+
+  it('广播顺序：runtime-restarting 先于 stop，runtime-port 在成功后（renderer 即时进重连等待态）', async () => {
+    const events: string[] = []
+    getAllWindowsMock.mockReturnValue([makeEventWindow(events)])
+    vi.mocked(stopRuntimeProcess).mockImplementation(async () => { events.push('stop') })
+    const sup = new RuntimeSupervisor()
+    await sup.start()
+    events.length = 0
+    await sup.restartForConfigChange()
+    // restarting 必须先于任何 stop（原 bridge 编排广播晚于动作，本用例锁定修复后的时序）
+    expect(events[0]).toBe('send:runtime-restarting')
+    expect(events.indexOf('send:runtime-restarting')).toBeLessThan(events.indexOf('stop'))
+    expect(events.at(-1)).toBe('send:runtime-port')
+    // 真重启语义：stop 杀旧后必然重新 spawn（第二次），而非幂等短路复用旧实例
+    expect(spawnMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('与手动 start 同窗口并发：经同一串行队列各走完整时序，不双 spawn', async () => {
+    const sup = new RuntimeSupervisor()
+    // start 先排队（真 spawn #1）→ restartForConfigChange 排队后执行（stop 杀旧 + 真spawn #2）
+    const [startPort, restartPort] = await Promise.all([sup.start(), sup.restartForConfigChange()])
+    expect(startPort).toBe(43110)
+    expect(restartPort).toBe(43110)
+    // 每任务恰好一次 spawn；第三次 spawn = 队列失效交错的双 spawn 回归信号
+    expect(spawnMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('失败：reject 上抛且补 runtime-failed 终态广播（不进崩溃退避链），队列不被毒化', async () => {
+    const { waitForHealth } = await import('../supervisor/health-checker.js')
+    vi.mocked(waitForHealth).mockRejectedValueOnce(new Error('health timeout'))
+    const channels: string[] = []
+    getAllWindowsMock.mockReturnValue([{
+      isDestroyed: () => false,
+      webContents: { send: (channel: string) => { channels.push(channel) } },
+    }])
+    const sup = new RuntimeSupervisor()
+    await expect(sup.restartForConfigChange()).rejects.toThrow('health timeout')
+    // 协议闭合：restarting 必有终态广播——失败落 runtime-failed（renderer 经既有
+    // failed 态拿重试按钮），runtime-port 是成功专属；无第二次 restarting = 未进崩溃退避链
+    expect(channels).toEqual(['runtime-restarting', 'runtime-failed'])
+    // 前序失败不毒化队列：后续 start 独立执行成功
+    await expect(sup.start()).resolves.toBe(43110)
   })
 })

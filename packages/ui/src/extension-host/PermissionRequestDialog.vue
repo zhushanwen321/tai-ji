@@ -17,6 +17,7 @@
  * 提交入口（approve/deny 点击）由壳乐观清错。
  */
 import { computed, inject, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../primitives/dialog'
 import { Button } from '../primitives/button'
 import { Checkbox } from '../primitives/checkbox'
@@ -37,6 +38,8 @@ const emit = defineEmits<{
   approve: [permissions: string[]]
   deny: []
 }>()
+
+const { t } = useI18n()
 
 const transport = inject(PERMISSION_TRANSPORT_KEY, null)
 
@@ -95,7 +98,7 @@ function onDeny(): void {
     >
       <DialogHeader>
         <DialogTitle data-testid="permission-dialog-title">{{ pluginId }}</DialogTitle>
-        <DialogDescription>{{ '插件申请了以下权限，批准后即可使用' }}</DialogDescription>
+        <DialogDescription>{{ t('extensionUI.permissionRequestDescription') }}</DialogDescription>
       </DialogHeader>
 
       <!-- 权限列表 -->
@@ -107,7 +110,7 @@ function onDeny(): void {
           @click.prevent="toggleAll"
         >
           <Checkbox :model-value="allSelected" />
-          <span>{{ '全选' }}</span>
+          <span>{{ t('extensionUI.permissionSelectAll') }}</span>
         </label>
         <label
           v-for="perm in permissions"
@@ -122,13 +125,13 @@ function onDeny(): void {
       </div>
 
       <!-- 提交失败错误行（BM3）：弹窗保持打开供重试，role=alert 供辅助技术播报 -->
-      <p v-if="error" role="alert" data-testid="permission-dialog-error">{{ '审批提交失败，请检查连接后重试' }}</p>
+      <p v-if="error" role="alert" data-testid="permission-dialog-error">{{ t('extensionUI.permissionSubmitFailed') }}</p>
 
       <!-- actions -->
       <div class="flex justify-end gap-2 pt-2">
-        <Button variant="ghost" data-testid="permission-reject" @click="onDeny">{{ '拒绝' }}</Button>
+        <Button variant="ghost" data-testid="permission-reject" @click="onDeny">{{ t('extensionUI.permissionDeny') }}</Button>
         <Button variant="default" data-testid="permission-approve" :disabled="selected.length === 0" @click="onApprove">
-          {{ '批准' }}
+          {{ t('extensionUI.permissionApprove') }}
         </Button>
       </div>
     </DialogContent>
