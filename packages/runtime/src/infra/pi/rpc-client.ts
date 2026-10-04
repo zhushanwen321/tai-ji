@@ -740,8 +740,9 @@ export class RpcClient implements IPiEngine {
       }
 
       // pending 注册（pi-rpc registry 部件）：timeout ≤ 0 = 不限时（D2 env 逃生门
-      // 0=不限时，唯一合法入口是 bash RPC——其余命令不得传 ≤0，控制面单请求秒级是
-      // 有界兜底档，规则 19）；不挂墙钟 timer 的形态下 clearTimeout(undefined) 是
+      // 0=不限时，合法入口 = bash RPC + 命令档 prompt（D14③①，见 prompt 注释的超时档位
+      // 纪律登记）——其余命令不得传 ≤0，控制面单请求秒级是有界兜底档，规则 19）；
+      // 不挂墙钟 timer 的形态下 clearTimeout(undefined) 是
       // no-op，resolve/reject 路径天然安全。超时时序（delete → timedOutIds 记入
       // 5s TTL → reject）在部件内与迁移前逐字一致。
       this.pendingRegistry.register(
@@ -954,13 +955,22 @@ export class RpcClient implements IPiEngine {
    * images 为 undefined 或空数组时归一化为不传 images 键（避免 pi 收到空数组），
    * 走与改动前完全一致的路径，零回归。
    */
-  prompt(content: string, images?: Array<{ data: string; mimeType: string }>, streamingBehavior?: 'steer' | 'followUp', options?: SendCommandOptions): Promise<PiMessage> {
+  /**
+   * timeoutMs（pi1-disposition-chat-flow D14③① G3 闸①）：RPC 墙钟超时档（ms），缺省
+   * CMD_TIMEOUT_MS（既有行为零变化）。`0` = 不限时档，**命令条目 prompt 专用**——
+   * 命令 handler 内 await 用户交互（如 /permission rule|model 多步交互）属任务正常路径，
+   * 不允许 60s 墙钟切成失败形态（挂起语义成立，D14③）。sendCommand 契约「timeout ≤ 0
+   * = 不限时」的合法入口由 bash RPC 扩为「bash RPC + 命令档 prompt」（超时档位纪律登记：
+   * 命令档只由投递内核对 D2 识别的命令条目使用，普通消息与其他命令禁止传 ≤0——控制面
+   * 单请求秒级是有界兜底档，任务级豁免仅限「用户主动配置的交互挂起」这一形态）。
+   */
+  prompt(content: string, images?: Array<{ data: string; mimeType: string }>, streamingBehavior?: 'steer' | 'followUp', options?: SendCommandOptions, timeoutMs?: number): Promise<PiMessage> {
     // 帧组装（pi-rpc commands）：images 是 shared 层图片附件形状（无 type 字段），
     // shared→pi ImageContent 的唯一组装点在公共包（pi 私有 type:'image' 不出本层）；
     // 空 images 归一化不传键（避免 pi 收到空数组），与改动前路径完全一致。
     // options 透传（idle-pi-reclamation D1）：维护通道经 prompt 的语义方法形态发起时，
     // maintenance 标记直达 sendCommand touch 排除。
-    return this.sendCommand('prompt', buildPromptParams({ message: content, images, streamingBehavior }), CMD_TIMEOUT_MS, options)
+    return this.sendCommand('prompt', buildPromptParams({ message: content, images, streamingBehavior }), timeoutMs ?? CMD_TIMEOUT_MS, options)
   }
 
   abort(): Promise<PiMessage> {
@@ -1181,8 +1191,8 @@ export class RpcClient implements IPiEngine {
    *
    * 判定优先级：null（取消）> confirm > value。
    * [HISTORICAL] 旧 bridge 场景的 `{id, response}` 包裹分支（method===undefined 且
-   * response 是对象）已删除：唯一调用方 bridge-handler 已全改 stringify+'select'，
-   * 该形态无生产调用方。
+   * response 是对象）已删除：唯一调用方（runtime 内部应答通道，随 plugin-bridge 退役
+   * 删除）此前已全改 stringify+'select'，该形态无生产调用方。
    *
    * 返回 boolean（false = 未写进 pi stdin，透传 sendRaw 语义）：extension UI 应答
    * 承载用户决策，false 时调用方必须终结该请求并上行带码错误（M1/RT-2#8——此前 void

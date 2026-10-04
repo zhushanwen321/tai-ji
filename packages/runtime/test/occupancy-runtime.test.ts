@@ -324,8 +324,10 @@ describe('MessageDispatcher occupancy 挂点', () => {
     expect(promptFn).toHaveBeenCalledTimes(1)
     expect((promptFn.mock.calls[0] as unknown[])[2]).toBe('steer')
     expect(registry.entries('s1')?.active[0]).toMatchObject({ lane: 'steer' })
-    // 受理后置位（D-18）：dispatching 帧取代旧的「零 occupancy 帧」
-    expect(occupancyFrames(publish)).toEqual([{ sessionId: 's1', turn: 'dispatching', compacting: false, bash: false }])
+    // [D3① pi1-disposition-chat-flow] 生成中出站不写 occupancy：置位前置 idle 门（保持
+    // generating 不覆盖，原回合脉冲全程不错乱）——旧「受理后 dispatching 帧取代零帧」
+    // 断言随 idle 门退役；occupancy 归 turn-start / agent_settled 事件驱动
+    expect(occupancyFrames(publish)).toEqual([])
   })
 
   it('#8a prompt 撞 compacting 拒绝（TOCTOU）→ 零拒绝帧/零错误气泡 + 条目留守 queued（D6 持有等 compaction_end）', async () => {

@@ -114,6 +114,16 @@ export interface DeliverySubmitOptions {
    * 'acceptance' 并登记来源清单（ADR-0074 词条）。
    */
   receiptAnchor?: 'marker' | 'acceptance'
+  /**
+   * 命令条目标志（pi1-disposition-chat-flow D14⑥/G3：内核 D2 识别结果随条目下发）。
+   * true = 命令条目（如 `/plan`），内核两处豁免：
+   * - port.send settle 兜底**不武装**（D14③②）：命令 handler 内 await 用户交互属任务
+   *   正常路径，port.send 合法等到 RPC 完成才 settle，60s 墙钟构成跨粒级挪用（挂起语义
+   *   成立；进程死亡由会话级兜底承接，D14①同族）；
+   * - 发送失败**首败即停**（D14⑥）：onSendFail 按 checked 同形态从内核移除、不进
+   *   backoff 重试——「失败 = 可能已执行」，自动重试买不到安全性（重投会重复执行命令）。
+   */
+  isCommand?: boolean
 }
 
 /**
@@ -220,12 +230,14 @@ interface CheckedWaiter {
  * 内核条目：DeliveryEntry + 实现私有字段。msg 为原始消息引用（合批构造 /
  * onSettled 回调身份源）；cancelRequested 为 in-flight 撤销两段式的待收回标记；
  * receiptAnchor 为提交方申报的送达回执锚（D1 申报制，沿 opts.id/opts.lane 持久化
- * 先例直达内部字段——不进 DeliveryEntry 条目视图 DTO，投影面零扩散）。
+ * 先例直达内部字段——不进 DeliveryEntry 条目视图 DTO，投影面零扩散）；
+ * isCommand 为命令条目标志（D14⑥/G3，同一持久化先例，投影面零扩散）。
  */
 interface KernelEntry extends DeliveryEntry {
   msg: DeliveryMessage
   cancelRequested: boolean
   receiptAnchor: 'marker' | 'acceptance'
+  isCommand: boolean
 }
 
 function isThenable(v: unknown): v is Promise<SendReceipt | void> {
@@ -619,37 +631,48 @@ export function createDelivery(
     try {
       const result = port.send(composed, intent)
       if (isThenable(result)) {
-        // 悬挂兜底（b31-D1）：port 契约声明实现必须 settle；适配器违约（promise 永不
-        // settle）时 inFlight 防重永久占位、watchdog/pump 全被短路 → handle 停摆。
-        // 超时按发送失败收口（warn 留痕 + 错误重试链），量级 = 控制面单请求秒级
-        // （C-proc-19）。settled 单向闩：超时强制失败后迟到的原 settle 不得二次驱动
-        // 状态机（重复投递代价已在 DeliveryPort.send 契约登记）。
-        let settled = false
-        clearHangTimer()
-        hangTimer = setTimeout(() => {
-          if (settled || disposed) return
-          settled = true
-          hangTimer = undefined
-          warn(
-            `port.send hung; force-failed after ${PORT_SEND_SETTLE_TIMEOUT_MS}ms ` +
-              '(retries may duplicate-deliver; see DeliveryPort.send settle contract)',
+        // [D14③②] settle 兜底对命令条目不武装：批内含命令条目时 port.send 合法等到
+        // 命令 handler 完成（含 await 用户交互，如 /permission rule|model）才 settle——
+        // 60s 墙钟对任务正常路径构成跨粒级挪用（回收层有界兜底的按条目豁免，D14③②）。
+        // 进程死亡等极端形态由会话级兜底承接（D14① 同族），命令条目无墙钟上限（D14②）。
+        if (batch.some((e) => e.isCommand)) {
+          result.then(
+            (receipt) => onSendReceipt(receipt),
+            (err: unknown) => onSendFail(err),
           )
-          onSendFail(new Error(`port.send promise did not settle within ${PORT_SEND_SETTLE_TIMEOUT_MS}ms`))
-        }, PORT_SEND_SETTLE_TIMEOUT_MS)
-        result.then(
-          (receipt) => {
-            if (settled) return
+        } else {
+          // 悬挂兜底（b31-D1）：port 契约声明实现必须 settle；适配器违约（promise 永不
+          // settle）时 inFlight 防重永久占位、watchdog/pump 全被短路 → handle 停摆。
+          // 超时按发送失败收口（warn 留痕 + 错误重试链），量级 = 控制面单请求秒级
+          // （C-proc-19）。settled 单向闩：超时强制失败后迟到的原 settle 不得二次驱动
+          // 状态机（重复投递代价已在 DeliveryPort.send 契约登记）。
+          let settled = false
+          clearHangTimer()
+          hangTimer = setTimeout(() => {
+            if (settled || disposed) return
             settled = true
-            clearHangTimer()
-            onSendReceipt(receipt)
-          },
-          (err: unknown) => {
-            if (settled) return
-            settled = true
-            clearHangTimer()
-            onSendFail(err)
-          },
-        )
+            hangTimer = undefined
+            warn(
+              `port.send hung; force-failed after ${PORT_SEND_SETTLE_TIMEOUT_MS}ms ` +
+                '(retries may duplicate-deliver; see DeliveryPort.send settle contract)',
+            )
+            onSendFail(new Error(`port.send promise did not settle within ${PORT_SEND_SETTLE_TIMEOUT_MS}ms`))
+          }, PORT_SEND_SETTLE_TIMEOUT_MS)
+          result.then(
+            (receipt) => {
+              if (settled) return
+              settled = true
+              clearHangTimer()
+              onSendReceipt(receipt)
+            },
+            (err: unknown) => {
+              if (settled) return
+              settled = true
+              clearHangTimer()
+              onSendFail(err)
+            },
+          )
+        }
       } else {
         onSendReceipt(result)
       }
@@ -710,13 +733,20 @@ export function createDelivery(
     // 交给调用方，不做幽灵重试——调用方收到 reject 后自行决定重发；不产 tombstone，
     // 未进通道的消息无判重语义）
     const rejected = settleChecked(inflightBatch, err, checkedPending)
-    if (rejected.size > 0) {
-      inflightBatch = inflightBatch.filter((e) => !rejected.has(e))
-      for (const e of rejected) removeActive(e)
+    // [D14⑥] 命令条目首败即停：非 checked 命令条目（send() 通路提交）按 checked 同
+    // 形态从内核移除、不进 backoff——命令不注标出站（D2②）后「失败 = 可能已执行」，
+    // 自动重试买不到安全性（重投会重复执行命令）；与 checked 首败即停（入口即拦，
+    // 「不做幽灵重试」语义）和 G2 修法（不重投）同原则。无 waiter 可 reject（无 checked
+    // 挂账），移除即失败面收口（不产 tombstone，未进通道无判重语义）。
+    const commandFailed = inflightBatch.filter((e) => e.isCommand && !rejected.has(e))
+    if (rejected.size > 0 || commandFailed.length > 0) {
+      const dropped = new Set<KernelEntry>([...rejected, ...commandFailed])
+      inflightBatch = inflightBatch.filter((e) => !dropped.has(e))
+      for (const e of dropped) removeActive(e)
       notifyChange()
     }
     if (inflightBatch.length === 0) {
-      // 全部为 checked 且已 reject：无需重试
+      // 全部为 checked 且已 reject / 命令条目已即停：无需重试
       inFlight = false
       inflightBatch = []
       sendAttempts = 0
@@ -872,6 +902,7 @@ export function createDelivery(
       msg,
       cancelRequested: false,
       receiptAnchor: opts?.receiptAnchor ?? 'marker',
+      isCommand: opts?.isCommand ?? false,
     }
     active.push(entry)
     activeIndex.set(entry.id, entry)

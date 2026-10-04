@@ -7,7 +7,7 @@
  *      （W18 采集异步化：diffChain 串行链 + turnGen 代际 + turnFinalizing 压制，03 D3-3）
  *   3. context 事件失效（sessionService.applyContextUpdate——W12 起只做 usage 实例失效，
  *      context.update 广播由快照应用后的挂钩发布）
- *   4. status/bridge/extension-ui 路由到 server（注册超时 / 处理 bridge 请求）
+ *   4. status/extension-ui 路由到 server（注册超时）
  *   5. subagent/workflow record 失效信号（W18 D4：entry_appended 主信号 + bg-notify/
  *      workflow-result/tool-call-end 兜底信号 → onRecordEntriesInvalidated——事件直写
  *      退役，数据写路径唯一 = journal 投影重算（sessionService 派生缓存是投影快照镜像））
@@ -36,7 +36,7 @@
  * [R-09] turn-start 不再采 baseline——diffSnapshots 输出只依赖 current（死参数已删）。
  *
  * 依赖经构造注入：send（WS 帧）、fileChangeDiff（port，git 纯函数经组合根注入）、
- * 各业务回调（executeHooks / contextUpdate / thinkingLevel / status/bridge/extension-ui 路由）。
+ * 各业务回调（executeHooks / contextUpdate / thinkingLevel / status/extension-ui 路由）。
  */
 import type { ServerMessage, ServerMessageType } from '@taiji/shared'
 import type { FileChange } from '@taiji/shared'
@@ -68,6 +68,9 @@ import type {
   SessionOccupancyTransition,
   UserStoppedMarkStore,
 } from './types.js'
+// pi 事件名经常量表具名出口引用（pi1-disposition-chat-flow U3⑦，D5⑥ 字面量单点化——
+// onPiEvent 派发载荷 / hook 变体判别的字符串完整值 = 扫描词表词，字面量直写即违规）
+import { PI_EVENT } from '../../infra/pi/pi-protocol.js'
 
 /**
  * occupancy 的 idle 初值（session-occupancy-send-closure D3）：registerSession 初始化与
@@ -413,63 +416,11 @@ export class UserStoppedGate {
 /** 模块级单例（生产挂点与调用方共用；SessionService 构造时 configure）。 */
 export const userStoppedGate = new UserStoppedGate()
 
-/**
- * 命令-only prompt 的 occupancy 收口窗口长度（CP6，scheduler-trigger-inversion §11 CP6）。
- *
- * 量级 = **控制面**（2s）：正常 turn 的 turn-start 在 prompt 回包后毫秒级到达，2s 是给
- * 回包与事件回调之间的调度留量；**不是**给任务执行加的墙钟预算。
- */
-export const OCCUPANCY_SETTLE_WINDOW_MS = 2_000
-
-/**
- * 命令-only prompt 的 occupancy 收口窗口（CP6）。
- *
- * 背景（实测确认，pi-semantics PS-44）：pi 对 `/` 开头文本先 `await _tryExecuteExtensionCommand`、
- * 再 `preflightResult?.(true)`——纯命令（如 `/schedule list`）不产任何 turn 事件；而 dispatcher 的
- * `markSessionActive` 已在 `client.prompt` 前把 `occupancy.turn` 置 `dispatching` ⇒ 该维度
- * 永远卡住（按钮变 stop、下一条消息被 busy 预检拒/转 steer 静默吞）。修法 = prompt resolve
- * 后武装 2s 短窗：期间无任何 turn 事件则回落 idle。
- *
- * 幂等门：回调只在 `occupancy.turn === 'dispatching'` 时回落（不覆盖 agent_start/
- * generating/settling）；`agent_start` / `turn_start` 到达即 cancel——「自派发以来未观察到
- * 任何 turn 事件」由取消语义构造性保证，而非在回调里追状态。
- *
- * 为什么是模块级单例：窗口由 dispatcher（arm）与 interpreter（turn 事件 cancel）两类共用，
- * 且 interpreter 按 session 构造（多实例）、dispatcher 单实例——单例是唯一无环通路
- * （同 userStoppedGate 范式）。
- */
-class OccupancySettleWindow {
-  private readonly timers = new Map<string, ReturnType<typeof setTimeout>>()
-
-  /** 武装短窗（重复武装先取消旧窗）。onElapsed 在到期且未被 turn 事件取消时同步调用。 */
-  arm(sessionId: string, onElapsed: () => void): void {
-    this.cancel(sessionId)
-    const timer = setTimeout(() => {
-      this.timers.delete(sessionId)
-      onElapsed()
-    }, OCCUPANCY_SETTLE_WINDOW_MS)
-    // 控制面 timer 不阻塞进程退出（对齐 userStoppedGate / pi-respawn.armTimer 惯例）
-    timer.unref?.()
-    this.timers.set(sessionId, timer)
-  }
-
-  /** turn 事件到达 / session 清理：取消窗口（幂等）。 */
-  cancel(sessionId: string): void {
-    const timer = this.timers.get(sessionId)
-    if (timer === undefined) return
-    clearTimeout(timer)
-    this.timers.delete(sessionId)
-  }
-
-  /** 测试辅助：重置全部窗口（跨用例隔离；生产不调用）。 */
-  resetForTest(): void {
-    for (const timer of this.timers.values()) clearTimeout(timer)
-    this.timers.clear()
-  }
-}
-
-/** 模块级单例（dispatcher 武装 / interpreter turn 事件取消共用）。 */
-export const occupancySettleWindow = new OccupancySettleWindow()
+// [D3③ pi1-disposition-chat-flow] CP6 回落窗（OCCUPANCY_SETTLE_WINDOW_MS /
+// OccupancySettleWindow / occupancySettleWindow）已整体退役：空闲发命令后 occupancy 的
+// 回落改由 pi 权威事实驱动——handled 响应即回落（session-delivery-registry deliverOne），
+// started 形态下回合事件异常不可达的防悬挂由 sweepInFlight occupancy 收尾承接
+//（transcript / 命令清单事实凭据，非时间窗）。时间平抑类机制净减一（D3④ ADR 登记）。
 
 /** plain object 判定（type-safety review：plugin hook 返回值是不可信边界——Worker/
  * sandbox 里的第三方代码可返回任意值，改写前必须 shape 守卫，畸形值丢弃改写保原值）。 */
@@ -548,8 +499,6 @@ export interface EventInterpreterOptions {
    * 组合根注入 server.handleSessionManagerRequest。
    */
   onSessionManagerRequest?: (requestId: string, sessionId: string, action: SessionManagerAction | '__malformed__', params: Record<string, unknown>) => void
-  /** bridge:* 前缀请求（直接路由不经前端超时）。组合根注入 server.handleBridgeRequest。 */
-  onBridgeUIRequest?: (requestId: string, sessionId: string, method: string, data: Record<string, unknown>) => void
   /** extension setStatus（路由到 statusline builtin 插件，status-bar-registry 广播）。组合根注入 server.handleStatusSetUpdate。 */
   onStatusSetUpdate?: (payload: { sessionId: string; key: string; text: string; textRaw?: string }) => void
   /**
@@ -681,7 +630,6 @@ const HANDLED_EVENT_KINDS: Record<PiTranslatedEvent['kind'], true> = {
   'llm-first-output': true,
   'status-set': true,
   'status-broadcast': true,
-  'bridge-ui': true,
   'extension-ui': true,
   'session-manager-ui': true,
   'thinking-level': true,
@@ -868,7 +816,7 @@ export class EventInterpreter {
    * - 本函数：结构编排 case（tool-call 异步 handler / compaction 终态）+ 余量分流；
    * - handleConversationEvent：对话内容流帧（message / subagent-stream / record 失效）；
    * - handleTurnLifecycleEvent：turn 生命周期（turn-start/end/usage + settled + trace）；
-   * - handleRoutingEvent：server 路由回调（status/bridge/extension/session-manager）；
+   * - handleRoutingEvent：server 路由回调（status/extension/session-manager）；
    * - handleMetaEvent：元数据与观测 hook 回调（thinking/renamed/hook）。
    * 五段合计覆盖与原单一 switch 的 case 集合逐一对应，命中语义与分发顺序不变。
    */
@@ -914,6 +862,15 @@ export class EventInterpreter {
         return true
       case 'message':
         this.opts.send(ev.message)
+        // pi1-disposition-chat-flow U4⑤（D7③ stdout 单一通路）：message_end 的 onPiEvent
+        // 观测登记点——bridge 转发链退役后插件事件感知唯一通路 = 本 stdout 触发点族
+        //（agent_start/tool_execution_*/agent_end 既有 + 本次补 message_end/turn_end）。
+        // message_end 是同形剔除词（pi-protocol PiEventNameHomoglyphExempt），字面量直写不违规
+        //（U4 同文件协调声明口径）；载荷 = 帧携带的 entry（持久化锚定载体，与 reload 同构）。
+        if (ev.message.type === 'message.message_end') {
+          const endPayload = ev.message.payload as { entry?: unknown } | undefined
+          this.opts.executeHooks?.('onPiEvent', { event: 'message_end', entry: endPayload?.entry }).catch(() => {})
+        }
         // composer-gen-stats（genstats-speed-llm-window D1/D2）：assistant message_end 帧 =
         // LLM 请求窗口闭合点（先于工具执行到达，pi 语义 P1）→ 结算窗口时长（role 守卫与
         // payload 防御提取在协作对象内）。委托原样保留转发后的调用位置——闭合时点语义不变。
@@ -949,9 +906,6 @@ export class EventInterpreter {
         // [R-09 简化] 原 turn-start 同步采 baseline 快照已删除——diffSnapshots 的 baseline
         // 参数是死参数（[HISTORICAL] dirty 漏报修复后输出只依赖 current），turn-start 采集
         // 是每 turn 一次的纯浪费（W18 前为 execSync 同步阻塞）。
-        // CP6：turn 事件到达 → 取消命令-only 收口窗口（幂等门的前半，
-        // 与下方 occupancy #2 同点——窗口不得覆盖真实 turn 状态）。
-        occupancySettleWindow.cancel(this.sessionId)
         this.currentMessageId = ev.messageId
         this.turnGen += 1
         this.turnFinalizing = false
@@ -979,6 +933,18 @@ export class EventInterpreter {
         // 不转发 message.complete（避免每 turn 触发 setStreaming 闪烁；
         // message.complete 仍由 turn-end/agent_end 独占）。
         this.opts.onContextUpdate?.(ev.sessionId, { inputTokens: ev.inputTokens, totalTokens: ev.totalTokens })
+        // pi1-disposition-chat-flow U4⑤（D7③ stdout 单一通路）：turn_end 的 onPiEvent 观测
+        // 登记点（同上方 message_end 登记）。挂本 case 的语义边界：无 usage 的 turn_end 在
+        // event-adapter 既有 gate（handleTurnEndPi totalTokens 缺失 return []）处不可达——
+        // stdout 通路既有形态，按需登记原则下接受，非本次重构引入。载荷 = turn-usage 事件
+        // 已提取的用量字段平铺（无值编码 null 缺省不落键，与帧载荷同纪律）。
+        this.opts.executeHooks?.('onPiEvent', {
+          event: PI_EVENT.turnEnd,
+          totalTokens: ev.totalTokens,
+          ...(ev.outputTokens !== null ? { outputTokens: ev.outputTokens } : {}),
+          ...(ev.cacheRead !== null ? { cacheRead: ev.cacheRead } : {}),
+          ...(ev.cacheWrite !== null ? { cacheWrite: ev.cacheWrite } : {}),
+        }).catch(() => {})
         this.opts.onTurnUsage?.(ev.sessionId)
         // composer-gen-stats（D1/D2）：组装生成指标样本采样（fire-and-forget 同步，不阻塞事件流）。
         // durationMs 取 llmWindowDurationMs（assistant message_start → message_end 的 LLM 请求
@@ -1075,9 +1041,6 @@ export class EventInterpreter {
       case 'status-broadcast':
         this.opts.send(ev.message)
         return true
-      case 'bridge-ui':
-        this.opts.onBridgeUIRequest?.(ev.requestId, ev.sessionId, ev.method, ev.data)
-        return true
       case 'session-manager-ui':
         // fire-and-forget（不 await），由 SessionManagerHandler 异步处理并回写 response，
         // 不走前端 UI 超时流程。
@@ -1111,10 +1074,8 @@ export class EventInterpreter {
         // D4 收敛环挂点：标记存活期内（收敛环活跃），非显式投递引发的 agent_start 一律
         // 再 abort（掐 notify replay 补发腿 / scheduler / auto-retry 开的 turn）。环未活跃
         // 时 no-op——正常会话（含显式投递开 turn）零额外开销（Map get 即返）。
-        if (ev.eventType === 'agent_start') {
+        if (ev.eventType === PI_EVENT.agentStart) {
           userStoppedGate.noteAgentStart(this.sessionId)
-          // CP6：agent_start 到达 → 取消命令-only 收口窗口（幂等门的前半）。
-          occupancySettleWindow.cancel(this.sessionId)
         }
         // agent_start 等纯观测事件（无 WS 帧产出）
         this.opts.executeHooks?.('onPiEvent', { event: ev.eventType, ...ev.data }).catch(() => {})
@@ -1157,12 +1118,12 @@ export class EventInterpreter {
       // onBeforeToolCall hook 失败（catch 分支）时仍触发 onPiEvent（不因 hook 失败丢观测事件）。
       // contentIndex 锚点不再被消费，同步清理（防 Map 残留）。
       this.toolCallContentIndex.delete(toolCallId)
-      this.opts.executeHooks?.('onPiEvent', { event: 'tool_execution_start', toolCallId, toolName, input, blocked: true }).catch(() => {})
+      this.opts.executeHooks?.('onPiEvent', { event: PI_EVENT.toolExecutionStart, toolCallId, toolName, input, blocked: true }).catch(() => {})
       return
     }
 
     // 观测 hook（tool_execution_start）
-    this.opts.executeHooks?.('onPiEvent', { event: 'tool_execution_start', toolCallId, toolName, input }).catch(() => {})
+    this.opts.executeHooks?.('onPiEvent', { event: PI_EVENT.toolExecutionStart, toolCallId, toolName, input }).catch(() => {})
 
     // [W21] hook 改写同步回 entry（WS 帧只发 entry——实时 feed 权威载体与 hook 语义一致）；
     // contentIndex 锚点（§11 检查点 3：pi toolcall_start 提供，模型输出 tool_use 时——无此锚点
@@ -1215,7 +1176,7 @@ export class EventInterpreter {
     }
 
     // 观测 hook（tool_execution_end）
-    this.opts.executeHooks?.('onPiEvent', { event: 'tool_execution_end', toolCallId, output, details, images }).catch(() => {})
+    this.opts.executeHooks?.('onPiEvent', { event: PI_EVENT.toolExecutionEnd, toolCallId, output, details, images }).catch(() => {})
 
     // ADR-0024 D5：失败的调用不触发 diff（避免噪声）；实时 diff
     if (!isError) {
@@ -1273,7 +1234,7 @@ export class EventInterpreter {
     this.opts.onOccupancyTransition?.('settling')
 
     // 观测 hook（agent_end）
-    this.opts.executeHooks?.('onPiEvent', { event: 'agent_end', stopReason: ev.stopReason, usage: ev.usage }).catch(() => {})
+    this.opts.executeHooks?.('onPiEvent', { event: PI_EVENT.agentEnd, stopReason: ev.stopReason, usage: ev.usage }).catch(() => {})
 
     // ADR-0024 D5：agent_end 推 ready 全集（diff 最终结果）。
     // W18 帧序三件套：turn-end 置 turnFinalizing（其后迟到的 accumulating no-op）；

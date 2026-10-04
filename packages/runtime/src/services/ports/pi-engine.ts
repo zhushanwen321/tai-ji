@@ -169,8 +169,15 @@ export interface IPiEngine {
    * - 'followUp'：streaming 时入队，run 结束后注入（等价于 pi followUp）
    *
    * U1 仅开通能力，不改现有调用方行为；U5 session-manager send 排队时消费。
+   *
+   * timeoutMs（pi1-disposition-chat-flow D14③① G3 闸①）：RPC 墙钟超时档（ms）。
+   * 缺省 = CMD_TIMEOUT_MS（既有行为）；`0` = **不限时档**——命令条目 prompt 专用
+   * （sendCommand 契约：timeout ≤ 0 = 不限时，合法入口 = bash RPC + 命令档，扩展准入
+   * 按超时档位纪律登记于 rpc-client prompt）。理由：命令 handler 内 await 用户交互属
+   * 任务正常路径（如 /permission rule|model 多步交互），任务级正常路径禁止自带墙钟
+   * 超时（项目原则），60s 墙钟对它构成跨粒级挪用。
    */
-  prompt(content: string, images?: Array<{ data: string; mimeType: string }>, streamingBehavior?: 'steer' | 'followUp', options?: SendCommandOptions): Promise<PiMessage>
+  prompt(content: string, images?: Array<{ data: string; mimeType: string }>, streamingBehavior?: 'steer' | 'followUp', options?: SendCommandOptions, timeoutMs?: number): Promise<PiMessage>
   abort(): Promise<PiMessage>
   steer(content: string): Promise<PiMessage>
   followUp(content: string): Promise<PiMessage>

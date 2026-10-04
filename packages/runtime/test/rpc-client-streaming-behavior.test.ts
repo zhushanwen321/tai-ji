@@ -180,15 +180,16 @@ describe('RpcClient.prompt streamingBehavior 透传（U1: session-delivery）', 
     expect(cmd.streamingBehavior).toBe('followUp')
   })
 
-  it('U2: 端口签名 arity——prompt 接受 4 个参数（content, images?, streamingBehavior?, options?）', () => {
+  it('U2: 端口签名 arity——prompt 接受 5 个参数（content, images?, streamingBehavior?, options?, timeoutMs?）', () => {
     // 编译期类型测试：IPiEngine.prompt 的参数数量由 TypeScript 保证，
-    // 运行期断言 RpcClient.prompt 的 length（4 = content + images + streamingBehavior + options）
+    // 运行期断言 RpcClient.prompt 的 length（5 = content + images + streamingBehavior + options + timeoutMs）
     const client = new RpcClient({ ...clientOpts, cwd: '/tmp', sessionId: 'arity-check' })
-    // prompt.length 是声明参数数（不含有默认值的参数），4 个参数 = arity 4。
+    // prompt.length 是声明参数数（不含有默认值的参数），5 个参数 = arity 5。
     // 第 4 参 options（SendCommandOptions）为 R8① maintenance 透传（idle-pi-reclamation D1）：
-    // 维护通道经 prompt 语义方法发起，maintenance 标记直达 sendCommand touch 排除，
-    // 已提交的设计演化——本断言由 3 同步为 4。
-    expect(client.prompt.length).toBe(4)
+    // 维护通道经 prompt 语义方法发起，maintenance 标记直达 sendCommand touch 排除；
+    // 第 5 参 timeoutMs（pi1-disposition-chat-flow D14③①）为命令档墙钟档位（0 = 不限时，
+    // 仅命令条目 prompt 使用）——已提交的设计演化，本断言由 4 同步为 5。
+    expect(client.prompt.length).toBe(5)
   })
 
   it('U2: 端口签名 arity——只传 images 不传 streamingBehavior 时，images 透传但 streamingBehavior 不出现', async () => {

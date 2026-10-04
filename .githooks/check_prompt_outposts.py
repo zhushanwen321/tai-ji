@@ -80,6 +80,14 @@ OUTPOST_CALLSITES = [
         "client.prompt(injection.text, undefined, streamingBehavior) 已替换",
     ),
     (
+        "services/session/session-delivery-registry.ts",
+        "await client.prompt(text, opts.images, opts.behavior, undefined, 0)",
+        "injected",
+        "[U1 D14③] 同上一条目出站点的命令档条件传参形态（G3 三闸联动：第 4 参无附件、"
+        "第 5 参 0=不限时档，仅命令条目走此分支）：文本同为 deliverOne 注入后文本，"
+        "注入语义与上一条目完全一致，仅超时档位参数差异",
+    ),
+    (
         "services/session/session-records.ts",
         "/subagents message ${params.subagentId}",
         "injected",

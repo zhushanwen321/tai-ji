@@ -462,6 +462,39 @@ export interface PiAutoRetryEndEvent extends PiBaseMessage {
   finalError?: string
 }
 
+/**
+ * 压缩/分支摘要重试排定事件（pi1-disposition-chat-flow U3⑤，D12 登记三事件之一）。
+ * pi 0.84.4 dist/core/agent-session.js `_summarizationRetryCallbacks`（:2952-2971）实发：
+ * onRetryScheduled → { type, attempt, maxAttempts, delayMs, errorMessage }。
+ */
+export interface PiSummarizationRetryScheduledEvent extends PiBaseMessage {
+  type: 'summarization_retry_scheduled'
+  attempt: number
+  maxAttempts: number
+  delayMs: number
+  errorMessage: string
+}
+
+/**
+ * 压缩/分支摘要重试单次尝试开始事件（D12 三事件之二）。pi 0.84.4 实发两变体
+ * （agent-session.d.ts:96-102）：`{ source: 'branchSummary' }` 与
+ * `{ source: 'compaction', reason }`——reason 仅 compaction 源携带，故可选。
+ */
+export interface PiSummarizationRetryAttemptStartEvent extends PiBaseMessage {
+  type: 'summarization_retry_attempt_start'
+  source: 'branchSummary' | 'compaction'
+  /** compaction 源专有：触发压缩的原因（branchSummary 变体不携带）。 */
+  reason?: PiCompactionReason
+}
+
+/**
+ * 压缩/分支摘要重试收尾事件（D12 三事件之三）。pi 0.84.4 onRetryFinished →
+ * `{ type }`（agent-session.js:2970），无载荷字段。
+ */
+export interface PiSummarizationRetryFinishedEvent extends PiBaseMessage {
+  type: 'summarization_retry_finished'
+}
+
 /** Thinking level 取值（pi thinking 配置）。 */
 export type PiThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
@@ -833,6 +866,12 @@ export interface GetEntriesResponse {
 export type { PiInputDisposition }
 
 /**
+ * services 层消费用的内部别名（check_pi_type_leak 口径：PiXxx 标识符只许 infra/pi 内部驻留，
+ * services 经此中性名消费同一词表——D5① 翻译口径的最小形态：值域与语义零变化，仅名字翻译）。
+ */
+export type InputDisposition = PiInputDisposition
+
+/**
  * 从 RPC 响应解析 disposition（B3 兼容式）：pi < 1.0.0 或 mock 无该字段 → undefined
  *（调用方行为与现状完全一致）；非法值（协议漂移）→ undefined + warn 可观测。
  * 唯一调用点 = rpc-client sendCommand 出口（解析结果挂 PiMessage.disposition 透传上层）。
@@ -848,6 +887,41 @@ export function parseInputDisposition(msg: PiMessageLike): PiInputDisposition | 
 /** parseInputDisposition 的最小结构入参（PiMessage 的结构子集）。 */
 export interface PiMessageLike {
   data?: Record<string, unknown>
+}
+
+/**
+ * 从 get_commands 响应解析**扩展命令** name 集合（pi1-disposition-chat-flow D2①，P5 已核实）：
+ * 响应 `data.commands` 含三类条目——`source:"extension"`（name = pi 侧 invocationName，同名
+ * 扩展命令注册时带 `:N` 消歧后缀）/ `source:"prompt"` 模板 / `source:"skill"`（name 带
+ * `skill:` 前缀）。命令识别集只收 extension 条目：pi 侧命令接管判定 `getCommand` 只查扩展
+ * 注册命令（resolveRegisteredCommands），skill 与模板经展开走正常回合（started）不属接管——
+ * source 过滤是「识别集两侧同一判定口径」的成立前提（D2①）。
+ * 响应畸形（data.commands 非数组）→ 空集（调用方按清单缺失兜底：全量按普通消息出站）。
+ */
+export function extractExtensionCommandNames(msg: PiMessageLike): Set<string> {
+  const out = new Set<string>()
+  const commands = msg.data?.commands
+  if (!Array.isArray(commands)) return out
+  for (const item of commands) {
+    const c = item as { name?: unknown; source?: unknown }
+    if (c.source !== 'extension') continue
+    if (typeof c.name === 'string' && c.name !== '') out.add(c.name)
+  }
+  return out
+}
+
+/**
+ * 命令识别（D2①）：文本以 `/` 开头且首个空格前段剥去前导 `/` 后与清单 name **逐字精确匹配**
+ * → 返回该 name；否则 undefined。两侧同口径剥斜杠：pi 侧命令名提取 = `text.slice(1, spaceIndex)`
+ * （agent-session.js _tryExecuteExtensionCommand 实读），清单 name 无 `/` 前缀。清单 name 的
+ * 非裸形态（同名扩展命令的 `:N` 消歧后缀）由逐字匹配自然覆盖：用户输入裸 name 时 pi 侧同样
+ * miss（两侧行为一致），输入带后缀 name 时两侧同样命中——不发明归一化规则。
+ */
+export function matchCommandName(text: string, names: ReadonlySet<string>): string | undefined {
+  if (!text.startsWith('/')) return undefined
+  const spaceIndex = text.indexOf(' ')
+  const candidate = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex)
+  return names.has(candidate) ? candidate : undefined
 }
 
 /**
@@ -891,6 +965,100 @@ export type PiEvent =
   | PiSessionInfoChangedEvent
   | PiAgentSettledEvent
   | PiExtensionErrorEvent
+  // summarization_retry_* 三事件（U3⑤，D12 登记——压缩/分支摘要重试状态，呈现层已有
+  // compaction 主链路覆盖，event-adapter 显式 no-op 不进 default warn）
+  | PiSummarizationRetryScheduledEvent
+  | PiSummarizationRetryAttemptStartEvent
+  | PiSummarizationRetryFinishedEvent
+
+// ── 事件名字面量常量表（pi1-disposition-chat-flow U3⑦，D5⑥ 字面量单点化）──────────
+
+/**
+ * pi 事件名字面量常量表——词表词字符串字面量在仓内的唯一驻留点（D5⑥：判别 / 派发载荷
+ * 形态 = 字符串完整值 ∈ 词表，services 层引用一律经下方具名出口 `PI_EVENT`，字面量直写
+ * 即违规；日志模板串内嵌 / 无引号对象键两形态不在检查面，见设计 D5⑤④口径边界登记）。
+ *
+ * 本表同时是 `check_pi_type_leak.py` 事件名项扫描词表的派生载体（D5⑤实装口径⑤：检查器
+ * 启动时定位本导出符号、提取方括号内带引号字符串字面量建词表，定位失败或空表 fail-fast
+ * 退出非 0；每次运行摘要行输出词表基数）。同形剔除词（下方 HomoglyphExempt）不进本表。
+ *
+ * 同源维护由两层编译期断言机器强制（D5⑥，非文件位置约定）：
+ * - **子集层**：`as const satisfies readonly PiEvent['type'][]`——表内出现非联合判别值的
+ *   词（手抄错词）即 tsc 红（TS2820，带 Did-you-mean）；
+ * - **穷尽层**：`PiEventNameDriftGuard` 的 ExpectNever——联合扩成员而本表与剔除集均未
+ *   收新成员时 Exclude 产物非 never，tsc 红（TS2344，错误消息点名缺失词）。
+ * 联合新成员触发红灯时，须在「进本表（进扫描词表，检查面自动扩）」与「进剔除集（同形词，
+ * 按界定规则②同步本文件剔除集类型与检查器头注 + ADR 登记）」之间显式裁决。
+ */
+export const PI_EVENT_NAMES = [
+  'agent_start',
+  'agent_end',
+  'turn_start',
+  'turn_end',
+  'message_start',
+  'message_update',
+  'tool_execution_start',
+  'tool_execution_update',
+  'tool_execution_end',
+  'extension_ui_request',
+  'compaction_start',
+  'auto_retry_start',
+  'auto_retry_end',
+  'thinking_level_changed',
+  'queue_update',
+  'session_info_changed',
+  'extension_error',
+  'summarization_retry_scheduled',
+  'summarization_retry_attempt_start',
+  'summarization_retry_finished',
+] as const satisfies readonly PiEvent['type'][]
+
+/** 词表成员类型（常量表值域）。 */
+export type PiEventName = (typeof PI_EVENT_NAMES)[number]
+
+/**
+ * 同形剔除集（事件名词表界定规则②，D5⑤）：与 taiji 内部词表同形的 6 词不进扫描词表
+ * 防误报。构成（源码锚点逐项核实见设计 D5⑤②）：
+ * - trace-trigger 联合判别值 3 词：message_end / agent_settled / entry_appended
+ *  （services/session/types.ts PiTranslatedEvent 的 trigger 联合——pi 原始事件名作 taiji
+ *   侧触发标签，已属 taiji 自有词表成员）；
+ * - compaction_end 1 词（taiji 侧第四类触发信号 onTraceSync 传值；注意 taiji 侧判别值是
+ *   连字符 'compaction-end'，pi 原词不是任何 taiji 类型的判别值）；
+ * - 通用词 2 词：status / error（taiji 通用词汇大面积同形）。
+ * 剔除代价：这 6 词上的 L2 型泄漏（services 层直听 pi 原始事件流）检不住——残余防线分档
+ * 登记见设计 D5⑤②（trace-trigger 3 词有类型约束防线；compaction_end 无类型约束，防线
+ * 强度最低，靠评审承接）。扩联合新增同形词时的归宿裁决入口 = 上方穷尽断言编译红。
+ */
+type PiEventNameHomoglyphExempt =
+  | 'message_end'
+  | 'agent_settled'
+  | 'entry_appended'
+  | 'compaction_end'
+  | 'status'
+  | 'error'
+
+/**
+ * 穷尽层断言（D5⑥ 双向断言的第二向；ExpectNever 形态沿本文件 ThinkingLevelDriftGuard
+ * 先例——导出仅为编译期断言锚定，防 unused，运行时零存在）：联合判别值全集 − 表值域 −
+ * 同形剔除集 ≡ never。表漏收联合新成员（且剔除集也未收）时 Exclude 产物非 never，编译红。
+ */
+export type PiEventNameDriftGuard = [
+  Expect<typeof PI_EVENT_NAMES extends readonly PiEvent['type'][] ? true : false>,
+  ExpectNever<Exclude<PiEvent['type'], PiEventName | PiEventNameHomoglyphExempt>>,
+]
+
+/**
+ * 消费侧具名出口（services 层引用 pi 事件名经此导入，字面量直写即违规——U3⑦
+ * event-interpreter 5 处字面量改导入常量的载体）。值恒为词表成员（`satisfies` 写错词即
+ * 编译红）；键 = taiji 侧语义名。仅登记现存消费词，新消费点按需补行。
+ */
+export const PI_EVENT = {
+  agentStart: 'agent_start',
+  agentEnd: 'agent_end',
+  turnEnd: 'turn_end',
+  toolExecutionStart: 'tool_execution_start',
+  toolExecutionEnd: 'tool_execution_end',
+} satisfies Record<string, PiEventName>
 
 /** Any message that can arrive from pi (response or event). */
 export type PiAnyIncomingMessage =

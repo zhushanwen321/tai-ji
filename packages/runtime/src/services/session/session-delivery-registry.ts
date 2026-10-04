@@ -44,12 +44,10 @@ import type { IManagedSessionView } from './types.js'
 import { LateBoundSkillSource, SkillInjector } from './skill-injector.js'
 import { publishSkillNotices } from './skill-notice-publisher.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
-import {
-  applySessionOccupancyTransition,
-  IDLE_SESSION_OCCUPANCY,
-  occupancySettleWindow,
-  userStoppedGate,
-} from './event-interpreter.js'
+import { applySessionOccupancyTransition, userStoppedGate } from './event-interpreter.js'
+import { extractExtensionCommandNames, matchCommandName } from '../../infra/pi/pi-protocol.js'
+import type { InputDisposition } from '../../infra/pi/pi-protocol.js'
+import { classifyPromptRejection, type PromptRejectionReason } from '../../infra/pi/pi-rejection.js'
 
 /** 组合根注入的装配材料（全部窄签名，测试可 mock） */
 export interface SessionDeliveryDeps {
@@ -84,6 +82,12 @@ export interface DeliverySubmitResult {
   clientUuid: string
   state: DeliveryEntryState
   lane: DeliveryLane
+  /**
+   * 命令条目标志（pi1-disposition-chat-flow G3③/D14③：内核 D2 识别结果随受理回执
+   * 返回，向后兼容可选字段）。true = 前端 pendingSend 30s 空窗计时器不挂表（G3 闸③）；
+   * 收尾凭据 = session.deliveryHandled 终局通知（handled）或错误回执（onSendFail）。
+   */
+  isCommand?: boolean
 }
 
 /** 单条撤销结果（delivery.cancel reply 的 runtime 侧形状） */
@@ -199,24 +203,9 @@ const LOCAL_ID_TIME_RADIX = 36
 /** 日志中 payload 预览的截断长度（整段消息不进日志）。 */
 const LOG_PAYLOAD_PREVIEW_CHARS = 60
 
-/** pi 0.84.4 prompt() busy 类确定性拒绝原文（PS-22/PS-23 探针锁守卫，pi 版本 bump 时探针红 =
- *  文案漂移，须同步本常量；识别函数是 D6 错误分类的迁移落点——内核适配器 catch 面）。 */
-export const PI_REJECTION_COMPACTING = 'Cannot submit a prompt while compaction is in progress'
-export const PI_REJECTION_PROCESSING = 'Agent is already processing'
-
-/** pi busy 类拒绝分型（D6；非 busy 类返回 null → 走普通错误面）。 */
-export type PromptRejectionReason = 'compacting' | 'processing'
-
-/**
- * 识别 pi prompt() 的 busy 类确定性拒绝（按错误消息原文）——错误分类迁移落点（D6）：
- * 从 message-dispatcher.sendPrompt 的 catch 面迁到内核适配器（promptWithBusyRetry 的消费点，
- * 逐字保持识别口径；dispatcher 侧 re-export 保持既有 import 路径与 PS-22/23 探针锁定面）。
- */
-export function classifyPromptRejection(errorMessage: string): PromptRejectionReason | null {
-  if (errorMessage.includes(PI_REJECTION_COMPACTING)) return 'compacting'
-  if (errorMessage.includes(PI_REJECTION_PROCESSING)) return 'processing'
-  return null
-}
+// pi 拒绝文案常量与分型函数已下沉 infra/pi（pi1-disposition-chat-flow U3①，D5③ infra/pi
+// 单点驻留——文案项机器检查按此口径）。本模块仅消费分型结果，不再持有文案常量；
+// PS-22/23 探针的锚定对象与报错指引同步迁至 infra/pi/pi-rejection.ts。
 
 /** 出站裸标记 id 形态：条目 id（协议层 clientUuid `u-<uuid>`）取裸 uuid（u3b 回执契约）。 */
 export function bareMarkerId(id: string): string {
@@ -376,6 +365,19 @@ interface RuntimeState {
    * 存活，dispose 即弃。
    */
   pendingRevoke: Set<string>
+  /**
+   * 扩展命令 name 清单快照（pi1-disposition-chat-flow D2①，pi 句柄附着时经 get_commands
+   * 拉取，pi respawn 后随 watchClient 重拉）。undefined = 未就绪或拉取失败
+   * （D2 清单新鲜度：失败时全量按普通消息出站，D2 分支 c 兜底）。
+   */
+  commandNames?: Set<string>
+  /**
+   * 命令条目 id 集（D14⑥ 适配器侧命令档判定源）：submit/收养时判定为命令的条目 id。
+   * port.send 循环据此对命令段走命令档（prompt 不限时）；内核行为面（settle 兜底豁免 /
+   * 首败即停）走 DeliverySubmitOptions.isCommand——两条通道同源于 submit 判定，不读
+   * meta（additive meta 契约 = 内核零读取零加工）。成员随条目离场经 onChange 剪枝。
+   */
+  commandEntryIds: Set<string>
   unsubClient?: () => void
   unsubSettled?: () => void
   watchdog?: ReturnType<typeof setInterval>
@@ -401,6 +403,11 @@ interface DeliverOptions {
   behavior?: 'steer' | 'followUp'
   /** 图片附件（合批分裂后只随首段）。 */
   images?: Array<{ data: string; mimeType: string }>
+  /**
+   * 命令档（D14③①）：true = 命令条目出站，prompt RPC 不限时（命令 handler 内 await
+   * 用户交互属任务正常路径）。数据源 = 条目提交时的 isCommand（meta 透传回 port.send）。
+   */
+  commandLane?: boolean
 }
 
 export function createSessionDeliveryRegistry(
@@ -432,6 +439,38 @@ export function createSessionDeliveryRegistry(
       : null
   }
 
+  // ── 命令识别（pi1-disposition-chat-flow D2①） ────────────────────────────
+
+  /**
+   * 命令清单刷新（D2①）：经 get_commands RPC 拉取扩展命令 name 快照。调用点 = pi 句柄
+   * 附着 / 重生（watchClient）；**只经已附着句柄读取，不主动拉起 pi**（对齐
+   * readTranscriptUserTexts 的只读口径——识别是优化不是正确性前提，清单缺失走分支 c
+   * 兜底：全量按普通消息出站）。失败 → 快照保持 undefined（同兜底）。
+   */
+  async function refreshCommandList(sessionId: string, state: RuntimeState): Promise<void> {
+    const client = state.client
+    if (!client) return
+    try {
+      const commands = await client.getCommands()
+      // source 过滤单点 = extractExtensionCommandNames（infra/pi，识别集两侧同口径）
+      state.commandNames = extractExtensionCommandNames({ data: { commands } })
+    } catch (e) {
+      state.commandNames = undefined
+      warn('command list refresh failed (plain-message outbound fallback), sid=', sessionId, e)
+    }
+  }
+
+  /**
+   * 命令条目判定（D2①）：清单快照就绪且文本命中（`/` 前缀 + 首空格前段剥斜杠后与清单
+   * name 逐字精确匹配，pi 侧接管判定同口径）。清单缺失/未就绪 → false（普通消息带标记
+   * 出站——若实际被接管，handled 响应仍驱动终局，D2③）。
+   */
+  function isCommandEntry(state: RuntimeState, content: string): boolean {
+    const names = state.commandNames
+    if (names === undefined || names.size === 0) return false
+    return matchCommandName(content, names) !== undefined
+  }
+
   // ── 出站交接（port.send 的实现面） ────────────────────────────────────────
 
   /** 合批拆分产物单段：段全文（含裸标记，若有）+ 命中的内核条目 id（agent 通路段无 id）。 */
@@ -451,9 +490,23 @@ export function createSessionDeliveryRegistry(
    * （dmg-r1-1：撤销/已送达文本不随批次重发，撤销粒度不再放大为整批），其余段照常拆分；仅
    * 定位失败（结构不符）才放弃拆分整条投递（不猜测切分——宁合不裂），放弃即 warn 显形。
    */
-  function splitComposed(text: string, state: RuntimeState): ComposedPart[] {
+  function splitComposed(text: string, state: RuntimeState, handle: DeliveryHandleV2): ComposedPart[] {
     const markers = extractMarkerIds(text)
-    if (markers.length === 0) return [{ text }] // 无标记（agent 通路/sendDirect 首发）：整条投递即合批语义，非降级
+    if (markers.length === 0) {
+      // [D2②] 无标记文本两族：agent 通路整条（合批语义，非降级）或命令条目（命令不注标
+      // 出站）。命令条目经内核活跃集全文精确匹配回条目身份——D1② handled 终局接线（deliverOne
+      // 的 confirmDelivered / 撤销守卫）依赖段身份。匹配域限于 commandEntryIds 在册条目：
+      // 无标记普通文本（'acceptance' 锚 / agent 通路）不劫持身份（受理登记提前会断
+      // onSendOk 的 acceptance 落地链）；串行投递（内核 in-flight 防重）下同文本命令条目按
+      // 队列序逐个消费，不会跨条目错配。误配形态 = 外来无标记文本恰与某活跃命令条目全文
+      // 相等（极窄，后果 = 终局通知错位、原条目走 G2 sweep 兜底），普通消息出站恒带标记。
+      for (const e of handle.entriesFull().active) {
+        if (e.payload.kind === 'text' && e.payload.content === text && state.commandEntryIds.has(e.id)) {
+          return [{ text, id: e.id }]
+        }
+      }
+      return [{ text }]
+    }
     const parts: ComposedPart[] = []
     let cursor = 0
     for (const bare of markers) {
@@ -515,12 +568,22 @@ export function createSessionDeliveryRegistry(
     return handle.entriesFull().active.some((e) => e.id === id)
   }
 
-  /** 三副作用置位（prompt 受理成功后，D-18 契约——内核状态机防回退，迟到写无害；§3.4+ 表，V8 验收锁定，禁止遗漏第三项）。 */
-  function markSessionActive(sessionId: string): void {
+  /**
+   * 三副作用置位（prompt 受理成功后，D-18 契约——内核状态机防回退，迟到写无害；§3.4+ 表，V8 验收锁定，禁止遗漏第三项）。
+   * occupancy = false（D1② handled 终局专用）：命令接管后输入已被消费、无回合要跑——
+   * 记账面（lastActiveAt / workspace）照常，occupancy 不再置 dispatching（回落后的 idle
+   * 是终态事实，不得打回）。
+   */
+  function markSessionActive(sessionId: string, occupancy = true): void {
     const view = viewOf(sessionId)
     if (!view) return
     view.lastActiveAt = Date.now()
-    applySessionOccupancyTransition(view, deps.getMessageBus(), 'dispatching')
+    // [D3①] occupancy 置位与 deliverOne 前置换位同一事实口径：仅空闲时置 dispatching
+    //（受理成功推进脉冲）；生成中出站保持 generating 不覆盖（原回合脉冲全程不错乱，
+    // ★3 修复的组成动作——命令 handled 终局后的 idle 回落不得被本置位打回 dispatching）。
+    if (occupancy && (view.occupancy?.turn ?? 'idle') === 'idle') {
+      applySessionOccupancyTransition(view, deps.getMessageBus(), 'dispatching')
+    }
     try {
       deps.recordWorkspace(view.cwd)
     } catch (e) {
@@ -530,25 +593,11 @@ export function createSessionDeliveryRegistry(
   }
 
   /**
-   * CP6：命令-only prompt 的 occupancy 收口窗口武装（prompt resolve 之后）。
-   *
-   * 回调幂等门（两重）：① 到期时重查活跃 session（恢复/重建后旧对象不得被回写）；
-   * ② 仅当 `turn === 'dispatching'` 才回落 idle——turn 事件已到达时窗口早被 cancel，
-   * 即使调度竞态晚到一步，turn 也不是 dispatching（不覆盖 generating/settling）。
-   * 真误判（活跃 turn 被短暂投影 idle）由 turn 事件自愈。
-   *
-   * [合并移植] 原 main 侧 dispatcher 直发流的武装点；投递内核化后随投递腿迁入本文件
-   * （prompt 发起点唯一落点 = deliverText）。
+   * [D3③] CP6 回落窗已退役（pi1-disposition-chat-flow）：空闲发命令后 occupancy 的
+   * 回落改由 pi 权威事实驱动——handled 响应即回落（deliverOne D3②），普通消息 started
+   * 形态下事件异常不可达的防悬挂由 sweepInFlight occupancy 收尾承接（transcript 命中 /
+   * 命令清单命中的事实凭据，非时间窗）。时间平抑类机制净减一（D3④ ADR 登记）。
    */
-  function armOccupancySettleWindowFor(sessionId: string): void {
-    occupancySettleWindow.arm(sessionId, () => {
-      const live = deps.getSession(sessionId)
-      if (!live) return
-      const occ = live.occupancy ?? IDLE_SESSION_OCCUPANCY
-      if (occ.turn !== 'dispatching') return
-      applySessionOccupancyTransition(live, deps.getMessageBus(), 'idle')
-    })
-  }
 
   /** 唤醒该 session 全部持有期等待者（边沿到达；幂等——无等待者 no-op）。 */
   function notifyWaiters(state: RuntimeState): void {
@@ -611,6 +660,13 @@ export function createSessionDeliveryRegistry(
    *   置 `piCompactingBlocked`（pi 侧权威事实），**按 compaction_end 事件释放**（事件驱动，
    *   不按挂钟轮询——规则 19：等边沿，不烧预算；也防事件丢失时死循环）。
    * - 其余错误原样抛（内核按受理失败走 backoff 重试 / failed 终态）。
+   *
+   * 返回值（pi1-disposition-chat-flow D1①）：响应 `data.disposition`（pi 1.0 权威去向
+   * 判定：handled=被扩展命令接管 / queued=排队 / started=即将开跑；pi < 1.0 或 mock 无
+   * 字段 → undefined，调用方行为与升级前一致）。'handled' 的终局消费在 deliverOne
+   *（D1② tombstone 终局）；queued/started 不驱动界面（D4——车道机制已表达同一信息）。
+   * 命令档（D14③①）：commandLane 时 prompt RPC 不限时（timeoutMs=0，命令 handler 内
+   * await 用户交互属任务正常路径）；busy 重试的 steer 二投保持同档。
    */
   async function promptWithBusyRetry(
     sessionId: string,
@@ -618,12 +674,19 @@ export function createSessionDeliveryRegistry(
     client: IPiEngine,
     text: string,
     opts: DeliverOptions,
-  ): Promise<void> {
+  ): Promise<InputDisposition | undefined> {
     let steerRetried = false
     for (;;) {
       try {
-        await client.prompt(text, opts.images, opts.behavior)
-        return
+        // PiMessage = unknown（端口层宽类型，pi-engine.ts 头注「类型系统对 pi 动态响应
+        // 认输」）：disposition 已在 rpc-client 出口经 parseInputDisposition 归一（值域
+        // 校验 + 非法值 undefined + warn），此处窄形状断言只读已归一字段。
+        // 命令档（D14③①）以条件传参表达——非命令路径的实参个数与升级前逐字一致
+        //（普通消息调用形态零变化）。
+        const res = (opts.commandLane
+          ? await client.prompt(text, opts.images, opts.behavior, undefined, 0)
+          : await client.prompt(text, opts.images, opts.behavior)) as { disposition?: InputDisposition } | undefined
+        return res?.disposition
       } catch (e) {
         const reason = classifyBusyRejection(e)
         if (reason === null) throw e
@@ -653,9 +716,15 @@ export function createSessionDeliveryRegistry(
    * 单条出站交接（port.send 的逐条实现 + sendDirect 共用）：
    * 抑制/撤销守卫 → 持有等待 → 显式投递放行 → ensureActive → skill 注入 → prompt（busy 类
    * 拒绝按 D6 处置）→ skillNotice → 记账置位。occupancy 置位先于 prompt（RT-4#10，RPC 往返
-   * 窗不呈 idle）；lastActiveAt/workspace 记账晚于 prompt 受理（成功才显示 working）。
-   * entryId = 本段对应的内核条目 id（splitComposed 按 marker 定位直传；agent 通路无标记段
-   * undefined）——撤销/抑制判定的唯一锚是条目身份，同文本多条互不误伤（V 裁决 R2-A2）。
+   * 窗不呈 idle）且**仅空闲时置位**（D3①：生成中出站保持 generating 不覆盖）；lastActiveAt/
+   * workspace 记账晚于 prompt 受理（成功才显示 working）。
+   * [D1①②] disposition 接线：响应 handled = 输入已被 pi 扩展命令接管（不会跟回合事件）→
+   * 条目复用送达确认原语写 tombstone 终局（delivered，D1②「离开系统的事实」）+ 经
+   * session.deliveryHandled 一对一通知前端（D1③）+ occupancy 主动回落（D3②，幂等门 =
+   * 仅 dispatching）。queued/started 不驱动界面（D4）。
+   * entryId = 本段对应的内核条目 id（splitComposed 按 marker 定位直传；无标记命令段经
+   * 活跃集全文匹配回身份；agent 通路无标记段 undefined）——撤销/抑制判定的唯一锚是条目
+   * 身份，同文本多条互不误伤（V 裁决 R2-A2）。
    */
   async function deliverOne(
     sessionId: string,
@@ -679,13 +748,17 @@ export function createSessionDeliveryRegistry(
     // [A1 切源] session cwd 作 project skill 扫描基准——视图缺失时 undefined = global-only
     //（宁缺毋错，不猜 cwd）
     const injection = await injector.inject(client, text, deps.getSession(sessionId)?.cwd)
-    // [RT-4#10] occupancy 置位先于 prompt：RPC 往返窗内对预检/回收豁免不再呈 idle；
-    // lastActiveAt/record（D-18「成功才显示 working」的记账面）仍在 prompt 受理成功后
-    //（markSessionActive，occupancy 同值转移被原语去重不二播）。
+    // [RT-4#10 + D3①] occupancy 置位先于 prompt：RPC 往返窗内对预检/回收豁免不再呈 idle；
+    // 置位前置 idle 门——仅空闲时执行 dispatching 转移，生成中出站保持 generating 不覆盖
+    //（原回合脉冲全程不错乱，★3）。lastActiveAt/record（D-18「成功才显示 working」的记账
+    // 面）仍在 prompt 受理成功后（markSessionActive，同口径 idle 门）。
     const dispatchView = viewOf(sessionId)
-    if (dispatchView) applySessionOccupancyTransition(dispatchView, deps.getMessageBus(), 'dispatching')
+    if (dispatchView && (dispatchView.occupancy?.turn ?? 'idle') === 'idle') {
+      applySessionOccupancyTransition(dispatchView, deps.getMessageBus(), 'dispatching')
+    }
+    let disposition: InputDisposition | undefined
     try {
-      await promptWithBusyRetry(sessionId, state, client, injection.text, opts)
+      disposition = await promptWithBusyRetry(sessionId, state, client, injection.text, opts)
     } catch (e) {
       // [RT-4#10] 非 busy 真失败收口（不卡 dispatching）：turn 没跑起来（仍 dispatching）→
       // idle；busy 类已在 promptWithBusyRetry 内分型收口（reject-processing → generating 等），
@@ -696,9 +769,35 @@ export function createSessionDeliveryRegistry(
       }
       throw e
     }
-    armOccupancySettleWindowFor(sessionId)
+    // [D1②③ + D3②] handled 终局：输入已被 pi 接管（命令），不会跟回合事件——条目复用
+    // 送达确认原语写 delivered tombstone（不进 in-flight 等待；对账器见 tombstone 不重投，
+    // 断线重连 resync 判重防线继承），一对一通知前端，occupancy 主动回落（幂等门 = 仅
+    // dispatching——turn 事件已到达时不覆盖真实状态）。queued/started 不驱动界面（D4）。
+    if (disposition === 'handled' && entryId !== undefined && handle.confirmDelivered(entryId)) {
+      state.submitted.delete(bareMarkerId(entryId))
+      state.pendingRevoke.delete(entryId) // 离场事实 > cancel 意图（delivered 同优先级口径）
+      notifyDeliveryHandled(sessionId, entryId)
+    }
+    if (disposition === 'handled') {
+      const settledView = viewOf(sessionId)
+      if (settledView && (settledView.occupancy?.turn ?? 'idle') === 'dispatching') {
+        applySessionOccupancyTransition(settledView, deps.getMessageBus(), 'idle')
+      }
+    }
     publishSkillNotices(deps.getMessageBus(), sessionId, text, injection.notices)
-    markSessionActive(sessionId)
+    markSessionActive(sessionId, disposition !== 'handled')
+  }
+
+  /**
+   * handled 终局通知（D1③）：一次性事件消息（非 last-value 快照），一对一告知前端该
+   * clientUuid 已离开投递系统——前端消费（U2）= 复用回滚三件套静默清除乐观气泡，无错误
+   * 提示。通知缺席（断连窗口丢失）由 D1⑤ 孤儿对账兜底（投影判据双分支）。
+   */
+  function notifyDeliveryHandled(sessionId: string, clientUuid: string): void {
+    deps.getMessageBus()?.publish(sessionId, {
+      type: 'session.deliveryHandled',
+      payload: { sessionId, clientUuid },
+    })
   }
 
   // ── pi 事件订阅：送达回执 + compaction_end 触发点 ────────────────────────
@@ -713,6 +812,7 @@ export function createSessionDeliveryRegistry(
     if (state.client === client && state.unsubClient) return
     state.unsubClient?.()
     state.unsubClient = undefined
+    const wasUnattached = state.client === undefined
     const changed = state.client !== undefined && state.client !== client
     state.client = client
     if (changed) {
@@ -721,6 +821,11 @@ export function createSessionDeliveryRegistry(
       // 'compacting-pi' 永久持有（自愈入口，R2-A1；无标记时重置为幂等无害）。
       state.piCompactingBlocked = false
       notifyWaiters(state) // 自愈即边沿：唤醒持有期等待者复核（MF-1-9）
+    }
+    if (changed || wasUnattached) {
+      // [D2 清单新鲜度] 附着 / 重生后命令清单快照重拉（异步，不阻塞投递腿；只经已附着
+      // 句柄读取不拉起 pi——就绪前按旧快照 / 缺失兜底判定，分支 c 覆盖行为正确性）。
+      void refreshCommandList(sessionId, state)
     }
     if (typeof client.onEvent !== 'function') {
       // 装配面缺失（部分测试替身）：无事件流 → 送达回执退化为对账器 transcript 扫描，
@@ -837,25 +942,45 @@ export function createSessionDeliveryRegistry(
   const IN_FLIGHT_GRACE_MS = 10_000
 
   /**
-   * 在途未确认扫描：有标记条目查 transcript（命中 → delivered；未命中 → 重投）。
+   * 无标记命令条目判定（⑧ G2 扫描集成员）：清单快照命中且出站无标记（D2② 命令条目
+   * 形态）。带标记条目与 'acceptance' 锚条目不在此列（各有正规终局通路）。
+   */
+  function isTrackedCommandEntry(rt: SessionRuntime, payload: DeliveryPayload): boolean {
+    const names = rt.commandNames
+    if (names === undefined || names.size === 0) return false
+    const text = payloadText(payload)
+    if (extractMarkerIds(text).length > 0) return false
+    return matchCommandName(text, names) !== undefined
+  }
+
+  /**
+   * 在途未确认扫描：有标记条目查 transcript（命中 → delivered；未命中 → 重投）；
+   * [⑧ G2] 无标记且命中命令清单的条目按响应丢失处理——超宽限静默终局 + 双成因日志，
+   * 不重投（重投会重复执行命令；D14①b，同时承接命令识别假阳性形态）。
    * slotCleared = 本轮是否实际执行过 clear_queue（reconcile 传入；watchdog 轮 /
    * ensureActive 失败轮为 false）——撤销兑现的必要前提：transcript 无迹 + 槽位未确认
    * 清空 ≠ 文本已离场（可能仍在 pi 槽位稍后被消费），此时只留守（dmg-r2-1）。
+   * [D3③] occupancy 收尾：本轮清空该 session 最后一笔在途条目时回落 idle（幂等门 =
+   * 仅 dispatching 才回落，不覆盖 generating/settling；真误判由 turn 事件自愈）——CP6
+   * 回落窗已退役，此处承接 started 形态下回合事件异常不可达的防悬挂（事实凭据驱动，
+   * 非时间窗；触发时机随既有 reconcile 扫描轮，不新增定时窗）。
    */
   async function sweepInFlight(sessionId: string, rt: SessionRuntime, slotCleared: boolean): Promise<void> {
     const aged = rt.handle
       .entriesFull()
       .active.filter((e) => e.state === 'in-flight' && Date.now() - e.updatedAt > IN_FLIGHT_GRACE_MS)
-      .filter((e) => extractMarkerIds(payloadText(e.payload)).length > 0)
+      .filter((e) => extractMarkerIds(payloadText(e.payload)).length > 0 || isTrackedCommandEntry(rt, e.payload))
     if (aged.length === 0) return
     const texts = await readTranscriptUserTexts(sessionId, rt)
     const requeue: string[] = []
+    let finalizedAny = false
     for (const entry of aged) {
       const needle = markerLiteral(bareMarkerId(entry.id))
       if (texts !== null && texts.some((t) => t.includes(needle))) {
         rt.pendingRevoke.delete(entry.id) // delivered 事实 > cancel 意图 → 意图了结
         rt.handle.confirmDelivered(entry.id)
         rt.submitted.delete(bareMarkerId(entry.id))
+        finalizedAny = true
         continue
       }
       if (rt.pendingRevoke.has(entry.id)) {
@@ -867,12 +992,39 @@ export function createSessionDeliveryRegistry(
         settleRevokedEntry(rt, entry.id)
         continue
       }
+      if (extractMarkerIds(payloadText(entry.payload)).length === 0) {
+        // [⑧ G2/D14①b] 无标记且命中命令清单：终局凭据（disposition 响应）丢失形态
+        // （pi 重启响应丢失，或 D2① 假阳性——清单命中、pi 侧 miss 凭据链断裂）。两形态
+        // 条目表征相同，同一判据收尾；静默终局（delivered = 离开系统的事实，复用送达
+        // 确认原语——对账器见 tombstone 不重投）+ 双成因日志（排障以 pi 侧进程记录区分，
+        // 不按单一成因误导排查方向）+ 终局通知（前端静默清除，D1③ 同形态）。
+        if (texts === null) continue // transcript 读失败轮：事实不明，留守待下轮（与带标记条目同口径）
+        rt.pendingRevoke.delete(entry.id)
+        rt.handle.confirmDelivered(entry.id)
+        rt.submitted.delete(bareMarkerId(entry.id))
+        finalizedAny = true
+        notifyDeliveryHandled(sessionId, entry.id)
+        warn(
+          'command entry finalized without receipt (cause: pi restart response loss OR stale command list false-positive), sid=',
+          sessionId,
+          'id=',
+          entry.id,
+        )
+        continue
+      }
       requeue.push(entry.id)
     }
     if (requeue.length > 0) {
       warn(`reconcile: ${requeue.length} in-flight entry(ies) not in transcript — requeue, sid=`, sessionId)
       rt.handle.requeue(requeue)
       rt.handle.flush()
+    }
+    if (finalizedAny && !rt.handle.entriesFull().active.some((e) => e.state === 'in-flight')) {
+      // 清空最后一笔在途条目：事实驱动的 occupancy 收尾（幂等门见头注）
+      const view = viewOf(sessionId)
+      if (view && (view.occupancy?.turn ?? 'idle') === 'dispatching') {
+        applySessionOccupancyTransition(view, deps.getMessageBus(), 'idle')
+      }
     }
   }
 
@@ -1022,28 +1174,49 @@ export function createSessionDeliveryRegistry(
     }
   }
 
-  /** 收养（D3③）：外来无标记文本以新 id 入内核 FIFO 正常投递（不丢弃、不原样回塞）。 */
+  /**
+   * 收养（D3③）：外来无标记文本以新 id 入内核 FIFO 正常投递（不丢弃、不原样回塞）。
+   * [D14⑥] 收养文本命中命令清单时按命令条目收养（不注标 + isCommand 下发——非 checked
+   * 通路命令条目首败即停，机制统一覆盖无例外豁免）。
+   */
   function adoptText(sessionId: string, rt: SessionRuntime, text: string): void {
     const id = genLocalId()
-    warn('adopted foreign parked message, sid=', sessionId, 'newId=', id)
-    void submitToKernel(sessionId, rt, { id, text: withDeliveryMarker(text, id), lane: 'direct' })
+    const isCommand = isCommandEntry(rt, text)
+    warn('adopted foreign parked message, sid=', sessionId, 'newId=', id, isCommand ? '(command)' : '')
+    void submitToKernel(sessionId, rt, {
+      id,
+      text: isCommand ? text : withDeliveryMarker(text, id),
+      lane: 'direct',
+      ...(isCommand ? { isCommand: true } : {}),
+    })
   }
 
-  /** 内核提交（submit/收养/重建共用）：出站文本已含标记，条目 id 显式传入（判重锚 D5②）。
-   *  回执锚恒申报 'marker'（D1 申报制）：withDeliveryMarker 在本层手里，出站文本尾附
-   *  裸标记，送达以 message_end 回执命中为准（两阶段回执正规路径）。 */
+  /**
+   * 内核提交（submit/收养/重建共用）：出站文本已含标记（命令条目除外），条目 id 显式传入
+   * （判重锚 D5②）。回执锚恒申报 'marker'（D1 申报制）：出站文本尾附裸标记，送达以
+   * message_end 回执命中为准（两阶段回执正规路径）；命令条目无标记，终局 = handled 接线
+   * 或 G2 sweep（同 submit 路径）。args.isCommand（D14⑥）：调用方对无标记文本的命令判定
+   * 结果（adopt 通路）随条目下发——settle 兜底豁免 + 首败即停在内核生效；rebuild 通路
+   * （text 恒带标记）不判不传。
+   */
   async function submitToKernel(
     sessionId: string,
     rt: SessionRuntime,
-    args: { id: string; text: string; lane: DeliveryLane; intent?: DeliveryIntent },
+    args: { id: string; text: string; lane: DeliveryLane; intent?: DeliveryIntent; isCommand?: boolean },
   ): Promise<void> {
     rt.submitted.set(bareMarkerId(args.id), { id: args.id, text: args.text })
     const message: DeliveryMessage = {
       payload: { kind: 'text', content: args.text },
       ...(args.intent !== undefined && { intent: args.intent }),
     }
+    if (args.isCommand === true) rt.commandEntryIds.add(args.id)
     try {
-      await rt.handle.sendChecked(message, { id: args.id, lane: args.lane, receiptAnchor: 'marker' })
+      await rt.handle.sendChecked(message, {
+        id: args.id,
+        lane: args.lane,
+        receiptAnchor: 'marker',
+        ...(args.isCommand === true ? { isCommand: true } : {}),
+      })
     } catch (e) {
       onDeliveryFailure(sessionId, rt, args.id, e)
     }
@@ -1136,18 +1309,25 @@ export function createSessionDeliveryRegistry(
           throw new Error(`[session-delivery] unsupported payload kind: ${msg.payload.kind}`)
         }
         const images = msg.payload.images
-        const parts = splitComposed(msg.payload.content, state)
+        // [D14⑥] 命令档判定（适配器侧）：段 id 命中 commandEntryIds（submit/收养时登记）
+        // → 命令档出站（prompt RPC 不限时，D14③①）。内核行为面（settle 兜底豁免 / 首败
+        // 即停）同源于 DeliverySubmitOptions.isCommand——同一判定结果、两条下发通道，不读
+        // meta（additive meta 契约 = 内核零读取零加工）。
+        const parts = splitComposed(msg.payload.content, state, handle)
         for (let i = 0; i < parts.length; i += 1) {
           // images 只随首段投递（合批拼接的 images 归属首条；一期 renderer 走路径模式不传
           // images——已知窄边界，见交付说明）
           const part = parts[i] as ComposedPart
+          const commandLane = part.id !== undefined && state.commandEntryIds.has(part.id)
           await deliverOne(sessionId, state, handle, part.text, {
             behavior: toStreamingBehavior(intent),
             ...(i === 0 && images !== undefined && images.length > 0 ? { images } : {}),
+            ...(i === 0 && commandLane ? { commandLane: true } : {}),
           }, part.id)
           // 受理登记（dmg-r1-4）：prompt 受理成功即申报——已受理段转 in-flight 出批留守
           //（等回执/对账）；后续段失败收口时仅未受理段走失败面，已进 pi 的段不再误报
-          //「消息投递失败」（无 id 段无条目，跳过）。条目已被撤销时登记幂等 false。
+          //「消息投递失败」（无 id 段无条目，跳过）。条目已被撤销/已随 handled 终局时
+          // 登记幂等 false。
           if (part.id !== undefined) handle.confirmAccepted(part.id)
         }
         return { accepted: true }
@@ -1165,6 +1345,7 @@ export function createSessionDeliveryRegistry(
       piCompactingBlocked: false,
       revoking: false,
       pendingRevoke: new Set(),
+      commandEntryIds: new Set(),
       reconciling: false,
       lastReconcileAt: 0,
       disposed: false,
@@ -1200,6 +1381,12 @@ export function createSessionDeliveryRegistry(
         const activeIds = new Set(active.map((e) => e.id))
         for (const id of state.segmentsByEntry.keys()) {
           if (!activeIds.has(id)) state.segmentsByEntry.delete(id)
+        }
+      }
+      if (state.commandEntryIds.size > 0) {
+        const activeIds = new Set(active.map((e) => e.id))
+        for (const id of state.commandEntryIds) {
+          if (!activeIds.has(id)) state.commandEntryIds.delete(id)
         }
       }
     })
@@ -1254,7 +1441,11 @@ export function createSessionDeliveryRegistry(
       const rt = ensureRuntime(sessionId)
       const lane = laneOf(viewOf(sessionId))
       const id = input.clientUuid ?? genLocalId()
-      const text = withDeliveryMarker(input.content, id)
+      // [D2①] 命令识别（清单快照判定）：命令条目出站不尾附投递标记（裸命令文本，pi 命令
+      // 解析精确命中——★2 根因消除）；其终局凭据 = disposition 本身（D1② handled →
+      // tombstone 终局）。普通消息出站形态与送达回执链路零变化（标记 + message_end 命中）。
+      const isCommand = isCommandEntry(rt, input.content)
+      const text = isCommand ? input.content : withDeliveryMarker(input.content, id)
       const message: DeliveryMessage = {
         payload: {
           kind: 'text',
@@ -1263,16 +1454,20 @@ export function createSessionDeliveryRegistry(
         },
         intent: input.intent ?? 'interrupt-at-turn-boundary',
       }
+      if (isCommand) rt.commandEntryIds.add(id)
       rt.submitted.set(bareMarkerId(id), { id, text })
       // 受理口径（D9⑤ 锁定）：submit 同步返回受理回执（lane + 条目态），不等底层受理——
       // 内核 sendChecked 的 settle 时点与送达正交（受理 ≠ 送达，调用方不被投递阻塞）。
       // 失败（受理失败 / 重试耗尽）经 fail-fast 出口广播 + 日志（条目由内核拒绝或转 failed）。
-      // 回执锚恒申报 'marker'（D1 申报制）：出站文本尾附裸标记（withDeliveryMarker 在
-      // 本层手里），送达以 message_end 回执命中为准，受理后维持 in-flight 等回执。
+      // 回执锚恒申报 'marker'（D1 申报制）：普通消息出站文本尾附裸标记，送达以 message_end
+      // 回执命中为准；命令条目无标记（message_end 永不命中），终局 = handled 接线（D1②）
+      // 或 G2 sweep 收尾（⑧）——不申报 'acceptance'（受理 ≠ 终局，命令可能尚未执行）。
       void rt.handle
-        .sendChecked(message, { id, lane, receiptAnchor: 'marker' })
+        .sendChecked(message, { id, lane, receiptAnchor: 'marker', ...(isCommand ? { isCommand: true } : {}) })
         .catch((e: unknown) => onDeliveryFailure(sessionId, rt, id, e))
-      return { clientUuid: id, state: entryStateOf(rt, id) ?? 'queued', lane }
+      // [G3③] 受理回执携带命令标志（内核 D2 识别结果随受理回执返回，向后兼容可选字段）：
+      // 前端据此对命令条目不挂 30s 空窗计时器（U2⑤）。
+      return { clientUuid: id, state: entryStateOf(rt, id) ?? 'queued', lane, ...(isCommand ? { isCommand: true } : {}) }
     },
     async cancel(sessionId, clientUuid) {
       const rt = runtimes.get(sessionId)
