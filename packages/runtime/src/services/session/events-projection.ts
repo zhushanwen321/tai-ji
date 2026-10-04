@@ -628,6 +628,25 @@ export class SessionEventProjection {
     this.runTailer?.rescan()
   }
 
+  /**
+   * 变更回调抑制窗口（entry 批编排专用，session-records.applyRecordEntries 经
+   * ensureProjection 的 suppressUpgradeChange 选项调用）：窗口内 fireChange 抑制，
+   * 发布归调用方在窗口结束后统一执行（publishRecordChanges 水位 diff 单点，与本投影
+   * 发布腿共用同一发布门与送达水位，抑制不丢数据）。覆盖降级投影升级腿：attachEventSources
+   * 的 rescan 全同步、fold 后即时 fireChange——若发生在 entry 批应用前，消费方会收到
+   * 一帧「只有 fold、缺本批 entry」的中间态 + 随后纠正帧。与 applyingEntryBatch 共用
+   * 同一门（嵌套窗口安全：恢复到前值）。
+   */
+  withChangeSuppressed<T>(fn: () => T): T {
+    const previous = this.applyingEntryBatch
+    this.applyingEntryBatch = true
+    try {
+      return fn()
+    } finally {
+      this.applyingEntryBatch = previous
+    }
+  }
+
   dispose(): void {
     this.disposed = true
     this.recordTailer?.dispose()

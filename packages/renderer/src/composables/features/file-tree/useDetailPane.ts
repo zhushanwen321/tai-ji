@@ -27,6 +27,7 @@ import { computed, watch, watchEffect, type Ref } from 'vue'
 import { useFileTreeStore, type DetailTabState, type DetailViewMode } from '@/stores/fileTree'
 import { useSessionStore } from '@/stores/session'
 import { useSideDrawer } from '@/composables/features/drawer/useSideDrawer'
+import { registerSessionCleanup } from '@/composables/useSessionScopedState'
 import { file as fileApi, git as gitApi } from '@/api'
 import { parseDiff } from '@/composables/logic/parseDiff'
 import { resolvePreviewPath } from '@/lib/path-utils'
@@ -53,6 +54,20 @@ const pendingLoads = new Map<string, Promise<void>>()
 function loadKey(sid: string, path: string): string {
   return `${sid}\u0000${path}`
 }
+
+/**
+ * session 销毁清理（模块级注册一次，triggerSessionCleanups 统一编排）：删除该 session
+ * 的全部请求版本号记账键。loadTokens 只 set 不删（L3 并发守卫按键覆盖即可工作），
+ * 长寿会话反复预览会无界累积——清理挂接在既有销毁沿（tab 关闭删单键见 closeTab /
+ * session 删除删全键见本函数），不设定时器不上限。
+ */
+function cleanupLoadTokensForSession(sessionId: string): void {
+  const prefix = `${sessionId}\u0000`
+  for (const key of loadTokens.keys()) {
+    if (key.startsWith(prefix)) loadTokens.delete(key)
+  }
+}
+registerSessionCleanup(cleanupLoadTokensForSession)
 
 /** 无激活 tab 时的只读空态（DetailPane 渲染 detail-empty 分支） */
 function emptyDetailState(): DetailTabState {
@@ -252,6 +267,10 @@ export function useDetailPane(sessionId: Ref<string | null>) {
     const sid = sessionId.value
     if (!sid) return
     store.closeDetailTab(sid, path)
+    // 请求版本号记账随实例销毁释放（唯一关闭入口，防长寿会话无界累积）。键已删使在途
+    // 加载的 stale 判据随即成立——迟到回写本就被 updateDetailTab 的分区/tab 缺席 no-op
+    // 守卫拦住，双防线语义一致。
+    loadTokens.delete(loadKey(sid, path))
   }
 
   /**
@@ -317,4 +336,11 @@ export function useDetailPane(sessionId: Ref<string | null>) {
     saveScroll,
     sessionCwd,
   }
+}
+
+// ── 测试专用 hooks（生产代码禁止调用，参照 useTerminal __resetTerminalStateForTest 先例）──
+
+/** 测试专用：loadTokens 记账键数（断言 tab 关闭 / session 清理后键释放）。 */
+export function __loadTokenKeyCountForTest(): number {
+  return loadTokens.size
 }

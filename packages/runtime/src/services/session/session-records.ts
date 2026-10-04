@@ -534,15 +534,30 @@ export class SessionRecords {
    * 降级投影。[降级闩死修复 2026-10-02] 降级不再终身：早退分支内联升级腿
    * （upgradeProjectionEventSources）——meta 可得后补建 tailer，fold 通道自愈。
    */
-  private ensureProjection(sessionId: string, cache: RecordEntriesCache): SessionEventProjection {
-    if (cache.projection !== null) {
+  private ensureProjection(
+    sessionId: string,
+    cache: RecordEntriesCache,
+    opts?: { suppressUpgradeChange?: boolean },
+  ): SessionEventProjection {
+    const existing = cache.projection
+    if (existing !== null) {
       // [降级闩死修复 2026-10-02] 事件源迟到升级：创建时 meta 不可得（pi flush 前
       // 窗口 / 磁盘扫描竞态）建出的 entry-only 降级投影此前被本早退永久复用——fold
       // 通道对该 session 终身死亡（「icon 无 agent」形态的构造性成因之一）。meta
       // 可得后补建 tailer（幂等：全接线源零成本早退）；补建的 rescan 经 fireChange
       // → onEventProjectionChange 走既有发布腿，无需额外同步。
-      this.upgradeProjectionEventSources(sessionId, cache.projection)
-      return cache.projection
+      // [升级腿中间帧抑制] suppressUpgradeChange = applyRecordEntries 编排传入：升级腿
+      // 的 rescan（attachEventSources，全同步）经 fireChange 即时发布——此刻本批 entry
+      // 尚未应用，会发一帧「只有 fold、缺 entry 批」的中间态 + 随后调用方的纠正帧。
+      // 抑制后最终态由 applyRecordEntries 尾部 publishRecordChanges 的水位 diff 统一
+      // 补发（两腿共用同一发布门与送达水位，抑制不丢数据）。其余调用点（读 RPC 路径）
+      // 保持既有即时发布腿。
+      if (opts?.suppressUpgradeChange === true) {
+        existing.withChangeSuppressed(() => this.upgradeProjectionEventSources(sessionId, existing))
+      } else {
+        this.upgradeProjectionEventSources(sessionId, existing)
+      }
+      return existing
     }
     const meta = this.deps.sessionStore
       .scanSessions({ force: true })
@@ -818,7 +833,9 @@ export class SessionRecords {
     // publish 未发生 → 水位滞留 → session 恢复后下轮触发补发）。
     // [pull-push W0] plan 家族不进投影（单例状态直扫直并，见下方 mergePlanState）。
     // [可观测性 2026-10-02] 发布观测归 publishRecordChanges 单点（trigger/耗时透传归因）。
-    const projection = this.ensureProjection(sessionId, cache)
+    // suppressUpgradeChange：既有降级投影的升级腿不在本批 entry 应用前发布中间帧（见
+    // ensureProjection 同名注释），最终态由下方 publishRecordChanges 水位 diff 统一补发。
+    const projection = this.ensureProjection(sessionId, cache, { suppressUpgradeChange: true })
     projection.applyEntryBatch(entries, { fullRebuild: isFullRebuild })
     this.syncCacheFromProjection(cache, projection)
     // [message-revoke U6d] G2 二分在此落点：plan 腿（随树）仅全量重建传 leafId 活跃路径

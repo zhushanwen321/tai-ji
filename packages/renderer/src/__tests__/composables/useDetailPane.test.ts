@@ -38,9 +38,10 @@ vi.mock('@/stores/session', () => ({
   useSessionStore: () => ({ list: [] }),
 }))
 
-import { useDetailPane } from '@/composables/features/file-tree/useDetailPane'
+import { useDetailPane, __loadTokenKeyCountForTest } from '@/composables/features/file-tree/useDetailPane'
 import { useFileTreeStore } from '@/stores/fileTree'
 import { useSideDrawer, resetSideDrawer } from '@/composables/features/drawer/useSideDrawer'
+import { triggerSessionCleanups } from '@/composables/useSessionScopedState'
 
 /**
  * 在独立 effectScope 中创建 useDetailPane（watcher 泄漏防护）：
@@ -501,5 +502,57 @@ describe('useDetailPane 变更集卡入口（detailFilePath）', () => {
     expect(state.value.content).toBe(PATCH)
     expect(tabs.value.length).toBe(1) // 已开仅激活，不新增第二个 tab
     expect(drawer.detailFilePath.value).toBeNull()
+  })
+})
+
+describe('useDetailPane loadTokens 记账清理（greptile PR #30 发现 4：无界累积修复）', () => {
+  it('关闭 tab → 该 tab 记账键删除；重开同文件加载不受影响', async () => {
+    const sid = 's-tokenclose'
+    const path = 'src/token-close.ts'
+    setupSession(sid, path, 'modified')
+    mockGitGetDiff.mockResolvedValue({ patch: PATCH, binary: false })
+
+    const sessionId = ref<string | null>(sid)
+    const pane = useDetailPaneScoped(sessionId)
+    const store = useFileTreeStore()
+    store.selectFile(sid, path)
+    await vi.waitFor(() => expect(pane.state.value.status).toBe('content'))
+
+    // 关闭 tab：记账键随实例销毁释放（此前只 set 不删，长寿会话反复预览无界累积）
+    const before = __loadTokenKeyCountForTest()
+    pane.closeTab(path)
+    await nextTick()
+    expect(__loadTokenKeyCountForTest()).toBe(before - 1)
+
+    // 重开同文件：记账键重建（token 从 1 重新起算），加载照常完成（清键不破坏后续加载）
+    store.selectFile(sid, path)
+    await vi.waitFor(() => expect(pane.state.value.status).toBe('content'))
+    expect(pane.state.value.path).toBe(path)
+    expect(__loadTokenKeyCountForTest()).toBe(before)
+  })
+
+  it('session 删除清理（triggerSessionCleanups）→ 该 session 全部记账键删除', async () => {
+    const sid = 's-tokencleanup'
+    const pathA = 'src/token-a.ts'
+    const pathB = 'src/token-b.ts'
+    mockGitGetDiff.mockResolvedValue({ patch: PATCH, binary: false })
+
+    const sessionId = ref<string | null>(sid)
+    const pane = useDetailPaneScoped(sessionId)
+    const store = useFileTreeStore()
+    store.setGitOverlay(sid, [
+      { path: pathA, xyCode: 'M', status: 'modified' },
+      { path: pathB, xyCode: 'M', status: 'modified' },
+    ])
+    store.selectFile(sid, pathA)
+    store.openDetailTab(sid, pathB) // 第二个 tab：watchEffect 拉起，同 sid 两枚记账键
+    await vi.waitFor(() => expect(pane.state.value.status).toBe('content'))
+    await vi.waitFor(() =>
+      expect(store.getDetailTab(sid, pathB)?.status).toBe('content'),
+    )
+
+    const before = __loadTokenKeyCountForTest()
+    triggerSessionCleanups(sid)
+    expect(__loadTokenKeyCountForTest()).toBe(before - 2)
   })
 })
