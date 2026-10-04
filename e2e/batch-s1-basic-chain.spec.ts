@@ -251,7 +251,7 @@ async function settleS1Anchors(
   }
   expect(journalFound, `run journal (wf-*.record.jsonl) 应在 ${JOURNAL_TIMEOUT_MS}ms 内落盘于 <agentDir>/sessions/**/workflow-state/`).toBe(true)
   const journalFile = listFilesRecursive(agentDir, '.record.jsonl')[0]
-  const runId = path.basename(journalFile).replace(/\.events\.jsonl$/, '')
+  const runId = path.basename(journalFile).replace(/\.record\.jsonl$/, '')
   expect(runId.startsWith('wf-'), `journal 文件名应为 <runId>.record.jsonl 且 runId 带 wf- 前缀，收到 "${runId}"`).toBe(true)
 
   // ── 通知等待：notifyDone 送达 entry（customType=workflow-result，details.notifyId=wf-done:<runId>） ──
