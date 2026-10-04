@@ -33,7 +33,8 @@ export type {
 
 /**
  * servable 预检通道的 electronAPI 方法面（IPC 通道名 `localFile:servable`，
- * chat-html-support §6.9 D9）：卡片（经 deps `probeArtifact?`）与抽屉渲染态共用。
+ * chat-html-support §6.9 D9）：内联预览容器 HtmlPreviewInline（经 deps `probeArtifact?`）
+ * 挂载前预检（v16 唯一渲染面，ADR-0108）。
  */
 export interface LocalFileServableChannel {
   /**
@@ -49,9 +50,10 @@ export interface LocalFileServableChannel {
 /**
  * 源码内容读取通道的 electronAPI 方法面（IPC 通道名 `localFile:read`）。
  *
- * 消费方 = DetailPane 「源码」态：产物目录 `<dataDir>/artifacts/<sessionId>` 在 session cwd
- * 外（§6.7 D7），runtime `file.read` 的 cwd 守门不可达，故源码内容走本条与 servable 同源
- * （同一白名单谓词）的读取通道。
+ * 消费方 = 内联容器源码态（deps `readArtifact`）与 DetailPane 变更集/文件树产物源码读取
+ * （useDetailPane `loadPreviewContent`）：产物目录 `<dataDir>/artifacts/<sessionId>` 在
+ * session cwd 外（§6.7 D7），runtime `file.read` 的 cwd 守门不可达，故源码内容走本条与
+ * servable 同源（同一白名单谓词）的读取通道。
  */
 export interface LocalFileReadChannel {
   /**

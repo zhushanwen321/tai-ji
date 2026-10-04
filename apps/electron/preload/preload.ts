@@ -65,16 +65,17 @@ export interface ElectronAPI {
    *  shell.showItemInFolder，返回是否放行） */
   revealInFolder(filePath: string): Promise<boolean>
   /**
-   * 预检绝对路径是否可经 local-file 协议服务（chat-html-support §6.9 D9）：HtmlPreviewCard
-   * （经 deps `probeArtifact?`）与 DetailPane 渲染态挂载前共用。谓词 = 白名单成员资格
-   * （先行短路）→ 存在性 → 目录性，与 main 的 local-file 协议 handler 同一模块函数。
-   * 入参 = 明文绝对路径（% 解码由 URL 入口承担，IPC 不重复解码）。
+   * 预检绝对路径是否可经 local-file 协议服务（chat-html-support §6.9 D9）：内联预览容器
+   * HtmlPreviewInline（经 deps `probeArtifact?`）挂载前预检（v16 唯一渲染面，ADR-0108）。
+   * 谓词 = 白名单成员资格（先行短路）→ 存在性 → 目录性，与 main 的 local-file 协议 handler
+   * 同一模块函数。入参 = 明文绝对路径（% 解码由 URL 入口承担，IPC 不重复解码）。
    */
   localFileServable(absPath: string): Promise<LocalFileServableResult>
   /**
    * 读白名单内文件内容（chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」）：
-   * DetailPane 「源码」态用——产物目录在 session cwd 外，runtime file.read 的 cwd 守门
-   * 不可达。谓词与 `localFileServable` / 协议 handler 同一白名单模块，越界返回
+   * 消费方 = 内联容器源码态（deps `readArtifact`）与 DetailPane 变更集/文件树产物源码读取
+   * （useDetailPane `loadPreviewContent`）——产物目录在 session cwd 外，runtime file.read
+   * 的 cwd 守门不可达。谓词与 `localFileServable` / 协议 handler 同一白名单模块，越界返回
    * `out_of_whitelist`（不触 fs）。
    */
   localFileRead(absPath: string): Promise<LocalFileReadResult>

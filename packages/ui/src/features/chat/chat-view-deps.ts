@@ -63,7 +63,7 @@ export interface ChatViewDeps {
    *  绝对路径，出参形状 = 主进程 `localFile:servable` 通道（白名单 ∪ 存在 ∪ 非目录三个
    *  谓词同源；reason ∈ not_found / is_dir / out_of_whitelist 即降级原因，servable=true
    *  时 size 附字节数供 HtmlPreviewInline 头部条展示文件名与大小）。
-   *  optional，同 sessionCwdOf：未 provide（测试 mock 壳）时卡片跳过预检、不显示大小，
+   *  optional，同 sessionCwdOf：未 provide（测试 mock 壳）时容器跳过预检、不显示大小，
    *  预检 pending 期间显中性加载态（不设墙钟超时）；renderer useChatViewDeps 运行时总
    *  provide 真实实现（内部经 electronAPI 走主进程 IPC）。 */
   probeArtifact?: (absPath: string) => Promise<{

@@ -31,7 +31,7 @@
     class="md-html-preview overflow-hidden rounded-card border border-border bg-surface"
     data-testid="html-preview-inline"
   >
-    <!-- 降级占位（原卡片降级形态延续）：路径非法 / 无法解析 / 预检三原因——文件名 + 原因灰显，无 iframe 无操作 -->
+    <!-- 降级占位（原卡片降级形态延续）：路径非法 / 无法解析 / 预检三原因——文件名 + 原因两行（原因行错误色标记），无 iframe 无操作 -->
     <div
       v-if="degradeReason"
       class="flex items-start gap-2.5 px-3 py-2.5"

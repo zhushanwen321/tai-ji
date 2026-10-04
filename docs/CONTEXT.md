@@ -185,15 +185,15 @@ session 的语义内容——对话历史、项目知识（AGENTS.md 等）、sk
 ### HTML 预览块
 info string 为 `html-preview` 的 fenced code block，内容是被预览 HTML 文件的路径（单行）。agent 交付 HTML 产物的引用语法（fence 首词匹配，尾随 token 忽略；空 / 多行 → 降级态「路径非法」）。
 
-**代码映射**: 段切分 `packages/renderer/src/composables/logic/markdown-incremental.ts`（`'html-preview'` 段类型）→ 分发 `packages/ui/src/features/chat/MarkdownRenderer.vue` → `HtmlPreviewCard.vue`。
+**代码映射**: 段切分 `packages/renderer/src/composables/logic/markdown-incremental.ts`（`'html-preview'` 段类型）→ 分发 `packages/ui/src/features/chat/MarkdownRenderer.vue` → 内联预览容器 `HtmlPreviewInline.vue`（v16）。
 
-### 预览卡片
-HTML 预览块在对话流中渲染成的消息内卡片（文件名 + 打开预览按钮）。走 Vue 段组件产出 DOM，不经 v-html / DOMPurify 通道（用户 HTML 白名单契约不受影响）。
+### 预览卡片（v16 后：内联预览容器的降级占位存续形态）
+HTML 预览块在对话流中的渲染载体为**内联预览容器**（v16，ADR-0108）：头部条（文件名/大小 + 源码-预览切换 + 刷新 + 收起/展开）+ sandbox iframe 原位嵌入消息流，脚本可执行、原位渲染、免点击跳转。「卡片」概念（v16 前形态：消息内单按钮卡片，点击后抽屉渲染）仅存续于降级占位——预检不过时容器退化为降级占位（文件名 + 原因两行，无操作区）。走 Vue 段组件产出 DOM，不经 v-html / DOMPurify 通道（用户 HTML 白名单契约不受影响）。
 
-**代码映射**: `packages/ui/src/features/chat/HtmlPreviewCard.vue`；预检能力经 `chat-view-deps.ts` 的 `probeArtifact?` 注入（未 provide → 跳过预检、不显示大小）。
+**代码映射**: `packages/ui/src/features/chat/HtmlPreviewInline.vue`；预检能力经 `chat-view-deps.ts` 的 `probeArtifact?` 注入（未 provide → 跳过预检、不显示大小）；源码态读取经 `readArtifact?`（`localFile:read` 通道）。
 
-### 渲染态
-DetailPane 对 HTML 文件的 iframe 预览形态，与既有「源码态」相对，可切换。实现 = `sandbox="allow-scripts"` iframe（无 `allow-same-origin`，文档落 opaque origin）加载 `local-file://` URL；挂载前经主进程 servable 预检，不可服务 → 「无法预览」占位带原因 + 重试。
+### 渲染态（v16 退役词条）
+DetailPane 对 HTML 文件的 iframe 预览形态（v16 前与「源码态」相对、可切换）——v16 已退役（ADR-0108）：DetailPane 对 `.html` 恢复 shiki 源码高亮，机制规格（`sandbox="allow-scripts"` iframe、无 `allow-same-origin` 落 opaque origin、servable 预检、URL 百分号编码、`?r=n` 刷新）整体平移至内联预览容器承载。现役「源码态」= 容器头部切换（iframe 卸载、内容经 `localFile:read` 读取走 shiki 高亮）与 DetailPane 源码高亮。
 
 ### 会话产物目录
 `<dataDir>/artifacts/<sessionId>/`——HTML 产物落点。它在 local-file 白名单内（`<dataDir>` 前缀成员），因此预览无需任何白名单放宽。随会话删除级联删除，超龄（默认 7 天，`TAIJI_ARTIFACTS_KEEP_DAYS` 可覆盖）由保留期扫描按文件系统级判据回收（ADR-0107）。

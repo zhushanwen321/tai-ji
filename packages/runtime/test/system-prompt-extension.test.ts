@@ -30,7 +30,7 @@ interface SystemPromptConfig {
 /** 既有用例隔离关注点用的「capability 显式关闭」片段（保持原精确断言） */
 const CAP_OFF: { capability: { enabled: boolean } } = { capability: { enabled: false } }
 
-/** capability 段 header 锚（与扩展源码 TAIJI_CAPABILITY_SECTION 的 header 一致） */
+/** capability 段 header 锚（与扩展源码 renderCapabilitySection 渲染段的 header 一致） */
 const CAP_HEADER = '# TaiJi capabilities'
 
 const PLUGIN_PATH = new URL('../../../extensions/taiji/system-prompt/index.ts', import.meta.url).pathname

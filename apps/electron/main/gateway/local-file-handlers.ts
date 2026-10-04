@@ -3,7 +3,8 @@
  *
  * 两个消费方共用本模块：
  * ① main.ts 的 `protocol.handle('local-file')` 协议 handler
- * ② 本模块注册的 `localFile:servable` 预检 IPC（卡片 + 抽屉渲染态挂载前准入检查）
+ * ② 本模块注册的 `localFile:servable` 预检 IPC（内联预览容器 HtmlPreviewInline 挂载前
+ *   准入检查，经 deps probeArtifact?——v16 唯一渲染面）
  *
  * **白名单成员集静态不变**（本设计不新增成员、不新增白名单输入方，§3.5 聚合不变量②）：
  * 产物目录落在既有成员 `<dataDir>` 内，前缀构造仍由 computeLocalFilePrefixes 纯函数裁决。
@@ -85,10 +86,11 @@ export function registerLocalFileHandlers(deps: IpcHandlerDeps): void {
     },
   )
 
-  // localFile:read：DetailPane 「源码」态读内容（chat-html-support §8.2 S3「切换『源码』看到
-  // shiki 高亮」）。产物目录 `<dataDir>/artifacts/<sessionId>` 在 session cwd 外（§6.7 D7），
-  // runtime file.read 的 cwd 守门对主要产物路径不可达——本条与 servable 预检复用同一白名单
-  // 谓词（§6.9 D9「同一谓词」），准入不放宽；读取失败不抛错，回结构化原因。
+  // localFile:read：内联容器源码态与 DetailPane 变更集/文件树产物源码读取（useDetailPane
+  // loadPreviewContent；chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」）。产物目录
+  // `<dataDir>/artifacts/<sessionId>` 在 session cwd 外（§6.7 D7），runtime file.read 的
+  // cwd 守门对主要产物路径不可达——本条与 servable 预检复用同一白名单谓词（§6.9 D9
+  // 「同一谓词」），准入不放宽；读取失败不抛错，回结构化原因。
   ipcMain.handle(LOCAL_FILE_READ, (_event, rawPath: unknown): LocalFileReadResult => {
     if (typeof rawPath !== 'string' || rawPath.length === 0) {
       return { ok: false, reason: 'out_of_whitelist' }

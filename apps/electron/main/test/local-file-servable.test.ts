@@ -45,10 +45,11 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 
-/** renderer 侧拼 local-file URL 的路径段编码形态（D4 编码规格）——与 packages/renderer
- *  src/composables/features/file-tree/html-preview.ts 的 `encodeLocalFilePath` 同构：
- *  剥冗余前导 `/` 后规范化为单个前导 `/`，逐段 encodeURIComponent。这是真实 URL 入口
- *  形态（镜像实现会漏掉 `~` → `/~` 的前导 `/`，正是 U10 分叉的成因）。 */
+/** renderer 侧拼 local-file URL 的路径段编码形态（D4 编码规格）——与 packages/ui
+ *  src/features/chat/html-preview-path.ts 的 `encodeLocalFilePath` 同构（v16 随抽屉渲染态
+ *  退役自 renderer 迁入 ui 包）：剥冗余前导 `/` 后规范化为单个前导 `/`，逐段
+ *  encodeURIComponent。这是真实 URL 入口形态（镜像实现会漏掉 `~` → `/~` 的前导 `/`，
+ *  正是 U10 分叉的成因）。 */
 const toUrlPathname = (raw: string): string =>
   '/' +
   raw

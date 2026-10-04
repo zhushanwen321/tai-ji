@@ -460,7 +460,7 @@ describe('cachedReadFileSync（mtime 级内容缓存，KV-cache 稳定性改造�
 
 // ── 能力段 ①② 渲染锁定 + 产物目录镜像常量（chat-html-support u1-prompt）──────────
 
-/** 能力段清单区的边界标签（文案与源码 TAIJI_CAPABILITY_SECTION 同字面量）。 */
+/** 能力段清单区的边界标签（文案与源码 renderCapabilitySection 渲染的 capability 段同字面量）。 */
 const POS_TAGS_LABEL = 'You may use these tags: '
 const POS_ATTRS_LABEL = 'Presentational attributes allowed: '
 const FORBIDDEN_TAGS_LABEL = 'Do not use these tags (they are stripped before rendering): '

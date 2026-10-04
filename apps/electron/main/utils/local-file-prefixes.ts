@@ -112,9 +112,9 @@ export function computeLocalFilePrefixes(opts: LocalFilePrefixOptions): string[]
 }
 
 // ── local-file servable 预检谓词（chat-html-support §6.4 D4 子决策 / §6.9 D9）──────
-// 卡片（经 deps probeArtifact?）与抽屉渲染态挂载前经 `localFile:servable` IPC 预检；
-// 协议 handler 与预检必须复用本模块的同一谓词——边缘路径（.. 穿越 / // 冗余斜杠 /
-// %2e2e 编码遍历 / 含 % # 空格的文件名）上两份平行实现必然分叉。
+// 内联预览容器 HtmlPreviewInline（经 deps probeArtifact?）挂载前经 `localFile:servable` IPC
+// 预检（v16 唯一渲染面）；协议 handler 与预检必须复用本模块的同一谓词——边缘路径（.. 穿越 /
+// // 冗余斜杠 / %2e2e 编码遍历 / 含 % # 空格的文件名）上两份平行实现必然分叉。
 
 /** 内部探测结果：比 IPC 出参多带规范化后的绝对路径（协议 handler 的 net.fetch 需要） */
 export interface LocalFileProbeResult extends LocalFileServableResult {

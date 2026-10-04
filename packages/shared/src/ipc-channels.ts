@@ -72,9 +72,9 @@ export const DIAGNOSTICS_EXPORT_BUNDLE = 'diagnostics:export-bundle' as const
 /**
  * local-file servable 预检通道 [chat-html-support §6.9 D9，ADR-0107 第 3 条]。
  *
- * invoke 通道：renderer（卡片经 deps `probeArtifact?` / 抽屉渲染态挂载前）传绝对路径，
- * main 侧返回 `{ servable, reason?, size? }`（reason ∈ `not_found` / `is_dir` /
- * `out_of_whitelist`）——谓词与 `protocol.handle('local-file')` 复用同一规范化管线模块
+ * invoke 通道：renderer（内联预览容器 HtmlPreviewInline 经 deps `probeArtifact?` 挂载前
+ * 预检——v16 唯一渲染面）传绝对路径，main 侧返回 `{ servable, reason?, size? }`（reason ∈
+ * `not_found` / `is_dir` / `out_of_whitelist`）——谓词与 `protocol.handle('local-file')` 复用同一规范化管线模块
  * （白名单成员资格先行短路 → 存在性 → 目录性；越界不触 fs，杜绝存在性探测通道）。
  * 通道名 `localFile:servable` 为设计/ADR 逐字记录值（见文件头命名惯例注），不随 kebab 惯例改名。
  */
@@ -83,7 +83,8 @@ export const LOCAL_FILE_SERVABLE = 'localFile:servable' as const
 /**
  * local-file 源码内容读取通道 [chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」]。
  *
- * invoke 通道：DetailPane 「源码」态传绝对路径，main 侧返回
+ * invoke 通道：内联容器源码态（deps readArtifact）与 DetailPane 变更集/文件树产物源码读取
+ * （useDetailPane loadPreviewContent）传绝对路径，main 侧返回
  * `{ ok: true, content, truncated }` 或 `{ ok: false, reason }`（reason ∈ servable 三原因 +
  * `read_failed`）——谓词与 `LOCAL_FILE_SERVABLE` / 协议 handler 复用同一白名单模块
  * （白名单成员资格先行短路 → 存在性 → 目录性；越界不触 fs）。

@@ -117,7 +117,7 @@ function decodeB64(b64: string): string {
  * 在协议层每帧重分配（tail 段每帧重建），若 key 随帧变则占位 DOM 重建、loader 旋转动画
  * （1.4s 周期）每帧从头重启，视觉冻结在起转 18°。文档级至多一个未闭合 fence，哨兵不撞号。
  * 其余段沿用 segId（前缀段跨帧不变 → DOM 复用）/ index（全量降级路径）。html-preview 段
- * （fence 闭合后才成段，属前缀/稳定区）走 segId——卡片预检态随实例保活，不被重建重置。
+ * （fence 闭合后才成段，属前缀/稳定区）走 segId——容器预检态随实例保活，不被重建重置。
  */
 function segKey(seg: MarkdownSegment, i: number): string {
   if (seg.type === 'streaming-fence') return 'sf'
