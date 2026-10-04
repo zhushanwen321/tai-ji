@@ -47,3 +47,64 @@ describe('drawer types：bashTask tab 扩展（D5①）', () => {
     expect(getDrawerControlState().selectedBackgroundTaskId).toBe('bt-abc123')
   })
 })
+
+// ── plan tab 扩展（plan 模式重设计 u1-drawer-tab，第 9 员）──
+// 形态照 bashTask 先例：编译期断言由 tsc 系执行，运行期影子验证成员合法 + 默认控制态
+// 零加员即可满足接口（plan tab 无选中态字段，OpenDrawerOptions 零加员）。
+
+// 'plan' 可赋给 SideDrawerTab（成员缺失即 vue-tsc 红）
+const planTab: SideDrawerTab = 'plan'
+
+describe('drawer types：plan tab 扩展（plan 模式重设计 u1-drawer-tab）', () => {
+  afterEach(() => {
+    _resetDrawerControlForTest()
+  })
+
+  it("'plan' 是合法 SideDrawerTab 成员（编译期断言的运行期影子）", () => {
+    expect(planTab).toBe('plan')
+  })
+
+  it("默认控制态零加员即满足接口（'plan' 作 activeTab 写入分区可读回）", () => {
+    bindDrawerSessionId(ref<string | null>('sess-plan'))
+    const state = getDrawerControlState()
+    expect(state.activeTab).not.toBe('plan')
+    state.activeTab = 'plan'
+    expect(getDrawerControlState().activeTab).toBe('plan')
+  })
+})
+
+// ── btw tab 扩展（btw-question D7，M3-a 第 10 员）──
+// 形态照 bashTask 先例：编译期断言由 tsc 系执行，运行期影子验证成员合法 + 可选字段
+// selectedBtwVid 零加员即可满足接口（默认控制态不写该字段的结构保证）。
+
+// 'btw' 可赋给 SideDrawerTab（成员缺失即 vue-tsc 红）
+const btwTab: SideDrawerTab = 'btw'
+
+describe('drawer types：btw tab 扩展（btw-question D7，M3-a）', () => {
+  afterEach(() => {
+    _resetDrawerControlForTest()
+  })
+
+  it("'btw' 是合法 SideDrawerTab 成员（编译期断言的运行期影子）", () => {
+    expect(btwTab).toBe('btw')
+  })
+
+  it('默认控制态不写 selectedBtwVid 即满足接口；分区内写入可读回', () => {
+    // 可选性锚：minimalControlState 字面量（上方）未含 selectedBtwVid 仍满足接口，
+    // 若未来改必填则该字面量 tsc 红，createDefaultControlState 构造点同步被迫改。
+    expect(minimalControlState.selectedBtwVid).toBeUndefined()
+    bindDrawerSessionId(ref<string | null>('sess-btw'))
+    const state = getDrawerControlState()
+    expect(state.selectedBtwVid).toBeUndefined()
+    state.selectedBtwVid = 'btw:pi-1'
+    expect(getDrawerControlState().selectedBtwVid).toBe('btw:pi-1')
+  })
+
+  it("'btw' 作 activeTab 写入分区可读回（DrawerPanel tab 元信息消费面）", () => {
+    bindDrawerSessionId(ref<string | null>('sess-btw-tab'))
+    const state = getDrawerControlState()
+    expect(state.activeTab).not.toBe('btw')
+    state.activeTab = 'btw'
+    expect(getDrawerControlState().activeTab).toBe('btw')
+  })
+})

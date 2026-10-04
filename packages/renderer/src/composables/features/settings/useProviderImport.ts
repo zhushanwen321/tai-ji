@@ -11,7 +11,8 @@
  *     → 失败（envelope error 或 transport reject）：toast 报错，回 'idle'
  *   onImportConfirm(selectedIds)
  *     → config.applyImportProviders(importId, selectedIds)
- *     → 成功：toast 导入/跳过/失败统计 + key 缺失提示，复位 idle
+ *     → 成功：toast 导入/跳过/失败统计 + key 缺失提示；有失败项保留 preview 供回查（RD-4#12），
+ *       全部成功才复位 idle
  *     → 失败（envelope error 或 transport reject）：保持 'previewing' 允许重试
  *
  * 注意：config.previewImportProviders/applyImportProviders 在 transport 层（请求超时、
@@ -96,7 +97,17 @@ export function useProviderImport() {
         return
       }
       reportImportSuccess(result.result, selectedIds)
-      resetImportState()
+      // RD-4#12：有失败项时保留 preview（不 reset），让用户可在弹窗回查失败条目——此前成功后
+      // 立刻 resetImportState() 清空 preview，用户无法回查。全部成功才 reset 关闭弹窗。保留期间
+      // importState 留 'previewing'（弹窗不关）；用户关闭弹窗（onPreviewDialogToggle）或重新
+      // 导入（onImportSelect）时清空。注：弹窗内「灰显失败行」需 ProviderImportPreviewDialog
+      // （packages/ui，非本包域）渲染 result 逐条 status，本包仅保留 preview 数据供回查 +
+      // toast 已报 failedCount；行级灰显列为跨包协调项。
+      if (result.result.failedCount > 0) {
+        importState.value = 'previewing'
+      } else {
+        resetImportState()
+      }
     } catch (e) {
       // transport 层 reject（请求超时 / WebSocket 断连 pending.rejectAll / 传输发送失败）：
       // 回 previewing 保留对话框允许重试 + toast

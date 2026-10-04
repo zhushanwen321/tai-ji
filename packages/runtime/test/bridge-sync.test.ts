@@ -90,6 +90,13 @@ vi.mock('../src/services/plugin-service/plugin-service.js', () => ({
     togglePlugin = vi.fn().mockResolvedValue([])
     initialize = vi.fn().mockResolvedValue(undefined)
     shutdown = vi.fn().mockResolvedValue(undefined)
+    // RT-1#1 契约（code-harden 批次 2）：pluginService 缺桥接方法 → bridge-handler 回
+    // isError 载荷（装配缺口 fail-fast）。mock 补齐桥接面，让路由用例走真实 payload
+    // 路径——bridge-handler 只做 stringify + 'select' 序列化与分发，payload 形状由本 mock 提供。
+    getBridgeSyncPayload = vi.fn().mockReturnValue({ tools: [], commands: [], success: true })
+    handleBridgeToolExecute = vi.fn().mockResolvedValue({ content: 'mock tool result', isError: false })
+    handleBridgeEvent = vi.fn()
+    handleBridgeIntercept = vi.fn().mockResolvedValue({})
   },
 }))
 
@@ -277,7 +284,7 @@ describe('RuntimeServer: bridge request routing', () => {
         data: { sessionId: 'sess-1', query: 'hello' },
       })
 
-      // 新契约：JSON 字符串 + 'select'（PluginService mock 无 handleBridgeIntercept → {} 回包）
+      // 新契约：JSON 字符串 + 'select'（mock handleBridgeIntercept 无注入规则 → {} 经真实路径回包）
       expect(mockSendExtensionUiResponse).toHaveBeenCalledTimes(1)
       const response = parseBridgeResponse(mockSendExtensionUiResponse.mock.calls[0])
       expect(response).toEqual({})

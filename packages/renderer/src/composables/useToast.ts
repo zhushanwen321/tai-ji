@@ -140,5 +140,13 @@ export function useToast() {
     scheduleRemove(id, state.remainingMs)
   }
 
-  return { toasts, error, info, warning, remove, pause, resume, droppedCount }
+  /**
+   * RD-3#7：清零丢弃计数（ToastContainer 溢出摘要「还有 N 条」的关闭动作消费方）。
+   * 让 droppedCount 有 UI 消费出口——不再只 console.warn 无留痕。
+   */
+  function resetDropped(): void {
+    droppedCount.value = 0
+  }
+
+  return { toasts, error, info, warning, remove, pause, resume, droppedCount, resetDropped }
 }

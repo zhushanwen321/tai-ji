@@ -4,11 +4,13 @@
  * 导出 PluginSettingsPage（插件管理页，IF7）+ 其数据源接口 + StatusBar/ViewHost
  * （W3：AC5 状态栏 + AC9 view 渲染侧，C3/C4 契约）及其注入接口 +
  * CompanionBand/PermissionRequestDialog（W2：AC3 渲染侧 + AC4 权限回路）及其注入契约。
- * 壳特有装配（bus 来源选择 / provide 时机 / Panel 分流裁决）留在各壳，本包提供契约、
- * 组件本体与双壳（桌面 renderer / 移动 mobile-renderer）逐字节共享的纯翻译件
- * （shell-adapters：WS source 适配 + CompanionBand source/transport 工厂；
- * permission-request-controller：权限审批编排状态机 factory，两壳薄接线消费）。
- * AskUserForm 是 CompanionBand 的内部子组件（W2 clarify Q2），不进导出面。
+ * 真实数据源实现由壳（P5）provide（接 runtime config.plugins 订阅 + S2
+ * status-bar-controller/view-host-store/contribution-registry + message-bus-bridge
+ * / runtime WS 通道），本包只定义契约与组件本体。
+ * 壳特有装配（bus 来源选择 / provide 时机）留在各壳，本包另提供双壳（桌面 renderer /
+ * 移动 mobile-renderer）逐字节共享的纯翻译件（shell-adapters：WS source 适配 +
+ * CompanionBand source/transport 工厂；permission-request-controller：权限审批编排
+ * 状态机 factory，两壳薄接线消费）。
  */
 export { default as PluginSettingsPage } from './PluginSettingsPage.vue'
 export {
@@ -59,9 +61,10 @@ export {
   type PluginViewSummary,
 } from './views-source'
 export {
+  convertToDialogRequest,
   createCompanionDialogAdapters,
+  createUiResponseTransport,
   createWsPluginMessageSource,
-  type AskUserRouting,
   type CompanionDialogAdapters,
   type CompanionDialogAdaptersOptions,
   type CompanionDialogAdaptersTesting,

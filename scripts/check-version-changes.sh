@@ -44,6 +44,7 @@ Usage: bash scripts/check-version-changes.sh [git-diff-range]
   DEPENDENTS_OF_CHANGED   传递闭包：引用了已 bump 包、须 patch 重发刷新范围的包
   LINKED_GROUPS_AFFECTED  linked 组受影响参考（不强制对齐）
   WARN_DECLARED_PACKAGE_NOT_FOUND          声明了但包不存在（typo/已删）
+  WARN_DECLARED_TYPE_CONFLICT              同包在多个 changeset 文件声明了不同 type（人工 --changed 权威，但须逐一复核声明）
   WARN_CHANGESET_PREVIOUSLY_CONSUMED       疑似已发布消费过的残留 changeset
                                            （git 删除历史 / CHANGELOG 首行双信号，只警告不排除）
 
@@ -268,7 +269,7 @@ for (const f of changedFiles) {
 
 // --- 解析 .changeset/*.md frontmatter ---
 const changesetDir = path.join(ROOT, '.changeset');
-const declared = {};          // name -> type（declared type，只显示不采纳）
+const declared = {};          // name -> [{ type, file }]（同包多文件声明全部保留——显示哪个是随机序，人工裁决必须看到全部）
 const changesetFilesForPkg = {}; // name -> [filename,...]（供 apply 消费时关联）
 const changesetMeta = {};      // file -> { pkgs, firstLine, content }（供残留检测）
 if (fs.existsSync(changesetDir)) {
@@ -284,7 +285,7 @@ if (fs.existsSync(changesetDir)) {
       const mm = line.match(/^['"]?([^:'"\s]+?)['"]?\s*:\s*(major|minor|patch)\s*$/);
       if (mm) {
         const pkgName = mm[1].trim();
-        declared[pkgName] = mm[2];
+        (declared[pkgName] ||= []).push({ type: mm[2], file: f });
         (changesetFilesForPkg[pkgName] ||= []).push(f);
         pkgs.push(pkgName);
       }
@@ -350,6 +351,11 @@ for (const group of (config.linked || [])) {
 // --- 声明了但不存在的包（typo/已删）警告 ---
 const declaredMissing = Object.keys(declared).filter(n => !exists(n));
 
+// --- 同包多声明 type 冲突警告（人工 --changed 是权威，但裁决面必须展示全部声明）---
+// 场景：同一包在多个 changeset 文件被声明为不同 type（旧分支 merge 复活 / 重复声明），
+// 单值字典只显示其中一个（目录序），人工按显示值填 --changed 就可能与另一文件冲突。
+const declaredTypeConflicts = changedList.filter(n => new Set(declared[n].map(d => d.type)).size > 1);
+
 // --- 已发布 changeset 残留检测（警告级，纯信息增量，不改变任何段/退出码/下游行为）---
 // 背景：已消费的 changeset（apply-version.sh 消费即删除）可能被旧分支 merge 复活，重新进入
 // CHANGED_PACKAGES 被人工误当新声明 → 重复 bump + CHANGELOG 重复条目。此处只把警告投放到
@@ -414,7 +420,8 @@ lines.push('CHANGED_PACKAGES:');
 if (changedList.length === 0) lines.push('  (none)');
 for (const name of changedList) {
   const p = packages[name];
-  lines.push(`  ${name} (${p.dir}, current: ${p.version}, declared: ${declared[name]})`);
+  const declStr = declared[name].map(d => `${d.type} (.changeset/${d.file})`).join(', ');
+  lines.push(`  ${name} (${p.dir}, current: ${p.version}, declared: ${declStr})`);
 }
 lines.push('');
 lines.push('UNDECLARED_PACKAGES:');
@@ -452,6 +459,14 @@ if (declaredMissing.length > 0) {
   lines.push('');
   lines.push('WARN_DECLARED_PACKAGE_NOT_FOUND:');
   for (const name of declaredMissing) lines.push(`  ${name} (declared in changeset but no such package)`);
+}
+if (declaredTypeConflicts.length > 0) {
+  lines.push('');
+  lines.push('WARN_DECLARED_TYPE_CONFLICT: (same package declared with different types across changeset files; --changed is authoritative but review every declaration below)');
+  for (const name of declaredTypeConflicts) {
+    const declStr = declared[name].map(d => `${d.type} (.changeset/${d.file})`).join(', ');
+    lines.push(`  ${name}: ${declStr}`);
+  }
 }
 if (consumedWarnings.length > 0) {
   lines.push('');

@@ -5,20 +5,29 @@
 // AssertMutuallyAssignable 助手自 SDK 导出（W2 在 core 里写
 //   `type _A = AssertMutuallyAssignable<CoreX, SdkX>`，
 // 挂 `pnpm --filter @zhushanwen/subagent-core typecheck` 断言族）。
-// 本文件落三件事：
+// 本文件落四件事：
 //   1. 类型层自恰断言：SDK 契约类型对自身的双向可赋值恒 true（样板可编译性验证）；
 //   2. 结构子集方向断言：run.params.task（AgentCallOpts 子集）不得引入 core 全量
 //      AgentCallOpts 未定义的字段——样板演示 core→SDK 方向的断言形态；
-//   3. 运行时形状冒烟：关键契约类型的必填字段在字面量构造下齐备（TS 编译期已锁，
-//      运行时断言防止字段被误标可选后测试静默放行）。
+//   3. 运行时形状冒烟：关键契约类型字面量构造齐备（必填缺失/多余字段编译期爆红；
+//      [U2 修正] 原注释自称「防止字段被误标可选后测试静默放行」——失准：必填→可选
+//      漂移不会在构造处爆红，可选项漂移的真正防线 = core 侧双向可赋值断言，见下
+//      describe 头注）；
+//   4. noop-safe 标记守卫：遍历 AGENT_EVENT_TYPE_NAMES 断言每个成员带
+//      `// noop-safe:` 一行标记（只查存在不查内容，缺标记 → console.warn）。
 //
 // 本文件不 import core（不变量：SDK 不得 import core；core 类型接入归 W2）。
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
+import { AGENT_EVENT_TYPE_NAMES } from "../protocol/contract-types.ts";
 import type {
   AgentCallOpts,
   AgentEvent,
+  AgentEventTypeName,
   AgentOutcome,
   AssertMutuallyAssignable,
   EngineCapabilities,
@@ -68,7 +77,13 @@ describe("类型闭包样板", () => {
   });
 });
 
-describe("契约类型运行时形状冒烟（字段可选项漂移时在构造处爆红）", () => {
+// [U2 修正] 原标题自称「字段可选项漂移时在构造处爆红」——失准：必填→可选的漂移
+// 不会在此爆红（带全字段的字面量对可选/必填两种声明都能编译），仅反向
+// optional→required（构造处缺字段）才红。可选项漂移的真正防线 = core 侧
+// AssertMutuallyAssignable 双向断言（可选性参与可赋值性判定，见 contract-types.ts
+// 断言助手注释）。本组测试的实际职责 = 构造面冒烟：必填缺失 / 多余字段在字面量
+// 构造处编译爆红 + 关键必填值的运行时确认。
+describe("契约类型运行时形状冒烟（必填缺失/多余字段在构造处爆红；可选项漂移防线 = core 侧双向断言）", () => {
   it("EngineCapabilities 11 个能力位必填（gate 四类判据的类型面）", () => {
     const caps: EngineCapabilities = {
       schemaEnforcement: "emulated",
@@ -97,32 +112,23 @@ describe("契约类型运行时形状冒烟（字段可选项漂移时在构造�
     expect(handle.sessionRef).toEqual({ sessionId: "s1", dbPath: "/tmp/db.sqlite" });
   });
 
-  it("AgentEvent 9 种事件可构造（事件逐字序列化契约的构造面）", () => {
-    const events: AgentEvent[] = [
-      { type: "tool_start", toolName: "bash", args: { cmd: "ls" } },
-      { type: "tool_end", toolName: "bash", result: { content: [] }, isError: false },
-      { type: "text_delta", delta: "hello" },
-      { type: "thinking_delta", delta: "hmm" },
-      { type: "turn_end", summary: "done" },
-      { type: "message_end", usage: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } },
-      { type: "compaction" },
-      { type: "activity" },
-      { type: "error", message: "boom" },
-    ];
-    expect(events).toHaveLength(9);
-    expect(new Set(events.map((e) => e.type))).toEqual(
-      new Set([
-        "tool_start",
-        "tool_end",
-        "text_delta",
-        "thinking_delta",
-        "turn_end",
-        "message_end",
-        "compaction",
-        "activity",
-        "error",
-      ]),
-    );
+  it("AgentEvent 事件按词表全集可构造（构造面与 AGENT_EVENT_TYPE_NAMES 同源，漏构造/多余键编译期爆红）", () => {
+    const events: Record<AgentEventTypeName, AgentEvent> = {
+      tool_start: { type: "tool_start", toolName: "bash", args: { cmd: "ls" } },
+      tool_end: { type: "tool_end", toolName: "bash", result: { content: [] }, isError: false },
+      text_delta: { type: "text_delta", delta: "hello" },
+      thinking_delta: { type: "thinking_delta", delta: "hmm" },
+      turn_end: { type: "turn_end", summary: "done" },
+      message_end: { type: "message_end", usage: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } },
+      compaction: { type: "compaction" },
+      activity: { type: "activity" },
+      error: { type: "error", message: "boom" },
+    };
+    // 运行时同源确认：键集 = 词表全集（不手写事件集合），逐成员 type 即词表成员
+    expect(Object.keys(events).sort()).toEqual([...AGENT_EVENT_TYPE_NAMES].sort());
+    for (const name of AGENT_EVENT_TYPE_NAMES) {
+      expect(events[name].type).toBe(name);
+    }
   });
 
   it("AgentOutcome.exitCode 接受 null（被信号杀死的杀链判据）", () => {
@@ -147,5 +153,31 @@ describe("契约类型运行时形状冒烟（字段可选项漂移时在构造�
     ];
     expect(req.method).toBe("select");
     expect(responses).toHaveLength(4);
+  });
+});
+
+// ── 4. noop-safe 标记守卫（U2 事件词表锁）──
+describe("事件词表 noop-safe 标记守卫", () => {
+  it("AGENT_EVENT_TYPE_NAMES 每个成员带 // noop-safe: 一行标记（缺标记 → warn；只查存在不查内容）", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("../protocol/contract-types.ts", import.meta.url)),
+      "utf8",
+    );
+    const start = source.indexOf("export const AGENT_EVENT_TYPE_NAMES");
+    const end = source.indexOf("] as const", start);
+    // 搭接点硬红：词表声明形态变了守卫会空转，提取失败必须爆（防守卫假绿）
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const block = source.slice(start, end);
+    for (const name of AGENT_EVENT_TYPE_NAMES) {
+      const memberLine = block.split("\n").find((line) => line.includes(`"${name}"`));
+      if (!memberLine?.includes("noop-safe:")) {
+        // no-op 安全性属运行时消费语义，不可静态判定——守卫只查标记存在不查内容
+        //（ADR-0071 宽容语义四行①的人工纪律最小机器化：缺标记告警可见，不阻断）
+        console.warn(
+          `[noop-safe 守卫] 事件词表成员 "${name}" 缺 // noop-safe: 标记——补一行旧宿主 reducer 安全性论证`,
+        );
+      }
+    }
   });
 });

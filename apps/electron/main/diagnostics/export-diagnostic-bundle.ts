@@ -3,7 +3,7 @@
  *
  * 【收集清单（D6 明文）】双台账现档（crashes/main.jsonl + crashes/runtime.jsonl）+
  * 触发条件状态表（D2 评估器输出，进 summary.md）+ 各层日志尾部（runtime-* / main-* /
- * renderer-error-* / pi-* 各家族最新一份取末 256KB，非全量）+ 近 24h 水位行摘录（runtime
+ * renderer-error-* / renderer-console-* / pi-* 各家族最新一份取末 256KB，非全量）+ 近 24h 水位行摘录（runtime
  * 日志 5min 明细行）+ 版本/平台/pi 版本/marker 状态 + 台账事件 detailPath 引用的深查文件
  * （D1 schema 字段：detailDigest 摘要与 detailPath 深查是配对设计，包内不含则归因链断）。
  * zip 内置 summary.md（人读首屏：最近 10 条台账事件表格 + 触发状态表 + 各文件清单说明）。
@@ -73,6 +73,7 @@ const LOG_FAMILIES: ReadonlyArray<{ prefix: string; note: string }> = [
   { prefix: 'runtime-', note: 'runtime 主日志尾部（含 5min 水位明细行，最后 256KB）' },
   { prefix: 'main-', note: 'main 进程日志尾部（最后 256KB）' },
   { prefix: 'renderer-error-', note: 'renderer JS 错误落盘尾部（最后 256KB）' },
+  { prefix: 'renderer-console-', note: 'renderer console warn/error 泛捕流落盘尾部（最后 256KB）' },
   { prefix: 'pi-', note: 'pi stdout tee 尾部（最后 256KB；含 relay 镜像 / 崩溃取证同名前缀家族）' },
 ]
 

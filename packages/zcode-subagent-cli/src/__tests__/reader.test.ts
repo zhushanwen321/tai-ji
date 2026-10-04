@@ -156,6 +156,125 @@ describe("readZcodeSessionView：native 读取", () => {
   });
 });
 
+describe("toolFromPart state 双形态（0.16.5 内嵌对象 + 旧字符串形态）", () => {
+  // 存量漂移修复：0.16.5 宿主库全库 state 为内嵌 JSON 对象（字符串形态 0 条），旧实现
+  // 只认 JSON 字符串 → 全量空壳 ToolCall + 误标 isError。fixture：一条 assistant
+  // message 内 6 个 tool part，toolCalls index 与样本一一对应
+  let formsDb: string;
+
+  beforeAll(async () => {
+    formsDb = path.join(tmpDir, "state-forms.sqlite");
+    const { DatabaseSync } = (await import("node:sqlite")) as { DatabaseSync: new (p: string) => unknown };
+    type Db = {
+      exec: (s: string) => void;
+      prepare: (s: string) => { run: (...a: unknown[]) => void };
+      close: () => void;
+    };
+    const db = new DatabaseSync(formsDb) as unknown as Db;
+    db.exec(
+      "CREATE TABLE session (id TEXT PRIMARY KEY, time_created INTEGER);" +
+        "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, sequence INTEGER, data TEXT);" +
+        "CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, sequence INTEGER, data TEXT);",
+    );
+    db.prepare("INSERT INTO session (id, time_created) VALUES (?, ?)").run("sess_state", 1000);
+    db
+      .prepare("INSERT INTO message (id, session_id, sequence, data) VALUES (?, ?, ?, ?)")
+      .run("msg_state", "sess_state", 0, JSON.stringify({ role: "assistant" }));
+    const insertPart = db.prepare(
+      "INSERT INTO part (id, message_id, session_id, sequence, data) VALUES (?, ?, ?, ?, ?)",
+    );
+    insertPart.run("s0", "msg_state", "sess_state", 0, JSON.stringify({ type: "step-start" }));
+    const toolParts = [
+      // [0] 内嵌对象 completed + string output
+      { type: "tool", tool: "Bash", state: { status: "completed", input: { command: "ls" }, output: "file-a" } },
+      // [1] 内嵌对象 completed + object output
+      {
+        type: "tool",
+        tool: "Edit",
+        state: { status: "completed", input: { path: "a.ts" }, output: { changedFiles: 1 } },
+      },
+      // [2] 内嵌对象 error：output 恒空、错误文本在 state.error（宿主库实测形态）
+      {
+        type: "tool",
+        tool: "Read",
+        state: { status: "error", input: { filePath: "x" }, output: null, error: "ENOENT: no such file" },
+      },
+      // [3] 旧形态：state 为 JSON 字符串（0.16.5 前版本）
+      {
+        type: "tool",
+        tool: "Grep",
+        state: JSON.stringify({ status: "completed", input: { query: "a" }, output: "hit" }),
+      },
+      // [4] running：args 保留、无 result、isError 降级
+      { type: "tool", tool: "Bash", state: { status: "running", input: { command: "sleep 1" } } },
+      // [5] 非法 state（非 JSON 字符串）：降级空壳
+      { type: "tool", tool: "Write", state: "{not-json" },
+    ];
+    toolParts.forEach((p, i) => insertPart.run(`s${i + 1}`, "msg_state", "sess_state", i + 1, JSON.stringify(p)));
+    insertPart.run(
+      "s7",
+      "msg_state",
+      "sess_state",
+      7,
+      JSON.stringify({ type: "step-finish", tokens: { input: 1, output: 1, cache: {} } }),
+    );
+    db.close();
+  });
+
+  async function readToolCalls() {
+    const view = await readZcodeSessionView(formsDb, "sess_state");
+    return view.turns[0]!.toolCalls;
+  }
+
+  it("内嵌对象 completed + string output：input→args、output→content、不标 isError", async () => {
+    const tc = (await readToolCalls())[0]!;
+    expect(tc.toolName).toBe("Bash");
+    expect(tc.args).toEqual({ command: "ls" });
+    expect(tc.result).toEqual({ content: ["file-a"] });
+    expect(tc.isError).toBeUndefined();
+  });
+
+  it("内嵌对象 completed + object output：output→details", async () => {
+    const tc = (await readToolCalls())[1]!;
+    expect(tc.toolName).toBe("Edit");
+    expect(tc.args).toEqual({ path: "a.ts" });
+    expect(tc.result).toEqual({ details: { changedFiles: 1 } });
+    expect(tc.isError).toBeUndefined();
+  });
+
+  it("内嵌对象 error：错误文本（state.error）进 result.content + isError（T4：错误原因必须可见）", async () => {
+    const tc = (await readToolCalls())[2]!;
+    expect(tc.toolName).toBe("Read");
+    expect(tc.args).toEqual({ filePath: "x" });
+    expect(tc.result).toEqual({ content: ["ENOENT: no such file"] });
+    expect(tc.isError).toBe(true);
+  });
+
+  it("旧形态回归：state 为 JSON 字符串仍可解析（completed 全字段映射）", async () => {
+    const tc = (await readToolCalls())[3]!;
+    expect(tc.toolName).toBe("Grep");
+    expect(tc.args).toEqual({ query: "a" });
+    expect(tc.result).toEqual({ content: ["hit"] });
+    expect(tc.isError).toBeUndefined();
+  });
+
+  it("running 降级：args 保留、无 result、isError", async () => {
+    const tc = (await readToolCalls())[4]!;
+    expect(tc.toolName).toBe("Bash");
+    expect(tc.args).toEqual({ command: "sleep 1" });
+    expect(tc.result).toBeUndefined();
+    expect(tc.isError).toBe(true);
+  });
+
+  it("非法 state（非 JSON 字符串）：降级空壳（toolName 保留 + isError，无 args/result）", async () => {
+    const tc = (await readToolCalls())[5]!;
+    expect(tc.toolName).toBe("Write");
+    expect(tc.args).toBeUndefined();
+    expect(tc.result).toBeUndefined();
+    expect(tc.isError).toBe(true);
+  });
+});
+
 describe("readZcodeSessionView：结构化错误（供降级②③级，验收 4 负例）", () => {
   beforeEach(() => {
     // 无共享状态需重置；保留钩子位置说明负例组意图

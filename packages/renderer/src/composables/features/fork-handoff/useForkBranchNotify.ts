@@ -70,7 +70,7 @@ function classifyChange(from: SessionStatus, to: SessionStatus): BranchChangeKin
 // taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：branchId→BranchTrack 非响应式追踪表（fork 通知全局 SSOT 的 diff 基线，无 sidRef 的显式 sid 协调器，上方注释已述 ADR-0049 例外）
 const trackMap = new Map<string, BranchTrack>()
 
-/** 分支未读角标：branchId → true（模块级单例，侧栏 ForkGroup 经 useForkBranchBadges 读） */
+/** 分支未读角标：branchId → true（模块级单例，SessionItemDisplay 的未读点直接读本模块，D9 合流） */
 // taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：分支未读角标全局 SSOT（无 sidRef 的显式 sid 协调器，跨 session 血缘键，侧栏角标跨组件读）
 export const unreadByBranch: Ref<ReadonlyMap<string, boolean>> = shallowRef(new Map())
 

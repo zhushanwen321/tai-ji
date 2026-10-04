@@ -172,4 +172,17 @@ describe('skill cache invalidation 端到端广播（契约 4 集成）', () => 
       reg.dispose()
     }
   })
+
+  it('RT-1#9: partial=true 透传进广播 payload（rebuildGlobal 失败分支的降级补发标注）', async () => {
+    const { broker, broadcastSpy } = await makeRealBroker()
+
+    broker.broadcastSkillCacheInvalidated('global', undefined, true)
+    broker.broadcastSkillCacheInvalidated('project')
+
+    const calls = skillCacheInvalidatedCalls(broadcastSpy)
+    expect(calls).toHaveLength(2)
+    // partial 降级标注随 payload 下发；正常失效广播不携带该字段
+    expect(calls[0]).toMatchObject({ payload: { scope: 'global', partial: true } })
+    expect((calls[1].payload as { partial?: boolean }).partial).toBeUndefined()
+  })
 })

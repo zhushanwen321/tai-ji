@@ -389,18 +389,36 @@ describe('useComposerKeydown', () => {
    * file 错误/空结果态），理由是「不可见态吞键 = 消息发不出且无提示」；反馈行补齐后该理由
    * 消失 ⇒ 判据删除（不是与旧判据并存）。仅「浮层未 open」仍全部键放行（末条用例锁定
    * Enter 正常发送）。
+   *
+   * D4 三态细化（command-enter-exact-send §3.3 D4）：非精确匹配锁 = 现状断言（首条 + 前缀条）；
+   * 精确匹配锁 = select-and-send 同步直调 composer 分发链，onSend 恰一次（双发回归锁——
+   * 实现若走合成事件二次派发，计数变 2 而红）；Tab 锁 = 恒 onSelect（补参通道不因完整名关闭）。
+   * 精确锁前置 = 显式 focus（环境 activeElement 默认 body → D1 前置② fail-closed 恒拦，
+   * 见 setupExactChain）。
    */
-  describe('D2 时序锁：浮层 open 时 Enter 选中候选、不触发发送（capture/bubble 全链路）', () => {
+  describe('D2 时序锁三态（command-enter-exact-send D4）：前缀/门失败恒选中不发送、精确直发恰一次、Tab 恒选中（capture/bubble 全链路）', () => {
     let target: HTMLElement
     let removeTarget: () => void
     let popoverWrapper: ReturnType<typeof mount> | null = null
     let onSelect: ReturnType<typeof vi.fn>
+    let onSelectAndSend: ReturnType<typeof vi.fn>
     let onSend: ReturnType<typeof vi.fn>
+    /** select-and-send → composer 分发链直调通道（镜像产线 useCommandPopoverTrigger.onSelectAndSend
+     *  的 onComposerKeydown 晚绑定闭包）；由 wireComposerKeydown 赋值，beforeEach 复位 */
+    let composerKeydownHandler: ((e: KeyboardEvent) => void) | null
 
     beforeEach(() => {
       setActivePinia(createPinia())
       onSelect = vi.fn()
       onSend = vi.fn()
+      composerKeydownHandler = null
+      // select-and-send 消费端 = 产线直调镜像（传原事件，零合成零 DOM 派发）。
+      // onSend 恰一次断言的作用面盖三处：①键盘层分流只调一次 ②原事件被 capture 截断不到
+      // target 冒泡（到则 composer 分发器二次 dispatchEnter）③CommandPopover 未合成再派发
+      // KeyboardEvent（再派发会重进 window capture → 第二次 select-and-send → 第二次直调）。
+      onSelectAndSend = vi.fn((payload: { originalEvent: KeyboardEvent }) => {
+        composerKeydownHandler?.(payload.originalEvent)
+      })
       // target 模拟 composer contenteditable：keydown 冒泡链上挂 useComposerKeydown 产物
       target = document.createElement('div')
       target.setAttribute('contenteditable', 'true')
@@ -434,15 +452,17 @@ describe('useComposerKeydown', () => {
         onFollowUp: vi.fn(),
         onSend,
       }
-      target.addEventListener('keydown', useComposerKeydown(deps))
+      composerKeydownHandler = useComposerKeydown(deps)
+      target.addEventListener('keydown', composerKeydownHandler)
     }
 
     /** 挂真 CommandPopover（panel 态无 sid → compact 一项保底非空）+ 接线 composer keydown。
-     *  propsOverride 供可见性矩阵用例换 type/query/variant（query 无匹配即可造「open 但空候选」）。 */
+     *  propsOverride 供可见性矩阵用例换 type/query/variant（query 无匹配即可造「open 但空候选」）。
+     *  onSelectAndSend 按产线 `@select-and-send="onSelectAndSend"` 接线（消费端见 beforeEach）。 */
     function setupChain(open: boolean, propsOverride: Record<string, unknown> = {}): void {
       popoverWrapper = mount(CommandPopover, {
         attachTo: document.body,
-        props: { open, type: 'slash', variant: 'panel', onSelect, ...propsOverride } as never,
+        props: { open, type: 'slash', variant: 'panel', onSelect, onSelectAndSend, ...propsOverride } as never,
       })
       wireComposerKeydown(open)
     }
@@ -484,6 +504,22 @@ describe('useComposerKeydown', () => {
       return e
     }
 
+    /** 精确锁链前置（D1 前置② focus 门，设计 §5 U3「测试态显式 focus composer」）：
+     *  环境 activeElement 默认 body → activeElement 门恒 fail-closed 拦截，精确锁进直发
+     *  分支前必须显式 focus。产线 shellInputRef = Composer shellInputHolder.ref（识别源 =
+     *  ComposerInput expose 的 getInputElement）；本组用例的「composer 输入区」= target
+     *  （contenteditable div，E-1 activeElementInInput 按该 expose 判据裁决），fake 实例
+     *  getInputElement 指向 target。withShellRef=false = 通道缺省 → 门 fail-closed（D1
+     *  降级态造法，focus 照做以证明拦截来自通道缺省而非焦点缺失）。 */
+    function setupExactChain(query: string, withShellRef = true): void {
+      const shellInputRef = withShellRef
+        ? ref<ShellInputInstance | null>({ getInputElement: () => target } as unknown as ShellInputInstance)
+        : undefined
+      setupChain(true, { query, shellInputRef })
+      target.focus()
+      expect(document.activeElement).toBe(target) // 造态自检：focus 门前置确已生效
+    }
+
     it('浮层 open：Enter 被浮层 capture 消费（onSelect 一次）且 stopPropagation 截断——onSend 不触发、事件 defaultPrevented', () => {
       setupChain(true)
 
@@ -491,6 +527,106 @@ describe('useComposerKeydown', () => {
 
       expect(onSelect).toHaveBeenCalledTimes(1)
       expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ type: 'slash', name: '/compact' }))
+      expect(onSend).not.toHaveBeenCalled()
+      expect(e.defaultPrevented).toBe(true)
+    })
+
+    // ── D4 三态细化（command-enter-exact-send §3.3 D4 + §4 场景 5）────────────────
+    // 非精确锁 = 上方既有用例（query 空 → 非精确，现状断言零改动）+ 下方前缀用例
+    // （前缀 + 焦点门通过 → 精确谓词为假 → 仍恒选中——设计场景 2「前缀插 chip 不回归」）。
+    it('非精确锁（前缀）：query=com + 输入区 focus → Enter 仍恒选中（onSelect 一次、不直发）', () => {
+      setupExactChain('com')
+
+      const e = dispatchEnter()
+
+      expect(onSelect).toHaveBeenCalledTimes(1)
+      expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ type: 'slash', name: '/compact' }))
+      expect(onSelectAndSend).not.toHaveBeenCalled()
+      expect(onSend).not.toHaveBeenCalled()
+      expect(e.defaultPrevented).toBe(true)
+    })
+
+    it('精确锁：完整名 /compact + 输入区 focus + Enter → 直发——select-and-send 恰一次且 onSend 恰一次（双发回归锁）', () => {
+      setupExactChain('compact')
+
+      const e = dispatchEnter()
+
+      expect(onSelectAndSend).toHaveBeenCalledTimes(1)
+      expect(onSelectAndSend).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'slash', name: '/compact', originalEvent: e }),
+      )
+      // D2 双发回归锁：唯一发送来源 = select-and-send 同步直调 composer 分发链（传原事件）。
+      // 实现若走合成事件二次派发（重进 window capture 或落 target 冒泡）→ 第二次
+      // dispatchEnter → 计数变 2 而红；=0 则直调链断（fail-closed 通道亦红）。
+      expect(onSend).toHaveBeenCalledTimes(1)
+      expect(onSelect).not.toHaveBeenCalled() // 直发不经 select 通路（插 chip 前置态在产线 onCmdSelect 侧）
+      expect(e.defaultPrevented).toBe(true) // capture 截断：原事件不到 target 冒泡（到则第二次 onSend）
+    })
+
+    it('Tab 锁：完整名 + 输入区 focus + Tab → 恒选中插 chip（onSelect 一次、select-and-send/onSend 零次）', () => {
+      setupExactChain('compact')
+
+      const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+      target.dispatchEvent(tab)
+
+      expect(onSelect).toHaveBeenCalledTimes(1)
+      expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ type: 'slash', name: '/compact' }))
+      // exactMatch 直发仅 Enter；Tab 恒 onSelect（补参通道不因完整名关闭——设计场景 3）
+      expect(onSelectAndSend).not.toHaveBeenCalled()
+      expect(onSend).not.toHaveBeenCalled()
+      expect(tab.defaultPrevented).toBe(true)
+    })
+
+    it('门失败降级：shellInputRef 缺省（D1 前置② fail-closed）+ 精确形 query → 不直发走选中', () => {
+      setupExactChain('compact', false)
+
+      const e = dispatchEnter()
+
+      expect(onSelect).toHaveBeenCalledTimes(1)
+      expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ type: 'slash', name: '/compact' }))
+      expect(onSelectAndSend).not.toHaveBeenCalled()
+      expect(onSend).not.toHaveBeenCalled()
+      expect(e.defaultPrevented).toBe(true)
+    })
+
+    // ── F-1 回归锁（W1 验收 P1）：门识别源 = getInputElement，不读实例 $el ──────────────
+    // 缺陷形态：dev 构建保留 ComposerInput 模板 HTML 注释 → subTree 根为 Fragment → 实例
+    // $el 是注释节点（nodeType 8）→ 旧实现 root.contains(activeElement) 恒 false →
+    // 精确直发在 dev 全变体静默退化插 chip（prod 剥离注释才正常）。两用例反向锁死 $el
+    // 通道不得复活：①$el 是注释 + expose 正确 → 门必须通过；②expose 缺失 + $el 正确 →
+    // 门必须 fail-closed（实现若回退 $el，②的 onSelectAndSend 会被调而红）。
+    it('F-1 锁：$el 为注释节点（dev 构建形态）+ getInputElement 正确 → 门通过，精确直发照常', () => {
+      setupChain(true, {
+        query: 'compact',
+        shellInputRef: ref<ShellInputInstance | null>({
+          $el: document.createComment(' 富文本输入区（contenteditable）'),
+          getInputElement: () => target,
+        } as unknown as ShellInputInstance),
+      })
+      target.focus()
+      expect(document.activeElement).toBe(target) // 造态自检：焦点门前置确已生效
+
+      const e = dispatchEnter()
+
+      expect(onSelectAndSend).toHaveBeenCalledTimes(1)
+      expect(onSend).toHaveBeenCalledTimes(1)
+      expect(onSelect).not.toHaveBeenCalled()
+      expect(e.defaultPrevented).toBe(true)
+    })
+
+    it('F-1 锁：expose 缺失（$el 正确且 focus 在内）→ 门 fail-closed 不直发（禁回退 $el）', () => {
+      setupChain(true, {
+        query: 'compact',
+        shellInputRef: ref<ShellInputInstance | null>({ $el: target } as unknown as ShellInputInstance),
+      })
+      target.focus()
+      expect(document.activeElement).toBe(target) // 造态自检：焦点在位，拦截只能来自 expose 缺失
+
+      const e = dispatchEnter()
+
+      expect(onSelect).toHaveBeenCalledTimes(1)
+      expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ type: 'slash', name: '/compact' }))
+      expect(onSelectAndSend).not.toHaveBeenCalled()
       expect(onSend).not.toHaveBeenCalled()
       expect(e.defaultPrevented).toBe(true)
     })

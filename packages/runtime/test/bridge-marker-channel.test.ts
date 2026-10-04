@@ -115,10 +115,10 @@ describe('event-adapter: marker 未命中不走 bridge 分支（P-10）', () => 
     expect(findBridgeUi(events)).toBeUndefined()
     const extUi = events.find(e => e.kind === 'extension-ui')
     expect(extUi).toBeDefined()
-    // ask-user 载荷带 questions 透传（前端路由 AskUserOverlay）
+    // ask-user 载荷经 legacy 归一上移产出统一表单帧（form + type 推断映射的 formQuestions）
     const payloadFields = extUi && 'payload' in extUi ? extUi.payload as Record<string, unknown> : {}
-    expect(Array.isArray(payloadFields.askUserQuestions)).toBe(true)
-    expect(payloadFields.askUser).toBe(true)
+    expect(payloadFields.form).toBe(true)
+    expect(Array.isArray(payloadFields.formQuestions)).toBe(true)
   })
 
   it('SESSION_MANAGER_MARKER → session-manager-ui kind，不产 bridge-ui', () => {
@@ -185,6 +185,42 @@ describe('bridge-handler: sendExtensionUiResponse 序列化形状', () => {
     const handler = new BridgeHandler(null)
     await handler.handleBridgeRequest('sess-1', 'req-2', 'bridge:tool_execute', { toolName: 't' }, client)
     expectSelectJsonSerialization(send, { content: 'Plugin system not available', isError: true })
+  })
+
+  it('bridge:sync 无 pluginService（RT-1#1 假成功修复）→ isError:true 而非 {tools:[],success:true}，error 留痕带 requestId/sessionId', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const { client, send } = makeMockClient()
+      const handler = new BridgeHandler(null)
+      await handler.handleBridgeRequest('sess-na', 'req-na-sync', 'bridge:sync', {}, client)
+      // 旧行为 {tools:[],success:true} 会被扩展侧 isBridgeSyncPayload 判定成功，sync
+      // 重试/Degraded 机制永不触发（插件工具链静默失效）——必须回 isError 形态。
+      expectSelectJsonSerialization(send, { content: 'Plugin system not available', isError: true })
+      const parsed = JSON.parse(send.mock.calls[0][1] as string) as Record<string, unknown>
+      expect(parsed.success).toBeUndefined()
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('req-na-sync'))
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('sess-na'))
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
+  it('bridge:intercept 无 pluginService（RT-1#1 假成功修复）→ isError:true 而非 {}（放行），error 留痕带 requestId/sessionId', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const { client, send } = makeMockClient()
+      const handler = new BridgeHandler(null)
+      await handler.handleBridgeRequest('sess-na', 'req-na-int', 'bridge:intercept', { eventName: 'before_agent_start', data: {} }, client)
+      // 旧行为 {} 会被扩展侧 isBridgeInterceptResponse 判定「无注入」正常放行——拦截
+      // 规则链静默失效且零留痕。
+      expectSelectJsonSerialization(send, { content: 'Plugin system not available', isError: true })
+      const parsed = JSON.parse(send.mock.calls[0][1] as string) as Record<string, unknown>
+      expect(parsed.injectedMessages).toBeUndefined()
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('req-na-int'))
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('sess-na'))
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 
   it('bridge:tool_execute 正常结果（设计 §3.3-D6 枚举的 6 处存量之一）→ result JSON 字符串 + select', async () => {

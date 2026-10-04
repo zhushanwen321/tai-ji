@@ -37,9 +37,11 @@ import {
   TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS,
   TAIJI_RUNTIME_PI_RECLAIM_TICK_MS,
   TAIJI_RUNTIME_PI_RECLAIM_VIEWED_WINDOW_MS,
+  TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS,
   DEFAULT_PI_RECLAIM_IDLE_MS,
   DEFAULT_PI_RECLAIM_TICK_MS,
   DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS,
+  DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS,
 } from '@taiji/shared'
 import type { PiConfigStore } from '../infra/pi/pi-config-store.js'
 import type { AuthStorage, CredentialWriter } from './auth/auth-storage.js'
@@ -82,15 +84,21 @@ export interface StartupBackgroundDeps {
   readSpawnMarkers: () => string[] | null
 }
 
-/** 空闲 pi 回收三旋钮（D4；默认值权威源 = shared/constants DEFAULT_PI_RECLAIM_*）。 */
+/** 空闲 pi 回收四旋钮（D4；默认值权威源 = shared/constants DEFAULT_PI_RECLAIM_*）。 */
 export interface ReclaimConfig {
   idleThresholdMs: number
   tickIntervalMs: number
   viewedWindowMs: number
+  /**
+   * 挂起 UI 请求豁免的计龄上界（v6 第四案，r5 I-1 字段名写死）：超过该上界的 pending
+   * 视同不存在（恢复常规回收）。由 reaper 在豁免判定内部消费；与 idleThresholdMs 联动
+   * （FORM_MAX_AGE < IDLE 时豁免恒不命中 = 死代码，resolveReclaimConfig 处 warn）。
+   */
+  pendingUiRequestMaxAgeMs: number
 }
 
 /**
- * 解析 env 三旋钮（idle-pi-reclamation D4 env 覆盖；独立导出便于单测 env 覆盖行为）。
+ * 解析 env 四旋钮（idle-pi-reclamation D4 env 覆盖；独立导出便于单测 env 覆盖行为）。
  *
  * 值语义：缺失回落 shared 默认；非法值（非数字 / NaN / Infinity / 非正数含 0）一律回落
  * 默认——非正数周期/阈值会让 setInterval 立即连拍或永不回收，视为配置错误按缺省处理
@@ -106,10 +114,22 @@ export function resolveReclaimConfig(env: NodeJS.ProcessEnv): ReclaimConfig {
     }
     return n
   }
+  const idleThresholdMs = parseMs(env[TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS], DEFAULT_PI_RECLAIM_IDLE_MS)
+  const pendingUiRequestMaxAgeMs = parseMs(env[TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS], DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS)
+  // r5 影响面 suggestion：FORM_MAX_AGE < IDLE 时，pending 在空闲阈值到达前就已「超龄」
+  // ⇒ 豁免恒不命中 = 死代码（进程照旧被回收、死表单仍被拉回）。此处 warn 不 throw
+  // （env 是运维逃生旋钮，与上方非法值回落同口径）。
+  if (pendingUiRequestMaxAgeMs < idleThresholdMs) {
+    console.warn(
+      `[runtime] TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS (${pendingUiRequestMaxAgeMs}ms) < ` +
+      `TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS (${idleThresholdMs}ms) — pending-UI-request exemption is unreachable (dead code); raise FORM_MAX_AGE or lower IDLE`,
+    )
+  }
   return {
-    idleThresholdMs: parseMs(env[TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS], DEFAULT_PI_RECLAIM_IDLE_MS),
+    idleThresholdMs,
     tickIntervalMs: parseMs(env[TAIJI_RUNTIME_PI_RECLAIM_TICK_MS], DEFAULT_PI_RECLAIM_TICK_MS),
     viewedWindowMs: parseMs(env[TAIJI_RUNTIME_PI_RECLAIM_VIEWED_WINDOW_MS], DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS),
+    pendingUiRequestMaxAgeMs,
   }
 }
 

@@ -42,6 +42,8 @@ import { parseBgNotifyDetails, SUBAGENT_RECORD_CUSTOM_TYPE } from '@taiji/shared
 import { parseEngineHandle } from '@zhushanwen/subagent-core'
 import { extractRecordsFromSessionFile, type SessionFileExtraction } from './session-file-extraction.js'
 import { normalizeSubagentStatus } from './subagent-status.js'
+import { isEnoent } from '../../utils/errors.js'
+import { warnOnce } from '../../utils/warn-once.js'
 import type { NormalizedSubagentStatus } from './subagent-status.js'
 import type { SubagentRecord, BgNotifyRecord } from '@taiji/shared'
 
@@ -689,12 +691,19 @@ function findSubagentSessionFile(mainCwd: string, startedAt: number | undefined)
 /**
  * 列出 subagent session 目录下的候选 JSONL 文件（目录解析 + 存在性 + 列目录三步，任一失败
  * 返回 null）。fs 调用时序保持原样：getSubagentSessionDir → existsSync → readdirSync → filter。
+ * RT-5#6：目录推导失败/目录不可读不再静默——subagent 历史不可见须可归因（warn 一次，
+ * 按 cwd/dir 去重）；目录不存在（从未跑过 subagent）与 ENOENT（TOCTOU 删除）保持安静。
  */
 function listSubagentJsonlFiles(mainCwd: string): { dir: string; files: string[] } | null {
   let dir: string
   try {
     dir = getSubagentSessionDir(mainCwd)
-  } catch {
+  } catch (e) {
+    warnOnce(
+      `subagent-dir:${mainCwd}`,
+      `[subagent-extractor] subagent session dir derivation failed, subagent history not shown: cwd=${mainCwd}`,
+      e instanceof Error ? e.message : e,
+    )
     return null
   }
   if (!existsSync(dir)) return null
@@ -702,7 +711,14 @@ function listSubagentJsonlFiles(mainCwd: string): { dir: string; files: string[]
   let files: string[]
   try {
     files = readdirSync(dir).filter((f) => f.endsWith('.jsonl') && !f.endsWith('.finalized'))
-  } catch {
+  } catch (e) {
+    if (!isEnoent(e)) {
+      warnOnce(
+        dir,
+        `[subagent-extractor] subagent session dir unreadable, subagent history not shown: dir=${dir}`,
+        e instanceof Error ? e.message : e,
+      )
+    }
     return null
   }
   if (files.length === 0) return null

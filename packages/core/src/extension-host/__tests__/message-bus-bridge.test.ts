@@ -2,14 +2,19 @@
  * message-bus-bridge.test.ts —— MessageBusBridge 单测（AC8/FR5/ERR2/dispose/窄化抽查）。
  *
  * 覆盖：AC8（9 个 plugin:* 每个 type 都 emit 对应 InternalEvent，无零订阅）、
- * FR5（5 个 extension:* 收敛，widget/widgetGui 双映射 + ui_request 归一）、
+ * FR5（6 个 extension:* wire type 收敛，widget/widgetGui 双映射 + ui_request 归一 +
+ * requestsInvalidated 失效链透传与防御分支）、
  * ERR2（未知 type + 4 种 payload 解析失败 → error 事件）、dispose 防泄漏、
  * 窄化映射抽查（scope/sessionId 保留、alignment 默认、widgetGui gui:null、editor 兜底）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { MessageBusBridge, parseStatusBarUpdate } from '../message-bus-bridge'
+import { MessageBusBridge, parseStatusBarUpdate, parseModalState, parseHeaderActionUpdate } from '../message-bus-bridge'
 import { InternalEventBus } from '../internal-event-bus'
 import { MockMessageSource } from '../plugin-message-source'
+import { HeaderActionStore } from '../header-action-store'
+import type { HeaderActionEntry } from '../header-action-store'
+import { createSessionScopedMap } from '../utils/session-scoped-map'
+import { subscribePluginModalSlot, resetPluginModalSlot, getPluginModalSlot } from '../plugin-modal-slot'
 import type { IncomingPluginMessage } from '../plugin-message-source'
 import type { InternalEvent } from '../types'
 
@@ -190,7 +195,7 @@ describe('MessageBusBridge', () => {
     })
   })
 
-  describe('FR5: 5 个 extension:* 收敛', () => {
+  describe('FR5: 6 个 extension:* wire type 收敛', () => {
     it('extension:widget → extension-widget（viewId=widgetKey、guiTree=lines）', () => {
       const { source, bus } = makeBridge()
       const { emitted } = spyEmit(bus)
@@ -245,19 +250,64 @@ describe('MessageBusBridge', () => {
       expect(e).toMatchObject({ kind: 'ui-request', sessionId: 's1', request: { requestId: 'r2', pluginId: '', kind: 'select', title: '选择', method: 'select', options: ['a', 'b'] } })
     })
 
-    it('5 个 extension:* 全部收敛，无零订阅', () => {
+    it('extension:requestsInvalidated → requests-invalidated（字段逐项透传，P2-2 失效链）', () => {
+      const { source, bus } = makeBridge()
+      const { emitted } = spyEmit(bus)
+      source.emit({
+        type: 'extension:requestsInvalidated',
+        payload: { sessionId: 's1', requestIds: ['req-1', 'req-2'], reason: 'session-closed' },
+      })
+      const e = emitted.find((x) => x.kind === 'requests-invalidated')
+      expect(e).toBeDefined()
+      // 整对象精确匹配：锁定 4 字段形状，多字段/少字段漂移都会红
+      expect(e).toEqual({ kind: 'requests-invalidated', sessionId: 's1', requestIds: ['req-1', 'req-2'], reason: 'session-closed' })
+      expect(emitted.some((x) => x.kind === 'error')).toBe(false)
+    })
+
+    it('extension:requestsInvalidated reason 缺省 → "unknown"', () => {
+      const { source, bus } = makeBridge()
+      const { emitted } = spyEmit(bus)
+      source.emit({ type: 'extension:requestsInvalidated', payload: { sessionId: 's1', requestIds: ['req-1'] } })
+      const e = emitted.find((x) => x.kind === 'requests-invalidated')
+      expect(e).toBeDefined()
+      expect(e).toMatchObject({ kind: 'requests-invalidated', requestIds: ['req-1'], reason: 'unknown' })
+    })
+
+    it('extension:requestsInvalidated requestIds 非数组 / 含非字符串元素 → error（防御分支，不产半成品事件）', () => {
+      const { source, bus } = makeBridge()
+      const { emitted } = spyEmit(bus)
+      source.emit({ type: 'extension:requestsInvalidated', payload: { requestIds: 'req-1' } })
+      source.emit({ type: 'extension:requestsInvalidated', payload: { requestIds: ['ok', 42] } })
+      const errors = emitted.filter((x) => x.kind === 'error')
+      expect(errors).toHaveLength(2)
+      expect(errors.every((x) => (x as { source: string }).source === 'extension:requestsInvalidated')).toBe(true)
+      expect(emitted.some((x) => x.kind === 'requests-invalidated')).toBe(false)
+    })
+
+    it('extension:requestsInvalidated payload 非记录 → error', () => {
+      const { source, bus } = makeBridge()
+      const { emitted } = spyEmit(bus)
+      source.emit({ type: 'extension:requestsInvalidated', payload: 'nope' })
+      const e = emitted.find((x) => x.kind === 'error')
+      expect(e).toBeDefined()
+      expect(e).toMatchObject({ kind: 'error', source: 'extension:requestsInvalidated' })
+      expect(emitted.some((x) => x.kind === 'requests-invalidated')).toBe(false)
+    })
+
+    it('6 个 extension:* wire type 全部收敛，无零订阅', () => {
       const { source, bus } = makeBridge()
       const { emitted } = spyEmit(bus)
       source.emit({ type: 'extension:widget', payload: { widgetKey: 'w', lines: [] } })
       source.emit({ type: 'extension:widgetGui', payload: { widgetKey: 'w', gui: null } })
       source.emit({ type: 'extension:status', payload: { text: 't' } })
       source.emit({ type: 'extension:notify', payload: { message: 'm' } })
+      source.emit({ type: 'extension:requestsInvalidated', payload: { requestIds: ['r1'] } })
       source.emit({ type: 'extension.ui_request', payload: { requestId: 'r', method: 'input' } })
-      for (const kind of ['extension-widget', 'extension-status', 'extension-notify', 'ui-request']) {
+      for (const kind of ['extension-widget', 'extension-status', 'extension-notify', 'requests-invalidated', 'ui-request']) {
         expect(emitted.some((x) => x.kind === kind), `expected ${kind} emitted`).toBe(true)
       }
       expect(emitted.some((x) => x.kind === 'error')).toBe(false)
-      expect(emitted.length).toBe(5)
+      expect(emitted.length).toBe(6)
     })
   })
 
@@ -465,6 +515,127 @@ describe('MessageBusBridge', () => {
       expect(e).toBeDefined()
       expect((e as { items: unknown[] }).items).toHaveLength(0)
       expect(emitted.some((x) => x.kind === 'error')).toBe(false)
+    })
+  })
+
+  describe('plugin:modalState / plugin:headerActionUpdate（plugin-header-action-modal-points u4a 两表项）', () => {
+    beforeEach(() => {
+      resetPluginModalSlot()
+    })
+
+    /**
+     * bridge + 两消费端容器全接线（真实 emit 流转）。不用 spyEmit——其 mockImplementation
+     * 会整体替换 emit、真实订阅端收不到事件，无法断言 store/slot 状态更新。
+     */
+    function makeWired() {
+      const source = new MockMessageSource()
+      const bus = new InternalEventBus()
+      const sessionScoped = createSessionScopedMap(() => new Map<string, HeaderActionEntry>())
+      const store = new HeaderActionStore({ bus, sessionScoped })
+      store.subscribe()
+      const unsubSlot = subscribePluginModalSlot(bus)
+      const bridge = new MessageBusBridge({ source, bus })
+      const modalEvents: Extract<InternalEvent, { kind: 'plugin:modalState' }>[] = []
+      const headerEvents: Extract<InternalEvent, { kind: 'plugin:headerActionUpdate' }>[] = []
+      const errors: InternalEvent[] = []
+      bus.on('plugin:modalState', (e) => modalEvents.push(e))
+      bus.on('plugin:headerActionUpdate', (e) => headerEvents.push(e))
+      bus.on('error', (e) => errors.push(e))
+      return { source, bridge, store, sessionScoped, unsubSlot, modalEvents, headerEvents, errors }
+    }
+
+    it('modalState open 帧 → plugin:modalState 事件 + 单槽镜像更新（owner/epoch）', () => {
+      const { source, modalEvents, errors } = makeWired()
+      source.emit({
+        type: 'plugin:modalState',
+        payload: { pluginId: 'scheduler-manager', modalId: 'panel', sessionId: 's1', title: '定时任务', width: 'md', state: 'open', epoch: 1 },
+      })
+      expect(modalEvents).toHaveLength(1)
+      expect(modalEvents[0].modalState).toMatchObject({
+        pluginId: 'scheduler-manager', modalId: 'panel', sessionId: 's1', title: '定时任务', width: 'md', state: 'open', epoch: 1,
+      })
+      expect(getPluginModalSlot()).toMatchObject({ pluginId: 'scheduler-manager', modalId: 'panel', sessionId: 's1', epoch: 1 })
+      expect(errors).toHaveLength(0)
+    })
+
+    it('modalState closed 帧 → 槽清空（runtime 单点关层语义，reason 随帧透传）', () => {
+      const { source } = makeWired()
+      source.emit({ type: 'plugin:modalState', payload: { pluginId: 'p1', modalId: 'm1', sessionId: 's1', state: 'open', epoch: 1 } })
+      expect(getPluginModalSlot()).not.toBeNull()
+      source.emit({ type: 'plugin:modalState', payload: { pluginId: 'p1', modalId: 'm1', sessionId: 's1', state: 'closed', epoch: 1, reason: 'session-switched' } })
+      expect(getPluginModalSlot()).toBeNull()
+    })
+
+    it('headerActionUpdate 帧 → store 按 (sessionId, headerActionId) 分区写入', () => {
+      const { source, store, headerEvents, errors } = makeWired()
+      source.emit({
+        type: 'plugin:headerActionUpdate',
+        payload: { pluginId: 'scheduler-manager', headerActionId: 'scheduler-manager.open', sessionId: 's1', badge: '3', tooltip: '3 启用', disabled: false },
+      })
+      expect(headerEvents).toHaveLength(1)
+      expect(store.get('s1', 'scheduler-manager.open')).toMatchObject({
+        pluginId: 'scheduler-manager', badge: '3', tooltip: '3 启用', disabled: false,
+      })
+      expect(errors).toHaveLength(0)
+    })
+
+    it('多会话徽标互不串（sessionId 分区正确，AP-1 场景 9）', () => {
+      const { source, store } = makeWired()
+      source.emit({ type: 'plugin:headerActionUpdate', payload: { pluginId: 'p', headerActionId: 'a', sessionId: 's1', badge: '3' } })
+      source.emit({ type: 'plugin:headerActionUpdate', payload: { pluginId: 'p', headerActionId: 'a', sessionId: 's2', badge: '7' } })
+      expect(store.get('s1', 'a')!.badge).toBe('3')
+      expect(store.get('s2', 'a')!.badge).toBe('7')
+    })
+
+    it('缺 sessionId 帧（两表项）→ 守卫失败丢弃 + error，store/slot 状态不变', () => {
+      const { source, store, modalEvents, headerEvents, errors } = makeWired()
+      source.emit({ type: 'plugin:modalState', payload: { pluginId: 'p1', modalId: 'm1', state: 'open', epoch: 1 } })
+      source.emit({ type: 'plugin:headerActionUpdate', payload: { pluginId: 'p', headerActionId: 'a', badge: '3' } })
+      expect(modalEvents).toHaveLength(0)
+      expect(headerEvents).toHaveLength(0)
+      expect(errors.map((e) => (e as { source: string }).source)).toEqual(['plugin:modalState', 'plugin:headerActionUpdate'])
+      expect(getPluginModalSlot()).toBeNull()
+      expect(store.get('s1', 'a')).toBeUndefined()
+    })
+
+    it.each([
+      ['payload 非 object', 'x'],
+      ['缺 pluginId', { modalId: 'm', sessionId: 's', state: 'open', epoch: 1 }],
+      ['缺 modalId', { pluginId: 'p', sessionId: 's', state: 'open', epoch: 1 }],
+      ['state 越界', { pluginId: 'p', modalId: 'm', sessionId: 's', state: 'bogus', epoch: 1 }],
+      ['epoch 非 number', { pluginId: 'p', modalId: 'm', sessionId: 's', state: 'open', epoch: '1' }],
+      ['epoch < 1（槽代数契约为正整数）', { pluginId: 'p', modalId: 'm', sessionId: 's', state: 'open', epoch: 0 }],
+    ])('modalState 非法帧（%s）→ 守卫 null（丢弃 + error）', (_label, payload) => {
+      expect(parseModalState({ type: 'plugin:modalState', payload })).toBeNull()
+    })
+
+    it('modalState width/reason 越界 → 宽容窄化为 undefined，不整包丢弃（对齐既有 scope 处置）', () => {
+      const r = parseModalState({
+        type: 'plugin:modalState',
+        payload: { pluginId: 'p', modalId: 'm', sessionId: 's', state: 'open', epoch: 1, width: 'xl', reason: 'whatever' },
+      })
+      expect(r).not.toBeNull()
+      const modalState = (r as { modalState: { width?: string; reason?: string } }).modalState
+      expect(modalState.width).toBeUndefined()
+      expect(modalState.reason).toBeUndefined()
+    })
+
+    it('headerActionUpdate 缺 headerActionId → null；disabled 非 boolean → 宽容 undefined', () => {
+      expect(parseHeaderActionUpdate({ type: 'plugin:headerActionUpdate', payload: { pluginId: 'p', sessionId: 's' } })).toBeNull()
+      const r = parseHeaderActionUpdate({
+        type: 'plugin:headerActionUpdate',
+        payload: { pluginId: 'p', headerActionId: 'a', sessionId: 's', disabled: 'yes' },
+      })
+      expect(r).not.toBeNull()
+      expect((r as { headerAction: { disabled?: boolean } }).headerAction.disabled).toBeUndefined()
+    })
+
+    it('未注册帧型 → 既有丢帧语义不回归（unknown message type error，无状态污染）', () => {
+      const { source, errors } = makeWired()
+      source.emit({ type: 'plugin:someFutureFrame', payload: {} })
+      expect(errors).toHaveLength(1)
+      expect((errors[0] as { message: string }).message).toBe('unknown message type: plugin:someFutureFrame')
+      expect(getPluginModalSlot()).toBeNull()
     })
   })
 })

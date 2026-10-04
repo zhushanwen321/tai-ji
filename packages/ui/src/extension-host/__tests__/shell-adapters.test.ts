@@ -5,12 +5,13 @@
  * - createWsPluginMessageSource 过滤条件（FR1/AC1）：TC1 plugin:uiRequest 前缀放行 /
  *   TC1b plugin:viewUpdate / TC2 extension.ui_request 白名单放行 / TC3 extension.error 拒绝 /
  *   TC4 plugin:statusBarUpdate 回归 / TC5 白名单 5 项字面量 + 行为级验证
- * - convertToDialogRequest 转换（FR2/AC2）：TC1-TC4（source 判定 / askUser 改写 / options
- *   归一 / method 超界恢复 + receivedAt）
- * - createCompanionDialogAdapters 投递层：TC5 无 sessionId 跳过；TC6/TC6m askUser 路由
- *   钉子（routeAskUser='panel' 过滤 C4 分流 / 'companion' 全投递——双壳唯一行为差异，
- *   两侧取值都钉进断言）；TC10 onUiRequestExpired 撤窗（D2，requestId 反查 + miss noop）
- * - transport 回传双通道（FR7/AC6/AC9）：TC7/TC8/TC8b
+ * - convertToDialogRequest 转换（FR2/AC2）：TC1-TC4（source 判定 / form 类键不透传 /
+ *   options 归一 / method 超界恢复 + receivedAt）
+ * - createCompanionDialogAdapters 投递层：TC5 无 sessionId 跳过；TC6 C4 四键排除
+ *   （form ∨ askUser ∨ scheduleCreate ∨ planReview——统一表单/审批各归 useExtensionUI
+ *   消费面，双壳固定同源）；TC10 onUiRequestExpired 撤窗（D2，requestId 反查 + miss noop）
+ * - transport 回传双通道（FR7/AC6/AC9）：TC7/TC8/TC8b 形状 + TC8c 未送达保留（M1/RD-3#1）
+ *   + TC8d 通路级收尾锚点（ADR-0073 D4a：onPiResponseSettled 清在 delivered 判定之前）
  * - requestIdSessions 生命周期（G1 / memory-leak-remediation §3.4）：TC-G1a/b/c
  *
  * 策略：convertToDialogRequest 直测（纯函数）；source 用真实 InternalEventBus（bus.emit）
@@ -27,7 +28,8 @@ vi.mock('@taiji/core/transport/ws-client', () => ({
 }))
 
 vi.mock('@taiji/core/transport/api/domains/extension', () => ({
-  sendExtensionUIResponse: vi.fn(),
+  // 默认 resolve true（WS 送达）——TC8c 显式改写 false 走未送达分支
+  sendExtensionUIResponse: vi.fn((): boolean => true),
 }))
 
 import { send } from '@taiji/core/transport/ws-client'
@@ -37,7 +39,13 @@ import {
   createCompanionDialogAdapters,
   createWsPluginMessageSource,
   type CompanionDialogAdapters,
+  type CompanionDialogAdaptersTesting,
 } from '../shell-adapters'
+
+/** 模块级共享反查表的测试探针入口（__testing 指向同一张表，实例载体任意） */
+function __testingProbe(): CompanionDialogAdaptersTesting {
+  return createCompanionDialogAdapters(new InternalEventBus()).__testing
+}
 
 // ── createWsPluginMessageSource（自 useExtensionHostBridge.test.ts 平移）────────
 
@@ -147,14 +155,16 @@ describe('createWsPluginMessageSource 过滤条件（FR1/AC1）', () => {
     expect(emitted[0]).toMatchObject({ kind: 'plugin-status-bar-update', items: [{ id: 'sb1', sessionId: 's1' }] })
   })
 
-  it('TC5: EXTENSION_BRIDGE_TYPES 字面量 5 项 + 每项行为级验证（进 bridge 产出非 error 事件）', () => {
+  it('TC5: EXTENSION_BRIDGE_TYPES 字面量 6 项 + 每项行为级验证（进 bridge 产出非 error 事件）', () => {
     // 字面量锁：EXTENSION_BRIDGE_TYPES 已是 core SSOT（派生自 EXTENSION_HANDLERS keys），
-    // 锁 5 项防 handlers 增删时白名单悄悄漂移（消费方 source filter 行为随之变化无信号）
+    // 锁项数防 handlers 增删时白名单悄悄漂移（消费方 source filter 行为随之变化无信号）。
+    // 第 6 项 extension:requestsInvalidated 为 P2-2 失效链（runtime 非 respond 终结挂起的广播）
     expect(EXTENSION_BRIDGE_TYPES).toEqual([
       'extension:widget',
       'extension:widgetGui',
       'extension:status',
       'extension:notify',
+      'extension:requestsInvalidated',
       'extension.ui_request',
     ])
 
@@ -166,6 +176,7 @@ describe('createWsPluginMessageSource 过滤条件（FR1/AC1）', () => {
       { type: 'extension:widgetGui', payload: { sessionId: 's1', widgetKey: 'w1', gui: ['g'] } },
       { type: 'extension:status', payload: { sessionId: 's1', statusKey: 'k', text: 'ready' } },
       { type: 'extension:notify', payload: { sessionId: 's1', message: 'hi', level: 'info' } },
+      { type: 'extension:requestsInvalidated', payload: { sessionId: 's1', requestIds: ['r9'], reason: 'turn-aborted' } },
       { type: 'extension.ui_request', payload: { sessionId: 's1', requestId: 'r1', method: 'select' } },
     ]
     for (const s of samples) {
@@ -204,7 +215,7 @@ describe('convertToDialogRequest（AC2）', () => {
     expect(pi.source).toBe('pi')
   })
 
-  it('TC2: askUser 改写——askUser:true → method=askUser + askUserQuestions/allowCancel 透传', () => {
+  it('TC2: form 类键不透传——askUser 帧经 C4 排除不达本转换；到达的请求按原始 method/kind 归一', () => {
     const e = makeUiRequestEvent({ kind: 'input' }) as Extract<InternalEvent, { kind: 'ui-request' }> & {
       request: Record<string, unknown>
     }
@@ -213,9 +224,11 @@ describe('convertToDialogRequest（AC2）', () => {
     e.request.allowCancel = false
 
     const req = convertToDialogRequest(e)
-    expect(req.method).toBe('askUser')
-    expect(req.askUserQuestions).toEqual([{ question: '继续?' }])
-    expect(req.allowCancel).toBe(false)
+    // 不再做 askUser 改写（ui-presentation-protocol：askUser 帧已被 C4 排除，归一只发生在
+    // useExtensionUI handler 内）——method 走原始/kind 兜底，富交互键不透传
+    expect(req.method).toBe('input')
+    expect('askUserQuestions' in req).toBe(false)
+    expect(req.allowCancel).toBeUndefined()
   })
 
   it('TC3: options 归一——string[] → {label,value}[]；对象数组透传；非法项跳过', () => {
@@ -267,9 +280,9 @@ describe('createCompanionDialogAdapters（C2/C3/C4 分流）', () => {
     vi.restoreAllMocks()
   })
 
-  it('TC5: 无 sessionId 事件跳过投递 + console.warn（两路由共用守卫）', () => {
+  it('TC5: 无 sessionId 事件跳过投递 + console.warn（双壳共用守卫）', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const adapters = createCompanionDialogAdapters(bus, { routeAskUser: 'panel' })
+    const adapters = createCompanionDialogAdapters(bus)
     const handler = vi.fn()
     const unsub = adapters.source.onUiRequest(handler)
 
@@ -281,15 +294,20 @@ describe('createCompanionDialogAdapters（C2/C3/C4 分流）', () => {
     warn.mockRestore()
   })
 
-  it('TC6: routeAskUser=panel（桌面壳）——askUser:true 不投递（C4 分流给 Panel inline），非 askUser 正常投递', () => {
-    const adapters = createCompanionDialogAdapters(bus, { routeAskUser: 'panel' })
+  it('TC6: C4 四键排除（form ∨ askUser ∨ scheduleCreate ∨ planReview 不投递）——普通 dialog 正常投递', () => {
+    const adapters = createCompanionDialogAdapters(bus)
     const handler = vi.fn()
     const unsub = adapters.source.onUiRequest(handler)
 
-    bus.emit({
-      kind: 'ui-request',
-      sessionId: 's1',
-      request: { requestId: 'r-ask', pluginId: '', kind: 'input', askUser: true },
+    // 四键逐键断言：各归 useExtensionUI 消费面（FormOverlay / PlanReviewBar / legacy 窗口期
+    // 归一层），漏排除 = 空壳 dialog 误触 + 双 UI 并存（违反零重叠契约）
+    const formKeys = ['form', 'askUser', 'scheduleCreate', 'planReview'] as const
+    formKeys.forEach((key, i) => {
+      bus.emit({
+        kind: 'ui-request',
+        sessionId: 's1',
+        request: { requestId: `r-excluded-${i}`, pluginId: '', kind: 'select', [key]: true },
+      })
     })
     expect(handler).not.toHaveBeenCalled()
 
@@ -302,39 +320,8 @@ describe('createCompanionDialogAdapters（C2/C3/C4 分流）', () => {
     unsub()
   })
 
-  it('TC6m: routeAskUser=companion（移动壳）——askUser 事件全投递（CompanionBand 独占，method=askUser 改写透传）', () => {
-    const adapters = createCompanionDialogAdapters(bus, { routeAskUser: 'companion' })
-    const handler = vi.fn()
-    const unsub = adapters.source.onUiRequest(handler)
-
-    bus.emit({
-      kind: 'ui-request',
-      sessionId: 's1',
-      request: {
-        requestId: 'r-ask',
-        pluginId: '',
-        kind: 'input',
-        askUser: true,
-        askUserQuestions: [{ question: '继续?' }],
-        allowCancel: true,
-      },
-    })
-    expect(handler).toHaveBeenCalledTimes(1)
-    const delivered = handler.mock.calls[0][0]
-    expect(delivered.requestId).toBe('r-ask')
-    expect(delivered.method).toBe('askUser')
-    expect(delivered.askUserQuestions).toEqual([{ question: '继续?' }])
-    expect(delivered.allowCancel).toBe(true)
-
-    // 非 askUser dialog 同通道正常投递（全 method 投递，v1 移动壳能力边界）
-    bus.emit({ kind: 'ui-request', sessionId: 's1', request: { requestId: 'r-dialog', pluginId: 'p1', kind: 'select' } })
-    expect(handler).toHaveBeenCalledTimes(2)
-    expect(handler.mock.calls[1][0]).toMatchObject({ requestId: 'r-dialog', method: 'select', source: 'plugin' })
-    unsub()
-  })
-
   it('TC10: onUiRequestExpired 订阅 global 通道 plugin:uiRequestExpired（D2 撤窗，requestId 反查 sessionId）', () => {
-    const adapters = createCompanionDialogAdapters(bus, { routeAskUser: 'panel' })
+    const adapters = createCompanionDialogAdapters(bus)
     const expiredHandler = vi.fn()
     const unsubExpired = adapters.source.onUiRequestExpired(expiredHandler)
 
@@ -375,7 +362,7 @@ describe('createCompanionDialogAdapters（C2/C3/C4 分流）', () => {
   })
 
   it('TC-BUS: onUiRequest 退订后 bus 事件不再投递（订阅/退订时序契约，双壳共用）', () => {
-    const adapters = createCompanionDialogAdapters(bus, { routeAskUser: 'companion' })
+    const adapters = createCompanionDialogAdapters(bus)
     const handler = vi.fn()
     const unsub = adapters.source.onUiRequest(handler)
 
@@ -395,11 +382,13 @@ describe('createCompanionDialogAdapters transport（AC6/AC9）', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    // 反查表已提为模块级共享（双消费方共管不变量）——用例间显式 reset 防跨用例残留
+    __testingProbe().resetRequestIdSessionsForTest()
     bus = new InternalEventBus()
   })
 
   it('TC7: sendPluginResponse 发 plugin.uiResponse（runtime handleUiResponse 消费）', () => {
-    const { transport } = createCompanionDialogAdapters(bus, { routeAskUser: 'panel' })
+    const { transport } = createCompanionDialogAdapters(bus)
     transport.sendPluginResponse('r1', { value: 'x' })
     expect(send).toHaveBeenCalledTimes(1)
     expect(send).toHaveBeenCalledWith({
@@ -409,16 +398,52 @@ describe('createCompanionDialogAdapters transport（AC6/AC9）', () => {
   })
 
   it('TC8: sendPiResponse 复用 sendExtensionUIResponse（extension.ui_response，method 透传）', () => {
-    const { transport } = createCompanionDialogAdapters(bus, { routeAskUser: 'panel' })
+    const { transport } = createCompanionDialogAdapters(bus)
     transport.sendPiResponse('s1', 'r1', 'editor', 'value')
     expect(sendExtensionUIResponse).toHaveBeenCalledTimes(1)
     expect(sendExtensionUIResponse).toHaveBeenCalledWith('s1', 'r1', 'editor', 'value')
   })
 
   it('TC8b: sendPiResponse 兜底——非法 method 落到 input（对齐 kind 兜底语义）', () => {
-    const { transport } = createCompanionDialogAdapters(bus, { routeAskUser: 'panel' })
+    const { transport } = createCompanionDialogAdapters(bus)
     transport.sendPiResponse('s1', 'r1', 'unknown-method', true)
     expect(sendExtensionUIResponse).toHaveBeenCalledWith('s1', 'r1', 'input', true)
+  })
+
+  it('TC8c: 未送达（WS 非 OPEN）→ 返回 false + notifyNotDelivered + 表项保留（M1/RD-3#1 连接恢复后重发）', () => {
+    vi.mocked(sendExtensionUIResponse).mockReturnValue(false)
+    const notifyNotDelivered = vi.fn()
+    const { transport, source, __testing } = createCompanionDialogAdapters(bus, { notifyNotDelivered })
+    // 投递一条写入反查表（source/transport 同 factory 实例，G1 共管不变量）
+    const handler = vi.fn()
+    const unsub = source.onUiRequest(handler)
+    bus.emit({ kind: 'ui-request', sessionId: 's1', request: { requestId: 'r-nd', pluginId: '', kind: 'confirm' } })
+    expect(handler).toHaveBeenCalledTimes(1)
+
+    expect(transport.sendPiResponse('s1', 'r-nd', 'confirm', true)).toBe(false)
+    expect(notifyNotDelivered).toHaveBeenCalledWith('s1')
+    // 返回 false 时表项保留（请求仍在队列，撤窗反查仍需可用）
+    expect(__testing.probeRequestIdSessionsSize()).toBe(1)
+
+    // plugin 通道同语义：未送达 → false + 无 sessionId 提示
+    vi.mocked(send).mockReturnValue(false)
+    expect(transport.sendPluginResponse('r-x', { v: 1 })).toBe(false)
+    expect(notifyNotDelivered).toHaveBeenLastCalledWith()
+    unsub()
+  })
+
+  it('TC8d: 通路级收尾锚点（ADR-0073 D4a）——onPiResponseSettled 在 delivered 判定之前无条件调用', () => {
+    const callOrder: string[] = []
+    vi.mocked(sendExtensionUIResponse).mockImplementation(() => {
+      callOrder.push('send')
+      return false // 即使未送达，锚点也应已触发（清在 delivered 判定之前）
+    })
+    const onPiResponseSettled = vi.fn((sid: string) => callOrder.push(`settled:${sid}`))
+    const { transport } = createCompanionDialogAdapters(bus, { onPiResponseSettled })
+
+    transport.sendPiResponse('s1', 'r-anchor', 'confirm', true)
+    expect(onPiResponseSettled).toHaveBeenCalledWith('s1')
+    expect(callOrder).toEqual(['settled:s1', 'send'])
   })
 })
 
@@ -429,6 +454,11 @@ describe('requestIdSessions respond 路径删除（G1 / memory-leak-remediation 
 
   beforeEach(() => {
     vi.clearAllMocks()
+    // clearAllMocks 连同 mock 工厂默认实现一起清——恢复「WS 送达 true」默认（TC8c 自行改写 false）
+    vi.mocked(sendExtensionUIResponse).mockReturnValue(true)
+    vi.mocked(send).mockReturnValue(true)
+    // 模块级共享表（双消费方共管）——用例间显式 reset 防跨用例残留
+    __testingProbe().resetRequestIdSessionsForTest()
     bus = new InternalEventBus()
   })
 
@@ -446,7 +476,7 @@ describe('requestIdSessions respond 路径删除（G1 / memory-leak-remediation 
 
   it('TC-G1a: pi respond（sendPiResponse）后表项删除——迟到撤窗广播 miss noop', () => {
     // [G1] pi 源 dialog 的有效清理路径只有 respond（extension UI 请求无超时撤窗广播）。
-    const adapters = createCompanionDialogAdapters(bus, { routeAskUser: 'panel' })
+    const adapters = createCompanionDialogAdapters(bus)
     const expiredHandler = vi.fn()
     const unsubExpired = adapters.source.onUiRequestExpired(expiredHandler)
     deliverRequest(adapters, 'r1')
@@ -463,7 +493,7 @@ describe('requestIdSessions respond 路径删除（G1 / memory-leak-remediation 
   })
 
   it('TC-G1b: plugin respond（sendPluginResponse）后表项删除——迟到撤窗广播 miss noop', () => {
-    const adapters = createCompanionDialogAdapters(bus, { routeAskUser: 'panel' })
+    const adapters = createCompanionDialogAdapters(bus)
     const expiredHandler = vi.fn()
     const unsubExpired = adapters.source.onUiRequestExpired(expiredHandler)
     deliverRequest(adapters, 'r2')
@@ -479,7 +509,7 @@ describe('requestIdSessions respond 路径删除（G1 / memory-leak-remediation 
 
   it('TC-G1c: 未 respond 的表项保留——撤窗反查仍命中（respond 删除不误伤展示中条目）', () => {
     // 防御性边界：respond 补删不能波及排队/展示中（未作答）条目——撤窗路径仍按 D2 语义反查出队
-    const adapters = createCompanionDialogAdapters(bus, { routeAskUser: 'panel' })
+    const adapters = createCompanionDialogAdapters(bus)
     const expiredHandler = vi.fn()
     const unsubExpired = adapters.source.onUiRequestExpired(expiredHandler)
     deliverRequest(adapters, 'r3', 's9')
@@ -493,14 +523,16 @@ describe('requestIdSessions respond 路径删除（G1 / memory-leak-remediation 
     unsubExpired()
   })
 
-  it('TC-G1d: 反查表为 factory 实例私有——两次调用互不串扰；resetRequestIdSessionsForTest 清空', () => {
-    const a = createCompanionDialogAdapters(bus, { routeAskUser: 'companion' })
-    const b = createCompanionDialogAdapters(bus, { routeAskUser: 'companion' })
+  it('TC-G1d: 反查表为模块级共享（双消费方共管不变量）——跨 factory/独立 transport 同表；reset 清空', () => {
+    const a = createCompanionDialogAdapters(bus)
+    const b = createCompanionDialogAdapters(bus)
+    // factory source 投递写入的表项，对另一次 factory 调用与独立 createUiResponseTransport
+    // 均可见（btw 面板经后者 respond 时必须删得到同一表项，G1 补删才成立）
     deliverRequest(a, 'r1')
     expect(a.__testing.probeRequestIdSessionsSize()).toBe(1)
-    expect(b.__testing.probeRequestIdSessionsSize()).toBe(0)
+    expect(b.__testing.probeRequestIdSessionsSize()).toBe(1)
 
-    a.__testing.resetRequestIdSessionsForTest()
+    b.__testing.resetRequestIdSessionsForTest()
     expect(a.__testing.probeRequestIdSessionsSize()).toBe(0)
   })
 })

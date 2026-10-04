@@ -719,7 +719,7 @@ describe("index assembly: gate wired into workflow mode", () => {
 
 		// terminal 后 turn_end：hook 守卫链第 0 条（state.terminal）拦截 → 不 steer
 		await pi.emit("turn_end", turnEndPayload());
-		expect(pi.sendUserMessage).not.toHaveBeenCalled();
+		expect(pi.sendMessage).not.toHaveBeenCalled();
 	});
 
 	it("失败次数未达阈值时 turn_end steer 行为不受闸门影响（软硬闸门分层）", async () => {
@@ -728,7 +728,9 @@ describe("index assembly: gate wired into workflow mode", () => {
 
 		await pi.emit("tool_execution_end", failedToolEndWith("Schema validation failed: /count must be number"));
 		await pi.emit("turn_end", turnEndPayload());
-		expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
+		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
+		// A6：steer 投递 options 契约——steer 队列 + 开轮（原 sendUserMessage 等价语义）
+		expect(pi.sendMessage.mock.calls[0]![1]).toEqual({ deliverAs: "steer", triggerTurn: true });
 		expect(pi.ctx.shutdown).not.toHaveBeenCalled();
 	});
 });

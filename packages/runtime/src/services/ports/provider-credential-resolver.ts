@@ -18,6 +18,21 @@
  * 本文件只放类型，不得 value import services/infra（C-comm-03）。
  */
 
+/**
+ * resolveProviderCredential 的不支持形态标记（RT-7#4，D 类拦截信号）：
+ * - 'command'：配置值是 `!` 前缀 command 形态（本模块不执行 shell）
+ * - 'unresolved-env'：配置值引用了未定义的环境变量（pi 同语义：整值不可用）
+ *
+ * 命中即「凭据条目存在但无法解析成明文 key」——消费方必须报「该凭据形态暂不支持」类
+ * 错误且**禁止把标记当 key 下发外部请求**（原样串作 Bearer 会以畸形凭据打外部 API）。
+ */
+export type UnsupportedCredentialForm = 'command' | 'unresolved-env'
+
+/** resolveProviderCredential 的成功形态（明文 key + 命中源）。 */
+export type ResolvedProviderCredential =
+  | { key: string; source: 'auth.json' | 'models.json' }
+  | { unsupported: UnsupportedCredentialForm }
+
 export interface IProviderCredentialResolver {
   /**
    * 同步判该 provider 是否在任一凭据源中有条目（存在性判定，不解析明文）。
@@ -32,8 +47,11 @@ export interface IProviderCredentialResolver {
   listCredentialBackedProviderIds(): Set<string>
 
   /**
-   * 解析 provider 的生效明文凭据，未命中返回 undefined。
+   * 解析 provider 的生效明文凭据。
    * 源优先级：auth.json（catalog 凭据所在）→ models.json providers[id].apiKey（custom 凭据所在）。
+   * - 命中高优先源但形态不支持（command / unresolved-env）→ 返回 { unsupported } 判别
+   *   结构，**不降级**读低优先源（显式配置错误被低优先源静默掩盖比报错更糟）。
+   * - 全源未命中 → undefined（无凭据）。
    */
-  resolveProviderCredential(providerId: string): Promise<{ key: string; source: 'auth.json' | 'models.json' } | undefined>
+  resolveProviderCredential(providerId: string): Promise<ResolvedProviderCredential | undefined>
 }

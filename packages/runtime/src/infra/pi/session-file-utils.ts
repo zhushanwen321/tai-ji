@@ -5,9 +5,12 @@
  * 从 pi-config-bridge.ts 提取以控制文件行数（pi-config-bridge 已删除）。
  */
 
-import { existsSync, readFileSync, statSync, openSync, readSync, closeSync, readdirSync, unlinkSync, writeFileSync, renameSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, readdirSync, unlinkSync, writeFileSync, renameSync } from 'node:fs'
+// 首行字节原语（session-reader-shared-core 场景 6：runtime sync 副本收敛基座单点，
+// 本文件 readFirstJsonlLine 改为其 sync 形态的薄包装，见该函数注释）。
+import { readFirstJsonlLineSync } from '@zhushanwen/session-core'
 import { atomicWrite } from '../../utils/fs-utils.js'
-import { parseJsonl, readTailEntries } from '../../utils/jsonl.js'
+import { parseJsonlWarnOnMalformed, readTailEntries } from '../../utils/jsonl.js'
 import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 // 逆序分块读工具（u4b 交付物，D5 共享 IO 形态）。infra → services 依赖倒挂豁免（同
 // session-lifecycle.ts 的 R3 ports 倒挂惯例）：D5③ 消费方在本文件（infra/pi），共享
@@ -25,14 +28,18 @@ import {
   readBindingSidecar,
   refreshScanDirCache,
   sessionMetaCache,
+  warnSidecarReadFailureOnce,
+  _resetSidecarWarnDedupForTest,
   type PersistBindingSidecarOpts,
 } from './session-binding-sidecar-io.js'
-export { invalidateScanDirCache, persistBindingSidecar, readBindingSidecar } from './session-binding-sidecar-io.js'
+export { invalidateScanDirCache, persistBindingSidecar, readBindingSidecar, _resetSidecarWarnDedupForTest } from './session-binding-sidecar-io.js'
 // 残留清扫家族已拆出至 './session-residue-cleanup.ts'（max-lines 预算，先例同上）：
-// 本文件 isScannableSessionFile 消费 TMP_RESIDUE_MARKERS（候选侧过滤），cleanup* 两函数
-// 经 re-export 维持原导出路径（消费方 import 路径零改动）。
-import { TMP_RESIDUE_MARKERS } from './session-residue-cleanup.js'
-export { cleanupMigrateResidues, cleanupTmpMigrateResidue, TMP_RESIDUE_MARKERS } from './session-residue-cleanup.js'
+// 本文件 isScannableSessionFile 消费 isTmpResidueFileName（候选侧过滤，RT-3#10 起精确
+// 后缀形态判定，与清扫侧/导入拒绝侧三消费点同一谓词），cleanup* 两函数经 re-export
+// 维持原导出路径（消费方 import 路径零改动）。
+import { isTmpResidueFileName } from './session-residue-cleanup.js'
+import { createDegradedStats, logScanDegradedSummary, noteScanDegraded, type ScanDegradedStats } from './session-scan-degraded.js'
+export { cleanupMigrateResidues, cleanupTmpMigrateResidue, isTmpResidueFileName, TMP_RESIDUE_MARKERS } from './session-residue-cleanup.js'
 
 // ── 类型定义 ─────────────────────────────────────────────────
 
@@ -49,25 +56,12 @@ export interface SessionHeader {
 // ── 解析工具 ─────────────────────────────────────────────────
 
 /**
- * parseSessionHeader 的头部读块大小（4KB）。
- *
- * session header（type:"session"，含 cwd/parentSession/forkEntryId）固定在 JSONL 首行，
- * 4KB 覆盖正常 header（cwd 长路径 + 路径型字段）。JSONL 行内无换行：块内无换行且未读满
- * （文件本身 < 4KB 的单行文件）按无首行终止处理；块读满仍无换行（首行 > 4KB）回退
- * 全量读取首行——旧 readFileSync 全量读实现可解析任意长度首行，单纯截断会让超长首行
- * JSON.parse 失败 → session 从侧栏消失（W20 review Fix-4 等价性修复）。
- */
-const HEADER_READ_CHUNK_BYTES = 4096
-
-/** LF（'\n'）字节值——JSONL 行终止符，Buffer.indexOf 用字节比较。 */
-const NEWLINE_BYTE = 0x0a
-
-/**
  * 解析 session JSONL 首行的 session header。
  *
- * wave:perf-w20 微项 9：只读文件头部一小块（而非 readFileSync 全量读再 split('\n')[0]）。
+ * wave:perf-w20 微项 9：只读文件首行（而非 readFileSync 全量读再 split('\n')[0]）。
  * header 固定在首行，长 session 文件（数 MB）全量读只为取第一行是纯浪费；扫描器对每个
- * 候选文件调一次本函数，节省随文件数线性放大。
+ * 候选文件调一次本函数，节省随文件数线性放大。首行读取走基座字节原语（下方
+ * readFirstJsonlLine 薄包装）。
  */
 export function parseSessionHeader(filePath: string): SessionHeader | null {
   const firstLine = readFirstJsonlLine(filePath)
@@ -100,40 +94,20 @@ function isSessionHeaderEntry(entry: unknown): entry is Record<string, unknown> 
 /**
  * 读取 session JSONL 首行原文（trace 路径 A 补 header 用，design D4：RPC get_entries 不含 header）。
  *
- * 与 parseSessionHeader 共用首行读块（4KB 块 + 超长首行回退全量）；区别在本函数返回**原文**
- * 而非解析后的窄字段——trace 的 SESSION 行 inspector 需要 header 完整 JSON（含 version
- * 等未建模字段），解析归调用方（session-trace 模块，用 core parse 容错语义）。
+ * 基座字节原语 readFirstJsonlLineSync（@zhushanwen/session-core）的同步薄包装——首行读取
+ * 的唯一实现随 session-reader-shared-core 场景 6 收敛基座单点（本模块原 4KB 块 + 超长首行
+ * 回退全量的自有实现删除）；本文件只保留既有「任何失败都视为无 header」的降级语义：
+ * 基座对 IO 错误上抛（错误分类信息不丢失），本包装 catch 归 null（消费方零改动）。
+ *
+ * 与 parseSessionHeader 共用本入口；区别在调用方消费的是**原文**而非解析后的窄字段——
+ * trace 的 SESSION 行 inspector 需要 header 完整 JSON（含 version 等未建模字段），解析
+ * 归调用方（session-trace 模块，用 core parse 容错语义）。
  *
  * @returns 首行文本；文件不存在 / 打开读取失败 / 空文件 → null（不抛）
  */
 export function readFirstJsonlLine(filePath: string): string | null {
   try {
-    const fd = openSync(filePath, 'r')
-    let head: Buffer
-    let bytesRead = 0
-    try {
-      const chunk = Buffer.alloc(HEADER_READ_CHUNK_BYTES)
-      bytesRead = readSync(fd, chunk, 0, chunk.length, 0)
-      head = chunk.subarray(0, bytesRead)
-    } finally {
-      closeSync(fd)
-    }
-    const nlIndex = head.indexOf(NEWLINE_BYTE)
-    let firstLine: string
-    if (nlIndex !== -1) {
-      firstLine = head.subarray(0, nlIndex).toString('utf-8')
-    } else if (bytesRead >= HEADER_READ_CHUNK_BYTES) {
-      // 首行 > 4KB（4KB 块读满仍未见换行）：回退全量读取首行，与旧 readFileSync 全量读
-      // 实现严格等价（W20 review Fix-4——超长首行可解析，session 不从侧栏消失）。
-      // readFileSync 失败由外层 catch 返回 null，与打开/读取失败同错误面。
-      const content = readFileSync(filePath, 'utf-8')
-      const contentNl = content.indexOf('\n')
-      firstLine = contentNl === -1 ? content : content.slice(0, contentNl)
-    } else {
-      // 文件本身 < 4KB 且无换行（单行 JSONL）：head 即全量内容
-      firstLine = head.toString('utf-8')
-    }
-    return firstLine || null
+    return readFirstJsonlLineSync(filePath) ?? null
   } catch {
     return null
   }
@@ -166,7 +140,9 @@ export function readSessionEndMeta(filePath: string): SessionEndSidecarMeta | nu
       ...(typeof meta.reason === 'string' ? { reason: meta.reason } : {}),
       ...(typeof meta.timestamp === 'string' ? { timestamp: meta.timestamp } : {}),
     }
-  } catch {
+  } catch (e) {
+    // RT-3#3 读侧分流：ENOENT（无终态 sidecar，多数 session 常态）安静；其余 warn 一次
+    warnSidecarReadFailureOnce(sidecarPath, e, 'meta sidecar read/parse failed')
     return null
   }
 }
@@ -474,7 +450,10 @@ export function extractSessionOutcome(filePath: string): SessionOutcome | null {
       // outcome 非法：sidecar 损坏/篡改，与 sidecar 不存在等价 → fallthrough 到 JSONL 兜底。
       // （原来此处直接 return null，会丢失 JSONL 中可能存在的合法 session_end 终态。）
     }
-  } catch { void 0 /* no sidecar or invalid → fallback to JSONL */ }
+  } catch (e) {
+    // RT-3#3 读侧分流：ENOENT（历史 session 无 sidecar）安静走 JSONL 兜底；其余 warn 一次
+    warnSidecarReadFailureOnce(sidecarPath, e, 'meta sidecar read failed, falling back to JSONL')
+  }
 
   // fallback: 从 JSONL 读（历史 session / 无 sidecar / sidecar outcome 非法时的兼容路径）
   // findLastEntryField 的 predicate 只校验了 typeof，未校验值合法性——
@@ -538,7 +517,9 @@ function scanJsonlFromTail(filePath: string, visit: (entry: Record<string, unkno
   }
   // ≤阈值：原全量读 fallback 保留（INVAR-tail-2: 尾读未命中，目标可能在文件头部）
   try {
-    scanEntriesReversed(parseJsonl(readFileSync(filePath, 'utf-8')), visit)
+    // RT-8#13：畸形行 dropCount 累计 + warn-once（附文件路径）——半截 JSONL 的字段
+    // 提取（session 名/outcome 等）静默降级不可观测
+    scanEntriesReversed(parseJsonlWarnOnMalformed(readFileSync(filePath, 'utf-8'), filePath), visit)
   } catch {
     return
   }
@@ -760,7 +741,10 @@ export function extractHandedOff(filePath: string): string | undefined {
       return marker.handedOffTo
     }
     // handedOffTo 非字符串：sidecar 损坏，与 sidecar 不存在等价 → fallthrough 尾读兜底。
-  } catch { void 0 /* no sidecar or invalid → fallback to legacy JSONL marker */ }
+  } catch (e) {
+    // RT-3#3 读侧分流：ENOENT（未交接）安静走尾读兜底；其余 warn 一次
+    warnSidecarReadFailureOnce(filePath + '.handoff.json', e, 'handoff sidecar read failed, falling back to tail read')
+  }
 
   // fallback：存量旧 session 的 JSONL `handoff_marker` 尾读（W11 前写入的兼容路径）
   const tailEntries = readTailEntries(filePath)
@@ -920,6 +904,9 @@ export function invalidateSessionMetaCache(filePath: string): void {
 // [SSOT 指针] 新增绑定字段必经此处填充 ScannedSessionMeta——必须同步在
 // session-binding-fields.ts 的 BINDING_FIELDS 注册表登记（漏登记=编译错），
 // 回填入口适用性（hydrateBindingMeta 四入口矩阵）与 create 派生调用方清单均在该模块维护。
+// 扫描降级计数家族（ScanDegradedStats / noteScanDegraded / logScanDegradedSummary）已拆出
+// './session-scan-degraded.ts'（max-lines 预算，RT-3#2 扩展时拆出，先例同 residue-cleanup）。
+
 /**
  * 单个 session 文件的元数据提取（三读合一 + 缓存）。
  *
@@ -932,8 +919,16 @@ export function invalidateSessionMetaCache(filePath: string): void {
  * 现统一在此一次提取，scannedToSummary 从 meta.outcome 取（INVAR-merge-2）。
  *
  * 文件删除/不可读（INVAR-cache-4）→ 清该 key 返回 null。
+ *
+ * RT-3#1：header 缺 id/cwd（非空字符串）→ fail-fast 返回 null + warn 带路径 + 计入
+ * degraded.badHeader。id/cwd 是消费链硬依赖（scannedToSummary 的 basename(cwd)、按
+ * cwd 分组键、restore 按 id 定位）——此前 parseSessionHeader 条件赋值不设字段、
+ * `as SessionHeader` 收口，异常发生在**消费**阶段（basename(undefined) TypeError），
+ * 扫描侧 catch 拦不住，一个坏文件毒死整个侧栏。出口收口对齐 import 侧
+ * parseHeaderFromFirstLine 的「id/cwd 均非空字符串才收录」同款清单（外部文件不修
+ * 本体，删/修文件后自动恢复收录）。与「非 session 文件」同不缓存（下次仍尝试）。
  */
-function scanSessionMeta(filePath: string): ScannedSessionMeta | null {
+function scanSessionMeta(filePath: string, degraded?: ScanDegradedStats): ScannedSessionMeta | null {
   let fstat
   try {
     fstat = statSync(filePath)
@@ -952,7 +947,14 @@ function scanSessionMeta(filePath: string): ScannedSessionMeta | null {
   // miss：三读合一提取全部元数据
   const header = parseSessionHeader(filePath)
   if (!header) {
-    // 非 session 文件（首行不是 session header）：不缓存（下次仍尝试，开销小）
+    // 非 session 文件（首行不是 session header：异质 .jsonl / 截断 / 读取失败）：不缓存
+    // （下次仍尝试，开销小），但计数显形（RT-3#2——静默跳过 = 列表少一条零痕迹）。
+    if (degraded) noteScanDegraded(degraded, 'noHeader', filePath)
+    return null
+  }
+  if (typeof header.id !== 'string' || header.id === '' || typeof header.cwd !== 'string' || header.cwd === '') {
+    if (degraded) noteScanDegraded(degraded, 'badHeader', filePath)
+    console.warn(`[session-file-utils] session header missing/empty id or cwd, file skipped: ${filePath}`)
     return null
   }
   const name = extractSessionName(filePath)
@@ -1020,6 +1022,26 @@ export interface ScanSessionsOptions {
 // （session-store / import-service / 测试直接消费）。
 
 /**
+ * 最近一轮 sessions 磁盘扫描是否降级不可信（BU5 旗标透出，唯一消费方 = btw 孤儿补账的
+ * 不可逆删除闸——deps.isSessionScanDegraded）。
+ *
+ * 置位时机（scanPiSessionsFromDisk 轮内）：
+ * - 顶层 readdir 失败（EACCES/IO）→ 显式降级 return []——与「权威空」在返回值上不可区分，
+ *   无旗标时消费方会把冷主会话全部误判「主已删」；
+ * - 任一收录降级计数非零（statFail/dirFail/scanFail/badHeader/noHeader）→ 列表可能缺条目
+ *   （含 cwd 分组子目录列举失败=整组缺失；单文件读取失败=恰可能遮住主会话文件）。
+ *   方向取舍：宁漏删不误删——任一缺条目都可能触发 rm -rf 不可逆面，降级时补账跳过、
+ *   改下次启动重试（代价 = 孤儿目录暂时滞留，有 warn 留痕，可恢复）。
+ * 复位时机：目录不存在（权威空）与全健康轮 → false。TTL 缓存轮不重算（旗标跟随最近一次
+ * 真实磁盘扫描轮——启动首扫必为真实轮，补账时序命中）。
+ */
+/**
+ * 旗标读写面（消费方：btw 孤儿补账闸，读 `.last`）：导出可变快照对象 = 零访问器行
+ *（max-lines 软上限下的紧凑透出），写者唯一 = 本文件；语义/置位复位时机见上方注释。
+ */
+export const scanDegradedFlag = { last: false }
+
+/**
  * 扫描 pi 的 sessions 目录（按 cwd 分组的子目录结构）。
  * 返回扁平化的 session 列表。
  *
@@ -1057,16 +1079,71 @@ export function scanPiSessions(opts?: ScanSessionsOptions): ScannedSessionMeta[]
  * 识别 session、不按文件名——残留文件内容是合法 session（同 sessionId），不过滤会产生
  * 同 id 双条目，且残留 mtime 更新、排序在前，findScannedSession 会命中残留路径 →
  * restore 附着错位文件。文件名过滤把「残留无害」从声明变成机制保证（候选侧与清扫侧
- * 同规则，TMP_RESIDUE_MARKERS）。
+ * 同规则，isTmpResidueFileName）。
+ *
+ * RT-3#10：判定从 `includes(marker)` 子串改为 isTmpResidueFileName 精确后缀形态——
+ * session id 中段含标记串的真实会话文件（`a.tmp-migrate-b.jsonl`，实测 fixture 验证）
+ * 曾被子串判定排除出列表且被清扫删除（数据丢失），精确形态只匹配真崩溃中间态。
  */
 export function isScannableSessionFile(name: string): boolean {
-  return name.endsWith('.jsonl') && !TMP_RESIDUE_MARKERS.some((marker) => name.includes(marker))
+  return name.endsWith('.jsonl') && !isTmpResidueFileName(name)
+}
+
+// ── 磁盘扫描分解件（metrics-gate 复杂度偿还；单文件/子目录/顶层条目三级各管一层容错）──
+
+/** 单文件收录（防御纵深 catch）：scanSessionMeta 抛错计 scanFail，不中断整轮。 */
+function collectSessionMetaIntoResults(filePath: string, results: ScannedSessionMeta[], degraded: ScanDegradedStats): void {
+  try {
+    const meta = scanSessionMeta(filePath, degraded)
+    if (meta) results.push(meta)
+  } catch {
+    noteScanDegraded(degraded, 'scanFail', filePath)
+  }
+}
+
+/** cwd 分组子目录收录：文件名过滤（isScannableSessionFile，排除崩溃残留）后逐文件。 */
+function scanCwdGroupDir(groupDir: string, results: ScannedSessionMeta[], degraded: ScanDegradedStats): void {
+  try {
+    const files = readdirSync(groupDir).filter(isScannableSessionFile)
+    for (const file of files) {
+      collectSessionMetaIntoResults(join(groupDir, file), results, degraded)
+    }
+  } catch {
+    // RT-3#2：子目录列举失败 = 整个 cwd 分组的会话未收录，必须显形
+    noteScanDegraded(degraded, 'dirFail', groupDir)
+  }
+}
+
+/** 单个顶层目录项收录（cwd 分组子目录 / 散置 session 文件分流）；stat 失败计 statFail 跳过。 */
+function scanSessionsDirEntry(sessionsDir: string, entry: string, results: ScannedSessionMeta[], degraded: ScanDegradedStats): void {
+  const entryPath = join(sessionsDir, entry)
+  let stat
+  try {
+    stat = statSync(entryPath)
+  } catch {
+    // RT-3#2：静默跳过 → 计数显形（权限/竞态删除，该条目未收录）
+    noteScanDegraded(degraded, 'statFail', entryPath)
+    return
+  }
+  if (stat.isDirectory()) {
+    scanCwdGroupDir(entryPath, results, degraded)
+  } else if (isScannableSessionFile(entry)) {
+    collectSessionMetaIntoResults(entryPath, results, degraded)
+  }
+}
+
+/** 轮末降级判定（[BU5] scanDegradedFlag.last 置位依据）：任一收录降级计数非零。 */
+function hasScanDegradation(degraded: ScanDegradedStats): boolean {
+  return degraded.badHeader > 0 || degraded.statFail > 0 || degraded.dirFail > 0 || degraded.scanFail > 0 || degraded.noHeader > 0
 }
 
 function scanPiSessionsFromDisk(sessionsDir: string): ScannedSessionMeta[] {
-  if (!existsSync(sessionsDir)) return []
+  if (!existsSync(sessionsDir)) { scanDegradedFlag.last = false; return [] } // 权威空（非读取降级）→ 入口复位；其余路径由轮末聚合覆盖
 
   const results: ScannedSessionMeta[] = []
+  // RT-3#1/#2：降级丢弃计数（degraded 显形）——各失败点计入，扫描轮末汇总打点，
+  // 单条坏文件「侧栏少一条」可归因（结构与实现见 session-scan-degraded.ts）。
+  const degraded: ScanDegradedStats = createDegradedStats()
 
   let entries: string[]
   try {
@@ -1074,47 +1151,20 @@ function scanPiSessionsFromDisk(sessionsDir: string): ScannedSessionMeta[] {
   } catch (e) {
     // L8: sessions 目录存在但不可读（权限/IO 故障）时，readdirSync 抛 EACCES 等异常。
     // 原实现未保护会冒泡为进程级未捕获异常，此处降级为返回空数组（scan 容忍失败）。
+    // [BU5] 降级空与权威空返回值不可区分 → 旗标置位透出（消费方 = 不可逆删除闸）。
+    scanDegradedFlag.last = true
     console.error(`[session-file-utils] scanPiSessions: failed to read sessions dir: ${sessionsDir}`, e)
     return []
   }
 
   for (const entry of entries) {
-    const entryPath = join(sessionsDir, entry)
-    let stat
-    try {
-      stat = statSync(entryPath)
-    } catch {
-      continue
-    }
-
-    if (stat.isDirectory()) {
-      try {
-        // 文件名过滤（isScannableSessionFile）：排除 .tmp-migrate- 归一化崩溃残留
-        const files = readdirSync(entryPath).filter(isScannableSessionFile)
-        for (const file of files) {
-          const filePath = join(entryPath, file)
-          try {
-            const meta = scanSessionMeta(filePath)
-            if (meta) results.push(meta)
-          // eslint-disable-next-line taste/no-silent-catch -- scanning: skip unreadable session entries
-          } catch {
-            // skip
-          }
-        }
-      // eslint-disable-next-line taste/no-silent-catch -- scanning: skip unreadable session subdirectory
-      } catch {
-        // skip unreadable dir
-      }
-    } else if (isScannableSessionFile(entry)) {
-      try {
-        const meta = scanSessionMeta(entryPath)
-        if (meta) results.push(meta)
-      // eslint-disable-next-line taste/no-silent-catch -- scanning: skip unreadable session entry
-      } catch {
-        // skip
-      }
-    }
+    scanSessionsDirEntry(sessionsDir, entry, results, degraded)
   }
+
+  logScanDegradedSummary(degraded)
+  // [BU5] 轮末降级旗标：任一收录降级 = 列表可能缺条目（语义与消费面见 scanDegradedFlag；
+  // 目录不存在的权威空由上方复位保持 false，顶层 readdir 失败在 catch 内置 true 提前返回）。
+  scanDegradedFlag.last = hasScanDegradation(degraded)
 
   results.sort((a, b) => b.lastModified - a.lastModified)
   return results

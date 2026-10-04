@@ -330,7 +330,9 @@ describe('MessageStream 共存钉扎（W5T1，streaming turn + bash 消息双挂
  * （bash-effects 模块级 per-session Map）不变。
  *
  * 覆盖（出现/消失生命周期 + 内容）：
- * - bashStart 帧置位 → ActivityStrip bash 行出现，含 i18n 前缀（zh locale「正在执行」）+ mono 命令
+ * - bashStart 帧置位 → ActivityStrip bash 行出现，行内 = i18n 前缀（zh locale「正在执行」）+
+ *   elapsed mono meta；命令原文不内联、在悬停详情（方案 A，见 ActivityStrip.vue 组件头注
+ *   [notice-family-phrase-detail 方案 A]——长命令会把横线挤成残端，故短语化）
  * - bashResult 到达（abort 哨兵帧 command:''+cancelled:true 只清执行态不产 entry）→ 行消失
  * - 行位于 Virtualizer 之外（文档流），空消息 session 也可见——不依赖 virtua 渲染窗口（T10/gap3/
  *   W5T1 依赖本文件的 Virtualizer stub 才能在 happy-dom 下渲染，本用例有无该 mock 均可跑）
@@ -357,7 +359,7 @@ describe('MessageStream executing bash 瞬时行（[u6a] ActivityStrip bash 行�
     clearExecutingBash('sess-exec-bash')
   })
 
-  it('W4-E1: bashStart 置位 → bash 行出现（前缀文案 + 命令文本）；bashResult 到达 → 行消失', async () => {
+  it('W4-E1: bashStart 置位 → bash 行出现（方案 A：前缀 + elapsed，命令在悬停详情）；bashResult 到达 → 行消失', async () => {
     const sid = 'sess-exec-bash'
     clearExecutingBash(sid)
     const wrapper = mountStream(sid)
@@ -370,11 +372,20 @@ describe('MessageStream executing bash 瞬时行（[u6a] ActivityStrip bash 行�
     await nextTick()
     const row = wrapper.find('[data-testid="activity-strip-row-bash"]')
     expect(row.exists()).toBe(true)
-    // W4 完整形态：i18n 前缀（renderer 测试 t() 从 zh-CN locale 真实取值）+ mono 命令文本
+    // 方案 A 行内形态：i18n 前缀（renderer 测试 t() 从 zh-CN locale 真实取值）+ elapsed mono
+    // meta。timestamp:1 → elapsed 恒为巨大时长（formatDurationHms 的 Nh Nm Ns 形态），只宽松
+    // 断言「已 + 数字」不断言具体数值；命令原文不内联（移入悬停详情）
     expect(row.text()).toContain('正在执行')
-    expect(row.text()).toContain('npm test')
+    expect(row.text()).toMatch(/已\s*\d+h/)
+    expect(row.text()).not.toContain('npm test')
     // 旧渲染点清理：原 executing-bash-notice testid 不应再出现
     expect(wrapper.find('[data-testid="executing-bash-notice"]').exists()).toBe(false)
+
+    // 方案 A 悬停详情：命令原文经 HoverCard portal 挂 body（手法同 ActivityStrip.test.ts 的
+    // detail 用例——pointerenter 后过 open-delay 150ms 再读 portal 节点）
+    await wrapper.find('[data-testid="activity-strip-text-bash"]').trigger('pointerenter')
+    await new Promise((r) => setTimeout(r, 260))
+    expect(document.querySelector('[data-testid="activity-strip-detail-body-bash"]')?.textContent).toBe('npm test')
 
     // bashResult 到达（abort 哨兵帧：只清执行态不产 entry）→ 行消失，无残留 spinner
     bashEffects['message.bashResult']?.(fakeCtx, sid, { command: '', cancelled: true })
@@ -382,5 +393,7 @@ describe('MessageStream executing bash 瞬时行（[u6a] ActivityStrip bash 行�
     expect(wrapper.find('[data-testid="activity-strip"]').exists()).toBe(false)
 
     wrapper.unmount()
+    // portal 详情节点不随组件卸载自动移除（ActivityStrip.test.ts 同款收尾）
+    document.querySelector('[data-testid="activity-strip-detail-bash"]')?.remove()
   })
 })

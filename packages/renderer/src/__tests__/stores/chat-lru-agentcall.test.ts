@@ -1,6 +1,6 @@
 /**
  * [B9 agentcall 分区 LRU 联动] renderer 装配链路集成测试
- * （docs/design/memory-leak-remediation.md §3.3-B9 / 验收 A6 单测层）。
+ * （内存审计 ADR-0069，原文档 §3.3-B9 已删除 git 可追溯 / 验收 A6 单测层）。
  *
  * 覆盖装配全链：stores/chat.ts → agentcall-lru-linkage（装配点）→ core lru.ts 联动驱逐 +
  * drawer control getViewedVids 豁免。核心断言（对应 A6 场景表行）：

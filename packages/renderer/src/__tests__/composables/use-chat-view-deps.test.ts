@@ -2,7 +2,8 @@
  * useChatViewDeps.onHandoff 忙拦截测试（review round 1 must-fix）。
  *
  * 覆盖：streaming 中点 handoff → 提前拦下（toast handoffBusy 短路，不发 RPC）；
- * 非活跃 → 正常走 handoff RPC；RPC 失败 → toast handoffFailed。
+ * 非活跃 → 正常走 handoff RPC；RPC 失败 → toast handoffFailed；
+ * [RD-1#8] 文件白名单（file.search）加载失败 → console.warn 留痕（降级为空集行为不变）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/use-chat-view-deps.test.ts
  */
@@ -24,6 +25,11 @@ vi.mock('@/composables/useToast', () => ({
 }))
 vi.mock('@/composables/features/chat/useChat', () => ({
   useChat: () => ({ abortBash: vi.fn(), editAndResend: vi.fn() }),
+}))
+// [RD-1#8] 文件白名单加载（file.search）可控失败/成功
+const loadFileCandidatesMock = vi.hoisted(() => vi.fn(() => Promise.resolve([])))
+vi.mock('@/composables/features/search/useFileSearch', () => ({
+  useFileSearch: () => ({ load: loadFileCandidatesMock }),
 }))
 
 beforeEach(() => {
@@ -80,5 +86,37 @@ describe('onHandoff streaming 忙拦截', () => {
     await vi.waitFor(() => expect(toastErrorMock).toHaveBeenCalled())
     expect(String(toastErrorMock.mock.calls[0][0])).toContain('rpc down')
     stop()
+  })
+})
+
+describe('[RD-1#8] 文件白名单加载失败留痕（降级可见，非静默吞噬）', () => {
+  it('file.search 失败 → console.warn 留痕 + 不抛错（白名单降级为空集的行为不变）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    loadFileCandidatesMock.mockRejectedValueOnce(new Error('file.search down'))
+    const sid = 's-file-whitelist-fail'
+
+    const { stop } = setupDeps(sid)
+    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled())
+
+    const first = String(warnSpy.mock.calls[0]?.[0])
+    expect(first).toContain('[useChatViewDeps] file whitelist load failed for session')
+    expect(first).toContain(sid)
+    // 留痕携带原始错误（排障可定位）
+    expect(warnSpy.mock.calls[0]?.[1]).toBeInstanceOf(Error)
+
+    stop()
+    warnSpy.mockRestore()
+  })
+
+  it('file.search 成功 → 零 warn（不污染正常流的观测信号）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    loadFileCandidatesMock.mockResolvedValueOnce([])
+
+    const { stop } = setupDeps('s-file-whitelist-ok')
+    await vi.waitFor(() => expect(loadFileCandidatesMock).toHaveBeenCalled())
+
+    expect(warnSpy).not.toHaveBeenCalled()
+    stop()
+    warnSpy.mockRestore()
   })
 })

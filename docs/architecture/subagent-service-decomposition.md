@@ -60,7 +60,7 @@ SubagentService 跑在宿主 pi 主进程内（extension 加载），是 subagen
 | 11 | close 三路 | closeSubagent / closeChatIdle / closeAfterRoundSettled | 1674–1814（chat 分路 H1 后消亡） |
 | 12 | await 入口 | executeAndAwait | 1815–1918 |
 | 13 | 身份解析/record 创建 | resolveIdentity ×2 / createRecordForMode / buildEarlyFailedHandle | 1969–2119 |
-| 14 | 引擎编排（run 域） | executeViaEngine / kickOffEngineRun / runEngineTask / adoptResumable / finalizeEngineOutcome / runAndFinalize ×10 | 2120–2560 |
+| 14 | 引擎编排（run 域） | executeViaEngine / kickOffEngineRun / runEngineTask / adoptResumable / finalizeEngineOutcome / runAndFinalize ×10（前述第 2-5 符号 H1 后消亡） | 2120–2560 |
 | 15 | pool/worktree 资源 | acquirePoolOrFinalize / resolveWorktreeHandle / releaseRoundResources | 2561–2595 |
 | 16 | chat spawn/轮次生命周期 ×13 | kickOffChatRound / handleChatRoundPhase / armChatIdleTimer ×13 | **H1 后消亡**（H1 保留其派发主干并归入 Continuation） |
 | 17 | 取消 | cancelBackground | ~3030 |
@@ -99,7 +99,7 @@ SubagentService（装配壳，类体 ≤ 500 行）
   │                          （store 与终态迁移入口的唯一宿主——H4 落点；record 字段级
   │                          写点仍散布，见 D1）
   ├─ RunOrchestration     —— 域 #6/#7/#12/#14/#15：model 解析/execute/await/
-  │                          引擎 kick-off/adopt/finalizeEngineOutcome/pool/worktree
+  │                          引擎 kick-off/adopt/finalizeEngineOutcome(已删)/pool/worktree
   ├─（H1 已立的 ConversationContinuation 与 H2 的 executeWorkflowAgent 归
   │    RunOrchestration 协作面；H1 后 finalizeRoundToIdle wrapper 唯一调用方 =
   │    settleOneShotOutcome，随其归 RunOrchestration 或内联）

@@ -21,6 +21,7 @@ import { canonicalizePath } from '../../utils/path-utils.js'
 import { errorWithCode, BUILTIN_EXTENSIONS_MISSING } from '../../utils/errors.js'
 import { readSettings } from '../pi/pi-settings-store.js'
 import { mandatoryExtensions } from '@taiji/shared'
+import { warnOnce } from '../../utils/warn-once.js'
 import type { IExtensionResolver, ExtensionPaths, DiscoveredExtension, ExtensionSource } from '../../services/ports/installer.js'
 
 const log = {
@@ -116,8 +117,16 @@ export class ExtensionResolver implements IExtensionResolver {
       const raw = readFileSync(pkgJsonPath, 'utf-8')
       const pkg = JSON.parse(raw) as { dependencies?: Record<string, string> }
       dependencies = pkg.dependencies ?? {}
-    } catch {
-      log.warn(`[extension-resolver] failed to read ${pkgJsonPath}`)
+    } catch (e: unknown) {
+      // RT-8#13：package.json 畸形 → 整个 npm 扩展源解析为空（「零扩展」）。此前 warn 有但
+      // 无路径与恢复动作，运维看到也不知该修哪个文件——补全路径 + 指引，并按路径去重
+      //（扩展装载链会反复调用本方法）。
+      warnOnce(
+        `ext-npm-pkg-json:${pkgJsonPath}`,
+        `[extension-resolver] 读取/解析 ${pkgJsonPath} 失败，npm 源扩展全部不可用（列表为空）: ${pkgJsonPath}。` +
+          '恢复动作：修复该 package.json 的 JSON 语法后重载扩展',
+        e,
+      )
       return result
     }
 
@@ -390,9 +399,16 @@ export class ExtensionResolver implements IExtensionResolver {
           }
           if (resolved.length > 0) return resolved
         }
-      } catch (e) {
-        // package.json 解析失败：warn 记录后继续降级尝试 index.ts/index.js
-        log.warn('[extension-resolver] resolveExtensionEntries package.json parse failed, falling back to index.ts/js:', e)
+      } catch (e: unknown) {
+        // package.json 解析失败：warn 记录后继续降级尝试 index.ts/index.js。RT-8#13：补路径
+        // 与恢复动作，并按路径去重（discovery 扫描对同目录会反复进入本分支）。
+        warnOnce(
+          `ext-discovery-pkg-json:${packageJsonPath}`,
+          `[extension-resolver] 读取/解析 ${packageJsonPath} 失败，pi.extensions manifest 入口不可用，` +
+            '降级尝试 index.ts/index.js（两者也没有则该目录不算扩展）。' +
+            `恢复动作：修复该 package.json 的 JSON 语法后重扫: ${packageJsonPath}`,
+          e,
+        )
       }
     }
 
@@ -454,7 +470,15 @@ export class ExtensionResolver implements IExtensionResolver {
       if (peerDeps.some(d => /pi-coding-agent|pi-agent-core/.test(d))) return true
 
       return false
-    } catch {
+    } catch (e: unknown) {
+      // RT-8#13：package.json 畸形 → 判非扩展。静默 false = 该扩展从列表无声消失且
+      // 无归因（半损坏清单被当「非 extension 目录」）。warn-once 按路径去重防重扫刷屏。
+      warnOnce(
+        `ext-pkg-json:${pkgJsonPath}`,
+        `[extension-resolver] package.json 读取/解析失败，该目录被判定为非 pi 扩展（不会出现在列表）: ${pkgJsonPath}。` +
+          '恢复动作：修复该 package.json 的 JSON 语法',
+        e,
+      )
       return false
     }
   }
@@ -476,7 +500,15 @@ export class ExtensionResolver implements IExtensionResolver {
       const raw = readFileSync(join(dir, 'package.json'), 'utf-8')
       const pkg = JSON.parse(raw) as { name?: unknown }
       return typeof pkg.name === 'string' ? pkg.name : basename(dir)
-    } catch {
+    } catch (e: unknown) {
+      // RT-8#13：fallback basename(dir) 是「身份降级」（同包跨源去重可能失效产生重复条目），
+      // 静默降级不可观测——warn-once 按路径。
+      warnOnce(
+        `ext-name:${dir}`,
+        `[extension-resolver] 读取扩展 name 失败（package.json 缺失/畸形/无 name 字段），` +
+          `去重 key 降级用目录名 ${basename(dir)}（可能导致该扩展跨源重复显示）: ${dir}`,
+        e,
+      )
       return basename(dir)
     }
   }

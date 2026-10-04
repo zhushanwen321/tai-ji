@@ -35,9 +35,10 @@
  * - `registerSessionCleanup(fn)`：加入模块级 Set，返回反注册函数
  * - `triggerSessionCleanups(sid)`：遍历 Set 调所有 fn(sid)
  * - useSessionScopedState 实例 setup 时自动注册自己的 cleanup（删 Map 分区），
- *   onScopeDisposed 时反注册（防卸载后还被 trigger 调用）
+ *   scope dispose 时反注册（防卸载后还被 trigger 调用）——反注册仅在 scope 活跃时
+ *   条件挂载，无 scope 上下文（模块级单例）不挂，见工厂尾部注释
  */
-import { computed, onScopeDispose, ref } from 'vue'
+import { computed, getCurrentScope, onScopeDispose, ref } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 
 /**
@@ -191,13 +192,26 @@ export function useSessionScopedState<T>(
     updater(partition)
   }
 
-  // 注册实例 cleanup 到模块级注册表，scope dispose 时反注册。
+  // 注册实例 cleanup 到模块级注册表（无条件——cleanup 必须留在注册表服务
+  // triggerSessionCleanups；scope dispose 反注册则是条件挂载）。
   // 防 composable 卸载后 triggerSessionCleanups 仍调用其 cleanup（操作已废弃 Map 无意义，
   // 且若未来 Map 持有需要释放的资源会造成 use-after-unmount）。
+  //
+  // 三态语义（Vue onScopeDispose 在无活跃 scope 时的实际行为）：① dev 下发 Vue warn
+  // ② 注册落空（回调不被存下）③ 不抛错。条件注册构造性消除 ①——冷启动恒现的
+  // onScopeDispose dev warn 即源于无 scope 调用。不包 try-catch（warn 是 console 输出，
+  // try-catch 结构上拦不住、恒 no-op），不用 failSilently 第二参（把意图藏进布尔参数，
+  // 调用点读不出语义）——两个被否形态见 console-noise-triage 设计 D1。
+  //
+  // 为什么模块级单例不需要 scope cleanup：单例与模块同生命周期，本就不存在
+  // 「scope 卸载」事件；cleanup 留在注册表由 triggerSessionCleanups 统一驱动即可
+  // （不挂 dispose 时 unregister 永不触发、条目保留恰是其正确语义，与守卫前行为一致）。
   const unregister = registerSessionCleanup(cleanup)
-  onScopeDispose(() => {
-    unregister()
-  })
+  if (getCurrentScope()) {
+    onScopeDispose(() => {
+      unregister()
+    })
+  }
 
   return {
     current,

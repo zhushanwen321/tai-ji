@@ -92,6 +92,21 @@ jobs:
         if: steps.check_pre.outputs.should_publish == 'true'
         run: pnpm --filter @zhushanwen/zcode-subagent-cli build
 
+      # session 读取共享基座两包（与正式线 release-npm.yml 同位置同语义补齐）：
+      # session-core 是 zcode-session-source 的 workspace 依赖，构建顺序必须在前；
+      # 两包带 pending changeset（session-core-initial / zcode-session-source-initial），
+      # 必进 changeset pre 发布批次，publish 前磁盘无 dist 会发出坏包（幽灵 dist 条目
+      # 被 Publish surface guard 拦截，连坐整批 pi-session-reader 发布）。与 Smoke /
+      # Publish 同条件挂载——skip 分支不发布即不构建，维持该 job「warning + skip、
+      # 整体绿」既有语义。
+      - name: Build session-core
+        if: steps.check_pre.outputs.should_publish == 'true'
+        run: pnpm --filter @zhushanwen/session-core build
+
+      - name: Build zcode-session-source
+        if: steps.check_pre.outputs.should_publish == 'true'
+        run: pnpm --filter @zhushanwen/zcode-session-source build
+
       # D9-② dist 发布回归门（对齐 release-npm.yml 的 Smoke step）：正常入口
       # npm-prerelease.sh 阶段 1.5 已含 smoke，此处兜底绕过该脚本直接 push
       # dev-npm-* 分支触发的场景。与 Publish 同条件——未准备 pre.json 的分支

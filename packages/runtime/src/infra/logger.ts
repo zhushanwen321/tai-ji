@@ -138,7 +138,7 @@ interface PiStreamState {
 const openPiStreams = new Set<PiStreamState>()
 
 /**
- * G2 活性无界治理（docs/design/memory-leak-remediation.md §3.4）：流确认 close 后从
+ * G2 活性无界治理（ADR-0069；原文档已删除 git 可追溯）：流确认 close 后从
  * openPiStreams 摘除。每个 pi spawn（主 session / withEphemeralPi / relay subagent /
  * crash log）各注册一条，原实现唯一清理点是 runtime 退出的 closeLogger——长跑进程内
  * Set 随工作流强度无界增长（~0.5-2KB/条，两组审计独立发现）。摘除条件三合一（全满足才删）：
@@ -731,6 +731,17 @@ function flushWatermarkDaily(acc: WatermarkDailyAccumulator): void {
       samples: acc.samples,
     }),
   })
+}
+
+/**
+ * crash log sink 是否可用（crash-correlation 采样门，D10）：pi-crash log 未初始化
+ * （单元测试 no-op 态）时关联取证无落点，采样本身是无意义功——快照/统一日志采集器
+ * 以此为门结构性惰性，生产（logger init 后）恒采集。与 writePiCrashLog 的内部
+ * `!logsDir || !currentLevel` 早退同源同语义，单独导出是为了让采样器在**做功前**短路
+ * （而非采完才发现没处写）。
+ */
+export function isPiCrashLogEnabled(): boolean {
+  return Boolean(logsDir && currentLevel)
 }
 
 /**

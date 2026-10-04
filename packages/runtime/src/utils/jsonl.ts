@@ -9,11 +9,22 @@
  * 各消费方对返回的 entries 再做自己的领域过滤（type 判定 / 取字段等）。
  */
 import { openSync, readSync, closeSync, fstatSync } from 'node:fs'
+import { warnOnce } from './warn-once.js'
 
 /** 1KB 的字节数（尾读窗口以 KB 为单位表达更直观）。 */
 const BYTES_PER_KB = 1024
 /** 尾读窗口大小（KB）；session_end/session_info 总在文件尾部，32KB 足够命中。 */
 const READ_TAIL_KB = 32
+
+/**
+ * JSONL 解析的可选观测参数（RT-8#13）：畸形行此前静默跳过——半损坏文件 = 轮次/
+ * 字段无声丢失，零丢弃计数。调用方（知道文件路径的一方）经 onMalformedLine 累计
+ * dropCount 并 warn-once，工具自身保持零日志耦合（headless 可测）。
+ */
+export interface JsonlParseOptions {
+  /** 每条畸形行回调一次（行文本已 trim）。 */
+  onMalformedLine?: (line: string) => void
+}
 
 /**
  * 把 JSONL 文本解析成成功解析的条目数组（按行序，跳过空行与畸形行）。
@@ -28,19 +39,44 @@ const READ_TAIL_KB = 32
  * 但显式循环更可读、不产生中间数组。
  *
  * @param raw JSONL 文本（各行 JSON 对象，以 \n 分隔）
+ * @param opts 可选畸形行观测（RT-8#13）
  * @returns 成功解析的条目（unknown[]；消费方自行收窄类型 + 过滤）
  */
-export function parseJsonl(raw: string): unknown[] {
+export function parseJsonl(raw: string, opts?: JsonlParseOptions): unknown[] {
   const entries: unknown[] = []
   for (const line of raw.split('\n')) {
     const trimmed = line.trim()
     if (!trimmed) continue
     try {
       entries.push(JSON.parse(trimmed))
-    // eslint-disable-next-line taste/no-silent-catch -- JSONL: skip malformed line, keep parsing
     } catch {
-      // skip malformed line
+      // skip malformed line（观测回调在 catch 内出声——非吞错，见 JsonlParseOptions）
+      opts?.onMalformedLine?.(trimmed)
     }
+  }
+  return entries
+}
+
+/**
+ * 解析 JSONL 文本并在存在畸形行时 warn-once 显形（RT-8#13 复用助手）。
+ *
+ * 「半截 JSONL」的字段提取（session 名/outcome 等）静默降级 = 防线从未生效不可观测。
+ * filePath 作 warn-once 去重键（同一文件重复解析只出声一次）；零畸形时不出声。
+ * 返回 entries 本体（与 parseJsonl 同形态），丢弃计数只出现在 warn 文案里。
+ */
+export function parseJsonlWarnOnMalformed(raw: string, filePath: string): unknown[] {
+  let dropped = 0
+  const entries = parseJsonl(raw, {
+    onMalformedLine: () => {
+      dropped += 1
+    },
+  })
+  if (dropped > 0) {
+    warnOnce(
+      `jsonl:${filePath}`,
+      `[jsonl] 文件含 ${dropped} 行畸形 JSON，相关字段提取可能缺失: ${filePath}。` +
+        '常见原因：写入被中断（崩溃/磁盘满）产生的半截行',
+    )
   }
   return entries
 }
@@ -92,9 +128,10 @@ export function readTailEntries(filePath: string): unknown[] | null {
  *
  * @param filePath JSONL 文件绝对路径
  * @param maxBytes 尾部读取的最大字节数
+ * @param opts 可选畸形行观测（RT-8#13，同 parseJsonl）
  * @returns 尾部解析出的 entry 数组；文件不存在返回 null
  */
-export function readTailBytes(filePath: string, maxBytes: number): unknown[] | null {
+export function readTailBytes(filePath: string, maxBytes: number, opts?: JsonlParseOptions): unknown[] | null {
   let fd: number
   try {
     fd = openSync(filePath, 'r')
@@ -129,9 +166,9 @@ export function readTailBytes(filePath: string, maxBytes: number): unknown[] | n
       if (!trimmed) continue
       try {
         entries.push(JSON.parse(trimmed))
-      // eslint-disable-next-line taste/no-silent-catch -- JSONL: skip malformed line, keep parsing
       } catch {
-        // skip malformed line
+        // skip malformed line（观测回调在 catch 内出声——非吞错，见 JsonlParseOptions）
+        opts?.onMalformedLine?.(trimmed)
       }
     }
     return entries

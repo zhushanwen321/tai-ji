@@ -101,7 +101,8 @@ const mockInstallGitRepository = vi.fn().mockResolvedValue({
     { name: 'pi-git-ext', version: '0.5.0', description: 'Git', path: '/tmp/git', enabled: true, source: 'user-installed' as const },
   ],
 })
-const mockFinishInstall = vi.fn().mockResolvedValue(undefined)
+// RT-6#1 后 finishInstall 契约 = 失败清单聚合返回（空数组 = 全部成功）
+const mockFinishInstall = vi.fn().mockResolvedValue([])
 const mockInstallExtension = vi.fn().mockResolvedValue(undefined)
 const mockCancelInstall = vi.fn().mockResolvedValue(undefined)
 
@@ -625,6 +626,29 @@ describe('RuntimeServer: extension message routing', () => {
       expect(msg.payload).toMatchObject({
         code: 'install_failed',
         message: expect.stringContaining('not found in temp directory'),
+      })
+    })
+
+    it('RT-6#1: 部分失败聚合透传 finish_partial_failed（code + hint），不回假成功列表', async () => {
+      // RT-6#1 后服务层逐包隔离：失败清单非空 → ExtensionInstallError('finish_partial_failed')
+      // 经 sendInstallError 透传（含 hint），前端 catch 显示而非假成功
+      mockFinishInstall.mockResolvedValueOnce([{ dirName: 'ext-broken', error: 'ENOTEMPTY: boom' }])
+      await connectClient()
+
+      const responsePromise = waitForMessage(ws, 'error')
+
+      ws.send(JSON.stringify({
+        type: 'extension.finishInstall',
+        id: 'ext-finish-partial',
+        payload: { tempDir: '/tmp/ext-scan-test', selected: ['ext-broken'] },
+      }))
+
+      const msg = await responsePromise
+      // hint 经 sendError 的 details.hint 透传（sendHandlerError → ExtensionInstallError.hint）
+      expect(msg.payload).toMatchObject({
+        code: 'finish_partial_failed',
+        message: expect.stringContaining('ext-broken'),
+        details: { hint: expect.any(String) },
       })
     })
   })

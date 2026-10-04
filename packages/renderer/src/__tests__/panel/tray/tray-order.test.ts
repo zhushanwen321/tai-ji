@@ -1,5 +1,5 @@
 /**
- * tray-order 排序纯函数测试（u-tray-widget；设计 docs/design/composer-task-tray.md §3.3 D6）。
+ * tray-order 排序纯函数测试（u-tray-widget；设计 docs/design/composer-task-tray.md §3.3 D6，已删除 git 可追溯）。
  *
  * 三视角（TEST-STRATEGY §3）：
  * - 构建者（白盒）：known-order 优先 / 未知 key 按传入数组序追加 / 不改入参 / 输入缺失 known

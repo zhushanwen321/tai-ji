@@ -4,7 +4,7 @@
 
 Internals reference for maintainers. For the usage contract (what the tool does, when an agent should call it), see [README.md](./README.md). This document covers how the code is structured, the state machine, the defensive execute flow, and where each design invariant is enforced — so a change does not silently break an invariant.
 
-Source: 10 files in `src/`, ~2085 lines total.
+Source: 11 files in `src/`, ~2265 lines total.
 
 ## File dependency graph
 
@@ -32,21 +32,21 @@ Source: 10 files in `src/`, ~2085 lines total.
        │  race guards        │    │  cursor/paste)     │                 │
        └──────────▲──────────┘    └────────────────────┘                 │
                   │                                                      │
-                  │                 ┌────────────────────┐               │
-                  ├────────────────▶│ channel-handler.ts │◀──────────────┘
-                  │  (AskUserComp.) │ subagent passthru  │
-                  │                 └─────────▲──────────┘
-                  │                           │
-                  │                 ┌─────────┴──────────┐
-                  │                 │channel-registry-   │
-                  │                 │register.ts         │
-                  │                 │globalThis Symbol   │
-                  │                 │handshake           │
-                  │                 └────────────────────┘
-           ┌──────┴───────────┐
-           │     index.ts     │  ← Tool factory + execute (6-step flow) + renderCall/renderResult
+                  │                 ┌────────────────────┐  ┌────────────────┐
+                  ├────────────────▶│ channel-handler.ts │◀─│ form-adapter   │
+                  │  (AskUserComp.) │ subagent passthru  │  │ AskUserQuestion│
+                  │                 └─────────▲──────────┘  │ ↔ FormQuestion │
+                  │                           │             │ normalize (D3)  │
+                  │                 ┌─────────┴──────────┐  └───────▲────────┘
+                  │                 │channel-registry-   │          │
+                  │                 │register.ts         │          │
+                  │                 │globalThis Symbol   │          │
+                  │                 │handshake           │          │
+                  │                 └────────────────────┘          │
+           ┌──────┴───────────┐                                     │
+           │     index.ts     │◀────────────────────────────────────┘
            └──────────────────┘     imports component + validate + types + submit-view +
-                                    channel-handler + channel-registry-register
+                                    channel-handler + channel-registry-register + form-adapter
 ```
 
 **No cycles.** All imports flow one direction; `types.ts` is the single leaf depended on by everyone.
@@ -67,11 +67,11 @@ Encoding is **one-way** — the old `parseAnswerParts` text reverse-parsing was 
 
 ## Channel registry handshake (subagent passthrough)
 
-`channel-handler.ts` + `channel-registry-register.ts` implement the subagent passthrough: the host-process ask-user extension registers an `"ask_user"` channel handler through a versioned `globalThis[Symbol.for]` slot handshake (`CHANNEL_HANDSHAKE_KEY`). The skeleton (versioned slot + pending/flush; this side never creates the registry instance) is deliberate and must not be simplified away — the M4 incident (a simplified self-made registry hijacking the canonical slot) is the anchor, see the header comment of `channel-registry-register.ts`. A second consumer of the same handshake *pattern* exists: `extensions/universal/permission/src/footer-provider.ts` (own slot key `FOOTER_HANDSHAKE_KEY`, same versioned-slot shape).
+`channel-handler.ts` + `channel-registry-register.ts` implement the subagent passthrough: the host-process ask-user extension registers one handler under **both channel names** — `ASK_USER_CHANNELS = ["ask_user", "ui_form"]` (`channel-registry-register.ts`; D9 dual-name: new subagents send `ui_form`, legacy npm subagents still send `ask_user`) — through a versioned `globalThis[Symbol.for]` slot handshake (`CHANNEL_HANDSHAKE_KEY`). The skeleton (versioned slot + pending/flush; this side never creates the registry instance) is deliberate and must not be simplified away — the M4 incident (a simplified self-made registry hijacking the canonical slot) is the anchor, see the header comment of `channel-registry-register.ts`. A second consumer of the same handshake *pattern* exists: `extensions/universal/permission/src/footer-provider.ts` (own slot key `FOOTER_HANDSHAKE_KEY`, same versioned-slot shape).
 
 Registry outreach facts (ext-simplify-11, D4):
 
-- **Single registrant on this slot.** The `CHANNEL_HANDSHAKE_KEY` slot currently has exactly one registrant: ask-user (`"ask_user"`). The permission footer-provider handshake above uses its own separate slot — same pattern, different slot, not a registrant here.
+- **Single registrant on this slot.** The `CHANNEL_HANDSHAKE_KEY` slot currently has exactly one registrant: ask-user, registering the same handler on both `"ask_user"` and `"ui_form"` (one handler, two channel names). The permission footer-provider handshake above uses its own separate slot — same pattern, different slot, not a registrant here.
 - **`"gui_widget"` route reserved but vacant.** The engine-sdk ui-channels parsing (`parseChannel`, re-exported via `packages/subagent-core/src/execution/ui-channels.ts`) reserves a `"gui_widget"` channel name, but no package registers a handler for it; the core-side `ui-request-handler-factory` special-cases the unregistered `"gui_widget"` request to `{ack:true}` without forwarding. A future registrant needs no ask-user change — registration is keyed by channel name and orthogonal per extension.
 - **Known gap, accepted (version-mismatch slot overwrite).** On `slot.version !== 1`, `readSlot` discards the slot and `registerAskUserChannelHandler` rebuilds it via `ensureSlot` — if a hypothetical v2 registry ever held the slot, this would drop its reference. Ruled not-worth-fixing (ext-simplify-11 finding 6): both sides pin `HANDSHAKE_VERSION = 1`, so the mismatch path is unreachable today; fixing it would be defensive code for an imagined v2. Re-review trigger: any PR that bumps either side's handshake version.
 

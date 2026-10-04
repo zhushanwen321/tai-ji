@@ -6,6 +6,7 @@ import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage, ClientMessageType } from '@taiji/shared'
 import type { IPluginService } from '../interfaces.js'
 import type { MessageHandlerContext } from './message-context.js'
+import { dismissRuntimeModalFromHost, isPluginModalClosedReason } from '../services/plugin-service/api/ui-api.js'
 
 export interface PluginHandlerContext extends MessageHandlerContext {
   pluginService: IPluginService | null
@@ -19,7 +20,7 @@ export class PluginMessageHandler {
     'plugin.list', 'plugin.toggle', 'plugin.uninstall', 'plugin.approvePermissions', 'plugin.revokePermissions',
     'plugin.denyPermissions',
     'plugin.executeCommand', 'plugin.config.get', 'plugin.config.set', 'plugin.install', 'plugin.uiResponse',
-    'plugin.mountPoints.sync',
+    'plugin.mountPoints.sync', 'plugin.dismissModal',
   ]
 
   async handlePluginMessage(msg: ClientMessage, ws: WsType): Promise<void> {
@@ -32,7 +33,17 @@ export class PluginMessageHandler {
     // 依据同一 key 断言（Extract 与 switch narrowing 同构，ClientMessageMap 为协议 SSOT）。
     // cast 仅放宽索引键域（Partial 化），不改变任何 handler 的签名与运行时行为。
     const handler = (PLUGIN_CASE_HANDLERS as Partial<Record<ClientMessageType, PluginCaseHandler>>)[msg.type]
-    if (!handler) return
+    // RT-1#6：落空不再静默 return——handles 清单与分发表漂移（漏登记）时，前端 pending
+    // Promise 只能等到泛化超时。显式 error 信封 + error 日志双显形。
+    if (!handler) {
+      console.error(`[plugin-handler] no case handler for type "${msg.type}" — handles/dispatch 表漂移？`)
+      return this.ctx.sendError(
+        ws,
+        'handler_not_registered',
+        `No case handler registered for message type: ${msg.type}`,
+        msg.id,
+      )
+    }
     return handler(this.ctx, msg, ws, this.ctx.pluginService)
   }
 }
@@ -42,7 +53,7 @@ type PluginHandledType =
   | 'plugin.list' | 'plugin.toggle' | 'plugin.uninstall' | 'plugin.approvePermissions' | 'plugin.revokePermissions'
   | 'plugin.denyPermissions'
   | 'plugin.executeCommand' | 'plugin.config.get' | 'plugin.config.set' | 'plugin.install' | 'plugin.uiResponse'
-  | 'plugin.mountPoints.sync'
+  | 'plugin.mountPoints.sync' | 'plugin.dismissModal'
 
 /** 按 type 字面量收窄 ClientMessage（查表 key = 运行时 guard，与原 switch narrowing 同构）。 */
 type PluginMsgOf<K extends ClientMessageType> = Extract<ClientMessage, { type: K }>
@@ -89,8 +100,22 @@ async function handlePluginDenyPermissions(ctx: PluginHandlerContext, msg: Plugi
   return ctx.reply(ws, msg.id, 'pong', {})
 }
 
+/**
+ * E6（AP-3/D2）args 标量守卫：GUI 点击来源把 args 变成用户可点输入，非标量值
+ * （嵌套对象/数组）等于给插件间传结构化 payload 开无 schema 旁路——runtime 主线程
+ * 入口拒绝、不 dispatch handler。未知键无从校验（args 无 schema），只校验值域。
+ */
+function isScalarArgs(args: unknown): args is Record<string, string | number | boolean> {
+  if (typeof args !== 'object' || args === null || Array.isArray(args)) return false
+  return Object.values(args).every(v => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')
+}
+
 async function handlePluginExecuteCommand(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.executeCommand'>, ws: WsType, pluginService: IPluginService): Promise<void> {
-  await pluginService.executeCommand(msg.payload.pluginId, msg.payload.commandId, msg.payload.args)
+  const args = msg.payload.args
+  if (args !== undefined && !isScalarArgs(args)) {
+    return ctx.sendError(ws, 'INVALID_ARGS', 'Invalid args: expected a flat record of scalar values (string | number | boolean). Action-bar/headerAction clicks must not carry nested objects or arrays.', msg.id)
+  }
+  await pluginService.executeCommand(msg.payload.pluginId, msg.payload.commandId, args)
   return ctx.reply(ws, msg.id, 'pong', {})
 }
 
@@ -138,6 +163,34 @@ async function handlePluginMountPointsSync(ctx: PluginHandlerContext, msg: Plugi
 }
 
 /**
+ * plugin.dismissModal（plugin-header-action-modal-points AP-2 关①，u5b 三处登记）：
+ * 宿主 UI（Esc/关闭键、切会话、打开 Settings/Search）发起的关闭上报。
+ * 处理 = 校验 (pluginId, modalId, epoch) 三元组与当前槽匹配（陈旧 epoch——关闭在途时
+ * 的重开——或不匹配 → 忽略 + 日志，防陈旧 dismiss 关掉刚重开的层）→ 广播
+ * plugin:modalState{closed, reason} + notify 插件 plugin.ui.modalClosed{modalId, reason}
+ * （reason 词表单点：dismissed | session-switched | host-overlay | replaced | plugin-gone）。
+ * 广播/notify 出线由 ui-api 的 wireRuntimeModalExits 装配（registerAllRpcMethods 注入）。
+ */
+async function handlePluginDismissModal(ctx: PluginHandlerContext, msg: PluginMsgOf<'plugin.dismissModal'>, ws: WsType, _pluginService: IPluginService): Promise<void> {
+  const { pluginId, modalId, epoch, reason } = msg.payload
+  // 畸形帧（首方 renderer 之外的来源 / 字段漂移）→ error envelope 显式拒绝；
+  // 形状合法但槽不匹配/epoch 陈旧 → 忽略 + 日志（幂等，closed 对已关层 no-op）。
+  if (typeof pluginId !== 'string' || pluginId.length === 0
+    || typeof modalId !== 'string' || modalId.length === 0
+    || typeof epoch !== 'number' || !Number.isSafeInteger(epoch) || epoch < 1) {
+    return ctx.sendError(ws, 'invalid_params', 'Invalid plugin.dismissModal payload: pluginId/modalId must be non-empty strings and epoch a positive safe integer.', msg.id)
+  }
+  if (!isPluginModalClosedReason(reason)) {
+    return ctx.sendError(ws, 'invalid_params', `Invalid plugin.dismissModal reason: expected one of dismissed | session-switched | host-overlay | replaced | plugin-gone but received ${JSON.stringify(reason)}.`, msg.id)
+  }
+  const matched = dismissRuntimeModalFromHost({ pluginId, modalId, epoch, reason })
+  if (!matched) {
+    console.warn(`[plugin-message-handler] dismissModal ignored: no matching open slot (plugin=${pluginId}, modal=${modalId}, epoch=${epoch}) — stale dismiss or already closed`)
+  }
+  return ctx.reply(ws, msg.id, 'pong', {})
+}
+
+/**
  * plugin.* 分发表（形态 2 表驱动分发）：key = ClientMessageType 字面量，值 = 该 case 的
  * 处理函数（msg 参数按该 key 收窄）。主函数只留查表 + 落空（未命中行为与原 switch 无
  * default 一致）。
@@ -160,4 +213,5 @@ const PLUGIN_CASE_HANDLERS: { readonly [K in PluginHandledType]: (
   'plugin.install': handlePluginInstall,
   'plugin.uiResponse': handlePluginUiResponse,
   'plugin.mountPoints.sync': handlePluginMountPointsSync,
+  'plugin.dismissModal': handlePluginDismissModal,
 }

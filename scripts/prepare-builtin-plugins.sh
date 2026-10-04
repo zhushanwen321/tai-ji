@@ -17,8 +17,10 @@
 #  - 打包产物（cwd=Resources）：electron-builder extraResources 把 resources/plugins
 #    拷入 Resources/resources/plugins（electron-builder.yml 有对应条目）
 #
-# dev 模式注意：dev 下 cwd=apps/electron，registry 扫描 apps/electron/resources/plugins
-# （目录不存在）→ built-in 插件在 dev 不被发现（独立已知缺口，不在本脚本范围）。
+# dev 装载链：本脚本在 dev-instance.mjs 的 pre 数组恒重建（spawn 前失败即中止 dev）；
+# supervisor 的 dev 分支（apps/electron/main/supervisor/process-control.ts）显式注入
+# --builtin-plugins-dir = <repo>/resources/plugins（不做 cwd 探测），registry 扫描即命中
+# 同目录编译产物。
 #
 # Usage: bash scripts/prepare-builtin-plugins.sh
 set -euo pipefail
@@ -28,6 +30,15 @@ cd "$REPO_ROOT"
 
 PLUGINS_DIR="$REPO_ROOT/resources/plugins"
 ESBUILD="$REPO_ROOT/node_modules/.bin/esbuild"
+
+# --alias：resources/plugins 不在 pnpm workspace、目录链上无 node_modules，
+# 裸标识符 @zhushanwen/extension-protocol 解析不到 → alias 指向包源码 barrel 入口
+# （esbuild tree-shake 只保留用到的符号）。repo 根动态推导，不写死本机绝对路径。
+EXT_PROTOCOL_ENTRY="$REPO_ROOT/packages/extension-protocol/src/index.ts"
+if [[ ! -f "$EXT_PROTOCOL_ENTRY" ]]; then
+	echo "ERROR: extension-protocol barrel 不存在（$EXT_PROTOCOL_ENTRY），--alias 无法解析；核对包路径后重试" >&2
+	exit 1
+fi
 
 if [[ ! -x "$ESBUILD" ]]; then
 	echo "ERROR: esbuild 未找到（${ESBUILD}），先 pnpm install" >&2
@@ -51,6 +62,7 @@ for plugin_dir in "$PLUGINS_DIR"/*/; do
 	"$ESBUILD" "${plugin_dir}index.ts" \
 		--bundle --format=esm --platform=node --target=node18 \
 		--log-level=warning \
+		"--alias:@zhushanwen/extension-protocol=${EXT_PROTOCOL_ENTRY}" \
 		--outfile="${plugin_dir}index.js"
 	if [[ ! -f "${plugin_dir}index.js" ]]; then
 		echo "ERROR: $name 编译未产出 index.js" >&2

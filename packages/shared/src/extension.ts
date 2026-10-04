@@ -11,6 +11,8 @@ export const EXTENSION_EVENTS = {
   WIDGET_GUI: 'extension:widgetGui',
   STATUS: 'extension:status',
   NOTIFY: 'extension:notify',
+  /** 挂起 UI 请求失效广播（abort/退出/回收等非 respond 路径清理时推给 renderer 对账） */
+  REQUESTS_INVALIDATED: 'extension:requestsInvalidated',
 } as const
 
 // ── Extension UI 交互 / 安装流 payload ────────────────────────────

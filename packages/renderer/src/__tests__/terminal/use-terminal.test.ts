@@ -10,10 +10,11 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/terminal/use-terminal.test.ts
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { defineComponent, h, ref } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import type { ServerMessage } from '@taiji/shared'
 import type { UseTerminalReturn } from '@/composables/features/terminal/useTerminal'
 
 // ── mock terminalApi（隔离 RPC）────────────────────────────────────────────
@@ -28,7 +29,9 @@ vi.mock('@taiji/core/transport/api/domains/terminal', () => ({
   terminalApi: terminalApiMock,
 }))
 
-import { useTerminal } from '@/composables/features/terminal/useTerminal'
+import { useTerminal, __resetTerminalStateForTest } from '@/composables/features/terminal/useTerminal'
+import { dispatchSession } from '@taiji/core/transport/api'
+import { useToast } from '@/composables/useToast'
 
 /** 测试宿主组件：在 setup 内调 useTerminal，expose 返回值。 */
 function makeHost(sessionId: string | null) {
@@ -44,12 +47,27 @@ function makeHost(sessionId: string | null) {
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  __resetTerminalStateForTest()
   terminalApiMock.spawn.mockClear()
   terminalApiMock.write.mockClear()
   terminalApiMock.resize.mockClear()
   terminalApiMock.kill.mockClear()
   terminalApiMock.attach.mockClear()
+  useToast().toasts.value = []
 })
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+/** 构造 terminal.writeFailed 帧（route-inbound 按 payload.sessionId 走 session 通道）。 */
+function writeFailedMsg(sid: string, message: string): ServerMessage {
+  return {
+    type: 'terminal.writeFailed',
+    id: `push_test_${Math.random()}`,
+    payload: { sessionId: sid, message },
+  } as ServerMessage
+}
 
 describe('useTerminal 编排逻辑', () => {
   it('UT-1: current 在 null sid 时返回默认实例（ptyAlive=false, buffer 为空）', () => {
@@ -109,6 +127,70 @@ describe('useTerminal 编排逻辑', () => {
     const terminal = wrapper.vm.terminal as UseTerminalReturn
     terminal.killTerminal()
     expect(terminalApiMock.kill).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  // ── RD-5#4：void 族全接 catch（失败不再成 unhandledrejection） ──────────
+
+  it('RD5-4-C1: writeToTerminal 的 write RPC reject 被 catch + warn（不裸奔）', async () => {
+    terminalApiMock.write.mockRejectedValueOnce(new Error('rpc down'))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const Host = makeHost('s-c1')
+    const wrapper = mount(Host)
+    const terminal = wrapper.vm.terminal as UseTerminalReturn
+    terminal.writeToTerminal('x')
+    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled())
+    wrapper.unmount()
+  })
+
+  it('RD5-4-C2: resize/kill/attach 的 RPC reject 全部被 catch + warn', async () => {
+    terminalApiMock.resize.mockRejectedValueOnce(new Error('resize failed'))
+    terminalApiMock.kill.mockRejectedValueOnce(new Error('kill failed'))
+    terminalApiMock.attach.mockRejectedValueOnce(new Error('attach failed'))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const Host = makeHost('s-c2')
+    const wrapper = mount(Host)
+    const terminal = wrapper.vm.terminal as UseTerminalReturn
+    terminal.resizeTerminal(100, 30)
+    terminal.killTerminal()
+    terminal.attachTerminal()
+    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalledTimes(3))
+    wrapper.unmount()
+  })
+
+  // ── RT-8#10/RD-5#4：terminal.writeFailed 订阅 → toast 显示链（M2 两端接通） ──
+
+  it('RT8-10-R1: 订阅建立后收到 terminal.writeFailed → warn + warning toast（含 runtime 报的 message）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const Host = makeHost('s-wf')
+    const wrapper = mount(Host)
+    const terminal = wrapper.vm.terminal as UseTerminalReturn
+    // spawnTerminal 建立订阅（ensureTerminalSubscription 先于 RPC）
+    await terminal.spawnTerminal('/tmp', 80, 24)
+    await flushPromises()
+
+    dispatchSession('s-wf', writeFailedMsg('s-wf', 'EPIPE: broken pipe'))
+
+    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled())
+    const { toasts } = useToast()
+    expect(toasts.value).toHaveLength(1)
+    expect(toasts.value[0]!.type).toBe('warning')
+    expect(toasts.value[0]!.message).toContain('EPIPE')
+    wrapper.unmount()
+  })
+
+  it('RT8-10-R2: 未订阅的 sid 收到 writeFailed 不产生 toast（session 隔离）', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const Host = makeHost('s-sub')
+    const wrapper = mount(Host)
+    const terminal = wrapper.vm.terminal as UseTerminalReturn
+    await terminal.spawnTerminal('/tmp', 80, 24)
+    await flushPromises()
+
+    dispatchSession('s-other', writeFailedMsg('s-other', 'boom'))
+    await flushPromises()
+
+    expect(useToast().toasts.value).toHaveLength(0)
     wrapper.unmount()
   })
 })

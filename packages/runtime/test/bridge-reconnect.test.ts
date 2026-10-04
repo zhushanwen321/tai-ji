@@ -485,7 +485,7 @@ describe('Bridge reconnect lifecycle', () => {
       expect(parseBridgeResponse(mockSendExtensionUiResponse.mock.calls[0])).toEqual({ injectedMessages: [] })
     })
 
-    it('returns empty intercept when plugin service is not available', async () => {
+    it('responds error payload when plugin service is not available', async () => {
       const serverWithoutPlugin = new RuntimeServer(0, '/tmp/test-project')
       const sessionService = new SessionService({} as never, {} as never, {} as never, '/tmp', {} as never, {} as never, {} as never, noopGitInfoReader, {} as never)
       serverWithoutPlugin.setServices(sessionService, {} as never, {} as never, { extension: {} as never, plugin: {} as never })
@@ -496,10 +496,15 @@ describe('Bridge reconnect lifecycle', () => {
         data: { sessionId: SESSION_ID },
       })
 
-      // 新契约：无 pluginService → {} 回包为 JSON 字符串 + 'select'
+      // RT-1#1 契约（code-harden 批次 2）：无 pluginService → isError 载荷而非 {}——
+      // 空对象会被扩展侧 isBridgeInterceptResponse 判「无注入」正常放行，拦截链静默
+      // 失效且零留痕；error 形状让扩展侧 warn 后放行（转发失败不吃掉 prompt，双侧留痕）
       expect(mockSendExtensionUiResponse).toHaveBeenCalledTimes(1)
       expect(mockSendExtensionUiResponse.mock.calls[0][0]).toBe('req-int2')
-      expect(parseBridgeResponse(mockSendExtensionUiResponse.mock.calls[0])).toEqual({})
+      expect(parseBridgeResponse(mockSendExtensionUiResponse.mock.calls[0])).toEqual({
+        content: 'Plugin system not available',
+        isError: true,
+      })
     })
   })
 

@@ -85,6 +85,8 @@ export class ProviderMessageHandler {
     this.ctx.reply(ws, msg.id, 'config.providers', {
       providers: attachSupportedLevelsSafe(this.ctx.modelService, this.ctx.configService.listProviders()),
       scopedModels: this.ctx.configService.getScopedModels(),
+      // M4/RT-3#4：models.json 损坏降级态透传给 UI（与 broadcast 侧 buildProviderListMsgs 同标）
+      corrupted: this.ctx.configService.isModelsStoreCorrupted(),
     })
     return true
   }

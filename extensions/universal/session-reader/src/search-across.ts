@@ -13,7 +13,7 @@ import {
   type SessionMetadataEntry,
   type SessionMetadataProvider,
 } from './discovery/find.js'
-import { parseSessionFile } from './core/parser.js'
+import { parseSessionFile } from '@zhushanwen/session-core'
 import { segmentTurns, type Turn } from './core/turns.js'
 import { buildTreeView } from './core/tree.js'
 import { BYTES_PER_KB, BYTES_PER_MB } from './core/units.js'

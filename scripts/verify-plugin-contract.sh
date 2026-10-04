@@ -25,9 +25,16 @@
 #     G4 显式失败优于静默失效）；plugin-sdk types.ts events 段 @stable 标注
 #     已清零（grep -c 断言为 0，events 面是 @experimental）。
 #
-# 输出协议（cw e2e-sh 标记行）：每个场景以**行首** `CT-D2 PASS/FAIL`、`CT-D1 PASS/FAIL`
-# 纯文本标记行输出（上方 [OK]/[FAIL]/PASS [step] 明细行保留）；脚本 exit code 与
-# 标记行一致。
+#   CT-D1b session 激活订阅端到端（plugin-header-action-modal-points AP-4/u5a 产出，
+#   与 CT-D1 同址同形；registerActivate RPC 与 Worker 侧 onDidActivateSession 订阅
+#   API 随 u5b 落地——此前运行到本段必出 CT-D1b SKIP，SDK API 就位后转为硬 PASS/FAIL）：
+#     插件 D register onDidActivateSession → 脚本经 WS 真实 session.create →
+#     session.switch（激活 relay 唯一触发点）→ 断言 Worker 收到 didActivate 且
+#     事件含该 sessionId（[ct-d] didActivate sid=... 日志证据）。
+#
+# 输出协议（cw e2e-sh 标记行）：每个场景以**行首** `CT-D2 PASS/FAIL`、`CT-D1 PASS/FAIL`、
+# `CT-D1b PASS/FAIL/SKIP` 纯文本标记行输出（上方 [OK]/[FAIL]/PASS [step] 明细行保留）；
+# 脚本 exit code 与标记行一致（SKIP 不计失败）。
 #
 # 运行形态：tsx 源码直跑（cwd=repo 根），自含 pnpm install（全新 checkout 可跑），
 # 不占用正在跑的 dev app。
@@ -125,7 +132,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$DATA_DIR/agent" "$BUILTIN_DIR/ct-a" "$BUILTIN_DIR/ct-b" "$BUILTIN_DIR/ct-c" "$SESSION_CWD"
+mkdir -p "$DATA_DIR/agent" "$BUILTIN_DIR/ct-a" "$BUILTIN_DIR/ct-b" "$BUILTIN_DIR/ct-c" "$BUILTIN_DIR/ct-d" "$SESSION_CWD"
 
 # models.json 预写：session.create 前置检查 getDefaultModel()（读
 # <dataDir>/agent/models.json），且 runtime 把 defaultModel 作为 --model 传给
@@ -234,6 +241,32 @@ export async function activate(context) {
 export async function deactivate() {}
 EOF
 
+# ct-d：session 激活订阅样本（CT-D1b 断言目标）。activate 订阅经 SDK API
+# onDidActivateSession（注册族 registerActivate 随 u5b 落地）——SDK API 未就位时
+# activate 防御降级（日志标记，插件照常激活成功），使 CT-D1b 段可 SKIP 而不阻塞
+# CT-D1/CT-D2；u5b 落地后走真实订阅链，didActivate handler 打印收到的 sessionId。
+cat > "$BUILTIN_DIR/ct-d/package.json" <<'EOF'
+{
+  "name": "ct-d",
+  "version": "1.0.0",
+  "type": "module",
+  "taijiPlugin": { "manifestVersion": 1, "main": "index.js", "activationEvents": ["onStartupFinished"] }
+}
+EOF
+cat > "$BUILTIN_DIR/ct-d/index.js" <<'EOF'
+export async function activate(context) {
+  console.log('[ct-d] activate called')
+  if (typeof context.api.sessions.onDidActivateSession !== 'function') {
+    console.log('[ct-d] onDidActivateSession unavailable (u5b registerActivate pending), CT-D1b SKIP')
+    return
+  }
+  context.api.sessions.onDidActivateSession((s) => {
+    console.log('[ct-d] didActivate sid=' + (s && s.id))
+  })
+}
+export async function deactivate() {}
+EOF
+
 # ── 2. 起隔离 runtime（--builtin-plugins-dir 指向 fixture，trusted 形态）──────
 PORT=""
 for _ in $(seq 1 10); do
@@ -329,17 +362,17 @@ const step = (name, ok, detail) => {
 const runFlow = async () => {
   let createSid = ''
   try {
-    // ── 前置：等 ct-a/ct-b/ct-c boot 自动激活（最多 30s）──
+    // ── 前置：等 ct-a/ct-b/ct-c/ct-d boot 自动激活（最多 30s）──
     let plugins = []
     for (let i = 0; i < 30; i++) {
       const m = await send('plugin.list', {})
       plugins = m.payload?.plugins ?? []
-      const ids = ['ct-a', 'ct-b', 'ct-c']
+      const ids = ['ct-a', 'ct-b', 'ct-c', 'ct-d']
       const allActive = ids.every((id) => plugins.find((p) => p.pluginId === id)?.status === 'active')
       if (allActive) break
       await sleep(1000)
     }
-    for (const id of ['ct-a', 'ct-b', 'ct-c']) {
+    for (const id of ['ct-a', 'ct-b', 'ct-c', 'ct-d']) {
       const p = plugins.find((x) => x.pluginId === id)
       step(`CT 前置 ${id} 激活`, p?.status === 'active', `status=${p?.status ?? 'MISSING'}`)
     }
@@ -385,6 +418,11 @@ const runFlow = async () => {
     createSid = t1.payload?.session?.id ?? ''
     step('CT-D1-T1 session.create 成功（真实 pi 子进程）', t1.type !== 'error' && !!createSid, `type=${t1.type} sid=${createSid}`)
     if (!createSid) throw new Error('session.create 未返回 sessionId，中止 delete 步骤')
+
+    // T1b: session.switch（CT-D1b 激活 relay 唯一触发点——didActivate 投递断言在 bash 侧；
+    // 激活 relay 只挂 switch 成功分支，create 本身不投递）
+    const t1b = await send('session.switch', { sessionId: createSid })
+    step('CT-D1b-T1b session.switch 成功（激活 relay 触发）', t1b.type !== 'error', `type=${t1b.type}`)
 
     // T2: session.delete → didDestroy 定向投递断言在 bash 侧
     const t2 = await send('session.delete', { sessionId: createSid })
@@ -544,6 +582,24 @@ fi
 
 ct_report CT-D1 $d1 'sessions 事件：didCreate/didDestroy 定向投递含 sessionId；events.on/emit 抛 NOT_IMPLEMENTED（含指引 URL）；SDK events 段 @stable 清零'
 
+# ══ CT-D1b 判定：session 激活订阅（registerActivate → switch → didActivate）════
+# u5a 产出（plugin-header-action-modal-points AP-4）；registerActivate RPC 与 Worker 侧
+# onDidActivateSession 订阅 API 随 u5b 落地——SDK API 未就位时（ct-d activate 防御降级
+# 标记）本段 SKIP 不计失败，u5b 落地后该标记不再出现，恢复硬 PASS/FAIL。
+db1=0
+if grep -qF '[ct-d] onDidActivateSession unavailable' "$RUNTIME_STDOUT"; then
+  echo -e "${YELLOW}[SKIP] CT-D1b onDidActivateSession SDK API 未就位（u5b registerActivate 落地后转硬判定）${NC}"
+  echo "CT-D1b SKIP"
+else
+  if [ -n "$CREATE_SID" ]; then
+    if wait_log "[ct-d] didActivate sid=$CREATE_SID" 'CT-D1b onDidActivateSession 回调触发且含 sessionId'; then :; else db1=1; fi
+  else
+    db1=1
+    echo -e "${RED}[FAIL] CT-D1b createSid 为空（session.create 未成功，didActivate 无法比对）${NC}" >&2
+  fi
+  ct_report CT-D1b $db1 '激活订阅：session.switch 成功 → didActivate 定向投递含 sessionId（激活 relay ①②③ 全链）'
+fi
+
 # ── 5. 收尾：优雅退出 runtime（SIGTERM 发真实子进程）─────────────
 kill -TERM "$RUNTIME_CHILD" 2>/dev/null || true
 for _ in $(seq 1 30); do
@@ -562,5 +618,5 @@ if [ "$CT_EXIT" -ne 0 ]; then
 fi
 echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}[OK] Plugin Contract E2E 验收全部通过（CT-D2 命令链+防劫持 + CT-D1 session 事件+events 降级）${NC}"
+echo -e "${GREEN}[OK] Plugin Contract E2E 验收全部通过（CT-D2 命令链+防劫持 + CT-D1 session 事件+events 降级 + CT-D1b 激活订阅）${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

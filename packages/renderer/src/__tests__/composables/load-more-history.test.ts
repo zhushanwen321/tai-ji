@@ -7,6 +7,7 @@
  * - 返回的游标页合并到消息列表头部（P-paging：顺序正确 + 无重复）
  * - 空页（翻页到头 / cursor 未命中）分区不变 + 窗口收敛
  * - RPC 失败不破坏现有消息
+ * - [RD-1#4] RPC 失败 → loadMoreError 态 + truncated 窗口不变（显形可重试，非「已到头」）
  * - useLoadMoreHistory 交互态：isPrepend 顶部插入信号翻转（`<Virtualizer :shift>`
  *   视口锚定的驱动源——prepend 后视口不跳变）
  *
@@ -14,6 +15,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { nextTick, ref } from 'vue'
 import type { Message } from '@taiji/shared'
 
 // mock @/api 的 chat domain（getHistory 游标参数是 [u6] 新增）
@@ -127,6 +129,19 @@ describe('「加载更早」游标翻页（[u6] D4 中期）', () => {
     expect(store.getMessages(sid)).toHaveLength(1)
     expect(store.getMessages(sid)[0]!.id).toBe('m1')
   })
+
+  it('[RD-1#4] loadMoreHistory 返回布尔：成功 true / RPC 失败 false（失败显形的调用契约）', async () => {
+    const store = useChatStore()
+    const okSid = 's4b-ok'
+    store.hydrate(okSid, [makeMessage('m1', 'msg-1', 'entry-1')], { truncated: true, loadedTurns: 1, totalTurnsEstimate: 2 })
+    vi.mocked(chat.getHistory).mockResolvedValue(windowReply([makeMessage('m0', 'msg-0', 'entry-0')], { truncated: false, loadedTurns: 1, totalTurnsEstimate: 2 }))
+    await expect(loadMoreHistory(okSid)).resolves.toBe(true)
+
+    const failSid = 's4b-fail'
+    store.hydrate(failSid, [makeMessage('m1', 'msg-1', 'entry-1')], { truncated: true, loadedTurns: 1, totalTurnsEstimate: 1 })
+    vi.mocked(chat.getHistory).mockRejectedValue(new Error('network error'))
+    await expect(loadMoreHistory(failSid)).resolves.toBe(false)
+  })
 })
 
 describe('useLoadMoreHistory 交互态（P-paging 视口锚定信号）', () => {
@@ -171,5 +186,60 @@ describe('useLoadMoreHistory 交互态（P-paging 视口锚定信号）', () => 
     await handleLoadMore()
     expect(chat.getHistory).not.toHaveBeenCalled()
     expect(isPrepend.value).toBe(false)
+  })
+
+  it('[RD-1#4] RPC 失败 → loadMoreError=true + truncated 窗口不变（显形可重试，非「已到头」）', async () => {
+    const store = useChatStore()
+    const sid = 's7'
+    store.hydrate(sid, [makeMessage('m1', 'msg-1', 'entry-1')], { truncated: true, loadedTurns: 1, totalTurnsEstimate: 2 })
+    vi.mocked(chat.getHistory).mockRejectedValue(new Error('network error'))
+
+    const { loadingMore, showLoadMore, handleLoadMore, loadMoreError } = useLoadMoreHistory(() => sid)
+    expect(loadMoreError.value).toBe(false)
+
+    await handleLoadMore()
+
+    // 失败态显形（顶部条据此渲染可重试错误行）
+    expect(loadMoreError.value).toBe(true)
+    // loading 复位（按钮可再点 = 可重试）
+    expect(loadingMore.value).toBe(false)
+    // 关键：truncated 窗口不变——失败不得被 UI 误读成「已到头」
+    expect(showLoadMore.value).toBe(true)
+    expect(store.getHistoryWindow(sid)).toEqual({ truncated: true, loadedTurns: 1, totalTurnsEstimate: 2 })
+    // 分区未被破坏
+    expect(store.getMessages(sid)).toHaveLength(1)
+  })
+
+  it('[RD-1#4] 重试成功 → loadMoreError 清除', async () => {
+    const store = useChatStore()
+    const sid = 's8'
+    store.hydrate(sid, [makeMessage('m1', 'msg-1', 'entry-1')], { truncated: true, loadedTurns: 1, totalTurnsEstimate: 2 })
+    vi.mocked(chat.getHistory).mockRejectedValueOnce(new Error('network error'))
+
+    const { handleLoadMore, loadMoreError } = useLoadMoreHistory(() => sid)
+    await handleLoadMore()
+    expect(loadMoreError.value).toBe(true)
+
+    vi.mocked(chat.getHistory).mockResolvedValue(
+      windowReply([makeMessage('m0', 'msg-0', 'entry-0')], { truncated: false, loadedTurns: 1, totalTurnsEstimate: 2 }),
+    )
+    await handleLoadMore()
+    expect(loadMoreError.value).toBe(false)
+    expect(store.getMessages(sid).map((m) => m.id)).toEqual(['m0', 'm1'])
+  })
+
+  it('[RD-1#4] 切换 session → loadMoreError 复位（失败态不跨 session 残留）', async () => {
+    const store = useChatStore()
+    const sid = ref('s9')
+    store.hydrate(sid.value, [makeMessage('m1', 'msg-1', 'entry-1')], { truncated: true, loadedTurns: 1, totalTurnsEstimate: 2 })
+    vi.mocked(chat.getHistory).mockRejectedValue(new Error('network error'))
+
+    const { handleLoadMore, loadMoreError } = useLoadMoreHistory(() => sid.value)
+    await handleLoadMore()
+    expect(loadMoreError.value).toBe(true)
+
+    sid.value = 's10'
+    await nextTick()
+    expect(loadMoreError.value).toBe(false)
   })
 })

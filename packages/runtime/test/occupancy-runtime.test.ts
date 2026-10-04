@@ -409,12 +409,17 @@ describe('MessageDispatcher occupancy 挂点', () => {
     const { dispatcher, publish, session, compactFn } = makeDispatcher({ compactBehavior: 'error' })
     compactFn.mockImplementation(async () => {
       // 模拟 compaction_start 已到达（interpreter #5 语义）：经原语置位（u3c readonly 收口；
-      // publish 传 null 与改前直写一致不广播——本用例焦点是 finally 兜底复位帧）
+      // publish 传 null 与改前直写一致不广播）。
+      // 注：RT-4#10 起 dispatcher 预检通过后自己先广播一帧 compacting=true（关重入窗口），
+      // 故本用例应见「true → false」两帧：前者是预检后置位帧，后者是 finally 复位帧。
       applySessionOccupancyTransition(session, null, 'compacting-start')
       throw new Error('compact transport exploded')
     })
     await expect(dispatcher.compact('s1')).rejects.toThrow('compact transport exploded')
-    expect(occupancyFrames(publish)).toEqual([{ sessionId: 's1', turn: 'idle', compacting: false, bash: false }])
+    expect(occupancyFrames(publish)).toEqual([
+      { sessionId: 's1', turn: 'idle', compacting: true, bash: false },
+      { sessionId: 's1', turn: 'idle', compacting: false, bash: false },
+    ])
   })
 
   it('messageBus 未注入 → 挂点 no-op 不抛（null-safety，存量语义）', async () => {

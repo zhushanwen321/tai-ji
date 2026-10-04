@@ -308,7 +308,7 @@ test.describe('文件树 E2E', () => {
 ---
 
 
-> 覆盖：SideDrawer 抽屉（5 tab：terminal/browser/git/doc/detail）、文件预览（detail tab，diff/preview 切换）、git 面板
+> 覆盖：SideDrawer 抽屉（10 tab：terminal/browser/git/doc/detail/subagent/workflow/bashTask/plan/btw，枚举以 DrawerPanel 实装为准）、文件预览（detail tab，diff/preview 切换）、git 面板
 >
 > 先读 [00-overview.md](./00-overview.md) 理解双轨制和公共前置。
 
@@ -328,7 +328,7 @@ SideDrawer 是 workspace-body 级的右侧抽屉，承载 5 个 tab：
 
 ## 2. 组件结构概述
 
-`PanelContainer.vue` 挂载抽屉容器（现为 `packages/ui/src/features/drawer/DrawerPanel.vue`，props: open/activeTab/sessionId）。header 含 tab 栏（terminal/browser/git/doc/detail，`drawer-tab-{key}` testid）、钉住按钮（`drawer-pin`）、关闭按钮（`drawer-close`）。content 按 activeTab 切换：terminal/browser tab 显示 widget 内容（extension.onWidget）或空态；git tab 挂 `GitPanel.vue`（git 全量状态）；doc tab 挂 `CommandDocPanel.vue`；detail tab 挂 `DetailPane.vue`（文件预览，容器 testid=`detail-pane`，含 diff/preview 切换 `detail-view-toggle`、加载/错误/空/二进制/截断态与 `detail-content` 内容区）。
+`PanelContainer.vue` 挂载抽屉容器（现为 `packages/ui/src/features/drawer/DrawerPanel.vue`，props: open/activeTab/sessionId）。header 含 tab 栏（全枚举见首行覆盖节，含新增 btw；`drawer-tab-{key}` testid）、钉住按钮（`drawer-pin`）、关闭按钮（`drawer-close`）。content 按 activeTab 切换：terminal/browser tab 显示 widget 内容（extension.onWidget）或空态；git tab 挂 `GitPanel.vue`（git 全量状态）；doc tab 挂 `CommandDocPanel.vue`；detail tab 挂 `DetailPane.vue`（文件预览，容器 testid=`detail-pane`，含 diff/preview 切换 `detail-view-toggle`、加载/错误/空/二进制/截断态与 `detail-content` 内容区）；btw tab 挂 `BtwPanel.vue`（2026-09-22 btw-question 新增：面板根 `drawer-btw-tab`、线列表 `btw-thread-list`、新建 `btw-new-thread`、空态 `btw-empty`/`btw-empty-new`、错误 `btw-create-error`/`btw-load-error`+`btw-load-retry`、挂起点 `btw-thread-pending`、fork pill 随创建态）。
 
 ## 3. data-testid 清单
 
@@ -344,7 +344,7 @@ testid 以组件 template 内 data-testid 属性为准（下表均已核实有�
 | `detail-binary` | DetailPane.vue | 二进制文件 |
 | `detail-content` | DetailPane.vue | 内容区（恒显，加载完成后） |
 | `detail-truncated` | DetailPane.vue | 文件 >1MB 截断 |
-| `drawer-tab-{key}` | DrawerPanel.vue | tab 栏按钮（terminal/browser/git/doc/detail 等） |
+| `drawer-tab-{key}` | DrawerPanel.vue | tab 栏按钮（terminal/browser/git/doc/detail/subagent/workflow/bashTask/plan/btw） |
 | `drawer-panel` / `drawer-pin` / `drawer-close` | DrawerPanel.vue | 抽屉容器 / 钉住 / 关闭 |
 
 > GitPanel 仅有 `git-inject-file` 一个 testid，git 状态内容查询仍靠内部元素文本；CommandDocPanel 无 testid。bashTask tab（后台命令详情）的完整 testid 清单见 [02-panels-sidebar.md](./02-panels-sidebar.md)。
@@ -793,7 +793,7 @@ pnpm dev    # 非 MOCK 轨，起 runtime + pi
 | `gui-columns` | Columns | `rendering-protocol/primitives/Columns.vue` |
 | `gui-list-tree` | ListTree | `rendering-protocol/primitives/ListTree.vue` |
 | `tool-block-header` | Block tool 块 header（点击展开） | `features/chat/Block.vue` |
-| `drawer-tab-{key}` | DrawerPanel tab 按钮（key=terminal/browser/git/doc/detail） | `features/drawer/DrawerPanel.vue` |
+| `drawer-tab-{key}` | DrawerPanel tab 按钮（key=terminal/browser/git/doc/detail/subagent/workflow/bashTask/plan/btw） | `features/drawer/DrawerPanel.vue` |
 
 ## 2. 渲染路径概述
 
@@ -1127,3 +1127,42 @@ testid 以组件 template 内 data-testid 属性为准（drawer 表已核实有�
 - SideDrawer 宿主：bashTask tab 为第 8 tab（drawer 4 点接线见 background-task-sidebar-view.md D5）
 - 列表面范式：composer 任务托盘 bash 面板（分桶槽/两行式 item/行内两段式终止；原 Agents tab 同构先例已随侧栏任务 tab 退役）
 - 组件测试：`packages/renderer/src/__tests__/components/background-task-detail-panel.test.ts`（16 用例）；列表/计数侧 = `packages/renderer/src/__tests__/panel/tray/`（原 background-task-list-view.test.ts 已随视图退役删除）
+
+---
+
+# 02g · 侧栏会话列表 testid 增删登记（模式体系 u11）
+
+> 覆盖决策：模式体系设计 D9（侧栏不聚合 + 父条目中性计数徽标，含 ForkGroup 退役与两项独家能力处置）。组件：`packages/renderer/src/components/sidebar/SessionList.vue`（扁平列表 + 计数派生）、`packages/renderer/src/components/sidebar/session-item/SessionItemDisplay.vue`（行渲染）、`packages/renderer/src/components/sidebar/session-item/SessionItemContextMenu.vue`（行菜单）。
+
+## §1 退役（testid 已删，源码零命中）
+
+ForkGroup（当前会话的「本会话的分支」折叠区）已整体退役——子会话与 fork 分支都按**一般 session** 展示（不聚合）。
+
+> **第三项能力（新 fork 分支入场高亮 `fresh`）的处置**：同批退役，属**已接受代价**——它只是聚合容器内的一次性入场提示（`FRESH_FADE_MS` + 定时清除），容器删除后不再有承载语义，非可独立消费的信号；因此 D9「两项独家能力」的清单指「可迁移的独立能力」，fresh 不在其中，其用例已随死元素删除并在 `packages/renderer/src/__tests__/panel/fast-fork-e2e-journeys.test.ts` 注释段说明。
+
+| testid | 原所在组件 | 处置 |
+|--------|-----------|------|
+| `fork-group-*` 全族（`fork-group` / `fork-group-header` / `fork-group-item` 等，此前以 `[data-testid^="fork-group"]` 概括断言） | `ForkGroup.vue`（已删除） | 侧栏退役不聚合；回归断言改为**反向断言零命中**：`wrapper.find('[data-testid^="fork-group"]').exists() === false`（见 `packages/renderer/src/__tests__/sidebar/fork-group.test.ts` 与 `packages/renderer/src/__tests__/panel/fast-fork-e2e-journeys.test.ts`） |
+
+**退役不丢能力**（两项独家能力处置，均不新增平行元素）：
+
+- **分支未读角标** → **合流进通用行既有未读点**（不新增 testid）：`SessionItemDisplay.vue` 的 `unread` computed 现为 `isUnread(id) || unreadByBranch.has(id)`（两源合流）；清除仍在既有 select → `clearUnread` 通路同点清两源。语义折叠理由：两类未读都是「这里有没看的东西」，无需求区分。
+- **分支软停止入口** → **迁入通用行菜单项**：运行中行的右键菜单新增「停止」（复用既有 **`chat.abort`**，两段确认沿用；**注**：全仓无 `session.abort` 帧，实施期修正见设计 v1.9；与既有硬杀 `forceQuit` 是两项不同能力）。
+
+## §2 新增（现行 testid）
+
+| testid | 所在组件 | 触发/可见条件 |
+|--------|---------|--------------|
+| `session-child-count` | SessionItemDisplay.vue | **父条目中性计数徽标**：`childCount > 0` 才渲染（子会话数按 `parentAgentSessionId` 分组纯内存派生，零新协议）；只读、描边 chip、**不用 accent**（accent 在本产品语义是「活跃/点睛」，且已被 `[AI]` 来源徽标占用）；`title` = `sidebar.sessionItem.childCount` |
+| `session-stop-item` | SessionItemContextMenu.vue | 运行中 session 的行菜单「停止」项（软停止；与硬杀态 `session-force-quit-item` 并列且语义不同——abort vs forceQuit → dead） |
+| `session-unread-dot` | SessionItemDisplay.vue（既有元素，**源已扩展**） | 后台完成未读 **或** fork 分支状态变更未读（两源合流，见 §1）；点开该行后消失（两源在同一清除点被清） |
+
+> **不变项**：`session-context-menu` / `session-view-parent-item` / `session-force-quit-item` / `session-icon` / `session-agent-badge` / `session-imported-fresh` / `sidebar-session-sub` / `mark-done-btn` / `quote-to-composer-btn` / `assign-project-btn` / `assign-project-option` / `folder-new-session-btn` / `folder-delete-btn` 语义与触发条件均未变。
+>
+> **与夹具的关系**：`SubagentPanel` / Agents tab 的 fixture 与本节无关；子会话在侧栏与父会话同屏由服务端 `projectId` 继承（`SessionManagerHandler.handleCreate`）保证，不是展示层虚拟归属。
+
+## §3 相关文档
+
+- 设计文档：[composer-task-tray.md](../design/composer-task-tray.md)（托盘内置四件与子会话入口）、[pi-launch-presets.md](../architecture/pi-launch-presets.md)（模式体系）与模式体系设计 D8/D9
+- 会话列表组件测试：`packages/renderer/src/__tests__/sidebar/`（含 fork-group.test.ts 的反向断言）
+- 托盘侧 counterpart testid 见 [01-chat-panel-composer.md §3.1](./01-chat-panel-composer.md)

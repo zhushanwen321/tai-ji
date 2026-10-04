@@ -40,16 +40,26 @@ export interface MarkdownSegment {
  *
  * 两者首渲染时可能为空集（fileSearch 未加载）→ 路径降级纯文本，加载完成后响应式重渲染。
  *
+ * - resourceBaseDir：本条消息/文档的相对资源解析基准目录（绝对路径；设计 markdown-html-sanitize-render
+ *   D4）。无则该消费面不做相对资源解析——img 相对 src 不重写（原样输出）、正文相对链接点击
+ *   preventDefault 无动作。来源：对话流 = session cwd（useChatViewDeps 工厂装配）、drawer =
+ *   打开文件所在目录（DetailPane 传 dirname）、更新日志不传（undefined）。
+ *
  * - copyLabel：代码块复制按钮的 i18n 文案（title 属性）。ui 渲染模块不 import 任何壳层
  *   i18n 单例（ui 无 `@/i18n` 可址），文案由宿主壳在渲染入口注入（ComposerInput 的
  *   t deps token 同族先例）；未注入时按钮省略 title 属性。每次渲染调用求值，locale
  *   切换后下一帧即生效（增量前缀缓存内已 bake 的段随前缀冻结，属既有机制语义）。
+ *
+ * 净化层信任槽（Symbol 键）挂 env 但不属于本公开类型——管线内部自产自销，不随
+ * markdown-types 镜像/序列化泄漏、不参与增量轴 env 签名，见 markdown-sanitize.ts。
  */
 export interface MarkdownEnv {
   /** 含/路径识别的白名单（FileNode.path 集合，相对 cwd，无前导 /） */
   filePaths?: Set<string>
   /** 裸 basename 识别的白名单（FileNode.name 集合） */
   localFiles?: Set<string>
+  /** 相对资源（img src / 正文链接 href）解析基准目录（绝对路径）；无则不做相对资源解析 */
+  resourceBaseDir?: string
   /** 代码块复制按钮 title 文案（宿主壳注入的 i18n 文案，如 zh「复制」/ en「Copy」） */
   copyLabel?: string
 }
@@ -74,4 +84,6 @@ export interface IncrementalMarkdownCache {
   nextSegId: number
   envFilePaths?: Set<string>
   envLocalFiles?: Set<string>
+  /** 相对资源解析基准目录（设计 D4）：壳侧 env 签名第三项（值恒等），变化触发全量重建 */
+  envResourceBaseDir?: string
 }

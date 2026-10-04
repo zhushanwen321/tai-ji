@@ -91,8 +91,41 @@
             </Button>
           </div>
         </div>
-        <!-- 正文：剥掉 frontmatter 后的 SKILL.md，正常 markdown 渲染 -->
+        <!-- 正文：剥掉 frontmatter 后的 SKILL.md，正常 markdown 渲染。
+             [RD-2#3/#4] 四态拆分：content→markdown / loading→加载行（切换命令即清正文，
+             请求期间不残留上一文档内容——头部已新条目而正文旧内容 = 串内容误读）/
+             failed→显式失败（含绝对路径，区别于「无文档正文」空态；绝对路径可打开所在目录，
+             复用 reveal-in-folder IPC）/ loaded 空 body→「无文档正文」 -->
         <MarkdownRenderer v-if="skill.content" key="skill-content" :content="skill.content" :session-id="sessionId ?? undefined" />
+        <div
+          v-else-if="skillLoadState === 'loading'"
+          data-testid="command-doc-loading"
+          class="flex items-center justify-center gap-1.5 py-6 text-[length:var(--text-xs)] text-neutral-dim"
+        >
+          <Loader2 class="size-3 animate-spin" aria-hidden="true" />
+          {{ t('panel.command.loading') }}
+        </div>
+        <div
+          v-else-if="skillLoadState === 'failed'"
+          data-testid="command-doc-load-failed"
+          role="alert"
+          class="mb-2 flex flex-wrap items-center gap-2 rounded-sm border border-hairline bg-bg-input px-2.5 py-2"
+        >
+          <span class="min-w-0 flex-1 break-all text-[length:var(--text-2xs)] leading-relaxed text-neutral-faint">
+            {{ t('panel.command.loadFailed') }}<span class="font-mono">{{ skill.sourcePath }}</span>
+          </span>
+          <Button
+            v-if="revealableSkillPath"
+            variant="ghost"
+            size="sm"
+            class="h-5 shrink-0 gap-1 px-1.5 text-[length:var(--text-2xs)] text-neutral-dim"
+            data-testid="command-doc-open-dir"
+            @click="onRevealSkillDir"
+          >
+            <FolderOpen class="size-3" aria-hidden="true" />
+            {{ t('panel.command.openDir') }}
+          </Button>
+        </div>
         <div v-else class="py-6 text-center text-[length:var(--text-xs)] text-neutral-dim">{{ t('panel.command.noDocBody') }}</div>
       </template>
       <!-- 非 skill 命令：信息卡 -->
@@ -116,7 +149,7 @@
 <script setup lang="ts">
 import { computed, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Wrench, Copy, Check } from '@lucide/vue'
+import { Wrench, Copy, Check, FolderOpen, Loader2 } from '@lucide/vue'
 import type { Component } from 'vue'
 import { useCommandStore } from '@/composables/features/command/useCommandStore'
 import { getSettingsStore } from '@taiji/core'
@@ -125,11 +158,15 @@ import { SLASH_ICON_COMPONENTS } from '@/composables/slashIcons'
 import * as fileApi from '@taiji/core/transport/api/domains/file'
 import { useChatViewDeps } from '@/composables/panel/useChatViewDeps'
 import { useCopy } from '@/composables/panel/useCopy'
+import { useToast } from '@/composables/useToast'
+import { isAbsolutePath } from '@/lib/path-utils'
+import { revealInFolder } from '@/lib/ipc'
 // [w6 chat-ui-and-shell T7] MarkdownRenderer 迁 ui 包（经 ChatViewDeps inject 消费 renderMarkdown）
 import { MarkdownRenderer, ChatViewDepsKey } from '@taiji/ui'
 import { Button } from '@/components/ui/button'
 
 const { t } = useI18n()
+const { error: toastError } = useToast()
 
 const props = defineProps<{
   /** drawer 所属 panel 的 session（查 commandStore + file.read cwd 守门用） */
@@ -200,6 +237,12 @@ const skillDescription = computed<string | undefined>(() => {
 const skillContent = ref<string | null>(null)
 /** SKILL.md 完整 frontmatter 块（---...---），元信息卡片「复制 frontmatter」用。null = 无 frontmatter 或未加载。 */
 const skillFrontmatter = ref<string | null>(null)
+/**
+ * [RD-2#3/#4] SKILL.md 加载态四态：loading（请求在途，切换命令即进入——正文清空防串内容）/
+ * loaded（读完，content 仍可能为空串 = 无文档正文）/ failed（两路守门均拒绝或读取异常，
+ * 显式失败文案区别于「无文档正文」空态）/ idle（无 skill 路径）。
+ */
+const skillLoadState = ref<'idle' | 'loading' | 'loaded' | 'failed'>('idle')
 /** 防重入标记：避免 watch 多次触发时并发发请求（竞态导致旧请求覆盖新结果） */
 let loadingPath: string | null = null
 
@@ -232,10 +275,12 @@ async function loadSkillContent(path: string): Promise<void> {
     if (!path) {
       skillContent.value = null
       skillFrontmatter.value = null
+      skillLoadState.value = 'idle'
     }
     return
   }
   loadingPath = path
+  skillLoadState.value = 'loading'
   try {
     const sid = props.sessionId ?? undefined
     const result = sid
@@ -246,27 +291,37 @@ async function loadSkillContent(path: string): Promise<void> {
       const { frontmatter, body } = parseFrontmatter(result.content)
       skillContent.value = body
       skillFrontmatter.value = frontmatter
+      skillLoadState.value = 'loaded'
     }
-  } catch {
-    // 两路守门均拒绝（路径既不在 cwd 下也不在白名单）→ 退化为无文档体
+  } catch (e) {
+    // [RD-2#3] 两路守门均拒绝（路径既不在 cwd 下也不在白名单）或读取异常：留日志（带 path）
+    // + 显式失败态——不再并入「无文档正文」空态（用户无法区分「文档坏了」与「没写文档」）
+    console.warn(`[command-doc-panel] SKILL.md 读取失败（${path}）:`, e)
     if (loadingPath === path) {
       skillContent.value = null
       skillFrontmatter.value = null
+      skillLoadState.value = 'failed'
     }
   } finally {
     if (loadingPath === path) loadingPath = null
   }
 }
 
-// skillPath 变化（切换命令）重新加载 SKILL.md
+// skillPath 变化（切换命令）重新加载 SKILL.md；[RD-2#4] 切换即同步清正文 + 进 loading 态
+// （请求期间头部已是新条目，残留上一文档正文 = 串内容误读）
 watch(
   skillPath,
   (path) => {
     descExpanded.value = false
-    if (path) void loadSkillContent(path)
-    else {
+    if (path) {
       skillContent.value = null
       skillFrontmatter.value = null
+      skillLoadState.value = 'loading'
+      void loadSkillContent(path)
+    } else {
+      skillContent.value = null
+      skillFrontmatter.value = null
+      skillLoadState.value = 'idle'
     }
   },
   { immediate: true },
@@ -301,4 +356,20 @@ const iconComponent = computed<Component>(() => {
     Wrench
   )
 })
+
+// ── [RD-2#3] 失败态「打开所在目录」动作（复用既有 reveal-in-folder IPC 机制，与
+//    TraceInspector 损坏行恢复指引同款；~ 前缀路径 renderer 无 homedir 不展开，不给出动作）──
+const revealableSkillPath = computed(() => {
+  const p = skillPath.value
+  return p !== null && isAbsolutePath(p) && !p.startsWith('~')
+})
+
+function onRevealSkillDir(): void {
+  const p = skillPath.value
+  if (p === null) return
+  void revealInFolder(p).catch((e: unknown) => {
+    toastError(t('panel.command.revealFailed'))
+    console.error('[command-doc-panel] reveal-in-folder failed:', e)
+  })
+}
 </script>

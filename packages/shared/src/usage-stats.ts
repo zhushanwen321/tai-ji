@@ -51,4 +51,10 @@ export interface UsageStatsResult {
   sessionCount: number
   /** 解析失败行数（分片求和，D9）。 */
   skippedLines: number
+  /**
+   * 读取失败的 session 文件数（RT-8#12）：stat 失败 + 读流失败的文件。这些文件的数据点
+   * 不在 rows 内——聚合偏低须可观测（「不含 N 个会话文件」），否则与「无用量」不可区分。
+   * 失败分片被 (mtime,size) 缓存，文件未变更期间重扫仍计入。
+   */
+  failedFiles?: number
 }

@@ -4,6 +4,7 @@
  * PluginService 持有（rpc-setup 注册侧与测试直查共享同一 Map），经 deps 注入。
  */
 
+import type { ServerMessageMap, ServerMessageType } from '@taiji/shared'
 import type { PluginRegistry } from '../plugin-registry.js'
 import type { PluginHost } from '../plugin-host.js'
 import type { PluginRpcServer } from '../plugin-rpc-server.js'
@@ -36,7 +37,20 @@ export interface CommandExecutorDeps {
   commandRegistry: Map<string, CommandRegistration>
   /** 命令执行 pending 登记表（handlerId → 结果 promise，超时兜底 reject） */
   commandInvokes: PendingTracker<string, unknown>
+  /**
+   * RT-6#7：Server→Client 广播出口（命令「started」在途反馈用）。
+   *
+   * 形态 = transport 广播三件套（type + id + payload），调用方直通自己的
+   * broadcastOrBroker（bind 后传入）。缺省 undefined = 不广播——命令执行是任务级、
+   * 默认 30min 兜底窗口，长命令期间前端此前只能等最终 pong，全程零在途反馈。
+   * type/payload 经 ServerMessageMap 泛型关联（与 broadcastOrBrokerWith 同步泛型化，
+   * MF-2-4：免 as 断言，payload 漂移编译期拦截）。
+   */
+  broadcast?: <T extends ServerMessageType>(type: T, id: string, payload: ServerMessageMap[T]) => void
 }
+
+/** RT-6#7：命令开始执行时下发的通知帧类型（plugin:notification → 前端 toast） */
+const COMMAND_STARTED_NOTIFICATION_TYPE = 'plugin:notification'
 
 /**
  * 执行插件注册的命令（S3-W1 发送段闭环）。
@@ -115,6 +129,30 @@ export async function executeCommand(
     COMMAND_RPC_METHODS.invoke,
     { handlerId: registration.handlerId, args: args ?? {} },
   )
+  // RT-6#7：命令已真正下发 → 广播 started（在途反馈）。放在 notify 之后：notify 是
+  // 「命令开始」的权威时刻（先于它 = 命令没发出，先于 await = 通知可能永远发不出）。
+  // best-effort：广播失败不影响命令执行本身（命令已下发、结果仍会回传），仅留痕。
+  try {
+    deps.broadcast?.(
+      COMMAND_STARTED_NOTIFICATION_TYPE,
+      `cmdStarted_${compositeKey}_${Date.now()}`,
+      {
+        pluginId,
+        level: 'info',
+        message:
+          `Command '${commandId}' started (plugin '${pluginId}', handler ` +
+          `'${registration.handlerId}') — running in background; you will be ` +
+          `notified when it finishes.`,
+      },
+    )
+  } catch (err: unknown) {
+    // best-effort 降级：广播失败不影响命令执行（命令已下发、结果仍会回传），仅留痕——
+    // 在途反馈是观测增强，不是命令语义的一部分，不值得为它打断执行链。
+    console.warn(
+      `[plugin-service] broadcast command started failed for ${compositeKey}:`,
+      toErrorMessage(err),
+    )
+  }
   return result
 }
 

@@ -66,6 +66,7 @@ function makeDeps(opts: {
   store: { save: ReturnType<typeof vi.fn> };
   workerHost: { start: ReturnType<typeof vi.fn> };
   eventBus: { emit: ReturnType<typeof vi.fn> };
+  appendEntry: ReturnType<typeof vi.fn>;
   onRunDone: ReturnType<typeof vi.fn>;
   log: ReturnType<typeof vi.fn>;
 } {
@@ -81,6 +82,7 @@ function makeDeps(opts: {
     runner: { run: vi.fn(async () => ({}) as AgentResult) },
     runs: new Map(),
     eventBus: { emit: vi.fn() },
+    appendEntry: vi.fn(),
     onRunDone: vi.fn(),
     log: vi.fn(),
   } as unknown as ReturnType<typeof makeDeps>;
@@ -139,9 +141,9 @@ describe("[OR-2] rebuildRuntime 抛错回灌重试矩阵", () => {
     // rebuild #2 成功 → run 仍 running（旧 worker 已换新，不卡死不误判 failed）
     expect(run.state.status).toBe("running");
     expect(deps.workerHost.start).toHaveBeenCalledTimes(2);
-    // 未收敛终态：不 save、不注销通知
+    // 未收敛终态：不 save、不注销（直落）
     expect(deps.store.save).not.toHaveBeenCalled();
-    expect(deps.eventBus.emit).not.toHaveBeenCalled();
+    expect(deps.appendEntry).not.toHaveBeenCalled();
     expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 
@@ -164,11 +166,12 @@ describe("[OR-2] rebuildRuntime 抛错回灌重试矩阵", () => {
     expect(run.state.error).toContain("Resource temporarily unavailable");
     // workerHost.start 恰好试了 3 次（3 次 rebuild 全失败）
     expect(deps.workerHost.start).toHaveBeenCalledTimes(3);
-    // 终态三件套：持久化 + pending:unregister + onRunDone
+    // 终态三件套：持久化 + pending:unregister 直落 + onRunDone
     expect(deps.store.save).toHaveBeenCalledTimes(1);
-    expect(deps.eventBus.emit).toHaveBeenCalledWith("pending:unregister", {
+    expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
       id: "wf-rebuild-2",
       reason: "failed",
+      status: "failed",
     });
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
   });

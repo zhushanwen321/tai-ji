@@ -116,8 +116,8 @@ describe('W3 补充：read/bash 工具特化 meta（行数/字符数自算）', 
     const text = wrapper.text()
     // 3 行（output.split('\n').length = 3）
     expect(text).toContain('3 行')
-    // 字符数 17（< 1000，显示原值）
-    expect(text).toContain('17 chars')
+    // 字符数 17（< 1000，显示原值；单位词走 i18n 键 panel.message.metaChars）
+    expect(text).toContain('17 字符')
     // 耗时（diff 2000ms → formatDuration "2s"）
     expect(text).toContain('2s')
   })
@@ -136,12 +136,12 @@ describe('W3 补充：read/bash 工具特化 meta（行数/字符数自算）', 
     // bash filteredMetaItems 过滤掉了行数统计（命令+output 已完整展示，行数无参考价值）
     expect(text).not.toContain('4 行')
     // bash 不显示字符数（read/cat 才显示）
-    expect(text).not.toContain('chars')
+    expect(text).not.toContain('字符')
     // 耗时（diff=4200ms → formatDuration toFixed(0) → "4s"）
     expect(text).toContain('4s')
   })
 
-  it('read 大文件字符数格式化为 XK chars（>1000 字符）', async () => {
+  it('read 大文件字符数格式化为 XK 字符（>1000 字符）', async () => {
     const bigContent = 'x'.repeat(2500) // 1 行 2500 字符
     const wrapper = mount(Block, {
       props: {
@@ -151,8 +151,8 @@ describe('W3 补充：read/bash 工具特化 meta（行数/字符数自算）', 
       },
     })
     await wrapper.find('[data-testid="tool-block-header"]').trigger('click')
-    // 2500 字符 → 2.5K chars
-    expect(wrapper.text()).toContain('2.5K chars')
+    // 2500 字符 → 2.5K 字符（panel.message.metaCharsK）
+    expect(wrapper.text()).toContain('2.5K 字符')
   })
 
   it('edit 工具细节条只有耗时（output 是简短确认，行数无意义）', async () => {

@@ -49,6 +49,7 @@ const fakeProc = {
       stdinWrites.push(chunk)
       return true
     }),
+    on: vi.fn(),
     once: vi.fn(),
   },
   kill: vi.fn(),

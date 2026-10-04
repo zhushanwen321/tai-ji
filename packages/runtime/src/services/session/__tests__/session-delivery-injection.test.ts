@@ -74,14 +74,50 @@ describe('A2-MF-C：deliverText 挂 skill 注入', () => {
     expect(h.inject.mock.calls[0][1]).toBe('首条消息')
     // prompt 收到注入产物（三参形态：images undefined + streamingBehavior undefined）
     expect(h.client.prompt).toHaveBeenCalledWith('<<injected:首条消息>>', undefined, undefined)
-    // 顺序：ensureActive → prompt → notice（发送成功后才发布）→ occupancy 'dispatching' 帧
-    //（session-dead-structural-fixes D2 挂点迁移：deliverText 置位收编为原语调用，受理后
-    // 投影广播 dispatching，与 notice 同在 prompt 成功之后）
-    expect(h.calls).toEqual(['ensureActive:s1', 'prompt', 'publish:session.skillNotice', 'publish:session.occupancy'])
+    // 顺序：ensureActive → occupancy 'dispatching' 置位帧（[RT-4#10] 前移至 prompt 之前，
+    // RPC 往返窗内预检/回收豁免不再呈 idle）→ prompt → notice（发送成功后才发布）。
+    // prompt 后的置位重复调用被原语全等去重（不再广播第二帧）。
+    expect(h.calls).toEqual(['ensureActive:s1', 'publish:session.occupancy', 'prompt', 'publish:session.skillNotice'])
     const noticeMsg = h.publish.mock.calls.find(([, msg]) => (msg as { type: string }).type === 'session.skillNotice')
     expect(noticeMsg![0]).toBe('s1')
     expect((noticeMsg![1] as unknown as { payload: { reason: string; skills: string[] } }).payload)
       .toEqual({ sessionId: 's1', reason: 'skill_missing', skills: ['ghost'] })
+  })
+
+  it('[RT-4#10] 置位先于 prompt：prompt 执行时点 occupancy 已 dispatching（RPC 往返窗内状态不再回退）', async () => {
+    const h = makeHarness()
+    let occupancyAtPrompt: { turn?: string; isGenerating?: boolean } | null = null
+    ;(h.client.prompt as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      // prompt mock 执行时点读取 session 视图：前移置位后此处必须已是 dispatching
+      occupancyAtPrompt = {
+        turn: (h.view as unknown as { occupancy?: { turn: string } }).occupancy?.turn,
+        isGenerating: h.view.isGenerating,
+      }
+      return {}
+    })
+    await h.registry.sendDirect('s1', '内容')
+    // prompt 执行时点：dispatching 已写入（旧实现此点仍是 idle——置位在 prompt 之后）
+    expect(occupancyAtPrompt).toEqual({ turn: 'dispatching', isGenerating: true })
+  })
+
+  it('[RT-4#10] prompt 失败按拒绝分型收口终态（不卡 dispatching）：processing 拒绝 → generating', async () => {
+    const h = makeHarness()
+    ;(h.client.prompt as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('prompt failed: Cannot ... Agent is already processing'),
+    )
+    await expect(h.registry.sendDirect('s1', 'x')).rejects.toThrow('Agent is already processing')
+    // 'reject-processing' 行：isGenerating=true + turn='generating'（pi 有 turn 在跑的权威信号）
+    expect(h.view.isGenerating).toBe(true)
+    expect((h.view as unknown as { occupancy?: { turn: string } }).occupancy?.turn).toBe('generating')
+  })
+
+  it('[RT-4#10] prompt 失败按拒绝分型收口终态：非 busy 真失败 → idle（不卡 dispatching）', async () => {
+    const h = makeHarness()
+    ;(h.client.prompt as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('EPIPE gone'))
+    await expect(h.registry.sendDirect('s1', 'x')).rejects.toThrow('EPIPE gone')
+    // 'reject-other' 行：turn 没跑起来 → idle
+    expect(h.view.isGenerating).toBe(false)
+    expect((h.view as unknown as { occupancy?: { turn: string } }).occupancy?.turn).toBe('idle')
   })
 
   it('内核 send 入口（session_manager send / completion-backflow 消费方）：同款注入', async () => {
@@ -113,7 +149,9 @@ describe('A2-MF-C：deliverText 挂 skill 注入', () => {
     const h = makeHarness({ notices: [{ reason: 'skill_missing', skills: ['ghost'] }] })
     ;(h.client.prompt as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('pi reject'))
     await expect(h.registry.sendDirect('s1', 'x')).rejects.toThrow('pi reject')
-    expect(h.publish).not.toHaveBeenCalled()
+    // skillNotice 零发布（notice 时机契约否定面不变）；[RT-4#10] occupancy 帧例外——
+    // 前移置位 + 失败收口会产生 dispatching/idle 两帧（合法投影，不属于 notice 否定面）
+    expect(h.publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.skillNotice')).toHaveLength(0)
   })
 
   it('notices 为空：不发布 skillNotice（no-op 零噪音）；真注入器纯文本 no-op 原文通过', async () => {

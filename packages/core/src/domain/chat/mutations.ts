@@ -52,7 +52,9 @@ export function commitMessages(
  * 错误文案兜底（如 REASON_FALLBACK_ERROR_TEXT）是调用点语义，不在此收编。
  */
 export function createAssistantErrorMessage(errorText: string): Message {
-  return { id: `a-${randomUuid()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: Date.now() }
+  // 开始/结束时刻取同一读数（秒级展示口径下一致，避免 1ms 漂移）
+  const now = Date.now()
+  return { id: `a-${randomUuid()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: now, endedAt: now }
 }
 
 /**
@@ -107,6 +109,11 @@ export interface TerminalMessagePatchOptions {
   finalContent: string | undefined
   /** complete 原始 payload（usage 回填读值） */
   payload: Record<string, unknown>
+  /**
+   * 收口时刻（epoch ms，本轮产出结束）——只写末位 assistant 的 Message.endedAt。
+   * 时钟由调用方注入（本函数保持纯函数），缺省读取侧回退 timestamp（旧行为）。
+   */
+  endedAt: number
 }
 
 /**
@@ -142,9 +149,9 @@ export const REASON_FALLBACK_ERROR_TEXT: Record<ErrorFinalizeReason, string> = {
   restart: '运行时已重启，回复已中断。重新连接后可继续。',
 }
 
-/** 单条消息的终态 patch（纯函数；status/usage/error/content 条件展开，语义见 {@link TerminalMessagePatchOptions}）。 */
+/** 单条消息的终态 patch（纯函数；status/usage/error/content/endedAt 条件展开，语义见 {@link TerminalMessagePatchOptions}）。 */
 export function terminalMessagePatch(m: Message, i: number, opts: TerminalMessagePatchOptions): Message {
-  const { lastAssistantIdx, isErrorStop, errorMessage, finalContent, payload } = opts
+  const { lastAssistantIdx, isErrorStop, errorMessage, finalContent, payload, endedAt } = opts
   // 仅最后一条 assistant 回填 usage + content（turn 级聚合，回填到非末 assistant 语义错位）
   const usage = i === lastAssistantIdx ? readUsage(payload) : undefined
   const shouldOverrideContent = i === lastAssistantIdx && finalContent !== undefined && finalContent.length > 0
@@ -156,6 +163,10 @@ export function terminalMessagePatch(m: Message, i: number, opts: TerminalMessag
     // reason='error' 兜底（terminalMessagePatch 只有 isErrorStop 布尔，reason 语义恒 'error'）
     ...(i === lastAssistantIdx && isErrorStop ? { error: errorMessage || REASON_FALLBACK_ERROR_TEXT.error } : {}),
     ...(shouldOverrideContent ? { content: finalContent } : {}),
+    // 产出结束时刻：只标末位 assistant（turn 级聚合的时间轴右端；中间段真实结束时刻
+    // live 不可知，保持缺省由消费侧回退 timestamp——reload 侧由 entry 时间戳补齐）。
+    // 幂等：已有值时不被后续 patch 覆盖。
+    ...(i === lastAssistantIdx ? { endedAt: m.endedAt ?? endedAt } : {}),
   }
 }
 

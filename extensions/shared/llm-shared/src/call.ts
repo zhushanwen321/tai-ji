@@ -18,7 +18,14 @@ import type {
 	Context as LlmContext,
 	SimpleStreamOptions,
 } from "@earendil-works/pi-ai/compat";
-import type { Api, Message, Model, ModelThinkingLevel, Usage } from "@earendil-works/pi-ai";
+import type {
+	Api,
+	Message,
+	Model,
+	ModelThinkingLevel,
+	StopReason,
+	Usage,
+} from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isRecord, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
@@ -53,11 +60,14 @@ export interface CallLLMOptions {
  * - ok:true → content 为提取并 trim 的文本；usage 为 completeSimple 响应的 resp.usage 透传
  *   （可选，存在才带——usage 整体缺失时不带字段，「跳过落账」语义由调用方处理，如
  *   rename-session 的 appendEntry 存在性守卫；permission classifier 等既有调用方不消费，零影响）。
+ *   stopReason 透传（可选，存在才带）：ok:false 分支只可能是 error/aborted；ok:true 分支的
+ *   值域是其余终态（stop/length/toolUse 等），调用方用它区分「输出被预算截断（length）」与
+ *   「模型正常返回空文本（stop）」两类静默失败（rename-session 的 title empty warn）。
  * - ok:false → stopReason 是独立透传字段（失败原因维度），供调用方保留
  *   error/aborted 的日志区分（如 permission classifier 的 G3 语义）。
  */
 export type CallLLMResult =
-	| { ok: true; content: string; usage?: Usage }
+	| { ok: true; content: string; usage?: Usage; stopReason?: Exclude<StopReason, "error" | "aborted"> }
 	| { ok: false; error: string; stopReason?: "error" | "aborted" };
 
 // ──────────────────────── 文本提取 ────────────────────────
@@ -159,6 +169,9 @@ export async function callLLM(
 			content: extractText(resp),
 			// additive（设计 §3.3 ②）：透传 resp.usage，存在才带；缺失时整体不带字段
 			...(resp.usage ? { usage: resp.usage } : {}),
+			// additive：透传终态 stopReason（stop/length/toolUse），存在才带——length 截断
+			// 与正常 stop 空文本对调用方是不同失败形态（rename-session 的 title empty warn 消费）
+			...(resp.stopReason ? { stopReason: resp.stopReason } : {}),
 		};
 	} catch (error) {
 		return { ok: false, error: toErrorMessage(error) };

@@ -291,7 +291,7 @@ export function useVirtuaFollow(opts: {
   }
 
   // scope dispose（session 切换/组件卸载）兜底取消 pending rAF 与抑制窗计时器，防泄漏。
-  // composable 在 setup 同步调用 → scope 必然活跃（测试无 scope 时 onScopeDispose 为 no-op，不抛错）。
+  // composable 在 setup 同步调用 → scope 必然活跃（无 scope 时 onScopeDispose 不抛错，但 dev 下会触发 Vue warn；生产为 no-op）。
   onScopeDispose(() => {
     if (pendingRafId !== null) {
       cancelAnimationFrame(pendingRafId)

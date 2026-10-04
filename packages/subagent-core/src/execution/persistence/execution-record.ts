@@ -7,7 +7,10 @@
 //   eventLog / currentActivity / result 文本均从 turns[] 派生（getEventLog /
 //   getCurrentActivity / getFullText），不再独立存储切片或缓冲。
 //
-//   createRecord    唯一创建入口（model 创建时必填，消灭 poll 路径 model 丢失）
+//   createRecord    唯一创建入口（model 允许 undefined = 用户未指定，R4/D6-①——
+//                   旧「创建时必填」不变量随模型可选化显式反转：poll 路径丢 model
+//                   的原始缺陷已由「identity 字段创建时一次确定」的收口本身消解，
+//                   undefined 是合法缺席语义而非丢失）
 //   updateFromEvent 唯一事件更新入口（累积进 turns[]，消灭闭包旁路累积器）
 //   completeRecord  唯一完成入口（冻结状态）
 //   project/snapshot 唯一投影入口（两路径字段一致）
@@ -149,14 +152,17 @@ function emptyTurn(): Turn {
 /**
  * 唯一创建入口。identity 字段（agent/model/thinkingLevel/mode/task）一次确定不可变。
  *
- * model 创建时必填——这是 poll 路径 model 丢失的架构修复
- * （旧实现 background record 运行时丢 model，poll 返回缺字段）。
+ * [R4/D6-① 反转] model 允许 undefined：原「创建时必填——poll 路径 model 丢失的架构
+ * 修复」不变量，其防丢失价值由「identity 创建时一次确定」收口本身承载（poll 不再
+ * 缺字段）；undefined 现是合法缺席语义 = 用户未指定模型（引擎走自身缺省解析，
+ * 如 zcode 的 defaultModelSelection），record.model 留空如实投影。禁空串哨兵。
  */
 export function createRecord(
   id: string,
   identity: {
     agent: string;
-    model: string;
+    /** [R4/D6-①] 缺席 = 用户未指定模型（条件盖章的调用方不产本键）。 */
+    model?: string | undefined;
     thinkingLevel?: string;
     mode: ExecutionMode;
     task: string;

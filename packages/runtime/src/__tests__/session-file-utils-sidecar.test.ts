@@ -6,6 +6,10 @@
  * A3b：缓存失效集成——persistAgentBinding 写入后 sessionMetaCache 失效，scanPiSessions 能立即读到 binding。
  * A4：readAgentBinding 降级路径——sidecar 不存在/JSON 损坏/spawnSource 非法 → undefined。
  *
+ * RT-3#3 读侧显形（warn 分支回归守卫）：meta/handoff sidecar 存在但内容非法 JSON 时
+ * warnSidecarReadFailureOnce 恰出声一次（ENOENT 不出声）且降级走 JSONL/尾读兜底——
+ * 回归即退回「绑定损坏与从未绑定不可区分」的静默态。
+ *
  * Model binding（缓存治理批 3 U8 后仅存扫描可见性面）：
  * M1：BINDING_FIELDS 矩阵守卫——modelId/thinkingLevel 四列值符合预期。
  * M2d：「JSONL append model entry → 扫描反向读可见」集成（持久层唯一写方 = pi，
@@ -15,7 +19,7 @@
  * M4：purge 清单含 .model.json。
  */
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, writeFileSync, appendFileSync, rmSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -25,7 +29,11 @@ import {
   agentSidecarPath,
   scanPiSessions,
   invalidateScanDirCache,
+  readSessionEndMeta,
+  extractSessionOutcome,
+  extractHandedOff,
   _resetSessionMetaCacheForTest,
+  _resetSidecarWarnDedupForTest,
 } from '../infra/pi/session-file-utils.js'
 import { BINDING_FIELDS } from '../infra/pi/session-binding-fields.js'
 import type { SessionLifecycle } from '../services/session/session-lifecycle.js'
@@ -213,6 +221,79 @@ describe('readAgentBinding', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
+  })
+})
+
+// ── RT-3#3 读侧显形：sidecar 存在但内容非法 JSON → warn 一次 + 降级兜底 ──
+
+describe('sidecar 损坏 warn 分支（RT-3#3 非 ENOENT 出声）', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>
+  let dir: string
+
+  beforeEach(() => {
+    _resetSidecarWarnDedupForTest()
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    dir = makeTmpDir('rt3-warn-')
+  })
+  afterEach(() => {
+    warnSpy.mockRestore()
+    _resetSidecarWarnDedupForTest()
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  function writeSessionWithMalformedSidecar(fp: string, sidecarPath: string): void {
+    writeFileSync(fp, [
+      JSON.stringify({ type: 'session', id: 's1', cwd: '/tmp', timestamp: '2026-01-01' }),
+      JSON.stringify({ type: 'session_end', outcome: 'stopped', timestamp: '2026-01-02' }),
+      JSON.stringify({ type: 'handoff_marker', handedOffTo: 'legacy-target', timestamp: '2026-01-03' }),
+    ].join('\n') + '\n')
+    writeFileSync(sidecarPath, 'not valid json {{{')
+  }
+
+  it('readSessionEndMeta：meta sidecar 非法 JSON → warn 一次（reason 含 sidecar 路径），返回 null', () => {
+    const fp = join(dir, 's1.jsonl')
+    const sidecarPath = fp + '.meta.json'
+    writeSessionWithMalformedSidecar(fp, sidecarPath)
+
+    expect(readSessionEndMeta(fp)).toBeNull()
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    const msg = String(warnSpy.mock.calls[0]?.[0])
+    expect(msg).toContain('meta sidecar read/parse failed')
+    expect(msg).toContain(sidecarPath)
+  })
+
+  it('extractSessionOutcome：meta sidecar 非法 JSON → warn 一次 + 走 JSONL 兜底取回终态', () => {
+    const fp = join(dir, 's2.jsonl')
+    const sidecarPath = fp + '.meta.json'
+    writeSessionWithMalformedSidecar(fp, sidecarPath)
+
+    expect(extractSessionOutcome(fp)).toBe('stopped')
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    const msg = String(warnSpy.mock.calls[0]?.[0])
+    expect(msg).toContain('meta sidecar read failed, falling back to JSONL')
+    expect(msg).toContain(sidecarPath)
+  })
+
+  it('extractHandedOff：handoff sidecar 非法 JSON → warn 一次 + 走 JSONL 尾读兜底取回交接目标', () => {
+    const fp = join(dir, 's3.jsonl')
+    const sidecarPath = fp + '.handoff.json'
+    writeSessionWithMalformedSidecar(fp, sidecarPath)
+
+    expect(extractHandedOff(fp)).toBe('legacy-target')
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    const msg = String(warnSpy.mock.calls[0]?.[0])
+    expect(msg).toContain('handoff sidecar read failed, falling back to tail read')
+    expect(msg).toContain(sidecarPath)
+  })
+
+  it('ENOENT（sidecar 从未写入）→ 保持安静不 warn（正常态不出声）', () => {
+    const fp = join(dir, 's4.jsonl')
+    writeFileSync(fp, JSON.stringify({ type: 'session', id: 's4', cwd: '/tmp', timestamp: '2026-01-01' }) + '\n')
+
+    expect(extractSessionOutcome(fp)).toBeNull()
+    expect(extractHandedOff(fp)).toBeUndefined()
+    expect(readSessionEndMeta(fp)).toBeNull()
+    expect(warnSpy).not.toHaveBeenCalled()
   })
 })
 

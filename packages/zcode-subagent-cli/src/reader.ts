@@ -18,7 +18,8 @@
 //   session(id, ..., time_created, ...) / message(id, session_id, sequence, data)
 //   / part(id, message_id, session_id, sequence, data)
 //   message.data: {role: 'user'|'assistant', ...}；part.data: {type: 'text'|'reasoning'|
-//   'tool'|'step-start'|'step-finish', ...}（tool 的 state 是 JSON 字符串）。
+//   'tool'|'step-start'|'step-finish', ...}（tool 的 state 是 JSON 字符串（旧形态）或
+//   内嵌对象（0.16.5+ 实测全库））。
 //   schema_migration 表存在——CLI 升级迁移表结构，漂移由结构化错误暴露（降级链兜底）。
 
 import * as fs from "node:fs";
@@ -31,6 +32,7 @@ import type {
   ReplayedTurn,
   SessionView,
   ToolCall,
+  ToolCallResult,
 } from "@zhushanwen/subagent-engine-sdk";
 import { ZCODE_ENGINE_ID } from "./constants.ts";
 
@@ -119,27 +121,52 @@ function usageFromStepFinish(part: ParsedPart): AgentUsage | undefined {
   };
 }
 
-/** tool part 的 state（JSON 字符串）→ 中立 ToolCall。 */
+/** state JSON 字符串形态（更早版本）：合法普通对象则透传，否则降级 undefined。 */
+function stateFromString(raw: string): Record<string, unknown> | undefined {
+  try {
+    const v: unknown = JSON.parse(raw);
+    return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// state 双形态：0.16.5+ 宿主库全量为内嵌 JSON 对象（$.state.status 可 SQL 直取，
+// 34 万条 tool part 字符串形态 0 条）；更早版本为 JSON 字符串。两形态都非法时降级
+// state=undefined（status 落 'unknown'）
+function stateFromPart(part: ParsedPart): Record<string, unknown> | undefined {
+  if (typeof part.state === "object" && part.state !== null && !Array.isArray(part.state)) {
+    return part.state as Record<string, unknown>;
+  }
+  if (typeof part.state === "string") {
+    return stateFromString(part.state);
+  }
+  return undefined;
+}
+
+// 输出形态（实测）：string（内容）或 object（结构化）——分别映射到 pi ToolCallResult
+// 的 content[] / details，不发明第二形状；errorText 优先于 output（T4：error ?? output）
+function toolResultFromOutput(errorText: string | undefined, output: unknown): ToolCallResult | undefined {
+  if (errorText !== undefined) return { content: [errorText] };
+  if (typeof output === "string") return { content: [output] };
+  if (typeof output === "object" && output !== null) return { details: output };
+  return undefined;
+}
+
+/** tool part 的 state（内嵌对象为主，JSON 字符串为旧形态兼容）→ 中立 ToolCall。 */
 function toolFromPart(part: ParsedPart): ToolCall {
   const toolName = typeof part.tool === "string" ? part.tool : "unknown";
-  let state: Record<string, unknown> | undefined;
-  if (typeof part.state === "string") {
-    try {
-      const v: unknown = JSON.parse(part.state);
-      state = typeof v === "object" && v !== null ? (v as Record<string, unknown>) : undefined;
-    } catch {
-      state = undefined;
-    }
-  }
+  const state = stateFromPart(part);
   const status = typeof state?.status === "string" ? state.status : "unknown";
   const output = state?.output;
+  // error 态错误文本在 state.error（宿主库实测 error 态 output 恒空）——ToolCall 形态
+  // 无 error 字段位，文本以 content 形态进 result（错误原因必须可见，设计 §3.4 T4 精神）
+  const errorText = status !== "completed" && typeof state?.error === "string" ? state.error : undefined;
+  const result = toolResultFromOutput(errorText, output);
   return {
     toolName,
     ...(state?.input !== undefined ? { args: state.input } : {}),
-    // 输出形态（实测）：string（内容）或 object（结构化）——分别映射到 pi ToolCallResult
-    // 的 content[] / details，不发明第二形状
-    ...(typeof output === "string" ? { result: { content: [output] } } : {}),
-    ...(typeof output === "object" && output !== null ? { result: { details: output } } : {}),
+    ...(result !== undefined ? { result } : {}),
     ...(status !== "completed" ? { isError: true } : {}),
   };
 }

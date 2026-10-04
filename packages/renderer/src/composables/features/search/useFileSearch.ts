@@ -30,8 +30,11 @@ export function useFileSearch() {
   async function load(sessionId: string): Promise<FileNode[]> {
     try {
       return await composerApi.getFileCandidates(sessionId)
-    } catch {
-      // file.search 失败（session 不存在/transport 断连）→ 降级空数组，浮层显空态，不抛
+    } catch (e: unknown) {
+      // file.search 失败（session 不存在/transport 断连）→ 降级空数组，浮层显空态，不抛。
+      // RD-5#3：降级本身正确，但必须留痕——静默 return [] 会让「候选为空」与
+      // 「后端挂了」不可分（红线 1：catch/丢弃后无日志无标记）。
+      console.warn(`[fileSearch] load 失败降级为空候选: sid=${sessionId}`, e)
       return []
     }
   }

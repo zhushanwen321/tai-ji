@@ -298,7 +298,7 @@ function findExtensionUi(results: PiTranslatedEvent[]): PiTranslatedEvent | unde
 }
 
 describe('event-adapter: ask-user ASK_USER_MARKER 检测 (U6-U8)', () => {
-  it('U6: title=marker + options[0] 合法 JSON → 透传 questions + extension-ui kind 事件', () => {
+  it('U6: title=marker + options[0] 合法 JSON → form 统一表单帧（type 推断映射）+ extension-ui kind 事件', () => {
     const questions = [{ header: 'db', question: '选哪个?', options: [{ label: 'PG' }] }]
     const payload = JSON.stringify({ questions, allowCancel: false })
     const event = makeSelectEvent(ASK_USER_MARKER, [payload], 'req-askuser')
@@ -309,14 +309,16 @@ describe('event-adapter: ask-user ASK_USER_MARKER 检测 (U6-U8)', () => {
     const extUi = findExtensionUi(results)
     expect(extUi).toBeDefined()
 
-    // message 帧：extension.ui_request + askUser=true + askUserQuestions 透传
+    // message 帧：extension.ui_request + form=true + formQuestions（legacy 归一上移 runtime）
     const msg = findMessage(results)
     expect(msg).toBeDefined()
     expect(msg!.message.type).toBe('extension.ui_request')
-    expect(msg!.message.payload.askUser).toBe(true)
+    expect(msg!.message.payload.form).toBe(true)
     expect(msg!.message.payload.method).toBe('select')
     expect(msg!.message.payload.requestId).toBe('req-askuser')
-    expect(msg!.message.payload.askUserQuestions).toEqual(questions)
+    expect(msg!.message.payload.formQuestions).toEqual([
+      { type: 'choice', header: 'db', question: '选哪个?', options: [{ label: 'PG' }] },
+    ])
     expect(msg!.message.payload.allowCancel).toBe(false)
     // ask-user 分支不传 options（避免前端把 JSON payload 当下拉选项）
     expect(msg!.message.payload.options).toBeUndefined()

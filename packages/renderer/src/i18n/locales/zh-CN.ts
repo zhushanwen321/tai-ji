@@ -13,6 +13,8 @@ import search from '@taiji/ui/locale/zh-CN/search'
 import composable from '@taiji/ui/locale/zh-CN/composable'
 import importSession from './zh-CN/importSession'
 import rollingRestart from './zh-CN/rollingRestart'
+import plan from './zh-CN/plan'
+import btw from './zh-CN/btw'
 
 export default {
   common,
@@ -32,4 +34,6 @@ export default {
   composable,
   importSession,
   rollingRestart,
+  plan,
+  btw,
 }

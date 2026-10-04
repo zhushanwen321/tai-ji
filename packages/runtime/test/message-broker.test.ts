@@ -13,20 +13,21 @@
  * 测试策略：直接构造 broker，注入 mock 的 ClientPool（含 mock ws）和 BrokerServices，
  * 不依赖真实 WebSocket / ConnectionManager。
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { WebSocket } from 'ws'
 import type { ClientPool, BrokerServices, ServerMessageBroker as BrokerType } from '../src/transport/message-broker.js'
 
 // ── Mock ws 工厂 ───────────────────────────────────────────────────
 
-/** 构造一个 mock ws：readyState=OPEN，send 为 vi.fn（可配置抛错）。 */
-function makeMockWs(opts: { throws?: boolean } = {}): WebSocket {
+/** 构造一个 mock ws：readyState=OPEN，send 为 vi.fn（可配置抛错 / bufferedAmount）。 */
+function makeMockWs(opts: { throws?: boolean; bufferedAmount?: number } = {}): WebSocket {
   const sendFn = opts.throws
     ? vi.fn(() => { throw new Error('connection closed (TOCTOU)') })
     : vi.fn()
   return {
     readyState: WebSocket.OPEN,
     send: sendFn,
+    ...(opts.bufferedAmount !== undefined ? { bufferedAmount: opts.bufferedAmount } : {}),
   } as unknown as WebSocket
 }
 
@@ -165,5 +166,204 @@ describe('ServerMessageBroker L6 (broadcast 单次 stringify)', () => {
     expect(sent1).toBe(sent2)
     // 且可反序列化回原 msg
     expect(JSON.parse(sent1 as string)).toEqual(msg)
+  })
+})
+
+describe('ServerMessageBroker broadcast 哨兵豁免清单（AP-2）', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /** 构造单 client broker + console.warn spy */
+  async function buildWithWarnSpy() {
+    const { ServerMessageBroker } = await import('../src/transport/message-broker.js')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const ws = makeMockWs()
+    const broker = new ServerMessageBroker({ clients: new Set([ws]) }, mockServices)
+    return { broker, ws, warnSpy }
+  }
+
+  it.each([
+    'plugin:modalState',
+    'plugin:headerActionUpdate',
+  ] as const)('豁免帧 %s：payload 带 sessionId 的全局广播不触发哨兵告警，帧照常下发', async (type) => {
+    const { broker, ws, warnSpy } = await buildWithWarnSpy()
+    const msg = {
+      type,
+      id: 'push_exempt',
+      payload: { pluginId: 'p1', sessionId: 's1', state: 'open', epoch: 1 },
+    } as unknown as Parameters<BrokerType['broadcast']>[0]
+
+    expect(() => broker.broadcast(msg)).not.toThrow()
+
+    expect(warnSpy).not.toHaveBeenCalled()
+    expect(vi.mocked(ws.send)).toHaveBeenCalledTimes(1)
+  })
+
+  it('清单外帧 payload 带 sessionId 仍触发哨兵告警（豁免不漏放宽）', async () => {
+    const { broker, warnSpy } = await buildWithWarnSpy()
+    const msg = {
+      type: 'session.list',
+      id: 'push_guard',
+      payload: { groups: [], sessionId: 's1' },
+    } as unknown as Parameters<BrokerType['broadcast']>[0]
+
+    broker.broadcast(msg)
+
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(String(warnSpy.mock.calls[0][0])).toContain('use IMessageBus.publish instead')
+  })
+
+  it('豁免帧 payload 无 sessionId（异常构造）不触发告警（哨兵本就只看 sessionId 存在性）', async () => {
+    const { broker, warnSpy } = await buildWithWarnSpy()
+    const msg = {
+      type: 'plugin:modalState',
+      id: 'push_nosid',
+      payload: { pluginId: 'p1', state: 'open', epoch: 1 },
+    } as unknown as Parameters<BrokerType['broadcast']>[0]
+
+    broker.broadcast(msg)
+
+    expect(warnSpy).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * RT-1#8：send() 的 stringify 守卫（照 reply :168-174 形态）。
+ *
+ * send 是 sendError 的最后手段路径（sendError → this.send(error envelope)）——
+ * 序列化失败若直抛，异常沿调用方冒泡且 error envelope 无从发出。守卫收口为
+ * error envelope：新 envelope 是受控构造的纯字符串 payload，序列化不再失败（结构上不递归）。
+ */
+describe('ServerMessageBroker RT-1#8 (send stringify 守卫)', () => {
+  it('循环引用 payload → send 不抛，改发 error envelope（code=send_serialization_failed）', async () => {
+    const { ServerMessageBroker } = await import('../src/transport/message-broker.js')
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const ws = makeMockWs()
+      const pool: ClientPool = { clients: new Set([ws]) }
+      const broker = new ServerMessageBroker(pool, mockServices)
+
+      const cyclic: Record<string, unknown> = { type: 'app.info', id: 'x' }
+      cyclic.payload = { self: cyclic }
+      const msg = cyclic as unknown as Parameters<BrokerType['send']>[1]
+
+      // 修复前：JSON.stringify 抛 TypeError 直接冒泡给调用方（含 sendError 路径）
+      expect(() => broker.send(ws, msg)).not.toThrow()
+
+      // 原 msg 未发出；发出的唯一一帧是 error envelope
+      expect(vi.mocked(ws.send)).toHaveBeenCalledTimes(1)
+      const sent = JSON.parse(vi.mocked(ws.send).mock.calls[0][0] as string) as {
+        type: string
+        payload: { code: string; message: string }
+      }
+      expect(sent.type).toBe('error')
+      expect(sent.payload.code).toBe('send_serialization_failed')
+      // 守卫留痕
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('send serialization failed'), expect.any(TypeError))
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
+  it('正常 payload → send 原样序列化发送（守卫零行为变化）', async () => {
+    const { ServerMessageBroker } = await import('../src/transport/message-broker.js')
+    const ws = makeMockWs()
+    const pool: ClientPool = { clients: new Set([ws]) }
+    const broker = new ServerMessageBroker(pool, mockServices)
+
+    const msg = { type: 'app.info', id: 'p1', payload: { appVersion: '1', piVersion: '2' } } as unknown as Parameters<BrokerType['send']>[1]
+    broker.send(ws, msg)
+
+    expect(vi.mocked(ws.send)).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(vi.mocked(ws.send).mock.calls[0][0] as string)).toEqual(msg)
+  })
+})
+
+/**
+ * RT-1#7：发送侧背压观测（bufferedAmount 超阈值 warn，每 socket 每次越限一条）。
+ * 量级依据与去重语义见 src/utils/backpressure-warn.ts 模块注释。
+ */
+describe('ServerMessageBroker RT-1#7 (bufferedAmount 背压 warn)', () => {
+  it('send 路径：bufferedAmount 超阈值 → warn 一条（含字节数）；持续超阈值不重复', async () => {
+    const { ServerMessageBroker } = await import('../src/transport/message-broker.js')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const ws = makeMockWs({ bufferedAmount: 2 * 1024 * 1024 })
+      const pool: ClientPool = { clients: new Set([ws]) }
+      const broker = new ServerMessageBroker(pool, mockServices)
+      const msg = { type: 'app.info', id: 'p1', payload: { appVersion: '1', piVersion: '2' } } as unknown as Parameters<BrokerType['send']>[1]
+
+      broker.send(ws, msg)
+      broker.send(ws, msg)
+      broker.send(ws, msg)
+
+      // 同一 socket 持续超阈值态：只 warn 一次
+      const backpressureWarns = warnSpy.mock.calls.filter(([m]) => String(m).includes('[backpressure]'))
+      expect(backpressureWarns).toHaveLength(1)
+      expect(String(backpressureWarns[0][0])).toContain('channel=send')
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('send 路径：水位降回阈值内后再次越限 → 再 warn（状态翻转去重）', async () => {
+    const { ServerMessageBroker } = await import('../src/transport/message-broker.js')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      // 可变 bufferedAmount 的 ws mock（模拟对端消费后水位回落）
+      const ws = { readyState: WebSocket.OPEN, send: vi.fn(), bufferedAmount: 2 * 1024 * 1024 } as unknown as WebSocket
+      const pool: ClientPool = { clients: new Set([ws]) }
+      const broker = new ServerMessageBroker(pool, mockServices)
+      const msg = { type: 'app.info', id: 'p1', payload: { appVersion: '1', piVersion: '2' } } as unknown as Parameters<BrokerType['send']>[1]
+
+      broker.send(ws, msg) // 越限 → warn #1
+      ;(ws as { bufferedAmount: number }).bufferedAmount = 0
+      broker.send(ws, msg) // 回落 → 无 warn，状态复位
+      ;(ws as { bufferedAmount: number }).bufferedAmount = 2 * 1024 * 1024
+      broker.send(ws, msg) // 再次越限 → warn #2
+
+      const backpressureWarns = warnSpy.mock.calls.filter(([m]) => String(m).includes('[backpressure]'))
+      expect(backpressureWarns).toHaveLength(2)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('broadcast 路径：单个积压 client warn，不影响其余 client 收帧', async () => {
+    const { ServerMessageBroker } = await import('../src/transport/message-broker.js')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const ws1 = makeMockWs({ bufferedAmount: 3 * 1024 * 1024 })
+      const ws2 = makeMockWs()
+      const pool: ClientPool = { clients: new Set([ws1, ws2]) }
+      const broker = new ServerMessageBroker(pool, mockServices)
+      const msg = { type: 'app.info', id: 'push_bp', payload: { appVersion: '1', piVersion: '2' } } as unknown as Parameters<BrokerType['broadcast']>[0]
+
+      broker.broadcast(msg)
+
+      // 积压 client 触发 warn，正常 client 照常收帧
+      expect(warnSpy.mock.calls.some(([m]) => String(m).includes('[backpressure]') && String(m).includes('channel=broadcast'))).toBe(true)
+      expect(vi.mocked(ws2.send)).toHaveBeenCalledTimes(1)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('bufferedAmount 缺省（mock/非 WS 契约）→ no-op，不 warn 不抛', async () => {
+    const { ServerMessageBroker } = await import('../src/transport/message-broker.js')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      // makeMockWs 不传 bufferedAmount 时属性缺省
+      const ws = makeMockWs()
+      const pool: ClientPool = { clients: new Set([ws]) }
+      const broker = new ServerMessageBroker(pool, mockServices)
+      const msg = { type: 'app.info', id: 'p1', payload: { appVersion: '1', piVersion: '2' } } as unknown as Parameters<BrokerType['send']>[1]
+
+      expect(() => broker.send(ws, msg)).not.toThrow()
+      expect(warnSpy.mock.calls.some(([m]) => String(m).includes('[backpressure]'))).toBe(false)
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 })

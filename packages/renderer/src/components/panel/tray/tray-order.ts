@@ -1,5 +1,5 @@
 /**
- * tray-order.ts —— 协议 widget 区排序纯函数（设计 docs/design/composer-task-tray.md
+ * tray-order.ts —— 协议 widget 区排序纯函数（设计 docs/design/composer-task-tray.md——已删除，git 可追溯——
  * §3.3 D6「排序 = known-order + getViewIds 数组序」+ §3.4 终态数据流）。
  *
  * 排序语义（宿主契约，与 core `view-host-store.getViewIds` 的 JSDoc 同源）：

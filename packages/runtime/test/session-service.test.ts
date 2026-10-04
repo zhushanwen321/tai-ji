@@ -21,6 +21,7 @@
  * - onSessionExit：构造函数注册的进程退出回调
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { SESSION_NOT_FOUND } from '../src/utils/errors.js'
 import type { MockInstance } from 'vitest'
 import { tmpdir, homedir } from 'node:os'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -910,8 +911,13 @@ describe('SessionService · Facade', () => {
       expect(setup.service.getSummary(id)?.modelId).toBe('anthropic/claude-x')
     })
 
-    it('throws when session not in map (W1/L7: fail-fast，不再静默成功)', async () => {
-      await expect(setup.service.switchModel('ghost', 'p' as ProviderId, 'm')).rejects.toThrow('session not active')
+    it('session 不在 Map → 先 ensureActive（U2/D5）；该 session 无落盘文件 → 既有码 SESSION_NOT_FOUND 透传（fail-fast，不静默成功）', async () => {
+      // model-switch-live-provider-sync U2：停止态不再 throw 'session not active' 早退，
+      // 而是 ensureActive 拉活/join；ghost 无落盘 session 文件 → 激活阶段以既有码
+      // SESSION_NOT_FOUND 失败（前端据此引导「侧栏删除该会话记录」）。
+      await expect(setup.service.switchModel('ghost', 'p' as ProviderId, 'm')).rejects.toMatchObject({
+        code: SESSION_NOT_FOUND,
+      })
     })
 
     it('切换后广播 session.state_changed（payload 来自 modelId/thinkingLevel 快照，W12；usage 走 context.update，D1）', async () => {
@@ -1014,8 +1020,19 @@ describe('SessionService · Facade', () => {
       expect(setup.service.getInputTokens(id)).toBe(12345)
     })
 
-    it('U-setInput-2：不存在的 session（无实例）返回 0，不抛错', () => {
-      expect(setup.service.getInputTokens('nonexistent')).toBe(0)
+    it('U-setInput-2：不存在的 session（无实例）返回 null（[RT-4#7] 无值 ≠ 0），不抛错', () => {
+      expect(setup.service.getInputTokens('nonexistent')).toBe(null)
+    })
+
+    it('U-setInput-2b：session 存在但 usage 快照未就绪（fetch 失败保留空）返回 null——无快照与上下文真空显式分形', async () => {
+      const { id } = await setup.seedSession()
+      // 不播种快照（mock getSessionStats 默认 {} → 拉取失败保留空）：读面 null 而非折叠为 0
+      expect(setup.service.getInputTokens(id)).toBe(null)
+      expect(setup.service.getUsagePercent(id)).toBe(null)
+    })
+
+    it('U-setInput-2c：[RT-4#7] getUsagePercent 无实例返回 null（语义对齐 getInputTokens）', () => {
+      expect(setup.service.getUsagePercent('nonexistent')).toBe(null)
     })
 
     it('U-setInput-3：applyContextUpdate 事件不直写快照（事件只做失效，W10 五写点收编）', async () => {
@@ -1061,7 +1078,8 @@ describe('SessionService · Facade', () => {
 
       setup.service.applyContextUpdate(id, 0)
 
-      expect(setup.service.getInputTokens(id)).toBe(0) // 快照未播种（mock getSessionStats 默认 {} → 拉取失败保留空）
+      // [RT-4#7] 快照未播种（mock getSessionStats 默认 {} → 拉取失败保留空）→ null（无值 ≠ 0）
+      expect(setup.service.getInputTokens(id)).toBe(null)
       expect(findBroadcast(setup, 'context.update')).toBeUndefined()
     })
 
@@ -1099,13 +1117,13 @@ describe('SessionService · Facade', () => {
       expect(setup.service.getUsagePercent(id)).toBe(100)
     })
 
-    it('快照未播种（percent 缺失）返回 0', async () => {
+    it('快照未播种（percent 缺失）返回 null（[RT-4#7] 无值 ≠ 0%）', async () => {
       const { id } = await setup.seedSession()
-      expect(setup.service.getUsagePercent(id)).toBe(0)
+      expect(setup.service.getUsagePercent(id)).toBe(null)
     })
 
-    it('session 不存在返回 0', () => {
-      expect(setup.service.getUsagePercent('ghost')).toBe(0)
+    it('session 不存在返回 null（[RT-4#7] 无实例 ≠ 0%）', () => {
+      expect(setup.service.getUsagePercent('ghost')).toBe(null)
     })
   })
 
@@ -1182,8 +1200,8 @@ describe('SessionService · Facade', () => {
       expect(setup.service.getSummary(id)?.status).toBe('idle')
     })
 
-    it('getInputTokens 对未知 session 返回 0', () => {
-      expect(setup.service.getInputTokens('ghost')).toBe(0)
+    it('getInputTokens 对未知 session 返回 null（[RT-4#7] 无实例 ≠ 0）', () => {
+      expect(setup.service.getInputTokens('ghost')).toBe(null)
     })
   })
 

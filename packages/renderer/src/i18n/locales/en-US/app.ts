@@ -10,4 +10,7 @@ export default {
   crashReasonOom: 'out of memory',
   crashReasonUnknown: 'unknown',
   crashDismiss: 'Dismiss',
+  // RD-3#11 memory pressure notice bar (useMemoryPressure level → UI consumer)
+  memoryPressureWarn: 'High memory usage; some caches were cleared automatically',
+  memoryPressureCritical: 'Memory critically low; consider closing some sessions',
 }

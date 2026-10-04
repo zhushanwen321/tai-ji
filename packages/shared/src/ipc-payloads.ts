@@ -32,12 +32,16 @@ export interface RendererMemorySnapshot {
  * - 'inbound-frame-dropped'：ws-client 入站帧大小守卫命中（超界帧丢弃）经本通道上报——
  *   main 侧 handler 识别该标记后额外写崩溃台账行（main.jsonl
  *   `layer=renderer, event=inbound-frame-dropped`，D1 写入点矩阵），复用既有通道不新建。
+ * - 'runtime-start-failed'：runtime 启动失败真因（code-harden RD-3#2：main supervisor
+ *   startAndNotify 失败 → runtime-error 推送 / get-runtime-start-error 拉取兜底到达
+ *   renderer，连接屏 failed 分支显示真实 message，并经本通道落台账）。
  */
 export type RendererErrorSource =
   | 'vue-error-handler'
   | 'window-onerror'
   | 'unhandledrejection'
   | 'inbound-frame-dropped'
+  | 'runtime-start-failed'
 
 /**
  * renderer → main 错误上报 payload（RENDERER_LOG = 'renderer-log' invoke 通道）

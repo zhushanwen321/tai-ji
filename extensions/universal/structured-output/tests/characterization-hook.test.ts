@@ -21,7 +21,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 // ── mock pi 公共 fixture（M5-T4：与 structured-output.test.ts Workflow hook 组共享）──
 // on() 收集回调，emit() 按注册顺序触发（第二参数恒传含 shutdown 的 handlerCtx），
-// sendUserMessage/appendEntry/ctx.shutdown spy。
+// sendMessage/appendEntry/ctx.shutdown spy。
 import {
   createMockPi,
   FAILED_TOOL_END,
@@ -56,17 +56,26 @@ describe("characterization: setupWorkflowHook timing (baseline before RetryState
     // turn 1: 失败调用 + toolUse turn_end → 不干预（模型还在调工具链）
     await pi.emit("tool_execution_end", FAILED_TOOL_END);
     await pi.emit("turn_end", turnEndPayload("toolUse"));
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
 
     // turn 2: 再次失败调用 + stop（StopReason 真实枚举成员，原误写 end_turn）→ steer。
     // soCallCount 未被 toolUse turn 重置（累计 2），calledButFailed=true →
     // 文案走 FAILED validation 分支而非 MUST call。
     await pi.emit("tool_execution_end", FAILED_TOOL_END);
     await pi.emit("turn_end", turnEndPayload());
-    expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
-    const msg = pi.sendUserMessage.mock.calls[0]![0] as string;
+    expect(pi.sendMessage).toHaveBeenCalledTimes(1);
+    // 形态契约（custom message 五要素，A2/A6）：customType 常量 / content=reminder /
+    // display:false 不渲染用户气泡 / steer 队列 / triggerTurn 开轮（与原
+    // sendUserMessage 开轮语义等价）
+    const [payload, opts] = pi.sendMessage.mock.calls[0]!;
+    expect(payload).toMatchObject({
+      customType: "structured-output:retry-reminder",
+      display: false,
+    });
+    const msg = (payload as { content: string }).content;
     expect(msg).toContain("FAILED validation");
     expect(msg).not.toContain("MUST call the structured-output tool");
+    expect(opts).toEqual({ deliverAs: "steer", triggerTurn: true });
   });
 
   it("② [U2 重锁] 3 same-signature failures in one turn → gate terminal + shutdown at 3rd, turn_end does NOT steer (was: single steer)", async () => {
@@ -87,7 +96,7 @@ describe("characterization: setupWorkflowHook timing (baseline before RetryState
 
     // turn_end：守卫链第 0 条（terminal）拦截 → 不 steer（旧基线：1 次 steer）
     await pi.emit("turn_end", turnEndPayload());
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 
   it("③ [U2 重锁] 3 failed turns → exactly 2 steers; 3rd failure (same signature ×3) hits gate terminal BEFORE retry-cap give-up → shutdown", async () => {
@@ -102,7 +111,7 @@ describe("characterization: setupWorkflowHook timing (baseline before RetryState
       await pi.emit("tool_execution_end", FAILED_TOOL_END);
       await pi.emit("turn_end", turnEndPayload());
     }
-    expect(pi.sendUserMessage).toHaveBeenCalledTimes(2);
+    expect(pi.sendMessage).toHaveBeenCalledTimes(2);
     expect(pi.ctx.shutdown).toHaveBeenCalledTimes(1);
   });
 
@@ -116,7 +125,7 @@ describe("characterization: setupWorkflowHook timing (baseline before RetryState
     await pi.emit("tool_execution_end", FAILED_TOOL_END);
     await pi.emit("turn_end", turnEndPayload());
 
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
     expect(pi.ctx.shutdown).not.toHaveBeenCalled();
   });
 
@@ -138,7 +147,7 @@ describe("characterization: setupWorkflowHook timing (baseline before RetryState
     await pi.emit("turn_end", turnEndPayload("toolUse"));
     await pi.emit("tool_execution_end", failedToolEndWith("a different error"));
     await pi.emit("turn_end", turnEndPayload());
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
     // terminal 幂等：第 4+ 次失败不重复 shutdown
     expect(pi.ctx.shutdown).toHaveBeenCalledTimes(1);
   });
@@ -159,32 +168,32 @@ describe("characterization: setupWorkflowHook timing (baseline before RetryState
 
       await pi.emit("tool_execution_end", FAILED_TOOL_END);
       await pi.emit("turn_end", turnEndPayload(stopReason));
-      expect(pi.sendUserMessage).not.toHaveBeenCalled();
+      expect(pi.sendMessage).not.toHaveBeenCalled();
       expect(pi.appendEntry).not.toHaveBeenCalled();
 
       // 预算不扣减 + 失败状态保留：下一个正常收尾的轮仍 steer，
       // 且因 soCallCount/lastSchemaError 保留走 FAILED 分支（非 MUST call）
       await pi.emit("turn_end", turnEndPayload());
-      expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
-      const msg = pi.sendUserMessage.mock.calls[0]![0] as string;
+      expect(pi.sendMessage).toHaveBeenCalledTimes(1);
+      const msg = (pi.sendMessage.mock.calls[0]![0] as { content: string }).content;
       expect(msg).toContain("FAILED validation");
       expect(msg).toContain("Schema validation failed: /count must be number");
     }
   });
 
   it("⑦ [U3 审查项#8] steer 发送失败（rejected promise）→ 不扣预算 + appendEntry 告警，后续轮仍可 steer（不永久哑火）", async () => {
-    // 注（形态契约锁定）：pi 0.84.1 实装下 extension 侧 sendUserMessage 的异步 rejection
-    // 被 pi 吞（loader.js 同步转发 + .catch(emitError) 转事件，不冒泡到调用方），
+    // 注（形态契约锁定）：pi 0.84.4 实装下 extension 侧 sendMessage 的异步 rejection
+    // 被 pi 吞（loader.js 同步转发 + bindCore .catch(emitError) 转事件，不冒泡到调用方），
     // 本用例在 mock 层构造 reject，锁定的是「未来 pi 返回真 Promise 时 hook 不得
-    // 白扣预算/不得永久哑火」的 Promise 形态契约，非 0.84.1 现网行为复现。
+    // 白扣预算/不得永久哑火」的 Promise 形态契约，非现网行为复现。
     const pi = createMockPi();
     await loadExtension(pi, SCHEMA);
 
-    // 第 1 轮：发送失败（await 路径 reject —— 模拟 compaction 中 prompt() 抛错）
-    pi.sendUserMessage.mockRejectedValueOnce(new Error("compaction in progress"));
+    // 第 1 轮：发送失败（await 路径 reject —— 模拟 compaction 中开轮抛错）
+    pi.sendMessage.mockRejectedValueOnce(new Error("compaction in progress"));
     await pi.emit("tool_execution_end", failWith("count"));
     await pi.emit("turn_end", turnEndPayload());
-    expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
+    expect(pi.sendMessage).toHaveBeenCalledTimes(1);
 
     // 失败告警：appendEntry 持久化（沿用本包 customType 通道格式）
     expect(pi.appendEntry).toHaveBeenCalledTimes(1);
@@ -200,24 +209,24 @@ describe("characterization: setupWorkflowHook timing (baseline before RetryState
     await pi.emit("turn_end", turnEndPayload());
     await pi.emit("tool_execution_end", failWith("beta"));
     await pi.emit("turn_end", turnEndPayload());
-    expect(pi.sendUserMessage).toHaveBeenCalledTimes(3);
+    expect(pi.sendMessage).toHaveBeenCalledTimes(3);
 
     // 第 4 个正常轮：hookRetryCount=2 达上限 → 放弃（失败有界语义不变）
     await pi.emit("tool_execution_end", failWith("gamma"));
     await pi.emit("turn_end", turnEndPayload());
-    expect(pi.sendUserMessage).toHaveBeenCalledTimes(3);
+    expect(pi.sendMessage).toHaveBeenCalledTimes(3);
   });
 
   it("⑧ [U3 审查项#8] steer 发送同步 throw（扩展被拒）→ 同样不扣预算 + 告警含错误文本", async () => {
     const pi = createMockPi();
     await loadExtension(pi, SCHEMA);
 
-    pi.sendUserMessage.mockImplementationOnce(() => {
+    pi.sendMessage.mockImplementationOnce(() => {
       throw new Error("extension deactivated");
     });
     await pi.emit("tool_execution_end", FAILED_TOOL_END);
     await pi.emit("turn_end", turnEndPayload());
-    expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
+    expect(pi.sendMessage).toHaveBeenCalledTimes(1);
     expect(pi.appendEntry).toHaveBeenCalledWith(
       "structured-output:hook",
       expect.objectContaining({ event: "steer_send_failed", error: "extension deactivated" }),
@@ -237,8 +246,8 @@ describe("characterization: setupWorkflowHook timing (baseline before RetryState
     );
     await pi.emit("turn_end", turnEndPayload());
 
-    expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
-    const msg = pi.sendUserMessage.mock.calls[0]![0] as string;
+    expect(pi.sendMessage).toHaveBeenCalledTimes(1);
+    const msg = (pi.sendMessage.mock.calls[0]![0] as { content: string }).content;
     expect(msg).toContain("FAILED validation");
     expect(msg).toContain("Validation failed for tool");
     expect(msg).toContain("assessments.0.impact"); // 首部关键信息：错误字段名保留

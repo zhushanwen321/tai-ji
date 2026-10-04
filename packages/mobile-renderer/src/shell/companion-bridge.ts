@@ -7,9 +7,12 @@
 // 权限审批编排状态机（bus 订阅 + 畸形事件守卫 + expired 撤窗 + transport 回传 +
 // BM3/D3 语义）已下沉同包 createPermissionRequestController（双壳共享，单测在同包
 // __tests__/）。本模块只做移动壳裁决：
-// - routeAskUser='companion'——无 Panel，CompanionBand 是 ask-user 的唯一消费面，dialog 全
-//   method + askUser 全投递（v1 能力边界；桌面壳传 'panel' 分流给 Panel inline 独占）；
+// - form 类四键排除与桌面同源（shell-adapters C4 固定排除面）——移动壳无 useExtensionUI
+//   消费面，form/planReview 类请求在移动端暂无呈现（v1 能力边界，恢复 = FormOverlay
+//   消费面下沉/复用，独立任务）；CompanionBand 只收简单 dialog；
 // - bus 模块级私有单例（桌面走 getExtensionBus 惰性单例，来源选择是壳裁决）；
+// - 壳层能力回调不注入（无 pinia chat store / toast：onPiResponseSettled 空操作对齐
+//   「移动壳无 pendingSend 链」，notifyNotDelivered 静默）；
 // - 权限/对话两通道均模块级装配（bus 单例私居本模块；ESM 单次求值，listener 不会翻倍），
 //   App.vue provide + 挂 CompanionBand / PermissionRequestDialog。
 //
@@ -38,7 +41,7 @@ export const __testing = {
 }
 
 // companion 数据源/回传对（App.vue provide 消费；G1 反查表泄漏语义两壳同持，见 shell-adapters）
-const companionDialog = createCompanionDialogAdapters(bus, { routeAskUser: 'companion' })
+const companionDialog = createCompanionDialogAdapters(bus)
 export const mobileDialogRequestSource = companionDialog.source
 export const mobileUiResponseTransport = companionDialog.transport
 

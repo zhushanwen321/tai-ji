@@ -26,14 +26,13 @@
 import { onScopeDispose, readonly, shallowRef, watch, type DeepReadonly, type Ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import type { ServerMessage, SessionGroup } from '@taiji/shared'
+import { isBtwVirtualId } from '@taiji/shared'
 import * as events from '@taiji/core/transport/api'
 import { useSessionStore } from '@/stores/session'
 import {
-  clearUnread,
   registerFork,
   resetForkBranchState,
   syncForkBranches,
-  unreadByBranch,
   type BranchChangeKind,
 } from '@/composables/features/fork-handoff/useForkBranchNotify'
 
@@ -84,6 +83,10 @@ export function useForkNoticeFeed(): {
   } {
   /** 按 sessionId 取 entries（shallowRef 下每次重算，feedMap 变化即响应） */
   function notices(sessionId: string): DeepReadonly<ForkNoticeEntry[]> {
+    // [M4-a / btw-question D4] ForkNotice suppress（btw 流渲染）：线是 fork 产物
+    //（header.parentSession 指向源）但关联只删不显——fork 反馈行/分支追踪状态不进 btw 流
+    //（读口单点抑制：MessageStream 全部消费方经本函数；dismiss/clear 对空表幂等）。
+    if (isBtwVirtualId(sessionId)) return readonly([])
     return readonly(feedMap.value.get(sessionId) ?? [])
   }
 
@@ -241,18 +244,4 @@ export function bindForkNoticeEffect(): void {
     unsubForkNotice()
     resetForkBranchState()
   })
-}
-
-/**
- * 读取分支未读角标状态（侧栏角标消费，RV2）。
- * 直接转发 useForkBranchNotify 的模块级单例（unreadByBranch SSOT 在 features 层，
- * 本函数仅是 ForkGroup 的读取门面）。clearUnread 透传：用户查看分支后清未读角标。
- */
-export function useForkBranchBadges(): {
-  /** 分支 id → 未读标记（需关注/已完成未查看） */
-  unreadByBranch: Ref<ReadonlyMap<string, boolean>>
-  /** 清除某分支未读角标（用户查看后调） */
-  clearUnread: (branchId: string) => void
-  } {
-  return { unreadByBranch, clearUnread }
 }

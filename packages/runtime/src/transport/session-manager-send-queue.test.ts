@@ -358,7 +358,8 @@ describe('A6-plugin-paths-vitest: plugin-service 两路径仍走 dispatcher 不�
   it('session-api.ts 的 plugin.sessions.sendMessage 仍经 deps.sendMessage（dispatcher 路径）', () => {
     const src = readFileSync(sessionApiPath, 'utf-8')
     expect(src).toContain("registerMethod('plugin.sessions.sendMessage'")
-    expect(src).toContain('await deps.sendMessage(sessionId, role, content)')
+    // [u5b] requireCommand 透传（D6 写路径前置校验），回执映射 {blocked} → {accepted:false}
+    expect(src).toContain('await deps.sendMessage(sessionId, role, content, requireCommand)')
     // 未切 delivery（D7 声明：plugin 路径保持现状，含 busy 拒绝语义）
     expect(src).not.toContain('getOrCreateDelivery')
     expect(src).not.toContain('sendChecked')
@@ -366,7 +367,8 @@ describe('A6-plugin-paths-vitest: plugin-service 两路径仍走 dispatcher 不�
 
   it('plugin-rpc-setup.ts 的 sendMessage 实现仍经 sessionService.sendMessage（dispatcher）', () => {
     const src = readFileSync(pluginRpcSetupPath, 'utf-8')
-    expect(src).toContain('await deps.sessionService.sendMessage(sessionId, content)')
+    // [u5b] requireCommand 透传到 dispatcher 第 5 参（restore 后、busy 预检前的原子校验）
+    expect(src).toContain('deps.sessionService.sendMessage(sessionId, content, undefined, undefined, requireCommand)')
     expect(src).not.toContain('getOrCreateDelivery')
     expect(src).not.toContain('sendChecked')
   })

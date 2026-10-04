@@ -6,8 +6,9 @@ import { guardStaleCtx, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import type { GoalInitFn } from "@zhushanwen/pi-goal";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
+import { t } from "./i18n.js";
 import type { PlanSessionMap, PlanState } from "./state.js";
-import { getPlanState } from "./state.js";
+import { PLAN_CONTEXT_CUSTOM_TYPE, getPlanState } from "./state.js";
 
 const logger = getLogger("pi-plan");
 
@@ -115,6 +116,9 @@ function buildPlanSlug(planFilePath: string): string {
 
 /** step preview 条数上限（1 条总述 + 3 条 preview，合计 ≤4 条，满足 goal schema maxItems:8） */
 const PREVIEW_COUNT = 3;
+
+/** skill 档 execMode 前缀（D10：`skill:<name>` 动态项，与 tool.ts 选项构造同源约定） */
+const SKILL_MODE_PREFIX = "skill:";
 /** 单条 preview 最大长度（超出部分截断，以 "..." 结尾） */
 const PREVIEW_MAX_CHARS = 80;
 const ELLIPSIS = "...";
@@ -151,7 +155,7 @@ export function buildPlanSuccessCriteria(planFilePath: string, tasks: string[]):
 
 /** goalInit 失败原因——五值与 tryGoalInit 的 5 个失败出口一一对应（设计 §6.2 D2）。 */
 export type GoalBridgeFailureReason =
-  | "goal-unavailable" // goal 未加载（slot 不存在/值非函数——桥修复后是真实可达的防御分支：goal 档仅在 detectGoalCapability 通过时出现，但 slot 残留 fn 失效等窗口仍可能触发）
+  | "goal-unavailable" // goal 未加载（slot 不存在/值非函数——execute 档无条件尝试 goalInit，goal 扩展未装/未挂 slot 时即走此出口，独立 pi 常态分支）
   | "plan-unreadable" // plan 文件读取失败
   | "no-steps" // plan 内容提取到 0 条步骤
   | "init-refused" // goalInit 返回 false（已有 active goal / ctx 缺失）
@@ -164,7 +168,7 @@ export type GoalBridgeOutcome =
 
 /** 每个 reason 指向一个具体恢复动作（不做纯日志字符串，设计 §4.2）。 */
 export const GOAL_FAILURE_RECOVERY: Record<GoalBridgeFailureReason, string> = {
-  "goal-unavailable": "The goal extension is not loaded — choose another execution method.",
+  "goal-unavailable": "The goal extension is not loaded — execute directly without goal tracking.",
   "plan-unreadable": "Check that the plan file exists and is readable, then call plan(action='complete') again.",
   "no-steps": "Add numbered steps under a '## Implementation Steps' section in the plan file, then call plan(action='complete') again.",
   "init-refused": "An active goal already exists — run /goal clear first, or continue with the existing goal.",
@@ -241,34 +245,42 @@ export function extractPlanSteps(planContent: string): string[] {
 
 
 /**
- * 投递 complete 后的执行通知（D2：goal 档先 goalInit、后按结果选 steer）。
- * 成功发 goal steer——「Execute via /goal」只在 goal 真实创建成功时说出；失败发
- * 含 reason 与恢复动作的降级 steer + warning notify。非 goal 档无 goalInit，按
- * execMode 组 steer。返回 goalInit 的 outcome（非 goal 档为 undefined）。
+ * 投递 complete 后的执行通知（2026-09-21 选项集重排：mode 值域 = execute | skill:<name>；
+ * execute 档整合 goal 桥 + auto-parallel subagent——goal 可用时先 goalInit 建跟踪，
+ * 失败/不可用降级为直接执行的 steer 指令，用户可见失败提示走 notify i18n）。
+ * skill 档动态构造 steer（含 skillEntryPath 路径，对齐 register-doc sourceSkill 的 skill 关联
+ * 先例；skillEntryPath = skill 入口文件路径——标准形态 SKILL.md 路径 / 散 .md 形态文件本身，
+ * 直接 read 不再拼 SKILL.md）。返回 goalInit 的 outcome（非 execute 档为 undefined）。
  */
 function deliverExecutionNotice(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   planFilePath: string,
   execMode: string,
+  skillEntryPath?: string,
 ): GoalBridgeOutcome | undefined {
-  const outcome = execMode === "goal" ? tryGoalInit(planFilePath, ctx) : undefined;
-
-  const modeMessages: Record<string, string> = {
-    subagent: "Execute via subagent-driven development: delegate each task to an independent subagent for parallel execution.",
-    goal: "Execute via /goal: set up tracked task decomposition with budget control using the goal extension.",
-    "single-agent": "Execute step by step in the current session.",
-  };
+  // execute 档整合 goal 桥：tryGoalInit 内部含 goal-unavailable gate（goal 未挂载走
+  // started:false 降级），无需前置 detectGoalCapability 探测
+  const outcome = execMode === "execute" ? tryGoalInit(planFilePath, ctx) : undefined;
 
   let modeHint: string;
-  if (outcome === undefined) {
-    modeHint = modeMessages[execMode] ?? modeMessages["single-agent"];
-  } else if (outcome.started) {
-    modeHint = modeMessages.goal;
-  } else {
-    modeHint = `Goal execution was not started (${outcome.reason}). ${GOAL_FAILURE_RECOVERY[outcome.reason]} Execute step by step in the current session.`;
+  if (execMode.startsWith(SKILL_MODE_PREFIX)) {
+    const skillName = execMode.slice(SKILL_MODE_PREFIX.length);
+    modeHint = skillEntryPath
+      ? `Execute via skill: read the ${skillName} skill at ${skillEntryPath} first, then follow its workflow to execute the plan file.`
+      : `Execute via skill: load the ${skillName} skill and follow its workflow to execute the plan file.`;
+  } else if (outcome?.started) {
+    modeHint =
+      "Goal tracking is active via /goal — execute the plan through the goal workflow: delegate independent, parallelizable tasks to subagents; run small or tightly-coupled steps in this session.";
+  } else if (outcome !== undefined) {
+    modeHint =
+      `Goal tracking was not started (${outcome.reason}). ${GOAL_FAILURE_RECOVERY[outcome.reason]} ` +
+      `Execute directly instead: judge by task complexity — delegate independent, parallelizable tasks to subagents; run small or tightly-coupled steps step by step in the current session.`;
     const detail = outcome.detail ? ` (${outcome.detail})` : "";
-    ctx.ui.notify(`Goal execution was not started (${outcome.reason})${detail}. ${GOAL_FAILURE_RECOVERY[outcome.reason]}`, "warning");
+    ctx.ui.notify(`${t("exec.goalFailedNotify", { reason: outcome.reason })}${detail}`, "warning");
+  } else {
+    modeHint =
+      "Execute by judging task complexity: delegate independent, parallelizable tasks to subagents; execute small or tightly-coupled steps step by step in the current session.";
   }
 
   const executeMessage =
@@ -277,16 +289,19 @@ function deliverExecutionNotice(
     `${modeHint}\n\n` +
     `Read the plan file and start implementing.`;
 
-  pi.sendUserMessage(executeMessage, { deliverAs: "steer" });
+  pi.sendMessage(
+    { customType: PLAN_CONTEXT_CUSTOM_TYPE, content: executeMessage, display: false },
+    { deliverAs: "steer", triggerTurn: true },
+  );
   return outcome;
 }
 
 /**
  * complete 的 isolation 分发（D1 后仅 compact | direct，两档都投递执行通知）。
  *
- * 返回值：execMode=goal 且 isolation=direct 时同步返回 goalInit 的 outcome
+ * 返回值：execMode=execute 且 isolation=direct 时同步返回 goalInit 的 outcome
  * （executeComplete 写进 result content 与 details）；其余情形返回 undefined——
- * 非 goal 档无 goalInit，compact 档 goalInit 在 onComplete 回调内执行（goal 状态
+ * skill 档无 goalInit，compact 档 goalInit 在 onComplete 回调内执行（goal 状态
  * entry 须在压缩后的世界里创建，提前到 compact 前有被压缩边界丢弃的风险，时序
  * 不动——设计 §6.2 D2），该档 result 已返回，失败报告走 steer + notify 通道。
  */
@@ -296,6 +311,7 @@ export function handlePlanComplete(
   state: PlanState,
   isolation: string,
   execMode: string,
+  skillEntryPath?: string,
 ): GoalBridgeOutcome | undefined {
   const planFilePath = state.planFilePath;
 
@@ -311,7 +327,7 @@ export function handlePlanComplete(
         // 守卫的 stale 文案兜底（D1 降级语义声明的合法形态）。
         onComplete: () => {
           guardStaleCtx(() => {
-            deliverExecutionNotice(pi, ctx, planFilePath, execMode);
+            deliverExecutionNotice(pi, ctx, planFilePath, execMode, skillEntryPath);
           }, {
             label: "plan:compact-onComplete",
             onStale: (error) => logger.warn("plan execution notice delivery skipped (stale ctx)", { error: toErrorMessage(error) }),
@@ -320,7 +336,7 @@ export function handlePlanComplete(
         onError: (_error: Error) => {
           guardStaleCtx(() => {
             ctx.ui.notify("Compact failed, continuing without isolation.", "warning");
-            deliverExecutionNotice(pi, ctx, planFilePath, execMode);
+            deliverExecutionNotice(pi, ctx, planFilePath, execMode, skillEntryPath);
           }, {
             label: "plan:compact-onError",
             onStale: (error) => logger.warn("plan execution notice delivery skipped (stale ctx)", { error: toErrorMessage(error) }),
@@ -332,7 +348,7 @@ export function handlePlanComplete(
 
     case "direct":
     default: {
-      return deliverExecutionNotice(pi, ctx, planFilePath, execMode);
+      return deliverExecutionNotice(pi, ctx, planFilePath, execMode, skillEntryPath);
     }
   }
 }

@@ -20,32 +20,25 @@ import { resolveExtensions, dedupeLoadedExtensions, applyPresetMode } from './ex
 import {
   BUILTIN_PRESET_IDS,
   DEFAULT_PRESETS,
+  SYSTEM_PROMPT_MAX_LENGTH,
+  isPiLaunchPreset,
   type PiLaunchPreset,
   type PiPresetsFile,
+  type PresetPromptConfig,
+  type PresetPromptSegment,
+  type PresetUsageEntry,
 } from '@taiji/shared'
 import type { IConfigStore } from './ports/config.js'
 import type { IExtensionService } from '../interfaces.js'
+import { logger } from '../infra/logger.js'
 import { atomicWrite } from '../utils/fs-utils.js'
+import { quarantineCorruptFile } from '../utils/json-store.js'
 
 /** JSON 序列化缩进（与 config-service.ts 共用约定）。 */
 const JSON_INDENT = 2
 
-/**
- * ToolMode 合法枚举白名单（W-RT-1）。
- *
- * shared 层 pi-preset.ts 的 TOOL_MODES 未导出（私有），此处本地定义副本保持模块自洽。
- * 用于 coercePreset 校验脏数据（如导入文件里 toolMode: "DROP TABLE"），不在白名单
- * 的 preset 被丢弃（防御性，与 loadPresetsFile 容错范式一致）。
- */
-const VALID_TOOL_MODES = ['all', 'allowlist', 'denylist', 'none'] as const
-
-/**
- * ExtensionMode 合法枚举白名单（W-RT-1）。
- *
- * shared 层 pi-preset.ts 的 EXTENSION_MODES 未导出（私有），此处本地定义副本。
- * 用途同 VALID_TOOL_MODES。
- */
-const VALID_EXTENSION_MODES = ['all', 'allowlist', 'denylist', 'none'] as const
+/** 诊断日志里的损坏内容截断长度（对齐 provider-extras-store 的 SCHEMA_SNIPPET_MAX 家族形态）。 */
+const SCHEMA_SNIPPET_MAX = 120
 
 /**
  * 生成 atomicWrite 的唯一 tmp 后缀（时间戳 + 随机串），避免并发写入撞固定 .tmp 文件。
@@ -67,6 +60,92 @@ export class PresetGuardError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'PresetGuardError'
+  }
+}
+
+/**
+ * pi-presets.json 损坏降级态错误（M4/RT-7#2）。
+ *
+ * 触发场景：读盘解析失败（JSON 畸形 / 顶层非对象）已隔离保现场后，任一写方法
+ * （savePreset / deletePreset / setDefaultPresetId / recordUsage / importPresets）
+ * 拒绝以空骨架全量覆写时抛出。message 含被隔离副本路径与恢复指引；
+ * code 经 preset-message-handler 的 sendPresetError 透传为 error envelope code。
+ */
+export class PresetStoreCorruptedError extends Error {
+  readonly code = 'preset_store_corrupted'
+  constructor(presetPath: string, quarantinePath?: string) {
+    const copyRef = quarantinePath ?? `${presetPath}.corrupt-<ts>`
+    super(
+      `pi-presets.json 已损坏并被隔离（副本：${copyRef}），已拒绝本次写入以防空预设覆写。` +
+      '恢复指引：对比 .corrupt 副本找回原预设写回 pi-presets.json 后重试',
+    )
+    this.name = 'PresetStoreCorruptedError'
+  }
+}
+
+/**
+ * 单段校验（validatePresetPrompt 循环体抽出）：段形状 / enabled / prompt 类型 / 段限，
+ * 违规即抛 PresetGuardError（整条拒绝语义）；合法段长记入 lengths 供合计判定。
+ */
+function validatePresetPromptSegment(
+  segmentKey: 'replace' | 'append',
+  rawSegment: unknown,
+  lengths: Record<'replace' | 'append', number>,
+): void {
+  if (rawSegment === undefined || rawSegment === null) return
+  if (typeof rawSegment !== 'object' || Array.isArray(rawSegment)) {
+    throw new PresetGuardError(`模式提示词形状非法：prompt.${segmentKey} 必须是对象`)
+  }
+  const segment = rawSegment as Record<string, unknown>
+  const enabled = segment['enabled']
+  const prompt = segment['prompt']
+  if (typeof enabled !== 'boolean') {
+    throw new PresetGuardError(`模式提示词形状非法：prompt.${segmentKey}.enabled 必须是 boolean`)
+  }
+  if (typeof prompt !== 'string') {
+    throw new PresetGuardError(`模式提示词形状非法：prompt.${segmentKey}.prompt 必须是 string`)
+  }
+  if (prompt.length > SYSTEM_PROMPT_MAX_LENGTH) {
+    throw new PresetGuardError(
+      `模式提示词 prompt.${segmentKey} 长度 ${prompt.length} / ${SYSTEM_PROMPT_MAX_LENGTH} 字符，超出单段上限，请精简该段`,
+    )
+  }
+  lengths[segmentKey] = prompt.length
+}
+
+/**
+ * 校验模式提示词（prompt 字段）——**整条拒绝**语义（写路 savePreset / 导入路 importPresets 共用）。
+ *
+ * 三条约束（设计文档 §7.1 校验接线）：
+ *   ① prompt 段形状：prompt 须为对象；replace/append 若存在须为对象，且 enabled 为 boolean、
+ *      prompt 为 string；
+ *   ② 段限：每段 prompt 长度 ≤ SYSTEM_PROMPT_MAX_LENGTH（16000），超限报错文案含该段实际长度；
+ *   ③ 合计限：replace.prompt.length + append.prompt.length ≤ SYSTEM_PROMPT_MAX_LENGTH，
+ *      错误文案含实际合计值。
+ *
+ * 入参为 unknown（而非 PiLaunchPreset）：导入路在 coercePreset 之前先跑本函数（顺序不可颠倒），
+ * 此时条目还是文件来的 raw 值。非对象入参直接放行（条目级形状由 coercePreset 负责）。
+ *
+ * 抛 PresetGuardError（既有守卫家族）→ preset-message-handler 的 catch 转成 `preset_guard_error`
+ * envelope 回 renderer，handler 无需改动。
+ */
+export function validatePresetPrompt(preset: unknown): void {
+  if (typeof preset !== 'object' || preset === null || Array.isArray(preset)) return
+  const rawPrompt = (preset as Record<string, unknown>)['prompt']
+  if (rawPrompt === undefined || rawPrompt === null) return
+  if (typeof rawPrompt !== 'object' || Array.isArray(rawPrompt)) {
+    throw new PresetGuardError('模式提示词形状非法：prompt 必须是对象')
+  }
+  const container = rawPrompt as Record<string, unknown>
+  const lengths: Record<'replace' | 'append', number> = { replace: 0, append: 0 }
+  for (const segmentKey of ['replace', 'append'] as const) {
+    validatePresetPromptSegment(segmentKey, container[segmentKey], lengths)
+  }
+  const total = lengths.replace + lengths.append
+  if (total > SYSTEM_PROMPT_MAX_LENGTH) {
+    throw new PresetGuardError(
+      `模式提示词合计 ${total} / ${SYSTEM_PROMPT_MAX_LENGTH} 字符，请精简总长`,
+    )
   }
 }
 
@@ -96,6 +175,30 @@ export interface PresetResolution {
   modelOverride?: string
   /** 覆盖思考级别（受 Landing Chip 覆盖，设计 §5.2） */
   thinkingLevel?: string
+  /**
+   * 模式提示词（已过读路段级折叠的合法值）。
+   *
+   * 由 resolve() 填入（直接取类型化 preset.prompt，不重复跑折叠——折叠只属读盘入口
+   * coercePreset），供 launch-params 的两个取值 helper 消费（设计 §7.2）。
+   * 未配置 / 读路段级折叠后无剩余段时为 undefined。
+   *
+   * 与 skillPaths 不同，undefined 即「无模式提示词」（无 ?? fallback 语义）。
+   */
+  prompt?: PresetPromptConfig
+  /**
+   * 模式回落事实（F1，设计 `mode-system-composer-density` §7.5 E4）：
+   * 请求的 presetId 定义不可得、本次 resolve 已回落 builtin:full 时，填原（悬空）presetId。
+   *
+   * 由 `resolveLaunchPresetOptions`（launch-params.ts）在 fallback 分支附加——**不是**
+   * `PresetService.resolve()` 的产物（resolve 只认已到手的 preset 定义）。
+   *
+   * 两个消费面口径不同，勿混：
+   * - **UI 披露位**（`SessionSummary.launchPresetFallbackTo`）仅 restore 置位；create/fork
+   *   不置位（回落照常发生但 UI 不披露）。
+   * - **trace env 三路同注**：create/restore/fork 均经 `buildPresetFallbackEnv` 出站，
+   *   故 fork/create 的 trace entry 仍会带 `presetFallback`。
+   */
+  fellBackFromPresetId?: string
 }
 
 /**
@@ -119,6 +222,14 @@ export class PresetService {
    */
   private presetFileCache: { mtimeMs: number; size: number; file: PiPresetsFile } | undefined
 
+  /**
+   * 损坏降级态（M4/RT-7#2）：读盘解析失败已隔离后置位（quarantinePath 供错误消息
+   * 指明取证副本入口）；原位文件恢复健康（成功解析出合法顶层对象）时清除。
+   * 置位期间 savePresetsFile 拒绝一切写入——空骨架 + 本次变更的全量覆写会把用户
+   * 全部自定义预设静默清空。
+   */
+  private corruptedState: { quarantinePath: string | undefined } | undefined
+
   constructor(
     private readonly configStore: IConfigStore,
     // extensionService 本 wave 不用，但 wave2 的 resolve 依赖它（getDiscoveredAndDisabled）。
@@ -139,10 +250,11 @@ export class PresetService {
   /**
    * 加载 pi-presets.json（容错，S-RT-2：带 mtime 缓存）。
    *
-   * 容错策略（与 config-service.loadAppConfig L216-232 对齐）：
-   *   - 文件不存在 → 空骨架兜底（presets: []）
-   *   - JSON 畸形 → 空骨架兜底 + console.warn（不抛错）
-   *   - 顶层非对象/presets 非数组 → 空骨架兜底 + console.warn
+   * 容错策略（M4/RT-7#2：损坏先隔离保现场，写侧拒绝空骨架覆写）：
+   *   - 文件不存在 → 空骨架兜底（presets: []），不触碰降级态
+   *   - JSON 畸形 / 顶层非对象 → quarantineCorruptFile 隔离 + 空骨架兜底 +
+   *     置 corruptedState（savePresetsFile 据此拒绝写入）
+   *   - presets 非数组 / 条目畸形 → 逐项折叠丢弃（既有语义，不算损坏）
    *
    * 缓存：statSync 拿 (mtimeMs, size)，命中缓存键则直接返回缓存 file（跳过 readFileSync + JSON.parse）；
    * miss 或 stat 失败则读盘解析并更新缓存。返回的 PiPresetsFile 是深拷贝，避免调用方 mutation 污染缓存。
@@ -173,31 +285,33 @@ export class PresetService {
    * 从磁盘读取并解析 pi-presets.json（容错，S-RT-2 抽出以便 loadPresetsFile 复用）。
    *
    * 主函数只留编排：读文件容错（readPresetsObject）→ presets 逐项 coerce →
-   * usage/defaultPresetId 透传兜底。
+   * usage 逐条目 coerce / defaultPresetId 透传兜底。损坏（JSON 畸形 / 顶层非对象）由
+   * readPresetsObject 隔离保现场，本函数置 corruptedState（写侧据此拒绝空骨架覆写，M4/RT-7#2）。
    */
   private parsePresetsFileFromDisk(path: string): PiPresetsFile {
     if (!existsSync(path)) {
       return { presets: [], version: 1 }
     }
-    const obj = readPresetsObject(path)
-    if (!obj) {
+    const read = readPresetsObject(path)
+    if (!read.obj) {
+      this.corruptedState = { quarantinePath: read.quarantinePath }
       return { presets: [], version: 1 }
     }
+    this.corruptedState = undefined
+    const obj = read.obj
     // 逐项类型守卫：只接受形似 PiLaunchPreset 的对象，丢弃畸形项（防御性，不抛错）。
-    // W-RT-1：coercePreset 内含 toolMode/extensionMode 枚举白名单校验。
+    // W-RT-1：coercePreset 经 shared isPiLaunchPreset 做 toolMode/extensionMode 枚举白名单校验。
     const presets = coercePresetsArray(
       Array.isArray(obj['presets']) ? obj['presets'] as unknown[] : [],
     )
-    // 透传 usage（FR-14 的持久化字段，load 容错不做强类型守卫，
-    // 与 defaultPresetId 同策略：只校验顶层存在性，值合法性由消费方在使用时兜底）
-    const usage = coerceRecordField(obj['usage'])
+    // usage 逐条目 coerce（FR-14 持久化字段读路折叠，与 coercePresetsArray 同策略：
+    // 坏条目丢弃 + warn，不丢整个容器、不抛错；形状守卫后即类型化值，无裸断言）
+    const usage = coerceUsage(obj['usage'])
     const defaultPresetId = typeof obj['defaultPresetId'] === 'string' ? obj['defaultPresetId'] as string : undefined
     const file: PiPresetsFile = {
       presets,
       defaultPresetId,
-      // usage 用 as 保持 PiPresetsFile 兼容（值是 Record<string, PresetUsageEntry>，
-      // 已知字段类型不安全但与原实现一致——load 容错不抛错，消费方信任读到的形状）
-      usage: usage as PiPresetsFile['usage'],
+      usage,
       version: 1,
     }
     // [HISTORICAL] FR-15（per-cwd 默认预设）已随 state-truth-sync U9 全链删除，perCwdDefaults
@@ -215,15 +329,31 @@ export class PresetService {
   }
 
   /**
+   * 降级态守卫（M4/RT-7#2）：pi-presets.json 损坏隔离后拒绝一切写入语义。
+   * savePresetsFile 入口统一拦截实际落盘；deletePreset 另在方法入口拦截（骨架视图里
+   * 「预设不存在 → no-op 成功」是对降级态的谎言——被删项可能就在 .corrupt 副本里）。
+   */
+  private assertNotCorrupted(): void {
+    if (this.corruptedState) {
+      throw new PresetStoreCorruptedError(this.piPresetsPath(), this.corruptedState.quarantinePath)
+    }
+  }
+
+  /**
    * 保存 pi-presets.json（atomicWrite + 唯一 tmp 后缀，与 config-service.saveAppConfig 同模式）。
+   *
+   * [M4/RT-7#2] 损坏降级态下拒绝写入：读盘解析失败回空骨架后，任何 savePresetsFile
+   * 都会把「空 presets + 本次变更」全量覆写——用户全部自定义预设静默清空。抛
+   * PresetStoreCorruptedError（带 code），经 preset-message-handler 转 error envelope。
    *
    * S-RT-2：写盘后立即 invalidate 缓存（写后 mtime/size 必变，但显式清避免下一次读的 stat 比对冗余，
    * 且防止 atomicWrite 的 tmp rename 时序下读到旧 mtime 的极端竞态——下次 loadPresetsFile 会重新 stat + 读盘）。
    */
   private savePresetsFile(file: PiPresetsFile): void {
+    this.assertNotCorrupted()
+    const path = this.piPresetsPath()
     const cd = this.configStore.getConfigDir()
     if (!existsSync(cd)) mkdirSync(cd, { recursive: true })
-    const path = this.piPresetsPath()
     atomicWrite(path, JSON.stringify(file, null, JSON_INDENT), uniqueTmpSuffix())
     // S-RT-2：写盘后失效缓存。下次 loadPresetsFile 会重新 stat + 读盘拿到新内容。
     this.presetFileCache = undefined
@@ -326,6 +456,9 @@ export class PresetService {
    *   - 强制 builtin:false（防止用户传 builtin:true 伪造内置预设）
    */
   savePreset(preset: PiLaunchPreset): void {
+    // 唯一写点入口守卫：模式提示词整条拒绝（形状 / 段限 / 合计限），抛 PresetGuardError。
+    // 放在 builtin 字段保护之前：非法提示词不应因后续保护逻辑改写而混过（且避免无谓读盘）。
+    validatePresetPrompt(preset)
     const file = this.loadPresetsFile()
     const isBuiltinId = DEFAULT_PRESETS.some(p => p.id === preset.id)
 
@@ -367,6 +500,9 @@ export class PresetService {
     if (DEFAULT_PRESETS.some(p => p.id === presetId)) {
       throw new PresetGuardError(`cannot delete builtin preset '${presetId}'`)
     }
+    // 降级态守卫在方法入口而非 savePresetsFile：骨架视图里「条目不存在 → no-op 成功」
+    // 是对降级态的谎言（被删项可能就在 .corrupt 副本里），必须拒绝（M4/RT-7#2）
+    this.assertNotCorrupted()
     const file = this.loadPresetsFile()
     const before = file.presets.length
     file.presets = file.presets.filter(p => p.id !== presetId)
@@ -436,6 +572,10 @@ export class PresetService {
     const importedRaw = Array.isArray(obj['presets']) ? obj['presets'] as unknown[] : []
     const imported: PiLaunchPreset[] = []
     for (const p of importedRaw) {
+      // 校验顺序不可颠倒：先 validatePresetPrompt（整条拒）→ 再 coercePreset（形状折叠）。
+      // 反过来会让超限段被段级折叠丢掉并 warn，「导入路整条拒」永不触发，用户以为导入成功
+      // 但提示词没了（静默降级）。超限项在此抛出 → 整个 import 中止，不写盘。
+      validatePresetPrompt(p)
       const typed = coercePreset(p)
       if (typed) imported.push(typed)
     }
@@ -475,6 +615,10 @@ export class PresetService {
       },
       modelOverride: preset.modelOverride,
       thinkingLevel: preset.thinkingLevel,
+      // 模式提示词透传：preset 已是类型化对象（非 raw），直接取 preset.prompt。
+      // 不在此重复跑 coercePresetPrompt——折叠只属读盘入口（coercePreset）；非法/超限段
+      // 在读路（段级折叠）与写路（整条拒）已拦下，不会进入 resolution。
+      prompt: preset.prompt,
     }
   }
 
@@ -565,25 +709,33 @@ export class PresetService {
 // ── 内部 helpers ──────────────────────────────────────────────────
 
 /**
- * 读 pi-presets.json 原始内容并校验顶层形状（容错）。
+ * 读 pi-presets.json 原始内容并校验顶层形状（容错 + 损坏隔离）。
  *
- * 容错策略（与 config-service.loadAppConfig L216-232 对齐）：
- *   - JSON 畸形 → console.warn + undefined（调用方兜底空骨架，不抛错）
- *   - 顶层非对象/数组/null → console.warn + undefined
+ * 容错策略（M4/RT-7#2 升级：损坏不再只 warn 回 undefined，先隔离保现场）：
+ *   - JSON 畸形 / 顶层非对象 / null / 数组 → quarantineCorruptFile 隔离为
+ *     `<path>.corrupt-<ts>` + 返回 { obj: undefined, quarantinePath }——调用方
+ *     （parsePresetsFileFromDisk）置降级态，写侧拒绝以空骨架覆写
+ *   - 隔离 rename 失败（目录只读等）返回 quarantinePath: undefined，原文件保留原位
  */
-function readPresetsObject(path: string): Record<string, unknown> | undefined {
+function readPresetsObject(path: string): { obj: Record<string, unknown> | undefined; quarantinePath: string | undefined } {
   let raw: unknown
   try {
     raw = JSON.parse(readFileSync(path, 'utf-8'))
   } catch (e) {
-    console.warn(`[preset-service] pi-presets.json is not valid JSON, ignoring: ${stringifyError(e)}`)
-    return undefined
+    const quarantinePath = quarantineCorruptFile(path, { tag: 'preset-service', reason: 'parse failed', cause: e })
+    console.warn(`[preset-service] pi-presets.json is not valid JSON, quarantined: ${stringifyError(e)}`)
+    return { obj: undefined, quarantinePath }
   }
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    console.warn('[preset-service] pi-presets.json top-level is not an object, ignoring')
-    return undefined
+    const quarantinePath = quarantineCorruptFile(path, {
+      tag: 'preset-service',
+      reason: 'top-level is not a JSON object',
+      cause: new Error(`unexpected shape: ${JSON.stringify(raw).slice(0, SCHEMA_SNIPPET_MAX)}`),
+    })
+    console.warn('[preset-service] pi-presets.json top-level is not an object, quarantined')
+    return { obj: undefined, quarantinePath }
   }
-  return raw as Record<string, unknown>
+  return { obj: raw as Record<string, unknown>, quarantinePath: undefined }
 }
 
 /** presets 数组逐项 coerce（coercePreset 校验失败的畸形项直接丢弃）。 */
@@ -596,48 +748,196 @@ function coercePresetsArray(presets: unknown[]): PiLaunchPreset[] {
   return validPresets
 }
 
+/** PresetUsageEntry 形状守卫（FR-14 契约面）：count / lastUsed 均须有限数值。 */
+function isPresetUsageEntry(value: unknown): value is PresetUsageEntry {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const entry = value as Record<string, unknown>
+  return typeof entry['count'] === 'number' && Number.isFinite(entry['count'])
+    && typeof entry['lastUsed'] === 'number' && Number.isFinite(entry['lastUsed'])
+}
+
 /**
- * coerce Record 形状的持久化字段（usage 用，FR-14）：
- * 普通对象原样透传，其余（缺失/数组/标量）返回 undefined。不做强类型守卫，
- * 值合法性由消费方在使用时兜底（与 defaultPresetId 同策略）。
+ * usage 逐条目 coerce（FR-14 持久化字段读路折叠，与 coercePresetsArray 同策略）：
+ * 形如 PresetUsageEntry 的条目原样透传；畸形条目丢弃 + warn（只记 presetId 键名，
+ * 不记条目值）；usage 顶层非对象形状（数组/标量）→ 丢弃整个字段为 undefined。
+ * load 容错不抛错语义不变，坏条目不再以伪造类型流入 renderer 契约面（preset.getUsage）。
  */
-function coerceRecordField(value: unknown): Record<string, unknown> | undefined {
-  return (typeof value === 'object' && value !== null && !Array.isArray(value))
-    ? value as Record<string, unknown>
-    : undefined
+function coerceUsage(raw: unknown): Record<string, PresetUsageEntry> | undefined {
+  if (raw === undefined) return undefined
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    logger.warn('[preset-service] usage 形状非法（非对象），已丢弃整个 usage 字段')
+    return undefined
+  }
+  const usage: Record<string, PresetUsageEntry> = {}
+  const invalidIds: string[] = []
+  for (const [presetId, entry] of Object.entries(raw)) {
+    if (isPresetUsageEntry(entry)) {
+      usage[presetId] = entry
+    } else {
+      invalidIds.push(presetId)
+    }
+  }
+  if (invalidIds.length > 0) {
+    logger.warn(`[preset-service] usage 条目畸形（count/lastUsed 须为有限数值），已丢弃条目：${invalidIds.join(', ')}`)
+  }
+  return usage
+}
+
+/** 合计超限丢段：优先丢 append 保留 replace（替换段语义更重且用户更难自恢复）。 */
+function dropSegmentOverTotalLimit(value: PresetPromptConfig, total: number, issues: string[]): void {
+  // 两段各自 ≤ 段限却合计超限 → 必然两段都在场；优先丢 append 保留 replace。
+  if (value.append) {
+    delete value.append
+    issues.push(
+      `模式提示词合计 ${total} / ${SYSTEM_PROMPT_MAX_LENGTH} 字符超限，已丢弃 append 段并保留 replace 段`,
+    )
+  } else if (value.replace) {
+    delete value.replace
+    issues.push(
+      `模式提示词合计 ${total} / ${SYSTEM_PROMPT_MAX_LENGTH} 字符超限，已丢弃 replace 段`,
+    )
+  }
+}
+
+/** 无可识别段的可观测性补记（仍丢弃，只增可见性；只记键名不记值）。 */
+function pushNoRecognizedSegmentIssue(
+  container: Record<string, unknown>,
+  value: PresetPromptConfig,
+  issues: string[],
+): void {
+  // 可观测契约（设计 §7.1「畸形/超限只丢该段 + warn」）：raw 是普通对象但**无任何可识别段**
+  //（如 `{foo:1}`）时当前实现会静默丢整个 prompt 容器——补一条 issue 让丢弃可见（仍丢弃，
+  // 只增可观测性）。**只记键名不记值**：值可能是用户提示词正文，不应进日志。
+  // 条件用「容器无 replace/append 键」而非「value 为空」：`{replace: <畸形>}` 已由段级 issue
+  // 覆盖，再叠一条会误导（键是被识别的，只是值非法）。
+  const hasSegment = value.replace !== undefined || value.append !== undefined
+  const containerKeys = Object.keys(container)
+  const hasKnownSegmentKey = containerKeys.includes('replace') || containerKeys.includes('append')
+  if (!hasSegment && !hasKnownSegmentKey && containerKeys.length > 0) {
+    issues.push(`prompt 容器无可识别段（键：${containerKeys.join(', ')}），已丢弃全部提示词段`)
+  }
+}
+
+/**
+ * 段级折叠模式提示词（读路 / 导入折叠用）。
+ *
+ * 与 validatePresetPrompt 的「整条拒绝」相对：畸形/超限的 prompt 段**只丢该段**，
+ * 记 issues（调用方 warn 日志），不因此丢掉整个 preset、不阻断文件加载。
+ *
+ * 函数拆分的理由（写进代码）：coercePreset 现有返回类型是 `T | undefined`（整条级），无法同时
+ * 表达「段级丢 + 整体报错」——故拆成「段级折叠（本函数）+ 整体校验（validatePresetPrompt）」
+ * 两个函数，调用方各自选语义，不靠布尔参数猜。
+ *
+ * 合计限与丢段顺序（堵直改盘旁路）：直改 pi-presets.json 无 UI 约束，故段级折叠也必须执行
+ * 合计判定——合计超限时**优先丢 append 段**（保留 replace：替换段语义更重且用户更难自恢复），
+ * issues 记实际合计值与丢弃了哪一段。段级超限（单段 > 16000）同样丢该段。
+ */
+function coercePresetPrompt(raw: unknown): { value?: PresetPromptConfig; issues: string[] } {
+  const issues: string[] = []
+  if (raw === undefined || raw === null) return { issues }
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    issues.push('prompt 形状非法（非对象），已丢弃全部提示词段')
+    return { issues }
+  }
+  const container = raw as Record<string, unknown>
+  const value: PresetPromptConfig = {}
+  for (const segmentKey of ['replace', 'append'] as const) {
+    const segment = coercePresetPromptSegment(segmentKey, container[segmentKey], issues)
+    if (segment) value[segmentKey] = segment
+  }
+  const total = (value.replace?.prompt.length ?? 0) + (value.append?.prompt.length ?? 0)
+  if (total > SYSTEM_PROMPT_MAX_LENGTH) {
+    dropSegmentOverTotalLimit(value, total, issues)
+  }
+  pushNoRecognizedSegmentIssue(container, value, issues)
+  const hasSegment = value.replace !== undefined || value.append !== undefined
+  return hasSegment ? { value, issues } : { issues }
+}
+
+/** 折叠单段模式提示词；畸形/超限返回 undefined 并追加一条 issue。 */
+function coercePresetPromptSegment(
+  segmentKey: 'replace' | 'append',
+  raw: unknown,
+  issues: string[],
+): PresetPromptSegment | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    issues.push(`prompt.${segmentKey} 形状非法（非对象），已丢弃该段`)
+    return undefined
+  }
+  const segment = raw as Record<string, unknown>
+  const enabled = segment['enabled']
+  const prompt = segment['prompt']
+  if (typeof enabled !== 'boolean' || typeof prompt !== 'string') {
+    issues.push(`prompt.${segmentKey} 字段类型非法（enabled 须 boolean / prompt 须 string），已丢弃该段`)
+    return undefined
+  }
+  if (prompt.length > SYSTEM_PROMPT_MAX_LENGTH) {
+    issues.push(
+      `prompt.${segmentKey} 长度 ${prompt.length} / ${SYSTEM_PROMPT_MAX_LENGTH} 字符超出单段上限，已丢弃该段`,
+    )
+    return undefined
+  }
+  return { enabled, prompt }
+}
+
+/**
+ * 数组型可选字段清单（coercePreset 字段级折叠用）。
+ *
+ * 下游 resolveToolArgs / resolveExtensionPaths 的 `?? []` 只兜 undefined——字符串等
+ * 形态脏数据会原样透传（applyPresetMode 对 string 做 includes = 子串误匹配），故读路折叠。
+ */
+const STRING_ARRAY_FIELDS = ['allowedTools', 'deniedTools', 'allowedExtensions', 'deniedExtensions'] as const
+
+/**
+ * 数组型可选字段折叠（与 coercePresetPrompt 段级折叠同策略）：
+ * 值非「string 数组」→ 丢弃该字段 + 记 issue，不丢整个 preset。
+ */
+function coercePresetStringArrayFields(preset: PiLaunchPreset, issues: string[]): void {
+  for (const field of STRING_ARRAY_FIELDS) {
+    const value = preset[field]
+    if (value === undefined) continue
+    if (!Array.isArray(value) || !value.every(item => typeof item === 'string')) {
+      delete preset[field]
+      issues.push(`字段 ${field} 形状非法（须 string[]），已丢弃该字段`)
+    }
+  }
 }
 
 /**
  * 把磁盘读到的 raw（unknown）尝试 coerce 成 PiLaunchPreset。
  * 不通过返回 undefined（loadPresetsFile 会丢弃）。
  *
- * 必须有 id(string) + name(string) + builtin(boolean) + order(number) + toolMode + extensionMode。
+ * 必填契约（id/name/builtin/order + toolMode/extensionMode 枚举白名单）由 shared
+ * isPiLaunchPreset 单点守卫（W-RT-1 收编：本文件旧 VALID_TOOL_MODES /
+ * VALID_EXTENSION_MODES 双轨白名单已删，白名单 SSOT = shared pi-preset.ts）。
+ * 脏数据（如导入文件里 toolMode: "DROP TABLE"）不在白名单 → 返回 undefined，preset
+ * 被丢弃，避免 resolveToolArgs/resolveExtensionPaths 的 switch 落空。
  *
- * W-RT-1：额外校验 toolMode/extensionMode 必须在枚举白名单内（VALID_TOOL_MODES /
- * VALID_EXTENSION_MODES）。脏数据（如导入文件里 toolMode: "DROP TABLE"）不在白名单 →
- * 返回 undefined，preset 被丢弃，避免 resolveToolArgs/resolveExtensionPaths 的 switch 落空。
+ * 可选字段是**字段级/段级折叠**（非整条丢弃）：数组型字段（allowedTools 等）非
+ * string[] 只丢该字段；模式提示词畸形/超限只丢该段。均记 issue + warn，不丢整个 preset。
+ * 整条拒绝只发生在写路/导入路（validatePresetPrompt）。
  */
 function coercePreset(raw: unknown): PiLaunchPreset | undefined {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
-  const r = raw as Record<string, unknown>
-  const toolMode = r['toolMode']
-  const extensionMode = r['extensionMode']
-  if (
-    typeof r['id'] !== 'string' ||
-    typeof r['name'] !== 'string' ||
-    typeof r['builtin'] !== 'boolean' ||
-    typeof r['order'] !== 'number' ||
-    typeof toolMode !== 'string' ||
-    typeof extensionMode !== 'string' ||
-    // W-RT-1：枚举白名单校验——脏数据（非合法 mode 值）丢弃
-    !(VALID_TOOL_MODES as readonly string[]).includes(toolMode) ||
-    !(VALID_EXTENSION_MODES as readonly string[]).includes(extensionMode)
-  ) {
-    return undefined
+  if (!isPiLaunchPreset(raw)) return undefined
+  // 守卫已把 raw narrow 到 PiLaunchPreset，直接浅拷贝（无需双重断言）。
+  // 可选字段此刻未经校验（isPiLaunchPreset 只保证必填契约），下方逐项折叠。
+  const preset: PiLaunchPreset = { ...raw }
+  const issues: string[] = []
+  coercePresetStringArrayFields(preset, issues)
+  // 模式提示词段级折叠：畸形/超限只丢该段 + warn，不丢整个 preset。
+  const { value: prompt, issues: promptIssues } = coercePresetPrompt(raw.prompt)
+  issues.push(...promptIssues)
+  if (issues.length > 0) {
+    logger.warn(`[preset-service] preset '${preset.id}' 读路折叠：${issues.join('；')}`)
   }
-  // 必填字段已验证，其余字段直接透传（PiLaunchPreset 的可选字段保持 unknown→具体类型由调用方信任）
-  // 双重断言：先 unknown 再 PiLaunchPreset（r 是 Record<string, unknown>，直接断言 TS 报不重叠）。
-  return { ...(r as unknown as PiLaunchPreset) }
+  if (prompt === undefined) {
+    // raw 可能带畸形 prompt（已 spread 进来的非对象/超限值），必须显式移除。
+    delete preset.prompt
+  } else {
+    preset.prompt = prompt
+  }
+  return preset
 }
 
 /** 按 id upsert（存在则替换，不存在则追加）。就地修改 presets 数组。 */

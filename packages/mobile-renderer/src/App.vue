@@ -11,7 +11,7 @@
 //   输入草稿，BM5），仅壳顶部插轻量断线条
 // - 首连尚未 connected：轻量「连接中」呈现（无重 UI；D8 裁决③：不复用桌面 runtime 不可用状态条）
 //
-// companion 区挂 ui CompanionBand（AskUserForm 是其 askUser method 的内部子组件）；
+// companion 区挂 ui CompanionBand（简单 dialog 渲染；form/审批类由桌面壳 useExtensionUI 消费面独占）；
 // source/transport 经 companion-bridge provide（回传走 core 既有通路，D7 ask-user 行）。
 // 权限审批弹窗（D7「手机可批」行）全局挂根：bus 'plugin-permission-request' →
 // companion-bridge 弹窗状态 → PermissionRequestDialog；回传经 provide 的
@@ -133,7 +133,7 @@ watch(isConnected, (connected) => {
             <MobileMessageStream :session-id="activeSessionId" />
           </main>
 
-          <!-- companion（B 伴随）：ui CompanionBand（AskUserForm 随 askUser method 路由渲染；
+          <!-- companion（B 伴随）：ui CompanionBand（简单 dialog 渲染；
                无请求时组件 v-if 自隐藏，容器保留 testid 锚点） -->
           <section class="mobile-shell__companion shrink-0" data-testid="zone-companion">
             <CompanionBand :session-id="activeSessionId" />

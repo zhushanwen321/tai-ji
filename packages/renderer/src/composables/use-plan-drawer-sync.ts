@@ -1,0 +1,72 @@
+/**
+ * usePlanDrawerSync —— drawer「计划产物」tab 自动打开接线（plan 模式重设计 u1-drawer-tab，
+ * 设计 §3.1 步骤②：drawer 自动打开「计划产物」tab）。
+ *
+ * ADR-0053 per-session pendingOpen 语义（事件驱动的打开 ≠ 直开）在本接线的落地形态：
+ * - 触发边界（仅同 session 内的状态翻转）：docs 0→n（首份产物就绪；P3-5 由 ===1 放宽为
+ *   >0——两份 register-doc 落进投影防抖同窗的 0→2 批量跳变同样开窗）。docs n→n+1 不触发——
+ *   tab 已在，L2 文档清单由 u1-docs-panel 响应式驱动，无需重开 drawer。isActive 翻转
+ *   不开窗（设计 plan-mode-ux-refactor §3.2：激活即开窗时 docs 尚空，drawer 只能呈现
+ *   pending/降级占位——「激活即空弹」P-C 已随该设计删除，首份产物就绪才是有内容的
+ *   开窗时机）。
+ * - 切走不打开：sid 变化的求值只更新基线（回调首行 sid 比对 return）——后台 session 的
+ *   plan 激活绝不抢焦点（D1：plan 面只服务焦点 session 的显示语义）。
+ * - 切回不重复打开：切回时无新翻转（同上 sid 比对 return），只有再次跨越触发边界才提示；
+ *   挂载即有的状态（重开 session 恢复 isActive=true / docs 已有）同理不打开——watch 非
+ *   immediate，挂载态是基线，用户主动重开 session 是有意图动作。
+ * - 已开不重发：drawer 打开中不动用户当前 tab（用户在看其他 tab 时被拽回是打断）。
+ *   drawer 关闭后的再次翻转（如新一轮 docs 重置后 0→1）仍会提示——「手动关闭」尊重的
+ *   是当次提示，新事件（首份产物就绪）是新提示。
+ *
+ * pendingOpen 残留面说明：core 的 pendingOpen 标记机制已随 tasks 域移除
+ * （coordination.ts [P4 s5]），本接线以「同 sid 翻转边界 + 焦点比对」达到同一行为契约
+ * （非焦点不直开 / 切回不重发），不需要跨切换的显式标记——标记的「未看过待提示」语义
+ * 由触发边界的瞬时性承载（错过即不补，下一次跨越边界再提示）。
+ *
+ * 触发源 = planStore 焦点分区视图（usePlanSync 的 WS 帧 applyFrame / 首拉 loadPlanState
+ * 写入），本 composable 只读不写 store；drawer 控制态经 core 公开 API（openDrawerTab），
+ * 与 useSessionTrace 的 drawer 联动同形态。
+ *
+ * 前置依赖：planStore.focusedSid 的注入方 = PlanModeBar（Panel 宿主内、composer 下方，
+ * setup 内 usePlanState 的 watch immediate → syncFocus）。本接线自身不注入焦点——
+ * 因此注入方必须与本接线的消费宿主（PanelContainer）同处一条单 Panel 宿主链
+ * （PanelContainer 恒单 Panel），注入方脱离该宿主关系单独挂载时 sid 恒 null、永不触发。
+ *
+ * 必须在组件 setup 同步调用（消费方 = PanelContainer）。
+ */
+import { watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useDrawerControl, openDrawerTab } from '@taiji/core/domain/drawer'
+import { usePlanStore } from '@/stores/plan-store'
+
+/** watch 源快照（字段级比较用；docsCount 归一为数字，避免数组引用比较永不等） */
+interface PlanDrawerSnapshot {
+  sid: string | null
+  docsCount: number
+}
+
+export function usePlanDrawerSync(): void {
+  const planStore = usePlanStore()
+  // storeToRefs 保响应性（store 实例属性访问会解包 computed 丢 ref 形态）
+  const { focusedSid, planView } = storeToRefs(planStore)
+  const { isOpen } = useDrawerControl()
+
+  watch(
+    (): PlanDrawerSnapshot => ({
+      sid: focusedSid.value,
+      docsCount: planView.value?.docs?.length ?? 0,
+    }),
+    (cur, prev) => {
+      // 切 session（含切走/切回）：只更新基线不打开（pendingOpen 语义：非焦点不直开、
+      // 切回无新翻转不重发）
+      if (!cur.sid || cur.sid !== prev.sid) return
+      // 首份产物边界 = prev 0 且 cur > 0（P3-5：原判式 ===1 会漏掉两份 register-doc 落进
+      // runtime 投影 300ms 防抖同窗的 0→2 批量跳变）
+      const firstDocs = prev.docsCount === 0 && cur.docsCount > 0
+      if (!firstDocs) return
+      // 已开不重发：drawer 打开中不动用户当前 tab
+      if (isOpen.value) return
+      openDrawerTab('plan')
+    },
+  )
+}

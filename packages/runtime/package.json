@@ -16,11 +16,14 @@
     "@iarna/toml": "^2.2.5",
     "@taiji/core": "workspace:*",
     "@zhushanwen/extension-protocol": "workspace:*",
+    "@zhushanwen/session-core": "workspace:*",
     "@zhushanwen/session-delivery": "workspace:*",
+    "@zhushanwen/zcode-session-source": "workspace:*",
     "@taiji/shared": "workspace:*",
     "@zhushanwen/pi-file-lock": "workspace:*",
     "@zhushanwen/pi-rpc": "workspace:*",
     "@zhushanwen/subagent-core": "workspace:*",
+    "@zhushanwen/subagent-engine-sdk": "workspace:*",
     "taiji-plugin-sdk": "workspace:*",
     "chokidar": "^4.0.1",
     "fast-glob": "^3.3.3",
@@ -30,6 +33,7 @@
     "ws": "^8"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.4",
     "@types/node": "^22",
     "@types/proper-lockfile": "^4.1.4",
     "@types/semver": "^7.7.1",

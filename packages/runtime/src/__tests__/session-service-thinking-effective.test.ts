@@ -8,7 +8,7 @@
  * 锁定：
  * - pi 生效值 ≠ 请求值 → 返回生效值 + 内存缓存（getSummary 投影源）写生效值
  * - get_state 异常形态（thinkingLevel 缺失/非 string）→ 请求值兜底不炸
- * - 无活跃进程 → 请求值兜底（行为同旧版）
+ * - 无活跃进程 → 先 ensureActive（U2/D7）；激活失败显性化（不再请求值兜底假成功）
  *
  * mock 构造照抄 session-service-w07-bus.test.ts makeEnv（被测方法路径不消费
  * extensionService/sessionStore 等依赖，{} as never 占位）。
@@ -88,10 +88,13 @@ describe('SessionService.setThinkingLevel 返回 pi 生效值（P3）', () => {
     expect(returned).toBe('low')
   })
 
-  it('无活跃进程 → 请求值兜底（行为同旧版）', async () => {
+  it('无活跃进程 → 走 ensureActive 拉活（U2/D7：不再「请求值兜底 + 内存直写」假成功）', async () => {
+    // 无 client 的 session 不存在（本 env 未注册 s1）→ 激活阶段失败显性化：
+    // SESSION_ACTIVATE_FAILED（无码错误包装）或既有码透传，且**不返回请求值**。
     const { svc } = makeEnv(() => 'high', false)
-    const returned = await svc.setThinkingLevel('s1', 'low')
-    expect(returned).toBe('low')
+    await expect(svc.setThinkingLevel('s1', 'low')).rejects.toMatchObject({
+      code: expect.stringMatching(/^(SESSION_ACTIVATE_FAILED|SESSION_NOT_FOUND)$/),
+    })
   })
 })
 

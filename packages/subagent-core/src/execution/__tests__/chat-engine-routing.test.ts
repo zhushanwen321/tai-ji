@@ -395,7 +395,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
   });
 
   it("[D3-④] zcode + maxTurns → 同步拒绝（record 创建前，不产生孤儿 record）——旧形态的 engine.run 内异步拒绝废弃", async () => {
-    // 旧形态：Service 层预检不查 maxTurns → record 创建 + kickOffEngineRun →
+    // 旧形态：Service 层预检不查 maxTurns → record 创建 + kickOffEngineRun（已删）→
     // zcode run 内硬编码 shape 检查 throw → failed record（异步化）。
     // D3-④ 检查点钉死后：capabilities.maxTurns 位驱动，record 创建前同步 throw。
     const { service, zcode } = setup(agentDir);
@@ -550,7 +550,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
       zcode.runImpl = () => Promise.resolve({ handle: fakeHandle(), outcome: doneOutcome("ok") });
       piEngine.runImpl = () => Promise.resolve({ handle: fakeHandle(), outcome: doneOutcome("ok") });
 
-      // chat 域 background 派发（runEngineTask 的 runCtx 构造点）
+      // chat 域 background 派发（kickOffChatRound 的 runCtx 构造点）
       await service.execute(baseOpts(agentDir, { engine: "zcode" }));
       await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
       expect(zcode.runs[0].ctx.sessionRootId).toBe("test-session");
@@ -842,7 +842,7 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
   });
 
   it("[池槽回归] 引擎 run 完成后 release 并发槽：连续 7 次（> maxConcurrent=6）后第 7 次不被永久阻塞", async () => {
-    // review MF1：kickOffEngineRun 旧实现 acquire 后无 release——每次引擎后台 run 泄漏
+    // review MF1：kickOffEngineRun（已删）旧实现 acquire 后无 release——每次引擎后台 run 泄漏
     // 一个槽，累计 maxConcurrent(6) 次后全部 background subagent 在 acquire 队列挂死
     process.env.TAIJI_AGENT_DATA_DIR = agentDir;
     const { service, zcode } = setup(agentDir);

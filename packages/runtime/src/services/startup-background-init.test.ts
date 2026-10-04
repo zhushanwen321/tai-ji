@@ -22,9 +22,11 @@ import {
   TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS,
   TAIJI_RUNTIME_PI_RECLAIM_TICK_MS,
   TAIJI_RUNTIME_PI_RECLAIM_VIEWED_WINDOW_MS,
+  TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS,
   DEFAULT_PI_RECLAIM_IDLE_MS,
   DEFAULT_PI_RECLAIM_TICK_MS,
   DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS,
+  DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS,
 } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import type { ExtensionService } from './extension-service.js'
@@ -325,11 +327,12 @@ describe('⑩ 空闲 pi 回收 reaper 挂载（idle-pi-reclamation D4，u3b）',
 })
 
 describe('resolveReclaimConfig（idle-pi-reclamation D4 env 覆盖解析）', () => {
-  it('env 全缺失时返回 shared 默认三旋钮', () => {
+  it('env 全缺失时返回 shared 默认四旋钮', () => {
     expect(resolveReclaimConfig({})).toEqual({
       idleThresholdMs: DEFAULT_PI_RECLAIM_IDLE_MS,
       tickIntervalMs: DEFAULT_PI_RECLAIM_TICK_MS,
       viewedWindowMs: DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS,
+      pendingUiRequestMaxAgeMs: DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS,
     })
   })
 
@@ -342,6 +345,47 @@ describe('resolveReclaimConfig（idle-pi-reclamation D4 env 覆盖解析）', ()
     expect(cfg.idleThresholdMs).toBe(5 * 60 * 1000)
     expect(cfg.viewedWindowMs).toBe(10 * 60 * 1000)
     expect(cfg.tickIntervalMs).toBe(DEFAULT_PI_RECLAIM_TICK_MS)
+    expect(cfg.pendingUiRequestMaxAgeMs).toBe(DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS)
+  })
+
+  it('v6 上界旋钮：TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS 合法值生效', () => {
+    // 3h > 默认 IDLE 2h（避免无意触发「上界 < 空闲阈」warn）
+    const cfg = resolveReclaimConfig({ [TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS]: String(3 * 60 * 60 * 1000) })
+    expect(cfg.pendingUiRequestMaxAgeMs).toBe(3 * 60 * 60 * 1000)
+  })
+
+  it('r5 联动护栏：上界 < 空闲阈值时打 warn（豁免恒不命中 = 死代码），但不 throw', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const cfg = resolveReclaimConfig({
+        [TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS]: String(2 * 60 * 60 * 1000),
+        [TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS]: String(60 * 60 * 1000), // 1h < 2h
+      })
+      expect(cfg.pendingUiRequestMaxAgeMs).toBe(60 * 60 * 1000)
+      expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('pending-UI-request exemption is unreachable'))).toBe(true)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('r5 联动护栏对照：上界 ≥ 空闲阈值不 warn', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      resolveReclaimConfig({
+        [TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS]: String(2 * 60 * 60 * 1000),
+        [TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS]: String(6 * 60 * 60 * 1000),
+      })
+      expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('exemption is unreachable'))).toBe(false)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('v6 上界旋钮：非数字回落默认（含其余非法形态）', () => {
+    expect(resolveReclaimConfig({ [TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS]: 'abc' }).pendingUiRequestMaxAgeMs)
+      .toBe(DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS)
+    expect(resolveReclaimConfig({ [TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS]: '0' }).pendingUiRequestMaxAgeMs)
+      .toBe(DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS)
   })
 
   it.each([

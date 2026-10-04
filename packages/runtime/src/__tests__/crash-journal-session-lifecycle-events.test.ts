@@ -51,7 +51,7 @@ const fakeProc = {
       return fakeProc.stderr
     }),
   },
-  stdin: { write: vi.fn(() => true), once: vi.fn() },
+  stdin: { write: vi.fn(() => true), once: vi.fn(), on: vi.fn() }, // on: RT-2#1 stdin 流错误源头接线
   // 模拟真实进程：SIGTERM 后异步死亡（信号致死 → exit code null），kill() 快速收口。
   kill: vi.fn((signal?: string) => {
     if (signal === 'SIGTERM' || signal === 'SIGKILL') {
@@ -91,7 +91,15 @@ vi.mock('@taiji/shared', async (importOriginal) => {
   return { ...actual, ENV_WHITELIST_PREFIXES: ['PATH', 'HOME', 'USER', 'LANG', 'TERM'] }
 })
 
-vi.mock('@taiji/shared/paths', () => ({ getDataDir: () => '/mock/home/.taiji' }))
+// RT-4#1 起销毁链 checkpoint.detach 步经 runDestroyStepIsolated 隔离（失败落 crash 台账），
+// mock 必须带 RUN_* 常量让 checkpoint store 单例可构造——否则构造期 throw 会在台账里
+// 多出 destroy-chain-step-failed 行，污染本文件「抑制语义 / crash 恰一条」断言。
+vi.mock('@taiji/shared/paths', () => ({
+  getDataDir: () => '/mock/home/.taiji',
+  RUN_CHECKPOINT_FILENAME: 'runtime-checkpoint.json',
+  RUN_CHECKPOINT_FAILED_PREFIX: 'runtime-checkpoint-failed-',
+  RUN_CHECKPOINT_FAILED_RETENTION: 3,
+}))
 
 vi.mock('../infra/pi/pi-paths.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../infra/pi/pi-paths.js')>()

@@ -29,6 +29,7 @@ const MODELS: ModelInfo[] = [
 beforeEach(() => {
   setActivePinia(createPinia())
   __resetSettingsStoreForTesting()
+  document.body.innerHTML = ''
 })
 
 describe('ModelSelectPopover 纯受控 + store 数据源', () => {
@@ -107,20 +108,24 @@ describe('ModelSelectPopover 纯受控 + store 数据源', () => {
     expect(providers).toContain('OpenAI')
   })
 
-  it('U11: 搜索过滤——query="cla" 时仅渲染 Claude 相关', async () => {
+  it('U11: 搜索过滤——输入 "cla" 仅渲染 Claude 相关（经 ModelPickerPanel 搜索框）', async () => {
     getSettingsStore().models.value = MODELS
     const wrapper = mount(ModelSelectPopover, {
       props: { selected: 'anthropic/claude-4' },
     })
     await wrapper.vm.$nextTick()
-    // 设 query（script setup ref 在实例 proxy 上已解包为字符串）触发 groups 重算
-    ;(wrapper.vm as unknown as { query: string }).query = 'cla'
+    // 打开 popover（内容 teleport 到 body）
+    ;(wrapper.vm as unknown as { open: boolean }).open = true
     await wrapper.vm.$nextTick()
-    const groups = (wrapper.vm as unknown as { groups: { provider: string; models: ModelInfo[] }[] }).groups
-    expect(groups).toHaveLength(1)
-    expect(groups[0].provider).toBe('Anthropic')
-    expect(groups[0].models).toHaveLength(1)
-    expect(groups[0].models[0].name).toBe('Claude 4')
+    // 搜索框由抽出的 ModelPickerPanel 提供（用户可见 DOM 断言）
+    const search = document.body.querySelector('[data-testid="model-picker-search"]') as HTMLInputElement | null
+    expect(search).not.toBeNull()
+    search!.value = 'cla'
+    search!.dispatchEvent(new Event('input', { bubbles: true }))
+    await wrapper.vm.$nextTick()
+    const bodyText = document.body.textContent ?? ''
+    expect(bodyText).toContain('Claude 4')
+    expect(bodyText).not.toContain('GPT-4')
   })
 
   it('U12: store 空时渲染引导空态（P2：模型池为空 → 引导导入凭据/配置，区别于搜索无结果）', async () => {

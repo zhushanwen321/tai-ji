@@ -16,6 +16,16 @@
       <span class="text-[11px] text-neutral-mid">{{ t('settings.loadPaths.priorityHint') }}</span>
     </div>
 
+    <!-- RD-4#1 保存失败常驻态：红字标注当前显示的是最近落盘值（不得只靠 toast，toast 会自动消失） -->
+    <p
+      v-if="saveError"
+      data-testid="load-paths-save-error"
+      class="mb-1.5 flex items-center gap-1 text-[11px] text-danger"
+    >
+      <AlertCircle class="size-3 shrink-0" />
+      {{ t('settings.loadPaths.saveErrorHint') }}
+    </p>
+
     <div class="overflow-hidden rounded-card bg-card">
       <div
         v-for="scope in SCOPES"
@@ -195,6 +205,8 @@ const props = defineProps<{
   kind: 'skill' | 'agent' | 'extension'
   /** 操作禁用（扫描中等场景） */
   disabled?: boolean
+  /** 保存失败常驻态（RD-4#1）：置位时 localDirs 回弹至最近落盘值（props.dirs）并常驻红字标注 */
+  saveError?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -216,6 +228,16 @@ watch(
     localDirs.value = next.map((d) => ({ ...d }))
   },
   { deep: true },
+)
+
+// RD-4#1 失败回弹：保存失败时 runtime 不广播（仅成功落盘后广播），store 仍持最近落盘值，
+// 而本组件的乐观编辑（commit）已让 localDirs 偏离。saveError 置位时强制从 props.dirs
+// （store 广播镜像）重拉，界面回弹至最近落盘值——不引入第二套本地状态。
+watch(
+  () => props.saveError,
+  (failed) => {
+    if (failed) localDirs.value = props.dirs.map((d) => ({ ...d }))
+  },
 )
 
 const projectDirs = computed(() => localDirs.value.filter((d) => d.scope === 'project'))

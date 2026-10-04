@@ -47,6 +47,8 @@ function mockCtx(modelService: unknown) {
     configService: {
       listProviders: vi.fn(() => PROVIDERS),
       getScopedModels: vi.fn(() => []),
+      // M4/RT-3#4：config.getProviders reply 携带 models.json 降级态标志
+      isModelsStoreCorrupted: vi.fn(() => false),
     },
     sessionService: {},
     modelService,

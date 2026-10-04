@@ -63,6 +63,9 @@ function makePorts(): ConnectionPorts {
       }),
       onRuntimeRestarting: vi.fn().mockReturnValue(() => {}),
       onRuntimeFailed: vi.fn().mockReturnValue(() => {}),
+      // RD-3#2：启动失败真因消费端口（推送置 failed 短路徒劳重连 + init 拉取兜底）
+      onRuntimeError: () => () => {},
+      getRuntimeStartError: async () => null,
       restartRuntime: vi.fn().mockResolvedValue(undefined),
     },
     visibility: {

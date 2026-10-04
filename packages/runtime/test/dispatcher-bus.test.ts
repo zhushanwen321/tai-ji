@@ -300,6 +300,39 @@ describe('message-dispatcher bus integration', () => {
     expect(compactionCalls).toHaveLength(0)
   })
 
+  it('[RT-4#10] compact 两连发：预检通过即置位（先于 RPC），第二发在事件回流前已被预检拦截', async () => {
+    // 第一发 RPC 挂起（模拟压缩进行中、pi compaction_start 事件未回流的窗口——
+    // 旧实现此窗口 isCompacting 恒 false，第二发预检照样通过 → 双 compaction 事件流）
+    let releaseFirst!: (v: { summary: string; tokensBefore: number; estimatedTokensAfter: number }) => void
+    const firstGate = new Promise<{ summary: string; tokensBefore: number; estimatedTokensAfter: number }>((resolve) => { releaseFirst = resolve })
+    const { dispatcher, compactFn, session } = makeMocks()
+    compactFn.mockImplementation(() => firstGate)
+
+    const first = dispatcher.compact('s1')
+    // async 函数体同步执行到第一个 await（client.compact）：置位（'compacting-start' →
+    // isCompacting=true 派生）已落 session 视图
+    expect(session.isCompacting).toBe(true)
+    expect(session.occupancy?.compacting).toBe(true)
+
+    // 第二发：预检读 isCompacting=true → 拒绝（不发出第二个 RPC）
+    await expect(dispatcher.compact('s1')).rejects.toThrow('Cannot compact while compaction already running')
+    expect(compactFn).toHaveBeenCalledTimes(1)
+
+    // 第一发完成：finally 复位（compacting-end）
+    releaseFirst({ summary: 'ok', tokensBefore: 100, estimatedTokensAfter: 50 })
+    await first
+    expect(session.isCompacting).toBe(false)
+    expect(session.occupancy?.compacting).toBe(false)
+  })
+
+  it('[RT-4#10] compact RPC 失败：finally 复位置位（transport 级失败不卡 compacting）', async () => {
+    const { dispatcher, compactFn, session } = makeMocks()
+    compactFn.mockRejectedValue(new Error('transport gone'))
+    await expect(dispatcher.compact('s1')).rejects.toThrow('transport gone')
+    expect(session.isCompacting).toBe(false)
+    expect(session.occupancy?.compacting).toBe(false)
+  })
+
   // ── null safety ──
 
   it('messageBus undefined → no crash on sendMessage', async () => {

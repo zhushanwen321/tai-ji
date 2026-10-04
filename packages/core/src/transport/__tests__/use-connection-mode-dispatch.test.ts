@@ -79,6 +79,8 @@ function buildIpc(spec: PortsSpec) {
     }),
     onRuntimeRestarting: vi.fn().mockReturnValue(() => {}),
     onRuntimeFailed: vi.fn().mockReturnValue(() => {}),
+    onRuntimeError: vi.fn().mockReturnValue(() => {}),
+    getRuntimeStartError: vi.fn().mockResolvedValue(null),
     restartRuntime: vi.fn().mockResolvedValue(undefined),
   }
 }

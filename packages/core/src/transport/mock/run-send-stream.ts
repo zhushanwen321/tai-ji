@@ -45,6 +45,20 @@ export interface SendStreamDeps {
 /** mock 固定回复前缀（不模拟失败，D7）—— 仅 runSendStream 使用 */
 const CANNED_REPLY = "好的，我来处理这个请求。（mock 模拟回复）";
 
+/** markdown 宽表回复（关键词 'md-table' 触发）—— 复刻真实对话流里的 CJK 短标签列 +
+ *  长 inline code token 组合（auto table layout 在 max-content/max-width 夹紧下会把短中文列
+ *  压向 min-content 的形态），供 e2e/markdown-table-layout.spec.ts 的列宽地板回归守卫取数。
+ *  哨兵词取 ASCII 形态，避免自然语言误触发（同 emitUiRequest 的 'ui-select' 哨兵纪律）。 */
+const TABLE_REPLY = [
+  "| 维度 | pi | zcode | 风险 |",
+  "| --- | --- | --- | --- |",
+  "| 报告目录 | `~/.review-fix-loop/<repo-slug>/<runId>/`（含时间戳） | `.tmp/review-fix-loop/rfl-<short-HEAD>/` | 同 HEAD 二次发起复用同目录、产物覆盖写——两次独立 run 的报告互覆，失去事后对账能力 |",
+  "| 参数面 | `reviewPrompt` / `fixPrompt` / `fixAgent` / `recheckAfterFix` / `convergeNewIssues` / `fallbackScan` / `batchNames` / `aggregatorModel` | 全无 | zcode 定制能力弱 |",
+].join("\n");
+
+/** 'md-table' 哨兵词判定（大小写不敏感，容许 md_table / md table 分隔变体） */
+const TABLE_TRIGGER_RE = /md[-_ ]?table/i;
+
 /** 按字符/词切分，证明逐块推送 —— 仅本文件流式阶段 helper 使用 */
 function splitChunks(text: string): string[] {
   return (
@@ -271,7 +285,11 @@ export async function runSendStream(
 ): Promise<void> {
   const { nextId, emit, sleep, isCancelled, TIMING } = deps;
   const messageId = nextId("m");
-  const reply = `已处理："${text}"。\n${CANNED_REPLY}`;
+  // 哨兵词 'md-table' → markdown 宽表回复（列宽地板 e2e 守卫数据源，见 TABLE_REPLY）；
+  // 其余走固定回复。表格前留空行：段落到表格显式分块，避免依赖 GFM 的段落中断行为。
+  const reply = TABLE_TRIGGER_RE.test(text)
+    ? `已处理："${text}"。\n\n${TABLE_REPLY}`
+    : `已处理："${text}"。\n${CANNED_REPLY}`;
 
   emit(sessionId, {
     type: "message.message_start",

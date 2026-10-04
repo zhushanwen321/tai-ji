@@ -540,6 +540,77 @@ if echo "$STAGED_FILES" | grep -qE "^(packages|extensions|apps)/.*(\.test\.(ts|m
 fi
 
 # ============================================================================
+# 2g. review-fix-loop 双实现锁步守卫
+#     scripts/check-rfl-parity.mjs：review+fix 循环有两份实现（pi 内置
+#     packages/subagent-core/workflows/review-fix-loop-utils.cjs / zcode 原生
+#     ~/.zcode/workflows/review-fix-loop.dwf.ts），共享语义靠注释文字约定维系同步。
+#     2026-09-20 比对证实该约定不可靠（调度去重修复只在 pi 侧、早退点台账守门
+#     只在 pi 侧），本守卫用同一语料跑两侧 planReviewerOrder 对账调度结果 + 池/
+#     阈值常量，并把「order 恒为输入排列」去重不变量双侧断言。zcode 文件不存在
+#     时跳过双实现对账，但 pi 侧去重不变量仍照跑（该失败不被 SKIP 吞掉）。
+#     复用 SKIP_CODE_RULES_CHECK 开关。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^packages/subagent-core/workflows/review-fix-loop|^scripts/check-rfl-parity\.mjs$"; then
+    print_section "[review-fix-loop 双实现锁步守卫]"
+
+    if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
+        if ! node scripts/check-rfl-parity.mjs; then
+            echo -e "${RED}[ERROR] 双实现已漂移——改一侧必须同步另一侧（pi: review-fix-loop-utils.cjs / zcode: ~/.zcode/workflows/review-fix-loop.dwf.ts）${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] review-fix-loop 双实现锁步守卫已跳过${NC}"
+    fi
+fi
+
+# ============================================================================
+# 2h. zcode-session-source bun 驱动双跑（D3 源级双跑，session-reader-shared-core U5）
+#     scripts/check-bun-driver.mjs：pi 扩展宿主是编译版 bun 二进制，bun:sqlite 是
+#     生产宿主唯一可用 sqlite 驱动（bun 下 import('node:sqlite') 失败，P-bun-host
+#     实测）。ext 常规 vitest 跑 node 只覆盖 node:sqlite 路径——bun 驱动路径是
+#     F4「本地绿产品挂」陷阱的同构盲区，同一断言集必须在 bun 运行时再跑一遍。
+#     fail-open 仅限 bun 缺失场景（输出安装指引后放行，bun 趟由 CI 承担）；
+#     测试失败必红，无放行分支。--require-bun（CI 用）把缺失翻转为红。
+#     注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底；
+#     AGENTS.md SKIP_* 清单登记成本见其清单注释）。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^packages/zcode-session-source/|^scripts/check-bun-driver\.mjs$"; then
+    print_section "[zcode-session-source bun 驱动双跑]"
+
+    if ! node scripts/check-bun-driver.mjs; then
+        echo -e "${RED}[ERROR] bun 趟未通过——bun:sqlite 驱动路径（生产宿主实际路径）有断言未过，按上方明细修复后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] bun 驱动双跑检查通过${NC}"
+fi
+
+# ============================================================================
+# 2h-2. P-bundle 门（session-reader-shared-core 附录 A，D2 生死门）
+#     scripts/check-pbundle.mjs：builtin staged 产物内 sqlite 驱动探测代码必须保持
+#     「运行期解析」形态——spec 被静态化（esbuild 升级 / 驱动实现回改字面量）时
+#     bundle 成功但 staged 运行期 Cannot find module，比不拆更糟。触发面 = staged
+#     命中 staged 产物的两个源（reader 扩展 / zcode-session-source）或门脚本本体；
+#     CI invariants 免 staged 前提 --rebuild 全量兜底（D7 通则，与 2h 同一挂载理由）。
+#     --rebuild 先重建 staged（bundle-extensions <1s，防「检查的是滞后产物」）；
+#     不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^packages/zcode-session-source/|^extensions/universal/session-reader/|^scripts/check-pbundle\.mjs$"; then
+    print_section "[P-bundle 门（staged 驱动 spec 运行期解析形态）]"
+
+    if ! node scripts/check-pbundle.mjs --rebuild; then
+        echo -e "${RED}[ERROR] P-bundle 门未通过——staged 产物内驱动 spec 被静态化，按上方 [FIX] 修复后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] P-bundle 门检查通过${NC}"
+fi
+
+# ============================================================================
 # 3. 自定义代码规范检查（原生 HTML 元素、Emoji、自定义 CSS）
 # ============================================================================
 
@@ -945,17 +1016,20 @@ fi
 # 架构约束登记检查（docs/constraints.json SSOT 的 machine enforcement 前置拦截）
 #   - check_pi_type_leak.py         C-comm-02：services/transport 禁 PiXxx 类型（allowlist=存量待治理）
 #   - check_services_infra_import.py C-comm-03：services 禁白名单外 infra value import
+#   - check_infra_services_import.py C-comm-01：infra 禁白名单外 services value import（三层单向补向）
 #   - check_shared_node_builtin.py  C-state-05：shared 禁 node: 内置 import
 #   - check_runtime_meta_url.py     C-build-01：runtime 禁无 guard 的 import.meta.url / globalThis.__dirname
 #   - check_staged_forbidden_lines.py C-ext-07/C-proc-04：staged 新增行禁 extensions console.warn/error
 #                                    与无说明的 eslint-disable（行级增量，存量不拦）
+#   - check_layering_registry_sync.py S2②：runtime-layering §3 表行 ↔ 守卫
+#                                    DOCUMENTED_MODULES 双向对账（登记漂移即红，MF-5-1 形态）
 #   注：与 R1 同例不设独立跳过开关，仅受 SKIP_ALL_CHECKS 总闸管辖。
 # ============================================================================
 
 if [ "$SKIP_ALL_CHECKS" != "1" ]; then
     print_section "[架构约束登记检查]"
 
-    for CONSTRAINT_CHECKER in check_pi_type_leak.py check_services_infra_import.py check_shared_node_builtin.py check_runtime_meta_url.py check_staged_forbidden_lines.py; do
+    for CONSTRAINT_CHECKER in check_pi_type_leak.py check_services_infra_import.py check_infra_services_import.py check_shared_node_builtin.py check_runtime_meta_url.py check_staged_forbidden_lines.py check_layering_registry_sync.py; do
         CHECKER_PATH=".githooks/$CONSTRAINT_CHECKER"
         if [ ! -f "$CHECKER_PATH" ]; then
             echo -e "${YELLOW}[WARN] 找不到检查脚本 $CHECKER_PATH${NC}"
@@ -975,6 +1049,38 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
     echo -e "${GREEN}[OK] 架构约束登记检查通过${NC}"
 else
     echo -e "${YELLOW}[SKIP] 架构约束登记检查已跳过${NC}"
+fi
+
+# ============================================================================
+# 非.workspace 结构接线对账（S1，PR #20 组 D 守卫化）
+#   node scripts/check-structure-wiring.mjs：管辖区（packages/ extensions/
+#   resources/plugins/）含 package.json 但不在 pnpm-workspace.yaml globs 内的包
+#   必须在 docs/structure-wiring.json 登记各管线接线面（CI typecheck / 测试装配 /
+#   发布线 / coverage 测量面），登记锚点在目标文件中真实存在——新顶层结构
+#   第一笔 commit 只做接线与登记（ed6735b47 一 commit 三坑形态不允许再发生）。
+#   触发面：pnpm-workspace.yaml / docs/structure-wiring.json / 管辖区新增 package.json。
+#   注：不设独立跳过开关，仅受 SKIP_ALL_CHECKS 总闸管辖。
+# ============================================================================
+
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    print_section "[结构接线对账]"
+    STRUCT_WIRING_TRIGGER=0
+    if echo "$STAGED_FILES" | grep -qE "^(pnpm-workspace\.yaml|docs/structure-wiring\.json)$|^(packages|extensions|resources/plugins)/.*package\.json$"; then
+        STRUCT_WIRING_TRIGGER=1
+    fi
+    if [ "$STRUCT_WIRING_TRIGGER" -eq 1 ]; then
+        echo -e "${BLUE}[INFO] 结构接线相关变更，运行对账...${NC}"
+        node scripts/check-structure-wiring.mjs
+        EXIT_CODE=$?
+        if [ $EXIT_CODE -ne 0 ]; then
+            echo ""
+            echo -e "${RED}[ERROR] 结构接线对账失败${NC}"
+            echo -e "${YELLOW}[INFO] 新顶层结构第一笔 commit 只做接线与登记（docs/structure-wiring.json SSOT）${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${GREEN}[OK] 无结构接线相关变更，跳过对账${NC}"
+    fi
 fi
 
 # ============================================================================
@@ -1057,6 +1163,34 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_RUNTIME_BUNDLE_CHECK" != "1" ]; the
     fi
 else
     echo -e "${YELLOW}[SKIP] Runtime Bundle 验证已跳过${NC}"
+fi
+
+# ============================================================================
+# core 域边界铁律 gate（C-state-04 machine enforcement 接线，2026-09-20 R1 评审补：
+# 此前 constraints.json 登记 enforcement=hook 但全仓零调用方，红灯不拦截提交——
+# 声明与磁盘事实漂移）。packages/core/src 有变更时触发：
+# scripts/check-domain-boundaries.sh（AC10 跨域 import + AC11 清空派；
+# AC10 存量基线与 AC11 allowlist 在脚本内登记，新增违规直接拦）。
+# 注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+DOMAIN_BOUNDARY_CHECKER="scripts/check-domain-boundaries.sh"
+
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    if echo "$STAGED_FILES" | grep -q "^packages/core/src/"; then
+        print_section "[core 域边界铁律 gate]"
+        bash "$DOMAIN_BOUNDARY_CHECKER"
+        EXIT_CODE=$?
+        if [ $EXIT_CODE -ne 0 ]; then
+            echo ""
+            echo -e "${RED}[ERROR] core 域边界检查失败（C-state-04）${NC}"
+            echo -e "${YELLOW}[INFO] AC10 跨域 import 经 '@taiji/core/domain/<域>' 公开 API；AC11 per-session 状态经 useSessionScopedState 分区${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${GREEN}[OK] core/src 无变更，跳过域边界检查${NC}"
+    fi
 fi
 
 # ============================================================================
@@ -1597,6 +1731,38 @@ else
 fi
 
 # ============================================================================
+# 引擎开发指南契约投影守卫（docs/extensions/subagents/engine-development-guide.md §12 待建守卫行落地）
+#   staged 命中指南或其投影源（errors.ts / error-codes.ts / engine-manifest.ts /
+#   contract-types.ts）或守卫脚本自身时触发：scripts/check-guide-contract-projection.mjs
+#   ——指南 §3 能力位表 / §4 两层词表 ↔ 源码词表投影一致性（引擎子进程域，2026-09-18
+#   引擎开发指南立项时同步落地）。
+#   契约源码 staged 而指南未同批 staged → 软提示（AGENT SMELL：语义漂移机器不可判，
+#   靠 AGENTS.md 主题索引「更新触发」义务 + 提示兜底；误报率数据出来前不收紧为硬门）。
+#   不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+GUIDE_PROJECTION_STAGED=$(git diff --cached --name-only -- docs/extensions/subagents/engine-development-guide.md packages/subagent-core/src/execution/engine/common/errors.ts packages/subagent-engine-sdk/src/protocol/error-codes.ts packages/subagent-core/src/execution/engine/engine-manifest.ts packages/subagent-engine-sdk/src/protocol/contract-types.ts packages/zcode-subagent-cli/package.json packages/zcode-subagent-cli/src/zcode-engine.ts scripts/check-guide-contract-projection.mjs)
+if echo "$GUIDE_PROJECTION_STAGED" | grep -qE "^docs/extensions/subagents/engine-development-guide\.md$|^packages/subagent-core/src/execution/engine/common/errors\.ts$|^packages/subagent-engine-sdk/src/protocol/error-codes\.ts$|^packages/subagent-core/src/execution/engine/engine-manifest\.ts$|^packages/subagent-engine-sdk/src/protocol/contract-types\.ts$|^packages/zcode-subagent-cli/package\.json$|^packages/zcode-subagent-cli/src/zcode-engine\.ts$|^scripts/check-guide-contract-projection\.mjs$"; then
+    print_section "[引擎指南契约投影守卫]"
+    if [ ! -f "scripts/check-guide-contract-projection.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-guide-contract-projection.mjs（守卫脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-guide-contract-projection.mjs; then
+        echo -e "${RED}[ERROR] 指南契约表与源码词表投影失同步——按上方 ✗ 明细同 commit 更新指南（更新触发义务见根 AGENTS.md 主题索引）后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] 引擎指南契约投影一致${NC}"
+    if echo "$GUIDE_PROJECTION_STAGED" | grep -qE "^packages/subagent-core/src/execution/engine/common/errors\.ts$|^packages/subagent-engine-sdk/src/protocol/error-codes\.ts$|^packages/subagent-core/src/execution/engine/engine-manifest\.ts$|^packages/subagent-engine-sdk/src/protocol/contract-types\.ts$|^packages/zcode-subagent-cli/package\.json$|^packages/zcode-subagent-cli/src/zcode-engine\.ts$" \
+        && ! echo "$GUIDE_PROJECTION_STAGED" | grep -q "^docs/extensions/subagents/engine-development-guide\.md$"; then
+        echo -e "${BLUE}[INFO] 引擎契约面源码已变更且指南未同批 staged——核对 docs/extensions/subagents/engine-development-guide.md 是否需同步（更新触发义务见根 AGENTS.md 主题索引行；纯实现改动可忽略本提示）${NC}"
+    fi
+else
+    echo -e "${GREEN}[OK] 无引擎契约面/指南变更，跳过引擎指南契约投影守卫${NC}"
+fi
+
+# ============================================================================
 # 消息流滚动跟随链路守卫（约束 C-state-11，chat-pin-bottom-fix §4.4 护栏⑤）
 #   staged 命中跟随链路（composables/panel/ 或 MessageStream.vue）或守卫脚本自身时触发：
 #   scripts/check-scroll-follow.mjs —— ① 跟随链路内 scrollToIndex 只许白名单
@@ -1912,6 +2078,7 @@ echo -e "  ${GREEN}[+]${NC} 数据布局字面量守卫（C-pi-14：pi/ 兄弟�
 echo -e "  ${GREEN}[+]${NC} e2e-map SSOT 结构校验（登记表 + 调度脚本变更时触发：结构/幽灵 asset 强校验 + select 匹配逻辑单测）"
 echo -e "  ${GREEN}[+]${NC} CI vitest 目标非空守卫（ci.yml/守卫变更时触发：vitest run 目标逐个 list 干跑非空，G2）"
 echo -e "  ${GREEN}[+]${NC} hook 脚本反模式守卫（install-hooks.sh 变更时触发：VAR=\$(cmd)+EXIT=\$? 组合拦截，G3）"
+echo -e "  ${GREEN}[+]${NC} review-fix-loop 双实现锁步守卫（workflows 变更时触发：pi/zcode 调度结果 + 池/阈值常量对账）"
 echo ""
 echo -e "${CYAN}Hook 脚本位置:${NC} .githooks/"
 echo ""

@@ -70,6 +70,25 @@ describe('useFileTree.loadTree 编排', () => {
     expect(store.getGitStatus('s1', 'a.ts')).toBeUndefined() // overlay 空
   })
 
+  it('RD-5#3 git.status 失败（rejected）→ 降级正确且 console.warn 留痕（含 sid）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const nodes = [{ path: 'a.ts', name: 'a.ts', type: 'file' }]
+    mockFileTree.mockResolvedValueOnce(nodes)
+    mockGitStatus.mockRejectedValueOnce(new Error('git unavailable'))
+
+    const { loadTree } = useFileTree()
+    const store = useFileTreeStore()
+    await loadTree('s1')
+
+    // 降级本身不变：树渲染、overlay 空
+    expect(store.getTree('s1')).toEqual(nodes)
+    expect(store.getGitStatus('s1', 'a.ts')).toBeUndefined()
+    // 留痕：「角标缺失」与「git 挂了」此前不可分（红线 1）
+    const texts = warnSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
+    expect(texts).toContain('s1')
+    warnSpy.mockRestore()
+  })
+
   it('T2.9 非 git 仓库（isRepo=false）→ 不设 overlay', async () => {
     mockFileTree.mockResolvedValueOnce([{ path: 'x', name: 'x', type: 'file' }])
     mockGitStatus.mockResolvedValueOnce({

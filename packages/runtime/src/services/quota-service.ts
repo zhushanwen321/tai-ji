@@ -130,6 +130,22 @@ export interface QuotaServiceOptions {
   providerCredentialResolver: IProviderCredentialResolver
 }
 
+/**
+ * 单形态凭据读取结果（RT-7#4/#7 收口）：ok=明文；missing=无凭证（→ no-credential）；
+ * io-error=读盘/锁失败（→ credential-unavailable，与「确实没有」分流，warn 已带路径）；
+ * unsupported=形态不支持（command / unresolved-env，→ credential-unsupported，禁止下发 HTTP）。
+ */
+type CredentialLookup =
+  | { status: 'ok'; credential: string }
+  | { status: 'missing' }
+  | { status: 'io-error' }
+  | { status: 'unsupported' }
+
+/** 凭据解析出口（resolveCredential）：ok 携带生效形态；其余为可区分失败态（语义同 CredentialLookup）。 */
+type ResolvedQuotaCredential =
+  | { status: 'ok'; credential: string; kind: QuotaAuthKind }
+  | { status: Exclude<CredentialLookup['status'], 'ok'> }
+
 export class QuotaService {
   private cache: QuotaCache
   /** providerId → pending Promise（并发保护） */
@@ -547,7 +563,9 @@ export class QuotaService {
    * 实际执行查询（内部方法）。五个出口（§7.3 改动 4「出口覆盖」）：
    * ① `!fetcher` 早退——不发请求，不经收尾 helper（lastFetchTime 不写；本地判定无请求
    *    无日志，速率受 hover 事件与 renderer markPending 去重双重有界，显式行为变更）；
-   * ② `no-credential`——凭证缺失显式失败（§7.3 改动 1，原为静默返回缓存）；
+   * ② 凭据不可用（§7.3 改动 1，原为静默返回缓存；RT-7#4/#7 后三分）：no-credential
+   *    （凭证链无凭证）/ credential-unavailable（读盘/锁失败）/ credential-unsupported
+   *    （command / unresolved-env 形态，发请求前拦截）；
    * ③ 成功 `cache.update`；④ `fetchFailed(reason)`；⑤ throw → `fetchFailed('network')`。
    * ②-⑤ 全部经 finishFetch 收尾 helper（守卫 + 三件套 + lastFetchTime 单点收口）。
    *
@@ -564,12 +582,20 @@ export class QuotaService {
     const fetcherIdAtStart = fetcher.id
 
     const resolved = await this.resolveCredential(providerId, fetcher.auth)
-    if (!resolved) {
-      // 出口 ②（no-credential，§7.3 改动 1）：凭证缺失显式失败而非静默返回缓存——
-      // 从零日志变为每次一条 warn（表 A #13，失败查询的节流速率前提）
-      logger.warn('[quota] fetch failed', { providerId, reason: 'no-credential' })
+    if (resolved.status !== 'ok') {
+      // 出口 ②（凭据不可用，§7.3 改动 1）：显式失败而非静默返回缓存——每次一条 warn
+      // （表 A #13，失败查询的节流速率前提）。RT-7#4/#7 三分：
+      // - missing → no-credential（凭证链确实没有任何凭证，恢复指引指向填 Key）
+      // - io-error → credential-unavailable（凭证文件读盘/锁失败——路径细节在
+      //   getCredential 侧的 warn；恢复指引指向检查文件/锁，而非误导用户去填已存在的 Key）
+      // - unsupported → credential-unsupported（command / unresolved-env 形态，
+      //   在此拦截，fetchQuota 永不收到形态标记串——禁止以畸形凭据下发外部请求）
+      const reason: QuotaFetchFailureReason = resolved.status === 'missing'
+        ? 'no-credential'
+        : resolved.status === 'io-error' ? 'credential-unavailable' : 'credential-unsupported'
+      logger.warn('[quota] fetch failed', { providerId, reason })
       return this.finishFetch(providerId, force, fetcherIdAtStart, () =>
-        this.fetchFailed(providerId, 'no-credential'))
+        this.fetchFailed(providerId, reason))
     }
 
     try {
@@ -680,14 +706,15 @@ export class QuotaService {
   /**
    * 按 fetcher.auth 能力声明数组序解析凭证（A2-2 三形态解析链）。
    * 首个解析到凭证的形态即生效，并以该形态作为 kind 传给 fetchQuota（凭证语义可区分）。
-   * 全形态 miss → null（调用方不发请求，返回缓存）。
+   * 全形态 miss → missing（调用方报 no-credential，不发请求）。
+   * 形态不支持 / 读盘失败 → fail-fast 返回对应失败态（不降级下一形态，见循环内注释）。
    *
    * 例外（D3 / §7.3 改动 3）：「用专属 Key」（exclusive）且该 fetcher 声明了 api-key
    * 形态时，只允许 api-key 形态，不回退 auth 数组中的其它形态。原因：`getCredential`
-   * 的 api-key 分支在 exclusive 下只读专属 Key 文件，缺失返回 null——若上层继续遍历，
+   * 的 api-key 分支在 exclusive 下只读专属 Key 文件，缺失返回 missing——若上层继续遍历，
    * kimi-coding（auth=['api-key','oauth']）会用 provider 的 OAuth 登录态查成功，而 UI
    * 分段控件显示「用专属 Key」，正是 D3「UI 的选择与 runtime 使用的凭证不得背离」要
-   * 消灭的「显示用 A、实际用 B」（§3.2 失败模式 D）。文件缺失即 null → 上层落
+   * 消灭的「显示用 A、实际用 B」（§3.2 失败模式 D）。文件缺失即 missing → 上层落
    * no-credential（§7.3 改动 3「缺失即 no-credential，不回退」）。
    *
    * 收窄条件由 shared 的 supportsExclusiveCredential 提供（两端共用，coding-plan-quota-config-ux
@@ -698,17 +725,22 @@ export class QuotaService {
   private async resolveCredential(
     providerId: string,
     auth: readonly QuotaAuthKind[],
-  ): Promise<{ credential: string; kind: QuotaAuthKind } | null> {
+  ): Promise<ResolvedQuotaCredential> {
     const source = resolveQuotaCredentialSource(this.getProviderInfo(providerId)?.quota)
     if (source === 'exclusive' && supportsExclusiveCredential(auth)) {
-      const credential = await this.getCredential(providerId, 'api-key')
-      return credential ? { credential, kind: 'api-key' } : null
+      const lookup = await this.getCredential(providerId, 'api-key')
+      return lookup.status === 'ok' ? { status: 'ok' as const, credential: lookup.credential, kind: 'api-key' } : lookup
     }
     for (const kind of auth) {
-      const credential = await this.getCredential(providerId, kind)
-      if (credential) return { credential, kind }
+      const lookup = await this.getCredential(providerId, kind)
+      if (lookup.status === 'ok') return { status: 'ok' as const, credential: lookup.credential, kind }
+      // RT-7#4/#7：unsupported 与 io-error 均 fail-fast 不降级下一形态——unsupported 时
+      // 同一凭据条目换形态也只会 miss（api_key 的 !cmd 条目在 oauth 形态读不到别的），
+      // 降级只会把可诊断的形态错误折叠成 no-credential；io-error 说明读盘层异常
+      // （锁竞争/损坏），继续走其他源可能用错凭据，报出来优先。
+      if (lookup.status !== 'missing') return lookup
     }
-    return null
+    return { status: 'missing' }
   }
 
   /**
@@ -722,63 +754,67 @@ export class QuotaService {
    * 支持自定义 API Key 是为了适配 router/反代场景：provider 的 baseUrl 指向本地 router，
    * 但 provider.apiKey 是 router 的 key，而 Coding Plan 平台（如 bigmodel.cn）需要平台专属 key。
    */
-  private async getCredential(providerId: string, kind: QuotaAuthKind): Promise<string | null> {
+  private async getCredential(providerId: string, kind: QuotaAuthKind): Promise<CredentialLookup> {
     if (kind === 'api-key') {
       // 凭证归属锚点（D3）：UI 与 runtime 必须用同一个 resolveQuotaCredentialSource，
       // 否则两端推断可以背离。未显式设置时按 apiKeySet 推断（兼容历史数据）。
       const source = resolveQuotaCredentialSource(this.getProviderInfo(providerId)?.quota)
       if (source === 'exclusive') {
         // 只读 quota 专属 Key 文件——quota 专属 key 语义，不属于 provider 凭据，
-        // 不并入 resolver（D3：resolver 只管 provider 凭据两源）。缺失 → null → no-credential
+        // 不并入 resolver（D3：resolver 只管 provider 凭据两源）。缺失 → missing → no-credential
         return this.readSecret(this.getApiKeyPath(providerId))
       }
       // source === 'provider'：完全跳过专属 Key 文件——这是 D3 消除「显示用 A、实际
       // 用 B」（§3.2 失败模式 D）的机制所在：来源切走后残留的专属 Key 永不被读。
       // D3 链 1（凭据收口）：auth.json api_key → models.json apiKey 两段统一走 resolver。
-      // 异常降级保留（resolveCredential 在 doFetch 的 try 之外，删掉降级会让 resolver
-      // 异常逃逸成 RPC 无响应——退化为 backstop 超时，比 no-credential 难诊断）。
+      // RT-7#4：unsupported（command / unresolved-env）以判别结构透传，调用方在发请求前
+      // 拦截（credential-unsupported），不把形态标记串当 key 交给 fetcher。
+      // RT-7#7：读盘/锁异常不再折叠成 null（原「debug + null → no-credential」误导用户
+      // 去填一个其实已存在的 Key）——升 warn 并分流 io-error → credential-unavailable。
+      // 异常上抛保留逃逸语义不变（resolveCredential 在 doFetch 的 try 之外，兜底逻辑见上）。
       try {
         const resolved = await this.credentialResolver.resolveProviderCredential(providerId)
-        return resolved?.key ?? null
+        if (resolved === undefined) return { status: 'missing' }
+        if ('unsupported' in resolved) return { status: 'unsupported' }
+        return { status: 'ok', credential: resolved.key }
       } catch (err) {
         const msg = toErrorMessage(err)
-        logger.debug('[quota] failed to resolve provider credential', { providerId, error: msg })
-        return null
+        logger.warn('[quota] failed to resolve provider credential (auth.json / models.json)', { providerId, error: msg })
+        return { status: 'io-error' }
       }
     }
 
     if (kind === 'oauth') {
-      const authCred = await this.readAuthCredential(providerId)
-      return authCred?.type === 'oauth' && authCred.access ? authCred.access : null
+      if (!this.getAuthCredential) return { status: 'missing' }
+      // RT-7#7：auth.json 读取异常升 warn + io-error 分流（原 debug + undefined → 静默 miss）
+      try {
+        const authCred = await this.getAuthCredential(providerId)
+        return authCred?.type === 'oauth' && authCred.access
+          ? { status: 'ok', credential: authCred.access }
+          : { status: 'missing' }
+      } catch (err) {
+        const msg = toErrorMessage(err)
+        logger.warn('[quota] failed to read auth.json credential (oauth)', { providerId, error: msg })
+        return { status: 'io-error' }
+      }
     }
 
     // cookie 类型：从 secrets 目录读取
     return this.readSecret(this.getCookiePath(providerId))
   }
 
-  /** auth.json 凭证读取（未注入通道 / 读取异常 → undefined，不阻断后续来源链）。 */
-  private async readAuthCredential(providerId: string): Promise<Credential | undefined> {
-    if (!this.getAuthCredential) return undefined
+  /** 读 secret 文件（去空白）。缺失/空 → missing；读盘异常 → io-error（RT-7#7：warn 带
+   * 具体文件路径，不再 debug + null 折叠成 no-credential）。 */
+  private readSecret(filePath: string): CredentialLookup {
     try {
-      return await this.getAuthCredential(providerId)
-    } catch (err) {
-      const msg = toErrorMessage(err)
-      logger.debug('[quota] failed to read auth.json credential', { providerId, error: msg })
-      return undefined
-    }
-  }
-
-  /** 读 secret 文件（去空白），文件不存在/读取失败返回 null */
-  private readSecret(filePath: string): string | null {
-    try {
-      if (!existsSync(filePath)) return null
+      if (!existsSync(filePath)) return { status: 'missing' }
       const val = readFileSync(filePath, 'utf-8').trim()
-      return val || null
+      return val ? { status: 'ok', credential: val } : { status: 'missing' }
     } catch (err) {
-      // 读取失败不阻断流程（返回 null fallback），但必须 log（架构约定 #4 落盘，禁止静默 catch）
+      // 读取失败分流 io-error（凭据文件在但读不了），路径在 warn 里可定位
       const msg = toErrorMessage(err)
-      logger.debug('[quota] failed to read secret file', { filePath, error: msg })
-      return null
+      logger.warn('[quota] failed to read secret file', { filePath, error: msg })
+      return { status: 'io-error' }
     }
   }
 

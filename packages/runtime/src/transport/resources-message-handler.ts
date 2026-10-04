@@ -64,9 +64,15 @@ export class ResourcesMessageHandler {
         // 会让失效广播与缓存实际状态不一致（前端重拉仍命中旧值；useProjectSkills 收不到失效
         // 信号则展示陈旧缓存）。best-effort：失败只记日志，不阻塞 WS 消息处理
         //（reply/broadcastSkillDirs 已立即返回）。invalidateAllProjects 是 Map 清理，不会抛。
+        //
+        // RT-1#9 通知不对称修复：rebuildGlobal 失败（scanFn 抛错或 notifyGlobalChange 链抛错）
+        // 时 global 失效广播随通知链一起丢失，而 finally 的 project 广播照发——前端 global
+        // 投影陈旧且无信号。失败分支补发 global 失效（partial=true 标注降级：globalCache
+        // 可能仍是旧值，重拉结果以 runtime 当前缓存为准；前端现只读 scope，字段向后兼容）。
         void this.ctx.skillRegistry.rebuildGlobal()
           .catch((e: unknown) => {
             console.error('[settings-handler] skillRegistry.rebuildGlobal failed after setSkillDirs:', e)
+            this.ctx.broadcastSkillCacheInvalidated('global', undefined, true)
           })
           .finally(() => {
             this.ctx.skillRegistry.invalidateAllProjects()

@@ -1,21 +1,24 @@
 /**
- * Extension UI store —— ask-user / dialog pending 请求的 session 级 SSOT。
+ * Extension UI store —— 统一表单 / dialog pending 请求的 session 级 SSOT。
  *
  * 依赖方向：无（stores 间禁止互相 import，对齐 subagent.ts / workflow.ts 铁律）。
  * 只 import 类型（ExtensionUIRequest），不 import 其他 store。
  *
  * 背景（CW wave `session-active-ssot` T1）：
- * 原 ask-user pending 状态困在 useExtensionUI composable 的 Panel 实例局部作用域
- *（useSessionScopedState reactive 数组），store/deriveStatus 读不到，导致 ask-user 提问
+ * 原表单 pending 状态困在 useExtensionUI composable 的 Panel 实例局部作用域
+ *（useSessionScopedState reactive 数组），store/deriveStatus 读不到，导致表单提问
  * 等待期间对话流收起（bug）。本 store 把 pending 提升为 session 级 store SSOT，供
- * derivedStatus computed 经 hasPendingAskUser 非响应式查询当前 session 是否有 ask-user 在等。
+ * derivedStatus computed 经 hasPendingBlockingOverlay 非响应式查询当前 session 是否有
+ * 阻塞 overlay 在等。
  *
  * 范式（镜像 subagent.ts / command.ts，ADR-0049 Map 分区派）：
  * - requestsBySession: ref<Map<sessionId, ExtensionUIRequest[]>> —— per-sessionId 分区
  * - recordsOf(sessionId): ComputedRef —— 响应式视图，组件订阅用
  * - getRequestsBySession(sessionId): ExtensionUIRequest[] —— 非响应式读（无则空数组）
- * - hasPendingAskUser / hasPendingDialog: 非响应式 getter，供 derivedStatus computed 内调
- * - applyRecords / addRequest / removeRequest: 不可变 Map 写（new Map(...).set(...)）
+ * - hasPendingBlockingOverlay / hasPendingDialog: 非响应式 getter，供 derivedStatus
+ *   computed 内调（hasPendingBlockingOverlay 语义 = 有 pending 统一表单 overlay：
+ *   form 键，见函数注释）
+ * - applyRecords / addRequest / removeRequest / retainOnly: 不可变 Map 写（new Map(...).set(...)）
  * - clearSession: deleteSession 精确释放分区（防泄漏）
  * - clearAllPending: runtime 重连全局清理（R3/T5）
  *
@@ -30,7 +33,7 @@ import { createPartitionedRecords } from '../lib/partitioned-session-records'
 export const useExtensionUIStore = defineStore('extension-ui', () => {
   // ── state ──
   /**
-   * 按 sessionId 分区的 pending UI 请求（含 ask-user 富交互 + 非 ask-user dialog 原语）。
+   * 按 sessionId 分区的 pending UI 请求（含统一表单富交互 form + 非 form dialog 原语）。
    * 切走不清、切回直接读 Map 分区；deleteSession 经 clearSession(sid) 精确释放。
    * 四件套实现单源在 lib/partitioned-session-records（S4 A1，行为逐字等价迁移）。
    */
@@ -52,17 +55,35 @@ export const useExtensionUIStore = defineStore('extension-ui', () => {
   }
 
   /**
-   * 该 session 是否有 ask-user 富交互请求 pending（核心查询，对称 subagent.ts hasRunning）。
+   * 该 session 是否有统一表单 overlay 请求 pending（form 键；核心查询，
+   * 对称 subagent.ts hasRunning）。三消费方（经本 getter 扩义自动联动）：
+   * deriveStatus waiting 状态点判定源（useSessionDerivations）；原 TurnProgressBar warn 豁免消费方已随 remove-turn-progress-bar 移除
+   * （getAwaitingUser 回调——scheduler 确认等待同样 block turn，漏接则等待超
+   * 10min 被误挂「turn 超时」警示）；③ usePanelView 挂载判据（经 currentFormRequest
+   * computed，同谓词）。
+   *
+   * 判定键（ui-presentation-protocol D5 收敛）：form 键——全部表单族帧（新 form /
+   * legacy askUser / scheduleCreate marker）由 runtime event-adapter 分支统一产出
+   *（归一上移 runtime 后 store 记录原生带 form 键，renderer 无侧归一挂点）。
+   *
    * 非响应式普通函数：供 derivedStatus computed 内调用，computed 通过其引用的响应式
    * requestsBySession 建立依赖（写入时不可变替换 ref，触发重算）。
    */
-  function hasPendingAskUser(sessionId: string): boolean {
-    return getRequestsBySession(sessionId).some((r) => r.askUser === true)
+  function hasPendingBlockingOverlay(sessionId: string): boolean {
+    return getRequestsBySession(sessionId).some(
+      (r) => r.form === true,
+    )
   }
 
-  /** 该 session 是否有非 ask-user 的简单原语 dialog pending（供外部消费者查询；当前无消费方，公共接口保留） */
+  /**
+   * 该 session 是否有非 overlay 类的简单原语 dialog pending（供外部消费者查询；当前无消费方，
+   * 公共接口保留）。对称判据：form 类富交互 overlay 不归 dialog（漏排会把它误归
+   * dialog 类，与 hasPendingBlockingOverlay 双真）。
+   */
   function hasPendingDialog(sessionId: string): boolean {
-    return getRequestsBySession(sessionId).some((r) => r.askUser !== true)
+    return getRequestsBySession(sessionId).some(
+      (r) => r.form !== true,
+    )
   }
 
   // ── 写操作（不可变 Map 替换，确保响应性触发）──
@@ -96,6 +117,28 @@ export const useExtensionUIStore = defineStore('extension-ui', () => {
     applyRecords(sessionId, prev.filter((r) => r.requestId !== requestId))
   }
 
+  /**
+   * 快照差集剔除（只保留 requestId ∈ keepIds 的条目）。不可变写。
+   *
+   * 落点语义（设计 scheduler-trigger-inversion §6.2 采用项④，v6.1 口径）：renderer 侧僵尸
+   * 表单修剪的**主算法**——`getPendingRequests` 应答落 store 前以最新快照为准调用本方法，
+   * 不在快照中的条目（含已完成 / 待决交互）一律从该 session 分区移除。
+   *
+   * 关键：keepIds 为空集合同样执行剔除（清空分区）——调用方把本调用放在 fetch 的
+   * `.then` 顶层（循环之外），空快照（`[]`）时循环体不执行但剔除照常发生，这是覆盖
+   * 「pi 进程被 idle reaper 回收 → runtime 定向清 pending，而 renderer 屏上仍留僵尸表单」
+   * 主路径的结构性保证（提交走 respond 不经快照入口，僵尸条目在下次快照落地即消失）。
+   *
+   * 分区为空 / 无条目需剔除时 no-op（避免无谓 Map 替换触发响应式重算）。
+   */
+  function retainOnly(sessionId: string, keepIds: ReadonlySet<string>): void {
+    const prev = getRequestsBySession(sessionId)
+    if (prev.length === 0) return
+    const next = prev.filter((r) => keepIds.has(r.requestId))
+    if (next.length === prev.length) return
+    applyRecords(sessionId, next)
+  }
+
   /** 清除指定 session 的 pending 分区（deleteSession 调，防泄漏，对齐 subagent.ts:171） */
   function clearSession(sessionId: string): void {
     partition.clear(sessionId)
@@ -113,12 +156,13 @@ export const useExtensionUIStore = defineStore('extension-ui', () => {
     recordsOf,
     // 非响应式读 / getter
     getRequestsBySession,
-    hasPendingAskUser,
+    hasPendingBlockingOverlay,
     hasPendingDialog,
     // 写操作（不可变 Map 替换）
     applyRecords,
     addRequest,
     removeRequest,
+    retainOnly,
     clearSession,
     clearAllPending,
   }

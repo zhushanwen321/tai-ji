@@ -66,7 +66,7 @@ export class ViewHostStore {
    * 的 key 落尾部**，不回原位（是「当前插入序」而非「首次出现序」）。消费端（renderer 托盘 widget 区：
    * known-order `['todo','goal']` 优先 + 其余 key 按本数组序追加）直接消费该序：有 entry 即出现、
    * invalidate 即消失。**勿新增自增 seq 字段**重建同一派生态——赋值时机引入顺序依赖，且每次重推
-   * 换 seq 会让未知 key 起伏抖动（比 Map 原地保位更差），见 docs/design/composer-task-tray.md §3.3 D6。
+   * 换 seq 会让未知 key 起伏抖动（比 Map 原地保位更差），见 docs/design/composer-task-tray.md §3.3 D6（已删除，git 可追溯）。
    */
   getViewIds(sessionId: string): string[] {
     const partition = this.deps.sessionScoped.get(sessionId)

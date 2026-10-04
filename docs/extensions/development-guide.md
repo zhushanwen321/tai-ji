@@ -435,9 +435,9 @@ MANAGEMENT:
       content: [{ type: "text", text: "Working..." }]
     });
 
-    // signal 用于中断支持
+    // signal 用于中断支持（取消也是错误路径：throw 让 pi 统一置 isError，见 4.6）
     if (signal.aborted) {
-      return { content: [{ type: "text", text: "Cancelled" }], isError: true, details: {} };
+      throw new Error("Cancelled");
     }
 
     // 根据 action 分发
@@ -563,20 +563,28 @@ registerMyCommand(pi, () => runtime);  // command 也传 getter
 ```typescript
 {
   content: [{ type: "text", text: string }],
-  isError?: boolean,       // 错误时设为 true
   details?: Record<string, unknown>  // renderResult 数据
 }
 ```
 
-**[规范]** 错误处理分两层：**内部实现可以 throw，`execute` 边界必须 catch**，对外返回结构化 `{ isError: true }`。
+SDK 的 `AgentToolResult` 类型未声明 `isError`——返回值不携带错误标记，**throw 是唯一的错误信号**。
 
-- 内部辅助函数（`handleExecution` 等）可以 `throw new Error(...)` 表达失败；
-- `execute` 是 API/契约边界，不允许异常逃逸——必须 catch 并转为 `{ isError: true }` 返回；
-- 错误消息只用 `err.message`（或 `String(err)`），**禁止把 `err.stack` 拼进 content**——堆栈不得外泄到 LLM 上下文与持久化记录，防止错误信息蔓延。
+**[规范]** 错误处理采用 **throw 范式**：内部实现函数与 `execute` 直接 `throw`，**不要 catch 后在返回值里带 `isError: true`**。
+
+- pi 实装锚点（pi-agent-core `dist/agent-loop.js` `executePreparedToolCall`）：`execute` 正常返回时 pi 恒置 `isError: false`，返回值上的 `isError` 字段**被丢弃**——catch 后返回 `{ isError: true }` 等于错误被标成功；`execute` 抛出时由 pi 外层 catch 统一转 `isError: true` 的 error tool result（错误消息原样成为 content，异常不会带崩 Pi）；
+- catch 仅用于**包装重抛**（如 `throw new Error(\`Error: ${toErrorMessage(err)}\`)`——scheduler 先例：统一消息格式并剥离堆栈），不得吞掉异常转为正常返回；
+- 错误消息只用 `err.message`（或 `String(err)`），**禁止把 `err.stack` 拼进 content**——堆栈不得外泄到 LLM 上下文与持久化记录，防止错误信息蔓延；
+- 同时禁止 `{ content: [{ text: "错误: ..." }] }` 不带失败标记的**错误成功模式**（调用方无法区分成功与失败——throw 范式下由 pi 置 isError 保证）。
 
 ```typescript
-async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-  // 正确：内部 throw，execute 边界 catch 转 isError，消息不含堆栈
+async execute(_toolCallId, params) {
+  // 正确：直接 throw——pi 外层 catch 统一转 isError:true 的 tool result
+  const result = await riskyOperation(); // 失败时 throw Error（消息不含堆栈）
+  return { content: [{ type: "text", text: `Success: ${result}` }] };
+}
+
+// 错误：catch 后在返回值里带 isError:true——字段被 pi 丢弃，错误轮被标成功
+async execute(_toolCallId, params) {
   try {
     const result = await riskyOperation();
     return { content: [{ type: "text", text: `Success: ${result}` }] };
@@ -585,12 +593,6 @@ async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
       isError: true,
     };
-  }
-
-  // 错误：异常从 execute 逃逸（未 catch），Tool 中断且 Pi 可能崩溃
-  async execute(_toolCallId, params) {
-    const result = await riskyOperation(); // throw 未捕获
-    return { content: [{ type: "text", text: `Success: ${result}` }] };
   }
 }
 ```
@@ -635,6 +637,17 @@ pi.registerCommand({
 ```
 
 **[规范]** Command 用于用户手动触发的操作。Tool 用于模型调用的操作。两者不互为替代——Tool 有 promptSnippet 提示模型何时调用，Command 没有此机制。
+
+### 5.1 向用户提问的通道选型 🔵
+
+> 通道收尾语义权威 = [docs/adr/decisions.md](../adr/decisions.md) ADR-0072 / ADR-0073。命令或工具内需要向用户提问时按此选型：
+
+| 提问形态 | 通道 | API | 收尾语义 |
+|---------|------|-----|---------|
+| 简单单选 / 确认类，一步收口，提交后无 turn 跟随 | plain dialog（taiji 内底部浮带） | 裸 `ctx.ui.select(title, labels)`（确认/输入用同族 `ctx.ui.confirm` / `ctx.ui.input`） | 应答终局即时收尾——提交/取消后宿主 busy 态立即恢复；pi select API 无元数据位，不可声明 turn 预期 |
+| 多问一次提交 / 级联表单 / 需显式声明「提交后是否有 turn 跟随」 | form（taiji 内 FormOverlay） | `uiFormInteract`（`@zhushanwen/extension-protocol`） | `expectTurn` 三态声明：命令 handler 内提交后无 turn 传 `expectTurn: false`（应答即收尾）；缺省 `true` = 提交后桥接 message_start |
+
+**[指南]** 提交后要 `pi.sendMessage` 驱动模型开 turn 的提问，必须走 `uiFormInteract`（`expectTurn` 保持缺省或显式 `true`）——plain dialog 通路提交即收尾，提交后开 turn 会在 turn 到来前产生状态空窗（插话可能打断）。通道可用性：`uiFormInteract` 仅 taiji 宿主（RPC 模式）有效，TUI 形态需扩展自有组件渲染（scheduler / plan 先例）；裸 `ctx.ui.select` 是 pi 原生 API，无 taiji 宿主时同样可用。
 
 ---
 
@@ -1227,7 +1240,7 @@ export function expandTilde(p: string): string {
 
 | 要求 | 说明 |
 |------|------|
-| 不允许未捕获异常 | 内部可 throw，execute 边界必须 catch 并返回 `{ isError: true }` |
+| 错误不得伪装成功 | execute 直接 throw（pi 统一置 isError:true）；返回值里的 isError 被 pi 丢弃，禁止靠它标记错误 |
 | 不允许模块加载时报错 | 配置加载失败在 session_start 中处理，不在模块顶层 |
 | 不允许 process.exit | 扩展无权结束进程 |
 | 不允许无限循环 | while(true) 必须有迭代上限 |
@@ -1693,7 +1706,7 @@ src/
 |--------|------|---------|
 | 模块级全局变量 | 多 session 共享状态，数据错乱 | 工厂闭包变量（会话级）/ `globalThis[Symbol.for]`（进程级单例，见 §7.5） |
 | 未保护的 ctx 访问 | session 关闭后崩溃 | `isStaleContextError()` 检查 |
-| Tool execute 异常逃逸 | 未处理异常带崩 Pi | 内部可 throw，execute 边界 catch 返回 `{ isError: true }` |
+| execute 内 catch 后返回 `{ isError: true }` | 返回值 isError 被 pi 丢弃，错误轮被标成功（pi 外层本就会 catch execute 异常转 error result，异常不会带崩 Pi） | execute 直接 throw，pi 统一置 isError:true（消息不含堆栈） |
 | 异步操作无信号 | 无法取消，残留资源 | 透传 `signal` |
 | 不设防重入 | 并发操作破坏状态 | `isProcessing` 标志 |
 | agent_end 中启动 LLM 调用 | 上下文已过期 | 只做同步清理 |
@@ -1757,7 +1770,7 @@ src/
 
 ### 健壮性阶段（必须通过）
 
-- [ ] 所有 execute 边界 catch 异常并返回 `{ isError: true }`（内部可 throw，错误消息不含堆栈）
+- [ ] execute 错误路径直接 throw（pi 统一置 isError:true）；禁止 catch 后返回带 `isError: true` 的结果（字段被 pi 丢弃，错误标成功）；错误消息不含堆栈
 - [ ] 异步操作支持 `signal` 取消
 - [ ] Stale context 检测 + `safeNotify` 保护
 - [ ] 防重入标志保护并发操作

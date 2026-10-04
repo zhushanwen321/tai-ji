@@ -27,6 +27,8 @@
 import { readFileSync } from 'node:fs'
 import { WORKFLOW_RECORD_CUSTOM_TYPE } from '@taiji/shared'
 import { extractRecordsFromSessionFile, type SessionFileExtraction } from './session-file-extraction.js'
+import { isEnoent } from '../../utils/errors.js'
+import { warnOnce } from '../../utils/warn-once.js'
 import type {
   WorkflowRunRecord,
   WorkflowAgentCall,
@@ -255,26 +257,47 @@ function extractWorkflowsFromEntriesLegacy(entries: unknown[]): WorkflowRunRecor
 /**
  * 读 workflow-state 文件 + 映射为 WorkflowRunRecord（legacy 路径）。
  * 文件不存在 / 解析失败 / 版本不匹配 → 返回 null（跳过该 run）。
+ * RT-5#6：跳过不再静默——ENOENT（state 文件被清理链删除，常态）保持安静，
+ * 其余降级 warn 一次（按路径去重），整条 run 从列表消失时可归因。
  */
 function readAndMapSnapshot(runId: string, stateFilePath: string): WorkflowRunRecord | null {
   let content: string
   try {
     content = readFileSync(stateFilePath, 'utf-8')
-  } catch {
-    // state 文件不存在或不可读（已被清理 / 并发删除）
+  } catch (e) {
+    // state 文件不存在（已被清理 / 并发删除）是常态不告警；不可读（EACCES 等）warn
+    if (!isEnoent(e)) {
+      warnOnce(
+        stateFilePath,
+        `[workflow-extractor] workflow state file unreadable, run no longer listed: runId=${runId}, path=${stateFilePath}`,
+        e instanceof Error ? e.message : e,
+      )
+    }
     return null
   }
 
   // rewrite mode：文件始终是最新单行快照。取最后一个非空行。
   const lines = content.split('\n').filter((l) => l.trim())
   const lastLine = lines[lines.length - 1]
-  if (!lastLine) return null
+  if (!lastLine) {
+    // 空 state 文件是异常形态（rewrite mode 恒写单行快照）——空文件 run 静默消失不可观测
+    warnOnce(
+      stateFilePath,
+      `[workflow-extractor] workflow state file is empty, run no longer listed: runId=${runId}, path=${stateFilePath}`,
+    )
+    return null
+  }
 
   let parsed: unknown
   try {
     parsed = JSON.parse(lastLine)
-  } catch {
+  } catch (e) {
     // JSON 解析失败（损坏的 state 文件）
+    warnOnce(
+      stateFilePath,
+      `[workflow-extractor] workflow state file JSON parse failed, run no longer listed: runId=${runId}, path=${stateFilePath}`,
+      e instanceof Error ? e.message : e,
+    )
     return null
   }
 

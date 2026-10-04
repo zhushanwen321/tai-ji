@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { extractToolCalls, formatToolCallSummary } from '../core/toolcall.js'
-import type { Entry } from '../core/parser.js'
+import type { Entry } from '@zhushanwen/session-core'
 
 /**
  * D1 映射表（design §3.3）确定性测试：formatToolCallSummary 12 个 switch 分支

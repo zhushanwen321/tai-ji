@@ -59,6 +59,19 @@ export const useProjectStore = defineStore('project', () => {
   const projects = ref<Project[]>([makeDefaultProject()])
   const activeProjectId = ref<string>(DEFAULT_PROJECT_ID)
 
+  /**
+   * 启动加载结果（RD-3#3 / 审计 M4 族：真实读失败与「无数据」不可区分 → deep watch 全量
+   * save 整表覆写 projects.json）。'failed' 时本 store 只读降级：所有变化不落盘（见 watch
+   * 回调 early-return），UI 可据 loadError + 重试（重新执行 init）恢复——runtime 恢复后
+   * init 成功即回到 'loaded'，落盘随之恢复。
+   */
+  const loadState = ref<'loaded' | 'failed'>('loaded')
+  /** loadState='failed' 时的失败原因（错误条展示用；重试成功后清空）。 */
+  const loadError = ref<string>('')
+
+  /** failed 态下「改动不会落盘」只 warn 一次（防每次操作刷屏）。 */
+  let saveBlockedWarned = false
+
   /** 当前活跃 project（id 失配时回退首个，保证非空） */
   const activeProject = computed<Project>(
     () => projects.value.find((p) => p.id === activeProjectId.value) ?? projects.value[0],
@@ -104,6 +117,18 @@ export const useProjectStore = defineStore('project', () => {
   watch(
     [projects, activeProjectId],
     () => {
+      // 读失败禁回写（RD-3#3）：load 失败时内存态是默认兜底而非 projects.json 权威数据，
+      // 全量 save 会把真实数据整表覆盖。禁止落盘直到 init 重试成功（loadState 回 'loaded'）。
+      if (loadState.value === 'failed') {
+        if (!saveBlockedWarned) {
+          saveBlockedWarned = true
+          console.warn(
+            `[project-store] projects.json 加载失败（${loadError.value || 'unknown error'}），` +
+              '当前改动不会落盘（防整表覆盖真实数据）；runtime 恢复后重新执行 init() 即恢复落盘',
+          )
+        }
+        return
+      }
       const state: ProjectStoreState = {
         projects: projects.value,
         activeProjectId: activeProjectId.value,
@@ -145,11 +170,15 @@ export const useProjectStore = defineStore('project', () => {
   /**
    * 启动加载（initApp 调用，必须在 newSession 之前——create 归属读 activeProjectId）。
    * 优先级：runtime projects.json → 旧 localStorage（一次性迁移）→ 默认 project。
-   * RPC 失败降级为默认（不抛，不阻断启动，对齐 workspaceStore.load 语义）。
+   * RPC 失败（RD-3#3）：置 loadState='failed' 后直接返回——不走 legacy 迁移（迁移的显式
+   * save 会以迁移数据覆写可能完好的 projects.json），不阻断启动；重试 = 重新执行 init。
    */
   async function init(): Promise<void> {
     try {
       const state = await projectApi.load()
+      loadState.value = 'loaded'
+      loadError.value = ''
+      saveBlockedWarned = false // 重试成功：若再次失败，blocked warn 重新可提示一次
       if (state.projects.length > 0) {
         // runtime 权威：直接用（含 activeProjectId）；id 失配/默认项缺失由归一化修复
         projects.value = state.projects
@@ -158,17 +187,26 @@ export const useProjectStore = defineStore('project', () => {
         return
       }
     } catch (e) {
-      // RPC 失败（runtime 未就绪/首启竞态）→ 降级，不阻断启动
-      console.warn('[project-store] load failed, falling back to default', e)
+      // RPC 失败（runtime 未就绪/首启竞态）→ 只读降级：内存保持默认兜底、禁一切落盘
+      //（此前回落默认后被 deep watch 全量 save 整表覆盖 projects.json，读失败与首启不可分）
+      loadState.value = 'failed'
+      loadError.value = e instanceof Error ? e.message : String(e)
+      console.warn('[project-store] load failed, write-back disabled until init retry succeeds', e)
+      return
     }
-    // runtime 空（首启）：localStorage 一次性迁移（有则用之 + 写回 runtime；无则默认）
+    // runtime 空（首启，RPC 成功）：localStorage 一次性迁移（有则用之 + 写回 runtime；无则默认）
     const legacy = loadLegacyFromStorage()
     if (legacy) {
       projects.value = legacy.projects
       activeProjectId.value = legacy.activeProjectId || DEFAULT_PROJECT_ID
       // 归一化先于显式 save：迁移落盘即归一化状态（stale id 不持久化）
       normalizeLoadedProjects()
-      void projectApi.save({ projects: projects.value, activeProjectId: activeProjectId.value }).catch(() => {})
+      void projectApi
+        .save({ projects: projects.value, activeProjectId: activeProjectId.value })
+        .catch((e: unknown) => {
+          // 迁移写回失败需留痕（此前空吞）：迁移数据仍在 localStorage，下次 init 空表时重试
+          console.warn('[project-store] legacy migration save failed, will retry on next init/change', e)
+        })
     }
   }
 
@@ -250,5 +288,5 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
-  return { projects, activeProjectId, activeProject, isDefaultProject, recentProjects, init, setActiveProject, addProject, removeProject, reorderProject }
+  return { projects, activeProjectId, activeProject, isDefaultProject, recentProjects, loadState, loadError, init, setActiveProject, addProject, removeProject, reorderProject }
 })

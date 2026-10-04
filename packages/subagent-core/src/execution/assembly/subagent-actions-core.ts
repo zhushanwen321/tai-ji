@@ -126,8 +126,9 @@ export type StartHandlerResult = {
   /**
    * registry 全等回显：handle.details.model = record.model = `${provider}/${id}`，
    * 源头是 resolveModel 裁决放行的条目——通过校验 = 子进程必然按此名执行。
+   * [R4/D6-① 连带] undefined = 用户未指定模型（引擎自身缺省解析），缺席如实回显。
    */
-  model: string;
+  model: string | undefined;
   response: BgResponse;
 };
 
@@ -607,14 +608,16 @@ export async function closeHandler(
  * [U4 / §3.2.3 万物可续] 语义分野写死：fork-from = **历史在**分叉新 id；reopen
  * （markReopened，经 message 触发）= 历史亡同 id 重启。守卫链按 transcript 锚
  * 可解析性分流——锚不可解析（transcript 被回收）时 fork-from 语义空洞，引导
- * message（reopen 语义）而非拒绝。
+ * message（reopen 语义）而非拒绝（zcode 例外：守卫 3 按引擎恒拒，见下）。
  *
  * 守卫链（拒绝原因与行动语言对齐，见 assertAndLookupForkFromSource）：
  *   1. 本进程内存 running → 还活着，应走 message（防双写同一子 session 文件）
  *   2. 不存在            → 引导 list 确认
- *   3. 异进程活跃         → 别处正跑，不可从此接续（读到半截历史；等其结束或在其所属会话内操作）
- *   4. worktree 记录     → checkout 不可复用，fork 子进程 cwd 会回落主仓破坏隔离
- *   5. 锚不可解析         → 无历史可分叉（从未开跑 / transcript 被回收）——引导
+ *   3. zcode 引擎        → fork-from 通道未接入，恒拒 + 准确理由（zcode 历史在隔离
+ *      sqlite 会话库、不随 pi retention 回收——下方锚判据文案对 zcode 失实）
+ *   4. 异进程活跃         → 别处正跑，不可从此接续（读到半截历史；等其结束或在其所属会话内操作）
+ *   5. worktree 记录     → checkout 不可复用，fork 子进程 cwd 会回落主仓破坏隔离
+ *   6. 锚不可解析         → 无历史可分叉（从未开跑 / transcript 被回收）——引导
  *      message（同 id reopen，历史摘要自动注入）或 start fresh
  *  （[U4] 原守卫 4「cancelled/user-close 拒绝」随万物可续删除——fork-from 对任何
  *   idle record 放行，主动告别不再是 fork 例外。）
@@ -648,9 +651,9 @@ export async function forkFromHandler(
   };
 }
 
-/** forkFromHandler 的守卫链（fork-from handler doc 的守卫 1–5 原样提取）：按序校验
+/** forkFromHandler 的守卫链（fork-from handler doc 的守卫 1–6 原样提取）：按序校验
  *  源记录可接续，命中即抛带行动语言的 Error；全部通过则返回源 SubagentRecord
- *  （守卫 5 已保证锚可解析、sessionFile 非空，返回类型随之收窄）。 */
+ *  （守卫 6 已保证锚可解析、sessionFile 非空，返回类型随之收窄）。 */
 function assertAndLookupForkFromSource(service: SubagentService, id: string): SubagentRecord & { sessionFile: string } {
   // 守卫 1：本进程内存 running —— 直接 message 即可，fork-from 会双写其 session 文件。
   if (service.queries.findRecord(id)) {
@@ -669,12 +672,27 @@ function assertAndLookupForkFromSource(service: SubagentService, id: string): Su
     );
   }
 
-  // 守卫 3：异进程活跃（.alive 侧车指向另一进程的活 pid）。
+  // 守卫 3（[R5] zcode 早分流）：fork-from 通道未对 zcode 接入，先于异进程探针 /
+  // worktree / 锚判据按引擎恒拒并给出准确理由——zcode 会话历史在隔离 sqlite 会话库、
+  // 不随 pi retention 回收，守卫 6 的「never started / transcript collected after
+  // retention expired」与守卫 5 的「read its session file」行动语言对 zcode 均失实；
+  // 守卫 4 探针判据基于 pi sessionFile（zcode 恒 undefined）天然跳过，无信息增量。
+  if (source.engine === "zcode") {
+    throw new Error(
+      `subagent ${id} runs on the zcode engine, whose fork-from channel is not wired up yet — ` +
+      `its session history lives in the engine's isolated sqlite session db (not a pi transcript file, ` +
+      `so it is never collected by retention). ` +
+      `Recovery: use action:'message' on this id — it reopens on the same id ` +
+      `(prior-task summary auto-injected); or start a fresh subagent (action:'start').`,
+    );
+  }
+
+  // 守卫 4：异进程活跃（.alive 侧车指向另一进程的活 pid）。
   // 双写防护：fork 虽 copy-on-write（历史 jsonl 只读），但源仍在异进程运行时接续容易
   // 读到半截历史，等它结束再接更安全。判据 = findForeignLiveInstance 直接探针（同
   // cold-lookup 准入判据；[U4b / D3b (a′)] 原读 rec.externalInstance 重建缓存换现查
   // 探针——语义等价且比重建时点缓存更新鲜）。sessionFile 缺失（entry-born 孤儿）时
-  // 无从探活，天然无 foreign 声明，落守卫 5 处置。
+  // 无从探活，天然无 foreign 声明，落守卫 6 处置。
   if (source.sessionFile !== undefined && findForeignLiveInstance(source.sessionFile) !== undefined) {
     throw new Error(
       `subagent ${id} is still running in another process (alive pid marker present). ` +
@@ -682,7 +700,7 @@ function assertAndLookupForkFromSource(service: SubagentService, id: string): Su
     );
   }
 
-  // 守卫 4：worktree 记录 —— WorktreeHandle 不可序列化，checkout 已被 reaper/cleanup
+  // 守卫 5：worktree 记录 —— WorktreeHandle 不可序列化，checkout 已被 reaper/cleanup
   // 回收；fork 子进程若复用旧路径会回落主 repo（破坏文件隔离）。与续聊链的
   // hadWorktree 守卫同一判据同一理由。
   if (source.worktree === true) {
@@ -694,7 +712,8 @@ function assertAndLookupForkFromSource(service: SubagentService, id: string): Su
     );
   }
 
-  // 守卫 5（[U4] 原守卫 6 锚判据化）：锚不可解析（字段缺失 = entry-born 从未开跑；
+  // 守卫 6（[U4] 锚判据化；[R5] zcode 形态已在守卫 3 早分流，到达此处必为 pi
+  // record）：锚不可解析（字段缺失 = entry-born 从未开跑；
   // 文件不在 = transcript 被回收）→ fork-from「继承历史」语义空洞。不硬拒 start
   // fresh，引导 message 的 reopen 语义（同 id 重开 + 历史摘要自动注入）。
   const sessionFile = source.sessionFile;

@@ -1,7 +1,7 @@
 /**
  * NpmInstaller SSRF 防护单测。
  *
- * 覆盖信任边界安全代码（CLAUDE.md + ponytail「security measures never simplify away」）：
+ * 覆盖信任边界安全代码（ponytail「security measures never simplify away」）：
  * - isPrivateIp：13 条内网/特殊用途 IP 段 + 公网 IP 放行
  * - validateUrlHost：非法 URL / 非 HTTPS / IPv4 私网 / IPv6（::1·fe80:·fc00:/fd）/ 公网放行
  *

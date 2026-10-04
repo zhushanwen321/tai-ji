@@ -97,7 +97,7 @@ describe('subagent store — state 初值', () => {
 describe('subagent store — loadSubagents', () => {
   it('成功时写入该 sid 分区', async () => {
     const records = [makeRecord(), makeRecord({ subagentId: 'bg-2', agent: 'worker' })]
-    vi.mocked(sessionApi.getSubagents).mockResolvedValue(records)
+    vi.mocked(sessionApi.getSubagents).mockResolvedValue({ subagents: records, oversize: false })
 
     const store = useSubagentStore()
     await store.loadSubagents('session-1')
@@ -151,7 +151,7 @@ describe('subagent store — loadSubagents 空结果守卫（接线冒烟）', (
   })
 
   it('连续第 2 次 RPC 空 → 判真实删空，清分区（strike 1/2 保留 → 2/2 放行全程经 store 可达 + 接线 tag）', async () => {
-    vi.mocked(sessionApi.getSubagents).mockResolvedValue([])
+    vi.mocked(sessionApi.getSubagents).mockResolvedValue({ subagents: [], oversize: false })
 
     const store = useSubagentStore()
     store.applyRecords('session-1', [makeRecord({ subagentId: 'bg-keep' })])
@@ -176,15 +176,39 @@ describe('subagent store — loadSubagents 空结果守卫（接线冒烟）', (
     const store = useSubagentStore()
     store.applyRecords('session-1', [makeRecord({ subagentId: 'bg-keep' })])
 
-    vi.mocked(sessionApi.getSubagents).mockResolvedValue([]) // strike 1/2
+    vi.mocked(sessionApi.getSubagents).mockResolvedValue({ subagents: [], oversize: false }) // strike 1/2
     await store.loadSubagents('session-1')
     vi.mocked(sessionApi.getSubagents).mockRejectedValue(new Error('network'))
     await store.loadSubagents('session-1') // catch → strike 重置
-    vi.mocked(sessionApi.getSubagents).mockResolvedValue([]) // 重新 strike 1/2，仍保留
+    vi.mocked(sessionApi.getSubagents).mockResolvedValue({ subagents: [], oversize: false }) // 重新 strike 1/2，仍保留
     await store.loadSubagents('session-1')
 
     expect(store.getRecordsBySession('session-1')).toHaveLength(1)
     expect(store.getRecordsBySession('session-1')[0].subagentId).toBe('bg-keep')
+  })
+
+  it('[RT-4#8] oversize=true：置降级标志 + 保留旧分区（不可用 ≠ 删空，不进 strike 守卫）', async () => {
+    const store = useSubagentStore()
+    store.applyRecords('session-1', [makeRecord({ subagentId: 'bg-keep' })])
+    vi.mocked(sessionApi.getSubagents).mockResolvedValue({ subagents: [], oversize: true })
+
+    // 连续多次 oversize（面板 retry）：不累计 strike 清分区（真实删空语义只属非 oversize 空结果）
+    await store.loadSubagents('session-1')
+    await store.loadSubagents('session-1')
+    expect(store.oversizeOf('session-1')).toBe(true)
+    expect(store.getRecordsBySession('session-1')).toHaveLength(1)
+
+    // 恢复正常（oversize=false）：标志清除 + 正常覆盖
+    vi.mocked(sessionApi.getSubagents).mockResolvedValue({ subagents: [makeRecord({ subagentId: 'bg-new' })], oversize: false })
+    await store.loadSubagents('session-1')
+    expect(store.oversizeOf('session-1')).toBe(false)
+    expect(store.getRecordsBySession('session-1')[0].subagentId).toBe('bg-new')
+
+    // clearSession 释放 oversize 分区
+    vi.mocked(sessionApi.getSubagents).mockResolvedValue({ subagents: [], oversize: true })
+    await store.loadSubagents('session-1')
+    store.clearSession('session-1')
+    expect(store.oversizeOf('session-1')).toBe(false)
   })
 })
 
@@ -198,6 +222,47 @@ describe('subagent store — clearSubagents', () => {
 
     expect(store.getRecordsBySession('session-1')).toEqual([])
     expect(store.getRecordsBySession('session-2')).toEqual([])
+  })
+
+  it('RD-3#12: clearSubagents 补齐 loading/error/strike 三 facet（+ oversize），对齐 clearSession 全清', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const store = useSubagentStore()
+      // session-1：非空分区 + 空结果一次（strike 1/2 残留）
+      store.applyRecords('session-1', [makeRecord({ subagentId: 'bg-a' })])
+      vi.mocked(sessionApi.getSubagents).mockResolvedValue({ subagents: [], oversize: false })
+      await store.loadSubagents('session-1') // strike 1/2：保留分区
+      expect(store.getRecordsBySession('session-1')).toHaveLength(1)
+      // session-2：oversize 降级标志置位
+      store.applyRecords('session-2', [makeRecord({ subagentId: 'bg-b' })])
+      vi.mocked(sessionApi.getSubagents).mockResolvedValue({ subagents: [], oversize: true })
+      await store.loadSubagents('session-2')
+      expect(store.oversizeOf('session-2')).toBe(true)
+      // session-3：RPC 失败 → loadError 置位
+      vi.mocked(sessionApi.getSubagents).mockRejectedValue(new Error('boom'))
+      await store.loadSubagents('session-3')
+      expect(store.loadErrorOf('session-3')).toBe('boom')
+
+      store.clearSubagents()
+
+      // 三 facet + oversize 全清（此前仅换 records Map，残留 loading/error/oversize/strike）
+      expect(store.getRecordsBySession('session-1')).toEqual([])
+      expect(store.isLoadingOf('session-1')).toBe(false)
+      expect(store.loadErrorOf('session-3')).toBeNull()
+      expect(store.oversizeOf('session-2')).toBe(false)
+
+      // strike 簿记已清：重新预置 session-1 后首次空结果从 strike 1 重新计（保留分区）——
+      // 若 clearSubagents 漏清 strike，残留 1 会让这次直接 strike 2/2 误删空 → 分区被清 → 断言红
+      store.applyRecords('session-1', [makeRecord({ subagentId: 'bg-keep' })])
+      vi.mocked(sessionApi.getSubagents).mockResolvedValue({ subagents: [], oversize: false })
+      await store.loadSubagents('session-1')
+      expect(store.getRecordsBySession('session-1')).toHaveLength(1)
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('empty strike 1/2'), 'session-1')
+    } finally {
+      warnSpy.mockRestore()
+      errorSpy.mockRestore()
+    }
   })
 })
 
@@ -225,7 +290,7 @@ describe('subagent store — clearSession (per-session 分区释放)', () => {
     // strike 2/2 误判删空 → 分区保留断言红。
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const store = useSubagentStore()
-    vi.mocked(sessionApi.getSubagents).mockResolvedValue([])
+    vi.mocked(sessionApi.getSubagents).mockResolvedValue({ subagents: [], oversize: false })
 
     // 预置非空分区 → strike 1/2：空结果保留
     store.applyRecords('session-1', [makeRecord({ subagentId: 'bg-keep' })])
@@ -567,7 +632,7 @@ describe('subagent store — split 双 session 加载态隔离（P2-3 回归锁�
   it('pane A 失败置 loadError 不影响 pane B 的错误/加载态（per-session 分区）', async () => {
     vi.mocked(sessionApi.getSubagents)
       .mockRejectedValueOnce(new Error('pane-a rpc down')) // sid-a 失败
-      .mockResolvedValueOnce([makeRecord()]) // sid-b 成功
+      .mockResolvedValueOnce({ subagents: [makeRecord()], oversize: false }) // sid-b 成功
 
     const store = useSubagentStore()
     await store.loadSubagents('sid-a')
@@ -584,8 +649,8 @@ describe('subagent store — split 双 session 加载态隔离（P2-3 回归锁�
   it('load 在途时另一 session 的读取不受影响（isIdle 分区读取）', async () => {
     let releaseB: (() => void) | undefined
     vi.mocked(sessionApi.getSubagents)
-      .mockResolvedValueOnce([makeRecord()])
-      .mockImplementationOnce(() => new Promise((resolve) => { releaseB = () => resolve([makeRecord()]) }))
+      .mockResolvedValueOnce({ subagents: [makeRecord()], oversize: false })
+      .mockImplementationOnce(() => new Promise((resolve) => { releaseB = () => resolve({ subagents: [makeRecord()], oversize: false }) }))
 
     const store = useSubagentStore()
     const pA = store.loadSubagents('sid-a') // 立即完成

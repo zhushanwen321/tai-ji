@@ -94,7 +94,7 @@
             @delete="onDeleteSession"
             @delete-folder="onDeleteFolder"
             @new-session-in-folder="onNewSessionInFolder"
-            @stop-branch="onStopBranch"
+            @abort="onAbortSession"
             @force-quit="onForceQuitSession"
             @set-project="onAssignProject"
           />
@@ -230,7 +230,7 @@ function onSessionImported(payload: ImportSessionImportedPayload): void {
 const { sessionCount, fileCount } = useSidebarCounts(focusedSessionId)
 const { derivedStatus } = useSessionDerivations()
 function statusOf(id: string) { return derivedStatus(id).value }
-const { onSelectSession, onNewSession, onNewSessionInFolder, onRenameSession, onDeleteSession, onDeleteFolder, onStopBranch, onForceQuitSession, onConfirmRename, onAssignProject, onRetryLoadSessions, searchDeps, onOpenSearchDrawer } = useSidebarSessionActions({ selectSession, restoreSession, newSession, loadSessions, renameSession, deleteSession, deleteFolder, assignSessionToProject, renameOpen, targetSessionId })
+const { onSelectSession, onNewSession, onNewSessionInFolder, onRenameSession, onDeleteSession, onDeleteFolder, onAbortSession, onForceQuitSession, onConfirmRename, onAssignProject, onRetryLoadSessions, searchDeps, onOpenSearchDrawer } = useSidebarSessionActions({ selectSession, restoreSession, newSession, loadSessions, renameSession, deleteSession, deleteFolder, assignSessionToProject, renameOpen, targetSessionId })
 useGlobalShortcuts({ onNewSession, onOpenImportSession: () => { importOpen.value = true }, forkFromLastAssistant, enterForkModeFromLastAssistant, handoffFromLastAssistant, navigation: useNavigationStore(), openSettings })
 // [B3 / 2026-09-14 内存审计 §2.4] app.info 退订函数保存 + onBeforeUnmount 调用：App.vue 以
 // v-if="connectionState !== 'connected'" 卸载 AppShell，runtime 崩溃自动重启下断连重连是

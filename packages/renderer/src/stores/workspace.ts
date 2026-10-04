@@ -13,6 +13,12 @@ import { workspace } from '@/api'
 
 export const useWorkspaceStore = defineStore('workspace', () => {
   const records = ref<RecentWorkspaceRecord[]>([])
+  /**
+   * RD-3#4：load 失败标记（最近工作区读失败 ≠ 无历史）。仅观测留痕——**不改** AC-4.5
+   * 验收口径「RPC reject → records 置 [] 不抛、不阻断启动」，故不加错误条/重试（与该规格冲突）。
+   * 置位让「读失败」与「真无历史」在日志/观测面可分（修复此前 catch 零日志零标记）。
+   */
+  const loadError = ref<string | null>(null)
 
   /** 默认 cwd：最近活跃工作区（records[0]?.cwd，W3 取代 resolveDefaultCwd） */
   const defaultCwd = computed(() => records.value[0]?.cwd)
@@ -24,8 +30,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function load(): Promise<void> {
     try {
       records.value = await workspace.listRecent()
-    } catch {
+      loadError.value = null
+    } catch (e) {
+      // AC-4.5：reject → records 置 [] 不抛（降级空态，不阻断启动）。RD-3#4：补一次 console.warn
+      // + loadError 标记，让「读失败」显形（此前零日志零标记，读失败被当首启空态）。
       records.value = []
+      loadError.value = e instanceof Error ? e.message : String(e)
+      console.warn('[workspace] load failed, degraded to empty recent list:', loadError.value)
     }
   }
 
@@ -48,5 +59,5 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  return { records, defaultCwd, load, record }
+  return { records, loadError, defaultCwd, load, record }
 })

@@ -5,7 +5,7 @@
  * （R2 实测 2026-08-22：tool execute 内 await ctx.compact() 不可行——AgentSession.compact
  * 开头的 abort() 会中止当前 agent 循环，挂起的 Promise 永不兑现、session 无 toolResult。
  * 故走 §3.2 降级态：execute 立即返回"压缩已启动"，onComplete/onError 后经
- * pi.sendUserMessage 注入结果消息——此时无进行中回合，abort 为 no-op）。
+ * pi.sendMessage custom message 注入结果——此时无进行中回合，abort 为 no-op）。
  * 压缩生成由 session_before_compact 接管 handler 完成（工具只触发，不生成）。
  */
 
@@ -18,6 +18,7 @@ import { buildDegradationHintLine } from "./reminder.js";
 import {
 	DEGRADATION_HINT_MIN_COMPACTIONS,
 	checkToolThresholdGuard,
+	COMPACT_RESULT_CUSTOM_TYPE,
 	countCompactions,
 	formatK,
 	getCurrentModelId,
@@ -160,8 +161,9 @@ export function registerCompactContextTool(
 			const compactionCount = countCompactions(getEntries(ctx));
 
 			// R2 降级态：fire-and-forget。工具立即返回"已启动"；压缩完成后（此时无进行中
-			// 回合，compact 内部的 abort 为 no-op）经 sendUserMessage 注入结果（steer：
-			// 下一个 LLM 调用前投递，agent 立即看到结果）
+			// 回合，compact 内部的 abort 为 no-op）经 sendMessage custom message 注入结果
+			// （triggerTurn:true 唤醒一轮让 agent 立即消费结果——工具已承诺"完成后你会收到
+			// 结果消息"；若此刻仍在 streaming，pi 缺省走 steer 队列，下一 LLM 调用前投递）
 			const mode = pickMode(config, gating.modelId);
 			ctx.compact({
 				customInstructions:
@@ -170,8 +172,10 @@ export function registerCompactContextTool(
 						: undefined,
 				// E1 实锤崩溃点（9/3 pi-crash log）：两个回调由 compact 的内部 Promise 链异步
 				// 调用，不在 pi runner emit() 的 try/catch 内——session 替换窗口（GUI 切
-				// session/新建/重载高频触发）下 pi.sendUserMessage 命中 stale ctx 同步抛错即
-				// 杀死 pi 进程。守卫 stale 静默降级（结果不投递，用户可重试 /compact），非
+				// session/新建/重载高频触发）下 pi.sendMessage 命中 stale ctx 同步抛错即
+				// 杀死 pi 进程（pi 0.84.4 实装：dist/core/extensions/loader.js 的 assertActive
+				// 214-219 wrapper → 142-146 staleMessage throw，在 runtime 调用前同步 throw）。
+				// 守卫 stale 静默降级（结果不投递，用户可重试 /compact），非
 				// stale 错误原样上抛（守卫不吞真实 bug）。
 				onComplete: (r: unknown) => {
 					guardStaleCtx(() => {
@@ -189,7 +193,12 @@ export function registerCompactContextTool(
 							`压缩前 ${formatK(result.tokensBefore ?? 0)} tokens → 压缩后约 ${formatK(result.estimatedTokensAfter ?? 0)} tokens；摘要生成成本：${cost}。`,
 							showHint ? buildDegradationHintLine() : "",
 						].filter((l) => l !== "");
-						pi.sendUserMessage(lines.join("\n"), { deliverAs: "steer" });
+						// display:true 进对话流（系统消息形态，非用户气泡）；对齐
+						// base-tool-enhance 完成通知先例（失败必须用户可见，不压 display:false）
+						pi.sendMessage(
+							{ customType: COMPACT_RESULT_CUSTOM_TYPE, content: lines.join("\n"), display: true },
+							{ triggerTurn: true },
+						);
 					}, {
 						isCtxStale: deps?.isCtxStale,
 						label: "smart-context:compact-onComplete",
@@ -200,9 +209,13 @@ export function registerCompactContextTool(
 					// 压缩本身的失败信息先落日志（守卫体外——stale 降级时该观测保留）
 					debugLog(`compact_context error: ${err.message}`);
 					guardStaleCtx(() => {
-						pi.sendUserMessage(
-							`[smart-context] 压缩失败：${err.message}。上下文未变化，可稍后重试（若反复失败，检查 smart-context 配置或使用 /compact）。`,
-							{ deliverAs: "steer" },
+						pi.sendMessage(
+							{
+								customType: COMPACT_RESULT_CUSTOM_TYPE,
+								content: `[smart-context] 压缩失败：${err.message}。上下文未变化，可稍后重试（若反复失败，检查 smart-context 配置或使用 /compact）。`,
+								display: true,
+							},
+							{ triggerTurn: true },
 						);
 					}, {
 						isCtxStale: deps?.isCtxStale,

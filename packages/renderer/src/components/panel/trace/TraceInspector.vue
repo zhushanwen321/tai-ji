@@ -46,13 +46,15 @@
     <!-- body：两态详情（select-text：全局 user-select:none 的内容区恢复点） -->
     <div class="min-h-0 flex-1 select-text overflow-y-auto px-2.5 pb-4" data-testid="trace-inspector-body">
       <!-- 损坏行恢复指引（§3.1）：打开 JSONL 所在目录（Electron reveal-in-folder IPC →
-           shell.showItemInFolder；路径来自快照 filePath，未落盘/未知时置灰） -->
+           shell.showItemInFolder；路径来自快照 filePath，未落盘/未知时置灰）。
+           [RD-2#6] 行号未知（协议/版本漂移防御）：不承诺行定位、不给出打开目录动作 -->
       <div
         v-if="row.kind === 'MALFORMED'"
         class="mb-2 flex flex-wrap items-center gap-2 rounded-sm border border-hairline bg-bg-input px-2.5 py-2"
         data-testid="trace-malformed-actions"
       >
         <Button
+          v-if="malformedLine !== null"
           variant="ghost"
           size="sm"
           :disabled="revealPath === null"
@@ -63,7 +65,11 @@
           <FolderOpen class="size-3" />
           {{ t('panel.trace.malformedOpenDir') }}
         </Button>
-        <span class="min-w-0 flex-1 text-[length:var(--text-2xs)] text-neutral-faint">{{ t('panel.trace.malformedHint', { line: row.lineNumber ?? 0 }) }}</span>
+        <span class="min-w-0 flex-1 text-[length:var(--text-2xs)] text-neutral-faint">{{
+          malformedLine !== null
+            ? t('panel.trace.malformedHint', { line: malformedLine })
+            : t('panel.trace.malformedHintUnknownLine')
+        }}</span>
       </div>
 
       <!-- block 态：assistant 子 block 全文（父 entry 溯源 + 类型分支渲染） -->
@@ -108,7 +114,7 @@
           v-else
           class="mb-2 overflow-x-auto whitespace-pre-wrap rounded-sm bg-bg-input p-2.5 font-mono text-[length:var(--text-2xs)] leading-relaxed text-neutral-mid"
           data-testid="trace-inspector-block-content"
-        >{{ JSON.stringify(block.kind === 'unknown' ? block.raw : block, null, JSON_INDENT) }}</pre>
+        >{{ safeJson(block.kind === 'unknown' ? block.raw : block) }}</pre>
       </template>
 
       <!-- 聚合态：kind 分支详情（原有四层） -->
@@ -286,15 +292,11 @@ const blocks = computed<
   }))
 })
 
-/** toolCall arguments 展示 JSON（解析失败兜底占位，不让 inspector 崩）。 */
+/** toolCall arguments 展示 JSON（[RD-2#5] 经 safeJson 统一守卫：解析失败/超限降级占位，不让 inspector 崩）。 */
 const blockArgumentsJson = computed(() => {
   const b = block.value
   if (!b || b.kind !== 'toolCall') return ''
-  try {
-    return JSON.stringify(b.arguments ?? {}, null, JSON_INDENT)
-  } catch {
-    return '(unserializable arguments)'
-  }
+  return safeJson(b.arguments ?? {})
 })
 
 /** 配对 toolResult 行 key（toolCallId 匹配；找不到 → 跳转按钮置灰）。 */
@@ -351,6 +353,36 @@ function onRevealFolder(): void {
 /** JSON.stringify 缩进宽度（原始 entry / block 原文兜底展示）。 */
 const JSON_INDENT = 2
 
+/** [RD-2#5] 序列化超限阈值（字符数，200KB）：超出截断 + 标记行，防巨型 entry 拖垮 inspector 渲染。 */
+const RAW_JSON_MAX_CHARS = 204_800
+
+/**
+ * [RD-2#5] JSON 序列化统一安全出口：模板表达式与 computed 的 JSON.stringify 一律经此。
+ * 环形引用 / BigInt 等会在 render 路径直接抛错（消息流无 per-item 错误边界，Inspector
+ * 整块空白且无降级标记）——此处 catch 降级占位；超限截断防巨型 payload。
+ */
+function safeJson(v: unknown): string {
+  let s: string
+  try {
+    s = JSON.stringify(v, null, JSON_INDENT)
+  } catch {
+    return t('panel.trace.rawJsonUnserializable')
+  }
+  // JSON.stringify(undefined) 返回 undefined（非字符串），不能进 .length
+  if (s === undefined) return 'undefined'
+  if (s.length > RAW_JSON_MAX_CHARS) {
+    return `${s.slice(0, RAW_JSON_MAX_CHARS)}\n${t('panel.trace.rawJsonTruncated')}`
+  }
+  return s
+}
+
+/** [RD-2#6] MALFORMED 行号：类型上可缺（协议/版本漂移防御）——null = 未知，
+ * 不以 ?? 0 伪装成「第 0 行」指引用户查不存在的行。 */
+const malformedLine = computed<number | null>(() => {
+  const r = row.value
+  return r !== null && r.kind === 'MALFORMED' && typeof r.lineNumber === 'number' ? r.lineNumber : null
+})
+
 /** 原始 JSON 兜底：block 态为该 block 原文（content[index]），聚合态为整个 entry。 */
 const rawJson = computed(() => {
   const r = row.value
@@ -359,8 +391,8 @@ const rawJson = computed(() => {
   if (idx !== null) {
     const content = (r.entry as { message?: { content?: unknown } })?.message?.content
     const rawBlock = Array.isArray(content) ? content[idx] : undefined
-    return JSON.stringify(rawBlock ?? { block: block.value?.kind }, null, JSON_INDENT)
+    return safeJson(rawBlock ?? { block: block.value?.kind })
   }
-  return JSON.stringify(r.entry ?? { raw: r.raw }, null, JSON_INDENT)
+  return safeJson(r.entry ?? { raw: r.raw })
 })
 </script>

@@ -7,7 +7,7 @@
  * 本文件是 testCommand 最后一跳，用例数需 >= wave testCases 数。
  */
 import { describe, it, expect } from 'vitest'
-import { ENV_WHITELIST_PREFIXES, AMBIENT_ENV_NAMES, KNOWN_PI_API_TYPES } from '../constants.js'
+import { ENV_WHITELIST_PREFIXES, AMBIENT_ENV_NAMES, KNOWN_PI_API_TYPES, ENGINE_ENV_DENY_LIST, PRESET_FALLBACK_ENV_KEYS } from '../constants.js'
 
 const AMBIENT_NAMES = [
   'GOOGLE_APPLICATION_CREDENTIALS',
@@ -95,5 +95,21 @@ describe('KNOWN_PI_API_TYPES（W2 A-09：pi-ai KnownApi 10 值全集）', () => 
     // ollama 经审计核实 pi 确不支持（A-09 附带核实），不得进白名单
     expect(KNOWN_PI_API_TYPES.has('ollama')).toBe(false)
     expect(KNOWN_PI_API_TYPES.has('')).toBe(false)
+  })
+})
+
+describe('ENGINE_ENV_DENY_LIST 与预设回落 env 名 SSOT 联动', () => {
+  // 原因（构造性防漂移）：deny 面按字面量登记（guard 只提取引号条目 + 本常量声明序），
+  // 若改 PRESET_FALLBACK_ENV_KEYS 值而忘同步 deny 面 → 引擎出站重新放行陈旧回落值，
+  // 子 agent pi 会记一个从未发生的 presetFallback 假披露。本断言把该联动机器化。
+  it('deny 清单包含模式回落两键（防枚举改名后静默漂移）', () => {
+    expect(
+      ENGINE_ENV_DENY_LIST,
+      'PRESET_FALLBACK_ENV_KEYS.FROM 未同步进 ENGINE_ENV_DENY_LIST——改名后忘了同步 deny 面（引擎出站 deny 失效 → 子 agent pi 假披露回归）',
+    ).toContain(PRESET_FALLBACK_ENV_KEYS.FROM)
+    expect(
+      ENGINE_ENV_DENY_LIST,
+      'PRESET_FALLBACK_ENV_KEYS.TO 未同步进 ENGINE_ENV_DENY_LIST——同上，改名后忘了同步 deny 面',
+    ).toContain(PRESET_FALLBACK_ENV_KEYS.TO)
   })
 })

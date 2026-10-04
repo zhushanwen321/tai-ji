@@ -186,6 +186,29 @@ describe('findSessions', () => {
     expect(matches[0].cwd).toBe('/proj-a')
   })
 
+  it('缺 cwd 的 header 进候选集（谓词不统一负面锚，design §4 负面行为验证）', async () => {
+    // header 行只有 id（无 cwd/timestamp）：runtime 导入侧「id+cwd 非空」严谓词会拒收，
+    // reader 宽谓词（仅要求 type==='session' ∧ id 为 string）必须照常收录——基座化
+    // （readFirstJsonlLine 改指 session-core）不得顺手统一谓词，本用例即机器锚。
+    const headerPath = join(slugDir, 'no-cwd.jsonl')
+    await mkdir(slugDir, { recursive: true })
+    await writeFile(headerPath, JSON.stringify({ type: 'session', id: '019e0001-no-cwd' }) + '\n')
+    await makeSession(slugDir, { name: 'with-cwd.jsonl', id: '019e0002-with-cwd', cwd: '/demo' })
+
+    // find 结果：缺 cwd header 命中，cwd 归一化为空串（buildCandidate 的 header.cwd ?? ''）
+    const { matches } = await findSessions('no-cwd', agentDir)
+    expect(matches).toHaveLength(1)
+    expect(matches[0].sessionId).toBe('019e0001-no-cwd')
+    expect(matches[0].cwd).toBe('')
+
+    // 候选枚举（recent 路径枚举全部候选）：缺 cwd header 未被候选集排除
+    const recent = await findSessions('recent', agentDir)
+    expect(recent.matches.map((m) => m.sessionId).sort()).toEqual([
+      '019e0001-no-cwd',
+      '019e0002-with-cwd',
+    ])
+  })
+
   it('limit 截断：truncated 标记正确', async () => {
     // 5 个文件 id 都含 "common"，uuid 片段 "common" 全匹配
     for (let i = 0; i < 5; i++) {

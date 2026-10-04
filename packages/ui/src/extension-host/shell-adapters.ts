@@ -8,14 +8,14 @@
  *   注释明确「壳把 transport 层适配成 source 注入」）
  * - createCompanionDialogAdapters：bus 'ui-request' + WS plugin:uiRequestExpired →
  *   DialogRequestSource / UiResponseTransport（companion-band-source.ts 契约的壳侧实现），
- *   唯一策略差异经 routeAskUser 参数注入（askUser 路由是壳裁决，不属翻译件）
+ *   壳层能力（pendingSend 收尾锚点 / 未送达提示）经可选回调注入（纯翻译件不依赖壳 i18n/store）
  *
  * 壳各自保留的装配裁决（不进本模块）：bus 来源选择（桌面 getExtensionBus 惰性单例 /
  *   移动模块级私有 bus）+ provide 时机（桌面 initExtensionHostBridge / 移动 App.vue setup）。
  *
  * 消息流：WS 下行 → route-inbound（events 正规通道）→ createWsPluginMessageSource →
  * MessageBusBridge → bus 'ui-request'（plugin:uiRequest + extension.ui_request 双源归一）
- * → source.onUiRequest（无 sid 跳过 / routeAskUser 分流）→ convertToDialogRequest →
+ * → source.onUiRequest（无 sid 跳过 / C4 四键排除）→ convertToDialogRequest →
  * DialogRequestQueue → CompanionBand 渲染 → 用户操作 → queue.respond → transport 回传
  * （pi 源 → extension.ui_response / plugin 源 → plugin.uiResponse）。
  *
@@ -90,7 +90,7 @@ type UiRequestEvent = Extract<InternalEvent, { kind: 'ui-request' }>
 
 // ── 类型守卫（索引签名字段收窄，禁止 any 断言） ──────────────────────
 
-const DIALOG_METHODS: readonly DialogRequest['method'][] = ['confirm', 'select', 'input', 'editor', 'askUser']
+const DIALOG_METHODS: readonly DialogRequest['method'][] = ['confirm', 'select', 'input', 'editor']
 
 function isDialogMethod(v: unknown): v is DialogRequest['method'] {
   return typeof v === 'string' && (DIALOG_METHODS as readonly string[]).includes(v)
@@ -128,19 +128,16 @@ function normalizeOptions(options: unknown): DialogRequestOption[] | undefined {
 /**
  * 转换 bus ui-request 事件为 ui 包 DialogRequest（AC2）：
  * - source：request.pluginId !== '' → 'plugin'（plugin 源），否则 'pi'（extension 源统一 ''）
- * - method：askUser === true → 'askUser'（C2 改写，askUserQuestions/allowCancel 透传）；
- *   否则索引签名原始 method（超界如 editor 透传）?? kind 兜底（对齐 toExtensionUIRequest 语义）
+ * - method：索引签名原始 method（超界如 editor 透传）?? kind 兜底（对齐
+ *   toExtensionUIRequest 语义）；form 类请求已被 C4 排除，不会到达本转换
  * - options：双形状归一（normalizeOptions）
  * - receivedAt：转换时刻时间戳（队列倒计时基准）
  */
 export function convertToDialogRequest(e: UiRequestEvent): DialogRequest {
   const req = e.request
-  const askUser = req.askUser === true
-  const method: DialogRequest['method'] = askUser
-    ? 'askUser'
-    : isDialogMethod(req.method)
-      ? req.method
-      : req.kind
+  const method: DialogRequest['method'] = isDialogMethod(req.method)
+    ? req.method
+    : req.kind
   return {
     source: req.pluginId !== '' ? 'plugin' : 'pi',
     sessionId: e.sessionId ?? '',
@@ -152,35 +149,35 @@ export function convertToDialogRequest(e: UiRequestEvent): DialogRequest {
     ...(req.default !== undefined ? { default: req.default as string } : {}),
     ...(req.prefill !== undefined ? { prefill: req.prefill as string } : {}),
     ...(req.level !== undefined ? { level: req.level as 'info' | 'warn' | 'error' } : {}),
-    ...(askUser ? { askUserQuestions: req.askUserQuestions as unknown[] } : {}),
-    ...(askUser ? { allowCancel: req.allowCancel as boolean } : {}),
     receivedAt: Date.now(),
   }
 }
 
-/** method 收窄到 ExtensionInteractMethod（askUser 请求不达回传通道——panel 路由已在投递层
- *  过滤；companion 路由下 askUser 的应答由 AskUserForm 经 sendPiResponse 以 method='askUser'
- *  外的收窄形态回传，非法值统一兜底 input） */
+/** method 收窄到 ExtensionInteractMethod（form 类请求已被 C4 过滤，不会到达回传通道） */
 function toInteractMethod(method: string): ExtensionInteractMethod {
   return method === 'confirm' || method === 'select' || method === 'input' || method === 'editor'
     ? method
     : 'input' // 兜底对齐 core parseUiRequest 的 kind 兜底语义
 }
 
-// ── askUser 路由策略（壳裁决注入点，唯一策略差异）────────────────────────
+// ── 壳层能力注入点（回调可选，未注入 = 空操作）────────────────────────
 
 /**
- * askUser 请求的路由裁决（分流契约 feature clarify C2/C4）：
- * - 'panel'：桌面壳——askUser 请求由 useExtensionUI 消费（Panel inline 独占），本层投递时
- *   跳过 askUser 事件（CompanionBand 独占非 askUser dialog），两者在数据源层分流零重叠
- * - 'companion'：移动壳——无 Panel，CompanionBand（AskUserForm）是 askUser 唯一消费面，
- *   dialog 全 method + askUser 全投递（v1 能力边界）
+ * 双壳共享 factory 的壳层能力注入（桌面 useExtensionHostBridge / 移动 companion-bridge）：
+ * - onPiResponseSettled：通路级收尾锚点（plain-dialog-submit-settle D1；ADR-0072 cancel 型
+ *   分型先例 → ADR-0073 D4a 壳层锚点与通路级收口）。sendPiResponse 应答终局无条件调用
+ *   （cancel / 提交 / WS 断连三型统一，清在 delivered 判定之前——断连期 turn 同样不可达）。
+ *   桌面壳注入 chatStore.clearPendingSend（plain dialog 通路默认值 = 无 turn 预期，生产者
+ *   穷尽论证见 ADR-0073）；移动壳无 pendingSend 链不注入 = 空操作。
+ * - notifyNotDelivered：「回复未送达」壳层提示（M1 环 3）——sendPiResponse / sendPluginResponse
+ *   未送达（WS 非 OPEN）时由壳层 toast（队列 headless 无 UI，可见反馈归壳层）。定义归壳层
+ *   （依赖 i18n 单例 + toast），ui 包只声明注入点。
  */
-export type AskUserRouting = 'companion' | 'panel'
-
 export interface CompanionDialogAdaptersOptions {
-  /** askUser 请求路由策略（双壳唯一行为差异，见 AskUserRouting） */
-  routeAskUser: AskUserRouting
+  /** pi 源 dialog 应答终局的壳层收尾回调（桌面注入 clearPendingSend；未注入 = 空操作） */
+  onPiResponseSettled?: (sessionId: string) => void
+  /** 回传未送达的壳层提示回调（桌面注入 toast；未注入 = 静默，表项保留语义不变） */
+  notifyNotDelivered?: (sessionId?: string) => void
 }
 
 /** 测试后门命名空间（生产代码禁止消费，对齐壳层 __testing 先例）：G1 反查表探针 */
@@ -214,28 +211,72 @@ export interface CompanionDialogAdapters {
  *
  * source.onUiRequest：
  * - 无 sessionId 跳过 + console.warn（C2，防 '' 分区脏数据）
- * - routeAskUser === 'panel' 时 askUser === true 跳过投递（C4 分流）
+ * - C4 四键排除：form ∨ askUser ∨ scheduleCreate ∨ planReview 跳过投递（统一表单 overlay /
+ *   planReview 审批条由 useExtensionUI 消费——Panel inline 独占；漏排除 = 空壳 dialog 误触
+ *   + 双 UI 并存，违反「零重叠」契约）
  * source.onUiRequestExpired：WS plugin:uiRequestExpired（timeout-plugin-service D2 超时撤窗，
  * 不经 bus——bridge 无此归一项）。按 requestId 反查（onUiRequest 流经时记录 requestId→sessionId
  * 映射，投递时归属 sid，MF-4 反查为主）；Map miss 时 payload 可选 sessionId 兜底（壳重启）。
  * 查不到（弹窗已 respond 关闭 / 从未投递 / 广播迟到于出队）→ noop 幂等（V4b miss 语义：
  * 广播无条件发出，miss 是正常时序）。
  *
- * transport（回传双通道）：
+ * transport（回传双通道，返回 boolean = WS 送达与否）：
  * - sendPiResponse：复用 sendExtensionUIResponse（extension.ui_response，method 透传，
- *   runtime 按 method 构建 pi 响应格式，AC9）
+ *   runtime 按 method 构建 pi 响应格式，AC9）；应答终局无条件调 onPiResponseSettled
+ *   （通路级收尾锚点，清在 delivered 判定之前——ADR-0073 D4a）
  * - sendPluginResponse：发 plugin.uiResponse（runtime UiRequestQueue.handleResponse 消费，AC6）
- * - [G1] 双通道 respond 即删反查表项——删除后迟到的撤窗广播按 miss noop 语义跳过，
+ * - 未送达（false）：表项保留（DialogRequestQueue.respond 见 false 不出队，连接恢复后同
+ *   requestId 重发幂等——M1/RD-3#1）+ notifyNotDelivered 壳层提示
+ * - [G1] 双通道送达即删反查表项——删除后迟到的撤窗广播按 miss noop 语义跳过，
  *   不误触已达应答 dialog
  */
+// ── [G1] requestId→sessionId 反查表（模块级共享；dialog 撤窗/应答路由）────────
+
+// taste:allow-no-data-owner（ADR-0049 全局 sid 协调器/订阅注册基建已登记）：requestId→sessionId
+// 反查表，非 GUI 数据。模块级共享（G1 共管不变量）：dialog 消费方不唯一——CompanionBand
+// （factory source 投递）与 btw 面板（useBtwTabData 经 createUiResponseTransport 独立回传）
+// 各自 respond 都必须删同一张表项，否则 respond 路径的 G1 补删对跨消费方请求失效
+// （pi 源 dialog 无撤窗广播，残留即泄漏）。测试隔离经 __testing.resetRequestIdSessionsForTest。
+const requestIdSessions = new Map<string, string>()
+
+/**
+ * 创建独立回传双通道（不绑定 factory source；btw 面板等自管请求簿记的消费方使用）。
+ * 与 createCompanionDialogAdapters 的 transport 同一实现、共管同一张模块级反查表——
+ * 语义（C4 之外的回传面完全一致）：见 transport 通道注释（factory JSDoc「transport」节）。
+ */
+export function createUiResponseTransport(options: CompanionDialogAdaptersOptions = {}): UiResponseTransport {
+  return {
+    sendPiResponse(sessionId, requestId, method, result) {
+      // 通路级收尾锚点：应答终局无条件清（cancel / 提交 / 断连三型统一；恒清不吞 turn 信号
+      // ——若某源提交后真有 turn，message_start 照常驱动 isGenerating；clearPendingSend 幂等）。
+      // 清在 delivered 判定之前：断连期 turn 同样不可达，不清则该形态仍走 30s 兜底
+      // （「意图先于送达」的两通路相位分叉登记见 ADR-0073；已知失真与重审条件见 ADR-0072 收口）。
+      options.onPiResponseSettled?.(sessionId)
+      const delivered = sendExtensionUIResponse(sessionId, requestId, toInteractMethod(method), result)
+      if (!delivered) {
+        // 未送达：表项保留（请求仍在队列，撤窗反查仍需可用）+ 壳层提示（队列 headless 无 UI）
+        options.notifyNotDelivered?.(sessionId)
+        return false
+      }
+      requestIdSessions.delete(requestId)
+      return true
+    },
+    sendPluginResponse(requestId, result) {
+      const delivered = send({ type: 'plugin.uiResponse', payload: { requestId, result } })
+      if (!delivered) {
+        options.notifyNotDelivered?.()
+        return false
+      }
+      requestIdSessions.delete(requestId)
+      return true
+    },
+  }
+}
+
 export function createCompanionDialogAdapters(
   bus: InternalEventBus,
-  options: CompanionDialogAdaptersOptions,
+  options: CompanionDialogAdaptersOptions = {},
 ): CompanionDialogAdapters {
-  // taste:allow-no-data-owner（ADR-0049 全局 sid 协调器/订阅注册基建已登记）：requestId→sessionId
-  // 反查表（dialog 撤窗/应答路由），非 GUI 数据；factory 单点持有（见函数头 [G1] 注释）
-  const requestIdSessions = new Map<string, string>()
-
   const source: DialogRequestSource = {
     onUiRequest(handler) {
       return bus.on('ui-request', (e) => {
@@ -243,9 +284,17 @@ export function createCompanionDialogAdapters(
           console.warn('[dialog-adapters] ui-request 事件缺少 sessionId，跳过投递:', e.request.requestId)
           return
         }
-        if (options.routeAskUser === 'panel' && e.request.askUser === true) {
-          return // C4：askUser 由 useExtensionUI 消费（Panel inline，桌面壳路由）
-        }
+        // C4：统一表单 overlay 类由 useExtensionUI 消费（Panel inline 挂 FormOverlay），本侧
+        // 对称排除（窗口键集合 = form ∨ askUser ∨ scheduleCreate——本侧消费 bus 原始帧，
+        // legacy 帧无 form 键，归一只发生在 useExtensionUI handler 内；窗口末 legacy 键删）——
+        // 漏排除则同一请求被转成空壳 select dialog 入队（用户误点 = respond null = 误触取消）
+        // 并与 overlay 双 UI 并存，违反双消费方「零重叠」契约。
+        if (e.request.form === true || e.request.askUser === true || e.request.scheduleCreate === true) return
+        // C4（plan 模式重设计 D5；u-plan-bar 起宿主收敛）：planReview 审批请求由 PlanModeBar
+        // 行内右区的 PlanReviewBar 消费（useExtensionUI planReviewFilter 实例入 store 枚举 +
+        // respond 回传，常驻订阅宿主 = PlanModeBar）——不落 CompanionBand 原始 dialog 渲染
+        // marker 控制符 title。
+        if (e.request.planReview === true) return
         // D2 撤窗反查表：同一 requestId 重复投递（实时帧 + 快照双源）幂等覆盖
         requestIdSessions.set(e.request.requestId, e.sessionId)
         handler(convertToDialogRequest(e))
@@ -270,16 +319,7 @@ export function createCompanionDialogAdapters(
     },
   }
 
-  const transport: UiResponseTransport = {
-    sendPiResponse(sessionId, requestId, method, result) {
-      requestIdSessions.delete(requestId)
-      sendExtensionUIResponse(sessionId, requestId, toInteractMethod(method), result)
-    },
-    sendPluginResponse(requestId, result) {
-      requestIdSessions.delete(requestId)
-      send({ type: 'plugin.uiResponse', payload: { requestId, result } })
-    },
-  }
+  const transport = createUiResponseTransport(options)
 
   const __testing: CompanionDialogAdaptersTesting = {
     probeRequestIdSessionsSize(): number {

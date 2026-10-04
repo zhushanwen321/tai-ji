@@ -1,6 +1,7 @@
 /**
  * Workflow hook：turn_end 时检查模型是否成功调用 structured-output 工具。
- * 未成功时通过 pi.sendUserMessage({deliverAs:"steer"}) 注入 steering message 重试。
+ * 未成功时通过 pi.sendMessage（custom message，display:false）以 steer 方式注入
+ * steering message 重试——提示词不伪装用户气泡，对话流用户内容 100% 来自用户输入。
  * 最多重试 MAX_HOOK_RETRIES 次，防止无限循环。
  *
  * RetryState：从旧 4 个 mutable 闭包（soCallCount/soSucceededEver/hookRetryCount/
@@ -89,6 +90,14 @@ export class RetryState {
 
 /** steer 发送失败告警的 appendEntry customType（session JSONL 持久化，不进 LLM 上下文）。 */
 export const HOOK_ENTRY_TYPE = "structured-output:hook";
+
+/**
+ * steer reminder 的 sendMessage customType（role:"custom" 消息，pi convertToLlm 对其
+ * 无条件转 LLM user 消息——LLM 可见性与 user message 无差别；display:false 不渲染
+ * 用户气泡，对话流归属语义结构性正确。锚点登记 docs/pi-semantics.json PS-43：
+ * pi dist/core/messages.js:89-96 case "custom" 无条件 role:"user"）。
+ */
+export const RETRY_REMINDER_CUSTOM_TYPE = "structured-output:retry-reminder";
 
 /**
  * steer 发送失败告警（审查项#8 失败路径）：双通道落盘（同 loop-gate writeTerminatedLog
@@ -194,7 +203,8 @@ function buildSteerReminder(
 
 /**
  * 注册 turn_end hook，检查模型是否成功调用 structured-output 工具。
- * 未成功时通过 pi.sendUserMessage({deliverAs:"steer"}) 注入 steering message 重试。
+ * 未成功时通过 pi.sendMessage（custom message，display:false）以 steer 方式注入
+ * steering message 重试。
  * 最多重试 MAX_HOOK_RETRIES 次，防止无限循环。
  *
  * @returns 共享的 RetryState（U2：index.ts 拿它接线 loop-gate 的 onTerminal 回调）。
@@ -240,14 +250,18 @@ export function setupWorkflowHook(pi: PiAPI, schemaJson: string): RetryState {
 		// 故 onTurnEnd()（清空 lastSchemaError）必须在发送成功之后调用。
 		const reminder = buildSteerReminder(calledButFailed, state.lastSchemaError, schemaJson, isObjectRoot);
 
-		// 审查项#8：await 发送结果——发送失败（如 compaction 中 prompt() 抛错 / 扩展已
+		// 审查项#8：await 发送结果——发送失败（如 compaction 中开轮抛错 / 扩展已
 		// 被 assertActive 拒绝）不扣减重试预算（不调 onTurnEnd），否则 fire-and-forget
 		// 丢一份 steer + 白扣一次预算，两次即永久哑火。
-		// pi 0.84.1 实装（loader.js）：extension 侧 sendUserMessage 同步转发且吞掉异步
-		// rejection（转 emitError）返回 void——await 对 undefined 立即解析；此处的
-		// try/catch 兜住同步 throw（assertActive）与未来 pi 返回真 Promise 的形态。
+		// pi 0.84.4 实装（loader.js）：extension 侧 sendMessage 同步转发且吞掉异步
+		// rejection（bindCore .catch(emitError) 转事件）返回 void——await 对 undefined
+		// 立即解析；此处的 try/catch 兜住同步 throw（assertActive）与未来 pi 返回真
+		// Promise 的形态。
 		try {
-			await pi.sendUserMessage(reminder, { deliverAs: "steer" });
+			await pi.sendMessage(
+				{ customType: RETRY_REMINDER_CUSTOM_TYPE, content: reminder, display: false },
+				{ deliverAs: "steer", triggerTurn: true },
+			);
 		} catch (err) {
 			writeSteerFailedLog(pi, state.hookRetryCount, err);
 			return;

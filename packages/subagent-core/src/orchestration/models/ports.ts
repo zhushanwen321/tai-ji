@@ -112,13 +112,29 @@ export interface LifecycleDeps {
  /** run 到达 done 终态时的回调（C-4 修复，可选）。Interface 层注入 notifyDone。 */
   onRunDone?: (run: WorkflowRun) => void;
  /**
- * 跨扩展事件总线（pending-notifications register/unregister 信号灯）。
+ * 跨扩展事件总线（pending-notifications register 信号灯）。
  *
- * runWorkflow 启动时 emit pending:register；所有 transition("done") 路径 emit
- * pending:unregister。两处均通过本端口（Engine 不直接依赖 Pi SDK）。可选——
- * 无 pending-notifications 扩展时 no-op（向后兼容）。
+ * runWorkflow 启动时 emit pending:register，经本端口（Engine 不直接依赖 Pi SDK）。
+ * 可选——无 pending-notifications 扩展时 no-op（向后兼容）。
+ *
+ * [reload-closeout D4] transition("done") 路径的 pending:unregister 持久化不再走
+ * 本端口（emit→内存 listener 是易失跳：reload 转换窗/多 extension factory 顺序窗
+ * 内丢失即注销 entry 永缺位）——finalizeRun 改经下方 appendEntry 直落权威面。
  */
   eventBus?: { emit(channel: string, data: unknown): void };
+ /**
+ * [reload-closeout D4] pending entry 权威落盘面（pi.appendEntry 的调用时解析注入）。
+ *
+ * finalizeRun 的 pending:unregister 持久化直走本面落盘（session JSONL 是唯一权威，
+ * 不经 eventBus emit→listener 易失跳）。注入实现须在函数体内现读当前 pi（生产装配
+ * workflow-events makeDeps：resolveCurrentPi().appendEntry）——与 log/onRunDone
+ * 同款 volatile 形态，在飞 pump 持有的旧 deps 对象自动路由到新 pi。entry 写法与
+ * status 映射归消费点（finalizeRun）单点定义，本成员只承载写通道。
+ *
+ * 可选——未注入时（旧测试 deps）finalizeRun 跳过直落（向后兼容；生产装配恒注入，
+ * 漏注入由 reconcile-sweep 下次 session_start 兜底）。
+ */
+  appendEntry?: (customType: string, data: unknown) => void;
  /**
  * 调试日志端口（Engine 不直接依赖 Pi SDK）。Interface 层注入实现。
  * 关键路径记录 run 启动、保存、pending 注册/注销，便于排查异步操作状态。

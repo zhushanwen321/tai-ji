@@ -158,6 +158,27 @@ describe('TerminalPage 保存交互', () => {
     const payload = configMock.setTerminalConfig.mock.calls[0]![0] as TerminalConfig
     expect(payload.shellArgs).toEqual([])
   })
+
+  it('RD-4#7：保存 in-flight 期间按钮禁用（saving 守卫，防 65s 窗口重复点击并发覆盖）', async () => {
+    let resolveSave!: (v: { config: TerminalConfig; corrupted: boolean }) => void
+    configMock.setTerminalConfig.mockImplementationOnce(
+      () => new Promise((r) => { resolveSave = r }),
+    )
+    wrapper = mount(TerminalPage, { attachTo: document.body })
+    await flushPromises()
+
+    // 第一次点击 → 进入 saving（setTerminalConfig pending）
+    await $('[data-testid="terminal-save"]').trigger('click')
+    await flushPromises()
+    expect(configMock.setTerminalConfig).toHaveBeenCalledTimes(1)
+    // in-flight：保存按钮禁用
+    expect(($('[data-testid="terminal-save"]').element as HTMLButtonElement).disabled).toBe(true)
+
+    // resolve → saving 复位，按钮恢复可用
+    resolveSave({ config: defaultConfig(), corrupted: false })
+    await flushPromises()
+    expect(($('[data-testid="terminal-save"]').element as HTMLButtonElement).disabled).toBe(false)
+  })
 })
 
 describe('TerminalPage corrupted 提示', () => {

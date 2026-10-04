@@ -5,6 +5,7 @@ export default {
   reconnecting: '重新连接中…',
   restarting: 'runtime 重启中…',
   failed: 'runtime 不可用，重试多次仍失败',
+  errorCause: '原因：{message}',
   retry: '重试',
   runtimeExited: '会话进程已退出：{reason}',
   sessionRequestFailed: '会话请求失败：{message}',

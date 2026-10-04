@@ -16,7 +16,7 @@
  * - complete: finalizeAndPersist(state, "complete", ...)（内部已含 tickState → finalizeGoal → persist）
  * - report_blocked: 手动 tickState（status 仍 active 才累加当前运行段）→ transitionStatus(active→blocked) → persistState
  *
- * create 不调 sendUserMessage：toolcall 时 AI 已在 turn 中，返回结果后自行续跑
+ * create 不发消息注入：toolcall 时 AI 已在 turn 中，返回结果后自行续跑
  * （与 /goal set 的 followUp 触发区分；对齐 Codex create_goal 不自动续跑）。
  *
  * schema：扁平 Type.Object（OpenAI 兼容，C3）——parameters 顶层必须是 type:"object"，
@@ -151,7 +151,7 @@ export interface GoalControlDetails {
  * slug：AI 生成的短标识，仅 widget 标题 + history 用，不注入 prompt。真 optional。
  * objective：完整描述，注入每轮 context prompt（保证方向感）。
  *
- * 全解耦：不读 todo/plan。toolcall 时 AI 已在 turn 中，**不**调 sendUserMessage
+ * 全解耦：不读 todo/plan。toolcall 时 AI 已在 turn 中，**不**发消息注入
  * （AI 返回后自行续跑，对齐 Codex create_goal）。
  *
  * 守卫用 D25 严格语义：非终态 active/paused/blocked 全挡，提示用 /goal resume 或

@@ -206,3 +206,48 @@ describe('SessionLifecycle.reclaimManagedSession × B8 历史缓存驱逐', () =
     expect(third.messages.map((m) => m.piEntryId)).toEqual(['e1', 'e2'])
   })
 })
+
+/** v6 第四案：回收定向清 pending 的代际校验测试（clearPendingUiRequests 挂成功分支）。 */
+describe('SessionLifecycle.reclaimManagedSession × v6 挂起 UI 请求定向清（代际校验）', () => {
+  it('回收成功路径调用 clearPendingUiRequests（只清被回收代际的 pending）', async () => {
+    const { pm, lifecycle } = makeEnv()
+    await lifecycle.registerSession('s1', pm.getClient('s1') as IPiEngine, tmpdir(), 't')
+    const clearSpy = vi.fn()
+    const reclaimed = await lifecycle.reclaimManagedSession('s1', {
+      seat: new ReclaimSeat(),
+      clearPendingUiRequests: clearSpy,
+    })
+    expect(reclaimed).toBe(true)
+    expect(clearSpy).toHaveBeenCalledTimes(1)
+    expect(clearSpy).toHaveBeenCalledWith('s1')
+  })
+
+  it('代际校验取消分支不调用（并发 restore 的新进程活请求不被误清）', async () => {
+    const { pm, lifecycle } = makeEnv()
+    await lifecycle.registerSession('s1', pm.getClient('s1') as IPiEngine, tmpdir(), 't')
+    // 并发重建占位：pm.hasClient 仍命中 → 代际校验失败 → 取消
+    ;(pm.hasClient as ReturnType<typeof vi.fn>).mockReturnValue(true)
+    const clearSpy = vi.fn()
+    const reclaimed = await lifecycle.reclaimManagedSession('s1', {
+      seat: new ReclaimSeat(),
+      clearPendingUiRequests: clearSpy,
+    })
+    expect(reclaimed).toBe(false)
+    expect(clearSpy).not.toHaveBeenCalled()
+  })
+
+  it('session 不存在（提前 return）不调用；可选依赖缺省不炸', async () => {
+    const { pm, lifecycle } = makeEnv()
+    const clearSpy = vi.fn()
+    const unknown = await lifecycle.reclaimManagedSession('nope', {
+      seat: new ReclaimSeat(),
+      clearPendingUiRequests: clearSpy,
+    })
+    expect(unknown).toBe(false)
+    expect(clearSpy).not.toHaveBeenCalled()
+
+    await lifecycle.registerSession('s2', pm.getClient('s2') as IPiEngine, tmpdir(), 't')
+    const reclaimedNoDep = await lifecycle.reclaimManagedSession('s2', { seat: new ReclaimSeat() })
+    expect(reclaimedNoDep).toBe(true)
+  })
+})

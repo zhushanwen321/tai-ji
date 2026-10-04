@@ -113,6 +113,33 @@ describe('terminal-write-queue 状态机（WQ 联动 2）', () => {
     expect(writeFn).toHaveBeenNthCalledWith(MAX_PENDING_WRITES, 's1', `cmd-${MAX_PENDING_WRITES - 1}`)
   })
 
+  // ── RD-3#5：drop-oldest 计数显形 ──────────────────────────────────────
+
+  it('RD3-5-D1: 队列满 drop-oldest 累计计数 + onDrop 回调（携带 per-session 累计值）', () => {
+    const onDrop = vi.fn()
+    const queue = createTerminalWriteQueue(writeFn, { onDrop })
+    for (let i = 0; i < MAX_PENDING_WRITES + 3; i++) {
+      queue.enqueueWrite('s1', `cmd-${i}`)
+    }
+    expect(onDrop).toHaveBeenCalledTimes(3)
+    // 每次回调携带累计值（1/2/3 递增，调用方可显示「已丢弃 N 条」）
+    expect(onDrop).toHaveBeenNthCalledWith(1, 's1', 1)
+    expect(onDrop).toHaveBeenNthCalledWith(3, 's1', 3)
+    expect(queue.droppedCountOf('s1')).toBe(3)
+    expect(queue.droppedCountOf('unknown-sid')).toBe(0)
+  })
+
+  it('RD3-5-D2: removeSession 清零计数；上限内不触发 onDrop', () => {
+    const onDrop = vi.fn()
+    const queue = createTerminalWriteQueue(writeFn, { onDrop })
+    for (let i = 0; i < MAX_PENDING_WRITES; i++) {
+      queue.enqueueWrite('s1', `cmd-${i}`)
+    }
+    expect(onDrop).not.toHaveBeenCalled()
+    queue.removeSession('s1')
+    expect(queue.droppedCountOf('s1')).toBe(0)
+  })
+
   it('工厂 per-instance 隔离：两个实例互不影响', () => {
     const queueA = createTerminalWriteQueue(writeFn)
     const queueB = createTerminalWriteQueue(writeFn)

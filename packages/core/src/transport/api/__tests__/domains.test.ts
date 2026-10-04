@@ -32,6 +32,7 @@ vi.mock('../../ws-client', () => ({
   send: (msg: unknown) => mockWsSend(msg),
 }))
 
+import * as btw from '../domains/btw'
 import * as chat from '../domains/chat'
 import * as composer from '../domains/composer'
 import * as config from '../domains/config'
@@ -294,13 +295,17 @@ describe('extension 域 RPC 动作', () => {
     expect(handler).toHaveBeenCalledTimes(1)
   })
 
-  it('sendExtensionUIResponse 经 ws send fire-and-forget', () => {
+  it('sendExtensionUIResponse 经 ws send fire-and-forget，透传 boolean 送达结果（M1 环 3）', () => {
     mockWsSend.mockReturnValue(true)
-    extension.sendExtensionUIResponse('s1', 'r1', 'select', 'opt-1')
+    expect(extension.sendExtensionUIResponse('s1', 'r1', 'select', 'opt-1')).toBe(true)
     expect(mockWsSend).toHaveBeenCalledWith({
       type: 'extension.ui_response',
       payload: { sessionId: 's1', requestId: 'r1', method: 'select', result: 'opt-1' },
     })
+
+    // WS 非 OPEN：send 返 false → 透传 false（调用方据此保留请求 + 提示重发，不再 :void 吞掉）
+    mockWsSend.mockReturnValue(false)
+    expect(extension.sendExtensionUIResponse('s1', 'r2', 'confirm', false)).toBe(false)
   })
 })
 
@@ -488,7 +493,8 @@ describe('session 域 请求-响应', () => {
     expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['session.setThinkingLevel', { sessionId: 's1', level: 'max' }])
 
     mockCommand.mockResolvedValueOnce({ subagents: [{ id: 'sa' }] })
-    await expect(session.getSubagents('s1')).resolves.toEqual([{ id: 'sa' }])
+    // [RT-4#8] 结构化返回透传（subagents + oversize?）：api domain 不再解包 .subagents
+    await expect(session.getSubagents('s1')).resolves.toEqual({ subagents: [{ id: 'sa' }] })
     expect(mockCommand.mock.calls[1][0]).toBe('session.getSubagents')
 
     mockCommand.mockResolvedValueOnce({ messages: [{ id: 'm' }] })
@@ -507,7 +513,8 @@ describe('session 域 请求-响应', () => {
 
   it('workflow 派生：getWorkflows / getAgentCallHistory / getAgentCallFilePath / workflowAction / subagentAction', async () => {
     mockCommand.mockResolvedValueOnce({ workflows: [{ runId: 'r1' }] })
-    await expect(session.getWorkflows('s1')).resolves.toEqual([{ runId: 'r1' }])
+    // [RT-4#8] 结构化返回透传（workflows + oversize?）：api domain 不再解包 .workflows
+    await expect(session.getWorkflows('s1')).resolves.toEqual({ workflows: [{ runId: 'r1' }] })
     expect(mockCommand.mock.calls[0][0]).toBe('session.getWorkflows')
 
     mockCommand.mockResolvedValueOnce({ messages: [] })
@@ -725,6 +732,10 @@ describe('config 域 请求-响应', () => {
     mockCommand.mockResolvedValueOnce({ refreshed: ['a'], failed: [{ providerId: 'b', reason: 'x' }] })
     await expect(config.refreshProviderCatalogs()).resolves.toEqual({ refreshed: ['a'], failed: [{ providerId: 'b', reason: 'x' }] })
 
+    // RT-7#8：损坏缓存源 / 落盘失败标志透传（api domain 不吞新字段）
+    mockCommand.mockResolvedValueOnce({ refreshed: [], failed: [], corrupt: ['own'], persistFailed: true })
+    await expect(config.refreshProviderCatalogs()).resolves.toEqual({ refreshed: [], failed: [], corrupt: ['own'], persistFailed: true })
+
     mockCommand.mockResolvedValueOnce({ providers: [{ id: 'p' }] })
     await expect(config.listProviders()).resolves.toEqual({ providers: [{ id: 'p' }], scopedModels: undefined })
   })
@@ -917,5 +928,25 @@ describe('config 域 订阅（onGlobalType 通道）', () => {
     expect(h3).toHaveBeenCalledWith({ providerId: 'p' })
     byType['auth.error']({ payload: { error: 'expired' } })
     expect(h4).toHaveBeenCalledWith({ error: 'expired' })
+  })
+})
+
+// ── btw 域（btw-question D6，M2-a）────────────────────────────────────────
+describe('btw 域 RPC 封装（D6 3 控制帧）', () => {
+  it('create：type/payload { mainSid } + reply 全字段透传（vid + mainSid + forkState）', async () => {
+    mockCommand.mockResolvedValueOnce({ vid: 'btw:pi-1', mainSid: 's-main', forkState: 'none' })
+    await expect(btw.create('s-main')).resolves.toEqual({ vid: 'btw:pi-1', mainSid: 's-main', forkState: 'none' })
+    expect(mockCommand).toHaveBeenCalledWith('btw.create', { mainSid: 's-main' }, RPC_BACKSTOP_TIMEOUT_MS)
+  })
+
+  it('list：type/payload { mainSid } + 解包 threads（与 session.list 解包 groups 同模式）', async () => {
+    mockCommand.mockResolvedValueOnce({ mainSid: 's-main', threads: [{ vid: 'btw:pi-1' }, { vid: 'btw:pi-2' }] })
+    await expect(btw.list('s-main')).resolves.toEqual([{ vid: 'btw:pi-1' }, { vid: 'btw:pi-2' }])
+    expect(mockCommand).toHaveBeenCalledWith('btw.list', { mainSid: 's-main' }, RPC_BACKSTOP_TIMEOUT_MS)
+  })
+
+  it('remove：type/payload { vid }，ack 型（command 返回 void，完成即 resolve）', async () => {
+    await btw.remove('btw:pi-1')
+    expect(mockCommand).toHaveBeenCalledWith('btw.remove', { vid: 'btw:pi-1' }, RPC_BACKSTOP_TIMEOUT_MS)
   })
 })

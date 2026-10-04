@@ -11,8 +11,8 @@
  * 业务逻辑在 services，经 handler 调用；本类不含领域计算，只做路由与编排。
  */
 import type { WebSocket as WsType } from 'ws'
-import type { ClientMessage, ClientMessageType, RollingRestartStatusPayload, ServerMessage, SkillCacheScope } from '@taiji/shared'
-import { OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES } from '@taiji/shared'
+import type { ClientMessage, ClientMessageType, RollingRestartStatusPayload, ServerMessage, ServerMessageType, SkillCacheScope } from '@taiji/shared'
+import { EXTENSION_EVENTS, OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES } from '@taiji/shared'
 import type { SessionManagerAction } from '@zhushanwen/extension-protocol'
 import type { ISessionService, IConfigService, IModelService, IMessageBroker, IExtensionService, IPluginService, IAuthService } from '../interfaces.js'
 
@@ -34,6 +34,7 @@ import type { IMessageBus } from '../services/message-bus/message-bus.js'
 import { createSessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 import { ExtensionTimeoutManager } from '../services/extension-timeout-manager.js'
+import type { PendingUIRequest, PendingUIRequestResolved } from '../services/extension-timeout-manager.js'
 import { ConnectionManager, type ConnectionManagerOptions } from './connection-manager.js'
 import { ServerMessageBroker } from './message-broker.js'
 import { BridgeHandler } from './bridge-handler.js'
@@ -51,6 +52,9 @@ import { QuotaMessageHandler } from './quota-message-handler.js'
 import { UsageMessageHandler } from './usage-message-handler.js'
 import { PresetMessageHandler } from './preset-message-handler.js'
 import { SessionManagerHandler } from './session-manager-handler.js'
+import { BtwMessageHandler } from './btw-message-handler.js'
+// BtwRoutingDeps（btw-question M2-b / B1 授权）：组合根构造 BtwService 后经 optional.btw 注入。
+import type { BtwRoutingDeps } from './btw-message-handler.js'
 import type { MessageHandlerContext, ErrorDetails } from './message-context.js'
 import type { WorkspaceService } from '../services/workspace/workspace-service.js'
 import type { ProjectStore } from '../services/project/project-store.js'
@@ -66,6 +70,8 @@ import type { IModelConnectionTester } from '../services/ports/model-connection-
 import { UsageStatsService } from '../services/usage/usage-stats-service.js'
 import type { PresetService } from '../services/preset-service.js'
 import { toErrorMessage } from '../utils/errors.js'
+// warn-once（MF-1-8）：invalidatePendingUiRequests 的 bus 缺失分支显形（RT-4#9 同款纪律）。
+import { warnOnce } from '../utils/warn-once.js'
 
 /**
  * setServices 的全部可选依赖（PR #189 review：签名从 18 个位置参数收敛为聚合对象，
@@ -109,6 +115,13 @@ export interface RuntimeServerOptionalServices {
    * 可选：未注入时 reply 超限占位文案退化为「（见 runtime 日志）」，阈值仍用默认常量。
    */
   replyGuardResolver?: (sessionId: string) => string | null | undefined
+  /**
+   * btw 线三帧路由（btw-question M2-b，B1 授权）：BtwService 窄面 + 主会话解析。
+   * 组合根（index.ts）构造 BtwService 后注入，assembleOptionalHandlers 据此构造
+   * BtwMessageHandler 并在 buildRoutes 展开 handles（缺省 = 不装配，btw.* 落 unknown_type——
+   * 生产组合根恒注入，缺省语义服务存量测试装配）。
+   */
+  btw?: BtwRoutingDeps
 }
 
 /**
@@ -174,6 +187,8 @@ export class RuntimeServer implements IMessageBroker {
   private usageMessageHandler!: UsageMessageHandler
   private presetMessageHandler!: PresetMessageHandler
   private sessionManagerHandler!: SessionManagerHandler
+  /** btw 三帧 handler（btw-question M2-b）：optional.btw 注入时装配（可选批次）。 */
+  private btwMessageHandler?: BtwMessageHandler
 
   /**
    * u7c（crash-forensics D5）：滚动重启状态只读查询 provider（组合根 setRollingRestartStatusProvider
@@ -260,7 +275,15 @@ export class RuntimeServer implements IMessageBroker {
     // 既有直接调用点已随之移除。setOnSessionDestroyed 是追加式注册，PluginService 后续
     // 注册的 didDestroy 投递不受影响。
     this.sessionService.setOnSessionDestroyed((summary) => {
+      // P2-2 失效链：摘除 + 广播（原 clearForSession 只清不广播——renderer 屏上的挂起
+      // 审批条/表单不知道请求已死）。覆盖主动删 / 进程退出 / restore 清场全部销毁路径。
+      this.invalidatePendingUiRequests(summary.id, 'session-destroyed')
       this.clearExtensionTimeoutsForSession(summary.id)
+    })
+    // P2-2 失效链（MF-1-7 abortPlan 编排下沉）：session.abortPlan prompt 成功后经回调
+    // 上抛至此——失效链消费保持 server.ts 单一出口（与 session-destroyed 同点注册）。
+    this.sessionService.setOnPlanAborted((sessionId) => {
+      this.invalidatePendingUiRequests(sessionId, 'plan-aborted')
     })
     this.configService = config
     this.modelService = model
@@ -348,7 +371,7 @@ export class RuntimeServer implements IMessageBroker {
       broadcast: (msg) => this.broker.broadcast(msg),
       broadcastProviderList: () => this.broker.broadcastProviderList(),
       broadcastSkillList: () => this.broker.broadcastSkillList(),
-      broadcastSkillCacheInvalidated: (scope: SkillCacheScope, cwd?: string) => this.broker.broadcastSkillCacheInvalidated(scope, cwd),
+      broadcastSkillCacheInvalidated: (scope: SkillCacheScope, cwd?: string, partial?: boolean) => this.broker.broadcastSkillCacheInvalidated(scope, cwd, partial),
       broadcastAgentList: () => this.broker.broadcastAgentList(),
       broadcastSkillDirs: () => this.broker.broadcastSkillDirs(),
       broadcastAgentDirs: () => this.broker.broadcastAgentDirs(),
@@ -367,6 +390,9 @@ export class RuntimeServer implements IMessageBroker {
       nextPushId: () => this.broker.nextPushId(),
       broadcastSessionList: () => this.broker.broadcastSessionList(),
       broadcast: (msg) => this.broker.broadcast(msg),
+      invalidatePendingUiRequests: (sid: string, reason: string) => {
+        this.invalidatePendingUiRequests(sid, reason)
+      },
     })
     this.extensionHandler = new ExtensionMessageHandler({
       ...messaging,
@@ -385,7 +411,7 @@ export class RuntimeServer implements IMessageBroker {
    * usage / preset——按对应 service 是否注入条件装配，守卫条件与原实现一致。
    */
   private assembleOptionalHandlers(messaging: MessageHandlerContext, optional: RuntimeServerOptionalServices): void {
-    const { workspace, project, worktree, terminal, quota, preset } = optional
+    const { workspace, project, worktree, terminal, quota, preset, btw } = optional
     if (this.gitService) {
       this.gitMessageHandler = new GitMessageHandler({
         ...messaging,
@@ -456,6 +482,17 @@ export class RuntimeServer implements IMessageBroker {
         presetService: preset,
       })
     }
+    if (btw) {
+      this.btwMessageHandler = new BtwMessageHandler({
+        ...messaging,
+        btwService: btw.service,
+        resolveMain: btw.resolveMain,
+        // state topic 'btw' 广播通道：组合根在 setServices 前已 setMessageBus（与
+        // sessionHandler ctx 同款时序前提，server.messageBus 在本阶段恒就绪）。
+        messageBus: this.messageBus,
+        nextPushId: () => this.broker.nextPushId(),
+      })
+    }
   }
 
   /** SessionManagerHandler：agent-managed session 请求处理（select 通道 + SESSION_MANAGER_MARKER）。 */
@@ -507,6 +544,7 @@ export class RuntimeServer implements IMessageBroker {
     const quotaHandler = this.quotaMessageHandler
     const usageHandler = this.usageMessageHandler
     const presetHandler = this.presetMessageHandler
+    const btwHandler = this.btwMessageHandler
     return new Map([
       ['ping', (msg, ws) => this.broker.reply(ws, msg.id, 'pong', {})],
       // u7c（crash-forensics D5）：滚动重启状态只读查询（与 request 同名 reply；provider
@@ -526,6 +564,8 @@ export class RuntimeServer implements IMessageBroker {
       ...(quotaHandler ? quotaHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => quotaHandler.handleQuotaMessage(msg, ws)] as const) : []),
       ...usageHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => usageHandler.handleUsageMessage(msg, ws)] as const),
       ...(presetHandler ? presetHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => presetHandler.handlePresetMessage(msg, ws)] as const) : []),
+      // btw 三帧（btw-question M2-b / D6）：create/list/remove → BtwMessageHandler。
+      ...(btwHandler ? btwHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => btwHandler.handleBtwMessage(msg, ws)] as const) : []),
     ] as Array<[ClientMessageType, (msg: ClientMessage, ws: WsType) => Promise<unknown> | unknown]>)
   }
 
@@ -549,8 +589,9 @@ export class RuntimeServer implements IMessageBroker {
   /**
    * W2：暴露 broker 的 skill 缓存失效广播，供 index.ts 的 skillRegistry.onChange 回调调用
    * （skill 变动 → 广播 config.skillCacheInvalidated 让 landing composable 失效缓存重拉）。
+   * partial 透传（RT-1#9 降级补发标注）。
    */
-  broadcastSkillCacheInvalidated(scope: SkillCacheScope, cwd?: string): void { this.broker.broadcastSkillCacheInvalidated(scope, cwd) }
+  broadcastSkillCacheInvalidated(scope: SkillCacheScope, cwd?: string, partial?: boolean): void { this.broker.broadcastSkillCacheInvalidated(scope, cwd, partial) }
   nextPushId(): string { return this.broker.nextPushId() }
 
   // ── Message routing ───────────────────────────────────────────
@@ -569,10 +610,22 @@ export class RuntimeServer implements IMessageBroker {
       }
     } catch (e) {
       const message = toErrorMessage(e)
-      const sessionId = ('sessionId' in msg.payload ? msg.payload.sessionId : undefined) as string | undefined
+      // RT-1#3：payload 可能缺省/为原始值（畸形帧已过 JSON.parse 层）——`'sessionId' in msg.payload`
+      // 在 undefined 上抛 TypeError，会替换掉原 handler 异常（catch 内二次抛）。可选链消除二次抛。
+      const sessionId = (msg.payload as { sessionId?: string } | undefined)?.sessionId
       // L4 增强：error 自带 code（如 MODEL_NOT_CONFIGURED）时透传，前端据此差异化引导；否则回退 handler_error。
       const code = (e as Error & { code?: string }).code ?? 'handler_error'
-      this.broker.sendError(ws, code, message, msg.id, sessionId ? { sessionId } : undefined)
+      try {
+        this.broker.sendError(ws, code, message, msg.id, sessionId ? { sessionId } : undefined)
+      } catch (envelopeError) {
+        // error envelope 发送自身失败（ws TOCTOU 已关闭等）：原 handler 异常不能随之丢失——
+        // 以 cause 保留上抛（Error options cause，仓内既有范式），由 connection-manager 兜底
+        // 漏斗打印 + 补发 sessionId 信封。
+        throw new Error(
+          `handler error envelope send failed (original: ${message}; envelope error: ${toErrorMessage(envelopeError)})`,
+          { cause: e },
+        )
+      }
     }
   }
 
@@ -592,6 +645,54 @@ export class RuntimeServer implements IMessageBroker {
 
   clearExtensionTimeoutsForSession(sessionId: string): void {
     this.extensionTimeoutMgr.clearForSession(sessionId)
+  }
+
+  /**
+   * 摘除 session 的全部挂起 UI 请求并推送失效帧（P2-2 失效链单一出口）。
+   *
+   * 非 respond 方式终结挂起（abort turn / 退出 plan / 回收 / session 销毁）时调用：
+   * 摘除 runtime pending 缓存 + 发布 extension:requestsInvalidated，renderer 移除本屏
+   * 对应审批条/表单。返回被摘清单（空清单不发布——常态 abort 无挂起，帧无意义）。
+   */
+  invalidatePendingUiRequests(sessionId: string, reason: string): PendingUIRequestResolved[] {
+    const invalidated = this.extensionTimeoutMgr.invalidatePendingForSession(sessionId)
+    if (invalidated.length > 0) {
+      if (this.messageBus) {
+        // wave:perf-w09 纪律收口（changeSetInvalidated R-08 同族先例）：payload 带 sessionId
+        // 的 session 级 push 型消息必须走 bus.publish——broker.broadcast 会触发哨兵误报
+        //（message-broker broadcast 的 session-scoped warn）且不占 seq 不入 ring，断连重连/
+        // 切回 session 无法回放。TOPIC_TABLE 登记 stream 档：分配 seq + 入 ring（一次性失效
+        // 信号、需可靠送达，session.restored 同款理由；renderer removeRequest 幂等，回放
+        // 重复帧无副作用）。
+        this.messageBus.publish(sessionId, {
+          type: EXTENSION_EVENTS.REQUESTS_INVALIDATED as ServerMessageType,
+          id: this.broker.nextPushId(),
+          payload: { sessionId, requestIds: invalidated.map((r) => r.requestId), reason },
+        })
+      } else {
+        // MF-1-8：bus 缺失 = 失效帧静默丢失，与上注「一次性失效信号、需可靠送达」矛盾且
+        // 不可诊断——warn-once 显形（RT-4#9 未知 customType 同款显形纪律）。组合根 index.ts
+        // 恒注入 bus，本分支实际不可达，触达即装配顺序回归性破坏；按 sessionId 去重，
+        // 波及面可归因（renderer 侧挂起审批条/表单将残留）。
+        warnOnce(
+          `invalidate-pending-ui-requests:${sessionId}`,
+          `[server] extension:requestsInvalidated not delivered: sessionId=${sessionId} invalidated=${invalidated.length} reason=${reason} — message bus not wired, invalidation frame dropped (expected always-injected by composition root; investigate wiring order)`,
+        )
+      }
+    }
+    return invalidated
+  }
+
+  /**
+   * 只读拉取该 session 的挂起 UI 请求快照（reaper-only，v6 第四案挂起表单豁免）。
+   *
+   * 与上方三个写口同族的薄委托（不暴露 manager 本体，不提供任何变更能力）；内部调
+   * ExtensionTimeoutManager.getPendingRequests——该方法本就是非破坏性只读快照
+   * （不消费/不移除），故 reaper 判定不会影响 pending 生命周期，也不影响 busy 预检。
+   * scope = 全扩展（confirm/select/input/editor 全在内，不按扩展过滤）。
+   */
+  getPendingUiRequests(sessionId: string): PendingUIRequest[] {
+    return this.extensionTimeoutMgr.getPendingRequests(sessionId)
   }
 
   async handleBridgeRequest(sessionId: string, requestId: string, method: string, data: Record<string, unknown>): Promise<void> {

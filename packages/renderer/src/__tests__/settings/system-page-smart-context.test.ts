@@ -39,6 +39,10 @@ vi.mock('@/composables/useToast', () => toastModule())
 vi.mock('@/composables/features/command/useCommandStore', () => commandStoreModule())
 vi.mock('@/lib/ipc', () => ipcModule())
 
+// SystemPage 集成 mount 重组件树，插桩/全量套件负载下超 5s 默认预算（空载单跑秒级过）
+// ——预算放宽对齐兄弟文件 system-page-rename-model.test.ts 的 20s 形态
+vi.setConfig({ testTimeout: 20_000 })
+
 // 工厂引用 helper 单例（mock 模块与断言共享同一 mock fn 实例）
 const settingsMock = settingsApiMocks
 
@@ -186,5 +190,31 @@ describe('SystemSmartContextSection 智能上下文压缩', () => {
     target!.click()
     await flushPromises()
     expect(settingsMock.setSmartContextExcludedModels).toHaveBeenCalledWith(['p1/m1'])
+  })
+
+  it('RD-4#8：getSmartContextConfig 读取失败 → 常驻提示 + Switch 禁用（不把默认值当已存值）', async () => {
+    settingsMock.getSmartContextConfig.mockRejectedValue(new Error('ws down'))
+    await mountPage()
+    // 顶部常驻提示 + 重试入口
+    expect(wrapper!.find('[data-testid="smart-context-load-error"]').exists()).toBe(true)
+    expect(wrapper!.text()).toContain('读取失败')
+    // Switch 禁用（loadError 时不可操作，禁止把默认「开」当已存值落盘）
+    const swEl = wrapper!.find('[data-testid="setting-smart-context-switch"]').element as HTMLButtonElement
+    expect(swEl.disabled).toBe(true)
+  })
+
+  it('RD-4#8：重试成功后清除提示 + Switch 恢复可用', async () => {
+    settingsMock.getSmartContextConfig.mockRejectedValueOnce(new Error('ws down'))
+    await mountPage()
+    expect(wrapper!.find('[data-testid="smart-context-load-error"]').exists()).toBe(true)
+
+    // 重试：mock 改成功（resetSettingsApiMocks 的默认 resolved 值）
+    settingsMock.getSmartContextConfig.mockResolvedValue(smartContextFixture())
+    await wrapper!.find('[data-testid="smart-context-load-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper!.find('[data-testid="smart-context-load-error"]').exists()).toBe(false)
+    const swEl = wrapper!.find('[data-testid="setting-smart-context-switch"]').element as HTMLButtonElement
+    expect(swEl.disabled).toBe(false)
   })
 })

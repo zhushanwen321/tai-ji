@@ -29,6 +29,7 @@ export class UsageMessageHandler {
           const result = await this.ctx.usageStatsService.getStats()
           this.ctx.reply(ws, msg.id, 'usage.getStats:result', result)
         } catch (e) {
+          // taste:allow-outbound-without-session-id — usage.getStats 是全局聚合统计，无会话归属
           this.ctx.sendError(ws, 'usage_scan_failed', toErrorMessage(e), msg.id, {
             hint: '扫描失败，可重试；详情见 runtime 日志',
           })

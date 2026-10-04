@@ -440,3 +440,68 @@ describe('SESSION 行溯源跳转失败的用户反馈（onJumpParent catch+toas
     view.unmount()
   })
 })
+
+describe('safeJson 守卫 + 损坏行行号未知降级（RD-2#5 / RD-2#6）', () => {
+  /** 快照 a1 toolCall block（content[1]）的 arguments 替换为指定值（引用直传，core 不克隆） */
+  function snapshotWithToolCallArguments(args: unknown): ServerMessageMap['session.traceEntries'] {
+    const snap = buildSnapshot()
+    const a1 = snap.entries[1] as { message?: { content?: Array<Record<string, unknown>> } }
+    const toolCall = a1.message?.content?.[1]
+    if (toolCall) toolCall.arguments = args
+    return snap
+  }
+
+  async function mountBlockArguments(snapshot: ServerMessageMap['session.traceEntries']) {
+    apiMock.getTraceEntries.mockResolvedValue(snapshot)
+    await readyPartition()
+    selectTraceEntry(SID, 'a1#block-1')
+    await nextTick()
+    const view = mount(TraceInspector, { props: { sessionId: SID } })
+    return { view, args: view.find('[data-testid="trace-inspector-block-arguments"]') }
+  }
+
+  it('[RD-2#5] arguments 环形引用 → 降级占位文案（inspector 不空白、render 路径不抛错）', async () => {
+    const circular: Record<string, unknown> = { path: 'a.ts' }
+    circular.self = circular
+    const { view, args } = await mountBlockArguments(snapshotWithToolCallArguments(circular))
+    expect(args.exists()).toBe(true)
+    expect(args.text()).toContain('无法序列化')
+    view.unmount()
+  })
+
+  it('[RD-2#5] arguments 超 200KB → 截断展示 + 「过大已截断」标记行（巨型 payload 不整段渲染）', async () => {
+    const { view, args } = await mountBlockArguments(snapshotWithToolCallArguments({ blob: 'x'.repeat(210 * 1024) }))
+    expect(args.exists()).toBe(true)
+    expect(args.text()).toContain('过大，已截断')
+    // 截断生效：DOM 文本不超阈值 + 标记行余量
+    expect(args.text().length).toBeLessThanOrEqual(200 * 1024 + 200)
+    view.unmount()
+  })
+
+  it('[RD-2#5 回归锚] 正常 arguments → JSON 键值原样展示（守卫不改变正常路径输出）', async () => {
+    const { view, args } = await mountBlockArguments(snapshotWithToolCallArguments({ path: 'a.ts', line: 3 }))
+    expect(args.text()).toContain('"path"')
+    expect(args.text()).toContain('a.ts')
+    expect(args.text()).not.toContain('无法序列化')
+    view.unmount()
+  })
+
+  it('[RD-2#6] MALFORMED 无 lineNumber（协议/版本漂移防御）→ 「行号未知」文案 + 不渲染「打开所在目录」动作（不承诺行定位、不指「第 0 行」）', async () => {
+    const snap = buildSnapshot()
+    snap.malformed = [
+      { raw: 'not json' } as unknown as ServerMessageMap['session.traceEntries']['malformed'][number],
+    ]
+    apiMock.getTraceEntries.mockResolvedValue(snap)
+    await readyPartition()
+    // lineNumber 缺省 → core trace-rows 行 key 模板串拼接为 malformed:undefined
+    selectTraceEntry(SID, 'malformed:undefined')
+    await nextTick()
+    const view = mount(TraceInspector, { props: { sessionId: SID } })
+    const actions = view.find('[data-testid="trace-malformed-actions"]')
+    expect(actions.exists()).toBe(true)
+    expect(actions.text()).toContain('行号未知')
+    expect(actions.text()).not.toContain('第 0 行')
+    expect(view.find('[data-testid="trace-malformed-reveal"]').exists()).toBe(false)
+    view.unmount()
+  })
+})

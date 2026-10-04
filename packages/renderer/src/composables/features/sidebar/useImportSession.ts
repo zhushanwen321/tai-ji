@@ -3,10 +3,10 @@
  *
  * 来源设计：docs/design/import-session.md（已删除，git 可追溯）§3.3 D5（RPC 契约）+ §3.1 终态交互样例。
  *
- * 职责边界：纯状态编排（query debounce 拉候选 / 目录过滤 / 选中 / 执行导入 /
- * 「选择其他目录」切扫描根重拉），不含 DOM 与 i18n 文案映射（错误码 → 恢复指引
- * 文案在组件层）。无 per-session 状态（ADR-0049 不适用：对话框是全局单例 UI，
- * 非 session 隔离域）。
+ * 职责边界：纯状态编排（来源选择 + query debounce 拉候选 / 目录过滤 / 选中 /
+ * 执行导入 /「选择其他目录」切扫描根重拉），不含 DOM 与 i18n 文案映射（错误码 →
+ * 恢复指引文案在组件层，按 source 分支取 zcode 特化文案）。无 per-session 状态
+ * （ADR-0049 不适用：对话框是全局单例 UI，非 session 隔离域）。
  *
  * 模块级导出（跨组件共享的导入瞬时信号）：
  *  - 成功 toast 组装在 importSession 内（对话框关闭后 toast 仍需展示）
@@ -21,7 +21,10 @@ import { computed, ref, shallowRef, watch } from 'vue'
 import type {
   ImportCandidate,
   ImportCandidateDir,
+  ImportDegradationSummary,
   ImportErrorCode,
+  ImportRequest,
+  ImportSourceKind,
   ImportWarning,
 } from '@taiji/shared'
 import { session as sessionApi } from '@/api'
@@ -45,7 +48,7 @@ export type ImportFreshState = 'visible' | 'fading'
 
 /**
  * fresh 徽标开始淡出前的实显时长（demo doImport 3.2s 后加 fade class；
- * ForkGroup FRESH_FADE_MS 同值——侧边栏 fresh 信号统一节奏）。
+ * 侧边栏 fresh 信号统一节奏）。
  */
 export const IMPORT_FRESH_VISIBLE_MS = 3_200
 
@@ -126,6 +129,7 @@ const FAILURE_CODES: ReadonlySet<string> = new Set([
   'import_target_conflict',
   'import_copy_failed',
   'import_project_invalid',
+  'import_db_path_forbidden',
   'timeout',
 ])
 
@@ -143,6 +147,8 @@ export interface ImportSessionImportedPayload {
   targetPath: string
   /** sidecar 写失败降级标记（文件已落地不回滚，消费方可选提示） */
   warning?: ImportWarning
+  /** 降级摘要（仅 warning 含 conversion_* 时携带；载荷契约见 shared ImportDegradationSummary） */
+  degradationSummary?: ImportDegradationSummary
 }
 
 export interface UseImportSessionOptions {
@@ -156,6 +162,12 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
 
   const open = ref(false)
   const query = ref('')
+  /**
+   * 导入源（两阶段视图：阶段一来源选择 → 阶段二该源候选列表）。缺省 'pi'
+   * （契约向后兼容：renderer 侧总是显式携带 source，缺省值仅覆盖「未选择即交互」
+   * 的初始态）；resetForOpen 重开对话框时回到缺省源。
+   */
+  const source = ref<ImportSourceKind>('pi')
   const items = ref<ImportCandidate[]>([])
   const dirs = ref<ImportCandidateDir[]>([])
   /** 过滤前总数（reply.total，供统计展示） */
@@ -242,7 +254,8 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
 
   /**
    * 拉取候选列表。query 为空 = 全量（limit 截断在 runtime）；rootDir 仅在
-   * 「选择其他目录」切过根后携带（缺省根由 runtime 推导，payload 不含该字段）。
+   * 「选择其他目录」切过根后携带（缺省根由 runtime 推导，payload 不含该字段；
+   * zcode 源切源时 rootDir 已重置，天然不携带）。source 总是显式携带。
    */
   async function fetchCandidates(): Promise<void> {
     const seq = ++requestSeq
@@ -251,7 +264,9 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
     loadErrorCode.value = null
     try {
       const trimmed = query.value.trim()
-      const payload: { rootDir?: string; query?: string } = {}
+      const payload: { source: ImportSourceKind; rootDir?: string; query?: string } = {
+        source: source.value,
+      }
       if (rootDir.value) payload.rootDir = rootDir.value
       if (trimmed) payload.query = trimmed
       const reply = await sessionApi.importCandidates(payload)
@@ -298,12 +313,17 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
     else void fetchCandidates()
   })
 
-  /** 打开对话框：重置全部状态 + 默认导入到当前活跃 project + 立即拉取 */
+  /**
+   * 打开对话框：重置全部状态 + 默认导入到当前活跃 project。不发起候选拉取——
+   * 两阶段视图先展示来源选择（阶段一零 RPC），选定来源由 selectSource 按需拉取。
+   * 例外：上次关闭时残留非空搜索词的场景，置空 query 会触发上方 watch 的立即
+   * 拉取（此时 source 已重置为 pi，多拉一次缺省源候选，无害）。
+   */
   function resetForOpen(): void {
     open.value = true
     cancelPendingFetch()
     requestSeq++
-    const prevTrimmed = query.value.trim()
+    source.value = 'pi'
     query.value = ''
     selectedDir.value = ''
     rootDir.value = null
@@ -316,12 +336,35 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
     dirs.value = []
     total.value = 0
     selectedProjectId.value = projectStore.activeProjectId
-    // query 非空 → 置空会触发上方 watch 的立即拉取；原本就为空则 watch 不触发，在此显式首拉
-    if (!prevTrimmed) void fetchCandidates()
   }
 
   function select(sessionId: string): void {
     selectedId.value = sessionId
+  }
+
+  /**
+   * 选定导入来源（对话框阶段一 → 阶段二的入口动作）。
+   * 切源：清源相关状态（选中/目录筛选/扫描根/错误态/候选快照——两源候选域不同，
+   * 旧数据对新源无意义；rootDir 是 pi 概念，zcode 换根 out-of-scope）并重拉。
+   * 同源重进：候选保留（避免往返闪烁），仅清选中与错误态；上次结果为空（含加载
+   * 失败——catch 路径已清空 items）时补拉，覆盖「重进失败列表 = 直接重试」与
+   * 「resetForOpen 不首拉后直接点缺省源」两个首次拉取场景。
+   */
+  function selectSource(kind: ImportSourceKind): void {
+    const switched = kind !== source.value
+    source.value = kind
+    selectedId.value = null
+    importErrorCode.value = null
+    if (switched) {
+      selectedDir.value = ''
+      rootDir.value = null
+      loadFailed.value = false
+      loadErrorCode.value = null
+      items.value = []
+      dirs.value = []
+      total.value = 0
+    }
+    if (switched || items.value.length === 0) void fetchCandidates()
   }
 
   /**
@@ -351,11 +394,23 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
     importing.value = true
     importErrorCode.value = null
     try {
-      const reply = await sessionApi.importSession({
-        sourcePath: candidate.sourcePath,
-        projectId: selectedProjectId.value,
-      })
-      notifyImportResult(candidate, reply.warning)
+      // 按源组装定位参数（契约：pi 以 sourcePath 文件定位；zcode 以 sessionId 定位，
+      // sourcePath 是 db 路径占位仅满足必填类型，runtime 侧不消费）
+      const request: ImportRequest =
+        source.value === 'zcode'
+          ? {
+            source: 'zcode',
+            sessionId: candidate.sessionId,
+            sourcePath: candidate.sourcePath,
+            projectId: selectedProjectId.value,
+          }
+          : {
+            source: 'pi',
+            sourcePath: candidate.sourcePath,
+            projectId: selectedProjectId.value,
+          }
+      const reply = await sessionApi.importSession(request)
+      notifyImportResult(candidate, reply.warning, reply.degradationSummary)
       options.onImported?.({
         sessionId: reply.sessionId,
         // name/dirLabel 均空（顶层文件无目录名）时回退短 ID——与 toast 显示名回退口径一致
@@ -363,6 +418,7 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
         projectName: selectedProjectName.value,
         targetPath: reply.targetPath,
         warning: reply.warning,
+        degradationSummary: reply.degradationSummary,
       })
       close()
     } catch (e) {
@@ -377,15 +433,41 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
   /**
    * 导入结果 toast（V1/V9 验收依赖）。文案骨架 = 设计 §3.1「已导入「<名称>」到
    * <project> · 可继续对话」；显示名回退短 ID（目录编码名对用户不可读，toast 又有
-   * 单行宽度约束）。预警（V9 死 cwd + sidecar 降级）追加在同一条消息里用分号分隔
-   * ——一次导入一个结果块，拆多条 toast 会竞态闪烁；有预警走 warning 通道
-   * （8s 停留，给用户足够阅读时间），否则 info（4s 命令回显节奏）。
+   * 单行宽度约束）。预警追加在同一条消息里用分号分隔——一次导入一个结果块，拆多条
+   * toast 会竞态闪烁；有预警走 warning 通道（8s 停留，给用户足够阅读时间），否则
+   * info（4s 命令回显节奏）。
+   *
+   * 降级分句（zcode-import-message-projection §7.4，按 warning 码分支消费
+   * degradationSummary）：sidecar_failed 保持既有文案——sidecar 胜出时 summary 不
+   * 挂载，该轮降级计数只走 runtime 日志（设计已接受）；conversion_unclassified →
+   * L4 计数行 + 首条 sample（定位/上报用，firstSample 可缺席）；conversion_degraded
+   * → L1/L2 一行计数汇总（droppedCount；= 0 即仅 L3 截断族，设计无 toast 分句、
+   * 显形走 runtime 日志，不显「已跳过 0 条」）。
    */
-  function notifyImportResult(candidate: ImportCandidate, warning: ImportWarning | undefined): void {
+  function notifyImportResult(
+    candidate: ImportCandidate,
+    warning: ImportWarning | undefined,
+    summary: ImportDegradationSummary | undefined,
+  ): void {
     const name = candidate.name || candidate.sessionId.slice(0, IMPORT_SHORT_ID_LENGTH)
     const parts = [t('importSession.toastImported', { name, project: selectedProjectName.value })]
     if (!candidate.cwdExists) parts.push(t('importSession.cwdMissing'))
-    if (warning === 'sidecar_failed') parts.push(t('importSession.toastWarnSidecar'))
+    if (warning === 'sidecar_failed') {
+      parts.push(t('importSession.toastWarnSidecar'))
+    } else if (warning === 'conversion_unclassified' && summary?.unclassified) {
+      const { count, firstSample } = summary.unclassified
+      parts.push(t('importSession.toastWarnUnclassified', { count }))
+      if (firstSample) {
+        parts.push(
+          t('importSession.toastUnclassifiedSample', {
+            messageId: firstSample.messageId,
+            preview: firstSample.preview,
+          }),
+        )
+      }
+    } else if (warning === 'conversion_degraded' && summary && summary.droppedCount > 0) {
+      parts.push(t('importSession.toastWarnDropped', { count: summary.droppedCount }))
+    }
     if (parts.length > 1) toast.warning(parts.join('; '))
     else toast.info(parts[0])
   }
@@ -393,6 +475,7 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
   return {
     open,
     query,
+    source,
     items,
     dirs,
     total,
@@ -414,6 +497,7 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
     close,
     resetForOpen,
     select,
+    selectSource,
     chooseRootDir,
     importSession,
     fetchCandidates,

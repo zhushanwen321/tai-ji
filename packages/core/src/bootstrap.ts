@@ -59,7 +59,7 @@ export function setExtensionRegistries(registries: {
   contributionRegistryImpl = registries.contributions
 }
 
-// 壳向 ExtensionHost 注册挂载点（sidebar.tab / panel.header / composer.toolbar / statusbar）
+// 壳向 ExtensionHost 注册挂载点（sidebar.tab / panel.header / composer.toolbar / statusbar / modal）
 export async function registerMountPoints(): Promise<void> {
   console.log('[bootstrap] step 4/5 registerMountPoints')
   if (!mountRegistryImpl) {
@@ -74,6 +74,8 @@ export async function registerMountPoints(): Promise<void> {
   mountRegistryImpl.register('panel.header')
   mountRegistryImpl.register('composer.toolbar')
   mountRegistryImpl.register('statusbar')
+  // modal 弹层挂载点（AP-2）：modal 贡献（type='modal'）的路由目标，PluginModalHost 消费
+  mountRegistryImpl.register('modal')
 }
 
 // 扫描 plugin manifest 注册声明式贡献（views/menus/commands/statusBarItems/slashCommands/configuration）

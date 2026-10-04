@@ -1,7 +1,7 @@
 /**
  * useSidebarSessionActions —— Sidebar session 操作 handler 集合（从 Sidebar.vue 提取，减行用）。
  *
- * 职责：session 选择/新建/重命名/删除 + folder 删除 + branch 停止 + 强制退出 + 列表重试
+ * 职责：session 选择/新建/重命名/删除 + folder 删除 + 软停止（abort） + 强制退出 + 列表重试
  * + SearchModal 接线（searchDeps/onOpenSearchDrawer，复用 selectSession/newSession
  * 注入）的事件处理。跨 store 编排（chat abort / 队列回收）在此层完成。
  *
@@ -133,8 +133,9 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     }
   }
 
-  /** 停止后台分支 session（ForkGroup 两段式确认后 emit stopBranch）。 */
-  function onStopBranch(id: string): void {
+  /** 停止运行中的 session（软停止）：SessionItem 右键菜单两段确认后 emit abort。
+   *  与 onForceQuitSession（硬杀 pi → dead）区分：abort 只中止当前生成，会话转 stopped 可 restore。 */
+  function onAbortSession(id: string): void {
     void abortSession(id)
   }
 
@@ -247,7 +248,7 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     onRenameSession,
     onDeleteSession,
     onDeleteFolder,
-    onStopBranch,
+    onAbortSession,
     onForceQuitSession,
     onConfirmRename,
     onAssignProject,

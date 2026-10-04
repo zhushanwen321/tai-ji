@@ -606,17 +606,31 @@ export class PluginHostProcess implements PluginHostProcessContract {
     getCrashJournal().append(journalEvent)
 
     // M6a-03：kill 兜底——fatal_error 消息路径子进程可能仍存活（发完消息不退出 = 进程
-    // 泄漏）。崩溃时强制终止。kill 后晚到的 exit 被上方 status='crashed' 幂等守卫拦截，
-    // 且重建时 createProcess 的残留清理会 removeAllListeners，不会命中新 handle。
+    // 泄漏）。崩溃时强制终止。
+    //
+    // RT-6#5 三处收口（对齐下方 handleProcessCleanExit 的清理口径）：
+    // ① 裸 child.kill() 只发一次 SIGTERM，忽略 SIGTERM 的子进程会残留为 orphan。改用
+    //    terminateProcess / shutdown 同款的 killChildGracefully（SIGTERM →
+    //    SHUTDOWN_KILL_TIMEOUT_MS → SIGKILL 升级链）。返回 Promise 不 await——崩溃链是
+    //    同步的，不能因等 kill 拖住 onCrash 通知；killChildGracefully 内部已吞 kill 抛错。
+    // ② 摘掉 createProcess 挂在本 child 上的全部监听（exit/error/disconnect/message）：
+    //    进程已判死，其迟到事件不得触碰重建后的新 handle（与 createProcess 残留清理段的
+    //    removeAllListeners 同源，M6a-03）。必须在 killChildGracefully 之前摘——后者要
+    //    挂自己的 once('exit') 才能 resolve。
+    // ③ 删除 processes / processInstances 两处 Map 条目：旧状只置 status='crashed'
+    //    不删，幽灵条目（含仍存活的 child 句柄）长期滞留，直到同 processId 重建才被
+    //    createProcess 的残留清理回收；期间 getProcessHandle / pluginToProcess 反查等
+    //    只读路径仍能命中已崩进程。删后晚到事件已无监听可触发（②），disconnect grace
+    //    定时器也因 processInstances 查不到本实例而空转（unref，不阻塞 runtime 退出）。
     const child = this.processInstances.get(processId)
-    if (child && child.exitCode === null && child.signalCode === null) {
-      try {
-        child.kill()
-      } catch (e: unknown) {
-        // best-effort：进程可能已退出，kill 抛错不阻塞崩溃通知
-        console.debug(`[plugin-host-process] kill failed for crashed process ${processId}:`, e)
+    if (child) {
+      child.removeAllListeners()
+      if (child.exitCode === null && child.signalCode === null) {
+        void this.killChildGracefully(child)
       }
     }
+    this.processInstances.delete(processId)
+    this.processes.delete(processId)
 
     this.onCrash?.(processId, pluginIds, error)
   }

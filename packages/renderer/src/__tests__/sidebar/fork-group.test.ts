@@ -1,51 +1,57 @@
 /**
- * W4 后台分支管理（ForkGroup）红灯测试（TDD）。
+ * u11 侧栏测试：ForkGroup 退役 + 两项能力迁移 + 父条目计数徽标（设计 §6.9 决策 D9）。
  *
- * 覆盖 U17-U20：
- * - U17：当前 session 有子分支时渲染 ForkGroup，无子分支不渲染
- * - U18：分支 session SessionItem sub 行显示「fork 自 <父名>」血缘
- * - U19：ForkGroup 分支项停止 action 调 abort（两段式确认）
- * - U20：fresh 高亮 3.2s 后淡出（FRESH_FADE_MS）
+ * [HISTORICAL] 本文件原为 W4「后台分支管理（ForkGroup）」红灯 TDD 测试（U17-U20：聚合渲染 /
+ * fresh 淡出 / ForkGroup 内两段式停止）。D9 裁决「侧栏不聚合（子会话与 fork 分支都按一般
+ * session 各占一行）」后 ForkGroup 组件退役，原断言随之失效，本文件重写为退役面的回归测试
+ * （保留同文件名，git 可追溯原测试）。
  *
- * 红灯预期：
- * - ForkGroup.vue 在 W4 才创建，当前不存在 → U19/U20 import 即失败
- * - SessionSummary 当前无 parentSession 字段（W1 才加）→ U17/U18 构造数据类型不支持
- * - SessionList 当前无 ForkGroup 渲染分支 → U17 断言失败
- * - SessionItem 当前无血缘展示 → U18 断言失败
+ * 覆盖 D9「退役的爆炸半径与能力处置」：
+ *  - R1 组件退役：ForkGroup.vue 不存在 + 生产代码零 import/调用引用
+ *  - R2 不丢行：分支会话仍在扁平列表各占一行，血缘不再聚合于容器
+ *  - R3 未读合流：unreadByBranch 并入既有 session-unread-dot（后台完成 / 分支停止两源都点亮）
+ *  - R4 软停止迁入通用行：运行中行右键「停止」两段确认 → SessionItem / SessionList emit abort
+ *  - R5 两源同点清除：clearSessionUnread 一次清 session 标记 + fork 分支角标（core select 链 step 4）
+ *  - R6 父条目未完成子会话数徽标（D9 元素，U-B 口径：非绿点子会话数）
+ *
+ * 三视角（TEST-STRATEGY §3）：每条用例至少 1 个用户可见 DOM 断言；清除点（编排层）用纯函数锁语义。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/fork-group.test.ts
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import type { SessionSummary, SessionGroup } from '@taiji/shared'
+import type { SessionGroup, SessionSummary } from '@taiji/shared'
 
 import SessionList from '@/components/sidebar/SessionList.vue'
 import SessionItem from '@/components/sidebar/SessionItem.vue'
+import { walkFiles } from '@/__tests__/helpers/walk-files'
+import {
+  registerFork,
+  resetForkBranchState,
+  syncForkBranches,
+  unreadByBranch,
+} from '@/composables/features/fork-handoff/useForkBranchNotify'
+import {
+  isUnread,
+  markUnread,
+  __resetCacheForTest,
+} from '@/composables/useSessionMarkers'
+import { clearSessionUnread } from '@/composables/features/sidebar/useSidebar'
 
-/**
- * 延迟加载 ForkGroup（W4 才创建，当前不存在）。
- * 用变量 specifier 动态 import——vite 的 import-analysis 只静态解析字面量 specifier，
- * 变量 specifier 推迟到运行时解析，避免模块级 transform 阶段就失败（0 test 跑不起来）。
- * 每个测试独立报告失败原因：U19/U20 在此 await 处 fail（运行时 resolve 失败），
- * U17/U18 不依赖 ForkGroup 文件、可独立跑出断言失败。
- */
-async function loadForkGroup(): Promise<any> {
-  const specifier = '@/components/sidebar/ForkGroup.vue'
-  const mod = await import(/* @vite-ignore */ specifier)
-  return mod.default
-}
+const CWD = '/p'
+const PARENT_FILE = '/p/src.jsonl'
 
 // ── 测试夹具 ─────────────────────────────────────────────────
-// FRESH_FADE_MS 常量当前不存在（W4 才定义于 ForkGroup 内），此处给出期望值用于断言。
-const FRESH_FADE_MS = 3200
 
 function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
     id: 'sess-parent',
     label: '主分支会话',
-    cwd: '/Users/test/project',
+    cwd: CWD,
     status: 'idle',
     lastActiveAt: Date.now(),
     modelId: 'gpt-4',
@@ -54,222 +60,250 @@ function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
   } as SessionSummary
 }
 
-// ── U17：当前 session 有子分支时渲染 ForkGroup ─────────────
-describe('U17: SessionList 有子分支时渲染 ForkGroup', () => {
-  beforeEach(() => setActivePinia(createPinia()))
+function mountList(sessions: SessionSummary[], activeId: string | null = null) {
+  return mount(SessionList, {
+    attachTo: document.body,
+    props: {
+      groups: [{ cwd: CWD, sessions }] as SessionGroup[],
+      activeId,
+      statusOf: () => 'done' as never,
+    },
+  })
+}
 
-  it('当前激活 session 有子分支（parentSession 指向当前 session）时渲染 ForkGroup', () => {
-    const parent = makeSession({ id: 'sess-active', label: '当前会话' })
-    // 分支 session：parentSession 指向当前激活 session（W4 的 ForkGroup 据此聚合）
-    const branch = {
-      ...makeSession({
-        id: 'sess-branch-1',
-        label: '探索方案 A',
-      }),
-      // W1 字段：分支血缘，当前类型不支持，红灯因数据/渲染不支持
-      parentSession: 'sess-active',
-    } as SessionSummary
+function mountItem(session: SessionSummary) {
+  return mount(SessionItem, {
+    attachTo: document.body,
+    props: { session, active: false, status: 'done' as never },
+  })
+}
 
-    const groups: SessionGroup[] = [
-      { cwd: '/Users/test/project', sessions: [parent, branch] },
-    ]
+/** 打开右键菜单（reka ContextMenuPortal teleport 到 body，同 session-item-force-quit 范式） */
+async function openContextMenu(wrapper: { find: (sel: string) => { trigger: (ev: string) => Promise<void> } }) {
+  await wrapper.find('.session-item').trigger('contextmenu')
+  await nextTick()
+  await nextTick()
+}
 
-    const wrapper = mount(SessionList, {
-      props: {
-        groups,
-        activeId: 'sess-active',
-        statusOf: () => 'done' as never,
-      },
-    })
+function findStopItem(): HTMLElement | null {
+  return document.body.querySelector('[data-testid="session-stop-item"]')
+}
 
-    // ForkGroup 组件应被渲染（用组件名查找——ForkGroup 是新组件，当前未在 SessionList 中使用）
-    const forkGroup = wrapper.findComponent({ name: 'ForkGroup' })
-    expect(forkGroup.exists()).toBe(true)
+/** 生产源码 = src 下非 __tests__ 的 .ts/.vue（组件退役扫描面） */
+function productionSources(): string[] {
+  return walkFiles('src', { extensions: ['.ts', '.vue'], skipDirs: ['__tests__'] })
+}
+
+beforeEach(() => {
+  setActivePinia(createPinia())
+  localStorage.removeItem('taiji:session-markers')
+  __resetCacheForTest()
+  resetForkBranchState()
+})
+
+afterEach(() => {
+  document.body.innerHTML = ''
+})
+
+// ── R1：ForkGroup 组件退役（D9） ─────────────────────────────
+describe('R1: ForkGroup 组件退役', () => {
+  it('ForkGroup.vue 文件已删除', () => {
+    expect(existsSync(join(process.cwd(), 'src/components/sidebar/ForkGroup.vue'))).toBe(false)
   })
 
-  it('无分支的 sessions 不渲染 ForkGroup', () => {
-    const groups: SessionGroup[] = [
-      {
-        cwd: '/Users/test/project',
-        sessions: [makeSession({ id: 'sess-1', label: '会话 1' })],
-      },
+  it('生产代码零引用：无 import / 动态 import / 模板使用 ForkGroup，无 useForkBranchBadges 调用', () => {
+    const codeRefPatterns = [
+      /from\s+['"][^'"]*ForkGroup\.vue['"]/,
+      /import\(\s*['"][^'"]*ForkGroup\.vue['"]\s*\)/,
+      /<ForkGroup[\s/>]/,
+      /useForkBranchBadges\s*\(/,
     ]
-
-    const wrapper = mount(SessionList, {
-      props: {
-        groups,
-        activeId: 'sess-1',
-        statusOf: () => 'done' as never,
-      },
+    const offenders = productionSources().filter((rel) => {
+      const src = readFileSync(rel, 'utf8')
+      return codeRefPatterns.some((re) => re.test(src))
     })
+    expect(offenders).toEqual([])
+  })
 
-    const forkGroup = wrapper.findComponent({ name: 'ForkGroup' })
-    expect(forkGroup.exists()).toBe(false)
+  it('SessionList 不再渲染聚合容器（ForkGroup 组件 + fork-group-* testid 均不存在）', () => {
+    const parent = makeSession({ id: 'sess-parent', label: '主线会话', sessionFile: PARENT_FILE })
+    const branch = makeSession({ id: 'sess-branch', label: '探索方案 A', parentSession: PARENT_FILE })
+    const wrapper = mountList([parent, branch], 'sess-parent')
+
+    expect(wrapper.findComponent({ name: 'ForkGroup' }).exists()).toBe(false)
+    expect(wrapper.find('[data-testid^="fork-group"]').exists()).toBe(false)
   })
 })
 
-// ── U18：分支 session SessionItem sub 行显示 fork 自父名血缘 ──
-describe('U18: SessionItem 分支 sub 行显示 fork 自父名', () => {
-  beforeEach(() => setActivePinia(createPinia()))
+// ── R2：扁平列表不丢行 ───────────────────────────────────────
+describe('R2: 分支会话仍在扁平列表各占一行', () => {
+  it('父 + 分支 = 两行；分支行标题与「fork 自 <父名>」血缘均可见', () => {
+    const parent = makeSession({ id: 'sess-parent', label: '主线会话', sessionFile: PARENT_FILE })
+    const branch = makeSession({ id: 'sess-branch', label: '探索方案 A', parentSession: PARENT_FILE })
+    const wrapper = mountList([parent, branch], 'sess-parent')
 
-  it('分支 session（含 parentSession 字段）sub 行含「fork 自」文案', () => {
-    const branch = {
-      ...makeSession({
-        id: 'sess-branch-1',
-        label: '探索方案 A',
-      }),
-      // W1 字段：fork 血缘，当前 SessionSummary 无此字段 → 红灯因类型不支持
-      parentSession: 'sess-parent',
-      // 父 session 名（W4 ForkGroup 渲染血缘需要，或 SessionItem 直接展示 parentSession 名）
-      parentLabel: '主分支会话',
-    } as SessionSummary
-
-    const wrapper = mount(SessionItem, {
-      props: {
-        session: branch,
-        active: false,
-        status: 'done' as never,
-      },
-    })
-
-    // sub 行（dirName 行，font-mono text-neutral-dim）应含「fork 自」血缘文案
-    expect(wrapper.text()).toContain('fork 自')
-    // 血缘文案含父名
-    expect(wrapper.text()).toContain('主分支会话')
-  })
-
-  it('普通 session（无 parentSession）sub 行不含 fork 自文案', () => {
-    const wrapper = mount(SessionItem, {
-      props: {
-        session: makeSession({ id: 'sess-plain', label: '普通会话' }),
-        active: false,
-        status: 'done' as never,
-      },
-    })
-
-    expect(wrapper.text()).not.toContain('fork 自')
+    // 退役不丢行：两条 session 各占一行（此前分支被折进 ForkGroup）
+    expect(wrapper.findAll('.session-item')).toHaveLength(2)
+    expect(wrapper.text()).toContain('主线会话')
+    expect(wrapper.text()).toContain('探索方案 A')
+    // 血缘展示保留（SessionItem sub 行，D9 未迁移该能力——它原本就在通用行）
+    expect(wrapper.text()).toContain('fork 自 主线会话')
   })
 })
 
-// ── U19：ForkGroup 分支项停止 action 调 abort ───────────────
-describe('U19: ForkGroup 分支项停止 action 调 abort', () => {
-  beforeEach(() => setActivePinia(createPinia()))
+// ── R3：未读合流进既有 dot ───────────────────────────────────
+describe('R3: unreadByBranch 合流进既有 session-unread-dot', () => {
+  /** 走真实分支追踪状态机：registerFork 建基线 → syncForkBranches diff 到终态 → 置角标 */
+  function markBranchUnread(branchId: string, to: 'done' | 'stopped'): void {
+    registerFork('sess-parent', branchId, '分支')
+    syncForkBranches(
+      [{ cwd: CWD, sessions: [makeSession({ id: branchId, parentSession: PARENT_FILE, status: to })] } as SessionGroup],
+      () => {},
+    )
+  }
 
-  it('分支项 hover + 点击停止按钮触发两段式 abort（首次确认，再次 emit）', async () => {
-    const branches: SessionSummary[] = [
-      // running 态分支（status: 'active' 表示生成中，可被 abort）
-      makeSession({
-        id: 'sess-branch-running',
-        label: '运行中分支',
-        status: 'active',
-      }) as SessionSummary,
-    ]
+  it('后台分支完成（done）→ 该行未读点（session-unread-dot）亮起', () => {
+    const branch = makeSession({ id: 'b-done', label: '后台分支', parentSession: PARENT_FILE })
+    markBranchUnread('b-done', 'done')
 
-    const ForkGroup = await loadForkGroup()
-    const wrapper = mount(ForkGroup, {
-      props: {
-        branches,
-        parentId: 'sess-active',
-      },
-    })
+    const wrapper = mountList([branch], 'sess-parent')
+    expect(unreadByBranch.value.get('b-done')).toBe(true)
+    expect(wrapper.find('[data-testid="session-unread-dot"]').exists()).toBe(true)
+  })
 
-    // 1. 首次点击停止按钮 → 进入确认态（不 emit）
-    const stopBtn = wrapper.find('[data-testid="fork-group-stop"]')
-    expect(stopBtn.exists()).toBe(true)
-    await stopBtn.trigger('click')
-    // 首次点击不 emit（两段式）
-    expect(wrapper.emitted('stop')).toBeFalsy()
+  it('后台分支被停止（stopped）→ 该行未读点亮起（软停止路径同源）', () => {
+    const branch = makeSession({ id: 'b-stopped', label: '被停止分支', parentSession: PARENT_FILE })
+    markBranchUnread('b-stopped', 'stopped')
 
-    // 2. 确认态出现确认按钮
-    const confirmBtn = wrapper.find('[data-testid="fork-group-stop-confirm"]')
-    expect(confirmBtn.exists()).toBe(true)
+    const wrapper = mountList([branch], 'sess-parent')
+    expect(wrapper.find('[data-testid="session-unread-dot"]').exists()).toBe(true)
+  })
 
-    // 3. 再次点击确认 → emit stop（带 sessionId）
-    await confirmBtn.trigger('click')
-    const emitted = wrapper.emitted('stop')
-    expect(emitted).toBeTruthy()
-    expect(emitted![0]).toEqual(['sess-branch-running'])
+  it('既有源（后台完成 markUnread）仍点亮同一枚 dot——合流未破坏原通路', () => {
+    markUnread('sess-bg')
+    const wrapper = mountList([makeSession({ id: 'sess-bg', label: '后台完成会话' })])
+
+    expect(isUnread('sess-bg')).toBe(true)
+    expect(wrapper.find('[data-testid="session-unread-dot"]').exists()).toBe(true)
   })
 })
 
-// ── U20：fresh 高亮 3.2s 后淡出 ──────────────────────────────
-describe('U20: ForkGroup fresh 高亮 3.2s 后淡出', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-    setActivePinia(createPinia())
+// ── R4：软停止迁入通用行 ─────────────────────────────────────
+describe('R4: 软停止（abort）迁入通用行右键菜单', () => {
+  it('运行中 session（status=active）→ 菜单出现「停止」项，初始非确认态', async () => {
+    const wrapper = mountItem(makeSession({ id: 's-running', status: 'active' }) as SessionSummary)
+    await openContextMenu(wrapper)
+
+    const stopItem = findStopItem()
+    expect(stopItem).not.toBeNull()
+    expect(stopItem!.textContent).toContain('停止')
+    expect(stopItem!.textContent).not.toContain('确认停止')
   })
 
-  it('新 fork 的分支 fresh class 存在，advanceTimersByTime(FRESH_FADE_MS) 后移除', async () => {
-    const branches: SessionSummary[] = [
-      // 新 fork 的分支：fresh 高亮（isFresh: true / 新创建）
-      makeSession({
-        id: 'sess-branch-fresh',
-        label: '刚 fork 的分支',
-      }) as SessionSummary,
-    ]
+  it('非运行中 session（idle）→ 不出现「停止」项（只有强制退出）', async () => {
+    const wrapper = mountItem(makeSession({ id: 's-idle', status: 'idle' }))
+    await openContextMenu(wrapper)
 
-    const ForkGroup = await loadForkGroup()
-    const wrapper = mount(ForkGroup, {
-      props: {
-        branches,
-        parentId: 'sess-active',
-        // 标记为 fresh（W4 ForkGroup 据此加 fresh class）
-        freshIds: ['sess-branch-fresh'],
-      },
-    })
+    expect(findStopItem()).toBeNull()
+    expect(document.body.querySelector('[data-testid="session-force-quit-item"]')).not.toBeNull()
+  })
 
-    // 1. 初始：fresh class 存在（高亮态）
-    const freshItem = wrapper.find('[data-testid="fork-group-branch-fresh"]')
-    // 或用 class 查找——ForkGroup 给 fresh 分支项加 fresh class
-    const branchItem = wrapper.find('[data-testid="fork-group-branch"]')
-    expect(branchItem.exists()).toBe(true)
-    expect(branchItem.classes()).toContain('fresh')
+  it('两段确认：首击进确认态（文案「确认停止？」+ danger 底）不 emit；再击才 emit abort', async () => {
+    const wrapper = mountItem(makeSession({ id: 's-running', status: 'active' }) as SessionSummary)
+    await openContextMenu(wrapper)
 
-    // 2. 推进 FRESH_FADE_MS（3.2s）→ fresh class 移除（淡出）
-    // [S2] ForkGroup fresh 淡出改为纯响应式驱动（timer 回调只更新 activeFresh Set，
-    // DOM patch 走 Vue 响应式异步更新）。fake timer 推进后必须 await nextTick 让 DOM patch 落地。
-    vi.advanceTimersByTime(FRESH_FADE_MS)
+    findStopItem()!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    const confirming = findStopItem()
+    expect(confirming).not.toBeNull() // 首击 preventDefault 保持菜单打开
+    expect(confirming!.textContent).toContain('确认停止？')
+    expect(confirming!.className).toContain('bg-danger')
+    expect(wrapper.emitted('abort')).toBeUndefined()
+
+    confirming!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(wrapper.emitted('abort')).toEqual([['s-running']])
+  })
+
+  it('SessionList 层透传：运行中行两段确认 → emit abort（带 sessionId）', async () => {
+    const wrapper = mountList([makeSession({ id: 'b-running', label: '运行中分支', status: 'active' })], null)
+    await openContextMenu(wrapper)
+
+    findStopItem()!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(wrapper.emitted('abort')).toBeUndefined()
+
+    findStopItem()!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(wrapper.emitted('abort')).toEqual([['b-running']])
+  })
+})
+
+// ── R5：两源同点清除 ─────────────────────────────────────────
+describe('R5: 未读两源在同一清除点被清（core select 链 step 4）', () => {
+  it('clearSessionUnread 同时清 fork 分支角标与 session 标记，DOM 未读点随之消失', async () => {
+    const sid = 'b-clear'
+    // 两源都置位
+    markUnread(sid)
+    registerFork('sess-parent', sid, '分支')
+    syncForkBranches(
+      [{ cwd: CWD, sessions: [makeSession({ id: sid, parentSession: PARENT_FILE, status: 'stopped' })] } as SessionGroup],
+      () => {},
+    )
+    expect(isUnread(sid)).toBe(true)
+    expect(unreadByBranch.value.get(sid)).toBe(true)
+
+    const wrapper = mountList([makeSession({ id: sid, label: '待清除分支', parentSession: PARENT_FILE })])
+    expect(wrapper.find('[data-testid="session-unread-dot"]').exists()).toBe(true)
+
+    // 单一清除点 = useSidebar 注入 core select 链 step 4 的 sessionEntry.clearUnread
+    clearSessionUnread(sid)
     await nextTick()
 
-    // 3. fresh class 应已移除
-    const branchItemAfter = wrapper.find('[data-testid="fork-group-branch"]')
-    expect(branchItemAfter.exists()).toBe(true)
-    expect(branchItemAfter.classes()).not.toContain('fresh')
+    expect(isUnread(sid)).toBe(false)
+    expect(unreadByBranch.value.has(sid)).toBe(false)
+    expect(wrapper.find('[data-testid="session-unread-dot"]').exists()).toBe(false)
+  })
+})
+
+// ── R6：父条目未完成子会话数徽标（D9 + U-B 口径改未完成数） ────
+describe('R6: 父条目子会话计数徽标', () => {
+  it('混合态（2 已完成 + 1 active）→ 徽标只数未完成 = 1；无子会话行不渲染', () => {
+    const parent = makeSession({ id: 'p-1', label: '父会话' })
+    const doneA = makeSession({ id: 'c-1', label: '子会话 A', parentAgentSessionId: 'p-1', spawnSource: 'agent', status: 'idle' })
+    const doneB = makeSession({ id: 'c-2', label: '子会话 B', parentAgentSessionId: 'p-1', spawnSource: 'agent', status: 'done' })
+    const running = makeSession({ id: 'c-3', label: '子会话 C', parentAgentSessionId: 'p-1', spawnSource: 'agent', status: 'active' })
+    const plain = makeSession({ id: 'plain', label: '普通会话' })
+    const wrapper = mountList([parent, doneA, doneB, running, plain])
+
+    const badges = wrapper.findAll('[data-testid="session-child-count"]')
+    // 仅父行有徽标（子行 / 普通行无）；数字 = 未完成数（2 个绿点子会话不计入）
+    expect(badges).toHaveLength(1)
+    expect(badges[0].text()).toBe('1')
+    // 中性色（不用 accent——accent 已被 [AI] 来源徽标占用）
+    expect(badges[0].classes()).toContain('text-neutral-dim')
+    expect(badges[0].classes()).not.toContain('text-accent')
   })
 
-  it('mount 后 freshIds 数组引用更新：新增 id 启动计时出现 fresh class（浅 watch 增量触发，W05 review）', async () => {
-    const branches: SessionSummary[] = [
-      makeSession({ id: 'sess-branch-a', label: '分支 A' }),
-      makeSession({ id: 'sess-branch-b', label: '分支 B' }),
-    ] as SessionSummary[]
+  it('全部子会话已完成（idle / done = 绿点）→ 未完成数 0，徽标不渲染', () => {
+    const parent = makeSession({ id: 'p-1', label: '父会话' })
+    const doneA = makeSession({ id: 'c-1', label: '子会话 A', parentAgentSessionId: 'p-1', spawnSource: 'agent', status: 'idle' })
+    const doneB = makeSession({ id: 'c-2', label: '子会话 B', parentAgentSessionId: 'p-1', spawnSource: 'agent', status: 'done' })
+    const wrapper = mountList([parent, doneA, doneB])
 
-    const ForkGroup = await loadForkGroup()
-    const wrapper = mount(ForkGroup, {
-      props: {
-        branches,
-        parentId: 'sess-active',
-        freshIds: [], // mount 时无 fresh
-      },
-    })
+    expect(wrapper.findAll('[data-testid="session-child-count"]')).toHaveLength(0)
+  })
 
-    // 初始：两个分支项均无 fresh class
-    let items = wrapper.findAll('[data-testid="fork-group-branch"]')
-    expect(items).toHaveLength(2)
-    expect(items[0].classes()).not.toContain('fresh')
-    expect(items[1].classes()).not.toContain('fresh')
+  it('error / stopped 子会话计入未完成数（判据 = 非绿点，非仅 active）', () => {
+    const parent = makeSession({ id: 'p-1', label: '父会话' })
+    const failed = makeSession({ id: 'c-1', label: '失败子会话', parentAgentSessionId: 'p-1', spawnSource: 'agent', status: 'error' })
+    const stopped = makeSession({ id: 'c-2', label: '停止子会话', parentAgentSessionId: 'p-1', spawnSource: 'agent', status: 'stopped' })
+    const doneChild = makeSession({ id: 'c-3', label: '已完子会话', parentAgentSessionId: 'p-1', spawnSource: 'agent', status: 'done' })
+    const wrapper = mountList([parent, failed, stopped, doneChild])
 
-    // 父组件替换 freshIds 数组引用（浅 watch 约定：更新经引用替换表达，原地 mutate 不触发）
-    // → 新增 id（sess-branch-b）启动计时，出现 fresh class
-    await wrapper.setProps({ freshIds: ['sess-branch-b'] })
-    items = wrapper.findAll('[data-testid="fork-group-branch"]')
-    expect(items[1].classes()).toContain('fresh')
-    // 不在 freshIds 中的 a 不受影响
-    expect(items[0].classes()).not.toContain('fresh')
-
-    // 增量触发的计时同样受 FRESH_FADE_MS 管辖：3.2s 后淡出
-    vi.advanceTimersByTime(FRESH_FADE_MS)
-    await nextTick()
-    items = wrapper.findAll('[data-testid="fork-group-branch"]')
-    expect(items[1].classes()).not.toContain('fresh')
+    const badges = wrapper.findAll('[data-testid="session-child-count"]')
+    expect(badges).toHaveLength(1)
+    expect(badges[0].text()).toBe('2')
   })
 })

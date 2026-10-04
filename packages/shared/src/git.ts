@@ -8,6 +8,12 @@
 export type GitStatusResult = {
   sessionId: string
   isRepo: boolean
+  /**
+   * git 不可用（缺失/超时）的降级标记（RT-8#5）：存在即 isRepo=false 的真因是「git 探测失败」
+   * 而非「非 git 仓库」——未装 git 的用户此前被误显「非 git 仓库」按错方向自救。值为原因
+   * 描述（如 git_unavailable / timeout 的 message）。真非仓库不设此字段。
+   */
+  gitUnavailableReason?: string
   branch?: string
   stagedCount: number
   unstagedCount: number

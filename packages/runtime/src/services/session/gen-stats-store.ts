@@ -1,8 +1,9 @@
 /**
  * gen-stats-store.ts — Composer 生成指标存储内核（纯函数族，实施计划 u2-store / P2）
  *
- *   - §3.3 D3 存储布局：`<dataDir>/gen-stats/{speed,cache-ratio}/<safe-model>.json`，
- *     文件格式 `{"YYYY-MM-DD": [[v1, v2], ...], ...}`；safeModelFileName = safeBase
+ *   - §3.3 D3 存储布局：`<dataDir>/gen-stats/{speed,cache-ratio,ttft}/<safe-model>.json`，
+ *     文件格式 `{"YYYY-MM-DD": [[v1, v2], ...], ...}`（ttft 为单元素组 [[ttftMs], ...]，
+ *     composer-genstats-ttft §3.3）；safeModelFileName = safeBase
  *     （`(provider + '__' + model)` 替换 `[/\\空格:]` → `_`）截断 64 字符 + hash8 后缀
  *     （sha256 前 8 位十六进制，单射性由 hash 保证——纯字符替换对 `a b`/`a_b`、
  *     macOS 大小写不敏感 FS 的 `Glm`/`GLM` 均碰撞）；30 天 GC（写入时顺带清理）；
@@ -10,11 +11,16 @@
  *     是本地 08:00，「今日」与直觉相悖）；tmp+rename 原子写。
  *   - §3.3 D6 聚合口径（对齐 pi-statusline）：速度 = 加权平均 Σtokens÷Σduration×1000
  *     （非算术平均）；命中率 = ΣcacheRead÷ΣpromptTotal×100，
- *     promptTotal = input + cacheRead + cacheWrite（不含 output，蓝本同）。
+ *     promptTotal = input + cacheRead + cacheWrite（不含 output，蓝本同）；TTFT = p50
+ *     中位数（composer-genstats-ttft §3.3——延迟重尾，加权均值口径不适用，否决方案 D）。
  *   - §3.3 D7 bogus guard 阈值（照抄蓝本 pi-statusline index.ts:61-62，不自行放宽）：
  *     outputTokens > 50 && durationMs < 100ms 的速度样本判定为 bogus（缓存回放型异常）。
  *     本文件只提供阈值常量 + 纯判定谓词（SSOT），丢弃动作在 u3 GenStatsService
  *     recordSample 采样入口执行。
+ *   - 缓存命中率归因降噪（2026-09-19）：展示 0% 的样本在**已知成因**（会话首个请求 /
+ *     空闲超 provider 缓存 TTL / compaction 后前缀重建）下由服务侧附归因，UI 渲染成因
+ *     文案而非裸 0%；分类 SSOT = 本文件 classifyCacheMiss + isDisplayedZeroCacheRatio
+ *     + hasReportedCacheFields（纯函数，状态判定在服务侧）。
  *   - §3.3 D8 同步 API：read→append→write 必须在同一同步临界段内完成（runtime 单进程
  *     + 单线程事件循环 + 同步 fs 天然串行化）——本模块全部 fs 操作为同步 API，即为此
  *     前提的结构性保证；将来改 async 必须引入互斥，否则多 session 并发写同一模型文件
@@ -31,6 +37,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { getDataDir } from '@taiji/shared/paths'
+import type { GenStatsCacheMiss } from '@taiji/shared'
 import { logger } from '../../infra/logger.js'
 import { atomicWrite } from '../../utils/fs-utils.js'
 
@@ -43,11 +50,15 @@ export type SpeedRecord = [outputTokens: number, durationMs: number]
  *  promptTotal = input + cacheRead + cacheWrite，不含 output——由调用方组装） */
 export type CacheRatioRecord = [cacheRead: number, promptTotal: number]
 
-/** 存储层通用条目（speed / cache-ratio 两类文件同为二元数字组，读写共用） */
-export type GenStatsRecord = SpeedRecord | CacheRatioRecord
+/** TTFT 样本记录：[ttftMs]（单元素组，composer-genstats-ttft 设计 §3.3 ttft 文件条目；
+ *  0 是合法真实测量值，null 语义不落盘） */
+export type TtftRecord = [ttftMs: number]
 
-/** 日记录文件形状：`{"YYYY-MM-DD": [GenStatsRecord, ...], ...}` */
-export type GenStatsDayRecords = Record<string, GenStatsRecord[]>
+/** 存储层通用条目（speed / cache-ratio 二元组 + ttft 单元素组，读写共用） */
+export type GenStatsRecord = SpeedRecord | CacheRatioRecord | TtftRecord
+
+/** 日记录文件形状：`{"YYYY-MM-DD": [T, ...], ...}`（按文件族参数化，缺省=三类联合） */
+export type GenStatsDayRecords<T extends GenStatsRecord = GenStatsRecord> = Record<string, T[]>
 
 // ── 常量 ─────────────────────────────────────────────────────────────
 
@@ -70,14 +81,30 @@ const MS_PER_SEC = 1000
 const PERCENT_SCALE = 100
 const MS_PER_DAY = 86_400_000
 
+/** 中位数奇偶判定模数：sorted.length % 2 === 1 → 奇数样本（单中位元素）——奇偶语义，非元组长度 */
+const MEDIAN_PARITY_MODULUS = 2
+
+/** 中位数折半因子：奇数样本中位下标 / 偶数样本双中位均值除数——折半语义，非元组长度 */
+const MEDIAN_HALVING_DIVISOR = 2
+
 /** 合法日 key 形状（YYYY-MM-DD；GC 的字典序比较依赖该规范形） */
 const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/
 
 /** 日 key 月/日段补零宽度（YYYY-MM-DD 规范形） */
 const DATE_PAD_WIDTH = 2
 
-/** 样本记录二元组长度（SpeedRecord / CacheRatioRecord 同形，读写校验共用） */
-const RECORD_TUPLE_LENGTH = 2
+/** speed / cache-ratio 记录元组长度（二元组；readDayRecords 缺省值 = 既有文件校验强度不变） */
+export const PAIR_RECORD_TUPLE_LENGTH = 2
+
+/** ttft 记录元组长度（单元素组，composer-genstats-ttft 设计 §3.3） */
+export const TTFT_RECORD_TUPLE_LENGTH = 1
+
+/**
+ * provider 前缀缓存 TTL 参考值（300_000 ms = 5 分钟，对齐 pi cache-stats 的 CACHE_TTL_MS；
+ * idle-expiry 归因阈值——空闲超过该值后的首个请求，缓存大概率已被 provider 淘汰，0% 属预期内）。
+ * 刻意不改用配置：蓝本同款常量，且阈值只影响归因文案（真值仍由 provider 上报）。
+ */
+export const CACHE_TTL_MS = 300_000
 
 /** atomicWrite 的 tmp 后缀（utils/fs-utils 同名约定；孤儿清扫匹配用） */
 const TMP_SUFFIX = '.tmp'
@@ -91,6 +118,52 @@ const TMP_SUFFIX = '.tmp'
  */
 export function isBogusSpeedSample(outputTokens: number, durationMs: number): boolean {
   return outputTokens > BOGUS_OUTPUT_THRESHOLD && durationMs < BOGUS_DURATION_THRESHOLD_MS
+}
+
+// ── 命中率无值 / 归零判定（归因降噪 2026-09-19，SSOT）─────────────────
+
+/**
+ * provider 是否上报了 cache 计量字段：两字段（cacheRead / cacheWrite）全缺省 → 无缓存计量。
+ * 无缓存能力的 provider（或单次请求未带 cache 字段）恒缺省——命中率样本整体不采（null
+ * 编码纪律：无数据 ≠ 0% miss；此前按 0 计入 promptTotal 会把它恒写成 0%）。
+ * 任一字段有值即视为有计量（如只上报 cacheRead 的 provider）。
+ */
+export function hasReportedCacheFields(cacheRead: number | null, cacheWrite: number | null): boolean {
+  return cacheRead !== null || cacheWrite !== null
+}
+
+/**
+ * 展示归零判定（**与 UI 显示口径同源**）：round(cacheRead ÷ promptTotal × 100) === 0。
+ * 归因只对「UI 会渲染成 0%」的样本触发——极小命中（如 0.1%，四舍五入后同样是刺眼的 0%）
+ * 一并覆盖。promptTotal ≤ 0（无有效分母）返回 false：那不是测量值，是无效样本。
+ */
+export function isDisplayedZeroCacheRatio(cacheRead: number, promptTotal: number): boolean {
+  if (promptTotal <= 0) return false
+  return Math.round((cacheRead / promptTotal) * PERCENT_SCALE) === 0
+}
+
+/**
+ * 展示 0% 的归因分类（纯函数，SSOT；状态（前序请求时刻 / compaction 标记）由调用方提供）。
+ *
+ * 只覆盖**预期内的 miss**（三值均非故障，UI 以中性色呈现）：
+ *  - 无前序请求 → cold-start（会话首个请求 / 新会话）；
+ *  - compaction 标记在场 → context-rewrite（优先级高于空闲：前缀被重写是结构性成因，
+ *    即使同时空闲超时，本次 miss 也无法靠 TTL 解释口径消化）；
+ *  - 空闲严格大于 CACHE_TTL_MS → idle-expiry（携带实际空闲时长）；
+ *  - 其余 → undefined（未知成因的真实 miss：如 provider 服务端淘汰——保留裸 0%，不降噪）。
+ */
+export function classifyCacheMiss(input: {
+  /** 本会话此前是否已有请求样本（false = 本样本是本会话首条） */
+  hasPreviousRequest: boolean
+  /** 距上一次请求的空闲毫秒数（无前序请求时 null） */
+  idleMs: number | null
+  /** 上一次请求之后是否发生过成功 compaction（前缀整体重写） */
+  contextRewritten: boolean
+}): GenStatsCacheMiss | undefined {
+  if (!input.hasPreviousRequest) return { reason: 'cold-start' }
+  if (input.contextRewritten) return { reason: 'context-rewrite' }
+  if (input.idleMs !== null && input.idleMs > CACHE_TTL_MS) return { reason: 'idle-expiry', idleMs: input.idleMs }
+  return undefined
 }
 
 // ── 日 key（本地时区）────────────────────────────────────────────────
@@ -139,6 +212,24 @@ export function aggregateCacheRatio(records: readonly CacheRatioRecord[]): numbe
   return Math.round((totalRead / totalPrompt) * PERCENT_SCALE)
 }
 
+/**
+ * TTFT p50 中位数（ms，四舍五入取整）。空记录 → null；0 只在真实测量下出现
+ * （ttftMs=0 合法，非 null 充数）。刻意不用均值：TTFT 重尾，偶发慢请求拉飞均值，
+ * speed/cache 的加权均值口径不适用于延迟（composer-genstats-ttft §3.3，否决方案 D）。
+ * 偶数样本取双中位均值再取整（[100,201] → 150.5 → 151）。
+ * 前置条件：条目形状已由 readDayRecords 按长度参数校验（本函数不再过滤）。
+ */
+export function aggregateTtft(records: readonly TtftRecord[]): number | null {
+  if (records.length === 0) return null
+  const sorted = records.map((r) => r[0]).sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / MEDIAN_HALVING_DIVISOR)
+  const median =
+    sorted.length % MEDIAN_PARITY_MODULUS === 1
+      ? sorted[mid]!
+      : (sorted[mid - 1]! + sorted[mid]!) / MEDIAN_HALVING_DIVISOR
+  return Math.round(median)
+}
+
 // ── GC（30 天，本地时区日 key）───────────────────────────────────────
 
 /**
@@ -146,9 +237,12 @@ export function aggregateCacheRatio(records: readonly CacheRatioRecord[]): numbe
  * YYYY-MM-DD 规范形的字典序 = 时间序；cutoff 当天键保留（>= 边界）。
  * 不改入参（返回新对象）。writeDayRecords 写入前自动调用（设计 D3「写入时顺带清理」）。
  */
-export function pruneExpiredDays(records: GenStatsDayRecords, now: Date = new Date()): GenStatsDayRecords {
+export function pruneExpiredDays<T extends GenStatsRecord>(
+  records: GenStatsDayRecords<T>,
+  now: Date = new Date(),
+): GenStatsDayRecords<T> {
   const cutoff = localDayKey(new Date(now.getTime() - SPEED_RETENTION_DAYS * MS_PER_DAY))
-  const pruned: GenStatsDayRecords = {}
+  const pruned: GenStatsDayRecords<T> = {}
   for (const [key, value] of Object.entries(records)) {
     if (key >= cutoff) pruned[key] = value
   }
@@ -170,6 +264,11 @@ export function getSpeedDir(env: NodeJS.ProcessEnv = process.env): string {
 /** `<dataDir>/gen-stats/cache-ratio` */
 export function getCacheRatioDir(env: NodeJS.ProcessEnv = process.env): string {
   return join(getGenStatsDir(env), 'cache-ratio')
+}
+
+/** `<dataDir>/gen-stats/ttft`（composer-genstats-ttft §3.3：与 speed/cache-ratio 同款布局） */
+export function getTtftDir(env: NodeJS.ProcessEnv = process.env): string {
+  return join(getGenStatsDir(env), 'ttft')
 }
 
 /**
@@ -195,15 +294,25 @@ export function cacheRatioFilePath(provider: string, model: string, env: NodeJS.
   return join(getCacheRatioDir(env), `${safeModelFileName(provider, model)}.json`)
 }
 
+/** ttft 文件绝对路径：`<dataDir>/gen-stats/ttft/<safe-model>.json` */
+export function ttftFilePath(provider: string, model: string, env: NodeJS.ProcessEnv = process.env): string {
+  return join(getTtftDir(env), `${safeModelFileName(provider, model)}.json`)
+}
+
 // ── 读 / 写（同步 + 原子 + 损坏自愈，D3/D8）──────────────────────────
 
-/** 存储条目有效性：恰为二元有限数字组（JSON 可解析出 Infinity/超大数，一并拦） */
-function isValidRecord(entry: unknown): entry is GenStatsRecord {
+/**
+ * 存储条目有效性：恰为期望长度的全有限数字组（JSON 可解析出 Infinity/超大数，一并拦）。
+ * 期望元组长度按文件族传入（speed/cache-ratio 二元组 = PAIR_RECORD_TUPLE_LENGTH、
+ * ttft 单元素组 = TTFT_RECORD_TUPLE_LENGTH；缺省 2 = 既有文件校验强度不变，
+ * composer-genstats-ttft §3.3「校验签名参数化」——单元素组在默认二元组校验下会被
+ * 整批当畸形丢弃，ttft 聚合恒空静默失效，故必须参数化）。
+ */
+function isValidRecord(entry: unknown, expectedTupleLength: number): entry is GenStatsRecord {
   return (
     Array.isArray(entry) &&
-    entry.length === RECORD_TUPLE_LENGTH &&
-    typeof entry[0] === 'number' && Number.isFinite(entry[0]) &&
-    typeof entry[1] === 'number' && Number.isFinite(entry[1])
+    entry.length === expectedTupleLength &&
+    entry.every((v) => typeof v === 'number' && Number.isFinite(v))
   )
 }
 
@@ -211,8 +320,13 @@ function isValidRecord(entry: unknown): entry is GenStatsRecord {
  * 读日记录文件（**损坏自愈，不抛**——设计 §3.5）：
  * 文件不存在 → 空；读失败 / JSON 解析失败 / 顶层形状非法 → warn 日志（带路径）+ 空，
  * 下次写入自愈重建；部分键/条目畸形 → 丢弃畸形部分（warn 一次），合法数据照常返回。
+ * 泛型 T = 调用方按文件族声明的记录类型（期望长度参数须与之匹配：二元组 2 / 单元素组 1）；
+ * 校验谓词按期望长度过滤，通过者即为 T——窄化由校验背书，非 as 断言（§3.3 禁 as 绕过）。
  */
-export function readDayRecords(filePath: string): GenStatsDayRecords {
+export function readDayRecords<T extends GenStatsRecord = GenStatsRecord>(
+  filePath: string,
+  expectedTupleLength: number = PAIR_RECORD_TUPLE_LENGTH,
+): GenStatsDayRecords<T> {
   if (!existsSync(filePath)) return {}
 
   let raw: string
@@ -239,14 +353,14 @@ export function readDayRecords(filePath: string): GenStatsDayRecords {
     return {}
   }
 
-  const result: GenStatsDayRecords = {}
+  const result: GenStatsDayRecords<T> = {}
   let repaired = false
   for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
     if (!DAY_KEY_RE.test(key) || !Array.isArray(value)) {
       repaired = true
       continue
     }
-    const entries = value.filter(isValidRecord)
+    const entries = value.filter((e): e is T => isValidRecord(e, expectedTupleLength))
     if (entries.length !== value.length) repaired = true
     result[key] = entries
   }
@@ -267,7 +381,10 @@ export function readDayRecords(filePath: string): GenStatsDayRecords {
  * 但换模型后旧模型文件永不重写，孤儿永驻；写入时顺带清扫同目录全部 `.tmp` 孤儿兜底
  * （gen-stats 目录仅本 store 写入，`*.tmp` 只可能是本原子写残留，清扫无旁观者伤害）。
  */
-export function writeDayRecords(filePath: string, records: GenStatsDayRecords): GenStatsDayRecords {
+export function writeDayRecords<T extends GenStatsRecord>(
+  filePath: string,
+  records: GenStatsDayRecords<T>,
+): GenStatsDayRecords<T> {
   mkdirSync(dirname(filePath), { recursive: true })
   const persisted = pruneExpiredDays(records)
   atomicWrite(filePath, JSON.stringify(persisted))

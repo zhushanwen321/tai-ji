@@ -68,6 +68,9 @@ export function useProjectSkills(currentCwd: Ref<string | null>) {
   // R3（review fix）：in-flight 去重。cwd 快速切 A→B→A 时，若 A 的 RPC 仍 pending，
   // 没有 in-flight 标记会重复触发 loadFor(A)。Set 记录 pending cwd，RPC 完成后删除。
   const inFlight = new Set<string>()
+  // RD-4#13：project skill 拉取失败标志——供列表区插「可重试」提示（此前仅 console.warn，
+  // slash 列表空与「该项目无 skill」不可区分）。
+  const loadError = ref(false)
 
   const projectSkills = computed<SkillInfo[]>(() => {
     const cwd = currentCwd.value
@@ -87,12 +90,22 @@ export function useProjectSkills(currentCwd: Ref<string | null>) {
       const next = new Map(skillsByCwd.value)
       next.set(cwd, skills)
       skillsByCwd.value = next
+      loadError.value = false
     } catch (e) {
       // 不写 cache：失败后 cache miss 仍在，下次 watch/失效信号触发会重试
+      // RD-4#13：置 loadError 供列表区插「可重试」提示（此前仅 warn，列表空与「无 skill」不可区分）
       console.warn(`[useProjectSkills] getProjectSkills failed for cwd=${cwd}, will retry on next trigger:`, e)
+      loadError.value = true
     } finally {
       inFlight.delete(cwd)
     }
+  }
+
+  /** RD-4#13：重试当前 cwd 的 project skill 拉取（供列表区「重试」入口调用）。 */
+  function retry(): void {
+    const cwd = currentCwd.value
+    if (!cwd || inFlight.has(cwd)) return
+    void loadFor(cwd)
   }
 
   // watch currentCwd：变化时按需拉取（缓存命中跳过）。immediate 触发初始 cwd 的拉取。
@@ -132,7 +145,7 @@ export function useProjectSkills(currentCwd: Ref<string | null>) {
     }
   })
 
-  return { projectSkills }
+  return { projectSkills, loadError, retry }
 }
 
 // ── useGlobalSkills：模块级 singleton 缓存 ──────────────────────────

@@ -93,6 +93,7 @@ function makePumpHarness(runId: string): PumpHarness {
     runner: { run: vi.fn(async () => ({ content: "legacy-runner", durationMs: 1, error: undefined, toolCalls: [] })) },
     runs: new Map([[runId, run]]),
     eventBus: { emit: vi.fn() },
+    appendEntry: vi.fn(),
     log: vi.fn(),
     workflowAgentDispatch: (opts: AgentCallOpts, parentRunId: string, signal?: AbortSignal) =>
       service.executeWorkflowAgent(opts, parentRunId, signal),
@@ -207,12 +208,13 @@ describe("pump → executeWorkflowAgent 端到端", () => {
     expect(unregistered?.[1]).toMatchObject({ id: record.id });
 
     // 4. run 级 pending 配对不回归（D5：lifecycle↔pump 的 run 级注册/注销对零改动
-    //    ——lifecycle.ts 零 diff 由 git 自查；此处锁 pump 侧 run 终态注销行为）：
-    //    脚本 return → finalizeRun emit pending:unregister with id=runId。
+    //    ——register 仍经 eventBus emit；此处锁 pump 侧 run 终态注销行为）：
+    //    脚本 return → finalizeRun 直落 appendEntry pending:unregister with id=runId
+    //    （[reload-closeout D4] emit 发射点已删，注销唯一持久化路径 = 直落）。
     await handleWorkerMessage(h.run, { type: "return", result: "done" }, h.deps, makeHandlers());
-    const runUnregister = h.deps.eventBus!.emit as ReturnType<typeof vi.fn>;
+    const runUnregister = h.deps.appendEntry as ReturnType<typeof vi.fn>;
     const runUnregCall = runUnregister.mock.calls.find((c) => c[0] === "pending:unregister");
-    expect(runUnregCall?.[1]).toMatchObject({ id: "wf-pump-e2e-1" });
+    expect(runUnregCall?.[1]).toMatchObject({ id: "wf-pump-e2e-1", status: "completed" });
     expect(h.run.state.status).toBe("done");
   });
 

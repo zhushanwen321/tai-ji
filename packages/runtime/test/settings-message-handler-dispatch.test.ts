@@ -24,7 +24,9 @@ function makeHandler(configOverrides: Record<string, ReturnType<typeof vi.fn>> =
     applyImportProviders: vi.fn().mockResolvedValue({ result: {} }),
     refreshProviderCatalogs: vi.fn().mockResolvedValue({ refreshed: [], failed: [] }),
     getProvider: vi.fn().mockReturnValue(undefined),
-    updateToolPermissions: vi.fn(),
+    isModelsStoreCorrupted: vi.fn().mockReturnValue(false),
+    // M4/RT-7#1：updateToolPermissions 返回 {ok}（config.json 损坏降级态拒绝覆写）
+    updateToolPermissions: vi.fn().mockReturnValue({ ok: true }),
     loadSkills: vi.fn().mockReturnValue([]),
     scanSkills: vi.fn().mockReturnValue([]),
     upsertSkill: vi.fn(),

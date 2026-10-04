@@ -76,7 +76,17 @@
     </div>
   </div>
 
-  <!-- 右侧：仅时间文字（状态信号已移至左侧 7px icon） -->
+  <!-- 右侧：子会话计数 chip（描边 + 层叠图标 + 数字；仅父条目有子会话时渲染，只读中性色，
+       不用 accent——accent 已被 [AI] 来源徒标占用）+ 时间文字。 -->
+  <span
+    v-if="childCount > 0"
+    data-testid="session-child-count"
+    class="mt-0.5 flex shrink-0 items-center gap-0.5 rounded-sm border border-border-strong px-1 py-px font-mono text-[length:var(--text-3xs)] leading-[1.3] text-neutral-dim"
+    :title="t('sidebar.sessionItem.childCount', { n: childCount })"
+  >
+    <Layers class="size-[9px] shrink-0" />
+    <span>{{ childCount }}</span>
+  </span>
   <span
     class="mt-1 shrink-0 font-mono text-[length:var(--text-3xs)] leading-[1.35] text-neutral-dim"
   >{{ timeLabel }}</span>
@@ -85,21 +95,25 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Layers } from '@lucide/vue'
 import type { DerivedStatus } from '@/types'
 import { formatRelativeTime } from '@/composables/logic/formatTime'
 import { dirNameOf } from '@taiji/ui'
 import { isUnread, isMarkedDone } from '@/composables/useSessionMarkers'
+import { unreadByBranch } from '@/composables/features/fork-handoff/useForkBranchNotify'
 import { isImportedFresh } from '@/composables/features/sidebar/useImportSession'
 import type { SessionItemSession } from './types'
 
 /** 左侧状态 icon 种类（7px 单一 icon 范式）。 */
 type IconKind = 'spinning' | 'hollow' | 'hollow-dim' | 'waiting' | 'error' | 'done' | 'dead' | 'empty'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   session: SessionItemSession
   active: boolean
   status: DerivedStatus
-}>()
+  /** 子会话数（按 parentAgentSessionId 计数，SessionList 注入）；0/缺省不渲染徒标 */
+  childCount?: number
+}>(), { childCount: 0 })
 
 const { t } = useI18n()
 
@@ -110,7 +124,12 @@ const isDead = computed(() => props.session.status === 'dead')
 const isAgentSpawned = computed(() => props.session.spawnSource === 'agent')
 
 // ── 未读 + 标记完成状态（读 useSessionMarkers 模块级响应式集合）──
-const unread = computed(() => isUnread(props.session.id))
+// 未读两源合流（D9，ForkGroup 退役）：① 后台完成（useCompletionNotify → markUnread）；
+// ② 后台分支状态翻转（useForkBranchNotify.unreadByBranch）。两类都是「这里有没看的东西」，
+// 同一枚 dot 承载，不新增元素。
+const unread = computed(
+  () => isUnread(props.session.id) || unreadByBranch.value.get(props.session.id) === true,
+)
 const markedDone = computed(() => isMarkedDone(props.session.id))
 
 // ── 导入 fresh 徽标（import-session u7）：isImportedFresh 读模块级响应式集合，

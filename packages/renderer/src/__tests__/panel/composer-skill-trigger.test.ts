@@ -8,8 +8,8 @@
  *   select payload → insertSkillChip（光标标记 chip、多个共存）+ 已选集合回传（D2 已选禁选数据面）
  * - P 组 CommandPopover（真实组件）：panel 态 taiji 源（globalSkills ∪ projectSkills props，
  *   ADR-0050 修订切源）合并去重序 + `__` 过滤 + pi 真源 skill 推送不影响；已选项「已选」
- *   禁选（onSelect 守卫）；location 取 SkillInfo.sourcePath；panel slash 段过滤 skill: 项
- *   （双入口消除）；landing 态合并回归
+ *   禁选（onSelect 守卫）；location 取 SkillInfo.sourcePath；panel slash 段 skill 换源保留
+ *   （ADR-0050 二次修订：pi 快照 skill: 项剔除 + registry 源项补入）；landing 态合并回归
  * - P7/P8 组 panel cwd 接线（ADR-0050 修订，Composer 层）：sessionStore 投影的 session cwd
  *   → useProjectSkills(cwd) 拉取 → CommandPopover projectSkills prop；landing 态不受影响
  * - W9/W10 组 SearchModal ⌘K 注入（第三条 skill 入口）：pendingSlash.isSkill → insertSkillChip
@@ -518,10 +518,16 @@ describe('CommandPopover skill-only 候选（D1 taiji 源 + D2 已选禁选，AD
     })
   })
 
-  it('P5 panel 态 slash 段过滤 skill: 项（ADR-0050 修订双入口消除）：skill 项不列、命令项照常', async () => {
+  it('P5 panel 态 slash 段 skill 换源保留（ADR-0050 二次修订）：pi 快照 skill: 项剔除、registry 源 skill 项补入并可选', async () => {
     wrapper = mount(CommandPopover, {
       attachTo: document.body,
-      props: { open: true, type: 'slash', sessionId: 's1', query: '' },
+      props: {
+        open: true,
+        type: 'slash',
+        sessionId: 's1',
+        query: '',
+        globalSkills: [skillInfo('registry-a', '/g/a/SKILL.md')],
+      },
     })
     await flushPromises()
     pushCommands('s1', [
@@ -531,8 +537,8 @@ describe('CommandPopover skill-only 候选（D1 taiji 源 + D2 已选禁选，AD
     await flushPromises()
     await nextTick()
     const rows = bodyRows()
-    // compact + commit = 2 项；skill:alpha 不进 panel slash 段（skill 段是唯一 skill 入口）
-    expect(rows).toHaveLength(2)
+    // compact + commit + registry-a = 3 项；pi 快照 skill:alpha 不进（reload 才刷新的滞后源）
+    expect(rows).toHaveLength(3)
     expect(rows.some((r) => r.textContent?.includes('alpha'))).toBe(false)
     const cmdRow = rows.find((r) => r.textContent?.includes('commit'))
     expect(cmdRow).toBeTruthy()
@@ -544,6 +550,17 @@ describe('CommandPopover skill-only 候选（D1 taiji 源 + D2 已选禁选，AD
       isSkill: false,
     })
     expect((wrapper.emitted('select')![0][0] as Record<string, unknown>).location).toBeUndefined()
+    // registry 源 skill 项：select payload 走 isSkill 分流（name 带 /skill: 前缀 + location 取 sourcePath）
+    const skillRow = rows.find((r) => r.textContent?.includes('registry-a'))
+    expect(skillRow).toBeTruthy()
+    skillRow!.click()
+    await nextTick()
+    expect(wrapper.emitted('select')![1][0]).toMatchObject({
+      type: 'slash',
+      name: '/skill:registry-a',
+      isSkill: true,
+      location: '/g/a/SKILL.md',
+    })
   })
 
   it('P4 landing 态：globalSkills + projectSkills 合并（global 优先、project 补独有、去重）', async () => {

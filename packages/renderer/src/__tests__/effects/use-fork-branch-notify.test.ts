@@ -17,9 +17,11 @@ import type { ServerMessage, SessionGroup, SessionSummary } from '@taiji/shared'
 import {
   bindForkNoticeEffect,
   resetForkNoticeFeed,
-  useForkBranchBadges,
   useForkNoticeFeed,
 } from '@/composables/effects/useForkNoticeEffect'
+// D9：useForkBranchBadges 门面已随 ForkGroup 退役删除（未读角标改由 SessionItemDisplay 直接读本模块），
+// 测试同步为直接消费 useForkBranchNotify 的模块级单例。
+import { clearUnread, unreadByBranch } from '@/composables/features/fork-handoff/useForkBranchNotify'
 import { useSessionStore } from '@/stores/session'
 
 function session(overrides: Partial<SessionSummary>): SessionSummary {
@@ -69,7 +71,6 @@ beforeEach(() => {
 
 describe('fork 分支角标（V7：产生 → 读后清除 → 切会话保持）', () => {
   it('后台分支 active→done：未读角标产生 + 反馈行追加状态通知（RV2 全链）', async () => {
-    const { unreadByBranch } = useForkBranchBadges()
     const { notices } = useForkNoticeFeed()
 
     broadcastForkNotice('s-parent', 's-branch', 'fix-bug')
@@ -93,8 +94,6 @@ describe('fork 分支角标（V7：产生 → 读后清除 → 切会话保持�
   })
 
   it('用户查看分支 → clearUnread 清除；groups 再次广播（切会话重放）已读态不回灌', async () => {
-    const { unreadByBranch, clearUnread } = useForkBranchBadges()
-
     broadcastForkNotice('s-parent', 's-branch', 'fix-bug')
     const doneBranch = session({ id: 's-branch', status: 'done', parentSession: 's-parent', label: 'fix-bug' })
     await broadcastGroups([session({ id: 's-parent', status: 'active' }), doneBranch])
@@ -111,8 +110,6 @@ describe('fork 分支角标（V7：产生 → 读后清除 → 切会话保持�
   })
 
   it('非活跃分支的未读角标跨多次 groups 广播保留（ADR-0049：角标状态不随焦点切换丢失）', async () => {
-    const { unreadByBranch, clearUnread } = useForkBranchBadges()
-
     broadcastForkNotice('s-a', 's-branch-a', 'branch-a')
     broadcastForkNotice('s-b', 's-branch-b', 'branch-b')
     await broadcastGroups([
@@ -137,8 +134,6 @@ describe('fork 分支角标（V7：产生 → 读后清除 → 切会话保持�
   })
 
   it('bind 卸载（App 卸载语义）→ 分支追踪/角标态清空', async () => {
-    const { unreadByBranch } = useForkBranchBadges()
-
     broadcastForkNotice('s-parent', 's-branch', 'fix-bug')
     await broadcastGroups([
       session({ id: 's-parent', status: 'active' }),

@@ -112,32 +112,41 @@ describe('SessionService.getAgentCallFilePath', () => {
 
   it('record 有 sessionFile（在 piAgentDir 下）→ 返回路径', async () => {
     const service = createService()
-    vi.spyOn(recordsRef(service), 'getSubagents').mockResolvedValue([
-      { subagentId: 'sa-001', sessionFile: '/tmp/pi-agent/subagents/enc/sa-001.jsonl' } as SubagentRecord,
-    ])
+    vi.spyOn(recordsRef(service), 'getSubagents').mockResolvedValue({
+      records: [
+        { subagentId: 'sa-001', sessionFile: '/tmp/pi-agent/subagents/enc/sa-001.jsonl' } as SubagentRecord,
+      ],
+      oversize: false,
+    })
     const result = await service.getAgentCallFilePath('main-sess', 'sa-001')
     expect(result).toBe('/tmp/pi-agent/subagents/enc/sa-001.jsonl')
   })
 
   it('找不到 record → 空串', async () => {
     const service = createService()
-    vi.spyOn(recordsRef(service), 'getSubagents').mockResolvedValue([])
+    vi.spyOn(recordsRef(service), 'getSubagents').mockResolvedValue({ records: [], oversize: false })
     expect(await service.getAgentCallFilePath('main-sess', 'sa-missing')).toBe('')
   })
 
   it('record 无 sessionFile（null）→ 空串', async () => {
     const service = createService()
-    vi.spyOn(recordsRef(service), 'getSubagents').mockResolvedValue([
-      { subagentId: 'sa-001', sessionFile: null } as SubagentRecord,
-    ])
+    vi.spyOn(recordsRef(service), 'getSubagents').mockResolvedValue({
+      records: [
+        { subagentId: 'sa-001', sessionFile: null } as SubagentRecord,
+      ],
+      oversize: false,
+    })
     expect(await service.getAgentCallFilePath('main-sess', 'sa-001')).toBe('')
   })
 
   it('sessionFile 路径穿越（不在 piAgentDir 下）→ 空串（isStrictlyUnder 安全校验）', async () => {
     const service = createService()
-    vi.spyOn(recordsRef(service), 'getSubagents').mockResolvedValue([
-      { subagentId: 'sa-001', sessionFile: '/etc/passwd' } as SubagentRecord,
-    ])
+    vi.spyOn(recordsRef(service), 'getSubagents').mockResolvedValue({
+      records: [
+        { subagentId: 'sa-001', sessionFile: '/etc/passwd' } as SubagentRecord,
+      ],
+      oversize: false,
+    })
     expect(await service.getAgentCallFilePath('main-sess', 'sa-001')).toBe('')
   })
 })

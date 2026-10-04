@@ -48,7 +48,7 @@ interface Spies {
   clearInput: Spy<() => void>
   restoreSegments: Spy<(segments: Segment[]) => void>
   submitFirstMessage: Spy<ComposerSendDeps['flow']['submitFirstMessage']>
-  send: Spy<(sessionId: string, segments: Segment[]) => Promise<void>>
+  send: Spy<(sessionId: string, segments: Segment[]) => Promise<boolean>>
   steer: Spy<(sessionId: string, segments: Segment[]) => Promise<boolean>>
   compact: Spy<(sessionId: string, customInstructions?: string) => Promise<void>>
   enqueueCompact: Spy<(sessionId: string, text: string, segments: Segment[]) => void>
@@ -82,7 +82,9 @@ function setup(initial?: Partial<DepsControl>): { deps: ComposerSendDeps; spies:
     clearInput: vi.fn(() => {}),
     restoreSegments: vi.fn((_segments: Segment[]) => {}),
     submitFirstMessage: vi.fn(async () => {}) as unknown as Spies['submitFirstMessage'],
-    send: vi.fn(async (_sessionId: string, _segments: Segment[]) => {}),
+    // [form-hang-fix D2] send 契约 Promise<boolean>：默认 true = 正常路径（sendActiveMessage
+    // 的 false→restoreSegments 消费用例各自 mockResolvedValueOnce(false)）
+    send: vi.fn(async (_sessionId: string, _segments: Segment[]) => true),
     steer: vi.fn(async (_sessionId: string, _segments: Segment[]) => true),
     compact: vi.fn(async (_sessionId: string, _customInstructions?: string) => {}),
     enqueueCompact: vi.fn((_sessionId: string, _text: string, _segments: Segment[]) => {}),

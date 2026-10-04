@@ -116,6 +116,20 @@ describe('finalizeSubagentStream', () => {
 
     expect(messages.value.get('subagent:x')!.value[0].status).toBe('complete')
   })
+
+  it('TC3c 收口写入产出结束时刻 endedAt（turn 聚合口径时间轴右端）；已有值不覆写', () => {
+    const { sm, messages } = makeMachine()
+    messages.value = new Map([['subagent:x', shallowRef([streamingAssistant('a1')])]])
+
+    sm.finalizeSubagentStream('subagent:x')
+    expect(messages.value.get('subagent:x')!.value[0].endedAt).toBeTypeOf('number')
+
+    // 已有值不覆写（迟到收口不覆写真实终点）
+    const second = makeMachine()
+    second.messages.value = new Map([['subagent:y', shallowRef([streamingAssistant('a1', { endedAt: 1234 })])]])
+    second.sm.finalizeSubagentStream('subagent:y')
+    expect(second.messages.value.get('subagent:y')!.value[0].endedAt).toBe(1234)
+  })
 })
 
 describe('finalizeMessages', () => {
@@ -242,6 +256,20 @@ describe('finalizeMessages', () => {
     const after = messages.value.get('s1')!.value[0]
     expect(after.status).toBe('complete')
     expect(after.error).toBeUndefined()
+  })
+
+  it('TC4h 收口写入产出结束时刻 endedAt（turn 聚合时间轴右端）；已有值不覆写（不迟到覆写真实终点）', () => {
+    const { sm, messages } = makeMachine()
+    messages.value = new Map([['s1', shallowRef([
+      streamingAssistant('a1'),
+      streamingAssistant('a2', { endedAt: 777 }),
+    ])]])
+
+    sm.finalizeMessages('s1', 'aborted')
+
+    const after = messages.value.get('s1')!.value
+    expect(after[0].endedAt).toBeTypeOf('number')
+    expect(after[1].endedAt).toBe(777)
   })
 
   it('TC5 normal 收口：streaming → complete；toolCall → end_not_received 且不设 endTime；无 errorText 不追加', () => {

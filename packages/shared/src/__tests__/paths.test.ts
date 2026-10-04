@@ -30,9 +30,9 @@ describe('getPiSessionsDir', () => {
     expect(getPiSessionsDir()).toBe(join('/tmp/taiji-shared-test-data', 'agent', 'sessions'))
   })
 
-  it('缺省且 env 未设：homedir() 兜底 ~/.taiji（纯字符串推导，不触 fs）', () => {
+  it('缺省且 env 未设：homedir() 兜底 ~/.taiji-dev（缺省反转，fail-safe default；纯字符串推导，不触 fs）', () => {
     vi.stubEnv('TAIJI_AGENT_DATA_DIR', undefined)
-    expect(getPiSessionsDir()).toBe(join(homedir(), '.taiji', 'agent', 'sessions'))
+    expect(getPiSessionsDir()).toBe(join(homedir(), '.taiji-dev', 'agent', 'sessions'))
   })
 })
 

@@ -4,7 +4,9 @@
  * 锁定：message_end / agent_settled / entry_appended 三事件经 translate() 输出
  * **同时**含 main 侧 handler 产物（W21 实时 feed / W1 bash flush / W18 派生缓存失效）
  * **与** trace-trigger 中间事件（interpreter 调 onTraceSync 做追赶式 since 拉取），
- * 且 main 产物在前、trace-trigger 追加在后。
+ * 且 main 产物在前、trace-trigger 追加在后。[reload-closeout D2] 起 agent_settled
+ * 在 trace-trigger 之后**再**追加 record-reconcile-trigger（onRecordReconcile 送达
+ * 水位对账腿，只挂 agent_settled——run 级联结束边界信号）。
  *
  * 回归背景：本 PR merge 曾修「两组 DISPATCHER.set 叠加互相覆盖」bug（Map 后写覆盖
  * 前写，丢一组产物）。若退回单 handler 覆盖形态（丢 trace-trigger 追加），本文件
@@ -27,7 +29,7 @@ import type {
 const SID = 's-trace-trigger'
 
 describe('withTraceTrigger 组合注册不互相覆盖（session-trace A33 回归锁）', () => {
-  it('组合注册不互相覆盖：三事件输出 main handler + trace-trigger 双产物', () => {
+  it('组合注册不互相覆盖：三事件输出 main handler + trace-trigger（agent_settled 另追加 record-reconcile-trigger）', () => {
     // message_end：main = W21 实时 feed（message.message_end entry 帧）
     const messageEnd = translate(
       {
@@ -49,9 +51,15 @@ describe('withTraceTrigger 组合注册不互相覆盖（session-trace A33 回�
     })
     expect(messageEnd[1]).toEqual({ kind: 'trace-trigger', trigger: 'message_end' })
 
-    // agent_settled：main = W1 bash flush 信号（agent-settled 中间事件）
+    // agent_settled：main = W1 bash flush 信号（agent-settled 中间事件）+ trace-trigger
+    // + record-reconcile-trigger（[reload-closeout D2] 送达水位对账腿第三层组合，只挂
+    // agent_settled——run 级联结束边界信号）
     const settled = translate({ type: 'agent_settled' } as PiAgentSettledEvent, SID)
-    expect(settled).toEqual([{ kind: 'agent-settled' }, { kind: 'trace-trigger', trigger: 'agent_settled' }])
+    expect(settled).toEqual([
+      { kind: 'agent-settled' },
+      { kind: 'trace-trigger', trigger: 'agent_settled' },
+      { kind: 'record-reconcile-trigger' },
+    ])
 
     // entry_appended：main = W18 派生缓存失效（record-entry-appended）
     const appended = translate(
@@ -64,13 +72,34 @@ describe('withTraceTrigger 组合注册不互相覆盖（session-trace A33 回�
     ])
   })
 
-  it('trace 腿独立于 main 腿：entry_appended 非 record customType 时 main 走 noop，trace-trigger 仍追加', () => {
+  it('trace 腿独立于 main 腿：entry_appended 非 record customType 时 main 产出失效事件，trace-trigger 仍追加在后', () => {
+    // 放宽（D5「失效转发的三段链路」①）：任何 custom entry 均产出失效信号，
+    // 「避免无关 entry 触发拉取」由派发层订阅者存在性守住（原三字面量过滤删除）。
+    // 组合语义不变：main 腿产失效事件不拖累 trace 腿——trace 视图仍需感知
+    // extension appendEntry 触发追赶拉取；main 产物在前、trace-trigger 追加在后。
     const events = translate(
       { type: 'entry_appended', entry: { type: 'custom', customType: 'demo:other' } } as unknown as PiEntryAppendedEvent,
       SID,
     )
-    // 组合语义：main handler 的过滤（只对 record customType 产失效信号）不拖累
-    // trace 腿——trace 视图仍需感知 extension appendEntry 触发追赶拉取
+    expect(events).toEqual([
+      { kind: 'record-entry-appended', customType: 'demo:other' },
+      { kind: 'trace-trigger', trigger: 'entry_appended' },
+    ])
+  })
+
+  it('放宽：非 record customType（如 pi-scheduler:task）产出失效事件且 customType 正确透传', () => {
+    const events = translate(
+      { type: 'entry_appended', entry: { type: 'custom', customType: 'pi-scheduler:task' } } as unknown as PiEntryAppendedEvent,
+      SID,
+    )
+    expect(events[0]).toEqual({ kind: 'record-entry-appended', customType: 'pi-scheduler:task' })
+  })
+
+  it('放宽边界：customType 非 string（extension 第三方脏数据）→ main 走 noop，trace-trigger 仍追加', () => {
+    const events = translate(
+      { type: 'entry_appended', entry: { type: 'custom', customType: 42 } } as unknown as PiEntryAppendedEvent,
+      SID,
+    )
     expect(events).toEqual([{ kind: 'noop' }, { kind: 'trace-trigger', trigger: 'entry_appended' }])
   })
 
@@ -95,6 +124,17 @@ describe('withTraceTrigger 组合注册不互相覆盖（session-trace A33 回�
     )
     expect(events).toEqual([
       { kind: 'record-entry-appended', customType: 'workflow-record' },
+      { kind: 'trace-trigger', trigger: 'entry_appended' },
+    ])
+  })
+
+  it('entry_appended 对 plan-state 同样双产物（plan 模式重设计 D1① 白名单第三员）', () => {
+    const events = translate(
+      { type: 'entry_appended', entry: { type: 'custom', customType: 'plan-state' } } as unknown as PiEntryAppendedEvent,
+      SID,
+    )
+    expect(events).toEqual([
+      { kind: 'record-entry-appended', customType: 'plan-state' },
       { kind: 'trace-trigger', trigger: 'entry_appended' },
     ])
   })

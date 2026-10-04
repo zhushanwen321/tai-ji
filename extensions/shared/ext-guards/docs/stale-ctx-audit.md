@@ -47,6 +47,7 @@
 | **todo** | handlers.ts 5 个 `pi.on`（session_start/session_tree/agent_start/before_agent_start/agent_end，async 体内无 await）；commands.ts /todos handler `await ctx.ui.custom`；tool.ts execute | **排除** | 全部 ctx/pi 调用（`reconstructState` 读 sessionManager、`ctx.ui.setStatus`/`setWidget`、refreshDisplay）都在同步上下文或 pi 自有 await 链——ctx 是事件派发时入参，非注册时捕获的旧引用；无 timer、无跨 session 存活回调（同合并行 permission「setTimeout 是本地 Promise」类排除理由） |
 | **ext-guards** | 守卫宿主包（`guardStaleCtx`/`oncePerProcess` 定义处，src/index.ts 唯一 `.then` 是守卫自身 rejection 分诊实现） | **排除** | 非 pi extension 的零依赖纯函数库（无 pi SDK peerDep，包注释自证），自身不捕获、不持有任何 pi/ctx——守卫宿主 ≠ 自身豁免，按源码事实判定为零调用面 |
 | **rename-session / msg-id-mapper / agent-ext / system-prompt-trace / extension-logger / file-lock / llm-shared / session-manager / session-reader / smart-context 其余模块 / permission / plugin-bridge（taiji）** | 普查无「跨 session 存活异步回调触碰 pi/ctx」命中 | **排除** | permission 的 setTimeout 是 classifier 超时（resolve 本地 Promise）；plugin-bridge 的 setTimeout 是 sync 重试/网关超时（Promise 竞速，不触碰 pi API）；其余命中点（pi.appendEntry 等）均在同步上下文（session_start/工具 execute 直接链）或供依赖注入的闭包声明，无 stale 窗口 |
+| **provider-live-sync** | index.ts :287 setTimeout 轮询链（tick 内 :271/:273 `ctx.modelRegistry.refresh`/`getError`）；:232 session_start handler | **排除** | tick 全链 try/catch + logError 有痕降级（:279-283「轮询绝不自杀：本拍失败下一拍继续」注释明言）——session 替换窗口 stale 抛错被内吞为日志，非无人接 rejection（同 base-tool-enhance sendTaskFinishedMessage 判例）；session_start handler 仅同步赋值捕获新 ctx（:232-234），无 pi/ctx API 调用 |
 
 ## 4. 「stale 静默语义」判定表（每接入包：stale 时静默意味着什么、用户出路）
 

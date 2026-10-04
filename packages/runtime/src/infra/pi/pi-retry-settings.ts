@@ -4,33 +4,27 @@
  * settings.json retry 域的读写全部经 pi-settings-store（唯一读写层 + 跨进程锁 + retry
  * 字段域 scope merge，D1a/D1b/D2）；读侧缺省合并/写侧 D3 嵌套 merge 的纯函数在
  * services/llm-retry-config-helper（infra 只做 I/O 编排，D17 三层）。
+ *
+ * [RT-3#12 去全局化] 本类不再持有 settingsDir 参数、构造不再调用 setSettingsPath——
+ * 模块级写入目标被最后构造者决定是机械缺陷（生产实参与 getSettingsPath() 同值，
+ * 该调用本是 no-op）。需要重定向 settings.json 的测试显式调用 setSettingsPath
+ * （全仓测试惯例）；读不再 invalidateSettingsCache——JsonStore 指纹校验让 pi 子进程
+ * 的直接落盘（set_auto_retry）在下一次 read 的 stat 失配中立即可见，全局失效只会
+ * 绕空指纹缓存让每次读全量触盘。
  */
 
-import { join } from 'node:path'
 import type { LlmRetryConfig } from '@taiji/shared'
 import type { ILlmRetrySettings, LlmRetryConfigSnapshot } from '../../services/ports/llm-retry-settings.js'
 import { mergeRetryConfig, resolveRetryConfig, validateRetryConfigForWrite } from '../../services/llm-retry-config-helper.js'
-import { getPiAgentDir } from './pi-paths.js'
-import { readSettings, setSettingsPath, updateSettingsFields, invalidateSettingsCache } from './pi-settings-store.js'
+import { readSettings, updateSettingsFields } from './pi-settings-store.js'
 import { toErrorMessage } from '../../utils/errors.js'
 
 /**
- * ILlmRetrySettings 实现。
- * @param settingsDir pi agent 配置目录（<dataDir>/agent），settings.json 所在地。
- *                    测试可注入临时目录；生产默认 getPiAgentDir()。
+ * ILlmRetrySettings 实现。settings.json 路径由 pi-settings-store 模块级单一所有者
+ * 决定（D17；生产 = getSettingsPath()，测试重定向经 setSettingsPath 显式注入）。
  */
 export class PiRetrySettings implements ILlmRetrySettings {
-  constructor(settingsDir: string = getPiAgentDir()) {
-    // 对齐 pi-settings-store 路径到同一 settings.json（与 PiExtensionSettings 同模式，
-    // 保证各域在测试/生产读写同一文件，D17 单一所有者）。
-    setSettingsPath(join(settingsDir, 'settings.json'))
-  }
-
   getRetryConfig(): LlmRetryConfigSnapshot {
-    // 读前失效缓存（同 PiExtensionSettings.getPackages 先例）：pi 子进程 set_auto_retry 直接
-    // 落盘、不经本 store 写路径，读前失效保证 GUI 打开分组必见 pi 最新落盘值，不吃 3s TTL 陈旧值。
-    // invalidate 只丢内存缓存不触盘；坏文件由 store schema guard 兜底 {}。
-    invalidateSettingsCache()
     return resolveRetryConfig(readSettings().retry)
   }
 

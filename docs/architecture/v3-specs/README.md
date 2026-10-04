@@ -9,7 +9,7 @@
 | `coding-plan-quota/` | **活跃** | provider 额度查询设计（被 packages/ 7 处代码注释引用） |
 | `flow-2-code-review/` | **活跃** | 产品主路径 Flow-2 时序设计（被 message.ts 引用） |
 | `flow-3-subagent/` | **活跃** | 产品主路径 Flow-3 多 agent 编排 + 进度聚合 |
-| `ask-user/` | **活跃** | inline ask-user 交互设计（被 AskUserOverlay.vue 引用） |
+| `ask-user/` | **活跃** | inline 提问交互设计（html demo；行为基线——tab 切换 / auto-advance / Other 形态——由统一表单协议的 FormOverlay / ChoiceQuestion 继承） |
 | `fast-fork/` | 待实现 | 快速分叉（Fork-to-Ask + 后台分支管理） |
 | `fast-merge/` | 待实现 | 多分支差异聚合（依赖 fast-fork 基础层） |
 | `fast-handoff/` | 待实现 | 一键交接到新 session |

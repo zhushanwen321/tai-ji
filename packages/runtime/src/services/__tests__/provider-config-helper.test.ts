@@ -260,8 +260,8 @@ describe('M1b: applyProviderWritePolicy 防线②③', () => {
   })
 })
 
-describe('S15: custom provider oauth 清理失败 warn（I9 清理① 降级可观测）', () => {
-  it('authStorage.remove reject → console.warn 指明清理失败，主写路径不受阻', async () => {
+describe('S15: custom provider oauth 清理失败 fail-fast（I9 清理① + RT-7#3 await 化）', () => {
+  function makeSetProviderService(auth: FullAuthPick) {
     const upsertProvider = vi.fn((_providerId: string, _merged: Record<string, unknown>) => ({}))
     const store = {
       getProviderConfig: vi.fn(() => undefined),
@@ -270,19 +270,33 @@ describe('S15: custom provider oauth 清理失败 warn（I9 清理① 降级可�
       ensureProviderInWhitelist: vi.fn(),
       getEnabledModels: vi.fn(() => []),
     } as unknown as IConfigStore
+    return { svc: new ConfigService('/tmp/project', store, auth, new TaijiProviderStore(extrasPath)), upsertProvider }
+  }
+
+  it('authStorage.remove reject → setProvider 整体 reject 且 upsert 不执行（清理失败不落半成品 models.json）', async () => {
     const auth = makeAuth()
     ;(auth.remove as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('auth store locked'))
-    const svc = new ConfigService('/tmp/project', store, auth, new TaijiProviderStore(extrasPath))
+    const { svc, upsertProvider } = makeSetProviderService(auth)
+
+    await expect(svc.setProvider('p-custom', { apiKey: 'sk-new' })).rejects.toThrow('auth store locked')
+    expect(upsertProvider).not.toHaveBeenCalled()
+    expect(auth.remove).toHaveBeenCalledWith('p-custom')
+  })
+
+  it('authStorage.remove 成功 → upsert 在清理完成后执行（await 顺序，merged 含新 apiKey）', async () => {
+    const removeDone: number[] = []
+    const auth = makeAuth()
+    ;(auth.remove as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      removeDone.push(1)
+    })
+    const { svc, upsertProvider } = makeSetProviderService(auth)
 
     await svc.setProvider('p-custom', { apiKey: 'sk-new' })
-    // fire-and-forget catch 在微任务后触发，排空后再断言
-    await new Promise((resolve) => setImmediate(resolve))
 
-    expect(upsertProvider).toHaveBeenCalled()
-    expect(console.warn).toHaveBeenCalledWith(
-      '[config-service] auth.json oauth cleanup failed for p-custom (I9 清理①):',
-      expect.any(Error),
-    )
+    // 清理先完成、upsert 后执行（fire-and-forget 时 upsert 可先于 auth.json 落盘发生）
+    expect(removeDone).toHaveLength(1)
+    expect(upsertProvider).toHaveBeenCalledTimes(1)
+    expect(upsertProvider.mock.calls[0][1]).toMatchObject({ apiKey: 'sk-new' })
   })
 })
 
@@ -718,5 +732,69 @@ describe('D12: 删除链 quota 清理（排序约束 + warn-only）', () => {
 
     expect(ret.removed).toBe(true)
     expect(extras.getExtrasSync('my-custom')).toBeUndefined()
+  })
+})
+
+describe('U6① 模型 id 规则（id 类毒化收口：可强转则强转、不可用才丢）', () => {
+  it('id 缺失（undefined / null）/ 空串 / 纯空白 / 对象 → 整条丢弃 + droppedModels 可见', () => {
+    const result = applyProviderWritePolicy(
+      { name: 'p1' },
+      {
+        models: [
+          { id: 'keep-1' },
+          { name: 'no-id' },
+          { id: null },
+          { id: '' },
+          { id: '   ' },
+          { id: { nested: true } },
+        ] as unknown as Array<Record<string, unknown>>,
+      },
+      'custom',
+      'settings',
+      'p1',
+    )
+    const kept = result.merged.models as Array<Record<string, unknown>>
+    expect(kept.map((m) => m.id)).toEqual(['keep-1'])
+    expect(result.droppedModels).toHaveLength(5)
+    // 文案区分命中类（S9a 类排障按文案 grep）
+    expect(result.droppedModels?.[0]).toContain('invalid id')
+    expect(result.droppedModels?.[0]).toContain('(no id)')
+  })
+
+  it('可强转 id（number / boolean）→ 保留并就地写回字符串形式（与 settings 路径 String(m.id) 同口径）', () => {
+    const result = applyProviderWritePolicy(
+      { name: 'p2' },
+      {
+        models: [{ id: 123 }, { id: true }] as unknown as Array<Record<string, unknown>>,
+      },
+      'custom',
+      'settings',
+      'p2',
+    )
+    const kept = result.merged.models as Array<Record<string, unknown>>
+    expect(kept.map((m) => m.id)).toEqual(['123', 'true'])
+    expect(result.droppedModels).toBeUndefined()
+  })
+
+  it('合法 id + 空串 name/api/baseUrl → 保留条目 + 删键（既有防线②行为不回归）', () => {
+    const result = applyProviderWritePolicy(
+      { name: 'p3' },
+      {
+        models: [{ id: 'm1', name: '', api: '  ', baseUrl: 'https://x' }] as unknown as Array<Record<string, unknown>>,
+      },
+      'custom',
+      'settings',
+      'p3',
+    )
+    const kept = result.merged.models as Array<Record<string, unknown>>
+    expect(kept).toEqual([{ id: 'm1', baseUrl: 'https://x' }])
+    expect(result.droppedModels).toBeUndefined()
+  })
+
+  it('未传 models → 不触碰 merged.models，无 droppedModels 信号', () => {
+    const merged: Record<string, unknown> = { name: 'p4', models: [{ id: 'existing' }] }
+    const result = applyProviderWritePolicy(merged, { name: 'p4' }, 'custom', 'settings', 'p4')
+    expect(result.merged.models).toEqual([{ id: 'existing' }])
+    expect(result.droppedModels).toBeUndefined()
   })
 })

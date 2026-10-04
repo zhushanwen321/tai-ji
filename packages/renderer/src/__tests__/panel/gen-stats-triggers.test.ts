@@ -1,11 +1,15 @@
 /**
- * GenStatsTriggers 组件测试 —— composer-gen-stats P4（三视角：构建者白盒 + 使用者黑盒 DOM + 观察者形态）。
+ * GenStatsTriggers 组件测试 —— composer-gen-stats P4 + composer-genstats-ttft U4
+ * （三视角：构建者白盒 + 使用者黑盒 DOM + 观察者形态）。
  *
- * - 使用者黑盒（真实 HoverCard）：双触发器存在（title 定位）、null 显「—」、帧驱动显示更新、
- *   命中率 80/50 三档语义色（class 断言，用户可见样式）；
- * - 观察者形态（HoverCard 家族 stub 常开）：浮层内容行（速度四行 / 缓存两行 + bar + 口径说明 /
- *   model 标题 / 暂无数据）——reka HoverCard 未 hover 不渲染 content，stub 常开让浮层内容
- *   可做用户可见 DOM 断言；
+ * - 使用者黑盒（真实 HoverCard）：三触发器存在（title 定位）、null 显「—」、帧驱动显示更新、
+ *   命中率 80/50 三档语义色、TTFT 1499/1500/3000/3001 三档语义色边界（S5）与 999/1000
+ *   格式化 ms/s 边界（class 断言，用户可见样式）；
+ * - 观察者形态（HoverCard 家族 stub 常开）：浮层内容行（TTFT 四行 p50 / 速度四行 /
+ *   缓存两行 + bar + 口径说明 / model 标题 / 暂无数据）——reka HoverCard 未 hover 不渲染
+ *   content，stub 常开让浮层内容可做用户可见 DOM 断言；
+ * - 构建者白盒：SFC 普通 script 块命名导出的纯函数（formatTtftDuration / ttftTier）
+ *   直连单测（双 script 块先例 AsyncErrorFallback.vue）；
  * - 数据注入：经真实 events.dispatchSession 通道喂 session.stats_update 帧（对齐
  *   context-capacity-popover.test.ts 形态）；getGenStats RPC mock 为永不 resolve 的 pending
  *   （恢复腿在途，不污染帧直驱断言）。
@@ -17,9 +21,14 @@ import { mount, flushPromises } from '@vue/test-utils'
 import * as events from '@taiji/core/transport/api'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import { __clearInFlightGenStatsForTest } from '@/composables/features/model/useGenStats'
-import type { GenStatsFrame, ServerMessage } from '@taiji/shared'
+import type { GenStatsCacheMiss, GenStatsFrame, ServerMessage } from '@taiji/shared'
 
-import GenStatsTriggers from '@/components/panel/GenStatsTriggers.vue'
+import GenStatsTriggers, {
+  formatTtftDuration,
+  ttftTier,
+  TTFT_WARN_THRESHOLD_MS,
+  TTFT_DANGER_THRESHOLD_MS,
+} from '@/components/panel/GenStatsTriggers.vue'
 
 // ── mock 边界：getGenStats RPC mock 为受控 pending（恢复腿不落地）──
 // mock 目标 = 实现 import 的权威路径（u5 re-anchor 删除 @/api/request bridge 后，
@@ -41,13 +50,15 @@ const HOVER_STUBS = {
 
 const SPEED_TITLE = 'TOKEN 速度' // zh-CN locale（vitest-i18n-setup 解析）
 const CACHE_TITLE = '缓存命中率'
+const TTFT_TITLE = '首字延迟 TTFT'
 
-/** 帧工厂 */
+/** 帧工厂（ttft 基线：current=820 →「820ms」，day=900 →「900ms」，d7=1100 →「1.1s」，d30=1300 →「1.3s」） */
 function genFrame(sessionId: string, overrides: Partial<GenStatsFrame> = {}): GenStatsFrame {
   return {
     sessionId,
     speed: { current: 35, day: 28, d7: 22, d30: 19 },
     cacheRatio: { current: 91, day: 87 },
+    ttft: { current: 820, day: 900, d7: 1100, d30: 1300 },
     model: 'prov-a/m1',
     ...overrides,
   }
@@ -156,6 +167,223 @@ describe('双触发器渲染（黑盒 DOM）', () => {
     expect(btn.classes()).toContain('text-neutral-dim')
     expect(btn.classes()).not.toContain('text-success')
   })
+
+  // ── 归因降噪（2026-09-19 D-A）：帧带 currentMiss → 成因文案 + 中性色（非故障）──
+  it.each([
+    { reason: 'cold-start', label: '首次请求' },
+    { reason: 'idle-expiry', label: '空闲过期' },
+    { reason: 'context-rewrite', label: '压缩重建' },
+  ] as const)('归因 $reason → 触发器显「$label」而非 0%，且为中性色（非 danger）', async ({ reason, label }) => {
+    const wrapper = mountTriggers()
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', {
+        cacheRatio: { current: 0, day: 0, currentMiss: { reason, idleMs: reason === 'idle-expiry' ? 12 * 60_000 : undefined } },
+      }),
+    })
+    await flushPromises()
+
+    const btn = wrapper.find(`[title="${CACHE_TITLE}"]`)
+    expect(wrapper.find('[data-testid="genstats-cache-value"]').text()).toBe(label)
+    expect(btn.classes()).toContain('text-neutral-dim')
+    expect(btn.classes()).not.toContain('text-danger')
+  })
+
+  it('未知成因的 0%（无 currentMiss）→ 仍显「0%」+ danger 色（降噪不吞真 miss 信号）', async () => {
+    const wrapper = mountTriggers()
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', { cacheRatio: { current: 0, day: 0 } }),
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="genstats-cache-value"]').text()).toBe('0%')
+    expect(wrapper.find(`[title="${CACHE_TITLE}"]`).classes()).toContain('text-danger')
+  })
+
+  // ── [RD-2#6/#7] 假测量值治理 + 未知 reason 协议漂移兜底 ──
+  it('[RD-2#6] idle-expiry 无 idleMs → 说明行显「空闲时长未知」，不产「已空闲 1m」假测量值；触发器 label 仍为「空闲过期」', async () => {
+    const wrapper = mountTriggers(true)
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', {
+        cacheRatio: { current: 0, day: 90, currentMiss: { reason: 'idle-expiry' } },
+      }),
+    })
+    await flushPromises()
+
+    // idleMs 缺失：时长未知分支文案，不以 ?? 0 伪装成「空闲 1m」（D4：null=无数据/0=真值）
+    const note = wrapper.find('[data-testid="genstats-cache-miss-note"]')
+    expect(note.exists()).toBe(true)
+    expect(note.text()).toContain('空闲时长未知')
+    expect(note.text()).not.toContain('空闲 1m')
+    // label 不依赖 idleMs，照常显示成因
+    expect(wrapper.find('[data-testid="genstats-cache-value"]').text()).toBe('空闲过期')
+  })
+
+  it('[RD-2#7] 未知 reason（runtime 领先 renderer 的协议漂移）→ default 通用「缓存未命中」文案 + console.warn 留痕，不出现空白 chip', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const wrapper = mountTriggers(true)
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', {
+        // 闭集联合外的 reason 只会来自 runtime 版本领先（TS2366 已拦编译期）——测试侧双断言注入
+        cacheRatio: {
+          current: 0,
+          day: 90,
+          currentMiss: { reason: 'server-eviction' as unknown as GenStatsCacheMiss['reason'] },
+        },
+      }),
+    })
+    await flushPromises()
+
+    // default 分支：通用文案兜底（缺省会 undefined → chip 空白）
+    expect(wrapper.find('[data-testid="genstats-cache-value"]').text()).toBe('缓存未命中')
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('server-eviction'))
+    // 未知 reason 不出归因说明行（该行只服务已知成因）
+    expect(wrapper.find('[data-testid="genstats-cache-miss-note"]').exists()).toBe(false)
+    warnSpy.mockRestore()
+  })
+})
+
+// ── TTFT 触发器（composer-genstats-ttft U4，黑盒 DOM）────────────
+
+describe('TTFT 触发器渲染（黑盒 DOM）', () => {
+  it('TTFT 触发器存在且位于速度触发器左侧（title 定位 + DOM 顺序）', () => {
+    const wrapper = mountTriggers()
+    const ttftBtn = wrapper.find(`[title="${TTFT_TITLE}"]`)
+    const speedBtn = wrapper.find(`[title="${SPEED_TITLE}"]`)
+    expect(ttftBtn.exists()).toBe(true)
+    expect(speedBtn.exists()).toBe(true)
+    // 速度按钮视角：TTFT 元素带 PRECEDING 位 = TTFT 在速度左侧（设计 §3.1 组件内顺序 TTFT · 速度 · 缓存）
+    const preceding =
+      speedBtn.element.compareDocumentPosition(ttftBtn.element) & Node.DOCUMENT_POSITION_PRECEDING
+    expect(preceding).toBeTruthy()
+  })
+
+  it('无帧（从未收到合法帧）→ TTFT 显「—」', () => {
+    const wrapper = mountTriggers()
+    expect(wrapper.find('[data-testid="genstats-ttft-value"]').text()).toBe('—')
+  })
+
+  it('帧驱动：ttft.current=820 →「820ms」', async () => {
+    const wrapper = mountTriggers()
+    await flushPromises()
+
+    pushSessionMsg('s1', { type: 'session.stats_update', payload: genFrame('s1') })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="genstats-ttft-value"]').text()).toBe('820ms')
+  })
+
+  it('帧内 ttft 全 null（错误 turn / runtime 中途启动丢锚路径）→ 显「—」（无值纪律：null 非 0）', async () => {
+    const wrapper = mountTriggers()
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', { ttft: { current: null, day: null, d7: null, d30: null } }),
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="genstats-ttft-value"]').text()).toBe('—')
+    // 同帧速度照常显示（字段级独立判定，ttft 无值不拖累其它指标）
+    expect(wrapper.find('[data-testid="genstats-speed-value"]').text()).toBe('35 t/s')
+  })
+
+  // ── 格式化 ms/s 边界（设计 §3.1：<1000 →「820ms」；≥1000 →「1.2s」1 位小数去尾 0）──
+  it.each([
+    { ms: 999, text: '999ms' },
+    { ms: 1000, text: '1s' },
+    { ms: 1001, text: '1s' },
+    { ms: 1200, text: '1.2s' },
+  ])('格式化边界：ttftMs=$ms → 触发器显「$text」', async ({ ms, text }) => {
+    const wrapper = mountTriggers()
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', { ttft: { current: ms, day: null, d7: null, d30: null } }),
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="genstats-ttft-value"]').text()).toBe(text)
+  })
+
+  // ── 三档语义色边界 S5（延迟反向）：<1500 success · 1500–3000 warn · >3000 danger ──
+  it.each([
+    { ms: 1499, tier: 'text-success' },
+    { ms: 1500, tier: 'text-warn' },
+    { ms: 3000, tier: 'text-warn' },
+    { ms: 3001, tier: 'text-danger' },
+  ])('TTFT $ms ms → 语义色 $tier（S5 边界）', async ({ ms, tier }) => {
+    const wrapper = mountTriggers()
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', { ttft: { current: ms, day: null, d7: null, d30: null } }),
+    })
+    await flushPromises()
+
+    const btn = wrapper.find(`[title="${TTFT_TITLE}"]`)
+    expect(btn.classes()).toContain(tier)
+  })
+
+  it('TTFT null → 触发器中性灰（无语义色分档，与其他档位类互斥）', async () => {
+    const wrapper = mountTriggers()
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', { ttft: { current: null, day: null, d7: null, d30: null } }),
+    })
+    await flushPromises()
+
+    const btn = wrapper.find(`[title="${TTFT_TITLE}"]`)
+    expect(btn.classes()).toContain('text-neutral-dim')
+    expect(btn.classes()).not.toContain('text-success')
+    expect(btn.classes()).not.toContain('text-warn')
+    expect(btn.classes()).not.toContain('text-danger')
+  })
+})
+
+// ── TTFT 纯函数（SFC 普通 script 块命名导出，构建者白盒）────
+
+describe('TTFT 纯函数：formatTtftDuration / ttftTier', () => {
+  it('formatTtftDuration：<1000 → 整数毫秒（0 是真实测量值显「0ms」，非无值）', () => {
+    expect(formatTtftDuration(0)).toBe('0ms')
+    expect(formatTtftDuration(820)).toBe('820ms')
+    expect(formatTtftDuration(999)).toBe('999ms')
+  })
+
+  it('formatTtftDuration：≥1000 → s 1 位小数四舍五入去尾 0', () => {
+    expect(formatTtftDuration(1000)).toBe('1s')
+    expect(formatTtftDuration(1200)).toBe('1.2s')
+    expect(formatTtftDuration(1250)).toBe('1.3s') // Math.round(12.5)=13 → 1.3s（四舍五入）
+    expect(formatTtftDuration(1499)).toBe('1.5s')
+    expect(formatTtftDuration(3000)).toBe('3s')
+    expect(formatTtftDuration(3210)).toBe('3.2s')
+  })
+
+  it('ttftTier：阈值边界与 null 恒中性（S5；阈值常量与实现同源导入）', () => {
+    expect(TTFT_WARN_THRESHOLD_MS).toBe(1500)
+    expect(TTFT_DANGER_THRESHOLD_MS).toBe(3000)
+    expect(ttftTier(null)).toBe('neutral')
+    expect(ttftTier(0)).toBe('success')
+    expect(ttftTier(1499)).toBe('success')
+    expect(ttftTier(1500)).toBe('warn')
+    expect(ttftTier(3000)).toBe('warn')
+    expect(ttftTier(3001)).toBe('danger')
+  })
 })
 
 // ── 观察者形态（浮层内容行，HoverCard stub 常开）────────────
@@ -201,8 +429,8 @@ describe('浮层内容（观察者形态）', () => {
     expect(text).toContain('今日加权（此模型）')
     expect(text).toContain('87%')
     expect(text).toContain('cacheRead ÷ (input + cacheRead + cacheWrite)')
-    // C4 口径补句：模型不支持缓存时恒为 0%
-    expect(text).toContain('模型不支持缓存时恒为 0%')
+    // C4 口径补句：模型不支持缓存时显示「—」（归因降噪后：无计量 ≠ 0%）
+    expect(text).toContain('模型不支持缓存时显示「—」')
 
     const bar = wrapper.find('[data-testid="genstats-cache-bar"]')
     expect(bar.exists()).toBe(true)
@@ -221,6 +449,58 @@ describe('浮层内容（观察者形态）', () => {
 
     expect(wrapper.find('[data-testid="genstats-cache-bar"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('—')
+  })
+
+  // ── 归因降噪浮层（2026-09-19 D-A）：成因说明行 + bar 隐藏 + 本次行显成因文案 ──
+  it('归因态浮层：本次行显成因文案、成因说明行（含空闲时长）、bar 隐藏', async () => {
+    const wrapper = mountTriggers(true)
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', {
+        cacheRatio: { current: 0, day: 96, currentMiss: { reason: 'idle-expiry', idleMs: 12 * 60_000 } },
+      }),
+    })
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('空闲过期')
+    expect(text).toContain('距上次请求已空闲 12m')
+    expect(text).toContain('provider 缓存已过期')
+    expect(text).toContain('今日加权（此模型）')
+    expect(text).toContain('96%') // 今日加权照常显示（归因只作用于本次行）
+
+    expect(wrapper.find('[data-testid="genstats-cache-miss-note"]').text()).toContain('空闲')
+    // 归因态无 0% 数值可画 → bar 整体隐藏（空轨道会被读成另一种 0）
+    expect(wrapper.find('[data-testid="genstats-cache-bar"]').exists()).toBe(false)
+  })
+
+  it('context-rewrite 归因浮层：压缩重建说明行', async () => {
+    const wrapper = mountTriggers(true)
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', { cacheRatio: { current: 0, day: 90, currentMiss: { reason: 'context-rewrite' } } }),
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('压缩重建')
+    expect(wrapper.text()).toContain('上下文压缩后前缀重建')
+  })
+
+  it('命中态无成因说明行（降噪行只在归因存在时出现）', async () => {
+    const wrapper = mountTriggers(true)
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', { cacheRatio: { current: 91, day: 87 } }),
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="genstats-cache-miss-note"]').exists()).toBe(false)
   })
 
   it('无合法帧 → 浮层显「暂无数据」（从未有帧与有帧无值的 UX 差异落在浮层）', () => {
@@ -243,5 +523,63 @@ describe('浮层内容（观察者形态）', () => {
 
     expect(wrapper.text()).not.toContain('暂无数据')
     expect(wrapper.find('[data-testid="genstats-speed-value"]').text()).toBe('—')
+  })
+})
+
+// ── TTFT 浮层（composer-genstats-ttft U4，观察者形态）────────────
+
+describe('TTFT 浮层（观察者形态）', () => {
+  it('浮层存在：head 双端（标题 + model）+ 四行 p50 聚合 + 口径说明', async () => {
+    const wrapper = mountTriggers(true)
+    await flushPromises()
+
+    pushSessionMsg('s1', { type: 'session.stats_update', payload: genFrame('s1') })
+    await flushPromises()
+
+    const popover = wrapper.find('[data-testid="genstats-ttft-popover"]')
+    expect(popover.exists()).toBe(true)
+    expect(popover.text()).toContain(TTFT_TITLE)
+    expect(wrapper.find('[data-testid="genstats-ttft-model"]').text()).toBe('prov-a/m1')
+
+    // 四行：本次 820ms / 今日 p50 900ms / 近 7 天 p50 1.1s / 近 30 天 p50 1.3s（label + 预格式化值）
+    const text = popover.text()
+    expect(text).toContain('本次')
+    expect(text).toContain('820ms')
+    expect(text).toContain('今日 p50（此模型）')
+    expect(text).toContain('900ms')
+    expect(text).toContain('近 7 天 p50')
+    expect(text).toContain('1.1s')
+    expect(text).toContain('近 30 天 p50')
+    expect(text).toContain('1.3s')
+    // 口径 note：p50 中位数 + 请求发出→首 token 口径 + 不含工具执行
+    expect(text).toContain('p50 中位数')
+    expect(text).toContain('不含工具执行时间')
+    // 「本次」行复用 C4 hover 补句（同速度侧语义）
+    expect(wrapper.find('[title="本会话最近一次请求的记录"]').exists()).toBe(true)
+  })
+
+  it('有帧但 ttft 字段全 null → 行值显「—」，浮层无「暂无数据」（两态区分）', async () => {
+    const wrapper = mountTriggers(true)
+    await flushPromises()
+
+    pushSessionMsg('s1', {
+      type: 'session.stats_update',
+      payload: genFrame('s1', { ttft: { current: null, day: null, d7: null, d30: null } }),
+    })
+    await flushPromises()
+
+    const popover = wrapper.find('[data-testid="genstats-ttft-popover"]')
+    expect(popover.exists()).toBe(true)
+    expect(popover.text()).not.toContain('暂无数据')
+    expect(popover.text()).toContain('—')
+    // 触发器同步显「—」
+    expect(wrapper.find('[data-testid="genstats-ttft-value"]').text()).toBe('—')
+  })
+
+  it('无合法帧 → TTFT 浮层显「暂无数据」', () => {
+    const wrapper = mountTriggers(true)
+    const popover = wrapper.find('[data-testid="genstats-ttft-popover"]')
+    expect(popover.exists()).toBe(true)
+    expect(popover.text()).toContain('暂无数据')
   })
 })

@@ -11,7 +11,7 @@
  * - resolveLaunchConfig：D2 字段优先级序 + D4 有效性校验（失效链内跳过回落下一档，
  *   KV 保留原值——本模块无 KV 写点）+ 每字段 provenance 标签
  *   （explicit / preset / lastUsed / memory / default）。
- * - isFactoryFullPreset：D3 出厂等价判定（PiLaunchPreset 的 10 个 launch 生效字段逐字段
+ * - isFactoryFullPreset：D3 出厂等价判定（PiLaunchPreset 的 11 个 launch 生效字段逐字段
  *   比对；出厂 builtin:full 时 resolve 输出 presetId=undefined 不透传）。
  * - ensureLaunchDataReady：数据源就绪聚合（D1 submit 侧加载窗口语义）。生产接线 = 仅直聚
  *   core KV 双源（lastUsedModel KV / 记忆表）；presets 就绪走壳侧 launchPort.ensureReady()
@@ -137,8 +137,14 @@ type PresetMetadataKey = 'id' | 'name' | 'description' | 'builtin' | 'order'
 export type PresetLaunchKey = Exclude<keyof PiLaunchPreset, PresetMetadataKey>
 
 /**
- * 比对键运行时枚举（D3 十字段 SSOT：toolMode / allowedTools / deniedTools / extensionMode /
- * allowedExtensions / deniedExtensions / modelOverride / thinkingLevel / noSkills / noContextFiles）。
+ * 比对键运行时枚举（D3 十一字段 SSOT：toolMode / allowedTools / deniedTools / extensionMode /
+ * allowedExtensions / deniedExtensions / modelOverride / thinkingLevel / noSkills / noContextFiles /
+ * prompt）。
+ *
+ * prompt = 模式提示词对象（`{ replace?: {enabled,prompt}, append?: {enabled,prompt} }`，同
+ * shared PresetPromptConfig）——它随 preset 落到新 session 的 pi 启动参数，是 launch 生效
+ * 字段，故参与出厂等价比对（用户在提示词上的任何编辑都意味着「已覆写过 builtin:full」，
+ * 不能被折叠成出厂等价而丢掉 presetId 透传）。比对走下方普通对象结构化分支。
  *
  * satisfies 映射类型做编译期穷尽强制（D3）：PiLaunchPreset 新增生效字段而漏登此表 →
  * Record<PresetLaunchKey, null> 缺键编译红；键拼写漂移 → 多余属性编译红。
@@ -155,6 +161,7 @@ export const PRESET_LAUNCH_KEYS = {
   thinkingLevel: null,
   noSkills: null,
   noContextFiles: null,
+  prompt: null,
 } as const satisfies Record<PresetLaunchKey, null>
 
 /** 比对键顺序表（isFactoryFullPreset 遍历用）。 */
@@ -163,16 +170,52 @@ const PRESET_LAUNCH_KEY_LIST: readonly PresetLaunchKey[] = Object.keys(
 ) as PresetLaunchKey[]
 
 /**
- * 单个 launch 字段的出厂等价比对语义（P2b 锁定）：
+ * 普通对象判定（JSON 字面量形状：Object 原型或 null 原型；Array / Date / Map 等不算）。
+ * 用于把「结构化对象」与「标量引用比较」两类语义分开——非普通对象（含跨 realm 对象，
+ * 其原型不同 realm）仍走 `===`（保守不等 → 判为非出厂等价、透传 presetId，行为差异
+ * 不会被吞）。
+ */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const proto = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
+}
+
+/**
+ * 单个 launch 字段的出厂等价比对语义（P2b 锁定 + D3 对象扩展）：
  * - 标量：=== （undefined === undefined 等价）
  * - 数组：顺序敏感、undefined 与 [] 不等价（用户显式清空 ≠ 从未配置）
+ * - 普通对象：按键结构化比对（键集合相同 + 逐键递归），见下
  *
- * @internal 导出仅为 launch-config.test.ts 锚定数组比对语义，非公开 API。
+ * 对象分支是 D3/P2b 比对语义的**扩展**——原锁定的是标量 / 数组两类；`prompt`
+ * （`{ replace?, append? }`，每段 `{ enabled, prompt }`）是纯 JSON 对象，出厂 full 不带
+ * 该字段，逐字段比对必须能区分「都没配置」与「配置了但文本相同/不同」。
+ *
+ * 边界（保持既有语义不回归）：
+ * - `undefined` vs `undefined` → true（标量分支，既有语义保留）
+ * - 一方 `undefined`，另一方对象/数组 → false（「从未配置」≠「显式配置」，不得因
+ *   对象分支把它翻成等价）
+ * - 键集合不同即不等（含 `{ replace: undefined }` 与 `{}`——显式写出未启用段也算配置
+ *   痕迹，判非等价是保守方向）
+ * - 数组语义不受影响（数组先于对象分支判定，顺序敏感、`undefined` ≠ `[]`）
+ *
+ * @internal 导出仅为 launch-config.test.ts 锚定比对语义，非公开 API。
  */
 export function launchFieldEquals(a: unknown, b: unknown): boolean {
   if (Array.isArray(a) || Array.isArray(b)) {
     if (!Array.isArray(a) || !Array.isArray(b)) return false
     return a.length === b.length && a.every((v, i) => v === b[i])
+  }
+  if (isPlainObject(a) || isPlainObject(b)) {
+    if (!isPlainObject(a) || !isPlainObject(b)) return false
+    const aKeys = Object.keys(a)
+    const bKeys = Object.keys(b)
+    if (aKeys.length !== bKeys.length) return false
+    return aKeys.every(
+      (key) =>
+        Object.prototype.hasOwnProperty.call(b, key) &&
+        launchFieldEquals(a[key], b[key]),
+    )
   }
   return a === b
 }

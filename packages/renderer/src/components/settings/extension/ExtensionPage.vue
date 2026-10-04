@@ -32,8 +32,16 @@
       kind="extension"
       :forced-dirs="forcedExtDirs"
       :dirs="extensionDirs"
+      :save-error="dirsSaveError"
       @update-dirs="onUpdateExtensionDirs"
     />
+
+    <!-- RD-4#11：数据目录读取失败时的显式标注（user 级强制目录不展示，不伪装真实路径） -->
+    <p
+      v-if="dataDirReadFailed"
+      data-testid="extension-datadir-read-failed"
+      class="text-[11px] text-warn"
+    >{{ t('settings.extension.dataDirReadFailed') }}</p>
 
     <!-- 安装流（推荐扩展 + npm/dir/git 安装 + 候选内联展开） -->
     <ExtensionInstallFlow :extensions="extensions" />
@@ -71,22 +79,39 @@ const { t } = useI18n()
 // ── 加载路径配置（Phase 4，接 store.extensionDirs，回写 store.setExtensionDirs）──
 /**
  * 强制目录（ADR-0021 §1.1 桥接层硬编码注入，UI 只读展示）。
- * user 级动态推导数据目录（dev=~/.taiji-dev，prod=~/.taiji）——与 SettingsResourcePage 同款：
- * 写死 '~/.taiji/extensions' 在 dev 下与实际扫描路径不一致、误导排查（resource 页已修过同款问题）。
- * getDataDir 为 async（IPC），初始用 ~ 形式兑底，拉取完成后更新。
+ * user 级动态推导数据目录——与 SettingsResourcePage 同款：写死 '~/.taiji/extensions' 在
+ * dev 下与实际扫描路径不一致、误导排查（resource 页已修过同款问题）。
+ * getDataDir 为 async（IPC）；返回失败/无 IPC（web/mock）时保持 null → user 级强制目录
+ * 不展示——数据目录缺省 dev（~/.taiji-dev）与打包 prod（~/.taiji）不同（C-proc-26），
+ * 兜底断言任一具体路径都会误导排查，reject 时经 dataDirReadFailed 显式标注。
  */
-const dataDirDisplay = ref('~/.taiji')
+const dataDirDisplay = ref<string | null>(null)
+/** RD-4#11：getDataDir 读取失败标记——失败时显式标注，不伪装真实路径。 */
+const dataDirReadFailed = ref(false)
 onMounted(async () => {
-  const dir = await getDataDir()
-  if (dir) dataDirDisplay.value = dir
+  try {
+    const dir = await getDataDir()
+    if (dir) dataDirDisplay.value = dir
+  } catch (e) {
+    // RD-4#11：IPC reject 时不回落写死路径。置位 dataDirReadFailed → 显式标注
+    // 「数据目录读取失败」，user 级强制目录不展示，避免误导排查。
+    console.warn('[ExtensionPage] getDataDir failed:', e)
+    dataDirReadFailed.value = true
+  }
 })
-const forcedExtDirs = computed(() => [`${dataDirDisplay.value}/extensions`, '.taiji/extensions'])
+const forcedExtDirs = computed(() =>
+  dataDirDisplay.value ? [`${dataDirDisplay.value}/extensions`, '.taiji/extensions'] : ['.taiji/extensions'],
+)
 
-/** 加载路径变更 → store 持久化（整体透传 SkillDirConfig[]，含 scope）。拖拽即时性由 LoadPaths 本地状态保证。 */
+/** 加载路径变更 → store 持久化（整体透传 SkillDirConfig[]，含 scope）。拖拽即时性由 LoadPaths 本地状态保证。
+ *  失败常驻态（RD-4#1）：置位 dirsSaveError → LoadPaths 回弹至最近落盘值 + 常驻红字；每次尝试起点复位。 */
+const dirsSaveError = ref(false)
 async function onUpdateExtensionDirs(dirs: SkillDirConfig[]): Promise<void> {
+  dirsSaveError.value = false
   try {
     await settingsStore.setExtensionDirs(dirs)
   } catch (e) {
+    dirsSaveError.value = true
     toastError(e instanceof Error ? e.message : String(e))
   }
 }

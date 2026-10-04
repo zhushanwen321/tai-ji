@@ -84,6 +84,15 @@ vi.mock('../logs/crash-journal.js', () => ({
   CrashJournalFileWriter: class {},
 }))
 
+// 数据目录恒等桩：electron mock 的 isPackaged=true 会让 main.ts 打包分支执行
+// resolvePackagedDataDir 并把 TAIJI_AGENT_DATA_DIR 钉回 ~/.taiji——globalSetup 钉的
+// tmp 目录被改写后，run-state 产物全部落进真实 prod 数据目录。本文件被测对象是
+// run-state marker/checkpoint 设施，数据目录钉死契约由 packaged-data-dir.test.ts
+// （行为矩阵）与 main-dev-datadir-pin.test.ts（接线钉）守护，此处恒等透传 env 值。
+vi.mock('../utils/packaged-data-dir.js', () => ({
+  resolvePackagedDataDir: (env: NodeJS.ProcessEnv) => env.TAIJI_AGENT_DATA_DIR ?? '',
+}))
+
 vi.mock('../logs/main-logger.js', () => ({
   initMainLogger: vi.fn(),
   closeMainLogger: vi.fn(async () => undefined),

@@ -21,21 +21,98 @@ interface SessionMarker {
 const STORAGE_KEY = 'taiji:session-markers'
 
 // ── 内存缓存（避免每次 isUnread 都 parse JSON）──
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：session 角标（unread/markedDone）localStorage 内存缓存（12 类未覆盖；权威 = localStorage）
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记 data-source-registry §4 ⑧ 非草稿）：session 角标（unread/markedDone）localStorage 内存缓存（权威 = localStorage key taiji:session-markers）
 const cache = shallowRef<Map<string, SessionMarker>>(new Map())
 // 是否已尝试从 localStorage hydrate。禁止用 cache.value.size===0 推断「是否已 hydrate」——
 // localStorage 存空对象 {} 时 new Map 是空 Map，size===0 恒成立，会导致每次查询都重新 parse。
 let hydrated = false
 
-// ── localStorage 读写 ──
+// ── 损坏保护（RD-1#2 / 审计 M4 族：损坏数据读回空骨架 → 全量覆写）──
+// localStorage 值解析失败时置 corrupt：此期间一切写盘被拒绝（mutateMarker early-return），
+// 防止以（可能不完整的）内存表 setItem 覆写原始损坏字符串——原始值保留在 localStorage
+// 供人工恢复。另一窗口经 storage 事件写入合法值（或删 key）即自动解除保护。
+let corrupt = false
+// warn 去重（防刷屏）：损坏发生、拒绝写、条目丢弃各只提示一次，__resetCacheForTest 复位。
+let warnedCorrupt = false
+let warnedRefuseWrite = false
+let warnedDroppedEntries = false
 
-function readAll(): Record<string, SessionMarker> {
-  const raw = localStorage.getItem(STORAGE_KEY)
-  if (!raw) return {}
+function warnCorruptOnce(error: unknown): void {
+  if (warnedCorrupt) return
+  warnedCorrupt = true
+  console.warn(
+    `[session-markers] localStorage key '${STORAGE_KEY}' 值损坏（JSON 解析失败或顶层结构非预期），未读/完成标记暂不可读，且写入已暂停以防覆写原始数据。` +
+      `恢复动作：DevTools 执行 localStorage.getItem('${STORAGE_KEY}') 检查并修复，或 localStorage.removeItem('${STORAGE_KEY}') 重置`,
+    error,
+  )
+}
+
+function warnRefuseWriteOnce(): void {
+  if (warnedRefuseWrite) return
+  warnedRefuseWrite = true
+  console.warn(
+    `[session-markers] 标记数据处于损坏保护中，本次标记变更不会写盘（防空表覆写）；恢复动作见上一条警告，另一窗口写入合法值后自动恢复`,
+  )
+}
+
+function warnDroppedEntriesOnce(count: number): void {
+  if (warnedDroppedEntries) return
+  warnedDroppedEntries = true
+  console.warn(
+    `[session-markers] localStorage key '${STORAGE_KEY}' 中 ${count} 个标记条目形状非法（非对象或无有效布尔标记字段），已丢弃不加载；` +
+      `其余条目正常加载，下次写盘时自动清理坏条目`,
+  )
+}
+
+/**
+ * 条目形状守卫：localStorage 是外部输入，合法 JSON 不代表条目形状合法。
+ * 只接受 plain object；unread/markedDone 必须为 boolean 才保留（漂移字段剔除而非整条丢弃，
+ * 合法标记不因同条目另一字段漂移而丢失）；重建后无任何合法字段的条目不可用，返回 undefined。
+ */
+function toSessionMarker(value: unknown): SessionMarker | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const { unread, markedDone } = value as { unread?: unknown; markedDone?: unknown }
+  const marker: SessionMarker = {}
+  if (typeof unread === 'boolean') marker.unread = unread
+  if (typeof markedDone === 'boolean') marker.markedDone = markedDone
+  if (marker.unread === undefined && marker.markedDone === undefined) return undefined
+  return marker
+}
+
+/**
+ * 解析并应用存储值（主读取 hydrate 与 storage 事件共用同一损坏方案）。
+ * 空值（null/''）= 合法空表；解析失败或顶层非「sid → marker」对象表（数组/原始值等形状漂移）
+ * = 保留 cache 旧值（不置空）+ 置 corrupt；条目形状非法 = 丢弃该条目 + warn-once，其余照常。
+ */
+function applyParsedMarkers(raw: string | null): void {
+  if (!raw) {
+    cache.value = new Map()
+    corrupt = false
+    return
+  }
   try {
-    return JSON.parse(raw) as Record<string, SessionMarker>
-  } catch {
-    return {}
+    const data: unknown = JSON.parse(raw)
+    // 顶层形状漂移与解析失败同走 corrupt 通道：错误形状的「表」不进 cache，也不允许
+    // 后续以它为基底写盘覆写原始值（与 JSON.parse 抛错同一保护语义）
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+      throw new Error(`expected a JSON object keyed by session id, got ${Array.isArray(data) ? 'array' : typeof data}`)
+    }
+    let dropped = 0
+    const next = new Map<string, SessionMarker>()
+    for (const [sid, value] of Object.entries(data as Record<string, unknown>)) {
+      const marker = toSessionMarker(value)
+      if (marker === undefined) {
+        dropped++
+        continue
+      }
+      next.set(sid, marker)
+    }
+    if (dropped > 0) warnDroppedEntriesOnce(dropped)
+    cache.value = next
+    corrupt = false
+  } catch (error) {
+    corrupt = true
+    warnCorruptOnce(error)
   }
 }
 
@@ -48,17 +125,23 @@ function readAll(): Record<string, SessionMarker> {
 function ensureCache(): void {
   if (hydrated) return
   hydrated = true
-  cache.value = new Map(Object.entries(readAll()))
+  applyParsedMarkers(localStorage.getItem(STORAGE_KEY))
 }
 
 /**
  * 写路径统一（Q1-1）：ensureCache → 基于 cache 变异 → 替换 cache.value（触发响应式）→ 立即写盘。
- * 不再每次写 readAll（消除 localStorage.getItem + 全量 JSON.parse 的重复——此前写路径完全
- * 绕过内存缓存，5 个后台 session 同时完成 = 5 次全量 parse/stringify 跑在主线程）。
- * 写盘保持立即 setItem（不引入 idle 合并，验收口径 = readAll 重复消除）。
+ * hydrate 后写路径不再全量读回 localStorage（消除 getItem + 全量 JSON.parse 的重复——此前
+ * 每次写都绕过内存缓存，5 个后台 session 同时完成 = 5 次全量 parse/stringify 跑在主线程）。
+ * 写盘保持立即 setItem（不引入 idle 合并，验收口径 = 读盘重复消除）。
  */
 function mutateMarker(sid: string, mutate: (marker: SessionMarker) => void): void {
   ensureCache()
+  // 损坏保护（RD-1#2）：hydrate 失败（corrupt）时内存表不代表真实数据，拒绝写盘——
+  // 否则以空表 setItem 全量覆写，所有 session 的未读/完成标记不可逆丢失。
+  if (corrupt) {
+    warnRefuseWriteOnce()
+    return
+  }
   const marker: SessionMarker = { ...cache.value.get(sid) }
   mutate(marker)
   const next = new Map(cache.value)
@@ -76,13 +159,10 @@ function mutateMarker(sid: string, mutate: (marker: SessionMarker) => void): voi
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (e) => {
     if (e.key === STORAGE_KEY) {
-      // 直接从事件 newValue 更新缓存，不重新 parse localStorage（避免竞态）
-      try {
-        const data = e.newValue ? JSON.parse(e.newValue) as Record<string, SessionMarker> : {}
-        cache.value = new Map(Object.entries(data))
-      } catch {
-        cache.value = new Map()
-      }
+      // 直接从事件 newValue 更新缓存，不重新 parse localStorage（避免竞态）；
+      // 损坏 newValue 与主读取（ensureCache）共用 applyParsedMarkers 同一方案：
+      // 解析失败保留旧 cache + 置 corrupt，合法值（含 null=另一窗口删 key）则替换并解除保护
+      applyParsedMarkers(e.newValue)
     }
   })
 }
@@ -150,6 +230,10 @@ export function __registerCleanupForTest(): void {
 export function __resetCacheForTest(): void {
   cache.value = new Map()
   hydrated = false
+  corrupt = false
+  warnedCorrupt = false
+  warnedRefuseWrite = false
+  warnedDroppedEntries = false
 }
 
 /**

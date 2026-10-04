@@ -225,7 +225,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    *
    * 终态时序（D3 交接原子化）：交接三步（setActiveSession + loadPanel + pushChat）完成
    * 即 transition('completed')，早于 send——send 成败属于 session 的错误通道（useChat
-   * W2 吞错 toast），与 flow 状态机无关（设计 D3 裁决）。
+   * W2 吞错 toast），与 flow 状态机无关（原设计 §3.3 D3，文档已删除、git 可追溯）。
    *
    * bash 首发（composer-bash-execute）：landing 态输入 !/!! 前缀时，Composer 提取 bashCommand
    * 传入，session 创建 + panel 载入流程不变，仅发送阶段改调 chat.sendBash（不走 LLM turn，
@@ -357,7 +357,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * 「流程状态机只守自己不变量」的正确语义。send 成败属于 session 的错误通道（useChat
    * W2 内部吞错只 toast），与 flow 状态机无关，flow 终态不应依赖它——send 链路未来任何
    * 演化（恢复 throw、新增前置抛错点）都不再影响 flow 终态（时序正确性 + 防御加固，
-   * 设计 D3 裁决）。
+   * 原设计 §3.3 D3，文档已删除、git 可追溯）。
    */
   async function handoverAndSend(
     newSid: string,
@@ -452,10 +452,18 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    *
    * 对齐 pendingCwd/pendingModel 范式。PresetSelectChip emit select 时调用，
    * submitFirstMessage create session 时透传给 sessionApi.create。
-   * 守卫：仅 landing 态生效。
+   *
+   * 守卫（[HISTORICAL]「选模式后不生效」缺陷根修）：模式选择发生在 PresetSelectChip 的
+   * preset-popover overlay 内——用户先点 chip 展开列表（`openPresetPopover` 把 state 置为
+   * `preset-popover`），再点选项，此时写入点的 state 恒为 `preset-popover` 而非 `landing`。
+   * 原守卫 `state !== 'landing'` 把这次真实选择静默丢弃：pendingPreset 恒 null → chip 文案
+   * 不回显（Landing 的 modeName 源自 pendingPreset）+ 建出的 session launchPresetId=undefined。
+   * preset-popover 是 landing 上下文的 overlay（打开态由 Landing 的 isPresetOpen 绑定、
+   * 选择在列表内原地完成），与 landing 同属「选择进行中」态，一并放行；
+   * 其余 overlay（dir/branch/modal）与终态仍 noop，防污染别的流程。
    */
   function setPendingPreset(presetId: string): void {
-    if (state.value !== 'landing') return
+    if (state.value !== 'landing' && state.value !== 'preset-popover') return
     pendingPreset.value = presetId
   }
 

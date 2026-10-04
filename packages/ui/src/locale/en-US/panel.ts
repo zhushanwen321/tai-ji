@@ -1,4 +1,39 @@
 export default {
+  // Mode chip (u4 mode-visibility-chip; conversation read-only chip + hover popover)
+  presetChip: {
+    ariaLabel: 'Mode: {name}',
+    replaceHint: 'Replaces prompt',
+    lockNote: 'The mode is fixed when the session is created and cannot be changed here; edit the mode definition in Settings (applies on the next launch)',
+    newSession: 'Start a new session to use another mode',
+    toolSurface: 'Tools',
+    extensionSurface: 'Extensions',
+    promptSegments: 'Prompt parts',
+    builtin: 'Built-in',
+    deleted: 'Mode deleted ({id})',
+    // F1 fallback disclosure (design `mode-system-composer-density` §7.5 E4):
+    // the two states are strictly distinct — pending only forecasts, fell-back may claim "this time".
+    deletedFallbackPending: 'Falls back to all-tools on restart',
+    deletedFellBack: 'Started with all-tools this time',
+    unknownSurface: '—',
+    toolAll: 'All tools',
+    toolNone: 'No tools',
+    extAll: 'All extensions',
+    extNone: 'No extensions',
+    allowCount: '{count} allowed',
+    denyCount: '{count} disabled',
+    promptCount: '{count} part(s)',
+  },
+  // Mode declaration row (u5 mode-declaration-row; derived row at the top of the message stream, no new entry type)
+  modeDeclaration: {
+    label: 'Mode: {name}',
+    toolChip: 'Tools · {surface}',
+    promptChip: 'Prompt · {count} part(s)',
+    deleted: 'Mode deleted ({id})',
+    // F1 fallback disclosure (§7.5 E4): same wording axis as panel.presetChip (pending only forecasts).
+    deletedFallbackPending: 'Falls back to all-tools on restart',
+    deletedFellBack: 'Started with all-tools this time',
+    newSession: 'New session',
+  },
   header: {
     toggleSidebarExpand: 'Expand sidebar',
     toggleSidebarCollapse: 'Collapse sidebar',
@@ -9,6 +44,10 @@ export default {
     branch: 'Branch',
     gitStatus: 'Git status · Open sidebar',
     copySessionFile: 'Copy session file path',
+    // Plugin header action buttons (HeaderActionsHost, E13 tri-state tooltip; plugin-header-action-modal-points AP-1)
+    pluginActionExtensionNotLoaded: 'Required extension not loaded in this session',
+    pluginActionRestoring: 'Session restoring, availability unknown',
+    pluginActionTemporarilyUnavailable: 'Temporarily unavailable',
   },
   composer: {
     send: 'Send',
@@ -57,7 +96,12 @@ export default {
     // the collapsed state reuses collapse, no new key)
     blockScrollLines: '{from}–{to} of {total} lines',
     blockScrollExpandAll: 'Expand all',
+    // Process-block (third family) header prefixes and detail-bar stats
     thinkingBlock: 'Thinking',
+    subagent: 'Subagent',
+    metaLines: '{n} lines',
+    metaChars: '{n} chars',
+    metaCharsK: '{n}K chars',
     imagePlaceholder: 'Image cache full',
     imagePlaceholderDetail: 'This session image cache reached its limit (64MB). Existing images stay visible; new images show a placeholder',
     imageUnavailable: 'Image unavailable',
@@ -89,6 +133,13 @@ export default {
     respawnRetryFailed: 'Recovery failed — try again later or create a new session',
     dispatching: 'Thinking…',
     railInProgress: 'in progress…',
+    // [RD-2#1 render error boundary] per-item failure placeholder row + retry; global render error toast
+    itemRenderFailed: 'This item failed to render',
+    itemRenderRetry: 'Retry',
+    renderErrorToast: 'A rendering error occurred and has been logged',
+    // [RD-3#7] toast in-flight overflow collapse summary (UI consumer of droppedCount)
+    toastDropped: '{count} more notification(s) hidden',
+    toastDroppedDismiss: 'Dismiss collapsed-notification notice',
     startConversation: 'Start a conversation, or select a session from the left',
     scrollToBottom: 'Scroll to bottom',
     // [system-notice-rendering-upgrade U3] compaction row splits in two (D3): main copy keeps the
@@ -99,8 +150,9 @@ export default {
     branchCreatedNoFrom: 'Branch created',
     thinkCount: 'Think ×{count}',
     toolCount: 'Tool ×{count}',
-    // [u3 remove-turn-progress-bar] TurnMeta generated chars (TurnMeta.vue, design §2.1/§2.4)
-    generatedChars: 'Generated {chars} chars',
+    // [u3 remove-turn-progress-bar] TurnMeta generated tokens (TurnMeta.vue, design §2.1/§2.4;
+    // 2026-09 token 口径: sum of reported output tokens over all LLM calls in the turn, no estimation)
+    generatedTokens: 'Generated {tokens} tokens',
     traceExpandAll: 'Expand all ({count} steps)',
     traceCollapse: 'Collapse to latest',
     traceFailed: '{count} failed',
@@ -111,8 +163,17 @@ export default {
     bashNoContext: 'no context',
     bashCancel: 'Cancel',
     bashUnknownCommand: '(unknown command)',
-    // [system-notice-rendering-upgrade U3] "background" chip of the structured background-bash row (D2)
-    bashBackgroundChip: 'background',
+    // [notice-family-phrase-detail 2026-09-18 option A] background-bash row phrase-first: body
+    // keeps only the terminal phrase (finished/failed/timed out); the raw command moves into the
+    // hover detail (HoverCard, read-only + copy); the "background" chip is retired with its
+    // semantics absorbed into the phrase (bashBackgroundChip key deleted). bashCancelled/bashTimeout
+    // are still consumed by BashOutputBlock
+    bashFinished: 'Background command finished',
+    bashFinishedFailed: 'Background command failed',
+    bashTimedOut: 'Background command timed out',
+    // [notice-family-phrase-detail] hover-detail panel titles (shared by SystemNotice rows + ActivityStrip bash row)
+    bashCommandLabel: 'Command',
+    noticeDetailLabel: 'Full notice',
     // [system-notice-rendering-upgrade U3] boundary row splits into main/sub copies (D5, consumed by
     // U6): count main copy + "resumed" sub copy. No leading dot in the value — the separator is
     // rendered conditionally by the consumer (design D5: "no leading dot when there is no main copy")
@@ -124,6 +185,9 @@ export default {
     turnTriggerBgNotifyFailed: '{count} failed',
     // [W4 turn-attribution] executing-bash transient row prefix (MessageStream.vue → ActivityStrip row)
     executingBash: 'Running',
+    // [notice-family-phrase-detail 2026-09-18 option A] executing-bash row elapsed meta — keeps an
+    // in-row observation of the run after the command moved to the hover detail
+    executingBashElapsed: '{elapsed} elapsed',
     // no hardcoded threshold — user-adjustable, a literal would drift)
   },
   git: {
@@ -141,6 +205,7 @@ export default {
     pillStaged: 'Staged',
     pillDirty: 'Dirty',
     pillConflict: 'Conflict',
+    unavailableTitle: 'Git unavailable, repository status cannot be read',
   },
   context: {
     capacity: 'Context capacity',
@@ -165,6 +230,10 @@ export default {
     quotaFailParse: 'failed to parse quota response',
     quotaFailNotConfigured: 'no Workspace configured — set it in Settings and retry',
     quotaFailNoCredential: 'no usable credential found — check the quota query configuration in Settings',
+    // RT-7#7: credential file read failed (IO/lock error, not "no credential") — check files, don't re-enter keys
+    quotaFailCredentialUnavailable: 'failed to read credential file — check disk and file permissions, then retry',
+    // RT-7#4: unsupported credential form (! command prefix / undefined env reference)
+    quotaFailCredentialUnsupported: 'unsupported credential form — use a plain API Key instead',
     window5h: '5h',
     windowWeek: 'This week',
     windowMonth: 'This month',
@@ -189,8 +258,27 @@ export default {
     genStatsD30: 'Last 30 days',
     genStatsDayShort: 'Today weighted (this model)',
     genStatsSpeedNote: '"Last turn" is this session\'s most recent request; day/7d/30d aggregate across all sessions on this model (weighted avg); based on single LLM request duration, excluding tool execution time',
-    genStatsCacheNote: '"Last turn" is this session\'s most recent request; "Today weighted" aggregates across all sessions on this model; cacheRead ÷ (input + cacheRead + cacheWrite); shows 0% when the model does not support caching',
+    genStatsCacheNote: '"Last turn" is this session\'s most recent request; "Today weighted" aggregates across all sessions on this model; cacheRead ÷ (input + cacheRead + cacheWrite); shows "—" when the model does not support caching',
+    // Miss attribution (2026-09-19 D-A): expected 0% causes — all non-fault, rendered in neutral tone
+    genStatsCacheMissColdStart: 'First request',
+    genStatsCacheMissIdle: 'Idle expiry',
+    genStatsCacheMissCompaction: 'Rebuilt',
+    genStatsCacheMissColdStartNote: 'First request in this session — cache not established yet (expected miss)',
+    genStatsCacheMissIdleNote: '{duration} idle since the last request — the provider cache expired (expected miss)',
+    genStatsCacheMissCompactionNote: 'Prefix rebuilt after context compaction — this request must miss (expected)',
+    // [RD-2#6] idle-expiry without idleMs: unknown duration must not masquerade as a measured value (null=no data/0=real value, D4)
+    genStatsCacheMissIdleNoteUnknownDuration: 'Idle for an unknown duration since the last request — the provider cache expired (expected miss)',
+    // [RD-2#7] runtime-ahead-of-renderer protocol drift (unknown reason) — generic fallback copy (default branch + warn)
+    genStatsCacheMissUnknown: 'Cache miss',
     genStatsNoData: 'No data yet',
+    // composer-genstats-ttft TTFT trigger (U4). p50 row labels get dedicated keys, not
+    // reusing genStatsDay ("Today avg" contradicts p50 median semantics, design §3.1);
+    // the "Last turn" row reuses genStatsCurrent* keys (same semantics)
+    genStatsTtftTitle: 'First token latency (TTFT)',
+    genStatsTtftDay: 'Today p50 (this model)',
+    genStatsTtftD7: 'Last 7 days p50',
+    genStatsTtftD30: 'Last 30 days p50',
+    genStatsTtftNote: '"Last turn" is this session\'s most recent request; day/7d/30d aggregate across all sessions on this model (p50 median); latency from request dispatch to the first output token, based on single LLM requests, excluding tool execution time',
   },
   sideDrawer: {
     title: 'Side drawer',
@@ -283,6 +371,12 @@ export default {
     clear: 'Clear',
     kill: 'Kill terminal process',
     sendToAI: 'Send to AI',
+    writeRpcFailed: 'Failed to send terminal command: {error}',
+    writeFailed: 'Terminal input may be lost: {message}',
+    queueDropped: 'Terminal write queue is full; dropped {count} oldest commands',
+    // RD-5#2: inline error bar for a failed PTY spawn (mirrors FileView error state)
+    spawnFailed: 'Failed to start terminal: {error}',
+    retry: 'Retry',
   },
   mermaid: {
     rendering: 'Rendering diagram…',
@@ -314,6 +408,10 @@ export default {
     builtin: 'Built-in',
     noDescription: 'No detailed description for this command',
     noDocBody: 'No documentation body for this skill',
+    // [RD-2#3] SKILL.md read failure (both guard paths rejected / IO error) — explicit failed state, distinct from empty body
+    loadFailed: 'Failed to read SKILL.md: ',
+    openDir: 'Open containing folder',
+    revealFailed: 'Failed to open the folder',
     path: 'Path',
     commandType: 'Extension command',
     builtinCommand: 'Built-in command',
@@ -401,6 +499,8 @@ export default {
     preview: 'Preview',
     loadFailed: 'Failed to load image',
     noDiff: 'No diff content',
+    // [RD-2#2] shiki highlight failure degraded visibly (content still renders as plain text lines)
+    highlightFailed: 'Highlight failed — degraded to plain text',
     tabDiff: 'Diff',
     copyFileName: 'Copy file name',
     copyFilePath: 'Copy path',
@@ -420,6 +520,17 @@ export default {
     selectSession: 'Select a session from the left',
     taskFailed: 'Task creation failed: {error}',
     sendFailed: 'Failed to send message: {error}',
+    // ── U4 model/thinking switch failures (model-switch-live-provider-sync §3.4) ──
+    // 5 new codes + general; the 4 pass-through codes fall back to `general`
+    // (toast shows the backend message).
+    modelSwitch: {
+      general: 'Switch failed: {error}',
+      sessionActivateFailed: 'Could not restore the session — reopen it from the sidebar',
+      sessionActivateTimeout: 'Session restore timed out — please retry shortly',
+      modelNotFound: 'This model no longer exists — please pick another',
+      providerCredentialMissing: 'This provider has no credential — add the API key in Settings',
+      engineModelMissing: 'The engine has not picked up this model yet: retry in a couple of seconds if you just changed the config; if it keeps failing, check the provider config in Settings',
+    },
   },
   ambiguous: {
     title: '「{basename}」 has {count} matches, choose a file to open',
@@ -477,11 +588,17 @@ export default {
     loading: 'Loading…',
     malformedLine: 'Unparseable entry (line {line})',
     malformedHint: 'JSONL line {line} is corrupted; open the session JSONL file to inspect',
+    // [RD-2#6] corrupted line without a line number (protocol/version drift defense): no line promise, no pointer to a nonexistent line
+    malformedLineUnknown: 'Unparseable entry (line unknown)',
+    malformedHintUnknownLine: 'JSONL contains a corrupted line (line number unknown)',
     inspectorBack: 'Back',
     inspectorCopy: 'Copy',
     inspectorCopied: 'Copied',
     inspectorSubtitle: 'From Trace view · full detail of the selected entry',
     inspectorRaw: 'Raw entry JSON',
+    // [RD-2#5] safeJson guard copy: unserializable (circular refs etc.) / over-limit truncation
+    rawJsonUnserializable: '(content could not be serialized for display)',
+    rawJsonTruncated: '…(content too large, truncated)',
     // usage right-side hints (disjoint buckets: cacheRead > input is the norm)
     usageUncached: 'uncached',
     usageCacheRead: 'cache hit',
@@ -490,5 +607,9 @@ export default {
     usageReasoning: 'subset of output',
     blockRedacted: '(thinking redacted, original text unavailable)',
     jumpToolResult: 'Jump to the paired TOOL row',
+  },
+  trayWidget: {
+    // [RD-2#8] third-party widget meta.progress with non-finite numbers (NaN/Infinity): no progress bar, show unavailable
+    progressUnavailable: 'No progress',
   },
 }

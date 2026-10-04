@@ -1,7 +1,7 @@
 /**
  * [G4 / u10] SkillRegistry projectWatcher LRU 驱逐单测（2026-09-14 内存审计）。
  *
- * 锁定（docs/design/memory-leak-remediation.md §3.4 G4）：
+ * 锁定（内存审计 ADR-0069 G4；原文档已删除 git 可追溯）：
  *  - L1 容量：distinct cwd 超过 MAX_PROJECT_WATCHERS（8）时驱逐最久未访问 cwd 的 watcher
  *    （close 释放 OS fd——worktree 工作方式下 distinct cwd 持续增长，无界即 EMFILE 同族风险）
  *  - L2 recency：getProjectSkills 缓存命中刷新 recency——活跃 cwd 不被挤出，驱逐落到次旧

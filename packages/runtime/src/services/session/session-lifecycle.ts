@@ -24,18 +24,27 @@ import { existsSync, rmSync, unlinkSync } from 'node:fs'
 import { unlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import type { SessionSummary, BatchDeleteResult, ServerMessage } from '@taiji/shared'
-import { BUILTIN_PRESET_IDS } from '@taiji/shared'
+import { BUILTIN_PRESET_IDS, isBtwVirtualId } from '@taiji/shared'
 // [D6-⑨ u7] 图片缓存目录推导（shared SSOT，含 sessionId 穿越校验——cache 级联删除用）
 import { getImageCacheDir } from '@taiji/shared/paths'
 import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
-import type { ILifecycleSessionOps, ISessionRegistry, ISessionRegisterDeps, IManagedSessionRecord } from './session-internal.js'
+import type { ILifecycleSessionOps, ISessionRegistry, ISessionRegisterDeps, IManagedSessionRecord, ManagedSession } from './session-internal.js'
 import type { IManagedSessionView, ScannedSession } from './types.js'
-import { buildPresetClientOptions, hasSubagentWorkflowExtension, warnLaunchEffectiveMismatch } from './launch-params.js'
+import {
+  buildPresetClientOptions,
+  buildPresetFallbackEnv,
+  hasSubagentWorkflowExtension,
+  resolveAppendSystemPrompt,
+  resolveEffectiveSystemPrompt,
+  warnLaunchEffectiveMismatch,
+} from './launch-params.js'
 import type { PresetClientOptions } from './launch-params.js'
 // D5 在途镜像（crash-forensics §3.3 D5 ①）：registerSession 汇聚点按本次 spawn 注入列表
 // 写 injected（presetZero 订阅在 session-service，本处只写注入态——两写方字段互不触碰，
 // 见 inflight-mirror.ts 文件头装配顺序说明）。
 import { inflightMirror } from './inflight-mirror.js'
+// [M4-a / btw-question D5+V7④] registerSession 订阅者豁免（checkpoint 不为 btw 建档）。
+import { getRuntimeCheckpointStore } from './runtime-checkpoint.js'
 import type { PresetResolution } from '../preset-service.js'
 import type { IConfigStore } from '../ports/config.js'
 import type { ISessionStore } from '../ports/session.js'
@@ -232,11 +241,43 @@ export interface ReclaimSessionDeps {
   /** pendingReload 定向清（D3 第 6 步）——u3 装配绑 ReloadOrchestrator.clearPending。 */
   clearPendingReload?(sessionId: string): void
   /**
+   * 定向清挂起 UI 请求（v6 第四案纵深防御）——只清属于**被回收代际**的 pending。
+   * 挂点 = 下方代际校验通过后的成功分支（`this.get(sessionId) !== session ||
+   * pm.hasClient(sessionId)` 为假）：并发 restore 的取消分支不调用，因此新进程的活请求
+   * 不会被清（pending 只由该进程的事件流写入，而新进程存在 ⇒ 代际校验必失败）。
+   * 装配绑 RuntimeServer.clearExtensionTimeoutsForSession（既有公开写口，薄委托到
+   * ExtensionTimeoutManager.clearForSession——不新增 server 能力）。
+   */
+  clearPendingUiRequests?(sessionId: string): void
+  /**
    * 驱逐该 session 的历史重建缓存条目（B8，memory-leak-remediation §3.3-B8 候选 C：
    * 回收态驻留 8×全量历史的内存收益 > 低频单次全量重建的 CPU 成本）。装配绑
    * SessionService.evictHistoryRebuildCache → SessionHistoryReader.onSessionReclaimed。
    */
   evictHistoryRebuildCache?(sessionId: string): void
+}
+
+/**
+ * [M4-a / btw-question D4 消费面① + D9④] btw 级联操作注入面（组合根在 BtwService 构造后
+ * 经 setBtwCascadeOps 注入；结构化窄依赖 = BtwService 的 closeLine / closeAllForMain 两原语
+ * 结构性满足，测试注入 fake / 置 null 复位）。
+ *
+ * 三路并发收敛单入口 = closeLine（本模块的 delete 对 btw vid 直删、deleteByCwd 批内连带、
+ * 主删级联经 closeAllForMain 逐线转调——三条路都落到同一原语，删除/abort 幂等由其保证）。
+ */
+export interface BtwCascadeOps {
+  /** 关单线（btw.remove 同一原语）：杀进程 + 注册表移除 +（可选）删线文件；未知线返 false。 */
+  closeLine(vid: string, opts?: { deleteSessionFile?: boolean }): Promise<boolean>
+  /** 主删级联：关主会话名下全部线 + 删 `btw/<encodeCwd>/<mainSid>/` 线目录（best-effort）。 */
+  closeAllForMain(mainSid: string, cwd: string): Promise<void>
+}
+
+/** 级联 ops 槽（模块级单例——对照 inflightMirror / userStoppedGate 先例；null = 未接线零变更）。 */
+let btwCascadeOps: BtwCascadeOps | null = null
+
+/** 组合根注入 btw 级联 ops（测试可传 null 复位，防跨用例泄漏）。 */
+export function setBtwCascadeOps(ops: BtwCascadeOps | null): void {
+  btwCascadeOps = ops
 }
 
 export class SessionLifecycle implements ISessionRegistry {
@@ -417,6 +458,32 @@ export class SessionLifecycle implements ISessionRegistry {
     // = Facade（组装根接线），按迁移前体内顺序执行 registerReplicatedStates →
     // ensureRecordEntriesCache → reconciler 对账（fire-and-forget）。
     this.emitSessionRegistered(id)
+    // [M4-a / btw-question D5 + V7④] registerSession 订阅者豁免清单（crash-forensics 侧，
+    // 「不为 btw 建档 → 重启不误 reattach」）。emit 内五个订阅者的逐项判定：
+    //   ① checkpoint 建档（session-service 的 upsert 挂点）→ **豁免**：本点采用「写-撤销」
+    //      等价形态——upsert 在上方 emit 内同步发生，随后 removeSession 即达「从未建档」的
+    //      post-condition（单线程同步序；崩溃恰落两调用之间的最坏后果 = 维持豁免前行为：
+    //      重启 reattach 白跑一趟）。撤销后无回写路径：reaper 搭车 refreshSessions 只更
+    //      **已存在**条目、不新增。不豁免的后果：btw 线目录不在 sessions/ 扫描面，
+    //      reattach 编排按 checkpoint 对 vid 走 restore → resolveRestoreTarget 构造性
+    //      SESSION_NOT_FOUND → 台账噪音 + 无效恢复尝试。
+    //      根修应在 session-service 订阅体内按 isBtwVirtualId 早退——该文件不入本单元领地，
+    //      写-撤销为行为等价落点（登记于 impl-plan §5 偏差表）。
+    //   ② projection / records / capability-reconciler / inflight-mirror.presetZero → **保留**
+    //      （D6：btw 线是一等会话，消息通路与状态投影白得；mirror 的 injected 写点在 emit
+    //      之前已内联执行）。
+    //   ③ spawn marker（pi-spawn-markers.json）→ **不豁免**（非本点订阅者，结论一并登记）：
+    //      reap 判据③按「任一 --extension/--skill 与清单精确相等」匹配，btw spawn 与主
+    //      spawn 共享 mandatory staged 段、判别力不变；且崩溃遗留的 btw 线孤儿 pi 与主 pi
+    //      同样烧 token，正是 reap 要收殓的对象——建档正确而非泄漏。
+    if (isBtwVirtualId(id)) {
+      try {
+        getRuntimeCheckpointStore().removeSession(id)
+      } catch (e: unknown) {
+        // best-effort：撤销失败仅留痕（残留形态 = 豁免前行为，非数据损坏），不打断注册主链。
+        console.error(`[session-lifecycle] checkpoint btw exemption failed (sessionId=${id}):`, e)
+      }
+    }
     return session
   }
 
@@ -495,7 +562,12 @@ export class SessionLifecycle implements ISessionRegistry {
     const client = await this.pm.createSession(tempId, sessionCwd, {
       skillPaths: resolution?.skillPaths ?? this.svc.getSkillPaths(sessionCwd),
       extensionPaths: allExtPaths,
-      systemPrompt: this.svc.getReplaceSystemPrompt(),
+      // 模式提示词两通道（设计 §7.2）——replace 走 D3 优先级（模式 > 全局 > pi 默认），
+      // append 只有模式一段（全局追加归 pi-system-prompt 扩展）。
+      systemPrompt: resolveEffectiveSystemPrompt(resolution, this.svc.getReplaceSystemPrompt()),
+      appendSystemPrompt: resolveAppendSystemPrompt(resolution),
+      // F1b（设计 §7.5 E4 trace 披露面）：模式回落事实现随 spawn 出站 env 到达 pi 子进程。
+      env: buildPresetFallbackEnv(resolution),
       ...presetClientOptions,
     })
 
@@ -864,8 +936,22 @@ export class SessionLifecycle implements ISessionRegistry {
     // 一并停——active 分支的 removeSessionEntry 只停环不清标记，本调用补齐标记清理）。
     // 两分支共用（非 active 分支不经过 removeSessionEntry 也必须清）。
     userStoppedGate.disposeForDelete(sessionId)
+    // [M4-a / btw-question D4+D9④] btw 线直删分支（下一段）：deleteByCwd 收集面「故意含 hidden」的
+    // 既有不变量保留（活跃线 vid 进批内 cwdSessions），本分支让直删与级联/btw.remove
+    // **三路收敛单入口 closeLine**——杀进程 + 注册表移除 + 线文件删除（路径限定 btw 根内）
+    // 全在 btw 侧完成，不落主会话 trash/sidecar 清理面；线已不在（并发双删 / 主删级联先行 /
+    // 重复调用）= 幂等 no-op 不抛——deleteByCwd 批内不得因重复处置记 failed。
+    // 未注入 ops（存量测试装配）→ fall through 既有两分支，行为零变更。
+    if (isBtwVirtualId(sessionId) && btwCascadeOps !== null) {
+      await btwCascadeOps.closeLine(sessionId, { deleteSessionFile: true })
+      return
+    }
     const session = this.get(sessionId)
+    // [M4-a] 级联 cwd 解析（两分支各取真值；分支抛出则级联随之跳过——主已删形态由
+    // 启动孤儿补账兑底清理线目录）。
+    let cascadeCwd: string | undefined
     if (session) {
+      cascadeCwd = session.cwd
       // D5①（session-dead-structural-fixes）：kill 路径全量日志 K5——活跃 session 被删除时
       // 其 pi 进程被杀，含调用源与信号链（仅 active 分支有 kill；非 active 分支无进程可杀）。
       console.warn(`[session-lifecycle] deleting active session, killing pi, session ${sessionId} (kill_source=delete | who: user delete session action | chain: detach -> pm destroy -> trash session file)`)
@@ -878,11 +964,31 @@ export class SessionLifecycle implements ISessionRegistry {
     } else {
       const target = this.svc.findScannedSession(sessionId)
       if (!target) throw new Error(`Session ${sessionId} not found`)
+      cascadeCwd = target.cwd
       // 与 active 分支的行为差异（既有语义，保持）：主文件不存在（扫描 stale）时仅跳过
       // trash，孤儿 sidecar 仍无条件清理——不把 existsSync 折进 purgeSessionSidecars，
       // 否则 active 分支「文件不存在则整体零动作」的语义会被顺带改掉。
       if (existsSync(target.filePath)) await this.sessionStore.trash(target.filePath)
       this.purgeSessionSidecars(target.filePath)
+    }
+    // [M4-a / btw-question D4 消费面① + D9④ 线终结] deleteSession 级联支线：删主 →
+    // 杀名下全部 btw 线进程 + 删 `btw/<encodeCwd>/<mainSid>/` 线目录（前端虚拟分区清理经
+    // cleanupSessionState 的 evictVirtualKeys 腿——m7/agentcall 先例同构，本处只管 runtime
+    // 半边）。单入口收敛：closeAllForMain 内部逐线转调 closeLine（与 btw.remove / 批内直删
+    // 同一原语），三路并发处置幂等不重复；abort 幂等 = pm.destroySession 无条目静默跳过。
+    // best-effort：级联失败只 warn 不阻断主删除（P2 降级隔离；漏删残留由启动孤儿补账兑底）。
+    if (btwCascadeOps && cascadeCwd !== undefined) {
+      try {
+        await btwCascadeOps.closeAllForMain(sessionId, cascadeCwd)
+      } catch (e: unknown) {
+        // best-effort 降级（非吞错）：走到本级联时主 session 本体已 trash/purge 完成，
+        // closeAllForMain 是删后辅助腿——上抛只会让已成功的 delete 报成失败返回，还连带跳过
+        // 后续 sessionData 清理与扫描缓存失效（侧栏残留更久），故错误不传播。可观测性：
+        // console.warn 级留痕（sessionId + 原始错误串，runtime 日志落盘可查）。后续路径：
+        // 本处不重试，漏删的线目录由启动孤儿补账 reconcileOrphanThreadDirs 兜底清理
+        // （启动时先于 WS listen 执行）——与本 try 前注释的 P2 降级隔离裁决一致。
+        console.warn(`[session-lifecycle] btw cascade failed (sessionId=${sessionId}):`, toErrorMessage(e))
+      }
     }
     // B5 触发面收窄（memory-leak-remediation §3.1 + §3.2-B5）：plugin sessionData（内存分区
     // + 磁盘文件）与 session 本体一同进废纸篓——trash 绑定**真删除**，active / scanned 两
@@ -920,6 +1026,9 @@ export class SessionLifecycle implements ISessionRegistry {
    * 故意包含 hidden session（与 SessionScanner.listAll 的 !s.hidden 过滤不同）：
    * folder 删除是按 cwd 的彻底清理，hidden session 也属于该 cwd。
    * 若未来要改为排除 hidden，需同步评估前端列表（listAll 过滤）与删除的语义对齐。
+   * [M4-a / D4] 批内 btw 连带处置：活跃 btw 线 vid 经 getActiveSummaries 进批 → 逐 vid 走
+   * delete 的 btw 直删分支（单入口 closeLine，幂等）；名下线目录由主会话的级联支线删除
+   *（与 session.delete 同路径）——批内主/线任意顺序处置均不重复、不互抛（单入口幂等）。
    *
    * wave:perf-w26 修正（审查）：scanSessions 传 { force: true } 旁路目录 TTL 快照——
    * deleteByCwd 是写语义的彻底清理：走快照会漏删（TTL 窗口内刚落盘的 session 不在快照里）
@@ -969,7 +1078,7 @@ export class SessionLifecycle implements ISessionRegistry {
     const target = this.resolveRestoreTarget(sessionId)
     await this.clearExistingSessionForRestore(sessionId)
     const { sessionCwd, cwdFellBack } = this.resolveRestoreCwd(target)
-    const { client, presetId, allExtPaths } = await this.spawnRestoreClient(target, sessionId, sessionCwd)
+    const { client, presetId, allExtPaths, fellBackFromPresetId } = await this.spawnRestoreClient(target, sessionId, sessionCwd)
     await this.attachRestoreFile(client, target, sessionId, cwdFellBack)
 
     // U2: get_state 读回 pi 生效 model + thinkingLevel（D2 设计）。
@@ -1001,6 +1110,15 @@ export class SessionLifecycle implements ISessionRegistry {
       parentAgentSessionId: target.parentAgentSessionId,
       handedOffTo: target.handedOffTo,
     }, 'restore')
+    // F1 披露（设计 `mode-system-composer-density` §7.5 E4）：模式定义不可得
+    // （fellBackFromPresetId 非空）时，本次 pi 确以 builtin:full 启动——把回落事实写到内存态，
+    // 经 toSummary（buildSessionSummary 透传）随 session summary 到达 renderer，chip/声明行据此
+    // 区分「已回落」（本次以全工具模式启动）与「未回落」（仅预告重启后回落）。
+    // 事实只在真发生回落时置位（避免「模式刚删、会话未重启」窗口内的假陈述）；不写 sidecar——
+    // 回落是「本进程本次运行」的内存态事实，进程重开未 restore 时不成立（详见 SessionSummary 字段注释）。
+    if (fellBackFromPresetId !== undefined) {
+      (session as ManagedSession).launchPresetFallbackTo = BUILTIN_PRESET_IDS.FULL
+    }
     const restoredSummary = this.svc.toSummary(session)
     // D4（session-dead-structural-fixes）：restore-abort——返回前检测 userStopped 标记。判定
     // 保持在主流程（位置同拆分前：toSummary 之后、notifySessionCreated 之前）：无标记时本行
@@ -1095,6 +1213,11 @@ export class SessionLifecycle implements ISessionRegistry {
    * sidecar 不清理。target.launchPresetId undefined 时（历史 session 无 sidecar）用
    * 'builtin:full' 兜底（FR-10）。
    *
+   * F1（设计 `mode-system-composer-density` §7.5 E4）：target.launchPresetId
+   * 存在但定义不可得时，`getLaunchPresetOptions` 回落 builtin:full 并在 resolution 上附
+   * `fellBackFromPresetId`——本函数原样上抛给 restoreSession 置披露位（不在此处写 summary，
+   * 与 hydrateBindingMeta 回填同点）。
+   *
    * 求值顺序硬约束（同拆分前，勿把 options 字面量提到 gate 之前）：getLaunchPresetOptions →
    * extensionPaths 兜底 → buildPresetClientOptions → **await migrationGate** → createSession
    *（skillPaths / systemPrompt 在 options 字面量内求值 = gate 之后）。
@@ -1103,7 +1226,7 @@ export class SessionLifecycle implements ISessionRegistry {
     target: ScannedSession,
     sessionId: string,
     sessionCwd: string,
-  ): Promise<{ client: IPiEngine; presetId: string; allExtPaths: string[] }> {
+  ): Promise<{ client: IPiEngine; presetId: string; allExtPaths: string[]; fellBackFromPresetId?: string }> {
     const presetId = target.launchPresetId ?? BUILTIN_PRESET_IDS.FULL
     const resolution = await this.svc.getLaunchPresetOptions(presetId, sessionCwd)
     const allExtPaths = resolution?.extensionPaths ?? await this.svc.getExtensionPaths(sessionCwd)
@@ -1116,7 +1239,11 @@ export class SessionLifecycle implements ISessionRegistry {
     const client = await this.pm.createSession(sessionId, sessionCwd, {
       skillPaths: resolution?.skillPaths ?? this.svc.getSkillPaths(sessionCwd),
       extensionPaths: allExtPaths,
-      systemPrompt: this.svc.getReplaceSystemPrompt(),
+      // 模式提示词两通道（设计 §7.2）——restore 用本次 resolve 的 resolution。
+      systemPrompt: resolveEffectiveSystemPrompt(resolution, this.svc.getReplaceSystemPrompt()),
+      appendSystemPrompt: resolveAppendSystemPrompt(resolution),
+      // F1b（设计 §7.5 E4 trace 披露面）：回落事实现随 spawn 出站 env 到达 pi 子进程。
+      env: buildPresetFallbackEnv(resolution),
       ...presetClientOptions,
       // P1（pi-assumption final gate V1⑤）：pi CLI --model 恒优先于 session entry 恢复
       //（main.js buildSessionOptions），restore 路径曾因全局默认兜底把 --model 拼进 spawn
@@ -1125,7 +1252,7 @@ export class SessionLifecycle implements ISessionRegistry {
       model: undefined,
       inheritSessionModel: true,
     })
-    return { client, presetId, allExtPaths }
+    return { client, presetId, allExtPaths, fellBackFromPresetId: resolution?.fellBackFromPresetId }
   }
 
   /**
@@ -1237,6 +1364,10 @@ export class SessionLifecycle implements ISessionRegistry {
       // pendingReload 有条目 ⇒ session busy ⇒ 恒非回收候选，真发生的窗口极窄）。
       this.removeEntry(sessionId)
       deps.clearPendingReload?.(sessionId)
+      // v6 第四案：回收定向清挂起 UI 请求（防 stale pending 在重激活时拉回死表单）。
+      // 挂代际校验通过后的分支：此处必为被回收的旧代际（新进程存在 ⇒ 上方校验已返回 false），
+      // 并发的取消分支不执行本步——新进程的活请求不被误清。
+      deps.clearPendingUiRequests?.(sessionId)
       // B8（memory-leak-remediation §3.3-B8 候选 C）：驱逐历史重建缓存条目——回收不是
       // 销毁，不走 removeSessionEntry 汇聚点，只驱逐缓存这一纯派生数据。挂代际校验
       // 通过后的成功路径（并发重建取消时新 session 无辜，不摘其缓存）；驱逐后重激活
@@ -1412,7 +1543,11 @@ export class SessionLifecycle implements ISessionRegistry {
     const client = await this.pm.createSession(forkedId, sessionCwd, {
       skillPaths: forkResolution?.skillPaths ?? this.svc.getSkillPaths(sessionCwd),
       extensionPaths: allExtPaths,
-      systemPrompt: this.svc.getReplaceSystemPrompt(),
+      // 模式提示词两通道（设计 §7.2）——fork 继承源 session 的 preset，用 forkResolution。
+      systemPrompt: resolveEffectiveSystemPrompt(forkResolution, this.svc.getReplaceSystemPrompt()),
+      appendSystemPrompt: resolveAppendSystemPrompt(forkResolution),
+      // F1b（设计 §7.5 E4 trace 披露面）：fork 继承的 preset 若已悬空，回落事实现随 env 出站。
+      env: buildPresetFallbackEnv(forkResolution),
       ...presetClientOptions,
     })
 

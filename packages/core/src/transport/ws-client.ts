@@ -368,7 +368,7 @@ export function connect(url: string, credentials: ConnectCredentials): void {
     reconnectStartedAt = null
     // auth 成功 = 凭据已有效（D8）：复位重连抑制位，后续正常断线恢复自动重连
     authRejectedSuppressed = false
-    // G2 活性治理（docs/design/memory-leak-remediation.md §3.4）：重连路径增挂 in-flight
+    // G2 活性治理（ADR-0069；原文档已删除 git 可追溯）：重连路径增挂 in-flight
     // subscribe 簿记的 TTL sweep。断连使部分 subscribe reply 永不到达（重连后新 id 重订），
     // 原实现唯一 sweep 触发点在超界帧归因死路径，过期条目无人扫 → 簿记随工作流强度无界
     // 增长。新连接确立时扫一次（本函数同步执行，早于 use-connection 的 state watch 触发

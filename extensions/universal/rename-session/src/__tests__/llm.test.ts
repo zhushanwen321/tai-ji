@@ -444,14 +444,30 @@ describe("callRenameLLM", () => {
 		expect(result).toBe("修复登录bug");
 	});
 
-	it("callLLM 返回空 content（cleanTitle 空串）→ 返回 null", async () => {
+	it("callLLM 返回空 content（cleanTitle 空串）→ 返回 null + logger.warn 留痕（stopReason/raw 结构化）", async () => {
 		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
-		vi.mocked(callLLM).mockResolvedValue({ ok: true, content: "   " });
+		vi.mocked(callLLM).mockResolvedValue({ ok: true, content: "   ", stopReason: "length" });
 		const result = await callRenameLLM(createCtx(), BASE_CONFIG, FINAL_MESSAGE);
 		expect(result).toBeNull();
+		// A1 契约：空标题不再无痕——warn 带 model/stopReason/raw（截断=length 是上调 maxTokens 的数据信号）
+		expect(loggerMock.warn).toHaveBeenCalledWith(
+			"title empty after clean, skipping rename",
+			{ model: "stub/stub-model", stopReason: "length", raw: "   " },
+		);
 	});
 
-	it("传给 callLLM 的 opts：model/systemPrompt(<200)/maxTokens=64/timeoutMs=30000/signal/sessionId/无 tools，messages 三段式", async () => {
+	it("callLLM 返回非空但清洗后为空（纯标点）→ warn 的 raw 携带 ≤100 码点原始预览", async () => {
+		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
+		vi.mocked(callLLM).mockResolvedValue({ ok: true, content: "。。。。。", stopReason: "stop" });
+		const result = await callRenameLLM(createCtx(), BASE_CONFIG, FINAL_MESSAGE);
+		expect(result).toBeNull();
+		expect(loggerMock.warn).toHaveBeenCalledWith(
+			"title empty after clean, skipping rename",
+			{ model: "stub/stub-model", stopReason: "stop", raw: "。。。。。" },
+		);
+	});
+
+	it("传给 callLLM 的 opts：model/systemPrompt(<200)/maxTokens=2048/timeoutMs=30000/signal/sessionId/无 tools，messages 三段式", async () => {
 		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
 		vi.mocked(callLLM).mockResolvedValue({ ok: true, content: "标题" });
 		await callRenameLLM(createCtx(), BASE_CONFIG, FINAL_MESSAGE);
@@ -470,7 +486,8 @@ describe("callRenameLLM", () => {
 		expect(callOpts.model).toBe(STUB_MODEL);
 		expect(callOpts.systemPrompt).toBe(RENAME_SYSTEM_PROMPT);
 		expect(callOpts.systemPrompt.length).toBeLessThan(200);
-		expect(callOpts.maxTokens).toBe(64);
+		// 输出预算覆盖 thinking+标题（reasoning 模型 thinking 600-1500 tokens 计入预算，64 必截断）
+		expect(callOpts.maxTokens).toBe(2048);
 		// 固定 30s 超时（超时归一 ok:false 走静默跳过）
 		expect(callOpts.timeoutMs).toBe(30000);
 		expect(callOpts.signal).toBeInstanceOf(AbortSignal);

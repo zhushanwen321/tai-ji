@@ -5,19 +5,30 @@ import { formatDuration } from '../parsing.js'
 
 describe('formatSchedule', () => {
   it('formats interval spec', () => {
-    expect(formatSchedule({ mode: 'interval', intervalMs: 300_000 })).toBe('every 5m')
-    expect(formatSchedule({ mode: 'interval', intervalMs: 3_600_000 })).toBe('every 1h')
+    expect(formatSchedule({ mode: 'interval', intervalMs: 300_000 }, undefined, 'en-US')).toBe('every 5m')
+    expect(formatSchedule({ mode: 'interval', intervalMs: 3_600_000 }, undefined, 'en-US')).toBe('every 1h')
   })
 
   it('formats once kind as "once in X" (not misleading "every X")', () => {
-    expect(formatSchedule({ mode: 'interval', intervalMs: 300_000 }, 'once')).toBe('once in 5m')
-    expect(formatSchedule({ mode: 'interval', intervalMs: 3_600_000 }, 'once')).toBe('once in 1h')
+    expect(formatSchedule({ mode: 'interval', intervalMs: 300_000 }, 'once', 'en-US')).toBe('once in 5m')
+    expect(formatSchedule({ mode: 'interval', intervalMs: 3_600_000 }, 'once', 'en-US')).toBe('once in 1h')
     // recurring/缺省保持 every
-    expect(formatSchedule({ mode: 'interval', intervalMs: 300_000 }, 'recurring')).toBe('every 5m')
+    expect(formatSchedule({ mode: 'interval', intervalMs: 300_000 }, 'recurring', 'en-US')).toBe('every 5m')
   })
 
   it('formats cron spec', () => {
-    expect(formatSchedule({ mode: 'cron', cronExpression: '*/10 * * * *' })).toBe('*/10 * * * *')
+    expect(formatSchedule({ mode: 'cron', cronExpression: '*/10 * * * *' }, undefined, 'en-US')).toBe('*/10 * * * *')
+    expect(formatSchedule({ mode: 'cron', cronExpression: '*/10 * * * *' }, 'recurring', 'zh-CN')).toBe('*/10 * * * *')
+  })
+
+  // zh 分支（设计 §7.5：`every 5m` ↔ `每 5 分钟`）
+  it('formats interval spec in zh-CN', () => {
+    expect(formatSchedule({ mode: 'interval', intervalMs: 300_000 }, 'recurring', 'zh-CN')).toBe('每 5 分钟')
+    expect(formatSchedule({ mode: 'interval', intervalMs: 3_600_000 }, 'recurring', 'zh-CN')).toBe('每 1 小时')
+    expect(formatSchedule({ mode: 'interval', intervalMs: 300_000 }, 'once', 'zh-CN')).toBe('5 分钟后一次')
+    // 非整分秒保持秒口径（与 en formatDuration 同规则：大单位整除优先）
+    expect(formatSchedule({ mode: 'interval', intervalMs: 90_000 }, 'recurring', 'zh-CN')).toBe('每 90 秒')
+    expect(formatSchedule({ mode: 'interval', intervalMs: 90_000 }, 'once', 'zh-CN')).toBe('90 秒后一次')
   })
 })
 
@@ -34,29 +45,39 @@ describe('formatRelativeTime', () => {
 
   it('formats future time', () => {
     const now = Date.now()
-    expect(formatRelativeTime(now + 300_000)).toBe('in 5m')
-    expect(formatRelativeTime(now + 7_200_000)).toBe('in 2h')
+    expect(formatRelativeTime(now + 300_000, 'en-US')).toBe('in 5m')
+    expect(formatRelativeTime(now + 7_200_000, 'en-US')).toBe('in 2h')
   })
 
   it('formats past time', () => {
     const now = Date.now()
-    expect(formatRelativeTime(now - 300_000)).toBe('5m ago')
-    expect(formatRelativeTime(now - 86_400_000)).toBe('1d ago')
+    expect(formatRelativeTime(now - 300_000, 'en-US')).toBe('5m ago')
+    expect(formatRelativeTime(now - 86_400_000, 'en-US')).toBe('1d ago')
   })
 
   it('formats now for recent timestamps', () => {
     const now = Date.now()
-    expect(formatRelativeTime(now)).toBe('now')
-    expect(formatRelativeTime(now + 2000)).toBe('now')
-    expect(formatRelativeTime(now - 2000)).toBe('now')
+    expect(formatRelativeTime(now, 'en-US')).toBe('now')
+    expect(formatRelativeTime(now + 2000, 'en-US')).toBe('now')
+    expect(formatRelativeTime(now - 2000, 'en-US')).toBe('now')
   })
 
   // 5 秒边界：源码 `< 5000` 严格小于。用显式 now 参数精确锁定，避免 fake-timer 漂移。
   it('treats 4999ms as now and 5000ms as not-now (strict <)', () => {
     const base = 1_700_000_000_000
-    expect(formatRelativeTime(base + 4999, base)).toBe('now')
-    expect(formatRelativeTime(base + 5000, base)).not.toBe('now')
-    expect(formatRelativeTime(base + 5000, base)).toBe('in 5s')
+    expect(formatRelativeTime(base + 4999, 'en-US', base)).toBe('now')
+    expect(formatRelativeTime(base + 5000, 'en-US', base)).not.toBe('now')
+    expect(formatRelativeTime(base + 5000, 'en-US', base)).toBe('in 5s')
+  })
+
+  // zh 分支（设计 §7.5：`in 4m` ↔ `4 分钟后`）
+  it('formats relative time in zh-CN', () => {
+    const now = 1_700_000_000_000
+    expect(formatRelativeTime(now + 240_000, 'zh-CN', now)).toBe('4 分钟后')
+    expect(formatRelativeTime(now + 7_200_000, 'zh-CN', now)).toBe('2 小时后')
+    expect(formatRelativeTime(now - 300_000, 'zh-CN', now)).toBe('5 分钟前')
+    expect(formatRelativeTime(now, 'zh-CN', now)).toBe('现在')
+    expect(formatRelativeTime(now + 5_000, 'zh-CN', now)).toBe('5 秒后')
   })
 })
 

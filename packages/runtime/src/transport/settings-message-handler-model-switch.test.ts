@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 import { SettingsMessageHandler, type SettingsHandlerContext } from './settings-message-handler.js'
+import { errorWithCode, SESSION_NOT_ACTIVE } from '../utils/errors.js'
 import type { ClientMessage, ProviderId, ServerMessage } from '@taiji/shared'
 
 function mockCtx(effectiveModel: string) {
@@ -106,5 +107,20 @@ describe('SettingsMessageHandler · model.switch reply 回传生效值（U6 / C-
     expect(ctx.reply).toHaveBeenCalledTimes(1)
     expect(replies[0].type).toBe('model.switched')
     expect(replies[0].payload).toEqual({ sessionId: 'sess-1', provider: 'zai-coding-cn', modelId: 'glm-5.3' })
+  })
+
+  it('session 未活跃（RT-4#4）→ switchModel 的 SESSION_NOT_ACTIVE rejection 原样上抛，不发 model.switched 假成功 reply', async () => {
+    // 无活跃进程的失败语义在 service 层 fail-fast（errorWithCode）；handler 不吞不转译，
+    // 由 server.ts handleMessage 全局 catch 统一 sendError（code 透传 + details.sessionId）。
+    const { ctx, switchModel } = mockCtx('zai-coding-cn/glm-5.3')
+    ;(switchModel as ReturnType<typeof vi.fn>).mockRejectedValue(
+      errorWithCode('会话未活跃（sess-1 无活跃进程），重开后可重试', SESSION_NOT_ACTIVE),
+    )
+    const handler = new SettingsMessageHandler(ctx)
+
+    await expect(handler.handleSettingsMessage(switchMsg(), WS)).rejects.toMatchObject({
+      code: SESSION_NOT_ACTIVE,
+    })
+    expect(ctx.reply).not.toHaveBeenCalled()
   })
 })

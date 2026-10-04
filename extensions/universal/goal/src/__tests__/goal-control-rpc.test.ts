@@ -69,7 +69,6 @@ function makeFixture(mode: "rpc" | "tui" | "json" | "print" = "rpc"): FakeFixtur
 		registerMessageRenderer: () => {},
 		appendEntry: () => {},
 		sendMessage: () => {},
-		sendUserMessage: () => {},
 	} as unknown as ExtensionAPI;
 
 	const ctx = {

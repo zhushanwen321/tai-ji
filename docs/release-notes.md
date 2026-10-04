@@ -19,4 +19,4 @@ Release note 面向**应用使用者**，两个消费场景共用同一份 body�
 
 > 本节存放**待随下次发版并入正式 release note 的条目草稿**（设计文档验收条款要求的指引先落于此，merge skill 阶段 5 定稿时按全局规范并入，并入后清空本节）。npm 包侧（CHANGELOG / deprecate 文案）随发版流程另行处理，不在本节。
 
-- runtime（@taiji/runtime，private 包不发 npm）：Quota fetchers 增强——MiMo 月度窗口充富（token used/limit 来自 `tokenPlan/usage` 条目，重置倒计时取 `tokenPlan/detail` `currentPeriodEnd` 按 UTC 解析）+ 请求头对齐 web 控制台（浏览器 UA + 固定 `x-timezone: UTC`）+ 全部 cookie 过期形态归 `unauthorized`（体内 401/403、3xx 登录重定向经 `redirect: manual`）+ 粘贴 cookie 空白归一；OpenCode fetcher 容忍部分缺失的 SSR 用量窗口。（来源：quota-fetchers-mimo-opencode-enrichment，changeset 已删——runtime 在 config.ignore 且 private，声明无效果）
+（空）

@@ -9,7 +9,7 @@
  * 测试框架：vitest（从 vitest 导入），运行：npx vitest run，禁止 node:test。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { writeFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { writeFileSync, mkdtempSync, rmSync, mkdirSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { getHistoryFromFilePath, tailReadHistory } from '../services/session-history.js'
@@ -249,6 +249,22 @@ describe('边界用例', () => {
     const { messages, truncated } = await tailReadHistory(join(tmpDir, 'nonexistent.jsonl'), realStore)
     expect(messages).toEqual([])
     expect(truncated).toBe(false)
+  })
+
+  it('tailReadHistory: statSync 非 ENOENT 失败（EACCES）原样上抛，不压成空页（RT-5#4）', async () => {
+    // EACCES 被压成 emptyPage 会把「读不了」伪装成「历史为空」假成功——与
+    // getHistoryFromFilePath 的 statSync 预检分级对齐：仅 ENOENT 返空页。
+    // 真实权限构造（chmod 000 去目录 search 权限 → statSync 抛 EACCES），非 mock
+    const lockedDir = join(tmpDir, 'locked')
+    mkdirSync(lockedDir)
+    const target = join(lockedDir, 'session.jsonl')
+    writeFileSync(target, `${JSON.stringify(msgEntry('e1', 'user', 'x'))}\n`, 'utf-8')
+    chmodSync(lockedDir, 0o000)
+    try {
+      await expect(tailReadHistory(target, realStore)).rejects.toMatchObject({ code: 'EACCES' })
+    } finally {
+      chmodSync(lockedDir, 0o700) // 恢复权限，afterEach 的 tmpDir 清理才可行
+    }
   })
 
   it('tailReadHistory: 空文件返回空数组 + truncated false', async () => {

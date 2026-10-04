@@ -6,8 +6,9 @@
  * 2. IPC 序列化防御：postMessage 的 DataCloneError 拦截 + fallback 回发（W2）
  * 3. retry/重建：worker/script 错误的指数退避重试 + rebuildRuntime（G3-001）
  * 4. 终态化：finalizeRun ——「transition → closeOut in-flight → save →
- *    pending:unregister → onRunDone」终态序列的唯一定义点（D5-② 单点化，收敛原
- *    8 处逐字复制；OR-8 收口步骤与 OR-4/B-4 双围栏内化于本函数）
+ *    pending:unregister 直落 appendEntry → onRunDone」终态序列的唯一定义点
+ *    （D5-② 单点化，收敛原 8 处逐字复制；OR-8 收口步骤与 OR-4/B-4 双围栏内化于
+ *    本函数；[reload-closeout D4] unregister 持久化直落权威面，不经 eventBus emit）
  *
  * 4 个 handle* 路由函数 + 终态化/重建/防御 helper 若干：
  * - handleWorkerMessage(run, raw, deps, handlers) — 路由 agent_call/return/error/log
@@ -34,6 +35,8 @@
  * 层归属：Engine。依赖 ports + WorkflowRun + executeAgentCall。
  * （旧并发门闩 gate 抽象已删——no-op，实际并发由 SubagentService ConcurrencyPool 管理。）
  */
+
+import { mapReasonToStatus, PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/extension-protocol";
 
 import { getLogger } from "../core/logger.ts";
 
@@ -230,7 +233,7 @@ export interface FinalizeRunOptions {
 /**
  * Run 终态五步 coda 的唯一定义点（D5-② + OR-8 收口内化）：
  * transition(done) → closeOutInFlightCalls → save（best-effort）→
- * pending:unregister → onRunDone。
+ * pending:unregister 直落 appendEntry → onRunDone。
  *
  * 收敛前 8 处逐字复制（本文件 6 处 + lifecycle 2 处）已全部改走本函数。原各副本
  * 的三处微差统一为规范形态（收敛裁决，非行为回归）：
@@ -250,10 +253,23 @@ export interface FinalizeRunOptions {
  * in-flight call（fire-and-forget agent() 未 await / worker 死亡时已 dispatch 的
  * call），先收口再落盘，内存态与持久化快照同一时点收敛（快照不再含 running 节点）。
  *
- * [OR-4][B-4] unregister 与 onRunDone 各自独立 try 围栏（不共用一个 try——emit
+ * [reload-closeout D4] pending:unregister 持久化直落：经 deps.appendEntry 直接
+ * appendEntry 落盘（调用时解析的活跃 append 面），不经 eventBus emit→内存 listener
+ * ——emit 链在 reload 转换窗/多 extension factory 顺序窗内整链失效，注销 entry
+ * 永缺位即通知悬挂（S1b 事故形态①段）。原 emit 发射点已删除（恒 no-op 死路径：
+ * 全仓唯一 listener 无内存视图可同步、通知不经该事件；直落成功后 emit 必被
+ * isPendingActive 幂等门拦截，直落失败时 emit 与直落同失败域零覆盖）。status 经
+ * protocol mapReasonToStatus 单点映射（listener 与 bte 对账同函数——裸写
+ * `status: reason` 会在非 identity 映射 case（budget_limited→failed）落词表外值）。
+ * 幂等：listener/sweep 的注销写侧对 entries 现算 isPendingActive/差集，直落后
+ * id 不再 active，多写方竞态无重复语义。
+ *
+ * [OR-4][B-4] unregister 与 onRunDone 各自独立 try 围栏（不共用一个 try——直落
  * 抛错会跳过 onRunDone）：这两个是真实副作用，任一同步抛错不得经 worker-host 的
- * `void handlers.onXxx(...)` 变 unhandledRejection 崩宿主；通知总线故障也不得吞掉
- * Interface 层完成回调（runAndWait 轮询依赖 onRunDone 语义收口，被跳过即悬挂）。
+ * `void handlers.onXxx(...)` 变 unhandledRejection 崩宿主；append 撞 reload 转换窗
+ * assertActive 抛错时 error 留痕（runId/reason）交 reconcile-sweep 下次
+ * session_start 收口（窄竞态残差），也不得吞掉 Interface 层完成回调（runAndWait
+ * 轮询依赖 onRunDone 语义收口，被跳过即悬挂）。
  *
  * @returns 是否成功 transition（false = 转移前已被并发终态化，后续步骤未执行）
  */
@@ -284,18 +300,26 @@ export async function finalizeRun(
     reason: run.state.reason,
     context: options.context,
   });
-  // [OR-4] emit pending:unregister 独立围栏（M12 同款）——listener 同步抛错 error
-  // 留痕后继续，不崩宿主、不跳过 onRunDone
+  // [reload-closeout D4] pending:unregister 直落权威面：直接 appendEntry 落盘
+  // （session JSONL 唯一权威；customType/status 均消费 protocol SSOT——零新增定义点）。
+  // [OR-4] 独立围栏（不共用 try——直落抛错不得跳过 onRunDone）：append 撞 reload
+  // 转换窗 assertActive 抛错时 error 留痕（runId/reason）后继续，不崩宿主、不跳过
+  // onRunDone；差集残留交 reconcile-sweep 下次 session_start 收口（窄竞态残差）。
+  const unregisterReason = run.state.reason ?? doneReason;
   try {
-    deps.eventBus?.emit("pending:unregister", {
+    deps.appendEntry?.(PENDING_UNREGISTER_ENTRY_TYPE, {
       id: run.runId,
-      reason: run.state.reason ?? doneReason,
+      reason: unregisterReason,
+      status: mapReasonToStatus(unregisterReason),
     });
   } catch (err) {
     const m = toErrorMessage(err);
-    logger.error(`[workflow] pending:unregister emit failed (${options.context}): ${m}`);
+    logger.error(
+      `[workflow] pending:unregister appendEntry failed (${options.context}, ` +
+        `runId=${run.runId}, reason=${unregisterReason}): ${m}`,
+    );
   }
-  // [OR-4][B-4] onRunDone 独立围栏（与 emit 拆分——emit 抛错不得吞掉完成回调）
+  // [OR-4][B-4] onRunDone 独立围栏（与直落拆分——直落抛错不得吞掉完成回调）
   if (options.notifyDone !== false) {
     try {
       deps.onRunDone?.(run);

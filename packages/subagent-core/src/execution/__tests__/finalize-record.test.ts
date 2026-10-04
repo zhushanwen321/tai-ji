@@ -673,14 +673,21 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     expect(record.agentResult).toBeUndefined();
   });
 
-  it("不写 manifest（idle 非终态，manifest 是终态诊断辅助）", async () => {
+  it("[B2] 写轮终派生 manifest 投影（session-reader 直读主路径数据源——idle 非终态，legacy running + executionStatus idle 双写）", async () => {
     const { deps, store } = makeDeps();
-    const record = makeMinimalRecord({ id: "rec-nomanifest" });
+    const record = makeMinimalRecord({ id: "rec-derived-manifest" });
     record.status = "idle";
     store.register(record);
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "done" });
-    const manifest = await manifestStore.readManifest("rec-nomanifest");
-    expect(manifest).toBeNull();
+    // [B2/簿记⑫] 轮终派生投影落盘（derivedManifestRecord——与 markSettled 字节同源）：
+    // 轮终 record 留内存 idle，缺本写则 records/ 目录缺席、session-reader manifest
+    // 直读主路径永不命中。派生单点：轮终 idle 无 closedReason → legacy "running"
+    //（活跃成员）+ executionStatus "idle"（权威词），非终态 closed 形态。
+    const manifest = await manifestStore.readManifest("rec-derived-manifest");
+    expect(manifest).not.toBeNull();
+    expect(manifest?.status).toBe("running");
+    expect(manifest?.executionStatus).toBe("idle");
+    expect(manifest?.closedReason).toBeUndefined();
   });
 
   it("MF-2: record.result 设为轮终 content（否则 notifier idle 回复恒为 (empty)，G1/G2 不成立）", async () => {

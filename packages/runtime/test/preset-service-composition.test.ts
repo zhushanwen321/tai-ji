@@ -3,7 +3,9 @@
  *
  * 覆盖 4 个 testCase：
  *   - tc2: setPresetService 注入前 getLaunchPresetOptions 返 undefined；注入后委托 presetService
- *   - tc3: 未知 presetId 返 undefined（presetService.getPreset 找不到）
+ *   - tc3: 未知 presetId 回落 builtin:full——返回完整 PresetResolution（与直接 resolve builtin:full
+ *          逐字段相等）+ 附回落事实 fellBackFromPresetId（回归锁：曾因漏 await 让 `{ ...resolution }`
+ *          展开 Promise → 只剩 fellBackFromPresetId 空壳，工具/扩展/提示词字段全丢）
  *   - tc4: builtin:full 正常 resolve，返回 PresetResolution 形状
  *   - tc1: PresetService 在组合根可构造（间接验证 index.ts 不抛错）
  *
@@ -152,21 +154,36 @@ describe('SessionService · wave 3 PresetService 注入', () => {
     expect(afterInjection!.toolArgs).toEqual({}) // builtin:full toolMode=all
   })
 
-  it('w3-tc3: 未知 presetId fallback 到 builtin:full（wave 改动：不再返 undefined）', async () => {
+  it('w3-tc3: 未知 presetId fallback 到 builtin:full——返回完整 PresetResolution + 回落事实', async () => {
     // wave 改动：getLaunchPresetOptions 找不到 preset 时 fallback 到 builtin:full（设计 §4.3），
     // 避免 restoreSession 拿到失效 presetId 时退到无 tool/thinking args 的旧行为。
     // builtin:full 永在（DEFAULT_PRESETS 保证），故 fallback 必命中。
+    const extensionService = makeFakeExtensionService([makeExt('ext-a', true)])
     const presetService = new PresetService(
       makeFakeConfigStore(tmpDir) as unknown as ConstructorParameters<typeof PresetService>[0],
-      makeFakeExtensionService([]) as unknown as ConstructorParameters<typeof PresetService>[1],
+      extensionService as unknown as ConstructorParameters<typeof PresetService>[1],
     )
     sessionService.setPresetService(presetService)
 
     const result = await sessionService.getLaunchPresetOptions('nonexistent-id', '/cwd')
-    // fallback 到 builtin:full：返回非 undefined，且 toolArgs/flags 与 builtin:full 一致
     expect(result).toBeDefined()
-    expect(result!.toolArgs).toEqual({}) // builtin:full toolMode=all
+
+    // 对照：builtin:full 直接 resolve 的完整产物（不写死值，以真实实现为准）。
+    const fullPreset = presetService.getPreset(BUILTIN_PRESET_IDS.FULL)!
+    const direct = await presetService.resolve(fullPreset, '/cwd')
+
+    // 回归锁（曾因漏 await 让回落分支 `{ ...resolution }` 展开 Promise → 空壳）：
+    // toolArgs / flags / extensionPaths / skillPaths / prompt 必须逐项等于直接 resolve 的产物。
+    expect(result!.toolArgs).toEqual(direct.toolArgs) // builtin:full toolMode=all → {}
+    expect(result!.toolArgs).toEqual({})
+    expect(result!.flags).toEqual(direct.flags)
     expect(result!.flags).toEqual({ noSkills: false, noContextFiles: false })
+    expect(Array.isArray(result!.extensionPaths)).toBe(true)
+    expect(result!.extensionPaths).toEqual(direct.extensionPaths)
+    expect(result!.skillPaths).toEqual(direct.skillPaths)
+    expect(result!.prompt).toEqual(direct.prompt)
+    // 回落事实不被修丢（restore 路径据此披露「模式已删除，本次以全工具模式启动」）。
+    expect(result!.fellBackFromPresetId).toBe('nonexistent-id')
   })
 
   it('w3-tc4: builtin:full 经 getLaunchPresetOptions 返回完整 PresetResolution 形状', async () => {
@@ -202,7 +219,7 @@ describe('SessionService · wave 3 PresetService 注入', () => {
         extensionService as unknown as ConstructorParameters<typeof PresetService>[1],
       )
       // 构造后立即可用（无 deferred initialization）
-      expect(ps.getAllPresets()).toHaveLength(3) // DEFAULT_PRESETS
+      expect(ps.getAllPresets()).toHaveLength(4) // DEFAULT_PRESETS
     }).not.toThrow()
   })
 })

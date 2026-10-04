@@ -4,7 +4,7 @@
   去 PENDING/N排队中 标签和计数 badge、去 chevron（不支持收起）、去 pulse-accent 闪烁动画。
   仅 border-b 与下方输入区分隔，融入 composer-box bg-input 背景。
   内容：每条一行，Zap（steer，accent）/ Clock（followup，info）/ Hourglass（defer，info）icon +
-  truncate 文本；多条显前 3 条 + 「+N」。
+  truncate 文本；多条按 3 行预算显示（≤3 条全显，>3 条显 2 条 + 「+N」汇总行）。
   [compact-defer-composer-queue u1] defer 行扩展：composer 侧 defer 队列展示统一收口——
   Hourglass icon + 占用分档 chip（deferChip，session 级单一值）+ truncate 文本 + 富内容
   +N 徽标（segments 非 text 段 >0）+ hover × 撤销（emit removeDefer，仅未提交条目——
@@ -23,8 +23,8 @@
     data-testid="queue-bubble"
   >
     <div
-      v-for="(item, i) in visibleItems"
-      :key="i"
+      v-for="item in visibleItems"
+      :key="itemKey(item)"
       class="qb-item group flex items-center gap-1.5 py-0.5 text-[length:var(--text-xs)]"
       :title="item.type === 'defer' ? deferHint : undefined"
     >
@@ -103,6 +103,13 @@ interface FlatItem {
   text: string
   id: string
   chipCount: number
+  /**
+   * [RD-2#9] 构造期分配的稳定序号：steering/followUp 无 id（恒空串），直接拼 id 会重复
+   * key；裸 index key 在重排/中段删除时漂移致 DOM 复用错位。key = type + ':' + (id || seq)
+   * ——defer 行有 pi 侧稳定 id 优先用（删除同伴不再重挂载），无 id 家族用 type 域内序号
+   * （type 前缀消除跨类型 DOM 复用）。
+   */
+  seq: number
 }
 
 /** steering 优先于 followUp（对齐 pi 队列消费顺序）→ defer（未提交恒在最后，对齐「最后投递」
@@ -111,12 +118,13 @@ interface FlatItem {
  *  defer 行必须可见。 */
 const flatItems = computed<FlatItem[]>(() => {
   const list: FlatItem[] = []
+  let seq = 0
   const s = props.state
   if (s?.steering?.length) {
-    list.push(...s.steering.map((text) => ({ type: 'steering' as const, text: stripDeferMarker(text), id: '', chipCount: 0 })))
+    list.push(...s.steering.map((text) => ({ type: 'steering' as const, text: stripDeferMarker(text), id: '', chipCount: 0, seq: seq++ })))
   }
   if (s?.followUp?.length) {
-    list.push(...s.followUp.map((text) => ({ type: 'followUp' as const, text: stripDeferMarker(text), id: '', chipCount: 0 })))
+    list.push(...s.followUp.map((text) => ({ type: 'followUp' as const, text: stripDeferMarker(text), id: '', chipCount: 0, seq: seq++ })))
   }
   if (props.deferEntries.length) {
     list.push(...props.deferEntries.map((m) => ({
@@ -125,10 +133,16 @@ const flatItems = computed<FlatItem[]>(() => {
       id: m.id,
       // [defer segments 化] 富内容 +N 徽标计数 = 非 text 段数（逻辑自 PendingBubble.chipCount 迁移）
       chipCount: m.segments.filter((seg) => seg.type !== 'text').length,
+      seq: seq++,
     })))
   }
   return list
 })
+
+/** [RD-2#9] v-for 稳定 key（禁裸 index）：defer 用 pi 侧 id，steering/followUp 用构造期序号 */
+function itemKey(item: FlatItem): string {
+  return `${item.type}:${item.id || item.seq}`
+}
 
 function iconOf(type: FlatItem['type']) {
   if (type === 'steering') return Zap
@@ -148,8 +162,17 @@ function stripDeferMarker(text: string): string {
   return text.replace(DEFER_FLUSH_MARKER_RE, '').trimEnd()
 }
 
-/** 前 3 条可见（v6 §8.5：多条显前 2-3 条 + 「+N」；溢出口径覆盖三组总和） */
-const VISIBLE_MAX = 3
-const visibleItems = computed(() => flatItems.value.slice(0, VISIBLE_MAX))
-const overflowCount = computed(() => Math.max(0, flatItems.value.length - VISIBLE_MAX))
+/**
+ * 行数预算：可见行 + 「+N」溢出行合计恒 ≤ 3 行（v6 §8.5「多条显前 2-3 条 + +N」的上界执行）。
+ * 旧实现固定显 3 条，条目再多就再多出一行溢出行把 composer 纵向撑高（底栏锚在底部，往上顶）。
+ * 现在：≤ 预算全显且无溢出行（常见形态零变化）；超预算时让位给 +N 汇总行，总行数仍为 3。
+ */
+const QUEUE_LINE_BUDGET = 3
+/** 有溢出时少显一行（把那行预算让给 +N 汇总），无溢出时全显 */
+const visibleCount = computed(() =>
+  flatItems.value.length > QUEUE_LINE_BUDGET ? QUEUE_LINE_BUDGET - 1 : flatItems.value.length,
+)
+const visibleItems = computed(() => flatItems.value.slice(0, visibleCount.value))
+/** 溢出口径仍覆盖三组总和（不重复计 defer 行：单一切片起点） */
+const overflowCount = computed(() => flatItems.value.length - visibleCount.value)
 </script>

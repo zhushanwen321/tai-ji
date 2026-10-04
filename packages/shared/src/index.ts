@@ -5,6 +5,7 @@ export type {
   ReplyPayloadMap,
   BatchDeleteResult,
   RenameMode,
+  UiLocale,
   SystemPromptConfig,
   CommandSourceInfo,
   DefaultModelSource,
@@ -13,11 +14,15 @@ export type {
   SkillCacheScope, SkillCacheInvalidatedPayload,
   SessionTraceHeaderPayload, SessionTraceMalformedLine, SessionTraceSessionEndPayload,
   SessionViewSnapshot,
+  // plugin modal/headerAction 帧载荷（plugin-header-action-modal-points AP-1/AP-2）
+  PluginModalClosedReason, PluginModalStatePayload, HeaderActionUpdatePayload,
   WatchdogMemoryLevel, WatchdogMemoryPressurePayload,
   RollingRestartState, RollingRestartReason, RollingRestartInflightSummary,
   RollingRestartDeferredPayload, RollingRestartCountdownPayload, RollingRestartForcedPayload,
   RollingRestartStatusPayload,
   ReattachDeferReason, ReattachDeferredPayload,
+  // plan 模式投影域（plan-state entry 派生视图 + 产物元数据，形状与 extension-protocol 同形）
+  PlanDocMeta, PlanStateView,
   ConnectionTestResultRow,
 } from './protocol'
 export type {
@@ -65,7 +70,7 @@ export { BASH_RPC_TIMEOUT_MS, COMPACT_RPC_TIMEOUT_MS, RENDERER_RPC_MARGIN_MS } f
 export * from './extension'
 export * from './git'
 export * from './plugin'
-export { BASE_PORT, DEV_PORT_OFFSET, MAX_PORT, ENV_WHITELIST_PREFIXES, AMBIENT_ENV_NAMES, SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES, SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE, PROVIDER_API_TYPES, KNOWN_PI_API_TYPES, SYSTEM_PROMPT_MAX_LENGTH, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, IMAGE_LIMITS, MAX_WS_PAYLOAD_BYTES, PLUGIN_NOTIFY_LIMITS, UI_TOAST_LIMITS, ENGINE_LAUNCH_ENV_KEYS, TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS, TAIJI_RUNTIME_PI_RECLAIM_TICK_MS, TAIJI_RUNTIME_PI_RECLAIM_VIEWED_WINDOW_MS, DEFAULT_PI_RECLAIM_IDLE_MS, DEFAULT_PI_RECLAIM_TICK_MS, DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS } from './constants'
+export { BASE_PORT, DEV_PORT_OFFSET, MAX_PORT, ENV_WHITELIST_PREFIXES, AMBIENT_ENV_NAMES, SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES, SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE, PLAN_STATE_CUSTOM_TYPE, PROVIDER_API_TYPES, KNOWN_PI_API_TYPES, SYSTEM_PROMPT_MAX_LENGTH, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, IMAGE_LIMITS, MAX_WS_PAYLOAD_BYTES, PLUGIN_NOTIFY_LIMITS, UI_TOAST_LIMITS, ENGINE_LAUNCH_ENV_KEYS, PRESET_FALLBACK_ENV_KEYS, TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS, TAIJI_RUNTIME_PI_RECLAIM_TICK_MS, TAIJI_RUNTIME_PI_RECLAIM_VIEWED_WINDOW_MS, TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS, DEFAULT_PI_RECLAIM_IDLE_MS, DEFAULT_PI_RECLAIM_TICK_MS, DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS, DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS, TAIJI_SESSION_ACTIVATE_TIMEOUT_MS, DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS } from './constants'
 export type { ProviderApiType } from './constants'
 // 崩溃韧性共享契约 SSOT（实施计划 u-foundation：
 // 出站帧守卫阈值 D3 / 全量读预检阈值 D5 / 历史双预算 D4 / 日志保留期 D6-⑦）。
@@ -150,13 +155,14 @@ export type { SubagentRecord, SubagentStatus, ClosedDisplayStatus } from './suba
 // 纯类型/常量/纯函数无 node 依赖，barrel 安全）。
 export type { RemoteAccessConfig, RemoteAccessInfo, RemoteAccessToggleResult } from './remote-access'
 export { REMOTE_ACCESS_FILENAME, REMOTE_TOKEN_HEX64, isRemoteAccessConfigShape } from './remote-access'
-// 导入 pi 会话 RPC 契约（设计 docs/design/import-session.md（已删除，git 可追溯）§3.3 D5，runtime/renderer 两端共同 import）
+// 导入会话 RPC 契约（pi / zcode 多源，runtime/renderer 两端共同 import；多源扩展见 docs/architecture/session-import-sources.md）
 export type {
-  ImportWarning, ImportErrorCode,
+  ImportSourceKind, ImportWarning, ImportErrorCode,
+  ImportDegradation, ImportDegradationSummary,
   ImportCandidatesRequest, ImportCandidatesReply, ImportCandidate, ImportCandidateDir,
   ImportRequest, ImportReply,
 } from './import-session'
-// 虚拟 session ID 工厂（subagent 三段式 / agent call 两段式）——跨层协议级 key 约定 SSOT
+// 虚拟 session ID 工厂（subagent 三段式 / agent call 两段式 / btw 两段式）——跨层协议级 key 约定 SSOT
 export {
   SUBAGENT_PREFIX,
   subagentVirtualId,
@@ -167,6 +173,10 @@ export {
   agentCallVirtualId,
   isAgentCallVirtualId,
   extractAgentCallSessionId,
+  BTW_PREFIX,
+  btwVirtualId,
+  isBtwVirtualId,
+  extractBtwPiSessionId,
 } from './virtual-session-id'
 // Coding Plan 额度查询类型
 export type {
@@ -207,6 +217,8 @@ export type {
   ExtensionMode,
   ThinkingLevel,
   PiLaunchPreset,
+  PresetPromptConfig,
+  PresetPromptSegment,
   PresetUsageEntry,
   PiPresetsFile,
   PresetExportPayload,
@@ -224,7 +236,7 @@ export { LAUNCH_RESULT_STATUSES, UPDATE_STALE_RELEASE } from './update'
 export type { UsageMetrics, UsageRow, UsageStatsResult } from './usage-stats'
 // Composer 生成指标类型 SSOT（帧 session.stats_update /
 // RPC session.getGenStats 的 type→payload 登记在 protocol.ts，形状经 GenStatsFrame 引用防漂移）
-export type { GenStatsSpeed, GenStatsCacheRatio, GenStatsFrame } from './gen-stats'
+export type { GenStatsSpeed, GenStatsCacheRatio, GenStatsCacheMiss, GenStatsTtft, GenStatsFrame } from './gen-stats'
 // 迁移功能（从其他 agent 迁移配置）类型
 export type {
   ProviderSource,

@@ -3,12 +3,12 @@
  *
  * 订阅模型改造（IF2）：onUIRequest(WS) 移除 → 模块级 refCount bus 'ui-request' 订阅。
  * 用例覆盖（T1-T10）：
- * - T1/T2: bus 事件入队（askUser=true）与非 askUser 负向分流（C4）
+ * - T1/T2: bus 事件入队（form=true，runtime marker 分支产出形状）与无标记负向分流（C4）
  * - T3: per-sessionId 分区隔离（U1 bus 版）
  * - T4: 按 requestId 精确 respond/cancel（U2 bus 版）
  * - T6: getPendingRequests 保留 RPC 路径（C3，U3/TC4 bus 版）
  * - T7: 同实例切 session 隔离（AC-1/AC-2 bus 版）
- * - T8: filter 第二道闸语义（askUserFilter 放行；dialog 通道已随 CompanionBand 迁移删除）
+ * - T8: filter 第二道闸语义（formFilter 放行；dialog 通道已随 CompanionBand 迁移删除）
  * - T9: 模块级 refCount 注册/注销（项目规则 #2）
  * - T10: requestId dedup 双通路（TC4 bus 版）
  *
@@ -23,7 +23,8 @@ import { InternalEventBus } from '@taiji/core'
 // ── mock extension api domain ──
 // onUIRequest 已移除（bus 订阅替代）；getPendingRequests/sendExtensionUIResponse 保留 RPC（C3）。
 vi.mock('@taiji/core/transport/api/domains/extension', () => ({
-  sendExtensionUIResponse: vi.fn(),
+  // 返 true = 送达（M1 环 3 后 respond 消费 boolean；断连场景用例单独 mockReturnValue(false)）
+  sendExtensionUIResponse: vi.fn((): boolean => true),
   onNotify: () => () => {},
   // [B9 agentcall LRU 联动] stores/chat 新装配链（agentcall-lru-linkage → workflow store
   // → @/api）把 settings.ts 的 re-export `onExtensions = extensionDomain.onExtensions`
@@ -47,9 +48,11 @@ vi.mock('@/composables/shell/useExtensionHostBridge', async (importOriginal) => 
   }
 })
 
-import { useExtensionUI, askUserFilter, __resetExtensionBusSubscriptionForTesting } from '@/composables/useExtensionUI'
+import { useExtensionUI, formFilter, __resetExtensionBusSubscriptionForTesting, FRAME_STALE_MAX_AGE_MS } from '@/composables/useExtensionUI'
 import { sendExtensionUIResponse, getPendingRequests } from '@taiji/core/transport/api/domains/extension'
+import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
+import { useToast } from '@/composables/useToast'
 
 /** 在独立 effectScope 内运行，模拟单 Panel 实例的完整生命周期 */
 function runWithScope<T>(fn: () => T): { result: T; dispose: () => void } {
@@ -61,7 +64,8 @@ function runWithScope<T>(fn: () => T): { result: T; dispose: () => void } {
   return { result, dispose: () => scope.stop() }
 }
 
-// ── 测试数据构造 helper（DialogRequest 形状，索引签名含 askUser 扩展字段）──
+// ── 测试数据构造 helper（DialogRequest 形状——runtime event-adapter ASK_USER_MARKER
+//    分支产出的 view-ready 帧：legacy 归一上移 runtime 后 form 键原生携带）──
 function mkAskUserReq(requestId: string, overrides: Record<string, unknown> = {}) {
   return {
     requestId,
@@ -69,8 +73,8 @@ function mkAskUserReq(requestId: string, overrides: Record<string, unknown> = {}
     kind: 'select' as const,
     method: 'select',
     title: 't',
-    askUser: true,
-    askUserQuestions: [{ header: 'q', question: 'q?', options: [] }],
+    form: true,
+    formQuestions: [{ type: 'text', header: 'q', question: 'q?' }],
     allowCancel: true,
     ...overrides,
   }
@@ -94,18 +98,20 @@ beforeEach(() => {
 })
 
 describe('useExtensionUI T1/T2 bus 事件入队与 C4 分流', () => {
-  it('T1: bus ui-request 事件（askUser=true）入 store，字段完整', () => {
-    const { currentAskUserRequest } = useExtensionUI(ref('sessionA'))
+  it('T1: bus ui-request 事件（form=true）入 store，字段完整（view-ready 帧直入）', () => {
+    const { currentFormRequest } = useExtensionUI(ref('sessionA'))
 
     emitBusUIRequest('sessionA', mkAskUserReq('r1'))
 
-    expect(currentAskUserRequest.value?.requestId).toBe('r1')
-    expect(currentAskUserRequest.value?.sessionId).toBe('sessionA')
-    expect(currentAskUserRequest.value?.method).toBe('select')
-    expect(currentAskUserRequest.value?.askUser).toBe(true)
-    expect(currentAskUserRequest.value?.allowCancel).toBe(true)
-    expect(currentAskUserRequest.value?.title).toBe('t')
-    expect(typeof currentAskUserRequest.value?.receivedAt).toBe('number')
+    expect(currentFormRequest.value?.requestId).toBe('r1')
+    expect(currentFormRequest.value?.sessionId).toBe('sessionA')
+    expect(currentFormRequest.value?.method).toBe('select')
+    // form 键 + formQuestions（runtime marker 分支产出形状）
+    expect(currentFormRequest.value?.form).toBe(true)
+    expect(currentFormRequest.value?.formQuestions).toEqual([{ type: 'text', header: 'q', question: 'q?' }])
+    expect(currentFormRequest.value?.allowCancel).toBe(true)
+    expect(currentFormRequest.value?.title).toBe('t')
+    expect(typeof currentFormRequest.value?.receivedAt).toBe('number')
 
     // store 分区为事件 sid
     const records = useExtensionUIStore().getRequestsBySession('sessionA')
@@ -113,23 +119,23 @@ describe('useExtensionUI T1/T2 bus 事件入队与 C4 分流', () => {
     expect(records[0].requestId).toBe('r1')
   })
 
-  it('T2: 非 askUser 请求不入 store（C4 分流）', () => {
-    const { currentAskUserRequest } = useExtensionUI(ref('sessionA'))
+  it('T2: 无标记 dialog 请求不入 store（C4 分流）', () => {
+    const { currentFormRequest } = useExtensionUI(ref('sessionA'))
 
     emitBusUIRequest('sessionA', mkDialogReq('r2', 'confirm'))
 
-    expect(currentAskUserRequest.value).toBeUndefined()
+    expect(currentFormRequest.value).toBeUndefined()
     expect(useExtensionUIStore().getRequestsBySession('sessionA')).toHaveLength(0)
   })
 
   it('T2b: 事件 sessionId 缺失 → 跳过入队（C2）', () => {
-    const { currentAskUserRequest } = useExtensionUI(ref('sessionA'))
+    const { currentFormRequest } = useExtensionUI(ref('sessionA'))
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     // 无 sessionId 的 ui-request 事件
     mockBus.emit({ kind: 'ui-request', request: mkAskUserReq('r-nosid') } as never)
 
-    expect(currentAskUserRequest.value).toBeUndefined()
+    expect(currentFormRequest.value).toBeUndefined()
     expect(useExtensionUIStore().getRequestsBySession('sessionA')).toHaveLength(0)
     expect(warnSpy).toHaveBeenCalled()
     warnSpy.mockRestore()
@@ -138,8 +144,8 @@ describe('useExtensionUI T1/T2 bus 事件入队与 C4 分流', () => {
 
 describe('useExtensionUI T3 per-session 队列隔离', () => {
   it('sessionA 与 sessionB 的 ask-user 互不串扰', () => {
-    const { currentAskUserRequest: aAsk } = useExtensionUI(ref('sessionA'))
-    const { currentAskUserRequest: bAsk } = useExtensionUI(ref('sessionB'))
+    const { currentFormRequest: aAsk } = useExtensionUI(ref('sessionA'))
+    const { currentFormRequest: bAsk } = useExtensionUI(ref('sessionB'))
 
     emitBusUIRequest('sessionA', mkAskUserReq('r-a1'))
     emitBusUIRequest('sessionB', mkAskUserReq('r-b1'))
@@ -152,19 +158,19 @@ describe('useExtensionUI T3 per-session 队列隔离', () => {
 })
 
 describe('useExtensionUI T4 按 requestId 精确 respond/cancel', () => {
-  it('队列含多个 ask-user 请求，respond 指定 requestId → 仅该请求出队 + 响应参数正确', () => {
-    const { respond, currentAskUserRequest } = useExtensionUI(ref('sessionA'))
+  it('队列含多个表单请求，respond 指定 requestId → 仅该请求出队 + 响应参数正确', () => {
+    const { respond, currentFormRequest } = useExtensionUI(ref('sessionA'))
     emitBusUIRequest('sessionA', mkAskUserReq('r-ask'))
     emitBusUIRequest('sessionA', mkAskUserReq('r-ask2'))
 
     respond('r-ask2', true)
 
     expect(sendExtensionUIResponse).toHaveBeenCalledWith('sessionA', 'r-ask2', 'select', true)
-    expect(currentAskUserRequest.value?.requestId).toBe('r-ask')
+    expect(currentFormRequest.value?.requestId).toBe('r-ask')
 
     // respond 队首后队列空
     respond('r-ask', false)
-    expect(currentAskUserRequest.value).toBeUndefined()
+    expect(currentFormRequest.value).toBeUndefined()
   })
 
   it('cancel 传入 requestId 等价于 respond(null)', () => {
@@ -182,80 +188,228 @@ describe('useExtensionUI T6 C3 保留 RPC 路径', () => {
       mkAskUserReq('r1'),
       mkAskUserReq('r2'),
     ] as never)
-    const { currentAskUserRequest } = useExtensionUI(ref('sessionA'))
+    const { currentFormRequest } = useExtensionUI(ref('sessionA'))
 
     // 等待拉取 Promise resolve（初始 subscribe 即触发一次 getPendingRequests）
     await nextTick()
     await nextTick()
 
     expect(getPendingRequests).toHaveBeenCalled()
-    expect(currentAskUserRequest.value?.requestId).toBe('r1')
+    expect(currentFormRequest.value?.requestId).toBe('r1')
     expect(useExtensionUIStore().getRequestsBySession('sessionA')).toHaveLength(2)
   })
 })
 
-describe('useExtensionUI T7 同实例切 session 隔离（AC-1/AC-2 bus 版）', () => {
-  it('AC-1: 同一实例 sessionId 从 A 切到 B 后 currentAskUserRequest 变 undefined', async () => {
+describe('useExtensionUI 快照差集剔除（renderer 僵尸表单修剪，§6.2 采用项④ v6.1）', () => {
+  it('(a) runtime 清 pending → 空快照应答剔除该 session 分区旧交互条目（空快照也执行）', async () => {
+    // 快照恒为空（A 初始权威快照为空，B 亦空）
+    vi.mocked(getPendingRequests).mockResolvedValue([])
     const sid = ref<string | null>('sessionA')
     const { result, dispose } = runWithScope(() => useExtensionUI(sid))
 
-    emitBusUIRequest('sessionA', mkAskUserReq('r-a1'))
-    expect(result.currentAskUserRequest.value?.requestId).toBe('r-a1')
-
-    sid.value = 'sessionB'
+    // 初始订阅拉取空完成
+    await nextTick()
     await nextTick()
 
-    expect(result.currentAskUserRequest.value).toBeUndefined()
+    // 模拟「屏上旧表单」：bus 实时帧入 A 分区（未重订阅时它保留在屏上——已声明缺口）
+    emitBusUIRequest('sessionA', mkAskUserReq('r-zombie'))
+    expect(result.currentFormRequest.value?.requestId).toBe('r-zombie')
+    expect(useExtensionUIStore().getRequestsBySession('sessionA')).toHaveLength(1)
+
+    // 触发重订阅（切走再切回）：runtime 已清 pending ⇒ 下一次快照为空 []
+    sid.value = 'sessionB'
+    await nextTick()
+    await nextTick()
+    sid.value = 'sessionA'
+    await nextTick()
+    await nextTick()
+    await nextTick()
+
+    // 空快照执行剔除（剔除逻辑在 for 循环之外）：僵尸条目从分区消失、overlay 收起
+    expect(result.currentFormRequest.value).toBeUndefined()
+    expect(useExtensionUIStore().getRequestsBySession('sessionA')).toEqual([])
+    expect(useExtensionUIStore().hasPendingBlockingOverlay('sessionA')).toBe(false)
+
     dispose()
   })
 
-  it('AC-2: 切回 A 后 pending ask-user 恢复显示（Map 分区保留）', async () => {
+  it('(b) 快照非空但缺某条 → 差集剔除该条、其余保留（活请求仍可提交）', async () => {
+    // 初始快照为空（bus 帧先占屏）；重订阅前才把 r-live 置入权威快照
+    let snapshotA: ExtensionUIRequest[] = []
+    vi.mocked(getPendingRequests).mockImplementation(async (s: string) =>
+      s === 'sessionA' ? snapshotA : [],
+    )
+    const sid = ref<string | null>('sessionA')
+    const { result, dispose } = runWithScope(() => useExtensionUI(sid))
+    await nextTick()
+    await nextTick()
+
+    emitBusUIRequest('sessionA', mkAskUserReq('r-zombie'))
+    emitBusUIRequest('sessionA', mkAskUserReq('r-live'))
+    expect(useExtensionUIStore().getRequestsBySession('sessionA').map((r) => r.requestId)).toEqual([
+      'r-zombie',
+      'r-live',
+    ])
+
+    // 重订阅：快照只含 r-live（r-zombie 已被 runtime 清）
+    snapshotA = [mkAskUserReq('r-live')] as never
+    sid.value = 'sessionB'
+    await nextTick()
+    await nextTick()
+    sid.value = 'sessionA'
+    await nextTick()
+    await nextTick()
+    await nextTick()
+
+    const ids = useExtensionUIStore().getRequestsBySession('sessionA').map((r) => r.requestId)
+    expect(ids).toEqual(['r-live'])
+    // 活请求仍在且可提交（respond 送达 + 出队）
+    expect(result.currentFormRequest.value?.requestId).toBe('r-live')
+    result.respond('r-live', true)
+    expect(sendExtensionUIResponse).toHaveBeenCalledWith('sessionA', 'r-live', 'select', true)
+    expect(useExtensionUIStore().getRequestsBySession('sessionA')).toEqual([])
+
+    dispose()
+  })
+
+  it('(c) 快照中的条目保持原字段且不重复入队（差集 + dedup 幂等）', async () => {
+    let snapshotA: ExtensionUIRequest[] = []
+    vi.mocked(getPendingRequests).mockImplementation(async (s: string) =>
+      s === 'sessionA' ? snapshotA : [],
+    )
+    const sid = ref<string | null>('sessionA')
+    const { result, dispose } = runWithScope(() => useExtensionUI(sid))
+    await nextTick()
+    await nextTick()
+
+    // bus 实时帧先入（带本地拍戳）
+    emitBusUIRequest('sessionA', mkAskUserReq('r-live', { title: 'bus-frame' }))
+    const before = useExtensionUIStore().getRequestsBySession('sessionA')[0]
+
+    // 重订阅：快照含同 requestId → 差集保留（不重复追加），且不覆盖已有记录
+    snapshotA = [mkAskUserReq('r-live')] as never
+    sid.value = 'sessionB'
+    await nextTick()
+    await nextTick()
+    sid.value = 'sessionA'
+    await nextTick()
+    await nextTick()
+    await nextTick()
+
+    const records = useExtensionUIStore().getRequestsBySession('sessionA')
+    expect(records).toHaveLength(1)
+    expect(records[0].requestId).toBe('r-live')
+    expect(records[0].title).toBe('bus-frame') // 活条目未被快照覆盖
+    expect(records[0].receivedAt).toBe(before.receivedAt)
+    expect(result.currentFormRequest.value?.requestId).toBe('r-live')
+
+    dispose()
+  })
+
+  it('(d) 帧入口兜底：携带超龄 receivedAt 的帧被丢弃（非主算法）', () => {
+    const { result, dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    // 超龄帧（超过本地兜底阈值）→ 不入 store
+    emitBusUIRequest(
+      'sessionA',
+      mkAskUserReq('r-old', { receivedAt: Date.now() - FRAME_STALE_MAX_AGE_MS - 1000 }),
+    )
+    expect(result.currentFormRequest.value).toBeUndefined()
+    expect(useExtensionUIStore().getRequestsBySession('sessionA')).toEqual([])
+    expect(warnSpy).toHaveBeenCalled()
+
+    // 未超龄（阈值内）→ 正常入队
+    emitBusUIRequest('sessionA', mkAskUserReq('r-fresh', { receivedAt: Date.now() - 1000 }))
+    expect(result.currentFormRequest.value?.requestId).toBe('r-fresh')
+
+    warnSpy.mockRestore()
+    dispose()
+  })
+})
+
+describe('useExtensionUI T7 同实例切 session 隔离（AC-1/AC-2 bus 版）', () => {
+  it('AC-1: 同一实例 sessionId 从 A 切到 B 后 currentFormRequest 变 undefined', async () => {
     const sid = ref<string | null>('sessionA')
     const { result, dispose } = runWithScope(() => useExtensionUI(sid))
 
     emitBusUIRequest('sessionA', mkAskUserReq('r-a1'))
+    expect(result.currentFormRequest.value?.requestId).toBe('r-a1')
+
     sid.value = 'sessionB'
     await nextTick()
-    expect(result.currentAskUserRequest.value).toBeUndefined()
+
+    expect(result.currentFormRequest.value).toBeUndefined()
+    dispose()
+  })
+
+  it('AC-2: 切回 A 后 pending 表单请求恢复显示（分区保留 + 快照权威再确认）', async () => {
+    // 快照按 session 分源：A 的 fetch 是权威 pending 集（含 r-a1），B 为空。
+    vi.mocked(getPendingRequests).mockImplementation(async (s: string) =>
+      s === 'sessionA' ? ([mkAskUserReq('r-a1')] as never) : [],
+    )
+    const sid = ref<string | null>('sessionA')
+    const { result, dispose } = runWithScope(() => useExtensionUI(sid))
+
+    emitBusUIRequest('sessionA', mkAskUserReq('r-a1'))
+    expect(result.currentFormRequest.value?.requestId).toBe('r-a1')
+
+    sid.value = 'sessionB'
+    await nextTick()
+
+    expect(result.currentFormRequest.value).toBeUndefined()
+    // 切走不清 A 分区（分区语义；A 的修剪只由 A 自己的快照驱动）
+    expect(useExtensionUIStore().getRequestsBySession('sessionA')).toHaveLength(1)
 
     sid.value = 'sessionA'
     await nextTick()
-    expect(result.currentAskUserRequest.value?.requestId).toBe('r-a1')
+    await nextTick()
+    expect(result.currentFormRequest.value?.requestId).toBe('r-a1')
 
     dispose()
   })
 
   it('T7b: 切走后旧 sid 迟到事件写旧分区（M1 事件 sid 语义），不污染新分区', async () => {
+    // 初始两 session 快照均为空；A 的权威快照在「切回」前才置入迟到请求（模拟 runtime pending）
+    const pendingBySession: Record<string, ExtensionUIRequest[]> = { sessionA: [], sessionB: [] }
+    vi.mocked(getPendingRequests).mockImplementation(async (s: string) => pendingBySession[s] ?? [])
     const sid = ref<string | null>('sessionA')
     const { result, dispose } = runWithScope(() => useExtensionUI(sid))
 
     sid.value = 'sessionB'
     await nextTick()
+    await nextTick()
 
     // 旧 sid 迟到事件（退订异步，或 runtime 重放）——事件 sid 仍是 A
     emitBusUIRequest('sessionA', mkAskUserReq('r-late-a'))
 
-    // B 分区不被污染；切回 A 能看到迟到事件
-    expect(result.currentAskUserRequest.value).toBeUndefined()
+    // B 分区不被污染；迟到事件写 A 分区（M1：事件自带归属）
+    expect(result.currentFormRequest.value).toBeUndefined()
+    expect(useExtensionUIStore().getRequestsBySession('sessionB')).toEqual([])
+    expect(useExtensionUIStore().getRequestsBySession('sessionA').map((r) => r.requestId)).toEqual(['r-late-a'])
+
+    // 切回 A：快照（权威 pending 集）含该请求 → 差集保留、恢复显示
+    pendingBySession.sessionA = [mkAskUserReq('r-late-a')] as never
     sid.value = 'sessionA'
     await nextTick()
-    expect(result.currentAskUserRequest.value?.requestId).toBe('r-late-a')
+    await nextTick()
+    expect(result.currentFormRequest.value?.requestId).toBe('r-late-a')
 
     dispose()
   })
 })
 
 describe('useExtensionUI T8 filter 第二道闸语义', () => {
-  it('askUserFilter 实例放行 ask-user（dialog 不再经 store）', () => {
+  it('formFilter 实例放行表单类请求（dialog 不再经 store）', () => {
     const sid = ref<string | null>('shared')
-    const { result: askPanel } = runWithScope(() => useExtensionUI(sid, askUserFilter))
+    const { result: formPanel } = runWithScope(() => useExtensionUI(sid, formFilter))
 
     emitBusUIRequest('shared', mkAskUserReq('r-ask'))
 
-    // askUserFilter 放行（askUser 恒 true）
-    expect(askPanel.currentAskUserRequest.value?.requestId).toBe('r-ask')
+    // formFilter 放行（runtime 产出的 view-ready 帧原生带 form 键）
+    expect(formPanel.currentFormRequest.value?.requestId).toBe('r-ask')
 
-    // store 只有一条（askUserFilter 实例写入）
+    // store 只有一条（formFilter 实例写入）
     expect(useExtensionUIStore().getRequestsBySession('shared')).toHaveLength(1)
   })
 })
@@ -266,23 +420,24 @@ describe('useExtensionUI T9 模块级 refCount 注册/注销（项目规则 #2�
     const sid = ref<string | null>('shared')
     const insts = [1, 2, 3].map(() => runWithScope(() => useExtensionUI(sid)))
 
-    // 3 实例订阅 → bus.on 只被调 1 次（refCount 首个注册）
-    expect(onSpy).toHaveBeenCalledTimes(1)
-    expect(onSpy.mock.calls[0][0]).toBe('ui-request')
+    // 3 实例订阅 → ui-request 通道 bus.on 只被调 1 次（refCount 首个注册）；
+    // 另 1 次是 P2-2 失效链的模块级单订阅（'requests-invalidated'，永驻不随实例 dispose）
+    expect(onSpy).toHaveBeenCalledTimes(2)
+    expect(onSpy.mock.calls.map((c) => c[0]).sort()).toEqual(['requests-invalidated', 'ui-request'])
 
     // 分发仍工作（3 实例都收到 → store 去重后 1 条）
     emitBusUIRequest('shared', mkAskUserReq('r1'))
     expect(useExtensionUIStore().getRequestsBySession('shared')).toHaveLength(1)
-    expect(insts[0].result.currentAskUserRequest.value?.requestId).toBe('r1')
-    expect(insts[2].result.currentAskUserRequest.value?.requestId).toBe('r1')
+    expect(insts[0].result.currentFormRequest.value?.requestId).toBe('r1')
+    expect(insts[2].result.currentFormRequest.value?.requestId).toBe('r1')
 
     // dispose 2 个 → 第 3 个实例仍收（r2 入队，respond r1 后晋升）
     insts[0].dispose()
     insts[1].dispose()
     emitBusUIRequest('shared', mkAskUserReq('r2'))
-    expect(insts[2].result.currentAskUserRequest.value?.requestId).toBe('r1')
+    expect(insts[2].result.currentFormRequest.value?.requestId).toBe('r1')
     insts[2].result.respond('r1', true)
-    expect(insts[2].result.currentAskUserRequest.value?.requestId).toBe('r2')
+    expect(insts[2].result.currentFormRequest.value?.requestId).toBe('r2')
 
     // 全部 dispose → 不再分发（bus 无 handler，emit 无副作用）
     insts[2].dispose()
@@ -295,11 +450,11 @@ describe('useExtensionUI T9 模块级 refCount 注册/注销（项目规则 #2�
 describe('useExtensionUI T10 requestId dedup 双通路（bus 帧 + 拉取）', () => {
   it('bus 实时帧先入队，切回拉取同 requestId 不重复入队', async () => {
     const sid = ref<string | null>('sessionA')
-    const { result, dispose } = runWithScope(() => useExtensionUI(sid, askUserFilter))
+    const { result, dispose } = runWithScope(() => useExtensionUI(sid, formFilter))
 
     // 1. bus 实时帧入 r1
     emitBusUIRequest('sessionA', mkAskUserReq('r1'))
-    expect(result.currentAskUserRequest.value?.requestId).toBe('r1')
+    expect(result.currentFormRequest.value?.requestId).toBe('r1')
 
     // 2. 切到 B（拉取空）
     sid.value = 'sessionB'
@@ -315,14 +470,54 @@ describe('useExtensionUI T10 requestId dedup 双通路（bus 帧 + 拉取）', (
     await nextTick()
     await nextTick()
 
-    // 4. 去重断言：respond(r1) 后晋升 r2（若有重复 r1，currentAskUserRequest 仍命中第二个 r1）
+    // 4. 去重断言：respond(r1) 后晋升 r2（若有重复 r1，currentFormRequest 仍命中第二个 r1）
     result.respond('r1', true)
-    expect(result.currentAskUserRequest.value?.requestId).toBe('r2')
+    expect(result.currentFormRequest.value?.requestId).toBe('r2')
 
     // 5. respond(r1) 只发送一次
     const r1Calls = vi.mocked(sendExtensionUIResponse).mock.calls.filter((c) => c[1] === 'r1')
     expect(r1Calls).toHaveLength(1)
 
     dispose()
+  })
+})
+
+describe('useExtensionUI T11 respond 未送达（M1 环 3 / RD-3#1 断连场景）', () => {
+  it('send 返 false → removeRequest 不被调用、请求保留、toast 提示；send 恢复 true 后重发送达并出队', () => {
+    const { respond, currentFormRequest } = useExtensionUI(ref('sessionA'))
+    emitBusUIRequest('sessionA', mkAskUserReq('r-drop'))
+
+    const store = useExtensionUIStore()
+    const removeSpy = vi.spyOn(store, 'removeRequest')
+
+    // 1. 断连期点提交：sendExtensionUIResponse 返 false（WS 非 OPEN 未送出）
+    vi.mocked(sendExtensionUIResponse).mockReturnValueOnce(false)
+    respond('r-drop', true)
+
+    expect(sendExtensionUIResponse).toHaveBeenCalledWith('sessionA', 'r-drop', 'select', true)
+    expect(removeSpy).not.toHaveBeenCalled() // 请求保留，不 remove
+    expect(currentFormRequest.value?.requestId).toBe('r-drop') // FormOverlay 保留展示
+    expect(store.getRequestsBySession('sessionA')).toHaveLength(1)
+    // 用户可见提示（toast error，M1 环 3 要求的显形出口）
+    const toast = useToast().toasts.value.find((t) => t.type === 'error')
+    expect(toast?.message).toBe('回复未送达，连接恢复后可重新提交')
+
+    // 2. 连接恢复（mock 恢复返 true）后用户再次提交：同 requestId 重投成功 → 出队
+    respond('r-drop', true)
+    expect(removeSpy).toHaveBeenCalledTimes(1)
+    expect(currentFormRequest.value).toBeUndefined()
+    expect(store.getRequestsBySession('sessionA')).toHaveLength(0)
+    removeSpy.mockRestore()
+  })
+
+  it('cancel 同样走未送达保留（respond(null) 等价路径）', () => {
+    const { cancel, currentFormRequest } = useExtensionUI(ref('sessionA'))
+    emitBusUIRequest('sessionA', mkAskUserReq('r-cancel'))
+
+    vi.mocked(sendExtensionUIResponse).mockReturnValueOnce(false)
+    cancel('r-cancel')
+
+    expect(sendExtensionUIResponse).toHaveBeenCalledWith('sessionA', 'r-cancel', 'select', null)
+    expect(currentFormRequest.value?.requestId).toBe('r-cancel')
   })
 })

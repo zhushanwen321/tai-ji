@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
 	DEFAULT_SMART_CONTEXT_CONFIG,
+	FIRED_ENTRY_CUSTOM_TYPE,
 	buildReinjectSection,
 	checkToolThresholdGuard,
 	computeFileListsLike,
+	deriveFiredThresholds,
 	estimateShadowedTokens,
 	estimateTextTokens,
 	findCrossedThresholds,
@@ -133,6 +135,51 @@ describe("摘要后处理纯函数（D11/D13）", () => {
 		const section = buildReinjectSection([{ path: "a", content: long }]);
 		expect(section).toContain("### a");
 		expect(section).toContain("[... truncated]");
+	});
+});
+
+describe("deriveFiredThresholds（D15：session entries → 已提醒档位）", () => {
+	const marker = (tiers: unknown, extra?: Record<string, unknown>) => ({
+		type: "custom",
+		customType: FIRED_ENTRY_CUSTOM_TYPE,
+		data: { tiers, tokens: 1, ...extra },
+	});
+
+	it("累加 marker 的 tiers（跨多条 marker）", () => {
+		const fired = deriveFiredThresholds([marker([200_000]), { type: "message" }, marker([400_000])]);
+		expect([...fired].sort((a, b) => a - b)).toEqual([200_000, 400_000]);
+	});
+
+	it("compaction entry 清空此前 marker（压缩后档位重置，D3）", () => {
+		const fired = deriveFiredThresholds([marker([200_000]), { type: "compaction" }]);
+		expect(fired.size).toBe(0);
+	});
+
+	it("compaction 之后的新 marker 重新生效（压缩后再跨档仍会提醒）", () => {
+		const fired = deriveFiredThresholds([marker([200_000]), { type: "compaction" }, marker([200_000])]);
+		expect([...fired]).toEqual([200_000]);
+	});
+
+	it("只认本扩展的 marker：其他 custom entry / custom_message 不参与", () => {
+		const fired = deriveFiredThresholds([
+			{ type: "custom", customType: "goal-state", data: { tiers: [200_000] } },
+			{ type: "custom_message", customType: FIRED_ENTRY_CUSTOM_TYPE, data: { tiers: [200_000] } },
+		]);
+		expect(fired.size).toBe(0);
+	});
+
+	it("畸形态逐条降级：data 非对象 / tiers 非数组 / 元素非数字", () => {
+		const fired = deriveFiredThresholds([
+			{ type: "custom", customType: FIRED_ENTRY_CUSTOM_TYPE },
+			{ type: "custom", customType: FIRED_ENTRY_CUSTOM_TYPE, data: "x" },
+			{ type: "custom", customType: FIRED_ENTRY_CUSTOM_TYPE, data: { tiers: "x" } },
+			{ type: "custom", customType: FIRED_ENTRY_CUSTOM_TYPE, data: { tiers: [200_000, "x", null, Number.NaN] } },
+		]);
+		expect([...fired]).toEqual([200_000]);
+	});
+
+	it("空 entries → 空集", () => {
+		expect(deriveFiredThresholds([]).size).toBe(0);
 	});
 });
 

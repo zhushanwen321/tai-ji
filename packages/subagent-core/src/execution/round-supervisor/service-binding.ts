@@ -261,10 +261,10 @@ export function createRoundSupervisorForService(binding: RoundSupervisorBinding)
 
 /**
  * [W4] 注册对账 sweep（发射点枚举⑤）：对「本 session register entry × 对应
- * record/run ∈ 终态集 ∪ 已离场/不存在」差集补发 unregister——appendEntry 权威落盘 +
- * 尽力 emit（写法论证见 reconcile-sweep.ts 头注）。[F2] 判据按类型分流：subagent 走
- * RecordStore，workflow/畸形走 FileRunStore（findStateByIdSync），bash 无收口通道
- * 保守跳过（显式偏差 impl-plan §5）。触发点 = initSession（session
+ * record/run ∈ 终态集 ∪ 已离场/不存在」差集补发 unregister——appendEntry 权威落盘
+ * （唯一写路径，不经 emit——写法论证见 reconcile-sweep.ts 头注）。[F2] 判据按类型
+ * 分流：subagent 走 RecordStore，workflow/畸形走 FileRunStore（findStateByIdSync），
+ * bash 无收口通道保守跳过（显式偏差 impl-plan §5）。触发点 = initSession（session
  * reattach / session_start / 监督器启动三时机的承载点，根进程 only——与孤儿恢复
  * 同一单扫描者判据，isChildProcess 由调用方传）。与 registry rebuild 的先后时序
  * 不作保证，残余窗口由下次 session_start 收口（设计明示容忍）。
@@ -309,7 +309,6 @@ export function runPendingReconcileSweepForService(binding: RoundSupervisorBindi
         return "active";
       },
       appendEntry: (customType, data) => binding.getPi()?.appendEntry(customType, data),
-      emit: (channel, data) => binding.getPi()?.events.emit(channel, data),
     });
   } catch (err) {
     bestEffort(err, "pending reconcile sweep", "error");

@@ -47,17 +47,9 @@ const RUNTIME_PORT_POLL_INTERVAL_MS = 300
 
 // ── pre-flight：renderer 产物形态 ────────────────────────────────────────
 
-/** renderer 产物 assets 目录（main 进程 loadFile 目标；mock/real 轨共用同一 outDir）。 */
-const RENDERER_DIST_ASSETS = path.join(REPO_ROOT, 'apps', 'electron', 'renderer', 'dist', 'assets')
-
-/**
- * mock 构建的标记串：mock fixture session 名（packages/core/src/transport/mock/data.ts
- * fixtureSessions 的 s4.label）。real 构建（不传 VITE_MOCK）下 mock 模块链随
- * `import.meta.env.VITE_MOCK === 'true'` 死分支摇除——实测（2026-09-16，138 个 assets/*.js）：
- * mock 构建命中 1 个文件，real 构建（VITE_E2E 传与不传两档）零命中。故本串是
- * 「当前产物是 mock 构建」的判据（而非 mock 代码是否存在）。
- */
-const MOCK_BUNDLE_MARKER = 'Promise 代码评审'
+// 产物路径与 mock 标记串与 mock 轨 fixture 共享（launch-app.ts 导出，判据依据见其注释）：
+// 两条轨共用 apps/electron/renderer/dist，标记串是「当前产物是 mock 构建」的判据。
+import { RENDERER_DIST_ASSETS, MOCK_BUNDLE_MARKER } from './launch-app'
 
 /**
  * pre-flight：确认当前 renderer 产物是 real bundle（mock 产物在场即 fail-fast）。

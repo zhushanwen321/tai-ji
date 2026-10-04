@@ -33,11 +33,13 @@ import { getUsageStats } from '@taiji/core/transport/api/domains/usage'
 
 const mockedGetUsageStats = vi.mocked(getUsageStats)
 
-/** 生成 n 天前的 YYYY-MM-DD（fixture 日期必须相对今天——组件默认 range=30 天滑窗过滤，硬编码日期会在窗口滑过后必然红）。 */
-function isoDaysAgo(n: number): string {
+/** 构造 n 天前的本地日期串（YYYY-MM-DD）。页面默认 range=30 按当天滚动构造窗口，写死日期会在 30 天后滑出窗口静默变红——测试日期一律相对当天。 */
+function daysAgo(n: number): string {
   const d = new Date()
   d.setDate(d.getDate() - n)
-  return d.toISOString().slice(0, 10)
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${mm}-${dd}`
 }
 
 /** 构造单条用量行（指标默认非零，便于聚合管线走正常分支）。 */
@@ -49,7 +51,7 @@ function makeRow(overrides: Partial<UsageRow> = {}): UsageRow {
     cacheWrite: 300,
     costUSD: 0.01,
     messages: 2,
-    date: isoDaysAgo(1),
+    date: daysAgo(1),
     provider: 'anthropic',
     model: 'claude-x',
     project: 'demo',
@@ -88,16 +90,16 @@ describe('UsagePage 首屏冒烟', () => {
       makeResult(
         [
           makeRow({
-            date: isoDaysAgo(2),
+            date: daysAgo(2),
             provider: 'kimi-coding',
             model: 'k3',
             project: 'taiji',
             costUSD: 0.42,
           }),
-          makeRow({ date: isoDaysAgo(1), provider: 'anthropic', model: 'claude-x', costUSD: 0 }),
+          makeRow({ date: daysAgo(1), provider: 'anthropic', model: 'claude-x', costUSD: 0 }),
           // compaction 虚拟桶：provider/model 固定 'compaction'，费用记 0（D1/D2）
           makeRow({
-            date: isoDaysAgo(1),
+            date: daysAgo(1),
             provider: 'compaction',
             model: 'compaction',
             project: 'demo',

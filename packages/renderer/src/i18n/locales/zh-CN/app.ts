@@ -10,4 +10,7 @@ export default {
   crashReasonOom: '内存不足',
   crashReasonUnknown: '未知原因',
   crashDismiss: '关闭',
+  // RD-3#11 内存压力提示条（useMemoryPressure level 接入 UI 消费方）
+  memoryPressureWarn: '内存占用较高，已自动清理部分缓存',
+  memoryPressureCritical: '内存严重不足，建议关闭部分会话',
 }

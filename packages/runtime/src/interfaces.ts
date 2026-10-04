@@ -27,6 +27,7 @@ import type {
   FileNode,
   SubagentRecord,
   WorkflowRunRecord,
+  PlanStateView,
   SystemPromptConfig,
   TerminalConfig,
   BatchDeleteResult,
@@ -37,11 +38,13 @@ import type {
   RenameMode,
 } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
+import type { SaveAppConfigResult } from './services/app-config-store.js'
 import type { DirScopes } from './services/skill-dir-config.js'
 import type { SessionTraceSnapshot } from './services/session/trace-sync.js'
 import type { Credential } from './services/auth/auth-storage.js'
 import type { IPiEngine, PiEventListener } from './services/ports/pi-engine.js'
 import type { IManagedSessionView } from './services/session/types.js'
+import type { OversizeAwareResult } from './services/session/session-records.js'
 import type { CatalogRefreshResult } from './services/provider-catalog-refresh.js'
 
 /**
@@ -143,8 +146,29 @@ export interface ISessionService {
    *
    * clientUuid（session-occupancy-send-closure D2）：客户端幂等 id 透传给 dispatcher，
    * 拒绝广播（预检与 pi 转译两路）原样带回；正常路径不消费。
+   *
+   * requireCommand（plugin-header-action-modal-points D6/u5a）：插件写路径前置原子校验的
+   * 命令名（可选；既有调用方不传 = 行为不变）。dispatcher 在 restore 之后、busy 预检之前
+   * 直连 client.getCommands() 校验（不走 getCommands 的 markDirty 查询语义），未命中短重试
+   * （P9 定案 500ms × 6）后仍失败即拒发，回执 reason:'command-missing'——命令串永不漏进
+   * 模型（E14 结构性防线）。
+   *
+   * reason 回执词表（AP-4）：'busy' | 'compacting' | 'bash'（busy 预检三态，bash 分类为本
+   * 设计新增）| 'command-missing' | 'hook-blocked'（hook 管道既有 reason 经 message.error
+   * 上浮）| 'error'（其余失败）。与 message-dispatcher.ts 的 SendPromptReason 对齐（interface
+   * 层不反向 import service 实现文件——既有内联惯例）；既有布尔消费方按字段兼容不受影响。
    */
-  sendMessage(sessionId: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string): Promise<{ blocked: boolean; rejected?: boolean }>
+  sendMessage(
+    sessionId: string,
+    content: string,
+    images?: Array<{ data: string; mimeType: string }>,
+    clientUuid?: string,
+    requireCommand?: string,
+  ): Promise<{
+    blocked: boolean
+    rejected?: boolean
+    reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error'
+  }>
   // [HISTORICAL] sendSubagentMessage 已删除（composer 四符号设计 D2，marker 半成品通道废弃）：
   // 定向消息改走 subagentAction(message/start) 直达 subagent。
   abort(sessionId: string): Promise<void>
@@ -179,8 +203,10 @@ export interface ISessionService {
   /**
    * 获取 session 派生的 subagent 列表（从主 session JSONL 的 subagent toolCall/toolResult 提取）。
    * 纯磁盘读取，不依赖 pi 进程活跃。文件不存在或无 subagent 调用时返回空数组。
+   * [RT-4#8] 返回结构化结果：oversize=true（文件 >32MB 预检阈值）时 records 恒空——
+   * 「列表不可用」与「无 subagent」显式分形（reply 透传 oversize 供面板降级提示）。
    */
-  getSubagents(sessionId: string): Promise<SubagentRecord[]>
+  getSubagents(sessionId: string): Promise<OversizeAwareResult<SubagentRecord>>
   /**
    * 获取 subagent 的对话流历史（直读 subagent JSONL，复用 convertPiHistory 转换）。
    * subagentId 对应 SubagentRecord.subagentId，从 getSubagents 结果中查找 sessionFile 路径。
@@ -202,8 +228,16 @@ export interface ISessionService {
   /**
    * 获取 session 派生的 workflow 列表（从主 session JSONL 的 workflow-state-link 提取）。
    * 纯磁盘读取，不依赖 pi 进程活跃。文件不存在或无 workflow 调用时返回空数组。
+   * [RT-4#8] 返回结构化结果：语义同 getSubagents（oversize=true 时列表不可用）。
    */
-  getWorkflows(sessionId: string): Promise<WorkflowRunRecord[]>
+  getWorkflows(sessionId: string): Promise<OversizeAwareResult<WorkflowRunRecord>>
+  /**
+   * 获取 session 的 plan 模式状态投影（plan 模式重设计 D1⑥ 冷腿，session.getPlanState
+   * RPC 后端）。纯磁盘读取（主 session JSONL 最后一条 plan-state entry → scanPlanStateEntries
+   * 派生，与 live 投影同一份派生代码），不依赖 pi 进程活跃；「从未进过 plan」形态归一
+   * 「未激活」缺省 View（reply 契约 planState 无 null 域）。
+   */
+  getPlanState(sessionId: string): Promise<PlanStateView>
   /**
    * 获取 workflow 内 agent call 的对话流历史。
    * agentCallSessionId 是 trace[].sessionId（pi session ID），按 sessionId 全局查找 JSONL。
@@ -246,6 +280,13 @@ export interface ISessionService {
    * text/task 的换行经 encodeDirectiveText 编码为字面 \n（extension 侧 decodeNewlineEscapes 互逆还原）。
    */
   subagentAction(sessionId: string, action: 'cancel' | 'message' | 'start', params: { subagentId?: string; text?: string; slug?: string; task?: string }): Promise<void>
+  /**
+   * 退出 plan 模式（PlanModeBar 确认 Popover 后；D5/E9/E10）：ensureActive 自动恢复 +
+   * client.prompt('/plan abort') 直发 + 挂起审批失效回调上抛。编排语义见
+   * SessionService.abortPlan；失效链消费（runtime pending 摘除 + 失效帧广播）经
+   * setOnPlanAborted 注入，单一出口在 transport 层。
+   */
+  abortPlan(sessionId: string): Promise<void>
   /** W5：session 是否空闲（进程存活且非生成中），供 ReloadOrchestrator 判断立即/排队 reload。 */
   isSessionIdle(sessionId: string): boolean
   /** W5：session 是否仍存活（未被 delete），供 ReloadOrchestrator 检测排队期删除。 */
@@ -297,8 +338,11 @@ export interface ISessionService {
    * 经此读 isIdle 判定标志；字段可写语义见 IManagedSessionView 注释。
    */
   getSession(sessionId: string): IManagedSessionView | undefined
-  /** W10：取最近 inputTokens——usage 实例快照派生（唯一数据源 = get_session_stats，旧缓存直写已删）。 */
-  getInputTokens(sessionId: string): number
+  /**
+   * W10：取最近 inputTokens——usage 实例快照派生（唯一数据源 = get_session_stats，旧缓存直写已删）。
+   * [RT-4#7] 无快照返回 null（对齐 context.update 无值占位帧语义：字段缺失 = 无值，0 仅表真值）。
+   */
+  getInputTokens(sessionId: string): number | null
   /**
    * 处理 context.update（pi agent_end/turn_end 推 inputTokens + totalTokens）。session 级状态单一 owner：
    * W12 起事件只做 usage 实例失效（markDirty + 防抖重拉 get_session_stats），发布归
@@ -314,8 +358,17 @@ export interface ISessionService {
    * 数据缓存——entry 扫描（get_entries 重拉）是派生缓存唯一数据写路径。
    */
   invalidateRecordEntries(sessionId: string, customType: string): void
-  /** W10：取 session 当前 usagePercent——usage 实例快照派生（pi 权威 percent 投影）。 */
-  getUsagePercent(sessionId: string): number
+  /**
+   * [reload-closeout D2]：送达水位对账入口（agent_settled 腿；interpreter 经组合根注入）。
+   * 重跑 fetch→merge→publish 管线，发布门 = 已发布快照水位——守卫/发布门处（hasSession
+   * 瞬态 false / bus 未注入）曾丢的帧下轮触发必补发，稳态零帧。
+   */
+  reconcileRecordEntries(sessionId: string): void
+  /**
+   * W10：取 session 当前 usagePercent——usage 实例快照派生（pi 权威 percent 投影）。
+   * [RT-4#7] 无快照返回 null（语义对齐 getInputTokens：无值 ≠ 0%）。
+   */
+  getUsagePercent(sessionId: string): number | null
   /** Get the underlying RpcClient for direct command sending (e.g., extension responses). */
   getRpcClient(sessionId: string): IRpcClient | undefined
 
@@ -339,6 +392,22 @@ export interface ISessionService {
    *（PluginService didDestroy 投递 + server 的挂起 UI 请求汇聚清理），单 handler 异常被隔离。
    */
   setOnSessionDestroyed(handler: (summary: SessionSummary) => void): void
+  /**
+   * [plugin-header-action-modal-points AP-4/u5a] 注册 session 激活回调（relay ③ 注册侧）：
+   * transport 层 session.switch 成功（含自动 restore 分支）经 notifySessionActivated 触发，
+   * PluginService 转发到激活订阅注册表定向投递 didActivate。**追加式回调列表**（D6a 同款，
+   * 显式禁 setOnSessionCreated 式单槽——单槽二次注册会覆盖，丢投递）。
+   */
+  onSessionActivated(handler: (summary: SessionSummary) => void): void
+  /**
+   * [plugin-header-action-modal-points AP-4/u5a] session 激活通知（relay ②，唯一触发点 =
+   * session-message-handler 的 switch 成功分支）。回调逐个隔离异常（notifySessionCreated
+   * 同款），不阻断 switch 主流程。
+   */
+  notifySessionActivated(summary: SessionSummary): void
+
+  /** 注册 plan 退出失效回调（abortPlan prompt 成功后上抛；server.ts setServices 注册，失效链消费单一出口在 transport 层） */
+  setOnPlanAborted(handler: (sessionId: string) => void): void
   /** Set thinking level for a session's pi subprocess. Returns pi-effective level (P3: pi clamps unsupported levels). */
   setThinkingLevel(sessionId: string, level: string): Promise<string>
   /** Steer an actively generating session */
@@ -407,7 +476,16 @@ export interface IConfigService {
   removeProviderByKind(providerId: string, kind: 'catalog' | 'custom'): Promise<{ removed: boolean; newDefault?: { provider: ProviderId; modelId: string } }>
   deleteProvider(providerId: string): Promise<{ removed: boolean; newDefault?: { provider: ProviderId; modelId: string } }>
   getProvider(providerId: string): { apiKey?: string; name?: string; type?: string; baseUrl?: string; models?: unknown[]; enabled?: boolean } | undefined
-  updateToolPermissions(permissions: Record<string, string>): void
+  /**
+   * models.json 是否处于损坏降级态（M4/RT-3#4）：原位文件已隔离、providers 读回空骨架。
+   * 随 config.providers RPC 下发 UI（字段名 corrupted）。
+   */
+  isModelsStoreCorrupted(): boolean
+  /**
+   * 写入工具权限（config.json.toolPermissions）。config.json 损坏降级态下拒绝空骨架覆写，
+   * 返回 {ok:false, code:'app_config_corrupted', error}（M4/RT-7#1）——RPC 层须透传 sendError。
+   */
+  updateToolPermissions(permissions: Record<string, string>): SaveAppConfigResult
   // ── Skill/Agent 加载路径（ADR-0021 §1 discovery.json v2 SSOT）──
   /** 覆盖 skill 路径（SkillDirConfig[] 带 scope，按 scope 分发写 projectPaths/globalPaths）。写 discovery.json + 投影 settings.json。 */
   setSkillDirs(dirs: SkillDirConfig[]): void
@@ -499,24 +577,24 @@ export interface IConfigService {
   // ── Worktree config（git-cwt-anywhere）──
   /** 读取 worktree 根目录（config.json.worktreeRootDir），默认 '~/worktrees'。 */
   getWorktreeRootDir(): string
-  /** 写入 worktree 根目录到 config.json.worktreeRootDir。 */
-  setWorktreeRootDir(dir: string): void
+  /** 写入 worktree 根目录到 config.json.worktreeRootDir。config.json 损坏降级态返回 {ok:false}（不写盘）。 */
+  setWorktreeRootDir(dir: string): SaveAppConfigResult
   /** 读取 setup 脚本路径（config.json.setupScript），默认 'custom-hooks/setup-worktree.sh'。 */
   getSetupScript(): string
-  /** 写入 setup 脚本路径到 config.json.setupScript。 */
-  setSetupScript(script: string): void
+  /** 写入 setup 脚本路径到 config.json.setupScript。config.json 损坏降级态返回 {ok:false}（不写盘）。 */
+  setSetupScript(script: string): SaveAppConfigResult
   /** 读取 bare-workspace 初始化脚本路径（config.json.bareSetupScript），默认 'custom-hooks/setup-worktree.sh'。 */
   getBareSetupScript(): string
-  /** 写入 bare-workspace 初始化脚本路径到 config.json.bareSetupScript。 */
-  setBareSetupScript(script: string): void
+  /** 写入 bare-workspace 初始化脚本路径到 config.json.bareSetupScript。config.json 损坏降级态返回 {ok:false}（不写盘）。 */
+  setBareSetupScript(script: string): SaveAppConfigResult
   /** 读取 worktree 创建超时时间（config.json.worktreeTimeout），默认 60 秒。 */
   getTimeout(): number
-  /** 写入 worktree 创建超时时间到 config.json.worktreeTimeout。 */
-  setTimeout(timeout: number): void
+  /** 写入 worktree 创建超时时间到 config.json.worktreeTimeout。config.json 损坏降级态返回 {ok:false}（不写盘）。 */
+  setTimeout(timeout: number): SaveAppConfigResult
   /** 读取默认基分支（config.json.defaultBaseBranch），默认 'origin/main'。 */
   getDefaultBaseBranch(): string
-  /** 写入默认基分支到 config.json.defaultBaseBranch。 */
-  setDefaultBaseBranch(baseBranch: string): void
+  /** 写入默认基分支到 config.json.defaultBaseBranch。config.json 损坏降级态返回 {ok:false}（不写盘）。 */
+  setDefaultBaseBranch(baseBranch: string): SaveAppConfigResult
   /** 读取是否启用 session 自动重命名（标志文件存在=开），默认 false。 */
   getAutoRenameEnabled(): boolean
   /** 设置 session 自动重命名开关（true 创建标志文件 / false 删除）。 */
@@ -569,7 +647,8 @@ export interface IExtensionService {
   uninstallExtension(name: string): Promise<void>
   installLocalDirectory(sourcePath: string): Promise<{ tempDir: string; candidates: import('@taiji/shared').ExtensionInfo[] }>
   installGitRepository(url: string): Promise<{ tempDir: string; candidates: import('@taiji/shared').ExtensionInfo[] }>
-  finishInstall(tempDir: string, selected: string[]): Promise<void>
+  /** 逐包隔离复制选中扩展到 extensions/（tmp+rename 原子换代）；返回失败清单（空 = 全部成功，非空时成功包已落盘、失败包旧版本保留）。 */
+  finishInstall(tempDir: string, selected: string[]): Promise<import('./services/extension-service.js').FinishInstallFailure[]>
   cancelInstall(tempDir: string): Promise<void>
 }
 

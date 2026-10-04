@@ -33,8 +33,13 @@ export const CHANNEL_HANDSHAKE_KEY = Symbol.for(
 /** 握手协议版本号。读写 slot 时校验 version !== 1 视为不兼容（warn + 重建 slot）。 */
 const HANDSHAKE_VERSION = 1;
 
-/** channel 名称（ask-user 固定注册 "ask_user"）。 */
-const ASK_USER_CHANNEL = "ask_user";
+/** 注册的 channel 名（D9 双名注册两代通道）。
+ *  channel 名由孙进程 select title 的 marker 经 normalizeChannelName 派生
+ *  （subagent-engine-sdk ui-channels.ts：剥 "\x00TAIJI_" 前缀 + 小写化）：
+ *    - 旧孙进程（askUserInteract / ASK_USER_MARKER "\x00TAIJI_ASK_USER"）→ "ask_user"
+ *    - 新孙进程（uiFormInteract / UI_FORM_MARKER "\x00TAIJI_UI_FORM"）→ "ui_form"
+ *  孙进程 npm 版本不可控，同名 handler 注册两代通道名；旧名随 D7 窗口退役。 */
+const ASK_USER_CHANNELS = ["ask_user", "ui_form"] as const;
 
 /**
  * channel registry 的本地等价接口（与 packages/subagent-core 的 UiChannelRegistry 形状一致，
@@ -91,24 +96,26 @@ function ensureSlot(): ChannelRegistryHandshake {
 }
 
 /**
- * 注册 ask_user channel handler 到 globalThis 握手 slot。
+ * 注册 ask_user channel handler 到 globalThis 握手 slot（D9 双名：ask_user + ui_form）。
  *
  * 行为：
- *   1. slot 不存在或 version 不兼容 → 建 slot（仅 pending），handler 入 pending；
- *      **slot.registry 保持 undefined**（M4 核心：ask-user 不建 registry）
- *   2. slot 存在但 registry 未就绪 → handler 入 pending
- *   3. slot 存在且 registry 就绪 → 直接调 registry.register("ask_user", handler)
+ *   1. slot 不存在或 version 不兼容 → 建 slot（仅 pending），handler 按 ASK_USER_CHANNELS
+ *      逐名入 pending；**slot.registry 保持 undefined**（M4 核心：ask-user 不建 registry）
+ *   2. slot 存在但 registry 未就绪 → handler 逐名入 pending
+ *   3. slot 存在且 registry 就绪 → 对每个 channel 名调 registry.register(name, handler)
  *
  * 多次调用幂等：registry 就绪时 register 同名覆盖；未就绪时 pending.length 增长
  * （packages/subagent-core flush 时一次性消费所有 pending）。
  *
- * @param handler ask_user channel handler（createAskUserChannelHandler 产出）
+ * @param handler ask_user channel handler（createAskUserChannelHandler 产出，双名共用同一实现）
  */
 export function registerAskUserChannelHandler(handler: ChannelHandler): void {
 	const slot = readSlot() ?? ensureSlot();
-	if (slot.registry !== undefined) {
-		slot.registry.register(ASK_USER_CHANNEL, handler);
-		return;
+	for (const channel of ASK_USER_CHANNELS) {
+		if (slot.registry !== undefined) {
+			slot.registry.register(channel, handler);
+		} else {
+			slot.pending.push({ channel, handler });
+		}
 	}
-	slot.pending.push({ channel: ASK_USER_CHANNEL, handler });
 }

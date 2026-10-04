@@ -157,9 +157,9 @@ describe("[U5 / §3.2.5] worktree 续聊重建三失败形态（WorktreeManager.
       kind: "rebuilt",
       handle: { path: DERIVED_CHECKOUT, branch: BRANCH, baseCommit: BASE_COMMIT, mainCwd: REPO },
     });
-    // 注册表补条目（pid=0 占位——续聊轮 spawn 后 registerPid 补全）
+    // 注册表补条目（pid = 宿主进程 pid——孤儿判据锚定宿主死活，同 create）
     expect(mockAdd).toHaveBeenCalledWith(
-      expect.objectContaining({ repo: REPO, branch: BRANCH, checkout: DERIVED_CHECKOUT, pid: 0 }),
+      expect.objectContaining({ repo: REPO, branch: BRANCH, checkout: DERIVED_CHECKOUT, pid: process.pid }),
     );
     // patch 实际应用（--check 干跑 + apply 两步）
     const applied = mockExecFile.mock.calls.filter((c) => (c[1] as readonly string[])[0] === "apply");

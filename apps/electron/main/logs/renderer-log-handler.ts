@@ -197,13 +197,15 @@ function sweepIdleEntries(now: number): void {
 
 /**
  * 合法捕获面（RendererErrorSource 联合）：三件套（D2-①）+
- * 'inbound-frame-dropped' 结构化标记（crash-forensics D8 入站超界帧丢弃上报）。
+ * 'inbound-frame-dropped' 结构化标记（crash-forensics D8 入站超界帧丢弃上报）+
+ * 'runtime-start-failed'（RD-3#2：runtime 启动失败真因，连接屏显示 + 台账留痕）。
  */
 const VALID_SOURCES: ReadonlySet<string> = new Set([
   'vue-error-handler',
   'window-onerror',
   'unhandledrejection',
   'inbound-frame-dropped',
+  'runtime-start-failed',
 ])
 
 function isRendererLogPayload(v: unknown): v is RendererLogPayload {

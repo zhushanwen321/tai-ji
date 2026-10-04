@@ -58,6 +58,7 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
 import { ComposerInput, ComposerInputDepsKey } from '@taiji/ui/features/composer'
 import CommandPopover from '@/components/panel/CommandPopover.vue'
 import Composer from '@/components/panel/Composer.vue'
+import type { ShellInputInstance } from '@/composables/panel/composer-shell'
 
 /** ui ComposerInput deps 注入（W4：ComposerInput 迁 ui 包，deps 经 inject token 提供） */
 const composerInputDeps = {
@@ -127,10 +128,11 @@ describe('ComposerInput slash-trigger（U1-U5）', () => {
  * autocomplete，不通过 RPC 暴露），由 CommandPopover slashCommands computed 在
  * 前端注入。U7 断言 4 项 = 3 pi 命令 + 1 前端注入 compact。
  *
- * [ADR-0050 修订] 本组 fixture 不含 skill 项：panel slash 段过滤 skill 项（双入口消除）
- * 后 source='skill' 的 pi 命令不进列表；本组用例的测试对象是键盘导航/越界收敛（与 skill
- * 语义无关），凑数第三条用 extension source 保持 4 项列表形态不变。panel slash 段的
- * skill 过滤断言由 command-popover-landing.test.ts L5b / composer-skill-trigger.test.ts P5 覆盖。
+ * [ADR-0050 二次修订] 本组 fixture 不含 skill 项且未传 registry skill props：panel slash 段
+ * 的 skill 项已换源保留（pi 快照项剔除 + registry 项补入），无 registry 源传入时列表形态
+ * 与命令等价；本组用例的测试对象是键盘导航/越界收敛（与 skill 语义无关），凑数第三条用
+ * extension source 保持 4 项列表形态不变。panel slash 段的 skill 换源断言由
+ * command-popover-landing.test.ts L5 / composer-skill-trigger.test.ts P5 覆盖。
  */
 const MOCK_CMDS = [
   { name: 'commit', source: 'extension' },
@@ -181,6 +183,31 @@ describe('CommandPopover slash query 过滤（U6-U8）', () => {
     pushCommands('s1')
     await flushPromises()
     await nextTick()
+  }
+
+  /** N-2c/N-2d 精确交叉前置（command-enter-exact-send D4）：造 composer 输入区
+   *  （contenteditable div）+ 显式 focus + shellInputRef 的 getInputElement 指向它——
+   *  D1 前置② activeElement 门（F-1 后识别源 = expose 元素，非 $el）的测试态通道：
+   *  环境 activeElement 默认 body，缺 focus 或缺通道则门 fail-closed 进不了直发分支
+   *  （与 composer-keydown.test.ts setupExactChain 同款前置）。withShellRef=false =
+   *  通道缺省降级态（focus 照做，证明拦截来自通道缺省而非焦点缺失）。 */
+  async function mountPopoverExact(query: string, withShellRef = true): Promise<void> {
+    const inputArea = document.createElement('div')
+    inputArea.setAttribute('contenteditable', 'true')
+    document.body.appendChild(inputArea)
+    const shellInputRef = withShellRef
+      ? ref<ShellInputInstance | null>({ getInputElement: () => inputArea } as unknown as ShellInputInstance)
+      : undefined
+    wrapper = mount(CommandPopover, {
+      attachTo: document.body,
+      props: { open: true, type: 'slash', sessionId: 's1', query, shellInputRef },
+    })
+    await flushPromises()
+    pushCommands('s1')
+    await flushPromises()
+    await nextTick()
+    inputArea.focus()
+    expect(document.activeElement).toBe(inputArea) // 造态自检：焦点门前置确已生效
   }
 
   it('U6 query="comm" → 仅渲染 /commit（1 项）', async () => {
@@ -300,6 +327,38 @@ describe('CommandPopover slash query 过滤（U6-U8）', () => {
     vm.handleKeydown(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }))
     await nextTick()
     expect(highlightedRowIndex()).toBe(1)
+  })
+
+  // ── N-2c/N-2d exactMatch 交叉（command-enter-exact-send D4）────────────────────
+  // 本族既有用例 query 为空/前缀 → 非精确 → 恒走 select（既有断言零改动，0 红可保）；
+  // 此处补完整名（query=commit → '/'+query === '/commit'）两态交叉：焦点门通过 →
+  // select-and-send 直发；通道缺省 → fail-closed 回落 select（D1 门语义，与
+  // composer-keydown.test.ts 精确锁/门降级用例同源互证）。
+  it('N-2c 精确交叉：query=完整名 + 输入区 focus → Enter 走 select-and-send（不落 select）', async () => {
+    await mountPopoverExact('commit')
+    const vm = wrapper!.vm as unknown as { handleKeydown: (e: KeyboardEvent) => boolean }
+
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    expect(() => vm.handleKeydown(enter)).not.toThrow()
+
+    const sent = wrapper!.emitted('select-and-send')
+    expect(sent).toHaveLength(1)
+    // 直发 payload = 收敛读点项 + 原事件（D2 钉死传原事件、零合成）
+    expect(sent![0][0]).toMatchObject({ type: 'slash', name: '/commit', originalEvent: enter })
+    expect(wrapper!.emitted('select')).toBeFalsy() // 直发不经 select 通路
+    expect(enter.defaultPrevented).toBe(true)
+  })
+
+  it('N-2d 精确交叉降级：query=完整名但 shellInputRef 缺省（门 fail-closed）→ Enter 落 select 不直发', async () => {
+    await mountPopoverExact('commit', false)
+    const vm = wrapper!.vm as unknown as { handleKeydown: (e: KeyboardEvent) => boolean }
+
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    expect(() => vm.handleKeydown(enter)).not.toThrow()
+
+    expect(wrapper!.emitted('select')?.at(-1)?.[0]).toMatchObject({ type: 'slash', name: '/commit' })
+    expect(wrapper!.emitted('select-and-send')).toBeFalsy()
+    expect(enter.defaultPrevented).toBe(true)
   })
 })
 

@@ -34,6 +34,11 @@ export interface SourceDetectResult {
   agentCount?: number
   /** provider 数量（W1 不实现，留 undefined）。W2/W3 填充。 */
   providerCount?: number
+  /**
+   * 检测异常显形（RT-5#5）：目录存在但不可读（EACCES 等）时置 'unreadable'——
+   * 「不可读」≠「未安装」≠「0 个」，三态须可区分；此时计数字段缺省（不填 0 假数据）。
+   */
+  error?: 'unreadable'
 }
 
 // ══ W2（cw-2026-07-26-migration-other-agents）—— Provider 导入预览/结果 DTO ══
@@ -163,6 +168,14 @@ export interface ProviderImportedItem {
   status: 'imported' | 'skipped' | 'failed'
   reason?: string
   quotaAutoEnabled?: boolean
+  /**
+   * 该 provider 导入过程中产生的**用户可见告警**（U6②：写侧丢弃的非法模型项等）。
+   *
+   * 与 preview 侧 per-provider `warnings` 同族语义：`status: 'imported'` 但有告警时，
+   * UI 应展示「已导入，但 N 个模型项因 id 非法被跳过」——静默丢弃违反 P0「故障要响亮」。
+   * 可选字段，向后兼容（旧消费方无此字段行为不变）。
+   */
+  warnings?: string[]
 }
 
 /**

@@ -43,8 +43,9 @@ vi.mock('@taiji/core/transport/api/domains/session', () => ({
   migrateImage: vi.fn(),
   writeSegments: vi.fn(),
   getCommands: vi.fn().mockResolvedValue({ commands: [] }),
-  getSubagents: vi.fn().mockResolvedValue([]),
-  getWorkflows: vi.fn().mockResolvedValue([]),
+  // RT-4#8 起 API 返结构化形状 { subagents, oversize }（store 按此解构）
+  getSubagents: vi.fn().mockResolvedValue({ subagents: [], oversize: false }),
+  getWorkflows: vi.fn().mockResolvedValue({ workflows: [], oversize: false }),
   getAgentCallHistory: vi.fn().mockResolvedValue([]),
 }))
 vi.mock('@taiji/core/transport/api/domains/chat', () => ({
@@ -98,6 +99,9 @@ vi.mock('@/composables/features/command/useCommandStore', () => ({
     appCommands: { value: [] },
     shortcutOverrides: { value: {} },
     clearCommands: vi.fn(),
+    // registerAppCommands（useAppCommands）在 initApp 启动期调用——缺此方法会让
+    // bootstrap fail-fast，TC-5 的重连重拉用例整条崩
+    registerApp: vi.fn(),
   }),
 }))
 // ── useNewTaskFlow mock（isActive/cancelFlow/startFlow/currentSession controllable）──
@@ -283,7 +287,7 @@ describe('useSidebar 接缝（TC-1..TC-4）', () => {
     }
     getSubagentsMock.mockClear()
     getWorkflowsMock.mockClear()
-    getSubagentsMock.mockResolvedValueOnce([record])
+    getSubagentsMock.mockResolvedValueOnce({ subagents: [record], oversize: false })
 
     const sidebar = useSidebar()
     useSessionStore().applySnapshot({ groups: [group([summary('s1')])] })

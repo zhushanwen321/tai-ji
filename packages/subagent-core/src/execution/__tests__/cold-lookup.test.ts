@@ -290,6 +290,49 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
 
     expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(ResurrectDeniedError);
     expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(/worktree isolation/);
+    // [R5] pi 形态（sessionFile 有值）：历史保全占位维持 sessionFile 路径渲染
+    expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(
+      new RegExp(`remains intact at ${sessionFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.`),
+    );
+    expect(vi.mocked(deps.register)).not.toHaveBeenCalled();
+  });
+
+  it("[R5] worktree 绑定丢失 zcode 形态（sessionFile undefined）→ 拒绝文案不产出 at undefined，改述隔离会话库承载", () => {
+    // zcode record 的历史由隔离会话库经 engineHandle.sessionRef 承载、不随 worktree
+    // checkout 丢失——sessionFile 占位按锚形态分流，硬渲染会产出 "at undefined"。
+    // 拒绝语义（ResurrectDeniedError）不变，仅修文案占位准确性。
+    const deps = makeDeps({
+      disk: [
+        makeFound({
+          worktree: true,
+          engine: "zcode",
+          sessionFile: undefined,
+          engineHandle: { sessionRef: { sessionId: "zc-1", dbPath: "/tmp/zc/db.sqlite" }, poolKey: "shared" },
+        }),
+      ],
+    });
+
+    expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(ResurrectDeniedError);
+    expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(/worktree isolation/);
+    // 不再出现 "at undefined" 占位泄漏
+    expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow(/isolated session db/);
+    let message = "";
+    try {
+      coldLookupForAction(makeDeps({
+        disk: [
+          makeFound({
+            worktree: true,
+            engine: "zcode",
+            sessionFile: undefined,
+            engineHandle: { sessionRef: { sessionId: "zc-1", dbPath: "/tmp/zc/db.sqlite" }, poolKey: "shared" },
+          }),
+        ],
+      }), "sa-cold-1", true);
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    expect(message).not.toContain("at undefined");
+    expect(message).toContain("not affected by the lost checkout");
     expect(vi.mocked(deps.register)).not.toHaveBeenCalled();
   });
 

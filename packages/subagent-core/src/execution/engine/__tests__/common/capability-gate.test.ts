@@ -6,7 +6,9 @@
 //
 // 覆盖（构建者白盒 + 使用者黑盒）：
 //   1. per-engine 拦截矩阵：pi 全放行（含 maxTurns/fork/worktree——V4⑤
-//      反向守护，pi 既有合法能力零拦截）；zcode maxTurns/worktree 拦
+//      反向守护，pi 既有合法能力零拦截）；zcode maxTurns 拦（worktree 随
+//      [U3 / R2 升位] sandbox=emulated 放行——worktree 隔离执行者是 core 层
+//      worktree-manager，引擎侧仅消费 task.cwd；none 形态判据防线保留）
 //      （[modeless 波5 收尾] conversation 显式参数分支随派发参数删除退役）
 //   2. 错误族：engine_capability_unsupported + recovery 含可操作指引（调参数 / 修
 //      manifest / 升级引擎包——W3 协议化口径，不再指向「engine: pi」内置兜底）
@@ -90,7 +92,7 @@ describe("capability-gate（D3-④ 拦截矩阵）", () => {
     expect(() => gate(PI_CAPS, { forkFromSessionFile: "/tmp/sess.jsonl", worktree: { path: "/tmp/wt" } }, "pi")).not.toThrow();
   });
 
-  it("[U6 / §3.2.6 要点 4] zcode conversation=cold：fork 通道族随 cold 放行；maxTurns/worktree 仍拦", () => {
+  it("[U6 / §3.2.6 要点 4] zcode conversation=cold：fork 通道族随 cold 放行；maxTurns 仍拦", () => {
     // zcode manifest conversation "unsupported" → "cold"（U6）：conversation 位
     // 经 gate（冷恢复 = resume 读 + 新 session 注入，能力位如实声明）——[modeless
     // 波5 收尾] 显式 conversation 参数分支已删，本位仅在 fork OR 借位/mismatch/
@@ -100,16 +102,34 @@ describe("capability-gate（D3-④ 拦截矩阵）", () => {
     //——zcode record 无 pi sessionFile 锚，守卫按锚缺失给 message/reopen 指引）。
     expect(() => gate(ZCODE_CAPS, { fork: true })).not.toThrow();
     expect(() => gate(ZCODE_CAPS, { forkFromSessionFile: "/tmp/sess.jsonl" })).not.toThrow();
-    // 能力位未变的拦截面（maxTurns/worktree）不随 conversation 升级回退
-    const cases: Array<[TaskShapeForGate, RegExp]> = [
-      [{ maxTurns: 10 }, /不支持 maxTurns/],
-      [{ worktree: true }, /不支持 worktree 隔离/],
-      [{ worktree: { path: "/tmp/wt" } }, /不支持 worktree 隔离/],
-    ];
-    for (const [task, pattern] of cases) {
-      const err = gateError(ZCODE_CAPS, task);
+    // 能力位未变的拦截面（maxTurns）不随 conversation/sandbox 升级回退
+    const err = gateError(ZCODE_CAPS, { maxTurns: 10 });
+    expect(err.code).toBe("engine_capability_unsupported");
+    expect(err.message).toMatch(/不支持 maxTurns/);
+    expect(err.message).toContain("capabilities");
+    expect(err.recovery).toMatch(/去掉|不传/);
+    expect(err.recovery).toMatch(/修 manifest|升级引擎包/);
+  });
+
+  it("[U3 / R2 升位] zcode sandbox=emulated：带 worktree 任务不再抛 engine_capability_unsupported", () => {
+    // zcode manifest sandbox "none" → "emulated"（R2）：worktree 隔离的全部重资产
+    // （创建/patch 收集/回收/续聊重建）在 core 层 worktree-manager，引擎侧只消费
+    // task.cwd（zcode = session/create 的 workspacePath）——声明对齐实际行为后，
+    // gate 判据（caps.sandbox === 'none' 拒）对 emulated 放行。manifest 真值断言
+    // 防用例空转（manifest 意外回退 none 时本用例红，而非静默通过）。
+    expect(ZCODE_CAPS.sandbox).toBe("emulated");
+    expect(() => gate(ZCODE_CAPS, { worktree: true })).not.toThrow();
+    expect(() => gate(ZCODE_CAPS, { worktree: { path: "/tmp/wt" } })).not.toThrow();
+  });
+
+  it("sandbox 判据防线保留：sandbox='none' 引擎带 worktree 仍同步拒（升位不放松判据本体）", () => {
+    // gate 判据本体不变——未来引擎若真不接 cwd 消费（声明 none），worktree 任务
+    // 仍在 record 创建前被同步拒（防线语义，R2 升位只改声明不改判据）。
+    const noneCaps: EngineCapabilities = { ...ZCODE_CAPS, sandbox: "none" };
+    for (const task of [{ worktree: true }, { worktree: { path: "/tmp/wt" } }]) {
+      const err = gateError(noneCaps, task);
       expect(err.code).toBe("engine_capability_unsupported");
-      expect(err.message).toMatch(pattern);
+      expect(err.message).toMatch(/不支持 worktree 隔离/);
       expect(err.message).toContain("capabilities");
       expect(err.recovery).toMatch(/去掉|不传/);
       expect(err.recovery).toMatch(/修 manifest|升级引擎包/);

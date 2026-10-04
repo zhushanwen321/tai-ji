@@ -176,11 +176,14 @@ export function setThinkingLevel(sessionId: string, level: string): Promise<{ se
 
 /**
  * 获取 session 派生的 subagent 列表（runtime 从主 session JSONL 提取）。
- * reply payload 是 { sessionId, subagents }，解包 .subagents。
+ * reply payload 是 { sessionId, subagents, oversize? }——结构化返回：oversize=true
+ * （session 文件 >32MB 预检阈值）时 subagents 恒空且列表不可用，消费方（store）据此
+ * 显示降级提示而非空列表；缺省 false（mock / 旧 runtime）。
  */
-export async function getSubagents(sessionId: string): Promise<SubagentRecord[]> {
-  const reply = await command('session.getSubagents', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)
-  return reply.subagents
+export async function getSubagents(
+  sessionId: string,
+): Promise<{ subagents: SubagentRecord[]; oversize?: boolean }> {
+  return command('session.getSubagents', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
 /**
@@ -209,11 +212,13 @@ export function setSubagentDefaultEngine(engineId: string): Promise<{ engineId: 
 
 /**
  * 获取 session 派生的 workflow 列表（runtime 从主 session JSONL 的 workflow-state-link 提取）。
- * reply payload 是 { sessionId, workflows }，解包 .workflows。
+ * reply payload 是 { sessionId, workflows, oversize? }——结构化返回（oversize 语义同
+ * getSubagents：true = 文件过大列表不可用，恒空数组）。
  */
-export async function getWorkflows(sessionId: string): Promise<WorkflowRunRecord[]> {
-  const reply = await command('session.getWorkflows', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)
-  return reply.workflows
+export async function getWorkflows(
+  sessionId: string,
+): Promise<{ workflows: WorkflowRunRecord[]; oversize?: boolean }> {
+  return command('session.getWorkflows', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
 /**

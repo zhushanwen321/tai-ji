@@ -7,7 +7,7 @@
  *
  * 覆盖：
  * - runWorkflow：spec → 创建 run + workerHost.start + store.save + emit pending:register
- * - abortRun：done no-op / running→done + emit pending:unregister
+ * - abortRun：done no-op / running→done + 直落 pending:unregister
  * - terminateRunningRuns：session 切换/关闭时仅 running 被终止（done,failed 落盘）
  * - scheduleTimeBudget：定时器到期 → abortRun(done,time_limited)（用 fake timers）
  * - evictDoneRunsBeyondCap：done run 内存淘汰白名单/排序/tie
@@ -102,6 +102,7 @@ function makeDeps(): LifecycleDeps & {
   store: { save: ReturnType<typeof vi.fn>; loadAll: ReturnType<typeof vi.fn> };
   workerHost: { start: ReturnType<typeof vi.fn> };
   eventBus: { emit: ReturnType<typeof vi.fn> };
+  appendEntry: ReturnType<typeof vi.fn>;
   onRunDone: ReturnType<typeof vi.fn>;
   log: ReturnType<typeof vi.fn>;
 } {
@@ -111,6 +112,7 @@ function makeDeps(): LifecycleDeps & {
     runner: { run: vi.fn(async () => ({})) },
     runs: new Map(),
     eventBus: { emit: vi.fn() },
+    appendEntry: vi.fn(),
     onRunDone: vi.fn(),
     log: vi.fn(),
   } as unknown as ReturnType<typeof makeDeps>;
@@ -142,10 +144,11 @@ describe("scheduleTimeBudget", () => {
     expect(run.state.status).toBe("done");
     expect(run.state.reason).toBe("time_limited");
     expect(run.state.error).toContain("Time budget exceeded");
-    // 完成通知
-    expect(deps.eventBus.emit).toHaveBeenCalledWith("pending:unregister", {
+    // 完成通知（[reload-closeout D4] 直落）
+    expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
       id: "wf-budget-1",
       reason: "time_limited",
+      status: "time_limited",
     });
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
   });
@@ -308,9 +311,10 @@ describe("runWorkflow", () => {
     expect(run.state.status).toBe("done");
     expect(run.state.reason).toBe("time_limited");
     expect(run.state.error).toContain("Time budget exceeded");
-    expect(deps.eventBus.emit).toHaveBeenCalledWith("pending:unregister", {
+    expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
       id: runId,
       reason: "time_limited",
+      status: "time_limited",
     });
   });
 
@@ -366,7 +370,7 @@ describe("runWorkflow", () => {
 // ── abortRun ─────────────────────────────────────────────────
 
 describe("abortRun", () => {
-  it("running run → done,aborted：releaseRuntime + emit pending:unregister", async () => {
+  it("running run → done,aborted：releaseRuntime + 直落 pending:unregister", async () => {
     const { run, terminate } = makeRunningRealRun("wf-abort-1");
     const deps = makeDeps();
     deps.runs.set("wf-abort-1", run);
@@ -378,9 +382,10 @@ describe("abortRun", () => {
     expect(run.state.error).toBe("user cancelled");
     expect(terminate).toHaveBeenCalledTimes(1);
     expect(run.runtime).toBeUndefined();
-    expect(deps.eventBus.emit).toHaveBeenCalledWith("pending:unregister", {
+    expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
       id: "wf-abort-1",
       reason: "aborted",
+      status: "aborted",
     });
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
   });
@@ -466,13 +471,15 @@ describe("terminateRunningRuns", () => {
 
     await terminateRunningRuns(deps, "Session shutdown: run terminated");
 
-    expect(deps.eventBus.emit).toHaveBeenCalledWith("pending:unregister", {
+    expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
       id: "wf-term-3",
       reason: "failed",
+      status: "failed",
     });
-    expect(deps.eventBus.emit).toHaveBeenCalledWith("pending:unregister", {
+    expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
       id: "wf-term-4",
       reason: "failed",
+      status: "failed",
     });
     // 对齐 session_start 恢复先例：主 agent 已离开本 session，不发完成通知
     expect(deps.onRunDone).not.toHaveBeenCalled();
@@ -530,16 +537,18 @@ describe("terminateRunningRuns", () => {
     // pending 通知幽灵注销（列表残留永不清理的 running 条目）
     expect(bad.state.status).toBe("done");
     expect(bad.state.reason).toBe("failed");
-    expect(deps.eventBus.emit).toHaveBeenCalledWith("pending:unregister", {
+    expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
       id: "wf-term-err",
       reason: "failed",
+      status: "failed",
     });
     // 其余 run 正常走完落盘 + unregister（单 run 失败不中断批量终止）
     expect(good.state.status).toBe("done");
     expect(deps.store.save).toHaveBeenCalledWith(good);
-    expect(deps.eventBus.emit).toHaveBeenCalledWith("pending:unregister", {
+    expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
       id: "wf-term-ok",
       reason: "failed",
+      status: "failed",
     });
   });
 });
