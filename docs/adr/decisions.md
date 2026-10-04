@@ -362,6 +362,18 @@ GitHub issue #24（Windows 10 窗口外壳四问题）复核结论：用户抱�
 ### ADR-0076 窗口尺寸持久化三字段裁决：{width, height, isMaximized}、仅主窗口、close 同步 flush（2026-10-01）
 非 mac 平台的窗口尺寸持久化（`<getDataDir()>/window-state.json`）字段恰三件 `{width, height, isMaximized}`，四条语义裁决：① **位置（x,y）不持久化**——窗口由 Electron 默认居中放置；已接受代价：多显示器用户重启后窗口回主屏居中、不记忆用户摆放位置（位置记忆引入恢复错位问题家族——副屏拔除后窗口开在不可见区域、「相交不足一半丢弃」的阈值裁决、恢复归属歧义，收益与证据不匹配；重审触发 = 用户反馈不可忍受）。② **仅主窗口写者**——只有 bootstrap 创建的主窗口挂持久化监听与启动恢复（`isMainWindow` 门标志），create-window IPC 迁移窗口不读不挂，持久化文件全局单写者，多窗口 last-writer-wins 互踩结构性消除。③ **close 同步 flush**——关闭事件取消防抖定时器立即落盘，`isMaximized` 取退出时刻窗口实际值：「最大化→直接关闭」序列下最大化期间跳过写、无防抖数据，须以退出时刻状态落 `isMaximized: true`，重启才能按正常态尺寸 show 后恢复最大化，同时消除防抖窗口的退出竞态。④ **最大化/全屏态跳过防抖写**——字段恒记最近一次正常态尺寸；resize/move 防抖 500ms 合并写；启动读取损坏/字段非法 → 丢弃回默认尺寸 + warn 日志（不阻断启动），合法值 clamp 到当前工作区后生效。实装 `apps/electron/main/window/window-state.ts`（不 import electron，窗口经最小结构接口注入；tmp+rename 原子写）。默认尺寸公式（主屏工作区 62%/75%、cap 1440×960、下限 800×600）与 darwin 分支恒 1200×800 的零改动边界同属本条裁决，数值权威 = [DESIGN.md §11](../DESIGN.md)。
 
+### ADR-0104 远程访问凭据走跨进程文件热读，开启信号走 argv flag（2026-10-03 用户裁决登记）
+
+**决策**：远程访问（手机浏览器经局域网直连 runtime，词条见 [CONTEXT.md](../CONTEXT.md)）三个通道裁决：
+
+1. **remote token 凭据通道 = `<dataDir>/remote-access.json`（0600）跨进程文件**：main 是唯一写者（`apps/electron/main/remote-access/store.ts`，原子写 = 同目录 tmp + fsync + renameSync，防读侧撕裂），runtime **每次 WS auth 握手时读文件取当前值**（`packages/runtime/src/transport/connection-manager.ts` 的 `readRemoteAccessToken`，由组合根以 `remoteTokenProvider` 注入，关态不装配零 IO）——token 轮换 = main 重写文件即生效，不重启 runtime、不中断在途 turn；文件缺失/损坏 → remote 凭据成员为空、退化为仅 spawn token 可认证（fail-closed）+ 频控日志（同因首次响亮含恢复指引，读取成功即重置）。
+2. **开启信号 = argv flag `--remote-access`（配套 `--mobile-dist=<path>`），新增 env 键 = 0**：listen host（`127.0.0.1` / `0.0.0.0`）是启动期一次性决策，supervisor 按 `remote-access.json` 的 enabled 在 spawn 时现读拼参（非快照）；argv 不经环境变量继承链——scripts 直跑、验证脚本、vitest e2e 池等非 supervisor 启动路径不传 flag 即天然关态，构造性免疫、无需任何剥除机制。
+3. **shape 判据单源 = shared**（`packages/shared/src/remote-access.ts` 的 `isRemoteAccessConfigShape` / `REMOTE_TOKEN_HEX64` / `REMOTE_ACCESS_FILENAME`）；main 写侧从严（hex + createdAt 全验）、runtime 读侧从宽（enabled=false 早退跳过 hex）的不对称是文档化刻意差异，不上收、不参数化。
+
+**依据**：① env 注入 remote token 不可行——env 在 spawn 时固化，「轮换即时生效」与「桌面无感（重启 runtime 会杀 pi 进程树、中断在途 turn）」不可兼得：轮换触发重启则杀在途 turn，不重启则 runtime 持有旧值永不刷新；文件热读使「轮换 = 写文件」由构造成立。② env 开启信号不可行——关态剥除只挂 supervisor spawn 一路，仓内存在多条直跑 runtime 的启动路径（`validate-runtime-bundle.sh`、verify-ws-auth 等验证脚本、e2e 池），任何一条漏剥即 fail-open（LAN 监听面）；argv 判据让该整族路径不传 flag 即关态，无需逐路径设防。③ main/runtime 共享 dataDir 是既有架构约定（`resolveRuntimeToken` 读 `<dataDir>/runtime-token` 同通道先例）；auth 是低频事件（每连接一次），每握手读 4KB 文件成本可忽略。④ 轮换不踢存量已认证连接（auth 只门禁握手是现状语义）——「怀疑泄漏」的完整处置 = 面板轮换（断新接入）+ 关开开关（重启 runtime 踢全部存量连接），登记于 CONTEXT.md「remote token」词条。
+
+**登记**：契约 SSOT = `packages/shared/src/remote-access.ts`；配置面 = `apps/electron/main/remote-access/`（写侧）与 `packages/runtime/src/transport/connection-manager.ts`（读侧鉴权消费）；无新约束族、无新增机器检查——fail-closed 语义由 connection-manager 单测锁定（E5 dist 探测 / E10 损坏重建处置单测在位）。设计过程产物 `.tmp/tech-design/remote-use-mobile.md`（不入库、git 不可追溯），本条为通道裁决的权威登记处。
+
 ## 已否谱系（决策已过时/被推翻，一行注记防重新发现旧坑）
 
 

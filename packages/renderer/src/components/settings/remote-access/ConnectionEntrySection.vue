@@ -21,7 +21,9 @@
     </p>
 
     <template v-else>
-      <!-- 多地址切换（多网卡场景；单地址不渲染选择器） -->
+      <!-- 多地址切换（多网卡场景；单地址不渲染选择器）。
+           下拉项文本 = url + Tailscale 项标注后缀——SelectItemText 的 textContent 即
+           SelectValue 触发器显示文本，后缀形态让关闭态也能看出选中的是 Tailscale 地址 -->
       <div v-if="info.urls.length > 1" class="flex items-center justify-between">
         <Label class="text-[12px] text-fg">{{ t('settings.remoteAccess.addressLabel') }}</Label>
         <Select :model-value="selectedUrl" @update:model-value="(v) => (selectedUrl = String(v))">
@@ -29,10 +31,21 @@
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem v-for="url in info.urls" :key="url" :value="url">{{ url }}</SelectItem>
+            <SelectItem v-for="entry in info.urls" :key="entry.url" :value="entry.url">
+              {{ entry.kind === 'tailscale' ? `${entry.url}${t('settings.remoteAccess.tailscaleSuffix')}` : entry.url }}
+            </SelectItem>
           </SelectContent>
         </Select>
       </div>
+
+      <!-- 选中 Tailscale 地址的使用前提（选中态提示；单 tailscale 地址无下拉也渲染） -->
+      <p
+        v-if="selectedKind === 'tailscale'"
+        class="text-[11px] leading-relaxed text-muted"
+        data-testid="remote-access-tailscale-selected-hint"
+      >
+        {{ t('settings.remoteAccess.tailscaleSelectedHint') }}
+      </p>
 
       <div class="flex items-start gap-4">
         <!-- 二维码（qrcode toDataURL 自绘 img，不引 vue 包装依赖）；生成失败/在途渲染占位提示 -->
@@ -101,15 +114,20 @@ const props = defineProps<{
 const { t } = useI18n()
 const { copied, copy } = useCopy()
 
-/** 当前展示的地址候选（默认首个；urls 变化后失效时回落首个） */
+/** 当前展示的地址候选（默认首个；urls 变化后失效时回落首个——数组已按 Tailscale 优先排序） */
 const selectedUrl = ref('')
 
 watch(
   () => props.info.urls,
   (urls) => {
-    if (!urls.includes(selectedUrl.value)) selectedUrl.value = urls[0] ?? ''
+    if (!urls.some((entry) => entry.url === selectedUrl.value)) selectedUrl.value = urls[0]?.url ?? ''
   },
   { immediate: true },
+)
+
+/** 选中候选的地址类型（lan 兜底：selectedUrl 未命中时按局域网形态渲染，不显示 Tailscale 提示） */
+const selectedKind = computed(() =>
+  props.info.urls.find((entry) => entry.url === selectedUrl.value)?.kind ?? 'lan',
 )
 
 /** 完整连接链接：地址候选（`http://<ip>:<port>`）拼 remote token（design §3.1 成功路径第 2 步形态） */

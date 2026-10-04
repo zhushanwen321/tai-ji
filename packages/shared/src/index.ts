@@ -180,7 +180,7 @@ export type { SubagentRecord, SubagentStatus, ClosedDisplayStatus } from './suba
 // 含 IPC 信封类型 RemoteAccessInfo/RemoteAccessToggleResult，main/preload/renderer
 // 三端共同 import；含无策略 shape 谓词（main/runtime 双侧 shape 判据单源）；
 // 纯类型/常量/纯函数无 node 依赖，barrel 安全）。
-export type { RemoteAccessConfig, RemoteAccessInfo, RemoteAccessToggleResult } from './remote-access'
+export type { RemoteAccessConfig, RemoteAccessUrl, RemoteAccessInfo, RemoteAccessToggleResult } from './remote-access'
 export { REMOTE_ACCESS_FILENAME, REMOTE_TOKEN_HEX64, isRemoteAccessConfigShape } from './remote-access'
 // 导入会话 RPC 契约（pi / zcode 多源，runtime/renderer 两端共同 import；多源扩展见 docs/architecture/session-import-sources.md）
 export type {

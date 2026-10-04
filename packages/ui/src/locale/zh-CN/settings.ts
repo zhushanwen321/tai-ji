@@ -1135,6 +1135,8 @@ export default {
     copied: '已复制',
     noUrls: '暂无局域网地址（runtime 未运行或仍在重启），稍后重开本面板刷新。',
     addressLabel: '访问地址',
+    tailscaleSuffix: '（Tailscale）',
+    tailscaleSelectedHint: '当前展示的是 Tailscale 地址：手机需安装 Tailscale 并登录同一账号才能访问；同一网络下可切换为局域网地址。',
     rotate: '轮换 token',
     rotated: '已轮换，旧链接即刻失效；已连接设备需重新扫码。',
     firewallHint: '首次开启时 macOS 可能弹出防火墙授权提示，选择「允许」即可（授权一次，之后不再询问）。',

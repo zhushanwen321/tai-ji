@@ -2,7 +2,8 @@
  * LAN 地址枚举单测（remote-access D6）。
  *
  * 覆盖：IPv4 过滤（IPv6 排除）、回环（internal）排除、Tailscale 100.x 保留、
- * 端口注入（null / 非法端口 → 空列表）、URL 拼接形态。
+ * 跨网优先排序（Tailscale 候选在前、局域网在后，组内保持枚举顺序）、kind 标注、
+ * CGNAT 段边界（100.64.0.0/10 进出界）、端口注入（null / 非法端口 → 空列表）。
  * interfaces 结果经参数注入（mock os.networkInterfaces 返回值，零真实网络依赖）。
  *
  * 运行：cd apps/electron/main && npx vitest run test/remote-access-lan-addresses.test.ts
@@ -39,12 +40,14 @@ function ipv6(overrides: Partial<NetworkInterfaceInfoIPv6> = {}): NetworkInterfa
 }
 
 describe('enumerateLanAddresses', () => {
-  it('仅保留非 internal 的 IPv4 地址，产 http://<ip>:<port> 候选', () => {
+  it('仅保留非 internal 的 IPv4 地址，产 lan 类候选', () => {
     const interfaces = {
       en0: [ipv4({ address: '192.168.1.5' })],
       lo0: [ipv4({ address: '127.0.0.1', internal: true })],
     }
-    expect(enumerateLanAddresses(interfaces, 3310)).toEqual(['http://192.168.1.5:3310'])
+    expect(enumerateLanAddresses(interfaces, 3310)).toEqual([
+      { url: 'http://192.168.1.5:3310', kind: 'lan' },
+    ])
   })
 
   it('排除回环（lo0 127.0.0.1）与 IPv6（fe80 link-local / fd00 global）', () => {
@@ -59,24 +62,51 @@ describe('enumerateLanAddresses', () => {
         ipv6({ address: 'fd00::5' }),
       ],
     }
-    expect(enumerateLanAddresses(interfaces, 3310)).toEqual(['http://192.168.1.5:3310'])
+    expect(enumerateLanAddresses(interfaces, 3310)).toEqual([
+      { url: 'http://192.168.1.5:3310', kind: 'lan' },
+    ])
   })
 
-  it('Tailscale 100.x 地址是普通非 internal 接口，进候选（D6 跨网入口）', () => {
+  it('Tailscale 100.x 地址标 tailscale 类（D6 跨网入口）', () => {
     const interfaces = {
       'utun100': [ipv4({ address: '100.64.0.3' })],
     }
-    expect(enumerateLanAddresses(interfaces, 3310)).toEqual(['http://100.64.0.3:3310'])
+    expect(enumerateLanAddresses(interfaces, 3310)).toEqual([
+      { url: 'http://100.64.0.3:3310', kind: 'tailscale' },
+    ])
   })
 
-  it('多网卡多地址按枚举顺序全部返回', () => {
+  it.each(['100.64.0.0', '100.127.255.255', '100.100.1.2'])('CGNAT 段内界 %s → tailscale', (address) => {
+    const interfaces = { utun: [ipv4({ address })] }
+    expect(enumerateLanAddresses(interfaces, 3310)[0]?.kind).toBe('tailscale')
+  })
+
+  it.each(['100.63.255.255', '100.128.0.0', '101.64.0.1', '99.100.1.2'])('CGNAT 段外界 %s → lan', (address) => {
+    const interfaces = { en0: [ipv4({ address })] }
+    expect(enumerateLanAddresses(interfaces, 3310)[0]?.kind).toBe('lan')
+  })
+
+  it('跨网优先排序：Tailscale 候选在前、局域网在后，组内保持枚举顺序', () => {
     const interfaces = {
       en0: [ipv4({ address: '192.168.1.5' })],
       en1: [ipv4({ address: '10.0.0.7' })],
+      utun: [ipv4({ address: '100.82.44.102' })],
     }
     expect(enumerateLanAddresses(interfaces, 3310)).toEqual([
-      'http://192.168.1.5:3310',
-      'http://10.0.0.7:3310',
+      { url: 'http://100.82.44.102:3310', kind: 'tailscale' },
+      { url: 'http://192.168.1.5:3310', kind: 'lan' },
+      { url: 'http://10.0.0.7:3310', kind: 'lan' },
+    ])
+  })
+
+  it('多条 Tailscale 候选保持接口枚举顺序', () => {
+    const interfaces = {
+      utunA: [ipv4({ address: '100.100.1.1' })],
+      utunB: [ipv4({ address: '100.70.2.2' })],
+    }
+    expect(enumerateLanAddresses(interfaces, 3310).map((c) => c.url)).toEqual([
+      'http://100.100.1.1:3310',
+      'http://100.70.2.2:3310',
     ])
   })
 

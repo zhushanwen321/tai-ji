@@ -46,7 +46,7 @@ const ENABLED_INFO: RemoteAccessInfo = {
   enabled: true,
   token: 'a'.repeat(64),
   createdAt: '2026-09-19T00:00:00Z',
-  urls: ['http://192.168.1.5:3210'],
+  urls: [{ url: 'http://192.168.1.5:3210', kind: 'lan' }],
   mobileDistReady: true,
 }
 
@@ -106,6 +106,8 @@ describe('RemoteAccessPage 开态渲染', () => {
     )
     // 警告文案区渲染（design 指定文案 key）
     expect(wrapper.find('[data-testid="remote-access-warning"]').exists()).toBe(true)
+    // 选中局域网候选（kind=lan）→ Tailscale 使用前提提示不渲染
+    expect(wrapper.find('[data-testid="remote-access-tailscale-selected-hint"]').exists()).toBe(false)
     // 产物就绪（mobileDistReady=true）→ E5 警告条不渲染
     expect(wrapper.find('[data-testid="remote-access-dist-missing"]').exists()).toBe(false)
   })
@@ -138,15 +140,40 @@ describe('RemoteAccessPage 开态渲染', () => {
     expect(wrapper.find('[data-testid="remote-access-dist-missing"]').exists()).toBe(false)
   })
 
-  it('多地址（多网卡）：渲染地址选择器且默认展示首个候选的完整链接', async () => {
+  it('多地址（Tailscale 优先排序由 main 侧保证）：默认选中数组首项，选中 Tailscale 项渲染使用前提提示', async () => {
     ipcMocks.getRemoteAccessInfo.mockResolvedValue(
-      makeInfo({ enabled: true, token: 'b'.repeat(64), urls: ['http://192.168.1.5:3210', 'http://100.64.0.8:3210'] }),
+      makeInfo({
+        enabled: true,
+        token: 'b'.repeat(64),
+        // 形态对齐 main 侧枚举器输出：Tailscale 候选在前、局域网在后
+        urls: [
+          { url: 'http://100.82.44.102:3210', kind: 'tailscale' },
+          { url: 'http://192.168.1.5:3210', kind: 'lan' },
+        ],
+      }),
     )
     wrapper = mount(RemoteAccessPage)
     await flushPromises()
 
     expect(wrapper.find('[data-testid="remote-access-url-select"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="remote-access-url"]').text()).toBe(`http://192.168.1.5:3210/?token=${'b'.repeat(64)}`)
+    // 默认选中数组首项（Tailscale 优先排序后的第一条）
+    expect(wrapper.find('[data-testid="remote-access-url"]').text()).toBe(`http://100.82.44.102:3210/?token=${'b'.repeat(64)}`)
+    // 选中 Tailscale 候选 → 使用前提提示渲染（下拉项切换交互归 reka Select 自身，此处验条件渲染分支）
+    const hint = wrapper.find('[data-testid="remote-access-tailscale-selected-hint"]')
+    expect(hint.exists()).toBe(true)
+    expect(hint.text()).toContain('Tailscale')
+  })
+
+  it('单条 Tailscale 地址（无下拉）：链接正常展示且使用前提提示仍渲染', async () => {
+    ipcMocks.getRemoteAccessInfo.mockResolvedValue(
+      makeInfo({ enabled: true, token: 'b'.repeat(64), urls: [{ url: 'http://100.82.44.102:3210', kind: 'tailscale' }] }),
+    )
+    wrapper = mount(RemoteAccessPage)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="remote-access-url-select"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="remote-access-url"]').text()).toBe(`http://100.82.44.102:3210/?token=${'b'.repeat(64)}`)
+    expect(wrapper.find('[data-testid="remote-access-tailscale-selected-hint"]').exists()).toBe(true)
   })
 })
 

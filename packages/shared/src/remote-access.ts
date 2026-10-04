@@ -69,13 +69,32 @@ export function isRemoteAccessConfigShape(value: unknown): value is Pick<RemoteA
 }
 
 /**
+ * 连接地址候选（面板「访问地址」下拉项）：url = `http://<ip>:<port>`（不含 token）。
+ * kind 标注地址类型——面板据此渲染标注与使用前提提示；排序语义（Tailscale 优先）
+ * 由 main 侧枚举器保证，消费方按数组序直接展示。
+ */
+export interface RemoteAccessUrl {
+  url: string
+  /**
+   * tailscale = CGNAT 保留段 100.64.0.0/10（Tailscale 跨网访问入口，手机须同账号）；
+   * lan = 局域网直连地址。已知误报源：Cloudflare WARP 等少数 VPN 同用 CGNAT 段，
+   * 误报后果仅是标注偏差，低危可接受。
+   */
+  kind: 'tailscale' | 'lan'
+}
+
+/**
  * remote-access 连接信息（get-remote-access-info / rotate-remote-access-token
  * IPC 返回形态）：配置字段 extends 契约 SSOT RemoteAccessConfig（零复制）+
  * main bridge 侧实时探测的信封扩展字段。
  */
 export interface RemoteAccessInfo extends RemoteAccessConfig {
-  /** LAN 直连候选（`http://<ip>:<port>`，不含 token；runtime 未启动为空数组） */
-  urls: string[]
+  /**
+   * 连接地址候选（不含 token；runtime 未启动为空数组）。
+   * 排序：Tailscale（跨网）候选在前、局域网候选在后，组内保持接口枚举顺序——
+   * 面板默认选中数组首项，跨网使用为主时默认即展示 Tailscale 地址。
+   */
+  urls: RemoteAccessUrl[]
   /** 移动壳 dist 产物就绪（bridge 读时点测；false = E5 静态面禁用，面板显形警告） */
   mobileDistReady: boolean
 }

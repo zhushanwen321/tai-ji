@@ -141,20 +141,20 @@ describe('remote-access 连接信息 IPC', () => {
       enabled: boolean
       token: string
       createdAt: string
-      urls: string[]
+      urls: { url: string; kind: 'tailscale' | 'lan' }[]
     }
 
     expect(info.enabled).toBe(true)
     expect(info.token).toBe('c'.repeat(64))
     expect(info.createdAt).toBe('2026-01-01T00:00:00.000Z')
-    expect(info.urls).toEqual(['http://192.168.1.5:3310'])
+    expect(info.urls).toEqual([{ url: 'http://192.168.1.5:3310', kind: 'lan' }])
   })
 
   it('get-remote-access-info：runtime 未启动（port=null）→ urls 空列表', async () => {
     seedConfig(true)
     await loadHandlers(makeDeps({ port: null }))
 
-    const info = (await handlers.get('get-remote-access-info')!()) as { urls: string[] }
+    const info = (await handlers.get('get-remote-access-info')!()) as { urls: unknown[] }
     expect(info.urls).toEqual([])
   })
 

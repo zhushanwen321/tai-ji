@@ -1136,6 +1136,8 @@ export default {
     copied: 'Copied',
     noUrls: 'No LAN address available yet (runtime not running or still restarting). Reopen this panel to refresh.',
     addressLabel: 'Address',
+    tailscaleSuffix: ' (Tailscale)',
+    tailscaleSelectedHint: 'The selected address goes through Tailscale: the phone must have Tailscale installed and signed in with the same account. On the same network, switch to the LAN address instead.',
     rotate: 'Rotate token',
     rotated: 'Token rotated. The old link is now invalid; connected devices must scan again.',
     firewallHint: 'macOS may show a firewall prompt the first time you enable this. Choose "Allow" (one-time, remembered afterwards).',
