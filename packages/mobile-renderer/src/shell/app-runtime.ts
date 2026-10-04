@@ -7,9 +7,10 @@
 // 接口、壳注入实现）。
 //
 // 平台差异（相对桌面组装）：
-// - toast → console（移动壳 v1 无 toast 组件；core toast 契约 { error, warning } 的降级通道）
-// - panel/navigation/hooks → no-op（移动壳无 panel/导航 store；SessionEntryPort 注释明示
-//   headless/mobile 未接线环境零新增步骤执行完整链）
+// - toast → 全局错误条（./error-bar 单槽单例；core toast 契约 { error, warning } 的移动
+//   呈现通道，remote-use A7/U14——revoke/stop/bash/compact 等 RPC 失败面对用户可见）
+// - panel/navigation/hooks → no-op（移动壳无 panel/导航 store；SessionEntryPort 全成员
+//   可选缺省 no-op、链零新增步骤可跑，sessionEntry 订阅/LRU 步已接线——remote-use D2）
 // - turn 展开 → 壳内 per-session Map 分区（ADR-0049 范式；桌面 useTurnExpansion 的 mobile 子集）
 import type { Ref } from 'vue'
 import {
@@ -34,6 +35,7 @@ import * as sessionApi from '@taiji/core/transport/api/domains/session'
 import { onGlobalType } from '@taiji/core/transport/api'
 import { registerSessionCleanup } from '@taiji/core/foundation/use-session-scoped-state'
 import { createComposerInjectionStore } from '@taiji/core/domain/composer/context'
+import { showErrorBar } from './error-bar'
 import type { DeliveryCancelReply, Segment, SessionSummary } from '@taiji/shared'
 import { i18n } from '../i18n'
 
@@ -100,11 +102,17 @@ const sessionStore = createSessionStore()
 /** 提交链路共享的通道 deps 基座（buildUseChatDeps spread 后补专属字段） */
 type CoreChannelDeps = Pick<UseChatDeps, 'chatApi' | 'writeSegments' | 'toast' | 't'>
 
+// core toast 通道的移动呈现（remote-use A7/U14 接线）：单点定义、两处注入共用
+// （coreChannelDeps 与 subDeps 引同一对象，防 toast 通道漂移回 console）。error/warning
+// 同入错误条单槽（移动壳无分级 toast 组件，可见性优先；core 传入文案已经 deps.t 翻译，
+// 直入错误条无需二次处理）。
+const errorBarToast: UseChatDeps['toast'] = { error: showErrorBar, warning: showErrorBar }
+
 function coreChannelDeps(): CoreChannelDeps {
   return {
     chatApi: chatApiPort,
     writeSegments: (payload) => sessionApi.writeSegments(payload),
-    toast: { error: console.error, warning: console.warn },
+    toast: errorBarToast,
     t,
   }
 }
@@ -172,7 +180,7 @@ const noop = (): void => {}
 //   ?? noop 解析）：移动壳无 new-task flow 活跃取消面 / 文件树 / 未读体系（未读属 W4）
 const subDeps: EnsureStreamSubDeps = {
   chatApi: chatApiPort,
-  toast: { error: console.error, warning: console.warn },
+  toast: errorBarToast,
   t,
 }
 
@@ -301,6 +309,8 @@ export const composerInjectionStore = createComposerInjectionStore()
  */
 export const __testing = {
   sessionEntry,
+  /** toast 通道装配断言出口（U14/A7：core 两处注入的 toast = 错误条通道，非 console） */
+  errorBarToast,
 }
 
 /** 当前激活 session（响应式） */
@@ -355,8 +365,8 @@ export async function restoreSession(id: string): Promise<void> {
     await selectSession(id)
   } catch (e) {
     // 降级策略（对齐桌面 useSidebar.restoreSession 同分支）：切入失败不阻断 revive、
-    // 不重抛——restore 成功后 revive 是 UI 死态清除，与切入成败解耦；移动壳无 toast，
-    // 降级通道 = console（coreChannelDeps.toast 同源）
+    // 不重抛——restore 成功后 revive 是 UI 死态清除，与切入成败解耦；一次性编排失败
+    // 用 console 留痕，不占用 core toast 通道的错误条单槽（错误条留给 core 失败面文案）
     console.warn(`[app-runtime.restoreSession] selectSession(${id}) failed after restore:`, e)
   }
   sessionStore.revive(id)

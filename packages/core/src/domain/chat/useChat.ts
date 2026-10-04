@@ -1323,7 +1323,7 @@ function readPartitionKeys(chat: ChatStoreInstance): Set<string> {
 
 /**
  * LRU 驱逐 + 连带退订复合入口（remote-use D2/U5）——sessionEntry.evictLru 的统一实现，
- * 双壳共接（桌面 useSidebar 现状裸接 chat.evictIfNeeded() 的改接同落此函数，防双壳分叉）。
+ * 双壳共接（桌面 useSidebar 与移动壳 app-runtime.ts 均接此函数，防双壳分叉）。
  *
  * 编排 = chat.evictIfNeeded()（驱逐本体，语义不变）+ 对被驱逐会话：
  * ① invalidateStreamSubscription——本地两层簿记失效（events handler 退订 + subscribe 幂等

@@ -15,15 +15,17 @@
 // - bus 模块级私有单例（桌面走 getExtensionBus 惰性单例，来源选择是壳裁决）；
 // - 壳层能力回调按移动壳形态注入（remote-use A11/U14）：onPiResponseSettled 不注入
 //   （空操作，对齐「移动壳无 pendingSend 链」）；notifyNotDelivered 注入错误条提示
-//   （移动壳无 toast，form 通道另有 respond 返回 false → App 置 MobileFormCard 内联
-//   错误行的同源反馈）；onSessionError/onGlobalError 错误回调 + 错误条状态同居本模块
-//   （bootstrap effects 注入消费，见下方「全局错误条」段）；
+//   （移动壳无分级 toast 组件，错误条即 toast 契约呈现通道——见 ./error-bar；form 通道
+//   另有 respond 返回 false → App 置 MobileFormCard 内联错误行的同源反馈）；
+//   onSessionError/onGlobalError 错误回调居本模块（bootstrap effects
+//   注入消费，见下方「全局错误条」段），错误条状态单例居 ./error-bar（与 app-runtime
+//   core toast 通道共用同一出口）；
 // - 权限/对话/form 三通道均模块级装配（bus 单例私居本模块；ESM 单次求值，listener 不会
 //   翻倍），App.vue provide + 挂 CompanionBand / PermissionRequestDialog / MobileFormCard。
 //
 // 回传走 core 既有通路（不新造协议）：pi 源 extension.ui_response（sendExtensionUIResponse）、
 // plugin 源 plugin.uiResponse（ws send）、审批源 plugin.approvePermissions/denyPermissions。
-import { computed, reactive, ref, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, reactive, watch, type ComputedRef, type Ref } from 'vue'
 import { InternalEventBus, MessageBusBridge } from '@taiji/core/extension-host'
 import type { ExtensionInteractMethod } from '@taiji/shared'
 import {
@@ -36,6 +38,7 @@ import { getPendingRequests, sendExtensionUIResponse, type ExtensionUIRequest } 
 import { registerSessionCleanup } from '@taiji/core/foundation/use-session-scoped-state'
 import { isPlanReviewFrame, isRichInteractionFrame } from './form-protocol'
 import { chatStore } from './app-runtime'
+import { showErrorBar, resetErrorBarForTest as resetErrorBarSlotForTest } from './error-bar'
 import { i18n } from '../i18n'
 
 // vue-i18n 的 t 复杂重载收窄为 (key, params?) => string（对齐 app-runtime 同款收窄）
@@ -58,9 +61,9 @@ export const __testing = {
   resetFormRequestsForTest(): void {
     formRequestsBySid.clear()
   },
-  /** 错误条跨用例隔离：清空单槽文本（模块级 ref，防错误残留泄漏到后续用例） */
+  /** 错误条跨用例隔离：清空单槽文本（error-bar 模块级单例 ref，防错误残留泄漏到后续用例） */
   resetErrorBarForTest(): void {
-    errorBarMessage.value = null
+    resetErrorBarSlotForTest()
   },
   /** exited 重置通路跨用例隔离：清空 dialog queue 句柄（模块级 let，防句柄残留跨用例串扰） */
   resetDialogQueueHandleForTest(): void {
@@ -68,26 +71,15 @@ export const __testing = {
   },
 }
 
-// ── 全局错误条状态 + effects 错误回调（remote-use A7/U14；D5 去留表：错误条是 V5/V18
+// ── 全局错误条 + effects 错误回调（remote-use A7/U14；D5 去留表：错误条是 V5/V18
 // 作答失败反馈的唯一载体）──
 //
-// 状态承载 = 模块级 reactive 单例（本模块既有范式，formRequestsBySid 同式）；views/ErrorBar.vue
-// 纯展示消费（依赖方向 views → shell，与 App 消费 shell 状态同向），挂载与 effects 注入
+// 状态承载 = ./error-bar 模块级单例（ref 单槽——与 app-runtime core toast 通道共用的
+// 单点出口，core 失败面文案经 toast 注入直入本槽）；views/ErrorBar.vue 纯展示消费
+// （依赖方向 views → shell，与 App 消费 shell 状态同向），挂载与 effects 注入
 // 在 bootstrap/App（U6 接线）。单槽覆盖式 + 手动关闭（ErrorBar 关闭钮），不加自动消失
 // timer（时间平抑类逻辑红线）；onSessionError 的持久反馈在流内（markSessionError 追加
 // error 消息），错误条只是瞬态置顶补充——后到错误覆盖前条不丢持久反馈。
-
-/** 当前错误条文本（null = 不渲染；App/组件消费） */
-const errorBarMessage = ref<string | null>(null)
-
-function showErrorBar(text: string): void {
-  errorBarMessage.value = text
-}
-
-/** 关闭错误条（ErrorBar 关闭钮消费） */
-export function dismissErrorBar(): void {
-  errorBarMessage.value = null
-}
 
 /**
  * onSessionError（A7，对齐桌面 handleSessionError）：带 sessionId 的 error envelope 兜底——
@@ -107,8 +99,8 @@ function handleGlobalError(message: string): void {
 
 /**
  * dialog 作答未送达提示（A11，注入 createCompanionDialogAdapters.notifyNotDelivered——对齐
- * 桌面 useExtensionHostBridge 注入形态）：移动壳无 toast，呈现用内联错误行范式落错误条
- * （对齐 form 通道 respondFailedId 的 role=alert 细行）。请求保留可重试语义由
+ * 桌面 useExtensionHostBridge 注入形态）：移动壳无分级 toast 组件，呈现用内联错误行范式
+ * 落错误条（对齐 form 通道 respondFailedId 的 role=alert 细行）。请求保留可重试语义由
  * shell-adapters 承接（respond 见 false 不出队，连接恢复后同 requestId 重发幂等）。
  */
 function notifyDialogResponseNotDelivered(_sessionId?: string): void {
@@ -127,7 +119,8 @@ const companionDialog = createCompanionDialogAdapters(bus, {
 })
 export const mobileDialogRequestSource = companionDialog.source
 export const mobileUiResponseTransport = companionDialog.transport
-export { errorBarMessage }
+// errorBarMessage/dismissErrorBar 消费点（ErrorBar.vue）改从 ./error-bar 直接 import——
+// 状态单例归属该模块，本模块不再中转 re-export
 
 // ── permissionRequest 审批通道（D7 审批行，App 挂 PermissionRequestDialog）──
 //
@@ -283,7 +276,7 @@ export type MobileFormRequests = {
   /**
    * 作答回传（桌面 respond 同构）：result 经 sendExtensionUIResponse（method 透传），
    * 未送达（WS 非 OPEN）保留请求可重试（M1/RD-3#1），送达即出分区。请求已终结
-   * （失效/已应答）→ 迟到应答丢弃 + console 留痕（无 toast 的降级提示）。返回值 =
+   * （失效/已应答）→ 迟到应答丢弃 + console 留痕（诊断留痕，不占错误条单槽）。返回值 =
    * 是否送达，App 编排消费（false → MobileFormCard 内联错误行，回传失败不静默）。
    */
   respond(requestId: string, result: boolean | string | null): boolean
@@ -359,7 +352,7 @@ export function useMobileFormRequests(sessionId: Ref<string | null>): MobileForm
     if (!sid) return false
     const target = (formRequestsBySid.get(sid) ?? []).find((r) => r.requestId === requestId)
     if (!target) {
-      // 已终结 requestId 的应答丢弃并留痕（桌面 toast 提示的降级形态——移动壳无 toast）
+      // 已终结 requestId 的应答丢弃并留痕（诊断留痕，不占错误条单槽——单槽留给 core 失败面）
       console.warn('[companion-bridge] form response dropped (request no longer pending):', requestId)
       return false
     }

@@ -16,7 +16,7 @@
  *   helper 唯一使用方 = 双壳测试（vitest 非 minify，函数体形态稳定），生产构建不打进
  *   bundle（双壳生产代码零消费，由双壳测试的 grep 断言守护）。
  *
- * 成员清单与 D9③ 真差异白名单互斥对齐（登记容器
+ * 成员清单与 D9② 真差异白名单互斥对齐（登记容器
  * docs/todo/remote-use-shell-unification-reserved-divergences.md §3）：cancelActiveFlow /
  * preloadFileTree / clearUnread 是壳合法缺省成员（移动壳无对应功能面），不在断言清单；
  * 清单覆盖关系由 core 侧契约测试锁死（Required<SessionEntryPort> 样例对象，新成员漏归边编译红）。
@@ -35,7 +35,7 @@ export const REQUIRED_SESSION_ENTRY_MEMBERS = [
 ] as const
 
 /**
- * D9③ 合法缺省成员（与 docs/todo 真差异白名单互斥对齐）：壳无对应功能面时缺省 no-op 是
+ * D9② 合法缺省成员（与 docs/todo 真差异白名单互斥对齐）：壳无对应功能面时缺省 no-op 是
  * 契约允许形态（use-session 链内 `?? noop` 解析），不进装配断言。
  */
 export const EXEMPT_SESSION_ENTRY_MEMBERS = [

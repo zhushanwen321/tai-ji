@@ -74,7 +74,7 @@ async function onSend(): Promise<void> {
     }
   } catch (e) {
     // 契约外异常防御（对齐桌面 useComposerSend catch 分支；core send 契约内不 throw）：
-    // 回填 + 错误行可见，console 记录供诊断（移动壳 v1 无 toast 通道）
+    // 回填 + 错误行可见，console 记录供诊断（错误条单槽留给 core 失败面文案）
     comp.setSegments(segments)
     sendFailed.value = true
     console.error('[mobile-composer] send failed:', e)

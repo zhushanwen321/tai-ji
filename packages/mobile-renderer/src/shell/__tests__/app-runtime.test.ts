@@ -1,4 +1,5 @@
-// sessionEntry 端口束装配断言（remote-use D2/U5）。
+// sessionEntry 端口束装配断言（remote-use D2/U5）+ core toast 通道装配断言（remote-use
+// A7/U14）。
 //
 // 锁定移动壳切入链装配对齐桌面的三件事（验收口径 = 装配面，非 12 步链本体——链编排在
 // core use-session.test.ts 既有覆盖）：
@@ -11,6 +12,9 @@
 //      效果」更强，防止空函数注入假装缺省
 //   3. evictLru 接 core 驱逐+退订复合入口（evictLruWithUnsubscribe）：超阈值驱逐时被驱逐
 //      会话收到 session.unsubscribe RPC，保留区零 RPC
+//
+// U14（A7）：core toast 通道（coreChannelDeps + subDeps 两处注入）= 错误条通道（error-bar
+// 单槽单例），非 console——core 失败面（revoke/stop/bash/compact 等 RPC 失败）对用户可见。
 //
 // mock 策略：仅 transport 出口（streamSubscribe/unsubscribe）模块级 vi.mock 隔离 WS，
 // app-runtime 组装与 core 链保持全真实（对齐 mobile-new-task.spec「mock 组件层会变成
@@ -25,6 +29,7 @@ import {
 // app-runtime 组装在 vi.mock 注册（hoist 先于全部 import 生效）后解析——transport 出口
 // 已是替身，组装链其余保持真实
 import { __testing, chatStore } from '../app-runtime'
+import { errorBarMessage, resetErrorBarForTest } from '../error-bar'
 
 const { mockStreamSubscribe, mockUnsubscribe } = vi.hoisted(() => ({
   mockStreamSubscribe: vi.fn(() => vi.fn()),
@@ -101,5 +106,31 @@ describe('sessionEntry 端口束装配（D2/U5）', () => {
     sessionEntry.evictLru!(null)
 
     expect(mockUnsubscribe).not.toHaveBeenCalled()
+  })
+})
+
+describe('core toast 通道装配（A7/U14）', () => {
+  beforeEach(() => {
+    resetErrorBarForTest()
+  })
+
+  it('toast 注入 = 错误条通道（非 console）：error 调用即写入错误条单槽', () => {
+    // core 失败面形态实调（useChat 侧 deps.toast.error(deps.t(...)) 的翻译后文案直入）
+    __testing.errorBarToast.error('composable.revokeFailed 文案')
+
+    expect(errorBarMessage.value).toBe('composable.revokeFailed 文案')
+  })
+
+  it('warning 同入错误条单槽（移动壳无分级 toast 组件，error/warning 同一出口）', () => {
+    __testing.errorBarToast.warning('需用户处置的信号')
+
+    expect(errorBarMessage.value).toBe('需用户处置的信号')
+  })
+
+  it('单槽覆盖式（core 通道与错误条既有形态一致）：后到覆盖前条', () => {
+    __testing.errorBarToast.error('first')
+    __testing.errorBarToast.error('second')
+
+    expect(errorBarMessage.value).toBe('second')
   })
 })

@@ -11,9 +11,10 @@
 // - 取消成功后全文回输入框草稿（composerInjection 通道 → MobileComposer 消费端
 //   insertTextAtCursor 追加不覆盖——G5 同族语义：不回填即静默丢输入）。
 //
-// 反馈通道：移动壳无 toast（app-runtime 降级 console）→ 内联错误行（MobileComposer
-// sendFailed 同款 respondFailedId 范式：role=alert + 专用 testid；新取消尝试时清空，
-// 不跨条目残留旧错）。移动壳不做 failed 行重试钮（D7 原文「条目状态 + 取消钮」，重试
+// 反馈通道：取消失败就近落条目级内联错误行（MobileComposer sendFailed 同款
+// respondFailedId 范式：role=alert + 专用 testid；新取消尝试时清空，不跨条目残留旧错；
+// core toast 契约的错误条承载 core 失败面文案，壳级条目反馈不挪用该单槽）。
+// 移动壳不做 failed 行重试钮（D7 原文「条目状态 + 取消钮」，重试
 // 面属桌面 QueueBubble 展示序；取消对 failed 条目同样有效，滞留条目有出路）。
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'

@@ -77,6 +77,8 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
     switchSession: switchSessionMock,
     rename: vi.fn(() => Promise.resolve()),
     remove: vi.fn(() => Promise.resolve()),
+    // [remote-use D2] 桌面 evictLru 改接驱逐+退订复合入口，测试补该通道
+    unsubscribe: vi.fn(() => Promise.resolve()),
     getSubagents: vi.fn(() => Promise.resolve([])),
     getWorkflows: vi.fn(() => Promise.resolve([])),
     getAgentCallHistory: vi.fn(() => Promise.resolve([])),

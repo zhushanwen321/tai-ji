@@ -35,9 +35,11 @@ import type { BatchDeleteResult, SessionSummary } from '@taiji/shared'
 import {
   createSessionStore,
   createUseSession,
+  evictLruWithUnsubscribe,
   resetSessionListSubForTest,
 } from '@taiji/core'
 import type {
+  ChatStoreInstance,
   SessionApiPort,
   PanelOrchestrationPort,
   ChatHydratePort,
@@ -215,7 +217,7 @@ export function useSidebar() {
   // 适配映射：cancelActiveFlow←useNewTaskFlow / clearUnread←clearSessionUnread（两源同点：
   // useSessionMarkers + useForkBranchNotify 分支角标，D9 合流） /
   // ensureStreamSubscription←useChat 壳包装（(sid, chat, sessionStore) 签名收窄为 (sid)）/
-  // touchRecency+evictLru←chat store LRU / preloadFileTree←useFileTree。
+  // touchRecency←chat store LRU / evictLru←D2 驱逐+退订复合入口 / preloadFileTree←useFileTree。
   const sessionEntry: SessionEntryPort = {
     cancelActiveFlow: () => {
       const newTaskFlow = useNewTaskFlow()
@@ -228,8 +230,16 @@ export function useSidebar() {
     preloadFileTree: (sid) => {
       void useFileTree().loadTree(sid)
     },
-    // panelSessionId 由 core 链在步 11 已完成 recency 刷新后透传；壳实现执行驱逐本体即可
-    evictLru: () => chat.evictIfNeeded(),
+    // panelSessionId 由 core 链在步 11 已完成 recency 刷新后透传；壳实现执行驱逐本体即可。
+    // [remote-use D2] 双壳同接驱逐+退订复合入口（桌面原裸接 chat.evictIfNeeded，一并改接
+    // 防双壳分叉）：被驱逐会话同步失效订阅簿记 + 发 session.unsubscribe RPC——不退订则
+    // 订阅残留、后续消息经 commitMessages 重建分区使驱逐白做（V16 桌面改变面第一条）。
+    // cast = pinia unwrap 类型鸿沟（messages 解包为 Map 本体，readPartitionKeys 内双形态
+    // 运行时归一），先例同函数下方 sessionStore 的 ADR-0059 cast。
+    evictLru: () =>
+      evictLruWithUnsubscribe(chat as unknown as ChatStoreInstance, {
+        unsubscribe: sessionApi.unsubscribe,
+      }),
   }
   // [remote-use D9/U21] 装配检查断言源填充（见模块级 __testing 注释；非消费，仅出口登记）
   __testing.sessionEntry = sessionEntry

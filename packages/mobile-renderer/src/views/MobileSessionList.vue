@@ -137,8 +137,8 @@ async function onMenuRestore(): Promise<void> {
   try {
     await restoreSession(target.id)
   } catch (e) {
-    // 降级策略：移动壳无 toast，壳级反馈通道 = console（coreChannelDeps.toast 同源；
-    // A7 错误条属 effects 域通道，不在本入口职责）
+    // 降级策略：壳级一次性编排失败 console 留痕，不占用错误条单槽（coreChannelDeps.toast
+    // 已接错误条承载 core 失败面——A7；对齐 app-runtime.restoreSession 同口径）
     console.error('[session-list] restore failed:', e)
   }
 }
@@ -152,7 +152,7 @@ async function onMenuDelete(): Promise<void> {
     await deleteSession(target.id)
   } catch (e) {
     // 降级策略：删除失败不产生本地半删态（core 编排在 remove RPC 成功后才清本地），
-    // 条目保留可重试；移动壳无 toast，壳级反馈通道 = console（coreChannelDeps.toast 同源）
+    // 条目保留可重试；壳级一次性编排失败 console 留痕，不占用错误条单槽
     console.error('[session-list] delete failed:', e)
   }
 }
@@ -180,8 +180,8 @@ async function onRenameSubmit(): Promise<void> {
     await renameSession(target.id, label)
     renameOpen.value = false
   } catch (e) {
-    // 降级策略：移动壳无 toast，壳级反馈通道 = console（coreChannelDeps.toast 同源）；
-    // 表单保持打开——标签未变（乐观更新只在 RPC 成功后），用户可直接重试
+    // 降级策略：壳级一次性编排失败 console 留痕，不占用错误条单槽（coreChannelDeps.toast
+    // 已接错误条承载 core 失败面——A7）；表单保持打开——标签未变（乐观更新只在 RPC 成功后），用户可直接重试
     console.error('[session-list] rename failed:', e)
   }
 }

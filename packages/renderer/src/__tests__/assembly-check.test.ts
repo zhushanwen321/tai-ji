@@ -40,11 +40,16 @@ vi.mock('@/api', () => ({
     switchSession: vi.fn(() => Promise.resolve()),
     rename: vi.fn(() => Promise.resolve()),
     remove: vi.fn(() => Promise.resolve()),
+    // D2 驱逐退订复合入口的 RPC 通道（evictLruWithUnsubscribe fire-and-forget 消费）
+    unsubscribe: vi.fn(() => Promise.resolve()),
   },
 }))
 
 import { useSidebar, __testing } from '@/composables/features/sidebar/useSidebar'
 import { createInboundEffects } from '@/composables/effects/useMessageEffects'
+import { useChatStore } from '@/stores/chat'
+import { session as sessionApi } from '@/api'
+import { _resetLruForTest } from '@taiji/core'
 
 // vitest 运行时 cwd 即包根（ac1 同款锚定）
 const pkgRoot = process.cwd()
@@ -85,6 +90,27 @@ describe('D9① 桌面壳装配检查（core 共享 helper）', () => {
     const { ok, problems } = checkInboundEffectsAssembly(createInboundEffects())
     expect(problems).toEqual([])
     expect(ok).toBe(true)
+  })
+
+  it('evictLru 接 D2 驱逐+退订复合入口：超阈值驱逐对被驱逐 sid 发 session.unsubscribe（裸接 chat.evictIfNeeded 即红）', () => {
+    _resetLruForTest()
+    const scope = effectScope()
+    scope.run(() => useSidebar())
+    const entry = __testing.sessionEntry!
+    const chatStore = useChatStore()
+    // LRU_MAX_SESSIONS=8：9 分区触发阈值驱逐，插入序最前者被逐（同毫秒稳定排序保留插入序）
+    for (let i = 0; i < 9; i++) chatStore.hydrate(`evict-s${i}`, [])
+
+    entry.evictLru(null)
+
+    // 驱逐本体仍生效（改接未破坏 evictIfNeeded 语义）
+    expect(chatStore.isHydrated('evict-s0')).toBe(false)
+    expect(chatStore.isHydrated('evict-s8')).toBe(true)
+    // 复合入口的退订半边：被驱逐 sid 恰好一次 unsubscribe RPC，保留区零 RPC——
+    // 裸接 chat.evictIfNeeded() 时该 mock 零调用，断言即红
+    expect(vi.mocked(sessionApi.unsubscribe)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(sessionApi.unsubscribe)).toHaveBeenCalledWith('evict-s0')
+    scope.stop()
   })
 })
 

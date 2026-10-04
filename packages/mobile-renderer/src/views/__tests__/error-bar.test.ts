@@ -10,7 +10,7 @@
 //
 // mock 策略：三条链都在 WS 未连接的测试环境驱动（initConnection 未跑，ws 为 null，
 // ws-client send 直接返回 false 无副作用）——A11 链的「未送达」分支由此构造，无需 mock
-// 传输层。错误条状态是 companion-bridge 模块级单例，beforeEach 经 __testing 重置。
+// 传输层。错误条状态是 error-bar 模块级单例，beforeEach 经 __testing 重置。
 //
 // 运行：cd packages/mobile-renderer && npx vitest run src/views/__tests__/error-bar.test.ts
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'

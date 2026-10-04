@@ -30,6 +30,8 @@ vi.mock('@taiji/core/transport/api/domains/session', () => ({
   switchSession: mocks.switchSession,
   list: vi.fn().mockResolvedValue([]),
   remove: vi.fn(),
+  // [remote-use D2] 桌面 evictLru 改接驱逐+退订复合入口，测试补该通道
+  unsubscribe: vi.fn().mockResolvedValue(undefined),
   create: vi.fn(),
   rename: vi.fn(),
   removeByCwd: vi.fn(),
