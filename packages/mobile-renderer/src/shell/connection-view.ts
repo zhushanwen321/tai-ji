@@ -52,12 +52,15 @@ export const shellConnectionState = ref<MobileShellConnectionState>('connecting'
 // 连接成功过至少一次（进程生命周期内不复位）：瞬时断连（connected → connecting）的
 // 视图分支锚点——App.vue 据此保持 connected 布局挂载（composer 草稿不丢）仅插顶部
 // 断线条，而非全屏换视图；首连（false）仍走全屏「连接中」。
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态）：连接成功过锚点布尔（§4 ⑧ 2026-10-04 批登记）
 export const hasConnectedOnce = ref(false)
 
 /**
  * token 提交结果态（TokenInputView 消费）：提交编排进行中 / 验身失败的可见反馈。
  * 验身结果异步于提交编排（initConnection resolve = 编排已提交，auth 结果后续到），
  * submitting 的收口点 = auth 结果落地（watch connected / notifyAuthRejected）。
+ *
+ * taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态）：token 提交反馈态（§4 ⑧ 2026-10-04 批登记）
  */
 export const tokenSubmit = ref<{ submitting: boolean; error: 'invalid' | 'failed' | null }>({
   submitting: false,

@@ -10,7 +10,10 @@
 // views/ErrorBar.vue 纯展示消费（依赖方向 views → shell）；挂载与 effects 注入在 bootstrap/App。
 import { ref } from 'vue'
 
-/** 当前错误条文本（null = 不渲染；ErrorBar 消费） */
+/**
+ * 当前错误条文本（null = 不渲染；ErrorBar 消费）。
+ * taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态）：错误条单槽文本（§4 ⑧ 2026-10-04 批登记）
+ */
 export const errorBarMessage = ref<string | null>(null)
 
 /** 写入错误条（core toast 通道与 companion-bridge 错误回调共用的单点出口） */
