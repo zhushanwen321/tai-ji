@@ -10,8 +10,19 @@
  *
  * 非法 `--port` 值 throw（消息与原实现一致）：组合根包装 console.error +
  * process.exit(1)，保持启动期 fail-fast 语义（组合根退出决策不进本模块，可测性）。
+ *
+ * 兜底（code-harden P2）：未知 `--` flag（如拼错 `--remote-acces`）与已知带值 flag
+ * 的缺值形态（如孤立出现在 argv 末尾的 `--port`）此前静默忽略——runtime 以关态/默认
+ * 值启动无任何提示。两者均 console.warn 提示，**不 throw 不 reject**（对第三方传参
+ * 保持「未知 flag 忽略」的兼容语义，仅补可观测）。
  */
 import { BASE_PORT, MAX_PORT } from '@taiji/shared'
+
+/**
+ * 带值 flag 的裸名集合（缺值判定用）：裸名（无 `=`）不匹配「flag + 有后续值」分支而
+ * 走到兜底 = 孤立出现在 argv 末尾缺值。
+ */
+const VALUE_FLAGS = new Set(['--port', '--project-root', '--builtin-plugins-dir', '--mobile-dist'])
 
 /** `--flag=value` 形态取值：按首个 = 切分，取 = 后全部（路径含 = 不截断）。 */
 function valueAfterEquals(arg: string, flag: string): string {
@@ -62,6 +73,14 @@ export function parseRuntimeArgs(argv: string[]) {
       mobileDist = argv[i + 1]
     } else if (arg.startsWith('--mobile-dist=')) {
       mobileDist = valueAfterEquals(arg, '--mobile-dist')
+    } else if (arg.startsWith('--')) {
+      // 兜底分支（code-harden P2）：此前静默忽略的两类形态改为 warn 提示。
+      // 解析结果不受影响——值不赋、不覆盖、不中断循环，仅补可观测。
+      if (VALUE_FLAGS.has(arg)) {
+        console.warn(`[runtime] ${arg} 缺值（孤立出现在 argv 末尾），已忽略并使用默认值`)
+      } else {
+        console.warn(`[runtime] unknown flag: ${arg} — 已忽略（不生效）；若为 remote-access 相关请核对拼写`)
+      }
     }
   }
   return { port, projectRoot, builtinPluginsDir, remoteAccess, mobileDist

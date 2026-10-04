@@ -20,7 +20,10 @@ import type { KVStorage, PlatformPort, WebSocketFactory, WebSocketLike } from '@
 
 // LocalStorageKV —— KVStorage 的 localStorage 桥接实现。
 // KVStorage 契约为异步签名（Promise 返回），localStorage 为同步 API——按契约包 Promise。
-// get 不存在 key 返回 null（localStorage.getItem 天然语义，非抛错）。
+// get 不存在 key 返回 null（localStorage.getItem 天然语义，非抛错）；读失败同样降级返回
+// null（等价无凭据）：「阻止所有 Cookie」等受限环境访问 localStorage 属性即抛 SecurityError，
+// 直抛会沿 resolve → bootstrap 炸成全屏「应用启动失败」页，而正确去向是 token 输入视图
+// （null → resolveCredential 三分支 need-input，connection-profile D4）。
 // set/remove 写失败降级（console.warn、不 reject）：Safari 隐私模式等环境 setItem 抛
 // QuotaExceededError，直抛会沿调用链炸 token 落盘处置（handleAuthSuccess 经 connection-view
 // void 调用 = unhandled rejection）。降级后的凭据语义：本次会话内存可用（连接凭据已在
@@ -28,7 +31,13 @@ import type { KVStorage, PlatformPort, WebSocketFactory, WebSocketLike } from '@
 // （storage 缺失 → resolve 三分支 need-input → runtime 拒绝 → token 输入视图，connection-profile D4）。
 class LocalStorageKV implements KVStorage {
   async get(key: string): Promise<string | null> {
-    return localStorage.getItem(key)
+    try {
+      return localStorage.getItem(key)
+    } catch (e) {
+      // 读降级（与 set/remove 同一面，语义见类注释）：失败等价无凭据，不向上传播。
+      console.warn(`[mobile-platform] localStorage.getItem failed (key=${key}), treated as absent:`, e)
+      return null
+    }
   }
 
   async set(key: string, value: string): Promise<void> {

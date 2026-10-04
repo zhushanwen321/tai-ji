@@ -63,14 +63,20 @@ const {
   currentFormRequest: pendingFormRequest,
   currentPlanReviewRequest: pendingPlanReview,
   respond: respondFormRequest,
+  reconcileNow: reconcileFormRequests,
 } = useMobileFormRequests(activeSessionId)
 
+// 作答回传失败（WS 未送达）的可见反馈：记录失败 requestId，经 prop 传入 MobileFormCard
+// 渲染内联错误行（不静默）；错误行按 requestId 匹配渲染——同请求重试成功或请求被摘除后
+// 不再显示，后续新请求不继承旧错误态
+const formRespondFailedId = ref<string | null>(null)
+
 function onFormSubmit(payload: { requestId: string; result: string }): void {
-  respondFormRequest(payload.requestId, payload.result)
+  formRespondFailedId.value = respondFormRequest(payload.requestId, payload.result) ? null : payload.requestId
 }
 
 function onFormCancel(payload: { requestId: string }): void {
-  respondFormRequest(payload.requestId, null)
+  formRespondFailedId.value = respondFormRequest(payload.requestId, null) ? null : payload.requestId
 }
 
 const { t } = useI18n()
@@ -93,9 +99,15 @@ function onTokenSubmit(token: string): void {
   void submitRemoteToken(token)
 }
 
-// 连接成功即拉取会话列表（首屏数据；后续 config.sessions 广播经 SessionApiPort 自动更新）
+// 连接成功即拉取会话列表（首屏数据；后续 config.sessions 广播经 SessionApiPort 自动更新）；
+// connected 边沿同时补拉 form/planReview 快照对账（静默重连保持视图挂载、sessionId 不变，
+// 断连期间到达的请求重连后补挂——dialog/permission 通道不在此列：dialog 另立任务、
+// permission 有超时撤窗有界）
 watch(isConnected, (connected) => {
-  if (connected) void loadSessions()
+  if (connected) {
+    void loadSessions()
+    reconcileFormRequests()
+  }
 }, { immediate: true })
 </script>
 
@@ -165,6 +177,7 @@ watch(isConnected, (connected) => {
           <MobileFormCard
             :request="pendingFormRequest"
             :plan-review="pendingPlanReview"
+            :respond-failed-id="formRespondFailedId"
             @submit="onFormSubmit"
             @cancel="onFormCancel"
           />

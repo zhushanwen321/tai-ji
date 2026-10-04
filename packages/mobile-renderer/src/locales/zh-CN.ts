@@ -63,6 +63,7 @@ export default {
       scheduleEchoNote: '按预填草稿确认；如需修改请在桌面操作',
       scheduleNotReady: '草稿不完整或时刻已过，请在桌面编辑后确认，或取消本次请求',
       emptyForm: '表单内容为空，仅可取消',
+      respondFailed: '未送达，连接恢复后可重试',
     },
     pasteImageFallback: '[图片粘贴：需桌面环境]',
   },

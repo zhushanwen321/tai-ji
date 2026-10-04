@@ -6,6 +6,9 @@
 // - 分支②：query 坏 token 验身失败**不动**好 storage（坏链接不毁好凭据；地址栏 query 保留）
 // - 分支③：storage 来源失效清空 + 落 token 输入视图（E11）
 // - 皆无：resolve 不带凭据（E2 通路——连接被拒后经 handleAuthFailure 落 token 输入视图）
+// - manual 同语义：验身成功落 storage + 抹地址栏，已消费 query 在端口内消歧不再压过已落盘
+//   凭据（防手输成功后残留旧 ?token= 在刷新 / 同会话再 resolve 时反复被采纳成循环）；
+//   stripQuery 抛错降级 warn 不上抛（storage 已落盘即自愈）
 //
 // 运行：cd packages/mobile-renderer && npx vitest run src/__tests__/connection-profile.test.ts
 import { describe, it, expect, vi } from 'vitest'
@@ -133,14 +136,58 @@ describe('D4 三分支闭合（端口集成）', () => {
     expect(onTokenInputRequired).toHaveBeenCalledTimes(1)
   })
 
-  it('手输采纳：resolve 优先采纳（压过 query/storage）；验身成功落 storage（语义同 query）', async () => {
+  it('手输采纳：resolve 优先采纳（压过 query/storage）；验身成功落 storage + 抹地址栏（语义同 query）', async () => {
     const { port, map, stripQuery } = makePort({ search: '?token=tok-query', stored: 'tok-old' })
     port.adoptManualToken('tok-manual')
     const resolved = await port.resolve()
     expect(resolved).toEqual({ url: 'ws://192.168.1.5:3210', token: 'tok-manual' })
     await port.handleAuthSuccess()
     expect(map.get(REMOTE_TOKEN_STORAGE_KEY)).toBe('tok-manual')
-    expect(stripQuery).not.toHaveBeenCalled() // manual 无 query 可抹
+    expect(stripQuery).toHaveBeenCalledTimes(1) // manual 同抹地址栏（漏抹则刷新时残留旧 query 压过新凭据成循环）
+  })
+
+  it('manual 验身成功后同会话再 resolve 走 storage 分支（旧 query 已消费，不再压过已落盘凭据）', async () => {
+    // 循环场景锚：手输前地址栏残留坏旧 ?token=tok-old；deps.search 是 bootstrap 时刻快照
+    // （replaceState 不回写快照），已消费的旧值必须在端口内消歧——否则 token 重试 / HMR
+    // 重连再次 resolve 时旧值重复被采纳，手输成功被旧值顶掉。
+    const { port, stripQuery } = makePort({ search: '?token=tok-old', stored: 'tok-stale' })
+    port.adoptManualToken('tok-manual')
+    await port.resolve()
+    await port.handleAuthSuccess()
+    expect(stripQuery).toHaveBeenCalledTimes(1)
+    // 同会话再 resolve（token 重试 / HMR 重连路径）：旧 query 不再采纳 → storage 分支
+    expect(await port.resolve()).toEqual({ url: 'ws://192.168.1.5:3210', token: 'tok-manual' })
+    // 刷新形态（真实地址栏已被 replaceState 抹掉 query）：新装配 resolve 同样走 storage
+    const fresh = makePort({ search: '', stored: 'tok-manual' })
+    expect(await fresh.port.resolve()).toEqual({ url: 'ws://192.168.1.5:3210', token: 'tok-manual' })
+  })
+
+  it('query 来源验身成功后同会话再 resolve 同样走 storage（已消费值不重复采纳）', async () => {
+    const { port, stripQuery } = makePort({ search: '?token=tok-new', stored: 'tok-old' })
+    await port.resolve()
+    await port.handleAuthSuccess()
+    expect(stripQuery).toHaveBeenCalledTimes(1)
+    expect(await port.resolve()).toEqual({ url: 'ws://192.168.1.5:3210', token: 'tok-new' })
+  })
+
+  it('stripQuery 抛错降级：handleAuthSuccess 正常完成、storage 已落盘、消费消歧不受影响', async () => {
+    // replaceState 在受限环境（sandboxed iframe 等）会抛——connection-view 对
+    // handleAuthSuccess 是 void 调用，直抛 = unhandled rejection；降级 = warn + 靠已落盘
+    // storage 自愈（下次刷新走 storage 分支）。
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { port, map, stripQuery } = makePort({ search: '?token=tok-q', stored: 'tok-old' })
+      stripQuery.mockImplementation(() => {
+        throw new Error('replaceState blocked (sandboxed context)')
+      })
+      await port.resolve()
+      await expect(port.handleAuthSuccess()).resolves.toBeUndefined()
+      expect(map.get(REMOTE_TOKEN_STORAGE_KEY)).toBe('tok-q')
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(await port.resolve()).toEqual({ url: 'ws://192.168.1.5:3210', token: 'tok-q' })
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 
   it('storage 来源验身成功幂等（不重写、不抹地址栏）；普通重连（待定凭据已清）auth 成功 no-op', async () => {

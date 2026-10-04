@@ -4,7 +4,9 @@
  * 2. `=` 形态**按首个 = 切分**：路径含 `=` 不截断（旧 split('=')[1] 写法的修复点）；
  * 3. 非法 --port 值 throw（组合根包装 console.error + exit(1)，退出决策不进本模块）；
  * 4. TAIJI_AGENT_PORT_OFFSET env 偏移与上界钳制；
- * 5. --remote-access 布尔 flag 出现即开（remote-access D9）。
+ * 5. --remote-access 布尔 flag 出现即开（remote-access D9）；
+ * 6. 未知 flag / 已知带值 flag 缺值 → warn 提示且解析结果不受影响（code-harden P2 兜底，
+ *    忽略语义保持不 throw）。
  *
  * 运行：cd packages/runtime && npx vitest run src/utils/__tests__/runtime-args.test.ts
  */
@@ -75,8 +77,29 @@ describe('parseRuntimeArgs（组合根 argv 解析）', () => {
     expect(() => parseRuntimeArgs([`--port=${bad}`])).toThrow(`invalid --port value: ${bad}`)
   })
 
-  it('末位悬空 flag（--port 无后续值）→ 静默忽略按缺省处理（与提取前实现对齐）', () => {
-    expect(parseRuntimeArgs(['--port']).port).toBe(BASE_PORT)
+  it('末位悬空 flag（--port 无后续值）→ warn 缺值 + 按缺省处理（code-harden P2：不再静默）', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(parseRuntimeArgs(['--port']).port).toBe(BASE_PORT)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(String(warnSpy.mock.calls[0]?.[0])).toContain('--port 缺值')
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('未知 flag（--remote-acces 拼错）→ warn 核对拼写指引 + 解析结果不受影响（不 throw，忽略语义保持）', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const args = parseRuntimeArgs(['--remote-acces', '--port', '4003'])
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(String(warnSpy.mock.calls[0]?.[0])).toContain('--remote-acces')
+      expect(String(warnSpy.mock.calls[0]?.[0])).toContain('remote-access')
+      expect(args.remoteAccess).toBe(false)
+      expect(args.port).toBe(4003)
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 
   it('TAIJI_AGENT_PORT_OFFSET env 正偏移 port', () => {

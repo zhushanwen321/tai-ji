@@ -278,6 +278,10 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
       // payload 形态对齐 scheduleRestart 耗尽分支（attempts + message）；纯 reject
       // 语义不变（不走崩溃退避链），补广播后原样 rethrow。
       const message = e instanceof Error ? e.message : String(e)
+      // toggle 失败同样刷新真因（RD-3#2，对齐 startAndNotify / attemptRestart 记录形态）：
+      // renderer 若错过本次 runtime-failed 广播（boot 竞态 / 无窗口在场），拉取兜底通道
+      // get-runtime-start-error 仍能取到真因——缺此行真因随当次广播窗口丢失
+      this.lastStartError = message
       this.broadcastToAllWindows('runtime-failed', { attempts: 0, message })
       throw e
     }

@@ -14,8 +14,9 @@
 //   per-session Map 分区 + requests-invalidated 失效摘除 + getPendingRequests 快照对账；
 // - bus 模块级私有单例（桌面走 getExtensionBus 惰性单例，来源选择是壳裁决）；
 // - 壳层能力回调不注入（无 pinia chat store / toast：onPiResponseSettled 空操作对齐
-//   「移动壳无 pendingSend 链」，notifyNotDelivered 静默——form 通道的未送达反馈同为
-//   console 降级，移动壳 v1 无 toast 组件）；
+//   「移动壳无 pendingSend 链」，notifyNotDelivered 静默——form 通道的未送达反馈经
+//   respond 返回 false 由 App 编排置内联错误行（MobileFormCard respondFailedId prop），
+//   console 留痕辅助，移动壳 v1 无 toast 组件）；
 // - 权限/对话/form 三通道均模块级装配（bus 单例私居本模块；ESM 单次求值，listener 不会
 //   翻倍），App.vue provide + 挂 CompanionBand / PermissionRequestDialog / MobileFormCard。
 //
@@ -80,7 +81,7 @@ export function useMobilePermissionRequest(): PermissionRequestState {
 // pinia，模块级 reactive Map 分区承接，ADR-0049 per-session Map 范式）：
 // - 订阅永驻模块级（不随视图挂载/卸载）——切 tab / 切 session 期间到达的请求照常入分区，
 //   视图按 activeSessionId 派生渲染；快照对账（getPendingRequests 差集剔除）由
-//   useMobileFormRequests 在 sid 变化时执行（桌面 subscribe(sid) 同式）；
+//   useMobileFormRequests 在 sid 变化与连接恢复边沿两处触发（桌面 subscribe(sid) 同式）；
 // - 无 sid 的 ui-request 跳过（C2；同帧 dialog 通道已 warn，此处不重复告警）；
 // - 撤窗语义与桌面 form 链同源：pi 源无超时撤窗广播，失效链
 //   requests-invalidated（turn abort / session 销毁等非 respond 终结）按 requestId 摘除；
@@ -164,11 +165,18 @@ export type MobileFormRequests = {
   /**
    * 作答回传（桌面 respond 同构）：result 经 sendExtensionUIResponse（method 透传），
    * 未送达（WS 非 OPEN）保留请求可重试（M1/RD-3#1），送达即出分区。请求已终结
-   * （失效/已应答）→ 迟到应答丢弃 + console 留痕（无 toast 的降级提示）。
+   * （失效/已应答）→ 迟到应答丢弃 + console 留痕（无 toast 的降级提示）。返回值 =
+   * 是否送达，App 编排消费（false → MobileFormCard 内联错误行，回传失败不静默）。
    */
   respond(requestId: string, result: boolean | string | null): boolean
   /** 取消（等价 respond(requestId, null)） */
   cancel(requestId: string): void
+  /**
+   * 快照对账立即执行（App.vue watch(isConnected) connected 边沿消费）：静默重连保持
+   * 视图挂载、sessionId 不变，断连期间到达的 form/planReview 请求经此补挂、已终结的
+   * 经此剔除；sid 为空跳过（无会话分区可对账）。
+   */
+  reconcileNow(): void
 }
 
 /** 视图消费的 planReview 帧窄化面（requestId + 守卫搬运的 selfReview） */
@@ -180,9 +188,10 @@ export type PlanReviewFrameForView = {
 /**
  * form/planReview 通道的会话视图（App.vue 聊天视图编排消费）：
  * - 按 activeSessionId 派生队首请求（无 sid 恒空，分区隔离；切 session 读不同分区）；
- * - sid 变化时快照对账（差集剔除 + 补入，桌面 subscribe 快照段同式——覆盖 runtime 重启 /
- *   断连重连 / 后台 session 的请求补挂；模块级实时订阅保证不漏帧，快照是权威对账面，
- *   不在快照中的旧条目一律移除，空快照也执行）。
+ * - 快照对账（差集剔除 + 补入，桌面 subscribe 快照段同式）两处触发：sid 变化（本模块
+ *   watch）+ 连接恢复边沿（App.vue watch(isConnected) connected 边沿调 reconcileNow——
+ *   静默重连保持视图挂载、sid 不变，断连期间到达的请求经此补挂 / 已终结的经此剔除）；
+ *   模块级实时订阅保证不漏帧，快照是权威对账面，不在快照中的旧条目一律移除，空快照也执行。
  */
 export function useMobileFormRequests(sessionId: Ref<string | null>): MobileFormRequests {
   const currentFormRequest = computed<ExtensionUIRequest | undefined>(() => {
@@ -221,6 +230,12 @@ export function useMobileFormRequests(sessionId: Ref<string | null>): MobileForm
     if (sid) reconcileSnapshot(sid)
   }, { immediate: true })
 
+  // 连接恢复边沿的对账入口（App.vue watch(isConnected) 消费；sid 为空跳过）
+  function reconcileNow(): void {
+    const sid = sessionId.value
+    if (sid) reconcileSnapshot(sid)
+  }
+
   function respond(requestId: string, result: boolean | string | null): boolean {
     const sid = sessionId.value
     if (!sid) return false
@@ -244,5 +259,5 @@ export function useMobileFormRequests(sessionId: Ref<string | null>): MobileForm
     respond(requestId, null)
   }
 
-  return { currentFormRequest, currentPlanReviewRequest, respond, cancel }
+  return { currentFormRequest, currentPlanReviewRequest, respond, cancel, reconcileNow }
 }

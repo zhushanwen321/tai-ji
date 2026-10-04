@@ -1131,6 +1131,7 @@ export default {
     entryDesc: 'With your phone on the same network, scan the code or open the link to connect.',
     warning: 'Anyone on the same network holding this link can fully control your taiji (including command execution).',
     qrAlt: 'Connection QR code',
+    qrFailed: 'QR code failed to generate — use the link above instead.',
     copyLink: 'Copy link',
     copied: 'Copied',
     noUrls: 'No LAN address available yet (runtime not running or still restarting). Reopen this panel to refresh.',

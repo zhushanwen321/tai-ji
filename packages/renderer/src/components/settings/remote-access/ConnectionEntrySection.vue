@@ -35,7 +35,7 @@
       </div>
 
       <div class="flex items-start gap-4">
-        <!-- 二维码（qrcode toDataURL 自绘 img，不引 vue 包装依赖） -->
+        <!-- 二维码（qrcode toDataURL 自绘 img，不引 vue 包装依赖）；生成失败/在途渲染占位提示 -->
         <div class="shrink-0 rounded-sm border border-border bg-white p-1.5">
           <img
             v-if="qrDataUrl"
@@ -44,7 +44,15 @@
             class="size-[140px] block"
             data-testid="remote-access-qr"
           >
-          <div v-else class="size-[140px]" aria-hidden="true"></div>
+          <div
+            v-else
+            class="flex size-[140px] items-center justify-center p-2"
+            data-testid="remote-access-qr-placeholder"
+          >
+            <p class="text-center text-[11px] leading-relaxed text-muted">
+              {{ t('settings.remoteAccess.qrFailed') }}
+            </p>
+          </div>
         </div>
 
         <!-- 链接 + 复制 -->
@@ -109,7 +117,7 @@ const fullUrl = computed(() =>
   selectedUrl.value && props.info.token ? `${selectedUrl.value}/?token=${props.info.token}` : '',
 )
 
-/** 二维码 data URL（生成失败置空渲染占位块，不阻塞链接/复制通路） */
+/** 二维码 data URL（生成失败/在途置空渲染占位提示块——文案引导复制链接兜底，不阻塞链接/复制通路） */
 const qrDataUrl = ref('')
 
 /**

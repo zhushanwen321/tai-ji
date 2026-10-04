@@ -242,6 +242,29 @@ describe('RemoteAccessPage 轮换流', () => {
   })
 })
 
+describe('RemoteAccessPage QR 失败降级', () => {
+  // code-harden 降级显形修复：toDataURL 失败不得只留空白块——占位块渲染提示文案（引导复制链接兜底），
+  // 链接/复制通路不受 QR 失败影响
+  it('toDataURL reject：占位块渲染失败提示文案，不渲染二维码 img，链接仍可用', async () => {
+    qrMocks.toDataURL.mockRejectedValue(new Error('qr boom'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    ipcMocks.getRemoteAccessInfo.mockResolvedValue(ENABLED_INFO)
+    wrapper = mount(RemoteAccessPage)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="remote-access-qr"]').exists()).toBe(false)
+    const placeholder = wrapper.find('[data-testid="remote-access-qr-placeholder"]')
+    expect(placeholder.exists()).toBe(true)
+    expect(placeholder.text()).toContain('二维码生成失败')
+    expect(placeholder.text()).toContain('链接')
+    // 降级不吞主通路：链接与复制按钮照常渲染
+    expect(wrapper.find('[data-testid="remote-access-url"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="remote-access-copy"]').exists()).toBe(true)
+    warn.mockRestore()
+  })
+})
+
 describe('RemoteAccessPage 复制链接', () => {
   it('点复制按钮：clipboard.writeText 收到完整链接（含 token）', async () => {
     ipcMocks.getRemoteAccessInfo.mockResolvedValue(ENABLED_INFO)

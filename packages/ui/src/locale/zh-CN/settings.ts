@@ -1130,6 +1130,7 @@ export default {
     entryDesc: '手机与电脑在同一网络时，扫码或打开链接即可访问。',
     warning: '同一网络内持有此链接的人可完全控制你的 taiji（含命令执行）。',
     qrAlt: '连接二维码',
+    qrFailed: '二维码生成失败，可复制上方链接访问',
     copyLink: '复制链接',
     copied: '已复制',
     noUrls: '暂无局域网地址（runtime 未运行或仍在重启），稍后重开本面板刷新。',

@@ -53,6 +53,16 @@
 //   退避簿记归零发生在连接成功（markConnected）而非触发瞬间；退避与连接状态解耦——重连成功
 //   后退避簿记归零（reconnectAttempts=0 + reconnectStartedAt=null），不污染新连接。
 //
+// ⑦ 探活死链检测（probeAlive，remote 形态切前台补位）：connected 态下 probeAlive() 发 ping
+//   + 限时 5s 等任意入站帧——任何入站帧（含超界/坏 JSON 帧，onmessage 首行在守卫/parse 之前
+//   清除）都是链路活性证据；超时无帧 → console.warn + close 走既有退避重连链（不动重连簿记，
+//   非 auth 拒绝、抑制位不涉及）。调用方 = use-connection visibility 切前台分支（仅 remote
+//   形态——移动壳无 IPC supervisor 事件补位；mock/local 直接 return，桌面死链检测仍由 TCP 层
+//   + IPC 事件兜底，零回归）。计时器清理点 = 入站帧 / onclose / clearTimers（disconnect、
+//   setFailed），单定时器不变量，超时回调带 gen 守卫不误杀换代后的新连接。断言点：超时 close
+//   + 重连可达 / 任意入站帧清除不 close / 非 connected no-op / 重复调用单定时器 / 清理不跨代。
+//   特征测试：ws-client.probe-alive.test.ts + use-connection-probe-alive.test.ts。
+//
 // ── 协议演进纪律 ──
 // - ws-client 从 remote-use 整体迁入 core/transport 后不预拆（auth/seq/RTT 经模块级状态紧
 //   耦合，拆分边界按实际耦合测量再定——架构文档 §5.1）。
@@ -67,7 +77,7 @@
 //   2 条——close code / presence 能力未迁入 core，激活待后续 wave。⑤ visibility 重连的 todo
 //   已移除（行为已落地 use-connection 并有专门测试，见 ⑤ [漂移] 说明）。
 // 超出原稿范围（规格按实现现状增补）：⑥ pre-auth 发送队列（review findings-confirmation #3）
-//   + 辅助状态（restarting/failed IPC 驱动）。
+//   + 辅助状态（restarting/failed IPC 驱动）+ ⑦ 探活死链检测（remote 切前台补位，见 ⑦）。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { providePlatform } from '../../platform/port'
 import type { ClientMessage } from '@taiji/shared'

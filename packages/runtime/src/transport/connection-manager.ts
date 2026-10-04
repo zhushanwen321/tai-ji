@@ -243,6 +243,11 @@ export class ConnectionManager {
   /** 已通过 auth 的连接集合（与 clients 池同步维护）。 */
   private authedConnections = new Set<WsType>()
   /**
+   * 已对 pre-auth 丢弃告警过的连接（code-harden P2 连接级频控）：每连接只 warn 首条
+   * 非 auth 消息，后续静默丢弃——防 10s 握手窗口内逐条刷屏；连接清理时随之删除。
+   */
+  private preAuthWarned = new Set<WsType>()
+  /**
    * 移动壳静态 handler（remote-access D3/E5，S3 拆分后）：组合根开态判定 + dist 探测
    * 通过时注入，实现与生命周期在 mobile-static.ts。null = 关态或 E5 禁用，HTTP 分派
    * 不进静态分支（与无远程访问形态逐字节一致）。
@@ -382,10 +387,16 @@ export class ConnectionManager {
     })
   }
 
-  /** unauthed 状态机：只受理首条 auth 消息；其他消息静默丢弃（设计意图，spec §3.3 D4）。 */
+  /**
+   * unauthed 状态机：只受理首条 auth 消息；其他消息每连接首条 warn、后续静默丢弃
+   * （spec §3.3 D4 丢弃语义不变 + code-harden P2 连接级频控防刷屏）。
+   */
   private handleUnauthedMessage(ws: WsType, msg: ClientMessage): void {
     if (msg.type !== 'auth') {
-      console.warn(`[runtime] dropping pre-auth message (type=${String((msg as { type?: unknown }).type)})`)
+      if (!this.preAuthWarned.has(ws)) {
+        this.preAuthWarned.add(ws)
+        console.warn(`[runtime] dropping pre-auth message (type=${String((msg as { type?: unknown }).type)})；该连接后续 pre-auth 消息静默丢弃、不再告警`)
+      }
       return
     }
     const token = (msg.payload as { token?: unknown } | undefined)?.token
@@ -444,6 +455,7 @@ export class ConnectionManager {
   private cleanupConnection(ws: WsType): void {
     this.clients.delete(ws)
     this.authedConnections.delete(ws)
+    this.preAuthWarned.delete(ws)
     this.clearHeartbeat(ws)
     const timer = this.authTimers.get(ws)
     if (timer) { clearTimeout(timer); this.authTimers.delete(ws) }

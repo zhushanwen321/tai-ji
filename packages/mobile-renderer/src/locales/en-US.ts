@@ -61,6 +61,7 @@ export default {
       scheduleEchoNote: 'Confirms the prefilled draft; edit on desktop to change details',
       scheduleNotReady: 'Draft incomplete or time has passed — edit on desktop to confirm, or cancel this request',
       emptyForm: 'Empty form — cancel only',
+      respondFailed: 'Not delivered — retry after the connection is restored',
     },
     pasteImageFallback: '[Image paste: desktop only]',
   },

@@ -42,6 +42,8 @@ const props = defineProps<{
   request?: ExtensionUIRequest
   /** 队首 planReview 审批请求（undefined = 该节不渲染） */
   planReview?: PlanReviewFrameForView
+  /** 作答回传未送达的 requestId（App 编排持有；与当前展示请求匹配时渲染内联错误行） */
+  respondFailedId?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -87,6 +89,14 @@ const isDraftMount = computed(() => props.request !== undefined && legacyDraft.v
 const draftQuestion = computed<ScheduleQuestion | null>(() =>
   legacyDraft.value ? { type: 'schedule', question: '', initial: legacyDraft.value } : null,
 )
+
+// 回传未送达错误行（role=alert 形态对齐 TokenInputView 错误行）：requestId 匹配当前展示
+// 请求才渲染——请求被摘除（卡片收口）或新请求到达时旧错误不残留
+const showRespondError = computed(() => {
+  const failedId = props.respondFailedId
+  if (failedId === null || failedId === undefined) return false
+  return props.request?.requestId === failedId || props.planReview?.requestId === failedId
+})
 
 /** 渲染问题集（draft 源 → 单 schedule 题；questions 源原样） */
 const questionsList = computed<FormQuestion[]>(() =>
@@ -324,6 +334,16 @@ function showOtherInput(q: FormQuestion): boolean {
         </div>
       </template>
 
+      <!-- 回传未送达内联错误行（App 编排置 respondFailedId，提交/取消失败同源） -->
+      <p
+        v-if="showRespondError"
+        class="text-xs text-neutral-fg"
+        role="alert"
+        data-testid="mobile-form-respond-error"
+      >
+        {{ t('mobile.formCard.respondFailed') }}
+      </p>
+
       <!-- actions：取消 + 提交（Submit 门禁用态带未答题数提示） -->
       <div class="flex items-center justify-end gap-2 pt-1">
         <Button v-if="allowCancel" variant="ghost" data-testid="mobile-form-cancel" @click="onCancel">
@@ -360,6 +380,15 @@ function showOtherInput(q: FormQuestion): boolean {
         data-testid="mobile-plan-review-self-review"
       >
         {{ planReview.selfReview }}
+      </p>
+      <!-- 回传未送达内联错误行（批准/搁置同走 respond 回传通道） -->
+      <p
+        v-if="showRespondError"
+        class="text-xs text-neutral-fg"
+        role="alert"
+        data-testid="mobile-plan-review-respond-error"
+      >
+        {{ t('mobile.formCard.respondFailed') }}
       </p>
       <div class="flex items-center justify-end gap-2 pt-1">
         <Button variant="ghost" data-testid="mobile-plan-review-dismiss" @click="emit('submit', { requestId: planReview.requestId, result: JSON.stringify({ decision: 'dismiss' }) })">

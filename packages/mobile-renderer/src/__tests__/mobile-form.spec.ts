@@ -5,7 +5,9 @@
 // （extension.ui_response 既有通路，method 透传）→ 卡片出队收口。
 //
 // 装配 + 通道一体断言（桌面同构语义锚定 useExtensionUI.test.ts / use-extension-ui-* 测试族）；
-// 协议编码纯逻辑契约在 form-protocol.test.ts。
+// 协议编码纯逻辑契约在 form-protocol.test.ts。断连重连快照对账（connected 边沿
+// reconcileNow 补拉）与回传失败内联错误行（respondFailedId prop，组件级断言独立 describe）
+// 同文件覆盖。
 //
 // mock 策略：extension 域（sendExtensionUIResponse/getPendingRequests）模块级 vi.mock
 // 隔离 WS（断言回传参数与送达布尔）；请求注入经 __testing.mobileExtensionBus.emit
@@ -16,6 +18,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick, ref } from 'vue'
 import App from '../App.vue'
+import MobileFormCard from '../views/MobileFormCard.vue'
 import { i18n } from '../i18n'
 import { __testing, useMobileFormRequests } from '../shell/companion-bridge'
 import { sessionStore } from '../shell/app-runtime'
@@ -324,6 +327,68 @@ describe('移动壳 form 请求链（D7 form 行恢复）', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid="mobile-form-section"]').exists()).toBe(false)
   })
+
+  it('断连重连（connected 边沿）触发快照对账：空快照剔除滞留请求；快照新请求补挂呈现', async () => {
+    wrapper = await mountChatView('sid-form')
+    emitFormRequest(singleChoiceRequest())
+    await nextTick()
+    expect(wrapper.find('[data-testid="mobile-form-section"]').exists()).toBe(true)
+
+    // 静默重连：视图保持挂载、sessionId 不变（瞬时断连不换视图，BM5）——无 sid 变化，
+    // 断连期间到达/终结的请求不可能经 sid 链路对账
+    shellConnectionState.value = 'connecting'
+    await nextTick()
+    expect(wrapper.find('[data-testid="shell-reconnecting-banner"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="mobile-form-section"]').exists()).toBe(true)
+
+    // 重连恢复：快照空（断连期间请求已被 pi 侧终结）→ 滞留卡差集剔除（僵尸卡假成功收口）
+    shellConnectionState.value = 'connected'
+    await flushPromises()
+    expect(mockGetPending).toHaveBeenCalledWith('sid-form')
+    expect(wrapper.find('[data-testid="mobile-form-section"]').exists()).toBe(false)
+
+    // 再次断连重连：快照含断连期间新到的请求 → 补挂呈现（pi 侧 select 不再挂起不可见）
+    shellConnectionState.value = 'connecting'
+    await nextTick()
+    mockGetPending.mockResolvedValueOnce([
+      { sessionId: 'sid-form', requestId: 'req-2', method: 'select', ...singleChoiceRequest() } as ExtensionUIRequest,
+    ])
+    shellConnectionState.value = 'connected'
+    await flushPromises()
+    expect(wrapper.find('[data-testid="mobile-form-section"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="mobile-form-title"]').text()).toBe('用哪个数据库？')
+  })
+
+  it('回传失败（WS 未送达）→ 内联错误行可见（submit/cancel 双路）；重试成功收口，新请求不带旧错误', async () => {
+    wrapper = await mountChatView('sid-form')
+    emitFormRequest(singleChoiceRequest())
+    await nextTick()
+    expect(wrapper.find('[data-testid="mobile-form-respond-error"]').exists()).toBe(false)
+
+    // 提交未送达：卡保留（可重试）+ 错误行在场（不静默）
+    mockSendResponse.mockReturnValueOnce(false)
+    await wrapper.get('[data-testid="mobile-form-option-pg"]').trigger('click')
+    await wrapper.get('[data-testid="mobile-form-submit"]').trigger('click')
+    expect(wrapper.find('[data-testid="mobile-form-section"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="mobile-form-respond-error"]').exists()).toBe(true)
+
+    // 取消也未送达：错误行保持
+    mockSendResponse.mockReturnValueOnce(false)
+    await wrapper.get('[data-testid="mobile-form-cancel"]').trigger('click')
+    expect(wrapper.find('[data-testid="mobile-form-respond-error"]').exists()).toBe(true)
+
+    // 重试成功：卡收口（错误随请求摘除消失）
+    mockSendResponse.mockReturnValueOnce(true)
+    await wrapper.get('[data-testid="mobile-form-submit"]').trigger('click')
+    expect(wrapper.find('[data-testid="mobile-form-section"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="mobile-form-respond-error"]').exists()).toBe(false)
+
+    // 新请求到达：不带上一轮错误态（错误按 requestId 匹配渲染）
+    emitFormRequest({ requestId: 'req-2', ...singleChoiceRequest() })
+    await nextTick()
+    expect(wrapper.find('[data-testid="mobile-form-section"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="mobile-form-respond-error"]').exists()).toBe(false)
+  })
 })
 
 describe('form 通道 respond 防御面（无 App 装配的通道级断言）', () => {
@@ -352,5 +417,55 @@ describe('form 通道 respond 防御面（无 App 装配的通道级断言）', 
     // 无 sid 上下文：respond 直接 false（渲染面依赖 session 分区的同构防御）
     sid.value = null
     expect(respond('req-1', 'late')).toBe(false)
+  })
+
+  it('reconcileNow：sid 为空跳过快照拉取（连接恢复入口无会话上下文的防御）', () => {
+    const sid = ref<string | null>(null)
+    const { reconcileNow } = useMobileFormRequests(sid)
+    reconcileNow()
+    expect(mockGetPending).not.toHaveBeenCalled()
+
+    // sid 就位后立即执行：以当前 sid 拉快照（连接恢复边沿的主路径）
+    sid.value = 'sid-reconnect'
+    reconcileNow()
+    expect(mockGetPending).toHaveBeenCalledWith('sid-reconnect')
+  })
+})
+
+describe('MobileFormCard 回传失败错误行（组件级 prop 渲染）', () => {
+  beforeEach(() => {
+    __testing.resetFormRequestsForTest()
+  })
+
+  function mountCard(props: Record<string, unknown>) {
+    return mount(MobileFormCard, { global: { plugins: [i18n] }, props })
+  }
+
+  function errRequest(): ExtensionUIRequest {
+    return { sessionId: 'sid-err', requestId: 'req-1', method: 'select', ...singleChoiceRequest() } as ExtensionUIRequest
+  }
+
+  it('respondFailedId 匹配当前请求 → 错误行渲染；不匹配或缺省 → 不渲染', () => {
+    const matched = mountCard({ request: errRequest(), respondFailedId: 'req-1' })
+    expect(matched.find('[data-testid="mobile-form-respond-error"]').exists()).toBe(true)
+    matched.unmount()
+
+    const mismatched = mountCard({ request: errRequest(), respondFailedId: 'req-other' })
+    expect(mismatched.find('[data-testid="mobile-form-respond-error"]').exists()).toBe(false)
+    mismatched.unmount()
+
+    const absent = mountCard({ request: errRequest() })
+    expect(absent.find('[data-testid="mobile-form-respond-error"]').exists()).toBe(false)
+    absent.unmount()
+  })
+
+  it('planReview 审批卡同样承接错误行（批准/搁置同走 respond 回传通道）', () => {
+    const card = mountCard({ planReview: { requestId: 'req-9' }, respondFailedId: 'req-9' })
+    expect(card.find('[data-testid="mobile-plan-review-respond-error"]').exists()).toBe(true)
+    card.unmount()
+
+    const noMatch = mountCard({ planReview: { requestId: 'req-9' }, respondFailedId: 'req-other' })
+    expect(noMatch.find('[data-testid="mobile-plan-review-respond-error"]').exists()).toBe(false)
+    noMatch.unmount()
   })
 })

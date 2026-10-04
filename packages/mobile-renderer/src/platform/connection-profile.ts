@@ -16,7 +16,7 @@ import type { ConnectionProfilePort, KVStorage, ResolvedConnectionProfile } from
 /** remote token 在 storage 的持久 key（验身成功才写入，G3 免重扫） */
 export const REMOTE_TOKEN_STORAGE_KEY = 'taiji.remote-access.token'
 
-/** 凭据来源：URL query / storage / 手输（token 输入视图提交；语义同 query——验身成功才落盘） */
+/** 凭据来源：URL query / storage / 手输（token 输入视图提交；语义同 query——验身成功落盘 + 抹地址栏） */
 export type CredentialSource = 'query' | 'storage' | 'manual'
 
 /** 已采纳待验身的凭据（内存持有；落盘只发生在 auth 成功处置，坏凭据不顶掉好 storage） */
@@ -70,7 +70,7 @@ export interface ConnectionProfileDeps {
   protocol: string
   /** location.search 原文（query token 摄取） */
   search: string
-  /** 抹地址栏 query（D4：query token 验身成功后调用；实现 = history.replaceState 剥 query） */
+  /** 抹地址栏 query（D4：query/manual 验身成功后调用；实现 = history.replaceState 剥 query） */
   stripQuery(): void
   /** 落 token 输入视图的通知（验身失败 / 皆无凭据被拒后；移动壳 UI 态切换） */
   onTokenInputRequired(): void
@@ -79,8 +79,10 @@ export interface ConnectionProfileDeps {
 /** auth 结果处置 + 手输采纳（bootstrap 接线面；TokenInputView 提交路径用 adoptManualToken） */
 export interface ConnectionCredentialController {
   /**
-   * auth 成功（ws-client connected）处置：query/manual 来源落 storage（query 同时抹地址栏）；
-   * storage 来源幂等（已在盘上）。无待定凭据（普通重连）no-op。
+   * auth 成功（ws-client connected）处置：query/manual 来源落 storage + 抹地址栏（manual
+   * 同抹——手输前地址栏可能残留旧 ?token=，不抹则刷新/同会话再 resolve 时旧值压过已落盘
+   * 新凭据成循环；stripQuery 抛错降级 warn 不上抛，storage 已落盘即自愈）。storage 来源
+   * 幂等（已在盘上）。无待定凭据（普通重连）no-op。
    */
   handleAuthSuccess(): Promise<void>
   /**
@@ -96,6 +98,26 @@ export function createConnectionProfilePort(
   deps: ConnectionProfileDeps,
 ): ConnectionProfilePort & ConnectionCredentialController {
   let pending: PendingCredential | null = null
+  // 本页会话内已验身消费的 query 值：deps.search 是 bootstrap 时刻的字符串快照，
+  // replaceState 抹地址栏不会回写快照——不消歧则后续 resolve（token 重试 / HMR 重连再走
+  // connectRemoteProfile）会从旧快照重复采纳已处置的 query 值，压过已落盘的新凭据。
+  let consumedQueryToken: string | null = null
+
+  // stripQuery 安全包装（query/manual 验身成功共用）：实装 = history.replaceState（bootstrap
+  // 注入），受限环境会抛——storage 此刻已落盘，下次刷新走 storage 分支即自愈，失败只 warn
+  // 不上抛（connection-view 对 handleAuthSuccess 是 void 调用，直抛 = unhandled rejection）。
+  // 消费消歧与 replaceState 成败无关（验身落盘即消费），先记后抹。
+  const stripAddressBarQuery = (): void => {
+    consumedQueryToken = readQueryToken(deps.search)
+    try {
+      deps.stripQuery()
+    } catch (e) {
+      // 降级策略（best-effort 抹地址栏）：受限环境 replaceState 抛错不向上传播——storage
+      // 已落盘，下次刷新走 storage 分支即自愈；warn 留排障依据（connection-view 对
+      // handleAuthSuccess 是 void 调用，直抛 = unhandled rejection）。
+      console.warn('[connection-profile] stripQuery failed, address bar keeps old query:', e)
+    }
+  }
 
   return {
     async resolve(): Promise<ResolvedConnectionProfile> {
@@ -105,7 +127,11 @@ export function createConnectionProfilePort(
       }
       const queryToken = readQueryToken(deps.search)
       const storedToken = await deps.storage.get(REMOTE_TOKEN_STORAGE_KEY)
-      const adoption = resolveCredential(queryToken, storedToken)
+      // 已消费的 query 值不再采纳（见 consumedQueryToken）：归 null 后走 storage / need-input
+      const adoption = resolveCredential(
+        queryToken === consumedQueryToken ? null : queryToken,
+        storedToken,
+      )
       if (adoption.action === 'adopt') {
         pending = adoption.credential
         return { url: wsUrlFromHost(deps.host, deps.protocol), token: pending.token }
@@ -119,7 +145,9 @@ export function createConnectionProfilePort(
     async handleAuthSuccess(): Promise<void> {
       if (pending && (pending.source === 'query' || pending.source === 'manual')) {
         await deps.storage.set(REMOTE_TOKEN_STORAGE_KEY, pending.token)
-        if (pending.source === 'query') deps.stripQuery()
+        // query 与 manual 都抹地址栏：manual 漏抹是历史缺陷——手输成功后地址栏残留旧
+        // ?token=，刷新时 query 优先级压过已落盘新凭据，坏旧值反复被采纳形成循环
+        stripAddressBarQuery()
       }
       pending = null
     },

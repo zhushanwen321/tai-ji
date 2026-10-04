@@ -45,8 +45,9 @@ export async function bootstrap(): Promise<void> {
     // WS scheme 派生源：http: → ws://，https: → wss://（wsUrlFromHost）
     protocol: location.protocol,
     search: location.search,
-    // D4：query token 验身成功后抹地址栏（replaceState 不产生历史条目）；失败路径刻意保留
-    // query（刷新重试入口，D4 显式判定）
+    // D4：query/manual 凭据验身成功后抹地址栏（replaceState 不产生历史条目；manual 同抹——
+    // 手输前地址栏可能残留旧 ?token=，不抹则刷新时旧值压过已落盘新凭据成循环）；失败路径
+    // 刻意保留 query（刷新重试入口，D4 显式判定）
     stripQuery: () => history.replaceState(null, '', location.pathname),
     // 凭据缺失 / 验身失败处置尾部落 token 输入视图（connection-view 信号入口③）
     onTokenInputRequired: notifyTokenInputRequired,

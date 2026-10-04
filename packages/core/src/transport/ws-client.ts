@@ -5,8 +5,10 @@
  *
  * [HISTORICAL] 不变量：
  * 1. 4 态状态机：disconnected → connecting → connected（onclose → reconnecting → connecting...）
- * 2. 心跳：15s 发 ping 保活（仅 keepalive，不跟踪 pong；死连接检测靠 TCP 层 + IPC supervisor
- *    事件 runtime-restarting/runtime-failed 驱动，非 pong 超时）
+ * 2. 心跳：15s 发 ping 保活（仅 keepalive，不跟踪 pong）。死连接检测分形态：桌面靠 TCP 层 +
+ *    IPC supervisor 事件 runtime-restarting/runtime-failed 驱动；remote 形态（移动壳无 IPC
+ *    supervisor 事件）由 probeAlive 探活补位——use-connection visibility 切前台触发，发 ping +
+ *    限时等任意入站帧，超时 close 走重连链。非 pong 超时语义不变。
  * 3. 指数退避重连：1s 起、×2、上限 30s
  * 4. generation 计数：新连接 ++generation，旧 WS 的残余回调（onopen/onclose/onmessage）
  *    检查 gen !== wsGeneration 时直接 return，不干扰新连接
@@ -90,6 +92,12 @@ const MAX_RECONNECT_DURATION_MS = 60_000
 /** auth 握手客户端超时（S1-W1）：短于 runtime 侧 10s 握手超时，客户端先主动断开走重连。 */
 const AUTH_TIMEOUT_MS = 5_000
 /**
+ * 探活超时（probeAlive，remote 形态切前台死链检测）：发 ping 后限时等任意入站帧，超时判定
+ * 半开 TCP 死链（锁屏/基站切换形态），主动 close 走既有退避重连链。量级对齐单请求粒度
+ * （AUTH_TIMEOUT_MS 同为 5s：正常链路 RTT 秒级以内，5s 留数个 RTT 余量）。
+ */
+const PROBE_ALIVE_TIMEOUT_MS = 5_000
+/**
  * pre-auth 发送队列容量上限（防泄漏）：入队消息与 request 层 pending 一一对应
  * （renderer pending 层 MAX_PENDING=256 同界），超限驱逐最老并经 onQueueDrop 通知。
  */
@@ -116,6 +124,8 @@ let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 /** auth 握手超时计时器（auth.result 到达 / 连接关闭时清除） */
 let authTimer: ReturnType<typeof setTimeout> | null = null
+/** 探活超时计时器（probeAlive 专用；任意入站帧 / 连接关闭时清除——单定时器不变量对齐 authTimer） */
+let probeAliveTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectAttempts = 0
 let wsGeneration = 0
 let currentUrl: string | null = null
@@ -410,6 +420,9 @@ export function connect(url: string, credentials: ConnectCredentials): void {
 
   ws.onmessage = (event) => {
     if (gen !== wsGeneration) return
+    // 探活（remote 切前台死链检测）：本代任何入站帧都是链路活性证据——在大小守卫/parse
+    // 之前清探活计时器（超界帧、坏 JSON 帧同样证明链路活，不清会被误判死链）。
+    clearProbeAliveTimer()
     // 入站帧守卫（D8）：JSON.parse 前置大小检查——超界整条丢弃（不 parse，防 OOM 形态），
     // 归因 + 计数 + 终止阀见 handleOversizedInboundFrame。守卫在 auth 检查之前（任何阶段
     // 的超界帧都拦，含握手期异常帧）。
@@ -465,6 +478,7 @@ export function connect(url: string, credentials: ConnectCredentials): void {
     state.value = 'disconnected'
     stopHeartbeat()
     clearAuthTimer()
+    clearProbeAliveTimer() // 探活窗内连接关闭：计时器随断连清除，不残留到重连后的新连接
     dropPreAuthQueue('closed')
     scheduleReconnect()
   }
@@ -523,6 +537,40 @@ export function send(msg: ClientMessage): boolean {
     return true
   }
   return false
+}
+
+// ── 探活（probeAlive，remote 形态切前台死链检测）──────────────
+
+/**
+ * 探活：发一条 ping 心跳，限时 PROBE_ALIVE_TIMEOUT_MS 内收到**任何入站帧**即视为链路活
+ * （不依赖 pong 具体语义——任意入站帧都是活性证据，onmessage 首行清除）；超时无帧判定半开
+ * TCP 死链（锁屏/基站切换形态：state 恒 connected、send 返回 true 但对端收不到），console.warn
+ * 后主动 close——close 走既有 onclose → 退避重连链（此处不动 reconnectAttempts 等重连簿记，
+ * 由既有路径处理；非 auth 拒绝，抑制位不涉及）。
+ *
+ * 仅 connected 态有效（其余状态调用 no-op）。调用方 = use-connection visibility 切前台分支
+ * （仅 remote 形态；移动壳无 IPC supervisor 事件补位，切前台是死链检测的唯一低成本时机）。
+ * 本地/mock 形态不调用——桌面死链检测由 TCP 层 + IPC supervisor 事件兜底，零回归。
+ *
+ * 计时器清理点与心跳/auth 计时器同款：任意入站帧（onmessage 首行）/ onclose / clearTimers
+ * （disconnect、setFailed）——断开与重连各路径不残留；重复调用先清旧（单定时器不变量，
+ * 对齐 scheduleReconnect :703-705 注释先例）。超时回调带 gen 守卫（对齐 authTimer），换代后
+ * 旧探活不误杀新连接。
+ */
+export function probeAlive(): void {
+  if (state.value !== 'connected') return
+  if (ws === null || ws.readyState !== WS_READY_STATE.OPEN) return
+  clearProbeAliveTimer()
+  send({ type: 'ping', payload: {} })
+  const gen = wsGeneration
+  probeAliveTimer = setTimeout(() => {
+    probeAliveTimer = null
+    if (gen !== wsGeneration) return // 已换代：旧探活不误杀新连接
+    console.warn(
+      '[ws] alive probe timeout: connection unresponsive (no inbound frame since probe ping), closing for reconnect',
+    )
+    ws?.close()
+  }, PROBE_ALIVE_TIMEOUT_MS)
 }
 
 // ── 内部 ────────────────────────────────────────────────────
@@ -721,8 +769,17 @@ function stopHeartbeat(): void {
   }
 }
 
+/** 清除探活计时器（入站帧 / onclose / clearTimers 三类清理点共用；幂等） */
+function clearProbeAliveTimer(): void {
+  if (probeAliveTimer) {
+    clearTimeout(probeAliveTimer)
+    probeAliveTimer = null
+  }
+}
+
 function clearTimers(): void {
   stopHeartbeat()
+  clearProbeAliveTimer()
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)
     reconnectTimer = null

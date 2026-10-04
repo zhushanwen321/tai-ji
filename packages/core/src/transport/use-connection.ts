@@ -43,6 +43,7 @@ import {
   onAuthRejected,
   onMessage,
   onQueueDrop,
+  probeAlive,
   setFailed,
   setRestarting,
   type ConnectCredentials,
@@ -400,9 +401,19 @@ export function useConnection() {
       removeVisibilityListener = ports.visibility.onVisibilityChange(() => {
         // 守卫 1：只有切回可见（visible）才重连，切到后台（hidden）不触发
         if (!ports.visibility.isVisible()) return
-        // 守卫 2：已连接就不重连（避免无谓连接触发）
-        if (getState().value === 'connected') return
-        // 守卫 3：从未连过（无 url/凭据复用）则不触发
+        // 守卫 2：已连接就不重连（避免无谓连接触发）。
+        // remote 形态例外——切前台先探活（移动形态死链检测）：移动壳无 IPC supervisor 事件
+        // 补位（桌面靠 runtime-restarting/runtime-failed 事件兜底），锁屏/基站切换形成的半开
+        // TCP 使 state 恒 connected——发消息 send 返回 true 但对端收不到，65s pending sweep
+        // 才报错。切前台探活：probeAlive 发 ping + 限时等任意入站帧，超时 close 走既有退避
+        // 重连链。mock/local 形态保持直接 return（桌面死链由 IPC 事件兜底，零回归）。
+        if (getState().value === 'connected') {
+          if (resolveConnectionMode(ports).kind !== 'remote') return
+          probeAlive()
+          return
+        }
+        // 守卫 3：从未连过（无 url/凭据复用）则不触发——重连分支簿记前提；对上方探活分支
+        // 结构性不可达（connected 必有簿记），守卫顺序与现状一致（探活分支沿用同一前提）。
         if (!lastConnectedUrl || !lastCredentials) return
         // 守卫 4：auth 拒绝抑制位生效（remote-use D8 全触发点覆盖——退避链在 ws-client
         // scheduleReconnect 短路，本守卫覆盖切前台主动重连）→ 不自动重连，等 token 重试路径。

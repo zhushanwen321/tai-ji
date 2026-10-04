@@ -251,6 +251,39 @@ describe('convertToDialogRequest（AC2）', () => {
     expect(convertToDialogRequest(e2).options).toEqual([{ label: 'x', value: '1', description: 'desc' }])
   })
 
+  it('TC3b: options 含非法项——console.warn 单条留痕（requestId + 跳过索引汇总）且合法项正常产出', () => {
+    // 降级留痕对齐移动壳 MobileFormCard formQuestions dropped 先例：跳过不静默，单条汇总不逐项刷屏
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const e = makeUiRequestEvent() as Extract<InternalEvent, { kind: 'ui-request' }> & {
+      request: Record<string, unknown>
+    }
+    e.request.options = ['ok', 42, { label: 'x', value: '1' }, null]
+    const req = convertToDialogRequest(e)
+
+    // 合法项（string + 合法对象）照常产出，非法项（索引 1、3）跳过
+    expect(req.options).toEqual([
+      { label: 'ok', value: 'ok' },
+      { label: 'x', value: '1' },
+    ])
+    expect(warn).toHaveBeenCalledTimes(1)
+    const warnText = warn.mock.calls[0][0] as string
+    expect(warnText).toContain('r1') // requestId
+    expect(warnText).toContain('2/4') // 跳过数/总数
+    expect(warnText).toContain('1, 3') // 被跳过索引
+    warn.mockRestore()
+  })
+
+  it('TC3c: options 全部合法时不产生留痕 warn', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const e = makeUiRequestEvent() as Extract<InternalEvent, { kind: 'ui-request' }> & {
+      request: Record<string, unknown>
+    }
+    e.request.options = ['a', { label: 'x', value: '1' }]
+    convertToDialogRequest(e)
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
   it('TC4: method 超界恢复 + receivedAt 补齐——原始 method 优先（editor 透传），无 method 用 kind', () => {
     const e1 = makeUiRequestEvent({ kind: 'input' }) as Extract<InternalEvent, { kind: 'ui-request' }> & {
       request: Record<string, unknown>

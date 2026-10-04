@@ -87,10 +87,10 @@ function getStderrSink(): WriteStream | null {
   // 轮转窗口：getStderrSink 被 writeStderrSink 之外的场景调用也不得绕过窗口禁令
   if (stderrRotation) return null
   if (stderrSink) return stderrSink
+  const logsDir = path.join(getDataDir(), 'logs')
+  const file = path.join(logsDir, 'electron-runtime-stderr.log')
   try {
-    const logsDir = path.join(getDataDir(), 'logs')
     mkdirSync(logsDir, { recursive: true })
-    const file = path.join(logsDir, 'electron-runtime-stderr.log')
     // 打开前若既有文件已超帽（上次运行崩溃未轮转 / 历史大文件），先滚动一次——进程内
     // 字节计数不覆盖历史，此 stat 弥合跨重启的 size 上限（对齐 runtime openMainStream）。
     if (existsSync(file) && statSync(file).size > readMainLogMaxBytes()) {
@@ -98,8 +98,15 @@ function getStderrSink(): WriteStream | null {
     }
     stderrSink = createWriteStream(file, { flags: 'a' })
     stderrSinkFile = file
-  } catch {
+  } catch (e) {
     stderrSink = null
+    // 可观测性：建流失败（logs 目录不可写 / 只读卷 / 权限）时 runtime 原生崩溃期
+    // stderr 文件取证通道整体失效，必须留痕。console.error 走进程 stderr 不依赖
+    // 文件系统，无递归风险（对齐同文件其余失败路径的响亮日志形态）。
+    console.error(
+      `[runtime] stderr sink create failed for ${file}: ${e instanceof Error ? e.message : String(e)}`
+      + ' — stderr 文件取证不可用，仅进程控制台可见',
+    )
   }
   return stderrSink
 }
@@ -437,6 +444,12 @@ export function spawnRuntimeProcess(port: number, onExit?: (code: number | null)
     onExit?.(SPAWN_ERROR_EXIT_CODE)
   })
 
+  // 打包态 stderr 背压丢弃计数（dev 走 console 转发无此路径，恒 0）：闭包变量生命周期
+  // = 本次 spawn，对齐 stderrBytes 的「本次 spawn 累计」语义（与 writeStderrSink 的
+  // 文件级字节计数职责不同）。首丢 warn 一条 + 累计计数，exit（spawn 收尾）汇总一行，
+  // 可观测形态对齐轮转通道 stderrRotationDropped 的「窗口结束合并 warn」。
+  let stderrBackpressureDropped = 0
+
   // M5（perf-quick-batch）：runtime 日志转发按打包状态分流。
   // - dev：stdout + stderr 全量 console 转发（终端调试可见）
   // - prod：stdout 不转发（runtime initLogger 已 tee 落盘，console 转发会阻塞主进程）；
@@ -456,14 +469,28 @@ export function spawnRuntimeProcess(port: number, onExit?: (code: number | null)
     // eslint-disable-next-line no-magic-numbers -- 1MB stderr 背压上限（非业务常量）
     const WRITE_BUFFER_LIMIT = 1024 * 1024
     let stderrBytes = 0
+    let stderrDropWarned = false
     child.stderr?.on('data', (data: Buffer) => {
-      if (stderrBytes > WRITE_BUFFER_LIMIT) return
+      if (stderrBytes > WRITE_BUFFER_LIMIT) {
+        stderrBackpressureDropped++
+        if (!stderrDropWarned) {
+          stderrDropWarned = true
+          // 首丢留痕：超限后静默丢弃 = 取证通道部分失效，须可归因（热路径不逐 chunk 记）
+          console.warn(`[runtime] stderr backpressure: exceeded ${WRITE_BUFFER_LIMIT} bytes this session — dropping further stderr (total reported on exit)`)
+        }
+        return
+      }
       stderrBytes += data.length
       writeStderrSink(data)
     })
   }
   child.on('exit', (code) => {
     console.log(`[runtime] Process exited with code ${code}`)
+    // 背压丢弃汇总（spawn 收尾）：丢弃总数一行留痕，崩溃取证时 stderr 文件缺口有账可查
+    // （对齐轮转窗口 stderrRotationDropped 完成后合并 warn 的形态）
+    if (stderrBackpressureDropped > 0) {
+      console.warn(`[runtime] stderr backpressure: dropped ${stderrBackpressureDropped} stderr chunk(s) total this session`)
+    }
     // 通知 supervisor 清理 child/port 状态（自然退出/崩溃路径）
     onExit?.(code)
   })

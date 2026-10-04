@@ -105,12 +105,16 @@ function isOptionObject(v: unknown): v is { label: string; value: string; descri
 
 /**
  * options 双形状归一（AC2）：string[] → { label, value }[]；
- * { label, value, description? }[] 透传；非法项跳过；无有效项返回 undefined。
+ * { label, value, description? }[] 透传；非法项跳过（留痕：单条 console.warn 汇总跳过数与
+ * 索引，带 requestId——降级不静默，对齐移动壳 MobileFormCard formQuestions dropped 先例）；
+ * 无有效项返回 undefined。
  */
-function normalizeOptions(options: unknown): DialogRequestOption[] | undefined {
+function normalizeOptions(options: unknown, requestId: string): DialogRequestOption[] | undefined {
   if (!Array.isArray(options)) return undefined
   const out: DialogRequestOption[] = []
-  for (const item of options) {
+  const skippedIndices: number[] = []
+  for (let i = 0; i < options.length; i++) {
+    const item = options[i]
     if (typeof item === 'string') {
       out.push({ label: item, value: item })
     } else if (isOptionObject(item)) {
@@ -119,8 +123,16 @@ function normalizeOptions(options: unknown): DialogRequestOption[] | undefined {
         value: item.value,
         ...(item.description !== undefined ? { description: item.description } : {}),
       })
+    } else {
+      // 非法项（非 string 且非合法对象形状）跳过并记录索引
+      skippedIndices.push(i)
     }
-    // 非法项（非 string 且非合法对象形状）跳过
+  }
+  if (skippedIndices.length > 0) {
+    console.warn(
+      `[shell-adapters] ui-request options 非法项跳过 ${skippedIndices.length}/${options.length}`
+        + `（索引 [${skippedIndices.join(', ')}]，要求 string 或 { label, value } 对象，requestId=${requestId}）`,
+    )
   }
   return out.length > 0 ? out : undefined
 }
@@ -138,6 +150,8 @@ export function convertToDialogRequest(e: UiRequestEvent): DialogRequest {
   const method: DialogRequest['method'] = isDialogMethod(req.method)
     ? req.method
     : req.kind
+  // 归一单次执行（曾内联调用两次——非法项留痕 warn 会双发）
+  const options = normalizeOptions(req.options, req.requestId)
   return {
     source: req.pluginId !== '' ? 'plugin' : 'pi',
     sessionId: e.sessionId ?? '',
@@ -145,7 +159,7 @@ export function convertToDialogRequest(e: UiRequestEvent): DialogRequest {
     method,
     ...(req.title !== undefined ? { title: req.title as string } : {}),
     ...(req.message !== undefined ? { message: req.message as string } : {}),
-    ...(normalizeOptions(req.options) !== undefined ? { options: normalizeOptions(req.options)! } : {}),
+    ...(options !== undefined ? { options } : {}),
     ...(req.default !== undefined ? { default: req.default as string } : {}),
     ...(req.prefill !== undefined ? { prefill: req.prefill as string } : {}),
     ...(req.level !== undefined ? { level: req.level as 'info' | 'warn' | 'error' } : {}),
