@@ -518,7 +518,8 @@ export function initExtensionHostBridge(app: App): void {
     },
   })
   // PluginModalHost 数据源（声明侧元数据 fallback；E1 降级链的 declaration 段）
-  // + dismissModal 出站（D3 门面：renderer WS send 白名单仅 bridge/dialog/singleton）
+  // + dismissModal 出站（D3 门面：check_no_direct_ws_send.py 白名单仅本 bridge 与 ui 侧
+  //   extension-host/shell-adapters 两个出站桥接件）
   app.provide(PLUGIN_MODAL_SOURCE_KEY, {
     getDeclaration: (pluginId, modalId) => {
       const c = contributions
