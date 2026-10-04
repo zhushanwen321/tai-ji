@@ -288,7 +288,7 @@ test.describe('新建任务 E2E', () => {
 ---
 
 
-> 覆盖：消息输入框（contenteditable）、slash 命令浮层（@ 引用 / # 文件 / / 命令）、发送三态（send/streaming-stop/sending-spinner）、steer/followUp
+> 覆盖：消息输入框（contenteditable）、slash 命令浮层（@ 引用 / # 文件 / / 命令）、发送位三态（send/streaming-stop/sending-spinner）、steer/followUp、发送终局行为分型（命令 disposition handled 即终局：不注标出站、不挂 30s 空窗——pi1-disposition-chat-flow D1/D2/D14③，见「sendMessage 全链路时序」§4.4）
 >
 > 先读 [00-overview.md](./00-overview.md) 理解双轨制和公共前置。
 
@@ -737,7 +737,7 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
   │           + 按类型翻转 isStreaming:
   │             message.message_start → setStreaming(true)
   │             message.complete / error / stream_error → setStreaming(false)
-  └─ await chatApi.submitDelivery(sid, content, clientUuid, images?)   ← 受理回执（reply 携带初始 lane + 条目态；送达由 message_end(user) 裸标记回执照会，状态演进经 session.delivery 帧）
+  └─ await chatApi.submitDelivery(sid, content, clientUuid, images?)   ← 受理回执（reply 携带初始 lane + 条目态 + isCommand 标志；终局凭据按 isCommand 分型——命令条目不注标出站，disposition=handled 经 WS `session.deliveryHandled` 一对一终局通知，空窗计时器豁免；普通消息由 message_end(user) 裸标记回执照会，状态演进经 session.delivery 帧。分型表见 §4.4）
 ```
 
 ### 4.2 关键设计点（[HISTORICAL]）
@@ -752,8 +752,23 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
 |------|------|------|
 | `chat.appendUser(sid, segments)` | `(sid, segments: Segment[])` | messages Map[sid] 追加 `{id:'u-{uuid}', role:'user', status:'complete'}`；返回 clientUuid |
 | `chatApi.streamSubscribe(sid, handler)` | `(sid, handler)` | 返回 unsub 函数；handler 接收 ServerMessage |
-| `chatApi.submitDelivery(sid, content, clientUuid, images?)` | `(sid, content, clientUuid, images?)` | `Promise<DeliverySubmitReply>`（受理回执：初始 lane + 条目态） |
+| `chatApi.submitDelivery(sid, content, clientUuid, images?)` | `(sid, content, clientUuid, images?)` | `Promise<DeliverySubmitReply>`（受理回执：初始 lane + 条目态 + isCommand 标志——内核命令识别结果随回执下发，前端以它登记孤儿对账成员并选择终局凭据分型） |
 | mock `chat.submitDelivery` | 同上 | sleep(40ms) → 协议合法最小响应；同时 `void runSendStream(...)` fire-and-forget |
+
+### 4.4 发送终局行为分型（pi1-disposition-chat-flow D1/D2/D14③）
+
+发送条目的终局凭据按命令识别结果分型（识别在 runtime 内核：session 建立时 `get_commands` 清单缓存 + `/` 前缀剥斜杠逐字精确匹配 + `source === 'extension'`）：
+
+| 条目类型 | 出站形态 | 终局凭据 | 空窗计时器 |
+|---------|---------|---------|-----------|
+| 命令条目（识别命中） | 不尾附投递标记（裸命令文本） | disposition=handled 即终局——内核经 WS `session.deliveryHandled { sessionId, clientUuid }` 一对一通知，前端静默回滚三件套（移除乐观气泡 + 清空空窗计时器 + 递减在途计数），无错误提示 | 不挂（pendingSend 空窗计时器对命令条目豁免——D14③ 三闸联动之一，另两闸 = sendCommand 不限时 + 内核 settle 兜底不武装） |
+| 普通消息（未识别 `/` 前缀 / skill / prompt 模板） | 注标出站（形态与送达回执链路零变化） | message_end 回执命中（既有链路） | 30s 空窗不变 |
+
+命令条目终局凭据丢失时的兜底链路：
+- 断线窗口通知丢失 / runtime 重启 → `session.delivery` 快照孤儿对账（D1⑤）静默清除；操作域仅限受理回执登记的命令条目（普通条目清除会在快照先于回执窗口删掉已送达气泡）。
+- pi 重启响应丢失 / 命令清单假阳性 → 内核 sweepInFlight 超宽限（10s）静默终局 + 日志，不重投（重投会重复执行命令）。
+
+单测：[`packages/core/src/domain/chat/__tests__/use-chat-disposition.test.ts`](../../packages/core/src/domain/chat/__tests__/use-chat-disposition.test.ts)（三件套静默回滚 / 孤儿对账终态双分支 / extension.error 命令 toast 同 key 限频 / pendingSend 命令条目豁免）。
 
 ## 5. ServerMessage 类型表（流式 chunk）
 
@@ -863,6 +878,7 @@ message.complete {messageId, stopReason:'complete', usage:{inputTokens:1280, out
 | [`__tests__/panel/turn-working.test.ts`](../../packages/renderer/src/__tests__/panel/turn-working.test.ts) | Turn working 态（完成复位/elapsed 计时/非 working 静态） |
 | [`__tests__/stores/toolcall-anchor.test.ts`](../../packages/renderer/src/__tests__/stores/toolcall-anchor.test.ts) | toolCallId 锚定（findToolCallOwner 乱序无害化） |
 | [`__tests__/effects/use-streaming-pin.test.ts`](../../packages/renderer/src/__tests__/effects/use-streaming-pin.test.ts) + [`__tests__/components/MessageStream-kind.test.ts`](../../packages/renderer/src/__tests__/components/MessageStream-kind.test.ts) | message-stream-editing-pin-identity keepMounted 崩溃回归：streaming pin 恒定 identity（turnStableId 身份钉扎，virtua keepMounted 下序列变更不崩）/ MessageStream kind 查表分发（三态互斥，防死分支复辟） |
+| [`packages/core/src/domain/chat/__tests__/use-chat-disposition.test.ts`](../../packages/core/src/domain/chat/__tests__/use-chat-disposition.test.ts)（core 包） | 发送终局行为分型（§4.4，pi1-disposition-chat-flow D1/D2/D14③）：handled 三件套静默回滚 / 孤儿对账终态双分支 + 在途窗口反向 / extension.error 命令 toast 限频 / pendingSend 命令条目豁免 |
 
 **运行**：
 ```bash

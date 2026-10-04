@@ -52,7 +52,7 @@ btw 旁路提问（主对话旁开 drawer 辅助对话流）的会话形态定�
 **决策**：出站条目的终局判定由 pi disposition 响应与投递标记回执双通道承接，终局事实一对一通知前端：
 1. **disposition 接线 + handled tombstone 终局**：出站 prompt（`promptWithBusyRetry`）读响应 disposition（rpc-client 出口经 `parseInputDisposition` 归一）；extension 命令被 pi 接管（disposition=handled）的条目不进 in-flight 等待，直接写入 `DeliveryTombstone`——终态固定为 delivered，语义从「送达事实」扩为「离开系统的事实」（不新造终态形态；cancelled 保持用户撤销专用——被接管混入撤销判据面会破坏 `isUserReclaimRejection` 双信号判据与「已投递不可撤」语义），继承断线重连 resync 判重防线。
 2. **终局通知**：内核经 WS 消息 `session.deliveryHandled { sessionId, clientUuid }`（一次性事件消息，非 last-value 快照）一对一通知前端；前端静默回滚三件套（移除乐观气泡 + 清空空窗计时器 + 递减在途计数），无错误提示。不采用快照消息承载（消息缺席无法区分取消/接管/丢失）与受理回执携带（受理回执必须即刻返回，等处置会让 reply 时延顶到 pi 处置时长、且把受理口径按车道割裂）。
-3. **孤儿对账**：`session.delivery` 快照到达（含断线重连回放）时，本地在途气泡的 clientUuid **曾经在场**（曾出现于任一帧投影——必要条件，防连发场景误清第二条气泡）且已离开在途（终态判据双分支：不在当前投影 / 在投影呈 delivered 终态）、本端无取消操作 → 按 handled 同形态静默清除。数据源 = delivery 快照投影而非 transcript 投影（pi 1.0 首次 flush 前会话文件不存在，transcript 口径不可判定；且仍在内核排队的条目会被误清）。曾见集合随对应气泡移除、上界 = 活跃气泡数；页面刷新后退化为「不清除」（保守方向，误清零风险），悬挂残留由重开 session 恢复。
+3. **孤儿对账**：`session.delivery` 快照到达（含断线重连回放）时，本地在途气泡的 clientUuid **曾经在场**（曾出现于任一帧投影——必要条件，防连发场景误清第二条气泡）且已离开在途（终态判据双分支：不在当前投影 / 在投影呈 delivered 终态）→ 按 handled 同形态静默清除。数据源 = delivery 快照投影而非 transcript 投影（pi 1.0 首次 flush 前会话文件不存在，transcript 口径不可判定；且仍在内核排队的条目会被误清）。**操作域限定（U2 实装收窄）**：对账清除只作用于受理回执 isCommand 登记的命令条目（useChat `handledDeliveryTargets` 在册成员）——普通消息条目终局必有 message_end 回执链管气泡，孤儿清除操作普通条目会在「快照帧先于 message_end 回执到达」窗口删掉已送达气泡（direct 车道降级豁免下构成文本丢失面）；命令条目不注标出站永无回执，是唯一悬挂源，清除恒正确。「本端无取消操作」豁免条件随操作域收窄结构性消解，无需取消豁免集合——命令条目撤销后清除恒正确（cancel 成功 → 内核删条目 → 下一帧「不在投影」分支清气泡，原文已回填草稿；cancel 竞态落败 → delivered 在场 → 命令已执行，清气泡同样正确）。曾见集合随对应气泡移除、上界 = 活跃气泡数；页面刷新后退化为「不清除」（保守方向，误清零风险），悬挂残留由重开 session 恢复。
 4. **命令识别 + 出站形态分型**：session 建立时经 `get_commands` 拉清单缓存；识别规则 = 文本 `/` 开头 + 首空格前段剥前导 `/` 后与清单 name 逐字精确匹配 + `source === 'extension'`（pi 侧接管判定只查扩展注册命令，匹配集与匹配口径两侧构造性一致）。识别为命令的条目出站**不尾附投递标记**（裸命令文本），终局凭据 = disposition 本身；未识别的 `/` 开头条目按普通消息带标记出站（实际被接管则 handled 仍驱动终局，纯单词漏识别则退化普通回合、与现状一致）；skill 与 prompt 模板输入恒走普通消息链路（注标出站 + message_end 回执——两类输入在 pi 侧展开开回合、不返回 handled，剥标记即无终局凭据）。清单拉取失败时全量按普通消息出站（兜底分支）。
 
 **效果**：命令终局时效从「永等 → 30s 超时」变为「响应即终局」；普通消息出站形态与送达回执链路零变化（pi 无输入持久化回执，标记 + message_end 命中是唯一送达凭据）。实装 = `packages/runtime/src/services/session/session-delivery-registry.ts` + `packages/session-delivery/`（内核）+ `packages/shared/src/protocol.ts`（`session.deliveryHandled` 消息）+ 前端消费（useChat / store）。登记无新约束族（ADR-0074 投递所有权内核的回程通道延伸）。设计文档 `.tmp/tech-design/pi1-disposition-chat-flow.md`（不入库，过程产物），本条即该契约的现行登记处。
@@ -89,8 +89,8 @@ runtime→renderer 的 per-session 消息分发（`packages/runtime/src/services
 ### ADR-0016 ServerMessageType 类型约束（部分有效）
 事件/RPC 消息类型受 ServerMessageType 联合约束，emit 拼错编译期报错（原 event-bus 文件已随包重构消失，现形态 = protocol.ts 类型定义 + route-inbound 分发，约束精神不变）。
 
-### ADR-0010 / ADR-0012 Extension UI 独立通道 + plugin bridge（0012 部分有效）
-pi extension 的 confirm/select/input 交互走独立 `extension.ui_request`/`extension.ui_timeout` 事件，与 Tool Approval 的 tool_call_pending 语义隔离、错误隔离。plugin-bridge（`extensions/taiji/plugin-bridge`）是插件工具进 pi 的唯一适配层，转发机制现为 select marker 通道（与 session-manager/ask-user 同构）。登记 C-comm-12。
+### ADR-0010 / ADR-0012 Extension UI 独立通道（0012 的 plugin bridge 部分已退役）
+pi extension 的 confirm/select/input 交互走独立 `extension.ui_request`/`extension.ui_timeout` 事件，与 Tool Approval 的 tool_call_pending 语义隔离、错误隔离；该通路的现行形态 = event-adapter 直接消费 pi 事件按结构化字段路由（ADR-0111）。plugin-bridge 已整体退役（插件工具进 pi 通路暂缺，现行登记见 `docs/todo/plugin-tool-access-gap.md`）。登记 C-comm-12。
 
 ### ADR-0024 FileChanges runtime 解析通道
 event-adapter 在 tool_execution_end 按 write/edit 分派提取 FileChange（参数名 path 为契约权威），bash 不解析、由回合边界 git 对账补齐 delete/bash 变更；runtime 只推 accumulating/ready 两态，审查态归前端。登记 C-comm-04。
@@ -200,8 +200,8 @@ managed session 完成通知从「每次 settle 无条件回流（CompletionBack
 
 ### ADR-0111 extension_ui_request 通路结构化契约（2026-10-04 设计裁决，pi1-disposition-chat-flow D6）
 **决策**：extension UI 交互通路按结构化字段路由，bridge 中介零驻留（plugin-bridge 已整体退役，RPC 事件 payload 是 event-adapter 对 pi 事件的直接消费，无转发注入）：
-1. event-adapter 从 pi RPC 事件 payload 派生结构化字段：`method`（pi 1.0 RPC 实发全集 9 个：select / confirm / input / editor / notify / setStatus / setWidget / setTitle / set_editor_text）、`extensionName`、`kind`。
-2. **kind 词表三值（dialog / notify / widget），值值有消费点**：dialog 族 = `extension.dialog`（载荷 dialogKind ∈ select/confirm/input/editor，需回包族）；notify 族 = `extension.notify`；widget 族 = `extension.widget`。setStatus / set_editor_text 与 select 的 marker 家族（session-manager 通道 / inflight 上报）属 runtime/前端内部状态上报——**不进 kind 词表、保持特化出口**（进词表判据 = 该值物化于某族 WS 消息载荷并驱动路由，防词表死分支；亦避免与 event-adapter 内部路由字段 PiTranslatedEvent.kind 撞名）。setTitle 无出口：warn 留痕 + noop（pi 升级语义变化可诊断）。
+1. event-adapter 从 pi RPC 事件 payload 派生结构化字段：`method`（pi 1.0 RPC 实发全集 9 个：select / confirm / input / editor / notify / setStatus / setWidget / setTitle / set_editor_text）、`kind`。`extensionName` 不派生（U4 实装裁决：pi 1.0 extension_ui_request 九变体 payload 均无扩展名字段——dist rpc-mode.js + rpc-types.d.ts 实读核实，强加即恒 undefined 死字段；扩展归属信息仅 extension_error 事件自带 extensionPath，该事件翻译处保留该字段）。
+2. **kind 词表三值（dialog / notify / widget），值值有消费点**：dialog 族 = `extension.dialog`（载荷 dialogKind ∈ select/confirm/input/editor，需回包族）；notify 族 = `extension:notify`；widget 族 = `extension:widget`。setStatus / set_editor_text 与 select 的 marker 家族（session-manager 通道 / inflight 上报）属 runtime/前端内部状态上报——**不进 kind 词表、保持特化出口**（进词表判据 = 该值物化于某族 WS 消息载荷并驱动路由，防词表死分支；亦避免与 event-adapter 内部路由字段 PiTranslatedEvent.kind 撞名）。setTitle 无出口：warn 留痕 + noop（pi 升级语义变化可诊断）。
 3. transport handler 与前端按消息类型路由（取代 marker 字符串分支识别）；marker 约定 → 结构化 kind 的翻译职责收敛在 event-adapter（合法持有点内，见 ADR-0110），title 降级为纯展示。
 
 **效果**：新通道接入 = 声明一处；kind 词表与 9 method 映射表即终态实有值（无死分支），可作实施对账底表；taiji 协议零 pi 专有方法名穿透（由 ADR-0110 方法名项检查拦截）。实装 = `packages/runtime/src/infra/pi/event-adapter.ts`（派生与分发）+ transport handler 消息类型路由 + `packages/core/src/transport/api/domains/extension.ts`（前端消费）。登记无新约束族。设计文档同 ADR-0108（不入库，过程产物），本条即该契约的现行登记处。
