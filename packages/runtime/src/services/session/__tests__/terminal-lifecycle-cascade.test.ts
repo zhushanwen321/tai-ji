@@ -8,7 +8,9 @@
  * - ②shutdown 链：`dispose-terminal-pties` 步在场且紧随 server-stop，重复调用幂等
  *   （destroyAllPties 无实例 / 二次调用均不抛、同一实例不重复杀）。
  * - ③序列一致性：SHUTDOWN_STEP_SEQUENCE 常量 ⇄ index.ts 实际打点序列逐项相等（机械对照），
- *   且打点与清理动作调用相邻（防「留打点删动作」的假接线）。
+ *   且打点与清理动作调用相邻（防「留打点删动作」的假接线）。打点序列按调用点文本位置收集，
+ *   本体已提取成可 import 模块的步骤（EXTRACTED_STEP_MODULES 登记）按其模块内的打点字面量
+ *   展开——登记不等于豁免：调用点从 index.ts 消失同样红。
  *
  * 源码级断言先例：src/__tests__/index-composition-root-wiring.test.ts（index.ts import 即执行
  * main()，无法直测，对源文件文本断言符号存在性与顺序）。
@@ -120,6 +122,43 @@ function createRemovalOrchestrator(svc: InstanceType<typeof TerminalService>): I
 
 const source = readFileSync(new URL('../../../index.ts', import.meta.url), 'utf8')
 
+/**
+ * shutdown 链中「打点 + 动作本体」已提取为可 import 模块的步骤符号 → 模块源文件。
+ * 先例：index.ts import 即执行 main() 不可直测，`dispose-terminal-ptys` 步本体提取到
+ * services/terminal/dispose-terminal-ptys-step.ts 后，打点字面量随之离开 index.ts 文本。
+ * 源级机械对照若只扫 index.ts，会把「本体搬走了」误判成「这步没了」——按调用点位置把这些
+ * 步骤展开即可保序。本表是提取登记（加登记才扫得到），不是跳过断言的豁免清单：调用点
+ * 不在 index.ts 出现、或模块内打点字面量不是恰好一个，都会红。
+ */
+const EXTRACTED_STEP_MODULES: Record<string, URL> = {
+  disposeTerminalPtysStep: new URL('../../terminal/dispose-terminal-ptys-step.ts', import.meta.url),
+}
+
+/** 读已提取步骤模块内的打点字面量（每模块恰一步：多处 / 缺漏皆为登记失效）。 */
+function readExtractedStepName(moduleUrl: URL): string {
+  const names = [...readFileSync(moduleUrl, 'utf8').matchAll(/shutdownStep\('([^']+)'\)/g)].map((m) => m[1]!)
+  expect(names).toHaveLength(1)
+  return names[0]!
+}
+
+/**
+ * 按 index.ts 文本顺序收集 shutdown 实际打点序列：`shutdownStep('name')` 字面量直接取，
+ * 登记过的已提取步骤取其在模块内的打点名（序列位置 = 调用点位置）。
+ */
+function collectActualShutdownSteps(): string[] {
+  const symbols = Object.keys(EXTRACTED_STEP_MODULES)
+  const pattern = new RegExp(`shutdownStep\\('([^']+)'\\)|\\b(${symbols.join('|')})\\s*\\(`, 'g')
+  const steps: string[] = []
+  for (const m of source.matchAll(pattern)) {
+    if (m[1] !== undefined) {
+      steps.push(m[1])
+      continue
+    }
+    steps.push(readExtractedStepName(EXTRACTED_STEP_MODULES[m[2]!]!))
+  }
+  return steps
+}
+
 beforeEach(() => {
   mockPtys.length = 0
   vi.clearAllMocks()
@@ -195,9 +234,13 @@ describe('u4 ②shutdown 终端清理步 + 幂等', () => {
 
 describe('u4 ③序列常量与 index.ts 打点序列一致（源码级机械对照）', () => {
   it('index.ts shutdown 内 shutdownStep 调用序列逐项等于 SHUTDOWN_STEP_SEQUENCE', () => {
-    const steps = [...source.matchAll(/shutdownStep\('([^']+)'\)/g)].map((m) => m[1])
-    expect(steps.length).toBeGreaterThan(0)
-    expect(steps).toEqual([...SHUTDOWN_STEP_SEQUENCE])
+    expect(collectActualShutdownSteps()).toEqual([...SHUTDOWN_STEP_SEQUENCE])
+  })
+
+  it('登记的已提取步骤其调用点在 index.ts 在场（登记 ≠ 豁免：调用点消失即红）', () => {
+    for (const symbol of Object.keys(EXTRACTED_STEP_MODULES)) {
+      expect(source).toContain(`${symbol}(`)
+    }
   })
 
   it('dispose-terminal-pties 打点与 destroyAllPties 调用相邻（防留打点删动作）', () => {
