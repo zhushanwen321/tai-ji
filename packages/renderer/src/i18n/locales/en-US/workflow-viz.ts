@@ -23,6 +23,7 @@ export default {
     noAgentCalls: 'This script has no agent call sites',
     noAgentCallsHint: 'The script only contains script steps with no call sites to show',
     nodeRenderFailed: 'Node render failed',
+    legendStopTitle: 'Stop overlay: when a run stops, in-flight call sites stop pulsing — interrupted/cancelled turn neutral gray, failed/time-limited turn red',
     // Unmatched instance groups (D2⑥: zero-hit/ambiguous instances are never dropped
     // silently; shown in a dedicated group below the canvas)
     unmatchedGroupTitle: 'Unmatched instances',
@@ -52,6 +53,7 @@ export default {
     traceColResult: 'Result',
     traceEmpty: 'No agent calls in this run yet',
     statusRetrying: 'Retrying',
+    statusSkipped: 'Skipped',
     chipRunning: 'In progress',
     chipSettled: 'Settled',
     statusDone: 'Done',

@@ -35,7 +35,9 @@
       @wheel.prevent="onWheel"
     >
       <g :transform="`translate(${vp.tx},${vp.ty}) scale(${vp.k})`" data-testid="wfvz-dag-viewport">
-        <!-- phase 分区背景列（当前 phase 高亮：accent 描边） -->
+        <!-- phase 分区背景列（当前 phase 高亮：accent 描边）。分区虚线描边 border-strong
+             级弱化「面板感」、强化「分组感」（workflow-overlay-refine D3）；分区标签
+             2xs/font-medium 与节点名 3xs 拉开半档（D3 标签档位，V1-wf③ 分层断言口径） -->
         <g
           v-for="c in layout.clusters"
           :key="c.phase"
@@ -44,7 +46,7 @@
           :data-testid="`wfvz-dag-cluster-${c.phase}`"
         >
           <rect
-            class="fill-surface stroke-border-hairline [rx:var(--radius-sm)] [stroke-dasharray:5_4]"
+            class="fill-surface stroke-border-strong [rx:var(--radius-sm)] [stroke-dasharray:5_4]"
             :class="c.phase === activePhase ? 'stroke-accent [stroke-width:1.5]' : ''"
             :x="c.x"
             :y="c.y"
@@ -52,7 +54,7 @@
             :height="c.height"
           />
           <text
-            class="fill-neutral-mid text-[length:var(--text-3xs)] font-semibold tracking-[0.04em]"
+            class="fill-neutral-mid text-[length:var(--text-2xs)] font-medium tracking-[0.03em]"
             :x="c.x + CLUSTER_TITLE_INSET"
             :y="c.y + CLUSTER_TITLE_H_BASE"
           >{{ c.phase }}</text>

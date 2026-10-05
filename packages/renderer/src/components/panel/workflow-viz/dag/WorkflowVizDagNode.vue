@@ -1,12 +1,14 @@
 <!--
   WorkflowVizDagNode —— DAG 画布的单节点卡片内容（SVG 子组件）。
 
-  只承担节点形态渲染：状态点 + 调用点名（截断）+ kind 标签；六态着色经 tone
-  computed 整组切换 Tailwind 工具类（互斥防同名工具类胜负取决发射序——pending 灰 /
-  running accent 脉冲 / done 绿 / failed 红 / retrying warn 脉冲 / skipped 中性虚线
-  淡化），data-state 属性仅作测试观察锚点（非 CSS 选择器）。停止叠加（D9：run 停止
-  时在途节点不显示蓝脉冲、着色随 run 级形态）同样经 tone 整组切换——run 级输入
-  （status/outcome → stopTone）由画布归一后传入（映射定义见 types.ts），本组件零派生。
+  只承担节点形态渲染：状态点 + 调用点名（截断）+ kind 标签；六态着色经 dag/tone.ts
+  模块映射（nodeTone）整组切换 Tailwind 工具类（互斥防同名工具类胜负取决发射序——
+  pending 灰 / running accent 脉冲 / done 绿 / failed 红 / retrying warn 脉冲 /
+  skipped 中性虚线淡化；映射单处在 tone.ts——workflow-overlay-refine D4：节点与
+  图例共同消费的单一事实源），data-state 属性仅作测试观察锚点（非 CSS 选择器）。
+  停止叠加（D9：run 停止时在途节点不显示蓝脉冲、着色随 run 级形态）同样经 nodeTone
+  整组切换——run 级输入（status/outcome → stopTone）由画布归一后传入（映射定义见
+  types.ts），本组件零派生。
 
   守卫：node prop 违约（缺失 / id 非法）时 fail-fast throw——本组件渲染抛错由外层
   WorkflowVizDagNodeGuard（errorCaptured 节点级边界）捕获并渲染占位错误态，不挂
@@ -43,6 +45,7 @@
 import { computed } from 'vue'
 import type { WorkflowDagNode } from '@taiji/shared'
 import { DAG_NODE_H, DAG_NODE_W } from './layout'
+import { nodeTone } from './tone'
 import type { WorkflowVizDagNodeStatus, WorkflowVizDagStopTone } from './types'
 
 const props = defineProps<{
@@ -70,30 +73,9 @@ const truncatedName = computed(() => {
 /** kind 标签（图内技术标签，原型同款 mono 英文小字；非用户文案）。 */
 const kindLabel = computed(() => (props.node.kind === 'agent' ? 'agent' : 'script'))
 
-/** 脉冲动画类（引用全局 keyframes SSOT 的 wfvz-node-pulse，keyframes 定义在 style.css） */
-const PULSE = 'animate-[wfvz-node-pulse_1.5s_ease-in-out_infinite]'
-
 /**
  * 六态着色（D9 渲染层派生态）+ 停止叠加（run 停止时不蓝脉冲、着色随 stop-tone）。
- * 互斥整组切换：Tailwind 发射序不保证同名工具类的 class 顺序胜负（见 Gantt 迁移同款裁决），
- * 同一时刻只发射一组状态类；pending 走基础类（rect 灰描边 / dot 中性点）。
+ * 映射单处在 dag/tone.ts（D4：节点与图例共同消费；互斥整组切换语义见模块注释）。
  */
-const tone = computed<{ rect: string; dot: string }>(() => {
-  if (props.stopTone === 'neutral') return { rect: 'stroke-[var(--neutral-dim)]', dot: 'fill-[var(--neutral-dim)]' }
-  if (props.stopTone === 'failed') return { rect: 'stroke-[var(--danger)]', dot: 'fill-[var(--danger)]' }
-  switch (props.status) {
-    case 'running':
-      return { rect: `stroke-[var(--accent)] [stroke-width:1.6] ${PULSE}`, dot: `fill-[var(--accent)] ${PULSE}` }
-    case 'done':
-      return { rect: 'stroke-[var(--success)]', dot: 'fill-[var(--success)]' }
-    case 'failed':
-      return { rect: 'stroke-[var(--danger)] [stroke-width:1.6]', dot: 'fill-[var(--danger)]' }
-    case 'retrying':
-      return { rect: `stroke-[var(--warn)] [stroke-width:1.6] ${PULSE}`, dot: `fill-[var(--warn)] ${PULSE}` }
-    case 'skipped':
-      return { rect: 'stroke-[var(--neutral-dim)] [stroke-dasharray:4_3] fill-[var(--surface-hover)]', dot: 'fill-[var(--neutral-dim)]' }
-    default:
-      return { rect: '', dot: '' }
-  }
-})
+const tone = computed<{ rect: string; dot: string }>(() => nodeTone(props.status, props.stopTone))
 </script>

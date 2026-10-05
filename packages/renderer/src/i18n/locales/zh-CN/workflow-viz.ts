@@ -32,6 +32,7 @@ export default {
     noAgentCalls: '本脚本无 agent 调用点',
     noAgentCallsHint: '脚本仅包含脚本步骤，没有可展示的调用点',
     nodeRenderFailed: '节点渲染失败',
+    legendStopTitle: '停止叠加：run 停止后在途调用点不再脉冲——已中断/已取消呈中性灰，失败/超时呈失败红',
     // 未匹配实例分组（D2⑥：零命中/歧义实例不静默丢弃，画布下方指定分组展示）
     unmatchedGroupTitle: '未匹配实例',
     unmatchedPhaseUnknown: '未归属 phase',
@@ -59,6 +60,7 @@ export default {
     traceColResult: '结果',
     traceEmpty: '本 run 暂无 agent 调用',
     statusRetrying: '重试中',
+    statusSkipped: '已跳过',
     chipRunning: '进行中',
     chipSettled: '已收束',
     statusDone: '完成',

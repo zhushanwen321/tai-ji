@@ -197,3 +197,25 @@ describe('WorkflowVizDag 节点级渲染边界与零节点形态', () => {
     expect(wrapper.find('[data-testid="wfvz-dag-cluster-gate"]').exists()).toBe(false)
   })
 })
+
+describe('WorkflowVizDag 画布视觉（workflow-overlay-refine D3）', () => {
+  it('V1-wf③ 标签/节点分层：分区标签 2xs/font-medium/0.03em 字距、节点名 3xs（字号档 class 断言）', () => {
+    const wrapper = mountDag()
+    const label = wrapper.find('[data-testid="wfvz-dag-cluster-gate"] text')
+    expect(label.classes()).toContain('text-[length:var(--text-2xs)]')
+    expect(label.classes()).toContain('font-medium')
+    expect(label.classes()).toContain('tracking-[0.03em]')
+    // 节点名与分区标签拉开半档（节点名恒 3xs——分层的另一侧基准）
+    const nodeName = wrapper.find('[data-testid="wfvz-dag-node-n-gate"] text')
+    expect(nodeName.classes()).toContain('text-[length:var(--text-3xs)]')
+  })
+
+  it('分区虚线描边升 border-strong 级 + dasharray 保留（弱化「面板感」、强化「分组感」）', () => {
+    const wrapper = mountDag()
+    const rect = wrapper.find('[data-testid="wfvz-dag-cluster-gate"] rect')
+    expect(rect.classes()).toContain('stroke-border-strong')
+    expect(rect.classes()).toContain('[stroke-dasharray:5_4]')
+    // 描边升档不回退既有 hairline
+    expect(rect.classes()).not.toContain('stroke-border-hairline')
+  })
+})
