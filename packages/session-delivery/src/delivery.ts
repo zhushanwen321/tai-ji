@@ -308,8 +308,9 @@ function buildBatchPayload(messages: DeliveryMessage[]): DeliveryMessage {
  * 文本必然 miss，命令退化为普通文本开 LLM 回合（★2 同构缺陷复发，D2② 效果主张落空）；
  * 两条命令互拼同样 miss；适配器对无标记段的全文身份匹配同理失效。故批内含无标记条目
  * 时只取队首一条单独成批（单条 composed = 原文，适配器全文匹配回条目身份，disposition
- * 终局可达）；其余条目留守，随下一轮 pump/doSend 出站。代价：无标记条目与其后的普通
- * 条目出站顺序倒置（两类条目不可共用一次 port.send，结构必然）；同类条目内 FIFO 保持。
+ * 终局可达）；其余条目留守，随下一轮 pump/doSend 出站。代价：无标记条目插队到其前方
+ * 普通条目之前出站（即与其前方的普通条目出站顺序倒置；两类条目不可共用一次
+ * port.send，结构必然）；同类条目内 FIFO 保持。
  */
 function isolateUnmarkedEntry(batch: KernelEntry[]): KernelEntry[] {
   const firstUnmarked = batch.find((e) => e.unmarked)
