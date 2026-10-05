@@ -2091,7 +2091,11 @@ export interface ServerMessageMapBase {
   //   true 让「列表不可用」与「无 subagent」显式分形，面板据此显示降级提示；缺省 false
   //   （mock / 旧 runtime / 广播帧不带，消费方按 false 处理）。协议先例 = traceEntries 的
   //   source='oversize'。
-  'session.subagents': { sessionId: string; subagents: SubagentRecord[]; oversize?: boolean }
+  // found（待裁决项 4）：RPC reply 专用会话存在性标志——false = 主会话文件不在册（pi 首条
+  //   消息前延迟落盘窗口 / 扫描竞态），「读不到会话」与「会话存在但列表为空」显式分形，
+  //   消费方（store）拿 false 保留既有分区不覆盖、true 的空列表是真实空（直接覆盖）；缺省
+  //   true（广播帧不带 = 权威数据帧 / mock / 旧 runtime）。
+  'session.subagents': { sessionId: string; subagents: SubagentRecord[]; oversize?: boolean; found?: boolean }
   // session.planState：plan 模式状态投影（runtime 读 session JSONL 最后一条 plan-state entry
   // 派生，冷热两路径共用同一份派生代码）。live 腿 = 投影链 stateSnapshot('plan') 广播；
   // 冷腿 = session.getPlanState RPC reply 复用本 payload。docs 缺省 = 旧 schema entry（D4 降级）。
@@ -2124,7 +2128,8 @@ export interface ServerMessageMapBase {
   //   注册/终态两条小条目（W17 前旧指针 / W17~W1 v1 快照为兼容读层）。信号形态不动（W3 领地）。
   // oversize（RT-4#8）：与 session.subagents 同款降级标志——W1 起仅旧格式惰性兼容读路径可产生
   //   （32MB 预检保留在兼容层），恒空数组语义不变。
-  'session.workflows': { sessionId: string; workflows: WorkflowRunRecord[]; oversize?: boolean }
+  // found（待裁决项 4）：与 session.subagents 同款会话存在性标志（RPC reply 专用，缺省 true）。
+  'session.workflows': { sessionId: string; workflows: WorkflowRunRecord[]; oversize?: boolean; found?: boolean }
   // session.agentCallHistory：workflow 内 agent call 的对话流消息（runtime 按 trace[].sessionId 查找 JSONL）。
   // truncated：u4b（D5①）巨型 JSONL 超预检阈值后逆序窗口降级标志（optional，消费方按 false 处理）。
   'session.agentCallHistory': { sessionId: string; agentCallSessionId: string; messages: import('./message').Message[]; truncated?: boolean }

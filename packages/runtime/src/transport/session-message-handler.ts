@@ -611,8 +611,10 @@ export class SessionMessageHandler {
   private async handleSessionGetSubagents(msg: Extract<ClientMessage, { type: 'session.getSubagents' }>, ws: WsType): Promise<void> {
     // [RT-4#8] oversize 透传：文件 >32MB 时 subagents 恒空 + oversize=true——renderer
     // 面板据此显示「会话过大，列表不可用」降级提示（与「无 subagent」的空列表分形）。
-    const { records: subagents, oversize } = await this.ctx.sessionService.getSubagents(msg.payload.sessionId)
-    return this.ctx.reply(ws, msg.id, 'session.subagents', { sessionId: msg.payload.sessionId, subagents, oversize })
+    // [待裁决项 4] found 透传：false = 会话不在册（延迟落盘窗口 / 扫描竞态），renderer
+    // 保留既有分区不覆盖（与「真实空列表」分形）。
+    const { records: subagents, oversize, found } = await this.ctx.sessionService.getSubagents(msg.payload.sessionId)
+    return this.ctx.reply(ws, msg.id, 'session.subagents', { sessionId: msg.payload.sessionId, subagents, oversize, found })
   }
 
   private async handleSessionGetSubagentHistory(msg: Extract<ClientMessage, { type: 'session.getSubagentHistory' }>, ws: WsType): Promise<void> {
@@ -634,8 +636,9 @@ export class SessionMessageHandler {
 
   private async handleSessionGetWorkflows(msg: Extract<ClientMessage, { type: 'session.getWorkflows' }>, ws: WsType): Promise<void> {
     // [RT-4#8] oversize 透传：语义同 handleSessionGetSubagents。
-    const { records: workflows, oversize } = await this.ctx.sessionService.getWorkflows(msg.payload.sessionId)
-    return this.ctx.reply(ws, msg.id, 'session.workflows', { sessionId: msg.payload.sessionId, workflows, oversize })
+    // [待裁决项 4] found 透传：语义同 handleSessionGetSubagents。
+    const { records: workflows, oversize, found } = await this.ctx.sessionService.getWorkflows(msg.payload.sessionId)
+    return this.ctx.reply(ws, msg.id, 'session.workflows', { sessionId: msg.payload.sessionId, workflows, oversize, found })
   }
 
   private async handleSessionGetAgentCallHistory(msg: Extract<ClientMessage, { type: 'session.getAgentCallHistory' }>, ws: WsType): Promise<void> {

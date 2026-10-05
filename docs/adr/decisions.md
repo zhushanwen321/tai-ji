@@ -274,6 +274,8 @@ skill 候选两态统一 taiji 源：globalSkills ∪ projectSkills（location �
 ### ADR-0054 Browser Drawer 用 WebContentsView
 内嵌网页用 WebContentsView（任意 URL + 独立 preload + CDP target），排除 iframe（X-Frame-Options 硬伤）与 webview tag（官方 discouraged）。实装 `apps/electron/main/browser/browser-view-manager.ts`。登记 C-build-06。
 
+[2026-10-04 理由边界修正] 「禁 iframe」的排除理由（依赖 `X-Frame-Options` / CSP `frame-ancestors` 的硬伤）只对**嵌入第三方远程网页**成立——目标站响应头拒绝被嵌。本地 HTML 文件由应用自有 `protocol.handle` 服务、响应不携带这些头，理由不命中；对话流 HTML 产物预览走 `sandbox="allow-scripts"` iframe（无 `allow-same-origin`、文档落 opaque origin、网络出站由内容级 CSP 封死）不在本条禁用范围。边界收窄同批落 `constraints.json` C-build-06 与 [ADR-0118](#adr-0107-对话流-html-预览与产物落点约定2026-10-04-设计裁决chat-html-support)。
+
 ### ADR-0066 太极·玄纯灰 V3（唯一现行视觉 ADR）
 全族去冷蓝换纯灰（bg/surface/neutral/border 同步），accent 中亮灰 #cfcfd4，状态色保留极弱色相（M/A/D badge 语义辨识下限）。值权威 = `packages/renderer/src/style.css`（暗色默认，亮色 [data-theme=light] 镜像）。视觉演化史见 [docs/design-evolution.md](../design-evolution.md)。
 
@@ -353,13 +355,13 @@ subagent 体系的资源面决策三条现状（原记于包内 `extensions/univ
 | D7-40 | ui↔renderer 镜像族收编 @taiji/shared（镜像守卫生效后的正式收编） | 下次 renderer 域改动立项时顺带 | 3 处镜像归 shared 单份，守卫测试删除 |
 | D7-41 | 惰性恢复跨 timer fire 子态发帧（attempt 让位裸 return 不置标志 → 三信号皆 miss；根治 = 第四信号或让位腿 join+标志改造，需裁决 join 失败记账归属） | 该格 UX 收口退化——症状锚点 = 活 session 回落 dead 终态页需手动解锁，或下次 respawn 域专项 | 判据封闭或收口机制重构 |
 
-### ADR-0074 窗口外壳 mimic_mac 形态维持（issue #24 复核 reaffirm，2026-10-01）
+### ADR-0115 窗口外壳 mimic_mac 形态维持（issue #24 复核 reaffirm，2026-10-01）
 GitHub issue #24（Windows 10 窗口外壳四问题）复核结论：用户抱怨全部指向 win/linux 自绘路径的实现缺陷（悬停圆点消失、16px 图标溢出 12px 圆点、侧栏顶部不可拖拽、四角色差方块、默认尺寸不看屏幕），无一条指向「自绘彩色圆点放左侧模拟 mac」的形态本身——无推翻既定裁决的新证据，mimic_mac 维持（三平台左上视觉统一，数值 SSOT = [DESIGN.md §11](../DESIGN.md)）。窗口控制按钮改为各平台原生风格的方案不采用（三平台视觉从此分裂，破坏「跨平台同一工作台」气质）。实现缺陷已在同批修复：悬停同色覆盖 + 8px 图标锁定 + 非 mac 顶部拖拽条带（DESIGN.md §11 增补段）。
 
-### ADR-0075 窗口圆角策略：应用内圆角仅 mac，不加窗口配置键（2026-10-01）
+### ADR-0116 窗口圆角策略：应用内圆角仅 mac，不加窗口配置键（2026-10-01）
 三平台窗口圆角策略定案：mac = 系统圆角 + AppShell 根节点 `rounded-[10px]` 保留；Windows 11 = 无边框窗口系统默认圆角（Electron `roundedCorners` 默认值即 `true`，实装依据 electron.d.ts 平台标注 darwin/win32）；Windows 10 与 Linux = 方角（OS 能力边界）。应用内圆角仅 mac 渲染（AppShell 根节点 setup 期 `detectPlatform()` 类绑定，非 CSS 选择器分支——避免非 mac 首次渲染 rounded 闪现，且组件测试可断言）；非 mac 四角与窗口内容同色，色差方块随应用内圆角关闭而消除。两条不采用登记防复发：① **显式声明 `roundedCorners: true`**——默认值即 `true`，显式化行为增量为零（Win11 本就圆角、Win10 键无效果、Linux 键不适用），零收益纯维护成本；② **透明窗口统一圆角**（`transparent: true`）——丢失系统贴边吸附与投影、部分 Linux 合成器直接失效，为视觉细节引入 P0 级窗口行为风险。
 
-### ADR-0076 窗口尺寸持久化三字段裁决：{width, height, isMaximized}、仅主窗口、close 同步 flush（2026-10-01）
+### ADR-0117 窗口尺寸持久化三字段裁决：{width, height, isMaximized}、仅主窗口、close 同步 flush（2026-10-01）
 非 mac 平台的窗口尺寸持久化（`<getDataDir()>/window-state.json`）字段恰三件 `{width, height, isMaximized}`，四条语义裁决：① **位置（x,y）不持久化**——窗口由 Electron 默认居中放置；已接受代价：多显示器用户重启后窗口回主屏居中、不记忆用户摆放位置（位置记忆引入恢复错位问题家族——副屏拔除后窗口开在不可见区域、「相交不足一半丢弃」的阈值裁决、恢复归属歧义，收益与证据不匹配；重审触发 = 用户反馈不可忍受）。② **仅主窗口写者**——只有 bootstrap 创建的主窗口挂持久化监听与启动恢复（`isMainWindow` 门标志），create-window IPC 迁移窗口不读不挂，持久化文件全局单写者，多窗口 last-writer-wins 互踩结构性消除。③ **close 同步 flush**——关闭事件取消防抖定时器立即落盘，`isMaximized` 取退出时刻窗口实际值：「最大化→直接关闭」序列下最大化期间跳过写、无防抖数据，须以退出时刻状态落 `isMaximized: true`，重启才能按正常态尺寸 show 后恢复最大化，同时消除防抖窗口的退出竞态。④ **最大化/全屏态跳过防抖写**——字段恒记最近一次正常态尺寸；resize/move 防抖 500ms 合并写；启动读取损坏/字段非法 → 丢弃回默认尺寸 + warn 日志（不阻断启动），合法值 clamp 到当前工作区后生效。实装 `apps/electron/main/window/window-state.ts`（不 import electron，窗口经最小结构接口注入；tmp+rename 原子写）。默认尺寸公式（主屏工作区 62%/75%、cap 1440×960、下限 800×600）与 darwin 分支恒 1200×800 的零改动边界同属本条裁决，数值权威 = [DESIGN.md §11](../DESIGN.md)。
 
 ## 已否谱系（决策已过时/被推翻，一行注记防重新发现旧坑）
@@ -494,3 +496,35 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **依据**：用户 2026-10-04 对底/右抽屉的 5 点产品反馈（三区分割缺失、开关位置、头部两行、tab 可区分性、tab 关闭叉）+ critique 补充发现（TurnRail 跨区、tab 条无横向滚动、空态黑块、最后实例禁用叉伪装可点、composer 窄宽叠字）。一体化生长的「同 surface 无缝」语言在多容器并存场景不可辨识（三区边界靠 1px 拖拽线不可发现），卡片化是分区可见性的直接解；代价 = 卡缝占 8px×2 垂直空间与推翻 D2 的回写成本，收益 = 分区心智清晰 + tab 范式全局一致 + 跨区缺陷构造性消除。
 
 **登记**：设计 SSOT = docs/DESIGN.md §3.4/§4.1/§5.3.1/§6.1/§6.3/§6.4（2026-10-04 同批回写）；CONTEXT.md「底抽屉」词条开关入口同步。实现落点 = MainPanel（壳下沉）/ PanelContainer（三卡 + 卡缝 handle）/ DrawerPanel（卡片化）/ TerminalView + TerminalInstanceBar（head 一行）/ TerminalToggleButton（原 StatusBarTerminalToggle 迁移）/ DetailPane / L2TabBar / TurnRail。
+
+### ADR-0118 对话流 HTML 预览与产物落点约定（2026-10-04 设计裁决，chat-html-support）
+
+**决策**：对话流支持「agent 交付 HTML 产物 → 用户在应用内直接看渲染结果」——扩写 capability 段成精确能力契约（M0：正/负面清单；M1：交付约定与预览约束 + 每 turn 注入会话产物目录绝对路径）、新 fence info string `html-preview` + 对话流预览卡片、DetailPane 对 `.html` 新增渲染态。四条关键裁决：
+
+1. **产物目录选在白名单既有成员内**（`<dataDir>/artifacts/<sessionId>/`）：local-file 协议白名单静态成员集（`apps/electron/main/utils/local-file-prefixes.ts`）已含 `<dataDir>` 前缀，产物落其下则预览无需新增白名单成员、renderer 不成为白名单输入方（「白名单外路径一律 403」不变量保持）。目录推导公式单点 = `packages/shared/src/paths.ts` 的 `getSessionArtifactsDir`（含 sessionId 穿越校验，规则与 `isPiSessionId` 同域：允许 `.` / `_`、禁 `:`——不用 `getImageCacheDir` 的窄集）；system-prompt 扩展侧不 import shared（包边界 + C-proc-26 / C-proc-09 门禁组合），以同公式镜像推导，两实现段名与校验正则字面量对拍机检。
+2. **session cwd 动态注册方案不采用**：该方案让 renderer 首次成为 local-file 白名单的输入方（白名单防线对 renderer 的信任假设从零变为有），并连带引入新 IPC 通道、进程内集合、注册时序竞争、预检对注册完成的依赖；落点约定后这些复杂度全部无服务对象。**已接受代价**：项目目录内的 HTML 不能被应用内预览——恢复路径 = 要求 agent 把产物写到会话产物目录，或经「查看源码」在项目内直接读源码。
+3. **预检通道统一落主进程 `localFile:servable`**（入参绝对路径，出参 `{servable, reason, size}`，reason ∈ `not_found` / `is_dir` / `out_of_whitelist`）：卡片（经 deps `probeArtifact?`）与抽屉渲染态共用；谓词与 `protocol.handle` 复用同一规范化管线模块（白名单成员资格先行短路 → 存在性 → 目录性——越界路径不触 fs，杜绝任意路径存在性探测通道）。**不新增 runtime 文件 RPC**：白名单成员资格只在 main 信任域可见，runtime file 族的 cwd 守门看不见白名单，两处预检会形成两套准入语义。
+3b. **实施期补全：源码态读取通道 `localFile:read`**（2026-10-04，D2 一致性审查反证）——产物目录在 session cwd 之外，既有 runtime `file.read` 的 cwd 守门不可达，故 `.html` 的**源码态**读取需一条与 servable **同源**的主进程通道：同谓词模块（准入前缀成员资格先行短路，越界不触 fs）、仅 `out_of_whitelist` 时回落既有 cwd 通道；通道名 `localFile:read`（`packages/shared/src/ipc-channels.ts` 登记）。它是第 3 条「预检通道统一落主进程」原则的对称补全（**探测与读取同源**），未新增白名单成员、未新增白名单输入方。
+
+3c. **实施期收窄：读/预检通道准入 = 会话产物子树**（2026-10-05，branch-review dmg-r1-2）——`localFile:servable` / `localFile:read` 两条 IPC 的准入前缀 = 产物子树 `<dataDir>/artifacts/**`（`computeLocalFileReadPrefixes`，`apps/electron/main/utils/local-file-prefixes.ts`），不复用协议 handler 全量白名单。理由：通道入参含模型消息文本承载的路径载荷（html-preview fence = 不可信输入），全量白名单含 `<dataDir>` 整前缀（含 `<dataDir>/agent/auth.json` 等凭据），读/预检面复用全量白名单 = 渲染进程被注入后可直读数据目录内任意文件文本。收窄后越界仍返回 `out_of_whitelist`（不触 fs），消费方回落既有通道（useDetailPane cwd 通道 / 容器降级占位）；三条调用链（容器源码态、挂载前 size 预检、抽屉产物源码读取）全部只消费产物路径，无功能回退。协议 handler（渲染面：图片 / iframe 服务）保持全量白名单不变；谓词函数与检查顺序同源不变，未新增白名单成员、未新增白名单输入方。
+
+4. **产物回收用文件系统级判据**（对齐 `apps/electron/main/images/image-cache.ts` 先例的「判据落文件系统层、不依赖进程级在场集」形态）：① 删会话级联删目录（与既有 `cache/images` 级联同一落点 `session-lifecycle.ts`、同一幂等形态）；② 保留期扫描（默认 7 天，`TAIJI_ARTIFACTS_KEEP_DAYS` 可覆盖；runtime 会话服务内启动扫 + 每日复扫）判据 =「产物目录子树最新文件 mtime 超龄 **且** 目录名 sessionId 在三棵会话树无同名会话文件」。**枚举深度规格另写**（主树 `sessions/<encodeCwd>/*.jsonl` 两层 / subagent `subagents/<encodeCwd>/sessions/*.jsonl` 三层 / btw `btw/<encodeCwd>/<mainSid>/*.jsonl` 三层，逐层 readdir 自实现）——不得照 `image-cache.ts` 的 `isOrphanSessionDir` 单层形态（该先例与生产两层布局失配，缺陷另登记 `docs/todo/image-cache-orphan-depth-mismatch.md`）；文件名 → id 解析用同型 `sessionFileIdFromName`，解析失配（合法 sid 含 `_` / `.`）保守取向为「视为存在、不清」。
+
+**三条配套**：① **引用语法** = 新 fence info string `html-preview`（首词匹配，内容 = 单行文件路径；空 / 多行 → 卡片降级态「路径非法」），卡片走 Vue 段组件（`HtmlPreviewCard.vue`）不进 v-html / DOMPurify 通道——「用户 HTML 白名单契约」与「预览卡片不经 sanitize 通道」不变量保持；段类型复用 mermaid 同构通道，finalize 仅由 fence 收尾 / 消息 complete 触发（静默 200ms 不提前 finalize——半截路径不产假降级卡片）。② **渲染态** = DetailPane 对 `.html` 新增「预览 | 源码」切换，渲染态为 `<iframe sandbox="allow-scripts" src="local-file:///<百分号编码 abs>?r=<n>">`（无 `allow-same-origin`，文档落 opaque origin，读不到主窗口 DOM / localStorage / cookie；`?r=n` 仅作重导航触发）；CSP meta（`packages/renderer/index.html`）新增 `frame-src 'self' local-file:`。③ **协议响应头** = `protocol.handle('local-file')` 全部响应附加 `Cache-Control: no-store`，`.html` / `.htm` 再附加内容级 CSP（`default-src 'none'` 封网络出站；`script-src 'unsafe-inline' local-file:` 保脚本与相对子资源；指令集不含 opaque origin 下恒不匹配的 `'self'`）——sandbox 管「碰不到主窗口」、文档 CSP 管「连不出网络」双保险。
+
+**依据**：① 根因是四环缺失（能力契约 / 交付模式 / 预览链路 / 产物落点未约定），落点约定消除整类「白名单外不可读」问题，比事后放宽白名单（renderer 成为白名单输入方）代价更低；② 预览文档唯一需要的同源能力是相对子资源，而子资源经 local-file 协议加载不依赖 origin 同源，故 sandbox 可不给 `allow-same-origin`；③ 两条被否路线的击穿点——srcdoc 方案（file.read RPC + iframe srcdoc）能力死（继承主文档 CSP 致内联脚本不执行、相对子资源无基准地址，交互价值消失）；WebContentsView 方案在抽屉内可行，但与对话流内联预览方向冲突（窗口层原生覆盖视图不随虚拟滚动同步，需一整套滚动同步机制）。
+
+**登记**：约束 C-build-06 表述随本裁决收窄——scope 由「嵌入式网页」收窄为「嵌入第三方远程网页」，理由（`X-Frame-Options` / CSP `frame-ancestors` 硬伤）仅对远程站成立，本地 HTML 由应用自有 `protocol.handle` 服务、不携带这些头（见 ADR-0054 理由边界修正补记），登记 `docs/constraints.json` C-build-06；未新增约束族（预览隔离由 sandbox + 文档 CSP 构造性保证，落在 C-build-06 的 review-electron-build 面内）。设计文档 `.tmp/tech-design/chat-html-support.md`（不入库，过程产物）；实施 = 8 单元（u-foundation / u1-prompt / u2-infra / u-artifacts / u3-detailpane / u4-card / u5-docs / u6-acceptance）。
+
+### ADR-0119 html-preview 渲染形态 = 对话流内联容器（2026-10-04 用户裁决，chat-html-support v16）
+
+**决策**：`html-preview` fence 段在**对话流内直接渲染**（`HtmlPreviewInline.vue` 内联容器：头部条[文件名/大小/源码-预览切换/刷新/收起展开] + sandbox iframe 原位嵌入消息流）；原「预览卡片 → 点击 → DetailPane 渲染态」两级形态**退役**——DetailPane 对 `.html` 恢复基线源码高亮，相对链接不再承载预览。安全模型零变化：sandbox 权限面、`local-file` 协议白名单、`localFile:servable` 预检、CSP `frame-src`、内容级 CSP 全部平移适用（机制规格从原 D4 抽屉渲染态整体平移到容器）。
+
+**要点**：
+1. **单渲染面原则**：内联容器是唯一渲染面。抽屉保留渲染态会造成「同一文件两个渲染入口、两套挂载序列」的双轨；内联容器的展开/源码态已覆盖抽屉渲染态的全部用户价值。`localFile:read` 通道保留（消费方 = 容器源码态 `useChatViewDeps` readArtifact 与 DetailPane 文件树/抽屉源码读取 `useDetailPane` loadPreviewContent——与设计 §6.4 D4「退役的连带回收」同口径；变更集卡入口语义是看 diff，不消费该通道）。
+2. **高度策略降级裁决**：内容高度自适应（iframe 内上报）三条通道均不可行——产物文档内协作脚本不可假设、opaque origin 收不到定向 postMessage、`sandbox` 无 `allow-same-origin` 时 `contentDocument` 恒 null——降级为固定 480px（展开 720px）、超限 iframe 内滚动；升级预案（协议 handler 注入上报脚本）登记设计文档 §6.3。
+3. **流式与降级形态保持**：finalize 仅由 fence 收尾/消息完成触发（静默不提前）；预检三原因降级占位形态延续（文件名 + 原因两行，恢复指引由失败路径表承载）。**S4 验收留痕口径（终态同步 R1 显式声明）**：「链接 → 抽屉源码高亮」为基线行为恢复（file-type 分发与 DetailPane code 类高亮由既有单测承载），**不作独立真机重验**——v16 重验覆盖 A3a/A3b/A5/A8 + A6；产物目录文件场景的链接正向断言受基线 forceDiff 存量缺口阻断（`docs/todo/message-link-artifact-file-force-diff-reject.md`，A20 定性 = 基线存量机制、本分支零触碰），缺口修复后补验。
+
+**依据**：用户裁决动机 = HTML 交付物在对话流内直接可见可交互，不经点击跳转（交互式图表/自包含组件的核心价值前置呈现）；ADR-0118 方案 A 本就预期「iframe 在 DOM 流内随滚动天然正确」，本裁决是该预期的终态化；已接受代价 = 对话流 turn 虚拟化使旧 turn 容器随滚动卸载/重挂载（脚本重执行，既有虚拟化行为的固有代价，实测无可感知卡顿阈值内）。
+
+**登记**：设计文档 v16（`.tmp/tech-design/chat-html-support.md` §6.3/§6.4）；实施 = u7-inline-refactor 单元（M1.5 批次）；验收 = v16 重跑四项（渲染/观感/安全负面/降级矩阵）+ 打包态，全部通过（2026-10-04）。S4 相对链接场景随之重定义为「链接 → 抽屉源码态（基线行为恢复）」；链接打开产物目录文件被基线 forceDiff 通道拒绝的存量缺口另登记 `docs/todo/message-link-artifact-file-force-diff-reject.md`。

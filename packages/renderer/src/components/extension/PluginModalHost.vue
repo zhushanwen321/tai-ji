@@ -82,6 +82,7 @@ import {
 } from '@taiji/core'
 import { Button } from '@/components/ui/button'
 import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
+import { cycleTabFocus, getFocusableElements } from '@/composables/logic/focus-trap'
 import { ViewHost } from '@taiji/ui/extension-host'
 import { PLUGIN_MODAL_SOURCE_KEY } from '@/composables/shell/useExtensionHostBridge'
 
@@ -224,7 +225,7 @@ function onKeydown(e: KeyboardEvent): void {
     dismiss('dismissed')
     return
   }
-  if (e.key === 'Tab') handleTabCycle(e)
+  if (e.key === 'Tab') cycleTabFocus(e, getFocusables)
 }
 /** window 级 Esc 兜底：焦点逃逸到层外（如 Teleport 后焦点落 body）时层内 @keydown 收不到。
  *  层内 onKeydown 先 fire（preventDefault），本监听检查 defaultPrevented 跳过防重复 dismiss；
@@ -240,28 +241,9 @@ useEventListener(
     dismiss('dismissed')
   },
 )
-/** Tab 焦点陷阱：末个非 shift → 首个；首个 shift → 末个；中间 Tab 交浏览器原生顺序。 */
-function handleTabCycle(e: KeyboardEvent): void {
-  const list = getFocusables()
-  if (list.length === 0) return
-  const first = list[0]
-  const last = list[list.length - 1]
-  const active = document.activeElement
-  if (active === last && !e.shiftKey) {
-    e.preventDefault()
-    first.focus()
-  } else if (active === first && e.shiftKey) {
-    e.preventDefault()
-    last.focus()
-  }
-}
+/** 层内可聚焦元素：查询根 = 本层根元素（Tab 循环三路语义见共享单元 focus-trap）。 */
 function getFocusables(): HTMLElement[] {
   const root = rootEl.value
-  if (!root) return []
-  return Array.from(
-    root.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    ),
-  )
+  return root ? getFocusableElements(root) : []
 }
 </script>

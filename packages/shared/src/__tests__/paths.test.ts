@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { getPiSessionsDir, getImageCacheRoot, getImageCacheDir } from '../paths'
+import { getPiSessionsDir, getImageCacheRoot, getImageCacheDir, getSessionArtifactsDir } from '../paths'
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -59,6 +59,33 @@ describe('getImageCacheDir', () => {
   it('路径穿越形态 sessionId：throw（路径遍历防护守卫）', () => {
     for (const bad of ['../evil', 'a/b', 'a\\b', '..' , 'a b']) {
       expect(() => getImageCacheDir(bad, '/tmp/taiji-shared-test-data')).toThrow(
+        /invalid sessionId \(path traversal blocked\)/,
+      )
+    }
+  })
+})
+
+describe('getSessionArtifactsDir', () => {
+  it('合法 sessionId（含 `.` 与 `_`）：join(dataDir, artifacts, sessionId)（校验与 isPiSessionId 同域）', () => {
+    expect(
+      getSessionArtifactsDir('019f9bd8-ee50-779d-a912-4a661683cf69', '/tmp/taiji-shared-test-data'),
+    ).toBe(join('/tmp/taiji-shared-test-data', 'artifacts', '019f9bd8-ee50-779d-a912-4a661683cf69'))
+    // `.` / `_` 均在 isPiSessionId 值域内（窄集 /^[A-Za-z0-9_-]+$/ 会误拒含 `.` 的合法 sid）
+    expect(getSessionArtifactsDir('sess.AB_01', '/tmp/taiji-shared-test-data')).toBe(
+      join('/tmp/taiji-shared-test-data', 'artifacts', 'sess.AB_01'),
+    )
+  })
+
+  it('缺省形态：读 TAIJI_AGENT_DATA_DIR env（vi.stubEnv 桩，不触 fs）', () => {
+    vi.stubEnv('TAIJI_AGENT_DATA_DIR', '/tmp/taiji-shared-test-data')
+    expect(getSessionArtifactsDir('sess-AB_01')).toBe(
+      join('/tmp/taiji-shared-test-data', 'artifacts', 'sess-AB_01'),
+    )
+  })
+
+  it('非法 sessionId：throw（含冒号 / 空串 / 路径分隔符 / `..` / 首尾非字母数字）', () => {
+    for (const bad of ['btw:019f9bd8', '', '../evil', 'a/b', 'a\\b', '..', '.abc', 'abc.', 'a b', '-abc']) {
+      expect(() => getSessionArtifactsDir(bad, '/tmp/taiji-shared-test-data')).toThrow(
         /invalid sessionId \(path traversal blocked\)/,
       )
     }

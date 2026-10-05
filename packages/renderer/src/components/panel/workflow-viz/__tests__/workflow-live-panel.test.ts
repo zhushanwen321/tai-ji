@@ -424,12 +424,12 @@ describe('WorkflowLivePanel · 多级 tab（使用者黑盒）', () => {
     loadSubagentDataMock.mockClear()
     // 面板挂载已登记活跃锚（setActiveWorkflowRun）——信号经 store 聚合触发纪元自增
     const store = useWorkflowStore()
-    store.triggerWorkflowReload(SID, 'running')
+    store.triggerWorkflowReload(SID)
     await flushPromises()
     expect(loadSubagentDataMock).toHaveBeenCalledWith('agentcall:acs-0')
     // 非活跃 session 的信号不触发重拉（纪元不自增）
     loadSubagentDataMock.mockClear()
-    store.triggerWorkflowReload('other-session', 'running')
+    store.triggerWorkflowReload('other-session')
     await flushPromises()
     expect(loadSubagentDataMock).not.toHaveBeenCalled()
   })

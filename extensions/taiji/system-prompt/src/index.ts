@@ -32,7 +32,7 @@
 import path from 'node:path'
 import { homedir } from 'node:os'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
-import type { ExtensionAPI, BeforeAgentStartEvent } from '@earendil-works/pi-coding-agent'
+import type { ExtensionAPI, BeforeAgentStartEvent, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { getLogger } from '@zhushanwen/pi-extension-logger'
 
 const logger = getLogger('taiji-system-prompt-extension')
@@ -74,20 +74,114 @@ function cachedReadFileSync(filePath: string): string | null {
 const GLOBAL_AGENTS_CANDIDATES = ['AGENTS.md', 'AGENTS.MD']
 
 /**
- * taiji capability 固定注入段（设计 D6）：告知 AI 本渲染器的能力面，让新会话无需
- * 用户手动教。常量放扩展源码内（版本化随 feature 走，非用户配置——用户只持有
- * on/off 开关，不持有文案本身）。文案英文，与 pi system prompt 语言一致；四点 =
- * 内联 HTML 白名单面 / 相对图片 cwd 解析 / 相对链接 cwd 解析（与反引号白名单路径
- * 自动链接化同基准、校验面差异如实）/ 远程图片不渲染 + 反引号规约。
+ * 对话流渲染管线的 HTML 能力边界（chat-html-support 设计 D1 ①②）：机器可读的结构化
+ * 常量，能力段文案由这些常量渲染——禁止把清单写成散文旁路（成员集合可被
+ * `scripts/check-capability-allowlist-sync.mjs` 与渲染管线白名单对拍，零散文解析）。
+ *
+ * 成员来源 = `packages/renderer/src/composables/logic/markdown-sanitize.ts` 的
+ * `ALLOWED_TAGS` 实际字面量（52 项，GitHub 风格白名单翻译，按族归类，每项恰一次）。
+ * 与渲染白名单的任一方向漂移（清单多出未放行成员 / 白名单新增未入清单）由对拍机检
+ * 红灯拦住，pre-commit 按路径触发。
  */
-const TAIJI_CAPABILITY_SECTION = `# TaiJi capabilities
+export const CAPABILITY_INLINE_TAG_FAMILIES: Readonly<Record<string, readonly string[]>> = {
+  headings: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
+  text: ['p', 'br', 'span', 'div', 'section', 'blockquote', 'pre', 'hr'],
+  inline: [
+    'a', 'b', 'i', 'em', 'strong', 's', 'strike', 'del', 'ins',
+    'code', 'kbd', 'samp', 'tt', 'var', 'sub', 'sup', 'q',
+  ],
+  lists: ['ul', 'ol', 'li', 'dl', 'dt', 'dd'],
+  table: ['table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td'],
+  media: ['img', 'picture', 'source'],
+  annotation: ['ruby', 'rt', 'rp'],
+  details: ['details', 'summary'],
+}
+
+/**
+ * 可用呈现属性（设计 D1 ①）：成员 = `markdown-sanitize.ts` 的 `ALLOWED_ATTR` 实际
+ * 字面量（defaultSchema 全局 '*' 表 + 按标签项；class 与任意 data-* 不翻译）。
+ */
+export const CAPABILITY_PRESENTATION_ATTRS: readonly string[] = [
+  // defaultSchema 全局 '*' 表
+  'abbr', 'accept', 'accept-charset', 'accesskey', 'action', 'align', 'alt', 'axis',
+  'border', 'cellpadding', 'cellspacing', 'char', 'charoff', 'charset', 'checked',
+  'clear', 'colspan', 'color', 'cols', 'compact', 'coords', 'datetime', 'dir',
+  'disabled', 'enctype', 'frame', 'hspace', 'headers', 'height', 'hreflang', 'for',
+  'id', 'ismap', 'itemprop', 'label', 'lang', 'maxlength', 'media', 'method',
+  'multiple', 'name', 'nohref', 'noshade', 'nowrap', 'open', 'prompt', 'readonly',
+  'rel', 'rev', 'rowspan', 'rows', 'rules', 'scope', 'selected', 'shape', 'size',
+  'span', 'start', 'summary', 'tabindex', 'target', 'title', 'usemap', 'valign',
+  'value', 'width',
+  // defaultSchema 按标签项
+  'cite', 'itemscope', 'itemtype', 'longdesc', 'src', 'srcset', 'href',
+  'aria-describedby', 'aria-label', 'aria-labelledby',
+]
+
+/**
+ * 禁用清单（设计 D1 ②）：净化层构造性剥除的标签与属性。
+ * - 标签 = 不在 `ALLOWED_TAGS` 的 script / style / link / iframe / form / input /
+ *   button / svg；
+ * - 属性 = class / style 与通配 data-* / on*（净化层 `ALLOW_DATA_ATTR: false` 构造性
+ *   全剥 data-*，on* 事件处理器同理不存活）。
+ * 通配项以 `*` 结尾，对拍机检按前缀比对剥除语义。
+ */
+export const CAPABILITY_FORBIDDEN: {
+  readonly tags: readonly string[]
+  readonly attributes: readonly string[]
+} = {
+  tags: ['button', 'form', 'iframe', 'input', 'link', 'script', 'style', 'svg'],
+  attributes: ['class', 'style', 'data-*', 'on*'],
+}
+
+/**
+ * 能力段 ①② 的清单渲染（文案由常量渲染，禁手写散文旁路）。渲染顺序 = 常量声明顺序，
+ * 包内单测按「解析出的清单集合 === 常量集合」逐项锁定（含常量集合全部成员、无旁路成员
+ * ——防对拍机检空转）。
+ */
+function renderCapabilityLists(): {
+  tags: string
+  attrs: string
+  forbiddenTags: string
+  forbiddenAttrs: string
+} {
+  return {
+    tags: Object.values(CAPABILITY_INLINE_TAG_FAMILIES).flat().join(', '),
+    attrs: CAPABILITY_PRESENTATION_ATTRS.join(', '),
+    forbiddenTags: CAPABILITY_FORBIDDEN.tags.join(', '),
+    forbiddenAttrs: CAPABILITY_FORBIDDEN.attributes.join(', '),
+  }
+}
+
+const CAPABILITY_LISTS = renderCapabilityLists()
+
+/**
+ * taiji capability 固定注入段（chat-html-support 设计 D1）：告知 AI 本渲染器的能力面，让新会话
+ * 无需用户手动教。常量放扩展源码内（版本化随 feature 走，非用户配置——用户只持有 on/off 开关，
+ * 不持有文案本身）。文案英文，与 pi system prompt 语言一致。
+ *
+ * M0 = ①②（inline HTML 正面清单 + 负面清单，文案由 CAPABILITY_* 常量渲染）；
+ * M1 = ③④（HTML 产物交付约定 + 预览约束告知，本函数追加）。其余三点 = 相对图片 cwd 解析 /
+ * 相对链接 cwd 解析（与反引号白名单路径自动链接化同基准、校验面差异如实）/ 远程图片不渲染
+ * + 反引号规约。
+ *
+ * @param artifactsDir 会话产物目录绝对路径（handler 每 turn 经 ctx 推导后拼入 ③ 段）；
+ *   null = 会话 id 缺失 / 不可解析 → 该处退化为 SESSION_ARTIFACTS_DIR_UNAVAILABLE，
+ *   其余文案完整（设计 D1「该行退化」）。
+ */
+function renderCapabilitySection(artifactsDir: string | null): string {
+  const artifactsRef = artifactsDir ?? SESSION_ARTIFACTS_DIR_UNAVAILABLE
+  return `# TaiJi capabilities
 
 How TaiJi renders your markdown responses:
 
-- Inline HTML is rendered with a GitHub-grade tag allowlist. Script/style elements and style/class attributes are stripped.
+- Inline HTML is rendered with a GitHub-grade allowlist; anything outside it is stripped before rendering. You may use these tags: ${CAPABILITY_LISTS.tags}. Presentational attributes allowed: ${CAPABILITY_LISTS.attrs}.
+- Do not use these tags (they are stripped before rendering): ${CAPABILITY_LISTS.forbiddenTags}. Do not use these attributes (they are stripped and have no effect): ${CAPABILITY_LISTS.forbiddenAttrs}.
+- For anything larger than a small fragment (reports, charts, interactive pages): write the HTML file into the session artifacts directory ${artifactsRef}${artifactsDir ? ' (given above each turn)' : ''}, then reference it with a fenced block whose info string is html-preview and whose content is that file's absolute path. Never paste the full HTML into your reply after writing the file — update the file in place on later changes. Artifacts are recycled automatically once stale (retention policy) — regenerate on reference failure instead of assuming persistence.
+- Previewed HTML runs sandboxed with no network access: scripts/styles/images may be inline or reference local files by relative path next to the HTML file; fonts must be inlined as data: URIs (relative-path font files are blocked by the browser CORS policy for the opaque-origin preview). CDN links will not load.
 - Relative image paths (e.g. ![](docs/assets/img.png)) are resolved against the session working directory and displayed.
 - Relative links (e.g. [plan](docs/plan.md)) use the same session working directory; clicking one opens the target file inside the app. Backtick file paths that TaiJi auto-links share the same cwd base. Difference in guarantees: auto-linked backtick paths are checked to exist, relative links may be dead — when citing a file you know exists, backticks are the safer form.
 - Remote http(s) images are not rendered; reference a local file path instead. Always use backticks for inline code and type names in prose (bare angle-bracket names like Promise<void> are stripped).`
+}
 
 /**
  * Resolve the data directory from the environment.
@@ -114,6 +208,64 @@ function resolveDataDir(): string {
     return process.env.TAIJI_AGENT_DATA_DIR
   }
   return path.resolve(process.env.PI_CODING_AGENT_DIR ?? '', '..')
+}
+
+/**
+ * 会话产物目录镜像常量（设计 D1/D7）：`<dataDir>/artifacts/<sessionId>/`。
+ *
+ * shared 侧单点声明 = `packages/shared/src/paths.ts` 的 `getSessionArtifactsDir`；本包
+ * 不 import `@taiji/shared`（① 包边界——extensions 包全体不依赖 @taiji/shared；② 运行时
+ * 门禁——shared `getDataDir()` 对「非打包进程持有 ~/.taiji 树值」直接 throw（C-proc-26），
+ * 而打包态 pi 进程恰构成该组合（C-proc-09 剥了 TAIJI_AGENT_PACKAGED），误用会让打包态
+ * capability 段整段静默消失）。故以同公式镜像推导，两侧字面量一致性由 u-artifacts 的
+ * 源文件对拍机检守护（§11 检查点 8）。
+ */
+export const SESSION_ARTIFACTS_DIR_SEGMENT = 'artifacts'
+
+/**
+ * 会话产物目录绝对路径（镜像 shared `getSessionArtifactsDir` 公式）。
+ *
+ * sessionId 校验与 pi `assertValidSessionId` / runtime `isPiSessionId` 同域：首尾字母
+ * 数字，中间允许 `[A-Za-z0-9._-]`（允许 `.` / `_`，禁 `:`）——不用 `getImageCacheDir`
+ * 的窄集 `/^[A-Za-z0-9_-]+$/`（合法含 `.` 的 pi sid 会被窄集误拒）。非法 sessionId
+ * 直接 throw（防路径穿越）。
+ *
+ * @param sessionId 会话 id（子目录分区，须与 `isPiSessionId` 同域）
+ * @throws Error 当 sessionId 含路径分隔符、冒号、空串或首尾非字母数字
+ */
+export function resolveSessionArtifactsDir(sessionId: string): string {
+  // 校验与 pi-paths.ts 的 isPiSessionId 同域（字面量与 shared getSessionArtifactsDir 一致）
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(sessionId)) {
+    throw new Error(`invalid sessionId (path traversal blocked): ${sessionId}`)
+  }
+  return path.join(resolveDataDir(), SESSION_ARTIFACTS_DIR_SEGMENT, sessionId)
+}
+
+/**
+ * 产物目录不可用时的占位文案（会话 id 缺失 / 不可解析，设计 D1）：拼入能力段 ③ 段，
+ * 退化只发生在该处，其余文案完整。
+ */
+const SESSION_ARTIFACTS_DIR_UNAVAILABLE = '(unavailable this turn)'
+
+/**
+ * 从 handler 第二参 ctx 推导会话产物目录绝对路径（设计 D1 路径注入）：
+ * `ctx.sessionManager.getSessionId()` + 包内镜像推导（resolveDataDir + 段名常量，
+ * 不经 @taiji/shared——包边界与 C-proc-26/C-proc-09 门禁组合，见 D1）。
+ *
+ * 会话 id 缺失（无 ctx / getSessionId 返回空）/ 非法（resolveSessionArtifactsDir throw，
+ * 如 btw 虚拟 id 含冒号）/ getSessionId 抛错 → null，调用方按退化形态渲染。
+ */
+function resolveArtifactsDirFromCtx(ctx?: ExtensionContext): string | null {
+  try {
+    const manager = ctx?.sessionManager
+    const sid = manager ? manager.getSessionId() : ''
+    if (!sid) return null
+    return resolveSessionArtifactsDir(sid)
+  } catch (err) {
+    // best-effort：本 turn 路径缺失 → 退化形态（绝不把异常漏给 agent loop）
+    logger.debug('session artifacts dir unavailable this turn', { detail: String(err) })
+    return null
+  }
 }
 
 /**
@@ -256,11 +408,12 @@ function withGlobalInstructions(prompt: string): string {
  * Append the fixed taiji capability section（labeled header 与 global 注入段同构）。
  * 生效粒度 = 下一 turn：本 hook 每 turn 读 config（mtime 缓存判变），改开关 → 写
  * system-prompt.json → 下一 turn 读到新值——当前 turn 不受影响（机制既有，非新增）。
+ * 会话产物目录路径每 turn 经 ctx 重新推导（会话切换/新建即生效）。
  */
-function withCapabilitySection(prompt: string): string {
+function withCapabilitySection(prompt: string, ctx?: ExtensionContext): string {
   const cfg = readConfig(resolveDataDir())
   if (!cfg.capability.enabled) return prompt
-  return prompt + '\n\n' + TAIJI_CAPABILITY_SECTION
+  return prompt + '\n\n' + renderCapabilitySection(resolveArtifactsDirFromCtx(ctx))
 }
 
 /** Read the append config and apply it to the prompt (empty append → unchanged). */
@@ -276,9 +429,9 @@ function withAppendPrompt(prompt: string): string {
  * config (the explicitly configured text wins last). Returns the new
  * systemPrompt, or undefined when nothing changed.
  */
-function buildSystemPrompt(event: BeforeAgentStartEvent): { systemPrompt: string } | undefined {
+function buildSystemPrompt(event: BeforeAgentStartEvent, ctx?: ExtensionContext): { systemPrompt: string } | undefined {
   const basePrompt = typeof event.systemPrompt === 'string' ? event.systemPrompt : ''
-  const newPrompt = withAppendPrompt(withCapabilitySection(withGlobalInstructions(basePrompt)))
+  const newPrompt = withAppendPrompt(withCapabilitySection(withGlobalInstructions(basePrompt), ctx))
   return newPrompt === event.systemPrompt ? undefined : { systemPrompt: newPrompt }
 }
 
@@ -305,9 +458,9 @@ function logHookFailure(err: unknown): void {
 }
 
 export default function (pi: ExtensionAPI): void {
-  pi.on('before_agent_start', (event: BeforeAgentStartEvent) => {
+  pi.on('before_agent_start', (event: BeforeAgentStartEvent, ctx: ExtensionContext) => {
     try {
-      return buildSystemPrompt(event)
+      return buildSystemPrompt(event, ctx)
     } catch (err) {
       // Never block the agent loop.
       logHookFailure(err)

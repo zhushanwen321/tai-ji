@@ -187,6 +187,8 @@ describe('SessionService.getSubagents', () => {
     const subagents = await svc.getSubagents(MAIN_SESSION_ID)
     expect(subagents.records).toHaveLength(1)
     expect(subagents.oversize).toBe(false)
+    // [待裁决项 4] 会话在册 → found=true（正常路径，含空列表时的真实空语义）
+    expect(subagents.found).toBe(true)
     expect(subagents.records[0].subagentId).toBe('bg-test-1-111')
     expect(subagents.records[0].agent).toBe('reviewer')
     expect(subagents.records[0].slug).toBe('review-code')
@@ -206,6 +208,9 @@ describe('SessionService.getSubagents', () => {
 
     const subagents = await svc.getSubagents('nonexistent-id')
     expect(subagents.records).toHaveLength(0)
+    // [待裁决项 4] 会话不在册（延迟落盘窗口 / 扫描竞态）→ found=false 显式分形，
+    // 不与「会话存在但真空列表」共用同一空返回（renderer 据此保留分区不覆盖）
+    expect(subagents.found).toBe(false)
   })
 })
 

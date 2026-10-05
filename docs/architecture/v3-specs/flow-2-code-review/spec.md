@@ -1,7 +1,7 @@
 # Flow 2 · 单 Agent 对话 → 代码变更审查
 
 **类型**: 日常主路径（每天高频）
-**关联**: ADR-0020、Phase 0.4（Markdown）、Phase 2.3（变更集+Diff）、chat-area-critique P0
+**关联**: Phase 0.4（Markdown）、Phase 2.3（变更集+Diff）、chat-area-critique P0
 **依据**: Nielsen 启发式 #3 用户控制（2/4）、#9 错误恢复（2/4）的命门短板
 
 ## 目标

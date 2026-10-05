@@ -117,6 +117,7 @@ describe('SessionService.getAgentCallFilePath', () => {
         { subagentId: 'sa-001', sessionFile: '/tmp/pi-agent/subagents/enc/sa-001.jsonl' } as SubagentRecord,
       ],
       oversize: false,
+      found: true,
     })
     const result = await service.getAgentCallFilePath('main-sess', 'sa-001')
     expect(result).toBe('/tmp/pi-agent/subagents/enc/sa-001.jsonl')
@@ -124,7 +125,7 @@ describe('SessionService.getAgentCallFilePath', () => {
 
   it('找不到 record → 空串', async () => {
     const service = createService()
-    vi.spyOn(recordsRef(service), 'getSubagents').mockResolvedValue({ records: [], oversize: false })
+    vi.spyOn(recordsRef(service), 'getSubagents').mockResolvedValue({ records: [], oversize: false, found: true })
     expect(await service.getAgentCallFilePath('main-sess', 'sa-missing')).toBe('')
   })
 
@@ -135,6 +136,7 @@ describe('SessionService.getAgentCallFilePath', () => {
         { subagentId: 'sa-001', sessionFile: null } as SubagentRecord,
       ],
       oversize: false,
+      found: true,
     })
     expect(await service.getAgentCallFilePath('main-sess', 'sa-001')).toBe('')
   })
@@ -146,6 +148,7 @@ describe('SessionService.getAgentCallFilePath', () => {
         { subagentId: 'sa-001', sessionFile: '/etc/passwd' } as SubagentRecord,
       ],
       oversize: false,
+      found: true,
     })
     expect(await service.getAgentCallFilePath('main-sess', 'sa-001')).toBe('')
   })

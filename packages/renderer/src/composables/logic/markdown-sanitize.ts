@@ -154,9 +154,10 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 })
 
 // ── 相对资源协议纯函数（D4）──
-// ④路消费方在 ui 包 MarkdownRenderer.vue（ui→renderer 依赖禁令，不可直接 import），
-// 判定/resolve 以镜像形态在彼处维护同标准实现——镜像纪律同 markdown-types.ts 的
-// MarkdownSegment 协议镜像（壳侧改动需人工同步镜像，注释互指防漂移）。
+// ④路调用点在 ui 包 MarkdownRenderer.vue，判定/resolve 镜像实现在 ui 包
+// markdown-links.ts（ui→renderer 依赖禁令，不可直接 import），彼处维护同标准实现——
+// 镜像纪律同 markdown-types.ts 的 MarkdownSegment 协议镜像（壳侧改动需人工同步镜像，
+// 注释互指防漂移）。
 
 /** scheme 前缀正则（http: / data: / mailto: 等带协议头的 URL——非相对路径，设计 D4 原文） */
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i
@@ -186,7 +187,7 @@ export function isRelativeResourcePath(value: string): boolean {
  *   走 local-file:// 协议，由 Electron main 进程（apps/electron/main/main.ts 的
  *   protocol.handle('local-file')）按 computeLocalFilePrefixes/isPathInAllowedPrefixes
  *   前缀白名单拦截——越界 403；
- * - 相对链接 href（④路 MarkdownRenderer.vue 镜像实现，不 import 本函数）：点击时由
+ * - 相对链接 href（④路 markdown-links.ts 镜像实现，不 import 本函数）：点击时由
  *   runtime RPC 守门——git.getDiff 的 path_not_allowed / stat 的 not_found，
  *   见设计错误规格表。
  * renderer 运行时无 node:path（vite browser build），全仓运行时源码零 node:path 先例，

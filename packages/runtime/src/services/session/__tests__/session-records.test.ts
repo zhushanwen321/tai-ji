@@ -544,6 +544,65 @@ describe('refreshRecordEntries：拉取与发布', () => {
   })
 })
 
+describe('[升级腿中间帧抑制] applyRecordEntries 发布序列（greptile PR #30 发现 3）', () => {
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('降级投影升级腿不再先于 entry 批发布：轮内首帧即完整态（含 fold 更新与本批 entry）', async () => {
+    // 场景：轮 1 meta 不可得 → entry-only 降级投影；轮 2 前 run journal 落盘 + meta
+    // 可得 → ensureProjection 早退分支走升级腿（attachEventSources → rescan 全同步）。
+    // 无抑制时升级腿在本批 entry 应用前经 fireChange 即时发布一帧「只有 fold（wf-1
+    // 步骤数 0→1 的 workflowUpdate）、缺本批 entry（sa-1）」的中间态，随后 applyEntryBatch
+    // 后的纠正帧补齐——消费方两连帧、观测日志出现误导中间行。抑制后单次发布、首帧即完整态。
+    const sessionDir = mkdtempSync(join(tmpdir(), 'rec-upgrade-'))
+    const sessionFile = join(sessionDir, 's1.jsonl')
+    writeFileSync(sessionFile, '')
+    const runDir = join(sessionDir, 'workflow-state')
+    mkdirSync(runDir, { recursive: true })
+    try {
+      // meta 可控：轮 1 空（降级投影），轮 2 前落位（触发升级腿）
+      const scanMeta: Array<{ id: string; filePath: string; cwd: string }> = []
+      const { records, client, publish } = makeRecords({
+        sessionStore: { scanSessions: vi.fn(() => scanMeta) } as unknown as ISessionStore,
+      })
+      const fire = registerSession(records)
+      client.getEntries
+        .mockResolvedValueOnce({ data: { entries: [...workflowRecordEntry('wf-1', 'running', 'e1')], leafId: 'e1' } } as GetEntriesResult)
+        .mockResolvedValueOnce({ data: { entries: [...subagentRecordEntry('sa-1', 'running', 'e2')], leafId: 'e2' } } as GetEntriesResult)
+
+      // 轮 1：meta 不可得 → 降级投影；发布 wf-1（无 fold，步骤空）一帧
+      fire('s1')
+      records.invalidateRecordEntries('s1', 'workflow-record')
+      await flushDebounce()
+      expect(publish).toHaveBeenCalledTimes(1)
+      publish.mockClear()
+
+      // 升级源就位：run journal 落盘（wf-1 出现 1 个步骤）+ session meta 可得
+      writeFileSync(join(runDir, 'wf-1.record.jsonl'), [
+        JSON.stringify({ type: 'run-created', runId: 'wf-1', workflowName: 'test-flow', argsSummary: '', ts: 1000 }),
+        JSON.stringify({ type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100 }),
+      ].join('\n') + '\n')
+      scanMeta.push({ id: 's1', filePath: sessionFile, cwd: join(sessionDir, 'cwd') })
+
+      // 轮 2：本批 entry 携新 subagent sa-1；升级腿 fold 使 wf-1 步骤数 0→1
+      records.invalidateRecordEntries('s1', 'subagent-record')
+      await flushDebounce()
+
+      // 修复后：单次发布两帧，首帧即 session.subagents（已含本批 entry 的 sa-1）——
+      // 中间帧形态（先 workflowUpdate 后 subagents 的两连发布）不再出现
+      expect(publish).toHaveBeenCalledTimes(2)
+      const first = publish.mock.calls[0]![1] as { type: string; payload: { subagents: Array<{ subagentId: string }> } }
+      const second = publish.mock.calls[1]![1] as { type: string; payload: { update: { runId: string } } }
+      expect(first.type).toBe('session.subagents')
+      expect(first.payload.subagents.map((s) => s.subagentId)).toContain('sa-1')
+      expect(second.type).toBe('session.workflowUpdate')
+      expect(second.payload.update.runId).toBe('wf-1')
+    } finally {
+      rmSync(sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+})
+
 describe('onSessionDisposed', () => {
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers() })
@@ -612,7 +671,7 @@ describe('磁盘读侧（scanSessions → extractor 真实执行）', () => {
   it('getSubagents：session 不在扫描结果返回 []', async () => {
     const { records } = makeRecords()
     // [RT-4#8] 结构化返回（records + oversize）：无扫描命中 = 空列表且非 oversize
-    expect(await records.getSubagents('s-none')).toEqual({ records: [], oversize: false })
+    expect(await records.getSubagents('s-none')).toEqual({ records: [], oversize: false, found: false })
   })
 
   it('getWorkflows：定位 session 文件后提取 workflow 列表', async () => {
@@ -644,8 +703,8 @@ describe('磁盘读侧（scanSessions → extractor 真实执行）', () => {
       const first = await records.getSubagents('s-big')
       const second = await records.getWorkflows('s-big')
       await records.getSubagents('s-big')
-      expect(first).toEqual({ records: [], oversize: true })
-      expect(second).toEqual({ records: [], oversize: true })
+      expect(first).toEqual({ records: [], oversize: true, found: true })
+      expect(second).toEqual({ records: [], oversize: true, found: true })
       // 每会话 + 每类别一次（去重 key = sid:kind）：3 次调用 2 条 warn（subagents 一次 + workflows 一次）
       const dedupeWarns = warnSpy.mock.calls.filter((c) => String(c[0]).includes('list unavailable'))
       expect(dedupeWarns).toHaveLength(2)

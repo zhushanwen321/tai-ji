@@ -189,9 +189,14 @@ function sendSelectionToAI(): void {
  * 拉取失败不自动新建（保留既有条目、下次触发重试，设计 §3.3 触发点分腿语义）。
  */
 async function activateSession(): Promise<void> {
+  // 过期激活轮防护：本轮会话在发起时锚定。对账 await 窗口内用户可切走（组件不卸载、
+  // sessionId prop 变化）——落定后「空清单自动新建」仅当锚定会话仍是当前会话才执行；
+  // 不等时静默放弃（新会话自己的激活轮负责其新建）。否则 spawn 链（resolveDims /
+  // useTerminal.spawnTerminal）读到的是切换后的 sessionId，PTY 会开到别的会话头上。
+  const roundSid = props.sessionId
   const result = await terminal.reconcileInstances()
   // await 落定：激活轮内 ack 建档引起的 active 变化不被误判为「用户切换」（见 interactive 注释）
-  if (result.ok && result.count === 0) await spawnWithFeedback()
+  if (result.ok && result.count === 0 && roundSid === props.sessionId) await spawnWithFeedback()
   view.syncView()
 }
 

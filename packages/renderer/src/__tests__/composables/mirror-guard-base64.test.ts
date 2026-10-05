@@ -4,8 +4,9 @@
 // 镜像两侧（ui→renderer 依赖禁令所致，两侧注释互指）：
 // - renderer：composables/logic/markdown.ts 的 decodeBase64（export；其 encodeBase64 产出
 //   data-path/data-code/data-source 属性值）
-// - ui：features/chat/MarkdownRenderer.vue 的 decodeB64（组件内局部函数，经
-//   helpers/markdown-renderer-mirror.ts 源码提取构造，非 import）
+// - ui：features/chat/markdown-links.ts 的 decodeB64（镜像纯函数模块，经
+//   helpers/markdown-renderer-mirror.ts 源码提取构造——chat 内部模块不在 ui exports
+//   白名单，renderer 不 import）
 //
 // 守卫语义：同一组文本经参照实现（referenceB64，UTF-8 等价编码）得到合法 base64，两侧解码
 // 输出逐例相等且还原原文——任一侧语义漂移即红灯。HISTORICAL 事故锚点：迁移时丢

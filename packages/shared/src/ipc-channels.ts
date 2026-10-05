@@ -9,8 +9,13 @@
  * 命名惯例（对齐 preload.ts 既有 electronAPI 两式并存）：
  * - 单动作扁平 kebab-case：'renderer-log'（同 'runtime-port' / 'open-external' / 'reveal-in-folder'）
  * - 领域通道族 `domain:action` 冒号式：'image-cache:write'（同 'browser:create' / 'update:check' / 'sound:list'）
+ *   领域前缀内层同用 kebab-case（image-cache / debug / diagnostics）；例外 = `localFile:` 族
+ *   （`localFile:servable` / `localFile:read`，均为设计/ADR 逐字记录值）
+ *   ——该族字面量已由设计 §6.9 D9 / ADR-0118 第 3 条与 renderer 侧 lib/ipc、preload/index.d.ts
+ *   注释逐字记录为契约，改 kebab 会与设计/ADR 记录漂移，故保持设计字面量，此处只做 SSOT 收敛。
  *
- * 消费方：u2-renderer-errors（RENDERER_LOG）· u7-memory-governance（IMAGE_CACHE_WRITE）。
+ * 消费方：u2-renderer-errors（RENDERER_LOG）· u7-memory-governance（IMAGE_CACHE_WRITE）·
+ * chat-html-support u2-infra（LOCAL_FILE_SERVABLE / LOCAL_FILE_READ）。
  * preload / main 两侧 handler 注册时必须 import 此处常量，禁止字面量分叉。
  */
 
@@ -63,3 +68,32 @@ export const DEBUG_RUN_LOG_RETENTION = 'debug:run-log-retention' as const
  * 'debug:*' 领域族惯例，后续同族诊断通道沿用该前缀。
  */
 export const DIAGNOSTICS_EXPORT_BUNDLE = 'diagnostics:export-bundle' as const
+
+/**
+ * local-file servable 预检通道 [chat-html-support §6.9 D9，ADR-0118 第 3 条]。
+ *
+ * invoke 通道：renderer（内联预览容器 HtmlPreviewInline 经 deps `probeArtifact?` 挂载前
+ * 预检——v16 唯一渲染面）传绝对路径，main 侧返回 `{ servable, reason?, size? }`（reason ∈
+ * `not_found` / `is_dir` / `out_of_whitelist`）——谓词与 `protocol.handle('local-file')` 复用同一规范化管线模块
+ * （准入前缀成员资格先行短路 → 存在性 → 目录性；越界不触 fs，杜绝存在性探测通道）；
+ * 通道准入前缀 = 会话产物子树 `<dataDir>/artifacts/**`（读/预检通道收窄面，非协议 handler
+ * 全量白名单——通道入参含模型消息文本路径载荷，见 computeLocalFileReadPrefixes）。
+ * 通道名 `localFile:servable` 为设计/ADR 逐字记录值（见文件头命名惯例注），不随 kebab 惯例改名。
+ */
+export const LOCAL_FILE_SERVABLE = 'localFile:servable' as const
+
+/**
+ * local-file 源码内容读取通道 [chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」]。
+ *
+ * invoke 通道：内联容器源码态（deps readArtifact）与 DetailPane 变更集/文件树产物源码读取
+ * （useDetailPane loadPreviewContent）传绝对路径，main 侧返回
+ * `{ ok: true, content, truncated }` 或 `{ ok: false, reason }`（reason ∈ servable 三原因 +
+ * `read_failed`）——谓词与 `LOCAL_FILE_SERVABLE` / 协议 handler 复用同一白名单模块
+ * （准入前缀成员资格先行短路 → 存在性 → 目录性；越界不触 fs）；通道准入前缀 = 产物子树
+ * `<dataDir>/artifacts/**`（读通道收窄面，非协议 handler 全量白名单——`<dataDir>` 整前缀
+ * 含 pi agent 目录凭据，文本读取面限定在实际消费域）。
+ * 为何需要独立通道：产物目录 `<dataDir>/artifacts/<sessionId>` 在 session cwd 外（§6.7 D7），
+ * runtime `file.read` 的 cwd 守门对主要产物路径不可达，源码态需与 servable 同源的读取面。
+ * 通道名沿用 `localFile:` 族前缀（与 `LOCAL_FILE_SERVABLE` 同一族，见文件头命名惯例注）。
+ */
+export const LOCAL_FILE_READ = 'localFile:read' as const

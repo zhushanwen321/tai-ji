@@ -76,6 +76,17 @@ vi.mock('./reap-orphan-pi.js', () => ({
   reapOrphanPiProcesses: rh.reapOrphanPiProcesses,
 }))
 
+// ⑧ 残留清扫挂载测试用 mock：缺省透传真实实现（U9 sidecar 验收用例依赖真实清扫行为），
+// spy 通道供 ⑧ 容错用例注入抛错。真实函数在工厂内取（hoisted 期拿不到模块引用）。
+const sfu = vi.hoisted(() => ({
+  cleanupTmpMigrateResidue: vi.fn((_sessionsDir: string, _maxAgeMs?: number): number => 0),
+}))
+vi.mock('../infra/pi/session-file-utils.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../infra/pi/session-file-utils.js')>()
+  sfu.cleanupTmpMigrateResidue.mockImplementation(actual.cleanupTmpMigrateResidue)
+  return { ...actual, cleanupTmpMigrateResidue: sfu.cleanupTmpMigrateResidue }
+})
+
 /** 与 ProviderConfigMigrationReport 形状一致（catalog 含 errors 字段——handled 分支会读）。 */
 function noopReport() {
   return {
@@ -156,6 +167,30 @@ describe('runStartupBackgroundInit（D8-1 后台初始化序列）', () => {
     expect(sc.ensureDeclaredStartupConfigs).toHaveBeenCalledTimes(1)
     // ensure 收到 getExtensionPaths 的返回值（空数组直通）与真实 pi agentDir
     expect(sc.ensureDeclaredStartupConfigs).toHaveBeenCalledWith([], getPiAgentDir())
+  })
+
+  it('⑧ best-effort：残留清扫抛错仅 warn，不阻塞序列尾部步骤（cleanupStartupResidue 容错契约）', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const actual = await vi.importActual<typeof import('../infra/pi/session-file-utils.js')>(
+      '../infra/pi/session-file-utils.js',
+    )
+    sfu.cleanupTmpMigrateResidue.mockImplementation(() => {
+      throw new Error('fs boom')
+    })
+    try {
+      const { deps, calls } = makeDeps()
+      await runStartupBackgroundInit(deps)
+      expect(warn).toHaveBeenCalledWith(
+        '[runtime] tmp-migrate/tmp-import residue cleanup failed:',
+        expect.any(Error),
+      )
+      // ⑧ 之后串行链其余步骤照常走完（尾部 ⑦b 已在 calls）
+      expect(calls).toContain('getExtensionPaths')
+    } finally {
+      warn.mockRestore()
+      // 恢复透传真实实现（clearAllMocks 不清 impl，覆写必须就地还原）
+      sfu.cleanupTmpMigrateResidue.mockImplementation(actual.cleanupTmpMigrateResidue)
+    }
   })
 
   it('D8-3：gate 在序列最前创建——迁移未完成时后续步骤不执行，完成才放行', async () => {
@@ -322,6 +357,31 @@ describe('⑩ 空闲 pi 回收 reaper 挂载（idle-pi-reclamation D4，u3b）',
     const startIdleReaper = vi.fn(() => { throw new Error('reaper start boom') })
     await expect(runStartupBackgroundInit({ ...deps, startIdleReaper })).resolves.toBeUndefined()
     expect(startIdleReaper).toHaveBeenCalledTimes(1)
+    expect(pluginService.initialize).toHaveBeenCalled()
+  })
+})
+
+describe('⑪ 产物目录保留期扫描挂载（chat-html-support §6.7 D7 回收②）', () => {
+  it('传入 startArtifactRetention 时在序列中被调用恰一次', async () => {
+    const { deps } = makeDeps()
+    const startArtifactRetention = vi.fn()
+    await runStartupBackgroundInit({ ...deps, startArtifactRetention })
+    expect(startArtifactRetention).toHaveBeenCalledTimes(1)
+    expect(startArtifactRetention).toHaveBeenCalledWith()
+  })
+
+  it('未传 startArtifactRetention 时跳过且其余步骤不受影响（序列正常完成）', async () => {
+    const { deps, extensionService, pluginService } = makeDeps()
+    await expect(runStartupBackgroundInit(deps)).resolves.toBeUndefined()
+    expect(extensionService.migrateBuiltinExtensions).toHaveBeenCalled()
+    expect(pluginService.initialize).toHaveBeenCalled()
+  })
+
+  it('startArtifactRetention 抛错被挂载点 catch 消化，不阻塞序列（fire-and-forget 形态）', async () => {
+    const { deps, pluginService } = makeDeps()
+    const startArtifactRetention = vi.fn(() => { throw new Error('artifact retention boom') })
+    await expect(runStartupBackgroundInit({ ...deps, startArtifactRetention })).resolves.toBeUndefined()
+    expect(startArtifactRetention).toHaveBeenCalledTimes(1)
     expect(pluginService.initialize).toHaveBeenCalled()
   })
 })

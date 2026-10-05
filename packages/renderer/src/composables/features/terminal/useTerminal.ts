@@ -453,6 +453,12 @@ interface ReconcileResult {
  *   按触发点分腿（世代变更重连腿静默）。
  */
 async function reconcileSession(sessionId: string): Promise<ReconcileResult> {
+  // 纵深防护：请求发起时捕获连接世代判据（auth token，getCurrentToken 与世代重置同源）。
+  // await 落定后世代已变 = 响应属于旧连接世代，按失败腿丢弃（保留既有条目、不自动新建）。
+  // 当前接线下断连时 use-connection 的 pendingApi.rejectAll 已把在途请求 reject 走失败腿，
+  // 本防护是第二层：传输层行为变化（旧响应不再被 reject 直达此处）时兜住「旧清单响应
+  // 复活幽灵终端」，与 resetTerminalDomain 的世代重置语义配套。
+  const generationToken = getCurrentToken()
   let listed: { terminalId: string; alive: boolean }[]
   try {
     listed = await terminalApi.list(sessionId)
@@ -461,6 +467,7 @@ async function reconcileSession(sessionId: string): Promise<ReconcileResult> {
     console.warn(`[terminal] terminal.list 拉取失败（保留既有条目，下次触发重试）: sid=${sessionId}`, e)
     return { ok: false, count: -1 }
   }
+  if (getCurrentToken() !== generationToken) return { ok: false, count: -1 }
   const listedIds = new Set(listed.map((i) => i.terminalId))
   for (const terminalId of terminalIdsOfSession(sessionId)) {
     if (!listedIds.has(terminalId)) releaseInstance(terminalId, { promptPendingWrites: true })

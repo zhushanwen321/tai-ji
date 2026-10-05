@@ -7,7 +7,7 @@
  *
  * 依赖方向：无下游（读全局 window.electronAPI，类型经 declare global 自动可用）
  */
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, ShieldsFacesPayload } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, ShieldsFacesPayload, LocalFileServableReason, LocalFileServableResult, LocalFileReadReason, LocalFileReadResult } from "@taiji/shared"
 import type { ImageCacheWritePort } from '@taiji/core'
 
 /** preload 注入的 electronAPI（web/mock / node 测试环境为 undefined——后者连
@@ -520,4 +520,41 @@ export function exportDiagnosticBundle(
 export function getImageCacheWritePort(): ImageCacheWritePort | undefined {
   const invoke = api?.imageCacheWrite
   return invoke ? (sessionId, images) => invoke({ sessionId, images }) : undefined
+}
+
+// ── 产物可服务性预检（chat-html-support §6.9 D9，u3-detailpane）────────
+
+// local-file 两条通道的 payload 类型不在此另立副本：定义 SSOT = `@taiji/shared`
+// （packages/shared/src/ipc-payloads.ts，C-comm-22 唯一类型源）；re-export 保持渲染域既有
+// 消费面（useDetailPane 等自 `@/lib/ipc` 取用）。
+export type {
+  LocalFileReadReason,
+  LocalFileReadResult,
+  LocalFileServableReason,
+  LocalFileServableResult,
+}
+
+/**
+ * 预检绝对路径是否可经 local-file 协议服务（渲染态挂载前准入检查）。
+ *
+ * 谓词与协议 handler 同源（白名单成员资格 → 存在性 → 目录性，main 侧单一实现）。
+ * 无 IPC（web/mock / 旧 preload 未暴露该通道）→ reject：调用方（渲染态）转
+ * 「预览服务不可用」占位 + 重试（不静默空白）。
+ */
+export function localFileServable(absPath: string): Promise<LocalFileServableResult> {
+  if (!api?.localFileServable) return Promise.reject(new Error('localFileServable unavailable'))
+  return api.localFileServable(absPath)
+}
+
+/**
+ * 读白名单内文件内容（DetailPane 「源码」态）。
+ *
+ * 产物目录 `<dataDir>/artifacts/<sessionId>` 在 session cwd 外（设计 §6.7 D7），runtime
+ * `file.read` 的 cwd 守门不可达——源码内容经本条与 servable 预检同一白名单谓词的主进程
+ * 通道读取。无 IPC（web/mock / 旧 preload 未暴露该通道）→ reject：调用方（源码态）
+ * 回落既有 `file.read` cwd 通道（不静默空白）。
+ */
+export function localFileRead(absPath: string): Promise<LocalFileReadResult> {
+  if (!api?.localFileRead) return Promise.reject(new Error('localFileRead unavailable'))
+  return api.localFileRead(absPath)
 }

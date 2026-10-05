@@ -1320,15 +1320,20 @@
     },
     {
       "id": "E2E-DOC-01",
-      "summary": "文档-代码符号漂移检查（check-doc-symbol-drift：DOC_MODULE_MAP 映射文档 × 源码导出表零悬空 + 测试文档路径存在性 + 源码注释 docs 引用零悬空 + 数据源登记锚点对账）",
+      "summary": "文档-代码符号漂移检查（check-doc-symbol-drift：DOC_MODULE_MAP 映射文档 × 源码导出表零悬空 + 测试文档路径存在性 + 源码注释 docs 引用零悬空 + 数据源登记锚点对账 + ADR 编号唯一占用与引用存在性）",
       "scope": [
-        "scripts/check-doc-symbol-drift.mjs"
+        "scripts/check-doc-symbol-drift.mjs",
+        "scripts/__tests__/check-doc-symbol-drift.test.mjs"
       ],
       "layer": "L1",
       "assets": [
         {
           "kind": "script",
           "ref": "scripts/check-doc-symbol-drift.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/__tests__/check-doc-symbol-drift.test.mjs"
         }
       ],
       "trigger": "on-diff",
@@ -1336,7 +1341,27 @@
       "run": "node scripts/check-doc-symbol-drift.mjs",
       "owner": "docs",
       "authority": "docs/constraints.json",
-      "note": "设计文档同步纪律（C-proc-10）的机器门：pre-commit 按 docs/architecture/ 或映射源码路径触发（install-hooks.sh DOC_SYMBOL_DRIFT 段）。本 rule 登记脚本资产的 coverage（剪枝清单 = node_modules/.git/dist/coverage/test-results/playwright-report/.taiji-harness/resources/.zcode——.zcode 为 workflow 引擎 gitignored 工作区，agents 手工维护目录不受影响）；改动脚本扫描面/剪枝清单/映射表时跑 node scripts/check-doc-symbol-drift.mjs 冒烟（exit 0 + 四段 OK 行）"
+      "note": "设计文档同步纪律（C-proc-10）的机器门：pre-commit 按 docs/architecture/ 或映射源码路径触发（install-hooks.sh DOC_SYMBOL_DRIFT 段）。本 rule 登记脚本资产的 coverage（剪枝清单 = node_modules/.git/dist/coverage/test-results/playwright-report/.taiji-harness/resources/.zcode——.zcode 为 workflow 引擎 gitignored 工作区，agents 手工维护目录不受影响）；改动脚本扫描面/剪枝清单/映射表时跑 node scripts/check-doc-symbol-drift.mjs 冒烟（exit 0 + 四段 OK 行）。检查面 6（ADR 编号唯一占用与引用存在性，2026-10-04 增）与检测核心单测同族登记先例见 E2E-CONSTRAINTS 族：改动 extractAdrRegistry/checkAdrRefsInText 判定逻辑时跑 npx vitest run scripts/__tests__/check-doc-symbol-drift.test.mjs（R7 组用例锁定登记面提取与悬空判定）"
+    },
+    {
+      "id": "E2E-DUP-01",
+      "summary": "代码重复度基线脚本轨（measure-code-duplication：jscpd 生产口径一键重跑，口径 SSOT = docs/CODE-DUPLICATION-BASELINE.md）",
+      "scope": [
+        "scripts/measure-code-duplication.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/measure-code-duplication.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/measure-code-duplication.mjs",
+      "owner": "docs",
+      "authority": "docs/CODE-DUPLICATION-BASELINE.md",
+      "note": "重复度度量口径的唯一机器入口（min-tokens 50 / strict / typescript 通道 / 五域源码 / 排除测试与生成物，基线 164 clones / 2543 lines / 0.73%）；改动脚本口径参数时须同批重测并更新 docs/CODE-DUPLICATION-BASELINE.md 基线数字（口径两处一致纪律见该文档「一键重跑」节）"
     },
     {
       "id": "E2E-RESUME-01",
@@ -1657,7 +1682,9 @@
         "scripts/check-thinking-levels.mjs",
         "scripts/__tests__/check-thinking-levels.test.mjs",
         "packages/subagent-core/src/shared/model-ref.ts",
-        "packages/shared/src/pi-preset.ts"
+        "packages/shared/src/pi-preset.ts",
+        "scripts/lib/guard-report.mjs",
+        "scripts/__tests__/helpers/guard-mirror.mjs"
       ],
       "layer": "L1",
       "assets": [
@@ -1671,7 +1698,7 @@
       "run": "node scripts/check-thinking-levels.mjs",
       "owner": "packages/subagent-core",
       "authority": "docs/CONTEXT.md",
-      "note": "词表归属 = 入口层（字符串进来的那一层）；pre-commit 按路径触发，--self-test 覆盖提取函数。守卫单测（tmp mirror × spawnSync）与守卫脚本同面登记：两比对面各有一例漂移红 + 文件缺失红，shared 面纳入后由该单测证明非恒绿。"
+      "note": "词表归属 = 入口层（字符串进来的那一层）；pre-commit 按路径触发，--self-test 覆盖提取函数。守卫单测（tmp mirror × spawnSync）与守卫脚本同面登记：两比对面各有一例漂移红 + 文件缺失红，shared 面纳入后由该单测证明非恒绿。呈报骨架（✓/✗ 行 + 失败旗标 + 集合对拍呈报 + 汇总出口）与 tmp-mirror 装置共享于 scripts/lib/guard-report.mjs + scripts/__tests__/helpers/guard-mirror.mjs（同面登记，守卫与单测经相对 import 消费）。"
     },
     {
       "id": "E2E-PIPE-09",
@@ -1977,6 +2004,92 @@
       "owner": "packages/renderer",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "terminal-multi-instance 验收资产（2026-10-03）。落地设计 §4 T1/T2/T4/T8/T9/T10/T13 的可脚本化部分（impl-plan §4.4 A1/A2/A4/A8/A9/A10/A13；T2 顺带断言 T7 的最后实例关闭按钮禁用态）。执行口径 = 开发阶段按改动范围空载串行（AGENTS.md e2e 执行准则），PR/merge 门禁不跑；触发面 = 终端域四层锚点（renderer 终端 composable/组件/store + core write-queue 与 terminal API/ws-client + runtime terminal service/端口契约/handler + shared protocol）任一变更。[补 scope] 增补 `packages/runtime/src/services/ports/terminal-service.ts`：端口契约层（destroySessionPties / destroyAllPties 等）也是终端域四层锚点的一层——`packages/runtime/src/services/terminal/**` 是不含 ports/ 的另一条路径，只改端口契约时本轨此前圈不到。[补 scope 2] 增补 `packages/runtime/src/index.ts`：终端域生命周期锚点——会话删除级联（`setOnSessionDelete` → `destroySessionPties`）与 shutdown 链 PTY 清理打点（`dispose-terminal-pties`）所在，只改该文件时本轨此前不被圈定（T4「无孤儿」与设计 §1 目标 4「应用退出全量清理」的触发面缺位）。`packages/runtime/src/services/session/rolling-restart.ts` 不补入 scope：T10 用 SIGKILL 不经 shutdown 链；该文件的触发面由 `services/session/**` 族 rule（含 E2E-EQUIV-05）覆盖，但应用退出 PTY 清理的真机锚**仅**由 §0.5 P5 探针承接（P5 探针未执行，登记 `docs/todo/terminal-multi-instance.md` 探针欠账）——E2E-EQUIV-05 只与其触发面重叠、不做该断言，不构成真机锚。未覆盖项与归属：T3 刷新恢复 / T5 单实例无感 = L4 真机走查（前提 P3 已由 u0-probe 探针核实），T6/T11/T12 = L1 单测（u1 runtime 协议 / u3-bar 组件 / u2 世代与对账）；T7 不单列场景：禁用态由 T2 断言 + u3-bar 单测承载；T4 的 UI 右键删除路径归 D3 verify 剧本，T10 的 write-queue 重置逻辑归 u2 单测（GEN-1/GEN-3），真机可见面（重置提示）**未走查、留待补**（D3 四节点无世代变更构造，GEN-3 只覆盖提示触发条件逻辑、不覆盖真机 toast 渲染面；已登记 `docs/todo/terminal-multi-instance.md` 探针欠账）。spec 用 `npx playwright test --list` 自检（本单元只产出资产，真机执行在 D3 段）。**执行状态如实登记**：D3 段只跑 A1/A2/A4/A10 四个 verify 节点（`artifacts/d3/summary.jsonl` 仅这四条；`scripts/run-spec.sh` 恒带 `--grep` 单例），本轨 spec 的 T8/T9/T13 三例**从未执行**（v1 仅 `--list`）——三例的验收由 L1 单测承载（T8→runtime MI-2；T9→terminal-instance-bar 空态 + MI-2；T13→renderer RC-2/DEL-1 + runtime MI-5/MI-6 + renderer W27-3（`packages/renderer/src/__tests__/terminal/use-terminal-raf-queue.test.ts:431-451`，切走期间分区内容保持——T13「历史输出保持」面的 L1 载体），见 impl-plan §4.4），本轨对应用例为**未执行资产**，随首次触发本轨时验证。T1 断言面含隐藏期累积锚：切走终端 1 前发延迟出标记的命令，切回后断言该新标记上屏（覆盖「不可见实例输出累积 → 切回回放」链，单测只证 data 帧按 terminalId 落分区）。"
+    },
+    {
+      "id": "E2E-CAPALLOW-01",
+      "summary": "capability 清单成员一致性对账守卫（capability-allowlist-sync）：system prompt 扩展的正面/负面清单常量字面量（CAPABILITY_INLINE_TAG_FAMILIES / CAPABILITY_PRESENTATION_ATTRS / CAPABILITY_FORBIDDEN）× markdown-sanitize.ts 的 ALLOWED_TAGS / ALLOWED_ATTR 白名单字面量零漂移机检（双侧源文本机械提取，零散文解析——跨包不可 import，编译期拦截不可行）",
+      "scope": [
+        "scripts/check-capability-allowlist-sync.mjs",
+        "scripts/__tests__/check-capability-allowlist-sync.test.mjs",
+        "scripts/lib/guard-report.mjs",
+        "scripts/__tests__/helpers/guard-mirror.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-capability-allowlist-sync.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-capability-allowlist-sync.mjs",
+      "owner": "extensions/taiji/system-prompt",
+      "authority": "scripts/check-capability-allowlist-sync.mjs",
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（触发面 = 本脚本自身 + extensions/taiji/system-prompt/src/index.ts + packages/renderer/src/composables/logic/markdown-sanitize.ts，见 .githooks/install-hooks.sh 同名段；看护对象是两清单载体文件而非本脚本；退出码契约 0=一致 / 非 0=漂移或输入故障）；本表 run = 自含冒烟（与 pre-commit 同一命令）；纯函数自检（--self-test）与守卫非恒绿证明（清单多出/缺失 + 文件缺失各一例红）由 scripts/__tests__/check-capability-allowlist-sync.test.mjs 回归测试覆盖（同面登记 scope）。新清单成员在常量登记表登记并同步触发面 pathspec；无独立约束/ADR 登记，设计决策（清单以结构化常量承载 + 文案由常量渲染 + 双侧字面量对拍而非 import）记录在脚本头注释块与设计文档 §6.1 D1，故 authority 自指呈报骨架（✓/✗ 行 + 失败旗标 + 集合对拍呈报 + 汇总出口）与 tmp-mirror 装置共享于 scripts/lib/guard-report.mjs + scripts/__tests__/helpers/guard-mirror.mjs（同面登记，守卫与单测经相对 import 消费）。"
+    },
+    {
+      "id": "E2E-ARTDIR-01",
+      "summary": "会话产物目录公式双实现对账守卫（artifact-dir-formula-sync）：shared paths.ts 的 getSessionArtifactsDir 段名字面量与 sessionId 校验正则字面量 × system-prompt 扩展内镜像推导（SESSION_ARTIFACTS_DIR_SEGMENT + resolveSessionArtifactsDir）零漂移机检（跨包不可 import——extensions 不依赖 @taiji/shared，源文本字面量对拍）",
+      "scope": [
+        "scripts/check-artifact-dir-formula-sync.mjs",
+        "scripts/__tests__/check-artifact-dir-formula-sync.test.mjs",
+        "scripts/lib/guard-report.mjs",
+        "scripts/__tests__/helpers/guard-mirror.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-artifact-dir-formula-sync.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-artifact-dir-formula-sync.mjs",
+      "owner": "packages/runtime",
+      "authority": "scripts/check-artifact-dir-formula-sync.mjs",
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（触发面 = 本脚本自身 + packages/shared/src/paths.ts + extensions/taiji/system-prompt/src/index.ts，见 .githooks/install-hooks.sh 同名段；看护对象是两侧公式载体文件而非本脚本；退出码契约 0=一致 / 非 0=漂移或输入故障）；本表 run = 自含冒烟（与 pre-commit 同一命令，均为不带 --self-test 的常规校验）；三条比较的非恒绿证明（段名漂移/正则漂移/镜像旁路字面量/文件缺失各一例红）由 scripts/__tests__/check-artifact-dir-formula-sync.test.mjs 回归测试覆盖（同面登记 scope）。公式段名/校验正则变更须双侧同步并同步触发面；无独立约束/ADR 登记，设计决策（为何镜像而非 import：extensions 包边界 + shared getDataDir 对打包态 pi 进程 throw）记录在脚本头注释块与设计文档 §6.7 D7，故 authority 自指呈报骨架（✓/✗ 行 + 失败旗标 + 集合对拍呈报 + 汇总出口）与 tmp-mirror 装置共享于 scripts/lib/guard-report.mjs + scripts/__tests__/helpers/guard-mirror.mjs（同面登记，守卫与单测经相对 import 消费）。"
+    },
+    {
+      "id": "E2E-PISYNC-01",
+      "summary": "pi 构建期派生锚点守卫（check-pi-sync）：build.yml PI_VERSION / prepare 脚本默认值 / builtin-providers 快照 / extensions peerDeps / KNOWN_PI_API_TYPES / pi-tui / dev binary 八项声明基准 ↔ node_modules 实装基准对账（S1-S8），升级 pi 后锚点漏同步在提交期红",
+      "scope": [
+        "scripts/check-pi-sync.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-pi-sync.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-pi-sync.mjs",
+      "owner": "packages/runtime",
+      "authority": "scripts/check-pi-sync.mjs",
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发 + ci.yml invariants（AGENTS.md C-build-07 同款口径；本表 run = 自含冒烟，纯读 node_modules 与仓库源文件，零网络）；呈报骨架共享于 scripts/lib/guard-report.mjs（同面登记）；--self-test 覆盖解析/版本比较/提取纯函数；无独立 ADR，版本门禁语义登记以 constraints.json 为准"
+    },
+    {
+      "id": "E2E-POSIXRESOLVE-01",
+      "summary": "POSIX resolve 折叠实现三份镜像字面量对拍守卫（posix-resolve-mirror-sync）：ui html-preview-path.ts resolvePosixPath（基准）× renderer markdown-sanitize.ts resolveResourcePath × ui markdown-links.ts resolveHrefPath 函数体逐字一致 + 折叠语义锚点在场机检（跨包不可 import——ui→renderer 依赖禁令，源文本字面量对拍；iframe 内联容器 src 与 markdown 相对链接点击落点共用同一相对路径解析语义，任一份漂移 = 两侧解析出不同绝对路径）",
+      "scope": [
+        "scripts/check-posix-resolve-mirror-sync.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-posix-resolve-mirror-sync.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-posix-resolve-mirror-sync.mjs",
+      "owner": "packages/ui",
+      "authority": "scripts/check-posix-resolve-mirror-sync.mjs",
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（触发面 = 本脚本自身 + packages/ui/src/features/chat/html-preview-path.ts + packages/renderer/src/composables/logic/markdown-sanitize.ts + packages/ui/src/features/chat/MarkdownRenderer.vue，见 .githooks/install-hooks.sh 同名段；看护对象是三份折叠实现载体文件而非本脚本；退出码契约 0=通过 / 1=漂移或提取失败）；本表 run = 自含冒烟（与 pre-commit 同一命令，均为不带 --self-test 的常规校验）；--self-test 纯函数自检内建非恒绿证明（漂移样例 ≠ 基准、三份一致退化样例被折叠语义锚点断言拦截——防「一致删空」对拍盲区）；renderer lib/path-utils.resolvePreviewPath 非本族镜像（相对路径仅前缀拼接不折叠 `..`，语义不同）；同族先例 = capability 清单（E2E-CAPALLOW-01）与产物目录公式（E2E-ARTDIR-01）对拍守卫，形态照搬 check-artifact-dir-formula-sync.mjs；无独立约束/ADR 登记，设计决策（为何镜像而非 import：ui→renderer 依赖禁令）记录在脚本头注释块，故 authority 自指"
     }
   ]
 }

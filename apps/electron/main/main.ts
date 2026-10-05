@@ -21,6 +21,7 @@
  *
  * 3. local-file:// 协议路径白名单 = computeLocalFilePrefixes 纯函数
  *    （app.getAppPath/getDataDir/tmpdir/用户内容子目录 + path.sep 后缀；dev 含 cwd，打包态剔除）
+ *    构造单一来源 = gateway/local-file-handlers 的 getAllowedLocalFilePrefixes
  *
  * 4. Runtime 启动时序（D1 决策）：createWindow 先于 spawn runtime
  *    - whenReady: createWindow → register → registerShortcuts → runtime.startAndNotify
@@ -60,7 +61,7 @@
  */
 import path from 'node:path'
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { homedir } from 'node:os'
 import { app, protocol, net, BrowserWindow } from 'electron'
 import { DEV_PORT_OFFSET } from '@taiji/shared'
 import type { CrashJournalWriter, LaunchResult } from '@taiji/shared'
@@ -79,14 +80,17 @@ import { updateOrchestrator } from './update/orchestrator.js'
 import { maybeRollbackInterruptedUpdate, cleanupCompletedUpdate } from './update/update-self-healer.js'
 import { killActiveCurlDownloads } from './update/curl-download.js'
 import { registerIpcHandlers } from './gateway/ipc-handlers.js'
-import { isPathInAllowedPrefixes } from './gateway/input-validators.js'
+import { getAllowedLocalFilePrefixes } from './gateway/local-file-handlers.js'
+import {
+  buildLocalFileErrorResponse,
+  decorateLocalFileResponse,
+} from './gateway/local-file-response.js'
 import { fixPathEnv } from './supervisor/shell-env.js'
 import { flushStderrSink } from './supervisor/process-control.js'
 import { initMainLogger, closeMainLogger, mainLogger } from './logs/main-logger.js'
 import { initCrashJournal, crashJournal } from './logs/crash-journal.js'
 import { startTriggerPatrol } from './diagnostics/trigger-patrol.js'
-import { expandLocalFilePath } from './utils/path.js'
-import { computeLocalFilePrefixes } from './utils/local-file-prefixes.js'
+import { buildLocalFileFetchUrl, probeLocalFileUrlPathname } from './utils/local-file-prefixes.js'
 import { resolveDevDataDir } from './utils/dev-data-dir.js'
 import { resolvePackagedDataDir } from './utils/packaged-data-dir.js'
 
@@ -366,37 +370,40 @@ app.whenReady().then(async () => {
   }
   // dev 实例 Dock 角标：与 prod 并存时一眼可辨（app.dock 非 mac 为 undefined）
   if (isDev) app.dock?.setBadge('dev')
-  // 注册 local-file:// 协议，用于渲染进程加载本地文件（如图片）
-  protocol.handle('local-file', (request) => {
-    const rawPath = decodeURIComponent(new URL(request.url).pathname)
-    // 渲染进程无法安全展开 ~，主进程统一处理（图片 URL 可能含 ~/）
-    const filePath = expandLocalFilePath(rawPath)
-    // [HISTORICAL] W3 → D2a：白名单构造收敛到 computeLocalFilePrefixes 纯函数。
-    // 打包态剔除 process.cwd()——macOS 打包版从 Finder/Dock 启动时 cwd 是 /，
-    // 前缀匹配 startsWith('/') 对任意绝对路径恒真，白名单塌缩为全盘，「绝不放行
-    // ~ 本身（含 ~/.ssh）」的注释护栏曾被该运行时环境击穿。不变量守护已移到单测：
-    // main/test/local-file-prefixes.test.ts（打包态不含文件系统根 / 不含 homedir 本身）。
-    // 各成员的取舍理由见 utils/local-file-prefixes.ts 文件头。
-    // projectRoot：仅 dev + dev-instance.mjs 装配器注入 TAIJI_DEV_PROJECT_ROOT 时生效
-    // （dev 装配的 electron cwd/appPath 都指向 apps/electron，白名单需要 worktree 根
-    // 成员才能放行 session cwd 下的用户文件）。打包态 env 不会被装配器注入，isDev
-    // 判断再显式防一层泄漏（isPackaged 时不传）。
-    const allowedPrefixes = computeLocalFilePrefixes({
-      isPackaged: app.isPackaged,
-      cwd: process.cwd(),
-      appPath: app.getAppPath(),
-      dataDir: getDataDir(),
-      tmpdir: tmpdir(),
-      ...(isDev && process.env.TAIJI_DEV_PROJECT_ROOT
-        ? { projectRoot: process.env.TAIJI_DEV_PROJECT_ROOT }
-        : {}),
+  // 注册 local-file:// 协议，用于渲染进程加载本地文件（图片 / HTML 预览文档）。
+  //
+  // 准入谓词与 localFile:servable 预检 IPC 复用同一模块函数（utils/local-file-prefixes 的
+  // probeLocalFileUrlPathname / probeLocalFileServable，chat-html-support §6.4 D4「同一谓词」/
+  // §6.9 D9）——边缘路径（.. 穿越 / // 冗余斜杠 / %2e2e / 含 % # 空格的文件名）上两份平行
+  // 实现必然分叉。白名单前缀构造单一来源 = gateway/local-file-handlers 的
+  // getAllowedLocalFilePrefixes（D2a 打包态剔除 cwd 的守卫在该处，单测
+  // main/test/local-file-prefixes.test.ts 守护）。
+  // 响应头（全部响应 no-store + .html/.htm 内容级 CSP）见 gateway/local-file-response（§6.5 D5）。
+  protocol.handle('local-file', async (request) => {
+    const allowedPrefixes = getAllowedLocalFilePrefixes(isDev)
+    // 渲染进程无法安全展开 ~，主进程统一处理（URL 可能含 ~/ + 百分号编码路径段）
+    const probe = probeLocalFileUrlPathname(new URL(request.url).pathname, allowedPrefixes, {
+      // 非 ENOENT 真异常（EACCES/EIO）就地映射仍是 not_found（三值 reason 枚举不扩），
+      // 真因由 main 日志承载（§6.4 D4 子决策③「诊断细分由 main 日志承载」）
+      onError: (err, filePath) =>
+        mainLogger.warn(`[main] local-file stat failed (${filePath}): ${errorText(err)}`),
     })
-    const resolved = path.resolve(filePath)
-    // 校验逻辑集中到 input-validators，拒绝不在白名单前缀内的路径（防目录穿越）
-    if (!isPathInAllowedPrefixes(resolved, allowedPrefixes)) {
-      return new Response('Forbidden', { status: 403 })
+    if (!probe.servable) {
+      // 可读错误文档（§11 检查点 3）：父页面 opaque origin 读不到状态码，错误文档是
+      // 用户在 iframe 内唯一的可见信号；消息不回显路径（无反射注入面）
+      return buildLocalFileErrorResponse(probe.reason ?? 'not_found')
     }
-    return net.fetch(`file://${resolved}`)
+    try {
+      // pathToFileURL 而非裸拼：resolvedPath 是解码后的明文，含 `#`/`?`/`%` 时裸拼会被
+      // URL 解析吞成 fragment/query 或错解码到另一路径（§6.4 D4 编码规格 / §11 检查点 4）
+      const response = await net.fetch(buildLocalFileFetchUrl(probe.resolvedPath))
+      return decorateLocalFileResponse(response, probe.resolvedPath)
+    } catch (err) {
+      // 预检后文件被删 / 读取失败的残余窗口：降级为可读 404 文档。错误文档本身不回显路径
+      // （无反射注入面），诊断细分（errno + 路径）由 main 日志承载（§6.4 D4 子决策③）
+      mainLogger.warn(`[main] local-file fetch failed (${probe.resolvedPath}): ${errorText(err)}`)
+      return buildLocalFileErrorResponse('not_found')
+    }
   })
 
   // W3：启动自愈——检测上次中断的升级并回滚，必须在 bootstrapMainWindow 之前

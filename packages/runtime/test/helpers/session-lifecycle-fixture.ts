@@ -28,20 +28,14 @@ vi.mock('../../src/infra/system/trash.js', () => ({ trash: vi.fn() }))
 /** 已 mock 的 infra trash（vi.mocked 视图，测试经它注入故障/断言调用）。 */
 export const trashMock = vi.mocked(trash)
 
-export interface SessionLifecycleFixture { // oe-exempt:20260930:test:测试 fixture 的装配契约形状，makeSessionLifecycleFixture 返回值与消费方解构共用同一类型标注
-  lifecycle: SessionLifecycle
-  svc: ILifecycleSessionOps
-  store: PiSessionStore
-  pm: IProcessManager
-}
-
 /**
- * 构造真实 SessionLifecycle 与四类协作对象。
+ * 构造真实 SessionLifecycle 与四类协作对象，返回 { lifecycle, svc, store, pm }
+ * （返回类型由 TS 推断，消费方解构使用）。
  *
  * S3 迁移跟移（原 MERGE_HEAD 版按旧 ISessionServiceInternal + 5 参构造书写）：
  * sessions Map 所有权已入 SessionLifecycle（this.get 判 active），构造多第 6 参 registerDeps。
  */
-export function makeSessionLifecycleFixture(): SessionLifecycleFixture {
+export function makeSessionLifecycleFixture() {
   const workspace = { record: vi.fn() } as unknown as WorkspaceService
   const pm = { destroySession: vi.fn().mockResolvedValue(undefined) } as unknown as IProcessManager
   const configStore = { getDefaultModel: vi.fn(() => undefined) } as unknown as IConfigStore

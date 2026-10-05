@@ -273,6 +273,36 @@ describe('TerminalView 实例激活（构建者视角）', () => {
     expect(useTerminalMock.reconcileInstances).not.toHaveBeenCalled()
     expect(useTerminalMock.spawnTerminal).not.toHaveBeenCalled()
   })
+
+  it('TV-16: 对账挂起期间切会话 → 旧激活轮落定后不自动新建（过期响应不把终端开到新会话）', async () => {
+    // greptile PR #30 发现 1：reconcileInstances 的 await 窗口内用户切走会话（组件不卸载、
+    // sessionId prop 变化），旧轮空清单响应落定后若仍自动新建，spawn 链读到的是切换后的
+    // sessionId——PTY 开到别的会话头上。激活轮须锚定发起时会话，过期轮静默放弃，
+    // 新会话的新建由其自己的激活轮负责。
+    const resolvers: Array<(result: { ok: boolean; count: number }) => void> = []
+    useTerminalMock.reconcileInstances.mockImplementation(
+      () => new Promise((resolve) => { resolvers.push(resolve) }),
+    )
+    const w = mount(TerminalView, { props: { sessionId: 'session-a' }, attachTo: document.body })
+    wrapper = w
+    await flushPromises()
+    expect(resolvers).toHaveLength(1)
+
+    // 切到会话 B：新激活轮发起（其自身对账同样挂起）
+    await w.setProps({ sessionId: 'session-b' })
+    await flushPromises()
+    expect(resolvers).toHaveLength(2)
+
+    // 旧轮（session-a）空清单响应落定：不得触发自动新建
+    resolvers[0]!({ ok: true, count: 0 })
+    await flushPromises()
+    expect(useTerminalMock.spawnTerminal).not.toHaveBeenCalled()
+
+    // 新会话（session-b）激活轮空清单响应落定：正常自动新建（新建归属不因旧轮放弃而丢失）
+    resolvers[1]!({ ok: true, count: 0 })
+    await flushPromises()
+    expect(useTerminalMock.spawnTerminal).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('TerminalView 交互（使用者视角）', () => {

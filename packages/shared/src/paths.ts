@@ -250,6 +250,37 @@ export function getImageCacheDir(sessionId: string, dataDir?: string): string {
   return join(dataDir ?? getDataDir(), 'cache', 'images', sessionId)
 }
 
+/**
+ * 会话产物目录（`<dataDir>/artifacts/<sessionId>`，chat-html-support §6.7 D7）。
+ *
+ * agent 生成的 HTML 产物默认写入此目录（capability 段每 turn 注入其绝对路径），目录在
+ * local-file 白名单的既有成员 `<dataDir>` 前缀内——预览无需任何白名单改动。
+ *
+ * **路径穿越防护**：sessionId 必须匹配与 `isPiSessionId`（`packages/runtime/src/infra/pi/
+ * pi-paths.ts`：首尾字母数字、中间允许 `[A-Za-z0-9._-]`，即允许 `.` / `_`、禁 `:`）
+ * 同域的正则，否则 throw。**不得使用 `getImageCacheDir` 的窄集** `^[A-Za-z0-9_-]+$`
+ * ——合法含 `.` 的 pi sessionId 会被窄集误拒，公式 throw 后被级联点 try/catch 吞掉成
+ * 静默 no-op（产物目录不随会话删除而清）；同理 btw 虚拟 id（`btw:<sid>`）含冒号必拒。
+ *
+ * 跨包边界：extensions 侧不 import shared，以同公式镜像推导（system-prompt 包内
+ * `SESSION_ARTIFACTS_DIR_SEGMENT` 与同域正则），两侧字面量一致性由
+ * `scripts/check-artifact-dir-formula-sync.mjs` 对拍机检守护。
+ *
+ * 纯函数无副作用——不创建目录（创建由 write 工具落盘时承担），仅做路径推导。
+ *
+ * @param sessionId 会话 id（子目录分区，须与 `isPiSessionId` 同域；允许 `.` / `_`、禁 `:`）
+ * @param dataDir   可选数据根目录（测试注入）；缺省读 getDataDir()
+ * @throws Error 当 sessionId 含路径分隔符、冒号、空串或首尾非字母数字
+ */
+export function getSessionArtifactsDir(sessionId: string, dataDir?: string): string {
+  // 校验与 pi-paths.ts 的 isPiSessionId 同域：首尾字母数字，中间允许 [A-Za-z0-9._-]
+  // （允许 `.` 与 `_`、禁 `:`）。比 getImageCacheDir 的窄集宽——见本函数头注。
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(sessionId)) {
+    throw new Error(`invalid sessionId (path traversal blocked): ${sessionId}`)
+  }
+  return join(dataDir ?? getDataDir(), 'artifacts', sessionId)
+}
+
 // ── run 目录运行态（crash-forensics D1/D3）────────────────────────────────────
 // 【oe-audit C8】文件名族 SSOT：此前 'runtime-checkpoint.json' 等字面量在
 // runtime-checkpoint.ts / main.ts / export-diagnostic-bundle.ts 三处独立定义

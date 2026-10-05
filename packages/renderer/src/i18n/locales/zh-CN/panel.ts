@@ -411,6 +411,25 @@ export default {
     fullscreenTitle: 'Mermaid 图表全屏查看',
     fullscreenDesc: '使用缩放控件查看 Mermaid 图表详情。',
   },
+  // html-preview fence 内联预览容器（chat-html-support §6.3 D3，v16 形态变更；降级原因码一一对应）
+  htmlPreview: {
+    // 源码 | 预览切换（默认预览）+ 刷新 + 收起/展开（高度上限切换）
+    tabPreview: '预览',
+    tabSource: '源码',
+    refresh: '刷新',
+    expand: '展开',
+    collapse: '收起',
+    checking: '检查中…',
+    // 源码态读取失败（deps.readArtifact reject → 错误占位 + 重试）
+    sourceLoadFailed: '源码读取失败',
+    // 路径非法：fence 内容 trim 后为空或含换行（单条路径语义）
+    invalidPath: '路径非法',
+    // 无法解析路径：相对路径 + resourceBaseDir / session cwd 皆缺（不静默猜基准）
+    unresolvedPath: '无法解析路径',
+    notFound: '文件不存在',
+    isDir: '路径是目录',
+    outOfWhitelist: '不可预览（不在预览白名单）',
+  },
   modelSelect: {
     noModel: '暂无可用模型，请先在设置中导入凭据或配置供应商',
     switchModel: '切换模型',
@@ -533,6 +552,10 @@ export default {
     copyFilePath: '复制路径',
     injectFileRef: '加入文件引用到对话框',
     injectToNew: '引用到新对话',
+    // [chat-html-support §6.9 D9] 产物目录源码读取的白名单通道真实失败原因（cwd 通道兜底前的错误态文案；
+    // out_of_whitelist 不在此列——该原因落 cwd 通道兜底，预览白名单提示由内联容器 panel.htmlPreview 承载）
+    htmlReasonNotFound: '文件不存在',
+    htmlReasonIsDir: '目标是一个目录',
   },
   panel: {
     sessionDead: '会话进程已退出',
