@@ -40,8 +40,8 @@ const originalSchemaEnv = process.env[SCHEMA_ENV_NAME];
 afterEach(() => {
   // fixture 的 restoreSchemaEnv 只处理 env；vi.restoreAllMocks 必须在消费方保留
   restoreSchemaEnv(originalSchemaEnv);
-  // 闸门 terminal 会武装真实 15s 兜底硬退 timer——触发 terminal 的测试用 fake timers
-  // 包裹，此处还原真实 timers 并丢弃未触发的 fake timer（不残留跨测试的硬退风险）
+  // terminal 链含 fire-and-forget handler 的测试用 fake timers 包裹，此处还原真实
+  // timers 并丢弃未触发的 fake timer（不残留跨测试的 timer）
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -79,7 +79,7 @@ describe("characterization: setupWorkflowHook timing (baseline before RetryState
   });
 
   it("② [U2 重锁] 3 same-signature failures in one turn → gate terminal + shutdown at 3rd, turn_end does NOT steer (was: single steer)", async () => {
-    vi.useFakeTimers(); // terminal 武装 15s 兜底硬退 timer——fake 掉避免真实 timer 泄漏
+    vi.useFakeTimers(); // terminal 链 fire-and-forget handler——fake 掉避免真实 timer 泄漏
     const pi = createMockPi();
     await loadExtension(pi, SCHEMA);
 
@@ -100,7 +100,7 @@ describe("characterization: setupWorkflowHook timing (baseline before RetryState
   });
 
   it("③ [U2 重锁] 3 failed turns → exactly 2 steers; 3rd failure (same signature ×3) hits gate terminal BEFORE retry-cap give-up → shutdown", async () => {
-    vi.useFakeTimers(); // terminal 武装 15s 兜底硬退 timer——fake 掉避免真实 timer 泄漏
+    vi.useFakeTimers(); // terminal 链 fire-and-forget handler——fake 掉避免真实 timer 泄漏
     const pi = createMockPi();
     await loadExtension(pi, SCHEMA);
 
@@ -133,7 +133,7 @@ describe("characterization: setupWorkflowHook timing (baseline before RetryState
   // 本测试锁「terminal 后 hook 彻底哑火」：即使 turn_end 带不同 stopReason/
   // 后续失败继续到达，也不再有任何 steer。
   it("⑤ [U2] after gate terminal, no steer under ANY subsequent turn_end shape (shutdown-failure insurance)", async () => {
-    vi.useFakeTimers(); // terminal 武装 15s 兜底硬退 timer——fake 掉避免真实 timer 泄漏
+    vi.useFakeTimers(); // terminal 链 fire-and-forget handler——fake 掉避免真实 timer 泄漏
     const pi = createMockPi();
     await loadExtension(pi, SCHEMA);
 

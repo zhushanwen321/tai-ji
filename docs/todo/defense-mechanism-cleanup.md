@@ -1,6 +1,6 @@
 # 全项目防御机制清查：重试 / 对账 / 超时兜底默认删除
 
-状态：主体清查已实施（2026-10-05 用户裁决 + 同日 4 分区并行清理落地，5 笔提交 64825a1d8 / 835674536 / c40a9969b / ba78ca9f2 / b6c7d402a）；投递域重构批次已实施（同日）；追加裁决残留项已由 Wave 2-C2 批次落地（notify 看门狗重投、startup-sweep 宽限窗、ABORT_STALL 收敛窗、structured-output 兜底硬退——见「已实施终态」末段）；其余跨分区残留项待实施（见文末遗留清单）。
+状态：全部批次已实施完毕（2026-10-05 用户裁决 + 同日主体清查 5 笔提交；同日投递域重构、journal 推送通道、Wave 2-C1/C2 残留批次、renderer 受理层上屏全部落地，遗留清单已清零）。本登记转为终态存档：后续新增防御机制前先对照 ADR-0112 原则与本文「例外保留」清单。
 
 - 第一原则（用户裁决原文归纳，体系化承载 = ADR-0112 事实驱动原则体系）：
   1. 本项目绝大部分情况 fail-fast；自动重试只有底层 pi 调 LLM 的地方有（在 pi 内部，非本项目代码）；
@@ -21,16 +21,22 @@
 - extensions：cw-tool / rename-session / permission 默认墙钟、session-manager SELECT_TIMEOUT 表、bte 2s 轮询器（改 exit 事件边沿收尾 exit-collector.ts）、scheduler widget 保活帧（唯一理由 = reaper 防御，陪葬退役）——全删。
 - 前端/平台（apps/electron / core / renderer）：重启稳定窗、renderer 崩溃自动 reload + 熔断（改静态错误页 + 手动重试）、端口释放猜等、重启延迟猜等——全删。
 - Wave 2-C2 批次（追加裁决残留项，2026-10-05 落地）：
-  - notify 看门狗重投（`subagent-core/execution/notify/notify-ledger.ts`）：NOTIFY_WATCHDOG_MS=120s 看门狗定时器 + NOTIFY_REDELIVERY_MAX_ATTEMPTS=5 重投上限 + abandoned 放弃终态族（生产/消费/compaction 补写/恢复跳过全链）——全删；语义终态 = 通知 sent 后无回执不重投（通知可能丢失是已接受代价），settled 边沿投递、回执销账、notifyId 幂等、重启恢复重放保留。
+  - notify 看门狗重投（`subagent-core/execution/notify/notify-ledger.ts`）：NOTIFY_WATCHDOG_MS=120s 看门狗定时器 + NOTIFY_REDELIVERY_MAX_ATTEMPTS=5 重投上限 + abandoned 放弃终态族（生产/消费/compaction 补写/恢复跳过全链）——全删；语义终态 = 通知 sent 后无回执不重投（通知可能丢失是已接受代价），settled 边沿投递、回执对账、notifyId 幂等、重启恢复重放保留。
   - startup-sweep 宽限窗（`subagent-core/orchestration/startup-sweep.ts` + `run-registry.ts`）：STARTUP_SWEEP_GRACE_WINDOW_MS=60s 事件流静止宽限窗（graceWindowMs 选项 / skippedGraceWindow outcome）——删，改创建顺序契约（单实例锁确立 + 扫描先于任何 pi spawn 的事实判定 + 三面证据幂等让位 + fold 保守停帧不崩坏）。
   - ABORT_STALL 收敛窗（`runtime/services/session/event-interpreter.ts` + `event-interpreter-settled-delay.ts`）：ABORT_STALL_CONVERGENCE_WINDOW_MS=3s 静默窗 + ABORT_STALL_MAX_PENDING_GENERATIONS=10 代强制清环 + UserStoppedGate 收敛环（converging Map / timer / beginRestoreConvergence / noteAgentSettled / disposeForEntryRemoval）——全删，改事件顺序契约：userStopped 标记存活期 = 旁路 turn 拦截存续期，标记清除只由显式意图事件驱动（显式投递 / 会话删除 / shutdown）；「settled 永不到达」（pi 收尾挂死）归 PingProbe → onSilentAbort → forceQuit 显式上报链。
   - structured-output 兜底硬退（`extensions/universal/structured-output/src/loop-gate.ts`）：TEARDOWN_FORCE_EXIT_MS=15s 兜底硬退 timer（armForceExitTeardown / process.exit 兜底）——删；同签名 3 次门禁（MAX_CONSECUTIVE_FAILURES）为确定性失败计数非时间机制，判定保留。pi 挂死不 settle 的处置 = 父进程既有失败路径 + 用户重启应用。
+- Wave 2-C1 批次（独立包组，2026-10-05 落地）：
+  - zcode turn 双 timer（`zcode-subagent-cli`）：ZCODE_TURN_IDLE_TIMEOUT_MS=30min + ZCODE_TURN_MAX_TIMEOUT_MS=60min 任务级墙钟族（常量 / env 旋钮 / timer 装配 / TurnTimeoutError 分流 / 超时入口 abort 链 / engine_timeout 文案 / transient:timeout 重试形态 / 预算继承面）——全删（规则 19 红线：任务级正常路径禁止自带墙钟超时）；瞬时重试本体（conn-closed 形态）与 schema 重试保留但不再携带上界。控制面单请求秒级超时（request 15s / read 5s / close 1.5s / stop 3s）与回收层有界兜底（abort grace 3s / kill grace 5s / harvest grace 1s）判定保留。
+  - update 下载停滞检测（`apps/electron/main/update/download-asset.ts`）：IDLE_TIMEOUT_MS=30s 无字节进展 abort watchdog——删（追加裁决推翻初scan「唯一保留超时」标注）；断点续传 temp 机制保留；curl 引擎 --speed-time 不在裁决点名范围，保留。
+  - renderer 崩溃恢复提示条死链（`useCrashRecoveryNotice` + `CrashRecoveredBar`）：数据源 reloadWindowAfterCrash 随 recovery-policy 删除后无生产者、结构性永不可见——四文件整删 + 3 个死 i18n 键清理。
+  - scheduler 模型切换对账（`extensions/universal/scheduler/src/runtime.ts`）：MODEL_SWITCH_RECONCILE_TICKS 2-tick 窗口计数 + phase/ticksOpen 字段 + forceSettleExpiredInFlight——合并为 settlePendingIfIdle 单点（记录存在 + isIdle() 事实查询即恢复）。
+- journal 推送通道（event-push-channel W-P1..W-P4，2026-10-05 落地）：run/record 两域落盘提交点经 SUBAGENT_JOURNAL_MARKER select 通道推送 runtime，派生视图改「启动冷读一次 + 推送增量折叠 + seq 缺口本地补读 + 终局条目补读触发」；event-tail watch 族（DirectoryEventTailer / watch 挂载 / 30s 周期复查 / 5s 失败重挂 / 200ms 合并）整体退役，readEventTail 补读原语保留。设计权威源 `.tmp/tech-design/event-push-channel.md`。
 - 跳过待裁决项全录见 `.tmp/dev-flow/defense-scan/*-changes.md`（gitignore 产物目录，逐条带理由）：holdEdgeTick、PingProbe、外部网络墙钟族等（ABORT_STALL 收敛窗、trace-sync/background-task/btw-fork 轮询已在本批裁决——前者删、后三者登记退役条件保留）。
 
 ## 遗留清单（待实施）
 
 1. 投递域重构批次：已实施（2026-10-05 同批落地——sweepInFlight 退役、命令/技能 started 基终局、断连钩子 + 失败批量显式上报、delivery backoff/settle 兜底/watchdog/退避轮询退役；裁决与实施形态见 delivery-backoff-retry-retirement / command-pi-restart-response-loss / skill-input-marker-pollution 三登记）。
-2. 追加裁决 ① 组 2/3/4/5 中依赖跨分区配合的残留：zcode 双 timer、update 停滞检测、event-tail watch 族（推送通道设计已产出 .tmp/tech-design/event-push-channel.md，实施按其 W-P1..W-P4 分波）。（notify 看门狗重投、structured-output 强制退出已由 Wave 2-C2 批次实施。）
-3. scheduler 模型切换 tick 对账改 isIdle() 事实查询（scheduler 文件域，待实施）。
-4. renderer 死代码 useCrashRecoveryNotice 清理（recovery-policy 删除后的前端残余）。
-5. renderer 受理层同步上屏（ADR-0112 ⑨「UI 跟随事实」渲染面：气泡确认呈现——受理回执到达才上屏、无回执不产生等待态气泡）：runtime 侧终局事件链已就绪（session.deliveryHandled 终局通知 / message.error 显式失败 / session.exited 死亡信号，投递域批次 2026-10-05 落地），渲染面改造属 renderer 文件域，投递域批次（session-delivery + runtime/session）不含，归 renderer 批次实施。
+2. 追加裁决 ① 组 2/3/4/5 中依赖跨分区配合的残留：已全部实施——notify 看门狗重投、structured-output 兜底硬退（Wave 2-C2 批次）；zcode 双 timer、update 停滞检测（Wave 2-C1 批次）；event-tail watch 族（journal 推送通道替代，W-P1..W-P4）。
+3. scheduler 模型切换 tick 对账：已实施（Wave 2-C1——2-tick 窗口计数对账与 forceSettleExpiredInFlight 合并为 settlePendingIfIdle：记录存在 + isIdle() 同步事实查询即恢复，agent_settled 确定性事件保留为提前触发加速器；tick 心跳本体是产品功能定时，保留）。
+4. renderer 死代码 useCrashRecoveryNotice：已实施（Wave 2-C1——数据源 reloadWindowAfterCrash 随 recovery-policy 删除后结构性永不可见的完整死链，四文件整删 + 3 个死 i18n 键清理；app.crashDismiss 键被内存压力提示条复用，保留）。
+5. renderer 受理层同步上屏：已实施（2026-10-05——气泡上屏时机后移至 delivery.submit 受理回执 resolve 后；30s pending-send 空窗 timer 族整体退役（PENDING_SEND_TIMEOUT_MS / timer 表 / 命令豁免 / 'timeout' finalize reason），气泡终局全事件驱动；断连「执行结果未确认」终态在真实渲染树可见（content 空 error 气泡补 text 块宿主——既有渲染缺陷顺带修复）；core chat 域按前端/平台分区口径随本批实施）。
