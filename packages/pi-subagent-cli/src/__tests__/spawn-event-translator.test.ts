@@ -259,3 +259,56 @@ describe("[codemode u5 / D4] 嵌套工具调用事件过滤（表驱动）", () 
     expect(h.record.turns[0]?.toolCalls[0]?.toolName).toBe("codemode");
   });
 });
+
+// [subagent 投影丢失修复] tool_execution_end result 的 content 块形状透传（表驱动）。
+//
+// 丢失形态锚定：subagent 会话图片可见性依赖 tool_end.result.content 里的 image 块
+// 原样透传（下游 = journal 重放 + GUI 投影的提取源）。本层为逐字透传层——result
+// 不压缩不改写，任何形状（纯文本 / 纯 image / 混合交错）逐块保留；此处表驱动锁定
+// 三种形状，防未来「翻译层顺手归一」回归（归一 = image 块丢失）。
+describe("[subagent 投影丢失修复] tool_execution_end result content 形状透传（表驱动）", () => {
+  const IMG = { type: "image", data: "aGVsbG8taW1hZ2U=", mimeType: "image/png" };
+
+  const ROWS: Array<{ name: string; content: unknown[]; details?: unknown }> = [
+    {
+      name: "纯文本 content",
+      content: [{ type: "text", text: "Script completed" }],
+    },
+    {
+      name: "纯 image content",
+      content: [IMG],
+    },
+    {
+      name: "混合 content（text + image 交错，codemode 真机形状）",
+      content: [{ type: "text", text: "Script completed" }, IMG, { type: "text", text: "done: 1x1 PNG" }],
+      details: { calls: [{ id: "n1", name: "read", status: "done" }] },
+    },
+  ];
+
+  for (const row of ROWS) {
+    it(`result.content ${row.name} → tool_end 逐块透传 + record 保留`, () => {
+      const h = makeHarness();
+      h.feed(
+        JSON.stringify({
+          type: "tool_execution_end",
+          toolCallId: "call_img_1",
+          toolName: "codemode",
+          args: { code: "img()" },
+          result: { content: row.content, ...(row.details !== undefined ? { details: row.details } : {}) },
+          isError: false,
+        }),
+      );
+
+      const toolEnd = h.events.find((e) => e.type === "tool_end") as
+        | { result?: { content?: unknown[]; details?: unknown } }
+        | undefined;
+      expect(toolEnd?.result?.content).toEqual(row.content);
+      if (row.details !== undefined) {
+        expect(toolEnd?.result?.details).toEqual(row.details);
+      }
+      // record（journal 重放面）同样保留 image 块——GUI reload 腿的提取源
+      const rec = h.record.turns[0]?.toolCalls[0];
+      expect(rec?.result?.content).toEqual(row.content);
+    });
+  }
+});

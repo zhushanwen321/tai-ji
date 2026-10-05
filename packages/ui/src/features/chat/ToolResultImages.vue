@@ -54,7 +54,13 @@ import {
   isSessionImageCacheFull,
   requestImageWrite,
 } from '@taiji/core/domain/chat'
-import type { ImageCacheWriteImage } from '@taiji/shared'
+import {
+  extractBtwPiSessionId,
+  extractMainSessionId,
+  isBtwVirtualId,
+  isSubagentVirtualId,
+  type ImageCacheWriteImage,
+} from '@taiji/shared'
 
 const props = defineProps<{
   /** 所属 session（落盘目录分区键；缺省时无法落盘 → fallback） */
@@ -63,6 +69,22 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+
+/**
+ * 落盘目录键归一：虚拟 session id（subagent:main:sub / btw:piSid）→ owner 的 pi session id。
+ *
+ * main 侧 getImageCacheDir 的路径穿越守卫只放行 `^[A-Za-z0-9_-]+$`（shared paths.ts），
+ * 虚拟 id 含冒号恒被拒 → IPC reject → 组件恒 fallback（subagent 会话图片不可见的收口点，
+ * [subagent 投影丢失修复]）。图片缓存归 owner 会话目录（随主会话清理/孤儿扫描生命周期），
+ * 记账键（帽满标记 / 路径记账）同步用归一后的 sid——与 disposeImageCacheForSession 的
+ * owner 侧调用同键。
+ */
+function normalizeCacheSessionId(sid: string | null | undefined): string | undefined {
+  if (!sid) return undefined
+  if (isSubagentVirtualId(sid)) return extractMainSessionId(sid)
+  if (isBtwVirtualId(sid)) return extractBtwPiSessionId(sid)
+  return sid
+}
 
 /** 单图渲染态（pending 时不出元素——IPC 往返窗口极短，避免闪烁占位）。 */
 type ImageItemState = 'pending' | 'ready' | 'placeholder' | 'fallback'
@@ -107,7 +129,8 @@ async function resolveItem(sid: string, image: ImageCacheWriteImage, item: Image
 }
 
 function syncItems(): void {
-  const sid = props.sessionId
+  // 归一在入口单点：后续三个 core 调用（帽满判定 / 单图写）全用归一后的目录键
+  const sid = normalizeCacheSessionId(props.sessionId)
   items.value = props.images.map(() => ({ state: 'pending' as const, path: undefined }))
   for (let i = 0; i < props.images.length; i++) {
     // 必须从 items.value 读**响应式代理**传给 resolveItem——初始化载体的原始对象引用

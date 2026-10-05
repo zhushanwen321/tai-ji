@@ -619,6 +619,7 @@ export type {
   PiGetMessagesData,
   PiHistoryContentPart,
   PiHistoryMessage,
+  PiHistoryImagePart,
   PiHistoryTextPart,
   PiHistoryThinkingPart,
   PiHistoryToolCallPart,

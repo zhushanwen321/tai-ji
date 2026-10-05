@@ -41,12 +41,22 @@ export interface PiHistoryMessage {
 /** Content parts within a pi history message. */
 export type PiHistoryContentPart =
   | PiHistoryTextPart
+  | PiHistoryImagePart
   | PiHistoryThinkingPart
   | PiHistoryToolCallPart
 
 export interface PiHistoryTextPart { // oe-exempt:20261004:framework:存量 pi 会话数据模型接口随 max-lines 拆分迁移自 pi-protocol.ts，非新增单实现设计
   type: 'text'
   text: string
+}
+
+/** pi 1.0.0 AgentMessage content 的 image 块（ToolResultMessage.content 恒为
+ *  (Text|Image)[]，pi dist messages.ts:398 实锚）——[subagent 投影丢失修复] 联合补成员，
+ *  此前漏声明致历史链 image 块在类型面不可表达（运行时 normalizePiToolResult 早已消费）。 */
+export interface PiHistoryImagePart {
+  type: 'image'
+  data: string
+  mimeType: string
 }
 
 export interface PiHistoryThinkingPart { // oe-exempt:20261004:framework:存量 pi 会话数据模型接口随 max-lines 拆分迁移自 pi-protocol.ts，非新增单实现设计
