@@ -156,8 +156,9 @@ function mockOrchestrator(overrides: Partial<MockOrchestrator> = {}): MockOrches
   }
 }
 
-/** 捕获 setTimeout（update:perform triggerRestart 后用 setTimeout 调 app.quit） */
-let capturedQuitTimer: { delay: number } | null = null
+// [ADR-0112] 原「setTimeout 500ms 延迟 quit」改为 setImmediate（不猜响应送达窗）；
+// quit 调度断言改为捕获 setImmediate 回调。
+let capturedQuitCallback: (() => void) | null = null
 
 // 预下载门控 isAutoUpdateSupportedForCurrentInstall（真实现非 mock）在 linux 无
 // APPIMAGE 时返回 false → update:check 不触发预下载 → downloadUpdate 0 次调用。
@@ -172,14 +173,12 @@ beforeEach(() => {
   vi.clearAllMocks()
   sendSpy.mockClear()
   mockMainWindow.isDestroyed.mockReturnValue(false)
-  capturedQuitTimer = null
-  // 拦截 setTimeout 仅捕获 quit 定时器（delay），其余放行避免影响 vi 内部定时器
-  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((cb: () => void, delay?: number) => {
-    // update:perform 成功路径用 setTimeout(cb, 500) 安排 quit；捕获此定时器
-    capturedQuitTimer = { delay: delay ?? 0 }
-    // 不实际执行 cb（避免触发 app.quit mock 的副作用），返回占位 handle
-    return 0 as unknown as NodeJS.Timeout
-  }) as typeof setTimeout)
+  capturedQuitCallback = null
+  // 拦截 setImmediate 仅捕获 quit 回调（不执行，避免 app.quit mock 副作用）
+  vi.spyOn(globalThis, 'setImmediate').mockImplementation(((cb: () => void) => {
+    capturedQuitCallback = cb
+    return 0 as unknown as NodeJS.Immediate
+  }) as typeof setImmediate)
 })
 
 afterEach(() => {
@@ -664,9 +663,8 @@ describe('T4 update-handlers: update:download / update:install / update:getPrelo
     expect(orch.installUpdate).toHaveBeenCalledWith(FIXTURE, '/tmp/pre.zip', expect.any(Function))
     // readPreloadedUpdateRaw 收到 app.getVersion() = '0.8.14'（版本守卫传参，WTC12 集成验证）
     expect(preloadedMocks.readPreloadedUpdateRaw).toHaveBeenCalledWith('0.8.14')
-    // triggerRestart=true → 安排延迟 quit
-    expect(capturedQuitTimer).not.toBeNull()
-    expect(capturedQuitTimer!.delay).toBe(500)
+    // triggerRestart=true → 安排 quit（setImmediate）
+    expect(capturedQuitCallback).not.toBeNull()
   })
 
   // ── update:install 无预下载产物 → 抛错 ──────────────────────

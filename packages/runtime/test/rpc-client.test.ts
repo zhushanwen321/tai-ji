@@ -1,5 +1,5 @@
 /**
- * RpcClient W1 单元测试（U1-U5）+ W3 超时语义（U8/U8b/D3a，自 rpc-client-timeout.test.ts 并入）。
+ * RpcClient W1 单元测试（U1-U5）+ stdin stream error 收口（RT-2#1）。
  *
  * 覆盖 plan.json：
  * - U1: sendCommand 归一 payload→data
@@ -7,15 +7,16 @@
  * - U3: switchSession 写入 switch_session + sessionPath
  * - U4: sendExtensionUiResponse 走 sendRaw，pending 不增长
  * - U5: sendExtensionUiResponse 三种 payload 格式（cancelled/confirmed/value）
- * - U8/U8b: 超时后迟到响应不广播（S6 幽灵事件修复）+ timedOutIds 5s TTL
- * - D3a: RpcTimeoutError 类型判别（instanceof / success:false 不误判）
+ *
+ * 退役登记（ADR-0112 防御机制清查）：W3 超时语义（U8/U8b 迟到响应丢弃 / D3a
+ * RpcTimeoutError 判别）随 RPC 墙钟超时机制整体删除。
  *
  * 测试策略：mock node:child_process 的 spawn，捕获 stdin 写入，并提供一个
  * emitLine 入口把伪造的 pi stdout JSONL 行投递给 RpcClient 的 line handler，
  * 从而驱动 pending resolve。这样不依赖真实 pi 进程。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { RpcTimeoutError, type RpcClient } from '../src/infra/pi/rpc-client.js'
+import type { RpcClient } from '../src/infra/pi/rpc-client.js'
 import {
   clearExitHandlers,
   emitPiLine,
@@ -25,7 +26,6 @@ import {
   lastWrittenJson,
   resetRpcClientMock,
 } from './helpers/rpc-client-mock'
-const clientOpts = { startupDelayMs: 0 } as const // 测试注入：启动确认窗口归零（窗口语义不变，见 RpcClientOptions.startupDelayMs）
 
 // ── Mocks（工厂单源在 helpers/rpc-client-mock.ts，vi.mock 声明留本文件——路径按本文件解析）──
 
@@ -68,7 +68,7 @@ describe('RpcClient W1', () => {
     resetRpcClientMock()
 
     const { RpcClient } = await import('../src/infra/pi/rpc-client.js')
-    client = new RpcClient({ ...clientOpts, cwd: '/project' })
+    client = new RpcClient({ cwd: '/project' })
     await client.start()
   })
 
@@ -282,7 +282,7 @@ describe('RpcClient stdin stream error 收口（RT-2#1）', () => {
     resetRpcClientMock()
 
     const { RpcClient } = await import('../src/infra/pi/rpc-client.js')
-    client = new RpcClient({ ...clientOpts, cwd: '/project' })
+    client = new RpcClient({ cwd: '/project' })
     await client.start()
   })
 
@@ -314,127 +314,3 @@ describe('RpcClient stdin stream error 收口（RT-2#1）', () => {
 })
 
 // ── W3 S6：超时后迟到响应被丢弃，不当 event 广播（自 rpc-client-timeout.test.ts 并入）──
-
-describe('RpcClient W3 S6 (timedOutIds)', () => {
-  let client: RpcClient
-
-  beforeEach(async () => {
-    resetRpcClientMock()
-
-    const { RpcClient: Client } = await import('../src/infra/pi/rpc-client.js')
-    client = new Client({ ...clientOpts, cwd: '/project' })
-    await client.start()
-  })
-
-  afterEach(async () => {
-    // 恢复真实 timer，避免影响后续测试
-    vi.useRealTimers()
-    // kill 走 SIGTERM + 等待 exit；helper fakeProc 的 kill 即死语义微任务驱动 exit 清 pending
-    try { await client.kill() } catch { /* noop */ }
-    clearExitHandlers()
-  })
-
-  // ── U8: 超时后迟到响应被丢弃，不当 event 广播 ─────────────────────
-  it('U8: late reply with same id after timeout is discarded (not broadcast as event)', async () => {
-    // 注册一个 event listener，捕获所有 event 广播
-    const events: Array<Record<string, unknown>> = []
-    client.onEvent((msg: { id?: string; type: string }) => {
-      events.push({ id: msg.id, type: msg.type })
-    })
-
-    vi.useFakeTimers()
-    // 发起命令，短超时 100ms
-    const commandPromise = client.sendCommand('get_state', {}, 100)
-    await Promise.resolve()
-    const sent = lastWrittenJson()
-    const cmdId = sent.id as string
-
-    // 推进时间超过超时 → sendCommand 应 reject
-    vi.advanceTimersByTime(200)
-    await expect(commandPromise).rejects.toThrow(/timed out/)
-
-    // 此时 pending 已清空，id 不再匹配 pending（U1 pi-rpc 收敛后经 registry 部件 hasPending 只读面）
-    expect((client as unknown as { pendingRegistry: { hasPending(id: string): boolean } }).pendingRegistry.hasPending(cmdId)).toBe(false)
-
-    // 模拟 pi 发回带同一 id 的迟到响应
-    emitPiLine({ type: 'response', id: cmdId, success: true, data: { late: true } })
-
-    // 修复后：迟到响应被 timedOutIds 命中丢弃，listener 不应收到
-    expect(events).toEqual([])
-  })
-
-  // ── U8b: timedOutIds 在 5s TTL 后自动清理（避免 Set 无限增长） ──────
-  it('U8b: timedOutIds entry expires after 5s TTL', async () => {
-    vi.useFakeTimers()
-    const commandPromise = client.sendCommand('get_state', {}, 100)
-    await Promise.resolve()
-    const sent = lastWrittenJson()
-    const cmdId = sent.id as string
-
-    // 触发超时
-    vi.advanceTimersByTime(200)
-    await expect(commandPromise).rejects.toThrow(/timed out/)
-
-    // 超时后 id 在 timedOutIds 中（U1 pi-rpc 收敛后经 registry 部件 isTimedOut 只读面）
-    const registry = (client as unknown as { pendingRegistry: { isTimedOut(id: string | undefined): boolean } }).pendingRegistry
-    expect(registry.isTimedOut(cmdId)).toBe(true)
-
-    // 5s TTL 后自动清理
-    vi.advanceTimersByTime(5_000)
-    expect(registry.isTimedOut(cmdId)).toBe(false)
-  })
-})
-
-describe('RpcTimeoutError 类型（D3a pi 半死自愈：超时判别收口为类型）', () => {
-  it('字段与 message：name/commandType/timeoutMs', () => {
-    const err = new RpcTimeoutError('abort', 60_000)
-    expect(err).toBeInstanceOf(RpcTimeoutError)
-    expect(err).toBeInstanceOf(Error)
-    expect(err.name).toBe('RpcTimeoutError')
-    expect(err.commandType).toBe('abort')
-    expect(err.timeoutMs).toBe(60_000)
-    // message 保持旧文案格式（依赖 /timed out/ 正则的既有测试不破）
-    expect(err.message).toBe('RPC command "abort" timed out after 60000ms')
-  })
-
-  it('sendCommand 超时 reject 的是 RpcTimeoutError 实例（instanceof 可判别）', async () => {
-    const client = new (await import('../src/infra/pi/rpc-client.js')).RpcClient({ cwd: '/project' })
-    await client.start()
-
-    vi.useFakeTimers()
-    const commandPromise = client.sendCommand('abort', {}, 100)
-    await Promise.resolve()
-    vi.advanceTimersByTime(200)
-
-    // 捕获 reject 值做 instanceof + 字段断言（rejects.toThrow 只验 message，判别不了类型）
-    const thrown = await commandPromise.then(
-      () => { throw new Error('expected rejection') },
-      (e: unknown) => e,
-    )
-    expect(thrown).toBeInstanceOf(RpcTimeoutError)
-    expect((thrown as RpcTimeoutError).commandType).toBe('abort')
-    expect((thrown as RpcTimeoutError).timeoutMs).toBe(100)
-
-    vi.useRealTimers()
-    await killAndDriveExit(client)
-  })
-
-  it('普通 RPC 失败（success:false）reject 普通 Error，不误判为超时', async () => {
-    const client = new (await import('../src/infra/pi/rpc-client.js')).RpcClient({ cwd: '/project' })
-    await client.start()
-
-    const commandPromise = client.sendCommand('abort')
-    await Promise.resolve()
-    // pi 回 success:false
-    emitPiLine({ type: 'response', id: lastWrittenJson().id, success: false, error: 'boom' })
-
-    const thrown = await commandPromise.then(
-      () => { throw new Error('expected rejection') },
-      (e: unknown) => e,
-    )
-    expect(thrown).not.toBeInstanceOf(RpcTimeoutError)
-    expect((thrown as Error).message).toContain('boom')
-
-    await killAndDriveExit(client)
-  })
-})

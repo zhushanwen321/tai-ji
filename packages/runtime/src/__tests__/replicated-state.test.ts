@@ -4,13 +4,11 @@
  * 验收对照（.taiji-harness/2026-08-19-data-source-governance-p1p4/acceptance/w6-acceptance.md）：
  * - 用例 1 失效不直接写值：markDirty 后防抖窗口内 get() 返回旧值
  *   → describe「失效与防抖」it 1（含设计约束断言：事件到达后立即读值为旧快照）
- * - 用例 2 快照失败退避重试且 dirty 不清除 → describe「失败退避」it 1
  * - 用例 3 空值覆盖语义（sessionName undefined 覆盖旧名，D1b 反例回归）
  *   → describe「D1b 合并规则」it 1（含设计约束断言：快照含显式空值覆盖非空旧值）
  * - 用例 4 wire 归一（key 缺失按登记语义处理）→ describe「D1b 合并规则」it 2 / it 3
  * - 用例 5 pollIntervalMs 周期兜底（配置启动、未配置不启动定时器）
  *   → describe「周期兜底」it 1 / it 2
- * - 用例 6 退避序列 1s/5s/15s 逐级 → describe「失败退避」it 2
  * - 用例 7 refetch 全量重拉语义 → describe「refetch / dispose」it 1
  * - 补充：在途失效不丢（epoch 守卫）、防抖聚合、dispose 生命周期
  *
@@ -36,8 +34,6 @@ type FetchMock = ReturnType<typeof vi.fn<() => Promise<SessionState>>>
 
 /** 防抖窗口（ms）。取小值缩短用例时间轴，语义与生产配置一致。 */
 const DEBOUNCE_MS = 100
-/** canonical 退避序列（W6 接口契约锁定值）。 */
-const BACKOFF_SCHEDULE: readonly number[] = [1000, 5000, 15000]
 
 /**
  * 模拟 JSON wire 序列化：值为 undefined 的 key 被丢弃。
@@ -55,7 +51,6 @@ function createState(
   const rs = new ReplicatedState<SessionState>({
     fetchSnapshot: fetch,
     debounceMs: DEBOUNCE_MS,
-    backoffSchedule: BACKOFF_SCHEDULE,
     pollIntervalMs: options.pollIntervalMs,
     diagnosticLabel: options.diagnosticLabel,
     merge: ownerSnapshotMerge,
@@ -123,149 +118,6 @@ describe('ReplicatedState', () => {
     })
   })
 
-  describe('失败退避', () => {
-    it('快照失败：保留上次快照与 dirty，退避重试，恢复成功后清除 dirty', async () => {
-      const { rs, fetch } = createState()
-      await seedSnapshot(rs, fetch, { sessionName: 'A' })
-      fetch.mockRejectedValue(new Error('rpc down'))
-
-      rs.markDirty()
-      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS) // 防抖到点，首次尝试失败
-      expect(fetch).toHaveBeenCalledTimes(2)
-      expect(rs.isDirty()).toBe(true) // 失败不清除 dirty
-      expect(rs.get()).toEqual({ sessionName: 'A' }) // UI 显示上次快照
-
-      await vi.advanceTimersByTimeAsync(1000)
-      expect(fetch).toHaveBeenCalledTimes(3) // 退避第 1 级重试（仍失败）
-
-      await vi.advanceTimersByTimeAsync(5000 + 15000 + 60_000)
-      expect(fetch).toHaveBeenCalledTimes(5) // 第 2 / 3 级重试后序列耗尽
-      expect(rs.isDirty()).toBe(true) // 耗尽后 dirty 依旧保留（数据仍可能过期）
-      expect(rs.get()).toEqual({ sessionName: 'A' })
-
-      fetch.mockResolvedValue({ sessionName: 'B' })
-      rs.markDirty() // 下一次失效重新启动拉取
-      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
-      expect(fetch).toHaveBeenCalledTimes(6)
-      expect(rs.get()).toEqual({ sessionName: 'B' })
-      expect(rs.isDirty()).toBe(false) // 成功应用才清除 dirty
-      await vi.advanceTimersByTimeAsync(60_000)
-      expect(fetch).toHaveBeenCalledTimes(6) // 成功后撤销挂起的冗余重试
-    })
-
-    it('退避序列 1s/5s/15s 逐级，序列耗尽后停止重试', async () => {
-      const { rs, fetch } = createState()
-      await seedSnapshot(rs, fetch, { sessionName: 'A' })
-      fetch.mockRejectedValue(new Error('down'))
-
-      rs.markDirty()
-      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
-      expect(fetch).toHaveBeenCalledTimes(2) // t=100 首次尝试（失败）
-
-      await vi.advanceTimersByTimeAsync(999)
-      expect(fetch).toHaveBeenCalledTimes(2) // 1s 边界差 1ms 不重试
-      await vi.advanceTimersByTimeAsync(1)
-      expect(fetch).toHaveBeenCalledTimes(3) // +1000 第 1 级
-
-      await vi.advanceTimersByTimeAsync(4999)
-      expect(fetch).toHaveBeenCalledTimes(3)
-      await vi.advanceTimersByTimeAsync(1)
-      expect(fetch).toHaveBeenCalledTimes(4) // +5000 第 2 级
-
-      await vi.advanceTimersByTimeAsync(14_999)
-      expect(fetch).toHaveBeenCalledTimes(4)
-      await vi.advanceTimersByTimeAsync(1)
-      expect(fetch).toHaveBeenCalledTimes(5) // +15000 第 3 级（序列耗尽）
-
-      await vi.advanceTimersByTimeAsync(120_000)
-      expect(fetch).toHaveBeenCalledTimes(5) // 耗尽后不再自动重试
-      expect(rs.isDirty()).toBe(true)
-      expect(rs.get()).toEqual({ sessionName: 'A' }) // 旧值始终保留
-    })
-  })
-
-  describe('失败可见性（code-harden RT-4#3）', () => {
-    it('连续失败：每次失败 warn（标签 + 尝试序号 + 分型），预算耗尽落一条终末 warn', async () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-      try {
-        const { rs, fetch } = createState({ diagnosticLabel: 'usage(s1)' })
-        await seedSnapshot(rs, fetch, { sessionName: 'A' })
-        fetch.mockRejectedValue(new Error('rpc down'))
-
-        rs.markDirty()
-        await vi.advanceTimersByTimeAsync(DEBOUNCE_MS) // 首次尝试失败
-        await vi.advanceTimersByTimeAsync(1000 + 5000 + 15_000) // 三级退避全部失败（耗尽）
-
-        // 每次失败一条 warn：含实例标签、尝试序号、RPC 分型
-        const failureWarns = warn.mock.calls.map((c) => String(c[0])).filter((s) => s.includes('snapshot fetch failed'))
-        expect(failureWarns).toHaveLength(4) // 首次 + 3 次退避
-        expect(failureWarns[0]).toContain('usage(s1)')
-        expect(failureWarns[0]).toContain('attempt=1/4')
-        expect(failureWarns[0]).toContain('kind=rpc')
-        expect(failureWarns[3]).toContain('attempt=4/4')
-
-        // 预算耗尽：终末 warn 恰一条（重复耗尽不重复记）
-        let exhausted = warn.mock.calls.map((c) => String(c[0])).filter((s) => s.includes('backoff budget exhausted'))
-        expect(exhausted).toHaveLength(1)
-        expect(exhausted[0]).toContain('usage(s1)')
-        expect(exhausted[0]).toContain('after 4 attempts')
-        expect(exhausted[0]).toContain('dirty=true')
-
-        // 耗尽后再次失效仍失败：不再重复终末 warn
-        rs.markDirty()
-        await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 60_000)
-        exhausted = warn.mock.calls.map((c) => String(c[0])).filter((s) => s.includes('backoff budget exhausted'))
-        expect(exhausted).toHaveLength(1)
-      } finally {
-        warn.mockRestore()
-      }
-    })
-
-    it('wire 归一异常分型 kind=wire-schema；成功恢复后终末 warn 标志复位（新一轮耗尽再显形）', async () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-      try {
-        const { rs, fetch } = createState({
-          diagnosticLabel: 'thinkingLevel(s2)',
-          fieldsNullSemantics: { thinkingLevel: 'required' },
-        })
-        await seedSnapshot(rs, fetch, { thinkingLevel: 'high' })
-
-        // wire 协议异常（required 字段 key 缺失）：warn 分型 kind=wire-schema
-        fetch.mockResolvedValue({}) // thinkingLevel key 缺失
-        rs.markDirty()
-        await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
-        const wireWarn = warn.mock.calls.map((c) => String(c[0])).find((s) => s.includes('kind=wire-schema'))
-        expect(wireWarn).toBeDefined()
-        expect(wireWarn).toContain('thinkingLevel(s2)')
-
-        // 恢复成功（dirty 清除）→ 重走全序列再次耗尽 → 终末 warn 再落一条（新一轮）
-        fetch.mockRejectedValue(new Error('rpc down again'))
-        rs.markDirty()
-        await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 1000 + 5000 + 15_000 + 60_000)
-        const exhausted = warn.mock.calls.map((c) => String(c[0])).filter((s) => s.includes('backoff budget exhausted'))
-        expect(exhausted).toHaveLength(1)
-        expect(exhausted[0]).toContain('thinkingLevel(s2)')
-      } finally {
-        warn.mockRestore()
-      }
-    })
-
-    it('无 diagnosticLabel：warn 仍产生（缺省标签），不因配置缺失回到零日志', async () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-      try {
-        const { rs, fetch } = createState()
-        await seedSnapshot(rs, fetch, { sessionName: 'A' })
-        fetch.mockRejectedValue(new Error('down'))
-
-        rs.markDirty()
-        await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
-        expect(warn.mock.calls.map((c) => String(c[0])).some((s) => s.includes('unnamed-replicated-state'))).toBe(true)
-      } finally {
-        warn.mockRestore()
-      }
-    })
-  })
-
   describe('D1b 合并规则（空值语义）', () => {
     it('空值覆盖：wire 快照 sessionName undefined（key 缺失）覆盖非空旧名（D1b 反例回归）', async () => {
       const { rs, fetch } = createState({ fieldsNullSemantics: { sessionName: 'explicit-null' } })
@@ -280,27 +132,6 @@ describe('ReplicatedState', () => {
       // key 缺失会被当「字段不动」，旧名永久残留 = 影子状态复活
       expect(rs.get()?.sessionName).toBeUndefined()
       expect(rs.get()).toEqual({ thinkingLevel: 'high' })
-      expect(rs.isDirty()).toBe(false)
-    })
-
-    it('wire 归一：required 字段（无空值语义）key 缺失 = 协议异常，按快照失败处理', async () => {
-      const { rs, fetch } = createState({ fieldsNullSemantics: { thinkingLevel: 'required' } })
-      await seedSnapshot(rs, fetch, { thinkingLevel: 'high', modelId: 'm-1' })
-
-      fetch.mockResolvedValue({ modelId: 'm-2' }) // thinkingLevel key 缺失（wire 形态）
-      rs.markDirty()
-      await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
-      expect(fetch).toHaveBeenCalledTimes(2) // 拉取发生了
-      expect(rs.get()).toEqual({ thinkingLevel: 'high', modelId: 'm-1' }) // 但未应用：保留旧值
-      expect(rs.isDirty()).toBe(true) // 失败路径：dirty 不清除
-
-      await vi.advanceTimersByTimeAsync(1000) // 退避重试仍拿到不合法快照
-      expect(fetch).toHaveBeenCalledTimes(3)
-      expect(rs.get()).toEqual({ thinkingLevel: 'high', modelId: 'm-1' })
-
-      fetch.mockResolvedValue({ thinkingLevel: 'low', modelId: 'm-2' }) // key 恢复在场
-      await vi.advanceTimersByTimeAsync(5000)
-      expect(rs.get()).toEqual({ thinkingLevel: 'low', modelId: 'm-2' }) // 正常应用
       expect(rs.isDirty()).toBe(false)
     })
 

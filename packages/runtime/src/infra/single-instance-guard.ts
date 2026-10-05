@@ -58,7 +58,7 @@ export interface InstanceGuardProbeResult {
 
 /** 依赖注入（测试替换探活/时钟；生产用默认实现）。 */
 export interface InstanceGuardDeps {
-  isPortReachable?: (port: number, timeoutMs: number) => Promise<boolean>
+  isPortReachable?: (port: number) => Promise<boolean>
   isPidAlive?: (pid: number) => boolean
 }
 
@@ -97,7 +97,7 @@ export async function probeSingleInstance(
     console.debug('[runtime] single-instance guard: read runtime.port failed (treated as absent):', error)
   }
   for (const [port, meta] of candidates) {
-    if (await isReachable(port, INSTANCE_PROBE_TIMEOUT_MS)) {
+    if (await isReachable(port)) {
       return { blocked: true, holder: { port, pid: meta.pid, source: meta.source, reachable: true } }
     }
     // 预登记窗口判定：instance.json 候选端口未 listen 但持有 pid 存活 = 实例在启动中
@@ -109,9 +109,6 @@ export async function probeSingleInstance(
   }
   return { blocked: false }
 }
-
-/** 探活超时：localhost TCP connect 的宽松上界（真实连接 <10ms，给降载机器留余量）。 */
-const INSTANCE_PROBE_TIMEOUT_MS = 500
 
 /** pid 存活判定：kill(pid, 0) 空信号探测（EPERM = 存在但无权限，也算活）。 */
 function defaultIsPidAlive(pid: number): boolean {
@@ -146,15 +143,18 @@ export function registerRuntimeInstance(dataDir: string, port: number): void {
   }
 }
 
-/** 默认探活：127.0.0.1 TCP connect，连接建立即可达（不发送数据——对 runtime WS 端口无副作用）。 */
-async function defaultIsPortReachable(port: number, timeoutMs: number): Promise<boolean> {
+/**
+ * 默认探活：127.0.0.1 TCP connect，连接建立即可达（不发送数据——对 runtime WS 端口
+ * 无副作用）。探活墙钟（INSTANCE_PROBE_TIMEOUT_MS 500ms）已随 ADR-0112 退役——
+ * connect 挂住时本 promise 悬挂（error 事件覆盖连接失败形态）。
+ */
+async function defaultIsPortReachable(port: number): Promise<boolean> {
   return await new Promise((resolve) => {
     const socket = net.connect({ port, host: '127.0.0.1' })
     const finish = (reachable: boolean): void => {
       socket.destroy()
       resolve(reachable)
     }
-    socket.setTimeout(timeoutMs, () => finish(false))
     socket.once('connect', () => finish(true))
     socket.once('error', () => finish(false))
   })

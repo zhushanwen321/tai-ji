@@ -28,7 +28,6 @@ import {
   resumeRun,
 } from "../resume-run.ts";
 import { abortRun } from "../lifecycle.ts";
-import { forgetRunResumedBudget, rebuildRuntime } from "../worker-message-pump.ts";
 import {
   interruptRun,
   isRunSettled,
@@ -228,12 +227,12 @@ describe("resumeRun — 复活主链（方案 A 同 runId 复活）", () => {
   });
 });
 
-// ── 预算单源（run-created 载荷继承/覆盖 + 重试重建重排）──────────
+// ── 预算单源（run-created 载荷继承/覆盖）──────────
 //
-// 修复 已归档设计档案 §1.1：resume 重建 spec 曾结构性不含
-// budgetTimeMs——复活 run 命中一次 worker/script 错误重试后 rebuildRuntime 不重排
-// 计时器（预算静默失效，直到下次 resume）。修复后 run-created 帧是预算单源：
-// resume 显式 options 覆盖 / 未提供则继承该帧，生效值写入 spec。
+// 修复 已归档设计档案 §1.1：resume 重建 spec 曾结构性不含 budgetTimeMs。
+// 修复后 run-created 帧是预算单源：resume 显式 options 覆盖 / 未提供则继承该帧，
+// 生效值写入 spec。[ADR-0112] 原用例中「错误重试 → rebuildRuntime 重排」附加断言
+// 随重试矩阵删除（rebuildRuntime 已删）。
 
 describe("resume 预算单源（run-created 载荷继承/覆盖）", () => {
   /** 活跃跨度可控的崩溃 record 流（active = 段内末执行事件 ts − run-created ts）。 */
@@ -284,16 +283,7 @@ describe("resume 预算单源（run-created 载荷继承/覆盖）", () => {
     });
   }
 
-  /** 触发重试重建（唯一计时器重排点，不 await 退避——直调 rebuildRuntime）。 */
-  function rebuild(run: WorkflowRun, deps: LifecycleDeps): void {
-    rebuildRuntime(run, deps, {
-      onMessage: vi.fn(async () => {}),
-      onError: vi.fn(async () => {}),
-      onExit: vi.fn(async () => {}),
-    });
-  }
-
-  it("未传 time → 继承 run-created 预算；重试重建按剩余活跃预算重排（非满额/非 undefined）", async () => {
+  it("未传 time → 继承 run-created 预算（首次挂表按剩余活跃折算，非满额/非 undefined）", async () => {
     const budget = 60 * MIN;
     const active = 40 * MIN;
     await seedWithBudget("wf-budget-inherit", { budgetTimeMs: budget, activeElapsedMs: active });
@@ -310,18 +300,9 @@ describe("resume 预算单源（run-created 载荷继承/覆盖）", () => {
     expect(budgetSchedules[0]!.ms).toBeGreaterThan(budget - active - 60_000);
     expect(budgetSchedules[0]!.ms).toBeLessThanOrEqual(budget - active);
 
-    // 错误重试 → rebuildRuntime：账本可达 → 重排剩余（≈20min），非满额 60min
-    budgetSchedules.length = 0;
-    rebuild(run, deps);
-    expect(isRunSettled(run)).toBe(false);
-    expect(budgetSchedules).toHaveLength(1);
-    const rescheduled = budgetSchedules[0]!.ms;
-    expect(rescheduled).toBeGreaterThan(budget - active - 60_000);
-    expect(rescheduled).toBeLessThanOrEqual(budget - active);
-    expect(rescheduled).toBeLessThan(budget);
   });
 
-  it("显式传 time → 覆盖 run-created 预算（生效值全链一致，重排按覆盖值）", async () => {
+  it("显式传 time → 覆盖 run-created 预算（生效值全链一致）", async () => {
     const createdBudget = 60 * MIN;
     const override = 120 * MIN;
     const active = 40 * MIN;
@@ -339,13 +320,6 @@ describe("resume 预算单源（run-created 载荷继承/覆盖）", () => {
     expect(budgetSchedules[0]!.ms).toBeGreaterThan(override - active - 60_000);
     expect(budgetSchedules[0]!.ms).toBeLessThanOrEqual(override - active);
 
-    budgetSchedules.length = 0;
-    rebuild(run, deps);
-    const rescheduled = budgetSchedules[0]!.ms;
-    expect(rescheduled).toBeGreaterThan(override - active - 60_000);
-    expect(rescheduled).toBeLessThanOrEqual(override - active);
-    // 判别构造：继承形态会得到 ≈20min，覆盖形态 ≈80min（> 原创建预算 60min）
-    expect(rescheduled).toBeGreaterThan(createdBudget);
   });
 
   it("旧格式帧（无预算字段）+ 未传 time → 不限时（现状行为不劣化：spec 无预算、两处均不重排）", async () => {
@@ -358,9 +332,6 @@ describe("resume 预算单源（run-created 载荷继承/覆盖）", () => {
     expect(run.spec.budgetTimeMs).toBeUndefined();
     expect(run.state.budget.maxTimeMs).toBeUndefined();
     expect(budgetSchedules).toHaveLength(0); // 首次挂表亦不排
-
-    rebuild(run, deps);
-    expect(budgetSchedules).toHaveLength(0); // 重试路径同样不排（与修复前一致）
   });
 
   it("旧格式帧（无预算字段）+ 显式传 time → 显式生效（既有恢复通道保留）", async () => {
@@ -386,7 +357,6 @@ describe("resume 预算单源（run-created 载荷继承/覆盖）", () => {
 
       const run = runs.get(runId)!;
       expect(run.spec.budgetTimeMs).toBeUndefined();
-      rebuild(run, deps);
       expect(budgetSchedules).toHaveLength(0);
     }
   });
@@ -425,7 +395,7 @@ describe("resume 预算单源（run-created 载荷继承/覆盖）", () => {
     expect("budgetTimeMs" in zeroResumed).toBe(false);
   });
 
-  it("跨崩溃存续：第一次显式 120min → 第二次无参 resume 生效 120min（非创建预算 60min），重试按剩余重排", async () => {
+  it("跨崩溃存续：第一次显式 120min → 第二次无参 resume 生效 120min（非创建预算 60min）", async () => {
     const runId = "wf-budget-durable";
     const createdBudget = 60 * MIN;
     const override = 120 * MIN;
@@ -447,14 +417,7 @@ describe("resume 预算单源（run-created 载荷继承/覆盖）", () => {
       expect(run.spec.budgetTimeMs).toBe(override);
       expect(run.state.budget.maxTimeMs).toBe(override);
 
-      // 重试重建按剩余（≈80min）重排——判别不是退回 created 60min 的 ≈20min
-      second.budgetSchedules.length = 0;
-      rebuild(run, second.deps);
-      const rescheduled = second.budgetSchedules[0]!.ms;
-      expect(rescheduled).toBeGreaterThan(createdBudget);
-      expect(rescheduled).toBeLessThanOrEqual(override - active);
     } finally {
-      forgetRunResumedBudget(runId);
       resetPhaseSettlementTrackerForTest();
     }
   });
@@ -600,7 +563,6 @@ describe("resume token 预算单源（budgetTokens 与时间轴同构）", () =>
       expect(run.spec.budgetTokens).toBe(50_000);
       expect(run.state.budget.maxTokens).toBe(50_000);
     } finally {
-      forgetRunResumedBudget(runId);
       resetPhaseSettlementTrackerForTest();
     }
   });
@@ -970,65 +932,6 @@ describe("resumeRun — 段 6 接管失败补偿（僵尸 run 防线）", () => 
       );
     } finally {
       errorSpy.mockRestore();
-    }
-  });
-
-  it("接管失败回滚清 D10 预算账目：残留会让后续按 runId 的预算折算读到已废弃的复活时刻", async () => {
-    await seedInterruptedRecord("wf-budget-rollback");
-    const { deps } = makeDeps();
-    vi.mocked(deps.workerHost.start).mockImplementation(() => {
-      throw new Error("engine spawn failed");
-    });
-
-    // noteRunResumedBudget 在段 6 首行写入（workerHost.start 之前）——接管失败后
-    // 该账目必须随回滚清除
-    await expect(resumeRun("wf-budget-rollback", deps, { now: () => T0 + 100_000 }))
-      .rejects.toThrow("engine spawn failed");
-
-    // 观察面 = 预算账本的执行期消费（remainingTimeBudgetMs → rebuildRuntime 重排）：
-    // 同 runId 新建 run（startedAt 10min 前、预算 60min）。账目已清 → 回落 startedAt
-    // 墙钟算法（重排 ≈ 50min）；修复前残留账目（resumedAt = 注入的 T0+100_000，远早
-    // 于真实 Date.now()）→ 折算剩余 0 → 不重排（scheduleTimeBudget 零调用）。
-    const run = new WorkflowRun(
-      "wf-budget-rollback",
-      {
-        scriptSource: "async function execute() {}",
-        args: {},
-        scriptName: "w",
-        scriptPath: "",
-        budgetTimeMs: 60 * 60_000,
-      },
-      {
-        budget: new Budget({ maxTimeMs: 60 * 60_000 }),
-        calls: new Map(),
-        trace: new Trace(),
-        errorLogs: [],
-      },
-      { startedAt: new Date(Date.now() - 10 * 60_000).toISOString() },
-    );
-    const worker = { postMessage: vi.fn(), terminate: vi.fn(async () => {}) } as unknown as WorkerHandle;
-    run.assignRuntime(new RunRuntime(worker, new AbortController()));
-    const scheduleTimeBudget = vi.fn();
-    const rebuildDeps = {
-      store: { save: vi.fn(async () => {}) },
-      workerHost: { start: vi.fn(() => worker) },
-      runner: { run: vi.fn(async () => ({ content: "" })) },
-      runs: new Map(),
-      scheduleTimeBudget,
-    } as unknown as LifecycleDeps;
-    try {
-      rebuildRuntime(run, rebuildDeps, {
-        onMessage: vi.fn(async () => {}),
-        onError: vi.fn(async () => {}),
-        onExit: vi.fn(async () => {}),
-      });
-      expect(scheduleTimeBudget).toHaveBeenCalledTimes(1);
-      const rescheduled = scheduleTimeBudget.mock.calls[0]![1] as number;
-      expect(rescheduled).toBeGreaterThanOrEqual(49 * 60_000); // 60 − 10（墙钟，容差 1min）
-      expect(rescheduled).toBeLessThanOrEqual(50 * 60_000);
-    } finally {
-      forgetRunResumedBudget("wf-budget-rollback");
-      resetPhaseSettlementTrackerForTest();
     }
   });
 });

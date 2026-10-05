@@ -31,7 +31,6 @@ import {
   __clearSessionCleanupRegistryForTest,
 } from '@/composables/useSessionScopedState'
 import { usePlanState, type UsePlanStateReturn } from '@/composables/use-plan-sync'
-import { PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS } from '@/stores/plan-store'
 import type { PlanDocMeta, PlanStateView } from '@taiji/shared'
 
 // ── mock 边界：getPlanState RPC mock 掉（runtime 侧 u1-rpc 未接线，受控 deferred 驱动）──
@@ -335,7 +334,7 @@ describe('活动补拉：首拉早于 entry 落盘 + 帧不可靠窗口的丢帧
     expect(commandMock).toHaveBeenCalledTimes(2)
   })
 
-  it('冷却门：冷却窗口内的后续活动信号不重复补拉（频率上限）', async () => {
+  it('[ADR-0112] 无冷却门：紧随的后续活动信号同样按门条件触发补拉（时间节流已删）', async () => {
     const host = mountHost('A')
     await settle()
     resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { isActive: false }) })
@@ -347,10 +346,10 @@ describe('活动补拉：首拉早于 entry 落盘 + 帧不可靠窗口的丢帧
     resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { isActive: false }) })
     await settle()
 
-    // 冷却窗口内第二条活动信号：不再补（PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS 未过）
+    // 紧随的第二条活动信号：仍按非活跃门直接补拉（无冷却节流）
     dispatchActivity('A')
     await settle()
-    expect(commandMock).toHaveBeenCalledTimes(2)
+    expect(commandMock).toHaveBeenCalledTimes(3)
   })
 
   it('非活跃门：view 已被 live 帧点亮时活动信号不触发补拉（活跃态由帧链自持）', async () => {
@@ -365,60 +364,48 @@ describe('活动补拉：首拉早于 entry 落盘 + 帧不可靠窗口的丢帧
     expect(commandMock).toHaveBeenCalledTimes(1) // 仅首拉，无补拉
   })
 
-  it('活跃冻结检测（F-W3-2）：view 活跃但帧链无进展时，冷却后的消息边沿触发补拉', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] })
-    try {
-      const host = mountHost('A')
-      await settle()
-      // live 帧点亮 view（②形态：planning + docs，frameRev=1）——真机 6c3：此后帧链再无帧到达
-      dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'planning' }))
-      await settle()
-      expect(host.plan.view.value?.state).toBe('planning')
+  it('活跃冻结检测（F-W3-2）：view 活跃但帧链无进展时，消息边沿触发补拉', async () => {
+    const host = mountHost('A')
+    await settle()
+    // live 帧点亮 view（②形态：planning + docs，frameRev=1）——真机 6c3：此后帧链再无帧到达
+    dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'planning' }))
+    await settle()
+    expect(host.plan.view.value?.state).toBe('planning')
 
-      // 首条消息边沿：只立帧基准，不补拉（健康链路常态 turn 不产生补拉）
-      dispatchActivity('A')
-      await settle()
-      expect(commandMock).toHaveBeenCalledTimes(1)
+    // 首条消息边沿：只立帧基准，不补拉（健康链路常态 turn 不产生补拉）
+    dispatchActivity('A')
+    await settle()
+    expect(commandMock).toHaveBeenCalledTimes(1)
 
-      // 冷却期过后第二/第三条边沿：frameRev 无增长 = planState 帧链疑死 → 补拉直读磁盘
-      vi.setSystemTime(Date.now() + PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS + 1)
-      dispatchActivity('A')
-      await settle()
-      expect(commandMock).toHaveBeenCalledTimes(2)
+    // 第二条边沿：frameRev 无增长 = planState 帧链疑死 → 补拉直读磁盘
+    dispatchActivity('A')
+    await settle()
+    expect(commandMock).toHaveBeenCalledTimes(2)
 
-      // 补拉 reply = 恢复后的磁盘真值（dispatching）→ 阶段指示收敛 ③已批准
-      resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { docs: [DOC], state: 'dispatching' }) })
-      await settle()
-      expect(host.plan.view.value?.state).toBe('dispatching')
-      expect(host.plan.stage.value).toBe('approved')
-    } finally {
-      vi.useRealTimers()
-    }
+    // 补拉 reply = 恢复后的磁盘真值（dispatching）→ 阶段指示收敛 ③已批准
+    resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { docs: [DOC], state: 'dispatching' }) })
+    await settle()
+    expect(host.plan.view.value?.state).toBe('dispatching')
+    expect(host.plan.stage.value).toBe('approved')
   })
 
   it('帧链恢复自动静默：frameRev 增长（planState 帧到达）后，消息边沿不再补拉', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] })
-    try {
-      const host = mountHost('A')
-      await settle()
-      dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'planning' }))
-      await settle()
-      dispatchActivity('A')
-      await settle()
-      expect(commandMock).toHaveBeenCalledTimes(1)
+    const host = mountHost('A')
+    await settle()
+    dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'planning' }))
+    await settle()
+    dispatchActivity('A')
+    await settle()
+    expect(commandMock).toHaveBeenCalledTimes(1)
 
-      // 帧链恢复：新 planState 帧到达（frameRev 增长）
-      dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'reviewing' }))
-      await settle()
+    // 帧链恢复：新 planState 帧到达（frameRev 增长）
+    dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'reviewing' }))
+    await settle()
 
-      // 冷却期后消息边沿：rev 有进展 → 不补拉（活跃态重新由帧链自持）
-      vi.setSystemTime(Date.now() + PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS + 1)
-      dispatchActivity('A')
-      await settle()
-      expect(commandMock).toHaveBeenCalledTimes(1)
-    } finally {
-      vi.useRealTimers()
-    }
+    // 后续消息边沿：rev 有进展 → 不补拉（活跃态重新由帧链自持）
+    dispatchActivity('A')
+    await settle()
+    expect(commandMock).toHaveBeenCalledTimes(1)
   })
 
   it('补拉走 updateFor(sid)：焦点 session 的活动信号补拉写自身分区（capturedSid 语义）', async () => {

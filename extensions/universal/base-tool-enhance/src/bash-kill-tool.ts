@@ -3,7 +3,7 @@
  *
  * 职责边界：只负责杀进程树 + kill 前把单例表与 registry **两侧**标 killing intent
  * （查询面立即可见——kill 返回后 bash_output 即显示 killing，无「已 kill 仍 running」
- * 倒挂窗口）。实际终态（exited, reason:"killed"）由轮询器 exit 边沿收尾写——
+ * 倒挂窗口）。实际终态（exited, reason:"killed"）由 exit 事件边沿收尾写——
  * bash_kill 不直接写终态（单一终态归属），也不 sendMessage（kill 调用方就在当前
  * turn 内等结果，再发 steer 通知是双发噪音——按 notify.ts 的单点归属规则，kill
  * 路径不 sendMessage，reason:"killed" 只 emit unregister，终态由 handleTaskExit 收尾）。
@@ -24,7 +24,6 @@ import { Type } from "typebox";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
-import { ensurePollerRunning } from "./background/poller.ts";
 import { getRegistryPath, readRegistry, taskToRegistryEntry, writeRegistryEntry } from "./background/registry.ts";
 import { getAllTasks, markKillingIntent } from "./background/task-store.ts";
 import { isActiveState, isTerminalState, type RegistryEntry } from "./background/types.ts";
@@ -100,10 +99,10 @@ export function createBashKillToolDefinition() {
 			}
 
 			// pid 复用防御（§3.6 宁不杀勿误杀）：
-			//  - pid 已死 → already exited 风格返回，不发 kill（终态由轮询边沿收尾）
+			//  - pid 已死 → already exited 风格返回，不发 kill（终态由 exit 边沿收尾）
 			//  - 有 pidStartTime 字段 → 校验实际进程 start time 匹配；不匹配/读不到 =
 			//    复用嫌疑，拒绝 kill 并说明
-			//  - 无字段（spawn 时 ps 不可用平台）→ 放行：本进程轮询器 ≤2s 前判过活，
+			//  - 无字段（spawn 时 ps 不可用平台）→ 放行：登记原进程在 spawn 时刻存活，
 			//    复用窗口毫秒级；registry 终态条目不会走到这里（上面 already exited）
 			if (!isPidAlive(fromStore.pid)) {
 				return killedFalse("already exited (process no longer alive; final state pending poll)");
@@ -141,8 +140,7 @@ export function createBashKillToolDefinition() {
 					detail: { pid: fromStore.pid, err: toErrorMessage(err) },
 				}),
 			);
-			// 轮询器确保在跑：边沿收尾（写终态）依赖它
-			ensurePollerRunning();
+			// 终态由 exit 事件边沿收尾（exit-collector，事件驱动；无轮询器）
 			return textResult(
 				JSON.stringify(
 					{

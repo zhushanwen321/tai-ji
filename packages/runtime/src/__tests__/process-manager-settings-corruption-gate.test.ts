@@ -134,8 +134,6 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 
-/** create 启动参数：startupDelayMs=0（先例口径，fakeProc 下 start() 可 resolve）。 */
-const SPAWN_OPTS = { startupDelayMs: 0 }
 
 // ── 1. 形态①：非法 JSON → 拒绝 + spawn 未调用 + 信封三要素 ─────────
 
@@ -143,7 +141,7 @@ describe('pi 会话启动门禁 · 形态①（原路径 JSON 非法）', () => 
   it('损坏时 createSession 拒绝，pi 进程未被 spawn', async () => {
     writeFileSync(settingsPath, '{ broken json', 'utf-8')
 
-    await expect(pm.createSession('s1', dir, SPAWN_OPTS)).rejects.toMatchObject({
+    await expect(pm.createSession('s1', dir)).rejects.toMatchObject({
       code: SETTINGS_CORRUPTED,
     })
     // 零副作用：spawn 一次都未发生（进程未创建，也无旧进程清理动作）
@@ -153,7 +151,7 @@ describe('pi 会话启动门禁 · 形态①（原路径 JSON 非法）', () => 
   it('错误消息含 settings.json 绝对路径与修复指引（修复/删除后重试、无需重启）', async () => {
     writeFileSync(settingsPath, '{ broken json', 'utf-8')
 
-    const err = await pm.createSession('s1', dir, SPAWN_OPTS).catch((e: unknown) => e as Error)
+    const err = await pm.createSession('s1', dir).catch((e: unknown) => e as Error)
     expect((err as Error & { code?: string }).code).toBe(SETTINGS_CORRUPTED)
     const msg = (err as Error).message
     expect(msg).toContain(settingsPath) // 文件绝对路径（动态拼接实际值）
@@ -167,7 +165,7 @@ describe('pi 会话启动门禁 · 形态①（原路径 JSON 非法）', () => 
 describe('pi 会话启动门禁 · 每次现查（无缓存）', () => {
   it('损坏先拒，文件修复后同一 ProcessManager 实例放行（无需重启）', async () => {
     writeFileSync(settingsPath, '{ broken json', 'utf-8')
-    await expect(pm.createSession('s1', dir, SPAWN_OPTS)).rejects.toMatchObject({
+    await expect(pm.createSession('s1', dir)).rejects.toMatchObject({
       code: SETTINGS_CORRUPTED,
     })
     expect(spawnMock).not.toHaveBeenCalled()
@@ -175,7 +173,7 @@ describe('pi 会话启动门禁 · 每次现查（无缓存）', () => {
     // 用户修复文件（写回合法 JSON）——getSettingsCorruption 每次 readFileSync 现查，
     // 同进程内立即放行
     writeFileSync(settingsPath, JSON.stringify({ defaultModel: 'p/m' }), 'utf-8')
-    const client = await pm.createSession('s1', dir, SPAWN_OPTS)
+    const client = await pm.createSession('s1', dir)
     expect(client).toBeDefined()
     expect(spawnMock).toHaveBeenCalledTimes(1)
   })
@@ -188,7 +186,7 @@ describe('pi 会话启动门禁 · 形态②（隔离副本）', () => {
     const copyPath = join(dir, 'settings.json.corrupt-20261003T000000')
     writeFileSync(copyPath, '{ whatever history }', 'utf-8')
 
-    const err = await pm.createSession('s1', dir, SPAWN_OPTS).catch((e: unknown) => e as Error)
+    const err = await pm.createSession('s1', dir).catch((e: unknown) => e as Error)
     expect((err as Error & { code?: string }).code).toBe(SETTINGS_CORRUPTED)
     expect((err as Error).message).toContain(copyPath)
     expect(spawnMock).not.toHaveBeenCalled()

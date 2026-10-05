@@ -33,9 +33,9 @@ export {
 } from "@zhushanwen/extension-protocol";
 
 /**
- * killing intent：bash_kill / 后台 timeout 已发令、轮询器 exit 边沿未确认的瞬态标记。
+ * killing intent：bash_kill / 后台 timeout 已发令、exit 事件边沿未确认的瞬态标记。
  * 标记写入单例表与 registry 两侧（查询面立即可见，无「已 kill 仍 running」倒挂）；
- * 轮询边沿据此决定终态 reason，消费后清除。
+ * exit 边沿据此决定终态 reason，消费后清除。
  */
 export interface KillingIntent {
 	reason: Extract<ContractEndReason, "killed" | "timeout">;
@@ -45,10 +45,10 @@ export interface KillingIntent {
 /**
  * 单例任务表条目（运行时权威，D17 根基）。
  *
- * child 引用**只用于读 exitCode/signalCode，禁止挂事件监听**——exit 感知统一走
- * 轮询器 kill(pid,0) 边沿；闭包式 exit 监听在同进程 session 替换后指向 stale bus
- * （D17）。child.on("error") 是唯一例外（spawn-background 内的 no-op，防进程崩溃，
- * 不做任何状态推进）。
+ * child 引用**只用于读 exitCode/signalCode 与 exit-collector 的 exit 监听挂接**
+ * （attachExitCollector，ADR-0112 改造：exit 感知归事件边沿——回调链全模块级，
+ * 无实例级 bus/pi 引用，session 替换不产生 stale）。child.on("error") 是另一处
+ * 监听（spawn-background 内的 no-op，防进程崩溃，不做任何状态推进）。
  */
 export interface BackgroundTask {
 	taskId: string;

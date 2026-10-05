@@ -1,7 +1,7 @@
 /**
  * SessionModelControl 直测（S6 迁出批 4b + model-switch-live-provider-sync U2）：
  * 模型/思考等级控制——**激活前置**（`ensureActive` 先于 Map 查询与 set RPC）、激活上界与
- * 错误分型（既有码透传 / 无码包 SESSION_ACTIVATE_FAILED / 超时 SESSION_ACTIVATE_TIMEOUT /
+ * 错误分型（既有码透传 / 无码包 SESSION_ACTIVATE_FAILED /
  * `Model not found` 三型）、set RPC + get_state 回执普查（pattern 换模生效值）、三实例
  * markDirty 失效时序、session.modelId/thinkingLevel 直写双投影、trace 补拉、错误路径。
  *
@@ -15,7 +15,6 @@ import type { IManagedSessionView } from '../types.js'
 import type { SessionReplicatedStates } from '../session-state-projection.js'
 import {
   SESSION_ACTIVATE_FAILED,
-  SESSION_ACTIVATE_TIMEOUT,
   SESSION_NOT_FOUND,
   MODEL_NOT_FOUND,
   PROVIDER_CREDENTIAL_MISSING,
@@ -36,8 +35,6 @@ interface FixtureOptions {
   noSession?: boolean
   /** ensureActive 实现（默认立即返回存活 client）。 */
   ensureActiveImpl?: () => Promise<IPiEngine>
-  /** 激活上界（默认不限时便于既有用例稳定）。 */
-  activateTimeoutMs?: number
   isModelRegistered?: (provider: string, modelId: string) => boolean
   hasProviderCredential?: (provider: string) => boolean
 }
@@ -66,7 +63,6 @@ function makeFixture(optsOrGetState: FixtureOptions | (() => Promise<unknown>) =
     ensureActive,
     isModelRegistered: opts.isModelRegistered ?? (() => true),
     hasProviderCredential: opts.hasProviderCredential ?? (() => true),
-    activateTimeoutMs: opts.activateTimeoutMs ?? 0,
   })
   return { control, session: session as { modelId: string; thinkingLevel: string }, markDirty, client, syncTraceEntries, ensureActive }
 }
@@ -113,40 +109,6 @@ describe('switchModel — 激活前置（U2/D5）', () => {
         .rejects.toMatchObject({ code: SESSION_NOT_FOUND, message: 'session file not found' })
     } finally {
       errors.mockRestore()
-    }
-  })
-
-  it('激活超时 → SESSION_ACTIVATE_TIMEOUT，且后台恢复继续（底层 promise 后到 settle 不炸）', async () => {
-    vi.useFakeTimers()
-    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
-    try {
-      const unhandled: unknown[] = []
-      const onUnhandled = (reason: unknown): void => { unhandled.push(reason) }
-      process.on('unhandledRejection', onUnhandled)
-      let settle: ((v: unknown) => void) | undefined
-      const pending = new Promise((resolve) => { settle = resolve as (v: unknown) => void })
-      const fixture = makeFixture({
-        activateTimeoutMs: 15_000,
-        ensureActiveImpl: () => pending.then(() => {
-          const e = new Error('后台恢复稍后失败') as Error & { code: string }
-          e.code = 'RESTORE_FAILED'
-          throw e
-        }) as Promise<IPiEngine>,
-      })
-      const p = fixture.control.switchModel('s1', 'p1' as ProviderId, 'm')
-      const assertion = expect(p).rejects.toMatchObject({ code: SESSION_ACTIVATE_TIMEOUT })
-      await vi.advanceTimersByTimeAsync(15_000)
-      await assertion
-      expect(fixture.client.setModel).not.toHaveBeenCalled()
-      // 超时后底层 promise 才 settle（后台恢复继续）——不应产生 unhandled rejection
-      settle?.(undefined)
-      await vi.advanceTimersByTimeAsync(0)
-      await Promise.resolve()
-      expect(unhandled).toEqual([])
-      process.off('unhandledRejection', onUnhandled)
-    } finally {
-      errors.mockRestore()
-      vi.useRealTimers()
     }
   })
 
@@ -296,24 +258,6 @@ describe('setThinkingLevel — 同激活语义（U2/D7）', () => {
       expect(fixture.client.setThinkingLevel).not.toHaveBeenCalled()
     } finally {
       errors.mockRestore()
-    }
-  })
-
-  it('激活超时同样显性化（档位路径与模型路径同一上界）', async () => {
-    vi.useFakeTimers()
-    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
-    try {
-      const fixture = makeFixture({
-        activateTimeoutMs: 15_000,
-        ensureActiveImpl: () => new Promise<IPiEngine>(() => {}),
-      })
-      const p = fixture.control.setThinkingLevel('s1', 'high')
-      const assertion = expect(p).rejects.toMatchObject({ code: SESSION_ACTIVATE_TIMEOUT })
-      await vi.advanceTimersByTimeAsync(15_000)
-      await assertion
-    } finally {
-      errors.mockRestore()
-      vi.useRealTimers()
     }
   })
 })

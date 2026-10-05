@@ -301,24 +301,19 @@ function settleAiWin(
 
 /**
  * AI ask → 转 human（等用户最终决策，不关闭对话框）。
- * M3：超时兜底防止永久挂起。若 AI 返回 ask 后用户恰好与 AI 在同一 tick 操作，
- * comp.cancel() 因 _resolved 守卫不调 done → requestUserApproval promise 永不
- * resolve → realUserPromise pending → 永久挂起（G5 串行化放大为全链卡死）。
- * 5 分钟超时后 fail-closed 拒绝（不静默放行）。
+ *
+ * 无超时（ADR-0112）：等待用户审批是交互语义（审批对话框无上界等待 = 权限系统
+ * fail-closed 本职：用户不动 = 不放行也不拒绝），非挂死保护。promise 落定由结构
+ * 保证——pi 实装 showExtensionCustom（0.84.4 dist interactive-mode.js）中 done 即
+ * resolve 函数、调用必 resolve；abort 路径经 comp.cancel→done / rpc select signal 短路。
+ * 原 M3 的 5min APPROVAL_TIMEOUT_MS 兜底已删：其登记的根因（同 tick 操作致
+ * _resolved 置位但 done 未调 → promise 永不 resolve）经现行代码 + pi 实装核实
+ * 不存在——ApprovalComponent 的 approve/deny/cancel 三个 settle 点均同步紧跟 done。
  */
 async function awaitUserAfterAiAsk(
 	realUserPromise: Promise<UserDecision>,
 ): Promise<PermissionDecision> {
-	const APPROVAL_TIMEOUT_MS = 300_000;
-	const userFinal = await Promise.race<UserDecision>([
-		realUserPromise,
-		new Promise<UserDecision>((resolve) =>
-			setTimeout(
-				() => resolve({ approved: false, reason: "approval dialog timeout (fail-closed)" }),
-				APPROVAL_TIMEOUT_MS,
-			),
-		),
-	]);
+	const userFinal = await realUserPromise;
 	const action: PermissionAction = userFinal.approved ? "allow" : "deny";
 	return {
 		action,

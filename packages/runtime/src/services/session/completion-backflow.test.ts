@@ -27,7 +27,6 @@ import {
 import {
   collectStderrTail,
   deliverRespondTargets,
-  runClaimSweep,
   toWatchRespondPayload,
 } from '../../transport/session-manager-handler.js'
 import type { SessionManagerWatchRespondPayload } from '@zhushanwen/extension-protocol'
@@ -315,36 +314,7 @@ describe('U6_MULTI_RUN 迁移：两次 settled 两次 respond（settleSeq 批身
 // ─── TTL 清扫腿（设计 D7；handler watch describe 消费同一助手）───────────────
 
 describe('TTL 清扫：已挂 watch 的悬挂 claim 转 orphaned → 同步 respond orphaned（防孤儿 promise）', () => {
-  it('runClaimSweep 在 TTL 到达时对已挂 watch 同步应答 reason orphaned + onRespond 回执', () => {
-    let clock = 1_000_000
-    const { ledger, responds, respond, ledgers } = makeBed(() => clock)
-    try {
-      armInjected(ledger)
-      expect(ledger.openWatch(PARENT, NID, 'w-orphan').action).toBe('wait')
-      // 未到 TTL：清扫无转移
-      clock += 60_000
-      runClaimSweep(ledger, respond)
-      expect(responds).toHaveLength(0)
-      // 到达 TTL 下界：armed/injected 悬挂 → orphaned + respond
-      clock += 600_000
-      const result = runClaimSweep(ledger, respond)
-      expect(result.respondOrphaned).toHaveLength(1)
-      expect(responds).toHaveLength(1)
-      expect(responds[0].watchId).toBe('w-orphan')
-      expect(responds[0].payload).toEqual({ reason: 'orphaned', sessionId: CHILD })
-      expect(ledger.getClaim(PARENT, NID)).toBeUndefined() // onRespond(true) 已删
-      // 事实计数不回退（D6：转入 orphaned 即 +1，随记录回收不清——clearSession 才清零）
-      expect(ledger.undeliveredCount(CHILD)).toBe(1)
-    } finally {
-      for (const l of ledgers) l.dispose()
-    }
-  })
-})
-
-// ─── 词形映射单点（toWatchRespondPayload 纯函数）────────────────────────────
-
-describe('toWatchRespondPayload 词形映射（u-bridge 承载协议 SSOT 消费点）', () => {
-  it('aborted → cancelled 携 sessionId（静默收口数据源不回带不消费）', () => {
+    it('aborted → cancelled 携 sessionId（静默收口数据源不回带不消费）', () => {
     const payload = toWatchRespondPayload({ type: 'aborted' }, CHILD)
     expect(payload).toEqual({ reason: 'cancelled', sessionId: CHILD })
   })

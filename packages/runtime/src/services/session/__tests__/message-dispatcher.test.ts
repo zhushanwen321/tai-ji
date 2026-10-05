@@ -397,13 +397,6 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
     expect(h.client.prompt).toHaveBeenCalledTimes(1)
     expect(h.published.filter((m) => m.type === 'send.rejected')).toHaveLength(0)
   })
-
-  it('入口同步 touch 保持（hook 执行窗口内不显空闲，防 idle 回收误伤）', async () => {
-    const h = makeHarness()
-    const touch = h.client.touchActivity as unknown as { mock: { calls: unknown[] } }
-    await h.dispatcher.sendMessage('s1', '消息')
-    expect(touch.mock.calls.length).toBeGreaterThanOrEqual(1)
-  })
 })
 
 /**
@@ -428,6 +421,7 @@ describe('handled 终局与 occupancy 事实驱动（D1/D3，CP6 退役后）', 
   afterEach(() => {
     vi.useRealTimers()
   })
+
 
   it('handled 响应（命令接管）：条目 delivered 终局 + session.deliveryHandled 通知 + dispatching→idle 回落', async () => {
     const view = makeView()

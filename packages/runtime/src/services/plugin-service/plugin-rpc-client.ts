@@ -12,7 +12,6 @@ import { PendingTracker } from '../../utils/async/pending-tracker.js'
 import { errorWithCode } from '../../utils/errors.js'
 import { getOrCreate } from '../../utils/collections.js'
 
-const DEFAULT_TIMEOUT_MS = 30_000
 
 /** Worker 通信端口的抽象（MessagePort / parentPort 均可适配） */
 export interface ClientPort {
@@ -37,7 +36,7 @@ export class PluginRpcClient {
    * 消息格式为 WorkerToHostMessage 的 rpc 变体：
    * `{ type: 'rpc', jsonrpc: '2.0', id, method, params }`
    */
-  request(method: string, params: Record<string, unknown>, timeoutMs: number = DEFAULT_TIMEOUT_MS): Promise<unknown> {
+  request(method: string, params: Record<string, unknown>, timeoutMs?: number): Promise<unknown> {
     if (!this.port) {
       return Promise.reject(new Error('RPC client not attached'))
     }
@@ -48,8 +47,9 @@ export class PluginRpcClient {
       { code: PluginRpcErrorCodes.RPC_TIMEOUT },
     )
 
-    // 先登记 pending（含超时 timer），再 postMessage。
-    const promise = this.pending.register(id, timeoutMs, timeoutError)
+    // 先登记 pending（缺省无墙钟——ADR-0112；timeoutMs 显式传入 = 交互等待 C2 语义，
+    // 如 ui dialog 人填表粒度），再 postMessage。
+    const promise = this.pending.register(id, timeoutError, timeoutMs)
 
     // WorkerToHostMessage: { type: 'rpc' } & RpcRequest
     const message: RpcRequest & { type: 'rpc' } = {

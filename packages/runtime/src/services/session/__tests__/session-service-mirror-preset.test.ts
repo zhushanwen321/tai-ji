@@ -29,7 +29,6 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { inflightMirror } from '../inflight-mirror.js'
-import { ReclaimSeat } from '../idle-pi-reaper.js'
 import { getRuntimeCheckpointStore, initRuntimeCheckpointStore } from '../runtime-checkpoint.js'
 import type { SubagentInFlightReport } from '@zhushanwen/extension-protocol'
 import type { IPiEngine } from '../../ports/pi-engine.js'
@@ -117,25 +116,6 @@ describe('SessionService × in-flight mirror（D5 预置 0 / detach / reclaim �
     await service.initializeManagedSession(SID, {} as unknown as IPiEngine, '/project', 'label', '/project/s.jsonl')
 
     // 新 epoch：旧「曾上报」不可继承（inFlight 归零 + hasEverReported 清空）
-    expect(inflightMirror.query(SID)).toEqual(PRESET_ZERO)
-  })
-
-  it('reclaim 成功：条目摘除；reclaim 返回 false（未回收）：条目保留', async () => {
-    const { service } = createSetup()
-    await service.initializeManagedSession(SID, {} as unknown as IPiEngine, '/project', 'label', '/project/s.jsonl')
-
-    // 未占用 → 七步回收编排走通（destroySession 桩）→ 条目摘除
-    const seat = new ReclaimSeat()
-    const reclaimed = await service.reclaimSession(SID, { seat, listRelayChildrenByMainSession: () => [] })
-    expect(reclaimed).toBe(true)
-    expect(inflightMirror.query(SID)).toBeUndefined()
-
-    // 再注册建条目 → 占座被占 → reclaim false（未回收）→ 零改动（防误摘）
-    await service.initializeManagedSession(SID, {} as unknown as IPiEngine, '/project', 'label', '/project/s.jsonl')
-    const seat2 = new ReclaimSeat()
-    seat2.tryAcquire(SID)
-    const again = await service.reclaimSession(SID, { seat: seat2, listRelayChildrenByMainSession: () => [] })
-    expect(again).toBe(false)
     expect(inflightMirror.query(SID)).toEqual(PRESET_ZERO)
   })
 

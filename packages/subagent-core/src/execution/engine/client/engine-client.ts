@@ -25,8 +25,6 @@ import type { ChildProcess } from "node:child_process";
 import {
   buildEngineChildEnv,
   CANCEL_SETTLE_GRACE_MS,
-  CRASH_REBUILD_BACKOFF_MS,
-  CRASH_REBUILD_MAX_ATTEMPTS,
   ENGINE_PROTOCOL_VERSION,
   EngineSdkError,
   HANDSHAKE_TIMEOUT_MS,
@@ -238,10 +236,10 @@ export class EngineClient {
   }
 
   /**
-   * 确保引擎 CLI 已连接（spawn + initialize 握手）。幂等；崩溃后按重建状态机重试：
-   * 初建失败 → 退避 1s/2s/4s 各重建一次（共 1 + CRASH_REBUILD_MAX_ATTEMPTS 次
-   * spawn 尝试），全败标记不可用直到宿主重启（unavailable 恒 throw）。
-   * 版本协商越界 → engine_protocol_mismatch + 直接标记不可用（不重试）。
+   * 确保引擎 CLI 已连接（spawn + initialize 握手）。幂等；[ADR-0112] 失败显式上报：
+   * 初建失败一次即标记不可用（unavailable 恒 throw，错误附恢复指引），修复由用户
+   * 排查后重启宿主承接。[HISTORICAL] 原退避 1s/2s/4s × 3 次自动重建已删。
+   * 版本协商越界 → engine_protocol_mismatch + 直接标记不可用。
    */
   async ensureConnected(): Promise<void> {
     if (this.disposed) {
@@ -257,7 +255,7 @@ export class EngineClient {
     if (this.state === "ready") return;
     if (this.connectInFlight) return this.connectInFlight;
 
-    this.connectInFlight = this.connectWithRebuild();
+    this.connectInFlight = this.connectOnce();
     try {
       await this.connectInFlight;
     } finally {
@@ -265,7 +263,7 @@ export class EngineClient {
     }
   }
 
-  private async connectWithRebuild(): Promise<void> {
+  private async connectOnce(): Promise<void> {
     this.state = "connecting";
     // 启动期清扫（每实例一次）：宿主崩溃残留的同 id 引擎孤儿 + 陈旧 pidfile。
     if (!this.pidfileSwept) {
@@ -287,46 +285,24 @@ export class EngineClient {
       }
     }
 
-    let attempt = 0;
-    // 序列：attempt 0 = 初建；1..CRASH_REBUILD_MAX_ATTEMPTS = 重建（退避 1s/2s/4s）。
-    while (attempt <= CRASH_REBUILD_MAX_ATTEMPTS) {
-      if (attempt > 0) {
-        // [测试通道] opts.crashRebuildBackoffMs 覆盖退避序列；缺省 = SDK 常量（1s/2s/4s）。
-        const backoff = (this.opts.crashRebuildBackoffMs ?? CRASH_REBUILD_BACKOFF_MS)[
-          attempt - 1
-        ];
-        logger.warn(
-          `[engine-client:${this.engineId}] rebuild attempt ${attempt}/${CRASH_REBUILD_MAX_ATTEMPTS} after ${backoff}ms backoff`,
-        );
-        await delay(backoff);
-        if (this.disposed) return;
-      }
-      try {
-        await this.spawnAndInitialize();
-        this.state = "ready";
-        return;
-      } catch (err) {
-        this.teardownProcess("handshake failed");
-        if (err instanceof EngineSdkError && err.code === "engine_protocol_mismatch") {
-          // 版本越界：重建无意义（每次都会越界）→ 直接标记不可用。
-          this.markUnavailable(err);
-          throw err;
-        }
-        attempt += 1;
-        if (attempt > CRASH_REBUILD_MAX_ATTEMPTS) {
-          const failure =
-            err instanceof Error ? err : new Error(String(err));
-          const unavailable = new EngineSdkError(
+    try {
+      await this.spawnAndInitialize();
+      this.state = "ready";
+    } catch (err) {
+      this.teardownProcess("handshake failed");
+      // [ADR-0112] 单次失败即显式上报 + 标记不可用（无自动重建）。
+      const failure = err instanceof Error ? err : new Error(String(err));
+      const unavailable =
+        err instanceof EngineSdkError && err.code === "engine_protocol_mismatch"
+          ? err
+          : new EngineSdkError(
             "engine_crashed",
-            `engine "${this.engineId}" failed to start after `
-              + `${1 + CRASH_REBUILD_MAX_ATTEMPTS} attempts (initial + ${CRASH_REBUILD_MAX_ATTEMPTS} rebuilds): ${failure.message}`,
+            `engine "${this.engineId}" failed to start: ${failure.message}`,
             "Fix or reinstall the engine package, then restart the host. The engine stays "
               + "unavailable until the next host start.",
           );
-          this.markUnavailable(unavailable);
-          throw unavailable;
-        }
-      }
+      this.markUnavailable(unavailable);
+      throw unavailable;
     }
   }
 
@@ -782,12 +758,6 @@ export class EngineClient {
 }
 
 // ── 内部工具 ─────────────────────────────────────────────────────────────────
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
 
 function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max)}...`;

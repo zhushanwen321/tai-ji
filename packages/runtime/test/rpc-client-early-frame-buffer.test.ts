@@ -19,7 +19,7 @@
  * 运行：npx vitest run test/rpc-client-early-frame-buffer.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { RpcClient, RpcTimeoutError, type PiMessage } from '../src/infra/pi/rpc-client.js'
+import { RpcClient, type PiMessage } from '../src/infra/pi/rpc-client.js'
 
 // ── Mocks（工厂单源在 helpers/rpc-client-mock.ts，vi.mock 声明留本文件——路径按本文件解析）──
 
@@ -49,7 +49,6 @@ import {
   resetRpcClientMock,
 } from './helpers/rpc-client-mock'
 
-const clientOpts = { startupDelayMs: 0 } as const // 测试注入：启动确认窗口归零（窗口语义不变，见 RpcClientOptions.startupDelayMs）
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -75,7 +74,7 @@ describe('RpcClient 早期帧缓冲（early-frame-buffer D1-D6）', () => {
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    client = new RpcClient({ ...clientOpts, cwd: '/project' })
+    client = new RpcClient({ cwd: '/project' })
     await client.start()
     // start 的 500ms startup 检查已结束，其注册的 exit handlers 已被 cleanup 移除
     clearExitHandlers()
@@ -242,34 +241,4 @@ describe('RpcClient 早期帧缓冲（early-frame-buffer D1-D6）', () => {
     expect(got1).toHaveLength(0)
   })
 
-  it('R1-7c: timedOutIds 迟到响应仍被丢弃（S6 现状），且不进缓冲（D2 分支序）', async () => {
-    const got1: PiMessage[] = []
-    client.onEvent(collector(got1))
-
-    // sendCommand 超时 → id 入 timedOutIds（fake timers 推进 FAST_TIMEOUT_MS）。
-    // 先 useFakeTimers 再调 getState：timer 必须在 fake 模式下注册（真实 timer 不受
-    // advanceTimersByTime 控制，先例：kill-sigcont 测试同样先 fake 后调用）。
-    vi.useFakeTimers()
-    const p = client.getState()
-    vi.advanceTimersByTime(10_000)
-    await expect(p).rejects.toThrow(RpcTimeoutError)
-
-    // 同 id 迟到的 response：丢弃（不广播）
-    const sent = lastWrittenJson()
-    emitPiLine({ type: 'response', id: sent.id, success: true, data: { sessionId: 'late' } })
-    expect(got1).toHaveLength(0)
-    expect(earlyFrameBufferOf(client)).toHaveLength(0)
-
-    vi.useRealTimers()
-
-    // 该帧也未入缓冲：后续（假设 detach 后的）首注册不会重放出幽灵 response
-    const got2: PiMessage[] = []
-    client.onEvent(collector(got2))
-    expect(got2).toHaveLength(0)
-
-    // 正常事件帧随后照常直通
-    emitPiLine({ type: 'session_start' })
-    expect(got1.map((m) => m.type)).toEqual(['session_start'])
-    expect(got2.map((m) => m.type)).toEqual(['session_start'])
-  })
 })

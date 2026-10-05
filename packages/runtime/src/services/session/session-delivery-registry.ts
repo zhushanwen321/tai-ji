@@ -13,8 +13,8 @@
  * 3. **两阶段回执**（D2）：受理 = prompt 受理（内核 in-flight）；送达 = pi `message_end(user)`
  *    文本命中裸标记 → `handle.confirmDelivered(id)`。裸标记是身份而非内容匹配，取代
  *    「出口即遗忘」的 fire-and-forget（§2.3 所有权落脚点③）。
- * 4. **对账器 Reconciler**（D3）：五触发点（agent_settled / compaction_end / abort 完成 /
- *    pi restored / 30s watchdog）→ 条件「空闲 + pi 槽位非空」→ `clear_queue` 全收 → 三分处置
+ * 4. **对账器 Reconciler**（D3）：四触发点（agent_settled / compaction_end / abort 完成 /
+ *    pi restored，全事件驱动）→ 条件「空闲 + pi 槽位非空」→ `clear_queue` 全收 → 三分处置
  *    （自有条目回队首重投 / 带标记无记录条目按 transcript 扫描重建 / 无标记外来文本收养）。
  *    pi 只有队列级原语（PS-65），条目级收回在本层以「全收 + 标记识别 + 其余重投」实现。
  *
@@ -103,13 +103,12 @@ export interface DeliveryCancelOutcome {
   reason?: string
 }
 
-/** 对账触发点（设计 D3 五触发点） */
+/** 对账触发点（设计 D3；watchdog 定时触发点已随 ADR-0112 防御机制清查退役，全事件驱动） */
 export type ReconcileTrigger =
   | 'agent-settled'
   | 'compaction-end'
   | 'abort-idle'
   | 'pi-restored'
-  | 'watchdog'
 
 /** 注册表对外接口（SessionManagerHandler / MessageDispatcher / transport u3a 经此消费投递能力） */
 export interface SessionDeliveryRegistry {
@@ -194,8 +193,6 @@ const DELIVERY_MARKER_ID_RE = new RegExp(
 const CLIENT_UUID_PREFIX = 'u-'
 /** 内核合批拼接分隔符（@zhushanwen/session-delivery buildBatchPayload "\n\n---\n\n"）。 */
 const BATCH_SEP = '\n\n---\n\n'
-/** 对账 watchdog 间隔（D3 触发点⑤）。 */
-const WATCHDOG_MS = 30_000
 /** 同一 session 两次对账的最小间隔（多触发点同帧到达时合并，防 clear_queue 风暴）。 */
 const RECONCILE_MIN_INTERVAL_MS = 200
 /** 本地生成条目 id 的时间戳进制（`m-<base36 时间戳>-<序号>`；短且同毫秒内靠序号单调）。 */
@@ -360,7 +357,7 @@ interface RuntimeState {
    * 待收回（kernel reclaim-requested）时登记；意图兑现（cancelled 终态 / delivered 事实
    * 优先）时清除。消费点：cancel 再入（重复完整「clear_queue 收回 + transcript 校验」
    * 流程，不透传内核 cancelRequested 短路终结）、sweepInFlight（不重投留守；蒸发兑现须
-   * 本轮实际执行过 clear_queue——watchdog / ensureActive 失败轮槽位状态未知只留守）、
+   * 本轮实际执行过 clear_queue——ensureActive 失败轮槽位状态未知只留守）、
    * rebuildEntry（不重建重投）、disposeCleared（收回文本 = 兑现终结）。随 runtime state
    * 存活，dispose 即弃。
    */
@@ -380,7 +377,6 @@ interface RuntimeState {
   commandEntryIds: Set<string>
   unsubClient?: () => void
   unsubSettled?: () => void
-  watchdog?: ReturnType<typeof setInterval>
   reconciling: boolean
   lastReconcileAt: number
   disposed: boolean
@@ -613,8 +609,7 @@ export function createSessionDeliveryRegistry(
    * - revoking：endRevokeHold（编排 try/finally 必达）；
    * - view 维度（bash / compacting 投影）：转移执行方（dispatcher bash-end / compacting-end
    *   转移后）经 notifyHoldRelease 端口驱动。
-   * 兜底：watchdog（30s）tick 同步唤醒等待者——无边沿装配（退化注册表 / 边沿丢失）退化为
-   * 周期复核，等待者不永久悬挂（B4）。
+   * （watchdog 30s 周期兜底唤醒已随 ADR-0112 防御机制清查退役——等待者唤醒归事件边沿。）
    */
   function waitForHoldEdge(state: RuntimeState): Promise<void> {
     return new Promise<void>((resolve) => {
@@ -681,11 +676,9 @@ export function createSessionDeliveryRegistry(
         // PiMessage = unknown（端口层宽类型，pi-engine.ts 头注「类型系统对 pi 动态响应
         // 认输」）：disposition 已在 rpc-client 出口经 parseInputDisposition 归一（值域
         // 校验 + 非法值 undefined + warn），此处窄形状断言只读已归一字段。
-        // 命令档（D14③①）以条件传参表达——非命令路径的实参个数与升级前逐字一致
-        //（普通消息调用形态零变化）。
-        const res = (opts.commandLane
-          ? await client.prompt(text, opts.images, opts.behavior, undefined, 0)
-          : await client.prompt(text, opts.images, opts.behavior)) as { disposition?: InputDisposition } | undefined
+        // 命令档墙钟豁免（D14③① timeoutMs=0 不限时档）已随 ADR-0112 防御机制清查退役
+        //（RPC 墙钟整体删除），命令与普通消息同参调用。
+        const res = (await client.prompt(text, opts.images, opts.behavior)) as { disposition?: InputDisposition } | undefined
         return res?.disposition
       } catch (e) {
         const reason = classifyBusyRejection(e)
@@ -887,11 +880,11 @@ export function createSessionDeliveryRegistry(
       // 事件型触发统一经 clientForAttachedTrigger（ensureActive 幂等读取 + watchClient 重挂）：
       // 不能拿 rt.client 旧引用短路——pi 重生后旧句柄是尸体，changed 分支（压缩标记自愈入口）
       // 永远不会被触发。事件来自活进程时 ensureActive 返回同一实例（幂等，零成本）。
-      const client = await clientForAttachedTrigger(sessionId, rt, trigger)
+      const client = await clientForAttachedTrigger(sessionId, rt)
       const primitive = client ? queuePrimitive(client) : null
       // 本轮「pi 槽位已清空」事实（sweepInFlight 兑现门禁）：primitive 非 null = clear_queue
-      // 必已成功执行（抛错即进 catch 不达 sweep）；watchdog 轮（不解析 client）与
-      // ensureActive 失败轮为 false——槽位状态未知，撤销兑现无前提（dmg-r2-1）
+      // 必已成功执行（抛错即进 catch 不达 sweep）；ensureActive 失败轮为 false——
+      // 槽位状态未知，撤销兑现无前提（dmg-r2-1）
       const slotCleared = primitive !== null
       if (primitive) {
         // 触发条件②：pi 槽位非空——槽位真值取 clear_queue 返回值（pi 权威、操作时刻；PS-65）
@@ -920,14 +913,11 @@ export function createSessionDeliveryRegistry(
    * abort / pi restored 四类事件成立 = pi 必已附着（事件只能来自活进程），此时 ensureActive
    * 是幂等读取（不新建进程）且顺带 watchClient 重挂（句柄变更即压缩标记自愈 + pi-restored
    * 对账）；pi 已死（崩溃后的人为触发，如 abort）则 restore respawn——句柄刷新的唯一机会。
-   * watchdog 触发**不解析**——静默的 idle session 不应被对账唤醒（idle pi 回收语义）。
    */
   async function clientForAttachedTrigger(
     sessionId: string,
     rt: SessionRuntime,
-    trigger: ReconcileTrigger,
   ): Promise<IPiEngine | undefined> {
-    if (trigger === 'watchdog') return undefined
     try {
       const client = await deps.ensureActive(sessionId)
       watchClient(sessionId, rt, rt.handle, client)
@@ -957,7 +947,7 @@ export function createSessionDeliveryRegistry(
    * 在途未确认扫描：有标记条目查 transcript（命中 → delivered；未命中 → 重投）；
    * [⑧ G2] 无标记且命中命令清单的条目按响应丢失处理——超宽限静默终局 + 双成因日志，
    * 不重投（重投会重复执行命令；D14①b，同时承接命令识别假阳性形态）。
-   * slotCleared = 本轮是否实际执行过 clear_queue（reconcile 传入；watchdog 轮 /
+   * slotCleared = 本轮是否实际执行过 clear_queue（reconcile 传入；ensureActive 失败轮 /
    * ensureActive 失败轮为 false）——撤销兑现的必要前提：transcript 无迹 + 槽位未确认
    * 清空 ≠ 文本已离场（可能仍在 pi 槽位稍后被消费），此时只留守（dmg-r2-1）。
    * [D3③] occupancy 收尾：本轮清空该 session 最后一笔在途条目时回落 idle（幂等门 =
@@ -985,7 +975,7 @@ export function createSessionDeliveryRegistry(
       }
       if (rt.pendingRevoke.has(entry.id)) {
         // 撤销待收回条目（dmg-r1-2）：不重投（重投会清撤销标记复活消息）。
-        if (!slotCleared) continue // 本轮未跑 clear_queue（watchdog / ensureActive 失败）：文本可能仍在槽位稍后被消费，留守待下轮（dmg-r2-1）
+        if (!slotCleared) continue // 本轮未跑 clear_queue（ensureActive 失败）：文本可能仍在槽位稍后被消费，留守待下轮（dmg-r2-1）
         if (texts === null) continue // transcript 读失败：事实不明，留守待下轮
         // 执行到此处 = 槽位已随本轮 clear_queue 清空且 transcript 无迹——文本已不在
         // 任何投递通道（随 pi 重生蒸发）→ 撤销意图兑现：本地终态
@@ -1057,7 +1047,7 @@ export function createSessionDeliveryRegistry(
     }
     if (own.length > 0) {
       rt.handle.requeue(own)
-      rt.handle.flush() // 重投立即走 gate 复核（空闲即投；busy 由 settled/watchdog 驱动）
+      rt.handle.flush() // 重投立即走 gate 复核（空闲即投；busy 由 settled 边沿驱动）
     }
     for (const id of settledRevokes) settleRevokedEntry(rt, id)
     for (const item of rebuild) await rebuildEntry(sessionId, rt, item.id, item.text)
@@ -1254,7 +1244,7 @@ export function createSessionDeliveryRegistry(
     })
   }
 
-  // ── 触发点装配（settled 边沿 / watchdog） ───────────────────────────────
+  // ── 触发点装配（settled 边沿） ───────────────────────────────
 
   /** settled 边沿订阅（触发点① + MF-1-9 settling hold 解除边沿）：settled → 唤醒持有期等待者（settling 复位已在该事件内落投影）+ 对账（槽位滞留自愈 V2）。 */
   function ensureSettledSub(sessionId: string, state: RuntimeState): void {
@@ -1264,19 +1254,6 @@ export function createSessionDeliveryRegistry(
       notifyWaiters(state)
       void reconcile(sessionId, 'agent-settled')
     })
-  }
-
-  /** watchdog（触发点⑤）：定期对账 + 打开 gate 的条目补投 + 唤醒持有期等待者（settled 事件丢失 / 无边沿装配的兜底复核，B4）。 */
-  function ensureWatchdog(sessionId: string, rt: SessionRuntime): void {
-    if (rt.watchdog !== undefined || rt.disposed) return
-    rt.watchdog = setInterval(() => {
-      if (rt.disposed) return
-      notifyWaiters(rt)
-      void reconcile(sessionId, 'watchdog')
-      rt.handle.flush()
-    }, WATCHDOG_MS)
-    // 纯兜底周期任务不持有事件循环（对齐全仓定时器惯例，M3）；dispose 显式 clearInterval 收口
-    rt.watchdog.unref?.()
   }
 
   // ── 运行时装配 ──────────────────────────────────────────────────────────
@@ -1399,7 +1376,6 @@ export function createSessionDeliveryRegistry(
     if (existing) return existing
     const rt = buildRuntime(sessionId)
     runtimes.set(sessionId, rt)
-    ensureWatchdog(sessionId, rt)
     return rt
   }
 
@@ -1426,7 +1402,7 @@ export function createSessionDeliveryRegistry(
       return ensureRuntime(sessionId).handle
     },
     getDelivery(sessionId) {
-      // 非创建性查询（MF-1-12）：无运行时返回 undefined，不引入 watchdog/settled 订阅副作用
+      // 非创建性查询（MF-1-12）：无运行时返回 undefined，不引入 settled 订阅副作用
       return runtimes.get(sessionId)?.handle
     },
     attachSegments(sessionId, clientUuid, segments) {
@@ -1524,7 +1500,7 @@ export function createSessionDeliveryRegistry(
       const activeStateById = new Map(full.active.map((e) => [e.id, e.state] as const))
       // 用户重试（§3.4 错误规格表：队列区 failed 行的重试钮 = delivery.resync 单条重报）：
       // failed → queued 的唯一入口是内核 requeue（types.ts 状态机迁移表）——重投入队首并
-      // 立即 flush 复核 gate（idle 即投；busy 由 settled/watchdog 驱动）。其余活跃条目
+      // 立即 flush 复核 gate（idle 即投；busy 由 settled 边沿驱动）。其余活跃条目
       // （queued/in-flight）行为不变（它们在队列里，重报不改变状态）。
       const retryIds = clientUuids.filter((id) => activeStateById.get(id) === 'failed')
       if (retryIds.length > 0) {
@@ -1594,7 +1570,6 @@ export function createSessionDeliveryRegistry(
       notifyWaiters(rt) // disposed 后等待者不悬挂（B3：唤醒后循环首查 disposed 即返回）
       rt.unsubClient?.()
       rt.unsubSettled?.()
-      if (rt.watchdog !== undefined) clearInterval(rt.watchdog)
       rt.handle.dispose()
       runtimes.delete(sessionId)
     },

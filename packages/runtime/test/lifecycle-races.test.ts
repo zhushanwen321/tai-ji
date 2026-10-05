@@ -11,11 +11,9 @@
  *    不冒泡为 uncaughtException，后续正常消息仍处理（W1，宿主层）；
  *    W4 补 rpcClient 层——Worker 内 notification 分发到各插件 handler 逐个兜底
  * 3. LC-U1-ENTRY（入口防御，W1）：null / 非对象 / 超大非对象消息不炸宿主
- * 4. LC-U1（rebuild/fatal/exit-0 约束，W3+W4）：
+ * 4. LC-U1（fatal/exit-0 约束，W3+W4）：
  *    - fatal_error 路径 terminate 存活线程（崩溃处理对称化）
  *    - exit code 0 清理 handle 不留僵尸（区分正常退出与崩溃）
- *    - rebuild 冷却 timer 保存引用 + unref + 受 shutdown 清理（关停后不复活）
- *    - crashCounts rebuild 成功 60s 无新崩溃清零（fake timers）
  *    - onRebuilt 只复活 CRASHED 态插件（用户已 disable/uninstall 跳过）
  *
  * 测试层级说明：按任务边界用「真实 PluginHost + PluginActivator + mock worker 通道」
@@ -364,7 +362,7 @@ describe('生命周期竞态（lifecycle races）', () => {
   })
 
   // ── LC-U1: fatal_error 路径 terminate 存活线程（W4 崩溃处理对称化）──
-  it('LC-U1: fatal_error 路径 terminate 存活线程——handle/索引清理、crash 回调恰一次、冷却 rebuild timer 已排程', async () => {
+  it('LC-U1: fatal_error 路径 terminate 存活线程——handle/索引清理、crash 回调恰一次', async () => {
     const rpc = new PluginRpcServer()
     const host = new PluginHost(rpc, { workerBootstrapOverride: WORKER_MOCK })
     try {
@@ -385,14 +383,10 @@ describe('生命周期竞态（lifecycle races）', () => {
       // handle / 反向索引 / 注册表清理
       expect(host.getWorkerHandleById(workerId)).toBeUndefined()
       expect(host.getWorkerHandle('lc-fatal')).toBeUndefined()
-      expect(host.getCrashCount('lc-fatal')).toBe(1)
-      // 冷却 rebuild timer 已排程（保存引用）
-      expect(host.getPendingRebuildTimer(workerId)).toBeDefined()
 
       // 幂等：terminate 触发的 exit(code=1) / 重复 fatal_error 不再触发 crash 回调
       await new Promise((r) => setTimeout(r, 50))
       expect(crashes).toHaveLength(1)
-      expect(host.getCrashCount('lc-fatal')).toBe(1)
     } finally {
       await host.shutdown()
     }
@@ -416,8 +410,6 @@ describe('生命周期竞态（lifecycle races）', () => {
       worker.emit('exit', 0)
 
       expect(crashes).toHaveLength(0)
-      expect(host.getCrashCount('lc-exit0')).toBe(0)
-      expect(host.getPendingRebuildTimer(workerId)).toBeUndefined()
       expect(host.getWorkerHandleById(workerId)).toBeUndefined()
       expect(host.getWorkerHandle('lc-exit0')).toBeUndefined()
 
@@ -428,112 +420,6 @@ describe('生命周期竞态（lifecycle races）', () => {
       // fake exit 的原线程仍真实存活且已从宿主 map 移除——手动 terminate 防泄漏
       await staleWorker?.terminate().catch(() => undefined)
       await host.shutdown()
-    }
-  })
-
-  // ── LC-U1: rebuild 冷却 timer 约束（W3）─────────────────────────
-  it('LC-U1: rebuild 冷却 timer 保存引用 + unref + 受 shutdown 清理——关停后冷却到期不复活', async () => {
-    const rpc = new PluginRpcServer()
-    const host = new PluginHost(rpc, { workerBootstrapOverride: WORKER_MOCK })
-    host.setRebuildCooldownMs(200)
-    try {
-      const workerId = await host.assignWorker('lc-timer', 'trusted')
-      await host.loadPlugin(workerId, 'lc-timer', '/tmp/lc-timer')
-      // 真实线程崩溃（mock bootstrap 对 crash 消息 process.exit(1) → exit code 1）
-      host.getWorkerHandle('lc-timer')!.postMessage({ type: 'crash' })
-      await waitFor(() => host.getPendingRebuildTimer(workerId) !== undefined)
-
-      const timer = host.getPendingRebuildTimer(workerId)!
-      expect(timer).toBeDefined()
-      // unref 证明：真实 Node Timeout 在 unref 后 hasRef() === false——冷却 timer
-      // 不得阻止进程退出（旧实现裸 setTimeout 且不保存引用，shutdown 无从清理）
-      const nodeTimer = timer as NodeJS.Timeout & { hasRef?: () => boolean }
-      expect(typeof nodeTimer.unref).toBe('function')
-      if (typeof nodeTimer.hasRef === 'function') {
-        expect(nodeTimer.hasRef()).toBe(false)
-      }
-
-      // 冷却窗口内 shutdown：timer 被清理，冷却到期后不 rebuild、无新 Worker
-      await host.shutdown()
-      expect(host.getPendingRebuildTimer(workerId)).toBeUndefined()
-      await new Promise((r) => setTimeout(r, 400))
-      expect(host.getAllWorkers()).toHaveLength(0)
-    } finally {
-      await host.shutdown()
-    }
-  })
-
-  // ── LC-U1: crashCounts 衰减（W3，fake timers）────────────────────
-  it('LC-U1: crashCounts 衰减——rebuild 成功后 60s 无新崩溃清零（「连续 3 次」按时间窗收敛）', async () => {
-    // 只 fake setTimeout/clearTimeout：worker exit 是真实 I/O 事件，setImmediate 保持真实
-    // 供 flushIO 轮询推进
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    const flushIO = () => new Promise<void>((r) => setImmediate(r))
-    const rpc = new PluginRpcServer()
-    const host = new PluginHost(rpc, { workerBootstrapOverride: WORKER_MOCK })
-    try {
-      const workerId = await host.assignWorker('lc-decay', 'trusted')
-      await host.loadPlugin(workerId, 'lc-decay', '/tmp/lc-decay')
-
-      host.getWorkerHandle('lc-decay')!.postMessage({ type: 'crash' })
-      // 等真实 exit 事件（I/O 驱动，非 timer 驱动）。固定轮数 setImmediate 在 CI 慢环境
-      // 下可能跑完仍等不到线程退出（曾以 200 轮上限在 CI 必挂）——按真实墙钟兜底：
-      // Date 未被 fake 可作 deadline，setTimeout 已被 fake 不能用于 waitFor 轮询
-      const exitDeadline = Date.now() + 5_000
-      while (host.getPendingRebuildTimer(workerId) === undefined && Date.now() < exitDeadline) {
-        await flushIO()
-      }
-      expect(host.getPendingRebuildTimer(workerId)).toBeDefined()
-      expect(host.getCrashCount('lc-decay')).toBe(1)
-
-      // 冷却到期（默认 5s）→ rebuild 成功：新 Worker 建立，计数暂不清零
-      await vi.advanceTimersByTimeAsync(5_000)
-      expect(host.getAllWorkers()).toHaveLength(1)
-      expect(host.getCrashCount('lc-decay')).toBe(1)
-
-      // 60s 稳定窗口内（差 1ms）不清零；窗口到期（无新崩溃）清零
-      await vi.advanceTimersByTimeAsync(59_999)
-      expect(host.getCrashCount('lc-decay')).toBe(1)
-      await vi.advanceTimersByTimeAsync(1)
-      expect(host.getCrashCount('lc-decay')).toBe(0)
-    } finally {
-      vi.useRealTimers()
-      await host.shutdown()
-    }
-  })
-
-  // ── LC-U1: onRebuilt 只复活 CRASHED 态插件（W3，PluginService 层）──
-  it('LC-U1: onRebuilt 只复活 CRASHED 态插件——UNLOADED（用户已 disable）与已卸载（无状态）跳过', async () => {
-    const tmpRoot = await mkdtemp(join(tmpdir(), 'lc-svc-root-'))
-    const tmpConfig = await mkdtemp(join(tmpdir(), 'lc-svc-config-'))
-    const broadcasts: unknown[] = []
-    const broker: IMessageBroker = {
-      send: () => {},
-      broadcast: (msg) => { broadcasts.push(msg) },
-      sendError: () => {},
-    }
-    const service = new PluginService(new PluginRegistry(tmpRoot, tmpConfig), broker, { configDir: tmpConfig })
-    await service.initialize()
-    try {
-      const crashed = makeDescriptor({ pluginId: 'p-crashed', pluginPath: '/tmp/p-crashed/index.js' })
-      const disabled = makeDescriptor({ pluginId: 'p-disabled', pluginPath: '/tmp/p-disabled/index.js' })
-      service.registry.cacheDescriptors([crashed, disabled])
-      service.activator.registerDescriptors([crashed, disabled])
-      // p-crashed：崩溃态（rebuild 应复活）；p-disabled：UNLOADED（用户 disable 终态）；
-      // p-removed：未注册状态（uninstall 后）
-      service.activator.markCrashed('p-crashed')
-
-      const loadSpy = vi.spyOn(service.host, 'loadPlugin')
-      service.handleWorkerRebuilt('trusted-99', ['p-crashed', 'p-disabled', 'p-removed'])
-
-      // 只重载 CRASHED 态；UNLOADED / 已卸载跳过（旧实现无条件重激活 = 复活用户关闭的插件）
-      expect(loadSpy).toHaveBeenCalledTimes(1)
-      expect(loadSpy).toHaveBeenCalledWith('trusted-99', 'p-crashed', crashed.pluginPath, 'trusted')
-      expect(service.activator.getState('p-disabled')).toBe('UNLOADED')
-    } finally {
-      await service.shutdown()
-      await rm(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      await rm(tmpConfig, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   })
 
@@ -555,7 +441,7 @@ describe('生命周期竞态（lifecycle races）', () => {
       })).resolves.toBeUndefined()
 
       // 1) 不冒泡 fatal_error：bootstrap 的 handleMessage catch 收到抛错才会 post
-      //    fatal_error → 宿主按整 Worker 崩溃处理（连坐同 Worker 全部插件 + crashCounts）
+      //    fatal_error → 宿主按整 Worker 崩溃处理（连坐同 Worker 全部插件）
       expect(posted.filter((m) => m.type === 'fatal_error')).toHaveLength(0)
       // 2) 同 Worker 其他插件的 handler 照常收到通知（分发不中断）
       expect(received).toHaveLength(1)

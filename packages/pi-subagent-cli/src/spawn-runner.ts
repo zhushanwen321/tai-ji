@@ -44,7 +44,7 @@ import {
 import { killPiProcess } from "@zhushanwen/pi-rpc";
 
 import { registerActiveChild } from "./active-children.ts";
-import { PI_KILL_GRACE_MS, SCHEMA_ENV_VAR } from "./constants.ts";
+import { SCHEMA_ENV_VAR } from "./constants.ts";
 import { getPiInvocation } from "./pi-invocation.ts";
 import { collectOutcome, type CollectedOutcome } from "./output-collector.ts";
 import { toErrorMessage } from "./error-message.ts";
@@ -76,11 +76,6 @@ import {
 } from "./logs/stderr-rotation.ts";
 
 const logger = getLogger("session-runner");
-
-// 毫秒→秒换算（SIGKILL 升级 warn 日志的秒数显示）。文件内私有定义：工程内
-// MS_PER_SECOND 惯例是各使用文件私有常量（subagent-engine-sdk kill-chain 等
-// 先例），无共享导出源可 import，保持同惯例不另立导出点。
-const MS_PER_SECOND = 1_000;
 
 /** run 的宿主回调面（server.ts 注入：协议通知 + host/* 反向请求）。 */
 export interface SpawnRunCallbacks {
@@ -486,7 +481,7 @@ async function writeAppendPromptFile(params: SpawnRunParams) {
 function buildTranslatorOpts(
   params: SpawnRunParams,
   callbacks: SpawnRunCallbacks,
-  killChild: (source: string) => void,
+  killChild: () => void,
   runEnd: RunEndState,
 ): SdkTranslatorOpts {
   return {
@@ -494,7 +489,7 @@ function buildTranslatorOpts(
     graceTurns: params.graceTurns,
     onEvent: callbacks.onEvent,
     onDelta: callbacks.onDelta,
-    abort: () => killChild("turn limiter abort"),
+    abort: () => killChild(),
     // agent_end（非 willRetry，队列排空）= 轮收敛（输出完整即轮终）：不 kill（等
     // agent_settled 收割边界——pi 的 compact/收尾在 agent_end 后执行，提前 kill 截断
     // 收尾截断 session 文件）；endedCleanly 置位让「end 与 settled 之间被杀」的 close
@@ -511,7 +506,7 @@ function buildTranslatorOpts(
       runEnd.endedCleanly = true;
       runEnd.settledTurnCount = turnsAtSettle;
       runEnd.resolveChatRun?.(0);
-      killChild("agent_settled reap");
+      killChild();
     },
   };
 }
@@ -632,21 +627,11 @@ export async function runSpawnOnce(
       ...(params.signal !== undefined ? { signal: params.signal } : {}),
     });
 
-    // [U1 归并] 杀链切 pi-rpc killPiProcess（SIGCONT 前置 + SIGTERM → grace →
-    // SIGKILL 阶梯，与 runtime 主链路同源；grace 维持 PI_KILL_GRACE_MS 现状值，
-    // timer unref 维持迁移前 dispose 语义）。相对 SDK killChain 的行为面差异：
-    // +SIGCONT（唤醒 SIGSTOP 冻结形态，防御增强）、-SIGKILL 后 10s 收尸等待
-    // （killChild 是 fire-and-forget，无 settle 消费方，无行为影响）。
-    const killChild = (source: string): void => {
-      void killPiProcess(child, {
-        graceMs: PI_KILL_GRACE_MS,
-        unrefTimers: true,
-        onEscalate: () => {
-          logger.warn(
-            `[kill-chain] child ${params.recordId} (source: ${source}) still alive ${PI_KILL_GRACE_MS / MS_PER_SECOND}s after SIGTERM, escalating to SIGKILL`,
-          );
-        },
-      });
+    // [U1 归并] 杀链切 pi-rpc killPiProcess（SIGKILL 直杀 + 立即 resolve，与
+    // runtime 主链路同源；原「SIGCONT → SIGTERM → grace → SIGKILL」阶梯随
+    // ADR-0112 防御清理退役）。killChild 是 fire-and-forget，无 settle 消费方。
+    const killChild = (): void => {
+      void killPiProcess(child);
     };
     // agent_settled 收割（[modeless 波2] 唯一终结语义）：轮终（真空闲）resolve 后的
     // 主动 kill，close 带信号但语义是成功（旧 core waitForChildExit 的 code ?? 0

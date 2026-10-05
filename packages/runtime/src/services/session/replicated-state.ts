@@ -79,8 +79,6 @@ export interface ReplicatedStateConfig<T> {
   fetchSnapshot: () => Promise<T>
   /** 失效防抖窗口（ms）：markDirty 后静默 debounceMs 再触发重拉，聚合失效风暴。 */
   debounceMs: number
-  /** 快照失败退避序列（ms，canonical [1000, 5000, 15000]）。耗尽后停止重试，等下一次失效/重连/周期。 */
-  backoffSchedule: readonly number[]
   /** 周期兜底重拉间隔（ms，可选，默认关闭 = 不启动周期定时器）。W7 thinkingLevel 依赖：
    *  pi 同档位切换不发射事件，纯事件失效覆盖不住，需要周期兜底。 */
   pollIntervalMs?: number
@@ -166,16 +164,12 @@ export class ReplicatedState<T> {
   /** 失效代数：每次 markDirty 自增。守卫「fetch 在途期间的失效不被成功快照吞掉」。 */
   private invalidationEpoch = 0
   private debounceTimer: ReturnType<typeof setTimeout> | null = null
-  private backoffTimer: ReturnType<typeof setTimeout> | null = null
   private pollTimer: ReturnType<typeof setInterval> | null = null
-  /** 退避游标：下次失败重试延迟取 backoffSchedule[backoffAttempt]，成功归零。 */
-  private backoffAttempt = 0
   private inFlight = false
   /** 在途 fetch 期间又有拉取触发（防抖到点/周期/重连）→ 挂起，fetch 结束后补拉一次。 */
   private chainedRefetch = false
   private disposed = false
   /** 退避预算耗尽的终末 warn 已落标志（每轮耗尽只落一条；成功/refetch 重置开启新一轮）。 */
-  private backoffExhaustionLogged = false
 
   constructor(config: ReplicatedStateConfig<T>) {
     this.config = config
@@ -217,21 +211,17 @@ export class ReplicatedState<T> {
   }
 
   /**
-   * 重连兜底全量重拉：绕过防抖立即拉取，并重置退避游标（重新走完整 1s/5s/15s 序列）。
-   * 调用点：重连 / session 激活后的主动拉取（broadcast 时序竞争的结构性兜底）。
+   * 重连全量重拉：绕过防抖立即拉取。调用点：重连 / session 激活后的主动拉取。
    */
   refetch(): void {
     if (this.disposed) return
-    this.backoffAttempt = 0
-    this.backoffExhaustionLogged = false
     void this.doFetch()
   }
 
-  /** 停止全部定时器（防抖 / 退避 / 周期兜底），实例不再拉取。per-session 实例销毁时调用。 */
+  /** 停止全部定时器（防抖 / 周期拉取），实例不再拉取。per-session 实例销毁时调用。 */
   dispose(): void {
     this.disposed = true
     this.clearDebounceTimer()
-    this.clearBackoffTimer()
     if (this.pollTimer !== null) {
       clearInterval(this.pollTimer)
       this.pollTimer = null
@@ -255,16 +245,13 @@ export class ReplicatedState<T> {
       // 语义「实例不再拉取」覆盖在途残余，迟到 warn 在测试环境下会落进 vitest worker
       // 关闭窗口引发 EnvironmentTeardownError（unhandled rejection → 覆盖率门禁 flake）。
       if (this.disposed) return
-      // 快照失败（含 wire 协议异常）：保留 dirty + 保留上次快照，退避重试。
-      // [code-harden RT-4#3] 失败显形：RPC 异常 / wire 归一异常分型 + 尝试序号，替代零日志 catch。
+      // 快照失败（含 wire 协议异常）：保留 dirty + 保留上次快照，不再自动重试
+      //（ADR-0112：1s/5s/15s 退避序列已删）。失败显式上报（warn），恢复 = 下一失效边沿
+      //（markDirty）/ refetch / 周期拉取。
       const kind = e instanceof WireSnapshotSchemaError ? 'wire-schema' : 'rpc'
-      const attemptNo = this.backoffAttempt + 1
-      const totalAttempts = this.config.backoffSchedule.length + 1
       console.warn(
-        `[replicated-state] ${this.diagnosticLabel} snapshot fetch failed`
-        + ` (attempt=${attemptNo}/${totalAttempts}, kind=${kind}): ${toErrorMessage(e)}`,
+        `[replicated-state] ${this.diagnosticLabel} snapshot fetch failed (kind=${kind}): ${toErrorMessage(e)}`,
       )
-      this.scheduleBackoffRetry()
     } finally {
       this.inFlight = false
       if (this.chainedRefetch && !this.disposed) {
@@ -279,53 +266,17 @@ export class ReplicatedState<T> {
     this.snapshot =
       this.snapshot === undefined ? normalized : this.config.merge(normalized, this.snapshot)
     if (epochAtStart === this.invalidationEpoch) {
-      // 拉取期间无新失效：数据新鲜 → 清 dirty、归零退避、撤销冗余的后续拉取
+      // 拉取期间无新失效：数据新鲜 → 清 dirty、撤销冗余的后续拉取
       this.dirty = false
-      this.backoffAttempt = 0
-      this.backoffExhaustionLogged = false
-      this.clearBackoffTimer()
       this.clearDebounceTimer()
     }
     // 拉取期间有 markDirty：dirty 保持 true；markDirty 已重挂防抖定时器，失效不丢
-  }
-
-  /** 失败退避：按 backoffSchedule 逐级重试；已有重试在途或序列耗尽则不再排。 */
-  private scheduleBackoffRetry(): void {
-    if (this.disposed) return
-    if (this.backoffTimer !== null) return
-    if (this.backoffAttempt >= this.config.backoffSchedule.length) {
-      // [code-harden RT-4#3] 预算耗尽显形：每轮耗尽只落一条终末 warn（快照陈旧不再零线索）。
-      // 恢复路径 = 既有失效边沿（markDirty / refetch / 周期兜底），理由见文件头
-      // 「失败可见性」段——不另配低频 poll。
-      if (!this.backoffExhaustionLogged) {
-        this.backoffExhaustionLogged = true
-        const totalAttempts = this.config.backoffSchedule.length + 1
-        console.warn(
-          `[replicated-state] ${this.diagnosticLabel} backoff budget exhausted after ${totalAttempts} attempts`
-          + ` (dirty=${this.dirty}); keeping last snapshot, will retry on next invalidation/refetch/poll edge`,
-        )
-      }
-      return
-    }
-    const delay = this.config.backoffSchedule[this.backoffAttempt]
-    this.backoffAttempt += 1
-    this.backoffTimer = setTimeout(() => {
-      this.backoffTimer = null
-      void this.doFetch()
-    }, delay)
   }
 
   private clearDebounceTimer(): void {
     if (this.debounceTimer !== null) {
       clearTimeout(this.debounceTimer)
       this.debounceTimer = null
-    }
-  }
-
-  private clearBackoffTimer(): void {
-    if (this.backoffTimer !== null) {
-      clearTimeout(this.backoffTimer)
-      this.backoffTimer = null
     }
   }
 

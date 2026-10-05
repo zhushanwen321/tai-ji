@@ -608,7 +608,8 @@ describe("PiEngine.read / dispose", () => {
     registerActiveChild("rec-dispose", child as unknown as ChildProcess);
 
     await engine.dispose();
-    expect(child.kills).toEqual(["SIGTERM"]);
+    // ADR-0112 防御清理：杀链 SIGKILL 直杀（原「SIGTERM → 30s grace → SIGKILL」退役）
+    expect(child.kills).toEqual(["SIGKILL"]);
 
     // 幂等：二次 dispose 不抛
     await engine.dispose();

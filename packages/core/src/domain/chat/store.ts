@@ -348,7 +348,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   const respawnPending = ref<Set<string>>(new Set())
   /** handingOff 瞬时态子域控制器（对称 compactingSessions），委托 chat-handoff.ts。设计见 ./README.md + chat-handoff.ts。 */
   const handoff = createHandoffController()
-  const { handingOffSessions, isHandingOff, setHandingOff, clearHandingOffTimer } = handoff
+  const { handingOffSessions, isHandingOff, setHandingOff } = handoff
   /** 按 sessionId 分区的自动重试态（W06-B，auto_retry_start/end） */
   const retryStates = ref<Map<string, RetryState>>(new Map())
   // [u5a 退役] `queueStates` 分区 + `getQueueState` / `clearQueueState` 已删除：唯一写方
@@ -427,7 +427,6 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * per-instance（core 单测直接调 factory 构造新 store）。
    */
   const pendingSendTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  // handingOff 超时兜底 timer + HANDING_OFF_TIMEOUT_MS 阈值内聚在 createHandoffController（chat-handoff.ts）
 
   // ── streaming 状态机深模块（B6：3 个原模块级状态机编排函数 + 2 个新提取的瞬态清理 helper 内聚为 factory，本 store 仅委托）──
   const streamingStateMachine = createStreamingStateMachine({
@@ -967,7 +966,6 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   onScopeDispose(() => {
     for (const timer of pendingSendTimers.values()) clearTimeout(timer)
     pendingSendTimers.clear()
-    handoff.clearAllTimers()
   })
 
   /**
@@ -1025,7 +1023,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     return compactingReasons.value.get(sessionId)
   }
 
-  // isHandingOff / setHandingOff / clearHandingOffTimer 委托 createHandoffController（chat-handoff.ts）。
+  // isHandingOff / setHandingOff 委托 createHandoffController（chat-handoff.ts）。
 
   /** 追加 system 提示行（与规则 #3「错误作为消息插入聊天流」一致：不用顶部 banner）。 */
   const appendSystemNotice = (sessionId: string, text: string): void => {
@@ -1160,7 +1158,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     // 07 文档 §3.3.2 cleanup 契约）。
     sessionStreamingFlags.delete(sessionId)
     // timer 清理（模块级 Map，非响应式）
-    for (const clear of [() => clearPendingSendTimer(sessionId), () => clearHandingOffTimer(sessionId)]) clear()
+    clearPendingSendTimer(sessionId)
     disposeLruEntry(sessionId) // R5: 清理 LRU 时序记录，防止内存泄漏
   }
 

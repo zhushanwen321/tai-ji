@@ -469,7 +469,7 @@ describe("callRenameLLM", () => {
 		);
 	});
 
-	it("传给 callLLM 的 opts：model/systemPrompt(<200)/maxTokens=2048/timeoutMs=30000/signal/sessionId/无 tools，messages 三段式", async () => {
+	it("传给 callLLM 的 opts：model/systemPrompt(<200)/maxTokens=2048/不传 timeoutMs/signal/sessionId/无 tools，messages 三段式", async () => {
 		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
 		vi.mocked(callLLM).mockResolvedValue({ ok: true, content: "标题" });
 		await callRenameLLM(createCtx(), BASE_CONFIG, FINAL_MESSAGE);
@@ -480,7 +480,7 @@ describe("callRenameLLM", () => {
 			systemPrompt: string;
 			messages: { role: string; content: { type: string; text: string }[] }[];
 			maxTokens: number;
-			timeoutMs: number;
+			timeoutMs?: number;
 			signal: AbortSignal;
 			sessionId: string;
 			tools?: unknown;
@@ -490,8 +490,8 @@ describe("callRenameLLM", () => {
 		expect(callOpts.systemPrompt.length).toBeLessThan(200);
 		// 输出预算覆盖 thinking+标题（reasoning 模型 thinking 600-1500 tokens 计入预算，64 必截断）
 		expect(callOpts.maxTokens).toBe(2048);
-		// 固定 30s 超时（超时归一 ok:false 走静默跳过）
-		expect(callOpts.timeoutMs).toBe(30000);
+		// 不传超时（ADR-0112：无包内超时兜底，失败直报）
+		expect(callOpts.timeoutMs).toBeUndefined();
 		expect(callOpts.signal).toBeInstanceOf(AbortSignal);
 		expect(callOpts.sessionId).toBe("test-session-id");
 		// 三段式：user(prompt) + assistant(finalText) + user(instruction)

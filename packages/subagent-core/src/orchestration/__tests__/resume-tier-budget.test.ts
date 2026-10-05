@@ -1,7 +1,8 @@
 // src/orchestration/__tests__/resume-tier-budget.test.ts
 //
-// [U2] D10 时间预算活跃段算式（纯函数 + pump 账本消费）测试 +
+// [U2] D10 时间预算活跃段算式（纯函数）测试 +
 // [ADR-0092]「恢复不补收未提交结果」的回归锁（原 D8 三档判据已随该条删除）。
+// [ADR-0112] 原「D10 pump 账本消费」describe 随重试矩阵删除（账本 + rebuildRuntime 已删）。
 //
 // 文件名保留历史名（原为「tier 判据 + 预算」双主题）；档位真实性冒烟归场景 22。
 import * as fs from "node:fs";
@@ -11,11 +12,6 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { computeActiveElapsedMs, resumeRun } from "../resume-run.ts";
-import {
-  forgetRunResumedBudget,
-  noteRunResumedBudget,
-  rebuildRuntime,
-} from "../worker-message-pump.ts";
 import {
   resetPhaseSettlementTrackerForTest,
   setRunEventJournalDirForTest,
@@ -188,107 +184,5 @@ describe("D10 活跃段算式 — computeActiveElapsedMs", () => {
       { type: "run-interrupted", errorCode: "crashed", ts: T0 + 4 * MIN, seq: 5 },
     ];
     expect(computeActiveElapsedMs(events as never)).toBe(1 * MIN);
-  });
-});
-
-// ── D10 pump 账本消费（重试路径按活跃段折算，场景 21）────────
-
-describe("D10 pump 账本消费 — rebuildRuntime 计时器重排按剩余活跃预算", () => {
-  it("noteRunResumedBudget 后 rebuildRuntime：scheduleTimeBudget 收到 budget −（活跃 + 本段已跑）", () => {
-    const runId = "wf-retry-budget";
-    const spec = {
-      scriptSource: "async function execute() {}",
-      args: {},
-      scriptName: "w",
-      scriptPath: "",
-      budgetTimeMs: 60 * MIN,
-    };
-    const run = new WorkflowRun(
-      runId,
-      spec,
-      {
-        budget: new Budget({ maxTimeMs: 60 * MIN }),
-        calls: new Map(),
-        trace: new Trace(),
-        errorLogs: [],
-      },
-      { startedAt: new Date(T0).toISOString() },
-    );
-    const worker = { postMessage: vi.fn(), terminate: vi.fn(async () => {}) } as unknown as WorkerHandle;
-    run.assignRuntime(new RunRuntime(worker, new AbortController()));
-
-    const scheduleTimeBudget = vi.fn();
-    const deps = {
-      store: { save: vi.fn(async () => {}) },
-      workerHost: { start: vi.fn(() => worker) },
-      runner: { run: vi.fn(async () => ({ content: "" })) },
-      runs: new Map(),
-      scheduleTimeBudget,
-    } as unknown as LifecycleDeps;
-    const handlers: WorkerHandlers = {
-      onMessage: vi.fn(async () => {}),
-      onError: vi.fn(async () => {}),
-      onExit: vi.fn(async () => {}),
-    };
-
-    try {
-      // resume 于「活跃已耗 40min + 本段已跑 5min」→ 剩余 ≈ 15min
-      noteRunResumedBudget(runId, 40 * MIN, Date.now() - 5 * MIN);
-      rebuildRuntime(run, deps, handlers);
-      expect(scheduleTimeBudget).toHaveBeenCalledTimes(1);
-      const rescheduled = scheduleTimeBudget.mock.calls[0]![1] as number;
-      expect(rescheduled).toBeGreaterThanOrEqual(14 * MIN);
-      expect(rescheduled).toBeLessThanOrEqual(15 * MIN);
-    } finally {
-      forgetRunResumedBudget(runId);
-      resetPhaseSettlementTrackerForTest();
-    }
-  });
-
-  it("forgetRunResumedBudget 后回落 startedAt 墙钟现状算法（非 resume 来源 run 语义保持）", () => {
-    const runId = "wf-fallback";
-    const spec = {
-      scriptSource: "async function execute() {}",
-      args: {},
-      scriptName: "w",
-      scriptPath: "",
-      budgetTimeMs: 60 * MIN,
-    };
-    const run = new WorkflowRun(
-      runId,
-      spec,
-      {
-        budget: new Budget({ maxTimeMs: 60 * MIN }),
-        calls: new Map(),
-        trace: new Trace(),
-        errorLogs: [],
-      },
-      { startedAt: new Date(Date.now() - 10 * MIN).toISOString() },
-    );
-    const worker = { postMessage: vi.fn(), terminate: vi.fn(async () => {}) } as unknown as WorkerHandle;
-    run.assignRuntime(new RunRuntime(worker, new AbortController()));
-    const scheduleTimeBudget = vi.fn();
-    const deps = {
-      store: { save: vi.fn(async () => {}) },
-      workerHost: { start: vi.fn(() => worker) },
-      runner: { run: vi.fn(async () => ({ content: "" })) },
-      runs: new Map(),
-      scheduleTimeBudget,
-    } as unknown as LifecycleDeps;
-
-    try {
-      noteRunResumedBudget(runId, 1, Date.now());
-      forgetRunResumedBudget(runId);
-      rebuildRuntime(run, deps, {
-        onMessage: vi.fn(async () => {}),
-        onError: vi.fn(async () => {}),
-        onExit: vi.fn(async () => {}),
-      });
-      const rescheduled = scheduleTimeBudget.mock.calls[0]![1] as number;
-      expect(rescheduled).toBeGreaterThanOrEqual(49 * MIN); // 60 − 10（墙钟）
-      expect(rescheduled).toBeLessThanOrEqual(50 * MIN);
-    } finally {
-      resetPhaseSettlementTrackerForTest();
-    }
   });
 });

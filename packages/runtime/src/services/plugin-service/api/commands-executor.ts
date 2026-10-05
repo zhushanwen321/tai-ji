@@ -115,7 +115,6 @@ export async function executeCommand(
   startTimes.set(registration.handlerId, Date.now())
   const result = deps.commandInvokes.register(
     registration.handlerId,
-    timeoutMs,
     Object.assign(
       new Error(
         `Command '${compositeKey}' timed out after ${formatDurationMs(timeoutMs)} ` +
@@ -124,6 +123,7 @@ export async function executeCommand(
       ),
       { code: -32000 },
     ),
+    timeoutMs,
   )
   deps.rpcServer.notify(
     handle.workerId,

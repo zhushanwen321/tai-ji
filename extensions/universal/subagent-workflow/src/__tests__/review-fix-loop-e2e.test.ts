@@ -19,6 +19,12 @@
  *
  * 已知限制：批内 review 调用顺序不保证——剧本不依赖具体 agent 顺序
  * （E2E-2 只断言调用总数，R1 中先到者 dirty 后到者 clean 均可）。
+ *
+ * [ADR-0112] 已删除原用例 A1「engine rebuild 后同 _runId 残留 state 被重置」：
+ * 脚本错误自动重建（rebuildRuntime）已删，脚本错误一次即 done,failed 显式上报，
+ * rebuild 后残留 state 重置 / meta.previousAttempts 留痕机制（及其工作流源码实现）
+ * 一并移除——该用例主题不可达。「脚本错误 → run failed + error 透传」契约由
+ * S-19 fail-fast 用例（脚本顶层 fail() 抛错 → reason=failed）继续锁定。
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -928,7 +934,8 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
         RUN_TIMEOUT_MS,
       );
 
-      // 脚本顶层白名单校验 fail() 抛错 → worker type:"error" → 重试超限 → reason=failed
+      // 脚本顶层白名单校验 fail() 抛错 → worker type:"error" → 一次即 done,failed
+      // 显式上报（[ADR-0112] 无脚本错误重试）
       expect(result.reason).toBe("failed");
       expect(result.error).toContain("未知参数: batchl");
       // 校验发生在任何 agent 调用之前（参数校验在脚本最顶部）
@@ -2161,90 +2168,6 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
     RUN_TIMEOUT_MS,
   );
 
-  it(
-    "A1: engine rebuild 后同 _runId 残留 state 被重置——calls/fixResults 无双记 + previousAttempts=1",
-    async () => {
-      // 受控脚本故障注入（设计 §8.2 S4 方法）：临时脚本副本在首次 fix 完成后写 marker
-      // 文件并抛错 → engine script-error → rebuildRuntime（同 _runId / 同 RUN_ROOT 重跑，
-      // 已完成调用按 callId 缓存重放）。attempt-2 读到 marker 不再抛。
-      // 修复前：loadState 原样复用 attempt-1 残留 → 重放的 recordCall/fixResults/fixCount
-      // 全部双记（calls=7/fixResults=2/fixCount=2）；修复后（A1）重置易变字段，
-      // 仅 meta.previousAttempts=1 留痕。
-      const faultDir = mkdtempSync(join(tmpdir(), "rfl-e2e-fault-"));
-      try {
-        const original = readFileSync(wf("review-fix-loop"), "utf-8");
-        const utilsSrc = readFileSync(join(WORKFLOWS_DIR, "review-fix-loop-utils.cjs"), "utf-8");
-        // 注入点：R1 fix 完成后的 log 行（此刻 state.json 已 saveState 落盘一次）
-        const anchor = 'log("Fixed " + fixedCount + " issue(s). Total: " + totalFixed + ". Modified " + modifiedFiles.length + " file(s). Continuing...");';
-        if (!original.includes(anchor)) {
-          throw new Error("A1 e2e: fault anchor not found in review-fix-loop.js");
-        }
-        const faultCode = anchor + "\n"
-          + "// [TEST-INJECTED FAULT] attempt-1 写 marker 后抛错触发 engine rebuild；attempt-2 读到 marker 不再抛\n"
-          + "try {\n"
-          + "  fs.accessSync(RUN_ROOT + \"/e2e-fault-marker\");\n"
-          + "} catch (e) {\n"
-          + "  if (String(e).includes(\"e2e-fault-marker\") === false && String(e).includes(\"ENOENT\") === false) throw e;\n"
-          + "  fs.writeFileSync(RUN_ROOT + \"/e2e-fault-marker\", \"1\");\n"
-          + "  throw new Error(\"e2e-injected fault: simulate script-error after first state write (A1)\");\n"
-          + "}";
-        const injected = original.replace(anchor, faultCode);
-        const faultScriptPath = join(faultDir, "review-fix-loop.js");
-        writeFileSync(faultScriptPath, injected, "utf-8");
-        // utils 经 workerData.scriptPath dirname 定位——副本目录内放同版 utils
-        writeFileSync(join(faultDir, "review-fix-loop-utils.cjs"), utilsSrc, "utf-8");
-
-        // 剧本：R1 1 must-fix → fix（saveState 后触发注入 fault）→ rebuild 重放 R1 → R2 clean
-        const runner = makeScenarioRunner({
-          review: [
-            () => ({ report_file: "/tmp/a1-r1.md", must_fix: 1, suggestion: 0, reconciliation: [] }),
-            () => ({
-              report_file: "/tmp/a1-r2.md", must_fix: 0, suggestion: 0,
-              reconciliation: [{ prev_id: "MF-1", status: "fixed", evidence: "read confirmed" }],
-            }),
-          ],
-          aggregate: () => ({
-            report_file: "/tmp/a1-agg.md", must_fix: 1, suggestion: 0,
-            must_fix_ids: [{ id: "MF-1", severity: "major" }], fixes_caution: [],
-          }),
-          fix: () => ({
-            fixed_count: 1,
-            fixes: [{ issue_id: "MF-1", description: "mock fix", self_check: "grep: 1 hit; synced", affected_files: [] }],
-            deferred: [],
-          }),
-        });
-        const deps = makeDeps(runner);
-        const result = await runWorkflowToSettled(
-          faultScriptPath,
-          { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
-          deps, undefined, RUN_TIMEOUT_MS,
-        );
-
-        expect(result.reason).toBe("completed");
-        expect(result.error).toBeUndefined();
-        const outcome = assertScriptOutcome(result.scriptResult);
-        expect(outcome.terminated).toBe("clean");
-        expect(outcome.totalFixed).toBe(1);
-
-        const st = JSON.parse(readFileSync(join(outcome.runDir!, "state.json"), "utf8")) as {
-          meta: { previousAttempts?: number };
-          calls: Array<Record<string, unknown>>;
-          fixResults: unknown[];
-          fixCount: number;
-        };
-        // attempt-1 残留被识别并留痕
-        expect(st.meta.previousAttempts).toBe(1);
-        // calls 无双记：attempt-2 重放 R1（review/agg/fix）+ R2 review = 4
-        //（修复前 = attempt-1 的 3 + attempt-2 的 4 = 7）
-        expect(st.calls.length).toBe(4);
-        expect(st.fixResults.length).toBe(1);
-        expect(st.fixCount).toBe(1);
-      } finally {
-        rmSync(faultDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-      }
-    },
-    RUN_TIMEOUT_MS * 2,
-  );
 });
 
 

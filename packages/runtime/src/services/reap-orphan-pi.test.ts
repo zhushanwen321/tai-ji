@@ -29,7 +29,6 @@ import {
   matchesOwnPiArgv,
   findOrphanPiRows,
   reapOrphanPiProcesses,
-  ORPHAN_KILL_GRACE_MS,
   type PsRow,
 } from './reap-orphan-pi.js'
 import { getSpawnMarkersPath, readSpawnMarkerList } from '../infra/pi/spawn-markers.js'
@@ -294,15 +293,12 @@ describe('spawn 清单读取与 fail-safe 降级（V10④：宁漏不误杀）',
     const dataDir = makeMarkersDataDir()
     try {
       writeMarkersFile(dataDir, [...MARKERS])
-      const signal = vi.fn((pid: number, sig: 'SIGTERM' | 'SIGKILL' | 0) => {
-        if (sig === 0 && pid === 504) throw esrch() // 宽限后探活已退出
-      })
+      const signal = vi.fn()
       const res = await reapOrphanPiProcesses({
         dataDir,
         ownPid: OWN_PID,
         listProcesses: async () => psStdout([row(504, 1, piCmd(MARKERS[0]))]),
         signal,
-        delay: async () => {},
         readSpawnMarkers: realRead(dataDir),
       })
       expect(res.reaped).toEqual([504])
@@ -352,90 +348,46 @@ describe('spawn 清单读取与 fail-safe 降级（V10④：宁漏不误杀）',
 })
 
 describe('reapOrphanPiProcesses（编排；清单一律注入，与 fs 隔离）', () => {
-  it('目标 = 判据 v2 且 ppid=1；并存实例与本 runtime 的子代不触碰；SIGTERM 后已退出则收殓，不打 SIGKILL', async () => {
+  it('目标 = 判据 v2 且 ppid=1；并存实例与本 runtime 的子代不触碰；SIGKILL 直杀', async () => {
     const stdout = psStdout([
       row(201, 1, piCmd(MARKERS[0])),       // 孤儿（ppid=1）
       row(202, OWN_PID, piCmd(MARKERS[0])), // 本 runtime 子进程
       row(205, 40842, piCmd(MARKERS[0])),   // 并存合法实例（打包版）的活跃 pi——跨实例保护
       row(204, 1, 'node app.js'),           // 无关进程
     ])
-    const signal = vi.fn((pid: number, sig: 'SIGTERM' | 'SIGKILL' | 0) => {
-      if (sig === 0 && pid === 201) throw esrch() // 宽限后探活：已退出
-    })
-    const delay = vi.fn(async () => {})
+    const signal = vi.fn()
     const res = await reapOrphanPiProcesses({
       dataDir: DATA_DIR,
       ownPid: OWN_PID,
       listProcesses: async () => stdout,
       signal,
-      delay,
       readSpawnMarkers: () => [...MARKERS],
     })
     expect(res.reaped).toEqual([201])
     expect(res.failed).toEqual([])
     expect(res.scanned).toBe(4)
-    expect(signal).toHaveBeenCalledWith(201, 'SIGTERM')
-    expect(signal).toHaveBeenCalledWith(201, 0)
-    expect(signal).not.toHaveBeenCalledWith(201, 'SIGKILL')
-    // 非目标 pid（202/205 活实例子代、204 无关进程）全程不被触碰
-    const touched = signal.mock.calls.map(c => c[0])
-    expect(touched).toEqual([201, 201])
-    expect(delay).toHaveBeenCalledWith(ORPHAN_KILL_GRACE_MS)
+    expect(signal).toHaveBeenCalledTimes(1)
+    expect(signal).toHaveBeenCalledWith(201, 'SIGKILL')
   })
 
-  it('顽固孤儿：SIGTERM → 宽限探活仍活 → SIGKILL（完整时序）', async () => {
-    const signal = vi.fn()
-    const delay = vi.fn(async () => {})
-    const res = await reapOrphanPiProcesses({
-      dataDir: DATA_DIR,
-      ownPid: OWN_PID,
-      listProcesses: async () => psStdout([row(301, 1, piCmd(MARKERS[0]))]),
-      signal,
-      delay,
-      readSpawnMarkers: () => [...MARKERS],
+  it('SIGKILL 即 ESRCH（stdin-EOF 自杀链先到）：按已回收计，不记失败', async () => {
+    const signal = vi.fn((pid: number, sig: 'SIGKILL') => {
+      if (sig === 'SIGKILL' && pid === 401) throw esrch()
     })
-    expect(res.reaped).toEqual([301])
-    expect(signal.mock.calls.map(c => `${c[0]}:${c[1]}`)).toEqual(['301:SIGTERM', '301:0', '301:SIGKILL'])
-    expect(delay).toHaveBeenCalledTimes(1)
-    expect(delay).toHaveBeenCalledWith(ORPHAN_KILL_GRACE_MS)
-  })
-
-  it('SIGTERM 即 ESRCH（stdin-EOF 自杀链先到）：按已回收计，不等待宽限', async () => {
-    const signal = vi.fn((_pid: number, sig: 'SIGTERM' | 'SIGKILL' | 0) => {
-      if (sig === 'SIGTERM') throw esrch()
-    })
-    const delay = vi.fn(async () => {})
     const res = await reapOrphanPiProcesses({
       dataDir: DATA_DIR,
       ownPid: OWN_PID,
       listProcesses: async () => psStdout([row(401, 1, piCmd(MARKERS[0]))]),
       signal,
-      delay,
       readSpawnMarkers: () => [...MARKERS],
     })
     expect(res.reaped).toEqual([401])
-    expect(delay).not.toHaveBeenCalled()
-  })
-
-  it('SIGKILL 也 ESRCH（宽限期内自行退出）：按已回收计不记失败', async () => {
-    const signal = vi.fn((pid: number, sig: 'SIGTERM' | 'SIGKILL' | 0) => {
-      if (sig === 'SIGKILL' && pid === 501) throw esrch()
-    })
-    const res = await reapOrphanPiProcesses({
-      dataDir: DATA_DIR,
-      ownPid: OWN_PID,
-      listProcesses: async () => psStdout([row(501, 1, piCmd(MARKERS[0]))]),
-      signal,
-      delay: async () => {},
-      readSpawnMarkers: () => [...MARKERS],
-    })
-    expect(res.reaped).toEqual([501])
     expect(res.failed).toEqual([])
   })
 
   it('真信号错误（非 ESRCH）：记入 failed 不抛', async () => {
-    const signal = vi.fn((_pid: number, sig: 'SIGTERM' | 'SIGKILL' | 0) => {
-      if (sig === 'SIGTERM') {
+    const signal = vi.fn((_pid: number, sig: 'SIGKILL') => {
+      if (sig === 'SIGKILL') {
         const e = new Error('not permitted') as NodeJS.ErrnoException
         e.code = 'EPERM'
         throw e
@@ -446,7 +398,6 @@ describe('reapOrphanPiProcesses（编排；清单一律注入，与 fs 隔离）
       ownPid: OWN_PID,
       listProcesses: async () => psStdout([row(601, 1, piCmd(MARKERS[0]))]),
       signal,
-      delay: async () => {},
       readSpawnMarkers: () => [...MARKERS],
     })
     expect(res.reaped).toEqual([])
@@ -510,7 +461,6 @@ describe('reapOrphanPiProcesses 杀链决策日志（crash-resilience §3.3 D6-�
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
     try {
       const signal = vi.fn()
-      const delay = vi.fn(async () => {})
       const dataDir = makeMarkersDataDir()
       try {
         writeMarkersFile(dataDir, [...MARKERS])
@@ -523,7 +473,6 @@ describe('reapOrphanPiProcesses 杀链决策日志（crash-resilience §3.3 D6-�
             row(802, 1, piCmd(MARKERS[1]!)),
           ]),
           signal,
-          delay,
           readSpawnMarkers: () => readSpawnMarkerList(dataDir),
         })
       } finally {
@@ -588,7 +537,6 @@ describe('reapOrphanPiProcesses 杀链决策日志（crash-resilience §3.3 D6-�
           ownPid: OWN_PID,
           listProcesses: async () => psStdout([row(902, 1, piCmd(MARKERS[0]!))]),
           signal: vi.fn(),
-          delay: vi.fn(async () => {}),
           readSpawnMarkers: () => readSpawnMarkerList(dataDir),
         })
       } finally {

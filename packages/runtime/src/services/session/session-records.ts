@@ -267,7 +267,6 @@ const JSON_INDENT = 2
  * 锚点：dist/core/session-manager.js:982-984（0.84.4）getEntries 返回 `this.fileEntries.filter(...)`
  * 内存过滤零磁盘 IO；调用链 dist/modes/rpc/rpc-mode.js:505-515 get_entries case）。
  */
-export const RECORD_RECONCILE_INTERVAL_MS = 15_000
 
 /**
  * [reload-closeout D2 实施期门①] 单轮对账（fetch→merge→publish）耗时红绿线：
@@ -333,7 +332,6 @@ export class SessionRecords {
    * 扫描域 = 持有非空派生缓存的已注册 session；域清零随 onSessionDisposed 检查停。
    * 与防抖失效路径 / agent_settled 腿的重入经 per-session inflight 合并（既有机制）。
    */
-  private reconcileTimer: ReturnType<typeof setInterval> | null = null
 
   /**
    * [reload-closeout D2 重审触发线第二维度] 扫描域规模边沿状态（上次 sweep 是否已超
@@ -548,7 +546,6 @@ export class SessionRecords {
     this.syncCacheFromProjection(cache, cache.projection)
     if (!this.deps.hasSession(sessionId)) return // 已销毁：不 publish（与 entry 路径同守卫）
     this.publishRecordChanges(cache, sessionId)
-    this.syncReconcileTimer()
   }
 
   /** 派生缓存 ← 投影合并快照（cache.subagents/workflows 的数据写路径唯一 = 投影重算）。 */
@@ -633,83 +630,15 @@ export class SessionRecords {
           console.warn(`[session-service] record refresh round took ${elapsedMs}ms for ${sessionId} (budget ${RECORD_RECONCILE_ROUND_BUDGET_MS}ms) — profiling red line exceeded, recalibration trigger`)
         }
         // [reload-closeout D2] 派生内容落缓存后同步定时腿起停（域非空起、域空停）
-        this.syncReconcileTimer()
       }
     }
     cache.inflight = run().finally(() => { cache.inflight = null })
     return cache.inflight
   }
 
-  // ── [reload-closeout D2] 定时对账腿（15s 服务级单例 timer）──
-
-  /**
-   * 扫描域内逐 session 重跑对账管线（refreshRecordEntries，发布门 = 水位）。
-   * 实施期门③：cursor=null（未首拉 / 自愈待全量）本轮跳过——cursor 失效全量重建的 RPC
-   * 路径无 oversize 保护（32MB 预检只在磁盘路径），高频定时撞自愈会放大；跳过后等
-   * agent_settled 腿走正常全量路径。
-   */
-  private runReconcileSweep(): void {
-    try {
-      const domain = this.reconcileScanDomain()
-      // [reload-closeout D2 重审触发线第二维度] 扫描域规模观测（此前仅耗时红线单维度，
-      // 「扫描域 session 数 > 10」零观测）：跨阈值边沿 warn 一次，稳态持续超线不重复刷；
-      // 措辞与单轮耗时红线同族（recalibration trigger）。域空时 overThreshold 恒 false，
-      // 边沿自然回落，下次重超线会再次 warn。
-      const overThreshold = domain.length > RECORD_RECONCILE_DOMAIN_SIZE_WARN_THRESHOLD
-      if (overThreshold && !this.reconcileDomainOverThreshold) {
-        console.warn(
-          `[session-service] record reconcile sweep domain grew to ${domain.length} sessions`
-          + ` (threshold ${RECORD_RECONCILE_DOMAIN_SIZE_WARN_THRESHOLD})`
-          + ` — scan-domain red line exceeded, recalibration trigger`,
-        )
-      }
-      this.reconcileDomainOverThreshold = overThreshold
-      if (domain.length === 0) {
-        this.stopReconcileTimer()
-        return
-      }
-      for (const sessionId of domain) {
-        const cache = this.recordEntriesCaches.get(sessionId)
-        if (!cache) continue
-        if (cache.cursor === null) continue // 实施期门③
-        void this.refreshRecordEntries(sessionId, 'reconcile-timer').catch((e) => this.warnReconcileRoundFailed(sessionId, e))
-      }
-    } catch (e) {
-      // 定时器单轮 try 围栏：异常不杀 timer，下轮恢复（对账循环自身挂死处置，§3.4）
-      console.warn(`[session-service] record reconcile sweep failed: ${toErrorMessage(e)}`)
-    }
-  }
-
-  /** 扫描域 = 持有非空派生缓存（任一家族有内容）的已注册 session。 */
-  private reconcileScanDomain(): string[] {
-    const ids: string[] = []
-    for (const [sessionId, cache] of this.recordEntriesCaches) {
-      if (isInReconcileDomain(cache)) ids.push(sessionId)
-    }
-    return ids
-  }
-
-  /** 水位门起停幂等同步：域非空确保 timer 在跑、域空停（销毁/清域检查点调用）。 */
-  private syncReconcileTimer(): void {
-    if (this.reconcileScanDomain().length > 0) this.ensureReconcileTimer()
-    else this.stopReconcileTimer()
-  }
-
-  private ensureReconcileTimer(): void {
-    if (this.reconcileTimer !== null) return
-    const timer = setInterval(() => this.runReconcileSweep(), RECORD_RECONCILE_INTERVAL_MS)
-    // unref：对账兜底腿不得钉住进程退出（fake-timers 环境无 unref，存在性守卫跳过）
-    if (typeof (timer as { unref?: () => void }).unref === 'function') {
-      ;(timer as { unref: () => void }).unref()
-    }
-    this.reconcileTimer = timer
-  }
-
-  private stopReconcileTimer(): void {
-    if (this.reconcileTimer === null) return
-    clearInterval(this.reconcileTimer)
-    this.reconcileTimer = null
-  }
+  // [ADR-0112 退役登记] 定时对账腿（reload-closeout D2 的 15s 服务级 setInterval 扫描）
+  // 已删——记录条目对账保留事件边沿单腿（agent_settled 触发 reconcileRecordEntries），
+  // settled 腿丢失时条目滞留至下一事件边沿。
 
   /**
    * W18：单轮 get_entries 拉取——按 cursor 有无分流增量/全量（fullRebuild 随返回值上浮，
@@ -1188,7 +1117,6 @@ export class SessionRecords {
       // [W1 / D6] 事件投影随 cache 同批销毁（停两域 tailer 的 watcher 与周期复查）
       cache.projection?.dispose()
       this.recordEntriesCaches.delete(sessionId)
-      this.syncReconcileTimer()
     }
   }
 }

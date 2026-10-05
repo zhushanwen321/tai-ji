@@ -169,9 +169,9 @@ export interface CrashJournalEvent {
   pid?: number | null
   /** [reaped/reap-failed] 收殓时刻的 ppid（恒 1 = reparent 证据，归因复核判据；reap-orphan-pi.ts）。 */
   ppid?: number | null
-  /** [reclaimed] 回收判定时的空闲时长 now - lastActivityAt（idle-pi-reaper.ts 摘除步）。 */
+  /** [reclaimed] 回收判定时的空闲时长 now - lastActivityAt（历史写入方 idle-pi-reaper 已退役；字段保留供旧 journal 解析）。 */
   idleMs?: number | null
-  /** [reclaimed] 最近被查看时刻（epoch ms）；null = 从未被查看（idle-pi-reaper.ts）。 */
+  /** [reclaimed] 最近被查看时刻（epoch ms）；null = 从未被查看（历史写入方 idle-pi-reaper 已退役；字段保留供旧 journal 解析）。 */
   lastViewedAt?: number | null
   /** [plugin-worker-crash] 宿主池内进程标识 trusted-N / sandbox-<pluginId>（plugin-host-process.ts）。 */
   processId?: string | null

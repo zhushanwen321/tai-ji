@@ -303,15 +303,15 @@ describe('u6 D1: update:getPreloaded miss 后认领', () => {
 // D2 交错缓解：update:install 响应增加实装 version 字段
 // ════════════════════════════════════════════════════════════════
 describe('u6 D2: update:install 响应含实装 version', () => {
-  /** 捕获 setTimeout（triggerRestart 后的延迟 quit），不实际执行 */
-  let capturedQuitTimer: { delay: number } | null = null
+  // [ADR-0112] 原「500ms 延迟 quit」改为 setImmediate；断言改为捕获 quit 回调。
+  let capturedQuitCallback: (() => void) | null = null
 
   beforeEach(() => {
-    capturedQuitTimer = null
-    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((cb: () => void, delay?: number) => {
-      capturedQuitTimer = { delay: delay ?? 0 }
-      return 0 as unknown as NodeJS.Timeout
-    }) as typeof setTimeout)
+    capturedQuitCallback = null
+    vi.spyOn(globalThis, 'setImmediate').mockImplementation(((cb: () => void) => {
+      capturedQuitCallback = cb
+      return 0 as unknown as NodeJS.Immediate
+    }) as typeof setImmediate)
   })
 
   afterEach(() => {
@@ -332,9 +332,8 @@ describe('u6 D2: update:install 响应含实装 version', () => {
 
     expect(result).toEqual({ triggerRestart: true, version: '0.9.11' })
     expect(installUpdate).toHaveBeenCalledWith(FIXTURE, '/tmp/preloaded.zip', expect.any(Function))
-    // triggerRestart=true → 仍安排 500ms 延迟 quit（既有不变量不回归）
-    expect(capturedQuitTimer).not.toBeNull()
-    expect(capturedQuitTimer!.delay).toBe(500)
+    // triggerRestart=true → 安排 quit（setImmediate，handler return 落定后进入退出流程）
+    expect(capturedQuitCallback).not.toBeNull()
   })
 })
 

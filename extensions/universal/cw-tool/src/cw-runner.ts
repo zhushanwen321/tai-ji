@@ -130,9 +130,6 @@ function tryParseJson(text: string): unknown | undefined {
 	}
 }
 
-/** cw spawn 默认超时（5 分钟）。cw 卡死时避免永久挂起 agent turn。 */
-const DEFAULT_CW_TIMEOUT_MS = 300_000;
-
 /**
  * 执行 cw 只读查询的核心逻辑：白名单校验 → 参数校验 → spawn → 解析。
  *
@@ -146,7 +143,7 @@ const DEFAULT_CW_TIMEOUT_MS = 300_000;
  * @param spawner  spawn 实现（默认走真实 cw，测试注入 fake）。
  * @param cwd      子进程工作目录（cw 2.0 以 cwd 定位 `~/.cw/<encoded-cwd>/` 账本）。
  * @param signal   可选 SDK abort signal；与超时合并后透传给 spawner，abort 时 spawner kill 子进程。
- * @param timeoutMs spawn 超时（ms），默认 5 分钟；0 表示不限时。超时返回 ok:false "cw 超时"。
+ * @param timeoutMs 可选 spawn 超时（ms），仅调用方显式传入时武装（包内无默认超时，ADR-0112：失败直报不设挂死兜底）；0 表示不限时。超时返回 ok:false "cw 超时"。
  */
 export async function executeCwAction(
 	action: string,
@@ -156,7 +153,7 @@ export async function executeCwAction(
 	spawner: CwSpawner,
 	cwd: string,
 	signal?: AbortSignal,
-	timeoutMs: number = DEFAULT_CW_TIMEOUT_MS,
+	timeoutMs?: number,
 ): Promise<CwDetails> {
 	const base = { action };
 
@@ -178,7 +175,7 @@ export async function executeCwAction(
 		else signal.addEventListener("abort", onSdkAbort, { once: true });
 	}
 	const timer =
-		timeoutMs > 0
+		timeoutMs !== undefined && timeoutMs > 0
 			? setTimeout(() => {
 					timedOut = true;
 					combined.abort();

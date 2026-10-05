@@ -480,11 +480,9 @@ describe("引擎崩溃与重建（A8①③）", () => {
   it("stderr 常驻排空：环形缓冲只留尾 400 字符（宿主侧不落盘）", async () => {
     const { client, cleanup } = makeClient({
       args: [FAKE_ENGINE, "--mode", "crash"],
-      // 测试通道压退避（生产默认 1+2+4s 不变）；真实子进程 spawn→崩溃 IO 保留
-      crashRebuildBackoffMs: [10, 20, 40],
     });
     // crash 模式：spawn 即死（stderr 写 600+ 字符样本）→ initialize 无应答 →
-    // 重建循环走完（注入退避 10+20+40ms）→ 标记不可用 reject engine_crashed。
+    // 一次即标记不可用 reject engine_crashed（ADR-0112：无自动重建）。
     await expect(client.ensureConnected()).rejects.toMatchObject({ code: "engine_crashed" });
     expect(client.stderrTailText.length).toBeLessThanOrEqual(401);
     expect(client.stderrTailText).toContain("x"); // 尾部内容保留（头部被截）
@@ -492,19 +490,14 @@ describe("引擎崩溃与重建（A8①③）", () => {
     await cleanup();
   }, 30_000);
 
-  it("崩溃重建：初建失败 + 3 次重建退避 1s/2s/4s 全败 → 标记不可用（恒 throw，含恢复指引）", async () => {
+  it("初建失败：一次即标记不可用（恒 throw，含恢复指引；ADR-0112 无自动重建）", async () => {
     const { client, cleanup } = makeClient({
       args: [FAKE_ENGINE, "--mode", "crash"],
-      // 测试通道压退避（生产默认序列 1s/2s/4s 不变——断言仍覆盖「4 次尝试全败」语义）
-      crashRebuildBackoffMs: [10, 20, 40],
     });
-    // 退避序列（注入后）：初建(即时崩) → 10ms → 重建1(崩) → 20ms → 重建2(崩) →
-    // 40ms → 重建3(崩) → 不可用。每次 spawn→崩溃是真实子进程 IO，无法用 fake
-    // timers 推进（advance 不等 IO），退避时长经 crashRebuildBackoffMs 压缩。
     await expect(client.ensureConnected()).rejects.toSatisfy(
       (err: Error & { code?: string; recovery?: string }) => {
         expect(err.code).toBe("engine_crashed");
-        expect(err.message).toContain("failed to start after 4 attempts");
+        expect(err.message).toContain("failed to start");
         expect(err.recovery).toContain("unavailable until the next host start");
         return true;
       },
@@ -514,7 +507,7 @@ describe("引擎崩溃与重建（A8①③）", () => {
     await cleanup();
   }, 30_000);
 
-  it("重建恢复：进程意外死亡后下次 ensureConnected 重建成功（新 pid）；连接复用不重建", async () => {
+  it("运行期崩溃恢复：调用方显式重连（ensureConnected）后重建成功（新 pid）；连接复用不重建", async () => {
     const { client, cleanup } = makeClient();
     await client.ensureConnected();
     const firstPid = client.enginePid!;

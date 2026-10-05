@@ -23,7 +23,6 @@ import type { PluginRpcServer } from './plugin-rpc-server.js'
 import { toErrorMessage } from '../../utils/errors.js'
 
 /** 每个 hook handler 的执行超时（ms） */
-const HOOK_HANDLER_TIMEOUT_MS = 5_000
 
 /**
  * RT-6#3：hook 异常（无 handle skip / handler 失败或超时）聚合 warn 的间隔。
@@ -128,7 +127,6 @@ export class HookPipeline {
             hookType,
             context,
           },
-          HOOK_HANDLER_TIMEOUT_MS, // 每个 handler 超时
         ) as Record<string, unknown>
 
         // 统一处理序（设计 §3.3-D2）：block 判定 → transform（注入步随 bridge 退役删除，

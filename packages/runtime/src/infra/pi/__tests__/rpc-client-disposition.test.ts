@@ -43,8 +43,7 @@ vi.mock('../../logger.js', async () => {
 })
 
 async function startClient(): Promise<RpcClient> {
-  const clientOpts = { startupDelayMs: 0 } as const
-  const client = new RpcClient({ ...clientOpts })
+  const client = new RpcClient()
   const startP = client.start()
   await vi.advanceTimersByTimeAsync(0)
   await startP

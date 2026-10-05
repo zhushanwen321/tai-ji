@@ -2,10 +2,10 @@
  * window-factory render-process-gone 崩溃台账接线单测（crash-forensics-and-watchdog
  * §3.3 D1 renderer 行，实施计划 u1f）。
  *
- * 覆盖（验收：render-process-gone oom 与普通 crash reason 可区分 + 熔断事件断言）：
- * - reload 决策 → reload 行，reason 透传 Electron 枚举（'oom' 与 'crashed' 在台账可区分）
- * - 熔断决策（60s 滑窗第 4 次）→ crash/circuit-breaker 行，该次不产生 reload 行
- * - destroyed 窗口 → 无台账行（恢复链在 isDestroyed 守卫后，台账挂同守卫之后）
+ * 覆盖（验收：render-process-gone oom 与普通 crash reason 可区分）：
+ * - 崩溃 → crash 行，reason 透传 Electron 枚举（'oom' 与 'crashed' 在台账可区分）
+ *   [ADR-0112] 原 reload/熔断(circuit-breaker) 事件随自动 reload 熔断链删除
+ * - destroyed 窗口 → 无台账行（错误页链在 isDestroyed 守卫后，台账挂同守卫之后）
  * - webContents 'unresponsive' → unresponsive/renderer-unresponsive 行（D1 renderer 行
  *   第三事件）：同一次持续卡死防重复记行，responsive 恢复复位后卡死↔恢复循环各记一行
  *
@@ -162,38 +162,35 @@ describe('render-process-gone 台账接线（crash-forensics D1 renderer 行）'
     delete process.env.TAIJI_E2E
   })
 
-  it('首崩 reason=oom → reload 行（renderer OOM 与普通崩溃在台账可区分，评估器 #9/#10 数据源）', async () => {
+  it('首崩 reason=oom → crash 行（renderer OOM 与普通崩溃在台账可区分，评估器 #9/#10 数据源）', async () => {
     const factory = await loadFactory()
     const win = await createProdWindow(factory, 'win-oom')
     crash(win, 'oom')
     expect(journalEvents()).toEqual([
-      { layer: 'renderer', event: 'reload', reason: 'oom' },
+      { layer: 'renderer', event: 'crash', reason: 'oom' },
     ])
   })
 
-  it('首崩 reason=crashed → reload 行 reason=crashed（与 oom 行 reason 可区分）', async () => {
+  it('首崩 reason=crashed → crash 行 reason=crashed（与 oom 行 reason 可区分）', async () => {
     const factory = await loadFactory()
     const win = await createProdWindow(factory, 'win-crashed')
     crash(win, 'crashed')
     expect(journalEvents()).toEqual([
-      { layer: 'renderer', event: 'reload', reason: 'crashed' },
+      { layer: 'renderer', event: 'crash', reason: 'crashed' },
     ])
     expect(journalEvents()[0].reason).not.toBe('oom')
   })
 
-  it('同窗口 60s 内第 4 次崩（熔断）→ crash/circuit-breaker 行，该次无 reload 行', async () => {
+  it('再次崩溃 → 逐次 crash 行（每次崩溃独立显式上报，无熔断状态）', async () => {
     const factory = await loadFactory()
     const win = await createProdWindow(factory, 'win-breaker')
-    for (let i = 0; i < 3; i++) crash(win, 'oom')
-    crash(win, 'oom') // 第 4 次：熔断转静态页
+    crash(win, 'oom')
+    crash(win, 'oom')
     const events = journalEvents()
-    expect(events).toHaveLength(4)
-    expect(events.slice(0, 3)).toEqual([
-      { layer: 'renderer', event: 'reload', reason: 'oom' },
-      { layer: 'renderer', event: 'reload', reason: 'oom' },
-      { layer: 'renderer', event: 'reload', reason: 'oom' },
+    expect(events).toEqual([
+      { layer: 'renderer', event: 'crash', reason: 'oom' },
+      { layer: 'renderer', event: 'crash', reason: 'oom' },
     ])
-    expect(events[3]).toEqual({ layer: 'renderer', event: 'crash', reason: 'circuit-breaker' })
   })
 
   it('destroyed 窗口 → 无台账行（恢复链与台账同在 isDestroyed 守卫之后）', async () => {

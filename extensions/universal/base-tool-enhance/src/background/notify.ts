@@ -7,14 +7,16 @@
  *  - 完成通知经 pi.sendMessage({customType, content, display:true},
  *    {deliverAs:"steer", triggerTurn:true}) 驱动新 turn
  *
- * D17 pi 引用刷新：轮询器与通知通路持模块级「当前 pi 引用」——同进程 session 替换
+ * D17 pi 引用刷新：通知通路持模块级「当前 pi 引用」——同进程 session 替换
  * （/fork、选择器切换、RPC session.*）会重建 eventBus 并重新 load extension，本
  * 模块引用由新实例 load 时 refreshPiReference 刷新，完成通知投递新 session。
+ * （exit-collector 的收尾回调链同样全模块级，exit 事件边沿由此跨替换可达——
+ * ADR-0112 改造：原 2s 轮询器已删。）
  *
  * 已知竞态（设计 §3.5 原样登记，不修）：dispose → 新实例 load 间毫秒窗口任务恰好
  * 完成时，sendMessage/emit 落旧 bus 丢一条——对账在该 session 重开时补 unregister，
  * 完成内容可由 bash_output 查询；窗口极窄且后果可恢复，不加同步握手。旧引用 throw
- * （旧 bus 已 dispose）时捕获降级为日志，不中断轮询（后续任务仍可通知）。
+ * （旧 bus 已 dispose）时捕获降级为日志，不中断后续任务的通知（边沿收尾不受影响）。
  *
  * kill 路径不 sendMessage（§3.5「bash_kill 终态收尾的单点归属」）：reason:"killed"
  * 只 emit unregister——kill 调用方就在当前 turn 等结果，双发是噪音。
@@ -108,7 +110,7 @@ export function emitPendingRegister(task: BackgroundTask): void {
  * data 形态对齐 pending-notifications parseUnregisterEvent 期望：{id, reason}——
  * status 不在 emit data 里（listener 用 mapReasonToStatus(reason) 自行计算）；
  * appendEntry 侧（对账/收殓）的落盘形态 {id, reason, status} 见 pending-reconcile.ts。
- * 轮询器 exit 边沿与进程退出收殓两条路径共用。
+ * exit 事件边沿与进程退出收殓两条路径共用。
  */
 export function emitPendingUnregister(
 	taskId: string,
@@ -127,7 +129,7 @@ export function emitPendingUnregister(
 }
 
 /**
- * ⑧⑨ 轮询器 exit 边沿的完成通知入口（poller setOnTaskExit 接线，index.ts load 时挂）。
+ * ⑧⑨ exit 事件边沿的完成通知入口（exit-collector setOnTaskExit 接线，index.ts load 时挂）。
  * 入参是 finalizeTask 之后的终态条目（state=exited）。kill 路径不 sendMessage
  * （文件头）；process-exit 不经过这里（收殓路径直接 finalizeTask + 只 emit）。
  */
@@ -152,7 +154,7 @@ function sendTaskFinishedMessage(task: BackgroundTask): void {
 			{ deliverAs: "steer", triggerTurn: true },
 		);
 	} catch (err) {
-		// 旧 bus 已 dispose（session 替换毫秒窗口）——降级日志，不中断轮询（文件头已知竞态）
+		// 旧 bus 已 dispose（session 替换毫秒窗口）——降级日志，不中断后续收尾（文件头已知竞态）
 		logger.warn("background task notify sendMessage failed; poll continues", {
 			detail: {
 				taskId: task.taskId,

@@ -1,7 +1,7 @@
 /**
  * reapOrphanPiProcesses 收殓状态机定向测试（CRAP 靶子：killOrphan）。
  *
- * 全依赖注入设计（listProcesses / signal / delay / readSpawnMarkers /
+ * 全依赖注入设计（listProcesses / signal / readSpawnMarkers /
  * readProcessStartTime 均可替换），零真实进程、零真实等待、零真实 fs。覆盖
  * killOrphan 处置序列全分支 + 编排层：
  * - SIGTERM 时目标已自行退出（ESRCH）→ 幂等按已回收计
@@ -40,8 +40,8 @@ function markers(): string[] {
 /** signal 注入工厂：按脚本序列响应（esrch 模拟 throw ESRCH / eperm 模拟 throw EPERM）。 */
 function scriptedSignal(script: Array<'ok' | 'esrch' | 'eperm'>) {
   let call = 0
-  const calls: Array<{ pid: number; signal: 'SIGTERM' | 'SIGKILL' | 0 }> = []
-  const fn = (pid: number, signal: 'SIGTERM' | 'SIGKILL' | 0) => {
+  const calls: Array<{ pid: number; signal: 'SIGKILL' }> = []
+  const fn = (pid: number, signal: 'SIGKILL') => {
     calls.push({ pid, signal })
     const step = script[call] ?? 'ok'
     call += 1
@@ -61,98 +61,56 @@ function scriptedSignal(script: Array<'ok' | 'esrch' | 'eperm'>) {
 
 function makeOptions(script: Array<'ok' | 'esrch' | 'eperm'>, stdout = orphanRow(4242)): {
   options: ReapOrphanOptions
-  calls: Array<{ pid: number; signal: 'SIGTERM' | 'SIGKILL' | 0 }>
-  delays: number[]
+  calls: Array<{ pid: number; signal: 'SIGKILL' }>
 } {
   const signal = scriptedSignal(script)
-  const delays: number[] = []
   const options: ReapOrphanOptions = {
     dataDir: DATA_DIR,
     ownPid: 999,
-    killGraceMs: 50,
     listProcesses: () => Promise.resolve(stdout),
     signal: signal.fn,
-    delay: (ms) => { delays.push(ms); return Promise.resolve() },
     readSpawnMarkers: markers,
     // SIGKILL 前 pid 复用复验的 ps 依赖注入：null = ps 不可用（防线缺席按现状继续）
     readProcessStartTime: () => Promise.resolve(null),
   }
-  return { options, calls: signal.calls, delays }
+  return { options, calls: signal.calls }
 }
 
-describe('killOrphan 处置序列（单孤儿全分支）', () => {
-  it('SIGTERM 成功 + 宽限后探活已死（ESRCH）→ reaped（优雅退出路径）', async () => {
-    // 调用序：SIGTERM(ok) → 探活 signal 0(esrch=已死) → 不发 SIGKILL
-    const { options, calls, delays } = makeOptions(['ok', 'esrch'])
+describe('killOrphan 处置序列（单孤儿全分支，SIGKILL 直杀）', () => {
+  it('SIGKILL 成功 → reaped', async () => {
+    const { options, calls } = makeOptions(['ok'])
     const result = await reapOrphanPiProcesses(options)
     expect(result.reaped).toEqual([4242])
     expect(result.failed).toEqual([])
-    expect(calls).toEqual([
-      { pid: 4242, signal: 'SIGTERM' },
-      { pid: 4242, signal: 0 },
-    ])
-    expect(delays).toEqual([50]) // 宽限等待一次
+    expect(calls).toEqual([{ pid: 4242, signal: 'SIGKILL' }])
   })
 
-  it('SIGTERM 时目标已自行退出（ESRCH）→ 幂等按已回收计，不再探活', async () => {
+  it('SIGKILL 时目标已自行退出（ESRCH）→ 幂等按已回收计', async () => {
     const { options, calls } = makeOptions(['esrch'])
     const result = await reapOrphanPiProcesses(options)
     expect(result.reaped).toEqual([4242])
-    expect(calls).toEqual([{ pid: 4242, signal: 'SIGTERM' }]) // 单次调用即收
+    expect(calls).toEqual([{ pid: 4242, signal: 'SIGKILL' }])
   })
 
-  it('SIGTERM 失败（EPERM）→ failed（不再探活、不发 SIGKILL）', async () => {
+  it('SIGKILL 失败（EPERM）→ failed（best-effort 不抛）', async () => {
     const { options, calls } = makeOptions(['eperm'])
     const result = await reapOrphanPiProcesses(options)
     expect(result.reaped).toEqual([])
     expect(result.failed).toEqual([4242])
-    expect(calls).toEqual([{ pid: 4242, signal: 'SIGTERM' }])
-  })
-
-  it('宽限后仍活（探活 ok）→ SIGKILL 兜底成功 → reaped', async () => {
-    // 调用序：SIGTERM(ok) → 探活(ok=活着) → SIGKILL(ok)
-    const { options, calls } = makeOptions(['ok', 'ok', 'ok'])
-    const result = await reapOrphanPiProcesses(options)
-    expect(result.reaped).toEqual([4242])
-    expect(calls).toEqual([
-      { pid: 4242, signal: 'SIGTERM' },
-      { pid: 4242, signal: 0 },
-      { pid: 4242, signal: 'SIGKILL' },
-    ])
-  })
-
-  it('探活抛 EPERM（权限受限）按「活着」处理 → 仍走 SIGKILL 兜底（宁多一发强杀不漏收）', async () => {
-    const { options, calls } = makeOptions(['ok', 'eperm', 'ok'])
-    const result = await reapOrphanPiProcesses(options)
-    expect(result.reaped).toEqual([4242])
-    expect(calls[2]).toEqual({ pid: 4242, signal: 'SIGKILL' })
-  })
-
-  it('SIGKILL 时目标恰好退出（ESRCH）→ reaped（宽限内死亡幂等）', async () => {
-    const { options } = makeOptions(['ok', 'ok', 'esrch'])
-    const result = await reapOrphanPiProcesses(options)
-    expect(result.reaped).toEqual([4242])
-  })
-
-  it('SIGKILL 失败（EPERM）→ failed（best-effort 不抛）', async () => {
-    const { options } = makeOptions(['ok', 'ok', 'eperm'])
-    const result = await reapOrphanPiProcesses(options)
-    expect(result.reaped).toEqual([])
-    expect(result.failed).toEqual([4242])
+    expect(calls).toEqual([{ pid: 4242, signal: 'SIGKILL' }])
   })
 
   it('SIGKILL 前 lstart 变化（pid 已复用）→ 跳过 SIGKILL 按已回收计 + warn（防线①补强）', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
-      const { options, calls } = makeOptions(['ok', 'ok'])
+      const { options, calls } = makeOptions([])
       // lstart 读取序列：处置起点 1000 → SIGKILL 前复读 2000（变化 = 原孤儿已死、pid 复用）
       const reads = [1000, 2000]
       options.readProcessStartTime = () => Promise.resolve(reads.shift() ?? 2000)
       const result = await reapOrphanPiProcesses(options)
       expect(result.reaped).toEqual([4242])
       expect(result.failed).toEqual([])
-      // 未发 SIGKILL（跳过强杀）：全程只有 SIGTERM + 探活两次信号
-      expect(calls.filter((c) => c.signal === 'SIGKILL')).toEqual([])
+      expect(calls).toEqual([])
       expect(warnSpy.mock.calls.some(([msg]) => String(msg).includes('reused between scan and SIGKILL'))).toBe(true)
     } finally {
       warnSpy.mockRestore()
@@ -160,34 +118,32 @@ describe('killOrphan 处置序列（单孤儿全分支）', () => {
   })
 
   it('SIGKILL 前 lstart 复读失败（ps 不可用返回 null）→ 不阻断，照常 SIGKILL（防线尽力而为）', async () => {
-    const { options, calls } = makeOptions(['ok', 'ok', 'ok'])
+    const { options, calls } = makeOptions(['ok'])
     options.readProcessStartTime = () => Promise.resolve(null)
     const result = await reapOrphanPiProcesses(options)
     expect(result.reaped).toEqual([4242])
-    expect(calls.map((c) => c.signal)).toEqual(['SIGTERM', 0, 'SIGKILL'])
+    expect(result.failed).toEqual([])
+    expect(calls).toEqual([{ pid: 4242, signal: 'SIGKILL' }])
   })
 })
 
 describe('reapOrphanPiProcesses 编排层', () => {
-  it('无孤儿（进程表无匹配行）→ 零处置零等待早退', async () => {
-    const { options, calls, delays } = makeOptions([], '  1     0 /sbin/launchd\n 999 1 zsh --mode rpc\n')
+  it('无孤儿（进程表无匹配行）→ 零处置早退', async () => {
+    const { options, calls } = makeOptions([], '  1     0 /sbin/launchd\n 999 1 zsh --mode rpc\n')
     const result = await reapOrphanPiProcesses(options)
     expect(result).toEqual({ scanned: 2, reaped: [], failed: [], unsupported: false })
     expect(calls).toEqual([])
-    expect(delays).toEqual([])
   })
 
   it('多孤儿逐个处置（各自独立成败汇总）', async () => {
-    // 两个孤儿：4242 优雅退出；4243 SIGTERM 即已退出
+    // 两个孤儿：4242 直杀成功；4243 SIGKILL 时已自行退出（幂等按已回收计）
     const stdout = `${orphanRow(4242)}\n${orphanRow(4243)}`
-    const script = scriptedSignal(['ok', 'esrch', 'esrch'])
+    const script = scriptedSignal(['ok', 'esrch'])
     const options: ReapOrphanOptions = {
       dataDir: DATA_DIR,
       ownPid: 999,
-      killGraceMs: 5,
       listProcesses: () => Promise.resolve(stdout),
       signal: script.fn,
-      delay: () => Promise.resolve(),
       readSpawnMarkers: markers,
       readProcessStartTime: () => Promise.resolve(null),
     }
@@ -203,7 +159,6 @@ describe('reapOrphanPiProcesses 编排层', () => {
       ownPid: 999,
       listProcesses: () => Promise.reject(new Error('spawn ps ENOENT')),
       signal: () => { throw new Error('should not be called') },
-      delay: () => Promise.resolve(),
       readSpawnMarkers: markers,
     })
     expect(result.unsupported).toBe(true)

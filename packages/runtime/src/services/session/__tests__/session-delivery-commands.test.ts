@@ -201,8 +201,9 @@ describe('D14①b（G2）：无标记且命中清单宽限后静默终局', () =
       await h.flush()
       expect(h.registry.entries('s1')?.active.some((e) => e.id === CLIENT_UUID && e.state === 'in-flight')).toBe(true)
       const promptCallsAtSweep = h.client.prompt.mock.calls.length
-      // 推进：越过在途宽限（10s）→ watchdog tick（30s 周期）触发对账轮
-      await vi.advanceTimersByTimeAsync(30_000)
+      // 推进：越过在途宽限（10s）→ 事件触发点对账（watchdog 定时腿已随 ADR-0112 退役）
+      await vi.advanceTimersByTimeAsync(10_001)
+      await h.registry.reconcile('s1', 'agent-settled')
       await h.flush()
       // 静默终局：delivered tombstone + 通知，不重投
       const full = h.registry.entries('s1')
@@ -236,7 +237,8 @@ describe('D14①b（G2）：无标记且命中清单宽限后静默终局', () =
     await attachWithCommandList(h)
     h.registry.submit('s1', { content: '普通消息', clientUuid: CLIENT_UUID })
     await h.flush()
-    await vi.advanceTimersByTimeAsync(30_000)
+    await vi.advanceTimersByTimeAsync(10_001)
+    await h.registry.reconcile('s1', 'agent-settled')
     await h.flush()
     // 带标记条目 transcript 未命中 → 既有 requeue 路径（非命令静默终局）
     expect(h.published.filter((m) => m.type === 'session.deliveryHandled').length).toBe(0)
@@ -267,7 +269,8 @@ describe('D3③：sweep occupancy 收尾（confirm 分支 + 幂等门）', () =>
     h.registry.submit('s1', { content: '正文', clientUuid: CLIENT_UUID })
     await h.flush()
     expect(h.occupancyTurn()).toBe('dispatching')
-    await vi.advanceTimersByTimeAsync(30_000)
+    await vi.advanceTimersByTimeAsync(10_001)
+    await h.registry.reconcile('s1', 'agent-settled')
     await h.flush()
     expect(h.registry.entries('s1')?.tombstones.some((t) => t.id === CLIENT_UUID && t.state === 'delivered')).toBe(true)
     expect(h.occupancyTurn()).toBe('idle')
@@ -280,7 +283,8 @@ describe('D3③：sweep occupancy 收尾（confirm 分支 + 幂等门）', () =>
     await h.flush()
     // turn 事件已推进（真实状态 generating）——G2 终局后的收尾不得覆盖
     applySessionOccupancyTransition(h.view, null, 'generating')
-    await vi.advanceTimersByTimeAsync(30_000)
+    await vi.advanceTimersByTimeAsync(10_001)
+    await h.registry.reconcile('s1', 'agent-settled')
     await h.flush()
     expect(h.occupancyTurn()).toBe('generating')
   })
@@ -294,13 +298,13 @@ describe('D14③①（G3 闸①）：命令档 prompt 不限时', () => {
     vi.useRealTimers()
   })
 
-  it('命令条目 prompt 以 timeoutMs=0（不限时档）出站；普通消息档位不变（undefined = CMD_TIMEOUT_MS）', async () => {
+  it('命令条目与普通消息同参出站（命令档墙钟豁免已随 ADR-0112 退役）', async () => {
     const h = makeHarness({ commands: [{ name: 'plan', source: 'extension' }] })
     await attachWithCommandList(h)
     h.registry.submit('s1', { content: '/plan', clientUuid: CLIENT_UUID })
     h.registry.submit('s1', { content: '普通消息', clientUuid: 'u-9c1e2b3a-1111-4222-8333-444455556667' })
     await h.flush()
-    expect(h.client.prompt.mock.calls[0]![4]).toBe(0) // 命令档：不限时
-    expect(h.client.prompt.mock.calls[1]![4]).toBeUndefined() // 普通档：缺省
+    expect(h.client.prompt.mock.calls[0]!.length).toBeLessThanOrEqual(3) // 无墙钟档位实参
+    expect(h.client.prompt.mock.calls[1]!.length).toBeLessThanOrEqual(3)
   })
 })

@@ -26,17 +26,13 @@ import type { ErrorDetails } from './message-context.js'
 
 const HTTP_OK = 200
 const HTTP_NOT_FOUND = 404
-const MAX_WS_CLOSE_CODE = 4000
-const HEARTBEAT_TIMEOUT_MS = 45_000
 /** WS 1001 Going Away（RFC 6455）——服务端计划内关停时发给全部存量连接的 close 码。 */
 const WS_CLOSE_GOING_AWAY = 1001
 /**
  * stop 等待存量连接优雅退出的有界上界：本机回环 close 握手毫秒级，2s = 20 倍极端余量，
  * 正常路径不触发；超时后 closeAllConnections 强制断开属回收层兜底（非正常路径依赖）。
  */
-const STOP_LINGER_GRACE_MS = 2_000
 /** auth 握手超时：连接建立后未在此时限内通过认证即断开（spec §3.3 D4 定 10s）。 */
-const AUTH_TIMEOUT_MS = 10_000
 /** WS policy violation 关闭码（RFC 6455）——auth 失败 / fail-closed 拒绝统一用它。 */
 const WS_CLOSE_POLICY_VIOLATION = 1008
 
@@ -69,9 +65,7 @@ export class ConnectionManager {
   private wss: WebSocketServer
   /** 连接池（仅 authed 连接）——broker.broadcast 遍历此集合向所有客户端推送。 */
   readonly clients = new Set<WsType>()
-  private heartbeatTimers = new Map<WsType, ReturnType<typeof setTimeout>>()
   /** 未认证连接的握手超时计时器（auth 成功/连接关闭时清除）。 */
-  private authTimers = new Map<WsType, ReturnType<typeof setTimeout>>()
   /** 已通过 auth 的连接集合（与 clients 池同步维护）。 */
   private authedConnections = new Set<WsType>()
 
@@ -127,21 +121,13 @@ export class ConnectionManager {
     // 连接数日志两个口径分开输出（review findings-confirmation #5）：旧 `total: clients.size + 1`
     // 把未 auth 新连接混进 authed 池计数——重连风暴期（pre-auth drop 443 条现场）半开旧连接 +
     // 未 auth 新连接堆积时 total 虚高误导排查。authenticated = 已认证池（clients，同
-    // authedConnections 同步维护）；pending auth = 握手中连接（authTimers）含本条（set 在本行之后）。
-    console.log(
-      `[runtime] client connected (authenticated: ${this.authedConnections.size}, ` +
-        `pending auth incl. this one: ${this.authTimers.size + 1})`,
-    )
+    // authedConnections 同步维护）。
+    console.log(`[runtime] client connected (authenticated: ${this.authedConnections.size})`)
     // fail-closed：无 token 配置时拒绝全部连接（组合根已落 warning，这里只拒绝）。
     if (this.authToken === null) {
       this.rejectAuth(ws, 'no_token_configured')
       return
     }
-    // unauthed：启动握手超时，认证通过前不进 clients 池、不推 initial state、不启心跳。
-    this.authTimers.set(ws, setTimeout(() => {
-      console.warn('[runtime] auth timeout, closing connection')
-      ws.close(WS_CLOSE_POLICY_VIOLATION, 'Auth timeout')
-    }, AUTH_TIMEOUT_MS))
     ws.on('message', (data) => this.handleRawMessage(ws, data))
     ws.on('close', () => this.handleClose(ws))
     ws.on('error', (err) => {
@@ -169,7 +155,6 @@ export class ConnectionManager {
     }
     // authed：auth 消息重复发送属协议错误，静默忽略（不进 handleMessage 路由）。
     if (msg.type === 'auth') return
-    this.resetHeartbeat(ws)
     this.callbacks.onMessage(msg, ws).catch((err) => {
       console.error('[runtime] unhandled error in handleMessage:', err)
       // RT-1#3：兜底信封补 sessionId（裁决 7：错误消息必须可归属 session）——server 主漏斗
@@ -196,15 +181,11 @@ export class ConnectionManager {
       this.rejectAuth(ws, 'bad_token')
       return
     }
-    // unauthed → authed：清握手计时、入池、回执、推 initial state、启心跳。
-    const timer = this.authTimers.get(ws)
-    if (timer) clearTimeout(timer)
-    this.authTimers.delete(ws)
+    // unauthed → authed：入池、回执、推 initial state。
     this.authedConnections.add(ws)
     this.clients.add(ws)
     ws.send(JSON.stringify({ type: 'auth.result', payload: { ok: true } }))
     this.callbacks.onConnect(ws)
-    this.resetHeartbeat(ws)
     // 口径对齐上方 handleConnection：authenticated 只计已认证池（旧文案 total 同值但语义混用）
     console.log(`[runtime] client authenticated (authenticated: ${this.clients.size})`)
   }
@@ -232,23 +213,6 @@ export class ConnectionManager {
   private cleanupConnection(ws: WsType): void {
     this.clients.delete(ws)
     this.authedConnections.delete(ws)
-    this.clearHeartbeat(ws)
-    const timer = this.authTimers.get(ws)
-    if (timer) { clearTimeout(timer); this.authTimers.delete(ws) }
-  }
-
-  private resetHeartbeat(ws: WsType): void {
-    const existing = this.heartbeatTimers.get(ws)
-    if (existing) clearTimeout(existing)
-    this.heartbeatTimers.set(ws, setTimeout(() => {
-      console.warn('[runtime] heartbeat timeout, closing connection')
-      ws.close(MAX_WS_CLOSE_CODE, 'Heartbeat timeout')
-    }, HEARTBEAT_TIMEOUT_MS))
-  }
-
-  private clearHeartbeat(ws: WsType): void {
-    const timer = this.heartbeatTimers.get(ws)
-    if (timer) { clearTimeout(timer); this.heartbeatTimers.delete(ws) }
   }
 
   /**
@@ -267,38 +231,18 @@ export class ConnectionManager {
    * 正是设计预期恢复路径，ws-client 对任意 close 码统一走 scheduleReconnect）。
    */
   async stop(): Promise<void> {
-    // 握手中（未 auth）连接先取出——下方清 authTimers 后不可达；它们同样占用 httpServer
-    // 连接计数，close 帧必须覆盖。
-    const pendingAuthConnections = [...this.authTimers.keys()]
-    for (const timer of this.heartbeatTimers.values()) {
-      clearTimeout(timer)
-    }
-    this.heartbeatTimers.clear()
-    for (const timer of this.authTimers.values()) {
-      clearTimeout(timer)
-    }
-    this.authTimers.clear()
-    // 1001 Going Away（RFC 6455）：计划内服务端关停语义。ws 库 close 对已关闭/握手中
-    // 连接均为安全 no-op，不抛错。
+    // 1001 Going Away（RFC 6455）：计划内服务端关停语义。ws 库 close 对已关闭连接均为
+    // 安全 no-op，不抛错。
     for (const ws of this.authedConnections) ws.close(WS_CLOSE_GOING_AWAY, 'Server shutting down')
-    for (const ws of pendingAuthConnections) ws.close(WS_CLOSE_GOING_AWAY, 'Server shutting down')
     // 摘 wss upgrade 监听 + httpServer 停止接受新连接。
     this.wss.close()
     // /health 探针的 keep-alive 空闲连接不经 WS close 帧路径，显式清（探针已验证：本方法
     // 只清无活跃请求的连接，不触碰 upgrade 后的 WS socket）。
     this.httpServer.closeIdleConnections()
-    // 等待全部连接结束。正常路径 close 握手在本机回环毫秒级完成；STOP_LINGER_GRACE_MS 是
-    // 回收层有界兜底（ADR-0047 口径）：对不回 close 帧的异常对端强制断开，保证 stop 必然
-    // resolve、runtime 必然走到 process.exit(86)。
+    // 等待全部连接结束（close 回调即真值）。关停 linger 强断兜底
+    //（STOP_LINGER_GRACE_MS 2s）已随 ADR-0112 防御机制清查退役。
     return new Promise((resolve) => {
-      const forceTimer = setTimeout(() => {
-        console.warn('[runtime] stop: connections lingering after grace period — force closing')
-        this.httpServer.closeAllConnections()
-      }, STOP_LINGER_GRACE_MS)
-      this.httpServer.close(() => {
-        clearTimeout(forceTimer)
-        resolve()
-      })
+      this.httpServer.close(() => resolve())
     })
   }
 }

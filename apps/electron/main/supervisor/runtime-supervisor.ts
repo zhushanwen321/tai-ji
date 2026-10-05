@@ -244,7 +244,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
 
     writePortFile(port)
     this._port = port
-    // 重启成功 → 记录（稳定窗口后清零计数）
+    // 重启成功 → 记录事实（计数无时间窗清零，清零唯一入口 = 用户显式重试）
     this.policy.recordSuccess()
     // [HISTORICAL] 复位 stopping：上方 `await this.stop()`（清旧进程）曾 markStopping，
     // 成功启动后若不复位，运行期崩溃的 exit 会被 onRuntimeExit 误判「主动停止」短路
@@ -445,7 +445,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
     // u7c（crash-forensics D5 ④）：planned 边（86）——滚动重启计划内退出走立即重启
     // 零退避零计数：policy.recordPlanned() 不进 counting 状态机、不做 shouldRestart 门
     // 检查（exhausted 态下滚动重启仍须照常重启）、延迟恒 0。重启成功后 start() 的
-    // recordSuccess 按既有稳定窗口规则收敛 crash 计数。start() 失败则经 attemptRestart
+    // recordSuccess 只记录事实（计数无时间窗清零，ADR-0112）。start() 失败则经 attemptRestart
     // → handleRestartFailure 回到既有退避路径（计划内重启失败 = 需要退避的异常形态）。
     if (verdict === 'planned-shutdown') {
       const delay = this.policy.recordPlanned()

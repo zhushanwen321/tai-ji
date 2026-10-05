@@ -14,11 +14,6 @@ import type { ServerMessage } from '@taiji/shared'
 import { RelayRegistry } from './relay-registry.js'
 import { getRelayChildrenDir, getRelayRunDir, getRelaySocketPath } from './relay-paths.js'
 
-/** 残留 socket 探活的连接超时（连得上=实例冲突；超时视为不可连=旧实例已死）。 */
-const STALE_PROBE_TIMEOUT_MS = 1_000
-/** server.close 等全部连接断开的兜底上限（destroyAll 已 destroy 连接，防御性）。 */
-const SERVER_CLOSE_SETTLE_MS = 500
-
 export interface RelayServerOptions {
   /** pi 二进制定位锚点（dev = apps/electron），透传 registry。 */
   projectRoot: string
@@ -28,8 +23,6 @@ export interface RelayServerOptions {
   publish: (sessionId: string, msg: ServerMessage) => void
   /** spawn 命令覆盖（测试注入假 pi）。 */
   piCommand?: string
-  /** 孤儿收割杀链宽限（测试注入小值；缺省 RELAY_KILL_GRACE_MS），透传 registry。 */
-  orphanKillGraceMs?: number
 }
 
 interface RelayServerState {
@@ -64,7 +57,6 @@ function probeStaleSocket(socketPath: string): Promise<void> {
       if (settled) return
       settled = true
       probe.destroy()
-      clearTimeout(timer)
       if (!reachable) {
         // 连不上：旧实例已死，删除残留文件继续启动
         try {
@@ -84,7 +76,6 @@ function probeStaleSocket(socketPath: string): Promise<void> {
         + `Recovery: 关闭另一个 taiji 实例后重启（lsof ${socketPath} 查看占用）。`,
       ))
     }
-    const timer = setTimeout(() => finish(false), STALE_PROBE_TIMEOUT_MS)
     probe.once('connect', () => finish(true))
     probe.once('error', () => finish(false))
   })
@@ -114,7 +105,6 @@ export async function initRelayServer(opts: RelayServerOptions): Promise<void> {
     dataDir,
     publish: opts.publish,
     piCommand: opts.piCommand,
-    orphanKillGraceMs: opts.orphanKillGraceMs,
   })
 
   const server = net.createServer((conn) => {
@@ -153,10 +143,10 @@ export async function deinitRelayServer(): Promise<void> {
   } catch (e) {
     console.warn('[relay] registry destroyAll failed during deinit:', e)
   }
+  // server.close 等全部连接断开（回调即真值；destroyAll 已 conn.destroy，无悬挂等待）。
+  // 关停盲等（SERVER_CLOSE_SETTLE_MS 500ms）已随 ADR-0112 退役。
   await new Promise<void>((resolve) => {
     s.server.close(() => resolve())
-    // close 回调等全部连接断开；destroyAll 已 conn.destroy，无悬挂等待
-    setTimeout(resolve, SERVER_CLOSE_SETTLE_MS).unref()
   })
   if (s.isUnixSocket) {
     try {

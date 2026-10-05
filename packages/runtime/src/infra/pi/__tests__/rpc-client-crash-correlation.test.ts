@@ -15,7 +15,6 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { RpcClient } from '../rpc-client.js'
-const clientOpts = { startupDelayMs: 0 } as const
 
 // ── Mocks ────────────────────────────────────────────────────────
 
@@ -130,7 +129,7 @@ async function flushAsync(): Promise<void> {
 
 async function startClient(options: Record<string, unknown> = {}): Promise<RpcClient> {
   const { RpcClient } = await import('../rpc-client.js')
-  const client = new RpcClient({ ...clientOpts, cwd: '/project', sessionId: 'sid-cc-1', ...options })
+  const client = new RpcClient({ cwd: '/project', sessionId: 'sid-cc-1', ...options })
   await client.start()
   return client
 }

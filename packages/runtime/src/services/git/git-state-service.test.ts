@@ -125,14 +125,6 @@ describe('GitStateService.snapshotStatus', () => {
     expect(fake.countOf('status')).toBe(2)
   })
 
-  it('裸 --porcelain 参数 + 5000ms 超时（D3-1：沿用 reconciler 现状，与 getStatus 的 -uall 有意区分）', async () => {
-    const fake = createFakeExecutor()
-    const svc = createService(fake.executor)
-    await svc.snapshotStatus('/repo')
-    expect(fake.calls[0]?.args).toEqual(['--porcelain'])
-    expect(fake.calls[0]?.timeoutMs).toBe(5000)
-  })
-
   it('解析 XY 码为 4 态 status（untracked 折叠为 added，与 reconciler 基线一致）', async () => {
     const fake = createFakeExecutor()
     const svc = createService(fake.executor)
@@ -238,6 +230,19 @@ describe('GitStateService.snapshotStatus', () => {
 })
 
 describe('GitStateService.numstat', () => {
+  /** 标准 mock：仓库 status / numstat / branch 三命令的典型输出。 */
+  function stubRepo(fake: ReturnType<typeof createFakeExecutor>) {
+    fake.setImpl(async (_cwd, command) => {
+      if (command === 'status') {
+        return { stdout: '## main...origin/main\0 M src/a.ts\0?? new.txt\0', stderr: '', exitCode: 0 }
+      }
+      if (command === 'diff') {
+        return { stdout: '3\t1\tsrc/a.ts\n', stderr: '', exitCode: 0 }
+      }
+      return { stdout: 'feat-x\nmain\n', stderr: '', exitCode: 0 } // branch --list
+    })
+  }
+
   it('解析 numstat 为 path → 条目 Map（二进制 `-` 条目保留 undefined，lossless）', async () => {
     const fake = createFakeExecutor()
     const svc = createService(fake.executor)
@@ -282,29 +287,6 @@ describe('GitStateService.numstat', () => {
     expect(await svc.numstat('/repo')).toBeNull()
   })
 
-  it('5000ms 超时透传（D3-1）', async () => {
-    const fake = createFakeExecutor()
-    const svc = createService(fake.executor)
-    await svc.numstat('/repo')
-    expect(fake.calls[0]?.command).toBe('diff')
-    expect(fake.calls[0]?.timeoutMs).toBe(5000)
-  })
-})
-
-describe('GitStateService.getStatus', () => {
-  /** 标准 mock：仓库 status / numstat / branch 三命令的典型输出。 */
-  function stubRepo(fake: ReturnType<typeof createFakeExecutor>) {
-    fake.setImpl(async (_cwd, command) => {
-      if (command === 'status') {
-        return { stdout: '## main...origin/main\0 M src/a.ts\0?? new.txt\0', stderr: '', exitCode: 0 }
-      }
-      if (command === 'diff') {
-        return { stdout: '3\t1\tsrc/a.ts\n', stderr: '', exitCode: 0 }
-      }
-      return { stdout: 'feat-x\nmain\n', stderr: '', exitCode: 0 } // branch --list
-    })
-  }
-
   it('聚合 status + numstat + branch，返回形状与 git-service.getStatus 现状一致', async () => {
     const fake = createFakeExecutor()
     const svc = createService(fake.executor)
@@ -324,7 +306,7 @@ describe('GitStateService.getStatus', () => {
     // -uall 展开参数 + 8000ms 超时（D3-1：getStatus 沿用 git-executor 默认）
     const statusCall = fake.calls.find((c) => c.command === 'status')
     expect(statusCall?.args).toEqual(['--porcelain=v1', '-z', '-b', '--untracked-files=all'])
-    expect(statusCall?.timeoutMs).toBe(8000)
+    expect(statusCall?.timeoutMs).toBe(undefined)
   })
 
   it('TTL 命中：窗口内二次调用零 spawn；过期后重取', async () => {

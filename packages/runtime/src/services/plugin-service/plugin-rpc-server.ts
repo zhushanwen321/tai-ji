@@ -64,7 +64,6 @@ export interface WorkerPort {
  */
 const PLUGIN_DEGRADED_HOST_CODES: ReadonlySet<string> = new Set([
   'SESSION_ACTIVATE_FAILED',
-  'SESSION_ACTIVATE_TIMEOUT',
   'MODEL_NOT_FOUND',
   'PROVIDER_CREDENTIAL_MISSING',
   'ENGINE_MODEL_MISSING',
@@ -156,16 +155,18 @@ export class PluginRpcServer {
    * @param workerId - 目标 Worker ID
    * @param method - RPC 方法名
    * @param params - 请求参数
-   * @param timeoutMs - 超时时间（毫秒）
+   *
+   * [ADR-0112 退役登记] invoke 墙钟（原 HOOK_HANDLER_TIMEOUT_MS 5s 等）已删——
+   * Worker 不回复时 pending 悬挂，由 dispose rejectAll 收口。
    */
-  invoke(workerId: string, method: string, params: Record<string, unknown>, timeoutMs: number): Promise<unknown> {
+  invoke(workerId: string, method: string, params: Record<string, unknown>): Promise<unknown> {
     const worker = this.workers.get(workerId)
     if (!worker) {
       return Promise.reject(new Error(`Worker not found: ${workerId}`))
     }
 
     const id = this.nextRequestId++
-    const promise = this.pendingInvokes.register(id, timeoutMs, new Error('RPC timeout'))
+    const promise = this.pendingInvokes.register(id, new Error('RPC timeout'))
 
     const request: RpcRequest = { jsonrpc: '2.0', id, method, params }
     worker.postMessage({ type: 'rpc', request })

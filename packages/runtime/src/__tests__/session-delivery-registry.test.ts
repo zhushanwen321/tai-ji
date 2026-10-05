@@ -310,7 +310,7 @@ describe('u2 对账器三分处置（D3）', () => {
       view: { isGenerating: true, occupancy: { turn: 'generating', compacting: false, bash: false } },
       cleared: { steering: ['滞留'], followUp: [] },
     })
-    await h.registry.reconcile('s1', 'watchdog')
+    await h.registry.reconcile('s1', 'agent-settled')
     await h.flush()
     expect(h.client.clearQueue).not.toHaveBeenCalled()
   })

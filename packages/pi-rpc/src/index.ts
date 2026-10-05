@@ -30,10 +30,6 @@ export type {
 
 export {
   attachLfOnlyLineReader,
-  CMD_TIMEOUT_MS,
-  FAST_TIMEOUT_MS,
-  SLOW_TIMEOUT_MS,
-  TIMED_OUT_ID_TTL_MS,
   createPendingRegistry,
   EARLY_FRAME_BUFFER_MAX,
   createEarlyFrameBuffer,
@@ -60,7 +56,7 @@ export {
 } from './commands.ts'
 export type { PromptImageAttachment, UiResponseShape } from './commands.ts'
 
-export { killPiProcess, DEFAULT_PI_KILL_GRACE_MS } from './kill-chain.ts'
+export { killPiProcess } from './kill-chain.ts'
 export type { KillableChild } from './kill-chain.ts'
 
 export { buildPiOutboundEnv } from './env.ts'

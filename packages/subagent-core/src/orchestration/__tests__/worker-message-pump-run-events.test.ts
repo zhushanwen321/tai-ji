@@ -427,70 +427,15 @@ describe("finalizeRun 的 run-settled errorCode 构造（DoneReason → RunError
   });
 });
 
-// ── 5. dispatchAgentCall 重试轨迹（agent-retrying 帧补投 + 静默反向） ──
+// ── 5. dispatchAgentCall 落账（[ADR-0112] 无重试轨迹） ──
+//
+// [HISTORICAL] 原「两次失败后成功 → dispatched→retrying×2→settled{attempt:3}」用例
+// 随重试矩阵删除（ADR-0112）——agent-retrying 帧不再产生（事件类型保留为 journal
+// 词表兼容，仅历史 record 含此帧）。「非重试终局零假帧」用例保留：失败单次终态化，
+// journal 恰三帧（run-created / agent-started / agent-settled）。
 
-describe("dispatchAgentCall 重试轨迹（agent-retrying 帧 + 静默反向）", () => {
-  it("两次失败后成功 → journal dispatched→retrying{attempt:1}→retrying{attempt:2}→settled{attempt:3}（backoffMs 实测 = 退避调度值）", async () => {
-    vi.useFakeTimers();
-    try {
-      const run = makeRealRun("wf-ev-retry");
-      await dispatchRunCreated(run);
-      const deps = makeDeps();
-      deps.runner.run = vi
-        .fn()
-        .mockResolvedValueOnce({
-          content: "",
-          error: "engine_crashed: engine process exited unexpectedly: signal SIGKILL",
-          durationMs: 5,
-          toolCalls: [],
-        })
-        .mockResolvedValueOnce({
-          content: "",
-          error: "transient provider flake",
-          durationMs: 5,
-          toolCalls: [],
-        })
-        .mockResolvedValue({ content: "ok", durationMs: 5, toolCalls: [] });
-      const handlers: WorkerHandlers = {
-        onMessage: vi.fn(async () => {}),
-        onError: vi.fn(async () => {}),
-        onExit: vi.fn(async () => {}),
-      };
-
-      await handleWorkerMessage(
-        run,
-        { type: "agent-call", callId: 2, opts: { prompt: "p" } },
-        deps,
-        handlers,
-      );
-      await flushMicrotasks(); // attempt 1 失败（mock 立即 resolve）
-      await vi.advanceTimersByTimeAsync(1000); // 首退避（BACKOFF 1000ms）→ attempt 2
-      await flushMicrotasks();
-      await vi.advanceTimersByTimeAsync(2000); // 次退避（BACKOFF 2000ms）→ attempt 3 成功
-      await flushMicrotasks(); // agent-settled 投递链落账
-
-      expect(isRunSettled(run)).toBe(false); // call 成功不触发终局
-      // 静默反向（D7）：重试窗口零终局通知（journal 事件落账 ≠ 通知）
-      expect(deps.onRunDone).not.toHaveBeenCalled();
-      const events = await scanRunEvents("wf-ev-retry");
-      expect(events.map((e) => e.type)).toEqual([
-        "run-created",
-        "agent-started",
-        "agent-retrying",
-        "agent-retrying",
-        "agent-settled",
-      ]);
-      expect(events[2]).toMatchObject({ type: "agent-retrying", taskIndex: 2, attempt: 1, backoffMs: 1000 });
-      expect(events[3]).toMatchObject({ type: "agent-retrying", taskIndex: 2, attempt: 2, backoffMs: 2000 });
-      // reason 摘要：首退避帧携带失败文案（engine 码前缀保留）
-      expect((events[2] as { reason?: string }).reason).toContain("engine_crashed");
-      expect(events[4]).toMatchObject({ type: "agent-settled", taskIndex: 2, attempt: 3, outcome: "done" });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("非重试终局（stale_context 不重试）→ 零 agent-retrying 帧（构造性零假帧）", async () => {
+describe("dispatchAgentCall 落账（失败单次终态，零假帧）", () => {
+  it("失败 call（stale_context）→ journal 恰三帧：run-created / agent-started / agent-settled", async () => {
     const run = makeRealRun("wf-ev-noretry");
     await dispatchRunCreated(run);
     const deps = makeDeps();
@@ -513,6 +458,8 @@ describe("dispatchAgentCall 重试轨迹（agent-retrying 帧 + 静默反向）"
 
     const events = await scanRunEvents("wf-ev-noretry");
     expect(events.map((e) => e.type)).toEqual(["run-created", "agent-started", "agent-settled"]);
-    expect(deps.onRunDone).not.toHaveBeenCalled();
+    // 无 agent-retrying 帧（构造性零假帧）
+    expect(events.filter((e) => e.type === "agent-retrying")).toHaveLength(0);
+    expect(deps.onRunDone).not.toHaveBeenCalled(); // call 失败不触发 run 终局（run-settled 由脚本 return 驱动）
   });
 });

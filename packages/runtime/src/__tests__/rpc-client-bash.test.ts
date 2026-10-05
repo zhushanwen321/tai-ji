@@ -21,7 +21,6 @@ import {
   lastWrittenJson,
   resetRpcClientMock,
 } from '../../test/helpers/rpc-client-mock'
-const clientOpts = { startupDelayMs: 0 } as const // 测试注入：启动确认窗口归零（窗口语义不变，见 RpcClientOptions.startupDelayMs）
 
 // ── Mocks（工厂单源在 test/helpers/rpc-client-mock.ts，vi.mock 声明留本文件——路径按本文件解析）──
 
@@ -61,7 +60,7 @@ describe('RpcClient bash/abortBash 透传', () => {
     resetRpcClientMock()
 
     const { RpcClient } = await import('../infra/pi/rpc-client.js')
-    client = new RpcClient({ ...clientOpts, cwd: '/project' })
+    client = new RpcClient({ cwd: '/project' })
     await client.start()
   })
 

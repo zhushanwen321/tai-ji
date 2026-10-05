@@ -18,7 +18,7 @@ export class PendingTracker<K extends string | number, T> {
   private pending = new Map<K, {
     resolve: (value: T) => void
     reject: (error: Error) => void
-    timer: ReturnType<typeof setTimeout>
+    timer: ReturnType<typeof setTimeout> | undefined
   }>()
 
   /** 当前登记的请求数量。 */
@@ -36,13 +36,18 @@ export class PendingTracker<K extends string | number, T> {
    *
    * @param timeoutError 超时时要 reject 的 Error——由调用方构造，
    *   tracker 不关心其形态（纯 Error / Object.assign 带 code 均可）。
+   * @param timeoutMs 可选墙钟（ADR-0112 收窄后多数消费方不再传——undefined/≤0 =
+   *   不限时，回复永不到达时由 dispose rejectAll 收口）；交互等待类消费方（permission /
+   *   ui-request 等人填表粒度）仍传显式值（C2 功能语义保留）。
    */
-  register(key: K, timeoutMs: number, timeoutError: Error): Promise<T> {
+  register(key: K, timeoutError: Error, timeoutMs?: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(key)
-        reject(timeoutError)
-      }, timeoutMs)
+      const timer = timeoutMs !== undefined && timeoutMs > 0
+        ? setTimeout(() => {
+          this.pending.delete(key)
+          reject(timeoutError)
+        }, timeoutMs)
+        : undefined
 
       this.pending.set(key, { resolve, reject, timer })
     })

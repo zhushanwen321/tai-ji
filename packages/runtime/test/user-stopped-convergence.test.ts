@@ -395,16 +395,6 @@ describe('MessageDispatcher 置位分型与显式投递清标记', () => {
     expect(persistSessionOutcome).toHaveBeenCalledWith('s1', 'stopped', 'Convergence abort (auto)')
   })
 
-  it('K2：abort RPC 超时强杀收口 → 置标记 source=abort_timeout', async () => {
-    const { dispatcher } = makeDispatcher({
-      session: makeMockSession({ isGenerating: true }),
-      abortBehavior: 'rpc-timeout',
-    })
-    await dispatcher.abort('s1')
-    expect(store.marks.get('s1')).toEqual({ source: 'abort_timeout' })
-    expect(store.marks.size).toBe(1) // 分型：只置一次标记（forceQuitSession 单一置位入口）
-  })
-
   it('sendPrompt 显式投递：投递前清标记放行，标记不在时照常投递（零开销）', async () => {
     const { dispatcher, markAtPrompt } = makeDispatcher()
     userStoppedGate.markUserStopped('s1', 'user_force_quit')

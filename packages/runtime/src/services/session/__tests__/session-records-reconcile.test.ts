@@ -26,7 +26,6 @@ import type { ISessionStore } from '../../ports/session.js'
 import type { SessionRecordsDeps } from '../session-records.js'
 import {
   SessionRecords,
-  RECORD_RECONCILE_INTERVAL_MS,
   RECORD_RECONCILE_ROUND_BUDGET_MS,
 } from '../session-records.js'
 import { SCALAR_STATE_DEBOUNCE_MS } from '../replicated-states.config.js'
@@ -194,15 +193,6 @@ async function flushDebounce(): Promise<void> {
   await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS)
 }
 
-/** 推进一个定时对账间隔（含微任务冲刷，拉取落定）。 */
-async function advanceReconcileInterval(times = 1): Promise<void> {
-  for (let i = 0; i < times; i++) {
-    await vi.advanceTimersByTimeAsync(RECORD_RECONCILE_INTERVAL_MS)
-    await Promise.resolve()
-    await Promise.resolve()
-  }
-}
-
 /** 按帧类型过滤 publish 调用（消息形状由调用处断言收窄，与 session-records.test.ts 同宽松度）。 */
 function framesOf(publish: ReturnType<typeof vi.fn>, type: string): Array<[string, unknown]> {
   return publish.mock.calls.filter(([, m]) => (m as { type: string }).type === type) as Array<[string, unknown]>
@@ -247,7 +237,7 @@ describe('送达水位发布门', () => {
     expect(framesOf(publish, 'session.planState')).toHaveLength(1)
   })
 
-  it('稳态零帧：快照==水位 → 重复对账（agent_settled 腿 + 定时腿）零帧', async () => {
+  it('稳态零帧：快照==水位 → 重复对账（agent_settled 腿）零帧', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
     await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
@@ -258,10 +248,6 @@ describe('送达水位发布门', () => {
     records.reconcileRecordEntries('s1')
     await Promise.resolve()
     await Promise.resolve()
-    expect(publish).toHaveBeenCalledTimes(1)
-
-    // 定时腿两轮同样零帧
-    await advanceReconcileInterval(2)
     expect(publish).toHaveBeenCalledTimes(1)
   })
 
@@ -378,7 +364,6 @@ describe('A3 守卫/发布门跳自愈（注入单测）', () => {
     expect(publish).toHaveBeenCalledTimes(1)
 
     client.getEntries.mockResolvedValue({ data: { entries: [], leafId: 'e1' } })
-    await advanceReconcileInterval(2) // 重连后两轮对账
     records.reconcileRecordEntries('s1')
     await Promise.resolve()
     await Promise.resolve()
@@ -417,88 +402,12 @@ describe('agent_settled 腿（reconcileRecordEntries）', () => {
     client.getEntries.mockImplementation(async () => new Promise<GetEntriesResult>((resolve) => { release = resolve }))
     records.reconcileRecordEntries('s1') // 腿 A：拉取挂起（inflight 已设）
     await Promise.resolve()
-    await advanceReconcileInterval(1) // 腿 B：定时器撞在途 → 复用 inflight
+    records.reconcileRecordEntries('s1') // 腿 B：对账撞在途 → 复用 inflight
+    await Promise.resolve()
     release({ data: { entries: [], leafId: 'e1' } })
     await Promise.resolve()
     await Promise.resolve()
     expect(client.getEntries).toHaveBeenCalledTimes(2) // seedRound 1 次 + 对账 1 次（无第三次）
-  })
-})
-
-// ── 定时腿（15s 服务级单例 timer）───────────────────────────────────────────
-
-describe('定时腿（15s 服务级单例 timer）', () => {
-  beforeEach(() => { vi.useFakeTimers() })
-  afterEach(() => { vi.useRealTimers() })
-
-  it('内容落缓存后 timer 自启：advance 15s → 域内 session 增量对账', async () => {
-    const { records, client } = makeRecords()
-    const fire = registerSession(records)
-    await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
-
-    client.getEntries.mockClear()
-    client.getEntries.mockResolvedValue({ data: { entries: [], leafId: 'e1' } })
-    await advanceReconcileInterval(1)
-    expect(client.getEntries).toHaveBeenCalledWith('e1') // 增量拉取发生
-  })
-
-  it('cursor=null 本轮跳过（门③：全量重建 RPC 无 oversize 保护，等 agent_settled 腿）', async () => {
-    const { records, client } = makeRecords()
-    const fire = registerSession(records)
-    // leafId 缺省 → 拉取成功但 cursor 保持 null（域内 + cursor 空的可达形态）
-    await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], undefined as unknown as string)
-
-    client.getEntries.mockClear()
-    await advanceReconcileInterval(3)
-    expect(client.getEntries).not.toHaveBeenCalled() // 定时腿跳过
-
-    // agent_settled 腿不受门③限制（正常全量路径）
-    client.getEntries.mockResolvedValue({ data: { entries: [...subagentRecordEntries('sa-1', 'running', 'e1')], leafId: 'e1' } })
-    records.reconcileRecordEntries('s1')
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(client.getEntries).toHaveBeenCalledWith()
-  })
-
-  it('onSessionDisposed 扫描域清零 → timer 停（advance 45s 零拉取）', async () => {
-    const { records, client } = makeRecords()
-    const fire = registerSession(records)
-    await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
-
-    client.getEntries.mockClear()
-    records.onSessionDisposed('s1')
-    await advanceReconcileInterval(3)
-    expect(client.getEntries).not.toHaveBeenCalled()
-  })
-
-  it('多 session：销毁其一，域内另一 session 仍被定时扫', async () => {
-    // per-session client 预创建（getClient 每 refresh 都被调，spy 不能惰性新建——
-    // 首拉发生在 flushDebounce 内，惰性创建时 mockResolvedValue 尚未挂上会拉到空）
-    const mkClient = () => ({
-      getEntries: vi.fn(async (_since?: string) => ({ data: { entries: [], leafId: null } }) as GetEntriesResult),
-    })
-    const clients = new Map<string, ReturnType<typeof mkClient>>([
-      ['s1', mkClient()],
-      ['s2', mkClient()],
-    ])
-    const { records } = makeRecords({
-      pm: { getClient: vi.fn((sid: string) => clients.get(sid) as unknown as IPiEngine) } as unknown as IProcessManager,
-    })
-    const fire = registerSession(records)
-    for (const sid of ['s1', 's2']) {
-      clients.get(sid)!.getEntries.mockResolvedValue({
-        data: { entries: [...subagentRecordEntries(`sa-${sid}`, 'running', `e-${sid}`, { rootSessionId: sid })], leafId: `e-${sid}` },
-      })
-      fire(sid)
-      records.invalidateRecordEntries(sid, 'subagent-record')
-      await flushDebounce()
-    }
-
-    for (const c of clients.values()) c.getEntries.mockClear()
-    records.onSessionDisposed('s1')
-    await advanceReconcileInterval(1)
-    expect(clients.get('s1')!.getEntries).not.toHaveBeenCalled()
-    expect(clients.get('s2')!.getEntries).toHaveBeenCalledWith('e-s2')
   })
 })
 

@@ -118,14 +118,6 @@ export const SETTINGS_CORRUPTED = 'settings_corrupted'
 export const SESSION_ACTIVATE_FAILED = 'SESSION_ACTIVATE_FAILED'
 
 /**
- * 会话激活超时（RPC 边界上界，`TAIJI_SESSION_ACTIVATE_TIMEOUT_MS`，默认 15s）。
- *
- * 超时只终止 RPC 等待（前端 toast 指引重试），**不取消后台恢复**——join 语义保留。
- * 触发条件与恢复动作见设计 §3.4 错误规格表「激活超时」行 / §3.6「激活的等待上界」行。
- */
-export const SESSION_ACTIVATE_TIMEOUT = 'SESSION_ACTIVATE_TIMEOUT'
-
-/**
  * pi 报 `Model not found` 且模型**不在** taiji 注册表（配置已被删/改名）。
  * 用户面：「该模型已不存在，请重新选择」。
  */

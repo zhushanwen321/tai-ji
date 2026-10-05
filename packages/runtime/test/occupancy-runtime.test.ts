@@ -393,24 +393,6 @@ describe('MessageDispatcher occupancy 挂点', () => {
     expect(occupancyFrames(publish)).toEqual([{ sessionId: 's1', turn: 'idle', compacting: false, bash: false }])
   })
 
-  it('#9c/#10 abort RPC 超时 → forceQuitSession 收敛链全复位（先 turn 复位帧、后三维全复位帧，先于 session.exited）', async () => {
-    const { dispatcher, publish } = makeDispatcher({
-      session: makeMockSession({ isGenerating: true, isCompacting: true, occupancy: { turn: 'generating', compacting: true, bash: true } }),
-      abortBehavior: 'rpc-timeout',
-    })
-    await dispatcher.abort('s1')
-    // 幂等写序列：abort catch 先写 turn=idle（compacting/bash 尚未复位，中间帧合法），
-    // RpcTimeout → forceQuitSession 全复位补完三维——乱序安全，终态一致。
-    const frames = occupancyFrames(publish)
-    expect(frames).toEqual([
-      { sessionId: 's1', turn: 'idle', compacting: true, bash: true },
-      { sessionId: 's1', turn: 'idle', compacting: false, bash: false },
-    ])
-    // 帧序约束：occupancy 全复位在 session.exited 之前（removeSessionEntry 会 clearSession）
-    const types = frameTypes(publish)
-    expect(types.indexOf('session.occupancy')).toBeLessThan(types.indexOf('session.exited'))
-  })
-
   it('#10 forceQuit → 全复位帧 + session.exited 保留（占用中 pi 死亡链路）', async () => {
     const { dispatcher, publish } = makeDispatcher({
       session: makeMockSession({ occupancy: { turn: 'settling', compacting: true, bash: false } }),

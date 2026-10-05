@@ -242,7 +242,7 @@ describe("executeCwAction", () => {
 		if (!details.ok) expect(details.error).toContain("cw spawn 失败");
 	});
 
-	it("超时 → ok:false 'cw 超时'（timeoutMs=0 不限时）", async () => {
+	it("显式传 timeoutMs 到点判超时（包内无默认超时；不传=不限时，ADR-0112 失败直报）", async () => {
 		const hangingSpawner: CwSpawner = (_args, _input, _cwd, signal) =>
 			new Promise<CwSpawnResult>((resolve) => {
 				signal?.addEventListener("abort", () => resolve({ stdout: "", stderr: "", exitCode: null }), {
@@ -261,6 +261,25 @@ describe("executeCwAction", () => {
 		);
 		expect(details).toMatchObject({ ok: false });
 		if (!details.ok) expect(details.error).toBe("cw 超时");
+	});
+
+	it("不传 timeoutMs 时不武装超时（hanging spawner 由测试自行收尾）", async () => {
+		let resolveSpawn: (r: CwSpawnResult) => void = () => {};
+		const hangingSpawner: CwSpawner = () =>
+			new Promise<CwSpawnResult>((resolve) => {
+				resolveSpawn = resolve;
+			});
+		const pending = executeCwAction("status", CW_ACTIONS, TOOL_NAME, {}, hangingSpawner, CWD);
+		// 若默认超时仍存在（300s），此处不会立即判定；用微任务检查其仍 pending 即证明无 timer 接管
+		let settled = false;
+		void pending.then(() => {
+			settled = true;
+		});
+		await Promise.resolve();
+		expect(settled).toBe(false);
+		resolveSpawn({ stdout: "ok", stderr: "", exitCode: 0 });
+		const details = await pending;
+		expect(details).toMatchObject({ ok: true });
 	});
 
 	it("SDK abort signal 与超时合并（进入即 aborted 也判失败）", async () => {

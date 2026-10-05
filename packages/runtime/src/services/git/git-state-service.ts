@@ -40,8 +40,6 @@ import type { GitRepoObserver } from './repo-observer.js'
 
 // D3-1 超时定案：snapshotStatus/numstat 沿用 reconciler 现状 5000ms；getStatus 沿用
 // git-executor 默认 8000ms（显式传参防 executor 默认值变化时语义漂移）。
-const SNAPSHOT_TIMEOUT_MS = 5000
-const STATUS_TIMEOUT_MS = 8000
 /** getStatus 结果 TTL（D4-3「短 TTL 如 2s」）。 */
 const STATUS_TTL_MS = 2000
 /**
@@ -126,7 +124,7 @@ export class GitStateService implements IGitStateService, IGitRepoObserver {
 
   private async runSnapshotStatus(cwd: string): Promise<StatusSnapshot> {
     try {
-      const res = await this.execGit(cwd, 'status', ['--porcelain'], SNAPSHOT_TIMEOUT_MS)
+      const res = await this.execGit(cwd, 'status', ['--porcelain'])
       if (res.exitCode !== 0) {
         this.maybeMarkNotRepo(cwd, res)
         return null
@@ -156,7 +154,7 @@ export class GitStateService implements IGitStateService, IGitRepoObserver {
 
   private async runNumstat(cwd: string): Promise<Map<string, NumstatEntry> | null> {
     try {
-      const res = await this.execGit(cwd, 'diff', ['--numstat', 'HEAD'], SNAPSHOT_TIMEOUT_MS)
+      const res = await this.execGit(cwd, 'diff', ['--numstat', 'HEAD'])
       if (res.exitCode !== 0) {
         this.maybeMarkNotRepo(cwd, res)
         return null
@@ -217,7 +215,6 @@ export class GitStateService implements IGitStateService, IGitRepoObserver {
         cwd,
         'status',
         ['--porcelain=v1', '-z', '-b', '--untracked-files=all'],
-        STATUS_TIMEOUT_MS,
       )
       if (statusRes.exitCode !== 0) {
         this.maybeMarkNotRepo(cwd, statusRes)
@@ -227,8 +224,8 @@ export class GitStateService implements IGitStateService, IGitRepoObserver {
       const { stagedCount, unstagedCount, hasConflict } = deriveCounts(files)
 
       const [numstatSettled, branchSettled] = await Promise.allSettled([
-        this.execGit(cwd, 'diff', ['--numstat', 'HEAD'], STATUS_TIMEOUT_MS),
-        this.execGit(cwd, 'branch', ['--list', '--format=%(refname:short)'], STATUS_TIMEOUT_MS),
+        this.execGit(cwd, 'diff', ['--numstat', 'HEAD']),
+        this.execGit(cwd, 'branch', ['--list', '--format=%(refname:short)']),
       ])
       // numstat/branch 是同一聚合查询的组成部分（非独立数据源）：任一 rejected（git 不可用/超时）
       // 即整体降级——与 git-service.getStatus 现状「串行 await 任一异常 → catch 降级」行为等价。
@@ -335,8 +332,8 @@ export class GitStateService implements IGitStateService, IGitRepoObserver {
     }
   }
 
-  private execGit(cwd: string, command: GitCommand, args: string[], timeoutMs: number): Promise<GitExecutorResult> {
-    return this.executor.exec(cwd, command, args, { timeoutMs })
+  private execGit(cwd: string, command: GitCommand, args: string[]): Promise<GitExecutorResult> {
+    return this.executor.exec(cwd, command, args)
   }
 }
 

@@ -77,15 +77,9 @@ OUTPOST_CALLSITES = [
         "injector.inject 之后按注入后文本调用（deliverOne 内 injection.text → "
         "promptWithBusyRetry 透传），busy-retry 只改 opts.behavior、文本不换，复用同一"
         "已注入文本；前一版 deliverText 调用点随重构消失，旧条目 "
-        "client.prompt(injection.text, undefined, streamingBehavior) 已替换",
-    ),
-    (
-        "services/session/session-delivery-registry.ts",
-        "await client.prompt(text, opts.images, opts.behavior, undefined, 0)",
-        "injected",
-        "[U1 D14③] 同上一条目出站点的命令档条件传参形态（G3 三闸联动：第 4 参无附件、"
-        "第 5 参 0=不限时档，仅命令条目走此分支）：文本同为 deliverOne 注入后文本，"
-        "注入语义与上一条目完全一致，仅超时档位参数差异",
+        "client.prompt(injection.text, undefined, streamingBehavior) 已替换；命令档"
+        "条件传参形态（原第 5 参 0=不限时档，U1 D14③）随 ADR-0112 超时档位删除"
+        "与本条合并为单一形态",
     ),
     (
         "services/session/session-records.ts",
@@ -114,11 +108,11 @@ OUTPOST_CALLSITES = [
     ),
     (
         "services/session/session-service.ts",
-        "client.prompt(BG_RECONCILE_COMMAND, undefined, undefined, { maintenance: true })",
+        "void client.prompt(BG_RECONCILE_COMMAND)",
         "exempt",
         "bg-notify redelivery 触发命令（无参字面命令，[2026-09-25] 替换退役的"
-        " /__taiji_reload__ 条目）；带 maintenance 标记——激活触发不刷新 RpcClient"
-        " 空闲时钟（频繁切会话不污染回收判定）",
+        " /__taiji_reload__ 条目）；maintenance 标记参数已随 ADR-0112 防御清理"
+        "（idle-pi-reaper 退役后空闲时钟判据消失）删除，回归裸命令形态",
     ),
     (
         "services/session/trace-sync.ts",

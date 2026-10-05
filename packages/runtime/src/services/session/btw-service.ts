@@ -79,18 +79,10 @@ export type { BtwErrorCode } from './btw-error.js'
 // 常量（闲置回收节拍；D9⑤ 行为契约文本已迁 btw-contract-inject.ts、fork 常量迁 btw-fork-exec.ts）
 // ─────────────────────────────────────────────────────────────────────────────
 
-const MINUTE_MS = 60_000
-
-/**
- * btw 线闲置回收阈值（D1：闲置 30min destroy 进程；线会话文件持久保留——裁决⑧）。
- * V3（设计 §5）：阈值是否合适待 S 系列验收后按实际使用调——经 deps.idleThresholdMs
- * 可注入，调档不改代码形态。
- */
-const IDLE_RECLAIM_MINUTES = 30
-export const BTW_IDLE_RECLAIM_MS = IDLE_RECLAIM_MINUTES * MINUTE_MS
-
-/** 闲置扫描节拍（单定时器扫全表，不 per-line 定时器；unref 不阻塞进程退出）。 */
-export const BTW_IDLE_TICK_MS = MINUTE_MS
+// ADR-0112 退役登记（2026-10-05）：btw 线闲置回收（BTW_IDLE_RECLAIM_MS 30min 阈值 +
+// BTW_IDLE_TICK_MS 1min 扫描节拍 + reclaimImminent 回收前提醒）已整体删除——线进程
+// 存续至显式关线（closeLine）或 runtime shutdown destroyAll。协议字段
+// BtwThreadInfo.reclaimImminent 保留（恒 false，wire 形状不变），提醒 UI 沉默退化。
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 类型
@@ -128,11 +120,9 @@ export interface BtwLineRecord {
   /** hidden:true（active 腿防线：listAll 过滤 + 不记工作区历史；重建轮同样复原）。 */
   hidden: true
   createdAt: number
-  /** 空闲钟参考（重建条目初值 0；运行期与 client.lastActivityAt 取 max）。 */
-  lastActivityAt: number
   /** 有待处理交互（豁免计闲置；豁免随任一终态解除——派生通道见 deps.hasPendingUiRequests / setPendingInteraction）。 */
   pendingInteraction: boolean
-  /** 回收提醒态（D1「回收前」提醒窗口，提前 1 拍置位；回收发生/用户续问后清——协议面 = BtwThreadInfo.reclaimImminent）。 */
+  /** 回收提醒态（协议面 = BtwThreadInfo.reclaimImminent；闲置回收退役后恒 false，wire 形状保留）。 */
   reclaimImminent: boolean
   /** 行为契约注入轮数（= 会话建立次数：create 1 轮 + 每次 reattach +1）。 */
   contractRounds: number
@@ -207,17 +197,14 @@ export interface BtwServiceDeps {
    */
   onWillReclaim?(vid: string): void
   /**
-   * 回收提醒态**清除**侧广播驱动（D1 回收提醒清除支：回收发生 / 用户续问 / 进程亡 /
-   * 挂起交互置位）。组合根接「线列表 state 广播」（typeKey 'btw'）。缺省 no-op（测试零广播）。
+   * 线状态变化广播驱动。组合根接「线列表 state 广播」（typeKey 'btw'）。缺省 no-op（测试零广播）。
    */
   onThreadStateChanged?(vid: string): void
   /**
-   * 交互中转 pending 快照（BU2/D1 闲置豁免的派生**解除**通道）：respond / expired / 失效
-   * 三终态的共同落点 = ExtensionTimeoutManager 的 per-session pending 表（respond →
-   * removeRequest、失效 → invalidatePendingForSession），组合根经
-   * server.getPendingUiRequests 薄委托注入（主 idle reaper 豁免 #8 同款先例）。idleTick 见
-   * 「已置位但中转已空」即派生解除——三终态统一覆盖，无须逐终态推挽接线（置位推送通道见
-   * index.ts onExtensionUIRequest）。缺省缺席 = 纯推送形态（解除走结构腿/显式调用）。
+   * 交互中转 pending 快照：respond / expired / 失效三终态的共同落点 =
+   * ExtensionTimeoutManager 的 per-session pending 表（respond → removeRequest、失效 →
+   * invalidatePendingForSession），组合根经 server.getPendingUiRequests 薄委托注入。
+   * 缺省缺席 = 纯推送形态（解除走结构腿/显式调用）。
    */
   hasPendingUiRequests?(vid: string): boolean
   /**
@@ -231,13 +218,10 @@ export interface BtwServiceDeps {
    * [M4-a / D9④ 单入口终结扇出] 线终结（三路：deleteSession 级联 / deleteByCwd 批内直删 /
    * btw.remove）后的 lifecycle 收尾：摘 sessions Map 条目 + detach adapter + 插件 sessionData
    * 真删清理（组合根注入，镜像主会话 delete 的收尾序）。必要性：planned kill（destroySession
-   * 先删进程表）抑制 exit 回调——条目/总线分区/插件数据不自清；**失效腿（闲置回收/进程亡）
-   * 不经本回调**（线可重开，条目保留，D9④）。回调自身幂等（无条目零动作）；closeLine 对
-   * 已出册线也补发一次（防注册表先摘、条目后存在的残留形态）。
+   * 先删进程表）抑制 exit 回调——条目/总线分区/插件数据不自清。回调自身幂等（无条目零动作）；
+   * closeLine 对已出册线也补发一次（防注册表先摘、条目后存在的残留形态）。
    */
   onLineTerminated?(vid: string): void
-  /** 闲置阈值覆盖（V3 调档口；缺省 BTW_IDLE_RECLAIM_MS）。 */
-  idleThresholdMs?: number
   /** 时钟注入（测试）。 */
   now?(): number
 }
@@ -296,11 +280,8 @@ async function requireSpawnState(
 export class BtwService {
   /** mainSid → 条目仅经 registry 全表索引（消费方 listLines(mainSid) 过滤；注册表即 D4 关联投影）。 */
   private readonly registry = new Map<string, BtwLineRecord>()
-  private timer: ReturnType<typeof setInterval> | null = null
-  private readonly idleThresholdMs: number
 
   constructor(private readonly deps: BtwServiceDeps) {
-    this.idleThresholdMs = deps.idleThresholdMs ?? BTW_IDLE_RECLAIM_MS
   }
 
   private now(): number {
@@ -416,7 +397,6 @@ export class BtwService {
             snapshotKind: 'unknown',
             hidden: true,
             createdAt,
-            lastActivityAt: 0,
             pendingInteraction: false,
             reclaimImminent: false,
             contractRounds: 0,
@@ -529,7 +509,6 @@ export class BtwService {
         snapshotKind,
         hidden: true,
         createdAt: this.now(),
-        lastActivityAt: this.now(),
         pendingInteraction: false,
         reclaimImminent: false,
         contractRounds: 1,
@@ -537,7 +516,6 @@ export class BtwService {
       }
       this.registry.set(vid, rec)
       this.deps.traceContractInjection?.({ vid, round: 1, carrier: 'append-system-prompt', contract: BTW_BEHAVIOR_CONTRACT })
-      this.armTimer()
       return { vid, mainSid, snapshotKind, sessionFilePath }
     } catch (e) {
       // 与 create/restore 的 init catch 同构：注册半途失败 → 收尸进程，不留半截条目。
@@ -566,11 +544,7 @@ export class BtwService {
     const rec = this.registry.get(vid)
     if (!rec) throw new BtwError('line_not_found', `[btw] no such line: ${vid}`)
     const alive = rec.client
-    if (alive && !alive.exited) {
-      this.armTimer() // 幂等兜底（BU1）：活线在场 ⇒ 闲置扫描必须在跑
-      this.markActivity(vid)
-      return alive
-    }
+    if (alive && !alive.exited) return alive
     if (!rec.sessionFilePath || !existsSync(rec.sessionFilePath)) {
       throw new BtwError('thread_file_missing', `[btw] thread session file missing (line had never flushed) — rebuild from scratch: ${rec.sessionFilePath ?? vid}`)
     }
@@ -591,14 +565,9 @@ export class BtwService {
       rec.client = client
       rec.contractRounds += 1
       this.deps.traceContractInjection?.({ vid, round: rec.contractRounds, carrier: 'append-system-prompt', contract: BTW_BEHAVIOR_CONTRACT })
-      // [BU1] 重附着成功必须武装闲置定时器：rebuildFromDisk → ensureProcess 链此前从不 arm
-      //（armTimer 仅 createLine 成功路径调用），回收后续问/重启重开的线进程永不回收
-      //（~138MB/线常驻，D1 代价 #3 回收前提落空）。armTimer 幂等（已有非空守卫）。
-      this.armTimer()
       // [D1 豁免随请求失效] 重附着 = 旧轮挂起请求的失效终态（中断 turn / 进程亡同一切面）
-      // → 结构解除；markActivity 随后顺带清回收提醒。
+      // → 结构解除。
       rec.pendingInteraction = false
-      this.markActivity(vid)
       return client
     } catch (e) {
       // best-effort 收尸：两键都试（rekey 前后），失败不掩盖原始附着错误（退出回调兜底）。
@@ -608,33 +577,16 @@ export class BtwService {
     }
   }
 
-  // ── 生命周期信号（闲置回收 / 交互豁免 / 活跃）──
+  // ── 生命周期信号（交互豁免）──
 
   /**
-   * 活跃信号（实装触发 = 本服务内部调用：ensureProcess 活跃/重附着路径与
-   * setPendingInteraction(false) 的终态应答支；闲置计时 = 本时间戳与
-   * client.lastActivityAt 取 max 兜底）。
-   */
-  markActivity(vid: string): void {
-    const rec = this.registry.get(vid)
-    if (!rec) return
-    rec.lastActivityAt = this.now()
-    this.clearReclaimImminent(rec) // D1 回收提醒清除支：用户续问 → 提醒清（驱动广播）
-  }
-
-  /**
-   * 有待处理交互登记（D1 豁免：不计闲置；豁免随任一终态解除——终态机触发点归 M3-c，
-   * 本方法是其解除口）。登记本身即提醒态的一部分（badge 待处理 = M3-c 消费）。
+   * 有待处理交互登记（豁免随任一终态解除——终态机触发点归 M3-c，本方法是其解除口）。
+   * 登记本身即提醒态的一部分（badge 待处理 = M3-c 消费）。
    */
   setPendingInteraction(vid: string, pending: boolean): void {
     const rec = this.registry.get(vid)
     if (!rec) return
     rec.pendingInteraction = pending
-    if (pending) {
-      this.clearReclaimImminent(rec) // 挂起交互 → 线不计闲置，回收提醒同步失效
-    } else {
-      this.markActivity(vid) // 终态应答视为一次活跃（防解除即刻误回收）+ 顺带清回收提醒
-    }
   }
 
   /**
@@ -699,14 +651,6 @@ export class BtwService {
     }
   }
 
-  /** 停止闲置扫描定时器（shutdown / 测试收尾）。 */
-  dispose(): void {
-    if (this.timer !== null) {
-      clearInterval(this.timer)
-      this.timer = null
-    }
-  }
-
   // ── 内部 ──
 
   /** 终结扇出（best-effort：扇出失败不阻断关线主链；回调内部各步自身隔离/幂等）。 */
@@ -719,6 +663,12 @@ export class BtwService {
     }
   }
 
+  /**
+   * 收尾口（shutdown / 测试收尾调用）。闲置扫描定时器已随 ADR-0112 退役，现为 no-op
+   * 形态保留（公共收尾调用面不破坏）。
+   */
+  dispose(): void {}
+
   /** 会话建立期 spawn options（不可协商不变量的唯一施加点）。 */
   private async buildEstablishOptions(ctx: BtwLineSpawnContext): Promise<BtwLineSpawnOptions> {
     const base = await this.deps.buildLineSpawnOptions(ctx)
@@ -727,86 +677,6 @@ export class BtwService {
       cwd: ctx.cwd,
       env: { ...base.env, PI_CODING_AGENT_SESSION_DIR: ctx.threadDir },
       appendSystemPrompt: composeContractAppendPrompt(base.appendSystemPrompt),
-    }
-  }
-
-  /** 回收前提醒（onWillReclaim）触发口：hook 异常不打断回收主链（best-effort 留痕）。 */
-  private fireWillReclaim(vid: string): void {
-    try {
-      this.deps.onWillReclaim?.(vid)
-    } catch (e) {
-      // best-effort：提醒挂点异常不打断回收主链（提醒兜底 = 回收分支 catch-up 补发），留痕可归因
-      console.warn(`[btw] onWillReclaim hook failed (${vid}): ${toErrorMessage(e)}`)
-    }
-  }
-
-  /** 回收提醒态清除（D1 清除支统一口：回收发生/续问/进程亡/交互置位）：翻转 + 驱动广播。 */
-  private clearReclaimImminent(rec: BtwLineRecord): void {
-    if (!rec.reclaimImminent) return
-    rec.reclaimImminent = false
-    try {
-      this.deps.onThreadStateChanged?.(rec.vid)
-    } catch (e) {
-      // best-effort：清除广播异常不打断回收/活跃主链（状态已翻转，恢复通道 = btw.list RPC 拉取兜底）
-      console.warn(`[btw] onThreadStateChanged hook failed (${rec.vid}): ${toErrorMessage(e)}`)
-    }
-  }
-
-  private armTimer(): void {
-    if (this.timer !== null) return
-    this.timer = setInterval(() => { this.idleTick() }, BTW_IDLE_TICK_MS)
-    this.timer.unref() // 不阻塞进程退出（runtime shutdown 另有 destroyAll 兜底）
-  }
-
-  /**
-   * 闲置扫描（D1）：活着的线 + 无待处理交互 + 闲置 ≥ 阈值 → 回收提醒挂点 → destroy
-   *（只杀进程，文件与注册表条目保留——裁决⑧，续问走 ensureProcess 重附着）。
-   * 进程已亡条目顺手清 client 引用（失效支：挂起请求清理/派生随进程亡归 M3-c/M4-a）。
-   */
-  private idleTick(): void {
-    const now = this.now()
-    for (const rec of this.registry.values()) {
-      const client = rec.client
-      if (!client) continue
-      if (client.exited) {
-        // 失效腿结构解除（D1）：进程亡 = 挂起请求失效终态 + 回收提醒失去意义，双双清。
-        rec.client = undefined
-        rec.pendingInteraction = false
-        this.clearReclaimImminent(rec)
-        continue
-      }
-      if (rec.pendingInteraction) {
-        // [BU2 派生解除] 已置位但交互中转（respond/expired/失效共同落点）已空 → 派生解除
-        //（三终态统一覆盖；解除即 re-age，防解除即刻误回收）。中转仍 pending → 继续豁免。
-        if (this.deps.hasPendingUiRequests && !this.deps.hasPendingUiRequests(rec.vid)) {
-          this.setPendingInteraction(rec.vid, false)
-        } else {
-          continue // 豁免：有待处理交互不计闲置（D1）
-        }
-      }
-      const last = Math.max(rec.lastActivityAt, client.lastActivityAt)
-      const idle = now - last
-      if (idle >= this.idleThresholdMs) {
-        // 回收前提醒（D1）：正常窗已在前一拍置位；时钟跳拍（休眠唤醒跨窗直达回收）时兜底
-        // 补发——保证 onWillReclaim 恒在 destroy 前触发（提醒挂点可达不变量）。
-        if (!rec.reclaimImminent) {
-          rec.reclaimImminent = true
-          this.fireWillReclaim(rec.vid)
-        }
-        rec.client = undefined
-        this.clearReclaimImminent(rec) // D1：回收发生 → 提醒清（清除支广播）
-        void this.deps.processes.destroySession(rec.vid).catch((e: unknown) => {
-          console.warn(`[btw] reclaim destroy failed (${rec.vid}): ${toErrorMessage(e)}`)
-        })
-        continue
-      }
-      // 提前 1 拍提醒窗（D1「回收前」，实装窗口 = 阈值 − 扫描节拍）：置提醒态 + 驱动广播；
-      // 下一拍满阈值才真回收（badge 待处理呈现已接线：renderer useBtwTabData
-      // setBtwReclaimReminder，数据源 = reclaimImminent）。
-      if (!rec.reclaimImminent && idle >= this.idleThresholdMs - BTW_IDLE_TICK_MS) {
-        rec.reclaimImminent = true
-        this.fireWillReclaim(rec.vid)
-      }
     }
   }
 }

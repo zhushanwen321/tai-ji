@@ -4,23 +4,16 @@
 // 消费；引擎进程内权威。spawn-runner.ts re-export 全部导出保持既有导入面
 // （index.ts / pi-engine.ts / __tests__ 均从 spawn-runner 导入）。
 //
-// [U1 归并] dispose 收割的升级链切 pi-rpc killPiProcess（与 spawn-runner
-// killChild / runtime 主链路同源）；前置 child.kill(signal) 维持现状——直接信号
-// 与升级链的分工（先发即杀，链兜底 grace 后 SIGKILL）在归并前后一致。
+// [U1 归并] dispose 收割切 pi-rpc killPiProcess（与 spawn-runner killChild /
+// runtime 主链路同源）；原「SIGTERM → 30s grace → SIGKILL 升级链」随 ADR-0112
+// 防御清理退役——killPiProcess 现为 SIGKILL 直杀 + 立即 resolve。
 
 import type { ChildProcess } from "node:child_process";
 
 import { getLogger } from "@zhushanwen/subagent-engine-sdk";
 import { killPiProcess } from "@zhushanwen/pi-rpc";
 
-import { PI_KILL_GRACE_MS } from "./constants.ts";
-
 const logger = getLogger("session-runner");
-
-// 毫秒→秒换算（SIGKILL 升级 warn 日志的秒数显示）。文件内私有定义：工程内
-// MS_PER_SECOND 惯例是各使用文件私有常量（subagent-engine-sdk kill-chain 等
-// 先例），无共享导出源可 import，保持同惯例不另立导出点。
-const MS_PER_SECOND = 1_000;
 
 /** 活跃子进程表（recordId → child）。 */
 const activeChildren = new Map<string, ChildProcess>();
@@ -41,14 +34,14 @@ export function getActiveChild(recordId: string): ChildProcess | undefined {
 }
 
 /**
- * 全量收割（dispose）：SIGTERM + 30s SIGKILL 升级；返回收割数。
+ * 全量收割（dispose）：SIGKILL 直杀（pi-rpc killPiProcess 单源）；返回收割数。
  *
  * 杀决策落盘（2026-09-24 事故取证补口）：dispose 全量收割会连坐杀掉**正在运行**的
  * record 子进程（relay 形态下 = relay.mjs 代理 → runtime kill-on-disconnect 连坐真
  * pi child）——该决策此前零日志，主 pi 侧先杀代理的断连形态第一现场不可考。收割
  * 必记 warn：record 清单 + 各自进程态（在跑被杀 / 已退出仅销账）。
  */
-export function killAllActiveChildren(signal: NodeJS.Signals = "SIGTERM"): number {
+export function killAllActiveChildren(): number {
   let killed = 0;
   const victims: string[] = [];
   const finished: string[] = [];
@@ -56,16 +49,7 @@ export function killAllActiveChildren(signal: NodeJS.Signals = "SIGTERM"): numbe
     if (child.exitCode === null && child.signalCode === null) {
       killed++;
       victims.push(`${recordId}(pid=${String(child.pid)})`);
-      child.kill(signal);
-      void killPiProcess(child, {
-        graceMs: PI_KILL_GRACE_MS,
-        unrefTimers: true,
-        onEscalate: () => {
-          logger.warn(
-            `[kill-chain] child ${recordId} (source: dispose killAll) still alive ${PI_KILL_GRACE_MS / MS_PER_SECOND}s after SIGTERM, escalating to SIGKILL`,
-          );
-        },
-      });
+      void killPiProcess(child);
     } else {
       finished.push(recordId);
     }

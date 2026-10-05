@@ -5,7 +5,7 @@
  * 锁定（验收条款逐条对照）：
  * - ① 判据命中处置成功 → 台账 reaped 事件：layer=pi、结构化 pid/ppid、detailDigest
  *   内嵌 argv 判据摘要（v2 marker 判据：argv 匹配 spawn 清单 + ppid=1 + argv 头部）。
- * - ④ 防误记：判据未命中（ppid≠1 / marker 清单外值）零事件；处置失败（SIGTERM
+ * - ④ 防误记：判据未命中（ppid≠1 / marker 清单外值）零事件；处置失败（SIGKILL
  *   非 ESRCH 错误）不记 reaped。
  *
  * 台账走真实 writer（initCrashJournal → mkdtemp tmp 目录 → closeCrashJournal 确定性
@@ -20,7 +20,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { closeCrashJournal, initCrashJournal } from '../infra/crash-journal.js'
-import { reapOrphanPiProcesses, ORPHAN_KILL_GRACE_MS, type PsRow, type ReapOrphanOptions } from './reap-orphan-pi.js'
+import { reapOrphanPiProcesses, type PsRow, type ReapOrphanOptions } from './reap-orphan-pi.js'
 
 const DATA_DIR = '/Users/tester/.taiji'
 const OWN_PID = 100
@@ -61,11 +61,9 @@ function psStdout(rows: PsRow[]): string {
   return rows.map(r => `  ${r.pid}   ${r.ppid} ${r.command}`).join('\n') + '\n'
 }
 
-/** SIGTERM 即退出形态的信号注入：SIGTERM/SIGKILL no-op，探活（signal 0）报 ESRCH。 */
-function signalDiesOnProbe(): ReapOrphanOptions['signal'] {
-  return (_pid, signal) => {
-    if (signal === 0) throw esrch()
-  }
+/** SIGKILL no-op 注入（台账测试不真发信号；ESRCH 形态见各用例 override）。 */
+function noopSignal(): ReapOrphanOptions['signal'] {
+  return () => {}
 }
 
 function makeOptions(rows: PsRow[], overrides?: Partial<ReapOrphanOptions>): ReapOrphanOptions {
@@ -74,8 +72,7 @@ function makeOptions(rows: PsRow[], overrides?: Partial<ReapOrphanOptions>): Rea
     ownPid: OWN_PID,
     readSpawnMarkers: () => [MARKER],
     listProcesses: () => Promise.resolve(psStdout(rows)),
-    signal: signalDiesOnProbe(),
-    delay: () => Promise.resolve(),
+    signal: noopSignal(),
     ...overrides,
   }
 }
@@ -142,7 +139,7 @@ describe('reap-orphan-pi → 崩溃台账 reaped 事件（D1 矩阵 reaped 行�
     expect(records[0]!.pid).toBe(702)
   })
 
-  it('④ 处置失败（SIGTERM 抛非 ESRCH）→ 进 failed，台账记 reap-failed（不记 reaped）', async () => {
+  it('④ 处置失败（SIGKILL 抛非 ESRCH）→ 进 failed，台账记 reap-failed（不记 reaped）', async () => {
     initCrashJournal(dataDir)
     const boom = new Error('operation not permitted')
     const result = await reapOrphanPiProcesses(makeOptions(
@@ -180,7 +177,4 @@ describe('reap-orphan-pi → 崩溃台账 reaped 事件（D1 矩阵 reaped 行�
     }
   })
 
-  it('宽限默认值不被接线改动：killGraceMs 缺省仍为 ORPHAN_KILL_GRACE_MS（接线零行为漂移哨兵）', () => {
-    expect(ORPHAN_KILL_GRACE_MS).toBe(2_000)
-  })
 })

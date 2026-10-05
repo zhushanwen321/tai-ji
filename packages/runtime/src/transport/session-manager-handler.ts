@@ -26,7 +26,7 @@ import type { ISessionService } from '../interfaces.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 // 通知债权状态机（u-claims）：本 handler 是其唯一受理侧消费方；组合根 index.ts 经
 // 本模块导出的映射/回执助手（toWatchRespondPayload 等）消费同一批素材。
-import type { ClaimLedger, RespondPayload, RespondTarget, SettleOutcome, SweepResult } from '../services/session/notify-claims.js'
+import type { ClaimLedger, RespondPayload, RespondTarget, SettleOutcome } from '../services/session/notify-claims.js'
 import { toErrorMessage } from '../utils/errors.js'
 import { SESSION_MANAGER_ACTIONS } from '@zhushanwen/extension-protocol'
 import {
@@ -174,17 +174,6 @@ export function deliverRespondTargets(
     }
     claims.onRespond(t.parentSid, t.notifyId, ok)
   }
-}
-
-/**
- * TTL 清扫消费（D7 回收策略）：扫描转移时 watch 已挂的记录返回 respondOrphaned，
- * 此处同步应答 'orphaned'（extension 按 D3 例外1 静默收口，防孤儿 promise）+ onRespond 回执。
- * 组合根 index.ts 的清扫定时环与 handler 测试经同一函数驱动（测试可覆盖该腿）。
- */
-export function runClaimSweep(claims: ClaimLedger, respond: WatchRespondFn): SweepResult {
-  const result = claims.sweep()
-  deliverRespondTargets(claims, result.respondOrphaned, respond)
-  return result
 }
 
 /** dispatch 的统一返回形状：即时应答 action 的结果 + 错误闭环（send 同步失败 / create 后置失败）——watch 纯应答通道三分支（fail-closed / 挂等 / 晚 respond）均返回 null，不产生本形状 */

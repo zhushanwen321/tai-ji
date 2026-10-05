@@ -277,7 +277,8 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       expect(h.childSpawned).toHaveLength(1);
       expect(h.childSpawned[0]!.recordId).toBe("rec-int-1");
       expect(h.stateChanges.map((s) => s.state)).toEqual(["running", "exited"]);
-      expect(h.stateChanges[1]).toMatchObject({ killed: true, signal: "SIGTERM" });
+      // ADR-0112 防御清理：settled 收割 = SIGKILL 直杀（原 SIGTERM 阶梯退役）
+      expect(h.stateChanges[1]).toMatchObject({ killed: true, signal: "SIGKILL" });
 
       // close 后活跃子进程表清理
       expect(getActiveChild("rec-int-1")).toBeUndefined();

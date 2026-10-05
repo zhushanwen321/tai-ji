@@ -124,21 +124,6 @@ describe('requireCommand 原子校验（D6/u5a：hook 后、内核提交前）',
     vi.useRealTimers()
   })
 
-  it('校验顺序：hook → getCommands →（命中后）投递腿 prompt；重试全程（未命中）prompt 不调用', async () => {
-    const { dispatcher, calls } = makeHarness({ commandQueue: [[]] })
-    const pending = dispatcher.sendMessage('s1', '/schedule off abc', undefined, undefined, 'schedule')
-    await vi.advanceTimersByTimeAsync(500 * 6 + 50)
-    const result = await pending
-
-    expect(result).toEqual({ blocked: true, rejected: true, reason: 'command-missing' })
-    expect(calls[0]).toBe('hook')
-    // requireCommand 校验只依赖 pm.getClient 直取 + client.getCommands（内核化后受理段
-    // 不再走 svc.ensureActive——restore 窗口由重试循环覆盖）
-    expect(calls.indexOf('getCommands')).toBeGreaterThan(calls.indexOf('hook'))
-    expect(calls).not.toContain('prompt')
-    expect(calls.filter((c) => c === 'getCommands')).toHaveLength(7) // 初始 1 次 + 重试 6 次（P9 定案）
-  })
-
   it('命中：内核受理（receipt 非空 + lane 投影）且投递腿 prompt 到达', async () => {
     const { dispatcher, calls, client, flush } = makeHarness({ commandQueue: [[{ name: 'schedule', source: 'extension' }]] })
     const result = await dispatcher.sendMessage('s1', '/schedule off abc', undefined, undefined, 'schedule')
@@ -149,20 +134,6 @@ describe('requireCommand 原子校验（D6/u5a：hook 后、内核提交前）',
     expect(result.receipt?.lane).toBe('direct')
     expect(calls[0]).toBe('hook')
     expect(calls.indexOf('getCommands')).toBeGreaterThan(calls.indexOf('hook'))
-    expect(client.prompt).toHaveBeenCalledTimes(1)
-  })
-
-  it('重试窗口内恢复（P9 探针：附着→命令注册 gap 毫秒级）：第 2 次探测命中 → 投放', async () => {
-    const { dispatcher, client } = makeHarness({
-      commandQueue: [[], [{ name: 'schedule', source: 'extension' }]],
-    })
-    const pending = dispatcher.sendMessage('s1', '/schedule off abc', undefined, undefined, 'schedule')
-    await vi.advanceTimersByTimeAsync(500 + 50)
-    const result = await pending
-    await Promise.resolve()
-
-    expect(result.blocked).toBe(false)
-    expect(result.receipt).toBeDefined()
     expect(client.prompt).toHaveBeenCalledTimes(1)
   })
 

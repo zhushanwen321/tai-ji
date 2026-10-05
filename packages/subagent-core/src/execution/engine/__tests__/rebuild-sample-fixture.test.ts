@@ -58,7 +58,6 @@ const FIXTURE_DIR = resolve(
   HERE,
   "../../../../../renderer/src/components/panel/workflow-viz/__tests__/fixtures",
 );
-const REBUILD_FIXTURE = join(FIXTURE_DIR, "rebuild-generation.record.jsonl");
 const RESUME_FIXTURE = join(FIXTURE_DIR, "resume-generation.record.jsonl");
 
 /** run 级转移帧词表（帧序特征断言用——agent 族 / phase 族 / worker-log 不属 run 级转移）。 */
@@ -73,9 +72,6 @@ const RUN_LEVEL_TRANSITIONS: ReadonlySet<string> = new Set([
 let journalDir: string;
 
 beforeEach(() => {
-  // 重试退避压到 1ms（TAIJI_SUBAGENT_TEST_RETRY_BACKOFF_BASE_MS 测试通道，
-  // worker-message-pump resolveRetryBackoffBaseMs；生产默认 1s 不变）。
-  vi.stubEnv("TAIJI_SUBAGENT_TEST_RETRY_BACKOFF_BASE_MS", "1");
   journalDir = mkdtempSync(join(tmpdir(), "u0-rebuild-sample-"));
   // record journal 显式注入（vitest 防线下的唯一真落盘通道；编排侧包装额外清
   // 活体 fold 缓存 / 终局注册表——跨用例隔离）。
@@ -228,101 +224,6 @@ function startedFrameIndexes(
   });
   return idx;
 }
-
-// ── rebuild 样本 ────────────────────────────────────────────
-
-describe("U0 rebuild 代际 record 样本采集", () => {
-  it(
-    "worker 崩溃 → rebuild 重派：同 taskIndex 两帧 agent-started、帧间无 run 级转移帧，fixture 与引擎产物同构",
-    async () => {
-      // 脚本形态（嵌 worker IIFE 的函数体）：2 phase + 崩溃点 + 带重试 call。
-      // - setTimeout(process.exit, 200)：task-1 在飞挂住期间 worker 自杀（真实崩溃）；
-      //   重放代际 task-1 立即成功 → clearTimeout 先于定时触发（重放不自杀）。
-      // - await inflight 表达「在飞时崩溃」意图；首代际永不返回（worker 已死）。
-      const spec: RunSpec = {
-        scriptName: "u0-rebuild-sample",
-        slug: "u0-rebuild-sample",
-        scriptPath: "u0-rebuild-sample.js",
-        args: {},
-        scriptSource: [
-          'phase("alpha");',
-          'await agent({ prompt: "u0-rb-task-0", description: "alpha-worker" });',
-          'const inflight = agent({ prompt: "u0-rb-task-1", description: "alpha-crasher" });',
-          "// 崩溃注入：task-1 在飞挂住时 worker 自杀（重放代际 clearTimeout 取消——脚本确定性重跑不得再次崩溃）",
-          "const suicide = setTimeout(() => process.exit(1), 200);",
-          "await inflight;",
-          "clearTimeout(suicide);",
-          'phase("beta");',
-          'await agent({ prompt: "u0-rb-task-2", description: "beta-retryer" });',
-          "return { ok: true };",
-        ].join("\n"),
-      };
-
-      const deps = makeDeps(
-        makeScriptedRunner({
-          hungPrompt: "u0-rb-task-1",
-          failingPrompt: "u0-rb-task-2",
-          successText: "u0 sample result",
-        }),
-      );
-
-      const runId = await runWorkflow(spec, deps);
-      // 崩溃前形态就位：task-1 已派发在飞（第一代际 agent-started 已落盘）
-      await waitForRecord(
-        runId,
-        (events) => startedFrameIndexes(events, 1).length === 1,
-        10_000,
-      );
-      // worker 自杀 → handleWorkerError → rebuild 重派 → 脚本重放 → run 收敛 done
-      await waitForTerminal(deps.runs, runId, 20_000);
-
-      const events = await scanRunEvents(runId, journalDir);
-      const recordPath = recordPathOf(runId);
-
-      // ── 帧序特征断言（验收条款②）──
-      // 终局：run 正常收敛（rebuild 成功重派，非 failed）
-      const settled = events.filter((e) => e.type === "run-settled");
-      expect(settled).toHaveLength(1);
-      expect((settled[0] as { outcome: string }).outcome).toBe("done");
-
-      // 同 taskIndex（call #1）恰两帧 agent-started
-      const startedIdx = startedFrameIndexes(events, 1);
-      expect(startedIdx).toHaveLength(2);
-      const [firstStart, secondStart] = startedIdx;
-
-      // 两帧之间无 run 级转移帧（隐式代际边界——rebuild 不落转移帧）
-      const between = events.slice(firstStart + 1, secondStart);
-      const transitionsBetween = between.filter((e) => RUN_LEVEL_TRANSITIONS.has(e.type));
-      expect(transitionsBetween.map((e) => e.type)).toEqual([]);
-
-      // 两帧之间恰一次重落 phase-started alpha（重放重落——「重落的 phase-started
-      // 不参与锚定」断言的样本载体），且无其他 agent-started 干扰
-      expect(between.filter((e) => e.type === "phase-started").map((e) => (e as { phase: string }).phase)).toEqual(["alpha"]);
-
-      // 代际结构：第一代际末帧（两帧 agent-started 之前的最后 agent-* 执行事实帧）
-      // 与第二代际真实重派帧
-      const before = events.slice(0, firstStart);
-      expect(before.some((e) => e.type === "agent-settled" && (e as { taskIndex: number }).taskIndex === 0)).toBe(true);
-      expect(before.some((e) => e.type === "agent-started" && (e as { taskIndex: number }).taskIndex === 0)).toBe(true);
-
-      // ≥2 phase（alpha / beta）与带重试 call（agent-retrying on task #2）
-      const phaseNames = events.filter((e) => e.type === "phase-started").map((e) => (e as { phase: string }).phase);
-      expect(phaseNames).toContain("alpha");
-      expect(phaseNames).toContain("beta");
-      const retryFrames = events.filter((e) => e.type === "agent-retrying");
-      expect(retryFrames).toHaveLength(1);
-      expect((retryFrames[0] as { taskIndex: number }).taskIndex).toBe(2);
-
-      // ── 样本全文打印（采集者按标记从本测试输出逐字节复制落盘 renderer fixture；
-      // 先打印后对拍——首跑 fixture 缺失时样本已可取材）──
-      printSampleBlock("rebuild", runId, recordPath);
-
-      // ── fixture 同构对拍（防手工编造/篡改：fixture 必须与引擎真实产物帧三元组序列全等）──
-      expect(readFixtureSignature(REBUILD_FIXTURE, "rebuild")).toEqual(frameSignature(events));
-    },
-    30_000,
-  );
-});
 
 // ── resume 样本 ─────────────────────────────────────────────
 

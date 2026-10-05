@@ -2,10 +2,9 @@
  * B1 pingTimer 泄漏回归（memory-leak-remediation §3.2-B1 / 验收 A1）。
  *
  * 泄漏序列（设计 §2.4 模式四核实链）：pi turn 中崩溃 → onSessionExit → adapter.detach →
- * interpreter.dispose()——事件源已退订，turn-end 永不再达，ping 循环失去唯一停止点；
- * 5s 后 respawn 为同 sessionId 生成新 client，pingPi 的 pm.getClient(sessionId) 延迟解析
- * 打到新 client 必然成功 → pingFailCount 恒清零 → 3 次失败自停永不成立 → interval 永续
- * （且 ping 双向 touch lastActivityAt 钉死 idle-pi-reaper 回收）。
+ * interpreter.dispose()——事件源已退订，turn-end 永不再达，ping 循环失去唯一停止点
+ * （历史场景注：B1 当时有 5s 自动 respawn 使失败计数恒清零、interval 永续；自动 respawn
+ * 已随防御机制清查退役，该永续条件不再存在，但 dispose 幂等收口仍是防线）。
  *
  * 修复：dispose() 补 this.stopPingLoop()（幂等）；已 in-flight 的 pingTick 由既有
  * `pingTimer === null` 守卫（SR1）拦截。

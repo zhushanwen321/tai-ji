@@ -5,7 +5,7 @@
  * - recordPlanned 返回 0（立即重启零退避）且 restartCount 不增（不进 counting 状态机）；
  * - planned 边不受 MAX 配额约束（exhausted 态下滚动重启仍可用——shouldRestart 门不适用）；
  * - planned 不污染 crash 计数序列：planned 后首次 crash 仍按 1s 基数起退避；
- * - planned 重启成功后稳定窗口清零照常适用（既有 recordSuccess 语义不回归）。
+ * - planned 重启成功后计数不清零（ADR-0112：无时间窗，清零唯一入口 = 用户显式重试）。
  *
  * 运行：cd apps/electron/main && npx vitest run test/restart-policy-planned.test.ts
  */
@@ -60,17 +60,15 @@ describe('recordPlanned：planned 边不进 counting 状态机（A4）', () => {
     expect(policy.count).toBe(1)
   })
 
-  it('既有 crash 计数下 planned 成功 + 稳定窗口后 recordSuccess 清零（新稳定周期语义）', async () => {
+  it('既有 crash 计数下 planned 成功后计数不清零（无时间窗，ADR-0112）', async () => {
     vi.useFakeTimers()
     const policy = new RestartPolicy()
     policy.recordCrashAndGetDelay()
     policy.recordCrashAndGetDelay()
     expect(policy.count).toBe(2)
 
-    policy.recordSuccess()
-    vi.advanceTimersByTime(10_001) // > STABLE_MS
-    policy.recordPlanned() // 滚动重启（不改变计数与 lastSuccessAt）
-    policy.recordSuccess() // 重启成功
-    expect(policy.count).toBe(0)
+    policy.recordPlanned() // 滚动重启（不改变计数）
+    policy.recordSuccess() // 重启成功（只记录事实，不清零）
+    expect(policy.count).toBe(2)
   })
 })

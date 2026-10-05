@@ -13,14 +13,13 @@
  *
  * 「终局 run 不可复活」的守卫面 = 调用方（聚合不设防）：
  * - runWorkflow：绑定对象是本函数内新建的聚合，结构性不可已终局；
- * - rebuildRuntime（worker 错误重试）：scheduleRebuild 在退避后、重建前同步重检
- *   isRunSettled（与 replaceRuntime 之间无 await，无竞窗）；
  * - resume 接管（adoptResumedRun）：资格门按 record 流 fold 拒绝已终局 run
  *   （resume-run 的 already-settled / 非 interrupted 拒绝项）。
  *
- * worker-error-retry（G5-001 + G6-001）：
- * - replaceRuntime(newRt): 原子释放前一个 runtime + 绑定新 runtime（终态 run 的
- *   重建拒绝由上述调用方 isRunSettled 前置承载，G6-001）。
+ * replaceRuntime(newRt)（G5-001）: 原子释放前一个 runtime + 绑定新 runtime。
+ * [HISTORICAL] 唯一生产调用方 worker-error-retry（scheduleRebuild → rebuildRuntime）
+ * 随重试矩阵删除（ADR-0112）——方法保留为聚合 API（终态 run 的重建拒绝 G6-001
+ * 仍由调用方 isRunSettled 前置承载），现仅供恢复/接管形态与测试使用。
  */
 
 import { RunRuntime } from "./run-runtime.ts";
@@ -32,8 +31,9 @@ import type { RunExecutionSnapshot } from "./run-state.ts";
 /**
  * 聚合根级 meta（非 RunExecutionSnapshot 的一部分，不随 trace 持久化到 worker JSONL）。
  *
- * workerErrorCount/scriptErrorCount 跨 runtime 存活（C.5：worker-message-pump 重试计数载体），
- * 因为 retry 会 replaceRuntime，但计数是 run 级而非 runtime 级。
+ * workerErrorCount/scriptErrorCount（C.5）：[HISTORICAL] 原 worker-message-pump 重试
+ * 计数载体（retry 会 replaceRuntime，计数 run 级而非 runtime 级）。[ADR-0112] 重试
+ * 矩阵删除后无生产写入方，字段保留为旧 record 兼容读。
  */
 export interface WorkflowRunMeta {
  /** ISO 时间戳，run 创建/启动时刻。 */
@@ -52,9 +52,9 @@ export interface WorkflowRunMeta {
    * （loadAll 重建）与 recoverCrashedRuns（收编链就地写入）。
    */
   interruptedAt?: string;
- /** Worker 线程错误计数（C.5：跨 runtime 存活，重试计数载体）。 */
+ /** Worker 线程错误计数（C.5；[ADR-0112] 后无生产写入方，旧 record 兼容读）。 */
   workerErrorCount?: number;
- /** 脚本错误计数（C.5：跨 runtime 存活）。 */
+ /** 脚本错误计数（C.5；[ADR-0112] 后无生产写入方，旧 record 兼容读）。 */
   scriptErrorCount?: number;
 }
 
@@ -131,9 +131,9 @@ export class WorkflowRun {
    * 原地替换 runtime（G5-001：worker-error-retry）。
    *
    * 原子地：释放旧 runtime（worker.terminate + abort）+ 绑定新 runtime。
-   * 终态 run 的重建拒绝（G6-001）由调用方前置承载——唯一生产调用链
-   * scheduleRebuild → rebuildRuntime 在本调用前同步重检 isRunSettled（无 await
-   * 竞窗，见类注释守卫面）。
+   * 终态 run 的重建拒绝（G6-001）由调用方前置承载（isRunSettled 门，见类注释
+   * 守卫面）。[HISTORICAL] 唯一生产调用链 scheduleRebuild → rebuildRuntime 已随
+   * 重试矩阵删除（ADR-0112）。
    */
   replaceRuntime(rt: RunRuntime): void {
     // 原子替换：旧 runtime 释放（terminate+abort），新 runtime 绑定。

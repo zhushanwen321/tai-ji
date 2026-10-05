@@ -53,8 +53,8 @@ describe("U5-A2 tool-execute", () => {
 		expect(options).toHaveLength(1);
 		const payload = JSON.parse(options[0]);
 		expect(payload.action).toBe(expectedAction);
-		// third arg has timeout
-		expect(opts).toHaveProperty("timeout");
+		// third arg: timeout 不传（ADR-0112 无包内挂死兜底，全 action 无 timer 长挂）
+		expect(opts).toHaveProperty("timeout", undefined);
 	});
 
 	it("create_managed_session includes cwd and label in payload.params", async () => {

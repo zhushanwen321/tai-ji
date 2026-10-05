@@ -100,7 +100,10 @@ export interface ClassifierConfig {
 	enabled: boolean;
 	/** 模型：'auto'（取 modelRegistry.getAvailable() 首个可用）或精确 'provider/model-id'（如 'zhipu/glm-4-flash'） */
 	model: string;
-	/** 超时秒数 */
+	/**
+	 * 超时秒数（仅用户显式配置时生效的 C2 业务超时；0 = 不限时）。
+	 * 包内默认 0（ADR-0112：无包内挂死兜底，LLM 挂死由上层失败直报，不设时间窗猜测）。
+	 */
 	timeout: number;
 	/** 低风险是否自动放行 */
 	autoApproveLowRisk: boolean;
@@ -133,7 +136,7 @@ export interface PermissionConfig {
 export const DEFAULT_CLASSIFIER_CONFIG: ClassifierConfig = {
 	enabled: true,
 	model: "auto",
-	timeout: 90,
+	timeout: 0,
 	autoApproveLowRisk: true,
 	autoDenyHighRisk: true,
 	thinkingLevel: "off",

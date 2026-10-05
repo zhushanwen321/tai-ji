@@ -20,7 +20,7 @@
  * runtime transport 路由删除同批退役（u5a 退役条件兑现）。
  * 注：bash 通道（sendBash / abortBash）不经 LLM turn、不经投递内核，行为不变
  * （设计 §1.3 In/Out：bash 通道不在本期改造面）；[MF-1-10] 实现整体搬移至
- * bash-dispatcher.ts（对齐 abort-liveness 先例），本类构造持有并保持公开签名不变。
+ * bash-dispatcher.ts，本类构造持有并保持公开签名不变。
  *
  * 依赖经构造注入:svc(dispatcher 窄接口 IDispatcherSessionOps,按消费者收窄——
  * 调用点实测 6 方法,见 session-internal.ts)、
@@ -37,36 +37,27 @@ import type { IPiEngine, IProcessManager } from '../ports/pi-engine.js'
 import type { SendMessageHook, ForceQuitSource } from './types.js'
 import type { WorkspaceService } from '../workspace/workspace-service.js'
 import type { IMessageBus } from '../message-bus/message-bus.js'
-import { toErrorMessage, RpcTimeoutError } from '../../utils/errors.js'
+import { toErrorMessage } from '../../utils/errors.js'
 import { applySessionOccupancyTransition, IDLE_SESSION_OCCUPANCY, userStoppedGate } from './event-interpreter.js'
 import type { SessionDeliveryRegistry, DeliverySubmitResult } from './session-delivery-registry.js'
 import type { DeliveryIntent } from '@zhushanwen/session-delivery'
 import type { SendPromptReason } from '@taiji/shared'
-import { AbortLiveness } from './abort-liveness.js'
-import type { AbortSource } from './abort-liveness.js'
 import { BashDispatcher, type InternalBashDispatchReceipt } from './bash-dispatcher.js'
 
-// abort 阶梯协作类（test-infra-source-simplify T5 抽离）：三级阶梯 + 防重入 + 处置竞态
-// 独立单元在 abort-liveness.ts，本模块持实例并委托；resetAbortLivenessForTest re-export
-// 保持原公开面（abort-liveness 测试与既有 import 方零改动）。AbortSource 类型消费方直接
-// import abort-liveness（本模块仅内部使用，不再转写）。
-export { resetAbortLivenessForTest } from './abort-liveness.js'
+/**
+ * abort 发起方分型（U2 修复）：收敛环复用 abort 完整链时区分「用户操作」与「runtime
+ * 自动收敛」的终态语义。默认 'user'（全部既有调用方零改动保持用户语义）；'convergence'
+ * 仅由 session-service 的 userStoppedGate.configure 接线传入（收敛环 restore-abort 后的
+ * re-abort 通路）。[ADR-0112] 原定义在 abort-liveness.ts（三级阶梯），该编排链随 RPC
+ * 墙钟超时退役后类型迁入本文件。
+ */
+export type AbortSource = 'user' | 'convergence'
 
 // sendMessage 回执 reason 词表 SSOT = shared SendPromptReason（msg-pipeline-debloat
 // D4-6 单点收敛，原 5 处手写词表归一；busy/compacting/bash 退役值收窄裁决与值语义见
 // shared 定义处）。运行面分支只看 blocked——插件/调用方不得依赖 reason 精确值做行为
 // 分支。本类型经 @taiji/shared 出口供 interfaces / session-api / session-service /
 // plugin-sdk 同源消费。
-
-/**
- * requireCommand 未命中的短重试参数（P9 探针定案，impl-plan u-probe 行）：命令可用 gap
- * 实测 1.3-3.0ms，500ms 间隔 × 6 次重试对 E4「30s 内首个 tick」约束留 10 倍余量。非
- * 任务级超时（AGENTS.md #19）：发送路径内的确定性失败探测，量级按恢复窗口校准。
- * 内核架构语义：client 未附着（restore 在途）时同样进入重试等待附着——附着后命令表
- * 即可探测；总预算 3s 内未附着或未命中均拒发（fail-closed）。
- */
-const REQUIRE_COMMAND_RETRY_INTERVAL_MS = 500
-const REQUIRE_COMMAND_RETRY_ATTEMPTS = 6
 
 /**
  * sendSystemCommand 的判别结果（消息撤回 D1/D8）：编排按 kind 映射错误码——
@@ -88,13 +79,6 @@ export class MessageDispatcher {
   private readonly sendMessageChains = new Map<string, Promise<unknown>>()
 
   /**
-   * abort 阶梯协作实例（W7 三级阶梯 + 防重入 + 处置竞态，实现见 abort-liveness.ts）。
-   * deps 回调经宿主转发：publish 动态读 this.messageBus（setMessageBus 后置注入后仍正确），
-   * forceQuitSession 复用宿主编排（与 forceQuit 入口共用同一条收敛链）。
-   */
-  private readonly abortLiveness: AbortLiveness
-
-  /**
    * bash 通道协作实例（[MF-1-10] 实现在 bash-dispatcher.ts，本类构造持有；公开方法
    * sendBash/abortBash/flushPendingBashResults 签名不变，session-service 消费面零改动）。
    */
@@ -112,13 +96,6 @@ export class MessageDispatcher {
     private readonly workspaceService: WorkspaceService,
     private messageBus?: IMessageBus,
   ) {
-    this.abortLiveness = new AbortLiveness({
-      getClient: (sessionId) => this.pm.getClient(sessionId),
-      persistSessionOutcome: (sessionId, outcome, reason) => this.svc.persistSessionOutcome(sessionId, outcome, reason),
-      publish: (sessionId, msg) => this.messageBus?.publish(sessionId, msg),
-      forceQuitSession: (sessionId, outcomeReason, exitReason, source) =>
-        this.forceQuitSession(sessionId, outcomeReason, exitReason, source),
-    })
     this.bash = new BashDispatcher({
       ensureActive: (sessionId) => this.svc.ensureActive(sessionId),
       getSessionByClient: (client) => this.svc.getSessionByClient(client),
@@ -182,13 +159,6 @@ export class MessageDispatcher {
    * 插件写路径的前置原子校验，插入点见 runAcceptance 内注释。回执 reason 词表见 SendPromptReason。
    */
   async sendMessage(sessionId: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string, requireCommand?: string): Promise<{ blocked: boolean; rejected?: boolean; receipt?: DeliverySubmitResult; reason?: SendPromptReason }> {
-    // ── 入口同步 touch（idle-pi-reclamation D6-1，任何 await 之前）──
-    // 出站交接（ensureActive/restore 600ms-3s + prompt）在注册表侧异步发生，若不入口
-    // touch，「hook 执行中 + 交接在途」窗口内空闲回收判定会误回收在途 session。
-    // client 未附着（已回收态）时无需 touch：restore spawn 的新 client lastActivityAt
-    // 初值 = spawn 时刻，空闲时长天然不达标。
-    this.pm.getClient(sessionId)?.touchActivity()
-
     // ── per-session 受理串行链（到达序 = 内核提交序）──
     // 前驱失败不毒化链（catch 吞 rejection，错误面已由链内各层自广播）。
     const prev = this.sendMessageChains.get(sessionId) ?? Promise.resolve()
@@ -221,14 +191,13 @@ export class MessageDispatcher {
     // ── requireCommand 原子校验（plugin-header-action-modal-points D6/u5a）──
     // 插件写路径前置校验：未命中 → 拒发回执（reason='command-missing'），不广播
     // message.error——回执机制（E14）就是它的反馈面，命令串不进模型、对话流无新消息。
-    // 校验位置 = hook 之后、内核提交之前（main 侧原位置为「restore 之后、busy 预检之前」，
-    // 内核架构下 busy 预检已退役；restore 窗口由 ensureCommandAvailable 的重试循环覆盖：
-    // client 未附着时按间隔重取，附着后命令表即可探测，总预算耗尽 fail-closed）。
+    // 校验位置 = hook 之后、内核提交之前。单次探测（ADR-0112：原 500ms×6 就绪轮询已删，
+    // 拒发 = 显式上报，重发决策归调用方）。
     if (requireCommand !== undefined) {
       const available = await this.ensureCommandAvailable(sessionId, requireCommand)
       if (!available) {
         console.warn(
-          `[message-dispatcher] requireCommand "${requireCommand}" not registered after ${REQUIRE_COMMAND_RETRY_ATTEMPTS} retries, rejecting send (reason=command-missing), sid=${sessionId}`,
+          `[message-dispatcher] requireCommand "${requireCommand}" not registered, rejecting send (reason=command-missing), sid=${sessionId}`,
         )
         return { blocked: true, rejected: true, reason: 'command-missing' }
       }
@@ -241,31 +210,19 @@ export class MessageDispatcher {
   /**
    * requireCommand 探测（plugin-header-action-modal-points D6/u5a）：直连
    * client.getCommands()（不走 sessionService.getCommands 的 markDirty 查询语义——那是
-   * UI 状态查询面路径），未命中按间隔短重试。client 未附着（restore 在途）同样进入
-   * 重试等待——附着后命令表即可探测；总预算耗尽 fail-closed（拒发由调用方收口）。
-   * 探测 RPC 失败（transport 抖动等）视同未命中参与重试，不中断发送主流程——
-   * warn 落日志留排查线索（非静默吞）。
+   * UI 状态查询面路径）。单次探测（ADR-0112：500ms×6 就绪轮询已删）；client 未附着 =
+   * 未命中（拒发由调用方收口）；探测 RPC 失败视同未命中，warn 留排查线索（非静默吞）。
    */
   private async ensureCommandAvailable(sessionId: string, requireCommand: string): Promise<boolean> {
-    for (let attempt = 0; attempt <= REQUIRE_COMMAND_RETRY_ATTEMPTS; attempt++) {
-      if (attempt > 0) {
-        await new Promise((resolve) => setTimeout(resolve, REQUIRE_COMMAND_RETRY_INTERVAL_MS))
-      }
-      const client = this.pm.getClient(sessionId)
-      if (!client) continue
-      try {
-        const commands = await client.getCommands()
-        if (commands.some((c) => c.name === requireCommand)) return true
-      } catch (e) {
-        // 降级策略（best-effort 探测）：单次 RPC 抖动视同未命中参与下一轮重试（总预算
-        // 耗尽 fail-closed），不中断发送/信令主流程——warn 留排查线索，非静默吞。
-        console.warn(
-          `[message-dispatcher] requireCommand probe failed (attempt ${attempt + 1}/${REQUIRE_COMMAND_RETRY_ATTEMPTS + 1}):`,
-          toErrorMessage(e),
-        )
-      }
+    const client = this.pm.getClient(sessionId)
+    if (!client) return false
+    try {
+      const commands = await client.getCommands()
+      return commands.some((c) => c.name === requireCommand)
+    } catch (e) {
+      console.warn(`[message-dispatcher] requireCommand probe failed:`, toErrorMessage(e))
+      return false
     }
-    return false
   }
 
   /** 串行链尾自清：本 run 仍是链尾时释放槽位（跨 session 恒不互相阻塞）。 */
@@ -300,8 +257,6 @@ export class MessageDispatcher {
     commandLine: string,
     requireCommand?: string,
   ): Promise<SystemCommandOutcome> {
-    // ── 入口同步 touch（idle-pi-reclamation D6-1，任何 await 之前——与 sendMessage 同款）──
-    this.pm.getClient(sessionId)?.touchActivity()
     // ── ensureActive 交接（旁路自带的 restore 触发点；拉活失败 = pi-reclaimed 终态码）──
     let client: IPiEngine
     try {
@@ -310,14 +265,11 @@ export class MessageDispatcher {
       console.error(`[message-dispatcher] sendSystemCommand: ensureActive failed, sid=${sessionId}`, toErrorMessage(e))
       return { kind: 'pi-reclaimed' }
     }
-    // 拉活后 touch：restore spawn 的新 client lastActivityAt 初值 = spawn 时刻（天然新鲜），
-    // 此处防御性刷新覆盖「探测重试循环（≤3s）+ prompt 在途」窗口的回收误杀。
-    client.touchActivity()
     if (requireCommand !== undefined) {
       const available = await this.ensureCommandAvailable(sessionId, requireCommand)
       if (!available) {
         console.warn(
-          `[message-dispatcher] sendSystemCommand: command "${requireCommand}" not registered after ${REQUIRE_COMMAND_RETRY_ATTEMPTS} retries (fail-closed), sid=${sessionId}`,
+          `[message-dispatcher] sendSystemCommand: command "${requireCommand}" not registered (fail-closed), sid=${sessionId}`,
         )
         return { kind: 'extension-missing' }
       }
@@ -393,7 +345,12 @@ export class MessageDispatcher {
 
   /**
    * 中止 session 当前 turn（协作式 abort RPC）：成功 → occupancy #9 idle 复位 + stopped 终态
-   * 写入 + message.complete{aborted} 收口广播；失败 → 终态兜底（超时走 K2 强杀收敛）。
+   * 写入 + message.complete{aborted} 收口广播；失败 → 显式上报收口（occupancy 复位 + stopped
+   * 终态 + error 广播）。
+   * [ADR-0112 退役登记] abort RPC 超时三级阶梯（chat-domain-v1x-liveness-governance W7/D3，
+   * 含 FROZEN_EVENT_SILENCE_MS 10min 保守窗——推翻 crash-forensics 附录 E 对 abort 阶梯
+   * 兜底的背书）已随 RPC 墙钟超时整体删除：abort() 不再有超时失败形态（pi 卡死时该
+   * Promise 悬挂，处置归用户「强制退出」）。
    *
    * [U2 修复] source 分型（默认 'user' 既有调用方零改动）：'convergence' 由收敛环通路传入
    * （session-service gate.configure 接线），成功路径终态 reason 写 'Convergence abort (auto)'
@@ -419,21 +376,7 @@ export class MessageDispatcher {
         applySessionOccupancyTransition(active, this.messageBus, 'idle')
       }
 
-      if (e instanceof RpcTimeoutError) {
-        // W7（chat-domain-v1x-liveness-governance D3）：abort RPC 超时 ≠ pi 冻结——实装 pi 的
-        // abort 应答即收敛，收敛前无中间信号，60s 超时只能区分「收敛了/没收敛」，不能区分
-        // 「忙/死」。旧代码直接强杀正是 2026-09-08 事故环 6 的误杀源（pi 循环中还在正常执行
-        // 工具调用却被判 frozen 连带击杀子代理）。改走三信号判据 + 三级阶梯（见
-        // runAbortStallLadder）；强杀保留为阶梯 3 的收窄形态（双信号：探测无响应 + 事件窗
-        // 静默超保守窗才触发）。检测即收敛的编排理由（exit 事件被双层守卫拦截，需手动编排
-        // 与 onSessionExit 同构的收敛链）见 forceQuitSession 方法头。
-        // [session-dead D5①/U2] abort 的 source 传入阶梯：阶梯 3 强杀的 K2 日志按调用源
-        // 区分 who——收敛环 re-abort 超时（convergence）不得在 kill 日志里冒充用户 abort。
-        await this.abortLiveness.handleAbortRpcTimeout(sessionId, client, errMsg, source)
-        return
-      }
-
-      // 非超时错误（EPIPE / 进程已退出 / RPC 显式失败等）：保持现行 abort 收口行为。
+      // 非超时错误（EPIPE / 进程已退出 / RPC 显式失败等）：显式上报收口（规则 #3）。
       // W4：abort 失败（异常退出）写 stopped 终态
       this.svc.persistSessionOutcome(sessionId, 'stopped', `Abort failed: ${errMsg}`)
       const abortErrMsg = { type: 'message.error' as const, payload: { sessionId, message: `Abort failed: ${errMsg}` } }

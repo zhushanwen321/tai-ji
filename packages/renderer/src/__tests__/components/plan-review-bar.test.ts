@@ -4,12 +4,12 @@
  * 覆盖（impl-plan U4b 验收条款②③⑤ + S15 renderer 断言族）：
  * - D4 分支公式单源化（derivePlanReviewBarMode）逐分支 DOM 断言：
  *   ① ready ⇔ 挂起注册表（presence 语义——ready 恒优先渲染，revising+挂起共存出 ready）；
- *   ② revising ⇔ state=revising（无挂起）；③ degraded ⇔ state=reviewing ∧ 无挂起 ∧ 稳定窗
- *   放行；④ isActive=false / dispatching·approved / 其余 → 不渲染
+ *   ② revising ⇔ state=revising（无挂起）；③ degraded ⇔ state=reviewing ∧ 无挂起 ∧ 组合
+ *   放行（[ADR-0112] 帧到达即时评估）；④ isActive=false / dispatching·approved / 其余 → 不渲染
  * - D3 搁置（decision:'dismiss' respond 通道，取代「忽略 = 杀 turn」）：payload 形状、
  *   不经 message.abort、文案含「暂存待办」提示、草稿保留
- * - D4「已应答抑制窗」+「degraded 稳定窗」fake timers 五断言（S15）：间隙内零渲染 /
- *   持续 ≥2s 放行 / 中途变假 cancel·重置 / <2s 间隙 ready 不误压 / 冷拉真值豁免直通
+ * - D4「已应答抑制标记」断言：压制零渲染（事件驱动解除）+ 悬挂无时间自愈 + P2-2 失效帧
+ *   同置标记 + 冷拉对账真值解除（显式拉取）
  * - D8 degraded 可行动化：[重新提交审批] 按钮（复用消息发送通道注入固定文案）+ resumeHint
  *   分源文案（'resubmit' / 通用）+ 发送失败就近错误行
  * - D8 检测窗开窗时机（dmg-r1-2）：nudge 轮自身的 message_start 到达才开判定窗——busy
@@ -95,8 +95,6 @@ import {
 import {
   usePlanStore,
   __resetPlanReviewColdSinkForTesting,
-  PLAN_REVIEW_DEGRADED_STABLE_MS,
-  PLAN_REVIEW_ACK_FALLBACK_MS,
 } from '@/stores/plan-store'
 import { sendExtensionUIResponse } from '@taiji/core/transport/api/domains/extension'
 
@@ -239,10 +237,8 @@ describe('PlanReviewBar 分支公式（D4 单源：ready ⇔ 挂起注册表，p
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(true)
   })
 
-  it('分支④ dispatching 不进审批条（执行方式表单是其唯一交互面）：稳定窗放行后仍不渲染', async () => {
-    vi.useFakeTimers()
+  it('分支④ dispatching 不进审批条（执行方式表单是其唯一交互面）', async () => {
     const wrapper = await mountBar(viewOf({ state: 'dispatching' }))
-    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_DEGRADED_STABLE_MS)
     await flushAsync()
 
     expect(wrapper.find('[data-testid="plan-review-bar"]').exists()).toBe(false)
@@ -307,7 +303,7 @@ describe('三键 respond payload（PlanReviewResponse 判别联合，D3 dismiss 
     expect(wrapper.find('[data-testid="plan-review-summary"]').exists()).toBe(false)
   })
 
-  it('revise → comments 打包自草稿快照，提交后草稿清空；提交后抑制窗内零渲染（revising 帧到达后出修订中行）', async () => {
+  it('revise → comments 打包自草稿快照，提交后草稿清空；提交后抑制标记压制零渲染（revising 帧到达后出修订中行）', async () => {
     const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     emitPlanReviewRequest('pr-1')
     await flushAsync()
@@ -329,7 +325,7 @@ describe('三键 respond payload（PlanReviewResponse 判别联合，D3 dismiss 
     })
     // D6：评论已注入对话流持久，草稿生命周期到提交为止
     expect(store.draftComments).toHaveLength(0)
-    // D4 抑制窗：已应答待帧标记压制 state 判定分支，不闪 degraded/revising（零渲染）
+    // D4 抑制标记：已应答待帧标记压制 state 判定分支，不闪 degraded/revising（零渲染）
     expect(wrapper.find('[data-testid="plan-review-bar"]').exists()).toBe(false)
     // 预期后态帧（state=revising ≠ reviewing）到达 → 值判定解除标记 → 修订中行
     usePlanStore().applyFrame(SID, viewOf({ state: 'revising' }))
@@ -356,84 +352,66 @@ describe('三键 respond payload（PlanReviewResponse 判别联合，D3 dismiss 
     expect(chatAbortMock).not.toHaveBeenCalled()
     // 暂存待办：计划进度与评论草稿保留（草稿不随应答消费）
     expect(store.draftComments).toHaveLength(1)
-    // 已应答抑制窗：提交后整条不渲染（不闪 degraded——dismiss 后 state 帧回流前的时序窗口）
+    // 已应答抑制标记：提交后整条不渲染（不闪 degraded——dismiss 后 state 帧回流前的时序窗口）
     expect(wrapper.find('[data-testid="plan-review-bar"]').exists()).toBe(false)
   })
 })
 
-describe('已应答抑制窗 + degraded 稳定窗（D4，fake timers 五断言 + 10s 兜底冷拉）', () => {
-  it('断言① 间隙内零渲染：state=reviewing ∧ 无挂起的重挂间隙（<2s）degraded 不渲染', async () => {
-    vi.useFakeTimers()
+describe('已应答抑制标记 + degraded 组合判定（D4，[ADR-0112] 帧到达即时评估）', () => {
+  it('degraded 即时放行：组合成立（reviewing ∧ 无挂起 ∧ 无标记）帧到达即渲染，无时间窗', async () => {
     const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
-    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_DEGRADED_STABLE_MS - 1)
-    await flushAsync()
-
-    expect(wrapper.find('[data-testid="plan-review-bar"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(false)
-  })
-
-  it('断言② 持续 ≥2s 放行：组合持续满 2s 后 degraded 渲染', async () => {
-    vi.useFakeTimers()
-    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
-    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_DEGRADED_STABLE_MS)
     await flushAsync()
 
     expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(true)
   })
 
-  it('断言③ 中途变假 cancel·重置：组合翻假取消定时器，再转真重新计满 2s 才放行', async () => {
-    vi.useFakeTimers()
+  it('组合变假即复位：state 离开 reviewing 即切修订中行；转回 reviewing 即 degraded', async () => {
     const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
-    await vi.advanceTimersByTimeAsync(1500)
-    // 组合变假（state 离开 reviewing → revising 帧）→ cancel·重置
-    usePlanStore().applyFrame(SID, viewOf({ state: 'revising' }))
     await flushAsync()
-    await vi.advanceTimersByTimeAsync(1000) // 距首次转真已 2.5s——若未 cancel 此处会误放行
+    expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(true)
+
+    // 组合变假（state 离开 reviewing → revising 帧）→ 即时复位
+    usePlanStore().applyFrame(SID, viewOf({ state: 'revising' }))
     await flushAsync()
     expect(wrapper.find('[data-testid="plan-review-revising"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(false)
 
-    // 再转真：重新计时（<2s 不放行，满 2s 放行）
+    // 再转真：即时放行
     usePlanStore().applyFrame(SID, viewOf({ state: 'reviewing' }))
-    await flushAsync()
-    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_DEGRADED_STABLE_MS - 1)
-    await flushAsync()
-    expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(false)
-    await vi.advanceTimersByTimeAsync(1)
     await flushAsync()
     expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(true)
   })
 
-  it('断言④ <2s 间隙 ready 不误压：重挂间隙内新 pending 到达 → ready 立即渲染（presence 优先）', async () => {
-    vi.useFakeTimers()
+  it('ready 恒优先：组合成立下新 pending 到达 → ready 立即渲染（presence 优先）', async () => {
     const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
-    await vi.advanceTimersByTimeAsync(500)
-    emitPlanReviewRequest('pr-gap') // persist→pending 间隙内登记到达
     await flushAsync()
+    expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(true)
 
+    emitPlanReviewRequest('pr-gap')
+    await flushAsync()
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(false)
   })
 
-  it('断言⑤ 冷拉真值豁免直通：已应答标记 10s 兜底冷拉对账（reviewing ∧ 无挂起真值）→ degraded 直接放行', async () => {
-    vi.useFakeTimers()
+  it('冷拉对账真值解除：已应答标记压制零渲染 → 显式冷拉（reviewing ∧ 无挂起真值）→ degraded 渲染', async () => {
     const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     emitPlanReviewRequest('pr-1')
     await flushAsync()
     await wrapper.find('[data-testid="plan-review-approve"]').trigger('click')
     await flushAsync()
-    // 已应答抑制窗：ready 摘除后零渲染
+    // 已应答抑制标记：ready 摘除后零渲染
     expect(wrapper.find('[data-testid="plan-review-bar"]').exists()).toBe(false)
 
-    // 10s 兜底 → 双源冷拉（getPlanState + getPendingRequests，本 mock 形态 = 真值
-    // reviewing ∧ 事实上无挂起）→ 解除标记 + 冷拉真值豁免稳定窗 → degraded 直通（不再等 2s）
-    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_ACK_FALLBACK_MS)
-    await flushAsync()
+    // 显式双源冷拉（getPlanState + getPendingRequests，本 mock 形态 = 真值
+    // reviewing ∧ 事实上无挂起）→ 解除标记 + degraded 组合即时放行
+    commandMock.mockResolvedValue({ sessionId: SID, planState: viewOf({ state: 'reviewing' }) })
+    getPendingRequestsMock.mockResolvedValue([])
+    await usePlanStore().coldReconcilePlanReview(SID)
     await flushAsync()
     expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(true)
   })
 
-  it('S2 抑制窗：搁置后 3s 内不闪 degraded（10s 兜底前保持零渲染）', async () => {
+  it('抑制标记悬挂无时间自愈：搁置后标记压制零渲染，时间流逝不解悬挂（[ADR-0112] 无兜底定时器）', async () => {
     vi.useFakeTimers()
     const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     emitPlanReviewRequest('pr-1')
@@ -446,8 +424,7 @@ describe('已应答抑制窗 + degraded 稳定窗（D4，fake timers 五断言 +
     expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(false)
   })
 
-  it('P2-2 失效帧（requestsInvalidated 摘除）同置已应答标记：ready 消失，稳定窗满仍零渲染', async () => {
-    vi.useFakeTimers()
+  it('P2-2 失效帧（requestsInvalidated 摘除）同置已应答标记：ready 消失且 degraded 不闪现', async () => {
     const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     emitPlanReviewRequest('pr-1')
     await flushAsync()
@@ -457,20 +434,15 @@ describe('已应答抑制窗 + degraded 稳定窗（D4，fake timers 五断言 +
     await flushAsync()
 
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(false)
-    // 杀伤锚点：推进过 2s 稳定期再断言——失效链同置已应答标记 → candidate=false 不 arm
-    // 稳定期定时器，窗满也不放行 degraded；漏置标记的变异在窗满后渲染 degraded → 红
-    // （fake timers 零推进时本断言恒绿，杀不死变异）
-    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_DEGRADED_STABLE_MS + 1)
-    await flushAsync()
+    // 杀伤锚点：失效链同置已应答标记 → 组合不成立，degraded 不渲染（即时评估下漏置
+    // 标记的变异会在 flush 后立即渲染 degraded → 红）
     expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(false)
   })
 })
 
 describe('degraded 可行动化（D8：成因分源文案 + [重新提交审批] 按钮）', () => {
   it("resumeHint='resubmit'（E3）→「审批提问已随会话重启失效」+ 按钮经消息发送通道注入固定文案", async () => {
-    vi.useFakeTimers()
     const wrapper = await mountBar(viewOf({ state: 'reviewing', resumeHint: 'resubmit' }))
-    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_DEGRADED_STABLE_MS)
     await flushAsync()
 
     const reason = wrapper.find('[data-testid="plan-review-degraded-reason"]')
@@ -488,9 +460,7 @@ describe('degraded 可行动化（D8：成因分源文案 + [重新提交审批]
   })
 
   it('其余来源（resumeHint 缺省）→ 「审批提问未挂起」（不猜测来源）', async () => {
-    vi.useFakeTimers()
     const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
-    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_DEGRADED_STABLE_MS)
     await flushAsync()
 
     const reason = wrapper.find('[data-testid="plan-review-degraded-reason"]')
@@ -500,9 +470,7 @@ describe('degraded 可行动化（D8：成因分源文案 + [重新提交审批]
   })
 
   it('发送失败 → 就近错误行（失败要出声），降级态保留可重试', async () => {
-    vi.useFakeTimers()
     const wrapper = await mountBar(viewOf({ state: 'reviewing', resumeHint: 'resubmit' }))
-    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_DEGRADED_STABLE_MS)
     await flushAsync()
 
     chatSendMock.mockRejectedValueOnce(new Error('ws down'))
@@ -534,9 +502,7 @@ describe('D8「agent 未响应」分支（turn 生命周期信号驱动，非墙
   }
 
   async function mountDegraded(): Promise<VueWrapper> {
-    vi.useFakeTimers()
     const wrapper = await mountBar(viewOf({ state: 'reviewing', resumeHint: 'resubmit' }))
-    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_DEGRADED_STABLE_MS)
     await flushAsync()
     return wrapper
   }

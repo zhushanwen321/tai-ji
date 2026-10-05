@@ -4,7 +4,7 @@
  * 覆盖（spec §3.2 五个不变量）：
  * - shouldRestart：stopping 短路 / 计数上限
  * - recordCrashAndGetDelay：指数退避序列 1s/2s/4s/8s/16s
- * - recordSuccess：稳定窗口清零（区分瞬时簇 vs 持续故障）
+ * - recordSuccess：无时间窗清零（ADR-0112：计数清零唯一入口 = 用户显式重试）
  * - markStopping / reset：主动停止生命周期
  *
  * 运行：pnpm --filter @taiji/electron run test:main -- main/test/restart-policy.test.ts
@@ -14,7 +14,6 @@ import {
   RestartPolicy,
   MAX_RESTARTS,
   RESTART_BASE_DELAY_MS,
-  STABLE_MS,
 } from '../supervisor/restart-policy.js'
 
 describe('RestartPolicy.shouldRestart', () => {
@@ -85,7 +84,7 @@ describe('RestartPolicy.recordCrashAndGetDelay（指数退避）', () => {
   })
 })
 
-describe('RestartPolicy.recordSuccess（稳定窗口清零）', () => {
+describe('RestartPolicy.recordSuccess（无时间窗清零，ADR-0112）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -93,46 +92,33 @@ describe('RestartPolicy.recordSuccess（稳定窗口清零）', () => {
     vi.useRealTimers()
   })
 
-  it('稳定窗口内 recordSuccess 不清零（同簇内累计）', () => {
+  it('recordSuccess 不清零计数（无稳定窗，累计只在手动重试时归零）', () => {
     const p = new RestartPolicy()
     p.recordCrashAndGetDelay()
     p.recordCrashAndGetDelay()
     expect(p.count).toBe(2)
 
-    // 首次 recordSuccess：lastSuccessAt 初始 0，守卫 lastSuccessAt>0 不成立，不清零
+    // 无论间隔多久，recordSuccess 只记录事实，不清零
     p.recordSuccess()
     expect(p.count).toBe(2)
 
-    // 紧接着再成功（now - lastSuccessAt ≈ 0 < STABLE_MS），不清零
+    vi.advanceTimersByTime(60_000)
     p.recordSuccess()
     expect(p.count).toBe(2)
   })
 
-  it('稳定窗口外 recordSuccess 清零计数（新故障簇）', () => {
+  it('崩溃计数持续累计直到 MAX 或用户显式重试（clearForManualRestart 清零）', () => {
     const p = new RestartPolicy()
-    p.recordCrashAndGetDelay()
-    p.recordCrashAndGetDelay()
-    expect(p.count).toBe(2)
-
-    p.recordSuccess() // 设 lastSuccessAt = T0
-    expect(p.count).toBe(2)
-
-    // 推进时间超过稳定窗口
-    vi.advanceTimersByTime(STABLE_MS + 1)
-    p.recordSuccess() // now - T0 > STABLE_MS → 清零
-    expect(p.count).toBe(0)
-  })
-
-  it('稳定后再次崩溃从 1 开始（非累计历史）', () => {
-    const p = new RestartPolicy()
-    // 第一簇：崩 3 次
     for (let i = 0; i < 3; i++) p.recordCrashAndGetDelay()
     expect(p.count).toBe(3)
 
-    // 稳定运行超过窗口
     p.recordSuccess()
-    vi.advanceTimersByTime(STABLE_MS + 1)
+    vi.advanceTimersByTime(60_000)
     p.recordSuccess()
+    expect(p.count).toBe(3)
+
+    // 用户显式重试是唯一清零入口
+    p.clearForManualRestart()
     expect(p.count).toBe(0)
 
     // 新故障簇：从 1 开始

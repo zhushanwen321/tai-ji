@@ -100,20 +100,6 @@ export interface IManagedSessionView {
    */
   bashRunToken: string | undefined
   /**
-   * pi 侧孤儿 bash 标记（timeout-slow-flow-wallclock D2 + P6 断言④，纯运行时态不进 toSummary）。
-   *
-   * bash RPC 超时（RpcTimeoutError）后 runtime 已停止等待（isBashRunning 由 finally 复位），
-   * 但 D2 语义是「停止等待 ≠ 处决」——pi 侧命令可能仍在跑且照常落盘。置此标记让 abortBash
-   * 守卫放行（诚实文案第①步「abortBash 可终止」的 runtime 承诺），否则守卫「runtime 不等待
-   * = 无命令在跑」的旧语义会短路早退，abort_bash 永不发出、UI 谎报已取消。
-   *
-   * 写方：sendBash 超时 catch 置 true；abortBash 的 abort_bash 发出且 pi 确认后清 false。
-   * bash 自然结束无法自动清（迟到 response 被 timedOutIds/NULL_EVENTS 丢弃，runtime 无从
-   * 得知）——标记残留只导致下次 abortBash 再发一次幂等的 abort_bash（pi 对无 bash 在跑时
-   * 无操作正常返回），无害。session 条目删除时随对象一同丢弃（与 pendingBashResults 同区）。
-   */
-  orphanBashRunning?: boolean
-  /**
    * bash 结果待落列（W1 fix-chat-flow-order，D2 双分支镜像 pi）。
    *
    * session 处于 streaming（活跃 run）时，sendBash 收到的 pi bash RPC 结果压入此列

@@ -59,7 +59,6 @@ import { WorkflowRun } from "./models/workflow-run.ts";
 import type { LifecycleDeps } from "./models/ports.ts";
 import { RunRuntime } from "./models/run-runtime.ts";
 import { makeHandlers } from "./lifecycle.ts";
-import { forgetRunResumedBudget, noteRunResumedBudget } from "./worker-message-pump.ts";
 import { WORKFLOW_RECORD_CUSTOM_TYPE } from "./workflow-record-entry.ts";
 import { assertResumeArgsMatch } from "./resume-args-guard.ts";
 import { rebuildBudget, runAccountingFromEvents } from "./run-accounting.ts";
@@ -252,8 +251,9 @@ export function computeActiveElapsedMs(events: readonly WorkflowRunEvent[]): num
  * D7 resume 锁参数（对齐 worktree-registry.ts 直用先例的参数族）：stale 30s——
  * 持锁段（资格校验→条目→落 record→活体注册，秒级 IO）远小于窗口，且
  * proper-lockfile 持锁期间每 stale/2 自动 touch mtime（长持有不被夺）；进程崩溃
- * 后锁残留 30s 可被 stale 夺取（待验证检查点 2 已核实实装语义）。重试短（2 次
- * / 100ms 起步）：锁被占 = 另一 resume 在途，语义是快速明确拒绝而非等待。
+ * 后锁残留 30s 可被 stale 夺取（待验证检查点 2 已核实实装语义）。
+ * [ADR-0112] 获取重试已删（原 retries 2 次/100-400ms）：锁被占 = 另一 resume 在途，
+ * 立即显式拒绝（ELOCKED → ResumeRejectionError）而非退避等待。
  */
 const RESUME_LOCK_STALE_MS = 30_000;
 
@@ -324,7 +324,7 @@ export async function resumeRun(
     release = await lockfile.lock(lockTarget, {
       realpath: false,
       stale: RESUME_LOCK_STALE_MS,
-      retries: { retries: 2, factor: 2, minTimeout: 100, maxTimeout: 400 },
+      retries: 0,
     });
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ELOCKED") {
@@ -522,9 +522,9 @@ function adoptResumedRun(
   },
   now: () => number,
 ): void {
-  noteRunResumedBudget(runId, summary.activeElapsedMs, summary.resumedAt);
-  // 生效预算（summary.budgetTimeMs/budgetTokens 与首次挂表同源）随 spec 落定——重试
-  // 重建面读 run.spec.budgetTimeMs/budgetTokens，本处不另算一遍
+  // 生效预算（summary.budgetTimeMs/budgetTokens 与首次挂表同源）随 spec 落定。
+  // [ADR-0112] 原进程内 D10 预算账本（noteRunResumedBudget）随重试矩阵删除——
+  // 账本唯一读方是已删的 rebuild 重试路径；resume 挂表用本函数下方局部折算。
   const run = rebuildRunFromRecord(
     runId,
     created,
@@ -609,11 +609,6 @@ async function rollbackFailedAdoption(
   created: Extract<WorkflowRunEvent, { type: "run-created" }>,
   err: unknown,
 ): Promise<void> {
-  // 回滚清账（D10）：noteRunResumedBudget 在段 6 首行写入（workerHost.start 之前）
-  // ——接管失败即无活体消费该账目，残留会让后续按 runId 的预算折算读到已废弃的
-  // 复活时刻；record 流是权威源，下次成功 resume 会重写覆盖。interruptRun 失败
-  // （record 滞留 running 的僵尸形态）同样无活体，清账无条件先行。
-  forgetRunResumedBudget(runId);
   try {
     await interruptRun(runId, {
       errorCode: "crashed",
@@ -647,7 +642,7 @@ async function resumeRunLocked(
 
   // ── 2b. 派发前语法闸（第 4 道检查的 resume 侧）──
   // run-created 里的 scriptSource 是权威脚本文本；不可编译（顶层重声明宿主预声明名）
-  // 时 Worker 启动后必然异步语法错 → 被重试矩阵吃满 MAX_WORKER_RETRIES 次才失败。
+  // 时 Worker 启动后必然异步语法错（失败上抛，分类与行号丢失）。
   // 此处先于段 4/5/6 的一切写动作拒绝（干净拒绝：run-resumed 未落、v2 条目未补、
   // run 仍 interrupted）。record 的脚本文本不可改 → 该 run 无法 resume，恢复动作 =
   // 修脚本后重派新 run（文案已含指引）。空脚本文本跳过（旧格式 record 无全文）。

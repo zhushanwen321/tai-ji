@@ -42,7 +42,6 @@ export type StatusChangeCallback = (payload: {
 /** PluginHost 的最小接口——热重载需要 getWorkerHandle（已在 hooks 间接使用） */
 
 const HOT_RELOAD_DEBOUNCE_MS = 300
-const HOT_RELOAD_DEACTIVATE_TIMEOUT_MS = 5_000
 
 interface ReloadContext {
   hooks: HotReloadHooks
@@ -120,30 +119,8 @@ export class PluginHotReloader {
 
     const oldStatus = 'active'
 
-    // 1. Deactivate (timeout 5s)
-    let deactivateTimer: ReturnType<typeof setTimeout> | undefined
-    try {
-      await Promise.race([
-        hooks.deactivate(pluginId),
-        new Promise((_, reject) => {
-          deactivateTimer = setTimeout(
-            () => reject(new Error('deactivate timeout')),
-            HOT_RELOAD_DEACTIVATE_TIMEOUT_MS,
-          )
-        }),
-      ])
-    } catch {
-      // Deactivate timeout → force terminate Worker
-      console.warn(`[plugin-hot-reload] hot reload: force terminate for ${pluginId}`)
-      await hooks.forceTerminate(pluginId)
-      hooks.disposeContext(pluginId)
-      hooks.setState(pluginId, 'UNLOADED')
-    } finally {
-      // D5 卫生修：deactivate 胜出（或抛错）路径清掉 race timer——否则 timer 仍 armed
-      // 5s 后对已 settle 的内部 promise 空 reject 一次（无害但脏）。超时路径 timer 已
-      // 触发，clearTimeout 为 noop，幂等。
-      if (deactivateTimer !== undefined) clearTimeout(deactivateTimer)
-    }
+    // 1. Deactivate（墙钟已随 ADR-0112 退役：deactivate 抛错走热重载失败路径）
+    await hooks.deactivate(pluginId)
 
     // 2. Re-activate
     await hooks.activate(pluginId)

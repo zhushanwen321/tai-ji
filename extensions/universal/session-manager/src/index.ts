@@ -56,27 +56,18 @@ const AbortSessionParams = Type.Object({
 
 // ── select 通道辅助 ──
 
-/** select 超时（ms）：工具等待 runtime handler respond 的最大时间（create/history 走长链路放宽）。
- *  watch 刻意缺席（notify-once D2：不传 timeout、fire-and-forget 长挂——P1 实测 `if
- *  (opts?.timeout)` 才设 timer）。形制 = `Exclude<SessionManagerAction, "watch">`：
- *  协议 action 集 6→7 后漏配键即编译期红（计划 blocker #1 的修复形态）。 */
-const SELECT_TIMEOUT_MS: Record<Exclude<SessionManagerAction, "watch">, number> = {
-	create: 60_000,
-	send: 30_000,
-	history: 60_000,
-	status: 30_000,
-	list: 30_000,
-	abort: 30_000,
-};
-
 /**
  * 通过 select 通道向 runtime handler 发送 session 管理请求（传输核走 protocol 的
  * callMarkerRpc 原语，D8）。回包为 handler respond 的 JSON 字符串（value 恒 raw）；
- * 失败四态（cancelled/timeout/channel-error/non-json）由 executeTool 统一 throw——
+ * 失败态（cancelled/channel-error/non-json）由 executeTool 统一 throw——
  * pi agent-loop 仅在 execute throw 时置 isError:true，返回值里的 isError 字段被丢弃
  * （pi-agent-core dist/agent-loop.js:453-483 executePreparedToolCall：正常 return
  * 硬编码 isError:false、catch 置 true——0.84.4 实读 :468/:470-476；语义登记 PS-56）。
  * 通道异常与非 JSON 回包的留痕由原语经注入的 log 承担。
+ *
+ * 不传 timeout（ADR-0112：无包内挂死兜底，handler 不回包时工具调用长挂、失败直报；
+ * 原 SELECT_TIMEOUT_MS per-action 表已删——原 watch 通道 D2/P1 的无 timer 长挂形态
+ * 现为全部 action 统一形态：任意晚的 respond 按 id 精确 resolve）。
  */
 function callSessionManager(
 	ctx: ExtensionContext,
@@ -96,8 +87,7 @@ function callSessionManager(
 		ui: { select: ctx.ui.select.bind(ctx.ui) },
 	};
 	return callMarkerRpc(guiCtx, SESSION_MANAGER_MARKER, payload, {
-		// watch 不传 timeout（D2/P1：无 timer 长挂不死，任意晚的 respond 按 id 精确 resolve；PS-59）
-		timeout: action === "watch" ? undefined : SELECT_TIMEOUT_MS[action],
+		// 全 action 不传 timeout（ADR-0112：无包内挂死兜底；无 timer 长挂，任意晚的 respond 按 id 精确 resolve）
 		log: (msg, detail) => logger.error(`[session-manager] ${msg}`, detail),
 	});
 }
@@ -133,11 +123,11 @@ async function executeTool(
 	if (!result.ok) {
 		// 行为微变①（D8，有意）：非 JSON 回包从「catch 后
 		// parsed=undefined 静默当成功文本返回」改为 throw + 提示文本（留痕由原语
-		// 经注入的 logger.error 承担）；其余三态维持原 cancelled/timeout 折叠文案。
+		// 经注入的 logger.error 承担）；不传 timeout 后剩余 cancelled/channel-error 两态折叠。
 		const text =
 			result.reason === "non-json"
 				? `Session manager ${action}: non-JSON response from runtime (protocol mismatch — redeploy same-version runtime + extension; see extension logs).`
-				: `Session manager ${action}: cancelled or timed out.`;
+				: `Session manager ${action}: cancelled or channel error.`;
 		throw new Error(text);
 	}
 	const raw = result.value;

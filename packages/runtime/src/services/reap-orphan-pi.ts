@@ -82,17 +82,11 @@ import { redactArgvLine } from '../infra/pi/argv-redact.js'
  * argv 对应字段）。writer 以 spread 序列化，扩展字段原样落盘 JSONL。
  */
 
-/** ps 枚举超时：全量进程表是毫秒级本地操作，10s 只是无 ps/假死兜底，防启动链悬挂。 */
-const PS_TIMEOUT_MS = 10_000
-
-/** SIGTERM 后等 pi 优雅退出的宽限，对齐 rpc-client kill 链的 KILL_TIMEOUT_MS（2s）。 */
-export const ORPHAN_KILL_GRACE_MS = 2_000
-
-/**
- * 启动后延迟多久执行收殓（挂载方 startup-background-init.ts 使用）。初值 5s：给 pi
- * stdin-EOF 自杀链留优雅退出时间（设计 D4a ⛔实施期门：宽限值待 S6 真机实测调整）。
- */
-export const ORPHAN_REAP_DELAY_MS = 5_000
+// ADR-0112 退役登记（2026-10-05）：本模块原三时间机制已删——①PS_TIMEOUT_MS 10s
+// （ps 枚举墙钟）；②ORPHAN_KILL_GRACE_MS 2s（SIGTERM 优雅退出宽限，删后 SIGTERM 成死
+// 信号，杀链收敛为 SIGKILL 直杀，推翻 crash-forensics 附录 E kill 族 grace 背书）；
+// ③ORPHAN_REAP_DELAY_MS 5s（启动延迟窗——判据 argv/ppid=1 事实化，不误杀新 runtime
+// 的子进程，窗口属纯保险）。孤儿判据本体（argv 四条合取 + ppid=1）是事实判据，保留。
 
 /** ps 单行解析结果（`ps -axo pid=,ppid=,command=` 的一行）。 */
 export interface PsRow {
@@ -246,8 +240,6 @@ export interface ReapOrphanOptions {
   dataDir: string
   /** 本 runtime 进程 pid（排除其活跃子进程，防线②）。 */
   ownPid: number
-  /** SIGTERM→SIGKILL 宽限 ms，默认 ORPHAN_KILL_GRACE_MS。 */
-  killGraceMs?: number
   /**
    * 杀链决策日志的「谁触发」（crash-resilience §3.3 D6-⑥，E2 归因缺口修复）：
    * 调用方自述（如 'startup-sweep'）。可选，缺省 'unspecified'——不强制改动既有
@@ -256,10 +248,8 @@ export interface ReapOrphanOptions {
   trigger?: string
   /** 进程枚举注入（测试替身）；缺省真实执行 ps。返回 ps stdout 原文。 */
   listProcesses?: () => Promise<string>
-  /** 信号注入（测试替身）；缺省 process.kill。signal 0 = 仅探活不实际发信号。 */
-  signal?: (pid: number, signal: 'SIGTERM' | 'SIGKILL' | 0) => void
-  /** 延时注入（测试替身，避免真实等待宽限）。 */
-  delay?: (ms: number) => Promise<void>
+  /** 信号注入（测试替身）；缺省 process.kill。 */
+  signal?: (pid: number, signal: 'SIGKILL') => void
   /**
    * spawn 清单读取（必填，D6c port 纪律）：组合根注入 infra/spawn-markers 的
    * readSpawnMarkerList(getDataDir()) 闭包，测试注入替身。返回 null = 清单缺失/读不到/
@@ -310,7 +300,7 @@ function defaultListProcesses(): Promise<string> {
     execFile(
       'ps',
       ['-axo', 'pid=,ppid=,command='],
-      { encoding: 'utf8', timeout: PS_TIMEOUT_MS },
+      { encoding: 'utf8' },
       (err, stdout) => {
         if (err) reject(err)
         else resolve(stdout)
@@ -319,14 +309,8 @@ function defaultListProcesses(): Promise<string> {
   })
 }
 
-function defaultSignal(pid: number, signal: 'SIGTERM' | 'SIGKILL' | 0): void {
+function defaultSignal(pid: number, signal: 'SIGKILL'): void {
   process.kill(pid, signal)
-}
-
-function defaultDelay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms).unref()
-  })
 }
 
 /**
@@ -336,7 +320,7 @@ function defaultDelay(ms: number): Promise<void> {
  */
 function defaultReadProcessStartTime(pid: number): Promise<number | null> {
   return new Promise((resolve) => {
-    execFile('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf8', timeout: PS_TIMEOUT_MS }, (err, stdout) => {
+    execFile('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf8' }, (err, stdout) => {
       if (err) {
         resolve(null)
         return
@@ -352,27 +336,22 @@ function defaultReadProcessStartTime(pid: number): Promise<number | null> {
  * 清单缺失/坏（readSpawnMarkers 返回 null）→ 跳过本轮（fail-safe，宁漏不误杀）。
  * 本函数不抛（全路径 catch 或降级返回），调用方可安全 fire-and-forget。
  */
-/** killOrphan 依赖簇（信号面 + 宽限），逐 pid 处置循环与主流程解包共享。 */
-interface OrphanKillDeps {
-  killGraceMs: number
-  signal: (pid: number, signal: 'SIGTERM' | 'SIGKILL' | 0) => void
-  delay: (ms: number) => Promise<void>
-  readProcessStartTime: (pid: number) => Promise<number | null>
-}
-
 /**
- * 逐孤儿处置 + 台账双写（crash-forensics §3.3 D1）：SIGTERM → 宽限 → SIGKILL 链
- * 逐 pid 执行，reaped / reap-failed 两类事件挂处置结果处（事件名语义 = 已收殓 /
- * 处置失败，防误记）。台账 best-effort（writer append 自吞错不向收殓链传播）。
+ * 逐孤儿处置 + 台账双写（crash-forensics §3.3 D1）：SIGKILL 直杀逐 pid 执行，
+ * reaped / reap-failed 两类事件挂处置结果处（事件名语义 = 已收殓 / 处置失败，防误记）。
+ * 台账 best-effort（writer append 自吞错不向收殓链传播）。
  */
 async function reapOrphansWithJournal(
   orphans: PsRow[],
-  deps: OrphanKillDeps,
+  deps: {
+    signal: (pid: number, signal: 'SIGKILL') => void
+    readProcessStartTime: (pid: number) => Promise<number | null>
+  },
 ): Promise<{ reaped: number[]; failed: number[] }> {
   const reaped: number[] = []
   const failed: number[] = []
   for (const row of orphans) {
-    const ok = await killOrphan(row, deps.killGraceMs, deps.signal, deps.delay, deps.readProcessStartTime)
+    const ok = await killOrphan(row, deps.signal, deps.readProcessStartTime)
     if (ok) {
       reaped.push(row.pid)
       // 台账双写（crash-forensics §3.3 D1 reaped 行：杀链判据命中处置成功处，与既有
@@ -406,10 +385,8 @@ async function reapOrphansWithJournal(
 
 export async function reapOrphanPiProcesses(options: ReapOrphanOptions): Promise<ReapOrphanResult> {
   const { dataDir, ownPid, readSpawnMarkers } = options
-  const killGraceMs = options.killGraceMs ?? ORPHAN_KILL_GRACE_MS
   const listProcesses = options.listProcesses ?? defaultListProcesses
   const signal = options.signal ?? defaultSignal
-  const delay = options.delay ?? defaultDelay
   const readProcessStartTime = options.readProcessStartTime ?? defaultReadProcessStartTime
 
   const result: ReapOrphanResult = { scanned: 0, reaped: [], failed: [], unsupported: false }
@@ -449,7 +426,7 @@ export async function reapOrphanPiProcesses(options: ReapOrphanOptions): Promise
   // D5①（session-dead-structural-fixes）：kill 路径全量日志 K7——收殓决策点升级 warn 含
   // 调用源与信号链（下各 pid 级明细 log 保持既有粒度不动）；u17 后判据为 spawn markers，
   // 清单条目数与数据目录一并记入。
-  console.warn(`[orphan-reap] found ${orphans.length} orphan pi process(es) matching spawn markers (${markerPaths.length} entries, dataDir=${dataDir}), reaping (kill_source=reap_orphan | who: runtime startup delayed reap, previous runtime died leaving unparented pi | chain: ps scan -> argv + ppid=1 orphan match -> SIGTERM -> ${killGraceMs}ms grace -> SIGKILL if alive)`)
+  console.warn(`[orphan-reap] found ${orphans.length} orphan pi process(es) matching spawn markers (${markerPaths.length} entries, dataDir=${dataDir}), reaping (kill_source=reap_orphan | who: runtime startup reap, previous runtime died leaving unparented pi | chain: ps scan -> argv + ppid=1 orphan match -> SIGKILL)`)
   // 杀链决策日志（crash-resilience §3.3 D6-⑥，E2 归因缺口的直接修复）：一条结构化
   // 行回答「谁触发 / 杀哪些 pid / 为什么」——动作/目标/原因字段化（console patch 的
   // meta 走 JSON.stringify 单行落盘 runtime 主日志），与下方逐 pid 处置行互为索引。
@@ -459,10 +436,9 @@ export async function reapOrphanPiProcesses(options: ReapOrphanOptions): Promise
     scanned: result.scanned,
     targets: orphans.map(r => ({ pid: r.pid, ppid: r.ppid })),
     reason: 'argv matches spawn marker list (--mode rpc + --no-extensions + staged extension/skill value) AND ppid=1 (parent runtime dead, orphan reparented to init)',
-    graceMs: killGraceMs,
   })
   const { reaped, failed } = await reapOrphansWithJournal(orphans, {
-    killGraceMs, signal, delay, readProcessStartTime,
+    signal, readProcessStartTime,
   })
   result.reaped = reaped
   result.failed = failed
@@ -479,47 +455,19 @@ export async function reapOrphanPiProcesses(options: ReapOrphanOptions): Promise
 /**
  * 单个孤儿的处置序列。返回 false = 处置失败（调用方记入 failed，仅日志不抛）。
  *
- * SIGKILL 前 pid 复用复验（防线尽力而为）：处置起点锚定一次 ps lstart，SIGKILL 发射前
- * 复读比对——lstart 变化 = 原孤儿已死、pid 已被无关进程复用（pid 复用必经原进程退出），
- * 跳过 SIGKILL 防「杀链延迟窗口内误杀复用者」。任一时点 ps 失败（null）→ 按现状继续，
- * 不因防线缺席放弃处置。原孤儿已随 pid 复用确定死亡，按已回收计（对齐「exited before
- * SIGTERM」语义），warn 留痕供归因。
+ * SIGKILL 直杀（ADR-0112：SIGTERM grace 优雅退出窗退役）。SIGKILL 发射前 pid 复用复验
+ * （防线尽力而为）：处置起点锚定一次 ps lstart，SIGKILL 发射前复读比对——lstart 变化 =
+ * 原孤儿已死、pid 已被无关进程复用（pid 复用必经原进程退出），跳过 SIGKILL 防「处置窗口
+ * 内误杀复用者」。任一时点 ps 失败（null）→ 按现状继续，不因防线缺席放弃处置。原孤儿已随
+ * pid 复用确定死亡，按已回收计（对齐「exited before kill」语义），warn 留痕供归因。
  */
 async function killOrphan(
   row: PsRow,
-  killGraceMs: number,
-  signal: (pid: number, signal: 'SIGTERM' | 'SIGKILL' | 0) => void,
-  delay: (ms: number) => Promise<void>,
+  signal: (pid: number, signal: 'SIGKILL') => void,
   readProcessStartTime: (pid: number) => Promise<number | null>,
 ): Promise<boolean> {
   const summary = argvSummary(row.command)
   const startLstart = await readProcessStartTime(row.pid)
-  try {
-    signal(row.pid, 'SIGTERM')
-  } catch (e) {
-    if (isProcessGone(e)) {
-      // 扫描到处置之间已自行退出（stdin-EOF 自杀链赶到前面）——按已回收计，幂等。
-      console.log(`[orphan-reap] reaped orphan pi pid=${row.pid} (exited before SIGTERM) ${summary}`)
-      return true
-    }
-    console.warn(`[orphan-reap] SIGTERM failed for orphan pi pid=${row.pid}:`, e instanceof Error ? e.message : e)
-    return false
-  }
-
-  await delay(killGraceMs)
-
-  // 宽限后探活：signal 0 只验证存在性不实际发信号。EPERM 等其他错误按「活着」处理
-  // （走 SIGKILL 兜底，宁可多一发强杀信号也不漏收）。
-  let alive = true
-  try {
-    signal(row.pid, 0)
-  } catch (e) {
-    if (isProcessGone(e)) alive = false
-  }
-  if (!alive) {
-    console.log(`[orphan-reap] reaped orphan pi pid=${row.pid} (SIGTERM) ${summary}`)
-    return true
-  }
 
   // SIGKILL 发射前的身份复验：lstart 与处置起点不同 = pid 已复用（原孤儿确定已死），
   // 跳过 SIGKILL——误杀复用者的代价高于少收一个已死孤儿。复验失败（null）不阻断。
@@ -533,14 +481,16 @@ async function killOrphan(
 
   try {
     signal(row.pid, 'SIGKILL')
-    console.log(`[orphan-reap] reaped orphan pi pid=${row.pid} (SIGKILL after ${killGraceMs}ms grace) ${summary}`)
+    console.log(`[orphan-reap] reaped orphan pi pid=${row.pid} (SIGKILL) ${summary}`)
     return true
   } catch (e) {
     if (isProcessGone(e)) {
-      console.log(`[orphan-reap] reaped orphan pi pid=${row.pid} (exited during grace) ${summary}`)
+      // 扫描到处置之间已自行退出（stdin-EOF 自杀链赶到前面）——按已回收计，幂等。
+      console.log(`[orphan-reap] reaped orphan pi pid=${row.pid} (exited before SIGKILL) ${summary}`)
       return true
     }
     console.warn(`[orphan-reap] SIGKILL failed for orphan pi pid=${row.pid}:`, e instanceof Error ? e.message : e)
     return false
   }
 }
+

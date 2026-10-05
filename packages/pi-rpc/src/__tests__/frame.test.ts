@@ -1,21 +1,17 @@
 // src/__tests__/frame.test.ts
 //
-// 帧协议层测试：LF-only 行分帧（U+2028/U+2029 边界）/ pending 表（超时分级 /
-// 迟到响应丢弃 / TTL 清理）/ 早期帧缓冲 / 裸写原语。
+// 帧协议层测试：LF-only 行分帧（U+2028/U+2029 边界）/ pending 表（请求-响应配对）/
+// 早期帧缓冲 / 裸写原语。
 //
-// 分帧断言移植自 runtime rpc-client-lf-framing.test.ts（D10 构造帧验证范式）；
-// pending 语义对齐 rpc-client S6（迟到丢弃）/ L6（超时分级）/ idle-pi-reclamation
-// D1（maintenance 豁免判定）。
+// 分帧断言移植自 runtime rpc-client-lf-framing.test.ts（D10 构造帧验证范式）。
+// 退役登记（ADR-0112 防御机制清查）：超时分级 / timedOutIds 迟到丢弃 / TTL 清理 /
+// maintenance 豁免判定用例随机制删除，失败信号归 pi exit 事件链 rejectAll。
 
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { PassThrough } from 'node:stream'
 
 import {
   attachLfOnlyLineReader,
-  CMD_TIMEOUT_MS,
-  FAST_TIMEOUT_MS,
-  SLOW_TIMEOUT_MS,
-  TIMED_OUT_ID_TTL_MS,
   createPendingRegistry,
   createEarlyFrameBuffer,
   EARLY_FRAME_BUFFER_MAX,
@@ -125,35 +121,15 @@ describe('attachLfOnlyLineReader', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 超时分级常量（L6）
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('超时分级常量', () => {
-  it('FAST=10s / CMD=60s / SLOW=120s / 迟到响应 TTL=5s', () => {
-    expect(FAST_TIMEOUT_MS).toBe(10_000)
-    expect(CMD_TIMEOUT_MS).toBe(60_000)
-    expect(SLOW_TIMEOUT_MS).toBe(120_000)
-    expect(TIMED_OUT_ID_TTL_MS).toBe(5_000)
-  })
-})
-
-// ─────────────────────────────────────────────────────────────────────────────
-// pending 表 + 迟到响应丢弃
+// pending 表
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('createPendingRegistry', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-  })
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
   it('response 命中：resolve + 不再命中（一次性）', () => {
     const registry = createPendingRegistry()
     const resolve = vi.fn()
     const reject = vi.fn()
-    registry.register('id-1', { resolve, reject }, CMD_TIMEOUT_MS, () => new Error('timeout'))
+    registry.register('id-1', { resolve, reject })
     const msg: PiMessage = { type: 'response', id: 'id-1', success: true }
 
     expect(registry.resolveResponse('id-1', msg)).toBe(true)
@@ -162,93 +138,33 @@ describe('createPendingRegistry', () => {
     expect(registry.resolveResponse('id-1', msg)).toBe(false)
   })
 
-  it('超时：reject(makeTimeoutError) + id 记入 timedOutIds（FAST 档），TTL 后自动清理', () => {
+  it('未注册 id 的 response：resolveResponse 不命中（返回 false）', () => {
     const registry = createPendingRegistry()
-    const resolve = vi.fn()
-    const reject = vi.fn()
-    const timeoutErr = new Error('RpcTimeout')
-    registry.register('id-fast', { resolve, reject }, FAST_TIMEOUT_MS, () => timeoutErr)
-
-    vi.advanceTimersByTime(FAST_TIMEOUT_MS)
-    expect(reject).toHaveBeenCalledWith(timeoutErr)
-    expect(resolve).not.toHaveBeenCalled()
-    // S6 迟到响应丢弃信号
-    expect(registry.isTimedOut('id-fast')).toBe(true)
-
-    vi.advanceTimersByTime(TIMED_OUT_ID_TTL_MS)
-    expect(registry.isTimedOut('id-fast')).toBe(false)
-  })
-
-  it('超时分级：FAST 档在 CMD 档之前触发；同 registry 混档并存', () => {
-    const registry = createPendingRegistry()
-    const rejects = { fast: vi.fn(), cmd: vi.fn() }
-    registry.register('f', { resolve: vi.fn(), reject: rejects.fast }, FAST_TIMEOUT_MS, () => new Error('f'))
-    registry.register('c', { resolve: vi.fn(), reject: rejects.cmd }, CMD_TIMEOUT_MS, () => new Error('c'))
-
-    vi.advanceTimersByTime(FAST_TIMEOUT_MS)
-    expect(rejects.fast).toHaveBeenCalledTimes(1)
-    expect(rejects.cmd).not.toHaveBeenCalled()
-
-    vi.advanceTimersByTime(CMD_TIMEOUT_MS - FAST_TIMEOUT_MS)
-    expect(rejects.cmd).toHaveBeenCalledTimes(1)
-  })
-
-  it('超时后迟到 response：isTimedOut 命中（消费方丢弃信号），resolveResponse 不命中', () => {
-    const registry = createPendingRegistry()
-    registry.register('late', { resolve: vi.fn(), reject: vi.fn() }, FAST_TIMEOUT_MS, () => new Error('t'))
-    vi.advanceTimersByTime(FAST_TIMEOUT_MS)
-
     const lateMsg: PiMessage = { type: 'response', id: 'late', success: true }
-    expect(registry.isTimedOut('late')).toBe(true)
     expect(registry.resolveResponse('late', lateMsg)).toBe(false)
   })
 
-  it('timeout ≤ 0 = 不限时：不挂墙钟 timer，只经 resolve/rejectAll settle', () => {
+  it('cancel：删除 pending，response 不再命中', () => {
     const registry = createPendingRegistry()
     const reject = vi.fn()
-    registry.register('unbounded', { resolve: vi.fn(), reject }, 0, () => new Error('t'))
-    vi.advanceTimersByTime(SLOW_TIMEOUT_MS * 2)
-    expect(reject).not.toHaveBeenCalled()
-  })
-
-  it('maintenance 标记：isMaintenanceResponse 仅对命中的 response 帧为 true（D1 双腿闭合）', () => {
-    const registry = createPendingRegistry()
-    registry.register('m', { resolve: vi.fn(), reject: vi.fn(), maintenance: true }, CMD_TIMEOUT_MS, () => new Error('t'))
-    registry.register('n', { resolve: vi.fn(), reject: vi.fn() }, CMD_TIMEOUT_MS, () => new Error('t'))
-
-    expect(registry.isMaintenanceResponse({ type: 'response', id: 'm' })).toBe(true)
-    expect(registry.isMaintenanceResponse({ type: 'response', id: 'n' })).toBe(false)
-    // 非 response 帧（事件复用 id 形态，如 bash_execution_update）不算 maintenance response
-    expect(registry.isMaintenanceResponse({ type: 'bash_execution_update', id: 'm' })).toBe(false)
-    expect(registry.isMaintenanceResponse({ type: 'response' })).toBe(false)
-  })
-
-  it('cancel：clearTimer + 删除（写 stdin 失败路径，不进 timedOutIds）', () => {
-    const registry = createPendingRegistry()
-    const reject = vi.fn()
-    registry.register('x', { resolve: vi.fn(), reject }, FAST_TIMEOUT_MS, () => new Error('t'))
+    registry.register('x', { resolve: vi.fn(), reject })
     registry.cancel('x')
-    vi.advanceTimersByTime(FAST_TIMEOUT_MS + TIMED_OUT_ID_TTL_MS)
-    expect(reject).not.toHaveBeenCalled()
-    expect(registry.isTimedOut('x')).toBe(false)
+    expect(registry.resolveResponse('x', { type: 'response', id: 'x' })).toBe(false)
+    expect(registry.hasPending('x')).toBe(false)
   })
 
-  it('rejectAll：全部 reject + timedOutIds 清空', () => {
+  it('rejectAll：全部仍 pending 的 reject，已 settle 的不重复', () => {
     const registry = createPendingRegistry()
     const rejects = [vi.fn(), vi.fn()]
-    registry.register('a', { resolve: vi.fn(), reject: rejects[0] }, CMD_TIMEOUT_MS, () => new Error('t'))
-    registry.register('b', { resolve: vi.fn(), reject: rejects[1] }, FAST_TIMEOUT_MS, () => new Error('t'))
-    // b 先超时进 timedOutIds
-    vi.advanceTimersByTime(FAST_TIMEOUT_MS)
-    expect(registry.isTimedOut('b')).toBe(true)
+    registry.register('a', { resolve: vi.fn(), reject: rejects[0] })
+    registry.register('b', { resolve: vi.fn(), reject: rejects[1] })
+    registry.cancel('b')
 
-    // b 已被超时 reject（其 timeout error）并从 pending 删除——rejectAll 只覆盖仍 pending 的 a
-    expect(rejects[1]).toHaveBeenCalledTimes(1)
     const err = new Error('pi process exited')
     registry.rejectAll(err)
     expect(rejects[0]).toHaveBeenCalledWith(err)
-    expect(rejects[1]).toHaveBeenCalledTimes(1) // 不重复 reject
-    expect(registry.isTimedOut('b')).toBe(false)
+    expect(rejects[1]).not.toHaveBeenCalled()
+    expect(registry.pendingSize).toBe(0)
   })
 })
 

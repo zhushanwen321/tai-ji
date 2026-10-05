@@ -29,6 +29,7 @@ import type {
   ExtensionContext,
   ExtensionUIContext,
   ModelRegistry,
+  SessionProjection,
   Theme,
 } from "@earendil-works/pi-coding-agent";
 
@@ -88,6 +89,8 @@ export function mkCtx(
       getEntries: () => [...entries],
       getTree: () => [],
       getSessionName: () => undefined,
+      // pi 1.0 新增必选成员；本包测试不消费会话投影，误用即抛错（failLoud 约定）
+      buildSessionProjection: () => failLoud<SessionProjection>("ctx.sessionManager.buildSessionProjection"),
     },
     modelRegistry: failLoud<ModelRegistry>("ctx.modelRegistry"),
     // SDK 契约：model / signal 在 agent 未流式输出时合法为 undefined
@@ -190,6 +193,14 @@ export function mkPi(
     setThinkingLevel: vi.fn(),
     registerProvider: vi.fn(),
     unregisterProvider: vi.fn(),
+    registerVirtualModel: vi.fn(),
+    unregisterVirtualModel: vi.fn(),
+    // pi 1.0 新增成员：settings/MCP 注册面——本包测试不消费；getSettings 的返回
+    // （Settings 合并视图）无法结构构造，走 failLoud
+    getSettings: () => failLoud<ReturnType<ExtensionAPI["getSettings"]>>("pi.getSettings"),
+    registerMcpServer: vi.fn(),
+    unregisterMcpServer: vi.fn(),
+    getMcpServers: vi.fn(() => []),
     events: {
       emit: vi.fn(),
       on: vi.fn(() => () => {}),

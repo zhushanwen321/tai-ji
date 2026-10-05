@@ -275,7 +275,7 @@ describe('RpcClient.getAvailableModels 封装', () => {
     const spy = vi.spyOn(client, 'sendCommand')
       .mockResolvedValue({ type: 'response', data: { models } } as PiMessage)
     await expect(client.getAvailableModels()).resolves.toEqual(models)
-    expect(spy).toHaveBeenCalledWith('get_available_models', {}, expect.any(Number))
+    expect(spy).toHaveBeenCalledWith('get_available_models', {})
   })
 
   it('malformed 响应（无 models 数组）→ 抛错（由对账层降级捕获，不误判全量漂移）', async () => {

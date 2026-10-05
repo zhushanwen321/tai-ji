@@ -98,7 +98,6 @@ describe('PluginService.executeHooks (BG1 T2)', () => {
         handlerId: 'h1',
         hookType: 'onBeforeSendMessage',
       }),
-      5_000,
     )
   })
 
@@ -275,7 +274,6 @@ describe('PluginService.executeHooks (BG1 T2)', () => {
       'worker-2',
       'plugin.hooks.invoke',
       expect.objectContaining({ handlerId: 'h2' }),
-      5_000,
     )
   })
 
@@ -480,7 +478,6 @@ describe('PluginService.executeHooks (BG1 T2)', () => {
       'worker-1',
       'plugin.hooks.invoke',
       expect.objectContaining({ handlerId: 'h-alive' }),
-      5_000,
     )
   })
 

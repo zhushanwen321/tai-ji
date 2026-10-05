@@ -3,10 +3,11 @@
 // 三视角：
 //   ①使用者（runtime event-adapter 视角）——帧形状：title=SUBAGENT_INFLIGHT_MARKER、
 //     options=[JSON 帧]（inFlight/sessionId/emittedAt）、控制面级 timeout 在场；
-//   ②构建者——初始上报（attachSession 触发，无需任何 subagent 调用）→ ack 清失败
-//     计数；失败折叠 + 延迟重试；推送在途期间多次迁移合并为单帧且携带最新绝对计数；
+//   ②构建者——初始上报（attachSession 触发，无需任何 subagent 调用）；失败折叠 +
+//     置脏（无 timer 自动重试，ADR-0112）；推送在途期间多次迁移合并为单帧且携带
+//     最新绝对计数；
 //   ③观察者——onInFlightChanged 同步返回（不 await select，不进生命周期链）；
-//     detachSession 停重试，session 死后通道静默。
+//     detachSession 后通道静默，session 死后不推帧。
 //
 // [HISTORICAL] 行为于 9f914b749 变更：kind='initial'|'delta' 帧字段与 initialAcked
 // 状态机作为死面删除（消费方 event-adapter 从不读 kind，绝对计数语义下帧间等价；
@@ -35,7 +36,6 @@ import { INFLIGHT_REPORT_ACK, SUBAGENT_INFLIGHT_MARKER } from "@zhushanwen/exten
 
 import { createInFlightReporter } from "../inflight-reporter.ts";
 
-const RETRY_MS = 50;
 const SELECT_TIMEOUT_MS = 1_000;
 
 type SelectCall = { title: string; payload: string; timeout: number | undefined };
@@ -93,7 +93,7 @@ async function advance(ms: number): Promise<void> {
 describe("初始上报（D5：触发时点 = extension 加载完成 / session 就绪）", () => {
   it("attachSession 即发初始帧（count=当下快照，无需任何 subagent 调用）", async () => {
     const channel = makeSelectChannel();
-    const reporter = createInFlightReporter({ retryDelayMs: RETRY_MS, selectTimeoutMs: SELECT_TIMEOUT_MS });
+    const reporter = createInFlightReporter({ selectTimeoutMs: SELECT_TIMEOUT_MS });
 
     reporter.attachSession(makeCtx(channel));
     await advance(0);
@@ -113,7 +113,7 @@ describe("初始上报（D5：触发时点 = extension 加载完成 / session �
 
   it("初始未送达前发生的迁移不产生第二帧（合并为单帧，ack 后补推最新快照）", async () => {
     const channel = makeSelectChannel();
-    const reporter = createInFlightReporter({ retryDelayMs: RETRY_MS });
+    const reporter = createInFlightReporter();
     reporter.attachSession(makeCtx(channel));
     await advance(0);
 
@@ -135,7 +135,7 @@ describe("初始上报（D5：触发时点 = extension 加载完成 / session �
 describe("绝对计数语义（每帧携带当下值，非增量）", () => {
   it("连续迁移各帧均为整值快照（2 → 0，不做加减）", async () => {
     const channel = makeSelectChannel();
-    const reporter = createInFlightReporter({ retryDelayMs: RETRY_MS });
+    const reporter = createInFlightReporter();
     reporter.attachSession(makeCtx(channel));
     await advance(0);
     channel.settleAll(INFLIGHT_REPORT_ACK);
@@ -158,27 +158,32 @@ describe("绝对计数语义（每帧携带当下值，非增量）", () => {
   });
 });
 
-describe("失败折叠 + 延迟重试（有界：累计 MAX_REPORT_ATTEMPTS 次放弃，D5 缺席语义②）", () => {
-  it("select resolve undefined（超时/旧版 runtime）→ 折叠重试；重试帧携带完整快照；ack 后停", async () => {
+describe("失败折叠（ADR-0112：无 timer 自动重试，事件驱动重推）", () => {
+  it("select resolve undefined（超时/旧版 runtime）→ 置脏不重试；下次迁移事件重推最新快照", async () => {
     const channel = makeSelectChannel();
-    const reporter = createInFlightReporter({ retryDelayMs: RETRY_MS, selectTimeoutMs: SELECT_TIMEOUT_MS });
+    const reporter = createInFlightReporter({ selectTimeoutMs: SELECT_TIMEOUT_MS });
     reporter.attachSession(makeCtx(channel));
     await advance(0);
     expect(channel.calls).toHaveLength(1);
 
-    // 首帧无人 ack，select 以 undefined 落定（超时形态）→ 折叠
+    // 首帧无人 ack，select 以 undefined 落定（超时形态）→ 折叠置脏
     channel.settle(0, undefined);
-    await advance(RETRY_MS - 1);
-    expect(channel.calls).toHaveLength(1); // 未到退避点不重试
-    await advance(1);
+    await advance(0);
+    // 推进远超原重试周期的时间：无 timer 自动重试（ADR-0112），零新帧
+    await advance(60_000);
+    expect(channel.calls).toHaveLength(1);
+
+    // 下一次 in-flight 变化事件驱动重推（携带最新绝对计数快照）
+    reporter.onInFlightChanged();
+    await advance(0);
     expect(channel.calls).toHaveLength(2);
     const retryFrame = parseFrame(channel.calls[1]);
-    expect(retryFrame.kind).toBeUndefined(); // kind 已删（9f914b749）：重试帧与普通帧等价
-    expect(retryFrame.inFlight).toBe(0); // 重试帧携带完整绝对计数快照
+    expect(retryFrame.kind).toBeUndefined(); // kind 已删（9f914b749）：重推帧与普通帧等价
+    expect(retryFrame.inFlight).toBe(0); // 重推帧携带完整绝对计数快照
 
-    // 重试帧得到 ack → 重试停止；随后迁移照常送达
+    // 重推帧得到 ack → 通道恢复；随后迁移照常送达
     channel.settle(1, INFLIGHT_REPORT_ACK);
-    await advance(RETRY_MS * 10);
+    await advance(60_000);
     expect(channel.calls).toHaveLength(2);
 
     reporter.onInFlightChanged();
@@ -188,81 +193,64 @@ describe("失败折叠 + 延迟重试（有界：累计 MAX_REPORT_ATTEMPTS 次�
     channel.settleAll(INFLIGHT_REPORT_ACK);
   });
 
-  it("select 通道抛错同样折叠进重试路径", async () => {
+  it("select 通道抛错同样折叠置脏，由迁移事件重推", async () => {
     const channel = makeSelectChannel();
-    const reporter = createInFlightReporter({ retryDelayMs: RETRY_MS });
+    const reporter = createInFlightReporter();
     reporter.attachSession(makeCtx(channel));
     await advance(0);
     channel.settle(0, new Error("channel blew up"));
-    await advance(RETRY_MS);
-    expect(channel.calls.length).toBeGreaterThanOrEqual(2);
+    await advance(0);
+    await advance(60_000); // 无 timer 重试
+    expect(channel.calls).toHaveLength(1);
+    reporter.onInFlightChanged();
+    await advance(0);
+    expect(channel.calls).toHaveLength(2);
     channel.settleAll(INFLIGHT_REPORT_ACK);
     await advance(0);
   });
 
-  it("非确认回包（旧版 runtime 的任意字符串）不算送达，继续重试", async () => {
+  it("非确认回包（旧版 runtime 的任意字符串）不算送达，置脏等事件重推", async () => {
     const channel = makeSelectChannel();
-    const reporter = createInFlightReporter({ retryDelayMs: RETRY_MS });
+    const reporter = createInFlightReporter();
     reporter.attachSession(makeCtx(channel));
     await advance(0);
     channel.settle(0, '{"ok":1}');
-    await advance(RETRY_MS);
+    await advance(0);
+    await advance(60_000); // 无 timer 重试
+    expect(channel.calls).toHaveLength(1);
+    reporter.onInFlightChanged();
+    await advance(0);
     expect(channel.calls).toHaveLength(2);
     channel.settleAll(INFLIGHT_REPORT_ACK);
     await advance(0);
-  });
-
-  it("累计失败达默认上限（3 次）即放弃：不再重试，后续迁移也不再发帧", async () => {
-    const channel = makeSelectChannel();
-    // 未注入 maxAttempts：锁默认上限 MAX_REPORT_ATTEMPTS = 3（增强面降级语义）。
-    const reporter = createInFlightReporter({ retryDelayMs: RETRY_MS, selectTimeoutMs: SELECT_TIMEOUT_MS });
-    reporter.attachSession(makeCtx(channel));
-    await advance(0);
-    expect(channel.calls).toHaveLength(1);
-
-    // 三帧全部失败落定：首帧 + 2 次退避重试；第 3 次失败触顶
-    channel.settle(0, undefined);
-    await advance(RETRY_MS);
-    expect(channel.calls).toHaveLength(2);
-    channel.settle(1, undefined);
-    await advance(RETRY_MS);
-    expect(channel.calls).toHaveLength(3);
-    channel.settle(2, undefined);
-
-    // 达到上限：放弃为 session 内终态——时间推进与后续迁移都不再发帧
-    await advance(RETRY_MS * 10);
-    expect(channel.calls).toHaveLength(3);
-    reporter.onInFlightChanged();
-    await advance(RETRY_MS * 10);
-    expect(channel.calls).toHaveLength(3);
   });
 });
 
 describe("不阻塞生命周期主链（D5 接线约束①）", () => {
   it("onInFlightChanged 同步返回：select 永不落定也不挂调用方（detach 可丢弃在途帧）", async () => {
     const channel = makeSelectChannel();
-    const reporter = createInFlightReporter({ retryDelayMs: RETRY_MS });
+    const reporter = createInFlightReporter();
     reporter.attachSession(makeCtx(channel));
     await advance(0);
 
     // 第一帧挂起（模拟 runtime 无响应）——迁移调用仍同步返回
     expect(() => reporter.onInFlightChanged()).not.toThrow();
 
-    // session 死后 detach：挂起帧被丢弃，重试链静止（时间推进零新调用）
+    // session 死后 detach：挂起帧被丢弃，通道静止（时间推进零新调用）
     reporter.detachSession();
     channel.settleAll(undefined);
-    await advance(RETRY_MS * 5);
+    await advance(60_000);
     expect(channel.calls).toHaveLength(1);
   });
 
-  it("detachSession 清掉待发重试定时器（session 已死，重试语义随之终结）", async () => {
+  it("detachSession 后失败落定不再发帧（ctx 已空，置脏无效果）", async () => {
     const channel = makeSelectChannel();
-    const reporter = createInFlightReporter({ retryDelayMs: RETRY_MS });
+    const reporter = createInFlightReporter();
     reporter.attachSession(makeCtx(channel));
     await advance(0);
     reporter.detachSession();
-    channel.settleAll(undefined); // 在途帧失败落定——ctx 已空，不排新重试
-    await advance(RETRY_MS * 10);
+    channel.settleAll(undefined); // 在途帧失败落定——ctx 已空，不排重推
+    await advance(60_000);
     expect(channel.calls).toHaveLength(1);
   });
 });

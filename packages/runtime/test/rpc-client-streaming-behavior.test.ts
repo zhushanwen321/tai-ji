@@ -12,7 +12,6 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { EventEmitter } from 'node:events'
-const clientOpts = { startupDelayMs: 0 } as const // 测试注入：启动确认窗口归零（窗口语义不变，见 RpcClientOptions.startupDelayMs）
 
 // ── stdin.write 捕获 ──
 const writeCalls: unknown[][] = []
@@ -103,9 +102,9 @@ describe('RpcClient.prompt streamingBehavior 透传（U1: session-delivery）', 
     return JSON.parse(raw.trim())
   }
 
-  /** 启动 client（startupDelayMs=0 已注入，start() 即时 settle） */
+  /** 启动 client */
   async function startClient(): Promise<InstanceType<typeof RpcClient>> {
-    const client = new RpcClient({ ...clientOpts, cwd: '/tmp', sessionId: 'test-sid' })
+    const client = new RpcClient({ cwd: '/tmp', sessionId: 'test-sid' })
     await client.start()
     return client
   }
@@ -180,16 +179,13 @@ describe('RpcClient.prompt streamingBehavior 透传（U1: session-delivery）', 
     expect(cmd.streamingBehavior).toBe('followUp')
   })
 
-  it('U2: 端口签名 arity——prompt 接受 5 个参数（content, images?, streamingBehavior?, options?, timeoutMs?）', () => {
+  it('U2: 端口签名 arity——prompt 接受 3 个参数（content, images?, streamingBehavior?）', () => {
     // 编译期类型测试：IPiEngine.prompt 的参数数量由 TypeScript 保证，
-    // 运行期断言 RpcClient.prompt 的 length（5 = content + images + streamingBehavior + options + timeoutMs）
-    const client = new RpcClient({ ...clientOpts, cwd: '/tmp', sessionId: 'arity-check' })
-    // prompt.length 是声明参数数（不含有默认值的参数），5 个参数 = arity 5。
-    // 第 4 参 options（SendCommandOptions）为 R8① maintenance 透传（idle-pi-reclamation D1）：
-    // 维护通道经 prompt 语义方法发起，maintenance 标记直达 sendCommand touch 排除；
-    // 第 5 参 timeoutMs（pi1-disposition-chat-flow D14③①）为命令档墙钟档位（0 = 不限时，
-    // 仅命令条目 prompt 使用）——已提交的设计演化，本断言由 4 同步为 5。
-    expect(client.prompt.length).toBe(5)
+    // 运行期断言 RpcClient.prompt 的 length（3 = content + images + streamingBehavior）。
+    // 第 4/5 参（SendCommandOptions maintenance / timeoutMs 不限时档）已随 ADR-0112
+    // 防御机制清查退役（空闲回收与 RPC 墙钟整体删除），arity 由 5 回落为 3。
+    const client = new RpcClient({ cwd: '/tmp', sessionId: 'arity-check' })
+    expect(client.prompt.length).toBe(3)
   })
 
   it('U2: 端口签名 arity——只传 images 不传 streamingBehavior 时，images 透传但 streamingBehavior 不出现', async () => {

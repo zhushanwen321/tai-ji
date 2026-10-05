@@ -298,7 +298,8 @@ export class PluginService implements IPluginService {
       }
       // D6/W4 贡献清理：崩溃插件的 statusBar/hook/tool/command 贡献不残留——对齐
       // togglePlugin(false) 的清理集（僵尸 statusbar 条目/仍可被路由的 tool/command
-      // 都指向已死 Worker，调用必超时）。rebuild 成功后 onRebuilt 重激活会重新注册。
+      // 都指向已死 Worker，调用必超时）。重新启用由用户在管理界面显式触发（ADR-0112：
+      // 原自动 rebuild 重激活链已退役）。
       for (const pluginId of pluginIds) {
         this.statusBarRegistry.clearForPlugin(pluginId)
         // AP-2 关②：runtime modal 槽清理 + closed{plugin-gone} 广播（崩溃插件的层必须收起）
@@ -316,49 +317,10 @@ export class PluginService implements IPluginService {
           payload: { pluginId, workerId, error },
         })
       }
-      // Trusted Worker 崩溃后通过 rebuildWorker 自动重建
     })
-
-    // 4a. Worker 重建后的重新加载回调
-    this.host.setRebuiltCallback((newWorkerId, pluginIds) => {
-      this.handleWorkerRebuilt(newWorkerId, pluginIds)
-    })
-
-    // 4b. Worker 生命周期回复回调（activated/deactivated/error）
     this.host.setReplyCallback((msg) => {
       this.activator.handleWorkerReply(msg as import('./plugin-types.js').WorkerToHostMessage)
     })
-  }
-
-  /**
-   * Worker 重建后的重载编排（rebuild 回调实现，D6/W3）。
-   *
-   * 只重激活当前状态为 CRASHED 的插件：冷却窗口内用户 disable（UNLOADED）或
-   * uninstall（状态已移除）的插件跳过——rebuild 无条件重激活会复活用户明确
-   * 关闭的插件（幽灵激活）。单插件重载失败只记日志，不影响同 Worker 其他插件。
-   */
-  handleWorkerRebuilt(newWorkerId: string, pluginIds: string[]): void {
-    for (const pluginId of pluginIds) {
-      const state = this.activator.getState(pluginId)
-      if (state !== 'CRASHED') {
-        console.log(`[plugin-service] skip reload after rebuild: ${pluginId} state=${state ?? 'REMOVED'}（非 CRASHED，用户已 disable/uninstall）`)
-        continue
-      }
-      try {
-        const descriptor = this.registry.getDescriptor(pluginId)
-        if (descriptor) {
-          this.host.loadPlugin(newWorkerId, pluginId, descriptor.pluginPath, 'trusted').then(() => {
-            // Re-activate the plugin after loading
-            return this.activator.activatePlugin(pluginId, { type: 'onStartupFinished' }, this.host)
-          }).catch((err: unknown) => {
-            console.error(`[plugin-service] failed to reload plugin ${pluginId}:`, err)
-          })
-        }
-      // eslint-disable-next-line taste/no-silent-catch -- worker reload: error logged, other plugins unaffected
-      } catch (err: unknown) {
-        console.error(`[plugin-service] failed to reload plugin ${pluginId}:`, err)
-      }
-    }
   }
 
   /**

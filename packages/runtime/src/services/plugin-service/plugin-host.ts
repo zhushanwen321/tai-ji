@@ -110,14 +110,6 @@ export function resolveAndValidateFile(filename: string): string {
 }
 
 const MAX_PLUGINS_PER_TRUSTED_WORKER = 10
-const LOAD_PLUGIN_TIMEOUT_MS = 10_000
-const MAX_REBUILD_ATTEMPTS = 3
-const REBUILD_COOLDOWN_MS = 5_000
-/**
- * crashCounts 衰减窗口（D6/W3）：rebuild 成功后经此窗口无新崩溃则清零。
- * 修复「连续 3 次」语义：跨长时间窗口的偶发崩溃不应永久累计（累计 4 次即永久停摆）。
- */
-const CRASH_COUNT_DECAY_MS = 60_000
 
 /**
  * Host 侧收到 Worker/子进程 `{type:'rpc'}` 消息后的统一分发（单一真相，Fix-3）。
@@ -248,7 +240,7 @@ export class PluginHost implements PluginHostContract {
 
   /**
    * pluginId → workerId 反向索引（D2-5：getWorkerHandle O(1)，替代全 worker 线性扫）。
-   * assign/terminate/crash/rebuild/shutdown 同步维护；sandbox 插件不进此索引
+   * assign/terminate/crash/shutdown 同步维护；sandbox 插件不进此索引
    * （getWorkerHandle 未命中时转调子进程宿主）。
    */
   private pluginToWorker = new Map<string, string>()
@@ -256,28 +248,9 @@ export class PluginHost implements PluginHostContract {
   /** sandbox 插件子进程宿主（fork 版，惰性创建；无 sandbox 插件时不创建） */
   private processHost: PluginHostProcess | null = null
   private readonly processHostOptions?: PluginPoolOptions
-  /**
-   * loadPlugin 超时（D5，对齐 fork 版 PluginHostProcess 同名字段与 PluginPoolOptions
-   * 先例；测试注入短超时用，默认 LOAD_PLUGIN_TIMEOUT_MS 10s 不变）。
-   */
-  private readonly loadTimeoutMs: number
   /** trusted Worker bootstrap mock 注入口（测试专用，由 PluginPoolOptions.workerBootstrapOverride 传入；详见该接口注释） */
   private readonly workerBootstrapOverride?: string
 
-  /** Per-plugin crash counter */
-  private crashCounts = new Map<string, number>()
-  /** Saved pluginIds from crashed trusted workers for rebuild */
-  private crashedTrustedWorkers = new Map<string, { pluginIds: string[]; trustLevel: 'trusted' }>()
-  /**
-   * rebuild 冷却 timer 表（D6/W3 rebuild 受约束）：crash → setTimeout(cooldown) →
-   * rebuildWorker。保存引用供 shutdown 清理；unref 不阻止进程退出（timer 未清理时
-   * 也不挂起 runtime 的退出路径）。
-   */
-  private rebuildTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  /** crashCounts 衰减 timer 表（W3：rebuild 成功后 60s 无新崩溃清零） */
-  private crashDecayTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  /** shutdown 已执行标志：关停后到达的 rebuild 请求一律拒绝（D6/W3 disposed 守卫） */
-  private disposed = false
 
   /**
    * per-worker stderr 采集器（D6-⑤）：createWorker 以 `stderr: true` 把 worker stderr
@@ -287,30 +260,15 @@ export class PluginHost implements PluginHostContract {
    */
   private workerStderrCollectors = new Map<string, ReturnType<typeof createWorkerStderrCollector>>()
 
-  private static readonly MAX_REBUILD_ATTEMPTS = MAX_REBUILD_ATTEMPTS
-  private static readonly REBUILD_COOLDOWN_MS = REBUILD_COOLDOWN_MS
-  private static readonly CRASH_COUNT_DECAY_MS = CRASH_COUNT_DECAY_MS
-  private rebuildCooldownMs = PluginHost.REBUILD_COOLDOWN_MS
-
   constructor(rpcServer: PluginRpcServer, processHostOptions?: PluginPoolOptions) {
     this.rpcServer = rpcServer
     this.processHostOptions = processHostOptions
     this.workerBootstrapOverride = processHostOptions?.workerBootstrapOverride
-    // 对齐 fork 版（plugin-host-process.ts 构造器 loadTimeoutMs 覆盖先例）
-    this.loadTimeoutMs = processHostOptions?.loadTimeoutMs ?? LOAD_PLUGIN_TIMEOUT_MS
   }
 
   /** 设置 crash callback（含 Worker 重建后的重新加载） */
   setCrashCallback(cb: CrashCallback): void {
     this.onCrash = cb
-  }
-
-  /** 设置 Worker 重建后的重新加载回调 */
-  private onRebuilt: ((newWorkerId: string, pluginIds: string[]) => void) | null = null
-
-  /** 设置 Worker 重建回调（由 PluginService 调用） */
-  setRebuiltCallback(cb: (newWorkerId: string, pluginIds: string[]) => void): void {
-    this.onRebuilt = cb
   }
 
   /** 设置 Worker 生命周期回复的回调（activated/deactivated/error） */
@@ -320,8 +278,7 @@ export class PluginHost implements PluginHostContract {
 
   /**
    * 惰性创建子进程宿主（sandbox 插件首次分配时）。
-   * crash/reply 回调转发到 PluginHost 自己的回调——sandbox 崩溃不计数不 rebuild
-   * （rebuild 仅 trusted 语义，见 handleWorkerCrash）；幂等守卫在 PluginHostProcess 内部。
+   * crash/reply 回调转发到 PluginHost 自己的回调；幂等守卫在 PluginHostProcess 内部。
    */
   private ensureProcessHost(): PluginHostProcess {
     if (this.processHost) return this.processHost
@@ -334,21 +291,6 @@ export class PluginHost implements PluginHostContract {
     })
     this.processHost = host
     return host
-  }
-
-  /** 覆盖重建冷却时间（测试用） */
-  setRebuildCooldownMs(ms: number): void {
-    this.rebuildCooldownMs = ms
-  }
-
-  /** 获取指定插件的 crash 次数（测试用） */
-  getCrashCount(pluginId: string): number {
-    return this.crashCounts.get(pluginId) ?? 0
-  }
-
-  /** 查询某 crashed Worker 的 pending rebuild timer（测试用：断言 timer 存在/unref/被 shutdown 清理） */
-  getPendingRebuildTimer(workerId: string): ReturnType<typeof setTimeout> | undefined {
-    return this.rebuildTimers.get(workerId)
   }
 
   /**
@@ -373,10 +315,8 @@ export class PluginHost implements PluginHostContract {
         handle.status === 'active' &&
         handle.pluginIds.length < MAX_PLUGINS_PER_TRUSTED_WORKER
       ) {
-        // M6a-06 对称去重（Worker 版）：rebuild 已预登记 pluginId（rebuildWorker 的
-        // createWorker/pluginToWorker），onRebuilt 的重激活经 assignWorker 复用同一
-        // Worker 时重复 push 会让 pluginIds 随 crash-rebuild 轮次累积（crash 回调
-        // 收到重复 id、crashCounts 每轮多计）
+        // 对称去重（Worker 版）：重复 push 会让 pluginIds 随重复分配轮次累积
+        //（crash 回调收到重复 id）
         if (!handle.pluginIds.includes(pluginId)) {
           handle.pluginIds.push(pluginId)
         }
@@ -393,9 +333,9 @@ export class PluginHost implements PluginHostContract {
   /**
    * 向指定 Worker 发送 load 指令，等待 loaded/error 响应。
    * pluginId 显式传入（loadedModules 分区键，见 PluginHostContract.loadPlugin 注释）。
-   * 超时（loadTimeoutMs，默认 10s）后 reject，并走 handleWorkerCrash 回收链（D5：
-   * terminate + unregisterWorker + 索引清理 + trusted 冷却后 rebuild，对齐 fork 版
-   * plugin-host-process.loadPlugin 超时 terminateProcess 的宿主回收语义）。
+   * loadPlugin 墙钟超时（loadTimeoutMs 10s + terminate 回收链）已随 ADR-0112 防御机制
+   * 清查退役（C-proc-19 控制面单请求粒度条款一并收窄）——插件顶层死循环 = loaded/error
+   * 永不到达 = 本 Promise 悬挂，处置归用户（插件管理界面停用/卸载）。
    */
   async loadPlugin(workerId: string, pluginId: string, pluginPath: string, trustLevel?: 'trusted' | 'sandbox'): Promise<void> {
     if (workerId.startsWith('sandbox-')) {
@@ -406,24 +346,6 @@ export class PluginHost implements PluginHostContract {
     if (!worker) throw new Error(`Worker not found: ${workerId}`)
 
     return new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        const message = `loadPlugin timeout for worker ${workerId} after ${this.loadTimeoutMs}ms`
-        // D5（设计 §6.5）：超时 ≈ 插件模块顶层死循环 ≈ Worker event loop 卡死 ≈ 同宿主
-        // 一切 RPC 不可响应——只 reject 不 terminate 会泄漏线程。走既有 crash 链：
-        // terminate + rpcServer.unregisterWorker + removeIndexEntries + trusted 记录
-        // crashedTrustedWorkers + crash 计数 + 冷却后 rebuild（连坐同宿主插件重载是
-        // 恢复语义，与 crash 路径一致）。超时入口 handle.status='active'（createWorker
-        // 刚创建，未涉 crash/terminate），满足 handleWorkerCrash 幂等守卫前置（P-10
-        // 实测见 test/plugin-host.test.ts）；本 terminate 触发的 exit(code=1) 被同守卫
-        // 拦截，不会二次 crash。
-        console.warn(
-          `${message}; worker terminated & rebuild scheduled ` +
-          `(pass loadTimeoutMs option to extend)`,
-        )
-        reject(new Error(message))
-        this.handleWorkerCrash(workerId, message)
-      }, this.loadTimeoutMs)
-
       const onMessage = (msg: unknown) => {
         // D6 入口防御 + loadPlugin 过滤：trusted Worker 多插件共享（≤10），同宿主并发
         // 加载 N 插件时 loaded/error 回复必须按 pluginId 归属——只匹配 m.type 会命中
@@ -433,7 +355,6 @@ export class PluginHost implements PluginHostContract {
         if (!isRecordMessage(msg)) return
         const m = msg
         if ((m.type === 'loaded' || m.type === 'error') && m.pluginId === pluginId) {
-          clearTimeout(timeout)
           worker.off('message', onMessage)
           if (m.type === 'loaded') resolve()
           else reject(new Error(String(m.error ?? 'load failed')))
@@ -517,26 +438,7 @@ export class PluginHost implements PluginHostContract {
     return this.workerInstances.get(workerId)
   }
 
-  /**
-   * 立即终止 rebuild 通道（D6/W3）：置 disposed + 清全部 rebuild/decay timer 与
-   * crashedTrustedWorkers。
-   *
-   * PluginService.shutdown 的**第一步**调用（host.shutdown 在关停链末尾才执行，
-   * 而 deactivateAll 可能耗时数秒——单插件 deactivate 超时 5s——期间冷却到期会
-   * 复活插件，LC-C2 场景）。幂等；host.shutdown 复用本方法。
-   */
-  cancelPendingRebuilds(): void {
-    this.disposed = true
-    for (const timer of this.rebuildTimers.values()) clearTimeout(timer)
-    this.rebuildTimers.clear()
-    for (const timer of this.crashDecayTimers.values()) clearTimeout(timer)
-    this.crashDecayTimers.clear()
-    this.crashedTrustedWorkers.clear()
-  }
-
   async shutdown(): Promise<void> {
-    // D6/W3 rebuild 受约束（见 cancelPendingRebuilds 注释）
-    this.cancelPendingRebuilds()
     // 子进程宿主先关（内部也 dispose rpcServer——dispose 幂等，重复调用无害）
     await this.processHost?.shutdown()
     // 同 terminateWorker：先统一置 terminated，terminate() 触发的 exit code=1 不误判崩溃
@@ -669,8 +571,8 @@ export class PluginHost implements PluginHostContract {
         this.handleWorkerCrash(workerId, `Worker exited with code ${code}`)
         return
       }
-      // D6/W4：exit code 0 是「正常退出」不是崩溃——不触发 crash 回调/不计 crashCounts/
-      // 不 rebuild，但 handle、反向索引与 rpcServer 注册必须清理：残留 handle 会让
+      // D6/W4：exit code 0 是「正常退出」不是崩溃——不触发 crash 回调，但 handle、
+      // 反向索引与 rpcServer 注册必须清理：残留 handle 会让
       // assignWorker 把新插件分配到已死 Worker（postMessage 落空），反向索引指向死线程。
       this.handleWorkerCleanExit(workerId)
     })
@@ -723,7 +625,7 @@ export class PluginHost implements PluginHostContract {
         snapshot.text,
       ].filter(Boolean).join('\n'))
     } catch (e) {
-      // 观测增强不得影响 crash 处置主流程（rebuild / onCrash 通知链），console.error
+      // 观测增强不得影响 crash 处置主流程（onCrash 通知链），console.error
       // 经 logger patch tee 进 runtime 主日志
       console.error(`[plugin-host] write plugin crash log failed for ${workerId}:`, e)
     }
@@ -741,93 +643,13 @@ export class PluginHost implements PluginHostContract {
     this.removeIndexEntries(workerId, pluginIds)
 
     if (trustLevel === 'trusted') {
-      // Save plugin info for potential rebuild before cleanup
-      this.crashedTrustedWorkers.set(workerId, { pluginIds, trustLevel })
+      // ADR-0112：原「冷却后自动 rebuild + crash 计数上限/衰减」编排已退役——崩溃经
+      // onCrash 显式上报（PluginService 置 CRASHED 态，前端可见），恢复决策归用户
+      // （管理界面重新启用）。
       this.workerInstances.delete(workerId)
       this.workers.delete(workerId)
-
-      // Increment crash counts per plugin
-      for (const pluginId of pluginIds) {
-        const count = (this.crashCounts.get(pluginId) ?? 0) + 1
-        this.crashCounts.set(pluginId, count)
-      }
-
-      // Schedule rebuild attempt（D6/W3：timer 保存引用 + unref，shutdown 统一清理）
-      const maxAttempts = PluginHost.MAX_REBUILD_ATTEMPTS
-      const exceeded = pluginIds.some(pid => (this.crashCounts.get(pid) ?? 0) > maxAttempts)
-      if (!exceeded) {
-        const timer = setTimeout(() => {
-          this.rebuildTimers.delete(workerId)
-          this.rebuildWorker(workerId, pluginIds).catch((err: unknown) => {
-            console.error(`[plugin-host] rebuild failed for ${workerId}:`, err)
-          })
-        }, this.rebuildCooldownMs)
-        // unref：冷却 timer 不得阻止进程退出（shutdown 清理是第一道，这里是第二道）
-        timer.unref?.()
-        this.rebuildTimers.set(workerId, timer)
-      } else {
-        console.warn(`[plugin-host] ${pluginIds.join(',')} exceeded max rebuild attempts (${maxAttempts})`)
-      }
     }
 
     this.onCrash?.(workerId, pluginIds, error)
-  }
-
-  /**
-   * Rebuild a crashed trusted worker.
-   * Creates a new Worker and re-assigns the same plugins.
-   */
-  private async rebuildWorker(oldWorkerId: string, pluginIds: string[]): Promise<void> {
-    // D6/W3 disposed 守卫：shutdown 后到达的 rebuild（timer 已被清理，此为竞态兜底——
-    // 如 timer 回调已出队执行中 shutdown 发生）不执行，防退出后复活。
-    if (this.disposed) {
-      console.log(`[plugin-host] skip rebuild for ${oldWorkerId}: host already shut down`)
-      return
-    }
-    const info = this.crashedTrustedWorkers.get(oldWorkerId)
-    if (!info) return
-
-    this.crashedTrustedWorkers.delete(oldWorkerId)
-
-    // Create a new trusted worker with the first plugin
-    if (pluginIds.length === 0) return
-
-    this.trustedCounter++
-    const newWorkerId = `trusted-${this.trustedCounter}`
-    const primaryPluginId = pluginIds[0]
-
-    const handle = this.createWorker(newWorkerId, 'trusted', primaryPluginId)
-
-    // Add remaining plugins to the shared worker
-    for (let i = 1; i < pluginIds.length; i++) {
-      handle.pluginIds.push(pluginIds[i])
-      this.pluginToWorker.set(pluginIds[i], newWorkerId)
-    }
-
-    console.log(`[plugin-host] rebuilt trusted worker ${oldWorkerId} as ${newWorkerId} for plugins: ${pluginIds.join(',')}`)
-
-    // W3 crashCounts 衰减：rebuild 成功后启动 60s 稳定窗口，窗口内无新崩溃（计数
-    // 未被新 crash 递增）则清零——「连续 3 次」按时间窗收敛，偶发崩溃不永久累计。
-    this.scheduleCrashCountDecay(oldWorkerId, pluginIds)
-
-    // Notify listener to reload plugins into the new worker
-    this.onRebuilt?.(newWorkerId, pluginIds)
-  }
-
-  /** W3：crashCounts 衰减调度（rebuild 成功后调用）。以调度时计数快照判定「无新崩溃」。 */
-  private scheduleCrashCountDecay(key: string, pluginIds: string[]): void {
-    const previous = this.crashDecayTimers.get(key)
-    if (previous) clearTimeout(previous)
-    const countsAtSchedule = pluginIds.map(pid => this.crashCounts.get(pid) ?? 0)
-    const timer = setTimeout(() => {
-      this.crashDecayTimers.delete(key)
-      for (let i = 0; i < pluginIds.length; i++) {
-        if (countsAtSchedule[i] > 0 && (this.crashCounts.get(pluginIds[i]) ?? 0) === countsAtSchedule[i]) {
-          this.crashCounts.delete(pluginIds[i])
-        }
-      }
-    }, PluginHost.CRASH_COUNT_DECAY_MS)
-    timer.unref?.()
-    this.crashDecayTimers.set(key, timer)
   }
 }

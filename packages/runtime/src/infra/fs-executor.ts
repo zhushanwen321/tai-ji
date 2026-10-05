@@ -19,9 +19,6 @@ import { readdir, stat, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { IFileExecutor, FsEntry, ListDirOptions } from '../services/ports/file-executor.js'
 
-/** 单次 fs 操作超时（ms），NFR ④K-2。listDir/stat/readFile 共用。 */
-const FS_TIMEOUT_MS = 10_000
-
 export class FsExecutor implements IFileExecutor {
   constructor() {}
 
@@ -37,7 +34,7 @@ export class FsExecutor implements IFileExecutor {
    */
   async listDir(path: string, opts?: ListDirOptions): Promise<FsEntry[]> {
     const withSize = opts?.withSize ?? true
-    const dirents = await this.withTimeout(() => readdir(path, { withFileTypes: true }), 'listDir')
+    const dirents = await readdir(path, { withFileTypes: true })
     const entries: FsEntry[] = []
     for (const d of dirents) {
       const type = d.isDirectory() ? 'dir' : 'file'
@@ -52,7 +49,7 @@ export class FsExecutor implements IFileExecutor {
       } else {
         // file entry：取 size。对符号链接文件，stat（默认 follow）遇 ELOOP/EACCES → 跳过（K-3）。
         try {
-          const s = await this.withTimeout(() => stat(join(path, d.name)), 'listDir.stat')
+          const s = await stat(join(path, d.name))
           entries.push({ name: d.name, type: 'file', size: s.size })
         } catch (e: unknown) {
           // 隔离单条 entry 的失败（符号链接成环 ELOOP / 无权限 EACCES / 文件刚被删 ENOENT），
@@ -67,27 +64,13 @@ export class FsExecutor implements IFileExecutor {
 
   /** stat 单个路径（默认 follow symlink）。type 取 isDirectory() 判定 dir/file；mtimeMs 供 D7-1 matcher 缓存键。 */
   async stat(path: string): Promise<{ type: 'dir' | 'file'; size: number; mtimeMs: number }> {
-    const s = await this.withTimeout(() => stat(path), 'stat')
+    const s = await stat(path)
     return { type: s.isDirectory() ? 'dir' : 'file', size: s.size, mtimeMs: s.mtimeMs }
   }
 
   /** 读文件内容（utf-8）。ENOENT → reject（FileService 转 not_found）；EACCES → reject。 */
   async readFile(path: string): Promise<string> {
-    return this.withTimeout(() => readFile(path, 'utf8'), 'readFile')
+    return readFile(path, 'utf8')
   }
 
-  /**
-   * 超时包装（NFR ④K-2）：Promise.race(op vs 定时器)。
-   * 超时 reject `new Error('timeout')`，FileService catch 后（按 instanceof / message）转 FileError('timeout')。
-   * op 内的 EACCES/ENOENT 等原生错误透传（保留 Error.code），由 FileService 按需分类。
-   */
-  private withTimeout<T>(op: () => Promise<T>, label: string): Promise<T> {
-    let timer: NodeJS.Timeout | undefined
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`${label} timeout`)), FS_TIMEOUT_MS)
-    })
-    return Promise.race([op(), timeout]).finally(() => {
-      if (timer) clearTimeout(timer)
-    })
-  }
 }

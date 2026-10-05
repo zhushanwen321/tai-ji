@@ -12,12 +12,12 @@
  *   只作用于当前焦点 session 分区（scoped.update 读 focusedSid 实时值，null sid 工厂内建 no-op）。
  * - 三步阶段指示（D1）+ 已批准档（D5 阶段不倒退）：derivePlanStage 纯函数承载（derivePhase
  *   单点接线，禁止消费方各自 if 拼——consumers.md §三 C），分区不存阶段字段。
- * - 审批条窗口状态（D4）：「已应答抑制窗」标记（respond 成功 / requestsInvalidated 摘除
- *   planReview 挂起即置标记，预期后态帧（state ≠ reviewing）/ 新 planReview pending 到达 /
- *   10s 双源冷拉真值三路解除）+「degraded 稳定窗」（state=reviewing ∧ 无挂起 ∧ 无标记的
- *   组合持续 ≥2s 才放行渲染；冷拉真值豁免稳定窗直通）。per-session 定时器 arm/cancel，
- *   epoch 世代比较防陈旧定时器误触发；2s + 10s 共 ≤2 个 per-session 定时器（上界量化），
- *   清理挂分区 cleanup 链（frameRevs 同款）。
+ * - 审批条窗口状态（D4）：「已应答抑制」标记（respond 成功 / requestsInvalidated 摘除
+ *   planReview 挂起即置标记，预期后态帧（state ≠ reviewing）/ 新 planReview pending 到达
+ *   两路事件驱动解除）+ degraded 分支组合判定（state=reviewing ∧ 无挂起 ∧ 无标记，帧到达
+ *   即时评估——[ADR-0112] 2s 稳定窗 / 10s 兜底冷拉定时器已删，无时间窗触发器；冷拉对账
+ *   coldReconcilePlanReview 保留为显式拉取动作，生产路径无自动触发，帧缺失 = 审批条不渲染
+ *   显式呈现）。per-session 无定时器；清理挂分区 cleanup 链（frameRevs 同款）。
  *
  * 与 WS/RPC 的接线边界：本 store 只持状态与操作（applyFrame / loadPlanState / 审批窗口
  * actions），订阅与首拉触发编排归 composables/use-plan-sync.ts（usePlanState）；planReview
@@ -127,9 +127,10 @@ export function derivePlanStage(view: PlanStateView | null): PlanStage | null {
  * 审批条分支公式（D4 单源——禁止消费方各自拼并集，F1「两个事实源的并集祈祷一致」的反面）：
  * - `ready ⇔ 挂起 planReview 请求存在`（runtime 注册表投影，唯一交互权威；**presence 语义
  *   ——ready 恒优先渲染**）
- * - 抑制窗（ackMarked）压制一切 state 判定分支（degraded / revising）
+ * - 已应答抑制标记（ackMarked）压制一切 state 判定分支（degraded / revising）
  * - `revising ⇔ state=revising`（无挂起、无压制）
- * - `degraded ⇔ state=reviewing ∧ 无挂起 ∧ 稳定窗放行`（稳定窗 = 组合持续 ≥2s 或冷拉真值豁免）
+ * - `degraded ⇔ state=reviewing ∧ 无挂起 ∧ 组合评估放行`（帧到达即时评估——[ADR-0112]
+ *   2s 稳定窗已删，双源投影时延差的假阳性闪现显式接受，不用时间平抑）
  * - state=dispatching/approved 不进审批条（执行方式表单是其唯一交互面）；其余不渲染
  */
 export interface PlanReviewBarModeInput {
@@ -149,51 +150,10 @@ export function derivePlanReviewBarMode(input: PlanReviewBarModeInput): PlanRevi
   return null
 }
 
-// ── 审批窗口时序常量（D4）──
-
-/**
- * degraded 稳定窗：`state=reviewing ∧ 无挂起` 组合持续该时长后放行渲染（S15 五断言口径）。
- * [时间平抑红线登记]（2s 稳定窗 = 用时间换一致的兜底）：
- *   补偿根因：双源投影时延差——planReview 挂起（runtime 注册表 → requests 广播 →
- *   registry 漏斗）与 plan-state 值帧（entry 持久化投影）是两条独立链路，值帧先达
- *   reviewing 而挂起登记在途的瞬窗，组合判定呈假阳性 degraded。不能靠事件顺序或单一
- *   事实源自然解决：presence 与值分属两个投影域，到达顺序无契约，双域架构下「瞬时无
- *   挂起」结构上不可判别是「真无挂起」还是「登记在途」。
- *   量级/形态：组合转真 arm 2s 单发（已在计时不重启）；变假 cancel·重置；epoch 世代
- *   防陈旧回调；冷拉真值豁免直通（对账结果即事实，不走窗）。
- *   恢复路径：满窗放行 degraded 渲染；期间挂起到达（ready 恒优先）或组合变假即自然消解。
- *   重审触发（退役条件）：挂起注册表与 plan-state 帧合并为单一状态帧（一次投影同帧
- *   携带 presence 与值）时，假阳性瞬窗构造性消失，本稳定窗退役。
- */
-export const PLAN_REVIEW_DEGRADED_STABLE_MS = 2_000
-/**
- * 已应答抑制窗兜底：标记置起后该时长未见预期后态帧 → 转双源冷拉对账（10s = 投影链路时延的量级冗余）。
- * [时间平抑红线登记]（10s 兜底 = 用时间换一致的兜底）：
- *   补偿根因：应答后的预期后态帧可能丢失（WS 帧链无送达保证，断连窗口高发），ack 标记
- *   无事件通道解除会无限悬挂，审批条被持续压制。不能靠事件顺序或单一事实源自然解决：
- *   帧丢失 = 无任何事件到达，顺序契约无从谈起；「事实上无挂起」必须查询而非断言
- *   （coldReconcilePlanReview 双查询），只能靠拉取真值收敛（ADR-0097 拉为主）。
- *   量级/形态：标记置起即 arm 10s 单发（single-flight 重置不叠加；epoch 世代防陈旧回调）。
- *   恢复路径：三解除路（预期后态帧值判定 / 新 pending 登记到达 / 冷拉真值）任一到达即
- *   清标记杀定时器；冷拉失败（断连）标记悬挂 fail-safe + loadError 通路，重连后
- *   stateSnapshot 重派发自然解除。
- *   重审触发（退役条件）：runtime 帧链具备可靠送达（送达确认或断连重放）后，后态帧
- *   丢失通道封闭，本兜底退役。
- */
-export const PLAN_REVIEW_ACK_FALLBACK_MS = 10_000
-
-/**
- * 活动补拉冷却（新 session 首拉窗口的丢帧补偿，2026-09-25 真机缺陷）：同一 session 的
- * assistant 消息活动触发 reconcileOnAssistantMessage 补拉的最小间隔。量级对齐
- * PLAN_REVIEW_ACK_FALLBACK_MS（投影链路时延冗余）取半——补拉是「状态可能已刷新」的
- * 对账而非异常恢复，频率上限取「每 turn 至多一次」的近似（turn 内多条 assistant 消息
- * 合并），避免长对话 session 每条消息一拉。
- * [时间平抑红线登记]（5s 冷却）：定性 = 对账频率上限而非一致性平抑——补偿动作本体是
- * reconcileOnAssistantMessage 补拉（帧链丢帧补偿），本常量只是该补拉 RPC 的节流门。
- * 永久配套：消费侧动作边沿触发补拉范式存在即配套存在（ADR-0097 推允许丢失、丢失收敛
- * 靠拉），不设「根因修复即删」的退役语义；帧链可靠送达后补拉支路退役，本冷却随支路消失。
- */
-export const PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS = 5_000
+// ── 审批窗口状态语义（D4）──
+// [ADR-0112] 审批窗口不设时间窗触发器（degraded 稳定窗 / 应答兜底冷拉定时器 / 活动补拉
+// 冷却均属「用时间换一致」的无效防御，不在本 store 出现）：degraded 分支组合判定为帧到达
+// 即时评估，活动补拉为事件边沿直接触发，帧缺失显式呈现，不建补偿。
 
 /**
  * 冷拉对账「pending 在场」真值的再入店缝（store 禁 import store 铁律的合规绕行——
@@ -233,20 +193,20 @@ interface PlanPartition {
   draftsRevealSeq: number
   draftsRevealConsumed: boolean
   /**
-   * 「已应答待帧」标记（D4 抑制窗①）：planReview 挂起被摘除（respond 成功 /
+   * 「已应答待帧」标记（D4 抑制标记）：planReview 挂起被摘除（respond 成功 /
    * requestsInvalidated）即置起，压制 degraded/revising 的 state 判定分支到「预期后态帧」
    * （帧内 state ≠ reviewing 的值判定——迟到旧帧值仍是 reviewing 不解除）/ 新 planReview
-   * pending 登记到达 / 10s 冷拉真值三路之一为止。presence 语义不受其压制（ready 恒优先）。
+   * pending 登记到达两路事件驱动解除之一为止。presence 语义不受其压制（ready 恒优先）。
+   * [ADR-0112] 10s 兜底冷拉定时器已删：后态帧丢失（断连窗口）时标记悬挂 = 审批条不渲染
+   * 显式呈现，不自愈不补偿；重连后 stateSnapshot 重派发 / 再次触发自然解除。
    */
   reviewAckMarked: boolean
-  /** ack 标记/兜底定时器世代（epoch 世代比较：cancel·重置后陈旧定时器回调按世代失配 no-op）。 */
-  reviewAckEpoch: number
   /**
-   * planReview 挂起镜像（D4 稳定窗输入面；唯一写入口 = useExtensionUI 挂起漏斗 + 冷拉对账
+   * planReview 挂起镜像（D4 组合判定输入面；唯一写入口 = useExtensionUI 挂起漏斗 + 冷拉对账
    * ——registry 的同步投影，渲染公式仍以 registry presence 为唯一交互权威，本镜像只驱动
-   * 定时器 arm/cancel 的组合判定）。
+   * 组合判定）。
    */
-  reviewPendingKnown: boolean
+  reviewPendingKnown: boolean,
   /**
    * D8「agent 未响应」检测窗相位（per-session，分区派而非实例级 ref——turn 事件 handler 经
    * action 写「消息所属 sid」分区，切 session 无丢值/串台，ADR-0049；状态机语义见
@@ -257,12 +217,8 @@ interface PlanPartition {
   reviewNudgePhase: PlanReviewNudgePhase
   /** D8 重新提交错误行（发送失败 / agent 未响应双分支的就近呈现；分区级，随焦点切换保留）。 */
   reviewNudgeError: string | null
-  /** degraded 稳定窗放行（组合持续 ≥2s；变假 cancel·重置）。 */
+  /** degraded 分支组合放行位（组合成立即时评估置真；变假即复位——无时间窗）。 */
   reviewDegradedStable: boolean
-  /** 冷拉真值豁免稳定窗（对账结果即事实，直接放行；随组合变假同批重置）。 */
-  reviewColdExempt: boolean
-  /** 稳定窗定时器世代（同 reviewAckEpoch 纪律）。 */
-  reviewStableEpoch: number
 }
 
 /**
@@ -388,11 +344,8 @@ export const usePlanStore = defineStore('plan', () => {
       draftsRevealSeq: 0,
       draftsRevealConsumed: true,
       reviewAckMarked: false,
-      reviewAckEpoch: 0,
       reviewPendingKnown: false,
       reviewDegradedStable: false,
-      reviewColdExempt: false,
-      reviewStableEpoch: 0,
       reviewNudgePhase: 'idle',
       reviewNudgeError: null,
     }),
@@ -417,39 +370,15 @@ export const usePlanStore = defineStore('plan', () => {
   const frameRevs = new Map<string, number>()
 
   /**
-   * 活动补拉冷却表（per-sid 上次活动补拉时间戳；新 session 首拉窗口丢帧补偿）。
-   * 语义见 reconcileOnAssistantMessage。清理挂 sessionCleanup 链（与 frameRevs 同批）；
-   * 迟到写拦截同 frameRevs（写入点 reconcileOnAssistantMessage 入口 isDeleted 守卫）。
-   */
-  const activityReconcileAt = new Map<string, number>()
-
-  /**
    * 消息边沿观察的帧基准表（per-sid：上一条消息边沿时的 frameRev，活跃冻结检测的进展基准，
    * 语义见 reconcileOnAssistantMessage）。清理挂 sessionCleanup 链；迟到写拦截同 frameRevs
    * （写入点 reconcileOnAssistantMessage 入口 isDeleted 守卫）。
    */
   const edgeFrameRevs = new Map<string, number>()
 
-  // ── 审批窗口 per-session 定时器（D4：2s 稳定窗 + 10s 兜底共 ≤2 个，single-flight 重置不叠加）──
-  // 定时器 handle 不进响应式分区（副作用句柄非状态）；epoch 世代在分区内（回调比较防陈旧触发）。
-  // 清理与 frameRevs 同挂 sessionCleanup 链（防 session 销毁后定时器空转写幽灵分区）。
-  const stableTimers = new Map<string, { epoch: number; handle: ReturnType<typeof setTimeout> }>()
-  const ackTimers = new Map<string, { epoch: number; handle: ReturnType<typeof setTimeout> }>()
-
   registerSessionCleanup((sid) => {
     frameRevs.delete(sid)
-    activityReconcileAt.delete(sid)
     edgeFrameRevs.delete(sid)
-    const stable = stableTimers.get(sid)
-    if (stable) {
-      clearTimeout(stable.handle)
-      stableTimers.delete(sid)
-    }
-    const ack = ackTimers.get(sid)
-    if (ack) {
-      clearTimeout(ack.handle)
-      ackTimers.delete(sid)
-    }
   })
 
   /** 当前帧版本号（无帧历史 = 0）。 */
@@ -457,69 +386,34 @@ export const usePlanStore = defineStore('plan', () => {
     return frameRevs.get(sid) ?? 0
   }
 
-  // ── 审批窗口内部机件（D4）──
+  // ── 审批窗口内部机件（D4；[ADR-0112] 时间窗定时器已删，全部同步判定）──
 
-  /** 变假 cancel·重置：清稳定窗放行位 + 杀在途 2s 定时器（epoch 递增使陈旧回调 no-op）。 */
-  function cancelStableWindow(sid: string, p: PlanPartition): void {
-    p.reviewDegradedStable = false
-    p.reviewColdExempt = false
-    p.reviewStableEpoch += 1
-    const t = stableTimers.get(sid)
-    if (t) {
-      clearTimeout(t.handle)
-      stableTimers.delete(sid)
-    }
-  }
-
-  /** 解除已应答标记（三解除路径共用）：清标记 + 杀 10s 兜底定时器。 */
-  function clearAckMark(sid: string, p: PlanPartition): void {
+  /** 解除已应答标记（两路事件驱动解除共用）：清标记。 */
+  function clearAckMark(p: PlanPartition): void {
     p.reviewAckMarked = false
-    p.reviewAckEpoch += 1
-    const t = ackTimers.get(sid)
-    if (t) {
-      clearTimeout(t.handle)
-      ackTimers.delete(sid)
-    }
   }
 
   /**
-   * 稳定窗组合判定 + 定时器 arm/cancel（每次窗口输入变化后调用）：
+   * degraded 分支组合判定（每次窗口输入变化后调用，同步评估）：
    * 组合 = `view 活跃 ∧ state=reviewing ∧ 无挂起镜像 ∧ 无已应答标记`。
-   * 组合转真 → arm 2s（已在计时则不动——「组合持续 ≥2s」语义，重复触发不重启时钟）；
-   * 组合变假 → cancel·重置；组合真且已放行（稳定/冷拉豁免）→ 保持。
+   * 组合真 → 即时放行（reviewDegradedStable 置真）；组合假 → 复位。
+   * [ADR-0112] 原 2s 稳定窗定时器已删：双源投影时延差的假阳性 degraded 闪现显式接受。
    */
-  function evalReviewWindow(sid: string, p: PlanPartition): void {
-    const candidate =
+  function evalReviewWindow(p: PlanPartition): void {
+    p.reviewDegradedStable =
       p.view?.isActive === true &&
       resolvePlanLifecycleState(p.view) === 'reviewing' &&
       !p.reviewPendingKnown &&
       !p.reviewAckMarked
-    if (!candidate) {
-      cancelStableWindow(sid, p)
-      return
-    }
-    if (p.reviewDegradedStable || p.reviewColdExempt) return
-    if (stableTimers.has(sid)) return
-    p.reviewStableEpoch += 1
-    const epoch = p.reviewStableEpoch
-    const handle = setTimeout(() => {
-      stableTimers.delete(sid)
-      scoped.updateFor(sid, (q) => {
-        // epoch 世代比较：组合中途变假已 cancel·重置，本回调是陈旧残留（微任务/定时器序竞态）→ no-op
-        if (q.reviewStableEpoch !== epoch) return
-        q.reviewDegradedStable = true
-      })
-    }, PLAN_REVIEW_DEGRADED_STABLE_MS)
-    stableTimers.set(sid, { epoch, handle })
   }
 
-  /** view 写入共同后置（帧 / 首拉 / 冷拉三路同覆）：预期后态值解除已应答标记 + 稳定窗重估。 */
-  function afterViewWrite(sid: string, p: PlanPartition): void {
-    // 解除②的值判定半边：收到的 state 值 ≠ reviewing = 预期后态帧（dismiss / review_aborted→
+  /** view 写入共同后置（帧 / 首拉 / 冷拉三路同覆）：预期后态值解除已应答标记 + degraded 组合重估。 */
+  function afterViewWrite(p: PlanPartition): void {
+    // 解除路径的值判定半边：收到的 state 值 ≠ reviewing = 预期后态帧（dismiss / review_aborted→
     // planning、approve→dispatching、revise→revising、exit→exited 全命中）；迟到旧帧值仍是
     // reviewing 不解除（D4②）。
-    if (resolvePlanLifecycleState(p.view) !== 'reviewing') clearAckMark(sid, p)
-    evalReviewWindow(sid, p)
+    if (resolvePlanLifecycleState(p.view) !== 'reviewing') clearAckMark(p)
+    evalReviewWindow(p)
   }
 
   // ── actions ──
@@ -545,7 +439,7 @@ export const usePlanStore = defineStore('plan', () => {
       clearDraftsOnPlanEnter(p, planState)
       p.view = planState
       p.loadError = null
-      afterViewWrite(sid, p)
+      afterViewWrite(p)
     })
   }
 
@@ -576,7 +470,7 @@ export const usePlanStore = defineStore('plan', () => {
         clearDraftsOnPlanEnter(p, planState)
         p.view = planState
         p.loadError = null
-        afterViewWrite(sessionId, p)
+        afterViewWrite(p)
       })
     } catch (e) {
       if (frameRevOf(sessionId) !== baseRev) return
@@ -598,19 +492,19 @@ export const usePlanStore = defineStore('plan', () => {
    * getPlanState 纯磁盘读语义）必得真值。范式对齐 useCommandSync 补拉闭环（消费侧
    * 动作边沿触发主动拉取，不依赖 broadcast 可靠性）。
    *
-   * 双支路（共享冷却门）：非活跃支路（fix-C 原语义）= 分区 view 未激活（首拉早于
-   * entry 落盘 / 从未进 plan）→ 补拉。活跃冻结支路（F-W3-2）= view 活跃但 frameRev
-   * 自上一条消息边沿以来无增长 → planState 帧链在该 session 上疑死（真机 6c3 实证：
-   * 消息帧正常到达而 planState 帧全程未达，view 冻结无再拉触发点），冷拉对账磁盘真值；
-   * 帧链恢复（任一 planState 帧到达 → frameRev 增长）后自动静默；首条边沿只立帧基准
-   * 不拉（健康链路上 plan 状态稳定的常态 turn 不产生补拉）。双门限频（无定时器无轮询）：
-   * 冷却门 = PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS 内同 sid 不重复补（长对话每条消息
-   * 都触发的频率上限）；帧进展门 = 活跃支路要求「边沿间 frameRev 零增长」。
+   * 双支路：非活跃支路（fix-C 原语义）= 分区 view 未激活（首拉早于 entry 落盘 / 从未进
+   * plan）→ 补拉。活跃冻结支路（F-W3-2）= view 活跃但 frameRev 自上一条消息边沿以来无
+   * 增长 → planState 帧链在该 session 上疑死（真机 6c3 实证：消息帧正常到达而 planState
+   * 帧全程未达，view 冻结无再拉触发点），冷拉对账磁盘真值；帧链恢复（任一 planState 帧
+   * 到达 → frameRev 增长）后自动静默；首条边沿只立帧基准不拉（健康链路上 plan 状态稳定
+   * 的常态 turn 不产生补拉）。帧进展门（无定时器无轮询）：活跃支路要求「边沿间 frameRev
+   * 零增长」。[ADR-0112] 5s 活动补拉冷却已删——每条 assistant 消息边沿按门条件直接拉取，
+   * 不再做时间节流（getPlanState 为轻量磁盘读）。
    */
   function reconcileOnAssistantMessage(sessionId: string): void {
     if (!sessionId) return
-    // 迟到写拦截（D-B2-1 口径延伸，同 applyFrame）：edgeFrameRevs / activityReconcileAt
-    // 两张辅助表的写入与 updateFor 同口径——cleanup 后迟到活动信号不重建条目、不触发补拉。
+    // 迟到写拦截（D-B2-1 口径延伸，同 applyFrame）：edgeFrameRevs 表的写入与 updateFor
+    // 同口径——cleanup 后迟到活动信号不重建条目、不触发补拉。
     if (scoped.isDeleted(sessionId)) return
     const revNow = frameRevOf(sessionId)
     const prevRev = edgeFrameRevs.get(sessionId)
@@ -621,19 +515,15 @@ export const usePlanStore = defineStore('plan', () => {
     })
     // 帧进展门：活跃支路要求「边沿间 frameRev 零增长」；非活跃时 frameRev 常为 0，「无进展」无判别力，不适用
     if (!inactive && (prevRev === undefined || prevRev !== revNow)) return
-    // 冷却门（两支路共用）
-    const last = activityReconcileAt.get(sessionId) ?? 0
-    if (Date.now() - last < PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS) return
-    activityReconcileAt.set(sessionId, Date.now())
     void loadPlanState(sessionId)
   }
 
-  // ── 审批窗口 actions（D4；写入口 = useExtensionUI 挂起漏斗 + 10s 兜底冷拉）──
+  // ── 审批窗口 actions（D4；写入口 = useExtensionUI 挂起漏斗）──
 
   /**
-   * planReview 挂起镜像同步（D4 抑制窗②的「新 pending 登记到达解除标记」半边）：
+   * planReview 挂起镜像同步（D4 抑制标记解除路径之一「新 pending 登记到达」）：
    * has=true（新挂起入店）→ 解除已应答标记（挂起 = 唯一交互权威、ready 优先于抑制——
-   * 提前清压制，防 revising 帧丢失时压制拖到兜底超时）；has=false → 只更新镜像。
+   * 提前清压制）；has=false → 只更新镜像。
    * 幂等（重复漏斗点调用无副作用）。
    */
   function setPlanReviewPending(sessionId: string, has: boolean): void {
@@ -641,19 +531,21 @@ export const usePlanStore = defineStore('plan', () => {
     scoped.updateFor(sessionId, (p) => {
       p.reviewPendingKnown = has
       if (has) {
-        clearAckMark(sessionId, p)
+        clearAckMark(p)
         // D8 成功收口（内含于挂起到达）：预期重挂发生 → 关检测窗 + 清旧错误（含重试后成功）
         p.reviewNudgePhase = 'idle'
         p.reviewNudgeError = null
       }
-      evalReviewWindow(sessionId, p)
+      evalReviewWindow(p)
     })
   }
 
   /**
-   * 已应答标记置起（D4 抑制窗①触发：planReview 挂起被 respond 成功 / requestsInvalidated
-   * 摘除的任何路径）：压制 degraded/revising 到预期后态帧 / 新 pending / 冷拉真值三路之一；
-   * 同时 arm 10s 双源冷拉兜底（single-flight：重复触发重置不叠加）。
+   * 已应答标记置起（D4 抑制标记触发：planReview 挂起被 respond 成功 / requestsInvalidated
+   * 摘除的任何路径）：压制 degraded/revising 到两路事件驱动解除之一（预期后态帧值判定 /
+   * 新 pending 登记到达）。[ADR-0112] 原 10s 兜底冷拉定时器已删：后态帧丢失（WS 帧链无
+   * 送达保证，断连窗口高发）时标记悬挂 = 审批条不渲染显式呈现，不自动自愈；重连后
+   * stateSnapshot 重派发 / 再次触发自然解除，或由用户重进 session（loadPlanState 冷路径）。
    */
   function markPlanReviewAnswered(sessionId: string): void {
     if (!sessionId) return
@@ -661,31 +553,17 @@ export const usePlanStore = defineStore('plan', () => {
       p.reviewAckMarked = true
       // 镜像真值不由本函数覆写：reviewPendingKnown 由 useExtensionUI 挂起漏斗按 registry
       // 现值收口（syncPlanReviewWindow）/冷拉对账真值置位（漏斗单写）
-      p.reviewAckEpoch += 1
-      const epoch = p.reviewAckEpoch
-      const prev = ackTimers.get(sessionId)
-      if (prev) clearTimeout(prev.handle)
-      const handle = setTimeout(() => {
-        ackTimers.delete(sessionId)
-        // epoch 世代比较：标记已被解除路径处理/重置（epoch 已递增）→ 陈旧兜底 no-op
-        let stale = false
-        scoped.updateFor(sessionId, (q) => {
-          if (q.reviewAckEpoch !== epoch) stale = true
-        })
-        if (stale) return
-        void coldReconcilePlanReview(sessionId)
-      }, PLAN_REVIEW_ACK_FALLBACK_MS)
-      ackTimers.set(sessionId, { epoch, handle })
-      evalReviewWindow(sessionId, p)
+      evalReviewWindow(p)
     })
   }
 
   /**
-   * 10s 兜底的双源冷拉对账（D4 抑制窗③）：`session.getPlanState` + `getPendingRequests`
-   * 双查询——「事实上无挂起」必须查询而非断言。
+   * 双源冷拉对账（显式拉取动作；[ADR-0112] 原 10s 抑制窗到期的自动触发器已删，生产路径
+   * 无自动调用——保留导出供显式对账场景与测试）：`session.getPlanState` +
+   * `getPendingRequests` 双查询——「事实上无挂起」必须查询而非断言。
    * - 成功：冷拉落地即以真值解除标记（不无条件亮 degraded）；pending 在场 → 经 sink 再入店
-   *   registry 呈 ready（权威优先），不在场 + 真值 reviewing → 冷拉真值豁免稳定窗直通
-   *   degraded；planState 真值按 F-R2-1 帧版本守卫回填（冷回填不倒拨热状态）。
+   *   registry 呈 ready（权威优先）；planState 真值按 F-R2-1 帧版本守卫回填（冷回填不倒拨
+   *   热状态）后 degraded 组合即时重估。
    * - 失败（WS 断连——恰是帧丢失主因，两通道同源失败相关性高）：标记悬挂（审批条保持
    *   不渲染，fail-safe 不误导）+ loadError 既有错误通路呈现（R7 失败分支）；重连后经
    *   stateSnapshot 重派发 / 再次触发自然解除。
@@ -712,14 +590,13 @@ export const usePlanStore = defineStore('plan', () => {
     if (planReviewRecords.length > 0) planReviewColdSink?.(sessionId, planReviewRecords)
     scoped.updateFor(sessionId, (p) => {
       p.loadError = null
-      clearAckMark(sessionId, p) // 冷拉落地即以真值解除标记（③解除路径）
+      clearAckMark(p) // 冷拉落地即以真值解除标记
       p.reviewPendingKnown = planReviewRecords.length > 0
-      p.reviewColdExempt = true // 冷拉真值豁免稳定窗（对账结果即事实，直接放行）
       if (frameRevOf(sessionId) === baseRev) {
         clearDraftsOnPlanEnter(p, planState)
         p.view = planState
       }
-      afterViewWrite(sessionId, p)
+      afterViewWrite(p)
     })
   }
 
@@ -818,9 +695,9 @@ export const usePlanStore = defineStore('plan', () => {
     () => scoped.current.value.reviewNudgeError,
   )
 
-  /** 焦点分区 degraded 稳定窗放行位（稳定窗通过 ∨ 冷拉真值豁免）。 */
+  /** 焦点分区 degraded 组合放行位（组合成立即时评估——帧到达即处理，无时间窗）。 */
   const planReviewDegradedGate: ComputedRef<boolean> = computed(
-    () => scoped.current.value.reviewDegradedStable || scoped.current.value.reviewColdExempt,
+    () => scoped.current.value.reviewDegradedStable,
   )
 
   return {

@@ -66,7 +66,7 @@ import { normalizeInactiveSessionFileIfNeeded, readEffectiveModelFromState, seed
 //   随后 removeSessionEntry 的销毁回调查无记录自然静默（幂等空转）。
 // - 'suppress'：非终局杀（restore 清场——同 id 随即重开）——组合根标记静默，
 //   销毁回调据此跳过，不产生伪造死亡通知（respawn/restore 链静默同族）。
-// 回收（reclaim）与 destroyAll 刻意不经本登记：前者不走 removeSessionEntry 汇聚点、
+// destroyAll 刻意不经本登记：
 // 后者随进程内存消亡，均无销毁回调需抑制。
 // detail.hasDestroySink（审查 unreasonable#3）：本次处置之后**是否必有 removeSessionEntry
 // 销毁回调**——组合根的 suppressedDeaths 抑制标只在 true 时立（标由该回调消费）。
@@ -121,9 +121,6 @@ import { getSessionsDir } from '../../infra/pi/pi-paths.js'
 // session 存活，无条件清理会把存活 session 的插件数据 tombstone+trash。跨服务模块级分发
 // 模式同 getCrashJournal（plugin-service 与 session-service 互为依赖，构造注入成环）。
 import { clearRemovedSessionData } from '../plugin-service/session-data-store.js'
-// 空闲回收占座原语与编排依赖类型（idle-pi-reclamation D6-2/D3，u2）。ReclaimSeat 是
-// reaper 判定循环与 reclaimManagedSession 共享的互斥状态（同实例注入，u3 装配）。
-import type { ReclaimSeat } from './idle-pi-reaper.js'
 // create 幂等化（发现 B）：clientUuid 去重登记表（in-flight 共用 Promise + 成功 TTL 保留）
 import { CreateIdempotencyRegistry } from './create-idempotency.js'
 import { cleanupMigrateResidues } from '../../infra/pi/session-file-utils.js'
@@ -259,52 +256,6 @@ function resolveCreateEffectiveThinkingLevel(
 ): string | undefined {
   return createMetaOverride?.thinkingLevel
     ?? (typeof presetClientOptions.thinkingLevel === 'string' ? presetClientOptions.thinkingLevel : undefined)
-}
-
-/**
- * relay 尾扫目标（窄接口，idle-pi-reclamation D3 第 5 步）。u3 装配把 RelayRegistry 内
- * 该 mainSessionId 的注册条目 child 包装为 { kill }——kill 实现绑 relay-registry 导出的
- * killRelayChild：杀注册表在册 child 后，attachRelayChildWiring 挂载的 child 'exit'
- * handler 会自动走 cleanupEntry（tee 销毁 + pid 文件删除 + 双 Map 注销），即「杀完走
- * 注册表清理」由既有事件链结构性保证，本模块无需（也无法，领地外）手工清理注册表。
- */
-export interface ReclaimRelayTarget {
-  kill(): Promise<void>
-}
-
-/**
- * reclaimManagedSession 的编排依赖（D3 七步；全部窄接口注入——不 import relay-registry /
- * background-task-reaper 等具体服务，测试全 fake，生产由 u3 组合根装配）。
- */
-export interface ReclaimSessionDeps {
-  /** 与 reaper 判定循环共享的占座实例（D6-2 全链占座，同实例互斥）。 */
-  seat: ReclaimSeat
-  /**
-   * relay 尾扫快照枚举（同步）——按 mainSessionId 返回当前在册的 relay 子进程目标。
-   * [u3 装配清单] RelayRegistry 现无按 mainSessionId 枚举条目的公开 API（仅 u1b 的
-   * hasByMainSessionId 存在性查询），u3 需补只读枚举访问器后接线。
-   */
-  listRelayChildrenByMainSession?(sessionId: string): ReclaimRelayTarget[]
-  /**
-   * 定向后台任务收殓（D3 第 5 步②）——u3 装配绑 reapSessionBackgroundTasks(getPiAgentDir(), sid)
-   * （复用 background-task-reaper 单 session 入口，与 removeSessionEntry 汇聚点同款触发面）。
-   */
-  reapBackgroundTasks?(sessionId: string): Promise<void>
-  /**
-   * 定向清挂起 UI 请求（v6 第四案纵深防御）——只清属于**被回收代际**的 pending。
-   * 挂点 = 下方代际校验通过后的成功分支（`this.get(sessionId) !== session ||
-   * pm.hasClient(sessionId)` 为假）：并发 restore 的取消分支不调用，因此新进程的活请求
-   * 不会被清（pending 只由该进程的事件流写入，而新进程存在 ⇒ 代际校验必失败）。
-   * 装配绑 RuntimeServer.clearExtensionTimeoutsForSession（既有公开写口，薄委托到
-   * ExtensionTimeoutManager.clearForSession——不新增 server 能力）。
-   */
-  clearPendingUiRequests?(sessionId: string): void
-  /**
-   * 驱逐该 session 的历史重建缓存条目（B8，memory-leak-remediation §3.3-B8 候选 C：
-   * 回收态驻留 8×全量历史的内存收益 > 低频单次全量重建的 CPU 成本）。装配绑
-   * SessionService.evictHistoryRebuildCache → SessionHistoryReader.onSessionReclaimed。
-   */
-  evictHistoryRebuildCache?(sessionId: string): void
 }
 
 /**
@@ -1406,92 +1357,6 @@ export class SessionLifecycle implements ISessionRegistry {
     } catch (initErr) {
       await this.safeDestroy(sessionId)
       throw initErr
-    }
-  }
-
-  /**
-   * 空闲回收的最小摘除编排（idle-pi-reclamation D3 七步，u2）。
-   *
-   * 与死亡清理汇聚点 removeSessionEntry（九步销毁）刻意不同：回收**不是销毁**——bus 分区
-   * （订阅/seq 连续，P3 广播流不断）、PTY、插件 didDestroy
-   * 投递、终态写等全部跳过（D3 被跳过步骤归属表）；历史缓存例外——B8 起回收时驱逐该
-   * session 条目（evictHistoryRebuildCache，驱逐后重激活走单次全量重建是显式登记的代价）。**禁止**为图省事改调 removeSessionEntry
-   * ——被否谱系第 1 条：PTY 连杀 / 广播断流 / 插件 destroy 污染三重冲突（除非三重冲突
-   * 全有独立解法，当前没有）。
-   *
-   * 返回 true = 回收完成（进程已杀 + Map 已摘）；false = 未回收（占座被占 / 最终豁免拦截 /
-   * 代际校验取消）——调用方（reaper）据此决定合并广播与分布计数。
-   *
-   * 广播责任在 reaper 合并层（一拍 N 个回收只广播一次），本函数不广播——静默先例 =
-   * restoreSession 清场与 lifecycle.delete。
-   */
-  async reclaimManagedSession(sessionId: string, deps: ReclaimSessionDeps): Promise<boolean> {
-    // ① seat 占座（D6-2）：false = 已有回收在途（并发 reaper 拍 / 等待方视角），直接跳过。
-    if (!deps.seat.tryAcquire(sessionId)) return false
-    try {
-      // ② 最终豁免检查（同步块零 await——本块与第 ④ 步 kill 的首个 await 之间无任何
-      // await 窗口，是 D6-1 原子性的根基：reaper 判定通过后到 detach/kill 之间没有
-      // 异步间隙让 occupancy 翻转而未被察觉）。
-      const session = this.get(sessionId)
-      if (!session) return false
-      const occ = session.occupancy
-      if (occ && (occ.turn !== 'idle' || occ.compacting || occ.bash)) return false
-      // ③ adapter.detach（停事件流）：pi 事件订阅经 EventAdapter 唯一持有，detach 即收口
-      // ——先于 kill，避免 kill 等待窗口内 pi 的尾流事件被翻译成消息广播。
-      this.detachSession(sessionId)
-      // ④ pm.destroySession（既有语义：先删 pm 双 Map 再 kill——exit 回调按 clientToId
-      // 无条目守卫静默跳过，_killing 语义零 crash log 零 exitCallbacks 多播，即「计划内
-      // 杀」在既有语义里就不产生崩溃记录与死亡广播，D3 引用 §1.1 事实 2）。
-      await this.pm.destroySession(sessionId)
-      // ⑤② 定向后台任务收殓（fire-and-forget，D3：正常情况豁免 #2 已保证无 running 任务，
-      // 此步兜「任务在检查与 kill 间的毫秒窗口退出/registry 写半截」的边角）。内部自带
-      // setImmediate 延后，不阻塞占座释放。
-      void deps.reapBackgroundTasks?.(sessionId)?.catch((e: unknown) => {
-        console.warn(`[session-lifecycle] reclaim background-task reap failed (sessionId=${sessionId}):`, e)
-      })
-      // ⑥a 代际校验（D6-3，摘除前）：占座期间若发生并发重建（未来绕过 ensureActive 的
-      // 恢复入口——restore/create 注册必产生新条目对象 + 新 pm client），引用比对即检出。
-      // 检出不摘除：新条目/新进程是无辜的，杀/摘它们 = 误杀并发重建的 session。
-      if (this.get(sessionId) !== session || this.pm.hasClient(sessionId)) {
-        console.warn(`[session-lifecycle] reclaim ${sessionId} cancelled: session was re-created concurrently (generation check, D6-3)`)
-        return false
-      }
-      // ⑥b 最小摘除：lifecycle sessions Map 删条目。
-      this.removeEntry(sessionId)
-      // v6 第四案：回收定向清挂起 UI 请求（防 stale pending 在重激活时拉回死表单）。
-      // 挂代际校验通过后的分支：此处必为被回收的旧代际（新进程存在 ⇒ 上方校验已返回 false），
-      // 并发的取消分支不执行本步——新进程的活请求不被误清。
-      deps.clearPendingUiRequests?.(sessionId)
-      // B8（memory-leak-remediation §3.3-B8 候选 C）：驱逐历史重建缓存条目——回收不是
-      // 销毁，不走 removeSessionEntry 汇聚点，只驱逐缓存这一纯派生数据。挂代际校验
-      // 通过后的成功路径（并发重建取消时新 session 无辜，不摘其缓存）；驱逐后重激活
-      // 走单次全量重建（P7 张力四要素显式登记的代价，见 onSessionReclaimed 注释）。
-      deps.evictHistoryRebuildCache?.(sessionId)
-      // ⑤① relay 尾扫（D3 第 5 步①，fire-and-forget）。**单段快照语义**：快照枚举与
-      // kill 目标列表在此同步段一次完成，setImmediate 异步执行阶段只用快照闭包、禁止再查
-      // 再杀——两段式（异步 kill 后二次复查再杀）可能误杀 restore 后新 session 经 relay
-      // 合法 spawn 的子进程（P6 尾扫项）。快照采集点放在代际校验通过之后：校验失败（并发
-      // 重建）路径不采集不杀，新 session 的 relay 条目天然不在任何快照里（fail-safe 方向）。
-      // setImmediate 先例同后台任务收殓：kill 链（SIGCONT→SIGTERM→3s grace→SIGKILL，
-      // relay-registry killRelayChild 同款语义）移出占座区间，
-      // 不可杀的 D 状态子进程等极端阻塞不拖累占座释放。
-      const relayTargets = deps.listRelayChildrenByMainSession?.(sessionId) ?? []
-      if (relayTargets.length > 0) {
-        console.log(`[session-lifecycle] reclaim ${sessionId}: relay tail-sweep snapshot captured ${relayTargets.length} child(ren)`)
-        setImmediate(() => {
-          for (const target of relayTargets) {
-            void target.kill().catch((e: unknown) => {
-              console.warn(`[session-lifecycle] reclaim relay tail-sweep kill failed (sessionId=${sessionId}):`, e)
-            })
-          }
-        })
-      }
-      return true
-    } finally {
-      // ⑦ try/finally 释放占座：占座只持有第 1-6 步的有界步骤（判定 sync / detach sync /
-      // kill 硬上限 2s / 摘除 sync），任一步抛异常 finally 兜底释放——等待中的 ensureActive
-      // 不会因占座泄漏永久挂起（D6-2「等待方永不抢跑」以释放确定性为前提）。
-      deps.seat.release(sessionId)
     }
   }
 

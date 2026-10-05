@@ -221,7 +221,7 @@ describe('findAvailablePort（先收割自身残留，占用者一律跳过）',
 
   it('身份不符的占用端口被跳过（不清杀），落到段内下一个空闲端口', async () => {
     healthMocks.isPortInUse.mockResolvedValueOnce(true).mockResolvedValueOnce(false)
-    await expect(findAvailablePort(1)).resolves.toBe(BASE_PORT + 1)
+    await expect(findAvailablePort()).resolves.toBe(BASE_PORT + 1)
     expect(processControlMocks.killProcessTree).not.toHaveBeenCalled()
     expect(processControlMocks.getDescendantPids).not.toHaveBeenCalled()
   })
@@ -234,7 +234,7 @@ describe('findAvailablePort（先收割自身残留，占用者一律跳过）',
       return ''
     })
     healthMocks.isPortInUse.mockResolvedValue(false)
-    await expect(findAvailablePort(1)).resolves.toBe(BASE_PORT)
+    await expect(findAvailablePort()).resolves.toBe(BASE_PORT)
   })
 
   it('fails after every candidate remains occupied，错误信息含占用者与恢复动作', async () => {
@@ -244,10 +244,9 @@ describe('findAvailablePort（先收割自身残留，占用者一律跳过）',
       return 'node'
     })
     healthMocks.isPortInUse.mockResolvedValue(true)
-    // retryMs 注入 1ms：无收割路径不再产生串行等待，保留参数兼容
     let caught: Error | undefined
     try {
-      await findAvailablePort(1)
+      await findAvailablePort()
     } catch (e) {
       caught = e as Error
     }

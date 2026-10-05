@@ -688,9 +688,7 @@ export class EventInterpreter {
    *
    * B1（memory-leak-remediation §3.2-B1，2026-09-14）：pi turn 中崩溃 → onSessionExit →
    * adapter.detach → 本 dispose 后事件源已退订，turn-end 永不再达，ping 循环失去唯一停止点；
-   * 5s 后 respawn 为同 sessionId 生成新 client，pingPi 的 pm.getClient(sessionId) 延迟解析
-   * 打到新 client 必然成功 → 失败计数恒清零，3 次失败自停条件永不成立 → interval 永续
-   *（且 ping 双向 touch lastActivityAt 钉死 idle-pi-reaper 回收）。pingProbe.stop 幂等且已
+   * pingProbe.stop 幂等且已
    * in-flight 的 tick 被 `timer === null` 守卫拦截（SR1）。settling 延迟 timer 与 disposed
    * 短路标志同迁 settledDelayer（T4），本方法只做两腿委托。
    */
@@ -993,7 +991,7 @@ export class EventInterpreter {
    * ② ping 生命期收口：turn-start → agent_settled（[RT-4#2②]，原为 turn-start → turn-end）。
    *   settling 期探测持续——pi 收尾挂死时 3 次失败触发 onSilentAbort 收敛；探测成功即
    *   不算卡死（ADR-0047 静默≠卡死，不用固定墙钟判死）。settled 处理完成（无论成败）
-   *   即停，与 B1 防 ping 永续（touch 钉死 idle-pi-reaper）约束一致。
+   *   即停（B1 防 ping 永续）。
    */
   private runAgentSettledEffects(): void {
     try {

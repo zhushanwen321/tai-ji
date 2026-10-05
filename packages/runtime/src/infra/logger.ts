@@ -49,8 +49,7 @@ import { readLogKeepDays } from '@taiji/shared'
 import { createGzip } from 'node:zlib'
 import { isPackaged } from '../utils/runtime-env.js'
 // endAndAwait 单一实现（偏差 #32①：原模块私有复刻与 crash-journal 同构，收敛共享原语；
-// 超时留痕出口 reportEndAwaitTimeout 保持本模块注入）
-import { END_AWAIT_TIMEOUT_MS, endAndAwaitStream } from './stream-end-await.js'
+import { endAndAwaitStream } from './stream-end-await.js'
 import { getCrashJournal } from './crash-journal.js'
 
 // ── 级别 ────────────────────────────────────────────────────────────
@@ -116,7 +115,6 @@ const PI_GZIP_TMP_SUFFIX = '.1.gz.tmp'
  * 10s = 该量级的 10 倍余量，且让 closeLogger（同批 await 在途轮转）的总兜底等待保持在
  * supervisor SIGTERM→SIGKILL 升级线以内。超时中止压缩并走失败分支（保留原文件，不丢数据）。
  */
-const GZIP_TIMEOUT_MS = 10_000
 
 // ── pi session 写流注册表（D10-1 退出 flush：closeLogger 统一 end + 等待）──
 interface PiStreamState {
@@ -1013,12 +1011,9 @@ async function gzipRotatedFile(file: string): Promise<boolean> {
   if (!existsSyncSafe(file)) return true
   const tmp = `${file}${PI_GZIP_TMP_SUFFIX}`
   const gz = `${file}${PI_GZIP_SUFFIX}`
-  const abort = new AbortController()
-  const timer = setTimeout(() => abort.abort(), GZIP_TIMEOUT_MS)
-  timer.unref?.()
   try {
     // createGzip()/createWriteStream() 同步抛错也落在 try 内（整段归入失败分支）
-    await pipeline(createReadStream(file), createGzip(), createWriteStream(tmp), { signal: abort.signal })
+    await pipeline(createReadStream(file), createGzip(), createWriteStream(tmp))
     renameSync(tmp, gz) // 覆盖上一个 .1.gz —— 单代保留，且不留 tmp 残骸
     return true
   } catch {
@@ -1030,8 +1025,6 @@ async function gzipRotatedFile(file: string): Promise<boolean> {
     }
     writeLogEntry('warn', `[logger] pi log gzip failed (${file}); original file kept, rotation skipped`)
     return false
-  } finally {
-    clearTimeout(timer)
   }
 }
 
@@ -1052,24 +1045,10 @@ function existsSyncSafe(path: string): boolean {
  * 前必须有「无在途写」保证——都要求 end 后**等待落盘完成**（形态契约与超时降级见
  * stream-end-await.ts，偏差 #32① 收敛后的单一实现）。
  */
-function endAndAwait(stream: WriteStream | undefined, label: string): Promise<void> {
-  return endAndAwaitStream(stream, label, reportEndAwaitTimeout)
+function endAndAwait(stream: WriteStream | undefined, _label: string): Promise<void> {
+  return endAndAwaitStream(stream)
 }
 
-/**
- * endAndAwait 超时的错误出口（审查 W30 Fix-1：记 error 级日志，防「静默降级」放大日志丢失）。
- *
- * 双出口：writeLogEntry 走常规写路径（轮转场景入 pendingLines、轮转后回放落盘；
- * closeLogger 后 currentLevel 已清则 no-op）；originalConsole.error 是**未 patch 的原生
- * console**（不递归进 writeLogEntry），stderr 由 supervisor 捕获落盘——超时意味着 fs
- * 本身可能挂起，文件路径不可靠时 stderr 是兜底出口。轮转窗口队列满时文件路被丢弃
- * （计入 pendingDroppedCount，随合并 warn 报数），stderr 恒可达。
- */
-function reportEndAwaitTimeout(label: string): void {
-  const msg = `[logger] endAndAwait timeout after ${END_AWAIT_TIMEOUT_MS}ms (${label}); stream force-destroyed, in-flight buffer tail lost`
-  writeLogEntry('error', msg)
-  originalConsole.error(msg)
-}
 
 /**
  * 关闭 logger（runtime shutdown 时调）。

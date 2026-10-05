@@ -32,35 +32,11 @@ interface ManagedProcess {
 }
 
 /**
- * 短命 pi 附着就绪上限（W11）：spawn 冷启动中位数 ~500ms（P0.5 探针，瓶颈在 Node
- * 冷启动）+ switchSession RPC（<1ms），端到端预算 ~600ms；5s 上限覆盖慢机/首次冷缓存。
- */
-const EPHEMERAL_READY_TIMEOUT_MS = 5_000
-
-/**
  * pi 版本探测失败的负缓存时长（缓存治理 1-7）：失败值 60s 内直接返 'unknown' 不再探测，
  * 过期重试——瞬态失败（pi 缺失/PATH 未就绪/探测超时）不永久定罪，也避免 pi 缺失环境
  * 每次调用都吃 5s 探测超时。对齐 GitStateService notRepoCache 先例；成功值仍永久缓存。
  */
 const PI_VERSION_FAILURE_TTL_MS = 60_000
-
-/**
- * 给 promise 套一层超时（短命 pi 就绪等待专用）。
- *
- * 超时后底层 promise 仍可能 pending（switchSession 自身 SLOW_TIMEOUT_MS 120s）——
- * withEphemeralPi 的 finally destroySession 会 kill 进程 → RpcClient.rejectAll 让其
- * settle，本包装的 then/catch 已就位，不产生 unhandled rejection。
- */
-function raceReadyTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), ms)
-    timer.unref()
-    p.then(
-      (v) => { clearTimeout(timer); resolve(v) },
-      (e) => { clearTimeout(timer); reject(e) },
-    )
-  })
-}
 
 /**
  * Manages pi subprocess lifecycles. Each session gets its own
@@ -295,21 +271,11 @@ export class ProcessManager implements IProcessManager {
   }
 
   /**
-   * W11（数据源治理）：短命 pi 附着指定 session 文件执行一次性 RPC，用后即毁。
-   *
-   * 形态（探针场景 B 定型，逐次冷起——父文档 D2 裁决禁 warm pi）：复用 createSession
-   * spawn `pi --mode rpc` → `switchSession(sessionFile)` 附着该文件（就绪上限 5s）→
-   * fn(client) → destroySession。session JSONL 本体的唯一写方是 pi：fn 内的 RPC
-   * （如 setSessionName）由 pi 自身 appendFileSync 落盘，taiji 不触碰文件。
-   *
-   * 附着经 switchSession RPC 而非 `pi --session <file>` CLI flag——RpcClient 的 spawn
-   * 参数面（rpc-client.ts）不在本 wave 改动范围，switchSession 是既有附着原语
-   * （restoreSession 同款）。spawn 时 pi 先建内存新 session（user/assistant 首消息前
-   * 不落盘，规则 #6——pi 1.0.0 起 user 首消息即建文件），switchSession 切走后即弃，
-   * sessions 目录零残留。
-   *
-   * 失败语义：spawn 失败 / 就绪超时 / fn 抛错一律 rethrow（进程在 finally 销毁），
-   * 调用方（如 renameSession 非活跃分支）按既有失败路径报错、保留旧值可重试。
+   * W11（数据源治理）：短命 pi 附着指定 session 文件执行一次性 RPC，用后即毁
+   * （spawn → switchSession 附着 → fn(client) → 销毁）。
+   * session JSONL 的唯一写方是 pi——fn 内 RPC（如 setSessionName）由 pi 自身落盘。
+   * spawn 失败 / fn 抛错一律 rethrow，调用方保留旧值可重试。
+   * 就绪等待墙钟（EPHEMERAL_READY_TIMEOUT_MS 5s race）已随 ADR-0112 防御机制清查退役。
    *
    * @param sessionFile 目标 session JSONL 绝对路径（须已存在；不存在时 switchSession
    *                    由 pi 报错，走同一失败路径）
@@ -325,11 +291,7 @@ export class ProcessManager implements IProcessManager {
     const ephemeralId = `ephemeral-${Date.now()}-${crypto.randomUUID()}`
     const client = await this.createSession(ephemeralId, spawnCwd)
     try {
-      await raceReadyTimeout(
-        client.switchSession(sessionFile),
-        EPHEMERAL_READY_TIMEOUT_MS,
-        `Ephemeral pi attach timed out after ${EPHEMERAL_READY_TIMEOUT_MS}ms (sessionFile: ${sessionFile})`,
-      )
+      await client.switchSession(sessionFile)
       // W2（restore-fork-attach-fix F4）：附着必断言（I1）。withEphemeralPi 附着本就是
       // 真实文件、天然通过；接线它使「附着必断言」成为无例外结构（设计文档 D4），
       // 新附着调用点照抄即得守卫。

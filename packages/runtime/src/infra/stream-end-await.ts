@@ -17,20 +17,14 @@
  */
 import type { WriteStream } from 'node:fs'
 
-/** 等流 'close' 的超时：fs 挂起时 close 永不触发，超时降级 resolve（防永久挂起）。 */
-export const END_AWAIT_TIMEOUT_MS = 5_000
-
 /** 超时降级时的留痕出口（注入）：label 标识流归属（如 `pi-rotation:<file>`）。 */
 export type EndAwaitTimeoutReporter = (label: string) => void
 
 /**
- * end 一个写流并等待其真正关闭。rename 前必须无在途写；永不 reject；fs 挂起时超时
- * 强制销毁降级（closeLogger/轮转不永久阻塞），超时经 reportTimeout 留痕。
+ * end 一个写流并等待其真正关闭。rename 前必须无在途写；永不 reject。
  */
 export function endAndAwaitStream(
   stream: WriteStream | undefined,
-  label: string,
-  reportTimeout: EndAwaitTimeoutReporter,
 ): Promise<void> {
   if (!stream) return Promise.resolve()
   if (stream.closed) return Promise.resolve() // 已关闭（含已 error 销毁的流）
@@ -38,27 +32,21 @@ export function endAndAwaitStream(
   if (stream.closed) return Promise.resolve() // 同步关闭路径（如测试用 fake 流）
   return new Promise<void>((resolve) => {
     let settled = false
-    const finish = (timedOut: boolean) => {
+    const finish = () => {
       if (settled) return
       settled = true
-      clearTimeout(timer)
       // 清理 once 链（审查 W30 Fix-9）：'close' 先触发时 'error' 监听器仍挂残留，
-      // 超时/事件到达后手动移除，避免悬挂监听器持有已关闭流的引用。
+      // 事件到达后手动移除，避免悬挂监听器持有已关闭流的引用。
       stream.removeListener('close', onClose)
       stream.removeListener('error', onError)
-      if (timedOut) {
+      {
         // 强制销毁（审查 W30 Fix-1）：不 destroy 则 fd 悬挂、「close」永不触发，
         // 后续轮转/退出若再 end 同一流仍会挂满一个超时窗口。无参 destroy 不 emit
-        // 'error'（上面的 error 监听器也已摘除），不会产生未捕获异常。
-        stream.destroy()
-        reportTimeout(label)
       }
       resolve()
     }
-    const onClose = () => finish(false)
-    const onError = () => finish(false)
-    const timer = setTimeout(() => finish(true), END_AWAIT_TIMEOUT_MS)
-    timer.unref?.() // 超时定时器不 holding 事件循环（fs 正常时 close 远早于超时到达）
+    const onClose = () => finish()
+    const onError = () => finish()
     stream.once('close', onClose)
     stream.once('error', onError)
   })

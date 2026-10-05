@@ -125,7 +125,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 | `engine_model_unknown` | validateModel 未命中且 `dynamic:false` | 同步拒（record 不创建） |
 | `engine_model_mismatch` | `dynamic:true` 运行期引擎拒绝 | run 失败 + record 标 failed |
 | `engine_handshake_timeout` | initialize 超时（10s） | 引擎不可用 |
-| `engine_crashed` | 进程意外退出 | 在途 run 失败（附 stderr 尾 400 字）；**崩溃重建上限 3 次、指数退避 1s/2s/4s**（`CRASH_REBUILD_MAX_ATTEMPTS`/`CRASH_REBUILD_BACKOFF_MS`，`engine-protocol.ts:65-76`），超限标记不可用至宿主重启 |
+| `engine_crashed` | 进程意外退出 / 引擎起不来 | 在途 run 失败（附 stderr 尾 400 字）；引擎初建失败一次即标记不可用至宿主重启（ADR-0112：失败显式上报，无自动重建） |
 | `engine_probe_failed` | probe 失败 | 结构化失败（逐项 check 摘要 + 恢复指引），**不自动切换引擎**；要换引擎只能由调用方显式传 `engine:'<id>'` |
 
 **conformance 锁定面**：协议一致性由 `packages/subagent-core/src/execution/engine/__tests__/conformance/engine-conformance.live.test.ts` 套件锁定（引擎 manifest、relay 常量镜像、run 帧映射）；SDK 侧封闭断言在 `subagent-engine-sdk/src/__tests__/protocol.test.ts`（方法集/通道集同源互证）与 `contract-closure.test.ts`（core↔SDK 双向可赋值）；两引擎各有 bin 级协议 e2e（如 `zcode-subagent-cli/src/__tests__/protocol-e2e.test.ts`：握手/反向请求/event seq 单调/终态/dispose 幂等 + 进程随 stdin 关闭退出，五断言）。chat 域独立协议面已退役：续聊轮 = 新 run + `RunParams.resume` 锚点（约束 C-proc-13；`engine-protocol.ts:14-17`）。

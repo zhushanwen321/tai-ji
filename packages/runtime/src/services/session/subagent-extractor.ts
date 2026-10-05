@@ -650,7 +650,6 @@ function resolveLegacySessionFile(
  * 时间戳匹配窗口（ms）。subagent JSONL 文件名含 ISO 时间戳，
  * 与 bg-notify.startedAt 的差值在此窗口内视为匹配。
  */
-const TIMESTAMP_WINDOW_MS = 60_000
 
 /**
  * 在 subagent session 目录中查找最匹配的 JSONL 文件。
@@ -729,7 +728,8 @@ function findLatestSubagentFile(dir: string, files: string[]): string | null {
   return latest ? join(dir, latest.file) : null
 }
 
-/** 有 startedAt：匹配文件名 ISO 时间戳最近且在 TIMESTAMP_WINDOW_MS 窗口内的文件。 */
+/** 有 startedAt：匹配文件名 ISO 时间戳最近邻的文件（事实最近匹配，无时间窗猜测——
+ *  ADR-0112：原 60s 窗口阈值已删，最近邻即裁决）。无可解析时间戳文件返回 null。 */
 function findTimestampMatchedSubagentFile(dir: string, files: string[], startedAt: number): string | null {
   const targetTime = startedAt
   let best: { file: string; diff: number } | null = null
@@ -739,12 +739,7 @@ function findTimestampMatchedSubagentFile(dir: string, files: string[], startedA
     const diff = Math.abs(fileTime - targetTime)
     if (!best || diff < best.diff) best = { file: f, diff }
   }
-
-  // 在窗口内才算匹配
-  if (best && best.diff <= TIMESTAMP_WINDOW_MS) {
-    return join(dir, best.file)
-  }
-  return null
+  return best ? join(dir, best.file) : null
 }
 
 /**

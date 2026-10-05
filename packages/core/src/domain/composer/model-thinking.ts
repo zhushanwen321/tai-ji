@@ -201,8 +201,8 @@ export function useComposerModelThinking(
    * 为什么放在 core 而不是壳层新建一个 ref：RPC 生命周期事实**只有 core 知道**——壳层
    * 自建第三份瞬态状态会与 `armed`（5s 保险丝，语义不同）和本文件 in-flight 计数产生
    * 同步义务（清除时机三处必须一致，否则出现「chip 一直转」或「转一下停」）。
-   * 这里与 `inFlightCallIds` 同点设立/撤销：RPC 前设、`finally` 清（覆盖 15s
-   * SESSION_ACTIVATE_TIMEOUT 与 WS backstop），换绑/删除 session 由既有 `watch(sessionId)`
+   * 这里与 `inFlightCallIds` 同点设立/撤销：RPC 前设、`finally` 清（覆盖 WS backstop），
+   * 换绑/删除 session 由既有 `watch(sessionId)`
    * 清 armed 的同一处一并清（见下方 watch）。
    *
    * 形态：`{ kind, sessionId, target }`——`kind` 区分模型/档位（两条路径的 chip 都要转），
@@ -417,8 +417,8 @@ export function useComposerModelThinking(
       // [u3·E10] in-flight 撤销必须留在 finally（晚于 flush）：回包触发的 watch 消费发生在
       // 计数仍 >0 的豁免窗内，规则 1 不误杀慢 RPC（>5s 回包仍正常匹配消费）
       inFlightCallIds.delete(callId)
-      // U4：「切换中」与 in-flight 同刻撤销（成功、失败、超时三路都经这里——
-      // SESSION_ACTIVATE_TIMEOUT 也走 catch/finally，不会悬挂）。
+      // U4：「切换中」与 in-flight 同刻撤销（成功、失败两路都经这里——
+      // reject 也走 catch/finally，不会悬挂）。
       if (switching.value?.kind === 'model') switching.value = null
     }
   }

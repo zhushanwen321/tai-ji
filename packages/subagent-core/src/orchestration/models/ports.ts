@@ -150,7 +150,7 @@ export interface LifecycleDeps {
  /**
  * D-12 regression fix (round-2 #2)：rebuildRuntime 重新调度 run 级墙钟预算计时器。
  *
- * worker/script 错误重试走 replaceRuntime，旧 RunRuntime 的 release 会 clearTimeout
+ * [HISTORICAL] worker/script 错误重试（replaceRuntime）已删（ADR-0112）；release 会 clearTimeout
  * 旧计时器（run-runtime.release）。新 runtime 必须重排 scheduleTimeBudget，否则带
  * budgetTimeMs 的 run 命中一次错误重试后时间预算静默失效（直到下次 pause/resume 才重排）。
  * 由 Interface 层 factory 注入——闭包捕获 deps，内部调 lifecycle.scheduleTimeBudget。

@@ -202,9 +202,8 @@ describe("组合根接线：初始上报时点（u7a 验收）", () => {
   });
 });
 
-describe("createInFlightReporter：有界重试（2026-09-13 oe-audit，原无限重试收敛）", () => {
-  // 重试 timer 走 setTimeout（retryDelayMs），select 为 stub 立即 resolve——fake timers
-  // 确定性驱动整条重试链，不依赖真实时序。
+describe("createInFlightReporter：失败无 timer 重试（ADR-0112，事件驱动重推）", () => {
+  // select 为 stub 立即 resolve——fake timers 确定性驱动，验证「时间推进零自动重试」。
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -226,26 +225,25 @@ describe("createInFlightReporter：有界重试（2026-09-13 oe-audit，原无�
     } as unknown as ExtensionContext;
   }
 
-  it("连续失败达 maxAttempts 放弃（不再重试）；ack 成功清零计数恢复重试资格", async () => {
+  it("失败后时间推进零自动重试；迁移事件驱动重推；新 session epoch 重置首败留痕", async () => {
     const { createInFlightReporter } = await import("../host/inflight-reporter.ts");
-    const reporter = createInFlightReporter({
-      selectTimeoutMs: 1,
-      retryDelayMs: 1,
-      maxAttempts: 3,
-    });
+    const reporter = createInFlightReporter({ selectTimeoutMs: 1 });
     const selectCalls: unknown[][] = [];
     const ctx = neverAckCtx(selectCalls);
 
     reporter.attachSession(ctx);
     await vi.advanceTimersByTimeAsync(30);
-    // 放弃后停止：初始 1 次 + 重试 2 次 = maxAttempts 次，之后静默
-    expect(selectCalls).toHaveLength(3);
-    const settled = selectCalls.length;
-    reporter.onInFlightChanged();
-    await vi.advanceTimersByTimeAsync(20);
-    expect(selectCalls).toHaveLength(settled); // 已放弃，迁移点不再触发推送
+    // 首帧失败折叠置脏：时间推进不再自动重试（无 timer）
+    expect(selectCalls).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(selectCalls).toHaveLength(1);
 
-    // ack 恢复路径：换一个恒 ack 的 ctx（模拟 runtime 就绪后的新 session）
+    // 迁移事件驱动重推（绝对计数快照语义：任何一帧成功即整镜恢复）
+    reporter.onInFlightChanged();
+    await vi.advanceTimersByTimeAsync(5);
+    expect(selectCalls).toHaveLength(2);
+
+    // 新 epoch（新 session）：attach 后首帧照发（恒 ack 的 runtime 侧通道）
     const ackCtx = {
       ...ctx,
       ui: {
@@ -258,18 +256,14 @@ describe("createInFlightReporter：有界重试（2026-09-13 oe-audit，原无�
     reporter.detachSession();
     reporter.attachSession(ackCtx);
     await vi.advanceTimersByTimeAsync(5);
-    expect(selectCalls).toHaveLength(settled + 1); // 新 epoch 首帧即 ack
+    expect(selectCalls).toHaveLength(3); // 新 epoch 首帧即 ack
   });
 
-  it("失败重试在 maxAttempts 内：ack 到达即停（不再多发）", async () => {
+  it("失败后不自动重试：ack 只由迁移事件触发的下一帧到达（不多发）", async () => {
     const { createInFlightReporter } = await import("../host/inflight-reporter.ts");
-    const reporter = createInFlightReporter({
-      selectTimeoutMs: 1,
-      retryDelayMs: 1,
-      maxAttempts: 10,
-    });
+    const reporter = createInFlightReporter({ selectTimeoutMs: 1 });
     const selectCalls: unknown[][] = [];
-    // 第 1 次失败（无 ack），第 2 次 ack
+    // 第 1 帧失败（无 ack），事件触发第 2 帧 ack
     let call = 0;
     const ctx = {
       mode: "rpc",
@@ -284,7 +278,12 @@ describe("createInFlightReporter：有界重试（2026-09-13 oe-audit，原无�
     } as unknown as ExtensionContext;
 
     reporter.attachSession(ctx);
-    await vi.advanceTimersByTimeAsync(30);
-    expect(selectCalls).toHaveLength(2); // 失败 1 次 → 重试 1 次 → ack 停
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(selectCalls).toHaveLength(1); // 首帧失败后时间推进零重试
+    reporter.onInFlightChanged();
+    await vi.advanceTimersByTimeAsync(5);
+    expect(selectCalls).toHaveLength(2); // 事件驱动第 2 帧 → ack 停
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(selectCalls).toHaveLength(2); // ack 后通道静默
   });
 });

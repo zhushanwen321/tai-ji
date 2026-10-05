@@ -41,8 +41,6 @@ export interface FileServiceOptions {
   allowedReadDirs?: string[]
 }
 
-/** 读取超时（ms），listDir/stat/readFile 共用（NFR ④K-2）。导出供测试 advanceTimersByTime 用。 */
-export const READ_TIMEOUT_MS = 10_000
 /** 文件大小截断阈值（1MB，readFile 用，AC-6.7）。导出供测试断言用。 */
 export const MAX_FILE_SIZE = 1_048_576
 /**
@@ -77,41 +75,6 @@ export const BUILTIN_IGNORE_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', 'coverage', '.next', '.cache', '.turbo',
 ])
 
-/**
- * 超时包装（NFR ④K-2，源码简化 T9 从 FileService 私有方法提取为可直测独立单元）：
- * promise 与定时器赛跑，超时 → reject FileError('timeout')，message 携带 label 定位操作。
- * FileService.callFs 是唯一生产消费点（READ_TIMEOUT_MS 全局统一超时）；导出供测试直测
- * 超时触发 / clearTimeout 无泄漏 / FileError 形状（此前私有不可直测，测试被迫本地复制副本）。
- *
- * 实现用单 Promise 构造器 + 手动 settle（非 Promise.race）：定时器回调直接调外层 reject，
- * 不产生被 reject 的中间 timeout promise —— 避免「落败 promise 异步 reject 触发
- * unhandledRejection」的竞态（Promise.race + setTimeout 超时模式的已知坑）。
- * promise settle 后立即 clearTimeout，无悬挂定时器。
- */
-export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    let settled = false
-    const timer = setTimeout(() => {
-      if (settled) return
-      settled = true
-      reject(new FileError('timeout', `${label} timed out after ${ms}ms`))
-    }, ms)
-    promise.then(
-      (v) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        resolve(v)
-      },
-      (e) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        reject(e)
-      },
-    )
-  })
-}
 
 /** 空 matcher 单例（无 .gitignore / 内容为空时共享，matchPath 永远 false）。 */
 const EMPTY_MATCHER: IgnoreMatcher = compileIgnoreRules('')
@@ -497,9 +460,10 @@ export class FileService implements IFileService {
    * - ENOENT → FileError('not_found')
    * - 其余（含已分类的 FileError）→ 透传
    */
-  private async callFs<T>(op: () => Promise<T>, label: string): Promise<T> {
+  private async callFs<T>(op: () => Promise<T>, _label: string): Promise<T> {
     try {
-      return await withTimeout(op(), READ_TIMEOUT_MS, label)
+      // fs 读取墙钟（READ_TIMEOUT_MS 10s，NFR ④K-2）已随 ADR-0112 退役。
+      return await op()
     } catch (e) {
       const code = (e as { code?: string } | null)?.code
       if (code === 'EACCES' || code === 'EPERM') throw new FileError('permission_denied')
