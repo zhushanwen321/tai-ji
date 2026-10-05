@@ -28,8 +28,8 @@
  * reattach-deferred 自身态，不触碰滚动重启态。
  *
  * 状态形态：窗口级单例（非 per-session）——滚动重启是全局动作、内存高压是全局信号，
- * 与 useCrashRecoveryNotice / useMemoryPressure 同款「窗口级单例状态，ADR-0049 Map 分区
- * 范式不适用」判定（无 sidRef、无 per-session 分区）。
+ * 「窗口级单例状态，ADR-0049 Map 分区范式不适用」判定（无 sidRef、无 per-session 分区；
+ * 与 useMemoryPressure 同款）。
  *
  * 订阅防重复（AGENTS 关键规则 2）：模块级 refCount——多实例共享单条物理订阅（4 条事件
  * + 1 条连接 watch），首个消费者注册、最后一个卸载时退订（useMemoryPressure 同款范式；

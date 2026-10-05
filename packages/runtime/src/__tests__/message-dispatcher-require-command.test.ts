@@ -21,9 +21,10 @@
  *   与本机制正交，见该用例内注释）
  * - reason 分类：hook 拦截 → 'hook-blocked'
  * - 手敲 `/` 扩展命令的 occupancy 收口（u5a #12）曾随投递腿迁入 registry 的 CP6 短窗；
- *   [pi1-disposition-chat-flow D3③] CP6 回落窗已整体退役，occupancy 回落改由 handled
- *   响应与 sweepInFlight 收尾的事实凭据驱动——行为锚定见 session-delivery-commands.test.ts
- *   与 message-dispatcher.test.ts 的 handled 用例。
+ *   [pi1-disposition-chat-flow D3③] CP6 回落窗已整体退役，occupancy 回落改由 pi 权威
+ *   事实驱动（handled 响应即回落；回合事件照常推进；进程死亡由 onSessionExit full-reset
+ *   收口，ADR-0112）——行为锚定见 session-delivery-commands.test.ts 与
+ *   message-dispatcher.test.ts 的 handled 用例。
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/message-dispatcher-require-command.test.ts
  */

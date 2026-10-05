@@ -443,9 +443,11 @@ async function main(): Promise<void> {
 
   // [MANDATORY] 时序硬声明（决策 1，登记见 docs/adr/decisions.md 启动扫描条目）：
   // startup sweep 必须先于任何 pi spawn：本时点无新 pi（启动段不 spawn）、单实例
-  // 锁已确立；旧 pi 残活的末帧新鲜形态由 graceWindowMs 兜——挪动此调用序前必读
-  // 设计 §3.3 决策 1。扫描是旁路维护：startupSweep 结构性不 reject（内部失败只
-  // warn/error 留痕），await 返回后启动主路径照常继续。
+  // 锁已确立——判读 running 的 run 其执行者只可能是上一生命周期的孤儿 pi，孤儿
+  // pi 正常收尾时收编被三面证据幂等让位（创建顺序契约，ADR-0112 判定层；原
+  // graceWindowMs 宽限窗已删）。挪动此调用序前必读设计 §3.3 决策 1。扫描是旁路
+  // 维护：startupSweep 结构性不 reject（内部失败只 warn/error 留痕），await 返回
+  // 后启动主路径照常继续。
   await startupSweep(getPiAgentDir, logger)
 
   // u1b（crash-forensics-and-watchdog D1）：runtime 台账单例初始化。位置与时序对齐上方

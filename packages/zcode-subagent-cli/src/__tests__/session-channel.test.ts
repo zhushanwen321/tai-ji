@@ -31,7 +31,6 @@ import { ZCODE_APPSERVER_GOLDEN } from "../golden-sample.ts";
 import {
   SessionChannel,
   SUBSCRIBE_DELIVERY_KIND,
-  TurnTimeoutError,
   extractAssistantText,
   extractCreatedSessionId,
   extractReadUsage,
@@ -809,26 +808,6 @@ describe("close（D4 用后即毁）", () => {
     ).rejects.toThrow(/accepted:false/);
     expect(sentFrames(stateFile, "session/close")).toHaveLength(1);
   }, 10_000);
-
-  it("终态超时（turn.terminal 与收尾帧均未达）→ TurnTimeoutError（ceiling 形态，P0-1 两 timer 语义）且 close 仍被调用", async () => {
-    const onlyRunning = [ZCODE_APPSERVER_GOLDEN.pushStream[0]]; // 仅 state.updated，无终态
-    const { ch, stateFile, workspacePath } = makeChannel({
-      replaceSendPushes: onlyRunning,
-    });
-    const err = await ch
-      .runTurn({ workspacePath, mode: "yolo" }, "做点什么", {
-        turnTimeoutMs: 250, // P0-1 语义收窄：显式总上界（不再是固定墙钟预算）
-      })
-      .then(
-        () => {
-          throw new Error("should reject");
-        },
-        (e: unknown) => e
-      );
-    expect(err).toBeInstanceOf(TurnTimeoutError);
-    expect((err as TurnTimeoutError).kind).toBe("ceiling");
-    expect(sentFrames(stateFile, "session/close")).toHaveLength(1);
-  }, 10_000);
 });
 
 // ============================================================
@@ -922,17 +901,15 @@ describe("resolve 时序（不变量 2）", () => {
 });
 
 // ============================================================
-// [R4] 连接崩溃收割（onClose 面 → failAllTurns——不再挂到 turnTimeoutMs）
+// [R4] 连接崩溃收割（onClose 面 → failAllTurns——turn 终局的确定性来源之一）
 // ============================================================
 
 describe("连接崩溃收割（R4 onClose 面）", () => {
-  it("进程崩溃（test/suicide）→ 在途 turn 立即 reject（崩溃 reason 含 stderr 尾）——不等 turnTimeoutMs", async () => {
-    // 挂起场景（无终态）+ 长预算：崩溃收割前 turnTimeoutMs 兜底永远不会到
+  it("进程崩溃（test/suicide）→ 在途 turn 立即 reject（崩溃 reason 含 stderr 尾）——不等终态事件", async () => {
+    // 挂起场景（无终态）：终局唯一来源 = 崩溃收割（无时间兜底，ADR-0112）
     const onlyRunning = [ZCODE_APPSERVER_GOLDEN.pushStream[0]];
     const { ch, conn, stateFile, workspacePath } = makeChannel({ replaceSendPushes: onlyRunning });
-    const turn = ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么", {
-      turnTimeoutMs: 60_000,
-    });
+    const turn = ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么");
     // 等 send 已达（fake 流水可观测）后在同一连接上触发自杀（崩溃收割的触发面）
     await vi.waitFor(() => {
       expect(sentFrames(stateFile, "session/send")).toHaveLength(1);

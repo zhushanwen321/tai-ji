@@ -1,7 +1,7 @@
 /**
  * InboundFrameDroppedNotice.vue 组件测试（crash-forensics-and-watchdog §3.3 D8 / §4 A6）。
  *
- * 三视角 DOM 断言（TEST-STRATEGY §3，CrashRecoveredBar.test.ts 同型）：
+ * 三视角 DOM 断言（TEST-STRATEGY §3）：
  * - 终止阀生效 session：会话级静态提示可见（role=alert + 标题 + 恢复指引文案），
  *   提示文案明示「切走再切回」这一唯一恢复动作
  * - 单 session 作用域：tripped 集合不含本 session（或为空）→ 不渲染（其余 session 不连坐）

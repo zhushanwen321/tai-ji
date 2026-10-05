@@ -74,7 +74,7 @@ describe('合批 per-message settled（P1）', () => {
     handle.dispose()
   })
 
-  it('合批 2 条 port.send 持续失败达重试上限 → onSettled 每条一次 rejected', () => {
+  it('合批 2 条 port.send 失败 → 首败即停，onSettled 每条恰一次 rejected（ADR-0112）', () => {
     let idle = false
     let settledCb: (() => void) | undefined
     const onSettled = vi.fn()
@@ -88,7 +88,7 @@ describe('合批 per-message settled（P1）', () => {
         return () => {}
       },
     })
-    const handle = createDelivery(port, { onSettled, backoff: { ms: 1, max: 1 } })
+    const handle = createDelivery(port, { onSettled })
 
     const msgA = textMsg('check CI', { dedupeKey: 'task-a' })
     const msgB = textMsg('poll build', { dedupeKey: 'task-b' })
@@ -96,14 +96,12 @@ describe('合批 per-message settled（P1）', () => {
     handle.send(msgB)
 
     idle = true
-    settledCb!() // flush 合批投出 → 首败进重试（非终态）
-    expect(onSettled).not.toHaveBeenCalled()
-
-    vi.advanceTimersByTime(1) // 重试再败 → attempts=2 > max=1 → 终态
+    settledCb!() // flush 合批投出 → 首败即停：每条一次 rejected，无重试
     expect(onSettled).toHaveBeenCalledTimes(2)
     expectSettledEntry(onSettled, 0, msgA, 'rejected', 'task-a')
     expectSettledEntry(onSettled, 1, msgB, 'rejected', 'task-b')
     expect(handle.depth()).toBe(0)
+    expect(handle.entriesFull().active).toHaveLength(0)
 
     handle.dispose()
   })

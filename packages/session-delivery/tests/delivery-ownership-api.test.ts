@@ -251,87 +251,11 @@ describe('u1-api cancel', () => {
     handle.dispose()
   })
 
-  it('出站批次错误重试窗口内 cancel：backoff 到期重试不重发已取消条目（dmg-r1-1）', () => {
-    // busy park 两条合批出站 → port.send 首投失败进 backoff 重试窗口 → 窗口内撤 u-1
-    // → 重试到期只重发 u-2（修复前：inflightBatch 残留 u-1，composed 原样重发已撤销文本）
-    let calls = 0
-    let idle = false
-    let settledCb: (() => void) | undefined
-    const port = makeMockPort({
-      isIdle: () => idle,
-      send: () => {
-        calls++
-        if (calls === 1) throw new Error('transient send failure')
-        return undefined
-      },
-      subscribeSettled: (cb) => {
-        settledCb = cb
-        return () => {
-          settledCb = undefined
-        }
-      },
-    })
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const handle = createDelivery(port, { backoff: { ms: 100, max: 50 } })
-
-    handle.send(textMsg('m1'), { id: 'u-1' }) // busy 留队
-    handle.send(textMsg('m2'), { id: 'u-2' })
-    idle = true
-    settledCb!() // settled 边沿 flush → 合批 [u-1, u-2] 出站 → 首投失败
-    expect(port.sendCalls).toHaveLength(1)
-    expect(port.sendCalls[0]!.msg.payload.content).toBe('m1\n\n---\n\nm2')
-
-    // 重试窗口内撤销 u-1（queued 分支本地终结 + 出批）
-    expect(handle.cancel('u-1').kind).toBe('cancelled')
-    vi.advanceTimersByTime(100) // backoff 到期 → 重试
-    expect(port.sendCalls).toHaveLength(2)
-    expect(port.sendCalls[1]!.msg.payload.content).toBe('m2') // 已撤销条目不随重试重发
-    expect(handle.entriesFull().active.map((e) => e.id)).toEqual(['u-2'])
-    expect(handle.entriesFull().tombstones).toMatchObject([{ id: 'u-1', state: 'cancelled' }])
-
-    warnSpy.mockRestore()
-    handle.dispose()
-  })
-
-  it('出站批次重试窗口内 cancel 唯一条目：backoff 到期按空收口（不重发不挂死）', () => {
-    let calls = 0
-    let idle = false
-    let settledCb: (() => void) | undefined
-    const port = makeMockPort({
-      isIdle: () => idle,
-      send: () => {
-        calls++
-        if (calls === 1) throw new Error('transient send failure')
-        return undefined
-      },
-      subscribeSettled: (cb) => {
-        settledCb = cb
-        return () => {
-          settledCb = undefined
-        }
-      },
-    })
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const handle = createDelivery(port, { backoff: { ms: 100, max: 50 } })
-
-    handle.send(textMsg('m1'), { id: 'u-1' }) // busy 留队
-    idle = true
-    settledCb!() // 单条批出站 → 首投失败进重试窗口
-    expect(port.sendCalls).toHaveLength(1)
-
-    expect(handle.cancel('u-1').kind).toBe('cancelled')
-    vi.advanceTimersByTime(100) // 重试到期：批已空 → 按空收口
-    expect(port.sendCalls).toHaveLength(1) // 无第二次 send
-    expect(handle.entriesFull().active).toHaveLength(0)
-
-    // 收口后队列不挂死：新消息正常出站
-    handle.send(textMsg('m2'), { id: 'u-2' })
-    expect(port.sendCalls).toHaveLength(2)
-    expect(port.sendCalls[1]!.msg.payload.content).toBe('m2')
-
-    warnSpy.mockRestore()
-    handle.dispose()
-  })
+  // [已不可达用例删除登记] 原「出站批次错误重试窗口内 cancel：backoff 到期重试不重发
+  // 已取消条目（dmg-r1-1）」与「出站批次重试窗口内 cancel 唯一条目：backoff 到期按空
+  // 收口」两用例随 backoff 重试链退役而不可达（无重试窗口；dmg-r1-1 的终态同步摘批
+  // 防线由「出站批次中 cancel 后，迟到受理回执不转移（在册守卫）」用例继续锁定），
+  // 2026-10-05 投递域清理批次删除。
 })
 
 describe('u1-api confirmAccepted（分段受理登记，dmg-r1-4）', () => {
@@ -390,31 +314,24 @@ describe('u1-api drain', () => {
   })
 
   it('混合队列全量取回：queued + in-flight + failed 全返回，条目清空 + 全记 cancelled tombstone', () => {
-    // 构造：第 1 次 port.send 成功（A 受理 in-flight）；第 2 次起全败（B+C 批重试耗尽 failed）
-    let calls = 0
+    // 构造：A 受理 in-flight；B 断连终局 failed（failInFlight）；C busy 留队 queued
     let idle = true
     const port = makeMockPort({
       isIdle: () => idle,
-      send: () => {
-        calls++
-        if (calls >= 2) throw new Error('fail after first delivery')
-        return undefined
-      },
     })
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const handle = createDelivery(port, { backoff: { ms: 1, max: 0 } })
+    const handle = createDelivery(port)
 
     handle.send(textMsg('A'), { id: 'u-a' }) // 立即投 → 受理 in-flight
     expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
 
     idle = false
-    handle.send(textMsg('B'), { id: 'u-b' }) // busy 留队
+    handle.send(textMsg('B'), { id: 'u-b' }) // busy 留队 queued
     handle.send(textMsg('C'), { id: 'u-c' })
-    idle = true
-    handle.flush()
-    // B+C 合批投出，第 2 次 port.send 抛错 → 零重试上限 → 双双 failed
-    vi.advanceTimersByTime(10)
-    expect(handle.entriesFull().active.map((e) => e.state)).toEqual(['in-flight', 'failed', 'failed'])
+    // 断连终局：A 在途转 failed（failed 唯一产生方 = failInFlight，ADR-0112）；
+    // queued 条目不触碰（B/C 留守队列）
+    expect(handle.failInFlight('pi connection lost')).toBe(1)
+    expect(handle.entriesFull().active.map((e) => e.state)).toEqual(['failed', 'queued', 'queued'])
 
     const drained = handle.drain()
     expect(drained.map((d) => d.id)).toEqual(['u-a', 'u-b', 'u-c'])
@@ -449,7 +366,7 @@ describe('u1-api drain', () => {
     // drain 后占用方消失（idle 翻转 + settled 边沿）也不投
     ;(port as { idle: boolean }).idle = true
     handle.flush()
-    vi.advanceTimersByTime(60_000) // watchdog 也无货可发
+    vi.advanceTimersByTime(60_000) // 无任何定时触发（ADR-0112 退役后零周期 timer）
     expect(port.sendCalls).toHaveLength(callsAfterDrain)
 
     // resync 重报同 id：cancelled tombstone 去重

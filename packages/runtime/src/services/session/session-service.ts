@@ -412,12 +412,12 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       // restore 时（dispatcher 已就绪）。
       forceQuitFallback: (sessionId) => this.dispatcher.forceQuit(sessionId),
     })
-    // D4 收敛环接线：宿主 Map 存取（上方 store）+ abort 能力（dispatcher.abort 完整链——
-    // 成功收口广播 / 失败超时强杀收敛）。gate 未 configure 时全部 no-op/抛错，本构造器是
-    // 生产唯一接线点（测试可经 resetForTest + 局部 configure 替换）。
-    // [U2 修复] source='convergence'：收敛环掐的是 runtime 自动收敛的补发 turn（非用户
-    // 操作），终态 reason 写 'Convergence abort (auto)' 与用户 abort 可区分（日志/终态
-    // 不得谎报用户语义；aborted 完成帧广播保持不变——前端 no-op）。
+    // userStopped 拦截链接线：宿主 Map 存取（上方 store）+ abort 能力（dispatcher.abort
+    // 完整链——成功收口广播 / 失败超时强杀收敛）。gate 未 configure 时全部 no-op/抛错，
+    // 本构造器是生产唯一接线点（测试可经 resetForTest + 局部 configure 替换）。
+    // [U2 修复] source='convergence'：agent_start 挂点掐的是 runtime 自动拦截的旁路
+    // turn（非用户操作），终态 reason 写 'Convergence abort (auto)' 与用户 abort 可区分
+    //（日志/终态不得谎报用户语义；aborted 完成帧广播保持不变——前端 no-op）。
     userStoppedGate.configure({
       marks: userStoppedMarkStore,
       abortSession: (sessionId) => this.dispatcher.abort(sessionId, 'convergence'),
@@ -631,6 +631,13 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       })
       runDestroyStepIsolated('adapter.detach', sessionId, () => {
         session.adapter.detach()
+      })
+      // pi 断连事件 → 投递域收口（ADR-0112 命令终局事件化断连腿）：挂起的在途投递批量
+      // 转显式失败（用户可见「执行结果未确认」上报），不留 in-flight 悬挂。挂点约束 =
+      // 先于 removeSessionEntry——销毁链扇出 delivery dispose（静默清队）与
+      // bus.clearSession（通知不可达），晚于此链点的失败上报送不到前端。
+      runDestroyStepIsolated('delivery.onPiDisconnected', sessionId, () => {
+        this.deliveryRegistry?.onPiDisconnected(sessionId)
       })
 
       // 构建人类可读的退出原因（含 stderr 尾部，诊断价值 > 敏感性风险，本地工具场景）

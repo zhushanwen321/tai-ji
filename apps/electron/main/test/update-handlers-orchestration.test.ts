@@ -605,12 +605,12 @@ describe('T4 update-handlers: update:download / update:install / update:getPrelo
     }))
   })
 
-  it('update:download：停滞形态 → 用户文案保持停滞 + 断点续传指引（不被 connect 话术覆盖）', async () => {
+  it('update:download：stalled 诊断形态（curl --speed-time 档）→ 用户文案落映射表超时 + 断点续传指引（不被 connect 话术覆盖）', async () => {
     const { UpdateError } = await import('../update/types.js')
     const orch = mockOrchestrator({
       downloadUpdate: vi.fn(async () => {
-        // undici 停滞档（finalizeSingleStreamError）/ curl --speed-time 档的英文诊断串形态
-        throw new UpdateError('download stalled (no data for 30s), aborted; temp kept — retry resumes from break point', 'downloading', 'UPDATE_NETWORK_TIMEOUT')
+        // curl --speed-time 档的英文诊断串形态（curl 引擎停滞检测保留——进程参数不在删除范围）
+        throw new UpdateError('curl download stalled (no data for 30s, exit 28)', 'downloading', 'UPDATE_NETWORK_TIMEOUT')
       }),
     })
     register(orch)
@@ -618,12 +618,12 @@ describe('T4 update-handlers: update:download / update:install / update:getPrelo
     const handler = handlers.get('update:download')!
     await expect(handler({}, { version: '0.9.0' })).rejects.toMatchObject({
       stage: 'downloading',
-      message: '下载停滞（连续 30 秒无数据）已中断',
+      message: '下载超时已中断',
       suggestion: expect.stringContaining('断点续传'),
     })
     expect(sendSpy).toHaveBeenCalledWith('update:error', expect.objectContaining({
       errorCode: 'UPDATE_NETWORK_TIMEOUT',
-      message: '下载停滞（连续 30 秒无数据）已中断',
+      message: '下载超时已中断',
     }))
   })
 

@@ -310,8 +310,6 @@ def check_env_literal_mirrors() -> list[str]:
         expect_prefix(relay_env, const_name, 'TAIJI_SUBAGENT_RELAY_')
     zcode_consts = PROJECT_ROOT / 'packages/zcode-subagent-cli/src/constants.ts'
     for const_name in [
-        'ZCODE_TURN_IDLE_TIMEOUT_ENV',
-        'ZCODE_TURN_MAX_TIMEOUT_ENV',
         'ZCODE_APPSERVER_STOP_TIMEOUT_ENV',
         'ZCODE_APPSERVER_ABORT_GRACE_ENV',
     ]:

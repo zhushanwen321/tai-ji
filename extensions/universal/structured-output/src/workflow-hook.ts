@@ -4,7 +4,7 @@
  * 装配形态（workflow 模式，见 src/index.ts）：
  *   - tool_execution_end：唯一 listener——喂 loop-gate 的 WorkflowGate（合一状态机：
  *     steer 记账段 + 硬杀计数段，先记账后计数），newlyTerminal 时触发硬杀副作用链
- *     （runTerminalTeardown：日志 → abort+shutdown → 15s 兜底硬退）。
+ *     （runTerminalTeardown：日志 → abort+shutdown 优雅终止）。
  *   - turn_end：唯一 listener——模型未成功产出 structured-output 时以 steer 方式注入
  *     重试提醒（软闸门），提示词不伪装用户气泡，对话流用户内容 100% 来自用户输入；
  *     最多重试 MAX_HOOK_RETRIES 次，防止无限循环。

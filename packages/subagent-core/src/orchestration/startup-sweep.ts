@@ -10,14 +10,18 @@
 // 的一次性全量收编扫描：单实例锁确立后、先于任何 pi spawn 的时点，全量枚举 pi
 // 宿主形态 run（createPiHostRunEnumeration——[D16⑥] 枚举判据换源：候选 = record
 // 事件流文件族，status = 共享判定核 fold record 读折叠投影，不读快照行），对
-// 判读 running 且事件流静止超宽限窗的 run 逐个收编（adoptInterruptedRun →
-// [D15] interruptRun 中断编排入口，run-interrupted 转移帧一件直落）。
+// 判读 running 的 run 逐个收编（adoptInterruptedRun → [D15] interruptRun 中断
+// 编排入口，run-interrupted 转移帧一件直落）。
 //
-// 判僵尸依据 = 双防线（决策 1）：①时序事实——扫描时点先于任何新 pi spawn（runtime
-// 启动段不 spawn，挂点注释为时序硬声明）；②事件流静止宽限窗
-// STARTUP_SWEEP_GRACE_WINDOW_MS——末帧距扫描时点不足窗的 run 跳过本轮（旧 pi 残活
-// 的末帧新鲜形态防御），下次启动再收。「残活且末帧已超窗」形态（长 ask 静默期崩溃）
-// 不设防，按四要素登记为已接受代价（决策 1）。
+// 判僵尸依据 = 创建顺序契约（ADR-0112 判定层，原事件流静止宽限窗已删）：扫描
+// 时点先于任何新 pi spawn（runtime 启动段不 spawn，挂点注释为时序硬声明）+
+// 单实例锁确立（同数据目录无并存 runtime）——此刻判读 running 的 run 其执行者
+// 只可能是上一生命周期的孤儿 pi。孤儿 pi 若正常收尾，其 run-settled 帧与终态
+// manifest 已落盘：收编被三面证据幂等让位（skippedTerminal），误收编不发生；
+// 孤儿 pi 若已死/挂死，收编即正确修正。删窗后残余形态 = 收编帧抢先落在孤儿 pi
+// 尾帧之前（fold 读面保守停帧在 interrupted，读面不崩坏）——manifest 事实面
+// 完好、下次扫描以 manifest 为准让位，数据最终一致（已接受代价：该 run 的显示
+// 面在本进程内短暂呈 interrupted）。
 //
 // 收编形态一件直落（[D15] 中断目标态）：只追加 run-interrupted 转移帧——不写
 // manifest 派生缓存（manifest-write 仅 terminal 输出，interrupted 是 [D2] 暂停态
@@ -62,27 +66,16 @@ export interface SweepLogChannel { // oe-exempt:20260928:framework:跨包契约�
   error(message: string): void;
 }
 
-/**
- * 事件流静止宽限窗（规格 3 定形，勿改量级）：末帧 ts 距扫描时点不足窗的 running
- * run 判「可能仍在推进」跳过本轮（adoptInterruptedRun 返回 skippedGraceWindow，
- * 零写）。分钟级取值给旧 pi 的 stdin-EOF 退出留余量（runtime 崩溃自动重启——
- * 首次退避 1s / planned 0ms——可落在旧 pi 收尾窗口内，末帧极新 = 可能仍在推进）；
- * 校准依据见退役设计 §3.1 规格 3 与 ADR 启动扫描条目。
- */
-export const STARTUP_SWEEP_GRACE_WINDOW_MS = 60_000;
-
 /** startupSweep 的结果（计数 + 错误摘要，供调用方日志与单测断言）。 */
 export interface StartupSweepResult { // oe-exempt:20260928:framework:startupSweep 返回契约——runtime 挂点与单测断言消费的跨包结构类型
   /** 收编成功数（run-interrupted 转移帧一件直落完成）。 */
   adopted: number;
   /**
-   * 未收编的 running run 数 = 收编判定未通过（幂等跳过 / 宽限窗 / 坏链 / 空
-   * record 流）+ 单 run 收编失败（warn 留痕）的总和。恒等式 adopted + skipped =
+   * 未收编的 running run 数 = 收编判定未通过（幂等跳过 / 坏链 / 空 record 流）+
+   * 单 run 收编失败（warn 留痕）的总和。恒等式 adopted + skipped =
    * 本次枚举出的 running run 数（非 running 的终态 run 不进收编判定，两侧都不计）。
    */
   skipped: number;
-  /** skipped 中宽限窗跳过数（skippedGraceWindow——事件流静止不足窗，下轮再收）。 */
-  skippedGraceWindow: number;
   /**
    * 本次枚举发现的 run 所在的 state 目录数（结果行「across K state dir(s)」的
    * K）。口径 = 结果集 stateDir 去重（枚举接口不暴露候选目录集；无 run 的空
@@ -102,7 +95,7 @@ const LOG_PREFIX = "[subagents] startup sweep:";
  * 级别留痕，调用方（runtime 启动序列）await 后照常继续。
  *
  * 结果行（info 级，规格 6）：
- * `[subagents] startup sweep: adopted N run(s), skipped M (grace W), across K state dir(s)`
+ * `[subagents] startup sweep: adopted N run(s), skipped M, across K state dir(s)`
  */
 export async function startupSweep(
   getAgentDir: () => string,
@@ -111,7 +104,6 @@ export async function startupSweep(
   const result: StartupSweepResult = {
     adopted: 0,
     skipped: 0,
-    skippedGraceWindow: 0,
     stateDirs: 0,
     errors: [],
   };
@@ -143,13 +135,11 @@ export async function startupSweep(
         // journalDir = 枚举出的 stateDir（per-call 目录参数——runtime 进程的
         // cwd/env 与落盘目录不相交，缺省模块锚在本形态结构性错位）。
         journalDir: run.stateDir,
-        graceWindowMs: STARTUP_SWEEP_GRACE_WINDOW_MS,
       });
       if (outcome === "adopted") {
         result.adopted += 1;
       } else {
         result.skipped += 1;
-        if (outcome === "skippedGraceWindow") result.skippedGraceWindow += 1;
       }
     } catch (err) {
       // 单 run 收编失败 = warn + 继续其余（bestEffort 同款容错，规格 5 / 决策 6）。
@@ -161,7 +151,7 @@ export async function startupSweep(
   }
   log.info(
     `${LOG_PREFIX} adopted ${result.adopted} run(s), ` +
-      `skipped ${result.skipped} (grace ${result.skippedGraceWindow}), ` +
+      `skipped ${result.skipped}, ` +
       `across ${result.stateDirs} state dir(s)`,
   );
   return result;

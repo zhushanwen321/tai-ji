@@ -1,14 +1,12 @@
 <template>
   <!--
     [crash-forensics-and-watchdog §3.3 D5 / D3，u7d + 偏差 #27] 滚动重启四态横幅 +
-    reattach 高压延迟轻态。视觉骨架复用 CrashRecoveredBar（fixed 顶部居中，零布局侵入），
-    但不复用其一次性语义——推迟等待是持续态：状态源 useRollingRestartStatus（广播加速
-    显示 + rollingRestart.status 只读 RPC 拉取恢复，重连/刷新不丢）。
+    reattach 高压延迟轻态。fixed 顶部居中，零布局侵入；推迟等待是持续态：状态源
+    useRollingRestartStatus（广播加速显示 + rollingRestart.status 只读 RPC 拉取恢复，
+    重连/刷新不丢）。
     挂载点 AppShell（连接后主界面；restarting 全屏过渡态由 App.vue 承接，横幅无需在场）。
-    **窗口级互斥（D5「同一时刻只有一条横幅」，滚动重启优先）**：本条 z-index 高于
-    CrashRecoveredBar（9999）一档——两者同位叠加时本条完整覆盖后者（不透明 bg-surface），
-    视觉上恒只有一条；红牌消除后 CrashRecoveredBar 恢复可达。跨条互斥需要双向感知
-    （改 useCrashRecoveryNotice/CrashRecoveredBar，领地外），采用覆盖式单向互斥并登记。
+    **横幅唯一性（D5「同一时刻只有一条横幅」）**：z-[10000] 顶部同位唯一横幅
+    （不透明 bg-surface 完整覆盖下层同位元素）。
   -->
   <Transition name="rolling-restart-banner">
     <div

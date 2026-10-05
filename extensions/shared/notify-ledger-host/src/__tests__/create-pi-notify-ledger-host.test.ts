@@ -2,7 +2,7 @@
 // 承载行为：
 // ① 端口接线（appendEntry / getEntries / isIdle / agent_settled 原样透传）；
 // ② 送达单通道形态与 stale 分诊——stale 静默降级 warn 归因、非 stale 原样上抛、
-//    sendDelivery 恒 {triggerTurn:true} / sendDisplayMessage 恒单参不唤醒。
+//    sendDelivery 恒 {triggerTurn:true}。
 // 观测参数（guard label / stale warn 前缀）在 guard-observability.test.ts（mock 形态，
 // vi.mock 全文件生效故独立成档）。
 // 两装配方（subagent-workflow / session-manager）的字段级行为等价由本组锚定：
@@ -120,24 +120,5 @@ describe("送达形态与 stale 分诊（真 guardStaleCtx）", () => {
 		const host = createPiNotifyLedgerHost(pi, makeCtx(), { component: "subagent-workflow", logger });
 		expect(() => host.sendDelivery(MESSAGE)).toThrow(boom);
 		expect(logger.warn).not.toHaveBeenCalled();
-	});
-
-	it("sendDisplayMessage 缺省不实现（最小 host，补显形前行为一致）", () => {
-		const { pi } = makePi();
-		const host = createPiNotifyLedgerHost(pi, makeCtx(), { component: "subagent-workflow", logger: makeLogger() });
-		expect(host.sendDisplayMessage).toBeUndefined();
-	});
-
-	it("sendDisplayMessage 显式开启：sendMessage(message) 单参（无 triggerTurn，不唤醒）", () => {
-		const { pi, sendMessage } = makePi();
-		const host = createPiNotifyLedgerHost(pi, makeCtx(), {
-			component: "subagent-workflow",
-			logger: makeLogger(),
-			sendDisplayMessage: true,
-		});
-		host.sendDisplayMessage?.(MESSAGE);
-		expect(sendMessage).toHaveBeenCalledTimes(1);
-		expect(sendMessage.mock.calls[0]?.length).toBe(1);
-		expect(sendMessage.mock.calls[0]?.[0]).toBe(MESSAGE);
 	});
 });

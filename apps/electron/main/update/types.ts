@@ -67,17 +67,18 @@ export interface UpdateErrorInfo {
  */
 export const UPDATE_ERROR_MESSAGES: Record<UpdateErrorCode, Omit<UpdateErrorInfo, 'code'>> = {
   UPDATE_NETWORK_TIMEOUT: {
-    // 成因多形态（timeout-slow-flow-wallclock D1/G1 + design-code-sync F1）：总墙钟已删、
-    // 本码不再由总时长触发，但仍有三个来源——① 传输停滞 30s（主形态，undici 双路径 +
-    // curl --speed-time）② curl --connect-timeout 10s 连接未建立（exit 28 双成因之一，
-    // 英文诊断串 'curl connection timeout (...)'）③ 泛化探测/abort（如 testProxy 10s
-    // 探测超时，诊断串 'timeout (aborted)'）。本条是停滞形态的基准文案（设计 §5.2 样例 5
-    // 措辞，30 秒与 IDLE_TIMEOUT_MS 对齐）；用户可见面由 update-handlers.resolveTimeoutUserCopy
-    // 按诊断 message 成因分流——connect 形态给连接超时话术（停滞文案会误导排查方向），
-    // 泛化形态给中性超时话术（无下载语境，「断点续传」指引不适用）。
-    message: '下载停滞（连续 30 秒无数据）已中断',
+    // 成因多形态（design-code-sync F1；原 undici 侧 30s 停滞检测已随 ADR-0112 删除）：
+    // ① curl --connect-timeout 10s 连接未建立（exit 28 双成因之一，英文诊断串
+    // 'curl connection timeout (...)'）② curl --speed-time 传输停滞（exit 28 另一成因，
+    // 诊断串 'curl download stalled (...)'——curl 进程参数属外部引擎，不在删除范围）
+    // ③ undici 传输层超时（headers/body timeout 兜出）④ 泛化探测/abort（如 testProxy
+    // 10s 探测超时，诊断串 'timeout (aborted)'）。本条是下载场景的基准文案；用户可见面
+    // 由 update-handlers.resolveTimeoutUserCopy 按诊断 message 成因分流——connect 形态给
+    // 连接超时话术（下载文案会误导排查方向），泛化形态给中性超时话术（无下载语境，
+    // 「断点续传」指引不适用）。
+    message: '下载超时已中断',
     stage: 'downloading',
-    suggestion: '点「重试」将从断点续传，无需重头下载；若反复停滞，请检查网络连接是否稳定或配置代理',
+    suggestion: '点「重试」将从断点续传，无需重头下载；若反复超时，请检查网络连接是否稳定或配置代理',
   },
   UPDATE_NETWORK_FAILED: {
     message: '网络连接失败',

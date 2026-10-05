@@ -691,6 +691,26 @@ export function extractExtensionCommandNames(msg: PiMessageLike): Set<string> {
 }
 
 /**
+ * 从 get_commands 响应解析 skill 与 prompt 模板条目 name 集合（skill-input-marker-pollution
+ * 恢复通道：手打形态 source=skill/prompt 清单条目统一切 started 基终局——出站不注标、
+ * pi 受理回执即终局。pi 侧对这两类输入展开为正常回合：_expandSkillCommand /
+ * expandPromptTemplate（agent-session.ts prompt/steer 路径实读），不返回 handled 接管，
+ * 终局由适配器按 disposition 受理事实驱动）。响应畸形（data.commands 非数组）→ 空集
+ * （调用方按清单缺失兜底：全量按普通消息出站）。
+ */
+export function extractSkillTemplateCommandNames(msg: PiMessageLike): Set<string> {
+  const out = new Set<string>()
+  const commands = msg.data?.commands
+  if (!Array.isArray(commands)) return out
+  for (const item of commands) {
+    const c = item as { name?: unknown; source?: unknown }
+    if (c.source !== 'skill' && c.source !== 'prompt') continue
+    if (typeof c.name === 'string' && c.name !== '') out.add(c.name)
+  }
+  return out
+}
+
+/**
  * 命令识别（D2①）：文本以 `/` 开头且首个空格前段剥去前导 `/` 后与清单 name **逐字精确匹配**
  * → 返回该 name；否则 undefined。两侧同口径剥斜杠：pi 侧命令名提取 = `text.slice(1, spaceIndex)`
  * （agent-session.js _tryExecuteExtensionCommand 实读），清单 name 无 `/` 前缀。清单 name 的

@@ -9,22 +9,17 @@
  *   探测（pi 收尾挂死时 3 次失败触发 onSilentAbort），settled 处理后停（防 B1 永续）。
  * - SC3 未知 kind（类型外运行时构造）落 handleMetaEvent default warn，不静默丢弃。
  *
- * 另含 UserStoppedGate 收敛环 pendingSettled 代数上限（RT-4#2③）：settled 永不到达时
- * 重挂窗累计代数，超上限强制清环（标记保留）——此前 pendingSettled 窗满不清、环条目
- * 永久存活（timer 已 fire 完不再重挂，条目 + userStopped 标记永驻）。
+ * （原 RT-4#2③ UserStoppedGate 收敛环代数上限组已随 ADR-0112 时间窗收敛环删除一并
+ * 移除——「settled 永不到达」场景归 PingProbe → onSilentAbort → forceQuit 显式上报链，
+ * 锁定用例见下方 settling 期 pi 真死组。）
  *
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/event-interpreter-settled-fallback.test.ts
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   EventInterpreter,
-  userStoppedGate,
   PING_INTERVAL_MS,
 } from '../event-interpreter.js'
-import {
-  ABORT_STALL_CONVERGENCE_WINDOW_MS,
-  ABORT_STALL_MAX_PENDING_GENERATIONS,
-} from '../event-interpreter-settled-delay.js'
 import type { ServerMessage } from '@taiji/shared'
 import type { PiTranslatedEvent, SessionOccupancyTransition } from '../types.js'
 
@@ -134,64 +129,6 @@ describe('[RT-4#2②] ping 生命期 = turn-start → agent_settled', () => {
     const countAfterSettled = pingPi.mock.calls.length
     await vi.advanceTimersByTimeAsync(PING_INTERVAL_MS * 10)
     expect(pingPi.mock.calls.length).toBe(countAfterSettled)
-    vi.restoreAllMocks()
-  })
-})
-
-describe('[RT-4#2③] UserStoppedGate 收敛环 pendingSettled 代数上限', () => {
-  beforeEach(() => { vi.useFakeTimers() })
-  afterEach(() => {
-    userStoppedGate.resetForTest()
-    vi.useRealTimers()
-  })
-
-  function armConvergence(sid: string): void {
-    // configure mock 宿主（marks 存取 + abort）并复现「被掐 turn 的 settled 未到」形态：
-    // begin 起环 → noteAgentStart 置 pendingSettled（标记存活前提下）。
-    const marks = new Map<string, string>()
-    userStoppedGate.configure({
-      marks: {
-        markUserStopped: (id, source) => { marks.set(id, source) },
-        hasUserStoppedMark: (id) => marks.has(id),
-        clearUserStoppedMark: (id) => { marks.delete(id) },
-        clearAllUserStoppedMarks: () => { marks.clear() },
-      },
-      abortSession: vi.fn(async () => {}),
-    })
-    userStoppedGate.markUserStopped(sid, 'user_force_quit')
-    userStoppedGate.beginRestoreConvergence(sid)
-    userStoppedGate.noteAgentStart(sid)
-  }
-
-  it('settled 永不到达：重挂窗累计代数，超上限强制清环且标记保留', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    armConvergence('sid-gen')
-
-    // 推进 (上限) 个窗口：每次窗满 pendingSettled=true → 重挂窗
-    await vi.advanceTimersByTimeAsync(ABORT_STALL_CONVERGENCE_WINDOW_MS * ABORT_STALL_MAX_PENDING_GENERATIONS)
-    // 代数耗尽 → 环条目清除（内部 converging Map 清空——由「标记保留 + 后续 begin 幂等」
-    // 可观测验证：再推进任意时长无新增 warn（环已死，不再重挂）
-    const warnCount = warnSpy.mock.calls.length
-    await vi.advanceTimersByTimeAsync(ABORT_STALL_CONVERGENCE_WINDOW_MS * 5)
-    expect(warnSpy.mock.calls.length).toBe(warnCount)
-    // 标记保留（restore 时标记仍生效——用户停止意图不因环退役丢失）
-    expect(userStoppedGate.hasUserStoppedMark('sid-gen')).toBe(true)
-    warnSpy.mockRestore()
-  })
-
-  it('settled 到达：代数清零重起算（正常链路不受代数上限影响）', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    armConvergence('sid-gen-ok')
-
-    // 多轮「窗将满 + settled 到达」：每轮代数清零，永不触发上限强制清环
-    for (let i = 0; i < ABORT_STALL_MAX_PENDING_GENERATIONS + 3; i++) {
-      await vi.advanceTimersByTimeAsync(ABORT_STALL_CONVERGENCE_WINDOW_MS - 10)
-      userStoppedGate.noteAgentStart('sid-gen-ok') // 新被掐 turn
-      userStoppedGate.noteAgentSettled('sid-gen-ok') // settled 到达 → 代数清零
-    }
-    // 环仍活跃（未达代数上限被强制清除）：settled 后窗重置，标记在静默窗满后正常收敛清除
-    await vi.advanceTimersByTimeAsync(ABORT_STALL_CONVERGENCE_WINDOW_MS + 10)
-    expect(userStoppedGate.hasUserStoppedMark('sid-gen-ok')).toBe(false)
     vi.restoreAllMocks()
   })
 })

@@ -26,10 +26,9 @@
  * [HISTORICAL] 不变量：
  * - 用全局 fetch（不用 electron.net，与 release-checker 一致，便于测试 mock）
  * - 流式下载：response.body.getReader() 累加 chunk 算进度 + pipe 到 writeStream（避免 100MB 一次进内存）
- * - 停滞检测是唯一超时形态（timeout-slow-flow-wallclock D1）：idle watchdog（30s 无进展
- *   即 abort）在 fetch 发起之前挂载，覆盖等响应头 + 流式传输全过程（clear 在 stream
- *   完成后才执行）；总墙钟已删除——只要下载还在传字节，无论多慢都不被杀，停滞 30s
- *   中断后走断点续传
+ * - 下载链路无时间防御（ADR-0112 追加裁决）：总墙钟与 idle 停滞检测均已删除——
+ *   只要传输在推进就持续等待；极端挂死由 undici 层自身超时（headers/body timeout）
+ *   兜出网络错误，不建应用层时间兜底
  * - 校验失败必须删除半下载文件，避免下次误用残文件
  * - .downloading 临时后缀：崩溃后残留文件不会伪装成完整安装包
  *
@@ -82,18 +81,6 @@ function getResumeStateFile(): string {
 }
 
 /**
- * 空闲超时：下载全程（等响应头 + 流式传输）连续 N ms 没有进展即中断。
- *
- * 国内网络典型故障是「连接建立后中途停滞」：流仍在「等字节」但实际已挂死。
- * 30s 无进展基本可判定连接已无效，主动 abort 后上层可走断点续传重连。
- *
- * 停滞检测是下载链路唯一保留的超时形态（timeout-slow-flow-wallclock D1）：
- * 总墙钟已删除——只要下载还在传字节，无论多慢都不被杀。watchdog 前移到
- * fetch 发起之前挂载，等响应头阶段同样受保护（响应头到达视为首个进展）。
- */
-const IDLE_TIMEOUT_MS = 30_000
-
-/**
  * 把 fetch 返回的 web ReadableStream 适配成 Node stream/web 的 ReadableStream 类型，
  * 供 `Readable.fromWeb` 消费。
  *
@@ -123,9 +110,6 @@ function getPersistedBytes(tempPath: string, fallback: number): number {
     return fallback
   }
 }
-
-/** ms → s 换算因子（用于错误消息里的超时秒数展示）。 */
-const MS_PER_SECOND = 1000
 
 /** HTTP 206 Partial Content：服务器接受 Range 请求、返回断点续传数据。 */
 const HTTP_PARTIAL_CONTENT = 206
@@ -213,13 +197,13 @@ export async function downloadAsset(
   //    - B/D7 probe 经 upgradeFetch（双引擎）：usedEngine='curl' → 本次放弃多段直接
   //      curl 整文件；flag 置位与否由 upgradeFetch 内部按 D4 判定，这里不做置位决策。
   //    - C/D 多段/单段失败按 D4 分类：连接建立失败 → 置 flag + 降级 curl；瞬时类/流中断
-  //      → 仅本次降级；HTTP/磁盘/超时类（non-fallback：含 idle 停滞中止/用户取消，D1 删总钟
-  //      后 AbortError 均非「连接建立类故障」，保守不降级）原样上抛不降级。
+  //      → 仅本次降级；HTTP/磁盘/超时类（non-fallback：传输层超时/用户取消等非「连接
+  //      建立类故障」，保守不降级）原样上抛不降级。
   //    [时序不变量 timeout-tick-parity] 编排分支保持提取前的同步判断形态（if/else 直达
   //    首个 IO await 调用点），禁止 async 编排 wrapper：从本函数进入到首个 IO await
-  //    （curl 链 / probe / downloadSingleStream→fetch）之间的 await 挂起点必须与提取前
-  //    逐一 tick 对齐——D1 idle 用例以 fake timers + 同步 enqueue 编排数据流，多一个
-  //    await tick 即使 fetch 晚到、测试的 source 捕获错位（2026-09 U03 实证）。
+  //    （curl 链 / probe / downloadSingleStream→fetch）之间的 await 挂起点保持最小——
+  //    编排决策在快路径同步完成（2026-09 U03 实证：多余 await tick 会让测试的 source
+  //    捕获错位）。
   const orchestrationCtx: IEngineOrchestrationContext = {
     tempPath, finalPath, downloadedBytes, resumeState, onProgress, proxyConfig, proxyUrl,
   }
@@ -486,64 +470,28 @@ interface ISingleStreamContext {
 }
 
 /**
- * idle 停滞检测 watchdog：连续 IDLE_TIMEOUT_MS 无进展即 abort controller。
- *
- * 在 fetch 发起之前创建（timeout-slow-flow-wallclock D1）：删除总墙钟后，等响应头
- * 阶段也由本 watchdog 覆盖——响应头到达视为首个进展（reset），之后每收到 chunk 继续
- * reset。P2 探针实证：真实 GitHub CDN header 时延 p50≈0.4s / max≈0.9s，30s 边界
- * 余量 >30x；per-part 路径（idle 本挂 fetch 前）已在生产以同形态运行。
- */
-function createIdleWatchdog(controller: AbortController) {
-  let timer: NodeJS.Timeout | undefined = setTimeout(() => controller.abort(), IDLE_TIMEOUT_MS)
-  return {
-    /** 收到进展（响应头到达 / 新 chunk）后重置 30s 计时。 */
-    reset(): void {
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(() => controller.abort(), IDLE_TIMEOUT_MS)
-    },
-    /** 流结束（成功或出错）后停表。 */
-    clear(): void {
-      if (timer) {
-        clearTimeout(timer)
-        timer = undefined
-      }
-    },
-  }
-}
-
-type IdleWatchdog = ReturnType<typeof createIdleWatchdog>
-
-/**
- * 单段流式下载（undici fetch + idle 停滞检测 + 断点续传保存）。
+ * 单段流式下载（undici fetch + 断点续传保存）。
  *
  * 从 downloadAsset 抽出为独立函数（u4）：既服务原单段路径，也作为 D10 第三步
  * 「curl 缺失回退 undici 直连」的执行体（proxyConfig=undefined 即无 dispatcher 直连）。
  *
- *    fetch + 流式传输共用同一个 AbortController，唯一超时形态是 idle 停滞检测
- *    （IDLE_TIMEOUT_MS，30s 无进展即中断），在 fetch 发起之前挂载：
- *    - 等响应头阶段受保护（总墙钟删除后若不前移，header 阶段将失去唯一显式保护）
- *    - 响应头到达即 reset 一次（首个进展），之后每收到 chunk 重置
- *    [NOTE] idle.clear() 必须在流式传输真正完成（writeStream finish/close）
- *    或出错后才执行——提前 clear 会让后续流式字节传输失去停滞保护，
- *    慢速/卡住连接的大文件可能永远挂住。下方用外层 try/finally 保证 stream
- *    结束才 clear。
+ *    fetch + 流式传输全程无应用层时间防御（ADR-0112 追加裁决：idle 停滞检测与
+ *    总墙钟均已删除）——传输推进即持续等待；极端挂死由 undici 层自身超时兜出
+ *    网络错误。
  *
  * 阶段拆分（结构性重构，行为不变）：
  *   1. fetchSingleStreamResponse —— fetch 执行 + 网络/HTTP/空 body 校验
  *   2. m5 totalBytes 一致性校验（stale 残文件作废递归重下）
- *   3. pipeResponseToTemp —— 流式写盘 + idle 重置 + 断点续传保存
+ *   3. pipeResponseToTemp —— 流式写盘 + 断点续传保存
  *   4. finalizeSingleStreamError —— 流错误收尾（temp 保留决策 + 分类抛出）
  *
- * @throws UpdateError 网络/停滞/磁盘分类错误（网络类附 cause=原始 undici 错误，
+ * @throws UpdateError 网络/磁盘分类错误（网络类附 cause=原始 undici 错误，
  *   供编排层 classifyUndiciFailure 按 D4 分类降级——errno 只在 cause 链上可提取）
  */
 async function downloadSingleStream(
   asset: ReleaseAsset,
   ctx: ISingleStreamContext,
 ): Promise<void> {
-  const controller = new AbortController()
-  // idle 停滞检测前移到 fetch 之前：等响应头阶段即受 30s 无进展保护（D1）。
-  const idle = createIdleWatchdog(controller)
   // dispatcher 声明在外层，确保外层 finally 能访问到做 close（连接池清理）。
   let dispatcher: ProxyAgent | undefined
   try {
@@ -551,14 +499,12 @@ async function downloadSingleStream(
     const rangeHeaders = ctx.downloadedBytes > 0
       ? { Range: `bytes=${ctx.downloadedBytes}-` }
       : undefined
-    const fetchOptions = buildFetchOptions(ctx.proxyConfig, controller.signal, rangeHeaders)
+    const fetchOptions = buildFetchOptions(ctx.proxyConfig, rangeHeaders)
     dispatcher = fetchOptions.dispatcher
 
     const response = await fetchSingleStreamResponse(asset, ctx, fetchOptions)
-    // 响应头到达 = 首个进展：重新计 30s，覆盖「header 之后、首个 body chunk 之前」的间隙。
-    idle.reset()
 
-    // 4. 流式写到 .downloading 临时文件，同时累加进度（共用上面的 controller/idle watchdog）
+    // 流式写到 .downloading 临时文件，同时累加进度
     //
     // [C3] Range 续传响应分类：发了 Range: bytes=N- 后必须区分
     //   - 206 Partial Content：续传成功，content-length 是剩余部分大小，
@@ -586,10 +532,8 @@ async function downloadSingleStream(
 
     await pipeResponseToTemp(ctx, response, {
       writeFlags, total, startBytes: resumeAccepted ? ctx.downloadedBytes : 0,
-    }, idle)
+    })
   } finally {
-    // 外层兜底：fetch 阶段异常也确保 idle watchdog 被清理。
-    idle.clear()
     // ProxyAgent 持有连接池，下载结束（成功/失败）后显式关闭避免句柄泄漏。
     if (dispatcher) {
       await dispatcher.close().catch(() => {}) // best-effort 连接池清理，失败不影响下载结果
@@ -612,20 +556,6 @@ async function fetchSingleStreamResponse(
   try {
     response = await fetch(asset.downloadUrl, fetchOptions as RequestInit)
   } catch (fetchErr) {
-    // header 等待阶段的 idle 中止（D1 idle 前移后本阶段唯一 abort 来源）按停滞语义抛出
-    // （design-code-sync F1）：与 testProxy 探测超时（同经 classifyNetError 产泛化
-    // 'timeout (aborted)'）在诊断串上可判别，下游用户文案按成因分流才不误标。cause 链
-    // 保留原始错误（编排层 classifyUndiciFailure 判定口径与之前 AbortError 形态一致）。
-    if (fetchErr instanceof Error && (fetchErr.name === 'AbortError' || fetchErr.message.includes('aborted'))) {
-      const stalled = new UpdateError(
-        `download stalled (no data for ${IDLE_TIMEOUT_MS / MS_PER_SECOND}s), aborted; temp kept — retry resumes from break point`,
-        'downloading',
-        'UPDATE_NETWORK_TIMEOUT',
-        extractRawCause(fetchErr),
-      )
-      stalled.cause = fetchErr
-      throw stalled
-    }
     // D1: 使用统一的分类函数替代内联字符串匹配（收敛三条 fetch 路径）
     const proxyUrl = ctx.proxyConfig ? resolveProxyUrl(ctx.proxyConfig) : undefined
     const classified = classifyNetError(fetchErr, 'downloading', proxyUrl)
@@ -677,15 +607,12 @@ interface ISingleStreamPipePlan {
 
 /**
  * 流式写盘阶段（downloadSingleStream 阶段 3）：pipe response.body 到 temp 文件，
- * 期间每收到 chunk 重置 idle watchdog、节流进度与断点续传状态保存；失败走
- * finalizeSingleStreamError。idle watchdog 由调用方在 fetch 前创建（停滞检测
- * 覆盖 header 等待 + 流传输全程），本函数只负责进展重置与收尾清理。
+ * 期间节流进度与断点续传状态保存；失败走 finalizeSingleStreamError。
  */
 async function pipeResponseToTemp(
   ctx: ISingleStreamContext,
   response: Response,
   plan: ISingleStreamPipePlan,
-  idle: IdleWatchdog,
 ): Promise<void> {
   const { total } = plan
   // 续传起点（206 = downloadedBytes；200 回退/全新 = 0）
@@ -702,8 +629,6 @@ async function pipeResponseToTemp(
     await new Promise<void>((resolve, reject) => {
       nodeStream.on('data', (chunk: Buffer) => {
         downloaded += chunk.length
-        // [M1] 收到新数据重置 idle timer（只要有字节流动就不算挂死）
-        idle.reset()
         // [NOTE] total=0（chunked 传输无 content-length）时不报进度：
         // onProgress 签名是 0-100 百分比，无总量时无法计算百分比；
         // 前端 useAppUpdate 的 state.percent 期望 0-100，传负值会 UI 异常。
@@ -738,9 +663,6 @@ async function pipeResponseToTemp(
     // [LEAK FIX] destroy writeStream 释放底层 fd，避免错误路径泄漏文件描述符。
     writeStream.destroy()
     finalizeSingleStreamError(ctx, err, downloaded, total)
-  } finally {
-    // [M1] 流式传输已结束（成功 finish 或抛错）才停 idle watchdog。
-    idle.clear()
   }
 }
 
@@ -756,6 +678,8 @@ function finalizeSingleStreamError(
   total: number,
 ): never {
   // 超时判定（用于错误分类：UPDATE_NETWORK_TIMEOUT vs 其他），不影响是否保留 temp。
+  // 应用层无时间防御（idle watchdog 已删）；此分支命中的是传输层真实超时形态
+  // （undici UND_ERR_BODY_TIMEOUT / headers timeout 等），非应用层时钟产物。
   const isTimeout = err instanceof Error && (
     err.name === 'AbortError' ||
     err.message.includes('aborted') ||
@@ -801,11 +725,10 @@ function finalizeSingleStreamError(
       extractRawCause(err),
     )
   }
-  // 停滞中断（idle 30s 无进展 abort；总墙钟删除后单段流阶段 AbortError 唯一来源即此，
-  // 见 timeout-slow-flow-wallclock D1）：映射为 UPDATE_NETWORK_TIMEOUT + 断点续传指引。
+  // 传输超时（undici 层超时兜出的错误）：映射为 UPDATE_NETWORK_TIMEOUT + 断点续传指引。
   if (isTimeout) {
     throw new UpdateError(
-      `download stalled (no data for ${IDLE_TIMEOUT_MS / MS_PER_SECOND}s), aborted; temp kept — retry resumes from break point`,
+      `download timed out; temp kept — retry resumes from break point`,
       'downloading',
       'UPDATE_NETWORK_TIMEOUT',
       extractRawCause(err),
@@ -1017,19 +940,23 @@ function logUndiciEngineFallback(err: unknown, proxyUrl: string | undefined): vo
 }
 
 /**
- * 构造 fetch 选项（User-Agent + 代理 + signal + 可选 Range 头）。
+ * 构造 fetch 选项（User-Agent + 代理 + 可选 signal + 可选 Range 头）。
  * 与 release-checker 保持一致的 User-Agent，避免部分 CDN 因空 UA 拒绝/限速。
+ * signal 缺省 = 单段路径（无应用层中断源，ADR-0112：时间防御已删）；
+ * 多段路径传共享 abort signal（任一段失败中断整批）。
  */
 function buildFetchOptions(
   proxyConfig: IProxyConfig | undefined,
-  signal: AbortSignal,
   extraHeaders?: Record<string, string>,
+  signal?: AbortSignal,
 ): RequestInit & { dispatcher?: ProxyAgent } {
   const headers: Record<string, string> = {
     'User-Agent': DOWNLOAD_USER_AGENT,
     ...extraHeaders,
   }
-  const options: RequestInit & { dispatcher?: ProxyAgent } = { signal, headers }
+  const options: RequestInit & { dispatcher?: ProxyAgent } = signal
+    ? { signal, headers }
+    : { headers }
   const proxyUrl = proxyConfig ? resolveProxyUrl(proxyConfig) : undefined
   if (proxyUrl) {
     try {
@@ -1146,8 +1073,7 @@ function createThrottledProgress(
  * @param proxyConfig 代理配置
  * @param onProgress 段内进度（实际只更新总进度，这里传 no-op 或段内计数）
  * @param sharedSignal downloadMultiPart 的共享 abort signal（[RM3] 段失败整批中断）：
- *   与下方 per-part watchdog controller 组合——共享 abort 触发本段 controller abort，
- *   idle 停滞检测语义保留在 per-part controller 上不变。缺省（单段调用方）无共享中断。
+ *   触发本段 controller abort。缺省（单段调用方）无共享中断。
  * @returns 下载字节数
  */
 async function downloadPart(
@@ -1163,15 +1089,12 @@ async function downloadPart(
     if (sharedSignal.aborted) controller.abort()
     else sharedSignal.addEventListener('abort', onSharedAbort)
   }
-  // per-part 只受 idle 停滞检测保护（总墙钟已删，D1）：idleTimer 本就挂在 fetch 之前，
-  // 等响应头阶段已被覆盖，无需前移（timeout-slow-flow-wallclock v1.1 口径）。
-  let idleTimer: NodeJS.Timeout | undefined = setTimeout(() => controller.abort(), IDLE_TIMEOUT_MS)
   let dispatcher: ProxyAgent | undefined
   let writeStream: ReturnType<typeof createWriteStream> | undefined
   try {
-    const options = buildFetchOptions(proxyConfig, controller.signal, {
+    const options = buildFetchOptions(proxyConfig, {
       Range: `bytes=${part.start}-${part.end}`,
-    })
+    }, controller.signal)
     dispatcher = options.dispatcher
     const response = await fetch(asset.downloadUrl, options)
     if (!response.ok || !response.body) {
@@ -1195,10 +1118,6 @@ async function downloadPart(
     return await new Promise<number>((resolve, reject) => {
       nodeStream.on('data', (chunk: Buffer) => {
         downloaded += chunk.length
-        if (idleTimer) {
-          clearTimeout(idleTimer)
-        }
-        idleTimer = setTimeout(() => controller.abort(), IDLE_TIMEOUT_MS)
         onProgress(downloaded)
       })
       nodeStream.pipe(writeStream!)
@@ -1253,7 +1172,6 @@ async function downloadPart(
     throw classified
   } finally {
     if (sharedSignal) sharedSignal.removeEventListener('abort', onSharedAbort)
-    if (idleTimer) clearTimeout(idleTimer)
     if (dispatcher) await dispatcher.close().catch(() => {})
   }
 }
@@ -1268,13 +1186,8 @@ async function downloadPart(
  * 5. [RM3] 任一段检测到服务器未遵守 Range（非 206 / 段长不符）→ 清理全部段文件，
  *    返回 degradedToSingle=true，由调用方降级单段完整下载，绝不合并错位内容。
  *
- * [MUST-FIX #4 / timeout 语义说明] downloadPart 每段独立受 IDLE_TIMEOUT_MS（30s 空闲）
- * 停滞检测保护（timeout-slow-flow-wallclock D1：总墙钟已删，活跃慢速段不再被时间上限杀）。
- * 这是多段下载的固有特性：某段 Range 落到 CDN 缓存未命中的字节区，单段 30s idle 中断即经
- * 共享 abortController 中断整批。这与单段下载「同一区域只中断一次可续传」语义不同。
- * 不放宽 timeout（30s idle 是国内网络挂死检测的合理阈值，放宽会退化为挂死），
- * 阈值调整（10MB→更大）超出 must-fix 范围。确定性风险已通过 downloadPart 失败自清 part 文件
- * （见 downloadPart catch）收敛。
+ * 段级无时间防御（ADR-0112：idle 停滞检测已删，与单段路径同口径）——任一段失败
+ * 经共享 abortController 中断整批（失败传播，非时间机制）。
  */
 async function downloadMultiPart(
   asset: ReleaseAsset,

@@ -34,9 +34,9 @@
  *   - 连续同签名失败达 MAX_CONSECUTIVE_FAILURES（3）→ terminal 态：
  *     写日志（stderr + appendEntry 双通道，含 §5.2 形态 b 恢复指引）后
  *     ctx.abort()（停当前 turn，截断 token 燃烧窗口）+ ctx.shutdown() 优雅终止
- *     子进程（RPC mode 在 agent_settled 后 exit），并武装 15s 兜底硬退 timer
- *    （R3 F-2 bounded teardown，覆盖 pi 挂死不 settle 的异常态；副作用序列见
- *     runTerminalTeardown，装配层在 newlyTerminal 时调用）。
+ *     子进程（RPC mode 在 agent_settled 后 exit）——副作用序列见 runTerminalTeardown，
+ *     装配层在 newlyTerminal 时调用。无兜底硬退 timer（ADR-0112 信任边界内不设防：
+ *     pi 挂死不 settle 的处置 = 父进程既有失败路径 + 用户重启应用，不建墙钟兜底）。
  *   - 成功调用清零（模型走通即无循环）。
  *
  * steer 侧转移（onToolExecEnd 的记账段 + onTurnEnd，转移表锁定于 retry-state.test.ts）：
@@ -460,70 +460,6 @@ export class WorkflowGate {
 /** terminal 日志的 appendEntry customType（session.jsonl 持久化，不进 LLM 上下文）。 */
 export const GATE_ENTRY_TYPE = "structured-output:gate";
 
-/** 每秒毫秒数（teardown 日志 ms→s 换算用，no-magic-numbers）。 */
-const MS_PER_SECOND = 1000;
-
-/**
- * terminal 后 bounded teardown 的兜底硬退窗口（ms）。
- *
- * 任务原案 10s（SIGTERM 前优雅窗口）+ 5s（SIGKILL 前余量）的信号分级在扩展上下文
- * 不可达（pi 0.84.1 ExtensionContext 无子进程句柄/信号能力，见 armForceExitTeardown
- * 注释的核实记录），合并为单步 process.exit 硬退窗口。
- *
- * 数据完整性权衡（照任务要求写明）：session flush 在 shutdown 请求时已尽力——RPC
- * mode 于 agent_settled 后 exit，session entry 逐条 append 落盘（writeTerminatedLog
- * 的 entry 在 terminal 当下已写入）；15s 优雅窗口远超正常 flush 需求（abort+shutdown
- * 后正常退出秒级完成），兜底只覆盖「pi 挂死不 settle」的异常态——此时宁可硬退
- *（父进程 SW 侧走「子进程结束未产出 structured-output」失败路径，stderr 已留原因）
- * 也不无限烧 token。
- *
- * 安全域：15_000 为字面量常量，处于 Node setTimeout 安全域内（非有限/超 2^31-1
- * 会塌缩为 1ms 立即触发——若未来 delay 来源动态化，需引入安全域校验，参照
- * packages/subagent-core/src/shared/timer-delay.ts 的 assertSafeTimerDelay）。
- */
-export const TEARDOWN_FORCE_EXIT_MS = 15_000;
-
-/**
- * 兜底硬退 exit code：非零且 < 128（SW 侧 session-runner 的 SIGNAL_EXIT_CODE_THRESHOLD）
- * → 父进程按「子进程自身报错」记录（stderr 缓冲已先行写明原因），不会与信号终止混淆。
- */
-const TEARDOWN_EXIT_CODE = 1;
-
-// one-shot timer 不属 C-ext-06 §7.5 的「跨 session 存活进程级单例」范畴：
-// terminal 一次性武装、随 process.exit 消亡；jiti 双实例下双 timer 各自
-// process.exit 进程级幂等，模块级 let 即可。
-let teardownTimer: ReturnType<typeof setTimeout> | undefined;
-
-/**
- * 武装 terminal 后的 bounded teardown 兜底：TEARDOWN_FORCE_EXIT_MS 后进程仍未退出
- *（pi 挂死未 settle）则 process.exit 硬退。
- *
- * 方案依据（pi 0.84.1 实装核实，node_modules/@earendil-works/pi-coding-agent
- * dist/core/extensions/types.d.ts + dist/core/extensions/runner.js）：
- * ExtensionContext 对外仅 shutdown()（优雅：置 shutdownRequested，agent_settled 后
- * exit）与 abort()（中止当前 agent 操作），无子进程句柄/信号 API；扩展与 pi 子进程
- * 同进程（loader 进程内加载），「向子进程发 SIGTERM/SIGKILL」在语义上不成立——扩展
- * 能做的最大硬杀就是对自身 process.exit。故采用任务预设的兜底形态：abort+shutdown
- * 优雅退出为主，定时 process.exit 兜底。
- *
- * timer 卫生：delay 为字面量常量、处 setTimeout 安全域（见 TEARDOWN_FORCE_EXIT_MS 注释）+
- * unref（不阻止 pi 在窗口内自然退出；自然退出时本 timer 随进程消亡不再开火）+
- * terminal 路径幂等 clearTimeout（重复武装不叠加多个兜底 timer）。
- */
-export function armForceExitTeardown(): void {
-	if (teardownTimer !== undefined) clearTimeout(teardownTimer);
-	const timer = setTimeout(() => {
-		process.stderr.write(
-			`[structured-output gate] graceful shutdown did not complete within ${TEARDOWN_FORCE_EXIT_MS / MS_PER_SECOND}s; `
-				+ "force-exiting (session flush was best-effort at shutdown request).\n",
-		);
-		process.exit(TEARDOWN_EXIT_CODE);
-	}, TEARDOWN_FORCE_EXIT_MS);
-	// unref：窗口内 pi 自然退出时不被本 timer 拖住（timer 随进程消亡，不再开火）
-	timer.unref();
-	teardownTimer = timer;
-}
-
 /**
  * terminal 态日志（§5.2 形态 b）：
  *   - stderr：子进程 stderr 直出（taiji runtime 的 pi-*.jsonl tee / 本地探针可见）
@@ -561,21 +497,20 @@ function writeTerminatedLog(pi: PiAPI, gate: WorkflowGate): void {
  * terminal 触发时的副作用链（装配层在 gate.onToolExecEnd 返回 newlyTerminal 时调用，
  * 见 workflow-hook.setupWorkflowHook）。
  *
- * 时序（R3 F-2 bounded teardown）：写日志（stderr + appendEntry 双通道，R3 F-3）→
- * ctx.abort()（中止当前 agent 操作——截断「shutdown 请求后当前 turn 的 bash/read/
- * 流式继续跑、模型继续烧 token」的窗口，~25s 实测窗口在 abort 后即止）→
- * ctx.shutdown()（RPC mode 置 shutdownRequested，agent_settled 后进程 exit(0)，
- * 父进程走「子进程结束但未产出 structured-output」的既有失败路径）→
- * armForceExitTeardown()（15s 兜底硬退，覆盖 pi 挂死不 settle 的异常态；方案依据
- * 见该函数注释）。
+ * 时序：写日志（stderr + appendEntry 双通道，R3 F-3）→ ctx.abort()（中止当前
+ * agent 操作——截断「shutdown 请求后当前 turn 的 bash/read/流式继续跑、模型继续烧
+ * token」的窗口）→ ctx.shutdown()（RPC mode 置 shutdownRequested，agent_settled 后
+ * 进程 exit(0)，父进程走「子进程结束但未产出 structured-output」的既有失败路径）。
+ * 无兜底硬退 timer（ADR-0112 信任边界内不设防）：pi 挂死不 settle 时 shutdown 不返回
+ * 的处置 = 父进程既有失败路径 + 用户重启应用，不建墙钟兜底。
  */
 export function runTerminalTeardown(pi: PiAPI, gate: WorkflowGate, ctx: ExtensionContext): void {
 	writeTerminatedLog(pi, gate);
 	// stale ctx 防御（crash-resilience D1）：abort/shutdown 均在 pi assertActive 面
 	// （PS-30，runner.js createContext）——session 替换窗口触发 terminal 时无人接的
 	// 同步 throw 会经 async handler 变 rejected Promise 杀 pi 进程。stale 静默跳过
-	// 优雅退出（此时进程的存在意义已随 session 替换消失），armForceExitTeardown 的
-	// 15s 硬退兜底保持武装——自清理语义不丢。非 stale 错误原样上抛（守卫不吞真实 bug）。
+	// 优雅退出（此时进程的存在意义已随 session 替换消失）。非 stale 错误原样上抛
+	//（守卫不吞真实 bug）。
 	guardStaleCtx(() => {
 		ctx.abort();
 		ctx.shutdown();
@@ -584,9 +519,8 @@ export function runTerminalTeardown(pi: PiAPI, gate: WorkflowGate, ctx: Extensio
 		onStale: (error) => {
 			process.stderr.write(
 				`[structured-output gate] terminal teardown skipped (stale ctx, session replaced): `
-					+ `${toErrorMessage(error)}; force-exit timer stays armed.\n`,
+					+ `${toErrorMessage(error)}\n`,
 			);
 		},
 	});
-	armForceExitTeardown();
 }

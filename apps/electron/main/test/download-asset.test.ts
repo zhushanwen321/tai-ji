@@ -1178,172 +1178,23 @@ describe('probe 四出口归类（GET Range 0-0 + Content-Range 判定）', () =
 })
 
 // ════════════════════════════════════════════════════════════════
-// D1 idle 停滞检测语义（timeout-slow-flow-wallclock 设计 §8 P2 / §9 场景 1/2 单测映射）。
-// 总墙钟删除后单段路径的唯一超时形态是 idle watchdog（fetch 前挂载）：
-//   ① 慢速但持续传输（<30s 必有字节）跨旧总钟边界（>3600s）不被杀
-//   ② 流中停滞 30s 无数据 → 中断 + UPDATE_NETWORK_TIMEOUT + temp 保留可续传
-//   ③ 等响应头阶段停滞 30s → idle 前移后照样中断（防 header 阶段无限挂）
+// UPDATE_NETWORK_TIMEOUT 用户可见文案闭环（G1 失败路径）：main 推送 update:error 前
+// 经 toUserFriendly() 映射（reportUpdateDownloadError 组 UpdateErrorPayload），
+// toast/设置页展示超时语义中文文案 + 断点续传指引；英文技术 message 只走落盘
+// 诊断通道，不直达用户。（原 D1 idle 停滞检测行为用例随该机制删除——ADR-0112）
 // ════════════════════════════════════════════════════════════════
-describe('D1: idle 停滞检测（总墙钟已删）', () => {
-  let originalFetch: typeof globalThis.fetch
-  let downloadAsset: typeof import('../update/download-asset.js')['downloadAsset']
-
-  /** 单块字节数（400 块 × 1KB = 400KB < 1MB 保存阈值，避免中途写 resume-state 干扰） */
-  const CHUNK_BYTES = 1024
-
-  /** 受控流式下载源：测试手动 enqueue/close 驱动 data 事件；signal abort 时 error 掉流（镜像真实 undici abort 传播行为）。 */
-  function makeControlledSource(totalBytes: number, signal?: AbortSignal): {
-    response: Response
-    enqueue: (buf: Uint8Array) => void
-    close: () => void
-  } {
-    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined
-    const stream = new ReadableStream<Uint8Array>({
-      start(c) {
-        streamController = c
-        signal?.addEventListener('abort', () => {
-          try { c.error(Object.assign(new Error('This operation was aborted'), { name: 'AbortError' })) } catch { /* 已关闭 */ }
-        }, { once: true })
-      },
-    })
-    return {
-      response: new Response(stream, {
-        status: 200,
-        headers: { 'Content-Length': String(totalBytes) },
-      }),
-      enqueue: (buf) => streamController?.enqueue(buf),
-      close: () => streamController?.close(),
-    }
-  }
-
-  beforeEach(async () => {
-    originalFetch = globalThis.fetch
-    const mod = await loadModule()
-    downloadAsset = mod.downloadAsset
-  })
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch
-    vi.useRealTimers()
-    vi.restoreAllMocks()
-    const updateDir = path.join(TMP_DATA_DIR, 'update')
-    if (existsSync(updateDir)) rmSync(updateDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-  })
-
-  // ① 场景 1（单测缩样）：慢速但持续传输不被杀——每 10s 一块共 400 块 = 4000s，
-  //    跨越旧总墙钟 3600s 边界；删除总钟后应完整下载成功。
-  it('慢速但持续传输跨旧总钟边界（4000s > 3600s）不被杀，最终下载成功', async () => {
-    vi.useFakeTimers()
-    const totalChunks = 400
-    const content = Buffer.alloc(totalChunks * CHUNK_BYTES, 0x5a)
-    const expectedSha = sha256Hex(content)
-    let source: ReturnType<typeof makeControlledSource> | undefined
-    globalThis.fetch = vi.fn(async () => {
-      source = makeControlledSource(content.length)
-      return source.response
-    }) as unknown as typeof globalThis.fetch
-
-    const pending = downloadAsset({
-      name: 'd1-slow-sustained.zip',
-      downloadUrl: 'https://example.com/d1-slow-sustained.zip',
-      size: content.length,
-      sha256: expectedSha,
-    })
-    const probe = pending.then(() => 'resolved' as const, () => 'rejected' as const)
-
-    // 每块间隔 10s（< 30s idle 边界）：data 到达即重置 idle，跨旧总钟边界持续推进
-    for (let i = 0; i < totalChunks; i++) {
-      source!.enqueue(new Uint8Array(content.subarray(i * CHUNK_BYTES, (i + 1) * CHUNK_BYTES)))
-      await vi.advanceTimersByTimeAsync(10_000)
-    }
-    source!.close()
-
-    expect(await probe).toBe('resolved')
-    const finalPath = path.join(TMP_DATA_DIR, 'update', 'd1-slow-sustained.zip')
-    expect(readFileSync(finalPath).compare(content)).toBe(0)
-  }, 30_000)
-
-  // ② 场景 2（单测缩样）：流中停滞 30 秒无数据 → idle 中断，错误可续传（temp 保留）。
-  it('流中停滞 30 秒 → idle abort，报 UPDATE_NETWORK_TIMEOUT（停滞文案）且 temp + resume-state 保留可续传', async () => {
-    vi.useFakeTimers()
-    const totalBytes = 100 * 1024 // < 10MB 多段阈值：直接单段路径，无 probe 干扰
-    let source: ReturnType<typeof makeControlledSource> | undefined
-    globalThis.fetch = vi.fn(async (_url: unknown, init?: { signal?: AbortSignal }) => {
-      source = makeControlledSource(totalBytes, init?.signal)
-      return source.response
-    }) as unknown as typeof globalThis.fetch
-
-    const pending = downloadAsset({
-      name: 'd1-stall-midstream.zip',
-      downloadUrl: 'https://example.com/d1-stall.zip',
-      size: totalBytes,
-    })
-    const probe = pending.then(() => 'resolved' as const, (e: unknown) => e)
-
-    source!.enqueue(new Uint8Array(CHUNK_BYTES)) // 首块到达（重置 idle）
-    await vi.advanceTimersByTimeAsync(1_000) // flush data 回调
-    // 先等 .downloading 真实落盘（fd open 完成）再推进假时钟：open 是 threadpool
-    // 异步操作，CI 拥塞时可晚于 idle abort 触发，届时 destroy 会连带取消尚未创建的
-    // 文件 → 断言假红（生产不会：abort 要求 30s 无数据，必晚于 open）。
-    const stallTempPath = path.join(TMP_DATA_DIR, 'update', 'd1-stall-midstream.zip.downloading')
-    await waitForRealPath(stallTempPath)
-    await vi.advanceTimersByTimeAsync(30_000) // 停滞满 30s → idle abort
-
-    const err = await probe
-    expect(err).toBeInstanceOf(UpdateError)
-    const updateErr = err as UpdateError
-    expect(updateErr.errorCode).toBe('UPDATE_NETWORK_TIMEOUT')
-    expect(updateErr.message).toContain('stalled')
-    expect(updateErr.message).toContain('30s')
-    // 可续传：temp 与 resume-state 均保留（重试从断点续传）
-    expect(existsSync(stallTempPath)).toBe(true)
-    expect(existsSync(path.join(TMP_DATA_DIR, 'update', 'resume-state.json'))).toBe(true)
-  }, 30_000)
-
-  // ③ P2 守护（单测缩样）：等响应头阶段停滞——idle 前移到 fetch 之前后，header 阶段
-  //    同样受 30s 保护；删除总钟后此阶段不再无限挂（P2 探针实证正常 CDN header 时延
-  //    p50≈0.4s / max≈0.9s，30s 边界余量 >30x）。
-  it('等响应头阶段停滞 30 秒 → idle 前移后照样中断（UPDATE_NETWORK_TIMEOUT），不再无限挂', async () => {
-    vi.useFakeTimers()
-    globalThis.fetch = vi.fn((_url: unknown, init?: { signal?: AbortSignal }) =>
-      new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener('abort', () => {
-          reject(Object.assign(new Error('This operation was aborted'), { name: 'AbortError' }))
-        })
-      })) as unknown as typeof globalThis.fetch
-
-    const pending = downloadAsset({
-      name: 'd1-stall-header.zip',
-      downloadUrl: 'https://example.com/d1-stall-header.zip',
-      size: 4096,
-    })
-    const probe = pending.then(() => 'resolved' as const, (e: unknown) => e)
-    await vi.advanceTimersByTimeAsync(30_000)
-
-    const err = await probe
-    expect(err).toBeInstanceOf(UpdateError)
-    expect((err as UpdateError).errorCode).toBe('UPDATE_NETWORK_TIMEOUT')
-    // header 停滞的诊断串为停滞语义（F1 成因分流的判别依据），非泛化 'timeout (aborted)'
-    expect((err as UpdateError).message).toContain('stalled')
-    // header 阶段失败：temp 文件从未创建，无半下载残留
-    expect(existsSync(path.join(TMP_DATA_DIR, 'update', 'd1-stall-header.zip.downloading'))).toBe(false)
-  }, 30_000)
-
-  // ④ 用户可见文案闭环（G1 失败路径）：main 推送 update:error 前经 toUserFriendly()
-  //    映射（reportUpdateDownloadError 组 UpdateErrorPayload），toast/设置页展示的是
-  //    停滞语义中文文案 + 断点续传指引（设计 §5.2 样例 5）；英文技术 message 只走
-  //    落盘诊断通道，不直达用户。
-  it('UPDATE_NETWORK_TIMEOUT 用户可见文案为停滞语义 + 续传指引（toUserFriendly 映射闭环）', () => {
+describe('UPDATE_NETWORK_TIMEOUT 用户可见文案（toUserFriendly 映射闭环）', () => {
+  it('UPDATE_NETWORK_TIMEOUT 用户可见文案为超时语义 + 续传指引', () => {
     const err = new UpdateError(
-      'download stalled (no data for 30s), aborted; temp kept — retry resumes from break point',
+      'download timed out; temp kept — retry resumes from break point',
       'downloading',
       'UPDATE_NETWORK_TIMEOUT',
     )
     const friendly = err.toUserFriendly()
-    expect(friendly.message).toBe('下载停滞（连续 30 秒无数据）已中断')
+    expect(friendly.message).toBe('下载超时已中断')
     expect(friendly.suggestion).toContain('断点续传')
     expect(friendly.suggestion).toContain('重试')
     // 英文技术 message 无「(大写码)」形态，不触发 (CODE) 后缀拼接污染中文文案
-    expect(friendly.message).not.toContain('stalled')
+    expect(friendly.message).not.toContain('timed out (')
   })
 })

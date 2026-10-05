@@ -1371,13 +1371,12 @@ export class SessionLifecycle implements ISessionRegistry {
    * replay turn 是精准中止）。
    * 调用方已判定标记存在（判定点与拆分前同位置），本函数不重复判定。
    *
-   * 标记不在此清：notify-ledger 有两条投递腿（session_start 恢复扫描 + settled 补发腿——
-   * abort 掐掉的 turn 收尾产生 agent_settled 边沿，busy parked 的通知在该边沿补投开新
-   * turn），一次性 abort 后清标记会被补发腿击穿（R1 审查反例）。改由收敛环接管：abort 成功后
-   * 启动静默观察窗（起点 = abort 完成，idle 场景同样有明确起点），标记存活期内 interpreter
-   * 观测到非显式投递引发的 agent_start 一律再 abort，窗满且最后一次被掐 turn 的
-   * agent_settled 已到达 → 判收敛清标记（挂点与状态机见 event-interpreter.ts
-   * UserStoppedGate）。显式投递（sendPrompt 等）在 dispatcher 投递前清标记放行。
+   * 标记不在此清（ADR-0112 事件顺序契约）：标记存活期 = 旁路 turn 拦截存续期，清除只由
+   * 显式意图事件驱动（显式投递 / 会话删除 / shutdown）。restore-abort 掐掉的 replay turn
+   * 的 settled 边沿正是 notify-ledger 补投触发点——此处清标记会被同边沿补投击穿（R1 审查
+   * 反例）；标记存续期间 interpreter 的 agent_start 挂点持续拦截旁路 turn（挂点与契约见
+   * event-interpreter.ts UserStoppedGate）。显式投递（sendPrompt 等）在 dispatcher 投递前
+   * 清标记放行。
    *
    * 失败链顺序同拆分前：abort 抛错 → warn → **await** forceQuitFallback → 再抛错 → warn
    *（两层 try/catch 都在本函数内，吞错边界与拆分前一致）。
@@ -1385,20 +1384,17 @@ export class SessionLifecycle implements ISessionRegistry {
   private async applyRestoreAbortConvergence(client: IPiEngine, sessionId: string): Promise<void> {
     try {
       await client.abort()
-      // 主 abort 成功 → 启动收敛环（abort 失败路径不起环：标记不视为已消费，收敛环未完成，
-      // 下次 restore 重试——错误规格 §3.4 restore-abort 失败行）。
-      userStoppedGate.beginRestoreConvergence(sessionId)
     } catch (abortErr) {
       // 既有 abort 失败链收口（错误规格 §3.4）：超时/断链 → forceQuit 强杀收敛（幂等：
       // 进程已死时成功返回）。经注入的 dispatcher.forceQuit（构造注入，避免双倍 abort
-      // RPC 超时等待直达强杀）。强杀失败（极端）→ 标记保留 + 环不启动，用户再点
+      // RPC 超时等待直达强杀）。强杀失败（极端）→ 标记保留，用户再点
       // 「强制退出」即达终态（设计恢复指引）。
       console.warn(`[session-lifecycle] restore-abort failed for ${sessionId}, falling back to force-quit convergence:`, toErrorMessage(abortErr))
       try {
         await this.userStoppedOps?.forceQuitFallback?.(sessionId)
       } catch (fallbackErr) {
         // 强杀收敛吞错（降级策略）：走到此处时 abort RPC 已超时，fallback 走 forceQuitSession
-        // 完整链（含自己的日志与广播），此处异常不改变收敛路径——标记保留 + 环不启动（见上），
+        // 完整链（含自己的日志与广播），此处异常不改变收敛路径——标记保留（见上），
         // 下次 restore 重试；restore 主体不可回滚（session 已复活进 Map），向上传播只会把
         // 收敛细节泄漏成 restore 失败。极端兜底再失败的用户出口：再点「强制退出」即达终态。
         console.warn(`[session-lifecycle] restore-abort force-quit fallback also failed for ${sessionId}, mark kept for next restore:`, toErrorMessage(fallbackErr))

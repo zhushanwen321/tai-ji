@@ -22,7 +22,7 @@
  *   - event-interpreter-gen-stats.ts：LlmWindowSampler——composer-gen-stats LLM 请求窗口
  *     状态机（turnStartedAt / llmWindowDurationMs 配对消费，登记方向 ①）
  *   - event-interpreter-settled-delay.ts：AgentSettledDelayer——agent_settled V7 延迟注入
- *     + disposed 销毁短路（登记方向 ②）；收敛窗常量随迁避免反向 import 成环
+ *     + disposed 销毁短路（登记方向 ②）
  *   - event-interpreter-ping.ts：PingProbe——ADR-0047 进程健康探测循环（登记五域之外，
  *     同为独立状态面、挂点仅 turn-start/turn-end/dispose 三处）
  *   - event-interpreter-compaction.ts：CompactionNotifier——compaction 双事件到 WS 帧 +
@@ -46,12 +46,11 @@ import { SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE } from '@zhush
 import { CompactionNotifier } from './event-interpreter-compaction.js'
 import { LlmWindowSampler } from './event-interpreter-gen-stats.js'
 import { PingProbe } from './event-interpreter-ping.js'
-import { AgentSettledDelayer, ABORT_STALL_CONVERGENCE_WINDOW_MS, ABORT_STALL_MAX_PENDING_GENERATIONS } from './event-interpreter-settled-delay.js'
+import { AgentSettledDelayer } from './event-interpreter-settled-delay.js'
 
-// [T4 协作对象拆分] 常量本体随域迁至协作对象文件（ping 三常量 → event-interpreter-ping.ts、
-// 收敛窗常量 → event-interpreter-settled-delay.ts），此处 re-export 保住既有导出面
+// [T4 协作对象拆分] 常量本体随域迁至协作对象文件（ping 三常量 → event-interpreter-ping.ts），
+// 此处 re-export 保住既有导出面
 //（event-interpreter-ping-dispose.test.ts 等直接 import 本文件；SR6 SSOT）。
-export { ABORT_STALL_CONVERGENCE_WINDOW_MS } from './event-interpreter-settled-delay.js'
 export { PING_INTERVAL_MS, PING_FAIL_THRESHOLD, PING_WARN_FAIL_COUNT } from './event-interpreter-ping.js'
 import { toErrorMessage } from '../../utils/errors.js'
 import type { SessionManagerAction } from '@zhushanwen/extension-protocol'
@@ -198,35 +197,33 @@ export function applySessionOccupancyTransition(
   updateSessionOccupancy(session, publish, row.patch)
 }
 
-// ── userStopped 标记门面 + restore-abort 收敛环（session-dead-structural-fixes D4）──
+// ── userStopped 标记门面（ADR-0112 事件顺序契约）──
 
-// [T4 协作对象拆分] 收敛窗常量（ABORT_STALL_CONVERGENCE_WINDOW_MS）与 dev settling 延迟读取
-//（readDevSettlingDelayMs）迁至 event-interpreter-settled-delay.ts——后者上界约束引用前者，
-// 同文件避免 settled-delay → event-interpreter 反向 import 成环；常量经顶部 re-export 转发。
+// [历史形态] 原 D4 收敛环（3s 静默观察窗 + pendingSettled 代数上限）已随 ADR-0112
+// 事实驱动清查删除：窗满清标记 = 用时间猜「补发腿流完」，属补偿猜测。
 
 /**
- * userStopped 门面 + 收敛环控制器（D4）。
+ * userStopped 门面。
  *
  * 为什么放本文件：标记宿主 Map 按规格必须在 session-service.ts（模块级、独立于
  * ManagedSession 生命周期），而 session-service 值导入本文件——子模块反向 import 会成环。
  * 本门面是子模块（dispatcher/lifecycle/interpreter 挂点）与宿主 Map 之间唯一的无环通路：
  * SessionService 构造时经 configure 注入宿主存取 + abort 能力，挂点/调用方用模块级单例。
  *
- * 收敛环状态机（D4 规格，v4 修订③前置）：
- * - begin(sid)：restoreSession 返回前的 abort 成功完成后调用——静默观察窗自此刻起算
- *   （「restore 无 replay turn 的 idle 场景同样有明确起点」）。
- * - noteAgentStart(sid)（interpreter hook agent_start 挂点）：环活跃且标记存活 → 非显式
- *   投递引发的 turn → 一律再 abort（掐补发腿开的 turn），置 pendingSettled。
- * - noteAgentSettled(sid)（interpreter agent-settled 挂点）：被掐 turn 收尾的 settled 边沿
- *   → 清 pendingSettled + 重置观察窗（重起算）。
- * - 窗到期：pendingSettled=false → 判收敛 → 清标记停环；true（掐而 settled 未到——pi 收尾
- *   卡顿超窗）→ 窗满不清，待 settled 到达重置窗后重起算（v4 边界缝前置）。
- * - consumeForExplicitDelivery(sid)：runtime 经手的投递（sendPrompt 等显式路径）= 新意图，
- *   投递前清标记放行 + 停环（补发腿不经 runtime 所以不适用——区分点 = 投递路径本身）。
+ * 事件顺序契约（ADR-0112 判定层）：标记存活期 = 旁路 turn 拦截存续期；标记清除只由
+ * 显式意图事件驱动——用户显式投递（consumeForExplicitDelivery）、会话删除
+ * （disposeForDelete）、shutdown（disposeAll）。不做任何自动收敛：
+ * 「settled 到达即清标记」会被同边沿的补投击穿——被掐 turn 的 settled 边沿正是
+ * notify-ledger 的补投触发点（settledEdgeDispatch → attemptDeliver），清标记后同
+ * 边沿补投开的新 turn 不再被拦；「窗满清标记」= 时间窗猜事实（原 D4，已删）。
  *
- * 有界性（D4）：notify-ledger 受理即 sent、回执判定秒级 ack、重投上限 abandoned 终态——
- * 待补投条目有限，收敛环至多 N+1 轮。已知登记例外（异步重投残余链、重启窗口）见设计 D4
- * 代价登记，此处不重复机制。
+ * 存续期行为：restore 每次命中标记执行 restore-abort（对 idle pi 幂等 no-op——
+ * pi@0.84.4 rpc-mode.js:329-331 → agent-session.js:1222-1226 锚点）；notify replay /
+ * scheduler 旁路源起的 turn 被 noteAgentStart 拦截再 abort（被掐通知已注入上下文，
+ * 下一 settled 边沿 checkReceipts 销账，不重复投递）。
+ *
+ * 「被掐 turn 的 settled 永不到达」（pi 收尾挂死）归显式上报链：PingProbe（ADR-0047，
+ * 60s ping × 3 连续失败）→ onSilentAbort → forceQuitSession。
  */
 export class UserStoppedGate {
   /** 宿主存取 + abort 能力（SessionService 构造时注入；未注入时全部 no-op——测试友好）。 */
@@ -234,19 +231,6 @@ export class UserStoppedGate {
     marks: UserStoppedMarkStore
     abortSession: (sessionId: string) => Promise<void>
   } | null = null
-  /** per-session 收敛环状态（环活跃 = 条目存在）。非 GUI 数据技术簿记（timer 句柄 +
-   *  pendingSettled 布尔），豁免登记 = taste:allow-no-data-owner W24-EX-C（§4 ⑧ ⑤，
-   *  2026-09-10 u3b 补登）；数据本体「用户停止意图标记」在主表 #30。 */
-  private readonly converging = new Map<string, {
-    timer: ReturnType<typeof setTimeout>
-    /** 有被环内 abort 掐掉的 turn 其 settled 未到达。 */
-    pendingSettled: boolean
-    /**
-     * [RT-4#2③] pendingSettled 卡死代数：窗满且 settled 未到时重挂窗（resetWindow）累计，
-     * settled 到达（noteAgentSettled）清零重起算。超上限强制清环防永久挂起（见 onWindowElapsed）。
-     */
-    pendingGenerations: number
-  }>()
 
   /** 组合根接线（SessionService 构造时调用；重复调用覆盖——测试多实例幂等）。 */
   configure(deps: {
@@ -275,95 +259,43 @@ export class UserStoppedGate {
   }
 
   /**
-   * restore-abort 完成：启动收敛环（静默窗自 abort 完成起算）。幂等——重复 begin（二次
-   * restore）先停旧窗重起新窗。调用前提 = restore-abort 已成功（abort 失败路径不起环，
-   * 标记不视为已消费，错误规格 §3.4）。
-   */
-  beginRestoreConvergence(sessionId: string): void {
-    this.stopTimer(sessionId)
-    const timer = setTimeout(() => { this.onWindowElapsed(sessionId) }, ABORT_STALL_CONVERGENCE_WINDOW_MS)
-    this.converging.set(sessionId, { timer, pendingSettled: false, pendingGenerations: 0 })
-  }
-
-  /**
-   * interpreter hook agent_start 挂点：环活跃期间的非显式投递 agent_start 一律再 abort。
+   * interpreter hook agent_start 挂点：标记存活期间的非显式投递 agent_start 一律再 abort。
    *
    * 「非显式投递」由时序构造性保证：显式投递（sendPrompt 等）先经 consumeForExplicitDelivery
-   * 清标记停环，其 turn 的 agent_start 事件回流必然晚于清标记（清在 prompt RPC 发出之前），
-   * 到达时环已停 → 不拦截。环活跃期间到达的 agent_start 只能来自不经 runtime 的触发源
+   * 清标记，其 turn 的 agent_start 事件回流必然晚于清标记（清在 prompt RPC 发出之前），
+   * 到达时标记已清 → 不拦截。标记存活期间到达的 agent_start 只能来自不经 runtime 的触发源
    * （notify replay / scheduler / auto-retry）。
    */
   noteAgentStart(sessionId: string): void {
-    const st = this.converging.get(sessionId)
-    if (!st) return
-    if (!this.hasUserStoppedMark(sessionId)) {
-      // 防御：环在标记不在（显式投递清标记与事件回流的窄竞态）→ 放行不拦。
-      this.stopTimer(sessionId)
-      this.converging.delete(sessionId)
-      return
-    }
-    st.pendingSettled = true
-    console.warn(`[event-interpreter] userStopped convergence: intercepting unattributed agent_start, re-aborting (sessionId=${sessionId})`)
-    // fire-and-forget：abort 内部已含失败链（超时 → forceQuitSession 强杀收敛）。失败时
-    // pendingSettled 保持 true → 窗满不清（标记不视为已消费，错误规格 §3.4）。
+    if (!this.hasUserStoppedMark(sessionId)) return
+    console.warn(`[event-interpreter] userStopped: intercepting unattributed agent_start, re-aborting (sessionId=${sessionId})`)
+    // fire-and-forget：abort 内部已含失败链（超时 → forceQuitSession 强杀收敛）。
     this.deps?.abortSession(sessionId).catch((e: unknown) => {
-      console.warn(`[event-interpreter] userStopped convergence: re-abort failed, mark kept (sessionId=${sessionId}):`, e)
+      console.warn(`[event-interpreter] userStopped: re-abort failed, mark kept (sessionId=${sessionId}):`, e)
     })
   }
 
   /**
-   * interpreter agent-settled 挂点：被掐 turn 收尾的 settled 边沿 → 清 pendingSettled +
-   * 重置观察窗（无论 pendingSettled 与否都重置——restore-abort 掐掉的 replay turn 不经过
-   * noteAgentStart，其 settled 是「有被掐 turn」的唯一事后信号，重置窗给补发腿的
-   * agent_start 留满窗拦截时间）。
-   */
-  noteAgentSettled(sessionId: string): void {
-    const st = this.converging.get(sessionId)
-    if (!st) return
-    st.pendingSettled = false
-    st.pendingGenerations = 0
-    this.resetWindow(sessionId, st)
-  }
-
-  /**
-   * 显式投递放行（sendPrompt 等经 runtime 的投递调用）：清标记 + 停环。投递前调用——
-   * 新意图不受任何闸门拦截（D4）。
+   * 显式投递放行（sendPrompt 等经 runtime 的投递调用）：清标记。投递前调用——
+   * 新意图不受任何闸门拦截。
    */
   consumeForExplicitDelivery(sessionId: string): void {
-    if (!this.hasUserStoppedMark(sessionId) && !this.converging.has(sessionId)) return
-    this.stopTimer(sessionId)
-    this.converging.delete(sessionId)
+    if (!this.hasUserStoppedMark(sessionId)) return
     this.marks().clearUserStoppedMark(sessionId)
   }
 
-  /** delete 等彻底清理路径：清标记 + 停环。 */
+  /** delete 等彻底清理路径：清标记。 */
   disposeForDelete(sessionId: string): void {
-    this.stopTimer(sessionId)
-    this.converging.delete(sessionId)
     if (this.hasUserStoppedMark(sessionId)) this.marks().clearUserStoppedMark(sessionId)
   }
 
-  /**
-   * session 条目删除汇聚点（removeSessionEntry）的环清理：只停环不清标记——forceQuit
-   * （K1/K2）尾步经过本挂点，标记必须存活到 restore（D4 标记宿主独立于 ManagedSession
-   * 生命周期的原因）。
-   */
-  disposeForEntryRemoval(sessionId: string): void {
-    this.stopTimer(sessionId)
-    this.converging.delete(sessionId)
-  }
-
-  /** destroyAll：全量清理（停全部环 + 清全部标记，shutdown 路径）。 */
+  /** destroyAll：全量清理（清全部标记，shutdown 路径）。 */
   disposeAll(): void {
-    for (const sessionId of this.converging.keys()) this.stopTimer(sessionId)
-    this.converging.clear()
     this.deps?.marks.clearAllUserStoppedMarks()
   }
 
-  /** 测试辅助：重置全部内部状态与依赖注入（跨用例隔离；生产不调用）。 */
+  /** 测试辅助：重置依赖注入（跨用例隔离；生产不调用）。 */
   resetForTest(): void {
-    for (const sessionId of this.converging.keys()) this.stopTimer(sessionId)
-    this.converging.clear()
     this.deps = null
   }
 
@@ -373,44 +305,6 @@ export class UserStoppedGate {
     }
     return this.deps.marks
   }
-
-  private resetWindow(sessionId: string, st: { timer: ReturnType<typeof setTimeout>; pendingSettled: boolean; pendingGenerations: number }): void {
-    clearTimeout(st.timer)
-    st.timer = setTimeout(() => { this.onWindowElapsed(sessionId) }, ABORT_STALL_CONVERGENCE_WINDOW_MS)
-  }
-
-  private stopTimer(sessionId: string): void {
-    const st = this.converging.get(sessionId)
-    if (st) clearTimeout(st.timer)
-  }
-
-  private onWindowElapsed(sessionId: string): void {
-    const st = this.converging.get(sessionId)
-    if (!st) return
-    if (st.pendingSettled) {
-      // [RT-4#2③] 掐而 settled 未到：重挂窗等待 settled 边沿重置（v4 边界缝语义保留），
-      // 但不再无限挂起——代数累计超上限强制清环（pi 收尾挂死时环条目 + timer 永久存活，
-      // 且该场景的真兜底已由 settling 期 ping 探测 → onSilentAbort → forceQuit 全链承担）。
-      // 标记保留：restore 时标记仍生效重新起环，用户停止意图不因环强制退役而丢失。
-      st.pendingGenerations += 1
-      if (st.pendingGenerations >= ABORT_STALL_MAX_PENDING_GENERATIONS) {
-        this.converging.delete(sessionId)
-        console.warn(
-          `[event-interpreter] userStopped convergence: settled never arrived after ${st.pendingGenerations} windows,` +
-          ` dropping convergence loop (userStopped mark kept, sid=${sessionId})`,
-        )
-        return
-      }
-      this.resetWindow(sessionId, st)
-      return
-    }
-    this.stopTimer(sessionId)
-    this.converging.delete(sessionId)
-    if (this.hasUserStoppedMark(sessionId)) {
-      this.marks().clearUserStoppedMark(sessionId)
-      console.warn(`[event-interpreter] userStopped convergence: quiet window elapsed, mark cleared (sessionId=${sessionId})`)
-    }
-  }
 }
 
 /** 模块级单例（生产挂点与调用方共用；SessionService 构造时 configure）。 */
@@ -418,9 +312,10 @@ export const userStoppedGate = new UserStoppedGate()
 
 // [D3③ pi1-disposition-chat-flow] CP6 回落窗（OCCUPANCY_SETTLE_WINDOW_MS /
 // OccupancySettleWindow / occupancySettleWindow）已整体退役：空闲发命令后 occupancy 的
-// 回落改由 pi 权威事实驱动——handled 响应即回落（session-delivery-registry deliverOne），
-// started 形态下回合事件异常不可达的防悬挂由 sweepInFlight occupancy 收尾承接
-//（transcript / 命令清单事实凭据，非时间窗）。时间平抑类机制净减一（D3④ ADR 登记）。
+// 回落改由 pi 权威事实驱动——handled 响应即回落（session-delivery-registry deliverOne）；
+// started/queued 形态下回合事件按 pi 事件流推进，进程死亡由 onSessionExit 链
+// full-reset 与断连失败上报收口（ADR-0112——原 sweepInFlight 承接腿已随终局事件化退役）。
+// 时间平抑类机制净减一（D3④ ADR 登记）。
 
 /** plain object 判定（type-safety review：plugin hook 返回值是不可信边界——Worker/
  * sandbox 里的第三方代码可返回任意值，改写前必须 shape 守卫，畸形值丢弃改写保原值）。 */
@@ -1025,9 +920,6 @@ export class EventInterpreter {
     // pi 卡死/异常退出时本事件不会发出——失败路径复位由 #9 abort 兜底与 #10 session.exited 承担。
     // onTurnFinalize 侧（handleTurnEndSideEffects）已先以 'settling' 原子写，此处幂等去重。
     this.opts.onOccupancyTransition?.('idle')
-    // D4 收敛环挂点：被掐 turn 收尾的 settled 边沿 → 清 pendingSettled + 重置静默窗。
-    // 环未活跃（无 forceQuit/restore 场景）时 no-op。
-    userStoppedGate.noteAgentSettled(this.sessionId)
   }
 
   /** server 路由回调事件的编排（原 handle 同名 case 逐字迁移）。命中返回 true。 */
@@ -1069,9 +961,9 @@ export class EventInterpreter {
         this.opts.onSessionRenamed?.(this.sessionId, ev.name)
         return true
       case 'hook':
-        // D4 收敛环挂点：标记存活期内（收敛环活跃），非显式投递引发的 agent_start 一律
-        // 再 abort（掐 notify replay 补发腿 / scheduler / auto-retry 开的 turn）。环未活跃
-        // 时 no-op——正常会话（含显式投递开 turn）零额外开销（Map get 即返）。
+        // userStopped 挂点：标记存活期间，非显式投递引发的 agent_start 一律
+        // 再 abort（掐 notify replay 补发腿 / scheduler / auto-retry 开的 turn）。
+        // 标记不在时 no-op——正常会话（含显式投递开 turn）零额外开销（单次 Set 查询）。
         if (ev.eventType === PI_EVENT.agentStart) {
           userStoppedGate.noteAgentStart(this.sessionId)
         }

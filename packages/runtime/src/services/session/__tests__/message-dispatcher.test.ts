@@ -401,8 +401,8 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
 
 /**
  * [pi1-disposition-chat-flow D1/D3] 原 CP6 短窗测试组随窗口机制退役删除；occupancy 的
- * 回落现由 pi 权威事实驱动（handled 响应）+ sweepInFlight 收尾承接。本组锚定投递链路上的
- * handled 终局行为（终局 / 通知 / occupancy 回落幂等门 / started 不驱动界面）。
+ * 回落现由 pi 权威事实驱动（handled 响应即回落；ADR-0112 终局事件化）。本组锚定投递
+ * 链路上的 handled 终局行为（终局 / 通知 / occupancy 回落幂等门 / started 不驱动界面）。
  */
 describe('handled 终局与 occupancy 事实驱动（D1/D3，CP6 退役后）', () => {
   type OccTurn = 'idle' | 'dispatching' | 'generating' | 'settling'

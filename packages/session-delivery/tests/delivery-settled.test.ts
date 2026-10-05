@@ -95,78 +95,48 @@ describe('A3-settled subscribeSettled 事件驱动路径', () => {
   })
 })
 
-describe('A3-settled watch-dog: settled 丢失场景下 30s 复核恢复', () => {
+describe('A3-settled 事件丢失形态（ADR-0112：无定时复核，留守归边沿/外部触发）', () => {
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers() })
 
-  it('settled 事件丢失后 watch-dog 30s 复核 flush（断言只能由 watchdog 满足）', () => {
-    // 反假测试声明：旧版测试 port isIdle 恒 false + backoff max 5，
-    // advanceTimersByTime(600) 时退避 5 拍打满强发碰巧满足断言、watchdog 从未运行。
-    // 本版：真实 subscribeSettled 装配但测试内从不触发回调 + 退避 max 足够大
-    // （且 #7 下有订阅装配本就不启动退避强发）——投递只能由 watchdog 复核驱动。
+  // [已不可达用例删除登记] 原「settled 事件丢失后 watch-dog 30s 复核 flush」与
+  // 「无 subscribeSettled 装配时纯退避轮询」两用例随 watchdog 定时复核腿与无订阅装配
+  // 退避轮询分支退役（ADR-0112——时间平抑机制不建）而不可达，2026-10-05 投递域清理
+  // 批次删除。事件丢失后的恢复形态由下列用例锁定：留守至外部触发，不自动强发。
+
+  it('settled 事件丢失 + busy 翻转：留守不投，外部 flush 驱动投递', () => {
     let idle = false
     const port = makeMockPort({
       isIdle: () => idle,
-      subscribeSettled: (cb) => {
-        void cb // 订阅成立、回调从不触发（模拟 RPC 断线丢 settled 事件）
-        return () => {}
-      },
+      subscribeSettled: () => () => {}, // 订阅成立但回调从不触发（模拟 settled 事件丢失）
     })
-    const handle = createDelivery(port, {
-      watchdogMs: 30_000,
-      backoff: { ms: 100, max: 500 }, // 若退避仍错误启动，500 拍 = 50s 不会强发
-    })
+    const handle = createDelivery(port)
 
     handle.send(textMsg('hello'))
     expect(port.sendCalls).toHaveLength(0)
 
-    // watchdog 第一拍（t=30s）之前不投：退避循环被抑制（#7），事件驱动无事件
-    vi.advanceTimersByTime(29_999)
+    idle = true
+    vi.advanceTimersByTime(60_000) // 无任何定时复核兜底：不自动投
     expect(port.sendCalls).toHaveLength(0)
 
-    idle = true // 目标 session 已 idle（settled 丢失，无人通知内核）
-    vi.advanceTimersByTime(1) // watchdog 第一拍到达
-    expect(port.sendCalls).toHaveLength(1) // watchdog 复核 → flush 送达
+    handle.flush() // 外部触发（真实链 = 恢复后的边沿信号）
+    expect(port.sendCalls).toHaveLength(1)
     expect(port.sendCalls[0]!.msg.payload.content).toBe('hello')
 
     handle.dispose()
   })
 
-  it('watchdog 复核仍 busy → 不投，队列滞留等下一拍/边沿', () => {
+  it('持续 busy：留守，队列滞留等边沿', () => {
     const port = makeMockPort({
       isIdle: () => false,
-      subscribeSettled: (cb) => {
-        void cb
-        return () => {}
-      },
+      subscribeSettled: () => () => {},
     })
-    const handle = createDelivery(port, {
-      watchdogMs: 30_000,
-      backoff: { ms: 100, max: 500 },
-    })
+    const handle = createDelivery(port)
 
     handle.send(textMsg('hello'))
-    vi.advanceTimersByTime(90_000) // 三拍全 busy
+    vi.advanceTimersByTime(90_000)
     expect(port.sendCalls).toHaveLength(0)
     expect(handle.depth()).toBe(1)
-
-    handle.dispose()
-  })
-
-  it('无 subscribeSettled 装配时不用 watch-dog，纯退避轮询', () => {
-    const port = makeMockPort({
-      isIdle: () => false,
-    })
-    const handle = createDelivery(port, {
-      backoff: { ms: 100, max: 5 },
-    })
-
-    handle.send(textMsg('hello'))
-    expect(port.sendCalls).toHaveLength(0)
-
-    vi.advanceTimersByTime(10_000)
-
-    expect(port.sendCalls).toHaveLength(1)
 
     handle.dispose()
   })
@@ -179,14 +149,12 @@ describe('A3-settled watch-dog: settled 丢失场景下 30s 复核恢复', () =>
         return () => {}
       },
     })
-    const handle = createDelivery(port, {
-      backoff: { ms: 100, max: 5 }, // 若退避仍启动，5s 内必强发
-    })
+    const handle = createDelivery(port)
 
     handle.send(textMsg('hello'))
-    vi.advanceTimersByTime(10_000) // 远超退避上限窗口
+    vi.advanceTimersByTime(10_000) // 远超原退避窗口
 
-    expect(port.sendCalls).toHaveLength(0) // 只依赖 settled 边沿 + watchdog，不退避强发
+    expect(port.sendCalls).toHaveLength(0) // 只依赖 settled 边沿，不退避强发
     expect(handle.depth()).toBe(1)
 
     handle.dispose()

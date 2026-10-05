@@ -45,11 +45,11 @@ import type { SendPromptReason } from '@taiji/shared'
 import { BashDispatcher, type InternalBashDispatchReceipt } from './bash-dispatcher.js'
 
 /**
- * abort 发起方分型（U2 修复）：收敛环复用 abort 完整链时区分「用户操作」与「runtime
- * 自动收敛」的终态语义。默认 'user'（全部既有调用方零改动保持用户语义）；'convergence'
- * 仅由 session-service 的 userStoppedGate.configure 接线传入（收敛环 restore-abort 后的
- * re-abort 通路）。[ADR-0112] 原定义在 abort-liveness.ts（三级阶梯），该编排链随 RPC
- * 墙钟超时退役后类型迁入本文件。
+ * abort 发起方分型（U2 修复）：userStopped 拦截链复用 abort 完整链时区分「用户操作」
+ * 与「runtime 自动拦截」的终态语义。默认 'user'（全部既有调用方零改动保持用户语义）；
+ * 'convergence' 仅由 session-service 的 userStoppedGate.configure 接线传入（userStopped
+ * 标记存活期 agent_start 挂点的 re-abort 通路）。[ADR-0112] 原定义在 abort-liveness.ts
+ *（三级阶梯），该编排链随 RPC 墙钟超时退役后类型迁入本文件。
  */
 export type AbortSource = 'user' | 'convergence'
 

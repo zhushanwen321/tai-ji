@@ -49,8 +49,6 @@ import { toErrorMessage } from '../../utils/errors.js'
 import { getRuntimeCheckpointStore } from './runtime-checkpoint.js'
 // D5 在途镜像（crash-forensics §3.3 D5）：detach 同点位摘除 = 本链第 3 步。
 import { inflightMirror } from './inflight-mirror.js'
-// userStopped 收敛环（session-dead-structural-fixes D4）：只停环不清标记（第 4 步）。
-import { userStoppedGate } from './event-interpreter.js'
 // 收殓下沉触发面 A（file-lock-unification-and-reaper-sink §3.3）：孤儿后台任务收殓（第 11 步）。
 import { reapSessionBackgroundTasks } from './background-task-reaper.js'
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
@@ -152,13 +150,10 @@ export class SessionEntryRemovalOrchestrator {
     runDestroyStepIsolated('mirror.detach', sessionId, () => {
       inflightMirror.dropSession(sessionId)
     })
-    // D4：收敛环定时器清理（所有删除路径汇聚点：主动删 / 进程退出 / forceQuit / restore
-    // 清场）。只停环不清标记——forceQuit（K1/K2）尾步经过本汇聚链，标记必须存活到后续
-    // restore（标记宿主独立于 ManagedSession 生命周期的原因，见 session-service.ts 模块级
-    // Map 注释）；delete 路径的标记清理由 lifecycle.delete 显式调 gate.disposeForDelete。
-    runDestroyStepIsolated('userStoppedGate.disposeForEntryRemoval', sessionId, () => {
-      userStoppedGate.disposeForEntryRemoval(sessionId)
-    })
+    // userStopped 标记不在本汇聚点清理：forceQuit（K1/K2）尾步经过本链，标记必须存活到
+    // 后续 restore（标记宿主独立于 ManagedSession 生命周期的原因，见 session-service.ts
+    // 模块级 Map 注释）；delete 路径的标记清理由 lifecycle.delete 显式调 gate.disposeForDelete。
+    // （原 D4 收敛环定时器清理已随 ADR-0112 时间窗删除移除。）
 
     // ── 第 5-9 步：Map 条目删除与删除回调扇出 ──
     // S3-W2：删除前缓存 summary（插件 didDestroy 通知需要 SessionInfo；删除后 Map 查不到）。

@@ -44,10 +44,6 @@
   <!-- Toast 通知：不再在根部固定挂载——ToastContainer 改 absolute 右上角锚定，挂载点
        收敛到 main-panel 内两分支（PanelContainer main-area（chat 主区）/ MainPanel
        settings 兜底），避免遮 composer 与 drawer。 -->
-  <!-- renderer 崩溃恢复一次性提示条（T2）：窗口级，URL query 标志驱动
-       （main 侧 reloadWindowAfterCrash 注入），useCrashRecoveryNotice 消费即清除标志
-       （手动刷新不重现）。挂根部使 connecting 过渡屏/主界面两态均可见。 -->
-  <CrashRecoveredBar />
   <!-- RD-3#7：ToastContainer 上提根部——连接前（connecting/failed/restarting）也渲染，让启动期
        错误（如渲染异常 toast）有 UI 留痕。connected 态仍由 PanelContainer main-area / MainPanel
        内的挂载点承接（保持 drawer 感知定位、恒不遮 drawer），故此处仅非连接态挂载——两态均渲染、
@@ -55,7 +51,7 @@
   <ToastContainer v-if="connectionState !== 'connected'" />
   <!-- RD-3#11：内存压力提示条（最小可见形态）——useMemoryPressure 的 level 接入 UI 消费方。
        warn/critical 时显示，用户据此行动；level 无 normal 回弹（协议 normal 不广播），dismiss 后
-       level 变化（升级）经 watch 重显。fixed 顶部居中，零布局侵入（同 CrashRecoveredBar 定位范式）。 -->
+       level 变化（升级）经 watch 重显。fixed 顶部居中，零布局侵入。 -->
   <div
     v-if="memoryLevel !== 'normal' && !memoryBarDismissed"
     data-testid="memory-pressure-bar"
@@ -86,7 +82,6 @@ import { useI18n } from 'vue-i18n'
 import TaijiLogo from '@/components/icons/TaijiLogo.vue'
 import AppShell from '@/components/shell/AppShell.vue'
 
-import CrashRecoveredBar from '@/components/ui/CrashRecoveredBar.vue'
 import ToastContainer from '@/components/ui/ToastContainer.vue'
 import { Button } from '@/components/ui/button'
 import { useConnection } from '@/composables/useConnection'

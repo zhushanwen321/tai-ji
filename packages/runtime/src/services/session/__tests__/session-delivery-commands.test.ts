@@ -1,12 +1,19 @@
 /**
- * 命令链路内核测试（pi1-disposition-chat-flow U1，§4.1 验收条款 1-7）：
- * - D2① 命令识别与不注标出站（清单缓存 + 识别 + 裸命令文本）
- * - G3③ 受理回执命令标志（isCommand 随 submit 回执返回）
+ * 无标记条目链路内核测试（pi1-disposition-chat-flow U1 起源；ADR-0112 命令终局事件化 +
+ * skill-input-marker-pollution started 基终局后的现行契约）：
+ * - D2① 命令识别与不注标出站（清单缓存 + 识别 + 裸命令文本）；手打 skill / prompt 模板
+ *   与 `<taiji-skill>` 芯片标记同判（无标记条目统一识别集）
+ * - G3③ 受理回执标志（isCommand 随 submit 回执返回，前端空窗豁免契约）
  * - D1② handled → delivered tombstone 终局 + D1③ 终局通知 + resync 判重防线继承
- * - D14①b（G2）无标记且命中清单宽限后静默终局 + 双成因日志 + 不重投 + occupancy 收尾
- * - D3③ sweep occupancy 收尾（confirm 分支 / 静默终局分支 / 幂等门）
- * - D14③① G3 闸①命令档 prompt 不限时（timeoutMs=0）+ 普通消息档位不变
+ * - 断连终局事件化（ADR-0112）：handled/queued/started disposition = 无标记条目的受理
+ *   终局（prompt 响应即受理回执，零时间窗零扫描）；pi 断连 → 在途条目批量显式失败
+ *   （message.error 逐条上报）+ 撤销待收回条目就地兑现
  * - D2 清单新鲜度：get_commands 失败 → 全量按普通消息出站（分支 c 兜底）
+ *
+ * [已不可达用例删除登记] 原「D14①b（G2）无标记条目宽限后静默终局」「D3③ sweep
+ * occupancy 收尾」两 describe 随 sweepInFlight（10s 宽限 + transcript 比对）整体退役
+ * （ADR-0112 命令终局事件化：回执长时间不到的唯一现实成因 = 进程死亡，由断连事件
+ * 收口）而不可达，2026-10-05 投递域清理批次删除。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/session-delivery-commands.test.ts
  */
@@ -170,88 +177,45 @@ describe('D1①②③：handled 终局 + 通知 + 判重防线继承', () => {
     expect(h.client.prompt).toHaveBeenCalledTimes(1) // 无第二次出站
   })
 
-  it('queued / started 响应不驱动界面：无通知、条目维持 in-flight 等凭据（D4）', async () => {
+  it('queued / started 响应 = 无标记条目受理终局：delivered tombstone + 通知（ADR-0112 终局事件化）', async () => {
     for (const disposition of ['queued', 'started']) {
       const h = makeHarness({ commands: [{ name: 'plan', source: 'extension' }], promptResult: { disposition } })
       await attachWithCommandList(h)
       h.registry.submit('s1', { content: '/plan', clientUuid: CLIENT_UUID })
       await h.flush()
-      expect(h.published.filter((m) => m.type === 'session.deliveryHandled').length).toBe(0)
-      expect(h.registry.entries('s1')?.active.some((e) => e.id === CLIENT_UUID && e.state === 'in-flight')).toBe(true)
+      // prompt 响应即受理回执：三值同为「pi 已受理输入」的确定性事实，终局零时间窗
+      const full = h.registry.entries('s1')
+      expect(full?.tombstones.some((t) => t.id === CLIENT_UUID && t.state === 'delivered')).toBe(true)
+      expect(full?.active.some((e) => e.id === CLIENT_UUID)).toBe(false)
+      expect(h.published.filter((m) => m.type === 'session.deliveryHandled').length).toBe(1)
       h.registry.dispose('s1')
     }
   })
-})
 
-describe('D14①b（G2）：无标记且命中清单宽限后静默终局', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-  })
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('响应丢失形态：宽限（10s）后 watchdog 对账轮静默终局 + 双成因日志 + 通知 + occupancy 收尾，不重投', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    try {
-      // 清单就绪但 prompt 无 disposition（pi 重启响应丢失模拟：handled 永不到来）
-      const h = makeHarness({ commands: [{ name: 'todos', source: 'extension' }], promptResult: { disposition: 'started' } })
-      await attachWithCommandList(h)
-      h.registry.submit('s1', { content: '/todos', clientUuid: CLIENT_UUID })
-      await h.flush()
-      expect(h.registry.entries('s1')?.active.some((e) => e.id === CLIENT_UUID && e.state === 'in-flight')).toBe(true)
-      const promptCallsAtSweep = h.client.prompt.mock.calls.length
-      // 推进：越过在途宽限（10s）→ 事件触发点对账（watchdog 定时腿已随 ADR-0112 退役）
-      await vi.advanceTimersByTimeAsync(10_001)
-      await h.registry.reconcile('s1', 'agent-settled')
-      await h.flush()
-      // 静默终局：delivered tombstone + 通知，不重投
-      const full = h.registry.entries('s1')
-      expect(full?.tombstones.some((t) => t.id === CLIENT_UUID && t.state === 'delivered')).toBe(true)
-      expect(h.published.filter((m) => m.type === 'session.deliveryHandled').length).toBe(1)
-      expect(h.client.prompt.mock.calls.length).toBe(promptCallsAtSweep) // 不重投
-      // 双成因日志（D14①b：排障按 pi 侧进程记录区分，不按单一成因误导）。
-      // registry warn 形态 = console.warn('[session-delivery]', ...args)——全参拼接匹配。
-      const g2log = warnSpy.mock.calls.find((args) => args.map(String).join(' ').includes('command entry finalized without receipt'))
-      expect(g2log).toBeDefined()
-      expect(g2log!.map(String).join(' ')).toContain('pi restart response loss OR stale command list false-positive')
-      // D3③ occupancy 收尾：清空最后一笔在途条目 → dispatching→idle
-      expect(h.occupancyTurn()).toBe('idle')
-    } finally {
-      warnSpy.mockRestore()
-    }
-  })
-
-  it('宽限未到不提前终局（10s 宽限早于 30s 空窗计时器——不与投递竞速）', async () => {
-    const h = makeHarness({ commands: [{ name: 'todos', source: 'extension' }], promptResult: { disposition: 'started' } })
+  it('started 终局（技能通路 started 基终局）：手打 skill 条目 delivered tombstone + 通知', async () => {
+    const h = makeHarness({ commands: [{ name: 'skill:search', source: 'skill' }], promptResult: { disposition: 'started' } })
     await attachWithCommandList(h)
-    h.registry.submit('s1', { content: '/todos', clientUuid: CLIENT_UUID })
+    const receipt = h.registry.submit('s1', { content: '/skill:search', clientUuid: CLIENT_UUID })
+    expect(receipt.isCommand).toBe(true) // 空窗豁免标志随识别集扩展覆盖技能条目
     await h.flush()
-    await vi.advanceTimersByTimeAsync(9_000)
-    expect(h.registry.entries('s1')?.active.some((e) => e.id === CLIENT_UUID && e.state === 'in-flight')).toBe(true)
-    expect(h.published.filter((m) => m.type === 'session.deliveryHandled').length).toBe(0)
+    const outbound = h.client.prompt.mock.calls[0]![0] as string
+    expect(outbound).toBe('/skill:search') // 不注标出站：纯单词 skillName 不被尾附标记污染
+    const full = h.registry.entries('s1')
+    expect(full?.tombstones.some((t) => t.id === CLIENT_UUID && t.state === 'delivered')).toBe(true)
+    expect(h.published.filter((m) => m.type === 'session.deliveryHandled').length).toBe(1)
   })
 
-  it('带标记条目不属命令静默终局判据面：transcript 未命中走既有 requeue 重投路径（G2 判据只作用于无标记命令条目）', async () => {
-    const h = makeHarness({ commands: [{ name: 'todos', source: 'extension' }], promptResult: {} })
+  it('started 响应对带标记条目不终局：等待 message_end 标记回执（D4）', async () => {
+    const h = makeHarness({ promptResult: { disposition: 'started' } })
     await attachWithCommandList(h)
     h.registry.submit('s1', { content: '普通消息', clientUuid: CLIENT_UUID })
     await h.flush()
-    await vi.advanceTimersByTimeAsync(10_001)
-    await h.registry.reconcile('s1', 'agent-settled')
-    await h.flush()
-    // 带标记条目 transcript 未命中 → 既有 requeue 路径（非命令静默终局）
+    expect(h.registry.entries('s1')?.active.some((e) => e.id === CLIENT_UUID && e.state === 'in-flight')).toBe(true)
     expect(h.published.filter((m) => m.type === 'session.deliveryHandled').length).toBe(0)
-    // 回收重投走 busy gate 复核（内核既有语义：busy 由 settled 边沿驱动——真实链 =
-    // agent_settled 置 idle 后 gate 开；mock 无事件流，按同一边沿语义模拟）
-    applySessionOccupancyTransition(h.view, null, 'idle')
-    h.emitSettled()
-    await h.flush()
-    expect(h.client.prompt.mock.calls.length).toBeGreaterThanOrEqual(2) // requeue 重投
   })
 })
 
-describe('D3③：sweep occupancy 收尾（confirm 分支 + 幂等门）', () => {
+describe('芯片通路识别（skill-input-marker-pollution：统一切 started 基终局）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -259,34 +223,83 @@ describe('D3③：sweep occupancy 收尾（confirm 分支 + 幂等门）', () =>
     vi.useRealTimers()
   })
 
-  it('confirm 分支（transcript 命中）：清空最后一笔在途条目时 dispatching→idle', async () => {
-    const bare = CLIENT_UUID.replace(/^u-/, '')
-    const h = makeHarness({
-      // transcript 已含投递标记（送达事实在 transcript，事件流回执丢失）
-      entries: [{ type: 'message', message: { role: 'user', content: `正文\n${markerLiteral(bare)}` } }],
-    })
+  it('正文含 <taiji-skill> 标记 → 无标记出站 + started 终局（不依赖清单就绪）', async () => {
+    const h = makeHarness({ promptResult: { disposition: 'started' } })
     await attachWithCommandList(h)
-    h.registry.submit('s1', { content: '正文', clientUuid: CLIENT_UUID })
+    const receipt = h.registry.submit('s1', { content: '正文 <taiji-skill name="review"/>', clientUuid: CLIENT_UUID })
+    expect(receipt.isCommand).toBe(true)
     await h.flush()
-    expect(h.occupancyTurn()).toBe('dispatching')
-    await vi.advanceTimersByTimeAsync(10_001)
-    await h.registry.reconcile('s1', 'agent-settled')
-    await h.flush()
+    const outbound = h.client.prompt.mock.calls[0]![0] as string
+    expect(outbound).toBe('正文 <taiji-skill name="review"/>') // 不注标出站
     expect(h.registry.entries('s1')?.tombstones.some((t) => t.id === CLIENT_UUID && t.state === 'delivered')).toBe(true)
-    expect(h.occupancyTurn()).toBe('idle')
+    expect(h.published.filter((m) => m.type === 'session.deliveryHandled').length).toBe(1)
+  })
+})
+
+describe('断连终局事件（ADR-0112：pi 进程死亡 → 挂起投递批量显式失败）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
-  it('幂等门：收尾不覆盖 generating（turn 事件已推进时保持真实状态）', async () => {
-    const h = makeHarness({ commands: [{ name: 'todos', source: 'extension' }], promptResult: { disposition: 'started' } })
+  it('断连 → in-flight 条目批量 failed + message.error 逐条上报（用户可见「执行结果未确认」）', async () => {
+    const h = makeHarness({ promptResult: {} }) // 无 disposition：条目受理后留守 in-flight
     await attachWithCommandList(h)
-    h.registry.submit('s1', { content: '/todos', clientUuid: CLIENT_UUID })
+    h.registry.submit('s1', { content: '消息一', clientUuid: CLIENT_UUID })
+    const SECOND = 'u-9c1e2b3a-1111-4222-8333-444455556667'
+    h.registry.submit('s1', { content: '消息二', clientUuid: SECOND })
     await h.flush()
-    // turn 事件已推进（真实状态 generating）——G2 终局后的收尾不得覆盖
-    applySessionOccupancyTransition(h.view, null, 'generating')
-    await vi.advanceTimersByTimeAsync(10_001)
-    await h.registry.reconcile('s1', 'agent-settled')
+    expect(h.registry.entries('s1')?.active.every((e) => e.state === 'in-flight')).toBe(true)
+
+    h.registry.onPiDisconnected('s1')
+    // 显式失败终局：条目转 failed（留守活跃集等用户处置），逐条用户可见上报
+    const errors = h.published.filter((m) => m.type === 'message.error')
+    expect(errors.length).toBe(2)
+    for (const e of errors) {
+      const payload = e.payload as { sessionId: string; message: string }
+      expect(payload.sessionId).toBe('s1')
+      expect(payload.message).toContain('执行结果未确认')
+      expect(payload.message).toContain('重发前请核对')
+    }
+    const states = h.registry.entries('s1')?.active.map((e) => e.state)
+    expect(states).toEqual(['failed', 'failed'])
+    // 失败条目经 resync 用户重试通路复活（failed → queued → 重投）
+    applySessionOccupancyTransition(h.view, null, 'idle')
+    const retried = await h.registry.resync('s1', [CLIENT_UUID, SECOND])
+    expect(retried).toEqual([])
     await h.flush()
-    expect(h.occupancyTurn()).toBe('generating')
+    expect(h.client.prompt.mock.calls.length).toBeGreaterThanOrEqual(4) // 2 首投 + 2 重投
+  })
+
+  it('断连 → 撤销待收回条目就地兑现（cancelled 终态，不重投不复活）', async () => {
+    const h = makeHarness({ promptResult: {} })
+    await attachWithCommandList(h)
+    h.registry.submit('s1', { content: '要撤的消息', clientUuid: CLIENT_UUID })
+    await h.flush()
+    expect(h.registry.entries('s1')?.active[0]!.state).toBe('in-flight')
+    // 用户撤销：in-flight → 待收回（意图登记，收回失败留守）
+    const cancelOutcome = await h.registry.cancel('s1', CLIENT_UUID)
+    expect(cancelOutcome.cancelled).toBe(false) // 收回未兑现（clearQueue mock 返回空集）
+    expect(h.registry.entries('s1')?.active[0]!.state).toBe('in-flight')
+
+    h.registry.onPiDisconnected('s1')
+    // 进程死亡 = 文本已离场：撤销意图就地兑现，不报失败
+    const full = h.registry.entries('s1')
+    expect(full?.active.some((e) => e.id === CLIENT_UUID)).toBe(false)
+    expect(full?.tombstones.some((t) => t.id === CLIENT_UUID && t.state === 'cancelled')).toBe(true)
+    expect(h.published.filter((m) => m.type === 'message.error').length).toBe(0)
+  })
+
+  it('断连幂等：无运行时 / 无在途条目时 no-op', async () => {
+    const h = makeHarness({ promptResult: { disposition: 'handled' }, commands: [{ name: 'plan', source: 'extension' }] })
+    await attachWithCommandList(h)
+    h.registry.submit('s1', { content: '/plan', clientUuid: CLIENT_UUID })
+    await h.flush()
+    expect(h.registry.entries('s1')?.active).toHaveLength(0)
+    expect(() => h.registry.onPiDisconnected('s1')).not.toThrow()
+    expect(() => h.registry.onPiDisconnected('s2')).not.toThrow()
   })
 })
 

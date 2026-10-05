@@ -1,22 +1,26 @@
 /**
- * 命令条目内核豁免测试（pi1-disposition-chat-flow D14③②/D14⑥/D2②，§4.1 验收条款 6/7）：
- * - G3 闸②：port.send settle 兜底对命令条目不武装（命令 handler await 用户交互属任务
- *   正常路径，60s 墙钟是跨粒级挪用）+ 普通条目兜底仍武装（对照）
- * - D14⑥：非 checked 通路（send()）命令条目首败即停、不进 backoff（「失败 = 可能已
- *   执行」，重试买不到安全性）+ 普通条目失败仍有限重试（对照）
- * - D2② 组批隔离：命令条目与普通条目同窗挂账 / 同队列积累时命令恒单独成批（port.send
- *   收到裸命令文本，不被 BATCH_SEP 拼接为混合 composed——拼接文本使命令解析必然 miss）+
- *   普通条目合批语义不变（对照）
+ * 无标记条目内核契约测试（pi1-disposition-chat-flow D2②/D14⑥ 起源；ADR-0112 首败即停
+ * 统一语义 + skill-input-marker-pollution 技能通路并入后为「无标记条目」统一契约）：
+ * - 首败即停（ADR-0112）：port.send 失败一次即收口，全条目统一（无 backoff 重试链）——
+ *   unmarked 条目从内核移除（无 tombstone）、checked 条目 reject、普通 send() 条目
+ *   onSettled('rejected') 逐条上报后移除
+ * - failInFlight：断连事件驱动的显式失败终局——in-flight 条目批量转 failed（留守活跃集
+ *   等用户处置），queued 条目不触碰
+ * - D2② 组批隔离：无标记条目与普通条目同窗挂账 / 同队列积累时无标记条目恒单独成批
+ *   （port.send 收到裸文本，不被 BATCH_SEP 拼接为混合 composed——拼接文本使命令解析与
+ *   适配器全文身份匹配必然 miss）+ 普通条目合批语义不变（对照）
+ * - F1-11：handled 终局路径 checked waiter 受理口径 settle
+ *
+ * [已不可达用例删除登记] 原「G3 闸②：settle 兜底按命令条目豁免 + 普通条目 60s 兜底」
+ * 两用例随 port.send settle 挂死兜底整体退役（ADR-0112 范围纪律：信任边界内不设防，
+ * 挂死处置 = 用户重启）而不可达，2026-10-05 投递域清理批次删除。
  *
  * 运行：cd packages/session-delivery && npx vitest run tests/delivery-command-lane.test.ts
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDelivery } from '../src/delivery.js'
 import type { DeliveryMessage } from '../src/types.js'
-import { makeBusyParkPort, makeMockPort } from './helpers.js'
-
-/** port.send 悬挂兜底阈值（与 delivery.ts PORT_SEND_SETTLE_TIMEOUT_MS 同值——测试推进量级锚定；模块私有故本处同值镜像）。 */
-const PORT_SEND_SETTLE_TIMEOUT_MS = 60_000
+import { makeBusyParkPort, makeMockPort, textMsg } from './helpers.js'
 
 function msg(content: string): DeliveryMessage {
   return { payload: { kind: 'text', content } }
@@ -29,49 +33,8 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('G3 闸②：settle 兜底按命令条目豁免（D14③②）', () => {
-  it('命令条目：port.send 永不 settle → 60s 兜底不强制失败（挂起语义成立）', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    try {
-      const port = makeMockPort({
-        send: () => new Promise(() => {}), // 永不 settle（模拟命令 handler 内 await 用户交互）
-      })
-      const handle = createDelivery(port)
-      const checked = handle.sendChecked(msg('/permission rule'), { id: 'cmd-1', isCommand: true })
-      // 越过兜底阈值（60s）+ 余量：命令条目不被墙钟切成失败形态（条目仍留守 active——
-      // sendChecked 受理前条目态为 queued，强制失败会把它从内核移除）
-      await vi.advanceTimersByTimeAsync(120_000)
-      expect(handle.entriesFull().active.some((e) => e.id === 'cmd-1')).toBe(true)
-      expect(warnSpy.mock.calls.some((args) => String(args[0]).includes('port.send hung'))).toBe(false)
-      // 收口（防悬挂泄漏）：dispose reject 挂账
-      handle.dispose()
-      await expect(checked).rejects.toThrow()
-    } finally {
-      warnSpy.mockRestore()
-    }
-  })
-
-  it('对照：普通条目同形态 → 60s 兜底强制失败（极端形态照旧收口，不因豁免失效）', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    try {
-      const port = makeMockPort({
-        send: () => new Promise(() => {}),
-      })
-      const handle = createDelivery(port)
-      handle.send(msg('普通消息'))
-      await vi.advanceTimersByTimeAsync(PORT_SEND_SETTLE_TIMEOUT_MS + 1_000)
-      // 强制失败 → backoff 重试链（默认 max=50 未到 → 条目留守 queued 重试）
-      expect(warnSpy.mock.calls.some((args) => String(args[0]).includes('port.send hung'))).toBe(true)
-      expect(handle.entriesFull().active.length).toBeGreaterThan(0)
-      handle.dispose()
-    } finally {
-      warnSpy.mockRestore()
-    }
-  })
-})
-
-describe('D14⑥：非 checked 通路命令条目首败即停', () => {
-  it('send() 通路命令条目：首败从内核移除，不进 backoff（port.send 恰一次）', async () => {
+describe('首败即停（ADR-0112 统一语义，backoff 自动重试链退役）', () => {
+  it('send() 通路 unmarked 条目：首败从内核移除，不重试（port.send 恰一次）', async () => {
     let calls = 0
     const port = makeMockPort({
       send: () => {
@@ -80,9 +43,9 @@ describe('D14⑥：非 checked 通路命令条目首败即停', () => {
       },
     })
     const handle = createDelivery(port)
-    // 非 checked 提交（send()）的命令条目：isCommand 经 opts 随条目下发（D14⑥）
-    handle.send(msg('/todos'), { isCommand: true })
-    await vi.advanceTimersByTimeAsync(1_000) // 越过默认 backoff.ms=100 若干倍
+    // 非 checked 提交（send()）的 unmarked 条目：unmarked 经 opts 随条目下发
+    handle.send(msg('/todos'), { unmarked: true })
+    await vi.advanceTimersByTimeAsync(1_000) // 越过原 backoff.ms=100 若干倍（无重试触发点）
     await Promise.resolve()
     // 首败即停：条目已移除（无 tombstone——未进通道无判重语义），无重试
     expect(calls).toBe(1)
@@ -90,30 +53,34 @@ describe('D14⑥：非 checked 通路命令条目首败即停', () => {
     expect(handle.entriesFull().tombstones.length).toBe(0)
   })
 
-  it('对照：普通条目失败进有限重试（backoff 到点重发，行为不变）', async () => {
+  it('对照：普通条目同形态首败即停——onSettled rejected 逐条上报后移除（重试决策归消费方）', async () => {
     let calls = 0
+    const settled: Array<{ content: string; outcome: string }> = []
     const port = makeMockPort({
       send: () => {
         calls += 1
-        if (calls === 1) return Promise.reject(new Error('transient'))
-        return Promise.resolve()
+        return Promise.reject(new Error('transient'))
       },
     })
-    const handle = createDelivery(port)
+    const handle = createDelivery(port, {
+      onSettled: (m, outcome) => settled.push({ content: m.payload.kind === 'text' ? m.payload.content : '', outcome }),
+    })
     handle.send(msg('普通消息'))
     await vi.advanceTimersByTimeAsync(1_000)
     await Promise.resolve()
-    // backoff 到点重试成功：条目受理转 in-flight
-    expect(calls).toBe(2)
-    expect(handle.entriesFull().active.some((e) => e.state === 'in-flight')).toBe(true)
+    // 统一首败即停：恰一次发送 + 失败通知面（onSettled rejected）+ 条目移除（无 tombstone）
+    expect(calls).toBe(1)
+    expect(settled).toEqual([{ content: '普通消息', outcome: 'rejected' }])
+    expect(handle.entriesFull().active.length).toBe(0)
+    expect(handle.entriesFull().tombstones.length).toBe(0)
   })
 
-  it('checked 命令条目：首败 reject 即停（入口即拦语义，与普通 checked 同形态）', async () => {
+  it('checked 条目（含 unmarked）：首败 reject 即停（入口即拦语义）', async () => {
     const port = makeMockPort({
       send: () => Promise.reject(new Error('port down')),
     })
     const handle = createDelivery(port)
-    const checked = handle.sendChecked(msg('/plan'), { id: 'cmd-2', isCommand: true })
+    const checked = handle.sendChecked(msg('/plan'), { id: 'cmd-2', unmarked: true })
     await expect(checked).rejects.toThrow('port down')
     await Promise.resolve()
     expect(handle.entriesFull().active.some((e) => e.id === 'cmd-2')).toBe(false)
@@ -121,7 +88,69 @@ describe('D14⑥：非 checked 通路命令条目首败即停', () => {
   })
 })
 
-describe('D2② 组批隔离：命令条目不与普通条目拼为混合 composed', () => {
+describe('failInFlight：断连事件驱动的显式失败终局（ADR-0112）', () => {
+  it('in-flight 条目转 failed（留守活跃集）+ onSettled rejected；queued 条目不触碰', async () => {
+    let sendResolve: (() => void) | undefined
+    const port = makeMockPort({
+      send: () => new Promise<void>((resolve) => { sendResolve = resolve }),
+    })
+    const settled: string[] = []
+    const handle = createDelivery(port, {
+      onSettled: (_m, outcome) => settled.push(outcome),
+    })
+    // 第一条：受理 → in-flight（sendChecked 受理口径 resolve）
+    const p1 = handle.sendChecked(textMsg('msg1'), { id: 'e-1' })
+    sendResolve!()
+    await p1
+    expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
+    // 第二条：busy 留守 queued（busy gate 关闸，不出站）
+    port.idle = false
+    handle.send(textMsg('msg2'), { id: 'e-2' })
+    expect(handle.entriesFull().active.find((e) => e.id === 'e-2')!.state).toBe('queued')
+
+    const n = handle.failInFlight('pi connection lost')
+    expect(n).toBe(1)
+    const full = handle.entriesFull()
+    expect(full.active.find((e) => e.id === 'e-1')!.state).toBe('failed')
+    expect(full.active.find((e) => e.id === 'e-2')!.state).toBe('queued')
+    expect(settled).toEqual(['rejected'])
+    handle.dispose()
+  })
+
+  it('failed 条目可经 requeue 重投（resync 用户重试通路）', async () => {
+    let sendResolve: (() => void) | undefined
+    const port = makeMockPort({
+      send: () => new Promise<void>((resolve) => { sendResolve = resolve }),
+    })
+    const handle = createDelivery(port)
+    const p1 = handle.sendChecked(textMsg('msg1'), { id: 'e-1' })
+    sendResolve!()
+    await p1
+    expect(handle.failInFlight('pi connection lost')).toBe(1)
+    // 用户重试：failed → queued → 重投（受理回执到达后转 in-flight）
+    expect(handle.requeue(['e-1'])).toBe(1)
+    expect(handle.entriesFull().active.find((e) => e.id === 'e-1')!.state).toBe('queued')
+    sendResolve!()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(handle.entriesFull().active.find((e) => e.id === 'e-1')!.state).toBe('in-flight')
+    handle.dispose()
+  })
+
+  it('幂等：无 in-flight 条目时 failInFlight 返回 0、零回调', () => {
+    const settled: string[] = []
+    const port = makeMockPort()
+    const handle = createDelivery(port, {
+      onSettled: (_m, outcome) => settled.push(outcome),
+    })
+    port.idle = false // busy：条目留守 queued（未受理，不属 failInFlight 触达面）
+    handle.send(textMsg('msg1'))
+    expect(handle.failInFlight('pi connection lost')).toBe(0)
+    expect(settled).toEqual([])
+    handle.dispose()
+  })
+})
+
+describe('D2② 组批隔离：无标记条目不与普通条目拼为混合 composed', () => {
   /** BATCH_SEP 字面量（与 delivery.ts buildBatchPayload 同值镜像，模块私有故本处同值）。 */
   const BATCH_SEP = '\n\n---\n\n'
 
@@ -130,7 +159,7 @@ describe('D2② 组批隔离：命令条目不与普通条目拼为混合 compos
     return payload.kind === 'text' ? payload.content : ''
   }
 
-  it('pump 混合挂账：命令+普通同窗挂账 → 命令独立成段（port.send 收到裸命令文本），普通条目随后照常出站', async () => {
+  it('pump 混合挂账：无标记+普通同窗挂账 → 无标记条目独立成段（port.send 收到裸文本），普通条目随后照常出站', async () => {
     // 每批 send 挂起、逐批放行（advanceTimersByTimeAsync 的微任务 flush 会跑完同步级联，
     // 逐批受控才能逐批断言 composed 形态）
     const resolvers: Array<() => void> = []
@@ -141,8 +170,8 @@ describe('D2② 组批隔离：命令条目不与普通条目拼为混合 compos
     })
     const handle = createDelivery(port)
     const m1 = handle.sendChecked(msg('普通一'), { id: 'm-1' })
-    // 在途窗口内连发：命令 + 普通先后挂账（修复前 pump 会把两者汇为一批拼接出站）
-    const c1 = handle.sendChecked(msg('/todos'), { id: 'c-1', isCommand: true })
+    // 在途窗口内连发：无标记 + 普通先后挂账（隔离生效前 pump 会把两者汇为一批拼接出站）
+    const c1 = handle.sendChecked(msg('/todos'), { id: 'c-1', unmarked: true })
     const m2 = handle.sendChecked(msg('普通二'), { id: 'm-2' })
     await vi.advanceTimersByTimeAsync(0)
     expect(port.sendCalls.length).toBe(1)
@@ -150,14 +179,14 @@ describe('D2② 组批隔离：命令条目不与普通条目拼为混合 compos
 
     resolvers[0]!() // 第一批 settle → pump 组批
     await vi.advanceTimersByTimeAsync(0)
-    // 隔离生效：第二批 = 队首命令条目单独出站（裸命令文本，无分隔符拼接）
+    // 隔离生效：第二批 = 队首无标记条目单独出站（裸文本，无分隔符拼接）
     expect(port.sendCalls.length).toBe(2)
     expect(composedOf(port.sendCalls[1])).toBe('/todos')
     expect(composedOf(port.sendCalls[1])).not.toContain(BATCH_SEP)
 
     resolvers[1]!()
     await vi.advanceTimersByTimeAsync(0)
-    // 命令批 settle 后剩余普通条目照常出站
+    // 无标记批 settle 后剩余普通条目照常出站
     expect(port.sendCalls.length).toBe(3)
     expect(composedOf(port.sendCalls[2])).toBe('普通二')
 
@@ -166,7 +195,7 @@ describe('D2② 组批隔离：命令条目不与普通条目拼为混合 compos
     handle.dispose()
   })
 
-  it('pump 双命令挂账：命令批恒单条（两条命令互拼同样使命令解析 miss）', async () => {
+  it('pump 双无标记挂账：无标记批恒单条（两条命令互拼同样使命令解析 miss）', async () => {
     const resolvers: Array<() => void> = []
     const port = makeMockPort({
       send: () => new Promise<void>((resolve) => {
@@ -175,8 +204,8 @@ describe('D2② 组批隔离：命令条目不与普通条目拼为混合 compos
     })
     const handle = createDelivery(port)
     const m1 = handle.sendChecked(msg('普通一'), { id: 'm-1' })
-    const c1 = handle.sendChecked(msg('/todos'), { id: 'c-1', isCommand: true })
-    const c2 = handle.sendChecked(msg('/plan'), { id: 'c-2', isCommand: true })
+    const c1 = handle.sendChecked(msg('/todos'), { id: 'c-1', unmarked: true })
+    const c2 = handle.sendChecked(msg('/plan'), { id: 'c-2', unmarked: true })
     await vi.advanceTimersByTimeAsync(0)
     expect(port.sendCalls.length).toBe(1)
 
@@ -197,12 +226,12 @@ describe('D2② 组批隔离：命令条目不与普通条目拼为混合 compos
     handle.dispose()
   })
 
-  it('doSend 混合队列：busy park 积累的命令+普通条目 → 命令单独出站，剩余普通条目合批语义不变（对照）', async () => {
+  it('doSend 混合队列：busy park 积累的无标记+普通条目 → 无标记条目单独出站，剩余普通条目合批语义不变（对照）', async () => {
     const bp = makeBusyParkPort()
     bp.setIdle(false) // busy：条目积累（busy park 合批窗口）
     const handle = createDelivery(bp.port)
     handle.send(msg('普通A'), { id: 'a-1' })
-    handle.send(msg('/todos'), { id: 'b-1', isCommand: true })
+    handle.send(msg('/todos'), { id: 'b-1', unmarked: true })
     handle.send(msg('普通C'), { id: 'c-1' })
     await vi.advanceTimersByTimeAsync(0)
     expect(bp.port.sendCalls.length).toBe(0)
@@ -210,8 +239,8 @@ describe('D2② 组批隔离：命令条目不与普通条目拼为混合 compos
     bp.setIdle(true)
     bp.fireSettled() // settled 边沿 → flush → doSend 组批
     await vi.advanceTimersByTimeAsync(0)
-    // 隔离：第一批 = 队列中的命令条目单独出站（裸命令文本）；命令批受理后条目转
-    // in-flight，busy gate 内查在途条目即关闸（设计内行为），第二批等下一边沿
+    // 隔离：第一批 = 队列中的无标记条目单独出站（裸文本）；条目受理后转 in-flight，
+    // busy gate 内查在途条目即关闸（设计内行为），第二批等下一边沿
     expect(bp.port.sendCalls.length).toBe(1)
     expect(composedOf(bp.port.sendCalls[0])).toBe('/todos')
     expect(composedOf(bp.port.sendCalls[0])).not.toContain(BATCH_SEP)
@@ -230,8 +259,7 @@ describe('F1-11：handled 终局路径 checked waiter 受理口径 settle', () =
     // handled 终局形态（session-delivery-registry deliverOne 同构）：port.send 实现
     // 内部先 confirmDelivered（finalizeEntry 同步摘批 + 写 tombstone），随后 promise
     // 才 settle——onSendOk 的 settleChecked 只 settle 当前批成员（批已不含该条目），
-    // 修复前 checked waiter 永不 settle、恒滞留 checkedPending（waiter 泄漏 +
-    // pump watchdog 停表条件恒假）。
+    // 修复前 checked waiter 永不 settle、恒滞留 checkedPending（waiter 泄漏）。
     const handleBox: { current: ReturnType<typeof createDelivery> | undefined } = {
       current: undefined,
     }
@@ -243,7 +271,7 @@ describe('F1-11：handled 终局路径 checked waiter 受理口径 settle', () =
     })
     const handle = createDelivery(port)
     handleBox.current = handle
-    const checked = handle.sendChecked(msg('/todos'), { id: 'cmd-handled', isCommand: true })
+    const checked = handle.sendChecked(msg('/todos'), { id: 'cmd-handled', unmarked: true })
     // 修复前此 await 永挂（vitest 默认超时红）；修复后受理口径随 delivered 终局 resolve
     await checked
     const full = handle.entriesFull()

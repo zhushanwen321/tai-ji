@@ -148,7 +148,7 @@ async function testProxyConnection(config: IProxyConfig): Promise<ProxyTestResul
     const undiciErr = err instanceof CurlFetchError && err.undiciError !== undefined ? err.undiciError : err
     const classified = classifyNetError(undiciErr, 'downloading', proxyUrl)
     // timeout 成因分流（F1）：testProxy 探测超时（'timeout (aborted)' 泛化形态）给中性
-    // 超时话术——无下载语境，停滞文案的「断点续传」指引在本场景是误导
+    // 超时话术——无下载语境，下载文案的「断点续传」指引在本场景是误导
     let info = resolveTimeoutUserCopy(classified.toUserFriendly(), classified.message)
     // D2（v3 修订）testProxy 统一准绳：公网 EHOSTUNREACH 也给代理语境话术。
     // 用户此刻在测代理，通用网络失败话术（非代理语境）会误导排查方向；
@@ -296,14 +296,14 @@ async function resolveUpdateDownloadShortCircuit(
 }
 
 /**
- * UPDATE_NETWORK_TIMEOUT 的用户可见文案按成因分流（design-code-sync F1，
- * timeout-slow-flow-wallclock §7 错误规格表）：该码有三个真实来源，停滞文案若覆盖
- * connect 成因会把用户引向「查传输停滞」而真实问题是网络/代理不可达。
- * 判别依据 = 诊断 message（英文串是落盘诊断通道的原始记录，见 net-errors NOTE）：
+ * UPDATE_NETWORK_TIMEOUT 的用户可见文案按成因分流（design-code-sync F1）：该码有
+ * 多个真实来源，下载场景文案若覆盖 connect 成因会把用户引向「查传输/续传」而真实
+ * 问题是网络/代理不可达。判别依据 = 诊断 message（英文串是落盘诊断通道的原始记录，
+ * 见 net-errors NOTE）：
  * - connect 形态（mapCurlExitToError connect 档 'curl connection timeout (...)'，
  *   curl --connect-timeout 10s 连接未建立）→ 连接超时话术
- * - 停滞形态（'... stalled ...'，undici 双路径 + curl --speed-time）→ 映射表
- *   停滞 + 断点续传文案（不覆写）
+ * - stalled 诊断形态（'... stalled ...'，curl --speed-time 传输停滞档）→ 映射表
+ *   下载超时 + 断点续传文案（不覆写）
  * - 泛化形态（'timeout (aborted)'，testProxy 探测超时等；无下载语境，「断点续传」
  *   指引不适用）→ 中性超时话术
  * 对齐本文件 testProxy 的 EHOSTUNREACH handler 内覆写先例（场景特化话术不入共享映射表，

@@ -17,7 +17,7 @@
  *   session 增删无界增长（每 session 至多 1 条，有界但不可回收）。注册后 deleteSession →
  *   triggerSessionCleanups(sid) 统一回收；uninstall 时整体清空（teardown 语义）。
  *
- * 状态形态：模块级单例 ref（useCrashRecoveryNotice 同款邻域范式）——状态源在 core
+ * 状态形态：模块级单例 ref——状态源在 core
  * ws-client（模块级单例），本 composable 只是其 renderer 投影 + 编排，非 per-instance
  * 数据（ADR-0049 Map 分区范式不适用，投影集合本身按 sessionId 寻址）。
  *

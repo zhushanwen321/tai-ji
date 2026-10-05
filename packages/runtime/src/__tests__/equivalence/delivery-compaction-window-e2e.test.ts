@@ -46,8 +46,8 @@ const MARK_A = 'COMPACT-WINDOW-A:'
 const MARK_B = 'COMPACT-WINDOW-B:'
 // clientUuid 必须是真 uuid 形态：投递身份判据 DELIVERY_MARKER_ID_RE（registry，SSOT =
 // shared MSG_ID_TAG_RE 派生）只认 uuid 段 + m-<base36>-<seq> 双形态——非 uuid 字面量的
-// 出站标记被 extractMarkerIds 判 0，message_end 回执命中与 sweepInFlight 对账兜底双通道
-// 同时失明，条目永挂 in-flight（断言第 7 步 tombstone 恒空）。
+// 出站标记被 extractMarkerIds 判 0，message_end 回执命中通道失明，条目永挂 in-flight
+//（断言第 7 步 tombstone 恒空）。
 const CLIENT_UUID_A = 'u-1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f'
 const CLIENT_UUID_B = 'u-9a8b7c6d-5e4f-4a3b-8c9d-0e1f2a3b4c5d'
 const BARE_MARKER_A = '1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f'
