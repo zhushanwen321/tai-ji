@@ -387,6 +387,9 @@ test.describe('Workflow 可视化 overlay E2E', () => {
     overlay = await openOverlay(page, ACTORS.pending)
     await expect(dagNode(overlay, 'agent-L2-N0')).toHaveAttribute('data-state', 'pending')
     await expect(dagNode(overlay, 'agent-L4-N1')).toHaveAttribute('data-state', 'pending')
+    // V3① 节点侧 pending 一角：run 运行中无停止叠加，dotTone('pending') 返回空串、
+    // 色由 circle 基类承载——与 LEGEND_EXPECT pending fill 同 literal（六态同色节点侧锚）
+    await expect(dagNode(overlay, 'agent-L2-N0').locator('circle')).toHaveClass(/fill-\[var\(--neutral-dim\)\]/)
     await page.keyboard.press('Escape')
 
     // ── failed 演员：danger 描边无脉冲 ──
@@ -503,6 +506,23 @@ test.describe('Workflow 可视化 overlay E2E', () => {
     for (let i = 0; i < 7; i++) {
       await expect(dagNode(overlay, `agent-L3-N${i}`)).toHaveAttribute('data-state', i < 4 ? 'done' : 'running')
     }
+    // V1-wf③ 上区内容水平居中（无贴左空白，wf D1 走查 edge#12）：最左/最右分区矩形与
+    // 画布两缘的空隙对称——mock `.dag-stage` justify-center 在自绘 SVG 的等价实现 =
+    // 初始视口 tx=(容器宽−画布宽)/2（k 恒 1），几何投影即两空隙相等
+    const gaps = await overlay.getByTestId('wfvz-dag-svg').evaluate((svg) => {
+      const box = svg.getBoundingClientRect()
+      let left = Number.POSITIVE_INFINITY
+      let right = Number.NEGATIVE_INFINITY
+      svg.querySelectorAll('[data-wfvz-cluster] > rect').forEach((rect) => {
+        const b = rect.getBoundingClientRect()
+        left = Math.min(left, b.left)
+        right = Math.max(right, b.right)
+      })
+      return { leftGap: left - box.left, rightGap: box.right - right }
+    })
+    // 贴左形态（tx=0）leftGap≈0 且右空白≈容器−画布；居中形态两空隙对称且各有可观边距
+    expect(gaps.leftGap).toBeGreaterThan(100)
+    expect(Math.abs(gaps.leftGap - gaps.rightGap)).toBeLessThan(4)
     await page.keyboard.press('Escape')
   })
 

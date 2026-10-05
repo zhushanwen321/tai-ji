@@ -198,6 +198,45 @@ describe('WorkflowVizDag 节点级渲染边界与零节点形态', () => {
   })
 })
 
+describe('WorkflowVizDag 视口水平居中（workflow-overlay-refine D1 / V1-wf③ 上区内容水平对中）', () => {
+  it('无布局环境（jsdom clientWidth 缺失）初始 tx 贴 0，渲染不破坏', () => {
+    const wrapper = mountDag()
+    expect(wrapper.find('[data-testid="wfvz-dag-viewport"]').attributes('transform')).toBe('translate(0,0) scale(1)')
+  })
+
+  it('run 切换重置：tx = (容器宽−画布宽)/2（k 恒 1 无 fit，画布宽 180 = 节点 156 + 分区左右内边距 24）', async () => {
+    const wrapper = mountDag()
+    const svg = wrapper.find('[data-testid="wfvz-dag-svg"]').element
+    Object.defineProperty(svg, 'clientWidth', { value: 1000 })
+    const solo: WorkflowDag = {
+      phases: [{ name: 'solo', order: 0 }],
+      nodes: [node({ id: 'solo', phase: 'solo' })],
+      edges: [],
+      parallelGroups: [],
+      loops: [],
+    }
+    await wrapper.setProps({ dag: solo })
+    // 单分区画布宽 180 → tx = (1000−180)/2 = 410；此前用户 pan 过也在重置中回到居中
+    expect(wrapper.find('[data-testid="wfvz-dag-viewport"]').attributes('transform')).toBe('translate(410,0) scale(1)')
+  })
+
+  it('画布宽于容器时 tx 贴 0（不产生负偏移把内容推出左缘）', async () => {
+    const wrapper = mountDag()
+    const svg = wrapper.find('[data-testid="wfvz-dag-svg"]').element
+    Object.defineProperty(svg, 'clientWidth', { value: 100 })
+    const next: WorkflowDag = {
+      phases: [{ name: 'wide', order: 0 }, { name: 'tail', order: 1 }],
+      nodes: [node({ id: 'w0', phase: 'wide' }), node({ id: 't0', phase: 'tail' })],
+      edges: [],
+      parallelGroups: [],
+      loops: [],
+    }
+    await wrapper.setProps({ dag: next })
+    // 两分区画布宽 392 > 容器 100 → tx = max(0, (100−392)/2) = 0
+    expect(wrapper.find('[data-testid="wfvz-dag-viewport"]').attributes('transform')).toBe('translate(0,0) scale(1)')
+  })
+})
+
 describe('WorkflowVizDag 画布视觉（workflow-overlay-refine D3）', () => {
   it('V1-wf③ 标签/节点分层：分区标签 2xs/font-medium/0.03em 字距、节点名 3xs（字号档 class 断言）', () => {
     const wrapper = mountDag()
