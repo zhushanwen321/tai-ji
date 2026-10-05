@@ -35,7 +35,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { fail, ok, isFailed, guardExit } from './lib/guard-report.mjs'
+import { fail, ok, isFailed, guardExit, extractFunctionBlock } from './lib/guard-report.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const UI_HTML_PREVIEW_PATH_SRC = join(ROOT, 'packages', 'ui', 'src', 'features', 'chat', 'html-preview-path.ts')
@@ -50,17 +50,9 @@ export const UI_LINKS_ANCHOR = 'function resolveHrefPath'
 /** 折叠语义锚点（三份缺一不可——防「一致删空 / 一致退化」的对拍盲区）。 */
 export const FOLD_SEMANTIC_ANCHORS = ["rel.startsWith('/')", "if (seg === '..')", 'parts.pop()']
 
-/**
- * 截取 `anchor` 起、到下一个行首 `}`（函数体闭合）为止的源码块。
- * 三个目标函数的闭合 `}` 均在行首，体内模板串的 `${...}` 不落行首——截取安全。
- */
-export function extractFunctionBlock(text, anchor) {
-  const start = text.indexOf(anchor)
-  if (start < 0) return { error: `未找到 ${anchor}（改名 / 移动？）` }
-  const end = text.indexOf('\n}', start)
-  if (end < 0) return { error: `${anchor} 未找到行首闭合 '}'（形态变化？）` }
-  return { text: text.slice(start, end + 2) }
-}
+// 函数体截取原语与产物目录公式守卫同款收敛：scripts/lib/guard-report.mjs（本文件 main /
+// self-test 的本地引用经上方 import 绑定；export 保持既有公共面）。
+export { extractFunctionBlock }
 
 /** 剥签名行（三份签名仅函数名 / export 修饰不同，对拍对象是签名行之后的函数体）。 */
 export function stripSignatureHead(blockText) {

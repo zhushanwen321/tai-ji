@@ -27,7 +27,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { fail, ok, isFailed, guardExit } from './lib/guard-report.mjs'
+import { fail, ok, isFailed, guardExit, extractFunctionBlock } from './lib/guard-report.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SHARED_PATHS_SRC = join(ROOT, 'packages', 'shared', 'src', 'paths.ts')
@@ -44,17 +44,9 @@ export const MIRROR_SEGMENT_CONST = 'SESSION_ARTIFACTS_DIR_SEGMENT'
 const SHARED_ANCHOR = `export function ${SHARED_FN}`
 const MIRROR_ANCHOR = `export function ${MIRROR_FN}`
 
-/**
- * 截取 `anchor` 起、到下一个行首 `}`（函数体闭合）为止的源码块。
- * 两个目标函数的闭合 `}` 均在行首，体内模板串的 `${...}` 不落行首——截取安全。
- */
-export function extractFunctionBlock(text, anchor) {
-  const start = text.indexOf(anchor)
-  if (start < 0) return { error: `未找到 ${anchor}（改名 / 移动？）` }
-  const end = text.indexOf('\n}', start)
-  if (end < 0) return { error: `${anchor} 未找到行首闭合 '}'（形态变化？）` }
-  return { text: text.slice(start, end + 2) }
-}
+// 函数体截取原语与 POSIX resolve 镜像守卫同款收敛：scripts/lib/guard-report.mjs。
+// re-export 保持单测（scripts/__tests__/check-artifact-dir-formula-sync.test.mjs）的既有 import 面。
+export { extractFunctionBlock }
 
 /** 从函数块提取 `join(<dataDir 表达式>, '<段名>', sessionId)` 的段名字面量。 */
 export function extractJoinSegment(blockText) {
