@@ -667,7 +667,7 @@ const sessionImpl = {
    */
   async getWorkflowRunEvents(sessionId: string, runId: string): Promise<WorkflowRunEventsReply> {
     await sleep(TIMING.ack)
-    if (Object.hasOwn(fixtureRunEventsByRun, runId)) {
+    if (Object.prototype.hasOwnProperty.call(fixtureRunEventsByRun, runId)) {
       return { sessionId, runId, events: fixtureRunEventsByRun[runId].map((e) => ({ ...e })) }
     }
     return { sessionId, runId, code: 'record_not_found', message: 'mock 无 record 事件流记录' }
@@ -682,10 +682,10 @@ const sessionImpl = {
    */
   async getWorkflowDag(sessionId: string, runId: string): Promise<WorkflowDagReply> {
     await sleep(TIMING.ack)
-    if (Object.hasOwn(fixtureDagByRun, runId)) {
+    if (Object.prototype.hasOwnProperty.call(fixtureDagByRun, runId)) {
       return { sessionId, runId, dag: { ...fixtureDagByRun[runId] } }
     }
-    if (Object.hasOwn(fixtureDagErrors, runId)) {
+    if (Object.prototype.hasOwnProperty.call(fixtureDagErrors, runId)) {
       return { sessionId, runId, code: fixtureDagErrors[runId].code, message: fixtureDagErrors[runId].message }
     }
     return { sessionId, runId, code: 'record_not_found', message: 'mock 无 record 文件基建' }
