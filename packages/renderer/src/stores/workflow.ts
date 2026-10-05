@@ -39,8 +39,8 @@ export {
   extractAgentCallSessionId,
 } from '@taiji/shared'
 import { createInflightDedup } from '@taiji/core/foundation/create-inflight-dedup'
+import { createEmptyResultStrikeGuard, createPartitionedLoadState, createPartitionedRecords } from '../lib/partitioned-session-records'
 import { session as sessionApi } from '@/api'
-import { createPartitionedLoadState, createPartitionedRecords } from '../lib/partitioned-session-records'
 
 // ── [P3/D6] progress 投影消费（纯函数，drawer WorkflowTab 与托盘面板共用）──
 
@@ -165,8 +165,17 @@ export const useWorkflowStore = defineStore('workflow', () => {
     dirtyWorkflows.delete(sessionId)
   }
 
-  // [W15] 防御性清理：参照 subagent.ts 的 onScopeDispose 模式（原 running 重试 timer 的
-  // clearTimeout 簿记随 500ms 盲等重试删除——待裁决项 5 根治，无 timer 即无清理义务）。
+  /**
+   * loadWorkflows 空结果守卫（R1 business-logic S3，与 subagent.ts 同款）：达到 LIMIT 判
+   * 真实删空放行覆盖。strike 语义单源在 createEmptyResultStrikeGuard JSDoc
+   * （lib/partitioned-session-records），此处只声明本 store 的阈值与 log tag。
+   */
+  const EMPTY_RESULT_STRIKE_LIMIT = 2
+  const strikeGuard = createEmptyResultStrikeGuard(EMPTY_RESULT_STRIKE_LIMIT, 'workflow-store', 'getWorkflows')
+
+  // [W15] 防御性清理：inflightDedup / dirtyWorkflows 是非响应式 Map（不在 ref 里），HMR /
+  // store dispose 时主动 clear，防旧实例的 drainDirty 读到已废弃 store 的簿记。参照
+  // subagent.ts 的 onScopeDispose panelStreamUnsub 模式。
   // mainSessionAgentCalls 由 clearWorkflows / clearAgentCallMapping 显式管理（业务路径触发），
   // 此处不重复清理（避免与 deleteSession 的精确清理冲突）。
   if (getCurrentScope()) {
@@ -484,7 +493,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
   }
 
   /**
-   * workflow 增量信号处理：信号到达即拉一次全量列表（running 与否同待遇）。
+   * workflow 增量信号处理：立即拉取完整列表。
    *
    * runtime 在 workflow 发起/结束时刻推送 session.workflowUpdate 增量信号，前端收到后触发
    * loadWorkflows RPC 拉取完整列表。由 useConnection.routeInbound 在所有 session（含非活跃）
@@ -507,10 +516,18 @@ export const useWorkflowStore = defineStore('workflow', () => {
    * @param status 信号里的 workflow status（[D2] 显式裁决：interrupted 与终态同待遇只拉
    *   一次——中断 run 事件流静止，resume 复活变 running 后随下一次信号刷新）
    */
-  function triggerWorkflowReload(sessionId: string): void {
+  function triggerWorkflowReload(sessionId: string, status: string): void {
     const sid = sessionId
-    // 增量信号 → 立即拉取完整列表
-    void loadWorkflows(sid)
+    // 增量信号 → 立即拉取完整列表；running 信号后列表为空 = workflow-state-link 可能未
+    // 落盘（pi 延迟写入时序），显式 warn 出声（诊断信号，非补偿——不延迟重拉）
+    void loadWorkflows(sid).then(() => {
+      if (status === 'running' && getRecordsBySession(sid).length === 0) {
+        console.warn(
+          '[workflow-store] running 信号后 workflow 列表为空：workflow-state-link 可能未落盘（pi 延迟写入），终态显示缺失',
+          sid,
+        )
+      }
+    })
     // [可视化 U5/D4] overlay 活跃 run 的事件流重新拉取（§3.1-4：overlay 订阅 run 级信号
     // 触发 getWorkflows + 事件流重新拉取——store 内聚合接线，信号处理链零改动）。force
     // 覆盖 ready 缓存；在途丢弃检查由 performLoadRunEvents 内建（信号到达时 overlay 已切
@@ -528,6 +545,8 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   /** 清空所有 workflow 分区 + 清 agentcall 映射（全局重置场景用） */
   function clearWorkflows(): void {
+    // strike 簿记按当前分区键重置（残留 strike → 重新预置后首次空结果误判删空）。
+    for (const sid of partition.recordsBySession.value.keys()) strikeGuard.reset(sid)
     // RD-3#12：整表替换 records + 全清 loading/error（+ oversize）三 facet，与 clearSession
     // 全清对齐——残留 loading=true → spinner 永转 / 残留 error → 错误态卡死。
     partition.recordsBySession.value = new Map()

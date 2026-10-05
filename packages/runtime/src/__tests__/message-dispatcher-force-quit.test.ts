@@ -6,10 +6,8 @@
  *        广播 session.exited{code:null, reason:用户指引文案} → removeEntry（与 abort 超时路径同构）
  * - FQ2: forceQuit 不在活跃进程表（pm.getClient 返回 undefined）→ 幂等成功：
  *        不调 destroy/persist/removeEntry、不广播（竞态兜底，菜单渲染后 session 恰好退出）
- * - FQ3: abort RPC 超时 + 真冻结判据成立（探测无响应 + 事件窗静默超保守窗，W7 阶梯 3）→
- *        复用同一强杀编排：persist stopped 带 'Abort failed (pi frozen...)' 诊断 reason +
- *        session.exited 用户文案。[W7] abort 超时不再无条件判死——阶梯全量用例见
- *        services/session/__tests__/message-dispatcher-abort-liveness.test.ts
+ * - FQ3: [ADR-0122 退役] abort RPC 超时三级阶梯（W7，含真冻结判据）已随 RPC 墙钟整体
+ *        删除，对应用例退役
  * - FQ4（code-harden RT-4#1）: 编排中段抛错 → 终态三步（full-reset / session.exited /
  *        removeEntry）finally 必达，异常不上抛
  * - FQ5/FQ6（code-harden RT-4#1）: 无活跃进程分支按 occupancy 分型——≠idle 继续完整
@@ -21,7 +19,6 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 import { MessageDispatcher } from '../services/session/message-dispatcher.js'
-import { RpcTimeoutError } from '../utils/errors.js'
 import type { IDispatcherSessionOps } from '../services/session/session-internal.js'
 import type { IManagedSessionView } from '../services/session/types.js'
 import type { IMessageBus } from '../services/message-bus/message-bus.js'
@@ -54,7 +51,6 @@ function makeMockSession(): IManagedSessionView {
 interface MockOpts {
   /** pm.getClient 返回值；undefined 模拟 session 不在活跃进程表 */
   active?: boolean
-  abortError?: Error
 }
 
 interface ForceQuitMocks {
@@ -70,16 +66,7 @@ interface ForceQuitMocks {
 }
 
 function makeMocks(opts: MockOpts = {}): ForceQuitMocks {
-  const client = opts.abortError
-    ? {
-        abort: vi.fn(async () => { throw opts.abortError! }),
-        // [W7] 真冻结判据显式化：探测无响应（getState 超时）+ 事件窗静默超保守窗
-        //（lastEventAt 远超默认窗 600s）= 阶梯 3 直达强杀的唯一触发组合。旧 mock（无
-        // getState / 无事件产出成员）会隐式落同一路径，显式化避免语义漂移。
-        getState: vi.fn(async () => { throw new RpcTimeoutError('get_state', 10_000) }),
-        lastEventAt: Date.now() - 700_000,
-      }
-    : { abort: vi.fn(async () => ({}) as Awaited<ReturnType<IPiEngine['abort']>>) }
+  const client = { abort: vi.fn(async () => ({}) as Awaited<ReturnType<IPiEngine['abort']>>) }
 
   const broadcasts: ServerMessage[] = []
   const bus = { publish: vi.fn((_sid: string, m: ServerMessage) => { broadcasts.push(m) }) } as unknown as IMessageBus
@@ -194,23 +181,5 @@ describe('MessageDispatcher forceQuit —— sidebar 强制退出', () => {
     expect(m.persistOutcomeFn).not.toHaveBeenCalled()
     expect(m.removeEntryFn).not.toHaveBeenCalled()
     expect(m.broadcasts).toHaveLength(0)
-  })
-})
-
-describe('MessageDispatcher abort RPC 超时 —— 复用强杀编排', () => {
-  it('FQ3: abort 超时 + 真冻结判据（探测无响应 + 事件窗静默超窗）→ 同一编排收敛 + stopped 带冻结诊断 reason + session.exited 用户文案', async () => {
-    const m = makeMocks({
-      active: true,
-      abortError: new RpcTimeoutError('abort', 5000),
-    })
-
-    await m.dispatcher.abort('s1')
-
-    expect(m.callOrder).toEqual(['detach', 'destroy', 'persist', 'remove'])
-    expect(m.persistOutcomeFn).toHaveBeenCalledWith('s1', 'stopped', expect.stringContaining('Abort failed (pi frozen'))
-    const exited = findSessionExited(m.broadcasts)
-    expect(exited).toBeDefined()
-    expect(exited!.payload).toMatchObject({ sessionId: 's1', code: null })
-    expect(exited!.payload.reason).toContain('冻结')
   })
 })

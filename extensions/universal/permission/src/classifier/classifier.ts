@@ -13,7 +13,9 @@
  *   - G3 修正（由 callLLM 承接）：completeSimple 的 EventStream.result() 只 resolve 不 reject，
  *     error/aborted 也 resolve（带 stopReason）。callLLM 已把 error/aborted 归一为 ok:false +
  *     stopReason 独立透传；classifier 消费透传字段保留日志区分（abort 与 error 分开记）
- *   - 外层超时/中止兜底保留：防御 provider 不支持 timeoutMs 时 result() 永挂
+ *   - 外层超时/中止兜底：仅在用户显式配置 timeout > 0 时武装（默认 0 = 不限时，ADR-0122：
+ *     无包内挂死兜底）；abort 竞速为事件驱动恒在。武装时防御 provider 不支持 timeoutMs
+ *     时 result() 永挂
  *   - fail-closed：timeout / 抛错 / 解析失败 / 无可用模型 → 一律 ask
  */
 

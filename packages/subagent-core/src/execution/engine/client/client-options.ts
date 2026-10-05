@@ -40,13 +40,6 @@ export interface EngineClientOptions {
   engineConfig?: Record<string, string>;
   /** 引擎 cmdline 身份谓词覆盖（pidfile 三条件清扫防误杀校验；缺省按 command 词形）。 */
   engineCmdlineMatcher?: (cmdline: string) => boolean;
-  /**
-   * [测试通道] 崩溃重建退避序列覆盖（ms）：缺省 = SDK 常量 CRASH_REBUILD_BACKOFF_MS
-   * （1s/2s/4s 生产默认不变）。测试传 ms 级序列压缩真实退避等待，保留真实子进程
-   * spawn/崩溃 IO。长度语义与 SDK 常量一致：按 attempt-1 索引，越界由调用方
-   * （connectWithRebuild 循环上界 CRASH_REBUILD_MAX_ATTEMPTS）保证。
-   */
-  crashRebuildBackoffMs?: readonly number[];
   /** manifest 诊断源（initialize 应答与 manifest 不一致 → warn 留痕，不参与判据）。 */
   manifestDiagnostics?: {
     capabilities?: EngineCapabilities;

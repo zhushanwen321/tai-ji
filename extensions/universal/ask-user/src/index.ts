@@ -29,10 +29,10 @@ import { validateInput } from "./validate";
 
 /**
  * execute 的返回形状：复用 SDK AgentToolResult<AskUserDetails>。
- * SDK 的 AgentToolResult 类型未声明 isError（pi-agent-core types.d.ts:316-334）——
- * 因为 pi 契约里返回值不携带错误标记：execute 只有 throw 才被置 isError:true
- * （agent-loop.js:453-483），返回值里的 isError 字段会被丢弃（W4 修复前曾误用）。
- * 取消（用户取消 / abort）不是错误，正常返回 cancelled result。
+ * 错误语义（pi-agent-core 1.0.0 已核验）：execute throw → agent-loop catch 置
+ * isError:true（agent-loop.js:581-588）；返回值 isError:true 也被尊重（同文件 :579
+ * `isError: result.isError === true`，0.84.4 时返回值会被丢弃）。本工具取消（用户
+ * 取消 / abort）不是错误，cancelled result 不带 isError，两版语义下均为正常返回。
  */
 type ExecuteResult = AgentToolResult<AskUserDetails>;
 

@@ -4,6 +4,8 @@ import type { GuiComponentType } from '@zhushanwen/extension-protocol'
 /** 容器原语类型键（card/columns/group）——这 3 类原语递归渲染子组件，是环的来源 */
 export type PrimitiveContainerType = Extract<GuiComponentType, 'card' | 'columns' | 'group'>
 
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构）：容器原语查表——PrimitiveRouter ↔
+// Card/Columns/Group 静态循环依赖的断环注册表，barrel 加载时一次性注册（§4 ⑧ 2026-10-04 批登记）
 const containers = new Map<PrimitiveContainerType, Component>()
 
 /**

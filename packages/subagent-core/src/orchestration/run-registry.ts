@@ -195,19 +195,12 @@ export async function projectRunRegistryState(
 
 /** adoptInterruptedRun 的可调项。 */
 export interface AdoptInterruptedRunOptions { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
-  /** 时钟注入（epoch ms）；缺省 Date.now()——转移 ts 与宽限窗判定的确定性测试通道。 */
+  /** 时钟注入（epoch ms）；缺省 Date.now()——转移 ts 的确定性测试通道。 */
   now?: number;
   /** 中断来源标记（RunErrorCode 中断族：crashed / terminated / startup-sweep）。 */
   errorCode?: RunErrorCode;
   /** 中断 reason 文本（run-interrupted 帧载荷 + 诊断面；缺省无 reason）。 */
   reason?: string;
-  /**
-   * 事件流静止宽限窗：末帧 ts 距 now 不足窗 → skippedGraceWindow（崩溃瞬间的
-   * 事件流仍在推进的保守窗——「活体集未命中」已由 activeRunIds 承载，本窗服务
-   * 跨进程慢写尾部场景）。缺省 0 = 立即收编（壳侧重启场景——活体集未命中的静止
-   * 流即收编）。
-   */
-  graceWindowMs?: number;
   /**
    * journal 目录（ADR-0081 目录参数化）：runtime 侧启动扫描注入
    * ——调用进程 cwd/env 与落盘目录不相交，scanRunEvents / manifest 证据面 /
@@ -235,8 +228,6 @@ export type AdoptInterruptedRunOutcome =
   | "skippedTerminal"
   /** 活跃保护跳过。 */
   | "skippedActive"
-  /** 宽限窗未到（graceWindowMs 判定）。 */
-  | "skippedGraceWindow"
   /** 坏链 run（fold 停在 created——run-created 帧损坏/缺首帧，run-interrupted 表外转移）。 */
   | "skippedBrokenChain"
   /** 空 record 流（无事件证据——从未落账或已过保留期清理）。 */
@@ -260,7 +251,7 @@ function resolveManifestDirForAdopt(journalDir?: string): string | undefined {
  * callCount 推导归 interruptRun 入口内聚——本函数只透传补写通道与载荷源。
  */
 /**
- * [adoptInterruptedRun 拆分] 收编前置裁决（三面证据 + 宽限窗 + 坏链守卫）：
+ * [adoptInterruptedRun 拆分] 收编前置裁决（三面证据 + 坏链守卫）：
  * 返回 skipped* 让位理由；null = 前置全过、继续收编。lastEventAt 一并返回
  * （收编成功日志的静止锚点），前置不通过时为 undefined。
  */
@@ -270,7 +261,6 @@ async function precheckAdoption(
   state: ReturnType<typeof foldEvents>,
   opts: AdoptInterruptedRunOptions | undefined,
   journalDir: string | undefined,
-  now: number,
 ): Promise<{ skipped: AdoptInterruptedRunOutcome; lastEventAt?: undefined } | { skipped: null; lastEventAt: number }> {
   // 三面证据（幂等第一道）：record fold 面（terminal 或已 interrupted 均跳过——
   // 重复收编让位）
@@ -289,14 +279,9 @@ async function precheckAdoption(
   if (opts?.hasSettledEntry !== undefined && (await opts.hasSettledEntry(runId))) {
     return { skipped: "skippedTerminal" };
   }
-  // 宽限窗（事件流静止判定；缺省 0 = 立即收编）
-  const lastEventAt = events[events.length - 1]!.ts;
-  if (now - lastEventAt < (opts?.graceWindowMs ?? 0)) {
-    return { skipped: "skippedGraceWindow" };
-  }
   // 坏链守卫：fold 停在 created（首帧损坏）时 run-interrupted 表外转移——保守跳过
   if (state.lifecycle === "created") return { skipped: "skippedBrokenChain" };
-  return { skipped: null, lastEventAt };
+  return { skipped: null, lastEventAt: events[events.length - 1]!.ts };
 }
 
 export async function adoptInterruptedRun(
@@ -314,7 +299,7 @@ export async function adoptInterruptedRun(
   // 收编链的全量重放结果进缓存，紧随的 interruptRun dispatch 链命中缓存直接
   // transition——同一次收编内同 runId 不再重折第二遍。
   const state = foldRunEventsToLifecycleState(runId, events);
-  const precheck = await precheckAdoption(runId, events, state, opts, journalDir, now);
+  const precheck = await precheckAdoption(runId, events, state, opts, journalDir);
   if (precheck.skipped !== null) return precheck.skipped;
   // 幂等追加中断转移事件（[D15] 入口；workflowName 取 run-created 帧——中断条目
   // 的 scriptName 载荷，缺帧回落 runId）。Illegal = 并发收编/终局让位——抢先方已

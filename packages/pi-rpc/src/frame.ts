@@ -1,12 +1,16 @@
 // src/frame.ts
 //
-// pi RPC 帧协议公共层：LF-only 行分帧 + pending 表（超时分级 / 迟到响应丢弃）+
+// pi RPC 帧协议公共层：LF-only 行分帧 + pending 表（请求-响应配对）+
 // 早期帧缓冲 + 裸写（fire-and-forget）。
 //
 // 来源（行为逐字等价提取，非重写）：
-//   - attachLfOnlyLineReader / 早期帧缓冲 / pending+timedOutIds / 超时分级常量
-//     ← runtime packages/runtime/src/infra/pi/rpc-client.ts（D10 分帧防御 / S6 迟到
-//     丢弃 / early-frame-buffer 设计 / L6 超时分级）
+//   - attachLfOnlyLineReader / 早期帧缓冲 / pending 表
+//     ← runtime packages/runtime/src/infra/pi/rpc-client.ts（D10 分帧防御 /
+//     early-frame-buffer 设计）
+//
+// 退役登记（ADR-0122 防御机制清查）：pending 表墙钟超时（L6 超时分级 CMD/FAST/SLOW）
+// 与 timedOutIds 迟到响应丢弃（S6，TTL 5s）已整体删除——pi 对 RPC 永不响应时调用方
+// promise 悬挂，处置归 pi 进程 exit 事件链（rejectAll）而非墙钟猜测。
 //   - tryWriteStdinLine / isBrokenPipeError ← pi-subagent-cli stdin-writer.ts 的
 //     writeStdinLine（EPIPE 检测提取为判别单源）
 //
@@ -68,122 +72,68 @@ export function attachLfOnlyLineReader(stream: NodeJS.ReadableStream, onLine: (l
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 超时分级（L6：按命令粒度校准，控制面单请求秒级 / 常规命令分钟级 / 大文件加载 2min）
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** 常规命令超时（prompt / abort / get_entries 等缺省档）。 */
-export const CMD_TIMEOUT_MS = 60_000
-/** 快速操作超时（getState / getCommands 等毫秒级 RPC，10s 足够，60s 等太久才报错）。 */
-export const FAST_TIMEOUT_MS = 10_000
-/** 慢操作超时（switchSession 加载大 session 文件可能耗时，120s 避免误超时）。 */
-export const SLOW_TIMEOUT_MS = 120_000
-/** timedOutIds 条目存活时间（S6：超时后迟到响应的防御窗口，5s 后清理避免 Set 无界增长）。 */
-export const TIMED_OUT_ID_TTL_MS = 5_000
-
-// ─────────────────────────────────────────────────────────────────────────────
-// pending 表 + 迟到响应丢弃
+// pending 表
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** pending 注册项（resolve/reject 由消费方包装业务语义后注入）。 */
 export interface PendingRegistration<TMsg> {
   resolve: (msg: TMsg) => void
   reject: (err: Error) => void
-  /**
-   * 维护通道标记（idle-pi-reclamation D1 双腿闭合）：true = 本请求属维护通道，
-   * 消费方据 isMaintenanceResponse 对其 response 帧跳过空闲时钟 touch。
-   */
-  maintenance?: boolean
 }
 
 export interface PendingRegistry<TMsg = PiMessage> {
-  /** 注册 pending（timeoutMs > 0 挂墙钟 timer；≤ 0 = 不限时）。超时错误构造经 makeTimeoutError 注入（错误类型归消费方）。 */
-  register(id: string, reg: PendingRegistration<TMsg>, timeoutMs: number, makeTimeoutError: () => Error): void
-  /** response 帧 resolve：pending 命中时 clearTimeout + 删除 + resolve，返回 true；未命中返回 false。 */
+  /** 注册 pending。 */
+  register(id: string, reg: PendingRegistration<TMsg>): void
+  /** response 帧 resolve：pending 命中时删除 + resolve，返回 true；未命中返回 false。 */
   resolveResponse(id: string, msg: TMsg): boolean
-  /** 注销 pending（clearTimeout + 删除；不记入 timedOutIds——写 stdin 失败路径，请求从未送达）。 */
+  /** 注销 pending（请求未送达的写失败路径）。 */
   cancel(id: string): void
-  /** 判定 msg 是否「maintenance pending 的 response」（消费方据此豁免空闲 touch）。 */
-  isMaintenanceResponse(msg: PiMessage): boolean
-  /** 判定 id 是否已超时（S6 迟到响应丢弃信号）。 */
-  isTimedOut(id: string | undefined): boolean
   /** 只读可观测面：id 是否仍 pending（诊断 / 白盒测试断言用）。 */
   hasPending(id: string): boolean
   /** 只读可观测面：当前 pending 数（诊断 / 白盒测试断言用）。 */
   get pendingSize(): number
-  /** 全部 reject + 清空 timedOutIds（进程退出 / stream error 收敛）。 */
+  /** 全部 reject（进程退出 / stream error 收敛）。 */
   rejectAll(error: Error): void
 }
 
 /**
- * RPC pending 表：请求-响应配对 + 超时升级（timedOutIds）+ 迟到响应防御。
+ * RPC pending 表：请求-响应配对。
  *
- * 超时时序（与 runtime rpc-client 提取前逐字一致）：timer 到 → pending 删除 →
- * id 记入 timedOutIds（TTL 后自动清除，unref）→ reject(makeTimeoutError())。
- * 收到带 timedOut id 的迟到 response 时消费方经 isTimedOut 丢弃（不当事件广播，
- * 避免幽灵 UI 副作用）。
+ * 无墙钟超时（ADR-0122 防御机制清查退役）：pi 对某 RPC 永不响应时 pending 悬挂，
+ * 失败信号由 pi 进程 exit 事件链经 rejectAll 统一收口，不做时间窗猜测。
  */
 export function createPendingRegistry<TMsg = PiMessage>(): PendingRegistry<TMsg> {
-  const pending = new Map<string, {
-    reg: PendingRegistration<TMsg>
-    /** 超时 timer；undefined = 不限时（timeoutMs ≤ 0 形态） */
-    timer: ReturnType<typeof setTimeout> | undefined
-  }>()
-  const timedOutIds = new Set<string>()
+  const pending = new Map<string, PendingRegistration<TMsg>>()
 
-  const register: PendingRegistry<TMsg>['register'] = (id, reg, timeoutMs, makeTimeoutError) => {
-    const timer = timeoutMs > 0
-      ? setTimeout(() => {
-        pending.delete(id)
-        // S6: 标记此 id 已超时，迟到响应丢弃而非广播为 event。TTL 后自动从 Set
-        // 删除避免无界增长；.unref() 避免阻止进程退出。
-        timedOutIds.add(id)
-        setTimeout(() => timedOutIds.delete(id), TIMED_OUT_ID_TTL_MS).unref()
-        reg.reject(makeTimeoutError())
-      }, timeoutMs)
-      : undefined
-    pending.set(id, { reg, timer })
+  const register: PendingRegistry<TMsg>['register'] = (id, reg) => {
+    pending.set(id, reg)
   }
 
   const resolveResponse: PendingRegistry<TMsg>['resolveResponse'] = (id, msg) => {
     const entry = pending.get(id)
     if (entry === undefined) return false
-    clearTimeout(entry.timer)
     pending.delete(id)
-    entry.reg.resolve(msg)
+    entry.resolve(msg)
     return true
   }
 
   const cancel: PendingRegistry<TMsg>['cancel'] = (id) => {
-    const entry = pending.get(id)
-    if (entry === undefined) return
-    clearTimeout(entry.timer)
     pending.delete(id)
   }
-
-  const isMaintenanceResponse: PendingRegistry<TMsg>['isMaintenanceResponse'] = (msg) =>
-    msg.type === 'response'
-    && msg.id !== undefined
-    && pending.get(msg.id)?.reg.maintenance === true
 
   return {
     register,
     resolveResponse,
     cancel,
-    isMaintenanceResponse,
-    isTimedOut: (id) => id !== undefined && timedOutIds.has(id),
     hasPending: (id) => pending.has(id),
     get pendingSize() {
       return pending.size
     },
     rejectAll(error) {
-      for (const [id, entry] of pending) {
-        clearTimeout(entry.timer)
-        entry.reg.reject(error)
+      for (const [id, reg] of pending) {
+        reg.reject(error)
         pending.delete(id)
       }
-      // 进程退出 / stream error 时 pending 已全清，对应的 timedOutIds 也应一并清空——
-      // 否则残留 id 会在 Set 里存活到 TTL（5s）才被自动删除（虽进程即将退出，仍补齐一致性）。
-      timedOutIds.clear()
     },
   }
 }

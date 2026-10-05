@@ -32,7 +32,6 @@ import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { emitPendingUnregister } from "./notify.ts";
-import { stopPoller } from "./poller.ts";
 import { taskToRegistryEntry, writeRegistryEntry } from "./registry.ts";
 import { finalizeTask, getActiveTasks } from "./task-store.ts";
 
@@ -67,14 +66,13 @@ export function installProcessExitGuard(): void {
 
 /**
  * 收殓动作（导出供测试直接调用，不真杀 pi 进程）：
- * 轮询器停止 → 遍历**单例表**活跃条目 kill-tree（单例表 = 本进程任务全集，天然
+ * 遍历**单例表**活跃条目 kill-tree（单例表 = 本进程任务全集，天然
  * 不含他进程条目——不遍历 registry，否则 ephemeral 附着进程退出会误杀属主进程的
  * 任务）→ registry 写终态 exited(reason:"process-exit")。
  *
- * 终态与轮询器边沿共用 finalizeTask（单一终态归属）。
+ * 终态与 exit 事件边沿共用 finalizeTask（单一终态归属）。
  */
 export function reapBackgroundTasksNow(): void {
-	stopPoller();
 	for (const task of getActiveTasks()) {
 		try {
 			// 回退路径诊断经 onFallback 注入 logger 适配（ext-simplify-13 D2）

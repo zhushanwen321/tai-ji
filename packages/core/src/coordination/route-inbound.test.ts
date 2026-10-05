@@ -464,13 +464,13 @@ describe('configureRouteInbound — crossSession 通道（ADR-0060）', () => {
     expect(ports.events.dispatchCrossSession).not.toHaveBeenCalled()
   })
 
-  it('⑩c extension.ui_request（点号）命中 crossSession 声明条目 → dispatchCrossSession', () => {
+  it('⑩c extension.dialog（点号）命中 crossSession 声明条目 → dispatchCrossSession', () => {
     // 点号是 runtime wire 实际格式（event-adapter.ts），ADR 文档冒号为笔误
     const ports = makePorts()
     const dispatcher = configureRouteInbound(ports)
-    dispatcher(sessionMsg('extension.ui_request', { requestId: 'r', method: 'input' }))
+    dispatcher(sessionMsg('extension.dialog', { requestId: 'r', dialogKind: 'input' }))
     expect(ports.events.dispatchCrossSession).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'extension.ui_request' }),
+      expect.objectContaining({ type: 'extension.dialog' }),
     )
   })
 
@@ -519,13 +519,13 @@ describe('configureRouteInbound — crossSession 通道（ADR-0060）', () => {
   it('⑩f 全量 crossSession 声明条目 type 字面量逐项命中（防拼写回归）', () => {
     // 逐项锁 route-inbound.ts 的 crossSession 声明条目 type 全集（ROUTE_TABLE 虽已导出，
     // 但遍历其键会自我引用，锁不住源码侧拼写漂移——测试内字面量逐项断言才能钉住）。
-    // 任一成员拼写漂移（如 extension.ui_request 误写成冒号）→ dispatchCrossSession 不再被调
+    // 任一成员拼写漂移（如 extension.dialog 误写成冒号）→ dispatchCrossSession 不再被调
     const literals = [
       'extension:widget',
       'extension:widgetGui',
       'extension:status',
       'extension:notify',
-      'extension.ui_request',
+      'extension.dialog',
       'extension:requestsInvalidated',
       'plugin:uiRequest',
       'plugin:viewUpdate',

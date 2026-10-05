@@ -55,6 +55,15 @@ export interface IRuntimeSupervisor {
   restartRuntime(): Promise<void>
 
   /**
+   * 配置变更触发的 runtime 重启（remote-access 开关切换）：先广播
+   * runtime-restarting → stop → 重新 spawn → 成功广播 runtime-port。
+   * 无条件真重启（restartRuntime 对存活进程幂等短路，不适用「必须以新配置
+   * 重启」的场景）。失败 reject 上抛，不走崩溃退避链。
+   * @returns 重启后实际监听的端口号
+   */
+  restartForConfigChange(): Promise<number>
+
+  /**
    * 停止 runtime 子进程及其整棵进程树（包括 pi），等待退出或超时。
    * @param timeoutMs SIGTERM 后等待 exit 的超时，超时则 SIGKILL 进程树
    */

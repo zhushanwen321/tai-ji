@@ -18,6 +18,7 @@ import { shallowRef, type ShallowRef } from 'vue'
 import type { Message } from '@taiji/shared'
 import type { FinalizeReason } from './store-types'
 import { readUsage } from './readers'
+import { randomUuid } from '../../utils/random-uuid'
 
 /** messages ref 的结构类型（兼容 Vue Ref 与裸 { value } 结构）。 */
 export type MessagesRef = { value: Map<string, ShallowRef<Message[]>> }
@@ -38,6 +39,22 @@ export function commitMessages(
   } else {
     messages.value = new Map(messages.value).set(sessionId, shallowRef(next))
   }
+}
+
+/**
+ * 纯 error assistant 气泡的条目构造单源（M2 形态统一：错误文本只住 error 字段、
+ * content 恒空——无 streaming 气泡可收口时追加的 error 气泡即全文，渲染端只有
+ * 「追加形态」一种 error 形态）。
+ *
+ * 消费点：store.markSessionError 与 registry 的 message.complete 秒败分支 /
+ * message.error / message.stream_error 无前置 streaming 分支——四处此前各自内联
+ * 同构字面量。只构造条目，追加动作（[...prev, entry] + commitMessages）留在调用点；
+ * 错误文案兜底（如 REASON_FALLBACK_ERROR_TEXT）是调用点语义，不在此收编。
+ */
+export function createAssistantErrorMessage(errorText: string): Message {
+  // 开始/结束时刻取同一读数（秒级展示口径下一致，避免 1ms 漂移）
+  const now = Date.now()
+  return { id: `a-${randomUuid()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: now, endedAt: now }
 }
 
 /**
@@ -103,11 +120,11 @@ export interface TerminalMessagePatchOptions {
  * error 类收口 reason（终态取向 error 的 FinalizeReason 子集）。
  * 类型谓词 isErrorFinalizeReason 收窄后 REASON_FALLBACK_ERROR_TEXT[reason] 恒 string。
  */
-export type ErrorFinalizeReason = Extract<FinalizeReason, 'error' | 'stream_error' | 'timeout' | 'disconnect' | 'restart'>
+export type ErrorFinalizeReason = Extract<FinalizeReason, 'error' | 'stream_error' | 'disconnect' | 'restart'>
 
 /** reason 是否终态取向 error（类型谓词；与 ErrorFinalizeReason 成员一一对应）。 */
 export function isErrorFinalizeReason(reason: FinalizeReason): reason is ErrorFinalizeReason {
-  return reason === 'error' || reason === 'stream_error' || reason === 'timeout' || reason === 'disconnect' || reason === 'restart'
+  return reason === 'error' || reason === 'stream_error' || reason === 'disconnect' || reason === 'restart'
 }
 
 /**
@@ -127,7 +144,6 @@ export function isErrorFinalizeReason(reason: FinalizeReason): reason is ErrorFi
 export const REASON_FALLBACK_ERROR_TEXT: Record<ErrorFinalizeReason, string> = {
   error: '会话出错，回复已中断。',
   stream_error: '输出流中断，回复不完整。',
-  timeout: '等待超时，回复已中断。',
   disconnect: '与运行时的连接已断开，回复已中断。重新连接后可继续。',
   restart: '运行时已重启，回复已中断。重新连接后可继续。',
 }

@@ -29,10 +29,10 @@ import { resolve } from 'node:path'
 import i18n, { setLocale } from '@/i18n'
 import zhCN from '@/i18n/locales/zh-CN/sidebar'
 import enUS from '@/i18n/locales/en-US/sidebar'
-import zhCNSettings from '@/i18n/locales/zh-CN/settings'
-import enUSSettings from '@/i18n/locales/en-US/settings'
-import zhNewTask from '@/i18n/locales/zh-CN/newTask'
-import enNewTask from '@/i18n/locales/en-US/newTask'
+import zhCNSettings from '@taiji/ui/locale/zh-CN/settings'
+import enUSSettings from '@taiji/ui/locale/en-US/settings'
+import zhNewTask from '@taiji/ui/locale/zh-CN/newTask'
+import enNewTask from '@taiji/ui/locale/en-US/newTask'
 import {
   THINKING_LEVELS,
   getDisplayLabel,

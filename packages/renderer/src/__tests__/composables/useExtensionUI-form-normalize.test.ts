@@ -65,7 +65,7 @@ function mkAskUserReq(requestId: string, overrides: Record<string, unknown> = {}
     requestId,
     pluginId: 'p',
     kind: 'select',
-    method: 'select',
+    dialogKind: 'select',
     title: 't',
     form: true,
     formQuestions: [{ type: 'choice', header: 'db', question: '选哪个数据库?', options: [{ label: 'Postgres' }] }],
@@ -80,7 +80,7 @@ function mkScheduleCreateReq(requestId: string): Record<string, unknown> {
     requestId,
     pluginId: '',
     kind: 'select',
-    method: 'select',
+    dialogKind: 'select',
     form: true,
     scheduleCreate: true,
     scheduleDraft: draft,
@@ -93,7 +93,7 @@ function mkBareLegacyAskUserReq(requestId: string): Record<string, unknown> {
     requestId,
     pluginId: 'p',
     kind: 'select',
-    method: 'select',
+    dialogKind: 'select',
     title: 't',
     askUser: true,
     askUserQuestions: [{ header: 'db', question: '选哪个数据库?', options: [{ label: 'Postgres' }] }],
@@ -106,7 +106,7 @@ function mkFormReq(requestId: string): Record<string, unknown> {
     requestId,
     pluginId: '',
     kind: 'select',
-    method: 'select',
+    dialogKind: 'select',
     form: true,
     formQuestions: [{ type: 'choice', header: 'db', question: '选哪个数据库?', options: [{ label: 'Postgres' }] }],
     allowCancel: true,
@@ -114,7 +114,7 @@ function mkFormReq(requestId: string): Record<string, unknown> {
 }
 
 function mkPlainSelectReq(requestId: string): Record<string, unknown> {
-  return { requestId, pluginId: '', kind: 'select', method: 'select', title: '选择', options: ['a', 'b'] }
+  return { requestId, pluginId: '', kind: 'select', dialogKind: 'select', title: '选择', options: ['a', 'b'] }
 }
 
 function emitBusUIRequest(sid: string, request: unknown): void {
@@ -190,7 +190,7 @@ describe('bus 路径（runtime marker 分支产出的 view-ready 帧入队）', 
     expect(records[0].form).toBe(true)
     expect(records[0].scheduleCreate).toBe(true)
     expect(records[0].scheduleDraft).toEqual(draft)
-    expect(records[0].method).toBe('select')
+    expect(records[0].dialogKind).toBe('select')
     // currentFormRequest 命中（find 谓词 form 键）
     expect(result.currentFormRequest.value?.requestId).toBe('r-sc')
     dispose()

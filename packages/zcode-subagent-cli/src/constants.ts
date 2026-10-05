@@ -81,57 +81,14 @@ export const ZCODE_APPSERVER_TURN_READ_TIMEOUT_MS = 5_000;
  */
 export const ZCODE_APPSERVER_TURN_CLOSE_TIMEOUT_MS = 1_500;
 
-// ============================================================
-// [P0-1 U1] turn 等待两 timer（idle 主判定 + 总上界回收兜底）
-// ============================================================
-
-/** turn idle 主判定的 env 覆盖通道（>0 覆盖、≤0 关闭、非法值 warn+回落默认）。 */
-export const ZCODE_TURN_IDLE_TIMEOUT_ENV = "TAIJI_ZCODE_TURN_IDLE_TIMEOUT_MS";
-
-/** turn 总上界的 env 覆盖通道（语义同上；0=关闭后 chatty-wedge 无自动回收）。 */
-export const ZCODE_TURN_MAX_TIMEOUT_ENV = "TAIJI_ZCODE_TURN_MAX_TIMEOUT_MS";
-
 /**
- * [P0-1 D1] turn idle 主判定缺省阈值（ms）：该 turn 任何事件到达刷新计时，连续
- * 静默达此值判「执行已不可推进」。活跃事件流零误杀（ADR-0047 逆否面）。默认
- * 30min 为先验值，⛔P-Z1 门（事件流 inter-event gap 分布）标定前用此默认。
- */
-export const ZCODE_TURN_IDLE_TIMEOUT_MS = 1_800_000;
-
-/**
- * [P0-1 D1] turn 总上界缺省值（ms）：从 openTurn 挂载起固定不刷新，兜 idle 覆盖
- * 不了的 chatty-wedge（事件持续但终态永不到达）。对超上界的合法极长任务是显式
- * 接受的残余误杀面（env 可调/可关 + 错误文案附自救指引）。默认 60min 为先验值
- * （T001 34 任务最长 541s，先验远离 6.6×），⛔P-Z0 门（任务总时长分布）标定前
- * 用此默认。
- */
-export const ZCODE_TURN_MAX_TIMEOUT_MS = 3_600_000;
-
-/**
- * env 原始值的三态解析结果（可判别联合——valid 分支 ms 必有）。两个解析函数共用：
- * `parseZcodeTurnTimeoutEnv`（≤0=valid，关语义在调用方）与 `parseZcodePositiveMsEnv`
- * （≤0=invalid）——≤0 归属差异见各自注释，调用方按所用函数语义消费。
+ * env 原始值的三态解析结果（可判别联合——valid 分支 ms 必有）。
+ * `parseZcodePositiveMsEnv` 的返回类型。
  */
 export type ZcodeTurnTimeoutEnvParse =
   | { state: "unset" }
   | { state: "valid"; ms: number }
   | { state: "invalid" };
-
-/**
- * 解析 turn 阈值 env 原始值（空串视同未设置，对齐 lifecycle-manager 先例的
- * `if (!raw)` 口径）。**与 `TAIJI_SUBAGENT_IDLE_TIMEOUT_MS` 先例的刻意分歧（设计
- * D2/r3 SG-5 显式登记）**：先例 ≤0=非法回落且禁用后不认 env；本通道 ≤0=显式
- * 关闭该 timer（规则 19 的 opt-out 出路），非法（非数字）才回落默认——调用方
- * 必须对 invalid 与 ≤0 关闭分别 warn 留痕（生效行为可见，A10① 断言依据）。
- */
-export function parseZcodeTurnTimeoutEnv(
-  raw: string | undefined
-): ZcodeTurnTimeoutEnvParse {
-  if (raw === undefined || raw === "") return { state: "unset" };
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) return { state: "invalid" };
-  return { state: "valid", ms: parsed };
-}
 
 /**
  * [R4 D3] abort 链第一级：session/stop 的控制面超时（ms）。stop 失败/超时即落
@@ -155,9 +112,8 @@ export const ZCODE_APPSERVER_ABORT_GRACE_ENV = "TAIJI_ZCODE_TEST_ABORT_GRACE_MS"
 
 /**
  * 解析 grace/stop 常量族 env 原始值（纯函数，warn 由消费侧 logger 负责——本模块
- * 零 import 约束）。与 `parseZcodeTurnTimeoutEnv` 的刻意分歧：turn timer 的 ≤0=
- * 显式关闭是规则 19 的用户 opt-out 出路；grace/stop 是回收层有界兜底窗口，无
- * 「关闭」语义（关掉即 abort 链挂死），≤0 只能是误设——与非法值同路径 warn+回落。
+ * 零 import 约束）。grace/stop 是回收层有界兜底窗口，无「关闭」语义（关掉即
+ * abort 链挂死），≤0 只能是误设——与非法值同路径 warn+回落。
  */
 export function parseZcodePositiveMsEnv(
   raw: string | undefined

@@ -97,7 +97,7 @@ describe('ws-client 入站守卫 ① 80MB 阈值（超界丢帧不断链）', ()
     dispatchHandler = vi.fn<(msg: ServerMessage) => void>()
     onMessage(dispatchHandler)
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    connect('ws://test')
+    connect('ws://test', { auth: 'skip' })
     latestFake().triggerOpen()
   })
 
@@ -143,7 +143,7 @@ describe('ws-client 入站守卫 ② per-session 连续计数与终止阀', () =
     dropped = []
     offDrop = onInboundFrameDropped((info) => dropped.push(info))
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    connect('ws://test')
+    connect('ws://test', { auth: 'skip' })
     latestFake().triggerOpen()
   })
 
@@ -224,7 +224,7 @@ describe('ws-client 入站守卫 ③ 终止阀的订阅暂停与恢复', () => {
     dropped = []
     offDrop = onInboundFrameDropped((info) => dropped.push(info))
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    connect('ws://test')
+    connect('ws://test', { auth: 'skip' })
     latestFake().triggerOpen()
   })
 
@@ -304,7 +304,7 @@ describe('ws-client 入站守卫 ④ in-flight 簿记重连 sweep（G2 活性治
     disconnect()
     _resetInboundGuardForTest()
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    connect('ws://test')
+    connect('ws://test', { auth: 'skip' })
     latestFake().triggerOpen()
   })
 

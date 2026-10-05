@@ -6,9 +6,13 @@
  * 失败放弃、大 payload tool result 截断（>256KB 摘要）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { RelayTee, TEE_MAX_CONSECUTIVE_FAILURES, TEE_TOOL_RESULT_MAX_BYTES } from '../../../infra/relay/relay-tee.js'
+import { RelayTee, TEE_MAX_CONSECUTIVE_FAILURES } from '../../../infra/relay/relay-tee.js'
 import type { ServerMessage } from '@taiji/shared'
 import { subagentVirtualId, isSubagentVirtualId, extractMainSessionId } from '@taiji/shared'
+
+/** 本层旧截断阈值（256KB，已退役）——大 payload 透传用例以「超旧阈值仍有量」为形，
+ *  防护语义改由下游出站守卫承担（见 describe 内注释）。 */
+const TEE_FORMER_LIMIT_BYTES = 256 * 1024
 
 function createTee() {
   const published: Array<{ sid: string; msg: ServerMessage }> = []
@@ -181,24 +185,63 @@ describe('RelayTee 隔离与放弃', () => {
   })
 })
 
-describe('RelayTee 大 payload 截断', () => {
-  it(`tool result 超 ${TEE_TOOL_RESULT_MAX_BYTES} 字节 → 只投截断摘要`, () => {
+describe('RelayTee toolResult entry 全量透传（不在此层截断）', () => {
+  // [subagent 投影丢失修复] 本层曾有 >256KB 整体替换截断——image 块/输出文本/details
+  // 全丢且 reload 才恢复，与主会话 tool_call_end 帧（无此层截断）形成通道水位劈叉。
+  // 量级防护单点 = 下游出站守卫（outbound-frame-registry 已注册
+  // session.subagentEntriesAppended：8MB 告警 + 32MB 契约保持式截断）。
+
+  it('大 payload tool result（含 image 块 + details）全量透传，结构字段与内容无损', () => {
     const { tee, published } = createTee()
-    const big = 'x'.repeat(TEE_TOOL_RESULT_MAX_BYTES + 4096)
+    const big = 'x'.repeat(TEE_FORMER_LIMIT_BYTES + 4096)
+    const img = { type: 'image', data: 'aGVsbG8taW1hZ2U=', mimeType: 'image/png' }
     feedLines(tee, [
-      { type: 'tool_execution_end', toolCallId: 'tc-big', toolName: 'bash', result: { content: [{ type: 'text', text: big }] }, isError: false },
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'tc-big',
+        toolName: 'codemode',
+        result: { content: [{ type: 'text', text: big }, img], details: { calls: [{ id: 'n1', name: 'read' }] } },
+        isError: false,
+      },
     ])
     const frames = entryFrames(published)
     expect(frames).toHaveLength(1)
-    const entry = frames[0].entries[0] as unknown as { message: { role: string; content: Array<{ type: string; text: string }>; toolCallId: string } }
+    const entry = frames[0].entries[0] as unknown as {
+      message: { role: string; content: Array<{ type: string; text?: string; data?: string }>; toolCallId: string; details?: unknown }
+    }
     expect(entry.message.role).toBe('toolResult')
-    expect(entry.message.content[0].text).toContain('[relay tee truncated]')
     expect(entry.message.toolCallId).toBe('tc-big')
-    // 结构字段保留、大体丢弃
-    expect(entry.message.content[0].text.length).toBeLessThan(500)
+    // 文本不被替换（无截断提示行）、image 块原样保留、details 不丢
+    expect(entry.message.content).toHaveLength(2)
+    expect(entry.message.content[0].text).toBe(big)
+    expect(entry.message.content[1]).toEqual(img)
+    expect(entry.message.details).toEqual({ calls: [{ id: 'n1', name: 'read' }] })
   })
 
-  it('阈值内的 tool result 原样透传', () => {
+  it('混合 content 形状（text + image 交错）逐块透传（丢失形态锚定：subagent 会话图片可见性的 live 载体）', () => {
+    const { tee, published } = createTee()
+    const img1 = { type: 'image', data: 'ZGF0YTE=', mimeType: 'image/png' }
+    const img2 = { type: 'image', data: 'ZGF0YTJf', mimeType: 'image/jpeg' }
+    feedLines(tee, [
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'tc-mix',
+        toolName: 'codemode',
+        result: { content: [{ type: 'text', text: 'first' }, img1, { type: 'text', text: 'second' }, img2] },
+        isError: false,
+      },
+    ])
+    const entry = entryFrames(published)[0].entries[0] as unknown as {
+      message: { content: Array<{ type: string; text?: string; data?: string }> }
+    }
+    expect(entry.message.content.map((b) => b.type)).toEqual(['text', 'image', 'text', 'image'])
+    expect(entry.message.content[0].text).toBe('first')
+    expect(entry.message.content[1].data).toBe('ZGF0YTE=')
+    expect(entry.message.content[2].text).toBe('second')
+    expect(entry.message.content[3].data).toBe('ZGF0YTJf')
+  })
+
+  it('纯文本 tool result 原样透传', () => {
     const { tee, published } = createTee()
     feedLines(tee, [
       { type: 'tool_execution_end', toolCallId: 'tc-ok', toolName: 'read', result: { content: [{ type: 'text', text: 'small body' }] }, isError: false },
@@ -207,13 +250,14 @@ describe('RelayTee 大 payload 截断', () => {
     expect(entry.message.content[0].text).toBe('small body')
   })
 
-  it('assistant 大文本不截断（截断只针对 toolResult）', () => {
+  it('assistant 大文本同样全量透传', () => {
     const { tee, published } = createTee()
-    const big = 'y'.repeat(TEE_TOOL_RESULT_MAX_BYTES + 4096)
+    const big = 'y'.repeat(TEE_FORMER_LIMIT_BYTES + 4096)
     feedLines(tee, [
       { type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: big }] } },
     ])
     const entry = entryFrames(published)[0].entries[0] as unknown as { message: { role: string; content: Array<{ type: string; text: string }> } }
+    expect(entry.message.role).toBe('assistant')
     expect(entry.message.content[0].text).toBe(big)
   })
 })

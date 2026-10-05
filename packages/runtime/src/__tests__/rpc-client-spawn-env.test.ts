@@ -13,7 +13,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { RpcClient } from '../infra/pi/rpc-client.js'
-const clientOpts = { startupDelayMs: 0 } as const // 测试注入：启动确认窗口归零（窗口语义不变，见 RpcClientOptions.startupDelayMs）
 
 // ── Mocks（骨架与 rpc-client-spawn-args.test.ts 同构，差异仅捕获 spawn 第三参数）──
 
@@ -93,7 +92,7 @@ describe('RpcClient 出站 env 契约（U3：deny 剥除 + 基座保全）', () 
 
   async function startWith(options: { env?: Record<string, string> } = {}): Promise<void> {
     const { RpcClient } = await import('../infra/pi/rpc-client.js')
-    client = new RpcClient({ ...clientOpts, cwd: '/project', ...options })
+    client = new RpcClient({ cwd: '/project', ...options })
     await client.start()
   }
 

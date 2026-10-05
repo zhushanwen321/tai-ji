@@ -9,7 +9,14 @@
  * 本文件是 renderer 层（可 import store），供 useConnection 装配点经
  * setConnectionPorts 注入 core（ConnectionPorts.effects / onRuntimeUnavailable）。
  *
- * 依赖方向：useMessageEffects → stores + useCompletionNotify + i18n + useToast。
+ * [remote-use D5] exited/restored/restoreFailed 的 core 最小语义（markSessionError / markDead /
+ * 流式终结 / 订阅簿记失效 / 恢复窗口订阅 / revive / 重订阅 / 恢复提示条两形态）归 core
+ * createLifecycleEffects factory 单一归属（packages/core/src/domain/chat/lifecycle-effects.ts，
+ * 移动壳直接接线复用）；本文件在 factory 之上叠加壳专属扩展，四项：① extensionUIStore
+ * 清挂起弹窗分区（M8 防御）② toast ③ 强杀分流 ④ respawn 过渡态及其回收（30s timer /
+ * clearRespawnPending）。壳不直接调 subscribeSession——恢复窗口订阅执行归 factory。
+ *
+ * 依赖方向：useMessageEffects → lifecycle factory + stores + useCompletionNotify + i18n + useToast。
  */
 import i18n from '@/i18n'
 import { useChatStore } from '@/stores/chat'
@@ -21,29 +28,26 @@ import { useWorkflowStore } from '@/stores/workflow'
 import { useToast } from '@/composables/useToast'
 import { handleCompletion } from '@/composables/effects/useCompletionNotify'
 import { consumeForcedExit } from '@/composables/effects/forced-exit-marks'
-import { invalidateStreamSubscription, subscribeSession } from '@taiji/core'
-import type { InboundEffects } from '@taiji/core'
+import { createLifecycleEffects } from '@taiji/core'
+import type { LifecycleEffects, InboundEffects } from '@taiji/core'
 import { subagentVirtualId, isBtwVirtualId, extractBtwPiSessionId } from '@taiji/shared'
 import type { PiEntry, PiToolCallEntryForm, ServerMessageMap, SubagentRecord } from '@taiji/shared'
 
 const t = i18n.global.t
 
-// ── [T4 回流修复] 恢复窗口编排（respawn 过渡态）──
+// ── [T4 回流修复 / remote-use D5 接线] 恢复窗口编排 ──
 //
-// Gate B 实测缺陷（0/3 提示条）根因：pi 死亡 → runtime removeSessionEntry → bus.clearSession
-// 清掉 renderer 订阅；自动恢复成功 publish session.restored 时 bus entry 内零订阅者（live 不达）；
-// ring 回放需要 renderer 主动 subscribe，而 dead 终态页下唯一入口「重新打开」走 session.restore
-// RPC，runtime lifecycle.restoreSession 对 existing session detach+destroy+removeSessionEntry
-// 把含 restored 帧的 ring 整体清除 → 之后 selectSession 的 subscribe 拿到空 ring（回放也不达）。
-// 两条通路在不改 runtime 的前提下结构性不可达。
+// core 语义（恢复窗口订阅 / revive / 重订阅 / 恢复提示条）归 lifecycle factory；本文件
+// 保留 respawnPending 过渡态（panel 派生 isSessionRespawning 抑制 dead 终态页的输入，
+// chat store 分区）与 30s 超时回收。
 //
-// 修法（最小可靠形态）：exited（非强制）时进 respawnPending 过渡态 + 立即重发 subscribe
-// 建立「恢复窗口订阅」——恢复路径（自动/手动）restored publish 前无清场（死亡时已清过
-// 一次；msg-pipeline-debloat D3 后手动恢复于 respawn 编排上下文命中时同样经 facade 尾部
-// 发布），renderer 是恢复后新 bus entry 的订阅者 → restored live 送达，本回调链自收口。
-// runtime 重启后编排器状态全内存即清、无 restored 帧——该场景由 revive-on-RPC-reply
-//（useSidebar.restoreSession / useSessionRespawnRetry，D3 保留件）收口，30s TTL 兜底
-// 过渡态回收。
+// 恢复窗口背景（Gate B 实测缺陷 0/3 提示条）：pi 死亡 → runtime removeSessionEntry →
+// bus.clearSession 清掉 renderer 订阅；自动恢复成功 publish session.restored 时 bus entry
+// 内零订阅者（live 不达）。修法 = exited（非强制）时经 factory.openRestoreWindow 立即重发
+// subscribe 建立恢复窗口订阅——恢复路径（自动/手动）restored publish 前无清场，renderer
+// 是恢复后新 bus entry 的订阅者 → restored live 送达，本回调链自收口。runtime 重启后
+// 编排器状态全内存即清、无 restored 帧——该场景由 revive-on-RPC-reply（useSidebar
+// .restoreSession / useSessionRespawnRetry，D3 保留件）收口，30s TTL 兜底过渡态回收。
 
 /** 恢复超时（无 restored/restoreFailed 到达即放弃等待，切回终态 dead 页）。30s：respawn
  *  实测 6s 级（5s 延迟 + spawn/attach），熔断最迟 ~10s 出结果，30s 覆盖两次重试仍有裕量。 */
@@ -65,47 +69,60 @@ function clearRespawnTimeout(sessionId: string): void {
 }
 
 /**
+ * 构建 lifecycle factory 实例（事件回调时 lazy 构建——本文件随 useConnection 模块加载，
+ * 装配时 pinia 未激活，不能在模块顶层 / createInboundEffects 内取 store；事件到达时
+ * pinia 已就绪。每次回调重建：文案按当前 locale 求值，与改造前逐次 t() 求值行为一致）。
+ */
+function buildLifecycleEffects(): LifecycleEffects {
+  return createLifecycleEffects(
+    { chat: useChatStore(), session: useSessionStore() },
+    {
+      restored: t('panel.message.respawnRestored'),
+      restoreFailed: t('panel.message.respawnFailed'),
+    },
+  )
+}
+
+/**
  * 处理 session.exited 事件（pi 进程异常退出）。
  *
  * 不能只依赖 session 通道的惰性订阅（ensureStreamSubscription 在首次 send 时建立）：
  * 进程可能在用户首次发消息前就死（如 extension 加载失败 exit(1)），此时无订阅者，
- * dispatchSession 会静默丢弃。因此 routeInbound 对 session.exited 做兜底处理，
- * 保证 markSessionError + markDead + invalidateStreamSubscription + toast 一定执行。
+ * dispatchSession 会静默丢弃。因此 routeInbound 对 session.exited 做兜底处理，保证
+ * factory 序列（markSessionError + markDead + invalidateStreamSubscription）与壳扩展
+ * 一定执行。
  *
  * [T4] 退出语义分流（wire 帧对意外/强制退出不可区分，靠 renderer 本地意图标记）：
- * - 用户强制退出（consumeForcedExit 命中）：runtime 构造性不 respawn → 维持既有终态行为。
+ * - 用户强制退出（consumeForcedExit 命中）：runtime 构造性不 respawn → 维持既有终态行为，
+ *   不进恢复窗口（不调 factory.openRestoreWindow——订阅执行归 factory，进不进窗口归壳裁决）。
  * - 意外退出：进 respawnPending 过渡态（panel 派生 isSessionRespawning 抑制 dead 终态页，
  *   对话流 + composer 保持可用，恢复窗口发消息经 runtime ensureActive join 送达），并
- *   立即重发 subscribe 建立恢复窗口订阅（见文件头注释——restored live 送达的唯一通路）。
- *   会话 status 仍置 dead（侧栏置灰准确），恢复成功经 revive 复位。
- *
- * invalidateStreamSubscription：失效本地流订阅标记（服务端订阅已随 bus.clearSession
- * 清除），respawn 后 ensureStreamSubscription 才会重挂 events handler + 重发 subscribe。
+ *   经 factory.openRestoreWindow 建立恢复窗口订阅。会话 status 仍置 dead（侧栏置灰准确），
+ *   恢复成功经 factory.onSessionRestored 的 revive 复位。
  */
 function handleSessionExited(sessionId: string, payload: { code: number | null; reason: string }): void {
-  useChatStore().markSessionError(sessionId, payload.reason)
-  useSessionStore().markDead(sessionId)
-  // 失效本地流订阅标记：服务端订阅已随 bus.clearSession 清除（pi 死亡），本地幂等标记
-  // 不失效则 respawn 后 ensureStreamSubscription 被短路 → 新 turn 的 message.* 丢失
-  //（UI 卡「进行中…」）。放 markDead 之后：错误消息/dead 态等 UI 反馈先落地
-  invalidateStreamSubscription(sessionId)
-  // D6b（integrity-hardening §3.6）：pi 死后清掉该 session 挂起的 ask-user / dialog 分区
+  // core 序列：markSessionError（含流式终结）+ markDead + 订阅簿记失效（服务端订阅已随
+  // bus.clearSession 清除，本地幂等标记不失效则 respawn 后 ensureStreamSubscription 被
+  // 短路 → 新 turn 的 message.* 丢失，UI 卡「进行中…」）
+  const lifecycle = buildLifecycleEffects()
+  lifecycle.markSessionDead(sessionId, payload.reason)
+  // 壳扩展①（D6b / M8 幽灵弹窗防御）：pi 死后清掉该 session 挂起的 ask-user / dialog 分区
   //（对齐 deleteSession 路径 core use-session cleanup hooks 的 extensionUIStore.clearSession 写法）。
-  // 不清则切走再切回（restore 起新 pi）后旧请求重弹，作答发给新进程被静默丢弃（M8 幽灵弹窗）。
+  // 不清则切走再切回（restore 起新 pi）后旧请求重弹，作答发给新进程被静默丢弃。
   useExtensionUIStore().clearSession(sessionId)
-  // reason 可能含多行 stderr，toast 只取首行（完整内容在聊天流 error 消息里）
+  // 壳扩展②：reason 可能含多行 stderr，toast 只取首行（完整内容在聊天流 error 消息里）
   const shortReason = payload.reason.split('\n')[0]
   useToast().error(t('connection.runtimeExited', { reason: shortReason }))
 
   const chatStore = useChatStore()
+  // 壳扩展③：强杀分流——用户强制退出无自动恢复（runtime 不 respawn），终态 dead 页原样
+  //（清掉可能残留的过渡态——防御路径，正常时序强制退出前不会有 pending）；不进恢复窗口
   if (consumeForcedExit(sessionId)) {
-    // 用户强制退出：无自动恢复（runtime 不 respawn），终态 dead 页原样（清掉可能残留的
-    // 过渡态——防御路径，正常时序强制退出前不会有 pending）
     clearRespawnTimeout(sessionId)
     chatStore.clearRespawnPending(sessionId)
     return
   }
-  // 意外退出 → 过渡态 + 恢复窗口订阅。mark 幂等（连续 exited 不重置计时窗口）。
+  // 壳扩展④：过渡态 + 恢复窗口。mark 幂等（连续 exited 不重置计时窗口）。
   chatStore.markRespawnPending(sessionId)
   if (!respawnTimeoutTimers.has(sessionId)) {
     respawnTimeoutTimers.set(
@@ -119,55 +136,49 @@ function handleSessionExited(sessionId: string, payload: { code: number | null; 
       }, RESPAWN_PENDING_TIMEOUT_MS),
     )
   }
-  // 恢复窗口订阅（fire-and-forget）：立即成为恢复后新 bus entry 的订阅者，restored /
+  // core：恢复窗口订阅（fire-and-forget）——立即成为恢复后新 bus entry 的订阅者，restored /
   // restoreFailed / 恢复后首帧 live 可达。subscribeSession 失败内部 console.warn 且登记
   // subscribed=false 意图条目，WS 重连 resubscribeAll 兜底重发（链路自愈）。
-  void subscribeSession(sessionId).catch((e) => {
-    console.warn(`[useMessageEffects] respawn-window subscribe failed for session ${sessionId}:`, e)
-  })
+  lifecycle.openRestoreWindow(sessionId)
 }
 
 /**
  * [u8] 处理 session.restored（pi 崩溃自动恢复成功，D7 / T4）。
  *
- * 对话流插入恢复提示条（T4 文案：在途回合未保留、后台任务/子代理已终止不自动恢复、
- * 可继续发消息）+ 复位 dead 态标记 + 收口过渡态（respawnPending 清除 → panel 派生回
- * conversation，T4 提示条在对话流内呈现）。帧经恢复窗口订阅 live 到达（修法见文件头
- * 注释；WS 重连场景由 resubscribeAll 的 ring 回放兜底，同一本回调）。随后主动重发
- * subscribe（幂等，subscribed=true 短路）：既恢复 live 订阅（后续 message.* 不丢），
- * 也让后续重开/切换拿到完整回放。失败 console.warn 不标记（下次可重试）。
+ * 壳扩展④回收：清 30s 超时 timer + 收口过渡态（respawnPending 清除 → panel 派生回
+ * conversation，T4 提示条在对话流内呈现）。core 序列（revive + 恢复提示条 restored 形态
+ * + 重订阅）归 factory.onSessionRestored：帧经恢复窗口订阅 live 到达（WS 重连场景由
+ * resubscribeAll 的 ring 回放兜底，同一本回调）；重订阅幂等（subscribed=true 短路），
+ * 既恢复 live 订阅（后续 message.* 不丢），也让后续重开/切换拿到完整回放，失败 warn 不
+ * 标记（下次可重试）。
  */
 function handleSessionRestored(sessionId: string, payload: { attempts: number }): void {
   console.debug(`[useMessageEffects] session ${sessionId} auto-restored after ${payload.attempts} attempt(s)`)
   clearRespawnTimeout(sessionId)
-  const chatStore = useChatStore()
-  chatStore.clearRespawnPending(sessionId)
-  useSessionStore().revive(sessionId)
-  chatStore.appendRespawnNotice(sessionId, 'restored', t('panel.message.respawnRestored'))
-  void subscribeSession(sessionId).catch((e) => {
-    console.warn(`[useMessageEffects] re-subscribe after restore failed for session ${sessionId}:`, e)
-  })
+  useChatStore().clearRespawnPending(sessionId)
+  buildLifecycleEffects().onSessionRestored(sessionId, payload)
 }
 
 /**
- * [u8] 处理 session.restoreFailed（自动恢复失败）。willRetry=false（连续 2 次熔断）→
- * 收口过渡态回终态 dead 页（保留「重新打开」出口）+ 对话流插入失败提示条（「引擎恢复
- * 失败，点此重试或新建会话」+ 重试按钮，RespawnNoticeBar——重开/重试后可见）；
- * willRetry=true 的中间失败不渲染不收口（重试由 runtime 自动续排，过渡态保持，
- * 避免提示条闪烁）。
+ * [u8] 处理 session.restoreFailed（自动恢复失败）。willRetry=true（中间失败）→ core 序列
+ * 仅 log（重试由 runtime 自动续排），壳同步不回收过渡态（避免提示条闪烁）；willRetry=false
+ * （连续 2 次熔断）→ factory 写恢复失败提示条（「引擎恢复失败，点此重试或新建会话」+
+ * 重试按钮，RespawnNoticeBar——重开/重试后可见）+ 壳回收过渡态回终态 dead 页（保留
+ * 「重新打开」出口）。分流判据 = wire payload 字段（core factory 内部同判据做提示条分流，
+ * 壳读同字段裁决过渡态回收时机）。
  */
 function handleSessionRestoreFailed(
   sessionId: string,
   payload: { attempts: number; willRetry: boolean; reason: string },
 ): void {
+  const lifecycle = buildLifecycleEffects()
   if (payload.willRetry) {
-    console.warn(`[useMessageEffects] auto restore failed (will retry) for session ${sessionId}:`, payload.reason)
+    lifecycle.onSessionRestoreFailed(sessionId, payload)
     return
   }
+  lifecycle.onSessionRestoreFailed(sessionId, payload)
   clearRespawnTimeout(sessionId)
-  const chatStore = useChatStore()
-  chatStore.clearRespawnPending(sessionId)
-  chatStore.appendRespawnNotice(sessionId, 'restoreFailed', t('panel.message.respawnFailed'))
+  useChatStore().clearRespawnPending(sessionId)
 }
 
 /**
@@ -226,10 +237,8 @@ function handleSubagentEntries(
 }
 
 /** 处理 session.workflowUpdate 事件（workflow 增量信号兜底）。update 锚定 protocol SSOT（MF-4）。 */
-function handleWorkflowUpdate(sessionId: string, _update: ServerMessageMap['session.workflowUpdate']['update']): void {
-  // [待裁决项 5 根治] update.status 不再区分待遇（原 running 信号的 500ms 盲等重试已删）：
-  // 信号到达即拉一次——信号发出时数据构造性可读，status 无消费场景。
-  useWorkflowStore().triggerWorkflowReload(sessionId)
+function handleWorkflowUpdate(sessionId: string, update: ServerMessageMap['session.workflowUpdate']['update']): void {
+  useWorkflowStore().triggerWorkflowReload(sessionId, update.status ?? 'unknown')
 }
 
 /** 全局 error 兜底（无 sessionId 无 id 的 server-push error → toast 提示）。 */

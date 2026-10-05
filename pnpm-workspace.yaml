@@ -10,3 +10,14 @@ packages:
 # vitest#11153 worker 拆卸竞态假红修复，退役条件见补丁文件头注释。
 patchedDependencies:
   vitest: patches/vitest.patch
+
+overrides:
+  '@earendil-works/pi-coding-agent': 1.0.0
+  '@earendil-works/pi-ai': 1.0.0
+  '@earendil-works/pi-tui': 1.0.0
+  '@earendil-works/pi-agent-core': 1.0.0
+onlyBuiltDependencies:
+  - esbuild
+  - electron
+  - node-pty
+  - vue-demi

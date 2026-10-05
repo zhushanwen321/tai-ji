@@ -44,10 +44,6 @@
   <!-- Toast 通知：不再在根部固定挂载——ToastContainer 改 absolute 右上角锚定，挂载点
        收敛到 main-panel 内两分支（PanelContainer main-area（chat 主区）/ MainPanel
        settings 兜底），避免遮 composer 与 drawer。 -->
-  <!-- renderer 崩溃恢复一次性提示条（T2）：窗口级，URL query 标志驱动
-       （main 侧 reloadWindowAfterCrash 注入），useCrashRecoveryNotice 消费即清除标志
-       （手动刷新不重现）。挂根部使 connecting 过渡屏/主界面两态均可见。 -->
-  <CrashRecoveredBar />
   <!-- RD-3#7：ToastContainer 上提根部——连接前（connecting/failed/restarting）也渲染，让启动期
        错误（如渲染异常 toast）有 UI 留痕。connected 态仍由 PanelContainer main-area / MainPanel
        内的挂载点承接（保持 drawer 感知定位、恒不遮 drawer），故此处仅非连接态挂载——两态均渲染、
@@ -55,7 +51,7 @@
   <ToastContainer v-if="connectionState !== 'connected'" />
   <!-- RD-3#11：内存压力提示条（最小可见形态）——useMemoryPressure 的 level 接入 UI 消费方。
        warn/critical 时显示，用户据此行动；level 无 normal 回弹（协议 normal 不广播），dismiss 后
-       level 变化（升级）经 watch 重显。fixed 顶部居中，零布局侵入（同 CrashRecoveredBar 定位范式）。 -->
+       level 变化（升级）经 watch 重显。fixed 顶部居中，零布局侵入。 -->
   <div
     v-if="memoryLevel !== 'normal' && !memoryBarDismissed"
     ref="memoryBarRef"
@@ -76,8 +72,8 @@
     </Button>
   </div>
   <!-- 权限请求弹窗（全局，session 无关）：bridge bus plugin-permission-request 驱动 pending；
-       transport 经 PERMISSION_TRANSPORT_KEY inject 调 WS approve/revoke（main.ts provide）。 -->
-  <PermissionRequestDialog :plugin-id="perm.pluginId" :permissions="perm.permissions" :pending="perm.pending" />
+       transport 经 PERMISSION_TRANSPORT_KEY inject 调 WS approve/deny（main.ts provide）。 -->
+  <PermissionRequestDialog :plugin-id="perm.pluginId" :permissions="perm.permissions" :pending="perm.pending" :error="perm.error" />
 </template>
 
 <script setup lang="ts">
@@ -87,7 +83,6 @@ import { useI18n } from 'vue-i18n'
 import TaijiLogo from '@/components/icons/TaijiLogo.vue'
 import AppShell from '@/components/shell/AppShell.vue'
 
-import CrashRecoveredBar from '@/components/ui/CrashRecoveredBar.vue'
 import ToastContainer from '@/components/ui/ToastContainer.vue'
 import { Button } from '@/components/ui/button'
 import { useConnection } from '@/composables/useConnection'
@@ -174,7 +169,7 @@ bindSessionStreamSync()
 // ADR-0049）；App 层不挂任何队列单例。
 // 内存压力降级消费（crash-forensics-and-watchdog §3.3 D4，u7d / 偏差 #28② 的 renderer 半边）：
 // 窗口级单例挂载（refCount 订阅，onScopeDispose 随 App 卸载退订）——订阅 watchdog:memoryPressure，
-// warn 持续拍压窗 LRU 8→4 + evictIfNeeded 驱逐。Gate W 默认 off 时 runtime 不广播、零成本待命。
+// warn 持续拍压窗 LRU 8→4 + 复合入口驱逐退订（evictLruWithUnsubscribe，remote-use D2——被驱逐会话连带退订）。Gate W 默认 off 时 runtime 不广播、零成本待命。
 // 【oe-audit C2】此前全链零装配（hook 零调用方 = 双重休眠，impl-plan u7d「经 useRollingRestartStatus
 // 引用链生产挂载」登记失实——该文件仅注释引用范式）；本挂载补齐生产消费方。
 // 【RD-3#11】捕获 level 供上方提示条消费（此前返回值丢弃、level 无 UI 消费方——内存压力 warn 阶段
@@ -248,7 +243,7 @@ watch(connectionState, (s) => {
     bootstrapError.value = null
     void onConnected()
     // 兜底：连接后主动拉一次 models（对齐 refreshProviders 范式，防订阅时序竞态未来回归）。
-    // mock 模式 WS 不回 model.list reply（mockSend 仅 ping/pong）→ pending 65s 超时，跳过避免 boot 卡顿。
+    // mock 平台 WS 桩仅 ping/pong 不回 model.list reply → pending 65s 超时，跳过避免 boot 卡顿。
     if (import.meta.env.VITE_MOCK !== 'true') {
       void refreshModels()
     }

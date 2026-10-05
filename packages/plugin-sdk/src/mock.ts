@@ -65,7 +65,6 @@ export function createMockAgentAPI(): Phase2AgentAPI {
     hooks: {
       onBeforeSendMessage: () => Promise.resolve(mockDisposable),
       onBeforeToolCall: () => Promise.resolve(mockDisposable),
-      onBeforeAgentStart: () => Promise.resolve(mockDisposable),
       onAfterToolResult: () => Promise.resolve(mockDisposable),
       onPiEvent: () => Promise.resolve(mockDisposable),
     },

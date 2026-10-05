@@ -25,7 +25,7 @@ export function onModels(handler: (models: ModelInfo[]) => void): () => void {
  *
  * onModels 订阅覆盖 sendInitialState 首推与运行时广播；本函数解决「订阅注册时序竞态导致首推丢失」
  * 的兜底（runtime settings-message-handler.ts 的 model.list case reply { models }）。
- * 由 settings-lifecycle.refreshModels 在连接后调一次。mock 模式 WS 不回此 reply（mockSend 仅 ping/pong），
+ * 由 settings-lifecycle.refreshModels 在连接后调一次。mock 模式 WS 不回此 reply（createMockPlatform 桩仅 ping→pong），
  * 故调用方须在非 mock 模式下调（否则 pending 65s 超时）。
  */
 export async function listModels(): Promise<ModelInfo[]> {

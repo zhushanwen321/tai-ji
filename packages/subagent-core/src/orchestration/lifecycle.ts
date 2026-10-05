@@ -19,7 +19,7 @@
  *
  * 私有 makeHandlers(run, deps) → WorkerHandlers：
  * - onMessage → handleWorkerMessage(run, raw, deps, handlers)
- * - onError → handleWorkerError(run, err, deps, handlers) + workerErrorCount++
+ * - onError → handleWorkerError(run, err, deps, handlers)（一次即 done,failed，ADR-0122）
  * - onExit(code, handle) → handleWorkerExit(run, code, handle, deps, handlers)
  * （G-025：handle.isCurrent 检查内化在 handleWorkerExit 内）
  *
@@ -58,7 +58,6 @@ import {
   settledRecordOf,
 } from "./terminal-actions.ts";
 import {
-  forgetRunResumedBudget,
   handleWorkerError,
   handleWorkerExit,
   handleWorkerMessage,
@@ -154,7 +153,8 @@ function broadcastAbortToWorker(run: WorkflowRun, reason: string): void {
  * **onExit G-025**：handleWorkerExit 内部检查 handle.isCurrent（stale exit 丢弃）。
  * 本函数不在 onExit 里重复检查——worker-message-pump.handleWorkerExit 是单一守卫点。
  *
- * **workerErrorCount**：onError 触发时递增（C.5 跨 runtime 存活的重试计数载体）。
+ * **workerErrorCount**：[HISTORICAL] 原重试计数载体（C.5）——[ADR-0122] 重试矩阵
+ * 删除后无生产写入方，字段保留为旧 record 兼容读。
  * 注意 handleWorkerError 内部也会递增——这里 onError 递增是 worker 事件层面的
  * 「error 事件到达」计数，handleWorkerError 内的是「错误处理决策」计数。
  * 实际 handleWorkerError 会做最终计数（含重试上限判断），onError 不重复递增。
@@ -207,7 +207,8 @@ export function makeHandlers(run: WorkflowRun, deps: LifecycleDeps): WorkerHandl
     },
     async onExit(code: number, handle: WorkerHandle): Promise<void> {
       // H-2：用 worker-host 传入的 handle（即真正触发 exit 的那个 handle），而非
-      // run.runtime?.worker——重试竞态下 runtime.worker 可能已被 replaceRuntime 替换
+      // run.runtime?.worker——[HISTORICAL] 原 rebuild 重试竞态注释（replaceRuntime
+      // 生产调用方已删，ADR-0122）；运行期 runtime 恒为 start 时绑定实例
       // 为新 handle，导致 handleWorkerExit 内的 isCurrent 检查误判（漏判 stale exit 或
       // 误杀新 worker）。G-025 检查仍在 handleWorkerExit 内（handle.isCurrent）。
       await handleWorkerExit(run, code, handle, depsWithTerminalCleanup, handlers);
@@ -394,8 +395,8 @@ export async function runWorkflow(
 
   // [D-撞名 / 第 4 道检查扩展到派发期] 语法闸：手工编写或从别处拷进工作流目录的脚本
   // 不过生成期校验（generateWorkflowScript 只服务 AI 生成路径）。脚本顶层重声明宿主
-  // 预声明名（args / $ARGS / agent / …）时，Worker 以**异步**语法错暴露 → 被 worker
-  // 错误矩阵当成崩溃重试 MAX_WORKER_RETRIES 次才失败，且丢分类与行号。此处与
+  // 预声明名（args / $ARGS / agent / …）时，Worker 以**异步**语法错暴露，丢分类与
+  // 行号。此处与
   // validateRunArgs 同 chokepoint（worker 启动前、失败零副作用），抛
   // WorkflowScriptSyntaxError（生成期同款诊断 + 恢复指引）。空脚本源跳过（旧格式
   // record 无文本可查，见 assertWorkflowScriptSyntax 头注）。
@@ -641,8 +642,6 @@ export function evictDoneRunsBeyondCap(
   for (const r of settled.slice(0, excess)) {
     runs.delete(r.runId);
     forgetSettledRecord(r.runId);
-    // [D10] resume 侧进程内注册表同步回收（与终局记录注册表同生命周期）
-    forgetRunResumedBudget(r.runId);
   }
   return excess;
 }

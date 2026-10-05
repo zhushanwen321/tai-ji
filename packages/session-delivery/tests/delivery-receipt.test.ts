@@ -37,36 +37,35 @@ describe('port.send receipt（U2 回执口径）', () => {
     vi.useRealTimers()
   })
 
-  it('accepted:false（同步返回）→ 错误重试耗尽后 onSettled rejected（不吞受理失败）', () => {
+  it('accepted:false（同步返回）→ 首败即停 onSettled rejected（不吞受理失败，ADR-0122）', () => {
     const onSettled = vi.fn()
     const port = makePort({
       send: (): SendReceipt => ({ accepted: false, reason: 'channel closed' }),
     })
-    // 退避 1ms × 上限 1：失败 → 1 次重试 → 再失败 → rejected 终态
-    const handle = createDelivery(port, { onSettled, backoff: { ms: 1, max: 1 } })
+    const handle = createDelivery(port, { onSettled })
 
     handle.send(textMsg('m1'))
-    expect(onSettled).not.toHaveBeenCalled() // 首次失败进入重试，非终态
-    vi.advanceTimersByTime(2)
+    // 首败即停：无重试窗口，rejected 通知同步收口
     expect(onSettled).toHaveBeenCalledTimes(1)
     expect(onSettled.mock.calls[0]?.[1]).toBe('rejected')
+    expect(handle.entriesFull().active).toHaveLength(0)
 
     handle.dispose()
   })
 
-  it('accepted:false（Promise 返回）→ 同步形态等价：重试耗尽后 rejected 终态', async () => {
+  it('accepted:false（Promise 返回）→ 同步形态等价：首败即停 rejected 终态', async () => {
     const onSettled = vi.fn()
     const port = makePort({
       send: (): Promise<SendReceipt> =>
         Promise.resolve({ accepted: false, reason: 'queue full' }),
     })
-    const handle = createDelivery(port, { onSettled, backoff: { ms: 1, max: 1 } })
+    const handle = createDelivery(port, { onSettled })
 
     handle.send(textMsg('m2'))
-    // Promise resolve（微任务）+ 退避 timer（宏任务）结算
     await vi.advanceTimersByTimeAsync(2)
     expect(onSettled).toHaveBeenCalledTimes(1)
     expect(onSettled.mock.calls[0]?.[1]).toBe('rejected')
+    expect(handle.entriesFull().active).toHaveLength(0)
 
     handle.dispose()
   })

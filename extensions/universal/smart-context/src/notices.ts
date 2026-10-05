@@ -3,8 +3,8 @@
  *
  * 四类通知（压缩结果 onComplete / onError、阈值提醒、model_select 跨界与降档两条）从
  * `sendUserMessage(deliverAs:'steer'|'followUp')` 改为 `sendMessage(deliverAs:'nextTurn',
- * triggerTurn:false)`——通知作为 custom role 上下文随下一次 prompt 注入（pi 0.84.4 实证，登记
- * docs/pi-semantics.json#PS-06：`_pendingNextTurnMessages` 常驻至被消费、不自起 run），结构上消除「通知自起 run 抢占用户
+ * triggerTurn:false)`——通知作为 custom role 上下文随下一次 prompt 注入（语义登记
+ * docs/pi-semantics.json#PS-06，verifiedWith 以该登记为准：`_pendingNextTurnMessages` 常驻至被消费、不自起 run），结构上消除「通知自起 run 抢占用户
  * 消息投递跑道」——故事 C 根因：压缩完成后通知 run 与用户消息同时 prompt()，后到者被 pi 以
  * `Agent is already processing` 拒绝。
  *

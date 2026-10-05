@@ -4,7 +4,7 @@
  * 职责（单一变化轴「重启编排决策」）：
  * - 判定是否应重启（stopping 标志 / 计数上限）
  * - 计算退避延迟（指数退避，1s/2s/4s/8s/16s）
- * - 稳定窗口清零（成功运行 >STABLE_MS 后计数清零，区分瞬时簇 vs 持续故障）
+ * - 崩溃计数只在用户显式重试（clearForManualRestart）时清零，无时间窗
  *
  * 从 supervisor 抽出是因为：supervisor 重度依赖 electron（app/BrowserWindow/child_process），
  * main 层 vitest 只测纯函数（vitest.config 注释）。把决策逻辑抽成纯类，
@@ -12,8 +12,9 @@
  *
  * [HISTORICAL] 不变量：
  * 1. shouldRestart 检查顺序：stopping（短路）→ 计数上限。主动退出绝不重启
- * 2. recordSuccess 在稳定窗口内不立即清零——需持续 STABLE_MS 才清零，
- *    避免「启动即崩」被误判为多次独立瞬时故障
+ * 2. 崩溃计数不按时间窗清零（原 STABLE_MS=10s 稳定窗已删，ADR-0122：时间窗
+ *    猜测属无效防御）——recordSuccess 只记录事实，计数清零唯一入口是
+ *    clearForManualRestart（用户显式重启服务的事件）
  * 3. 退避序列：2^(n-1) * BASE，clamp MAX，n=1..MAX_RESTARTS → 1s/2s/4s/8s/16s
  */
 
@@ -25,8 +26,6 @@ export const RESTART_BACKOFF_EXPONENT = 2
 export const MAX_RESTART_DELAY_MS = 16_000
 /** 最大重启次数（持续性故障判定阈值，1+2+4+8+16=31s + 每次重启 ~2s ≈ 40s 给出结论） */
 export const MAX_RESTARTS = 5
-/** 稳定运行窗口（ms）：成功运行超过此时长后计数清零，视为「瞬时故障已过去」 */
-export const STABLE_MS = 10_000
 /**
  * planned 边的重启延迟 = 0（立即重启，零退避——crash-forensics D5 ④）。
  */
@@ -39,20 +38,17 @@ export const PLANNED_RESTART_DELAY_MS = 0
  * ```
  * idle ──recordCrash──▶ counting ──recordCrash──▶ ... ──超过 MAX──▶ exhausted
  *   │                       │
- *   │                  └─稳定 STABLE_MS─ recordSuccess ──▶ idle（清零）
+ *   │                       └─recordSuccess（无操作，计数只在手动重试时清零）
  *   └─recordSuccess（无操作，计数本就 0）
- * exhausted ──reset──▶ idle（手动重试入口）
+ * exhausted ──clearForManualRestart──▶ idle（用户显式重试入口）
  *
  * recordPlanned（u7c）：planned 边 idle ──▶ idle——计划内滚动重启退出（码 86）不进
  * counting 状态机：不递增计数、不产生退避（返回 PLANNED_RESTART_DELAY_MS=0 立即重启）、
  * 不受 MAX/shouldRestart 门约束（设计 D5 ④「立即重启、跳过退避与崩溃计数」）。
- * recordSuccess 的稳定窗口清零照常适用（planned 重启成功 = 新稳定周期，既有 crash
- * 计数按窗口规则自然收敛）。
  * ```
  */
 export class RestartPolicy {
   private restartCount = 0
-  private lastSuccessAt = 0
   private _stopping = false
 
   /** 主动停止标志（stop() 设 true，start() 重置 false） */
@@ -75,13 +71,13 @@ export class RestartPolicy {
   }
 
   /**
-   * 手动重试清零：重置停止标志 + 清计数 + 清 lastSuccessAt（给新的 MAX 次配额）。
+   * 手动重试清零：重置停止标志 + 清计数（给新的 MAX 次配额）。
    * 仅 restartRuntime（用户点重试按钮）调，自动重启路径不调。
+   * 这是崩溃计数清零的唯一入口（用户显式重启服务的事件驱动）。
    */
   clearForManualRestart(): void {
     this._stopping = false
     this.restartCount = 0
-    this.lastSuccessAt = 0
   }
 
   /**
@@ -109,30 +105,22 @@ export class RestartPolicy {
   }
 
   /**
-   * 记录一次计划内退出并返回重启延迟（u7c：crash-forensics D5 ④ planned 边）。
-   *
    * 与 recordCrashAndGetDelay 的差异（A4 验收语义）：不递增 restartCount（不进
    * counting 状态机）、不做 shouldRestart 门检查（planned 不受 MAX 配额约束——
    * exhausted 态下滚动重启仍须照常重启）、返回 PLANNED_RESTART_DELAY_MS=0（立即
-   * 重启零退避）。不动 stopping/lastSuccessAt（后者由重启成功后的 recordSuccess
-   * 按既有稳定窗口规则处理）。
+   * 重启零退避）。不动 stopping。
    */
   recordPlanned(): number {
     return PLANNED_RESTART_DELAY_MS
   }
 
   /**
-   * 记录重启成功。
-   * 若距上次成功 >STABLE_MS，视为新故障簇，计数清零；
-   * 否则保持计数（同簇内，下次崩溃继续累计）。
+   * 记录重启成功（只记录事实，不改计数）。
+   * 崩溃计数无时间窗清零（ADR-0122：时间窗猜测属无效防御）——清零唯一入口
+   * 是 clearForManualRestart（用户显式重试）。
    */
   recordSuccess(): void {
-    const now = Date.now()
-    if (this.lastSuccessAt > 0 && now - this.lastSuccessAt > STABLE_MS) {
-      // 稳定运行超过窗口 → 故障簇结束，清零
-      this.restartCount = 0
-    }
-    this.lastSuccessAt = now
+    // 无操作：保留方法以维持 supervisor 调用面稳定（记录点的存在本身有日志价值时再扩展）
   }
 
   /** 当前重启计数（测试/日志用） */

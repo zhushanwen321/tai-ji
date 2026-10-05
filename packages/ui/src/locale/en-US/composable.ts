@@ -1,0 +1,69 @@
+export default {
+  sendFailed: 'Failed to send message: {msg}',
+  nextTurnSendFailed: 'Failed to send next turn: {msg}',
+  stopFailed: 'Failed to stop: {msg}',
+  compactFailed: 'Failed to compact: {msg}',
+  bashFailed: 'Failed to run bash: {msg}',
+  // [U5 message revoke D8] revoke orchestration toasts (D8 spec table is the presentation SSOT;
+  // keys map 1:1 to core useChat REVOKE_ERROR_TOAST_KEYS) + pending-cancel leg and RPC failures
+  revokeFailed: 'Revoke failed: {msg}',
+  revokeCancelFailed: 'Failed to cancel delivery: {msg}',
+  revokeDeliveredRace: 'Message was just delivered — click revoke again',
+  revokeRestoreContentMissing: 'Revoked, but the original text could not be restored',
+  revokeBusy: 'Generating — stop the turn to revoke',
+  revokeNoMapping: 'Message cannot be revoked. Try refreshing the conversation and retry.',
+  revokeExtensionMissing: 'Revoke component not ready — restart the session',
+  revokeNavFailed: 'Revoke incomplete — please retry',
+  revokePiReclaimed: 'Session process was reclaimed and could not be restored — please retry',
+  revokeWorkflowRunning: 'Background task running — finish or stop it before revoking',
+
+  // Receipt unreachable (disconnect / timeout): the command may have started — never say
+  // "failed" (invites a re-run = double execution); recovery = check the conversation first.
+  bashOutcomeUnknown: 'Bash command state unknown: it may have started. Check the conversation before running it again ({msg})',
+  // `@` directive messages (U2b): empty-text guard + RPC failure (readable error, S8)
+  subagentDirectiveEmpty: 'Directive message is empty, please type content for the subagent',
+  subagentDirectiveFailed: 'Failed to send directive message: {msg}',
+  // Extension command failure toast (pi1-disposition-chat-flow U2③ / D10③): command-source
+  // errors only (useChat filters errorEvent === 'command'); {name} = command name without prefix
+  extensionCommandFailed: 'Command failed: {name} — {msg}',
+  providerNameRequired: 'Provider name is required',
+  oauthSwitchNeedsKey: 'Switching to API Key requires a new API Key (it replaces the OAuth credential on save)',
+  duplicateHeaderKey: 'Duplicate header key detected, the last value will be used',
+  modelNameRequired: 'Model name is required',
+  modelAlreadyExists: 'Model "{name}" already exists',
+  discoveredModels: 'Discovered {count} models, {merged}',
+  newMerged: '{count} new merged',
+  allExisted: 'All already existed',
+  discoverFailed: 'Discovery failed',
+  dirNotExist: 'Directory {dir} no longer exists, switched to home directory',
+  // E7 (D10) cwd both-empty toast: explicit notice when landing falls back to home silently
+  cwdFallbackToHome: 'No directory selected, created in home directory',
+  imageMigratePartialFailed: '{count} image(s) failed to migrate (temp file may be cleaned), will try original path',
+  loadFailed: 'Load failed',
+  copyLabel: 'Copy',
+  removeLabel: 'Remove',
+  // skill chip tooltip (C5): injection behavior + size cap (50KB = injection budget cap)
+  skillChipTitle: 'Injects the full skill text when sent (max 50KB)',
+  yesterday: 'Yesterday',
+  daysAgo: '{days} days ago',
+  dateFormat: '{month}/{day}',
+  searchUnavailable: 'Search service is temporarily unavailable',
+  // Thinking level labels (W2)
+  thinkingLevel: {
+    off: 'off',
+    minimal: 'Minimal',
+    low: 'low',
+    medium: 'medium',
+    high: 'high',
+    xhigh: 'Very High',
+    max: 'max',
+    on: 'On',
+    default: 'thinking',
+  },
+  // Thinking strategy presets (W2)
+  thinkingStrategy: {
+    allLevels: 'All Levels',
+    onOff: 'On / Off',
+    highMax: 'High / Max',
+  },
+}

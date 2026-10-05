@@ -1,9 +1,9 @@
 // src/orchestration/__tests__/execute-agent-call.test.ts
 //
 // U2: executeAgentCall 透传 stream 给 runner.run
-// U3: executeAgentCall retry 递归也透传 stream（不丢、不重建）
+// [ADR-0122] 失败显式上报：单次执行、失败直接终态化（原 3 次指数退避重试矩阵已删）。
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   classifyFailureKind,
@@ -157,39 +157,34 @@ describe("U1: finalizeCall sessionFile → trace 节点", () => {
   });
 });
 
-// ── U3: retry 递归也透传 stream ──
+// ── [ADR-0122] 失败单次终态：无自动重试 ──
 
-describe("U3: executeAgentCall retry 透传 stream", () => {
-  it("首次 runner.run 返回 error → retry 时第 4 参仍是同一 stream", async () => {
-    vi.useFakeTimers();
-
-    const capturedStreams: unknown[] = [];
+describe("ADR-0122: 失败单次终态（无自动重试）", () => {
+  it("首次 runner.run 返回 error → 不重试（恰 1 次调用）+ 终态 failed", async () => {
     const runner = createMockRunner(
-      vi.fn().mockImplementation((_opts, _sig, _onEvt, stream) => {
-        capturedStreams.push(stream);
-        // 首次 error，第二次成功
-        if (capturedStreams.length === 1) {
-          return Promise.resolve(makeMockResult({ error: "transient error" }));
-        }
-        return Promise.resolve(makeMockResult());
-      }),
+      vi.fn().mockResolvedValue(makeMockResult({ error: "transient error", failureKind: "unknown" })),
     );
-
-    const fakeStream = { onDelta: vi.fn(), dispose: vi.fn() };
     const { call, trace } = makeAgentCallAndTrace();
     const budget = new Budget();
 
-    const promise = executeAgentCall(call, runner, budget, new AbortController().signal, trace, undefined, fakeStream as never);
-    // 推进 retry 退避定时器（BACKOFF_BASE_MS = 1000，首退避 1s）
-    await vi.advanceTimersByTimeAsync(2000);
-    await promise;
+    await executeAgentCall(call, runner, budget, new AbortController().signal, trace);
 
-    expect(runner.run).toHaveBeenCalledTimes(2);
-    // 两次调用的第 4 参都是同一 stream 对象
-    expect(capturedStreams[0]).toBe(fakeStream);
-    expect(capturedStreams[1]).toBe(fakeStream);
+    expect(runner.run).toHaveBeenCalledTimes(1);
+    expect(call.attempts).toBe(1);
+    expect(call.status).toBe("done");
+    expect(call.result?.error).toBe("transient error");
+    expect(findByStep(trace, 0)?.status).toBe("failed");
+  });
 
-    vi.useRealTimers();
+  it("成功路径 → 单次调用 + 终态 completed", async () => {
+    const runner = createMockRunner();
+    const { call, trace } = makeAgentCallAndTrace();
+    const budget = new Budget();
+
+    await executeAgentCall(call, runner, budget, new AbortController().signal, trace);
+
+    expect(runner.run).toHaveBeenCalledTimes(1);
+    expect(findByStep(trace, 0)?.status).toBe("completed");
   });
 });
 
@@ -213,7 +208,7 @@ describe("isOrphaned 守卫", () => {
     expect(call.result?.content).toBe("OK");
   });
 
-  it("U2: 谓词 true + stale-context 失败路径 → trace.update 0 次，markDone 保留（覆盖 stale finalize 调用点）", async () => {
+  it("U2: 谓词 true + stale-context 失败路径 → trace.update 0 次，markDone 保留（覆盖失败 finalize 调用点）", async () => {
     const { call, trace } = makeAgentCallAndTrace();
     const updateSpy = vi.spyOn(trace, "update");
     // "context canceled" 经产出侧词表分类为 stale_context（D5-③ 后消费侧读字段）
@@ -229,10 +224,9 @@ describe("isOrphaned 守卫", () => {
     expect(call.result?.error).toBe("context canceled");
   });
 
-  it("U3: 谓词 true + 信号 abort 路径 → trace.update 0 次，markDone 保留（覆盖 abort finalize 调用点）", async () => {
+  it("U3: 谓词 true + 信号 abort 路径 → trace.update 0 次，markDone 保留", async () => {
     const { call, trace } = makeAgentCallAndTrace();
     const updateSpy = vi.spyOn(trace, "update");
-    // 错误文案不含 stale 模式词，确保走 signal.aborted 分支而非 stale 分支
     const runner = createMockRunner(
       vi.fn().mockResolvedValue(makeMockResult({ error: "old generation failure" })),
     );
@@ -259,34 +253,6 @@ describe("isOrphaned 守卫", () => {
     expect(findByStep(trace, 0)?.status).toBe("completed");
     expect(call.status).toBe("done");
   });
-
-  it("U5: 递归重试透传——可重试失败后成功，谓词 true → 重试后终态 trace.update 仍 0 次", async () => {
-    vi.useFakeTimers();
-    try {
-      const { call, trace } = makeAgentCallAndTrace();
-      const updateSpy = vi.spyOn(trace, "update");
-      const runner = createMockRunner(
-        vi.fn()
-          .mockResolvedValueOnce(makeMockResult({ error: "transient error" }))
-          .mockResolvedValueOnce(makeMockResult()),
-      );
-      const budget = new Budget();
-
-      const promise = executeAgentCall(call, runner, budget, new AbortController().signal, trace, undefined, undefined, () => true);
-      // 推进首退避 1s（BACKOFF_BASE_MS = 1000）
-      await vi.advanceTimersByTimeAsync(2000);
-      await promise;
-
-      expect(runner.run).toHaveBeenCalledTimes(2);
-      expect(call.attempts).toBe(2);
-      // 谓词穿透递归层：重试后终态也不写 trace
-      expect(updateSpy).not.toHaveBeenCalled();
-      expect(call.status).toBe("done");
-      expect(call.result?.error).toBeUndefined();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
 });
 
 // ── W4b: STALE_CONTEXT_PATTERNS 对齐 pi 真实文案（stale 分诊） ──
@@ -294,9 +260,10 @@ describe("isOrphaned 守卫", () => {
 // pi 0.84.x 真实 stale 文案（extensions/runner.ts:531，dist runner.js:567）：
 // "This extension ctx is stale after session replacement or reload. Do not use
 //  a captured pi or command ctx after ctx.newSession(), ..."
-// 旧 patterns（"stale context"/"stalecontext"）与该文案零匹配（词序相反），
-// stale 错误曾退化为普通错误照常重试 3 次——W4b 词序修正 + 对齐 scheduler
-// 已验证 marker 'stale after session replacement'（runtime.ts STALE_CTX_MARKER）。
+// 旧 patterns（"stale context"/"stalecontext"）与该文案零匹配（词序相反）——
+// W4b 词序修正 + 对齐 scheduler 已验证 marker 'stale after session replacement'
+// （runtime.ts STALE_CTX_MARKER）。[ADR-0122] 后分诊结果只影响 failureKind 分类
+// 展示，不再有重试语义差异。
 
 /** pi 真实 stale 文案前半（含 marker 全文前缀，锚定真实串而非自造缩写）。 */
 const PI_REAL_STALE_MESSAGE =
@@ -312,9 +279,9 @@ describe("W4b: stale 分诊对齐 pi 真实文案", () => {
     expect(STALE_CONTEXT_PATTERNS).toContain("ctx is stale");
   });
 
-  it("真实文案 → executeAgentCall 不重试（runner.run 恰 1 次）+ markDone failed", async () => {
+  it("真实文案 → 单次终态 failed（runner.run 恰 1 次）", async () => {
     // [D5-③] 全链路锁：产出侧 classifyFailureKind（真实文案 → stale_context）→
-    // 消费侧读 failureKind 字段分诊（不扫文案）
+    // 消费侧读 failureKind 字段分类
     const { call, trace } = makeAgentCallAndTrace();
     const runner = createMockRunner(
       vi.fn().mockResolvedValue(makeFailedResult(PI_REAL_STALE_MESSAGE)),
@@ -329,24 +296,20 @@ describe("W4b: stale 分诊对齐 pi 真实文案", () => {
     expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
-  it("普通 transient 错误 → 不命中 stale（照常进入重试路径，现状回归）", () => {
+  it("普通 transient 错误 → 不命中 stale", () => {
     expect(isStaleContextErrorMsg("transient network error")).toBe(false);
     expect(isStaleContextErrorMsg(undefined)).toBe(false);
   });
 });
 
-// ── MF-1: 确定性 schema 失败不重试 ──
+// ── MF-1: 确定性 schema 失败单次终态 ──
 //
-// 回归背景（第五轮实测）：gate 终止子进程后 collectResult F-1 置归因 error →
-// executeAgentCall 判非 stale 走可重试分支 → 不可满足 schema 下循环至
-// MAX_ATTEMPTS=3（实测 attempts=3、4 子进程、235s vs 修复前 67.3s）。
-// 修复：归因 error 带机器标记（SSOT = DETERMINISTIC_SCHEMA_FAILURE_PREFIX），
-// 分诊短路。用真实链路产物（describeMissingParsedOutput）作 error 输入，锁定
-// collectResult → executeAgentCall 全链路分诊行为。
+// [HISTORICAL] 回归背景（第五轮实测）：gate 终止子进程后归因 error 曾循环重试至
+// MAX_ATTEMPTS=3（实测 attempts=3、4 子进程、235s）。ADR-0122 后一切失败单次终态，
+// 分诊结果（failureKind）仅随 result 透传供分类展示。
 //
-// 三态可重试性矩阵（完整锁定在 output-collector.test 的 MF-1 describe）：
-//   态① 从未调用 SO → 不可重试；态② isError（gate 终止/不可满足 schema）→ 不可重试；
-//   态③ 调用过但无 details → 可重试（保留既有重试语义）。
+// 三态矩阵（完整锁定在 output-collector.test 的 MF-1 describe）：
+//   态① 从未调用 SO；态② isError（gate 终止/不可满足 schema）；态③ 调用过但无 details。
 
 /** 构造态②真实产物（isError SO 调用，schema 校验失败——gate 终止回归场景）。 */
 function state2Attribution(): string {
@@ -362,7 +325,7 @@ function state2Attribution(): string {
   return msg!;
 }
 
-describe("MF-1: 确定性 schema 失败不重试", () => {
+describe("MF-1: 确定性 schema 失败单次终态", () => {
   it("态②真实产物（gate 终止/schema 校验失败归因）→ runner.run 恰 1 次 + 终态 failed", async () => {
     const attribution = state2Attribution();
     expect(isDeterministicSchemaFailureMsg(attribution)).toBe(true);
@@ -375,14 +338,13 @@ describe("MF-1: 确定性 schema 失败不重试", () => {
 
     await executeAgentCall(call, runner, budget, new AbortController().signal, trace);
 
-    // 修复前：循环至 MAX_ATTEMPTS=3（4 次子进程）；修复后：恰 1 次
     expect(runner.run).toHaveBeenCalledTimes(1);
     expect(call.attempts).toBe(1);
     expect(call.status).toBe("done");
     expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
-  it("态①真实产物（never called，缺 extension 环境确定性）→ 同样不重试", async () => {
+  it("态①真实产物（never called，缺 extension 环境确定性）→ 同样单次终态", async () => {
     const attribution = describeMissingParsedOutput([])!;
     const { call, trace } = makeAgentCallAndTrace();
     const runner = createMockRunner(
@@ -397,7 +359,7 @@ describe("MF-1: 确定性 schema 失败不重试", () => {
     expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
-  it("MF-2 计数不再低估：retry 不发生 → usage consume 恰一次、totalCallCount=1", async () => {
+  it("usage consume 恰一次、totalCallCount=1", async () => {
     const attribution = state2Attribution();
     const { call, trace } = makeAgentCallAndTrace();
     const runner = createMockRunner(
@@ -413,14 +375,13 @@ describe("MF-1: 确定性 schema 失败不重试", () => {
 
     await executeAgentCall(call, runner, budget, new AbortController().signal, trace);
 
-    // 修复前：3 attempts → consume×3（usedTokens×3）；修复后：恰一次加权消耗
-    // （input×1 + output×2 = 100 + 100 = 200，权重见 budget.ts）
+    // 恰一次加权消耗（input×1 + output×2 = 100 + 100 = 200，权重见 budget.ts）
     expect(budget.usedTokens).toBe(200);
     expect(budget.usedCost).toBeCloseTo(0.01);
     expect(budget.totalCallCount).toBe(1);
   });
 
-  it("MF-3 归因不再混合：终态 error 保持归因原文（不被重试轮次覆盖）", async () => {
+  it("终态 error 保持归因原文", async () => {
     const attribution = state2Attribution();
     const { call, trace } = makeAgentCallAndTrace();
     const runner = createMockRunner(
@@ -433,35 +394,26 @@ describe("MF-1: 确定性 schema 失败不重试", () => {
     expect(call.result?.error).toBe(attribution);
   });
 
-  it("态③（no details，无标记）→ 照常重试（可重试语义保留）", async () => {
-    vi.useFakeTimers();
-    try {
-      // 态③真实文案（不带确定性标记）——矩阵执行面锁定：无标记 = unknown = 可重试
-      const msg = describeMissingParsedOutput([
-        { toolName: "structured-output", result: { content: [] } },
-      ])!;
-      expect(isDeterministicSchemaFailureMsg(msg)).toBe(false);
+  it("态③（no details，无标记）→ 同样单次终态（ADR-0122：失败显式上报）", async () => {
+    // 态③真实文案（不带确定性标记）
+    const msg = describeMissingParsedOutput([
+      { toolName: "structured-output", result: { content: [] } },
+    ])!;
+    expect(isDeterministicSchemaFailureMsg(msg)).toBe(false);
 
-      const { call, trace } = makeAgentCallAndTrace();
-      const runner = createMockRunner(
-        vi.fn()
-          .mockResolvedValueOnce(makeFailedResult(msg))
-          .mockResolvedValueOnce(makeMockResult()),
-      );
-      const budget = new Budget();
+    const { call, trace } = makeAgentCallAndTrace();
+    const runner = createMockRunner(
+      vi.fn().mockResolvedValue(makeFailedResult(msg)),
+    );
+    const budget = new Budget();
 
-      const promise = executeAgentCall(call, runner, budget, new AbortController().signal, trace);
-      await vi.advanceTimersByTimeAsync(2000);
-      await promise;
+    await executeAgentCall(call, runner, budget, new AbortController().signal, trace);
 
-      expect(runner.run).toHaveBeenCalledTimes(2);
-      expect(call.status).toBe("done");
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(runner.run).toHaveBeenCalledTimes(1);
+    expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
-  it("分诊交叉锁定：标记词不命中任何 STALE_CONTEXT_PATTERNS（stale 分诊在前也不误吞）", () => {
+  it("分诊交叉锁定：标记词不命中任何 STALE_CONTEXT_PATTERNS（stale 分诊不误吞）", () => {
     const lower = DETERMINISTIC_SCHEMA_FAILURE_PREFIX.toLowerCase();
     for (const pattern of STALE_CONTEXT_PATTERNS) {
       expect(lower.includes(pattern)).toBe(false);
@@ -472,15 +424,13 @@ describe("MF-1: 确定性 schema 失败不重试", () => {
   });
 });
 
-// ── D5-③: failureKind 三态结构化分诊（V5③④ 验收的执行面锁定） ──
+// ── D5-③: failureKind 结构化分诊（词表在产出侧 output-collector.classifyFailureKind）──
 //
-// 语义守恒（r1 MF4 钉正，最高优先约束）：unknown（含字段缺省）= 可重试——保持
-// 收敛前（子串分诊时代）的默认重试语义；仅 stale_context（不重试、换参重发由
-// 上层编排）与 schema_deterministic 维持特判。词表识别已收敛到产出侧
-// output-collector.classifyFailureKind（消费侧只读字段）。
+// [ADR-0122] 分诊不再绑定重试语义——任何 failureKind 均单次终态；分诊结果随
+// result 透传进 trace 节点，供消费方分类展示。
 
-describe("D5-③: failureKind 三态分诊", () => {
-  it("stale_context → 不退避不重试：runner.run 恰 1 次 + 终态 failed（V5③）", async () => {
+describe("D5-③: failureKind 分诊字段透传", () => {
+  it("stale_context → 单次终态 failed（V5③）", async () => {
     const { call, trace } = makeAgentCallAndTrace();
     const runner = createMockRunner(
       vi.fn().mockResolvedValue(makeMockResult({
@@ -499,7 +449,7 @@ describe("D5-③: failureKind 三态分诊", () => {
     expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
-  it("schema_deterministic → 不重试特判维持：runner.run 恰 1 次（V5③ 同族）", async () => {
+  it("schema_deterministic → 单次终态 failed", async () => {
     const attribution = state2Attribution();
     const { call, trace } = makeAgentCallAndTrace();
     const runner = createMockRunner(
@@ -516,161 +466,52 @@ describe("D5-③: failureKind 三态分诊", () => {
     expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
-  it("unknown → 默认退避重试：瞬态错误（模拟 provider 5xx）退避后第二次成功（V5④ 正向）", async () => {
-    vi.useFakeTimers();
-    try {
-      const { call, trace } = makeAgentCallAndTrace();
-      const runner = createMockRunner(
-        vi.fn()
-          .mockResolvedValueOnce(makeMockResult({
-            error: "provider 503 service unavailable",
-            failureKind: "unknown",
-          }))
-          .mockResolvedValueOnce(makeMockResult()),
-      );
-      const budget = new Budget();
+  it("unknown → 单次终态 failed（provider 5xx 等瞬态错误显式上报，不自动重试）", async () => {
+    const { call, trace } = makeAgentCallAndTrace();
+    const runner = createMockRunner(
+      vi.fn().mockResolvedValue(makeMockResult({
+        error: "provider 503 service unavailable",
+        failureKind: "unknown",
+      })),
+    );
+    const budget = new Budget();
 
-      const promise = executeAgentCall(call, runner, budget, new AbortController().signal, trace);
-      await vi.advanceTimersByTimeAsync(2000);
-      await promise;
+    await executeAgentCall(call, runner, budget, new AbortController().signal, trace);
 
-      expect(runner.run).toHaveBeenCalledTimes(2);
-      expect(call.status).toBe("done");
-      expect(call.result?.error).toBeUndefined();
-      expect(findByStep(trace, 0)?.status).toBe("completed");
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(runner.run).toHaveBeenCalledTimes(1);
+    expect(call.status).toBe("done");
+    expect(call.result?.error).toBe("provider 503 service unavailable");
+    expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
-  it("failureKind 缺省（旧链路/上游未写）→ 等同 unknown 默认退避重试（V5④ 语义守恒核心断言）", async () => {
-    vi.useFakeTimers();
-    try {
-      // 字段缺省是可重试而非「保守不重试」——反转会把一切未标注路径（瞬态 provider
-      // 错误、spawn 失败）静默丢进不重试（r1 MF4 击穿反例）
-      const { call, trace } = makeAgentCallAndTrace();
-      const runner = createMockRunner(
-        vi.fn()
-          .mockResolvedValueOnce(makeMockResult({ error: "spawn EAGAIN transient" }))
-          .mockResolvedValueOnce(makeMockResult()),
-      );
-      const budget = new Budget();
+  it("failureKind 缺省（旧链路/上游未写）→ 单次终态 failed", async () => {
+    const { call, trace } = makeAgentCallAndTrace();
+    const runner = createMockRunner(
+      vi.fn().mockResolvedValue(makeMockResult({ error: "spawn EAGAIN transient" })),
+    );
+    const budget = new Budget();
 
-      const promise = executeAgentCall(call, runner, budget, new AbortController().signal, trace);
-      await vi.advanceTimersByTimeAsync(2000);
-      await promise;
+    await executeAgentCall(call, runner, budget, new AbortController().signal, trace);
 
-      expect(runner.run).toHaveBeenCalledTimes(2);
-      expect(call.status).toBe("done");
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(runner.run).toHaveBeenCalledTimes(1);
+    expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
-  it("词表漂移失效模式：未知错误文案 → classifyFailureKind=unknown → 走退避重试（安全默认）", async () => {
-    vi.useFakeTimers();
-    try {
-      // pi 升级改写 stale 文案后，旧词表对新文案零命中——分诊降级 unknown、
-      // 保守重试（可能多耗一次调用），而不是静默漏诊挂死在不重试
-      const futurePiError = "extension runtime was superseded by a newer orchestration epoch";
-      expect(classifyFailureKind(futurePiError)).toBe("unknown");
+  it("词表漂移失效模式：未知错误文案 → classifyFailureKind=unknown → 仍单次终态（分类降级不影响执行面）", async () => {
+    // pi 升级改写 stale 文案后，旧词表对新文案零命中——分诊降级 unknown 只影响
+    // 分类展示，执行面恒为单次终态（ADR-0122）
+    const futurePiError = "extension runtime was superseded by a newer orchestration epoch";
+    expect(classifyFailureKind(futurePiError)).toBe("unknown");
 
-      const { call, trace } = makeAgentCallAndTrace();
-      const runner = createMockRunner(
-        vi.fn()
-          .mockResolvedValueOnce(makeFailedResult(futurePiError))
-          .mockResolvedValueOnce(makeMockResult()),
-      );
-      const budget = new Budget();
+    const { call, trace } = makeAgentCallAndTrace();
+    const runner = createMockRunner(
+      vi.fn().mockResolvedValue(makeFailedResult(futurePiError)),
+    );
+    const budget = new Budget();
 
-      const promise = executeAgentCall(call, runner, budget, new AbortController().signal, trace);
-      await vi.advanceTimersByTimeAsync(2000);
-      await promise;
+    await executeAgentCall(call, runner, budget, new AbortController().signal, trace);
 
-      expect(runner.run).toHaveBeenCalledTimes(2);
-      expect(call.status).toBe("done");
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-});
-
-describe("AGENT_RETRY_BACKOFF_BASE_ENV 退避基数通道", () => {
-  const ENV = "TAIJI_SUBAGENT_TEST_AGENT_RETRY_BACKOFF_BASE_MS";
-
-  afterEach(() => {
-    delete process.env[ENV];
-  });
-
-  it("合法正整数 → 激活覆盖：退避按覆盖基数计时（1ms 快速重试，fake timers 推进 1ms 即第二轮）", async () => {
-    vi.useFakeTimers();
-    try {
-      process.env[ENV] = "1";
-      const { call, trace } = makeAgentCallAndTrace();
-      const runner = createMockRunner(
-        vi.fn()
-          .mockResolvedValueOnce(makeMockResult({ error: "transient", failureKind: "unknown" }))
-          .mockResolvedValueOnce(makeMockResult()),
-      );
-      const budget = new Budget();
-
-      const promise = executeAgentCall(call, runner, budget, new AbortController().signal, trace);
-      // 覆盖基数 1 → 首次重试退避 1×2^0 = 1ms：推进 1ms 第二轮立即启动（默认基数下
-      // 此推进量不足，用例将超时——即覆盖生效的行为判据）
-      await vi.advanceTimersByTimeAsync(1);
-      await promise;
-
-      expect(runner.run).toHaveBeenCalledTimes(2);
-      expect(call.status).toBe("done");
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("非法值（非正整数）→ 不激活 + 默认基数维持：退避仍按 1000ms 计（推进 1ms 不进第二轮）", async () => {
-    vi.useFakeTimers();
-    try {
-      process.env[ENV] = "not-a-number";
-      const { call, trace } = makeAgentCallAndTrace();
-      const runner = createMockRunner(
-        vi.fn()
-          .mockResolvedValueOnce(makeMockResult({ error: "transient", failureKind: "unknown" }))
-          .mockResolvedValueOnce(makeMockResult()),
-      );
-      const budget = new Budget();
-
-      const promise = executeAgentCall(call, runner, budget, new AbortController().signal, trace);
-      await vi.advanceTimersByTimeAsync(1);
-      // 默认基数下首次退避 1000ms：1ms 内不得出现第二轮
-      expect(runner.run).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(2000);
-      await promise;
-      expect(runner.run).toHaveBeenCalledTimes(2);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("空串 → 等同未设：默认基数（resolveBackoffBaseMs 未设分支回归）", async () => {
-    vi.useFakeTimers();
-    try {
-      process.env[ENV] = "";
-      const { call, trace } = makeAgentCallAndTrace();
-      const runner = createMockRunner(
-        vi.fn()
-          .mockResolvedValueOnce(makeMockResult({ error: "transient", failureKind: "unknown" }))
-          .mockResolvedValueOnce(makeMockResult()),
-      );
-      const budget = new Budget();
-
-      const promise = executeAgentCall(call, runner, budget, new AbortController().signal, trace);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(runner.run).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(2000);
-      await promise;
-      expect(runner.run).toHaveBeenCalledTimes(2);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(runner.run).toHaveBeenCalledTimes(1);
+    expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 });

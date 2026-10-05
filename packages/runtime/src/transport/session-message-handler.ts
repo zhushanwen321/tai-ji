@@ -1115,12 +1115,16 @@ export class SessionMessageHandler {
     // 受理口径（D9⑤）：submit 同步返回（lane + 条目态），不等底层送达——内核 FIFO 无界，
     // 正常路径无拒绝态（send.rejected 退役归 u5；hook 否决发生在受理之前，不构成受理拒绝）。
     // 受理失败经 registry 侧广播 + 日志。帧经内核 onChange 单发（D4-4），先于本 reply。
+    // [G3③ pi1-disposition-chat-flow] isCommand（内核 D2 识别结果随受理回执返回，向后
+    // 兼容可选字段）：前端据此对命令条目不挂 30s 空窗计时器（U2⑤）；收尾凭据 =
+    // session.deliveryHandled 终局通知或错误回执。
     return this.ctx.reply(ws, msg.id, 'delivery.submit', {
       clientUuid: result.clientUuid,
       // 条目态映射（D5③：cancelled 不投影）。submit 返回时刻 cancelled 结构上不可达
       // （同 tick 无用户撤销动作），映射缺席走 queued 兜底而非谎报终态。
       state: frameStateOf(result.state) ?? 'queued',
       lane: frameLaneOf(result.lane),
+      ...(result.isCommand === true ? { isCommand: true } : {}),
     })
   }
 

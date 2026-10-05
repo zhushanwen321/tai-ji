@@ -1,53 +1,16 @@
 /**
- * mock-ws 单测 —— 旧三导出（mockConnect/mockSend/mockDisconnect 状态机 + ping→pong）
- * 与新 createMockPlatform（in-memory KVStorage + WebSocketLike 桩：200ms connecting→connected、
- * ping 回灌 pong、close→CLOSED）。fake timers 驱动延迟。
+ * mock-ws 单测 —— createMockPlatform（in-memory KVStorage + WebSocketLike 桩：
+ * 200ms connecting→connected、ping 回灌 pong、close→CLOSED）。fake timers 驱动延迟。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { ServerMessage } from '@taiji/shared'
 import { WS_READY_STATE } from '../../../platform/port'
-import {
-  mockConnect, mockDisconnect, mockSend, createMockPlatform,
-} from '../mock-ws'
+import { createMockPlatform } from '../mock-ws'
 
 beforeEach(() => {
   vi.useFakeTimers()
 })
 afterEach(() => {
-  mockDisconnect()
   vi.useRealTimers()
-})
-
-describe('旧导出（过渡兼容）：mockConnect / mockSend / mockDisconnect', () => {
-  it('mockConnect：connecting → 200ms 后 connected', () => {
-    const states: string[] = []
-    mockConnect((s) => states.push(s), () => {})
-    expect(states).toEqual(['connecting'])
-    vi.advanceTimersByTime(200)
-    expect(states).toEqual(['connecting', 'connected'])
-  })
-
-  it('mockSend：ping 延迟 10ms 回灌 pong，其余类型 no-op', () => {
-    const received: ServerMessage[] = []
-    mockConnect(() => {}, (m) => received.push(m))
-    mockSend({ type: 'ping', payload: {} })
-    expect(received).toHaveLength(0)
-    vi.advanceTimersByTime(10)
-    expect(received.map((m) => m.type)).toEqual(['pong'])
-    mockSend({ type: 'message.send', payload: {} } as never)
-    vi.advanceTimersByTime(100)
-    expect(received).toHaveLength(1)
-  })
-
-  it('mockDisconnect：回调置 disconnected 后清空', () => {
-    const states: string[] = []
-    mockConnect((s) => states.push(s), () => {})
-    mockDisconnect()
-    expect(states).toEqual(['connecting', 'disconnected'])
-    // 二次 disconnect：callback 已清空，无新状态
-    mockDisconnect()
-    expect(states).toHaveLength(2)
-  })
 })
 
 describe('createMockPlatform', () => {

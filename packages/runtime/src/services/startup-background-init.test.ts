@@ -15,19 +15,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { readFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { runStartupBackgroundInit, resolveReclaimConfig } from './startup-background-init.js'
+import { runStartupBackgroundInit } from './startup-background-init.js'
 import { getMigrationGate } from './session/session-lifecycle.js'
 import { getSessionsDir, getPiAgentDir } from '../infra/pi/pi-paths.js'
-import {
-  TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS,
-  TAIJI_RUNTIME_PI_RECLAIM_TICK_MS,
-  TAIJI_RUNTIME_PI_RECLAIM_VIEWED_WINDOW_MS,
-  TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS,
-  DEFAULT_PI_RECLAIM_IDLE_MS,
-  DEFAULT_PI_RECLAIM_TICK_MS,
-  DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS,
-  DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS,
-} from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import type { ExtensionService } from './extension-service.js'
 import type { ProcessManager } from '../infra/pi/process-manager.js'
@@ -237,14 +227,12 @@ describe('runStartupBackgroundInit（D8-1 后台初始化序列）', () => {
 })
 
 describe('⑨ 孤儿 pi 收殓挂载（integrity-hardening §3.4 D4a）', () => {
-  it('启动后延迟 5s 触发一次收殓，参数带本实例 dataDir、注入的清单读取函数与 runtime pid', async () => {
+  it('启动链尾立即触发一次收殓（5s 延迟窗已随 ADR-0122 退役），参数带本实例 dataDir、注入的清单读取函数与 runtime pid', async () => {
     vi.useFakeTimers()
     try {
       const { deps, readSpawnMarkers } = makeDeps()
       await runStartupBackgroundInit(deps)
-      // 串行链完成后宽限未到：不收殓（5s 给 pi stdin-EOF 自杀链留时间）
-      expect(rh.reapOrphanPiProcesses).not.toHaveBeenCalled()
-      await vi.advanceTimersByTimeAsync(5_000)
+      // 收殓已在串行链完成前 kick-off（延迟窗删除后无宽限期）
       expect(rh.reapOrphanPiProcesses).toHaveBeenCalledTimes(1)
       const arg = rh.reapOrphanPiProcesses.mock.calls[0][0]
       expect(arg.ownPid).toBe(process.pid)
@@ -262,8 +250,8 @@ describe('⑨ 孤儿 pi 收殓挂载（integrity-hardening §3.4 D4a）', () => 
       rh.reapOrphanPiProcesses.mockRejectedValueOnce(new Error('reap boom'))
       const { deps, extensionService } = makeDeps()
       await expect(runStartupBackgroundInit(deps)).resolves.toBeUndefined()
-      // advanceTimersByTimeAsync 会 flush 微任务：reject 必须已被挂载点 catch 消化
-      await vi.advanceTimersByTimeAsync(5_000)
+      // kick-off 同步链（延迟窗删除）：reject 必须已被挂载点 catch 消化
+      await vi.advanceTimersByTimeAsync(1)
       expect(rh.reapOrphanPiProcesses).toHaveBeenCalledTimes(1)
       expect(extensionService.checkAndAutoUpgrade).toHaveBeenCalled()
     } finally {
@@ -336,30 +324,6 @@ describe('⑧ sessions 残留清扫家族扩展（缓存治理 U9：退役 .mode
   })
 })
 
-describe('⑩ 空闲 pi 回收 reaper 挂载（idle-pi-reclamation D4，u3b）', () => {
-  it('传入 startIdleReaper 时在序列中被调用恰一次', async () => {
-    const { deps } = makeDeps()
-    const startIdleReaper = vi.fn()
-    await runStartupBackgroundInit({ ...deps, startIdleReaper })
-    expect(startIdleReaper).toHaveBeenCalledTimes(1)
-    expect(startIdleReaper).toHaveBeenCalledWith()
-  })
-
-  it('未传 startIdleReaper 时跳过且其余步骤不受影响（序列正常完成）', async () => {
-    const { deps, extensionService, pluginService } = makeDeps()
-    await expect(runStartupBackgroundInit(deps)).resolves.toBeUndefined()
-    expect(extensionService.migrateBuiltinExtensions).toHaveBeenCalled()
-    expect(pluginService.initialize).toHaveBeenCalled()
-  })
-
-  it('startIdleReaper 抛错被挂载点 catch 消化，不阻塞序列（fire-and-forget 形态）', async () => {
-    const { deps, pluginService } = makeDeps()
-    const startIdleReaper = vi.fn(() => { throw new Error('reaper start boom') })
-    await expect(runStartupBackgroundInit({ ...deps, startIdleReaper })).resolves.toBeUndefined()
-    expect(startIdleReaper).toHaveBeenCalledTimes(1)
-    expect(pluginService.initialize).toHaveBeenCalled()
-  })
-})
 
 describe('⑪ 产物目录保留期扫描挂载（chat-html-support §6.7 D7 回收②）', () => {
   it('传入 startArtifactRetention 时在序列中被调用恰一次', async () => {
@@ -383,90 +347,5 @@ describe('⑪ 产物目录保留期扫描挂载（chat-html-support §6.7 D7 回
     await expect(runStartupBackgroundInit({ ...deps, startArtifactRetention })).resolves.toBeUndefined()
     expect(startArtifactRetention).toHaveBeenCalledTimes(1)
     expect(pluginService.initialize).toHaveBeenCalled()
-  })
-})
-
-describe('resolveReclaimConfig（idle-pi-reclamation D4 env 覆盖解析）', () => {
-  it('env 全缺失时返回 shared 默认四旋钮', () => {
-    expect(resolveReclaimConfig({})).toEqual({
-      idleThresholdMs: DEFAULT_PI_RECLAIM_IDLE_MS,
-      tickIntervalMs: DEFAULT_PI_RECLAIM_TICK_MS,
-      viewedWindowMs: DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS,
-      pendingUiRequestMaxAgeMs: DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS,
-    })
-  })
-
-  it('合法值逐项覆盖，未覆盖项保持默认', () => {
-    const env = {
-      [TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS]: String(5 * 60 * 1000),
-      [TAIJI_RUNTIME_PI_RECLAIM_VIEWED_WINDOW_MS]: String(10 * 60 * 1000),
-    }
-    const cfg = resolveReclaimConfig(env)
-    expect(cfg.idleThresholdMs).toBe(5 * 60 * 1000)
-    expect(cfg.viewedWindowMs).toBe(10 * 60 * 1000)
-    expect(cfg.tickIntervalMs).toBe(DEFAULT_PI_RECLAIM_TICK_MS)
-    expect(cfg.pendingUiRequestMaxAgeMs).toBe(DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS)
-  })
-
-  it('v6 上界旋钮：TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS 合法值生效', () => {
-    // 3h > 默认 IDLE 2h（避免无意触发「上界 < 空闲阈」warn）
-    const cfg = resolveReclaimConfig({ [TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS]: String(3 * 60 * 60 * 1000) })
-    expect(cfg.pendingUiRequestMaxAgeMs).toBe(3 * 60 * 60 * 1000)
-  })
-
-  it('r5 联动护栏：上界 < 空闲阈值时打 warn（豁免恒不命中 = 死代码），但不 throw', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    try {
-      const cfg = resolveReclaimConfig({
-        [TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS]: String(2 * 60 * 60 * 1000),
-        [TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS]: String(60 * 60 * 1000), // 1h < 2h
-      })
-      expect(cfg.pendingUiRequestMaxAgeMs).toBe(60 * 60 * 1000)
-      expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('pending-UI-request exemption is unreachable'))).toBe(true)
-    } finally {
-      warnSpy.mockRestore()
-    }
-  })
-
-  it('r5 联动护栏对照：上界 ≥ 空闲阈值不 warn', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    try {
-      resolveReclaimConfig({
-        [TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS]: String(2 * 60 * 60 * 1000),
-        [TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS]: String(6 * 60 * 60 * 1000),
-      })
-      expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('exemption is unreachable'))).toBe(false)
-    } finally {
-      warnSpy.mockRestore()
-    }
-  })
-
-  it('v6 上界旋钮：非数字回落默认（含其余非法形态）', () => {
-    expect(resolveReclaimConfig({ [TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS]: 'abc' }).pendingUiRequestMaxAgeMs)
-      .toBe(DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS)
-    expect(resolveReclaimConfig({ [TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS]: '0' }).pendingUiRequestMaxAgeMs)
-      .toBe(DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS)
-  })
-
-  it.each([
-    ['负数', '-1000'],
-    ['零', '0'],
-    ['非数字', 'abc'],
-    ['空串', ''],
-    ['NaN 字面量', 'NaN'],
-    ['Infinity', 'Infinity'],
-  ])('非法值（%s）回落默认', (_label, raw) => {
-    const cfg = resolveReclaimConfig({ [TAIJI_RUNTIME_PI_RECLAIM_TICK_MS]: raw })
-    expect(cfg.tickIntervalMs).toBe(DEFAULT_PI_RECLAIM_TICK_MS)
-  })
-
-  it('非法值只影响自身旋钮，其余合法项正常透传', () => {
-    const cfg = resolveReclaimConfig({
-      [TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS]: 'not-a-number',
-      [TAIJI_RUNTIME_PI_RECLAIM_TICK_MS]: '60000',
-    })
-    expect(cfg.idleThresholdMs).toBe(DEFAULT_PI_RECLAIM_IDLE_MS)
-    expect(cfg.tickIntervalMs).toBe(60000)
-    expect(cfg.viewedWindowMs).toBe(DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS)
   })
 })

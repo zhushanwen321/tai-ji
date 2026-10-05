@@ -6,7 +6,7 @@
  * 背景：system prompt 的 capability 段把「对话流渲染管线的 HTML 能力边界」告知 AI。这段
  * 文案的成员集合以结构化常量承载在 extensions/taiji/system-prompt/src/index.ts
  * （CAPABILITY_INLINE_TAG_FAMILIES / CAPABILITY_PRESENTATION_ATTRS / CAPABILITY_FORBIDDEN），
- * 但**真实白名单**是 packages/renderer/src/composables/logic/markdown-sanitize.ts 的
+ * 但**真实白名单**是 packages/ui/src/features/chat/markdown-sanitize.ts 的（D10 渲染链下沉迁入 ui 包）
  * ALLOWED_TAGS / ALLOWED_ATTR。两侧是跨包双份手工维护——渲染白名单改了而清单忘跟（或反之）
  * 就是 agent 被教会的能力与实际行为漂移。本守卫在提交期做**源文件字面量集合对拍**（零散文
  * 解析，跨包不可 import 不是豁免理由——u-artifacts 的公式对拍同为读源文件文本形态）：
@@ -37,7 +37,7 @@ import { fail, ok, isFailed, guardExit, reportSetCompare, setDiff } from './lib/
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SYSTEM_PROMPT_SRC = join(ROOT, 'extensions', 'taiji', 'system-prompt', 'src', 'index.ts')
-const SANITIZE_SRC = join(ROOT, 'packages', 'renderer', 'src', 'composables', 'logic', 'markdown-sanitize.ts')
+const SANITIZE_SRC = join(ROOT, 'packages', 'ui', 'src', 'features', 'chat', 'markdown-sanitize.ts')
 
 // ── 纯函数（--self-test 覆盖）────────────────────────────────────────
 

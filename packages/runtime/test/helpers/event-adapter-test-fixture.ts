@@ -29,7 +29,6 @@ export interface EventAdapterOptions {
   cwd?: string
   fileChangeDiff?: IFileChangeDiff
   onExtensionUIRequest?: (requestId: string, sessionId: string, method: string) => void
-  onBridgeUIRequest?: (requestId: string, sessionId: string, method: string, data: Record<string, unknown>) => void
   onStatusSetUpdate?: (payload: { sessionId: string; key: string; text: string }) => void
   onContextUpdate?: (sessionId: string, data: { inputTokens: number; totalTokens: number }) => void
   /** W3：pi turn_end 单 turn 用量到达（turn 级副作用触发点）。 */
@@ -55,7 +54,6 @@ export function createEventAdapter(
     send,
     fileChangeDiff: options?.fileChangeDiff,
     onExtensionUIRequest: options?.onExtensionUIRequest,
-    onBridgeUIRequest: options?.onBridgeUIRequest,
     onStatusSetUpdate: options?.onStatusSetUpdate,
     onContextUpdate: options?.onContextUpdate,
     onTurnUsage: options?.onTurnUsage,

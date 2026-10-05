@@ -226,6 +226,81 @@ describe('renderOutline', () => {
     // totalEntries 近似（leaf+branch+orphan）不含 session header（segmentTurns 规则1 跳过）
     expect(result.stats.totalEntries).toBeGreaterThan(0)
   })
+
+  // ---- D9② 占位行折叠：纯记录条目 turn 不产 outline 行、不占轮次 ----
+
+  function recEntry(id: string, type: string): Entry {
+    // pi 1.0 纯记录条目形态（usage/session_info/model_change 等，无 message 字段）
+    return { type, id, parentId: null }
+  }
+
+  function sysEntry(id: string): Entry {
+    // pi 1.0 system 消息（role=system，工具集变更高频追加）——非对话轴，随折叠
+    return { type: 'message', id, parentId: null, message: { role: 'system', content: 'sys' } }
+  }
+
+  it('9. D9② 纯记录条目 turn 折叠：不产行、totalTurns 只数对话轮，对话 turn 的 T 序号保留原 index', () => {
+    const turns = [
+      turn(0, [recEntry('MC', 'model_change'), recEntry('TL', 'thinking_level_change')]),
+      turn(1, [uEntry('U1', 'first question')], { userEntry: uEntry('U1', 'first question') }),
+      turn(2, [recEntry('US', 'usage')]),
+      turn(3, [uEntry('U2', 'second question')], { userEntry: uEntry('U2', 'second question') }),
+    ]
+    const result = renderOutline(turns, emptyTree(), { budget: 2000 })
+
+    // 记录 turn（0/2）折叠：行只剩两个对话 turn
+    expect(result.turns).toHaveLength(2)
+    expect(result.lines).toHaveLength(2)
+    expect(result.stats.totalTurns).toBe(2)
+    // T 序号 = 原 turn.index（expand/detail 的入口地址稳定，折叠不重编号）
+    expect(result.turns.map((b) => b.index)).toEqual([1, 3])
+    // 字节/条目统计保持全量口径（折叠是展示层行为，不丢数据面）：2+1+1+1 = 5
+    expect(result.stats.totalEntries).toBe(5)
+  })
+
+  it('10. D9② system 消息与 custom 审计条目同折叠；custom_message 参与对话流保留', () => {
+    const turns = [
+      turn(0, [sysEntry('S1'), recEntry('C1', 'custom')]),
+      turn(1, [uEntry('U1', 'q')], { userEntry: uEntry('U1', 'q') }),
+    ]
+    const result = renderOutline(turns, emptyTree(), { budget: 2000 })
+    expect(result.turns).toHaveLength(1)
+    expect(result.stats.totalTurns).toBe(1)
+
+    const cm: Entry = { type: 'custom_message', id: 'CM', parentId: null, customType: 'plan-context', content: 'prompt' }
+    const withCm = renderOutline([turn(0, [cm]), turn(1, [uEntry('U1', 'q')], { userEntry: uEntry('U1', 'q') })], emptyTree(), { budget: 2000 })
+    expect(withCm.turns).toHaveLength(2)
+  })
+
+  it('11. D9② entry 粒度同谓词：纯记录条目不产行，entryIdx 只数对话条目', () => {
+    const turns = [
+      turn(0, [recEntry('MC', 'model_change'), uEntry('U0', 'a')], { userEntry: uEntry('U0', 'a') }),
+      turn(1, [recEntry('US', 'usage')]),
+    ]
+    const result = renderOutline(turns, emptyTree(), { granularity: 'entry', budget: 2000 })
+    expect(result.turns).toHaveLength(1)
+    expect(result.turns[0]?.userBrief).toBe('a')
+  })
+
+  it('12. D9② branch_summary 归纯记录折叠：前置 turn 成 turn 不产行（pi 1.0 纯记录类）', () => {
+    // pi 1.0 dist branchWithSummary 落盘形态：{type:'branch_summary', id, parentId, fromId,
+    // summary, details, usage, fromHook}，无 message 字段。归类 = 纯记录（分叉操作痕迹，
+    // 非当前路径对话内容；taiji 无消息编辑入口不产生该形态）
+    const bs: Entry = { type: 'branch_summary', id: 'BS', parentId: null, summary: 'original path digest' }
+    const turns = [
+      turn(0, [bs]),
+      turn(1, [uEntry('U1', 'new branch question')], { userEntry: uEntry('U1', 'new branch question') }),
+    ]
+    const result = renderOutline(turns, emptyTree(), { budget: 2000 })
+    // 折叠：前置 turn 不产行，outline 只剩新路径对话 turn
+    expect(result.turns).toHaveLength(1)
+    expect(result.lines).toHaveLength(1)
+    expect(result.stats.totalTurns).toBe(1)
+    // T 序号保留原 turn.index（expand/detail 入口地址稳定）
+    expect(result.turns.map((b) => b.index)).toEqual([1])
+    // 字节/条目统计保持全量口径：BS + U1 = 2
+    expect(result.stats.totalEntries).toBe(2)
+  })
 })
 
 describe('renderExpand', () => {

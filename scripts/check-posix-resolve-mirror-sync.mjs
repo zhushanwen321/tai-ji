@@ -7,7 +7,7 @@
  * 的纯函数实现——renderer 运行时无 node:path）有三份逐字同款实现，跨包不可 import
  * （ui→renderer 依赖禁令）：
  *   ① ui html-preview-path.ts 的 resolvePosixPath（html-preview 内联容器 src/href 解析）；
- *   ② renderer markdown-sanitize.ts 的 resolveResourcePath（相对资源 img src 重写，D4）；
+ *   ② ui markdown-sanitize.ts 的 resolveResourcePath（相对资源 img src 重写，D4；D10 渲染链下沉后三方同域 ui 包内——镜像形态与对拍纪律不变）
  *   ③ ui markdown-links.ts 的 resolveHrefPath（④路相对链接 href resolve）。
  * 任一份漂移 = 两侧对同一相对路径解析出不同绝对路径（iframe src 与 markdown 链接点击
  * 落点不一致，越界收口行为分叉）。三份仅注释纪律同步无机检同族先例（产物目录公式、
@@ -39,7 +39,7 @@ import { fail, ok, isFailed, guardExit, extractFunctionBlock } from './lib/guard
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const UI_HTML_PREVIEW_PATH_SRC = join(ROOT, 'packages', 'ui', 'src', 'features', 'chat', 'html-preview-path.ts')
-const SANITIZE_SRC = join(ROOT, 'packages', 'renderer', 'src', 'composables', 'logic', 'markdown-sanitize.ts')
+const SANITIZE_SRC = join(ROOT, 'packages', 'ui', 'src', 'features', 'chat', 'markdown-sanitize.ts')
 const UI_MARKDOWN_LINKS_SRC = join(ROOT, 'packages', 'ui', 'src', 'features', 'chat', 'markdown-links.ts')
 
 /** 函数体截取锚点（含声明前缀，避免匹配到调用点 / 注释提及）。 */

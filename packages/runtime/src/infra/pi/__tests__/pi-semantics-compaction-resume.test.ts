@@ -55,7 +55,7 @@ describe.skipIf(!PI_DIST || !AGENT_CORE_DIST)(
 
     it('compact() 第一步 await this.abort() 先于 compaction_start{manual} emit；JSDoc never retries 原文在场', () => {
       const win = methodWindow(SESSION_SRC, 'async compact(customInstructions) {')
-      expect(win, 'PS-61 漂移：compact() 方法消失/改签名——复核 PS-61 锚 dist/core/agent-session.js:1468').not.toBe('')
+      expect(win, 'PS-61 漂移：compact() 方法消失/改签名——复核 PS-61 锚 dist/core/agent-session.js:2132').not.toBe('')
 
       const abortIdx = win.indexOf('await this.abort();')
       expect(
@@ -65,7 +65,7 @@ describe.skipIf(!PI_DIST || !AGENT_CORE_DIST)(
       const startIdx = win.indexOf('this._emit({ type: "compaction_start", reason: "manual" });')
       expect(
         startIdx,
-        'PS-61/PS-62 漂移：manual compaction_start emit 改形——复核 PS-62 锚 dist/core/agent-session.js:1471',
+        'PS-61/PS-62 漂移：manual compaction_start emit 改形——复核 PS-62 锚 dist/core/agent-session.js:2135',
       ).toBeGreaterThanOrEqual(0)
       expect(
         abortIdx < startIdx,
@@ -86,7 +86,7 @@ describe.skipIf(!PI_DIST)(
     it('manual 路径 start/end 恒字面量 manual（end 成功/aborted 两处）', () => {
       expect(
         count(SESSION_SRC, 'this._emit({ type: "compaction_start", reason: "manual" });'),
-        'PS-62 漂移：manual compaction_start 字面量 emit 消失/改形/复制——复核 PS-62 锚 dist/core/agent-session.js:1471',
+        'PS-62 漂移：manual compaction_start 字面量 emit 消失/改形/复制——复核 PS-62 锚 dist/core/agent-session.js:2135',
       ).toBe(1)
       expect(
         countRe(SESSION_SRC, /type: "compaction_end",\s*\n\s*reason: "manual",/g),
@@ -97,7 +97,7 @@ describe.skipIf(!PI_DIST)(
     it('auto 路径 reason 经 _runAutoCompaction 变量透传，词表仅 threshold/overflow 两值', () => {
       expect(
         SESSION_SRC.includes('async _runAutoCompaction(reason, willRetry)'),
-        'PS-62 漂移：_runAutoCompaction 签名/参数改形——reason 透传链断锚，复核 PS-62 锚 dist/core/agent-session.js:1733',
+        'PS-62 漂移：_runAutoCompaction 签名/参数改形——reason 透传链断锚，复核 PS-62 锚 dist/core/agent-session.js:2423',
       ).toBe(true)
       expect(
         count(SESSION_SRC, 'this._emit({ type: "compaction_start", reason });'),
@@ -107,10 +107,11 @@ describe.skipIf(!PI_DIST)(
         count(SESSION_SRC, 'this._emit({ type: "compaction_end", reason,'),
         'PS-62 漂移：auto compaction_end 不再透传 reason 变量——词表锚改形，复核 PS-62 锚 :1844',
       ).toBe(1)
+      // pi 1.0.0 第三处：_checkCompaction post-run 复查段超限即 threshold 压缩
       expect(
         count(SESSION_SRC, '_runAutoCompaction("threshold"'),
-        'PS-62 漂移：threshold 调用点数量变化（预期 2）——auto 词表构成变化，复审 PS-62',
-      ).toBe(2)
+        'PS-62 漂移：threshold 调用点数量变化（预期 3：_compactBeforeNextAssistantResponse / prepareRequest 重试 / _checkCompaction post-run 复查）——auto 词表构成变化，复审 PS-62',
+      ).toBe(3)
       expect(
         count(SESSION_SRC, '_runAutoCompaction("overflow"'),
         'PS-62 漂移：overflow 调用点数量变化（预期 2）——auto 词表构成变化，复审 PS-62',
@@ -124,7 +125,7 @@ describe.skipIf(!PI_DIST)(
   () => {
     it('_tryExecuteExtensionCommand 以首个空格切分且 args 为原样余串（无 trim/引号解析）', () => {
       const win = methodWindow(SESSION_SRC, 'async _tryExecuteExtensionCommand(text) {')
-      expect(win, 'PS-63 漂移：_tryExecuteExtensionCommand 消失/改签名——复核 PS-63 锚 dist/core/agent-session.js:956-958').not.toBe('')
+      expect(win, 'PS-63 漂移：_tryExecuteExtensionCommand 消失/改签名——复核 PS-63 锚 dist/core/agent-session.js:1600-1602').not.toBe('')
 
       const splitIdx = win.indexOf('const spaceIndex = text.indexOf(" ");')
       expect(

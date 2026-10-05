@@ -1,38 +1,30 @@
 /**
- * u8-pi-respawn 组装级测试（crash-resilience §3.3 D7）：真实 SessionService 构造器接线
- * （onSessionExit 链尾部 schedule / removeSessionEntry 汇聚点 cancel / ensureActive join）。
+ * u8 组装级测试（崩溃上报 + 惰性恢复 join；发布判别 msg-pipeline-debloat D3）：真实
+ * SessionService 构造器接线（onSessionExit 链尾部 crashExit / removeSessionEntry 汇聚点
+ * cancel / ensureActive join）。
  *
- * 覆盖验收必测断言（组装级，编排器本体行为见 pi-respawn.test.ts）：
- * - ①集成：非主动退出（triggerExit）→ 5s 后自动 restore 恰好一次；
- * - ②反向（A7）：forceQuit 不触发自动恢复——事实核验（只读确认）：forceQuitSession 在
- *   message-dispatcher.ts:470-490 手工编排（detach → destroy → persist stopped → 广播
- *   exited → removeEntry），不经 pm.onSessionExit 链；真实 kill 路径的 exit 事件被双层
- *   守卫拦截（rpc-client.kill 置 _killing 跳过 exitCallback + process-manager 按
+ * [ADR-0122 退役登记] 原「5s 延迟自动恢复 + 熔断 + restoreFailed 推送」机制的组装级
+ * 用例（①/③c/⑨/D3-①b/①c/⑥ 的 timer 维度）随机制退役。现覆盖：
+ * - 崩溃上报集成：非主动退出（triggerExit）→ crashExit 显式上报（不做自动 restore）；
+ * - ②反向（A7）：forceQuit 不触发崩溃上报——事实核验（只读确认）：forceQuitSession 在
+ *   message-dispatcher 手工编排，不经 pm.onSessionExit 链；真实 kill 路径的 exit 事件被
+ *   双层守卫拦截（rpc-client.kill 置 _killing 跳过 exitCallback + process-manager 按
  *   clientToId 无条目拦截 intentional destroy）——本 mock 的 destroySession 与真实行为
- *   同构（仅删 Map 不触发 exitCb），故 forceQuit 后推进时间不可能产生 restore；
+ *   同构（仅删 Map 不触发 exitCb），故 forceQuit 后不可能产生崩溃上报；
  * - ③join：恢复窗口内并发 ensureActive 返回同一 in-flight Promise、restore 内核只
- *   spawn 一个（pm.createSession 进程数断言）、两个调用方都在恢复完成后拿到同一 client
- *   （③c = timer 已触发的自动恢复进行中变体——自动恢复经 ensureRestored 登记 in-flight，
- *   ensureActive join 之，双向构造性成立，D7-③）；
- * - ⑧session 删除取消：removeSessionEntry 汇聚点（lifecycle.delete 主动删的汇聚路径）
- *   取消 pending timer；
- * - ⑨restored/restoreFailed 消息形态：messageBus.publish 的 payload 必带 sessionId
- *   （仓规规则 7）。
- * - shutdown 入口：cancelAllPendingRespawns 清 pending（index.ts shutdown 序列接线，
- *   先于 server.stop→destroyAll 的顺序由组合根代码保证，编排器层 timer 清理断言见
- *   pi-respawn.test.ts ⑦）。
- * - [D3 msg-pipeline-debloat] 发布判别四入口矩阵（组装级）：session.restored 唯一发布点 =
- *   restoreSession facade 成功尾部三合一出口（onRestoreSuccess）；自动首试成功（信号②）/
- *   fire 前惰性抢占（信号①）/ fire 后 join（信号②）/ 跨 fire 子态不发布（D7-41 行为
- *   基线，收口归 message_start gate）/ 熔断后手动（信号③）发布 / 无崩溃上下文 restore
- *  （普通懒 spawn / startup-reattach 形态）静默不发布。restoreSession 替身一律按生产
+ *   spawn 一个（pm.createSession 进程数断言）、两个调用方都在恢复完成后拿到同一 client；
+ * - ③b join 失败传导；
+ * - ⑧session 删除核销：removeSessionEntry 汇聚点核销崩溃登记（删除后的恢复不发布）；
+ * - shutdown 入口：cancelAllPendingRespawns 核销（组合根 shutdown 序列接线）；
+ * - [D3] 发布判别：崩溃后恢复成功 → 恰好一条 session.restored；无崩溃上下文的 restore
+ *   （普通懒 spawn / startup-reattach 形态）静默不发布。restoreSession 替身一律按生产
  *   契约在成功尾部调用 service.onRestoreSuccess（spy 掉 lifecycle FS 链后出口须补齐）。
  *
  * restore 内核以 spyOn(service, 'restoreSession') 模拟（不触碰 lifecycle spawn 链 /
  * 真实文件系统 / 真实 ~/.taiji——fs 红线；spawn 进程数断言经 mock impl 内对
  * pm.createSession 的一次调用表达）。
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { tmpdir } from 'node:os'
 import type { IMessageBroker, IEventAdapter, IExtensionService } from '../src/interfaces.js'
 import type { IMessageBus } from '../src/services/message-bus/message-bus.js'
@@ -42,7 +34,6 @@ import type { ISessionStore } from '../src/services/ports/session.js'
 import type { IGitInfoReader } from '../src/services/ports/git-info.js'
 import type { ServerMessage } from '@taiji/shared'
 import { SessionService } from '../src/services/session/session-service.js'
-import { RESPAWN_DELAY_MS } from '../src/services/session/pi-respawn.js'
 
 type MockClient = IPiEngine & { exited: boolean; kill: ReturnType<typeof vi.fn> }
 
@@ -68,9 +59,8 @@ function makeMockClient(overrides: Partial<Record<string, unknown>> = {}): MockC
     onExit: vi.fn(),
     kill: vi.fn().mockResolvedValue(undefined),
     start: vi.fn().mockResolvedValue(undefined),
-    // touchActivity：sendPrompt 入口同步 touch（idle-pi-reclamation D6-1）经 pm.getClient
-    // 到达 fake client——fake 须补齐该接口成员（IPiEngine 结构要求）
-    touchActivity: vi.fn(),
+    // lastActivityAt：活动时钟观测面（IPiEngine 结构要求）
+    lastActivityAt: 0,
     exited: false,
     ...overrides,
   }
@@ -192,7 +182,7 @@ function createSetup(): Setup {
         rejectFn = (e: unknown) => rej(e)
       })
       await pm.createSession(id, tmpdir())
-      // [D3] 被替身替换的 facade 跳过 lifecycle 链，但成功尾部三合一出口必须按生产契约
+      // [D3] 被替身替换的 facade 跳过 lifecycle 链，但成功尾部出口必须按生产契约
       // 补齐——session.restored 的唯一发布点在 facade 尾部（onRestoreSuccess）。
       service.onRestoreSuccess(id)
       return { id } as never
@@ -210,8 +200,7 @@ function createSetup(): Setup {
     clientMap,
     createSessionSpy,
     // 真实 process-manager 的 onExit 在回调上层前先清 processes/clientToId 条目
-    //（process-manager.ts:174-175）——triggerExit 同构模拟，否则 respawn 的 isActive
-    // 守卫读到残留 client 而错误 no-op。
+    //——triggerExit 同构模拟，否则 crashExit 的 isActive 守卫读到残留 client 而错误 no-op。
     triggerExit: (sid, code, stderr = '') => {
       clientMap.delete(sid)
       exitCb?.(sid, code, stderr)
@@ -221,7 +210,7 @@ function createSetup(): Setup {
   }
 }
 
-/** [D3] 恢复成功替身：跳过 lifecycle FS 链 + 按生产契约在成功尾部收尾三合一出口。 */
+/** [D3] 恢复成功替身：跳过 lifecycle FS 链 + 按生产契约在成功尾部收尾出口。 */
 function spyRestoreSuccessWithFacadeTail(setup: Setup, summary: Record<string, unknown> = { id: 's1' }): ReturnType<typeof vi.fn> {
   return vi.spyOn(setup.service, 'restoreSession').mockImplementation(async (id: string) => {
     setup.service.onRestoreSuccess(id)
@@ -234,56 +223,43 @@ function restoredPublishCalls(setup: Setup): Array<[string, ServerMessage]> {
   return vi.mocked(setup.messageBus.publish).mock.calls.filter(([, m]) => (m as ServerMessage).type === 'session.restored') as Array<[string, ServerMessage]>
 }
 
-describe('u8-pi-respawn 组装级（SessionService 接线，crash-resilience D7）', () => {
-  beforeEach(() => {
-    // 只 fake setTimeout/clearTimeout（恢复编排只消费这对）——SessionService 构造的
-    // BackgroundTaskService 2s 轮询 setInterval 保持真实，否则 runAllTimersAsync 会把
-    // 轮询 interval 无限推进触发 vitest 10k timers 熔断。
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-  })
+describe('u8 组装级（SessionService 接线：崩溃上报 + 惰性恢复 join）', () => {
   afterEach(() => {
-    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
-  it('①集成：非主动退出 → 5s 后自动 restore 恰好一次，facade 尾部出口推 session.restored 恰好一条（sessionId 必带 ⑨）', async () => {
+  it('崩溃上报集成：非主动退出（triggerExit）→ 崩溃显式上报，不做自动 restore；手动恢复成功后恰好一条 restored', async () => {
     const setup = createSetup()
     setup.register('s1', '/fake/s1.jsonl')
     const restoreSpy = spyRestoreSuccessWithFacadeTail(setup)
     setup.triggerExit('s1', 1, 'boom')
     // 进程退出链：session.exited 照常发布（既有行为不回归）
     expect(setup.messageBus.publish).toHaveBeenCalledWith('s1', expect.objectContaining({ type: 'session.exited' }))
-    // 5s 前不恢复
-    await vi.advanceTimersByTimeAsync(RESPAWN_DELAY_MS - 1)
+    // ADR-0122：不再自动恢复——restore 不被调用
     expect(restoreSpy).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(1)
+
+    // 用户手动恢复：facade 尾部出口发布恰好一条（崩溃登记命中）
+    await setup.service.restoreSession('s1')
     expect(restoreSpy).toHaveBeenCalledTimes(1)
-    expect(restoreSpy).toHaveBeenCalledWith('s1')
-    await vi.runAllTimersAsync()
-    // [D3] 首试成功（timer 已删 + 计数 0）：信号② attemptInFlight 命中 → 恰好一条（S3①）
     const restored = restoredPublishCalls(setup)
     expect(restored).toHaveLength(1)
     expect(restored[0][0]).toBe('s1')
     expect(restored[0][1].payload).toMatchObject({ sessionId: 's1', attempts: 1 })
-    // 且只一次
-    await vi.runAllTimersAsync()
-    expect(restoreSpy).toHaveBeenCalledTimes(1)
-    expect(restoredPublishCalls(setup)).toHaveLength(1)
   })
 
-  it('②反向（A7）：forceQuit 不触发自动恢复（forceQuitSession 手工编排不经 onSessionExit 链）', async () => {
+  it('②反向（A7）：forceQuit 不触发崩溃上报（forceQuitSession 手工编排不经 onSessionExit 链）', async () => {
     const setup = createSetup()
     const restoreSpy = vi.spyOn(setup.service, 'restoreSession').mockResolvedValue({ id: 's1' } as never)
     // 挂一个活跃 client（不注册 lifecycle Map——真实 forceQuit 场景 session 在 Map，但
-    // 本断言的核心是 forceQuit 链路自身不产生 exit 通知 / 不调 schedule）
+    // 本断言的核心是 forceQuit 链路自身不产生 exit 通知 / 不调 crashExit）
     setup.clientMap.set('s1', makeMockClient())
     await setup.service.forceQuit('s1')
     // session.exited 照常广播（用户可见的强制退出反馈）
     expect(setup.messageBus.publish).toHaveBeenCalledWith('s1', expect.objectContaining({ type: 'session.exited' }))
-    // 时间充分推进：无自动恢复、无 restored
-    await vi.runAllTimersAsync()
-    expect(restoreSpy).not.toHaveBeenCalled()
-    expect(vi.mocked(setup.messageBus.publish).mock.calls.some(([, m]) => (m as ServerMessage).type === 'session.restored')).toBe(false)
+    // 无崩溃登记：后续恢复成功不发布 restored
+    await setup.service.restoreSession('s1')
+    expect(restoreSpy).toHaveBeenCalledTimes(1)
+    expect(restoredPublishCalls(setup)).toHaveLength(0)
   })
 
   it('③join：恢复窗口内并发 ensureActive 返回同一 Promise，restore 内核只 spawn 一个 pi，完成后双方拿到同一 client', async () => {
@@ -323,135 +299,34 @@ describe('u8-pi-respawn 组装级（SessionService 接线，crash-resilience D7�
     await expect(p3).resolves.toBeDefined()
   })
 
-  it('③c timer 已触发、自动恢复进行中（spawn+attach 未完成）→ 并发 ensureActive join 同一恢复，只 spawn 一个 pi（P-respawn-join）', async () => {
-    const setup = createSetup()
-    setup.register('s9', '/fake/s9.jsonl')
-    const deferred = setup.spyRestoreWithDeferred('s9')
-    setup.triggerExit('s9', 1, 'boom')
-    // timer 触发 → 自动恢复启动，restoreSession 进行中（spawn+attach 未完成）
-    await vi.advanceTimersByTimeAsync(RESPAWN_DELAY_MS)
-    expect(deferred.spy).toHaveBeenCalledTimes(1)
-    // 恢复窗口内用户发消息 → ensureActive 查无活 client → join 自动恢复的 in-flight Promise
-    const userCall = setup.service.ensureActive('s9')
-    expect(deferred.spy).toHaveBeenCalledTimes(1)
-    let settled = false
-    void userCall.then(() => { settled = true })
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(settled).toBe(false)
-    // 自动恢复的 spawn+attach 完成 → join 方与自动恢复同时收口，进程数 = 1（无双 spawn）
-    deferred.resolve()
-    const client = await userCall
-    expect(settled).toBe(true)
-    expect(deferred.spy).toHaveBeenCalledTimes(1)
-    expect(setup.createSessionSpy).toHaveBeenCalledTimes(1)
-    expect(setup.clientMap.get('s9')).toBe(client)
-    // [D3] 矩阵「fire 后 join 子态」：信号② attemptInFlight 命中 → 恰好一条 restored
-    //（join 方经同一 Promise 收口，不重复发布）
-    const restored = restoredPublishCalls(setup)
-    expect(restored).toHaveLength(1)
-    expect(restored[0][1].payload).toMatchObject({ sessionId: 's9', attempts: 1 })
-  })
-
-  it('⑧session 删除取消：removeSessionEntry 汇聚点（lifecycle.delete 主动删的汇聚路径）取消 pending timer', async () => {
+  it('⑧session 删除核销：removeSessionEntry 汇聚点核销崩溃登记（删除后的恢复不发布 restored）', async () => {
     const setup = createSetup()
     setup.register('s1', '/fake/s1.jsonl')
-    const restoreSpy = vi.spyOn(setup.service, 'restoreSession').mockResolvedValue({ id: 's1' } as never)
+    const restoreSpy = spyRestoreSuccessWithFacadeTail(setup)
     setup.triggerExit('s1', 1, 'boom')
-    // 5s 窗口内用户删除 session（主动删经 removeSessionEntry 汇聚点）
+    // 用户删除 session（主动删经 removeSessionEntry 汇聚点）
     setup.service.removeSessionEntry('s1')
-    await vi.runAllTimersAsync()
-    expect(restoreSpy).not.toHaveBeenCalled()
-    expect(vi.mocked(setup.messageBus.publish).mock.calls.some(([, m]) => (m as ServerMessage).type === 'session.restored')).toBe(false)
+    // 恢复成功：崩溃登记已被核销，不发布 restored
+    await setup.service.restoreSession('s1')
+    expect(restoreSpy).toHaveBeenCalledTimes(1)
+    expect(restoredPublishCalls(setup)).toHaveLength(0)
   })
 
-  it('shutdown 入口：cancelAllPendingRespawns 清 pending 自动恢复（组合根 shutdown 序列消费）', async () => {
+  it('shutdown 入口：cancelAllPendingRespawns 核销崩溃登记（组合根 shutdown 序列消费）', async () => {
     const setup = createSetup()
     setup.register('s1', '/fake/s1.jsonl')
-    const restoreSpy = vi.spyOn(setup.service, 'restoreSession').mockResolvedValue({ id: 's1' } as never)
+    const restoreSpy = spyRestoreSuccessWithFacadeTail(setup)
     setup.triggerExit('s1', 1, 'boom')
     setup.service.cancelAllPendingRespawns()
-    await vi.runAllTimersAsync()
-    expect(restoreSpy).not.toHaveBeenCalled()
-  })
-
-  it('⑨失败推送形态：自动恢复失败推 session.restoreFailed（sessionId 必带），熔断后停在 willRetry=false', async () => {
-    const setup = createSetup()
-    setup.register('s1', '/fake/s1.jsonl')
-    vi.spyOn(setup.service, 'restoreSession').mockRejectedValue(new Error('attach hard-fail'))
-    setup.triggerExit('s1', 1, 'boom')
-    await vi.runAllTimersAsync()
-    const failures = vi.mocked(setup.messageBus.publish).mock.calls.filter(([, m]) => (m as ServerMessage).type === 'session.restoreFailed')
-    expect(failures).toHaveLength(2)
-    for (const [sid, msg] of failures as Array<[string, ServerMessage]>) {
-      expect(sid).toBe('s1')
-      expect(msg.payload).toMatchObject({ sessionId: 's1' })
-    }
-    expect((failures[0][1] as ServerMessage).payload).toMatchObject({ willRetry: true })
-    expect((failures[1][1] as ServerMessage).payload).toMatchObject({ willRetry: false })
-  })
-
-  // ── [D3] 发布判别四入口矩阵（组装级，msg-pipeline-debloat）──
-
-  it('D3-①b fire 前惰性抢占（信号①）：5s 窗口内 ensureActive 完成恢复 → 恰好一条 restored；timer 到点 attempt 让位不双发', async () => {
-    const setup = createSetup()
-    setup.register('s1', '/fake/s1.jsonl')
-    const deferred = setup.spyRestoreWithDeferred('s1')
-    setup.triggerExit('s1', 1, 'boom')
-    // 窗口内用户发消息 → 惰性恢复启动（pending timer 仍在册）
-    const userCall = setup.service.ensureActive('s1')
-    expect(deferred.spy).toHaveBeenCalledTimes(1)
-    deferred.resolve()
-    await userCall
-    // facade 尾部出口：pendingTimers 在册命中（信号①）→ 恰好一条
-    const restored = restoredPublishCalls(setup)
-    expect(restored).toHaveLength(1)
-    expect(restored[0][1].payload).toMatchObject({ sessionId: 's1', attempts: 1 })
-    // timer 到点：attempt 复查 isActive（createSession 已置活 client）→ 让位，无双发
-    await vi.runAllTimersAsync()
-    expect(setup.createSessionSpy).toHaveBeenCalledTimes(1)
-    expect(restoredPublishCalls(setup)).toHaveLength(1)
-  })
-
-  it('D3-①c 跨 fire 子态（D7-41 行为基线）：惰性恢复 fire 前发起、fire 后完成 → 无 restored 帧（收口归 message_start gate）', async () => {
-    const setup = createSetup()
-    setup.register('s1', '/fake/s1.jsonl')
-    const deferred = setup.spyRestoreWithDeferred('s1')
-    setup.triggerExit('s1', 1, 'boom')
-    // fire 前惰性恢复发起
-    const userCall = setup.service.ensureActive('s1')
-    // timer 到点：attempt 复查 isRestoring → 让位裸 return（early return 不置 attemptInFlight）
-    await vi.advanceTimersByTimeAsync(RESPAWN_DELAY_MS)
-    expect(deferred.spy).toHaveBeenCalledTimes(1)
-    // fire 后惰性恢复完成：timer 已删 / 标志未置 / 计数 0 → 三信号皆 miss，不发布
-    deferred.resolve()
-    await userCall
-    expect(restoredPublishCalls(setup)).toHaveLength(0)
-    // 恢复事实成立（client 可用），仅缺 restored 帧——该格收口靠保留的 useChat
-    // consumeRespawnWindowOnTurnStart（message_start gate），D7-41 登记
-    expect(setup.clientMap.get('s1')).toBeDefined()
-  })
-
-  it('D3-⑥ 熔断后手动恢复（信号③）：restoreFailed×2 熔断 → 手动 restoreSession 成功 → 恰好一条 restored（attempts=3）', async () => {
-    const setup = createSetup()
-    setup.register('s1', '/fake/s1.jsonl')
-    vi.spyOn(setup.service, 'restoreSession').mockRejectedValue(new Error('attach hard-fail'))
-    setup.triggerExit('s1', 1, 'boom')
-    await vi.runAllTimersAsync()
-    expect(restoredPublishCalls(setup)).toHaveLength(0)
-    // 用户手动「恢复会话」：改成功替身（同契约尾部出口）直调 facade
-    spyRestoreSuccessWithFacadeTail(setup, { id: 's1' })
     await setup.service.restoreSession('s1')
-    const restored = restoredPublishCalls(setup)
-    expect(restored).toHaveLength(1)
-    // attempts 语义 = 成功前连续失败次数 + 1（2 次自动失败后手动成功 = 3）
-    expect(restored[0][1].payload).toMatchObject({ sessionId: 's1', attempts: 3 })
+    expect(restoreSpy).toHaveBeenCalledTimes(1)
+    expect(restoredPublishCalls(setup)).toHaveLength(0)
   })
 
   it('D3-反向 无崩溃上下文的 restore（普通懒 spawn / startup-reattach 形态）→ 静默不发布 restored', async () => {
     const setup = createSetup()
     const restoreSpy = spyRestoreSuccessWithFacadeTail(setup, { id: 's-fresh' })
-    // 从未崩溃（无 pending timer / 无 attemptInFlight / 无失败计数）的恢复入口
+    // 从未崩溃（无崩溃登记）的恢复入口
     await setup.service.restoreSession('s-fresh')
     expect(restoreSpy).toHaveBeenCalledTimes(1)
     expect(restoredPublishCalls(setup)).toHaveLength(0)

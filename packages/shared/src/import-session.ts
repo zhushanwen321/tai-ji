@@ -13,8 +13,9 @@
  *   renderer 侧 debounce 250ms）
  * - `session.import` — 执行导入（点「导入」）
  *
- * 消息类型字符串与 case 分发由 runtime transport 层（u3-rpc-wiring）登记，
- * 本文件只承载 payload/reply 的类型定义，供两端共同 import 防止裁量漂移。
+ * 消息类型字符串与 type→payload 映射登记在 shared protocol.ts（受 ReplyPayloadMap
+ * 类型约束），case 分发由 runtime transport 层 handler 登记；本文件只承载
+ * payload/reply 的类型定义，供两端共同 import 防止裁量漂移。
  *
  * ## 语义约定（非类型字段，runtime 与 renderer 共同遵守）
  *

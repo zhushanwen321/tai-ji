@@ -12,10 +12,10 @@
 - 现状：`packages/renderer/src/stores/fileTree.ts:339-344` 的 per-session detailTabs 分区持有文件内容/diff 内容本体，[data-source-registry.md](../architecture/data-source-registry.md) 无该域主表条目（§4 ⑧ 补登只覆盖 useDetailPane 技术簿记 loadTokens/pendingLoads）；对照 #36（plan 审阅态本体入主表）/ #13（trace entries）先例，持有内容本体的分区应有主表条目。同域 6 个兄弟分区（tree/expandedPaths/nodeStates/gitOverlay/dirChangeCounts/selectedPaths）共用同一口径歧义。
 - 实现要点：为 fileTree 域补主表条目（权威源 = workspace 磁盘文件经 runtime file RPC，分区即拉取缓存，detailTabs 与同域 6 分区一并登记）；或在 §4 ⑧ 显式声明该域「纯 RPC 拉取视图缓存，不设主表条目」的口径及理由。
 
-## 3. data-source-registry.md #51 写入口列缺 kill 通道类失败重建路径
+## 3. data-source-registry.md #56 写入口列缺 kill 通道类失败重建路径
 
-- 现状：#51 写入口列枚举「terminal.spawn ack 建档 + terminal.list 对账 + 关闭沿释放三路径」，缺 kill 通道类失败的镜像重建路径——`packages/renderer/src/composables/useTerminal.ts` handleRoutingError kill 分档已实装「非 unknown_terminal_id 失败 → console.warn + toast + `establishInstance(terminalId,{alive:true})` 镜像重建」（代码注释与 i18n 双语文案已登记），治理登记 SSOT 缺该子句。
-- 实现要点：#51 行写入口列补一句「kill 通道类失败 → establishInstance 原语重建镜像条目」，与 useTerminal.ts 既有代码注释同 commit 同步（行为代码已实装，本条只补登记文本）。
+- 现状：#56 写入口列枚举「terminal.spawn ack 建档 + terminal.list 对账 + 关闭沿释放三路径」，缺 kill 通道类失败的镜像重建路径——`packages/renderer/src/composables/useTerminal.ts` handleRoutingError kill 分档已实装「非 unknown_terminal_id 失败 → console.warn + toast + `establishInstance(terminalId,{alive:true})` 镜像重建」（代码注释与 i18n 双语文案已登记），治理登记 SSOT 缺该子句。
+- 实现要点：#56 行写入口列补一句「kill 通道类失败 → establishInstance 原语重建镜像条目」，与 useTerminal.ts 既有代码注释同 commit 同步（行为代码已实装，本条只补登记文本）。
 
 ## 4. AppShell.vue 懒加载重试注释「单通道」表述与 lazy-chunk-retry.ts 双要素实装矛盾
 

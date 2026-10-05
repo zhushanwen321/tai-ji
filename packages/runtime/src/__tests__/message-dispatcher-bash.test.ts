@@ -27,7 +27,6 @@ import type { IDispatcherSessionOps } from '../services/session/session-internal
 import type { IManagedSessionView } from '../services/session/types.js'
 import type { IMessageBus } from '../services/message-bus/message-bus.js'
 import type { IPiEngine, IProcessManager, PiBashResult } from '../services/ports/pi-engine.js'
-import { RpcTimeoutError } from '../utils/errors.js'
 import type { ServerMessage } from '@taiji/shared'
 import type { WorkspaceService } from '../services/workspace/workspace-service.js'
 
@@ -59,7 +58,6 @@ function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManaged
     isCompacting: false,
     isBashRunning: false,
     bashRunToken: undefined,
-    orphanBashRunning: false,
     ...overrides,
   }
 }
@@ -351,73 +349,6 @@ describe('MessageDispatcher sendBash —— 错误路径（T6, S2 对称兜底�
   })
 })
 
-describe('MessageDispatcher sendBash —— bash RPC 超时诚实终态（timeout-slow-flow-wallclock D2）', () => {
-  beforeEach(() => vi.clearAllMocks())
-
-  it('D2-1: RpcTimeoutError → 合成终态 output 换诚实文案（三步恢复指引）+ 不自动 abortBash + 置孤儿标记 + 返回回执 started', async () => {
-    const { dispatcher, abortBashFn, broadcasts, session } = makeMocks({
-      bashError: new RpcTimeoutError('bash', 3_600_000),
-    })
-    const result = await dispatcher.sendBash('s1', 'sleep 3700', false)
-
-    // 合成终态：诚实文案而非 [bash error] 技术措辞
-    const end = findBashResult(broadcasts)
-    expect(end).toBeDefined()
-    expect(end!.payload).toMatchObject({
-      sessionId: 's1',
-      command: 'sleep 3700',
-      exitCode: null,
-      cancelled: false,
-      truncated: false,
-      excludeFromContext: false,
-    })
-    expect(end!.payload.output).toContain('已停止等待')
-    expect(end!.payload.output).toContain('命令可能仍在后台运行')
-    expect(end!.payload.output).toContain('abortBash')
-    expect(end!.payload.output).toContain('重开本 session')
-    expect(end!.payload.output).toContain('先取消再发送')
-    // 旧技术措辞不再出现
-    expect(end!.payload.output).not.toContain('[bash error]')
-    // D2②：不自动 abort_bash——超时是「停止等待」不是「处决命令」
-    expect(abortBashFn).not.toHaveBeenCalled()
-    // P6 断言④：pi 侧孤儿 bash 仍在跑（诚实文案第①步承诺的 runtime 承载）
-    expect(session.orphanBashRunning).toBe(true)
-    // finally isBashRunning 复位（slot 释放，后续 bash 不被 busy 拒绝）
-    expect(session.isBashRunning).toBe(false)
-    // 回执 started：超时 = 停止等待不是处决，pi 侧孤儿仍在跑（未收口，消费方不得恢复草稿）
-    expect(result).toMatchObject({ status: 'started' })
-    expect(result.error).toContain('timed out')
-  })
-
-  it('D2-2: 文案如实反映 env 自定义超时（90s → 「90 秒」；1h → 「1 小时」）', async () => {
-    const custom = makeMocks({ bashError: new RpcTimeoutError('bash', 90_000) })
-    await custom.dispatcher.sendBash('s1', 'cmd', false)
-    expect(findBashResult(custom.broadcasts)!.payload.output).toContain('命令执行超过 90 秒')
-
-    const hour = makeMocks({ bashError: new RpcTimeoutError('bash', 3_600_000) })
-    await hour.dispatcher.sendBash('s1', 'cmd', false)
-    expect(findBashResult(hour.broadcasts)!.payload.output).toContain('命令执行超过 1 小时')
-  })
-
-  it('D2-3: 超时路径不广播 message.error 技术帧（P6 deviation：诚实气泡是唯一用户可见面，双条目并存已实证）', async () => {
-    const { dispatcher, broadcasts } = makeMocks({ bashError: new RpcTimeoutError('bash', 3_600_000) })
-    await dispatcher.sendBash('s1', 'cmd', false)
-    // 聊天流只有合成诚实终态帧，无 message.error 技术行
-    const errMsg = broadcasts.find((m) => m.type === 'message.error')
-    expect(errMsg).toBeUndefined()
-    // 诊断信息不丢失：诚实终态帧仍在（error envelope + runtime 日志承载技术细节）
-    expect(findBashResult(broadcasts)).toBeDefined()
-  })
-
-  it('D2-4: 非 RpcTimeoutError 的 transport 错误维持既有 [bash error] 文案（回归守卫）', async () => {
-    const { dispatcher, broadcasts } = makeMocks({ bashError: new Error('pi boom') })
-    await dispatcher.sendBash('s1', 'git status', false)
-    const end = findBashResult(broadcasts)
-    expect(end).toBeDefined()
-    expect(end!.payload.output).toBe('[bash error] pi boom')
-  })
-})
-
 describe('MessageDispatcher —— bash/message 双向互斥（T7 迁移：内核持有承接，u2）', () => {
   beforeEach(() => vi.clearAllMocks())
 
@@ -471,31 +402,7 @@ describe('MessageDispatcher abortBash（T8 + P6 断言④孤儿形态）', () =>
     expect(session.isBashRunning).toBe(false)
   })
 
-  it('D2-6: 超时孤儿形态 abortBash → abort_bash 发出 + 孤儿标记清除 + sent:true（P6 断言④复验）', async () => {
-    // 超时链路：sendBash 超时 → isBashRunning 复位 + 孤儿标记置位（pi 侧 sleep 仍在跑）
-    const { dispatcher, abortBashFn, broadcasts, session } = makeMocks({
-      bashError: new RpcTimeoutError('bash', 3_600_000),
-    })
-    await dispatcher.sendBash('s1', 'sleep 30', false)
-    expect(session.isBashRunning).toBe(false)
-    expect(session.orphanBashRunning).toBe(true)
-
-    // 用户点取消：守卫因孤儿标记放行 → abort_bash 真实发出（旧守卫在此短路）
-    const result = await dispatcher.abortBash('s1')
-
-    expect(abortBashFn).toHaveBeenCalledTimes(1)
-    // pi 确认取消 → 孤儿标记清除 + sent:true（handler 回 aborted 合理）
-    expect(session.orphanBashRunning).toBe(false)
-    expect(result).toEqual({ sent: true })
-    // 兜底 bashAborted 独立帧广播（前端 executingBash 幂等清态，msg-pipeline-debloat D4-3）。
-    // broadcasts 含一条 bashResult（超时合成终态 cancelled:false）+ 一条 bashAborted（abort 兜底）。
-    expect(findBashResult(broadcasts)!.payload.cancelled).toBe(false)
-    const aborted = findBashAborted(broadcasts)
-    expect(aborted).toBeDefined()
-    expect(aborted!.payload).toMatchObject({ sessionId: 's1' })
-  })
-
-  it('D2-7: 无 bash 且无孤儿 → 守卫短路 { sent:false } + 不调 client.abortBash（回执真实化：不得回 aborted）', async () => {
+  it('T8c: 无 bash 在跑 → 守卫短路 { sent:false } + 不调 client.abortBash（回执真实化：不得回 aborted）', async () => {
     const { dispatcher, abortBashFn, broadcasts, session } = makeMocks({})
 
     const result = await dispatcher.abortBash('s1')
@@ -507,20 +414,6 @@ describe('MessageDispatcher abortBash（T8 + P6 断言④孤儿形态）', () =>
     expect(session.isBashRunning).toBe(false)
   })
 
-  it('D2-8: 孤儿形态 abort_bash 失败 → sent:false + 孤儿标记保留（bash 状态未知，误清比残留更不诚实）', async () => {
-    // 超时置孤儿 → abort_bash RPC 抛错（pi 卡死形态）
-    const { dispatcher, session } = makeMocks({
-      bashError: new RpcTimeoutError('bash', 3_600_000),
-      abortBashError: new Error('pi unresponsive'),
-    })
-    await dispatcher.sendBash('s1', 'sleep 30', false)
-    expect(session.orphanBashRunning).toBe(true)
-
-    await expect(dispatcher.abortBash('s1')).resolves.toEqual({ sent: false })
-
-    // 标记保留：下次 abortBash 再发一次幂等 abort_bash，比误清（谎称无孤儿）更诚实
-    expect(session.orphanBashRunning).toBe(true)
-  })
 })
 
 describe('MessageDispatcher sendBash 空命令（D4-3 哨兵不变式守卫删除）', () => {

@@ -1,5 +1,5 @@
 /**
- * Pending 请求映射 —— 命令 id（crypto.randomUUID）→ Promise。
+ * Pending 请求映射 —— 命令 id（randomUuid）→ Promise。
  *
  * 依赖方向：无下游（被 api/domains 调用）。
  *
@@ -10,6 +10,7 @@
  * TransportPorts.pending 仅作 core 内部测试注入 seam（见 route-inbound.ts）。
  */
 import type { ServerMessage } from '@taiji/shared'
+import { randomUuid } from '../../utils/random-uuid'
 
 /** 注册中的 pending 请求 */
 export interface PendingRequest<T = unknown> {
@@ -94,10 +95,11 @@ function sweepExpired(): void {
   armSweepTimer()
 }
 
-/** 生成新命令 id（crypto.randomUUID）。命名避开泛化 create（Gate-1.5 duplicate_exports：
+/** 生成新命令 id（randomUuid：secure context 缺失时走 v4 fallback，见 utils/random-uuid）。
+ *  命名避开泛化 create（Gate-1.5 duplicate_exports：
  *  与 api/domains/session.ts 的 session.create RPC 同名异义，消费方仅 request.ts）。 */
 export function createCommandId(): string {
-  return crypto.randomUUID()
+  return randomUuid()
 }
 
 /**

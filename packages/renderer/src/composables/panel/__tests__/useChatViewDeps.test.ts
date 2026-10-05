@@ -36,15 +36,15 @@ vi.mock('@/lib/ipc', () => ({
   localFileRead: (...args: unknown[]) => mockLocalFileRead(...(args as [string])),
 }))
 
-vi.mock('@/composables/logic/markdown', () => ({
+vi.mock('@taiji/ui/features/chat/markdown', () => ({
   renderMarkdownSegments: (...args: unknown[]) => mockRenderMarkdownSegments(...(args as [string, unknown])),
 }))
-vi.mock('@/composables/logic/markdown-incremental', () => ({
+vi.mock('@taiji/ui/features/chat/markdown-incremental', () => ({
   createIncrementalRenderCache: () => ({ boundary: 0, prefixText: '', prefixSegments: [], nextSegId: 0 }),
   renderIncremental: (...args: unknown[]) => mockRenderIncremental(...(args as [string, unknown, unknown, unknown])),
   STREAMING_FENCE_SILENCE_MS: 200,
 }))
-vi.mock('@/composables/logic/mermaid', () => ({
+vi.mock('@taiji/ui/features/chat/mermaid', () => ({
   renderMermaid: vi.fn(async () => ({ svg: '' })),
 }))
 vi.mock('@/composables/logic/messageFormat', () => ({
@@ -136,6 +136,7 @@ describe('useChatViewDeps — resourceBaseDir 传值矩阵（对话流 cwd 装�
       filePaths: expect.any(Set),
       localFiles: expect.any(Set),
       resourceBaseDir: '/home/demo/project-a',
+      copyLabel: '复制',
     })
   })
 
@@ -149,6 +150,7 @@ describe('useChatViewDeps — resourceBaseDir 传值矩阵（对话流 cwd 装�
         filePaths: expect.any(Set),
         localFiles: expect.any(Set),
         resourceBaseDir: '/home/demo/project-b',
+        copyLabel: '复制',
       },
       undefined,
     )
@@ -161,6 +163,7 @@ describe('useChatViewDeps — resourceBaseDir 传值矩阵（对话流 cwd 装�
       filePaths: expect.any(Set),
       localFiles: expect.any(Set),
       resourceBaseDir: undefined,
+      copyLabel: '复制',
     })
   })
 
@@ -202,6 +205,7 @@ describe('useChatViewDeps — sessionCwdOf deps 字段 + override 传值矩阵�
       filePaths: expect.any(Set),
       localFiles: expect.any(Set),
       resourceBaseDir: '/home/demo/project-a/docs',
+      copyLabel: '复制',
     })
   })
 

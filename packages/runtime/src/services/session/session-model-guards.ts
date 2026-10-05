@@ -11,7 +11,6 @@
  * 共同的保守方向 = **fail-open**：无法判定时不误报更「确定」的码（未注入 configService /
  * listProviders 抛错 → 视为「在注册表 / 有凭据」→ 落双因文案，用户仍有可行动作）。
  */
-import { TAIJI_SESSION_ACTIVATE_TIMEOUT_MS, DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS } from '@taiji/shared'
 import { toErrorMessage } from '../../utils/errors.js'
 import type { IConfigService } from '../../interfaces.js'
 
@@ -55,17 +54,3 @@ export function providerHasCredential(configService: IConfigService | null, prov
   }
 }
 
-/**
- * 激活上界 env 解析（U2）：`TAIJI_SESSION_ACTIVATE_TIMEOUT_MS` 覆盖默认 15s；
- * 非法值（非数/NaN）回落默认；`≤0` = 不限时（逃生门，与 bash RPC 的 0=不限时同口径）。
- */
-export function resolveActivateTimeoutMs(env: Record<string, string | undefined>): number {
-  const raw = env[TAIJI_SESSION_ACTIVATE_TIMEOUT_MS]
-  if (raw === undefined) return DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS
-  const n = Number(raw)
-  if (!Number.isFinite(n)) {
-    console.warn(`[session-service] invalid ${TAIJI_SESSION_ACTIVATE_TIMEOUT_MS} value "${raw}", falling back to ${DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS}ms`)
-    return DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS
-  }
-  return n
-}

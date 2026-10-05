@@ -8,12 +8,10 @@
  * - providerHasCredential：null fail-open / provider 缺失 / apiKeySet /
  *   ambient / env_var（凭据由 pi 运行时解析，taiji 侧看不到值）/ 皆非 /
  *   抛错 fail-open（warn 有痕）
- * - resolveActivateTimeoutMs：缺省默认 / 非有限值（'abc'/'NaN'/'Infinity'）回落 /
  *   数值透传 / ≤0 不限时逃生门 / 空串现状锁定（见对应用例注释）
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS, TAIJI_SESSION_ACTIVATE_TIMEOUT_MS } from '@taiji/shared'
-import { isModelInRegistry, providerHasCredential, resolveActivateTimeoutMs } from '../session-model-guards.js'
+import { isModelInRegistry, providerHasCredential } from '../session-model-guards.js'
 import type { IConfigService } from '../../../interfaces.js'
 
 /** 被测函数消费的最小 provider 形态（ProviderInfo 的子集，避免构造无关字段）。 */
@@ -130,38 +128,5 @@ describe('providerHasCredential — 凭据齐备判定', () => {
       expect.stringContaining('credential check failed (fail-open)'),
     )
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('auth.json unreadable'))
-  })
-})
-
-describe('resolveActivateTimeoutMs — 激活上界 env 解析', () => {
-  it('env 缺键（undefined）→ DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS', () => {
-    expect(resolveActivateTimeoutMs({})).toBe(DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS)
-    // 显式 undefined（键存在但值为 undefined，process.env 形态）同缺省
-    expect(resolveActivateTimeoutMs({ [TAIJI_SESSION_ACTIVATE_TIMEOUT_MS]: undefined }))
-      .toBe(DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS)
-  })
-
-  it.each(['abc', 'NaN', 'Infinity'])('非有限值 %s → warn 回落默认', (raw) => {
-    const warn = stubWarn()
-    expect(resolveActivateTimeoutMs({ [TAIJI_SESSION_ACTIVATE_TIMEOUT_MS]: raw }))
-      .toBe(DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS)
-    expect(warn).toHaveBeenCalledTimes(1)
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`invalid ${TAIJI_SESSION_ACTIVATE_TIMEOUT_MS} value "${raw}"`))
-  })
-
-  it('数值串透传：2500 → 2500', () => {
-    expect(resolveActivateTimeoutMs({ [TAIJI_SESSION_ACTIVATE_TIMEOUT_MS]: '2500' })).toBe(2500)
-  })
-
-  it("'0' → 0（≤0 = 不限时逃生门，与 bash RPC 的 0=不限时同口径）", () => {
-    expect(resolveActivateTimeoutMs({ [TAIJI_SESSION_ACTIVATE_TIMEOUT_MS]: '0' })).toBe(0)
-  })
-
-  it("''（空串）→ 0：Number('') === 0 走透传腿，现状锁定为不限时", () => {
-    // 现状锁定用例：空串 env（如 `TAIJI_SESSION_ACTIVATE_TIMEOUT_MS= pi ...`）经
-    // Number('') === 0 透传为 0=不限时，而非回落默认——与源码注释「非法值回落默认」
-    // 的直觉相悖。待 business-logic 裁决空串是否应归入非法值回落；本用例只锁定
-    // 现状，不改实现。
-    expect(resolveActivateTimeoutMs({ [TAIJI_SESSION_ACTIVATE_TIMEOUT_MS]: '' })).toBe(0)
   })
 })

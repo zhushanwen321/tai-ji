@@ -5,7 +5,7 @@
  *   ✗ 不调 plugin hook（onBeforeToolCall/onAfterToolResult）
  *   ✗ 不做 file_changes baseline diff（snapshotGitStatus/diffSnapshots）
  *   ✗ 不回写 session 状态（context.update / thinkingLevel 缓存）
- *   ✗ 不路由 status/bridge/extension-ui 到 server
+ *   ✗ 不路由 status/extension-ui 到 server
  *   ✗ 不持有可变态（currentMessageId/writeContents/diffChain 帧序态全在 interpreter）
  *   ✓ 只产出结构化中间事件（PiTranslatedEvent[]），交由 service 层 EventInterpreter 编排。
  *
@@ -32,12 +32,14 @@
  */
 import type { ServerMessage, ServerMessageType, ExtensionInteractMethod, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
 import { EXTENSION_EVENTS, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective } from '@taiji/shared'
-import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, BRIDGE_MARKER, BRIDGE_METHODS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, SCHEDULE_CREATE_MARKER, PLAN_REVIEW_MARKER, UI_FORM_MARKER, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport, isScheduleDraft, isFormQuestion } from '@zhushanwen/extension-protocol'
-import type { SessionManagerAction, BridgeRequest } from '@zhushanwen/extension-protocol'
+import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, SCHEDULE_CREATE_MARKER, PLAN_REVIEW_MARKER, UI_FORM_MARKER, SUBAGENT_JOURNAL_MARKER, JOURNAL_REPORT_ACK, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport, isScheduleDraft, isFormQuestion, isSubagentJournalReport } from '@zhushanwen/extension-protocol'
+import type { SessionManagerAction } from '@zhushanwen/extension-protocol'
 import type { PiEventListener } from '../../services/ports/pi-engine.js'
 import type { PiTranslatedEvent } from '../../services/session/types.js'
 // [u7b D5 例外] 在途镜像单例：marker 旁路写、u7c 滚动重启判定读（见文件头例外登记）
 import { inflightMirror } from '../../services/session/inflight-mirror.js'
+// [event-push-channel] journal 事件报告路由单例：marker 旁路送达派生视图（同款 module 单例形态）
+import { routeJournalReport } from '../../services/session/journal-report-router.js'
 import { randomUUID } from 'node:crypto'
 import { stripAnsi, normalizePiToolResult } from './normalize-tool-result.js'
 import type {
@@ -93,8 +95,8 @@ const STOP_REASON_MAP: Record<string, string> = {
  * Must stay in sync with ExtensionInteractMethod SSOT (shared/extension.ts).
  *
  * notify 不在此列——它是 fire-and-forget（pi rpc-mode.ts notify 发后不等回复），
- * 走独立 extension.notify WS 帧 + 前端 toast 渲染（非阻塞）。
- * setStatus/setWidget/set_editor_text/bridge:* 也不在此列——它们走独立分支，不产 ui_request 帧。
+ * 走独立 extension:notify WS 帧 + 前端 toast 渲染（非阻塞）。
+ * setStatus/setWidget/set_editor_text 也不在此列——它们走独立分支，不产 dialog 帧。
  *
  * 用 `as const satisfies readonly ExtensionInteractMethod[]` 实现编译期穷举检查：
  * ExtensionInteractMethod 扩展新方法时，若此数组遗漏，tsc 报错（而非静默 noop 丢弃）。
@@ -102,6 +104,31 @@ const STOP_REASON_MAP: Record<string, string> = {
 const INTERACTIVE_UI_METHODS = new Set(
   ['confirm', 'select', 'input', 'editor'] as const satisfies readonly ExtensionInteractMethod[]
 )
+
+/**
+ * 扩展交互表面 kind 词表（pi1-disposition-chat-flow D6①，三值）：dialog / notify / widget——
+ * 每值物化于一族 WS 消息并驱动前端路由（值值有消费点，无死值；setStatus/set_editor_text 是
+ * runtime/前端内部状态上报，不进本词表、出口与载荷维持现状——见映射表各行归类）。
+ * 词表止点：本类型是 kind 词表在仓内的唯一驻留点（合法持有点），taiji 协议侧（WS 载荷、
+ * 前端路由）不出现 kind 字段——kind 经下方帧类型映射物化为消息类型本身。
+ * 以类型联合驻留而非值常量 + typeof 派生：三出口按 pi method 分发、帧类型经
+ * EXTENSION_UI_KIND_FRAME 静态映射，词表无运行时值消费点（type-only 值常量是 lint 红形态）。
+ * [HISTORICAL] bridge 通道分支（bridgeEvent/bridgeIntercept 候选值）随 plugin-bridge 整体
+ * 退役消失（D7①），终态需求方为零，词表按实有值声明。
+ */
+type ExtensionUiKind = 'dialog' | 'notify' | 'widget'
+
+/**
+ * kind → WS 消息族主帧类型（D6②：三值各对应一族 WS 消息；消费点 = 下方三个翻译出口经本表
+ * 取帧类型——dialog 出口 extensionDialogBroadcast / notify 出口 translateNotifyRequest /
+ * widget 出口 translateSetWidgetRequest 纯文本分支。widget 族的 widgetGui 分支与 subagent-stream
+ * 内部事件是同族细化帧，不占词表值）。Record 键集穷尽：词表新值缺帧类型即编译红。
+ */
+const EXTENSION_UI_KIND_FRAME: Record<ExtensionUiKind, ServerMessageType> = {
+  dialog: EXTENSION_EVENTS.DIALOG as ServerMessageType,
+  notify: EXTENSION_EVENTS.NOTIFY as ServerMessageType,
+  widget: EXTENSION_EVENTS.WIDGET as ServerMessageType,
+}
 
 /**
  * base-tool-enhance 后台任务的 custom 消息类型（权威源：extensions/universal/
@@ -341,13 +368,15 @@ interface AgentEndRuntimeExtras {
  * 异常会从 translate() 抛出 → 经 EventAdapter.attach 的整批 try-catch 被吞 →
  * agent_end 整批事件丢失 → isGenerating 永不复位 + message.complete 不送达。
  * messages 可能在 pi 内部异常 / 会话尚未产出任何 assistant 消息时为空。
+ * willRetry 透传（U3②）：pi agent_end 恒发 willRetry（agent-session.js 实装），重试
+ * 中间帧即使 messages 为空也不是终态——硬编码 false 会把「跳过等待下一轮」的过滤①
+ * 击穿（handoff 消费 turn-end 帧的 willRetry 判定，D15.1）。
  */
-function emptyMessagesDegradedTurnEnd(sid: string): PiTranslatedEvent[] {
+function emptyMessagesDegradedTurnEnd(sid: string, willRetry: boolean): PiTranslatedEvent[] {
   console.warn(`[EventAdapter] agent_end with empty messages (degraded to turn-end{error}) sid=${sid}`)
   return [{
     kind: 'turn-end',
-    // willRetry=false：降级路径拿不到 pi 的 willRetry，按「不重试」终态处理（前端照常发声/收口）。
-    message: { type: 'message.complete', payload: { sessionId: sid, stopReason: 'error', willRetry: false } },
+    message: { type: 'message.complete', payload: { sessionId: sid, stopReason: 'error', willRetry } },
     stopReason: 'error',
   }]
 }
@@ -379,13 +408,19 @@ function extractAgentEndFields(
 
 /**
  * 提取完整文本 content：pi agent_end 携带最终 AssistantMessage，content[] 含 streaming 全部文本。
- * 透出给前端用权威源覆盖客户端累积值，消除末尾 delta 的 async 渲染竞态（如 ** 未闭合不渲染加粗）。abort 路径为空不覆盖。
+ * 透传给前端用权威源覆盖客户端累积值，消除末尾 delta 的 async 渲染竞态（如 ** 未闭合不渲染加粗）。abort 路径为空不覆盖。
  * content 在 PiAgentEndMessage 中是 unknown，此处按 pi 运行时形态（content block 数组）提取。
+ * text 非 string 的畸形 block（{type:'text',text:123}）整块过滤归 ''——不折 String(拼接)（与
+ * handoff 侧历史 S1 防御同口径；U3② 起 handoff 经本函数取最终文本，畸形归一是两消费方共用语义）。
  */
 function extractFinalContent(extras: AgentEndRuntimeExtras): string {
   return (Array.isArray(extras.content) ? extras.content : [] as unknown[])
-    .filter((c): c is { type: string; text?: string } => typeof c === 'object' && c !== null && (c as { type?: unknown }).type === 'text')
-    .map((c) => c.text ?? '')
+    .filter((c): c is { type: string; text: string } => {
+      if (typeof c !== 'object' || c === null) return false
+      const obj = c as { type?: unknown; text?: unknown }
+      return obj.type === 'text' && typeof obj.text === 'string'
+    })
+    .map((c) => c.text)
     .join('')
 }
 
@@ -410,8 +445,10 @@ function toUsageTokens(usage: PiAgentEndEvent['messages'][number]['usage']): {
 
 /** agent_end — extract stop reason, usage, responseModel, diagnostics, errorMessage, content */
 function handleAgentEnd(event: PiAgentEndEvent, sid: string): PiTranslatedEvent[] {
+  // [retry-sound] willRetry 恒读（pi 恒发；degraded 路径同样透传，U3②）
+  const willRetry = event.willRetry === true
   if (!event.messages || event.messages.length === 0) {
-    return emptyMessagesDegradedTurnEnd(sid)
+    return emptyMessagesDegradedTurnEnd(sid, willRetry)
   }
   // pi 事件是强类型契约（ADR-0037）。agent_end.messages 的 usage/stopReason 由 PiAgentEndMessage
   // 覆盖（PiUsage 已镜像 pi 字段名 input/output/cacheRead/cacheWrite）。运行时扩展字段经
@@ -421,12 +458,12 @@ function handleAgentEnd(event: PiAgentEndEvent, sid: string): PiTranslatedEvent[
   const { rawReason, usage, responseModel, diagnostics, errorMessage } = extractAgentEndFields(lastMsg, extras)
   const finalContent = extractFinalContent(extras)
   const stopReason = STOP_REASON_MAP[rawReason] ?? rawReason
-  // [retry-sound] willRetry 透传（pi agent-session.ts 恒发，pi-protocol.ts PiAgentEndEvent.willRetry）：
+  // [retry-sound] willRetry 透传（pi agent-session.ts 恒发，pi-protocol.ts PiAgentEndEvent.willRetry；
+  // 读取点在函数顶——degraded 与正常路径共用，U3②）：
   // pi 每个 LLM attempt 失败都结束当次 agent loop 并发 agent_end，重试经 agent.continue() 续跑——
   // willRetry=true 表示「本次 error 是中间失败，pi 将自动重试」，turn 并未结束。前端完成提示音
   // （useCompletionNotify）据此静音中间失败：只有 willRetry=false 的终态（重试成功 / 重试用尽 /
   // 不可重试错误）才发声。其余消费方（chat 流收口/错误气泡）不读此字段，行为不变。
-  const willRetry = event.willRetry === true
   const message: ServerMessage = {
     type: 'message.complete',
     payload: {
@@ -456,7 +493,8 @@ function handleAgentEnd(event: PiAgentEndEvent, sid: string): PiTranslatedEvent[
 /**
  * turn_start — LLM 请求起算锚点（composer-genstats-ttft，设计 §3.2）。
  *
- * pi 0.84.4 实装（agent-loop.js）：每轮 LLM 请求恰发一次 turn_start——首个请求在
+ * pi 实装（agent-loop.js；语义前提登记 PS-46 / PS-47，verifiedWith 以 pi-semantics.json
+ * 为准）：每轮 LLM 请求恰发一次 turn_start——首个请求在
  * runAgentLoop / runAgentLoopContinue 入口（agent_start 后），工具循环后续轮在内层 while
  * 的 prepareNextTurn 之后 emit（原生 auto-compaction 运行在 prepareNextTurn 内、先于本
  * 事件，不含在 TTFT 窗口；工具执行亦不含——工具后下一轮 turn_start 重新起算）。
@@ -483,7 +521,7 @@ function handleTurnStart(_event: PiTurnStartEvent, sid: string): PiTranslatedEve
  * （超出 PiTurnEndMessage 声明范围，同 handleAgentEnd 的 responseModel 提取模式——pi AgentMessage
  * 实际形态比声明的 union 更宽），用 as 提取。字段缺省 → null（无值编码纪律 D4，禁 ?? 0——
  * 0 只允许作为真实测量值出现，null 由 interpreter/service 逐字段判定丢弃语义）。
- * PS-25 已验证（pi 0.84.4 实装）：message.model = 请求侧 model.id（必填恒有；gen-stats 分桶
+ * PS-25 已验证（语义登记 PS-25，verifiedWith 以 pi-semantics.json 为准）：message.model = 请求侧 model.id（必填恒有；gen-stats 分桶
  * 裁定采它，不采 responseModel——后者仅 openai-completions 在路由结果 ≠ 请求 id 时才有，
  * 多数 provider 恒缺）；失败 turn 的 failureMessage.usage 为 EMPTY_USAGE（totalTokens=0），
  * 被下方 totalTokens gate 丢弃，不产样本。
@@ -523,11 +561,15 @@ function parseSelectOptionsPayload(event: PiExtensionUiRequestEvent): unknown {
   }
 }
 
-/** extension.ui_request 的前端 WS 广播消息事件（与内部路由事件成对发出）。 */
-function extensionUiRequestBroadcast(payload: Record<string, unknown>): PiTranslatedEvent {
+/**
+ * 对话框族帧（kind=dialog，pi1-disposition-chat-flow D6②）：marker 富交互与普通对话框
+ * 五个翻译出口共用的前端 WS 广播消息（与内部路由事件成对发出）。
+ * pi 词汇止点：帧类型与载荷判别字段（dialogKind）都是 taiji 词表，pi method 不出本文件。
+ */
+function extensionDialogBroadcast(payload: Record<string, unknown>): PiTranslatedEvent {
   return {
     kind: 'message',
-    message: { type: 'extension.ui_request' as ServerMessageType, payload },
+    message: { type: EXTENSION_UI_KIND_FRAME.dialog, payload },
   }
 }
 
@@ -535,17 +577,18 @@ function extensionUiRequestBroadcast(payload: Record<string, unknown>): PiTransl
  * 对话框请求的统一出站对（marker 富交互与普通对话框五个翻译出口共用）：
  * ① extension-ui kind 事件——EventInterpreter 暂停 watchdog + 通知 server 跟踪请求 +
  *   缓存 pending（2026-07-16 后 extension UI 不超时，block 等待用户响应）；
- * ② extension.ui_request WS 广播帧——前端渲染对话框/审批条/表单。
+ * ② extension.dialog WS 广播帧——前端按消息类型路由，渲染对话框/审批条/表单
+ * （title 若含 marker 约定串已在本层翻译消化，到前端仅纯展示——D6③）。
  */
 function dialogRequestEvents(
-  dialogMethod: ExtensionInteractMethod,
+  dialogKind: ExtensionInteractMethod,
   requestId: string,
   sid: string,
   requestPayload: Record<string, unknown>,
 ): PiTranslatedEvent[] {
   return [
-    { kind: 'extension-ui', requestId, sessionId: sid, method: dialogMethod, payload: requestPayload },
-    extensionUiRequestBroadcast(requestPayload),
+    { kind: 'extension-ui', requestId, sessionId: sid, method: dialogKind, payload: requestPayload },
+    extensionDialogBroadcast(requestPayload),
   ]
 }
 
@@ -558,6 +601,18 @@ function dialogRequestEvents(
 function isInflightReportFrame(event: PiEvent): boolean {
   const e = event as unknown as { type?: unknown; method?: unknown; title?: unknown }
   return e.type === 'extension_ui_request' && e.method === 'select' && e.title === SUBAGENT_INFLIGHT_MARKER
+}
+
+/**
+ * journal 事件报告帧形状判定（select + title = SUBAGENT_JOURNAL_MARKER，event-push-channel）。
+ *
+ * translate() 的守卫分支与 EventAdapter 监听器旁路（consumeJournalReport）共用本判定，
+ * 防「两处标记判定漂移」（inflight 同款注释）：translate 侧只保证不广播，旁路侧负责
+ * 路由派生视图 + ack。
+ */
+function isJournalReportFrame(event: PiEvent): boolean {
+  const e = event as unknown as { type?: unknown; method?: unknown; title?: unknown }
+  return e.type === 'extension_ui_request' && e.method === 'select' && e.title === SUBAGENT_JOURNAL_MARKER
 }
 
 /**
@@ -672,11 +727,11 @@ function translateSetWidgetRequest(event: PiExtensionUiRequestEvent, sid: string
       return stripAnsi(stripped)
     }),
   }
-  return [{ kind: 'message', message: { type: EXTENSION_EVENTS.WIDGET as ServerMessageType, payload: widgetPayload } }]
+  return [{ kind: 'message', message: { type: EXTENSION_UI_KIND_FRAME.widget, payload: widgetPayload } }]
 }
 
 /**
- * notify → extension.notify（fire-and-forget，pi 不等回复）。
+ * notify → extension:notify（fire-and-forget，pi 不等回复）。
  * pi rpc-mode.ts notify 发出 extension_ui_request{method:'notify'} 后不注册 pending、不等 response。
  * 不走 INTERACTIVE_UI_METHODS（不产 extension-ui kind → 不注册 timeout → 不弹模态对话框）。
  * 前端用 toast 渲染（非阻塞）。
@@ -688,7 +743,7 @@ function translateNotifyRequest(event: PiExtensionUiRequestEvent, sid: string): 
   return [{
     kind: 'message',
     message: {
-      type: EXTENSION_EVENTS.NOTIFY as ServerMessageType,
+      type: EXTENSION_UI_KIND_FRAME.notify,
       payload: {
         sessionId: sid,
         message: String(event.message ?? ''),
@@ -725,44 +780,6 @@ function translateSessionManagerSelect(
     : {}
 
   return [{ kind: 'session-manager-ui', requestId, sessionId: sid, action, params }]
-}
-
-/**
- * bridge 请求检测（设计 bridge-rewrite-pi-0.84 §3.3-D6）：select title 为 BRIDGE_MARKER →
- * options[0] 是 JSON 序列化的 BridgeRequest（协议 v2）。识别成功产出既有 bridge-ui kind
- * 交 interpreter 路由 bridge-handler（method 分派逻辑不动）。
- * 与 session-manager 分支同构：不产 extension-ui kind（不弹前端、不注册弹窗超时）。
- * 解析失败（非 JSON / 缺 method / method 不在 BRIDGE_METHODS 集合）折叠为
- * 'bridge:malformed' 哨兵请求——event-adapter 是纯翻译层无 client 句柄，回包必须经
- * handler（bridge:malformed case 回 E5 错误，不静默丢弃——失败要出声）。
- */
-function translateBridgeSelect(
-  event: PiExtensionUiRequestEvent,
-  sid: string,
-  requestId: string,
-): PiTranslatedEvent[] {
-  const rawBridge = parseSelectOptionsPayload(event) as Partial<BridgeRequest> | undefined
-  const rawBridgeMethod = rawBridge?.method
-  // method 集合守卫（与 session-manager action 守卫同款防线）：判别字段合法才走正常分派
-  if (typeof rawBridgeMethod === 'string' && (BRIDGE_METHODS as readonly string[]).includes(rawBridgeMethod)) {
-    // data = BridgeRequest 除 method 外的字段集，照 bridge-handler 的消费形状组装
-    //（tool_execute 读 toolName/toolCallId/params，event/intercept 读 eventName/data）
-    const bridgeData: Record<string, unknown> = {}
-    const bridgeFieldKeys = ['toolName', 'toolCallId', 'params', 'sessionId', 'eventName', 'data'] as const
-    for (const key of bridgeFieldKeys) {
-      if (rawBridge?.[key] !== undefined) bridgeData[key] = rawBridge[key]
-    }
-    return [{ kind: 'bridge-ui', requestId, sessionId: sid, method: rawBridgeMethod, data: bridgeData }]
-  }
-  // malformed 哨兵：raw 带原始 payload 供 handler 日志留痕（非 JSON 时回退原始 options 字符串）
-  const rawOptions = Array.isArray(event.options) && event.options.length > 0 ? String(event.options[0]) : ''
-  return [{
-    kind: 'bridge-ui',
-    requestId,
-    sessionId: sid,
-    method: 'bridge:malformed',
-    data: { raw: rawBridge ?? rawOptions },
-  }]
 }
 
 /**
@@ -816,7 +833,7 @@ function tryTranslateAskUserSelect(
   const requestPayload = {
     sessionId: sid,
     requestId,
-    method: 'select',              // 仍是 select（复用回传通道）
+    dialogKind: 'select',          // taiji 对话框变体词表（respond 复用同形值回传）
     form: true,                    // 统一表单帧（legacy 归一上移：marker 命中即 view-ready）
     formQuestions: askUserData.questions.map(toFormQuestion), // AskUserQuestion → FormQuestion type 推断
     // [MF-1-14] 运行时 boolean 守卫：payload 来自旧版扩展的动态 JSON（parseSelectOptionsPayload
@@ -851,7 +868,7 @@ function tryTranslateScheduleCreateSelect(
   const requestPayload = {
     sessionId: sid,
     requestId,
-    method: 'select',              // 仍是 select（复用回传通道）
+    dialogKind: 'select',          // taiji 对话框变体词表（respond 复用同形值回传）
     form: true,                    // 统一表单帧（legacy 归一上移：marker 命中即 view-ready）
     scheduleCreate: true,          // 挂载源分流键（FormOverlay 据此走 draft 源：扁平 FormResult 应答）
     scheduleDraft: draft,          // 守卫收窄后的草稿对象透传（前端无需再 JSON.parse）
@@ -883,7 +900,7 @@ function tryTranslatePlanReviewSelect(
   const requestPayload = {
     sessionId: sid,
     requestId,
-    method: 'select',              // 仍是 select（复用 respond 回传通道）
+    dialogKind: 'select',          // taiji 对话框变体词表（respond 复用同形值回传）
     planReview: true,              // 标记 plan 审批富交互，前端据此路由到审批条（C4 过滤器）
     // docs 不透传进帧：审批条文档清单由 usePlanState 投影链（session.planState）唯一承载
     // selfReview 条件落键（D9③，plan 状态机显式化）：docs 不透传纪律保留，仅加这一个
@@ -931,7 +948,7 @@ function tryTranslateFormSelect(
   const requestPayload = {
     sessionId: sid,
     requestId,
-    method: 'select',              // 仍是 select（复用 respond 回传通道）
+    dialogKind: 'select',          // taiji 对话框变体词表（respond 复用同形值回传）
     form: true,                    // 标记统一表单富交互，前端据此路由到 FormOverlay（C4 过滤器）
     formQuestions: validQuestions, // 守卫过滤后的合法问题集透传（前端复核守卫收窄，设计 D2）
     // [MF-1-14] 同 ask-user 分支的运行时 boolean 守卫（payload 为动态 JSON，?? 只挡缺席）
@@ -965,7 +982,8 @@ function translatePlainDialogRequest(
   const requestPayload = {
     sessionId: sid,
     requestId,
-    method,
+    // pi method → taiji dialogKind 翻译点（合法持有点）：值同形、权威在 taiji 词表（D6 词汇止点）
+    dialogKind: method,
     title: event.title,
     message: event.message,
     options: rawOptions ? rawOptions.map(String) : undefined,
@@ -980,8 +998,8 @@ function translatePlainDialogRequest(
  * 可降级 marker 对话框分支表（保序 = 降级优先序）：marker 命中 → try 翻译，检测失败
  * （返回 undefined，非合法 JSON / payload 缺字段）→ 落到后续 marker 或普通对话框分支。
  * 各 try 函数的检测语义与守卫差异见各自 doc 注释。
- * SESSION_MANAGER / BRIDGE 不入表：无降级语义（命中即 runtime 内部通道消费），在
- * translateInteractiveRequest 保留显式两段。
+ * SESSION_MANAGER 不入表：无降级语义（命中即 runtime 内部通道消费），在
+ * translateInteractiveRequest 保留显式一段。
  */
 const MARKER_DIALOG_FALLBACKS: ReadonlyArray<{
   marker: string
@@ -996,21 +1014,17 @@ const MARKER_DIALOG_FALLBACKS: ReadonlyArray<{
 /**
  * Interactive dialog methods: confirm, select, input, editor (notify 已在上方独立分支处理)。
  * [HISTORICAL] 旧 bridge 通道的 method.startsWith('bridge:') 前缀分支已删除（设计
- * bridge-rewrite-pi-0.84 §3.3-D6 清理批）：pi 0.84.4 下 ExtensionAPI 无自定义
- * extension_ui_request method 能力，旧通道永不可达；新通道 method 恒为 'select'，
- * 经 BRIDGE_MARKER 识别进入 bridge-ui kind。
+ * bridge-rewrite-pi-0.84 §3.3-D6 清理批）；bridge select marker 分支随 plugin-bridge 整体
+ * 退役删除（pi1-disposition-chat-flow D7①）。
  */
 function translateInteractiveRequest(event: PiExtensionUiRequestEvent, sid: string): PiTranslatedEvent[] {
   // 经 handleExtensionUIRequest 的 INTERACTIVE_UI_METHODS gate 收窄为 dialog 子集后进入
   const dialogMethod = event.method as ExtensionInteractMethod
   const requestId = String(event.id ?? '')
 
-  // runtime 内部通道双分支：识别即消费（不经前端、无降级）
+  // runtime 内部通道：识别即消费（不经前端、无降级）
   if (isMarkerSelect(event, SESSION_MANAGER_MARKER)) {
     return translateSessionManagerSelect(event, sid, requestId)
-  }
-  if (isMarkerSelect(event, BRIDGE_MARKER)) {
-    return translateBridgeSelect(event, sid, requestId)
   }
   // 可降级 marker 家族（表驱动，保序）：检测失败逐级降级，全不命中 → 普通对话框
   for (const { marker, translate } of MARKER_DIALOG_FALLBACKS) {
@@ -1096,6 +1110,13 @@ function handleMessageStart(event: PiMessageStartEvent, sid: string): PiTranslat
   // 同属「内部记账」语义。过滤行为不变。
   if (role === 'user') return [{ kind: 'noop' }]
 
+  // pi 1.0.0 system role（B2）：系统提示词与工具集变更的持久化消息（declareToolChanges
+  // 注入的 toolsAdded/toolsRemoved 记录 + system prompt 快照），内部记账语义与 user/toolResult
+  // 同族——对话流不显示（原始历史不变），持久化侧经 message_end 落盘由 apply-entry reducer
+  // 处理（ PiSessionMessageEntry role 联合已登记 'system'）。start 侧转发会给前端建空气泡，
+  // 与 user/toolResult 同理由此跳过。
+  if (role === 'system') return [{ kind: 'noop' }]
+
   // toolResult 是 pi agent-core 工具执行完毕的内部记账（agent-loop.js emitToolResultMessage：
   // executeToolCalls 后 emit message_start/end{role:'toolResult'}）。
   // 前端已通过 tool_execution_end 拿到 output，toolResult message_start 对前端是噪声——
@@ -1154,6 +1175,14 @@ function handleMessageStart(event: PiMessageStartEvent, sid: string): PiTranslat
 const MESSAGE_END_ALLOWED_ROLES = new Set(['user', 'assistant', 'toolResult'])
 
 /**
+ * message_end 静默跳过的已知 role（pi 1.0.0 起出现）：system = 系统提示词与工具集变更的
+ * 持久化消息。持久化侧由 reload 链路（JSONL entry → apply-entry）处理，live 链路跳过
+ * 下发（对话流不显示）。与上方白名单防线的区别：system 是 pi 已建模的合法 role、
+ * 预期会出现在 message_end（B2），跳过是有意行为而非漂移信号——静默不 warn。
+ */
+const MESSAGE_END_SILENT_SKIP_ROLES = new Set(['system'])
+
+/**
  * message_end — 重构 message entry 作为实时 feed 载体（W21，D5 单一 reducer 双路喂入的实时侧）。
  *
  * pi 把 message_end 作为 user/assistant/toolResult/custom 四种 message 持久化的唯一触发点
@@ -1186,6 +1215,10 @@ function handleMessageEnd(event: PiMessageEndEvent, sid: string): PiTranslatedEv
     return [{ kind: 'noop' }]
   }
   const isCustom = typeof msg.customType === 'string'
+  if (!isCustom && MESSAGE_END_SILENT_SKIP_ROLES.has(msg.role)) {
+    // pi 1.0.0 system role：已知合法、有意跳过（见 MESSAGE_END_SILENT_SKIP_ROLES 注释）
+    return [{ kind: 'noop' }]
+  }
   if (!isCustom && !MESSAGE_END_ALLOWED_ROLES.has(msg.role)) {
     // 未建模 role 防线：pi 当前不经 message_end 发这些 role，命中说明 pi 行为漂移——
     // warn 可观测 + 跳过（防 registry 端与既有 effect 双计），不中断事件流。
@@ -1550,10 +1583,18 @@ function handleAgentSettled(_event: PiAgentSettledEvent, _sid: string): PiTransl
 // queue_update：[u5a 退役] message.queue_update 帧已随协议条目整链退役（core 消费方 /
 // renderer UI 消费 / shared payload 声明均已删，队列深度展示归 session.delivery 快照帧）。
 // pi 侧仍恒发该事件，登记为已知 no-op（同 bash_execution_update 理由——不落 default warn）。
+// summarization_retry_* 三事件（pi1-disposition-chat-flow U3⑤，D12 显式 no-op 登记）：
+// 压缩/分支摘要重试状态（scheduled / attempt_start / finished），呈现层已有 compaction
+// 主链路（compaction-start/end 双事件 → session.compacting 帧）覆盖，重试过程不产前端
+// 行为。显式登记后「未登记」与「裁决不处理」恢复可区分——每次压缩重试不再刷 Unhandled
+// pi event type 告警。
 const NULL_EVENTS = new Set([
   'extension_config', 'extension_ui_response', 'response',
   'bash_execution_update',
   'queue_update',
+  'summarization_retry_scheduled',
+  'summarization_retry_attempt_start',
+  'summarization_retry_finished',
 ])
 
 /**
@@ -1650,6 +1691,31 @@ const DISPATCHER = new Map<string, Handler>()
 const DEBUG_PI_EVENTS = process.env.TAIJI_DEBUG_PI_EVENTS === '1'
 
 /**
+ * 嵌套工具调用产块事件过滤（codemode u5 / 设计 D4，live ≡ reload 对齐）。
+ *
+ * 判据来源（pi 1.0.0 dist 实证，非 codemode 专属逻辑）：工具经 ctx.executeTool() 发起的
+ * 嵌套调用，其 tool_execution_start / tool_execution_update / tool_execution_end 事件一律
+ * 携带 parentToolCallId（dist/core/nested-tool-calls.js 三处 emit 点），且嵌套调用不落
+ * 独立 transcript 条目（dist/core/extensions/types.d.ts executeTool 契约「It does not
+ * appear in the transcript」——仅外层 result message 的 nestedCalls 保留有界记录）。
+ * 过滤语义 = 与 transcript 投影对齐：reload 后嵌套调用只有
+ * 外层一个工具块，live 期放行 start/end 会各产独立工具块 → 投影不一致。未来任何
+ * ctx.executeTool 调用源自动被本过滤覆盖（现役唯一发射源为 codemode 脚本）。
+ *
+ * tool_execution_update 豁免（判据不含 update）：嵌套 update 不产工具块、不落 transcript，
+ * 丢弃无等价性收益；且它是 subagent 翻译层的活性信号载体（U-A6 无进展守护刷新通道，嵌套
+ * 执行窗口内唯一在途刷新源），丢弃会复发守护误杀。
+ *
+ * 空串按非嵌套放行：pi 实发恒为真实父 id，'' 属畸形值——误滤顶层事件会丢用户可见工具块
+ * （数据损失），误放行嵌套事件至多多一个重复块（表观噪声），两害取轻。
+ */
+function isNestedToolExecutionBlockEvent(event: PiEvent): boolean {
+  if (event.type !== 'tool_execution_start' && event.type !== 'tool_execution_end') return false
+  const parentToolCallId = event.parentToolCallId
+  return typeof parentToolCallId === 'string' && parentToolCallId !== ''
+}
+
+/**
  * 纯翻译：把单个 pi 事件翻译为 0~N 个中间事件。
  *
  * 无副作用、无可变态、不 import services 域类型。组合根负责把 translate 的结果
@@ -1675,9 +1741,16 @@ export function translate(event: PiEvent, sessionId: string): PiTranslatedEvent[
   // 此守卫覆盖直调 translate 的路径——结构性消灭「marker 帧落回普通 select 分支 →
   // 前端出现无人应答的弹窗 pending 泄漏」形态（[HISTORICAL] session-manager 同类教训）。
   if (isInflightReportFrame(event)) return []
+  // journal 事件报告帧守卫（event-push-channel）：同款不广播例外——marker 帧恒被
+  // 旁路消费，直调 translate 路径零产出。
+  if (isJournalReportFrame(event)) return []
 
   // Lifecycle events that produce no output
   if (NULL_EVENTS.has(eventType)) return []
+
+  // [codemode u5 / D4] 嵌套工具调用产块事件过滤——start 与 end 同点同判（update 豁免，
+  // 判据来源与豁免依据见 isNestedToolExecutionBlockEvent 注释）
+  if (isNestedToolExecutionBlockEvent(event)) return []
 
   // agent_start — 仅产 hook 事件（interpreter 触发 onPiEvent/agent_start hook）
   if (eventType === 'agent_start') {
@@ -1690,6 +1763,43 @@ export function translate(event: PiEvent, sessionId: string): PiTranslatedEvent[
 
   console.warn('[EventAdapter] Unhandled pi event type:', eventType)
   return []
+}
+
+/**
+ * handoff 专用的 turn-end 窄帧投影（pi1-disposition-chat-flow U3②，D5②/D15.1）。
+ *
+ * 入参 unknown（pi 原始事件 JSON，PiEventListener 的动态形态）→ 经 translate() 全量翻译 →
+ * 取 turn-end 帧（pi agent_end 的内部翻译形态）投影为 handoff 判定所需的最小字段。
+ * 目的：handoff-service（services 层）不再直听 pi 原始 agent_end（L2 泄漏点归零）——
+ * pi 词汇（事件名字面量 / 类型名）止步本函数，handoff 只消费结构化窄帧。
+ *
+ * 返回 undefined = 本事件不产 turn-end 帧（含 NULL_EVENTS / 翻译为其他 kind），调用方
+ * 直接忽略。translate() 无副作用（纯翻译，见文件头），handoff 旁路复用它不产生重复
+ * 广播 / hook 副作用——副作用全部在 interpreter 侧，本函数不接 interpreter。
+ */
+export interface HandoffTurnEndFrame {
+  /** pi 将自动重试（中间失败帧）——handoff 据此跳过等待下一轮（D15.1 ①）。 */
+  willRetry: boolean
+  /** 翻译后的 stopReason（STOP_REASON_MAP 归一；'error' = run 失败终态，D15.1 ②拒绝判据）。 */
+  stopReason: string | undefined
+  /** 最终 assistant 文本（text blocks join；无 content 或空数组 → undefined）。 */
+  content: string | undefined
+}
+
+export function projectHandoffTurnEnd(event: unknown, sessionId: string): HandoffTurnEndFrame | undefined {
+  const events = translate(event as unknown as PiEvent, sessionId)
+  for (const ev of events) {
+    if (ev.kind !== 'turn-end') continue
+    const message = ev.message as { type: string; payload?: Record<string, unknown> }
+    const payload = message.payload ?? {}
+    const content = payload.content
+    return {
+      willRetry: payload.willRetry === true,
+      stopReason: ev.stopReason,
+      content: typeof content === 'string' && content !== '' ? content : undefined,
+    }
+  }
+  return undefined
 }
 
 /**
@@ -1764,6 +1874,9 @@ export class EventAdapter {
       // [u7b D5 例外] subagent 在途上报旁路：marker 帧就地消费（镜像 + ack），识别即吞掉
       //（不进翻译 → 结构性零前端广播；translate 的守卫分支为第二道防线）。
       if (this.consumeInflightReport(event, client)) return
+      // [event-push-channel] journal 事件报告旁路：marker 帧就地消费（路由派生视图 +
+      // ack），识别即吞掉（同款不进翻译；translate 的守卫分支为第二道防线）。
+      if (this.consumeJournalReport(event, client)) return
       // RT-2#3：translate 与 interpret 同处隔离边界。此前 translate 在 try 外——pi 字段
       // 漂移致 handler 直读炸掉（如 tool_execution_update
       // partialResult.content 数组形态缺位）时异常逃逸进 rpc-client 的 stdout parse catch，
@@ -1852,10 +1965,10 @@ export class EventAdapter {
       if (typeof report.sessionId !== 'string' || report.sessionId === '') {
         // u7a 契约（extension-protocol subagent-inflight/types.ts）：sessionId 缺席 =
         // 无法归属 → 丢弃整帧（不镜像不 ack；pi 延迟写入窗口过后 reporter 重试即可归属）。
-        // 不视为协议错误（与 plugin-bridge getSessionId 同款防御）。
+        // 不视为协议错误（同款防御先例：报文归属失败静默丢弃由重试自愈）。
         return true
       }
-      // 归属用 adapter 的 sessionId（帧来自本 pi 进程，与 session-manager/bridge 同口径）；
+      // 归属用 adapter 的 sessionId（帧来自本 pi 进程，与 session-manager 同口径）；
       // report.sessionId 只作在场性判据，不比对——pi session id 与 runtime 会话键是两个 id 空间。
       inflightMirror.applyReport(this.sessionId, report)
       const requestId = String((event as PiExtensionUiRequestEvent).id ?? '')
@@ -1867,6 +1980,47 @@ export class EventAdapter {
       // 旁路永不干扰翻译/事件流（畸形帧形态 / ack 通道异常仅留诊断）。warn 起步：prod
       // info 级过滤下 debug 不落盘，在途镜像失准必须可直接排障（滚动重启判定读数来源）。
       console.warn('[EventAdapter] subagent-inflight bypass failed:', err instanceof Error ? err.message : err)
+    }
+    return true
+  }
+
+  /**
+   * journal 事件报告旁路（event-push-channel，设计 §3.2/§3.3）：识别 select +
+   * SUBAGENT_JOURNAL_MARKER → 解析 → 经 journal-report-router 送达该 session 的
+   * 事件派生视图（同步应用 = fold + 缺口补读）→ 应用成功回 JOURNAL_REPORT_ACK
+   * （生效回执，D7）。返回 true = 本帧已消费（调用方跳过翻译）。
+   *
+   * 坏帧 / 未知 schema → 静默丢弃（仍返回 true，不抛不 ack）：不 ack 使写侧按 D5
+   * 首败 warn 折叠，问题可感知。路由无消费方（sink 未注册 / 投影未就绪）→ 不 ack
+   * （同上折叠），事件不丢——派生视图创建时 attach() 冷读从磁盘收敛。永不向调用方抛错。
+   */
+  private consumeJournalReport(event: unknown, client: PiEventClient): boolean {
+    if (!isJournalReportFrame(event as PiEvent)) return false
+    try {
+      const report = parseSelectOptionsPayload(event as PiExtensionUiRequestEvent)
+      if (!isSubagentJournalReport(report)) {
+        console.warn('[EventAdapter] subagent-journal frame dropped: malformed payload')
+        return true
+      }
+      if (typeof report.sessionId !== 'string' || report.sessionId === '') {
+        // 契约（extension-protocol subagent-journal/types.ts）：sessionId 缺席 =
+        // 无法归属 → 丢弃整帧（不 fold 不 ack；pi 延迟写入窗口过后 reporter 后续
+        // 帧自然归属）。不视为协议错误（inflight 同款防御先例）。
+        return true
+      }
+      // 归属用 adapter 的 sessionId（帧来自本 pi 进程，与 inflight/session-manager
+      // 同口径）；report.sessionId 只作在场性判据，不比对——pi session id 与 runtime
+      // 会话键是两个 id 空间。
+      const applied = routeJournalReport(this.sessionId, report)
+      if (!applied) return true // 无消费方：不 ack（写侧失败折叠），冷读兜底收敛
+      const requestId = String((event as PiExtensionUiRequestEvent).id ?? '')
+      // 生效回执（D7）：routeJournalReport 内同步完成 fold 应用（含缺口补读的同步
+      // 文件读），resolve 即「已应用」。
+      if (requestId !== '') client.sendExtensionUiResponse?.(requestId, JOURNAL_REPORT_ACK, 'select')
+    } catch (err) {
+      // 旁路永不干扰翻译/事件流（畸形帧形态 / ack 通道异常仅留诊断）。warn 起步：
+      // prod info 级过滤下 debug 不落盘，推送链故障必须可直接排障。
+      console.warn('[EventAdapter] subagent-journal bypass failed:', err instanceof Error ? err.message : err)
     }
     return true
   }

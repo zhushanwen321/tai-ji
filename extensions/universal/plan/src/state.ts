@@ -91,9 +91,9 @@ export const DEFAULT_PLAN_STATE: PlanState = {
  *
  * ask_user（D10/F9）：提示词 Phase B 本就指示「Use ask_user tool if available」，白名单
  * 曾把它排除（结构性禁言）。feature-tier 依赖降级：ask-user 是可禁扩展，pi setActiveTools
- * 对不存在的工具名静默跳过——pi 实装锚点：dist/core/agent-session.js:655（0.84.4，
+ * 对不存在的工具名静默跳过——pi 实装锚点（1.0.0 复核）：dist/core/agent-session.js
  * setActiveToolsByName docstring "Only tools in the registry can be enabled. Unknown
- * tool names are ignored."）——被禁时不报错不生效，提示词 "if available"
+ * and hidden tool names are ignored."——被禁时不报错不生效，提示词 "if available"
  * 条件语义即降级（回退对话流提问）。
  */
 export const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "plan", "ask_user"];
@@ -176,7 +176,7 @@ export type PlanAbortControllers = Map<string, PendingSelect>;
  * 发挂起 select 前新建 PendingSelect 并登记。禁复用已 abort 的 controller——
  * pi 实装对已 abort 的 signal 在 createDialogPromise 首行短路立即 resolve undefined，
  * 复用会让退出后再入 plan 的 submit-review 瞬时静默取消。
- * pi 实装锚点：dist/modes/rpc/rpc-mode.js:48（0.84.4）——createDialogPromise 首行
+ * pi 实装锚点：dist/modes/rpc/rpc-mode.js createDialogPromise 首行
  * `opts?.signal?.aborted` 即 `return Promise.resolve(defaultValue)`，select 的
  * defaultValue = undefined（E10 生命周期设计依据）。
  */

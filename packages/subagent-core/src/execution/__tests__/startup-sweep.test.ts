@@ -1,4 +1,4 @@
-// startup-sweep 单测（机制退役设计 §4.1 场景 1/2/3/4/7，全部 mkdtemp 假树直调，
+// startup-sweep 单测（机制退役设计 §4.1 场景 1/2/3/4，全部 mkdtemp 假树直调，
 // 时钟用假树事件时间戳控制——不 mock 系统时间）。
 //
 // 场景-断言对照（[D15] 中断目标态——收编 = run-interrupted 转移帧一件直落，
@@ -13,10 +13,11 @@
 // - 场景 4：时序防拆断言——静态读 runtime main() 源码，断言 startupSweep 调用
 //   位于单实例锁之后、service 构造段（pi spawn 的前置装配）之前，且时序硬
 //   声明注释在位。
-// - 场景 7：宽限窗防误收编——末帧距今 < 60s 零写（journal 零新增）+
-//   skipped/grace 计数；末帧改老后重调正常收编。
 // - 检查点 8 三形态（[D16⑥] 枚举换源实测）：坏链 / 空 record 流 / v1 旧形态
 //   目录——前两形态候选照进但收编判定拦下（零写入），v1 目录不进候选。
+// - 新鲜末帧直收（ADR-0122 清查：事件流静止宽限窗已删，判僵尸依据 = 创建顺序
+//   契约——单实例锁 + 扫描先于任何 pi spawn）：末帧距今 10s 的 running run
+//   照常收编，无任何时间窗跳过。
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
@@ -26,11 +27,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readRunTerminalManifest } from "../persistence/manifest-store.ts";
 import { RUN_EVENTS_SUFFIX } from "../../shared/run-vocabulary.ts";
 import { createRunEventJournal, type WorkflowRunEventInput } from "../../orchestration/run-events.ts";
-import {
-  STARTUP_SWEEP_GRACE_WINDOW_MS,
-  startupSweep,
-  type SweepLogChannel,
-} from "../../orchestration/startup-sweep.ts"; // [D1 拆边 Class C] 实现已上移 orchestration/
+import { startupSweep, type SweepLogChannel } from "../../orchestration/startup-sweep.ts"; // [D1 拆边 Class C] 实现已上移 orchestration/
 
 /** mock 日志通道（按方法名断言级别落位——规格 6 签名的级别结构承载位）。 */
 function makeLog(): SweepLogChannel {
@@ -117,14 +114,13 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
   it("场景 1：僵尸 run 收编中断帧直落 + 反向断言无条目/manifest 写入 + info 结果行落位", async () => {
     const stateDir = makeSlugStateDir("--fixture-slug--");
     const runId = "wf-sweep-a";
-    const staleTs = Date.now() - 3 * 60 * 60 * 1000; // 末帧 3 小时前，远超宽限窗
-    await seedRunningRun(stateDir, runId, staleTs);
+    await seedRunningRun(stateDir, runId, Date.now() - 3 * 60 * 60 * 1000);
     const before = walkFiles(agentRoot);
 
     const result = await startupSweep(() => agentRoot, log);
 
     // 收编计数 + 幂等恒等式
-    expect(result).toMatchObject({ adopted: 1, skipped: 0, skippedGraceWindow: 0, stateDirs: 1, errors: [] });
+    expect(result).toMatchObject({ adopted: 1, skipped: 0, stateDirs: 1, errors: [] });
     // journal 半边：run-interrupted(startup-sweep) 转移帧（[D15] 中断编排入口——
     // interrupted 是暂停态非终局，收编产物 = 中断帧一件直落）
     const events = await createRunEventJournal(stateDir).scan(runId);
@@ -148,7 +144,7 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
     // 结果行按方法名落位：info 恰一次（三类计数），warn/error 零调用
     expect(log.info).toHaveBeenCalledTimes(1);
     expect(log.info).toHaveBeenCalledWith(
-      "[subagents] startup sweep: adopted 1 run(s), skipped 0 (grace 0), across 1 state dir(s)",
+      "[subagents] startup sweep: adopted 1 run(s), skipped 0, across 1 state dir(s)",
     );
     expect(log.warn).not.toHaveBeenCalled();
     expect(log.error).not.toHaveBeenCalled();
@@ -172,7 +168,7 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
     expect(second.skipped).toBe(1);
     expect((await createRunEventJournal(stateDir).scan(runId)).length).toBe(framesAfterFirst);
     expect(log.info).toHaveBeenLastCalledWith(
-      "[subagents] startup sweep: adopted 0 run(s), skipped 1 (grace 0), across 1 state dir(s)",
+      "[subagents] startup sweep: adopted 0 run(s), skipped 1, across 1 state dir(s)",
     );
   });
 
@@ -203,9 +199,8 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
   it("场景 3b：单 run 收编失败——warn 留痕继续，其余可收编 run 不受影响", async () => {
     if (process.platform === "win32" || process.getuid?.() === 0) return;
     const stateDir = makeSlugStateDir("--fixture-slug--");
-    const staleTs = Date.now() - 3 * 60 * 60 * 1000;
-    await seedRunningRun(stateDir, "wf-sweep-ok", staleTs);
-    await seedRunningRun(stateDir, "wf-sweep-bad", staleTs);
+    await seedRunningRun(stateDir, "wf-sweep-ok", Date.now() - 3 * 60 * 60 * 1000);
+    await seedRunningRun(stateDir, "wf-sweep-bad", Date.now() - 3 * 60 * 60 * 1000);
     // wf-sweep-bad 的 journal 读面破坏（EACCES）——判定核保守按 running 进收编，
     // scan 分通道上抛，收编失败
     chmodSync(join(stateDir, `wf-sweep-bad${RUN_EVENTS_SUFFIX}`), 0o000);
@@ -225,7 +220,7 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
       expect(String(vi.mocked(log.warn).mock.calls[0]?.[0])).toContain("wf-sweep-bad");
       expect(log.error).not.toHaveBeenCalled();
       expect(log.info).toHaveBeenCalledWith(
-        "[subagents] startup sweep: adopted 1 run(s), skipped 1 (grace 0), across 1 state dir(s)",
+        "[subagents] startup sweep: adopted 1 run(s), skipped 1, across 1 state dir(s)",
       );
     } finally {
       chmodSync(join(stateDir, `wf-sweep-bad${RUN_EVENTS_SUFFIX}`), 0o644);
@@ -253,32 +248,20 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
     expect(sweepLine).toBeLessThan(serviceLine);
   });
 
-  it("场景 7：宽限窗内零写（skipped 含 grace 计数）——末帧改老后重调正常收编", async () => {
+  it("新鲜末帧直收（宽限窗已删）：末帧距今 10s 的 running run 照常收编，无时间窗跳过", async () => {
     const stateDir = makeSlugStateDir("--fixture-slug--");
-    const runId = "wf-sweep-grace";
-    // 末帧距今 10s < 60s 宽限窗（假树时间戳控制，不 mock 系统时间）
+    const runId = "wf-sweep-fresh";
+    // 末帧距今 10s（旧实现会被 60s 宽限窗跳过）——创建顺序契约下照常收编
     await seedRunningRun(stateDir, runId, Date.now() - 10_000);
-    expect(STARTUP_SWEEP_GRACE_WINDOW_MS).toBe(60_000);
 
-    const fresh = await startupSweep(() => agentRoot, log);
-    // 零写：adoptInterruptedRun 返回 skippedGraceWindow——journal 零新增帧 +
-    // manifest 不物化
-    expect(fresh).toMatchObject({ adopted: 0, skipped: 1, skippedGraceWindow: 1 });
-    expect((await createRunEventJournal(stateDir).scan(runId))).toHaveLength(2); // 仅 seed 两帧
-    expect(await readRunTerminalManifest(stateDir, runId)).toBeNull();
-    expect(log.info).toHaveBeenLastCalledWith(
-      "[subagents] startup sweep: adopted 0 run(s), skipped 1 (grace 1), across 1 state dir(s)",
-    );
-
-    // 末帧改老（重建 journal 为远超窗的旧时间戳）再调 → 正常收编（场景 1 语义：
-    // run-interrupted 帧 + manifest 不物化）
-    rmSync(join(stateDir, `${runId}${RUN_EVENTS_SUFFIX}`));
-    await seedRunningRun(stateDir, runId, Date.now() - 3 * 60 * 60 * 1000);
-    const stale = await startupSweep(() => agentRoot, log);
-    expect(stale.adopted).toBe(1);
+    const result = await startupSweep(() => agentRoot, log);
+    expect(result).toMatchObject({ adopted: 1, skipped: 0 });
     const events = await createRunEventJournal(stateDir).scan(runId);
     expect(events[events.length - 1]?.type).toBe("run-interrupted");
     expect(await readRunTerminalManifest(stateDir, runId)).toBeNull();
+    expect(log.info).toHaveBeenLastCalledWith(
+      "[subagents] startup sweep: adopted 1 run(s), skipped 0, across 1 state dir(s)",
+    );
   });
 });
 
@@ -317,7 +300,7 @@ describe("startupSweep 枚举换源三形态（[D16⑥] 检查点 8）", () => {
     const result = await startupSweep(() => agentRoot, log);
 
     // run-interrupted 对 created 是表外转移 → 保守跳过（零写入），计入 skipped
-    expect(result).toMatchObject({ adopted: 0, skipped: 1, skippedGraceWindow: 0, errors: [] });
+    expect(result).toMatchObject({ adopted: 0, skipped: 1, errors: [] });
     expect(readFileSync(recordPath, "utf8")).toBe(before);
     expect(log.warn).not.toHaveBeenCalled();
   });
@@ -331,7 +314,7 @@ describe("startupSweep 枚举换源三形态（[D16⑥] 检查点 8）", () => {
 
     // 判定核：文件在、无 settled 帧 → 保守 running 进收编判定；scan 空流 →
     // skippedMissing（无事件证据——从未落账或已清理），零写入
-    expect(result).toMatchObject({ adopted: 0, skipped: 1, skippedGraceWindow: 0, errors: [] });
+    expect(result).toMatchObject({ adopted: 0, skipped: 1, errors: [] });
     expect(readFileSync(recordPath, "utf8")).toBe("");
     expect(log.warn).not.toHaveBeenCalled();
   });
@@ -348,7 +331,7 @@ describe("startupSweep 枚举换源三形态（[D16⑥] 检查点 8）", () => {
     // 故障走 EACCES 上抛用例，见读错分通道 describe）
     expect(result).toMatchObject({ adopted: 0, skipped: 0, stateDirs: 0, errors: [] });
     expect(log.info).toHaveBeenCalledWith(
-      "[subagents] startup sweep: adopted 0 run(s), skipped 0 (grace 0), across 0 state dir(s)",
+      "[subagents] startup sweep: adopted 0 run(s), skipped 0, across 0 state dir(s)",
     );
     // 旧件原样在盘（不读不写不主动删）
     expect(readFileSync(join(stateDir, "wf-v1-only.events.jsonl"), "utf8")).toContain("run-created");

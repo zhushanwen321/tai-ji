@@ -36,8 +36,8 @@ export interface SubagentDirectiveDetails {
 /**
  * 定向消息留痕：向主 session 落 subagent-directive custom_message entry。
  *
- * 按主 agent streaming 状态分流 sendMessage options。pi 0.84.4 sendCustomMessage
- * 实装（agent-session.js）：isStreaming 且无 deliverAs 时默认 agent.steer()——会把
+ * 按主 agent streaming 状态分流 sendMessage options。pi sendCustomMessage
+ * 实装（agent-session.js，1.0.0 复核同构）：isStreaming 且无 deliverAs 时默认 agent.steer()——会把
  * 定向消息注入正在运行的主 agent LLM turn，违反「不经主 agent LLM 直达 subagent」。
  * 故按调用时刻的权威 streaming 状态（ctx.isIdle()，与 sendCustomMessage 内部
  * isStreaming 判据精确互补，含 agent_end 后 retry/continuation 窗口）分流：

@@ -7,7 +7,7 @@
  *
  * 依赖方向：无下游（读全局 window.electronAPI，类型经 declare global 自动可用）
  */
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, ShieldsFacesPayload, LocalFileServableReason, LocalFileServableResult, LocalFileReadReason, LocalFileReadResult } from "@taiji/shared"
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, LocalFileServableReason, LocalFileServableResult, LocalFileReadReason, LocalFileReadResult } from '@taiji/shared'
 import type { ImageCacheWritePort } from '@taiji/core'
 
 /** preload 注入的 electronAPI（web/mock / node 测试环境为 undefined——后者连
@@ -401,6 +401,47 @@ export function getDataDir(): Promise<string | undefined> {
 export async function chooseDirectory(): Promise<string | null> {
   if (!api?.chooseDirectory) return null
   return api.chooseDirectory()
+}
+
+// ── 远程访问（设置面板连接信息：配置读取 / token 轮换 / 开关切换）─────────
+// 类型经 shared SSOT（RemoteAccessInfo / RemoteAccessToggleResult）——契约权威在
+// main bridge-handlers 的 handler 返回形态，类型声明三端共同 import。
+
+/** web/mock 降级空态：关态 + 空 token + 无候选地址（面板渲染关态说明，不产死链接） */
+const REMOTE_ACCESS_FALLBACK: RemoteAccessInfo = {
+  enabled: false, token: '', createdAt: '', urls: [], mobileDistReady: false,
+}
+
+/**
+ * 读取远程访问配置 + LAN 地址候选。读操作无 IPC（web/mock）返回关态空态——
+ * 读降级是合法显形空态（面板按关态渲染，不产死链接）；写操作的降级是假成功，
+ * 一律拒绝（见下方 rotate/set）。
+ */
+export function getRemoteAccessInfo(): Promise<RemoteAccessInfo> {
+  return api?.getRemoteAccessInfo ? api.getRemoteAccessInfo() : Promise.resolve(REMOTE_ACCESS_FALLBACK)
+}
+
+/**
+ * 写操作（轮换 token / 切开关）在无 IPC（web/mock）或旧 preload 缺方法时的统一拒绝：
+ * 写操作假成功会让用户以为已生效（红线②），读降级不适用此逻辑。
+ */
+const REMOTE_ACCESS_WRITE_UNAVAILABLE = '远程访问设置仅在桌面应用中可用'
+
+/** 轮换 remote token（main 重写文件即生效不重启），返回最新连接信息。无 IPC 拒绝（写操作不假成功） */
+export function rotateRemoteAccessToken(): Promise<RemoteAccessInfo> {
+  return api?.rotateRemoteAccessToken
+    ? api.rotateRemoteAccessToken()
+    : Promise.reject(new Error(REMOTE_ACCESS_WRITE_UNAVAILABLE))
+}
+
+/**
+ * 切换远程访问开关（开/关态变化且 runtime 在跑时 main 侧重启 runtime）。
+ * 无 IPC（web/mock）拒绝——写操作不假成功；调用方（面板）catch 后 toast 显形。
+ */
+export function setRemoteAccessEnabled(enabled: boolean): Promise<RemoteAccessToggleResult> {
+  return api?.setRemoteAccessEnabled
+    ? api.setRemoteAccessEnabled(enabled)
+    : Promise.reject(new Error(REMOTE_ACCESS_WRITE_UNAVAILABLE))
 }
 
 /** 获取当前代理配置。无 IPC 时返回默认配置 */

@@ -96,8 +96,10 @@ function crash(hint, how) {
 // ── prompt 流（场景 onPrompt）────────────────────────────────────────
 async function runPromptFlow(cmd) {
   const p = scenario.onPrompt ?? {};
+  // pi 1.0.0：prompt 应答在 preflight 后携带 disposition（handled=被接管/queued=排队/started=已开始执行）。
+  // mock 剧本无扩展接管路径，缺省 'started'；场景可用 onPrompt.disposition 覆盖。
   messageLog.push({ role: 'user', content: cmd.message });
-  send(frames.responseOk(cmd.id, 'prompt'));
+  send(frames.responseOk(cmd.id, 'prompt', { disposition: p.disposition ?? 'started' }));
   send(frames.agentStart());
   for (const text of p.assistant ?? []) {
     send(frames.messageEnd('assistant', text));
@@ -155,6 +157,21 @@ function handleUiResponse(line) {
   }
   if (a.agentEnd) send(frames.agentEnd([], false));
   if (a.crash) crash('onSelectResponse.crash', a.crash);
+}
+
+// ── steer / follow_up（pi 1.0.0 应答携带 disposition：handled|queued）──
+// mock 无真实 run 状态跟踪，缺省 'queued'（输入已排队）；场景 onSteer/onFollowUp 可覆盖
+// disposition 与追加剧本（assistant/rawFrames/agentEnd）。
+function handleQueueInput(cmd, kind, scene) {
+  const a = scene ?? {};
+  messageLog.push({ role: 'user', content: cmd.message });
+  send(frames.responseOk(cmd.id, kind, { disposition: a.disposition ?? 'queued' }));
+  for (const text of a.assistant ?? []) {
+    send(frames.messageEnd('assistant', text));
+    messageLog.push({ role: 'assistant', content: text });
+  }
+  for (const f of resolveRawFrames(a.rawFrames)) send(f);
+  if (a.agentEnd) send(frames.agentEnd([], false));
 }
 
 // ── abort（解散源：turn abort / /plan abort 级联）─────────────────────
@@ -237,6 +254,12 @@ function handleCommand(line) {
         log(`prompt flow error: ${error?.stack ?? error}`);
         if (line?.id) send(frames.responseError(line.id, 'prompt', `mock-pi: prompt flow error: ${error?.message ?? error}`));
       });
+      return;
+    case 'steer':
+      handleQueueInput(line, 'steer', scenario.onSteer);
+      return;
+    case 'follow_up':
+      handleQueueInput(line, 'follow_up', scenario.onFollowUp);
       return;
     case 'abort':
       handleAbort(line);

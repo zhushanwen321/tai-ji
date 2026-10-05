@@ -166,11 +166,9 @@ function makeCtx(overrides?: Partial<RunContext>): RunContext {
 
 describe("dispose 收割（P0-1 U5：引擎集成面）", () => {
   it("dispose 时在途 turn 收敛为明确失败且不重试：engine_run_failed、boot 1、create×1（收割≠瞬时崩溃，u-z4 disposed 短路）", async () => {
-    // 两 timer 显式关闭（规则 19 opt-out 形态）——排除 timeout 判死路径，
     // 本用例的失败终态只能来自 dispose 收割链（onClose failAllTurns → dispose
-    // no-op 幂等；close 吞没变体由 channel 层 mock 测试承载）
-    vi.stubEnv("TAIJI_ZCODE_TURN_IDLE_TIMEOUT_MS", "0");
-    vi.stubEnv("TAIJI_ZCODE_TURN_MAX_TIMEOUT_MS", "0");
+    // no-op 幂等；close 吞没变体由 channel 层 mock 测试承载）——channel 已无
+    // 时间判死来源（turn 双 timer 删除），终局唯一来源即收割链
     const f = makeEngine();
     const runPromise: Promise<EngineRunResult> = f.engine.run(makeTask({ cwd: f.workspace }), makeCtx());
     await waitForMethod(f.stateFile, "session/send"); // 在途 turn 已建立
@@ -196,7 +194,7 @@ describe("dispose 收割（P0-1 U5：引擎集成面）", () => {
     expect(bootCount(f.stateFile)).toBe(1);
 
     // 窗口量级：dispose 全链不超 kill 链 + HARVEST_GRACE + 进程调度余量——
-    // 收割在 grace 量级窗口闭合，而非挂满 turn 预算（30min/60min 量级差异）
+    // 收割在 grace 量级窗口闭合（确定性收尾时序，非等待型挂起）
     expect(disposeMs).toBeLessThan(ZCODE_KILL_GRACE_MS + ZCODE_APPSERVER_HARVEST_GRACE_MS + 2000);
   }, 30_000);
 

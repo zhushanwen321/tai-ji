@@ -192,6 +192,7 @@ describe('formatLogShowTime / buildLogShowArgs：窗口与形态', () => {
     const p = (n: number): string => String(n).padStart(2, '0')
     const fmt = (d: Date): string =>
       `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+    expect(args[0]).toBe('show')
     expect(args).toContain('--style')
     expect(args).toContain('compact')
     expect(args).toContain(fmt(start))

@@ -17,7 +17,7 @@ import DiffView from '@/components/panel/detail-renderers/DiffView.vue'
 
 const mockHighlight = vi.hoisted(() => vi.fn())
 
-vi.mock('@/composables/logic/markdown', () => ({
+vi.mock('@taiji/ui/features/chat/markdown', () => ({
   highlightCode: mockHighlight,
 }))
 

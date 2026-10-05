@@ -53,7 +53,8 @@ const logger = getLogger("subagents");
 /**
  * [§1.4 (c)] 轮终链 fire-and-forget 的统一断头保护：链上任何异常（stale pi 抛错、
  * 簿记/通知失败等，成因不限）降级为 error 留痕，不得升格为未处理 promise 拒绝——
- * pi rpc 模式没有安装未处理拒绝处理器（0.84.4 只在交互模式注册），Node 默认 exit 1，
+ * pi rpc 模式没有安装未处理拒绝处理器（1.0.0 复核：dist 下仅 codemode-worker 子进程
+ * 注册，rpc/interactive 主进程均无），Node 默认 exit 1，
  * 后果 = 当轮 record 丢失、manifest 投影未执行（登记 §1.4 死亡通道）。
  */
 function voidRoundFinalChain(promise: Promise<void>, what: string): void {

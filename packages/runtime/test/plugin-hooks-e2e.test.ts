@@ -47,6 +47,7 @@ import {
 } from '../src/services/plugin-service/plugin-bootstrap.js'
 import type {
   HostToWorkerMessage,
+  HookContext,
   HookEntry,
   PluginDescriptor,
 } from '../src/services/plugin-service/plugin-types.js'
@@ -245,12 +246,14 @@ describe('plugin-hooks e2e — Worker host (plugin-bootstrap.handleMessage)', ()
     harness.hostReceived.length = 0
     const notifySpy = vi.spyOn(harness.service.rpcServer, 'notify')
     const invokeSpy = vi.spyOn(harness.service.rpcServer, 'invoke')
+    // [pi1-disposition-chat-flow D7①] context 用 event-interpreter 平铺形态（bridge 包装
+    // 形状分支已随退役删除；生产调用形态 = { event, ...payload }）
+    // ExecuteHookFn 的 context 形参是宽松 Record（event-interpreter 生产路径传平铺对象，
+    // 经组合根注入绕过 HookContext 严格注解）；直调 service 方法同形态，cast 对齐。
     const result = await harness.service.executeHooks('onPiEvent', {
-      pluginId: '',
-      hookType: 'onPiEvent',
-      data: { eventName: 'agent_start', data: { sessionId: 's-e2e' } },
-      timestamp: Date.now(),
-    })
+      event: 'agent_start',
+      sessionId: 's-e2e',
+    } as unknown as HookContext)
 
     // observe 快捷路径：立即返回不 block；经 notify（无 id 通知）派发，不创建 invoke
     expect(result).toEqual({ blocked: false })
@@ -368,12 +371,10 @@ describe('plugin-hooks e2e — process host (plugin-bootstrap-process)', () => {
     harness.hostReceived.length = 0
     const notifySpy = vi.spyOn(harness.service.rpcServer, 'notify')
     const invokeSpy = vi.spyOn(harness.service.rpcServer, 'invoke')
+    // [pi1-disposition-chat-flow D7①] 平铺形态（同上）
     await harness.service.executeHooks('onPiEvent', {
-      pluginId: '',
-      hookType: 'onPiEvent',
-      data: { eventName: 'session_start', data: {} },
-      timestamp: Date.now(),
-    })
+      event: 'session_start',
+    } as unknown as HookContext)
     expect(notifySpy).toHaveBeenCalledTimes(1)
     expect(invokeSpy).not.toHaveBeenCalled()
     notifySpy.mockRestore()

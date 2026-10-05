@@ -38,7 +38,6 @@ describe('u1-view 双视图投影（D9②/D5③）', () => {
       payload: { kind: 'text', content: 'pending' },
       createdAt: expect.any(Number),
       updatedAt: expect.any(Number),
-      sendAttempts: 0,
     })
     expect(full.tombstones.map((t) => t.id)).toEqual(['u-1', 'u-2', 'u-3'])
 
@@ -158,24 +157,18 @@ describe('u1-view onChange 订阅（state topic 装配）', () => {
     handle.dispose()
   })
 
-  it('重试耗尽 failed 终态触发 onChange（创建 + 终态各一次）', () => {
-    const port = makeMockPort({
-      send: () => {
-        throw new Error('pi stuck')
-      },
-    })
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const handle = createDelivery(port, { backoff: { ms: 1, max: 0 } })
+  it('failInFlight failed 终态触发 onChange（创建 + 受理 + 终态）', () => {
+    const port = makeMockPort()
+    const handle = createDelivery(port)
     let changes = 0
     handle.onChange(() => changes++)
 
-    // 同步链：创建(#1) → port.send 抛错 → 零重试上限即 failed 终态(#2)
+    // 同步链：创建(#1) → 受理转 in-flight(#2) → failInFlight failed 终态(#3)
     handle.send(textMsg('m1'), { id: 'u-1' })
     expect(changes).toBe(2)
-    vi.advanceTimersByTime(5) // 无后续变更
-    expect(changes).toBe(2)
+    expect(handle.failInFlight('pi connection lost')).toBe(1)
+    expect(changes).toBe(3)
 
-    warnSpy.mockRestore()
     handle.dispose()
   })
 
@@ -304,7 +297,7 @@ describe('u1-view D9⑤ 口径时点：sendChecked 受理即 resolve（送达确
   })
 })
 
-describe('u1-view v1 机制保持抽查（busy gate / watchdog / dispose）', () => {
+describe('u1-view v1 机制保持抽查（busy gate / dispose）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -312,25 +305,9 @@ describe('u1-view v1 机制保持抽查（busy gate / watchdog / dispose）', ()
     vi.useRealTimers()
   })
 
-  it('30s watchdog：settled 丢失时复核投递（条目 queued → 出站受理 in-flight）', () => {
-    let idle = false
-    const port = makeMockPort({
-      isIdle: () => idle,
-      subscribeSettled: () => () => {}, // 订阅成立但回调从不触发
-    })
-    const handle = createDelivery(port, { watchdogMs: 30_000, backoff: { ms: 100, max: 500 } })
-
-    handle.send(textMsg('m1'), { id: 'u-1' })
-    vi.advanceTimersByTime(29_999)
-    expect(port.sendCalls).toHaveLength(0)
-
-    idle = true
-    vi.advanceTimersByTime(1) // watchdog 第一拍
-    expect(port.sendCalls).toHaveLength(1)
-    expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
-
-    handle.dispose()
-  })
+  // [已不可达用例删除登记] 原「30s watchdog：settled 丢失时复核投递」随 watchdog 定时
+  // 复核腿退役（ADR-0122——busy 留守归 settled 边沿与外部触发，不建定时兜底）而不可达，
+  // 2026-10-05 投递域清理批次删除。
 
   it('dispose 语义保持：清条目集（含 tombstone），不触发 onSettled，checked reject', async () => {
     const onSettled = vi.fn()

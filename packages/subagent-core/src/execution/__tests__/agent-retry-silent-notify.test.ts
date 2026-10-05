@@ -1,17 +1,15 @@
 // src/execution/__tests__/agent-retry-silent-notify.test.ts
 //
-// [P4 / D7] 重试静默反向单测（impl-plan P4 验收条款 c：agent 失败重试期零通知）。
+// [P4 / D7] 终局化静默反向单测。
 //
-// D7 通知不变量的反向面：重试非终局（脚本的自治空间）——重试等待期与重试过程
-// 本身不得产生任何终局信号（终局信号 = 通知链的唯一触发源，finalizeRun → onRunDone
-// → notifyDone 只由终态 transition 驱动）。本文件在两个可证伪点锁定该保证：
+// [HISTORICAL] 原主题「重试等待期零通知」（impl-plan P4 验收条款 c）随重试矩阵删除
+// （ADR-0122）——无重试等待期，失败单次终态化即唯一终局信号。现行锁定两点：
 //
-//   1. call 级（executeAgentCall 真函数 + fake runner 首败后成）：重试等待期
-//      call 未终局化（status=running、trace 零终态 update、无 markDone）；整个过程
-//      finalizeCall 恰好一次（终局化单次，无逐 attempt 终态信号）。
-//   2. journal 级（dispatchAgentSettled 的 result gate）：call 未 markDone（重试中）
-//      时 dispatchAgentSettled 静默返回——agent-settled / run-settled 帧只在终局后落账
-//      （run-settled 帧是终局通知的单点判定源，重试期零帧 = 零通知的结构性前提）。
+//   1. call 级（executeAgentCall 真函数 + fake runner）：失败单次终态化——finalizeCall
+//      恰好一次（终局化单次，trace 单节点单次 update）。
+//   2. journal 级（dispatchAgentSettled 的 result gate）：call 未 markDone 时
+//      dispatchAgentSettled 静默返回——agent-settled / run-settled 帧只在终局后落账
+//      （守卫为防御面，现网调用点在 markDone 之后）。
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -85,7 +83,7 @@ async function flushMicrotasks(ticks = 20): Promise<void> {
 // ── 反向面 1：重试等待期零终局信号 ─────────────────────────────
 
 describe("agent 失败重试期零通知（D7 反向面）", () => {
-  it("call 级：首败 → 重试成功；重试等待期零终局化，全程 finalizeCall 恰好一次", async () => {
+  it("call 级：失败 → 单次终态化（runner.run 恰 1 次、trace 单节点单次 update）", async () => {
     vi.useFakeTimers();
     try {
       const call = new AgentCall(
@@ -103,8 +101,7 @@ describe("agent 失败重试期零通知（D7 反向面）", () => {
       const runner = {
         run: vi
           .fn()
-          .mockResolvedValueOnce({ content: "", error: "engine transient boom", failureKind: "unknown" } satisfies AgentResult)
-          .mockResolvedValueOnce({ content: "done" } satisfies AgentResult),
+          .mockResolvedValue({ content: "", error: "engine transient boom", failureKind: "unknown" } satisfies AgentResult),
       };
       const budget = new Budget();
       const trace = new Trace();
@@ -127,24 +124,14 @@ describe("agent 失败重试期零通知（D7 反向面）", () => {
         trace,
       );
 
-      // 第一次 run 已失败、已进入 backoff 等待（BACKOFF_BASE_MS=1000）：重试等待期
-      // call 未终局化——零 markDone、trace 节点仍 running（零终态 update = 零终局信号）。
-      await vi.advanceTimersByTimeAsync(0);
-      expect(runner.run).toHaveBeenCalledTimes(1);
-      expect(call.status).toBe("running");
-      expect(call.result).toBeUndefined();
-      expect(trace.toArray()[0]?.status).toBe("running");
-
-      // backoff 到期 → 重试成功 → 终局化恰好一次
-      await vi.advanceTimersByTimeAsync(1000);
       await promise;
 
-      expect(runner.run).toHaveBeenCalledTimes(2); // 重试确实发生
-      expect(call.attempts).toBe(2);
+      expect(runner.run).toHaveBeenCalledTimes(1); // 无重试
+      expect(call.attempts).toBe(1);
       expect(call.status).toBe("done");
-      expect(call.result?.error).toBeUndefined(); // 最终成功
-      expect(trace.toArray()).toHaveLength(1); // 终局化恰好一次（非逐 attempt）
-      expect(trace.toArray()[0]?.status).toBe("completed");
+      expect(call.result?.error).toBe("engine transient boom");
+      expect(trace.toArray()).toHaveLength(1); // 终局化恰好一次
+      expect(trace.toArray()[0]?.status).toBe("failed");
     } finally {
       vi.useRealTimers();
     }

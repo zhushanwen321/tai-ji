@@ -36,6 +36,8 @@ import type {
   ProviderId,
   LlmRetryConfig,
   RenameMode,
+  CodemodeEnabledResult,
+  CodemodeSetEnabledResult,
   SendPromptReason,
 } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
@@ -589,6 +591,11 @@ export interface IConfigService {
   getRetryConfig(): { config: LlmRetryConfig; configured: boolean }
   /** 写 retry 域：D8 全量校验失败返回 ok:false + error 不落盘；成功 D3 嵌套键级 merge。 */
   setRetryConfig(config: LlmRetryConfig): { ok: boolean; error?: string }
+  // ── Codemode 开关（codemode 设计 D1/A1，经 ICodemodeSettings port）──
+  /** 读 codemode 开关激活态：settings.json 损坏时错误态经 corruption 返回（enabled 恒 false）。 */
+  getCodemodeEnabled(): CodemodeEnabledResult
+  /** 写 codemode 开关（defaultTools 增量条目）：损坏拒入 ok:false 信封（含路径与隔离副本提示）。 */
+  setCodemodeEnabled(enabled: boolean): CodemodeSetEnabledResult
   // ── Worktree config（git-cwt-anywhere）──
   /** 读取 worktree 根目录（config.json.worktreeRootDir），默认 '~/worktrees'。 */
   getWorktreeRootDir(): string
@@ -740,6 +747,8 @@ export interface IPluginService {
   approvePermissions(pluginId: string, permissions: string[]): Promise<void>
   /** Revoke all permissions for a plugin */
   revokePermissions(pluginId: string): Promise<void>
+  /** 拒绝插件本次权限申请（不回收已授权限；无 pending 时幂等 no-op） */
+  denyPermissions(pluginId: string): Promise<void>
   /** Execute a command contributed by a plugin（S3-W1：返回插件 handler 的执行结果） */
   executeCommand(pluginId: string, commandId: string, args?: Record<string, unknown>): Promise<unknown>
   /** Get plugin config value(s) */
@@ -754,17 +763,14 @@ export interface IPluginService {
   /** Handle UI response from frontend (confirm/select/input dialogs) */
   handleUiResponse(requestId: string, result: unknown): void
 
-  /** Bridge routing methods */
-  handleBridgeRequest?(method: string, payload: Record<string, unknown>, sessionId: string): Promise<unknown>
-
   /** Install a plugin from an npm package specifier */
   installPlugin(packageSpecifier: string): Promise<import('./services/ports/plugin-installer.js').InstallResult>
   getToolSchemas?(): import('./services/plugin-service/plugin-types.js').ToolRegistration[]
-  /** 构造 bridge:sync 同步负载（工具 schema 塑形下沉 service，transport 只 reply） */
-  getBridgeSyncPayload?(): import('./services/plugin-service/plugin-types.js').BridgeSyncPayload
-  handleBridgeToolExecute?(request: import('./services/plugin-service/plugin-types.js').BridgeToolExecuteRequest): Promise<import('./services/plugin-service/plugin-types.js').BridgeToolExecuteResponse>
-  handleBridgeEvent?(eventName: string, data: unknown, sessionId: string): void
-  handleBridgeIntercept?(eventName: string, data: Record<string, unknown>, sessionId: string): Promise<import('./services/plugin-service/plugin-types.js').BridgeInterceptResponse>
+  /**
+   * pi 侧事件向插件钩子的投递（pi1-disposition-chat-flow D7②）：泛型 'onPiEvent' 键派发，
+   * 载荷平铺形状（{ event, ...payload }）。statusSetUpdate 挂点迁移后的唯一投递入口。
+   */
+  notifyPiEvent?(eventName: string, payload: Record<string, unknown>, sessionId: string): void
 }
 
 // ── IGitService ───────────────────────────────────────────────────

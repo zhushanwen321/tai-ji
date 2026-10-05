@@ -109,7 +109,7 @@ export interface SkillInjectionResult {
   notices: SkillNotice[]
 }
 
-// ── pi stripFrontmatter 镜像（锚点 @earendil-works/pi-coding-agent 0.84.4
+// ── pi stripFrontmatter 镜像（锚点 @earendil-works/pi-coding-agent 1.0.0
 //    dist/utils/frontmatter.js + dist/utils/text.js，逐字对齐）──
 //
 // 为什么不直接 import pi 包根导出（设计 D5 原意）：pi 包 exports 白名单仅 "." / "./rpc-entry" /
@@ -222,7 +222,7 @@ function resolveSingleMarker(
     // 经 extension 覆盖链不保证是 SKILL.md 所在目录（PS-24 真实 pi 探针实证漂移，
     // golden diff 抓到后弃用）——dirname(path) 是唯一可靠推导。
     const baseDir = dirname(path)
-    // pi _expandSkillCommand 模板（agent-session.js 0.84.4 :997）逐字：
+    // pi _expandSkillCommand 模板（agent-session.js _expandSkillCommand，1.0.0 复核）逐字：
     // `<skill name="..." location="...">\nReferences are relative to <baseDir>.\n\n<body>\n</skill>`
     // name 用裸 skill 名（SkillInfo.name 无前缀，pi 原生展开无前缀）；
     // name/baseDir 与 pi 同款直接插值不转义（对齐实装行为）
@@ -238,8 +238,8 @@ function resolveSingleMarker(
 /**
  * registry 扫描 → 裸 skill 名 → 映射条目 的权威映射（D7 切源）：global 在前、project
  * 补后，同名先入为主（global 覆盖 project）。与三处现状锚点一致：pi loadSkills 装载序
- * user（agentDir/skills）先于 project（cwd/.pi/skills）且 first-set-wins（0.84.4
- * dist/core/skills.js:322-343/:347-350）；taiji ConfigService.loadSkills 的 orderedDirs
+ * user（agentDir/skills）先于 project（cwd/.pi/skills）且 first-set-wins（1.0.0
+ * dist/core/skills.js loadSkillsFromDir 装载链）；taiji ConfigService.loadSkills 的 orderedDirs
  * global 段在前 +「靠前目录 = 高优先，先入为主」（skill-config-helper.ts）；landing 候选
  * 合并序同款（command-popover-skill-candidates.ts）。SkillInfo.name 是裸名（无 `skill:`
  * 前缀），无需剥前缀；enabled 恒 true（ADR-0021 §5 目录级管道）不做过滤。

@@ -40,18 +40,13 @@ describe("守卫观测参数（label / stale warn 前缀）", () => {
 		mockCapturedGuardOpts.length = 0;
 	});
 
-	it("label = `${component}:sendDelivery` / `${component}:sendDisplayMessage`（两装配方前缀各自归因）", () => {
+	it("label = `${component}:sendDelivery`（装配方前缀归因）", () => {
 		const host = createPiNotifyLedgerHost(makePi(), makeCtx(), {
 			component: "session-manager",
 			logger: { warn: vi.fn() },
-			sendDisplayMessage: true,
 		});
 		host.sendDelivery(MESSAGE);
-		host.sendDisplayMessage?.(MESSAGE);
-		expect(mockCapturedGuardOpts.map((o) => o.label)).toEqual([
-			"session-manager:sendDelivery",
-			"session-manager:sendDisplayMessage",
-		]);
+		expect(mockCapturedGuardOpts.map((o) => o.label)).toEqual(["session-manager:sendDelivery"]);
 	});
 
 	it("staleWarnPrefix 缺省：onStale warn 文案无前缀（subagent-workflow 形态，逐字节）", () => {

@@ -146,8 +146,8 @@ function collectToolCallIds(entries: readonly unknown[]): { callIds: Set<string>
  * 检查 fork 源状态（D3 分支② 判定；语义对齐 pi `forkFrom` 守卫——缺失/空/无 header
  * 即不可 fork——并**更严**一档：header-only（零非 header entry）也判不可用，构造性
  * 杜绝「空上下文线」击穿 G2；pi 对 header-only 会产出空快照文件，宿主前置拦截）。
- * pi 守卫与 header-only 行为断言登记 PS-51（锚点 pi@0.84.4
- * dist/core/session-manager.js forkFrom :1237-1246 守卫 throw / :1271-1275 循环
+ * pi 守卫与 header-only 行为断言登记 PS-51（verifiedWith 以 pi-semantics.json 为准，
+ * 逐 claim 行号见该条目 piAnchor：forkFrom 守卫 throw / append 循环
  * 对 header-only 源零 append 仍产出文件），durable 探针 = btw-pi-fork-semantics.test.ts。
  * 读侧容忍尾部半行（append 中读到未写完的行直接丢弃，不整文件判废）。
  */
@@ -202,7 +202,7 @@ const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
 /**
  * 一次性 fork bootstrap：`pi --mode rpc --fork <源> --session-dir <线目录>` 起进程，
  * pi 在启动期同步完成 forkFrom 落盘（写 header + 逐条复制全树，V2 探针 A 实测 206ms；
- * 写序断言登记 PS-51，锚点 pi@0.84.4 dist/core/session-manager.js forkFrom :1237），
+ * 写序断言登记 PS-51，锚点 dist/core/session-manager.js forkFrom（verifiedWith 见该登记）），
  * 宿主轮询到**新增** .jsonl 即 SIGTERM 收掉 bootstrap 并等其退出（文件可见先于内容
  * 写完，退出即写入侧封闭）再返回（该进程不承载线——线进程由
  * ensureProcess 另行惰性 spawn，避免污染进程表）。
@@ -243,8 +243,8 @@ export async function forkViaCliPi(req: ForkViaCliRequest): Promise<string> {
       // 等退出再返回：pi forkFrom 先 writeFileSync(header) 后逐条 appendFileSync，
       // 文件可见先于内容写完；Node 信号不打断同步复制循环，进程退出即写入侧封闭，
       // 下游 switchSession 读到的是完整静止文件（构造性保证，非时序依赖）。
-      // 写序断言登记 PS-51（锚点 pi@0.84.4 dist/core/session-manager.js:1237 定义 /
-      // :1269 wx 写 / :1271-1275 append 循环）——pi 改异步落盘即漂移，重验见该条目 guard。
+      // 写序断言登记 PS-51（锚点 dist/core/session-manager.js forkFrom：writeFileSync(header)
+      // 定义 / wx 首写 / append 循环，行号见该条目 piAnchor）——pi 改异步落盘即漂移，重验见该条目 guard。
       // SIGTERM 极端形态（目标注册 handler 吞信号不退，node 默认即终止故罕见）→ 宽限
       // 后升级 SIGKILL（不可捕获，写入侧随进程消亡封闭），保证 await 不无限 pending。
       await Promise.race([

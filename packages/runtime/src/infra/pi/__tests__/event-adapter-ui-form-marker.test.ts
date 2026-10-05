@@ -72,7 +72,7 @@ describe('EventAdapter UI_FORM_MARKER 检测路由（u2）', () => {
     expect(payload?.['allowCancel']).toBe(false)
     expect(payload?.['sessionId']).toBe(SID)
     expect(payload?.['requestId']).toBe('req-form')
-    expect(payload?.['method']).toBe('select')
+    expect(payload?.['dialogKind']).toBe('select')
     // 与 ask-user 分支同构：不传 title/options（避免前端把 JSON payload 当下拉选项/标题）
     expect(payload?.['title']).toBeUndefined()
     expect(payload?.['options']).toBeUndefined()
@@ -195,7 +195,7 @@ describe('EventAdapter UI_FORM_MARKER 检测路由（u2）', () => {
 
     const payload = broadcastPayload(events)
     expect(payload).toBeDefined()
-    expect(payload?.['method']).toBe('confirm')
+    expect(payload?.['dialogKind']).toBe('confirm')
     expect(payload?.['form']).toBeUndefined()
   })
 
@@ -245,7 +245,7 @@ describe('EventAdapter form 帧的 pending 缓存编排入口（interpreter 路�
 
     // 广播帧同步送出（message kind 经 interpreter send）
     expect(sent).toHaveLength(1)
-    expect(sent[0].type).toBe('extension.ui_request')
+    expect(sent[0].type).toBe('extension.dialog')
   })
 })
 

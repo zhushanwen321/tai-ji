@@ -246,7 +246,7 @@ function parseCatalogBody(body: unknown): OverlayModel[] {
 }
 
 /** 由 200 响应构造 overlay 条目。last-modified 缺失/非法时置 0（stale）——与 pi
- * 0.84.4 实装（core/remote-catalog-provider.js：`Date.parse(...) ?? ""` →
+ * 1.0.0 实装（core/remote-catalog-provider.js：`Date.parse(...) ?? ""` →
  * `Number.isNaN(lastModified) ? 0 : lastModified`）逐字对齐：pi 侧 0 视为 stale、
  * 执行期忽略该 entry，若此处用 Date.now() 兜底会把 pi 判 stale 的 entry 标成
  * fresh，重演「展示可用 ≠ 执行可用」漂移。 */

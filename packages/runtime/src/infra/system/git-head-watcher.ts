@@ -1,7 +1,7 @@
 /**
  * GitHeadWatcher —— git HEAD 的 fs.watch 事件驱动挂载 + 两层恢复链（缓存治理批 4 U11）。
  *
- * 对齐 pi tui 的 fs-watch 形态（@earendil-works/pi-coding-agent 0.84.4 实装锚点：
+ * 对齐 pi tui 的 fs-watch 形态（@earendil-works/pi-coding-agent 1.0.0 实装锚点：
  * dist/utils/fs-watch.js + dist/core/footer-data-provider.js setupGitWatcher/clearGitWatchers/
  * scheduleGitWatcherRetry）：
  * - **watch HEAD 所在目录而非 HEAD 文件**——git 原子写（tmp + rename 覆盖）会换 inode，对文件
@@ -39,10 +39,7 @@ import type { RepoObservation } from '../../services/ports/git-info.js'
 
 /** debounce 窗口：首事件起算、窗口内事件合并到到点一次放行（tui WATCH_DEBOUNCE_MS 同构）。 */
 const HEAD_DEBOUNCE_MS = 500
-/** L1 重试间隔（tui FS_WATCH_RETRY_DELAY_MS = 5000 同构）。 */
-const WATCH_RETRY_DELAY_MS = 5000
 /** L2 周期兜底间隔（设计 §3.4.3：无条件运行，徽章陈旧上界 60s）。 */
-const FALLBACK_RESCAN_INTERVAL_MS = 60_000
 
 /** watch 目标目录的类型：head 所在目录（事件过滤 filename===HEAD）与 reftable 目录（不过滤）。 */
 type WatchDirKind = 'head' | 'reftable'
@@ -56,16 +53,13 @@ export interface GitHeadWatcherCallbacks {
   /** debounce 收敛后的 git 事件（参数 = 受影响 cwd 集合）。经组合根接观测刷新触发器。 */
   onGitEvent(cwds: Set<string>): void
   /** L2 兜底周期（参数 = watcher 已登记的全部 cwd）。经同一触发器入口，两路统一。 */
-  onFallbackTick(cwds: Set<string>): void
 }
 
 export interface GitHeadWatcherOptions extends GitHeadWatcherCallbacks {
   /** 测试可注入短 debounce（默认 500ms）。 */
   debounceMs?: number
   /** 测试可注入短 L1 重试间隔（默认 5s）。 */
-  retryDelayMs?: number
   /** 测试可注入短 L2 兜底周期（默认 60s）。 */
-  fallbackIntervalMs?: number
 }
 
 /** 从 error 事件/构造抛出的未知形态中提取 errno（结构化收窄，无断言）；无 code 返回空串。 */
@@ -79,8 +73,6 @@ function extractErrno(err: unknown): string {
 export class GitHeadWatcher {
   private readonly callbacks: GitHeadWatcherCallbacks
   private readonly debounceMs: number
-  private readonly retryDelayMs: number
-  private readonly fallbackIntervalMs: number
 
   /** cwd → watch 目标（observe 登记 / forget 移除；observe 幂等重登记覆盖旧值）。 */
   private readonly targets = new Map<string, WatchDirEntry[]>()
@@ -90,16 +82,11 @@ export class GitHeadWatcher {
   /** debounce 批次：窗口内事件累积的 cwd 集合，到点整体放行。 */
   private pendingCwds = new Set<string>()
   private debounceTimer: NodeJS.Timeout | null = null
-  private retryTimer: NodeJS.Timeout | null = null
-  private fallbackTimer: NodeJS.Timeout | null = null
   private disposed = false
 
   constructor(options: GitHeadWatcherOptions) {
     this.callbacks = options
     this.debounceMs = options.debounceMs ?? HEAD_DEBOUNCE_MS
-    this.retryDelayMs = options.retryDelayMs ?? WATCH_RETRY_DELAY_MS
-    this.fallbackIntervalMs = options.fallbackIntervalMs ?? FALLBACK_RESCAN_INTERVAL_MS
-    this.armFallbackTimer()
   }
 
   // ── 挂载集合维护（观测器回调驱动）────────────────────────────────────
@@ -146,14 +133,6 @@ export class GitHeadWatcher {
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer)
       this.debounceTimer = null
-    }
-    if (this.retryTimer) {
-      clearTimeout(this.retryTimer)
-      this.retryTimer = null
-    }
-    if (this.fallbackTimer) {
-      clearInterval(this.fallbackTimer)
-      this.fallbackTimer = null
     }
   }
 
@@ -251,14 +230,9 @@ export class GitHeadWatcher {
       this.dirCwds.clear()
     }
     console.warn(
-      `[git-head-watcher] fs.watch error${extractErrno(err)} — cleared ${failedDir !== undefined ? `watcher for ${failedDir}` : 'all git watchers'}, retrying mount in ${this.retryDelayMs}ms` +
-        '（EMFILE 类按日志检查进程 fd 上限；重试持续失败期间缓存新鲜度由 L2 周期兜底维持）',
+      `[git-head-watcher] fs.watch error${extractErrno(err)} — cleared ${failedDir !== undefined ? `watcher for ${failedDir}` : 'all git watchers'}` +
+        '（自动补挂重试已随 ADR-0122 退役：watch 失效显式上报，恢复归下一次 mount 触发）',
     )
-    if (this.retryTimer) return
-    this.retryTimer = setTimeout(() => {
-      this.retryTimer = null
-      this.remountMissing()
-    }, this.retryDelayMs)
   }
 
   /**
@@ -315,22 +289,4 @@ export class GitHeadWatcher {
 
   // ── L2：60s 周期兜底（无条件运行，不依赖 watch 存活）──────────────────
 
-  /**
-   * 武装 L2 兜底定时器（构造即武装——「无条件运行」语义；unref 不持有事件循环，
-   * 对齐 skill-registry 兜底定时器先例，shutdown 由 dispose 显式清理）。
-   * 每周期：①顺带重挂已失效 watcher；②把已登记 cwd 集合发 onFallbackTick（经触发器
-   * 同一「刷新 + 值变化判定 + 节流 + 广播」入口——徽章陈旧上界 60s 的机制保证）。
-   */
-  private armFallbackTimer(): void {
-    if (this.fallbackTimer) return
-    const timer = setInterval(() => {
-      if (this.disposed) return
-      this.remountAll()
-      const cwds = new Set(this.targets.keys())
-      if (cwds.size > 0) this.callbacks.onFallbackTick(cwds)
-    }, this.fallbackIntervalMs)
-    // 纯兜底周期任务：unref 不持有事件循环（不阻进程退出）；shutdown 由 dispose 显式清理
-    timer.unref()
-    this.fallbackTimer = timer
-  }
 }

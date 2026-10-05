@@ -51,7 +51,7 @@ describe("WT6: PermissionMode 枚举完整性", () => {
 		expect(DEFAULT_CONFIG.enabled).toBe(true);
 		expect(DEFAULT_CONFIG.classifier.enabled).toBe(true);
 		expect(DEFAULT_CONFIG.classifier.model).toBe("auto");
-		expect(DEFAULT_CONFIG.classifier.timeout).toBe(90);
+		expect(DEFAULT_CONFIG.classifier.timeout).toBe(0);
 		expect(DEFAULT_CONFIG.classifier.autoApproveLowRisk).toBe(true);
 		expect(DEFAULT_CONFIG.classifier.autoDenyHighRisk).toBe(true);
 		expect(DEFAULT_CONFIG.userRules).toEqual([]);

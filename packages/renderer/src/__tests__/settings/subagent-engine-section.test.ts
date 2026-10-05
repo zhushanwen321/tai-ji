@@ -27,7 +27,7 @@ const sessionApiMock = vi.hoisted(() => ({
 
 import SubagentEngineSection from '@/components/settings/agent/SubagentEngineSection.vue'
 import { useToast } from '@/composables/useToast'
-import zhCN from '@/i18n/locales/zh-CN/settings'
+import zhCN from '@taiji/ui/locale/zh-CN/settings'
 
 function makeI18n() {
   return createI18n({

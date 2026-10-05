@@ -12,8 +12,7 @@
  * - handlers.ts: 5 个事件处理器（session_start/session_tree/agent_start/before_agent_start/agent_end）
  *                + reconstructState（回放最后一条 todo toolResult）+ steer 双机制（autoClear/completion）
  * - render.ts:   状态栏（status line）/ widget（单双列自适应）/ tool result 三层渲染
- * - component.ts: /todos 命令的 TodoListComponent TUI 视图（只读双列）
- * - commands.ts: /todos 命令注册
+ * - commands.ts: /todos 命令注册（notify + widget 双通道反馈，D10①）
  * - index.ts（本文件）: 工厂入口（创建 state + 注册 tool/command/event + makeRefreshDisplay）
  *
  * 错误处理：包内单一 throw 协议——handler 与 model 层纯函数（addTodos / updateTodos）
@@ -74,5 +73,5 @@ export default function (pi: ExtensionAPI) {
 	// ── 注册所有 handler / tool / command ──────────────
 	registerTodoEventHandlers(pi, state, refreshDisplay);
 	registerTodoTool(pi, state, refreshDisplay);
-	registerTodosCommand(pi, state);
+	registerTodosCommand(pi, state, refreshDisplay);
 }

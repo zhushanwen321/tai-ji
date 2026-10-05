@@ -444,63 +444,6 @@ export function readLogKeepDays(env: Record<string, string | undefined> = proces
   return Number(env.TAIJI_LOG_KEEP_DAYS) || DEFAULT_LOG_KEEP_DAYS
 }
 
-// ── 空闲 pi 进程回收（idle-pi-reclamation D4，实施计划 u3）──
-// 四个旋钮的 env 变量名 + 默认值 SSOT。本文件保持纯常量：解析（env 读取 + 非法值回落）
-// 收口在 runtime 的 resolveReclaimConfig（startup-background-init.ts），此处不写函数。
-
-/**
- * 空闲回收判定周期（ms）。`TAIJI_RUNTIME_PI_RECLAIM_TICK_MS` env 覆盖，默认 5 分钟一拍（D4）。
- */
-export const TAIJI_RUNTIME_PI_RECLAIM_TICK_MS = 'TAIJI_RUNTIME_PI_RECLAIM_TICK_MS'
-/**
- * 空闲阈值（ms）。`TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS` env 覆盖，默认 2 小时（D4：被否
- * 30min——回收/恢复抖动变常态；被否 24h——对午饭级离开太迟）。
- */
-export const TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS = 'TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS'
-/**
- * 查看豁免窗口（ms）。`TAIJI_RUNTIME_PI_RECLAIM_VIEWED_WINDOW_MS` env 覆盖，默认 30 分钟
- * （D2 #6：窗口内被 session.switch 查看过的 session 不回收）。
- */
-export const TAIJI_RUNTIME_PI_RECLAIM_VIEWED_WINDOW_MS = 'TAIJI_RUNTIME_PI_RECLAIM_VIEWED_WINDOW_MS'
-/**
- * 挂起 UI 请求豁免的计龄上界（ms）。`TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS` env 覆盖，
- * 默认 6 小时（v6 第四案：豁免无上界 = 把有界的 2h 缺陷换成无界进程滞留）。上界写在豁免
- * 判定内部（阈值判定先于豁免，外部上界会被结构性旁路），且只作用于回收豁免判定、
- * **不排空 pending 存储**——超龄 pending 在进程存活期内仍可被重订阅捞回。
- */
-export const TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS = 'TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS'
-
-/**
- * 默认值四件套（与 runtime idle-pi-reaper.ts 的 DEFAULT_REAP_TICK_MS /
- * DEFAULT_IDLE_THRESHOLD_MS / DEFAULT_VIEWED_WINDOW_MS / DEFAULT_FORM_MAX_AGE_MS 数值
- * 逐一同源）：reaper 模块内的 DEFAULT_* 是「options 未传时」的 fallback 兜底（DI 纯单测
- * 场景），生产装配经 resolveReclaimConfig 把此处权威值（可被 env 覆盖）传入 config——
- * 改默认值只改这里，reaper 内 fallback 仅保测试构造点不炸，两处数值失同步时以本处为准。
- */
-// eslint-disable-next-line no-magic-numbers -- 设计标定阈值（D4），校准依据见上方 JSDoc
-export const DEFAULT_PI_RECLAIM_TICK_MS = 5 * 60 * 1000
-// eslint-disable-next-line no-magic-numbers -- 设计标定阈值（D4），校准依据见上方 JSDoc
-export const DEFAULT_PI_RECLAIM_IDLE_MS = 2 * 60 * 60 * 1000
-// eslint-disable-next-line no-magic-numbers -- 设计标定阈值（D2 #6），校准依据见上方 JSDoc
-export const DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS = 30 * 60 * 1000
-// eslint-disable-next-line no-magic-numbers -- 设计标定阈值（v6 第四案挂起表单豁免上界），校准依据见上方 JSDoc
-export const DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS = 6 * 60 * 60 * 1000
-
-// ── 会话激活上界（model-switch-live-provider-sync U2，D5 停止态走 ensureActive）──
-
-/**
- * 停止态/回收态 session 的模型切换（先 `ensureActive` 拉活再切）在 **RPC 边界**的等待上界。
- * `TAIJI_SESSION_ACTIVATE_TIMEOUT_MS` env 覆盖，默认 15s。
- *
- * 语义（设计 §3.6「激活的等待上界」行）：超时只终止 RPC 等待并回
- * `SESSION_ACTIVATE_TIMEOUT`（前端 toast 指引重试），**不取消后台恢复**——join 语义保留，
- * 用户重试时 join 同一 in-flight。`≤0` = 不限时（逃生门，与 bash RPC 的 0=不限时同口径）。
- * 正常路径 1–2s（respawn+attach 经验值），上界只对病态占座生效。
- */
-export const TAIJI_SESSION_ACTIVATE_TIMEOUT_MS = 'TAIJI_SESSION_ACTIVATE_TIMEOUT_MS'
-// eslint-disable-next-line no-magic-numbers -- 设计标定阈值（U2/D5），校准依据见上方 JSDoc
-export const DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS = 15 * 1000
-
 // ── 滚动重启计划内退出码（crash-forensics-and-watchdog §3.3 D5 ④，u7c）──
 
 /**

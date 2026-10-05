@@ -94,7 +94,7 @@
 
 - `execute` 返回 `{ content: [...], details: {...} }` 结构
 - `details` 是 renderResult 的数据来源，不要依赖 content 文本解析
-- 错误处理采用 **throw 范式**（与 pi@0.84.4 实装一致：pi-agent-core `dist/agent-loop.js` `executePreparedToolCall` 对 execute 返回值只取 content/details/usage/terminate，返回值上的 `isError` 字段**被丢弃**〔`:464` 正常返回恒 `isError: false`〕；`execute` 抛出时由 pi 外层 catch 统一转 `isError: true` 的 error tool result，`:466-471`）——**内部实现函数与 `execute` 直接 `throw`，不要 catch 后在返回值里带 `isError: true`**（返回值 isError 被丢弃 = 错误被标成功）；先例：session-reader `handler-utils.ts` err() + `index.ts` execute 不 catch 原样传播。唯一纪律：错误消息用 `err.message`（不含堆栈），禁止把 `err.stack` 拼进 content（堆栈外泄到 LLM 上下文/持久化记录）；同时禁止 `{ content: [{ text: "错误: ..." }] }` 不带失败标记的**错误成功模式**（调用方无法区分成功与失败——throw 范式下由 pi 置 isError 保证）
+- 错误处理采用 **throw 范式**（统一 throw 约定保持；与 pi@1.0.0 实装一致：`AgentToolResult` 已声明 `isError?: boolean`〔pi-agent-core `dist/types.d.ts:386`〕，`dist/agent-loop.js` `executePreparedToolCall` 正常返回按 `isError: result.isError === true` 尊重返回值标记〔`:579`〕、`execute` 抛出时由 pi 外层 catch 统一转 `isError: true` 的 error tool result〔`:581-588`〕，两版语义等价，不构成错误标成功通道）——**内部实现函数与 `execute` 直接 `throw`，不要 catch 后在返回值里带 `isError: true`**（统一 throw 纪律：单一错误路径，错误消息格式统一受控；catch 后返回与 throw 语义等价，禁止双轨混用）；先例：session-reader `handler-utils.ts` err() + `index.ts` execute 不 catch 原样传播。唯一纪律：错误消息用 `err.message`（不含堆栈），禁止把 `err.stack` 拼进 content（堆栈外泄到 LLM 上下文/持久化记录）；同时禁止 `{ content: [{ text: "错误: ..." }] }` 不带失败标记的**错误成功模式**（调用方无法区分成功与失败——throw 范式下由 pi 置 isError 保证）
 
 ## TUI 渲染
 
@@ -136,7 +136,7 @@ streamSink: ctx.mode === "rpc"
 - 新增/修改 SDK 调用必须有契约测试覆盖（模板：`extensions/universal/subagent-workflow/src/execution/__tests__/sdk-contract.test.ts`）
 - `registerTool` 的 schema 必填字段在所有执行模式下都必须真的必填；条件必填用 Optional + 运行时校验，避免 schema 与描述矛盾
 
-> 本项目已将 `@earendil-works/pi-coding-agent` 作为根 devDependency 安装（真实 SDK 类型，当前 0.84.4——版本不在文档写死，以根 `package.json` 为准并由 C-build-07 检查 `scripts/check-pi-sync.mjs` 跟随），不再使用类型桩。extensions 的 tsconfig 直接从 node_modules 解析 SDK 类型。
+> 本项目已将 `@earendil-works/pi-coding-agent` 作为根 devDependency 安装（真实 SDK 类型——版本不在文档写死，以根 `package.json` 为准并由 C-build-07 检查 `scripts/check-pi-sync.mjs` 跟随），不再使用类型桩。extensions 的 tsconfig 直接从 node_modules 解析 SDK 类型。
 
 ## Event handler 消息注入
 

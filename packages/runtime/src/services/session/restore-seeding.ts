@@ -196,9 +196,9 @@ function bytesToMbLabel(bytes: number): string {
  * D5⑤ 超阈值文件的最小规范化（P-restore-skip 降级形态）。
  *
  * 为什么不走设计主形态「跳过 normalize 全流程」（P-restore-skip 双分支裁决，u4c 实施期）：
- * 失忆半边不安全——pi 0.84.4 实装 _buildIndex（node_modules dist/core/session-manager.js
- * :673-694）对所有非 session entry 无差别 `byId.set(entry.id); leafId = entry.id`，
- * appendMessage 以 `parentId: this.leafId` 挂链（:768+）：尾部 legacy session_end（无 id）
+ * 失忆半边不安全——pi 实装（1.0.0 复核）_buildIndex（node_modules
+ * dist/core/session-manager.js）对所有非 session entry 无差别 `byId.set(entry.id); leafId = entry.id`，
+ * appendMessage 以 `parentId: this.leafId` 挂链：尾部 legacy session_end（无 id）
  * 未 strip 时 leafId=undefined → 新增 entry parentId=undefined → parentId 链断 →
  * 全部旧历史不进 LLM 上下文且无任何错误信号（静默失忆）。A11 构造声明的「尾部含
  * legacy session_end 变体」正是该场景，跳过即触发。cwd 半边（跳过 → switchSession

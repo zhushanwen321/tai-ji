@@ -124,10 +124,12 @@
           <SystemPage v-else-if="activeMenu === 'system'" :key="activeMenu" :system="system" @update="onSystemUpdate" />
           <SystemPromptPage v-else-if="activeMenu === 'system-prompt'" :key="activeMenu" />
           <TerminalPage v-else-if="activeMenu === 'terminal'" :key="activeMenu" />
+          <McpSection v-else-if="activeMenu === 'mcp'" :key="activeMenu" />
           <PiPresetsPage v-else-if="activeMenu === 'preset'" :key="activeMenu" />
           <TtsPage v-else-if="activeMenu === 'tts'" :key="activeMenu" />
           <WorktreePage v-else-if="activeMenu === 'worktree'" :key="activeMenu" />
           <UpdatePage v-else-if="activeMenu === 'update'" :key="activeMenu" />
+          <RemoteAccessPage v-else-if="activeMenu === 'remote-access'" :key="activeMenu" />
           <AppearancePage v-else-if="activeMenu === 'appearance'" :key="activeMenu" :system="system" @update="onSystemUpdate" />
           <UsagePage v-else-if="activeMenu === 'usage'" :key="activeMenu" />
         </div>
@@ -140,7 +142,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, Volume2, X, Download, Palette, BarChart3, ArrowLeft, ArrowRight, PanelLeftClose } from '@lucide/vue'
+import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, Server, Volume2, X, Download, Palette, BarChart3, ArrowLeft, ArrowRight, PanelLeftClose, Wifi } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
 import { cycleTabFocus, getFocusableElements } from '@/composables/logic/focus-trap'
@@ -156,10 +158,12 @@ import PluginContributionsPage from './extension/PluginContributionsPage.vue'
 import SystemPage from './system/SystemPage.vue'
 import SystemPromptPage from './system/SystemPromptPage.vue'
 import TerminalPage from './terminal/TerminalPage.vue'
+import McpSection from './mcp/McpSection.vue'
 import WorktreePage from './worktree/WorktreePage.vue'
 import PiPresetsPage from './preset/PiPresetsPage.vue'
 import TtsPage from './tts/TtsPage.vue'
 import UpdatePage from './update/UpdatePage.vue'
+import RemoteAccessPage from './remote-access/RemoteAccessPage.vue'
 import UsagePage from './usage/UsagePage.vue'
 import AppearancePage from './appearance/AppearancePage.vue'
 
@@ -171,10 +175,12 @@ const menus = [
   { id: 'extension', labelKey: 'settings.menu.extension', icon: Blocks },
   { id: 'system-prompt', labelKey: 'settings.menu.systemPrompt', icon: ScrollText },
   { id: 'terminal', labelKey: 'settings.menu.terminal', icon: TerminalSquare },
+  { id: 'mcp', labelKey: 'settings.menu.mcp', icon: Server },
   { id: 'preset', labelKey: 'settings.menu.preset', icon: ClipboardList },
   { id: 'tts', labelKey: 'settings.menu.tts', icon: Volume2 },
   { id: 'worktree', labelKey: 'settings.menu.worktree', icon: GitBranch },
   { id: 'update', labelKey: 'settings.menu.update', icon: Download },
+  { id: 'remote-access', labelKey: 'settings.menu.remoteAccess', icon: Wifi },
   { id: 'system', labelKey: 'settings.menu.system', icon: SlidersHorizontal },
   { id: 'usage', labelKey: 'settings.menu.usage', icon: BarChart3 },
 ] as const

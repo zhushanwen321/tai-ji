@@ -112,26 +112,6 @@ describe('ProcessManager.withEphemeralPi（W11 短命 pi 附着）', () => {
     expect(pm.size).toBe(0)
   })
 
-  it('就绪超时：switchSession 挂起超过 5s → reject 带 timeout 消息 + 进程销毁（fake timers）', async () => {
-    vi.useFakeTimers()
-    const origCreate = pm.createSession.bind(pm)
-    vi.spyOn(pm, 'createSession').mockImplementation(async (id, cwd, opts) => {
-      const c = await origCreate(id, cwd, opts)
-      ;(c as unknown as { switchSession: ReturnType<typeof vi.fn> }).switchSession
-        = vi.fn(() => new Promise<void>(() => {}))
-      return c
-    })
-
-    const pending = pm.withEphemeralPi(SESSION_FILE, async () => 'unreachable')
-    const assertion = expect(pending).rejects.toThrow('Ephemeral pi attach timed out after 5000ms')
-    // 推进 5s 触发就绪超时
-    await vi.advanceTimersByTimeAsync(5_000)
-    await assertion
-
-    expect(rpcMock.instances[0].killed).toBe(true)
-    expect(pm.size).toBe(0)
-  })
-
   it('spawn 失败（createSession 抛错）→ rethrow，无进程残留', async () => {
     vi.spyOn(pm, 'createSession').mockRejectedValueOnce(new Error('Failed to start pi process'))
     await expect(pm.withEphemeralPi(SESSION_FILE, async () => 'unreachable'))

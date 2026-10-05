@@ -14,6 +14,7 @@ import { ProviderCredentialResolver } from '../auth/provider-credential-resolver
 import type { IProviderCredentialResolver } from '../ports/provider-credential-resolver.js'
 import type { IConfigStore } from '../ports/config.js'
 import type { BuiltinProviderTemplate } from '@taiji/shared'
+import snapshot from '../../generated/builtin-providers.json'
 import type { AuthStorage } from '../auth/auth-storage.js'
 import type { TaijiProviderStore } from '../provider-extras-store.js'
 
@@ -45,71 +46,26 @@ const service = new ConfigService('/tmp/project', {} as unknown as IConfigStore)
 describe('ConfigService.listBuiltinProviders', () => {
   const providers: BuiltinProviderTemplate[] = service.listBuiltinProviders()
 
-  it('t1: 返回 39 个内置 provider', () => {
-    expect(providers).toHaveLength(39)
-  })
-
-  it('t2: openai authMode===api_key 且 envVars 含 OPENAI_API_KEY', () => {
-    const openai = providers.find(p => p.id === 'openai')
-    expect(openai).toBeDefined()
-    expect(openai!.authMode).toBe('api_key')
-    expect(openai!.envVars).toContain('OPENAI_API_KEY')
-  })
-
-  it('t3: 不含 radius（wave 1 已排除）', () => {
-    const radius = providers.find(p => p.id === 'radius')
-    expect(radius).toBeUndefined()
-  })
-
-  it('t4: anthropic authMode===both 且 oauthSupported===true', () => {
-    const anthropic = providers.find(p => p.id === 'anthropic')
-    expect(anthropic).toBeDefined()
-    expect(anthropic!.authMode).toBe('both')
-    expect(anthropic!.oauthSupported).toBe(true)
-  })
-
-  it('t5: 每个 provider 含全字段，models 元素含 11 字段契约（id/name/api/baseUrl/reasoning/input/cost/contextWindow/maxTokens/thinkingLevelMap/compat）', () => {
+  // 投影层契约 = 「生成 JSON 完整透出 + 形状守卫」。值契约（42/openai both/radius 在册/
+  // google-vertex M-1）的归属边界在 gen 提取器（scripts/__tests__/gen-builtin-providers.test.ts），
+  // 此处不再复制第二份手写基线数字（gen t10 注释登记过「手写基线第三份数据失守」教训）。
+  it('t1: 投影与生成快照结构等价（完整透出，无丢失无改写）', () => {
     expect(providers.length).toBeGreaterThan(0)
-    const ALL_11 = ['id', 'name', 'api', 'baseUrl', 'reasoning', 'input', 'cost', 'contextWindow', 'maxTokens', 'thinkingLevelMap', 'compat']
+    expect(providers).toEqual(snapshot.providers)
+  })
+
+  it('t5: provider 级投影形状契约（本层独有信号：models.length===modelCount 对账 + 损坏守卫不误触发）', () => {
     for (const p of providers) {
-      // provider 级字段
       expect(typeof p.id).toBe('string')
       expect(typeof p.name).toBe('string')
-      // api/baseUrl 为 optional，存在时须为 string
-      if (p.api !== undefined) expect(typeof p.api).toBe('string')
-      if (p.baseUrl !== undefined) expect(typeof p.baseUrl).toBe('string')
       expect(['api_key', 'oauth', 'both', 'ambient']).toContain(p.authMode)
       expect(Array.isArray(p.envVars)).toBe(true)
       expect(typeof p.oauthSupported).toBe('boolean')
-      if (p.apiKeyName !== undefined) expect(typeof p.apiKeyName).toBe('string')
-      if (p.oauthName !== undefined) expect(typeof p.oauthName).toBe('string')
       expect(typeof p.modelCount).toBe('number')
-      if (p.logoUrl !== undefined) expect(typeof p.logoUrl).toBe('string')
       expect(Array.isArray(p.models)).toBe(true)
+      // 条目数对账是投影层独有的完整性信号（快照等价已保证其余字段）
       expect(p.models.length).toBe(p.modelCount)
-      // model 级 11 字段契约（生成脚本恒输出 11 键；可选字段缺省为 null）
-      for (const m of p.models) {
-        for (const key of ALL_11) {
-          expect(m, `${p.id} model ${m.id} 应含字段 ${key}`).toHaveProperty(key)
-        }
-        expect(typeof m.id).toBe('string')
-        expect(typeof m.name).toBe('string')
-        expect(typeof m.api).toBe('string')
-        if (m.baseUrl !== undefined) expect(typeof m.baseUrl).toBe('string')
-        expect(typeof m.reasoning).toBe('boolean')
-        expect(Array.isArray(m.input)).toBe(true)
-        expect(m.contextWindow).toBeTypeOf('number')
-        if (m.maxTokens !== null && m.maxTokens !== undefined) expect(typeof m.maxTokens).toBe('number')
-        if (m.thinkingLevelMap !== null && m.thinkingLevelMap !== undefined) expect(typeof m.thinkingLevelMap).toBe('object')
-        if (m.compat !== null && m.compat !== undefined) expect(typeof m.compat).toBe('object')
-      }
     }
-  })
-
-  it('t6: google-vertex envVars 含 GOOGLE_CLOUD_API_KEY（镜像表漏配回归，M-1）', () => {
-    const gv = providers.find(p => p.id === 'google-vertex')
-    expect(gv).toBeDefined()
-    expect(gv!.envVars).toContain('GOOGLE_CLOUD_API_KEY')
   })
 })
 

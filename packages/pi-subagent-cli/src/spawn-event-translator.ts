@@ -37,6 +37,30 @@ type PendingToolRegistry = Map<string, { toolName: string; args?: unknown }>;
 /** agentEvent 统一出口签名（reducer + limiter + 协议通知）。 */
 type AgentEventSink = (event: AgentEvent) => void;
 
+/**
+ * [codemode u5 / D4] 嵌套工具调用判定（live ≡ reload 对齐，非 codemode 专属逻辑）。
+ *
+ * 判据来源（pi 1.0.0 dist 实证）：工具经 ctx.executeTool() 发起的嵌套调用，其
+ * tool_execution_start / tool_execution_update / tool_execution_end 事件一律携带
+ * parentToolCallId（dist/core/nested-tool-calls.js 三处 emit 点），且嵌套调用不落
+ * transcript（dist/core/extensions/types.d.ts executeTool 契约「It does not appear in
+ * the transcript」）。过滤语义 = 与 transcript 投影对齐：reload 后嵌套调用只有外层一个
+ * 工具块，live 期放行 start/end 会经下方翻译各产独立 tool_start/tool_end → 投影不一致。
+ * 未来任何 ctx.executeTool 调用源自动被本过滤覆盖（现役唯一发射源为 codemode 脚本）。
+ *
+ * start 与 end 必须同判同滤（两 handler 入口同一谓词）：仅滤 start 会让嵌套 end 对未注册
+ * toolCallId 发出孤儿 tool_end 块。空串按非嵌套放行（'' 属畸形值，pi 实发恒为真实父 id；
+ * 误滤顶层块是数据损失，误放行至多多一个重复块）。
+ *
+ * tool_execution_update 豁免（判据不含 update，switch 分支不动）：嵌套 update 不产工具块、
+ * 不落 transcript，且经 handleToolExecutionUpdate 映射为活性信号（U-A6 无进展守护刷新通道，
+ * 嵌套执行窗口内唯一在途刷新源），丢弃会复发守护误杀。
+ */
+function isNestedToolExecution(raw: SdkEvent): boolean {
+  const parentToolCallId = raw.parentToolCallId;
+  return typeof parentToolCallId === "string" && parentToolCallId !== "";
+}
+
 /** createSdkEventTranslator 的装配参数。 */
 export interface SdkTranslatorOpts {
   maxTurns?: number;
@@ -60,6 +84,8 @@ function handleToolExecutionStart(
   pendingTools: PendingToolRegistry,
   agentEvent: AgentEventSink,
 ): void {
+  // [codemode u5 / D4] 嵌套调用不产独立 tool_start、不进寄存器（判据见 isNestedToolExecution）
+  if (isNestedToolExecution(raw)) return;
   const toolName = raw.toolName ?? "";
   if (raw.toolCallId) {
     pendingTools.set(raw.toolCallId, { toolName, args: raw.args });
@@ -73,6 +99,8 @@ function handleToolExecutionEnd(
   pendingTools: PendingToolRegistry,
   agentEvent: AgentEventSink,
 ): void {
+  // [codemode u5 / D4] 与 start 同判早退——防对未注册 toolCallId 发孤儿 tool_end
+  if (isNestedToolExecution(raw)) return;
   agentEvent({
     type: "tool_end",
     toolName: raw.toolName ?? "",

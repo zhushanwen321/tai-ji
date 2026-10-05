@@ -35,7 +35,7 @@ const REPO_ROOT = join(TEST_DIR, '..', '..')
 
 const readReal = (rel) => readFileSync(join(REPO_ROOT, rel), 'utf-8')
 const realSystemPrompt = readReal('extensions/taiji/system-prompt/src/index.ts')
-const realSanitize = readReal('packages/renderer/src/composables/logic/markdown-sanitize.ts')
+const realSanitize = readReal('packages/ui/src/features/chat/markdown-sanitize.ts')
 
 const mustValues = (result, label) => {
   if (result.error) throw new Error(`${label} 提取失败：${result.error}`)
@@ -100,7 +100,7 @@ const sanitizeSrc = ({ tags, attrs, allowData = true, allowAria = true }) => {
 
 /**
  * tmp mirror 工厂：目录布局对齐守卫的 ROOT 相对路径（extensions/taiji/system-prompt/src、
- * packages/renderer/src/composables/logic）。overrides 覆盖任一侧成员集或净化配置锚点（漂移
+ * packages/ui/src/features/chat）。overrides 覆盖任一侧成员集或净化配置锚点（漂移
  * 注入点），missing 指定不落盘的文件。root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
  */
 function makeMirror({
@@ -122,7 +122,7 @@ function makeMirror({
       forbiddenTags,
       forbiddenAttrs,
     }),
-    'packages/renderer/src/composables/logic/markdown-sanitize.ts': sanitizeSrc({
+    'packages/ui/src/features/chat/markdown-sanitize.ts': sanitizeSrc({
       tags: sanitizeTags,
       attrs: sanitizeAttrs,
       allowData,
@@ -225,7 +225,7 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
   })
 
   it('比对面文件缺失 → exit 1，报缺失路径与迁移同步指引（提取失败一律 fail）', () => {
-    const fx = makeMirror({ missing: ['packages/renderer/src/composables/logic/markdown-sanitize.ts'] })
+    const fx = makeMirror({ missing: ['packages/ui/src/features/chat/markdown-sanitize.ts'] })
     try {
       const r = fx.run()
       expect(r.status).toBe(1)

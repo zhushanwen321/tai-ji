@@ -295,6 +295,53 @@ describe("registerPlanCommand", () => {
     return payload.content;
   }
 
+  // --- D10②：命令反馈 notify（display:false 注入仅 LLM 可见，用户可见性由 notify 承担） ---
+
+  it("重入分支（存在既有 plan 文件）：notify 提示 + 选项清单仍走 display:false 注入", async () => {
+    vi.mocked(fs.readdirSync).mockReturnValue(["old-plan"] as unknown as ReturnType<typeof fs.readdirSync>);
+    vi.mocked(fs.statSync).mockImplementation(() => ({ isDirectory: () => true }) as unknown as fs.Stats);
+    vi.mocked(fs.existsSync).mockImplementation((p) => String(p).endsWith("/.tmp/plans/old-plan/plan.md"));
+    try {
+      await handler("", ctx);
+    } finally {
+      vi.mocked(fs.existsSync).mockImplementation(() => false);
+    }
+
+    const notify = (ctx as unknown as { ui: { notify: ReturnType<typeof vi.fn> } }).ui.notify;
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("1 existing plan file(s)"), "info");
+    // LLM 注入通路不变：custom message display:false + 选项清单全文
+    const message = sentMessage();
+    expect(message).toContain("[PLAN MODE] Found existing plan files:");
+    const calls = (pi.sendMessage as ReturnType<typeof vi.fn>).mock.calls;
+    const payload = calls[0][0] as { display: boolean };
+    expect(payload.display).toBe(false);
+  });
+
+  it("--skills 未知技能 fail-fast：notify error + 注入通路保留", async () => {
+    await handler("复盘 --skills nope", ctx);
+
+    const notify = (ctx as unknown as { ui: { notify: ReturnType<typeof vi.fn> } }).ui.notify;
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("unknown skill(s): nope"), "error");
+    expect(sentMessage()).toContain("Failed to enter: unknown skill(s): nope");
+  });
+
+  it("--template 文件缺失 fail-fast：notify error", async () => {
+    await handler("复盘 --template tpl.md", ctx);
+
+    const notify = (ctx as unknown as { ui: { notify: ReturnType<typeof vi.fn> } }).ui.notify;
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Template file not found"), "error");
+  });
+
+  it("进入成功：notify info 携带 planFilePath（命令反馈通道，widget 之外补可达）", async () => {
+    await handler("复盘需求", ctx);
+
+    const notify = (ctx as unknown as { ui: { notify: ReturnType<typeof vi.fn> } }).ui.notify;
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining("Plan mode entered: /tmp/test-project/.tmp/plans/"),
+      "info",
+    );
+  });
+
   describe("--template via /plan handler", () => {
     afterEach(() => {
       // 还原默认 existsSync=false，避免路径实现泄漏到后续用例

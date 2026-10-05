@@ -75,8 +75,8 @@ describe('B-2：catalog provider 无 override → 全部标 source:"builtin"', (
     for (const m of models) {
       expect(m.source).toBe('builtin')
     }
-    // 真实 builtin 副本非空（防御生成物损坏导致的假通过）
-    expect(models.map(m => m.id)).toContain('glm-5.2')
+    // 真实 builtin 副本非空（防御生成物损坏导致的假通过；清单锚 pi-ai 1.0.0 快照）
+    expect(models.map(m => m.id)).toContain('glm-5.3')
   })
 })
 
@@ -86,8 +86,8 @@ describe('B-2：catalog provider 有 override models → 混合列表逐条标�
       'zai-coding-cn': {
         baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
         models: [
-          // 同 id 替换 builtin 的 glm-5.2（用户覆写 contextWindow）
-          { id: 'glm-5.2', name: 'GLM 5.2 (custom)', contextWindow: 111000 },
+          // 同 id 替换 builtin 的 glm-5.3（用户覆写 contextWindow）
+          { id: 'glm-5.3', name: 'GLM 5.3 (custom)', contextWindow: 111000 },
           // 新增自定义模型（builtin 无此 id）
           { id: 'glm-my-alias', name: 'My Alias', contextWindow: 200000 },
         ],
@@ -98,17 +98,17 @@ describe('B-2：catalog provider 有 override models → 混合列表逐条标�
     const bySource = (s: 'builtin' | 'override') => models.filter(m => m.source === s).map(m => m.id)
 
     // override 两条均标 'override'——同 id 被 override 替换的也标 'override'（已被用户定义覆盖）
-    expect(bySource('override')).toEqual(['glm-5.2', 'glm-my-alias'])
+    expect(bySource('override')).toEqual(['glm-5.3', 'glm-my-alias'])
     // 其余 builtin 条目标 'builtin'（混合列表：override 存在时未被覆盖的内置条目仍在，
     // 对齐 pi 真实行为 design D1 探针——旧「override 非空即整体替换」与 pi 漂移）
-    expect(bySource('builtin')).not.toContain('glm-5.2')
-    expect(bySource('builtin')).toContain('glm-5-turbo')
-    expect(bySource('builtin')).toContain('glm-4.7')
+    expect(bySource('builtin')).not.toContain('glm-5.3')
+    expect(bySource('builtin')).toContain('glm-4.6v')
+    expect(bySource('builtin')).toContain('glm-5.3-flash')
     // 同 id 不重复出现（覆盖而非并列）
-    expect(models.filter(m => m.id === 'glm-5.2')).toHaveLength(1)
+    expect(models.filter(m => m.id === 'glm-5.3')).toHaveLength(1)
     // 覆盖条目取 override 定义值
-    const overridden = models.find(m => m.id === 'glm-5.2')!
-    expect(overridden.name).toBe('GLM 5.2 (custom)')
+    const overridden = models.find(m => m.id === 'glm-5.3')!
+    expect(overridden.name).toBe('GLM 5.3 (custom)')
     expect(overridden.contextWindow).toBe(111000)
     // 混合列表顺序：builtin 在前、override 追加在后（design §3.1 场景 A 形态）
     const lastSource = models[models.length - 1].source

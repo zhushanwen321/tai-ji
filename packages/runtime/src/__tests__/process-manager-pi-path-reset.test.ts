@@ -111,20 +111,20 @@ describe('ProcessManager.getPiPath 失败复位（RT-2#5）', () => {
     findPiMock.mockImplementation(() => {
       throw new Error('Bundled pi binary not found')
     })
-    await expect(pm.createSession('s1', '/mock/cwd', { startupDelayMs: 0 })).rejects.toThrow('Bundled pi binary not found')
+    await expect(pm.createSession('s1', '/mock/cwd')).rejects.toThrow('Bundled pi binary not found')
     expect(findPiMock).toHaveBeenCalledTimes(1)
 
     // 修复前：piPathPromise 保持 rejected，第二次 createSession 直接拒绝且
     // findPiExecutable 不再被调（调用计数停在 1）。修复后：复位 → 重新探测成功
     findPiMock.mockReturnValue('/fake-tools/pi')
-    const client = await pm.createSession('s1', '/mock/cwd', { startupDelayMs: 0 })
+    const client = await pm.createSession('s1', '/mock/cwd')
     expect(findPiMock).toHaveBeenCalledTimes(2)
     expect(client).toBeDefined()
   })
 
   it('成功路径语义不变：一次成功探测后永久缓存（不重复探测）', async () => {
-    await pm.createSession('s1', '/mock/cwd', { startupDelayMs: 0 })
-    await pm.createSession('s2', '/mock/cwd', { startupDelayMs: 0 })
+    await pm.createSession('s1', '/mock/cwd')
+    await pm.createSession('s2', '/mock/cwd')
     // 成功值缓存：两次 createSession 只探测一次（piPath 短路）
     expect(findPiMock).toHaveBeenCalledTimes(1)
   })

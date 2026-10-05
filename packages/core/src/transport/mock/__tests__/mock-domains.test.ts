@@ -547,9 +547,10 @@ describe('mock model / extension / plugin / composer / search domain', () => {
     await waitFor(() => plugins.length > 0)
     expect(plugins[0]).toEqual([])
     un()
-    // [G4 锚定补齐] 权限审批/回收 stub：mock 无插件运行时，ack resolve 即可
+    // [G4 锚定补齐] 权限审批/回收/拒绝 stub：mock 无插件运行时，ack resolve 即可
     await expect(plugin.approvePermissions('p1', ['fs.read'])).resolves.toBeUndefined()
     await expect(plugin.revokePermissions('p1')).resolves.toBeUndefined()
+    await expect(plugin.denyPermissions('p1')).resolves.toBeUndefined()
     expect(typeof settings.onProviders).toBe('function')
     expect(settings.listProviders).toBe(config.listProviders)
     // getMentionCandidates 对齐 real 已废弃语义（恒 []）；getFileCandidates 与 real 同签名（sessionId）

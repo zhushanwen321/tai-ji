@@ -248,11 +248,12 @@ async function emitFileChanges(
   return true;
 }
 
-/** Extension UI 交互请求（extension.ui_request）：pi extension 调 ctx.ui.select/confirm/input 时，
- *  runtime 经 event-adapter 翻译后推此帧。useExtensionUI composable 经 events.on(sessionId) 订阅，
- *  mock 走 pushSession(dispatchSession) 同构透传，让 dialog 在 mock 下可验证。
- *  仅关键词触发（不污染所有消息，避免 modal 弹窗挡住后续 E2E 交互——如 ST-1 的 complete 后输入）。
- *  用 'ui-select' 哨兵词 + '部署' 中文，避免 /select/i 匹配自然语言中含 "select" 的普通输入。 */
+/** Extension UI 交互请求（extension.dialog，pi1-disposition-chat-flow D6）：pi extension
+ *  调 ctx.ui.select/confirm/input 时，runtime 经 event-adapter 翻译后推此帧。
+ *  useExtensionUI composable 经 events.on(sessionId) 订阅，mock 走 pushSession(dispatchSession)
+ *  同构透传，让 dialog 在 mock 下可验证。仅关键词触发（不污染所有消息，避免 modal 弹窗挡住
+ *  后续 E2E 交互——如 ST-1 的 complete 后输入）。用 'ui-select' 哨兵词 + '部署' 中文，
+ *  避免 /select/i 匹配自然语言中含 "select" 的普通输入。 */
 async function emitUiRequest(
   sessionId: string,
   text: string,
@@ -263,12 +264,12 @@ async function emitUiRequest(
   if (isCancelled(sessionId)) return false;
   await sleep(TIMING.done);
   pushSession(sessionId, {
-    type: "extension.ui_request",
+    type: "extension.dialog",
     id: nextId("uir"),
     payload: {
       sessionId,
       requestId: `mock-ui-${Date.now()}`,
-      method: "select",
+      dialogKind: "select",
       title: "Mock: 选择部署目标",
       message: "选择部署环境",
       options: ["生产环境", "预发环境", "测试环境"],

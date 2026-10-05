@@ -22,7 +22,7 @@
  * 同步写补投标记 entry 保幂等。覆盖的失效面 = 主路径单次投递丢失（进程死亡收殓、
  * 投递 throw、投递被接受但未落盘即崩溃）。**补投是 registry 全集的独立遍历，不挂
  * pending 差集循环**（决策 2）：差集候选 = pending:register 还挂着的任务，而失效
- * 形态「poller 边沿 unregister 已写、sendMessage 才 throw」下差集为空，挂靠即永久
+ * 形态「exit 边沿 unregister 已写、sendMessage 才 throw」下差集为空，挂靠即永久
  * 漏补。补投**不代写 pending:unregister**——收尾保持差集循环唯一写点（避免绕过
  * listener 的 isPendingActive 幂等门落冗余 entry）。
  *
@@ -33,7 +33,7 @@
  *
  * 补投终态判据（决策 2）：protocol isTerminalState 严格终态（exited/orphaned）——
  * **显式不用下方 isTerminalByRegistry 宽判据**（宽判据含 running/killing 且 pid 判死，
- * 会把 killing 遗留——kill 已发令、poller 终态化前进程死亡，实为被杀任务——误判为
+ * 会把 killing 遗留——kill 已发令、exit 边沿终态化前进程死亡，实为被杀任务——误判为
  * 可补投）；且 state=exited 时 reason≠killed（killed 是 reason 枚举值而非独立
  * state，state 级过滤排不掉，必须 reason 级显式排除——kill 的发起方当次交互已同步
  * 获知结果，补投是重复刺激）。killing/running+判死遗留不补投（保守正确，退化现状）。
@@ -85,9 +85,9 @@ const logger = getLogger("base-tool-enhance");
 /**
  * 对账依赖的最小 pi 面（结构兼容 ExtensionAPI 的子集；测试注入不造完整 pi）。
  *
- * sendMessage 返回类型 `void | Promise<void>` 是 pi 0.84.4 实装的适配登记
- * （bg-task-notify-durability 实装核实）：ExtensionAPI.sendMessage 的类型声明与
- * loader.js:296 / agent-session.js:2004 两级桥接均不返回 promise（bindCore 包装层
+ * sendMessage 返回类型 `void | Promise<void>` 是 pi 实装的适配登记
+ * （bg-task-notify-durability 实装核实，1.0.0 复核同构）：ExtensionAPI.sendMessage 的类型声明与
+ * loader.js / agent-session.js bindCore 两级桥接均不返回 promise（bindCore 包装层
  * 以 .catch 吞 rejection 转 runner emitError），真实 pi 注入时恒返回 undefined——
  * 「await resolve 即已落盘」在实装通道上拿不到。await 两者皆合法：
  *  - 同步 throw（assertActive 失败 / 旧 bus）在调用点抛出，可捕；

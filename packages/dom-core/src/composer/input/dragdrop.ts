@@ -13,6 +13,7 @@
  * 检查防子元素冒泡误触发。
  */
 import { ref, type Ref } from 'vue'
+import { randomUuid } from '@taiji/core'
 import { findImageChipEl, applyImagePersistResult } from './input-dom'
 import type { ComposerInputInstance, DragDropDeps } from './types'
 
@@ -62,7 +63,8 @@ export function useComposerDragDrop(
     void (async () => {
       const sid = sessionId.value
       for (const file of imageFiles) {
-        const placeholderMark = `__drag_pending_${crypto.randomUUID()}__`
+        // randomUuid 而非 crypto.randomUUID：非安全上下文（LAN http）下为 undefined，见 contenteditable 同款注释
+        const placeholderMark = `__drag_pending_${randomUuid()}__`
         inputRef.value?.insertImageBadge(placeholderMark, placeholderMark, '拖入中…', false)
         const result = await pasteImage(file, sid)
         const placeholder = composerBoxRef.value

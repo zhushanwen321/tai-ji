@@ -1,8 +1,9 @@
 /**
- * MarkdownSegment —— markdown 渲染段类型（ui 展示层关心的渲染单元）。
+ * markdown 渲染协议类型 —— ui 单一源（SSOT）。
  *
- * renderer 壳的 renderMarkdownSegments（markdown.ts，依赖 shiki/markdown-it）产出此类型，
- * 经 ChatViewDeps.renderMarkdown 注入 ui 的 MarkdownRenderer。
+ * 渲染纯逻辑（markdown.ts / markdown-incremental.ts，依赖 markdown-it/shiki/katex，
+ * 经 `@taiji/ui` 渲染 subpath 导出）产出/消费本文件类型，经 ChatViewDeps.renderMarkdown
+ * 注入 ui 的 MarkdownRenderer。桌面壳与移动壳共用同一协议面。
  *
  * - text 段：渲染后的 HTML 字符串（含代码块/链接等，走 v-html）
  * - mermaid 段：原始 mermaid 源码（走 MermaidRenderer 组件渲染）
@@ -14,10 +15,6 @@
  *   ——content 为 fence 内已到达源码，lang 为语言名，mermaid 标记是否 mermaid fence；
  *   占位 UI（语言名 + spinner 行）由 MarkdownRenderer 特殊渲染
  *
- * 协议镜像同步：与 renderer composables/logic/markdown.ts 的 MarkdownSegment 扩展（W22 的
- * segId/lang/mermaid/streaming-fence）做结构对齐，防壳侧漂移——镜像不只为 deps 赋值提供
- * 类型，更是增量协议在 ui 侧的形状契约（壳侧删字段/改字段类型方向的漂移会被结构化类型在
- * 编译期拦下；壳侧新增字段不拦截——结构性子类型允许超集，需人工同步本镜像）：
  * segId 是 D-5 增量渲染的段稳定键（renderIncremental 首次产出时分配，前缀段跨帧不变），
  * 渲染树 v-for 按 segId 取 key（全量渲染路径不携带，undefined）。
  */
@@ -34,11 +31,46 @@ export interface MarkdownSegment {
   mermaid?: boolean
 }
 
-/** D-5 增量渲染结果（renderer 壳 renderIncremental 输出的镜像类型，W22 协议 / W23 消费）。
+/**
+ * renderMarkdown / renderIncremental 的 env 参数：贯穿 core rule（state.env）+ renderer
+ * rule（markdown-it 渲染规则第 4 参），随渲染调用逐帧透传。
+ *
+ * - filePaths：当前 session 项目里文件的**完整路径**集合（如 {'src/index.ts', 'packages/x.ts'}）。
+ *   含/路径识别的白名单——正文里的裸路径（如 src/foo.ts）必须命中此集合才链接化。
+ *   数据源：useFileSearch.load 的全量递归 file.search 结果（FileNode[]，每次现拉），扁平化为 FileNode.path Set。
+ * - localFiles：当前 session 项目里文件的 **basename** 集合（如 {'design.md', 'README.md'}）。
+ *   裸 basename（无 / 前缀，如 design.md）识别的白名单。
+ *   数据源：同上，扁平化为 FileNode.name Set。
+ *
+ * 两者首渲染时可能为空集（fileSearch 未加载）→ 路径降级纯文本，加载完成后响应式重渲染。
+ *
+ * - resourceBaseDir：本条消息/文档的相对资源解析基准目录（绝对路径；设计 markdown-html-sanitize-render
+ *   D4）。无则该消费面不做相对资源解析——img 相对 src 不重写（原样输出）、正文相对链接点击
+ *   preventDefault 无动作。来源：对话流 = session cwd（useChatViewDeps 工厂装配）、drawer =
+ *   打开文件所在目录（DetailPane 传 dirname）、更新日志不传（undefined）。
+ *
+ * - copyLabel：代码块复制按钮的 i18n 文案（title 属性）。ui 渲染模块不 import 任何壳层
+ *   i18n 单例（ui 无 `@/i18n` 可址），文案由宿主壳在渲染入口注入（ComposerInput 的
+ *   t deps token 同族先例）；未注入时按钮省略 title 属性。每次渲染调用求值，locale
+ *   切换后下一帧即生效（增量前缀缓存内已 bake 的段随前缀冻结，属既有机制语义）。
+ *
+ * 净化层信任槽（Symbol 键）挂 env 但不属于本公开类型——管线内部自产自销，不随
+ * markdown-types 镜像/序列化泄漏、不参与增量轴 env 签名，见 markdown-sanitize.ts。
+ */
+export interface MarkdownEnv {
+  /** 含/路径识别的白名单（FileNode.path 集合，相对 cwd，无前导 /） */
+  filePaths?: Set<string>
+  /** 裸 basename 识别的白名单（FileNode.name 集合） */
+  localFiles?: Set<string>
+  /** 相对资源（img src / 正文链接 href）解析基准目录（绝对路径）；无则不做相对资源解析 */
+  resourceBaseDir?: string
+  /** 代码块复制按钮 title 文案（宿主壳注入的 i18n 文案，如 zh「复制」/ en「Copy」） */
+  copyLabel?: string
+}
+
+/** D-5 增量渲染结果（renderIncremental 输出，W22 协议 / W23 消费）。
  *  渲染树 = [...prefixSegments, ...tailSegments]；前缀段引用恒等（缓存命中帧零重渲染），
- *  tail 段每帧重建。与 renderer composables/logic/markdown.ts 的 IncrementalRenderResult
- *  结构对齐（壳侧删字段/改字段类型方向的漂移会被结构化类型在编译期拦下；壳侧新增字段
- *  不拦截——结构性子类型允许超集，需人工同步本镜像）。 */
+ *  tail 段每帧重建。 */
 export interface IncrementalMarkdownResult {
   prefixSegments: MarkdownSegment[]
   tailSegments: MarkdownSegment[]
@@ -46,9 +78,9 @@ export interface IncrementalMarkdownResult {
   mode: 'incremental' | 'fallback-full'
 }
 
-/** D-5 增量渲染缓存句柄（renderer 壳 IncrementalRenderCache 的结构镜像）。
- *  ui 侧只持有/透传（opaque handle）：创建与原地更新都在 renderer 壳的 renderIncremental 内，
- *  ui 不读写其字段。结构镜像（而非 unknown）保证壳侧实现与协议同步。 */
+/** D-5 增量渲染缓存句柄（renderIncremental 创建与原地更新）。
+ *  ui 侧只持有/透传（opaque handle）：创建与原地更新都在渲染模块的 renderIncremental 内，
+ *  ui 不读写其字段。结构化定义（而非 unknown）保证实现与协议同步。 */
 export interface IncrementalMarkdownCache {
   boundary: number
   prefixText: string

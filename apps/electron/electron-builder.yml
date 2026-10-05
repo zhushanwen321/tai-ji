@@ -133,6 +133,17 @@ extraResources:
     filter:
       - "**/*"
       - "!**/*.map"
+  # 移动壳构建产物（remote-access 静态托管，D3）：packages/mobile-renderer 的 vite
+  # 独立 web 构建（base:'./'，outDir 本包 dist，与 electron 加载链无耦合），由
+  # build / build:dir 编排在 renderer 构建后先行 `pnpm run build:mobile` 产出。
+  # to: mobile-dist → 打包后位于 <process.resourcesPath>/mobile-dist，该路径是
+  # supervisor prod 分支拼 --mobile-dist=<Resources>/mobile-dist 的锚点（supervisor
+  # 拼参侧与本条目必须同步，改名两处一起改）。sourcemap 不进产物。
+  - from: ../../packages/mobile-renderer/dist
+    to: mobile-dist
+    filter:
+      - "**/*"
+      - "!**/*.map"
 
 # NOTE: macos-latest 是 arm64 runner，无法交叉编译 x64。
 # 如需 Intel Mac 支持，追加 macos-13 (Intel) 或配置 universal。

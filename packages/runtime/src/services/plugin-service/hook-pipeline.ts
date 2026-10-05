@@ -13,10 +13,8 @@
  *   每个 handler 超时 5s、超时/异常视为放行，Worker crashed 跳过该 handler。
  * - D2-3 映射层：Worker 响应（InterceptorResult）到 HookResult 的字段映射在此收口
  *   （modifiedData → transformedData），消费侧（event-interpreter 等）读 transformedData。
- * - 注入透传（git `7a3797d0b` 版 plugin-intercept-injection §3.3-D2/D5，文档已退役于
- *   `fadd8b8b4`）：注入形状守卫在本层逐插件
- *   执行（本层是唯一持有 pluginId 的位置）；injectedMessages 跨插件累积拼接（非覆盖），
- *   消费方为 handleBridgeIntercept 的注入映射（bridge-interop.ts）。
+ * - [pi1-disposition-chat-flow D7①] 注入（injectedMessages）支线已随 bridge 退役删除——
+ *   唯一消费方是 bridge intercept 注入映射；blocked / transform 语义保留。
  */
 
 import type { HookEntry, HookContext, HookResult } from './plugin-types.js'
@@ -25,7 +23,6 @@ import type { PluginRpcServer } from './plugin-rpc-server.js'
 import { toErrorMessage } from '../../utils/errors.js'
 
 /** 每个 hook handler 的执行超时（ms） */
-const HOOK_HANDLER_TIMEOUT_MS = 5_000
 
 /**
  * RT-6#3：hook 异常（无 handle skip / handler 失败或超时）聚合 warn 的间隔。
@@ -45,22 +42,12 @@ export const HOOK_ANOMALY_WARN_EVERY = 10
  */
 const OBSERVE_MAX_IN_FLIGHT = 64
 
-/** describeShape 的 warn 摘要截断上限（chars）：防超大条目刷日志 */
-const WARN_SUMMARY_MAX_CHARS = 80
-
 /**
  * observe 类 hookType 集合（D2-2）：fire-and-forget 语义，经 notifyObservers 以
  * rpcServer.notify 零往返派发（无 pending 登记、无超时定时器、不等响应）。
  * block/transform 类不在集合内，走 execute 的 request 腿（同步拿结果）。
  */
 export const OBSERVE_HOOK_TYPES: ReadonlySet<string> = new Set(['onPiEvent'])
-
-/**
- * 唯一消费注入的 hookType（设计 §3.3-D1 契约边界）：injectedMessages 仅
- * onBeforeAgentStart（bridge intercept 链路）被消费；其余 intercept hookType
- * 返回非空注入类型合法但无运行时效果，本层忽略 + warn 留痕（D5 行 3）。
- */
-const INJECTION_CONSUMING_HOOK_TYPE = 'onBeforeAgentStart'
 
 /** HookPipeline 所需的派发依赖（最小接口，便于单测 mock） */
 export interface HookPipelineDeps {
@@ -116,11 +103,10 @@ export class HookPipeline {
     // D2-3 映射层：Worker 响应 {proceed, reason, modifiedData} → HookResult
     // {blocked, blockedBy, reason, transformedData}。transformedData 取链上最后一个
     // 非 undefined 的 modifiedData（与下游 handler 间 context.data 的传递终值一致）。
+    // [pi1-disposition-chat-flow D7①] 注入（injectedMessages）支线已随 bridge 退役删除——
+    // 唯一消费方是 bridge intercept（onBeforeAgentStart）链路，退役后注入语义整体消失；
+    // blocked（阻断）与 transform（改写）语义保留。
     let transformedData: unknown
-
-    // 注入累积（设计 §3.3-D2）：与 transformedData 的「链上最后一个」覆盖语义显式
-    // 分叉——合法条目按 priority 执行序累积拼接，不被后续插件整体覆盖。
-    const injectedMessages: string[] = []
 
     // 串行执行：await 每个 handler，支持 transform 和 block
     for (const entry of entries) {
@@ -141,18 +127,12 @@ export class HookPipeline {
             hookType,
             context,
           },
-          HOOK_HANDLER_TIMEOUT_MS, // 每个 handler 超时
         ) as Record<string, unknown>
 
-        // 统一处理序（设计 §3.3-D2）：① 注入形状校验（合法条目 push 进累积）→
-        // ② block 判定 → ③ transform。各步判定收口在模块私有 helper，顺序由
-        // execute 主循环保证（校验先于 block 判定——block 插件的畸形注入照样
-        // warn，block 插件自身的合法注入进累积并随 blocked 回包透传，阻止与
-        // 留言互不吞没）。
-        applyInjectionCollection(result, hookType, entry, injectedMessages)
-
+        // 统一处理序（设计 §3.3-D2）：block 判定 → transform（注入步随 bridge 退役删除，
+        // [pi1-disposition-chat-flow D7①]）。
         // 检查是否被阻止
-        const blocked = buildBlockedResult(result, entry, injectedMessages)
+        const blocked = buildBlockedResult(result, entry)
         if (blocked) return blocked
 
         // 检查是否需要转换内容
@@ -172,11 +152,9 @@ export class HookPipeline {
       }
     }
 
-    // 成功回包：transformedData（覆盖语义）与 injectedMessages（累积语义）可并存，
-    // 各自仅在非空时携带键（无注入回包形状与既有行为一致——G4 不倒退）
+    // 成功回包：transformedData 仅在非空时携带键
     const finalResult: HookResult = { blocked: false }
     if (transformedData !== undefined) finalResult.transformedData = transformedData
-    if (injectedMessages.length > 0) finalResult.injectedMessages = injectedMessages
     return finalResult
   }
 
@@ -276,8 +254,8 @@ export class HookPipeline {
 
 /**
  * 从 HookContext 取 sessionId（诊断日志用）：顶层 `context.sessionId` 优先，回落
- * `context.data.sessionId`（bridge 事件链路的历史形状——handleBridgeEvent 把
- * sessionId 放在 data 里，见 bridge-interop.ts）。两者都缺 → undefined（日志落 unknown）。
+ * `context.data.sessionId`（事件链路把 sessionId 放在 data 里的历史形状）。两者都缺
+ * → undefined（日志落 unknown）。
  */
 function contextSessionId(context: HookContext): string | undefined {
   if (typeof context.sessionId === 'string') return context.sessionId
@@ -286,48 +264,23 @@ function contextSessionId(context: HookContext): string | undefined {
 }
 
 /**
- * execute 单 handler 结果的注入步（设计 §3.3-D2 处理序 ①）：
- * 消费型 hookType 逐条目形状校验并累积；非消费型返回非空注入 → 误用整体
- * 忽略 + warn（D5 行 3；不做形状校验——畸形叠加是双重 warn 无意义，设计 r3 INFO）。
- */
-function applyInjectionCollection(
-  result: Record<string, unknown>,
-  hookType: string,
-  entry: HookEntry,
-  injectedMessages: string[],
-): void {
-  if (!(result && typeof result === 'object' && result.injectedMessages !== undefined)) return
-  if (hookType === INJECTION_CONSUMING_HOOK_TYPE) {
-    collectInjectedMessages(result.injectedMessages, entry.pluginId, injectedMessages)
-  } else if (hasNonEmptyInjection(result.injectedMessages)) {
-    console.warn(
-      `[plugin-service] ignoring injectedMessages from plugin ${entry.pluginId}: ` +
-      `hookType ${hookType} does not consume injected messages (only ${INJECTION_CONSUMING_HOOK_TYPE} does)`,
-    )
-  }
-}
-
-/**
- * execute 单 handler 结果的 block 步（设计 §3.3-D2 处理序 ②）：proceed === false 时
+ * execute 单 handler 结果的 block 步（设计 §3.3-D2 处理序）：proceed === false 时
  * 构造 blocked 回包，否则返回 undefined（放行）。
- * block 前已累积的注入（含 block 插件自身合法注入，push 在 block 判定之前完成）随
- * blocked 回包透传（设计 §3.3-D2 block 交互定案）；空累积不带键，保持既有 block 回包形状。
+ * [pi1-disposition-chat-flow D7①] 注入透传参数已随 bridge 退役删除（原「block 前已
+ * 累积的注入随 blocked 回包透传」语义的唯一消费链是 bridge intercept）。
  */
 function buildBlockedResult(
   result: Record<string, unknown>,
   entry: HookEntry,
-  injectedMessages: string[],
 ): HookResult | undefined {
   if (!(result && typeof result === 'object' && 'proceed' in result && result.proceed === false)) {
     return undefined
   }
-  const blocked: HookResult = {
+  return {
     blocked: true,
     reason: (result.reason as string) ?? `Blocked by plugin ${entry.pluginId}`,
     blockedBy: entry.pluginId,
   }
-  if (injectedMessages.length > 0) blocked.injectedMessages = injectedMessages
-  return blocked
 }
 
 /**
@@ -342,47 +295,3 @@ function extractModifiedData(result: Record<string, unknown>): unknown {
   return undefined
 }
 
-/**
- * 逐条目形状校验并把合法条目 push 进累积数组（设计 §3.3-D2/D5 行 1/2）。
- *
- * 非数组整体丢弃 + warn（含 pluginId；Array.isArray 判定在 push 之前——字符串值
- * 不会被 spread 拆条）；数组内非 string 条目丢弃该条 + warn（含 pluginId + 条目序号），
- * 合法条目照常累积（G3：丢弃 + 留痕，不炸 turn）。
- */
-function collectInjectedMessages(value: unknown, pluginId: string, collected: string[]): void {
-  if (!Array.isArray(value)) {
-    console.warn(
-      `[plugin-service] drop malformed injectedMessages from plugin ${pluginId}: ` +
-      `expected array, got ${describeShape(value)}`,
-    )
-    return
-  }
-  value.forEach((item, index) => {
-    if (typeof item !== 'string') {
-      console.warn(
-        `[plugin-service] drop malformed injectedMessages entry ${index} from plugin ${pluginId}: ` +
-        `not a string (${describeShape(item)})`,
-      )
-      return
-    }
-    collected.push(item)
-  })
-}
-
-/** 误用判定的「非空注入」：空数组等价无注入（D5 行「空数组」格，无日志）；null 静默忽略 */
-function hasNonEmptyInjection(value: unknown): boolean {
-  return Array.isArray(value) ? value.length > 0 : value !== null
-}
-
-/** 收到的形状摘要（warn 日志用）：string 原样、其余 JSON 化；截断防超大条目刷日志 */
-function describeShape(value: unknown): string {
-  let text: string
-  try {
-    text = typeof value === 'string' ? value : JSON.stringify(value) ?? String(value)
-  } catch {
-    text = String(value) // 循环引用等 JSON 序列化失败 → 兜底
-  }
-  return text.length > WARN_SUMMARY_MAX_CHARS
-    ? `${text.slice(0, WARN_SUMMARY_MAX_CHARS)}…`
-    : text
-}

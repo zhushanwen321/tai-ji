@@ -2,7 +2,7 @@
  * mock 流式序列单测 —— run-send-stream.ts 生命周期 + run-send-stream-branches.ts 三分支。
  * 用零延迟 stub deps（sleep 直通）驱动确定性序列，断言帧序：message_start →
  * [auto_retry] → thinking → 分支 tool_call（read/todo/goal）→ text_delta →
- * file_changes（accumulating/ready）→ [extension.ui_request] → complete（usage 回填）。
+ * file_changes（accumulating/ready）→ [extension.dialog] → complete（usage 回填）。
  * 同时覆盖取消提前返回（isCancelled 全程 true 只发 message_start）。
  */
 import { describe, it, expect } from 'vitest'
@@ -125,11 +125,11 @@ describe('run-send-stream 关键词触发帧', () => {
     expect((widget?.payload as { widgetKey?: string }).widgetKey).toBe('goal')
   })
 
-  it("含 'ui-select'：complete 前推 extension.ui_request（select 方法 + 选项）", async () => {
+  it("含 'ui-select'：complete 前推 extension.dialog（select 变体 + 选项）", async () => {
     const h = makeHarness()
     await runSendStream('s1', 'ui-select deploy', h.deps)
-    const req = h.pushed.find((m) => m.type === 'extension.ui_request')
-    expect((req?.payload as { method?: string }).method).toBe('select')
+    const req = h.pushed.find((m) => m.type === 'extension.dialog')
+    expect((req?.payload as { dialogKind?: string }).dialogKind).toBe('select')
     expect(((req?.payload as { options?: string[] }).options ?? []).length).toBe(3)
   })
 

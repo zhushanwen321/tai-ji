@@ -9,7 +9,6 @@
  * 无 onSessionDisposed）。Facade 保留两方法一行委托（ISessionService 契约不变）。
  */
 import type { ProviderId } from '@taiji/shared'
-import { DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS } from '@taiji/shared'
 import type { IPiEngine } from '../ports/pi-engine.js'
 import type { IManagedSessionView } from './types.js'
 import type { SessionReplicatedStates } from './session-state-projection.js'
@@ -17,7 +16,6 @@ import {
   toErrorMessage,
   errorWithCode,
   SESSION_ACTIVATE_FAILED,
-  SESSION_ACTIVATE_TIMEOUT,
   SESSION_NOT_FOUND,
   MODEL_NOT_CONFIGURED,
   RESTORE_FAILED,
@@ -39,37 +37,7 @@ const ACTIVATION_PASSTHROUGH_CODES: ReadonlySet<string | number> = new Set([
   MODEL_NOT_CONFIGURED,
   RESTORE_FAILED,
   BUILTIN_EXTENSIONS_MISSING,
-  SESSION_ACTIVATE_TIMEOUT,
 ])
-
-/**
- * 激活等待套一层上界（实现范式与 `process-manager.ts` 的 raceReadyTimeout 同款）。
- *
- * 关键语义（设计 §3.6「激活的等待上界」行）：**超时不取消后台恢复** —— 底层 promise 继续跑
- * （join 语义保留，用户重试时 join 同一 in-flight），此处只终止 RPC 等待；定时器 `unref()`
- * 不阻止进程退出；超时后给底层 promise 补挂 no-op 双向挂接，防其后续 settle 触发
- * unhandled rejection。
- */
-function raceActivateTimeout<T>(p: Promise<T>, ms: number, sessionId: string): Promise<T> {
-  if (ms <= 0) return p
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      p.then(
-        () => {},
-        () => {},
-      )
-      reject(errorWithCode(
-        `session activation timed out after ${ms}ms (sessionId=${sessionId}; background restore continues, retry later)`,
-        SESSION_ACTIVATE_TIMEOUT,
-      ))
-    }, ms)
-    timer.unref()
-    p.then(
-      (v) => { clearTimeout(timer); resolve(v) },
-      (e) => { clearTimeout(timer); reject(e) },
-    )
-  })
-}
 
 /**
  * 激活阶段错误分型（U2）：既有码原样透传，其余（含无码错误）包 `SESSION_ACTIVATE_FAILED`
@@ -118,26 +86,22 @@ export interface SessionModelControlDeps {
    * 语义：无法证明缺凭据时不误报 `PROVIDER_CREDENTIAL_MISSING`。
    */
   hasProviderCredential(provider: string): boolean
-  /** 激活等待上界（ms，默认 15s；≤0 = 不限时逃生门）。 */
-  activateTimeoutMs?: number
 }
 
 export class SessionModelControl {
   constructor(private readonly deps: SessionModelControlDeps) {}
 
-  private get activateTimeoutMs(): number {
-    return this.deps.activateTimeoutMs ?? DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS
-  }
-
   /**
-   * 激活 + 守卫（U2）：`ensureActive` 前置（回收态不在 Map / client 已死两态都能拉活），
-   * 施加 RPC 边界上界并做错误分型；返回的 client 必须**未退出**（`exited` 过滤是
+   * 激活 + 守卫（U2）：`ensureActive` 前置（停止态/回收态 / client 已死两态都能拉活），
+   * 做错误分型；返回的 client 必须**未退出**（`exited` 过滤是
    * 「不把死 client 交给 set RPC」的守卫面）。
+   * [ADR-0122 退役登记] 激活等待上界（raceActivateTimeout，原 15s 墙钟）已删——激活慢时
+   * 调用方 RPC 悬挂等待真实完成（ensureActive 内部 join 语义不变）。
    */
   private async activate(sessionId: string): Promise<IPiEngine> {
     let client: IPiEngine
     try {
-      client = await raceActivateTimeout(this.deps.ensureActive(sessionId), this.activateTimeoutMs, sessionId)
+      client = await this.deps.ensureActive(sessionId)
     } catch (e) {
       const wrapped = classifyActivationError(e, sessionId)
       if (wrapped !== e) {

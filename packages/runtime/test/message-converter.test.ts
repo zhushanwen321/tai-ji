@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { convertPiHistory } from '../src/infra/pi/message-converter.js'
-import type { PiHistoryMessage, PiHistoryToolResult } from '../src/infra/pi/pi-protocol.js'
+import type {
+  PiHistoryContentPart,
+  PiHistoryImagePart,
+  PiHistoryMessage,
+  PiHistoryToolResult,
+} from '../src/infra/pi/pi-protocol.js'
 
 describe('convertPiHistory', () => {
   it('converts user and assistant text messages', () => {
@@ -78,6 +83,41 @@ describe('convertPiHistory', () => {
     expect(messages).toHaveLength(1)
     expect(messages[0].toolCalls![0].status).toBe('error')
     expect(messages[0].toolCalls![0].output).toBe('command failed')
+  })
+
+  // [subagent 投影丢失修复] 历史 toolResult 的 image 块必须随 fill 保留（表驱动：纯 image /
+  // 混合 content）——与 core reducer（computeToolCallFill）同源提取，此前漏取致重开后
+  // 工具结果图片丢失。
+  const imgPart: PiHistoryImagePart = { type: 'image', data: 'aGVsbG8taW1hZ2U=', mimeType: 'image/png' }
+  it.each([
+    ['image only', [imgPart]],
+    [
+      'mixed text + image',
+      [
+        { type: 'text', text: 'Script completed' },
+        imgPart,
+      ],
+    ],
+  ] as Array<[string, PiHistoryContentPart[]]>)('preserves toolResult images in history fill (%s)', (_label, content) => {
+    const raw: (PiHistoryMessage | PiHistoryToolResult)[] = [
+      {
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: 'tc3', name: 'codemode', arguments: {} }],
+        timestamp: 1000,
+      },
+      {
+        role: 'toolResult',
+        content,
+        timestamp: 2000,
+        toolCallId: 'tc3',
+        toolName: 'codemode',
+      } satisfies PiHistoryToolResult,
+    ]
+
+    const messages = convertPiHistory(raw)
+
+    const tc = messages[0].toolCalls![0]
+    expect(tc.images).toEqual([{ data: 'aGVsbG8taW1hZ2U=', mimeType: 'image/png' }])
   })
 })
 

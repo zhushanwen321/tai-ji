@@ -3,13 +3,17 @@
  *
  * 修复前断链：PluginService.approvePermissions 只 grant 不 resolve pending，
  * 挂起在 waitForPermissionApproval 的激活（boot/handleEvent await 着）只能干等
- * 30s 超时；且等待期间 re-activate 被 ACTIVATING 幂等守卫 no-op 吞掉（实测
- * boot 后台初始化 plugins=30007.5ms）。
+ * 审批等待超时（PERMISSION_TIMEOUT_MS）；且等待期间 re-activate 被 ACTIVATING
+ * 幂等守卫 no-op 吞掉（实测 boot 后台初始化 plugins=30007.5ms）。
  *
  * 修复后契约（本文件锁定）：
  *  a. approvePermissions 唤醒挂起中的激活 → 毫秒级完成（fake timers 下不推进
- *     30s 即断言 ACTIVE），且唤醒的是同一次激活（assignWorker 恰好一次）
+ *     审批等待超时（PERMISSION_TIMEOUT_MS）即断言 ACTIVE），且唤醒的是同一次
+ *     激活（assignWorker 恰好一次）
  *  b. revokePermissions 拒绝唤醒 → 走既有失败语义（UNLOADED、不分配 Worker）
+ *  e. denyPermissions（M7 语义分界）= 拒绝本次申请：descriptor.permissions 与
+ *     granted 授予集不变、不调 save、不回收已授权限；有 pending 时唤醒为拒绝；
+ *     无 pending 时幂等 no-op
  *  c. 挂起期间 uninstall / toggle(false) → pending 被清理、激活作废、无复活
  *  d. 批准唤醒与停用的竞态 → 醒来的激活作废，已停用插件不复活
  *
@@ -23,7 +27,7 @@ import { join } from 'node:path'
 
 import { PluginService } from '../src/services/plugin-service/plugin-service.js'
 import type { PluginRegistry } from '../src/services/plugin-service/plugin-registry.js'
-import { PluginActivator } from '../src/services/plugin-service/plugin-activator.js'
+import { PluginActivator, PERMISSION_TIMEOUT_MS } from '../src/services/plugin-service/plugin-activator.js'
 import type { PluginHost } from '../src/services/plugin-service/plugin-host.js'
 import type { PluginDescriptor } from '../src/services/plugin-service/plugin-types.js'
 import type { IMessageBroker } from '../src/interfaces.js'
@@ -73,7 +77,7 @@ function internals(service: PluginService): ServiceInternals {
 /**
  * mock host：postMessage 后微任务回 activated——挂起中的激活被唤醒后能立即走完
  * assignWorker → loadPlugin → activate → ACTIVE 全程（fake timers 不推进也能完成，
- * 证明唤醒链路独立于 30s 超时 timer）。
+ * 证明唤醒链路独立于审批等待超时 timer，即 PERMISSION_TIMEOUT_MS）。
  */
 function createMockHost(activator: PluginActivator): PluginHost {
   return {
@@ -147,7 +151,7 @@ describe('权限审批唤醒链路（approve / revoke / 挂起期清理）', () 
   }
 
   // ── a. 批准唤醒：毫秒级完成，唤醒的是同一次激活 ─────────────────
-  it('a: 挂起等待审批 → approvePermissions → 激活立即完成（不推进 30s 超时 timer）', async () => {
+  it('a: 挂起等待审批 → approvePermissions → 激活立即完成（不推进审批等待超时 timer）', async () => {
     const { activation } = await startPendingActivation()
     const host = internals(service).host
 
@@ -156,8 +160,8 @@ describe('权限审批唤醒链路（approve / revoke / 挂起期清理）', () 
     const broadcastCalls = (broker.broadcast as ReturnType<typeof vi.fn>).mock.calls
     expect(broadcastCalls.some((c) => (c[0] as { type: string }).type === 'plugin:permissionRequest')).toBe(true)
 
-    // 批准。fake timers 下 30s 超时从未触发——若唤醒链路断裂，这里 state 仍会是
-    // ACTIVATING（修复前实测 boot 挂满 30007.5ms）
+    // 批准。fake timers 下审批等待超时（PERMISSION_TIMEOUT_MS）从未触发——若唤醒
+    // 链路断裂，这里 state 仍会是 ACTIVATING（修复前实测 boot 挂满 30007.5ms）
     await service.approvePermissions('wake-plugin', ['plugin.hooks.register'])
 
     expect(activator.getState('wake-plugin')).toBe('ACTIVE')
@@ -178,6 +182,50 @@ describe('权限审批唤醒链路（approve / revoke / 挂起期清理）', () 
     expect(activator.getState('wake-plugin')).toBe('UNLOADED')
     expect((host.assignWorker as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0)
     await activation
+  })
+
+  // ── e. denyPermissions：拒绝本次申请，不回收已授权限（M7 语义分界）──
+  it('e: denyPermissions → descriptor.permissions 与 granted 授予集不变、不调 save（不回收已授权限）', async () => {
+    const { permissionChecker: checker } = service as unknown as {
+      permissionChecker: import('../src/services/plugin-service/plugin-permission.js').PluginPermissionChecker
+    }
+    // 先授予（模拟既有已授权限），再拒绝新申请——已授权限必须原样保留
+    checker.grant('wake-plugin', ['plugin.hooks.register'])
+    const saveSpy = vi.spyOn(checker, 'save').mockResolvedValue()
+    const permissionsBefore = [...descriptor.permissions]
+
+    await service.denyPermissions('wake-plugin')
+
+    expect(descriptor.permissions).toEqual(permissionsBefore)
+    const granted = (checker as unknown as { granted: Map<string, Set<string>> }).granted.get('wake-plugin')
+    expect(granted?.size).toBeGreaterThan(0)
+    expect(saveSpy).not.toHaveBeenCalled()
+    // 无 pending：不触发激活，状态不受影响
+    expect(activator.getState('wake-plugin')).toBe('UNLOADED')
+  })
+
+  it('e2: 有 pending 等待审批时 denyPermissions → resolvePermissionApproval(false) 被调，激活走失败语义', async () => {
+    const { activation } = await startPendingActivation()
+    const host = internals(service).host
+    const resolveSpy = vi.spyOn(activator, 'resolvePermissionApproval')
+
+    await service.denyPermissions('wake-plugin')
+
+    expect(resolveSpy).toHaveBeenCalledWith('wake-plugin', false)
+    expect(activator.getState('wake-plugin')).toBe('UNLOADED')
+    expect((host.assignWorker as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0)
+    await activation
+  })
+
+  it('e3: 无 pending 时 denyPermissions → 幂等 no-op（状态不变、不分配 Worker、不抛）', async () => {
+    const host = internals(service).host
+    const resolveSpy = vi.spyOn(activator, 'resolvePermissionApproval')
+
+    await expect(service.denyPermissions('wake-plugin')).resolves.toBeUndefined()
+
+    expect(resolveSpy).toHaveBeenCalledWith('wake-plugin', false)
+    expect(activator.getState('wake-plugin')).toBe('UNLOADED')
+    expect((host.assignWorker as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0)
   })
 
   // ── c1. 挂起期间 uninstall：pending 清理 + 无幽灵状态复活 ────────
@@ -223,9 +271,45 @@ describe('权限审批唤醒链路（approve / revoke / 挂起期清理）', () 
     expect((host.assignWorker as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0)
   })
 
+  // ── W5 广播契约：列表刷新经 config.plugins 广播（reply pong ack 契约的断言
+  // 归属 plugin-message-handler.test.ts 的 plugin.* 分发表用例，本组不覆盖）──
+  // PluginInfo 不含权限字段（pluginId/version/displayName/description/status/
+  // trustLevel/enabled）——deny/revoke 后广播内容不变，不广播；approve 触发
+  // activate（status discovered→active 真实变化）才广播。
+  /** 数 broker.broadcast 中 type=config.plugins 的调用次数（列表刷新广播） */
+  function pluginListBroadcastCount(): number {
+    const broadcastMock = broker.broadcast as ReturnType<typeof vi.fn>
+    return broadcastMock.mock.calls.filter((c) => (c[0] as { type: string }).type === 'config.plugins').length
+  }
+
+  it('W5: approvePermissions → activate 完成后广播 config.plugins（恰一次）', async () => {
+    ;(broker.broadcast as ReturnType<typeof vi.fn>).mockClear()
+
+    await service.approvePermissions('wake-plugin', ['plugin.hooks.register'])
+
+    expect(activator.getState('wake-plugin')).toBe('ACTIVE')
+    expect(pluginListBroadcastCount()).toBe(1)
+  })
+
+  it('W5: denyPermissions（无 pending）→ 不广播 config.plugins', async () => {
+    ;(broker.broadcast as ReturnType<typeof vi.fn>).mockClear()
+
+    await service.denyPermissions('wake-plugin')
+
+    expect(pluginListBroadcastCount()).toBe(0)
+  })
+
+  it('W5: revokePermissions → 不广播 config.plugins（PluginInfo 字段无变化）', async () => {
+    ;(broker.broadcast as ReturnType<typeof vi.fn>).mockClear()
+
+    await service.revokePermissions('wake-plugin')
+
+    expect(pluginListBroadcastCount()).toBe(0)
+  })
+
   // ── 超时兜底仍在（唤醒是加速，超时是语义不变的兜底）──────────────
   it('无人批准时仍按 permissionTimeoutMs 超时回落 UNLOADED（唤醒不破坏兜底）', async () => {
-    // 重建短超时 activator（service 内置 30s，这里直测 activator 层）
+    // 重建短超时 activator（service 用默认 PERMISSION_TIMEOUT_MS，这里直测 activator 层）
     const shortActivator = new PluginActivator({
       permissionChecker: { getUnapproved: () => ['plugin.hooks.register'] },
       onPermissionRequest: () => { /* 无人批准 */ },
@@ -240,5 +324,131 @@ describe('权限审批唤醒链路（approve / revoke / 挂起期清理）', () 
 
     expect(shortActivator.getState('wake-plugin')).toBe('UNLOADED')
     expect((host.assignWorker as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0)
+  })
+})
+
+// ── S5-V3 审批终局广播（remote-use-mobile 弹窗自动撤回的 runtime 半边）────────
+// 契约：resolvePermissionApproval 命中挂起审批 → 恰一帧 plugin:permissionRequestResolved
+// { pluginId, requestId, approved }；requestId 与开窗 permissionRequest 广播同源；
+// miss noop（迟到审批/超时终局）不再广播——同一 requestId 至多一帧，多连接端撤窗幂等。
+describe('S5-V3 审批终局 resolved 广播（approve / deny / miss / 超时）', () => {
+  let tmpDir: string
+  let descriptor: PluginDescriptor
+  let service: PluginService
+  let broker: ReturnType<typeof createMockBroker>
+  let activator: PluginActivator
+
+  beforeEach(async () => {
+    vi.useFakeTimers()
+    tmpDir = await mkdtemp(join(tmpdir(), 'plugin-perm-resolved-'))
+    await mkdir(join(tmpDir, 'wake-plugin'), { recursive: true })
+    descriptor = makeDescriptor({ pluginPath: join(tmpDir, 'wake-plugin', 'index.js') })
+    broker = createMockBroker()
+    const registryMock = {
+      getDescriptor: vi.fn(() => descriptor),
+      getAllDescriptors: vi.fn(() => [descriptor]),
+      removeDescriptor: vi.fn(() => true),
+    }
+    service = new PluginService(registryMock as unknown as PluginRegistry, broker, {
+      configDir: tmpDir,
+    })
+    const reg = internals(service)
+    activator = reg.activator
+    reg.host = createMockHost(activator)
+    activator.registerDescriptors([descriptor])
+  })
+
+  afterEach(async () => {
+    activator?.stopAllWatchers()
+    vi.useRealTimers()
+    await rm(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  interface ResolvedBroadcast {
+    type: 'plugin:permissionRequestResolved'
+    payload: { pluginId: string; requestId: string; approved: boolean }
+  }
+  /** 收集 broker.broadcast 中的 resolved 终局帧（S5-V3 广播断言专用） */
+  function resolvedBroadcasts(): ResolvedBroadcast[] {
+    const broadcastMock = broker.broadcast as ReturnType<typeof vi.fn>
+    return broadcastMock.mock.calls
+      .map((c) => c[0] as ResolvedBroadcast)
+      .filter((m) => m.type === 'plugin:permissionRequestResolved')
+  }
+  /** 开窗 permissionRequest 广播的 requestId（首帧） */
+  function firstRequestBroadcastId(): string {
+    const broadcastMock = broker.broadcast as ReturnType<typeof vi.fn>
+    const msg = broadcastMock.mock.calls
+      .map((c) => c[0] as { type: string; payload: { requestId?: string } })
+      .find((m) => m.type === 'plugin:permissionRequest')
+    return msg?.payload.requestId ?? ''
+  }
+
+  async function startPendingActivation(): Promise<{ activation: Promise<void> }> {
+    const activation = activator.activatePlugin(
+      'wake-plugin',
+      { type: 'onStartupFinished' },
+      internals(service).host,
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(activator.getState('wake-plugin')).toBe('ACTIVATING')
+    return { activation }
+  }
+
+  it('deny 命中挂起审批 → 恰一帧 resolved(approved=false)，requestId 与 permissionRequest 广播同源', async () => {
+    const { activation } = await startPendingActivation()
+    const openRequestId = firstRequestBroadcastId()
+    expect(openRequestId).not.toBe('')
+
+    await service.denyPermissions('wake-plugin')
+    await activation
+
+    const frames = resolvedBroadcasts()
+    expect(frames).toHaveLength(1)
+    expect(frames[0].payload).toEqual({ pluginId: 'wake-plugin', requestId: openRequestId, approved: false })
+  })
+
+  it('approve 命中挂起审批 → 恰一帧 resolved(approved=true)，且先于激活续跑（撤窗先于状态推进）', async () => {
+    const { activation } = await startPendingActivation()
+    const openRequestId = firstRequestBroadcastId()
+
+    await service.approvePermissions('wake-plugin', ['plugin.hooks.register'])
+    await activation
+
+    const frames = resolvedBroadcasts()
+    expect(frames).toHaveLength(1)
+    expect(frames[0].payload).toEqual({ pluginId: 'wake-plugin', requestId: openRequestId, approved: true })
+    expect(activator.getState('wake-plugin')).toBe('ACTIVE')
+  })
+
+  it('无挂起审批（miss）→ 不广播 resolved；终局后迟到审批也不产生第二帧（同一 requestId 至多一帧）', async () => {
+    // 无 pending 时 deny：幂等 no-op，零帧
+    await service.denyPermissions('wake-plugin')
+    expect(resolvedBroadcasts()).toHaveLength(0)
+
+    // 有 pending → deny 终局（一帧）；随后迟到的 approve 对已删 pending miss：不再加帧
+    const { activation } = await startPendingActivation()
+    await service.denyPermissions('wake-plugin')
+    await activation
+    expect(resolvedBroadcasts()).toHaveLength(1)
+
+    await service.approvePermissions('wake-plugin', ['plugin.hooks.register'])
+    expect(resolvedBroadcasts()).toHaveLength(1)
+  })
+
+  it('审批超时路径不发 resolved（终局由 expired 广播覆盖，不双发）', async () => {
+    const { activation } = await startPendingActivation()
+
+    // 推进越过完整审批等待（service 默认 30min）：超时取消（UNLOADED）+ expired 广播，无 resolved
+    await vi.advanceTimersByTimeAsync(PERMISSION_TIMEOUT_MS + 1)
+    await activation
+    expect(activator.getState('wake-plugin')).toBe('UNLOADED')
+
+    const broadcastMock = broker.broadcast as ReturnType<typeof vi.fn>
+    const expiredSent = broadcastMock.mock.calls
+      .map((c) => c[0] as { type: string })
+      .some((m) => m.type === 'plugin:permissionRequestExpired')
+    expect(expiredSent).toBe(true)
+    expect(resolvedBroadcasts()).toHaveLength(0)
   })
 })

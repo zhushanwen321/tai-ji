@@ -28,6 +28,8 @@ import type { IProcessManager, IPiEngine } from '../../ports/pi-engine.js'
 import type { ISessionStore } from '../../ports/session.js'
 import type { SessionRecordsDeps } from '../session-records.js'
 import { SessionRecords } from '../session-records.js'
+import { routeJournalReport } from '../journal-report-router.js'
+import type { SubagentJournalEvent, SubagentJournalReport } from '@zhushanwen/extension-protocol'
 import { SCALAR_STATE_DEBOUNCE_MS } from '../replicated-states.config.js'
 
 vi.mock('../../../infra/logger.js', () => ({ logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } }))
@@ -130,12 +132,6 @@ function workflowFramesOf(publish: ReturnType<typeof vi.fn>): unknown[] {
 function framesPublishedEvents(): Array<[string, Record<string, unknown>]> {
   return loggerInfo.mock.calls.filter(
     ([m]) => m === '[session-records] record frames published',
-  ) as unknown as Array<[string, Record<string, unknown>]>
-}
-
-function runJournalAppliedEvents(): Array<[string, Record<string, unknown>]> {
-  return loggerInfo.mock.calls.filter(
-    ([m]) => m === '[events-projection] run journal events applied',
   ) as unknown as Array<[string, Record<string, unknown>]>
 }
 
@@ -342,10 +338,12 @@ describe('断点显形 warn + 发布观测（W0 观测面）', () => {
   })
 })
 
-describe('发布归因 + workflowFolds fold 证据（可观测性 2026-10-02）', () => {
+describe('发布归因 + workflowFolds fold 证据（可观测性 2026-10-02，event-push-channel 重演）', () => {
   // 事故场景重放（workflow 详情空窗）：run journal 先落 run-created，entry 腿送注册条目
-  // 后 tailer 再读到 agent-started——两腿发布在观测面上必须可归因、fold 证据可分形。
-  it('tailer 腿发布落 trigger=event-projection + fold 证据推进；读活动落 events-projection 观测行；entry 腿对称', async () => {
+  // 后写侧追加 agent-started 并经 marker 通道推送——两腿发布在观测面上必须可归因、fold
+  // 证据可分形。（原「tailer 腿」随 event-tail watch 退役换轨为推送喂入；读活动事实 =
+  // routeJournalReport 送达并应用，不再有 tailer 观测行。）
+  it('推送腿发布落 trigger=event-projection + fold 证据推进；entry 腿对称', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'wf-observe-'))
     try {
       const sessionDir = join(dir, 'sessions', 'enc-proj')
@@ -361,7 +359,6 @@ describe('发布归因 + workflowFolds fold 证据（可观测性 2026-10-02）'
 
       const meta = { id: 's1', filePath: sessionFile, cwd: '/proj' }
       const { records, publish, client } = makeRecords({
-        eventTailerRecheckMs: 30,
         sessionStore: { scanSessions: vi.fn(() => [meta]) } as unknown as ISessionStore,
       })
       const fire = registerSession(records)
@@ -384,20 +381,20 @@ describe('发布归因 + workflowFolds fold 证据（可观测性 2026-10-02）'
         workflowFolds: { 'wf-1': { fold: 'present', asks: 0 } },
       })
 
-      // 轮 2（journal 追加 agent-started → tailer recheck 拾取 → fold 推进 → 归因发布）
-      appendFileSync(
-        journal,
-        JSON.stringify({ type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100, seq: 2 }) + '\n',
-      )
+      // 轮 2（journal 追加 agent-started：写侧落盘后经 marker 通道推送 → 投影 fold
+      // 推进 → 归因发布；event-tail watch 已随 event-push-channel 退役，读活动事实
+      // = routeJournalReport 送达并应用，不再有 tailer 观测行）
+      const agentStarted: SubagentJournalEvent = {
+        type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100, seq: 2,
+      }
+      appendFileSync(journal, JSON.stringify(agentStarted) + '\n')
       loggerInfo.mockClear()
-      await vi.advanceTimersByTimeAsync(120)
+      const report: SubagentJournalReport = {
+        domain: 'run', fileKey: 'wf-1', events: [agentStarted], sessionId: 's1', emittedAt: 1200,
+      }
+      expect(routeJournalReport('s1', report)).toBe(true)
 
-      // 读活动观测行（events-projection 域）：tail 读到了什么，一步可见
-      const applied = runJournalAppliedEvents()
-      expect(applied).toHaveLength(1)
-      expect(applied[0]![1]).toMatchObject({ runId: 'wf-1', events: 1, lastSeq: 2, lifecycle: 'running', asks: 1 })
-
-      // 发布归因行：trigger=event-projection + fold 证据推进 + 无 elapsedMs（tailer 无轮概念）
+      // 发布归因行：trigger=event-projection + fold 证据推进 + 无 elapsedMs（推送腿无轮概念）
       const round2 = framesPublishedEvents()
       expect(round2).toHaveLength(1)
       expect(round2[0]![1]).toMatchObject({
@@ -437,7 +434,6 @@ describe('降级投影闩死修复（2026-10-02）', () => {
       const meta = { id: 's1', filePath: sessionFile, cwd: '/proj' }
       let metaVisible = false
       const { records, publish, client } = makeRecords({
-        eventTailerRecheckMs: 30,
         sessionStore: { scanSessions: vi.fn(() => (metaVisible ? [meta] : [])) } as unknown as ISessionStore,
       })
       const fire = registerSession(records)

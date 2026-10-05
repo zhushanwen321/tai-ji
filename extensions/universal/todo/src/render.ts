@@ -43,7 +43,7 @@ export function renderStatusText(todoList: Todo[], th: Theme): string {
 
 // ── Widget 双列渲染 ──────────────────────────────────
 
-/** 渲染单条 todo 的 widget 行（不含缩进），供 component.ts 复用。
+/** 渲染单条 todo 的 widget 行（不含缩进）。
  * textColor = 非完成态文本颜色（widget 用 "text"，tool result 列表用 "muted"——历史差异显式保留，未做视觉统一）。 */
 function renderWidgetItem(t: Todo, th: Theme, textColor: ThemeColor = "text"): string {
 	const mark =
@@ -70,7 +70,7 @@ function renderSingleColumn(
 	return todos.map((t) => truncateToWidth(indent + renderWidgetItem(t, th), maxWidth));
 }
 
-/** 双列布局渲染，供 widget 和 component 复用 */
+/** 双列布局渲染，供 widget 复用 */
 const COLUMN_COUNT = 2;
 
 export function renderDualColumn(

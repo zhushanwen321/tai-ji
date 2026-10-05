@@ -28,6 +28,11 @@ export interface SdkEvent {
   type: string;
   toolCallId?: string;
   toolName?: string;
+  /** pi 1.0.0：嵌套调用（工具经 ctx.executeTool 调其他工具）携带的父调用 id；顶层调用缺省
+   * （dist/core/agent-session.d.ts「Tool execution events of calls a tool made through
+   * `ctx.executeTool()` carry `parentToolCallId`」）。[codemode u5 / D4] 翻译层据它同判
+   * 过滤嵌套 tool_execution_start/end（live ≡ reload 对齐）。 */
+  parentToolCallId?: string;
   args?: unknown;
   result?: ToolCallResult;
   isError?: boolean;

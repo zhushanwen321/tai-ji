@@ -125,7 +125,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 | `engine_model_unknown` | validateModel 未命中且 `dynamic:false` | 同步拒（record 不创建） |
 | `engine_model_mismatch` | `dynamic:true` 运行期引擎拒绝 | run 失败 + record 标 failed |
 | `engine_handshake_timeout` | initialize 超时（10s） | 引擎不可用 |
-| `engine_crashed` | 进程意外退出 | 在途 run 失败（附 stderr 尾 400 字）；**崩溃重建上限 3 次、指数退避 1s/2s/4s**（`CRASH_REBUILD_MAX_ATTEMPTS`/`CRASH_REBUILD_BACKOFF_MS`，`engine-protocol.ts:65-76`），超限标记不可用至宿主重启 |
+| `engine_crashed` | 进程意外退出 / 引擎起不来 | 在途 run 失败（附 stderr 尾 400 字）；引擎初建失败一次即标记不可用至宿主重启（ADR-0122：失败显式上报，无自动重建） |
 | `engine_probe_failed` | probe 失败 | 结构化失败（逐项 check 摘要 + 恢复指引），**不自动切换引擎**；要换引擎只能由调用方显式传 `engine:'<id>'` |
 
 **conformance 锁定面**：协议一致性由 `packages/subagent-core/src/execution/engine/__tests__/conformance/engine-conformance.live.test.ts` 套件锁定（引擎 manifest、relay 常量镜像、run 帧映射）；SDK 侧封闭断言在 `subagent-engine-sdk/src/__tests__/protocol.test.ts`（方法集/通道集同源互证）与 `contract-closure.test.ts`（core↔SDK 双向可赋值）；两引擎各有 bin 级协议 e2e（如 `zcode-subagent-cli/src/__tests__/protocol-e2e.test.ts`：握手/反向请求/event seq 单调/终态/dispose 幂等 + 进程随 stdin 关闭退出，五断言）。chat 域独立协议面已退役：续聊轮 = 新 run + `RunParams.resume` 锚点（约束 C-proc-13；`engine-protocol.ts:14-17`）。
@@ -222,17 +222,17 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 
 0.〔宿主〕编排前置：journal 接线点 = workflow 域两处——`workflow-dispatch.ts:333` 与 `runAndFinalize`（`run-orchestration.ts:650`，函数头自述 workflow 域专用）各自 `wireEventJournal`（taskId = record.id，journal 是事件唯一出口或转发 workflow liveRecord）；chat 域 Continuation 轮不接 event journal（`chat-rounds.ts:273-274` 明文，pi 子代理 session JSONL 即原生数据源），其 §8 降级链②级结构性不可达——降级链实际覆盖 = ①级 read + ③级 outcome-only → 派 run 帧。
 1.〔契约〕宿主派 run 帧 →〔zcode〕引擎 `runViaAppServer`（`zcode-engine.ts:297-338`）：pre-aborted 短路（:299-303，取消先于启动不建会话）→ 模型解析 → resume 前缀构造（:328）→ 首轮执行 + schema 仿真重试（:334）。
-2.〔zcode〕引擎 → `SessionChannel.runTurn`（`session-channel.ts:749-796`）：`createSession`（:756）→〔契约〕**create 应答即接管点回调**（下文）→ `openTurn` 挂双 timer（:839-869）→ `subscribe`（:762，〔契约〕deliveryKind 必填否则终态事件不达）→ send → 事件流（text/thinking/activity 三回调 → `ctx.onEvent`，journal 落盘仅随 workflow 域接线点——步骤 0）→ 终态 → `readBestEffort`（:774）→〔契约〕**finally 无条件 `closeSession`**（:791-795——终态后循环/续发类机制必须在 close 前发生，见门禁续轮）。
+2.〔zcode〕引擎 → `SessionChannel.runTurn`（`session-channel.ts:749-796`）：`createSession`（:756）→〔契约〕**create 应答即接管点回调**（下文）→ `openTurn` 登记 turn 终局落定（终态事件 + 收割错误两事实源）→ `subscribe`（:762，〔契约〕deliveryKind 必填否则终态事件不达）→ send → 事件流（text/thinking/activity 三回调 → `ctx.onEvent`，journal 落盘仅随 workflow 域接线点——步骤 0）→ 终态 → `readBestEffort`（:774）→〔契约〕**finally 无条件 `closeSession`**（:791-795——终态后循环/续发类机制必须在 close 前发生，见门禁续轮）。
 3.〔zcode〕回引擎层：`parsedAppServerAttempt`（`zcode-engine.ts:1446-1459`，`interrupted` 不在 `isFailedTerminalStatus`、不误判失败——:1440-1445 注释）→〔契约〕schema 校验 → outcome + handle → run 应答。
 4.〔契约〕宿主：run 应答到达即终态（`methods.ts:153`）→ handle 回填（`backfillRoundHandle` 整替语义 + 同值幂等；journal 终态路径 `backfillHandle` 补 eventsPath，`event-journal-wiring.ts:84-86`）。
 
 **resume 轮（现状 cold 形态）**：宿主带 `run.params.resume` 锚 → 引擎读锚（`zcode-engine.ts:322-328`）→ `buildResumeHistoryPrefix`：`channel.resumeSession(anchor.sessionId)`（读通道）取结构化历史 → 24k token 预算裁剪（保尾丢旧，至少保 1 条）→ 拼注入前缀 → **执行仍 create 新 session**（原地 resume 续写会命中上游 -32031 卡死——设计期 bundle 探针结论）→ 新 sessionRef 经 `onHandleReady` 回传 → 宿主同值幂等整替锚。**读通道失败分支（[U3] 2026-09-19）**：读失败即判定锚真失效——resume 走 app-server resident 内存态，resume 结果就是锚活性权威信号（宿主侧 zcode 锚库投影预检查已退役收窄 pi 锚专属——库投影滞后于 create 应答致预检查系统性误判，`conversation-continuation.ts` reviveOrThrow 注），引擎经 `buildResumeUnavailableNoticeSegment`（`zcode-engine.ts:1163`）注入 `[会话延续提示]` 锚失效声明段继续执行——run 不失败、零世代推进（锚失效不走 reopen 降级，round/epoch 不动），模型知情后基于最新消息独立续推。native resume 主路径（同 session 续写、锚稳定、24k 语义收敛）= 设计 3（native resume，已裁决未实施），实施期定型项。
 
-**门禁续轮形态**（设计 4 已裁决未实施，实施期定型项）：自纠重试循环落在 `runTurn` **内部**（turn 终态 → 缺 parsedOutput 且未耗尽 → 同 session 再 send → 新 turn，≤3 次）→ 终态 → read 兜底 → finally close——**循环必须在 close 之前**（finally 无条件 `closeSession` 是硬约束，`session-channel.ts:791-795`）；idle/ceiling 双 timer 以 run 边界为界不随 steer turn 重置（防门禁轮被 TurnTimeoutError 打断改新会话重试，破坏同会话语义）；每轮 steer 决策前检查 `ctx.signal.aborted`——`interrupted` 终态直接出口，不进门禁、不因新轮拖延 settle 触发 killChain 连坐。
+**门禁续轮形态**（设计 4 已裁决未实施，实施期定型项）：自纠重试循环落在 `runTurn` **内部**（turn 终态 → 缺 parsedOutput 且未耗尽 → 同 session 再 send → 新 turn，≤3 次）→ 终态 → read 兜底 → finally close——**循环必须在 close 之前**（finally 无条件 `closeSession` 是硬约束，`session-channel.ts:791-795`）；每轮 steer 决策前检查 `ctx.signal.aborted`——`interrupted` 终态直接出口，不进门禁、不因新轮拖延 settle 触发 killChain 连坐。
 
 **abort/取消链**（zcode 实装锚）：`ctx.signal` abort → `onAbort` → `appServerAbortChain`（`zcode-engine.ts:506-512`）；链体（:595-667）：stop 帧（`ZCODE_APPSERVER_STOP_TIMEOUT_MS` = 3s）→ grace 窗（`ZCODE_APPSERVER_ABORT_GRACE_MS` = 3s，`constants.ts:160`）内 turn 落定即止（共享进程不杀）→ 超窗 `killChain` 收割共享进程（**接受连坐**——协议已不可信，在途其他任务走崩溃路径，:611-616）；abort 与 create 竞态（signal 先到、session 未建）→ 等会话建立（带上限）再发 stop。引擎义务：cancel 受理 3s 内收敛（§2.1）；用户取消不得被任何续跑机制强制续烧 token。
 
-**timer 语义**：引擎侧回收层双 timer（idle 主判定 `ZCODE_TURN_IDLE_TIMEOUT_MS` = 30min 刷新重挂 + 总上界 `ZCODE_TURN_MAX_TIMEOUT_MS` = 60min 固定倒数，`session-channel.ts:839-854`；显式传参/env 覆盖/关闭通道齐备）——任一 fire → 类型化 `TurnTimeoutError` reject，宿主分流走可重试形态。任务级正常路径无墙钟（§2.1），此为回收层 opt-out 兜底。
+**timer 语义**：引擎侧无 turn 级 timer（原 idle/总上界双 timer 已按 ADR-0122 删除——任务级正常路径无墙钟，§2.1；turn 终局 = 终态事件或连接死亡收割两确定性事实，无终态且连接存活 = 挂起显式暴露，用户 abort 链或重启处置）。保留的 timer 仅控制面单请求超时（`ZCODE_APPSERVER_REQUEST_TIMEOUT_MS` / stop / read / close，秒级粒度）与 abort 链 grace（回收层，见上行）。
 
 **接管点副作用复刻义务**：`onSessionCreated`（`zcode-engine.ts:486-495`）承载两个宿主侧副作用——`rt.activeSessions.add(sessionId)`（TTL sweep 豁免集 + dispose close-fire 目标集；`rt.activeSessions` 全仓唯一调用点即此，:720-729 sweep 消费）与 `ctx.onHandleReady` 回传（sessionRef 同源 `zcodeSessionDbPath`）。**任何「会话确立」的新形态（resume 装载确认等）必须在装载确认时点复刻两者**——漏登记的竞态后果（设计 3（native resume，已裁决未实施）实装推演）：超 30 天高龄会话整轮在途期间不在豁免集，TTL sweep（运行时建立 +50ms defer 触发，`ZCODE_SESSION_SWEEP_DEFER_MS`，`constants.ts:241`）可删其库条目，`persistence:"immediate"` 下对已删行续写行为上游未定义。
 

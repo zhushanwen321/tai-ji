@@ -39,6 +39,8 @@ import type {
   QuotaConfigurePayload,
   ThinkingLevel,
   LlmRetryConfig,
+  CodemodeEnabledResult,
+  CodemodeSetEnabledResult,
   ScannedSkillInfo,
   ScannedAgentInfo,
   RenameMode,
@@ -1031,23 +1033,30 @@ const chatImpl = {
     // 登记在飞条目（abort 终态帧依据）：流序列 settle（complete 或 cancelled 退出）即清，
     // 避免流走完后 session 再 abort 被误补 failed 帧。
     inflightDeliveryEntries.set(sessionId, { clientUuid, preview: text.slice(0, DELIVERY_PREVIEW_MAX_CHARS) })
-    // fire-and-forget 补 .catch 留痕（红线 1）：内部异常不落成无痕 unhandled rejection
-    void runSendStream(sessionId, text, {
-      nextId,
-      emit,
-      sleep,
-      pushSession,
-      isCancelled: (s) => cancelled.has(s),
-      TIMING,
-    })
-      .catch((e) => {
-        console.error('[mock] send stream failed:', e)
+    // [受理先于执行] 流启动推迟到 reply 之后（宏任务）：真实通道里 runtime 回受理 ack 后
+    // pi 才开跑（受理事实先于执行事实）；mock 的同步 fire-and-forget 曾让 assistant 首事件
+    // 抢在 reply 前落 chat store——appendUser（reply 后上屏）被排到 assistant 之后，分组
+    // 拆成两个 turn（user 气泡挂尾，P0 smoke TC-MSGSTREAM-TURN 实测）。宏任务保证 renderer
+    // 侧 reply-resolve 微任务链（含 appendUser）全部走完后再开流。
+    setTimeout(() => {
+      // fire-and-forget 补 .catch 留痕（红线 1）：内部异常不落成无痕 unhandled rejection
+      void runSendStream(sessionId, text, {
+        nextId,
+        emit,
+        sleep,
+        pushSession,
+        isCancelled: (s) => cancelled.has(s),
+        TIMING,
       })
-      .finally(() => {
-        if (inflightDeliveryEntries.get(sessionId)?.clientUuid === clientUuid) {
-          inflightDeliveryEntries.delete(sessionId)
-        }
-      })
+        .catch((e) => {
+          console.error('[mock] send stream failed:', e)
+        })
+        .finally(() => {
+          if (inflightDeliveryEntries.get(sessionId)?.clientUuid === clientUuid) {
+            inflightDeliveryEntries.delete(sessionId)
+          }
+        })
+    }, 0)
     return { clientUuid, state: 'in-flight', lane: 'direct' }
   },
 
@@ -1649,13 +1658,16 @@ const pluginsSub = makeMockSubscription((): PluginInfo[] => [])
 
 const pluginImpl = {
   onPlugins: (h: (plugins: PluginInfo[]) => void) => pluginsSub.subscribe(h),
-  // 插件权限审批/回收（[G4 锚定补齐]：锚定前 mock 缺此二成员，门面三元下不可达）。
-  // mock 无插件运行时，ack 型 stub resolve 即可。revokePermissions 与 real 同为单参
-  // （回收即撤销插件全部授权，无 permissions 参数——锚定曾抓出 stub 多参，已对齐）。
+  // 插件权限审批/回收/拒绝（[G4 锚定补齐]：锚定前 mock 缺此族成员，门面三元下不可达）。
+  // mock 无插件运行时，ack 型 stub resolve 即可。revokePermissions / denyPermissions
+  // 与 real 同为单参（锚定曾抓出 stub 多参，已对齐）。
   async approvePermissions(_pluginId: string, _permissions: string[]): Promise<void> {
     await sleep(TIMING.ack)
   },
   async revokePermissions(_pluginId: string): Promise<void> {
+    await sleep(TIMING.ack)
+  },
+  async denyPermissions(_pluginId: string): Promise<void> {
     await sleep(TIMING.ack)
   },
 }
@@ -1752,6 +1764,8 @@ const mockSmartContextPrefs = {
   reminderThresholds: [] as number[],
   excludedModels: [] as string[],
 }
+// codemode 开关内存态（默认开 = 产品裁决「常驻默认打开」，与启动迁移写 +codemode 后的读侧一致）
+const mockCodemodePrefs = { enabled: true }
 
 export const settings = {
   // 订阅（转发到 mock sub）
@@ -1849,6 +1863,15 @@ export const settings = {
   async setSmartContextExcludedModels(models: string[]): Promise<ServerMessageMap['config.smartContextExcludedModels']> {
     mockSmartContextPrefs.excludedModels = [...models]
     return { models: [...models] }
+  },
+  // ── [C3] system 设置项字段（codemode）：内存态 fixture（不持久化；损坏错误态为 runtime
+  //    读侧 raw 预检行为，mock 模式文件系统态不模拟，恒 corruption=null）──
+  async getCodemodeEnabled(): Promise<CodemodeEnabledResult> {
+    return { enabled: mockCodemodePrefs.enabled, corruption: null }
+  },
+  async setCodemodeEnabled(enabled: boolean): Promise<CodemodeSetEnabledResult> {
+    mockCodemodePrefs.enabled = enabled
+    return { ok: true, enabled }
   },
 }
 

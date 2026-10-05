@@ -1458,8 +1458,9 @@ fi
 I18N_CJK_CHECKER=".githooks/check_i18n_cjk.py"
 
 if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_I18N_CJK_CHECK" != "1" ]; then
-    # 仅当 staged 含 .vue 文件时检查
-    STAGED_VUE=$(echo "$STAGED_FILES" | grep -E "^packages/renderer/src/.*\.vue$" || true)
+    # 仅当 staged 含 .vue 文件时检查（双根与 check_i18n_cjk.py 的 SCAN_ROOTS 对齐；
+    # mobile-renderer 根缺席曾致其下 .vue 不触发守卫）
+    STAGED_VUE=$(echo "$STAGED_FILES" | grep -E "^packages/(renderer/src|mobile-renderer/src)/.*\.vue$" || true)
     if [ -n "$STAGED_VUE" ]; then
         echo -e "${BLUE}[INFO] 运行 i18n CJK 残留检测...${NC}"
 
@@ -1609,7 +1610,7 @@ ${STAGED_DELETED}"
     # 与 thinking 档位检查同型（读双侧源文件字面量对拍），触发面：检查脚本自身 /
     # system-prompt 源 / 渲染净化源（文件被删除也必须触发，脚本对文件缺失自带 fail 分支）。
     # 不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
-    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-capability-allowlist-sync\.mjs$|^extensions/taiji/system-prompt/src/index\.ts$|^packages/renderer/src/composables/logic/markdown-sanitize\.ts$"; then
+    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-capability-allowlist-sync\.mjs$|^extensions/taiji/system-prompt/src/index\.ts$|^packages/ui/src/features/chat/markdown-sanitize\.ts$"; then
         echo -e "${BLUE}[INFO] capability 清单/渲染白名单文件有变更，运行清单对拍检查...${NC}"
         if [ ! -f "scripts/check-capability-allowlist-sync.mjs" ]; then
             echo -e "${RED}[ERROR] 找不到 scripts/check-capability-allowlist-sync.mjs（D1 对拍机器检查交付物缺失）${NC}"
@@ -1648,14 +1649,14 @@ ${STAGED_DELETED}"
 
     # POSIX resolve 折叠实现三份镜像对拍检查（chat-html-support v16 内联容器 / markdown
     # sanitize D4 镜像纪律机检补强，按路径触发）：ui html-preview-path.ts resolvePosixPath /
-    # renderer markdown-sanitize.ts resolveResourcePath / ui MarkdownRenderer.vue
+    # ui markdown-sanitize.ts（renderer 迁入）resolveResourcePath / ui MarkdownRenderer.vue
     # resolveHrefPath 三份逐字同款折叠实现（跨包不可 import 的镜像纪律）——任一份漂移 =
     # 两侧对同一相对路径解析出不同绝对路径（iframe src 与 markdown 链接点击落点不一致）。
     # 读三侧源文件文本，剥签名行后函数体逐字对拍 + 折叠语义锚点在场断言（防三份一致退化）。
     # renderer lib/path-utils.resolvePreviewPath 非本族镜像（相对路径仅前缀拼接不折叠 `..`），
     # 不参与对拍。触发面：检查脚本自身 / 三份源文件（文件被删除也必须触发，脚本对文件缺失
     # 自带 fail 分支）。不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
-    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-posix-resolve-mirror-sync\.mjs$|^packages/ui/src/features/chat/html-preview-path\.ts$|^packages/renderer/src/composables/logic/markdown-sanitize\.ts$|^packages/ui/src/features/chat/MarkdownRenderer\.vue$"; then
+    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-posix-resolve-mirror-sync\.mjs$|^packages/ui/src/features/chat/html-preview-path\.ts$|^packages/ui/src/features/chat/markdown-sanitize\.ts$|^packages/ui/src/features/chat/MarkdownRenderer\.vue$"; then
         echo -e "${BLUE}[INFO] POSIX resolve 镜像文件有变更，运行三份折叠实现对拍检查...${NC}"
         if [ ! -f "scripts/check-posix-resolve-mirror-sync.mjs" ]; then
             echo -e "${RED}[ERROR] 找不到 scripts/check-posix-resolve-mirror-sync.mjs（镜像对拍机器检查交付物缺失）${NC}"

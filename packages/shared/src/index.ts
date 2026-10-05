@@ -62,7 +62,7 @@ export type {
   PiRespawnNoticeVariant,
   SendPromptReason,
 } from './message'
-export { parseBgNotifyDetails, COMPLETE_NOTIFY_CUSTOM_TYPES, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective, PI_RESPAWN_NOTICE_CUSTOM_TYPE, parseRespawnNoticeVariant, parseBackgroundBashDetails, parseWorkflowResultNotify, MSG_ID_TAG_RE, MSG_ID_TAG_BARE_RE, BARE_UUID_RE, markerLiteral, DELIVERY_PREVIEW_MAX_CHARS, decodeNewlineEscapes } from './message'
+export { parseBgNotifyDetails, COMPLETE_NOTIFY_CUSTOM_TYPES, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective, PI_RESPAWN_NOTICE_CUSTOM_TYPE, parseRespawnNoticeVariant, parseBackgroundBashDetails, parseWorkflowResultNotify, MSG_ID_TAG_RE, MSG_ID_TAG_BARE_RE, BARE_UUID_RE, MSG_ID_UUID_SEGMENT, MSG_ID_ADOPTED_SEGMENT, markerLiteral, DELIVERY_PREVIEW_MAX_CHARS, decodeNewlineEscapes } from './message'
 // w21 pi-entry：pi session entry wire 类型（runtime 实时重构 ↔ core reducer ↔ protocol payload 三方共用）
 export type {
   PiEntry, PiEntryBase, PiMessageEntry, PiMessageBody,
@@ -91,13 +91,42 @@ export type {
 // LLM 重试配置域（类型 + D8 合法域常量 + 校验纯函数，renderer 表单与 runtime 写入侧共用）
 export type { LlmRetryConfig, LlmRetryProviderConfig } from './llm-retry'
 export { LLM_RETRY_DOMAIN, validateLlmRetryConfig } from './llm-retry'
+// codemode 域 WS 协议契约（codemode 设计 D1/A1：开关命令对请求响应 + settings.json 损坏错误态形状，renderer 与 runtime 共用）
+export type {
+  CodemodeSettingsCorruption,
+  CodemodeEnabledResult,
+  CodemodeSetEnabledRequest,
+  CodemodeSetEnabledResult,
+} from './codemode'
+// mcp 域 WS 协议契约（pi-mcp-management 设计：mcp.list/add/update/setEnabled/remove/test/testCancel 七命令 + 条目/徽标/损坏错误态形状，renderer 与 runtime 共用）
+export type {
+  McpExposureLevel,
+  McpServerEntryValue,
+  McpOauthConfig,
+  McpServerEntry,
+  McpConfigCorruption,
+  McpListRequest,
+  McpListResult,
+  McpAddRequest,
+  McpUpdateRequest,
+  McpRemoveRequest,
+  McpSetEnabledRequest,
+  McpMutationResult,
+  McpTestRequest,
+  McpTestHandle,
+  McpTestCancelRequest,
+  McpTestCancelResult,
+  McpTestResultEvent,
+  McpProbeState,
+  McpServerStatusBadge,
+} from './mcp'
 // RPC 超时校准链常量 SSOT（timeout-slow-flow-wallclock D2/D3，renderer/runtime 双端编译期对齐）
 export { BASH_RPC_TIMEOUT_MS, COMPACT_RPC_TIMEOUT_MS, RENDERER_RPC_MARGIN_MS } from './timeouts'
 export * from './extension'
 export * from './git'
 export * from './plugin'
 
-export { BASE_PORT, DEV_PORT_OFFSET, MAX_PORT, ENV_WHITELIST_PREFIXES, AMBIENT_ENV_NAMES, SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES, SUBAGENT_RECORD_CUSTOM_TYPE, PROVIDER_API_TYPES, KNOWN_PI_API_TYPES, SYSTEM_PROMPT_MAX_LENGTH, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, IMAGE_LIMITS, MAX_WS_PAYLOAD_BYTES, PLUGIN_NOTIFY_LIMITS, UI_TOAST_LIMITS, ENGINE_LAUNCH_ENV_KEYS, PRESET_FALLBACK_ENV_KEYS, TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS, TAIJI_RUNTIME_PI_RECLAIM_TICK_MS, TAIJI_RUNTIME_PI_RECLAIM_VIEWED_WINDOW_MS, TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS, DEFAULT_PI_RECLAIM_IDLE_MS, DEFAULT_PI_RECLAIM_TICK_MS, DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS, DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS, TAIJI_SESSION_ACTIVATE_TIMEOUT_MS, DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS, MAX_SPEAK_CHARS, TTS_CACHE_MAX_FILES, TTS_CACHE_MAX_BYTES } from './constants'
+export { BASE_PORT, DEV_PORT_OFFSET, MAX_PORT, ENV_WHITELIST_PREFIXES, AMBIENT_ENV_NAMES, SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES, SUBAGENT_RECORD_CUSTOM_TYPE, PROVIDER_API_TYPES, KNOWN_PI_API_TYPES, SYSTEM_PROMPT_MAX_LENGTH, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, IMAGE_LIMITS, MAX_WS_PAYLOAD_BYTES, PLUGIN_NOTIFY_LIMITS, UI_TOAST_LIMITS, ENGINE_LAUNCH_ENV_KEYS, PRESET_FALLBACK_ENV_KEYS, MAX_SPEAK_CHARS, TTS_CACHE_MAX_FILES, TTS_CACHE_MAX_BYTES } from './constants'
 
 export type { ProviderApiType } from './constants'
 // 崩溃韧性共享契约 SSOT（实施计划 u-foundation：
@@ -191,6 +220,12 @@ export * from './file-tree'
 export type { RecentWorkspaceRecord } from './workspace'
 export type { Project, ProjectStoreState } from './project'
 export type { SubagentRecord, SubagentStatus, ClosedDisplayStatus } from './subagent'
+// 远程访问配置契约 SSOT（remote-access.json：main 写入侧与 runtime 握手热读侧共用；
+// 含 IPC 信封类型 RemoteAccessInfo/RemoteAccessToggleResult，main/preload/renderer
+// 三端共同 import；含无策略 shape 谓词（main/runtime 双侧 shape 判据单源）；
+// 纯类型/常量/纯函数无 node 依赖，barrel 安全）。
+export type { RemoteAccessConfig, RemoteAccessUrl, RemoteAccessInfo, RemoteAccessToggleResult } from './remote-access'
+export { REMOTE_ACCESS_FILENAME, REMOTE_TOKEN_HEX64, isRemoteAccessConfigShape } from './remote-access'
 // 导入会话 RPC 契约（pi / zcode 多源，runtime/renderer 两端共同 import；多源扩展见 docs/architecture/session-import-sources.md）
 export type {
   ImportSourceKind, ImportWarning, ImportErrorCode,

@@ -4,19 +4,30 @@
  * 对应 spec §4.2 M4「桥接 handler」：getRuntimePort / getRuntimePortOffset /
  * getWindows / focusWindow / createWindow。
  * 只读 Main 内部状态或委托给 windowManager/runtime，无 OS 副作用。
+ * remote-access 域（get-remote-access-info / rotate-remote-access-token /
+ * set-remote-access-enabled）是本文件的受控例外：写配置文件 + 触发 runtime 重启，
+ * 有输入校验（isValidRemoteAccessEnabled）——写侧委托 remote-access store，重启链
+ * （stop → spawn → runtime-restarting/runtime-port 广播时序）整体委托
+ * supervisor.restartForConfigChange，本文件不持配置状态、零重启编排。
  *
  * [HISTORICAL] 不变量：
- * - 桥接 handler 不做输入校验（只读/委托，无安全风险）
+ * - 桥接 handler 不做输入校验（只读/委托，无安全风险；remote-access 域除外，见上）
  * - createWindow 触发 broadcastWindowList（通知所有 renderer 窗口列表变化）
  * - windowManager.setOnWindowListChanged 注册 broadcastWindowList 回调
  *
- * 依赖方向：bridge-handlers → electron(ipcMain) + interfaces
+ * 依赖方向：bridge-handlers → electron(ipcMain) + interfaces + remote-access(store/lan)
  */
 import { ipcMain, BrowserWindow } from 'electron'
-import { homedir } from 'node:os'
+import { statSync } from 'node:fs'
+import { homedir, networkInterfaces } from 'node:os'
 import { sep } from 'node:path'
 import { getDataDir } from '@taiji/shared/paths'
+import type { RemoteAccessConfig, RemoteAccessInfo } from '@taiji/shared'
 import type { IpcHandlerDeps } from '../interfaces.js'
+import { enumerateLanAddresses } from '../remote-access/lan-addresses.js'
+import { resolveMobileDistEnv, resolveMobileDistPath } from '../remote-access/mobile-dist.js'
+import { readRemoteAccessConfig, rotateRemoteAccessToken, setRemoteAccessEnabled } from '../remote-access/store.js'
+import { isValidRemoteAccessEnabled } from './input-validators.js'
 
 /**
  * 注册桥接 IPC handler（runtime port / 窗口管理系列）。
@@ -53,6 +64,35 @@ export function registerBridgeHandlers(deps: IpcHandlerDeps): void {
     await deps.runtime.restartRuntime()
   })
 
+  // ── remote-access 连接信息（配置 + LAN 候选 + 轮换 + 开关切换）────────
+  // remote-access D2/D6/D9：main 是 remote-access.json 唯一写方；连接 URL 候选 =
+  // LAN IPv4 枚举 × 当前 runtime 端口（runtime 未启动 → 空列表，面板不产死链接）。
+  ipcMain.handle('get-remote-access-info', () => buildRemoteAccessInfo(deps))
+
+  // 轮换 token：重写文件即生效（runtime 每次握手热读，不触发重启），返回新配置。
+  // 复用轮换返回值构建 payload（同步写读之间无其他写方，读回恒等于写入值，免一次文件读）。
+  ipcMain.handle('rotate-remote-access-token', () => {
+    return buildRemoteAccessInfo(deps, rotateRemoteAccessToken())
+  })
+
+  // 开关切换：先落盘，开关状态实际变化且 runtime 在跑时重启 runtime（listen host 与
+  // argv 是启动期一次性决策）；runtime 未跑（mock/未启动）只落盘，下次启动自然生效。
+  // 重启编排（stop→spawn→广播时序）整体委托 supervisor.restartForConfigChange——
+  // 广播（runtime-restarting 先于 stop）归 supervisor 单点，本层零编排
+  ipcMain.handle('set-remote-access-enabled', async (_event, enabled: unknown) => {
+    if (!isValidRemoteAccessEnabled(enabled)) {
+      throw new Error('set-remote-access-enabled: enabled must be a boolean')
+    }
+    const before = readRemoteAccessConfig().enabled
+    setRemoteAccessEnabled(enabled)
+    let restarted = false
+    if (enabled !== before && deps.runtime.port !== null) {
+      await deps.runtime.restartForConfigChange()
+      restarted = true
+    }
+    return { ...buildRemoteAccessInfo(deps), restarted }
+  })
+
   // ── 窗口管理 ─────────────────────────────────────────────────────
   ipcMain.handle('create-window', async (_event, options?: { sessionId?: string }) => {
     const windowId = deps.windowManager.generateId()
@@ -82,10 +122,40 @@ export function registerBridgeHandlers(deps: IpcHandlerDeps): void {
  * 在 createWindow / window close 时触发。
  */
 export function broadcastWindowList(): void {
-  const allWindows = BrowserWindow.getAllWindows()
-  for (const win of allWindows) {
+  for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
       win.webContents.send('window-list-updated')
     }
+  }
+}
+
+// ── remote-access 连接信息（helper，模式对齐 broadcastWindowList：实时取窗口，不存引用）──
+
+/**
+ * 移动壳 dist 产物就绪探测（面板读取时刻的点测）。
+ *
+ * [时间点] 本探测发生在面板读取时刻，与 runtime 启动期的 E5 探测
+ * （resolveMobileStaticRoot）存在窗口差——两次探测之间 dist 可能被构建/删除，
+ * 本结论是可接受的近似（E5 显形的目标是「用户有提示」，静态面挂载的权威判据
+ * 仍在 runtime 启动期探测）。
+ */
+function isMobileDistReady(): boolean {
+  // 三元组经 resolveMobileDistEnv 单点工厂（与 spawnRuntimeProcess 拼参同源，
+  // 防面板点测与 spawn 实参对同一 dist 判定漂移）
+  try {
+    return statSync(resolveMobileDistPath(resolveMobileDistEnv())).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/** 当前配置 + LAN 候选（端口来自 supervisor 的既有端口发现，未启动为 null → 空列表）。 */
+function buildRemoteAccessInfo(deps: IpcHandlerDeps, config: RemoteAccessConfig = readRemoteAccessConfig()): RemoteAccessInfo {
+  return {
+    enabled: config.enabled,
+    token: config.token,
+    createdAt: config.createdAt,
+    urls: enumerateLanAddresses(networkInterfaces(), deps.runtime.port),
+    mobileDistReady: isMobileDistReady(),
   }
 }

@@ -89,4 +89,38 @@ describe("setupToolErrorAudit", () => {
 
 		expect(pi.appendEntry).not.toHaveBeenCalled();
 	});
+
+	// D13②：嵌套子调用失败不单独记账（父工具的 tool_execution_end 是记账终点）
+
+	it("skips nested sub-call failure (parentToolCallId present) — no audit entry", async () => {
+		const pi = createMockPi();
+		setupToolErrorAudit(pi as unknown as ExtensionAPI);
+		const handler = getRegisteredHandler(pi);
+
+		await handler({
+			isError: true,
+			toolName: "bash",
+			toolCallId: "call-child-1",
+			parentToolCallId: "call-parent-0",
+			result: { content: [{ type: "text", text: "child failed" }] },
+		});
+
+		expect(pi.appendEntry).not.toHaveBeenCalled();
+	});
+
+	it("empty-string parentToolCallId is treated as top-level call — entry still recorded", async () => {
+		const pi = createMockPi();
+		setupToolErrorAudit(pi as unknown as ExtensionAPI);
+		const handler = getRegisteredHandler(pi);
+
+		await handler({
+			isError: true,
+			toolName: "bash",
+			toolCallId: "call-4",
+			parentToolCallId: "",
+			result: { content: [{ type: "text", text: "top-level failed" }] },
+		});
+
+		expect(pi.appendEntry).toHaveBeenCalledTimes(1);
+	});
 });

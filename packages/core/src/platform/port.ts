@@ -15,6 +15,15 @@ export interface KVStorage {
   remove(key: string): Promise<void>
 }
 
+// WebSocketCloseInfo —— 关闭事件信息（原生 CloseEvent 的最小投影，remote-use D8）：
+// code 为对端发送的 close 码（如 1001 Going Away = runtime 计划内关停）；平台适配层
+// 从原生 CloseEvent 投影三字段，无事件形态（mock 桩 close）不传整个参数。
+export interface WebSocketCloseInfo {
+  code: number
+  reason: string
+  wasClean: boolean
+}
+
 // WebSocketLike —— WebSocket 抽象（属性式回调，贴合原生 WebSocket 语义）。
 // 平台适配层（ElectronPlatformAdapter/MockPlatform）按本接口实现真实/模拟连接。
 // readyState 数字常量对齐 WHATWG：CONNECTING=0 / OPEN=1 / CLOSING=2 / CLOSED=3。
@@ -23,7 +32,8 @@ export interface WebSocketLike {
   send(data: string): void
   close(): void
   onopen: (() => void) | null
-  onclose: (() => void) | null
+  /** 关闭回调；参数为关闭信息投影（可选——无事件形态的桩可不传，消费方按无码处理） */
+  onclose: ((event?: WebSocketCloseInfo) => void) | null
   onmessage: ((event: { data: unknown }) => void) | null
   onerror: ((err: unknown) => void) | null
 }

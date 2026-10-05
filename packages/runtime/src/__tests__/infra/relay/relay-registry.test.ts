@@ -19,8 +19,8 @@ import { RELAY_PROTOCOL_VERSION, RELAY_ENV_SOCKET, RELAY_ENV_SESSION_ID, RELAY_E
 import type { ServerMessage } from '@taiji/shared'
 
 /** 轮询等待条件成立（进程间时序）。 */
-// 默认 30s：CI 2 核 runner 上 vitest 并行 worker 抢占下，spawn 假 pi → SIGTERM →
-// marker 写盘链路可显著慢于本地（8s 预算曾连续两轮 CI 超时红，同代码第三轮又绿，
+// 默认 30s：CI 2 核 runner 上 vitest 并行 worker 抢占下，spawn 假 pi → 杀链 SIGKILL →
+// 进程退出传播链路可显著慢于本地（8s 预算曾连续两轮 CI 超时红，同代码第三轮又绿，
 // 纯调度噪声）；断言语义不变，只放宽时序预算
 async function waitFor(cond: () => boolean, timeoutMs = 30_000, what = 'condition'): Promise<void> {
   const start = Date.now()
@@ -128,9 +128,10 @@ function validHandshake(overrides: Record<string, unknown> = {}): Record<string,
 }
 
 describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
-  // 本文件全部用例涉及真实子进程 + 杀链（SIGTERM → 3s grace → SIGKILL），满并行下
-  // 5s 默认 testTimeout 不够（全量 347 文件满并行时杀链用例曾超时）——统一放宽。
-  // 60s：waitFor 内部预算 30s（见 waitFor 注释），用例超时必须大于其最长等待。
+  // 本文件全部用例涉及真实子进程 + 杀链（pi-rpc killPiProcess SIGKILL 直杀，ADR-0122
+  // grace 退役），满并行下 5s 默认 testTimeout 不够（全量 347 文件满并行时杀链用例曾超
+  // 时）——统一放宽。60s：waitFor 内部预算 30s（见 waitFor 注释），用例超时必须大于
+  // 其最长等待。
   const PROCESS_TEST_TIMEOUT_MS = 60_000
   const t = (name: string, fn: () => void | Promise<void>): void => { it(name, fn, PROCESS_TEST_TIMEOUT_MS) }
   let dataDir: string
@@ -148,7 +149,9 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     workDir = await mkdtemp(join(tmpdir(), 'relay-pi-'))
     fakePi = join(workDir, 'fake-pi.mjs')
     // 假 pi：dump argv/cwd/relay-env 剥离结果；events 模式输出事件流；echo 模式回显
-    // stdin；exit7 模式即退；SIGTERM 写 marker（断连即杀断言）。
+    // stdin；exit7 模式即退。挂住模式（hang/events/stream）无信号 handler——收割全靠
+    // 杀链 SIGKILL 直杀（killPiProcess，ADR-0122：原 SIGTERM marker 断言已随 grace
+    // 退役删除），「child 被杀」统一以进程退出 / pid 文件清理为断言信号。
     await writeFile(fakePi, [
       "import { writeFileSync } from 'node:fs'",
       "const mode = process.argv[2] ?? 'hang'",
@@ -170,18 +173,10 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
       "// stream 模式：持续向 stdout 吐数据（半关闭容错测试——子进程在连接死亡后仍输出）",
       "if (mode === 'stream') {",
       "  let i = 0",
-      "  const timer = setInterval(() => { process.stdout.write(`chunk-${i++}\\n`) }, 10)",
-      "  process.on('SIGTERM', () => { clearInterval(timer); process.exit(0) })",
+      "  setInterval(() => { process.stdout.write(`chunk-${i++}\\n`) }, 10)",
       '}',
       "// hang/events 模式挂住事件循环：立即退出会与 stdout pipe flush 竞态丢数据",
       "if (mode === 'hang' || mode === 'events') setTimeout(() => {}, 60000)",
-      "process.on('SIGTERM', () => {",
-      "  if (process.env.TAIJI_TEST_SIGTERM_MARKER) writeFileSync(process.env.TAIJI_TEST_SIGTERM_MARKER, 'sigterm')",
-      '  process.exit(0)',
-      '})',
-      "// handler 注册完才写 ready：CI 2 核饱和下 node 冷启动可达数秒，杀链若在",
-      "// 注册前发 SIGTERM 走默认终止，marker 永不出现（间歇红 CI 的根因）",
-      "if (process.env.TAIJI_TEST_READY_MARKER) writeFileSync(process.env.TAIJI_TEST_READY_MARKER, 'ready')",
       '',
     ].join('\n'))
     published = []
@@ -197,8 +192,8 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     vi.restoreAllMocks()
   })
 
-  async function startServer(opts?: { orphanKillGraceMs?: number }): Promise<void> {
-    await initRelayServer({ projectRoot: workDir, dataDir, publish, piCommand: process.execPath, orphanKillGraceMs: opts?.orphanKillGraceMs })
+  async function startServer(): Promise<void> {
+    await initRelayServer({ projectRoot: workDir, dataDir, publish, piCommand: process.execPath })
   }
 
   t('init：listen + socket 文件创建 + active 状态', async () => {
@@ -442,25 +437,20 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     await agent.waitForClosed()
   })
 
-  t('断连即杀：客户端断开 → 伪 child 收到 SIGTERM（marker 文件）+ 结构化决策日志', async () => {
+  t('断连即杀：客户端断开 → 伪 child 被杀（进程退出）+ 结构化决策日志', async () => {
     await startServer()
-    const marker = join(workDir, 'sigterm-marker')
     const agent = new TestAgent(getActiveRelaySocketPath()!)
     await agent.opened
     const hs = validHandshake({ argv: [fakePi, 'hang'] })
-    const ready = join(workDir, 'ready-marker')
-    ;(hs.env as Record<string, string>).TAIJI_TEST_SIGTERM_MARKER = marker
-    ;(hs.env as Record<string, string>).TAIJI_TEST_READY_MARKER = ready
     agent.send(hs)
     await waitFor(() => existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'pid file written')
-    // 等 handler 注册完再触发杀链：否则 SIGTERM 打进 node 启动期走默认终止，marker 永不出现
-    await waitFor(() => existsSync(ready), 30_000, 'fake-pi ready (SIGTERM handler registered)')
     // 杀链决策日志（crash-resilience §3.3 D6-⑥）：spy 必须在 initLogger patch console
     // 之后挂（spy 替换的是 patched 版本，调用路径经过 spy）；close handler 同步落行
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       agent.destroy()
-      await waitFor(() => existsSync(marker), 30_000, 'SIGTERM marker (kill-on-disconnect)')
+      // SIGKILL 直杀（ADR-0122）下断言「child 被杀」= pid 文件清理（child exit →
+      // cleanupEntry 的既有事件链；hang 模式 child 挂 60s，只会因被杀退出）
       await waitFor(() => !existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'pid file cleaned after kill')
       // 决策行：动作 / 主 session（哪个主 session 死）/ recordId + 子进程 pid（连带杀谁）/ 原因
       const decisionCall = warnSpy.mock.calls.find(([msg]) => msg === '[relay] kill decision')
@@ -478,26 +468,21 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
 
   // goodbye 预告（2026-09-24 事故取证修复）：宿主正常收割（agent_settled 后杀代理）
   // 先发 goodbye 再断开——runtime 侧把 close 判定为正常 teardown：child 照常收割
-  // （marker 仍出现），但不产生 warn 级 kill-on-disconnect 与 kill decision 决策行
-  // （正常路径不污染故障统计）。无预告断连的 warn 语义由上例锁定。
+  // （进程退出 / pid 文件清理），但不产生 warn 级 kill-on-disconnect 与 kill decision
+  // 决策行（正常路径不污染故障统计）。无预告断连的 warn 语义由上例锁定。
   t('goodbye 预告：断开前发 goodbye → child 仍被收割，但无 warn 级 kill-on-disconnect 日志', async () => {
     await startServer()
-    const marker = join(workDir, 'sigterm-marker-goodbye')
     const agent = new TestAgent(getActiveRelaySocketPath()!)
     await agent.opened
     const hs = validHandshake({ argv: [fakePi, 'hang'] })
-    const ready = join(workDir, 'ready-marker-goodbye')
-    ;(hs.env as Record<string, string>).TAIJI_TEST_SIGTERM_MARKER = marker
-    ;(hs.env as Record<string, string>).TAIJI_TEST_READY_MARKER = ready
     agent.send(hs)
     await waitFor(() => existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'pid file written')
-    await waitFor(() => existsSync(ready), 30_000, 'fake-pi ready (SIGTERM handler registered)')
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
     try {
       agent.send({ v: 1, kind: 'goodbye' })
       agent.destroy()
-      await waitFor(() => existsSync(marker), 30_000, 'SIGTERM marker (reaped after goodbye)')
+      // 收割完成信号 = pid 文件删除（SIGKILL 直杀后 child exit → cleanupEntry，ADR-0122）
       await waitFor(() => !existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'pid file cleaned after reap')
       // 无 warn 级断连告警与 kill decision 决策行（正常收割不产生故障噪声）
       expect(warnSpy.mock.calls.some(([msg]) => String(msg).includes('kill-on-disconnect'))).toBe(false)
@@ -517,20 +502,17 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
   // decision 日志 + inflightKills 双登记）。
   t('destroyAll 接管杀链：close 不重复打 kill decision，child 仍被收割', async () => {
     await startServer()
-    const marker = join(workDir, 'sigterm-marker-destroyall')
-    const ready = join(workDir, 'ready-marker-destroyall')
     const agent = new TestAgent(getActiveRelaySocketPath()!)
     await agent.opened
     const hs = validHandshake({ argv: [fakePi, 'hang'] })
-    ;(hs.env as Record<string, string>).TAIJI_TEST_SIGTERM_MARKER = marker
-    ;(hs.env as Record<string, string>).TAIJI_TEST_READY_MARKER = ready
     agent.send(hs)
     await waitFor(() => existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'pid file written')
-    await waitFor(() => existsSync(ready), 30_000, 'fake-pi ready (SIGTERM handler registered)')
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       await getActiveRelayRegistry()!.destroyAll()
-      await waitFor(() => existsSync(marker), 30_000, 'SIGTERM marker (child reaped by destroyAll)')
+      // 收割完成信号 = pid 文件删除（destroyAll → killRelayChild SIGKILL 直杀 →
+      // cleanupEntry，ADR-0122；hang 模式 child 挂 60s，只会因被杀退出）
+      await waitFor(() => !existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'pid file cleaned (child reaped by destroyAll)')
       // close handler 对同一 child 不重复杀链（无 kill decision / kill-on-disconnect warn）
       expect(warnSpy.mock.calls.some(([msg]) => msg === '[relay] kill decision')).toBe(false)
       expect(warnSpy.mock.calls.some(([msg]) => String(msg).includes('kill-on-disconnect'))).toBe(false)
@@ -549,12 +531,8 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     const socketPath = getActiveRelaySocketPath()!
     const agent = new TestAgent(socketPath)
     await agent.opened
-    const ready = join(workDir, 'ready-marker-halfclose')
-    const hs = validHandshake({ argv: [fakePi, 'stream'] })
-    ;(hs.env as Record<string, string>).TAIJI_TEST_READY_MARKER = ready
-    agent.send(hs)
+    agent.send(validHandshake({ argv: [fakePi, 'stream'] }))
     await waitFor(() => agent.frames.some((f) => f.kind === 'accept'), 30_000, 'accept frame')
-    await waitFor(() => existsSync(ready), 30_000, 'fake-pi streaming')
     // 收到若干流帧证明字节泵在转发（k=3 留余量防 readline 拆帧与调度抖动），再半关闭
     await waitFor(() => agent.dataUp().length >= 3, 30_000, 'stream frames flowing')
     agent.halfClose()
@@ -594,18 +572,14 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
 
   t('deinitRelayServer：running 子进程全部杀链收割', async () => {
     await startServer()
-    const marker = join(workDir, 'sigterm-marker-deinit')
     const agent = new TestAgent(getActiveRelaySocketPath()!)
     await agent.opened
-    const hs = validHandshake({ argv: [fakePi, 'hang'] })
-    const ready = join(workDir, 'ready-marker-deinit')
-    ;(hs.env as Record<string, string>).TAIJI_TEST_SIGTERM_MARKER = marker
-    ;(hs.env as Record<string, string>).TAIJI_TEST_READY_MARKER = ready
-    agent.send(hs)
+    agent.send(validHandshake({ argv: [fakePi, 'hang'] }))
     await waitFor(() => existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'pid file written')
-    await waitFor(() => existsSync(ready), 30_000, 'fake-pi ready (SIGTERM handler registered)')
     await deinitRelayServer()
-    await waitFor(() => existsSync(marker), 30_000, 'SIGTERM marker (deinit kill chain)')
+    // 收割完成信号 = pid 文件删除（deinit → destroyAll → killRelayChild SIGKILL 直杀
+    // → cleanupEntry，ADR-0122；hang 模式 child 挂 60s，只会因被杀退出）
+    await waitFor(() => !existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'pid file cleaned (deinit kill chain)')
   })
 
   t('重复 recordId → 第二个连接 reject duplicate', async () => {
@@ -648,10 +622,9 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
   })
 
   // idle pi reclamation D3 第 5 步尾扫读面（u3a）：listTargetsByMainSessionId 真值表。
-  // kill 可调且有效 = SIGTERM marker 落盘（假 pi hang 模式注册 SIGTERM handler 后写
-  // ready，防杀链跑在 handler 注册前）；「杀完走注册表清理」断言 = pid 文件删除
-  // （child 'exit' → cleanupEntry 的既有事件链，与 hasByMainSessionId 用例同款完成
-  // 信号，不探测私有 Map）。
+  // kill 可调且有效 = kill 返回后 child 被杀（pid 文件删除 = child 'exit' → cleanupEntry
+  // 的既有事件链；SIGKILL 直杀 ADR-0122，hang 模式 child 挂 60s 只会因被杀退出）；
+  // 「杀完走注册表清理」断言同源，不探测私有 Map。
   t('listTargetsByMainSessionId 真值表：无条目空数组 → 注册后含目标且 kill 可调 → 清理后空', async () => {
     await startServer()
     const registry = getActiveRelayRegistry()!
@@ -659,21 +632,14 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     expect(registry.listTargetsByMainSessionId('main-1')).toEqual([])
     const agent = new TestAgent(getActiveRelaySocketPath()!)
     await agent.opened
-    const marker = join(workDir, 'sigterm-marker-list-targets')
-    const ready = join(workDir, 'ready-marker-list-targets')
-    const hs = validHandshake({ argv: [fakePi, 'hang'] })
-    ;(hs.env as Record<string, string>).TAIJI_TEST_SIGTERM_MARKER = marker
-    ;(hs.env as Record<string, string>).TAIJI_TEST_READY_MARKER = ready
-    agent.send(hs)
+    agent.send(validHandshake({ argv: [fakePi, 'hang'] }))
     await waitFor(() => existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'relay registered (pid file)')
-    await waitFor(() => existsSync(ready), 30_000, 'fake-pi ready (SIGTERM handler registered)')
     const targets = registry.listTargetsByMainSessionId('main-1')
     expect(targets).toHaveLength(1)
     // per-sid 精度：其他 mainSessionId 仍为空
     expect(registry.listTargetsByMainSessionId('main-other')).toEqual([])
-    // kill 可调且有效：kill 链发出 SIGTERM（假 pi 写 marker 后退出）
+    // kill 可调且有效：kill 链 SIGKILL 直杀（ADR-0122），child 被杀退出
     await targets[0]!.kill()
-    await waitFor(() => existsSync(marker), 30_000, 'SIGTERM marker (kill chain fired)')
     // 杀完无需手工注销：child 'exit' handler 自动 cleanupEntry（pid 文件删除为完成信号）
     await waitFor(() => !existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'entry cleaned after kill')
     expect(registry.listTargetsByMainSessionId('main-1')).toEqual([])
@@ -717,16 +683,11 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
       child.kill('SIGKILL')
     })
 
-    t('活孤儿（启动时间不晚于 spawn 记录）→ 收割（SIGTERM）', async () => {
-      const marker = join(workDir, 'orphan-marker')
+    t('活孤儿（启动时间不晚于 spawn 记录）→ 收割（进程退出）', async () => {
       const orphan = join(workDir, 'orphan.mjs')
       await writeFile(orphan, [
         "import { writeFileSync } from 'node:fs'",
         `writeFileSync(${JSON.stringify(join(workDir, 'orphan-boot.json'))}, 'booted')`,
-        "process.on('SIGTERM', () => {",
-        `  writeFileSync(${JSON.stringify(marker)}, 'reaped')`,
-        '  process.exit(0)',
-        '})',
         'setTimeout(() => {}, 60000)',
         '',
       ].join('\n'))
@@ -736,10 +697,10 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
       // 孤儿形态：spawn 在「现在」（进程已启动后写记录），runtime 已死（无注册表）
       const pidFile = getRelayPidFilePath('rec-orphan', dataDir)
       await writeFileAsync(pidFile, JSON.stringify({ pid: child.pid, spawnedAt: Date.now() }))
-      // grace 100ms：收割杀链 SIGTERM→SIGKILL 窗口压缩（orphan 有 SIGTERM handler 即退，
-      // 不走 SIGKILL），用例只锁「SIGTERM 到达 + 收割完成」语义
-      await startServer({ orphanKillGraceMs: 100 })
-      await waitFor(() => existsSync(marker), 30_000, 'orphan reaped by sweep')
+      // 收割为 SIGKILL 直杀（ADR-0122 grace 退役）：用例锁「收割完成 + pid 文件删除」
+      // 语义——child 被杀 = signalCode 置位（SIGKILL 不可捕获，无 handler 依赖）
+      await startServer()
+      await waitFor(() => child.signalCode === 'SIGKILL', 30_000, 'orphan reaped by sweep')
       await waitFor(() => !existsSync(pidFile), 30_000, 'orphan pid file removed')
     })
 
@@ -747,15 +708,10 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     // 静默孤儿（无 tee 证据含）立即收割（上一用例锁定）；仍在产出的活跃孤儿
     // 登记 pending 延迟收割，tee 静默到期后补杀。
     t('活跃孤儿（tee 近期有写入）→ defer（pendingSince 登记，不杀）；tee 静默后 → 补杀', async () => {
-      const marker = join(workDir, 'orphan-marker-active')
       const orphan = join(workDir, 'orphan-active.mjs')
       await writeFile(orphan, [
         "import { writeFileSync } from 'node:fs'",
         `writeFileSync(${JSON.stringify(join(workDir, 'orphan-active-boot.json'))}, 'booted')`,
-        "process.on('SIGTERM', () => {",
-        `  writeFileSync(${JSON.stringify(marker)}, 'reaped')`,
-        '  process.exit(0)',
-        '})',
         'setTimeout(() => {}, 60000)',
         '',
       ].join('\n'))
@@ -770,26 +726,27 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
       mkdirSync(logsDir, { recursive: true })
       const teeFile = join(logsDir, `pi-relay-${new Date().toISOString().slice(0, 10)}-${recordId}.jsonl`)
       writeFileSync(teeFile, '{"type":"message_update"}\n')
-      // grace 100ms 同上：补杀杀链窗口压缩，defer/补杀语义不变
-      await startServer({ orphanKillGraceMs: 100 })
+      await startServer()
       const registry = getActiveRelayRegistry()
       if (registry === null || registry === undefined) throw new Error('registry not active')
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
       try {
         await registry.sweepOrphanChildren()
-        // 活跃孤儿被 defer：未杀（marker 不出现）+ pendingSince 已登记 + warn 留痕
-        expect(existsSync(marker)).toBe(false)
+        // 活跃孤儿被 defer：进程未被杀（exitCode/signalCode 均空，与 pid 复用防护用例
+        // 同款存活判据）+ pendingSince 已登记 + warn 留痕
+        expect(child.exitCode === null && child.signalCode === null).toBe(true)
         const pending = JSON.parse(readFileSync(pidFile, 'utf-8')) as { pendingSince?: number }
         expect(typeof pending.pendingSince).toBe('number')
         expect(warnSpy.mock.calls.some(([msg]) => String(msg).includes('deferred reap'))).toBe(true)
       } finally {
         warnSpy.mockRestore()
       }
-      // tee 静默到期（mtime 回拨到 10 分钟前）→ 再次 sweep 补杀
+      // tee 静默到期（mtime 回拨到 10 分钟前）→ 再次 sweep 补杀（SIGKILL 直杀，ADR-0122：
+      // child 被杀 = signalCode 置位，无 handler 依赖）
       const stale = new Date(Date.now() - 10 * 60_000)
       utimesSync(teeFile, stale, stale)
       await registry.sweepOrphanChildren()
-      await waitFor(() => existsSync(marker), 30_000, 'deferred orphan reaped after going idle')
+      await waitFor(() => child.signalCode === 'SIGKILL', 30_000, 'deferred orphan reaped after going idle')
       await waitFor(() => !existsSync(pidFile), 30_000, 'deferred orphan pid file removed')
     })
 

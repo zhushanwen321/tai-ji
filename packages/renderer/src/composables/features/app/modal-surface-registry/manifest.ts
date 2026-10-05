@@ -43,7 +43,7 @@ export type ModalSurfaceFamily =
   | 'popover-layer'
   /** ToastContainer（非阻塞通知，不消费 Esc） */
   | 'toast'
-  /** 可编程横幅（CrashRecoveredBar / memory pressure bar，显示到 dismiss 或 level 变化） */
+  /** 可编程横幅（memory pressure bar，显示到 dismiss 或 level 变化） */
   | 'program-banner'
   /** 可编程横幅（RollingRestartBanner，滚动重启） */
   | 'rolling-banner'
@@ -213,15 +213,6 @@ export const MODAL_SURFACE_MANIFEST = [
       { file: 'packages/renderer/src/components/ui/ToastContainer.vue', form: 'class-raw', literal: '9999', count: 1 },
     ],
     basis: '§6.7 表：ToastContainer（非阻塞通知，不入让位族、只入 view 遮蔽族）',
-  },
-  {
-    id: 'crash-recovered-bar',
-    family: 'program-banner',
-    kind: 'member',
-    zAnchors: [
-      { file: 'packages/renderer/src/components/ui/CrashRecoveredBar.vue', form: 'class-raw', literal: '9999', count: 1 },
-    ],
-    basis: '§6.7 表：CrashRecoveredBar（可编程横幅，显示到 dismiss）',
   },
   {
     id: 'memory-pressure-bar',

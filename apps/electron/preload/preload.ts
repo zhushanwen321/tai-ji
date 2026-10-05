@@ -1,7 +1,7 @@
 // apps/electron/preload/preload.ts
 import { contextBridge, ipcRenderer } from 'electron'
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, ShieldsFacesPayload, LocalFileServableResult, LocalFileReadResult } from "@taiji/shared"
-import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ } from "@taiji/shared"
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, LocalFileServableResult, LocalFileReadResult } from '@taiji/shared'
+import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ } from '@taiji/shared'
 
 // local-file 预检 / 源码读取的 payload 类型（LocalFileServableResult / LocalFileReadResult）
 // 定义 SSOT = `packages/shared/src/ipc-payloads.ts`（C-comm-22 唯一类型源），本文件只 import
@@ -219,6 +219,13 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
    * 对齐 ui 层 ChooseDirectoryFn 契约（LoadPaths onChooseDirectory 消费）。
    */
   chooseDirectory(): Promise<string | null>
+  // ── remote-access（设置面板连接信息：配置读取 / token 轮换 / 开关切换）──
+  /** 读取远程访问配置 + LAN 地址候选（urls 不含 token，面板自行拼接 `?token=`） */
+  getRemoteAccessInfo(): Promise<RemoteAccessInfo>
+  /** 轮换 remote token（main 重写文件即生效，不触发重启），返回最新连接信息 */
+  rotateRemoteAccessToken(): Promise<RemoteAccessInfo>
+  /** 切换远程访问开关（开/关态变化且 runtime 在跑时触发重启），返回最新连接信息 + 是否已重启 */
+  setRemoteAccessEnabled(enabled: boolean): Promise<RemoteAccessToggleResult>
   getProxyConfig(): Promise<import('@taiji/shared').IProxyConfig>
   /** 保存代理配置 */
   setProxyConfig(config: import('@taiji/shared').IProxyConfig): Promise<void>
@@ -424,6 +431,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // v2 §3：chooseDirectory 薄包装 pick-directory handler，返回 path（canceled→null），对齐 ui ChooseDirectoryFn 契约
   chooseDirectory: () =>
     ipcRenderer.invoke('pick-directory').then((r: { canceled: boolean; path: string | null }) => r.path),
+  // ── remote-access（设置面板连接信息）────────────────────────
+  getRemoteAccessInfo: () => ipcRenderer.invoke('get-remote-access-info'),
+  rotateRemoteAccessToken: () => ipcRenderer.invoke('rotate-remote-access-token'),
+  setRemoteAccessEnabled: (enabled: boolean) => ipcRenderer.invoke('set-remote-access-enabled', enabled),
   getProxyConfig: () => ipcRenderer.invoke('update:getProxyConfig'),
   setProxyConfig: (config) => ipcRenderer.invoke('update:setProxyConfig', config),
   testProxy: (config) => ipcRenderer.invoke('update:testProxy', config),

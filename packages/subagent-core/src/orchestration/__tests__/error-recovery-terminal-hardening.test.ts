@@ -215,18 +215,14 @@ describe("[OR-4] 终态收尾 直落/onRunDone 围栏（不产 unhandledRejectio
     expect(deps.store.save).toHaveBeenCalledTimes(1);
   });
 
-  it("time_limited 路径（预算耗尽 + 超限重试）：直落抛错 → resolve", async () => {
-    const run = makeRealRun("wf-fence-6", { budgetTimeMs: 5000 });
+  it("failed 路径（script error 一次即终态，ADR-0122）：直落抛错 → resolve", async () => {
+    const run = makeRealRun("wf-fence-6");
     await seedRunCreated(run);
-    // 已耗 6000ms > 预算 5000ms（fake timers 冻结 Date）
-    run.meta.startedAt = new Date(Date.now() - 6000).toISOString();
     const deps = makeDeps({ appendThrows: true });
 
-    const p = handleScriptError(run, "boom", [], deps, makeHandlers());
-    await vi.advanceTimersByTimeAsync(1000); // 退避
-    await expect(p).resolves.toBeUndefined();
+    await expect(handleScriptError(run, "boom", [], deps, makeHandlers())).resolves.toBeUndefined();
 
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "time_limited" });
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(deps.store.save).toHaveBeenCalledTimes(1);
     // [B-4] 独立围栏：直落故障不再跳过 onRunDone（旧实现同一 try 会跳过）
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);

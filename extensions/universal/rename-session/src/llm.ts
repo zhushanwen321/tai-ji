@@ -154,10 +154,7 @@ export function buildTitleMessages(
 	return messages;
 }
 
-// ──────────────────────── debug 证据链 + 超时 ────────────────────────
-
-/** rename LLM 超时（固定值：实测 2048 预算下独立调用 5-12.5s，30s 约 2.4x+ 余量；超时归一 ok:false 静默跳过）。 */
-const RENAME_TIMEOUT_MS = 30_000;
+// ──────────────────────── debug 证据链 ────────────────────────
 
 /** title empty warn 的 raw 预览上限（Unicode 码点数；预览是 LLM 标题候选，非对话原文）。 */
 const TITLE_EMPTY_RAW_PREVIEW_CODE_POINTS = 100;
@@ -308,12 +305,10 @@ export async function callRenameLLM(
 		// 输出预算必须覆盖「thinking + 标题」两部分：thinking 计入 maxTokens 的模型
 		//（StepFun step-5-preview 实测 thinking 600-1500 tokens 且不可禁用/不可压低，
 		// reasoning_effort/thinking 参数均被无视）在 64 预算下正文必然截断为空。
-		// 2048 = 实测最大总输出 843 tokens 的 2.4x 余量；不给 4096+ 是因为最坏满额时长
-		//（4096 ÷ 67 tok/s ≈ 61s）远超 30s 超时线。截断发生时空标题 warn 带 stopReason=length 留痕，
+		// 2048 = 实测最大总输出 843 tokens 的 2.4x 余量。截断发生时空标题 warn 带 stopReason=length 留痕，
 		// 该 warn 累积出现即上调本常量的数据信号。maxTokens 是截断上限非预扣额度，按实际用量计费。
 		maxTokens: 2048,
-		// 固定 30s 超时（网络抖动归一为 ok:false 走静默跳过，不悬挂 fire-and-forget promise）
-		timeoutMs: RENAME_TIMEOUT_MS,
+		// 不传 timeoutMs（ADR-0122：不设包内超时兜底，LLM 挂死由上层失败直报；调用方显式超时走 llm-shared C2 通道）
 		// 档位按「该模型自己的 supportedLevels」判定（pi-ai 数据驱动，本层不自持词表）：
 		// 配置写了该模型不支持的档位 → 留痕并按「不传档位」处理（不静默换成别的档）。
 		// llm-shared 内部会把 "off" 映射为不传 reasoning（provider 默认）。

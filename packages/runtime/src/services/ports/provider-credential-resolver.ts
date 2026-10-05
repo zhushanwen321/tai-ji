@@ -58,7 +58,7 @@ export interface IProviderCredentialResolver {
   /**
    * 解析 provider 实际生效的 baseUrl（同步；两级数据源，对齐 pi 实际生效解析序
    * provider-composer 的 `config.baseUrl ?? model.baseUrl` 覆盖式网关语义——pi 行为锚点：
-   * @earendil-works/pi-coding-agent@0.84.4 dist/core/provider-composer.js:98
+   * @earendil-works/pi-coding-agent@1.0.0 dist/core/provider-composer.js
    * `baseUrl: config.oauth === "radius" ? model.baseUrl : (config.baseUrl ?? model.baseUrl)`；
    * radius-oauth 例外分支读 model.baseUrl 而非 config.baseUrl，联动 provider 均非 radius
    * oauth，现行为不受影响）：

@@ -27,6 +27,7 @@
  * 运行：cd packages/core && pnpm exec vitest run src/domain/chat/__tests__/apply-entry-equivalence.test.ts
  */
 import { describe, it, expect, beforeEach } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { effectScope, toRaw } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { replayEntries } from '../apply-entry'
@@ -1484,6 +1485,61 @@ describe('plan-state entry：不进对话流，live ≡ reload 构造性（A7）
     expect(normalizeIds(liveState)).toEqual(normalizeIds(reloadState))
     // 对话流呈现（toRenderItems 分组：turn 边界 / 气泡）同样一致
     expect(toRenderItems(normalizeIds(liveState).messages)).toEqual(toRenderItems(normalizeIds(reloadState).messages))
+  })
+})
+
+// ── pi 1.0.0 新 entry 类型（B1）：usage / context_edit / role:'system' message ──
+
+describe('pi 1.0.0 新 entry 类型（真实样本 fixture）', () => {
+  // 样本生成方式（形态权威）：pi 1.0.0 实装 dist 的 SessionManager API 落盘产物——
+  // appendMessage(user) → appendMessage(assistant+usage) → appendUsage('cache_warm',...)
+  // → appendMessage({role:'system'}) → appendContextEdit(...)，与 pi 写盘走同一 append* 代码
+  // 路径；其中 system 行的消息体按 pi 包内官方 session 格式说明（pi-coding-agent 包内
+  // session-format 文档）的「SessionMessageEntry」权威形态重写（content:"" + sections + toolsAdded 工具对象数组——appendMessage 只是机械
+  // 通路，pi 自产的 system 消息体由 declareToolChanges 构造，非空 content 数组形态）。
+  // fixture 逐行为 pi 1.0.0 权威 JSONL 落盘形态（uuid/timestamp 为生成时点值）。
+  const fixtureEntries: PiEntry[] = readFileSync(
+    new URL('./__fixtures__/pi-1.0.0-new-entries.jsonl', import.meta.url),
+    'utf-8',
+  )
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => JSON.parse(line) as PiEntry)
+
+  it('装置：fixture 含 session header + 三类新 entry（usage / context_edit / system message）', () => {
+    const types = fixtureEntries.map((e) => (e as { type: string }).type)
+    expect(types[0]).toBe('session')
+    expect(types).toContain('usage')
+    expect(types).toContain('context_edit')
+    const systemMsg = fixtureEntries.find(
+      (e) => (e as { type: string }).type === 'message' && (e as { message?: { role?: string } }).message?.role === 'system',
+    )
+    expect(systemMsg).toBeDefined()
+  })
+
+  // 两行参数化共用「新 entry 零新增对话流消息」契约：dispatch 逐条分派、无跨条状态——
+  // 混合序列零新增成立时，子集序列零新增构造性成立；单列形态（usage/context_edit 各自
+  // 成列）由行 2 独立行使
+  it.each([
+    ['全量 fixture（混合序列）', fixtureEntries, 2],
+    ['仅 usage/context_edit 子集', fixtureEntries.filter((e) => e.type === 'usage' || e.type === 'context_edit'), 0],
+  ])('新 entry 零对话流投影、不崩（%s）：重放确定性', (_label, entries, expectedCount) => {
+    const state = replayEntries(entries)
+    // usage / context_edit / system message 均不产对话流消息（system 与 live 侧
+    // event-adapter 跳过同语义）；全量行 user/assistant 两条正常渲染，子集行 0 条
+    expect(state.messages).toHaveLength(expectedCount)
+    if (expectedCount === 2) {
+      expect(state.messages.map((m) => m.role)).toEqual(['user', 'assistant'])
+      // 既有消息内容不被新 entry 改写（context_edit 的 pi 语义 = 只改未来模型上下文、
+      // 原始历史/UI 不变——钉住 fixture 里 user/assistant 消息的原文，杀死「原位改写
+      // targetId 消息」类变异：数量与 role 序列在该变异下不变，唯内容变）
+      expect(JSON.stringify(state.messages[0]!.content)).toContain('你好')
+      expect(JSON.stringify(state.messages[1]!.content)).toContain('回复')
+      // 对话流呈现（toRenderItems 分组）正常产出
+      expect(toRenderItems(state.messages).length).toBeGreaterThan(0)
+    }
+    // reducer 纯函数确定性：同序列两次重放全等
+    expect(state).toEqual(replayEntries(entries))
   })
 })
 

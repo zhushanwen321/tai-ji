@@ -102,7 +102,24 @@ export interface PiCustomMessageEntry extends PiEntryBase {
   details?: unknown
 }
 
-/** reducer 输入的 pi entry 联合（6 个 taiji 建模类型）。 */
+/** usage entry（pi 1.0.0 新增：cache_warm 等非对话操作的用量记录；不进对话流，用量统计计入）。 */
+export interface PiUsageEntry extends PiEntryBase {
+  type: 'usage'
+  kind?: string
+  provider?: string
+  model?: string
+  usage?: unknown
+  note?: string
+}
+
+/** context_edit entry（pi 1.0.0 新增：对更早 context-producing entry 的追加式编辑；只改未来模型上下文，对话流不显示）。 */
+export interface PiContextEditEntry extends PiEntryBase {
+  type: 'context_edit'
+  targetId: string
+  replacement?: unknown
+}
+
+/** reducer 输入的 pi entry 联合（8 个 taiji 建模类型）。 */
 export type PiEntry =
   | PiMessageEntry
   | PiCustomEntry
@@ -110,6 +127,8 @@ export type PiEntry =
   | PiCompactionEntry
   | PiBranchSummaryEntry
   | PiCustomMessageEntry
+  | PiUsageEntry
+  | PiContextEditEntry
 
 /**
  * toolCall entry 形态（W21 实时路径 tool_execution_start 的重构载体）。

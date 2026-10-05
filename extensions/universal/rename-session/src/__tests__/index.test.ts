@@ -826,7 +826,7 @@ describe("rename_session 工具注册与 execute 守卫（D3）", () => {
 		expect(setup.registerToolMock).not.toHaveBeenCalled();
 	});
 
-	it("TC-T4: execute 时 live mode 非 agent-tool（load 是 agent-tool、运行中切走）→ isError（经 throw，pi 0.84.4 实装契约），文案含恢复动作指引", async () => {
+	it("TC-T4: execute 时 live mode 非 agent-tool（load 是 agent-tool、运行中切走）→ isError（经 throw，pi 1.0.0 实装契约），文案含恢复动作指引", async () => {
 		setupWithMode(AGENT_TOOL_CONFIG); // load 时注册
 		const tool = setup.registeredTool as RegisteredRenameTool;
 

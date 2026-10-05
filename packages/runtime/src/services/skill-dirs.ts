@@ -29,7 +29,8 @@ export const FORCED_PROJECT_SKILL_DIR = '.taiji/skills'
 /**
  * pi 原生项目 skill 目录（skill-reload-nondestructive D7 扫描集对账）。
  * pi 实装扫描 `resolve(cwd, CONFIG_DIR_NAME, "skills")` 且 CONFIG_DIR_NAME=".pi"
- * （@earendil-works/pi-coding-agent 0.84.4 dist/config.js:402 + dist/core/skills.js:349），
+ * （@earendil-works/pi-coding-agent 1.0.0 dist/config.js CONFIG_DIR_NAME + dist/core/skills.js
+ * 项目 skills 扫描点），
  * taiji 扫描集原本不含它——skill-injector 注入映射切源 taiji SkillRegistry 后，该目录
  * 的 skill 会从 get_commands 权威消失，不补入即回归 skill_missing。scan 与 watch 经
  * resolveProjectSkillDirs SSOT 同源双覆盖（连带良性行为：.pi/skills 变动开始触发 reload）。

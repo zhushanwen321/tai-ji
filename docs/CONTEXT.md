@@ -60,7 +60,7 @@ session-manager extension 与 taiji runtime 之间的长挂应答事件通道（
 ### Session 切入链
 用户在侧栏点选一个 session 后，前端按固定顺序执行的 12 步动作序列：`cancelActiveFlow → switchSession RPC → setActiveId → clearUnread → ensureStreamSubscription → touchRecency → syncSessionToPanel → navigation.push → hydrate/reconcile → preloadFileTree → touchRecency(panel 绑定 session) → evictLru`。
 
-**代码映射**（renderer-deepening D3/D4，2026-09-03 u5.1/u5.2 落地）：链的唯一载体 = `packages/core/src/domain/session/use-session.ts` 的 `selectSession`（12 步顺序有接口级断言，改时序只改这一处）；跨域步骤（取消新建任务流 / 清未读 / 流订阅 / chat LRU / 文件树预加载）经 `SessionEntryPort` 端口束注入（全成员可选、缺省 no-op），桌面壳 `useSidebar.selectSession` 为一行代理 + 端口接线（原 `useSidebarNew` 已于 2026-08-31 改名回 `useSidebar`、旧轨删除——chat-stream-perf §3.3 D-D3；现桌面壳编排 = `packages/renderer/src/composables/features/sidebar/useSidebar.ts`），headless/mobile 未接线环境零新增步骤执行完整链。时序采 panel-first（panel/导航先于历史回填，链尾两步保护 panel 绑定 session 不被 LRU 驱逐——[lru-panel-exempt-fix]）；「订阅先于 panel 载入」前提（C-W3-4，2026-07-29 handoff 回复丢失事故）由链本体步 5→7 顺序保证，不再依赖注释跨文件同步。
+**代码映射**（renderer-deepening D3/D4，2026-09-03 u5.1/u5.2 落地）：链的唯一载体 = `packages/core/src/domain/session/use-session.ts` 的 `selectSession`（12 步顺序有接口级断言，改时序只改这一处）；跨域步骤（取消新建任务流 / 清未读 / 流订阅 / chat LRU / 文件树预加载）经 `SessionEntryPort` 端口束注入（全成员可选、缺省 no-op），桌面壳 `useSidebar.selectSession` 为一行代理 + 端口接线（原 `useSidebarNew` 已于 2026-08-31 改名回 `useSidebar`、旧轨删除——chat-stream-perf §3.3 D-D3；现桌面壳编排 = `packages/renderer/src/composables/features/sidebar/useSidebar.ts`），headless 未接线环境零新增步骤执行完整链；移动壳已接线 sessionEntry（remote-use D2，`packages/mobile-renderer/src/shell/app-runtime.ts`）。时序采 panel-first（panel/导航先于历史回填，链尾两步保护 panel 绑定 session 不被 LRU 驱逐——[lru-panel-exempt-fix]）；「订阅先于 panel 载入」前提（C-W3-4，2026-07-29 handoff 回复丢失事故）由链本体步 5→7 顺序保证，不再依赖注释跨文件同步。
 
 ### 导入源（Import Source）
 session 导入统一入口的多 coding-agent 抽象：一个导入源负责「定位外部会话 → 校验 → 转换为合法 pi session JSONL」，实现 runtime 的 SessionImportSource SPI（`listCandidates` + `prepareImport`）；公共编排（互斥/去重/原子落盘/sidecar）由 ImportService 统一承担，导入完成广播由 handler 层在 reply 后发出。现役源：pi（外部 pi JSONL 原样复制）、zcode（宿主 SQLite 库转换）。导入产物落太极 sessions 目录后完全复用现有会话消费链（渲染/续聊/搜索），导入后续聊由 pi 引擎接管。**幂等键 = 产物 header.id**；**文件名不变量**：文件名剥 `.jsonl` 后最后 `_` 尾段 === header.id（源 id 含 `_` 须归一化）。扩展指南（新增源的步骤清单与不变量全集）：[docs/architecture/session-import-sources.md](architecture/session-import-sources.md)。
@@ -205,7 +205,7 @@ DetailPane 对 HTML 文件的 iframe 预览形态（v16 前与「源码态」相
 
 ### Marker RPC（select+marker 通道原语，2026-09-14）
 
-extension 与 taiji runtime 之间的请求-回包通道原语（`packages/extension-protocol/src/core/select-rpc.ts` 的 `callMarkerRpc`）：extension 侧以 `ctx.ui.select(MARKER, [payload])` 发起（payload 为已序列化字符串），runtime 侧对应 handler 响应同一 marker。回包是判别联合 `MarkerRpcResult`——`{ok:true, value}`（value 恒 raw string，JSON 合法性由原语检测但 parse 消费留调用方）或 `{ok:false, reason}` 四态失败（`cancelled` / `timeout` / `channel-error` / `non-json`，由 `signal.aborted` 反推区分）。mode 门控（裸 TUI 下不发）留在调用方。现役消费方：session-manager / plugin-bridge / subagent-workflow inflight-reporter / ui-form（统一表单协议，见下节）；错误回包形状单源为 `ChannelErrorResult`。
+extension 与 taiji runtime 之间的请求-回包通道原语（`packages/extension-protocol/src/core/select-rpc.ts` 的 `callMarkerRpc`）：extension 侧以 `ctx.ui.select(MARKER, [payload])` 发起（payload 为已序列化字符串），runtime 侧对应 handler 响应同一 marker。回包是判别联合 `MarkerRpcResult`——`{ok:true, value}`（value 恒 raw string，JSON 合法性由原语检测但 parse 消费留调用方）或 `{ok:false, reason}` 四态失败（`cancelled` / `timeout` / `channel-error` / `non-json`，由 `signal.aborted` 反推区分）。mode 门控（裸 TUI 下不发）留在调用方。现役消费方：session-manager / subagent-workflow inflight-reporter / ui-form（统一表单协议，见下节）；错误回包形状单源为 `ChannelErrorResult`。
 
 ### 统一表单协议（ui-form，2026-09-19）
 
@@ -363,6 +363,18 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 
 **命名约定**: "Panel" 统一指 Session 的视口（即代码中的 `Panel` / `PanelLeaf` / `PanelTree`，`packages/renderer/src/stores/panel.ts`），不用于其他含义。
 
+### 远程访问（Remote Access）
+手机浏览器经局域网直连 runtime 的可选能力，默认关闭（纯回环监听，与既有形态一致）。开启后 runtime 改绑 `0.0.0.0`，同一端口同源托管移动壳构建产物（HTTP 静态面 + WS）；WS 鉴权集合 = {per-spawn token} ∪ {remote token}。配置面 = 设置 → 远程访问面板（开关 / token 轮换 / LAN 地址+二维码 / Tailscale 指引），配置持久化 `<dataDir>/remote-access.json`（0600，main 原子写，关态留存）。开启信号 = argv `--remote-access`（无 env 通道，脚本直跑 / e2e 池等非 supervisor 路径不传 flag 即天然关态）；`--mobile-dist=<path>` 是移动壳 dist 的唯一来源（main 按运行环境解析：dev 仓库 dist / prod 打包资源）。**代码映射**：runtime `packages/runtime/src/transport/connection-manager.ts`（绑定地址 / token 集合 / 静态托管白名单）、组合根 `packages/runtime/src/index.ts`、main 配置面 `apps/electron/main/remote-access/`、supervisor 拼参 `apps/electron/main/supervisor/process-control.ts`、面板 `packages/renderer/src/components/settings/remote-access/`、契约 `packages/shared/src/remote-access.ts`。
+
+### 移动壳（mobile shell）
+`@taiji/mobile-renderer` 构建出的手机 web 客户端（浏览器运行、触控交互），与桌面 renderer 并列的双壳成员（拓扑见 [renderer-package-topology.md](architecture/renderer-package-topology.md)）。连接装配：WS URL 从 `location.host` 同源派生、凭据经 PlatformPort.storage（localStorage）持久、storage/webSocket 为真实实现。UI 主体 = session 列表 / 消息流 / 新建任务表单 / token 输入视图 + 底部 tab + 根级权限审批弹窗（ui PermissionRequestDialog，PermissionTransport 经 plugin.approvePermissions/revokePermissions 回传）；业务逻辑复用 core 业务域，展示复用 ui 共享组件（markdown 渲染链模块与被 ui 组件消费的 locale 域文件已下沉 ui 包，双壳共享单源）。v1 能力边界：slash 命令 bar / plugin view 全集 / terminal / 文件树 / git 面板不在移动壳（挂载点子集 = message-stream / slash(隐藏保留) / companion）；图片粘贴降级为文本占位（`[图片粘贴：需桌面环境]`）、mermaid 图表占位呈现、hover 类消息操作不可用。壳间禁止互相 import。
+
+### remote token
+远程访问的持久凭据：64 位 hex 小写字符串（32 字节随机值的 hex 编码）。main 生成与轮换——重写 `remote-access.json` 即生效（runtime 每次 WS auth 握手热读文件，轮换不重启 runtime、不中断在途 turn）；文件缺失/损坏 → remote 集合为空退化为仅 spawn token（fail-closed）。存量已认证连接不随轮换踢除（auth 只门禁握手）——「怀疑泄漏」的完整处置 = 面板轮换（断新接入）+ 关开开关（重启 runtime 踢全部存量连接）。移动壳侧 token 经验身成功才写 localStorage（key `taiji.remote-access.token`）；URL query 携带的 token 验身失败**不动**既有 storage（坏链接不毁好凭据），storage 来源验身失败才清空（落 token 输入视图重扫恢复）。
+
+### profile 连接策略（connection profile）
+连接发现三分支中的远程形态，形态判定收口在 `packages/core/src/transport/use-connection.ts` 的 resolveConnectionMode() 薄谓词（init 首连 / HMR 重连 / retryRuntime 三处消费；连接目标解析留在各分支原地）：**本地 = IPC** 端口发现（electronAPI 有值）、**远程 = profile**（移动壳）、**mock = VITE_MOCK**。profile 的注入实现 = `packages/mobile-renderer/src/platform/connection-profile.ts`：凭据采纳顺序 = URL query `?token=`（显式携带的新凭据 = 用户新意图，验身成功落 storage 并 `history.replaceState` 抹地址栏）→ storage（验身过的持久凭据，跨 runtime 重启免重扫）→ 皆无（不带凭据发起连接，runtime fail-closed 拒绝 → `onAuthRejected` 信号 → token 输入视图）。auth 被拒时移动壳抑制全部自动重连触发点（退避重连 + visibility 切前台主动重连）；连接失败（非凭据失败）维持重连等待态，不落 token 视图。
+
 ### Run record 事件流（workflow 域）
 workflow run 的唯一持久化：`<sessionDir>/workflow-state/<runId>.record.jsonl`（workspace 有活跃 session 时落 `sessions/<slug>/workflow-state/`），append-only JSONL 逐行记录 run 生命周期事件（[ADR-0082](adr/decisions.md) 对齐 pi 后 9 事件：`run-created / phase-started / agent-started / agent-retrying / agent-settled / phase-settled / run-interrupted / run-resumed / run-settled`，事件行携带单调 seq；`run-created` 带 scriptSource 全文、`agent-settled` 带 result 全文与 sessionFile）。`agent-started` 载荷携带 `phase?`（call 归属快照——fold 推导无需回溯转移事件）与 `memberRecordId?`（[D6] 绑定字段——同名续写路由）；`phase-started`/`phase-settled` 是 phase 状态机转移事件（[D3]——worker 模板 `phase()` 经 postMessage 写入 record，异步丢失窗口由 fold 自愈规则承接）。run 生命周期四态 + interrupted 暂停态（`created → running → settling → terminal`；`running/settling → interrupted → resume → running`）——interrupted 非终局（run-interrupted 转移帧，可续跑）；终局 outcome 四值 `done/failed/cancelled/time_limited`。manifest（`<runId>.json`）降格为 run-settled 终局事件的派生缓存。判读 = record fold 唯一权威（注册表投影 / 终局诊断引用 / resume 资格全部折叠）。由显式状态机单点写入（terminal-actions.ts 的 dispatchRunTrigger 单写者链），引擎不直接写。无主 run 的磁盘清理走对账清理（裁决点 7：引用集三代解析 + 宽限窗——run 数据生命周期跟随 session 归属）。
 
@@ -474,6 +486,35 @@ pi 引擎的可用模型集合及其能力（思考档位等）。能力判定�
 
 ## Settings 域
 
+### Code Mode（codemode / 脚本模式）
+pi 1.0 内置扩展（builtin extension）提供的能力：模型编写 JavaScript 脚本调用工具，脚本内可并行调用多个工具、过滤过大的结果、生成图片，QuickJS 沙箱执行。taiji 侧常驻默认启用（零配置可用），设置页「系统」提供全局开关（SystemCodemodeSection，经 `config.getCodemodeEnabled` / `config.setCodemodeEnabled` 命令对）。激活判定 = settings.json `defaultTools` 解析出的激活工具集含 `codemode`（`isCodemodeActive`）；配置随新启动的会话读取。例外：会话以显式工具白名单启动时（launch preset `--tools` 或 subagent agentTools），pi 语义是白名单整体覆盖 `defaultTools`，该类会话 codemode 不激活。与 MCP 管理的职责边界：本词条域管 codemode 全局默认启用（settings.json `defaultTools`）；per-server 暴露档位（exposure）与 mcp.json 的 `autoEnableCodemode` 字段归 [MCP 服务器条目](#mcp-服务器条目mcp-server-entry)词条。
+
+**代码映射**: `packages/runtime/src/infra/pi/pi-codemode-settings.ts`（解析/迁移/开关写入唯一写点）；渲染面 `packages/renderer/src/components/settings/system/SystemCodemodeSection.vue`。
+
+### MCP 服务器条目（MCP Server Entry）
+mcp.json 里一条具名配置：传输参数 + 启停（`enabled`）+ 暴露档位（`exposure`）+ 描述（`description`）。名称是聚合唯一键：全局唯一，仅含字母、数字、下划线、连字符（连字符与下划线归并同名，pi 比对前把连字符替换为下划线）；编辑态锁定名称——改名 = 删除后重建，不做原地改名。传输类型两种：stdio（本地子进程：`command`/`args`/`env`/`cwd`）或 http（远程流式 HTTP：`url`/`headers`），由传输字段有无表达、不落 `type` 键。管理入口 = 设置页 MCP 分区（清单、表单/代码双模式表单、启停/删除确认、连接测试）。
+
+**代码映射**: `packages/runtime/src/infra/pi/pi-mcp-store.ts`（读写与保存校验唯一入口）；渲染面 `packages/renderer/src/components/settings/mcp/`。
+
+### mcp.json
+pi 内置 MCP 扩展的用户级配置文件（`<agentDir>/mcp.json`，taiji 隔离部署下 = `<数据目录>/agent/mcp.json`，路径经 `getMcpConfigPath()` 动态推导；与 settings.json 的 [defaultTools](#defaulttools) 分属两个文件、两套字段域）。**生效语义 = 新会话读取**：会话启动时由 spawn 白名单装载的 `--extension builtin:mcp` 扩展读取并后台连接全部启用的服务器，运行中会话不感知配置变化——与扩展启停同属「写文件、新会话生效」模型，页头固定说明该语义。taiji 侧唯一读写层 = `packages/runtime/src/infra/pi/pi-mcp-store.ts`（跨进程磁盘锁内重读合并写入 + 保存校验 fail-fast + 文件损坏拒入不覆盖外部手编内容）；pi 官方写路径（`editMcpServers` / 终端 `pi mcp` 命令）与用户手编并存且无锁，锁协议与外部并发窗口登记见 [data-source-registry §6](architecture/data-source-registry.md)。项目级 `<会话cwd>/.pi/mcp.json` 在该会话中同名整条覆盖用户级——设置页清单只反映用户级文件（覆盖偏差由设置页页头说明声明）。`mcpServers` 之外的顶层键（如 `autoEnableCodemode`）taiji 写回时原样保留（丢顶层键会静默改变 codemode 激活行为）。
+
+### 暴露档位（exposure）
+服务器工具到达模型的方式（mcp.json 条目的 `exposure` 字段，pi 定义四档）：codemode（**默认**——工具不直接声明给模型，只供 [Code Mode](#code-modecodemode--脚本模式) 脚本调用）/ deferred（经工具检索加载后直接调用）/ direct（像内置工具一样直接声明给模型）/ hidden（注册但不可达）。默认 codemode 意味着「配置成功但工具不可直接调用」——不使用 codemode 的用户应选 direct 或 deferred（表单档位释义引导此选择）。与 [Code Mode](#code-modecodemode--脚本模式) 词条的职责边界：codemode 全局启用开关（settings.json `defaultTools`）归彼处，per-server 档位归本词条。
+
+### agent 目录（agent directory）
+pi 运行时读配置与存数据的目录（系统 pi = `~/.pi/agent`；taiji 隔离部署下 = `<数据目录>/agent/`，路径唯一来源 `getPiAgentDir()` 动态推导——spawn pi 子进程〔会话与 `pi mcp list --json` 连接测试〕经 `PI_CODING_AGENT_DIR` 注入同源值）。承载 pi 侧用户级配置与运行数据：settings.json / mcp.json / subagents/ / auth.json 等；与 taiji 自身的 extension 存储目录（`<dataDir>/extensions/`）完全分离（ADR-0009 隔离，见 [Extension Data Directory](#extension-data-directory)）。不采用别名：pi 目录。
+
+**代码映射**: `packages/runtime/src/infra/pi/pi-paths.ts`（`getPiAgentDir()`）。
+
+### defaultTools
+pi settings.json 的默认工具集字段（数组，settings-manager 解析后决定新会话启动时激活哪些工具）：pi 侧两层合并（global/project）经 `mergeDefaultTools`、激活集解析经 `resolveDefaultTools`；字段缺失时 pi 会话层回落 `DEFAULT_TOOL_NAMES`（read/bash/edit/write）。taiji 读侧解析同构实现 = `resolveDefaultToolSet`（开关显示判定），对字段缺失/非数组坏值统一解析为空激活集（codemode 不在默认集，与 pi 侧「不激活」判定等价）。字段归属 = settings.json tools 字段域（[data-source-registry §6](architecture/data-source-registry.md)），写方全集 = taiji 启动迁移 + 设置页 Code Mode 开关，用户手工编辑始终被尊重（taiji 不把用户移除的条目写回）。
+
+### 工具增量条目（`+name` / `-name` 语法）
+`defaultTools` 数组条目的增量修饰语法：`+name` 追加工具、`-name` 移除工具，按条目顺序应用；纯名条目（无修饰符）= 整体替换默认工具集。解析规则（pi `getDefaultTools` 读面 + `resolveDefaultTools` 同构——非字符串元素的丢弃发生在 `getDefaultTools` 读面 filter，`resolveDefaultTools` 本身不剥非字符串，与 PS-70 登记归属一致）：数组内任一纯名出现 → 激活集 = 全部纯名（增量条目在其上继续应用）；仅增量条目 → 激活集从 `DEFAULT_TOOL_NAMES` 起步；空数组 → 空激活集；非字符串元素解析前被丢弃。taiji 用 `+codemode` 表达默认启用、`-codemode` 表达关闭占位（负条目占位 = 字段保留 + codemode 关闭跨重启持久 + 不写回用户默认工具集的唯一同时满足形态）。
+
+**代码映射**: `packages/runtime/src/infra/pi/pi-codemode-settings.ts` 的 `resolveDefaultToolSet`（语义表驱动单测 `__tests__/pi-codemode-settings.test.ts`；pi 语义门禁登记 docs/pi-semantics.json PS-70）。
+
 ### 乐观更新协议
 「乐观写本地 → await 持久化 → 失败回滚后 rethrow」的唯一实现（`packages/core/src/foundation/optimistic-update.ts`，提供 `runOptimisticUpdate`/`optimisticUpdate`/`refCell` 三形态）；错误映射到既有错误面（toast / actionError / saveError 标志）由调用方或字段 module 承接。RPC 设置项字段编排（`setting-field` module）与 settings 域全部乐观写现场均收编于此协议。**Avoid**：手写 prev/rollback 快照样板、组件内 try/catch 回滚、置标志式失败语义。
 
@@ -514,14 +555,9 @@ taiji 管理的 extension 存储目录（`<dataDir>/extensions/`，本地/Git �
 runtime 侧服务模块（`packages/runtime/src/services/extension-service.ts`，接口 `IExtensionService`），管理 pi extension 生命周期：发现扫描（用户安装目录 `<dataDir>/extensions/`、npm 目录 `<dataDir>/npm/`）、settings.json `packages[]` 与 `disabled-packages.json` 启停管理、npm / 本地目录 / Git 三种安装来源、将 extension 路径注入 pi 进程启动参数。builtin pi-extensions 的打包内置清单 SSOT = `packages/shared/src/mandatory-extensions.json`（infrastructure 组不可禁、feature 组可禁）。
 
 ### Plugin
-taiji 自己的插件系统，由 PluginService 统一管理（`packages/runtime/src/services/plugin-service/`，接口 `IPluginService`）。宿主双轨：trusted 插件共享 Worker Thread（≤10 插件/Worker，`plugin-host.ts`），sandbox 插件独占 fork 子进程（`plugin-host-process.ts`，`ELECTRON_RUN_AS_NODE=1`）。使用 agentAPI（非 pi ExtensionAPI）。数据（storage KV、权限授予）存储在 `<dataDir>/plugins/` 下。与 pi Extension 是完全不同的概念。
+taiji 自己的插件系统，由 PluginService 统一管理（`packages/runtime/src/services/plugin-service/`，接口 `IPluginService`）。宿主双轨：trusted 插件共享 Worker Thread（≤10 插件/Worker，`plugin-host.ts`），sandbox 插件独占 fork 子进程（`plugin-host-process.ts`，`ELECTRON_RUN_AS_NODE=1`）。使用 agentAPI（非 pi ExtensionAPI）。数据（storage KV、权限授予）存储在 `<dataDir>/plugins/` 下。与 pi Extension 是完全不同的概念。插件工具接入 pi 的通路暂缺，见 [docs/todo/plugin-tool-access-gap.md](todo/plugin-tool-access-gap.md)。
 
 **避免使用**: "扩展"（Extension）——Extension 指 pi 的扩展，Plugin 指 taiji 的插件。
-
-### Plugin Bridge（`@zhushanwen/pi-plugin-bridge`）
-taiji plugin 系统与 pi 引擎之间的桥（`extensions/taiji/plugin-bridge/`，builtin 清单 infrastructure 组）。机制：runtime PluginService 的插件工具清单经 select + BRIDGE_MARKER 通道（pi 公开承诺的 dialog 帧契约）同步进 pi 注册（registerTool），工具 execute、pi 事件转发与 intercept 经同一通道往返 runtime；runtime 侧识别/回包在 `packages/runtime/src/transport/bridge-handler.ts`，协议 v2 形状 SSOT 在 `@zhushanwen/extension-protocol` 的 plugin-bridge 协议模块。Bridge 是插件系统内唯一感知 pi 存在的模块。
-
-> **术语演进**：原「Pi Bridge Extension」基于私有通道（extension_ui_request）的旧方案已废弃重写（bridge-rewrite-pi-0.84）；其「代理 pi.appendEntry()」职责随 sessionData 存储迁移（见下）消亡。
 
 ### sessionData
 Plugin 的 per-session KV 存储 API（`api.sessionData`）。由 runtime 侧 `SessionDataStore` 承载（`packages/runtime/src/services/plugin-service/session-data-store.ts`）：内存 write-back 缓存（500ms debounce flush）+ 退出前 `flushAll` 落盘，持久化在 `<dataDir>/session-data/` 下按 sessionId 分区，单 session 容量上限 10MB。与 PluginStorage（global/workspace scope，`<dataDir>/plugins/<pluginId>/` 下的 `globalState.json` / `workspace-<cwdHash>.json`）不同。

@@ -597,7 +597,7 @@ describe("redelivery: exclusion criteria (decision 2 strict terminal + killed re
 		expect(pi.sendMessage).not.toHaveBeenCalled();
 	});
 
-	it("running leftover with dead pid is NOT redelivered (poller write-failure domain, unregister covers)", async () => {
+	it("running leftover with dead pid is NOT redelivered (exit-edge write-failure domain, unregister covers)", async () => {
 		const entry = makeRegistryEntry({ taskId: "bt-1700000000-rund01", state: "running", pid: deadPid() });
 		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
 		const pi = createMockPi();

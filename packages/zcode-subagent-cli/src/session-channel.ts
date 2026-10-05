@@ -18,35 +18,24 @@
 //   - 错误透传纪律：RPC error 应答（AppServerRpcError，含 code/message/data）原样
 //     上抛不吞不包装——R5 降级链按 code（-32601/-32602 漂移类）归类（§3.3 错误规格表）。
 //
-// 终态判定（D4 + 不变量 1）双保险：
+// turn 终局判定（D4 + 不变量 1；ADR-0122 事实驱动）：终局来源只有两个确定性事实——
 //   1. turn.terminal 权威：v4/telemetry/event {kind:"turn.terminal"} 到达即终态
-//      （success/error 均 算终态——旧实现实证：不归类会挂到超时）；
+//      （success/error 均算终态——旧实现实证：不归类会挂到无终态等待）；
 //   2. 宽松匹配防洪堤：turn.terminal 缺失/迟到时，收尾帧（session/event
-//      payload.response 非空）即终态——防协议小漂移把任务挂死到超时预算。
+//      payload.response 非空）即终态——防协议小漂移把任务挂死在无界等待。
 //   终态判定后：收尾帧数据（response/usage）仍吸收（它属终态数据不是增量回调，
 //   且与 turn.terminal 常在同一 stdout 批次到达）；迟到 delta 不再触发回调
 //   （不变量 2 的另一半：resolve 后不再发事件）。
+//   无终态事件且连接存活 = 任务静默挂起（显式暴露，不建时间兜底自动回收；
+//   用户 abort 链 stop → killChain → onClose 收割为显式失败路径）。
 //
 // 连接崩溃的 turn 收割（R4 已补齐）：SessionChannel 在构造时订阅 AppServerConnection
 // 的 onClose 面——进程死亡（崩溃/我方杀链）时立即 fail 全部在途 turn（错误即连接层
-// 的崩溃 reason，含 stderr 尾部），不再依赖 turn 等待预算挂满才收割。
+// 的崩溃 reason，含 stderr 尾部），turn 终局不再依赖任何时间预算。
 // （onClose 由连接层保证在全部在途 request reject 之后触发。）
 //
-// turn 等待两 timer 状态机（P0-1 根修）：旧 300s 固定
-// 墙钟（timer 从 send 起跳、事件不刷新，T001 实测 21% 活跃任务被误杀）替换为——
-//   1. idle 主判定：本 turn 任何事件（session/event、telemetry stream.chunk/
-//      turn.terminal）刷新计时；连续静默达阈值判「执行已不可推进」（活跃事件流
-//      零误杀，ADR-0047 逆否面）；缺省 30min（ZCODE_TURN_IDLE_TIMEOUT_MS，
-//      ⛔P-Z1 标定前先验值）；
-//   2. 总上界回收兜底：从挂载起固定不刷新，兜 idle 覆盖不了的 chatty-wedge
-//      （事件持续但终态永不到达）；缺省 60min（ZCODE_TURN_MAX_TIMEOUT_MS，
-//      ⛔P-Z0 标定前先验值；对超上界合法极长任务是显式接受的残余误杀面）。
-//   任一 fire → reject TurnTimeoutError{kind:"idle"|"ceiling", lastEventAt,
-//   elapsed}（类型化，R4 引擎据此分流与合成 engine_timeout 文案）。两阈值 env
-//   可调（TAIJI_ZCODE_TURN_IDLE_TIMEOUT_MS / TAIJI_ZCODE_TURN_MAX_TIMEOUT_MS）、
-//   ≤0 显式关闭（关闭时 warn 明示后果——规则 19 opt-out，A10① 断言依据）。
-//   create 应答先于挂 timer 到达（runTurn 先 createSession 后 openTurn），不参与
-//   刷新。
+// （原 turn 等待两 timer——idle 30min + 总上界 60min 墙钟——已按 ADR-0122
+// 「任务级正常路径禁止自带墙钟超时」删除，登记见 defense-mechanism-cleanup。）
 
 import { createHash } from "node:crypto";
 
@@ -56,12 +45,7 @@ import type { AppServerConnection } from "./connection.ts";
 import {
   ZCODE_APPSERVER_TURN_CLOSE_TIMEOUT_MS,
   ZCODE_APPSERVER_TURN_READ_TIMEOUT_MS,
-  ZCODE_TURN_IDLE_TIMEOUT_ENV,
-  ZCODE_TURN_IDLE_TIMEOUT_MS,
-  ZCODE_TURN_MAX_TIMEOUT_ENV,
-  ZCODE_TURN_MAX_TIMEOUT_MS,
   isFailedTerminalStatus,
-  parseZcodeTurnTimeoutEnv,
 } from "./constants.ts";
 import { toErrorMessage } from "./error-message.ts";
 
@@ -395,70 +379,8 @@ export interface SessionTurnCallbacks {
   onActivity?: () => void;
 }
 
-/** turn 超时的判定形态（P0-1 D1：idle 主判定 / 总上界兜底——引擎分流与文案的判据）。 */
-export type TurnTimeoutKind = "idle" | "ceiling";
-
-/**
- * turn 等待两 timer 的类型化超时错误（P0-1 D1/D4）。引擎（R4）按 `kind` 分流：
- * 超时入口接 abort 链（stop 应答三态裁决）+ `engine_timeout` 前缀合成——不经
- * 字符串匹配。字段供 outcome 文案使用：`elapsed` 距 openTurn 挂载的总时长；
- * `lastEventAt` 最后一次事件到达时刻（整轮无任何事件时 undefined——进程假死/
- * 协议静默形态的证据）。
- */
-export class TurnTimeoutError extends Error {
-  readonly kind: TurnTimeoutKind;
-  readonly elapsed: number;
-  readonly lastEventAt: number | undefined;
-  readonly thresholdMs: number;
-
-  constructor(
-    kind: TurnTimeoutKind,
-    parts: {
-      thresholdMs: number;
-      elapsed: number;
-      lastEventAt: number | undefined;
-    }
-  ) {
-    super(
-      kind === "idle"
-        ? `zcode turn idle 判死：连续 ${parts.thresholdMs}ms 未观察到本 turn 任何事件` +
-            "（session/event 与 v4/telemetry/event 均静默），终态未到达。" +
-            (parts.lastEventAt === undefined
-              ? "本轮自 send 起未观察到任何事件（进程假死/协议静默形态）。"
-              : `最后事件时刻 ${new Date(parts.lastEventAt).toISOString()}。`) +
-            "恢复指引：直接重跑本任务；若持续出现，检查 ZCode 桌面端模型连通性或改用 engine: pi。"
-        : `zcode turn 总上界判死：${parts.thresholdMs}ms 内未观察到终态` +
-            "（turn.terminal 与收尾帧均未到达；idle 判定未触发——事件流仍活跃，chatty-wedge 形态）。" +
-            (parts.lastEventAt === undefined
-              ? ""
-              : `最后事件时刻 ${new Date(parts.lastEventAt).toISOString()}。`) +
-            `恢复指引：直接重跑本任务；若本任务属合法超长任务（预期超过 ${parts.thresholdMs}ms 总上界），` +
-            `重跑前设 ${ZCODE_TURN_MAX_TIMEOUT_ENV} 为更大毫秒值，或设 0 关闭总上界` +
-            "（关闭后 chatty 形态不再自动回收，静默 wedged 仍由 idle 层兜底——自行权衡）。"
-    );
-    this.name = "TurnTimeoutError";
-    this.kind = kind;
-    this.elapsed = parts.elapsed;
-    this.lastEventAt = parts.lastEventAt;
-    this.thresholdMs = parts.thresholdMs;
-  }
-}
-
-export interface SessionTurnOptions extends SessionTurnCallbacks {
-  /**
-   * 显式总上界（ms，P0-1 D1/D2 语义收窄：不再是从 send 起跳的固定墙钟缺省预算，
-   * 而是「显式总上界」传参面——缺省走 env `TAIJI_ZCODE_TURN_MAX_TIMEOUT_MS` →
-   * `ZCODE_TURN_MAX_TIMEOUT_MS`（60min 先验值）；≤0 显式关闭该 timer。工具面
-   * 不暴露（D2），引擎内部传参点（D6 重试预算继承传剩余值）。
-   */
-  turnTimeoutMs?: number;
-  /**
-   * idle 主判定静默阈值（ms，P0-1 D2 内部传参点）：缺省走 env
-   * `TAIJI_ZCODE_TURN_IDLE_TIMEOUT_MS` → `ZCODE_TURN_IDLE_TIMEOUT_MS`（30min
-   * 先验值）；≤0 显式关闭该 timer。
-   */
-  idleTimeoutMs?: number;
-}
+/** runTurn 选项 = 回调集（原超时传参面已随 turn 双 timer 删除，ADR-0122）。 */
+export type SessionTurnOptions = SessionTurnCallbacks;
 
 /** 终态信号来源（D4：turn.terminal 权威；final-frame = 宽松判定防洪堤）。 */
 export type TerminalSource = "turn.terminal" | "final-frame";
@@ -496,7 +418,7 @@ interface TerminalInfo {
 
 /**
  * 一个在途 turn 的全部状态（推送泵的归因目标）。settle/fail 由 openTurn 装配
- * （互斥守卫 + timer 清理 + done promise 落定），泵内只调用不感知装配细节。
+ * （互斥守卫 + done promise 落定），泵内只调用不感知装配细节。
  */
 interface ActiveTurn {
   readonly sessionId: string;
@@ -511,81 +433,8 @@ interface ActiveTurn {
   lastTerminalStatus: string | undefined;
   /** 权威终态 turn.terminal 的错误详情（先到/迟到都记——⛔P-Z2，terminal 帧独有）。 */
   lastTerminalError: { code?: string; message?: string } | undefined;
-  /** 本轮生效阈值（openTurn 解析后的值，fire 时进 TurnTimeoutError 文案）。 */
-  idleMs: number;
-  ceilingMs: number;
-  /** 挂载时刻（elapsed 起算点）。 */
-  startedAt: number;
-  /** 最后一次事件到达时刻（epoch ms；整轮无事件 undefined——idle 判定的证据面）。 */
-  lastEventAt: number | undefined;
-  /** 两 timer 句柄（刷新=clearTimeout+重挂；settle/fail/fire 统一清理）。 */
-  idleTimer: NodeJS.Timeout | undefined;
-  ceilingTimer: NodeJS.Timeout | undefined;
   settle: (t: TerminalInfo) => void;
   fail: (err: Error) => void;
-  /** 超时落定（openTurn 装配：互斥守卫 + 清 timer + 类型化 reject）。 */
-  fireTimeout: (kind: TurnTimeoutKind) => void;
-}
-
-/** 两 timer 统一清理（settle/fail/超时 fire/runTurn finally 四路共匯）。 */
-function clearTurnTimers(turn: ActiveTurn): void {
-  if (turn.idleTimer !== undefined) {
-    clearTimeout(turn.idleTimer);
-    turn.idleTimer = undefined;
-  }
-  if (turn.ceilingTimer !== undefined) {
-    clearTimeout(turn.ceilingTimer);
-    turn.ceilingTimer = undefined;
-  }
-}
-
-/** setTimeout + unref（守卫进程退出不被 turn 预算拖住——既有 300s timer 同形态）。 */
-function armTurnTimer(onFire: () => void, ms: number): NodeJS.Timeout {
-  const timer = setTimeout(onFire, ms);
-  if (typeof timer.unref === "function") timer.unref();
-  return timer;
-}
-
-/**
- * 单个 turn timer 阈值解析（P0-1 D2）：显式传参 > env > 缺省默认。env ≤0 与显式
- * ≤0 同为「显式关闭」语义（与 `TAIJI_SUBAGENT_IDLE_TIMEOUT_MS` 先例的刻意分歧，
- * 设计 D2/r3 SG-5 登记）；env 非法 warn+回落默认。**关闭必须 warn 明示后果**——
- * 静默失去回收层 = 「以为有兜底、实际裸奔」，生效行为必须可见（A10① 断言依据）。
- */
-function resolveTurnTimerMs(parts: {
-  explicit: number | undefined;
-  envName: string;
-  fallbackMs: number;
-  label: string;
-  offConsequence: string;
-}): number {
-  let value: number;
-  let source: string;
-  if (parts.explicit !== undefined) {
-    value = parts.explicit;
-    source = "显式传参";
-  } else {
-    const raw = process.env[parts.envName];
-    const parsed = parseZcodeTurnTimeoutEnv(raw);
-    if (parsed.state === "valid") {
-      value = parsed.ms;
-      source = `env ${parts.envName}=${raw}`;
-    } else {
-      if (parsed.state === "invalid") {
-        logger.warn(
-          `[session-channel] ${parts.envName}="${raw}" 非法（应为毫秒数字）——回落默认 ${parts.fallbackMs}ms（${parts.label}）。设置正毫秒值覆盖，或 0 显式关闭`
-        );
-      }
-      value = parts.fallbackMs;
-      source = "默认值";
-    }
-  }
-  if (value <= 0) {
-    logger.warn(
-      `[session-channel] zcode turn ${parts.label}已关闭（${source}）——${parts.offConsequence}。设正毫秒值（env ${parts.envName} 或显式传参）恢复回收层`
-    );
-  }
-  return value;
 }
 
 /**
@@ -618,7 +467,7 @@ export class SessionChannel {
       ),
       // 连接崩溃收割：进程死亡（崩溃/我方杀链）立即 fail 全部在途 turn——
       // onClose 契约保证触发时连接层在途 request 已全部 reject，此处补齐
-      // 「无在途 request 的 turn」的收割（否则挂到 turn idle/总上界预算耗尽）
+      // 「无在途 request 的 turn」的收割（否则在途 turn 失去全部终局来源）
       conn.onClose((reason) => this.failAllTurns(`app-server ${reason}`)),
     ];
   }
@@ -626,17 +475,17 @@ export class SessionChannel {
   /**
    * [P0-1 U5/D7] dispose 前收割 + 退订：「退订 = 不会再有事件」在结构上蕴含「在途
    * turn 不应再等」——close 缺失/被吞没形态（onClose 收割主路径未触发）下，在途
-   * turn 于退订前经既有 failAllTurns 收敛为明确失败，不再挂满自身 idle/总上界预算
-   * （设计 §3.4 退化路径闭合；race 窗口在引擎 shutdownRuntimeAndDisposeChannel，
-   * 量级与 awaitConnFinalized 同源 ZCODE_APPSERVER_HARVEST_GRACE_MS）。幂等：与
-   * onClose 收割先到者赢（turn.fail 的 settled 守卫——已落定 turn 不改写），
-   * activeTurns 已空则 no-op。不影响连接自身生命周期（R4）。
+   * turn 于退订前经既有 failAllTurns 收敛为明确失败（设计 §3.4 退化路径闭合；
+   * race 窗口在引擎 shutdownRuntimeAndDisposeChannel，量级与 awaitConnFinalized
+   * 同源 ZCODE_APPSERVER_HARVEST_GRACE_MS）。幂等：与 onClose 收割先到者赢
+   * （turn.fail 的 settled 守卫——已落定 turn 不改写），activeTurns 已空则 no-op。
+   * 不影响连接自身生命周期（R4）。
    */
   dispose(): void {
     this.disposed = true;
     this.failAllTurns(
       "zcode session channel 已 dispose：连接 close 事件未在收割窗口内到达，" +
-        "在途 turn 于退订前收割为明确失败（不再挂到 turn 自身预算耗尽）。恢复指引：直接重跑本任务。",
+        "在途 turn 于退订前收割为明确失败。恢复指引：直接重跑本任务。",
     );
     for (const off of this.offHandlers.splice(0)) off();
   }
@@ -794,7 +643,6 @@ export class SessionChannel {
           : {}),
       };
     } finally {
-      opened.stopTimers();
       this.activeTurns.delete(sessionId);
       await this.closeSession(sessionId);
     }
@@ -807,7 +655,7 @@ export class SessionChannel {
   private openTurn(
     sessionId: string,
     opts: SessionTurnOptions
-  ): { turn: ActiveTurn; done: Promise<TerminalInfo>; stopTimers: () => void } {
+  ): { turn: ActiveTurn; done: Promise<TerminalInfo> } {
     let resolveDone!: (t: TerminalInfo) => void;
     let rejectDone!: (err: Error) => void;
     const done = new Promise<TerminalInfo>((res, rej) => {
@@ -820,7 +668,7 @@ export class SessionChannel {
         onTextDelta: opts.onTextDelta,
         onThinkingDelta: opts.onThinkingDelta,
         // [PR3] tool 执行期活性回调（SessionTurnCallbacks.onActivity 注释——宿主侧
-        // 无进展守护的工具执行期刷新面）
+        // 的工具执行期刷新面）
         onActivity: opts.onActivity,
       },
       settled: false,
@@ -830,85 +678,25 @@ export class SessionChannel {
       terminal: undefined,
       lastTerminalStatus: undefined,
       lastTerminalError: undefined,
-      idleMs: 0,
-      ceilingMs: 0,
-      startedAt: Date.now(),
-      lastEventAt: undefined,
-      idleTimer: undefined,
-      ceilingTimer: undefined,
-      // 装配占位：下方 timer 创建后重绑（settle/fail 需要清理两 timer）
+      // 装配占位：下方重绑（settle/fail 闭包引用 turn 本体）
       settle: () => {},
       fail: () => {},
-      fireTimeout: () => {},
     };
-    turn.idleMs = resolveTurnTimerMs({
-      explicit: opts.idleTimeoutMs,
-      envName: ZCODE_TURN_IDLE_TIMEOUT_ENV,
-      fallbackMs: ZCODE_TURN_IDLE_TIMEOUT_MS,
-      label: "idle 主判定",
-      offConsequence:
-        "静默 wedged（无事件）形态将无自动回收，任务可能挂到宿主进程退出",
-    });
-    turn.ceilingMs = resolveTurnTimerMs({
-      explicit: opts.turnTimeoutMs,
-      envName: ZCODE_TURN_MAX_TIMEOUT_ENV,
-      fallbackMs: ZCODE_TURN_MAX_TIMEOUT_MS,
-      label: "总上界",
-      offConsequence:
-        "chatty-wedge（有事件无终态）形态将无自动回收，仅剩 idle 静默判定兜底",
-    });
-    // 两 timer 状态机（P0-1 D1）：idle 事件刷新重挂、总上界固定倒数；
-    // 任一 fire → 类型化 TurnTimeoutError reject（kind 供 R4 分流）。
-    const fireTimeout = (kind: TurnTimeoutKind): void => {
-      if (turn.settled) return;
-      turn.settled = true;
-      clearTurnTimers(turn);
-      this.activeTurns.delete(sessionId);
-      rejectDone(
-        new TurnTimeoutError(kind, {
-          thresholdMs: kind === "idle" ? turn.idleMs : turn.ceilingMs,
-          elapsed: Date.now() - turn.startedAt,
-          lastEventAt: turn.lastEventAt,
-        })
-      );
-    };
-    turn.fireTimeout = fireTimeout;
-    if (turn.idleMs > 0) {
-      turn.idleTimer = armTurnTimer(() => turn.fireTimeout("idle"), turn.idleMs);
-    }
-    if (turn.ceilingMs > 0) {
-      turn.ceilingTimer = armTurnTimer(
-        () => turn.fireTimeout("ceiling"),
-        turn.ceilingMs
-      );
-    }
+    // turn 终局只由两个确定性事实落定：终态事件（settle）与收割错误（fail）。
+    // 无终态且连接存活 = 任务静默挂起，显式暴露不建时间兜底（ADR-0122）。
     turn.settle = (t: TerminalInfo): void => {
       if (turn.settled) return;
       turn.settled = true;
       turn.terminal = t;
-      clearTurnTimers(turn);
       resolveDone(t);
     };
     turn.fail = (err: Error): void => {
       if (turn.settled) return;
       turn.settled = true;
-      clearTurnTimers(turn);
       rejectDone(err);
     };
     this.activeTurns.set(sessionId, turn);
-    return { turn, done, stopTimers: () => clearTurnTimers(turn) };
-  }
-
-  /**
-   * idle 主判定的事件刷新（P0-1 D1）：本 turn 任何事件到达即重置 idle 倒数——
-   * 活跃事件流零误杀的结构保证。总上界不受影响（固定倒数）。已落定 turn 无
-   * timer 可刷新（只剩 lastEventAt 记账）。
-   */
-  private refreshIdle(turn: ActiveTurn): void {
-    turn.lastEventAt = Date.now();
-    if (turn.settled || turn.idleTimer === undefined) return;
-    clearTimeout(turn.idleTimer);
-    turn.idleTimer = armTurnTimer(() => turn.fireTimeout("idle"), turn.idleMs);
+    return { turn, done };
   }
 
   private lookupTurn(sessionId: string | undefined): ActiveTurn | undefined {
@@ -946,13 +734,11 @@ export class SessionChannel {
     const payload =
       isRecord(params) && isRecord(params.payload) ? params.payload : undefined;
     if (payload === undefined) return;
-    // 事件到达即刷新 idle 主判定（P0-1 D1——本 turn 的任何 session/event 都算进展）
-    this.refreshIdle(turn);
     if (this.applyFinalFrame(turn, payload)) return;
     // [PR3] 非 final-frame 且非 delta 的帧 = 引擎可见但宿主不可见的进展
     //（tool.updated progress / turn.started / hook 事件）：宿主刷新面只有 delta
-    // 回调，「仅工具执行、零正文」形态下宿主侧无进展守护饿死误杀——onActivity 补
-    // 该缺口。已落定 turn 不发（settle 后 run 已收尾，迟到帧只是收尾窗口噪声）。
+    // 回调，「仅工具执行、零正文」形态下宿主侧零活性信号——onActivity 补该缺口。
+    // 已落定 turn 不发（settle 后 run 已收尾，迟到帧只是收尾窗口噪声）。
     // 不加节流：服务端 tool.updated 天然 ~1s cadence（探针实证）。v4/telemetry 路径
     //（handleTelemetry/applyStreamChunkTelemetry）不加同款——session/event 镜像帧
     // 已覆盖（同 eventId），双发无增益。
@@ -1108,8 +894,6 @@ export class SessionChannel {
     // 携带文本字段——保留旧实现的形态漂移兜底：带文本则当 delta 收（不变量 1）
     const turn = this.lookupTurn(extractPushSessionId(params));
     if (turn === undefined || turn.settled) return;
-    // 遥测到达即刷新 idle 主判定（P0-1 D1：telemetry 事件同算进展）
-    this.refreshIdle(turn);
     for (const key of ["chunk", "text", "content"] as const) {
       const v = params[key];
       if (typeof v === "string" && v !== "") {

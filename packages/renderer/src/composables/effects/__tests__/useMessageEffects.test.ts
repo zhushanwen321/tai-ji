@@ -1,32 +1,33 @@
 // @vitest-environment node
 
 /**
- * useMessageEffects 测试（架构审计 §11.4）。
+ * useMessageEffects 测试（架构审计 §11.4 + remote-use D5 接线）。
  *
- * core use-connection 是 headless（零 store），副作用回调实现归位 renderer 本层。
- * 本测试锁定 InboundEffects 回调的 store/toast 接线 + runtime 清理回调：
- * - onSessionExited → markSessionError + markDead + clearSession（D6b 清挂起弹窗分区）+ toast（首行 reason）
- * - onMessageComplete → 算 focusedSid + handleCompletion（aborted 过滤链在
- *   useCompletionNotify.test.ts 覆盖，本层只验证接线）
- * - onSubagents → applyRecords；onWorkflowUpdate → triggerWorkflowReload
- * - onSubagentEntries → chatStore.applySubagentEntries（虚拟分区 id 经 shared 工厂构造，
- *   E-4 relay tee entry 帧兜底接线）
- * - onGlobalError → toast
- * - onSessionError → markSessionError + toast（D6b：带 sid error envelope 兜底展示）
- * - handleRuntimeUnavailable → finalizeAllStreaming + clearAllPending（T5）
+ * [remote-use D5] exited/restored/restoreFailed 的 core 最小语义归 core
+ * createLifecycleEffects factory 单一归属（factory 自身行为在
+ * core/src/domain/chat/__tests__/lifecycle-effects.test.ts 全覆盖）；本文件锁定：
+ * - 桌面壳扩展四项接线：① extensionUIStore.clearSession（D6b/M8 清挂起弹窗分区）
+ *   ② toast（首行 reason）③ 强杀分流（consumeForcedExit 命中 → 不进恢复窗口不建订阅）
+ *   ④ respawn 过渡态及其回收（markRespawnPending / 30s timer / restored·熔断收口）
+ * - factory 原语透传：exited → markSessionDead 序列入参；restored/restoreFailed 回调转发
+ * - 恢复窗口订阅经 factory（subscribe RPC 经 setSubscriptionPorts 捕获，壳不直调 subscribeSession）
+ * - 非 lifecycle 回调：onMessageComplete → focusedSid + handleCompletion；onSubagents →
+ *   applyRecords；onSubagentEntries → applySubagentEntries（E-4 虚拟分区）；onGlobalError /
+ *   onSessionError → toast；handleRuntimeUnavailable → finalizeAllStreaming + clearAllPending
  *
  * 运行：cd packages/renderer && npx vitest run src/composables/effects/__tests__/useMessageEffects.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import type { PiEntry, ServerMessage, ServerMessageMap, SubagentRecord } from '@taiji/shared'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import type { PiEntry, ServerMessageMap, SubagentRecord } from '@taiji/shared'
 import { isSubagentVirtualId, extractBtwPiSessionId, extractMainSessionId } from '@taiji/shared'
-import { isVirtualKeyOf } from '@taiji/core'
+import { isVirtualKeyOf, setSubscriptionPorts, resetSubscriptionStates, resetChatModuleStateForTest } from '@taiji/core'
 
 const storeMocks = vi.hoisted(() => ({
   markSessionError: vi.fn(),
   finalizeAllStreaming: vi.fn(),
   applySubagentEntries: vi.fn(),
   markDead: vi.fn(),
+  revive: vi.fn(),
   clearAllPending: vi.fn(),
   clearSession: vi.fn(),
   applyRecords: vi.fn(),
@@ -55,7 +56,7 @@ vi.mock('@/stores/chat', () => ({
   }),
 }))
 vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ markDead: storeMocks.markDead }),
+  useSessionStore: () => ({ markDead: storeMocks.markDead, revive: storeMocks.revive }),
 }))
 vi.mock('@/stores/panel', () => ({
   usePanelStore: () => ({ panels: storeMocks.panels, activePanelId: storeMocks.activePanelId }),
@@ -77,14 +78,38 @@ vi.mock('@/composables/effects/useCompletionNotify', () => ({
 }))
 
 import { createInboundEffects, handleRuntimeUnavailable } from '../useMessageEffects'
+import { markForcedExit, resetForcedExitMarks } from '../forced-exit-marks'
 
 const effects = createInboundEffects()
+
+/** subscribe RPC spy（factory 恢复窗口订阅经 setSubscriptionPorts 捕获——core 真链路，
+ *  不 mock @taiji/core：factory 行为归 core 单测，本层只验证「订阅经 factory 建立」接线）。 */
+const subscribeRpc = vi.fn().mockResolvedValue({ snapshot: [], stateSnapshot: [], lastSeq: 0 })
+
+/** exited 后等恢复窗口订阅（fire-and-forget async）的同步段执行到 RPC 发出。 */
+const flushSubscribes = async (): Promise<void> => {
+  for (const r of subscribeRpc.mock.results) {
+    await Promise.race([Promise.resolve(r.value).catch(() => {}), Promise.resolve()])
+  }
+  await Promise.resolve()
+}
 
 describe('createInboundEffects（§11.4 InboundEffects 接线）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     storeMocks.panels = []
     storeMocks.activePanelId = 'root-panel'
+    storeMocks.isRespawnPending.mockReturnValue(false)
+    resetChatModuleStateForTest()
+    resetSubscriptionStates()
+    resetForcedExitMarks()
+    setSubscriptionPorts({ subscribe: subscribeRpc, replay: vi.fn() })
+  })
+
+  afterEach(() => {
+    resetChatModuleStateForTest()
+    resetSubscriptionStates()
+    resetForcedExitMarks()
   })
 
   it('onSessionExited → markSessionError + markDead + clearSession（D6b 清挂起弹窗分区） + toast（reason 只取首行）', () => {
@@ -99,6 +124,90 @@ describe('createInboundEffects（§11.4 InboundEffects 接线）', () => {
     // toast 含首行 reason + i18n 文案（zh-CN 默认 locale）
     expect(msg).toContain('Session process exited')
     expect(msg).not.toContain('ext load failed')
+  })
+
+  it('[D5 接线] 意外退出 → 经 factory 建立恢复窗口订阅（subscribe RPC 发出，壳不直调 subscribeSession）', async () => {
+    effects.onSessionExited!('s1', { code: 1, reason: 'crashed' })
+
+    expect(subscribeRpc).toHaveBeenCalledTimes(1)
+    expect(subscribeRpc).toHaveBeenCalledWith('s1', undefined)
+    await flushSubscribes()
+  })
+
+  it('[D5 接线] 强杀分流（壳扩展③）：consumeForcedExit 命中 → 不进过渡态、不建恢复窗口订阅', async () => {
+    markForcedExit('s1')
+
+    effects.onSessionExited!('s1', { code: 1, reason: 'force quit' })
+
+    expect(storeMocks.markRespawnPending).not.toHaveBeenCalled()
+    expect(subscribeRpc).not.toHaveBeenCalled()
+    // 终态防御路径：清掉可能残留的过渡态
+    expect(storeMocks.clearRespawnPending).toHaveBeenCalledWith('s1')
+    // markSessionDead 序列与壳扩展①② 照常（core 序列在分流之前）
+    expect(storeMocks.markSessionError).toHaveBeenCalledWith('s1', 'force quit')
+    expect(storeMocks.clearSession).toHaveBeenCalledWith('s1')
+    expect(storeMocks.toastError).toHaveBeenCalledTimes(1)
+  })
+
+  it('[D5 接线] 意外退出 → 进 respawnPending 过渡态（壳扩展④），30s 无收口事件则超时回收', () => {
+    vi.useFakeTimers()
+    try {
+      storeMocks.isRespawnPending.mockReturnValue(true)
+      effects.onSessionExited!('s1', { code: 1, reason: 'crashed' })
+
+      expect(storeMocks.markRespawnPending).toHaveBeenCalledWith('s1')
+      expect(storeMocks.clearRespawnPending).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(30_000)
+
+      // 仍 pending → 超时切回终态 dead 页（保留「重新打开」出口）
+      expect(storeMocks.clearRespawnPending).toHaveBeenCalledWith('s1')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('[D5 接线] 连续 exited 不重置计时窗口（幂等：仅挂一个 30s timer，首个到期回收）', () => {
+    vi.useFakeTimers()
+    try {
+      storeMocks.isRespawnPending.mockReturnValue(true)
+      effects.onSessionExited!('s1', { code: 1, reason: 'crashed' })
+      effects.onSessionExited!('s1', { code: 1, reason: 'crashed again' })
+
+      vi.advanceTimersByTime(30_000)
+
+      // 第二次 exited 未另挂 timer → 只有首窗口到期的一次回收
+      expect(storeMocks.clearRespawnPending).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('onSessionRestored → 收口过渡态（clearRespawnPending）+ core 序列经 factory（revive + restored 提示条 + 重订阅）', async () => {
+    effects.onSessionRestored!('s1', { attempts: 2 })
+
+    // 壳扩展④回收
+    expect(storeMocks.clearRespawnPending).toHaveBeenCalledWith('s1')
+    // core 序列透传（revive + 提示条文案由 factory 内部消费 i18n 注入值）
+    expect(storeMocks.revive).toHaveBeenCalledWith('s1')
+    expect(storeMocks.appendRespawnNotice).toHaveBeenCalledWith('s1', 'restored', expect.any(String))
+    // 重订阅（恢复 live 订阅 + 完整回放）
+    expect(subscribeRpc).toHaveBeenCalledTimes(1)
+    await flushSubscribes()
+  })
+
+  it('onSessionRestoreFailed → willRetry=true 中间失败：不收口过渡态、无提示条', () => {
+    effects.onSessionRestoreFailed!('s1', { attempts: 1, willRetry: true, reason: 'attach failed' })
+
+    expect(storeMocks.clearRespawnPending).not.toHaveBeenCalled()
+    expect(storeMocks.appendRespawnNotice).not.toHaveBeenCalled()
+  })
+
+  it('onSessionRestoreFailed → willRetry=false 熔断：恢复失败提示条（restoreFailed 形态）+ 收口过渡态', () => {
+    effects.onSessionRestoreFailed!('s1', { attempts: 2, willRetry: false, reason: 'attach hard-fail' })
+
+    expect(storeMocks.appendRespawnNotice).toHaveBeenCalledWith('s1', 'restoreFailed', expect.any(String))
+    expect(storeMocks.clearRespawnPending).toHaveBeenCalledWith('s1')
   })
 
   it('onMessageComplete → 从 panel store 算 focusedSid 传给 handleCompletion（stop 直传）', () => {
@@ -150,14 +259,14 @@ describe('createInboundEffects（§11.4 InboundEffects 接线）', () => {
     expect(storeMocks.applySubagentEntries).toHaveBeenCalledWith('subagent:s-main:rec-9', entries)
   })
 
-  it('onWorkflowUpdate → triggerWorkflowReload(sid)；update.status 不再透传（500ms 盲等重试删除，待裁决项 5）', () => {
+  it('onWorkflowUpdate → triggerWorkflowReload(sid, status)；status 缺省按 "unknown"（防御运行时坏形状）', () => {
     effects.onWorkflowUpdate!('s1', { runId: 'wf-1', status: 'running' })
-    expect(storeMocks.triggerWorkflowReload).toHaveBeenCalledWith('s1')
+    expect(storeMocks.triggerWorkflowReload).toHaveBeenCalledWith('s1', 'running')
 
     storeMocks.triggerWorkflowReload.mockClear()
-    // status 缺省的坏形状同样只透传 sid（信号到达即拉一次，无 status 消费场景）
+    // status 缺省的坏形状按 "unknown" 透传（防御运行时坏形状，warn 判定不命中）
     effects.onWorkflowUpdate!('s1', { runId: 'wf-1' } as ServerMessageMap['session.workflowUpdate']['update'])
-    expect(storeMocks.triggerWorkflowReload).toHaveBeenCalledWith('s1')
+    expect(storeMocks.triggerWorkflowReload).toHaveBeenCalledWith('s1', 'unknown')
   })
 
   it('onGlobalError → toast.error(message)', () => {

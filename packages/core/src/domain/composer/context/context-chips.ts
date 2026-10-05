@@ -9,7 +9,7 @@
  * - ContextChipsBar @remove(id) → onRemoveContextChip → ComposerInput.removeImageChip(chipId) → refreshAttachedItems
  *
  * [HISTORICAL] chip id 曾用 path，但同一文件附两次时 path 重复导致 Vue :key 冲突（删除不可靠）。
- * C3 改用 segment.id（composer chip 的稳定唯一 uuid，crypto.randomUUID 生成）。
+ * C3 改用 segment.id（composer chip 的稳定唯一 uuid，randomUuid 生成）。
  *
  * segments 是 DOM 即时读取（非响应式），需在 input 变化 / chip 删除后主动调 refreshAttachedItems。
  *

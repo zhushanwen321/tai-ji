@@ -1,4 +1,4 @@
-// OAuth config 提取 fixture 测试：用 node_modules 里 6 个真实 oauth provider 源码断言
+// OAuth config 提取 fixture 测试：用 node_modules 里真实 oauth provider 源码断言
 // extractOAuthConfig 的提取结果（clientId/flow/endpoints/scopes/callbackPort）。
 // 直接读真实文件而非内嵌节选 —— pi-ai 升级后源码变化会破坏断言，正是本测试的回归守卫职责。
 // 测试框架 vitest（禁 node:test / tsx --test）。
@@ -7,7 +7,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { extractOAuthConfig, generateBuiltinProviders, OAUTH_DIR } from './gen-builtin-providers.mjs'
 
-const OAUTH_IDS = ['anthropic', 'github-copilot', 'kimi-coding', 'xai', 'openai-codex', 'openrouter']
+// pi-ai 1.0.0 oauth provider 全集（openai 走 oauth、radius 1.0.0 起进静态 catalog）
+const OAUTH_IDS = ['anthropic', 'github-copilot', 'kimi-coding', 'xai', 'openai-codex', 'openrouter', 'openai', 'radius']
 
 function readRealSource(id: string): string {
   return readFileSync(join(OAUTH_DIR, `${id}.js`), 'utf-8')
@@ -86,6 +87,30 @@ describe('extractOAuthConfig（真实 pi-ai 源码 fixture）', () => {
     expect(cfg.endpoints.token).toBe('https://openrouter.ai/api/v1/auth/keys')
   })
 
+  it('openai: DYNAMIC_CLIENT_ID（1.0.0 登录时动态注册）+ flow=callback + CALLBACK_PORT 1455 + 模板 SCOPE 展开', () => {
+    const cfg = extractOAuthConfig('openai', readRealSource('openai-chatgpt'))
+    expect(cfg.clientId).toBe('dynamic_agent_client')
+    expect(cfg.flow).toBe('callback')
+    expect(cfg.callbackPort).toBe(1455)
+    expect(cfg.endpoints.authorize).toBe('https://auth.openai.com/api/accounts/authorize')
+    expect(cfg.endpoints.token).toBe('https://auth.openai.com/api/accounts/oauth/token')
+    // 模板字面量 SCOPE 展开（${DIRECT_TOKEN_SCOPE} 同文件常量内联）——scopes 提取器 1.0.0 形态锚
+    expect(cfg.scopes).toEqual(
+      expect.arrayContaining(['openid', 'resource.invoke', 'chatgpt.tokens.use.direct']),
+    )
+  })
+
+  it('radius: OAUTH_CLIENT_ID/OAUTH_SCOPE 常量名（1.0.0）+ flow=device + 端点空（gateway 运行时发现）', () => {
+    const cfg = extractOAuthConfig('radius', readRealSource('radius'))
+    expect(cfg.clientId).toBe('pi-gateway')
+    expect(cfg.flow).toBe('device')
+    // 端点从 gateway 运行时发现（loadRadiusOAuthDiscovery），静态提取为空是预期降级
+    expect(cfg.endpoints).toEqual({})
+    // OAUTH_ 前缀常量名形态——scopes 提取器 1.0.0 形态锚
+    expect(cfg.scopes).toEqual(['gateway', 'offline_access'])
+    expect(cfg.callbackPort).toBe(1456)
+  })
+
   it('提取失败 fixture：oauth provider 缺 clientId（非登记的无 clientId provider）→ throw', () => {
     const fakeNoClientId = `
 const AUTHORIZE_URL = "https://example.com/oauth/authorize";
@@ -107,7 +132,7 @@ const SOME_URL = "https://example.com";
 describe('generateBuiltinProviders 集成（oauthConfig 挂载）', () => {
   const providers = generateBuiltinProviders()
 
-  it('6 个 oauth provider 均带 oauthConfig 且 flow 正确', () => {
+  it('oauth provider 全集（pi-ai 1.0.0 为 8 个）均带 oauthConfig 且 flow 正确', () => {
     for (const id of OAUTH_IDS) {
       const p = providers.find((x) => x.id === id)
       expect(p, `${id} 应在 catalog`).toBeDefined()
@@ -116,8 +141,8 @@ describe('generateBuiltinProviders 集成（oauthConfig 挂载）', () => {
     }
   })
 
-  it('非 oauth provider 无 oauthConfig', () => {
-    const openai = providers.find((p) => p.id === 'openai')
-    expect(openai.oauthConfig).toBeUndefined()
+  it('非 oauth provider 无 oauthConfig（deepseek 为 api_key 纯通道反例）', () => {
+    const deepseek = providers.find((p) => p.id === 'deepseek')
+    expect(deepseek.oauthConfig).toBeUndefined()
   })
 })

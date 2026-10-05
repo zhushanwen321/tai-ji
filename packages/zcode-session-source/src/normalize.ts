@@ -12,7 +12,7 @@
  * 该不变量。pi 侧对 header.id 无格式校验（恢复路径不校验——assertValidSessionId
  * 仅在显式指定 id 时调用），本函数的字符集是 taiji 自定约束（pi
  * assertValidSessionId 允许集的真子集，收紧方向安全；锚点
- * dist/core/session-manager.js:15-19 正则字面量 :16，verifiedWith 0.84.4）。
+ * dist/core/session-manager.js assertValidSessionId 正则字面量（语义登记 PS-52，verifiedWith 以该登记为准））。
  *
  * 相对 runtime 旧版的改造（设计 §1.5 source 包契约第 4 条「错误面归消费侧」）：不再
  * 抛 runtime services 层的 ImportServiceError（本包不私建 import_* / zcode_* 错误码），

@@ -156,8 +156,9 @@ function mockOrchestrator(overrides: Partial<MockOrchestrator> = {}): MockOrches
   }
 }
 
-/** 捕获 setTimeout（update:perform triggerRestart 后用 setTimeout 调 app.quit） */
-let capturedQuitTimer: { delay: number } | null = null
+// [ADR-0122] 原「setTimeout 500ms 延迟 quit」改为 setImmediate（不猜响应送达窗）；
+// quit 调度断言改为捕获 setImmediate 回调。
+let capturedQuitCallback: (() => void) | null = null
 
 // 预下载门控 isAutoUpdateSupportedForCurrentInstall（真实现非 mock）在 linux 无
 // APPIMAGE 时返回 false → update:check 不触发预下载 → downloadUpdate 0 次调用。
@@ -172,14 +173,12 @@ beforeEach(() => {
   vi.clearAllMocks()
   sendSpy.mockClear()
   mockMainWindow.isDestroyed.mockReturnValue(false)
-  capturedQuitTimer = null
-  // 拦截 setTimeout 仅捕获 quit 定时器（delay），其余放行避免影响 vi 内部定时器
-  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((cb: () => void, delay?: number) => {
-    // update:perform 成功路径用 setTimeout(cb, 500) 安排 quit；捕获此定时器
-    capturedQuitTimer = { delay: delay ?? 0 }
-    // 不实际执行 cb（避免触发 app.quit mock 的副作用），返回占位 handle
-    return 0 as unknown as NodeJS.Timeout
-  }) as typeof setTimeout)
+  capturedQuitCallback = null
+  // 拦截 setImmediate 仅捕获 quit 回调（不执行，避免 app.quit mock 副作用）
+  vi.spyOn(globalThis, 'setImmediate').mockImplementation(((cb: () => void) => {
+    capturedQuitCallback = cb
+    return 0 as unknown as NodeJS.Immediate
+  }) as typeof setImmediate)
 })
 
 afterEach(() => {
@@ -606,12 +605,12 @@ describe('T4 update-handlers: update:download / update:install / update:getPrelo
     }))
   })
 
-  it('update:download：停滞形态 → 用户文案保持停滞 + 断点续传指引（不被 connect 话术覆盖）', async () => {
+  it('update:download：stalled 诊断形态（curl --speed-time 档）→ 用户文案落映射表超时 + 断点续传指引（不被 connect 话术覆盖）', async () => {
     const { UpdateError } = await import('../update/types.js')
     const orch = mockOrchestrator({
       downloadUpdate: vi.fn(async () => {
-        // undici 停滞档（finalizeSingleStreamError）/ curl --speed-time 档的英文诊断串形态
-        throw new UpdateError('download stalled (no data for 30s), aborted; temp kept — retry resumes from break point', 'downloading', 'UPDATE_NETWORK_TIMEOUT')
+        // curl --speed-time 档的英文诊断串形态（curl 引擎停滞检测保留——进程参数不在删除范围）
+        throw new UpdateError('curl download stalled (no data for 30s, exit 28)', 'downloading', 'UPDATE_NETWORK_TIMEOUT')
       }),
     })
     register(orch)
@@ -619,12 +618,12 @@ describe('T4 update-handlers: update:download / update:install / update:getPrelo
     const handler = handlers.get('update:download')!
     await expect(handler({}, { version: '0.9.0' })).rejects.toMatchObject({
       stage: 'downloading',
-      message: '下载停滞（连续 30 秒无数据）已中断',
+      message: '下载超时已中断',
       suggestion: expect.stringContaining('断点续传'),
     })
     expect(sendSpy).toHaveBeenCalledWith('update:error', expect.objectContaining({
       errorCode: 'UPDATE_NETWORK_TIMEOUT',
-      message: '下载停滞（连续 30 秒无数据）已中断',
+      message: '下载超时已中断',
     }))
   })
 
@@ -664,9 +663,8 @@ describe('T4 update-handlers: update:download / update:install / update:getPrelo
     expect(orch.installUpdate).toHaveBeenCalledWith(FIXTURE, '/tmp/pre.zip', expect.any(Function))
     // readPreloadedUpdateRaw 收到 app.getVersion() = '0.8.14'（版本守卫传参，WTC12 集成验证）
     expect(preloadedMocks.readPreloadedUpdateRaw).toHaveBeenCalledWith('0.8.14')
-    // triggerRestart=true → 安排延迟 quit
-    expect(capturedQuitTimer).not.toBeNull()
-    expect(capturedQuitTimer!.delay).toBe(500)
+    // triggerRestart=true → 安排 quit（setImmediate）
+    expect(capturedQuitCallback).not.toBeNull()
   })
 
   // ── update:install 无预下载产物 → 抛错 ──────────────────────

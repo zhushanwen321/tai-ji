@@ -9,7 +9,7 @@
  * - P1.5 组件黑盒·横线分隔行族（compacting 行自通栏带降级回归本族 / A4+A7）：四行同构
  *   （system-notice + content-col 保留，行内左右各一条渐隐 hairline）、待发 chip count =
  *   内核投递投影里「非 direct 且未 delivered」条目数（[u3c/D7] 单源化——原 useCompactQueue
- *   未提交条目口径随队列退役，口径唯一定义点 = useQueueRows.deliveryQueueEntries）、
+ *   未提交条目口径随队列退役，口径唯一定义点 = core deliveryQueueEntries（U20 下沉））、
  *   count=0 隐藏 chip、bash/thinking/settling 行同构形态
  * - P2 组件黑盒·优先级堆叠：compacting + bash 并存 → 两行且 compacting 在上；
  *   thinking 与 compacting/bash 互斥（「无以上但有 dispatching turn」才显示）；
@@ -19,7 +19,7 @@
  * - P4 MessageStream 集成·迁移收口：TurnMeta 旧 dispatching 占位不再渲染 + thinking 行接管；
  *   executingBash 瞬时行迁入（bashStart 帧驱动）；fork notice 与活动条的文档流定位顺序
  *   （活动条在前——ForkNotice 为文档流 block，按文档序自然堆叠）
- * - P5 i18n key 完整：四个行文案 key 在 zh/en locale 均定义
+ * - P5 i18n key 完整：行文案 + 待发 chip + bash 详情等 key 在 zh/en locale 均定义
  *
  * i18n：vitest 全局 setup（vitest-i18n-setup.ts）mock useI18n → t() 返回 zh-CN 文案。
  *
@@ -33,8 +33,8 @@ import { useI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
 import { getDeliveryProjectionRef } from '@taiji/core'
 import type { DeliveryFrameEntry } from '@taiji/core'
-import zhPanel from '@/i18n/locales/zh-CN/panel'
-import enPanel from '@/i18n/locales/en-US/panel'
+import zhPanel from '@taiji/ui/locale/zh-CN/panel'
+import enPanel from '@taiji/ui/locale/en-US/panel'
 
 const apiMock = vi.hoisted(() => ({
   send: vi.fn(() => Promise.resolve()),
@@ -461,8 +461,16 @@ describe('ActivityStrip · i18n key 完整（P5）', () => {
   const ZH_MESSAGE: Record<string, unknown> = zhPanel.message
   const EN_MESSAGE: Record<string, unknown> = enPanel.message
 
-  it('compressing/autoCompressing/executingBash/dispatching 在 zh/en locale 均定义', () => {
-    for (const key of ['compressing', 'autoCompressing', 'executingBash', 'dispatching']) {
+  it('compressing/autoCompressing/compactingQueueChip/executingBash/executingBashElapsed/bashCommandLabel/dispatching 在 zh/en locale 均定义', () => {
+    for (const key of [
+      'compressing',
+      'autoCompressing',
+      'compactingQueueChip',
+      'executingBash',
+      'executingBashElapsed',
+      'bashCommandLabel',
+      'dispatching',
+    ]) {
       expect(ZH_MESSAGE[key], `panel.message.${key} 缺 zh-CN 定义`).toEqual(expect.any(String))
       expect(EN_MESSAGE[key], `panel.message.${key} 缺 en-US 定义`).toEqual(expect.any(String))
     }
