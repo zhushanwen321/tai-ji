@@ -201,7 +201,8 @@ export const EXTENSION_COMMAND_ERROR_RATE_LIMIT_MS = 60_000
  * resetChatModuleStateForTest（测试隔离，与同文件其余模块级 Map 同模式）。
  */
 // taste:allow-no-data-owner W24-EX-C（进程内流程状态——toast 展示层限频时刻，非数据一致性
-// 事实；错误数据本体已逐条完整留痕 runtime 日志 + extension.error WS 消息，D10③ 时间平抑登记）
+// 事实；错误数据本体已逐条完整留痕 runtime 日志 + extension.error WS 消息，D10③ 时间平抑登记；
+// 登记于登记表 §4 ⑧ W24-EX-C 条目）
 const extensionCommandErrorLastShownAt = new Map<string, number>()
 
 /**
@@ -367,7 +368,7 @@ function handleSessionDeliveryHandled(
 /**
  * [D1④] handled 形态静默清除三件套（U2① 终局通知与 U2② 孤儿对账共用，「按 handled 同
  * 形态」的单一实现）：① 移除乐观气泡（truncateFrom 幂等：已 morph / 不存在的 id no-op）；
- * ② 清空窗计时器 + dispatching 占位（clearPendingSend）；③ 递减在途计数（钳制幂等）。
+ * ② 清 dispatching 占位（clearPendingSend，纯 Set 操作）；③ 递减在途计数（钳制幂等）。
  * 无错误提示（handled = 命令已执行的正常终局）。
  */
 function finalizeHandledEntry(sid: string, clientUuid: string, chat: ChatStoreInstance): void {
