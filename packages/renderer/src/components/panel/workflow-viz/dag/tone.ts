@@ -17,8 +17,10 @@ const PULSE_CLASS = 'animate-[wfvz-node-pulse_1.5s_ease-in-out_infinite]'
 
 /**
  * dot 静态色类（无脉冲）——图例六态与节点 dot 的共同颜色事实源。
- * pending 返回空串：消费方自带基础中性点类（节点 circle 与图例 dot 的静态基础类
- * 同为 fill-[var(--neutral-dim)]，与既有节点实现一致）。
+ * 每个状态恰好返回一个 fill 类（pending 显式返回中性灰，消费方不得再挂基础 fill
+ * 类）：Tailwind 同属性任意值工具类按值字母序发射（accent < danger < neutral-dim
+ * < success < warn），「基础类 + tone 类」并存时 neutral-dim 后发覆盖 tone 色——
+ * 单 fill 类消竞争（D3 剧本实锤的 running/failed dot 渲染中性灰根因）。
  * 停止叠加（stopTone）优先于六态：run 停止时在途节点不脉冲、着色随 run 级形态。
  */
 export function dotTone(status: WorkflowVizDagNodeStatus, stopTone?: WorkflowVizDagStopTone): string {
@@ -33,10 +35,10 @@ export function dotTone(status: WorkflowVizDagNodeStatus, stopTone?: WorkflowViz
       return 'fill-[var(--danger)]'
     case 'retrying':
       return 'fill-[var(--warn)]'
+    case 'pending':
     case 'skipped':
-      return 'fill-[var(--neutral-dim)]'
     default:
-      return ''
+      return 'fill-[var(--neutral-dim)]'
   }
 }
 

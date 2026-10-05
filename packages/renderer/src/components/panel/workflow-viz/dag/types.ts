@@ -31,11 +31,13 @@ export type WorkflowVizDagClickPayload =
   | { semantic: 'phase'; phase: string }
 
 /**
- * run 停止时在途节点的叠加着色调（画布归一 D9 着色映射后传入节点卡片）：
+ * run 停止时在途节点的叠加着色调（画布归一 D9 着色映射后传入节点卡片；叠加
+ * 两档只属于「被停止的 run」——正常完成 outcome='done' 不是停止）：
  * - 'neutral'：中性暗——interrupted（暂停态，可续跑）、cancelled（用户主动终局，
  *   tray-tone「同语义同色」先例）与 done + outcome 缺省（v1 存量数据缺口保守
  *   中性，不作成败断言）三源共用一档；
  * - 'failed'：失败色系——failed 与 time_limited 终局（D9 着色映射全枚举）；
- * - null：run 运行中（无叠加，在途节点正常蓝脉冲）。
+ * - null：无叠加——run 运行中（在途节点正常蓝脉冲）与 outcome='done'（正常完成，
+ *   六态自明：done 节点 success 绿与 skipped 虚线不被叠加吞掉）。
  */
 export type WorkflowVizDagStopTone = 'neutral' | 'failed' | null

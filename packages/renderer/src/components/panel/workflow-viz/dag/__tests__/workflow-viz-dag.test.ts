@@ -158,6 +158,20 @@ describe('WorkflowVizDag 停止叠加（D9 着色映射）', () => {
     const wrapper = mountDag(sampleDag(), { runStatus: 'done', runOutcome: 'cancelled' })
     expect(wrapper.find('[data-testid="wfvz-dag-node-n-biz"]').attributes('data-stop-tone')).toBe('neutral')
   })
+
+  it('正常完成 run（outcome=done）：无叠加（done 节点 success 六态自明，D9 done=success 供扫读）', () => {
+    const states: Record<string, WorkflowVizDagNodeStatus> = { 'n-gate': 'done', 'n-biz': 'skipped' }
+    const wrapper = mountDag(sampleDag(), { runStatus: 'done', runOutcome: 'done', nodeStates: states })
+    const node = wrapper.find('[data-testid="wfvz-dag-node-n-biz"]')
+    expect(node.attributes('data-stop-tone')).toBeUndefined()
+    // dot 单 fill 类 = tone 色（无基础中性类竞争——D3 剧本实锤的中性灰根因已修）
+    const dot = node.find('circle')
+    expect(dot.classes().filter((c) => c.startsWith('fill-['))).toEqual(['fill-[var(--neutral-dim)]'])
+    // done 节点 dot 恢复 success 绿
+    const doneDot = wrapper.find('[data-testid="wfvz-dag-node-n-gate"] circle')
+    expect(doneDot.classes()).toContain('fill-[var(--success)]')
+    expect(doneDot.classes().filter((c) => c.startsWith('fill-['))).toHaveLength(1)
+  })
 })
 
 describe('WorkflowVizDag 节点级渲染边界与零节点形态', () => {

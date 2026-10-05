@@ -31,7 +31,7 @@
       :height="DAG_NODE_H"
     />
     <circle
-      :class="['fill-[var(--neutral-dim)] stroke-[var(--surface)] [stroke-width:1.5] transition-[fill] duration-[var(--duration-fast)] ease-[var(--ease)]', tone.dot]"
+      :class="['stroke-[var(--surface)] [stroke-width:1.5] transition-[fill] duration-[var(--duration-fast)] ease-[var(--ease)]', tone.dot]"
       :cx="DOT_CX"
       :cy="DAG_NODE_H / 2"
       r="4"

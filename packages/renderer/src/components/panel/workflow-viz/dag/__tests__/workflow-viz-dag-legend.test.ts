@@ -15,6 +15,7 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import type { WorkflowDag, WorkflowDagNode, WorkflowRunRecord } from '@taiji/shared'
 import WorkflowVizOverlay from '../../overlay/WorkflowVizOverlay.vue'
+import { dotTone } from '../tone'
 import type { WorkflowVizDagNodeStatus } from '../types'
 
 /** 六态词表序（图例条目序；tone 同源断言逐一覆盖）。 */
@@ -75,6 +76,16 @@ describe('WorkflowVizDag 图例（workflow-overlay-refine D4）', () => {
       }
       // 脉冲是节点态、不是图例态：图例 dot 恒静态色
       expect(legendDot.classes().some((cls) => cls.includes('wfvz-node-pulse'))).toBe(false)
+    }
+  })
+
+  it('V3-wf① 图例六态 dot 各恰一个 fill 类且为 tone 色（无基础中性类竞争——单 fill 类消发射序覆盖）', () => {
+    const wrapper = mountLegend()
+    for (const state of STATES) {
+      const dot = wrapper.find(`[data-testid="wfvz-dag-legend-dot-${state}"]`)
+      const fills = dot.classes().filter((cls) => cls.startsWith('fill-['))
+      expect(fills).toHaveLength(1)
+      expect(fills[0]).toBe(dotTone(state))
     }
   })
 

@@ -195,15 +195,19 @@ function nodeState(nodeId: string): WorkflowVizDagNodeStatus {
 }
 
 /**
- * D9 停止叠加归一：run 已停止时在途节点不蓝脉冲——interrupted（暂停）与
- * cancelled（用户主动终局）落中性暗（tray-tone「同语义同色」先例）；
- * failed / time_limited 落失败色系（D9 着色映射全枚举）；done + outcome 缺省
- * （v1 存量数据缺口）保守中性暗，不作成败断言；run 运行中 = null（无叠加）。
+ * D9 停止叠加归一（叠加两档只属于「被停止的 run」，正常完成不是停止）：
+ * run 运行中 = null（无叠加，在途节点正常蓝脉冲）；outcome='done' = null（正常
+ * 完成的 run 六态自明——done 节点 success 绿与 skipped 虚线不被叠加吞掉，D9
+ * 「DAG done = success 供扫读」）；interrupted（暂停）与 cancelled（用户主动终局）
+ * 落中性暗（tray-tone「同语义同色」先例）；failed / time_limited 落失败色系
+ * （D9 着色映射全枚举）；done + outcome 缺省（v1 存量数据缺口）保守中性暗，
+ * 不作成败断言。
  */
 const stopTone = computed<WorkflowVizDagStopTone>(() => {
   if (props.runStatus === undefined || props.runStatus === 'running') return null
   if (props.runStatus === 'interrupted') return 'neutral'
   if (props.runOutcome === 'failed' || props.runOutcome === 'time_limited') return 'failed'
+  if (props.runOutcome === 'done') return null
   return 'neutral'
 })
 
