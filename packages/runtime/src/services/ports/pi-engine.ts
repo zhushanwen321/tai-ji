@@ -123,9 +123,9 @@ export interface PiSessionOptions {
   /**
    * 档位字符串透传（非空即发）；合法性由上游入口层校验（launch-params
    * resolveEffectiveThinking，词表 = shared PI_THINKING_LEVELS），本层不重复校验。
-   * 不可把「pi 会拒绝非法档位」当兜底依赖——pi（0.84.4）对非法 --thinking 仅 push
+   * 不可把「pi 会拒绝非法档位」当兜底依赖——pi（1.0.0 复核）对非法 --thinking 仅 push
    * warning diagnostic 并丢弃档位、进程照常以缺省档启动（pi-coding-agent
-   * dist/cli/args.js:112-121；仅 type==="error" 才 exit：dist/main.js:476-478）。
+   * dist/cli/args.js `--thinking` 分支；仅 diagnostics 含 type==="error" 才 exit：dist/main.js）。
    */
   thinkingLevel?: string
 }

@@ -493,7 +493,8 @@ function handleAgentEnd(event: PiAgentEndEvent, sid: string): PiTranslatedEvent[
 /**
  * turn_start — LLM 请求起算锚点（composer-genstats-ttft，设计 §3.2）。
  *
- * pi 0.84.4 实装（agent-loop.js）：每轮 LLM 请求恰发一次 turn_start——首个请求在
+ * pi 实装（agent-loop.js；语义前提登记 PS-46 / PS-47，verifiedWith 以 pi-semantics.json
+ * 为准）：每轮 LLM 请求恰发一次 turn_start——首个请求在
  * runAgentLoop / runAgentLoopContinue 入口（agent_start 后），工具循环后续轮在内层 while
  * 的 prepareNextTurn 之后 emit（原生 auto-compaction 运行在 prepareNextTurn 内、先于本
  * 事件，不含在 TTFT 窗口；工具执行亦不含——工具后下一轮 turn_start 重新起算）。
@@ -520,7 +521,7 @@ function handleTurnStart(_event: PiTurnStartEvent, sid: string): PiTranslatedEve
  * （超出 PiTurnEndMessage 声明范围，同 handleAgentEnd 的 responseModel 提取模式——pi AgentMessage
  * 实际形态比声明的 union 更宽），用 as 提取。字段缺省 → null（无值编码纪律 D4，禁 ?? 0——
  * 0 只允许作为真实测量值出现，null 由 interpreter/service 逐字段判定丢弃语义）。
- * PS-25 已验证（pi 0.84.4 实装）：message.model = 请求侧 model.id（必填恒有；gen-stats 分桶
+ * PS-25 已验证（语义登记 PS-25，verifiedWith 以 pi-semantics.json 为准）：message.model = 请求侧 model.id（必填恒有；gen-stats 分桶
  * 裁定采它，不采 responseModel——后者仅 openai-completions 在路由结果 ≠ 请求 id 时才有，
  * 多数 provider 恒缺）；失败 turn 的 failureMessage.usage 为 EMPTY_USAGE（totalTokens=0），
  * 被下方 totalTokens gate 丢弃，不产样本。

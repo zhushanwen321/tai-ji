@@ -23,8 +23,8 @@
  *   ① `--fork` + `--session-dir` 双旗标组合成立：forkFrom 落点吃 sessionDir 参数，
  *      实测 fork 文件落 --session-dir 目录、全树（含分支）逐字节等价、
  *      header.parentSession = 源绝对路径（P-fork-equivalence 实证，206ms）。
- *      forkFrom 写序/守卫断言已机器登记 docs/pi-semantics.json PS-51（锚点 pi@0.84.4
- *      dist/core/session-manager.js forkFrom :1237，逐 claim 行号见该条目 piAnchor）。
+ *      forkFrom 写序/守卫断言已机器登记 docs/pi-semantics.json PS-51（锚点
+ *      dist/core/session-manager.js forkFrom，逐 claim 行号与 verifiedWith 见该条目）。
  *   ② 单旗标与 RPC new 组合成立：`PI_CODING_AGENT_SESSION_DIR` env（main.js 与
  *      --session-dir 同优先级的等价通道）启动 → get_state/new_session 落点均在该目录
  *      （agent-session-runtime newSession 继承 getSessionDir）。

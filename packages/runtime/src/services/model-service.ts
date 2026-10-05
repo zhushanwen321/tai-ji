@@ -215,8 +215,8 @@ export class ModelService implements IModelService, ProviderConnectionTestServic
    * 编排：pi RPC + 缓存更新 + 广播 session 级状态（全部委托 SessionService.switchModel，
    * 它是 session 级状态唯一 owner）。D4 移除 config.defaults 广播。
    *
-   * 全局默认模型持久化：pi 0.84.4 实装中 setModel 不传 options.persist，
-   * 只写 session 级 entries，不写 settings.json（全局默认）。全局默认
+   * 全局默认模型持久化：pi 实装（1.0.0 复核）rpc set_model 入口调 setModel 不传
+   * options.persist，只写 session 级 entries，不写 settings.json（全局默认）。全局默认
    * 回归 Settings 页配置的单一语义（sendInitialState 推送）。taiji 不再冗余写（D1d）。
    *
    * session.state_changed 的广播由 SessionService.switchModel 内部负责（含新 modelId +
@@ -226,7 +226,7 @@ export class ModelService implements IModelService, ProviderConnectionTestServic
   async switchModel(sessionId: string, provider: ProviderId, modelId: string): Promise<string> {
     this.ensureInitialized()
     // 1. pi RPC + 缓存更新 + 广播 session.state_changed（session 级状态单一 owner；
-    //    pi 0.84.4 setModel 只写 session 级 entries，不持久化全局默认）
+    //    pi setModel rpc 入口不带 options（persist 缺省），只写 session 级 entries，不持久化全局默认）
     // U6 回执普查：透传 get_state 读回的生效模型复合串（pi pattern 换模时 ≠ 请求值）
     const effective = await this.sessionService.switchModel(sessionId, provider, modelId)
 

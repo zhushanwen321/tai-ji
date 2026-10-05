@@ -649,7 +649,7 @@ function modelIdPairOf(provider: unknown, id: unknown): string | null {
 /**
  * 单 entry 的模型信息提取（extractLatestModelFromJsonl 的解析语义落点）。
  *
- * 对齐 pi 实装 getSessionContextSettings（dist/core/session-manager.js:148-160，0.84.4 实锚）：
+ * 对齐 pi 实装 getSessionContextSettings（pi 1.0.0 dist/core/session-manager.js）：
  * - model_change entry：provider / modelId 是 entry 顶级平铺字段（pi 唯一显式 setModel 写点）
  * - assistant message entry：entry.type === 'message' 且 message.role === 'assistant'，
  *   取 message.provider + message.model

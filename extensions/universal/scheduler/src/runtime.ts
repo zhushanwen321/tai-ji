@@ -379,8 +379,8 @@ export class SchedulerRuntime {
    * 按序执行「互斥校验 → setModel(task.model) → 记未决切换记录 → sendMessage」，切换段
    * 整体入模型 op 串行队列（modelOpChain——与恢复 setModel 互斥，MF-2）。busy 亦照常 setModel
    * （P-MODEL-② 证伪「busy 切换不生效」——steer 消息消费时在同一 run 内开新 turn，turn
-   * 开始从 ctx.model 取当前模型，setModel 对 steer turn 生效。pi 实装锚点（0.84.4）：
-   * dist/core/agent-session.js:1258 setModel 同步写 agent.state.model + :304 每个 turn
+   * 开始从 ctx.model 取当前模型，setModel 对 steer turn 生效。pi 实装锚点（1.0.0 复核）：
+   * dist/core/agent-session.js setModel 同步写 agent.state.model + 每个 turn
    * 准备时从 agent.state.model 取模型快照——setModel 先于下一 turn 准备即生效）。
    * 失败降级（分级，不阻塞核心
    * 调度）：modelOps 缺省 / 会话无当前模型 / setModel false → 日志 + 放弃切换，照常 dispatch。

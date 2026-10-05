@@ -589,8 +589,8 @@ export class MessageDispatcher {
     // [RT-4#10] 预检与置位原子化：预检通过后立即写 'compacting-start'（原语义 = 只在 pi
     // compaction_start 事件回流后由 interpreter 置位，事件往返窗内第二个 compact 的预检
     // 仍读 false → 两连发双双通过 → 双 compaction 事件流）。事件回流时 interpreter 的
-    // 'compacting-start' 经原语全等去重幂等（不双写）。RPC 为同步等待压缩完成（pi 0.84.4
-    // agent-session.js:1468 compact() await 全程），finally 的 'compacting-end' 复位与
+    // 'compacting-start' 经原语全等去重幂等（不双写）。RPC 为同步等待压缩完成（pi 1.0.0
+    // agent-session.js compact() await 全程），finally 的 'compacting-end' 复位与
     // compaction_end 事件三路对称复位语义保持。
     if (active) {
       applySessionOccupancyTransition(active, this.messageBus, 'compacting-start')

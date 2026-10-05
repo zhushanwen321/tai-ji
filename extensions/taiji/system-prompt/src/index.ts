@@ -13,7 +13,7 @@
  *  4. Reads the global instructions file `~/.agents/AGENTS.md` (candidates
  *     AGENTS.md / AGENTS.MD, exact case match) every turn and appends it
  *     under a labeled header. Modeled on pi's native `loadContextFileFromDir`
- *     but deliberately narrower: pi 0.84.4 also probes `AGENTS.override.md`
+ *     but deliberately narrower: pi 1.0.0 also probes `AGENTS.override.md`
  *     and applies its candidate list to project dirs, whereas this list only
  *     targets the global agents directory and never picks up override files.
  *     Opt-in by file existence: no file → no injection. Skipped when
@@ -66,7 +66,7 @@ function cachedReadFileSync(filePath: string): string | null {
 
 /**
  * Global instruction candidates. Modeled on pi's native loadContextFileFromDir
- * but deliberately not a strict mirror: pi 0.84.4 probes its own candidate
+ * but deliberately not a strict mirror: pi 1.0.0 probes its own candidate
  * list (including AGENTS.override.md) against project dirs, while these
  * candidates apply only to the global agents directory, intentionally exclude
  * AGENTS.override.md, and recognize only AGENTS.md case variants.

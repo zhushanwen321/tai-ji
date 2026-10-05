@@ -163,9 +163,10 @@ export function isSubagentProcess(
 /**
  * pi ExtensionRunner 在 session 替换后标记 stale ctx 的错误文案片段。
  *
- * pi 语义断言（0.84.4 实装：runner.js `invalidate()` 默认 message + `assertActive()`
- * `throw new Error(this.staleMessage)`），登记于 docs/pi-semantics.json PS-30
- * （探针：extensions/shared/ext-guards/src/__tests__/pi-semantics-stale-ctx-wording.test.ts），
+ * pi 语义断言（语义登记 docs/pi-semantics.json PS-30，verifiedWith 以该登记为准：
+ * runner.js `invalidate()` 默认 message + `assertActive()`
+ * `throw new Error(this.staleMessage)`；
+ * 探针：extensions/shared/ext-guards/src/__tests__/pi-semantics-stale-ctx-wording.test.ts），
  * 随 C-proc-08 pi 版本门禁自动重验。文案变更时守卫退化为「全部上抛」（回到现状崩溃链路，
  * 有 pi-crash log 取证，不更危险），门禁报红提示更新分诊词。
  */

@@ -58,8 +58,8 @@ export interface AvailableModelSnapshot {
 }
 
 /**
- * pi 队列级原语 clear_queue 的响应形状（PS-65 实装核对：pi 0.84.4 dist
- * `agent-session.js:1195-1203 clearQueue()` 返回 `{steering, followUp}` 两队列**全文数组**
+ * pi 队列级原语 clear_queue 的响应形状（语义登记 PS-65，verifiedWith 以 pi-semantics.json
+ * 为准：dist `agent-session.js clearQueue()` 返回 `{steering, followUp}` 两队列**全文数组**
  * ——`_steeringMessages` / `_followUpMessages` 的浅拷贝，元素是入队时的整段文本）。
  *
  * 这是「队列级」原语：pi 不提供条目级收回（出队判定本身就是按全文 indexOf 匹配，无 id，
@@ -128,9 +128,10 @@ export interface RpcClientOptions {
   /**
    * 档位字符串透传（非空即发）；合法性由上游入口层校验（runtime launch-params
    * resolveEffectiveThinking，词表 = shared PI_THINKING_LEVELS），本层不重复校验。
-   * 不可把「pi 会拒绝非法档位」当兜底依赖——pi（0.84.4）对非法 --thinking 仅 push
-   * warning diagnostic 并丢弃档位、进程照常以缺省档启动（pi-coding-agent
-   * dist/cli/args.js:112-121；仅 type==="error" 才 exit：dist/main.js:476-478）。
+   * 不可把「pi 会拒绝非法档位」当兜底依赖——pi 对非法 --thinking 仅 push
+   * warning diagnostic 并丢弃档位、进程照常以缺省档启动（pi 1.0.0 实装复核：
+   * dist/cli/args.js `--thinking` 分支 isValidThinkingLevel 未命中仅 push warning；
+   * 仅 diagnostics 存在 type==="error" 才 exit：dist/main.js）。
    */
   thinkingLevel?: string
 }
@@ -575,7 +576,8 @@ export class RpcClient implements IPiEngine {
    * 向 pi stdin 写入一行原始 JSON，不注册 pending、不等 RPC reply。
    *
    * 用于 pi 不回复 `{type:'response'}` 的命令（目前仅 `extension_ui_response`——
-   * pi 0.84.4 dist/modes/rpc/rpc-mode.js:618-625 处理后直接 return，不回 RPC 确认）。
+   * pi 1.0.0 dist/modes/rpc/rpc-mode.js handleInputLine 的 extension_ui_response
+   * 分支 resolve pendingExtensionRequests 后直接 return，不回 RPC 确认）。
    * 用 sendCommand 会导致 pending 永不 resolve → 60s CMD_TIMEOUT_MS 后才超时（timer
    * 泄漏 + 无用等待）。
    *
@@ -891,9 +893,10 @@ export class RpcClient implements IPiEngine {
     // 已随 ADR-0112 退役（见文件头，推翻该量级校准裁决）。
     const msg = await this.sendCommand('compact', customInstructions ? { customInstructions } : {})
     // RT-2#4：形状守卫（bash 式，对照 getAvailableModels）——pi compact 成功响应恒带
-    // CompactionResult 对象（rpc-mode.js:421 success(id,"compact",result)），且三必填字段
-    // 齐备（pi 0.84.4 dist/core/compaction/compaction.d.ts CompactionResult：summary:string /
-    // firstKeptEntryId:string / tokensBefore:number），与 port 契约（services/ports/pi-engine.ts
+    // CompactionResult 对象（rpc-mode.js case "compact" → success(id,"compact",result)），
+    // 且三必填字段齐备（pi 1.0.0 dist/core/compaction/compaction.d.ts CompactionResult：
+    // summary:string / firstKeptEntryId:string / tokensBefore:number），与 port 契约
+    // （services/ports/pi-engine.ts
     // PiCompactionResult）一致。data 缺失/非对象/缺必填字段 = 协议异常。pi 手动 compact 失败
     // 另有 compaction_end{errorMessage} 事件编排（dispatcher 零广播注释），不走本返回值——
     // reject 让协议异常显形而非 undefined 字段渗入消费方。

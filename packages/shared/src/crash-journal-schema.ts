@@ -155,7 +155,7 @@ export interface CrashJournalEvent {
   inflight?: number | null
   /** taiji 应用版本（如 0.9.16）。 */
   appVersion?: string | null
-  /** pi 版本（如 0.84.4）。 */
+  /** pi 版本（如 1.0.0）。 */
   piVersion?: string | null
   memPressure?: CrashJournalMemPressure | null
   /** 详情摘要内嵌（如末 10 行 stderr 摘要，≤2KB——归因不依赖会被清理的 detailPath）。 */

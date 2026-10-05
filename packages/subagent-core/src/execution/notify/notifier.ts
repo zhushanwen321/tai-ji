@@ -192,9 +192,8 @@ export interface NotifierHost {
   isIdle?: () => boolean;
   /**
    * 原生 settled 事件订阅能力（D8）：注册 handler 监听主 agent settled 边沿。
-   * 无退订语义（pi 0.84.4 的 `pi.on(...)` 全部重载返回 void、无 off——实装锚点：
-   * node_modules `@earendil-works/pi-coding-agent` dist/core/extensions/types.d.ts
-   * `on()` 系列重载，0.84.4 实测）——退订由本模块的 disposed
+   * 退订不依赖 pi 返回值（0.84.4 的 `pi.on(...)` 返回 void 且无 off；pi 1.0.0 起 on
+   * 返回 unsubscribe，本模块不消费）——退订由本模块的 disposed
    * 标志包装兑现（见下方 port 装配）。可选：未注入时内核退化退避轮询（busy 消息
    * 靠退避达上限强发，不走 settled 边沿驱动）。
    */

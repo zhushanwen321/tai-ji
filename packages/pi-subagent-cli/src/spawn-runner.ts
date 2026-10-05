@@ -586,13 +586,14 @@ export async function runSpawnOnce(
       // 档位原样透传（合法性权威 = 宿主入口层与 pi）——非法值由 pi 显式报错，
       // 本层不再做白名单收窄（收窄会把非法值静默换成 undefined = 「显式指定」变「没指定」）。
       // [pi 锚点] 档位以 --model "provider/id:level" 后缀传递（pi-rpc
-      // buildPiSubagentSpawnArgs :222-227），pi CLI 链恒严格解析：dist/core/
+      // buildPiSubagentSpawnArgs），pi CLI 链恒严格解析：dist/core/
       // model-resolver.js resolveCliModel 两处 parseModelPattern 传
-      // allowInvalidThinkingLevelFallback:false（:383/:419），非法后缀在严格模式按
-      // 模型 id 一部分处理返回 model:undefined（:185-190；缺省 ?? true 放宽仅 scope
+      // allowInvalidThinkingLevelFallback:false，非法后缀在严格模式按
+      // 模型 id 一部分处理返回 model:undefined（缺省 ?? true 放宽仅 scope
       // 模式走）→ resolveCliModel 收敛为 error "Model ... not found" → dist/main.js
-      // 打印 Error 后 process.exit(1)（:719-729）→ spawn run 失败可见。实装 0.84.4；
-      // 语义登记 PS-69。pi 升级重验：:383/:419 是否仍传 false——若 CLI 链改用缺省
+      // 打印 Error 后 process.exit(1) → spawn run 失败可见（语义登记 PS-69，
+      // verifiedWith 以 pi-semantics.json 为准，逐 claim 行号见该条目 piAnchor）。
+      // pi 升级重验：两处 parseModelPattern 是否仍传 false——若 CLI 链改用缺省
       // 放宽，非法档位将静默剥后缀降级为「没指定」（docs/pi-semantics.json PS-62）。
       thinkingLevel:
         typeof params.thinkingLevel === "string" && params.thinkingLevel.length > 0

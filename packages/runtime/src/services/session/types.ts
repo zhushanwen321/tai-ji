@@ -399,15 +399,17 @@ export type PiTranslatedEvent =
    * LLM 请求起算锚点（composer-genstats-ttft，pi turn_start 到达翻译——已移出 NULL_EVENTS）。
    * interpreter 挂 LlmWindowSampler.onRequestStart()：记 requestStartedAt = Date.now()，同步清
    * ttftMs / firstOutputAt（重锚清除不变量：残留生命周期严格限本请求，与既有窗口锚一致）。
-   * 窗口构成（设计 §3.2，pi 0.84.4 实装时序）：turn_start 在 prepareNextTurn 之后 emit → 原生
+   * 窗口构成（设计 §3.2，pi 实装时序——语义登记 PS-46，verifiedWith 以 pi-semantics.json 为准）：
+   * turn_start 在 prepareNextTurn 之后 emit → 原生
    * auto-compaction 不含在窗口；工具执行亦不含（工具后下一轮 turn_start 重新起算）；turn_start
    * 后的 steering 注入段计入（通常毫秒级，接受）。
    */
   | { kind: 'llm-request-start'; sessionId: string }
   /**
    * LLM 请求窗口首个输出信号（composer-genstats-ttft，pi text_start / thinking_start /
-   * toolcall_start 三子类型翻译——单点收无 delta 兜底：pi-ai 0.84.4 全族流式实现凡产 delta
-   * 必先产对应 *_start，兜底不存在服务对象）。interpreter 挂 LlmWindowSampler.onFirstOutput()：
+   * toolcall_start 三子类型翻译——单点收无 delta 兜底（语义登记 PS-47，verifiedWith 以
+   * pi-semantics.json 为准：pi-ai 全族流式实现凡产 delta 必先产对应 *_start，
+   * 兜底不存在服务对象）。interpreter 挂 LlmWindowSampler.onFirstOutput()：
    * 幂等 first-wins（已有 firstOutputAt 直接 return），ttftMs = firstOutputAt − requestStartedAt；
    * 信号先于锚点到达（不可能序，防御）无锚直接 return 不产值。
    */

@@ -288,8 +288,8 @@ export class SessionStateProjection {
    *
    * 语义依据：agent_settled = run 级联结束（pi finally），此刻必无 turn 在跑 → 'idle' 转移正确。
    * 反向竞态（本复位晚于「新 run 受理 prompt」的置位）存在但可自愈：pi 对活跃 run 的 prompt
-   * 会拒绝 processing（锚点 pi@0.84.4 dist/core/agent-session.js:862 "Agent is already
-   * processing" throw，run 活跃时 prompt 直拒），由 handlePromptFailure 的 processing 分支
+   * 会拒绝 processing（锚点 pi 1.0.0 dist/core/agent-session.js prompt 的
+   * "Agent is already processing" throw，run 活跃时 prompt 直拒），由 handlePromptFailure 的 processing 分支
    * （'reject-processing'）重新纠偏。
    */
   handleAgentSettledSideEffects(sessionId: string): void {

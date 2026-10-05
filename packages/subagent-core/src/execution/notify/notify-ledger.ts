@@ -134,10 +134,10 @@ export interface NotifyLedgerHost {
   readSessionEntries(): readonly unknown[];
   /** 主 agent 是否空闲（发送前二次复查用；ctx.isIdle()）。 */
   isIdle(): boolean;
-  /** 订阅 settled 边沿（pi.on("agent_settled")——无退订语义：createExtensionAPI.on
-   *  只 push 进 extension.handlers、无 off（pi 0.84.4 loader.js:209-214），由 ledger
-   *  disposed 标志包装）。注意与 ctx.events.on(channel) 消歧：后者走 eventBus、有
-   *  trackEventBusSubscription 退订通路（loader.js:174、:338），语义不同。 */
+  /** 订阅 settled 边沿（pi.on("agent_settled")——0.84.4 无退订语义：createExtensionAPI.on
+   *  只 push 进 extension.handlers、无 off；pi 1.0.0 起 on 返回 unsubscribe，本接口
+   *  仍不消费，退订由 ledger disposed 标志包装）。注意与 ctx.events.on(channel) 消歧：
+   *  后者走 eventBus、有 trackEventBusSubscription 退订通路（loader.js），语义不同。 */
   onAgentSettled(handler: () => void): void;
   /** 单通道送达（pi.sendMessage({triggerTurn:true})）。 */
   sendDelivery(message: { customType: string; content: string; display: boolean; details?: unknown }): void;
@@ -556,10 +556,11 @@ export function createNotifyLedger(
   // _emitAgentSettled）= 设计 P-B1(b) 探针门待证项（docs/architecture/pi-boundary-reliability.md 附录 D
   // D5）；错过边沿的回执由重启恢复重放消费（本地链路消息不丢，ADR-0112 故障模型）。
   // [MF-5] registerSettledListener=false（bind 路径）时跳过注册：pi.on("agent_settled")
-  // 无退订语义——createExtensionAPI.on 只 push 进 extension.handlers、无 off
-  //（pi 0.84.4 dist/core/extensions/loader.js:209-214）。注意消歧两类订阅面：此处的
-  // pi.on 是生命周期事件订阅（无退订）；ctx.events.on(channel) 走 eventBus、有
-  // trackEventBusSubscription 退订通路（loader.js:174、:338）——勿按后者的可退订
+  // 的生命周期不依赖 pi 返回值——0.84.4 的 createExtensionAPI.on 只 push 进
+  // extension.handlers、无 off；pi 1.0.0 起 on 返回 unsubscribe 但本处不消费，
+  // 生命周期随 ledger disposed 标志收敛。注意消歧两类订阅面：此处的
+  // pi.on 是生命周期事件订阅（不退订）；ctx.events.on(channel) 走 eventBus、有
+  // trackEventBusSubscription 退订通路（loader.js）——勿按后者的可退订
   // 语义「修复」此处。per-bind 注册会随 session 切换累积死 handler
   // （旧实例 disposed 短路但物理监听永存）——bind 用模块级单例 handler
   // （settledEdgeDispatch）+ boundLedger 引用切换替代（见 bindNotifyLedgerHost）。

@@ -13,10 +13,10 @@
  * 合法持有点清单（ADR D5①）中 services 层不留文案驻留。
  */
 
-/** pi 0.84.4 prompt() busy 类确定性拒绝原文（PS-22 探针锁守卫——manual 压缩窗口拒绝）。 */
+/** pi prompt() busy 类确定性拒绝原文（语义登记 PS-22，verifiedWith 以 pi-semantics.json 为准；探针锁守卫——manual 压缩窗口拒绝）。 */
 export const PI_REJECTION_COMPACTING = 'Cannot submit a prompt while compaction is in progress'
 
-/** pi 0.84.4 prompt() busy 类确定性拒绝原文（PS-23 探针锁守卫——isStreaming 无 streamingBehavior 拒绝）。 */
+/** pi prompt() busy 类确定性拒绝原文（语义登记 PS-23，verifiedWith 以 pi-semantics.json 为准；探针锁守卫——isStreaming 无 streamingBehavior 拒绝）。 */
 export const PI_REJECTION_PROCESSING = 'Agent is already processing'
 
 /** pi busy 类拒绝分型（D6；非 busy 类返回 null → 走普通错误面）。 */

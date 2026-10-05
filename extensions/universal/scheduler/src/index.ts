@@ -179,7 +179,8 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
 
   // U6c：树回退（撤回 __taiji_nav__ → navigateTree / 用户树跳转）后重折叠任务集。
   // 注册在 factory 顶层而非 PiSchedulerBackend 构造函数：pi 的 on 是追加语义（loader.js
-  // on 实现 list.push，无去重无 off，0.84.4 实装核对），且 RPC 模式下每次 session 替换
+  // on 实现 list.push，无去重——0.84.4 连 off 都没有，1.0.0 起返回 unsubscribe 但本处
+  // 不消费，handler 生命周期随 factory 代际收敛），且 RPC 模式下每次 session 替换
   // session_start 在同一代内触发两次（agent-session-runtime finishSessionReplacement
   // 内部 rebindSession 一路 + RPC handler 再 rebindSession 一路，均经 bindExtensions
   // emit session_start）——构造函数注册会同代线性累积 handler（残留旧代 backend 在旧

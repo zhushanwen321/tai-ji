@@ -81,7 +81,8 @@ function logNotifyIdAbsence(action: 'send' | 'create'): void {
 /**
  * watch respond 写回通道（boolean 传导，D7①）：true = 已写入发起方 pi 进程 stdin
  * （写入失败 false 传导）；pi 侧无独立消费确认——rpc-mode 收行后按 id resolve 既有
- * pending 项（pi 实装 dist/modes/rpc/rpc-mode.js:615-624，0.84.4 实读；既有锚
+ * pending 项（pi 实装 dist/modes/rpc/rpc-mode.js handleInputLine 的 extension_ui_response
+ * 分支按 id resolve pendingExtensionRequests，1.0.0 实读；既有锚
  * rpc-client.ts:1129-1133）。watch 长挂 select 无 timeout，pi 侧不超时清项（PS-59）；
  * 写成功未消费的残余由 TTL 清扫腿（D7③）兜底。
  */
@@ -209,7 +210,8 @@ export interface SessionManagerHandlerOptions {
    * 向 pi 发送 extension_ui_response（sessionId = 发起方 session，requestId 只在其 pending 表有效）。
    * 返回 boolean 作 watch respond 的 D7① 失败传导：true = 已写入发起方 pi 进程 stdin
    * （写入失败 false 传导），pi 侧无独立消费确认——rpc-mode 收行后按 id resolve 既有
-   * pending 项（pi 实装 dist/modes/rpc/rpc-mode.js:615-624，0.84.4 实读；既有锚
+   * pending 项（pi 实装 dist/modes/rpc/rpc-mode.js handleInputLine 的 extension_ui_response
+   * 分支按 id resolve pendingExtensionRequests，1.0.0 实读；既有锚
    * rpc-client.ts:1129-1133）；
    * void/undefined（client 缺失、旧测试替身）一律按失败计（`=== true` 收敛）。
    */

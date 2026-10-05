@@ -1174,9 +1174,9 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 的窗口一步到位，不要求用户先发消息；恢复失败向上抛，由 handler 转 error envelope，
    * 前端呈现 E9 恢复指引）。② client.prompt('/plan abort') 直发：`/` 前缀 prompt 被
    * pi 先行执行为 extension command、不产用户消息、streaming 中可用（主审 R2 复核实证）；
-   * pi 实装锚点（0.84.4）：dist/core/agent-session.js:826-833——prompt 对 `/` 前缀先行
-   * 尝试 extension command（源码注释明言 execute immediately, even during streaming），
-   * handled 即 return 不产用户消息；命令解析 _tryExecuteExtensionCommand :954。本断言
+   * pi 实装锚点（语义登记 PS-49，verifiedWith 以 pi-semantics.json 为准）：prompt 对 `/`
+   * 前缀先行尝试 extension command（源码注释明言 execute immediately, even during
+   * streaming），handled 即 return 不产用户消息；命令解析 _tryExecuteExtensionCommand。本断言
    * 双承重：此写入路径 + .githooks/check_prompt_outposts.py 豁免条目的依据。刻意绕过
    * dispatcher busy 预检——照 workflowAction（session-records.ts workflowAction）先例，
    * 审批挂起期 busy defer 会吞掉退出命令（E10 卡死链的入口），直发让 extension 侧
@@ -1488,9 +1488,9 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * background 任务完成通知补投的 runtime 触发（bg-task-notify-durability 第二触发面）。
    *
    * 背景：桌面「切走会话再切回」是同进程重新挂接——pi 进程存活、不重发 session_start
-   * （真机实证；pi 0.84.4 实装锚点：session_start 事件 per AgentSession 只发一次——
-   * dist/core/agent-session.js:152 构造时赋值、:1919 bindExtensions 内唯一 emit、
-   * :2230 reload 场景显式 reason="reload"；切回 = runtime 重新挂接同一存活进程，
+   * （真机实证；pi 1.0.0 实装锚点：session_start 事件 per AgentSession 只发一次——
+   * dist/core/agent-session.js 构造时赋值 _sessionStartEvent、bindExtensions 内唯一正常
+   * emit、reload 场景显式 reason="reload"；切回 = runtime 重新挂接同一存活进程，
    * 不经 AgentSession 构造），扩展侧挂在 session_start 上的维护链在「投递失败但
    * 进程存活」场景（设计 G2 核心场景）永不触发。getCommands 是切回后 renderer
    * 主动拉取的必经查询（broadcast 与订阅时序竞争的既有补偿点），在此按节流补触发。
