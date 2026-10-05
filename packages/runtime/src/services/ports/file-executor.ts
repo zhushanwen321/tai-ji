@@ -35,15 +35,14 @@ export interface ListDirOptions {
  * 实现约束（infra/fs-executor.ts）：
  * - listDir **单层 readdir**（不递归，depth=1 编排在 FileService）。
  *   dir entry 不取 size（undefined），file entry 取 size（性能优化，NFR）。
- * - 超时机制（Promise.race，④NFR K-2：node:fs/promises 无内建超时）：超时 reject Error，
- *   FileService catch 后转 FileError('timeout')。
+ * - 无墙钟超时（fs 读取超时包装已随 ADR-0112 退役，操作直通 await）。
  * - symlink 目录（④NFR K-3）：readdir 对符号链接判 isSymbolicLink()，
  *   遇 ELOOP/EACCES catch 后跳过该 entry（不 follow 成环）。
  * - EACCES → reject Error(code='EACCES')，FileService 转 FileError('permission_denied')。
  */
 export interface IFileExecutor {
   /**
-   * 列目录单层子（不递归）。超时/EACCES → reject Error。
+   * 列目录单层子（不递归）。EACCES → reject Error。
    * opts.withSize=false（D7-3）：非 symlink 的 file entry 免 per-file stat，size 缺省；
    * symlink entry 仍 stat（坏 symlink ELOOP/ENOENT 跳过的语义与 withSize=true 一致）。
    * 成员一致性口径（审查修正）：常规情形成员一致；stat 失败竞态（readdir 与 stat 间隙

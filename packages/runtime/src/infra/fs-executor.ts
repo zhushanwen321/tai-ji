@@ -5,8 +5,8 @@
  * 真引 node:fs/promises（Tier 2 证伪：编译器对依赖声明验签，SDK 没装/没方法/签名变 → tsc 报错）。
  *
  * 实现要点（④NFR K-2/K-3）：
- * - 超时（K-2）：每个操作用 Promise.race 包装，超时 reject `new Error('timeout')`。
- *   node:fs/promises 无内建超时（不可复用 git-executor 的 execFileSync timeout）。
+ * - 无墙钟超时（K-2 退役）：原「每操作 Promise.race 超时 reject」的墙钟包装已随 ADR-0112
+ *   删除，各操作直通 await——不再产生 'timeout' 失败形态。
  * - symlink 目录（K-3）：listDir 用 readdir({ withFileTypes:true }) 拿 Dirent，
  *   对 isSymbolicLink() 的 entry 单独 stat 判定；遇 ELOOP（符号链接成环 a→b→a）/EACCES
  *   catch 后跳过该 entry（不 follow 成环）。
