@@ -5,8 +5,10 @@
  * - resolveDefaultToolSet / isCodemodeActive：pi 1.0.0 实装语义复刻——语义表由 u1 实施
  *   期 node 探针在实装 dist/core/settings-manager.js 上逐条实测固化（getDefaultTools
  *   调用侧：数组先 filter 剥非字符串元素；非数组含 null → 空激活集；undefined → pi 回落
- *   默认集，对 codemode 判定等价空集；空 name modifier no-op；大小写敏感）。pi bump 由
- *   docs/pi-semantics.json 门禁（U7 登记，guard probe 指向本文件）自动重验。
+ *   默认集，对 codemode 判定等价空集；空 name modifier no-op；大小写敏感）。混合坏值
+ *   逐元素行为于 2026-10-03 二轮探针定案（SettingsManager 公共入口喂值实测）：非字符串
+ *   元素静默剥除后按剩余字符串解析，taiji 同构一致。pi bump 由 docs/pi-semantics.json
+ *   门禁（U7 登记，guard probe 指向本文件）自动重验。
  * - ensureCodemodeDefaultEntry：字段存在性判定（undefined/null 写默认；任何已配置值含
  *   空数组/坏值不碰）+ 幂等 + 用户字段零触碰。
  * - setCodemodeEntry：开（移负条目 + 幂等判激活）/ 关（移正条目与纯名 + 负条目占位）+
@@ -88,6 +90,12 @@ describe('resolveDefaultToolSet · pi 1.0.0 实装语义表（探针结论固化
     ['["codemode","read"] 混合纯名 → 整体替换为纯名集合', ['codemode', 'read'], ['codemode', 'read']],
     ['["codemode", 42] 坏值混入 → 非字符串被剥除后解析（探针：filter 在解析前）', ['codemode', 42], ['codemode']],
     ['[42, "+codemode"] 坏值混入 → 剥除后按 modifier 解析', [42, '+codemode'], ['read', 'bash', 'edit', 'write', 'codemode']],
+    // ── 混合坏值矩阵（逐元素探针定案 2026-10-03，pi 1.0.0 实装 SettingsManager.getDefaultTools
+    //    公共入口实测；mergeDefaultTools 合并层坏值行为见模块头/PS-70——taiji 单文件读写不复刻该层）──
+    ['["read","bash",123,null,"edit",{},["nested"]] 纯名+坏值 → 剥除后整体替换默认集（write 随之丢失）', ['read', 'bash', 123, null, 'edit', {}, ['nested']], ['read', 'bash', 'edit']],
+    ['["+codemode",123,"-read"] modifier+坏值 → 剥除后默认集起步、顺序应用不受坏值打断', ['+codemode', 123, '-read'], ['bash', 'edit', 'write', 'codemode']],
+    ['[123,null,{},["nested"]] 全坏数组 → 空激活集', [123, null, {}, ['nested']], []],
+    ['[0,false,"bash"] falsy 非字符串同样剥除（typeof 判定，与真值无关）', [0, false, 'bash'], ['bash']],
     ['["-"] 空 name modifier → no-op', ['+', '-'], ['read', 'bash', 'edit', 'write']],
     ['["+CODEMODE"] 大小写敏感（工具名精确匹配）', ['+CODEMODE'], ['read', 'bash', 'edit', 'write', 'CODEMODE']],
   ] as const)('%s', (_label, raw, expected) => {
