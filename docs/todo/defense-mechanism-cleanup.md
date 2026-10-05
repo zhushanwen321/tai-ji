@@ -14,4 +14,5 @@
   - 用户/调用方显式配置传入的超时是功能参数（超时默认原则本就禁止默认墙钟），不在删除范围；
   - 产品功能性的重试（如 workflow 用户显式配置的重试）与机械防御性重试区分，前者保留；
   - 与既往权威裁决冲突处（如 crash-forensics 附录 E「回收层统一有界兜底」）在清单中标注，由本裁决逐条推翻或豁免，不静默。
-- 行动：5 分区 subagent 并行穷举扫描（清单落 .tmp/dev-flow/defense-scan/），主 agent 核实汇总后呈报逐类裁决。
+- 行动：4 分区 subagent 并行穷举扫描（清单落 .tmp/dev-flow/defense-scan/），主 agent 核实汇总后呈报逐类裁决。
+- 追加裁决（2026-10-05，同日）：① 组 2/3/4/5 全删（含既往裁决背书形态——zcode 双 timer、notify 看门狗、update 停滞检测、event-tail 5s 重挂、structured-output 强制退出，旧裁决一并推翻）；② 组 6 事件驱动对账保留（含 notify-ledger 回执对账本体，其 120s 看门狗重投随②删）；③ C1 口径 = 本机全链「无响应转显式失败」的墙钟一律删除（65s backstop、chat-rounds 双窗、60s settle 兜底等），断连补批量收口事件路径；④ event-tail 机制退役（方向裁决：运行时事件走推送通道、journal 文件只做恢复读——通道设计已立项，见 .tmp/tech-design/ 产出）；⑤ 例外保留：产品功能定时、C2 显式配置超时、file-lock 锁语义、组 6 事件对账、构建脚本类。
