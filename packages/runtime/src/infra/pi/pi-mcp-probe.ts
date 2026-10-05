@@ -3,7 +3,8 @@
  *
  * 通道：spawn `pi mcp list --json`。CLI 权威 = node_modules @earendil-works/pi-coding-agent
  * 1.0.0 dist/extensions/mcp/cli.js（list 分支：全部条目并行真实连接后 JSON.stringify 一次性
- * 输出 stdout，退出码 0 全部正常 / 1 有失败——errors 非空或任一启用条目 state ≠ connected）。
+ * 输出 stdout，退出码 0 全部正常 / 1 有失败——errors 非空或任一启用条目 state ≠ connected；
+ * pi 语义登记 PS-73，探针 pi-mcp-probe.test.ts）。
  *
  * 定死契约（D3）：
  * 1. 子进程 env 与会话 spawn 同一装配点（rpc-client.ts start 同款）：buildPiOutboundEnv

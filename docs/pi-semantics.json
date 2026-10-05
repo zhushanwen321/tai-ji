@@ -1525,5 +1525,74 @@
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-extension-command-error.test.ts"
     },
     "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-72",
+    "claim": "pi mcp.json 校验器语义（taiji PiMcpStore 保存校验面的复刻基准）：SERVER_NAME = /^[A-Za-z0-9_-]+$/；validateMcpServerConfig 的 type 分支条件 = url 分支（type undefined|\"http\"|\"streamable-http\"）/ command 分支（type undefined|\"stdio\"）/ \"sse\" 显式拒绝；type 与传输字段错配（如 type:\"http\"+command 无 url）落到兜底文案 needs either \"command\" (stdio) or \"url\" (streamable HTTP)——报错文案与真实病因错位（PiMcpStore 保存当场拦 type 错配的依据）；混填（command+url 同填）不报错、url 分支先命中胜出且 config 原样返回（含 command）；无 type 条目按传输字段归类两分支均放行（D7 type 无条件剥离的行为等价性依据）；-/_ 归并同名先入者胜。taiji 有意收紧三处（互斥拦截 / sse 拒绝 / type 词表闭集 stdio|http|streamable-http）是 PiMcpStore 侧策略非 pi 语义",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/mcp-servers.js",
+        "symbol": "SERVER_NAME / mcpNamespace / validateMcpServerConfig",
+        "note": "SERVER_NAME :18；mcpNamespace :20-22（-→_ 归并）；validateMcpServerConfig :107-169——sse 拒绝 :137、url 分支 :139、command 分支 :160、混填 url 分支胜出原样 return :159、needs either 兜底 :168【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-mcp-store.test.ts"
+    },
+    "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-73",
+    "claim": "`pi mcp list --json` 输出契约（taiji McpProbe 的解析基准）：list 分支对全部条目并行真实连接（Promise.all 内逐条 createConnection+getClient）后 JSON.stringify 一次性输出 stdout（连接逐条进行、无增量输出——中途杀进程无部分结果可解析）；退出码 0 = 全部正常 / 1 = 有失败（errors 非空或任一启用条目 state ≠ \"connected\"）；禁用条目固定写 state:\"disabled\"；servers[] 条目字段集 = name/scope/source/enabled/exposure/transport/state/tools/toolExposure?/resources?/resourceTemplates?/error?；ServerState 六值闭集 connecting|connected|disconnected|needs-auth|failed|closed。taiji probe（pi-mcp-probe.ts）按该契约做形状守卫：name 非字符串条目丢弃、字段缺失按 CLI 默认值兜底、非法 JSON/形状不符降级 invalid-output",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/extensions/mcp/cli.js",
+        "symbol": "case \"list\" / list()（并行真实连接 + 一次性输出 + 退出码）",
+        "note": "case \"list\" :142；list :347-394——Promise.all 并行真实连接 :348、report 字段集 :349-383、禁用条目 state:\"disabled\" :356、JSON.stringify 一次性输出 :387、退出码 failed ? 1 : 0 :388【行号锚基于 pi@1.0.0 实装实测】"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/extensions/mcp/runtime.d.ts",
+        "symbol": "type ServerState",
+        "note": ":19 六值闭集 connecting|connected|disconnected|needs-auth|failed|closed【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-mcp-probe.test.ts"
+    },
+    "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-74",
+    "claim": "abort RPC 对 idle pi 是幂等 no-op：rpc-mode abort 分支只 `await session.abort()` 后 success，无空闲检查；AgentSession.abort() 的全部动作均为可选链掐点（abortRetry/abortCompaction/abortBranchSummary 的 `?.abort()`，无对象时零副作用）+ agent.abort 可选链单行体（无活跃 run 时 activeRun 为 undefined）+ waitForIdle 对 isIdle（!_isAgentRunActive && !isCompacting）立即返回——对无活跃 run/压缩/branch summary/retry 的空闲 session 零状态变化、可重复调用。承重：runtime userStopped 标记的 restore-abort（session-lifecycle applyRestoreAbortConvergence / event-interpreter UserStoppedGate）依赖「对 idle pi 无害」才能每次命中标记都执行；pi 若改为 abort 携带状态副作用（置位全局标志/记录/通知），restore-abort 语义须复审",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/modes/rpc/rpc-mode.js",
+        "symbol": "case \"abort\"",
+        "note": ":327-329 await session.abort() 后 return success——无空闲检查、无副作用分支【行号锚基于 pi@1.0.0 实装实测】"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "abort() / abortRetry / abortCompaction / abortBranchSummary / waitForIdle / isIdle",
+        "note": "abort() :1873-1884（可选链掐点 + agent.abort + waitForIdle）；abortRetry :3029-3031 / abortCompaction :2262-2265 / abortBranchSummary :2269-2271 均 ?.abort() 置位式；waitForIdle :1885-1889 isIdle 早退；isIdle :1038-1040 = !_isAgentRunActive && !isCompacting【行号锚基于 pi@1.0.0 实装实测】"
+      },
+      {
+        "pkg": "pi-agent-core",
+        "distPath": "dist/agent.js",
+        "symbol": "abort()",
+        "note": ":218-220 abort() { this.activeRun?.abortController.abort(); } 单行可选链——无活跃 run（activeRun undefined）时零副作用【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "observe",
+      "note": "消费方：packages/runtime/src/services/session/session-lifecycle.ts applyRestoreAbortConvergence docblock 与 packages/runtime/src/services/session/event-interpreter.ts UserStoppedGate 头注（两处符号名 + 行号锚回指本条）。无独立单测探针——no-op 断言的承重面是真实 pi 子进程的 RPC 语义（e2e 面），单测层直调需真实 AgentSession 实例、探 mock 不探实装收益低（同 PS-69 先例），靠锚点符号名复审。pi 升级时重验：abort() 是否仍纯可选链掐点组合、waitForIdle 是否仍 isIdle 早退、是否新增有状态副作用（置位标志/记录/通知）"
+    },
+    "verifiedWith": "1.0.0"
   }
 ]

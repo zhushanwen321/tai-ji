@@ -218,7 +218,8 @@ export function applySessionOccupancyTransition(
  * 边沿补投开的新 turn 不再被拦；「窗满清标记」= 时间窗猜事实（原 D4，已删）。
  *
  * 存续期行为：restore 每次命中标记执行 restore-abort（对 idle pi 幂等 no-op——
- * pi@0.84.4 rpc-mode.js:329-331 → agent-session.js:1222-1226 锚点）；notify replay /
+ * pi@1.0.0 rpc-mode.js:327-329 abort 分支 → agent-session.js:1873-1884 abort() →
+ * pi-agent-core agent.js:218-220 可选链单行体，语义登记 PS-74）；notify replay /
  * scheduler 旁路源起的 turn 被 noteAgentStart 拦截再 abort（被掐通知已注入上下文，
  * 下一 settled 边沿 checkReceipts 销账，不重复投递）。
  *

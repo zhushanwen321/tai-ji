@@ -1362,13 +1362,14 @@ export class SessionLifecycle implements ISessionRegistry {
 
   /**
    * D4（session-dead-structural-fixes）：restore-abort——userStopped 标记命中时 `await
-   * client.abort()`（对 idle pi 是无害 no-op——锚点核实 pi@0.84.4 实装：abort RPC 分支
-   * `dist/modes/rpc/rpc-mode.js:329-331` → `AgentSession.abort()`（`dist/core/agent-session.js:1222-1226`，
-   * 仅 abortRetry + agent.abort + waitForIdle）→ `pi-agent-core/dist/agent.js:201-204`
-   * `abort() { this.activeRun?.abortController.abort() }` 可选链——无活跃 run（`activeRun = undefined`，
-   * `:371`）时零副作用；waitForIdle 对 isIdle（`agent-session.js:620-622`，`!_isAgentRunActive`）
-   * 立即返回——幂等无副作用；对 session_start 钩子补投（notify replay / scheduler）已起跑的
-   * replay turn 是精准中止）。
+   * client.abort()`（对 idle pi 是无害 no-op——锚点核实 pi@1.0.0 实装：abort RPC 分支
+   * `dist/modes/rpc/rpc-mode.js:327-329` → `AgentSession.abort()`（`dist/core/agent-session.js:1873-1884`，
+   * abortRetry/abortCompaction/abortBranchSummary 三处可选链掐点 + agent.abort + waitForIdle）
+   * → `pi-agent-core/dist/agent.js:218-220`
+   * `abort() { this.activeRun?.abortController.abort(); }` 可选链——无活跃 run 时零副作用；
+   * waitForIdle 对 isIdle（`agent-session.js:1038-1040`，`!_isAgentRunActive && !isCompacting`）
+   * 立即返回（`:1885-1889` 早退分支）——幂等无副作用；对 session_start 钩子补投（notify
+   * replay / scheduler）已起跑的 replay turn 是精准中止；锚点语义登记 PS-74）。
    * 调用方已判定标记存在（判定点与拆分前同位置），本函数不重复判定。
    *
    * 标记不在此清（ADR-0112 事件顺序契约）：标记存活期 = 旁路 turn 拦截存续期，清除只由

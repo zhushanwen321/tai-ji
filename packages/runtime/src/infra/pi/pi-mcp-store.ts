@@ -158,7 +158,7 @@ export class McpStoreError extends Error {
 // 实施期 node 探针逐分支核对通过——结论：名称正则 /^[A-Za-z0-9_-]+$/；type 三分支
 // 条件为 undefined | "http" | "streamable-http"（url）/ undefined | "stdio"（command），
 // "sse" 显式拒绝，错配落到 needs either 文案；混填不报错、url 分支胜出且 config
-// 原样含 command）
+// 原样含 command；语义登记 PS-72，探针 pi-mcp-store.test.ts「pi 实装等价性」组）
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** 复刻 pi SERVER_NAME（dist/core/mcp-servers.js:18 `/^[A-Za-z0-9_-]+$/`）。 */

@@ -60,9 +60,10 @@ const AbortSessionParams = Type.Object({
  * 通过 select 通道向 runtime handler 发送 session 管理请求（传输核走 protocol 的
  * callMarkerRpc 原语，D8）。回包为 handler respond 的 JSON 字符串（value 恒 raw）；
  * 失败态（cancelled/channel-error/non-json）由 executeTool 统一 throw——
- * pi agent-loop 仅在 execute throw 时置 isError:true，返回值里的 isError 字段被丢弃
- * （pi-agent-core dist/agent-loop.js:453-483 executePreparedToolCall：正常 return
- * 硬编码 isError:false、catch 置 true——0.84.4 实读 :468/:470-476；语义登记 PS-56）。
+ * execute throw → pi agent-loop catch 置 isError:true（pi-agent-core dist/agent-loop.js
+ * executePreparedToolCall，1.0.0 实读 catch :581-588）；1.0.0 起返回值 isError:true 也被
+ * 尊重（同文件 :579 `isError: result.isError === true`，0.84.4 时返回值会被丢弃）——
+ * 本工具失败恒走 throw，两版语义等价（语义登记 PS-56）。
  * 通道异常与非 JSON 回包的留痕由原语经注入的 log 承担。
  *
  * 不传 timeout（ADR-0112：无包内挂死兜底，handler 不回包时工具调用长挂、失败直报；
