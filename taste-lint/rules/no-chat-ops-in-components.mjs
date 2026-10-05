@@ -43,7 +43,7 @@ const OPS_FIELDS = new Set([
   'applySubagentEntries', 'appendUser',
   'applyMessageEvent', 'finalizeSession',
   'finalizeAllStreaming', 'resetTransientStates', 'addPendingSend',
-  'clearPendingSend', 'disarmPendingSendTimer', 'markSessionError', 'setHandingOff',
+  'clearPendingSend', 'markSessionError', 'setHandingOff',
   'setOccupancy', 'clearOccupancy', 'setCompactingReason',
   'appendSystemNotice', 'appendRespawnNotice', 'appendSubagentDirective', 'truncateFrom',
   'markRespawnPending', 'clearRespawnPending',

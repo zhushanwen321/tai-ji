@@ -191,8 +191,7 @@ function registerHandledDeliveryTarget(sid: string, clientUuid: string): void {
  * [pi1-disposition-chat-flow U2③ / D10③] extension.error 命令来源 toast 的同 key 限频窗：
  * 同 key（extensionName + error 文本）弹出后 60s 内不重复弹。量级取 goal 循环事故回合间隔
  * （2026-09-08：64 分钟约 320 回合 ≈ 12s/回合）的数倍，覆盖命令循环重试刷屏形态（D10③；
- * 参数为模块常量，实施期可校准）。导出供测试 import（禁魔数复制漂移，对齐
- * PENDING_SEND_TIMEOUT_MS 先例）。
+ * 参数为模块常量，实施期可校准）。导出供测试 import（禁魔数复制漂移）。
  */
 export const EXTENSION_COMMAND_ERROR_RATE_LIMIT_MS = 60_000
 
@@ -892,8 +891,9 @@ export function createUseChat(deps: UseChatDeps) {
    *
    * @param sessionId           目标 session
    * @param segments            结构化 segments（含 image/file/text/skill/mention）
-   * @param clientUuid          appendUser 生成的 user message id（`u-<uuid>`），
-   *                            用作 segments.json 主键 + prompt 标记 uuid（建立 clientUuid ↔
+   * @param clientUuid          提交前生成的 user message id（`u-<uuid>`），受理确认后
+   *                            同 id 上屏气泡（appendUser 显式 id 入参）。用作 segments.json
+   *                            主键 + prompt 标记 uuid（建立 clientUuid ↔
    *                            pi userEntryId 映射，extension input hook 剥标记后写 custom
    *                            entry）+ delivery.submit 条目 id（回执/morph/resync 判重锚）
    * @param precomputedPromptText 调用方已算过的 segmentsToPrompt(segments)（非空白——调用方
@@ -901,7 +901,8 @@ export function createUseChat(deps: UseChatDeps) {
    *                            恒传；原「缺省时内部兜底重算」的分支无运行时命中且会掩盖
    *                            调用方契约违反（S4 修复目的即消除重复计算），已删。
    * @returns 受理回执 DeliverySubmitReply（[pi1-disposition-chat-flow U2⑤] 调用方消费
-   *                            isCommand 命令标志做 pendingSend 计时器豁免 + 命令条目登记）。
+   *                            isCommand 命令标志登记命令条目终局操作域；原 pendingSend
+   *                            计时器豁免随 30s 空窗 timer 退役）。
    */
   async function submitSegments(
     sessionId: string,
@@ -955,48 +956,48 @@ export function createUseChat(deps: UseChatDeps) {
   }
 
   /**
-   * [投递所有权内核 u3b / D1+D7] 统一提交编排：appendUser 乐观气泡 → inflight 占位 →
-   * ensureStreamSubscription → dispatching 占位 → submitSegments（delivery.submit）。
-   * send / followUp / editAndResend 三通路共享；lane 由 runtime 内核判定，失败
-   * 回滚乐观副作用后原样上抛，由通路各自分型（send toast 不 throw / followUp 转 false）。
+   * [投递所有权内核 u3b / D1+D7] 统一提交编排：ensureStreamSubscription → submitSegments
+   * （delivery.submit）→ **受理回执到达后**气泡上屏（appendUser + inflight 占位 +
+   * dispatching 占位）。
+   * send / followUp / editAndResend 三通路共享；lane 由 runtime 内核判定，失败原样上抛
+   * （无乐观副作用可回滚——气泡/占位在受理确认前不存在），由通路各自分型
+   * （send toast 不 throw / followUp 转 false；输入恢复走调用方 restoreSegments 契约）。
+   *
+   * [ADR-0112 ⑨ UI 跟随事实 / defense-mechanism-cleanup 遗留 5] 受理回执前不上屏等待态
+   * 气泡：runtime 确认受理（delivery.submit reply 同步受理确认）才出现气泡——UI 不预测、
+   * 不假造中间态。RPC 飞行窗口的用户反馈由 Composer 层 isSending 承担（非消息气泡）。
    *
    * 返回 clientUuid（= 乐观气泡 id = 内核条目 id），供调用方断言/对账。
    */
   async function submitNewMessage(sid: string, segments: Segment[], promptText: string): Promise<string> {
-    // appendUser 返回生成的 user message id（u-<uuid>），作为 clientUuid 传给 submitSegments
-    // （写 segments.json sidecar + prompt 标记，建立 clientUuid ↔ pi userEntryId 映射）+
-    // delivery.submit 条目 id（session.delivery 帧 / 送达回执标记 / morph 的身份锚）。
-    const clientUuid = chat.appendUser(sid, segments)
-    // 乐观气泡占位：其送达回执（message_end(user) ① 标记匹配）到达时抵消，防重复入流；
-    // RPC 失败路径回滚（下方 catch）。[D7] direct 车道抵消机制保留。
-    chat.incrementInflight(sid, 1)
+    // clientUuid 前移生成（u-<uuid>）：作为 submitSegments 的条目 id（session.delivery 帧 /
+    // 送达回执标记 / morph 的身份锚 + clientUuid ↔ pi userEntryId 映射），受理确认后同一 id
+    // 上屏气泡（appendUser 显式 id 入参，气泡 id = 内核条目 id 契约不变）。
+    const clientUuid = `u-${crypto.randomUUID()}`
     ensureStreamSubscription(sid, chat, session, subDeps)
+    // S4：复用调用方算过的 promptText，避免 submitSegments 内部再调一次 segmentsToPrompt。
+    const reply = await submitSegments(sid, segments, clientUuid, promptText)
+    // 受理确认到达 → 气泡上屏 + 占位挂账（此后送达回执 message_end(user) ① 标记匹配抵消，
+    // D7 direct 车道抵消机制保留）。极端时序守卫：message_end 送达回执先于 submit reply
+    // 到达（reply 与事件帧异通道无顺序契约）时投影已 delivered——气泡照常上屏（事实成立），
+    // 跳过 inflight 挂账（回执已消费，挂账永无抵消配额——泄漏面）。判定谓词复用
+    // findDeliveryEntry 单一实现（[MF-1-4] 禁内联 find 漂移）。
+    chat.appendUser(sid, segments, clientUuid)
+    if (findDeliveryEntry(sid, clientUuid)?.state !== 'delivered') {
+      chat.incrementInflight(sid, 1)
+    }
     // dispatching 空窗占位（填 isGenerating 空窗，让停止按钮/输入可用性立即翻转）：
-    // message_start 到达自动清；非 direct 车道由 session.delivery 帧的 morph 编排回收。
+    // message_start 到达自动清；非 direct 车道由 session.delivery 帧的 morph 编排回收；
+    // 命令挂起（handled disposition 交互挂起等）由 session.deliveryHandled 终局清
+    //（U2①）——事件驱动收口，无墙钟兜底（ADR-0112）。
     chat.addPendingSend(sid)
-    try {
-      // S4：复用调用方算过的 promptText，避免 submitSegments 内部再调一次 segmentsToPrompt。
-      const reply = await submitSegments(sid, segments, clientUuid, promptText)
-      // [pi1-disposition-chat-flow U2⑤ / D14③ G3 闸③] 命令条目（受理回执 isCommand，内核
-      // D2 识别结果）30s 空窗计时器豁免：撤 timer 保留 pendingSend 置位——命令挂起语义成立
-      // （`/permission` 交互挂起不被切成失败形态），收尾凭据 = session.deliveryHandled 终局
-      // 通知（U2①）或命令失败 toast（U2③）；普通消息计时器行为不变。同时登记 handled
-      // 通知/孤儿对账的操作域（命令条目 = 永无 message_end 回执的唯一条目族，见
-      // handledDeliveryTargets 注）。isCommand 缺省（旧 runtime）= 普通消息，链路零变化。
-      if (reply.isCommand === true) {
-        chat.disarmPendingSendTimer(sid)
-        registerHandledDeliveryTarget(sid, clientUuid)
-      }
-    } catch (e) {
-      // RPC 失败回滚（三件套）：pi/内核侧无消息、送达回执永不到来——
-      // ① 乐观气泡移除（[u3b] 前身靠 send.rejected 兜底回滚，内核化后无拒绝帧，必须在
-      //    此回滚，否则气泡永久悬挂）；truncateFrom 幂等（id 不存在 no-op）；
-      // ② dispatching 占位回收；③ inflight 占位回收。
-      // 错误反馈由通路 catch 分型（toast 或转 false），本函数不吞。
-      chat.truncateFrom(sid, clientUuid, true)
-      chat.clearPendingSend(sid)
-      chat.decrementInflight(sid, 1)
-      throw e
+    // [pi1-disposition-chat-flow U2⑤] 命令条目登记（受理回执 isCommand，内核 D2 识别结果）：
+    // handled 通知/孤儿对账的操作域（命令条目 = 永无 message_end 回执的唯一条目族，见
+    // handledDeliveryTargets 注）；收尾凭据 = session.deliveryHandled 终局通知（U2①）或
+    // 命令失败 toast（U2③）。isCommand 缺省（旧 runtime）= 普通消息，链路零变化。
+    // （原 U2⑤ 30s 空窗计时器豁免随计时器整体退役——ADR-0112 时间平抑红线，收口全事件驱动。）
+    if (reply.isCommand === true) {
+      registerHandledDeliveryTarget(sid, clientUuid)
     }
     return clientUuid
   }

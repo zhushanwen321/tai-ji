@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { effectScope, effect } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { createChatStore, PENDING_SEND_TIMEOUT_MS } from '../store'
+import { createChatStore } from '../store'
 import type { ChatStoreInstance } from '../store'
 import { textToSegments } from '@taiji/shared'
 import type { Message, Segment, ServerMessage } from '@taiji/shared'
@@ -808,7 +808,7 @@ describe('createChatStore factory', () => {
     })
   })
 
-  describe('finalizeSession 收口 warn 的 dev 门（D5：仅 timeout 去门）', () => {
+  describe('finalizeSession 收口 warn 的 dev 门（D5）', () => {
     let warnSpy: ReturnType<typeof vi.spyOn>
 
     beforeEach(() => {
@@ -827,21 +827,8 @@ describe('createChatStore factory', () => {
       return allLines.filter((s) => s.includes('finalizeSession'))
     }
 
-    it('非 dev（isDevMode=false）→ reason=timeout → console.warn 发出（含 sid/reason，「非 dev 构建可见」构造性证据）', () => {
-      sut.store.finalizeSession('s-t', 'timeout')
-      const line = finalizeWarnLines().find((s) => s.includes('sid=s-t') && s.includes('reason=timeout'))
-      expect(line).toBeDefined()
-    })
-
-    it('非 dev → 30s pendingSend timer 唯一来源路径同发 timeout warn（timer 到期 → finalizeSession timeout）', () => {
-      const sid = 's-timer'
-      sut.store.applyMessageEvent(sid, msg(sid, 'message.message_start', { messageId: 'a1' }))
-      sut.store.addPendingSend(sid)
-      vi.advanceTimersByTime(PENDING_SEND_TIMEOUT_MS)
-      const line = finalizeWarnLines().find((s) => s.includes(`sid=${sid}`) && s.includes('reason=timeout'))
-      expect(line).toBeDefined()
-      expect(sut.store.isActive(sid)).toBe(false) // 兜底收口照旧（D3 timer 语义零改动）
-    })
+    // [ADR-0112] 原 timeout reason「非 dev 去门 warn」两用例随 pendingSend 30s 空窗 timer
+    // 退役：'timeout' 已从 FinalizeReason 删除，无生产者即无用例形态。
 
     it('非 dev → 其余异常 reason（error/disconnect）零 warn（其余 reason dev 门保留）', () => {
       sut.store.finalizeSession('s-e', 'error')
@@ -861,12 +848,6 @@ describe('createChatStore factory', () => {
       expect(finalizeWarnLines()).toHaveLength(1)
       sut.store.finalizeSession('s-n', 'normal')
       expect(finalizeWarnLines()).toHaveLength(1) // normal 仍被排除
-    })
-
-    it('dev → timeout 仍 warn（去门是放大而非移除信号）', () => {
-      provideDevMode(true)
-      sut.store.finalizeSession('s-t', 'timeout')
-      expect(finalizeWarnLines()).toHaveLength(1)
     })
   })
 
@@ -996,26 +977,9 @@ describe('createChatStore factory', () => {
       expect(sut.store.isActive('s1')).toBe(false)
     })
 
-    it('addPendingSend 挂 30s 超时 timer，到期触发 finalizeSession(timeout)', () => {
-      const sid = 's1'
-      sut.store.applyMessageEvent(sid, msg(sid, 'message.message_start', { messageId: 'a1' })) // 建 streaming
-      sut.store.addPendingSend(sid)
-      expect(sut.store.isActive(sid)).toBe(true)
-
-      // 推进一个超时窗（PENDING_SEND_TIMEOUT_MS），pendingSend timer 触发 finalizeSession('timeout')
-      vi.advanceTimersByTime(PENDING_SEND_TIMEOUT_MS)
-      expect(sut.store.isGenerating(sid)).toBe(false) // streaming 被 timeout 收口
-    })
-
-    it('clearPendingSend 取消挂的 timer（到期不再 finalize）', () => {
-      const sid = 's1'
-      sut.store.applyMessageEvent(sid, msg(sid, 'message.message_start', { messageId: 'a1' })) // 建 streaming
-      sut.store.addPendingSend(sid)
-      sut.store.clearPendingSend(sid)
-
-      vi.advanceTimersByTime(PENDING_SEND_TIMEOUT_MS)
-      expect(sut.store.isGenerating(sid)).toBe(true) // timer 已被清，未被 timeout 收口
-    })
+    // [ADR-0112] 原「addPendingSend 挂 30s 超时 timer / clearPendingSend 取消 timer」两用例
+    // 随 timer 退役删除：pendingSend 收口全事件驱动（message_start/finalizeSession/
+    // deliveryHandled/delivery morph/occupancy idle 帧/断连收口），无墙钟兜底可推演。
 
     it('clearPendingSend 幂等：清不存在的 session 不抛错', () => {
       expect(() => sut.store.clearPendingSend('ghost')).not.toThrow()

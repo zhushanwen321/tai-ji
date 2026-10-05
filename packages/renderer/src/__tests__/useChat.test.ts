@@ -202,13 +202,15 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     expect(chat.isActive('s-terminal')).toBe(false)
   })
 
-  it('send 失败清 pendingSend（catch 路径）', async () => {
+  it('send 失败零乐观残留（受理回执前不上屏——无气泡无占位，失败信号走 toast/false 契约）', async () => {
     const chat = useChatStore()
     apiMock.submitDelivery.mockRejectedValueOnce(new Error('network'))
     const { send } = useChat()
-    // [W2] send 失败不再 throw（与 steer/followUp/abort 对齐：clearPendingSend + toast，不 throw）；
-    // [R2-A5] send 契约 Promise<boolean>——失败返回 false，dispatch 侧按 false 恢复草稿
+    // [W2] send 失败不再 throw（toast + false，不 throw）；
+    // [R2-A5] send 契约 Promise<boolean>——失败返回 false，dispatch 侧按 false 恢复草稿。
+    // [ADR-0112 受理回执后上屏] 失败时气泡/占位从未置位（无回滚面，结构性零残留）。
     await expect(send('s-fail', textToSegments('hi'))).resolves.toBe(false)
+    expect(chat.getMessages('s-fail')).toHaveLength(0)
     expect(chat.pendingSend.has('s-fail')).toBe(false)
     expect(chat.isActive('s-fail')).toBe(false)
   })
@@ -240,19 +242,10 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     expect(chat.isActive('s-abort')).toBe(false)
   })
 
-  it('pendingSend 30s 超时兜底：message_start 永不到 → 强制清（W3）', () => {
-    vi.useFakeTimers()
-    const chat = useChatStore()
-    chat.addPendingSend('s-timeout')
-    expect(chat.pendingSend.has('s-timeout')).toBe(true)
-    // 29s 未超时，仍挂着
-    vi.advanceTimersByTime(29_000)
-    expect(chat.pendingSend.has('s-timeout')).toBe(true)
-    // 30s 触发超时回调，finalizeSession('timeout') 强制清
-    vi.advanceTimersByTime(1_000)
-    expect(chat.pendingSend.has('s-timeout')).toBe(false)
-    expect(chat.isActive('s-timeout')).toBe(false)
-  })
+  // [ADR-0112] 原「pendingSend 30s 超时兜底（W3）」用例随 30s 空窗 timer 退役删除：
+  // pendingSend 收口全事件驱动（message_start / finalizeSession 各 reason / deliveryHandled /
+  // delivery morph / occupancy idle 帧 / 断连 finalizeAllStreaming），无墙钟兜底可推演。
+  // 「message_start 永不到」的现实成因（pi 死亡）由断连链收口——finalizeAllStreaming 用例覆盖。
 
   it('finalizeAllStreaming 强制收口所有 streaming session（runtime 崩溃时 useConnection 调）', () => {
     const chat = useChatStore()
@@ -266,28 +259,18 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     expect(chat.isActive('s-crash')).toBe(false)
   })
 
-  it('正常流转清除 pendingSend 超时 timer（message_start 到达 → pendingSend timer 不再触发）', () => {
-    vi.useFakeTimers()
-    const chat = useChatStore()
-    chat.addPendingSend('s-normal')
-    expect(chat.pendingSend.has('s-normal')).toBe(true)
-    // message_start 到达 → 创建 streaming entity + clearPendingSend（清 pendingSend + 其 timer）
-    chat.applyMessageEvent('s-normal', { type: 'message.message_start', payload: { sessionId: 's-normal', messageId: 'a1' } })
-    expect(chat.pendingSend.has('s-normal')).toBe(false)
-    // 推进超过 30s，pendingSend 超时回调不应再触发（timer 已被 clearPendingSend 清除）
-    vi.advanceTimersByTime(31_000)
-    expect(chat.pendingSend.has('s-normal')).toBe(false)
-    // streaming entity 仍存在（未被 pendingSend timer 误清）
-    expect(chat.isGenerating('s-normal')).toBe(true)
-  })
+  // [ADR-0112] 原「正常流转清除 pendingSend 超时 timer」用例随 timer 退役删除：
+  // message_start 到达清 pendingSend 的语义由「message_start 到达 → 清 pendingSend +
+  // 设 isGenerating」用例覆盖，无 timer 残留断言面。
 
-  it('[u3c/D1] followUp 提交失败回滚乐观副作用 + toast 提示', async () => {
+  it('[u3c/D1] followUp 提交失败零乐观残留（受理回执前不上屏）+ toast 提示', async () => {
     const chat = useChatStore()
     const { send, followUp } = useChat()
     await send('s-fu-rollback', textToSegments('first'))
     const before = chat.getMessages('s-fu-rollback').length
     apiMock.submitDelivery.mockRejectedValueOnce(new Error('ws disconnected'))
     await expect(followUp('s-fu-rollback', textToSegments('下轮'))).resolves.toBe(false)
+    // 失败时新气泡从未上屏（无回滚面，分区长度不变——结构性零残留）
     expect(chat.getMessages('s-fu-rollback')).toHaveLength(before)
   })
 })

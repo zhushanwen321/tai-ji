@@ -1,13 +1,16 @@
 /**
  * pi1-disposition-chat-flow U2 前端消费单测族——命令终局消费三面：
  *
- * 1. U2① session.deliveryHandled 终局通知 → 静默回滚三件套（移除乐观气泡 + 清空窗计时器 +
+ * 1. U2① session.deliveryHandled 终局通知 → 静默回滚三件套（移除气泡 + 清 pendingSend +
  *    递减在途计数，无错误提示，D1③④）；
  * 2. U2② 孤儿对账双分支（delivered 终态在场 / 不在投影，D1⑤）+「曾经在场」反向（V8 在途
  *    窗口未受理气泡不清除）+ 操作域收窄（普通消息条目不进对账——回执链管）；
  * 3. U2③ extension.error 命令来源 toast（D10③：仅 errorEvent === 'command' 放行 + 同 key
  *    去重 + 60s 限频窗两分支；风暴上限反向 = 同 key 3 连触发 toast 恰一次）；
- * 4. U2⑤ pendingSend 30s 空窗计时器对命令条目不挂表（D14③ G3 闸③，普通消息计时器不变对照）。
+ * 4. U2⑤ 受理回执前不上屏（ADR-0112 ⑨ UI 跟随事实 / defense-mechanism-cleanup 遗留 5）：
+ *    delivery.submit 受理回执（RPC reply）到达前消息列表无该条目气泡、无等待态占位；
+ *    回执到达才上屏；RPC 失败零乐观残留；送达回执先于 reply 的极端时序守卫。
+ *    （原「pendingSend 30s 空窗计时器命令豁免」组随 timer 退役改写为本组——收口全事件驱动。）
  *
  * 「用户可见 DOM 断言」在 core 层的形态 = chat store messages 分区断言（对话流渲染的单一
  * 输入源），与 useChat.test.ts 既有 morph 用例同判据。
@@ -16,13 +19,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { effectScope } from 'vue'
 import { textToSegments } from '@taiji/shared'
 import type { Segment, ServerMessage } from '@taiji/shared'
-import { createChatStore, PENDING_SEND_TIMEOUT_MS } from '../store'
+import { createChatStore } from '../store'
 import {
   createUseChat,
   resetChatModuleStateForTest,
   EXTENSION_COMMAND_ERROR_RATE_LIMIT_MS,
 } from '../useChat'
-import { resetDeliveryProjectionForTest } from '../effects/user-delivery'
+import { replaceDeliveryProjection, resetDeliveryProjectionForTest } from '../effects/user-delivery'
 import type { UseChatDeps } from '../useChat'
 
 interface Fixture { // oe-exempt:20261004:test:测试 harness 参数包（单文件局部，非架构契约）
@@ -257,8 +260,8 @@ describe('pi1-disposition-chat-flow U2：extension.error 命令反馈矩阵（U2
   /** 建立 streamSubscribe 订阅（不经 send——extension.error 消费独立于发送链） */
   function subscribeOnly(f: Fixture): void {
     void f.useChat.send('s1', textToSegments('建立订阅'))
-    // 本组用例只关心 toast 断言：清掉 send 的 pendingSend 空窗 timer，防限频窗用例推进
-    // timers 时触发无关的 finalizeSession(timeout) 日志噪音
+    // 本组用例只关心 toast 断言：清掉 send 置位的 pendingSend 占位（无 timer 可推演——
+    // 收口全事件驱动，置位残留对 toast 断言无影响，纯状态卫生）
     f.chatStore.clearPendingSend('s1')
   }
 
@@ -318,36 +321,103 @@ describe('pi1-disposition-chat-flow U2：extension.error 命令反馈矩阵（U2
   })
 })
 
-describe('pi1-disposition-chat-flow U2：pendingSend 空窗计时器命令豁免（U2⑤ / D14③ G3 闸③）', () => {
+describe('pi1-disposition-chat-flow U2⑤：受理回执前不上屏（ADR-0112 ⑨ UI 跟随事实）', () => {
   beforeEach(() => {
     resetChatModuleStateForTest()
     resetDeliveryProjectionForTest()
-    vi.useFakeTimers()
   })
 
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('命令条目（受理回执 isCommand）不挂 30s 空窗计时器：推满阈值后挂起语义成立（不被切成失败形态）', async () => {
+  it('发送动作后、受理回执（RPC reply）前：消息列表无该条目气泡节点、无等待态占位；回执到达才上屏', async () => {
     const f = makeFixture()
-    f.chatApi.submitDelivery.mockResolvedValue({ ...COMMAND_REPLY })
-    await f.useChat.send('s1', textToSegments('/permission rule'))
+    // 受理回执悬置（RPC 飞行中）：submitDelivery 返回未 resolve 的 promise
+    let releaseReply: (reply: unknown) => void = () => {}
+    f.chatApi.submitDelivery.mockImplementation(
+      () => new Promise((resolve) => { releaseReply = resolve }),
+    )
+    const sendPromise = f.useChat.send('s1', textToSegments('/todos'))
+    // 受理确认前（RPC 飞行窗口）：消息列表无该条目的气泡节点（用户可见 DOM 断言）+
+    // pendingSend/inflight 零置位（无等待态、无挂账）
+    expect(f.chatStore.getMessages('s1')).toHaveLength(0)
+    expect(f.chatStore.isPendingSend('s1')).toBe(false)
+    expect(f.chatStore.getInflight('s1')).toBe(0)
+    // 受理回执到达 → 气泡上屏 + 占位挂账（等待态自此有事实依据）
+    releaseReply({ clientUuid: 'u-x', state: 'in-flight', lane: 'direct' })
+    await sendPromise
+    const userMsg = f.chatStore.getMessages('s1').find((m) => m.role === 'user')
+    expect(userMsg).toBeDefined()
     expect(f.chatStore.isPendingSend('s1')).toBe(true)
-    // 推满 30s 空窗阈值 + 余量：命令条目计时器未挂 → 无 timeout 收口
-    vi.advanceTimersByTime(PENDING_SEND_TIMEOUT_MS + 1_000)
-    // 挂起语义成立：pendingSend 置位保留（isActive 保持——停止按钮/steer guard 不误翻转）
-    expect(f.chatStore.isPendingSend('s1')).toBe(true)
-    expect(f.chatStore.isActive('s1')).toBe(true)
+    expect(f.chatStore.getInflight('s1')).toBe(1)
     f.dispose()
   })
 
-  it('对照（普通消息计时器不变）：受理回执无 isCommand → 推满阈值照常 timeout 收口', async () => {
+  it('命令条目（isCommand 受理回执）受理后才上屏，终局仍由 deliveryHandled 静默清除（started 基终局呈现）', async () => {
     const f = makeFixture()
-    await f.useChat.send('s1', textToSegments('普通消息'))
+    f.chatApi.submitDelivery.mockResolvedValue({ ...COMMAND_REPLY })
+    await f.useChat.send('s1', textToSegments('/todos'))
+    const bubbleId = f.chatStore.getMessages('s1').find((m) => m.role === 'user')!.id
+    // 受理态呈现：命令条目气泡在流（pi 已受理输入的事实）+ pendingSend 挂起语义成立
+    expect(f.chatStore.getMessages('s1').some((m) => m.id === bubbleId)).toBe(true)
     expect(f.chatStore.isPendingSend('s1')).toBe(true)
-    vi.advanceTimersByTime(PENDING_SEND_TIMEOUT_MS)
-    // D-015/F4 既有语义零变化：空窗超时 → finalizeSession(timeout) 收口（pendingSend 清）
+    // 终局通知到达 → 静默收气泡（handled/queued/started 三值统一受理终局，回合输出照常流入）
+    f.emit('s1', handledFrame('s1', bubbleId))
+    expect(f.chatStore.getMessages('s1').some((m) => m.id === bubbleId)).toBe(false)
+    expect(f.chatStore.isPendingSend('s1')).toBe(false)
+    expect(f.toast.error).not.toHaveBeenCalled()
+    f.dispose()
+  })
+
+  it('RPC 失败：零乐观残留（无气泡、无占位、无挂账），失败信号走既有 toast/false 契约', async () => {
+    const f = makeFixture()
+    f.chatApi.submitDelivery.mockRejectedValue(new Error('transport down'))
+    await expect(f.useChat.send('s1', textToSegments('hello'))).resolves.toBe(false)
+    expect(f.chatStore.getMessages('s1')).toHaveLength(0)
+    expect(f.chatStore.isPendingSend('s1')).toBe(false)
+    expect(f.chatStore.getInflight('s1')).toBe(0)
+    // transport 级失败 toast 兜底（错误可见性契约不变）
+    expect(f.toast.error).toHaveBeenCalledTimes(1)
+    f.dispose()
+  })
+
+  it('极端时序守卫：送达回执先于受理回执（投影已 delivered）→ 气泡照常上屏、不挂无主 inflight 账', async () => {
+    const f = makeFixture()
+    // reply resolve 前投影已转 delivered（message_end(user) 标记回执先于 submit reply 到达——
+    // reply 与事件帧异通道无顺序契约的极端窗）
+    f.chatApi.submitDelivery.mockImplementation(async (sid: string, _content: string, clientUuid: string) => {
+      replaceDeliveryProjection(sid, [{ clientUuid, preview: 'p', state: 'delivered', lane: 'direct' }])
+      return { clientUuid, state: 'delivered', lane: 'direct' }
+    })
+    await f.useChat.send('s1', textToSegments('hello'))
+    // 气泡上屏不丢（事实成立：消息已进 transcript）；inflight 零挂账（回执已消费，挂账永无抵消）
+    expect(f.chatStore.getMessages('s1').some((m) => m.role === 'user')).toBe(true)
+    expect(f.chatStore.getInflight('s1')).toBe(0)
+    f.dispose()
+  })
+})
+
+describe('pi1-disposition-chat-flow：断连未确认终局呈现（command-pi-restart-response-loss 终局③）', () => {
+  beforeEach(() => {
+    resetChatModuleStateForTest()
+    resetDeliveryProjectionForTest()
+  })
+
+  it('在途命令条目遇 pi 断连：message.error「执行结果未确认」帧 → 用户可见 error 气泡（未确认文案）+ pendingSend 事件驱动收口', async () => {
+    const f = makeFixture()
+    f.chatApi.submitDelivery.mockResolvedValue({ ...COMMAND_REPLY })
+    await f.useChat.send('s1', textToSegments('/todos'))
+    expect(f.chatStore.getMessages('s1').some((m) => m.role === 'user')).toBe(true)
+    expect(f.chatStore.isPendingSend('s1')).toBe(true)
+    // pi 断连：runtime onPiDisconnected 在途条目批量 failed + message.error 逐条显式上报
+    //（payload 形态 = session-delivery-registry onPiDisconnected 的用户可见文案）
+    f.emit('s1', {
+      type: 'message.error',
+      payload: { sessionId: 's1', message: '执行结果未确认（pi 连接已断开），重发前请核对：/todos' },
+    } as unknown as ServerMessage)
+    // 用户可见终态呈现：error 气泡入流且「未确认」文案完整（不得静默悬挂）
+    const errMsg = f.chatStore.getMessages('s1').find((m) => m.role === 'assistant' && m.status === 'error')
+    expect(errMsg).toBeDefined()
+    expect(errMsg!.error).toContain('执行结果未确认')
+    expect(errMsg!.error).toContain('重发前请核对')
+    // pendingSend 随终局收口（finalizeSession 事件驱动，无墙钟兜底）
     expect(f.chatStore.isPendingSend('s1')).toBe(false)
     f.dispose()
   })

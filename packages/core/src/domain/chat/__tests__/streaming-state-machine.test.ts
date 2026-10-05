@@ -200,29 +200,29 @@ describe('finalizeMessages', () => {
     expect(after.toolCalls![0].endTime).toBeTypeOf('number') // 非 normal/aborted 设 endTime
   })
 
-  it('TC4d timeout 收口：streaming → error；toolCall → end_not_received + endTime（restart 同族）', () => {
+  it('TC4d disconnect 收口：streaming → error；toolCall → end_not_received + endTime（restart 同族）', () => {
     const { sm, messages } = makeMachine()
     const assistant = streamingAssistant('a1', { content: 'partial', toolCalls: [runningToolCall('tc1')] })
     messages.value = new Map([['s1', shallowRef([assistant])]])
 
-    sm.finalizeMessages('s1', 'timeout')
+    sm.finalizeMessages('s1', 'disconnect')
 
     const after = messages.value.get('s1')!.value[0]
-    expect(after.status).toBe('error') // timeout ∈ isErrorReason（restart 同分支）
+    expect(after.status).toBe('error') // disconnect ∈ isErrorReason（restart 同分支）
     expect(after.toolCalls![0].status).toBe('end_not_received') // 非 error/stream_error → end_not_received
     expect(after.toolCalls![0].endTime).toBeTypeOf('number')
   })
 
   // [M2 error-visibility 不变量] 凡 streaming 收口产出 error 终态的 assistant 消息，
   // error 字段必非空——渲染层以「error 有无」区分纯 error（整条 danger）与追加形态
-  // （正文原色 + error 独立 danger 行）。errorText 缺失路径（断连 / 超时 / 重启收口
+  // （正文原色 + error 独立 danger 行）。errorText 缺失路径（断连 / 重启收口
   // 不带文案）若无兜底，崩溃前正常正文会被误判纯 error 整条染红。
   it('TC4e errorText 缺失的 error 类收口：error 字段写 reason 兜底文案（追加形态不变量）', () => {
     const { sm, messages } = makeMachine()
     const assistant = streamingAssistant('a1', { content: 'partial' })
     messages.value = new Map([['s1', shallowRef([assistant])]])
 
-    for (const reason of ['disconnect', 'timeout', 'restart'] as const) {
+    for (const reason of ['disconnect', 'restart'] as const) {
       // 重置回 streaming 再收口（sealed 守卫：终态消息二次 finalize 不重写）
       messages.value = new Map([['s1', shallowRef([streamingAssistant('a1', { content: 'partial' })])]])
       sm.finalizeMessages('s1', reason)

@@ -21,15 +21,15 @@ export interface RetryState {
  *   aborted      → message:complete, toolCall:end_not_received（同上，D-008 message 保持 complete）
  *   stream_error → message:error,     toolCall:error
  *   error        → message:error,     toolCall:error
- *   timeout      → message:error,     toolCall:end_not_received
  *   disconnect   → message:error,     toolCall:end_not_received
  *   restart      → message:error,     toolCall:end_not_received
+ * （原 'timeout' 成员随 pendingSend 30s 空窗 timer 退役——ADR-0112 时间平抑红线，
+ * pendingSend/streaming 的收口全事件驱动，无墙钟兜底生产者。）
  */
 export type FinalizeReason =
   | 'normal'
   | 'aborted'
   | 'stream_error'
   | 'error'
-  | 'timeout'
   | 'disconnect'
   | 'restart'

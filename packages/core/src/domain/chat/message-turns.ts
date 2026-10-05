@@ -721,9 +721,13 @@ function toolBlockOf(tc: ToolCall): OrderedBlock {
 /** 主路径：contentBlocks 非空时按其真实时序解出（text/thinking/toolCall 的 refId 回查）。 */
 function expandFromContentBlocks(blocks: NonNullable<Message['contentBlocks']>, msg: Message): OrderedBlock[] {
   const result: OrderedBlock[] = []
+  // [ADR-0112 断连未确认终局] error 消息的 text 块宿主保证（与 expandFallback 同判据）：
+  // content 空但 error 非空时仍产 text 块——Block 的 error danger 行只挂 text 分支，
+  // 缺宿主 = 错误文案在对话流不可见（静默悬挂）。
+  const needsTextBlock = !!msg.content || (msg.status === 'error' && !!msg.error)
   for (const b of blocks) {
     if (b.type === 'text') {
-      if (msg.content) result.push({ kind: 'text', ref: normalizeContent(msg.content) })
+      if (needsTextBlock) result.push({ kind: 'text', ref: normalizeContent(msg.content) })
     } else if (b.type === 'thinking') {
       const th = msg.thinking?.find((t) => t.id === b.refId)
       if (th) result.push({ kind: 'thinking', ref: th })
@@ -739,7 +743,11 @@ function expandFromContentBlocks(blocks: NonNullable<Message['contentBlocks']>, 
 function expandFallback(msg: Message): OrderedBlock[] {
   const fallback: OrderedBlock[] = []
   const text = normalizeContent(msg.content)
-  if (text.trim()) fallback.push({ kind: 'text', ref: text })
+  // [ADR-0112 断连未确认终局] 纯 error 气泡（content 空 + error 非空）必须有 text 块宿主：
+  // Block 的 error danger 行只挂 text 分支——零块消息（秒败 turn / 断连显式失败上报
+  // 「执行结果未确认」）的 error 文案在对话流不可见（静默悬挂）。补空正文 text 块，
+  // error 行随 Block text 分支渲染（空正文 + 独立 danger 行 = M2 追加形态）。
+  if (text.trim() || (msg.status === 'error' && !!msg.error)) fallback.push({ kind: 'text', ref: text })
   for (const th of msg.thinking ?? []) fallback.push({ kind: 'thinking', ref: th })
   for (const tc of msg.toolCalls ?? []) fallback.push(toolBlockOf(tc))
   return fallback

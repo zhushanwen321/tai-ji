@@ -103,11 +103,11 @@ export interface TerminalMessagePatchOptions {
  * error 类收口 reason（终态取向 error 的 FinalizeReason 子集）。
  * 类型谓词 isErrorFinalizeReason 收窄后 REASON_FALLBACK_ERROR_TEXT[reason] 恒 string。
  */
-export type ErrorFinalizeReason = Extract<FinalizeReason, 'error' | 'stream_error' | 'timeout' | 'disconnect' | 'restart'>
+export type ErrorFinalizeReason = Extract<FinalizeReason, 'error' | 'stream_error' | 'disconnect' | 'restart'>
 
 /** reason 是否终态取向 error（类型谓词；与 ErrorFinalizeReason 成员一一对应）。 */
 export function isErrorFinalizeReason(reason: FinalizeReason): reason is ErrorFinalizeReason {
-  return reason === 'error' || reason === 'stream_error' || reason === 'timeout' || reason === 'disconnect' || reason === 'restart'
+  return reason === 'error' || reason === 'stream_error' || reason === 'disconnect' || reason === 'restart'
 }
 
 /**
@@ -127,7 +127,6 @@ export function isErrorFinalizeReason(reason: FinalizeReason): reason is ErrorFi
 export const REASON_FALLBACK_ERROR_TEXT: Record<ErrorFinalizeReason, string> = {
   error: '会话出错，回复已中断。',
   stream_error: '输出流中断，回复不完整。',
-  timeout: '等待超时，回复已中断。',
   disconnect: '与运行时的连接已断开，回复已中断。重新连接后可继续。',
   restart: '运行时已重启，回复已中断。重新连接后可继续。',
 }

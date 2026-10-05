@@ -4,7 +4,7 @@
  * FileChanges 通道 / 收口出口设计 / 子域控制器委托）见 ./README.md。
  * 本文件仅保留与代码行为直接绑定的短契约注释。
  */
-import { computed, onScopeDispose, ref, shallowRef, type ComputedRef, type ShallowRef } from 'vue'
+import { computed, ref, shallowRef, type ComputedRef, type ShallowRef } from 'vue'
 import { commitMessages, truncateMessagesFrom, prependHistory as prependHistoryMut } from './mutations'
 import { truncateToolOutputBatch, truncateToolOutputBatchCached } from './truncate-tool-output'
 import { dispatchMessageEvent } from './effects/registry'
@@ -280,7 +280,7 @@ function restoreRespawnNotices(partition: Message[], merged: Message[]): Message
 
 /**
  * 构造 chat 域全部 state + actions。factory 模式与归位历史见 ./README.md。
- * 内部用 onScopeDispose（清 timer），调用方需在 effectScope 上下文内执行本 factory。
+ * 调用方需在 effectScope 上下文内执行本 factory。
  *
  * [B9 agentcall LRU 联动] options.agentCallEvictionsOf：主 session 或 btw 分区 LRU 驱逐时
  * 查询应联动释放的 agentcall 虚拟分区（豁免已由实现侧应用；形参 = 被驱逐 sid 原形态——
@@ -293,9 +293,6 @@ export interface ChatStoreOptions {
   /** [B9] 查询被驱逐 sid（mainSid / btw 线 vid）名下应联动释放的 agentcall virtualId（豁免已应用）；见 LruEvictDeps.agentCallEvictionsOf */
   agentCallEvictionsOf?: (mainSid: string) => string[]
 }
-
-/** pendingSend 空窗期 timer 阈值（D-015/F4，接管 dispatchingTimer 30s 语义）。导出供测试 import（禁魔数复制漂移） */
-export const PENDING_SEND_TIMEOUT_MS = 30_000
 
 export function createChatStore(options: ChatStoreOptions = {}) {
   /** 按 sessionId 分区的消息表（UC-2 隔离） */
@@ -387,8 +384,8 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * 「live ≡ reload」从构造上成立（同 reducer 同输入序列必得同 state，等价性断言见
    * runtime src/__tests__/equivalence/live-reload.test.ts）。
    *
-   * 非 Vue ref（[ADR-0049 例外]：factory 单例 Map，存的是纯投影数据非响应式业务状态，
-   * 与 pendingSendTimers 同判据）：渲染不走它——实时渲染走 messages ref 的 overlay 路径
+   * 非 Vue ref（[ADR-0049 例外]：factory 单例 Map，存的是纯投影数据非响应式业务状态）：
+   * 渲染不走它——实时渲染走 messages ref 的 overlay 路径
    * （message_start/delta/complete，streaming 语义）；本 state 是权威累积，供 W22
    * broadcast≡get_state 对账与后续 ref 收敛消费。disposeSession / LRU 驱逐同点清理。
    */
@@ -409,24 +406,6 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * ./truncated-window.ts。
    */
   const { historyWindows, setHistoryWindow, getHistoryWindow, clearHistoryWindow } = createTruncatedWindowController()
-
-  /**
-   * pendingSend 空窗期 timer（按 sessionId 隔离）。
-   *
-   * [ADR-0049 例外] 本 Map 不套 useSessionScopedState。判据：createChatStore() factory 由
-   * renderer defineStore('chat', () => createChatStore(agentCallLruLinkage())) 包装（renderer
-   * stores/chat.ts，B9 联动 options 经装配模块注入），Pinia 按 store id 缓存——factory body 全应用只执行一次，本 Map 实质单例。factory 体内非
-   * Vue setup 上下文（虽在 effectScope 内用 onScopeDispose，但无 sidRef: Ref<string|null>）；
-   * Map 存的是 timer handle（ReturnType<typeof setTimeout>，非 reactive 业务状态）。
-   * useSessionScopedState 是 setup-scoped 工厂（要求 sidRef + reactive 容器契约），factory
-   * 体内不适用——强套需把 factory 改造成 setup composable（破坏 Pinia store 单例语义：
-   * 每次 useStore() 重新执行会重建 Map 丢失单例）+ reactive 容器语义错位（timer handle 不是
-   * 响应式状态）。与 lru/coordination/panel-orchestration 同属 ADR-0049 例外（单例性来源不同：
-   * 那几处是模块级 ES module 单例，本处是 Pinia defineStore factory 单例）。session 销毁清理：
-   * 本文件 onScopeDispose（见末尾）for + clearTimeout + clear；测试隔离：createChatStore()
-   * per-instance（core 单测直接调 factory 构造新 store）。
-   */
-  const pendingSendTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   // ── streaming 状态机深模块（B6：3 个原模块级状态机编排函数 + 2 个新提取的瞬态清理 helper 内聚为 factory，本 store 仅委托）──
   const streamingStateMachine = createStreamingStateMachine({
@@ -851,11 +830,12 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     // 清 pendingSend（bash 消息不经此收口：finalizeMessages 跳过 bash，
     // 其生命周期由 bashResultEffect/markBashError 独立管理，不应被 assistant 收口误清）。
     clearPendingSend(sessionId)
-    // 收口日志（D5）：timeout = 30s 兜底命中的真异常信号，恒发 warn（不依赖 dev 标志——
-    // 非 dev 构建 attach 调试可见，与 warnSteerNotConsumed/warnSendBlocked 常驻 warn 先例形态统一）；
-    // 其余异常 reason 维持 dev 门（dev 留痕）；normal/aborted 正常路径不打（去长对话噪音）
-    const shouldWarn = reason === 'timeout' || (isDevMode() && reason !== 'normal' && reason !== 'aborted')
-    if (shouldWarn) console.warn(`[chat] finalizeSession sid=${sessionId} reason=${reason}`)
+    // 收口日志（D5）：异常 reason 维持 dev 门（dev 留痕）；normal/aborted 正常路径不打
+    //（去长对话噪音）。（原 reason === 'timeout' 常驻 warn 分支随 pendingSend 30s 空窗
+    // timer 退役——ADR-0112 时间平抑红线，收口全事件驱动。）
+    if (isDevMode() && reason !== 'normal' && reason !== 'aborted') {
+      console.warn(`[chat] finalizeSession sid=${sessionId} reason=${reason}`)
+    }
   }
 
   /**
@@ -889,39 +869,24 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   }
 
   // ── pendingSend 生命周期（useChat/effects 经 ctx/port 调）──
+  // [ADR-0112 时间平抑红线] 原 pendingSend 30s 空窗 timer（PENDING_SEND_TIMEOUT_MS +
+  // pendingSendTimers + disarmPendingSendTimer 命令豁免）已整体退役：pendingSend 的收口
+  // 全事件驱动——message_start（正常）/ finalizeSession（complete/error/disconnect 等）/
+  // session.deliveryHandled（命令终局 U2①）/ session.delivery morph / occupancy 三维全
+  // idle 帧 / abort 乐观清 / 断连 resetTransientStates。
 
-  /** send 前置位（填空窗）。不可变 Set add（保证响应式）。同时挂 pendingSendTimer（D-015）。 */
+  /** send 前置位（填空窗）。不可变 Set add（保证响应式）。 */
   function addPendingSend(sessionId: string): void {
     pendingSend.value = new Set(pendingSend.value).add(sessionId)
-    clearPendingSendTimer(sessionId)
-    pendingSendTimers.set(sessionId, setTimeout(() => {
-      finalizeSession(sessionId, 'timeout')
-      pendingSendTimers.delete(sessionId)
-    }, PENDING_SEND_TIMEOUT_MS))
   }
 
-  /** message_start（正常）/ finalizeSession（异常）/ abort（乐观）/ send.rejected（回滚）调。幂等。 */
+  /** message_start（正常）/ finalizeSession（异常）/ abort（乐观）/ deliveryHandled（命令终局）调。幂等。 */
   function clearPendingSend(sessionId: string): void {
     if (pendingSend.value.has(sessionId)) {
       const next = new Set(pendingSend.value)
       next.delete(sessionId)
       pendingSend.value = next
     }
-    clearPendingSendTimer(sessionId)
-  }
-
-  /**
-   * [G3 闸③ pi1-disposition-chat-flow U2⑤ / D14③] 命令条目空窗计时器豁免：撤除该 session
-   * 已挂的 pendingSend 30s 空窗 timer（PENDING_SEND_TIMEOUT_MS），**保留 pendingSend 置位**。
-   *
-   * 命令判定依据 = delivery.submit 受理回执 isCommand（内核 D2 识别结果随回执返回，U1⑨；
-   * 向后兼容可选字段）。命令条目挂起语义成立（D14③：`/permission rule` 交互挂起多久都不得
-   * 被 30s 墙钟切成失败形态）——30s 计时器对它不挂表；收尾凭据 = session.deliveryHandled
-   * 终局通知（handled → clearPendingSend 全清，U2①）或命令失败 toast（U2③）。普通消息
-   * 计时器行为不变（addPendingSend 无条件挂表）。
-   */
-  function disarmPendingSendTimer(sessionId: string): void {
-    clearPendingSendTimer(sessionId)
   }
 
   /** [D3] pendingSend 投影查询（「正在提交直发」瞬时态——send/editAndResend 置、message_start
@@ -930,14 +895,6 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    *  仅非活跃态可见，锁的目的是防提交在途并发覆盖 pendingDirectSends）。 */
   function isPendingSend(sessionId: string): boolean {
     return pendingSend.value.has(sessionId)
-  }
-
-  function clearPendingSendTimer(sessionId: string): void {
-    const t = pendingSendTimers.get(sessionId)
-    if (t !== undefined) {
-      clearTimeout(t)
-      pendingSendTimers.delete(sessionId)
-    }
   }
 
   /**
@@ -960,13 +917,6 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     ])
     clearPendingSend(sessionId)
   }
-
-  // store 作用域销毁时（HMR 热替换 / $dispose / 测试 teardown）清理 timer，
-  // 避免回调操作已废弃的 store 实例 ref + warn 噪音。
-  onScopeDispose(() => {
-    for (const timer of pendingSendTimers.values()) clearTimeout(timer)
-    pendingSendTimers.clear()
-  })
 
   /**
    * 指定 session 是否正在压缩上下文（#6）。
@@ -1157,8 +1107,6 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     // D-3 生命周期：streaming flag 惰性派生缓存随 messages 分区同点清理（漏删即慢泄漏，
     // 07 文档 §3.3.2 cleanup 契约）。
     sessionStreamingFlags.delete(sessionId)
-    // timer 清理（模块级 Map，非响应式）
-    clearPendingSendTimer(sessionId)
     disposeLruEntry(sessionId) // R5: 清理 LRU 时序记录，防止内存泄漏
   }
 
@@ -1197,7 +1145,6 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     resetTransientStates,
     addPendingSend,
     clearPendingSend,
-    disarmPendingSendTimer,
     isPendingSend,
     markSessionError,
     isCompacting,
@@ -1288,7 +1235,7 @@ export type ChatStoreOps = Pick<
   | 'applySubagentEntries' | 'appendUser'
   | 'applyMessageEvent' | 'finalizeSession'
   | 'finalizeAllStreaming' | 'resetTransientStates' | 'addPendingSend'
-  | 'clearPendingSend' | 'disarmPendingSendTimer' | 'markSessionError' | 'setHandingOff'
+  | 'clearPendingSend' | 'markSessionError' | 'setHandingOff'
   | 'setOccupancy' | 'clearOccupancy' | 'setCompactingReason'
   | 'appendSystemNotice' | 'appendRespawnNotice' | 'appendSubagentDirective' | 'truncateFrom'
   | 'markRespawnPending' | 'clearRespawnPending'
