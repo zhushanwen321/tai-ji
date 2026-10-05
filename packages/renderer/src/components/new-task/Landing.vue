@@ -62,6 +62,12 @@ provide(NewTaskDepsKey, deps)
 const flow = deps.flow
 const toastError = deps.toast.error
 
+/** [D9] landing 输入卡固定窄宽：根元素局部覆写全局令牌 --content-max-w（值同全局 720px）。
+ *  main-area 恒把该令牌覆写为 100%（useDrawerSplitWidth），全局封顶在此被解除——landing
+ *  内容列不加本覆写会被撑满。覆写后 composer 实宽 = min(0.6 × W − 48px, 720px)；
+ *  覆写手段与 main-area 的 100% 覆写同族（局部覆写全局令牌，不新造机制/令牌）。 */
+const LANDING_CONTENT_MAX_W = '720px'
+
 /**
  * [perf-landing 跳转先行] 首发提交飞行中（flow.isInflight = createInFlight，submitFirstMessage
  * 入口同步置位）→ 立即离开 landing 内容态（问候语 + chip 行 + composer 卡片 v-show 隐藏），
@@ -284,6 +290,7 @@ function onPresetSelect(payload: { presetId: string }): void {
   <div
     data-testid="new-task-landing"
     class="relative flex min-h-0 flex-1 flex-col items-center justify-center gap-8 overflow-hidden p-6"
+    :style="{ '--content-max-w': LANDING_CONTENT_MAX_W }"
   >
 
     <!-- [perf-landing 跳转先行] 创建中过渡视图：点击发送后同帧出现（isInflight 入口同步置位），
@@ -334,7 +341,9 @@ function onPresetSelect(payload: { presetId: string }): void {
       {{ t('newTask.landing.retryHistory') }}
     </Button>
 
-    <!-- composer 卡片（variant=landing：720px 居中，--bg-input + --border + --radius-lg）。
+    <!-- composer 卡片（variant=landing：根元素覆写 --content-max-w=720px 后本注释描述的
+         「720px 居中窄卡」真实生效（ui-signal-density D9）——此前 main-area 恒 100% 覆写
+         使该形态从未生效。--bg-input + --border + --radius-lg）。
          spec §3.1：chip 是 composer 卡片顶部元信息行，非悬空 → 经 #meta-row slot 注入。
          landing 态 session 真源用 flow（composerSid），props 作 fallback。 -->
     <Composer variant="landing" :session-id="composerSid">

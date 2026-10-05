@@ -7,8 +7,8 @@
  * ② SplitterPanel 挂载/卸载瞬时重算 layout，无过渡参与，无法做开合宽度动画。
  * 故 PanelContainer 换手写 flex 布局，本 composable 承载其宽度模型：
  *
- * - 无 drawer：main 占 MAIN_STANDALONE_PCT% 且左右 margin calc 居中（两侧各 (100%-75%)/2 留白，
- *   对话流整体在工作区视觉居中），main 层 --content-max-w:100% 解除 720px 封顶（内容占满 75%）；
+ * - 无 drawer：main 占 MAIN_STANDALONE_PCT% 且左右 margin calc 居中（两侧各 (100%-60%)/2 留白，
+ *   对话流整体在工作区视觉居中），main 层 --content-max-w:100% 解除 720px 封顶（内容占满 60%）；
  * - 有 drawer：drawer 占 drawerPct%（默认 50），main 占剩侧（模板侧 calc(100% - drawerPct% - 1px)），
  *   margin 0 贴左；--content-max-w 恒 100% 不随开合切换（内容 min(容器,容器)=容器，
  *   width/margin 全程可插值，开合动画无跳变）；
@@ -38,14 +38,15 @@ const PCT_SCALE = 100
 /** standalone 留白分摊两侧（左右各半，no-magic-numbers） */
 const MARGIN_SIDES = 2
 
-/** 无 drawer 时 main 区域占比（用户预期：无 drawer 3/4，有 drawer 动画到 1/2） */
-export const MAIN_STANDALONE_PCT = 75
+/** 无 drawer 时 main 区域占比（ui-signal-density D10：对话流与输入卡默认占工作区 3/5，
+ *  右抽屉打开后 main 随 drawerPct 收窄而逐渐放大；drawer 收到最窄 20% 时 main ≈ 80%） */
+export const MAIN_STANDALONE_PCT = 60
 
 function clampDrawerPct(v: number): number {
   return Math.min(DRAWER_MAX_PCT, Math.max(DRAWER_MIN_PCT, v))
 }
 
-/** standalone 时 main 居中的两侧 margin（(100% - 75%) / 2 = 12.5%；显式值而非 margin:auto——
+/** standalone 时 main 居中的两侧 margin（(100% - 60%) / 2 = 20%；显式值而非 margin:auto——
  *  auto 不可插值，开合动画会横跳。物理属性 margin-left/right 而非 margin-inline：水平 LTR 下
  *  等效，且 transition-[width,margin] 简写自然覆盖（logical 属性不受 margin 简写过渡影响）；
  *  用纯百分比而非 calc()：jsdom cssstyle 对 margin 的 calc 值校验不过（width 则可），测试可断言） */
@@ -80,8 +81,8 @@ export function useDrawerSplitWidth(splitAreaEl: Ref<HTMLElement | null>, drawer
 
   /**
    * main-area 动态样式（宽度模型 SSOT，模板直连）：
-   * - standalone：width 75% + 左右 margin calc 居中 + --content-max-w:100%（解除全局 720px
-   *   封顶，对话流/composer 内容列占满 75% 区域）；
+   * - standalone：width 60% + 左右 margin calc 居中 + --content-max-w:100%（解除全局 720px
+   *   封顶，对话流/composer 内容列占满 60% 区域）；
    * - split：width calc(100% - drawerPct% - 1px) + margin 0 贴左（drawer 贴右）。
    * --content-max-w 两态恒 100% 不切换：值不变 → 无过渡跳变，内容 width:100% 永远跟随容器，
    * 开合动画期间 min(容器,容器)=容器 全程连续。
