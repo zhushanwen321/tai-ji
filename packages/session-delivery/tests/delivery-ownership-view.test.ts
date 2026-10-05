@@ -38,7 +38,6 @@ describe('u1-view 双视图投影（D9②/D5③）', () => {
       payload: { kind: 'text', content: 'pending' },
       createdAt: expect.any(Number),
       updatedAt: expect.any(Number),
-      sendAttempts: 0,
     })
     expect(full.tombstones.map((t) => t.id)).toEqual(['u-1', 'u-2', 'u-3'])
 

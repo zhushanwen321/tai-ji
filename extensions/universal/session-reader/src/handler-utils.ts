@@ -20,8 +20,9 @@ export const SESSION_ID_PREFIX_LEN = 8
 export const pad = (n: number): string => String(n).padStart(TURN_INDEX_WIDTH, '0')
 
 /** 构造带 👉 恢复指引的 Error。契约：handler 直接 throw，execute 不 catch、原样传播给 pi；
- * pi 外层（pi-agent-core agent-loop.js executePreparedToolCall catch，:466-471）统一转
- * isError:true 的 error tool result——返回值上的 isError 字段会被丢弃（错误被标成功）。 */
+ * pi 外层（pi-agent-core agent-loop.js executePreparedToolCall catch，pi 1.0.0 :581-588）
+ * 统一转 isError:true 的 error tool result——统一 throw 为纪律选择（单一错误路径），
+ * 非「返回值 isError 失效」（1.0.0 起返回值标记同样被尊重〔:579〕，双轨写法仍禁用）。 */
 export function err(message: string): Error {
   return new Error(message)
 }

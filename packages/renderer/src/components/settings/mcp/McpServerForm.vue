@@ -406,7 +406,8 @@ function parseCodeText(): ParseResult {
 
 // ── 校验（表单/代码共用链路；错误消息按「错误 → 修复动作」组织，D4）──
 
-/** -/_ 归并同名（pi 将两种字符视为同名：名称中连字符替换为下划线后比对，D4） */
+/** -/_ 归并同名（pi 将两种字符视为同名：名称中连字符替换为下划线后比对——pi 1.0.0
+ *  dist core/mcp-servers.js:21 mcpNamespace `mcp__${server.replace(/-/g, "_")}`，D4） */
 function normalizeName(n: string): string {
   return n.replace(/-/g, '_')
 }

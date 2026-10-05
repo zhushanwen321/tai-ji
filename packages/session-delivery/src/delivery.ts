@@ -447,7 +447,6 @@ export function createDelivery(
       payload: e.payload,
       createdAt: e.createdAt,
       updatedAt: e.updatedAt,
-      sendAttempts: e.sendAttempts,
       ...(e.settledAt !== undefined ? { settledAt: e.settledAt } : {}),
     }
   }
@@ -822,7 +821,6 @@ export function createDelivery(
       payload: msg.payload,
       createdAt: ts,
       updatedAt: ts,
-      sendAttempts: 0,
       msg,
       cancelRequested: false,
       receiptAnchor: opts?.receiptAnchor ?? 'marker',
@@ -1015,7 +1013,6 @@ export function createDelivery(
       const idx = active.indexOf(e)
       if (idx !== -1) active.splice(idx, 1)
       e.state = 'queued'
-      e.sendAttempts = 0
       e.updatedAt = now()
       e.settledAt = undefined
     }
@@ -1075,7 +1072,6 @@ export function createDelivery(
       e.state = 'failed'
       e.updatedAt = ts
       e.settledAt = ts
-      e.sendAttempts = 1
       count++
       callOnSettled(e.msg, 'rejected')
     }

@@ -575,7 +575,8 @@ function dispatchMessageEntry(c: ChatStateCollector, entry: PiMessageEntry): voi
  *
  * case 覆盖（pi SessionEntry 全集）：message（role 细分 user/assistant/toolResult/
  * bashExecution/compactionSummary/custom/branchSummary）/ custom / label / compaction /
- * branch_summary / custom_message；未建模类型（thinking_level_change / model_change /
+ * branch_summary / custom_message / usage / context_edit（后两者零投影显式 no-op）；
+ * 未建模类型（thinking_level_change / model_change /
  * session_info / 未来的新类型）走 default no-op——「converter 不丢弃任何 pi entry 类型」
  * （父文档规则 #9）指不崩溃、不中断重放、不静默吞掉后续 entry；元数据类 entry 本身不产出
  * 对话流消息。

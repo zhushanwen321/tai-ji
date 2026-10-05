@@ -204,8 +204,6 @@ export interface DeliveryEntry {
   createdAt: number
   /** 最近一次状态迁移时间（epoch ms）。 */
   updatedAt: number
-  /** 已尝试投递次数（诊断用：首败即停语义下不再驱动重试判定，ADR-0122）。 */
-  sendAttempts: number
   /** 终态落定时间（epoch ms；delivered/failed/cancelled 时有值，tombstone 提取源）。 */
   settledAt?: number
 }
