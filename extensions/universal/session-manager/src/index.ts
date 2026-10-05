@@ -109,10 +109,13 @@ function asResultRecord(v: unknown): Record<string, unknown> | undefined {
 /**
  * 统一的 execute 包装：调用 select 通道并解析结果。
  * 返回标准 AgentToolResult 形状；select 取消/超时/异常/非 JSON 回包是错误路径，
- * 必须 throw（extension-conventions「禁止错误成功模式」——pi 契约里 execute 只有
- * throw 才被置 isError:true，返回值携带 isError 字段会被 agent-loop 丢弃
- * （agent-loop.js:453-483，PS-56），ask-user/scheduler/session-reader 的 W4 throw
- * 范式同款；调用方 agent 需能区分成功与失败以决定重试/放弃）。
+ * 必须 throw（extension-conventions「禁止错误成功模式」——execute throw → pi
+ * agent-loop catch 置 isError:true（pi-agent-core dist/agent-loop.js
+ * executePreparedToolCall，1.0.0 实读 catch :581-588）；1.0.0 起返回值 isError:true
+ * 也被尊重（同文件 :579 `isError: result.isError === true`，0.84.4 时返回值会被
+ * 丢弃）——本工具失败恒走 throw，两版语义等价（语义登记 PS-56）；
+ * ask-user/scheduler/session-reader 的 W4 throw 范式同款，调用方 agent 需能区分
+ * 成功与失败以决定重试/放弃）。
  */
 async function executeTool(
 	ctx: ExtensionContext,
