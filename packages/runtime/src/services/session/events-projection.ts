@@ -593,20 +593,15 @@ export class SessionEventProjection {
     this.coldReadDomain('run')
   }
 
-  /**
-   * 事件源是否已接线（任一目录非 undefined）——降级投影升级腿的判定面：entry-only
-   * 降级投影（构造时 meta 缺席）对推送恒拒（applyJournalReport 目录守卫），升级腿
-   * 据此判定是否需要按迟到 meta 补接线。
-   */
+  /** 事件源是否已接线（任一目录非 undefined）——降级投影升级腿的判定面。 */
   hasEventSources(): boolean {
     return this.recordsDir !== undefined || this.runJournalDir !== undefined
   }
 
   /**
-   * [降级闩死修复 2026-10-02] 迟到事件源补接线（幂等，disposed 安全）：构造时 meta
-   * 缺席的 entry-only 降级投影，meta 可得后由 ensureProjection 升级腿补目录并重跑
-   * attach 冷读（已折叠 seq 守卫去重，冷读幂等；fireChange 经既有发布腿出帧）。
-   * 已接线 = 零成本早退。entry 批与 fold 状态原位保留（同一实例，不重建）。
+   * [降级闩死修复 2026-10-02] 迟到事件源补接线（幂等，disposed 安全）：meta 缺席时
+   * 建出的 entry-only 降级投影，meta 可得后由升级腿补目录并重跑 attach 冷读（seq
+   * 守卫去重，entry 批与 fold 状态原位保留）；已接线 = 零成本早退。
    */
   attachEventSources(dirs: { recordsDir?: string; runJournalDir?: string }): void {
     if (this.disposed) return

@@ -158,6 +158,16 @@ export default [
       'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
     },
   },
+  // events-projection：session/workflow 事件投影聚合点（entry 批 + journal 推送双源
+  // 单点合并）。降级投影升级腿恢复（W-P2 重构回归修复）净增 9 行代码，509 > 500 微超
+  // 即提额（先例 pi-provider-store / server.ts「微超即提额，保留软上限告警」同型）——
+  // 再拆属独立重构任务。
+  {
+    files: ['packages/runtime/src/services/session/events-projection.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
+    },
+  },
   // [HISTORICAL] 复杂度债务偿还产物：
   // 以下文件因行为保持提取（helper 签名/花括号/JSDoc 开销）代码行超 max-lines 阈值。
   // 职责内聚（每文件均为单一子系统的高复杂度函数原地拆解，cyclo 已全部 ≤12），
