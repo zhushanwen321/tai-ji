@@ -2073,7 +2073,7 @@
     },
     {
       "id": "E2E-POSIXRESOLVE-01",
-      "summary": "POSIX resolve 折叠实现三份镜像字面量对拍守卫（posix-resolve-mirror-sync）：ui html-preview-path.ts resolvePosixPath（基准）× renderer markdown-sanitize.ts resolveResourcePath × ui MarkdownRenderer.vue resolveHrefPath 函数体逐字一致 + 折叠语义锚点在场机检（跨包不可 import——ui→renderer 依赖禁令，源文本字面量对拍；iframe 内联容器 src 与 markdown 相对链接点击落点共用同一相对路径解析语义，任一份漂移 = 两侧解析出不同绝对路径）",
+      "summary": "POSIX resolve 折叠实现三份镜像字面量对拍守卫（posix-resolve-mirror-sync）：ui html-preview-path.ts resolvePosixPath（基准）× renderer markdown-sanitize.ts resolveResourcePath × ui markdown-links.ts resolveHrefPath 函数体逐字一致 + 折叠语义锚点在场机检（跨包不可 import——ui→renderer 依赖禁令，源文本字面量对拍；iframe 内联容器 src 与 markdown 相对链接点击落点共用同一相对路径解析语义，任一份漂移 = 两侧解析出不同绝对路径）",
       "scope": [
         "scripts/check-posix-resolve-mirror-sync.mjs"
       ],

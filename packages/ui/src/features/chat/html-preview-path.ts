@@ -2,9 +2,9 @@
  * html-preview 内联容器的路径矩阵纯函数（chat-html-support §6.3 D3，v16 内联容器）。
  *
  * ui 包镜像纪律（ui→renderer 依赖禁令不可直接 import）：
- * - isAbsolutePath / resolvePosixPath 与 MarkdownRenderer ④路 resolveHrefPath 同标准
+ * - isAbsolutePath / resolvePosixPath 与 markdown-links.ts ④路 resolveHrefPath 同标准
  *   （base + rel 后逐段折叠 `.` / `..`）。POSIX resolve 折叠实现共三份逐字同款镜像：
- *   本文件 resolvePosixPath / ui MarkdownRenderer.vue resolveHrefPath /
+ *   本文件 resolvePosixPath / ui markdown-links.ts resolveHrefPath /
  *   renderer composables/logic/markdown-sanitize.ts resolveResourcePath——改动需三处
  *   同批同步（镜像纪律同 markdown-types.ts 协议镜像注释；漂移由
  *   scripts/check-posix-resolve-mirror-sync.mjs 源文本字面量对拍机检拦截）。

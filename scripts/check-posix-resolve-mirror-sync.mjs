@@ -8,7 +8,7 @@
  * （ui→renderer 依赖禁令）：
  *   ① ui html-preview-path.ts 的 resolvePosixPath（html-preview 内联容器 src/href 解析）；
  *   ② renderer markdown-sanitize.ts 的 resolveResourcePath（相对资源 img src 重写，D4）；
- *   ③ ui MarkdownRenderer.vue 的 resolveHrefPath（④路相对链接 href resolve）。
+ *   ③ ui markdown-links.ts 的 resolveHrefPath（④路相对链接 href resolve）。
  * 任一份漂移 = 两侧对同一相对路径解析出不同绝对路径（iframe src 与 markdown 链接点击
  * 落点不一致，越界收口行为分叉）。三份仅注释纪律同步无机检同族先例（产物目录公式、
  * capability 清单均已配对拍守卫），本守卫补齐。
@@ -40,12 +40,12 @@ import { fail, ok, isFailed, guardExit } from './lib/guard-report.mjs'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const UI_HTML_PREVIEW_PATH_SRC = join(ROOT, 'packages', 'ui', 'src', 'features', 'chat', 'html-preview-path.ts')
 const SANITIZE_SRC = join(ROOT, 'packages', 'renderer', 'src', 'composables', 'logic', 'markdown-sanitize.ts')
-const UI_MARKDOWN_RENDERER_SRC = join(ROOT, 'packages', 'ui', 'src', 'features', 'chat', 'MarkdownRenderer.vue')
+const UI_MARKDOWN_LINKS_SRC = join(ROOT, 'packages', 'ui', 'src', 'features', 'chat', 'markdown-links.ts')
 
 /** 函数体截取锚点（含声明前缀，避免匹配到调用点 / 注释提及）。 */
 export const UI_ANCHOR = 'export function resolvePosixPath'
 export const RENDERER_ANCHOR = 'export function resolveResourcePath'
-export const UI_VUE_ANCHOR = 'function resolveHrefPath'
+export const UI_LINKS_ANCHOR = 'function resolveHrefPath'
 
 /** 折叠语义锚点（三份缺一不可——防「一致删空 / 一致退化」的对拍盲区）。 */
 export const FOLD_SEMANTIC_ANCHORS = ["rel.startsWith('/')", "if (seg === '..')", 'parts.pop()']
@@ -111,7 +111,7 @@ function nextOne() {}`
 
   const uiText = bodyOf(UI_ANCHOR)
   const rendererText = bodyOf(RENDERER_ANCHOR)
-  const uiVueText = bodyOf(UI_VUE_ANCHOR)
+  const uiLinksText = bodyOf(UI_LINKS_ANCHOR)
 
   const uiBody = extractFunctionBody(uiText, UI_ANCHOR)
   assert(!uiBody.error && uiBody.text.includes("rel.startsWith('/')"), '函数体提取（含折叠拼接）')
@@ -120,9 +120,9 @@ function nextOne() {}`
 
   // 三份同款 → 逐字一致 + 锚点全在场
   const rendererBody = extractFunctionBody(rendererText, RENDERER_ANCHOR)
-  const uiVueBody = extractFunctionBody(uiVueText, UI_VUE_ANCHOR)
+  const uiLinksBody = extractFunctionBody(uiLinksText, UI_LINKS_ANCHOR)
   assert(
-    uiBody.text === rendererBody.text && uiBody.text === uiVueBody.text,
+    uiBody.text === rendererBody.text && uiBody.text === uiLinksBody.text,
     '三份同款样例逐字一致',
   )
   assert(missingFoldAnchors(uiBody.text).length === 0, '同款样例折叠语义锚点全在场')
@@ -170,7 +170,7 @@ function compareWithBaseline(baselineBody, mirrorBody, mirrorLabel, baselineLabe
   } else {
     fail(
       `折叠实现漂移: ${mirrorLabel} ≠ 基准 ${baselineLabel}` +
-        `——恢复动作：以任一份为准，把三份（${UI_ANCHOR} / ${RENDERER_ANCHOR} / ${UI_VUE_ANCHOR}）` +
+        `——恢复动作：以任一份为准，把三份（${UI_ANCHOR} / ${RENDERER_ANCHOR} / ${UI_LINKS_ANCHOR}）` +
         `函数体改为逐字同款（本侧源文件 ${mirrorSrc}；本守卫只对拍不裁决权威侧，语义变化须人工确认后三处同批同步）`,
     )
   }
@@ -179,16 +179,16 @@ function compareWithBaseline(baselineBody, mirrorBody, mirrorLabel, baselineLabe
 function main() {
   const uiText = readTextOrFail(UI_HTML_PREVIEW_PATH_SRC, 'ui html-preview-path 源文件')
   const rendererText = readTextOrFail(SANITIZE_SRC, 'renderer markdown-sanitize 源文件')
-  const uiVueText = readTextOrFail(UI_MARKDOWN_RENDERER_SRC, 'ui MarkdownRenderer 源文件')
-  if (uiText === null || rendererText === null || uiVueText === null) process.exit(1)
+  const uiLinksText = readTextOrFail(UI_MARKDOWN_LINKS_SRC, 'ui markdown-links 源文件')
+  if (uiText === null || rendererText === null || uiLinksText === null) process.exit(1)
 
   const uiBody = extractFunctionBody(uiText, UI_ANCHOR)
   const rendererBody = extractFunctionBody(rendererText, RENDERER_ANCHOR)
-  const uiVueBody = extractFunctionBody(uiVueText, UI_VUE_ANCHOR)
+  const uiLinksBody = extractFunctionBody(uiLinksText, UI_LINKS_ANCHOR)
   const extracted = [
     [`ui ${UI_ANCHOR}`, uiBody, UI_HTML_PREVIEW_PATH_SRC],
     [`renderer ${RENDERER_ANCHOR}`, rendererBody, SANITIZE_SRC],
-    [`ui ${UI_VUE_ANCHOR}`, uiVueBody, UI_MARKDOWN_RENDERER_SRC],
+    [`ui ${UI_LINKS_ANCHOR}`, uiLinksBody, UI_MARKDOWN_LINKS_SRC],
   ]
   for (const [label, body, src] of extracted) {
     if (body.error) fail(`${label} 提取失败: ${body.error}——恢复动作：核对 ${src} 函数形态（闭合 '}' 须在行首）`)
@@ -210,9 +210,9 @@ function main() {
     )
   }
 
-  // ② 三份函数体逐字对拍（renderer ↔ MarkdownRenderer 由等价传递覆盖）
+  // ② 三份函数体逐字对拍（renderer ↔ markdown-links 由等价传递覆盖）
   compareWithBaseline(uiBody, rendererBody, `renderer ${RENDERER_ANCHOR}`, baselineLabel, SANITIZE_SRC)
-  compareWithBaseline(uiBody, uiVueBody, `ui ${UI_VUE_ANCHOR}`, baselineLabel, UI_MARKDOWN_RENDERER_SRC)
+  compareWithBaseline(uiBody, uiLinksBody, `ui ${UI_LINKS_ANCHOR}`, baselineLabel, UI_MARKDOWN_LINKS_SRC)
 
   guardExit(
     '✓ POSIX resolve 三份折叠实现对拍通过（函数体逐字一致 + 折叠语义锚点在场）',

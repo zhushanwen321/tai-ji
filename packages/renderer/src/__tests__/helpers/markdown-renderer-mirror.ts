@@ -3,21 +3,21 @@ import { resolve } from 'node:path'
 import { runInNewContext } from 'node:vm'
 
 /**
- * ui 侧 MarkdownRenderer.vue 镜像函数提取器（U-A6 镜像守卫测试专用 helper，设计 D4-7 短期层）。
+ * ui 侧 MarkdownRenderer 镜像函数提取器（U-A6 镜像守卫测试专用 helper，设计 D4-7 短期层）。
  *
- * 背景：ui→renderer 依赖禁令使 ui 包 MarkdownRenderer.vue 内的相对路径判定/resolve 与
- * base64 解码函数只能以镜像形态存在（与 renderer markdown-sanitize.ts 的
- * isRelativeResourcePath/resolveResourcePath、markdown.ts 的 decodeBase64 同标准，两侧注释
- * 互指，改动需同批同步——镜像纪律同 markdown-types.ts 协议镜像）。守卫测试喂同输入断言
- * 同输出：任一侧语义漂移即红灯。
+ * 背景：ui→renderer 依赖禁令使 ui 包内的相对路径判定/resolve 与 base64 解码函数只能以镜像
+ * 形态存在（与 renderer markdown-sanitize.ts 的 isRelativeResourcePath/resolveResourcePath、
+ * markdown.ts 的 decodeBase64 同标准，两侧注释互指，改动需同批同步——镜像纪律同
+ * markdown-types.ts 协议镜像）。守卫测试喂同输入断言同输出：任一侧语义漂移即红灯。
  *
- * 提取方式（零生产代码改动）：从 MarkdownRenderer.vue 源码中按顶层声明锚点提取函数文本，
- * 经 esbuild 转译（剥离 TS 类型注解）后在 node:vm 沙箱构造可调用函数——ui 侧函数是组件内
- * 局部函数（非 export），任何包都无法 import，源码提取是唯一不改生产代码的可达路径。
- * 语义保真由提取即源码本身保证：改 ui 侧函数语义，守卫下一次运行提取到的就是新语义。
+ * 提取方式（零生产代码改动）：从 ui 侧 markdown-links.ts（镜像纯函数模块）源码中按顶层
+ * 声明锚点提取函数文本，经转译（剥离 TS 类型注解）后在 node:vm 沙箱构造可调用函数——
+ * chat 内部模块不在 ui 包 exports 白名单，renderer 无法 import，源码提取是零生产代码
+ * 改动的可达路径。语义保真由提取即源码本身保证：改 ui 侧函数语义，守卫下一次运行
+ * 提取到的就是新语义。
  */
 
-const MARKDOWN_RENDERER_VUE = resolve(__dirname, '../../../../ui/src/features/chat/MarkdownRenderer.vue')
+const MARKDOWN_LINKS_TS = resolve(__dirname, '../../../../ui/src/features/chat/markdown-links.ts')
 
 /** ui 侧提取函数签名（与 renderer 侧对应导出函数同型） */
 export interface UiMarkdownRendererMirrors {
@@ -26,16 +26,16 @@ export interface UiMarkdownRendererMirrors {
   decodeB64: (b64: string) => string
 }
 
-/** 提取 MarkdownRenderer.vue script setup 顶层声明（函数体顶格、闭括号顶格；const 单行） */
+/** 提取 markdown-links.ts 顶层声明（export 可选前缀；函数体顶格、闭括号顶格；const 单行） */
 function extractTopLevelBlock(src: string, name: string, kind: 'function' | 'const'): string {
   const re =
     kind === 'function'
-      ? new RegExp(`^function ${name}\\([\\s\\S]*?^\\}`, 'm')
-      : new RegExp(`^const ${name} = .*$`, 'm')
+      ? new RegExp(`^(?:export )?function ${name}\\([\\s\\S]*?^\\}`, 'm')
+      : new RegExp(`^(?:export )?const ${name} = .*$`, 'm')
   const m = src.match(re)
   if (!m) {
     throw new Error(
-      `镜像守卫提取失败：MarkdownRenderer.vue 中未找到顶层 ${kind} ${name}。` +
+      `镜像守卫提取失败：markdown-links.ts 中未找到顶层 ${kind} ${name}。` +
         `ui 侧镜像函数被改名/移动/缩进调整——守卫失效需人工对位：核对 ui 侧函数与 ` +
         `renderer 侧镜像（markdown-sanitize.ts / markdown.ts）语义是否仍一致，` +
         `再更新本 helper 的提取锚点。镜像纪律见两测文件头注释。`,
@@ -50,13 +50,17 @@ function extractTopLevelBlock(src: string, name: string, kind: 'function' | 'con
  * 函数体内含 TS 注解（如 const parts: string[]），故整段转译而非正则剥注解；转译失败显式红。
  */
 export async function loadUiMarkdownRendererMirrors(): Promise<UiMarkdownRendererMirrors> {
-  const vueSrc = readFileSync(MARKDOWN_RENDERER_VUE, 'utf8')
+  const linksSrc = readFileSync(MARKDOWN_LINKS_TS, 'utf8')
+  // 片段行首剥 export 修饰：vm 沙箱是 Script（CommonJS）语义不吃 ESM 语法，转译也不剥
+  // export——剥前缀后与组件内裸声明形态一致
   const ts = [
-    extractTopLevelBlock(vueSrc, 'SCHEME_RE', 'const'),
-    extractTopLevelBlock(vueSrc, 'isRelativeHref', 'function'),
-    extractTopLevelBlock(vueSrc, 'resolveHrefPath', 'function'),
-    extractTopLevelBlock(vueSrc, 'decodeB64', 'function'),
-  ].join('\n')
+    extractTopLevelBlock(linksSrc, 'SCHEME_RE', 'const'),
+    extractTopLevelBlock(linksSrc, 'isRelativeHref', 'function'),
+    extractTopLevelBlock(linksSrc, 'resolveHrefPath', 'function'),
+    extractTopLevelBlock(linksSrc, 'decodeB64', 'function'),
+  ]
+    .map((block) => block.replace(/^export /, ''))
+    .join('\n')
   const { transformWithOxc } = await import('vite')
   const { code } = await transformWithOxc(ts, 'markdown-renderer-mirror-extract.ts', { lang: 'ts' })
   // vm 沙箱注入宿主 atob / TextDecoder / Uint8Array（decodeB64 体内引用，统一 realm 避免

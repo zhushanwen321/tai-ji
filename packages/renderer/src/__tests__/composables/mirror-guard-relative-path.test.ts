@@ -3,8 +3,9 @@
 //
 // 镜像两侧（ui→renderer 依赖禁令所致，两侧注释互指、改动需同批同步）：
 // - renderer：composables/logic/markdown-sanitize.ts 的 isRelativeResourcePath / resolveResourcePath
-// - ui：features/chat/MarkdownRenderer.vue 的 isRelativeHref / resolveHrefPath（组件内局部函数，
-//   经 helpers/markdown-renderer-mirror.ts 源码提取构造，非 import）
+// - ui：features/chat/markdown-links.ts 的 isRelativeHref / resolveHrefPath（镜像纯函数模块，
+//   经 helpers/markdown-renderer-mirror.ts 源码提取构造——chat 内部模块不在 ui exports
+//   白名单，renderer 不 import）
 //
 // 守卫语义：两侧喂同一组代表性输入（含空串/锚点/协议相对/scheme/绝对路径/../ 穿越/含特殊
 // 字符路径等边界），逐例断言输出等于设计语义锚定值——任一侧漂移或双侧同漂均红灯。
