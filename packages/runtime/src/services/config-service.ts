@@ -71,6 +71,7 @@ import {
 } from './smart-context-config.js'
 import { loadAppConfig as loadAppConfigImpl, saveAppConfig as saveAppConfigImpl, type SaveAppConfigResult } from './app-config-store.js'
 import { isModelsStoreCorrupted as isModelsStoreCorruptedImpl } from '../infra/pi/pi-provider-store.js'
+import { SETTINGS_CORRUPTED, errorCodeOf, toErrorMessage } from '../utils/errors.js'
 import {
   getDefaultModel as getDefaultModelImpl,
   setDefaultModel as setDefaultModelImpl,
@@ -493,7 +494,23 @@ export class ConfigService implements IConfigService {
   }
 
   migrateSettingsSkillsToDiscovery(): void {
-    this.configStore.migrateSettingsSkillsToDiscovery()
+    // 启动路径（组合根 listen 前同步段调用）：settings.json 损坏时读侧统一阻断抛
+    // settings_corrupted（错误码判别，见 utils/errors errorCodeOf；类识别属 infra 层
+    // 内部消费方形态）——显式捕获呈结构化告警（message 单一来源组装于错误类构造处，
+    // 含路径与修复指引），不阻塞启动（ES1，沿 cleanLeakedPackages /
+    // runCodemodeStartupMigration 同款；迁移幂等，修复文件后重启自动补跑）。
+    // 非损坏错误不吞，维持上抛。
+    try {
+      this.configStore.migrateSettingsSkillsToDiscovery()
+    } catch (e) {
+      if (errorCodeOf(e) === SETTINGS_CORRUPTED) {
+        console.warn(
+          `[config-service] skills 启动迁移跳过（不阻塞启动，修复后重启自动补跑）。${toErrorMessage(e)}`,
+        )
+        return
+      }
+      throw e
+    }
   }
 
   // ── Agent CRUD（委托 agent-config-helper）────────────────────────

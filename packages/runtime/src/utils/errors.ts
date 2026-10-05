@@ -93,6 +93,20 @@ export const SESSION_NOT_FOUND = 'SESSION_NOT_FOUND'
 export const RESTORE_FAILED = 'RESTORE_FAILED'
 
 /**
+ * settings.json 损坏时拒绝启动 pi 会话的错误码（pi 会话启动门禁，用户终裁 fail-fast）。
+ *
+ * 触发面：ProcessManager.createSession（pi 进程 spawn 唯一入口）顶部经
+ * getSettingsCorruption() 现查命中——损坏（原路径 JSON 非法/不可读，或已被隔离出
+ * `.corrupt-*` 副本）时不允许启动任何新 pi 进程（会话创建/恢复/fork/崩溃自动重生/
+ * 短命 pi 全部经此单点被拒）。已运行会话不经此入口，不受影响。
+ *
+ * 用户面：消息含 settings.json 绝对路径 + `.corrupt-*` 副本路径（若有）+ 修复指引
+ * 「修复或删除该文件后重试，无需重启」；transport 中央 catch 透传本 code 为 error
+ * envelope（与 MODEL_NOT_CONFIGURED 同通路），renderer 经既有双语错误模板插值呈现。
+ */
+export const SETTINGS_CORRUPTED = 'settings_corrupted'
+
+/**
  * 会话激活失败（无码错误的统一包装）。
  *
  * model-switch-live-provider-sync U2：停止态/回收态 session 的模型切换与档位设置先走

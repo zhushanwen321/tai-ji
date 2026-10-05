@@ -41,6 +41,14 @@ export interface JsonStoreOptions<T> {
    * 不同 store 的「空」定义不同（空对象 vs 空数组字段），由调用方决定。
    */
   shouldDeleteWhen?: (value: T) => boolean
+  /**
+   * 读损坏（非 ENOENT 读失败 / parse 失败）策略。默认 'quarantine'（隔离留底 +
+   * 默认值回落，见 quarantineCorruptFile）；'throw' = 读失败原样上抛，不隔离、
+   * 不回落默认值。settings.json 专用（用户终裁：核心配置损坏一律 fail-fast，统一
+   * 阻断入口 readSettings 捕获后转译 SettingsCorruptedError）——settings 之外的
+   * 存储维持隔离回落语义不变。
+   */
+  corruptReadPolicy?: 'quarantine' | 'throw'
 }
 
 interface CacheEntry<T> {
@@ -79,6 +87,7 @@ export class JsonStore<T> {
   private readonly indent: number
   private readonly deserialize: (raw: unknown) => T
   private readonly shouldDeleteWhen: (value: T) => boolean
+  private readonly corruptReadPolicy: 'quarantine' | 'throw'
   private cache: CacheEntry<T> | null = null
 
   constructor(path: string, defaultValue: T, opts?: JsonStoreOptions<T>) {
@@ -87,6 +96,7 @@ export class JsonStore<T> {
     this.indent = opts?.indent ?? DEFAULT_INDENT
     this.deserialize = opts?.deserialize ?? ((v): T => v as T)
     this.shouldDeleteWhen = opts?.shouldDeleteWhen ?? (() => false)
+    this.corruptReadPolicy = opts?.corruptReadPolicy ?? 'quarantine'
   }
 
   /** 读取：指纹一致返缓存；指纹变 / 文件被删 → 重读盘 + parse + ENOENT→默认值。 */
@@ -154,9 +164,11 @@ export class JsonStore<T> {
       raw = readFileSync(this.path, 'utf-8')
     } catch (e: unknown) {
       // ENOENT 是「尚无文件」的正常态，直接回默认值；其余读错误（EACCES/EISDIR 等）
-      // 同样先隔离现场再降级——半截/不可读文件若留在原位，下一次 write 会把默认值
-      // 写回去，把可恢复的现场合法化成「全空配置」
+      // 按策略分流：'throw' 原样上抛（settings.json fail-fast，半截/不可读文件不许
+      // 静默合法化）；'quarantine' 先隔离现场再降级——半截/不可读文件若留在原位，
+      // 下一次 write 会把默认值写回去，把可恢复的现场合法化成「全空配置」
       if (!isEnoent(e)) {
+        if (this.corruptReadPolicy === 'throw') throw e
         this.quarantine('read failed', e)
       }
       return { value: this.defaultValue, revision }
@@ -164,6 +176,7 @@ export class JsonStore<T> {
     try {
       return { value: this.deserialize(JSON.parse(raw)), revision }
     } catch (e: unknown) {
+      if (this.corruptReadPolicy === 'throw') throw e
       this.quarantine('parse failed', e)
       return { value: this.defaultValue, revision }
     }

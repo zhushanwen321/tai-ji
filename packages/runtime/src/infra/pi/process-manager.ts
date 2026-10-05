@@ -6,7 +6,7 @@ import { RpcClient, type RpcClientOptions } from './rpc-client.js'
 import { getConfigDir } from './pi-paths.js'
 import { assertPiSessionFile } from './session-attach-assert.js'
 import type { IProcessManager } from '../../services/ports/pi-engine.js'
-import { toErrorMessage } from '../../utils/errors.js'
+import { SETTINGS_CORRUPTED, errorWithCode, toErrorMessage } from '../../utils/errors.js'
 import { isPackaged } from '../../utils/runtime-env.js'
 import { buildOutboundChildEnv } from '../spawn-env.js'
 // E-2（subagent-realtime-channel §4.2/§4.4）：findPiExecutable 抽出为共享函数
@@ -20,6 +20,10 @@ import {
   ensureRuntimeEngineRootsEnv,
   getEngineRootsSpawnEnv,
 } from '../../services/session/engine-roots.js'
+// pi 会话启动门禁的损坏判定单点（用户终裁 fail-fast）：getSettingsCorruption 每次
+// 调用现查（raw 预检不经 JsonStore，检测动作自身不触发改名），保证「改坏 → 拒绝 →
+// 修复 → 放行」全程无需重启 runtime。
+import { getSettingsCorruption } from './pi-settings-store.js'
 
 interface ManagedProcess {
   client: RpcClient
@@ -146,10 +150,46 @@ export class ProcessManager implements IProcessManager {
   }
 
   /**
+   * pi 会话启动门禁（用户终裁 fail-fast，2026-10-05）：settings.json 损坏时不允许启动 pi。
+   *
+   * 检测单点 getSettingsCorruption()（pi-settings-store）每次现查（无缓存）——settings.json
+   * 是 taiji/pi/用户三方共享的核心配置，可能在任意时刻被改坏（手工编辑是一等场景）；
+   * 现查保证「同进程内先拒后修再放行」无需重启。
+   *
+   * 插入点语义：
+   * - createSession 是 pi 进程 spawn 的**唯一入口**——会话创建（lifecycle.createNew）、
+   *   恢复（spawnRestoreClient，覆盖 session.restore RPC / 崩溃自动重生 respawn /
+   *   惰性恢复 ensureActive / 重启 reattach）、fork（switch_session 重 spawn 形态）、
+   *   短命 pi（withEphemeralPi，非活跃 session 改名等一次性附着）全部汇入此处，
+   *   单点门禁结构性覆盖全部 spawn 形态，无需各入口逐个插检查。
+   * - 位置在一切副作用之前（含旧进程 destroySession）：损坏时零副作用直接拒绝，
+   *   已运行会话不经此入口、不受影响（「只拦新 spawn」语义）。
+   * - 错误信封：errorWithCode(SETTINGS_CORRUPTED) 经 transport 中央 catch 透传为
+   *   error envelope（code + message，与 MODEL_NOT_CONFIGURED 同通路）；restore 链
+   *   经既有 catch 收敛为 RESTORE_FAILED（message 原样保留）。
+   */
+  private assertSettingsReadableForSpawn(): void {
+    const corruption = getSettingsCorruption()
+    if (!corruption.corrupted) return
+    const copyHint = corruption.corruptCopyPath
+      ? ` The damaged original was preserved at ${corruption.corruptCopyPath}.`
+      : ''
+    throw errorWithCode(
+      `Cannot start pi session: settings.json is corrupted (${corruption.filePath}).`
+      + copyHint
+      + ' Fix or delete the file, then retry; no restart is needed.',
+      SETTINGS_CORRUPTED,
+    )
+  }
+
+  /**
    * Spawn a new pi subprocess for the given session.
    * If a process already exists for this sessionId it is killed first.
    */
   async createSession(sessionId: string, cwd: string, options?: RpcClientOptions): Promise<RpcClient> {
+    // pi 会话启动门禁（见方法上方 JSDoc）：损坏时零副作用拒绝，进程未 spawn。
+    this.assertSettingsReadableForSpawn()
+
     if (this.processes.has(sessionId)) {
       await this.destroySession(sessionId)
     }

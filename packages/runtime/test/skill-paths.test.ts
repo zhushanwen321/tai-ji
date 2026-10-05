@@ -67,6 +67,22 @@ vi.mock('../src/infra/pi/pi-provider-store.js', async (importOriginal) => {
     refreshAll: () => {},
   }
 })
+// settings 损坏检测/读侧阻断经真实实现会在本文件的完全替换式 fs mock（readFileSync→''）下
+// 把一切文件判为损坏（JSON.parse('') 抛）——createSession 启动门禁与 readSettings 预检均
+// 拒绝，spawn 不执行、capture 为空。本测试聚焦 skill 路径解析，settings 恒按「存在且合法」
+// mock（与上方 pi-provider-store.readSettings mock 同口径）。
+vi.mock('../src/infra/pi/pi-settings-store.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/infra/pi/pi-settings-store.js')>()
+  return {
+    ...actual,
+    readSettings: () => ({}),
+    getSettingsCorruption: () => ({
+      corrupted: false,
+      filePath: '/mock/home/.taiji/agent/settings.json',
+      corruptCopyPath: null,
+    }),
+  }
+})
 vi.mock('../src/infra/pi/session-file-utils.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/infra/pi/session-file-utils.js')>()
   return { ...actual, scanPiSessions: () => mockScannedSessions }

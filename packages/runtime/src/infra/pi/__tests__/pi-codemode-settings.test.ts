@@ -15,7 +15,15 @@
  *   规范化（非数组坏值视为显式配置动作覆盖为增量表达）+ 混合纯名边界 + 用户条目保留。
  * - getSettingsCorruption：两形态（raw 预检非法 JSON / .corrupt- 副本）+ 每次现查 +
  *   检测动作自身绝不触发隔离改名（A1 核心约束）。
- * - runCodemodeStartupMigration：损坏跳过 + 结构化告警；未损坏幂等写入。
+ * - updateSettingsFields：锁内损坏预检拒入（写侧全局防线，唯一写入口一处门禁覆盖全部
+ *   字段域）——损坏写被拒（SettingsWriteRejectedError）+ 结构化告警形状 + mutator 不执行 +
+ *   文件原样无隔离副本；竞态窗口语义（锁外观察为好后并发写坏，锁内写仍被拒）。
+ * - PiCodemodeSettings.setEnabled：损坏拒入（SettingsWriteRejectedError）与读竞态
+ *   （SettingsCorruptedError）结果转译（ok:false + corruption 载荷）。
+ * - PiCodemodeSettings.getEnabled：读侧归一——损坏经 readSettings 抛
+ *   SettingsCorruptedError，本类捕获转译错误态信封（enabled=false + corruption 载荷），
+ *   读取路径零隔离、修复文件后无需失效动作即恢复。
+ * - runCodemodeStartupMigration：损坏拒入不阻塞启动；未损坏幂等写入。
  *
  * 运行：pnpm -C packages/runtime test pi-codemode-settings pi-settings-store
  */
@@ -29,6 +37,7 @@ import {
   PI_DEFAULT_TOOL_NAMES,
   ensureCodemodeDefaultEntry,
   isCodemodeActive,
+  PiCodemodeSettings,
   resolveDefaultToolSet,
   runCodemodeStartupMigration,
   setCodemodeEntry,
@@ -37,6 +46,8 @@ import {
   getSettingsCorruption,
   invalidateSettingsCache,
   setSettingsPath,
+  SettingsWriteRejectedError,
+  updateSettingsFields,
   type SettingsCorruption,
 } from '../pi-settings-store.js'
 
@@ -390,5 +401,142 @@ describe('runCodemodeStartupMigration · 组合根启动序列编排', () => {
     } finally {
       chmodSync(dir, 0o755)
     }
+  })
+})
+
+// ── 6. 写侧全局拒入（updateSettingsFields 锁内损坏预检——唯一写入口一处门禁覆盖全部域）──
+
+describe('updateSettingsFields · 锁内损坏预检拒入（写侧全局防线）', () => {
+  it.each([
+    ['model'], ['skills'], ['extension'], ['retry'], ['tools'], ['full'],
+  ] as const)('损坏文件 + %s 域写入 → 抛 SettingsWriteRejectedError，mutator 不执行，文件原样无隔离副本', (scope) => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    writeFileSync(settingsPath, '{ broken', 'utf-8')
+    expect(() =>
+      updateSettingsFields(scope, () => {
+        throw new Error('mutator must not run when corruption gate rejects')
+      }),
+    ).toThrow(SettingsWriteRejectedError)
+    // 文件原样：预检先于锁内 JsonStore 读——不触发读时隔离改名、不产生空基线写回
+    expect(readFileSync(settingsPath, 'utf-8')).toBe('{ broken')
+    expect(readdirSync(dir).filter(name => name.includes('.corrupt-'))).toEqual([])
+    // 结构化告警形状（对齐 codemode 域形态）：含路径、字段域、恢复指引
+    const logged = warnSpy.mock.calls.map(c => c.join(' ')).join('\n')
+    expect(logged).toContain(settingsPath)
+    expect(logged).toContain(`字段域: ${scope}`)
+    expect(logged).toContain('修复或删除该文件后重试')
+  })
+
+  it('竞态窗口语义（原锁外预检用例改写）：锁外观察为好 → 并发写坏 → 锁内写被拒且不合法化覆盖', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    writeFileSync(settingsPath, JSON.stringify({ defaultModel: 'keep-me', packages: ['p1'] }), 'utf-8')
+    invalidateSettingsCache()
+    // t0：锁外观察时刻（旧实现预检所在位置）——文件合法
+    expect(getSettingsCorruption().corrupted).toBe(false)
+    // t1：并发写方在预检之后、锁内读改写之前把文件改坏
+    writeFileSync(settingsPath, '{ corrupted-by-race', 'utf-8')
+    // t2：锁内预检命中 → 拒绝写入；用户字段不被空基线覆盖，坏文件原样保留
+    expect(() =>
+      updateSettingsFields('tools', s => { s.defaultTools = ['+codemode'] }),
+    ).toThrow(SettingsWriteRejectedError)
+    expect(readFileSync(settingsPath, 'utf-8')).toBe('{ corrupted-by-race')
+    expect(readdirSync(dir).filter(name => name.includes('.corrupt-'))).toEqual([])
+    expect(warnSpy.mock.calls.length).toBeGreaterThan(0)
+  })
+
+  it('副本形态（原路径已被隔离）+ 写入 → 拒绝 + 错误载荷与告警含副本路径', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const copyPath = join(dir, `settings.json${corruptCopyName('2026-10-04T03:00:00.000Z')}`)
+    writeFileSync(copyPath, '{ broken', 'utf-8')
+    let caught: unknown
+    try {
+      updateSettingsFields('retry', () => {})
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toBeInstanceOf(SettingsWriteRejectedError)
+    const err = caught as SettingsWriteRejectedError
+    expect(err.code).toBe('settings_write_rejected')
+    expect(err.corruption.corrupted).toBe(true)
+    expect(err.corruption.corruptCopyPath).toBe(copyPath)
+    expect(err.message).toContain(copyPath)
+    expect(err.message).toContain('修复或删除该文件后重试')
+    expect(warnSpy.mock.calls.map(c => c.join(' ')).join('\n')).toContain(copyPath)
+  })
+
+  it('未损坏 → 正常写入（门禁只拦坏文件，好文件行为不变）', () => {
+    writeFileSync(settingsPath, JSON.stringify({ defaultModel: 'm' }), 'utf-8')
+    invalidateSettingsCache()
+    updateSettingsFields('model', s => { s.defaultThinkingLevel = 'high' })
+    const disk = onDisk()
+    expect(disk.defaultThinkingLevel).toBe('high')
+    expect(disk.defaultModel).toBe('m')
+  })
+})
+
+// ── 7. setEnabled 结果转译（锁内拒入 → ok:false 信封）────────────────────────
+
+describe('PiCodemodeSettings.setEnabled · 锁内拒入结果转译', () => {
+  it('损坏 → ok:false + corruption 载荷（error 含路径与恢复指引），文件原样', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    writeFileSync(settingsPath, '{ broken', 'utf-8')
+    const result = new PiCodemodeSettings().setEnabled(true)
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable: expected rejection')
+    expect(result.corruption.filePath).toBe(settingsPath)
+    expect(result.corruption.corruptCopyPath).toBeNull()
+    expect(result.error).toContain(settingsPath)
+    expect(result.error).toContain('修复或删除该文件后重试')
+    expect(readFileSync(settingsPath, 'utf-8')).toBe('{ broken')
+  })
+
+  it('副本形态 → corruption.corruptCopyPath 有值', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const copyPath = join(dir, `settings.json${corruptCopyName('2026-10-04T04:00:00.000Z')}`)
+    writeFileSync(copyPath, '{ broken', 'utf-8')
+    const result = new PiCodemodeSettings().setEnabled(false)
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable: expected rejection')
+    expect(result.corruption.corruptCopyPath).toBe(copyPath)
+  })
+
+  it('未损坏 → 正常写入 ok:true（落盘终态）', () => {
+    seed(undefined)
+    const result = new PiCodemodeSettings().setEnabled(true)
+    expect(result).toEqual({ ok: true, enabled: true })
+    expect(onDisk().defaultTools).toEqual(['+codemode'])
+  })
+})
+
+// ── 8. getEnabled 读侧归一（读侧统一阻断后 catch SettingsCorruptedError 单一路径）──
+
+describe('PiCodemodeSettings.getEnabled · 读侧归一（损坏错误态经 SettingsCorruptedError 转译）', () => {
+  it('损坏 → 错误态信封（enabled=false + corruption 载荷），文件原样无隔离副本', () => {
+    writeFileSync(settingsPath, '{ broken', 'utf-8')
+    const result = new PiCodemodeSettings().getEnabled()
+    expect(result.enabled).toBe(false)
+    expect(result.corruption).toEqual({ filePath: settingsPath, corruptCopyPath: null })
+    // 隔离退役：读侧归一后损坏读取仍零隔离、原文件字节原样
+    expect(readdirSync(dir).filter(name => name.includes('.corrupt-'))).toEqual([])
+    expect(readFileSync(settingsPath, 'utf-8')).toBe('{ broken')
+  })
+
+  it('副本形态 → corruption.corruptCopyPath 有值', () => {
+    const copyPath = join(dir, `settings.json${corruptCopyName('2026-10-05T05:00:00.000Z')}`)
+    writeFileSync(copyPath, '{ broken', 'utf-8')
+    const result = new PiCodemodeSettings().getEnabled()
+    expect(result.enabled).toBe(false)
+    expect(result.corruption?.corruptCopyPath).toBe(copyPath)
+  })
+
+  it('未损坏 → 正常读取（开关真实终态 + corruption=null）；修复文件后无需失效动作即恢复', () => {
+    seed(['+codemode'])
+    expect(new PiCodemodeSettings().getEnabled()).toEqual({ enabled: true, corruption: null })
+
+    // 损坏 → 错误态；修回合法（开关为关的终态）→ 读取恢复且判定为关
+    writeFileSync(settingsPath, '{ broken', 'utf-8')
+    expect(new PiCodemodeSettings().getEnabled().enabled).toBe(false)
+    writeFileSync(settingsPath, JSON.stringify({ defaultTools: ['-codemode'] }), 'utf-8')
+    expect(new PiCodemodeSettings().getEnabled()).toEqual({ enabled: false, corruption: null })
   })
 })

@@ -264,7 +264,13 @@ export interface IPiEngine {
  * 这是「多进程调度」视角：按 sessionId 查/建/销毁 pi 进程，是 IPiEngine 的集合管理者。
  */
 export interface IProcessManager {
-  /** 创建并启动一个新的 pi 进程，绑定到 sessionId。返回其 IPiEngine 句柄。 */
+  /**
+   * 创建并启动一个新的 pi 进程，绑定到 sessionId。返回其 IPiEngine 句柄。
+   *
+   * pi 会话启动门禁（fail-fast）：settings.json 损坏（getSettingsCorruption 现查命中）
+   * 时抛 `code = 'settings_corrupted'` 错误，进程不 spawn——创建/恢复/fork/自动重生/
+   * 短命 pi 全部经本方法，单点覆盖；已运行会话不经此入口，不受影响。
+   */
   createSession(sessionId: string, cwd: string, options?: PiSessionOptions): Promise<IPiEngine>
   /** 销毁 sessionId 对应的 pi 进程。 */
   destroySession(sessionId: string): Promise<void>

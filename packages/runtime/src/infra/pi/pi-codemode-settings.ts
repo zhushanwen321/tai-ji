@@ -35,7 +35,13 @@
  * DEFAULT_TOOL_NAMES，空集与回落默认集对 includes('codemode') 同结果）。
  */
 
-import { updateSettingsFields, getSettingsCorruption, readSettings, type PiSettings } from './pi-settings-store.js'
+import {
+  updateSettingsFields,
+  readSettings,
+  SettingsCorruptedError,
+  SettingsWriteRejectedError,
+  type PiSettings,
+} from './pi-settings-store.js'
 import type { ICodemodeSettings } from '../../services/ports/codemode-settings.js'
 import type { CodemodeEnabledResult, CodemodeSetEnabledResult } from '@taiji/shared'
 
@@ -102,9 +108,8 @@ function isFieldUnset(raw: unknown): boolean {
  * （任何内容，含空数组、坏值）→ 不碰。经 updateSettingsFields('tools', …)（跨进程锁 +
  * 字段域 merge），用户其他字段与 defaultTools 内其他条目零触碰。
  *
- * 遇损坏文件须先经 getSettingsCorruption() 拒入（runCodemodeStartupMigration 编排）——
- * 损坏时 updateSettingsFields 锁内重读走 JsonStore 会触发读时隔离改名、以空基线合法化
- * 覆盖用户全部字段（A1 要堵死的路径）。
+ * settings.json 损坏时 updateSettingsFields 锁内预检统一拒入（抛 SettingsWriteRejectedError，
+ * 坏文件原样保留，不触发隔离改名、不以空基线覆盖用户字段），本函数不重复预检。
  */
 export function ensureCodemodeDefaultEntry(): void {
   updateSettingsFields('tools', (s: PiSettings) => {
@@ -150,29 +155,19 @@ export function setCodemodeEntry(enabled: boolean): void {
 }
 
 /**
- * 组合根启动迁移入口（codemode 设计 D1/A1：listen 前同步段、与 cleanLeakedPackages
- * 同窗口、先于一切 pi 进程 spawn）。损坏 → 跳过迁移 + 结构化告警（含路径与恢复指引）；
- * 未损坏 → 幂等默认写入。迁移失败不阻塞启动（沿 cleanLeakedPackages ES1 风格，
- * 下次启动重试幂等）。
+ * 组合根启动迁移入口（codemode 设计 D1/D2/A1：listen 前同步段、与 cleanLeakedPackages
+ * 同窗口、先于一切 pi 进程 spawn）。损坏 → updateSettingsFields 锁内预检拒入（结构化
+ * 告警由 store 层落，含路径与恢复指引）+ 本层 catch 留痕不阻塞启动（沿 cleanLeakedPackages
+ * ES1 风格，修复后重启自动补跑幂等迁移）；未损坏 → 幂等默认写入。
  */
 export function runCodemodeStartupMigration(): void {
-  // A1 写点拒入：进 updateSettingsFields 之前先查损坏单点（每次现查）
-  const corruption = getSettingsCorruption()
-  if (corruption.corrupted) {
-    const copyNote = corruption.corruptCopyPath
-      ? `，原内容可从隔离副本找回: ${corruption.corruptCopyPath}`
-      : ''
-    console.warn(
-      `[pi-codemode-settings] settings.json 已损坏，跳过 codemode 启动迁移。文件: ${corruption.filePath}${copyNote}。` +
-      `恢复指引：修复或删除该文件后重试（重启后迁移自动补跑）。`,
-    )
-    return
-  }
   try {
     ensureCodemodeDefaultEntry()
   } catch (e) {
     // 降级策略（best-effort）：迁移失败不阻塞启动（ES1，沿 cleanLeakedPackages 同款），
-    // 错误留痕后继续启动主路径；写入幂等，下次启动自动补跑
+    // 错误留痕后继续启动主路径；写入幂等，下次启动自动补跑。
+    // 损坏拒入（SettingsWriteRejectedError）同样走此处：store 层已落结构化告警，
+    // 本条留痕补「迁移被跳过、重启自动补跑」的后果说明。
     console.warn('[pi-codemode-settings] codemode 启动迁移失败（不阻塞启动，下次启动重试幂等）:', e)
   }
 }
@@ -184,53 +179,54 @@ export function runCodemodeStartupMigration(): void {
  * 编排两件本模块既有能力，无第二条读写路径：
  *   - tools 字段域读写（isCodemodeActive 激活判定 / setCodemodeEntry 增量条目写入，
  *     全部经 pi-settings-store 统一读写层）；
- *   - getSettingsCorruption() 损坏检测单点（raw 预检、每次现查、检测动作自身绝不触发
- *     隔离改名——A1 落定层）。
+ *   - 损坏治理：读侧统一阻断后（readSettings 损坏即抛 SettingsCorruptedError），
+ *     本类捕获转译为结果信封错误态——对外形态（enabled=false + corruption 载荷，
+ *     设置页 Switch 错误态渲染依据）不变；写侧拒入（SettingsWriteRejectedError）与
+ *     读竞态（SettingsCorruptedError）同样转译为 ok:false 信封。
  *
  * settings.json 路径由 pi-settings-store 模块级单一所有者决定（D17；生产 =
  * getSettingsPath()，测试重定向经 setSettingsPath 显式注入，全仓测试惯例）。
  */
 export class PiCodemodeSettings implements ICodemodeSettings {
   getEnabled(): CodemodeEnabledResult {
-    // A1 读侧：损坏 → 错误态（enabled=false + corruption 有值），不走默认读路径——
-    // readSettings 经 JsonStore，读损坏文件会触发读时隔离改名（codemode 承诺自己的
-    // 读写路径绝不触发或加速该隔离）；未损坏才走正常读路径。
-    const corruption = getSettingsCorruption()
-    if (corruption.corrupted) {
-      return {
-        enabled: false,
-        corruption: { filePath: corruption.filePath, corruptCopyPath: corruption.corruptCopyPath },
+    // 损坏 → 错误态信封（enabled=false + corruption 载荷）：读侧阻断统一由
+    // readSettings 抛 SettingsCorruptedError（单一路径，本层只转译），未损坏走正常读。
+    try {
+      return { enabled: isCodemodeActive(readSettings().defaultTools), corruption: null }
+    } catch (e) {
+      if (e instanceof SettingsCorruptedError) {
+        return {
+          enabled: false,
+          corruption: { filePath: e.corruption.filePath, corruptCopyPath: e.corruption.corruptCopyPath },
+        }
       }
+      throw e
     }
-    return { enabled: isCodemodeActive(readSettings().defaultTools), corruption: null }
   }
 
   setEnabled(enabled: boolean): CodemodeSetEnabledResult {
-    // A1 写点拒入：进 updateSettingsFields 之前先查损坏单点（每次现查）——损坏时
-    // updateSettingsFields 锁内重读走 JsonStore 会触发隔离改名、以空基线合法化覆盖
-    // 用户全部字段（A1 要堵死的路径），故此处拒绝而非放行。
-    const corruption = getSettingsCorruption()
-    if (corruption.corrupted) {
-      const copyNote = corruption.corruptCopyPath
-        ? `，原内容可从隔离副本找回: ${corruption.corruptCopyPath}`
-        : ''
-      // 结构化告警（A1）：含路径与恢复指引；损坏检测每次现查，用户修复文件后重试即恢复，
-      // 无需重启（与启动迁移告警同文案结构，便于日志统一检索）
-      console.warn(
-        `[pi-codemode-settings] settings.json 已损坏，拒绝 codemode 开关写入。文件: ${corruption.filePath}${copyNote}。` +
-        `恢复指引：修复或删除该文件后重试开关操作（损坏检测每次现查，修复即恢复，无需重启）。`,
-      )
-      return {
-        ok: false,
-        error: `settings.json 已损坏，拒绝写入。文件: ${corruption.filePath}${copyNote}。` +
-          `修复或删除该文件后重试开关操作，无需重启。`,
-        corruption: { filePath: corruption.filePath, corruptCopyPath: corruption.corruptCopyPath },
+    // 损坏拒入已收敛到 pi-settings-store：写侧锁内预检（SettingsWriteRejectedError）+
+    // 读侧统一阻断（SettingsCorruptedError——锁内重读竞态窗口 / 写后回读竞态）；本层
+    // 只把两类错误转译为 ok:false 信封，其余错误（ELOCKED / 写盘失败）沿既有通道原样上抛。
+    try {
+      setCodemodeEntry(enabled)
+    } catch (e) {
+      if (e instanceof SettingsWriteRejectedError || e instanceof SettingsCorruptedError) {
+        return {
+          ok: false,
+          error: e.message,
+          corruption: {
+            filePath: e.corruption.filePath,
+            corruptCopyPath: e.corruption.corruptCopyPath,
+          },
+        }
       }
+      throw e
     }
-    setCodemodeEntry(enabled)
     // 成功回写后落盘终态（shared CodemodeSetEnabledResult 契约：写入含幂等不动 /
     // 负条目占位等规范化分支，renderer 以服务端终态校准开关显示）。已知取舍（A1 登记）：
-    // 写后回读与写方之间存在极窄并发窗口，撞上时按 JsonStore 既有隔离行为降级，非本类新增通道。
+    // 写后回读与写方之间存在极窄并发窗口，撞上损坏时按读侧阻断语义抛
+    // SettingsCorruptedError（经 WS 全局 catch 成错误信封），非本类新增通道。
     return { ok: true, enabled: isCodemodeActive(readSettings().defaultTools) }
   }
 }
