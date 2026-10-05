@@ -2254,33 +2254,14 @@
       ]
     },
     {
-      "id": "C-state-12",
-      "summary": "replicated state 周期 pollTimer 配置全关是空闲回收保留 projection 实例的安全前提：启用任一 replicated state 的周期 poll 前，必须先给回收态加结构性收尾（dispose 定时器保留数据）或取消 projection 域跳过，否则回收态残留「周期 poll → 死进程 reject → backoff → 再 poll」循环；【2026-09-12 恢复登记】本条随 dev-0.9.17 合并对侧重写 constraints.json 被顶出，原编号无撞车原位恢复",
-      "scope": [
-        "packages/runtime/src/services/session/replicated-states.config.ts"
-      ],
-      "authority": [
-        "../packages/runtime/src/services/session/idle-pi-reaper.ts"
-      ],
-      "dimensions": [
-        "business-logic"
-      ],
-      "enforcement": [
-        {
-          "type": "review",
-          "agent": "review-business-logic"
-        }
-      ]
-    },
-    {
       "id": "C-proc-16",
-      "summary": "renderer 进程崩溃自动恢复必须经 recovery-policy 熔断：render-process-gone 按窗口自动 reload 以 windowId 为键、60s 滑动窗口 ≤3 次，超限停静态错误页 + 手动重试（重试重置预算），禁止无限 reload 循环（OOM 类崩溃 reload 后大概率再崩）；多窗口熔断计数互不影响；崩溃详情落盘 + renderer JS 错误现场经 renderer-log IPC 落 main 侧日志（每窗口每分钟限流 100 条，超限合并为汇总行，防错误风暴分钟级刷 GB）；恢复必须用户可见（一次性 CrashRecoveredBar 提示条，禁静默恢复）；renderer 侧错误捕获三件套抑制 Vue 默认整树卸载；【2026-09-12 恢复登记】原 C-proc-12 被 dev-0.9.17 合并对侧条目撞号占用（该号现为引擎协议边界），改登 C-proc-16",
+      "summary": "renderer 进程崩溃显式失败（ADR-0112 事实驱动：失败显式上报，手动重试是唯一恢复通道）：render-process-gone（clean-exit 正常退出除外）一次崩溃即加载静态错误页——无自动 reload、无熔断预算、无恢复提示条（OOM 类崩溃 reload 后大概率再崩）；崩溃详情（windowId/reason/exitCode/时间戳）经 main-logger 落 main 侧日志 + crash-journal 崩溃台账（reason 透传 Electron RenderProcessGoneDetails 枚举，评估器数 crash / 按 reason 分类）；renderer JS 错误现场经错误捕获三件套（app.config.errorHandler / window error / unhandledrejection）抑制 Vue 默认整树卸载，并经 renderer-log IPC 落 main 侧日志（每窗口每分钟限流 100 条，超限计数合并为一条汇总行，防错误风暴分钟级刷 GB）；【2026-09-12 恢复登记】原 C-proc-12 被 dev-0.9.17 合并对侧条目撞号占用（该号现为引擎协议边界），改登 C-proc-16",
       "scope": [
-        "apps/electron/main/window/recovery-policy.ts",
         "apps/electron/main/window/window-factory.ts",
-        "apps/electron/main/logs/**",
-        "apps/electron/main/test/recovery-policy.test.ts",
-        "packages/renderer/src/composables/useCrashRecoveryNotice.ts"
+        "apps/electron/main/logs/main-logger.ts",
+        "apps/electron/main/logs/crash-journal.ts",
+        "apps/electron/main/logs/renderer-log-handler.ts",
+        "packages/renderer/src/boot/error-reporter.ts"
       ],
       "authority": [
         "architecture/crash-forensics-and-watchdog.md"
@@ -2303,7 +2284,6 @@
         "packages/runtime/src/services/session/runtime-checkpoint.ts",
         "packages/runtime/src/services/startup-reattach.ts",
         "packages/runtime/src/services/session/session-service.ts",
-        "packages/runtime/src/services/session/idle-pi-reaper.ts",
         "apps/electron/main/main.ts"
       ],
       "authority": [
