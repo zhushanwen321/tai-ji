@@ -130,8 +130,10 @@
               class="inline-flex items-center gap-1.5 text-[length:var(--text-2xs)] text-neutral-mid"
             >
               <svg class="size-2 shrink-0" viewBox="0 0 8 8" aria-hidden="true">
+                <!-- dot fill 全量取 dotTone（含 pending 的中性灰）——禁另挂基础 fill 类：
+                     Tailwind 同属性任意值类按值字母序发射，双类并存时 neutral-dim 后发
+                     覆盖 tone 色（tone.ts 模块注释载机制与根因） -->
                 <circle
-                  class="fill-[var(--neutral-dim)]"
                   :class="dotTone(entry.status)"
                   cx="4"
                   cy="4"
