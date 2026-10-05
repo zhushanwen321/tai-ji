@@ -150,9 +150,9 @@ afterAll(() => {
 	rmSync(DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
-describe("real spawn lifecycle (poll edge finalization)", () => {
+describe("real spawn lifecycle (exit event edge finalization)", () => {
 	it("short task: running → exited with exitCode 0, output file readable, registry terminal", async () => {
-		// 断言只要求「poll 边沿前 state=running」与退出产物，不依赖命令时长（终态化只在 finalizeTask）
+		// 断言只要求「exit 事件边沿前 state=running」与退出产物，不依赖命令时长（终态化只在 finalizeTask）
 		const spawned = spawnBg("sleep 0.1 && echo done");
 		if (!spawned.ok) throw new Error(spawned.error);
 		const { task } = spawned;
@@ -325,7 +325,7 @@ describe("bash_output tool", () => {
 });
 
 describe("bash_kill tool (killing intent, single-point finalization)", () => {
-	it("kill marks BOTH store and registry as killing before the poll edge lands", async () => {
+	it("kill marks BOTH store and registry as killing before the exit event edge lands", async () => {
 		const spawned = spawnBg("sleep 60");
 		if (!spawned.ok) throw new Error(spawned.error);
 		const { task } = spawned;
@@ -333,7 +333,7 @@ describe("bash_kill tool (killing intent, single-point finalization)", () => {
 		const killResult = JSON.parse(await killTool(task.taskId)) as { killed: boolean; reason: string };
 		expect(killResult.killed).toBe(true);
 
-		// 轮询未收尾（sleep 60 才死、kill 后立即断言）：两侧 killing 即可见，无倒挂
+		// exit 边沿未到（sleep 60 才死、kill 后立即断言）：两侧 killing 即可见，无倒挂
 		expect(getTask(task.taskId)?.state).toBe("killing");
 		expect(readRegistry(REGISTRY_PATH).get(task.taskId)?.state).toBe("killing");
 		// kill-tree 确实对该 pid 发过令
@@ -491,7 +491,7 @@ describe("explicit background timeout (D6)", () => {
 			vi.useRealTimers();
 		}
 
-		// SIGKILL 已真实发出：轮询边沿收尾 → exited(reason:"timeout")，终态由边沿写
+		// SIGKILL 已真实发出：exit 事件边沿收尾 → exited(reason:"timeout")，终态由边沿写
 		//（timeout 路径满载下 SIGKILL 生效延迟不可预估，deadline 放宽到 8s）
 		await pollUntilTicked(
 			() => getTask(taskId)?.state === "exited" && getTask(taskId)?.reason === "timeout",
@@ -518,7 +518,7 @@ describe("explicit background timeout (D6)", () => {
 			expect(killTreeCalls).not.toContain(task.pid);
 			// D6-en/R2-S1 加固：身份校验不过 = 登记原进程已不在（死亡或被复用），intent
 			// 标记一并跳过——无条件改写内存 intent 为 timeout 会冲掉 UI 代杀 / AI bash_kill
-			// 预写的 killed（误报 timed out 唤醒 AI）；终态归轮询边沿按事实收尾
+			// 预写的 killed（误报 timed out 唤醒 AI）；终态归 exit 事件边沿按事实收尾
 			expect(getTask(task.taskId)?.state).toBe("running");
 			expect(getTask(task.taskId)?.intent).toBeUndefined();
 			expect(readRegistry(REGISTRY_PATH).get(task.taskId)?.state).toBe("running");

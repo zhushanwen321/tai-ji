@@ -171,7 +171,7 @@ describe("register emit (data flow ⑤)", () => {
 	});
 });
 
-describe("exit-edge notification (⑧⑨, poll edge wiring)", () => {
+describe("exit-edge notification (⑧⑨, exit-edge wiring)", () => {
 	it("natural exit 0: unregister emit reason 'completed' + sendMessage steer with exact params", async () => {
 		const pi = createMockPi();
 		attach(pi);
