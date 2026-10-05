@@ -275,7 +275,9 @@ skill 候选两态统一 taiji 源：globalSkills ∪ projectSkills（location �
 内嵌网页用 WebContentsView（任意 URL + 独立 preload + CDP target），排除 iframe（X-Frame-Options 硬伤）与 webview tag（官方 discouraged）。实装 `apps/electron/main/browser/browser-view-manager.ts`。登记 C-build-06。
 
 ### ADR-0066 太极·玄纯灰 V3（唯一现行视觉 ADR）
-全族去冷蓝换纯灰（bg/surface/neutral/border 同步），accent 中亮灰 #cfcfd4，状态色保留极弱色相（M/A/D badge 语义辨识下限）。值权威 = `packages/renderer/src/style.css`（暗色默认，亮色 [data-theme=light] 镜像）。视觉演化史见 [docs/design-evolution.md](../design-evolution.md)。
+全族去冷蓝换纯灰（bg/surface/neutral/border 同步），accent 弱蓝灰 `#a5adc2`（见下方补记），状态色保留极弱色相（M/A/D badge 语义辨识下限）。值权威 = `packages/renderer/src/style.css`（暗色默认，亮色 [data-theme=light] 镜像）。视觉演化史见 [docs/design-evolution.md](../design-evolution.md)。
+
+> **补记（2026-10，ui-signal-density D3，用户终裁全局路径）**：玄主题 accent 现值 = 弱蓝灰 `#a5adc2`（OKLCh C 0.0315 / H 269°，对 bg `#131316` 对比 8.26:1），定位为**重新引入弱色相的尝试**——不是对「去冷蓝 = 防色疲劳」的安全论证：冷蓝 `#4f8ef7`（C≈0.15 / H≈220°）的否决理由不变，新值彩度约其 1/5、色相从青蓝转向紫灰，「长时间使用不疲劳」需真实使用反馈验证，设计阶段不可判定。**重审触发条件**：用户报告暗色界面视觉疲劳 / 冷色相不适。届时回退首选 = 锚点专用令牌（`--accent` 回纯灰、新增 `--accent-anchor` 弱蓝灰只挂三处点睛位——侧栏新建任务主按钮、选中会话行、当前导航/活动指示；见 ui-signal-density §3.2 候选 F）。
 
 ### ADR-0084 Overview 视图整体移除
 用户裁决 Overview（多会话鸟瞰）不应在任何地方存在，全链路删除（组件/路由 view/入口链/i18n/测试）。背景：入口早已收敛（v6 D14 移除 sidebar 按钮，仅 ⌘K 命令面板 go-overview 可达），实态为 v1 骨架无真实用户价值。替代形态：会话切换与统筹由 Sidebar Session List + ⌘K 搜索满足；后台任务可见性由侧栏 Agents/Flows 视图 + 通知体系承担。连带删除唯一消费者 sessionDigest 派生（useSessionDerivations）。

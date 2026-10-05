@@ -7,7 +7,7 @@ colors:
   fg: "#dedee2"
   muted: "#96969c"
   border: "rgba(255, 255, 255, 0.07)"
-  accent: "#cfcfd4"
+  accent: "#a5adc2"
   success: "#78a87e"
   warn: "#b79c54"
   danger: "#bf6b6b"
@@ -264,8 +264,8 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 ### 4.4 主色 / 状态色（太极·玄默认：水墨降饱和，克制放开档）
 
 ```css
-/* 主色（玄 = 纯灰系）*/
---accent:        #cfcfd4;
+/* 主色（玄 = 近无彩度底 + 一枚贯穿全应用的弱蓝灰；彩度「依稀」量级，可寻不与状态色争语义）*/
+--accent:        #a5adc2;
 --accent-hover:  #e0e0e4;
 --accent-soft:   color-mix(in oklch, var(--accent) 10%, transparent);  /* 派生 */
 --accent-ring:   color-mix(in oklch, var(--accent) 30%, transparent);  /* 派生 */
@@ -353,7 +353,7 @@ demo 引入完整多主题系统（spec 无，demo 重大扩展）。机制：�
 **阴 · 暗色族（3 个）**——背景近中性，色相只做「依稀相」(S≤6%)，靠明度阶梯说话：
 | 主题 | accent | 特色 |
 |---|---|---|
-| **太极·玄（默认）** | `#cfcfd4` 纯灰 | 暗端防糊，阶梯上抬+加宽级差 |
+| **太极·玄（默认）** | `#a5adc2` 弱蓝灰 | 暗端防糊，阶梯上抬+加宽级差；唯一贯穿全应用的色相锚点（OKLCh C 0.0315，依稀量级） |
 | 太极·黛蓝 | `#9ca9c9` 依稀蓝相 | S≈8% |
 | 太极·暖墨 | `#cbc3b3` 暖相 | 宣纸暖 |
 
@@ -475,7 +475,7 @@ hover 时右侧整单元（badge/耗时）`visibility:hidden` 让位 ghost 操�
 
 **通用（全场景）**：
 - **工具失败**（exit≠0）：图标统一 `--neutral-ico`，行尾加 mono `exit N` 中性标签（`bg-bg-elevated` 胶囊）
-- **彩色边界**：保留 = 真 failure danger / 待行动 accent / git 语义色（降极小圆点）；降中性 = workflow done / GoalCard badge / ±stats / 目录改动数
+- **彩色边界**：保留 = 真 failure danger / 待行动 accent / git 语义色（降极小圆点）；降中性 = workflow done / GoalCard badge / ±stats / 目录改动数。**workflow DAG 画布节点不在本降中性清单**——画布是过程主视图，done = success 绿供进展扫读（「哪些绿了、哪个还在跑」），列表 badge 场景「done 是多数派稳态故降中性」的逻辑不适用于画布（workflow-overlay-refine D9 裁决）
 - **GitPanel 行级 badge 中性化**：M/A/D 统一 `neutral-dim`，仅 U（冲突）染 `danger + font-weight 700`
   > **场景区分**：GitPanel 行级 badge 因信息密度高需中性化降噪；**ChangeSetCard 文件 badge 保留彩色**（M=info / A=success / D=danger），因对话流场景信息密度低，彩色辅助辨识收益大于降噪收益。两条不矛盾，是同一原则在不同信息密度场景的取舍。
 
