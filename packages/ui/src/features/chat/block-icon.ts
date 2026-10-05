@@ -9,6 +9,7 @@ import {
   ListChecks,
   AlertTriangle,
   ArrowRight,
+  Layers,
 } from '@lucide/vue'
 import type { ToolCallStatus } from '@taiji/shared'
 
@@ -28,6 +29,7 @@ import type { ToolCallStatus } from '@taiji/shared'
 export type BlockIconKind =
   | 'thinking' | 'tool-read' | 'tool-bash' | 'tool-edit' | 'tool-other'
   | 'subagent' | 'workflow' | 'running' | 'failed' | 'text'
+  | 'bash-group'
 
 /** toolName → tool 细分类映射（未命中的 toolName 走 'tool-other'） */
 const TOOL_ICON_MAP: Record<string, BlockIconKind> = {
@@ -63,6 +65,8 @@ export function getBlockIcon(
  * Demo H 最终值：thinking=brain / tool-read=book-open / tool-bash=square-terminal /
  * tool-edit=pencil / tool-other=square-function / subagent=users / workflow=list-checks /
  * failed=alert-triangle / text=arrow-right。
+ * bash-group（ui-signal-density §3.3 D1 U3）= layers（连续 bash 组块图标；
+ * Layers 已在本包 slash-icons.ts 引入过，同源 @lucide/vue 直引）。
  */
 export const BLOCK_ICON_LUCIDE: Record<Exclude<BlockIconKind, 'running'>, Component> = {
   thinking: Brain,
@@ -74,6 +78,7 @@ export const BLOCK_ICON_LUCIDE: Record<Exclude<BlockIconKind, 'running'>, Compon
   workflow: ListChecks,
   failed: AlertTriangle,
   text: ArrowRight,
+  'bash-group': Layers,
 }
 
 /**

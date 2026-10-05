@@ -156,6 +156,10 @@ export default {
     traceExpandAll: '展开全部（{count} 步）',
     traceCollapse: '恢复精简',
     traceFailed: '含 {count} 次失败',
+    // [ui-signal-density D1 U3] bash 组块组头文案（Block.vue 组分支消费）：zh 按设计字面
+    // 「{count} 个连续 bash · 共 {duration}」；失败分句复用 traceFailed（组行尾「· 含 M 次失败」），
+    // 不另开键——语义域同属失败计数句式（设计降级路径条的 key 归属裁决）
+    traceBashSummary: '{count} 个连续 bash · 共 {duration}',
     bashCancelled: '已取消',
     bashTimeout: '已超时',
     bashOutputTruncated: '输出已截断',

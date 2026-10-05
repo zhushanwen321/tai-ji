@@ -1,4 +1,5 @@
 <template>
+  <!-- split-justified: trace 块分支体系（五分支共享 ICON/折叠态/composable 基建，按分支机械拆分产出转发壳）；script 超 300 为存量（HEAD 已 317），bash-group 组分支（D1 U3）叠加后 329，拆分属独立重构任务 -->
   <!--
     展示组件 · trace 块（message-stream 折叠区内的单个块）。Demo H 视觉：灰阶 + SVG ICON +
     唯一 accent 蓝（running）+ failed hover muted 暖橙。
@@ -6,6 +7,8 @@
     - tool：默认 1 行收起（streaming/running 也收起），点击展开详情。failed 终态默认展开（streaming 中失败不 remount，只 header 红）。
     - workflow：list-checks ICON + WORKFLOW. prefix + 状态动词 + workflow 名，详情区走 list-tree GUI / 文本。
     - subagent：渲染委托给 BlockSubagent（users ICON + SUBAGENT. prefix + 去卡片化）。
+    - bash-group：连续 bash 组块（ui-signal-density D1 U3）——组头「×N · 共 Xs · 含 M 次失败」，
+      展开后成员行（嵌套递归渲染普通 tool 收起态，SFC 文件名自引用）。
     - 展开块限高：thinking / bash 输出 / 非 bash 工具输出统一走 BlockScrollBox（240px 块内滚动 +
       渐隐提示 + 行区间信息条；bash 命令头保持在滚动区外 = 恒吸顶）；GUI 协议输出自管理高度不包。
     - failed：无鲜红全展开（红框已删），改中性灰默认 + hover 染 warn，错误摘要进 body 文本。
@@ -87,6 +90,43 @@
       <!-- text 块行尾时刻（D2 悬停化：原 w-28 固定占位列随悬停化一并移除，正文行恢复满宽；
            ml-auto 钉行尾，悬停/键盘焦点进入该行才显现） -->
       <span v-if="messageTimestamp" class="ml-auto shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity group-hover/text:opacity-100 group-focus-within/text:opacity-100" data-testid="text-time-slot">{{ formatClock(messageTimestamp) }}</span>
+    </div>
+
+    <!-- ── bash 组块（ui-signal-density §3.3 D1 U3）：连续 bash 折成一行组头「×N · 共 Xs」。
+         组头计数三条口径（×N=已完成成员数 / Xs=已完成成员耗时合计 / M=组内失败数）由 core
+         groupConsecutiveBash 一次算好（header），本组件零解析；组头不跑计时器（组内 running
+         成员保持独立行，计时跳动只在 running 行上）。失败不隐瞒（V8）：成员含 error 时行尾
+         traceFailed 段（M = 组内口径，与 TraceCompactorRow 全局 failedCount 分账）。
+         展开后成员保持各自 1 行收起态（嵌套普通 tool Block 复用既有行形态与 PR-1 行高不变量），
+         要看某个成员的输出需再点那一行（两步路径，D1 已接受代价①）。展开态住组件本地 ref、
+         不进 store 不持久化（与 toolCollapsed/thinkingExpanded 同级，D1「组展开态住在哪里」）。 -->
+    <div v-else-if="type === 'bash-group' && group" class="trace-bash-group" data-testid="bash-group">
+      <div
+        data-testid="bash-group-header"
+        class="flex min-w-0 cursor-pointer select-none items-center gap-1.5 text-[length:var(--text-sm)] font-medium text-neutral-mid transition-opacity hover:opacity-80"
+        role="button"
+        tabindex="0"
+        :aria-expanded="groupExpanded"
+        :title="groupExpanded ? t('panel.message.collapse') : t('panel.message.expand')"
+        @click="toggleGroup"
+        @keydown.enter.prevent="toggleGroup"
+        @keydown.space.prevent="toggleGroup"
+      >
+        <component :is="BLOCK_ICON_LUCIDE['bash-group']" :class="BLOCK_ICON_CLASS" />
+        <span class="min-w-0 truncate text-left">{{ t('panel.message.traceBashSummary', { count: group.header.count, duration: formatDuration(group.header.durationMs) }) }}</span>
+        <span v-if="group.header.failedCount > 0" data-testid="bash-group-failed" class="shrink-0 text-danger">· {{ t('panel.message.traceFailed', { count: group.header.failedCount }) }}</span>
+      </div>
+      <Transition name="block-expand">
+        <div v-if="groupExpanded" class="mt-0.5 flex min-w-0 flex-col">
+          <Block
+            v-for="m in group.members"
+            :key="m.flatIndex"
+            :type="m.block.kind"
+            :tool="m.block.kind === 'tool' || m.block.kind === 'agentgraph' ? (m.block.ref as ToolCall) : undefined"
+            :session-id="sessionId"
+          />
+        </div>
+      </Transition>
     </div>
 
     <!-- tool_call 块：默认 1 行收起（streaming/running 也收起），header 含摘要，点击展开详情。
@@ -260,6 +300,7 @@ import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import { extractGui } from '@zhushanwen/extension-protocol'
 import type { MessageStatus, ToolCall } from '@taiji/shared'
 import { SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES, displayWorkflowName } from '@taiji/shared'
+import type { FlatBlock } from '@taiji/core/domain/chat'
 import { lookupWorkflowRun, openWorkflow } from '@taiji/core/domain/drawer'
 import { AnsiText, GuiComponentRenderer } from '../../rendering-protocol'
 import MarkdownRenderer from './MarkdownRenderer.vue'
@@ -267,7 +308,7 @@ import BlockSubagent from './BlockSubagent.vue'
 import BlockScrollBox from './BlockScrollBox.vue'
 import ToolResultImages from './ToolResultImages.vue'
 import { BLOCK_ICON_CLASS, BLOCK_ICON_LUCIDE, BLOCK_LABEL_CLASS, RUNNING_LOADER_SVG, getBlockIcon } from './block-icon'
-import { formatClock, shortenForHeader, tailLines, stripAnsi } from './format-utils'
+import { formatClock, formatDuration, shortenForHeader, tailLines, stripAnsi } from './format-utils'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
 // barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
@@ -281,13 +322,16 @@ const { t } = useI18n()
 const { copied, copy } = useCopy()
 
 const props = defineProps<{
-  type: 'thinking' | 'tool' | 'text' | 'agentgraph'
+  type: 'thinking' | 'tool' | 'text' | 'agentgraph' | 'bash-group'
   /** thinking / text 内容 */
   content?: string
   /** thinking 块 id（thinking 类型时由父组件透传，用于 data-testid 精确锚定；其他类型忽略） */
   thinkingId?: string
   /** tool_call 数据（type==='tool' 时必填） */
   tool?: ToolCall
+  /** bash 组块数据（type==='bash-group' 时由 Turn.vue 透传；D1 组块数据契约 members+header）。
+   *  header 三条口径（count/durationMs/failedCount）由 core groupConsecutiveBash 一次算好。 */
+  group?: { members: FlatBlock[]; header: { count: number; durationMs: number; failedCount: number } }
   /** thinking 块初始折叠态（来自 ThinkingBlock.collapsed，默认收起） */
   collapsed?: boolean
   /** working 态（turn 进行中）：thinking 各态默认折叠（collapsed 初值 true），working→false
@@ -525,6 +569,15 @@ const toolExpanded = computed(() => !toolCollapsed.value)
 
 function toggleTool(): void {
   toolCollapsed.value = !toolCollapsed.value
+}
+
+/* ── bash 组展开态（D1「组展开态住在哪里」）：组件本地 ref，不进 store、不持久化——
+ *    turn 级展开态（useTurnExpansion / turn-expansion store）现状也不持久化，
+ *    不为一个更低层的 UI 态单开持久化先例。与 toolCollapsed / thinkingExpanded 同级。 ── */
+const groupExpanded = ref(false)
+
+function toggleGroup(): void {
+  groupExpanded.value = !groupExpanded.value
 }
 
 /**

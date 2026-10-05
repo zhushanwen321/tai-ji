@@ -14,8 +14,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { Block } from '@taiji/ui'
-import type { MessageStatus } from '@taiji/shared'
-import { MdStub, AnsiStub, makeToolCall, mountToolBlock } from './helpers'
+import type { MessageStatus, ToolCall } from '@taiji/shared'
+import { MdStub, AnsiStub, GuiStub, makeToolCall, mountToolBlock } from './helpers'
 
 function mountTextBlock(over: { streaming?: boolean; status?: MessageStatus; error?: string; content?: string; messageTimestamp?: number } = {}) {
   return mount(Block, {
@@ -654,5 +654,118 @@ describe('chat-flow-timestamp U2: Block 行尾时间槽（A3/A4 + D2 悬停化�
     expect(toolWrapper.find('[data-testid="tool-time-slot"]').classes()).not.toContain('opacity-100')
     const thinkWrapper = mountThinkingTimeBlock({ messageTimestamp: 1000 })
     expect(thinkWrapper.find('[data-testid="thinking-time-slot"]').classes()).not.toContain('opacity-100')
+  })
+})
+
+// ═════════════════════════════════════════════════════════════════
+// ui-signal-density §3.3 D1 U3：Block bash-group 组块（连续 bash 折叠）
+// 组头三条计数口径由 core groupConsecutiveBash 算好（header），本文件断言渲染形态：
+// 组头 / 失败段 testid、展开收起、成员默认收起态、两步路径、failed 成员默认展开（V8）。
+// ═════════════════════════════════════════════════════════════════
+
+/** bash 组块 fixture：ToolCall[] → Turn.vue 组分支透传的 group prop 形态（members+header）。 */
+function makeBashGroupProp(tools: ToolCall[]) {
+  return {
+    members: tools.map((tc, i) => ({
+      assistantId: 'a1',
+      assistantStatus: 'complete' as const,
+      block: { kind: 'tool' as const, ref: tc },
+      flatIndex: i,
+    })),
+    header: {
+      count: tools.length,
+      durationMs: tools.reduce((sum, t) => sum + Math.max(0, (t.endTime ?? 0) - t.startTime), 0),
+      failedCount: tools.filter((t) => t.status === 'error').length,
+    },
+  }
+}
+
+function mountBashGroup(group: ReturnType<typeof makeBashGroupProp>) {
+  return mount(Block, {
+    props: { type: 'bash-group', group, sessionId: 'sess-bash-group-test' },
+    global: {
+      stubs: { GuiComponentRenderer: GuiStub, AnsiText: AnsiStub, MarkdownRenderer: MdStub },
+    },
+  })
+}
+
+describe('ui-signal-density D1 U3: Block bash-group 组块', () => {
+  it('组行形态：bash-group / bash-group-header testid 存在（§4.2 gui-components 组头分支的锚点）', () => {
+    const wrapper = mountBashGroup(makeBashGroupProp([makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'echo hi' }, startTime: 0, endTime: 1000 })]))
+    expect(wrapper.find('[data-testid="bash-group"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="bash-group-header"]').exists()).toBe(true)
+  })
+
+  it('组头三条口径渲染：count / durationMs / failedCount 数字出现在组头文本（header 由 core 算好，组件零解析）', () => {
+    const wrapper = mountBashGroup(
+      makeBashGroupProp([
+        makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' }, startTime: 0, endTime: 1500 }),
+        makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' }, status: 'error', startTime: 2000, endTime: 3500 }),
+        makeToolCall({ id: 'b2', toolName: 'bash', input: { command: 'c' }, startTime: 4000, endTime: 5000 }),
+      ]),
+    )
+    const headerText = wrapper.find('[data-testid="bash-group-header"]').text()
+    expect(headerText).toContain('3') // ×N = 组内已完成成员数
+    expect(headerText).toContain('4s') // 共 Xs = 1500+1500+1000 = 4000ms → formatDuration '4s'
+    expect(wrapper.find('[data-testid="bash-group-failed"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="bash-group-failed"]').text()).toContain('1') // · 含 M 次失败
+  })
+
+  it('failedCount=0 → 失败段不渲染（组行不虚构失败）', () => {
+    const wrapper = mountBashGroup(makeBashGroupProp([
+      makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } }),
+      makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' } }),
+    ]))
+    expect(wrapper.find('[data-testid="bash-group-failed"]').exists()).toBe(false)
+  })
+
+  it('展开收起：默认收起（成员不在 DOM）；点组头展开 → 成员行各自 1 行收起态；再点收起 → 成员消失', async () => {
+    const wrapper = mountBashGroup(makeBashGroupProp([
+      makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } }),
+      makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' } }),
+    ]))
+    expect(wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk').length).toBe(0) // 默认收起（成员行 = 组容器内嵌套 Block 根 .trace-blk；外层查找收窄到 bash-group 子树，排除 Block 根容器自身）
+    await wrapper.find('[data-testid="bash-group-header"]').trigger('click')
+    const members = wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk')
+    expect(members.length).toBe(2) // 成员行出现
+    // 成员保持各自 1 行收起态（PR-1 行高不变量）：无展开输出区
+    expect(wrapper.find('.tool-result').exists()).toBe(false)
+    // aria-expanded 翻转
+    expect(wrapper.find('[data-testid="bash-group-header"]').attributes('aria-expanded')).toBe('true')
+    await wrapper.find('[data-testid="bash-group-header"]').trigger('click')
+    expect(wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk').length).toBe(0) // 收起
+    expect(wrapper.find('[data-testid="bash-group-header"]').attributes('aria-expanded')).toBe('false')
+  })
+
+  it('两步路径（V1 已接受代价①）：组展开 → 点成员行 → 该成员完整输出可见', async () => {
+    const wrapper = mountBashGroup(makeBashGroupProp([
+      makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'echo step-one' }, output: 'step-one-output' }),
+      makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'echo step-two' } }),
+    ]))
+    await wrapper.find('[data-testid="bash-group-header"]').trigger('click')
+    // 第一步：组展开（成员行在场、均收起）
+    expect(wrapper.find('.tool-result').exists()).toBe(false)
+    // 第二步：点成员行 → 完整输出可见（bash 凹槽命令头 + 输出）
+    const firstHeader = wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk')[0].find('[data-testid="tool-block-header"]')
+    await firstHeader.trigger('click')
+    const expanded = wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk')[0]
+    expect(expanded.text()).toContain('echo step-one')
+    expect(expanded.text()).toContain('step-one-output')
+  })
+
+  it('V8 形态：failed 成员行在组展开后挂载即默认展开（错误输出立即可见，无需再点）', async () => {
+    const wrapper = mountBashGroup(makeBashGroupProp([
+      makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'ok' } }),
+      makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'boom' }, status: 'error', error: 'exit code 1' }),
+      makeToolCall({ id: 'b2', toolName: 'bash', input: { command: 'after' } }),
+    ]))
+    await wrapper.find('[data-testid="bash-group-header"]').trigger('click')
+    const members = wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk')
+    expect(members.length).toBe(3)
+    // 失败成员（第 2 个）挂载即展开：输出区在场（displayContent 兜底 tool.error）
+    expect(members[1].find('.tool-result').exists()).toBe(true)
+    expect(members[1].text()).toContain('exit code 1')
+    // 非失败成员保持收起
+    expect(members[0].find('.tool-result').exists()).toBe(false)
   })
 })

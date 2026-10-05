@@ -157,6 +157,10 @@ export default {
     traceExpandAll: 'Expand all ({count} steps)',
     traceCollapse: 'Collapse to latest',
     traceFailed: '{count} failed',
+    // [ui-signal-density D1 U3] bash group header copy (Block.vue group branch): en mirrors the
+    // zh literal "{count} consecutive bash · total {duration}"; the failure clause reuses
+    // traceFailed ("· {count} failed" at the row tail) — same failure-count phrasing domain
+    traceBashSummary: '{count} consecutive bash · total {duration}',
     bashCancelled: 'cancelled',
     bashTimeout: 'timeout',
     bashOutputTruncated: 'Output truncated',
