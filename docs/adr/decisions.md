@@ -477,3 +477,10 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **登记**：无新约束族（推拉纪律承 ADR-0097）；实装 = `packages/shared/src/protocol.ts`（两 RPC 契约与错误码闭集）+ `packages/runtime/src/services/session/session-records.ts`（指纹扩维）。设计文档 `.tmp/tech-design/workflow-visualization.md`（不入库，过程产物）；本条即该决策的现行登记处。
 
+
+### ADR-0112 本地 GUI 项目防御机制第一原则：fail-fast 常态，重试 / 对账 / 时间窗兜底默认不建（2026-10-05 用户裁决）
+**决策**：本项目为桌面 GUI 应用，进程间本地通信（stdin/stdout 管道 + localhost WebSocket），无复杂网络环境；底层 AI 能力（LLM 调用、provider 重试）由 pi 封装，非本项目代码。据此定防御机制第一原则：① 新增代码默认不引入自动重试、对账补偿、时间窗猜测（sweep / 宽限窗 / 空窗兜底）机制——确需引入必须先回答「为什么事件顺序或单一事实源不能自然解决」并登记 ADR（与「时间平抑类逻辑红线」同门槛，覆盖面扩至重试与对账族）；② 存量机制经 2026-10-05 起全项目清查逐类裁决退役，清查登记与清单 = `docs/todo/defense-mechanism-cleanup.md`；③ 保留白名单：调用方显式配置传入的超时参数（功能非防御）、断线重连的会话记录拉取重放（ADR-0097 拉取真理通道）、pi 内部的 provider 层重试（非本项目代码）。
+
+**依据**：本地进程通信不产生复杂网络环境类的瞬态失败面；fail-fast 后失败显式上报（人看通知 / agent 收失败回执），重试决策归知道语义的消费方——服务层做重试是知识错位的补偿（与「计算器/裁判分层」同构）；时间窗兜底被「时间平抑类逻辑红线」判死的同一逻辑覆盖重试与对账族：删掉后数据仍最终一致的，说明事实源或通道该修而非加兜底。
+
+**登记**：投递域首批裁决同日落地（backoff 退役 / sweep 退役 / 断连未确认终局 / 技能 started 基终局 / 受理层同步上屏，见 `docs/todo/delivery-backoff-retry-retirement.md` 等 5 登记）；crash-forensics 附录 E「回收层统一有界兜底」与超时默认原则中「回收层允许默认有界」的既往条款被本原则部分收窄——存量挂死保护逐条以清查清单裁决为准，不静默保留。
