@@ -25,7 +25,8 @@ const { order, FakeStream } = vi.hoisted(() => {
     /**
      * close 时机模式（审查 W30 Fix-3：验证顺序约束真正依赖 close 等待，而非假同步）：
      * 0 = end 同步置 closed（默认，既有测试路径）；>0 = end 后延迟 N tick 才置 closed
-     * 并 emit 'close'（模拟真实流的异步 flush）；-1 = 永不 close（超时降级路径用）。
+     * 并 emit 'close'（模拟真实流的异步 flush）；-1 = 永不 close（fs 挂起形态，现行契约
+     * 为 Promise 永不 settle——超时降级已随 ADR-0112 退役）。
      */
     closeDelayTicks = 0
     private handlers: Record<string, Array<() => void>> = {}
@@ -37,7 +38,7 @@ const { order, FakeStream } = vi.hoisted(() => {
       this.chunks.push(String(data))
       return true
     }
-    /** endAndAwait 超时降级路径会强制销毁流（审查 W30 Fix-1）——fake 必须忠实模拟该 API。 */
+    /** WriteStream API 完备性成员——endAndAwait 超时降级（强制销毁流）已随 ADR-0112 退役。 */
     destroy(): this {
       this.destroyed = true
       this.closed = true
@@ -86,7 +87,7 @@ const { order, FakeStream } = vi.hoisted(() => {
           }
           setImmediate(loop)
         }
-        // closeDelayTicks < 0：永不 close（endAndAwait 超时降级测试路径）
+        // closeDelayTicks < 0：永不 close（fs 挂起形态；现行契约 = Promise 永不 settle，无超时降级）
       }
       return this
     }
