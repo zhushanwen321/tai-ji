@@ -362,17 +362,19 @@ export class MessageDispatcher {
     try {
       await client.abort()
     } catch (e) {
-      // [HISTORICAL] abort 失败也必须广播终态（规则 #3）：否则前端 isStreaming / runtime
-      // isGenerating 永不复位，UI 卡在「思考中」。pi 卡死时 client.abort() 无响应，靠这条兜底。
+      // [HISTORICAL] abort await 失败也必须广播终态（规则 #3）：否则前端 isStreaming / runtime
+      // isGenerating 永不复位，UI 卡在「思考中」。失败信号来源 = pi 进程退出/流错误经 exit/error
+      // 事件链 rejectAll（rpc-client.ts），靠这条收尾；卡死悬挂不经此路径（无墙钟超时，
+      // 归用户强制退出，C-proc-13⑤）。
       const errMsg = toErrorMessage(e)
       console.error(`[message-dispatcher] abort failed (source=${source}): sessionId=${sessionId}`, errMsg)
       // 先取 active 再 destroy——destroySession 会删 processes/clientToId 条目，
       // 之后再经 getSessionByClient 反查会拿 undefined。
       const active = this.svc.getSessionByClient(client)
       if (active) {
-        // occupancy #9（D2 迁移）：abort RPC 失败兜底 → 'idle' 行（pi 卡死时 agent_settled
-        // 永不到达，turn 不能停留在 dispatching/generating/settling）。isGenerating=false 由
-        // 原语 flags 派生。
+        // occupancy #9（D2 迁移）：abort await 失败收口 → 'idle' 行（进入此分支的都是 pi 已
+        // 退出/流错误等显式失败，agent_settled 不会再到达，turn 不能停留在
+        // dispatching/generating/settling）。isGenerating=false 由原语 flags 派生。
         applySessionOccupancyTransition(active, this.messageBus, 'idle')
       }
 
