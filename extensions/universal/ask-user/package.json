@@ -42,13 +42,13 @@
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^4.1.9",
     "fast-check": "^4.9.0",
-    "typebox": "1.3.27",
+    "typebox": "1.3.34",
     "vitest": "^4.1.8"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^1.0.0",
     "@earendil-works/pi-tui": "^1.0.0",
-    "typebox": "1.3.27"
+    "typebox": "1.3.34"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-tui": {
