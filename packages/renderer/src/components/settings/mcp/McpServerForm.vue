@@ -350,6 +350,16 @@ type ParseResult =
   | { ok: true; name: string | null; entry: McpServerEntryValue; bare: boolean }
   | { ok: false; error: string }
 
+/** 单条目对象形态判定：普通对象（非数组非 null）才可作条目值 / 包装层。 */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/** 裸条目值对象判定（含 command/url/type 任一顶层键，D7 裸形态条款）。 */
+function isBareEntryValue(record: Record<string, unknown>): boolean {
+  return 'command' in record || 'url' in record || 'type' in record
+}
+
 /**
  * 代码模式解析（单条目形态）：
  * - 包装形态 { "名称": { ... } }：名称自动取键名；编辑流键名 ≠ 被编辑名 → 拦截（改名 =
@@ -369,25 +379,23 @@ function parseCodeText(): ParseResult {
     const msg = e instanceof Error ? e.message : String(e)
     return { ok: false, error: t('settings.mcp.errCodeJson', { message: msg }) }
   }
-  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+  if (!isPlainObject(obj)) {
     return { ok: false, error: t('settings.mcp.errCodeWrapperValue') }
   }
-  const record = obj as Record<string, unknown>
-  const isBare = 'command' in record || 'url' in record || 'type' in record
-  if (isBare) {
+  if (isBareEntryValue(obj)) {
     return {
       ok: true,
       name: props.editing ? props.editing.name : null,
-      entry: record as McpServerEntryValue,
+      entry: obj as McpServerEntryValue,
       bare: true,
     }
   }
-  const keys = Object.keys(record)
+  const keys = Object.keys(obj)
   if (keys.length !== 1) {
     return { ok: false, error: t('settings.mcp.errCodeSingle') }
   }
-  const value = record[keys[0]]
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+  const value = obj[keys[0]]
+  if (!isPlainObject(value)) {
     return { ok: false, error: t('settings.mcp.errCodeWrapperValue') }
   }
   if (props.editing && keys[0] !== props.editing.name) {
@@ -429,37 +437,40 @@ function validateEntry(entry: McpServerEntryValue): boolean {
   return true
 }
 
+/** 代码 tab 取候选（D7）：解析 + 添加流裸形态保存拦截。失败已置 codeError，返回 null。 */
+function resolveCodeCandidate(): { name: string; entry: McpServerEntryValue } | null {
+  const parsed = parseCodeText()
+  if (!parsed.ok) {
+    codeError.value = parsed.error
+    return null
+  }
+  if (parsed.bare && !props.editing) {
+    // 添加流裸形态的保存校验层拒绝（D7 添加态名称来源写死条款）：解析层照常接受
+    //（切换 tab 不拦），保存时拦截并提示改用包装形态提供服务器名
+    codeError.value = t('settings.mcp.errCodeBareNeedsWrapper')
+    return null
+  }
+  return { name: props.editing ? props.editing.name : (parsed.name ?? ''), entry: parsed.entry }
+}
+
+/** 表单 tab 取候选：字段构建 + env/headers 坏行字段错误登记（错误区在表单 tab 可见）。 */
+function resolveFormCandidate(): { name: string; entry: McpServerEntryValue } {
+  const built = formToEntry()
+  if (built.envBadLines.length > 0) {
+    fieldErrors.value.env = t('settings.mcp.errEnvBadLine', { lines: built.envBadLines.join(', ') })
+  }
+  if (built.headersBadLines.length > 0) {
+    fieldErrors.value.headers = t('settings.mcp.errHeadersBadLine', { lines: built.headersBadLines.join(', ') })
+  }
+  return { name: name.value.trim(), entry: built.entry }
+}
+
 /** 提交（保存按钮）：当前 tab 内容 → 解析 → 校验 → emit（保存协议调用与损坏拒入处理归 McpSection） */
 function submit(): void {
   fieldErrors.value = {}
-  let candidateName: string
-  let entry: McpServerEntryValue
-
-  if (activeTab.value === 'code') {
-    const parsed = parseCodeText()
-    if (!parsed.ok) {
-      codeError.value = parsed.error
-      return
-    }
-    if (parsed.bare && !props.editing) {
-      // 添加流裸形态的保存校验层拒绝（D7 添加态名称来源写死条款）：解析层照常接受
-      //（切换 tab 不拦），保存时拦截并提示改用包装形态提供服务器名
-      codeError.value = t('settings.mcp.errCodeBareNeedsWrapper')
-      return
-    }
-    candidateName = props.editing ? props.editing.name : (parsed.name ?? '')
-    entry = parsed.entry
-  } else {
-    candidateName = name.value.trim()
-    const built = formToEntry()
-    entry = built.entry
-    if (built.envBadLines.length > 0) {
-      fieldErrors.value.env = t('settings.mcp.errEnvBadLine', { lines: built.envBadLines.join(', ') })
-    }
-    if (built.headersBadLines.length > 0) {
-      fieldErrors.value.headers = t('settings.mcp.errHeadersBadLine', { lines: built.headersBadLines.join(', ') })
-    }
-  }
+  const resolved = activeTab.value === 'code' ? resolveCodeCandidate() : resolveFormCandidate()
+  if (resolved === null) return
+  const { name: candidateName, entry } = resolved
 
   const nameError = validateName(candidateName)
   const entryValid = validateEntry(entry)

@@ -198,37 +198,27 @@ export function validateMcpEntryForRead(name: string, config: unknown): string |
   return null
 }
 
-/**
- * 保存校验面（写前，D4）：三不变量 + 互斥有意收紧 + type 例外条款。
- * 校验输入恒为写回产物（剥离/清理之后，D4 管线顺序）——表单路径产物无 type 键，
- * type 三项校验在该路径空转。校验不过抛 McpStoreError，不落盘（fail-fast）。
- */
-export function validateMcpEntryForSave(name: string, config: unknown): void {
-  if (!MCP_SERVER_NAME_PATTERN.test(name)) {
+/** type 键校验（D4 例外条款）：表单产物无 type 键时本节空转；sse 显式拒 + 词表外拒。 */
+function validateMcpEntryType(config: Record<string, unknown>): void {
+  const type = config.type
+  if (type === undefined) return
+  if (type === 'sse') {
     throw new McpStoreError(
-      'name_invalid',
-      `服务器名 "${name}" 含非法字符：只能包含字母、数字、下划线、连字符，请修正名称`,
+      'type_sse',
+      '不支持旧版 SSE 传输（type: "sse"）：请改用 streamable HTTP 地址（填 url 字段，删除 type 键）',
     )
   }
-  if (!isRecord(config)) {
-    throw new McpStoreError('entry_not_object', `服务器 "${name}" 的配置必须是 JSON 对象`)
+  if (typeof type !== 'string' || !MCP_TYPE_VALUES.has(type)) {
+    throw new McpStoreError(
+      'type_unknown',
+      `未知的 type 值 "${String(type)}"：合法值为 "stdio"、"http"、"streamable-http"，请修正或删除 type 键`,
+    )
   }
+}
+
+/** 传输字段组合校验（D4）：混填有意收紧 + 缺一拦截 + type 与传输字段错配拦截。 */
+function validateTransportCombo(config: Record<string, unknown>): void {
   const type = config.type
-  // type 例外条款（D4）：表单产物无 type 键时本节空转
-  if (type !== undefined) {
-    if (type === 'sse') {
-      throw new McpStoreError(
-        'type_sse',
-        '不支持旧版 SSE 传输（type: "sse"）：请改用 streamable HTTP 地址（填 url 字段，删除 type 键）',
-      )
-    }
-    if (typeof type !== 'string' || !MCP_TYPE_VALUES.has(type)) {
-      throw new McpStoreError(
-        'type_unknown',
-        `未知的 type 值 "${String(type)}"：合法值为 "stdio"、"http"、"streamable-http"，请修正或删除 type 键`,
-      )
-    }
-  }
   const hasCommand = typeof config.command === 'string'
   const hasUrl = typeof config.url === 'string'
   if (hasCommand && hasUrl) {
@@ -256,6 +246,25 @@ export function validateMcpEntryForSave(name: string, config: unknown): void {
       `type: "${String(type)}" 与 command 字段不符：command 是本地命令型传输，请删除 type 键或改用 url（该形态 pi 加载期整条拒载，报错文案与真实病因错位，故保存当场拦截）`,
     )
   }
+}
+
+/**
+ * 保存校验面（写前，D4）：三不变量 + 互斥有意收紧 + type 例外条款。
+ * 校验输入恒为写回产物（剥离/清理之后，D4 管线顺序）——表单路径产物无 type 键，
+ * type 三项校验在该路径空转。校验不过抛 McpStoreError，不落盘（fail-fast）。
+ */
+export function validateMcpEntryForSave(name: string, config: unknown): void {
+  if (!MCP_SERVER_NAME_PATTERN.test(name)) {
+    throw new McpStoreError(
+      'name_invalid',
+      `服务器名 "${name}" 含非法字符：只能包含字母、数字、下划线、连字符，请修正名称`,
+    )
+  }
+  if (!isRecord(config)) {
+    throw new McpStoreError('entry_not_object', `服务器 "${name}" 的配置必须是 JSON 对象`)
+  }
+  validateMcpEntryType(config)
+  validateTransportCombo(config)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

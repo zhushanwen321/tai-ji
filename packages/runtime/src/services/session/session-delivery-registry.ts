@@ -503,6 +503,40 @@ export function createSessionDeliveryRegistry(
   }
 
   /**
+   * 无标记文本 → 活跃无标记条目身份回查（D2②）：无标记文本两族——agent 通路整条（合批
+   * 语义，非降级）或无标记条目（命令/技能，出站不注标）。无标记条目经内核活跃集全文精确
+   * 匹配回条目身份——disposition 受理终局接线（deliverOne 的 confirmDelivered / 撤销守卫）
+   * 依赖段身份。匹配域限于 unmarkedEntryIds 在册条目：无标记普通文本（'acceptance' 锚 /
+   * agent 通路）不劫持身份（受理登记提前会断 onSendOk 的 acceptance 落地链）；串行投递
+   * （内核 in-flight 防重）下同文本条目按队列序逐个消费，不会跨条目错配。误配形态 = 外来
+   * 无标记文本恰与某活跃无标记条目全文相等（极窄，后果 = 终局通知错位、原条目由断连事件
+   * 收口），普通消息出站恒带标记。
+   */
+  function matchUnmarkedEntryId(text: string, state: RuntimeState, handle: DeliveryHandleV2): string | undefined {
+    for (const e of handle.entriesFull().active) {
+      if (e.payload.kind === 'text' && e.payload.content === text && state.unmarkedEntryIds.has(e.id)) {
+        return e.id
+      }
+    }
+    return undefined
+  }
+
+  /**
+   * 剩余段切出（段间 gap / 批尾 tail 共用）：非 BATCH_SEP 起始 = 结构不符——放弃拆分整条
+   * 投递（不猜测切分——宁合不裂），返回 false 由调用方整条收口；BATCH_SEP 之后的未知文本
+   * 非空才成段（agent 通路条目无标记）。
+   */
+  function pushRemainderPart(parts: ComposedPart[], raw: string, label: string, state: RuntimeState): boolean {
+    if (!raw.startsWith(BATCH_SEP)) {
+      warn(`splitComposed: unexpected ${label} — delivering as one batch (undo granularity lost), sid=`, state.sessionId)
+      return false
+    }
+    const unknown = raw.slice(BATCH_SEP.length)
+    if (unknown.length > 0) parts.push({ text: unknown })
+    return true
+  }
+
+  /**
    * 合批拆分（u2 适配层；V1/V6/V9/V10 的结构性前提）：内核 doSend/pump 会把同时处于 queued
    * 的多条条目合批为一条 composed 消息（buildBatchPayload 以 BATCH_SEP 连接）——agent 通路的
    * 合批语义保留，但用户消息必须逐条进 transcript（每条一个 user entry + 可单条撤销）。
@@ -516,20 +550,9 @@ export function createSessionDeliveryRegistry(
   function splitComposed(text: string, state: RuntimeState, handle: DeliveryHandleV2): ComposedPart[] {
     const markers = extractMarkerIds(text)
     if (markers.length === 0) {
-      // [D2②] 无标记文本两族：agent 通路整条（合批语义，非降级）或无标记条目（命令/
-      // 技能，出站不注标）。无标记条目经内核活跃集全文精确匹配回条目身份——disposition
-      // 受理终局接线（deliverOne 的 confirmDelivered / 撤销守卫）依赖段身份。匹配域限于
-      // unmarkedEntryIds 在册条目：无标记普通文本（'acceptance' 锚 / agent 通路）不劫持
-      // 身份（受理登记提前会断 onSendOk 的 acceptance 落地链）；串行投递（内核 in-flight
-      // 防重）下同文本条目按队列序逐个消费，不会跨条目错配。误配形态 = 外来无标记文本
-      // 恰与某活跃无标记条目全文相等（极窄，后果 = 终局通知错位、原条目由断连事件
-      // 收口），普通消息出站恒带标记。
-      for (const e of handle.entriesFull().active) {
-        if (e.payload.kind === 'text' && e.payload.content === text && state.unmarkedEntryIds.has(e.id)) {
-          return [{ text, id: e.id }]
-        }
-      }
-      return [{ text }]
+      // [D2②] 无标记文本身份回查（匹配域/误配形态见 matchUnmarkedEntryId）
+      const id = matchUnmarkedEntryId(text, state, handle)
+      return id !== undefined ? [{ text, id }] : [{ text }]
     }
     const parts: ComposedPart[] = []
     let cursor = 0
@@ -554,25 +577,13 @@ export function createSessionDeliveryRegistry(
         return [{ text }]
       }
       if (idx > cursor) {
-        const gap = text.slice(cursor, idx)
-        if (!gap.startsWith(BATCH_SEP)) {
-          warn('splitComposed: unexpected gap between batch segments — delivering as one batch (undo granularity lost), sid=', state.sessionId)
-          return [{ text }]
-        }
-        const unknown = gap.slice(BATCH_SEP.length)
-        if (unknown.length > 0) parts.push({ text: unknown })
+        if (!pushRemainderPart(parts, text.slice(cursor, idx), 'gap between batch segments', state)) return [{ text }]
       }
       parts.push({ text: record.text, id: record.id })
       cursor = idx + record.text.length
     }
     if (cursor < text.length) {
-      const tail = text.slice(cursor)
-      if (!tail.startsWith(BATCH_SEP)) {
-        warn('splitComposed: unexpected tail after batch segments — delivering as one batch (undo granularity lost), sid=', state.sessionId)
-        return [{ text }]
-      }
-      const unknown = tail.slice(BATCH_SEP.length)
-      if (unknown.length > 0) parts.push({ text: unknown })
+      if (!pushRemainderPart(parts, text.slice(cursor), 'tail after batch segments', state)) return [{ text }]
     }
     return parts
   }
@@ -736,15 +747,84 @@ export function createSessionDeliveryRegistry(
   }
 
   /**
+   * 投递前置守卫（抑制/撤销）：entryId 缺席（agent 通路段）恒放行；抑制 = rebuild 判定
+   * 已送达（只记账不碰 pi）；撤销 = 持有期条目离册（撤销只终结未受理条目）。
+   */
+  function skipSuppressedOrRevoked(state: RuntimeState, handle: DeliveryHandleV2, entryId?: string): boolean {
+    if (entryId === undefined) return false
+    if (state.suppressed.has(entryId)) {
+      state.suppressed.delete(entryId) // rebuild 判定已送达：只记账，不碰 pi
+      return true
+    }
+    return !stillActive(handle, entryId)
+  }
+
+  /**
+   * dispatching 置位（idle 门，D3①）：view 缺席或生成中 no-op——生成中出站保持 generating
+   * 不覆盖（原回合脉冲全程不错乱，★3）。occupancy 置位先于 prompt（RT-4#10，RPC 往返窗
+   * 内对预检/回收豁免不再呈 idle）。
+   */
+  function markDispatchingIfIdle(sessionId: string): void {
+    const view = viewOf(sessionId)
+    if (view && (view.occupancy?.turn ?? 'idle') === 'idle') {
+      applySessionOccupancyTransition(view, deps.getMessageBus(), 'dispatching')
+    }
+  }
+
+  /**
+   * dispatching 收口（幂等门 = 仅恰在 dispatching 时执行）：
+   * - 'reject-other'：[RT-4#10] prompt 非 busy 真失败收口（不卡 dispatching）；busy 类已在
+   *   promptWithBusyRetry 内分型收口（reject-processing → generating 等），其终态不得被本腿
+   *   覆盖——只收口仍停留 dispatching 的形态。
+   * - 'idle'：[D3②] handled 终局主动回落（命令接管后输入已消费、无回合要跑；回落后的 idle
+   *   是终态事实）。
+   */
+  function settleDispatching(sessionId: string, to: 'reject-other' | 'idle'): void {
+    const view = viewOf(sessionId)
+    if (view && (view.occupancy?.turn ?? 'idle') === 'dispatching') {
+      applySessionOccupancyTransition(view, deps.getMessageBus(), to)
+    }
+  }
+
+  /**
+   * 受理终局（D1②③ + D3② + 命令终局事件化）：prompt 响应 disposition 即受理回执，
+   * handled/queued/started 三值同为「pi 已受理输入」的确定性事实（零时间窗、零扫描、零
+   * 持久化）——
+   * - handled = 被扩展命令接管（输入已消费，不跟回合事件）；
+   * - started = 已开跑（手打 skill / prompt 模板展开为正常回合——started 基终局，
+   *   skill-input-marker-pollution；或命令清单假阳性当普通文本接住）；
+   * - queued = 已入 pi steering/followUp 队列（技能展开后入队；「受理即完成意图传递」，
+   *   后续消费由 pi 自主——若文本滞留被对账收回，经 adopt 通道重投，无双投）。
+   * 终局动作统一：条目复用送达确认原语写 delivered tombstone（对账器见 tombstone 不重投，
+   * 断线重连 resync 判重防线继承）+ session.deliveryHandled 一对一通知前端（静默收气泡，
+   * 回合输出照常流入）。带标记条目维持原样：仅 handled 即终局（D2③：清单缺失时实际被
+   * 接管的兜底），queued/started 等待 message_end 标记回执（D4）。资格判定先行
+   *（confirmDelivered 有终局副作用，不得对不合格条目调用）。
+   */
+  function settleAcceptedEntry(
+    sessionId: string,
+    state: RuntimeState,
+    handle: DeliveryHandleV2,
+    entryId: string | undefined,
+    disposition: InputDisposition | undefined,
+  ): void {
+    const unmarkedTracked = entryId !== undefined && state.unmarkedEntryIds.has(entryId)
+    if (entryId !== undefined && disposition !== undefined &&
+        (unmarkedTracked || disposition === 'handled') &&
+        handle.confirmDelivered(entryId)) {
+      state.submitted.delete(bareMarkerId(entryId))
+      state.pendingRevoke.delete(entryId) // 离场事实 > cancel 意图（delivered 同优先级口径）
+      notifyDeliveryHandled(sessionId, entryId)
+    }
+  }
+
+  /**
    * 单条出站交接（port.send 的逐条实现 + sendDirect 共用）：
    * 抑制/撤销守卫 → 持有等待 → 显式投递放行 → ensureActive → skill 注入 → prompt（busy 类
-   * 拒绝按 D6 处置）→ skillNotice → 记账置位。occupancy 置位先于 prompt（RT-4#10，RPC 往返
-   * 窗不呈 idle）且**仅空闲时置位**（D3①：生成中出站保持 generating 不覆盖）；lastActiveAt/
-   * workspace 记账晚于 prompt 受理（成功才显示 working）。
-   * [D1①②] disposition 接线：响应 handled = 输入已被 pi 扩展命令接管（不会跟回合事件）→
-   * 条目复用送达确认原语写 tombstone 终局（delivered，D1②「离开系统的事实」）+ 经
-   * session.deliveryHandled 一对一通知前端（D1③）+ occupancy 主动回落（D3②，幂等门 =
-   * 仅 dispatching）。queued/started 不驱动界面（D4）。
+   * 拒绝按 D6 处置）→ 受理终局 → skillNotice → 记账置位。occupancy 置位先于 prompt 且仅
+   * 空闲时置位（markDispatchingIfIdle）；lastActiveAt/workspace 记账晚于 prompt 受理
+   *（markSessionActive，成功才显示 working）。终局分派细则见 settleAcceptedEntry /
+   * settleDispatching 的 JSDoc。
    * entryId = 本段对应的内核条目 id（splitComposed 按 marker 定位直传；无标记命令段经
    * 活跃集全文匹配回身份；agent 通路无标记段 undefined）——撤销/抑制判定的唯一锚是条目
    * 身份，同文本多条互不误伤（V 裁决 R2-A2）。
@@ -757,13 +837,9 @@ export function createSessionDeliveryRegistry(
     opts: DeliverOptions = {},
     entryId?: string,
   ): Promise<void> {
-    if (entryId !== undefined && state.suppressed.has(entryId)) {
-      state.suppressed.delete(entryId) // rebuild 判定已送达：只记账，不碰 pi
-      return
-    }
-    if (entryId !== undefined && !stillActive(handle, entryId)) return // 持有期被撤销：撤销生效
+    if (skipSuppressedOrRevoked(state, handle, entryId)) return
     await waitDeliverable(sessionId, state)
-    if (entryId !== undefined && !stillActive(handle, entryId)) return
+    if (entryId !== undefined && !stillActive(handle, entryId)) return // 持有期被撤销：撤销生效
     // [D4] 显式投递清标记（新意图）：先于 ensureActive/restore（restore-abort 读不到标记即不掐）
     userStoppedGate.consumeForExplicitDelivery(sessionId)
     const client = await deps.ensureActive(sessionId)
@@ -771,55 +847,16 @@ export function createSessionDeliveryRegistry(
     // [A1 切源] session cwd 作 project skill 扫描基准——视图缺失时 undefined = global-only
     //（宁缺毋错，不猜 cwd）
     const injection = await injector.inject(client, text, deps.getSession(sessionId)?.cwd)
-    // [RT-4#10 + D3①] occupancy 置位先于 prompt：RPC 往返窗内对预检/回收豁免不再呈 idle；
-    // 置位前置 idle 门——仅空闲时执行 dispatching 转移，生成中出站保持 generating 不覆盖
-    //（原回合脉冲全程不错乱，★3）。lastActiveAt/record（D-18「成功才显示 working」的记账
-    // 面）仍在 prompt 受理成功后（markSessionActive，同口径 idle 门）。
-    const dispatchView = viewOf(sessionId)
-    if (dispatchView && (dispatchView.occupancy?.turn ?? 'idle') === 'idle') {
-      applySessionOccupancyTransition(dispatchView, deps.getMessageBus(), 'dispatching')
-    }
+    markDispatchingIfIdle(sessionId)
     let disposition: InputDisposition | undefined
     try {
       disposition = await promptWithBusyRetry(sessionId, state, client, injection.text, opts)
     } catch (e) {
-      // [RT-4#10] 非 busy 真失败收口（不卡 dispatching）：turn 没跑起来（仍 dispatching）→
-      // idle；busy 类已在 promptWithBusyRetry 内分型收口（reject-processing → generating 等），
-      // 其终态不得被本腿覆盖——只收口仍停留 dispatching 的形态。
-      const failView = viewOf(sessionId)
-      if (failView && failView.occupancy?.turn === 'dispatching') {
-        applySessionOccupancyTransition(failView, deps.getMessageBus(), 'reject-other')
-      }
+      settleDispatching(sessionId, 'reject-other')
       throw e
     }
-    // [D1②③ + D3② + 命令终局事件化] 无标记条目受理终局：prompt 响应 disposition 即
-    // 受理回执，handled/queued/started 三值同为「pi 已受理输入」的确定性事实（零时间窗、
-    // 零扫描、零持久化）——
-    // - handled = 被扩展命令接管（输入已消费，不跟回合事件）；
-    // - started = 已开跑（手打 skill / prompt 模板展开为正常回合——started 基终局，
-    //   skill-input-marker-pollution；或命令清单假阳性当普通文本接住）；
-    // - queued = 已入 pi steering/followUp 队列（技能展开后入队；「受理即完成意图传递」，
-    //   后续消费由 pi 自主——若文本滞留被对账收回，经 adopt 通道重投，无双投）。
-    // 终局动作统一：条目复用送达确认原语写 delivered tombstone（对账器见 tombstone 不重
-    // 投，断线重连 resync 判重防线继承）+ session.deliveryHandled 一对一通知前端（静默
-    // 收气泡，回合输出照常流入）。
-    // 带标记条目维持原样：仅 handled 即终局（D2③：清单缺失时实际被接管的兜底），
-    // queued/started 等待 message_end 标记回执（D4）。资格判定先行（confirmDelivered
-    // 有终局副作用，不得对不合格条目调用）。
-    const unmarkedTracked = entryId !== undefined && state.unmarkedEntryIds.has(entryId)
-    if (entryId !== undefined && disposition !== undefined &&
-        (unmarkedTracked || disposition === 'handled') &&
-        handle.confirmDelivered(entryId)) {
-      state.submitted.delete(bareMarkerId(entryId))
-      state.pendingRevoke.delete(entryId) // 离场事实 > cancel 意图（delivered 同优先级口径）
-      notifyDeliveryHandled(sessionId, entryId)
-    }
-    if (disposition === 'handled') {
-      const settledView = viewOf(sessionId)
-      if (settledView && (settledView.occupancy?.turn ?? 'idle') === 'dispatching') {
-        applySessionOccupancyTransition(settledView, deps.getMessageBus(), 'idle')
-      }
-    }
+    settleAcceptedEntry(sessionId, state, handle, entryId, disposition)
+    if (disposition === 'handled') settleDispatching(sessionId, 'idle')
     publishSkillNotices(deps.getMessageBus(), sessionId, text, injection.notices)
     markSessionActive(sessionId, disposition !== 'handled')
   }

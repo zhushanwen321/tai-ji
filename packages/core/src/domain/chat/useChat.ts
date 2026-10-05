@@ -18,7 +18,7 @@
  *
  * abort：调 api.chat.abort（方法存在，中断流转 DEFERRED G-025）。
  */
-import type { Segment, ServerMessage, CompactErrorCode, MessageBlockedCode } from '@taiji/shared'
+import type { Segment, ServerMessage, ServerMessageUnion, CompactErrorCode, MessageBlockedCode } from '@taiji/shared'
 import { segmentsToPrompt, restoreRevokedDraft, markerLiteral, MESSAGE_BLOCKED_CODE } from '@taiji/shared'
 import {
   subscribeSession,
@@ -728,6 +728,73 @@ function consumeRespawnWindowOnTurnStart(
   sessionStore.revive(sid)
 }
 
+/** session.* → 跨 store 协调（sessionStore.applySnapshot / occupancy 投影），保留在 useChat
+ *（stores 间禁止互相 import）。case 体提取为上方同名 handle* helper；未列 session.* 类型
+ * 的 no-op 观测（RD-1#9）走 warnUnhandledSessionFrame。（原 streamSubscribe 回调内联 switch
+ * 逐字迁移。） */
+function handleSessionFrame(
+  sid: string,
+  chat: ChatStoreInstance,
+  sessionStore: SessionStoreLike,
+  deps: EnsureStreamSubDeps,
+  msg: ServerMessageUnion,
+): void {
+  switch (msg.type) {
+    // [fix-handoff-with-message] session.handoffStarted 不再处理：前端已删除「正在交接…」
+    // system notice（改由 composer stop 按钮提供取消入口）。runtime 仍广播此消息，前端忽略即可。
+    case 'session.compacting': {
+      handleSessionCompacting(sid, chat, msg)
+      break
+    }
+    case 'session.compacted': {
+      handleSessionCompacted(sid, chat)
+      break
+    }
+    case 'session.occupancy': {
+      handleSessionOccupancy(sid, chat, msg)
+      break
+    }
+    // [投递所有权内核 u3b / D7] 内核条目状态快照：队列区/气泡 morph 的单一数据源
+    case 'session.delivery': {
+      handleSessionDelivery(sid, chat, msg)
+      break
+    }
+    // [pi1-disposition-chat-flow U2① / D1③] handled 终局通知：命令条目静默清除
+    case 'session.deliveryHandled': {
+      handleSessionDeliveryHandled(sid, chat, msg)
+      break
+    }
+    // [pi1-disposition-chat-flow U2③ / D10③] extension.error 白名单放行（最小通路）：
+    // 仅 errorEvent === 'command' 来源进 toast（同 key 去重 + 限频），其余静默
+    case 'extension.error': {
+      handleExtensionErrorFrame(sid, msg, deps)
+      break
+    }
+    case 'session.renamed': {
+      handleSessionRenamed(sid, sessionStore, msg)
+      break
+    }
+    case 'session.state_changed': {
+      handleSessionStateChanged(sessionStore, msg)
+      break
+    }
+    case 'session.thinkingLevelSet': {
+      handleSessionThinkingLevelSet(sessionStore, msg)
+      break
+    }
+    default: {
+      // [RD-1#9] 未列 session.* 类型的 no-op 观测（dev，一次/类型）：本分支对
+      // session.exited / restored / restoreFailed / commands / stats_update 等帧是
+      // 「有意的 no-op」（消费方在 renderer 侧 message bus 或另一订阅面），但旧实现
+      // 零痕迹——协议漂移（runtime 新增 session.* 而前端漏接）在 dev 下不可见。
+      // Set 去重防刷屏；非 session.* 前缀（app.info / config.* / plugin:* 等全局帧
+      // 经同一 streamSubscribe 到达，本就由其他域消费）不 warn，避免误报噪音。
+      warnUnhandledSessionFrame(msg.type, sid)
+      break
+    }
+  }
+}
+
 export function ensureStreamSubscription(
   sid: string,
   chat: ChatStoreInstance,
@@ -783,62 +850,8 @@ export function ensureStreamSubscription(
       }
       return
     }
-    // session.* → 跨 store 协调（sessionStore.applySnapshot / occupancy 投影），
-    // 保留在 useChat（stores 间禁止互相 import）。case 体提取为上方同名 handle* helper。
-    switch (msg.type) {
-      // [fix-handoff-with-message] session.handoffStarted 不再处理：前端已删除「正在交接…」
-      // system notice（改由 composer stop 按钮提供取消入口）。runtime 仍广播此消息，前端忽略即可。
-      case 'session.compacting': {
-        handleSessionCompacting(sid, chat, msg)
-        break
-      }
-      case 'session.compacted': {
-        handleSessionCompacted(sid, chat)
-        break
-      }
-      case 'session.occupancy': {
-        handleSessionOccupancy(sid, chat, msg)
-        break
-      }
-      // [投递所有权内核 u3b / D7] 内核条目状态快照：队列区/气泡 morph 的单一数据源
-      case 'session.delivery': {
-        handleSessionDelivery(sid, chat, msg)
-        break
-      }
-      // [pi1-disposition-chat-flow U2① / D1③] handled 终局通知：命令条目静默清除
-      case 'session.deliveryHandled': {
-        handleSessionDeliveryHandled(sid, chat, msg)
-        break
-      }
-      // [pi1-disposition-chat-flow U2③ / D10③] extension.error 白名单放行（最小通路）：
-      // 仅 errorEvent === 'command' 来源进 toast（同 key 去重 + 限频），其余静默
-      case 'extension.error': {
-        handleExtensionErrorFrame(sid, msg, deps)
-        break
-      }
-      case 'session.renamed': {
-        handleSessionRenamed(sid, sessionStore, msg)
-        break
-      }
-      case 'session.state_changed': {
-        handleSessionStateChanged(sessionStore, msg)
-        break
-      }
-      case 'session.thinkingLevelSet': {
-        handleSessionThinkingLevelSet(sessionStore, msg)
-        break
-      }
-      default: {
-        // [RD-1#9] 未列 session.* 类型的 no-op 观测（dev，一次/类型）：本分支对
-        // session.exited / restored / restoreFailed / commands / stats_update 等帧是
-        // 「有意的 no-op」（消费方在 renderer 侧 message bus 或另一订阅面），但旧实现
-        // 零痕迹——协议漂移（runtime 新增 session.* 而前端漏接）在 dev 下不可见。
-        // Set 去重防刷屏；非 session.* 前缀（app.info / config.* / plugin:* 等全局帧
-        // 经同一 streamSubscribe 到达，本就由其他域消费）不 warn，避免误报噪音。
-        warnUnhandledSessionFrame(msg.type, sid)
-        break
-      }
-    }
+    // session.* → 跨 store 协调（编排细则见 handleSessionFrame）
+    handleSessionFrame(sid, chat, sessionStore, deps, msg)
   })
   streamSubscriptions.set(sid, unsub)
 }

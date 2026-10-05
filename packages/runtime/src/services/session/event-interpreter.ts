@@ -821,29 +821,7 @@ export class EventInterpreter {
         this.handleTurnEnd(ev)
         return true
       case 'turn-usage':
-        // pi turn_end 的单 turn 用量：回写 context.update（用量在前），再触发 onTurnUsage
-        //（turn 级副作用：project sidecar 兜底等）。
-        // 不转发 message.complete（避免每 turn 触发 setStreaming 闪烁；
-        // message.complete 仍由 turn-end/agent_end 独占）。
-        this.opts.onContextUpdate?.(ev.sessionId, { inputTokens: ev.inputTokens, totalTokens: ev.totalTokens })
-        // pi1-disposition-chat-flow U4⑤（D7③ stdout 单一通路）：turn_end 的 onPiEvent 观测
-        // 登记点（同上方 message_end 登记）。挂本 case 的语义边界：无 usage 的 turn_end 在
-        // event-adapter 既有 gate（handleTurnEndPi totalTokens 缺失 return []）处不可达——
-        // stdout 通路既有形态，按需登记原则下接受，非本次重构引入。载荷 = turn-usage 事件
-        // 已提取的用量字段平铺（无值编码 null 缺省不落键，与帧载荷同纪律）。
-        this.opts.executeHooks?.('onPiEvent', {
-          event: PI_EVENT.turnEnd,
-          totalTokens: ev.totalTokens,
-          ...(ev.outputTokens !== null ? { outputTokens: ev.outputTokens } : {}),
-          ...(ev.cacheRead !== null ? { cacheRead: ev.cacheRead } : {}),
-          ...(ev.cacheWrite !== null ? { cacheWrite: ev.cacheWrite } : {}),
-        }).catch(() => {})
-        this.opts.onTurnUsage?.(ev.sessionId)
-        // composer-gen-stats（D1/D2）：组装生成指标样本采样（fire-and-forget 同步，不阻塞事件流）。
-        // durationMs 取 llmWindowDurationMs（assistant message_start → message_end 的 LLM 请求
-        // 窗口，不含工具执行时间）；真缺闭/缺起 → null；一次性消费语义、未注入 onGenStats 时
-        // 整块跳过——组装与状态清理由 LlmWindowSampler.consume 承载（注释详见该处）。
-        this.llmWindows.consume(ev.sessionId, ev)
+        this.handleTurnUsage(ev)
         return true
       case 'llm-request-start':
         // composer-genstats-ttft（设计 §3.2）：pi turn_start 到达 → TTFT 请求锚点重锚
@@ -874,6 +852,36 @@ export class EventInterpreter {
       default:
         return false
     }
+  }
+
+  /**
+   * turn-usage 的编排（原 handleTurnLifecycleEvent 同名 case 体逐字迁移）。命中返回 true。
+   */
+  private handleTurnUsage(ev: PiTranslatedEvent & { kind: 'turn-usage' }): boolean {
+    // pi turn_end 的单 turn 用量：回写 context.update（用量在前），再触发 onTurnUsage
+    //（turn 级副作用：project sidecar 兜底等）。
+    // 不转发 message.complete（避免每 turn 触发 setStreaming 闪烁；
+    // message.complete 仍由 turn-end/agent_end 独占）。
+    this.opts.onContextUpdate?.(ev.sessionId, { inputTokens: ev.inputTokens, totalTokens: ev.totalTokens })
+    // pi1-disposition-chat-flow U4⑤（D7③ stdout 单一通路）：turn_end 的 onPiEvent 观测
+    // 登记点（同上方 message_end 登记）。挂本 case 的语义边界：无 usage 的 turn_end 在
+    // event-adapter 既有 gate（handleTurnEndPi totalTokens 缺失 return []）处不可达——
+    // stdout 通路既有形态，按需登记原则下接受，非本次重构引入。载荷 = turn-usage 事件
+    // 已提取的用量字段平铺（无值编码 null 缺省不落键，与帧载荷同纪律）。
+    this.opts.executeHooks?.('onPiEvent', {
+      event: PI_EVENT.turnEnd,
+      totalTokens: ev.totalTokens,
+      ...(ev.outputTokens !== null ? { outputTokens: ev.outputTokens } : {}),
+      ...(ev.cacheRead !== null ? { cacheRead: ev.cacheRead } : {}),
+      ...(ev.cacheWrite !== null ? { cacheWrite: ev.cacheWrite } : {}),
+    }).catch(() => {})
+    this.opts.onTurnUsage?.(ev.sessionId)
+    // composer-gen-stats（D1/D2）：组装生成指标样本采样（fire-and-forget 同步，不阻塞事件流）。
+    // durationMs 取 llmWindowDurationMs（assistant message_start → message_end 的 LLM 请求
+    // 窗口，不含工具执行时间）；真缺闭/缺起 → null；一次性消费语义、未注入 onGenStats 时
+    // 整块跳过——组装与状态清理由 LlmWindowSampler.consume 承载（注释详见该处）。
+    this.llmWindows.consume(ev.sessionId, ev)
+    return true
   }
 
   /**
