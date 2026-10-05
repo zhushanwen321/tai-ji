@@ -25,7 +25,7 @@ interface ToolExecutionEndLikeEvent {
 	isError: boolean;
 	toolName: string;
 	toolCallId: string;
-	/** 嵌套子调用标记（pi 1.0：另一工具（如 codemode 脚本）发起的调用携带） */
+	/** 嵌套子调用标记（pi 1.0：另一工具（如 codemode 脚本）发起的调用携带；实装锚点 = dist/core/extensions/types.d.ts ToolExecutionEndEvent :837-838） */
 	parentToolCallId?: string;
 	result?: unknown;
 }
