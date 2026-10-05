@@ -1,5 +1,11 @@
 # @zhushanwen/pi-goal
 
+## 0.14.11
+
+### Patch Changes
+
+- 802af968f: message_end handling now consumes only user/assistant messages, so pi 1.0.0's frequent system-message writes (tool-set changes) and malformed message shapes no longer pollute goal token accounting. Also pins the pi peer dependency range to ^1.0.0.
+
 ## 0.14.10
 
 ### Patch Changes

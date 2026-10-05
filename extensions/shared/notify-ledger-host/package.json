@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-notify-ledger-host",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "description": "Shared pi-extension adapter factory for the @zhushanwen/subagent-core notify ledger host port — binds pi appendEntry / sessionManager.getEntries / isIdle / agent_settled / sendMessage into a NotifyLedgerHost with stale-ctx guarded delivery (shared library, not a Pi extension).",
   "type": "module",
   "main": "src/index.ts",

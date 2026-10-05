@@ -1,5 +1,11 @@
 # @zhushanwen/pi-scheduler
 
+## 0.10.0
+
+### Minor Changes
+
+- 802af968f: The scheduler widget stops pushing redundant keepalive frames while the task list is unchanged, and pending model switches restore via a direct idle-state query instead of tick counting, so recovery tracks actual agent state (requires pi 1.0.0).
+
 ## 0.9.3
 
 ### Patch Changes

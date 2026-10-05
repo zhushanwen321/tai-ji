@@ -1,5 +1,11 @@
 # @zhushanwen/pi-permission
 
+## 1.6.0
+
+### Minor Changes
+
+- 802af968f: Waiting for your approval no longer fails closed after 5 minutes — the dialog stays open until you decide. The AI risk classifier's built-in 90-second timeout default is also retired: classification runs unbounded unless you configure `classifier.timeout` explicitly (requires pi 1.0.0).
+
 ## 1.5.0
 
 ### Minor Changes

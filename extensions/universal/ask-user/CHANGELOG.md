@@ -1,5 +1,11 @@
 # @zhushanwen/pi-ask-user
 
+## 7.3.5
+
+### Patch Changes
+
+- 802af968f: Pin the pi peer dependency range to ^1.0.0 and correct the isError semantics comment (pi 1.0.0 honors isError on normal tool returns); no behavior change.
+
 ## 7.3.4
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @zhushanwen/pi-notify-ledger-host
 
+## 0.3.0
+
+### Minor Changes
+
+- 802af968f: Retire the optional `sendDisplayMessage` port: notification delivery is back to the single `sendDelivery` wake-turn channel, and the `sendDisplayMessage` factory option is removed from `CreatePiNotifyLedgerHostOptions` (requires pi 1.0.0).
+
 ## 0.2.4
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-system-prompt",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "System prompt injection extension for Pi — reads config and appends to system prompt",
   "type": "module",
   "main": "src/index.ts",

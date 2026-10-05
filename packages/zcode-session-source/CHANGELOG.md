@@ -1,5 +1,11 @@
 # @zhushanwen/zcode-session-source
 
+## 0.2.5
+
+### Patch Changes
+
+- 802af968f: Pin the pi peer dependency range to ^1.0.0 (stale pi implementation anchors in comments refreshed to 1.0.0). No behavior change.
+
 ## 0.2.4
 
 ### Patch Changes

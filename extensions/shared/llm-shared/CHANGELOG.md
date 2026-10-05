@@ -1,5 +1,11 @@
 # @zhushanwen/pi-llm-shared
 
+## 0.11.1
+
+### Patch Changes
+
+- 802af968f: (no changeset body; patch version bump)
+
 ## 0.11.0
 
 ### Minor Changes

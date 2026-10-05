@@ -1,5 +1,11 @@
 # @zhushanwen/pi-extension-logger
 
+## 0.6.2
+
+### Patch Changes
+
+- 802af968f: (no changeset body; patch version bump)
+
 ## 0.6.1
 
 ### Patch Changes
