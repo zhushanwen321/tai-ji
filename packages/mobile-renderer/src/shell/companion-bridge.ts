@@ -187,7 +187,7 @@ function toMobileFormRequest(sid: string, request: FormFrameSource): ExtensionUI
   return {
     sessionId: sid,
     requestId: request.requestId,
-    method: ((typeof request.method === 'string' ? request.method : request.kind) ?? 'input') as ExtensionInteractMethod,
+    dialogKind: ((typeof request.method === 'string' ? request.method : request.kind) ?? 'input') as ExtensionInteractMethod,
     ...(typeof request.message === 'string' ? { message: request.message } : {}),
     ...(request.form !== undefined ? { form: request.form as true } : {}),
     ...(request.formQuestions !== undefined ? { formQuestions: request.formQuestions as unknown[] } : {}),
@@ -363,7 +363,7 @@ export function useMobileFormRequests(sessionId: Ref<string | null>): MobileForm
       console.warn('[companion-bridge] form response dropped (request no longer pending):', requestId)
       return false
     }
-    const delivered = sendExtensionUIResponse(sid, target.requestId, target.method, result)
+    const delivered = sendExtensionUIResponse(sid, target.requestId, target.dialogKind, result)
     if (!delivered) {
       // 未送达：保留分区条目，连接恢复后同 requestId 重发幂等（M1/RD-3#1）
       console.warn('[companion-bridge] form response not delivered (WS closed), kept for retry:', requestId)

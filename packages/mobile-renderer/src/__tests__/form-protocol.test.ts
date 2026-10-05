@@ -30,7 +30,7 @@ function choiceReq(overrides: Partial<ExtensionUIRequest> = {}): ExtensionUIRequ
   return {
     sessionId: 'sid-a',
     requestId: 'req-1',
-    method: 'select',
+    dialogKind: 'select',
     form: true,
     formQuestions: [
       { type: 'choice', question: '用哪个数据库？', options: [{ label: 'pg' }, { label: 'mysql' }] },

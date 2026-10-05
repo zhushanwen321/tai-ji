@@ -76,6 +76,10 @@ const deps: ChatViewDeps = {
   onHandoffAsk: () => {},
   openDrawer: () => {},
   onFileClick: () => {},
+  // 浮层浏览器为桌面壳能力（display-containers §7.4）；移动壳无浮层容器，降级系统浏览器
+  openBrowser: (url) => {
+    window.open(url, '_blank', 'noopener')
+  },
 
   // 数据加载（remote-use-mobile D7 面板族 Phase 2：空候选 → 路径链接化降级普通文本）
   loadFileCandidates: () => [],

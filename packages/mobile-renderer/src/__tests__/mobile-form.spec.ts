@@ -311,7 +311,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
 
     // 切到 sid-b：快照含该请求 → 补挂呈现（dedup 幂等，实时帧 + 快照双源单卡）
     mockGetPending.mockResolvedValueOnce([
-      { sessionId: 'sid-b', requestId: 'req-b', method: 'select', ...singleChoiceRequest() } as ExtensionUIRequest,
+      { sessionId: 'sid-b', requestId: 'req-b', dialogKind: 'select', ...singleChoiceRequest() } as ExtensionUIRequest,
     ])
     sessionStore.setActiveId('sid-b')
     await flushPromises()
@@ -351,7 +351,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
     shellConnectionState.value = 'connecting'
     await nextTick()
     mockGetPending.mockResolvedValueOnce([
-      { sessionId: 'sid-form', requestId: 'req-2', method: 'select', ...singleChoiceRequest() } as ExtensionUIRequest,
+      { sessionId: 'sid-form', requestId: 'req-2', dialogKind: 'select', ...singleChoiceRequest() } as ExtensionUIRequest,
     ])
     shellConnectionState.value = 'connected'
     await flushPromises()
@@ -442,7 +442,7 @@ describe('MobileFormCard 回传失败错误行（组件级 prop 渲染）', () =
   }
 
   function errRequest(): ExtensionUIRequest {
-    return { sessionId: 'sid-err', requestId: 'req-1', method: 'select', ...singleChoiceRequest() } as ExtensionUIRequest
+    return { sessionId: 'sid-err', requestId: 'req-1', dialogKind: 'select', ...singleChoiceRequest() } as ExtensionUIRequest
   }
 
   it('respondFailedId 匹配当前请求 → 错误行渲染；不匹配或缺省 → 不渲染', () => {
