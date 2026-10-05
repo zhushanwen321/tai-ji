@@ -146,7 +146,7 @@ import { __setMockFileAck } from './file'
 import { __setMockGitAck } from './git'
 
 // workflow/subagent fixture（E2E 验证 Flows/Agents tab，从 workflow-data.ts 拆出控文件行数）
-import { fixtureWorkflows, fixtureSubagents, fixtureRunEvents } from './workflow-data'
+import { fixtureWorkflows, fixtureSubagents, fixtureRunEventsByRun, fixtureDagByRun, fixtureDagErrors } from './workflow-data'
 
 /** "npm:" 前缀长度（install source 解析用，对齐 runtime NPM_PREFIX_LENGTH） */
 const NPM_PREFIX = 'npm:'
@@ -659,26 +659,35 @@ const sessionImpl = {
 
   /**
    * Mock run 事件流（workflow-visualization §3.1-4；[G4 锚定补齐] 同因：门面三元下 mock
-   * 缺成员即接口同构破）。按 runId 分流：wf-mock-001 返回 fixtureRunEvents 成功回执
-   * （workflow-viz overlay 事件流/Gantt 子页的正向对账数据，e2e/workflow-viz-overlay.spec.ts）；
-   * 其余 runId 返回结构化 record_not_found 领域回执（形态对齐 real 错误臂；该降级形态的
-   * renderer 分流由组件测试覆盖——workflow-live-panel.test.ts 错误二分用例）。
+   * 缺成员即接口同构破）。按 runId 查 fixtureRunEventsByRun 返回对应演员的事件行集
+   * （[D8] workflow-overlay-refine §3.3 演员清单——wf-mock-001 既有 done + 十演员，
+   * 冻结清单见 workflow-data.ts 头注释与 runlog）；未登记 runId 返回结构化
+   * record_not_found 领域回执（形态对齐 real 错误臂；该降级形态的 renderer 分流由
+   * 组件测试覆盖——workflow-live-panel.test.ts 错误二分用例）。
    */
   async getWorkflowRunEvents(sessionId: string, runId: string): Promise<WorkflowRunEventsReply> {
     await sleep(TIMING.ack)
-    if (runId === 'wf-mock-001') {
-      return { sessionId, runId, events: fixtureRunEvents.map((e) => ({ ...e })) }
+    if (Object.hasOwn(fixtureRunEventsByRun, runId)) {
+      return { sessionId, runId, events: fixtureRunEventsByRun[runId].map((e) => ({ ...e })) }
     }
     return { sessionId, runId, code: 'record_not_found', message: 'mock 无 record 事件流记录' }
   },
 
   /**
    * Mock run DAG 蓝图（workflow-visualization §3.1-5；[G4 锚定补齐] 同因：门面三元下 mock
-   * 缺成员即接口同构破）。mock 无 record 文件基建 → 返回结构化 record_not_found 领域回执
-   *（形态对齐 real 错误臂；overlay 左栏按码分流降级形态 = 按 phase 分组只读列表）。
+   * 缺成员即接口同构破）。[D8 定稿②③] 按 runId 查预置表返回——成功臂 fixtureDagByRun
+   * （预置成品 DAG，mock 内不跑解析器）、错误臂 fixtureDagErrors（parse_failed 演员——
+   * 降级断言 V5①/OV4 的唯一数据源）；未登记 runId 恒 record_not_found 领域回执
+   *（形态对齐 real 错误臂；未登记 runId 的降级形态仍由本负例承载）。
    */
   async getWorkflowDag(sessionId: string, runId: string): Promise<WorkflowDagReply> {
     await sleep(TIMING.ack)
+    if (Object.hasOwn(fixtureDagByRun, runId)) {
+      return { sessionId, runId, dag: { ...fixtureDagByRun[runId] } }
+    }
+    if (Object.hasOwn(fixtureDagErrors, runId)) {
+      return { sessionId, runId, code: fixtureDagErrors[runId].code, message: fixtureDagErrors[runId].message }
+    }
     return { sessionId, runId, code: 'record_not_found', message: 'mock 无 record 文件基建' }
   },
 
