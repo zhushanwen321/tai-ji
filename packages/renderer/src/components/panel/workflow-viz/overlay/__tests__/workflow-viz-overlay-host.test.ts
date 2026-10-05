@@ -331,7 +331,7 @@ describe('Host 容器（黑盒 DOM + D10 回落）', () => {
     wrapper.unmount()
   })
 
-  it('零命中实例在左栏未匹配分组可见（D2⑥ 不静默丢弃——真实匹配链派生，S3 对账出口）', async () => {
+  it('零命中实例在上区未匹配分组可见（D2⑥ 不静默丢弃——真实匹配链派生，S3 对账出口）', async () => {
     // phase 'elsewhere' 不在 DAG 分区 → 零命中进 unmatched（Host 派生经 matchInstancesToNodes）
     await seedRecords([makeRun('wf-1', 's1', { agentCalls: [
       { id: 0, agent: 'stray-agent', phase: 'elsewhere', status: 'done' },

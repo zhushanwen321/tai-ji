@@ -6,9 +6,12 @@
   状态色降噪色阶、焦点管理三要素：打开即 focus 面板 / 关闭归还触发元素 / Tab 首末
   循环焦点陷阱防逃逸到遮罩后背景 UI）。
 
-  结构：header（run 名 + slug + 状态 pill + 已用时长 + args 摘要 + 右上关闭）+
-  左 DAG 栏（WorkflowVizDag 画布 / DAG 不可得降级列表）+ 右实况面板（slot——
-  U5 多级 tab 面板填充位）。
+  结构：header（单行七元素：workflow 名 + slug + 状态 pill + errorCode + 已用时长
+  + 关闭钮，v5 终裁参数信息不进 header——workflow-overlay-refine D2）+
+  body 纵向两段（workflow-overlay-refine D1，份额 1.6:1）：上区 DAG（WorkflowVizDag
+  画布 / DAG 不可得降级列表 / 解析中 / 未匹配实例分组 + 左下角 D4 状态图例（仅画布
+  就绪时在场，dot 类与节点同源 dag/tone.ts、pointer-events-none 不拦截画布交互），
+  全宽）+ 下区 dock（slot——U5 多级 tab 面板填充位，全宽）。
 
   关闭三通道统一走同一 close()（设计 §3.1-2）：ESC（window keydown，open 时挂、
   close 时卸 + IME 守卫）、右上关闭按钮、点遮罩（面板外区域 @click.self）。
@@ -24,9 +27,15 @@
   数据边界（u4 与 u5 的派生单处分工）：节点六态映射（nodeStates）与已用时长
   （elapsedMs，含 D9 中断停走口径）为已派生输入——单点实现在 renderer 侧
   gantt-segments 派生（deriveNodeStatus）与 workflowStore（deriveWorkflowRunElapsedMs），
-  由容器 Host 统一派生后经 props 透传（壳与实况面板 header 共用同一时长派生），
+  由容器 Host 统一派生后经 props 透传（单 header 终态 D2：时长仅壳 header 呈现，
+  面板层不再重复），
   本壳纯展示不自行判定；DAG 不可得的降级形态（原因码 + parse_failed 重试入口 +
-  按 phase 分组只读列表）在本壳实现（左栏行为，数据 = run.agentCalls）。
+  按 phase 分组只读列表）在本壳实现（上区行为，数据 = run.agentCalls）。
+
+  纵向份额（D1 常量口径）：上区 flex-[1.6] / 下区 flex-1 = 61.5% / 38.5%（分母 =
+  面板内容高）；下 dock 低于最小可用高度时 dock 内部滚动（overflow-y-auto 既有链），
+  不压缩 DAG 区份额。未匹配实例分组 max-h-[35%] 的分母随容器变为上区高度（D1
+  E4 口径变更点，类值不变）。
 -->
 <template>
   <div
@@ -45,7 +54,7 @@
       data-testid="wfvz-overlay-panel"
       @click.stop
     >
-      <!-- header：run 标识 + 状态 pill + 时长 + args 摘要 + 关闭 -->
+      <!-- header：workflow 名 + slug + 状态 pill + errorCode + 时长 + 关闭（单行七元素；D2 v5 终裁不展示 args） -->
       <header
         class="flex flex-none items-center gap-2 border-b border-hairline px-3 py-2"
         data-testid="wfvz-overlay-header"
@@ -78,12 +87,6 @@
           class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-mid"
           data-testid="wfvz-overlay-elapsed"
         >{{ formatDuration(elapsedMs) }}</span>
-        <span
-          v-if="run?.argsSummary"
-          class="min-w-0 truncate text-[length:var(--text-3xs)] text-neutral-dim"
-          data-testid="wfvz-overlay-args"
-          :title="run.argsSummary"
-        >{{ run.argsSummary }}</span>
         <span class="flex-1" />
         <Button
           variant="ghost"
@@ -97,10 +100,10 @@
         </Button>
       </header>
 
-      <!-- body：左 DAG 栏 + 右实况面板（slot） -->
-      <div class="flex min-h-0 flex-1">
+      <!-- body：上区 DAG（纵向主视图，全宽）+ 下区实况面板 dock（slot），份额 1.6:1 -->
+      <div class="flex min-h-0 flex-1 flex-col">
         <aside
-          class="relative flex min-w-0 grow-0 shrink-0 basis-[45%] flex-col border-r border-hairline"
+          class="relative flex min-h-0 flex-[1.6] flex-col"
           data-testid="wfvz-overlay-dag-pane"
         >
           <!-- DAG 就绪：画布 + 未匹配分组同链（v-else-if/v-else 降级与解析中接续本链——三态互斥） -->
@@ -113,6 +116,32 @@
             :active-phase="activePhase"
             @select="(payload) => emit('select', payload)"
           />
+          <!-- D4 状态图例（workflow-overlay-refine）：六态 dot + 词，dot 类从 dag/tone.ts
+               同源取（「图例 = DAG 的图例」）；停止叠加两档说明由容器 title 承载；绝对
+               定位层不占画布布局流，pointer-events-none 不拦截节点点击与缩放手势（V3-wf⑤） -->
+          <div
+            class="pointer-events-none absolute bottom-2 left-3 flex items-center gap-3 rounded-sm border border-hairline bg-surface px-2.5 py-1.5"
+            :title="t('panel.workflowViz.legendStopTitle')"
+            data-testid="wfvz-dag-legend"
+          >
+            <span
+              v-for="entry in legendEntries"
+              :key="entry.status"
+              class="inline-flex items-center gap-1.5 text-[length:var(--text-2xs)] text-neutral-mid"
+            >
+              <svg class="size-2 shrink-0" viewBox="0 0 8 8" aria-hidden="true">
+                <circle
+                  class="fill-[var(--neutral-dim)]"
+                  :class="dotTone(entry.status)"
+                  cx="4"
+                  cy="4"
+                  r="4"
+                  :data-testid="`wfvz-dag-legend-dot-${entry.status}`"
+                />
+              </svg>
+              {{ entry.label }}
+            </span>
+          </div>
           <!-- 未匹配实例分组（D2⑥：零命中/歧义实例不静默丢弃——画布下方按 phase
                分组的指定展示面；正常 run 无未匹配实例时零渲染，画布不受影响） -->
           <div
@@ -200,7 +229,7 @@
           </div>
         </aside>
 
-        <section class="flex min-w-0 flex-1 flex-col" data-testid="wfvz-overlay-live-pane">
+        <section class="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="wfvz-overlay-live-pane">
           <slot />
         </section>
       </div>
@@ -216,6 +245,7 @@ import { WORKFLOW_RUN_OUTCOME_LABELS, type WorkflowAgentCall, type WorkflowDag, 
 import { Button } from '@/components/ui/button'
 import { formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
 import WorkflowVizDag from '../dag/WorkflowVizDag.vue'
+import { dotTone } from '../dag/tone'
 import type { WorkflowUnmatchedInstance } from '../blueprint-match'
 import type { WorkflowVizDagClickPayload, WorkflowVizDagNodeStatus } from '../dag/types'
 import type { WorkflowVizDagLoadError } from './types'
@@ -254,6 +284,31 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+// ── D4 状态图例（六态 + 停止叠加说明；挂 DAG 区左下，绝对定位不占布局流）──
+
+/**
+ * 图例 dot 类消费 dag/tone.ts 的 dotTone（与节点 dot 同源的单一事实源，模板内
+ * `dotTone(entry.status)` 逐条取类）；词用既有状态词族现值（与 RunTraceTable
+ * statusLabel 同映射），skipped 为 workflow-overlay-refine D4 新增词条。
+ * 停止叠加两档不进常驻图例，由图例容器 title 承载说明（i18n legendStopTitle）。
+ */
+const LEGEND_STATUS_LABEL_KEYS = {
+  pending: 'panel.sideDrawer.workflowPending',
+  running: 'panel.sideDrawer.workflowRunning',
+  done: 'panel.workflowViz.statusDone',
+  failed: 'panel.workflowViz.statusFailed',
+  retrying: 'panel.workflowViz.statusRetrying',
+  skipped: 'panel.workflowViz.statusSkipped',
+} as const satisfies Record<WorkflowVizDagNodeStatus, string>
+
+/** 图例条目（序 = 六态词表序：pending / running / done / failed / retrying / skipped）。 */
+const legendEntries = computed(() =>
+  (Object.keys(LEGEND_STATUS_LABEL_KEYS) as WorkflowVizDagNodeStatus[]).map((status) => ({
+    status,
+    label: t(LEGEND_STATUS_LABEL_KEYS[status]),
+  })),
+)
 
 const panelRef = ref<HTMLElement | null>(null)
 /** 焦点归还锚（DESIGN §5.12：打开前聚焦元素，关闭时归还）。 */

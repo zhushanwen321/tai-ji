@@ -17,7 +17,9 @@
     v-if 不渲染，关闭态 DOM 零痕迹。
   - 已用时长（壳 header 槽，设计 §3.1-1）：D9 停走口径（terminal = completedAt、
     interrupted = health.lastProgressAt 缺省回 startedAt、running = 当前时刻），1s tick
-    仅在 open 态运行（关闭即停）；面板 header 的同口径时长归面板自身（双 header 形态——壳层服务 overlay 全局态、面板层使面板可独立测试复用；数值单源 deriveWorkflowRunElapsedMs 恒一致，裁决登记 = 设计文档 §3.1-2 header 裁决记录，2026-10-02 D5 终态同步）。
+    仅在 open 态运行（关闭即停）；D2 单 header 终态（workflow-overlay-refine）：面板
+    无 header 行，已用时长由壳 header 单点呈现（派生单源 deriveWorkflowRunElapsedMs
+    不变，双 header 形态已废止）。
 -->
 <template>
   <WorkflowVizOverlayGuard :key="guardEpoch" @fallback="onFallback">

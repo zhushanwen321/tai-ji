@@ -3,7 +3,8 @@
  *
  * - 构建者（白盒）：事件流数据经 mock RPC 注入 workflowStore 缓存分区；tab 模型经 expose
  *   与 DOM 事件直接驱动；store 挂载编排（活跃 run 登记 / 事件流首拉）断言 mock 调用
- * - 使用者（黑盒 DOM）：每条用例至少一个用户可见断言——header pill 文案、trace 行状态、
+ * - 使用者（黑盒 DOM）：每条用例至少一个用户可见断言——header 去重形态（D2 单 header
+ *   终态：三槽零渲染）、trace 行状态与空值回归（D5 盘点锚）、
  *   事件流行与 ✂ 截断标注、错误二分形态（静态指引 vs 重试按钮）、phase 头卡轮次、tab 关闭回落
  * - 观察者（形态）：data-testid 结构（wf-viz-* 树）与 data-status/data-active 属性
  *
@@ -168,62 +169,19 @@ beforeEach(() => {
   mockGetRunEvents.mockResolvedValue(eventsReply())
 })
 
-// ── header（pill + 停走时长 + args 摘要）─────────────────────────────────────
+// ── header 去重（D2 单 header 终态：面板无 header 行，pill/elapsed/args 由壳 header
+// 单点呈现——cancelled/failed pill 文案与停走时长语义迁壳层（overlay 测试）与派生单点
+// 函数级测试（__tests__/stores/workflow.test.ts deriveWorkflowRunElapsedMs 全分支）承载）
 
-describe('WorkflowLivePanel · header（使用者黑盒）', () => {
-  it('done 终局：pill 显示 outcome 显示名 + 已用时长（completedAt 锚停走）+ args 摘要', async () => {
+describe('WorkflowLivePanel · header 去重（D2 单 header 终态）', () => {
+  it('面板无 header 行：pill / 已用时长 / args 三槽零渲染，顶格从 L2TabBar 开始', async () => {
     const wrapper = await mountPanel()
-    const pill = wrapper.find('[data-testid="wf-viz-run-pill"]')
-    expect(pill.text()).toBe('成功') // WORKFLOW_RUN_OUTCOME_LABELS.done
-    expect(pill.attributes('data-status')).toBe('done')
-    expect(wrapper.find('[data-testid="wf-viz-run-elapsed"]').text()).toContain('panel.workflowViz.elapsedLabel')
-    expect(wrapper.find('[data-testid="wf-viz-run-args"]').text()).toBe('{"task":"demo"}')
-  })
-
-  it('failed 终局：pill 附 errorCode 摘要（设计：failed 终态附 errorCode 摘要）', async () => {
-    const wrapper = await mountPanel(makeRun({ status: 'done', outcome: 'failed', errorCode: 'budget_exceeded' }))
-    expect(wrapper.find('[data-testid="wf-viz-run-pill"]').text()).toBe('失败 · budget_exceeded')
-  })
-
-  it('cancelled 终局：pill 文案「已取消」+ 取消色（D9 全枚举，与 trace 行 stoppedColorOf 同源非绿）', async () => {
-    const wrapper = await mountPanel(makeRun({ status: 'done', outcome: 'cancelled', reason: 'aborted' }))
-    const pill = wrapper.find('[data-testid="wf-viz-run-pill"]')
-    expect(pill.text()).toBe('已取消')
-    expect(pill.classes()).toContain('text-neutral-mid')
-    expect(pill.classes()).not.toContain('text-success')
-  })
-
-  it('interrupted 暂停态：pill 承接「已中断（可续跑）」文案 key（WorkflowTab 徽标同款）', async () => {
-    const wrapper = await mountPanel(makeRun({ status: 'interrupted', reason: undefined, completedAt: undefined }))
-    // i18n mock 下 t() 返回 key——断言 key 引用（文案 SSOT 在 locale 文件）
-    expect(wrapper.find('[data-testid="wf-viz-run-pill"]').text()).toBe('panel.tray.workflowInterrupted')
-  })
-
-  it('interrupted 暂停态：已用时长锚 lastProgressAt 停走（D9 停走口径——显示锚值而非墙钟差，且不随 tick 推进）', async () => {
-    // startedAt + 20s 后中断：health.lastProgressAt = 02:00:20Z，completedAt 缺省
-    // （中断形态无完成时刻）——停走锚 = lastProgressAt（deriveWorkflowRunElapsedMs 数据锚
-    // 分支）。若停走失效（endMs 取墙钟 now），显示会是自 2026-10-02 起的天级数值。
-    const wrapper = await mountPanel(makeRun({
-      status: 'interrupted',
-      reason: undefined,
-      completedAt: undefined,
-      health: { lastProgressAt: Date.parse('2026-10-02T02:00:20Z') },
-    }))
-    expect(wrapper.find('[data-testid="wf-viz-run-elapsed"]').text()).toContain('20s')
-    // 同帧两次读取一致（tick 只在 running 态重算，interrupted 数据锚切换后输出与 now 无关）
-    expect(wrapper.find('[data-testid="wf-viz-run-elapsed"]').text()).toContain('20s')
-  })
-
-  it('interrupted 暂停态无 health 锚（v2 事件 fold 投影恒缺省）：已用时长槽省略（—），不展示 0s', async () => {
-    // v2 投影不产出 health 字段（shared/workflow.ts 注释——消费侧按 unknown 处理）：
-    // 无停走锚 = 数据缺口，显示省略符而非确定的 0 值（跑半小时后中断显示「0s」更误导）
-    const wrapper = await mountPanel(makeRun({
-      status: 'interrupted',
-      reason: undefined,
-      completedAt: undefined,
-    }))
-    expect(wrapper.find('[data-testid="wf-viz-run-elapsed"]').text()).toContain('duration=—')
-    expect(wrapper.find('[data-testid="wf-viz-run-elapsed"]').text()).not.toContain('0s')
+    expect(wrapper.find('[data-testid="wf-viz-run-pill"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="wf-viz-run-elapsed"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="wf-viz-run-args"]').exists()).toBe(false)
+    // 面板首子元素 = L2TabBar 包裹层（顶格，无 header 行占位）
+    const first = wrapper.find('[data-testid="wf-viz-live-panel"]').element.children[0]
+    expect(first.querySelector('[data-testid="wf-viz-tabbar"]')).not.toBeNull()
   })
 
   it('interrupted 暂停态：在途 trace 行叠加中性停止色且不旋转（D9 停止着色 + 静态图标）', async () => {
@@ -261,6 +219,30 @@ describe('WorkflowLivePanel · workflow tab 三子页（使用者黑盒 + 观察
     expect(wrapper.find('[data-testid="wf-viz-trace-row-1"]').text()).toContain('boom')
     // token 单列总量（100+200=300）
     expect(wrapper.find('[data-testid="wf-viz-trace-row-0"]').text()).toContain('300')
+  })
+
+  it('trace 表空值回归（D5 盘点锚）：语义空列统一 —（phase/duration/tokens/error），无空串或 undefined 泄漏', async () => {
+    // pending call：phase 缺省 + 无 duration/tokens/error（startedAt 有值显示时间）——
+    // 5 处 — 空值槽中本行可呈现的 4 处逐一锁定（startedAt 缺省形态由 formatTime 分支
+    // 覆盖，attempt/状态/agent/# 恒有值无空形态）
+    const wrapper = await mountPanel(makeRun({
+      agentCalls: [makeCall({
+        id: 9,
+        status: 'pending',
+        sessionId: undefined,
+        phase: undefined,
+        durationMs: undefined,
+        inputTokens: undefined,
+        outputTokens: undefined,
+        error: undefined,
+      })],
+    }))
+    const row = wrapper.find('[data-testid="wf-viz-trace-row-9"]')
+    expect(row.text()).toContain('—')
+    expect(row.text()).not.toContain('undefined')
+    const cells = row.findAll('span')
+    const dashCells = cells.filter((c) => c.text() === '—')
+    expect(dashCells.length).toBe(4)
   })
 
   it('pending / sessionId 缺失行点击不开 agent tab（对齐 WorkflowTab 现状 no-op）', async () => {
