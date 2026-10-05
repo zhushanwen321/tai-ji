@@ -42,13 +42,13 @@ import { getInFlightSnapshot } from "@zhushanwen/subagent-core";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
-/** select 通道级超时（控制面单请求，秒级校准——超时默认原则规则 19）。取值对齐
- *  plugin-bridge 启动 sync 的 2s 自愈闸：session_start 首帧可能早于 runtime adapter
- *  attach（R2 实证），超时折叠后靠有限次重试覆盖 attach 竞态窗口（约 6s，见
- *  MAX_REPORT_ATTEMPTS）；fire-and-forget 帧不留 pending 挂死面。 */
+/** select 通道级超时（控制面单请求，秒级校准——超时默认原则规则 19）：session_start
+ *  首帧可能早于 runtime adapter attach（R2 实证），超时折叠后靠有限次重试覆盖
+ *  attach 竞态窗口（约 6s，见 MAX_REPORT_ATTEMPTS）；fire-and-forget 帧不留 pending
+ *  挂死面。 */
 const SELECT_TIMEOUT_MS = 2_000;
 
-/** 失败重试退避（对齐 plugin-bridge SYNC_RETRY_MS 控制面节奏）。 */
+/** 失败重试退避（与 select 超时同档 2s：失败即等一个超时周期再试）。 */
 const RETRY_DELAY_MS = 2_000;
 
 /** 累计失败放弃上限（刻意取小——增强面降级）：GUI live 在途镜像短暂滞后可接受，
@@ -81,9 +81,9 @@ export interface InFlightReporterOpts {
 }
 
 /**
- * sessionId 从 ctx 取（plugin-bridge getSessionId 同款防御）：pi session 文件延迟写入
- * 窗口内取失败不阻断上报——sessionId 缺席时 runtime 按无法归属丢弃整帧（契约
- * SubagentInFlightReport.sessionId 可选语义），不视为协议错误。
+ * sessionId 从 ctx 取：pi session 文件延迟写入窗口内取失败不阻断上报——sessionId
+ * 缺席时 runtime 按无法归属丢弃整帧（契约 SubagentInFlightReport.sessionId 可选语义），
+ * 不视为协议错误。
  */
 function getSessionId(ctx: ExtensionContext): string | undefined {
   try {
@@ -191,7 +191,7 @@ export function createInFlightReporter(opts: InFlightReporterOpts = {}): InFligh
         retryTimer = null;
         kick();
       }, retryDelayMs);
-      // unref：不阻塞进程退出（退出收割由既有 process hook 负责，与 plugin-bridge 同款）。
+      // unref：不阻塞进程退出（退出收割由既有 process hook 负责）。
       retryTimer.unref?.();
     }
   }

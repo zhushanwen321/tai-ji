@@ -443,8 +443,8 @@ export function setupWorkflowDomain(
     try {
       lsRef.lastSessionId = ctx.sessionManager.getSessionId();
       // [u7a D5] 初始上报（count=当下绝对计数）：触发时点 = extension 加载完成 / session
-      // 就绪（factory 无 ctx/ui，session_start 是最早带 ctx 的钩子——plugin-bridge 同款
-      // 事实）。fire-and-forget 在 await 装配链之前发起，不阻塞也不被阻塞。
+      // 就绪（factory 无 ctx/ui，session_start 是最早带 ctx 的钩子）。fire-and-forget
+      // 在 await 装配链之前发起，不阻塞也不被阻塞。
       inflightReporter.attachSession(ctx);
       // [skill-reload D4] adoption 入参接线：reason 是 handler 独占信息（event 参数），
       // existing 是 sessionState（domainState 闭包）里的既有条目——两者都是

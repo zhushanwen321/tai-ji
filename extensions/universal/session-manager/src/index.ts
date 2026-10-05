@@ -131,7 +131,7 @@ async function executeTool(
 ): Promise<{ content: Array<{ type: "text"; text: string }>; details: undefined }> {
 	const result = await callSessionManager(ctx, action, params);
 	if (!result.ok) {
-		// 行为微变①（D8，有意——对齐 plugin-bridge 形态）：非 JSON 回包从「catch 后
+		// 行为微变①（D8，有意）：非 JSON 回包从「catch 后
 		// parsed=undefined 静默当成功文本返回」改为 throw + 提示文本（留痕由原语
 		// 经注入的 logger.error 承担）；其余三态维持原 cancelled/timeout 折叠文案。
 		const text =
