@@ -23,7 +23,7 @@
  * 现有 import 路径向后兼容。
  */
 import { defineStore } from 'pinia'
-import { computed, getCurrentScope, onScopeDispose, ref } from 'vue'
+import { computed, getCurrentScope, onScopeDispose } from 'vue'
 import type { ComputedRef } from 'vue'
 import type { SubagentRecord, Message } from '@taiji/shared'
 import { subagentVirtualId } from '@taiji/shared'
@@ -40,7 +40,7 @@ import { session as sessionApi } from '@/api'
 import * as events from '@taiji/core/transport/api'
 import { toErrorMessage } from '@taiji/core'
 import { isRunningProjection } from '@/lib/subagent-bucket'
-import { createEmptyResultStrikeGuard, createPartitionedRecords } from '../lib/partitioned-session-records'
+import { createPartitionedLoadState, createPartitionedRecords } from '../lib/partitioned-session-records'
 
 /**
  * fetchAndInject 的 chat 注入回调类型。
@@ -65,33 +65,17 @@ export const useSubagentStore = defineStore('subagent', () => {
    */
   const partition = createPartitionedRecords<SubagentRecord>()
 
-  /** 加载态（M1：loadSubagents 在途时 true；per-session Map 分区，ADR-0049 派——
-   * split 模式双面板并行拉取时，任一 pane 的在途/失败不得遮蔽另一 pane 的状态） */
-  const loadingBySession = ref(new Map<string, boolean>())
-  /** 加载错误（M1：loadSubagents 失败时设该 sid 分区错误消息；缺省 null = 无错误。
-   * 全局单值形态会把 pane A 的失败显示到 pane B 的面板（store 级串扰），分区化治根） */
-  const loadErrorBySession = ref(new Map<string, string | null>())
   /**
-   * [RT-4#8] oversize 降级标志（per-session 分区）：session 文件 >32MB 预检阈值时
-   * runtime 返回空列表 + oversize=true——「列表不可用」与「无 subagent」显式分形，
-   * 面板据此显示降级提示而非空列表。置位时保留旧分区数据（不可用 ≠ 删空）。
+   * 每 session 加载态三件套（loading / loadError / oversize 分区，ADR-0049 派）。
+   * 实现单源在 lib/partitioned-session-records 的 createPartitionedLoadState
+   * （待裁决项 1 收敛 2026-10-04，原手抄 71 行退役）；facet 的领域语义注释保留在各
+   * 使用点——loading：split 双面板并行拉取任一 pane 的在途/失败不得遮蔽另一 pane；
+   * loadError：失败设该 sid 分区错误消息（全局单值形态会把 pane A 的失败显示到 pane B，
+   * 分区化治根）；oversize：[RT-4#8] session 文件 >32MB 列表不可用，置位时保留旧分区
+   * 数据（不可用 ≠ 删空），面板据此显示降级提示而非空列表。
    */
-  const oversizeBySession = ref(new Map<string, boolean>())
-
-  /** per-session 加载态读取（消费方 computed 内调用建立响应依赖） */
-  function isLoadingOf(sessionId: string): boolean {
-    return loadingBySession.value.get(sessionId) ?? false
-  }
-
-  /** per-session 加载错误读取 */
-  function loadErrorOf(sessionId: string): string | null {
-    return loadErrorBySession.value.get(sessionId) ?? null
-  }
-
-  /** [RT-4#8] per-session oversize 降级读取（面板降级提示判据） */
-  function oversizeOf(sessionId: string): boolean {
-    return oversizeBySession.value.get(sessionId) ?? false
-  }
+  const loadState = createPartitionedLoadState()
+  const { isLoadingOf, loadErrorOf, oversizeOf } = loadState
 
   // ── 非响应式资源表（参照 chat.ts streamingTimers 模式）──
   /**
@@ -101,14 +85,6 @@ export const useSubagentStore = defineStore('subagent', () => {
    * 同一 token 覆盖（subscribeStream 先 stopStream 再 set），drawer 单实例同一时刻只订阅一个 subagent。
    */
   const streamUnsub = new Map<string, () => void>()
-
-  /**
-   * loadSubagents 空结果守卫（R1 business-logic S3）：达到 LIMIT 判真实删空。
-   * strike 语义单源在 createEmptyResultStrikeGuard JSDoc（lib/partitioned-session-records），
-   * 此处只声明本 store 的阈值与 log tag。
-   */
-  const EMPTY_RESULT_STRIKE_LIMIT = 2
-  const strikeGuard = createEmptyResultStrikeGuard(EMPTY_RESULT_STRIKE_LIMIT, 'subagent-store', 'getSubagents')
 
   // 防御性清理：正常由 SubagentTab onBeforeUnmount→stopStream 清理，
   // 此处防止消费方未清的兜底。
@@ -179,11 +155,8 @@ export const useSubagentStore = defineStore('subagent', () => {
 
   /** 清除指定 session 的 subagent 列表分区（deleteSession 调，防泄漏，ADR-0049 AC-8） */
   function clearSession(sessionId: string): void {
-    strikeGuard.reset(sessionId)
     partition.clear(sessionId)
-    loadingBySession.value.delete(sessionId)
-    loadErrorBySession.value.delete(sessionId)
-    oversizeBySession.value.delete(sessionId)
+    loadState.clear(sessionId)
   }
 
   /**
@@ -222,55 +195,39 @@ export const useSubagentStore = defineStore('subagent', () => {
    */
   async function loadSubagents(sessionId: string): Promise<void> {
     if (!sessionId) return // 空 sid 不写分区
-    loadingBySession.value.set(sessionId, true)
-    loadErrorBySession.value.delete(sessionId)
+    loadState.beginLoad(sessionId)
     try {
       // [RT-4#8] 结构化返回：oversize=true 时 records 恒空（文件 >32MB 列表不可用）——
-      // 置降级标志 + 保留旧分区数据（不可用 ≠ 删空，不经 strike guard），面板显示
-      // 降级提示而非空列表。
-      const { subagents: records, oversize } = await sessionApi.getSubagents(sessionId)
+      // 置降级标志 + 保留旧分区数据（不可用 ≠ 删空），面板显示降级提示而非空列表。
+      // [待裁决项 4] found=false = 会话不在册（pi 延迟落盘窗口 / 扫描竞态）——「读不到
+      // 会话」≠「会话数据为空」，保留分区不覆盖；found=true 的空列表是真实空，直接覆盖
+      // （真实删空语义；原连续空计数 strike 守卫随歧义根治退役）。缺省（undefined，mock /
+      // 旧 runtime）按 found 处理。推送路径是权威数据，不经本判定。
+      const { subagents: records, oversize, found } = await sessionApi.getSubagents(sessionId)
       if (oversize) {
-        strikeGuard.reset(sessionId)
-        oversizeBySession.value.set(sessionId, true)
+        loadState.setOversize(sessionId)
         return
       }
-      oversizeBySession.value.delete(sessionId)
-      // 空结果守卫（sidebar-sync-plan P1 + R1 business-logic S3）：strike 语义单源在
-      // createEmptyResultStrikeGuard JSDoc（S4 A1），此处只判定 + 覆盖前清零。推送路径
-      // 是权威数据，不经此守卫。
-      if (
-        strikeGuard.shouldKeepExisting(sessionId, records.length, getRecordsBySession(sessionId).length)
-      ) {
-        return
-      }
-      strikeGuard.reset(sessionId)
+      loadState.clearOversize(sessionId)
+      if (found === false) return
       applyRecords(sessionId, records)
     } catch (e) {
-      // M1：失败不覆盖现有分区，设该 sid 分区 loadError；strike 重置（「连续 RPC 成功且空」语义纯净，
-      // 读失败与数据空不同通道，不让 RPC 故障累计出误清分区）
-      strikeGuard.reset(sessionId)
+      // M1：失败不覆盖现有分区，设该 sid 分区 loadError
       const msg = toErrorMessage(e)
       console.error('[subagent-store] loadSubagents failed:', e)
-      loadErrorBySession.value.set(sessionId, msg)
+      loadState.setLoadError(sessionId, msg)
     } finally {
-      // delete 而非 set(sid, false)：load 在途时 clearSession 已删分区的话，set 会
-      // 为已删 session 重生条目（残留）；get ?? false 缺省读取语义等价（无条目 = 不在途）
-      loadingBySession.value.delete(sessionId)
+      loadState.endLoad(sessionId)
     }
   }
 
   /** 清空所有 subagent 分区 + 停止所有 streaming（全局重置场景用） */
   function clearSubagents(): void {
     for (const pid of streamUnsub.keys()) stopStream(pid)
-    // RD-3#12：全局重置须补齐 loading/error/strike 三 facet（+ oversize），与 clearSession
-    // 全清语义对齐——此前仅换 records Map，残留 loading=true → spinner 永转 / 残留 error →
-    // 错误态卡死 / 残留 strike → 重新预置后首次空结果误判删空。strike 仅在对非空分区连续空
-    // 结果时残留，故 recordsBySession 当前键即残留 strike 键全集，先按它 reset 再整表替换。
-    for (const sid of partition.recordsBySession.value.keys()) strikeGuard.reset(sid)
+    // RD-3#12：全局重置须整表替换 records + 全清 loading/error（+ oversize）三 facet，
+    // 与 clearSession 全清语义对齐——残留 loading=true → spinner 永转 / 残留 error → 错误态卡死。
     partition.recordsBySession.value = new Map()
-    loadingBySession.value = new Map()
-    loadErrorBySession.value = new Map()
-    oversizeBySession.value = new Map()
+    loadState.clearAll()
   }
 
   /**

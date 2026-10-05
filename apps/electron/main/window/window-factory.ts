@@ -477,21 +477,29 @@ export async function createWindow(
     unresponsiveJournaled = false
   })
 
-  // Cmd/Ctrl+W 拦截：drawer 打开时优先关 drawer，而非关窗口。
+  // 容器快捷键窗口级拦截（display-containers §7.5）：⌘/Ctrl+W 与 ⌃` 转发 renderer 编排器决策。
   // before-input-event 在 Electron 默认菜单 accelerator（role:'close'）之前触发，
-  // event.preventDefault() 可阻止默认的关窗口行为，让 renderer 决定关 drawer 还是关窗口。
-  // renderer 收到 'shortcut' type='close' 后：drawer 开则关 drawer + 回传 consumed，
-  // drawer 关则不 consumed（让默认关窗口行为继续）——但 before-input-event 是同步的，
-  // 无法等 renderer 异步回传。故此处统一 preventDefault，由 renderer 决定：
-  //   - drawer 开 → 关 drawer（不关窗口）
-  //   - drawer 关 → 调 windowClose() IPC 主动关窗口
-  // 跨平台：mac=metaKey(w)，win/linux=controlKey(w)。CmdOrCtrl 在 before-input-event 里
+  // event.preventDefault() 可阻止默认的关窗口行为；before-input-event 是同步的、无法等
+  // renderer 异步回传，故此处统一 preventDefault，由 renderer 编排器（key-orchestrator）决定：
+  //   - ⌘W（type='close'）→ 沿层级序逐层关容器（浮层 → 底抽屉 → 右抽屉），全关后
+  //     renderer 调 windowClose() IPC 主动关窗口（yields⌘W 模态开着则无动作）
+  //   - ⌃`（type='toggle-bottom-drawer'）→ 底抽屉开关
+  // ⌃` 判定 = Control+Backquote 严格匹配（跨平台一致、无 shift/alt/meta 附加）：窗口级拦截
+  // 不经 shortcut-registry（那是 globalShortcut 系统级注册表，会从 VS Code 等其它应用抢键）；
+  // taiji 失焦时 before-input-event 不触发 = 无动作。
+  // 跨平台 ⌘W：mac=metaKey(w)，win/linux=controlKey(w)。CmdOrCtrl 在 before-input-event 里
   // 需手动判断（event.input.modifiers 含 'control' 或 'meta'）。
   win.webContents.on('before-input-event', (event, input) => {
     if (input.key.toLowerCase() === 'w' && (input.control || input.meta)) {
       event.preventDefault()
       if (!win.isDestroyed()) {
         win.webContents.send('shortcut', 'close')
+      }
+    }
+    if (input.key === '`' && input.control && !input.meta && !input.alt && !input.shift) {
+      event.preventDefault()
+      if (!win.isDestroyed()) {
+        win.webContents.send('shortcut', 'toggle-bottom-drawer')
       }
     }
   })

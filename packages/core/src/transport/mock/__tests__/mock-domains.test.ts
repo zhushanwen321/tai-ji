@@ -191,11 +191,12 @@ describe('mock session domain', () => {
     expect((await session.getContext('s1')).usagePercent).toBeDefined()
     expect((await session.getSubagents('s3')).subagents.length).toBeGreaterThan(0)
     // [RT-4#8] 结构化返回（records/oversize 语义同 real 域；mock 恒非 oversize）
-    expect(await session.getSubagents('other')).toEqual({ subagents: [], oversize: undefined })
+    // [待裁决项 4] found: true = mock 的 session 恒在册（「不在册」形态无 mock 数据源）
+    expect(await session.getSubagents('other')).toEqual({ subagents: [], oversize: undefined, found: true })
     expect(await session.getSubagentHistory('s1', 'a1')).toEqual([])
     expect(await session.getAgentCallHistory('s1', 'ac1')).toEqual([])
     expect((await session.getWorkflows('s3')).workflows.length).toBeGreaterThan(0)
-    expect(await session.getWorkflows('other')).toEqual({ workflows: [], oversize: undefined })
+    expect(await session.getWorkflows('other')).toEqual({ workflows: [], oversize: undefined, found: true })
     // workflow 可视化拉取（G4 锚定补齐成员）：run 事件流按 runId 分流，DAG 恒 record_not_found；
     // 两臂恒带 sessionId（C-comm-05，形态对齐 real）
     const runEvents = await session.getWorkflowRunEvents('s3', 'wf-mock-001')

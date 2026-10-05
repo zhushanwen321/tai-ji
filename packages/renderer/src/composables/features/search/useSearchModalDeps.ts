@@ -29,11 +29,12 @@ import { file } from '@/api'
 import { useCommandStore } from '@/composables/features/command/useCommandStore'
 import { useFileTree } from '@/composables/features/file-tree/useFileTree'
 import { useFileTreeStore } from '@/stores/fileTree'
+import { usePanelStore } from '@/stores/panel'
 import { useSidebarStore } from '@/stores/sidebar'
 import { usePresetStore } from '@/stores/preset'
 import i18n from '@/i18n'
 
-export interface SearchModalShellDeps {
+export interface SearchModalShellDeps { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
   selectSession: (id: string) => Promise<void>
   newSession: () => void
 }
@@ -65,7 +66,9 @@ export function useSearchModalDeps(shell: SearchModalShellDeps): SearchDeps {
     storage: getPlatform().storage,
     fileTree: {
       loadTree: (sid) => useFileTree().loadTree(sid),
-      selectFile: (path) => fileTreeStore.selectFile(path),
+      // 注入目标会话 = focusedSessionId（drawer 分区键同源——search-jump 返回 drawerTab:'detail'
+      // 后打开的抽屉即它，注入分区与展示分区必然同区；W3 detail 展示态 per-session 化）
+      selectFile: (path) => fileTreeStore.selectFile(usePanelStore().focusedSessionId, path),
     },
     appCommandActions: {
       newSession: shell.newSession,

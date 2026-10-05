@@ -232,6 +232,7 @@ import {
 } from '@/components/ui/dialog'
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible'
 import { useAppUpdate } from '@/composables/features/settings/useAppUpdate'
+import { useUpdateInstallActions } from '@/composables/features/settings/useUpdateInstallActions'
 import { useToast } from '@/composables/useToast'
 import { getDataDir, openUpdateManualDir } from '@/api/domains/settings'
 
@@ -239,8 +240,9 @@ const { t } = useI18n()
 const { state, checkForUpdate, performDownload, performInstall, openFallbackUrl } = useAppUpdate()
 const { error: toastError } = useToast()
 
-/** 确认重启安装 Dialog 开关 */
-const showConfirmDialog = ref(false)
+/** 确认重启安装 Dialog 三路编排（showConfirmDialog/onInstallClick/onConfirmInstall/onLater） */
+const { showConfirmDialog, onInstallClick, onConfirmInstall, onLater } =
+  useUpdateInstallActions(performInstall)
 
 /** 手动通道折叠区开关（D9：默认展开——路径属常驻引导，用户可收起） */
 const manualChannelOpen = ref(true)
@@ -273,22 +275,6 @@ function onCheck(): void {
 /** available：触发下载阶段 */
 function onDownload(): void {
   void performDownload()
-}
-
-/** downloaded：打开确认 Dialog（不直接执行 install，避免误点中断会话） */
-function onInstallClick(): void {
-  showConfirmDialog.value = true
-}
-
-/** 确认安装：关闭 Dialog 后执行 install（替换 + 重启） */
-async function onConfirmInstall(): Promise<void> {
-  showConfirmDialog.value = false
-  await performInstall()
-}
-
-/** 稍后：仅关闭 Dialog */
-function onLater(): void {
-  showConfirmDialog.value = false
 }
 
 /** error 态重试：强制重新检测（manual：再次失败继续显形，RD-4#5） */

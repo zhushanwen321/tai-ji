@@ -72,11 +72,25 @@ describe('useUrlBar', () => {
     expect(navigateFn).not.toHaveBeenCalled()
   })
 
-  it('Escape → 回填 displayUrl + 不触发 navigate', () => {
+  it('Escape → 回填 displayUrl + 不触发 navigate + preventDefault（§6.7 先行档契约）', () => {
+    // 进入编辑态：与真实使用路径一致（聚焦后输入，Esc 在编辑态被消费）
+    result.isEditingUrl.value = true
     result.urlInput.value = '未确认的输入'
-    result.onUrlEscape()
+    const evt = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    result.onUrlEscape(evt)
+    // §6.7 先行档：消费即 preventDefault（阻断编排器双动作——弃编辑 + 关浮层）
+    expect(evt.defaultPrevented).toBe(true)
     expect(result.urlInput.value).toBe('https://example.com')
     expect(navigateFn).not.toHaveBeenCalled()
+    expect(result.isEditingUrl.value).toBe(false)
+  })
+
+  it('非编辑态 Esc 不拦（§6.7 行为分界）：不 preventDefault，Esc 归编排器层级序', () => {
+    // 未聚焦（isEditingUrl=false）：处理器不消费——结构上元素级监听仅在聚焦时收到真实按键，
+    // 此处直调验证显式守卫：不置位 defaultPrevented（编排器照常走层级序关浮层）
+    const evt = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    result.onUrlEscape(evt)
+    expect(evt.defaultPrevented).toBe(false)
     expect(result.isEditingUrl.value).toBe(false)
   })
 

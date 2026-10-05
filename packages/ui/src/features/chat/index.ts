@@ -45,3 +45,5 @@ export { default as MarkdownRenderer } from './MarkdownRenderer.vue'
 export { default as MermaidRenderer } from './MermaidRenderer.vue'
 export { default as BashOutputBlock } from './BashOutputBlock.vue'
 export { default as ChangeSetCard } from './ChangeSetCard.vue'
+// html-preview 内联预览容器（chat-html-support §6.3 D3，v16 形态变更——替代卡片形态）
+export { default as HtmlPreviewInline } from './HtmlPreviewInline.vue'

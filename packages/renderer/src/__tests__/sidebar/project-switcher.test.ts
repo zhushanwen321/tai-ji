@@ -11,6 +11,8 @@
  *  - 新建流：网格尾部 add 卡 → 内联 Input → Enter 创建；Esc 取消
  *  - 删除流（右键 ContextMenu，demo 3A 卡片无删除按钮的保功能方案）：默认项目卡无删除菜单；
  *    命名卡右键 → 删除项 → ConfirmDialog 确认
+ *  - 模态表面聚合注册（§6.7 弹出层族）：菜单开 → openShieldingSurfaces 报 rect = 打开元素实测
+ *    （v-for 内 string ref 会变数组的旧缺陷在此红）；关 → 退出报告；开着卸载 → 注册随卸载摘除
  *  - title 兜底：tooltip 在 sidebar 滚动容器内裁剪风险 → 卡片 title=全名（待验证检查点 3 决策）
  *
  * 测试框架：vitest + @vue/test-utils（mount）。vue-i18n 由 vitest-i18n-setup.ts 全局 mock。
@@ -20,8 +22,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
+import { ContextMenuContent } from 'reka-ui'
 import type { Project, SessionGroup, SessionSummary } from '@taiji/shared'
 import ProjectSwitcher from '@/components/sidebar/ProjectSwitcher.vue'
+import {
+  isModalSurfaceOpen,
+  openShieldingSurfaces,
+  resetModalSurfaceRegistry,
+} from '@/composables/features/app/modal-surface-registry'
 import { useProjectStore, DEFAULT_PROJECT_ID } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 
@@ -346,5 +354,94 @@ describe('ProjectSwitcher 3A：删除流（右键 ContextMenu）', () => {
 
     expect(projectStore.projects.some((p) => p.id === 'b')).toBe(false)
     expect(cardById(wrapper, 'b').exists()).toBe(false)
+  })
+})
+
+describe('ProjectSwitcher 模态表面聚合注册（view 遮蔽 rect 读点，§6.7 弹出层族）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    document.body.innerHTML = ''
+    resetModalSurfaceRegistry()
+  })
+
+  afterEach(() => {
+    wrapper?.unmount()
+    wrapper = null
+    document.body.innerHTML = ''
+  })
+
+  /** 打开菜单的内容根元素（函数 ref 实际拿到的 $el，包含 testid 菜单 div）；
+   *  关闭的卡只渲染占位（不含菜单元素），须按 contains 挑打开的那棵 */
+  function liveContentRoot(menuEl: HTMLElement): Element {
+    const el = wrapper!
+      .findAllComponents(ContextMenuContent)
+      .map((c) => c.element)
+      .find((root) => root.contains(menuEl))
+    expect(el, '打开菜单的内容根元素（函数 ref 读点同源）').toBeDefined()
+    return el!
+  }
+
+  it('菜单开 → 遮蔽报告带 rect = 打开元素实测；关 → 退出报告；重开 rect 跟随新元素；开着卸载 → 注册随卸载摘除', async () => {
+    const projectStore = useProjectStore()
+    projectStore.projects = [
+      makeProject(DEFAULT_PROJECT_ID, ''),
+      makeProject('a', 'Alpha'),
+      makeProject('b', 'Beta'),
+    ]
+    projectStore.activeProjectId = 'a'
+
+    wrapper = mountSwitcher()
+    // 挂载即在册，但菜单未开：不入遮蔽报告
+    expect(isModalSurfaceOpen('project-switcher-menu')).toBe(false)
+    expect(openShieldingSurfaces()).toEqual([])
+
+    // 右键打开 b 卡菜单（真实挂载流程，tick 约定同删除流用例）
+    await cardById(wrapper, 'b').trigger('contextmenu')
+    await nextTick()
+    await nextTick()
+    await nextTick()
+    const menuEl1 = document.body.querySelector<HTMLElement>('[data-testid="project-context-menu"]')
+    expect(menuEl1, '菜单内容真实挂载（reka Portal teleport 到 body）').not.toBeNull()
+
+    // rect = 打开的那棵菜单内容元素实测：给函数 ref 实际拿到的同一元素钉哨兵矩形
+    // （stub 只落这一个元素的几何读点，挂载/开合流程全真实，不 mock 时序）——
+    // 旧缺陷（v-for string ref 数组化 → rect 恒 null）在此红
+    liveContentRoot(menuEl1!).getBoundingClientRect = () =>
+      ({ x: 11, y: 22, width: 160, height: 33 }) as DOMRect
+    expect(openShieldingSurfaces()).toEqual([
+      { id: 'project-switcher-menu', mode: 'intersecting', rect: { x: 11, y: 22, width: 160, height: 33 } },
+    ])
+
+    // Esc 关闭（真实 dismiss 链）：face 退出报告，菜单卸载，注册仍在册（开合态翻转，非注销）
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    )
+    await nextTick()
+    await nextTick()
+    await nextTick()
+    expect(document.body.querySelector('[data-testid="project-context-menu"]')).toBeNull()
+    expect(isModalSurfaceOpen('project-switcher-menu')).toBe(false)
+    expect(openShieldingSurfaces()).toEqual([])
+
+    // 重开同一卡：函数 ref 跟随新挂载的内容根（防陈旧槽位读到已脱离 DOM 的旧元素），
+    // rect = 新元素实测
+    await cardById(wrapper, 'b').trigger('contextmenu')
+    await nextTick()
+    await nextTick()
+    await nextTick()
+    const menuEl2 = document.body.querySelector<HTMLElement>('[data-testid="project-context-menu"]')
+    expect(menuEl2, '重开后菜单重新挂载').not.toBeNull()
+    liveContentRoot(menuEl2!).getBoundingClientRect = () =>
+      ({ x: 44, y: 55, width: 160, height: 33 }) as DOMRect
+    expect(openShieldingSurfaces()).toEqual([
+      { id: 'project-switcher-menu', mode: 'intersecting', rect: { x: 44, y: 55, width: 160, height: 33 } },
+    ])
+
+    // 开着直接卸载组件 → onBeforeUnmount 注销（refCount 归零摘条目）→ 报告恒空
+    wrapper!.unmount()
+    wrapper = null
+    await nextTick()
+    expect(isModalSurfaceOpen('project-switcher-menu')).toBe(false)
+    expect(openShieldingSurfaces()).toEqual([])
   })
 })

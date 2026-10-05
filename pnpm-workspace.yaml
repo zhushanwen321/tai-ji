@@ -4,3 +4,9 @@ packages:
   - 'extensions/taiji/*'
   - 'extensions/universal/*'
   - 'extensions/shared/*'
+
+# pnpm 10：patchedDependencies 的规范家（package.json 的 pnpm 字段被 pnpm>=10 忽略，
+# 写那里会导致下次 install 洗掉补丁）。裸键 = 应用到所有 vitest 版本实例。
+# vitest#11153 worker 拆卸竞态假红修复，退役条件见补丁文件头注释。
+patchedDependencies:
+  vitest: patches/vitest.patch

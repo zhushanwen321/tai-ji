@@ -259,14 +259,14 @@ describe('createInboundEffects（§11.4 InboundEffects 接线）', () => {
     expect(storeMocks.applySubagentEntries).toHaveBeenCalledWith('subagent:s-main:rec-9', entries)
   })
 
-  it('onWorkflowUpdate → triggerWorkflowReload(sid, status)；status 缺省按 "unknown"（防御运行时坏形状）', () => {
+  it('onWorkflowUpdate → triggerWorkflowReload(sid)；update.status 不再透传（500ms 盲等重试删除，待裁决项 5）', () => {
     effects.onWorkflowUpdate!('s1', { runId: 'wf-1', status: 'running' })
-    expect(storeMocks.triggerWorkflowReload).toHaveBeenCalledWith('s1', 'running')
+    expect(storeMocks.triggerWorkflowReload).toHaveBeenCalledWith('s1')
 
     storeMocks.triggerWorkflowReload.mockClear()
-    // protocol SSOT 声明 status 必填，但运行时不可信——缺 status 时兜底 'unknown'（显式 cast 模拟坏形状）
+    // status 缺省的坏形状同样只透传 sid（信号到达即拉一次，无 status 消费场景）
     effects.onWorkflowUpdate!('s1', { runId: 'wf-1' } as ServerMessageMap['session.workflowUpdate']['update'])
-    expect(storeMocks.triggerWorkflowReload).toHaveBeenCalledWith('s1', 'unknown')
+    expect(storeMocks.triggerWorkflowReload).toHaveBeenCalledWith('s1')
   })
 
   it('onGlobalError → toast.error(message)', () => {

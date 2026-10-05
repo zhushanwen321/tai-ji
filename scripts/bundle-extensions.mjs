@@ -17,8 +17,9 @@
  *  - index.js + index.js.map（所有 JS value dep inline）
  *  - package.json（pi.extensions 改指 ./index.js；源码 package.json 不动）
  *  - permission 额外含 tree-sitter-bash.wasm + web-tree-sitter.wasm（手动拷贝，与 index.js 同目录）
- *  - subagent-workflow 额外含 relay/（独立执行零依赖脚本）+ workflows/（内置 workflow
- *    脚本资产，u1-staged 起源在 packages/subagent-core/workflows/，见下方常量注释）
+ *  - subagent-workflow 额外含 relay/（独立执行零依赖脚本）+ workflows/ + agents/
+ *    （内置 workflow 脚本与内置 10 角色资产，u1-staged 起源在 packages/subagent-core/，
+ *    见下方 WORKFLOW_DIR_PACKAGES / AGENTS_DIR_PACKAGES 常量注释）
  *  - plan 额外含 templates/（内置计划模板 .md，<available-plans> 清单注入与
  *    select-template 数据源，登记与缺失后果见 scripts/lib/staged-asset-dirs.mjs
  *    登记表注释）
@@ -170,6 +171,34 @@ const RELAY_DIR_PACKAGES = new Set(["subagent-workflow"]);
 const SUBAGENT_CORE_WORKFLOWS_DIR = join(REPO_ROOT, "packages", "subagent-core", "workflows");
 const WORKFLOW_DIR_PACKAGES = new Set(["subagent-workflow"]);
 
+/**
+ * subagent-workflow 的内置 agents/ 资产（2026-10-03 B′ 修复）：core 包内 10 个内置角色
+ * .md 拷到 staged **扩展包目录下**，与 workflows/ 并列。
+ *
+ * 为何需要：打包态扩展是 esbuild 自包含 bundle、staged 无 node_modules ⇒
+ * `pi-host.corePackageNpmRoot()` 的 `require.resolve` 锚点必败。修复走"回退到 staged
+ * scope 根作 npm 槽根"（`stagedScopeRootFromModuleUrl`）——npm 槽语义下
+ * `<scope>/<pkg>/{agents,workflows}` 走约定目录扫描；因此**这两个目录必须实际存在于
+ * staged 包目录内**（同目录形态在 dev/npm 形态本来也由约定扫描命中，三形态对齐）。
+ * 缺失后果：打包版 `<available_subagents>` 缺失 10 内置角色、`<available_workflows>`
+ * 缺失 6 内置模板（`subagents` 批量工具报 'Built-in workflow fan-out is not available'）。
+ * 落点约束：**不得**把 node_modules 形态引进来（electron-builder 内建丢弃相对路径恰为
+ * `node_modules` 的目录，见 `app-builder-lib/out/util/filter.js:43`）。
+ */
+const SUBAGENT_CORE_AGENTS_DIR = join(REPO_ROOT, "packages", "subagent-core", "agents");
+const AGENTS_DIR_PACKAGES = new Set(["subagent-workflow"]);
+
+// 内置 agents 资产（B′，与 copyWorkflowDir 同源同构）：整目录拷到 staged 包目录下。
+async function copyAgentsDir(outDir, extraAssets) {
+	if (!existsSync(SUBAGENT_CORE_AGENTS_DIR)) {
+		throw new Error(
+			`agents dir missing: ${SUBAGENT_CORE_AGENTS_DIR}（subagent-core 包内置角色资产缺失 = 打包配置回归）`,
+		);
+	}
+	await cp(SUBAGENT_CORE_AGENTS_DIR, join(outDir, "agents"), { recursive: true });
+	extraAssets.push("agents/");
+}
+
 // permission 特殊处理（R1）：拷 2 个 wasm 到 staged 与 index.js 同目录
 async function copyPermissionWasm(outDir, extraAssets) {
 	for (const [depRel, outName] of PERMISSION_WASM) {
@@ -231,6 +260,7 @@ async function copySpecialAssets(short, srcDir, outDir, extraAssets) {
 	if (short === "permission") await copyPermissionWasm(outDir, extraAssets);
 	if (RELAY_DIR_PACKAGES.has(short)) await copyRelayDir(srcDir, outDir, extraAssets);
 	if (WORKFLOW_DIR_PACKAGES.has(short)) await copyWorkflowDir(outDir, extraAssets);
+	if (AGENTS_DIR_PACKAGES.has(short)) await copyAgentsDir(outDir, extraAssets);
 	if ((PACKAGE_ASSET_DIRS[short] ?? []).includes("templates")) {
 		await copyTemplatesDir(srcDir, outDir, extraAssets);
 	}

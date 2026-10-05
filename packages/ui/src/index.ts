@@ -17,6 +17,10 @@ export * from './lib/file-basename'
 export * from './lib/base64'
 export { cn } from './lib/utils'
 
+// ── 模态表面注册桥（display-containers §6.7：ui 包表面宿主经 inject 自注册，
+// renderer App 根 provide 实函数——层级方向见 modal-surface-registrar.ts 文件头）──
+export * from './modal-surface-registrar'
+
 // RenderingProtocol 层的公共面（GuiComponentRenderer / AnsiText / 注册表机制）经
 // `@taiji/ui/rendering-protocol` 子路径暴露。7 原语是 RenderingProtocol 内部
 // 实现细节，不经顶层导出（AC4：原语不经顶层暴露，消费方走 ./rendering-protocol 子路径）。

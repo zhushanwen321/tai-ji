@@ -7,7 +7,7 @@
  *
  * 依赖方向：无下游（读全局 window.electronAPI，类型经 declare global 自动可用）
  */
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, RemoteAccessInfo, RemoteAccessToggleResult } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, LocalFileServableReason, LocalFileServableResult, LocalFileReadReason, LocalFileReadResult } from '@taiji/shared'
 import type { ImageCacheWritePort } from '@taiji/core'
 
 /** preload 注入的 electronAPI（web/mock / node 测试环境为 undefined——后者连
@@ -41,7 +41,8 @@ export function onRuntimePort(cb: (port: number) => void): () => void {
 
 /**
  * 监听主进程快捷键事件（before-input-event 拦截后转发）。
- * type 含 'standard' / 'focus'（globalShortcut）/'close'（before-input-event Cmd/Ctrl+W）。
+ * type 含 'standard' / 'focus'（globalShortcut）/'close'（before-input-event ⌘W）/
+ * 'toggle-bottom-drawer'（before-input-event ⌃`，display-containers §7.5）。
  * 返回取消订阅函数。无 IPC（web/mock）返回 no-op。
  */
 export function onShortcut(cb: (type: string) => void): () => void {
@@ -168,9 +169,10 @@ export function browserShow(sessionId: string): Promise<void> {
   return api?.browserShow(sessionId) ?? Promise.resolve()
 }
 
-/** 切换可见 view 到指定 session（Wave 4 per-session 隔离）。
- * 隐藏当前可见的其他 session view，显示 target session view。切 session 时由 useBrowserFocusSync 调用。
- * 无 IPC（web/mock）静默 no-op。 */
+/** 切换可见 view 到指定 session（Wave 4 per-session 隔离；§7.4 R3 收口后语义）。
+ *  hide-only 收口 + 浮层随行豁免：恒只隐藏不显示，显示唯一触发 = browser-view-manager.applyDisplay
+ *  统一谓词。切 session 时由 useBrowserFocusSync 调用。
+ *  无 IPC（web/mock）静默 no-op。 */
 export function browserFocus(sessionId: string): Promise<void> {
   return api?.browserFocus(sessionId) ?? Promise.resolve()
 }
@@ -220,6 +222,67 @@ export function browserDestroy(sessionId: string): Promise<void> {
 }
 
 /**
+ * 浮层开合/内容切换上报（display-containers §7.4 show 统一谓词事实源之一）。
+ * 契约：浮层开/换 browser 内容时在 BrowserPane 挂载前上报（谓词事实先于 show 请求）；
+ * 浮层关闭/换出 browser 内容时立即上报——主进程联动隐藏 view（keep-alive）。
+ * 非法 payload 主进程 reject（error envelope）。无 IPC（web/mock）静默 no-op。
+ */
+export function browserSetOverlayState(state: {
+  open: boolean
+  content: 'browser' | 'workflow' | null
+  sessionId: string | null
+}): Promise<void> {
+  return api?.browserSetOverlayState(state) ?? Promise.resolve()
+}
+
+/**
+ * shieldsView 遮蔽面全量上报（display-containers §5.1 规则 6② / §6.7 / §7.4 view 遮蔽联动）。
+ *
+ * 契约：**全量替换语义**——每次上报 = 当前开着的遮蔽面全集（非增量，调用方
+ * useShieldsViewSync 在重算触发面收敛后重报）。fullscreen=true = 全屏阻塞面（主进程无条件
+ * 隐藏 view）；fullscreen=false = 非全屏面（横幅/弹出层族），rect = 视口坐标 CSS px
+ * （getBoundingClientRect 同空间），与 view 显示矩形的几何相交判定与双阈值滞回都在主进程
+ * display-gate（renderer 只报事实不判相交）；rect 缺省时主进程保守按相交处理。
+ * 成员开态内 rect 变化（横幅文案随 level 改宽）也须重报——重算触发面归 useShieldsViewSync。
+ * 非法 payload 主进程 reject（error envelope）。无 IPC（web/mock）静默 no-op。
+ */
+export function browserSetShields(payload: ShieldsFacesPayload): Promise<void> {
+  return api?.browserSetShields(payload) ?? Promise.resolve()
+}
+
+// ── view 转发键清单（display-containers §7.4 [MANDATORY]，renderer 半边）─────────────
+// 主进程半边（forward-keys.ts 桥 + registry + before-input-event）已备；本组封装是
+// renderer 注册处的上报/派发腿：useGlobalShortcuts 装配处按 keymap+shortcutOverrides
+// 派生 mod 前缀清单上报，并订阅 'shortcut:forward' 按 accelerator 派发动作。
+// 无 IPC（web/mock）静默 no-op / 返回空回执 / no-op 退订。
+
+/**
+ * 转发键清单全量上报（初始化 / renderer 重载/崩溃恢复后启动；settings 重录走增量
+ * browserUpdateForwardKeys）。入清单约束（仅 mod 前缀组合，Esc 不入）由主进程 registry
+ * 强制，违规项进 rejected 回执。无 IPC 时返回空回执。
+ */
+export function browserSetForwardKeys(keys: string[]): Promise<{ accepted: string[]; rejected: string[] }> {
+  return api?.browserSetForwardKeys(keys) ?? Promise.resolve({ accepted: [], rejected: [] })
+}
+
+/** 转发键清单注册/注销增量（settings 重录 = 注销旧 accelerator + 注册新 accelerator）。无 IPC 时返回空回执 */
+export function browserUpdateForwardKeys(delta: {
+  add?: string[]
+  remove?: string[]
+}): Promise<{ accepted: string[]; rejected: string[] }> {
+  return api?.browserUpdateForwardKeys(delta) ?? Promise.resolve({ accepted: [], rejected: [] })
+}
+
+/**
+ * 监听 view 转发的 app 快捷键族（主进程 before-input-event 命中清单后转发，页面聚焦态
+ * 宿主 window keydown 收不到输入的唯一通路）。按 accelerator 派发各自注册动作；
+ * 容器键（⌃`/⌘W）不经此通道（走 onShortcut → useCloseShortcut）。无 IPC 返回 no-op 退订。
+ */
+export function onBrowserForwardKey(callback: (payload: { accelerator: string }) => void): () => void {
+  return api?.onBrowserForwardKey(callback) ?? (() => {})
+}
+
+/**
  * 监听主进程推送的 browser 状态变化（url/isLoading/error）。
  * 主进程 did-navigate / did-fail-load / did-start-loading 等事件触发时推送，
  * BrowserPane 据此更新地址栏真实 URL（防钓鱼）+ loading/error 态。
@@ -231,6 +294,8 @@ export function onBrowserState(
     currentUrl: string
     isLoading: boolean
     error: { errorCode: number; errorDescription: string; validatedURL: string } | null
+    /** 渲染进程崩溃（render-process-gone，§5.3 两类占位之二：创建失败/进程崩溃） */
+    processGone: { reason: string } | null
     canGoBack: boolean
     canGoForward: boolean
     /** 当前缩放因子（autoFit 后主进程回推，BrowserPane 转发给 useBrowserZoom.setZoomFromRemote） */
@@ -496,4 +561,41 @@ export function exportDiagnosticBundle(
 export function getImageCacheWritePort(): ImageCacheWritePort | undefined {
   const invoke = api?.imageCacheWrite
   return invoke ? (sessionId, images) => invoke({ sessionId, images }) : undefined
+}
+
+// ── 产物可服务性预检（chat-html-support §6.9 D9，u3-detailpane）────────
+
+// local-file 两条通道的 payload 类型不在此另立副本：定义 SSOT = `@taiji/shared`
+// （packages/shared/src/ipc-payloads.ts，C-comm-22 唯一类型源）；re-export 保持渲染域既有
+// 消费面（useDetailPane 等自 `@/lib/ipc` 取用）。
+export type {
+  LocalFileReadReason,
+  LocalFileReadResult,
+  LocalFileServableReason,
+  LocalFileServableResult,
+}
+
+/**
+ * 预检绝对路径是否可经 local-file 协议服务（渲染态挂载前准入检查）。
+ *
+ * 谓词与协议 handler 同源（白名单成员资格 → 存在性 → 目录性，main 侧单一实现）。
+ * 无 IPC（web/mock / 旧 preload 未暴露该通道）→ reject：调用方（渲染态）转
+ * 「预览服务不可用」占位 + 重试（不静默空白）。
+ */
+export function localFileServable(absPath: string): Promise<LocalFileServableResult> {
+  if (!api?.localFileServable) return Promise.reject(new Error('localFileServable unavailable'))
+  return api.localFileServable(absPath)
+}
+
+/**
+ * 读白名单内文件内容（DetailPane 「源码」态）。
+ *
+ * 产物目录 `<dataDir>/artifacts/<sessionId>` 在 session cwd 外（设计 §6.7 D7），runtime
+ * `file.read` 的 cwd 守门不可达——源码内容经本条与 servable 预检同一白名单谓词的主进程
+ * 通道读取。无 IPC（web/mock / 旧 preload 未暴露该通道）→ reject：调用方（源码态）
+ * 回落既有 `file.read` cwd 通道（不静默空白）。
+ */
+export function localFileRead(absPath: string): Promise<LocalFileReadResult> {
+  if (!api?.localFileRead) return Promise.reject(new Error('localFileRead unavailable'))
+  return api.localFileRead(absPath)
 }

@@ -1,9 +1,13 @@
 // apps/electron/preload/preload.ts
 import { contextBridge, ipcRenderer } from 'electron'
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, RemoteAccessInfo, RemoteAccessToggleResult } from '@taiji/shared'
-import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, LocalFileServableResult, LocalFileReadResult } from '@taiji/shared'
+import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ } from '@taiji/shared'
 
-export interface ElectronAPI {
+// local-file 预检 / 源码读取的 payload 类型（LocalFileServableResult / LocalFileReadResult）
+// 定义 SSOT = `packages/shared/src/ipc-payloads.ts`（C-comm-22 唯一类型源），本文件只 import
+// 用于 ElectronAPI 方法签名——从前在此处另立一份副本会与 main / renderer 侧静默漂移。
+
+export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
   /** 监听 runtime 端口事件 */
   onRuntimePort(callback: (port: number) => void): () => void
   /** 监听 runtime 启动失败事件 */
@@ -60,6 +64,24 @@ export interface ElectronAPI {
   /** 在文件管理器中显示文件（trace MALFORMED 行「打开所在目录」；main 校验绝对路径后
    *  shell.showItemInFolder，返回是否放行） */
   revealInFolder(filePath: string): Promise<boolean>
+  /**
+   * 预检绝对路径是否可服务（chat-html-support §6.9 D9）：内联预览容器 HtmlPreviewInline
+   * （经 deps `probeArtifact?`）挂载前预检（v16 唯一渲染面，ADR-0119）。谓词 = 准入前缀
+   * 成员资格（先行短路）→ 存在性 → 目录性，与 main 的 local-file 协议 handler 同一模块
+   * 函数；准入前缀 = 会话产物子树 `<dataDir>/artifacts/**`（读/预检通道收窄面，非协议
+   * handler 全量白名单——通道入参含模型消息文本路径载荷）。入参 = 明文绝对路径（% 解码
+   * 由 URL 入口承担，IPC 不重复解码）。
+   */
+  localFileServable(absPath: string): Promise<LocalFileServableResult>
+  /**
+   * 读产物子树内文件内容（chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」）：
+   * 消费方 = 内联容器源码态（deps `readArtifact`）与 DetailPane 变更集/文件树产物源码读取
+   * （useDetailPane `loadPreviewContent`）——产物目录在 session cwd 外，runtime file.read
+   * 的 cwd 守门不可达。谓词与 `localFileServable` 同一模块函数，准入前缀同为产物子树
+   * `<dataDir>/artifacts/**`（收窄面），越界返回 `out_of_whitelist`（不触 fs），消费方
+   * 回落既有 cwd 通道。
+   */
+  localFileRead(absPath: string): Promise<LocalFileReadResult>
   /** 监听 macOS 全屏状态变化 */
   onFullscreenChanged(callback: (payload: { isFullscreen: boolean }) => void): () => void
   // ── 窗口控制（win/linux 自绘圆点点击）─────────────────────────
@@ -70,19 +92,25 @@ export interface ElectronAPI {
   /** 关闭当前窗口 */
   windowClose(): Promise<void>
   // ── Browser drawer（嵌入式浏览器）─────────────────────────────
-  /** 创建 WebContentsView 并 attach 到指定窗口（初始隐藏） */
+  /** 创建 WebContentsView 并 attach 到指定窗口（初始隐藏）。
+   *  失败 reject（display-containers §7.4 错误通道）：window 失联/已销毁等创建失败时
+   *  Promise reject 带原因，caller catch 落错误占位（重试 = create + show + navigate） */
   browserCreate(sessionId: string, windowId: string): Promise<void>
   /** 导航到指定 URL */
   browserNavigate(sessionId: string, url: string): Promise<void>
   /** 隐藏 view（keep-alive，不销毁） */
   browserHide(sessionId: string): Promise<void>
-  /** 显示 view（恢复最近 rect） */
+  /** 显示请求（恢复最近 rect）。收敛到显示收口谓词（§7.4 show 统一谓词）：
+   *  show 当且仅当「浮层开 ∧ 内容 browser ∧ 无错误态 ∧ 无相交 shieldsView 面」，
+   *  谓词为假时保持/进入隐藏（非失败） */
   browserShow(sessionId: string): Promise<void>
-  /** 切换可见 view 到指定 session（Wave 4：隐藏其他可见 view，显示 target；用于切 session 时 swap） */
+  /** 切换可见 view 到指定 session。浮层随行豁免（§5.1 规则 5）：浮层开 ∧ 内容 browser 时
+   *  换显整体豁免（view 保持发起会话的）；非显示收口谓词态只隐藏不显示（防残影复活） */
   browserFocus(sessionId: string): Promise<void>
   /** 设置 view 位置/尺寸（CSS px = DIP，不乘 dpr；renderer 经 getBoundingClientRect 推送） */
   browserSetRect(sessionId: string, rect: { x: number; y: number; width: number; height: number }): Promise<void>
-  /** 销毁 view（removeChildView + webContents.destroy） */
+  /** 销毁 view（removeChildView + webContents.destroy）。会话删除级联：浮层当前内容是该会话时
+   *  主进程侧浮层态同步复位；其它会话的 view/浮层不动 */
   browserDestroy(sessionId: string): Promise<void>
   /** 后退（Wave 5 历史；sessionId 不存在或无法后退时无操作） */
   browserBack(sessionId: string): Promise<void>
@@ -94,12 +122,40 @@ export interface ElectronAPI {
   browserGetZoom(sessionId: string): Promise<number>
   /** 读取 WebContentsView 内当前选区文本 + URL（二期扩展点，Wave 6 预留） */
   browserGetSelection(sessionId: string): Promise<{ text: string; url: string }>
-  /** 监听 browser 状态变化（url/isLoading/error/canGoBack/canGoForward/zoomFactor，主进程 did-navigate 等事件推送），返回取消订阅函数 */
+  /** 显示收口事实源之一（display-containers §7.4）：浮层开合/内容切换上报。
+   *  契约：BrowserPane 挂载/重开前先上报（谓词事实先于 show 请求）；浮层关闭/换出 browser
+   *  内容时立即上报——主进程侧联动隐藏 view（keep-alive）。非法 payload reject（error envelope） */
+  browserSetOverlayState(state: {
+    open: boolean
+    content: 'browser' | 'workflow' | null
+    sessionId: string | null
+  }): Promise<void>
+  /** 显示收口事实源之一（§5.1 规则 6② / §6.7）：shieldsView 遮蔽面**全量**上报（替换语义）。
+   *  fullscreen=true 无条件隐藏 view；非全屏面与 view 矩形几何相交才隐藏（双阈值空间滞回），
+   *  成员开态内 rect 变化（横幅改宽）也须重报。非法 payload reject（error envelope） */
+  browserSetShields(payload: ShieldsFacesPayload): Promise<void>
+  /** 转发键清单全量上报（§7.4 [MANDATORY]）：初始化 / settings 重录快捷键 / renderer 重载时调。
+   *  入清单约束：仅 mod 前缀组合（mod=meta||ctrl，可带 shift）；裸键/shift-only/alt 组合/Esc
+   *  一律拒绝入清单（rejected 返回）。页面聚焦态命中清单的键由主进程转发回本窗处理链 */
+  browserSetForwardKeys(keys: string[]): Promise<{ accepted: string[]; rejected: string[] }>
+  /** 转发键清单增量（注册/注销）；op 语义同上，违规项进 rejected */
+  browserUpdateForwardKeys(delta: {
+    add?: string[]
+    remove?: string[]
+  }): Promise<{ accepted: string[]; rejected: string[] }>
+  /** 监听 view 转发的 app 快捷键族（主进程 before-input-event 命中清单后转发）。
+   *  renderer 注册处按 accelerator 派发各自注册动作；容器键（⌃`/⌘W）不经此通道（走 onShortcut） */
+  onBrowserForwardKey(callback: (payload: { accelerator: string }) => void): () => void
+  /** 监听 browser 状态变化（url/isLoading/error/processGone/canGoBack/canGoForward/zoomFactor，
+   *  主进程 did-navigate 等事件推送），返回取消订阅函数。
+   *  两类错误占位区分（§5.3）：processGone 非 null → 「创建失败/进程崩溃」占位（重试 = create + show +
+   *  navigate）；error 非 null → 「页面加载失败」占位。两者非 null 时 view 已被主进程联动隐藏 */
   onBrowserState(callback: (state: {
     sessionId: string
     currentUrl: string
     isLoading: boolean
     error: { errorCode: number; errorDescription: string; validatedURL: string } | null
+    processGone: { reason: string } | null
     canGoBack: boolean
     canGoForward: boolean
     zoomFactor: number
@@ -283,6 +339,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }) => ipcRenderer.invoke('pick-file', options),
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
   revealInFolder: (filePath: string) => ipcRenderer.invoke('reveal-in-folder', filePath),
+  // 通道名 SSOT = @taiji/shared 的 LOCAL_FILE_SERVABLE / LOCAL_FILE_READ
+  // （packages/shared/src/ipc-channels.ts）；main 侧 gateway/local-file-handlers 同 import
+  // ——两侧禁止字面量分叉
+  localFileServable: (absPath: string) => ipcRenderer.invoke(LOCAL_FILE_SERVABLE, absPath),
+  localFileRead: (absPath: string) => ipcRenderer.invoke(LOCAL_FILE_READ, absPath),
   onFullscreenChanged: (callback: (payload: { isFullscreen: boolean }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: { isFullscreen: boolean }) => callback(payload)
     ipcRenderer.on('fullscreen-changed', handler)
@@ -306,11 +367,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
   browserSetZoom: (sessionId: string, factor: number) => ipcRenderer.invoke('browser:set-zoom', { sessionId, factor }),
   browserGetZoom: (sessionId: string) => ipcRenderer.invoke('browser:get-zoom', sessionId),
   browserGetSelection: (sessionId: string) => ipcRenderer.invoke('browser:get-selection', sessionId),
+  browserSetOverlayState: (state: {
+    open: boolean
+    content: 'browser' | 'workflow' | null
+    sessionId: string | null
+  }) => ipcRenderer.invoke('browser:overlay-state', state),
+  browserSetShields: (payload: ShieldsFacesPayload) => ipcRenderer.invoke('browser:shields', payload),
+  browserSetForwardKeys: (keys: string[]) => ipcRenderer.invoke('browser:forward-keys', { set: keys }),
+  browserUpdateForwardKeys: (delta: { add?: string[]; remove?: string[] }) =>
+    ipcRenderer.invoke('browser:forward-keys', { add: delta.add, remove: delta.remove }),
+  onBrowserForwardKey: (callback: (payload: { accelerator: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: { accelerator: string }) => callback(payload)
+    ipcRenderer.on('shortcut:forward', handler)
+    return () => ipcRenderer.removeListener('shortcut:forward', handler)
+  },
   onBrowserState: (callback: (state: {
     sessionId: string
     currentUrl: string
     isLoading: boolean
     error: { errorCode: number; errorDescription: string; validatedURL: string } | null
+    processGone: { reason: string } | null
     canGoBack: boolean
     canGoForward: boolean
     zoomFactor: number
@@ -320,6 +396,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       currentUrl: string
       isLoading: boolean
       error: { errorCode: number; errorDescription: string; validatedURL: string } | null
+      processGone: { reason: string } | null
       canGoBack: boolean
       canGoForward: boolean
       zoomFactor: number

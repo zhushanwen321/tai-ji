@@ -94,7 +94,7 @@ import { useWorkflowStore, agentCallVirtualId } from '@/stores/workflow'
 // 生产链路 side effect，测试 import 即激活（与真实 App 一致）
 import '@/composables/features/drawer/useSideDrawer'
 import { _resetLruForTest } from '@taiji/core'
-import { drawerControl, closeDrawer, _resetDrawerControlForTest } from '@taiji/core/domain/drawer'
+import { drawerControl, closeDrawer, openSubagent, _resetDrawerControlForTest } from '@taiji/core/domain/drawer'
 import type { Message } from '@taiji/shared'
 
 function makeMessage(id: string): Message {
@@ -130,7 +130,7 @@ describe('B9 agentcall LRU 联动驱逐（阈值路径 evictIfNeeded）', () => 
 
     // panel 焦点 s0，drawer 打开 subagent tab 选中 viewed（正在查看）
     focusSession('s0')
-    drawerControl.setSubagentView(viewed, 'workflow')
+    openSubagent({ virtualId: viewed, enteredFrom: 'workflow' })
     // 登记 workflow 映射（agentcall 清理唯一通路）+ 写分区消息
     wf.registerAgentCall('s0', unviewed)
     wf.registerAgentCall('s0', viewed)
@@ -160,7 +160,7 @@ describe('B9 agentcall LRU 联动驱逐（阈值路径 evictIfNeeded）', () => 
     const viewed = agentCallVirtualId('acs-was-viewed')
 
     focusSession('s0')
-    drawerControl.setSubagentView(viewed, 'workflow')
+    openSubagent({ virtualId: viewed, enteredFrom: 'workflow' })
     closeDrawer() // 关闭 drawer：不再查看 → 豁免失效
     wf.registerAgentCall('s0', viewed)
     chat.setMessages(viewed, [makeMessage('m-v')])
@@ -185,7 +185,7 @@ describe('B9 agentcall LRU 联动驱逐（阈值路径 evictIfNeeded）', () => 
 
     // s-stale 曾开 drawer 选中 staleVid，焦点切走后分区保留（LRU 不清 drawer 控制分区）
     focusSession('s-stale')
-    drawerControl.setSubagentView(staleVid, 'workflow')
+    openSubagent({ virtualId: staleVid, enteredFrom: 'workflow' })
     wf.registerAgentCall('s-stale', staleVid)
     chat.setMessages(staleVid, [makeMessage('m-s')])
     // 焦点切到 s-now（panel 枚举只剩 s-now → s-stale 的选中不在豁免源内）
@@ -214,7 +214,7 @@ describe('B9 agentcall LRU 联动驱逐（显式路径 evictSessionWithVirtual�
     const unviewed = agentCallVirtualId('acs-u2')
 
     focusSession('s1')
-    drawerControl.setSubagentView(viewed, 'workflow')
+    openSubagent({ virtualId: viewed, enteredFrom: 'workflow' })
     wf.registerAgentCall('s1', unviewed)
     wf.registerAgentCall('s1', viewed)
     chat.setMessages(unviewed, [makeMessage('m-u')])

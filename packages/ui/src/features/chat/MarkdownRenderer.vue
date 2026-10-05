@@ -35,6 +35,28 @@
         <span class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" />
         <span data-testid="md-streaming-fence-lang" class="font-mono text-[length:var(--text-2xs)] font-semibold lowercase tracking-[0.08em] text-neutral-dim">{{ seg.lang }}</span>
       </div>
+      <!-- html-preview 段（chat-html-support §6.3 D3，v16 内联容器）：纯路径载荷走
+           HtmlPreviewInline 组件（不经 v-html/净化信任槽）；路径解析矩阵与 ④路同源——
+           props.resourceBaseDir 覆盖优先、缺省由容器经 deps.sessionCwdOf 拿 session cwd。
+           源码态经 #source 作用域插槽由本组件承接渲染（fence 高亮通道）：渲染能力由宿主
+           单向下供，容器不反向 import 本组件（无组件间静态循环依赖）。插槽内容里的
+           <MarkdownRenderer> 是 SFC 文件名隐式自引用——递归有界：容器把源码包进 html
+           fence，包裹后不再是 html-preview 语法区，嵌套实例不会命中本分支。 -->
+      <HtmlPreviewInline
+        v-else-if="seg.type === 'html-preview'"
+        :path="seg.content"
+        :session-id="props.sessionId"
+        :resource-base-dir="props.resourceBaseDir"
+      >
+        <template #source="{ markdown }">
+          <MarkdownRenderer
+            :content="markdown"
+            :session-id="props.sessionId"
+            class="p-1.5"
+            data-testid="html-preview-source"
+          />
+        </template>
+      </HtmlPreviewInline>
       <MermaidRenderer v-else :source="seg.content" />
     </template>
     <!-- 歧义文件选择浮层：裸 basename 多匹配时弹出（锚定到点击的 <a>，portal 到 body） -->
@@ -66,8 +88,10 @@ import type { MarkdownSegment } from './markdown-types'
 import { findByBasename } from '../../lib/file-basename'
 import { RUNNING_LOADER_SVG } from './block-icon'
 import AmbiguousFilePopover from './AmbiguousFilePopover.vue'
+import HtmlPreviewInline from './HtmlPreviewInline.vue'
 import MermaidRenderer from './MermaidRenderer.vue'
 import { useChatViewDeps } from './chat-view-deps'
+import { decodeB64, isOverlayBrowserHref, isRelativeHref, resolveHrefPath } from './markdown-links'
 import { useMarkdownStreaming } from './composables/useMarkdownStreaming'
 
 const props = defineProps<{
@@ -92,21 +116,12 @@ const deps = useChatViewDeps()
 // D-5 增量流式渲染状态机（content watch → rAF 节流 → 增量协议 → 渲染树，生命周期同组件实例）
 const { segments } = useMarkdownStreaming(props, deps)
 
-/** data-path 解码（renderer 壳 linkify 产出 base64 编码路径，HISTORICAL：迁移时丢 decodeBase64 致点击打开错误路径） */
-function decodeB64(b64: string): string {
-  try {
-    const binary = atob(b64)
-    return new TextDecoder().decode(Uint8Array.from(binary, (c) => c.charCodeAt(0)))
-  } catch {
-    return b64
-  }
-}
-
 /**
  * v-for 段 key（W23 review Fix-2）：streaming-fence 占位段固定哨兵 'sf'——占位段的 segId
  * 在协议层每帧重分配（tail 段每帧重建），若 key 随帧变则占位 DOM 重建、loader 旋转动画
  * （1.4s 周期）每帧从头重启，视觉冻结在起转 18°。文档级至多一个未闭合 fence，哨兵不撞号。
- * 其余段沿用 segId（前缀段跨帧不变 → DOM 复用）/ index（全量降级路径）。
+ * 其余段沿用 segId（前缀段跨帧不变 → DOM 复用）/ index（全量降级路径）。html-preview 段
+ * （fence 闭合后才成段，属前缀/稳定区）走 segId——容器预检态随实例保活，不被重建重置。
  */
 function segKey(seg: MarkdownSegment, i: number): string {
   if (seg.type === 'streaming-fence') return 'sf'
@@ -145,40 +160,11 @@ let copiedBtn: HTMLElement | null = null
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
 const COPIED_FEEDBACK_MS = 1200
 
-// ── ④路相对链接判定/resolve（设计 markdown-html-sanitize-render D4）──
-// 与 renderer markdown-sanitize.ts 的 isRelativeResourcePath/resolveResourcePath 同标准镜像
-// （ui→renderer 依赖禁令不可直接 import——镜像纪律同 markdown-types.ts 的协议镜像，两侧
-// 注释互指，改动需同批同步）。
-
-/** scheme 前缀正则（http: / data: / mailto: 等带协议头的 URL——非相对路径，与 sanitize 侧同款） */
-const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i
-
-/** 相对资源路径判定：非 # 开头（页内锚点）、非 // 开头（协议相对 = 远程）、无 scheme 前缀。空串非路径。 */
-function isRelativeHref(value: string): boolean {
-  if (value === '') return false
-  if (value.startsWith('#')) return false
-  if (value.startsWith('//')) return false
-  return !SCHEME_RE.test(value)
-}
-
-/** POSIX resolve（Node path.resolve 语义的纯函数实现；renderer 运行时无 node:path，两侧同款镜像） */
-function resolveHrefPath(base: string, rel: string): string {
-  const joined = rel.startsWith('/') ? rel : `${base}/${rel}`
-  const parts: string[] = []
-  for (const seg of joined.split('/')) {
-    if (seg === '' || seg === '.') continue
-    if (seg === '..') {
-      parts.pop()
-      continue
-    }
-    parts.push(seg)
-  }
-  return `/${parts.join('/')}`
-}
+// ④⑤路链接判定/resolve 与 data-path 解码 → ./markdown-links.ts（镜像纯函数模块，设计 markdown-html-sanitize-render D4）
 
 /**
- * v-html 内点击事件委托路由（代码块复制 / 文件路径 / 歧义 basename / 相对链接 / 外链）。
- * 文件操作经 deps 桥接（onFileClick/openDrawer）。代码块复制是 DOM 副作用，ui 本地处理。
+ * v-html 内点击事件委托路由（代码块复制 / 文件路径 / 歧义 basename / 相对链接 / 外链 / 浮层浏览器）。
+ * 文件操作经 deps 桥接（onFileClick/openDrawer）；浮层浏览器经 deps.openBrowser 桥接。代码块复制是 DOM 副作用，ui 本地处理。
  */
 /** ① 代码块复制按钮（data-code 是 base64 编码的源码）。代码块复制是 DOM 副作用，ui 本地处理。 */
 function handleCodeblockCopy(e: MouseEvent, btn: HTMLElement): void {
@@ -222,14 +208,25 @@ function handleAmbiguousClick(e: MouseEvent, ambLink: HTMLElement): void {
 }
 
 /**
- * ④ 相对链接分流（④路扩展，设计 D4）：原生 <a> 的 href 命中相对路径 → 应用内打开对应
- * 文件（drawer detail，与路②同通道；目标有未提交改动显 diff / untracked 自动降级 preview
- * 是 detail 通道统一语义）。# 锚点 / // 协议相对 / scheme 链接不拦截（默认冒泡走外链闸）。
+ * ④⑤路链接分流：相对链接 → 应用内文件详情（④路，设计 D4）；http(s) localhost/127.0.0.1 →
+ * 浮层浏览器（⑤路，display-containers §7.4 URL 注入链：openBrowser(url) → 浮层壳 + BrowserPane）。
+ * 其余 scheme 链接不拦截（target=_blank 默认冒泡 → setWindowOpenHandler → 系统浏览器，维持现状）。
  */
 function handleAnchorClick(e: MouseEvent, anchor: Element): void {
   // 用 getAttribute 原始值判定：element.href 是浏览器绝对化后的值，相对形态失真（D4）
   const href = anchor.getAttribute('href')
-  if (!href || !isRelativeHref(href)) return
+  if (!href) return
+
+  if (!isRelativeHref(href)) {
+    // ⑤路浮层浏览器分流：需发起会话（view 键 + 级联/谓词锚）；无会话宿主（命令文档等）
+    // 回落系统浏览器（默认冒泡）
+    if (isOverlayBrowserHref(href) && props.sessionId) {
+      e.preventDefault()
+      deps.openBrowser(href, props.sessionId)
+    }
+    return
+  }
+
   e.preventDefault()
   // 基准目录双通道（D4 传值矩阵）：props 覆盖优先（drawer 文件目录语义）；props 缺省
   // （对话流/命令文档）经 deps.sessionCwdOf 拿 session cwd；两者皆缺（未知 sid）→
@@ -241,7 +238,7 @@ function handleAnchorClick(e: MouseEvent, anchor: Element): void {
 }
 
 /**
- * v-html 内点击事件委托路由（代码块复制 / 文件路径 / 歧义 basename / 相对链接 / 外链）。
+ * v-html 内点击事件委托路由（代码块复制 / 文件路径 / 歧义 basename / 相对链接 / 外链 / 浮层浏览器）。
  * 文件操作经 deps 桥接（onFileClick/openDrawer）。
  */
 function onClick(e: MouseEvent): void {

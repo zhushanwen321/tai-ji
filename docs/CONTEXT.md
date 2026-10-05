@@ -181,6 +181,25 @@ session 的语义内容——对话历史、项目知识（AGENTS.md 等）、sk
 **代码映射**: 现行符号 `SystemNotice`（`packages/ui/src/features/chat/SystemNotice.vue` 唯一渲染点；core 写入点 `appendSystemNotice` / `appendSubagentDirective`，`packages/core/src/domain/chat/store.ts`）。
 
 > **术语演进**：历史名 `SystemNotification`（terminology R3 统一产物）已随 v3 重构消亡，现行符号为 `SystemNotice`，内联系统提示行已重新落地聊天流。
+
+### HTML 预览块
+info string 为 `html-preview` 的 fenced code block，内容是被预览 HTML 文件的路径（单行）。agent 交付 HTML 产物的引用语法（fence 首词匹配，尾随 token 忽略；空 / 多行 → 降级态「路径非法」）。
+
+**代码映射**: 段切分 `packages/renderer/src/composables/logic/markdown-incremental.ts`（`'html-preview'` 段类型）→ 分发 `packages/ui/src/features/chat/MarkdownRenderer.vue` → 内联预览容器 `HtmlPreviewInline.vue`（v16）。
+
+### 预览卡片（v16 后：内联预览容器的降级占位存续形态）
+HTML 预览块在对话流中的渲染载体为**内联预览容器**（v16，ADR-0119）：头部条（文件名/大小 + 源码-预览切换 + 刷新 + 收起/展开）+ sandbox iframe 原位嵌入消息流，脚本可执行、原位渲染、免点击跳转。「卡片」概念（v16 前形态：消息内单按钮卡片，点击后抽屉渲染）仅存续于降级占位——预检不过时容器退化为降级占位（文件名 + 原因两行，无操作区）。走 Vue 段组件产出 DOM，不经 v-html / DOMPurify 通道（用户 HTML 白名单契约不受影响）。
+
+**代码映射**: `packages/ui/src/features/chat/HtmlPreviewInline.vue`；预检能力经 `chat-view-deps.ts` 的 `probeArtifact?` 注入（未 provide → 跳过预检、不显示大小）；源码态读取经 `readArtifact?`（`localFile:read` 通道）。
+
+### 渲染态（v16 退役词条）
+DetailPane 对 HTML 文件的 iframe 预览形态（v16 前与「源码态」相对、可切换）——v16 已退役（ADR-0119）：DetailPane 对 `.html` 恢复 shiki 源码高亮，机制规格（`sandbox="allow-scripts"` iframe、无 `allow-same-origin` 落 opaque origin、servable 预检、URL 百分号编码、`?r=n` 刷新）整体平移至内联预览容器承载。现役「源码态」= 容器头部切换（iframe 卸载、内容经 `localFile:read` 读取走 shiki 高亮）与 DetailPane 源码高亮。
+
+### 会话产物目录
+`<dataDir>/artifacts/<sessionId>/`——HTML 产物落点。它在 local-file 白名单内（`<dataDir>` 前缀成员），因此预览无需任何白名单放宽。随会话删除级联删除，超龄（默认 7 天，`TAIJI_ARTIFACTS_KEEP_DAYS` 可覆盖）由保留期扫描按文件系统级判据回收（ADR-0118）。
+
+**代码映射**: `packages/shared/src/paths.ts` 的 `getSessionArtifactsDir`（公式单点，含 sessionId 穿越校验）；system-prompt 扩展侧以镜像推导（不 import shared——包边界 + 运行时门禁）。
+
 ### Thinking
 模型的内部推理过程，在回答生成前产生。属于单条 Message（挂在 `Message.thinking[]` 上），不属于整个 Session。UI 中默认折叠展示。
 
@@ -303,9 +322,25 @@ Session 级状态，表示 pi 进程正在工作（从用户发送消息到 agen
 
 > **术语演进**：原 `Side Inspector`（terminology R4 计划改 `SideInspector`）在 v3 重构中收敛为 **Side Drawer**。v3 版更通用：不再限于运行时状态面板，而是 header 多 tab 通用容器。
 
-Panel 联动的浮层抽屉。一个 header + 多 tab 容器，tab 承载不同实体：terminal（终端）/ browser（浏览器）/ git（变更集）/ doc（命令文档）/ detail（文件详情）/ subagent（子代理只读对话流）/ workflow（workflow agent call 列表）/ bashTask（后台命令详情）。tab 枚举与状态 SSOT = `packages/core/src/domain/drawer/types.ts`。与 Panel 数据强耦合，从触发它的 Panel 内浮起，固定挂该 Panel，v1 不跨 Panel 覆盖对侧。
+Panel 联动的浮层抽屉。一个 header + 多 tab 容器，tab 承载不同实体：git（变更集）/ doc（命令文档）/ detail（文件详情）/ subagent（子代理只读对话流）/ bashTask（后台命令详情）/ plan（计划文档）/ btw（旁路线）/ workflow（workflow agent call 列表，回落载体——主入口浮层）。tab 枚举与状态 SSOT = `packages/core/src/domain/drawer/types.ts`。与 Panel 数据强耦合，从触发它的 Panel 内浮起，固定挂该 Panel，v1 不跨 Panel 覆盖对侧。
+
+**容器归属规则**：内容按形状分家——竖长阅读型归右抽屉、横宽输出流归 Bottom Drawer（底抽屉）、全画布内容（网页 / workflow 图）归 Overlay（内容浮层）；归属声明唯一权威 = 容器注册表（`packages/core/src/domain/drawer/registry.ts`）。
 
 **与旧 Side Inspector 的差异**：旧版三 Tab 是运行时状态面板；v3 版是通用容器，旧三 Tab 的运行时状态能力由 subagent/workflow tab + Flow-3 进度聚合承接。
+
+### Bottom Drawer（底抽屉）
+
+split 行（对话区 + 右抽屉）之下、StatusBar 之上的全宽横向容器，横宽内容的家。唯一内容 = terminal（终端；终端面板内**多实例**——实例切换条可新建/切换/关闭，实例编号形如 `term:<会话id>:<序号>`，会话内序号单调递增且不复用。多实例是**终端面板内部维度**，容器仍不预设 tab 枚举——第二种横向内容出现时才加维度）。开关双入口：`` ⌃` ``（before-input-event 窗口级）+ PanelHeader 顶栏终端按钮（三卡化 2026-10-04 起；原 StatusBar 底栏落点退役），终端面板头部另有收起按钮（收起语义非销毁，实例保留）；默认高 35%、拖上沿可调（clamp 15%–70%）。开合态按会话分区不持久化，高度为全局布局值单键持久化。域模块 = `packages/core/src/domain/bottom-drawer/`，内容归属同读容器注册表。
+
+### 终端实例（Terminal Instance）
+
+一个会话内可并行运行的多个终端（各自独立 PTY 与输出缓冲）。标识 = **实例编号** `term:<会话id>:<序号>`：序号由后台（runtime）按会话维度分配、单调递增、实例关闭后**不复用**（防旧输出串进新终端）；枚举/归属校验一律取**精确前缀 `term:<sid>:` + 序号段数字校验（`^\d+$`）**，禁按冒号切分取段；由编号反解 sid / 序号则取最后一个冒号前的余段 + 数字校验（sid 域不含冒号由格式保证）。实例注册表与序号分配的**唯一事实源 = runtime**（重键后的 `ptyMap` 派生视图 + 会话级计数器），界面经 `terminal.list` 在三个触发点（⌘R 刷新 / 会话激活 / 世代变更重连）对账恢复。生命周期：主动关闭与自然退出（exit/崩溃）同语义（切换条移除 + 输出分区/写队列/模块级订阅三腿清理）；最后实例的关闭按钮为 UI 供养规则（可自然退出归零至空态）；会话删除与 runtime shutdown 均级联全量杀链。
+
+**世代变更**：runtime 重启即注册表清空、序号从 1 重算（「全新世界」作用域 = runtime 进程生命周期）。界面判据 = **auth token 是否变化**（端口值不可靠——重启常落回原端口）；世代变更时终端域显式失效重置（清输出分区与切换条、清写队列状态机、模块级订阅先退订再清空），**同世代 WS 闪断不重置**。
+
+### Overlay（内容浮层）
+
+盖住全窗口的内容浮层，全画布内容的家（网页、workflow 图）。统一壳 = OverlayShell（AppShell 层挂载、`--z-modal`，88%×92% 圆角面板 + 遮罩 + 点遮罩/按钮两通道关闭；Esc 不在壳内——由键盘栈序编排器统一路由）。双内容 = browser（网页）/ workflow（工作流图），单例换内容（开新内容替换旧内容，不并开）；workflow 另在右抽屉保留回落 tab（固定家 + 显式双入口）。开合态 SSOT = `packages/core/src/domain/overlay/`（单例 `{ kind, payload }`）。
 
 ### Session Tree
 pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同一文件内可存在多个分支（fork 点），唯一的可变状态是内存中的 `leafId` 指针。taiji 通过 runtime 直接读取 JSONL 文件构建树，不依赖 pi RPC。

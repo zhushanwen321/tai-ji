@@ -126,6 +126,9 @@ import { ProjectStore } from './services/project/project-store.js'
 import { ImportService } from './services/session/import-service.js'
 import { ExternalFileImportSource } from './services/session/import-source-external-file.js'
 import { ZcodeImportSource } from './services/session/import-source-zcode.js'
+// chat-html-support（§6.7 D7 回收②）：产物目录保留期扫描（启动扫 + 每日复扫）装配入口——
+// 经后台初始化序列 ⑪（startArtifactRetention dep）触发一次。
+import { startArtifactRetention } from './services/session/artifact-retention.js'
 import type { SessionImportSource } from './services/session/import-source.js'
 // zcode 源默认库 = 宿主 HOME 下 zcode 会话库动态推导（zcode-session-source 与引擎包
 // db-path.ts 同源 SDK 常量，session-reader-shared-core U10 起唯一承载）
@@ -1270,9 +1273,11 @@ async function main(): Promise<void> {
   skillRegistry.onChange((event) => {
     server.broadcastSkillCacheInvalidated(event.scope, event.cwd)
   })
-  // Terminal：同步销毁该 session 绑定的 PTY（kill 进程 + 清 ptyMap）。
+  // Terminal：同步销毁该 session 绑定的**全部** PTY 实例（多实例语义：kill 进程 +
+  // 清该会话前缀的全部 ptyMap 键；无法回溯到 u4 之前的「单实例」态——
+  // terminal-multi-instance u4，设计 §2.3 不变量③）。
   sessionService.setOnSessionDelete((sid) => {
-    terminalService.destroyPty(sid)
+    terminalService.destroySessionPties(sid)
   })
 
   // D8-2（perf W29）：appInfo 惰性——piVersion 先 'unknown'（同步 getAppVersion），
@@ -1637,6 +1642,13 @@ async function main(): Promise<void> {
       await engineClientsDisposed
       shutdownStep('server-stop')
       await server.stop()
+      // terminal-multi-instance u4（设计 §0.5 P5 正常退出清理）：全量杀终端 PTY——与上方
+      // server.stop→destroyAll 同语义（先关入口再杀子进程），挂点紧随 server-stop：此刻
+      // 不再有 terminal.spawn 请求进入，注册表冻结，清理后不会被新建实例回填。
+      // destroyAllPties 幂等（无实例时直接返回，重复调用不报错）；kill 的 SIGKILL 升级
+      // timer 不参与退出等待（与 server.stop 内 destroyAll 同款）。
+      shutdownStep('dispose-terminal-pties')
+      terminalService.destroyAllPties()
       // u7c（D5 退出链新增步骤）：引擎池 dispose——zcode appserver 杀链，挂点钉死在
       // server.stop 之后、closeLogger 之前（杀链期间的日志与 stderr tee 要经 logger
       // 落盘，closeLogger 先行则现场丢失）。引擎池的物理宿主在 pi 进程内（registry
@@ -1793,6 +1805,9 @@ async function main(): Promise<void> {
     // u3b（idle-pi-reclamation D4）：reaper 启动闭包（装配在上方 wiring 段）——经后台
     // 序列 ⑩ 触发一次，fire-and-forget 形态由该序列保证。
     startIdleReaper,
+    // chat-html-support（§6.7 D7 回收②）：产物目录保留期扫描启动（启动扫 + 每日复扫）——
+    // 经后台序列 ⑪ 触发一次；实现落 runtime 会话服务，无需组合根装配。
+    startArtifactRetention,
     // u5（crash-forensics D3）：收割完成 promise 交付（reattach 编排的唯一消费方）。
     onOrphanReapChainScheduled: (completion) => {
       orphanReapChain = completion

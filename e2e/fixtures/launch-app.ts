@@ -91,23 +91,34 @@ export async function launchApp(opts: { dataDir?: string } = {}): Promise<{
   assertMockRendererBundle()
   const tmpDataDir = opts.dataDir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-e2e-'))
 
+  // 子进程 env：继承 process.env 后剥离 ELECTRON_RUN_AS_NODE。
+  // 该变量（relay 打包模式注入，agent bash / Electron 宿主内可见）会让 electron 二进制
+  // 退化成纯 node 模式，不认 --remote-debugging-port → 全部用例 electron.launch
+  // `Process failed to launch!` + `Electron: bad option: --remote-debugging-port=0`。
+  // 构造性免疫该已知坑（排障记录见 docs/TROUBLESHOOTING.md「electron 轨在 agent bash 里全灭」条目）。
+  const childEnv: Record<string, string> = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value === 'string') childEnv[key] = value
+  }
+  Object.assign(childEnv, {
+    // renderer 侧：mock API + E2E 注入（Vite 构建期 define 已把 sample-project cwd 打进 bundle）
+    VITE_MOCK: 'true',
+    VITE_E2E: 'true',
+    // main 侧：跳过 runtime spawn + 跳过 Vite 轮询直接 loadFile
+    TAIJI_MOCK: '1',
+    TAIJI_E2E: '1',
+    // 隔离数据目录，防 Chromium LevelDB LOCK 竞争 + 不污染 dev/prod
+    TAIJI_AGENT_DATA_DIR: tmpDataDir,
+  })
+  delete childEnv.ELECTRON_RUN_AS_NODE
+
   const app = await electron.launch({
     // 显式指定 electron 可执行文件（hoisted 模式下在 root node_modules/electron）
     executablePath: ELECTRON_EXECUTABLE,
     // Electron 进程的 cwd 指向 apps/electron（含 package.json 的 main 字段），
     // app.getAppPath() 会解析到此处，dist/main/main.cjs + dist/preload/preload.cjs + renderer/dist 都在此树下
     cwd: ELECTRON_DIR,
-    env: {
-      ...process.env,
-      // renderer 侧：mock API + E2E 注入（Vite 构建期 define 已把 sample-project cwd 打进 bundle）
-      VITE_MOCK: 'true',
-      VITE_E2E: 'true',
-      // main 侧：跳过 runtime spawn + 跳过 Vite 轮询直接 loadFile
-      TAIJI_MOCK: '1',
-      TAIJI_E2E: '1',
-      // 隔离数据目录，防 Chromium LevelDB LOCK 竞争 + 不污染 dev/prod
-      TAIJI_AGENT_DATA_DIR: tmpDataDir,
-    },
+    env: childEnv,
     // 用 @playwright/test 自带的 electron（node_modules/.bin/electron）；
     // 不指定 executablePath 时 _electron 默认走 playwright 解析的 electron
     args: ['.'],

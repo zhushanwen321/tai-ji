@@ -3,7 +3,8 @@
 // 用途：e2e/workflow-thinkinglevel-real.spec.ts 的 TC1/TC2/TC3 用它验证
 // agent() 的 thinkingLevel 参数端到端真实生效。断言表面全部是 pi 自己写的
 // 文件（零 taiji 代码介入）：
-//   - workflow state JSONL 的 calls[0].opts（扩展持久化的脚本请求值，TC1）
+//   - record 事件流 agent-started 帧 input（脚本请求值全文落账，TC1——[D1] record 单源，
+//     旧 v1 全量快照条目已停写）
 //   - 子进程 session JSONL 的 thinking_level_change entry（pi 真实生效值，TC2）
 //
 // 注意：本文件是 repo 内 fixture 资产。实际运行发现路径是 user 级

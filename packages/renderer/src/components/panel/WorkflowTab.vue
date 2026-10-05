@@ -139,7 +139,7 @@ import { useI18n } from 'vue-i18n'
 import { Check, Loader2, Square, Workflow } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { useDrawerControl, openSubagent } from '@taiji/core/domain/drawer'
+import { useWorkflowSelection, openSubagent } from '@taiji/core/domain/drawer'
 import {
   agentCallVirtualId,
   agentCallElapsedMs,
@@ -156,7 +156,7 @@ const { t } = useI18n()
 const panelStore = usePanelStore()
 const workflowStore = useWorkflowStore()
 
-const { selectedWorkflowName } = useDrawerControl()
+const { selectedWorkflowName } = useWorkflowSelection()
 
 // abort 两段式确认态：动作单点在 useWorkflowAction（与 tray workflow 面板共享）；
 // aborting computed 保持模板既有形态（按钮 testid/class/title 按 runId 派生）

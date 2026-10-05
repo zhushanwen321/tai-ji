@@ -1,5 +1,11 @@
 # @zhushanwen/pi-subagent-workflow
 
+## 9.2.1
+
+### Patch Changes
+
+- 492e02447: Fix built-in workflows and agents not being discovered in bundled/packaged builds: the resolver now falls back to the staged scope root when `require.resolve` fails in self-contained bundles, so the `subagents` batch tool no longer reports "Built-in workflow fan-out is not available".
+
 ## 9.2.0
 
 ### Minor Changes

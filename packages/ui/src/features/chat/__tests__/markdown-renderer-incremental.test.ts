@@ -295,3 +295,69 @@ describe('W23 ④: complete 消息渲染与旧版全量渲染等价（回归基�
     expect(inc.text()).toContain('const a = 1')
   })
 })
+
+describe('chat-html-support ①: html-preview fence 识别与段切分（首词命中 / 尾随忽略 / 空与多行）', () => {
+  it('info 首词 = html-preview → html-preview 段（载荷 = 路径）；尾随 token 忽略（与 mermaid 同构）', async () => {
+    const { m } = await createIncrementalDeps()
+    for (const info of ['html-preview', 'html-preview title=report', 'HTML-PREVIEW']) {
+      const segs = await m.renderMarkdownSegments('```' + info + '\n/abs/report.html\n```\n')
+      expect(segs, info).toHaveLength(1)
+      expect(segs[0].type, info).toBe('html-preview')
+      expect(segs[0].content.trim(), info).toBe('/abs/report.html')
+    }
+  })
+
+  it('空内容 → 载荷 trim 后为空；多行内容 → 载荷含换行（消费侧判定「路径非法」的两类输入）', async () => {
+    const { m } = await createIncrementalDeps()
+    const empty = await m.renderMarkdownSegments('```html-preview\n```\n')
+    expect(empty[0].type).toBe('html-preview')
+    expect(empty[0].content.trim()).toBe('')
+
+    const multi = await m.renderMarkdownSegments('```html-preview\n/a.html\n/b.html\n```\n')
+    expect(multi[0].type).toBe('html-preview')
+    expect(multi[0].content.trim()).toContain('\n')
+  })
+
+  it('mermaid fence 行为不变（回归）：首词命中 + 尾随忽略', async () => {
+    const { m } = await createIncrementalDeps()
+    const segs = await m.renderMarkdownSegments('```mermaid\ngraph LR\nA-->B\n```\n')
+    expect(segs).toHaveLength(1)
+    expect(segs[0].type).toBe('mermaid')
+    expect(segs[0].content).toContain('graph LR')
+  })
+
+  it('未闭合 fence：非 finalize → streaming-fence 占位（lang=html-preview）；finalize → 落成 html-preview 段', async () => {
+    const { m } = await createIncrementalDeps()
+    const open = '```html-preview\n/abs/report.html'
+    const cache = m.createIncrementalRenderCache()
+
+    const r1 = await m.renderIncremental(open, cache, undefined, { finalizeOpenFence: false })
+    const all1 = [...r1.prefixSegments, ...r1.tailSegments]
+    const fence = all1.find((s) => s.type === 'streaming-fence')
+    expect(fence?.lang).toBe('html-preview')
+    expect(all1.some((s) => s.type === 'html-preview')).toBe(false)
+
+    const r2 = await m.renderIncremental(open, cache, undefined, { finalizeOpenFence: true })
+    const all2 = [...r2.prefixSegments, ...r2.tailSegments]
+    const card = all2.find((s) => s.type === 'html-preview')
+    expect(card?.content.trim()).toBe('/abs/report.html')
+    expect(all2.some((s) => s.type === 'streaming-fence')).toBe(false)
+  })
+
+  it('fallback-full 路径（含链接引用定义 → 无稳定边界）同样走 html-preview 占位分流', async () => {
+    const { m } = await createIncrementalDeps()
+    const content = '[ref]: https://example.com\n\n```html-preview\n/abs/report.html'
+    const cache = m.createIncrementalRenderCache()
+
+    const r1 = await m.renderIncremental(content, cache, undefined, { finalizeOpenFence: false })
+    expect(r1.mode).toBe('fallback-full')
+    const all1 = [...r1.prefixSegments, ...r1.tailSegments]
+    expect(all1.some((s) => s.type === 'streaming-fence' && s.lang === 'html-preview')).toBe(true)
+    expect(all1.some((s) => s.type === 'html-preview')).toBe(false)
+
+    const r2 = await m.renderIncremental(content, cache, undefined, { finalizeOpenFence: true })
+    const all2 = [...r2.prefixSegments, ...r2.tailSegments]
+    expect(all2.some((s) => s.type === 'html-preview')).toBe(true)
+    expect(all2.some((s) => s.type === 'streaming-fence')).toBe(false)
+  })
+})

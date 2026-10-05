@@ -11,10 +11,15 @@
  *
  * 运行：cd apps/electron/main && npx vitest run test/local-file-prefixes.test.ts
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import path from 'node:path'
 import { homedir } from 'node:os'
-import { computeLocalFilePrefixes } from '../utils/local-file-prefixes'
+import {
+  computeLocalFilePrefixes,
+  computeLocalFileReadPrefixes,
+  readLocalFileContent,
+  MAX_LOCAL_FILE_READ_BYTES,
+} from '../utils/local-file-prefixes'
 import { isPathInAllowedPrefixes } from '../gateway/input-validators'
 
 // 固定语义值（不依赖跑测试的机器，断言跨机器可复现）
@@ -178,5 +183,148 @@ describe('computeLocalFilePrefixes: 输出契约与缺省行为', () => {
     expect(prefixes.some(p => p.startsWith(TMP))).toBe(false)
     // 只剩用户内容子目录 3 项
     expect(prefixes).toHaveLength(3)
+  })
+})
+
+describe('readLocalFileContent: 源码态白名单读取通道（chat-html-support §8.2 S3）', () => {
+  // 产物目录是主场景：<dataDir>/artifacts/<sessionId>/ 在 session cwd 外、在白名单内
+  const PREFIXES = packagedPrefixes()
+  const ARTIFACT = path.join(DATA_DIR, 'artifacts', 's1', 'report.html')
+
+  it('白名单内文件 → ok + 内容 + truncated=false', () => {
+    const reads: string[] = []
+    const result = readLocalFileContent(ARTIFACT, PREFIXES, {
+      statSync: () => ({ isDirectory: () => false, size: 11 }),
+      readFileSync: (p) => {
+        reads.push(p)
+        return new TextEncoder().encode('<h1>hi</h1>')
+      },
+    })
+    expect(result).toEqual({ ok: true, content: '<h1>hi</h1>', truncated: false })
+    expect(reads).toEqual([ARTIFACT])
+  })
+
+  it('越界路径短路不触 fs（statSync / readFileSync 均不调用，无存在性探测通道）', () => {
+    const stat = vi.fn()
+    const read = vi.fn()
+    const result = readLocalFileContent('/etc/passwd', PREFIXES, {
+      statSync: stat,
+      readFileSync: read,
+    })
+    expect(result).toEqual({ ok: false, reason: 'out_of_whitelist' })
+    expect(stat).not.toHaveBeenCalled()
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it('不存在 → not_found（不读内容）', () => {
+    const read = vi.fn()
+    const result = readLocalFileContent(ARTIFACT, PREFIXES, {
+      statSync: () => undefined,
+      readFileSync: read,
+    })
+    expect(result).toEqual({ ok: false, reason: 'not_found' })
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it('目录 → is_dir（不读内容）', () => {
+    const read = vi.fn()
+    const result = readLocalFileContent(path.join(DATA_DIR, 'artifacts'), PREFIXES, {
+      statSync: () => ({ isDirectory: () => true, size: 0 }),
+      readFileSync: read,
+    })
+    expect(result).toEqual({ ok: false, reason: 'is_dir' })
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it('超上限截断（truncated=true，与 runtime file.read 同语义）', () => {
+    const big = new Uint8Array(MAX_LOCAL_FILE_READ_BYTES + 8).fill(65)
+    const result = readLocalFileContent(ARTIFACT, PREFIXES, {
+      statSync: () => ({ isDirectory: () => false, size: big.byteLength }),
+      readFileSync: () => big,
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.truncated).toBe(true)
+      expect(result.content.length).toBe(MAX_LOCAL_FILE_READ_BYTES)
+    }
+  })
+
+  it('读取抛错（EACCES 等）→ read_failed（IPC 边界不抛错）', () => {
+    const result = readLocalFileContent(ARTIFACT, PREFIXES, {
+      statSync: () => ({ isDirectory: () => false, size: 1 }),
+      readFileSync: () => {
+        throw new Error('EACCES')
+      },
+    })
+    expect(result).toEqual({ ok: false, reason: 'read_failed' })
+  })
+
+  it('读取真异常经 onError 旁路（不静默吞掉，与探针异常同一通道）', () => {
+    const onError = vi.fn()
+    const err = new Error('EACCES: permission denied')
+    const result = readLocalFileContent(ARTIFACT, PREFIXES, {
+      statSync: () => ({ isDirectory: () => false, size: 1 }),
+      readFileSync: () => {
+        throw err
+      },
+      onError,
+    })
+    expect(result).toEqual({ ok: false, reason: 'read_failed' })
+    expect(onError).toHaveBeenCalledWith(err, ARTIFACT)
+  })
+
+  it('探测真异常经 onError 旁路 → not_found（不静默吞掉）', () => {
+    const onError = vi.fn()
+    const err = new Error('EACCES')
+    const result = readLocalFileContent(ARTIFACT, PREFIXES, {
+      statSync: () => {
+        throw err
+      },
+      onError,
+    })
+    expect(result).toEqual({ ok: false, reason: 'not_found' })
+    expect(onError).toHaveBeenCalledWith(err, ARTIFACT)
+  })
+})
+
+describe('computeLocalFileReadPrefixes: 读/预检 IPC 通道准入收窄', () => {
+  // 通道消费域 = 产物子树（HtmlPreviewInline 源码态/size 预检、useDetailPane 抽屉产物
+  // 读取）；全量白名单含 <dataDir> 整前缀，读通道若复用 = 渲染进程可直读数据目录内
+  // 任意文件文本（含 pi agent 目录凭据）。本组用例锁定收窄面本身。
+  it('前缀 = <dataDir>/artifacts/ 且带 trailing path.sep（与全量白名单同构的误判防护）', () => {
+    expect(computeLocalFileReadPrefixes(DATA_DIR)).toEqual([path.join(DATA_DIR, 'artifacts') + path.sep])
+  })
+
+  it('产物路径命中、dataDir 内非产物子树不命中（attachments / cache/images / agent）', () => {
+    const readPrefixes = computeLocalFileReadPrefixes(DATA_DIR)
+    expect(isPathInAllowedPrefixes(`${DATA_DIR}/artifacts/s1/report.html`, readPrefixes)).toBe(true)
+    expect(isPathInAllowedPrefixes(`${DATA_DIR}/artifacts`, readPrefixes)).toBe(true)
+    expect(isPathInAllowedPrefixes(`${DATA_DIR}/attachments/sess-1/img.png`, readPrefixes)).toBe(false)
+    expect(isPathInAllowedPrefixes(`${DATA_DIR}/cache/images/x.png`, readPrefixes)).toBe(false)
+    expect(isPathInAllowedPrefixes(`${DATA_DIR}/agent/auth.json`, readPrefixes)).toBe(false)
+    // 兄弟目录不误伤（trailing sep 守护）
+    expect(isPathInAllowedPrefixes(`${DATA_DIR}/artifacts-extra/x.html`, readPrefixes)).toBe(false)
+  })
+
+  it('攻击面锁定：全量白名单内的 <dataDir>/agent/auth.json 经读通道前缀 out_of_whitelist 不触 fs', () => {
+    // 对照组证明攻击面真实存在：同一路径在全量白名单内可读
+    expect(isPathInAllowedPrefixes(`${DATA_DIR}/agent/auth.json`, packagedPrefixes())).toBe(true)
+    const stat = vi.fn()
+    const read = vi.fn()
+    const result = readLocalFileContent(`${DATA_DIR}/agent/auth.json`, computeLocalFileReadPrefixes(DATA_DIR), {
+      statSync: stat,
+      readFileSync: read,
+    })
+    expect(result).toEqual({ ok: false, reason: 'out_of_whitelist' })
+    expect(stat).not.toHaveBeenCalled()
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it('产物文件经读通道前缀正常读取（消费面不回归）', () => {
+    const result = readLocalFileContent(`${DATA_DIR}/artifacts/s1/report.html`, computeLocalFileReadPrefixes(DATA_DIR), {
+      statSync: () => ({ isDirectory: () => false, size: 11 }),
+      readFileSync: () => new TextEncoder().encode('<h1>hi</h1>'),
+    })
+    expect(result).toEqual({ ok: true, content: '<h1>hi</h1>', truncated: false })
   })
 })

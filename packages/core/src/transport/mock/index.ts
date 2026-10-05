@@ -636,9 +636,10 @@ const sessionImpl = {
    * 让 E2E 能验证「切 session 后列表刷新」（切到无数据 session 看空态，切回 s3 看列表）。
    * [RT-4#8] 形态对齐 real（getSubagents 结构化返回；mock 恒非 oversize）。
    */
-  async getSubagents(sessionId: string): Promise<{ subagents: SubagentRecord[]; oversize?: boolean }> {
+  async getSubagents(sessionId: string): Promise<{ subagents: SubagentRecord[]; oversize?: boolean; found?: boolean }> {
     await sleep(TIMING.ack)
-    return { subagents: sessionId === 's3' ? fixtureSubagents.map((s) => ({ ...s })) : [] }
+    // found: true = mock 的 session 恒在册（fixture session 无「不在册」形态）
+    return { subagents: sessionId === 's3' ? fixtureSubagents.map((s) => ({ ...s })) : [], found: true }
   },
 
   /** Mock subagent 对话流历史（返回空数组，agent call 对话流由 getAgentCallHistory 覆盖） */
@@ -652,9 +653,10 @@ const sessionImpl = {
    * s3 返回 fixture，其他 session 返回空——同 getSubagents 的区分逻辑。
    * [RT-4#8] 形态对齐 real（结构化返回；mock 恒非 oversize）。
    */
-  async getWorkflows(sessionId: string): Promise<{ workflows: WorkflowRunRecord[]; oversize?: boolean }> {
+  async getWorkflows(sessionId: string): Promise<{ workflows: WorkflowRunRecord[]; oversize?: boolean; found?: boolean }> {
     await sleep(TIMING.ack)
-    return { workflows: sessionId === 's3' ? fixtureWorkflows.map((w) => ({ ...w })) : [] }
+    // found: true = mock 的 session 恒在册（同 getSubagents）
+    return { workflows: sessionId === 's3' ? fixtureWorkflows.map((w) => ({ ...w })) : [], found: true }
   },
 
   /**

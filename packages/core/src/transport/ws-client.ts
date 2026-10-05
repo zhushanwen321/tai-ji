@@ -521,6 +521,23 @@ export function connect(url: string, credentials: ConnectCredentials): void {
   }
 }
 
+/**
+ * 当前连接凭据只读取值面（terminal-multi-instance 设计 §0.5 P6）。
+ *
+ * 用途：终端域的「runtime 世代变更」核对判据——renderer 在 WS 连接建立边沿比较本值与
+ * 上一次连接建立时保存的值，**变化即世代变更**（每次 spawn 重新生成 randomBytes token，
+ * 旧 token 对新进程必失效）；未变即同世代（WS 闪断 / 无新进程的幂等 `runtime-port` 广播沿），
+ * 终端域不重置。端口值不构成世代信号（`findAvailablePort` 重启常落回原端口）。
+ *
+ * 语义：模块私有 `currentCredentials` 的只读世代判据面——token 形态凭据返回其 token
+ * （`connect(url, credentials)` 每次传入时更新、内部退避重连复用 currentCredentials 时
+ * 保留上次值、skip 形态 / 未连接为 null）。空串 token 是合法值（强制握手探测语义），
+ * 原样返回不归一。世代判据只做相等性比较，非鉴权用途——鉴权走握手 {type:'auth'} 通道。
+ */
+export function getCurrentToken(): string | null {
+  return currentCredentials?.auth === 'token' ? currentCredentials.token : null
+}
+
 /** 主动断开（不触发重连） */
 export function disconnect(): void {
   // 递增 generation 使旧 WS 的回调失效

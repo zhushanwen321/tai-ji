@@ -58,7 +58,9 @@ export default {
     sendEmptyHint: 'Type something before sending',
     sendHint: 'Type and send',
     steerHint: 'Add to current task with ⏎ · Queue for next turn with Alt+⏎ · Shift+⏎ newline…',
-    inputHint: 'Describe what you want AI to do… (/ command · $ file · # session · {\'@\'} subagent · ! bash · Shift+⏎ newline · ↑/↓ history · Shift+Tab thinking · Ctrl+P/Ctrl+Shift+P model)',
+    // Cardification 2026-10-04: shortcut hints removed from placeholder — absolutely-positioned
+    // pseudo-element overflows the min-height box when wrapped narrow; triggers stay discoverable via popovers
+    inputHint: 'Describe what you want AI to do…',
     addContent: 'Add content (attachment / command)',
     attach: 'Attachment',
     image: 'Image',
@@ -299,8 +301,6 @@ export default {
   },
   sideDrawer: {
     title: 'Side drawer',
-    pin: 'Pin',
-    unpin: 'Unpin',
     close: 'Close',
     noTerminal: 'No terminal output',
     terminalHint: 'Real-time output appears after extension pushes terminal widget',
@@ -369,6 +369,9 @@ export default {
     bashTaskWriteFailed: 'Operation did not take effect (failed to write data); please retry',
   },
   browserPane: {
+    overlayTitle: 'Browser',
+    overlayClose: 'Close',
+    createFailed: 'Failed to open embedded browser',
     back: 'Back',
     forward: 'Forward',
     reload: 'Reload',
@@ -383,8 +386,6 @@ export default {
     guideHint: 'Links now open here, without leaving the app',
   },
   terminal: {
-    clear: 'Clear',
-    kill: 'Kill terminal process',
     sendToAI: 'Send to AI',
     writeRpcFailed: 'Failed to send terminal command: {error}',
     writeFailed: 'Terminal input may be lost: {message}',
@@ -392,6 +393,17 @@ export default {
     // RD-5#2: inline error bar for a failed PTY spawn (mirrors FileView error state)
     spawnFailed: 'Failed to start terminal: {error}',
     retry: 'Retry',
+    // dmg-r1-4: kill RPC channel-class failure (non unknown_terminal_id) — PTY still running, user-visible feedback
+    closeFailed: 'Failed to close terminal {message}; the instance is still running',
+    // Cardification 2026-10-04: toggle button moved to PanelHeader (old StatusBar slot retired)
+    toggle: 'Toggle terminal',
+    // terminal-multi-instance §3.1: instance switch bar (TerminalInstanceBar, single-row head)
+    instanceName: 'Terminal {seq}',
+    instanceCreate: 'New terminal',
+    instanceClose: 'Close terminal',
+    instanceCloseDisabled: 'Cannot close the last instance',
+    instanceEmpty: 'No terminal instances',
+    collapse: 'Collapse terminal area',
   },
   mermaid: {
     rendering: 'Rendering diagram…',
@@ -406,6 +418,25 @@ export default {
     close: 'Close',
     fullscreenTitle: 'Mermaid diagram fullscreen',
     fullscreenDesc: 'Use zoom controls to view Mermaid diagram details.',
+  },
+  // html-preview fence inline preview container (chat-html-support §6.3 D3, v16 form change; degrade reason codes map one-to-one)
+  htmlPreview: {
+    // Source | Preview toggle (default preview) + refresh + collapse/expand (height cap toggle)
+    tabPreview: 'Preview',
+    tabSource: 'Source',
+    refresh: 'Refresh',
+    expand: 'Expand',
+    collapse: 'Collapse',
+    checking: 'Checking…',
+    // Source-mode read failure (deps.readArtifact reject → error placeholder + retry)
+    sourceLoadFailed: 'Failed to load source',
+    // 路径非法：fence 内容 trim 后为空或含换行（单条路径语义）
+    invalidPath: 'Invalid path',
+    // 无法解析路径：相对路径 + resourceBaseDir / session cwd 皆缺（不静默猜基准）
+    unresolvedPath: 'Cannot resolve path',
+    notFound: 'File not found',
+    isDir: 'Path is a directory',
+    outOfWhitelist: 'Not previewable (outside the preview whitelist)',
   },
   modelSelect: {
     noModel: 'No models available. Import credentials or configure a provider in Settings first.',
@@ -529,6 +560,10 @@ export default {
     copyFilePath: 'Copy path',
     injectFileRef: 'Add file reference to composer',
     injectToNew: 'Reference in new chat',
+    // [chat-html-support §6.9 D9] Artifact-dir source read (allowlist channel) real-failure reasons (error copy before falling back to the cwd channel;
+    // out_of_whitelist excluded — that reason falls back to the cwd channel; the preview-allowlist notice lives in the inline container's panel.htmlPreview)
+    htmlReasonNotFound: 'File not found',
+    htmlReasonIsDir: 'Target is a directory',
   },
   panel: {
     sessionDead: 'Session process exited',

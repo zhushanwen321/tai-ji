@@ -559,13 +559,49 @@ function resetIncrementalCache(cache: IncrementalMarkdownCache, env?: MarkdownEn
   cache.envResourceBaseDir = env?.resourceBaseDir
 }
 
-/** 降级全量渲染：整段 content 作为 tailSegments，前缀缓存重置（可恢复——下一帧重走增量） */
+/** html-preview fence 首词判定（scan.openFence.lang 已取 info 首词——与 fence 规则同源比对） */
+function isHtmlPreviewFenceLang(lang: string): boolean {
+  return lang.toLowerCase() === 'html-preview'
+}
+
+/**
+ * fallback-full 路径的 html-preview 分流（chat-html-support §6.3 D3）：fallback 渲染整串
+ * 不经 buildTailSegments 占位分支——未闭合的 html-preview fence 会被 fence 规则落成半截
+ * 路径段（假降级占位）。定位依据：未闭合 fence 吞掉其后全部内容，故其段必是最后一个
+ * html-preview 段；finalize 时不替换（完整渲染）。
+ */
+function degradeOpenHtmlPreviewSegment(
+  tailSegments: MarkdownSegment[],
+  content: string,
+  openFence: BlockScan['openFence'],
+): MarkdownSegment[] {
+  if (!openFence || !isHtmlPreviewFenceLang(openFence.lang)) return tailSegments
+  let idx = -1
+  for (let i = tailSegments.length - 1; i >= 0; i--) {
+    if (tailSegments[i].type === 'html-preview') { idx = i; break }
+  }
+  if (idx === -1) return tailSegments
+  const bodyStart = content.indexOf('\n', openFence.offset)
+  const segs = [...tailSegments]
+  segs[idx] = {
+    type: 'streaming-fence',
+    content: bodyStart === -1 ? '' : content.slice(bodyStart + 1),
+    lang: openFence.lang === '' ? 'text' : openFence.lang,
+    mermaid: false,
+  }
+  return segs
+}
+
+/** 降级全量渲染：整段 content 作为 tailSegments，前缀缓存重置（可恢复——下一帧重走增量）；
+ *  opts 带入扫描与 finalize：非 finalize 时对未闭合 html-preview fence 做占位分流。 */
 async function renderFallbackFull(
   content: string,
   cache: IncrementalMarkdownCache | null,
   env?: MarkdownEnv,
+  opts?: { openFence: BlockScan['openFence']; finalize: boolean },
 ): Promise<IncrementalMarkdownResult> {
-  const tailSegments = await renderMarkdownSegments(content, env)
+  let tailSegments = await renderMarkdownSegments(content, env)
+  if (opts && !opts.finalize) tailSegments = degradeOpenHtmlPreviewSegment(tailSegments, content, opts.openFence)
   if (cache) resetIncrementalCache(cache, env)
   let localId = 0
   for (const s of tailSegments) s.segId = cache ? cache.nextSegId++ : localId++
@@ -720,17 +756,18 @@ export async function renderIncremental(
   }
 
   const scan = scanMarkdownBlocks(content)
-  if (scan.boundary === null) return renderFallbackFull(content, c, env)
+  const finalize = opts?.finalizeOpenFence === true
+  const fallbackOpts = { openFence: scan.openFence, finalize }
+  if (scan.boundary === null) return renderFallbackFull(content, c, env, fallbackOpts)
   const boundary = scan.boundary
 
   if (c && !isCacheStable(c, content, boundary, env)) {
-    return renderFallbackFull(content, c, env) // 前缀被改写 / 边界回退（单调性防御）
+    return renderFallbackFull(content, c, env, fallbackOpts) // 前缀被改写 / 边界回退（单调性防御）
   }
   if (c) await advancePrefixCache(content, boundary, c, env)
 
   const ids: SegIdSource = { cache: c, localId: 0 }
   const prefixSegments = await resolvePrefixSegments(content, boundary, ids, env)
-  const finalize = opts?.finalizeOpenFence === true
   const tailSegments = await buildTailSegments(content, boundary, scan, finalize, env, ids)
   return { prefixSegments, tailSegments, stableBoundary: boundary, mode: 'incremental' }
 }

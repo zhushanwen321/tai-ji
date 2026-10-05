@@ -1,17 +1,17 @@
 <!--
-  WorkflowVizOverlay —— workflow 实况 overlay 壳（workflow-visualization 设计 §3.1-1/2，
-  U4 单元）。SearchModal 范式参照新写（D8：它是搜索功能组件、无 slot，不做组件级
-  复用——只参照其「fixed 遮罩 + ESC keydown + autofocus」inline 形态与 close 后不再
-  调度查询的资源清理手法）；视觉遵守 DESIGN.md（浮层 radius-lg 12px、z-modal 1000、
-  状态色降噪色阶、焦点管理三要素：打开即 focus 面板 / 关闭归还触发元素 / Tab 首末
-  循环焦点陷阱防逃逸到遮罩后背景 UI）。
+  WorkflowVizOverlay —— workflow 内容浮层（workflow-visualization 设计 §3.1-1/2，
+  U4 单元；display-containers W2 起为 OverlayShell 内的内容层）。SearchModal 范式参照
+  新写（D8：它是搜索功能组件、无 slot，不做组件级复用——只参照其「close 后不再调度
+  查询」的资源清理手法）。
 
-  结构：header（run 名 + slug + 状态 pill + 已用时长 + args 摘要 + 右上关闭）+
-  左 DAG 栏（WorkflowVizDag 画布 / DAG 不可得降级列表）+ 右实况面板（slot——
-  U5 多级 tab 面板填充位）。
+  壳与内容分层（display-containers §6.5/§7.3）：面板 + 遮罩 + 两通道关闭（点遮罩 /
+  按钮）+ Tab 焦点陷阱注册 + IME 守卫 + 焦点契约（打开 focus 面板 / 关闭回 composer）
+  全部归 OverlayShell；本组件是挂进壳标题栏 slot（run 名 + slug + 状态 pill + 已用时长
+  + args 摘要）与 body（左 DAG 栏 + 右实况面板 slot——U5 多级 tab 面板填充位）的
+  workflow 内容层。
 
-  关闭三通道统一走同一 close()（设计 §3.1-2）：ESC（window keydown，open 时挂、
-  close 时卸 + IME 守卫）、右上关闭按钮、点遮罩（面板外区域 @click.self）。
+  **ESC 不在本壳链路监听**（display-containers §6.7 唯一属主 = 栈序编排器）：关闭通道
+  只有两路（点遮罩 / 右上关闭按钮，均走 OverlayShell 的 close 事件 → 本层 close() 上抛）。
 
   单例语义：壳自身无实例状态残留——「开新 run 切内容」由挂载方保持单实例并切换
   props（run/dag），切换 run 时 DAG 视口重置在画布组件内处理（D11③）。
@@ -29,27 +29,14 @@
   按 phase 分组只读列表）在本壳实现（左栏行为，数据 = run.agentCalls）。
 -->
 <template>
-  <div
-    v-if="open"
-    class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/80 backdrop-blur-[2px]"
-    data-testid="wfvz-overlay"
-    @click.self="close"
+  <OverlayShell
+    :open="open"
+    :label="t('panel.workflowViz.overlayTitle')"
+    :close-label="t('panel.workflowViz.overlayClose')"
+    @close="close"
   >
-    <section
-      ref="panelRef"
-      class="flex h-[88%] w-[92%] flex-col overflow-hidden rounded-lg border border-hairline bg-surface shadow-2 outline-none"
-      role="dialog"
-      aria-modal="true"
-      :aria-label="t('panel.workflowViz.overlayTitle')"
-      tabindex="-1"
-      data-testid="wfvz-overlay-panel"
-      @click.stop
-    >
-      <!-- header：run 标识 + 状态 pill + 时长 + args 摘要 + 关闭 -->
-      <header
-        class="flex flex-none items-center gap-2 border-b border-hairline px-3 py-2"
-        data-testid="wfvz-overlay-header"
-      >
+    <!-- 标题栏 slot：run 标识 + 状态 pill + 时长 + args 摘要（关闭按钮归壳，恒在最右） -->
+    <template #title>
         <Workflow class="size-[15px] shrink-0 text-neutral-dim" aria-hidden="true" />
         <span class="min-w-0 shrink-0 font-mono text-[length:var(--text-xs)] font-semibold text-neutral-fg">{{ run?.scriptName ?? '' }}</span>
         <span
@@ -84,18 +71,7 @@
           data-testid="wfvz-overlay-args"
           :title="run.argsSummary"
         >{{ run.argsSummary }}</span>
-        <span class="flex-1" />
-        <Button
-          variant="ghost"
-          size="icon"
-          class="size-[22px] shrink-0 text-neutral-dim"
-          :aria-label="t('panel.workflowViz.overlayClose')"
-          data-testid="wfvz-overlay-close"
-          @click="close"
-        >
-          <X class="size-3.5" aria-hidden="true" />
-        </Button>
-      </header>
+    </template>
 
       <!-- body：左 DAG 栏 + 右实况面板（slot） -->
       <div class="flex min-h-0 flex-1">
@@ -204,17 +180,17 @@
           <slot />
         </section>
       </div>
-    </section>
-  </div>
+  </OverlayShell>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X, Workflow } from '@lucide/vue'
+import { Workflow } from '@lucide/vue'
 import { WORKFLOW_RUN_OUTCOME_LABELS, type WorkflowAgentCall, type WorkflowDag, type WorkflowRunRecord } from '@taiji/shared'
 import { Button } from '@/components/ui/button'
 import { formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
+import OverlayShell from './OverlayShell.vue'
 import WorkflowVizDag from '../dag/WorkflowVizDag.vue'
 import type { WorkflowUnmatchedInstance } from '../blueprint-match'
 import type { WorkflowVizDagClickPayload, WorkflowVizDagNodeStatus } from '../dag/types'
@@ -245,7 +221,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  /** 三通道关闭统一出口（ESC / 关闭按钮 / 点遮罩都走 close）。 */
+  /** 关闭动作统一出口（右上关闭按钮 / 点遮罩走 close；ESC 由栈序编排器直接关 core 开合态，不经本壳）。 */
   close: []
   /** DAG 点击上抛转发（agent 节点 / pending 节点=phase 语义 / phase 分区）。 */
   select: [payload: WorkflowVizDagClickPayload]
@@ -255,81 +231,11 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-const panelRef = ref<HTMLElement | null>(null)
-/** 焦点归还锚（DESIGN §5.12：打开前聚焦元素，关闭时归还）。 */
-let lastFocused: Element | null = null
-
-// ── 关闭三通道（统一 close）──
+// ── 关闭通道（壳两通道：按钮/遮罩统一 close 事件上抛；ESC 归编排器）──
 
 function close(): void {
   emit('close')
 }
-
-/** ESC 关闭 + Tab 焦点陷阱（window keydown，open 时挂载；IME 组合态不拦截——SearchModal 同守卫）。 */
-function onWindowKeydown(e: KeyboardEvent): void {
-  if (e.isComposing) return
-  if (e.key === 'Escape') {
-    e.preventDefault()
-    close()
-    return
-  }
-  if (e.key === 'Tab') trapTab(e)
-}
-
-/** Tab 可聚焦元素查询（焦点陷阱的候选集）。 */
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-
-/**
- * Tab 焦点陷阱（DESIGN §5.12 焦点管理三要素之三）：焦点在面板内可聚焦元素首末循环，
- * 防 Tab 逃逸到被遮罩挡住的背景 UI（role=dialog + aria-modal 的 a11y 语义一致性）。
- */
-function trapTab(e: KeyboardEvent): void {
-  const panel = panelRef.value
-  if (!panel) return
-  const focusables = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
-  if (focusables.length === 0) {
-    e.preventDefault()
-    panel.focus()
-    return
-  }
-  const first = focusables[0]
-  const last = focusables[focusables.length - 1]
-  const active = document.activeElement
-  const inside = active instanceof Node && panel.contains(active)
-  if (e.shiftKey) {
-    if (!inside || active === first) {
-      e.preventDefault()
-      last.focus()
-    }
-  } else if (!inside || active === last) {
-    e.preventDefault()
-    first.focus()
-  }
-}
-
-/**
- * open 切换（SearchModal watch(immediate) 同型）：打开 → 记录焦点锚 + nextTick
- * focus 面板（安全默认焦点）；关闭 → 焦点归还 + 瞬态清理（本壳无定时器/在途查询
- * ——数据生命周期归 store，D11①在途丢弃在消费层）。
- */
-watch(() => props.open, (isOpen) => {
-  if (isOpen) {
-    lastFocused = document.activeElement
-    void nextTick(() => panelRef.value?.focus())
-    window.addEventListener('keydown', onWindowKeydown)
-  } else {
-    window.removeEventListener('keydown', onWindowKeydown)
-    if (lastFocused instanceof HTMLElement && typeof lastFocused.focus === 'function') {
-      lastFocused.focus()
-    }
-    lastFocused = null
-  }
-}, { immediate: true })
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', onWindowKeydown)
-})
 
 // ── header 状态 pill（文案单源：outcome 四值 = shared LABELS；interrupted 复用
 // tray「已中断（可续跑）」词源；running/done 缺省为本域文案）──

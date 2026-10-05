@@ -126,6 +126,79 @@ check_wasm_chunks() {
     return 0
 }
 
+# 内置 pi 扩展资产存活 + 发现面完整性（2026-10-03 B′ 事故护栏，三平台共用）
+#
+# 背景：打包态扩展是 esbuild 自包含 bundle（@zhushanwen/subagent-core 被 inline），
+# staged 布局无 node_modules ⇒ `require.resolve` 锚点必败。修复路径 = 回退到 staged
+# scope 根（`<Resources>/extensions/@zhushanwen`）作 npm 槽根，靠约定目录扫描命中
+# `pi-subagent-workflow/{workflows,agents}`（见 pi-host.stagedScopeRootFromModuleUrl）。
+# 因此产物里这两个目录必须真实存在，且不得被 electron-builder 滤镜静默剪掉任何文件
+# ——历史上 `!**/README.md` 的**递归**语义删掉了 workflows/README.md（当时是解析锚点
+# 本体），且“文件在包里=完整”的错觉让该失效静默一个版本。
+#
+# 断言三层：① 两目录存在；② 数量与源（packages/subagent-core）一致（不写死数字）；
+# ③ 存活 diff——pre-package staged 与 post-package 产物文件集做差，任何删除必须落在
+# 白名单（精确模式；包根文档严格限于 `./<scope>/<pkg>/README.md` 两级，不得写成递归），
+# 否则红。
+check_builtin_ext_assets() {
+    local staged_root="$1" packaged_root="$2"
+    local core_src="packages/subagent-core"
+    local failed=0
+
+    if [ ! -d "$staged_root" ]; then
+        echo -e "  ${YELLOW}⚠${NC} 跳过内置扩展资产校验（pre-package staged 目录不存在: ${staged_root}）"
+        return 0
+    fi
+    if [ ! -d "$packaged_root" ]; then
+        echo -e "  ${RED}✗${NC} 产物内置扩展目录缺失: ${packaged_root}"
+        return 1
+    fi
+
+    local sw="$packaged_root/pi-subagent-workflow"
+    local wf_src wf_pkg ag_src ag_pkg
+    wf_src=$(find "$core_src/workflows" -maxdepth 1 -name '*.js' ! -name '_*' 2>/dev/null | wc -l | tr -d ' ')
+    wf_pkg=$(find "$sw/workflows" -maxdepth 1 -name '*.js' ! -name '_*' 2>/dev/null | wc -l | tr -d ' ')
+    ag_src=$(find "$core_src/agents" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
+    ag_pkg=$(find "$sw/agents" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
+
+    # ① + ② 发现面资产存在且与源同量（口径：workflows 只算 .js 且排除 `_` 前缀；agents 算 .md）
+    if [ "$wf_src" -gt 0 ] && [ "$wf_pkg" = "$wf_src" ]; then
+        echo -e "  ${GREEN}✓${NC} 内置 workflow 资产齐备（$wf_pkg 个，与源同量）"
+    else
+        echo -e "  ${RED}✗${NC} 内置 workflow 资产缺量: 产物 ${wf_pkg} / 源 ${wf_src}（→ subagents 批量工具将报 'fan-out is not available'）"
+        failed=1
+    fi
+    if [ "$ag_src" -gt 0 ] && [ "$ag_pkg" = "$ag_src" ]; then
+        echo -e "  ${GREEN}✓${NC} 内置 agent 资产齐备（$ag_pkg 个，与源同量）"
+    else
+        echo -e "  ${RED}✗${NC} 内置 agent 资产缺量: 产物 ${ag_pkg} / 源 ${ag_src}（→ <available_subagents> 缺内置角色）"
+        failed=1
+    fi
+
+    # ③ 存活 diff：任何非白名单删除都是滤镜/拷贝回归
+    local tmp_pre tmp_post deleted
+    tmp_pre="$(mktemp)"
+    tmp_post="$(mktemp)"
+    (cd "$staged_root" && find . -type f) | sort > "$tmp_pre"
+    (cd "$packaged_root" && find . -type f) | sort > "$tmp_post"
+    # 白名单（精确模式）：包根文档仅 `./<pkg>/README.md|ARCHITECTURE.md` 一级（传入根已为
+    # scope 目录；**非递归**，不得写成 `**/`）+ sourcemap / 类型声明 / 测试基建 /
+    # tree-sitter 源码与 debug wasm（与 electron-builder.yml 排除面一致）
+    local allowed='^\./[^/]+/(README|ARCHITECTURE)\.md$|\.map$|\.d\.ts$|/__tests__/|\.test\.|/tree-sitter-bash/src/|/tree-sitter-bash/grammar\.js$|/web-tree-sitter/debug/'
+    deleted=$(comm -23 "$tmp_pre" "$tmp_post" | grep -vE "$allowed" || true)
+    rm -f "$tmp_pre" "$tmp_post"
+    if [ -n "$deleted" ]; then
+        echo -e "  ${RED}✗${NC} 产物删除了非白名单文件（滤镜/拷贝回归）:"
+        echo "$deleted" | sed 's/^/      /' >&2
+        failed=1
+    else
+        echo -e "  ${GREEN}✓${NC} 资产存活 diff 通过（无白名单外删除）"
+    fi
+
+    if [ "$failed" -ne 0 ]; then return 1; fi
+    return 0
+}
+
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}[Postbuild Validation]${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -339,6 +412,10 @@ if [ -d "$OUTPUT_DIR/mac-arm64" ]; then
         if ! check_staged_engines "$APP_PATH/Contents/Resources/engines"; then
             FAILED=1
         fi
+        # 内置 pi 扩展资产存活 + 发现面完整性（B′ 事故护栏）
+        if ! check_builtin_ext_assets "apps/electron/resources/extensions/@zhushanwen" "$BUILTIN_EXT_DIR"; then
+            FAILED=1
+        fi
         # 移动壳 dist（remote-access 静态托管资源）：packages/mobile-renderer 的 vite
         # web 构建（build 编排 build:mobile 先行产出）+ electron-builder extraResources
         # 复制 → <Resources>/mobile-dist。index.html 是 runtime 同源静态托管入口，
@@ -427,6 +504,10 @@ if [ -d "$OUTPUT_DIR/win-unpacked" ]; then
     fi
     # staged subagent 引擎 CLI（W9，三平台共用 check_staged_engines）
     if ! check_staged_engines "$WIN_RESOURCES/engines"; then
+        FAILED=1
+    fi
+    # 内置 pi 扩展资产存活 + 发现面完整性（B′ 事故护栏）
+    if ! check_builtin_ext_assets "apps/electron/resources/extensions/@zhushanwen" "$WIN_BUILTIN"; then
         FAILED=1
     fi
     # builtin taiji plugins（Windows 同 mac 校验：每插件 manifest main 入口存在）
@@ -521,6 +602,10 @@ if [ -d "$OUTPUT_DIR/linux-unpacked" ]; then
     fi
     # staged subagent 引擎 CLI（W9，三平台共用 check_staged_engines）
     if ! check_staged_engines "$LINUX_RESOURCES/engines"; then
+        FAILED=1
+    fi
+    # 内置 pi 扩展资产存活 + 发现面完整性（B′ 事故护栏）
+    if ! check_builtin_ext_assets "apps/electron/resources/extensions/@zhushanwen" "${LINUX_BUILTIN}"; then
         FAILED=1
     fi
 fi

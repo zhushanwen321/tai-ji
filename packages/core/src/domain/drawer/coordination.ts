@@ -1,66 +1,58 @@
 /**
- * drawer 协同层 —— 模块级公开 API（C2 契约）+ 瞬时参数。
+ * drawer 协同层 —— 模块级公开 API（C2 契约）+ 瞬时参数/选中态写入编排。
  *
  * 迁移自 renderer composables/features/useSideDrawer.ts 的协同部分（W1）。
  * [P4 s5 drawer-widget-removal] pendingOpen 机制（pendingOpenMap/setPendingOpenForSid/
  * getPendingOpenForSid/consumePendingOpen/openTasksDrawerOnFirstData）已随 tasks 域删除移除——
- * PluginViewContainer 承接后无消费方（tasks tab 已从 SideDrawerTab 联合删除）。
+ * PluginViewContainer 承接后无消费方（tasks tab 已从抽屉 tab 联合删除）。
  *
- * 瞬时参数（selectedCommandName/detailFilePath）：打开时的瞬时参数，
- * 消费后清空，不构成 session 级持久状态。
+ * 瞬时参数（selectedCommandName/detailFilePath）：打开时的瞬时参数，按会话分区
+ * （selection/transient.ts，display-containers §6.6②——消跨会话劫持），读取面在该文件。
  *
- * 分层（C4）：单向依赖 control.ts（drawerControl 原语 + getBoundSessionId + getDrawerControlState）。
- * control 不 import 本文件（防循环）。
+ * 选中态写入编排（display-containers §6.6① 五字段迁出后）：选中态落 selection/<域>
+ * 分区、切 tab + 开合落 control——跨两分区的编排收口在本层（control 保持纯控制态，C4）。
+ * 各选中态写入面（setSubagentView / setWorkflowView / setBtwView / setBackgroundTaskView）
+ * 状态本体在 selection/<域>，经 drawer barrel 单一出口（本文件不重复导出，防 export * 同名冲突）。
+ *
+ * 分层（C4）：单向依赖 control.ts（drawerControl 原语 + getBoundSessionId + getDrawerControlState）
+ * 与 selection/（各内容域分区 + 瞬时参数）。control/selection 不 import 本文件（防循环）。
  */
 import { ref } from 'vue'
 import type { WorkflowRunRecord } from '@taiji/shared'
 import { drawerControl, getDrawerControlState, _resetDrawerControlForTest } from './control'
-import type { SideDrawerTab, OpenDrawerOptions, OpenSubagentOptions } from './types'
-
-// ── 不分区的瞬时参数（模块级单例，消费后清空）──
-// 供 renderer 兼容层 re-export（useSideDrawer() 返回形状含这两个 ref）。
-/** Doc tab 当前展示的命令名（点击用户气泡 slash chip 时设置） */
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：drawer doc tab 瞬时参数（消费后清空）
-export const selectedCommandName = ref<string | null>(null)
-/**
- * Detail tab 打开时立即展示的文件路径（点击即看 diff）。
- * 由变更集卡等非文件树入口设置；useDetailPane watch 它并强制 diff 模式。
- * 用完即清空（消费后置 null），避免残留导致下次打开 detail tab 被旧值劫持。
- */
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：drawer detail tab 瞬时参数（消费后清空）
-export const detailFilePath = ref<string | null>(null)
+import { setSubagentView } from './selection/subagent'
+import { setWorkflowView } from './selection/workflow'
+import { setBackgroundTaskView } from './selection/bash-task'
+import { selectedCommandName, detailFilePath } from './selection/transient'
+import { _resetSelectionForTest } from './selection'
+import type { RightDrawerTab, OpenDrawerOptions, OpenSubagentOptions } from './types'
 
 // ── 模块级公开 API（C2）──
 
 /**
  * 打开抽屉，可指定初始 tab + Doc tab 的选中命令 / Detail tab 的文件路径。
- * 瞬时参数写入对应 ref（消费后清空）。
+ * 瞬时参数写入当前会话分区（selection/transient.ts；undefined 字段不写——缺省不覆盖已有值）。
  */
-export function openDrawerTab(tab?: SideDrawerTab, opts?: OpenDrawerOptions): void {
+export function openDrawerTab(tab?: RightDrawerTab, opts?: OpenDrawerOptions): void {
   if (opts?.commandName !== undefined) selectedCommandName.value = opts.commandName
   if (opts?.filePath !== undefined) detailFilePath.value = opts.filePath
   drawerControl.open(tab)
 }
 
-/** 关闭抽屉（钉住态亦可手动关闭） */
+/** 关闭抽屉 */
 export function closeDrawer(): void {
   drawerControl.close()
 }
 
 /** 切换开关；从关到开可指定 tab */
-export function toggleDrawer(tab?: SideDrawerTab): void {
+export function toggleDrawer(tab?: RightDrawerTab): void {
   if (getDrawerControlState().isOpen) closeDrawer()
   else openDrawerTab(tab)
 }
 
 /** 切换 tab（抽屉关闭时仅改 activeTab，不自动打开） */
-export function setDrawerTab(tab: SideDrawerTab): void {
+export function setDrawerTab(tab: RightDrawerTab): void {
   drawerControl.setTab(tab)
-}
-
-/** 切换钉住态（仅当前分区） */
-export function toggleDrawerDock(): void {
-  drawerControl.toggleDock()
 }
 
 /**
@@ -68,9 +60,20 @@ export function toggleDrawerDock(): void {
  * virtualId 由调用方（chat subagent 块 / composer 任务托盘 / workflow WorkflowTab）用
  * subagentVirtualId(mainSid, subId) 或 agentCallVirtualId(acsId) 算好传入；core 不感知 id 结构。
  * enteredFrom 驱动 SubagentTab 返回按钮显隐（D4）：'workflow'=从 workflow tab 进入显返回；'chat'=无返回。
+ * 选中态（selectedSubagentId + enteredFrom）落 subagent 内容域分区（§6.6①），切 tab + 开 drawer 落控制态。
  */
 export function openSubagent(opts: OpenSubagentOptions): void {
-  drawerControl.setSubagentView(opts.virtualId, opts.enteredFrom)
+  setSubagentView(opts.virtualId, opts.enteredFrom)
+  drawerControl.open('subagent')
+}
+
+/**
+ * 设置 bashTask tab 当前任务（undefined=清选中）+ 切 tab + 开 drawer（D5④ 行点击归宿）。
+ * 选中态落 bashTask 内容域分区（§6.6①，selection/bash-task.ts）。
+ */
+export function selectBackgroundTask(taskId: string | undefined): void {
+  setBackgroundTaskView(taskId)
+  drawerControl.open('bashTask')
 }
 
 // ── workflow overlay 桥接（workflow-visualization U6/D1 入口语义分立）──────────
@@ -124,13 +127,15 @@ export function openWorkflow(workflowName?: string, opts?: { slug?: string; sess
  * 打开 drawer workflow tab，展示指定 workflow 的 agent call 列表（显式 drawer 语义，
  * D1：现 openWorkflow 实现的移位保留）。
  *
- * 形参双语义与 WorkflowTab 兼收解析现状一致：传 runId（精确命中）或脚本名（取最新）；
+ * 形参双语义与 WorkflowTab 兼容解析现状一致：传 runId（精确命中）或脚本名（取最新）；
  * 空串时仅切到 workflow tab（不记录选中名，显空态或全部）。消费方 = D10 回落链
  * （Guard → openDrawerTab('workflow') + 本函数注入选中态）、SubagentTab 返回按钮
  * （返回 drawer workflow tab）、block 反查未命中的兜底归宿。
+ * 选中态落 workflow 内容域分区（§6.6①），切 tab + 开 drawer 落控制态。
  */
 export function openWorkflowInDrawer(workflowName?: string): void {
-  drawerControl.setWorkflowView(workflowName ?? '')
+  setWorkflowView(workflowName ?? '')
+  drawerControl.open('workflow')
 }
 
 /**
@@ -142,11 +147,10 @@ export function lookupWorkflowRun(sessionId: string, scriptName: string, slug?: 
 }
 
 /**
- * 重置 drawer 全部状态（测试隔离用）：control 分区 + 瞬时参数。
+ * 重置 drawer 全部状态（测试隔离用）：control 分区 + 选中态/瞬时参数分区。
  * 生产代码禁止调用。renderer 兼容层 resetSideDrawer() 委托本函数。
  */
 export function _resetDrawerForTest(): void {
   _resetDrawerControlForTest()
-  selectedCommandName.value = null
-  detailFilePath.value = null
+  _resetSelectionForTest()
 }

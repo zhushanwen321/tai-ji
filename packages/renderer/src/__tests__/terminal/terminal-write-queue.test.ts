@@ -1,13 +1,14 @@
 // @vitest-environment node
 
 /**
- * terminal-write-queue store 测试（Phase 5 V5.1）。
+ * terminal-write-queue store 测试（Phase 5 联动 2 / 多实例 u2）。
  *
- * 验证联动 2 的写队列 + ptyAlive 状态管理：
+ * 验证写队列 + ptyAlive 状态管理（per-terminalId 分键）+ 关闭沿入队守卫 + 清理扇出：
  * - enqueueWrite PTY 未活 → 入队（不立即 write）
- * - enqueueWrite PTY 已活 → 立即 write
- * - markAlive → flush 队列
- * - markExited → ptyAlive=false
+ * - enqueueWrite PTY 已活 → 立即 write（命令经编号解析会话段后调 terminalApi.write）
+ * - markAlive → flush 队列；markExited → ptyAlive=false
+ * - 未注册实例入队被拒（关闭沿守卫，不建档）
+ * - removeInstance / removeSession（精确前缀）/ clearAll 清理 + dropToastTimers
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/terminal/terminal-write-queue.test.ts
  */
@@ -24,12 +25,24 @@ vi.mock('@taiji/core/transport/api/domains/terminal', () => ({
 import { useTerminalWriteQueueStore } from '@/stores/terminal-write-queue'
 import { useToast } from '@/composables/useToast'
 import { MAX_PENDING_WRITES } from '@taiji/core/domain/drawer'
+import {
+  __resetTerminalInstanceRegistryForTest,
+  registerInstance,
+} from '@/composables/features/terminal/terminal-instance-registry'
+
+const T1 = 'term:s1:1'
+const T2 = 'term:s1:2'
+const T_OTHER = 'term:s2:1'
 
 beforeEach(() => {
   setActivePinia(createPinia())
   terminalApiMock.write.mockClear()
-  // toast 模块级单例状态隔离（跨用例残留清理）
   useToast().toasts.value = []
+  __resetTerminalInstanceRegistryForTest()
+  // 已建档（关注册成员资格）——入队守卫放行；测试按需再注册
+  registerInstance(T1, true)
+  registerInstance(T2, true)
+  registerInstance(T_OTHER, true)
 })
 
 afterEach(() => {
@@ -37,70 +50,114 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('terminal-write-queue store（Phase 5 联动 2）', () => {
+describe('terminal-write-queue store（多实例）', () => {
   it('WQ-1: enqueueWrite PTY 未活 → 入队（不立即 write）', () => {
     const store = useTerminalWriteQueueStore()
-    store.enqueueWrite('s1', 'npm test')
+    store.enqueueWrite(T1, 'npm test')
     expect(terminalApiMock.write).not.toHaveBeenCalled()
-    expect(store.isPtyAlive('s1')).toBe(false)
+    expect(store.isPtyAlive(T1)).toBe(false)
+    expect(store.pendingCountOf(T1)).toBe(1)
   })
 
-  it('WQ-2: enqueueWrite PTY 已活 → 立即 write', () => {
+  it('WQ-2: enqueueWrite PTY 已活 → 立即 write（编号解析会话段）', () => {
     const store = useTerminalWriteQueueStore()
-    store.markAlive('s1') // 先标记存活
+    store.markAlive(T1) // 先标记存活
     terminalApiMock.write.mockClear()
-    store.enqueueWrite('s1', 'echo done')
-    expect(terminalApiMock.write).toHaveBeenCalledWith('s1', 'echo done')
+    store.enqueueWrite(T1, 'echo done')
+    expect(terminalApiMock.write).toHaveBeenCalledWith('s1', T1, 'echo done')
   })
 
   it('WQ-3: markAlive flush 待写队列（按入队顺序）', () => {
     const store = useTerminalWriteQueueStore()
-    store.enqueueWrite('s1', 'cmd1')
-    store.enqueueWrite('s1', 'cmd2')
+    store.enqueueWrite(T1, 'cmd1')
+    store.enqueueWrite(T1, 'cmd2')
     expect(terminalApiMock.write).not.toHaveBeenCalled()
-    store.markAlive('s1')
+    store.markAlive(T1)
     expect(terminalApiMock.write).toHaveBeenCalledTimes(2)
-    expect(terminalApiMock.write).toHaveBeenNthCalledWith(1, 's1', 'cmd1')
-    expect(terminalApiMock.write).toHaveBeenNthCalledWith(2, 's1', 'cmd2')
+    expect(terminalApiMock.write).toHaveBeenNthCalledWith(1, 's1', T1, 'cmd1')
+    expect(terminalApiMock.write).toHaveBeenNthCalledWith(2, 's1', T1, 'cmd2')
   })
 
   it('WQ-4: markAlive 后再 enqueueWrite 立即 write（队列已空）', () => {
     const store = useTerminalWriteQueueStore()
-    store.markAlive('s1')
+    store.markAlive(T1)
     terminalApiMock.write.mockClear()
-    store.enqueueWrite('s1', 'late-cmd')
-    expect(terminalApiMock.write).toHaveBeenCalledWith('s1', 'late-cmd')
+    store.enqueueWrite(T1, 'late-cmd')
+    expect(terminalApiMock.write).toHaveBeenCalledWith('s1', T1, 'late-cmd')
   })
 
   it('WQ-5: markExited 置 ptyAlive=false（后续 enqueueWrite 入队）', () => {
     const store = useTerminalWriteQueueStore()
-    store.markAlive('s1')
-    expect(store.isPtyAlive('s1')).toBe(true)
-    store.markExited('s1')
-    expect(store.isPtyAlive('s1')).toBe(false)
+    store.markAlive(T1)
+    expect(store.isPtyAlive(T1)).toBe(true)
+    store.markExited(T1)
+    expect(store.isPtyAlive(T1)).toBe(false)
     terminalApiMock.write.mockClear()
-    store.enqueueWrite('s1', 'after-exit')
-    expect(terminalApiMock.write).not.toHaveBeenCalled() // 入队，不立即 write
+    store.enqueueWrite(T1, 'after-exit')
+    expect(terminalApiMock.write).not.toHaveBeenCalled()
   })
 
-  it('WQ-6: 多 session 隔离（s1/s2 独立队列）', () => {
+  it('WQ-6: 多实例隔离（同会话两实例 / 跨会话独立队列）', () => {
     const store = useTerminalWriteQueueStore()
-    store.enqueueWrite('s1', 'cmd-s1')
-    store.enqueueWrite('s2', 'cmd-s2')
-    store.markAlive('s1')
-    // s1 flush 了，s2 还在队列（未 alive）
+    store.enqueueWrite(T1, 'cmd-t1')
+    store.enqueueWrite(T2, 'cmd-t2')
+    store.enqueueWrite(T_OTHER, 'cmd-other')
+    store.markAlive(T1)
     expect(terminalApiMock.write).toHaveBeenCalledTimes(1)
-    expect(terminalApiMock.write).toHaveBeenCalledWith('s1', 'cmd-s1')
+    expect(terminalApiMock.write).toHaveBeenCalledWith('s1', T1, 'cmd-t1')
     terminalApiMock.write.mockClear()
-    store.markAlive('s2')
-    expect(terminalApiMock.write).toHaveBeenCalledWith('s2', 'cmd-s2')
+    store.markAlive(T_OTHER)
+    expect(terminalApiMock.write).toHaveBeenCalledWith('s2', T_OTHER, 'cmd-other')
   })
 
-  it('WQ-7: removeSession 清理状态', () => {
+  it('WQ-7: removeInstance 清理实例态（返回滞留数）', () => {
     const store = useTerminalWriteQueueStore()
-    store.markAlive('s1')
-    store.removeSession('s1')
-    expect(store.isPtyAlive('s1')).toBe(false)
+    store.enqueueWrite(T1, 'pending')
+    expect(store.removeInstance(T1)).toBe(1)
+    expect(store.isPtyAlive(T1)).toBe(false)
+    expect(store.pendingCountOf(T1)).toBe(0)
+  })
+
+  // ── 关闭沿入队守卫（注册成员资格，与存活镜像解耦）───────────────────────
+
+  it('MI-1: 未注册实例入队被拒（不建档、不 write）+「输入可能丢失」提示一次', () => {
+    const store = useTerminalWriteQueueStore()
+    store.enqueueWrite('term:s1:9', 'to-closed')
+    expect(store.pendingCountOf('term:s1:9')).toBe(0)
+    expect(terminalApiMock.write).not.toHaveBeenCalled()
+    // 丢弃必显形（设计 §5 u2）：复用「输入可能丢失」提示通道，含实例显示名
+    const warnings = useToast().toasts.value.filter((x) => x.type === 'warning')
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]!.message).toContain('终端 9')
+  })
+
+  it('MI-2: 已注册未 alive → 入 pendingWrites，markAlive 后正常 flush（守卫与镜像解耦）', () => {
+    const store = useTerminalWriteQueueStore()
+    store.enqueueWrite(T1, 'before-alive')
+    expect(store.pendingCountOf(T1)).toBe(1)
+    expect(terminalApiMock.write).not.toHaveBeenCalled()
+    store.markAlive(T1)
+    expect(terminalApiMock.write).toHaveBeenCalledWith('s1', T1, 'before-alive')
+  })
+
+  it('MI-3: removeSession 精确前缀清该会话全部实例态（含他会话不受影响）', () => {
+    const store = useTerminalWriteQueueStore()
+    store.enqueueWrite(T1, 'a1')
+    store.enqueueWrite(T2, 'a2')
+    store.enqueueWrite(T_OTHER, 'b1')
+    expect(store.removeSession('s1')).toBe(2)
+    expect(store.pendingCountOf(T1)).toBe(0)
+    expect(store.pendingCountOf(T2)).toBe(0)
+    expect(store.pendingCountOf(T_OTHER)).toBe(1)
+  })
+
+  it('MI-4: clearAll 清空全部实例态（世代变更重置）', () => {
+    const store = useTerminalWriteQueueStore()
+    store.enqueueWrite(T1, 'a1')
+    store.enqueueWrite(T_OTHER, 'b1')
+    expect(store.clearAll()).toBe(2)
+    expect(store.pendingCountOf(T1)).toBe(0)
+    expect(store.pendingCountOf(T_OTHER)).toBe(0)
   })
 
   // ── RD-3#5：write 失败 catch + drop 计数显形（M2 renderer 端） ─────────
@@ -109,9 +166,8 @@ describe('terminal-write-queue store（Phase 5 联动 2）', () => {
     terminalApiMock.write.mockRejectedValueOnce(new Error('ws closed'))
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const store = useTerminalWriteQueueStore()
-    store.markAlive('s1')
-    store.enqueueWrite('s1', 'boom')
-    // 等 catch 微任务链（write reject → .catch → toast）落地
+    store.markAlive(T1)
+    store.enqueueWrite(T1, 'boom')
     await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled())
     const { toasts } = useToast()
     expect(toasts.value).toHaveLength(1)
@@ -124,11 +180,9 @@ describe('terminal-write-queue store（Phase 5 联动 2）', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const store = useTerminalWriteQueueStore()
     for (let i = 0; i < MAX_PENDING_WRITES + 3; i++) {
-      store.enqueueWrite('s1', `cmd-${i}`)
+      store.enqueueWrite(T1, `cmd-${i}`)
     }
-    // 每次丢弃都留痕（console.warn）
     expect(warnSpy).toHaveBeenCalledTimes(3)
-    // 聚合窗口内不发 toast（防连发刷屏）
     expect(useToast().toasts.value).toHaveLength(0)
     vi.advanceTimersByTime(1000)
     const { toasts } = useToast()
@@ -137,15 +191,29 @@ describe('terminal-write-queue store（Phase 5 联动 2）', () => {
     expect(toasts.value[0]!.message).toContain('3')
   })
 
-  it('RD3-5-R3: removeSession 清理未触发的聚合 toast timer', async () => {
+  it('RD3-5-R3: removeInstance 清理未触发的聚合 toast timer', async () => {
     vi.useFakeTimers()
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const store = useTerminalWriteQueueStore()
     for (let i = 0; i < MAX_PENDING_WRITES + 1; i++) {
-      store.enqueueWrite('s1', `cmd-${i}`)
+      store.enqueueWrite(T1, `cmd-${i}`)
     }
-    store.removeSession('s1')
+    store.removeInstance(T1)
     vi.advanceTimersByTime(5000)
-    expect(useToast().toasts.value).toHaveLength(0) // timer 已随 session 清理，不再 toast
+    expect(useToast().toasts.value).toHaveLength(0)
+  })
+
+  it('RD3-5-R4: removeSession 按精确前缀清理聚合 toast timer（他会话 timer 保留）', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const store = useTerminalWriteQueueStore()
+    for (let i = 0; i < MAX_PENDING_WRITES + 1; i++) store.enqueueWrite(T1, `cmd-${i}`)
+    for (let i = 0; i < MAX_PENDING_WRITES + 1; i++) store.enqueueWrite(T_OTHER, `other-${i}`)
+    store.removeSession('s1')
+    vi.advanceTimersByTime(1000)
+    // 仅 s2 的聚合 toast 触发（s1 timer 已随 removeSession 清理）
+    const { toasts } = useToast()
+    expect(toasts.value).toHaveLength(1)
+    expect(toasts.value[0]!.message).toContain('1')
   })
 })

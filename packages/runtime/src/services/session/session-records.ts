@@ -184,13 +184,42 @@ type EntriesSinceResult = { data?: { entries?: unknown[]; leafId?: string | null
 type RecordRefreshTrigger = 'invalidate' | 'reconcile-settled' | 'reconcile-timer'
 
 /**
- * [RT-4#8] getSubagents/getWorkflows 的读面结果：records + oversize 降级标志。
+ * [可观测性 2026-10-02] 发布归因（「record frames published」观测行 trigger 字段的值域）：
+ * entry 三腿（RecordRefreshTrigger）+ event-projection = 事件源 tailer 驱动的发布腿。
+ * 事故背景（workflow 详情空窗诊断）：tailer 路径发布此前零日志、且与 entry 路径共享
+ * 送达水位——「tailer 没 fold」与「fold 了但信号没到 GUI」两类故障在事后日志里不可分；
+ * 发布归因 + fold 证据（workflowFolds）落观测行后两态在观测面直接分形。
+ */
+type RecordPublishSource = RecordRefreshTrigger | 'event-projection'
+
+/**
+ * [可观测性 2026-10-02] 单个 run 的 fold 证据快照（workflowUpdate 信号涉及 run 逐 run
+ * 一项，JSON 观测行载荷）。fold: 'absent' = runFolds 无该 run 的 checkpoint（tailer
+ * 从未读到该 run 的 journal）——与 asks/lastSeq 一起区分「没读到」与「读到但停在旧帧」。
+ */
+interface WorkflowFoldEvidenceView {
+  fold: 'absent' | 'present'
+  lastSeq?: number
+  lifecycle?: string
+  asks?: number
+  phases?: number
+  runSettled?: boolean
+}
+
+/**
+ * [RT-4#8] getSubagents/getWorkflows 的读面结果：records + oversize 降级标志 +
+ * found 会话存在性标志。
  * oversize=true（session 文件 >32MB 预检阈值）时 records 恒空数组——「列表不可用」
  * 与「无记录」显式分形，transport reply 透传 oversize 供 renderer 面板显示降级提示。
+ * [待裁决项 4] found=false = 主会话文件不在册（pi 首条消息前延迟落盘窗口 / 扫描
+ * 竞态）——「读不到会话」与「会话存在但列表为空」显式分形：renderer 拿到 found=false
+ * 保留既有分区不覆盖（空列表歧义的根治，替代消费侧连续空计数补救）；found=true 的
+ * 空列表是真实空（直接覆盖）。
  */
 export interface OversizeAwareResult<T> {
   records: T[]
   oversize: boolean
+  found: boolean
 }
 
 /** workflow 增量信号形状（session.workflowUpdate payload.update；status / reason / 步骤数 / stepStatuses（status@attempts）/ phasesFingerprint 任一变化一条）。 */
@@ -508,10 +537,34 @@ export class SessionRecords {
    * 文件目录，run journal 源错位（与壳侧 slug 锚 process.cwd() 而非 session cwd 的
    * 限制同族，边缘场景登记不改；根治属 core 布局单源）。
    * 会话 meta 不可得（pi 延迟写入 / 测试窄 mock）→ 无 tailer 的 entry-only
-   * 降级投影。
+   * 降级投影。[降级闩死修复 2026-10-02] 降级不再终身：早退分支内联升级腿
+   * （upgradeProjectionEventSources）——meta 可得后补建 tailer，fold 通道自愈。
    */
-  private ensureProjection(sessionId: string, cache: RecordEntriesCache): SessionEventProjection {
-    if (cache.projection !== null) return cache.projection
+  private ensureProjection(
+    sessionId: string,
+    cache: RecordEntriesCache,
+    opts?: { suppressUpgradeChange?: boolean },
+  ): SessionEventProjection {
+    const existing = cache.projection
+    if (existing !== null) {
+      // [降级闩死修复 2026-10-02] 事件源迟到升级：创建时 meta 不可得（pi flush 前
+      // 窗口 / 磁盘扫描竞态）建出的 entry-only 降级投影此前被本早退永久复用——fold
+      // 通道对该 session 终身死亡（「icon 无 agent」形态的构造性成因之一）。meta
+      // 可得后补建 tailer（幂等：全接线源零成本早退）；补建的 rescan 经 fireChange
+      // → onEventProjectionChange 走既有发布腿，无需额外同步。
+      // [升级腿中间帧抑制] suppressUpgradeChange = applyRecordEntries 编排传入：升级腿
+      // 的 rescan（attachEventSources，全同步）经 fireChange 即时发布——此刻本批 entry
+      // 尚未应用，会发一帧「只有 fold、缺 entry 批」的中间态 + 随后调用方的纠正帧。
+      // 抑制后最终态由 applyRecordEntries 尾部 publishRecordChanges 的水位 diff 统一
+      // 补发（两腿共用同一发布门与送达水位，抑制不丢数据）。其余调用点（读 RPC 路径）
+      // 保持既有即时发布腿。
+      if (opts?.suppressUpgradeChange === true) {
+        existing.withChangeSuppressed(() => this.upgradeProjectionEventSources(sessionId, existing))
+      } else {
+        this.upgradeProjectionEventSources(sessionId, existing)
+      }
+      return existing
+    }
     const meta = this.deps.sessionStore
       .scanSessions({ force: true })
       .find((s) => s.id === sessionId)
@@ -538,16 +591,38 @@ export class SessionRecords {
   }
 
   /**
+   * [降级闩死修复 2026-10-02] 降级投影升级腿（ensureProjection 早退分支内联调用）：
+   * 事件源全接线时零成本早退；缺席时重扫 meta，可得则补建 tailer（目录推导与构造
+   * 路径同源）。meta 仍不可得 → 本轮跳过（下次 ensureProjection 再试，不设定时器
+   * ——重试由既有读/写触点驱动）。
+   */
+  private upgradeProjectionEventSources(sessionId: string, projection: SessionEventProjection): void {
+    if (!projection.needsEventSources()) return
+    const meta = this.deps.sessionStore
+      .scanSessions({ force: true })
+      .find((s) => s.id === sessionId)
+    if (meta === undefined) return
+    const cwd = meta.cwd
+    projection.attachEventSources({
+      recordsDir: typeof cwd === 'string' ? getSubagentRecordsDir(getPiAgentDir(), cwd) : undefined,
+      runJournalDir: join(dirname(meta.filePath), 'workflow-state'),
+    })
+  }
+
+  /**
    * [W1 / D6] 事件源驱动的发布腿（信号形态不动，驱动源换投影变更）：tail 事件
    * → 投影重算 → 水位 diff → 按差异发布。与 entry 批路径（applyRecordEntries 统一
    * 发布）共用同一 publishRecordChanges 与送达水位，发布门单点。
+   *
+   * [可观测性 2026-10-02] 发布归因 source='event-projection'（与 entry 三腿对称落
+   * 观测行；此前本腿发布零日志，空窗类事故无法与「tailer 没 fold」分形）。
    */
   private onEventProjectionChange(sessionId: string): void {
     const cache = this.recordEntriesCaches.get(sessionId)
     if (!cache || cache.projection === null) return
     this.syncCacheFromProjection(cache, cache.projection)
     if (!this.deps.hasSession(sessionId)) return // 已销毁：不 publish（与 entry 路径同守卫）
-    this.publishRecordChanges(cache, sessionId)
+    this.publishRecordChanges(cache, sessionId, 'event-projection')
     this.syncReconcileTimer()
   }
 
@@ -604,7 +679,9 @@ export class SessionRecords {
             console.warn(`[session-service] refresh record entries via getEntries failed for ${sessionId}: ${toErrorMessage(e)}`)
             return
           }
-          const frames = this.applyRecordEntries(cache, fetched.entries, sessionId, fetched.fullRebuild, fetched.leafId)
+          // [可观测性 2026-10-02] 发布观测收口 publishRecordChanges 单点（trigger +
+          // startedAt 透传归因与耗时；entry 三腿与 event-projection 腿同字段对称）。
+          this.applyRecordEntries(cache, fetched.entries, sessionId, trigger, fetched.fullRebuild, fetched.leafId, startedAt)
           if (fetched.leafId !== undefined) cache.cursor = fetched.leafId
           // [message-revoke U6d] 撤回失效在途命中：本轮是失效前捕获的增量轮（cursor 已被
           // 上方回写复活）——作废本轮结果，重跑全量（flag 在全量轮入口清除；两轮上限恰好
@@ -613,16 +690,6 @@ export class SessionRecords {
           // [pull-push W0] 首拉未决解除（拉取 + merge + 发布判定已完成一轮；发布与否随
           // 水位 diff——零帧轮同样解除，缓存腿健康即为目标状态）。
           cache.awaitingFirstPull = false
-          // [pull-push W0] 发布观测：水位门后有帧才落（稳态零帧零日志——S5 无噪声锚）；
-          // reconcile 触发的补发轮即 S5「缓存兜底」可检索事件（域键=frames、原因=trigger、耗时=elapsedMs）。
-          if (frames.length > 0) {
-            logger.info('[session-records] record frames published', {
-              sessionId,
-              trigger,
-              frames,
-              elapsedMs: Date.now() - startedAt,
-            })
-          }
           return
         }
       } finally {
@@ -760,17 +827,21 @@ export class SessionRecords {
     cache: RecordEntriesCache,
     entries: unknown[],
     sessionId: string,
+    trigger: RecordRefreshTrigger,
     isFullRebuild: boolean,
-    leafId?: string,
-  ): string[] {
+    leafId: string | undefined,
+    roundStartedAt: number,
+  ): void {
     // [W1 / D6] entry 批换投影入口：v1 快照扫描 + v2 条目分类 + 事件 fold 双源
     // 单点合并（事件源胜出仲裁）全在投影内完成；步骤视图合并的输入源也从本处的
     // 两缓存喂入退役（投影合并快照内跑 mergeWorkflowStepRecords——W0 输入换源）。
     // 已销毁 session 也完成投影 merge，只拦发布（D3 登记卫生债，水位机制下无害：
     // publish 未发生 → 水位滞留 → session 恢复后下轮触发补发）。
-    // [pull-push W0] plan 家族不进投影（单例状态直扫直并，见下方 mergePlanState）；
-    // 返回本轮实际发布的帧类型序列（观测事件域键载荷，空数组 = 零帧轮）。
-    const projection = this.ensureProjection(sessionId, cache)
+    // [pull-push W0] plan 家族不进投影（单例状态直扫直并，见下方 mergePlanState）。
+    // [可观测性 2026-10-02] 发布观测归 publishRecordChanges 单点（trigger/耗时透传归因）。
+    // suppressUpgradeChange：既有降级投影的升级腿不在本批 entry 应用前发布中间帧（见
+    // ensureProjection 同名注释），最终态由下方 publishRecordChanges 水位 diff 统一补发。
+    const projection = this.ensureProjection(sessionId, cache, { suppressUpgradeChange: true })
     projection.applyEntryBatch(entries, { fullRebuild: isFullRebuild })
     this.syncCacheFromProjection(cache, projection)
     // [message-revoke U6d] G2 二分在此落点：plan 腿（随树）仅全量重建传 leafId 活跃路径
@@ -780,8 +851,8 @@ export class SessionRecords {
     // 会在窗口越界误裁（U6a 调用点契约同款）。
     mergePlanState(cache, scanPlanStateEntries(entries, isFullRebuild ? leafId : undefined), isFullRebuild)
 
-    if (!this.deps.hasSession(sessionId)) return [] // session 已销毁：不 publish（防 bus 重建已 clearSession 的 entry）
-    return this.publishRecordChanges(cache, sessionId)
+    if (!this.deps.hasSession(sessionId)) return // session 已销毁：不 publish（防 bus 重建已 clearSession 的 entry）
+    this.publishRecordChanges(cache, sessionId, trigger, roundStartedAt)
   }
 
   /**
@@ -794,15 +865,25 @@ export class SessionRecords {
    * 空投照样完成调用，u0 校准维持「调用完成即推进」，不因 bus 内部跳下移）。bus 未注入
    * → publish 短路且水位滞留（真实可观测的滞留形态），等对账腿补发。
    *
-   * [pull-push W0] 返回本轮实际发布的帧类型序列（观测事件的域键载荷；空数组 = 零帧轮，
-   * 调用方不落观测日志）。bus 未注入短路时 warn 显形（此前静默 return 零日志——R11
+   * [pull-push W0] 返回本轮实际发布的帧类型序列 + workflowUpdate 信号涉及 runId 集
+   * （消费方观测面）。bus 未注入短路时 warn 显形（此前静默 return 零日志——R11
    * 排障盲点：水位滞留无痕）。
+   *
+   * [可观测性 2026-10-02] 发布观测收口本方法单点：水位门后有帧落一行 info（trigger =
+   * 发布归因：entry 三腿 / event-projection；workflowFolds = fold 证据）。此前仅 entry
+   * 路径落日志、tailer 路径静默且两路径共享水位——「fold 没更新」与「更新了但 GUI
+   * 没刷」事后不可分（workflow 详情空窗事故的定位缺口）。
    */
-  private publishRecordChanges(cache: RecordEntriesCache, sessionId: string): string[] {
+  private publishRecordChanges(
+    cache: RecordEntriesCache,
+    sessionId: string,
+    source: RecordPublishSource,
+    roundStartedAt?: number,
+  ): { frames: string[]; workflowSignalRunIds: string[] } {
     const bus = this.deps.getMessageBus()
     if (!bus) {
       logger.warn('[session-records] publish skipped: message bus not injected (watermark retained, reconcile leg will re-publish)', { sessionId })
-      return []
+      return { frames: [], workflowSignalRunIds: [] }
     }
     const frames: string[] = []
 
@@ -815,7 +896,12 @@ export class SessionRecords {
       frames.push('session.subagents')
     }
 
-    const workflowSignals = workflowSignalsAgainstPublished(cache.workflows, cache.publishedWorkflows)
+    // [待裁决项 5 根治] 发射前可读性门：只公告读路径当前可返回的 run（见 gate JSDoc）。
+    const workflowSignals = filterReadableWorkflowSignals(
+      workflowSignalsAgainstPublished(cache.workflows, cache.publishedWorkflows),
+      cache.projection?.workflows ?? null,
+    )
+    const workflowSignalRunIds = workflowSignals.map((s) => s.runId)
     for (const update of workflowSignals) {
       bus.publish(sessionId, {
         type: 'session.workflowUpdate',
@@ -835,7 +921,49 @@ export class SessionRecords {
       cache.publishedPlanState = cache.planState
       frames.push('session.planState')
     }
-    return frames
+
+    // [可观测性 2026-10-02] 发布观测：水位门后有帧才落一行（稳态零帧零日志——S5 无噪声
+    // 锚不变）。字段对称面：trigger = 发布归因（entry 三腿 / event-projection）；
+    // elapsedMs = entry 轮耗时（tailer 腿无轮概念缺省）；workflowFolds = workflowUpdate
+    // 信号涉及 run 的 fold 证据（缺席/停帧在观测面直接分形，空窗类事故一步定位）。
+    if (frames.length > 0) {
+      logger.info('[session-records] record frames published', {
+        sessionId,
+        trigger: source,
+        frames,
+        ...(roundStartedAt !== undefined ? { elapsedMs: Date.now() - roundStartedAt } : {}),
+        ...(workflowSignalRunIds.length > 0
+          ? { workflowFolds: this.workflowFoldEvidence(cache, workflowSignalRunIds) }
+          : {}),
+      })
+    }
+    return { frames, workflowSignalRunIds }
+  }
+
+  /**
+   * [可观测性 2026-10-02] workflowUpdate 信号涉及 run 的 fold 证据快照（runFolds 逐
+   * run 读取，纯观测零分支）。证据语义：fold 'absent' = tailer 从未读到该 run 的
+   * journal；asks/lastSeq 落后于盘面 = tailer 停帧/滞后——「详情空窗」类事故据此
+   * 一步区分「没读到」与「读到没发/发了没到」。
+   */
+  private workflowFoldEvidence(cache: RecordEntriesCache, runIds: readonly string[]): Record<string, WorkflowFoldEvidenceView> {
+    const folds = cache.projection?.sources.runFolds
+    const evidence: Record<string, WorkflowFoldEvidenceView> = {}
+    for (const runId of runIds) {
+      const fold = folds?.get(runId)
+      evidence[runId] =
+        fold === undefined
+          ? { fold: 'absent' }
+          : {
+            fold: 'present',
+            lastSeq: fold.lastSeq,
+            lifecycle: fold.state.lifecycle,
+            asks: fold.asks.size,
+            phases: fold.phases.size,
+            runSettled: fold.runSettled !== undefined,
+          }
+    }
+    return evidence
   }
 
   /**
@@ -860,18 +988,20 @@ export class SessionRecords {
     // wave:perf-w26（plan M-3）：路径解析消费方 force 旁路 TTL（刚落盘 session 的
     // subagent 面板在窗口内不静默返回空）。
     const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
-    if (!target) return { records: [], oversize: false }
+    // [待裁决项 4] 会话不在册（延迟落盘窗口 / 扫描竞态）→ found=false 显式分形，
+    // 不再与「会话存在但真空列表」共用同一空返回（renderer 据此保留分区）。
+    if (!target) return { records: [], oversize: false, found: false }
     // [W1 / D6] 读请求只读内存投影；oversize（>32MB = v1 巨文件时代会话）走旧格式
     // 惰性兼容读路径（32MB 预检语义退役至此专属——extractor 预检在该路径降级空列表
     // + oversize 标志 + warn，[RT-4#8] 语义原样保留）。
     if (isSessionFileOversize(target.filePath)) {
       const { records, oversize } = extractSubagentsFromSessionFile(target.filePath)
       if (oversize) this.warnOversizeOnce(sessionId, 'subagents')
-      return { records, oversize }
+      return { records, oversize, found: true }
     }
     const cache = this.ensureRecordEntriesCache(sessionId)
     const projection = this.ensureProjection(sessionId, cache)
-    return { records: Array.from(projection.subagents.values()), oversize: false }
+    return { records: Array.from(projection.subagents.values()), oversize: false, found: true }
   }
 
   /**
@@ -1007,15 +1137,16 @@ export class SessionRecords {
   async getWorkflows(sessionId: string): Promise<OversizeAwareResult<WorkflowRunRecord>> {
     // wave:perf-w26（plan M-3）：路径解析消费方 force 旁路 TTL（与 getSubagents 同理）。
     const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
-    if (!target) return { records: [], oversize: false }
+    // [待裁决项 4] 会话不在册 → found=false 显式分形（与 getSubagents 同款）。
+    if (!target) return { records: [], oversize: false, found: false }
     if (isSessionFileOversize(target.filePath)) {
       const { records, oversize } = extractWorkflowsFromSessionFile(target.filePath)
       if (oversize) this.warnOversizeOnce(sessionId, 'workflows')
-      return { records, oversize }
+      return { records, oversize, found: true }
     }
     const cache = this.ensureRecordEntriesCache(sessionId)
     const projection = this.ensureProjection(sessionId, cache)
-    return { records: Array.from(projection.workflows.values()), oversize: false }
+    return { records: Array.from(projection.workflows.values()), oversize: false, found: true }
   }
 
   /**
@@ -1259,6 +1390,34 @@ function workflowSignalsAgainstPublished(current: Map<string, WorkflowRunRecord>
     }
   }
   return updates
+}
+
+/**
+ * [待裁决项 5 根治 2026-10-04] workflowUpdate 信号发射前可读性门（publishRecordChanges
+ * 单点接线，本文件唯一发射点）。
+ *
+ * 读路径事实（代码实态）：getWorkflows 正常路径直读 cache.projection.workflows（同一
+ * 实例）；信号构造源 = cache.workflows = 投影镜像（syncCacheFromProjection）。故「信号
+ * 发出时数据必然可读」在现行调用图下结构性成立，本门常态零拦截——它是发射点的显式
+ * 不变量：未来新增发布腿 / 信号源与读源解耦时在此拦截，替代消费侧时间兜底（renderer
+ * 的 500ms running 信号盲等重试已随本项删除）。
+ *
+ * 不可读 run 不进本轮发布 = 推迟到下一轮触发（不给定时器）：publishedWorkflows 水位只在
+ * workflowSignals 非空时推进，被过滤 run 的水位差残留 → 下一轮投影变更 / 对账腿
+ * （agent_settled / 15s 定时）重新进入 diff 自然重试。
+ *
+ * readableRunIds null（投影不可得；现行调用图不可达的防御读法）→ 放行：判据缺失不拦截
+ * 信号（宁可多发一次让消费侧拉取证实，不静默吞信号）。
+ *
+ * oversize 读路径（>32MB 旧格式惰性提取）不经本门：发射前按该路径回读 = 双倍全文扫描；
+ * 该路径的「列表不可用」语义由 [RT-4#8] 降级提示承接，与本门正交。
+ */
+export function filterReadableWorkflowSignals(
+  signals: WorkflowUpdateSignal[],
+  readableRunIds: ReadonlyMap<string, unknown> | null,
+): WorkflowUpdateSignal[] {
+  if (readableRunIds === null) return signals
+  return signals.filter((s) => readableRunIds.has(s.runId))
 }
 
 /**

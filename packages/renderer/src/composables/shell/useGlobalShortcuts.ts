@@ -11,13 +11,28 @@
  * composable 内重复调用，否则产生独立 sessionStore 导致状态分裂。故 Sidebar.vue 调一次
  * useSidebar 后注入此处。useSearchModal/useSidebarStore/useCommandStore/usePresetStore
  * 均为模块级单例，内部安全调用。
+ *
+ * view 转发键清单（display-containers §7.4 [MANDATORY]，renderer 半边，F1-17 补齐）：
+ * 本装配点同时承担三件事——
+ * ① 上报：启动初始化（含 renderer 重载/崩溃恢复后启动的同一入口）经 browserSetForwardKeys
+ *   全量重报（keymap+shortcutOverrides 派生的 mod 前缀清单）；settings 重录（overrides
+ *   变化）经 browserUpdateForwardKeys 注册/注销增量（注销旧 accelerator + 注册新）。
+ * ② 派发：订阅 onBrowserForwardKey，主进程命中清单转发回的 accelerator 按同一 keymap
+ *   派发动作——页面聚焦态宿主 window keydown 收不到输入，此通道是 app 快捷键族在
+ *   WebContentsView 焦点下恒生效的唯一通路（容器键 ⌃`/⌘W 走 onShortcut 通道，不在此）。
+ * ③ 判定同源：入清单约束/匹配语义与主进程 gateway/forward-keys.ts 配对契约同判定
+ *   （渲染侧不可跨层 import 主进程模块，此处为镜像实现，键矩阵测试两侧对账）。
+ *   guardComposerFocus 不用于转发派发：转发事件蕴含焦点在 WebContentsView，宿主 composer
+ *   必然不在输入态（守卫针对的冲突场景不存在）。
  */
+import { onScopeDispose, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { useCommandStore } from '@/composables/features/command/useCommandStore'
 import { useNavigationStore } from '@/stores/navigation'
 import { usePresetStore } from '@/stores/preset'
 import { useSearchModal } from '@taiji/core'
 import { useSidebarStore } from '@/stores/sidebar'
+import { browserSetForwardKeys, browserUpdateForwardKeys, onBrowserForwardKey } from '@/lib/ipc'
 
 /** 全局快捷键派发所需的注入方法（来自 useSidebar / session actions composable） */
 export interface UseGlobalShortcutsOptions {
@@ -38,6 +53,15 @@ export interface UseGlobalShortcutsOptions {
   navigation: ReturnType<typeof useNavigationStore>
   /** ⌘, 打开 Settings（AppShell provide，Sidebar.vue inject 后注入） */
   openSettings: () => void
+}
+
+/** 键盘事件判定所需子集（KeyboardEvent 与转发测试桩共用形状） */
+export interface ShortcutInput { // oe-exempt:20261003:framework:类型契约先行——键盘编排契约层，键矩阵测试即消费面
+  key: string
+  metaKey?: boolean
+  ctrlKey?: boolean
+  altKey?: boolean
+  shiftKey?: boolean
 }
 
 interface KeymapEntry {
@@ -109,16 +133,7 @@ export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
       // ⌘K/⌘N/⌘B/⌘⇧P/⌘[/⌘]/⌘, 在 composer 聚焦时保持可用。
       // 检测：activeElement 落在 composer-box（contenteditable 输入区）内。
       if (m.guardComposerFocus && isComposerFocused()) return false
-      // 有 override → 解析组合键格式（'mod+n' / 'shift+j' / 'j'）
-      if (m.commandId && overrides[m.commandId]) {
-        return matchOverrideKey(e, overrides[m.commandId])
-      }
-      // 默认：⌘/Ctrl + key，shift 守卫区分同 key 的 shift/非 shift 项
-      const mod = e.metaKey || e.ctrlKey
-      if (!mod) return false
-      if (e.key.toLowerCase() !== m.key) return false
-      // shift 项要求 e.shiftKey；非 shift 项要求 !e.shiftKey（否则 ⌘G 和 ⌘⇧G 都命中 ⌘G）
-      return m.shift ? e.shiftKey : !e.shiftKey
+      return matchKeymapEntry(e, m, overrides)
     })
     if (hit) {
       e.preventDefault()
@@ -129,6 +144,101 @@ export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
       hit.action()
     }
   })
+
+  // ── view 转发键清单（§7.4 renderer 半边）──────────────────────────────
+  // ① 启动初始化全量重报（renderer 重载/崩溃恢复后启动重跑本装配点 = 同一入口重报）。
+  const forwardList = deriveForwardAccelerators(keymap, commandStore.shortcutOverrides.value)
+  void browserSetForwardKeys(forwardList)
+  // ② settings 重录（overrides 运行时可变）→ 注册/注销增量重报（注销旧 accelerator + 注册新；
+  //    主进程 registry 幂等可乱序补报，丢失面由下次全量重报收敛——AGENTS 拉推分工的 push 臂）。
+  let prevForwardList = forwardList
+  const stopOverridesWatch = watch(
+    () => deriveForwardAccelerators(keymap, commandStore.shortcutOverrides.value),
+    (next) => {
+      const remove = prevForwardList.filter((k) => !next.includes(k))
+      const add = next.filter((k) => !prevForwardList.includes(k))
+      prevForwardList = next
+      if (add.length > 0 || remove.length > 0) void browserUpdateForwardKeys({ add, remove })
+    },
+  )
+  // ③ 转发派发：主进程命中清单键 preventDefault 后经 'shortcut:forward' 转回，按同一 keymap
+  //    派发（无 guardComposerFocus——转发事件蕴含焦点在 WebContentsView，composer 非输入态）。
+  const unsubscribeForward = onBrowserForwardKey(({ accelerator }) => {
+    const overrides = commandStore.shortcutOverrides.value
+    const hit = keymap.find((m) => forwardedAcceleratorHits(accelerator, m, overrides))
+    if (hit) hit.action()
+  })
+  onScopeDispose(() => {
+    stopOverridesWatch()
+    unsubscribeForward()
+  })
+}
+
+/**
+ * 单条 keymap entry 匹配（window keydown 路径，§7.4 配对契约 renderer 侧判定源）：
+ * 有 override → matchOverrideKey（'mod+n' / 'shift+j' / 'j' / 'alt+x' 格式）；
+ * 无 override → 默认 ⌘/Ctrl + key，shift 严格双分（shift 项要求 e.shiftKey、非 shift 项
+ * 要求 !e.shiftKey——⌘G 与 ⌘⇧G 是不同键）。导出供键矩阵测试对账（配对契约判定源）。
+ */
+export function matchKeymapEntry(e: ShortcutInput, m: Pick<KeymapEntry, 'key' | 'shift' | 'commandId'>, overrides: Record<string, string>): boolean {
+  if (m.commandId && overrides[m.commandId]) {
+    return matchOverrideKey(e, overrides[m.commandId])
+  }
+  const mod = e.metaKey || e.ctrlKey
+  if (!mod) return false
+  if (e.key.toLowerCase() !== m.key) return false
+  return m.shift ? !!e.shiftKey : !e.shiftKey
+}
+
+/** 修饰符 token（不是键，入清单判定用——与主进程 MODIFIER_TOKENS 同词表） */
+const FORWARD_MODIFIER_TOKENS = new Set(['mod', 'shift', 'alt', 'ctrl', 'control', 'meta', 'command', 'cmd', 'option'])
+
+/**
+ * 入清单约束（§7.4 [MANDATORY]）：仅 mod 前缀组合（mod=meta||ctrl，可带 shift）；
+ * 裸键 / shift-only / alt 组合 / Esc / 畸形格式一律不入。与主进程 gateway/forward-keys.ts
+ * parseForwardAccelerator 同判定（镜像实现，键矩阵测试两侧对账——F1-18 已知不对称在
+ * matchOverrideKey 侧，不在本判定：入清单两侧均严格拒绝）。
+ */
+export function isForwardableAccelerator(accelerator: string): boolean {
+  if (typeof accelerator !== 'string') return false
+  const parts = accelerator
+    .toLowerCase()
+    .split('+')
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0)
+  const key = parts.pop()
+  if (key === undefined || parts.length === 0) return false // 裸键不入清单
+  if (key === 'escape') return false // Esc 不入清单（页面所有权，§6.7 第 4 层）
+  if (FORWARD_MODIFIER_TOKENS.has(key)) return false
+  if (!parts.includes('mod')) return false // shift-only / alt-only / 无前缀不入
+  if (parts.includes('alt')) return false
+  if (parts.some((m) => m !== 'mod' && m !== 'shift')) return false
+  return true
+}
+
+/** 单条 entry 的生效 accelerator（override 优先；无 override 用默认 mod 组合，shift 项带 shift） */
+export function effectiveAcceleratorOf(m: KeymapEntry, overrides: Record<string, string>): string {
+  if (m.commandId && overrides[m.commandId]) return overrides[m.commandId].trim().toLowerCase()
+  return m.shift ? `mod+shift+${m.key}` : `mod+${m.key}`
+}
+
+/**
+ * 由 keymap + overrides 派生转发键清单（mod 前缀组合，去重保序）：不可转发项（裸键/
+ * shift-only/alt/Esc override）不入清单——该类 override 在页面聚焦态不生效，§7.4 登记为已知边界。
+ */
+export function deriveForwardAccelerators(keymap: KeymapEntry[], overrides: Record<string, string>): string[] {
+  const out: string[] = []
+  for (const m of keymap) {
+    const acc = effectiveAcceleratorOf(m, overrides)
+    if (!isForwardableAccelerator(acc)) continue
+    if (!out.includes(acc)) out.push(acc)
+  }
+  return out
+}
+
+/** 转发回的 accelerator 是否命中该 entry（归一化字符串等值——两侧清单同源派生） */
+function forwardedAcceleratorHits(accelerator: string, m: KeymapEntry, overrides: Record<string, string>): boolean {
+  return effectiveAcceleratorOf(m, overrides) === accelerator.trim().toLowerCase()
 }
 
 /**
@@ -142,8 +252,10 @@ function isComposerFocused(): boolean {
   return !!el.closest('.composer-box, [data-testid="composer-box"]')
 }
 
-/** 匹配自定义快捷键格式（'mod+n' / 'shift+j' / 'j' / 'alt+x' 等） */
-function matchOverrideKey(e: KeyboardEvent, override: string): boolean {
+/** 匹配自定义快捷键格式（'mod+n' / 'shift+j' / 'j' / 'alt+x' 等）。
+ *  已知不对称（F1-18 登记为已知边界）：对未声明修饰键不拒绝——'mod+n' override 在 ⌥⌘N 下
+ *  也命中；主进程转发侧严格拒绝 alt，严格侧只会少转发不会误转发。 */
+function matchOverrideKey(e: ShortcutInput, override: string): boolean {
   const parts = override.toLowerCase().split('+')
   const key = parts[parts.length - 1]
   const needMod = parts.includes('mod')

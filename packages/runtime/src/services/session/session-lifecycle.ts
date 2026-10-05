@@ -28,7 +28,7 @@ import { BUILTIN_PRESET_IDS, isBtwVirtualId } from '@taiji/shared'
 // 缺省 clientUuid 生成走 core 唯一入口（禁直调 crypto.randomUUID，secure context/Node 版本防御）
 import { randomUuid } from '@taiji/core/utils/random-uuid'
 // [D6-⑨ u7] 图片缓存目录推导（shared SSOT，含 sessionId 穿越校验——cache 级联删除用）
-import { getImageCacheDir } from '@taiji/shared/paths'
+import { getImageCacheDir, getSessionArtifactsDir } from '@taiji/shared/paths'
 import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
 import type { ILifecycleSessionOps, ISessionRegistry, ISessionRegisterDeps, IManagedSessionRecord, ManagedSession } from './session-internal.js'
 import type { IManagedSessionView, ScannedSession } from './types.js'
@@ -996,6 +996,19 @@ export class SessionLifecycle implements ISessionRegistry {
     // deleteSessionImageCache，runtime 进程无法跨包 import，此处按同语义内联最小接线：
     // 同一 shared paths 推导（getImageCacheDir 含 sessionId 穿越校验）+ force 幂等删）。
     try { rmSync(getImageCacheDir(sessionIdFromSessionFilePath(filePath)), { recursive: true, force: true }) } catch { void 0 }
+    // [chat-html-support §6.7 D7 回收①] 会话产物目录级联（`<dataDir>/artifacts/<sessionId>`，
+    // 公式单点 = shared getSessionArtifactsDir，含与 isPiSessionId 同域的 sessionId 穿越
+    // 校验）。与上行 cache/images 级联同一落点、同一幂等形态（recursive + force），
+    // best-effort 不阻断删除主链——残留由 artifact-retention 保留期扫描兜底。
+    // 目录的创建由 write 工具落盘时承担：真装版 pi write 工具在写入前
+    // `mkdir(dir, {recursive:true})`（工具 description 亦声明）——持久源码锚点
+    // @earendil-works/pi-coding-agent@0.84.4 dist/core/tools/write.js:22（
+    // defaultWriteOperations.mkdir recursive 实装）/ :141（description
+    // 「Automatically creates parent directories」声明）/ :160（execute 写前调用），
+    // 与 pi-semantics 探针族同口径可重验；P-2 探针（⛔ u-artifacts 门禁）同结论，
+    // 探针产物在 .tmp 不入库，仓内可复现证据以 dist 锚点为准。
+    // 故不实现 runtime 会话激活预建降级。
+    try { rmSync(getSessionArtifactsDir(sessionIdFromSessionFilePath(filePath)), { recursive: true, force: true }) } catch { void 0 }
     // W-Runtime4：清理 session 文件头解析缓存（infra session-file-utils 的 filePath 键
     // 派生缓存，非已删的 label 影子缓存）中的 stale 条目（避免无界增长）
     this.sessionStore.invalidateMetaCache(filePath)

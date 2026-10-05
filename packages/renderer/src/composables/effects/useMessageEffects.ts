@@ -237,8 +237,10 @@ function handleSubagentEntries(
 }
 
 /** 处理 session.workflowUpdate 事件（workflow 增量信号兜底）。update 锚定 protocol SSOT（MF-4）。 */
-function handleWorkflowUpdate(sessionId: string, update: ServerMessageMap['session.workflowUpdate']['update']): void {
-  useWorkflowStore().triggerWorkflowReload(sessionId, update.status ?? 'unknown')
+function handleWorkflowUpdate(sessionId: string, _update: ServerMessageMap['session.workflowUpdate']['update']): void {
+  // [待裁决项 5 根治] update.status 不再区分待遇（原 running 信号的 500ms 盲等重试已删）：
+  // 信号到达即拉一次——信号发出时数据构造性可读，status 无消费场景。
+  useWorkflowStore().triggerWorkflowReload(sessionId)
 }
 
 /** 全局 error 兜底（无 sessionId 无 id 的 server-push error → toast 提示）。 */

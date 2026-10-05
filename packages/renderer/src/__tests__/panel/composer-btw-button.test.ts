@@ -35,6 +35,7 @@ import {
   drawerControl,
   getDrawerControlState,
   openDrawerTab,
+  setBtwView,
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
 import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
@@ -253,7 +254,7 @@ describe('badge 两态基础：聚合 Σ unread + 清除 = 线内容进视口（
 
     // 进视口 = drawer 开在 btw tab + 选中该线（BtwPanel 自动选中的等价写入）
     openDrawerTab('btw')
-    drawerControl.setBtwView('btw:t1')
+    setBtwView('btw:t1')
     await settle()
     expect(badge().exists()).toBe(false) // 用户可见 DOM：角标消失
 

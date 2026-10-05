@@ -1,15 +1,18 @@
 <template>
   <!--
-    BrowserPane —— 嵌入式浏览器面板（Browser Drawer Wave 2 + Wave 3）。
+    BrowserPane —— 嵌入式浏览器面板（Browser Drawer Wave 2 + Wave 3；display-containers W2 起
+    挂浮层壳，u-w2-browser-mount）。
 
-    挂在 SideDrawer 的 browser tab，点击 agent 输出的 http(s) 链接 → drawer.open('browser',{url})
-    → SideDrawer 显本组件 → onMounted 创建 WebContentsView（主进程）+ pushRect（推 viewport 元素位置/尺寸）
+    挂在浮层壳（OverlayShell via BrowserOverlay）body：markdown/agent 消息里的 localhost 链接
+    点击 → openBrowser(url, sessionId)（core URL 注入链）→ 浮层显本组件 → onMounted 创建
+    WebContentsView（主进程）+ pushRect（推 viewport 元素位置/尺寸——观测目标 = 浮层视口）
     + 加载 url + show。主进程 view 经 setBounds 定位到本组件 browser-vp 元素，覆盖渲染真实页面。
     主进程 webContents 事件经 onBrowserState 推回，更新地址栏真实 URL（防钓鱼）+ loading/error 态。
 
     Wave 2 最小闭环：
     - 导航栏骨架（back/forward 占位 disabled，reload 可用，外链导出降级到系统浏览器）
-    - 加载 / 错误 / 空态三态切换
+    - 加载 / 错误 / 空态三态切换；错误占位两类区分（§5.3）：创建失败/进程崩溃（createError）
+      vs 页面加载失败（error），占位内重试 = create + show + navigate
 
     Wave 3 rect 同步：
     - ResizeObserver + window resize + rAF + 33ms 节流推 viewport 元素 rect 给主进程 setRect
@@ -106,16 +109,31 @@
     <!-- viewport 区域（Wave 3：主进程 WebContentsView 经 setRect 定位到本元素的位置/尺寸，
          真实页面由主进程 view 覆盖渲染；本组件仅渲染加载 / 错误 / 空态覆盖层）。-->
     <div ref="viewportEl" class="relative min-h-0 flex-1 bg-bg" data-testid="browser-vp">
+      <!-- 错误态（创建失败 / 进程崩溃，§5.3 两类占位之二）：browserCreate reject 或
+           render-process-gone；与页面加载失败占位文案区分。判序首项（错误优先于加载态） -->
+      <div
+        v-if="createError"
+        class="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4"
+        data-testid="browser-create-error"
+      >
+        <AlertCircle class="size-8 text-danger" />
+        <span class="text-[length:var(--text-sm)] font-semibold text-neutral-fg">{{ t('panel.browserPane.createFailed') }}</span>
+        <span class="max-w-[240px] text-center text-[length:var(--text-2xs)] text-neutral-mid">{{ createError }}</span>
+        <div class="mt-2 flex gap-2">
+          <Button variant="secondary" size="sm" @click="retryCreate">{{ t('panel.browserPane.retry') }}</Button>
+          <Button variant="ghost" size="sm" @click="openInExternal">{{ t('panel.browserPane.openExternal') }}</Button>
+        </div>
+      </div>
       <!-- 加载态 -->
       <div
-        v-if="isLoading"
+        v-else-if="isLoading"
         class="absolute inset-0 flex flex-col items-center justify-center gap-3"
         data-testid="browser-loading"
       >
         <div class="size-6 animate-spin rounded-full border-2 border-border border-t-accent" />
         <span class="font-mono text-[length:var(--text-2xs)] text-neutral-mid">{{ displayUrl }}</span>
       </div>
-      <!-- 错误态 -->
+      <!-- 错误态（页面加载失败，§5.3 两类占位之一） -->
       <div
         v-else-if="error"
         class="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4"
@@ -237,6 +255,9 @@ const displayUrl = ref<string>(props.url)
 const isLoading = ref<boolean>(Boolean(props.url))
 /** 最近一次加载错误（成功导航后清空） */
 const error = ref<BrowserLoadError | null>(null)
+/** 创建失败/进程崩溃原因（§5.3 两类占位之二：browserCreate reject / render-process-gone；
+ *  与页面加载失败占位文案区分，主进程已联动隐藏 view 保证占位可见） */
+const createError = ref<string | null>(null)
 /** 是否可后退（主进程 navigationHistory.canGoBack 回传，控制 back 按钮 disabled） */
 const canGoBack = ref<boolean>(false)
 /** 是否可前进 */
@@ -262,13 +283,49 @@ const isSecure = computed(() => displayUrl.value.startsWith('https://'))
 // 命中黑名单时不 navigate、不退出编辑态（保用户输入便于修正）。
 // 主进程 handler + manager 还有第二/三层白名单 + 黑名单，三道防线独立函数。
 const { urlInput, onUrlFocus, onUrlEnter, onUrlEscape } = useUrlBar(displayUrl, (url) => {
+  navigateWithFeedback(url)
+})
+
+/**
+ * 导航（带反馈）：loading/error 态随 Promise 链收敛——navigate reject（§7.4 错误通道：
+ * scheme 拒绝 / loadURL 失败）落页面加载失败占位；主进程 did-fail-load 推送同口径覆盖。
+ */
+function navigateWithFeedback(url: string): void {
   isLoading.value = true
   error.value = null
-  void browserNavigate(props.sessionId, url).catch(() => {
-    // 保底重置 loading：主进程 onBrowserState 也会推送 did-fail-load 错误态
+  void browserNavigate(props.sessionId, url).catch((e: unknown) => {
     isLoading.value = false
+    error.value = {
+      errorCode: -1,
+      errorDescription: e instanceof Error ? e.message : String(e),
+      validatedURL: url,
+    }
   })
-})
+}
+
+/** 创建失败/进程崩溃落占位（§7.4 错误通道：browserCreate 失败 reject，renderer caller catch） */
+function onCreateFailed(e: unknown): void {
+  createError.value = e instanceof Error ? e.message : String(e)
+}
+
+/** 重试（§5.3：占位内重试 = create + show + navigate，重新请求创建链）。
+ * windowId 缺失口径与 onMounted 同路径一致（[W4] fail-fast + 结构化 warn，不静默）。 */
+function retryCreate(): void {
+  createError.value = null
+  const windowId = getCurrentWindowId()
+  if (!windowId) {
+    console.warn('[browser-pane] windowId missing from URL query, skip browserCreate')
+    return
+  }
+  void browserCreate(props.sessionId, windowId).catch(onCreateFailed)
+  nextTick(() => {
+    pushRect()
+    if (props.url) {
+      navigateWithFeedback(props.url)
+      void browserShow(props.sessionId)
+    }
+  })
+}
 
 /**
  * 读取当前窗口的 windowId。
@@ -301,7 +358,8 @@ onMounted(() => {
     return
   }
   // 创建 WebContentsView（attach 到主窗口，初始隐藏）。幂等：已存在则主进程复用。
-  void browserCreate(props.sessionId, windowId)
+  // 失败 reject（§7.4 错误通道）→ catch 落「创建失败」占位（与加载失败占位区分）。
+  void browserCreate(props.sessionId, windowId).catch(onCreateFailed)
 
   // 缩放快捷键（Cmd/Ctrl +/-/0）
   window.addEventListener('keydown', onZoomKeydown)
@@ -311,7 +369,7 @@ onMounted(() => {
   nextTick(() => {
     pushRect()
     if (props.url) {
-      void browserNavigate(props.sessionId, props.url)
+      navigateWithFeedback(props.url)
       void browserShow(props.sessionId)
     }
   })
@@ -322,6 +380,9 @@ onMounted(() => {
     if (state.currentUrl) displayUrl.value = state.currentUrl
     isLoading.value = state.isLoading
     error.value = state.error
+    // 渲染进程崩溃（render-process-gone）→ 「创建失败/进程崩溃」占位；存活推送（processGone
+    // 为 null）= 进程恢复上报，清占位（重试成功后主进程状态推送同路收敛）
+    createError.value = state.processGone ? state.processGone.reason : null
     canGoBack.value = state.canGoBack
     canGoForward.value = state.canGoForward
     // 主进程 autoFit 后回推 zoomFactor，同步本地基准（用户 Cmd+/- 在此基准上微调）
@@ -376,9 +437,7 @@ function copyUrl(): void {
 function reload(): void {
   const target = displayUrl.value || props.url
   if (!target) return
-  isLoading.value = true
-  error.value = null
-  void browserNavigate(props.sessionId, target)
+  navigateWithFeedback(target)
 }
 
 /** 在系统浏览器打开当前 URL（降级出口） */

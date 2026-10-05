@@ -62,24 +62,72 @@ import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
  * realpath 去重吸收）。
  *
  * 每次调用现解析（不 memo）：发现调用点稀疏（session_start + 缓存 miss），解析
- * 成本可忽略；失败（异常布局/解析器不可用）降级为不注入并 warn——绝不因资产
- * 接线失败阻断发现主链。
+ * 成本可忽略；两种形态各有通路，都不阻断发现主链：
+ *   - **dev / npm 形态**：`require.resolve` 沿本包依赖解析链命中 core 包；
+ *   - **bundle / staged 打包形态**（2026-10-03 B′ 修复）：esbuild 自包含 bundle 把
+ *     core inline、staged 布局无 node_modules ⇒ resolve 必败（实证：pi-host 日志全天
+ *     202 条 'Cannot find module … workflows/README.md'，内置 6 workflow + 10 agent
+ *     整体不可发现、`subagents` 批量工具报 'Built-in workflow fan-out is not available'）。
+ *     此时回退到 staged scope 根（见 stagedScopeRootFromModuleUrl）——仅当回退也不
+ *     成立（异常布局/解析器不可用）才降级为不注入并 warn。
  */
-function corePackageNpmRoot(): string | undefined {
+export function corePackageNpmRoot(moduleUrl: string = import.meta.url): string | undefined {
   try {
     // createRequire 锚定本模块（jiti 加载器下 import.meta.url 可用；不可用则随
     // catch 降级）。require.resolve 沿 pi-sw 自身的依赖解析链——workspace 与发布态
     // 都从本包出发命中 core。
-    const require = createRequire(import.meta.url);
+    const require = createRequire(moduleUrl);
     const anchor = require.resolve("@zhushanwen/subagent-core/workflows/README.md");
     return dirname(dirname(dirname(anchor)));
   } catch (err) {
-    // getLogger 惰性调用（catch 是冷路径——测试环境对 pi-extension-logger 的
-    // module-level mock 可能返回 undefined，模块级持有会在 import 期踩 undefined）
+    const stagedRoot = stagedScopeRootFromModuleUrl(moduleUrl);
+    if (stagedRoot !== undefined) {
+      // getLogger 惰性调用（冷路径：测试环境对 pi-extension-logger 的 module-level
+      // mock 可能返回 undefined，模块级持有会在 import 期踩 undefined）
+      getLogger("pi-host").debug(
+        "[pi-host] core 包经 staged scope 根注入（bundle 形态，无 node_modules 解析面）",
+        { root: stagedRoot },
+      );
+      return stagedRoot;
+    }
     getLogger("pi-host").warn(
       "[pi-host] core 包 agents/ 注入根解析失败——10 内置角色可能不可发现",
       { reason: toErrorMessage(err) },
     );
+    return undefined;
+  }
+}
+
+/**
+ * bundle / staged 形态的 core 资产注入根（2026-10-03 B′）。
+ *
+ * 打包态扩展被 esbuild 打成**自包含 index.js**（core 被 inline），staged 布局内无
+ * node_modules ⇒ `require.resolve` 锚点必败。但此时模块位置是
+ * `<stagedScope>/<pkg>/index.js`（如
+ * `<Resources>/extensions/@zhushanwen/pi-subagent-workflow/index.js`），其**父目录**
+ * 正是 `@zhushanwen` scope 目录——npm 槽语义（"一级子项 = 包目录"）恰好成立，
+ * 于是可直接当 npm 槽根用：约定目录扫描即命中
+ * `pi-subagent-workflow/{workflows,agents}`（两目录由 `scripts/bundle-extensions.mjs`
+ * 随包拷贝；`pi.agents`/`pi.workflows` manifest 约定及其"声明路径不存在 → 整包失败
+ * 占位"语义是 subagent-core resource-discovery 的 taiji 自建规则，权威源 =
+ * resource-discovery.ts processPackage——pi 上游 manifest 只有
+ * extensions/skills/prompts/themes 四字段，无 agents/workflows 概念。已核仓内无任何
+ * 包声明该字段，故扫描面内所有包都走约定目录分支，不进 manifest 失败分支）。
+ *
+ * 与 dev/npm 形态的既有语义一致：npm 槽根扫的就是 scope 下全部包目录（因此本包自带
+ * 的 workflows/agents 在 dev/npm 形态同样入发现面），非新增语义。
+ *
+ * 形态判据 = 父目录名以 `@` 开头：dev（模块在 `extensions/universal/...`）与 npm
+ * 安装形态都先走 resolve 成功分支，本回退不可达；仅 bundle/staged 形态命中。
+ */
+export function stagedScopeRootFromModuleUrl(moduleUrl: string): string | undefined {
+  try {
+    const pkgDir = dirname(fileURLToPath(moduleUrl));
+    const scopeDir = dirname(pkgDir);
+    if (scopeDir === pkgDir) return undefined;
+    const scopeName = scopeDir.split(/[\\/]/).pop() ?? "";
+    return scopeName.startsWith("@") ? scopeDir : undefined;
+  } catch {
     return undefined;
   }
 }
