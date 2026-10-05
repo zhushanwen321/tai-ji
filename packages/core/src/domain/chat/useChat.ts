@@ -304,8 +304,8 @@ export function resetChatModuleStateForTest(): void {
  *
  * 与下方 morph 循环是同函数相邻分支（impl-plan U2 检查点）：对账只清登记在册的命令条目、
  * morph 只处理非 direct 车道的活跃条目，操作域互斥不重叠。
- * 清除动作 = finalizeHandledEntry（handled 同形态静默清除：移除乐观气泡 + 清空窗计时器 +
- * 递减在途计数，无错误提示 D1④）。
+ * 清除动作 = finalizeHandledEntry（handled 同形态静默清除：移除乐观气泡 + 清 dispatching
+ * 占位（clearPendingSend，纯 Set 操作）+ 递减在途计数，无错误提示 D1④）。
  */
 function reconcileHandledOrphans(
   sid: string,
@@ -345,7 +345,8 @@ function markHandledTargetsSeenInProjection(sid: string, entries: DeliveryFrameE
 /**
  * [pi1-disposition-chat-flow U2① / D1③④] session.deliveryHandled 终局通知消费：命令条目
  * 被 pi 接管（handled disposition）后内核一对一通知，前端按 handled 同形态静默清除——
- * 回滚三件套（移除乐观气泡 + 清空窗计时器 + 递减在途计数），**无错误提示**（handled =
+ * 回滚三件套（移除乐观气泡 + 清 dispatching 占位（clearPendingSend，纯 Set 操作）+ 递减
+ * 在途计数），**无错误提示**（handled =
  * 命令已执行，非失败形态；执行结果经 pi 回合事件正常入流）。
  * 只对登记在册成员动作：外来命令条目（plugin send_to_session / 收养等无本地乐观面的提交）
  * 无气泡可移除、无挂账可回收，误动 clearPendingSend/decrementInflight 会误伤同 session

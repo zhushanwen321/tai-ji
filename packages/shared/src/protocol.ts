@@ -1081,7 +1081,7 @@ export type ServerMessageType =
   // disposition）的终局通知——一次性事件消息，非 last-value 快照（不登记 message-bus
   // STATE_TYPE_KEY_MAP，无 stateSnapshot 重连回放；缺席即丢失，丢失后的收敛由孤儿对账
   // 承接 D1⑤）。内核一对一通知前端，前端按 handled 同形态静默清除（移除乐观气泡 +
-  // 清空窗计时器 + 递减在途计数，无错误提示 U2①）。
+  // 清 dispatching 占位（clearPendingSend，纯 Set 操作）+ 递减在途计数，无错误提示 U2①）。
   | 'session.deliveryHandled'
   // session.revokeMessage（消息撤回设计 D2/D8）：revokeMessage RPC 的 reply type（与 request
   // 同名——delivery.* / session.subscribe 同款 payload 消费型同名模式）。

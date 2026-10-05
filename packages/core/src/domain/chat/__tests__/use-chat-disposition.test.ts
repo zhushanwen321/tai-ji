@@ -130,7 +130,7 @@ describe('pi1-disposition-chat-flow U2：handled 终局通知静默回滚三件�
 
     // 三件套：① 气泡移除（用户可见 DOM 断言——命令不进 transcript，气泡即刻消失）
     expect(f.chatStore.getMessages('s1').some((m) => m.id === bubbleId)).toBe(false)
-    // ② 清空窗计时器 + dispatching 占位；③ 在途计数归零
+    // ② 清 dispatching 占位（clearPendingSend，纯 Set 操作）；③ 在途计数归零
     expect(f.chatStore.isPendingSend('s1')).toBe(false)
     expect(f.chatStore.getInflight('s1')).toBe(0)
     // 无错误提示：零 toast（handled = 命令已执行的正常终局）且无 error 气泡
