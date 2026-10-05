@@ -1,10 +1,12 @@
 /**
- * Block.vue text 分支样式测试（block-rendering M0，TC-M0-4）。
+ * Block.vue text 分支样式测试（block-rendering M0，TC-M0-4；D5 行类型定档更新）。
  *
- * [block-rendering M0] 文字样式模型统一：所有 text 全 inline 统一正文级
- * （text-base/leading-7），颜色跟随所属 assistant streaming 态（streaming→neutral-mid，
- * complete/缺省→neutral-fg，单调不随兄弟 message 翻转）。旧「过程文字暗色小字」两级
- * 视觉层级已取消（text-sm/leading-relaxed/恒 neutral-mid 移除）。
+ * [block-rendering M0] 文字样式模型统一：所有 text 全 inline 统一正文级，颜色跟随所属
+ * assistant streaming 态（streaming→neutral-mid，complete/缺省→neutral-fg，单调不随兄弟
+ * message 翻转）。旧「过程文字暗色小字」两级视觉层级已取消（text-sm/leading-relaxed/
+ * 恒 neutral-mid 移除）。
+ * [D5 行类型定档] 正文行字号档位从 --text-base（14px）抬到 --text-md（15px）——
+ * 行类型「字号 × 明度」三层：正文 15px / 工具 13px / thinking 12px（ui-signal-density §3.3 D5）。
  *
  * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/Block.test.ts
  */
@@ -34,13 +36,14 @@ function mountTextBlock(over: { streaming?: boolean; status?: MessageStatus; err
   })
 }
 
-describe('block-rendering M0: Block text 分支正文样式（TC-M0-4）', () => {
-  it('text 分支统一正文级样式：text-base/leading-7，不含 text-sm/leading-relaxed', () => {
+describe('block-rendering M0 + D5: Block text 分支正文样式（TC-M0-4）', () => {
+  it('text 分支统一正文级样式：text-md/leading-7（D5 正文档 15px），不含过程样式 text-sm/leading-relaxed', () => {
     const wrapper = mountTextBlock({})
     const textEl = wrapper.find('.trace-blk > div')
-    expect(textEl.classes()).toContain('text-[length:var(--text-base)]')
+    expect(textEl.classes()).toContain('text-[length:var(--text-md)]')
     expect(textEl.classes()).toContain('leading-7')
     expect(textEl.classes()).not.toContain('text-[length:var(--text-sm)]')
+    expect(textEl.classes()).not.toContain('text-[length:var(--text-base)]')
     expect(textEl.classes()).not.toContain('leading-relaxed')
   })
 
@@ -129,32 +132,32 @@ describe('error-visibility M1: failed tool header danger + 终态展开（TC1-3�
     expect(wrapper.text()).toContain('ENOENT: no such file')
   })
 
-  it('TC3: unfinished(end_not_received) tool header 保持中性灰（abort/中断非失败，不标红）', () => {
+  it('TC3: unfinished(end_not_received) tool header 染 text-neutral-mid（D5 工具行档，abort/中断非失败不标红）', () => {
     const wrapper = mountToolBlock(makeToolCall({ status: 'end_not_received' }))
     const header = wrapper.find('[data-testid="tool-block-header"]')
-    expect(header.classes()).toContain('text-neutral-dim')
+    expect(header.classes()).toContain('text-neutral-mid')
     // unfinished 不标红（区别于 failed）
     expect(header.classes()).not.toContain('text-danger')
   })
 })
 
-/* ── feat-chat-flow-dim：已完成过程块置灰（完成态降两档，与 running accent 形成亮暗对比）──
- * - completed tool header 从 neutral-fg 经 mid 降到 neutral-dim（用户实测 mid 档置灰感不足
- *   后明确裁决再降一档；dim 3.56:1 不过 AA，此裁决仅限过程块折叠 header）
- * - running 保持 accent 不回归 */
-describe('feat-chat-flow-dim: completed tool header 置灰', () => {
-  it('completed tool header 染 text-neutral-dim（不再是最亮 neutral-fg）', () => {
+/* ── D5 行类型定档：工具行 = 13px（--text-sm）× --neutral-mid（ui-signal-density §3.3 D5）──
+ * - completed/unfinished tool header 染 text-neutral-mid（工具行层级明度；取代旧
+ *   feat-chat-flow-dim 的 dim 档裁决——行层级改由「字号 × 明度」三档拉开）
+ * - running 保持 accent、failed 保持 danger（状态色不是层级色，不随 D5 变） */
+describe('D5 行类型定档: completed tool header 染 neutral-mid', () => {
+  it('completed tool header 染 text-neutral-mid（工具行档，不再是最亮 neutral-fg）', () => {
     const wrapper = mountToolBlock(makeToolCall({ status: 'completed' }))
     const header = wrapper.find('[data-testid="tool-block-header"]')
-    expect(header.classes()).toContain('text-neutral-dim')
+    expect(header.classes()).toContain('text-neutral-mid')
     expect(header.classes()).not.toContain('text-neutral-fg')
   })
 
-  it('running tool header 保持 text-accent（进行中不置灰）', () => {
+  it('running tool header 保持 text-accent（进行中状态色，不落工具行档）', () => {
     const wrapper = mountToolBlock(makeToolCall({ status: 'running' }))
     const header = wrapper.find('[data-testid="tool-block-header"]')
     expect(header.classes()).toContain('text-accent')
-    expect(header.classes()).not.toContain('text-neutral-dim')
+    expect(header.classes()).not.toContain('text-neutral-mid')
   })
 })
 
@@ -535,11 +538,15 @@ describe('bash-running-stream-output: bash 展开容器与输出守卫（U3）',
   })
 })
 
-/* ── [chat-flow-timestamp U2] Block 行尾时间槽（设计 §3 A3/A4）──
+/* ── [chat-flow-timestamp U2 + D2 悬停化] Block 行尾时间槽 ──
  * A3 tool 块行尾 `耗时 · 时刻`：完成态耗时 = formatDuration(end - start)（从实现读：
  * formatDuration(2000) = (2000/1000).toFixed(0)+'s' = '2s'，非 '2.0s'）；endTime 缺失只显时刻；
  * running 态耗时 span 染 text-accent（实时跳动）。A4 text/thinking 块行尾只显所属 message 时刻；
  * messageTimestamp 缺失整槽不渲染（数据缺口降级语义，设计 §2.5）。
+ * [D2] 三槽（tool/text/thinking）从常驻改悬停按需：DOM 恒在（messageTimestamp 有值时），
+ * 可见度由 `opacity-0 + group-hover/<group>:opacity-100 + group-focus-within/<group>:opacity-100`
+ * 三件套控制（悬停该行 + 键盘焦点进入该行两翼）。happy-dom 无真实 hover（PR-2 探针结论：
+ * 纯 CSS 手法下 DOM 存在性无前后差异），断言形态 = 三件套类名存在性（V2/V3 的形态等价物）。
  * 期望时刻用本地 Date getter 构造（clockOf，与 formatClock 同口径；禁硬编码时区串）。 */
 function clockOf(ms: number): string {
   const d = new Date(ms)
@@ -547,13 +554,20 @@ function clockOf(ms: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
-describe('chat-flow-timestamp U2: Block 行尾时间槽（A3/A4）', () => {
+describe('chat-flow-timestamp U2: Block 行尾时间槽（A3/A4 + D2 悬停化）', () => {
   function mountThinkingTimeBlock(over: Record<string, unknown> = {}) {
     // collapsed 显式传 undefined（同 M3 组：键缺失会吃掉 `?? true` 的 fallback）
     return mount(Block, {
       props: { type: 'thinking', content: 'deep reasoning content', thinkingId: 't-time', collapsed: undefined, ...over },
       global: { stubs: { MarkdownRenderer: MdStub } },
     })
+  }
+
+  /** V2/V3 断言口径：槽未悬停视觉隐藏（opacity-0），悬停/键盘焦点两翼显现类在场 */
+  function expectHoverVisibility(slot: { classes(): string[] }, group: string): void {
+    expect(slot.classes()).toContain('opacity-0')
+    expect(slot.classes()).toContain(`group-hover/${group}:opacity-100`)
+    expect(slot.classes()).toContain(`group-focus-within/${group}:opacity-100`)
   }
 
   it('A3 tool 块 startTime=1000/endTime=3000 → 槽文本 `2s·HH:MM:SS`（耗时 formatDuration(2000) + 时刻 formatClock(1000)）', () => {
@@ -602,5 +616,43 @@ describe('chat-flow-timestamp U2: Block 行尾时间槽（A3/A4）', () => {
     expect(textWrapper.find('[data-testid="text-time-slot"]').exists()).toBe(false)
     const thinkWrapper = mountThinkingTimeBlock({})
     expect(thinkWrapper.find('[data-testid="thinking-time-slot"]').exists()).toBe(false)
+  })
+
+  // ── D2 悬停化形态（V2/V3 的单测等价物；PR-2 探针结论：纯 CSS 手法下断言类名三件套）──
+
+  it('V2: text 块无常驻时刻——text-time-slot 带 opacity-0 + 悬停/键盘两翼显现类（group/text）', () => {
+    const wrapper = mountTextBlock({ messageTimestamp: 1000 })
+    const slot = wrapper.find('[data-testid="text-time-slot"]')
+    expect(slot.exists()).toBe(true)
+    expectHoverVisibility(slot, 'text')
+    // w-28 固定占位列已随悬停化移除（正文行恢复满宽），改 ml-auto 钉行尾
+    expect(slot.classes()).toContain('ml-auto')
+    expect(slot.classes()).not.toContain('w-28')
+  })
+
+  it('V2: thinking 块无常驻时刻——thinking-time-slot 三件套（group/think 行内已有命名分组容器）', () => {
+    const wrapper = mountThinkingTimeBlock({ messageTimestamp: 1000 })
+    const slot = wrapper.find('[data-testid="thinking-time-slot"]')
+    expect(slot.exists()).toBe(true)
+    expectHoverVisibility(slot, 'think')
+  })
+
+  it('V2: tool 块无常驻时刻——tool-time-slot 三件套（group/tool 行容器）', () => {
+    const wrapper = mountToolBlock(makeToolCall({ startTime: 1000, endTime: 3000 }))
+    const slot = wrapper.find('[data-testid="tool-time-slot"]')
+    expect(slot.exists()).toBe(true)
+    expectHoverVisibility(slot, 'tool')
+  })
+
+  it('V3: 三槽 group 容器在 DOM（悬停移开后回落 opacity-0 默认态 = 移开消失的结构前提）', () => {
+    // 移开消失 / 不常驻的结构前提 = 显现类挂在 group 伪类上、默认态只有 opacity-0；
+    // 本断言锁定三槽默认类集合不含任何恒显 opacity 类（如 opacity-100）
+    const textWrapper = mountTextBlock({ messageTimestamp: 1000 })
+    const textSlot = textWrapper.find('[data-testid="text-time-slot"]')
+    expect(textSlot.classes()).not.toContain('opacity-100')
+    const toolWrapper = mountToolBlock(makeToolCall({ startTime: 1000, endTime: 3000 }))
+    expect(toolWrapper.find('[data-testid="tool-time-slot"]').classes()).not.toContain('opacity-100')
+    const thinkWrapper = mountThinkingTimeBlock({ messageTimestamp: 1000 })
+    expect(thinkWrapper.find('[data-testid="thinking-time-slot"]').classes()).not.toContain('opacity-100')
   })
 })

@@ -33,18 +33,20 @@
                emoji 21px，CJK 行被裁 2-5px）；无单位系数使行盒恒 = 系数×字号，字体无关。 -->
           <span
             v-if="working && thinkingTailLines.length > 0"
-            class="flex h-[1lh] min-w-0 flex-1 justify-end overflow-hidden text-[length:var(--text-sm)] leading-normal text-neutral-dim"
+            class="flex h-[1lh] min-w-0 flex-1 justify-end overflow-hidden text-[length:var(--text-xs)] leading-normal text-neutral-dim"
             :class="thinkingExpanded ? 'invisible' : ''"
           >
             <span class="mr-auto flex flex-col items-end self-start" :style="thinkScrollStyle">
               <span v-for="(line, i) in thinkDisplayLines" :key="i" class="whitespace-nowrap">{{ line }}</span>
             </span>
           </span>
-          <span v-else class="flex-1 min-w-0 truncate text-[length:var(--text-sm)] text-neutral-dim" :class="thinkingExpanded ? 'invisible' : ''">{{ previewText }}</span>
-          <!-- thinking 块行尾时刻 -->
-          <span v-if="messageTimestamp" class="ml-auto shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums" data-testid="thinking-time-slot">{{ formatClock(messageTimestamp) }}</span>
+          <span v-else class="flex-1 min-w-0 truncate text-[length:var(--text-xs)] text-neutral-dim" :class="thinkingExpanded ? 'invisible' : ''">{{ previewText }}</span>
+          <!-- thinking 块行尾时刻（D2 悬停化：常驻改按需——悬停该行 / 键盘焦点进入该行才显现） -->
+          <span v-if="messageTimestamp" class="ml-auto shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity group-hover/think:opacity-100 group-focus-within/think:opacity-100" data-testid="thinking-time-slot">{{ formatClock(messageTimestamp) }}</span>
         </div>
-        <!-- 展开内容区：copy 按钮在左上角，始终可见（BlockScrollBox 外层，层级不动） -->
+        <!-- 展开内容区：copy 按钮浮在左上角（BlockScrollBox 外层，层级不动）。按钮常驻 DOM 且
+             层级固定，可见度由悬停控制（opacity-0 + group-hover/result:opacity-100）——
+             「始终可见」指常驻 DOM 与层级，非视觉常显。 -->
         <Transition name="block-expand">
         <div v-if="thinkingExpanded" class="group/result relative mt-1 pl-4 text-[length:var(--text-sm)] leading-[1.7] text-neutral-mid">
           <Button
@@ -67,12 +69,13 @@
       </div>
     </div>
 
-    <!-- 正文 text 块：全 inline 统一正文样式（text-base/leading-7），颜色跟所属 assistant streaming 态
-         （streaming→neutral-mid，complete/缺省→neutral-fg，单调不随兄弟 message 翻转）。
+    <!-- 正文 text 块：全 inline 统一正文样式（text-md/leading-7，D5 行类型定档 15px），颜色跟所属
+         assistant streaming 态（streaming→neutral-mid，complete/缺省→neutral-fg，单调不随兄弟
+         message 翻转）。group/text 命名分组承载行尾时刻的悬停/键盘聚焦两翼显现。
          streaming-tail 光标在 Turn.vue trace 容器末尾（跟在所有 block 后，不受 contentBlocks 时序影响）。
          [M2 形态统一] 唯一 error 形态 = 追加形态：content 崩溃前正文保持原色（可为空），
          msg.error 独立 danger 行（错误文本只住 error 字段，永不染红正文）。 -->
-    <div v-else-if="type === 'text'" data-testid="block-text" class="flex items-start gap-2 pb-2 text-[length:var(--text-base)] leading-7" :class="textColorClass">
+    <div v-else-if="type === 'text'" data-testid="block-text" class="group/text flex items-start gap-2 pb-2 text-[length:var(--text-md)] leading-7" :class="textColorClass">
       <div class="min-w-0 flex-1">
         <MarkdownRenderer v-if="content" :content="content ?? ''" :session-id="sessionId ?? undefined" :streaming="streaming" />
         <!-- error 独立 danger 行（AlertCircle + msg.error 文本） -->
@@ -81,8 +84,9 @@
           <span class="min-w-0 flex-1 whitespace-pre-wrap">{{ error }}</span>
         </div>
       </div>
-      <!-- text 块行尾时刻 -->
-      <span v-if="messageTimestamp" class="w-28 shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums" data-testid="text-time-slot">{{ formatClock(messageTimestamp) }}</span>
+      <!-- text 块行尾时刻（D2 悬停化：原 w-28 固定占位列随悬停化一并移除，正文行恢复满宽；
+           ml-auto 钉行尾，悬停/键盘焦点进入该行才显现） -->
+      <span v-if="messageTimestamp" class="ml-auto shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity group-hover/text:opacity-100 group-focus-within/text:opacity-100" data-testid="text-time-slot">{{ formatClock(messageTimestamp) }}</span>
     </div>
 
     <!-- tool_call 块：默认 1 行收起（streaming/running 也收起），header 含摘要，点击展开详情。
@@ -136,8 +140,9 @@
         </div>
       </div>
 
-      <!-- ── 普通 tool 块：1 行收起（header 含 toolName+argPath 摘要+状态），点击展开详情 ── -->
-      <div v-else>
+      <!-- ── 普通 tool 块：1 行收起（header 含 toolName+argPath 摘要+状态），点击展开详情。
+           group/tool 命名分组承载行尾时刻槽的悬停/键盘聚焦两翼显现（D2）── -->
+      <div v-else class="group/tool">
         <div
           data-testid="tool-block-header"
           class="tool-header flex min-w-0 cursor-pointer select-none items-center gap-1.5 text-[length:var(--text-sm)] font-medium transition-opacity hover:opacity-80"
@@ -161,8 +166,8 @@
             </span>
           </span>
           <span v-else-if="argPath" class="min-w-0 normal-case tracking-normal text-neutral-dim truncate" :class="{ invisible: toolExpanded && isBashTool }">· {{ shortenForHeader(argPath) }}</span>
-          <!-- tool 块行尾槽：耗时 · 时刻 -->
-          <span v-if="tool?.startTime" class="ml-auto shrink-0 flex items-center gap-1 font-mono text-[length:var(--text-2xs)] tabular-nums" data-testid="tool-time-slot">
+          <!-- tool 块行尾槽：耗时 · 时刻（D2 悬停化：悬停该行 / 键盘焦点进入该行才显现） -->
+          <span v-if="tool?.startTime" class="ml-auto shrink-0 flex items-center gap-1 font-mono text-[length:var(--text-2xs)] tabular-nums opacity-0 transition-opacity group-hover/tool:opacity-100 group-focus-within/tool:opacity-100" data-testid="tool-time-slot">
             <span v-if="toolDuration" :class="isRunning ? 'text-accent' : 'text-neutral-dim'">{{ toolDuration }}</span>
             <span v-if="toolDuration" class="text-neutral-faint">·</span>
             <span class="text-neutral-dim">{{ formatClock(tool.startTime) }}</span>
@@ -423,14 +428,13 @@ const headerBlockIcon = computed(() => {
 })
 
 /** 普通 tool header 状态色：running 染 accent，failed 染 danger（错误醒目），
- *  completed 置灰降两档（feat-chat-flow-dim）：neutral-fg → mid → dim（#74747a）。
- *  dim 3.56:1 不过 AA（critique 第 3 轮曾据此禁用），用户实测 mid 档置灰感不足、
- *  明确裁决再降一档——可读性让位于「完成块扫视即灰」的层级对比，此裁决仅限
- *  过程块折叠 header（正文/输出内容不适用）。unfinished 与 completed 同档中性灰（abort/中断非失败，不标 danger 防 abort 满屏红误读）。 */
+ *  其余（completed/unfinished，abort/中断非失败不标 danger 防 abort 满屏红误读）
+ *  按 D5 行类型定档染 --neutral-mid（工具行层级明度；行层级由「字号 × 明度」拉开，
+ *  见 ui-signal-density §3.3 D5，取代旧 feat-chat-flow-dim 的 dim 档裁决）。 */
 const toolStatusClass = computed(() => {
   if (isRunning.value) return 'text-accent'
   if (isFailed.value) return 'text-danger'
-  return 'text-neutral-dim'
+  return 'text-neutral-mid'
 })
 
 /** workflow 顶层 input 安全读取（拍平 schema：action/name/slug/args/runId 都在顶层；runId 仅 schema 描述——run 动作调用时刻 runId 尚未由引擎生成、不可得，组件不读该字段，run 定位经 (name, slug) 反查，见 openWorkflowDrawer 注释与设计 §5 检查点④核实结论） */

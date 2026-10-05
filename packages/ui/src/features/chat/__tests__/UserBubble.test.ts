@@ -66,7 +66,7 @@ describe('W4TC3: UserBubble 展示态', () => {
   it('展示态 hover actions 容器存在（group-hover 可见）', () => {
     const wrapper = mountBubble()
     // hover actions 容器：opacity-0 group-hover:opacity-100
-    const actions = wrapper.find('.group\\/user .opacity-0')
+    const actions = wrapper.find('.group\\/user > .opacity-0')
     expect(actions.exists()).toBe(true)
     // 容器内至少有 1 个 button（复制）
     expect(actions.findAll('button').length).toBeGreaterThanOrEqual(1)
@@ -75,19 +75,19 @@ describe('W4TC3: UserBubble 展示态', () => {
   it('canEdit=true + 非 sessionEditable → 编辑按钮存在', () => {
     const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
     // hover actions 容器内有 3 个 button（复制 + 编辑 + 撤回 [U5]）
-    const actions = wrapper.find('.group\\/user .opacity-0')
+    const actions = wrapper.find('.group\\/user > .opacity-0')
     expect(actions.findAll('button').length).toBe(3)
   })
 
   it('canEdit=false → 复制 + 撤回按钮（编辑不显示）', () => {
     const wrapper = mountBubble({ canEdit: false })
-    const actions = wrapper.find('.group\\/user .opacity-0')
+    const actions = wrapper.find('.group\\/user > .opacity-0')
     expect(actions.findAll('button').length).toBe(2)
   })
 
   it('isSessionEditable=true → 复制 + 撤回按钮（活跃态禁止编辑，撤回入口不受限）', () => {
     const wrapper = mountBubble({ canEdit: true, isSessionEditable: true })
-    const actions = wrapper.find('.group\\/user .opacity-0')
+    const actions = wrapper.find('.group\\/user > .opacity-0')
     expect(actions.findAll('button').length).toBe(2)
   })
 })
@@ -346,7 +346,7 @@ describe('W4TC3: UserBubble 编辑态', () => {
   it('canEdit=true 点编辑按钮 → 进入编辑态 + emit edit-state-change', async () => {
     const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
     // hover actions 容器的第 2 个 button 是编辑（[U5] 撤回按钮在编辑之后，index 2）
-    const actions = wrapper.find('.group\\/user .opacity-0')
+    const actions = wrapper.find('.group\\/user > .opacity-0')
     const buttons = actions.findAll('button')
     expect(buttons.length).toBe(3)
     // 点编辑按钮
@@ -358,7 +358,7 @@ describe('W4TC3: UserBubble 编辑态', () => {
 
   it('编辑态渲染 textarea', async () => {
     const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
-    const actions = wrapper.find('.group\\/user .opacity-0')
+    const actions = wrapper.find('.group\\/user > .opacity-0')
     const buttons = actions.findAll('button')
     await buttons[1].trigger('click')
     // 编辑态有 textarea
@@ -367,7 +367,7 @@ describe('W4TC3: UserBubble 编辑态', () => {
 
   it('编辑态取消 → emit edit-state-change false', async () => {
     const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
-    const actions = wrapper.find('.group\\/user .opacity-0')
+    const actions = wrapper.find('.group\\/user > .opacity-0')
     const buttons = actions.findAll('button')
     await buttons[1].trigger('click')
     // 编辑态内有取消按钮（variant="ghost"）
@@ -385,7 +385,7 @@ describe('W4TC3: UserBubble 编辑态', () => {
   // 只能靠这条 emit 复位。C2 实测：onUnmounted 内 emit 父监听器可达。
   it('编辑态中卸载 → 父组件收到 { editing: false, turnKey }（D3 卸载清理）', async () => {
     const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
-    const actions = wrapper.find('.group\\/user .opacity-0')
+    const actions = wrapper.find('.group\\/user > .opacity-0')
     const buttons = actions.findAll('button')
     await buttons[1].trigger('click')
     expect(wrapper.emitted('edit-state-change')!.length).toBe(1)
@@ -412,7 +412,7 @@ describe('[D3] submitEdit 双发锁', () => {
         stubs: { MarkdownRenderer: true, ImageThumb: true },
       },
     })
-    const actions = wrapper.find('.group\\/user .opacity-0')
+    const actions = wrapper.find('.group\\/user > .opacity-0')
     await actions.findAll('button')[1]!.trigger('click')
     await wrapper.find('textarea').setValue(draft)
     return { wrapper, editAndResend }
@@ -479,7 +479,7 @@ describe('[MF-2] submitEdit 编辑重发 slash 段不翻倍', () => {
   it('草稿展示归位全文（命令可见可改）→ 直接发送：prompt = `/compact 总结`（命令仅一次）', async () => {
     const prompts: string[] = []
     const wrapper = mountCommandMessage(prompts)
-    await wrapper.find('.group\\/user .opacity-0').findAll('button')[1]!.trigger('click')
+    await wrapper.find('.group\\/user > .opacity-0').findAll('button')[1]!.trigger('click')
     expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('/compact 总结')
     const sendBtn = wrapper.findAll('button').find((b) => b.text().includes('panel.composer.send'))
     expect(sendBtn).toBeDefined()
@@ -492,7 +492,7 @@ describe('[MF-2] submitEdit 编辑重发 slash 段不翻倍', () => {
   it('用户改了正文后发送：prompt 命令仍仅一次且与命令名一致', async () => {
     const prompts: string[] = []
     const wrapper = mountCommandMessage(prompts)
-    await wrapper.find('.group\\/user .opacity-0').findAll('button')[1]!.trigger('click')
+    await wrapper.find('.group\\/user > .opacity-0').findAll('button')[1]!.trigger('click')
     await wrapper.find('textarea').setValue('/compact 总结一下')
     const sendBtn = wrapper.findAll('button').find((b) => b.text().includes('panel.composer.send'))
     await sendBtn!.trigger('click')
@@ -503,7 +503,7 @@ describe('[MF-2] submitEdit 编辑重发 slash 段不翻倍', () => {
   it('用户改命令名（/compact → /goal）：prompt 只含新命令，旧命令不残留', async () => {
     const prompts: string[] = []
     const wrapper = mountCommandMessage(prompts)
-    await wrapper.find('.group\\/user .opacity-0').findAll('button')[1]!.trigger('click')
+    await wrapper.find('.group\\/user > .opacity-0').findAll('button')[1]!.trigger('click')
     await wrapper.find('textarea').setValue('/goal 总结')
     const sendBtn = wrapper.findAll('button').find((b) => b.text().includes('panel.composer.send'))
     await sendBtn!.trigger('click')
@@ -542,7 +542,7 @@ describe('[轮 3] submitEdit 编辑重发 skill 段标记不翻倍', () => {
   }
 
   async function submitDraft(wrapper: ReturnType<typeof mount>, draft?: string) {
-    await wrapper.find('.group\\/user .opacity-0').findAll('button')[1]!.trigger('click')
+    await wrapper.find('.group\\/user > .opacity-0').findAll('button')[1]!.trigger('click')
     if (draft !== undefined) await wrapper.find('textarea').setValue(draft)
     const sendBtn = wrapper.findAll('button').find((b) => b.text().includes('panel.composer.send'))
     expect(sendBtn).toBeDefined()
@@ -552,7 +552,7 @@ describe('[轮 3] submitEdit 编辑重发 skill 段标记不翻倍', () => {
   it('草稿回填标记文本 → 直接提交：prompt 标记仅一次（修复前为两次）', async () => {
     const prompts: string[] = []
     const wrapper = mountSkillMessage(prompts)
-    await wrapper.find('.group\\/user .opacity-0').findAll('button')[1]!.trigger('click')
+    await wrapper.find('.group\\/user > .opacity-0').findAll('button')[1]!.trigger('click')
     expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe(`正文${MARKER}`)
     const sendBtn = wrapper.findAll('button').find((b) => b.text().includes('panel.composer.send'))
     await sendBtn!.trigger('click')
@@ -577,9 +577,13 @@ describe('[轮 3] submitEdit 编辑重发 skill 段标记不翻倍', () => {
   })
 })
 
-/* ── [chat-flow-timestamp U2] UserBubble 行尾时刻（设计 §3 A4）──
+/* ── [chat-flow-timestamp U2 + D2 悬停化] UserBubble 行尾时刻 ──
  * turn.user.timestamp 有值 → 气泡左侧 user-timestamp 槽显本地时刻；编辑态（textarea 分支）
  * 与展示态是 v-if / v-else 互斥分支，编辑态下整个展示分支（含时间槽）被替换。
+ * [D2] 槽从常驻改悬停按需：DOM 恒在（timestamp 有值时），可见度由
+ * `opacity-0 + group-hover/ts:opacity-100 + group-focus-within/ts:opacity-100` 三件套控制
+ * （时刻与气泡同处 group/ts 行；悬停该行 / 键盘焦点进入该行两翼显现）。happy-dom 无真实
+ * hover（PR-2 探针结论：纯 CSS 手法下断言类名三件套，V2/V3 的形态等价物）。
  * 期望时刻用本地 Date getter 构造（clockOf，与 formatClock 同口径；禁硬编码时区串）。 */
 function clockOf(ms: number): string {
   const d = new Date(ms)
@@ -587,7 +591,7 @@ function clockOf(ms: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
-describe('chat-flow-timestamp U2: UserBubble 行尾时刻（A4）', () => {
+describe('chat-flow-timestamp U2: UserBubble 行尾时刻（A4 + D2 悬停化）', () => {
   // 固定 epoch（非 Date.now()）：失败时可复现的确定值
   const USER_TS = 1700000000000
 
@@ -604,11 +608,23 @@ describe('chat-flow-timestamp U2: UserBubble 行尾时刻（A4）', () => {
     expect(slot.text().replace(/\s+/g, '')).toBe(clockOf(USER_TS))
   })
 
+  it('V2: user-timestamp 无常驻时刻——opacity-0 默认隐藏 + 悬停/键盘焦点两翼显现类（group/ts 行）', () => {
+    const wrapper = mountBubble({ turn: makeTurnWithTs() })
+    const slot = wrapper.find('[data-testid="user-timestamp"]')
+    expect(slot.exists()).toBe(true)
+    // 未悬停视觉隐藏
+    expect(slot.classes()).toContain('opacity-0')
+    expect(slot.classes()).not.toContain('opacity-100')
+    // 悬停该行 / 键盘焦点进入该行两翼显现
+    expect(slot.classes()).toContain('group-hover/ts:opacity-100')
+    expect(slot.classes()).toContain('group-focus-within/ts:opacity-100')
+  })
+
   it('编辑态不渲染 user-timestamp 槽（v-if/v-else 互斥：编辑分支替换含时间槽的展示分支）', async () => {
     // 编辑态触发与上方编辑态组同款：canEdit=true + 非 sessionEditable + hover actions 第 2 个按钮
     // （该触发在本测试环境轻量可行，故直测而非仅靠 v-if 语义说明）
     const wrapper = mountBubble({ turn: makeTurnWithTs(), canEdit: true, isSessionEditable: false })
-    const actions = wrapper.find('.group\\/user .opacity-0')
+    const actions = wrapper.find('.group\\/user > .opacity-0')
     await actions.findAll('button')[1]!.trigger('click')
     // 已进入编辑态（textarea 渲染）
     expect(wrapper.find('textarea').exists()).toBe(true)

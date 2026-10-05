@@ -100,5 +100,7 @@ export const RUNNING_LOADER_SVG: string =
  * （toolName / name / slug 均 13px）同档，层级由色彩承担而非缩到 11px。
  */
 export const BLOCK_ICON_CLASS = 'size-3.5 shrink-0 text-neutral-ico hover:text-neutral-ico-hover'
+/** 动作词 label（思考 / 执行工具 / WORKFLOW. / SUBAGENT. 前缀）：D5 提权——字重 600、
+ *  颜色抬到 --neutral-fg，让动作词在「字号 × 明度」行类型分层中成为行的视觉锚点。 */
 export const BLOCK_LABEL_CLASS =
-  'mr-0.5 inline-block shrink-0 whitespace-nowrap text-[length:var(--text-sm)] font-medium text-neutral-dim'
+  'mr-0.5 inline-block shrink-0 whitespace-nowrap text-[length:var(--text-sm)] font-semibold text-neutral-fg'
