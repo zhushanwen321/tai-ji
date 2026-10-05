@@ -424,6 +424,8 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **登记**：无新约束族（调用意图经函数名区分，语义边界由 coordination.ts 的 D1/D10 注释锚点与测试钉住）；实装 = `packages/core/src/domain/drawer/coordination.ts`。设计文档 `.tmp/tech-design/workflow-visualization.md`（不入库，过程产物）；本条即该决策的现行登记处。
 
+> **补记（2026-10-06，workflow-overlay-refine D2，header 形态修订）**：workflow-visualization（2026-10-02）交付的 overlay「双 header」形态——壳 header 与 `WorkflowLivePanel.vue` 自身 header 行（状态 pill / elapsed / args）并存——已被该设计 D2 修订为**单 header** 终态：LivePanel 自身 header 行删除（面板顶部直接从 L2TabBar 开始，run 状态要素由壳 header 单点呈现），args 整体不进 header（用户 v5 终裁：真实形态是 JSON 串、扫读价值低）。本条登记的入口语义分立与回落链不受影响；overlay 现行结构以该形态为准。
+
 ### ADR-0105 workflow DAG 静态解析器落 subagent-core（2026-10-02 设计裁决，workflow-visualization §3.2 解析位置 A 方案）
 **决策**：`scriptSource → DAG JSON` 静态解析器（acorn 解析；节点/边/phase 分区/条件谓词/并行组/循环回边/调用点行号；模板名保留；不支持语法 fail-fast 结构化错误）落 **subagent-core**（workflow 编排核心包）——解析器紧邻 script-lint 与 record 写入点，与引擎 CLI 包（pi-subagent-cli / zcode-subagent-cli）无关（引擎包被边界禁止依赖 core）；解析产物作为 run 数据的派生物经 `session.getWorkflowDag(runId)` RPC 透出（runtime 读该 run record 的 `run-created` scriptSource，调 core 解析器，runId 内存缓存、仅缓存成功结果）。到达 renderer 的链路 = runtime tsup bundle（noExternal inline core）。**acorn 依赖只声明在 subagent-core**（runtime 不声明——runtime tsup 对自身 dependencies 默认 external，声明错位会致打包态断链）。
 

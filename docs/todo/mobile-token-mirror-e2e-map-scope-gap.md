@@ -1,18 +1,18 @@
 # 移动壳 token 镜像的 e2e-map scope 缺口（packages/mobile-renderer/** 无 rule 覆盖）
 
-状态：缺口已登记、修复待 U9 同 commit 完成（兜底 = `mobile-token-mirror-parity.test.ts` 镜像一致性单测，随令牌镜像改动落地）。登记来源：ui-signal-density 设计 D3 移动壳镜像条 + §4.2（v7 登记，v8 补触发条件）
+状态：已解决（2026-10-06 定案）——scope 登记与镜像一致性单测均已落地：`docs/testing/e2e-map.json` 的 E2E-VISUAL-01 增补 `packages/mobile-renderer/src/styles/**` scope；`packages/renderer/src/__tests__/mobile-token-mirror-parity.test.ts` 机器断言两文件逐字一致。登记来源：ui-signal-density 设计 D3 移动壳镜像条 + §4.2（v7 登记，v8 补触发条件）
 
-## 缺口
+## 缺口（背景）
 
-`docs/testing/e2e-map.json` 全部 62 条 rule 的 scope 无一条覆盖 `packages/mobile-renderer/**`（设计期已 read 全量 scope 核实）。该目录下的 `styles/tokens.css` 是 renderer `style.css` tokens 段的**镜像副本**（文件头注释自述「真值源仍是 renderer style.css（SSOT: docs/DESIGN.md §4）……改动须同步两处」），只改桌面侧时移动壳静默漂移不会触发任何 e2e。
+`docs/testing/e2e-map.json` 全部 62 条 rule 的 scope 此前无一条覆盖 `packages/mobile-renderer/**`（设计期已 read 全量 scope 核实）。该目录下的 `styles/tokens.css` 是 renderer `style.css` tokens 段的**镜像副本**（文件头注释自述「真值源仍是 renderer style.css（SSOT: docs/DESIGN.md §4）……改动须同步两处」），只改桌面侧时移动壳静默漂移不会触发任何 e2e。
 
-## 修复动作（触发条件：任一 accent 令牌族改动落地时）
+## 定案登记（触发条件：任一 accent 令牌族改动落地时）
 
-给 e2e-map 增补覆盖 `packages/mobile-renderer/**` 的 scope 登记（归属承载该镜像消费面的 rule），或显式记「本次不适用 + 理由」——不许无记录跳过。
-
-- **ui-redesign-combined 文档回写批（本登记批次）不适用**：本批只改 `docs/` 文档，不改 `packages/mobile-renderer/` 任何文件，无新增触发面。
-- scope 登记与 `packages/renderer/src/__tests__/mobile-token-mirror-parity.test.ts`（把「人读对读」升级为机器断言：两文件 `:root` 玄块三值 + 派生式逐字相等）随令牌镜像值改动同 commit 落地，由该单元（U9）承接。
+- **触发与兑现**：accent 令牌族改动（renderer `style.css` 与移动壳 `tokens.css` 双侧 `:root` 玄块三值）落地，scope 登记随同批完成，无无记录跳过。
+- **scope 归属裁决**：E2E-VISUAL-01（像素 diff 轨）——令牌镜像值变更与桌面令牌同属视觉触发面（accent 变更触发基线重录，见该 rule note 的 2026-10-06 D3 段），行为轨（E2E-MOCK-01 / E2E-ELECTRON-01）不承载令牌值变更。
+- **登记范围** = `packages/mobile-renderer/src/styles/**`（镜像宿主目录，进 `--check` 门禁 watched roots）；`packages/mobile-renderer/**` 其余子目录不在本缺口射程（设计 D3 只触及令牌镜像宿主，移动壳其余 UI 的 e2e 覆盖另议）。
+- **机器兜底**：`packages/renderer/src/__tests__/mobile-token-mirror-parity.test.ts`（断言面 = 两文件 `:root` 玄块三值 + 派生式逐字相等）。
 
 ## 兜底现状
 
-镜像同步目前只有 `tokens.css` 文件头注释一处口头约束、没有双侧机器检查。镜像一致性单测落地前，改桌面令牌须人工同步检查移动壳镜像。
+镜像一致性由 `mobile-token-mirror-parity.test.ts`（镜像一致性单测）机器断言 + E2E-VISUAL-01 scope 覆盖镜像宿主目录；改桌面令牌不同步移动壳会被单测拦截。

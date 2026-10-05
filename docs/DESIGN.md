@@ -266,7 +266,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 ```css
 /* 主色（玄 = 近无彩度底 + 一枚贯穿全应用的弱蓝灰；彩度「依稀」量级，可寻不与状态色争语义）*/
 --accent:        #a5adc2;
---accent-hover:  #e0e0e4;
+--accent-hover:  #b5bdd4;  /* accent 等色相提亮一档（OKLCh dL≈0.052，与其余 preset 同模式） */
 --accent-soft:   color-mix(in oklch, var(--accent) 10%, transparent);  /* 派生 */
 --accent-ring:   color-mix(in oklch, var(--accent) 30%, transparent);  /* 派生 */
 --accent-fg:     #1a1a1c;  /* accent 实色上的文字（玄主题用深字）*/
