@@ -18,21 +18,7 @@
 //   - 错误透传纪律：RPC error 应答（AppServerRpcError，含 code/message/data）原样
 //     上抛不吞不包装——R5 降级链按 code（-32601/-32602 漂移类）归类（§3.3 错误规格表）。
 //
-// 终态判定（D4 + 不变量 1）双保险：
-//   1. turn.terminal 权威：v4/telemetry/event {kind:"turn.terminal"} 到达即终态
-//      （success/error 均 算终态——旧实现实证：不归类会挂到超时）；
-//   2. 宽松匹配防洪堤：turn.terminal 缺失/迟到时，收尾帧（session/event
-//      payload.response 非空）即终态——防协议小漂移把任务挂死到超时预算。
-//   终态判定后：收尾帧数据（response/usage）仍吸收（它属终态数据不是增量回调，
-//   且与 turn.terminal 常在同一 stdout 批次到达）；迟到 delta 不再触发回调
-//   （不变量 2 的另一半：resolve 后不再发事件）。
-//
-// 连接崩溃的 turn 收割（R4 已补齐）：SessionChannel 在构造时订阅 AppServerConnection
-// 的 onClose 面——进程死亡（崩溃/我方杀链）时立即 fail 全部在途 turn（错误即连接层
-// 的崩溃 reason，含 stderr 尾部），turn 终局不再依赖任何时间预算。
-// （onClose 由连接层保证在全部在途 request reject 之后触发。）
-//
-// turn 终局判定（ADR-0112 事实驱动）：终局来源只有两个确定性事实——
+// turn 终局判定（D4 + 不变量 1；ADR-0112 事实驱动）：终局来源只有两个确定性事实——
 //   1. turn.terminal 权威：v4/telemetry/event {kind:"turn.terminal"} 到达即终态
 //      （success/error 均算终态——旧实现实证：不归类会挂到无终态等待）；
 //   2. 宽松匹配防洪堤：turn.terminal 缺失/迟到时，收尾帧（session/event
@@ -42,6 +28,11 @@
 //   （不变量 2 的另一半：resolve 后不再发事件）。
 //   无终态事件且连接存活 = 任务静默挂起（显式暴露，不建时间兜底自动回收；
 //   用户 abort 链 stop → killChain → onClose 收割为显式失败路径）。
+//
+// 连接崩溃的 turn 收割（R4 已补齐）：SessionChannel 在构造时订阅 AppServerConnection
+// 的 onClose 面——进程死亡（崩溃/我方杀链）时立即 fail 全部在途 turn（错误即连接层
+// 的崩溃 reason，含 stderr 尾部），turn 终局不再依赖任何时间预算。
+// （onClose 由连接层保证在全部在途 request reject 之后触发。）
 //
 // （原 turn 等待两 timer——idle 30min + 总上界 60min 墙钟——已按 ADR-0112
 // 「任务级正常路径禁止自带墙钟超时」删除，登记见 defense-mechanism-cleanup。）
