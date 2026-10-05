@@ -531,7 +531,16 @@ export class SessionRecords {
    * 降级投影。
    */
   private ensureProjection(sessionId: string, cache: RecordEntriesCache): SessionEventProjection {
-    if (cache.projection !== null) return cache.projection
+    if (cache.projection !== null) {
+      // [降级闩死修复 2026-10-02；event-push-channel 重演] 事件源迟到升级：创建时
+      // meta 不可得（pi flush 前窗口 / 磁盘扫描竞态）建出的目录缺席降级投影，推送
+      // 对其恒拒（applyJournalReport 目录守卫返回 false）——早退永久复用 = fold 通
+      // 道对该 session 终身死亡（「icon 无 agent」形态）。meta 可得后整投影重建：
+      // 事件源目录是构造期 readonly 注入，补源 = 换实例（entry 批重放 + attach 冷
+      // 读在新实例重演，fold 从磁盘事实源收敛）。
+      this.upgradeProjectionEventSources(sessionId, cache)
+      return cache.projection
+    }
     const meta = this.deps.sessionStore
       .scanSessions({ force: true })
       .find((s) => s.id === sessionId)
@@ -552,6 +561,29 @@ export class SessionRecords {
     projection.attach()
     this.syncCacheFromProjection(cache, projection)
     return projection
+  }
+
+  /**
+   * [降级闩死修复 2026-10-02] 降级投影升级腿（ensureProjection 早退分支内联调用）：
+   * 事件源已接线（任一目录非 undefined）零成本早退；缺席时重扫 meta，可得则补接线
+   * （attachEventSources：补目录 + 重跑 attach 冷读——seq 守卫去重，entry 批与 fold
+   * 状态原位保留）。meta 仍不可得 → 本轮跳过（下次读/写触点再试，不设定时器——
+   * 重试由既有读触点驱动）。tailer 时代的「补建 tailer」形态随 event-push-channel
+   * 退役：升级语义保留（补源 + 冷读 = 恢复读），换源落点从 tailer 工厂换成目录注入。
+   */
+  private upgradeProjectionEventSources(sessionId: string, cache: RecordEntriesCache): void {
+    const projection = cache.projection
+    if (projection === null || projection.hasEventSources()) return
+    const meta = this.deps.sessionStore
+      .scanSessions({ force: true })
+      .find((s) => s.id === sessionId)
+    if (meta === undefined) return
+    const cwd = meta.cwd
+    projection.attachEventSources({
+      recordsDir: typeof cwd === 'string' ? getSubagentRecordsDir(getPiAgentDir(), cwd) : undefined,
+      runJournalDir: join(dirname(meta.filePath), 'workflow-state'),
+    })
+    this.syncCacheFromProjection(cache, projection)
   }
 
   /**
@@ -640,7 +672,7 @@ export class SessionRecords {
             console.warn(`[session-service] refresh record entries via getEntries failed for ${sessionId}: ${toErrorMessage(e)}`)
             return
           }
-          const frames = this.applyRecordEntries(cache, fetched.entries, sessionId, fetched.fullRebuild, fetched.leafId)
+          this.applyRecordEntries(cache, fetched.entries, sessionId, fetched.fullRebuild, fetched.leafId, trigger, startedAt)
           if (fetched.leafId !== undefined) cache.cursor = fetched.leafId
           // [message-revoke U6d] 撤回失效在途命中：本轮是失效前捕获的增量轮（cursor 已被
           // 上方回写复活）——作废本轮结果，重跑全量（flag 在全量轮入口清除；两轮上限恰好
@@ -648,17 +680,9 @@ export class SessionRecords {
           if (cache.forceFullRebuild) continue
           // [pull-push W0] 首拉未决解除（拉取 + merge + 发布判定已完成一轮；发布与否随
           // 水位 diff——零帧轮同样解除，缓存腿健康即为目标状态）。
+          // 发布观测统一在发布腿（publishRecordChanges：每次发布一行，含 workflowFolds
+          // 证据与透传 trigger）——本拉取腿不再重复打点（W0 曾双写，一轮两行归因互相稀释）。
           cache.awaitingFirstPull = false
-          // [pull-push W0] 发布观测：水位门后有帧才落（稳态零帧零日志——S5 无噪声锚）；
-          // reconcile 触发的补发轮即 S5「缓存兜底」可检索事件（域键=frames、原因=trigger、耗时=elapsedMs）。
-          if (frames.length > 0) {
-            logger.info('[session-records] record frames published', {
-              sessionId,
-              trigger,
-              frames,
-              elapsedMs: Date.now() - startedAt,
-            })
-          }
           return
         }
       } finally {
@@ -730,6 +754,8 @@ export class SessionRecords {
     sessionId: string,
     isFullRebuild: boolean,
     leafId?: string,
+    trigger: RecordRefreshTrigger = 'invalidate',
+    roundStartedAt?: number,
   ): string[] {
     // [W1 / D6] entry 批换投影入口：v1 快照扫描 + v2 条目分类 + 事件 fold 双源
     // 单点合并（事件源胜出仲裁）全在投影内完成；步骤视图合并的输入源也从本处的
@@ -749,7 +775,7 @@ export class SessionRecords {
     mergePlanState(cache, scanPlanStateEntries(entries, isFullRebuild ? leafId : undefined), isFullRebuild)
 
     if (!this.deps.hasSession(sessionId)) return [] // session 已销毁：不 publish（防 bus 重建已 clearSession 的 entry）
-    return this.publishRecordChanges(cache, sessionId, 'invalidate')
+    return this.publishRecordChanges(cache, sessionId, trigger, roundStartedAt)
   }
 
   /**
