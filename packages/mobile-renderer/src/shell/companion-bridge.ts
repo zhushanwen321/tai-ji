@@ -154,7 +154,7 @@ export function useMobilePermissionRequest(): PermissionRequestState {
 
 /**
  * per-session form/planReview 请求分区（requestId 全局唯一，跨分区无重叠）。
- * 登记表主表 #52（声明处 @data-owner #52）——runtime 双源（bus ui-request 实时帧 +
+ * 登记表主表 #53（声明处 @data-owner #53）——runtime 双源（bus ui-request 实时帧 +
  * getPendingRequests 快照）的消费副本，写口 addFormRequest / removeFormRequests /
  * clearFormRequestsForSession 三函数封闭于本模块，清理点 = registerSessionCleanup（删除）
  * + resetCompanionChannelsForExitedSession（exited 分通道重置）。
