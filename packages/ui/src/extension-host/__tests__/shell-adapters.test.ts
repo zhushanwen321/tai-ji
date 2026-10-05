@@ -3,7 +3,7 @@
  *
  * 覆盖（自 renderer composables/shell 平移，行为语义全量保持）：
  * - createWsPluginMessageSource 过滤条件（FR1/AC1）：TC1 plugin:uiRequest 前缀放行 /
- *   TC1b plugin:viewUpdate / TC2 extension.ui_request 白名单放行 / TC3 extension.error 拒绝 /
+ *   TC1b plugin:viewUpdate / TC2 extension.dialog 白名单放行 / TC3 extension.error 拒绝 /
  *   TC4 plugin:statusBarUpdate 回归 / TC5 白名单 5 项字面量 + 行为级验证
  * - convertToDialogRequest 转换（FR2/AC2）：TC1-TC4（source 判定 / form 类键不透传 /
  *   options 归一 / method 超界恢复 + receivedAt）
@@ -113,14 +113,14 @@ describe('createWsPluginMessageSource 过滤条件（FR1/AC1）', () => {
     expect(emitted[0]).not.toMatchObject({ kind: 'error' })
   })
 
-  it('TC2: extension.ui_request 白名单放行 → bus 收到 kind=ui-request（与 plugin:uiRequest 归一）', () => {
+  it('TC2: extension.dialog 白名单放行 → bus 收到 kind=ui-request（与 plugin:uiRequest 归一）', () => {
     const { bus, bridge: b } = makeBridge()
     bridge = b
     const { emitted } = spyEmit(bus)
 
     dispatchCrossSession({
-      type: 'extension.ui_request',
-      payload: { sessionId: 's1', requestId: 'r1', method: 'confirm', title: '确认?' },
+      type: 'extension.dialog',
+      payload: { sessionId: 's1', requestId: 'r1', dialogKind: 'confirm', title: '确认?' },
     })
 
     expect(emitted).toHaveLength(1)
@@ -165,7 +165,7 @@ describe('createWsPluginMessageSource 过滤条件（FR1/AC1）', () => {
       'extension:status',
       'extension:notify',
       'extension:requestsInvalidated',
-      'extension.ui_request',
+      'extension.dialog',
     ])
 
     // 行为级一致性：白名单每项经全链路都产出对应 kind 事件（非 kind=error）。
@@ -177,7 +177,7 @@ describe('createWsPluginMessageSource 过滤条件（FR1/AC1）', () => {
       { type: 'extension:status', payload: { sessionId: 's1', statusKey: 'k', text: 'ready' } },
       { type: 'extension:notify', payload: { sessionId: 's1', message: 'hi', level: 'info' } },
       { type: 'extension:requestsInvalidated', payload: { sessionId: 's1', requestIds: ['r9'], reason: 'turn-aborted' } },
-      { type: 'extension.ui_request', payload: { sessionId: 's1', requestId: 'r1', method: 'select' } },
+      { type: 'extension.dialog', payload: { sessionId: 's1', requestId: 'r1', dialogKind: 'select' } },
     ]
     for (const s of samples) {
       const { bus, bridge: b } = makeBridge()

@@ -51,8 +51,8 @@ vi.mock('@/composables/useToast', () => ({
 import McpSection from '@/components/settings/mcp/McpSection.vue'
 import { pickRekaOption } from '../helpers/reka-select-harness'
 import { dispatchGlobal } from '@taiji/core/transport/api'
-import zhCN from '@/i18n/locales/zh-CN/settings'
-import enUS from '@/i18n/locales/en-US/settings'
+import zhCN from '@taiji/ui/locale/zh-CN/settings'
+import enUS from '@taiji/ui/locale/en-US/settings'
 import type { McpListResult, McpServerEntry, McpServerStatusBadge, McpServerEntryValue } from '@taiji/shared'
 
 function makeI18n() {

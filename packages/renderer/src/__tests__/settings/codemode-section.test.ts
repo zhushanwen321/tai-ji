@@ -39,8 +39,8 @@ vi.mock('@/composables/useToast', () => ({
 }))
 
 import SystemCodemodeSection from '@/components/settings/system/SystemCodemodeSection.vue'
-import zhCN from '@/i18n/locales/zh-CN/settings'
-import enUS from '@/i18n/locales/en-US/settings'
+import zhCN from '@taiji/ui/locale/zh-CN/settings'
+import enUS from '@taiji/ui/locale/en-US/settings'
 
 function makeI18n() {
   return createI18n({

@@ -120,7 +120,6 @@ export const SHUTDOWN_STEP_SEQUENCE = [
   'stop-memory-watermark-timer',
   'stop-watchdog',
   'cancel-pending-respawns',
-  'stop-idle-reaper',
   'flush-stores',
   'dispose-skill-registry',
   'dispose-git-head-watcher',

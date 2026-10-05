@@ -1515,7 +1515,7 @@ async function main(): Promise<void> {
     shutdownStep('cancel-pending-respawns')
     sessionService.cancelAllPendingRespawns()
     // [M4-a / M2-b 备忘清偿] btw 闲置扫描定时器收口（timer 已 unref 不阻塞退出，此处显式
-    // stop 是与上方 idle-reaper 同款的收口双保险；shutdown 后不再有回收拍）。线会话文件
+    // dispose 是收口双保险；shutdown 后不再有回收拍）。线会话文件
     // **不删**（退出不删，D5 裁决⑧）；线进程由下方 server.stop → destroyAll 统一杀（同一 pm）。
     btwService.dispose()
     console.log(`\n[runtime] received ${signal}, shutting down...`)
