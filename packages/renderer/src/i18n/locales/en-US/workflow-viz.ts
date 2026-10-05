@@ -59,7 +59,6 @@ export default {
     statusDone: 'Done',
     statusFailed: 'Failed',
     attemptLabel: 'attempt',
-    elapsedLabel: 'Elapsed {duration}',
     eventsEmpty: 'No event records yet',
     eventsNotFound: 'No event stream record for this run',
     eventsNotFoundHint: 'Legacy-format run or the record has been cleaned up; the event stream is unavailable',

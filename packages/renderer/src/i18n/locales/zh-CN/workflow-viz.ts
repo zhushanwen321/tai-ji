@@ -66,7 +66,6 @@ export default {
     statusDone: '完成',
     statusFailed: '失败',
     attemptLabel: '尝试',
-    elapsedLabel: '已用 {duration}',
     eventsEmpty: '暂无事件记录',
     eventsNotFound: '该 run 无事件流记录',
     eventsNotFoundHint: '旧格式 run 或记录已被清理，无法查看事件流',
