@@ -54,6 +54,9 @@ import {
 import { extractWorkflowsFromSessionFile } from './workflow-extractor.js'
 import { scanRecordFamilyEntriesFromSessionFile } from './session-file-extraction.js'
 import { SessionEventProjection } from './events-projection.js'
+// [event-push-channel] journal 事件推送消费方注册（constructor 内 setJournalReportSink）
+import { setJournalReportSink } from './journal-report-router.js'
+import type { SubagentJournalReport } from '@zhushanwen/extension-protocol'
 import { WorkflowRunEventsReader } from './workflow-run-events-reader.js'
 import type { WorkflowDagReply, WorkflowRunEventsReply } from '@taiji/shared'
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
@@ -249,12 +252,6 @@ export interface SessionRecordsDeps {
    * 供测试省略）；生产组合根恒接线，缺省时注入退化为 global-only 映射。
    */
   getSessionCwd?(sessionId: string): string | undefined
-  /**
-   * [W1 / D6] 事件 tailer 周期复查间隔注入面：生产缺省走 u0 tailer 缺省值
-   * （30s，macOS fs.watch 静默丢事件兜底上界）；测试注入短值驱动确定性增量
-   * （fake timers 下 advance 复查周期即续读，不依赖真实 watch 事件时序）。
-   */
-  eventTailerRecheckMs?: number
 }
 
 /** JSON 落盘缩进（全仓 JSON_INDENT = 2 约定）。 */
@@ -347,7 +344,14 @@ export class SessionRecords {
     // [A1 接线] 默认源 = 晚绑定占位（SessionService 构造期 registry 尚不存在，组合根
     // 后绑；测试默认装配无标记文本不触达映射）。
     private readonly injector: SkillInjector = new SkillInjector(new LateBoundSkillSource()),
-  ) {}
+  ) {
+    // [event-push-channel] journal 事件推送消费方注册：event-adapter marker 旁路经
+    // journal-report-router 送达本服务 → per-session 事件投影（applyJournalReport）。
+    // 进程级单 sink（runtime 单 SessionRecords 实例；后注册覆盖先注册对齐 inflight 出口先例）。
+    setJournalReportSink({
+      applyJournalReport: (sessionId, report) => this.applyJournalReport(sessionId, report),
+    })
+  }
 
   /**
    * 组装期订阅接线（D2③「换订阅者」）：向 lifecycle 注册本模块的缓存注册 handler。
@@ -495,7 +499,8 @@ export class SessionRecords {
    * 冷启动协议（设计 D6「冷启动 = 从头流式读一次，此后全增量」）：
    * 1. entry 源就位——scanRecordFamilyEntriesFromSessionFile 流式扫描会话文件
    *    （v1 快照 + v2 注册/终态条目，32MB 扫描上界，超界返回 null 留给兼容路径）；
-   * 2. 事件源 attach——两域目录 tailer 从文件头全量读（offset 续读此后增量）。
+   * 2. 事件源 attach——两域目录全量冷读（journal 事件账本 = 恢复读；此后的实时
+   *    增量由 journal 推送喂入，见 applyJournalReport）。
    * 两源幂等、次序不敏感；活跃会话的 get_entries 游标通道继续增量喂 entry 源。
    *
    * 目录派生：records = core getSubagentRecordsDir(agentDir, cwd)（单源，不再本侧
@@ -505,7 +510,7 @@ export class SessionRecords {
    * 目录折叠 `/\:`——cwd 含 `:` 或 `\` 时写侧探测落 agentDir 根、本侧推导落 session
    * 文件目录，run journal 源错位（与壳侧 slug 锚 process.cwd() 而非 session cwd 的
    * 限制同族，边缘场景登记不改；根治属 core 布局单源）。
-   * 会话 meta 不可得（pi 延迟写入 / 测试窄 mock）→ 无 tailer 的 entry-only
+   * 会话 meta 不可得（pi 延迟写入 / 测试窄 mock）→ 无事件源的 entry-only
    * 降级投影。
    */
   private ensureProjection(sessionId: string, cache: RecordEntriesCache): SessionEventProjection {
@@ -519,9 +524,6 @@ export class SessionRecords {
       recordsDir: typeof cwd === 'string' ? getSubagentRecordsDir(getPiAgentDir(), cwd) : undefined,
       runJournalDir: meta !== undefined ? join(dirname(meta.filePath), 'workflow-state') : undefined,
       onProjectionChange: () => this.onEventProjectionChange(sessionId),
-      ...(this.deps.eventTailerRecheckMs !== undefined
-        ? { recheckIntervalMs: this.deps.eventTailerRecheckMs }
-        : {}),
     })
     if (meta !== undefined) {
       const entries = scanRecordFamilyEntriesFromSessionFile(meta.filePath)
@@ -536,7 +538,27 @@ export class SessionRecords {
   }
 
   /**
-   * [W1 / D6] 事件源驱动的发布腿（信号形态不动，驱动源换投影变更）：tail 事件
+   * [event-push-channel] journal 事件推送喂入（event-adapter marker 旁路 →
+   * journal-report-router → 本方法）：报告送达该 session 的事件投影（同步应用 =
+   * 域校验 + seq 缺口判定 + 缺口补读 + fold）→ 派生缓存同步 → 水位发布。
+   *
+   * 投影未就绪（缓存/投影未建）→ 返回 false（不回 ack，写侧按 D5 失败折叠）——
+   * 事件不丢：投影创建时 attach() 全目录冷读从磁盘收敛（推送丢弃窗口被冷读覆盖）。
+   * 同步应用（fold 与补读均为同步文件读）= 生效回执（D7）的前提。
+   */
+  private applyJournalReport(sessionId: string, report: SubagentJournalReport): boolean {
+    const cache = this.recordEntriesCaches.get(sessionId)
+    const projection = cache?.projection
+    if (!cache || projection === null || projection === undefined) return false
+    if (!projection.applyJournalReport(report)) return false
+    this.syncCacheFromProjection(cache, projection)
+    if (!this.deps.hasSession(sessionId)) return true // 已销毁：fold 已应用但不 publish（与 entry 路径同守卫）
+    this.publishRecordChanges(cache, sessionId)
+    return true
+  }
+
+  /**
+   * [W1 / D6] 事件源驱动的发布腿（信号形态不动，驱动源换投影变更）：事件喂入
    * → 投影重算 → 水位 diff → 按差异发布。与 entry 批路径（applyRecordEntries 统一
    * 发布）共用同一 publishRecordChanges 与送达水位，发布门单点。
    */

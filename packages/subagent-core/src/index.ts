@@ -134,6 +134,13 @@ export {
   setInFlightListener,
   getInFlightSnapshot,
 } from "./execution/engine/inflight-snapshot.ts";
+// journal 落盘事件出口（event-push-channel W-P1）：run/record 两域落盘提交点经
+// notifyJournalAppended 推给壳层 reporter（setJournalAppendListener 注册）——
+// 壳层经 select marker 通道带回执推送 runtime，派生视图改推送喂入（watch 族退役）。
+export {
+  setJournalAppendListener,
+  notifyJournalAppended,
+} from "./execution/persistence/journal-notify.ts";
 // W3 后内核宿主 = engine/host（在途推送迁移点 = Continuation arm/disarm 与 EngineClient
 // 反向通道镜像桥接），模块本体不经 engines/pi。
 // maxTurnsToWatchdogMs 为 maxTurns→watchdog 毫秒换算（U3/U4 / D7，floor 语义
@@ -320,12 +327,11 @@ export {
   type RecordSettledEvent,
   applyRecordEvent,
 } from "./execution/persistence/record-events.ts";
+// [event-push-channel W-P3] event-tail 的目录 watch 族已退役——journal 实时性归推送
+// 通道，本模块只保留补读与恢复读原语。
 export {
-  createEventDirectoryTailer,
   readEventTail,
   splitCompleteLines,
-  type EventDirectoryTailer,
-  type EventDirectoryTailerOptions,
   type EventLineParser,
   type EventTailChunk,
 } from "./execution/persistence/event-tail.ts";

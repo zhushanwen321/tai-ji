@@ -30,6 +30,9 @@ import { zcodeRefOf } from "./record-store-rebuild.ts";
 import * as fs from "node:fs";
 
 import { SUBAGENT_RECORD_CUSTOM_TYPE } from "./record-entry.ts";
+// [event-push-channel W-P1] journal 落盘事件出口：落盘提交点把新事件推给壳层
+// reporter（select marker 通道带回执推送 runtime 派生视图）。
+import { notifyJournalAppended } from "./journal-notify.ts";
 import {
   INITIAL_RECORD_EVENT_FOLD_STATE,
   applyRecordEvent,
@@ -528,6 +531,10 @@ export class RecordEventsWriteFace {
     return this.journal
       .append(id, input)
       .then((full) => {
+        // [event-push-channel W-P1] 落盘提交点推送：推送语义与事实源同点（推的就是
+        // 刚落盘的行）。fire-and-forget（出口回调内部自行合并缓冲），失败不反噬落盘
+        // 主链——完整性由消费方 seq 缺口补读收敛。
+        notifyJournalAppended("record", id, [full]);
         const now = this.foldCache.get(id);
         if (now === undefined || full.seq <= now.lastSeq) return; // 并发清理 / 缓存已含或已领先（连续 append 正常态）
         if (full.seq > now.lastSeq + 1) {

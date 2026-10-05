@@ -21,6 +21,9 @@ import type { IProcessManager, IPiEngine } from '../../ports/pi-engine.js'
 import type { ISessionStore } from '../../ports/session.js'
 import type { SessionRecordsDeps } from '../session-records.js'
 import { SessionRecords } from '../session-records.js'
+// [event-push-channel] journal 推送喂入生产路径路由（SessionRecords 构造期注册 sink）
+import { routeJournalReport } from '../journal-report-router.js'
+import type { SubagentJournalEvent } from '@zhushanwen/extension-protocol'
 import { SCALAR_STATE_DEBOUNCE_MS } from '../replicated-states.config.js'
 import { projectV2Workflow } from '../workflow-record-projection.js'
 import type { RunEventFoldCheckpoint } from '@zhushanwen/subagent-core'
@@ -125,7 +128,7 @@ describe('projectV2Workflow：fold 新字段透出（U3 §3.1-4）', () => {
   })
 })
 
-// ── ② 水位 diff 扩两维（全链：真实 run journal + tailer recheck）──
+// ── ② 水位 diff 扩两维（全链：真实 run journal + journal 推送喂入）──
 
 const SID = 's1'
 let dir: string
@@ -138,9 +141,17 @@ vi.mock('../../../infra/pi/pi-paths.js', async (importOriginal) => {
   return { ...actual, getPiAgentDir: () => piAgentDirRef.dir }
 })
 
-/** journal 追加一帧（append-only，与引擎写侧同构）。 */
+/** journal 追加一帧（append-only，与引擎写侧同构）+ 推送喂入（写侧落盘提交点推
+ *  报告，经 journal-report-router 生产路径路由到本 session 投影）。 */
 function appendFrame(frame: Record<string, unknown>): void {
   writeFileSync(runJournalPath, `${JSON.stringify(frame)}\n`, { flag: 'a' })
+  expect(routeJournalReport(SID, {
+    domain: 'run',
+    fileKey: 'run-1',
+    events: [frame as SubagentJournalEvent],
+    sessionId: SID,
+    emittedAt: Date.now(),
+  })).toBe(true)
 }
 
 function makeRecords() {
@@ -179,7 +190,6 @@ function makeRecords() {
     } as unknown as ISessionStore,
     hasSession: vi.fn(() => true),
     getMessageBus: () => ({ publish } as unknown as IMessageBus),
-    eventTailerRecheckMs: 50,
   }
   const records = new SessionRecords(deps)
   return { records, publish, client }
@@ -228,7 +238,6 @@ describe('workflowUpdate 水位 diff 扩两维（U3 坑③盲区修复）', () =
     expect(workflowUpdates(publish)).toHaveLength(1) // 新 run 首发
 
     appendFrame({ type: 'agent-retrying', taskIndex: 0, attempt: 1, backoffMs: 500, reason: 'transient', ts: 1200 })
-    await vi.advanceTimersByTimeAsync(150)
     const updates = workflowUpdates(publish)
     expect(updates).toHaveLength(2) // 重试边沿：attempts 入 stepStatuses 指纹（盲区②修复）
     expect(updates[1]).toEqual({ runId: 'run-1', status: 'running' })
@@ -244,14 +253,12 @@ describe('workflowUpdate 水位 diff 扩两维（U3 坑③盲区修复）', () =
     expect(workflowUpdates(publish)).toHaveLength(1)
 
     appendFrame({ type: 'phase-started', phase: 'preflight', ts: 1050 })
-    await vi.advanceTimersByTimeAsync(150)
     const updates = workflowUpdates(publish)
     expect(updates).toHaveLength(2) // phases 折叠入指纹（盲区①修复：纯脚本 phase 无 agent 事件也发信号）
     expect(updates[1]).toEqual({ runId: 'run-1', status: 'running' })
 
     // phase 收束（phase-settled）同样翻动指纹
     appendFrame({ type: 'phase-settled', phase: 'preflight', ts: 1060 })
-    await vi.advanceTimersByTimeAsync(150)
     expect(workflowUpdates(publish)).toHaveLength(3)
   })
 
@@ -265,7 +272,6 @@ describe('workflowUpdate 水位 diff 扩两维（U3 坑③盲区修复）', () =
     expect(workflowUpdates(publish)).toHaveLength(1)
 
     appendFrame({ type: 'worker-log', entry: { level: 'log', message: 'noise' }, ts: 1060 })
-    await vi.advanceTimersByTimeAsync(150)
     expect(workflowUpdates(publish)).toHaveLength(1) // 滞后到下一转态信号，不放大为拉取频率
   })
 })

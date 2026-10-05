@@ -52,6 +52,9 @@ import { getSubagentService } from "@zhushanwen/subagent-core";
 import type { LauncherDeps } from "@zhushanwen/subagent-core";
 import { terminateRunningRuns } from "@zhushanwen/subagent-core";
 import { setInFlightListener } from "@zhushanwen/subagent-core";
+// [event-push-channel W-P1] journal 落盘事件出口接线：core 两域落盘提交点 → 出口
+// 回调 → 壳层 journal reporter（select marker 通道带回执推送 runtime 派生视图）。
+import { setJournalAppendListener } from "@zhushanwen/subagent-core";
 import {
   evictDoneRunsBeyondCap,
   MAX_RETAINED_DONE_RUNS,
@@ -65,6 +68,10 @@ import { WorkflowScriptRegistryImpl } from "@zhushanwen/subagent-core";
 // [u7a D5] 在途上报出口：实例由本 seam 创建并接线 setInFlightListener（组合根零
 // 管道），session_start / session_shutdown 驱动 attach/detach；测试可注入 fake。
 import { createInFlightReporter, type InFlightReporter } from "./host/inflight-reporter.ts";
+// [event-push-channel W-P1] journal 推送出口：实例由本 seam 创建并接线
+// setJournalAppendListener（与 inflight reporter 同 seam 同款），session_start /
+// session_shutdown 驱动 attach/detach；测试可注入 fake。
+import { createJournalReporter, type JournalReporter } from "./host/journal-reporter.ts";
 // [W2/V1 D1 第 8 行] 判活类消费面（isScriptRunning）经 core 投影单点
 //（runSummary.status 三态投影——终局判定源 = 终局记录注册表）。
 import { type RunSettlementRecord } from "./jsonl-run-store.ts";
@@ -274,7 +281,7 @@ export interface WorkflowDomainHandle {
  */
 export function setupWorkflowDomain(
   pi: ExtensionAPI,
-  wiring: { inflightReporter?: InFlightReporter } = {},
+  wiring: { inflightReporter?: InFlightReporter; journalReporter?: JournalReporter } = {},
 ): WorkflowDomainHandle {
   // [u7a D5] 在途聚合上报接线（自组合根 index.ts 收编）：core 状态迁移
   // （spawn/close/arm/disarm）→ 出口回调 → reporter 经 select 通道推绝对计数帧。
@@ -285,6 +292,14 @@ export function setupWorkflowDomain(
   // 组合根对实例零知识（纯管道参数已删）。
   const inflightReporter = wiring.inflightReporter ?? createInFlightReporter();
   setInFlightListener(inflightReporter.onInFlightChanged);
+  // [event-push-channel W-P1] journal 推送出口接线（与 inflight reporter 同 seam 同款）：
+  // core 两域落盘提交点 → 出口回调 → reporter 按 (domain,fileKey) 分组合并 → select
+  // marker 通道带回执推送 runtime。出口为进程级单监听，后注册覆盖先注册（jiti 重载
+  // 幂等）；回调同步 void，不进任何落盘 await 链。ctx 由 session_start 注入
+  // （factory 阶段无 ui）。wiring.journalReporter 是测试注入面（fake reporter 观察
+  // attach/detach 驱动时点）；生产路径缺省真实创建——组合根对实例零知识。
+  const journalReporter = wiring.journalReporter ?? createJournalReporter();
+  setJournalAppendListener(journalReporter.onJournalAppended);
   // [skill-reload D2] handle.state 即槽对象本身（不做解构重包装——否则容器每次
   //  factory 重跑新建，调用方拿不到「同一 domain state 引用」的接管前提）。
   const domainState = getOrCreateWorkflowDomainState();
@@ -446,6 +461,9 @@ export function setupWorkflowDomain(
       // 就绪（factory 无 ctx/ui，session_start 是最早带 ctx 的钩子）。fire-and-forget
       // 在 await 装配链之前发起，不阻塞也不被阻塞。
       inflightReporter.attachSession(ctx);
+      // [event-push-channel W-P1] journal 推送出口 attach（事件驱动，无初始帧——
+      // 报告语义是增量事件，缺席语义归消费方冷读）。
+      journalReporter.attachSession(ctx);
       // [skill-reload D4] adoption 入参接线：reason 是 handler 独占信息（event 参数），
       // existing 是 sessionState（domainState 闭包）里的既有条目——两者都是
       // session-lifecycle seam 的 adoption 分流判据，经 SessionStartOptions 传入。
@@ -546,6 +564,9 @@ export function setupWorkflowDomain(
       getSubagentService()?.invalidatePiBinding("session replacement (reload)");
       // b 动作保留（理由见上方 D1 分支说明）。
       inflightReporter.detachSession();
+      // [event-push-channel W-P1] journal 推送通道随 reload 同步摘 ctx（旧 ctx 的
+      // session 已被 pi 替换，推送帧无法归属；新 session_start 重新 attach）。
+      journalReporter.detachSession();
 
       // [skill-reload D8] reload 分支归因日志：preserved 计数取自跳过清理时的存活
       // 对象真实统计（runs = 各 session 内存 run 聚合根数；records = run.state.calls
@@ -582,6 +603,9 @@ export function setupWorkflowDomain(
     // [u7a D5] 在途上报通道随 session 终结：摘 ctx + 停重试（session 已死，重试直至
     // 成功的语义只对活 session 成立；进程级出口监听保留——后续 /new 重新 attach）。
     inflightReporter.detachSession();
+    // [event-push-channel W-P1] journal 推送通道随 session 终结：摘 ctx + 丢弃待推
+    // 缓冲（未推事件由消费方冷读/缺口补读收敛，不重推——设计 D5）。
+    journalReporter.detachSession();
 
     // ── workflow 域：terminate 所有 running run + store 收尾 + 清理 temp files ──
     // H-5: 遍历所有 sessionState 条目清理（而不只 lastSessionId——

@@ -32,12 +32,14 @@
  */
 import type { ServerMessage, ServerMessageType, ExtensionInteractMethod, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
 import { EXTENSION_EVENTS, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective } from '@taiji/shared'
-import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, SCHEDULE_CREATE_MARKER, PLAN_REVIEW_MARKER, UI_FORM_MARKER, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport, isScheduleDraft, isFormQuestion } from '@zhushanwen/extension-protocol'
+import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, SCHEDULE_CREATE_MARKER, PLAN_REVIEW_MARKER, UI_FORM_MARKER, SUBAGENT_JOURNAL_MARKER, JOURNAL_REPORT_ACK, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport, isScheduleDraft, isFormQuestion, isSubagentJournalReport } from '@zhushanwen/extension-protocol'
 import type { SessionManagerAction } from '@zhushanwen/extension-protocol'
 import type { PiEventListener } from '../../services/ports/pi-engine.js'
 import type { PiTranslatedEvent } from '../../services/session/types.js'
 // [u7b D5 例外] 在途镜像单例：marker 旁路写、u7c 滚动重启判定读（见文件头例外登记）
 import { inflightMirror } from '../../services/session/inflight-mirror.js'
+// [event-push-channel] journal 事件报告路由单例：marker 旁路送达派生视图（同款 module 单例形态）
+import { routeJournalReport } from '../../services/session/journal-report-router.js'
 import { randomUUID } from 'node:crypto'
 import { stripAnsi, normalizePiToolResult } from './normalize-tool-result.js'
 import type {
@@ -598,6 +600,18 @@ function dialogRequestEvents(
 function isInflightReportFrame(event: PiEvent): boolean {
   const e = event as unknown as { type?: unknown; method?: unknown; title?: unknown }
   return e.type === 'extension_ui_request' && e.method === 'select' && e.title === SUBAGENT_INFLIGHT_MARKER
+}
+
+/**
+ * journal 事件报告帧形状判定（select + title = SUBAGENT_JOURNAL_MARKER，event-push-channel）。
+ *
+ * translate() 的守卫分支与 EventAdapter 监听器旁路（consumeJournalReport）共用本判定，
+ * 防「两处标记判定漂移」（inflight 同款注释）：translate 侧只保证不广播，旁路侧负责
+ * 路由派生视图 + ack。
+ */
+function isJournalReportFrame(event: PiEvent): boolean {
+  const e = event as unknown as { type?: unknown; method?: unknown; title?: unknown }
+  return e.type === 'extension_ui_request' && e.method === 'select' && e.title === SUBAGENT_JOURNAL_MARKER
 }
 
 /**
@@ -1726,6 +1740,9 @@ export function translate(event: PiEvent, sessionId: string): PiTranslatedEvent[
   // 此守卫覆盖直调 translate 的路径——结构性消灭「marker 帧落回普通 select 分支 →
   // 前端出现无人应答的弹窗 pending 泄漏」形态（[HISTORICAL] session-manager 同类教训）。
   if (isInflightReportFrame(event)) return []
+  // journal 事件报告帧守卫（event-push-channel）：同款不广播例外——marker 帧恒被
+  // 旁路消费，直调 translate 路径零产出。
+  if (isJournalReportFrame(event)) return []
 
   // Lifecycle events that produce no output
   if (NULL_EVENTS.has(eventType)) return []
@@ -1856,6 +1873,9 @@ export class EventAdapter {
       // [u7b D5 例外] subagent 在途上报旁路：marker 帧就地消费（镜像 + ack），识别即吞掉
       //（不进翻译 → 结构性零前端广播；translate 的守卫分支为第二道防线）。
       if (this.consumeInflightReport(event, client)) return
+      // [event-push-channel] journal 事件报告旁路：marker 帧就地消费（路由派生视图 +
+      // ack），识别即吞掉（同款不进翻译；translate 的守卫分支为第二道防线）。
+      if (this.consumeJournalReport(event, client)) return
       // RT-2#3：translate 与 interpret 同处隔离边界。此前 translate 在 try 外——pi 字段
       // 漂移致 handler 直读炸掉（如 tool_execution_update
       // partialResult.content 数组形态缺位）时异常逃逸进 rpc-client 的 stdout parse catch，
@@ -1959,6 +1979,47 @@ export class EventAdapter {
       // 旁路永不干扰翻译/事件流（畸形帧形态 / ack 通道异常仅留诊断）。warn 起步：prod
       // info 级过滤下 debug 不落盘，在途镜像失准必须可直接排障（滚动重启判定读数来源）。
       console.warn('[EventAdapter] subagent-inflight bypass failed:', err instanceof Error ? err.message : err)
+    }
+    return true
+  }
+
+  /**
+   * journal 事件报告旁路（event-push-channel，设计 §3.2/§3.3）：识别 select +
+   * SUBAGENT_JOURNAL_MARKER → 解析 → 经 journal-report-router 送达该 session 的
+   * 事件派生视图（同步应用 = fold + 缺口补读）→ 应用成功回 JOURNAL_REPORT_ACK
+   * （生效回执，D7）。返回 true = 本帧已消费（调用方跳过翻译）。
+   *
+   * 坏帧 / 未知 schema → 静默丢弃（仍返回 true，不抛不 ack）：不 ack 使写侧按 D5
+   * 首败 warn 折叠，问题可感知。路由无消费方（sink 未注册 / 投影未就绪）→ 不 ack
+   * （同上折叠），事件不丢——派生视图创建时 attach() 冷读从磁盘收敛。永不向调用方抛错。
+   */
+  private consumeJournalReport(event: unknown, client: PiEventClient): boolean {
+    if (!isJournalReportFrame(event as PiEvent)) return false
+    try {
+      const report = parseSelectOptionsPayload(event as PiExtensionUiRequestEvent)
+      if (!isSubagentJournalReport(report)) {
+        console.warn('[EventAdapter] subagent-journal frame dropped: malformed payload')
+        return true
+      }
+      if (typeof report.sessionId !== 'string' || report.sessionId === '') {
+        // 契约（extension-protocol subagent-journal/types.ts）：sessionId 缺席 =
+        // 无法归属 → 丢弃整帧（不 fold 不 ack；pi 延迟写入窗口过后 reporter 后续
+        // 帧自然归属）。不视为协议错误（inflight 同款防御先例）。
+        return true
+      }
+      // 归属用 adapter 的 sessionId（帧来自本 pi 进程，与 inflight/session-manager
+      // 同口径）；report.sessionId 只作在场性判据，不比对——pi session id 与 runtime
+      // 会话键是两个 id 空间。
+      const applied = routeJournalReport(this.sessionId, report)
+      if (!applied) return true // 无消费方：不 ack（写侧失败折叠），冷读兜底收敛
+      const requestId = String((event as PiExtensionUiRequestEvent).id ?? '')
+      // 生效回执（D7）：routeJournalReport 内同步完成 fold 应用（含缺口补读的同步
+      // 文件读），resolve 即「已应用」。
+      if (requestId !== '') client.sendExtensionUiResponse?.(requestId, JOURNAL_REPORT_ACK, 'select')
+    } catch (err) {
+      // 旁路永不干扰翻译/事件流（畸形帧形态 / ack 通道异常仅留诊断）。warn 起步：
+      // prod info 级过滤下 debug 不落盘，推送链故障必须可直接排障。
+      console.warn('[EventAdapter] subagent-journal bypass failed:', err instanceof Error ? err.message : err)
     }
     return true
   }

@@ -204,6 +204,23 @@ export {
   isInFlightReportAck,
 } from './extensions/subagent-inflight/types'
 
+// ── ./extensions/subagent-journal：journal 事件推送协议（事件报告帧经 select 通道 + marker；
+// 写侧实现在 extensions/universal/subagent-workflow host/journal-reporter + subagent-core 落盘出口
+// notifyJournalAppended，读侧在 runtime event-adapter marker 路由 → session-records 派生视图）──
+export type {
+  SubagentJournalDomain,
+  SubagentJournalEvent,
+  SubagentJournalReport,
+} from './extensions/subagent-journal/types'
+export {
+  SUBAGENT_JOURNAL_MARKER,
+} from './extensions/subagent-journal/marker'
+export {
+  JOURNAL_REPORT_ACK,
+  isSubagentJournalReport,
+  isJournalReportAck,
+} from './extensions/subagent-journal/types'
+
 // ── ./extensions/subagent-notify：subagent-workflow 通知通道词表（custom_message customType 单源：
 // 写侧 = 壳 sendMessage / subagent-core notifier+ledger，读侧 = shared/runtime/core；
 // 等值锁在壳 __tests__/contract.notify-custom-types.test.ts）──

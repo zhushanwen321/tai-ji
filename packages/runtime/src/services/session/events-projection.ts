@@ -1,5 +1,6 @@
 /**
- * 事件投影（W1 [D6]：runtime 读侧换源——每会话内存投影，读请求唯一数据源）。
+ * 事件投影（event-push-channel：runtime 读侧实时性载体 = journal 写入方推送，
+ * 文件只做恢复读——ADR-0112「活状态走订阅推送、存储只做恢复源」）。
  *
  * 双源单点合并（设计 w1-run-record-journal-authority §3.1 环节 B / §3.3 D6）：
  * - entry 源：主 session 条目（v2 注册/终态两条小条目）——
@@ -7,10 +8,23 @@
  *   scanRecordFamilyEntriesFromSessionFile 流式扫描喂入（同一入口）；
  * - 事件源：record 事件文件（`<recordsDir>/<sa-id>.events`）与 run journal
  *   （`<sessionDir>/workflow-state/<runId>.record.jsonl`，后缀常量
- *   RUN_EVENTS_SUFFIX 单源）——经 u0 event-tail
- *   目录 tailer（watch + offset 续读 + 周期复查）增量 fold。run 域 fold 自
- *   [W2 D7] 起单源 core run-events foldRunEventCheckpoint（状态机检查点 + 投影
- *   骨架 created/asks/runSettled 一体产出），runtime 不再自建 fold。
+ *   RUN_EVENTS_SUFFIX 单源）——两条喂入路径：
+ *   ① 推送（实时路径）：journal 写入方（subagent-core，pi 扩展进程内）在落盘
+ *      提交点经 select marker 通道推报告（SubagentJournalReport），经 event-adapter
+ *      旁路 → journal-report-router → applyJournalReport 喂入。per 文件持两个水位
+ *      （字节偏移 = 补读起点、已折叠最大 seq = 去重判据——域 fold 的 seq 单调守卫
+ *      构造性幂等）；报告内最小带 seq 事件 > 水位 + 1 = 缺口 → 以 readEventTail 从
+ *      字节偏移本地补读到文件尾（拉取通道，ADR-0112 保留白名单「事件驱动的对账与
+ *      拉取通道」）；无 seq 存量行不参与缺口判定（设计 §3.3 兼容条款）。run 域 fold
+ *      自 [W2 D7] 起单源 core run-events foldRunEventCheckpoint（状态机检查点 +
+ *      投影骨架 created/asks/runSettled 一体产出），runtime 不再自建 fold。
+ *   ② 冷读（恢复路径）：attach() 全目录扫读（从当前字节偏移，首次 = 从 0）——
+ *      投影创建 / 断连重开（pi 进程死亡 → 推送通道终结 → 重开 session）的收敛读。
+ *
+ * 终局一致性（设计 §3.3 唯一显式丢失收敛点）：终态条目（entry 通道，独立于推送
+ * 通道的第二通道）在场而事件 fold 缺终局事件行、且条目时点晚于 fold 末事件 ts =
+ * 「fold 落后于条目通道」的确定性信号 → 触发一次该文件的 journal 补读（事件驱动
+ * 拉取，非定时器、非推送补偿；同一条目时点只触发一次——attempted 水位防重复）。
  *
  * 仲裁规则（事件源胜出 / 窗外条目兜底）：同实体两源都有数据时 事件流 事件
  * 胜出（事实源）；事件源被保留通道清理（窗外终态实体）后 entry 终态条目是
@@ -28,6 +42,10 @@
  * tail 原语只读完整行边界。
  */
 
+import { readdirSync } from 'node:fs'
+import { join } from 'node:path'
+
+import type { SubagentJournalReport } from '@zhushanwen/extension-protocol'
 import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 import {
   ALL_RUN_OUTCOMES,
@@ -39,12 +57,11 @@ import {
   WORKFLOW_RECORD_CUSTOM_TYPE,
   classifySubagentRecordEntryData,
   classifyWorkflowRecordEntryData,
-  createEventDirectoryTailer,
   foldRecordEvents,
   INITIAL_RECORD_EVENT_FOLD_STATE,
   parseRecordEventFileLine,
+  readEventTail,
   RECORD_EVENTS_SUFFIX,
-  type EventDirectoryTailer,
   type RecordCreatedEvent,
   type RecordEvent,
   type RecordEventFoldState,
@@ -467,7 +484,7 @@ function mergeWorkflowHalf(sources: EventProjectionSources): Map<string, Workflo
   return workflows
 }
 
-// ── 有状态投影（tailer 接线 + 单点合并）────────────────────────
+// ── 有状态投影（推送喂入 + 冷读 + 单点合并）────────────────────
 
 function recordIdOfFilename(filename: string): string {
   return filename.endsWith(RECORD_EVENTS_SUFFIX)
@@ -490,18 +507,20 @@ export interface SessionEventProjectionOptions { // oe-exempt:20260929:framework
   runJournalDir: string | undefined
   /** 投影变更回调（事件源驱动的发布腿；entry 批路径由调用方统一发布，本回调被抑制）。 */
   onProjectionChange: () => void
-  /** tailer 周期复查间隔（测试注入短值；缺省 30s）。 */
-  recheckIntervalMs?: number
 }
 
 /**
- * 每会话 事件投影：entry 源（applyEntryBatch）与 事件源（tail 目录
- * watcher）双源喂入，单点合并成 subagents/workflows 快照。
+ * 每会话 事件投影：entry 源（applyEntryBatch）与 事件源（推送喂入 + 冷读）双源
+ * 喂入，单点合并成 subagents/workflows 快照。
  *
  * 冷启动协议：构造后调用方先 applyEntryBatch（会话文件流式扫描或 get_entries
- * 全量）再 attach()（tailer rescan 从文件头全量读）——两源幂等，次序不敏感。
- * 事件源目录缺席（会话 meta 不可得，如 pi 延迟写入窗口）→ 无 tailer 的
- * entry-only 降级投影，行为退化为 entry 通道单源。
+ * 全量）再 attach()（全目录冷读）——两源幂等，次序不敏感。事件源目录缺席
+ * （会话 meta 不可得，如 pi 延迟写入窗口）→ 无事件源的 entry-only 降级投影，
+ * 行为退化为 entry 通道单源。
+ *
+ * 推送喂入（applyJournalReport）的水位与去重（设计 §3.3）：per 文件持两个水位
+ * ——字节偏移（只经实际文件读取推进 = 补读起点）+ 域 fold 内置的 seq 单调守卫
+ * （已折叠最大 seq = 去重判据）。报告只携带事件本体，重复投递构造性幂等。
  */
 export class SessionEventProjection {
   readonly sources: EventProjectionSources = initialEventProjectionSources()
@@ -510,48 +529,28 @@ export class SessionEventProjection {
   workflows: Map<string, WorkflowRunRecord> = new Map()
 
   private readonly sessionId: string
-  private readonly recordTailer: EventDirectoryTailer | undefined
-  private readonly runTailer: EventDirectoryTailer | undefined
+  private readonly recordsDir: string | undefined
+  private readonly runJournalDir: string | undefined
   private readonly onProjectionChange: () => void
   private disposed = false
   /** entry 批应用期间的回调抑制（发布归调用方统一执行）。 */
   private applyingEntryBatch = false
 
+  /** 补读起点水位：fileKey → 字节偏移（只落在完整行边界；只经 readEventTail 推进）。 */
+  private readonly recordOffsets = new Map<string, number>()
+  private readonly runOffsets = new Map<string, number>()
+  /** fold 末事件 ts 水位：fileKey → 已应用事件的最大 ts（终局条目补读触发的判据半边）。 */
+  private readonly recordLastEventTs = new Map<string, number>()
+  private readonly runLastEventTs = new Map<string, number>()
+  /** 终局条目补读的 attempted 水位：fileKey → 已触发补读时的条目时点（同值只触发一次）。 */
+  private readonly finalCatchupAttempted = new Map<string, number>()
+
   constructor(opts: SessionEventProjectionOptions) {
     this.sessionId = opts.sessionId
+    this.recordsDir = opts.recordsDir
+    this.runJournalDir = opts.runJournalDir
     this.onProjectionChange = opts.onProjectionChange
-    // undefined 直传 = tailer 缺省值（30s，周期复查兜底上界）
-    const recheck: number | undefined = opts.recheckIntervalMs
-    if (opts.recordsDir !== undefined) {
-      this.recordTailer = createEventDirectoryTailer({
-        dir: opts.recordsDir,
-        filter: (name) => name.endsWith(RECORD_EVENTS_SUFFIX),
-        parseLine: parseRecordEventFileLine,
-        onEvents: (filename, events) => this.applyRecordEvents(filename, events),
-        onSkippedLines: (filename, count) =>
-          console.warn(`[events-projection] record events skipped ${count} bad lines: ${filename}`),
-        onReset: (filename) => {
-          this.sources.recordFolds.delete(recordIdOfFilename(filename))
-        },
-        recheckIntervalMs: recheck,
-      })
-    }
-    if (opts.runJournalDir !== undefined) {
-      this.runTailer = createEventDirectoryTailer({
-        dir: opts.runJournalDir,
-        filter: (name) => name.endsWith(RUN_EVENTS_SUFFIX),
-        parseLine: parseWorkflowRunEventFileLine,
-        onEvents: (filename, events) => this.applyRunEvents(filename, events),
-        onSkippedLines: (filename, count) =>
-          console.warn(`[events-projection] run journal skipped ${count} bad lines: ${filename}`),
-        onReset: (filename) => {
-          this.sources.runFolds.delete(runIdOfFilename(filename))
-        },
-        recheckIntervalMs: recheck,
-      })
-    }
   }
-
   /**
    * entry 批应用（v2 条目分类 → 源持有态；fullRebuild = 游标全量重拉，entry 源
    * 整体重置为新基线，事件源不动——事件流 是事实源，不随 entry 游标自愈重置）。
@@ -584,52 +583,193 @@ export class SessionEventProjection {
     }
   }
 
-  /** 事件源冷启动 / 手动复查入口（幂等）。 */
+  /**
+   * 事件源冷启动 / 手动收敛入口（幂等）：全目录扫读（首次 = 从 0 全量冷读，此后
+   * 从各文件字节偏移续读）。推送通道断连（pi 进程死亡 → 重开 session）后的收敛
+   * 路径——journal 是磁盘上的事实源，冷读即恢复读。
+   */
   attach(): void {
-    this.recordTailer?.rescan()
-    this.runTailer?.rescan()
+    this.coldReadDomain('record')
+    this.coldReadDomain('run')
   }
 
   dispose(): void {
     this.disposed = true
-    this.recordTailer?.dispose()
-    this.runTailer?.dispose()
   }
 
-  private applyRecordEvents(filename: string, events: readonly RecordEvent[]): void {
+  /**
+   * 推送喂入入口（event-push-channel 实时路径）：journal 写入方经 marker 通道推
+   * 报告 → 本方法。流程（设计 §3.3）：
+   * 1. 报告事件经域行解析器校验（与文件冷读同一解析器——喂入源换轨后判定面单源，
+   *    坏事件跳过不炸投影）；
+   * 2. 缺口判定：报告内最小带 seq 事件 > 已折叠最大 seq + 1 → 本地补读（从字节
+   *    偏移 readEventTail 到文件尾——补读覆盖报告事件本体，fold seq 守卫去重）；
+   * 3. 无缺口 → 报告事件直接 fold（重复投递幂等）。
+   *
+   * 返回是否应用（供 adapter 生效回执判定）：事件源目录缺席（entry-only 降级）=
+   * 无法应用 → false（不 ack，写侧失败折叠）。
+   */
+  applyJournalReport(report: SubagentJournalReport): boolean {
+    if (this.disposed) return false
+    const domain = report.domain
+    const id = report.fileKey
+    if ((domain === 'record' ? this.recordsDir : this.runJournalDir) === undefined) return false
+    const events = this.validateReportEvents<RecordEvent | WorkflowRunEvent>(report, domain === 'record' ? parseRecordEventFileLine : parseWorkflowRunEventFileLine)
+    if (events.length === 0) return true // 坏事件帧：消费但零应用（写侧已获 ack，无丢失面）
+    // 缺口判定（无 seq 事件不参与——报告全为无 seq 存量行时直接 fold，状态机幂等）
+    const seqs = events.map((e) => (e as { seq?: unknown }).seq).filter((s): s is number => typeof s === 'number')
+    const watermark = domain === 'record'
+      ? (this.sources.recordFolds.get(id)?.lastSeq ?? 0)
+      : (this.sources.runFolds.get(id)?.lastSeq ?? 0)
+    const minSeq = seqs.length > 0 ? Math.min(...seqs) : undefined
+    if (minSeq !== undefined && minSeq > watermark + 1) {
+      // 缺口：从字节偏移补读到文件尾（覆盖报告事件——它们已在盘上），fold 去重
+      this.readFromOffset(domain, id)
+    } else {
+      this.applyEvents(domain, id, events)
+    }
+    return true
+  }
+
+  /** 报告事件逐条过域行解析器（JSON.stringify 后与文件行走同一解析——判定面单源）。 */
+  private validateReportEvents<T>(
+    report: SubagentJournalReport,
+    parseLine: (line: string) => T | undefined,
+  ): T[] {
+    const events: T[] = []
+    let skipped = 0
+    for (const event of report.events) {
+      const parsed = parseLine(JSON.stringify(event))
+      if (parsed === undefined) skipped += 1
+      else events.push(parsed)
+    }
+    if (skipped > 0) {
+      console.warn(`[events-projection] journal report skipped ${skipped} invalid events: ${report.domain}/${report.fileKey}`)
+    }
+    return events
+  }
+
+  /** 单域全目录冷读（attach 的实现半边；目录缺失 = 静默空读——事件源未落盘的缺省语义）。 */
+  private coldReadDomain(domain: 'record' | 'run'): void {
+    const dir = domain === 'record' ? this.recordsDir : this.runJournalDir
+    if (dir === undefined || this.disposed) return
+    const suffix = domain === 'record' ? RECORD_EVENTS_SUFFIX : RUN_EVENTS_SUFFIX
+    let entries: string[]
+    try {
+      entries = readdirSync(dir)
+    } catch {
+      return // 目录未创建（尚无任何 journal）——推送到达时按缺口补读路径冷起
+    }
+    for (const name of entries) {
+      if (!name.endsWith(suffix)) continue
+      this.readFromOffset(domain, domain === 'record' ? recordIdOfFilename(name) : runIdOfFilename(name))
+    }
+  }
+
+  /**
+   * 从字节偏移续读单文件到文件尾并 fold（冷读与缺口补读共用的唯一文件读入口）。
+   * 文件变短（截断/重建）→ readEventTail 从 0 全量重读（truncated 语义）+ fold
+   * 重置——重复行去重归域 fold。
+   */
+  private readFromOffset(domain: 'record' | 'run', id: string): void {
+    const dir = domain === 'record' ? this.recordsDir : this.runJournalDir
+    if (dir === undefined || this.disposed) return
+    const suffix = domain === 'record' ? RECORD_EVENTS_SUFFIX : RUN_EVENTS_SUFFIX
+    const filePath = join(dir, id + suffix)
+    const offsets = domain === 'record' ? this.recordOffsets : this.runOffsets
+    const chunk =
+      domain === 'record'
+        ? readEventTail(filePath, offsets.get(id) ?? 0, parseRecordEventFileLine)
+        : readEventTail(filePath, offsets.get(id) ?? 0, parseWorkflowRunEventFileLine)
+    offsets.set(id, chunk.nextOffset)
+    // 截断/重建：fold 全量重放（域 fold seq 守卫下不重建也幂等——重建走保守路径）
+    if (chunk.truncated) {
+      if (domain === 'record') this.sources.recordFolds.delete(id)
+      else this.sources.runFolds.delete(id)
+    }
+    if (chunk.skippedLines > 0) {
+      console.warn(`[events-projection] ${domain} events skipped ${chunk.skippedLines} bad lines: ${filePath}`)
+    }
+    if (chunk.events.length > 0) this.applyEvents(domain, id, chunk.events)
+  }
+
+  private applyRecordEvents(id: string, events: readonly RecordEvent[]): void {
     if (this.disposed || events.length === 0) return
-    const id = recordIdOfFilename(filename)
     const current = this.sources.recordFolds.get(id) ?? INITIAL_RECORD_EVENT_FOLD_STATE
     this.sources.recordFolds.set(id, foldRecordEvents([...events], current))
+    this.advanceLastEventTs(this.recordLastEventTs, id, events)
     this.recompute()
     this.fireChange()
   }
 
-  private applyRunEvents(filename: string, events: readonly WorkflowRunEvent[]): void {
+  private applyRunEvents(id: string, events: readonly WorkflowRunEvent[]): void {
     if (this.disposed || events.length === 0) return
-    const runId = runIdOfFilename(filename)
     // [W2 D7] fold 单源：core foldRunEventCheckpoint 增量接续（既有 checkpoint 为
     // 初值；seq 守卫去重 + 坏帧保守停帧归 core 单点）。坏帧出声（warn 归消费方
-    // 注入——停帧后骨架停在最近一致态，截断重建走 onReset 清 fold 全量重放）。
-    const current = this.sources.runFolds.get(runId) ?? INITIAL_RUN_EVENT_FOLD
-    this.sources.runFolds.set(
-      runId,
-      foldRunEventCheckpoint(events, (err, lastType) => {
-        console.warn(
-          `[events-projection] run journal fold stopped at a broken frame (file=${filename}, ` +
-            `lastType=${lastType}): ${err instanceof Error ? err.message : String(err)}`,
-        )
-      }, current),
-    )
+    // 注入——停帧后骨架停在最近一致态，截断重建走 truncated 清 fold 全量重放）。
+    const current = this.sources.runFolds.get(id) ?? INITIAL_RUN_EVENT_FOLD
+    const warnBroken = (err: unknown, lastType: string): void => {
+      console.warn(`[events-projection] run journal fold stopped at a broken frame (runId=${id}, lastType=${lastType}): ${err instanceof Error ? err.message : String(err)}`)
+    }
+    this.sources.runFolds.set(id, foldRunEventCheckpoint(events, warnBroken, current))
+    this.advanceLastEventTs(this.runLastEventTs, id, events)
     this.recompute()
     this.fireChange()
   }
 
-  /** 单点合并重算（合并快照整体替换）。 */
+  private applyEvents(domain: 'record' | 'run', id: string, events: readonly (RecordEvent | WorkflowRunEvent)[]): void {
+    if (domain === 'record') this.applyRecordEvents(id, events as readonly RecordEvent[])
+    else this.applyRunEvents(id, events as readonly WorkflowRunEvent[])
+  }
+
+  /** fold 末事件 ts 水位推进（事件批内最大 ts——终局条目补读触发的判据半边）。 */
+  private advanceLastEventTs(
+    target: Map<string, number>,
+    id: string,
+    events: readonly { ts?: unknown }[],
+  ): void {
+    let max = target.get(id) ?? 0
+    for (const event of events) if (typeof event.ts === 'number' && event.ts > max) max = event.ts
+    target.set(id, max)
+  }
+
+  /**
+   * 终局条目补读触发（设计 §3.3 终局一致性，D6）：终态条目（entry 通道）在场而
+   * 事件 fold 缺终局事件行、且条目时点晚于 fold 末事件 ts → 触发一次该文件补读。
+   * 判定单点 = recompute（entry 源与事件源两半都在场后才有意义）；同一条目时点
+   * 只触发一次（attempted 水位——补读后条件仍在 = journal 确实无后续事件，防读循环）。
+   */
+  private checkFinalEntryCatchup(): void {
+    // run 域：done 条目 → 缺 run-settled 帧；interrupted 条目 → 缺 run-interrupted 帧
+    this.sources.v2WorkflowSettled.forEach((entry, runId) => {
+      const fold = this.sources.runFolds.get(runId)
+      if (fold === undefined || this.runJournalDir === undefined) return
+      const terminalFolded =
+          entry.status === 'done' ? fold.runSettled !== undefined
+            : entry.status === 'interrupted' ? fold.state.lifecycle === 'interrupted'
+              : true // 未知 status：不触发（条目词表外形态交仲裁层兜底）
+      if (terminalFolded || this.finalCatchupAttempted.get(`run:${runId}`) === entry.settledAt) return
+      if ((this.runLastEventTs.get(runId) ?? 0) >= entry.settledAt) return
+      this.finalCatchupAttempted.set(`run:${runId}`, entry.settledAt)
+      this.readFromOffset('run', runId)
+    })
+    // record 域：终态条目在场而 fold 缺 record-settled 帧（record 域同构判据）
+    this.sources.v2SubagentSettled.forEach((entry, id) => {
+      const fold = this.sources.recordFolds.get(id)
+      if (fold === undefined || this.recordsDir === undefined) return
+      if (fold.settled !== undefined || this.finalCatchupAttempted.get(`record:${id}`) === entry.endedAt) return
+      if ((this.recordLastEventTs.get(id) ?? 0) >= entry.endedAt) return
+      this.finalCatchupAttempted.set(`record:${id}`, entry.endedAt)
+      this.readFromOffset('record', id)
+    })
+  }
+
+  /** 单点合并重算（合并快照整体替换）+ 终局条目补读判定（两源都在场后判定）。 */
   private recompute(): void {
     const merged = mergeEventProjection(this.sources, this.sessionId)
     this.subagents = merged.subagents
     this.workflows = merged.workflows
+    this.checkFinalEntryCatchup()
   }
 
   private fireChange(): void {
