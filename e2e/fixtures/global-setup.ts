@@ -4,9 +4,9 @@
  * 产物缺失或过期时自动跑 build:e2e（build:main + build:preload + build:vite with VITE_E2E）。
  * 产物存在且新鲜则跳过（增量开发时避免每次重建，节省时间）。
  *
- * 新鲜度门禁：renderer bundle 的 mtime 必须晚于 packages/{ui,core,renderer}/src 的最新
- * mtime，否则视为过期——防止测试跑在源码中途状态构建的过期 bundle 上（被测 DOM ≠ 当前
- * 源码，spec 断言对着旧 DOM 报假红）。
+ * 新鲜度门禁：renderer bundle 的 mtime 必须晚于直供 dist 的五棵源码树（RENDERER_SOURCE_ROOTS：
+ * ui/core/renderer + shared/extension-protocol）的最新 mtime，否则视为过期——防止测试跑在源码
+ * 中途状态构建的过期 bundle 上（被测 DOM ≠ 当前源码，spec 断言对着旧 DOM 报假红）。
  *
  * 产物路径：
  * - apps/electron/dist/main/main.cjs（main entry）
@@ -27,13 +27,16 @@ const ARTIFACTS = [
   path.join(ELECTRON_DIR, 'renderer/dist/index.html'),
 ]
 
-// renderer bundle 的新鲜度基准 = 渲染层三个包的源码树（vite build 每次全量重写 dist，
-// index.html 的 mtime 即最近一次 renderer 构建时点）
+// renderer bundle 的新鲜度基准 = 直供 renderer bundle 的源码树（vite build 每次全量重写 dist，
+// index.html 的 mtime 即最近一次 renderer 构建时点）。shared / extension-protocol 两树
+// 不经 dist 中转、源码直供进 renderer bundle（dist 内联），改动同样使 bundle 过期，故一并纳入
 const RENDERER_INDEX = path.join(ELECTRON_DIR, 'renderer/dist/index.html')
 const RENDERER_SOURCE_ROOTS = [
   path.join(REPO_ROOT, 'packages/ui/src'),
   path.join(REPO_ROOT, 'packages/core/src'),
   path.join(REPO_ROOT, 'packages/renderer/src'),
+  path.join(REPO_ROOT, 'packages/shared/src'),
+  path.join(REPO_ROOT, 'packages/extension-protocol/src'),
 ]
 
 function artifactsMissing(): boolean {
@@ -107,6 +110,6 @@ export default async function globalSetup(): Promise<void> {
     runBuildE2e()
     console.log('[e2e global-setup] 构建产物就绪')
   } else {
-    console.log('[e2e global-setup] 构建产物存在且新鲜（晚于 packages/{ui,core,renderer}/src），跳过 build')
+    console.log('[e2e global-setup] 构建产物存在且新鲜（晚于 RENDERER_SOURCE_ROOTS 五树），跳过 build')
   }
 }
