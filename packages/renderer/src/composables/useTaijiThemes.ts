@@ -7,7 +7,7 @@
  *    style.css 的 [data-theme-preset="dailan"/"nuanmo"/"qingmo"/"zhuyin"] 规则覆盖 :root token。
  *
  * 太极主题映射（与 style.css 的 preset 规则严格对应）：
- * - 玄（暗·纯灰·默认）   → theme=dark,    preset=''       （:root 默认，无 preset 覆盖）
+ * - 玄（暗·弱蓝灰·默认） → theme=dark,    preset=''       （:root 默认，无 preset 覆盖）
  * - 黛蓝（暗·依稀蓝相）  → theme=dark,    preset='dailan'
  * - 暖墨（暗·宣纸暖相）  → theme=dark,    preset='nuanmo'
  * - 皓（亮·宣纸墨黑）    → theme=light,   preset=''       （[data-theme=light] 默认，无 preset 覆盖）
@@ -38,12 +38,12 @@ export interface TaijiTheme {
 /** 6 太极主题（顺序：3 暗 + 3 亮，与 demo themeEntries 一致） */
 export const TAIJI_THEMES: TaijiTheme[] = [
   {
-    label: '太极 · 玄（暗 · 纯灰 · 默认）',
+    label: '太极 · 玄（暗 · 弱蓝灰 · 默认）',
     shortName: '玄',
     theme: 'dark',
     preset: '',
     dark: true,
-    swatch: ['#cfcfd4', '#dedee2', '#1f1f22', '#131316'],
+    swatch: ['#a5adc2', '#dedee2', '#1f1f22', '#131316'],
   },
   {
     label: '太极 · 黛蓝（暗 · 依稀蓝相）',
