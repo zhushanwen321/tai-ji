@@ -1033,23 +1033,30 @@ const chatImpl = {
     // 登记在飞条目（abort 终态帧依据）：流序列 settle（complete 或 cancelled 退出）即清，
     // 避免流走完后 session 再 abort 被误补 failed 帧。
     inflightDeliveryEntries.set(sessionId, { clientUuid, preview: text.slice(0, DELIVERY_PREVIEW_MAX_CHARS) })
-    // fire-and-forget 补 .catch 留痕（红线 1）：内部异常不落成无痕 unhandled rejection
-    void runSendStream(sessionId, text, {
-      nextId,
-      emit,
-      sleep,
-      pushSession,
-      isCancelled: (s) => cancelled.has(s),
-      TIMING,
-    })
-      .catch((e) => {
-        console.error('[mock] send stream failed:', e)
+    // [受理先于执行] 流启动推迟到 reply 之后（宏任务）：真实通道里 runtime 回受理 ack 后
+    // pi 才开跑（受理事实先于执行事实）；mock 的同步 fire-and-forget 曾让 assistant 首事件
+    // 抢在 reply 前落 chat store——appendUser（reply 后上屏）被排到 assistant 之后，分组
+    // 拆成两个 turn（user 气泡挂尾，P0 smoke TC-MSGSTREAM-TURN 实测）。宏任务保证 renderer
+    // 侧 reply-resolve 微任务链（含 appendUser）全部走完后再开流。
+    setTimeout(() => {
+      // fire-and-forget 补 .catch 留痕（红线 1）：内部异常不落成无痕 unhandled rejection
+      void runSendStream(sessionId, text, {
+        nextId,
+        emit,
+        sleep,
+        pushSession,
+        isCancelled: (s) => cancelled.has(s),
+        TIMING,
       })
-      .finally(() => {
-        if (inflightDeliveryEntries.get(sessionId)?.clientUuid === clientUuid) {
-          inflightDeliveryEntries.delete(sessionId)
-        }
-      })
+        .catch((e) => {
+          console.error('[mock] send stream failed:', e)
+        })
+        .finally(() => {
+          if (inflightDeliveryEntries.get(sessionId)?.clientUuid === clientUuid) {
+            inflightDeliveryEntries.delete(sessionId)
+          }
+        })
+    }, 0)
     return { clientUuid, state: 'in-flight', lane: 'direct' }
   },
 
