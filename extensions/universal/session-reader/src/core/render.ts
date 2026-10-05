@@ -346,12 +346,14 @@ function formatLine(b: TurnBrief, level: LineLevel, branchSize?: number): string
 /**
  * 对话语义条目判定（outline 折叠谓词，D9②）。
  *
- * pi 1.0 session 落盘 entry 十类（session-manager.js appendXxx 家族实装）中，参与
+ * pi 1.0 session 落盘 entry 十一类（session-manager.js appendXxx 家族实装）中，参与
  * 对话流的仅三类：message（role=user/assistant/toolResult）、compaction、
  * custom_message（appendCustomMessageEntry——参与 LLM 上下文的注入消息）。其余
  * ——usage（模型记账，appendUsage 明言不参与 LLM 上下文）/ session_info /
  * model_change / thinking_level_change / context_edit / custom（扩展审计痕迹，
- * appendCustomEntry）/ branch_summary（branchWithSummary 落盘的分叉痕迹：编辑历史
+ * appendCustomEntry）/ label（entry 书签/标记，appendLabelChange 落盘，targetId
+ * 指向被标记条目，无 message 字段，与 usage 同归折叠侧）/ branch_summary
+ * （branchWithSummary 落盘的分叉痕迹：编辑历史
  * 消息产生分支时记录被放弃路径的摘要；summary 虽经 sessionEntryToContextMessages
  * 转 createBranchSummaryMessage 参与 LLM 上下文重放，但语义是被放弃路径的终点而非
  * 当前路径的对话内容，且 taiji 无消息编辑入口不产生该形态）——是纯记录条目：
