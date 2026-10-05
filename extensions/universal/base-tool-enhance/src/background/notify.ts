@@ -155,7 +155,7 @@ function sendTaskFinishedMessage(task: BackgroundTask): void {
 		);
 	} catch (err) {
 		// 旧 bus 已 dispose（session 替换毫秒窗口）——降级日志，不中断后续收尾（文件头已知竞态）
-		logger.warn("background task notify sendMessage failed; poll continues", {
+		logger.warn("background task notify sendMessage failed (stale bus?); notification skipped, later tasks unaffected", {
 			detail: {
 				taskId: task.taskId,
 				err: toErrorMessage(err),
