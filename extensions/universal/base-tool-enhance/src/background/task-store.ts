@@ -15,14 +15,14 @@
  *
  * 【不变量登记（D6-en，注释级）】extension 对某条目的**每次 registry 写都先经该
  * 条目的内存状态更新**——registry 侧 killing 状态因此恒为内存态的投影，runtime
- * 跨进程预写的 killing 不会被 stale 内存态冲回，D6-en intent 读回（poller.ts）的
- * 正确性依赖此约束。全部 5 个 writeRegistryEntry 调用点逐一成立：
+ * 跨进程预写的 killing 不会被 stale 内存态冲回，D6-en intent 读回（exit-collector.ts）
+ * 的正确性依赖此约束。全部 5 个 writeRegistryEntry 调用点逐一成立：
  *   ① spawn-background.ts spawnBackgroundTask：registerSpawnedTask（新条目首登记）
  *     先于 registry 写 running；
  *   ② bash-kill-tool.ts：markKillingIntent(taskId,"killed") 先于 registry 写 killing；
  *   ③ spawn-background.ts armBackgroundTimeout：markKillingIntent(taskId,"timeout")
  *     先于 registry 写 killing（pid 已死路径提前 return，不触达写点）；
- *   ④ poller.ts finalizeExitedTask：finalizeTask（内存终态化）先于 registry 写 exited；
+ *   ④ exit-collector.ts finalizeExitedTask：finalizeTask（内存终态化）先于 registry 写 exited；
  *   ⑤ process-exit-guard.ts reapBackgroundTasksNow：finalizeTask 先于 registry 写
  *     exited(process-exit)（设计枚举 4 点时未列本点，实际同序成立，一并登记）。
  * 未来新增写路径（如 maintenance 类）必须保持该顺序，违反即 intent 可丢失。
@@ -61,7 +61,7 @@ export function getAllTasks(): BackgroundTask[] {
 	return [...taskTable.values()];
 }
 
-/** 活跃条目（running | killing），轮询器监护对象。 */
+/** 活跃条目（running | killing），exit 事件边沿的监护对象。 */
 export function getActiveTasks(): BackgroundTask[] {
 	return getAllTasks().filter((t) => isActiveState(t.state));
 }
@@ -99,9 +99,9 @@ export interface FinalizeOutcome {
 }
 
 /**
- * 终态化（exited）：唯一终态写入口。轮询器 exit 边沿、进程退出收殓两条路径收敛
- * 到这里（bash_kill 不直接写终态——单一终态归属，§3.5「bash_kill 终态收尾的
- * 单点归属」）。消费 intent、清 timeout 定时器、算 durationMs、LRU 淘汰溢出终态。
+ * 终态化（exited）：唯一终态写入口。exit 事件边沿（exit-collector）、进程退出收殓
+ * 两条路径收敛到这里（bash_kill 不直接写终态——单一终态归属，§3.5「bash_kill 终态
+ * 收尾的单点归属」）。消费 intent、清 timeout 定时器、算 durationMs、LRU 淘汰溢出终态。
  */
 export function finalizeTask(taskId: string, outcome: FinalizeOutcome): BackgroundTask | undefined {
 	const task = taskTable.get(taskId);

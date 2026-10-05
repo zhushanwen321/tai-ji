@@ -23,6 +23,9 @@ export default {
   // `@` 定向消息（U2b）：空文本挡 + RPC 失败（错误可读，S8 恢复动作 = 重试 / 重新 @ 选择）
   subagentDirectiveEmpty: '定向消息内容为空，请输入发送给 subagent 的内容',
   subagentDirectiveFailed: '定向消息发送失败：{msg}',
+  // 扩展命令执行失败 toast（pi1-disposition-chat-flow U2③ / D10③）：仅命令来源错误进
+  // toast（useChat 过滤 errorEvent === 'command'），{name} = 剥前缀补斜杠的命令名
+  extensionCommandFailed: '命令执行失败：{name} — {msg}',
   providerNameRequired: '供应商名称不能为空',
   oauthSwitchNeedsKey: '改用 API Key 需要输入新的 API Key（保存后将替换 OAuth 凭证）',
   duplicateHeaderKey: '存在重复的 header key，将以最后出现的值为准',

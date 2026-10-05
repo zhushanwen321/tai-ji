@@ -283,13 +283,13 @@ describe('MessageBusBridge', () => {
       expect(e).toMatchObject({ kind: 'extension-notify', sessionId: 's1', notification: { pluginId: '', message: 'done', level: 'info' } })
     })
 
-    it('extension.ui_request → ui-request（与 plugin:uiRequest 归一同一 kind）', () => {
+    it('extension.dialog → ui-request（与 plugin:uiRequest 归一同一 kind）', () => {
       const { source, bus } = makeBridge()
       const { emitted } = spyEmit(bus)
-      source.emit({ type: 'extension.ui_request', payload: { sessionId: 's1', requestId: 'r2', method: 'select', title: '选择', options: ['a', 'b'] } })
+      source.emit({ type: 'extension.dialog', payload: { sessionId: 's1', requestId: 'r2', dialogKind: 'select', title: '选择', options: ['a', 'b'] } })
       const e = emitted.find((x) => x.kind === 'ui-request')
       expect(e).toBeDefined()
-      expect(e).toMatchObject({ kind: 'ui-request', sessionId: 's1', request: { requestId: 'r2', pluginId: '', kind: 'select', title: '选择', method: 'select', options: ['a', 'b'] } })
+      expect(e).toMatchObject({ kind: 'ui-request', sessionId: 's1', request: { requestId: 'r2', pluginId: '', kind: 'select', title: '选择', dialogKind: 'select', options: ['a', 'b'] } })
     })
 
     it('extension:requestsInvalidated → requests-invalidated（字段逐项透传，P2-2 失效链）', () => {
@@ -344,7 +344,7 @@ describe('MessageBusBridge', () => {
       source.emit({ type: 'extension:status', payload: { text: 't' } })
       source.emit({ type: 'extension:notify', payload: { message: 'm' } })
       source.emit({ type: 'extension:requestsInvalidated', payload: { requestIds: ['r1'] } })
-      source.emit({ type: 'extension.ui_request', payload: { requestId: 'r', method: 'input' } })
+      source.emit({ type: 'extension.dialog', payload: { requestId: 'r', dialogKind: 'input' } })
       for (const kind of ['extension-widget', 'extension-status', 'extension-notify', 'requests-invalidated', 'ui-request']) {
         expect(emitted.some((x) => x.kind === kind), `expected ${kind} emitted`).toBe(true)
       }
@@ -489,15 +489,15 @@ describe('MessageBusBridge', () => {
       expect(req.method).toBe('editor')
     })
 
-    it('extension.ui_request method=editor 同样兜底', () => {
+    it('extension.dialog dialogKind=editor 同样兜底', () => {
       const { source, bus } = makeBridge()
       const { emitted } = spyEmit(bus)
-      source.emit({ type: 'extension.ui_request', payload: { sessionId: 's1', requestId: 'r2', method: 'editor' } })
+      source.emit({ type: 'extension.dialog', payload: { sessionId: 's1', requestId: 'r2', dialogKind: 'editor' } })
       const e = emitted.find((x) => x.kind === 'ui-request')
       expect(e).toBeDefined()
       const req = (e as { request: Record<string, unknown> }).request
       expect(req.kind).toBe('input')
-      expect(req.method).toBe('editor')
+      expect(req.dialogKind).toBe('editor')
     })
   })
 

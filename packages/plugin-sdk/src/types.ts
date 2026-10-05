@@ -20,14 +20,12 @@
  * runtime 的 plugin-types 自动生成（runtime 为真相源的镜像方向）；D28 审计
  * 记录了当时的刻意重复理由。方向反转为「SDK 为 SSOT、runtime re-export」后
  * sync-types.sh 已删除（生成方向不再存在），依赖方向 = runtime → SDK 单向。
- * D4 单源化（ext-simplify-16）后 Bridge* 回包形状定义源上收
- * @zhushanwen/extension-protocol（唯一定义点，下方 re-export 消费）。
+ * [pi1-disposition-chat-flow D7①] 原 Bridge* 回包形状（曾单源于
+ * @zhushanwen/extension-protocol 并经下方 re-export 消费）随 plugin-bridge 整体退役删除；
+ * GuiComponent 的 GUI 协议段单源关系保留。
  */
 
-// D4 单源化：Bridge* 回包形状唯一定义源 = @zhushanwen/extension-protocol。
-// import 供本文件内 ToolExecuteHandler / update(guiTree) 等类型引用；export 保持既有
-// `BridgeInterceptResponse`/`BridgeToolExecuteResponse` 导入面不变。
-import type { BridgeInterceptResponse, BridgeToolExecuteResponse, GuiComponent } from '@zhushanwen/extension-protocol'
+import type { GuiComponent } from '@zhushanwen/extension-protocol'
 
 // sendMessage 回执 reason 词表单点 = @taiji/shared（msg-pipeline-debloat D4-6：原五处
 // 手写词表归一；shared 与本包同为 private workspace 包，无 npm 发布链）。
@@ -315,7 +313,6 @@ export type InterceptorHookType =
   | 'onMessageSend'
   | 'onBeforeSendMessage'
   | 'onBeforeToolCall'
-  | 'onBeforeAgentStart'
   | 'onAfterToolResult'
 
 /**
@@ -333,15 +330,14 @@ export type ObserverHookType = 'onPiEvent'
 export type HookType = InterceptorHookType | ObserverHookType
 
 /**
- * @proposed — 拦截器返回结果：允许/阻止/修改数据/注入消息。
+ * @proposed — 拦截器返回结果：允许/阻止/修改数据。
  *
- * 三个语义域互不混淆（git `7a3797d0b` 版 plugin-intercept-injection §3.3-D1，文档已退役于
- * `fadd8b8b4`）：
+ * 语义域（[HISTORICAL] git `7a3797d0b` 版 plugin-intercept-injection 三域模型的残存两域；
+ * 注入域随 plugin-bridge 整体退役删除，pi1-disposition-chat-flow D7①）：
  * - 阻止：proceed:false — runtime 侧终止后续插件 hook 链并留痕；当前 pi 集成不阻止
  *   agent turn（pi before_agent_start 无 block 槽位，turn 照常进行）
  * - 改写：modifiedData — 改写当前 hook 事件的 data（如 onAfterToolResult 改写工具输出），
  *   管线按「链上最后一个」覆盖语义透传（HookResult.transformedData）
- * - 注入：injectedMessages — 新增 LLM 上下文消息，跨插件累积拼接（非改写、非阻止）
  */
 export interface InterceptorResult {
   /**
@@ -351,15 +347,8 @@ export interface InterceptorResult {
   proceed: boolean
   /** proceed:false 时的原因描述（留痕 / blocked 回包用） */
   reason?: string
-  /** 改写语义：改写当前 hook 事件的 data（链上最后一个生效，非累积）。勿用于注入 */
+  /** 改写语义：改写当前 hook 事件的 data（链上最后一个生效，非累积）。 */
   modifiedData?: unknown
-  /**
-   * 注入语义：向 LLM 上下文新增的消息文本。契约边界（D1）：仅 onBeforeAgentStart
-   * （bridge intercept 链路）被消费；其他 intercept hookType 返回非空值类型合法但
-   * 无运行时效果（管线 warn 留痕，作者应移除误用）。observe hook（onPiEvent）的
-   * 响应在 Worker 侧丢弃，此处误用注入无任何运行时信号，仅靠本注释约束。
-   */
-  injectedMessages?: string[]
 }
 
 /**
@@ -395,18 +384,15 @@ export type PiEventCallback = (eventName: string, data: unknown) => Promise<void
 
 /**
  * @internal — runtime 内部：Hook 通用返回结果（主线程塑形）。
- * injectedMessages 与 transformedData 语义分叉（git `7a3797d0b` 版 plugin-intercept-injection
- * §3.3-D2/D3，文档已退役于 `fadd8b8b4`）：
- * 前者为管线层逐插件形状校验后的合法条目跨插件累积拼接（priority 执行序），后者保持
- * 「链上最后一个」覆盖语义；消费方为 handleBridgeIntercept 的注入映射。
+ * transformedData 保持「链上最后一个」覆盖语义（[HISTORICAL] 注入域 injectedMessages
+ * 随 plugin-bridge 整体退役删除，pi1-disposition-chat-flow D7①——原消费方为 bridge
+ * intercept 的注入映射）。
  */
 export interface HookResult {
   blocked: boolean
   blockedBy?: string
   reason?: string
   transformedData?: unknown
-  /** 注入语义（仅 onBeforeAgentStart 链路消费）：管线已校验的合法条目，跨插件累积 */
-  injectedMessages?: string[]
 }
 
 /**
@@ -676,18 +662,14 @@ export const PermissionConstants = Object.freeze({
   NOTIFY: 'notify',
 } as const)
 
-// @internal — runtime 内部塑形对象（Bridge* 回包形状），定义源在协议包（见文件头 D4 单源化）
-export type { BridgeInterceptResponse, BridgeToolExecuteResponse }
+// [pi1-disposition-chat-flow D7①] Bridge 类型段（BridgeToolExecuteRequest / 跨进程回包
+// 形状 re-export）随 plugin-bridge 整体退役删除——工具执行跨进程通路消失，Worker 侧本地
+// 注册面（ToolExecuteHandler）保留供插件 API 兼容，回包形状本地最小声明。
 
-// ── Bridge 类型（插件 Worker ↔ 主进程桥接）─────────────────────────
-
-/** @internal — runtime 内部：主进程调用插件注册的工具 */
-export interface BridgeToolExecuteRequest {
-  type: 'bridge.tool.execute'
-  toolName: string
-  parameters: Record<string, unknown>
-  sessionId?: string
-  toolCallId?: string
+/** Worker 侧 tool 执行结果的本地最小形状（原跨进程回包形状的消费方已随 bridge 退役删除） */
+export interface ToolExecuteResult {
+  content: string
+  isError?: boolean
 }
 
 /** @internal — runtime 内部：Worker 侧 tool 执行处理函数 */
@@ -695,7 +677,7 @@ export type ToolExecuteHandler = (params: {
   arguments: Record<string, unknown>
   sessionId?: string
   toolCallId?: string
-}) => Promise<BridgeToolExecuteResponse>
+}) => Promise<ToolExecuteResult>
 
 // ── Phase 2: Tool 类型 ──────────────────────────────────────────────
 
@@ -711,7 +693,7 @@ export interface ToolRegistration {
    * - >0 — 该工具单次执行的时间上界；
    * - <=0 或 Infinity — 显式 opt-out（不限时）；
    * - 非法值（非 number / NaN）— 注册入口 fail-fast（INVALID_TIMEOUT_MS）；
-   * - 缺省 — 回落 DEFAULT_TOOL_EXECUTE_TIMEOUT_MS（bridge-interop 默认兜底）。
+   * - 缺省 — 回落 DEFAULT_TOOL_EXECUTE_TIMEOUT_MS（tool-timeout 默认兜底）。
    */
   timeoutMs?: number
   /** Worker 侧本地执行 handler，在 createToolApi 注册时存储 */
@@ -779,7 +761,6 @@ export interface Phase2AgentAPI extends Phase1AgentAPI {
   readonly hooks: {
     onBeforeSendMessage(handler: HookInterceptor): Promise<Disposable>
     onBeforeToolCall(handler: HookInterceptor): Promise<Disposable>
-    onBeforeAgentStart(handler: HookInterceptor): Promise<Disposable>
     onAfterToolResult(handler: HookObserver): Promise<Disposable>
     onPiEvent(eventName: string, handler: PiEventCallback): Promise<Disposable>
   }

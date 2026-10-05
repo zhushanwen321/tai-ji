@@ -603,6 +603,22 @@ export async function runOAuthLogin(
   if (providerId === 'github-copilot') {
     return runCopilotDeviceFlow(config, hooks, signal, tuning)
   }
+  // 流程必需端点守卫（pi 1.0.0 起 snapshot 允许端点缺失 = 需运行时发现语义，radius 首例——
+  // 实装 loadRadiusOAuthDiscovery 从 gateway 动态发现，静态提取为空是预期降级）。缺失时
+  // fail-fast 给可操作错误（经 auth-service catch 广播 auth.error，用户可见），替代深层
+  // postForm(new URL(undefined)) 的裸 TypeError。两条特判 flow（codex/copilot）自带硬编码
+  // 端点，不依赖 snapshot，已在上方提前返回不受本守卫影响。
+  const required = config.flow === 'device'
+    ? ['deviceCode', 'token'] as const
+    : config.flow === 'callback'
+      ? ['authorize', 'token'] as const
+      : ['authorize', 'token', 'deviceCode'] as const
+  const missing = required.filter((k) => !config.endpoints[k])
+  if (missing.length > 0) {
+    throw new Error(
+      `OAuth login unavailable for '${providerId}': endpoints ${missing.join('/')} require runtime discovery (gateway), which is not implemented yet — configure this provider with an API key instead`,
+    )
+  }
   if (config.flow === 'device') {
     return runStandardDeviceFlow(providerId, config, hooks, signal, tuning)
   }

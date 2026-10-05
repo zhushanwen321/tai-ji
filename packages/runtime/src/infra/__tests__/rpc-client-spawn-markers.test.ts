@@ -142,8 +142,12 @@ describe('A · RpcClient.start：argv 无 --session-dir + 清单落盘（集成�
     })
     try {
       expect(capturedSpawnArgs).not.toContain('--session-dir')
-      // B1 不动 argv 其他部分：两类 flag 全量透传原样
-      expect(flagValues(capturedSpawnArgs, '--extension')).toEqual([stagedDev, dataDirNpm, userHomePi, userProjectPi, userAgents])
+      // B1 不动 argv 其他部分：两类 flag 全量透传原样（--extension 首两个值恒为基座
+      // builtin:codemode——codemode 设计 D8，与 builtin:mcp——pi-mcp-management P11
+      // 配套，仅主 agent 模板装载；白名单路径在其后）
+      expect(flagValues(capturedSpawnArgs, '--extension')).toEqual([
+        'builtin:codemode', 'builtin:mcp', stagedDev, dataDirNpm, userHomePi, userProjectPi, userAgents,
+      ])
       expect(flagValues(capturedSpawnArgs, '--skill')).toEqual([stagedSkill, userAgents])
       // 清单 = staged 子集（保序：skill 在前），用户三来源（~/.pi、项目 .pi、~/.agents）全排除
       expect(readSpawnMarkers()).toEqual([stagedSkill, stagedDev, dataDirNpm])
@@ -212,7 +216,9 @@ describe('B · spawn-markers 三根登记规则', () => {
       // resolver dev 分支产出形态：分组层恒在（scanDirectory 只扫分组目录下的包）
       const values = [
         `${repo}/extensions/universal/session-reader`,
-        `${repo}/extensions/taiji/plugin-bridge`,
+        // [pi1-disposition-chat-flow D7①] 原 fixture 路径 extensions/taiji/plugin-bridge 随包退役删除，
+        // 换现存 taiji 组包（dev 分支断言只认分组形态，包名无语义）
+        `${repo}/extensions/taiji/agent-ext`,
       ]
       expect(selectSpawnMarkerPaths(values, dataDir)).toEqual(values)
       // discovery 深层形态（包目录下入口文件）同样收录

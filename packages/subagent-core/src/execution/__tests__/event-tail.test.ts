@@ -1,7 +1,8 @@
 // src/execution/__tests__/event-tail.test.ts
 //
-// [W1 / D6] journal tail 读取原语测试：完整行边界（纯函数）/ offset 续读 /
-// 部分行 / 坏行宽容 / 截断重读 / 周期复查（fake timers）。
+// [W1 / D6 → event-push-channel W-P3] journal tail 读取原语测试：完整行边界
+// （纯函数）/ offset 续读 / 部分行 / 坏行宽容 / 截断重读。目录 watch 族测试随
+// watch 三原语退役删除（实时性归推送通道，见 event-tail.ts 头注）。
 //
 // 验收⑤锚：fixture（含中部坏行、不完整尾行）上「分多次续读拼接」与「一次全量
 // 读 + fold」等价（run/record 两域共用的域无关原语——本套件用 record 域解析器
@@ -13,7 +14,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   createRecordEventStream,
@@ -22,7 +23,6 @@ import {
   type RecordEvent,
 } from "../persistence/record-events.ts";
 import {
-  createEventDirectoryTailer,
   readEventTail,
   splitCompleteLines,
   type EventTailChunk,
@@ -214,187 +214,5 @@ describe("验收⑤：续读拼接 ≡ 全量 fold（fixture 含中部坏行 + �
     expect(foldRecordEvents(tailEvents)).toEqual(foldRecordEvents(fullChunk.events));
     // 全量读 skipped = 头行 1 + 坏行 1（tail 续读不重算头行）
     expect(fullChunk.skippedLines).toBe(2);
-  });
-});
-
-describe("createEventDirectoryTailer（周期复查 / offset 续读状态）", () => {
-  it("rescan 冷启动全量读 + 后续 rescan 增量续读（onEvents 按文件回调）", async () => {
-    const recordsDir = path.join(workDir, "records");
-    fs.mkdirSync(recordsDir);
-    const journal = createRecordEventStream(recordsDir);
-    await journal.append("sa-1", {
-      type: "record-created",
-      ts: 1,
-      id: "sa-1",
-      agent: "a",
-      task: "t",
-      slug: "s",
-      origin: "tool",
-      rootSessionId: "root",
-      depth: 0,
-      mode: "background",
-      startedAt: 1,
-    });
-    const seen: Array<{ file: string; count: number }> = [];
-    const tailer = createEventDirectoryTailer({
-      dir: recordsDir,
-      filter: (name) => name.endsWith(".events"),
-      parseLine: parseRecordEventFileLine,
-      onEvents: (filename, events) => seen.push({ file: filename, count: events.length }),
-      onSkippedLines: () => undefined,
-    });
-    try {
-      tailer.rescan();
-      expect(seen).toEqual([{ file: "sa-1.events", count: 1 }]);
-      expect(tailer.offsetOf("sa-1.events")).toBe(fs.statSync(path.join(recordsDir, "sa-1.events")).size);
-
-      seen.length = 0;
-      await journal.append("sa-1", { type: "record-settled", ts: 2, stopReason: "completed", endedAt: 2, turns: 1, totalTokens: 1 });
-      tailer.rescan();
-      expect(seen).toEqual([{ file: "sa-1.events", count: 1 }]); // 只增量（头行已消费）
-    } finally {
-      tailer.dispose();
-    }
-  });
-
-  it("非目标文件被 filter 排除（records 目录的 manifest .json 不读）", () => {
-    const recordsDir = path.join(workDir, "records");
-    fs.mkdirSync(recordsDir);
-    fs.writeFileSync(path.join(recordsDir, "sa-1.json"), "{}");
-    const tailer = createEventDirectoryTailer({
-      dir: recordsDir,
-      filter: (name) => name.endsWith(".events"),
-      parseLine: parseRecordEventFileLine,
-      onEvents: () => {
-        throw new Error("manifest .json 不应触发 onEvents");
-      },
-    });
-    try {
-      tailer.rescan();
-      expect(tailer.offsetOf("sa-1.json")).toBeUndefined();
-    } finally {
-      tailer.dispose();
-    }
-  });
-
-  it("文件消失后偏移回收：同名新文件从 0 全量读（不误判 truncated）", () => {
-    const recordsDir = path.join(workDir, "records");
-    fs.mkdirSync(recordsDir);
-    const filePath = path.join(recordsDir, "sa-1.events");
-    fs.writeFileSync(filePath, lineOf({ type: "record-created", seq: 1, ts: 1 }));
-    const resets: string[] = [];
-    const tailer = createEventDirectoryTailer({
-      dir: recordsDir,
-      filter: (name) => name.endsWith(".events"),
-      parseLine: parseRecordEventFileLine,
-      onEvents: () => undefined,
-      onReset: (filename) => resets.push(filename),
-    });
-    try {
-      tailer.rescan();
-      expect(tailer.offsetOf("sa-1.events")).toBeGreaterThan(0);
-      fs.rmSync(filePath);
-      tailer.rescan(); // 目录枚举回收偏移
-      expect(tailer.offsetOf("sa-1.events")).toBeUndefined();
-      fs.writeFileSync(filePath, lineOf({ type: "record-settled", seq: 1, ts: 2, stopReason: "completed", endedAt: 2, turns: 0, totalTokens: 0 }));
-      tailer.rescan(); // 新文件从 0 读，无 truncated
-      expect(resets).toEqual([]);
-      expect(tailer.offsetOf("sa-1.events")).toBe(fs.statSync(filePath).size);
-    } finally {
-      tailer.dispose();
-    }
-  });
-
-  it("周期复查（fake timers，尾组四）：不依赖 watch 事件，周期到点自动捕获新文件与新事件", async () => {
-    vi.useFakeTimers();
-    try {
-      const recordsDir = path.join(workDir, "records");
-      fs.mkdirSync(recordsDir);
-      const seen: Array<{ file: string; count: number }> = [];
-      const tailer = createEventDirectoryTailer({
-        dir: recordsDir,
-        filter: (name) => name.endsWith(".events"),
-        parseLine: parseRecordEventFileLine,
-        onEvents: (filename, events) => seen.push({ file: filename, count: events.length }),
-        onSkippedLines: () => undefined,
-        recheckIntervalMs: 1000,
-        debounceMs: 10,
-      });
-      // 构造后（未 rescan）目录为空——首个周期复查是冷启动
-      vi.advanceTimersByTime(1000);
-      expect(seen).toEqual([]);
-
-      // watch 静默丢事件形态：直接写文件（不依赖 fs.watch 通知），周期复查兜底
-      const journal = createRecordEventStream(recordsDir);
-      await journal.append("sa-9", {
-        type: "record-created",
-        ts: 1,
-        id: "sa-9",
-        agent: "a",
-        task: "t",
-        slug: "s",
-        origin: "tool",
-        rootSessionId: "root",
-        depth: 0,
-        mode: "background",
-        startedAt: 1,
-      });
-      seen.length = 0;
-      vi.advanceTimersByTime(1000);
-      expect(seen).toEqual([{ file: "sa-9.events", count: 1 }]);
-
-      tailer.dispose();
-      // dispose 后周期复查停摆（定时器清理）
-      seen.length = 0;
-      await journal.append("sa-9", { type: "record-settled", ts: 2, stopReason: "completed", endedAt: 2, turns: 0, totalTokens: 0 });
-      vi.advanceTimersByTime(5000);
-      expect(seen).toEqual([]);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("watch 事件路径（真实 fs.watch + 短 debounce）：文件追加经 watch 触发续读", async () => {
-    const recordsDir = path.join(workDir, "records");
-    fs.mkdirSync(recordsDir);
-    const journal = createRecordEventStream(recordsDir);
-    await journal.append("sa-1", {
-      type: "record-created",
-      ts: 1,
-      id: "sa-1",
-      agent: "a",
-      task: "t",
-      slug: "s",
-      origin: "tool",
-      rootSessionId: "root",
-      depth: 0,
-      mode: "background",
-      startedAt: 1,
-    });
-    const seen: number[] = [];
-    const tailer = createEventDirectoryTailer({
-      dir: recordsDir,
-      filter: (name) => name.endsWith(".events"),
-      parseLine: parseRecordEventFileLine,
-      onEvents: (_filename, events) => seen.push(events.length),
-      debounceMs: 20,
-      // 周期复查兜底必须在断言窗口内真实可用（默认 30s 落不进 2s 窗口——「双保险」
-      // 名不副实）：注入短间隔后，fs.watch 事件在负载下迟到/丢失时由复查轮兜住，
-      // 断言与窗口均不变
-      recheckIntervalMs: 200,
-    });
-    try {
-      tailer.rescan(); // 冷启动消费首事件
-      seen.length = 0;
-      await journal.append("sa-1", { type: "record-settled", ts: 2, stopReason: "completed", endedAt: 2, turns: 1, totalTokens: 1 });
-      // 真实 fs.watch + debounce：事件到达后 2s 内应触发（含周期复查兜底，双保险）
-      const deadline = Date.now() + 2000;
-      while (seen.length === 0 && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-      expect(seen).toEqual([1]);
-    } finally {
-      tailer.dispose();
-    }
   });
 });

@@ -93,6 +93,20 @@ export const SESSION_NOT_FOUND = 'SESSION_NOT_FOUND'
 export const RESTORE_FAILED = 'RESTORE_FAILED'
 
 /**
+ * settings.json 损坏时拒绝启动 pi 会话的错误码（pi 会话启动门禁，用户终裁 fail-fast）。
+ *
+ * 触发面：ProcessManager.createSession（pi 进程 spawn 唯一入口）顶部经
+ * getSettingsCorruption() 现查命中——损坏（原路径 JSON 非法/不可读，或已被隔离出
+ * `.corrupt-*` 副本）时不允许启动任何新 pi 进程（会话创建/恢复/fork/崩溃自动重生/
+ * 短命 pi 全部经此单点被拒）。已运行会话不经此入口，不受影响。
+ *
+ * 用户面：消息含 settings.json 绝对路径 + `.corrupt-*` 副本路径（若有）+ 修复指引
+ * 「修复或删除该文件后重试，无需重启」；transport 中央 catch 透传本 code 为 error
+ * envelope（与 MODEL_NOT_CONFIGURED 同通路），renderer 经既有双语错误模板插值呈现。
+ */
+export const SETTINGS_CORRUPTED = 'settings_corrupted'
+
+/**
  * 会话激活失败（无码错误的统一包装）。
  *
  * model-switch-live-provider-sync U2：停止态/回收态 session 的模型切换与档位设置先走
@@ -102,14 +116,6 @@ export const RESTORE_FAILED = 'RESTORE_FAILED'
  * 「打包产物断链」误报成「会话无法恢复」）。
  */
 export const SESSION_ACTIVATE_FAILED = 'SESSION_ACTIVATE_FAILED'
-
-/**
- * 会话激活超时（RPC 边界上界，`TAIJI_SESSION_ACTIVATE_TIMEOUT_MS`，默认 15s）。
- *
- * 超时只终止 RPC 等待（前端 toast 指引重试），**不取消后台恢复**——join 语义保留。
- * 触发条件与恢复动作见设计 §3.4 错误规格表「激活超时」行 / §3.6「激活的等待上界」行。
- */
-export const SESSION_ACTIVATE_TIMEOUT = 'SESSION_ACTIVATE_TIMEOUT'
 
 /**
  * pi 报 `Model not found` 且模型**不在** taiji 注册表（配置已被删/改名）。
@@ -134,10 +140,10 @@ export const PROVIDER_CREDENTIAL_MISSING = 'PROVIDER_CREDENTIAL_MISSING'
 export const ENGINE_MODEL_MISSING = 'ENGINE_MODEL_MISSING'
 
 /**
- * pi `set_model` RPC 的「模型未找到」错误文本前缀（pi 0.84.4 实装唯一可用判据）。
+ * pi `set_model` RPC 的「模型未找到」错误文本前缀（pi 实装唯一可用判据，1.0.0 复核）。
  *
- * 权威源：`node_modules/@earendil-works/pi-coding-agent/dist/modes/rpc/rpc-mode.js:371`
- * `return error(id, "set_model", `Model not found: ${provider}/${modelId}`)`；RpcClient 对
+ * 权威源：`node_modules/@earendil-works/pi-coding-agent/dist/modes/rpc/rpc-mode.js`
+ * case "set_model" 的 `return error(id, "set_model", `Model not found: ${provider}/${modelId}`)`；RpcClient 对
  * `success:false` 帧 `reject(new Error(res.error))`（`infra/pi/rpc-client.ts:624`）——即错误
  * **无 code 字段**，只能按文本前缀分类（分类结果再经 taiji 注册表/凭据两判，见 U2）。
  * pi 版本升级后此文本变更即分类失守，受 C-proc-08 探针守卫（docs/pi-semantics.json PS-xx）。

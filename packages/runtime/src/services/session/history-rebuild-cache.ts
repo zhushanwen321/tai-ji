@@ -15,8 +15,8 @@
  * - 读取：getHistory 命中时走 getEntries(since=lastLeafId) 增量（空增量 = 缓存新鲜）
  * - 清除：SessionHistoryReader.onSessionDisposed（Facade removeSessionEntry 第 ⑤ 步直调，
  *   与 traceSync/projection/records 并列；session 删除 + pi 进程退出两条路汇聚点）
- *   + 容量帽 LRU 驱逐 + reclaim 驱逐（B8：onSessionReclaimed，reclaimManagedSession 经
- *   ReclaimSessionDeps 注入调用——驱逐后重激活走单次全量重建，显式登记代价）
+ *   + 容量帽 LRU 驱逐 + 撤回失效驱逐（onSessionReclaimed：消息撤回编排经
+ *   SessionService.evictHistoryRebuildCache 调用——驱逐后下次重建走单次全量）
  * - 无持久化：重开 app 后 runtime 内存已空，必然全量重建（纯派生数据，丢弃无一致性风险）
  *
  * pi get_entries(since) 行为（2026-08-16 实测，pi 0.84.0，脚本 /tmp/verify-pi-since.mjs 已验证后删除）：
@@ -725,15 +725,11 @@ export class SessionHistoryReader {
   }
 
   /**
-   * B8（memory-leak-remediation §3.3-B8 候选 C）：空闲回收（reclaimManagedSession）时
-   * 驱逐该 session 的缓存条目。回收不是销毁——**禁止**改调 removeSessionEntry 汇聚点
-   *（会连带 bus 分区清理断流 / PTY 连杀 / 插件 didDestroy 投递，D3 三重冲突）；本
-   * 方法只驱逐历史缓存（纯派生数据，丢弃无一致性风险）。驱逐后重激活走单次全量
-   * 重建（P7「回收→恢复零重建」路径被显式放弃，代价四要素：量级 = 单次全量重建
-   * 典型数百 ms~秒级；恢复路径 = 无需恢复（重建即路径）；重审条件 = 回收→重激活
-   * 频率实测升高时重审「回收态保留缓存」策略；显式判定 = 接受）。装配：
-   * reclaimManagedSession 经 ReclaimSessionDeps.evictHistoryRebuildCache（组合根绑
-   * SessionService.evictHistoryRebuildCache → 本方法）。
+   * 驱逐单 session 的历史重建缓存条目。现行唯一调用链 = 消息撤回编排（revoke-orchestrator
+   * 第 ④ 步）→ SessionService.evictHistoryRebuildCache → 本方法：撤回使缓存基线失效，
+   * 驱逐后下次 getHistory 走单次全量重建。只驱逐历史缓存（纯派生数据，丢弃无一致性
+   * 风险），不改调 removeSessionEntry 汇聚点（会连带 bus 分区清理 / PTY 连杀 / 插件
+   * didDestroy 投递）。
    */
   onSessionReclaimed(sessionId: string): void {
     this.historyCache.delete(sessionId)

@@ -11,7 +11,7 @@ describe("U5-A4 tool-error-handling", () => {
 		vi.clearAllMocks();
 	});
 
-	it("select returning undefined (user cancel/timeout) → cancelled throw（W4 范式：错误路径 throw）", async () => {
+	it("select returning undefined (user cancel/channel error) → cancelled throw（W4 范式：错误路径 throw）", async () => {
 		await expectToolRejects(
 			createToolHarness(vi.fn().mockResolvedValue(undefined)),
 			"create_managed_session",

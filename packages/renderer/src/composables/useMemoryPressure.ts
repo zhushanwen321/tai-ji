@@ -18,9 +18,9 @@
  *   不广播（renderer 无「压力消退」信号可消费），自动恢复无从触发；已驱逐的 session
  *   不回补（恢复默认只影响后续判定），应用重启后 LRU 模块态归零天然复位。
  *
- * 状态形态：窗口级单例（非 per-session）——内存压力是全局信号，与 useCrashRecoveryNotice
- * 同款「窗口级单例状态，ADR-0049 Map 分区范式不适用」判定（无 sidRef、无 per-session
- * 分区，useSessionScopedState 的 setup-scoped 工厂契约不成立）。
+ * 状态形态：窗口级单例（非 per-session）——内存压力是全局信号，「窗口级单例状态，
+ * ADR-0049 Map 分区范式不适用」（无 sidRef、无 per-session 分区，useSessionScopedState
+ * 的 setup-scoped 工厂契约不成立）。
  *
  * 订阅防重复（AGENTS 关键规则 2）：模块级 refCount——多实例（split mode）共享单条物理
  * events.onGlobalType 订阅，首个消费者注册、最后一个卸载时退订（useAppUpdate 同款范式）。

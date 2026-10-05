@@ -31,18 +31,8 @@ import { join } from 'node:path'
 import { getDataDir } from '@taiji/shared/paths'
 import { ensureAutoRenameDefault } from './rename-session-config.js'
 import { ensureDeclaredStartupConfigs } from './extension-startup-config.js'
-import { ORPHAN_REAP_DELAY_MS, reapOrphanPiProcesses } from './reap-orphan-pi.js'
+import { reapOrphanPiProcesses } from './reap-orphan-pi.js'
 import { reapAllSessionsBackgroundTasks } from './session/background-task-reaper.js'
-import {
-  TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS,
-  TAIJI_RUNTIME_PI_RECLAIM_TICK_MS,
-  TAIJI_RUNTIME_PI_RECLAIM_VIEWED_WINDOW_MS,
-  TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS,
-  DEFAULT_PI_RECLAIM_IDLE_MS,
-  DEFAULT_PI_RECLAIM_TICK_MS,
-  DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS,
-  DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS,
-} from '@taiji/shared'
 import type { PiConfigStore } from '../infra/pi/pi-config-store.js'
 import type { AuthStorage, CredentialWriter } from './auth/auth-storage.js'
 import type { ExtensionService } from './extension-service.js'
@@ -63,12 +53,6 @@ export interface StartupBackgroundDeps {
   broadcastAppInfo: () => void
   skillRegistry: SkillRegistry
   pluginService: PluginService
-  /**
-   * 启动空闲 pi 回收 reaper（idle-pi-reclamation D4，u3b）。可选成员保证既有测试构造点
-   * 不破；undefined = 跳过（行为不变）。构造留在组合根（本模块只编排执行顺序，见文件头
-   * 注释）——闭包内完成 seat/豁免/reclaim 全部装配，本模块只在序列里触发一次。
-   */
-  startIdleReaper?: () => void
   /**
    * 产物目录保留期扫描（chat-html-support §6.7 D7 回收②）：启动扫 + 每日复扫定时器。
    * 可选成员保证既有测试构造点不破；undefined = 跳过（行为不变）。装配 = runtime 会话服务
@@ -95,55 +79,6 @@ export interface StartupBackgroundDeps {
    * 可选成员保证既有测试构造点不破；undefined = 跳过清扫（行为不变）。
    */
   sweepSpawnMarkerTmpResidue?: () => number
-}
-
-/** 空闲 pi 回收四旋钮（D4；默认值权威源 = shared/constants DEFAULT_PI_RECLAIM_*）。 */
-export interface ReclaimConfig {
-  idleThresholdMs: number
-  tickIntervalMs: number
-  viewedWindowMs: number
-  /**
-   * 挂起 UI 请求豁免的计龄上界（v6 第四案，r5 I-1 字段名写死）：超过该上界的 pending
-   * 视同不存在（恢复常规回收）。由 reaper 在豁免判定内部消费；与 idleThresholdMs 联动
-   * （FORM_MAX_AGE < IDLE 时豁免恒不命中 = 死代码，resolveReclaimConfig 处 warn）。
-   */
-  pendingUiRequestMaxAgeMs: number
-}
-
-/**
- * 解析 env 四旋钮（idle-pi-reclamation D4 env 覆盖；独立导出便于单测 env 覆盖行为）。
- *
- * 值语义：缺失回落 shared 默认；非法值（非数字 / NaN / Infinity / 非正数含 0）一律回落
- * 默认——非正数周期/阈值会让 setInterval 立即连拍或永不回收，视为配置错误按缺省处理
- * （env 是运维逃生旋钮不是校验面，warn 不 throw）。
- */
-export function resolveReclaimConfig(env: NodeJS.ProcessEnv): ReclaimConfig {
-  const parseMs = (raw: string | undefined, fallback: number): number => {
-    if (raw === undefined) return fallback
-    const n = Number(raw)
-    if (!Number.isFinite(n) || n <= 0) {
-      console.warn(`[runtime] invalid reclaim env value "${raw}", falling back to ${fallback}ms`)
-      return fallback
-    }
-    return n
-  }
-  const idleThresholdMs = parseMs(env[TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS], DEFAULT_PI_RECLAIM_IDLE_MS)
-  const pendingUiRequestMaxAgeMs = parseMs(env[TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS], DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS)
-  // r5 影响面 suggestion：FORM_MAX_AGE < IDLE 时，pending 在空闲阈值到达前就已「超龄」
-  // ⇒ 豁免恒不命中 = 死代码（进程照旧被回收、死表单仍被拉回）。此处 warn 不 throw
-  // （env 是运维逃生旋钮，与上方非法值回落同口径）。
-  if (pendingUiRequestMaxAgeMs < idleThresholdMs) {
-    console.warn(
-      `[runtime] TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS (${pendingUiRequestMaxAgeMs}ms) < ` +
-      `TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS (${idleThresholdMs}ms) — pending-UI-request exemption is unreachable (dead code); raise FORM_MAX_AGE or lower IDLE`,
-    )
-  }
-  return {
-    idleThresholdMs,
-    tickIntervalMs: parseMs(env[TAIJI_RUNTIME_PI_RECLAIM_TICK_MS], DEFAULT_PI_RECLAIM_TICK_MS),
-    viewedWindowMs: parseMs(env[TAIJI_RUNTIME_PI_RECLAIM_VIEWED_WINDOW_MS], DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS),
-    pendingUiRequestMaxAgeMs,
-  }
 }
 
 /**
@@ -242,19 +177,8 @@ export async function runStartupBackgroundInit(deps: StartupBackgroundDeps): Pro
   // 语义与编排位置不变（本步骤不参与耗时分解探针）。
   cleanupStartupResidue()
 
-  // ⑩ 空闲 pi 回收 reaper 启动（idle-pi-reclamation D4，u3b）：对齐 ⑨ 的 fire-and-forget
-  // + try/catch 形态——startIdleReaper 只起一个 setInterval 判定循环（tick 定时器已在
-  // reaper 内部 unref，不阻塞进程退出），同步返回无异步面；首拍在 tick 间隔（默认 5min）
-  // 之后，与串行链其余步骤零共享状态。缺省（undefined）= 跳过（行为不变，既有测试构造点
-  // 不受影响）。
-  if (deps.startIdleReaper) {
-    try {
-      deps.startIdleReaper()
-    // eslint-disable-next-line taste/no-silent-catch -- best-effort：闭包装配错误仅 warn，不阻塞启动序列（reaper 缺席 = 现状行为，下轮重启重试）
-    } catch (e) {
-      console.warn('[runtime] idle pi reaper start failed:', e)
-    }
-  }
+  // 后台初始化耗时分解探针（06 §5 m-7）：listen 后各段（改造前这些段全部堆在 listen 前）。
+  console.log(`[runtime] background init breakdown: migrationA=${(tMigA - tBg).toFixed(1)}ms migrateBuiltin=${(tMigB - tMigA).toFixed(1)}ms autoUpgrade=${(tAutoUpgrade - tMigB).toFixed(1)}ms piVersion=${(tPiVersion - tAutoUpgrade).toFixed(1)}ms skillInit=${(tSkillInit - tPiVersion).toFixed(1)}ms plugins=${(tPlugins - tSkillInit).toFixed(1)}ms total=${(tPlugins - tBg).toFixed(1)}ms`)
 
   // ⑪ 产物目录保留期扫描（chat-html-support §6.7 D7 回收②）：启动扫 + 每日复扫定时器
   // （节奏照搬 main 侧 log-retention.ts 模式，落点在 runtime 会话服务）。同步返回无异步面，
@@ -269,13 +193,12 @@ export async function runStartupBackgroundInit(deps: StartupBackgroundDeps): Pro
   }
 
   // 后台初始化耗时分解探针（06 §5 m-7）：listen 后各段（改造前这些段全部堆在 listen 前）。
-  console.log(`[runtime] background init breakdown: migrationA=${(tMigA - tBg).toFixed(1)}ms migrateBuiltin=${(tMigB - tMigA).toFixed(1)}ms autoUpgrade=${(tAutoUpgrade - tMigB).toFixed(1)}ms piVersion=${(tPiVersion - tAutoUpgrade).toFixed(1)}ms skillInit=${(tSkillInit - tPiVersion).toFixed(1)}ms plugins=${(tPlugins - tSkillInit).toFixed(1)}ms total=${(tPlugins - tBg).toFixed(1)}ms`)
 }
 
 /**
  * ⑧ + ⑧b 启动期磁盘残留清扫：两者同为「目录级兜底清扫、失败仅 warn 不影响主流程」的
  * 一档关注点，收敛在独立函数承载（runStartupBackgroundInit 保持串行链编排骨架）。
- * 同步执行，编排位置在 ⑦b 之后、⑩ 之前（本步骤不参与后台耗时分解探针）。
+ * 同步执行，编排位置在 ⑦b 之后、⑪ 之前（本步骤不参与后台耗时分解探针）。
  */
 function cleanupStartupResidue(): void {
   // ⑧ sessions 目录残留清扫（W3 `.tmp-migrate-`/`.tmp-import-` 崩溃残留 + 缓存治理 U9
@@ -315,6 +238,7 @@ function cleanupStartupResidue(): void {
     // best-effort：回收失败不影响主流程（残留仅是磁盘垃圾，下次启动重试）
     console.warn('[runtime] aged backup residue cleanup failed:', e)
   }
+
 }
 
 /**
@@ -330,7 +254,9 @@ function scheduleOrphanReapChain(deps: StartupBackgroundDeps): void {
   const reapChainDone = new Promise<void>((resolve) => {
     settleReapChain = resolve
   })
-  const reapTimer = setTimeout(() => {
+  // ADR-0122：原 5s 启动延迟窗已退役——孤儿判据（argv 四条合取 + ppid=1）是事实判据，
+  // 不误杀本 runtime 的子进程，收殓在启动链立即执行。
+  {
     // u17 判据 v2（设计 §6.12）：孤儿判据消费 spawn 清单，读取函数由组合根经 deps 注入
     // （清单文件 io 在 infra/spawn-markers.ts 读写两侧 SSOT；D6c services 层不 import infra）。
     void reapOrphanPiProcesses({
@@ -363,9 +289,7 @@ function scheduleOrphanReapChain(deps: StartupBackgroundDeps): void {
         console.warn('[runtime] spawn-marker tmp residue cleanup failed:', e)
       }
     }
-  }, ORPHAN_REAP_DELAY_MS)
-  // unref：不让收殓定时器独自挂住进程生命周期（正常场景 runtime 长活，仅测试/工具受益）。
-  reapTimer.unref()
+  }
   deps.onOrphanReapChainScheduled?.(reapChainDone)
 }
 

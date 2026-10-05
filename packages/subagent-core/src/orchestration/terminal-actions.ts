@@ -23,6 +23,9 @@ import { mapReasonToStatus, PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/ex
 
 import { disposeWorkflowWindowEngineState } from "../execution/engine/routing.ts";
 import { writeRunTerminalManifest } from "../execution/persistence/manifest-store.ts";
+// [event-push-channel W-P1] journal 落盘事件出口：落盘提交点把新事件推给壳层
+// reporter（select marker 通道带回执推送 runtime 派生视图）。
+import { notifyJournalAppended } from "../execution/persistence/journal-notify.ts";
 import { clearMemberReusePool, type MemberReusePoolIo } from "../execution/service/member-reuse-pool.ts";
 import type { LifecycleDeps } from "./models/ports.ts";
 import type { RunSpec } from "./models/run-spec.ts";
@@ -222,12 +225,19 @@ export function foldRunEventsToLifecycleState(
 export function appendRunDiagnosticEvent(runId: string, entry: WorkerLogEntry, journalDir?: string): void {
   try {
     const { journal } = resolveRunEventJournal(journalDir);
-    journal.append(runId, { type: "worker-log", entry, ts: Date.now() }).catch((err: unknown) => {
-      runEventLogger.warn("[subagents] worker-log 诊断事件落账失败（run 生命周期不受影响）", {
-        runId,
-        detail: toErrorMessage(err),
+    journal
+      .append(runId, { type: "worker-log", entry, ts: Date.now() })
+      .then((appended) => {
+        // [event-push-channel W-P1] 落盘提交点推送（诊断事件同走通道，worker-log
+        // 高频行由壳层 reporter 合并缓冲——设计 §5 风险 1 的量级缓解面）。
+        notifyJournalAppended("run", runId, [appended]);
+      })
+      .catch((err: unknown) => {
+        runEventLogger.warn("[subagents] worker-log 诊断事件落账失败（run 生命周期不受影响）", {
+          runId,
+          detail: toErrorMessage(err),
+        });
       });
-    });
   } catch (err) {
     runEventLogger.warn("[subagents] worker-log 诊断事件落账失败（run 生命周期不受影响）", {
       runId,
@@ -314,6 +324,10 @@ async function appendTransition(
     // ——seq 水位据此精确对齐盘面，miss 冷读重建时 seq 守卫据此去重。
     const appended = await journal.append(run.runId, journalEventOf(trigger, journalDir));
     appendedSeq = typeof appended.seq === "number" ? appended.seq : undefined;
+    // [event-push-channel W-P1] 落盘提交点推送：推送语义与事实源同点（推的就是刚
+    // 落盘的行）。fire-and-forget（出口回调内部自行合并缓冲），失败不反噬落盘主链
+    // ——完整性由消费方 seq 缺口补读收敛。
+    notifyJournalAppended("run", run.runId, [appended]);
     // terminal 已删条目（entry miss）不回写；旧格式无 seq 帧不推进水位。
     if (appendedSeq !== undefined) {
       const entry = liveRunFoldCheckpoints.get(run.runId);

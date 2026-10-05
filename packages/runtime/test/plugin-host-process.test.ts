@@ -18,11 +18,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const MOCK_BOOTSTRAP = resolve(__dirname, 'fixtures/plugin-bootstrap-process.mock.cjs')
 const NOOP_ESM_LOADER = resolve(__dirname, 'fixtures/noop-esm-loader.cjs')
 
-const DEFAULT_LOAD_TIMEOUT_MS = 10_000
 /** disconnect 宽限注入值（生产默认 250ms 不变；配套守卫窗口 sleep 等比缩小）。 */
 const TEST_DISCONNECT_GRACE_MS = 50
 
-function createHost(options?: { loadTimeoutMs?: number }): {
+function createHost(): {
   host: PluginHostProcess
   rpc: PluginRpcServer
 } {
@@ -31,7 +30,6 @@ function createHost(options?: { loadTimeoutMs?: number }): {
     bootstrapPathOverride: MOCK_BOOTSTRAP,
     // MF-1：sandbox fork 边界断言 execArgv 含 --import；测试用 noop loader 满足契约
     execArgv: ['--import', NOOP_ESM_LOADER],
-    loadTimeoutMs: options?.loadTimeoutMs ?? DEFAULT_LOAD_TIMEOUT_MS,
     disconnectGraceMs: TEST_DISCONNECT_GRACE_MS,
   })
   return { host, rpc }
@@ -120,7 +118,7 @@ describe('PluginHostProcess', () => {
     track(host)
 
     const processId = await host.assignProcess('rpc-test', 'sandbox')
-    const result = await rpc.invoke(processId, 'test.method', {}, 2000)
+    const result = await rpc.invoke(processId, 'test.method', {})
     expect(result).toBeNull()
   })
 
@@ -168,24 +166,6 @@ describe('PluginHostProcess', () => {
     expect(host.getProcessHandleById(processId)).toBeUndefined()
   })
 
-  // ── TC7: loadPlugin 超时清理 ─────────────────────────────────
-  it('TC7: loadPlugin rejects on timeout and cleans up the child', async () => {
-    const { host } = createHost({ loadTimeoutMs: 500 })
-    track(host)
-
-    const processId = await host.assignProcess('hang-test', 'sandbox')
-    const handle = host.getProcessHandle('hang-test')!
-    // 先让 mock 进入 hang 态（后续 load 不响应）
-    handle.postMessage({ type: 'hang' })
-
-    await expect(host.loadPlugin(processId, 'hang-test', '/fake/hang.js', 'sandbox')).rejects.toThrow(
-      /timeout/i,
-    )
-
-    // E2: 宿主清理该子进程
-    expect(host.getProcessHandleById(processId)).toBeUndefined()
-  })
-
   // ── TC8: terminateProcess 清理 ───────────────────────────────
   it('TC8: terminateProcess removes handle and does not trigger crash callback', async () => {
     const { host, rpc } = createHost()
@@ -203,7 +183,7 @@ describe('PluginHostProcess', () => {
 
     expect(host.getProcessHandleById(processId)).toBeUndefined()
     // rpcServer 已 unregister：invoke 应报 Worker not found
-    await expect(rpc.invoke(processId, 'test.method', {}, 100)).rejects.toThrow(/not found/i)
+    await expect(rpc.invoke(processId, 'test.method', {})).rejects.toThrow(/not found/i)
 
     // 等待事件传播，terminated 守卫应阻止 crash 回调（覆盖 grace 定时器到期后的形态）
     await new Promise((resolve) => setTimeout(resolve, TEST_DISCONNECT_GRACE_MS + 50))

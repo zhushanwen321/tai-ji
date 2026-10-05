@@ -15,6 +15,7 @@
  *     "abortDelayMs": 0
  *   },
  *   "onPrompt": {
+ *     "disposition": "started",          // prompt 应答的 disposition（pi 1.0.0：handled|queued|started，缺省 started）
  *     "planStateEntry": {...},           // prompt 后立即落盘的 plan-state 快照（submit-review persist 模拟）
  *     "assistant": ["..."],              // 依次 message_end 的 assistant 文本
  *     "select": {...},                   // planReviewSelect / uiFormSelect 参数（kind: "plan-review"|"ui-form"）
@@ -22,6 +23,13 @@
  *     "agentEnd": false,                 // select 挂起后是否收轮（默认 false = turn 保持打开）
  *     "crash": {"code": 1} | {"signal": "SIGKILL"}   // 注入崩溃
  *   },
+ *   "onSteer": {                         // steer 命令到达后的动作（缺省 disposition "queued"）
+ *     "disposition": "queued",           // pi 1.0.0：handled|queued
+ *     "assistant": ["..."],
+ *     "rawFrames": [...],
+ *     "agentEnd": false
+ *   },
+ *   "onFollowUp": { ... },               // follow_up 同 onSteer
  *   "onSelectResponse": {                // extension_ui_response 到达后的动作
  *     "planStateEntry": {...}|null,
  *     "assistant": ["..."],

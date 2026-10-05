@@ -6,7 +6,7 @@
  * - D1 中央分发表：handler 的 handles 清单 + Map spread → O(N→M) 路由映射（亮点，勿动）。
  * - setServices：四阶段编排（assignServices → createBroker → assembleHandlers → buildRoutes），
  *   装配全部 message handler 并注入各 handler 的 context（messaging + 领域依赖）。
- * - extension timeout / bridge 请求的对外委托入口（event-adapter 经 index.ts 调用）。
+ * - extension timeout / statusSetUpdate 投递的对外委托入口（event-adapter 经 index.ts 调用）。
  *
  * 业务逻辑在 services，经 handler 调用；本类不含领域计算，只做路由与编排。
  */
@@ -39,7 +39,6 @@ import { ExtensionTimeoutManager } from '../services/extension-timeout-manager.j
 import type { PendingUIRequest, PendingUIRequestResolved } from '../services/extension-timeout-manager.js'
 import { ConnectionManager, type ConnectionManagerOptions } from './connection-manager.js'
 import { ServerMessageBroker } from './message-broker.js'
-import { BridgeHandler } from './bridge-handler.js'
 import { SettingsMessageHandler } from './settings-message-handler.js'
 import { SessionMessageHandler } from './session-message-handler.js'
 import { ExtensionMessageHandler } from './extension-message-handler.js'
@@ -71,6 +70,7 @@ import type { QuotaService } from '../services/quota-service.js'
 import type { TtsService } from '../services/tts-service.js'
 import type { IProviderCredentialResolver } from '../services/ports/provider-credential-resolver.js'
 import type { IModelConnectionTester } from '../services/ports/model-connection-tester.js'
+import type { McpServersService } from '../services/mcp-servers-service.js'
 import { UsageStatsService } from '../services/usage/usage-stats-service.js'
 import type { PresetService } from '../services/preset-service.js'
 import { toErrorMessage } from '../utils/errors.js'
@@ -109,6 +109,13 @@ export interface RuntimeServerOptionalServices {
    * ctx（discoverModels mode=test 路由依赖）。生产恒注入，ctx 装配处断言非空。
    */
   connectionTester?: IModelConnectionTester
+  /**
+   * MCP 服务器管理域服务（pi-mcp-management）：组合根（index.ts）构造 McpServersService
+   * （infra 实现 PiMcpServers 组合 pi-mcp-store + pi-mcp-probe）经本对象注入，
+   * assembleCoreHandlers 透传给 SettingsMessageHandler ctx（mcp.* 七命令路由依赖）。
+   * 生产恒注入；缺省（存量测试装配）时 mcp.* 落 unknown_type（handler 条件装配）。
+   */
+  mcpServersService?: McpServersService
   project?: ProjectStore
   delivery?: SessionDeliveryRegistry
   /**
@@ -183,7 +190,6 @@ export class RuntimeServer implements IMessageBroker {
   // initialized and each handler receives an explicit context object rather than
   // the `as unknown as XxxHandlerContext` cast the field-initializer needed.
   private extensionTimeoutMgr = new ExtensionTimeoutManager()
-  private bridgeHandler!: BridgeHandler
   private settingsHandler!: SettingsMessageHandler
   private sessionHandler!: SessionMessageHandler
   private extensionHandler!: ExtensionMessageHandler
@@ -280,7 +286,7 @@ export class RuntimeServer implements IMessageBroker {
     this.genStatsService = genStats
     this.sessionService = session
     // D6a（integrity-hardening §3.6）：挂起 UI 请求的汇聚清理。extensionTimeoutMgr 的
-    // per-session 残留（pendingRequests / bridgeRequestIds / session 跟踪）此前只在
+    // per-session 残留（pendingRequests / session 跟踪）此前只在
     // session 删除分支直接清理，pi 意外退出的收敛链（onSessionExit → removeSessionEntry）
     // 不触碰它——挂起的 ask-user 弹窗在 restore 后重弹，作答发给新进程被静默丢弃（M8 幽灵
     // 弹窗）。挂到 onSessionDestroyed（removeSessionEntry 触发，覆盖主动删 / 进程退出 /
@@ -360,13 +366,9 @@ export class RuntimeServer implements IMessageBroker {
     }
   }
 
-  /** 核心 handler 批：bridge / settings / session / extension / plugin（无条件装配）。 */
+  /** 核心 handler 批：settings / session / extension / plugin（无条件装配）。 */
   private assembleCoreHandlers(messaging: MessageHandlerContext, optional: RuntimeServerOptionalServices): void {
-    const { auth, providerCredentialResolver, connectionTester } = optional
-    // 第二参注入 extensionTimeoutMgr：marker 通道（method 恒 'select'）识别出的 bridge
-    // 请求由 BridgeHandler 入口登记进 bridgeRequestIds（impl-plan 偏差 #5——生产装配点
-    // 必须传，否则前端误发 ui_response 的拦截依据丢失）。
-    this.bridgeHandler = new BridgeHandler(this.pluginService ?? null, this.extensionTimeoutMgr)
+    const { auth, providerCredentialResolver, connectionTester, mcpServersService } = optional
     this.settingsHandler = new SettingsMessageHandler({
       ...messaging,
       configService: this.configService,
@@ -379,6 +381,10 @@ export class RuntimeServer implements IMessageBroker {
       // D-21 端口化：测试连接 HTTP 适配器经组合根注入（恒注入前提同上——
       // 组合根 index.ts 保证传入，setServices 编排保证；transport 不 import infra 实现）。
       connectionTester: connectionTester!,
+      // pi-mcp-management：mcp.* 七命令路由依赖。生产恒注入（组合根保证传入）；
+      // 缺省（存量测试装配）时 ctx 成员 undefined，SettingsMessageHandler 构造器
+      // 条件装配跳过 mcp 域子 handler，mcp.* 落 unknown_type（非空断言同上两行先例）。
+      mcpServersService: mcpServersService!,
       // W4：skillRegistry 必须注入（settings-handler 的 config.getGlobalSkills/getProjectSkills 依赖）。
       // 组合根 index.ts 保证传入；此处断言非空（setServices 编排保证）。若未来 skillRegistry 可选，handler 需守卫。
       skillRegistry: this.skillRegistry!,
@@ -638,6 +644,14 @@ export class RuntimeServer implements IMessageBroker {
   broadcastSkillCacheInvalidated(scope: SkillCacheScope, cwd?: string, partial?: boolean): void { this.broker.broadcastSkillCacheInvalidated(scope, cwd, partial) }
   nextPushId(): string { return this.broker.nextPushId() }
 
+  /**
+   * 通用全局广播暴露（u5b 打回接线，mcp:testResult 首个消费方）：组合根把 PiMcpServers 的
+   * onTestResult 回调接到本方法完成 probe 终态回填（`mcp.test` 异步句柄的完成侧通道）。
+   * 仅承接 payload 无 sessionId 的纯全局帧（broker.broadcast 契约；带 sid 消息必须走
+   * IMessageBus.publish，见 broker 侧误用哨兵）。
+   */
+  broadcastServerMessage(msg: ServerMessage): void { this.broker.broadcast(msg) }
+
   // ── Message routing ───────────────────────────────────────────
 
   private async handleMessage(msg: ClientMessage, ws: WsType): Promise<void> {
@@ -743,17 +757,16 @@ export class RuntimeServer implements IMessageBroker {
     return this.extensionTimeoutMgr.getPendingRequests(sessionId)
   }
 
-  async handleBridgeRequest(sessionId: string, requestId: string, method: string, data: Record<string, unknown>): Promise<void> {
-    const client = this.sessionService.getRpcClient(sessionId)
-    if (!client) {
-      console.warn(`[server] bridge request for inactive session: ${sessionId}, method: ${method}`)
-      return
-    }
-    await this.bridgeHandler.handleBridgeRequest(sessionId, requestId, method, data, client)
-  }
-
+  /**
+   * statusSetUpdate 投递挂点（pi1-disposition-chat-flow D7② 挂点迁移 + 断链修复）：
+   * pi setStatus stdout 事件（event-adapter status-set → interpreter 路由）直达 pluginService
+   * 的插件事件投递方法——原 BridgeHandler.handleStatusSetUpdate 中转随 bridge 退役删除。
+   * 断链修复落点 = 分发侧：新投递点按泛型 'onPiEvent' 键派发（与 hook-api 注册面泛型键
+   * 形状对齐，事件名在载荷 event 字段），修复「注册键 'onPiEvent' vs 分发键原始事件名」
+   * 的既有错位（audit §4.2）。
+   */
   handleStatusSetUpdate(payload: { sessionId: string; key: string; text: string; textRaw?: string }): void {
-    this.bridgeHandler.handleStatusSetUpdate(payload)
+    this.pluginService?.notifyPiEvent?.('plugin:statusSetUpdate', payload, payload.sessionId)
   }
 
   /**

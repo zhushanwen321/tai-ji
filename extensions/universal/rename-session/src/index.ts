@@ -64,7 +64,7 @@ const RENAME_TOOL_SUBAGENT_GUARD_MESSAGE =
  *   子进程同样加载本 extension（全局 mode=agent-tool 时 subagent 也注册本工具），
  *   子会话是临时产物不参与 rename 体系，与 message_end / turn_end 两入口同语义。
  * - execute 内 live 读 config 守卫：mode !== "agent-tool"（mode 切走后本工具残留在
- *   已存活 session 的工具清单——pi 无 unregisterTool）→ throw isError（pi 0.84.4 实装：
+ *   已存活 session 的工具清单——pi 无 unregisterTool）→ throw isError（pi 1.0.0 实装：
  *   execute 正常返回的 isError 字段被丢弃，isError 状态只能经 throw 产生，
  *   agent-loop.js executePreparedToolCall catch → createErrorToolResult(message)）。
  * - cleanTitle 空值同样 throw isError（空白/纯标点标题不可落库）。

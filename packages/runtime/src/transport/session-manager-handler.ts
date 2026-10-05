@@ -26,7 +26,7 @@ import type { ISessionService } from '../interfaces.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 // 通知债权状态机（u-claims）：本 handler 是其唯一受理侧消费方；组合根 index.ts 经
 // 本模块导出的映射/回执助手（toWatchRespondPayload 等）消费同一批素材。
-import type { ClaimLedger, RespondPayload, RespondTarget, SettleOutcome, SweepResult } from '../services/session/notify-claims.js'
+import type { ClaimLedger, RespondPayload, RespondTarget, SettleOutcome } from '../services/session/notify-claims.js'
 import { toErrorMessage } from '../utils/errors.js'
 import { SESSION_MANAGER_ACTIONS } from '@zhushanwen/extension-protocol'
 import {
@@ -81,7 +81,8 @@ function logNotifyIdAbsence(action: 'send' | 'create'): void {
 /**
  * watch respond 写回通道（boolean 传导，D7①）：true = 已写入发起方 pi 进程 stdin
  * （写入失败 false 传导）；pi 侧无独立消费确认——rpc-mode 收行后按 id resolve 既有
- * pending 项（pi 实装 dist/modes/rpc/rpc-mode.js:615-624，0.84.4 实读；既有锚
+ * pending 项（pi 实装 dist/modes/rpc/rpc-mode.js handleInputLine 的 extension_ui_response
+ * 分支按 id resolve pendingExtensionRequests，1.0.0 实读；既有锚
  * rpc-client.ts:1129-1133）。watch 长挂 select 无 timeout，pi 侧不超时清项（PS-59）；
  * 写成功未消费的残余由 TTL 清扫腿（D7③）兜底。
  */
@@ -176,17 +177,6 @@ export function deliverRespondTargets(
   }
 }
 
-/**
- * TTL 清扫消费（D7 回收策略）：扫描转移时 watch 已挂的记录返回 respondOrphaned，
- * 此处同步应答 'orphaned'（extension 按 D3 例外1 静默收口，防孤儿 promise）+ onRespond 回执。
- * 组合根 index.ts 的清扫定时环与 handler 测试经同一函数驱动（测试可覆盖该腿）。
- */
-export function runClaimSweep(claims: ClaimLedger, respond: WatchRespondFn): SweepResult {
-  const result = claims.sweep()
-  deliverRespondTargets(claims, result.respondOrphaned, respond)
-  return result
-}
-
 /** dispatch 的统一返回形状：即时应答 action 的结果 + 错误闭环（send 同步失败 / create 后置失败）——watch 纯应答通道三分支（fail-closed / 挂等 / 晚 respond）均返回 null，不产生本形状 */
 type SessionManagerDispatchResult =
   | SessionManagerCreateResult
@@ -220,7 +210,8 @@ export interface SessionManagerHandlerOptions {
    * 向 pi 发送 extension_ui_response（sessionId = 发起方 session，requestId 只在其 pending 表有效）。
    * 返回 boolean 作 watch respond 的 D7① 失败传导：true = 已写入发起方 pi 进程 stdin
    * （写入失败 false 传导），pi 侧无独立消费确认——rpc-mode 收行后按 id resolve 既有
-   * pending 项（pi 实装 dist/modes/rpc/rpc-mode.js:615-624，0.84.4 实读；既有锚
+   * pending 项（pi 实装 dist/modes/rpc/rpc-mode.js handleInputLine 的 extension_ui_response
+   * 分支按 id resolve pendingExtensionRequests，1.0.0 实读；既有锚
    * rpc-client.ts:1129-1133）；
    * void/undefined（client 缺失、旧测试替身）一律按失败计（`=== true` 收敛）。
    */

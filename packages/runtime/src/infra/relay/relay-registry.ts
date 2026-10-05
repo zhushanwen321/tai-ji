@@ -38,15 +38,12 @@ import { isPidAlive } from '../../utils/protocol-background-task.js'
 import { RelayTee } from './relay-tee.js'
 import { getRelayChildrenDir, getRelayPidFilePath } from './relay-paths.js'
 
-/** 断连即杀的优雅退出窗口（SIGTERM 后等这么久再 SIGKILL，设计 §4.2）。 */
-export const RELAY_KILL_GRACE_MS = 3_000
-
 /**
  * 孤儿分级收割（2026-09-24 事故修复）：孤儿判定语义保持（无管理者），处置按活跃度
  * 分级——tee 镜像最近写入超过 {@link ORPHAN_IDLE_REAP_MS}（静默，纯资源占用）立即
  * 收割（现状行为）；仍在产出的孤儿登记 pending 延迟收割（重启风暴期「sweep 杀 →
  * crash-recovery 重派 → 再 sweep 杀」的振荡止血；ADR-0047：静默 ≠ 卡死，活跃产出
- * 不得判死），延迟有硬上限防无限活。量级为任务级（分钟），与控制面秒级 grace 不可
+ * 不得判死），延迟有硬上限防无限活。量级为任务级（分钟），与控制面秒级超时不可
  * 互相挪用（超时默认按对象粒度校准）。
  */
 /** 量级换算基准：1 秒 / 1 分钟的毫秒数（孤儿处置族的阈值定义与日志换算共用）。 */
@@ -60,8 +57,6 @@ const ORPHAN_PENDING_RECHECK_MS = 60_000
 /** pending 硬上限（分钟）：活跃孤儿最多延迟这么多再收割（防 tee 持续产出但恢复链已死透）。 */
 const ORPHAN_PENDING_MAX_MINUTES = 30
 const ORPHAN_PENDING_MAX_MS = ORPHAN_PENDING_MAX_MINUTES * MINUTE_MS
-/** 握手超时：连接建立后等第一帧的上限（防半开连接占资源）。 */
-const HANDSHAKE_TIMEOUT_MS = 10_000
 /** spawn 失败时代理看到的退出码（127 = command not found 惯例，走子进程非零退出语义）。 */
 const SPAWN_FAILURE_EXIT_CODE = 127
 /** pid 复用判定的时钟容差（ps lstart 秒级精度 + 调度延迟）。 */
@@ -137,11 +132,6 @@ export interface RelayRegistryOptions {
   publish: (sessionId: string, msg: ServerMessage) => void
   /** spawn 命令覆盖（测试注入假 pi；缺省 findPiExecutable(projectRoot)）。 */
   piCommand?: string
-  /**
-   * 孤儿收割杀链的 SIGTERM→SIGKILL 宽限（缺省 RELAY_KILL_GRACE_MS）。测试注入小值
-   * 压缩收割用例的真实等待；生产调用方勿传。
-   */
-  orphanKillGraceMs?: number
 }
 
 /**
@@ -180,31 +170,25 @@ function endConn(conn: Socket): void {
 
 /**
  * 杀链（S7 收敛：pi-rpc kill-chain 单源消费，与 rpc-client.kill / pi-subagent-cli
- * killChild 同源）：SIGCONT（唤醒可能被 SIGSTOP 冻结的进程，否则 SIGTERM 被吞）→
- * SIGTERM → grace → SIGKILL。幂等：已退出的 child 直接 resolve（killPiProcess 前置
- * exitCode/signalCode 短路，与迁移前本函数守卫等价——去重不重复实现）。
+ * killChild 同源）：SIGKILL 直杀，信号发出即 resolve（不等真实 exit）。幂等：已退出
+ * 的 child 直接 resolve（killPiProcess 前置 exitCode/signalCode 短路即覆盖，本函数
+ * 不重复实现）。
  *
- * 消费参数与外层兜底裁决（独立实现 → 单源消费的行为保真点）：
- * - graceMs 缺省维持 RELAY_KILL_GRACE_MS（3s，设计 §4.2 断连即杀窗口，不随
- *   killPiProcess 缺省 2s 漂移）；
- * - unrefTimers: true 维持迁移前双 timer unref 形态——kill-on-disconnect / 尾扫 /
- *   destroyAll 都是关停路径，ref'd timer 会拖住 runtime 进程退出；
- * - .catch 兜底维持「杀链必 resolve、永不 reject」契约：close 路径
- *   `void killRelayChild(...)` fire-and-forget 无 catch。注：killPiProcess 内三处 kill
- *   现已收口 safeKill 吞错（kill 尽力而为语义），promise 结构性必 resolve，本
- *   .catch 从「必要兜底」降级为纵深防御（防未来 kill-chain 新增异步抛出路径），
- *   reject 内容降级 debug 留痕。
+ * ADR-0122 防御清理：原 SIGCONT/SIGTERM/grace 等待阶梯已随 pi-rpc kill-chain 的
+ * grace 退役收敛为直杀形态，graceMs 消费参数随之消失；「杀链必 resolve、永不
+ * reject」契约维持——close 路径 `void killRelayChild(...)` fire-and-forget 无 catch，
+ * killPiProcess 内 kill 已收口 safeKill 吞错（kill 尽力而为语义），promise 结构性
+ * 必 resolve，本 .catch 从「必要兜底」降级为纵深防御（防未来 kill-chain 新增异步
+ * 抛出路径），reject 内容降级 debug 留痕。
  *
- * 迁移删除的防御与理由：迁移前 settleTimer（graceMs+2s 强制 resolve）守护的是
- * 「SIGKILL 后等真实 exit」形态的挂起面；killPiProcess 的 killTimer 在 grace 超时
- * 点无条件 SIGKILL + resolve（信号发出即承诺兑现），promise 结构性不可能超过 graceMs
- * 悬挂，外层 Promise.race 兜底恒为死代码，故去兜底而非保留。escalation 路径的
- * resolve 时机从「真实 exit」提前为「SIGKILL 发出」——消费方全部容忍：cleanupEntry
- * 幂等且由 attachRelayChildWiring 的 exit handler 独立复跑，尾扫 kill 是
- * fire-and-forget（session-lifecycle `void target.kill().catch(...)`）。
+ * resolve 时机语义（SIGKILL 发出 ≠ 真实 exit）：exit 收尾由 attachRelayChildWiring
+ * 挂载的 exit handler 独立复跑 cleanupEntry（幂等），尾扫 kill 是 fire-and-forget
+ * （session-lifecycle `void target.kill().catch(...)`）——消费方全部容忍 resolve 早于
+ * 真实死亡。无外层超时兜底：promise 结构性立即 settle（信号发出即 resolve，无等待
+ * 窗），任何墙钟兜底恒为死代码。
  */
-export function killRelayChild(child: ChildProcess, graceMs = RELAY_KILL_GRACE_MS): Promise<void> {
-  return killPiProcess(child, { graceMs, unrefTimers: true }).catch((e) => {
+export function killRelayChild(child: ChildProcess): Promise<void> {
+  return killPiProcess(child).catch((e) => {
     // kill 抛错说明进程已死（exit 事件已/将至）；杀链契约是必 resolve（见头注），
     // 吞错防 close 路径 unhandled rejection，debug 留痕使该纵深兜底可观测
     console.debug('[relay] kill chain rejected (must-resolve contract, safe to ignore):', toErrorMessage(e))
@@ -264,11 +248,12 @@ export class RelayRegistry {
   private readonly recordIdToConn = new Map<string, Socket>()
   /**
    * 在途杀链登记（kill-on-disconnect 的 fire-and-forget 修正面）：close 路径的
-   * `void killRelayChild(...)` 不等结果——runtime 若在杀链 grace 期内退出，unref
-   * timer 随进程消亡，SIGTERM 已发但未死透的 child（pi 优雅退出实测可达 15s）无人
-   * 补 SIGKILL，成为下一轮 runtime orphan sweep 的收割对象（2026-09-24 事故 r6 双杀
-   * 形态）。destroyAll 在清完在册条目后等待此集合清空，把关停窗口内的全部杀链
-   * 都收到 SIGKILL 发出承诺再放行 runtime 退出。
+   * `void killRelayChild(...)` 不等结果——runtime 若在杀链 promise settle 前退出，
+   * 杀链随进程消亡中断（child 可能仅收到信号未及退出），成为下一轮 runtime orphan
+   * sweep 的收割对象（2026-09-24 事故 r6 双杀形态）。SIGKILL 直杀 + 信号发出即
+   * resolve 后杀链 settle 几乎瞬时，此集合通常空转；保留是关停顺序的结构保证——
+   * destroyAll 在清完在册条目后等待此集合清空，不依赖杀链 settle 时序假设即放行
+   * runtime 退出。
    */
   private readonly inflightKills = new Set<Promise<void>>()
   /** pending 孤儿复查 timer（armOrphanRecheck 武装；destroyAll 清除）。 */
@@ -306,9 +291,9 @@ export class RelayRegistry {
    * 按 mainSessionId 枚举在册 relay 子进程目标（idle pi reclamation D3 第 5 步尾扫，u3a）。
    *
    * 返回元素结构对齐 session-lifecycle.ts 的 ReclaimRelayTarget（{ kill }）——刻意不
-   * import 该类型（infra → services 反向依赖禁向），结构类型天然兼容，u3 装配接线
-   * listRelayChildrenByMainSession 时可直接赋值。kill 实现绑本文件导出的 killRelayChild
-   * （SIGCONT→SIGTERM→grace→SIGKILL，幂等：已退出 child 直接 resolve）。
+ * import 该类型（infra → services 反向依赖禁向），结构类型天然兼容，u3 装配接线
+ * listRelayChildrenByMainSession 时可直接赋值。kill 实现绑本文件导出的 killRelayChild
+ * （SIGKILL 直杀 + 信号发出即 resolve，幂等：已退出 child 直接 resolve）。
    *
    * 「杀完走注册表清理」由既有事件链结构性保证：attachRelayChildWiring 挂载的 child
    * 'exit' handler 收到 exit 即调 cleanupEntry（tee 销毁 + pid 文件删除 + 双 Map 注销，
@@ -336,26 +321,18 @@ export class RelayRegistry {
       console.warn('[relay] connection error, destroying:', err.message)
       conn.destroy()
     })
-    const handshakeTimer = setTimeout(() => {
-      console.warn('[relay] handshake timeout, closing connection')
-      conn.destroy()
-    }, HANDSHAKE_TIMEOUT_MS)
-    handshakeTimer.unref()
-
     const rl = createInterface({ input: conn })
     // readline 会把 input 流的 'error' 转发到 interface 实例上 re-emit（Node 文档
     // Interface 'error' 事件）——rl 无 listener 时同样 throw 成 uncaughtException，
     // 是 conn 层 listener 之外的独立逃逸路径（事故审计发现的第二颗地雷）。转发只是
     // 通知机制，真实处置已在 conn 层 listener（destroy + 清理路径），此处 no-op 吞掉。
     rl.on('error', () => {})
-    rl.once('close', () => clearTimeout(handshakeTimer))
 
     let handshaked = false
     rl.on('line', (line) => {
       if (line.trim().length === 0) return
       if (!handshaked) {
         handshaked = true
-        clearTimeout(handshakeTimer)
         const frame = this.tryParseFrame(line)
         if (frame === null || frame.kind !== RELAY_FRAME_KINDS.handshake) {
           writeFrame(conn, { kind: RELAY_FRAME_KINDS.reject, reason: RELAY_REJECT_REASONS.malformed, supported: [RELAY_PROTOCOL_VERSION] })
@@ -505,7 +482,7 @@ export class RelayRegistry {
         env: buildChildEnv(frame),
         stdio: ['pipe', 'pipe', 'pipe'],
         // 不 detached：与 runtime 同进程组。注意：这只在「信号发给整个进程组」时才构成
-        // 收割——当前无组信号发送方（supervisor/端口清杀路径均只 SIGTERM runtime 单进程），
+        // 收割——当前无组信号发送方（supervisor/端口清杀路径均只对 runtime 单进程发终止信号），
         // Unix 父死子不亡，child 会 reparent 给 launchd 残活。实际兜底链 = deinit
         // destroyAll + supervisor stop 的预记录后代清理 + 启动 orphan sweep。
         detached: false,
@@ -598,7 +575,7 @@ export class RelayRegistry {
       // SIGKILL 已发出（进程可能仍在 D 状态收尾），此刻注销会把活孤儿提前销账——账面
       // 与真实进程态一致（真实 exit 才销账），杀链失败时条目留册由尾扫再杀。
       // 杀链登记 inflightKills：关停窗口内 runtime 退出前由 destroyAll 等待其收尾
-      // （grace 内 SIGKILL 发出承诺），防 unref timer 随进程消亡漏补刀。
+      // （SIGKILL 发出即承诺兑现），防杀链 promise 随 runtime 进程消亡中断漏补刀。
       const killP = killRelayChild(entry.child)
       this.inflightKills.add(killP)
       void killP.finally(() => this.inflightKills.delete(killP))
@@ -635,8 +612,9 @@ export class RelayRegistry {
       this.cleanupEntry(entry)
     }))
     // 在册条目已清，但 close 路径触发的在途杀链（kill-on-disconnect fire-and-forget）
-    // 可能仍在 grace 窗口内等 SIGTERM 收敛/补 SIGKILL——等待它们全部收尾再放行，
-    // 防 runtime 退出使 unref timer 消亡而漏补刀（残活 child 成为下轮 sweep 的孤儿）。
+    // 可能尚未 settle——等待它们全部收尾再放行，防杀链 promise 随 runtime 进程消亡
+    // 中断（残活 child 成为下轮 sweep 的孤儿）。SIGKILL 直杀下杀链 settle 几乎瞬时，
+    // 此等待通常零开销；保留是关停顺序的结构保证，不依赖杀链 settle 时序假设。
     while (this.inflightKills.size > 0) {
       await Promise.allSettled([...this.inflightKills])
     }
@@ -772,23 +750,15 @@ export class RelayRegistry {
       if (procStart !== null && procStart > oldSpawnedAt + PID_REUSE_TOLERANCE_MS) return
       if (!isPidAlive(oldPid)) return
       console.warn(`[relay] superseded registration: reaping stale pid ${String(oldPid)} before overwriting pid file recordId=${recordId}`)
+      // SIGKILL 直杀（ADR-0122：SIGTERM grace 等待已退役）。杀不动（EPERM 等）不阻塞
+      // 新注册，残留交 orphan sweep。
       try {
-        process.kill(oldPid, 'SIGCONT')
-        process.kill(oldPid, 'SIGTERM')
-      } catch {
-        return // 杀不动（EPERM 等）：不阻塞新注册，残留交 orphan sweep
-      }
-      setTimeout(() => {
-        try {
-          if (isPidAlive(oldPid)) process.kill(oldPid, 'SIGKILL')
-        } catch (e) {
-          if ((e as NodeJS.ErrnoException)?.code !== 'ESRCH') {
-            // 非 ESRCH（EPERM 等）：没杀掉也不阻塞新注册，残留交 orphan sweep 兜底
-            console.warn(`[relay] superseded pid SIGKILL failed, deferring to orphan sweep pid=${String(oldPid)}:`, toErrorMessage(e))
-          }
-          // ESRCH = 已死（探活到 SIGKILL 之间退出，正是收割目标状态），静默
+        process.kill(oldPid, 'SIGKILL')
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException)?.code !== 'ESRCH') {
+          console.warn(`[relay] superseded pid SIGKILL failed, deferring to orphan sweep pid=${String(oldPid)}:`, toErrorMessage(e))
         }
-      }, RELAY_KILL_GRACE_MS).unref()
+      }
     })
   }
 
@@ -808,23 +778,15 @@ export class RelayRegistry {
     )
   }
 
-  /** 孤儿收割执行：SIGCONT → SIGTERM → grace 后 SIGKILL + 删 pid 文件（信号链与原 sweep 逐字一致）。 */
+  /** 孤儿收割执行：SIGKILL 直杀 + 删 pid 文件（ADR-0122：SIGCONT/SIGTERM/grace 已退役）。 */
   private reapOrphanPid(pidFile: string, recordId: string, pid: number, reason: string): void {
     console.warn(`[relay] reaping orphan relay child recordId=${recordId} pid=${String(pid)} (${reason})`)
-    try {
-      process.kill(pid, 'SIGCONT')
-      process.kill(pid, 'SIGTERM')
-    } catch (e) {
-      // EPERM = 非本进程组（pid 复用的另一形态）：不追杀，保留文件
-      console.warn(`[relay] orphan SIGTERM failed (not reaping) recordId=${recordId}:`, e)
-      return
-    }
-    setTimeout(() => {
+    {
       try {
-        if (isPidAlive(pid)) process.kill(pid, 'SIGKILL')
+        process.kill(pid, 'SIGKILL')
       } catch (e) {
         if ((e as NodeJS.ErrnoException)?.code === 'ESRCH') {
-          // kill 抛 ESRCH = 进程已死（探活到 SIGKILL 之间退出），正是收割目标状态
+          // kill 抛 ESRCH = 进程已死，正是收割目标状态
         } else {
           // 其他 errno（EPERM 等）：进程没杀掉，台账不销账——保留 pid 文件供下次
           // sweep 再扫（删文件会把杀不掉的活孤儿从兜底视野里永久销账）
@@ -833,7 +795,7 @@ export class RelayRegistry {
         }
       }
       this.removePidFile(pidFile)
-    }, this.opts.orphanKillGraceMs ?? RELAY_KILL_GRACE_MS).unref()
+    }
   }
 
   /**

@@ -514,7 +514,7 @@ export { uiFormInteract }    // 双向交互（select+marker 通道，四态判�
 export { isFormQuestion, isFormAnswers }
 ```
 
-包出口不止上面这些：session-manager / plugin-bridge / subagent-inflight / subagent-engine / pending-entries / background-task 等子协议同样是包出口（完整清单见 `packages/extension-protocol/src/index.ts`，各自语义见对应模块头注与专项文档）。`background-task` 的行为原语（进程处置 / registry 文件 IO / output tail）走独立子出口 `./background-task`，不进桶出口——renderer/core 等浏览器消费方结构性不触达 node 内建。
+包出口不止上面这些：session-manager / subagent-inflight / subagent-engine / pending-entries / background-task 等子协议同样是包出口（完整清单见 `packages/extension-protocol/src/index.ts`，各自语义见对应模块头注与专项文档）。`background-task` 的行为原语（进程处置 / registry 文件 IO / output tail）走独立子出口 `./background-task`，不进桶出口——renderer/core 等浏览器消费方结构性不触达 node 内建。
 
 ### 5.2 辅助函数签名
 

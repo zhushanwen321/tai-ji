@@ -14,9 +14,9 @@ import { createSessionCommand } from './tui/session-command.js'
  * 分层（同 scheduler/cw-tool）：
  * - tool-handler.ts：纯逻辑 handler，agentDir 注入，零 pi 依赖，可单测
  * - index.ts（本文件）：pi 依赖层，registerTool + getAgentDir() 调用 + execute 闭包
- *   （错误直接 throw 给 pi——pi-agent-core agent-loop 只对 execute throw 置
- *   isError:true，返回值里的 isError 字段被丢弃；W4 修复，锚点
- *   agent-loop.js:453-483/525-547，pi 自带 bash 工具同范式）
+ *   （错误直接 throw 给 pi——pi-agent-core agent-loop 对 execute throw 置 isError:true，
+ *   锚点 agent-loop.js:581-588；1.0.0 起返回值 isError:true 同样被尊重（:579），
+ *   本工具恒走 throw 路径两版语义等价，pi 自带 bash 工具同范式）
  */
 
 // ---- TypeBox 参数 schema（design §3.4 14 字段）----
@@ -208,10 +208,9 @@ export default function sessionReaderExtension(pi: ExtensionAPI): void {
       _onUpdate: unknown,
       ctx: ExtensionContext | undefined,
     ) {
-      // 错误路径直接 throw：pi 契约只有 throw 才置 isError:true（tool_execution_end /
-      // ToolResultMessage），handler 抛的 Error 文案（含 👉 恢复提示）原样成为
-      // toolResult content，模型仍可读到。曾用 return {isError:true}——被 agent-loop
-      // 丢弃，错误轮被标成功（W4 修复）。
+      // 错误路径直接 throw：pi 契约 throw 置 isError:true（tool_execution_end /
+      // ToolResultMessage；1.0.0 起返回值 isError:true 也被尊重，本工具恒走 throw），
+      // handler 抛的 Error 文案（含 👉 恢复提示）原样成为 toolResult content，模型仍可读到。
       // signal 仅 search 消费（MF-5：长扫描可中断，Esc 不再挂死）；其余 action 有界不接
       // 信号包采集（design §7B）：可选链逐层降级——ctx===undefined（存量单测五参形态）、
       // sessionManager 缺字段、getSessionDir 方法缺失，任一层不成立即 liveSessionDir=undefined

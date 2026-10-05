@@ -49,12 +49,18 @@ const SKIP_REASON = CODING_AGENT_DIST && AGENT_CORE_DIST && REPO_ROOT
   : 'node_modules/@earendil-works/{pi-coding-agent,pi-agent-core}/dist 或仓库根不可达（cwd 上溯 6 级未命中）'
 if (SKIP_REASON) console.warn(`[pi-semantics] skip：${SKIP_REASON}`)
 
+// dist 不可达时 skip（describe.skipIf 命中时 vitest 仍执行工厂体——读取必须在模块级
+// 三元守卫内完成，不能放 describe 体，否则收集期抛错而非 skip）
+const AGENT_SESSION_SRC = CODING_AGENT_DIST ? readFileSync(join(CODING_AGENT_DIST, 'core', 'agent-session.js'), 'utf-8') : ''
+const AGENT_CORE_SRC = AGENT_CORE_DIST ? readFileSync(join(AGENT_CORE_DIST, 'agent.js'), 'utf-8') : ''
+const AGENT_LOOP_SRC = AGENT_CORE_DIST ? readFileSync(join(AGENT_CORE_DIST, 'agent-loop.js'), 'utf-8') : ''
+
 describe.skipIf(SKIP_REASON !== '')(
   `PS-26 探针：transform 面唯一性与裸标记两通路存活（静态断言${SKIP_REASON ? `｜skip：${SKIP_REASON}` : ''}）`,
   () => {
-    const agentSession = readFileSync(join(CODING_AGENT_DIST as string, 'core', 'agent-session.js'), 'utf-8')
-    const agentCore = readFileSync(join(AGENT_CORE_DIST as string, 'agent.js'), 'utf-8')
-    const agentLoop = readFileSync(join(AGENT_CORE_DIST as string, 'agent-loop.js'), 'utf-8')
+    const agentSession = AGENT_SESSION_SRC
+    const agentCore = AGENT_CORE_SRC
+    const agentLoop = AGENT_LOOP_SRC
 
     it('pi-coding-agent prompt()：input hook 是全文唯一 transform 询问点（hasHandlers("input")/emitInput 各仅 1 处）', () => {
       // 唯一性 = steer/followUp/_queueSteer/_queueFollowUp 无 input hook 的结构性依据：
@@ -63,11 +69,12 @@ describe.skipIf(SKIP_REASON !== '')(
       expect(agentSession.match(/\.emitInput\(/g), '.emitInput( 出现 >1 处——input 事件发射面扩大，复核 PS-26 锚点').toHaveLength(1)
     })
 
-    it('pi-coding-agent prompt()：文本替换仅由 hook transform 结果驱动（非 transform 不改 currentText）', () => {
-      // transform 条件分支形态：action === "transform" 才 currentText = inputResult.text
-      const hook = /if \(this\._extensionRunner\.hasHandlers\("input"\)\) \{\s*\n\s*const inputResult = await this\._extensionRunner\.emitInput\(/
+    it('pi-coding-agent prompt()：文本替换仅由 hook transform 结果驱动（非 transform 不改文本）', () => {
+      // pi 1.0.0：hook 拦截段从 prompt() 内联抽为独立方法 _runInputHandlers（守卫反转为早退，
+      // handled → undefined 终止），transform 条件分支语义不变
+      const hook = /async _runInputHandlers\(text, images, source, streamingBehavior\) \{\s*\n\s*if \(!this\._extensionRunner\.hasHandlers\("input"\)\) \{\s*\n\s*return \{ text, images \};\s*\n\s*\}\s*\n\s*const inputResult = await this\._extensionRunner\.emitInput\(/
         .exec(agentSession)
-      expect(hook, 'PS-26 漂移：prompt() 的 input hook 拦截段形态改变——复核 agent-session.js prompt()').not.toBeNull()
+      expect(hook, 'PS-26 漂移：prompt() 的 input hook 拦截段（_runInputHandlers）形态改变——复核 agent-session.js').not.toBeNull()
       expect(
         agentSession.includes('if (inputResult.action === "transform") {'),
         'PS-26 漂移：prompt() 不再按 inputResult.action === "transform" 条件替换文本——hook 语义变化，复核 PS-26',
@@ -94,14 +101,17 @@ describe.skipIf(SKIP_REASON !== '')(
     })
 
     it('pi-agent-core runAgentLoop：初始 prompt 消息原样 emit message_start/message_end（send 通路落盘/回流来源）', () => {
-      const init = /for \(const prompt of prompts\) \{\s*\n\s*await emit\(\{ type: "message_start", message: prompt \}\);\s*\n\s*await emit\(\{ type: "message_end", message: prompt \}\);\s*\n\s*\}/
+      // pi 1.0.0：prompts 先经 declareToolChanges（工具装载有增量时插入 system 消息，无增量原样直通
+      // ——user prompt 文本零改写），循环变量改名 prompt → message
+      const init = /const initialMessages = declareToolChanges\(context, prompts\);[\s\S]*?for \(const message of initialMessages\) \{\s*\n\s*await emit\(\{ type: "message_start", message \}\);\s*\n\s*await emit\(\{ type: "message_end", message \}\);\s*\n\s*\}/
         .exec(agentLoop)
       expect(init, 'PS-26 漂移：runAgentLoop 初始 prompt 不再原样 emit message_start/message_end——send 通路 user 消息事件/落盘来源变化，复核 agent-loop.js').not.toBeNull()
     })
 
     it('pi-agent-core runLoop：steering drain 后的消息直接 emit + push 上下文（steer 通路零 transform 注入）', () => {
-      // 注入块三行同现：事件携带的消息与进 LLM 上下文的是同一对象（无第二改写面）
-      const inject = /for \(const message of pendingMessages\) \{\s*\n\s*await emit\(\{ type: "message_start", message \}\);\s*\n\s*await emit\(\{ type: "message_end", message \}\);\s*\n\s*currentContext\.messages\.push\(message\);\s*\n\s*newMessages\.push\(message\);/
+      // pi 1.0.0：循环头 = declareToolChanges 包裹（prepared + pending 合并注入；steering 消息
+      // 无工具增量时原样直通），注入块 emit + push 四行同现不变
+      const inject = /for \(const message of declareToolChanges\(currentContext, \[\.\.\.preparedMessages, \.\.\.pendingMessages\]\)\) \{\s*\n\s*await emit\(\{ type: "message_start", message \}\);\s*\n\s*await emit\(\{ type: "message_end", message \}\);\s*\n\s*currentContext\.messages\.push\(message\);\s*\n\s*newMessages\.push\(message\);/
         .exec(agentLoop)
       expect(inject, 'PS-26 漂移：steering 消息注入块不再「原样 emit + 直接 push 上下文」——steer 通路出现改写点，复核 agent-loop.js runLoop').not.toBeNull()
     })

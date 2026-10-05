@@ -11,7 +11,7 @@
  *   turn_end 时检查模型是否调用了 structured-output 工具，没调/失败则 steer 注入
  *   重试提醒（软闸门，最多重试 2 次）。同一状态机（WorkflowGate）上的硬杀闸门在
  *   同签名校验失败达 3 次时 terminal：写日志（stderr + session JSONL 双通道，含恢复
- *   指引）后 ctx.abort() + ctx.shutdown() 优雅终止子进程 + 15s 兜底硬退 timer——
+ *   指引）后 ctx.abort() + ctx.shutdown() 优雅终止子进程（无兜底硬退 timer，ADR-0122）——
  *   terminal 后软闸门不再 steer（同一份 terminal 事实，无跨对象接线；G2 与模型
  *   配合度无关）。装配与 listener 明细见 workflow-hook.setupWorkflowHook。
  *

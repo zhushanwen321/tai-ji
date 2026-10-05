@@ -48,18 +48,13 @@ export const DEFAULT_SUBAGENT_ENGINE = 'pi'
 
 // ── 协议客户端管理面 ───────────────────────────────────────────
 
-/** idle 回收窗口（设计 §3.6：idle 5min → 发 dispose）。 */
-// eslint-disable-next-line no-magic-numbers -- 5 minutes = 5 * 60 * 1000ms, self-documenting with comment
-const ENGINE_IDLE_REUSE_MS = 5 * 60 * 1000
-/** 退出钩子聚合上界（dispose 帧 3s 上界由 EngineClient 承担；本上界保证 shutdown
- *  不被单个挂死引擎的杀链收尾无限拖住——杀链已发起，SIGKILL 升级由 reaper 兜底）。 */
-const DISPOSE_AGGREGATE_CAP_MS = 3_000
+// ADR-0122 退役登记（2026-10-05）：协议引擎 idle 回收（ENGINE_IDLE_REUSE_MS 5min →
+// dispose）已删——引擎实例进程级自持直至 shutdown dispose（退出钩子仍收口）。shutdown
+// 聚合上界（DISPOSE_AGGREGATE_CAP_MS 3s）随杀链 grace 退役一并删除。
 
-/** 管理器条目：自持协议引擎实例 + idle 定时器句柄。 */
+/** 管理器条目：自持协议引擎实例。 */
 interface RuntimeEngineEntry {
   engine: EnginePort
-  resetIdleTimer(): void
-  clearIdleTimer(): void
 }
 
 /** 自持实例表（进程级；与 pi 宿主实例不共享）。 */
@@ -104,45 +99,6 @@ function ensureRuntimeEngineWiring(): void {
   }
 }
 
-/** idle 到期回收：dispose + 出表（dispose 后实例不可重建，出表让下次 read 走重建
- *  路径拿新实例）。真实定时器回调与测试钩子共用本函数——测试驱动的是同一实现路径。 */
-function expireIdleEntry(engineId: string, engine: EnginePort): void {
-  const entry = protocolEntries.get(engineId)
-  if (entry === undefined || entry.engine !== engine) return
-  protocolEntries.delete(engineId)
-  // EnginePort.dispose?() 可选成员（RemoteEngine 恒实装）——optional call 后判空。
-  const disposing = engine.dispose?.()
-  if (disposing !== undefined) {
-    void disposing.catch((err: unknown) => {
-      console.warn(
-        `[subagent-engine-history] idle dispose failed for engine '${engineId}': ${toErrorMessage(err)}`,
-      )
-    })
-  }
-}
-
-/** idle 定时器：touch 重置；触发 → expireIdleEntry。 */
-function armIdleTimer(engineId: string, engine: EnginePort): NodeJS.Timeout {
-  const timer = setTimeout(() => expireIdleEntry(engineId, engine), ENGINE_IDLE_REUSE_MS)
-  timer.unref()
-  return timer
-}
-
-/**
- * 测试钩子：显式触发 idle 到期回收（与真实定时器回调共用 expireIdleEntry——同一
- * 实现路径，非并行仿真）。生产窗口 5min 不可等待，「窗口内复用 / 过期重建」又必须
- * 确定性验证：由用例显式驱动「窗口到期」，避免用例与真实 read 耗时竞速。
- * 生产禁用——生产恒由 armIdleTimer 的真实定时器驱动。
- */
-export function expireIdleEngineClientsForTests(): void {
-  for (const [engineId, entry] of [...protocolEntries]) {
-    // 定时器尚未真正到期——先撤销句柄再走同一到期路径（真实到期时该 clear 为 no-op，
-    // 故生产路径零差异）。
-    entry.clearIdleTimer()
-    expireIdleEntry(engineId, entry.engine)
-  }
-}
-
 /** 自持实例创建：三级发现装载（幂等）→ cli descriptor portFactory 新实例。 */
 function createProtocolEntry(engineId: string): RuntimeEngineEntry | undefined {
   try {
@@ -150,19 +106,7 @@ function createProtocolEntry(engineId: string): RuntimeEngineEntry | undefined {
     const discovered = scan.discovered.find((e) => e.id === engineId)
     if (discovered === undefined || discovered.descriptor.kind !== 'cli') return undefined
     const engine = discovered.descriptor.portFactory()
-    let timer: NodeJS.Timeout | undefined
-    const entry: RuntimeEngineEntry = {
-      engine,
-      resetIdleTimer() {
-        if (timer !== undefined) clearTimeout(timer)
-        timer = armIdleTimer(engineId, engine)
-      },
-      clearIdleTimer() {
-        if (timer !== undefined) clearTimeout(timer)
-        timer = undefined
-      },
-    }
-    timer = armIdleTimer(engineId, engine)
+    const entry: RuntimeEngineEntry = { engine }
     protocolEntries.set(engineId, entry)
     return entry
   } catch (err) {
@@ -174,12 +118,7 @@ function createProtocolEntry(engineId: string): RuntimeEngineEntry | undefined {
 }
 
 function ensureProtocolEntry(engineId: string): RuntimeEngineEntry | undefined {
-  const cached = protocolEntries.get(engineId)
-  if (cached !== undefined) {
-    cached.resetIdleTimer()
-    return cached
-  }
-  return createProtocolEntry(engineId)
+  return protocolEntries.get(engineId) ?? createProtocolEntry(engineId)
 }
 
 /**
@@ -237,7 +176,6 @@ function ensureProtocolReaderFor(engineId: string): void {
  */
 export function resetRuntimeEngineWiringForTests(): void {
   for (const entry of protocolEntries.values()) {
-    entry.clearIdleTimer()
     const disposing = entry.engine.dispose?.()
     if (disposing !== undefined) void disposing.catch(() => {})
   }
@@ -249,26 +187,19 @@ export function resetRuntimeEngineWiringForTests(): void {
 
 /**
  * 进程退出钩子（runtime index.ts shutdown 消费）：全部自持协议实例并行 dispose。
- * 聚合上界缺省 3s（DISPOSE_AGGREGATE_CAP_MS）——单实例 dispose 的帧等待/杀链上界由
- * EngineClient 承担（3s dispose 帧 → 超时组杀），本聚合上界保证 shutdown 编排
- * 不被杀链收尾无限拖住。幂等（出表后重复调用为 no-op）。capMs 仅测试注入。
+ * 幂等（出表后重复调用为 no-op）。
  */
-export function disposeRuntimeEngineClients(capMs: number = DISPOSE_AGGREGATE_CAP_MS): Promise<void> {
+export function disposeRuntimeEngineClients(): Promise<void> {
   const entries = [...protocolEntries.values()]
   protocolEntries.clear()
-  for (const entry of entries) entry.clearIdleTimer()
   if (entries.length === 0) return Promise.resolve()
   // EnginePort.dispose?() 可选成员（RemoteEngine 恒实装）——optional call 后过滤。
-  const all = Promise.allSettled(
+  return Promise.allSettled(
     entries.map((entry) => {
       const disposing = entry.engine.dispose?.()
       return disposing !== undefined ? Promise.resolve(disposing).catch(() => {}) : Promise.resolve()
     }),
-  )
-  return Promise.race([
-    all,
-    new Promise<void>((resolve) => setTimeout(resolve, capMs).unref()),
-  ]).then(() => {})
+  ).then(() => {})
 }
 
 // ── record 路由与读取入口 ──────────────────────────────────────

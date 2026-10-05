@@ -3,19 +3,22 @@ import { getPiAgentDir } from './pi-paths.js'
 import { redactArgv } from './argv-redact.js'
 import { recordSpawnMarkers } from './spawn-markers.js'
 import { getDefaultModel } from './pi-provider-store.js'
-import { RpcTimeoutError } from '../../utils/errors.js'
 import type { ProviderId } from '@taiji/shared'
-import { BASH_RPC_TIMEOUT_MS, COMPACT_RPC_TIMEOUT_MS } from '@taiji/shared'
 // B3 出站契约唯一构建器（U3 收口点；实现本体在 @taiji/shared，此处走 runtime 门面）
 import { buildOutboundChildEnv } from '../spawn-env.js'
-import type { IPiEngine, PiSessionStats, PiCompactionResult, PiBashResult, PiCommandInfo, SendCommandOptions } from '../../services/ports/pi-engine.js'
+import type { IPiEngine, PiSessionStats, PiCompactionResult, PiBashResult, PiCommandInfo } from '../../services/ports/pi-engine.js'
 import { createPiSessionLog, writePiCrashLog, captureMemorySnapshot, type PiSessionLog, type PiCrashContext } from '../logger.js'
 import { captureMachinePiSnapshotSection, collectUnifiedLogCorrelation } from '../crash-correlation.js'
 // pi 进程 RPC 公共层（@zhushanwen/pi-rpc；设计 docs/architecture/subagent-permanent-session-model.md
-// §3.3.2，G5 收敛）：argv 构造 / LF-only 行分帧 / pending 表（超时分级 + 迟到响应丢弃）/
+// §3.3.2，G5 收敛）：argv 构造 / LF-only 行分帧 / pending 表（请求-响应配对）/
 // 早期帧缓冲 / 命令帧组装 / 杀链 / 出站 env 组装全部 import 自公共包——本文件保留
-// 进程生命周期编排与 runtime 专属语义（touch 时钟 / 崩溃取证 / stderr 收集 / 日志落盘），
+// 进程生命周期编排与 runtime 专属语义（活动时钟 / 崩溃取证 / stderr 收集 / 日志落盘），
 // 协议机制零独立副本（S7 grep 无双轨门）。行为逐字等价迁移（U1 先并存后切换）。
+//
+// 退役登记（ADR-0122 防御机制清查，2026-10-05）：RPC 墙钟超时（L6 分级 CMD/FAST/SLOW
+// 与任务级 bash 1h / compact 30min，推翻 timeout-slow-flow-wallclock D2/D3 量级校准）
+// 与 timedOutIds 迟到响应丢弃（S6）已整体删除——pi 对 RPC 永不响应时调用方 promise
+// 悬挂，失败信号归 pi exit/error 事件链（rejectAll + notifyExitOnce）。
 import {
   attachLfOnlyLineReader,
   buildPiMainAgentArgs,
@@ -28,12 +31,10 @@ import {
   killPiProcess,
   createPendingRegistry,
   createEarlyFrameBuffer,
-  CMD_TIMEOUT_MS,
-  FAST_TIMEOUT_MS,
-  SLOW_TIMEOUT_MS,
   type PiMessage,
   type PiEventListener,
 } from '@zhushanwen/pi-rpc'
+import { parseInputDisposition } from './pi-protocol.js'
 
 // 协议类型与 LF-only 行分帧 re-export：既有消费方（event-adapter / 测试）的 import
 // 路径 'rpc-client.js' 保持不变；实现本体在 @zhushanwen/pi-rpc（无独立副本）。
@@ -57,8 +58,8 @@ export interface AvailableModelSnapshot {
 }
 
 /**
- * pi 队列级原语 clear_queue 的响应形状（PS-65 实装核对：pi 0.84.4 dist
- * `agent-session.js:1195-1203 clearQueue()` 返回 `{steering, followUp}` 两队列**全文数组**
+ * pi 队列级原语 clear_queue 的响应形状（语义登记 PS-65，verifiedWith 以 pi-semantics.json
+ * 为准：dist `agent-session.js clearQueue()` 返回 `{steering, followUp}` 两队列**全文数组**
  * ——`_steeringMessages` / `_followUpMessages` 的浅拷贝，元素是入队时的整段文本）。
  *
  * 这是「队列级」原语：pi 不提供条目级收回（出队判定本身就是按全文 indexOf 匹配，无 id，
@@ -75,12 +76,6 @@ export interface PiQueueSnapshot {
 export interface RpcClientOptions {
   cwd?: string
   model?: string
-  /**
-   * 启动确认窗口宽度 ms（缺省 STARTUP_DELAY_MS=500）。窗口语义（窗口内 exit/error
-   * 即 reject）不变，只调宽度——测试注入 0 免真实时钟等待（2026-09-14 审计：
-   * 500ms × N 次 start() 是 rpc-client 族慢因之一）。生产调用方勿传。
-   */
-  startupDelayMs?: number
   /**
    * 附着恢复模式（restoreSession 专用）：true 时 start() 不拼 --model——options.model
    * 与全局默认兜底都被抑制。pi 的 CLI model 恒优先于 session entry 恢复（main.js
@@ -133,19 +128,17 @@ export interface RpcClientOptions {
   /**
    * 档位字符串透传（非空即发）；合法性由上游入口层校验（runtime launch-params
    * resolveEffectiveThinking，词表 = shared PI_THINKING_LEVELS），本层不重复校验。
-   * 不可把「pi 会拒绝非法档位」当兜底依赖——pi（0.84.4）对非法 --thinking 仅 push
-   * warning diagnostic 并丢弃档位、进程照常以缺省档启动（pi-coding-agent
-   * dist/cli/args.js:112-121；仅 type==="error" 才 exit：dist/main.js:476-478）。
+   * 不可把「pi 会拒绝非法档位」当兜底依赖——pi 对非法 --thinking 仅 push
+   * warning diagnostic 并丢弃档位、进程照常以缺省档启动（pi 1.0.0 实装复核：
+   * dist/cli/args.js `--thinking` 分支 isValidThinkingLevel 未命中仅 push warning；
+   * 仅 diagnostics 存在 type==="error" 才 exit：dist/main.js）。
    */
   thinkingLevel?: string
 }
 
-// 超时分级常量（L6）与迟到响应 TTL / 早期帧缓冲上限已上移 @zhushanwen/pi-rpc
-// （frame 模块单源）：CMD_TIMEOUT_MS / FAST_TIMEOUT_MS / SLOW_TIMEOUT_MS 经顶部
-// import 消费；TIMED_OUT_ID_TTL_MS / EARLY_FRAME_BUFFER_MAX 由 registry / buffer
-// 部件内部持有。杀链 grace 走 killPiProcess 缺省（DEFAULT_PI_KILL_GRACE_MS = 2s，
-// 与迁移前 KILL_TIMEOUT_MS 等值）。
-const STARTUP_DELAY_MS = 500
+// 超时分级常量（L6）已随 ADR-0122 防御机制清查退役（见文件头退役登记）；
+// 早期帧缓冲上限（EARLY_FRAME_BUFFER_MAX）由 buffer 部件内部持有。
+// 杀链走 killPiProcess（SIGKILL 直杀，grace 等待窗已退役）。
 /**
  * stderr 崩溃取证缓冲的字节上限（D4/G4：异常退出全量落盘的内存防御边界）。
  *
@@ -184,58 +177,15 @@ function resolveStartModel(options: RpcClientOptions): string | undefined {
 // --no-extensions 与 --extension 交互 / W-RT-6 tools 互斥）见 pi-rpc spawn-args.ts。
 
 /**
- * bash RPC 超时解析（timeout-slow-flow-wallclock D2 env 逃生门）。
- *
- * 优先级：env `TAIJI_RUNTIME_BASH_RPC_TIMEOUT_MS`（0=不限时；空/空白/非法/负值回退默认）
- * > shared `BASH_RPC_TIMEOUT_MS`（1h）。env 覆盖读取刻意留在 runtime 侧（renderer 不可达
- * 进程 env），renderer 侧 backstop 由 D5 的 shared 常量 + margin 独立取值。
- *
- * 读一次缓存：pi 是长驻子进程，超时决策在进程生命周期内稳定——若每次 bash() 重读 env，
- * 运行中途改 env 会让「已等 59 分钟」与「刚改的 1 秒」并存于同一次等待，语义不可预测；
- * 缓存后语义 = 「本次 runtime 进程启动后首个 bash 请求时的配置」（测试可经
- * resetBashRpcTimeoutForTest 重置）。
+ * RPC 超时错误（integrity-hardening D3a）已随墙钟超时机制退役（ADR-0122）：
+ * RpcTimeoutError 不再被本模块构造，类本体保留在 utils/errors.ts 供历史错误反序列化。
  */
-let cachedBashRpcTimeoutMs: number | null = null
-
-export function resolveBashRpcTimeoutMs(): number {
-  if (cachedBashRpcTimeoutMs === null) {
-    // 空串防御（harden b23-6）：`Number('') === 0` 会把「env 设了空值」折成 0=不限时，
-    // 意外解除任务级兜底——空/空白必须与未设同待遇（回退默认），只有显式写 0 才是不限时。
-    const raw = process.env.TAIJI_RUNTIME_BASH_RPC_TIMEOUT_MS?.trim()
-    const parsed = raw ? Number(raw) : Number.NaN
-    cachedBashRpcTimeoutMs = Number.isFinite(parsed) && parsed >= 0 ? parsed : BASH_RPC_TIMEOUT_MS
-  }
-  return cachedBashRpcTimeoutMs
-}
-
-/** 测试隔离：清空 env 逃生门缓存（对齐 core resetChatModuleStateForTest 先例）。生产勿调。 */
-export function resetBashRpcTimeoutForTest(): void {
-  cachedBashRpcTimeoutMs = null
-}
-
-/**
- * RPC 超时错误（integrity-hardening D3a：pi 半死自愈）。
- *
- * pi 事件循环卡死（native 模块 / 同步 IO 冻结）时一切 RPC 都以超时失败——这类失败
- * 意味着进程「半死」（活着但不响应），处置是强杀重建而非重试。调用方
- * （message-dispatcher 的 abort 强杀分支）经 instanceof 判别，因此必须是独立类型：
- * 字符串 message 匹配无编译期防护，改文案即断链。
- *
- * [arch] 类本体定义在 utils/errors.ts（中立层——services 层 instanceof 判别需要运行时
- * 值 import，定义在 infra 会让 services→infra 违反三层规则），此处 re-export 保持
- * 既有 import 路径（rpc-client.js）兼容。
- */
-export { RpcTimeoutError } from '../../utils/errors.js'
 
 export class RpcClient implements IPiEngine {
   private proc: ChildProcess | null = null
   /**
-   * RPC pending 表（请求-响应配对 + 超时分级 L6 + 迟到响应丢弃 S6）——
-   * @zhushanwen/pi-rpc frame 部件。超时错误构造经回调注入 RpcTimeoutError
-   * （类型本体在 utils/errors.ts，公共包不感知宿主错误面）。maintenance 标记
-   * （idle-pi-reclamation D1 双腿闭合）随注册写入：出站腿在 sendCommand 不 touch，
-   * 回程腿在 handleMessage 依据标记对其 response 帧跳过 touch——回程回声与出站
-   * 请求同频，只排除出站腿时空闲时钟仍被周期性重置。
+   * RPC pending 表（请求-响应配对）——@zhushanwen/pi-rpc frame 部件。
+   * 无墙钟超时（ADR-0122 退役，见文件头）：失败信号归 pi exit/error 事件链 rejectAll。
    */
   private pendingRegistry = createPendingRegistry<PiMessage>()
   private listeners = new Set<PiEventListener>()
@@ -290,16 +240,6 @@ export class RpcClient implements IPiEngine {
   private stderrTruncated = false
   /** pi stdout JSONL 原始流落盘（架构约定 #4，诊断 pi 卡死的决定性证据） */
   private piSessionLog: PiSessionLog | null = null
-  /**
-   * 最近一次「事件帧」到达 stdout 的时刻（chat-domain-v1x-liveness-governance W7 桥事件窗信号）。
-   *
-   * 为什么记在 handleMessage 顶部而非 listener 广播分支：该戳度量的是「pi 是否还在发事件」
-   * （pi 侧产出证据），不是「runtime 是否消费」——bash_execution_update 等被 timedOutIds
-   * 丢弃 / 进早期帧缓冲的流事件同样是 pi 事件循环存活的证据。只记非 response 帧：RPC
-   * response 的活性由快超时探测（getState）专责，两信号职责正交（设计 §3.2 D3 三信号判据）。
-   * 消费方 = message-dispatcher abort 超时阶梯的「事件窗静默」判定（区分 RPC 饿死 vs 真冻结）。
-   */
-  private _lastEventAt: number | undefined
 
   // ── 崩溃取证上下文（crash-resilience §3.3 D6-④）：崩溃时刻 writeCrashLogIfNeeded
   // 采集进 pi-crash log 头部的 runtime 侧字段。未知保持 null（显式落盘「没采到」）。
@@ -309,8 +249,9 @@ export class RpcClient implements IPiEngine {
   private spawnedAt: number | null = null
   /**
    * 已知 pi 历史文件绝对路径：switch_session 参数（restore/fork 路径）或 get_state
-   * 返回的 sessionFile（attach 序列恒调）任一发生过。新建 session 在 pi 首条 assistant
-   * 前文件可能不存在（仓规 #6），runtime 不探测文件系统，未知即 null。
+   * 返回的 sessionFile（attach 序列恒调）任一发生过。新建 session 在 pi 首次 flush
+   * （user/assistant 首消息后，pi 1.0.0 起 user 消息即建文件——仓规 #6）前文件可能
+   * 不存在，runtime 不探测文件系统，未知即 null。
    */
   private attachedSessionFile: string | null = null
 
@@ -395,16 +336,17 @@ export class RpcClient implements IPiEngine {
 
     const proc = this.proc
     this.wireProcessHandlers(proc)
-    // Wait briefly to confirm process didn't exit immediately
-    await this.awaitStartupSettled(proc)
-    // D6-④：spawn 确认存活后再记 uptime 起点（立即崩溃的进程 uptimeMs 由 null 表达
-    // 「未过存活确认」，与「存活 N ms 后崩溃」区分）。
+    // 启动确认窗（awaitStartupSettled 500ms）已随 ADR-0122 防御机制清查退役：
+    // spawn 后立即崩溃 / ENOENT 由 wireProcessHandlers 接线的 exit/error 事件链
+    // 上报（rejectAll + notifyExitOnce → 上层 onSessionExit 收敛），不做「活了
+    // 500ms 就不会立即崩」的时间窗猜测。
+    // D6-④：spawn 后记 uptime 起点（立即崩溃的进程 uptimeMs 极小，仍为有效观测值）。
     this.spawnedAt = Date.now()
   }
 
   /**
    * start 的进程事件接线（error / exit / stdout JSONL 解析 / stdout+stdin+stderr stream error /
-   * stderr 全量收集）。与提取前注册顺序一致：error → exit → readline line → stdout error
+   * stderr 全量收集）。注册顺序：error → exit → readline line → stdout error
    * → stdin error → stderr data/error。
    */
   private wireProcessHandlers(proc: ChildProcess): void {
@@ -420,7 +362,7 @@ export class RpcClient implements IPiEngine {
       this.piSessionLog = null
       // Only reject pending requests on unexpected exits.
       // For normal kill flow (_killing=true), rejectAll is called in kill()
-      // via a separate safety net to avoid leaving callers hanging until CMD_TIMEOUT_MS.
+      // via a separate safety net so callers don't hang forever.
       if (!this._killing) {
         this.writeCrashLogIfNeeded(code)
         this.rejectAll(new Error(`pi process exited with code ${code}${this.formatStderrSuffix()}`))
@@ -554,57 +496,10 @@ export class RpcClient implements IPiEngine {
     }
   }
 
-  /**
-   * start 的启动确认窗口：等 STARTUP_DELAY_MS 确认进程没有立即退出；
-   * 窗口内 exit / error 即 reject（消息含 stderr 尾部）。
-   */
-  private awaitStartupSettled(proc: ChildProcess): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      let settled = false
-      const onExit = (code: number | null) => {
-        if (settled) return
-        settled = true
-        cleanup()
-        reject(new Error(`pi process exited immediately with code ${code}${this.formatStderrSuffix()}`))
-      }
-      const onError = (err: Error) => {
-        if (settled) return
-        settled = true
-        cleanup()
-        reject(new Error(`pi spawn error: ${err.message}`))
-      }
-      const cleanup = () => {
-        proc.removeListener('exit', onExit)
-        proc.removeListener('error', onError)
-      }
-      proc.on('exit', onExit)
-      proc.on('error', onError)
-      setTimeout(() => {
-        if (settled) return
-        cleanup()
-        if (!this._exited) resolve()
-        else reject(new Error(`pi process exited during startup${this.formatStderrSuffix()}`))
-      }, this.options.startupDelayMs ?? STARTUP_DELAY_MS)
-    })
-  }
-
   private handleMessage(msg: PiMessage): void {
-    // 入站 touch（idle-pi-reclamation D1）：任何 stdout 帧（response / 事件 / 迟到丢弃帧）
-    // 都证明 pi 在产出，进程非空闲。放在分派前——分支结构变化不影响 touch 语义。
-    // 唯一例外（D1 双腿闭合）：解析为「maintenance pending 的 response」的帧不 touch。
-    // 维护通道（{ maintenance: true }）的出站腿已在 sendCommand 排除，但其 response
-    // 回程经本入口无条件 touch 会把空闲时钟重置回去——回程回声与出站请求同频到达，
-    // 只排除出站腿时回收饿死原样保留，故双腿同豁免。事件帧 / 非 maintenance response
-    // 的 touch 语义零变化。
-    // 边角（可接受）：迟到 maintenance response——pending 已被超时清理（60s）后到达，
-    // id 命不中 pending → 照旧 touch。超时 60s 后才回的维护响应极罕见，且该边角方向 =
-    // 多豁免不误杀（多 touch 一次只推迟回收，不会误杀活跃进程），与「宁漏不误杀」同向。
-    const maintenanceResponse = this.pendingRegistry.isMaintenanceResponse(msg)
-    if (!maintenanceResponse) {
-      this._lastActivityAt = Date.now()
-    }
-    // W7 桥事件窗信号：事件帧到达即更新活跃戳（语义与放置理由见 _lastEventAt 字段注释）。
-    if (msg.type !== 'response') this._lastEventAt = Date.now()
+    // 入站 touch：任何 stdout 帧（response / 事件）都证明 pi 在产出——活动时钟
+    // 供崩溃取证（pi 死前最后活动时刻）等观测面消费。
+    this._lastActivityAt = Date.now()
     // If id matches a pending request, resolve it; otherwise emit as event.
     // resolve 只认 RPC response：pi 的 RpcResponse union 所有变体 type === 'response'
     // （pi-mono coding-agent/src/modes/rpc/rpc-types.ts:114-223），事件各有独立 type 字符串。
@@ -615,14 +510,7 @@ export class RpcClient implements IPiEngine {
     // pending 就 resolve 会把首条 delta 误当 response（真 response 到达时 pending 已删，
     // 真实 output 丢失，bash() shape guard 落 [protocol error: malformed] fallback）。
     // 非 response 的带 id 消息走下方 listener 路径（event-adapter NULL_EVENTS 已登记）。
-    // pending 配对 / 迟到丢弃判定在 pi-rpc registry 部件内（超时序列与迁移前逐字一致）。
     if (msg.type === 'response' && msg.id && this.pendingRegistry.resolveResponse(msg.id, msg)) {
-      return
-    } else if (this.pendingRegistry.isTimedOut(msg.id)) {
-      // S6: 该 id 的请求已超时 reject，pi 迟到的响应丢弃（不当 event 广播给 listeners，
-      // 避免幽灵 UI 副作用）。timedOutIds 在 registry 内由超时回调写入，5s TTL 后自动清理。
-      // D2：此分支帧与 pending 命中的 response 帧同样不进早期帧缓冲（有独立的
-      // 请求-响应配对 / 迟到丢弃语义，与 listener 无关）。
       return
     } else if (this.listeners.size === 0 && !this.earlyFrameBuffer.closed) {
       // 早期帧缓冲（early-frame-buffer D1）：listener 空窗（spawn → EventAdapter attach）
@@ -688,7 +576,8 @@ export class RpcClient implements IPiEngine {
    * 向 pi stdin 写入一行原始 JSON，不注册 pending、不等 RPC reply。
    *
    * 用于 pi 不回复 `{type:'response'}` 的命令（目前仅 `extension_ui_response`——
-   * pi 0.84.4 dist/modes/rpc/rpc-mode.js:618-625 处理后直接 return，不回 RPC 确认）。
+   * pi 1.0.0 dist/modes/rpc/rpc-mode.js handleInputLine 的 extension_ui_response
+   * 分支 resolve pendingExtensionRequests 后直接 return，不回 RPC 确认）。
    * 用 sendCommand 会导致 pending 永不 resolve → 60s CMD_TIMEOUT_MS 后才超时（timer
    * 泄漏 + 无用等待）。
    *
@@ -716,7 +605,7 @@ export class RpcClient implements IPiEngine {
     return true
   }
 
-  sendCommand(type: string, params: Record<string, unknown> = {}, timeout = CMD_TIMEOUT_MS, options?: SendCommandOptions): Promise<PiMessage> {
+  sendCommand(type: string, params: Record<string, unknown> = {}): Promise<PiMessage> {
     return new Promise((resolve, reject) => {
       if (!this.proc || this._exited) {
         return reject(new Error('pi process is not running'))
@@ -729,19 +618,12 @@ export class RpcClient implements IPiEngine {
       // 记录点在 pending 注册前——即使进程在写 stdin 后立刻死亡，字段已就位。
       this.lastCommandType = type
 
-      // 出站 touch（idle-pi-reclamation D1）：sendCommand 是全部出站 RPC 的唯一咽喉。
-      // 唯一例外 = 维护通道（options.maintenance——维护类内部命令不计用户/session 活跃，
-      // 计入会让空闲时钟被周期性重置、回收饿死且不体现为豁免命中）。
-      // touch 在状态检查后：进程已死时无空闲可言。
-      if (!options?.maintenance) {
-        this._lastActivityAt = Date.now()
-      }
+      // 出站 touch：sendCommand 是全部出站 RPC 的唯一咽喉。touch 在状态检查后：
+      // 进程已死时无活动可言。
+      this._lastActivityAt = Date.now()
 
-      // pending 注册（pi-rpc registry 部件）：timeout ≤ 0 = 不限时（D2 env 逃生门
-      // 0=不限时，唯一合法入口是 bash RPC——其余命令不得传 ≤0，控制面单请求秒级是
-      // 有界兜底档，规则 19）；不挂墙钟 timer 的形态下 clearTimeout(undefined) 是
-      // no-op，resolve/reject 路径天然安全。超时时序（delete → timedOutIds 记入
-      // 5s TTL → reject）在部件内与迁移前逐字一致。
+      // pending 注册（pi-rpc registry 部件）。无墙钟超时（ADR-0122 退役，见文件头）：
+      // pi 对该命令永不响应时 promise 悬挂，失败信号归 pi exit/error 事件链 rejectAll。
       this.pendingRegistry.register(
         id,
         {
@@ -755,18 +637,15 @@ export class RpcClient implements IPiEngine {
               if (res.data === undefined && res.payload !== undefined) {
                 res.data = res.payload
               }
+              // disposition 出口统一解析并挂载（B3 传递）：仅 prompt/steer/follow_up 响应
+              // 携带该字段；解析出值才挂键，其余命令响应保持无键（上层 undefined 即缺失语义）。
+              const disposition = parseInputDisposition(res)
+              if (disposition !== undefined) res.disposition = disposition
               resolve(res)
             }
           },
           reject,
-          // D1 双腿闭合：标记随 pending 注册写入，handleMessage 据此对回程 response 跳过 touch
-          maintenance: !!options?.maintenance,
         },
-        timeout,
-        // D3a：超时以 RpcTimeoutError 类型 reject（字段化 commandType/timeoutMs），调用方
-        // instanceof 判别后走强杀自愈路径，不再靠 message 字符串匹配。错误构造注入
-        // （类型本体在 utils/errors.ts，公共包不感知宿主错误面）。
-        () => new RpcTimeoutError(type, timeout),
       )
 
       try {
@@ -910,27 +789,15 @@ export class RpcClient implements IPiEngine {
    * 只读暴露：消费方（reaper 判定）只读，刷新统一走 RpcClient 内部 touch 点与
    * touchActivity()——写点集中可审计，防止空闲时钟被随意重置。
    */
+  /**
+   * 最近一次 pi 双向活动时刻（ms epoch）。
+   * 只读暴露：消费方为观测面（crash 取证「死前最后活动时刻」等）。写点集中在
+   * RpcClient 内部（出站 sendCommand / 入站 handleMessage），防止时钟被随意重置。
+   * 原空闲回收判定（idle-pi-reclamation D1/D6-1 touchActivity + maintenance 豁免）
+   * 已随 ADR-0122 防御机制清查退役。
+   */
   get lastActivityAt(): number {
     return this._lastActivityAt
-  }
-
-  /**
-   * 手动刷新空闲时钟（idle-pi-reclamation D6-1）。调用方语义 = MessageDispatcher
-   * .sendPrompt 入口同步 touch：「prompt 已发出、插件 hook / restore 执行中」窗口内
-   * occupancy 尚未置 dispatching（markSessionActive 在两个 await 之后），靠此处刚
-   * touch 过的时间戳让回收判定不满足空闲阈值，by construction 关闭误回收窗口。
-   */
-  touchActivity(): void {
-    this._lastActivityAt = Date.now()
-  }
-
-  /**
-   * 最近一次事件帧到达时刻（W7 abort 超时阶梯的桥事件窗信号读点）。
-   * undefined = 本进程生命周期内从未观测到事件帧（对 abort 超时场景，配合探测无响应
-   * 即构成冻结证据——运行中的 session 几乎不可能从未有过事件，pi spawn 即发初始化事件）。
-   */
-  get lastEventAt(): number | undefined {
-    return this._lastEventAt
   }
 
   // ── High-level API ────────────────────────────────────────────────
@@ -948,13 +815,12 @@ export class RpcClient implements IPiEngine {
    * images 为 undefined 或空数组时归一化为不传 images 键（避免 pi 收到空数组），
    * 走与改动前完全一致的路径，零回归。
    */
-  prompt(content: string, images?: Array<{ data: string; mimeType: string }>, streamingBehavior?: 'steer' | 'followUp', options?: SendCommandOptions): Promise<PiMessage> {
+  prompt(content: string, images?: Array<{ data: string; mimeType: string }>, streamingBehavior?: 'steer' | 'followUp'): Promise<PiMessage> {
     // 帧组装（pi-rpc commands）：images 是 shared 层图片附件形状（无 type 字段），
     // shared→pi ImageContent 的唯一组装点在公共包（pi 私有 type:'image' 不出本层）；
     // 空 images 归一化不传键（避免 pi 收到空数组），与改动前路径完全一致。
-    // options 透传（idle-pi-reclamation D1）：维护通道经 prompt 的语义方法形态发起时，
-    // maintenance 标记直达 sendCommand touch 排除。
-    return this.sendCommand('prompt', buildPromptParams({ message: content, images, streamingBehavior }), CMD_TIMEOUT_MS, options)
+    // RPC 墙钟超时档（timeoutMs/options 参数）已随 ADR-0122 退役（见文件头）。
+    return this.sendCommand('prompt', buildPromptParams({ message: content, images, streamingBehavior }))
   }
 
   abort(): Promise<PiMessage> {
@@ -968,15 +834,11 @@ export class RpcClient implements IPiEngine {
    * 全文 indexOf 匹配无 id，PS-64），上层（delivery registry 对账器）据此完成「全收 → 按裸标记
    * 识别 → 自有条目重投 / 外来文本收养」（§3.1 场景 D / D3）。
    *
-   * 超时用 FAST_TIMEOUT_MS：纯内存操作 + 同步 emit（pi 实装 `clearQueue` 无 await），
-   * 属控制面单请求（AGENTS.md 规则 19 粒度原则）——秒级即失败，不占任务级预算；失败
-   * 语义由调用方处置（对账器本轮放弃、下轮触发点重试；cancel 路径回「已投递不可撤」）。
-   *
    * 形状守卫：响应非对象或缺数组字段时归一为空数组（协议异常不炸对账主链——对账器把
    * 「空」解释为「无滞留」，最坏形态是滞留留到下一触发点，而非对账链路抛错）。
    */
   async clearQueue(): Promise<PiQueueSnapshot> {
-    const msg = await this.sendCommand('clear_queue', {}, FAST_TIMEOUT_MS)
+    const msg = await this.sendCommand('clear_queue')
     const data = msg.data as Record<string, unknown> | undefined
     return {
       steering: toStringArray(data?.steering),
@@ -1006,11 +868,10 @@ export class RpcClient implements IPiEngine {
    * W1（数据源治理）：活跃 session 的 label 持久化唯一写入口——pi 内部经
    * sessionManager.appendSessionInfo 落盘 + 广播 session_info_changed，取代旧版直写（taiji W11 前）
    * 直写 session JSONL（消除与 pi 进程内 rename-session 扩展的 last-write-wins 竞争）。
-   * success:false / 超时由 sendCommand 既有约定 reject（调用方决定失败语义）。
+   * success:false 由 sendCommand 既有约定 reject（调用方决定失败语义）。
    */
   setSessionName(name: string): Promise<PiMessage> {
-    // L6：set_session_name 是毫秒级 RPC（pi 内存缓冲 append），用 FAST_TIMEOUT_MS 快速失败
-    return this.sendCommand('set_session_name', { name }, FAST_TIMEOUT_MS)
+    return this.sendCommand('set_session_name', { name })
   }
 
   /**
@@ -1028,14 +889,14 @@ export class RpcClient implements IPiEngine {
   }
 
   async compact(customInstructions?: string): Promise<PiCompactionResult> {
-    // timeout-slow-flow-wallclock D3：压缩是 LLM 调用链（分钟级），超时回归自有常量
-    // COMPACT_RPC_TIMEOUT_MS（30min，shared SSOT）——不再与 bash 共用（300s 前科已由 D2 拆除），
-    // renderer backstop 引同一常量 + RENDERER_RPC_MARGIN_MS（编译期对齐，恒不先于本层判死）。
-    const msg = await this.sendCommand('compact', customInstructions ? { customInstructions } : {}, COMPACT_RPC_TIMEOUT_MS)
+    // 压缩 RPC 墙钟（COMPACT_RPC_TIMEOUT_MS 30min，timeout-slow-flow-wallclock D3）
+    // 已随 ADR-0122 退役（见文件头，推翻该量级校准裁决）。
+    const msg = await this.sendCommand('compact', customInstructions ? { customInstructions } : {})
     // RT-2#4：形状守卫（bash 式，对照 getAvailableModels）——pi compact 成功响应恒带
-    // CompactionResult 对象（rpc-mode.js:421 success(id,"compact",result)），且三必填字段
-    // 齐备（pi 0.84.4 dist/core/compaction/compaction.d.ts CompactionResult：summary:string /
-    // firstKeptEntryId:string / tokensBefore:number），与 port 契约（services/ports/pi-engine.ts
+    // CompactionResult 对象（rpc-mode.js case "compact" → success(id,"compact",result)），
+    // 且三必填字段齐备（pi 1.0.0 dist/core/compaction/compaction.d.ts CompactionResult：
+    // summary:string / firstKeptEntryId:string / tokensBefore:number），与 port 契约
+    // （services/ports/pi-engine.ts
     // PiCompactionResult）一致。data 缺失/非对象/缺必填字段 = 协议异常。pi 手动 compact 失败
     // 另有 compaction_end{errorMessage} 事件编排（dispatcher 零广播注释），不走本返回值——
     // reject 让协议异常显形而非 undefined 字段渗入消费方。
@@ -1056,15 +917,13 @@ export class RpcClient implements IPiEngine {
    * 直接执行 bash 命令（pi bash RPC）。
    *
    * excludeFromContext 透传规则：undefined 时不传该键（走 pi 默认），显式 true/false 时透传。
-   * bash 是任务级慢速流（合法耗时可达小时级），超时用独立常量 BASH_RPC_TIMEOUT_MS（1h，
-   * env `TAIJI_RUNTIME_BASH_RPC_TIMEOUT_MS` 可覆盖、0=不限时——resolveBashRpcTimeoutMs），
-   * 不再复用 compact 的 300s 常量（timeout-slow-flow-wallclock D2：跨粒级挪用是 `!sleep 320`
-   * 误杀的根因）。超时语义是「停止等待」非「处决」：不自动 abort_bash，pi 侧照常执行落盘。
+   * bash RPC 任务级墙钟（BASH_RPC_TIMEOUT_MS 1h + env 逃生门，timeout-slow-flow-wallclock D2）
+   * 已随 ADR-0122 退役（见文件头，推翻该量级校准裁决）。
    * 返回值归一为 PiBashResult（sendCommand 已归一 data ?? payload，此处按结构断言）。
    */
   async bash(command: string, excludeFromContext?: boolean): Promise<PiBashResult> {
     const args = excludeFromContext !== undefined ? { command, excludeFromContext } : { command }
-    const msg = await this.sendCommand('bash', args, resolveBashRpcTimeoutMs())
+    const msg = await this.sendCommand('bash', args)
     // [W6] shape guard：pi 返回 malformed 数据时 fallback，避免下游因 undefined 字段崩溃。
     // [S1] fallback 不用 exitCode:1（会被前端误读为「命令失败」，实为 pi 协议异常），
     // 改用 exitCode:undefined（PiBashResult.exitCode 类型 number|undefined，dispatcher 广播时
@@ -1084,8 +943,7 @@ export class RpcClient implements IPiEngine {
   }
 
   async getCommands(): Promise<PiCommandInfo[]> {
-    // L6：getCommands 是毫秒级操作，用 FAST_TIMEOUT_MS（10s）替代默认 60s，失败更快报错
-    const msg = await this.sendCommand('get_commands', {}, FAST_TIMEOUT_MS)
+    const msg = await this.sendCommand('get_commands', {})
     // RT-2#4：形状守卫（bash 式，对照 getAvailableModels）——pi get_commands 恒返回
     // commands 数组（可为空），缺失/非数组 = 协议异常。此前 `?? []` 把协议异常折成
     // 空数组：session-state-projection 的 publishCommandsSnapshot 只挡 undefined，
@@ -1117,7 +975,6 @@ export class RpcClient implements IPiEngine {
   switchSession(sessionPath: string): Promise<void> {
     // D6-④：崩溃取证上下文——已知历史文件路径（restore/fork 附着目标）。
     this.attachedSessionFile = sessionPath
-    // L6：switchSession 加载大 session 文件可能耗时，用 SLOW_TIMEOUT_MS（120s）避免误超时。
     // [pi 锚点] switch_session 是永久重绑读写目标——pi-mono coding-agent/src/core/
     // agent-session-runtime.ts switchSession（~:194-215，open 新 SessionManager →
     // teardownCurrent → createRuntime 重绑）+ core/session-manager.ts `sessionFile`
@@ -1125,13 +982,12 @@ export class RpcClient implements IPiEngine {
     // 故 switchSession 成功后紧随的 get_state（model/thinkingLevel 读回，restore-seeding
     // 播种依赖）返回的是新 session 的生效值（clone v0.84.2 核对，实装 0.84.4）。
     // switch_session 仅主 agent 消费（subagent 续聊走 spawn --session 直续，见 pi-rpc README）。
-    return this.sendCommand('switch_session', buildSwitchSessionParams(sessionPath), SLOW_TIMEOUT_MS).then(() => undefined)
+    return this.sendCommand('switch_session', buildSwitchSessionParams(sessionPath)).then(() => undefined)
   }
 
   /** 查询 pi session 状态（get_state），返回归一后的 state 对象（sendCommand 已归一 data ?? payload）。 */
   async getState(): Promise<Record<string, unknown> | undefined> {
-    // L6：getState 是毫秒级操作，用 FAST_TIMEOUT_MS（10s）替代默认 60s
-    const data = (await this.sendCommand('get_state', {}, FAST_TIMEOUT_MS)).data
+    const data = (await this.sendCommand('get_state', {})).data
     // D6-④：崩溃取证上下文——get_state 是 attach 序列恒经 RPC，响应携带生效中的
     // sessionFile（绝对路径）。字符串形态才记录（异常响应不覆盖已有值）。
     if (typeof data?.sessionFile === 'string' && data.sessionFile.length > 0) {
@@ -1147,11 +1003,11 @@ export class RpcClient implements IPiEngine {
    * models-store 远端目录刷新合并），元素是 pi-ai Model 经本层翻译的内部类型
    * AvailableModelSnapshot（含 reasoning/thinkingLevelMap）——services/model-capability.ts
    * 的 runCapabilityReconcile 用它检测配置聚合与 pi 运行态的漂移（配置有而 pi 无 /
-   * reasoning 不一致 / 大小写孪生）。毫秒级内存快照，FAST_TIMEOUT_MS 即可；
+   * reasoning 不一致 / 大小写孪生）。
    * malformed 响应抛错由对账层降级捕获（避免误判为全量漂移）。
    */
   async getAvailableModels(): Promise<AvailableModelSnapshot[]> {
-    const msg = await this.sendCommand('get_available_models', {}, FAST_TIMEOUT_MS)
+    const msg = await this.sendCommand('get_available_models', {})
     const models = msg.data?.models
     if (!Array.isArray(models)) {
       throw new Error('[rpc] getAvailableModels: malformed response from pi (data.models is not an array)')
@@ -1175,8 +1031,8 @@ export class RpcClient implements IPiEngine {
    *
    * 判定优先级：null（取消）> confirm > value。
    * [HISTORICAL] 旧 bridge 场景的 `{id, response}` 包裹分支（method===undefined 且
-   * response 是对象）已删除：唯一调用方 bridge-handler 已全改 stringify+'select'，
-   * 该形态无生产调用方。
+   * response 是对象）已删除：唯一调用方（runtime 内部应答通道，随 plugin-bridge 退役
+   * 删除）此前已全改 stringify+'select'，该形态无生产调用方。
    *
    * 返回 boolean（false = 未写进 pi stdin，透传 sendRaw 语义）：extension UI 应答
    * 承载用户决策，false 时调用方必须终结该请求并上行带码错误（M1/RT-2#8——此前 void
@@ -1195,14 +1051,12 @@ export class RpcClient implements IPiEngine {
 
     this._killing = true
 
-    // 杀链（pi-rpc kill-chain 部件）：SIGCONT（唤醒 SIGSTOP 冻结形态，对运行中进程
-    // 无副作用）→ SIGTERM → grace（缺省 2s，与迁移前 KILL_TIMEOUT_MS 等值）→ SIGKILL
-    // + resolve（不等收尸，exit handler 由进程生命周期接手）。
+    // 杀链（pi-rpc kill-chain 部件）：SIGKILL 直杀 + 立即 resolve（不等收尸，exit
+    // handler 由进程生命周期接手；grace 优雅退出等待窗已随 ADR-0122 退役）。
     // exit 安全网：_killing=true 使 exit handler 跳过 rejectAll，此处 onExit 回调统一
-    // 清 pending——调用方不必等各自的 60s 超时。
+    // 清 pending——调用方不必悬挂等待。
     return killPiProcess(this.proc!, {
       onExit: () => this.rejectAll(new Error('pi process killed')),
-      onEscalate: () => console.warn('[rpc] SIGKILL after timeout'),
     })
   }
 }

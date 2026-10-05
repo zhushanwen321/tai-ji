@@ -25,7 +25,8 @@ const { order, FakeStream } = vi.hoisted(() => {
     /**
      * close 时机模式（审查 W30 Fix-3：验证顺序约束真正依赖 close 等待，而非假同步）：
      * 0 = end 同步置 closed（默认，既有测试路径）；>0 = end 后延迟 N tick 才置 closed
-     * 并 emit 'close'（模拟真实流的异步 flush）；-1 = 永不 close（超时降级路径用）。
+     * 并 emit 'close'（模拟真实流的异步 flush）；-1 = 永不 close（fs 挂起形态，现行契约
+     * 为 Promise 永不 settle——超时降级已随 ADR-0122 退役）。
      */
     closeDelayTicks = 0
     private handlers: Record<string, Array<() => void>> = {}
@@ -37,7 +38,7 @@ const { order, FakeStream } = vi.hoisted(() => {
       this.chunks.push(String(data))
       return true
     }
-    /** endAndAwait 超时降级路径会强制销毁流（审查 W30 Fix-1）——fake 必须忠实模拟该 API。 */
+    /** WriteStream API 完备性成员——endAndAwait 超时降级（强制销毁流）已随 ADR-0122 退役。 */
     destroy(): this {
       this.destroyed = true
       this.closed = true
@@ -86,7 +87,7 @@ const { order, FakeStream } = vi.hoisted(() => {
           }
           setImmediate(loop)
         }
-        // closeDelayTicks < 0：永不 close（endAndAwait 超时降级测试路径）
+        // closeDelayTicks < 0：永不 close（fs 挂起形态；现行契约 = Promise 永不 settle，无超时降级）
       }
       return this
     }
@@ -222,39 +223,6 @@ describe('logger.ts 轮转顺序（fs mock）', () => {
     await logger.closeLogger()
   })
 
-  it('endAndAwait 超时降级：close 永不触发时超时后 resolve，强制销毁流 + 记 error，轮转不永久挂起（审查 W30 Fix-1）', async () => {
-    vi.useFakeTimers()
-    process.env.TAIJI_LOG_MAX_BYTES = '80'
-    const created: InstanceType<typeof FakeStream>[] = []
-    let first = true
-    vi.mocked(createWriteStream).mockImplementation((file) => {
-      const name = String(file)
-      order.push(`open:${name}`)
-      const s = new FakeStream(name)
-      if (first) {
-        first = false
-        s.closeDelayTicks = -1 // 永不 close：模拟 fs 挂起（'close' 永不触发）
-      }
-      created.push(s)
-      return asWriteStream(s)
-    })
-    const logger = await import('../infra/logger.js')
-    logger.initLogger(dataDir)
-    for (let i = 0; i < 6; i++) logger.logger.info(`line-${i}`)
-    // 轮转已触发且 end 已调用，但 close 永不触发 → 无超时前 rename 不得发生
-    expect(order.filter((o) => o.startsWith('end:'))).toHaveLength(1)
-    expect(order.filter((o) => o.startsWith('rename:'))).toHaveLength(0)
-    // 推进超过 END_AWAIT_TIMEOUT_MS（5s）→ 超时降级：强制销毁挂起流 + 记 error 级日志
-    await vi.advanceTimersByTimeAsync(6000)
-    expect(created[0].destroyed).toBe(true) // 挂起流被强制销毁（fd 不悬挂）
-    // error 报告入 pendingLines 队列（超时时轮转仍在进行），回放后落进新流
-    const allChunks = created.flatMap((s) => s.chunks).join('')
-    expect(allChunks).toContain('[ERROR]')
-    expect(allChunks).toContain('endAndAwait timeout')
-    expect(order.filter((o) => o.startsWith('rename:'))).toHaveLength(1) // rename 照常发生（数据不丢）
-    await logger.closeLogger()
-  })
-
   it('回放失败计数：轮转后新流打开失败时 pending 行丢弃并合并记一次 warn（终审 suggestion）', async () => {
     process.env.TAIJI_LOG_MAX_BYTES = '80'
     const created: InstanceType<typeof FakeStream>[] = []
@@ -297,7 +265,7 @@ describe('logger.ts 轮转顺序（fs mock）', () => {
       const s = new FakeStream(name)
       if (first) {
         first = false
-        s.closeDelayTicks = -1 // 永不 close：轮转窗口保持打开，pending 队列持续累积
+        s.closeDelayTicks = 1 // 下一 tick close（超时降级路径已随 ADR-0122 退役）
       }
       created.push(s)
       return asWriteStream(s)
@@ -306,16 +274,16 @@ describe('logger.ts 轮转顺序（fs mock）', () => {
     logger.initLogger(dataDir)
     // init 行已超阈值 → 第 0 行起触发轮转；后续全部进 pendingLines（上限 10_000）
     for (let i = 0; i < 10005; i++) logger.logger.info(`line-${i}`)
-    // 推进超时：轮转降级完成 → 回放 10_000 行 + 超限丢弃合并记一次 warn。
-    // 丢弃计数 = 5（line-10000..10004）+ 1（超时 error 报告自身入队时队列已满被丢，
+    // 推进：轮转完成 → 回放 10_000 行 + 超限丢弃合并记一次 warn。
+    // 丢弃计数 = 5（line-10000..10004）（原 +1 为超时 error 报告自身入队被丢，
     // 计入同一计数——error 报告不绕过上限，stderr 出口兜底其可见性）。
-    await vi.advanceTimersByTimeAsync(6000)
+    await vi.advanceTimersByTimeAsync(10)
     logger.logger.info('after-rotation') // 回放使字节计数超阈值 → 再触发一轮轮转（回放是微任务，closeLogger 会 await）
     await logger.closeLogger()
     // warn 只出现一次（含丢弃计数）
     const warnChunks = created.flatMap((s) => s.chunks).filter((c) => c.includes('[WARN]'))
     expect(warnChunks).toHaveLength(1)
-    expect(warnChunks[0]).toContain('dropped 6 log lines')
+    expect(warnChunks[0]).toContain('dropped 5 log lines')
     // 队列内（未超限）的行回放落盘；超限行 line-10000 被丢弃；轮转结束后写入恢复正常
     const allChunks = created.flatMap((s) => s.chunks).join('')
     expect(allChunks).toContain('line-9999')
@@ -346,7 +314,7 @@ describe('logger.ts 轮转顺序（fs mock）', () => {
       const s = new FakeStream(name)
       if (name.includes('.jsonl')) {
         piOpens += 1
-        if (piOpens === 1) s.closeDelayTicks = -1 // 首个 pi 流永不 close：pi 轮转窗口保持，队列持续累积
+        if (piOpens === 1) s.closeDelayTicks = 1 // 首个 pi 流下一 tick close（超时降级路径已退役）
       }
       created.push(s)
       return asWriteStream(s)
@@ -356,12 +324,12 @@ describe('logger.ts 轮转顺序（fs mock）', () => {
     const piLog = logger.createPiSessionLog('drop-cap-sid')
     // 每行 ~51B：i=0 直写（惰性打开）；i=1 超阈值触发轮转入队；i=2..10000 填满队列；i=10001..10005 被丢弃
     for (let i = 0; i < 10_006; i++) piLog.write(`{"n":${i},"pad":"${'x'.repeat(38)}"}`)
-    // 推进超 END_AWAIT_TIMEOUT_MS（5s）：挂起流强制销毁 → pi 轮转续体走完（磁盘文件不存在，
-    // gzipRotatedFile 视为已归档）→ 回放 10_000 行 + 超限丢弃计数合并 warn
-    await vi.advanceTimersByTimeAsync(6000)
-    await vi.advanceTimersByTimeAsync(0) // 排空续体微任务链（fake timers 下禁用 setImmediate tick）
-    // 队列满不触发二次轮转：屏障前 pi 流 end 只发生 1 次（首轮），open 2 次（首轮 + 回放重开）；
-    // closeLogger 的 shutdown end 不计（它会对回放流再 end 一次，同文件名）
+    // 推进：pi 轮转续体走完（磁盘文件不存在，gzipRotatedFile 视为已归档）→ 回放 10_000 行 +
+    // 超限丢弃计数合并 warn
+    await vi.advanceTimersByTimeAsync(10)
+    await vi.advanceTimersByTimeAsync(10) // 排空续体微任务链（close 延迟 tick + fake timers）
+    // 队列满不触发二次轮转：屏障前 pi 流 end 1 次（首轮；closeLogger 的 shutdown end 在屏障后）、
+    // open 2 次（首轮 + 回放重开）。
     expect(order.filter((o) => o.startsWith('end:') && o.includes('.jsonl'))).toHaveLength(1)
     expect(piOpens).toBe(2)
     await logger.closeLogger() // 屏障：await 在途轮转（含回放）→ 断言无竞态

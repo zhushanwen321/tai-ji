@@ -41,8 +41,6 @@ export type { StatusChangeCallback } from './plugin-hot-reload.js'
 // 5 个测试文件 import `PluginHost as ActivatorHost`）不破坏（NON-BREAKING）。
 export type { PluginHostContract as PluginHost } from './plugin-host.js'
 
-const DEACTIVATE_TIMEOUT_MS = 5_000
-const ACTIVATE_TIMEOUT_MS = 30_000
 // 权限审批等待默认值（timeout-plugin-service D3）：审批对象是「等一个不在场的人」，
 // 量级按本仓「等人工」裁决值 30min（dialog-queue DEFAULT_DIALOG_TIMEOUT_MS 同源），
 // 不再是 30s 判拒。全局逃生门 = env TAIJI_PLUGIN_PERMISSION_TIMEOUT_MS（生产装配点
@@ -51,7 +49,7 @@ export const PERMISSION_TIMEOUT_MS = 1_800_000
 
 interface PendingReply {
   resolve: (success: boolean) => void
-  timer: ReturnType<typeof setTimeout>
+  timer: ReturnType<typeof setTimeout> | undefined
 }
 
 interface PluginContextState {
@@ -146,8 +144,6 @@ export class PluginActivator {
   private onPermissionRequestExpired?: (payload: { pluginId: string; requestId: string }) => void
   private onPermissionRequestResolved?: (payload: { pluginId: string; requestId: string; approved: boolean }) => void
   private permissionTimeoutMs: number
-  /** activate 生命周期握手超时（D4：默认 ACTIVATE_TIMEOUT_MS 30s 不动，构造选项可覆盖） */
-  private activateTimeoutMs: number
   /** 待审批的权限请求 */
   private pendingPermissions = new Map<string, PendingPermission>()
 
@@ -162,7 +158,6 @@ export class PluginActivator {
     this.permissionTimeoutMs = options?.permissionTimeoutMs ?? PERMISSION_TIMEOUT_MS
     // 对齐 U7 形态（plugin-host.ts 构造器 loadTimeoutMs ?? LOAD_PLUGIN_TIMEOUT_MS）：
     // 生产装配不传 → 默认 30s 不动；仅测试/重初始化插件场景传覆盖值。
-    this.activateTimeoutMs = options?.activateTimeoutMs ?? ACTIVATE_TIMEOUT_MS
   }
 
   /** 注册插件描述符，构建 activationEvent 索引 */
@@ -288,7 +283,6 @@ export class PluginActivator {
         { type: 'activate', pluginId, pluginDir: descriptor.pluginPath, event },
         pluginId,
         'activate',
-        this.activateTimeoutMs,
       )
 
       if (success) {
@@ -407,7 +401,7 @@ export class PluginActivator {
     // （由 doActivatePlugin 的 finally 消费：成功 → 立即反卷真实 deactivate；否则 →
     // 终一化 UNLOADED），状态改写 DEACTIVATING 使审批醒来的激活经 ACTIVATING 状态
     // 检查作废，最后 await in-flight 激活尝试——deactivatePlugin 返回时停用语义已
-    // 收敛（最坏等待 ACTIVATE_TIMEOUT_MS，激活不完成就无法安全停用，代价可接受）。
+    // 收敛（await in-flight 激活完成——激活不完成就无法安全停用）。
     if (currentState === 'ACTIVATING') {
       this.deactivateRequested.add(pluginId)
       this.pluginStates.set(pluginId, 'DEACTIVATING')
@@ -425,7 +419,6 @@ export class PluginActivator {
         { type: 'deactivate', pluginId },
         pluginId,
         'deactivate',
-        DEACTIVATE_TIMEOUT_MS,
       )
     }
 
@@ -777,36 +770,20 @@ export class PluginActivator {
    * 发送消息并注册 pending promise，等待 handleWorkerReply() 解析。
    * op 参与复合键（`${pluginId}:${op}`，D6 并发模型），超时自动 resolve(false)。
    */
+  /**
+   * 发送 activate/deactivate 消息并等待回复（无墙钟，ADR-0122 退役登记：原
+   * ACTIVATE_TIMEOUT_MS 30s / DEACTIVATE_TIMEOUT_MS 5s 握手墙钟已删——插件不回复时
+   * 悬挂等待，处置归用户（管理界面停用/卸载）；Worker crash 由 crash 回调链收口）。
+   */
   private sendAndWaitReply(
     handle: { workerId: string; postMessage(message: unknown): void },
     message: unknown,
     pluginId: string,
     op: 'activate' | 'deactivate',
-    timeoutMs: number,
   ): Promise<boolean> {
     return new Promise((resolve) => {
       const key = `${pluginId}:${op}`
-      const timer = setTimeout(() => {
-        // 超时只清理自己注册的 entry（复合键 + timer 身份比对：并发重入同 op 时
-        // 旧 timer 不误删新 entry——旧实现无条件 delete 是回复错配的帮凶）
-        if (this.pendingReplies.get(key)?.timer === timer) {
-          this.pendingReplies.delete(key)
-        }
-        // D4 错误规格（activate 超时行）：UNLOADED 保持 + 消息提示 activateTimeoutMs
-        // 覆盖通道。只 activate 打——deactivate 超时是 D6 登记不动项（本地清理
-        // 兜底已安全，维持静默 resolve(false)）。迟到的 activated 回复经 pending
-        // miss noop（handleWorkerReply 守卫），不炸。
-        if (op === 'activate') {
-          console.warn(
-            `[plugin-activator] activate reply for ${pluginId} timed out after ${timeoutMs}ms — ` +
-              `plugin left UNLOADED (pass activateTimeoutMs option to extend; ` +
-              `onActivate should stay lightweight — move heavy initialization to the first tool/command)`,
-          )
-        }
-        resolve(false)
-      }, timeoutMs)
-
-      this.pendingReplies.set(key, { resolve, timer })
+      this.pendingReplies.set(key, { resolve, timer: undefined })
       handle.postMessage(message)
     })
   }

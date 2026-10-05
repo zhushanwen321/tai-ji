@@ -554,6 +554,11 @@ function dispatchMessageEntry(c: ChatStateCollector, entry: PiMessageEntry): voi
     case 'assistant':
       commitUserAssistantMessage(c, body, entryId, baseId, fallbackTs)
       return
+    case 'system':
+      // pi 1.0.0 system role（B1）：系统提示词与工具集变更的持久化消息。对话流不显示
+      //（pi 官方语义 = 原始历史不变），与 live 侧 event-adapter 的 MESSAGE_END_SILENT_SKIP_ROLES
+      // 同语义——显式 case 静默跳过，不进 default warn（system 是已建模合法 role、预期出现）。
+      return
     default: {
       // 显式拒绝未知 role（W11 语义）：非已建模 role 不默认归 assistant，防数据异常被掩盖
       console.warn(`[apply-entry] unknown role: ${String(body.role)}, skipping`)
@@ -597,6 +602,16 @@ function dispatchEntry(c: ChatStateCollector, entry: PiEntry): void {
     }
     case 'label': {
       // 用户书签/标记：重放侧无对话流投影，显式 no-op（规则 #9：有 case、不丢弃、不崩溃）。
+      return
+    }
+    case 'usage': {
+      // pi 1.0.0 用量记录（cache_warm 等）：不产对话流消息（用量统计由 runtime 侧
+      // usage-stats-service 扫描计入），零投影显式 no-op（与 live 侧 event-adapter 跳过同语义）。
+      return
+    }
+    case 'context_edit': {
+      // pi 1.0.0 上下文编辑（只改未来模型上下文，原始历史/UI/导出不变——pi 官方语义
+      // 就是投影不动），零投影显式 no-op；模型上下文的编辑投影属第二类组 4 设计。
       return
     }
     default: {

@@ -47,13 +47,15 @@ vi.mock('../widget.js', async (importOriginal) => {
 })
 
 // vi.mock factory 会被提升，跨模块共享状态必须经 vi.hoisted。
-const { isCtxStaleCaptures, runtimeInstances } = vi.hoisted(() => ({
+const { isCtxStaleCaptures, runtimeInstances, stopSchedulerCalls } = vi.hoisted(() => ({
   isCtxStaleCaptures: [] as Array<(() => boolean) | undefined>,
   runtimeInstances: [] as Array<{ stopScheduler(): void }>,
+  stopSchedulerCalls: [] as Array<{ stopScheduler(): void }>,
 }))
 
 // InstrumentedRuntime 继承真实实现（loadTasks/onAfterTick/startScheduler 均真实执行），
-// 仅捕获构造参（isCtxStale）并登记实例（afterEach 统一停 timer，避免真实 setInterval 残留）。
+// 仅捕获构造参（isCtxStale）并登记实例（afterEach 统一停 timer，避免真实 setInterval 残留）；
+// stopScheduler 调用按序记录（F1 验收断言面：新装配前旧实例必须被停）。
 vi.mock('../runtime.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../runtime.js')>()
   const RealSchedulerRuntime = actual.SchedulerRuntime
@@ -66,6 +68,10 @@ vi.mock('../runtime.js', async (importOriginal) => {
       isCtxStaleCaptures.push(isCtxStale)
       runtimeInstances.push(this)
     }
+    override stopScheduler(): void {
+      stopSchedulerCalls.push(this)
+      super.stopScheduler()
+    }
   }
   return { ...actual, SchedulerRuntime: InstrumentedRuntime }
 })
@@ -73,8 +79,6 @@ vi.mock('../runtime.js', async (importOriginal) => {
 import schedulerExtension from '../index.js'
 import { TICK_INTERVAL_MS } from '../runtime.js'
 import { TASK_ENTRY_TYPE } from '../types.js'
-/** 与 index.ts 的 WIDGET_KEEPALIVE_INTERVAL_MS 同值（常量不导出，测试锚定同值）。 */
-const KEEPALIVE_INTERVAL_MS = 10 * 60 * 1000
 
 /**
  * 最小 fake pi：覆盖 factory 消费的 API 面
@@ -206,12 +210,9 @@ describe('G1: index.ts 代际接线（S9）', () => {
 // 下一 tick 的 refreshWidget 访问 stale ctx.ui 抛错 → unhandledRejection → pi 主进程 exit 1。
 // F1 在 session_start 开头幂等 stopScheduler，从源头消灭。
 //
-// 行为断言口径（验收 U4）：观测面 = refreshWidget 的推送调用序列（本文件 mock 环境下
-// refreshWidget 走 setSchedulerWidgetMock，与真实 ctx.ui.setWidget 同一调用序列）。widget
-// 推送修正（D1 指纹跳推 + D2 保活底线帧）后每次 tick 不再必然推帧——任务集静态期间零推送、
-// 空任务集恒零推送，故注入非空任务集、以「跨 10min 保活窗口必推一帧」作为「该 runtime 的
-// timer 是否还在 tick」的行为观测面（保活帧间隔与 index.ts WIDGET_KEEPALIVE_INTERVAL_MS
-// 同值 10min）。F1 缺失时旧 timer 跨窗口必多推一帧，即被捕获。
+// 行为断言口径（验收 U4）：观测面 = InstrumentedRuntime 的 stopScheduler 调用序列
+// （widget 推送是 D1 指纹跳推语义——任务集静态期间零推送，不能靠推送计数区分新旧 timer；
+// stopScheduler 白盒断言直接锁定「新装配前旧实例必须被停」的 F1 语义本身）。
 describe('F1: session_start 停旧 runtime（crash-fix U4）', () => {
   const BASE = Date.parse('2026-01-01T00:00:00Z')
 
@@ -243,7 +244,7 @@ describe('F1: session_start 停旧 runtime（crash-fix U4）', () => {
     }
   }
 
-  /** 同 createFakeCtx，但注入非空任务集（保活帧只在非空任务集时推送，见上方口径注释）。 */
+  /** 同 createFakeCtx，但注入非空任务集（首帧渲染需要非空任务集可断言）。 */
   function createFakeCtxWithTasks(sessionFile: string): ExtensionContext {
     return {
       cwd: '/test-index-session-start',
@@ -260,6 +261,7 @@ describe('F1: session_start 停旧 runtime（crash-fix U4）', () => {
   beforeEach(() => {
     isCtxStaleCaptures.length = 0
     runtimeInstances.length = 0
+    stopSchedulerCalls.length = 0
     setSchedulerWidgetMock.mockClear()
     vi.useFakeTimers()
     vi.setSystemTime(new Date(BASE))
@@ -272,7 +274,7 @@ describe('F1: session_start 停旧 runtime（crash-fix U4）', () => {
     vi.useRealTimers()
   })
 
-  it('U4: 双 session_start 后旧 timer 已停——跨保活窗口只有新 runtime 推帧', async () => {
+  it('U4: 双 session_start 后旧 timer 已停（stopScheduler 恰命中首个实例）', async () => {
     const { pi, events } = createMockPi()
     schedulerExtension(pi)
     const sessionStart = events.get('session_start')
@@ -281,19 +283,19 @@ describe('F1: session_start 停旧 runtime（crash-fix U4）', () => {
     // 第一次 session_start：runtime1 + timer1 启动，初始渲染 1 次
     sessionStart!({ type: 'session_start', reason: 'startup' }, createFakeCtxWithTasks('/test/session-1.json'))
     expect(setSchedulerWidgetMock).toHaveBeenCalledTimes(1)
+    expect(runtimeInstances).toHaveLength(1)
 
-    // 前置因果锚点：静置越过保活窗口，timer1 推一帧保活帧（排除「timer 从未启动」的假绿；
-    // 也锁定跳推行为——窗口内其余 tick 零推送）
-    await vi.advanceTimersByTimeAsync(KEEPALIVE_INTERVAL_MS + TICK_INTERVAL_MS)
-    expect(setSchedulerWidgetMock).toHaveBeenCalledTimes(2)
+    // 前置因果锚点：静置数个 tick——timer1 在 tick（无异常），任务集静态零推送（D1 跳推）
+    await vi.advanceTimersByTimeAsync(2 * TICK_INTERVAL_MS)
+    expect(setSchedulerWidgetMock).toHaveBeenCalledTimes(1)
 
     // 第二次 session_start（session 替换）：F1 在装配新 runtime 前停掉 timer1
     sessionStart!({ type: 'session_start', reason: 'new_session' }, createFakeCtxWithTasks('/test/session-2.json'))
-    expect(setSchedulerWidgetMock).toHaveBeenCalledTimes(3) // runtime2 初始渲染（实例态重置，首帧必推）
+    expect(setSchedulerWidgetMock).toHaveBeenCalledTimes(2) // runtime2 初始渲染（实例态重置，首帧必推）
+    expect(runtimeInstances).toHaveLength(2)
 
-    // 行为断言（验收口径）：再静置一个保活窗口，只有 runtime2 的 timer 触发推送——恰 +1；
-    // F1 缺失时 timer1/timer2 都活着，此处为 +2
-    await vi.advanceTimersByTimeAsync(KEEPALIVE_INTERVAL_MS + TICK_INTERVAL_MS)
-    expect(setSchedulerWidgetMock).toHaveBeenCalledTimes(4)
+    // 行为断言（验收口径）：stopScheduler 恰被调一次且命中 runtime1；
+    // F1 缺失时旧 timer 不被停（数组为空或不含 runtime1）
+    expect(stopSchedulerCalls).toEqual([runtimeInstances[0]])
   })
 })

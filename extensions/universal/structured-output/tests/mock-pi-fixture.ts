@@ -78,6 +78,14 @@ function toFullExtensionAPI(partial: ReturnType<typeof createMockPi>): Extension
     exec: vi.fn(),
     getActiveTools: vi.fn(),
     getAllTools: vi.fn(),
+    // pi 1.0 新增成员补齐（D8 表 structured-output 行）：生产零改动，fixture 形状对齐
+    // 实装版 ExtensionAPI，包级 tsc（-p tsconfig.json）不再报缺成员。均为未用 spy。
+    getSettings: vi.fn(),
+    registerMcpServer: vi.fn(),
+    unregisterMcpServer: vi.fn(),
+    getMcpServers: vi.fn(),
+    registerVirtualModel: vi.fn(),
+    unregisterVirtualModel: vi.fn(),
     setActiveTools: vi.fn(),
     getCommands: vi.fn(),
     setModel: vi.fn(),

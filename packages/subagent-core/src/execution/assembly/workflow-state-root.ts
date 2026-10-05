@@ -19,7 +19,7 @@
 // 2026-09-27 W2 D3 场景 3 定位）；runtime 侧读面走 pi-host-run-store（主
 // session 文件同源枚举，不读 env/cwd）。
 //
-// core 缺省 agentDir 推导锚定 pi 实装版 0.84.4 dist config.js getAgentDir：
+// core 缺省 agentDir 推导锚定 pi 实装（1.0.0 复核）dist config.js getAgentDir：
 // `process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent")`
 // （ENV_AGENT_DIR = PI_CODING_AGENT_DIR、CONFIG_DIR_NAME = piConfig.configDir = ".pi"，
 // 无 piConfig.name 覆盖）。pi 升级若改 getAgentDir 语义 → 本推导漂移，可见信号

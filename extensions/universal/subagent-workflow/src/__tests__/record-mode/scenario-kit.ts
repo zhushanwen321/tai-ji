@@ -107,8 +107,9 @@ export function makeFauxRunner(
       dispatches.push({ seq, opts });
       const step: FauxStep = steps[seq - 1] ?? { kind: "ok" };
       if (step.kind === "error") {
-        // 可重试失败形态：executeAgentCall 的重试判据 = result.error 在场
-        //（throw 会走 worker 错误矩阵，不是调用级重试——场景 21 的注入面）
+        // 调用级失败注入面：result.error 在场 = executeAgentCall 单次 finalizeCall
+        // failed 显式上报（[ADR-0122] 无自动重试；throw 会走 worker 错误矩阵，
+        // 一次即 run failed——与调用级失败是两条不同路径）
         return { content: "", error: step.message, durationMs: 1 };
       }
       if (step.kind === "hang") {

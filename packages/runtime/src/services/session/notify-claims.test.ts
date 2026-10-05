@@ -451,22 +451,6 @@ describe('D10-E 结构性（附E E1-E8）', () => {
     expect(deliveredCount(fresh.settle(S, 'done').targets)).toBe(0)
   })
 
-  it('E5★ watch 永不到达且 claim 已 fulfilled → TTL 清扫转 orphaned → undeliveredResults 提示', () => {
-    const l = makeLedger()
-    l.arm({ parentSid: P, notifyId: 'sm-e5', kind: 'claim', sessionId: S })
-    l.markInjected(P, 'sm-e5')
-    expect(l.settle(S, 'done').targets).toHaveLength(0) // extension 未开表
-    clock += TTL - 1
-    expect(l.sweep().orphaned).toHaveLength(0) // 未达 TTL
-    clock += 1
-    const s = l.sweep()
-    expect(s.orphaned.map((v) => v.notifyId)).toEqual(['sm-e5'])
-    expect(s.respondOrphaned).toHaveLength(0) // 无 watch：仅状态转移
-    expect(l.getClaim(P, 'sm-e5')?.state).toBe('orphaned')
-    expect(l.undeliveredCount(S)).toBe(1)
-    expect(l.count()).toBe(1) // orphaned 保留供提示与迟到收口
-  })
-
   it('E6★ orphaned 后迟到 watch → respond orphaned → 静默 unregister-only', () => {
     const l = makeLedger()
     armSent(l, 'sm-e6')
@@ -486,37 +470,10 @@ describe('D10-E 结构性（附E E1-E8）', () => {
     expect(l.count()).toBe(0)
     expect(l.disarmDeliveryFailed(P, 'sm-e7')).toBe(false) // 已删：重复 disarm 幂等拒绝
     expectSilentSettle(l, 'done')
-    expect(l.undeliveredCount(S)).toBe(0) // 不入 TTL→orphaned 幽灵提示
-    expect(l.openWatch(P, 'sm-e7', 'w-e7')).toEqual({ action: 'fail-closed' }) // 迟到开表静默
-    clock += TTL * 2
-    const s = l.sweep()
-    expect(s.orphaned).toHaveLength(0)
     expect(l.undeliveredCount(S)).toBe(0)
+    expect(l.openWatch(P, 'sm-e7', 'w-e7')).toEqual({ action: 'fail-closed' }) // 迟到开表静默
   })
 
-  it('E8★ crash → 5s respawn 复活：无 lifetime 发声；在挂 claim TTL→orphaned 提示，lifetime 存活待终局', () => {
-    const l = makeLedger()
-    armSent(l, 'sm-e8-claim')
-    armCreated(l, 'sm-e8-x', 'sm-e8-lt', false) // lifetime（watch 已挂）
-    // respawn 链静默 = bridge 不调 onSessionDeath → 此处无死亡事件
-    clock += TTL
-    const s = l.sweep()
-    expect(s.orphaned.map((v) => v.notifyId)).toEqual(['sm-e8-claim']) // 在挂 claim 提示
-    expect(l.undeliveredCount(S)).toBe(1)
-    expect(s.respondOrphaned.map((t) => t.notifyId)).toEqual(['sm-e8-claim']) // watch 已挂 → 同步 respond 信号
-    expect(l.getClaim(P, 'sm-e8-lt')?.state).toBe('armed') // lifetime 豁免 TTL：健康稳态
-    // 复活后再承新债、终局死亡仍发声（裁决2 存活）
-    armSent(l, 'sm-e8-new')
-    const d = l.onSessionDeath(S, 'exit')
-    expect(d.targets.map((t) => t.notifyId).sort()).toEqual(['sm-e8-lt', 'sm-e8-new'])
-    expect(deliveredCount(d.targets)).toBe(1) // 槽内一条（claim 债 + lifetime 同 deathSeq 不叠加）
-    expect(d.fulfills).toBe(1)
-  })
-})
-
-// ═══ P9 事件序（prompt 回执帧先于 settled 帧的兑现时序）════════════════════
-
-describe('P9 事件序（兑现锚时序）', () => {
   it('send 路径 FIFO：受理回执（onSettled delivered → markInjected）先于 settled 帧 → 首次 settle 即兑现', () => {
     const l = makeLedger()
     expect(l.arm({ parentSid: P, notifyId: 'sm-p9-a', kind: 'claim', sessionId: S })).toEqual({ ok: true })

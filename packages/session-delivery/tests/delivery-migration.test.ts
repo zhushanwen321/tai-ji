@@ -5,11 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDelivery } from '../src/delivery.js'
 import { makeMockPort, textMsg } from './helpers.js'
 
-describe('A1-migration 搬迁: gate 拒绝→退避重试→达上限强发', () => {
+describe('A1-migration 搬迁: gate 拒绝→留守→边沿/外部触发重投', () => {
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers() })
 
-  it('主 agent busy 时 flush 退避，idle 后才发送', () => {
+  it('主 agent busy 时留守不发送，idle 后经 flush 复核投递', () => {
     const port = makeMockPort()
     port.idle = false
     const handle = createDelivery(port)
@@ -17,40 +17,35 @@ describe('A1-migration 搬迁: gate 拒绝→退避重试→达上限强发', ()
     handle.send(textMsg('hello'))
     expect(port.sendCalls).toHaveLength(0)
 
-    vi.advanceTimersByTime(100)
-    expect(port.sendCalls).toHaveLength(0)
+    vi.advanceTimersByTime(10_000)
+    expect(port.sendCalls).toHaveLength(0) // busy 留守：无退避轮询强发（ADR-0122）
 
     port.idle = true
-    vi.advanceTimersByTime(100)
-
+    handle.flush() // 外部触发复核（真实链 = settled 边沿驱动）
     expect(port.sendCalls).toHaveLength(1)
     expect(port.sendCalls[0]!.msg.payload.content).toBe('hello')
 
     handle.dispose()
   })
 
-  it('主 agent 持续 busy 达退避上限后强制发送', () => {
+  it('主 agent 持续 busy 留守不发送（无订阅装配也不强发——ADR-0122 退避轮询退役）', () => {
     const port = makeMockPort()
     port.idle = false
-    const handle = createDelivery(port, {
-      backoff: { ms: 100, max: 50 },
-    })
+    const handle = createDelivery(port)
 
     handle.send(textMsg('hello'))
     expect(port.sendCalls).toHaveLength(0)
 
     vi.advanceTimersByTime(10_000)
 
-    expect(port.sendCalls).toHaveLength(1)
+    expect(port.sendCalls).toHaveLength(0)
 
     handle.dispose()
   })
 
   it('#10 isIdle=true + 内核在途条目未终态 → 视为 busy 不立即投（G4 等价 gate；D2 拆除后 pending 判定内查 active 表）', () => {
     const port = makeMockPort()
-    const handle = createDelivery(port, {
-      backoff: { ms: 100, max: 5 },
-    })
+    const handle = createDelivery(port)
 
     // 制造内核在途：首条受理转 in-flight（缺省 marker 申报，等回执未确认）
     const first = handle.send(textMsg('在途一条'))
@@ -58,10 +53,10 @@ describe('A1-migration 搬迁: gate 拒绝→退避重试→达上限强发', ()
     const firstId = first.kind === 'accepted' ? first.id : undefined
 
     handle.send(textMsg('hello'))
-    expect(port.sendCalls).toHaveLength(1) // idle 但在途未终态 → 等边沿/退避
+    expect(port.sendCalls).toHaveLength(1) // idle 但在途未终态 → 留守
 
     handle.confirmDelivered(firstId!) // 送达回执 → 在途清零
-    vi.advanceTimersByTime(100) // 无订阅装配退避一拍，复核通过后投
+    handle.flush() // 外部触发复核（真实链 = settled 边沿驱动）
     expect(port.sendCalls).toHaveLength(2)
 
     handle.dispose()
@@ -119,7 +114,7 @@ describe('A1-migration 搬迁: dispose 短路', () => {
     expect(handle.depth()).toBe(0)
   })
 
-  it('dispose 后退避 timer 不再触发发送', () => {
+  it('dispose 后 flush 不再触发发送（调度面全部短路；ADR-0122 退役后已无退避 timer）', () => {
     vi.useFakeTimers()
     const port = makeMockPort()
     port.idle = false
@@ -127,6 +122,7 @@ describe('A1-migration 搬迁: dispose 短路', () => {
 
     handle.send(textMsg('hello'))
     handle.dispose()
+    handle.flush() // disposed 短路
 
     vi.advanceTimersByTime(10_000)
     expect(port.sendCalls).toHaveLength(0)

@@ -66,24 +66,6 @@ function statusNumstatImpl(statusOut: () => string, numstatOut: () => string): E
 }
 
 describe('FileChangeDiffAdapter × GitStateService（W18 采集收编）', () => {
-  it('A1: 采集委托 GitStateService——裸 --porcelain（5000ms）+ --numstat HEAD（5000ms）', async () => {
-    const fake = createFakeExecutor()
-    fake.setImpl(statusNumstatImpl(() => ' M a.ts', () => '1\t2\ta.ts'))
-    const adapter = makeAdapter(fake)
-
-    const snap = (await adapter.snapshotGitStatus('/repo')) as Map<string, FileChangeStatus> | null
-    expect(snap?.get('a.ts')).toBe('modified')
-    const ns = await adapter.numstat('/repo')
-    expect(ns?.get('a.ts')).toMatchObject({ add: 1, del: 2 })
-
-    const statusCall = fake.calls.find((c) => c.command === 'status')
-    expect(statusCall?.args).toEqual(['--porcelain'])
-    expect(statusCall?.timeoutMs).toBe(5000)
-    const numstatCall = fake.calls.find((c) => c.command === 'diff')
-    expect(numstatCall?.args).toEqual(['--numstat', 'HEAD'])
-    expect(numstatCall?.timeoutMs).toBe(5000)
-  })
-
   it('A2: 并发单飞——同 cwd 并发采集共享一次 exec（重复采集零重复 spawn）', async () => {
     const fake = createFakeExecutor()
     fake.setImpl(statusNumstatImpl(() => ' M a.ts', () => ''))

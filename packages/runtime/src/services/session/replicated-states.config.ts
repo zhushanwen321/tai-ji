@@ -57,10 +57,6 @@ export const SCALAR_STATE_DEBOUNCE_MS = 300
 /** usagePercent 上限（对齐 session-service.computeUsage 的 MAX_PERCENT 口径，clamp 防越界）。 */
 const MAX_USAGE_PERCENT = 100
 
-/** 快照失败退避序列（canonical，W6 接口契约锁定值）。 */
-// eslint-disable-next-line no-magic-numbers -- canonical 退避序列 1s/5s/15s（W6 契约锁定，非可调魔数）
-const SCALAR_STATE_BACKOFF_SCHEDULE: readonly number[] = [1000, 5000, 15000]
-
 /** get_state 字段投影的共享形态（每实例快照是其中单字段子集）。 */
 interface SessionScalarFields {
   thinkingLevel?: string
@@ -118,7 +114,6 @@ export function createThinkingLevelStateConfig(
       return fields.thinkingLevel === undefined ? {} : { thinkingLevel: fields.thinkingLevel }
     },
     debounceMs: SCALAR_STATE_DEBOUNCE_MS,
-    backoffSchedule: SCALAR_STATE_BACKOFF_SCHEDULE,
     merge: ownerSnapshotMerge,
     fieldsNullSemantics: { thinkingLevel: 'required' },
   }
@@ -133,7 +128,6 @@ export function createModelIdStateConfig(fetchState: FetchStateFn): ReplicatedSt
       return fields.modelId === undefined ? {} : { modelId: fields.modelId }
     },
     debounceMs: SCALAR_STATE_DEBOUNCE_MS,
-    backoffSchedule: SCALAR_STATE_BACKOFF_SCHEDULE,
     merge: ownerSnapshotMerge,
     fieldsNullSemantics: { modelId: 'required' },
   }
@@ -209,7 +203,6 @@ export function createUsageStateConfig(
       }
     },
     debounceMs: SCALAR_STATE_DEBOUNCE_MS,
-    backoffSchedule: SCALAR_STATE_BACKOFF_SCHEDULE,
     merge: ownerSnapshotMerge,
     fieldsNullSemantics: {},
   }
@@ -234,7 +227,6 @@ export function createCommandsStateConfig(fetchCommands: FetchCommandsFn): Repli
       return { commands: result as PiCommandInfo[] }
     },
     debounceMs: SCALAR_STATE_DEBOUNCE_MS,
-    backoffSchedule: SCALAR_STATE_BACKOFF_SCHEDULE,
     merge: ownerSnapshotMerge,
     fieldsNullSemantics: {},
   }

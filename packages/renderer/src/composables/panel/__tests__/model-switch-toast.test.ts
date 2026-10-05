@@ -18,9 +18,8 @@ function err(code: string, message = 'engine said no'): Error & { code: string }
 }
 
 describe('modelSwitchToastKey —— code → i18n key 单点映射', () => {
-  it('5 个新码 → 各自专用文案 key（§3.4 错误规格表）', () => {
+  it('4 个新码 → 各自专用文案 key（§3.4 错误规格表）', () => {
     expect(modelSwitchToastKey(err('SESSION_ACTIVATE_FAILED'))).toBe('panel.panel.modelSwitch.sessionActivateFailed')
-    expect(modelSwitchToastKey(err('SESSION_ACTIVATE_TIMEOUT'))).toBe('panel.panel.modelSwitch.sessionActivateTimeout')
     expect(modelSwitchToastKey(err('MODEL_NOT_FOUND'))).toBe('panel.panel.modelSwitch.modelNotFound')
     expect(modelSwitchToastKey(err('PROVIDER_CREDENTIAL_MISSING'))).toBe('panel.panel.modelSwitch.providerCredentialMissing')
     expect(modelSwitchToastKey(err('ENGINE_MODEL_MISSING'))).toBe('panel.panel.modelSwitch.engineModelMissing')

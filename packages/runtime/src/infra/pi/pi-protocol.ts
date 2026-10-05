@@ -22,6 +22,8 @@
  */
 // ThinkingLevel 值域双向防漂移锁的比对对象（import type：类型位置消费，保持本文件零运行时依赖）。
 import type { PI_THINKING_LEVELS } from '@taiji/shared'
+// disposition 词表（PiMessage.disposition 同源；本文件 re-export 供既有 import 路径使用）。
+import type { PiInputDisposition } from '@zhushanwen/pi-rpc'
 
 // ── Base types ─────────────────────────────────────────────────────
 
@@ -304,7 +306,7 @@ export interface PiToolcallEndSubEvent {
 
 /**
  * 流式错误/中止终结事件（code-harden RT-2#2）：wire 实发 `{type:'error', reason, error}`，
- * 权威源 = @earendil-works/pi-ai 0.84.4 dist/types.d.ts AssistantMessageEvent 的 error 变体
+ * 权威源 = @earendil-works/pi-ai 1.0.0 dist/types.d.ts AssistantMessageEvent 的 error 变体
  * （`reason: 'aborted'|'error'`，`error` 是终态 AssistantMessage，人类可读文本在其
  * `errorMessage` 字段）。RPC wire 的 toJsonEvent 只剥 `partial`，error 变体无 partial
  * 不受影响。wire 上没有 `content` 字段——旧本地声明 `content?: string` 使恒 undefined
@@ -332,6 +334,8 @@ export interface PiToolExecutionStartEvent extends PiBaseMessage {
   toolName: string
   /** pi 的规范字段名（pi 从不发 input）。 */
   args: Record<string, unknown>
+  /** pi 1.0.0：嵌套调用（工具经 ctx.executeTool 调其他工具）时携带的父调用 id；顶层调用缺省。带该字段（非空串）的 start/end 被 event-adapter 按 codemode D4 过滤（live≡reload 对齐，见 isNestedToolExecutionBlockEvent）；update 豁免照常翻译、payload 不携带该字段。 */
+  parentToolCallId?: string
 }
 
 export interface PiToolExecutionUpdateEvent extends PiBaseMessage {
@@ -344,6 +348,8 @@ export interface PiToolExecutionUpdateEvent extends PiBaseMessage {
    * 不强制具体类型（pi 不保证形态）。
    */
   partialResult: unknown
+  /** pi 1.0.0：嵌套调用时携带的父调用 id；顶层调用缺省。update 豁免不过滤（照常翻译，嵌套 update 不产工具块且是 subagent 活性信号载体；判据见 start 事件注释）。 */
+  parentToolCallId?: string
 }
 
 /**
@@ -363,6 +369,8 @@ export interface PiToolExecutionEndEvent extends PiBaseMessage {
   result: PiToolExecutionResult
   /** pi 必填字段（agent-session.ts 始终发送）。 */
   isError: boolean
+  /** pi 1.0.0：嵌套调用时携带的父调用 id；顶层调用缺省。带该字段（非空串）的 end 与 start 同点同判被过滤（codemode D4，见 isNestedToolExecutionBlockEvent）。 */
+  parentToolCallId?: string
 }
 
 /**
@@ -454,6 +462,39 @@ export interface PiAutoRetryEndEvent extends PiBaseMessage {
   finalError?: string
 }
 
+/**
+ * 压缩/分支摘要重试排定事件（pi1-disposition-chat-flow U3⑤，D12 登记三事件之一）。
+ * pi 1.0.0 dist/core/agent-session.js `_summarizationRetryCallbacks` 实发：
+ * onRetryScheduled → { type, attempt, maxAttempts, delayMs, errorMessage }。
+ */
+export interface PiSummarizationRetryScheduledEvent extends PiBaseMessage {
+  type: 'summarization_retry_scheduled'
+  attempt: number
+  maxAttempts: number
+  delayMs: number
+  errorMessage: string
+}
+
+/**
+ * 压缩/分支摘要重试单次尝试开始事件（D12 三事件之二）。pi 1.0.0 实发两变体
+ * （agent-session.d.ts）：`{ source: 'branchSummary' }` 与
+ * `{ source: 'compaction', reason }`——reason 仅 compaction 源携带，故可选。
+ */
+export interface PiSummarizationRetryAttemptStartEvent extends PiBaseMessage {
+  type: 'summarization_retry_attempt_start'
+  source: 'branchSummary' | 'compaction'
+  /** compaction 源专有：触发压缩的原因（branchSummary 变体不携带）。 */
+  reason?: PiCompactionReason
+}
+
+/**
+ * 压缩/分支摘要重试收尾事件（D12 三事件之三）。pi 1.0.0 onRetryFinished →
+ * `{ type }`（_summarizationRetryCallbacks 内），无载荷字段。
+ */
+export interface PiSummarizationRetryFinishedEvent extends PiBaseMessage {
+  type: 'summarization_retry_finished'
+}
+
 /** Thinking level 取值（pi thinking 配置）。 */
 export type PiThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
@@ -530,7 +571,7 @@ export interface PiExtensionUiRequestEvent extends PiBaseMessage {
    *
    * 交互式 dialog 方法（产生 extension.ui_request WS 帧，需前端回复）：confirm / select / input / editor
    * Fire-and-forget 方法（独立 WS 帧，不等回复）：notify / setStatus / setWidget / set_editor_text / setTitle
-   * notify 走 extension.notify WS 帧 + toast 渲染（非模态）；setStatus/setWidget 走各自独立帧；
+   * notify 走 extension:notify WS 帧 + toast 渲染（非模态）；setStatus/setWidget 走各自独立帧；
    * set_editor_text 走 extension:setEditorText。setTitle 宿主不实现（pi fire-and-forget，
    * 丢弃无功能损失——event-adapter 落 default 分支 warn + noop，预决策只补类型不实现宿主）。
    * 全集对照 pi rpc-mode.js createExtensionUIContext 的 output 调用点（RT-2#7 补全
@@ -566,222 +607,122 @@ export interface PiErrorEvent extends PiBaseMessage {
   message: string
 }
 
-// ── get_messages response data ─────────────────────────────────────
-
-/**
- * Shape of the `data` field in a get_messages response.
- *
- * GOTCHA: pi puts the messages array under `data.messages`,
- * NOT under `payload.messages`. The top-level response has
- * type: 'response' and the history is nested in `data`.
- */
-export interface PiGetMessagesData {
-  messages: PiHistoryMessage[]
-}
-
-/** A single message in pi's conversation history. */
-export interface PiHistoryMessage {
-  role: 'user' | 'assistant' | 'toolResult'
-  content: PiHistoryContentPart[]
-  timestamp?: number
-  stopReason?: string
-}
-
-/** Content parts within a pi history message. */
-export type PiHistoryContentPart =
-  | PiHistoryTextPart
-  | PiHistoryThinkingPart
-  | PiHistoryToolCallPart
-
-export interface PiHistoryTextPart {
-  type: 'text'
-  text: string
-}
-
-export interface PiHistoryThinkingPart {
-  type: 'thinking'
-  thinking: string
-}
-
-export interface PiHistoryToolCallPart {
-  type: 'toolCall' | 'tool_use'
-  id: string
-  name: string
-  arguments: Record<string, unknown>
-}
-
-/** toolResult messages represent tool execution outcomes in history. */
-export interface PiHistoryToolResult extends PiHistoryMessage {
-  role: 'toolResult'
-  toolCallId: string
-  toolName: string
-  isError?: boolean
-  /** pi 持久化了 details（ToolResultMessage.details），含 __gui__ 结构化渲染数据。
-   *  类型声明补齐——pi JSONL 和 get_messages 都返回此字段。 */
-  details?: Record<string, unknown>
-}
-
-// ── get_entries response data (pi session entry tree) ──────────────
-
-/**
- * pi session entry 树的节点（get_entries RPC 返回的 entries 数组元素）。
- *
- * 对应 pi 源码 `SessionEntry` 联合（session-manager.ts:140-150）。pi 的 entry 树是
- * 会话的完整持久化形态：message/custom/label/compaction/branch_summary 等都作为
- * entry 节点存储，通过 parentId 串成树。
- *
- * taiji 当前只消费 message entry（重建历史）+ custom entry "taiji.client-msg-id"
- * （clientUuid ↔ userEntryId 映射），其余 entry 类型声明齐全以备未来扩展，
- * 但 rebuildHistoryFromEntries 当前跳过不处理。
- *
- * 类型以 pi 源码为准（session-manager.ts:46-149）。pi 还定义了 thinking_level_change /
- * model_change / custom_message / session_info 等 entry 类型——这里只建模 taiji
- * 可能消费的子集，未建模的 entry 在 rebuildHistoryFromEntries 中按 unknown 跳过。
- */
-export type PiSessionEntry =
-  | PiSessionMessageEntry
-  | PiSessionCustomEntry
-  | PiSessionLabelEntry
-  | PiSessionCompactionEntry
-  | PiSessionBranchSummaryEntry
-  | PiSessionCustomMessageEntry
-
-/**
- * 所有 entry 的公共字段（对应 pi SessionEntryBase，session-manager.ts:46-51）。
- *
- * - id：pi 生成的随机 id。pi 源码用 uuidv7（session-manager.ts:1 import），不是早期文档
- *   说的 randomUUID slice(0,8)——以 pi 源码为准。session 内唯一，是 entry 树节点的主键。
- * - parentId：父节点 id，根 entry 为 null。pi 的 entry 是 append-only，parentId 构成树。
- * - timestamp：ISO string（pi 持久化格式），注意与 PiHistoryMessage.timestamp（number ms）不同。
- *
- * 注意：base.type 是 string（loose），但每个具体 entry 子接口都用字面量 type 重声明
- * （如 type: 'message'），使 PiSessionEntry 联合支持 discriminated union narrowing
- * （`entry.type === 'custom'` 后 TS 能收窄到 PiSessionCustomEntry）。
- */
-export interface PiSessionEntryBase {
-  type: string
-  id: string
-  parentId: string | null
-  timestamp: string
-}
-
-/**
- * message entry（user/assistant/toolResult 消息）。对应 pi SessionMessageEntry。
- *
- * message 字段复用 PiHistoryMessage（pi AgentMessage 在 taiji 侧的镜像类型），
- * 形状与 get_messages 返回的 messages 元素一致（role/content/timestamp/...）。
- */
-export interface PiSessionMessageEntry extends PiSessionEntryBase {
-  type: 'message'
-  message: PiHistoryMessage
-}
-
-/**
- * custom entry（extension 通过 pi.appendEntry 写入，不进 LLM 上下文）。
- * 对应 pi CustomEntry（session-manager.ts:106-114）。
- *
- * taiji 的 taiji.client-msg-id extension 写入的 custom entry data 结构：
- * `{ clientUuid: string, userEntryId: string }`，userEntryId 指向同一次提交的 user message entry。
- * 消费侧（entry-tree-builder）按 customType 过滤后断言 data 形状。
- *
- * pi 源码 data 字段是 `data?: T`（可选泛型），此处用 unknown + 必填，因为 taiji 写入的
- * custom entry 恒有 data；pi 其他 extension 写入的 custom entry 由消费侧自行断言。
- */
-export interface PiSessionCustomEntry extends PiSessionEntryBase {
-  type: 'custom'
-  customType: string
-  data: unknown
-}
-
-/**
- * label entry（pi setLabel 写入，用户书签/标记）。对应 pi LabelEntry（session-manager.ts:118-123）。
- *
- * pi 源码字段名是 targetId（指向被标记的 entry），不是 entryId——以 pi 源码为准。
- * 当前 taiji 不消费 label entry，声明齐全以备未来扩展。
- */
-export interface PiSessionLabelEntry extends PiSessionEntryBase {
-  type: 'label'
-  label: string | undefined
-  targetId: string
-}
-
-/**
- * compaction entry（compact 产生的摘要）。对应 pi CompactionEntry（session-manager.ts:74-86）。
- * type 是字面量 'compaction'（pi 源码定义），保证联合 narrowing 正确。
- * 当前 taiji 不消费此 entry（历史重建走 message entry + JSONL sidecar）。
- */
-export interface PiSessionCompactionEntry extends PiSessionEntryBase {
-  type: 'compaction'
-  summary: string
-  firstKeptEntryId: string
-  tokensBefore: number
-  /** Extension-specific data（如 ArtifactIndex、结构化 compaction 版本标记）。 */
-  details?: unknown
-  /** True if generated by an extension。 */
-  fromHook?: boolean
-}
-
-/**
- * branch_summary entry（branch 产生的摘要）。对应 pi BranchSummaryEntry（session-manager.ts:88-96）。
- * type 是字面量 'branch_summary'（pi 源码定义），保证联合 narrowing 正确。
- * 当前 taiji 不消费此 entry。
- */
-export interface PiSessionBranchSummaryEntry extends PiSessionEntryBase {
-  type: 'branch_summary'
-  fromId: string
-  summary: string
-  /** Extension-specific data（不进 LLM 上下文）。 */
-  details?: unknown
-  /** True if generated by an extension。 */
-  fromHook?: boolean
-}
-
-/**
- * custom_message entry（扩展经 pi sendMessage 注入的结构化通知，持久化进 session JSONL）。
- * 对应 pi CustomMessageEntry（session-manager.ts:866）。
- *
- * 与 custom entry（type:'custom'）的区别：custom_message 进 LLM 上下文 + 对话流渲染，
- * custom entry 是纯扩展数据（不进 LLM 上下文）。mapSessionEntries 据此分流：
- * custom_message → messages（伪消息），custom → customDataEntries。
- *
- * display:false 时 taiji 不渲染（core message-turns 分组管线：display===false 消息透明跳过、
- * 不产出渲染项，完成通知类则作 turn 边界触发器）；完成通知类 customType
- *（subagent-bg-notify/workflow-result）由 mapSessionEntries 引用 COMPLETE_NOTIFY_CUSTOM_TYPES
- * 覆写为 display:false（pi 可能持久化 display:true，taiji 统一隐藏）。
- */
-export interface PiSessionCustomMessageEntry extends PiSessionEntryBase {
-  type: 'custom_message'
-  customType: string
-  content: string
-  display?: boolean
-  details?: Record<string, unknown>
-}
-
-/**
- * get_entries RPC 请求（对应 pi rpc-types.ts:63 `{ type: "get_entries"; since?: string }`）。
- *
- * since 可选：传 entry id 时返回该 entry 之后的所有 entry（增量拉取，pi rpc-mode.ts:614-620
- * 用 findIndex + slice 实现，找不到 since id 时报错 "Entry not found"）。
- * 不传 since 时返回全部 entry（全量拉取）。
- */
-export interface GetEntriesCommand {
-  type: 'get_entries'
-  since?: string
-}
-
-/**
- * get_entries RPC 响应的 data 字段（对应 pi rpc-mode.ts:622 返回结构）。
- *
- * - entries：session 所有 entry（since 指定时为该 entry 之后的子集），含全部 entry 类型。
- * - leafId：session 当前叶子 entry id（pi sessionManager.getLeafId()，branch 后指向新叶子，
- *   空 session 为 null）。
- */
-export interface GetEntriesResponse {
-  entries: PiSessionEntry[]
-  leafId: string | null
-}
+// ── get_messages / get_entries response data（拆分承载：pi-session-data.ts）──
+//
+// 会话数据模型（get_messages 历史消息族 + get_entries session entry 树）已拆至
+// ./pi-session-data.ts（max-lines 拆分：与上方 wire 事件协议是正交关注点）。
+// 此处 re-export 保持既有 import 路径——消费方从本文件导入这些符号的写法不变，
+// 归属约束亦不变（services 只经本门面消费，不直连 infra/pi 内部文件）。
+export type {
+  GetEntriesCommand,
+  GetEntriesResponse,
+  PiGetMessagesData,
+  PiHistoryContentPart,
+  PiHistoryMessage,
+  PiHistoryImagePart,
+  PiHistoryTextPart,
+  PiHistoryThinkingPart,
+  PiHistoryToolCallPart,
+  PiHistoryToolResult,
+  PiSessionBranchSummaryEntry,
+  PiSessionCompactionEntry,
+  PiSessionContextEditEntry,
+  PiSessionCustomEntry,
+  PiSessionCustomMessageEntry,
+  PiSessionEntry,
+  PiSessionEntryBase,
+  PiSessionLabelEntry,
+  PiSessionMessageEntry,
+  PiSessionUsageEntry,
+} from './pi-session-data.js'
 
 // ── Shared types ───────────────────────────────────────────────────
+
+/**
+ * pi 1.0.0 prompt/steer/follow_up 响应 data.disposition 的值域（'handled' 被扩展接管 /
+ * 'queued' 排队 / 'started' 已开始执行）。词表 SSOT 在 @zhushanwen/pi-rpc（PiMessage.disposition
+ * 字段同源），此处 re-export 保持既有 import 路径；字段语义见 pi-rpc types.ts。
+ */
+export type { PiInputDisposition }
+
+/**
+ * services 层消费用的内部别名（check_pi_type_leak 口径：PiXxx 标识符只许 infra/pi 内部驻留，
+ * services 经此中性名消费同一词表——D5① 翻译口径的最小形态：值域与语义零变化，仅名字翻译）。
+ */
+export type InputDisposition = PiInputDisposition
+
+/**
+ * 从 RPC 响应解析 disposition（B3 兼容式）：pi < 1.0.0 或 mock 无该字段 → undefined
+ *（调用方行为与现状完全一致）；非法值（协议漂移）→ undefined + warn 可观测。
+ * 唯一调用点 = rpc-client sendCommand 出口（解析结果挂 PiMessage.disposition 透传上层）。
+ */
+export function parseInputDisposition(msg: PiMessageLike): PiInputDisposition | undefined {
+  const value = msg.data?.disposition
+  if (value === undefined) return undefined
+  if (value === 'handled' || value === 'queued' || value === 'started') return value
+  console.warn(`[pi-protocol] disposition 非法值: ${String(value)}（协议漂移？），按缺失处理`)
+  return undefined
+}
+
+/** parseInputDisposition 的最小结构入参（PiMessage 的结构子集）。 */
+export interface PiMessageLike {
+  data?: Record<string, unknown>
+}
+
+/**
+ * 从 get_commands 响应解析**扩展命令** name 集合（pi1-disposition-chat-flow D2①，P5 已核实）：
+ * 响应 `data.commands` 含三类条目——`source:"extension"`（name = pi 侧 invocationName，同名
+ * 扩展命令注册时带 `:N` 消歧后缀）/ `source:"prompt"` 模板 / `source:"skill"`（name 带
+ * `skill:` 前缀）。命令识别集只收 extension 条目：pi 侧命令接管判定 `getCommand` 只查扩展
+ * 注册命令（resolveRegisteredCommands），skill 与模板经展开走正常回合（started）不属接管——
+ * source 过滤是「识别集两侧同一判定口径」的成立前提（D2①）。
+ * 响应畸形（data.commands 非数组）→ 空集（调用方按清单缺失兜底：全量按普通消息出站）。
+ */
+export function extractExtensionCommandNames(msg: PiMessageLike): Set<string> {
+  const out = new Set<string>()
+  const commands = msg.data?.commands
+  if (!Array.isArray(commands)) return out
+  for (const item of commands) {
+    const c = item as { name?: unknown; source?: unknown }
+    if (c.source !== 'extension') continue
+    if (typeof c.name === 'string' && c.name !== '') out.add(c.name)
+  }
+  return out
+}
+
+/**
+ * 从 get_commands 响应解析 skill 与 prompt 模板条目 name 集合（skill-input-marker-pollution
+ * 恢复通道：手打形态 source=skill/prompt 清单条目统一切 started 基终局——出站不注标、
+ * pi 受理回执即终局。pi 侧对这两类输入展开为正常回合：_expandSkillCommand /
+ * expandPromptTemplate（agent-session.ts prompt/steer 路径实读），不返回 handled 接管，
+ * 终局由适配器按 disposition 受理事实驱动）。响应畸形（data.commands 非数组）→ 空集
+ * （调用方按清单缺失兜底：全量按普通消息出站）。
+ */
+export function extractSkillTemplateCommandNames(msg: PiMessageLike): Set<string> {
+  const out = new Set<string>()
+  const commands = msg.data?.commands
+  if (!Array.isArray(commands)) return out
+  for (const item of commands) {
+    const c = item as { name?: unknown; source?: unknown }
+    if (c.source !== 'skill' && c.source !== 'prompt') continue
+    if (typeof c.name === 'string' && c.name !== '') out.add(c.name)
+  }
+  return out
+}
+
+/**
+ * 命令识别（D2①）：文本以 `/` 开头且首个空格前段剥去前导 `/` 后与清单 name **逐字精确匹配**
+ * → 返回该 name；否则 undefined。两侧同口径剥斜杠：pi 侧命令名提取 = `text.slice(1, spaceIndex)`
+ * （agent-session.js _tryExecuteExtensionCommand 实读），清单 name 无 `/` 前缀。清单 name 的
+ * 非裸形态（同名扩展命令的 `:N` 消歧后缀）由逐字匹配自然覆盖：用户输入裸 name 时 pi 侧同样
+ * miss（两侧行为一致），输入带后缀 name 时两侧同样命中——不发明归一化规则。
+ */
+export function matchCommandName(text: string, names: ReadonlySet<string>): string | undefined {
+  if (!text.startsWith('/')) return undefined
+  const spaceIndex = text.indexOf(' ')
+  const candidate = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex)
+  return names.has(candidate) ? candidate : undefined
+}
 
 /**
  * pi Usage type — mirrors pi 源码字段名（input/output/cacheRead/cacheWrite/totalTokens）。
@@ -824,6 +765,100 @@ export type PiEvent =
   | PiSessionInfoChangedEvent
   | PiAgentSettledEvent
   | PiExtensionErrorEvent
+  // summarization_retry_* 三事件（U3⑤，D12 登记——压缩/分支摘要重试状态，呈现层已有
+  // compaction 主链路覆盖，event-adapter 显式 no-op 不进 default warn）
+  | PiSummarizationRetryScheduledEvent
+  | PiSummarizationRetryAttemptStartEvent
+  | PiSummarizationRetryFinishedEvent
+
+// ── 事件名字面量常量表（pi1-disposition-chat-flow U3⑦，D5⑥ 字面量单点化）──────────
+
+/**
+ * pi 事件名字面量常量表——词表词字符串字面量在仓内的唯一驻留点（D5⑥：判别 / 派发载荷
+ * 形态 = 字符串完整值 ∈ 词表，services 层引用一律经下方具名出口 `PI_EVENT`，字面量直写
+ * 即违规；日志模板串内嵌 / 无引号对象键两形态不在检查面，见设计 D5⑤④口径边界登记）。
+ *
+ * 本表同时是 `check_pi_type_leak.py` 事件名项扫描词表的派生载体（D5⑤实装口径⑤：检查器
+ * 启动时定位本导出符号、提取方括号内带引号字符串字面量建词表，定位失败或空表 fail-fast
+ * 退出非 0；每次运行摘要行输出词表基数）。同形剔除词（下方 HomoglyphExempt）不进本表。
+ *
+ * 同源维护由两层编译期断言机器强制（D5⑥，非文件位置约定）：
+ * - **子集层**：`as const satisfies readonly PiEvent['type'][]`——表内出现非联合判别值的
+ *   词（手抄错词）即 tsc 红（TS2820，带 Did-you-mean）；
+ * - **穷尽层**：`PiEventNameDriftGuard` 的 ExpectNever——联合扩成员而本表与剔除集均未
+ *   收新成员时 Exclude 产物非 never，tsc 红（TS2344，错误消息点名缺失词）。
+ * 联合新成员触发红灯时，须在「进本表（进扫描词表，检查面自动扩）」与「进剔除集（同形词，
+ * 按界定规则②同步本文件剔除集类型与检查器头注 + ADR 登记）」之间显式裁决。
+ */
+export const PI_EVENT_NAMES = [
+  'agent_start',
+  'agent_end',
+  'turn_start',
+  'turn_end',
+  'message_start',
+  'message_update',
+  'tool_execution_start',
+  'tool_execution_update',
+  'tool_execution_end',
+  'extension_ui_request',
+  'compaction_start',
+  'auto_retry_start',
+  'auto_retry_end',
+  'thinking_level_changed',
+  'queue_update',
+  'session_info_changed',
+  'extension_error',
+  'summarization_retry_scheduled',
+  'summarization_retry_attempt_start',
+  'summarization_retry_finished',
+] as const satisfies readonly PiEvent['type'][]
+
+/** 词表成员类型（常量表值域）。 */
+export type PiEventName = (typeof PI_EVENT_NAMES)[number]
+
+/**
+ * 同形剔除集（事件名词表界定规则②，D5⑤）：与 taiji 内部词表同形的 6 词不进扫描词表
+ * 防误报。构成（源码锚点逐项核实见设计 D5⑤②）：
+ * - trace-trigger 联合判别值 3 词：message_end / agent_settled / entry_appended
+ *  （services/session/types.ts PiTranslatedEvent 的 trigger 联合——pi 原始事件名作 taiji
+ *   侧触发标签，已属 taiji 自有词表成员）；
+ * - compaction_end 1 词（taiji 侧第四类触发信号 onTraceSync 传值；注意 taiji 侧判别值是
+ *   连字符 'compaction-end'，pi 原词不是任何 taiji 类型的判别值）；
+ * - 通用词 2 词：status / error（taiji 通用词汇大面积同形）。
+ * 剔除代价：这 6 词上的 L2 型泄漏（services 层直听 pi 原始事件流）检不住——残余防线分档
+ * 登记见设计 D5⑤②（trace-trigger 3 词有类型约束防线；compaction_end 无类型约束，防线
+ * 强度最低，靠评审承接）。扩联合新增同形词时的归宿裁决入口 = 上方穷尽断言编译红。
+ */
+type PiEventNameHomoglyphExempt =
+  | 'message_end'
+  | 'agent_settled'
+  | 'entry_appended'
+  | 'compaction_end'
+  | 'status'
+  | 'error'
+
+/**
+ * 穷尽层断言（D5⑥ 双向断言的第二向；ExpectNever 形态沿本文件 ThinkingLevelDriftGuard
+ * 先例——导出仅为编译期断言锚定，防 unused，运行时零存在）：联合判别值全集 − 表值域 −
+ * 同形剔除集 ≡ never。表漏收联合新成员（且剔除集也未收）时 Exclude 产物非 never，编译红。
+ */
+export type PiEventNameDriftGuard = [
+  Expect<typeof PI_EVENT_NAMES extends readonly PiEvent['type'][] ? true : false>,
+  ExpectNever<Exclude<PiEvent['type'], PiEventName | PiEventNameHomoglyphExempt>>,
+]
+
+/**
+ * 消费侧具名出口（services 层引用 pi 事件名经此导入，字面量直写即违规——U3⑦
+ * event-interpreter 5 处字面量改导入常量的载体）。值恒为词表成员（`satisfies` 写错词即
+ * 编译红）；键 = taiji 侧语义名。仅登记现存消费词，新消费点按需补行。
+ */
+export const PI_EVENT = {
+  agentStart: 'agent_start',
+  agentEnd: 'agent_end',
+  turnEnd: 'turn_end',
+  toolExecutionStart: 'tool_execution_start',
+  toolExecutionEnd: 'tool_execution_end',
+} satisfies Record<string, PiEventName>
 
 /** Any message that can arrive from pi (response or event). */
 export type PiAnyIncomingMessage =

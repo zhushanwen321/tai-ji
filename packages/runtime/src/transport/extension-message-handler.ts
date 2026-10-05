@@ -86,11 +86,6 @@ export class ExtensionMessageHandler {
   private async handleExtensionUiResponse(msg: Extract<ClientMessage, { type: 'extension.ui_response' }>, ws: WsType): Promise<void> {
     const { sessionId: extSid, requestId, method, result: extResult } = msg.payload
 
-    if (this.ctx.extensionTimeoutMgr.isBridgeRequest(requestId)) {
-      this.ctx.extensionTimeoutMgr.removeRequest(requestId)
-      return
-    }
-
     const client = this.ctx.sessionService.getRpcClient(extSid)
     if (!client) {
       this.ctx.extensionTimeoutMgr.removeRequest(requestId)

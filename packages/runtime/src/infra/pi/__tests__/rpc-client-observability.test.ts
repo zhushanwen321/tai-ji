@@ -19,7 +19,6 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { RpcClient } from '../rpc-client.js'
-const clientOpts = { startupDelayMs: 0 } as const // 测试注入：启动确认窗口归零（窗口语义不变，见 RpcClientOptions.startupDelayMs）
 
 // ── Mocks ────────────────────────────────────────────────────────
 
@@ -143,7 +142,7 @@ function emitProcExit(code: number | null = null): void {
 
 async function startClient(options: Record<string, unknown> = {}): Promise<RpcClient> {
   const { RpcClient } = await import('../rpc-client.js')
-  const client = new RpcClient({ ...clientOpts, cwd: '/project', sessionId: 'sid-obs-1', ...options })
+  const client = new RpcClient({ cwd: '/project', sessionId: 'sid-obs-1', ...options })
   await client.start()
   return client
 }

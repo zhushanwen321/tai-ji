@@ -3,10 +3,9 @@
  *
  * 验收条款逐条对照（impl-plan u5）：
  * - **A1 过滤公式真值表**：shouldReattachEntry 五条件各自独立命中 / 全不命中 / 边界值
- *   （idle 恰等 2h、viewed 恰等 30min——边界走恢复方向，reaper「恰好等于阈值不回收」的对偶）。
+ *   （idle 恰等 2h、viewed 恰等 30min——边界走恢复方向）。
  * - **A2 快照布尔反向形态**：backgroundTasks=true 陈旧快照（任务已结束、checkpoint 未刷新）
- *   → 仍恢复；「多恢复自收敛」由新 runtime reaper 按 checkpoint 时间戳正常回收（既有行为，
- *   idle-pi-reaper.checkpoint.test.ts 守卫），本文件断言恢复判定读快照布尔。
+ *   → 仍恢复；本文件断言恢复判定读快照布尔。
  * - **A3 live 孤儿未收割完不 spawn**：收割 promise 未 resolve 时编排不启动 restore（假收割
  *   promise 控制时序）；收割超上界 → 全部候选 reattach-skipped + 删 checkpoint。
  * - **A4 高水位延迟不依赖采样环**：冷启动逐拍即时查询——首拍高压推迟、缓解后恢复；
@@ -258,8 +257,6 @@ describe('A2 快照布尔反向形态（陈旧 backgroundTasks=true 多恢复，
     const report = await runStartupReattach(makeDeps(h), makeOptions(h))
     expect(report.candidates).toEqual(['stale-bg'])
     expect(h.restore).toHaveBeenCalledWith('stale-bg')
-    // 自收敛的另一半：条目按 checkpoint 时间戳留档，新 runtime reaper 后续拍按
-    // lastActivityAt 正常回收（既有行为由 idle-pi-reaper.checkpoint.test.ts 守卫不回归）。
     // 排查口径：持续多恢复且不自收敛 = 公式错误；偶发单次后自收敛 = 快照滞后（D3 原文）。
   })
 })

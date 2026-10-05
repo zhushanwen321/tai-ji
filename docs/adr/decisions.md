@@ -41,6 +41,39 @@ pi 当前持有的 session JSONL 唯一写方是 pi 进程——taiji 任何代�
 ### ADR-0083 btw 旁路提问：派生临时会话形态
 btw 旁路提问（主对话旁开 drawer 辅助对话流）的会话形态定案（2026-09-22 定案，2026-09-23 交付）：① 每条 btw 线 = 主会话当前进度的 **pi 原生 fork 全树快照**（`--fork` + `--session-dir`，含分支；不复用 session-fork.ts 单路径截断），跑在独立 pi 进程；源状态三分支（正常 / 无快照线（fork throw → 回落无 fork 新建 spawn，宿主零直写）/ 截断快照）；② 虚拟 ID 第三家族 `btw:<piSessionId>` 两段式（与 pi id 零冲突契约：真 sid 禁冒号、虚拟 id 永含冒号；派生键第二段 = owner piSessionId，INVAR-1.1 强制化 + 生产值域断言）；③ 持久化 = 目录即关联（`btw/<encodeCwd>/<mainSid>/`，注册表启动重建 hidden 复原）+ 重载链（applyEntry 全量回放；离线尾读含 btw 目录解析路径）+ 孤儿补账；仅主删级联删（deleteSession / deleteByCwd 连带）/ 显式关线，关闭/退出/闲置回收均不删；④ G4 三防线（目录隔离 / `hidden: true` / 不记工作区历史）——关联只服务生命周期与自身线列表，不进任何展示链；⑤ 派生资源边界（zcode selection side chat 先例对照）：命令族硬禁 + 派发能力保留 + 投影收窄（无 opener）+ 派生键三触发分层（失效保留 / 终结清除 / btw 驱逐同驱）+ model-only 行为契约注入；⑥ 挂起交互请求终态机（应答 / 撤回 / 失效 + 回收提醒/未读清除支），失效提示三路收敛——事件 invalidated 与快照对账差集两路写入收敛单入口 + 回放悬空对账独立路（信号源 = pi 会话文件持久层，不依赖内存簿记跨进程存活）；交互呈现现行形态 = **D8 降级启用**（V4 核实三通道抽离的 plan 通道不成立）：五类请求统一 drawer 内联确认条 + 富表单降档，三通道 per-vid 路由为未启用备手（产品意图仍为与主 agent 同形态保真，plan-store 分区化后可复评启用）。权威源：`.tmp/tech-design/btw-question.md`（设计文档，不入 git；实施记录 git 可追溯）。登记：数据面见 data-source-registry ⑧ btw 补登链；未新增约束族（机制边界由既有 C-ext-19 / C-pi-12/13 / C-data-01 等覆盖）。
 
+### ADR-0123 codemode 常驻默认开 + 设置页可关（2026-10-03 用户裁决，codemode 设计 T1 确认点）
+**决策**：codemode（pi 1.0 内置的脚本化工具调用能力）产品形态 = **常驻默认打开 + 设置页开关可关（默认显示开）**——用户零配置开箱即得。落地三支柱：① **启动迁移幂等写入**：settings.json `defaultTools` 字段缺失 → 写 `["+codemode"]`；字段存在（含坏值）→ 不碰，尊重手改——「字段缺失 = 未配置 = 默认开；字段存在 = 有人配置过 = 尊重」，与 pi `mergeDefaultTools` 缺失回落语义同构；② **开关写增量条目**：打开 = 先移除 `"-codemode"` 再按 pi 解析语义幂等补 `"+codemode"`；关闭 = 移除 `"+codemode"` 与纯名 `"codemode"` 后，数组为空时写 `["-codemode"]` 占位（防启动迁移写回、防落空数组），非空则保留其余条目原样——激活态单一事实源恒为 settings.json，禁止运行时 `setActiveTools()` 影子点亮；③ **spawn 恒带装载旗标**：pi spawn 参数恒带 `--extension builtin:codemode`（pi 1.0 起 `--no-extensions` 把内置扩展一并排除，缺旗标会「配置已开但会话未装载」）。
+
+**依据**：pi RPC 无 per-session 工具开关参数，settings.json `defaultTools` 是唯一持久控制通道；增量条目与用户手工编辑、MCP 侧 `autoEnableCodemode` 联动正交同向叠加。否决面：launch preset `--tools` 会话级全量枚举（pi 调整默认集即静默失真，多入口重复接线）；运行时激活 API（影子状态双源漂移）；纯开关无默认写入（违背默认开裁决）。
+
+**登记**：无新约束族。实装 = `packages/runtime/src/infra/pi/pi-codemode-settings.ts`（启动迁移 + 字段域 + 损坏 fail-fast 跳过告警）+ `packages/runtime/src/infra/pi/pi-settings-store.ts`（'tools' scope 与损坏检测单点）+ `packages/pi-rpc/src/spawn-args.ts`（恒带旗标）+ WS 通道（`packages/runtime/src/services/ports/codemode-settings.ts` / `packages/runtime/src/transport/codemode-message-handler.ts`）+ `packages/renderer/src/components/settings/system/SystemCodemodeSection.vue`。机制现状另登记于 [docs/CONTEXT.md](../CONTEXT.md)（codemode / defaultTools 词条）、[docs/FEATURE-PRIORITIES.md](../FEATURE-PRIORITIES.md) 与 [docs/architecture/data-source-registry.md](../architecture/data-source-registry.md) §6；设计文档 `.tmp/tech-design/codemode.md`（不入库，过程产物），本条即该裁决的现行登记处。
+
+### ADR-0124 出站结果回程契约：disposition 终局 + handled 通知 + 孤儿对账 + 命令出站形态（2026-10-04 设计裁决，pi1-disposition-chat-flow D1/D2）
+**决策**：出站条目的终局判定由 pi disposition 响应与投递标记回执双通道承接，终局事实一对一通知前端：
+1. **disposition 接线 + handled tombstone 终局**：出站 prompt（`promptWithBusyRetry`）读响应 disposition（rpc-client 出口经 `parseInputDisposition` 归一）；extension 命令被 pi 接管（disposition=handled）的条目不进 in-flight 等待，直接写入 `DeliveryTombstone`——终态固定为 delivered，语义从「送达事实」扩为「离开系统的事实」（不新造终态形态；cancelled 保持用户撤销专用——被接管混入撤销判据面会破坏 `isUserReclaimRejection` 双信号判据与「已投递不可撤」语义），继承断线重连 resync 判重防线。
+2. **终局通知**：内核经 WS 消息 `session.deliveryHandled { sessionId, clientUuid }`（一次性事件消息，非 last-value 快照）一对一通知前端；前端静默回滚三件套（移除乐观气泡 + 清空空窗计时器 + 递减在途计数），无错误提示。不采用快照消息承载（消息缺席无法区分取消/接管/丢失）与受理回执携带（受理回执必须即刻返回，等处置会让 reply 时延顶到 pi 处置时长、且把受理口径按车道割裂）。
+3. **孤儿对账**：`session.delivery` 快照到达（含断线重连回放）时，本地在途气泡的 clientUuid **曾经在场**（曾出现于任一帧投影——必要条件，防连发场景误清第二条气泡）且已离开在途（终态判据双分支：不在当前投影 / 在投影呈 delivered 终态）→ 按 handled 同形态静默清除。数据源 = delivery 快照投影而非 transcript 投影（pi 1.0 首次 flush 前会话文件不存在，transcript 口径不可判定；且仍在内核排队的条目会被误清）。**操作域限定（U2 实装收窄）**：对账清除只作用于受理回执 isCommand 登记的命令条目（useChat `handledDeliveryTargets` 在册成员）——普通消息条目终局必有 message_end 回执链管气泡，孤儿清除操作普通条目会在「快照帧先于 message_end 回执到达」窗口删掉已送达气泡（direct 车道降级豁免下构成文本丢失面）；命令条目不注标出站永无回执，是唯一悬挂源，清除恒正确。「本端无取消操作」豁免条件随操作域收窄结构性消解，无需取消豁免集合——命令条目撤销后清除恒正确（cancel 成功 → 内核删条目 → 下一帧「不在投影」分支清气泡，原文已回填草稿；cancel 竞态落败 → delivered 在场 → 命令已执行，清气泡同样正确）。曾见集合随对应气泡移除、上界 = 活跃气泡数；页面刷新后退化为「不清除」（保守方向，误清零风险），悬挂残留由重开 session 恢复。
+4. **命令识别 + 出站形态分型**：session 建立时经 `get_commands` 拉清单缓存；识别规则 = 文本 `/` 开头 + 首空格前段剥前导 `/` 后与清单 name 逐字精确匹配 + `source === 'extension'`（pi 侧接管判定只查扩展注册命令，匹配集与匹配口径两侧构造性一致）。识别为命令的条目出站**不尾附投递标记**（裸命令文本），终局凭据 = disposition 本身；未识别的 `/` 开头条目按普通消息带标记出站（实际被接管则 handled 仍驱动终局，纯单词漏识别则退化普通回合、与现状一致）；skill 与 prompt 模板输入恒走普通消息链路（注标出站 + message_end 回执——两类输入在 pi 侧展开开回合、不返回 handled，剥标记即无终局凭据）。清单拉取失败时全量按普通消息出站（兜底分支）。
+
+**效果**：命令终局时效从「永等 → 30s 超时」变为「响应即终局」；普通消息出站形态与送达回执链路零变化（pi 无输入持久化回执，标记 + message_end 命中是唯一送达凭据）。实装 = `packages/runtime/src/services/session/session-delivery-registry.ts` + `packages/session-delivery/`（内核）+ `packages/shared/src/protocol.ts`（`session.deliveryHandled` 消息）+ 前端消费（useChat / store）。登记无新约束族（ADR-0074 投递所有权内核的回程通道延伸）。设计文档 `.tmp/tech-design/pi1-disposition-chat-flow.md`（不入库，过程产物），本条即该契约的现行登记处。
+
+### ADR-0125 occupancy 事实驱动 + CP6 回落窗退役（2026-10-04 设计裁决，pi1-disposition-chat-flow D3）
+**决策**：occupancy（dispatching/generating/idle 投影）回落由事实凭据驱动，2 秒定时回落窗（CP6）退役：
+1. `deliverOne` 前置换位加 `turn === 'idle'` 条件——生成中出站保持 generating 不覆盖；handled 响应到达即主动回落 dispatching → idle（pi 权威回答取代时间窗猜测）。
+2. CP6 删除后的防悬挂承接 = `sweepInFlight` 对账扫描补 occupancy 收尾：confirm 分支（transcript 命中）与命令清单静默终局分支在清空该 session 最后一笔在途条目时，若 `turn === 'dispatching'` 则转移 idle（幂等门 = 仅 dispatching 才回落，不覆盖 generating/settling；真误判由 turn 事件自愈）。凭据 = transcript 命中 / 命令清单命中的事实（事件驱动），触发时机随既有 10s 宽限对账轮，不新增定时窗；requeue 分支（transcript 未命中重投）条目仍在途、不做收尾。
+3. **时间平抑红线登记**：CP6 的退役条件 = pi 提供权威去向事实——由 ADR-0124 的 disposition 接线达成。sweep 收尾动作的根因 = 「started 形态下回合事件异常不可达但 transcript 已有事实凭据」的残余形态兜底，退役条件 = pi 提供回合事件必达保证或输入级回执。
+
+**效果**：时间平抑类机制净减一；空闲发命令不干扰原回合生成状态。实装 = `packages/runtime/src/services/session/event-interpreter.ts`（CP6 删除 + sweep 收尾）+ `session-delivery-registry.ts`（前置条件 + handled 回落）。登记无新约束族。设计文档同 ADR-0108（不入库，过程产物），本条即该退役决策的现行登记处。
+
+### ADR-0126 pi 词汇合法持有点清单 + 泄漏机器检查（2026-10-04 设计裁决，pi1-disposition-chat-flow D5）
+**决策**：pi 词汇（pi 系 import / 事件名字面量 / 拒绝文案 / pi 方法名 / 协议类型）只允许出现在两层**合法持有点清单**内，清单外由 `.githooks/check_pi_type_leak.py` 五项机器检查拦截（类型项 + import / 事件名 / 文案 / 方法名四项）。**本条即清单 SSOT，与检查器文件头注同源维护——两处改一处必同步**：
+1. **合法持有点清单（两层）**：runtime 内 = `packages/runtime/src/infra/pi/**`（infra 门面层）+ `packages/runtime/src/services/session/session-delivery-registry.ts`（文件头封闭声明）；仓内 pi 系镜像层 = `packages/pi-rpc/**`（RPC 消息契约镜像）+ `packages/pi-subagent-cli/**`（pi spawn 事件直接适配器）。文案项更严：唯一驻留点 = `infra/pi`（消费方经 `infra/pi/pi-rejection.ts` 导入常量，清单内其他文件亦不得持有）。与类型项存量 ALLOWLIST（2026-08-22 过渡基线，独立专项治理）互不取代、不合并维护——两套白名单分管两类词汇。
+2. **事件名词表界定规则**：扫描词表 = `packages/runtime/src/infra/pi/pi-protocol.ts` 的 `PI_EVENT_NAMES` 常量数组值域（字面量唯一驻留点，兼作检查器词表派生载体——检查器启动解析提取，定位失败或空表 fail-fast 退出非 0，摘要行输出词表基数）。等价关系「常量表值域 ≡ PiEvent 联合判别值全集 − 同形剔除集」由同文件两层编译期断言机器强制（`as const satisfies` 子集层 + `PiEventNameDriftGuard` 的 ExpectNever 穷尽层）——联合扩成员而常量表与剔除集均未收即 tsc 红，剔除集扩容路径由该红灯获得机器触发入口；检查器 python 侧零第二套词表（扩联合后下次运行自动取到新词表，检查器代码零改动）。services 层引用 pi 事件名一律经 `PI_EVENT` 具名常量导入，字面量直写即违规。
+3. **同形剔除集（6 词，不进扫描词表防误报，与 pi-protocol.ts `PiEventNameHomoglyphExempt` 同源）**：trace-trigger 联合判别值 3 词（message_end / agent_settled / entry_appended——pi 原始事件名作 taiji 侧触发标签，已属 taiji 自有词表成员）+ compaction_end（taiji 判别值是连字符 'compaction-end'，pi 原词经 onTraceSync 宽 string 传值——该词无类型约束防线，防线下限 = 唯一用途点单点存在 + 评审承接）+ 通用词 2 词（status / error——taiji 通用词汇大面积同形）。
+4. **「检不出」盲区声明（口径边界，登记备查）**：(a) taiji 复合消息类型尾段（如 'message.message_start'）——字符串完整值 ≠ 词表词，属整串相等口径的选型理由而非盲区；(b) 无引号对象键形态（`{ agent_start: ... }`）——标识符键非字符串字面量，检不出（该形态的现存实例已随 plugin-bridge 退役删除；未来再现时扩「对象键」匹配形态为纯增量动作，检查器头注即重审触发器）；(c) 日志模板串内嵌——完整值 ≠ 词表词不命中，日志文本非协议穿透通道，保留原文。剔除代价如实登记：剔除集 6 词上的 L2 型泄漏（services 层直听 pi 原始事件流）检不住。
+
+**效果**：pi 升级的代码审查范围 = 合法持有点清单（类型项另含存量 ALLOWLIST 过渡基线）；检查上线以泄漏修法族落地为前置，首检红灯仅限设计登记的预期存量（整串口径）。同源对端 = `.githooks/check_pi_type_leak.py` 文件头注（白名单 / 词表派生规则 / 剔除集 / 盲区声明的检查器侧副本）与 `pi-protocol.ts` 剔除集断言红灯指引。登记无新约束族（既有 C-comm-02 延伸）。设计文档同 ADR-0108（不入库，过程产物），本条即该清单的现行登记处。
+
 ## 通信与协议
 
 ### ADR-0055 MessageBus：per-session 消息分发 SSOT
@@ -56,8 +89,8 @@ runtime→renderer 的 per-session 消息分发（`packages/runtime/src/services
 ### ADR-0016 ServerMessageType 类型约束（部分有效）
 事件/RPC 消息类型受 ServerMessageType 联合约束，emit 拼错编译期报错（原 event-bus 文件已随包重构消失，现形态 = protocol.ts 类型定义 + route-inbound 分发，约束精神不变）。
 
-### ADR-0010 / ADR-0012 Extension UI 独立通道 + plugin bridge（0012 部分有效）
-pi extension 的 confirm/select/input 交互走独立 `extension.ui_request`/`extension.ui_timeout` 事件，与 Tool Approval 的 tool_call_pending 语义隔离、错误隔离。plugin-bridge（`extensions/taiji/plugin-bridge`）是插件工具进 pi 的唯一适配层，转发机制现为 select marker 通道（与 session-manager/ask-user 同构）。登记 C-comm-12。
+### ADR-0010 / ADR-0012 Extension UI 独立通道（0012 的 plugin bridge 部分已退役）
+pi extension 的 confirm/select/input 交互走独立 `extension.ui_request`/`extension.ui_timeout` 事件，与 Tool Approval 的 tool_call_pending 语义隔离、错误隔离；该通路的现行形态 = event-adapter 直接消费 pi 事件按结构化字段路由（ADR-0111）。plugin-bridge 已整体退役（插件工具进 pi 通路暂缺，现行登记见 `docs/todo/plugin-tool-access-gap.md`）。登记 C-comm-12。
 
 ### ADR-0024 FileChanges runtime 解析通道
 event-adapter 在 tool_execution_end 按 write/edit 分派提取 FileChange（参数名 path 为契约权威），bash 不解析、由回合边界 git 对账补齐 delete/bash 变更；runtime 只推 accumulating/ready 两态，审查态归前端。登记 C-comm-04。
@@ -164,6 +197,14 @@ managed session 完成通知从「每次 settle 无条件回流（CompletionBack
 **关键不采用**：① per-session「已通知」布尔 flag——推导性质不应物化为状态，多债权合并时语义破碎；② extension 侧轮询子会话状态——有事件源禁周期 pull（ADR-0064 轮询精简准则），且「谁的完成算数」仍绕不开债权模型；③ 扩 notify-ledger 外部通道合批——P0 设施改动连带 workflow-result 通知形态回归，合批改 extension 侧 50ms 微窗；④ 死亡新闻槽「槽释放后新 claim 自带」的时间基判定——extension 无从知晓死亡事件响应笔数，arm→watch 微窗竞态下迟到 watch 会二次发声，(sessionId, deathSeq) 槽键序无关消解。已接受代价全集（本节即登记处，四要素：量级/恢复路径/重审条件/判定）：C-1 create 失败路径死亡通知缺失（罕见 throw 窗，poll/重试恢复，月级 1 次即重审）；C-2 >50ms 跨窗拆条 + 单笔 +50ms 延迟（幂等不破，A6 口径「至多一条、总数守恒」，用户可感知多条即重审）；C-3 象限2 混装整体退化（同 bundle 不可达，once 日志观测，锚失守即重审）；C-4 arm→watch 微窗通知缺位（毫秒级×父死并发，登记如实，实测可感知即重审）；C-5 arm↔register 非原子窗口（毫秒级自愈）；C-6 放弃旧文本通道 outbox 排队补投（持久化二期根治，丢失高发即提前排期）；C-7 runtime 重启账本全失（shutdown warn 裁决做 + poll 可发现，二期根治）；C-8 宿主 JSONL 写入面线性增长（每 send 2 行 pending+每通知 ≥3 行，goal 每 turn 全量扫描，实施期测基线定阈值，compaction P-B4 实测丢 entry 即重审）；C-9 respond 失败窗口 register 残留（下次 session_start 收尾路径清理，长命 session 残留堆积即扩口对账心跳）。
 
 过程设计文档为不入库产物（已随交付弃置）——**本 ADR 即决策现行登记处**，实施记录 git 可追溯（commit d06d9464a 起）。
+
+### ADR-0127 extension_ui_request 通路结构化契约（2026-10-04 设计裁决，pi1-disposition-chat-flow D6）
+**决策**：extension UI 交互通路按结构化字段路由，bridge 中介零驻留（plugin-bridge 已整体退役，RPC 事件 payload 是 event-adapter 对 pi 事件的直接消费，无转发注入）：
+1. event-adapter 从 pi RPC 事件 payload 派生结构化字段：`method`（pi 1.0 RPC 实发全集 9 个：select / confirm / input / editor / notify / setStatus / setWidget / setTitle / set_editor_text）、`kind`。`extensionName` 不派生（U4 实装裁决：pi 1.0 extension_ui_request 九变体 payload 均无扩展名字段——dist rpc-mode.js + rpc-types.d.ts 实读核实，强加即恒 undefined 死字段；扩展归属信息仅 extension_error 事件自带 extensionPath，该事件翻译处保留该字段）。
+2. **kind 词表三值（dialog / notify / widget），值值有消费点**：dialog 族 = `extension.dialog`（载荷 dialogKind ∈ select/confirm/input/editor，需回包族）；notify 族 = `extension:notify`；widget 族 = `extension:widget`。setStatus / set_editor_text 与 select 的 marker 家族（session-manager 通道 / inflight 上报）属 runtime/前端内部状态上报——**不进 kind 词表、保持特化出口**（进词表判据 = 该值物化于某族 WS 消息载荷并驱动路由，防词表死分支；亦避免与 event-adapter 内部路由字段 PiTranslatedEvent.kind 撞名）。setTitle 无出口：warn 留痕 + noop（pi 升级语义变化可诊断）。
+3. transport handler 与前端按消息类型路由（取代 marker 字符串分支识别）；marker 约定 → 结构化 kind 的翻译职责收敛在 event-adapter（合法持有点内，见 ADR-0110），title 降级为纯展示。
+
+**效果**：新通道接入 = 声明一处；kind 词表与 9 method 映射表即终态实有值（无死分支），可作实施对账底表；taiji 协议零 pi 专有方法名穿透（由 ADR-0110 方法名项检查拦截）。实装 = `packages/runtime/src/infra/pi/event-adapter.ts`（派生与分发）+ transport handler 消息类型路由 + `packages/core/src/transport/api/domains/extension.ts`（前端消费）。登记无新约束族。设计文档同 ADR-0108（不入库，过程产物），本条即该契约的现行登记处。
 
 ## 状态管理范式（renderer/core）
 
@@ -543,3 +584,36 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **依据**：用户裁决动机 = HTML 交付物在对话流内直接可见可交互，不经点击跳转（交互式图表/自包含组件的核心价值前置呈现）；ADR-0118 方案 A 本就预期「iframe 在 DOM 流内随滚动天然正确」，本裁决是该预期的终态化；已接受代价 = 对话流 turn 虚拟化使旧 turn 容器随滚动卸载/重挂载（脚本重执行，既有虚拟化行为的固有代价，实测无可感知卡顿阈值内）。
 
 **登记**：设计文档 v16（`.tmp/tech-design/chat-html-support.md` §6.3/§6.4）；实施 = u7-inline-refactor 单元（M1.5 批次）；验收 = v16 重跑四项（渲染/观感/安全负面/降级矩阵）+ 打包态，全部通过（2026-10-04）。S4 相对链接场景随之重定义为「链接 → 抽屉源码态（基线行为恢复）」；链接打开产物目录文件被基线 forceDiff 通道拒绝的存量缺口另登记 `docs/todo/message-link-artifact-file-force-diff-reject.md`。
+
+### ADR-0122 事实驱动原则体系：状态、传播、失败、呈现的统一纪律（2026-10-05 用户裁决）
+**决策**：本地 GUI 应用的工程原则体系，总原则 = **事实驱动，不做补偿性猜测**——系统的每一个状态判定都锚定确定性事实（回执到达、断连信号、同步查询返回、磁盘记录）；用时间猜事实、用补偿掩盖丢失、用乐观呈现代替确认的机制一律不建，存量一律清拆。分则按四个层面：
+
+**地基——故障模型（进程生死二态）**：本机全链（回环网络、本地管道、本地文件）内进程间消息不会无缘无故丢失，「没收到」的唯一现实解释是对端进程死亡，而死亡有操作系统级断连信号。不存在需要独立防御的「对端活着但消息丢了」形态；应用层广播的时序竞态用事实查询消解（见判定层），不建防御机制。
+
+**传播架构（活状态与存储的分工）**：
+- 活状态走订阅推送，存储只做恢复源：进程活着时才有意义的实时状态（运行事件、进度、流式输出）一律订阅-推送传播；文件与记录只承担持久化事实源与崩溃/断点恢复两个职责。禁止用监视存储模拟实时（tail 日志、watch 数据目录、轮询表）。判据：数据在进程死后仍有意义（恢复/对账/审计）→ 落盘由恢复场景读；仅活着时有意义 → 推送不落盘或落盘只为审计。
+- 推管即时，拉管正确：推送丢失可容忍，消费方重连后按消费水位从事实源补读（拉取通道）；事实源读取不可绕过。推是延迟优化，拉是正确性底线（与 ADR-0097「拉为主、推补充」合并解释：拉保证正确性与收敛，推只优化延迟）。
+- 单一事实源，消费方只持水位：一个状态只有一个产生方、一份权威存储；消费方本地只留订阅水位，重连凭水位补读。禁止多消费方各自拉同一存储再互相对账。
+
+**判定与决策（事实的三级来源）**：
+- 状态判定锚定确定性事实，来源严格递减：同步事实查询 > 确定性事件 > （禁止）时间推测。能查到的状态直接查（会话空闲、进程存活、消费水位），事件只作提前触发的加速器；禁止「先信事件、不信了才查事实」的两段式。
+- 竞态用顺序契约与事实查询消解：多步写（数据文件与登记）的竞态用创建顺序契约（登记先行）加持有者存活查询消解，不用宽限窗猜「是否还在写」。
+- 知识与决策同地：重试、恢复这类决策需要「后果是什么」的语义知识；谁拥有语义知识谁决策。内核与基础设施只做无语义的忠实执行与如实上报，不建自动重试/自动恢复/静默重投。
+
+**失败与呈现（显式纪律）**：
+- 失败显式上报：失败不自动补偿——失败即显式通知（人看页面通知、agent 收失败回执），首败即停；时间窗扫描、宽限窗、静默终局、自动重试、对账补偿全部不建。
+- UI 呈现跟随事实：确认成功才呈现（受理回执到达气泡才上屏），不建「先显示、错了再回收」的乐观态；结果未知显式标注（如「执行结果未确认，重发前请核对」），不静默假装无事发生。
+
+**范围纪律**：
+- 机制服务可达场景：产品全链路无入口的形态不为它建行为路径（含注释穷举与用例）。判定依据 = 触发源存在性。
+- 信任边界内不设防：本机全链无网络类故障面，墙钟兜底不建；「调用永不返回」（实现卡死）的处置 = 显式失败 + 用户重启应用，不自动恢复。
+
+**删除判据**：删掉某机制后数据仍最终一致 → 它是补偿补丁，删；不一致 → 事件顺序契约本身未定义，先定义契约（谁的事实、谁推送、丢了如何补拉）再删。
+
+**元原则**：原则面前无存量豁免——与本体系冲突的既往裁决一并推翻（已删：zcode 无进展检测双 timer、notify 看门狗重投、update 停滞检测、event-tail watch 族、structured-output 强制退出等，清单见 defense-mechanism-cleanup 登记）。
+
+**保留白名单（原则不适用域）**：产品功能定时（调度/提醒/产品轮询能力）、调用方显式配置传入的超时参数、恢复场景的文件读取、锁语义原语、事件驱动的对账与拉取通道（ADR-0097 实现本体）、构建脚本类。
+
+**依据**：本体系收敛自 pi 1.0 适配设计包交付后的系列裁决（2026-10-05）：命令终局事件化（handled/started/断连三事件）、投递 backoff 退役、全项目防御机制清查（约 270 处登记）、event-tail 退役与推送通道方向、受理层同步上屏、scheduler 切换对账翻转为事实查询。故障模型依据 = 本地进程通信无网络类瞬态失败面，对端死亡有 OS 级信号。
+
+**登记**：清查清单与删改记录 = `docs/todo/defense-mechanism-cleanup.md` 与 `.tmp/dev-flow/defense-scan/`（四分区清单 + 改动清单）；投递域重构与推送通道设计 = `.tmp/tech-design/` 产出（过程产物，决策以本条与 cleanup 登记为准）；AGENTS.md「防御机制第一原则」规则条目为本条的规则面投影。原「时间平抑类逻辑红线」为本体系判定层的既有条目，继续有效。

@@ -1,17 +1,20 @@
 /**
  * provider-live-sync —— 运行中 pi 进程的**模型快照实时同步**扩展。
  *
- * 问题（根因①）：pi 0.84.4 的可用模型集合冻结在 **spawn 时刻**——`set_model` 从
- * `session.modelRuntime.getAvailableSnapshot()` 解析（`dist/modes/rpc/rpc-mode.js:367-375`），
- * 该快照建于 `ModelRuntime.create()` 的 refresh（`dist/core/model-runtime.js:63-100`），
+ * 问题（根因①）：pi 1.0.0 的可用模型集合冻结在 **spawn 时刻**——`set_model` 从
+ * `session.modelRuntime.getAvailableSnapshot()` 解析（`dist/modes/rpc/rpc-mode.js`
+ * case "set_model"），
+ * 该快照建于 `ModelRuntime.create()` 的 refresh（`dist/core/model-runtime.js`
+ * create 内 ModelConfig.load + rebuildProviders），
  * 而 pi 自身**没有文件 watcher、没有 refresh RPC**。于是「会话开着 → 在设置页新增 provider/
  * 模型/凭据 → 直接切到新模型」会报 `Model not found`（缺凭据与缺模型同文案），只能重开会话。
  *
  * 解法：本扩展按固定周期读 `<agentDir>/models.json` 与 `<agentDir>/auth.json`，**内容变化**时
  * 调 pi 自己的 `ctx.modelRegistry.refresh({ allowNetwork: false })`——`ModelRuntime.refresh()`
  * 首行即 `ModelConfig.load(modelsPath)` **重读磁盘配置**，随后 `rebuildProviders()` 按新配置重组
- * （`dist/core/model-runtime.js:501-513`），因此新增/删除 provider、模型与凭据都会立即生效；
- * `allowNetwork:false` 走本地恢复相位并在任何凭据解析/入网前返回（pi-ai `dist/models.js:153-158`）
+ * （`dist/core/model-runtime.js` refresh），因此新增/删除 provider、模型与凭据都会立即生效；
+ * `allowNetwork:false` 走本地恢复相位并在任何凭据解析/入网前返回（pi-ai `dist/models.js`
+ * runProviderRefreshPhase）
  * ——**零网络请求**。
  *
  * 设计取舍（详见 docs 侧设计文档 §3.3 D3/D11/D12）：

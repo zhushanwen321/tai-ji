@@ -24,6 +24,7 @@ import {
 } from '../events-projection.js'
 import { projectV2Workflow } from '../workflow-record-projection.js'
 import { scanRecordFamilyEntriesFromSessionFile } from '../session-file-extraction.js'
+import type { SubagentJournalEvent } from '@zhushanwen/extension-protocol'
 import {
   foldRunEventCheckpoint,
   INITIAL_RUN_EVENT_FOLD,
@@ -1022,14 +1023,22 @@ describe('scanRecordFamilyEntriesFromSessionFile（冷启动流式 entry 源）'
   })
 })
 
-// ── 有状态投影（tailer 接线集成）─────────────────────────────
+// ── 有状态投影（推送喂入 + 冷读集成）─────────────────────────
 
-describe('SessionEventProjection（冷启动 + 增量 + dispose）', () => {
+/** journal 推送报告构造（event-push-channel 契约形态；emittedAt 诊断面固定值）。 */
+function journalReport(
+  domain: 'run' | 'record',
+  fileKey: string,
+  events: ReadonlyArray<RecordCreatedEvent | RecordEvent | RecordSettledEvent | Record<string, unknown>>,
+): { domain: 'run' | 'record'; fileKey: string; events: SubagentJournalEvent[]; sessionId: string; emittedAt: number } {
+  return { domain, fileKey, events: events as SubagentJournalEvent[], sessionId: 's1', emittedAt: 42 }
+}
+
+describe('SessionEventProjection（冷启动 + 推送增量 + dispose）', () => {
   let dir: string
   let recordsDir: string
   let runDir: string
   beforeEach(() => {
-    vi.useFakeTimers()
     dir = mkdtempSync(join(tmpdir(), 'jp-proj-'))
     recordsDir = join(dir, 'records')
     runDir = join(dir, 'workflow-state')
@@ -1037,49 +1046,9 @@ describe('SessionEventProjection（冷启动 + 增量 + dispose）', () => {
     mkdirSync(runDir, { recursive: true })
   })
   afterEach(() => {
-    vi.useRealTimers()
     rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
-  it('[降级闩死修复 2026-10-02] attachEventSources 补建缺席 tailer 并冷读全量 → fold/投影/onChange 恢复；幂等', () => {
-    writeFileSync(
-      join(runDir, 'wf-1.record.jsonl'),
-      [
-        JSON.stringify({ type: 'run-created', runId: 'wf-1', workflowName: 'f', argsSummary: '', ts: 1000 }),
-        JSON.stringify({ type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100 }),
-      ].join('\n') + '\n',
-    )
-    let changes = 0
-    // meta 不可得形态：两目录均缺席 → entry-only 降级投影（无 tailer）
-    const projection = new SessionEventProjection({
-      sessionId: 's1',
-      recordsDir: undefined,
-      runJournalDir: undefined,
-      onProjectionChange: () => {
-        changes += 1
-      },
-      recheckIntervalMs: 50,
-    })
-    try {
-      expect(projection.needsEventSources()).toBe(true)
-      projection.applyEntryBatch([workflowRegisteredEntry('wf-1')])
-      projection.attach() // 无 tailer：冷启动 no-op
-      expect(projection.workflows.get('wf-1')?.agentCalls).toHaveLength(0) // 降级形态：fold 缺席 agentCalls 空
-
-      // meta 可得后升级：补建两域 tailer 并冷读（rescan 从文件头全量）
-      projection.attachEventSources({ recordsDir, runJournalDir: runDir })
-      expect(projection.needsEventSources()).toBe(false)
-      expect(projection.workflows.get('wf-1')?.agentCalls).toHaveLength(1)
-      expect(projection.workflows.get('wf-1')?.status).toBe('running')
-      expect(changes).toBeGreaterThan(0) // fold 结果经 fireChange 走既有发布腿
-
-      // 幂等：同源再调不重建不重复回调
-      projection.attachEventSources({ recordsDir, runJournalDir: runDir })
-      expect(projection.workflows.get('wf-1')?.agentCalls).toHaveLength(1)
-    } finally {
-      projection.dispose()
-    }
-  })
 
   it('冷启动：attach 全量读两域事件流 → 合并快照（entry 批先行喂 v2 条目）', () => {
     writeFileSync(join(recordsDir, 'sa-1.events'), recordJournalLines('sa-1', [createdEvent('sa-1')]).join('\n') + '\n')
@@ -1095,7 +1064,6 @@ describe('SessionEventProjection（冷启动 + 增量 + dispose）', () => {
       recordsDir,
       runJournalDir: runDir,
       onProjectionChange: () => {},
-      recheckIntervalMs: 50,
     })
     try {
       projection.applyEntryBatch([subagentRegisteredEntry('sa-1'), workflowRegisteredEntry('wf-1')])
@@ -1108,12 +1076,12 @@ describe('SessionEventProjection（冷启动 + 增量 + dispose）', () => {
     }
   })
 
-  it('run journal 增量：周期复查拾取追加帧 → [W2 D7] 单源 fold 推进 → run 投影到终局', async () => {
+  it('run journal 推送增量：applyJournalReport 喂入追加帧 → [W2 D7] 单源 fold 推进 → run 投影到终局', async () => {
     writeFileSync(
       join(runDir, 'wf-1.record.jsonl'),
       [
-        JSON.stringify({ type: 'run-created', runId: 'wf-1', workflowName: 'f', argsSummary: '', ts: 1000 }),
-        JSON.stringify({ type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100 }),
+        JSON.stringify({ type: 'run-created', runId: 'wf-1', workflowName: 'f', argsSummary: '', ts: 1000, seq: 1 }),
+        JSON.stringify({ type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100, seq: 2 }),
       ].join('\n') + '\n',
     )
     const projection = new SessionEventProjection({
@@ -1121,22 +1089,21 @@ describe('SessionEventProjection（冷启动 + 增量 + dispose）', () => {
       recordsDir,
       runJournalDir: runDir,
       onProjectionChange: () => {},
-      recheckIntervalMs: 50,
     })
     try {
       projection.applyEntryBatch([workflowRegisteredEntry('wf-1')])
       projection.attach()
       expect(projection.workflows.get('wf-1')).toMatchObject({ runId: 'wf-1', status: 'running' })
 
-      // 事件文件追加步骤终局 + run 终局（offset 续读增量批次，经 core fold 接续）
+      // 写侧落盘追加 + 推送报告喂入（event-push-channel 实时路径：报告只带事件本体，
+      // seq 水位连续 → 直接 fold，经 core fold 接续）
+      const settledFrame = { type: 'agent-settled', taskIndex: 0, attempt: 1, outcome: 'done', durationMs: 700, ts: 1900, seq: 3 }
+      const runSettledFrame = { type: 'run-settled', outcome: 'done', artifactsDir: '/tmp/a', ts: 2000, seq: 4 }
       appendFileSync(
         join(runDir, 'wf-1.record.jsonl'),
-        [
-          JSON.stringify({ type: 'agent-settled', taskIndex: 0, attempt: 1, outcome: 'done', durationMs: 700, ts: 1900 }),
-          JSON.stringify({ type: 'run-settled', outcome: 'done', artifactsDir: '/tmp/a', ts: 2000 }),
-        ].join('\n') + '\n',
+        [JSON.stringify(settledFrame), JSON.stringify(runSettledFrame)].join('\n') + '\n',
       )
-      await vi.advanceTimersByTimeAsync(120)
+      expect(projection.applyJournalReport(journalReport('run', 'wf-1', [settledFrame, runSettledFrame]))).toBe(true)
       const record = projection.workflows.get('wf-1')!
       expect(record.status).toBe('done')
       expect(record.outcome).toBe('done')
@@ -1146,7 +1113,7 @@ describe('SessionEventProjection（冷启动 + 增量 + dispose）', () => {
     }
   })
 
-  it('增量：周期复查拾取追加事件 → fold 推进 → onChange 驱动（投影变更即信号源）', async () => {
+  it('推送增量：applyJournalReport 喂入追加事件 → fold 推进 → onChange 驱动（投影变更即信号源）', async () => {
     writeFileSync(join(recordsDir, 'sa-1.events'), recordJournalLines('sa-1', [createdEvent('sa-1')]).join('\n') + '\n')
     const onChange = vi.fn()
     const projection = new SessionEventProjection({
@@ -1154,7 +1121,6 @@ describe('SessionEventProjection（冷启动 + 增量 + dispose）', () => {
       recordsDir,
       runJournalDir: runDir,
       onProjectionChange: onChange,
-      recheckIntervalMs: 50,
     })
     try {
       projection.applyEntryBatch([subagentRegisteredEntry('sa-1')])
@@ -1162,9 +1128,9 @@ describe('SessionEventProjection（冷启动 + 增量 + dispose）', () => {
       expect(projection.subagents.get('sa-1')?.status).toBe('running')
       onChange.mockClear()
 
-      // 事件文件追加终态事件（offset 续读增量）
+      // 写侧落盘追加终态事件 + 推送报告喂入
       appendFileSync(join(recordsDir, 'sa-1.events'), `${recordEventLine(settledRecordEvent())}\n`)
-      await vi.advanceTimersByTimeAsync(120)
+      expect(projection.applyJournalReport(journalReport('record', 'sa-1', [settledRecordEvent()]))).toBe(true)
       expect(projection.subagents.get('sa-1')?.status).toBe('idle')
       expect(projection.subagents.get('sa-1')?.stopReason).toBe('completed')
       expect(onChange).toHaveBeenCalled()
@@ -1183,14 +1149,13 @@ describe('SessionEventProjection（冷启动 + 增量 + dispose）', () => {
       recordsDir,
       runJournalDir: runDir,
       onProjectionChange: () => {},
-      recheckIntervalMs: 50,
     })
     try {
       projection.attach()
       expect(projection.subagents.get('sa-1')).toBeDefined() // 坏行跳过不炸投影
-      // 重放同 seq 事件（截断重读形态）：状态不回退
+      // 重放同 seq 事件（重复投递形态）：状态不回退
       appendFileSync(join(recordsDir, 'sa-1.events'), `${recordEventLine(createdEvent('sa-1'))}\n`)
-      await vi.advanceTimersByTimeAsync(120)
+      expect(projection.applyJournalReport(journalReport('record', 'sa-1', [createdEvent('sa-1')]))).toBe(true)
       const record = projection.subagents.get('sa-1')!
       expect(record.status).toBe('running')
       expect(record.subagentId).toBe('sa-1')
@@ -1199,19 +1164,18 @@ describe('SessionEventProjection（冷启动 + 增量 + dispose）', () => {
     }
   })
 
-  it('dispose 后停增量（周期复查不复活投影）', async () => {
+  it('dispose 后停增量（推送喂入不复活投影）', async () => {
     writeFileSync(join(recordsDir, 'sa-1.events'), recordJournalLines('sa-1', [createdEvent('sa-1')]).join('\n') + '\n')
     const projection = new SessionEventProjection({
       sessionId: 's1',
       recordsDir,
       runJournalDir: runDir,
       onProjectionChange: () => {},
-      recheckIntervalMs: 50,
     })
     projection.attach()
     projection.dispose()
     appendFileSync(join(recordsDir, 'sa-1.events'), `${recordEventLine(settledRecordEvent())}\n`)
-    await vi.advanceTimersByTimeAsync(200)
+    expect(projection.applyJournalReport(journalReport('record', 'sa-1', [settledRecordEvent()]))).toBe(false)
     expect(projection.subagents.get('sa-1')?.status).toBe('running')
   })
 })

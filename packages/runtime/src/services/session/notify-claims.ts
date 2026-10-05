@@ -4,7 +4,7 @@
  * 职责边界：
  * - **零 I/O 纯状态机**：不发日志、不执行 respond、不碰文件系统；一切方法返回「素材/信号」，
  *   由 u-bridge（组合根桥接层）负责实际 respond、warn 落盘与协议词形组装。
- *   唯一副作用 = TTL 清扫 setInterval（dispose 停止）。
+ *   无内部定时器（TTL 清扫 setInterval 已随 ADR-0122 防御机制清查退役）。
  * - **架构约束（并行度复审 F3 裁定，L0 grep 锚）**：本模块禁 import 扩展协议包——内部态
  *   与 outcome 快照 runtime 自持（词汇 = session_end outcome 等 runtime 既有词形）；
  *   state→协议 reason/payload 的词形映射归 u-bridge（协议 SSOT 由桥接与扩展双侧 import 承载）。
@@ -17,9 +17,9 @@
  *   ——arm——▶ armed ──markInjected（受理回执）──▶ injected ──settle(kind=claim)──▶ fulfilled{outcomeSnapshot}
  *   armed ──disarmDeliveryFailed（投递失败腿）──▶ 删除（静默：无 respond、无 undelivered 计数）
  *   未终结 claim ──abortClaims（handleAbort 入口同步抹除）──▶ aborted ──onRespond(true)──▶ 删除
- *   未终结 ──orphanByParent（父死亡批量）/ onRespond(false)（respond 失败）/ sweep(TTL) ──▶ orphaned（吸收态）
+ *   未终结 ──orphanByParent（父死亡批量）/ onRespond(false)（respond 失败）──▶ orphaned（吸收态）
  *   armed·injected·fulfilled ──onSessionDeath（delete/forceQuit 汇聚点，先于杀进程）──▶ 删除
- *   orphaned ──sweep（达 TTL）──▶ 删除；session 删除 ──clearSession──▶ 删除（连带该 session 计数器）
+ *   orphaned 记录滞留至 clearSession（session 删除 / shutdown）；TTL 达限自动回收已退役。
  * ```
  *
  * 关键语义裁决（实施期落点，均从设计条文推导）：
@@ -43,7 +43,6 @@
  */
 
 /** TTL 下界 = 10min（设计审查条款：≥10min——保证杀父重启窗口内 orphaned 记录仍在、收口腿拿得到精确应答）。 */
-const MIN_TTL_MS = 600_000
 
 // ─── 词表（runtime 自持，非协议词形）────────────────────────────────────────
 
@@ -167,10 +166,6 @@ export type RespondDisposition = 'deleted' | 'orphaned' | 'absent' | 'noop'
 // ─── 工厂 ──────────────────────────────────────────────────────────────────
 
 export interface ClaimLedgerDeps {
-  /** TTL 阈值（ms）。下界钳制 MIN_TTL_MS（设计审查条款：≥10min，保杀父重启窗口内收口腿拿得到精确应答）。 */
-  ttlMs?: number
-  /** 清扫间隔（ms）。缺省 = 钳制后的 ttlMs。 */
-  sweepIntervalMs?: number
   /** 时钟注入（纯度：测试手动推进；缺省 Date.now）。 */
   now?: () => number
 }
@@ -205,8 +200,6 @@ export interface ClaimLedger {
    * （已 orphaned 则空转——吸收态不双计）；记录已不在册（死亡批量已删）→ absent 空转。
    */
   onRespond(parentSid: string, notifyId: string, ok: boolean): RespondDisposition
-  /** TTL 清扫（扫描三类见文件头；sweepIntervalMs 定时自动调用，亦可手动调用）。 */
-  sweep(nowMs?: number): SweepResult
   /** session 删除清理（清该 session 作为子会话的全部记录 + seq/undelivered 计数器）。 */
   clearSession(sessionId: string): number
   /** 查记录（catch-up 布尔式入口：getClaim(...)?.state === 'fulfilled'）。 */
@@ -234,8 +227,6 @@ interface ClaimRecord {
 const keyOf = (parentSid: string, notifyId: string): string => `${parentSid}\u0000${notifyId}`
 
 export function createClaimLedger(deps: ClaimLedgerDeps = {}): ClaimLedger {
-  const ttlMs = Math.max(MIN_TTL_MS, deps.ttlMs ?? MIN_TTL_MS)
-  const sweepIntervalMs = deps.sweepIntervalMs ?? ttlMs
   const now = deps.now ?? (() => Date.now())
 
   const records = new Map<string, ClaimRecord>()
@@ -479,49 +470,6 @@ export function createClaimLedger(deps: ClaimLedgerDeps = {}): ClaimLedger {
     return 'orphaned'
   }
 
-  // ─── TTL 清扫（D7，三类扫描）───────────────────────────────────────────
-
-  function sweep(atMs?: number): SweepResult {
-    const at = atMs ?? now()
-    const orphaned: ClaimView[] = []
-    const respondOrphaned: RespondTarget[] = []
-    let purged = 0
-    for (const r of [...records.values()]) {
-      const age = at - r.stateSince
-      if (r.state === 'orphaned') {
-        // 类③：orphaned 达 TTL 回收（≥ 下界窗口保证重启收口腿拿得到精确应答）
-        if (age >= ttlMs) {
-          unlink(r)
-          purged++
-        }
-        continue
-      }
-      if (r.kind === 'lifetime') continue // lifetime 的 armed/injected 是健康稳态（见文件头裁决）
-      if (r.state === 'armed' || r.state === 'injected') {
-        // 类①：claim 悬挂（respawn 窗 / 受理回执丢失）→ 转 orphaned 保提示
-        if (age >= ttlMs) {
-          const watchId = r.watchId
-          const snapshot = view(r)
-          orphan(r)
-          orphaned.push(snapshot)
-          if (watchId !== undefined) {
-            respondOrphaned.push(targetOf(r, watchId, { type: 'orphaned' }))
-          }
-        }
-      } else if (r.state === 'fulfilled' && r.watchId === undefined) {
-        // 类②：fulfilled-no-watch（extension 未开表/应答链路丢失）→ 转 orphaned 计入 undelivered
-        if (age >= ttlMs) {
-          const snapshot = view(r)
-          orphan(r)
-          orphaned.push(snapshot)
-        }
-      }
-      // fulfilled + watch 已挂：等 bridge onRespond（每素材必回契约），不入扫描
-      // aborted：同上契约 + clearSession 兜底，不入设计三类
-    }
-    return { orphaned, respondOrphaned, purged }
-  }
-
   // ─── 查询 / 清理 / 生命周期 ────────────────────────────────────────────
 
   function clearSession(sessionId: string): number {
@@ -539,10 +487,6 @@ export function createClaimLedger(deps: ClaimLedgerDeps = {}): ClaimLedger {
     return r ? view(r) : undefined
   }
 
-  const timer = setInterval(() => {
-    sweep()
-  }, sweepIntervalMs)
-
   return {
     arm,
     markInjected,
@@ -553,13 +497,10 @@ export function createClaimLedger(deps: ClaimLedgerDeps = {}): ClaimLedger {
     onSessionDeath,
     orphanByParent,
     onRespond,
-    sweep,
     clearSession,
     getClaim,
     count: () => records.size,
     undeliveredCount: (sessionId) => undeliveredBySession.get(sessionId) ?? 0,
-    dispose: () => {
-      clearInterval(timer)
-    },
+    dispose: () => {},
   }
 }

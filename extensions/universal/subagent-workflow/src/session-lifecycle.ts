@@ -523,19 +523,17 @@ function appendSubagentIdentityEntry(pi: ExtensionAPI): void {
  * 返回 undefined。
  */
 export function bindLedgerHostAndRecover(pi: ExtensionAPI, ctx: ExtensionContext): NotifyLedgerHost | undefined {
-  // host 五端口接线 + 送达 stale 防御（D5 单通道 {triggerTurn:true} / stale 静默降级 /
-  // abandon 补显形 T4③）收敛在 @zhushanwen/pi-notify-ledger-host 工厂，权威注释随迁
-  // 工厂内；component/logger 参数保持本包 label 前缀与 warn 通道归因不变，
-  // sendDisplayMessage = 生产 bind 恒实现（NotifyLedgerHost 可选端口的本侧既有语义）。
+  // host 五端口接线 + 送达 stale 防御（D5 单通道 {triggerTurn:true} / stale 静默降级）
+  // 收敛在 @zhushanwen/pi-notify-ledger-host 工厂，权威注释随迁工厂内；
+  // component/logger 参数保持本包 label 前缀与 warn 通道归因不变。
   const ledgerHost = createPiNotifyLedgerHost(pi, ctx, {
     component: "subagent-workflow",
     logger,
-    sendDisplayMessage: true,
   });
   // bind 与 recover 拆独立 try（失败归因不同）：
   // - bind 失败：槽上无 ledger，消费方（getBoundNotifyLedger）退回内核直发路径；
   // - recover 失败：bind 已成功、槽上 ledger 仍在，消费方照常走账本路径（重启重放
-  //   缺席，边沿/看门狗仍投新通知）——不得共用 "bind failed" 文案误报。
+  //   缺席，settled 边沿仍投新通知）——不得共用 "bind failed" 文案误报。
   let ledger: ReturnType<typeof bindNotifyLedgerHost>;
   try {
     ledger = bindNotifyLedgerHost(ledgerHost);

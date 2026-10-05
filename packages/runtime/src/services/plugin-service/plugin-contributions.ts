@@ -29,8 +29,7 @@ export function removePluginHookEntries(hookRegistry: Map<string, HookEntry[]>, 
 /**
  * 清理指定插件的全部工具注册条目（Fix-7：与 removePluginHookEntries 同模式）。
  *
- * 禁用/卸载插件的工具不再出现在 bridge schema 同步（syncToolsToBridge）与
- * bridge 执行路由中。
+ * 禁用/卸载插件的工具从注册表移除后不再被任何执行路由命中。
  */
 export function removePluginToolEntries(toolRegistry: Map<string, ToolEntry>, pluginId: string): void {
   for (const [toolKey, entry] of toolRegistry) {

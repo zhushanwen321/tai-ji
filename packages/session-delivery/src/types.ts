@@ -101,13 +101,12 @@ export interface DeliveryPort {
    * 处理）；void / `{accepted:true}` = 受理成功。旧实现返回 void 兼容。
    *
    * settle 契约：返回 promise 时实现必须 settle（resolve 或 reject）——悬挂的
-   * promise 会让内核 in-flight 防重永久占位。内核侧按控制面单请求粒度设有界兜底
-   * （默认 60s，C-proc-19）：超时按发送失败收口（warn 留痕 + 走错误重试链）。
-   * 已接受代价：迟到的原请求在超时强制失败后仍可能到达底层通道，与重试构成重复
-   * 投递；通道内判重由适配器/对端按裸标记（clientUuid）负责，内核不建第二套判重。
+   * promise 会让内核 in-flight 防重永久占位、通路停摆。信任边界内不设防
+   * （ADR-0122 范围纪律）：本机操作无响应 = 底层已挂，内核不建墙钟兜底，
+   * 处置 = 用户显式失败 + 重启应用。
    */
   send(msg: DeliveryMessage, intent: DeliveryIntent): Promise<SendReceipt | void> | SendReceipt | void
-  /** agent_settled 边沿订阅（D8）。缺省时内核退化退避轮询。返回退订函数。 */
+  /** agent_settled 边沿订阅（D8）。缺省时 busy 条目留守至外部 flush/send 触发。返回退订函数。 */
   subscribeSettled?(cb: () => void): () => void
 }
 
@@ -122,10 +121,6 @@ export interface DeliveryConfig {
   /** 合批依赖谓词（D4 must-fix #1）。true 时 send() 走合批窗口，false/缺省时立即投。
    *  禁止用 isIdle 代替。 */
   mergeHoldActive?: () => boolean
-  /** 退避参数。 */
-  backoff?: { ms: number; max: number }
-  /** watch-dog 复核间隔（ms）。默认 30_000。 */
-  watchdogMs?: number
   /** 去重配置（条数 LRU）。 */
   dedupe?: { maxKeys: number }
   /**
@@ -144,8 +139,12 @@ export interface DeliveryConfig {
    * 锚定在受理时点，后移到送达会让 agent 工具调用阻塞至目标 session 当前 turn 结束
    * （steer 类车道可达数十秒）。本注释即接口口径权威声明。
    *
+   * outcome 'rejected' = 失败终局通知（ADR-0122 首败即停：send 失败一次即移除条目并
+   * 逐条回调；断连事件 failInFlight 转 failed 终态同样逐条回调）。重试决策归消费方，
+   * 内核不建自动重试。
+   *
    * 异常契约：实现不应抛——回调异常由内核捕获并 warn 留痕，不影响条目状态机与
-   * 其余条目的回调（回调异常 ≠ 投递失败，不进错误重试链）。
+   * 其余条目的回调（回调异常 ≠ 投递失败，不进失败重试链）。
    */
   onSettled?: (msg: DeliveryMessage, outcome: 'delivered' | 'rejected') => void
 }
@@ -181,7 +180,8 @@ export type DeliveryLane = 'direct' | 'steer' | 'queued'
  * - in-flight → delivered：送达回执到达（message_end 标记命中 / 适配器确认，D2）
  * - in-flight → queued：对账回收重投（滞留收回，D3；cancel 部分收回的其余条目同路径）
  * - in-flight/queued → cancelled：用户撤销（delivery.cancel）
- * - in-flight → failed：重试耗尽（sendAttempts 超 backoff.max，既有上限语义保留）
+ * - in-flight → failed：断连事件驱动的未确认终局（failInFlight，ADR-0122——pi 连接
+ *   断开时结果未知，显式失败交用户处置）
  * - failed → queued：用户重试（resync 单条重报）；failed → cancelled：用户移除
  * 帧投影四态差异：cancelled 不进 session.delivery 帧（D5③），协议侧帧 state 无此值。
  */
@@ -204,7 +204,7 @@ export interface DeliveryEntry {
   createdAt: number
   /** 最近一次状态迁移时间（epoch ms）。 */
   updatedAt: number
-  /** 已尝试投递次数（重试耗尽判定源：sendAttempts > backoff.max → failed，§3.4）。 */
+  /** 已尝试投递次数（诊断用：首败即停语义下不再驱动重试判定，ADR-0122）。 */
   sendAttempts: number
   /** 终态落定时间（epoch ms；delivered/failed/cancelled 时有值，tombstone 提取源）。 */
   settledAt?: number
@@ -216,6 +216,11 @@ export interface DeliveryEntry {
  * cancelled tombstone 防「cancel 确认帧断连窗口丢失 → 已撤销消息被 resync 复活」。
  * 栖身 runtime 进程内存、不跨 runtime 重启；reattach 场景（判重表已清空）判重锚
  * 回落 transcript 全量标记扫描（D5②/§3.4）。
+ *
+ * 语义边界（pi1-disposition-chat-flow D1②）：tombstone 语义从「送达事实」扩为
+ * 「离开系统的事实」——handled 条目（pi 接管输入等受理即终局形态）复用送达确认
+ * 原语写入本记录，终态固定为 delivered（复用既有送达终态，不新造终态形态；对账器
+ * 见 tombstone 不重投，继承断线重连 resync 判重防线）。state 联合仅两值不变。
  */
 export interface DeliveryTombstone {
   id: string

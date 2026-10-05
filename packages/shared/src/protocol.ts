@@ -26,6 +26,23 @@ import type {
 } from './migration'
 import type { SegmentsMetadataEntry } from './message-metadata'
 import type { ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply } from './import-session'
+// codemode 域：payload/reply 形状 SSOT 在 ./codemode（codemode 设计 D1/A1，本文件仅登记
+// type→payload 映射）
+import type { CodemodeEnabledResult, CodemodeSetEnabledRequest, CodemodeSetEnabledResult } from './codemode'
+// mcp 域：payload/reply 形状 SSOT 在 ./mcp（pi-mcp-management 设计，本文件仅登记 type→payload 映射）
+import type {
+  McpAddRequest,
+  McpListResult,
+  McpMutationResult,
+  McpRemoveRequest,
+  McpSetEnabledRequest,
+  McpTestCancelRequest,
+  McpTestCancelResult,
+  McpTestHandle,
+  McpTestRequest,
+  McpTestResultEvent,
+  McpUpdateRequest,
+} from './mcp'
 import type { UsageStatsResult } from './usage-stats'
 // composer-gen-stats：生成指标帧形状 SSOT（本文件仅登记 type→payload 映射）
 import type { GenStatsFrame } from './gen-stats'
@@ -212,6 +229,9 @@ export type ClientMessageType =
   | 'config.setSmartContextCompactModel'
   | 'config.setSmartContextThresholds'
   | 'config.setSmartContextExcludedModels'
+  // codemode 开关命令对（codemode 设计 D1/A1）：get 读激活态（损坏错误态经 corruption 字段返回），
+  // set 写增量条目（损坏拒入走 ok:false 信封）；payload/reply 形状见 codemode 域登记段。
+  | 'config.getCodemodeEnabled' | 'config.setCodemodeEnabled'
   // u-locale-channel：renderer 上报 UI 语言 → runtime 写 <dataDir>/ui-preferences.json（ack 型 reply）。
   | 'config.setUiLocale'
   | 'preset.list' | 'preset.getDefault' | 'preset.setDefault'
@@ -261,6 +281,13 @@ export type ClientMessageType =
   // 门禁（MUTATION_DOMAINS 只含 session/model/preset/config 四域）；错误统一走 sendError
   // 错误信封，错误码词表 TtsErrorCode 七值（tts-types.ts）。
   | 'tts.getConfig' | 'tts.configure' | 'tts.speak' | 'tts.getCapabilities'
+  // mcp.*（pi-mcp-management 设计 §5 U2，M0 七 RPC）：设置页 MCP 分区对 pi 用户级 mcp.json 的管理面——
+  // list（清单 + 损坏错误态，拉取一次模型 §3.1）/ add / update（编辑写回契约 D7 归 runtime store）/
+  // setEnabled（启停专用操作，仅翻转 enabled 键 §3.1 最小语义）/ remove / test（连接测试异步任务
+  // 句柄，D3）/ testCancel（取消进行中的连接测试，D3「取消」按钮）。写入生效语义 = 新会话生效
+  //（D1）。payload/reply 形状见 mcp 域登记段；ADR-0065 mutation 归类（add/update/setEnabled/remove）
+  // 由 mutation-reply-contract 登记。
+  | 'mcp.list' | 'mcp.add' | 'mcp.update' | 'mcp.setEnabled' | 'mcp.remove' | 'mcp.test' | 'mcp.testCancel'
 
 // ── Payload 类型定义 ────────────────────────────────────────────
 
@@ -901,6 +928,10 @@ export interface ClientMessageMap {
   'config.setSmartContextThresholds': { thresholds: number[] }
   /** config.setSmartContextExcludedModels：设置排除模型列表（每条完整 provider/modelId，runtime 侧过滤去重）。 */
   'config.setSmartContextExcludedModels': { models: string[] }
+  /** config.getCodemodeEnabled：读取 codemode 开关（无参数）。 */
+  'config.getCodemodeEnabled': Record<string, never>
+  /** config.setCodemodeEnabled：设置 codemode 开关目标态（写入语义归 runtime 侧字段域）。 */
+  'config.setCodemodeEnabled': CodemodeSetEnabledRequest
   /**
    * config.setUiLocale：上报 renderer UI 语言（跨进程 locale 通道，u-locale-channel）。
    * runtime 原子写 `<dataDir>/ui-preferences.json`（{ v:1, locale, updatedAt }），extension 侧读取热生效。
@@ -992,6 +1023,16 @@ export interface ClientMessageMap {
   'tts.speak': { sessionId?: string; text: string }
   /** tts.getCapabilities：设置页表单数据源（TtsFormModel 内嵌该家 TtsCapabilities，形状见 tts-types）。 */
   'tts.getCapabilities': Record<string, never>
+  // ── mcp.*（pi-mcp-management 设计 §5 U2，M0 七 RPC）请求 payload：形状 SSOT 在 ./mcp，此处仅登记
+  // type→payload 映射（u-foundation 补齐项——ClientMessageType 与 ReplyPayloadMap 已登记，
+  // 本 map 缺登记会使 core 域函数 command() 的 payload 类型约束无法解析）。list 无参数。
+  'mcp.list': Record<string, never>
+  'mcp.add': McpAddRequest
+  'mcp.update': McpUpdateRequest
+  'mcp.setEnabled': McpSetEnabledRequest
+  'mcp.remove': McpRemoveRequest
+  'mcp.test': McpTestRequest
+  'mcp.testCancel': McpTestCancelRequest
 }
 
 // ClientMessage 由 ClientMessageMap 直接派生：每个 type 字面量映射到
@@ -1084,6 +1125,12 @@ export type ServerMessageType =
   // 与 session.occupancy 同模式——重连/切回 session 自动恢复，不依赖广播时序）。
   // 数据源 = 内核 entries() 投影视图（D9②，D5③ 修剪规则）。QueueBubble 单一数据源（D7）。
   | 'session.delivery'
+  // session.deliveryHandled（pi1-disposition-chat-flow D1③）：出站条目被 pi 接管（handled
+  // disposition）的终局通知——一次性事件消息，非 last-value 快照（不登记 message-bus
+  // STATE_TYPE_KEY_MAP，无 stateSnapshot 重连回放；缺席即丢失，丢失后的收敛由孤儿对账
+  // 承接 D1⑤）。内核一对一通知前端，前端按 handled 同形态静默清除（移除乐观气泡 +
+  // 清 dispatching 占位（clearPendingSend，纯 Set 操作）+ 递减在途计数，无错误提示 U2①）。
+  | 'session.deliveryHandled'
   // session.revokeMessage（消息撤回设计 D2/D8）：revokeMessage RPC 的 reply type（与 request
   // 同名——delivery.* / session.subscribe 同款 payload 消费型同名模式）。
   | 'session.revokeMessage'
@@ -1146,7 +1193,9 @@ export type ServerMessageType =
   // auth.result：auth 握手的结果回复（S1-W1，ConnectionManager 传输层生产，见 ClientMessageMap 'auth'）。
   | 'auth.result'
   | 'pong' | 'error'
-  | 'extension.ui_request' | 'extension.error'
+  // extension.dialog：对话框族帧（pi1-disposition-chat-flow D6——按 kind 分发的 WS 消息族之一；
+  // 取代原 extension.ui_request，pi 词汇止点于 event-adapter，帧判别字段 dialogKind 为 taiji 自有词表）
+  | 'extension.dialog' | 'extension.error'
   | 'extension.discovered' | 'extension.installCancelled'
   | 'extension.recommended'
   | 'extension.pendingRequests'
@@ -1237,6 +1286,9 @@ export type ServerMessageType =
   | 'config.smartContextCompactModel'
   | 'config.smartContextThresholds'
   | 'config.smartContextExcludedModels'
+  // codemode 开关命令对 reply（codemode 设计 D1/A1）：get 回激活态 + 损坏错误态；set 回两态信封
+  //（成功终态 / 损坏拒入含 error + corruption）。
+  | 'config.codemodeEnabled' | 'config.codemodeSetEnabled'
   | 'preset.list' | 'preset.getDefault' | 'preset.setDefault'
   | 'preset.create' | 'preset.update' | 'preset.delete'
   | 'preset.recordUsage' | 'preset.getUsage'
@@ -1285,6 +1337,14 @@ export type ServerMessageType =
   // tts.*（ai-voice-tts 设计 §7.1）：四 RPC 的 reply（:result 后缀复用 quota.fetch:result 约定；
   // payload 消费型，形状见 ServerMessageMapBase tts 条目）。
   | 'tts.getConfig:result' | 'tts.configure:result' | 'tts.speak:result' | 'tts.getCapabilities:result'
+  // mcp.*（pi-mcp-management 设计）：七 RPC 的 reply（:result 后缀复用 quota.fetch:result /
+  // tts.getConfig:result 约定）。payload 直引 ./mcp 具名类型——清单/写入走 RPC reply 承载
+  //（§3.1 打开时拉取一次 + D8 快照语义），连接测试终态另有广播帧 mcp:testResult（下一组）。
+  | 'mcp.list:result' | 'mcp.add:result' | 'mcp.update:result' | 'mcp.setEnabled:result' | 'mcp.remove:result' | 'mcp.test:result' | 'mcp.testCancel:result'
+  // mcp:testResult（pi-mcp-management 设计，u5b 打回接线）：probe 终态回填的 server→client
+  // 广播帧（`mcp.test` 异步任务句柄的完成侧，D8① pi 实测类徽标数据源；冒号形态对齐
+  // rollingRestart:* 全局帧先例，payload 无 sessionId 走 broker 纯全局通道）。
+  | 'mcp:testResult'
 
 /** skill 缓存失效广播的作用域：global=全局 skill 变动，project=某项目 cwd 的 skill 变动。 */
 export type SkillCacheScope = 'global' | 'project'
@@ -1769,6 +1829,14 @@ export interface DeliverySubmitReply {
   clientUuid: string
   state: DeliveryFrameEntry['state']
   lane: DeliveryFrameEntry['lane']
+  /**
+   * 命令标志（pi1-disposition-chat-flow U1⑨ / D14③ G3 闸③）：内核命令识别结果
+   * （D2①——文本以 `/` 开头且剥前导 `/` 后与 get_commands 清单 extension 命令逐字
+   * 精确命中）随受理回执返回。向后兼容可选字段：true = 识别为命令（前端 pendingSend
+   * 不挂 30s 空窗计时器 U2⑤；终局凭据 = session.deliveryHandled D1③ 或错误回执）；
+   * false/缺省 = 普通消息（旧 runtime 不发该字段，链路行为与升级前一致）。
+   */
+  isCommand?: boolean
 }
 
 /** delivery.cancel 的 reply：cancelled=false = 不可撤（已 delivered 或收回失败，§3.4——条目由对账器下轮兜底，前端提示「已投递不可撤」）。 */
@@ -2015,35 +2083,38 @@ export interface ServerMessageMapBase {
   // 摘除 runtime pending 缓存时推给 renderer——renderer 按帧移除本屏对应请求（审批条/
   // 表单），消除「僵尸 ready 审批条点击静默无效」的残留窗口
   'extension:requestsInvalidated': { sessionId: string; requestIds: string[]; reason: string }
-  // extension.ui_request：交互对话框请求（select/confirm/input/editor + ask-user 富交互）。
-  // ask-user 扩展字段（askUser/askUserQuestions/allowCancel）仅在 method='select' + askUser=true 时存在。
-  // askUserQuestions 用 unknown[] 保持 shared 包依赖最小化（与 extension:widgetGui 的 gui:unknown 先例一致），
-  // 前端消费时用类型守卫收窄为 AskUserQuestion[]。
-  // schedule-create 扩展字段（scheduleCreate/scheduleDraft）仅在 method='select' + scheduleCreate=true 时存在
-  // （runtime event-adapter 第 4 marker 分支翻译 SCHEDULE_CREATE_MARKER select，U5）；
-  // scheduleDraft 用 unknown 保持 shared 依赖最小化，前端用 extension-protocol 的 isScheduleDraft 守卫收窄。
-  'extension.ui_request': {
+  // extension.dialog：交互对话框请求（dialogKind ∈ select/confirm/input/editor 四变体 + 富交互标志）。
+  // pi1-disposition-chat-flow D6：pi 词汇止点于 event-adapter——帧判别字段 dialogKind 是 taiji
+  // 自有词表（值域与 pi method 同形、权威在 taiji 侧，复用 ExtensionInteractMethod 类型承载），
+  // 富交互路由（form/planReview/scheduleCreate 标志）与 title 均随帧透传，title 仅纯展示。
+  // dialogKind='select' + 富交互标志时的扩展字段：
+  // ask-user（askUser/askUserQuestions/allowCancel）；askUserQuestions 用 unknown[] 保持 shared 包
+  // 依赖最小化（与 extension:widgetGui 的 gui:unknown 先例一致），前端用类型守卫收窄为 AskUserQuestion[]。
+  // schedule-create（scheduleCreate/scheduleDraft，runtime event-adapter 第 4 marker 分支翻译
+  // SCHEDULE_CREATE_MARKER select，U5）；scheduleDraft 用 unknown 保持 shared 依赖最小化，
+  // 前端用 extension-protocol 的 isScheduleDraft 守卫收窄。
+  'extension.dialog': {
     sessionId: string
     requestId: string
-    method: ExtensionInteractMethod
+    dialogKind: ExtensionInteractMethod
     title?: string
     message?: string
     options?: string[]
     default?: string
     level?: 'info' | 'warn' | 'error'
     prefill?: string
-    // ask-user 富交互扩展（仅 method='select' + askUser=true 时存在）
+    // ask-user 富交互扩展（仅 dialogKind='select' + askUser=true 时存在）
     askUser?: boolean
     askUserQuestions?: unknown[]
     allowCancel?: boolean
-    // schedule 创建确认富交互扩展（仅 method='select' + scheduleCreate=true 时存在）
+    // schedule 创建确认富交互扩展（仅 dialogKind='select' + scheduleCreate=true 时存在）
     scheduleCreate?: boolean
     scheduleDraft?: unknown  // ScheduleDraft（@zhushanwen/extension-protocol），前端守卫收窄
-    // planReview 审批扩展（仅 method='select' + planReview=true 时存在；plan 模式重设计 D5：
+    // planReview 审批扩展（仅 dialogKind='select' + planReview=true 时存在；plan 模式重设计 D5：
     // PLAN_REVIEW_MARKER select 通道，前端 C4 分流给 PlanReviewBar 不落 CompanionBand）。
     // 审批条文档清单由 usePlanState 投影链（session.planState）承载，本帧不携带 docs。
     planReview?: boolean
-    // 统一提问表单扩展（仅 method='select' + form=true 时存在；ui-presentation-protocol D1：
+    // 统一提问表单扩展（仅 dialogKind='select' + form=true 时存在；ui-presentation-protocol D1：
     // UI_FORM_MARKER select 通道，前端 C4 分流给 FormOverlay 渲染类型化问题集）。
     // formQuestions 用 unknown[] 保持 shared 依赖最小化（与 askUserQuestions 同款先例），
     // 前端消费时用 extension-protocol 的 isFormQuestion 守卫收窄为 FormQuestion[]。
@@ -2070,6 +2141,9 @@ export interface ServerMessageMapBase {
   // 仅最近 deliveredWindow 条完整条目；cancelled 不投影（D5③）——稳态帧体积有界。
   // QueueBubble 的单一数据源（D7）。
   'session.delivery': { sessionId: string; entries: DeliveryFrameEntry[] }
+  // session.deliveryHandled（pi1-disposition-chat-flow D1③）：handled 终局通知 payload——
+  // clientUuid 定位被接管的出站条目（= 提交时 clientUuid，与内核 tombstone id 同源 D1②）。
+  'session.deliveryHandled': { sessionId: string; clientUuid: string }
   // session.revokeMessage（消息撤回设计 D2/D8）：revokeMessage RPC 的 reply（与 request 同名，
   // payload 消费型）。形状见 SessionRevokeMessageReply——成功 = revoked:true + 消息原文
   //（草稿回填，D7）；错误 = revoked:false + error 六码闭集（D8 错误规格表 SSOT）。
@@ -2384,6 +2458,10 @@ export interface ServerMessageMapBase {
   'config.smartContextThresholds': { thresholds: number[] }
   /** config.smartContextExcludedModels：config.setSmartContextExcludedModels 的 reply（过滤去重后）。 */
   'config.smartContextExcludedModels': { models: string[] }
+  /** config.codemodeEnabled：config.getCodemodeEnabled 的 reply（corruption 非空 = settings.json 损坏错误态，此时 enabled 恒 false）。 */
+  'config.codemodeEnabled': CodemodeEnabledResult
+  /** config.codemodeSetEnabled：config.setCodemodeEnabled 的 reply（两态信封：写后落盘终态 / 损坏拒入）。 */
+  'config.codemodeSetEnabled': CodemodeSetEnabledResult
 
   // ── preset 域 reply（设计文档 pi-launch-presets.md，runtime PresetMessageHandler reply）──
   // 仅登记 payload 消费型 reply（domain 读 reply 字段）。
@@ -2730,6 +2808,20 @@ export interface ServerMessageMapBase {
   'tts.speak:result': { filePath: string }
   /** tts.getCapabilities:result：三家表单投影（数据权威在 runtime driver，renderer 不 import 数据表）。 */
   'tts.getCapabilities:result': { forms: Record<TtsProviderId, TtsFormModel> }
+  // ── mcp.*（pi-mcp-management 设计，七 RPC reply，payload 直引 ./mcp 具名类型）──
+  // 清单/写入走 RPC reply 承载（§3.1 打开时拉取一次 + D8 快照语义），帧仅作 reply 承载，
+  // 形状 SSOT 在 ./mcp（mcp.list:result 清单 + 损坏错误态两态；add/update/setEnabled/remove
+  // 共用 McpMutationResult 两态信封——写后落盘终态条目 / 拒入信封 error+corruption；test 回
+  // 异步任务句柄，testCancel 回取消结果）。
+  'mcp.list:result': McpListResult
+  'mcp.add:result': McpMutationResult
+  'mcp.update:result': McpMutationResult
+  'mcp.setEnabled:result': McpMutationResult
+  'mcp.remove:result': McpMutationResult
+  'mcp.test:result': McpTestHandle
+  'mcp.testCancel:result': McpTestCancelResult
+  /** mcp:testResult 广播：probe 终态回填（D8① 徽标 + testId/name 回显，形状 SSOT 在 ./mcp）。 */
+  'mcp:testResult': McpTestResultEvent
 }
 
 /**
@@ -2960,6 +3052,19 @@ export interface ReplyPayloadMap {
   'config.setSmartContextCompactModel': ServerMessageMap['config.smartContextCompactModel']
   'config.setSmartContextThresholds': ServerMessageMap['config.smartContextThresholds']
   'config.setSmartContextExcludedModels': ServerMessageMap['config.smartContextExcludedModels']
+  // codemode 开关命令对（codemode 设计 D1/A1）
+  'config.getCodemodeEnabled': ServerMessageMap['config.codemodeEnabled']
+  'config.setCodemodeEnabled': ServerMessageMap['config.codemodeSetEnabled']
+  // mcp 域七命令（pi-mcp-management 设计）：reply 经 :result 帧承载（ServerMessageMapBase 登记，
+  // payload 直引 ./mcp 具名类型——清单变更无 server→client 广播帧，§3.1 打开时拉取一次 + D8 快照
+  // 语义；唯一广播 = 连接测试终态 mcp:testResult，probe 完成侧推送帧）。
+  'mcp.list': ServerMessageMap['mcp.list:result']
+  'mcp.add': ServerMessageMap['mcp.add:result']
+  'mcp.update': ServerMessageMap['mcp.update:result']
+  'mcp.setEnabled': ServerMessageMap['mcp.setEnabled:result']
+  'mcp.remove': ServerMessageMap['mcp.remove:result']
+  'mcp.test': ServerMessageMap['mcp.test:result']
+  'mcp.testCancel': ServerMessageMap['mcp.testCancel:result']
   // u-locale-channel：ack 型（无读回 RPC，成功只回 config.uiLocaleSet；写盘失败走错误信封）。
   'config.setUiLocale': void
   // preset 域（设计文档 pi-launch-presets.md）：runtime PresetMessageHandler reply。

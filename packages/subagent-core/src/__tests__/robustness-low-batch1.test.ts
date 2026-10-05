@@ -43,8 +43,6 @@ function makeRunningRun(): WorkflowRun {
       // 真实数组——push/slice 直接作用于它
       errorLogs: [] as Array<{ level: string; message: string }>,
       scriptResult: undefined as unknown,
-      // rebuildRuntime 内 discardInFlightCalls 遍历 calls + 移除 trace 节点——
-      // 必须是真实 Map（空 = 无在飞 call，discard 为 no-op）
       calls: new Map(),
       trace: { removeByStepIndex: vi.fn() },
     },
@@ -96,9 +94,6 @@ function makeHandlers(): WorkerHandlers {
 }
 
 beforeEach(() => {
-  // handleScriptError 重试路径走 scheduleRebuild（指数退避 1s/2s/4s）。
-  // 测试中 workerLogs 已在退避前 push，但为了让 promise resolve（rebuildRuntime 后），
-  // 用 fake timers 推进退避。超 MAX 的终态路径不进退避，直接 resolve。
   vi.useFakeTimers();
 });
 
@@ -171,36 +166,18 @@ describe("L9: handleScriptError 追加 errorLogs（非覆盖）", () => {
 
 // ── handleReturn: errorLogs 追加（经 handleWorkerMessage 触发） ──
 
-describe("L9: handleReturn 追加 errorLogs（非覆盖）", () => {
-  it("已有 2 条 errorLogs 后 handleReturn 再追加 1 条 → 长度 3", async () => {
+describe("L9: errorLogs 追加（非覆盖）", () => {
+  it("预置 2 条 errorLogs 后 handleReturn 再追加 1 条 → 长度 3（workerLogs 通路同 L9 追加）", async () => {
     const run = makeRunningRun();
     const deps = makeDeps();
     await dispatchRunCreated(run); // [W2/V1] 六态机引导（run-created 首帧——终局裁决前置）
 
-    // 先用 scriptError 累积 2 条诊断日志
-    const p1 = handleScriptError(
-      run,
-      "boom-1",
-      [{ level: "error", message: "diag-1" }],
-      deps,
-      makeHandlers(),
-    );
-    await vi.advanceTimersByTimeAsync(1000);
-    await p1;
+    // 预置 2 条既有诊断日志（[ADR-0122] 原「scriptError 重试不终态化累积」形态已删，
+    // scriptError 一次即终态——改用预置构造追加前提）
+    run.state.errorLogs.push({ level: "error", message: "diag-1" });
+    run.state.errorLogs.push({ level: "warn", message: "diag-2" });
 
-    const p2 = handleScriptError(
-      run,
-      "boom-2",
-      [{ level: "error", message: "diag-2" }],
-      deps,
-      makeHandlers(),
-    );
-    await vi.advanceTimersByTimeAsync(2000);
-    await p2;
-
-    expect(run.state.errorLogs).toHaveLength(2);
-
-    // handleReturn 经 handleWorkerMessage 触发——它内部走 finalizeRun 终局 coda
+    // handleReturn 经 handleWorkerMessage 触发——workerLogs 先追加、后走 finalizeRun 终局 coda
     await handleWorkerMessage(
       run,
       { type: "return", result: "final-result", workerLogs: [{ level: "log", message: "final-return-log" }] },
@@ -213,6 +190,9 @@ describe("L9: handleReturn 追加 errorLogs（非覆盖）", () => {
       level: "log",
       message: "final-return-log",
     });
+    // 追加而非覆盖：前两条保留
+    expect(run.state.errorLogs[0].message).toBe("diag-1");
+    expect(run.state.errorLogs[1].message).toBe("diag-2");
     // scriptResult 也被正确写入（验证未破坏其他字段）
     expect(run.state.scriptResult).toBe("final-result");
     // [W2/V1] 终局断言换源（两态机字段停更——终局经注册表判定）
@@ -234,9 +214,7 @@ describe("L9: errorLogs 截断到 MAX_ERROR_LOGS（500）", () => {
     }
     expect(run.state.errorLogs).toHaveLength(499);
 
-    // handleScriptError 内部 push 3 条 + 截断。走终态路径（count > MAX）避免退避计时。
-    // scriptErrorCount=3 → count=4 > 3 → transition done,failed，不进 scheduleRebuild。
-    run.meta.scriptErrorCount = 3;
+    // handleScriptError 内部 push 3 条 + 截断（终态路径，ADR-0122 一次即 failed）。
     await handleScriptError(
       run,
       "boom",

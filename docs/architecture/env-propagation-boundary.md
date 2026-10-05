@@ -275,6 +275,7 @@ rg -n 'spawn\(|execFile\(|fork\(|pty\.spawn' packages/runtime/src apps/electron/
   新检查脚本按 `.githooks/check_*.py` 命名法并在 install-hooks.sh 与其他检查同构注册；豁免名单硬编码在脚本内逐条注明理由（reap-orphan-pi ps 只读、relay-env 探针特殊 env、构建器自身实现处）。
   豁免增量登记（后台任务收殓 `services/session/background-task-reaper.ts` 三调用点）：① `spawnSync('ps')` 进程 start time 只读探测——pid 复用防御（判定逻辑移植自 extension reaper），数组参数不经 shell、显式 timeout，仅读系统进程表、不向下游传递任何数据，与 reap-orphan-pi ps 探测先例同构；② `spawnSync('pgrep')` 收殓补杀的子孙 pid 只读枚举（kill 树兜底残留清理）——数组参数不经 shell，仅读进程表，无 env 出站面，同 reap-orphan-pi 先例；③ `taskkill` Windows 进程树终止（孤儿任务补杀）——数组参数不经 shell、stdio ignore，kill 处置无数据回流通路，同 supervisor/windows-process.ts taskkill.exe 先例。
   豁免增量登记（进程 start time 按需现测 `services/background-task/process-probe.ts`）：`execFileAsync(`（`promisify(execFile)` 产物，powershell Get-Process / ps -o lstart 两调用点）——D6 pid 复用防御的只读探测，数组参数不经 shell、显式 1s timeout，仅读系统进程表回读 stdout，无 env 出站面，与 reap-orphan-pi / background-task-reaper ps 探测先例同构；powershell 分支调用参数跨行，豁免 snippet 只能锚定产物名本身，该产物在该文件的全部调用均属此条裁决范围。同批堵 hook 形态逃逸口：checker 补 promisify 产物名追踪（`const X = promisify(<child_process API>)` 绑定且该 API 确已 import 时，`X(...)` 调用点注册为等价检测模式）——此前 `execFileAsync(` 不命中裸 API 名正则，调用点完全游离于裁决视野外。
+  豁免增量登记（pi mcp 连接探针 `infra/pi/pi-mcp-probe.ts`）：`spawn(command, args, opts`（`options.spawnImpl` 注入缝的缺省实现）——env 在 `runMcpProbe` 内经 `buildPiOutboundEnv` 组装（`@zhushanwen/pi-rpc` env 模块单源，与会话 spawn 同一装配点），底层白名单构建器以 `buildChildEnv: buildOutboundChildEnv` 参数注入——间接组装形态，非裸继承（与 rpc-client.ts 豁免条目同构）；deny 键剥离由 `infra/pi/__tests__/pi-mcp-probe.test.ts` 单测锁定。
 
 ---
 

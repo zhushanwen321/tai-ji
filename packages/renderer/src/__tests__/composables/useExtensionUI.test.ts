@@ -73,7 +73,7 @@ function mkAskUserReq(requestId: string, overrides: Record<string, unknown> = {}
     requestId,
     pluginId: 'p',
     kind: 'select' as const,
-    method: 'select',
+    dialogKind: 'select',
     title: 't',
     form: true,
     formQuestions: [{ type: 'text', header: 'q', question: 'q?' }],
@@ -81,8 +81,8 @@ function mkAskUserReq(requestId: string, overrides: Record<string, unknown> = {}
     ...overrides,
   }
 }
-function mkDialogReq(requestId: string, method: 'confirm' | 'select' | 'input' = 'confirm') {
-  return { requestId, pluginId: 'p', kind: method, method, title: 't' }
+function mkDialogReq(requestId: string, dialogKind: 'confirm' | 'select' | 'input' = 'confirm') {
+  return { requestId, pluginId: 'p', kind: dialogKind, dialogKind, title: 't' }
 }
 
 /** 触发某 session 的 bus ui-request 事件（真实 bus emit） */
@@ -107,7 +107,7 @@ describe('useExtensionUI T1/T2 bus 事件入队与 C4 分流', () => {
 
     expect(currentFormRequest.value?.requestId).toBe('r1')
     expect(currentFormRequest.value?.sessionId).toBe('sessionA')
-    expect(currentFormRequest.value?.method).toBe('select')
+    expect(currentFormRequest.value?.dialogKind).toBe('select')
     // form 键 + formQuestions（runtime marker 分支产出形状）
     expect(currentFormRequest.value?.form).toBe(true)
     expect(currentFormRequest.value?.formQuestions).toEqual([{ type: 'text', header: 'q', question: 'q?' }])

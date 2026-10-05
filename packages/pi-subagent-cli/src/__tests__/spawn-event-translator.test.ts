@@ -169,3 +169,146 @@ describe("[U-A6] tool_execution_update 到达形态与活性信号", () => {
     expect(h.record.turns[0]?.text).toBe("hi");
   });
 });
+
+// [codemode u5 / D4] 嵌套工具调用事件过滤（live ≡ reload 对齐）。
+//
+// 判据来源（pi 1.0.0 dist 实证；非 codemode 专属逻辑——本注释防止未来被误判为
+// codemode 专属而错误放行）：工具经 ctx.executeTool() 发起的嵌套调用，其
+// tool_execution_start / tool_execution_update / tool_execution_end 事件一律携带
+// parentToolCallId（pi dist/core/nested-tool-calls.js 三处 emit 点，嵌套 id 形态
+// `${parentToolCallId}/${n}`），且嵌套调用不落 transcript（pi dist/core/extensions/
+// types.d.ts executeTool 契约「It does not appear in the transcript」）。过滤语义 =
+// 与 transcript 投影对齐：reload 后嵌套调用只有外层一个工具块，live 期放行 start/end
+// 会经本翻译层各产独立 tool_start/tool_end → 投影不一致（AGENTS.md 关键规则 9 /
+// codemode 设计 §3.3 D4）。
+//
+// start 与 end 必须同判同滤：仅滤 start 会让嵌套 end 对未注册 toolCallId 发出孤儿
+// tool_end。tool_execution_update 豁免（判据不含 update）：嵌套 update 是 U-A6
+// 无进展守护的活性信号载体（嵌套执行窗口内唯一在途刷新源），照常映射。
+describe("[codemode u5 / D4] 嵌套工具调用事件过滤（表驱动）", () => {
+  const OUTER_ID = "call_outer_1";
+  const NESTED_ID = `${OUTER_ID}/1`;
+
+  /** 行 = 单条 stdout 行 + 期望 onEvent 收到的事件数组（filtered 行期望空数组）。 */
+  const ROWS: Array<{ name: string; raw: Record<string, unknown>; expected: AgentEvent[] }> = [
+    {
+      name: "嵌套 start → 过滤（不产独立 tool_start）",
+      raw: { type: "tool_execution_start", toolCallId: NESTED_ID, toolName: "read", args: { path: "a" }, parentToolCallId: OUTER_ID },
+      expected: [],
+    },
+    {
+      name: "嵌套 end → 过滤（不对未注册 toolCallId 发孤儿 tool_end）",
+      raw: { type: "tool_execution_end", toolCallId: NESTED_ID, toolName: "read", result: { content: [{ type: "text", text: "ok" }] }, isError: false, parentToolCallId: OUTER_ID },
+      expected: [],
+    },
+    {
+      name: "嵌套 update → 豁免（U-A6 活性信号照发，嵌套窗口内唯一在途刷新源）",
+      raw: { type: "tool_execution_update", toolCallId: NESTED_ID, toolName: "read", partialResult: { content: [{ type: "text", text: "partial" }] }, parentToolCallId: OUTER_ID },
+      expected: [ACTIVITY_EVENT],
+    },
+    {
+      name: "非嵌套 start → 零影响（tool_start 照常）",
+      raw: { type: "tool_execution_start", toolCallId: "call_top", toolName: "read", args: { path: "a" } },
+      expected: [{ type: "tool_start", toolName: "read", args: { path: "a" } }],
+    },
+    {
+      name: "非嵌套 end → 零影响（tool_end 照常；无 start 时 args 缺省回退）",
+      raw: { type: "tool_execution_end", toolCallId: "call_top", toolName: "bash", result: { content: [{ type: "text", text: "done" }] }, isError: false },
+      expected: [{ type: "tool_end", toolName: "bash", result: { content: [{ type: "text", text: "done" }] }, isError: false }],
+    },
+    {
+      name: "非嵌套 update → 零影响（活性信号照常）",
+      raw: { type: "tool_execution_update", toolCallId: "call_top", toolName: "bash", partialResult: { content: [{ type: "text", text: "partial" }] } },
+      expected: [ACTIVITY_EVENT],
+    },
+    {
+      name: "边界：parentToolCallId 空串按非嵌套放行（畸形值宁放行不误丢顶层块）",
+      raw: { type: "tool_execution_start", toolCallId: NESTED_ID, toolName: "read", args: { path: "a" }, parentToolCallId: "" },
+      expected: [{ type: "tool_start", toolName: "read", args: { path: "a" } }],
+    },
+  ];
+
+  for (const row of ROWS) {
+    it(row.name, () => {
+      const h = makeHarness();
+      h.feed(JSON.stringify(row.raw));
+
+      expect(h.events).toEqual(row.expected);
+      // 过滤行对 record 零写入（无工具条目——live 工具块计数 ≡ reload 的 record 侧锚点）
+      if (row.expected.length === 0) {
+        expect(JSON.stringify(h.record)).not.toContain(row.raw.toolCallId as string);
+      }
+    });
+  }
+
+  it("同判复合场景：外层 start/end 之间夹嵌套 start+update+end——恰产外层一对 tool_start/tool_end，无孤儿 tool_end", () => {
+    const h = makeHarness();
+    h.feed(JSON.stringify({ type: "tool_execution_start", toolCallId: OUTER_ID, toolName: "codemode", args: { code: "await tools.read({path:'a'})" } }));
+    h.feed(JSON.stringify({ type: "tool_execution_start", toolCallId: NESTED_ID, toolName: "read", args: { path: "a" }, parentToolCallId: OUTER_ID }));
+    h.feed(JSON.stringify({ type: "tool_execution_update", toolCallId: NESTED_ID, toolName: "read", partialResult: { content: [{ type: "text", text: "partial" }] }, parentToolCallId: OUTER_ID }));
+    h.feed(JSON.stringify({ type: "tool_execution_end", toolCallId: NESTED_ID, toolName: "read", result: { content: [{ type: "text", text: "ok" }] }, isError: false, parentToolCallId: OUTER_ID }));
+    h.feed(JSON.stringify({ type: "tool_execution_end", toolCallId: OUTER_ID, toolName: "codemode", result: { content: [{ type: "text", text: "script done" }] }, isError: false }));
+
+    expect(h.events).toEqual([
+      { type: "tool_start", toolName: "codemode", args: { code: "await tools.read({path:'a'})" } },
+      ACTIVITY_EVENT, // 嵌套 update 豁免——嵌套窗口内活性信号照发
+      { type: "tool_end", toolName: "codemode", args: { code: "await tools.read({path:'a'})" }, result: { content: [{ type: "text", text: "script done" }] }, isError: false },
+    ]);
+    // record 只有外层一个工具条目（嵌套不写 record）——live 工具块计数 ≡ reload
+    expect(h.record.turns[0]?.toolCalls).toHaveLength(1);
+    expect(h.record.turns[0]?.toolCalls[0]?.toolName).toBe("codemode");
+  });
+});
+
+// [subagent 投影丢失修复] tool_execution_end result 的 content 块形状透传（表驱动）。
+//
+// 丢失形态锚定：subagent 会话图片可见性依赖 tool_end.result.content 里的 image 块
+// 原样透传（下游 = journal 重放 + GUI 投影的提取源）。本层为逐字透传层——result
+// 不压缩不改写，任何形状（纯文本 / 纯 image / 混合交错）逐块保留；此处表驱动锁定
+// 三种形状，防未来「翻译层顺手归一」回归（归一 = image 块丢失）。
+describe("[subagent 投影丢失修复] tool_execution_end result content 形状透传（表驱动）", () => {
+  const IMG = { type: "image", data: "aGVsbG8taW1hZ2U=", mimeType: "image/png" };
+
+  const ROWS: Array<{ name: string; content: unknown[]; details?: unknown }> = [
+    {
+      name: "纯文本 content",
+      content: [{ type: "text", text: "Script completed" }],
+    },
+    {
+      name: "纯 image content",
+      content: [IMG],
+    },
+    {
+      name: "混合 content（text + image 交错，codemode 真机形状）",
+      content: [{ type: "text", text: "Script completed" }, IMG, { type: "text", text: "done: 1x1 PNG" }],
+      details: { calls: [{ id: "n1", name: "read", status: "done" }] },
+    },
+  ];
+
+  for (const row of ROWS) {
+    it(`result.content ${row.name} → tool_end 逐块透传 + record 保留`, () => {
+      const h = makeHarness();
+      h.feed(
+        JSON.stringify({
+          type: "tool_execution_end",
+          toolCallId: "call_img_1",
+          toolName: "codemode",
+          args: { code: "img()" },
+          result: { content: row.content, ...(row.details !== undefined ? { details: row.details } : {}) },
+          isError: false,
+        }),
+      );
+
+      const toolEnd = h.events.find((e) => e.type === "tool_end") as
+        | { result?: { content?: unknown[]; details?: unknown } }
+        | undefined;
+      expect(toolEnd?.result?.content).toEqual(row.content);
+      if (row.details !== undefined) {
+        expect(toolEnd?.result?.details).toEqual(row.details);
+      }
+      // record（journal 重放面）同样保留 image 块——GUI reload 腿的提取源
+      const rec = h.record.turns[0]?.toolCalls[0];
+      expect(rec?.result?.content).toEqual(row.content);
+    });
+  }
+});

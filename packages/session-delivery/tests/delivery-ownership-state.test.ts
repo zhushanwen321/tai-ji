@@ -134,43 +134,32 @@ describe('u1-state 合法迁移路径', () => {
     handle.dispose()
   })
 
-  it('in-flight → failed：重试耗尽（sendAttempts > backoff.max），条目留守 failed 至处置', () => {
-    const port = makeMockPort({
-      send: () => {
-        throw new Error('pi stuck')
-      },
-    })
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const handle = createDelivery(port, { backoff: { ms: 1, max: 2 } })
+  it('in-flight → failed：failInFlight 断连终局（ADR-0122），条目留守 failed 至处置', () => {
+    const port = makeMockPort()
+    const handle = createDelivery(port)
 
+    // 造 in-flight：受理成功（port.send 默认同步受理）→ 断连终局
     handle.send(textMsg('m1'), { id: 'u-1' })
-    vi.advanceTimersByTime(10) // 首试 + 2 次重试全败 → attempts=3 > max=2
+    expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
+    expect(handle.failInFlight('pi connection lost')).toBe(1)
 
     const entry = handle.entriesFull().active[0]!
     expect(entry.state).toBe('failed')
-    expect(entry.sendAttempts).toBe(3)
+    expect(entry.sendAttempts).toBe(1)
     expect(entry.settledAt).toBeTypeOf('number')
     expect(handle.entriesFull().tombstones).toHaveLength(0) // failed 是活跃态，不产 tombstone
 
-    warnSpy.mockRestore()
     handle.dispose()
   })
 
   it('failed → queued：requeue 用户重试（resync 单条重报），settledAt 清除后重投', () => {
-    let calls = 0
-    const port = makeMockPort({
-      // 首败进 failed；requeue 重试后成功（sendCalls 由 mock 包装层记录，含抛错轮）
-      send: () => {
-        calls++
-        if (calls === 1) throw new Error('pi stuck')
-        return undefined
-      },
-    })
+    const port = makeMockPort()
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const handle = createDelivery(port, { backoff: { ms: 1, max: 0 } })
+    const handle = createDelivery(port)
 
+    // 造 failed（断连终局）：受理成功 → failInFlight
     handle.send(textMsg('m1'), { id: 'u-1' })
-    vi.advanceTimersByTime(5)
+    handle.failInFlight('pi connection lost')
     expect(handle.entriesFull().active[0]!.state).toBe('failed')
     expect(port.sendCalls).toHaveLength(1)
 
@@ -186,16 +175,12 @@ describe('u1-state 合法迁移路径', () => {
   })
 
   it('failed → cancelled：cancel × 移除 failed 条目', () => {
-    const port = makeMockPort({
-      send: () => {
-        throw new Error('pi stuck')
-      },
-    })
+    const port = makeMockPort()
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const handle = createDelivery(port, { backoff: { ms: 1, max: 0 } })
+    const handle = createDelivery(port)
 
     handle.send(textMsg('m1'), { id: 'u-1' })
-    vi.advanceTimersByTime(5)
+    handle.failInFlight('pi connection lost')
     expect(handle.entriesFull().active[0]!.state).toBe('failed')
 
     const result = handle.cancel('u-1')
@@ -286,16 +271,12 @@ describe('u1-state 非法迁移拒绝', () => {
   })
 
   it('confirmDelivered(failed) 拒绝：failed 未投递成功，不构成送达事实', () => {
-    const port = makeMockPort({
-      send: () => {
-        throw new Error('pi stuck')
-      },
-    })
+    const port = makeMockPort()
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const handle = createDelivery(port, { backoff: { ms: 1, max: 0 } })
+    const handle = createDelivery(port)
 
     handle.send(textMsg('m1'), { id: 'u-1' })
-    vi.advanceTimersByTime(5)
+    handle.failInFlight('pi connection lost')
     expect(handle.entriesFull().active[0]!.state).toBe('failed')
 
     expect(handle.confirmDelivered('u-1')).toBe(false)

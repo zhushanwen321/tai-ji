@@ -20,9 +20,6 @@ import type { LatestReleaseInfo } from '@taiji/shared'
 // 捕获注册的 handler（key=channel, value=handler fn）
 const handlers = new Map<string, (...args: unknown[]) => unknown>()
 
-// 捕获 setTimeout（update:perform triggerRestart 后用 setTimeout 调 app.quit）
-let capturedQuitTimer: { callback: () => void; delay: number } | null = null
-
 vi.mock('electron', () => ({
   ipcMain: {
     handle: (channel: string, fn: (...args: unknown[]) => unknown) => {
@@ -281,12 +278,6 @@ describe('u3b: update:install validateRelease（m11 防御纵深）', () => {
     handlers.clear()
     vi.clearAllMocks()
     sendSpy.mockClear()
-    capturedQuitTimer = null
-    // 拦截 setTimeout 捕获 quit 定时器
-    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((cb: () => void, delay?: number) => {
-      capturedQuitTimer = { callback: cb, delay: delay ?? 0 }
-      return 0 as unknown as NodeJS.Timeout
-    }) as typeof setTimeout)
   })
 
   it('污染 version 的 preloaded → install 前被 validateRelease 拒绝，installUpdate 不被调', async () => {

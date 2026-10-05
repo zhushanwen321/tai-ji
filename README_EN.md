@@ -163,7 +163,7 @@ The following 16 extensions are usable standalone outside taiji (all published t
 | [`pi-cache-probe`](extensions/universal/cache-probe/README.md) | Cache prefix fingerprint collection |
 | [`pi-cw-tool`](extensions/universal/cw-tool/README.md) | cw 2.0 runner + read-only `cw_query` tool |
 
-The remaining 5 (`agent-ext` / `msg-id-mapper` / `plugin-bridge` / `system-prompt` / `system-prompt-trace`, npm package names have `pi-` prefix) are taiji-integration-specific, source code under `extensions/taiji/`. For extension development, see [docs/extensions/development-guide.md](docs/extensions/development-guide.md).
+The remaining 4 (`agent-ext` / `msg-id-mapper` / `system-prompt` / `system-prompt-trace`, npm package names have `pi-` prefix) are taiji-integration-specific, source code under `extensions/taiji/`. For extension development, see [docs/extensions/development-guide.md](docs/extensions/development-guide.md).
 
 ---
 

@@ -18,7 +18,7 @@ const SUMMARY_TAIL_LINES = 5;
 const SUMMARY_MAX_CHARS = 800;
 
 /**
- * 轮询器 exit 边沿的 tail 摘要（存进条目、M3 通知用）：末尾几行的紧凑文本。
+ * exit 事件边沿收尾的 tail 摘要（存进条目、M3 通知用）：末尾几行的紧凑文本。
  */
 export function readTailSummary(outputFile: string, maxChars: number = SUMMARY_MAX_CHARS): string | undefined {
 	const tail = readOutputTailPrimitive(outputFile, { maxLines: SUMMARY_TAIL_LINES, maxBytes: maxChars });

@@ -321,19 +321,6 @@ describe("中断收编入口 adoptInterruptedRun（[D15]：幂等追加 run-inte
     ]);
   });
 
-  it("宽限窗（graceWindowMs）：末帧静止不足窗 → skippedGraceWindow，不追加", async () => {
-    await seed("wf-ad-5", [createdEvent("wf-ad-5", BASE_TS), agentStartedEvent(BASE_TS + 1)]);
-    const outcome = await adoptInterruptedRun("wf-ad-5", {
-      now: BASE_TS + 60_000,
-      graceWindowMs: 60_000 * 60,
-    });
-    expect(outcome).toBe("skippedGraceWindow");
-    expect((await journal.scan("wf-ad-5")).map((e) => e.type)).toEqual([
-      "run-created",
-      "agent-started",
-    ]);
-  });
-
   it("活跃保护：activeRunIds 命中 → skippedActive（事件流静默 ≠ 死亡）", async () => {
     await seed("wf-ad-6", [createdEvent("wf-ad-6", BASE_TS), agentStartedEvent(BASE_TS + 1)]);
     const outcome = await adoptInterruptedRun("wf-ad-6", {

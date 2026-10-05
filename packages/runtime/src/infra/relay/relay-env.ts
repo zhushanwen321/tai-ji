@@ -24,8 +24,6 @@ import { getRelayScriptPath } from './relay-paths.js'
 import { isRelayServerActive, getActiveRelaySocketPath } from './relay-server.js'
 import { warnOnce } from '../../utils/warn-once.js'
 
-/** 探针超时（§10-1：spawn 执行器跑 --eval "process.exit(0)" 的完成上限）。 */
-const PROBE_TIMEOUT_MS = 5_000
 
 /** getRelaySpawnEnv 的可注入项（测试隔离用；生产全部走缺省推导）。 */
 export interface RelaySpawnEnvOptions {
@@ -52,7 +50,6 @@ export function probeNodeExecutor(execPath: string, isElectron: boolean): Promis
     const finish = (ok: boolean): void => {
       if (settled) return
       settled = true
-      clearTimeout(timer)
       try {
         child?.kill('SIGKILL')
       } catch {
@@ -72,8 +69,6 @@ export function probeNodeExecutor(execPath: string, isElectron: boolean): Promis
       resolve(false)
       return
     }
-    const timer = setTimeout(() => finish(false), PROBE_TIMEOUT_MS)
-    timer.unref()
     child.on('error', () => finish(false))
     child.on('exit', (code) => finish(code === 0))
   })

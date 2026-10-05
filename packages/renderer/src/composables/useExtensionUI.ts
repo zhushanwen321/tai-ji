@@ -1,11 +1,12 @@
 /**
  * Extension UI 交互 composable——bus 订阅编排 + filter 分流读取。
  *
- * pi extension 调 ctx.ui.select/confirm/input → runtime 推 extension.ui_request
- * → core MessageBusBridge 归一为 bus 'ui-request' 事件（plugin:uiRequest + extension.ui_request
+ * pi extension 调 ctx.ui.select/confirm/input → runtime 推 extension.dialog
+ * （pi1-disposition-chat-flow D6：前端按消息类型分发）
+ * → core MessageBusBridge 归一为 bus 'ui-request' 事件（plugin:uiRequest + extension.dialog
  * 双源合一）→ 本 composable 订阅 bus、写入 extensionUIStore（session 级 pending SSOT）→
  * 渲染层（Panel inline overlay）从 store 分区派生 → 用户操作 → sendExtensionUIResponse
- * 回传（带 method）→ pi Promise resolve。
+ * 回传（method = dialogKind 同形值）→ pi Promise resolve。
  *
  * 状态归属（CW wave `session-active-ssot` T2）：pending 队列已提升到 extensionUIStore
  *（session 级 SSOT），让 deriveStatus 经 hasPendingBlockingOverlay 能查到阻塞 overlay
@@ -277,9 +278,10 @@ function pickPlanFields(
  * bus 事件 request（DialogRequest）→ ExtensionUIRequest 适配（IF3）。
  *
  * DialogRequest 是 parseUiRequest/parseExtensionUiRequest 经 ...payload 展开构造的——
- * runtime extension.ui_request 原始 payload（含 form/formQuestions/allowCancel/message/
+ * runtime extension.dialog 原始 payload（含 form/formQuestions/allowCancel/message/
  * options 等）保留在索引签名里（event-adapter UI_FORM_MARKER 分支 payload 标记 form:true）。
- * method 用原始 method（可能超界如 editor）?? kind 兜底（kind 已归一 select/confirm/input）。
+ * dialogKind 用帧判别字段（taiji 词表，可能超界如 editor）?? kind 兜底（kind 已归一
+ * select/confirm/input）。
  */
 function toExtensionUIRequest(sid: string, request: DialogRequest): ExtensionUIRequest {
   // receivedAt：优先采信帧携带的数值，缺失则由本层打戳（当前 runtime 广播帧不带该键，
@@ -288,7 +290,7 @@ function toExtensionUIRequest(sid: string, request: DialogRequest): ExtensionUIR
   return {
     sessionId: sid,
     requestId: request.requestId,
-    method: (request.method as ExtensionInteractMethod | undefined) ?? request.kind,
+    dialogKind: (request.dialogKind as ExtensionInteractMethod | undefined) ?? request.kind,
     ...pickDialogFields(request),
     ...pickFormFields(request),
     ...pickLegacyFields(request),
@@ -460,7 +462,7 @@ export function useExtensionUI(
       useToast().error(t('extensionUI.requestExpired'), { sessionId: sid })
       return false
     }
-    const delivered = sendExtensionUIResponse(target.sessionId, target.requestId, target.method, result)
+    const delivered = sendExtensionUIResponse(target.sessionId, target.requestId, target.dialogKind, result)
     if (!delivered) {
       notifyUiResponseNotDelivered(target.sessionId)
       return false

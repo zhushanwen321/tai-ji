@@ -111,7 +111,7 @@ export function migrateTodo(raw: unknown): Todo {
 
 // ── GUI 渲染辅助 ─────────────────────────────────────
 
-/** completed 计数单一来源：renderStatusText / renderWidgetLines / component 三个消费点共用口径
+/** completed 计数单一来源：renderStatusText / renderWidgetLines 等消费点共用口径
  * （buildGui 的 tab 计数与段内容改由 openTodos/doneTodos 同源复用，不再经本函数）。 */
 export function todoProgress(todos: Todo[]): { completed: number; total: number } {
 	return {

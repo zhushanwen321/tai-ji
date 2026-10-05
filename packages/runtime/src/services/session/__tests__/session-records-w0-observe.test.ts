@@ -361,7 +361,6 @@ describe('发布归因 + workflowFolds fold 证据（可观测性 2026-10-02）'
 
       const meta = { id: 's1', filePath: sessionFile, cwd: '/proj' }
       const { records, publish, client } = makeRecords({
-        eventTailerRecheckMs: 30,
         sessionStore: { scanSessions: vi.fn(() => [meta]) } as unknown as ISessionStore,
       })
       const fire = registerSession(records)
@@ -437,7 +436,6 @@ describe('降级投影闩死修复（2026-10-02）', () => {
       const meta = { id: 's1', filePath: sessionFile, cwd: '/proj' }
       let metaVisible = false
       const { records, publish, client } = makeRecords({
-        eventTailerRecheckMs: 30,
         sessionStore: { scanSessions: vi.fn(() => (metaVisible ? [meta] : [])) } as unknown as ISessionStore,
       })
       const fire = registerSession(records)

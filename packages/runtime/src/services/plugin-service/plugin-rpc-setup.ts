@@ -86,7 +86,6 @@ export interface RpcSetupContext {
    * （删 pending/排队项 + 撤窗广播 + 放行串行队列）。
    */
   cancelUiRequest: (requestId: string) => void
-  syncToolsToBridge: () => Promise<void>
   getDescriptor: (pluginId: string) => import('./plugin-types.js').PluginDescriptor | undefined
   sessionDataStore: SessionDataStore
   /** 活跃 session 解析器（P6：替代模块级全局 _activeSessionCache） */
@@ -170,7 +169,6 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
   // Tool RPC handlers
   registerToolRpcHandlers(rpcServer, {
     toolRegistry,
-    syncToolsToBridge: ctx.syncToolsToBridge,
   })
 
   // Hook RPC handlers

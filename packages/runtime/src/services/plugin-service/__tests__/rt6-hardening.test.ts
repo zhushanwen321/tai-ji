@@ -2,9 +2,8 @@
  * RT-6 code-harden 定向回归（P9 收尾批次）。
  *
  * 覆盖三行：
- * - RT-6#2（major）：BridgeToolCache 跨插件同名 schema 遮蔽——syncFrom 按裸名查重 warn +
- *   首见优先消歧；getSyncPayload 不前递同名项（tool-api.ts 注册入口按复合键
- *   `pluginId:name` 查重的语义不变，本测试不触碰注册路径）。
+ * - [pi1-disposition-chat-flow D7①] RT-6#2（BridgeToolCache 跨插件同名 schema 遮蔽）段
+ *   随 bridge 退役整段删除（断言对象 BridgeToolCache 已删）。
  * - RT-6#3（major）：HookPipeline 无 handle skip / handler 失败或超时 → 聚合 warn
  *   （含 pluginId + hookType + sessionId），每 N 次一条（禁逐条刷屏）。
  * - RT-6#4（major）：HookPipeline observe 腿在途深度上限 → 超限 drop + 聚合 warn。
@@ -13,7 +12,6 @@
  * 运行：cd packages/runtime && npx vitest run src/services/plugin-service/__tests__/rt6-hardening.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { BridgeToolCache } from '../bridge-interop.js'
 import { HookPipeline, HOOK_ANOMALY_WARN_EVERY } from '../hook-pipeline.js'
 import type { HookPipelineDeps } from '../hook-pipeline.js'
 import { executeCommand } from '../api/commands-executor.js'
@@ -24,72 +22,6 @@ import { PluginService } from '../plugin-service.js'
 import type { PluginHost } from '../plugin-host.js'
 import type { PluginRpcServer } from '../plugin-rpc-server.js'
 import type { ToolEntry, HookEntry, HookContext, HookType, PluginDescriptor } from '../plugin-types.js'
-
-// ── RT-6#2：跨插件同名工具 ────────────────────────────────────────
-
-function toolEntry(pluginId: string, name: string, description: string): ToolEntry {
-  return {
-    pluginId,
-    handlerId: `${pluginId}:${name}`,
-    schema: { name, description, parameters: { type: 'object', properties: {} } },
-  }
-}
-
-describe('RT-6#2 BridgeToolCache 裸名跨插件查重 + 消歧', () => {
-  let warnSpy: ReturnType<typeof vi.spyOn>
-
-  beforeEach(() => {
-    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-  })
-
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it('同名跨插件：warn 留痕（含两个 pluginId），且执行路由索引不被后写覆盖', () => {
-    const cache = new BridgeToolCache()
-    const registry = new Map<string, ToolEntry>([
-      ['plugin-a:dup', toolEntry('plugin-a', 'dup', 'from A')],
-      ['plugin-b:dup', toolEntry('plugin-b', 'dup', 'from B')],
-    ])
-
-    cache.syncFrom(registry)
-
-    const texts = warnSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
-    expect(texts).toContain('dup')
-    expect(texts).toContain('plugin-a')
-    expect(texts).toContain('plugin-b')
-    // 首见优先（registry 插入序 = 注册序）：A 不被 B 静默顶掉
-    expect(cache.getEntryByName('dup')?.pluginId).toBe('plugin-a')
-  })
-
-  it('同名跨插件：getSyncPayload 不前递同名项（首见优先，仅一条）', () => {
-    const cache = new BridgeToolCache()
-    cache.syncFrom(new Map<string, ToolEntry>([
-      ['plugin-a:dup', toolEntry('plugin-a', 'dup', 'from A')],
-      ['plugin-b:dup', toolEntry('plugin-b', 'dup', 'from B')],
-    ]))
-
-    const payload = cache.getSyncPayload()
-    expect(payload.tools).toEqual([
-      { name: 'dup', description: 'from A', parameters: { type: 'object', properties: {} } },
-    ])
-    expect(payload.success).toBe(true)
-  })
-
-  it('异名插件：无 warn、两条 schema 均下发（不误伤正常路径）', () => {
-    const cache = new BridgeToolCache()
-    cache.syncFrom(new Map<string, ToolEntry>([
-      ['plugin-a:alpha', toolEntry('plugin-a', 'alpha', 'A alpha')],
-      ['plugin-b:beta', toolEntry('plugin-b', 'beta', 'B beta')],
-    ]))
-
-    expect(warnSpy).not.toHaveBeenCalled()
-    expect(cache.getSyncPayload().tools.map((t) => t.name)).toEqual(['alpha', 'beta'])
-    expect(cache.getEntryByName('alpha')?.pluginId).toBe('plugin-a')
-    expect(cache.getEntryByName('beta')?.pluginId).toBe('plugin-b')
-  })
-})
 
 // ── RT-6#3 / RT-6#4：HookPipeline 可观测性 + observe 背压 ──────────
 
@@ -128,36 +60,36 @@ describe('RT-6#3 HookPipeline skip/失败聚合 warn', () => {
   })
 
   it('execute：无 handle → warn 含 pluginId/hookType/sessionId（不再零日志 continue）', async () => {
-    const { pipeline } = setupPipeline('onBeforeAgentStart', [
+    const { pipeline } = setupPipeline('onBeforeToolCall', [
       { pluginId: 'p-gone', handlerId: 'p-gone:h1', priority: 0 },
     ], { workerId: null })
 
     // 聚合节流：到达 N 的整数倍才输出一条（禁逐条刷屏），内容断言需跑满一轮
     for (let i = 0; i < HOOK_ANOMALY_WARN_EVERY; i++) {
-      const result = await pipeline.execute('onBeforeAgentStart', makeContext('onBeforeAgentStart', 'sid-1'))
+      const result = await pipeline.execute('onBeforeToolCall', makeContext('onBeforeToolCall', 'sid-1'))
       expect(result).toEqual({ blocked: false })
     }
 
     const texts = warnSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
     expect(texts).toContain('p-gone')
-    expect(texts).toContain('onBeforeAgentStart')
+    expect(texts).toContain('onBeforeToolCall')
     expect(texts).toContain('sid-1')
     expect(texts).toContain('skipped total=10')
   })
 
   it('execute：handler 超时/抛错 → warn 含 pluginId/hookType/sessionId + 失败原因', async () => {
-    const { pipeline, deps } = setupPipeline('onBeforeAgentStart', [
+    const { pipeline, deps } = setupPipeline('onBeforeToolCall', [
       { pluginId: 'p-slow', handlerId: 'p-slow:h1', priority: 0 },
     ])
     ;(deps.rpcServer.invoke as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('RPC timeout'))
 
     for (let i = 0; i < HOOK_ANOMALY_WARN_EVERY; i++) {
-      await pipeline.execute('onBeforeAgentStart', makeContext('onBeforeAgentStart', 'sid-2'))
+      await pipeline.execute('onBeforeToolCall', makeContext('onBeforeToolCall', 'sid-2'))
     }
 
     const texts = warnSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
     expect(texts).toContain('p-slow')
-    expect(texts).toContain('onBeforeAgentStart')
+    expect(texts).toContain('onBeforeToolCall')
     expect(texts).toContain('sid-2')
     expect(texts).toContain('RPC timeout')
     expect(texts).toContain('failed total=10')
@@ -179,16 +111,16 @@ describe('RT-6#3 HookPipeline skip/失败聚合 warn', () => {
   })
 
   it('聚合节流：N 次以内只 warn 一次（禁逐条刷屏），计数达到 N 的整数倍再输出', async () => {
-    const { pipeline } = setupPipeline('onBeforeAgentStart', [
+    const { pipeline } = setupPipeline('onBeforeToolCall', [
       { pluginId: 'p-gone', handlerId: 'p-gone:h1', priority: 0 },
     ], { workerId: null })
 
     for (let i = 0; i < 9; i++) {
-      await pipeline.execute('onBeforeAgentStart', makeContext('onBeforeAgentStart', 'sid-4'))
+      await pipeline.execute('onBeforeToolCall', makeContext('onBeforeToolCall', 'sid-4'))
     }
     expect(warnSpy).not.toHaveBeenCalled()
 
-    await pipeline.execute('onBeforeAgentStart', makeContext('onBeforeAgentStart', 'sid-4'))
+    await pipeline.execute('onBeforeToolCall', makeContext('onBeforeToolCall', 'sid-4'))
     expect(warnSpy).toHaveBeenCalledTimes(1)
     const texts = warnSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
     expect(texts).toContain('skipped total=10')

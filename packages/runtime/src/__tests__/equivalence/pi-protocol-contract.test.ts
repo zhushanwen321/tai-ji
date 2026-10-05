@@ -156,6 +156,8 @@ const REDUCER_CASE_TYPES = [
   'compaction',
   'branch_summary',
   'custom_message',
+  'usage',
+  'context_edit',
 ] as const
 
 /**
@@ -173,6 +175,8 @@ function assertReducerCaseCoverage(entry: PiEntry): void {
     case 'compaction':
     case 'branch_summary':
     case 'custom_message':
+    case 'usage':
+    case 'context_edit':
       return
     default: {
       const uncovered: never = entry
@@ -339,22 +343,13 @@ describe.skipIf(!FAUX_PI_READY)(
       expect(observedTypes.has('message')).toBe(true)
       expect(observedTypes.has('session_info')).toBe(true)
 
-      // 编译期 exhaustive 的运行时侧证：真实 message entry 走 assertReducerCaseCoverage
-      // 必命中 case；六个建模类型各自的最小形态也逐个过 switch（case 全集可达性）
+      // 真实产物侧证：get_entries 产出含 message entry 且能通过穷举守卫。
+      // 「case 全集可达性」的运行时循环已删——文件编译通过后类型化字面量恒命中
+      // case（default 对 PiEntry 成员不可达），该循环不可能红，全集证明由
+      // assertReducerCaseCoverage 的编译期 never 守卫独自承载。
       const messageEntry = rawEntries.find((e) => e.type === 'message')
       expect(messageEntry).toBeDefined()
       assertReducerCaseCoverage(messageEntry as unknown as PiEntry)
-      const minimalEntries: PiEntry[] = [
-        { type: 'message', timestamp: 't', message: { role: 'user' } },
-        { type: 'custom', timestamp: 't', customType: 'probe' },
-        { type: 'label', timestamp: 't' },
-        { type: 'compaction', timestamp: 't' },
-        { type: 'branch_summary', timestamp: 't' },
-        { type: 'custom_message', timestamp: 't', customType: 'probe' },
-      ]
-      for (const e of minimalEntries) {
-        expect(() => assertReducerCaseCoverage(e)).not.toThrow()
-      }
 
       console.log(
         `[W25 contract] D5 固化证据：${allEvents.length} 事件 0 条 entry_appended | ` +

@@ -584,7 +584,6 @@ export default {
     modelSwitch: {
       general: 'Switch failed: {error}',
       sessionActivateFailed: 'Could not restore the session — reopen it from the sidebar',
-      sessionActivateTimeout: 'Session restore timed out — please retry shortly',
       modelNotFound: 'This model no longer exists — please pick another',
       providerCredentialMissing: 'This provider has no credential — add the API key in Settings',
       engineModelMissing: 'The engine has not picked up this model yet: retry in a couple of seconds if you just changed the config; if it keeps failing, check the provider config in Settings',

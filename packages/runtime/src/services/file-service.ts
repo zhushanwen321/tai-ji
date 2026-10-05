@@ -41,8 +41,6 @@ export interface FileServiceOptions {
   allowedReadDirs?: string[]
 }
 
-/** 读取超时（ms），listDir/stat/readFile 共用（NFR ④K-2）。导出供测试 advanceTimersByTime 用。 */
-export const READ_TIMEOUT_MS = 10_000
 /** 文件大小截断阈值（1MB，readFile 用，AC-6.7）。导出供测试断言用。 */
 export const MAX_FILE_SIZE = 1_048_576
 /**
@@ -77,41 +75,6 @@ export const BUILTIN_IGNORE_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', 'coverage', '.next', '.cache', '.turbo',
 ])
 
-/**
- * 超时包装（NFR ④K-2，源码简化 T9 从 FileService 私有方法提取为可直测独立单元）：
- * promise 与定时器赛跑，超时 → reject FileError('timeout')，message 携带 label 定位操作。
- * FileService.callFs 是唯一生产消费点（READ_TIMEOUT_MS 全局统一超时）；导出供测试直测
- * 超时触发 / clearTimeout 无泄漏 / FileError 形状（此前私有不可直测，测试被迫本地复制副本）。
- *
- * 实现用单 Promise 构造器 + 手动 settle（非 Promise.race）：定时器回调直接调外层 reject，
- * 不产生被 reject 的中间 timeout promise —— 避免「落败 promise 异步 reject 触发
- * unhandledRejection」的竞态（Promise.race + setTimeout 超时模式的已知坑）。
- * promise settle 后立即 clearTimeout，无悬挂定时器。
- */
-export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    let settled = false
-    const timer = setTimeout(() => {
-      if (settled) return
-      settled = true
-      reject(new FileError('timeout', `${label} timed out after ${ms}ms`))
-    }, ms)
-    promise.then(
-      (v) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        resolve(v)
-      },
-      (e) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        reject(e)
-      },
-    )
-  })
-}
 
 /** 空 matcher 单例（无 .gitignore / 内容为空时共享，matchPath 永远 false）。 */
 const EMPTY_MATCHER: IgnoreMatcher = compileIgnoreRules('')
@@ -127,7 +90,7 @@ export class FileService implements IFileService {
    *
    * ignore 策略：始终返回所有节点，对 .gitignore 命中的节点标记 `ignored=true`，
    * 由前端按 showIgnored 开关做本地 computed 过滤（瞬时切换不重拉，避免闪烁）。
-   * @throws FileError('session_not_found' | 'permission_denied' | 'timeout')
+   * @throws FileError('session_not_found' | 'permission_denied')
    */
   async listTree(sessionId: string): Promise<FileNode[]> {
     const cwd = this.requireCwd(sessionId)
@@ -150,7 +113,7 @@ export class FileService implements IFileService {
   /**
    * 展开目录单层子（UC-3，#3，AC-2.3/2.5，T2.1/T2.10）。
    * 同 listTree 的 ignore 策略：始终返回所有节点并标记 ignored=true。
-   * @throws FileError('out_of_cwd' | 'session_not_found' | 'permission_denied' | 'timeout')
+   * @throws FileError('out_of_cwd' | 'session_not_found' | 'permission_denied')
    */
   async expandDir(sessionId: string, path: string): Promise<FileNode[]> {
     const cwd = this.requireCwd(sessionId)
@@ -164,7 +127,7 @@ export class FileService implements IFileService {
   /**
    * 读文件内容（UC-6 前置，#7，AC-7.1/7.3）。越界守门 + >1MB 截断。
    * W1b 范围：cwd 越界守门 + 读取 + 截断。BC-3 白名单（~/.agents/skills 等）W2 补。
-   * @throws FileError('out_of_cwd' | 'not_found' | 'permission_denied' | 'timeout' | 'read_failed')
+   * @throws FileError('out_of_cwd' | 'not_found' | 'permission_denied' | 'read_failed')
    */
   async readFile(sessionId: string, path: string): Promise<{ content: string; truncated: boolean }> {
     const cwd = this.requireCwd(sessionId)
@@ -195,7 +158,7 @@ export class FileService implements IFileService {
    * 无法走 cwd 守门，改走 allowedReadDirs 全局白名单（~/.agents/skills 等 skill 目录）。
    *
    * 原 server.ts handleFileRead 内联逻辑下沉至此（解三层违纪 AC-2b）。白名单目录由装配时传入。
-   * @throws FileError('out_of_cwd' | 'not_found' | 'permission_denied' | 'timeout' | 'read_failed')
+   * @throws FileError('out_of_cwd' | 'not_found' | 'permission_denied' | 'read_failed')
    */
   async readFileFromWhitelist(path: string): Promise<{ content: string; truncated: boolean }> {
     const allowed = this.opts.allowedReadDirs ?? []
@@ -260,8 +223,8 @@ export class FileService implements IFileService {
    * truncated（D7，adversarial-review-fixes §3.4）：DoS 上限 MAX_SEARCH_RESULTS 截止时该目录
    * 层还有未收集条目 → true（硬信号：确实有文件被截掉；恰达上限且无剩余条目为 false）——
    * file.search.cwd:result 携带，前端提示「结果已截断」。
-   * @throws FileError('not_found' | 'permission_denied' | 'timeout') —— cwd 不存在或非目录抛
-   *   not_found；准入 stat 经 callFs，EACCES/EPERM → permission_denied、超时 → timeout；
+   * @throws FileError('not_found' | 'permission_denied') —— cwd 不存在或非目录抛
+   *   not_found；准入 stat 经 callFs，EACCES/EPERM → permission_denied；
    *   其余 fs 错误（递归期）per-dir 容错不抛
    */
   async searchFilesInCwd(cwd: string, showIgnored?: boolean): Promise<{ files: FileNode[]; truncated: boolean }> {
@@ -323,7 +286,7 @@ export class FileService implements IFileService {
       try {
         entries = await this.callFs(() => this.opts.executor.listDir(absPath, { withSize: false }), 'listDir')
       } catch {
-        // per-directory 容错：单目录 EACCES/ENOENT/timeout 跳过，不中断整体递归
+        // per-directory 容错：单目录 EACCES/ENOENT 跳过，不中断整体递归
         return
       } finally {
         release()
@@ -491,20 +454,22 @@ export class FileService implements IFileService {
   }
 
   /**
-   * 执行一次 executor 调用：超时包装（NFR ④K-2）+ 错误分类（EACCES/ENOENT → FileError）。
-   * - 超时 → FileError('timeout')（withTimeout 已抛，label 定位是哪个 fs 操作）
+   * 执行一次 executor 调用并分类 fs 错误（EACCES/ENOENT → FileError）。
+   * fs 读取墙钟超时包装（READ_TIMEOUT_MS / withTimeout，NFR ④K-2）已随 ADR-0122 退役——
+   * 本方法现为直通调用，不再产生 'timeout' 失败形态；_label 原为超时定位用，保留签名避免波及调用点。
    * - EACCES/EPERM → FileError('permission_denied')
    * - ENOENT → FileError('not_found')
    * - 其余（含已分类的 FileError）→ 透传
    */
-  private async callFs<T>(op: () => Promise<T>, label: string): Promise<T> {
+  private async callFs<T>(op: () => Promise<T>, _label: string): Promise<T> {
     try {
-      return await withTimeout(op(), READ_TIMEOUT_MS, label)
+      // fs 读取墙钟（READ_TIMEOUT_MS 10s，NFR ④K-2）已随 ADR-0122 退役。
+      return await op()
     } catch (e) {
       const code = (e as { code?: string } | null)?.code
       if (code === 'EACCES' || code === 'EPERM') throw new FileError('permission_denied')
       if (code === 'ENOENT') throw new FileError('not_found')
-      throw e // FileError('timeout') 或未知错误透传
+      throw e // 未知错误透传（已分类 FileError 亦经此路径原样上抛）
     }
   }
 }

@@ -238,8 +238,8 @@ describe("Workflow hook: structured-output failure retry", () => {
   afterEach(() => {
     // fixture 的 restoreSchemaEnv 只处理 env；vi.restoreAllMocks 必须在消费方保留
     restoreSchemaEnv(originalSchemaEnv);
-    // 闸门 terminal 会武装真实 15s 兜底硬退 timer——触发 terminal 的测试用 fake timers
-    // 包裹，此处还原真实 timers 并丢弃未触发的 fake timer（不残留跨测试的硬退风险）
+    // terminal 链含 fire-and-forget handler 的测试用 fake timers 包裹，此处还原真实
+    // timers 并丢弃未触发的 fake timer（不残留跨测试的 timer）
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -314,7 +314,7 @@ describe("Workflow hook: structured-output failure retry", () => {
   });
 
   it("stops steering after MAX_HOOK_RETRIES (=2) exhausted", async () => {
-    vi.useFakeTimers(); // 第 3 轮失败触发 gate terminal（武装 15s 兜底 timer）——fake 掉避免泄漏
+    vi.useFakeTimers(); // 第 3 轮失败触发 gate terminal——fake 掉避免真实 timer 泄漏
     const pi = createMockPi();
     await loadExtension(pi, SCHEMA);
 

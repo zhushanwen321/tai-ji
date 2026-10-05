@@ -25,16 +25,19 @@ const DEFAULT_METADATA: StatusKeyMetadata = {
 
 // ── event payload types ───────────────────────────────────────────
 
+/**
+ * statusSetUpdate 载荷（平铺形状，pi1-disposition-chat-flow D7②）：新投递点
+ * （pluginService.notifyPiEvent）按泛型 'onPiEvent' 键派发，hook-api 适配层走
+ * 「event-interpreter 平铺」分支——handler 第二参 = 剥离 event 元字段后的业务载荷本身，
+ * 键值直出（sessionId/key/text/textRaw）。
+ * [HISTORICAL] 原按 bridge 包装形状 BridgeEventData{eventName,data,sessionId} 解包
+ * bridgeData.data ?? {}——该形状随 bridge 退役消失；且旧分发键错位（注册键 'onPiEvent'
+ * vs 分发键原始事件名）使本插件从未实际收到过事件（断链已随挂点迁移修复）。
+ */
 interface StatusSetUpdateData {
-  sessionId: string
-  key: string
-  text: string
-}
-
-interface BridgeEventData {
-  eventName: string
-  data: StatusSetUpdateData | null | undefined
-  sessionId: string
+  sessionId?: string
+  key?: string
+  text?: string
 }
 
 // ── plugin activation ─────────────────────────────────────────────
@@ -46,11 +49,10 @@ export async function activate(context: PluginContext): Promise<void> {
     'plugin:statusSetUpdate',
     async (_eventName: string, data: unknown) => {
       try {
-        const bridgeData = data as BridgeEventData
-        const eventData = bridgeData.data ?? {}
-        const sessionId = (eventData as Record<string, unknown>).sessionId as string ?? ''
-        const key = String((eventData as Record<string, unknown>).key ?? '')
-        const text = (eventData as Record<string, unknown>).text == null ? '' : String((eventData as Record<string, unknown>).text)
+        const eventData = (data ?? {}) as StatusSetUpdateData
+        const sessionId = typeof eventData.sessionId === 'string' ? eventData.sessionId : ''
+        const key = String(eventData.key ?? '')
+        const text = eventData.text == null ? '' : String(eventData.text)
 
         // Empty text means clear — let updateStatusBarItem handle removal (plugin-service deletes from Map)
 
@@ -66,7 +68,7 @@ export async function activate(context: PluginContext): Promise<void> {
             sessionId: meta.scope === 'per-session' ? sessionId : undefined,
           },
         )
-         
+
       } catch (err) {
         console.error('[statusline] Error handling statusSetUpdate:', err)
         // Intentionally silent — statusline is passive, should not crash the Worker

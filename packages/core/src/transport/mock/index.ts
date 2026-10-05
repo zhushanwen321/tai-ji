@@ -39,6 +39,8 @@ import type {
   QuotaConfigurePayload,
   ThinkingLevel,
   LlmRetryConfig,
+  CodemodeEnabledResult,
+  CodemodeSetEnabledResult,
   ScannedSkillInfo,
   ScannedAgentInfo,
   RenameMode,
@@ -1755,6 +1757,8 @@ const mockSmartContextPrefs = {
   reminderThresholds: [] as number[],
   excludedModels: [] as string[],
 }
+// codemode 开关内存态（默认开 = 产品裁决「常驻默认打开」，与启动迁移写 +codemode 后的读侧一致）
+const mockCodemodePrefs = { enabled: true }
 
 export const settings = {
   // 订阅（转发到 mock sub）
@@ -1852,6 +1856,15 @@ export const settings = {
   async setSmartContextExcludedModels(models: string[]): Promise<ServerMessageMap['config.smartContextExcludedModels']> {
     mockSmartContextPrefs.excludedModels = [...models]
     return { models: [...models] }
+  },
+  // ── [C3] system 设置项字段（codemode）：内存态 fixture（不持久化；损坏错误态为 runtime
+  //    读侧 raw 预检行为，mock 模式文件系统态不模拟，恒 corruption=null）──
+  async getCodemodeEnabled(): Promise<CodemodeEnabledResult> {
+    return { enabled: mockCodemodePrefs.enabled, corruption: null }
+  },
+  async setCodemodeEnabled(enabled: boolean): Promise<CodemodeSetEnabledResult> {
+    mockCodemodePrefs.enabled = enabled
+    return { ok: true, enabled }
   },
 }
 

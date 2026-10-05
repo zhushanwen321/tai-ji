@@ -164,7 +164,7 @@ taiji 的 Agent 能力通过 pi 扩展机制实现，源码在 [`extensions/`](e
 | [`pi-cw-tool`](extensions/universal/cw-tool/README.md) | cw 2.0 runner + `cw_query` 工具 |
 | [`pi-provider-live-sync`](extensions/universal/provider-live-sync/README.md) | Provider 配置实时同步 |
 
-其余 5 个（`agent-ext` / `msg-id-mapper` / `plugin-bridge` / `system-prompt` / `system-prompt-trace`，npm 包名带 `pi-` 前缀）为 taiji 集成专用，源码在 `extensions/taiji/` 下。扩展开发见 [docs/extensions/development-guide.md](docs/extensions/development-guide.md)。
+其余 4 个（`agent-ext` / `msg-id-mapper` / `system-prompt` / `system-prompt-trace`，npm 包名带 `pi-` 前缀）为 taiji 集成专用，源码在 `extensions/taiji/` 下。扩展开发见 [docs/extensions/development-guide.md](docs/extensions/development-guide.md)。
 
 ---
 

@@ -1,18 +1,17 @@
 /**
  * worker-message-pump handlers — handleWorkerExit/Error/ScriptError + postBudgetUpdate 测试。
  *
- * 参考 worker-message-pump-workflow-call.test.ts 的 mock 构建。通过 vi.useFakeTimers() 跳过
- * scheduleRebuild 的指数退避（1s/2s/4s）。
+ * 参考 worker-message-pump-workflow-call.test.ts 的 mock 构建。[ADR-0122] 后错误
+ * 一次即终态（原 scheduleRebuild 指数退避重试矩阵已删），无需 fake timers 压缩退避。
  *
  * 覆盖：
- * - handleWorkerExit：code=0 正常退出（no-op） / code!=0 委托 handleWorkerError / stale handle 过滤
- * - handleWorkerError：超限（count > MAX=3）→ transition done,failed + 直落 pending:unregister
- *   / 未超限 → rebuildRuntime（workerHost.start 重建）
- * - handleScriptError：超限 → transition done,failed / workerLogs 捕获
+ * - handleWorkerExit：code=0 正常退出（no-op） / code!=0 一次即 failed / stale handle 过滤
+ * - handleWorkerError：一次即 transition done,failed + 直落 pending:unregister
+ * - handleScriptError：一次即 failed / workerLogs 捕获
  * - postBudgetUpdate：postMessage budget-update（usedTokens/usedCost）
  * - stale handle 过滤（handle.isCurrent=false）+ terminal stale 守卫（isTerminal 语义）
- * - rebuildRuntime：worker 崩溃后 workerHost.start + scheduleTimeBudget 重排 + replaceRuntime
- *   + 在飞 call 清理（discardInFlightCalls 生效：在飞清除、done 保留）
+ * - 孤儿 call 守卫（S7-second）：重跑 dispatch 替换同 callId 条目后，旧代际迟到
+ *   completion 不投新 worker、不复活 Map/trace 条目
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -21,14 +20,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import {
-  forgetRunResumedBudget,
   handleScriptError,
   handleWorkerError,
   handleWorkerExit,
   handleWorkerMessage,
-  noteRunResumedBudget,
   postBudgetUpdate,
-  rebuildRuntime,
 } from "../worker-message-pump.ts";
 import {
   dispatchRunCreated,
@@ -57,8 +53,6 @@ function findByStep(trace: Trace, stepIndex: number) {
 /** 构造一个活体（未终局）mock WorkflowRun，meta 可配置。 */
 let runSeq = 0;
 function makeRunningRun(opts: {
-  workerErrorCount?: number;
-  scriptErrorCount?: number;
   budgetTimeMs?: number;
   postMessage?: ReturnType<typeof vi.fn>;
   /** [F1] 预置本 runtime 代际已收到终态消息（return/error）。 */
@@ -70,15 +64,11 @@ function makeRunningRun(opts: {
       budget: { usedTokens: 50, usedCost: 0.1 },
       // L9: errorLogs 现在用 push 追加——必须是真实数组，不能省略
       errorLogs: [],
-      // rebuildRuntime 内 discardInFlightCalls 遍历 calls + 移除 trace 节点——
-      // 必须是真实 Map（空 = 无在飞 call，discard 为 no-op）
       calls: new Map(),
       trace: { removeByStepIndex: vi.fn() },
     },
     meta: {
       startedAt: new Date().toISOString(),
-      workerErrorCount: opts.workerErrorCount,
-      scriptErrorCount: opts.scriptErrorCount,
     },
     spec: {
       scriptName: "test-wf",
@@ -143,16 +133,7 @@ function makeHandle(isCurrent = true): WorkerHandle {
   return { isCurrent } as unknown as WorkerHandle;
 }
 
-beforeEach(() => {
-  vi.useFakeTimers();
-});
-
-afterEach(() => {
-  vi.useRealTimers();
-});
-
-// ── handleWorkerExit ─────────────────────────────────────────
-
+// ── [W2/V1] 六态机引导 + 终态 fixture ────────────────────────
 
 /** [W2/V1] 六态机引导：journal 首帧（run-created）落账——finalizeRun/abortRun 等
  *  活体终局入口的六态机裁决要求 created→dispatched 已在链上（生产链路由
@@ -172,11 +153,12 @@ function markRunTerminalDone(run: WorkflowRun, reason: DoneReason = "completed")
   });
 }
 
+// ── handleWorkerExit ─────────────────────────────────────────
+
 describe("handleWorkerExit", () => {
   it("code=0 且已收到终态消息：no-op（不 transition、不 save）", async () => {
-    // [F1] 语义更新：exit(0) no-op 的前提是本代际已交付 return/error（正常收尾退出，
-    // 或 script-error 重试退避窗口）。无终态消息的 exit(0) 现转 done,failed，
-    // 见下方用例与 worker-exit-without-result.test.ts。
+    // [F1] exit(0) no-op 的前提是本代际已交付 return/error（正常收尾退出）。
+    // 无终态消息的 exit(0) 转 done,failed，见下方用例与 worker-exit-without-result.test.ts。
     const run = makeRunningRun({ receivedTerminalMessage: true });
     await seedRunCreated(run);
     const deps = makeDeps();
@@ -205,9 +187,8 @@ describe("handleWorkerExit", () => {
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
   });
 
-  it("code!=0 异常退出：委托 handleWorkerError → 超 MAX 重试 → transition done,failed", async () => {
-    // workerErrorCount 已达 MAX=3 → handleWorkerError 内 count=4 > 3 → failed
-    const run = makeRunningRun({ workerErrorCount: 3 });
+  it("code!=0 异常退出：委托 handleWorkerError → 一次即 transition done,failed（ADR-0122）", async () => {
+    const run = makeRunningRun();
     await seedRunCreated(run);
     const deps = makeDeps();
     const handle = makeHandle(true);
@@ -220,6 +201,8 @@ describe("handleWorkerExit", () => {
     // 持久化 + 完成通知
     expect(deps.store.save).toHaveBeenCalledTimes(1);
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
+    // 无自动重建：workerHost.start 不被调
+    expect(deps.workerHost.start).not.toHaveBeenCalled();
   });
 
   it("stale handle（isCurrent=false）：丢弃 exit 事件，不处理", async () => {
@@ -252,15 +235,13 @@ describe("handleWorkerExit", () => {
 // ── handleWorkerError ────────────────────────────────────────
 
 describe("handleWorkerError", () => {
-  it("count > MAX（3）：transition done,failed + save + 直落 pending:unregister", async () => {
-    // workerErrorCount=3 → count=4 > MAX
-    const run = makeRunningRun({ workerErrorCount: 3 });
+  it("worker error → 一次即 transition done,failed + save + 直落 pending:unregister（ADR-0122）", async () => {
+    const run = makeRunningRun();
     await seedRunCreated(run);
     const deps = makeDeps();
 
     await handleWorkerError(run, new Error("worker boom"), deps, makeHandlers());
 
-    expect(run.meta.workerErrorCount).toBe(4);
     expect(isRunSettled(run)).toBe(true);
     expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(run.state.error).toBe("worker boom");
@@ -271,26 +252,22 @@ describe("handleWorkerError", () => {
       status: "failed",
     });
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
+    // 无自动重建
+    expect(deps.workerHost.start).not.toHaveBeenCalled();
   });
 
-  it("count <= MAX：退避 + rebuildRuntime（workerHost.start 重建新 runtime）", async () => {
-    const run = makeRunningRun({ workerErrorCount: 0 }); // count=1 <= MAX
+  it("[R4-F1] 同代际幂等：receivedTerminalMessage 已置位 → 第二个事件直接跳过", async () => {
+    const run = makeRunningRun({ receivedTerminalMessage: true });
+    await seedRunCreated(run);
     const deps = makeDeps();
 
-    const promise = handleWorkerError(run, new Error("transient"), deps, makeHandlers());
+    await handleWorkerError(run, new Error("second event"), deps, makeHandlers());
 
-    // 推进指数退避（第 1 次重试：1s）
-    await vi.advanceTimersByTimeAsync(1000);
-    await promise;
-
-    expect(run.meta.workerErrorCount).toBe(1);
-    // 状态仍 running（重试不改 status）
     expect(isRunSettled(run)).toBe(false);
-    // workerHost.start 被调（rebuildRuntime 内重建 worker）
-    expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
+    expect(deps.store.save).not.toHaveBeenCalled();
   });
 
-  it("终态（done）：stale 守卫前置丢弃（不递增 workerErrorCount）", async () => {
+  it("终态（done）：stale 守卫前置丢弃", async () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
     // [D6(a)] 终态 fixture 注入注册表条目（生产经 dispatch 链 note）。
@@ -299,7 +276,6 @@ describe("handleWorkerError", () => {
 
     await handleWorkerError(run, new Error("stale"), deps, makeHandlers());
 
-    expect(run.meta.workerErrorCount).toBeUndefined(); // 未递增
     expect(deps.store.save).not.toHaveBeenCalled();
   });
 });
@@ -307,8 +283,8 @@ describe("handleWorkerError", () => {
 // ── handleScriptError ────────────────────────────────────────
 
 describe("handleScriptError", () => {
-  it("count > MAX（3）：transition done,failed + 捕获 workerLogs", async () => {
-    const run = makeRunningRun({ scriptErrorCount: 3 }); // count=4 > MAX
+  it("script error → 一次即 transition done,failed + 捕获 workerLogs（ADR-0122）", async () => {
+    const run = makeRunningRun();
     await seedRunCreated(run);
     const deps = makeDeps();
     const workerLogs = [
@@ -317,30 +293,16 @@ describe("handleScriptError", () => {
 
     await handleScriptError(run, "TypeError: x is undefined", workerLogs, deps, makeHandlers());
 
-    expect(run.meta.scriptErrorCount).toBe(4);
     expect(isRunSettled(run)).toBe(true);
     expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
-    expect(run.state.error).toContain("Workflow failed after 3 retries");
-    expect(run.state.error).toContain("TypeError: x is undefined");
+    // 错误原文显式上报（无 retries 包装文案）
+    expect(run.state.error).toBe("TypeError: x is undefined");
     // workerLogs 捕获到 errorLogs
     expect(run.state.errorLogs).toEqual(workerLogs);
     expect(deps.store.save).toHaveBeenCalledTimes(1);
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
-  });
-
-  it("count <= MAX：退避 + rebuildRuntime", async () => {
-    const run = makeRunningRun({ scriptErrorCount: 1 }); // count=2 <= MAX
-    const deps = makeDeps();
-
-    const promise = handleScriptError(run, "ReferenceError", [], deps, makeHandlers());
-
-    // 第 2 次重试退避：2s
-    await vi.advanceTimersByTimeAsync(2000);
-    await promise;
-
-    expect(run.meta.scriptErrorCount).toBe(2);
-    expect(isRunSettled(run)).toBe(false);
-    expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
+    // 无自动重建
+    expect(deps.workerHost.start).not.toHaveBeenCalled();
   });
 
   it("terminal 状态：stale 守卫前置丢弃", async () => {
@@ -352,7 +314,6 @@ describe("handleScriptError", () => {
 
     await handleScriptError(run, "late error", [], deps, makeHandlers());
 
-    expect(run.meta.scriptErrorCount).toBeUndefined();
     expect(deps.store.save).not.toHaveBeenCalled();
   });
 });
@@ -381,178 +342,18 @@ describe("postBudgetUpdate", () => {
   });
 });
 
-// ── rebuildRuntime ───────────────────────────────────────────
-
-describe("rebuildRuntime", () => {
-  it("worker 崩溃后重建：workerHost.start + replaceRuntime（保持 running）", () => {
-    const run = makeRunningRun({ budgetTimeMs: 0 }); // 无时间预算
-    const deps = makeDeps();
-
-    rebuildRuntime(run, deps, makeHandlers());
-
-    // workerHost.start 被调（构造新 worker）
-    expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
-    // replaceRuntime 被调（新 runtime 绑定，mock 内仅替换 runtime 字段）
-    expect(run.runtime).toBeDefined();
-    // status 仍 running（replaceRuntime 不改 status）
-    expect(isRunSettled(run)).toBe(false);
-  });
-
-  it("带 budgetTimeMs 时重排 scheduleTimeBudget 计时器", () => {
-    const run = makeRunningRun({ budgetTimeMs: 5000 });
-    const scheduleTimeBudget = vi.fn((_runId: string, _budgetTimeMs: number) => undefined);
-    const deps = makeDeps({ scheduleTimeBudget });
-
-    rebuildRuntime(run, deps, makeHandlers());
-
-    // D-12 regression fix (round-2 #2)：replaceRuntime 后重排时间预算
-    expect(scheduleTimeBudget).toHaveBeenCalledTimes(1);
-    // 第 1 参 = runId（mock run 无 runId），第 2 参 = budgetTimeMs
-    const args = scheduleTimeBudget.mock.calls[0]!;
-    expect(args[1]).toBe(5000);
-  });
-
-  it("无 scheduleTimeBudget 注入时不重排（向后兼容，不抛错）", () => {
-    const run = makeRunningRun({ budgetTimeMs: 5000 });
-    const deps = makeDeps({ scheduleTimeBudget: undefined });
-
-    expect(() => rebuildRuntime(run, deps, makeHandlers())).not.toThrow();
-    expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
-  });
-
-  it("rebuildRuntime 后同步清理在飞 call（status !== done 清除、done 保留）", () => {
-    const run = makeRunningRun({ budgetTimeMs: 0 });
-    // 注入在飞 call（running）与已完成 call（done）+ trace 节点移除 spy
-    const removeByStepIndex = vi.fn();
-    const calls = new Map<number, { id: number; status: string }>([
-      [7, { id: 7, status: "running" }],
-      [8, { id: 8, status: "done" }],
-    ]);
-    (run.state as { calls: unknown }).calls = calls;
-    (run.state as { trace: unknown }).trace = { removeByStepIndex };
-    const deps = makeDeps();
-
-    rebuildRuntime(run, deps, makeHandlers());
-
-    // 在飞 call（running）被移除（含 trace 节点）；已完成 call（done）保留供重跑 replay
-    expect(calls.has(7)).toBe(false);
-    expect(calls.has(8)).toBe(true);
-    expect(removeByStepIndex).toHaveBeenCalledTimes(1);
-    expect(removeByStepIndex).toHaveBeenCalledWith(7);
-    // 重建本身不受影响
-    expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
-  });
-});
-
 // ── orphan call guard（S7-second 竞态回归） ─────────────────
 //
-// 复刻 gate-report §3 的竞态形态：dispatch agent-call → 立即 rebuildRuntime（同步
-// discard 在飞 call）→ 旧 dispatch 的 promise 以失败/成功 resolve → 迟到的旧代际
-// 结果不得经 postAgentResult 投给**新 worker** 的同 callId pending（否则重跑中的
-// agent() 被旧结果劫持 resolve 为空串 → 脚本假成功，PHASE_B 子进程被连带收割）。
+// 竞态形态：dispatch agent-call → 重跑 dispatch 替换同 callId 条目 → 旧 dispatch 的
+// promise 以失败/成功 resolve → 迟到的旧代际结果不得经 postAgentResult 投给**重跑
+// dispatch 的同 callId pending**（否则重跑中的 agent() 被旧结果劫持 resolve 为空串
+// → 脚本假成功）。[HISTORICAL] 原用例经 rebuildRuntime 的 discardInFlightCalls 构造
+// discard——该机制随重试矩阵删除（ADR-0122），本组用例改为「直接重跑 dispatch 替换」
+// 形态，守卫谓词（isOrphanedCall）的判定语义不变。
 //
-// 用真实 WorkflowRun/RunRuntime/Trace/Budget（而非 makeRunningRun 的简化 mock）：
-// rebuildRuntime → replaceRuntime → release 的 abort 旧 controller / terminate 旧
-// worker / discardInFlightCalls 全链路需要真实聚合根行为才成立。
+// 用真实 WorkflowRun/RunRuntime/Trace/Budget（而非 makeRunningRun 的简化 mock）。
 
-// ── race-F3：rebuild 时间预算折算（已耗墙钟不重置） ─────────────
-//
-// 旧实现 rebuildRuntime 重排计时器用满额 budgetTimeMs——每吃一次 worker/script
-// 错误重试就重置一次预算，最坏 6 次重试放大 ~6× 墙钟。修复后：
-// - 重排值 = max(0, 原预算 - 已耗墙钟)（从 run.meta.startedAt 推算）
-// - 重试前已耗尽 → 不 rebuild，直接 done,time_limited 终态
-//
-// 确定性说明：本文件 beforeEach 已 useFakeTimers()（默认 fake Date）——Date.now
-// 冻结，startedAt 倒拨值即精确已耗墙钟，断言可精确等值。
-describe("race-F3: rebuild 时间预算折算", () => {
-  it("剩余 30% → 重排预算 = 30% 而非满额", () => {
-    const run = makeRunningRun({ budgetTimeMs: 5000 });
-    // 已耗 70%（3500ms）→ 剩余 1500ms；fake Date 冻结，elapsed 精确
-    run.meta.startedAt = new Date(Date.now() - 3500).toISOString();
-    const scheduleTimeBudget = vi.fn((_runId: string, _budgetTimeMs: number) => undefined);
-    const deps = makeDeps({ scheduleTimeBudget });
-
-    rebuildRuntime(run, deps, makeHandlers());
-
-    expect(scheduleTimeBudget).toHaveBeenCalledTimes(1);
-    const args = scheduleTimeBudget.mock.calls[0]!;
-    expect(args[1]).toBe(1500);
-    // run 保持 running（正常 rebuild 路径不受影响）
-    expect(isRunSettled(run)).toBe(false);
-  });
-
-  it("重试前预算已耗尽（已耗 > 预算）→ 不 rebuild，直接 done,time_limited", async () => {
-    const run = makeRunningRun({ budgetTimeMs: 5000 });
-    await seedRunCreated(run);
-    // 已耗 6000ms > 预算 5000ms（退避 advance 1000ms 后已耗 7000ms，仍耗尽）
-    run.meta.startedAt = new Date(Date.now() - 6000).toISOString();
-    const scheduleTimeBudget = vi.fn((_runId: string, _budgetTimeMs: number) => undefined);
-    const deps = makeDeps({ scheduleTimeBudget });
-
-    const p = handleScriptError(run, "boom", [], deps, makeHandlers());
-    await vi.advanceTimersByTimeAsync(1000); // 推进退避（1s）
-    await p;
-
-    // 不 rebuild：不启新 worker、不重排计时器
-    expect(deps.workerHost.start).not.toHaveBeenCalled();
-    expect(scheduleTimeBudget).not.toHaveBeenCalled();
-    // 直接 time_limited 终态 + 持久化 + 注销直落 + onRunDone
-    expect(isRunSettled(run)).toBe(true);
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "time_limited" });
-    expect(deps.store.save).toHaveBeenCalled();
-    expect(deps.appendEntry).toHaveBeenCalledWith(
-      "pending:unregister",
-      expect.objectContaining({ reason: "time_limited", status: "time_limited" }),
-    );
-    expect(deps.onRunDone).toHaveBeenCalled();
-  });
-
-  it("预算未耗尽（fresh run）→ 照常 rebuild，不误转 time_limited（防误伤回归）", async () => {
-    const run = makeRunningRun({ budgetTimeMs: 5000 }); // startedAt ≈ now，remaining 满
-    const scheduleTimeBudget = vi.fn((_runId: string, _budgetTimeMs: number) => undefined);
-    const deps = makeDeps({ scheduleTimeBudget });
-
-    const p = handleScriptError(run, "boom", [], deps, makeHandlers());
-    await vi.advanceTimersByTimeAsync(1000);
-    await p;
-
-    expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
-    expect(scheduleTimeBudget).toHaveBeenCalledTimes(1);
-    expect(isRunSettled(run)).toBe(false);
-  });
-
-  it("复活 run（spec 带继承预算 + D10 账本）：worker/script 错误重试按剩余活跃预算重排，不被 startedAt 墙钟误判耗尽", async () => {
-    // 修复 已归档设计档案（决策记录见 docs/adr/decisions.md） §1.1 后的生产形态：resume 重建 spec 带 run-created 继承的预算
-    const BUDGET = 60 * 60_000;
-    const run = makeRunningRun({ budgetTimeMs: BUDGET });
-    await seedRunCreated(run);
-    // 跨天搁置：startedAt 墙钟 7 天前——若走墙钟算法 remaining ≈ 0 会直接 time_limited；
-    // D10 账本（活跃 40min + 本段 5min）折算 → 剩余 ≈15min，正常 rebuild
-    run.meta.startedAt = new Date(Date.now() - 7 * 24 * 60 * 60_000).toISOString();
-    const scheduleTimeBudget = vi.fn((_runId: string, _budgetTimeMs: number) => undefined);
-    const deps = makeDeps({ scheduleTimeBudget });
-
-    try {
-      noteRunResumedBudget(run.runId, 40 * 60_000, Date.now() - 5 * 60_000);
-      const p = handleScriptError(run, "boom", [], deps, makeHandlers());
-      await vi.advanceTimersByTimeAsync(1000); // 退避 1s（Date 同步前进 1s）
-      await p;
-
-      // 不 time_limited：正常 rebuild + 计时器按剩余活跃预算重排（非满额 60min）
-      expect(isRunSettled(run)).toBe(false);
-      expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
-      expect(scheduleTimeBudget).toHaveBeenCalledTimes(1);
-      const rescheduled = scheduleTimeBudget.mock.calls[0]![1] as number;
-      expect(rescheduled).toBeGreaterThanOrEqual(14 * 60_000);
-      expect(rescheduled).toBeLessThanOrEqual(15 * 60_000);
-      expect(rescheduled).toBeLessThan(BUDGET);
-    } finally {
-      forgetRunResumedBudget(run.runId);
-    }
-  });
-});
-
-/** 手动控制的 deferred——精确编排「dispatch 挂起 → rebuild → 旧 promise settle」交错。 */
+// ── 手动控制的 deferred——精确编排「dispatch 挂起 → 替换 → 旧 promise settle」交错。
 interface Deferred<T> {
   promise: Promise<T>;
   resolve: (value: T) => void;
@@ -620,104 +421,11 @@ function findAgentResultPost(
   return undefined;
 }
 
-describe("orphan call guard（rebuild 后迟到 completion 不投递新 worker）", () => {
-  it("失败路径：discard + 重跑替换后，旧 dispatch 的失败 completion 不投新 worker、不复活 Map 条目", async () => {
-    const run = makeRealRun("wf-orphan-1");
-    const deps = makeDeps();
-    // rebuild 的新 worker——postMessage 记录用于断言「孤儿结果未投递」
-    const newWorkerPost = vi.fn();
-    deps.workerHost.start.mockImplementation(
-      () =>
-        ({ postMessage: newWorkerPost, terminate: vi.fn(async () => {}) }) as unknown as WorkerHandle,
-    );
-    const handlers = makeHandlers();
-
-    // 旧 runtime 代际：dispatch callId=1，runner 挂起（模拟在飞子进程）
-    const deferredA = createDeferred<AgentResult>();
-    deps.runner.run.mockImplementation(() => deferredA.promise);
-    await handleWorkerMessage(run, makeAgentCallMsg(1), deps, handlers);
-    await flushMicrotasks();
-    expect(run.state.calls.get(1)?.status).toBe("running");
-
-    // worker 崩溃 → rebuildRuntime：replaceRuntime（abort 旧 controller）+ 同步 discard 在飞 call
-    rebuildRuntime(run, deps, handlers);
-    expect(run.state.calls.has(1)).toBe(false);
-    expect(findByStep(run.state.trace, 1)).toBeUndefined();
-
-    // 新 worker 重跑脚本：同 callId=1 再 dispatch（重跑实例 B 挂起在飞）
-    const deferredB = createDeferred<AgentResult>();
-    deps.runner.run.mockImplementation(() => deferredB.promise);
-    await handleWorkerMessage(run, makeAgentCallMsg(1), deps, handlers);
-    await flushMicrotasks();
-    const rerunCall = run.state.calls.get(1);
-    expect(rerunCall).toBeDefined();
-
-    // 旧 dispatch 的 promise 以失败 resolve（abort 收割子进程后的迟到 finalize，
-    // error 含 "aborted" 命中 stale-context 快速路径——真实形态）
-    deferredA.resolve({ content: "", error: "Subprocess aborted by runtime shutdown" });
-    await flushMicrotasks();
-
-    // 孤儿失败结果不得投给新 worker（否则劫持重跑 pending 为空串假成功）
-    expect(findAgentResultPost(newWorkerPost, 1)).toBeUndefined();
-    // calls Map 无孤儿复活条目：callId=1 仍是重跑实例 B
-    expect(run.state.calls.get(1)).toBe(rerunCall);
-  });
-
-  it("成功路径：discard 后旧 dispatch 的成功 completion 不投新 worker、不复活 Map/trace 条目", async () => {
-    const run = makeRealRun("wf-orphan-2");
-    const deps = makeDeps();
-    const newWorkerPost = vi.fn();
-    deps.workerHost.start.mockImplementation(
-      () =>
-        ({ postMessage: newWorkerPost, terminate: vi.fn(async () => {}) }) as unknown as WorkerHandle,
-    );
-
-    const deferred = createDeferred<AgentResult>();
-    deps.runner.run.mockImplementation(() => deferred.promise);
-    await handleWorkerMessage(run, makeAgentCallMsg(2), deps, makeHandlers());
-    await flushMicrotasks();
-
-    rebuildRuntime(run, deps, makeHandlers());
-    expect(run.state.calls.has(2)).toBe(false);
-
-    // 旧 promise 以成功 resolve（runner 已完成、结果晚于 rebuild 到达）
-    deferred.resolve({ content: "late success", durationMs: 5, error: undefined, toolCalls: [] });
-    await flushMicrotasks();
-
-    expect(findAgentResultPost(newWorkerPost, 2)).toBeUndefined();
-    expect(run.state.calls.has(2)).toBe(false);
-    expect(findByStep(run.state.trace, 2)).toBeUndefined();
-  });
-
-  it("catch 路径：discard 后旧 dispatch 的异常 reject 不投新 worker、不复活 Map 条目", async () => {
-    // catch 块的 logger.error 会打印——静默防噪音
-    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      const run = makeRealRun("wf-orphan-3");
-      const deps = makeDeps();
-      const newWorkerPost = vi.fn();
-      deps.workerHost.start.mockImplementation(
-        () =>
-          ({ postMessage: newWorkerPost, terminate: vi.fn(async () => {}) }) as unknown as WorkerHandle,
-      );
-
-      const deferred = createDeferred<AgentResult>();
-      deps.runner.run.mockImplementation(() => deferred.promise);
-      await handleWorkerMessage(run, makeAgentCallMsg(3), deps, makeHandlers());
-      await flushMicrotasks();
-
-      rebuildRuntime(run, deps, makeHandlers());
-      expect(run.state.calls.has(3)).toBe(false);
-
-      deferred.reject(new Error("runner exploded"));
-      await flushMicrotasks();
-
-      expect(findAgentResultPost(newWorkerPost, 3)).toBeUndefined();
-      expect(run.state.calls.has(3)).toBe(false);
-    } finally {
-      spy.mockRestore();
-    }
-  });
+describe("orphan call guard（非孤儿路径不误伤）", () => {
+  // [HISTORICAL] 原「rebuild discard + 重跑替换」形态的孤儿守卫用例随重试矩阵删除
+  // （ADR-0122）——该形态现网不可达（同 run 内同 callId 重跑 dispatch 只发生在已删的
+  // rebuild 重跑场景）；谓词本体（isOrphanedCall / executeAgentCall isOrphaned 注入）
+  // 保留为接管形态的防御面，行为由 execute-agent-call.test.ts 的谓词直测覆盖。
 
   it("非孤儿正常路径：成功 completion 照常投递 agent-result（守卫不误伤）", async () => {
     const run = makeRealRun("wf-orphan-4");
@@ -737,154 +445,6 @@ describe("orphan call guard（rebuild 后迟到 completion 不投递新 worker�
     expect(findByStep(run.state.trace, 4)?.status).toBe("completed");
   });
 
-  it("U6/S3 场景重放：discard + 重跑替换后，旧 finalize 不污染重跑新 trace 节点（旧 call 实例仍 markDone）", async () => {
-    const run = makeRealRun("wf-orphan-s3");
-    const deps = makeDeps();
-    const newWorkerPost = vi.fn();
-    deps.workerHost.start.mockImplementation(
-      () => ({ postMessage: newWorkerPost, terminate: vi.fn(async () => {}) }) as unknown as WorkerHandle,
-    );
-    const handlers = makeHandlers();
-
-    // 旧代际 dispatch callId=9：runner 挂起（模拟在飞子进程）
-    const deferredA = createDeferred<AgentResult>();
-    deps.runner.run.mockImplementation(() => deferredA.promise);
-    await handleWorkerMessage(run, makeAgentCallMsg(9), deps, handlers);
-    await flushMicrotasks();
-    const oldCall = run.state.calls.get(9);
-    expect(oldCall?.status).toBe("running");
-
-    // rebuild：discard 移除旧 call 条目 + trace 节点（replaceRuntime 同步 abort 旧 signal）
-    rebuildRuntime(run, deps, handlers);
-    expect(run.state.calls.has(9)).toBe(false);
-    expect(findByStep(run.state.trace, 9)).toBeUndefined();
-
-    // 重跑 dispatch 同 callId=9：新实例 + 新 trace 节点 running，挂起在飞
-    const deferredB = createDeferred<AgentResult>();
-    deps.runner.run.mockImplementation(() => deferredB.promise);
-    await handleWorkerMessage(run, makeAgentCallMsg(9), deps, handlers);
-    await flushMicrotasks();
-    const rerunCall = run.state.calls.get(9);
-    expect(rerunCall).toBeDefined();
-    expect(rerunCall).not.toBe(oldCall);
-    expect(findByStep(run.state.trace, 9)?.status).toBe("running");
-
-    // 旧 runner promise 以非 stale 失败 resolve——rebuild 已 abort 旧 signal，旧
-    // executeAgentCall 醒来走 signal.aborted finalize 调用点（错误文案不含 stale
-    // 模式词，确保不进 stale 分支）。红性锚点：无 OB2 守卫时此处 trace.update(9)
-    // 命中重跑新节点 → 短暂污染为 failed。
-    deferredA.resolve({ content: "", durationMs: 3, error: "old generation failure", toolCalls: [] });
-    await flushMicrotasks();
-
-    // 新 trace 节点未被旧 finalize 污染：仍 running、无 result、无 completedAt
-    const newNode = findByStep(run.state.trace, 9);
-    expect(newNode?.status).toBe("running");
-    expect(newNode?.result).toBeUndefined();
-    expect(newNode?.completedAt).toBeUndefined();
-    // 旧实例 markDone 保留（dispatch 层 catch 路径依赖 call.status 语义）
-    expect(oldCall?.status).toBe("done");
-    expect(oldCall?.result?.error).toBe("old generation failure");
-    // 重跑实例仍在飞，未被旧 completion 干扰；孤儿结果不投新 worker
-    expect(rerunCall?.status).toBe("running");
-    expect(findAgentResultPost(newWorkerPost, 9)).toBeUndefined();
-
-    // 收尾：resolve 重跑 deferred，让挂起的 promise 链走完（非孤儿 → 正常完成路径）
-    deferredB.resolve({ content: "rerun ok", durationMs: 1, error: undefined, toolCalls: [] });
-    await flushMicrotasks();
-    expect(findByStep(run.state.trace, 9)?.status).toBe("completed");
-  });
-});
-
-// ── rebuildRuntime 可观察性（OB3 日志点 L1-L4） ─────────────
-
-/** 从 deps.log 的 mock 调用记录提取 (message, payload)——message 非字符串时置空串（断言自然失败）。 */
-function toLogEntries(calls: unknown[][]): Array<{ message: string; payload: unknown }> {
-  return calls.map((c) => ({
-    message: typeof c[2] === "string" ? c[2] : "",
-    payload: c[3],
-  }));
-}
-
-describe("rebuildRuntime 可观察性（OB3 日志点）", () => {
-  it("U7: 无 budgetTimeMs 时按序打 L1 start → L4 complete（payload 含 runId），无 L2 重排日志", () => {
-    const run = makeRealRun("wf-rebuild-log-1");
-    const deps = makeDeps();
-
-    rebuildRuntime(run, deps, makeHandlers());
-
-    const entries = toLogEntries(deps.log.mock.calls);
-    const messages = entries.map((e) => e.message);
-    expect(messages).toContain("runtime rebuild start");
-    expect(messages).toContain("runtime rebuild complete");
-    // L4 在 L1 之后（顺序锚）
-    expect(messages.indexOf("runtime rebuild complete")).toBeGreaterThan(
-      messages.indexOf("runtime rebuild start"),
-    );
-    // 无 budgetTimeMs → 该分支本就跳过重排，L2 不打
-    expect(messages).not.toContain("time budget rescheduled");
-    // L1/L4 payload 含 runId
-    const l1 = entries.find((e) => e.message === "runtime rebuild start");
-    expect(l1?.payload).toMatchObject({ runId: "wf-rebuild-log-1" });
-    const l4 = entries.find((e) => e.message === "runtime rebuild complete");
-    expect(l4?.payload).toEqual({ runId: "wf-rebuild-log-1" });
-  });
-
-  it("U7: 带 budgetTimeMs + scheduleTimeBudget 注入时含 L2（在 L1 之后、L3 之前，payload 含 budgetTimeMs）", () => {
-    const run = makeRealRun("wf-rebuild-log-2", { budgetTimeMs: 5000 });
-    const scheduleTimeBudget = vi.fn((_runId: string, _budgetTimeMs: number) => undefined);
-    const deps = makeDeps({ scheduleTimeBudget });
-
-    rebuildRuntime(run, deps, makeHandlers());
-
-    const entries = toLogEntries(deps.log.mock.calls);
-    const messages = entries.map((e) => e.message);
-    expect(messages).toContain("time budget rescheduled");
-    expect(messages.indexOf("time budget rescheduled")).toBeGreaterThan(
-      messages.indexOf("runtime rebuild start"),
-    );
-    expect(messages.indexOf("time budget rescheduled")).toBeLessThan(
-      messages.indexOf("in-flight calls discarded"),
-    );
-    const l2 = entries.find((e) => e.message === "time budget rescheduled");
-    expect(l2?.payload).toEqual({ runId: "wf-rebuild-log-2", budgetTimeMs: 5000 });
-  });
-
-  it("U8: 含 2 个在飞 call 的 run 经 rebuild → L3 callIds 升序、count === 2，与实际被弃 callId 一致", async () => {
-    const run = makeRealRun("wf-rebuild-log-3");
-    const deps = makeDeps();
-    const handlers = makeHandlers();
-
-    // 两个在飞 call（dispatch 插入序 5 → 3，验证 L3 callIds 是升序而非插入序）
-    const deferreds = [createDeferred<AgentResult>(), createDeferred<AgentResult>()];
-    let next = 0;
-    deps.runner.run.mockImplementation(() => {
-      const d = deferreds[next];
-      next += 1;
-      return d!.promise;
-    });
-    await handleWorkerMessage(run, makeAgentCallMsg(5), deps, handlers);
-    await handleWorkerMessage(run, makeAgentCallMsg(3), deps, handlers);
-    await flushMicrotasks();
-    expect(run.state.calls.get(5)?.status).toBe("running");
-    expect(run.state.calls.get(3)?.status).toBe("running");
-
-    rebuildRuntime(run, deps, makeHandlers());
-
-    // L3 payload：callIds 升序 [3, 5]、count === 2（即 discardInFlightCalls 返回值）
-    const entries = toLogEntries(deps.log.mock.calls);
-    const l3 = entries.find((e) => e.message === "in-flight calls discarded");
-    expect(l3?.payload).toEqual({ runId: "wf-rebuild-log-3", callIds: [3, 5], count: 2 });
-    // 返回值（经 L3 暴露）与实际被弃 callId 一致：Map/trace 条目均已移除
-    expect(run.state.calls.has(5)).toBe(false);
-    expect(run.state.calls.has(3)).toBe(false);
-    expect(findByStep(run.state.trace, 5)).toBeUndefined();
-    expect(findByStep(run.state.trace, 3)).toBeUndefined();
-
-    // 收尾：resolve 两个挂起的 deferred（孤儿守卫 drop，无投递无污染）
-    deferreds[0]!.resolve({ content: "", durationMs: 1, error: undefined, toolCalls: [] });
-    deferreds[1]!.resolve({ content: "", durationMs: 1, error: undefined, toolCalls: [] });
-    await flushMicrotasks();
-  });
 });
 
 // ── agent-call 的 schema 入参形状：调用方错误 fail-fast，不静默降级成文本调用 ──

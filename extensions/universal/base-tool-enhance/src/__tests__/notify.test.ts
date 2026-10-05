@@ -18,7 +18,7 @@ import {
 	refreshPiReference,
 	resetNotifyForTest,
 } from "../background/notify.ts";
-import { pollTickForTest, setOnTaskExit, stopPoller } from "../background/poller.ts";
+import { setOnTaskExit } from "../background/exit-collector.ts";
 import { spawnBackgroundTask } from "../background/spawn-background.ts";
 import {
 	clearTaskStoreForTest,
@@ -63,13 +63,12 @@ function sleep(ms: number): Promise<void> {
 const POLL_DEADLINE_MS = 10_000;
 
 /**
- * 轮询直到期望状态出现或超时：每次迭代先 pollTickForTest()（手动 tick 推进状态机）
- * 再检查——固定 sleep 后单次 tick 单次断言是满载 flake 源，等状态而非猜时刻。
+ * 等待直到期望状态出现或超时：exit 事件边沿（真实 ChildProcess exit 监听）负责
+ * 推进状态机——固定 sleep 后单次断言是满载 flake 源，等状态而非猜时刻。
  */
 async function pollUntilTicked(check: () => boolean, what: string): Promise<void> {
 	const deadline = Date.now() + POLL_DEADLINE_MS;
 	for (;;) {
-		pollTickForTest();
 		if (check()) return;
 		if (Date.now() > deadline) {
 			throw new Error(`timed out after ${POLL_DEADLINE_MS}ms waiting for ${what}`);
@@ -87,7 +86,7 @@ function spawnBg(command: string) {
 	});
 }
 
-/** 构造终态条目直调 handleTaskExit（通知行为单元，不经真实轮询时序）。 */
+/** 构造终态条目直调 handleTaskExit（通知行为单元，不经真实 exit 边沿时序）。 */
 function finalizedTask(overrides: Partial<BackgroundTask> = {}): BackgroundTask {
 	return {
 		taskId: "bt-1700000000-test01",
@@ -125,7 +124,6 @@ function killLeftoverTasks(): void {
 afterEach(() => {
 	killLeftoverTasks();
 	clearTaskStoreForTest();
-	stopPoller();
 	setOnTaskExit(undefined);
 	resetNotifyForTest();
 	vi.restoreAllMocks();
@@ -173,7 +171,7 @@ describe("register emit (data flow ⑤)", () => {
 	});
 });
 
-describe("exit-edge notification (⑧⑨, poll edge wiring)", () => {
+describe("exit-edge notification (⑧⑨, exit-edge wiring)", () => {
 	it("natural exit 0: unregister emit reason 'completed' + sendMessage steer with exact params", async () => {
 		const pi = createMockPi();
 		attach(pi);
@@ -182,7 +180,7 @@ describe("exit-edge notification (⑧⑨, poll edge wiring)", () => {
 		if (!spawned.ok) throw new Error(spawned.error);
 		const { task } = spawned;
 
-		// 轮询到 exit 边沿收尾（handleTaskExit 同步完成 unregister emit + sendMessage）
+		// 等到 exit 边沿收尾（handleTaskExit 同步完成 unregister emit + sendMessage）
 		await pollUntilTicked(
 			() => pi.events.emit.mock.calls.some((c) => c[0] === "pending:unregister"),
 			"pending:unregister (completed)",
@@ -203,7 +201,7 @@ describe("exit-edge notification (⑧⑨, poll edge wiring)", () => {
 		expect(message.content).toContain("exit 0");
 		expect(message.content).toContain("done"); // tail 摘要
 		expect(options).toEqual({ deliverAs: "steer", triggerTurn: true });
-		// U1（D1）：真实轮询边沿投递的 details 与终态条目逐字段一致（非 fixture 常量）
+		// U1（D1）：真实 exit 边沿投递的 details 与终态条目逐字段一致（非 fixture 常量）
 		const finalizedEntry = getTask(task.taskId);
 		expect(message.details).toMatchObject({
 			taskId: task.taskId,
@@ -224,7 +222,7 @@ describe("exit-edge notification (⑧⑨, poll edge wiring)", () => {
 
 		markKillingIntent(task.taskId, "killed");
 		killProcessTree(task.pid);
-		// 轮询到 kill 边沿收尾（SIGKILL 生效 + tick 终态化）
+		// 等到 kill 边沿收尾（SIGKILL 生效 + exit 事件终态化）
 		await pollUntilTicked(() => getTask(task.taskId)?.reason === "killed", "reason=killed finalization");
 
 		expect(getTask(task.taskId)?.reason).toBe("killed");
@@ -259,7 +257,7 @@ describe("exit-edge notification (⑧⑨, poll edge wiring)", () => {
 		if (!spawned.ok) throw new Error(spawned.error);
 		const { task } = spawned;
 
-		// 轮询到 exit 边沿收尾（reason failed）
+		// 等到 exit 边沿收尾（reason failed）
 		await pollUntilTicked(
 			() => pi.events.emit.mock.calls.some((c) => c[0] === "pending:unregister"),
 			"pending:unregister (failed)",
@@ -391,7 +389,7 @@ describe("D17: pi reference refresh (session replacement takeover)", () => {
 		expect(fresh.sendMessage).toHaveBeenCalledTimes(1);
 	});
 
-	it("poller keeps running when notification path throws inside the exit edge", async () => {
+	it("exit edge survives notification path throwing inside the callback", async () => {
 		const stale = createMockPi();
 		stale.sendMessage = vi.fn(() => {
 			throw new Error("stale bus disposed");
@@ -406,15 +404,13 @@ describe("D17: pi reference refresh (session replacement takeover)", () => {
 		const first = spawnBg("sleep 0.1 && echo one");
 		const second = spawnBg("sleep 0.1 && echo two");
 		if (!first.ok || !second.ok) throw new Error("spawn failed");
-		// 边沿回调内部全捕获：轮询到两条任务都完成终态化（每迭代 tick 后查）
+		// 边沿回调内部全捕获：等到两条任务都完成终态化（exit 事件自行推进）
 		await pollUntilTicked(
 			() =>
 				getTask(first.task.taskId)?.state === "exited" &&
 				getTask(second.task.taskId)?.state === "exited",
 			"both tasks to finalize",
 		);
-		// tick 不抛（异常全捕获）
-		expect(() => pollTickForTest()).not.toThrow();
 		expect(getTask(first.task.taskId)?.state).toBe("exited");
 		expect(getTask(second.task.taskId)?.state).toBe("exited");
 	});

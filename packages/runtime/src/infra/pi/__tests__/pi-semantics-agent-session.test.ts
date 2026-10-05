@@ -34,8 +34,8 @@ describe.skipIf(!PI_DIST)(
   `PS-04 探针：setThinkingLevel 条件落账/发声（isChanging 门控${SKIP_REASON ? `｜skip：${SKIP_REASON}` : ''}）`,
   () => {
     it('isChanging = effective !== previousLevel；appendThinkingLevelChange 与 thinking_level_changed 均在 if (isChanging) 块内', () => {
-      // pi 0.84.4：签名加第二参 options（ModelMutationOptions.persist）——会话内切档默认
-      // 不再写全局默认（0.84.1 是 isChanging 时自动写）。taiji 单参调用（rpc-mode.js:391
+      // pi 1.0.0：签名第二参 options（ModelMutationOptions.persist）保留——会话内切档默认
+      // 不再写全局默认。taiji 单参调用（rpc-mode.js:389
       // session.setThinkingLevel(command.level)）不触发 settings 写入，与 model-service
       // 「per-session runtime state — no persistence needed」设计一致；全局默认由
       // pi-provider-store 独立通路读写。条件落账/发声（claim 本体）逐行未变。
@@ -124,9 +124,13 @@ describe.skipIf(!PI_DIST)(
       ).toBe(true)
       const triggerIdx = win.indexOf('else if (options?.triggerTurn)')
       expect(triggerIdx, 'PS-08 漂移：triggerTurn 分支消失——直达起轮路径改形，复核 PS-08').toBeGreaterThanOrEqual(0)
+      // 直达语句锚 = 行首语句位的 await（m 模式 ^\s+await …;）。窗口内另有 deferred
+      // 形态 this._deferredSettledActions.push(async () => await this._runAgentPrompt(...))
+      // ——它的行首是 push 调用非 await 语句，本锚不会命中；旧写法（slice 窗口裸 includes）
+      // 命中的恰是 deferred 行，pi 删直达只留延迟时仍绿（审查 2026-10-03 修正）
       expect(
-        win.slice(triggerIdx, triggerIdx + 200).includes('await this._runAgentPrompt(appMessage)'),
-        'PS-08 漂移：triggerTurn 不再走 _runAgentPrompt 直达——投递语义变化，复核 PS-08（事故 A 基线 session 唯一成功样本路径）',
+        new RegExp(/^ +await this\._runAgentPrompt\(appMessage\);/m).test(win.slice(triggerIdx)),
+        'PS-08 漂移：triggerTurn 不再走 _runAgentPrompt 直达（行首语句位）——投递语义变化，复核 PS-08（事故 A 基线 session 唯一成功样本路径）',
       ).toBe(true)
       expect(
         win.includes('else if (this.isStreaming)'),

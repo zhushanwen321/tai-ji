@@ -3,7 +3,7 @@
 // 场景 15（修订设计 §4，E-09）：同进程双 resume。同进程快速连发两条 resume。
 //
 // 通过标准（原文）：恰一次生效，第二次明确拒绝；record 只有一套 run-resumed。
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   makeFauxRunner,
@@ -48,7 +48,13 @@ describe("场景 15：同进程双 resume——恰一次生效", () => {
       const events = await scanScenarioEvents(env, RUN_ID);
       expect(events.filter((e) => e.type === "run-resumed")).toHaveLength(1);
 
-      // 生效侧可继续跑完（释放挂起）
+      // 生效侧可继续跑完（释放挂起）。release 前必须等重派集 C 真实派发落地：
+      // 第二条 resume 的锁拒绝是立即返回（[ADR-0122] retries=0，无旧重试退避窗），
+      // allSettled 返回时生效侧 worker 的重派可能尚未走到 faux runner——此刻
+      // release(1) 会 miss 挂起门（gates 未注册），hang 永不释放，run 永不终局
+      await vi.waitFor(() => {
+        expect(sd.faux.dispatches).toHaveLength(1);
+      });
       sd.faux.release(1, "c-done");
       const summary = await waitForScenarioSettled(sd.runs, RUN_ID);
       expect(summary.reason).toBe("completed");

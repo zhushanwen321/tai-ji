@@ -118,7 +118,7 @@ export interface PiMainAgentSpawnOptions {
  * pi 对两个 prompt flag 的值走同一解析函数（`resolvePromptInput`）：先
  * `existsSync(值)`（相对 pi 进程 cwd = 会话 cwd = 用户项目目录），命中即把**该文件内容**
  * 当提示词注入，否则当字面文本。
- * （pi 实装锚点：dist/core/resource-loader.js:17-29（0.84.4）——existsSync 命中即
+ * （pi 实装锚点：dist/core/resource-loader.js resolvePromptInput——existsSync 命中即
  * readFileSync 全文注入。）后果：模式文案若恰等于项目内存在的相对路径
  * （`AGENTS.md` / `.env` / `config.json` 等），pi 会静默把文件全文当提示词（UI 显示
  * 用户文案、实际生效文件内容，且可能把含密钥文件送进上下文）。
@@ -138,13 +138,28 @@ function toInlinePromptValue(value: string): string {
  *
  * 基座 flag 语义（架构约定 #11）：
  * - --no-extensions：抑制 pi 自动发现/加载的全局扩展，不影响显式 --extension 注入；
+ * - --extension builtin:codemode（恒带，codemode 设计 D8）：pi 1.0 起 --no-extensions
+ *   把内置扩展一并排除（resource-loader noExtensions 分支只保留 CLI 显式源），codemode
+ *   正是内置扩展——不显式 -e 则 settings.json defaultTools 通道不可达。恒带不带开关
+ *   条件：spawn 参数与 settings.json 双通道条件同步会出现不一致窗口。builtin:codemode
+ *   仅 pi ≥1.0 存在（0.84.4 报 Unknown built-in extension），本旗标随 pi 1.0 升级同行。
+ * - --extension builtin:mcp（恒带，pi-mcp-management P11 配套）：内置 MCP 扩展激活时
+ *   自行读取 mcp.json 并连接全部启用的服务器（loadMcpConfig 在 rpc 模式零引用，扩展
+ *   激活路径是 MCP 加载的唯一通路）——不装载则 mcp.json 无消费方，taiji 界面保存的
+ *   配置零生效。仅主 agent 模板装载（subagent 模板不加，设计 §5 U1 辐射面裁决：
+ *   N 个并行 subagent × M 个启用服务器的连接放大 + mcp_servers 提示词节 + direct 档
+ *   首 prompt 延迟，且 subagent 消费 MCP 工具为零证据场景，不预付；重评登记 docs/todo/）。
+ *   无启用服务器的会话零成本（pi 实装保证）。
  * - --approve：强制信任 cwd——RPC 模式无交互 UI，pi 原生信任流程在 hasUI=false 时
  *   默认拒绝会导致 <cwd>/.pi/ 下的 skill 被跳过；实际主要信任项目级 .pi/skills。
  *   TODO(follow-up): Project Trust UI 落地后移除全局 --approve。
  * - 不传 --session-dir：pi 走默认派生 <agentDir>/sessions/<encodeCwd>（B1 方案 B 布局）。
  */
 export function buildPiMainAgentArgs(options: PiMainAgentSpawnOptions, model: string | undefined): string[] {
-  const args = ['--mode', 'rpc', '--no-extensions', '--approve']
+  const args = [
+    '--mode', 'rpc', '--no-extensions', '--approve',
+    '--extension', 'builtin:codemode', '--extension', 'builtin:mcp',
+  ]
   if (model) args.push('--model', model)
   // --system-prompt: 替换 pi 核心系统提示词（身份/工具列表/指引/pi 文档路径 4 段）。
   // 动态段（project_context/skills/日期/cwd）仍由 pi 照常拼接。空白/未传不拼。
@@ -235,5 +250,11 @@ export function buildPiSubagentSpawnArgs(params: PiSubagentSpawnParams): string[
     args.push('--fork', params.forkSource)
   }
   appendSkillArgs(args, params.skillPaths)
+  // builtin:codemode 恒带（codemode 设计 D8，与主 agent 模板同源旗标）：pi 1.0 起
+  // --no-extensions 连内置扩展一起排除，显式 -e 是 -ne 下唯一装载通道（显式源
+  // enabled:true）。subagent 侧所有调用方经本模板传导自动携带；pi-subagent-cli
+  // 包装层在其后追加 --no-extensions 与 --extension 白名单。落点选尾部：不触碰
+  // --session 紧跟 --session-dir 的既有位置锚定。
+  args.push('--extension', 'builtin:codemode')
   return args
 }

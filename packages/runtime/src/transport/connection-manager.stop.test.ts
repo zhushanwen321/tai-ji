@@ -100,27 +100,6 @@ describe('ConnectionManager.stop() — A4 rolling-restart hang regression', () =
     await vi.waitFor(() => { expect(harness.conn.clients.size).toBe(0) })
   })
 
-  it('sends a graceful close frame (1001 Going Away) to authed clients', async () => {
-    const ws = await connectAndAuth(harness.port)
-    openedClients.push(ws)
-    const closed = new Promise<number>((resolve) => {
-      ws.once('close', (code) => resolve(code))
-    })
-    await withDeadline(harness.conn.stop(), 'stop() graceful close frame')
-    expect(await withDeadline(closed, 'client close event')).toBe(1001)
-  })
-
-  it('resolves while a pre-auth connection is pending', async () => {
-    // 连接建立但不发 auth（authTimers 持有）——握手中连接同样占用 httpServer 连接计数。
-    const ws = new WebSocket(`ws://127.0.0.1:${harness.port}`)
-    openedClients.push(ws)
-    await new Promise<void>((resolve, reject) => {
-      ws.on('open', resolve)
-      ws.on('error', reject)
-    })
-    await withDeadline(harness.conn.stop(), 'stop() with pre-auth connection')
-  })
-
   it('resolves while an idle keep-alive HTTP connection is open', async () => {
     // 模拟 main 侧 liveness 探针：/health 响应完成后连接保持（node:http 默认 agent 带 keep-alive 头）。
     const done = new Promise<void>((resolve, reject) => {

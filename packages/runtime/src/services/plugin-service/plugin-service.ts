@@ -1,5 +1,5 @@
 import { PluginPermissionChecker as PermissionChecker } from './plugin-permission.js'
-import type { PluginDescriptor, ToolEntry, HookEntry, HookContext, HookResult, BridgeToolExecuteRequest, BridgeToolExecuteResponse, BridgeInterceptResponse, BridgeSyncPayload, ToolRegistration, IPluginServiceDeps } from './plugin-types.js'
+import type { PluginDescriptor, ToolEntry, HookEntry, HookContext, HookResult, IPluginServiceDeps } from './plugin-types.js'
 import type { StatusBarItem, PluginInfo } from '@taiji/shared'
 import type { IPluginService, ISessionService } from '../../interfaces.js'
 import type { IMessageBroker } from '../../interfaces.js'
@@ -17,7 +17,6 @@ import type { CommandRegistration } from './api/commands-api.js'
 import { EntryInvalidationDispatch, ENTRY_INVALIDATION_NOTIFY_METHOD } from './plugin-entry-invalidation-dispatch.js'
 import { executeCommand as executePluginCommand, deliverInvokeResult as deliverPluginInvokeResult } from './api/commands-executor.js'
 import type { InstallResult } from '../ports/plugin-installer.js'
-import { handleBridgeToolExecute, handleBridgeEvent, handleBridgeIntercept, BridgeToolCache, PI_HOOK_EVENT_MAP } from './bridge-interop.js'
 import { toConfigKey, fromConfigKey, isConfigKey } from './api/config-api.js'
 import { HookPipeline, OBSERVE_HOOK_TYPES } from './hook-pipeline.js'
 import { UiRequestQueue } from './ui-request-queue.js'
@@ -50,8 +49,8 @@ export { findTsxImportArg, resolveEsmLoaderExecArgv } from './plugin-esm-execarg
  * 5 个原交职责已下沉到内聚模块，本类仅保留：
  *  (a) initialize 编排（9 步生命周期装配）；
  *  (b) 协作者装配（registry/storage/rpcServer/host/activator/...）；
- *  (c) 薄门面方法：委托 HookPipeline / UiRequestQueue / StatusBarRegistry /
- *      bridge-interop（命令执行发送段在 api/commands-executor.ts，协议映射在
+ *  (c) 薄门面方法：委托 HookPipeline / UiRequestQueue / StatusBarRegistry
+ *      （命令执行发送段在 api/commands-executor.ts，协议映射在
  *      plugin-info-mapper.ts，贡献清理在 plugin-contributions.ts）。
  */
 export class PluginService implements IPluginService {
@@ -85,9 +84,6 @@ export class PluginService implements IPluginService {
 
   /** taiji 配置根（~/.taiji/），plugin/session-data 持久化根。组合根注入。 */
   private readonly configDir: string
-
-  /** bridge 工具 schema 缓存 + sync 负载塑形（P5：职责收口到 bridge-interop） */
-  private readonly bridgeToolCache = new BridgeToolCache()
 
   private permissionChecker: PermissionChecker
 
@@ -306,7 +302,8 @@ export class PluginService implements IPluginService {
       }
       // D6/W4 贡献清理：崩溃插件的 statusBar/hook/tool/command 贡献不残留——对齐
       // togglePlugin(false) 的清理集（僵尸 statusbar 条目/仍可被路由的 tool/command
-      // 都指向已死 Worker，调用必超时）。rebuild 成功后 onRebuilt 重激活会重新注册。
+      // 都指向已死 Worker，调用必超时）。重新启用由用户在管理界面显式触发（ADR-0122：
+      // 原自动 rebuild 重激活链已退役）。
       for (const pluginId of pluginIds) {
         this.statusBarRegistry.clearForPlugin(pluginId)
         // AP-2 关②：runtime modal 槽清理 + closed{plugin-gone} 广播（崩溃插件的层必须收起）
@@ -317,9 +314,6 @@ export class PluginService implements IPluginService {
         this.sessionEventDispatch.clearForPlugin(pluginId)
         this.entryInvalidationDispatch.clearForPlugin(pluginId)
       }
-      void this.syncToolsToBridge().catch((err: unknown) => {
-        console.error('[plugin-service] syncToolsToBridge after crash failed:', toErrorMessage(err))
-      })
       for (const pluginId of pluginIds) {
         this.broker.broadcast({
           type: 'plugin:crashed',
@@ -327,49 +321,10 @@ export class PluginService implements IPluginService {
           payload: { pluginId, workerId, error },
         })
       }
-      // Trusted Worker 崩溃后通过 rebuildWorker 自动重建
     })
-
-    // 4a. Worker 重建后的重新加载回调
-    this.host.setRebuiltCallback((newWorkerId, pluginIds) => {
-      this.handleWorkerRebuilt(newWorkerId, pluginIds)
-    })
-
-    // 4b. Worker 生命周期回复回调（activated/deactivated/error）
     this.host.setReplyCallback((msg) => {
       this.activator.handleWorkerReply(msg as import('./plugin-types.js').WorkerToHostMessage)
     })
-  }
-
-  /**
-   * Worker 重建后的重载编排（rebuild 回调实现，D6/W3）。
-   *
-   * 只重激活当前状态为 CRASHED 的插件：冷却窗口内用户 disable（UNLOADED）或
-   * uninstall（状态已移除）的插件跳过——rebuild 无条件重激活会复活用户明确
-   * 关闭的插件（幽灵激活）。单插件重载失败只记日志，不影响同 Worker 其他插件。
-   */
-  handleWorkerRebuilt(newWorkerId: string, pluginIds: string[]): void {
-    for (const pluginId of pluginIds) {
-      const state = this.activator.getState(pluginId)
-      if (state !== 'CRASHED') {
-        console.log(`[plugin-service] skip reload after rebuild: ${pluginId} state=${state ?? 'REMOVED'}（非 CRASHED，用户已 disable/uninstall）`)
-        continue
-      }
-      try {
-        const descriptor = this.registry.getDescriptor(pluginId)
-        if (descriptor) {
-          this.host.loadPlugin(newWorkerId, pluginId, descriptor.pluginPath, 'trusted').then(() => {
-            // Re-activate the plugin after loading
-            return this.activator.activatePlugin(pluginId, { type: 'onStartupFinished' }, this.host)
-          }).catch((err: unknown) => {
-            console.error(`[plugin-service] failed to reload plugin ${pluginId}:`, err)
-          })
-        }
-      // eslint-disable-next-line taste/no-silent-catch -- worker reload: error logged, other plugins unaffected
-      } catch (err: unknown) {
-        console.error(`[plugin-service] failed to reload plugin ${pluginId}:`, err)
-      }
-    }
   }
 
   /**
@@ -477,13 +432,12 @@ export class PluginService implements IPluginService {
         dismissRuntimeModalForPluginGone(pluginId)
         this.removeHookEntriesFor(pluginId) // P-1：清 hook 注册，禁用插件的 hook 不再执行
         // Fix-7：禁用插件的工具/命令同步清注册——与 P-1 的 hook 清理对称，否则禁用插件的
-        // 工具仍可被 bridge 调用、命令 invoke 仍发向该插件（worker 已 deactivate，必超时）
+        // 工具仍可被执行路由、命令 invoke 仍发向该插件（worker 已 deactivate，必超时）
         this.removeToolEntriesFor(pluginId)
         this.removeCommandEntriesFor(pluginId)
         // S3-W2：session 事件注册表同步清理（禁用插件的 didCreate/didDestroy 订阅不再投递）
         this.sessionEventDispatch.clearForPlugin(pluginId)
         this.entryInvalidationDispatch.clearForPlugin(pluginId)
-        await this.syncToolsToBridge()
         // E2 修复：disable 腿补 plugin:statusChange 广播——renderer E2 触发链
         //（plugin-status-change{inactive} → handlePluginGone：三容器清理 + 命令注销 +
         // 顶栏按钮/modal 收起）此前无触发源，禁用后按钮残留。deactivatePlugin 抛错走
@@ -589,7 +543,6 @@ export class PluginService implements IPluginService {
     // AP-2 关②：runtime modal 槽清理 + closed{plugin-gone} 广播（卸载插件的层必须收起）
     dismissRuntimeModalForPluginGone(pluginId)
 
-    await this.syncToolsToBridge()
     this.broadcastPluginList()
     // RT-6#6：内存清理与回滚广播已全部完成，此刻才把磁盘删除失败抛给调用方——
     // 「只 log 不回错」会让卸载在重启后静默复活。code 供 transport 全局 catch 透传。
@@ -610,9 +563,8 @@ export class PluginService implements IPluginService {
   /**
    * 清理指定插件的全部工具注册条目（Fix-7：与 removeHookEntriesFor 同模式）。
    *
-   * togglePlugin(false) 与 uninstallPlugin 共用——禁用插件的工具不再出现在 bridge
-   * schema 同步（syncToolsToBridge）与 bridge 执行路由中（实现迁至
-   * plugin-contributions.ts）。
+   * togglePlugin(false) 与 uninstallPlugin 共用——禁用插件的工具从工具注册表移除后
+   * 不再被任何执行路由命中（实现迁至 plugin-contributions.ts）。
    */
   private removeToolEntriesFor(pluginId: string): void {
     removePluginToolEntries(this.toolRegistry, pluginId)
@@ -750,7 +702,6 @@ export class PluginService implements IPluginService {
       broadcastStatusBarItems: () => this.statusBarRegistry.broadcastAll(),
       handleUiRequest: (method, params, pluginId) => this.uiRequestQueue.handleRequest(method, params, pluginId),
       cancelUiRequest: (requestId) => this.uiRequestQueue.cancelRequest(requestId),
-      syncToolsToBridge: () => this.syncToolsToBridge(),
       getDescriptor: (pluginId) => this.registry.getDescriptor(pluginId),
       sessionDataStore: this.sessionDataStore,
       activeSessionResolver: this.activeSessionResolver,
@@ -788,54 +739,25 @@ export class PluginService implements IPluginService {
     return this.hookPipeline.execute(hookType, context)
   }
 
-  /** 同步 toolRegistry schema 到 bridge 轮询缓存（委托 bridge-interop） */
-  async syncToolsToBridge(): Promise<void> {
-    this.bridgeToolCache.syncFrom(this.toolRegistry)
-  }
-
-  /** 获取 bridge 轮询缓存的工具 schema（委托 bridge-interop） */
-  getToolSchemas(): ToolRegistration[] {
-    return this.bridgeToolCache.getSchemas()
-  }
-
   /**
-   * 构造 bridge:sync 同步负载（工具 schema 塑形下沉 bridge-interop，transport 只 reply）。
-   */
-  getBridgeSyncPayload(): BridgeSyncPayload {
-    return this.bridgeToolCache.getSyncPayload()
-  }
-
-  /**
-   * 处理 bridge 发起的工具执行请求（ADR-0012 契约不变）。委托 bridge-interop。
-   * 传 bridgeToolCache 的 name 索引（微项 7：O(1) 路由；索引随 syncToolsToBridge 刷新）。
-   */
-  async handleBridgeToolExecute(request: BridgeToolExecuteRequest): Promise<BridgeToolExecuteResponse> {
-    return handleBridgeToolExecute(request, this.toolRegistry, this.host, this.rpcServer, this.bridgeToolCache)
-  }
-
-  handleBridgeEvent(eventName: string, data: unknown, sessionId: string): void {
-    handleBridgeEvent(eventName, data, sessionId, (hookType, context) => this.executeHooks(hookType, context))
-  }
-
-  /**
-   * 处理 bridge 拦截请求。
+   * pi 侧事件向插件钩子的投递入口（pi1-disposition-chat-flow D7② 挂点迁移 + 断链修复）：
+   * statusSetUpdate 等内部事件经本方法以泛型 'onPiEvent' 键派发——与 hook-api 注册面的
+   * 泛型键形状对齐（hook-api 以 'onPiEvent' 为键写入 hookRegistry），修复原
+   * handleBridgeEvent「分发键 = 原始事件名」的注册/分发键错位断链。
    *
-   * 按 PI_HOOK_EVENT_MAP 判定（D4）：无映射条目 → 空响应（ERR2）；kind=observe →
-   * 转 handleBridgeEvent 观察链路（fire-and-forget，不 block）；kind=intercept →
-   * 委托 bridge-interop 拦截链路（block/injectedMessages 生效）。判定下沉到 service，
-   * transport 不再做事件名白名单过滤。
+   * context 形态与 event-interpreter 的既有调用完全同构：平铺 { event: <事件名>,
+   * ...payload }（ExecuteHookFn 的 context 参数是宽松 Record）——hook-api onPiEvent
+   * 适配层走「event-interpreter 平铺」分支：payload = 剥离 event 元字段后的剩余字段，
+   * 插件侧 handler 收到的第二参即业务载荷本身（statusline 适配后的解包形状）。
+   *
+   * fire-and-forget：observe 快捷路径（executeHooks → notifyObservers），不等待不回包。
    */
-  async handleBridgeIntercept(eventName: string, data: unknown, sessionId: string): Promise<BridgeInterceptResponse> {
-    const mapping = PI_HOOK_EVENT_MAP[eventName]
-    if (!mapping) {
-      return { injectedMessages: [] }
-    }
-    if (mapping.kind === 'observe') {
-      // 纯观察事件：走 fire-and-forget 观察链路，不阻塞
-      this.handleBridgeEvent(eventName, data, sessionId)
-      return { injectedMessages: [] }
-    }
-    return handleBridgeIntercept(eventName, data, sessionId, (hookType, context) => this.executeHooks(hookType, context))
+  notifyPiEvent(eventName: string, payload: Record<string, unknown>, _sessionId: string): void {
+    // 平铺形态经 ExecuteHookFn（宽松 Record）注入时已是设计内输入；直调本类方法时对齐
+    // event-interpreter 生产形态（HookContext 严格注解为历史形态，cast 与组合根注入同口径）。
+    this.executeHooks('onPiEvent', { event: eventName, ...payload } as unknown as HookContext).catch((err: unknown) => {
+      console.error('[plugin-service] notifyPiEvent error:', err)
+    })
   }
 
   async installPlugin(packageSpecifier: string): Promise<InstallResult> {

@@ -4,18 +4,16 @@
 // 2026-09 S2 契约修复后与旧副本分叉：应答缺 sessionFile 不再悬挂，见
 // performGetStateHandshake 的停表分支——修复仅限本文件）。
 //
-// 通过 get_state RPC 查询子进程 sessionFile/sessionId，带超时重试。
-//   - 重试节奏：单次超时 GET_STATE_TIMEOUT_MS（2s）后，等 GET_STATE_RETRY_INTERVAL_MS
-//     （500ms）再发起下一次 get_state，最多 GET_STATE_MAX_RETRIES（3）次。
-//   - 加速路径：sessionFile 一旦拿到立即 resolve（不等剩余重试）。
-//   - 应答不完整（缺 sessionFile）：视同未应答——不清本轮 timer/retry 驱动，
-//     超时照常排 retry，3 轮耗尽 resolve 已收集字段（契约：至多 3 次尝试后必 settle）。
-//   - 发送/注册同步抛错（stdin 已断的 EPIPE 形态，stdin-writer.ts writeStdinLine
-//     rethrow）：同样按「本轮未应答」处理——有剩余轮次则排下一轮，否则 resolve 已
-//     收集字段。异常不得逃出 tryOnce（重试路径经 setTimeout 回调再入，逃出即宿主
-//     uncaughtException；首轮经 promise executor 逃出即 reject，两者都违反
-//     「至多 3 次尝试后必 settle」契约）。
-//   - 全部超时：resolve 空对象（调用方走兜底查找）。
+// 通过 get_state RPC 查询子进程 sessionFile/sessionId（单次、有界）。
+// [ADR-0122] 握手重试已删（原 3 次 × 2s 超时 + 500ms 间隔）：单次超时即 settle，
+// 调用方走兜底反查（LC-4 按 sessionId 后缀匹配，行为仍收敛）——不猜「慢启动下轮
+// 就绪」。加速路径保留：sessionFile 一旦拿到立即 resolve。
+//   - 应答不完整（缺 sessionFile）：单次超时照常 settle 已收集字段（契约：一次
+//     尝试后必 settle）。
+//   - 发送/注册同步抛错（stdin 已断的 EPIPE 形态）：同样按「未应答」处理——异常
+//     不得逃出 promise executor（逃出即 reject，违反「必 settle」契约），warn 留痕
+//     后 settle 已收集字段。
+//   - 超时：resolve 已收集字段（调用方走兜底查找）。
 
 import type { ChildProcess } from "node:child_process";
 
@@ -26,10 +24,6 @@ import { sendGetStateCommand } from "./stdin-writer.ts";
 
 const logger = getLogger("subagents");
 
-/** FR-4: get_state RPC 握手最大重试次数。 */
-const GET_STATE_MAX_RETRIES = 3;
-/** FR-4: get_state RPC 握手重试间隔（ms）。 */
-const GET_STATE_RETRY_INTERVAL_MS = 500;
 /** FR-4: get_state RPC 握手单次超时（ms）。 */
 const GET_STATE_TIMEOUT_MS = 2000;
 
@@ -59,10 +53,8 @@ export function extractGetStateFields(data: unknown, into: GetStateResult): void
 }
 
 /**
- * FR-4: 通过 get_state RPC 查询子进程获取 sessionFile/sessionId。
- *
- * 最多重试 GET_STATE_MAX_RETRIES 次，单次超时 GET_STATE_TIMEOUT_MS 后等待
- * GET_STATE_RETRY_INTERVAL_MS 再发起下一次重试。
+ * FR-4: 通过 get_state RPC 查询子进程获取 sessionFile/sessionId（单次尝试，
+ * 超时 GET_STATE_TIMEOUT_MS 后 settle 已收集字段——[ADR-0122] 无重试）。
  */
 export function performGetStateHandshake(
   child: ChildProcess,
@@ -70,69 +62,42 @@ export function performGetStateHandshake(
 ): Promise<GetStateResult> {
   return new Promise<GetStateResult>((resolve) => {
     const collected: GetStateResult = {};
-    let attempts = 0;
     let resolved = false;
 
-    function tryOnce(): void {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    /** settle 已收集字段（唯一出口——超时与同步抛错两条入口共用，幂等）。 */
+    function settle(): void {
+      if (timer !== undefined) clearTimeout(timer);
       if (resolved) return;
-      attempts++;
-
-      // [#15] 本次 tryOnce 私有的驱动（2s 超时 timer + 超时后派生的 retry）。
-      let pendingRetry: ReturnType<typeof setTimeout> | undefined;
-      let timer: ReturnType<typeof setTimeout> | undefined;
-
-      /**
-       * 本轮判「未应答」的唯一出口（超时回调与同步抛错两条入口都汇到这里）：
-       * 先把本轮驱动全部停表，再按剩余轮次排下一轮或 resolve 已收集字段。
-       */
-      function retryOrSettle(): void {
-        if (timer !== undefined) clearTimeout(timer);
-        if (pendingRetry !== undefined) clearTimeout(pendingRetry);
-        if (resolved) return;
-        if (attempts < GET_STATE_MAX_RETRIES) {
-          pendingRetry = setTimeout(() => tryOnce(), GET_STATE_RETRY_INTERVAL_MS);
-          pendingRetry.unref();
-          return;
-        }
-        // 3 轮耗尽：必 settle（resolve 已收集字段，调用方走兜底）
-        resolved = true;
-        resolve(collected);
-      }
-
-      try {
-        const reqId = sendGetStateCommand(child);
-
-        timer = setTimeout(() => {
-          pendingRetry = undefined;
-          retryOrSettle();
-        }, GET_STATE_TIMEOUT_MS);
-        timer.unref();
-
-        addResponseListener(reqId, (data: unknown) => {
-          if (resolved) return;
-          extractGetStateFields(data, collected);
-          if (collected.sessionFile) {
-            // 应答完整才停表（S2 契约修复）：缺 sessionFile 视同未应答，保留 timer
-            // 与 pendingRetry 全部驱动——重试的排定权威唯一（timer 超时回调），由它
-            // 照常排 retry 直至 3 轮耗尽 resolve collected；多驱动并发安全由既有
-            // resolved/attempts 守卫保证。
-            if (timer !== undefined) clearTimeout(timer);
-            if (pendingRetry !== undefined) clearTimeout(pendingRetry);
-            resolved = true;
-            resolve(collected);
-          }
-        });
-      } catch (err) {
-        // 同步抛错（stdin 已断的 EPIPE 等）按「本轮未应答」处理；剩余轮次照排，
-        // 耗尽即 resolve 已收集字段——异常绝不逃出 tryOnce（见头注契约）。
-        logger.warn(
-          `[subagents] get_state handshake attempt ${attempts}/${GET_STATE_MAX_RETRIES} failed `
-            + `(treated as no answer this round): ${toErrorMessage(err)}`,
-        );
-        retryOrSettle();
-      }
+      resolved = true;
+      resolve(collected);
     }
 
-    tryOnce();
+    try {
+      const reqId = sendGetStateCommand(child);
+
+      timer = setTimeout(() => {
+        settle();
+      }, GET_STATE_TIMEOUT_MS);
+      timer.unref();
+
+      addResponseListener(reqId, (data: unknown) => {
+        if (resolved) return;
+        extractGetStateFields(data, collected);
+        if (collected.sessionFile) {
+          // 应答完整才提前停表（S2 契约修复）：缺 sessionFile 视同未应答，等
+          // 单次超时 settle（调用方走兜底反查）。
+          settle();
+        }
+      });
+    } catch (err) {
+      // 同步抛错（stdin 已断的 EPIPE 等）按「未应答」处理——异常绝不逃出
+      // promise executor（见头注契约），warn 留痕后 settle 已收集字段。
+      logger.warn(
+        `[subagents] get_state handshake failed (treated as no answer): ${toErrorMessage(err)}`,
+      );
+      settle();
+    }
   });
 }

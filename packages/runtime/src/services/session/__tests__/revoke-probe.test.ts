@@ -280,9 +280,10 @@ describe('A6 信令不污染（探针：transcript 撤回前后对比 + 命令�
     h.emitPiEvent({ type: 'message_end', message: { role: 'user', content: seededText } })
     await h.flush()
     // 投递收口副作用复位（markSessionActive 置 dispatching + 派生 isGenerating=true；
-    // 真实回落 = armOccupancySettleWindow 的 timer 回调，fake timers 不推进——按
-    // event-interpreter 'idle' 行语义手动复位，撤回前置 = 空闲。isGenerating 是只读派生
-    // 属性，经 spyOn getter 复位——与 revoke-orchestrator.test.ts 的 isCompacting 同款手法）
+    // 真实回落 = pi 事件驱动（[D3③] handled 响应 / sweepInFlight 收尾，CP6 时间窗已退役），
+    // fake 环境无事件流——按 event-interpreter 'idle' 行语义手动复位，撤回前置 = 空闲。
+    // isGenerating 是只读派生属性，经 spyOn getter 复位——与 revoke-orchestrator.test.ts
+    // 的 isCompacting 同款手法）
     vi.spyOn(h.view, 'isGenerating', 'get').mockReturnValue(false)
     h.view.occupancy = { turn: 'idle', compacting: false, bash: false }
 

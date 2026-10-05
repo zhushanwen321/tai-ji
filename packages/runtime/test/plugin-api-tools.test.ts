@@ -37,19 +37,13 @@ function extractLastResponse(port: ReturnType<typeof createMockPort>): RpcRespon
 describe('Tool API — registerToolRpcHandlers', () => {
   let rpc: PluginRpcServer
   let toolRegistry: Map<string, ToolEntry>
-  let syncCalls: number
   let port: ReturnType<typeof createMockPort>
 
   beforeEach(() => {
     rpc = new PluginRpcServer()
     toolRegistry = new Map()
-    syncCalls = 0
-
     registerToolRpcHandlers(rpc, {
       toolRegistry,
-      syncToolsToBridge: async () => {
-        syncCalls++
-      },
     })
 
     port = createMockPort()
@@ -84,8 +78,6 @@ describe('Tool API — registerToolRpcHandlers', () => {
     expect(entry.schema.name).toBe('my-tool')
     expect(entry.schema.description).toBe('A test tool')
 
-    // 验证 sync 被调用
-    expect(syncCalls).toBe(1)
   })
 
   // ── 重复注册 ──────────────────────────────────────────────────
@@ -119,13 +111,11 @@ describe('Tool API — registerToolRpcHandlers', () => {
     expect(resp.error!.message.includes('already registered')).toBeTruthy()
     // 注册表大小不变
     expect(toolRegistry.size).toBe(1)
-    // sync 不应被调用
-    expect(syncCalls).toBe(0)
   })
 
   // ── 注销已注册工具 ────────────────────────────────────────────
 
-  it('unregister existing tool → deletes from registry and calls sync', async () => {
+  it('unregister existing tool → deletes from registry', async () => {
     // 预先注册
     toolRegistry.set('my-plugin:my-tool', {
       pluginId: 'my-plugin',
@@ -145,7 +135,6 @@ describe('Tool API — registerToolRpcHandlers', () => {
     expect('result' in resp).toBeTruthy()
     // unregister 不返回特定值，但应成功（无 error）
     expect(toolRegistry.size).toBe(0)
-    expect(syncCalls).toBe(1)
   })
 
   // ── 注销不存在工具 ────────────────────────────────────────────
@@ -161,8 +150,6 @@ describe('Tool API — registerToolRpcHandlers', () => {
     const resp = extractLastResponse(port)
     expect(resp.id).toBe(4)
     expect('result' in resp).toBeTruthy()
-    // sync 不被调用（没有删除操作）
-    expect(syncCalls).toBe(0)
   })
 
   // ── D7 归属隔离（MF-1）─────────────────────────────────
@@ -206,6 +193,5 @@ describe('Tool API — registerToolRpcHandlers', () => {
     const resp = extractLastResponse(port)
     expect('result' in resp).toBeTruthy()
     expect(toolRegistry.has('A:xxx')).toBe(true)
-    expect(syncCalls).toBe(0)
   })
 })

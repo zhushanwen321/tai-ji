@@ -265,9 +265,10 @@ function dispatchGlobalRouted(
  * handle 函数」的表达力缺陷由此消除）。
  *
  * type 分隔符与 runtime wire 实际格式一致（shared/protocol.ts ServerMessageType）：
- * extension:widget/widgetGui/status/notify 用冒号；extension.ui_request 用**点号**
- * （runtime event-adapter.ts 实发 'extension.ui_request'，ADR-0060 文档里的冒号为笔误，
- * 以 protocol.ts + MessageBusBridge EXTENSION_HANDLERS 为准）。
+ * extension:widget/widgetGui/status/notify 用冒号；extension.dialog 用**点号**
+ * （pi1-disposition-chat-flow D6 起 dialog 族取代原 extension.ui_request，runtime
+ * event-adapter 实发 'extension.dialog'，与 protocol.ts + MessageBusBridge
+ * EXTENSION_HANDLERS 同源）。
  *
  * 导出面说明：导出供 route-inbound.test.ts 注册探针条目（payloadGuard「不门控分发」
  * 契约的接口级验证——生产 payloadGuard 条目均无 crossSession 声明，需注入探针才可
@@ -364,7 +365,7 @@ export const ROUTE_TABLE: Record<string, RouteTableEntry> = {
   'extension:widgetGui': { crossSession: true },
   'extension:status': { crossSession: true },
   'extension:notify': { crossSession: true },
-  'extension.ui_request': { crossSession: true }, // 点号：runtime wire 实际格式（见 ROUTE_TABLE 注释）
+  'extension.dialog': { crossSession: true }, // 点号：runtime wire 实际格式（见 ROUTE_TABLE 注释）
   // P2-2 失效链（D-recheck2-1）：非 respond 终结（abort turn / 退出 plan / 回收 / session
   // 销毁）的挂起 UI 请求失效广播。bridge EXTENSION_HANDLERS 有解析器（归一 'requests-invalidated'
   // 事件 → useExtensionUI 摘审批条/表单），但本表此前漏声明——帧只进 session 通道、bridge

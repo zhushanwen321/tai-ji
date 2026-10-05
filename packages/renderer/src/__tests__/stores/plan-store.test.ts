@@ -8,14 +8,14 @@
  *   规划中档）/ ③ reviewing / ③✓ approved（D5 阶段不倒退，F5）
  * - state 读侧解析（resolvePlanLifecycleState：归一 View 的 state 直读 + 值域守卫，缺失/
  *   垃圾落 idle——批次 3 条目 1 删除混装兜底后的声明例外锚；resolveResumeHint：直读）
- * - D4 分支公式单源（derivePlanReviewBarMode）：presence 语义 / 抑制窗 / 稳定窗输入面
- * - 审批窗口机件：已应答标记三路解除（预期后态帧值判定 / 新 pending / 冷拉真值）、迟到旧帧
- *   不解标记、稳定窗 arm/cancel·重置、10s 兑底双源冷拉（失败 → 标记悬挂 + loadError（R7）；
- *   成功 → 真值解除 + 冷拉豁免直通 + sink 再入店）
+ * - D4 分支公式单源（derivePlanReviewBarMode）：presence 语义 / 抑制标记 / degraded 组合输入面
+ * - 审批窗口机件：已应答标记两路事件驱动解除（预期后态帧值判定 / 新 pending）、迟到旧帧
+ *   不解标记、degraded 组合即时评估（[ADR-0122] 时间窗已删）、双源冷拉对账（显式拉取：
+ *   失败 → 标记悬挂 + loadError（R7）；成功 → 真值解除 + sink 再入店）
  * - D8 检测窗相位机（dmg-r1-2）：send resolve 只进 armed（前置在途 turn 终态不判定）、
  *   nudge 轮 message_start 才开 watching、send.rejected 不受起点标记门
  * - 辅助表迟到写拦截（D-B2-1 口径延伸，dmg-r1-3）：cleanup 后迟到 applyFrame /
- *   活动信号不复活 frameRevs / edgeFrameRevs / activityReconcileAt 条目
+ *   活动信号不复活 frameRevs / edgeFrameRevs 条目
  * - 首拉成功/置空/失败、陈旧首拉守卫、applyFrame 分区写、评论草稿、enter 翻转清、
  *   草稿回看（历史族，行为不变）
  *
@@ -40,8 +40,6 @@ import {
   resolveResumeHint,
   registerPlanReviewColdSink,
   __resetPlanReviewColdSinkForTesting,
-  PLAN_REVIEW_DEGRADED_STABLE_MS,
-  PLAN_REVIEW_ACK_FALLBACK_MS,
   type PlanReviewComment,
 } from '@/stores/plan-store'
 import type { PlanDocMeta, PlanStateView } from '@taiji/shared'
@@ -217,12 +215,12 @@ describe('derivePlanReviewBarMode：D4 分支公式单源（presence 语义）',
     expect(derivePlanReviewBarMode({ ...base, hasPending: true, state: 'revising' })).toBe('ready')
   })
 
-  it('已应答抑制窗压制 state 判定分支（degraded/revising）', () => {
+  it('已应答抑制标记压制 state 判定分支（degraded/revising）', () => {
     expect(derivePlanReviewBarMode({ ...base, ackMarked: true })).toBeNull()
     expect(derivePlanReviewBarMode({ ...base, ackMarked: true, state: 'revising' })).toBeNull()
   })
 
-  it('revising ⇔ state=revising（无挂起无压制）；degraded ⇔ reviewing ∧ 稳定窗放行', () => {
+  it('revising ⇔ state=revising（无挂起无压制）；degraded ⇔ reviewing ∧ 组合放行', () => {
     expect(derivePlanReviewBarMode({ ...base, state: 'revising' })).toBe('revising')
     expect(derivePlanReviewBarMode(base)).toBe('degraded')
     expect(derivePlanReviewBarMode({ ...base, degradedGate: false })).toBeNull()
@@ -235,7 +233,7 @@ describe('derivePlanReviewBarMode：D4 分支公式单源（presence 语义）',
   })
 })
 
-// ── 审批窗口机件（D4 抑制窗 / 稳定窗 / 冷拉对账）─────────────
+// ── 审批窗口机件（D4 抑制标记 / degraded 组合 / 冷拉对账）─────────────
 
 describe('审批窗口机件（D4）', () => {
   /** planReview 帧记录（冷拉 getPendingRequests 快照形态） */
@@ -350,36 +348,28 @@ describe('审批窗口机件（D4）', () => {
     expect(planReviewNudgeError.value).toBe('no-response')
   })
 
-  it('稳定窗 arm/cancel·重置（fake timers）：组合持续 ≥2s 放行；中途变假重置，再转真重新计满', async () => {
-    vi.useFakeTimers()
+  it('degraded 组合即时评估（[ADR-0122] 2s 稳定窗已删）：组合成立帧到达即放行；变假即复位', () => {
     const { store, planReviewDegradedGate } = mountStore()
     store.applyFrame('A', { ...BASE_VIEW, state: 'reviewing' })
-    expect(planReviewDegradedGate.value).toBe(false)
-    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_DEGRADED_STABLE_MS - 1)
-    expect(planReviewDegradedGate.value).toBe(false)
-    await vi.advanceTimersByTimeAsync(1)
+    // 组合成立（reviewing ∧ 无挂起 ∧ 无标记）→ 即时放行，不等时间窗
     expect(planReviewDegradedGate.value).toBe(true)
 
-    // 变假（挂起到达）→ cancel·重置；再转真 → 重新计满 2s 才放行
+    // 组合变假（挂起到达）→ 即时复位；组合转真（挂起摘除）→ 即时放行
     store.setPlanReviewPending('A', true)
     expect(planReviewDegradedGate.value).toBe(false)
     store.setPlanReviewPending('A', false)
-    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_DEGRADED_STABLE_MS - 1)
-    expect(planReviewDegradedGate.value).toBe(false)
-    await vi.advanceTimersByTimeAsync(1)
     expect(planReviewDegradedGate.value).toBe(true)
   })
 
   it('冷拉失败（R7 失败分支）→ 标记悬挂不解除 + loadError 呈现', async () => {
-    vi.useFakeTimers()
     const { store, planReviewAckMarked, planReviewDegradedGate, planLoadError } = mountStore()
     store.applyFrame('A', { ...BASE_VIEW, state: 'reviewing' })
     store.markPlanReviewAnswered('A')
     commandMock.mockReset().mockRejectedValue(new Error('ws closed'))
     getPendingRequestsMock.mockReset().mockRejectedValue(new Error('ws closed'))
 
-    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_ACK_FALLBACK_MS)
-    await vi.advanceTimersByTimeAsync(0)
+    await store.coldReconcilePlanReview('A')
+    await settle()
 
     // 标记悬挂（审批条保持不渲染——fail-safe 不误导）+ loadError 既有错误通路
     expect(planReviewAckMarked.value).toBe(true)
@@ -387,24 +377,22 @@ describe('审批窗口机件（D4）', () => {
     expect(planLoadError.value).toContain('ws closed')
   })
 
-  it('冷拉真值（reviewing ∧ 无挂起）→ 解除标记 + 冷拉豁免稳定窗直通', async () => {
-    vi.useFakeTimers()
+  it('冷拉真值（reviewing ∧ 无挂起）→ 解除标记 + degraded 组合即时放行', async () => {
     const { store, planReviewAckMarked, planReviewDegradedGate } = mountStore()
     store.applyFrame('A', { ...BASE_VIEW, state: 'reviewing' })
     store.markPlanReviewAnswered('A')
     commandMock.mockReset().mockResolvedValue({ sessionId: 'A', planState: { ...BASE_VIEW, state: 'reviewing' } })
     getPendingRequestsMock.mockReset().mockResolvedValue([])
 
-    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_ACK_FALLBACK_MS)
-    await vi.advanceTimersByTimeAsync(0)
+    await store.coldReconcilePlanReview('A')
+    await settle()
 
     expect(planReviewAckMarked.value).toBe(false)
-    // 冷拉真值豁免稳定窗：对账结果即事实，直接放行（不再等 2s）
+    // 冷拉落地即以真值解除标记，degraded 组合即时重估放行（无时间窗）
     expect(planReviewDegradedGate.value).toBe(true)
   })
 
   it('冷拉真值（pending 在场）→ 真值解除标记 + sink 再入店 registry（呈 ready 权威优先）', async () => {
-    vi.useFakeTimers()
     const sinkRecords: ExtensionUIRequest[][] = []
     registerPlanReviewColdSink((sid, records) => {
       expect(sid).toBe('A')
@@ -416,8 +404,8 @@ describe('审批窗口机件（D4）', () => {
     commandMock.mockReset().mockResolvedValue({ sessionId: 'A', planState: { ...BASE_VIEW, state: 'reviewing' } })
     getPendingRequestsMock.mockReset().mockResolvedValue([planReviewRecord('pr-cold'), { ...planReviewRecord('form-1'), planReview: false }])
 
-    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_ACK_FALLBACK_MS)
-    await vi.advanceTimersByTimeAsync(0)
+    await store.coldReconcilePlanReview('A')
+    await settle()
 
     expect(planReviewAckMarked.value).toBe(false)
     // 只有 planReview 记录入店（form 键不归审批条）
@@ -619,7 +607,7 @@ describe('陈旧首拉守卫（F-R2-1：冷回填不倒拨 live 帧）', () => {
     expect(planView.value?.docs?.length).toBe(1)
   })
 
-  it('辅助表迟到写拦截（D-B2-1 口径延伸）：cleanup 后迟到活动信号不重建 edgeFrameRevs/activityReconcileAt，不触发补拉', async () => {
+  it('辅助表迟到写拦截（D-B2-1 口径延伸）：cleanup 后迟到活动信号不重建 edgeFrameRevs，不触发补拉', async () => {
     const { store } = usePlanRefs()
     store.syncFocus('A')
     store.applyFrame('A', { ...BASE_VIEW, docs: [DOC] })
@@ -627,7 +615,7 @@ describe('陈旧首拉守卫（F-R2-1：冷回填不倒拨 live 帧）', () => {
     await settle()
 
     // 迟到活动信号 ×2：若未拦截，第一次会重建 edgeFrameRevs('A'→0)，第二次因「边沿间
-    // frameRev 零增长」通过帧进展门 + 冷却表空 → 触发补拉 RPC（零 RPC 断言拦截生效）
+    // frameRev 零增长」通过帧进展门 → 触发补拉 RPC（零 RPC 断言拦截生效）
     store.reconcileOnAssistantMessage('A')
     store.reconcileOnAssistantMessage('A')
     await settle()

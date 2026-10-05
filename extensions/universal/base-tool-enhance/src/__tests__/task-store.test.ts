@@ -79,7 +79,7 @@ describe("task store state machine", () => {
 		const marked = markKillingIntent(task.taskId, "killed");
 		expect(marked?.state).toBe("killing");
 		expect(marked?.intent).toEqual({ reason: "killed", at: expect.any(Number) });
-		// killing 仍属活跃态（轮询器监护对象）
+		// killing 仍属活跃态（exit 边沿监护对象）
 		expect(getActiveTasks().map((t) => t.taskId)).toEqual([task.taskId]);
 	});
 

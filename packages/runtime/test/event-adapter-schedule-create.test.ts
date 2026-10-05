@@ -2,7 +2,7 @@
  * event-adapter 第 4 marker 分支：schedule 创建确认（SCHEDULE_CREATE_MARKER）翻译测试。
  *
  * 设计 scheduler-create-confirm-modal §3.4 / U5 验收：
- * - 合法 draft → 翻译为 extension.ui_request 帧（scheduleCreate: true + scheduleDraft 字段保真）
+ * - 合法 draft → 翻译为 extension.dialog 帧（scheduleCreate: true + scheduleDraft 字段保真）
  *   + extension-ui kind 事件（watchdog 暂停 + pending 跟踪，S4）
  * - 检测失败（非合法 JSON / draft 缺字段）→ 降级普通 select（S2 同款兜底）
  *
@@ -67,13 +67,13 @@ describe('event-adapter: schedule-create SCHEDULE_CREATE_MARKER 检测（第 4 m
     const extUi = findExtensionUi(results)
     expect(extUi).toBeDefined()
 
-    // message 帧：extension.ui_request + form=true（legacy 归一上移）+ scheduleCreate=true + scheduleDraft 透传
+    // message 帧：extension.dialog + form=true（legacy 归一上移）+ scheduleCreate=true + scheduleDraft 透传
     const msg = findMessage(results)
     expect(msg).toBeDefined()
-    expect(msg!.message.type).toBe('extension.ui_request')
+    expect(msg!.message.type).toBe('extension.dialog')
     expect(msg!.message.payload.form).toBe(true)
     expect(msg!.message.payload.scheduleCreate).toBe(true)
-    expect(msg!.message.payload.method).toBe('select')
+    expect(msg!.message.payload.dialogKind).toBe('select')
     expect(msg!.message.payload.requestId).toBe('req-sched')
     expect(msg!.message.payload.sessionId).toBe('sess-1')
     // scheduleDraft 字段保真（深比较全字段，含可选字段）
@@ -122,8 +122,8 @@ describe('event-adapter: schedule-create SCHEDULE_CREATE_MARKER 检测（第 4 m
 
     const msg = findMessage(results)
     expect(msg).toBeDefined()
-    expect(msg!.message.type).toBe('extension.ui_request')
-    expect(msg!.message.payload.method).toBe('select')
+    expect(msg!.message.type).toBe('extension.dialog')
+    expect(msg!.message.payload.dialogKind).toBe('select')
     // 降级为普通 select（无 schedule-create 专有字段）
     expect(msg!.message.payload.scheduleCreate).toBeUndefined()
     expect(msg!.message.payload.scheduleDraft).toBeUndefined()
@@ -192,7 +192,7 @@ describe('event-adapter: schedule-create SCHEDULE_CREATE_MARKER 检测（第 4 m
 
     const msg = findMessage(results)
     expect(msg).toBeDefined()
-    expect(msg!.message.payload.method).toBe('confirm')
+    expect(msg!.message.payload.dialogKind).toBe('confirm')
     expect(msg!.message.payload.scheduleCreate).toBeUndefined()
   })
 

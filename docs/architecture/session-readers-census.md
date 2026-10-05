@@ -137,7 +137,6 @@ grep -rn 'client\.getEntries(' packages/runtime/src --include='*.ts' | grep -v '
 | 包 | 消费点 | 说明 |
 |----|--------|------|
 | permission | `index.ts` `pi.on("session_tree")` → statusline/footer 重绘 | 重绘时读新分支 config，不读 session 文件 |
-| plugin-bridge | `index.ts` `observeHandler("session_tree")` | 事件转发给 taiji plugins（observe 通道） |
 | subagent-workflow | `session_tree` → `terminateRunningRuns` | 撤回编排以 workflow-running 前置检查阻止该副作用触发（撤回遇活跃 run 不放行） |
 | scheduler（extensions/universal） | `backend.ts` `pi.on("session_tree")` → 重折叠任务集 | 纯重建体（loadTasks 换 Map），零 dispatch 零 append；被撤任务到点不触发（A14） |
 

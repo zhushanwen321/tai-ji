@@ -1,22 +1,15 @@
-// zcode-engine-retry.test.ts —— [P0-1 U4/D6] 瞬时失败自动重试一次 + 预算继承测试
-// （设计锚点 D6、F-1/F-4、U4、P-Z4）。全部跑 __fixtures__/fake-appserver.mjs 子进程
+// zcode-engine-retry.test.ts —— [P0-1 U4/D6] 瞬时失败自动重试一次测试
+// （设计锚点 D6、F-1/F-4、U4）。全部跑 __fixtures__/fake-appserver.mjs 子进程
 // （scenario 注入；crashAfterSendMs 为 U4 扩展的崩溃收割注入通道），绝不 spawn 真
 // zcode.cjs。覆盖：
-//   - 预算继承纯函数（P-Z4「显式预算下重试轮不重置总预算」的数学本体）：剩余 =
-//     总预算 − 已耗尽的精确断言 + 下限门禁 + 非显式 unbounded；
 //   - 重试一次成功（连接崩溃形态）：crash → failAllTurns 收割 → 新会话重跑（进程
 //     死后惰性重建 + scenario 切换）→ 自然终态；
-//   - 重试仍失败两形态各一（超时族 / 连接崩溃族）：文案补「已自动重试一次」句
-//     （u-z2 留的 F-1 补句义务），连接崩溃族 boot 2 证据；
+//   - 重试仍失败（连接崩溃族）：文案补「已自动重试一次」句（u-z2 留的 F-1 补句
+//     义务），boot 2 证据；
 //   - 不可重试形态不重试：RPC 错误（-32004/-32601 漂移）/ status=error 终态（D6
-//     被否③）/ 用户取消（aborted 短路）——各 create×1 无补句；
-//   - 显式预算 vs 默认配置行为差异（P-Z4 门禁集成面）：显式预算剩余充足 → 重试；
-//     剩余不足下限 → depleted 不重试；env ≤0 显式关闭上界 → unbounded 重试不受
-//     门禁（与 channel resolveTurnTimerMs 同一 env 通道，vi.stubEnv 缩短量级——
-//     真实默认 60min/300s 下限不在单测等待范围）。
-// 集成层无法在真实等待范围内让重试轮 fire 收窄后的上界（剩余 ≈ 300s 量级），「重试
-// 轮上界=剩余」的数值精确断言由纯函数层承载（turnTimeoutMs 传递链路的集成行为由
-// F1 用例的重试成功佐证）——分层等价，偏差已登记。
+//     被否③）/ 用户取消（aborted 短路）——各 create×1 无补句。
+// （原预算继承面——resolveTransientRetryBudget 纯函数与显式总上界 env 门禁——随
+// turn 双 timer 删除一并移除：重试轮不再携带上界预算。）
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -30,8 +23,6 @@ import type { AgentCallOpts } from "../port-types.ts";
 import { ZCODE_APPSERVER_GOLDEN } from "../golden-sample.ts";
 import {
   ZcodeEngine,
-  ZCODE_TURN_RETRY_MIN_BUDGET_MS,
-  resolveTransientRetryBudget,
   type ZcodeEngineDeps,
 } from "../zcode-engine.ts";
 
@@ -133,8 +124,7 @@ function makeEngine(overrides: ScenarioOverrides = {}): EngineFixture {
     sources: { v2ConfigPath: v2Path, personalProviderConfigPath: personalPath, builtinCatalogPath: path.join(tmpRoot, "absent-catalog.json") },
     processEnv: {
       PATH: process.env.PATH ?? "",
-      // 钉扎 appserver 定向（定向不探不降）；turn 阈值走全局 env stub（session-channel
-      // 的 resolveTurnTimerMs 与引擎预算门禁都直读 process.env——D2 env 通道）
+      // 钉扎 appserver 定向（定向不探不降）
       TAIJI_ZCODE_MODE: "appserver",
       FAKE_STATE_FILE: stateFile,
       FAKE_SESSION_SCENARIO: scenarioFile,
@@ -199,30 +189,6 @@ function makeCtx(overrides?: Partial<RunContext>): RunContext {
 }
 
 // ============================================================
-// 预算继承纯函数（P-Z4 数学本体：剩余 = 总预算 − 已耗尽，不重置）
-// ============================================================
-
-describe("resolveTransientRetryBudget（P-Z4：显式预算下重试轮不重置总预算）", () => {
-  it("显式预算下剩余 = 总预算 − 已耗尽（精确数值，重试轮上界=剩余）", () => {
-    expect(resolveTransientRetryBudget(3_600_000, 1_800_000)).toEqual({ state: "inherit", remainingMs: 1_800_000 });
-    expect(resolveTransientRetryBudget(400_000, 100_000)).toEqual({ state: "inherit", remainingMs: 300_000 });
-  });
-
-  it("剩余恰为下限 → inherit（边界含）；剩余低于下限 → depleted（不重试直接终态化）", () => {
-    expect(resolveTransientRetryBudget(ZCODE_TURN_RETRY_MIN_BUDGET_MS, 0)).toEqual({
-      state: "inherit",
-      remainingMs: ZCODE_TURN_RETRY_MIN_BUDGET_MS,
-    });
-    expect(resolveTransientRetryBudget(360_000, 300_000)).toEqual({ state: "depleted" });
-  });
-
-  it("非显式预算（env 未设/非法回落/≤0 显式关闭）→ unbounded（无总预算面，重试不受门禁）", () => {
-    expect(resolveTransientRetryBudget(undefined, 0)).toEqual({ state: "unbounded" });
-    expect(resolveTransientRetryBudget(undefined, 999_999)).toEqual({ state: "unbounded" });
-  });
-});
-
-// ============================================================
 // 集成：重试一次成功（连接崩溃形态，D6/F-4 主路径）
 // ============================================================
 
@@ -240,20 +206,6 @@ describe("瞬时失败自动重试一次（P0-1 U4：新会话重跑）", () => 
     expect(r.outcome.exitCode).toBe(0);
     // 机械证据：崩溃 boot 1 + 重试轮惰性重建 boot 2；首轮 + 重试轮各自 create 新会话
     expect(bootCount(f.stateFile)).toBe(2);
-    expect(createCount(f.stateFile)).toBe(2);
-  }, 20_000);
-
-  it("重试仍失败·超时族：文案补「已自动重试一次仍超时」句（F-1 补句义务），进程不杀（boot 1）", async () => {
-    vi.stubEnv("TAIJI_ZCODE_TURN_IDLE_TIMEOUT_MS", "300");
-    const f = makeEngine(); // hang + stopBehavior 缺省 terminal（两轮止损链都 stop-acked）
-    const r = await f.engine.run(makeTask({ cwd: f.workspace }), makeCtx());
-    expect(r.outcome.error).toMatch(/^engine_timeout:/);
-    // u-z2 留的补句义务：仅重试真实发生后出现（F-1 样例句逐字）
-    expect(r.outcome.error).toContain("已自动重试一次仍超时");
-    expect(r.outcome.error).toContain("重试在止损链终局后启动，无新旧任务双跑窗");
-    // 重试轮同样走止损链（stop 已送达）+ 停止损不杀共享进程（boot 1）
-    expect(r.outcome.error).toContain("session/stop 已送达");
-    expect(bootCount(f.stateFile)).toBe(1);
     expect(createCount(f.stateFile)).toBe(2);
   }, 20_000);
 
@@ -300,7 +252,6 @@ describe("不可重试形态不重试（一次会话收口，无补句）", () =
   }, 15_000);
 
   it("用户取消（turn 在途时 abort）：aborted 短路优先 → 不重试（create×1）", async () => {
-    vi.stubEnv("TAIJI_ZCODE_TURN_IDLE_TIMEOUT_MS", "5000");
     const f = makeEngine(); // hang + stopBehavior terminal（stop 优雅生效 → aborted 收口）
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 80);
@@ -312,54 +263,3 @@ describe("不可重试形态不重试（一次会话收口，无补句）", () =
   }, 15_000);
 });
 
-// ============================================================
-// 显式预算 vs 默认配置（P-Z4 门禁集成面）
-// ============================================================
-
-describe("显式预算门禁与默认配置的行为差异（P-Z4 集成面）", () => {
-  it("显式预算剩余充足（310s > 300s 下限 + 首轮消耗）→ 重试发生：boot 2 + create×2 + 自然终态", async () => {
-    vi.stubEnv("TAIJI_ZCODE_TURN_MAX_TIMEOUT_MS", "310000");
-    const f = makeEngine({
-      crashAfterSendMs: 120,
-      rebootSendPushes: [...ZCODE_APPSERVER_GOLDEN.pushStream, ...ZCODE_APPSERVER_GOLDEN.terminal],
-    });
-    const r = await f.engine.run(makeTask({ cwd: f.workspace }), makeCtx());
-    // 重试未被预算门禁拦截（剩余 ≥ 下限），重试轮成功收口
-    expect(r.outcome.error).toBeUndefined();
-    expect(r.outcome.content).toBe(GOLDEN_FULL_TEXT);
-    expect(bootCount(f.stateFile)).toBe(2);
-    expect(createCount(f.stateFile)).toBe(2);
-  }, 20_000);
-
-  it("显式预算剩余不足下限（60s − 消耗 < 300s）→ depleted 不重试：boot 1 + create×1 + 无补句", async () => {
-    vi.stubEnv("TAIJI_ZCODE_TURN_MAX_TIMEOUT_MS", "60000");
-    const f = makeEngine({ crashAfterSendMs: 120 }); // scenario 固定 crash（无重试即不重建）
-    const r = await f.engine.run(makeTask({ cwd: f.workspace }), makeCtx());
-    expect(r.outcome.error).toMatch(/^engine_run_failed: app-server 会话执行失败/);
-    expect(r.outcome.error).not.toContain("已自动重试");
-    expect(createCount(f.stateFile)).toBe(1);
-    expect(bootCount(f.stateFile)).toBe(1);
-  }, 15_000);
-
-  it("env ≤0 显式关闭总上界 → 无显式预算（unbounded）→ 重试不受门禁：boot 2 证据", async () => {
-    vi.stubEnv("TAIJI_ZCODE_TURN_MAX_TIMEOUT_MS", "0");
-    const f = makeEngine({ crashAfterSendMs: 120 }); // scenario 固定 crash——重试轮同样崩溃
-    const r = await f.engine.run(makeTask({ cwd: f.workspace }), makeCtx());
-    expect(r.outcome.error).toContain("已自动重试一次仍失败");
-    expect(createCount(f.stateFile)).toBe(2);
-    expect(bootCount(f.stateFile)).toBe(2);
-  }, 20_000);
-
-  it("超时族 + 预算门禁拦截（depleted）→ 未重试：engine_timeout 文案不含补句（补句仅随真实重试，F-1 一致性）", async () => {
-    vi.stubEnv("TAIJI_ZCODE_TURN_IDLE_TIMEOUT_MS", "300");
-    vi.stubEnv("TAIJI_ZCODE_TURN_MAX_TIMEOUT_MS", "60000"); // 剩余 60s − 首轮消耗 < 300s 下限
-    const f = makeEngine(); // hang + stop terminal（首轮 idle 判死 → timeout 形态）
-    const r = await f.engine.run(makeTask({ cwd: f.workspace }), makeCtx());
-    expect(r.outcome.error).toMatch(/^engine_timeout:/);
-    expect(r.outcome.error).toContain("idle 判定");
-    // 目标 3 的反面断言：未重试形态不含「已自动重试」句（与行为一致）
-    expect(r.outcome.error).not.toContain("已自动重试");
-    expect(createCount(f.stateFile)).toBe(1);
-    expect(bootCount(f.stateFile)).toBe(1);
-  }, 15_000);
-});

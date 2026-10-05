@@ -42,7 +42,6 @@ import type { IMessageBus } from '../../message-bus/message-bus.js'
 import type { IProcessManager, IPiEngine } from '../../ports/pi-engine.js'
 import type { ISessionStore } from '../../ports/session.js'
 import { SCALAR_STATE_DEBOUNCE_MS } from '../replicated-states.config.js'
-import { RECORD_RECONCILE_INTERVAL_MS } from '../session-records.js'
 
 /** pi entry_appended 事件载荷形态（agent-session bindCore appendEntry 的 _emit 原文）。 */
 function piEntryAppendedEvent(customType: string, data: Record<string, unknown>): Record<string, unknown> {
@@ -206,11 +205,6 @@ describe('全链：首个 plan-state entry → session.planState 帧及时发布
     p.emitPiEvent(piEntryAppendedEvent('plan-state', PLAN_ENTRY_DATA))
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS)
     expect(planStateFrames(p.received)).toHaveLength(0) // 无订阅者：无直推（真机 20:09:36.204）
-
-    // 15s 定时腿（真机 20:09:39-20:18:24 每 15s 空增量）：cursor 增量空批 → 水位 diff 恒等 → 不补发
-    await vi.advanceTimersByTimeAsync(RECORD_RECONCILE_INTERVAL_MS)
-    expect(planStateFrames(p.received)).toHaveLength(0)
-    expect(p.client.getEntries).toHaveBeenCalledWith('leaf-1') // 定时腿确实跑了增量拉取
 
     // agent_settled 腿同样不补（publish 调用已完成，水位已推进——对账腿只覆盖 publish 跳丢形态）
     p.records.reconcileRecordEntries('s1')

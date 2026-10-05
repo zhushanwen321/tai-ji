@@ -149,27 +149,19 @@ describe('D1 申报制：批次粒度（per-entry 申报）', () => {
   })
 })
 
-describe('D1 申报制：重试语义（P0-20 锁）', () => {
-  it('首拍受理失败整批重试：acceptance 条目终态化时点 = 整批 accepted 后（与 marker 对齐）', () => {
-    let attempts = 0
+describe('D1 申报制：首败即停语义（P0-20 锁，ADR-0122）', () => {
+  it('首拍受理失败首败即停：整批条目 rejected 逐条回调（acceptance 与 marker 对齐），无重试', () => {
     const port = makePort()
-    let firstAttempt = true
-    // 覆写 send：首拍显式拒绝（accepted:false），二拍受理成功
+    // 覆写 send：恒显式拒绝（accepted:false）
     vi.mocked(port.send).mockImplementation((msg, intent) => {
-      attempts += 1
       void msg
       void intent
-      if (firstAttempt) {
-        firstAttempt = false
-        return { accepted: false, reason: 'transient' }
-      }
-      return undefined
+      return { accepted: false, reason: 'transient' }
     })
-    const settled: string[] = []
+    const settled: Array<{ content: string; outcome: string }> = []
     const handle = createDelivery(port, {
-      backoff: { ms: 100, max: 5 },
       onSettled: (msg, outcome) => {
-        if (outcome === 'delivered') settled.push(msg.payload.content)
+        settled.push({ content: msg.payload.content, outcome })
       },
     })
 
@@ -180,17 +172,13 @@ describe('D1 申报制：重试语义（P0-20 锁）', () => {
     port.idle = true
     handle.flush()
 
-    // 首拍拒绝（整批 A+B）：条目留守出站批次（仍 queued），不落终态、不回调
-    expect(attempts).toBe(1)
-    expect(handle.entriesFull().tombstones).toHaveLength(0)
-    expect(settled).toEqual([])
-
-    // 退避一拍重试成功：整批 accepted → acceptance 条目统一落地
-    vi.advanceTimersByTime(100)
-    expect(attempts).toBe(2)
+    // 首败即停：整批条目 rejected 逐条回调（per-message 契约保持），无重试窗口
+    expect(settled).toEqual([
+      { content: 'notify: A done', outcome: 'rejected' },
+      { content: 'notify: B done', outcome: 'rejected' },
+    ])
     expect(handle.entriesFull().active).toHaveLength(0)
-    expect(handle.entriesFull().tombstones).toHaveLength(2)
-    expect(settled).toEqual(['notify: A done', 'notify: B done'])
+    expect(handle.entriesFull().tombstones).toHaveLength(0) // 未受理无判重语义
 
     handle.dispose()
   })

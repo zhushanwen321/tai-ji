@@ -82,7 +82,6 @@ describe('plugin-sdk freeze 运行时侧（AC12 后半：runtime api 对象冻�
       hooks: {
         onBeforeSendMessage: async () => ({ dispose: () => undefined }),
         onBeforeToolCall: async () => ({ dispose: () => undefined }),
-        onBeforeAgentStart: async () => ({ dispose: () => undefined }),
         onAfterToolResult: async () => ({ dispose: () => undefined }),
         onPiEvent: async () => ({ dispose: () => undefined }),
       },

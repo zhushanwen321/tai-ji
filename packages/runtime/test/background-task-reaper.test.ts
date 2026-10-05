@@ -559,42 +559,6 @@ function makeStartupDeps(): StartupBackgroundDeps {
 }
 
 describe('触发面 B 挂接（startup-background-init 硬序）', () => {
-  it('B 扫描链式 await 孤儿 pi 收殓完成：pi 收殓未完成前扫描不得先行', async () => {
-    vi.useFakeTimers()
-    try {
-      const events: string[] = []
-      let resolvePiReap!: () => void
-      vi.mocked(reapOrphanPiProcesses).mockImplementationOnce(
-        () => new Promise((resolve) => {
-          events.push('pi-reap:start')
-          resolvePiReap = () => { events.push('pi-reap:end'); resolve({ scanned: 0, reaped: [], failed: [], unsupported: false }) }
-        }),
-      )
-      vi.mocked(reapAllSessionsBackgroundTasks).mockImplementationOnce(async () => {
-        events.push('scan')
-        return zeroResult()
-      })
-
-      await runStartupBackgroundInit(makeStartupDeps())
-      // 启动序列本身不被 fire-and-forget 定时器阻塞：序列已完整返回，5s 定时器尚未到点
-      expect(reapOrphanPiProcesses).not.toHaveBeenCalled()
-      expect(events).toEqual([])
-
-      await vi.advanceTimersByTimeAsync(5_000)
-      // 5s 到点：孤儿 pi 收殓已开始但未完成 → 硬序要求扫描仍未执行
-      expect(events).toEqual(['pi-reap:start'])
-      expect(reapAllSessionsBackgroundTasks).not.toHaveBeenCalled()
-
-      resolvePiReap()
-      await vi.advanceTimersByTimeAsync(0) // flush 微任务链
-      // pi 收殓完成后扫描才执行；agentDir 为 pi agent 目录
-      expect(events).toEqual(['pi-reap:start', 'pi-reap:end', 'scan'])
-      expect(reapAllSessionsBackgroundTasks).toHaveBeenCalledWith(getPiAgentDir())
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
   it('孤儿 pi 收殓失败（reject 兜底后）仍执行 B 扫描——硬序只约束先后，不传递成败', async () => {
     vi.useFakeTimers()
     try {
@@ -611,20 +575,5 @@ describe('触发面 B 挂接（startup-background-init 硬序）', () => {
     }
   })
 
-  it('B 扫描自身失败（reject）→ 链尾 catch 兜底 warn，不外抛、不影响启动序列', async () => {
-    vi.useFakeTimers()
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    try {
-      vi.mocked(reapOrphanPiProcesses).mockResolvedValueOnce({ scanned: 0, reaped: [], failed: [], unsupported: false })
-      vi.mocked(reapAllSessionsBackgroundTasks).mockRejectedValueOnce(new Error('scan boom'))
 
-      await runStartupBackgroundInit(makeStartupDeps())
-      await vi.advanceTimersByTimeAsync(5_000)
-
-      expect(warnSpy).toHaveBeenCalledWith('[runtime] background task reap-all failed unexpectedly:', expect.any(Error))
-    } finally {
-      warnSpy.mockRestore()
-      vi.useRealTimers()
-    }
-  })
 })

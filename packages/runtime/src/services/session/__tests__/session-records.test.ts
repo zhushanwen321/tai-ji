@@ -20,6 +20,8 @@ import type { IProcessManager, IPiEngine } from '../../ports/pi-engine.js'
 import type { ISessionStore } from '../../ports/session.js'
 import type { SessionRecordsDeps } from '../session-records.js'
 import { SessionRecords, encodeDirectiveText } from '../session-records.js'
+// [event-push-channel] journal 推送喂入生产路径路由（SessionRecords 构造期注册 sink）
+import { routeJournalReport } from '../journal-report-router.js'
 import { SCALAR_STATE_DEBOUNCE_MS } from '../replicated-states.config.js'
 import type { SkillInjector, SkillInjectionResult } from '../skill-injector.js'
 import { extractSubagentsFromSessionFile } from '../subagent-extractor.js'
@@ -295,7 +297,6 @@ describe('refreshRecordEntries：拉取与发布', () => {
       piAgentDirRef.dir = dir
       const { records, publish, client } = makeRecords({
         sessionStore: { scanSessions: vi.fn(() => [{ id: 's1', filePath: join(dir, 's1.jsonl') }]) } as unknown as ISessionStore,
-        eventTailerRecheckMs: 50,
       })
       const fire = registerSession(records)
       client.getEntries.mockResolvedValue({
@@ -309,9 +310,17 @@ describe('refreshRecordEntries：拉取与发布', () => {
 
       // 同 runId 仍 running，run journal 追加一个 agent 步骤（core 启动即落账的产物）——
       // status/reason 未变，但步骤数 / 步骤状态序列变化也必须发布（否则 GUI 详情整个 run
-      // 期间收不到 reload 触发）
-      writeFileSync(runJournalPath, `${JSON.stringify({ type: 'agent-started', taskIndex: 0, agentName: 'reviewer', attempt: 1, ts: 1100 })}\n`, { flag: 'a' })
-      await vi.advanceTimersByTimeAsync(150)
+      // 期间收不到 reload 触发）。[event-push-channel] 增量喂入 = journal 推送报告
+      // （经 journal-report-router 生产路径路由到本 session 投影）。
+      const agentStarted = { type: 'agent-started', taskIndex: 0, agentName: 'reviewer', attempt: 1, seq: 2, ts: 1100 }
+      writeFileSync(runJournalPath, `${JSON.stringify(agentStarted)}\n`, { flag: 'a' })
+      expect(routeJournalReport('s1', {
+        domain: 'run',
+        fileKey: 'run-1',
+        events: [agentStarted],
+        sessionId: 's1',
+        emittedAt: Date.now(),
+      })).toBe(true)
       const stepMsgs = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.workflowUpdate')
       expect(stepMsgs).toHaveLength(2)
       expect(stepMsgs[1][0]).toBe('s1')
@@ -544,64 +553,6 @@ describe('refreshRecordEntries：拉取与发布', () => {
   })
 })
 
-describe('[升级腿中间帧抑制] applyRecordEntries 发布序列（greptile PR #30 发现 3）', () => {
-  beforeEach(() => { vi.useFakeTimers() })
-  afterEach(() => { vi.useRealTimers() })
-
-  it('降级投影升级腿不再先于 entry 批发布：轮内首帧即完整态（含 fold 更新与本批 entry）', async () => {
-    // 场景：轮 1 meta 不可得 → entry-only 降级投影；轮 2 前 run journal 落盘 + meta
-    // 可得 → ensureProjection 早退分支走升级腿（attachEventSources → rescan 全同步）。
-    // 无抑制时升级腿在本批 entry 应用前经 fireChange 即时发布一帧「只有 fold（wf-1
-    // 步骤数 0→1 的 workflowUpdate）、缺本批 entry（sa-1）」的中间态，随后 applyEntryBatch
-    // 后的纠正帧补齐——消费方两连帧、观测日志出现误导中间行。抑制后单次发布、首帧即完整态。
-    const sessionDir = mkdtempSync(join(tmpdir(), 'rec-upgrade-'))
-    const sessionFile = join(sessionDir, 's1.jsonl')
-    writeFileSync(sessionFile, '')
-    const runDir = join(sessionDir, 'workflow-state')
-    mkdirSync(runDir, { recursive: true })
-    try {
-      // meta 可控：轮 1 空（降级投影），轮 2 前落位（触发升级腿）
-      const scanMeta: Array<{ id: string; filePath: string; cwd: string }> = []
-      const { records, client, publish } = makeRecords({
-        sessionStore: { scanSessions: vi.fn(() => scanMeta) } as unknown as ISessionStore,
-      })
-      const fire = registerSession(records)
-      client.getEntries
-        .mockResolvedValueOnce({ data: { entries: [...workflowRecordEntry('wf-1', 'running', 'e1')], leafId: 'e1' } } as GetEntriesResult)
-        .mockResolvedValueOnce({ data: { entries: [...subagentRecordEntry('sa-1', 'running', 'e2')], leafId: 'e2' } } as GetEntriesResult)
-
-      // 轮 1：meta 不可得 → 降级投影；发布 wf-1（无 fold，步骤空）一帧
-      fire('s1')
-      records.invalidateRecordEntries('s1', 'workflow-record')
-      await flushDebounce()
-      expect(publish).toHaveBeenCalledTimes(1)
-      publish.mockClear()
-
-      // 升级源就位：run journal 落盘（wf-1 出现 1 个步骤）+ session meta 可得
-      writeFileSync(join(runDir, 'wf-1.record.jsonl'), [
-        JSON.stringify({ type: 'run-created', runId: 'wf-1', workflowName: 'test-flow', argsSummary: '', ts: 1000 }),
-        JSON.stringify({ type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100 }),
-      ].join('\n') + '\n')
-      scanMeta.push({ id: 's1', filePath: sessionFile, cwd: join(sessionDir, 'cwd') })
-
-      // 轮 2：本批 entry 携新 subagent sa-1；升级腿 fold 使 wf-1 步骤数 0→1
-      records.invalidateRecordEntries('s1', 'subagent-record')
-      await flushDebounce()
-
-      // 修复后：单次发布两帧，首帧即 session.subagents（已含本批 entry 的 sa-1）——
-      // 中间帧形态（先 workflowUpdate 后 subagents 的两连发布）不再出现
-      expect(publish).toHaveBeenCalledTimes(2)
-      const first = publish.mock.calls[0]![1] as { type: string; payload: { subagents: Array<{ subagentId: string }> } }
-      const second = publish.mock.calls[1]![1] as { type: string; payload: { update: { runId: string } } }
-      expect(first.type).toBe('session.subagents')
-      expect(first.payload.subagents.map((s) => s.subagentId)).toContain('sa-1')
-      expect(second.type).toBe('session.workflowUpdate')
-      expect(second.payload.update.runId).toBe('wf-1')
-    } finally {
-      rmSync(sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    }
-  })
-})
 
 describe('onSessionDisposed', () => {
   beforeEach(() => { vi.useFakeTimers() })
@@ -1380,7 +1331,7 @@ describe('[W1] 读侧换源：磁盘 entry-only 投影 / v2 读投影 / 全文�
     }
   })
 
-  it('投影驱动信号：事件文件追加终态事件 → tail 复查 → 投影变更 publish（subagents 帧 + workflowUpdate 转态信号）', async () => {
+  it('投影驱动信号：事件文件追加终态事件 → journal 推送喂入 → 投影变更 publish（subagents 帧 + workflowUpdate 转态信号）', async () => {
     const cwd = '/tmp/w1-signal'
     const world = makeV2World(cwd)
     piAgentDirRef.dir = world.agentDir
@@ -1399,7 +1350,6 @@ describe('[W1] 读侧换源：磁盘 entry-only 投影 / v2 读投影 / 全文�
       ].join('\n') + '\n')
       const { records, publish } = makeRecords({
         sessionStore: { scanSessions: vi.fn(() => [{ id: 's1', filePath: world.sessionFile, cwd }]) } as unknown as ISessionStore,
-        eventTailerRecheckMs: 50,
       })
       const fire = registerSession(records)
       fire('s1')
@@ -1410,12 +1360,20 @@ describe('[W1] 读侧换源：磁盘 entry-only 投影 / v2 读投影 / 全文�
       expect(subFrames).toHaveLength(1)
       expect((subFrames[0]![1] as { payload: { subagents: Array<{ status: string }> } }).payload.subagents[0]!.status).toBe('running')
 
-      // 事件文件追加 record-settled（completed）→ 复查周期拾取 → 投影变更 publish
+      // 事件文件追加 record-settled（completed）→ journal 推送报告喂入 → 投影变更 publish
+      //（[event-push-channel] 实时路径 = 推送，写侧落盘提交点推报告经生产路由到达投影）
       publish.mockClear()
+      const settled = { type: 'record-settled', seq: 2, ts: 3000, stopReason: 'completed', endedAt: 3000, turns: 2, totalTokens: 500 }
       writeFileSync(join(world.recordsDir, 'sa-1.events'), [
-        JSON.stringify({ type: 'record-settled', seq: 2, ts: 3000, stopReason: 'completed', endedAt: 3000, turns: 2, totalTokens: 500 }),
+        JSON.stringify(settled),
       ].join('\n') + '\n', { flag: 'a' })
-      await vi.advanceTimersByTimeAsync(150)
+      expect(routeJournalReport('s1', {
+        domain: 'record',
+        fileKey: 'sa-1',
+        events: [settled],
+        sessionId: 's1',
+        emittedAt: Date.now(),
+      })).toBe(true)
 
       subFrames = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.subagents')
       expect(subFrames).toHaveLength(1)

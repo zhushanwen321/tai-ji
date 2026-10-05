@@ -39,7 +39,7 @@ describe.skipIf(!PI_DIST)(
   () => {
     it('出队判定 = message_start(user) 时全文 indexOf 文本匹配（无 id 参与）', () => {
       const win = methodWindow(SESSION_SRC, '_handleAgentEvent = async (event) => {')
-      expect(win, 'PS-64 漂移：_handleAgentEvent 消失/改名——复核 PS-64 锚 dist/core/agent-session.js:360').not.toBe('')
+      expect(win, 'PS-64 漂移：_handleAgentEvent 消失/改名——复核 PS-64 锚 dist/core/agent-session.js:190').not.toBe('')
 
       expect(
         win.includes('event.type === "message_start" && event.message.role === "user"'),
@@ -71,7 +71,7 @@ describe.skipIf(!PI_DIST)(
 
     it('clearQueue() 是唯一批量收回原语且队列级全清（返回拷贝 + 置空 + agent.clearAllQueues）', () => {
       const win = methodWindow(SESSION_SRC, 'clearQueue() {')
-      expect(win, 'PS-64 漂移：clearQueue() 方法消失/改名——复核 PS-64 锚 dist/core/agent-session.js:1195').not.toBe('')
+      expect(win, 'PS-64 漂移：clearQueue() 方法消失/改名——复核 PS-64 锚 dist/core/agent-session.js:1846').not.toBe('')
 
       expect(
         win.includes('const steering = [...this._steeringMessages];'),
@@ -130,7 +130,7 @@ describe.skipIf(!PI_DIST)(
   () => {
     it('prompt() 对 streamingBehavior 的消费全部在流式前提下，非流式路径零读取', () => {
       const win = methodWindow(SESSION_SRC, 'async prompt(text, options) {')
-      expect(win, 'PS-66 漂移：prompt() 方法消失/改名——复核 PS-66 锚 dist/core/agent-session.js:821').not.toBe('')
+      expect(win, 'PS-66 漂移：prompt() 方法消失/改名——复核 PS-66 锚 dist/core/agent-session.js:1481').not.toBe('')
 
       expect(
         win.includes('this.isStreaming ? options?.streamingBehavior : undefined'),
@@ -166,7 +166,7 @@ describe.skipIf(!PI_DIST)(
 
     it('sendUserMessage 直透 deliverAs → streamingBehavior（extension 通道同语义）', () => {
       const win = methodWindow(SESSION_SRC, 'async sendUserMessage(content, options) {')
-      expect(win, 'PS-66 漂移：sendUserMessage 消失/改名——复核 PS-66 锚 dist/core/agent-session.js:1161').not.toBe('')
+      expect(win, 'PS-66 漂移：sendUserMessage 消失/改名——复核 PS-66 锚 dist/core/agent-session.js:1812').not.toBe('')
       expect(
         win.includes('streamingBehavior: options?.deliverAs,'),
         'PS-66 漂移：deliverAs 不再直透 streamingBehavior（改名/加变换？）——extension 通道投递语义变化，复审 PS-66',

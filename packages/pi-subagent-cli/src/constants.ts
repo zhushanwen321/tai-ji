@@ -22,6 +22,3 @@ const BYTES_PER_KIB = 1024;
  *  超大值在 spawn 调用点报 E2BIG（与 schema 内容无关的表象，难归因）——故注入前
  *  按此上限 fail-fast 拒绝（spawn-args.ts applySchemaEnvToChildEnv）。 */
 export const SCHEMA_ENV_MAX_BYTES = SCHEMA_ENV_MAX_KIB * BYTES_PER_KIB;
-
-/** [D3-① race-F4] SIGTERM 优雅窗口：30s 超窗升级 SIGKILL（core 现状值）。 */
-export const PI_KILL_GRACE_MS = 30_000;

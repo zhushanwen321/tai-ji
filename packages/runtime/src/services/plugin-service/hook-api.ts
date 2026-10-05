@@ -220,7 +220,6 @@ export function createHookApi(
 ): {
   onBeforeSendMessage(handler: HookInterceptor): Promise<Disposable>
   onBeforeToolCall(handler: HookInterceptor): Promise<Disposable>
-  onBeforeAgentStart(handler: HookInterceptor): Promise<Disposable>
   onAfterToolResult(handler: HookObserver): Promise<Disposable>
   onPiEvent(eventName: string, handler: PiEventCallback): Promise<Disposable>
 } {
@@ -292,12 +291,6 @@ export function createHookApi(
       registerHook('onBeforeToolCall', handler, async (ctx) => handler(ctx as Parameters<HookInterceptor>[0])),
 
     /**
-     * 注册 Agent 启动前拦截器。可阻止启动。
-     */
-    onBeforeAgentStart: (handler: HookInterceptor) =>
-      registerHook('onBeforeAgentStart', handler, async (ctx) => handler(ctx as Parameters<HookInterceptor>[0])),
-
-    /**
      * 注册工具结果后观察者。只能读取数据，不能阻止；可选返回
      * InterceptorResult.modifiedData 改写 output（D2-3 transform 语义，包装透传返回值）。
      */
@@ -310,20 +303,17 @@ export function createHookApi(
      * 注册 pi 事件观察者。
      *
      * D2-4：注册 key 统一为泛型 `'onPiEvent'`（不按事件名细分）——与调用侧
-     * （event-interpreter / bridge-interop）的泛型调用对齐，事件名经 context 传给
-     * handler，插件在 handler 内自行按事件名过滤。
+     * （event-interpreter / plugin-service.notifyPiEvent）的泛型调用对齐，事件名经
+     * context 传给 handler，插件在 handler 内自行按事件名过滤。
      *
-     * context 形状适配（三类调用方统一解析，Fix-2）：
-     * - bridge 包装 / 标准 HookContext：`data: { eventName, data, ... }` ——事件名与
-     *   负载嵌套在 ctx.data 内，payload 解包为内层 data
+     * context 形状适配（两类调用方统一解析，Fix-2；[pi1-disposition-chat-flow D7①]
+     * bridge 包装形状分支随 bridge 退役删除——现役调用方均为平铺形状）：
      * - 平铺变体：`{ eventName, data }` 直接在 ctx 顶层 ——payload 取顶层 data
      * - event-interpreter 平铺：`{ event, ...payload }` ——payload 为剥离 event/eventName
      *   元字段后的剩余字段（handler 的 data 不再混入 event 字段本身）
      *
-     * eventName 解析优先级：实际收到的 `event` 字段 > 顶层 `eventName` > bridge 包装内
-     * `data.eventName` > 注册时 eventName（最后兜底）。payload.data 存在但其内无
-     * eventName 时不会覆盖实际收到的 event 字段（Fix-2 错报边界）。
-     * handler 统一收到 `(eventName, data)`。
+     * eventName 解析优先级：实际收到的 `event` 字段 > 顶层 `eventName` > 注册时
+     * eventName（最后兜底）。handler 统一收到 `(eventName, data)`。
      */
     onPiEvent: (eventName: string, handler: PiEventCallback) =>
       registerHook(
@@ -333,19 +323,14 @@ export function createHookApi(
           const c = (ctx ?? {}) as {
             event?: unknown
             eventName?: unknown
-            data?: { eventName?: unknown; data?: unknown }
+            data?: unknown
           }
-          const nested = c.data
           const resolvedEventName =
             (typeof c.event === 'string' ? c.event : undefined)
             ?? (typeof c.eventName === 'string' ? c.eventName : undefined)
-            ?? (typeof nested?.eventName === 'string' ? nested.eventName : undefined)
             ?? eventName
           let payload: unknown
-          if (typeof nested?.eventName === 'string') {
-            // bridge 包装 {eventName, data, ...}：解包内层 data
-            payload = nested.data !== undefined ? nested.data : nested
-          } else if (typeof c.eventName === 'string' && c.data !== undefined) {
+          if (typeof c.eventName === 'string' && c.data !== undefined) {
             // 平铺变体 {eventName, data}：取顶层 data
             payload = c.data
           } else {

@@ -88,7 +88,6 @@ vi.mock('../src/infra/pi/process-manager.js', () => ({
 // ── Import after mocks ──────────────────────────────────────────
 
 import { SessionService, userStoppedMarkStore } from '../src/services/session/session-service.js'
-import { userStoppedGate, ABORT_STALL_CONVERGENCE_WINDOW_MS } from '../src/services/session/event-interpreter.js'
 import { PiConfigStore } from '../src/infra/pi/pi-config-store.js'
 import { PiSessionStore } from '../src/infra/pi/session-store.js'
 import type { IMessageBroker, IEventAdapter } from '../src/interfaces.js'
@@ -213,7 +212,7 @@ describe('D5②：session.restore 幂等短路复用', () => {
   })
 })
 
-describe('D4：restore-abort（标记检测 + 收敛环启动）', () => {
+describe('D4：restore-abort（标记检测）', () => {
   let service: SessionService
 
   beforeEach(() => {
@@ -222,16 +221,14 @@ describe('D4：restore-abort（标记检测 + 收敛环启动）', () => {
     tmpRoot = mkdtempSync(join(tmpdir(), 'restore-abort-'))
     service = createService()
     userStoppedMarkStore.clearAllUserStoppedMarks()
-    vi.useFakeTimers()
   })
 
   afterEach(() => {
-    vi.useRealTimers()
     if (tmpRoot) rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     userStoppedMarkStore.clearAllUserStoppedMarks()
   })
 
-  it('forceQuit 置标记后 restore：返回前 client.abort 被调用，静默窗满判收敛清标记', async () => {
+  it('forceQuit 置标记后 restore：返回前 client.abort 被调用，标记保留（无自动收敛，待显式投递消费）', async () => {
     const id = 'restore-abort-id'
     // ① K1 置标记（client 在进程表 → forceQuit 完整收敛链）
     const dyingClient = makeMockClient()
@@ -249,14 +246,12 @@ describe('D4：restore-abort（标记检测 + 收敛环启动）', () => {
 
     // D4 核心：restore 返回前 abort（掐 session_start 钩子补投的 replay turn）
     expect(freshClient.abort).toHaveBeenCalledTimes(1)
-    expect(userStoppedMarkStore.hasUserStoppedMark(id)).toBe(true) // 标记不在 abort 时消费
-
-    // ③ 收敛环：静默窗满（无补发 agent_start）→ 判收敛清标记
-    await vi.advanceTimersByTimeAsync(ABORT_STALL_CONVERGENCE_WINDOW_MS)
-    expect(userStoppedMarkStore.hasUserStoppedMark(id)).toBe(false)
+    // 标记保留：拦截存续到用户下一次显式投递（ADR-0122 事件顺序契约，原静默窗自动
+    // 收敛已删）
+    expect(userStoppedMarkStore.hasUserStoppedMark(id)).toBe(true)
   })
 
-  it('无标记的普通 restore（pi 崩溃等非用户意图）：不 abort、不起收敛环（notify replay 照常补投）', async () => {
+  it('无标记的普通 restore（pi 崩溃等非用户意图）：不 abort（notify replay 照常补投）', async () => {
     const id = 'no-mark-id'
     getClientMock.mockReturnValue(undefined)
     const freshClient = makeMockClient()
@@ -265,7 +260,6 @@ describe('D4：restore-abort（标记检测 + 收敛环启动）', () => {
 
     await service.restoreSession(id)
     expect(freshClient.abort).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(ABORT_STALL_CONVERGENCE_WINDOW_MS * 2)
     expect(userStoppedMarkStore.hasUserStoppedMark(id)).toBe(false)
   })
 

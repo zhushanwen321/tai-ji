@@ -259,14 +259,14 @@ describe('createInboundEffects（§11.4 InboundEffects 接线）', () => {
     expect(storeMocks.applySubagentEntries).toHaveBeenCalledWith('subagent:s-main:rec-9', entries)
   })
 
-  it('onWorkflowUpdate → triggerWorkflowReload(sid)；update.status 不再透传（500ms 盲等重试删除，待裁决项 5）', () => {
+  it('onWorkflowUpdate → triggerWorkflowReload(sid, status)；status 缺省按 "unknown"（防御运行时坏形状）', () => {
     effects.onWorkflowUpdate!('s1', { runId: 'wf-1', status: 'running' })
-    expect(storeMocks.triggerWorkflowReload).toHaveBeenCalledWith('s1')
+    expect(storeMocks.triggerWorkflowReload).toHaveBeenCalledWith('s1', 'running')
 
     storeMocks.triggerWorkflowReload.mockClear()
-    // status 缺省的坏形状同样只透传 sid（信号到达即拉一次，无 status 消费场景）
+    // status 缺省的坏形状按 "unknown" 透传（防御运行时坏形状，warn 判定不命中）
     effects.onWorkflowUpdate!('s1', { runId: 'wf-1' } as ServerMessageMap['session.workflowUpdate']['update'])
-    expect(storeMocks.triggerWorkflowReload).toHaveBeenCalledWith('s1')
+    expect(storeMocks.triggerWorkflowReload).toHaveBeenCalledWith('s1', 'unknown')
   })
 
   it('onGlobalError → toast.error(message)', () => {

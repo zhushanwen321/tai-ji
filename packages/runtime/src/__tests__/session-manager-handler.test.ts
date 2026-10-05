@@ -17,7 +17,7 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { SessionManagerHandler } from '../transport/session-manager-handler.js'
 import type { SessionManagerHandlerOptions } from '../transport/session-manager-handler.js'
-import { deliverRespondTargets, runClaimSweep } from '../transport/session-manager-handler.js'
+import { deliverRespondTargets } from '../transport/session-manager-handler.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 import { createClaimLedger } from '../services/session/notify-claims.js'
 import type { ClaimLedger, SettleOutcome } from '../services/session/notify-claims.js'
@@ -832,6 +832,12 @@ describe('SessionManagerHandler', () => {
     const VALID_NID = 'sm-12345678-1234-4234-8234-123456789012'
     const VALID_NID2 = 'sm-12345678-1234-4234-8234-123456789013'
 
+    /** create 带 prompt+notifyId 的 shortcut（应答面取首个 respond 调用）。 */
+    async function createAndRespond(opts: SessionManagerHandlerOptions, handler: SessionManagerHandler): Promise<Record<string, unknown>> {
+      await handler.handle('req-1', 'sid-parent', 'create', { cwd: '/t', prompt: 'init', notifyId: VALID_NID })
+      return respondAt(opts)
+    }
+
     it('params 守卫通过：封闭单键 {notifyId}（sm- 形态）→ 进入路由零 error', async () => {
       const opts = makeMockOptions()
       const handler = new SessionManagerHandler(opts)
@@ -948,46 +954,7 @@ describe('SessionManagerHandler', () => {
       expect(respondAt(opts, 1)).toEqual({ reason: 'orphaned', sessionId: 's1' })
     })
 
-    it('TTL：已挂 watch 的悬挂 claim 到达 TTL → runClaimSweep 经 handler 写回通道同步 respond orphaned', async () => {
-      let clock = 5_000_000
-      const claims = createClaimLedger({ now: () => clock })
-      const opts = makeMockOptions({ claims })
-      const handler = new SessionManagerHandler(opts)
-
-      await handler.handle('req-send', 'sid-parent', 'send', { sessionId: 's1', prompt: 'go', notifyId: VALID_NID })
-      await handler.handle('req-watch', 'sid-parent', 'watch', { notifyId: VALID_NID })
-      expect(opts.sendExtensionUiResponse).toHaveBeenCalledTimes(1) // send 结果（watch 挂起无应答）
-
-      clock += 60_000
-      runClaimSweep(claims, handler.watchRespond)
-      expect(opts.sendExtensionUiResponse).toHaveBeenCalledTimes(1) // 未到 TTL：无转移
-
-      clock += 600_000 // ≥ MIN_TTL_MS
-      const result = runClaimSweep(claims, handler.watchRespond)
-      expect(result.respondOrphaned).toHaveLength(1)
-      expect(opts.sendExtensionUiResponse).toHaveBeenCalledTimes(2)
-      expect(opts.sendExtensionUiResponse).toHaveBeenLastCalledWith(
-        'sid-parent',
-        'req-watch',
-        JSON.stringify({ reason: 'orphaned', sessionId: 's1' }),
-        'select',
-      )
-      expect(claims.getClaim('sid-parent', VALID_NID)).toBeUndefined() // onRespond 回执已删
-    })
-  })
-
-  // ─── notify-once 受理点 arm / 投递失败腿 / handleAbort 同步抹除（设计 D2/D4）──────
-  describe('notify-once 受理点接线：arm / disarm / abort 同步抹除 / undeliveredResults', () => {
-    const VALID_NID = 'sm-12345678-1234-4234-8234-123456789012'
-    const VALID_NID2 = 'sm-12345678-1234-4234-8234-123456789013'
-
-    /** create 双键用例共用腿：发起 create（携 prompt+notifyId 固定参数）→ 取回 respond 信封。 */
-    async function createAndRespond(opts: SessionManagerHandlerOptions, handler: SessionManagerHandler): Promise<Record<string, unknown>> {
-      await handler.handle('req-1', 'sid-parent', 'create', { cwd: '/t', prompt: 'init', notifyId: VALID_NID })
-      return respondAt(opts)
-    }
-
-    it('send 带合法 notifyId → arm + willNotify:true + notifyId/parentSid 穿 envelope meta', async () => {
+        it('send 带合法 notifyId → arm + willNotify:true + notifyId/parentSid 穿 envelope meta', async () => {
       const opts = makeMockOptions()
       const handler = new SessionManagerHandler(opts)
       await handler.handle('req-1', 'sid-parent', 'send', { sessionId: 's1', prompt: 'hello', notifyId: VALID_NID })

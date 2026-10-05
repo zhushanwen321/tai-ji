@@ -47,27 +47,26 @@ describe('createDelivery warn 出口参数化（U4）', () => {
     const handle = createDelivery(port, { warn: injectedWarn })
 
     handle.send(textMsg('m1'))
-    // 首次失败即警告（retrying with backoff），同步可见
+    // 首败即停警告（first-failure stop，无重试），同步可见
     expect(injectedWarn).toHaveBeenCalledTimes(1)
-    expect(injectedWarn.mock.calls[0]?.[0]).toBe('port.send failed, retrying with backoff')
+    expect(injectedWarn.mock.calls[0]?.[0]).toBe('port.send failed (first-failure stop, no kernel retry)')
     expect(consoleWarnSpy).not.toHaveBeenCalled()
 
     handle.dispose()
   })
 
-  it('注入 warn：退避达上限 settle rejected 的终态警告同样走注入出口', () => {
+  it('注入 warn：accepted:false 首败即停的警告同样走注入出口', () => {
     const injectedWarn = vi.fn()
     const port = makePort({
       send: (): SendReceipt => ({ accepted: false, reason: 'busy parked' }),
     })
-    const handle = createDelivery(port, { warn: injectedWarn, backoff: { ms: 1, max: 1 } })
+    const handle = createDelivery(port, { warn: injectedWarn })
 
     handle.send(textMsg('m2'))
     vi.advanceTimersByTime(5)
 
     const msgs = injectedWarn.mock.calls.map((c) => c[0])
-    expect(msgs).toContain('port.send failed, retrying with backoff')
-    expect(msgs).toContain('port.send failed after max retries')
+    expect(msgs).toContain('port.send failed (first-failure stop, no kernel retry)')
     expect(consoleWarnSpy).not.toHaveBeenCalled()
 
     handle.dispose()
