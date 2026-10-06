@@ -59,8 +59,11 @@ describe('HeaderActionsHost', () => {
     const wrapper = mountHost(makeSource())
     const btn = wrapper.find('[data-testid=header-action-scheduler-manager-open]')
     expect(btn.exists()).toBe(true)
-    // 用户可见断言：与内置按钮同规格 + 声明 title 兜底 tooltip
-    expect(btn.classes()).toContain('size-[22px]')
+    // 用户可见断言：与 composer 左簇相邻 icon-btn 同规格（size-[28px]，对齐
+    // ComposerBtwButton / AddMenu 触发器；用户裁决 2026-10-06 自 panel 顶栏迁入
+    // composer 左簇）+ 声明 title 兜底 tooltip
+    expect(btn.classes()).toContain('size-[28px]')
+    expect(btn.classes()).toContain('rounded-sm')
     expect(btn.attributes('title')).toBe('定时任务')
     // 无 badge 时不渲染徽标
     expect(btn.find('span').exists()).toBe(false)

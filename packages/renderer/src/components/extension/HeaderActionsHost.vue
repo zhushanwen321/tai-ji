@@ -1,10 +1,11 @@
 <!--
-  HeaderActionsHost（plugin-header-action-modal-points AP-1 / u4b）——panel header 插件按钮区。
+  HeaderActionsHost（plugin-header-action-modal-points AP-1 / u4b）——composer 左簇插件按钮区。
 
   消费 ContributionRegistry 的 headerAction 声明（经 bridge 的响应式声明镜像）+
   HeaderActionStore per-session 运行时镜像（badge/tooltip/disabled，#42）渲染按钮组。
-  插入点：PanelHeader 既有按钮组内、ViewHost panel.header 之后 session-file 之前；
-  与内置按钮同视觉规格（drawer/git 同款 size-[22px]，DESIGN.md §11 几何不动）。
+  插入点（用户裁决 2026-10-06）：Composer 左簇、「+」（AddMenuPopover）之后、btw 按钮
+  （ComposerBtwButton）之前；按钮与左簇相邻 icon-btn 同规格（size-[28px] rounded-sm，
+  对齐 ComposerBtwButton / AddMenu 触发器形态），composer 底栏非 drag 区无 app-region 类。
 
   - badge ≤4 字符宿主截断，全文进 tooltip（AP-1 徽标契约）
   - E13 三态灰置：registered 可点 / unregistered 灰置+tooltip / unknown 保持上次值
@@ -16,7 +17,7 @@
     的渲染端承接，过滤在列表构建层（toHeaderActionButton 返回 null）、先于 disabled 合成
   - E3 点击 → CommandRegistry.execute：命令缺失（emit error，ERR6）后按钮本地置灰，
     禁静默 no-op；宿主重判 registered（命令重注册）后置灰让位、按钮恢复可点
-  - 无声明时整组件零 DOM（不挤压右侧内置按钮，同 ViewHost empty="hidden" 语义）
+  - 无声明时整组件零 DOM（不挤压左簇相邻按钮，同 ViewHost empty="hidden" 语义）
 -->
 <template>
   <template v-if="buttons.length > 0">
@@ -25,14 +26,14 @@
       :key="b.key"
       variant="ghost"
       size="icon"
-      class="relative size-[22px] rounded-md text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-mid [-webkit-app-region:no-drag]"
+      class="relative size-[28px] shrink-0 rounded-sm text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-mid disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-mid"
       :data-testid="b.testid"
       :disabled="b.disabled"
       :title="b.tooltip"
       :aria-label="b.tooltip"
       @click="b.onClick()"
     >
-      <component :is="b.icon" class="size-[15px]" />
+      <component :is="b.icon" class="size-4" />
       <span
         v-if="b.badge"
         class="absolute -right-1.5 -top-1.5 inline-flex h-3 min-w-3 items-center justify-center rounded-full bg-accent px-1 font-mono text-[9px] font-semibold leading-none text-accent-fg ring-1 ring-bg"
@@ -62,7 +63,7 @@ const props = defineProps<{
 const { t } = useI18n()
 const source = inject(HEADER_ACTIONS_SOURCE_KEY, null)
 
-/** badge 最大字符数（AP-1：徽标位是 22px 按钮的一个角，超长截断全文进 tooltip） */
+/** badge 最大字符数（AP-1：徽标位是 icon 按钮的一个角，超长截断全文进 tooltip） */
 const BADGE_MAX_CHARS = 4
 
 /** lucide 名 → 组件映射（宿主解析，插件不给 SVG）。未登记名 fallback 到通用插件图标。 */

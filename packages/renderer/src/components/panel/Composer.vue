@@ -129,6 +129,14 @@
              展开态插件 toolbar 挂载点 -->
         <div data-composer-cluster="left" class="flex min-w-0 shrink-0 items-center gap-0.5">
           <AddMenuPopover @select="onAddSelect" />
+          <!-- plugin headerAction 挂载点（demo 裁决落点 = composer 左簇、「+」之后；用户裁决
+               2026-10-06）。显隐由 hidden 管线唯一裁决：无任务插件推 hidden=true → 列表构建层
+               剔除，零 DOM 不渲染；无声明同样零 DOM。
+               密度机不参与（不加 anchorProtected v-show）：锚点保护的职责是折叠托盘聚合入口
+               （受托盘 emitter/数据面唯一实例约束只能折叠不能卸载），headerAction 入口的显隐
+               权威在插件 hidden 推送（hidden=false = 插件要求常驻），密度折叠会让插件显式
+               申报的入口被宽度条件静默吞掉，两套显隐权威冲突时以 hidden 管线为准。 -->
+          <HeaderActionsHost v-if="sessionId" :session-id="sessionId" />
           <!-- btw 入口（btw-question D7，M3-b）：`+` 之后、托盘之前。show-btw 实例开关
                （false 不出按钮——drawer 内 BtwPanel 的 Composer 传 false 防递归出 btw 入口）；
                无 session 不出（与托盘同判据，badge 数据面需主会话）。点击 = openDrawerTab('btw')，
@@ -290,6 +298,7 @@ import { ArrowUp, Clock, Loader2, Square, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { ComposerInput, ComposerInputDepsKey, type ComposerInputDeps } from '@taiji/ui/features/composer'
 import { ViewHost } from '@taiji/ui/extension-host'
+import HeaderActionsHost from '@/components/extension/HeaderActionsHost.vue'
 import AddMenuPopover from './AddMenuPopover.vue'
 import ComposerBtwButton from './tray/ComposerBtwButton.vue'
 import ComposerTray from './tray/ComposerTray.vue'
