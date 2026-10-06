@@ -246,8 +246,8 @@ const switching = ref(false)
 
 /**
  * 模型标签显示态（标签读取规则四分支合成，纯函数单源 resolveSubagentModelDisplay）：
- * ① 回执生效值（useSubagentModel 回执态）→ ④ 详情载荷最近生效值（分叉态重载）→
- * ② 覆盖意图值 + 「用户覆盖中」标注 → 兜底盖章值（现状）。
+ * 各分支语义与优先级链唯一权威 = 其头注释（useSubagentModel.ts），此处不重复罗列，
+ * 防双处维护漂移。
  */
 const modelDisplay = computed(() => {
   const record = chatMeta.value
