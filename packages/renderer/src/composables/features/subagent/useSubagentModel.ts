@@ -85,13 +85,17 @@ export interface SubagentModelDisplayInput { // oe-exempt:20261006:framework:wir
  * 标签读取规则四分支（subagent-model-switch §9 文件地图 transport 行；纯函数可单测）：
  * ① 生效值在场（回执态）→ 显示实际生效值（热切回读值；同族替换时生效值 ≠ 覆盖意图，
  *    如实显示生效值）；
- * ② 已记账型路径 → 显示覆盖意图值 + 「用户覆盖中」标注；
+ * ② 已记账型路径（回执 recorded，或重载后仅覆盖状态载荷在场）→ 显示覆盖意图值 +
+ *    「用户覆盖中」标注——§6.4：无回读源的已记账型路径标签 = 覆盖意图值（= 下次 spawn
+ *    解析裁决值）；已记账回执在场时优先于载荷「最近生效值」——后者是同会话早前热切的
+ *    历史生效值，不是本次切换后的生效事实，其消费域仅限④分叉态重载（回执态整体缺席）；
  * ③ 生效值回读失败 → 不落本函数输入（错误应答不写显示态），标签维持切换前显示——由
  *    「禁乐观写 + 失败不写」构造性成立，无显式分支；
  * ④ 分叉态重载（面板重载 + 同族替换已发生，回执态已丢）→ 按详情载荷「最近生效值」
  *    显示，不回退覆盖意图值。
  *
- * 优先级链：回执生效值 > 详情载荷最近生效值 > 覆盖意图值 > 盖章值（现状兜底）。
+ * 优先级链：回执生效值 > 回执覆盖意图（已记账回执优先于载荷最近生效值）> 载荷最近生效值
+ * （仅回执态整体缺席时分叉态重载）> 载荷覆盖状态 > 盖章值（现状兜底）。
  * overridden = 覆盖意图在场（覆盖状态载荷字段或已记账回执）——覆盖生效处显式标注
  * 「用户覆盖中」（§7 实现期文档同步义务的前端部分）。
  */
@@ -101,14 +105,19 @@ export function resolveSubagentModelDisplay(input: SubagentModelDisplayInput): S
   if (input.display?.effectiveModel !== undefined) {
     return { label: input.display.effectiveModel, overridden: overrideIntent !== undefined }
   }
-  // ④ 分叉态重载：详情载荷最近生效值承接（不回退覆盖意图值）
+  // ② 已记账型回执在场（本次切换无活进程）：显示本次覆盖意图值（§6.4 口径），不显示
+  //    载荷「最近生效值」（同会话早前热切的历史值——记账型切换后它已不代表生效事实）
+  if (input.display?.overrideIntent !== undefined) {
+    return { label: input.display.overrideIntent, overridden: true }
+  }
+  // ④ 分叉态重载（回执态整体缺席）：详情载荷最近生效值承接（不回退覆盖意图值）
   if (input.recentEffectiveModel !== undefined) {
     return {
       label: toModelRef(input.recentEffectiveModel.provider, input.recentEffectiveModel.modelId),
       overridden: overrideIntent !== undefined,
     }
   }
-  // ② 已记账型（回执 recorded，或重载后仅覆盖状态载荷在场）：覆盖意图值 + 标注
+  // ②' 重载后仅覆盖状态载荷在场：覆盖意图值 + 标注
   if (overrideIntent !== undefined) {
     return { label: overrideIntent, overridden: true }
   }

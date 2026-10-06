@@ -12,7 +12,8 @@
  *   返回 undefined；
  * - resolveSubagentModelDisplay 四分支：① 回执生效值在场 → 实际生效值；④ 分叉态
  *   重载（无回执态 + 载荷最近生效值在场）→ 生效值承接、不回退覆盖意图值；② 已记账
- *   → 覆盖意图值 + 「用户覆盖中」标注；兜底 → 盖章值。
+ *   → 覆盖意图值 + 「用户覆盖中」标注（优先级高于④——已记账回执在场时「最近生效值」
+ *   是同会话早前热切的历史值，§6.4 口径显示覆盖意图值）；兜底 → 盖章值。
  *
  * 全 mock：@/api 门面 + vue-i18n + useToast（不发真实请求；单例回执态经
  * resetSubagentModelDisplayForTests 用例间隔离）。
@@ -75,6 +76,20 @@ describe('resolveSubagentModelDisplay — 标签读取规则四分支', () => {
       modelOverride: 'p/intent',
     })
     expect(display.label).toBe('p/intent')
+    expect(display.overridden).toBe(true)
+  })
+
+  it('分支② 优先于④：已记账型回执在场 + 载荷最近生效值同场 → 显示本次覆盖意图值，不显示历史生效值', () => {
+    // 先热切产生 model_change 尾条目（载荷 recentEffectiveModel），后无活进程记账型切换
+    // 写入回执 overrideIntent——§6.4：已记账型路径标签 = 覆盖意图值；「最近生效值」消费
+    // 域仅限分叉态重载（回执态整体缺席），回执态在场时显示它 = 历史值 stale 显示
+    const display = resolveSubagentModelDisplay({
+      display: { overrideIntent: 'p/recorded-intent' },
+      stampedModel: 'p/stamped',
+      modelOverride: 'p/intent',
+      recentEffectiveModel: { provider: 'p', modelId: 'recent-effective' },
+    })
+    expect(display.label).toBe('p/recorded-intent')
     expect(display.overridden).toBe(true)
   })
 
