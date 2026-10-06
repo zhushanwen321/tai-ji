@@ -60,8 +60,18 @@ import type { ExecutionRecord, ModelOverride } from "./domain/record-model.ts";
 import type { AgentEvent, ExecuteOptions, ExecutionHandle, RecordSnapshot, SubagentRecord } from "./assembly/types.ts";
 // [subagent-model-switch §7.2] setModel 编排（目标 5 壳接线——本体纯函数 + deps 装配）。
 import type { ModelRef } from "@zhushanwen/subagent-engine-sdk";
+import { SET_MODEL_NOT_ACTIVE_CODE } from "@zhushanwen/subagent-engine-sdk";
 import { setModel } from "./service/model-switch.ts";
 import type { ModelSwitchTarget, SetModelReply } from "./service/model-switch.ts";
+// [subagent-model-switch §7.4 生产接线] run 级全切聚合（runAggregate 通道本体）+ 三
+// 通道生产实现（run 非终局判定 / 已受理成员清单 / 成员引擎转发面——本体在
+// model-switch-wiring.ts，壳装配段单行委托）。
+import { runModelSwitchAggregate } from "./service/run-model-switch-aggregate.ts";
+import {
+  assertRunNotTerminalForSwitch,
+  listAcceptedMemberRunIdsForSwitch,
+  resolveMemberEnginePortForSwitch,
+} from "./service/model-switch-wiring.ts";
 // [R4] ExecutionMode / ForkDepthExceededError / DEFAULT_AGENT_NAME / WorktreeHandle 消费
 // 已随 run 域迁聚合——types import 收窄为转发签名所需类型面。
 // [R1] 转发 getter 返回类型标注（实例已迁聚合，仅 type 引用）。
@@ -268,9 +278,10 @@ export class SubagentService {
     this.store.setPendingUnregister((id, status) => this.notifyHost.emitPendingUnregister(id, status));
     // [subagent-model-switch §6.2] 覆盖记账内存表的 miss 重建通道（读取规则：解析
     // 第 0 层读宿主内存表；内存 miss——主 agent 进程重启后首次解析——按域从持久化
-    // 权威重建）。chat 域 = 执行记录链最新记录的 modelOverride 字段（事件流折叠
-    // 投影——scanFile 补投影 + 冷复活水合的读面）。workflow 域（runId 键）的 run
-    // 事件流折叠重建随 U4a 接线（本闭包内按键形态分流扩展）。
+    // 权威重建）。本闭包 = chat 域重建（执行记录链最新记录的 modelOverride 字段——
+    // 事件流折叠投影——scanFile 补投影 + 冷复活水合的读面）。workflow 域（runId 键）
+    // 的 miss 重建 = deps.rebuildRunOverride 独立通道（journal 折叠 latestModelOverride
+    // 单点，WorkflowDispatch 装配段注入），由 workflow-dispatch 派发链消费（不经本闭包）。
     this.modelService.setOverrideRebuild((key) => this.store.getFullRecord(key)?.modelOverride);
     // [R3] 域 #3/#8/#10/#13 聚合（record 读建面：孤儿恢复/查询投影/action 网关/身份解析
     // 与 record 创建）。deps 全晚绑定闭包（构造期零求值——store/manifestStore/modelService
@@ -766,22 +777,23 @@ export class SubagentService {
    * 写持久化意图），deps 在本方法内装配（闭包现读壳共享依赖：modelService /
    * store / chatRounds；跨聚合零 import，G2「经壳编排」形态）。
    *
-   * U3/U5/U4 联调前接线（本单元以桩/接口编程交付，真实转发联调挂 U3/U5 commit
-   * 门补跑）：
-   *   - engineSetModel：fail-fast 桩——capability setModel 位非 'native' 的引擎在
-   *     步骤②预检即被拦截，本通道不可达；U3 于 EnginePort/EngineClient 实装后替换
-   *     为协议通道。
-   *   - isEngineNotActiveError：恒 false 保守桩（U3 应答形态定形后接线）——判别
-   *     miss 时竞态退出按错误应答处置（写 + 错误，不虚构生效值，与处置表不冲突）。
-   *   - runAggregate / assertRunNotTerminal / listAcceptedMemberRunIds：
-   *     fail-fast 桩——U5 实装后替换（workflow run 级全切联调面）。persistRunOverride
-   *     已由 U4b 接线为 journal 覆盖事件真实通道（U4a 事件类型 + 本单元写入面）。
-   *     runAggregate 桩先行 throw 意味着 run 级切换在本单元仍不可达（U5 落地后
-   *     persistRunOverride 通道随联调生效）。
+   * 生产接线（§7.2 步骤②「按状态分流 → 引擎转发」/ §7.4「run 级全切」的真实通道）：
+   *   - engineSetModel：EnginePort.setModel 协议转发（引擎按 manifest
+   *     capabilities.setModel = 'native' 条件挂方法——native 位与方法缺席的组合 =
+   *     装配损坏，fail-fast 由转发通道守卫承接；非 native 引擎在编排步骤②预检即转
+   *     记账路径，不可达本通道）。
+   *   - isEngineNotActiveError：SDK SET_MODEL_NOT_ACTIVE_CODE 判别——引擎转发期间
+   *     子进程退出（§7.3 全部竞态窗口）按「无活进程」形态转纯记账路径。
+   *   - runAggregate：runModelSwitchAggregate（U5 聚合函数）+ resolveMemberPort
+   *     成员引擎解析（{@link resolveMemberEnginePortForSwitch}）；persistOverrideIntent
+   *     回调不注入——run 级意图写入由编排层在聚合返回后统一执行（步骤③），回调
+   *     双写会让 journal 覆盖事件落两笔。
+   *   - assertRunNotTerminal / listAcceptedMemberRunIds：run registry fold 终局判定
+   *     （record fold 唯一权威）与已受理成员清单（{@link listAcceptedMemberRunIdsForSwitch}）。
    *
    * 覆盖表重建回调（进程内意图表 miss → 记录链重建）：chat 域 = store.getFullRecord
    * 的 modelOverride 字段（v2 fold 投影——scanFile 补投影 + 冷复活水合）；workflow
-   * 域的 run 事件流折叠重建随 U4a 接线（同一回调内按键形态分流扩展）。
+   * 域的 run 事件流折叠重建已接 rebuildRunOverride（WorkflowDispatch 装配段）。
    */
   setModel(
     target: ModelSwitchTarget,
@@ -795,33 +807,35 @@ export class SubagentService {
           this.store.markModelOverride(record, override);
         },
         resolveEnginePort: (record) => this.chatRounds.resolveEnginePortForSwitch(record),
-        engineSetModel: () => {
-          throw new Error(
-            "engine setModel relay is not wired yet (U3 lands the EnginePort/EngineClient " +
-              "setModel method). Reachable only when an engine declares capabilities.setModel " +
-              "= 'native' before U3 ships — report this as an integration-ordering bug.",
-          );
+        engineSetModel: (port, params) => {
+          if (port.setModel === undefined) {
+            throw new Error(
+              `engine '${port.id}' declares capabilities.setModel=native (precheck passed) ` +
+                `but exposes no setModel method — integration bug, report this`,
+            );
+          }
+          return port.setModel(params);
         },
-        isEngineNotActiveError: () => false,
-        runAggregate: () => {
-          throw new Error(
-            "run-level model switch aggregate is not wired yet (U5 lands " +
-              "runModelSwitchAggregate). Workflow-run scope switching is unreachable " +
-              "until the runtime entry (U1) and U5 ship — report this as an integration-ordering bug.",
-          );
-        },
-        assertRunNotTerminal: () => {
-          throw new Error(
-            "workflow run terminal-state check is not wired yet (U4/U5). Workflow-run " +
-              "scope switching is unreachable until the runtime entry (U1) ships.",
-          );
-        },
-        listAcceptedMemberRunIds: () => {
-          throw new Error(
-            "accepted member listing for run-level switch is not wired yet (U5). " +
-              "Workflow-run scope switching is unreachable until the runtime entry (U1) ships.",
-          );
-        },
+        isEngineNotActiveError: (err: unknown): boolean =>
+          err instanceof Error &&
+          (err as { code?: unknown }).code === SET_MODEL_NOT_ACTIVE_CODE,
+        runAggregate: (input) =>
+          runModelSwitchAggregate({
+            ...input,
+            resolveMemberPort: (memberRunId) =>
+              resolveMemberEnginePortForSwitch(
+                this.store,
+                (windowKey) => this.runOrchestration.resolveChatEnginePort(windowKey),
+                memberRunId,
+              ),
+          }),
+        assertRunNotTerminal: (runId) => assertRunNotTerminalForSwitch(runId),
+        listAcceptedMemberRunIds: (runId) =>
+          listAcceptedMemberRunIdsForSwitch(
+            this.store,
+            this.sessionRootId ?? this.sessionId ?? undefined,
+            runId,
+          ),
         // [U4a 事件管线消费 / U4b 接线] run 级覆盖意图持久化：run 事件流追加
         // `model-override` 记账帧（事件类型/词表/fold 均为 U4a 产物，本接线复用既有
         // journal 写入口——非新持久化载体）。写入面说明：run-events 注释指向的

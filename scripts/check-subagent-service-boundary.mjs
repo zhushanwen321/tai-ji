@@ -65,6 +65,10 @@ const ALLOWED_EDGES = new Map([
   // ④ D-R4-8：ResolvedIdentity type-only 单向（chat-rounds 为第三消费方，
   //   2026-09-13 补登——源码注释声称已登记但台账漏登，聚合边界守卫显形）
   ["chat-rounds.ts|ResolvedIdentity", "record-access.ts"],
+  // ⑤ subagent-model-switch D2 修复组：SetModelCapableEnginePort type-only 单向
+  //   （wiring 聚合复用 U5 聚合导出的引擎端口契约类型，零运行时依赖、无环；
+  //   2026-10-06 登记依据 = 一致性修复 R1 packages-subagent-core-wiring 组）
+  ["model-switch-wiring.ts|SetModelCapableEnginePort", "run-model-switch-aggregate.ts"],
 ]);
 
 /** [H3/R6] SERVICE_DIR 下的支撑文件（非聚合）：类型声明 / 常量叶子 / 叶子 helper

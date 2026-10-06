@@ -22,9 +22,9 @@
 // （已生效型）与面板标签取引擎回读的生效值——记账不收生效值、生效值不改写记账。
 //
 // 依赖注入形态（R1 打样模式）：deps 全晚绑定闭包语义（装配点 = subagent-service
-// 壳构造）。引擎转发（engineSetModel）与 run 级聚合（runAggregate）是 U3/U5 的
-// 接线通道——本单元以接口编程 + 桩验收；生产装配注入显式 fail-fast 桩（capability
-// 门控 / U1 入口未接线下不可达），U3/U5 实装后替换为真实通道并联调。
+// 壳构造）。引擎转发（engineSetModel）与 run 级聚合（runAggregate）的接线通道已由
+// 生产装配注入真实通道（壳侧：EnginePort.setModel 协议转发 + runModelSwitchAggregate
+// 聚合 + run registry fold 终局判定，见 subagent-service.setModel 装配段）。
 
 import type {
   ModelRef,
@@ -104,8 +104,8 @@ export interface ModelSwitchModelService { // oe-exempt:20261006:framework:类�
 
 /**
  * setModel 编排的依赖注入面。转发通道（engineSetModel / runAggregate）与 workflow
- * 侧查询（assertRunNotTerminal / listAcceptedMemberRunIds / persistRunOverride）是
- * U3/U5/U4 的接线点——生产装配注入 fail-fast 桩或真实通道（见各成员注释）。
+ * 侧查询（assertRunNotTerminal / listAcceptedMemberRunIds / persistRunOverride）的
+ * 生产实装在壳装配段（subagent-service.setModel deps 闭包）。
  */
 export interface ModelSwitchDeps { // oe-exempt:20261006:framework:setModel 编排依赖注入面（U3/U5/U4 接线点，端口先立单实现常态）
   /** 模型服务（步骤①校验 + 步骤③内存记账表写入）。 */
@@ -119,9 +119,10 @@ export interface ModelSwitchDeps { // oe-exempt:20261006:framework:setModel 编�
   /** chat 域目标引擎解析（与派发链同一路由裁决——resolveRoundEnginePort 同款形态）。 */
   readonly resolveEnginePort: (record: Pick<ExecutionRecord, "engine" | "engineHandle" | "id">) => EnginePort;
   /**
-   * 引擎 setModel 转发通道（签名 = SDK SetModelParams→SetModelResult）。U3 于
-   * EnginePort/EngineClient 实装方法后接线；生产装配的过渡桩 fail-fast（capability
-   * setModel 位非 'native' 的引擎在步骤②预检即被拦截，本通道不可达）。
+   * 引擎 setModel 转发通道（签名 = SDK SetModelParams→SetModelResult）。生产实装 =
+   * EnginePort.setModel 协议转发（U3 实装的可选面——manifest capabilities.setModel
+   * = 'native' 条件挂方法）；capability 非 'native' 的引擎在步骤②预检即被拦截，
+   * 本通道只承接 native 引擎。
    */
   readonly engineSetModel: (port: EnginePort, params: SetModelParams) => Promise<SetModelResult>;
   /**
@@ -131,15 +132,19 @@ export interface ModelSwitchDeps { // oe-exempt:20261006:framework:setModel 编�
    */
   readonly isEngineNotActiveError: (err: unknown) => boolean;
   /**
-   * run 级全切聚合通道（签名 = assembly/types runModelSwitchAggregate）。U5 实装
-   * 后接线；生产装配过渡桩 fail-fast（U1 runtime 入口未接线下 workflow 分流不可达）。
+   * run 级全切聚合通道（签名 = assembly/types RunModelSwitchAggregateInput）。生产
+   * 实装 = runModelSwitchAggregate（U5 聚合函数，壳装配注入 resolveMemberPort 成员
+   * 引擎解析；persistOverrideIntent 回调不注入——run 级意图写入由本编排聚合返回后
+   * 统一执行，下方步骤③，回调双写会让 journal 覆盖事件落两笔）。
    */
   readonly runAggregate: (input: RunModelSwitchAggregateInput) => Promise<RunSwitchAggregateResult>;
   /**
    * workflow run 非终局检查（步骤①附加校验——终局 fail-fast，§7.5「run 已终局」
-   * 行）。U4/U5 接线（run registry fold 终局判定）；终局时抛错。
+   * 行）。生产实装 = run registry fold 终局判定（record fold 唯一权威，无第二判据）；
+   * `void | Promise<void>`：终局判定经 run 事件流扫描（磁盘 IO），编排 await 它——
+   * 异步校验仍在全部写入前完成（步骤①语义不变），终局抛错走 catch 转 error 应答。
    */
-  readonly assertRunNotTerminal: (runId: string) => void;
+  readonly assertRunNotTerminal: (runId: string) => void | Promise<void>;
   /** run 级已受理成员 runId 全量清单（全切转发面，§7.4——不做宿主侧存活预判）。 */
   readonly listAcceptedMemberRunIds: (runId: string) => string[];
   /**
@@ -205,8 +210,9 @@ export async function setModel(
     if (target.domain === "workflow-run") {
       // workflow 域附加校验：run 非终局（终局 fail-fast——不可 resume、无未来步骤
       // 消费覆盖，§7.5「run 已终局」行）。先于 resolveModel 校验（作用域校验优先
-      // 于模型校验——目标 run 不可切时模型对错无关紧要）。
-      deps.assertRunNotTerminal(target.runId);
+      // 于模型校验——目标 run 不可切时模型对错无关紧要）。await：终局判定经 run
+      // 事件流 fold（磁盘扫描），异步完成仍在全部写入前（步骤①语义不变）。
+      await deps.assertRunNotTerminal(target.runId);
     }
     // canonical ref 全等 + 凭据预检 + thinking 档位预检：resolveModel 对新模型按
     // 现役候选链完整裁决（预检 = 提前跑一遍未来解析——同一函数同一路径，不留
