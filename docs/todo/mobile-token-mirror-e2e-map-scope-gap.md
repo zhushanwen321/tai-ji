@@ -1,6 +1,6 @@
 # 移动壳 token 镜像的 e2e-map scope 缺口（packages/mobile-renderer/** 无 rule 覆盖）
 
-状态：已解决（2026-10-06 定案）——scope 登记与镜像一致性单测均已落地：`docs/testing/e2e-map.json` 的 E2E-VISUAL-01 增补 `packages/mobile-renderer/src/styles/**` scope；`packages/renderer/src/__tests__/mobile-token-mirror-parity.test.ts` 机器断言两文件逐字一致。登记来源：ui-signal-density 设计 D3 移动壳镜像条 + §4.2（v7 登记，v8 补触发条件）
+状态：已解决（2026-10-06 定案）——scope 登记与镜像一致性单测均已落地：`docs/testing/e2e-map.json` 的 E2E-VISUAL-01 增补 `packages/mobile-renderer/src/styles/**` scope；`packages/renderer/src/__tests__/mobile-token-mirror-parity.test.ts` 机器断言两文件 accent 令牌族逐字一致（断言面四组：玄块主三值 / color-mix 派生式 / shadcn 两行引用 / desktop 定稿锚定，非全文件）。登记来源：ui-signal-density 设计 D3 移动壳镜像条 + §4.2（v7 登记，v8 补触发条件）
 
 ## 缺口（背景）
 
@@ -15,4 +15,4 @@
 
 ## 兜底现状
 
-镜像一致性由 `mobile-token-mirror-parity.test.ts`（镜像一致性单测）机器断言 + E2E-VISUAL-01 scope 覆盖镜像宿主目录；改桌面令牌不同步移动壳会被单测拦截。
+镜像一致性由 `mobile-token-mirror-parity.test.ts`（镜像一致性单测，断言面 = accent 令牌族四组）机器断言 + E2E-VISUAL-01 scope 覆盖镜像宿主目录；改桌面 accent 令牌族不同步移动壳会被单测拦截，族外令牌仍靠 E2E-VISUAL-01 像素轨兜底。

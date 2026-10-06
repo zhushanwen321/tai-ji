@@ -160,7 +160,7 @@ v6 审查发现「被选中」出现三种视觉语言，统一为二分：
 
 实色背景上的前景元素（文字/图形）必须用该色的 `-fg` 变体，不从 neutral 谱系借。
 
-**事故**：drawer unread badge 圆点用 `--neutral-fg`，玄主题下 accent(`#cfcfd4`) 与 neutral-fg(`#dedee2`) 亮度差仅 ~4%，圆点融进胶囊底不可见。`--accent-fg`（`#1a1a1c` 深字）才是 accent 实色上的正确前景色，6 个主题预设都配了对。
+**事故**：drawer unread badge 圆点用 `--neutral-fg`，玄主题下 accent（事故时值 `#cfcfd4`；现行定稿 `#a5adc2`）与 neutral-fg(`#dedee2`) 亮度差仅 ~4%，圆点融进胶囊底不可见。`--accent-fg`（`#1a1a1c` 深字）才是 accent 实色上的正确前景色，6 个主题预设都配了对。
 
 **检查**：看到 `background: var(--accent)` + 前景元素，前景应该是 `--accent-fg`，不是 `--neutral-fg`。
 

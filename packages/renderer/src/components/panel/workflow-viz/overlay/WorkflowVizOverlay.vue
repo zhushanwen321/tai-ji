@@ -6,8 +6,8 @@
   状态色降噪色阶、焦点管理三要素：打开即 focus 面板 / 关闭归还触发元素 / Tab 首末
   循环焦点陷阱防逃逸到遮罩后背景 UI）。
 
-  结构：header（单行七元素：workflow 名 + slug + 状态 pill + errorCode + 已用时长
-  + 关闭钮，v5 终裁参数信息不进 header——workflow-overlay-refine D2）+
+  结构：header（单行六元素：图标 + workflow 名 + slug + 状态 pill + errorCode
+  + 已用时长，关闭钮不计入元素数；v5 终裁参数信息不进 header——workflow-overlay-refine D2）+
   body 纵向两段（workflow-overlay-refine D1，份额 1.6:1）：上区 DAG（WorkflowVizDag
   画布 / DAG 不可得降级列表 / 解析中 / 未匹配实例分组 + 左下角 D4 状态图例（仅画布
   就绪时在场，dot 类与节点同源 dag/tone.ts、pointer-events-none 不拦截画布交互），
@@ -54,7 +54,7 @@
       data-testid="wfvz-overlay-panel"
       @click.stop
     >
-      <!-- header：workflow 名 + slug + 状态 pill + errorCode + 时长 + 关闭（单行七元素；D2 v5 终裁不展示 args） -->
+      <!-- header：单行六元素（图标 + workflow 名 + slug + 状态 pill + errorCode + 时长，关闭钮不计入；D2 v5 终裁不展示 args） -->
       <header
         class="flex flex-none items-center gap-2 border-b border-hairline px-3 py-2"
         data-testid="wfvz-overlay-header"
