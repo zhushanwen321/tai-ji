@@ -1,5 +1,6 @@
 // coverage-file-gate-exempt: 组合根装配接线面——决策逻辑在注入工厂（btw-line-spawn-options.ts 等，各有直测），本文件新增行是构造注入与回调接线，单测不可达（入口装配）；行为由 validate-runtime-bundle 与 runtime e2e 承载
 import { RuntimeServer } from './transport/server.js'
+import { createSubagentModelSwitchGateway } from './transport/subagent-model-gateway.js'
 import { SessionService } from './services/session/session-service.js'
 import { REVOKED_SIGNAL_CUSTOM_TYPE } from './services/session/revoke-orchestrator.js'
 // BtwService 组合根接线（btw-question M2-b，B2 授权）：依赖六项按其 docstring 归位本文件。
@@ -45,6 +46,7 @@ import { ProviderCredentialResolver } from './services/auth/provider-credential-
 import type { IProviderCredentialResolver } from './services/ports/provider-credential-resolver.js'
 import { PresetService } from './services/preset-service.js'
 import { ModelService } from './services/model-service.js'
+import { createModelOverrideQuery } from './services/session/model-override-query.js'
 
 import { BASE_PORT, MAX_PORT, mandatoryExtensions, isBtwVirtualId } from '@taiji/shared'
 import type { ImportSourceKind } from '@taiji/shared'
@@ -1436,6 +1438,17 @@ async function main(): Promise<void> {
   }
 
   const tServicesReady = performance.now()
+  // [subagent-model-switch U6] 模型切换网关生产适配器（§7.1.1 通道）：出站点 prompt +
+  // 结果文件回收 + wire 应答映射。依赖同源派生——getClient 照 workflowAction 的
+  // deps.pm.getClient 形态（sessionService.getRpcClient 同一 pm）；sessionStore 与
+  // SessionRecords 装配（session-service.ts createModelOverrideQuery 注入点）同一实例；
+  // agentDir 缺省走适配器内 getPiAgentDir()（与 model-override-query 缺省锚一致）。
+  // 注入后 handler 不再走 subagent_model_switch_unwired 兜底。
+  const subagentModelSwitchGateway = createSubagentModelSwitchGateway({
+    getClient: (sessionId) => sessionService.getRpcClient(sessionId),
+    scanSessions: (opts) => sessionStore.scanSessions(opts),
+    overrideQuery: createModelOverrideQuery({ sessionStore }),
+  })
   server.setServices(sessionService, configService, modelService, {
     extension: extensionService,
     plugin: pluginService,
@@ -1477,6 +1490,9 @@ async function main(): Promise<void> {
     // btw 线三帧路由（btw-question M2-b，B1/B2 授权接线）：BtwService 窄面 + 主会话解析
     // 注入 BtwMessageHandler（assembleOptionalHandlers 装配 → buildRoutes 展开 handles）。
     btw: { service: btwService, resolveMain: resolveBtwMain },
+    // [subagent-model-switch U6] subagent.setModel 路由依赖（§7.1.1 通道生产适配器，
+    // 上方构造；缺席时 handler 恒回 unwired 可操作错误的兜底自此不可达）。
+    subagentModelSwitchGateway,
   })
 
   // Graceful shutdown on signals

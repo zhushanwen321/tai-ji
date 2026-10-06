@@ -153,6 +153,15 @@ OUTPOST_CALLSITES = [
         "handler 下沉 session-service（形态对齐 promptReload/workflowAction 命令"
         "编排区），豁免条目随调用点迁移",
     ),
+    (
+        "transport/subagent-model-gateway.ts",
+        "client.prompt(`/subagent-model ${payload}`)",
+        "exempt",
+        "[subagent-model-switch U6] 模型切换宿主触达命令（设计 §7.1.1 通道）："
+        "payload = 单行 JSON（runtime 自产 requestId + 协议字段 provider/modelId/"
+        "recordId|runId），无用户自由文本（provider/modelId 源 = 前端模型目录选择器，"
+        "非 composer 出口）——与 workflows abort 豁免同族的内部命令",
+    ),
 ]
 
 # injection 字段合法枚举（白名单加载校验用）：typo 条目既无法放行匹配也不进统计口径，

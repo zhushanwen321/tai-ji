@@ -200,6 +200,14 @@ export { DEFAULT_AGENT_NAME } from "./execution/domain/record-model.ts";
 export type { AgentEventLogEntry, BgResponse, CancelResponse, CloseResponse, DisplayItem, ForkFromResponse, ListResponse, MessageResponse, SubagentListItem, SubagentRecord, SubagentToolResult } from "./execution/assembly/types.ts";
 export type { ClosedReason, ExecutionMode, ExecutionOutcome, ExecutionStatus, ExternalState } from "./execution/domain/record-types.ts";
 export type { ExecutionRecord, ModelOverride } from "./execution/domain/record-model.ts";
+// [subagent-model-switch U6] setModel 编排应答契约 type-only 导出：/subagent-model 命令
+// handler（extension 壳）消费——壳生产消费纪律禁止深路径 import；type-only 编译期擦除，
+// 零运行时面。形状 SSOT 仍在 service/model-switch.ts。
+export type {
+  ChatSetModelReply,
+  ModelSwitchTarget,
+  SetModelReply,
+} from "./execution/service/model-switch.ts";
 // [subagent-model-switch] 模型切换 run 级聚合契约（u-foundation 定形，U5 实装）。
 export type {
   RunModelSwitchAggregateInput,
@@ -595,7 +603,7 @@ export { reapOrphanRuns } from "./execution/persistence/run-state-evidence.ts";
 // rootCwd 贯穿 env 名单源（根进程无 env → ctx.cwd 兜底，与 SessionBaselines 推导
 // 同式——壳侧复制推导式时经此常量锚定 env 名防漂移）。壳生产消费必须走 barrel。
 export { ENV_ROOT_CWD } from "./execution/service/session-baselines.ts";
-export { getSubagentRecordsDir } from "./execution/assembly/path-encoding.ts";
+export { getSubagentRecordsDir, getSubagentModelSwitchResultsDir } from "./execution/assembly/path-encoding.ts";
 
 // resolvePiSessionScopedDir：pi 宿主 sessionDir 布局（cwd slug + existsSync 探测）
 // 的单一权威源——pi 壳 session-lifecycle 的 resolveSessionDir 经 opts.agentDir

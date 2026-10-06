@@ -64,3 +64,20 @@ export function getSubagentSessionDir(agentDir: string, mainCwd: string): string
 export function getSubagentRecordsDir(agentDir: string, mainCwd: string): string {
   return path.join(agentDir, "subagents", encodeCwd(mainCwd), "records");
 }
+
+/**
+ * 获取 subagent 模型切换请求结果目录（subagent-model-switch §7.1.1 通道回执载体）。
+ *
+ * 布局 = `<subagent 数据根>/model-switch/`——数据根与 getSubagentRecordsDir 同族
+ * （同 (agentDir, mainCwd) 入参、同 enc 段），extension（/subagent-model 命令写入侧）
+ * 与 runtime（SubagentModelSwitchGateway 读取侧）两侧 import 本单源，路径同源性由
+ * 结构保证（与 records 通道同款理由）。文件形态 = `<requestId>.json`，请求作用域
+ * 生命周期（写后读、读后即删，§7.1.1 要素 4）。
+ *
+ * @param agentDir agent 配置目录（如 ~/.pi/agent）
+ * @param mainCwd 树根主 agent 的工作目录（与 getSubagentRecordsDir 同一编码键）
+ * @returns 模型切换结果目录绝对路径
+ */
+export function getSubagentModelSwitchResultsDir(agentDir: string, mainCwd: string): string {
+  return path.join(agentDir, "subagents", encodeCwd(mainCwd), "model-switch");
+}
