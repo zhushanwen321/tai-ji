@@ -77,7 +77,7 @@ import {
 } from "../engine/routing.ts";
 import type { AgentOutcome } from "../engine/types.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
-import type { AgentConfig } from "../assembly/model-resolver.ts";
+import type { AgentConfig, ModelInfo } from "../assembly/model-resolver.ts";
 import type { NotifyHost } from "../notify/notify-host.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
 // 本聚合单向 type import（D-R3-2 同款非环形态）。
@@ -94,6 +94,10 @@ import { type AgentEvent, type ExecuteOptions } from "../assembly/types.ts";
 // [R6/D-R4-4] 跨两聚合消费的值语义纯量归一常量叶子文件（聚合→支撑文件方向合法）。
 import { PRIORITY_BACKGROUND } from "./service-constants.ts";
 import type { AgentStreamSink } from "../../shared/agent-stream.ts";
+// [subagent-model-switch §6.6] 用户覆盖记账（意图载体形状，domain 叶子类型）+
+// 解析产物词形拼接（record.model 盖章词形与解析产物同源单点）。
+import type { ModelOverride } from "../domain/record-model.ts";
+import { joinEngineModelRef } from "../engine/model-validation.ts";
 
 const logger = getLogger("subagents");
 
@@ -194,6 +198,20 @@ export interface WorkflowDispatchDeps {
    * 三分结果见 {@link MemberReviveOutcome}。
    */
   readonly reviveMemberRecord: (recordId: string) => MemberReviveOutcome;
+  /**
+   * [subagent-model-switch §6.6②] workflow 域用户覆盖记账读取（键 = parentRunId，
+   * 覆盖作用域 = 一个 run 的剩余执行）。生产装配 = ModelConfigService.getModelOverride
+   * （内存表 + 同步重建闭包单点）。
+   */
+  readonly getModelOverride: (key: string) => ModelOverride | undefined;
+  /**
+   * [subagent-model-switch §6.2 读取规则 / §7.4] workflow 域覆盖的 miss 重建通道
+   * （主 agent 重启后首次派发：内存表 miss → run 事件流折叠产物，latestModelOverride
+   * 单点——U4a journal 覆盖事件的派发侧消费面；resume 不带参数也吃持久化覆盖的
+   * 管线终点）。命中后由装配方回填内存表（回填与折叠同点完成，后续派发内存命中
+   * 不再读 journal）。异步 = 折叠需读 run 事件流文件。
+   */
+  readonly rebuildRunOverride: (runId: string) => Promise<ModelOverride | undefined>;
 }
 
 /**
@@ -269,6 +287,20 @@ export class WorkflowDispatch {
     // ③ 引擎感知 model 校验（非 pi = validateModelForEngine；pi = D8 派发期对称
     // 校验，详见 resolveWorkflowIdentity）+ identity 解析 +
     // record 引擎留痕盖章（详见 stampWorkflowEngineTrace）。
+    // [subagent-model-switch §7.4 派发侧覆写 / §6.6 决策六②] 用户覆盖在场 → 覆写
+    // 调用参数 model（覆盖存在时，调用参数中的显式 model 也被覆盖——用户覆盖赢，
+    // §2 目标 3）。覆写发生在 resolveWorkflowIdentity 之前：pi 路径的 paramOverride
+    // 与非 pi 路径的 engineModel 两个解析输入源同点生效，D8 派发期目录校验校验的
+    // 也是覆盖值。thinkingLevel 不覆写——档位由解析链现役候选链裁决（调用参数显式
+    // 档位 > 覆盖记账档位 > frontmatter，§6.2 记账形状）。内存 miss（主 agent 重启
+    // 后首次派发）经 rebuildRunOverride 从 run 事件流折叠重建（含内存回填）。
+    const dispatchOverride =
+      this.deps.getModelOverride(parentRunId) ?? (await this.deps.rebuildRunOverride(parentRunId));
+    if (dispatchOverride !== undefined) {
+      const overrideRef = `${dispatchOverride.ref.provider}/${dispatchOverride.ref.modelId}`;
+      opts.model = overrideRef;
+      execOpts.model = overrideRef;
+    }
     const identity = await this.resolveWorkflowIdentity(route, opts, execOpts, agentConfig);
     this.stampWorkflowEngineTrace(route, execOpts);
 
@@ -285,6 +317,13 @@ export class WorkflowDispatch {
       if (memberRecordId !== undefined) {
         const revived = this.deps.reviveMemberRecord(memberRecordId);
         if (revived.kind === "revived") {
+          // [subagent-model-switch §6.6 复活重新盖章] 重派视作新一轮启动：复活命中
+          // 后、引擎调用前，以最新解析产物（identity——上方派发侧覆写已把覆盖写进
+          // 解析输入，含第 0 层短路语义）重新盖章 model / thinkingLevel。不变量 1
+          // 的例外边界（重派 = 新一轮启动的盖章动作）；切换操作本身仍永不改写
+          // record.model（不变量 5 不受影响）。interrupted 后 resume 的重派步骤恰是
+          // 复活路径高发区——旧盖章值在此被最新解析产物替换，spawn argv 与盖章一致。
+          restampRecordModel(revived.record, identity.resolved);
           const effectiveSignal = signal ?? revived.record.controller?.signal;
           return this.runWorkflowEngineTask(
             revived.record,
@@ -429,6 +468,64 @@ export class WorkflowDispatch {
   }
 
   /**
+   * [subagent-model-switch §7.4 P9 窗口封住] taskSpec 组装点的覆盖二次咨询（覆盖
+   * 记账表的第二个消费点，非双轨）。命中覆盖时重解析并重盖章，返回生效解析产物
+   * （runCtx.ctxModel 源）；未命中原样返回 identity 产物（现状行为零变化）。
+   *
+   * - pi 路径：resolveModel 第 0 层通道重解析（userOverride 槽）——registry 全等 +
+   *   auth 同链复核，档位候选链含覆盖记账档位（调用参数显式档位最高，§6.2）。覆盖
+   *   值后来失效（模型下架 / 凭据撤销 / 档位不可用）在此抛错 → 调用方 catch 合成
+   *   failed result（fail-fast 不降级，与显式指定不可用即抛错的现役语义同构）。
+   * - 非 pi 引擎（过渡期混合 run）：覆盖词形直消费——引擎校验已在 identity 解析点
+   *   对覆写后的 engineModel 完成（覆写先于 resolveWorkflowIdentity）；ctxModel 为
+   *   ref 结构投影（引擎侧只消费 provider/id 拼词形，name 不参与）。
+   *
+   * 非本域 record（origin 非 workflow / parentRunId 缺省——runWorkflowEngineTask
+   * 被 SAR 直调占位路径复用时的守卫）短路原样返回。
+   */
+  private consultOverrideAtTaskSpec(
+    record: ExecutionRecord,
+    identity: ResolvedIdentity,
+    opts: AgentCallOpts,
+    engine: EnginePort,
+  ): { model: ModelInfo | undefined; thinkingLevel: string | undefined } {
+    if (record.origin !== "workflow" || record.parentRunId === undefined) {
+      return identity.resolved;
+    }
+    const override = this.deps.getModelOverride(record.parentRunId);
+    if (override === undefined) {
+      return identity.resolved;
+    }
+    const overrideRef = `${override.ref.provider}/${override.ref.modelId}`;
+    if (engine.id !== DEFAULT_ENGINE_ID) {
+      const projected: ModelInfo = {
+        id: override.ref.modelId,
+        name: override.ref.modelId,
+        provider: override.ref.provider,
+        reasoning: false,
+      };
+      type MutableStampRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
+      (record as MutableStampRecord).model = overrideRef;
+      return {
+        model: projected,
+        thinkingLevel: opts.thinkingLevel ?? identity.resolved.thinkingLevel,
+      };
+    }
+    const resolvedOverride = this.deps.getModelService().resolveModel(
+      identity.agent,
+      opts.thinkingLevel !== undefined ? { thinkingLevel: opts.thinkingLevel } : undefined,
+      undefined,
+      identity.agentConfig,
+      {
+        model: overrideRef,
+        ...(override.thinkingLevel !== undefined ? { thinkingLevel: override.thinkingLevel } : {}),
+      },
+    );
+    restampRecordModel(record, resolvedOverride);
+    return resolvedOverride;
+  }
+
+  /**
    * executeWorkflowAgent 的执行核（acquire 后主体 + finally 回收）。八步迁移 ④⑤⑥⑦
    * 的落点：
    *   ④ journal 接线（wireEventJournal 单点；taskId = record.id——真实 record 在
@@ -500,12 +597,20 @@ export class WorkflowDispatch {
         journalOnEvent(event);
       };
 
+      // [subagent-model-switch §7.4 P9 窗口封住] taskSpec 组装点二次咨询覆盖记账：
+      // 身份解析到引擎启动之间存在「调用已受理但引擎任务未启动」的异步窗口（含上方
+      // 池排队等待），窗口内的 run 级切换不漏切该调用（前提 P9）——spawn 前最后时刻
+      // 取到最新覆盖，取值与盖章单点完成（§6.6：覆盖值与已盖章值不一致时同步更新
+      // 盖章，不存在「盖章 ≠ 实际启动」的窗口）。命中覆盖时本点同步重盖章
+      // record.model / thinkingLevel（盖章时点定界：「本轮启动前最后取值点定值，
+      // 启动后不变」），ctxModel 与 taskSpec.model 随盖章值同源。
+      const effectiveResolved = this.consultOverrideAtTaskSpec(record, identity, opts, engine);
       const runCtx: RunContext = {
         taskId: record.id,
         // [D4] record 身份信封（引擎写进任务子进程身份 env；构造单点 = identityEnvelopeOf）
         identity: identityEnvelopeOf(record),
         signal: runSignal.signal,
-        ctxModel: identity.resolved.model,
+        ctxModel: effectiveResolved.model,
         onEvent: observedEvent,
         ...(effectiveStream !== undefined ? { stream: effectiveStream } : {}),
         ...(this.sessionRootId !== null && this.sessionRootId !== ""
@@ -517,7 +622,8 @@ export class WorkflowDispatch {
       };
       // 任务声明：opts 直传（D6 合流——AgentCallOpts 即 EnginePort 任务形状，SAR 同款
       // 零映射），model 覆写为 record 留痕词形（resolveIdentity 解析产物，与
-      // runAndFinalize 的 taskSpecWithModel 同源权威）。
+      // runAndFinalize 的 taskSpecWithModel 同源权威；二次咨询命中时 = 重盖章后的
+      // 覆盖词形）。
       const taskSpec: AgentCallOpts = {
         ...opts,
         ...(record.model !== undefined ? { model: record.model } : {}),
@@ -556,6 +662,24 @@ export class WorkflowDispatch {
 }
 
 // ── [H2 W2] workflow 域派发 helper（executeWorkflowAgent 专用，M3 语义逐项复刻）──
+
+/**
+ * [subagent-model-switch §6.6] record.model / thinkingLevel 盖章（复活重新盖章与
+ * taskSpec 二次咨询重盖章共用单点——「本轮启动前最后取值点定值，启动后不变」）。
+ * 解析产物缺席（用户未指定且无任何候选，引擎走自身缺省解析）时保留原盖章——防误清
+ * 历史事实（R4/D6-② 条件留空语义的同款取舍）。落盘面：终态写面 identityBindingPayload
+ * 落 model/thinkingLevel 内存现值，盖章后随终态收口自然持久化。
+ */
+function restampRecordModel(
+  record: ExecutionRecord,
+  resolved: { model: ModelInfo | undefined; thinkingLevel: string | undefined },
+): void {
+  if (resolved.model === undefined) return;
+  type MutableStampRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
+  const mutable = record as MutableStampRecord;
+  mutable.model = joinEngineModelRef(resolved.model);
+  mutable.thinkingLevel = resolved.thinkingLevel;
+}
 
 /**
  * AgentOutcome → workflow AgentResult 直映射（SAR outcomeToRunnerResult 的 service
