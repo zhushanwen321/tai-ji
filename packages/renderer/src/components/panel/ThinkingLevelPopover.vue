@@ -1,14 +1,14 @@
 <template>
   <!--
     思考等级 popover（draft-composer-states §2c）。
-    触发器与列表均中性配色（与上下文容量 / 模型触发器同款 text-neutral-dim），仅选中态走 accent。
-    等级强度靠 popover 内 off→max 的语义表达。
+    触发器按「可操作 = 亮字」口径提亮（正文档色 + 600 字重，与模型触发器同款）；
+    浮层列表保持中性配色，仅选中态走 accent。等级强度靠 popover 内 off→max 的语义表达。
   -->
   <Popover v-model:open="canOpen">
     <PopoverTrigger as-child>
       <Button
         variant="ghost"
-        class="h-7 gap-1 rounded-sm px-2 text-[11px] text-neutral-dim transition-colors hover:text-neutral-mid"
+        class="h-7 gap-1 rounded-sm px-2 text-[11px] text-neutral-fg font-semibold transition-colors"
         :title="t('panel.thinkingLevel.title')"
       >
         <!-- U4：切换中（停止态切档要先 ensureActive 拉活）→ 转圈 + 禁止重复开合/点选 -->
