@@ -1,6 +1,8 @@
 # subagent.setModel 命令链路生产适配器未接线（跨端通道缺口）
 
-状态：未解决（subagent-model-switch 一致性修复 R1，fix-packages-runtime-gateway 组登记；命令链路部分转升级呈报待重派，查询链路部分已交付——见下方「已交付部分」）。
+状态：已解决（2026-10-07 关闭——用户裁决候选 A 落地，通道实装并经 5 轮真机验收全场景可达；机制权威 = [ADR-0113](../adr/decisions.md) 与设计 §7.1.1，下方盘点内容作通道裁决依据存档）。
+
+**解决记录**：候选 A 实装 = U6 收尾单元（extension `/subagent-model` 命令 + runtime `SubagentModelSwitchGateway` 适配器 + 组合根注入 + prompt 出站点守卫白名单登记），requestId 结果文件回执 + 60s 超时。验收：D3 五轮真机（chat 轮内热切 / workflow 全切聚合 / 持久化延续全场景实测，终局 degraded 无阻塞缺陷，见 `.tmp/dev-flow/subagent-model-switch.acceptance/verdict.json`）。登记条款中「待设计裁决项」的落定：命令载荷 = `/subagent-model <单行 JSON>`；请求关联键 = requestId；超时 = 60s（65s backstop）；回执载体 = 结果文件（非 custom entry——jsonl 事件词表四点同步纪律只管状态机事件，覆盖记账走 `model-override` 事件帧，模型切换应答属请求-应答语义走文件通道）。
 
 - 现状：`subagent.setModel` WS 消息的生产链路在 runtime 侧断裂——`SubagentModelSwitchGateway` 全仓无生产 `implements`（仅 `packages/runtime/src/interfaces.ts` 端口定义 + `packages/runtime/src/transport/__tests__/subagent-message-handler.test.ts` 测试 mock），组合根未注入 `subagentModelSwitchGateway`，`SubagentMessageHandler`（`packages/runtime/src/transport/subagent-message-handler.ts`）恒回 `subagent_model_switch_unwired` 可操作错误。前端入口（SubagentTab/WorkflowTab）与宿主编排本体（`packages/subagent-core/src/execution/subagent-service.ts` setModel 壳）均已就绪，缺口在两者的连接段。
 - 根因（通道盘点，读码核实）：宿主编排跑在 pi 进程 extension 内（subagent-core 单例，`extensions/universal/subagent-workflow/src/session-lifecycle.ts` 装配），而 runtime → pi extension 无结构化调用通道——pi 实装版 1.0.0 的 rpc-mode 命令词表封闭（`node_modules/@earendil-works/pi-coding-agent/dist/modes/rpc/rpc-mode.js`，default 分支 = Unknown command error）；现役 slash command 通道（`client.prompt("/subagents ...")`）的 RPC reply 只含 preflight disposition、不携带 command handler 的结构化输出（rpc-mode.js prompt case）。设计文档 §7.1 只定形「请求 → 宿主 setModel → 应答」，未定义 runtime 触达 pi extension 的物理通道。

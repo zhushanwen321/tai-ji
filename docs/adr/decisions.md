@@ -510,3 +510,12 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **依据**：本体系收敛自 pi 1.0 适配设计包交付后的系列裁决（2026-10-05）：命令终局事件化（handled/started/断连三事件）、投递 backoff 退役、全项目防御机制清查（约 270 处登记）、event-tail 退役与推送通道方向、受理层同步上屏、scheduler 切换对账翻转为事实查询。故障模型依据 = 本地进程通信无网络类瞬态失败面，对端死亡有 OS 级信号。
 
 **登记**：清查清单与删改记录 = `docs/todo/defense-mechanism-cleanup.md` 与 `.tmp/dev-flow/defense-scan/`（四分区清单 + 改动清单）；投递域重构与推送通道设计 = `.tmp/tech-design/` 产出（过程产物，决策以本条与 cleanup 登记为准）；AGENTS.md「防御机制第一原则」规则条目为本条的规则面投影。原「时间平抑类逻辑红线」为本体系判定层的既有条目，继续有效。
+
+### ADR-0113 subagent 执行模型切换：用户覆盖语义与跨端命令通道（2026-10-06 用户裁决「按 A 做」）
+**决策**：
+- **用户覆盖赢**：`setModel` 在模型解析链第 0 层加用户覆盖记账，优先级高于 agent frontmatter 与脚本/调用参数显式指定的模型。
+- **持久化与热切是同一意图的两半，必须同步落**：只热切会被下一轮 spawn 的旧 `--model` argv 压回（pi CLI flag 恒优先于 session 恢复）；只记账则执行中不受控。记账载体 = record 事件文件 `record-model-override` 帧（chat 域）/ run journal `model-override` 事件（workflow 域），fold 取最新、替换不叠加；records 磁盘快照 json 是投影非事实源（不作断言面）。
+- **跨端通道（runtime → pi extension）= prompt 斜杠命令出站点**：runtime `client.prompt("/subagent-model <单行 JSON>")` → pi `prompt()` 扩展命令分支（流式中也立即执行；排队路径会拒扩展命令，不可绕行）→ subagent-workflow 进程内编排 → 结果文件 `<subagent 数据根>/model-switch/<requestId>.json` 回执（原子写、网关读后即删、60s 超时 best-effort）。pi 1.0.0 无结构化 RPC 注册面（rpc-mode 命令词表封闭）且上游不 fork/不提 PR——斜杠命令是仓内在产标准通道（三先例：workflow abort / subagents 动作族 / plan abort）；新出站点登记 `.githooks/check_prompt_outposts.py` 白名单。
+- **三态语义（引擎中立）**：switched（生效值+档位回执）/ not-applicable（引擎 capability unsupported，提示性应答非错误，记账照写）/ 失败名单（fail-fast 分型；单成员失败不回滚其他成员、不影响 run 级意图写入）。resume 生效模型三档回落：resume 显式参数 > 持久化覆盖 > run 创建模型。
+
+**登记**：设计 SSOT = `.tmp/tech-design/subagent-model-switch.md`（§5.2 解析链 / §7.1.1 通道机制 / §7.4 三态）；术语投影 = docs/CONTEXT.md「模型覆盖」词条；验收终态 = 5 轮真机验收 degraded 无阻塞缺陷（`.tmp/dev-flow/subagent-model-switch.acceptance/verdict.json`）；验收期遗留裁决项 = `docs/todo/subagent-model-switch-d3-defects.md`。
