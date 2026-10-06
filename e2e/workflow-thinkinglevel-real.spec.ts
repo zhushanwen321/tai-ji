@@ -31,7 +31,7 @@
  *
  * 文件定位链（[D1] record 单源后）：
  * 主 session JSONL（session.create reply 的 sessionFile）
- *   → workflow-record v2 registered 条目的 data.journalPath → record 事件流
+ *   → workflow-record v2 registered 条目的 data.recordPath → record 事件流
  *     （<sessionDir>/workflow-state/<runId>.record.jsonl，jsonl-run-store.ts）
  *   → agent-settled 帧 result.sessionFile → 子进程 session 文件
  *     （缺失时全量扫描 dataDir 下 sessions/*.jsonl 按首行 session.id 匹配，
@@ -199,16 +199,17 @@ function readSessionEntries(file: string): any[] | null {
  * 主 session JSONL 的 workflow-record v2 条目提取（[D1] record 单源后的投影锚）。
  *
  * pi 侧落盘形状（workflow-record-entry.ts v2 schema）：主 session 每 run 两条小
- * 条目——registered（`{v:2, kind:"registered", runId, journalPath, ...}`，含 record
- * 流绝对路径锚点）与 settled（`{v:2, kind:"settled", runId, status, ...}`）。唯一
- * 事实源 = journalPath 指向的 record 事件流（`<sessionDir>/workflow-state/
- * <runId>.record.jsonl`，jsonl-run-store.ts 头注），条目本身可随时从 record 重建。
+ * 条目——registered（`{v:2, kind:"registered", runId, recordPath, ...}`，含 record
+ * 流绝对路径锚点；ADR-0078 改名前旧键名 journalPath）与 settled（`{v:2, kind:"settled",
+ * runId, status, ...}`）。唯一事实源 = recordPath 指向的 record 事件流
+ * （`<sessionDir>/workflow-state/<runId>.record.jsonl`，jsonl-run-store.ts 头注），
+ * 条目本身可随时从 record 重建。
  *
  * 返回 null = 主 session 文件不可读；内层字段 null = 文件可读但对应条目缺失
  * （两者区分诊断）。
  */
 function findWorkflowRecordV2Entries(mainSessionFile: string): {
-  registered: { runId: string; journalPath: string } | null;
+  registered: { runId: string; recordPath: string } | null;
   settled: { runId: string; status: string } | null;
 } | null {
   let lines: string[]
@@ -217,15 +218,15 @@ function findWorkflowRecordV2Entries(mainSessionFile: string): {
   } catch {
     return null
   }
-  let registered: { runId: string; journalPath: string } | null = null
+  let registered: { runId: string; recordPath: string } | null = null
   let settled: { runId: string; status: string } | null = null
   for (const line of lines) {
     try {
       const entry = JSON.parse(line)
       if (entry?.customType !== 'workflow-record' || entry?.data?.v !== 2) continue
       const data = entry.data
-      if (data.kind === 'registered' && typeof data.runId === 'string' && typeof data.journalPath === 'string') {
-        registered = { runId: data.runId, journalPath: data.journalPath }
+      if (data.kind === 'registered' && typeof data.runId === 'string' && typeof data.recordPath === 'string') {
+        registered = { runId: data.runId, recordPath: data.recordPath }
       } else if (data.kind === 'settled' && typeof data.runId === 'string') {
         settled = { runId: data.runId, status: String(data.status) }
       }
@@ -235,13 +236,13 @@ function findWorkflowRecordV2Entries(mainSessionFile: string): {
 }
 
 /**
- * record 事件流读取（journalPath 指向的 `<runId>.record.jsonl`，每行一个事件帧
+ * record 事件流读取（recordPath 指向的 `<runId>.record.jsonl`，每行一个事件帧
  * JSON.parse）。不可读/缺失返回 null——record 流是 [D1] 后唯一事实源，缺失即
  * workflow 数据链断裂（fail，不静默）。
  */
-function readRecordEvents(journalPath: string): any[] | null {
+function readRecordEvents(recordPath: string): any[] | null {
   try {
-    return fs.readFileSync(journalPath, 'utf-8')
+    return fs.readFileSync(recordPath, 'utf-8')
       .trim().split('\n')
       .filter((l) => l.trim() !== '')
       .map((l) => JSON.parse(l))
@@ -404,7 +405,7 @@ test('TC1: record 流 agent-started 帧 input 含 thinkingLevel/model（脚本�
       })
     }
     expect(rec, '主 session JSONL 应可读').toBeTruthy()
-    expect(rec!.registered, '主 session JSONL 应含 v2 registered 条目（runId + journalPath 锚点）').toBeTruthy()
+    expect(rec!.registered, '主 session JSONL 应含 v2 registered 条目（runId + recordPath 锚点）').toBeTruthy()
     expect(rec!.registered!.runId, 'registered.runId 应非空').toBeTruthy()
     expect(rec!.settled, '主 session JSONL 应含 v2 settled 条目（终态 coda 写入）').toBeTruthy()
     expect(rec!.settled!.runId, 'settled.runId 应与 registered 同 run（runId 关联）').toBe(rec!.registered!.runId)
@@ -413,17 +414,17 @@ test('TC1: record 流 agent-started 帧 input 含 thinkingLevel/model（脚本�
     // 断言 ②：record 事件流（唯一事实源）的 agent-started 帧 input 含脚本请求值。
     // input = resolveAgentOpts 规范化后 opts 的 canonical JSON（dispatchAgentStarted
     // 全文落账）——脚本 agent({model, thinkingLevel}) 的请求值在此可观测。
-    const recordEvents = readRecordEvents(rec!.registered!.journalPath)
+    const recordEvents = readRecordEvents(rec!.registered!.recordPath)
     if (!recordEvents) {
-      writeDiag('tc1', ctx.dataDir, ctx.events, { journalPath: rec!.registered!.journalPath })
+      writeDiag('tc1', ctx.dataDir, ctx.events, { journalPath: rec!.registered!.recordPath })
     }
-    expect(recordEvents, `record 事件流应可读（${rec!.registered!.journalPath}）——[D1] 后唯一事实源`).toBeTruthy()
+    expect(recordEvents, `record 事件流应可读（${rec!.registered!.recordPath}）——[D1] 后唯一事实源`).toBeTruthy()
     expect(recordEvents!.some((e) => e.type === 'run-created'), 'record 流应含 run-created 首帧').toBe(true)
 
     const startedInput = agentStartedInputOf(recordEvents!)
     if (!startedInput) {
       writeDiag('tc1', ctx.dataDir, ctx.events, {
-        journalPath: rec!.registered!.journalPath,
+        journalPath: rec!.registered!.recordPath,
         recordEventTypes: recordEvents!.map((e) => e.type),
       })
     }
@@ -449,7 +450,7 @@ test('TC2: 子进程 JSONL 含 thinking_level_change high + model_change（pi �
     }
     expect(ctx.doneUpdate, 'workflow 应跑完（faux 队列预设）——未 done 见 /tmp/tc2-diag.json').toBeDefined()
 
-    // 定位链 1+2（[D1]）：主 session JSONL → v2 registered 条目 → journalPath
+    // 定位链 1+2（[D1]）：主 session JSONL → v2 registered 条目 → recordPath
     // → record 流 → agent-settled 帧 result.sessionFile
     let mainFile = ctx.mainSessionFile
     const fileDeadline = Date.now() + 15_000
@@ -460,9 +461,9 @@ test('TC2: 子进程 JSONL 含 thinking_level_change high + model_change（pi �
     expect(fs.existsSync(mainFile!), '主 session JSONL 文件应已写入').toBe(true)
 
     const rec = findWorkflowRecordV2Entries(mainFile!)
-    expect(rec?.registered, '主 session JSONL 应含 workflow-record v2 registered 条目（journalPath 锚点）').toBeTruthy()
-    const recordEvents = readRecordEvents(rec!.registered!.journalPath)
-    expect(recordEvents, `record 事件流应可读（${rec!.registered!.journalPath}）`).toBeTruthy()
+    expect(rec?.registered, '主 session JSONL 应含 workflow-record v2 registered 条目（recordPath 锚点）').toBeTruthy()
+    const recordEvents = readRecordEvents(rec!.registered!.recordPath)
+    expect(recordEvents, `record 事件流应可读（${rec!.registered!.recordPath}）`).toBeTruthy()
     const settledSessionFile = settledSessionFileOf(recordEvents!)
 
     // 定位链 3：优先 agent-settled 帧 result.sessionFile（pi 子进程 session 文件
@@ -559,7 +560,7 @@ test('TC3: workflowUpdate done + 子进程 JSONL 有 assistant 消息（完整�
     console.log(`[TC3] workflowUpdate done 信号到达: runId=${update.runId}, reason=${update.reason ?? '(无)'}`)
 
     // 核心断言 2：子进程 JSONL 有 assistant 消息（faux 演员跑完产出）
-    // 定位链同 TC2：主 session JSONL → v2 registered 条目 → journalPath → record 流
+    // 定位链同 TC2：主 session JSONL → v2 registered 条目 → recordPath → record 流
     // → agent-settled 帧 result.sessionFile → 全量扫描 fallback
     const mainFile = await waitForMainSessionJsonl(ctx.mainSessionFile)
     expect(mainFile, '主 session JSONL 路径应存在').toBeTruthy()
@@ -568,8 +569,8 @@ test('TC3: workflowUpdate done + 子进程 JSONL 有 assistant 消息（完整�
     const rec = findWorkflowRecordV2Entries(mainFile!)
     expect(rec?.registered, '主 session JSONL 应含 workflow-record v2 registered 条目').toBeTruthy()
     const runId = rec!.registered!.runId
-    const recordEvents = readRecordEvents(rec!.registered!.journalPath)
-    expect(recordEvents, `record 事件流应可读（${rec!.registered!.journalPath}）`).toBeTruthy()
+    const recordEvents = readRecordEvents(rec!.registered!.recordPath)
+    expect(recordEvents, `record 事件流应可读（${rec!.registered!.recordPath}）`).toBeTruthy()
     const settledSessionFile = settledSessionFileOf(recordEvents!)
 
     // 定位链 3：同 TC2——优先 agent-settled 帧 result.sessionFile，fallback 全量扫描
