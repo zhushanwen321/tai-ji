@@ -522,12 +522,14 @@ watch(
 /** ComposerInput input 事件 → 维护 draft（纯文本，用于发送判断）+ 刷新 image chips + 已选 skill 集合 */
 function onInputChange(text: string): void {
   draft.value = text
-  refreshAttachedItems()
+  // 单次 getSegments 遍历复用（性能 A 档）：attachedItems 与 selectedSkillNames 消费同一
+  // segments 快照（同帧无 DOM 写，两次独立读取原本就恒等；getSegments 是全树递归解析，
+  // 长草稿每次击键省一次 O(节点数) 遍历）
+  const segments = inputRef.value?.getSegments() ?? []
+  refreshAttachedItems(segments)
   // 已选禁选数据面（多 skill 注入 D2）：skill segment 有 name，其余类型跳过
   // （TS 5.5 推断 type predicate：filter 后 s 收窄为 skill segment）
-  selectedSkillNames.value = (inputRef.value?.getSegments() ?? [])
-    .filter((s) => s.type === 'skill')
-    .map((s) => s.name)
+  selectedSkillNames.value = segments.filter((s) => s.type === 'skill').map((s) => s.name)
   // 用户修改了内容，重置浏览历史状态（下次按上重新从最后一条开始）
   resetBrowsing()
 }
