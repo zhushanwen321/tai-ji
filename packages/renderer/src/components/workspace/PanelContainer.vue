@@ -68,9 +68,7 @@
           :session-id="leaf.sessionId ?? undefined"
           :session-file="sessionFileOf(leaf)"
           :git-branch="gitBranchOf(leaf)"
-          :git-indicator="gitIndicatorOf(leaf)"
           :status="statusOf(leaf)"
-          @open-git="openDrawerTab('git')"
           @toggle-drawer="onDrawerToggle()"
         />
         <Panel
@@ -246,7 +244,6 @@ import type { PanelLeaf } from '@taiji/shared'
 import {
   bindDrawerSessionId,
   useDrawerControl,
-  openDrawerTab,
   closeDrawer,
   toggleDrawer,
   setDrawerTab,
@@ -262,7 +259,6 @@ import { usePanelStore } from '@/stores/panel'
 import { useSessionStore } from '@/stores/session'
 import { useSessionDerivations } from '@/composables/features/chat/useSessionDerivations'
 import { provideGitStatus } from '@/composables/features/file-tree/useGitStatus'
-import type { GitIndicator } from '@/composables/features/file-tree/useGitStatus'
 import { useDrawerSplitWidth, useBottomDrawerHeight } from '@/composables/features/drawer/useDrawerSplitWidth'
 import { focusComposer } from '@/composables/features/app/key-orchestrator'
 import { usePlanDrawerSync } from '@/composables/use-plan-drawer-sync'
@@ -422,16 +418,10 @@ function onDrawerToggle(): void {
 
 /** git 状态唯一数据源（panel/spec.md：git 移入抽屉后）。
  *  在 PanelContainer 层按 panel 的 session 持有实例 → GIT_STATUS_KEY provide →
- *  GitPanel（抽屉内）注入。单实例避免双实例 stale（抽屉内 stage 后同步更新）。getter 随 panel 响应。 */
-const git = provideGitStatus(() => panelSessionId.value)
-
-/**
- * 各 Panel 透传给 PanelHeader 的 git 脏状态指示。
- * git 状态由本容器 provideGitStatus 持有（不依赖具体 leaf），参数仅为与其他 xxxOf(leaf) 保持调用一致。
- */
-function gitIndicatorOf(_l: PanelLeaf): GitIndicator | undefined {
-  return git.indicator.value
-}
+ *  GitPanel（抽屉内）注入。单实例避免双实例 stale（抽屉内 stage 后同步更新）。getter 随 panel 响应。
+ *  git 入口按钮已从 PanelHeader 移除（用户裁决 2026-10-06）：仅删顶栏入口，drawer git tab
+ *  能力保留（openDrawerTab('git') 通道与 GitPanel 挂载不动，后续可经编程路径再接入口）。 */
+provideGitStatus(() => panelSessionId.value)
 
 // ── AC-13：drawer 打开期间 agent 新消息感知（壳层职责，C3；旧 SideDrawer 逻辑迁移）──
 // drawer 打开时对话流被遮挡，agent 新消息需非侵入式感知（spec §4.5）。

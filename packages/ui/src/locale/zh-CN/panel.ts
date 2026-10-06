@@ -42,7 +42,6 @@ export default {
     forward: '前进',
     workingDir: '工作目录',
     branch: '分支',
-    gitStatus: 'Git 状态 · 打开侧栏',
     copySessionFile: '复制 session 文件路径',
     // plugin 顶栏按钮区（HeaderActionsHost，E13 三态 tooltip；plugin-header-action-modal-points AP-1）
     pluginActionExtensionNotLoaded: '本会话未加载所需扩展',
