@@ -78,7 +78,7 @@
          streaming-tail 光标在 Turn.vue trace 容器末尾（跟在所有 block 后，不受 contentBlocks 时序影响）。
          [M2 形态统一] 唯一 error 形态 = 追加形态：content 崩溃前正文保持原色（可为空），
          msg.error 独立 danger 行（错误文本只住 error 字段，永不染红正文）。 -->
-    <div v-else-if="type === 'text'" data-testid="block-text" class="group/text flex items-start gap-2 pb-2 text-[length:var(--text-md)] leading-7" :class="textColorClass">
+    <div v-else-if="type === 'text'" data-testid="block-text" class="group/text flex items-start gap-2 pb-2 text-[length:var(--text-md)] leading-[1.75]" :class="textColorClass">
       <div class="min-w-0 flex-1">
         <MarkdownRenderer v-if="content" :content="content ?? ''" :session-id="sessionId ?? undefined" :streaming="streaming" />
         <!-- error 独立 danger 行（AlertCircle + msg.error 文本） -->
@@ -107,7 +107,7 @@
     <div v-else-if="type === 'bash-group' && group" class="trace-bash-group" data-testid="bash-group">
       <div
         data-testid="bash-group-header"
-        class="flex min-w-0 cursor-pointer select-none items-center gap-1.5 text-[length:var(--text-sm)] font-medium transition-opacity hover:opacity-80"
+        class="flex min-w-0 cursor-pointer select-none items-center gap-1.5 text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] transition-opacity hover:opacity-80"
         :class="group.hasRunning ? 'text-accent' : 'text-neutral-mid'"
         role="button"
         tabindex="0"
@@ -117,8 +117,13 @@
         @keydown.enter.prevent="toggleGroup"
         @keydown.space.prevent="toggleGroup"
       >
-        <!-- running 态 loader（双环 + accent），其余走静态组图标 -->
-        <span v-if="group.hasRunning" class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+        <!-- running 态 loader（双环 + accent），其余走静态组图标。
+             执行中扫光（2026-10-06 对话流视觉裁决）：图标容器 overflow-hidden 裁剪，
+             内部 absolute 扫光层跑全局 sheen-x（渐变带 var(--sheen)，仅扫图标不扫文字） -->
+        <span v-if="group.hasRunning" class="relative inline-flex size-[13px] shrink-0 items-center justify-center overflow-hidden rounded-sm text-accent">
+          <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+          <span class="pointer-events-none absolute inset-0 bg-[linear-gradient(100deg,transparent_22%,var(--sheen)_50%,transparent_78%)] animate-[sheen-x_2.8s_cubic-bezier(.45,0,.25,1)_infinite]" aria-hidden="true" />
+        </span>
         <component :is="BLOCK_ICON_LUCIDE['bash-group']" v-else :class="BLOCK_ICON_CLASS" />
         <span class="min-w-0 truncate text-left">{{ t('panel.message.traceBashSummary', { count: group.header.count, duration: formatDuration(group.header.durationMs) }) }}</span>
         <span v-if="group.header.failedCount > 0" data-testid="bash-group-failed" class="shrink-0 text-danger">· {{ t('panel.message.traceFailed', { count: group.header.failedCount }) }}</span>
@@ -149,17 +154,18 @@
       <div v-else-if="isWorkflow" class="trace-workflow pb-2.5 mb-0.5" data-testid="workflow-block">
         <div
           data-testid="tool-block-header"
-          class="flex min-w-0 cursor-pointer select-none items-center gap-1.5 text-[length:var(--text-base)] font-medium text-neutral-dim transition-opacity hover:opacity-80"
+          class="flex min-w-0 cursor-pointer select-none items-center gap-1.5 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-dim transition-opacity hover:opacity-80"
           @click="openWorkflowDrawer"
         >
           <!-- running 态 loader（双环 + accent），其余走 list-checks ICON -->
           <span v-if="isRunning" class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
           <component :is="BLOCK_ICON_LUCIDE.workflow" v-else :class="[BLOCK_ICON_CLASS, isFailed ? 'hover:text-warn' : '']" />
           <span :class="BLOCK_LABEL_CLASS">{{ t('panel.message.workflow') }}</span>
-          <span v-if="workflowFields.nameShort" class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-accent" :title="workflowFields.name">{{ workflowFields.nameShort }}</span>
+          <!-- name 染对话流专属名称色 --name（2026-10-06 裁决）；slug 降行层级灰（与「子代理」等标签同色 --neutral-mid） -->
+          <span v-if="workflowFields.nameShort" class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-[color:var(--name)]" :title="workflowFields.name">{{ workflowFields.nameShort }}</span>
           <template v-if="workflowFields.slug">
             <span class="text-neutral-faint">·</span>
-            <span class="min-w-0 shrink-0 truncate font-mono text-[length:var(--text-sm)] text-accent">{{ workflowFields.slug }}</span>
+            <span class="min-w-0 shrink-0 truncate font-mono text-[length:var(--text-sm)] text-neutral-mid">{{ workflowFields.slug }}</span>
           </template>
         </div>
         <!-- mini phase 管道 chips：数据源 = WorkflowRunRecord.phases 折叠（getWorkflows 同批透出，
@@ -192,15 +198,20 @@
       <div v-else class="group/tool">
         <div
           data-testid="tool-block-header"
-          class="tool-header flex min-w-0 cursor-pointer select-none items-center gap-1.5 text-[length:var(--text-sm)] font-medium transition-opacity hover:opacity-80"
-          :class="[toolStatusClass, isRunning ? 'animate-[toolcall-breathe_2.4s_ease-in-out_infinite]' : '']"
+          class="tool-header flex min-w-0 cursor-pointer select-none items-center gap-1.5 text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] transition-opacity hover:opacity-80"
+          :class="toolStatusClass"
           :title="toolExpanded ? t('panel.message.collapse') : t('panel.message.expand')"
           @click="toggleTool"
         >
-          <!-- running 态 loader（双环 + accent），其余走 BLOCK_ICON_LUCIDE[iconKind] -->
-          <span v-if="isRunning" class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+          <!-- running 态 loader（双环 + accent），其余走 BLOCK_ICON_LUCIDE[iconKind]。
+               执行中扫光（2026-10-06 对话流视觉裁决）：图标容器 overflow-hidden 裁剪，
+               内部 absolute 扫光层跑全局 sheen-x（渐变带 var(--sheen)，仅扫图标不扫文字） -->
+          <span v-if="isRunning" class="relative inline-flex size-[13px] shrink-0 items-center justify-center overflow-hidden rounded-sm text-accent">
+            <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+            <span class="pointer-events-none absolute inset-0 bg-[linear-gradient(100deg,transparent_22%,var(--sheen)_50%,transparent_78%)] animate-[sheen-x_2.8s_cubic-bezier(.45,0,.25,1)_infinite]" aria-hidden="true" />
+          </span>
           <component :is="headerBlockIcon" v-else :class="[BLOCK_ICON_CLASS, isFailed ? 'hover:text-warn' : '']" />
-          <span class="shrink-0 normal-case tracking-normal">{{ toolName }}</span>
+          <span class="shrink-0 normal-case tracking-normal [font-weight:var(--fw-bold)]">{{ toolName }}</span>
           <!-- running + 有流式输出：单行尾行视口（同 thinking header 结构：leading-normal
                字体无关行高 + mr-auto 短行左贴/溢出钉右 + 纵向状态机滑入）；否则静态 shortenForHeader -->
           <span

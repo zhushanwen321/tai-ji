@@ -13,7 +13,8 @@
  *   时，所有 text 块 DOM 均存在（含非末位 a1 的 text——防「非末位 text 被折叠隐藏」历史回归），
  *   thinking/tool 节点不存在，.trace 容器恒渲染。
  * - TC-REG-3 样式统一：展开态下所有 text block class 含正文 token 锚点
- *   （text-[length:var(--text-md)] + leading-7，D5 行类型定档正文档 15px），不含过程样式
+ *   （text-[length:var(--text-md)] + leading-[1.75]，D5 行类型定档正文档 15px；行高系数化
+ *   用户裁决 2026-10-06），不含过程样式
  *   （text-[length:var(--text-sm)] / leading-relaxed）。Block.vue 用 arbitrary value，
  *   禁止字面 'text-md' 子串匹配（TC-M0-4 模式）。
  *
@@ -220,7 +221,8 @@ describe('block-rendering 回归护栏（§8.3）', () => {
   })
 
   // TC-REG-3：样式统一——展开态多 assistant，所有 text block 含正文 token 锚点
-  // （text-[length:var(--text-md)] + leading-7，D5 正文档），不含过程样式（text-sm / leading-relaxed）。
+  // （text-[length:var(--text-md)] + leading-[1.75]，D5 正文档；行高系数化用户裁决 2026-10-06），
+  // 不含过程样式（text-sm / leading-relaxed）。
   it('TC-REG-3: 展开态多 assistant — 所有 text block 统一正文样式（token 锚点）', async () => {
     const a1 = msg({
       id: 'a1',
@@ -250,7 +252,8 @@ describe('block-rendering 回归护栏（§8.3）', () => {
     expect(textEls[1].find('.md-stub').text()).toBe('正文B')
     for (const el of textEls) {
       expect(el.classes()).toContain('text-[length:var(--text-md)]')
-      expect(el.classes()).toContain('leading-7')
+      // 行高系数化 leading-[1.75]（用户裁决 2026-10-06，原 leading-7）
+      expect(el.classes()).toContain('leading-[1.75]')
       expect(el.classes()).not.toContain('text-[length:var(--text-sm)]')
       expect(el.classes()).not.toContain('text-[length:var(--text-base)]')
       expect(el.classes()).not.toContain('leading-relaxed')

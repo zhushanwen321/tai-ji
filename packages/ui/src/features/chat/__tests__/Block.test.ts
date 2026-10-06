@@ -37,11 +37,12 @@ function mountTextBlock(over: { streaming?: boolean; status?: MessageStatus; err
 }
 
 describe('block-rendering M0 + D5: Block text 分支正文样式（TC-M0-4）', () => {
-  it('text 分支统一正文级样式：text-md/leading-7（D5 正文档 15px），不含过程样式 text-sm/leading-relaxed', () => {
+  it('text 分支统一正文级样式：text-md/leading-[1.75]（D5 正文档 15px），不含过程样式 text-sm/leading-relaxed', () => {
     const wrapper = mountTextBlock({})
     const textEl = wrapper.find('.trace-blk > div')
     expect(textEl.classes()).toContain('text-[length:var(--text-md)]')
-    expect(textEl.classes()).toContain('leading-7')
+    // 行高系数化 leading-[1.75]（用户裁决 2026-10-06，原 leading-7 = 1.75rem 定值改无单位系数）
+    expect(textEl.classes()).toContain('leading-[1.75]')
     expect(textEl.classes()).not.toContain('text-[length:var(--text-sm)]')
     expect(textEl.classes()).not.toContain('text-[length:var(--text-base)]')
     expect(textEl.classes()).not.toContain('leading-relaxed')

@@ -251,6 +251,10 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --neutral-faint: #46464c;  /* 极弱/装饰 */
 --neutral-ico:   #86868c;  /* 图标默认色 */
 --neutral-ico-hover: #dedee2;
+
+/* 对话流专属名称色（2026-10-06 对话流视觉裁决）：workflow / subagent 的具体名称——
+   暖驼微暖低饱和，不随主色态变化；亮色主题覆盖 #8c6231（对比 5.2:1），preset 不覆盖 */
+--name: #d7b894;
 ```
 
 ### 4.3 边框 / 分隔（v6 慎用，静态容器不叠加）
@@ -299,6 +303,11 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --font-sans: system-ui, 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
 --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
 
+/* 字重三档（2026-10-06 对话流视觉裁决）：消费方用 Tailwind 任意值类 [font-weight:var(--fw-*)] */
+--fw-text: 400;  /* 日常文字 */
+--fw-mid: 500;   /* 中档：行容器 / 组头 */
+--fw-bold: 600;  /* 粗体：动作词 / 工具名 */
+
 /* 字号 scale（base 13→14 上移，calc 自适应）*/
 > 2026-08-25：--font-sans 改系统栈，supersede ADR-0019 的 Inter 字体子决策（chat-visual-font-optimize）
 --font-scale-u: 1;   /* 用户档位（AppearancePage 选：small 0.929 / medium 1.0 / large 1.143）*/
@@ -332,6 +341,10 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 /* 动效 */
 --ease: cubic-bezier(0.4,0,0.2,1);
 --duration-fast: 120ms;  --duration: 200ms;  --duration-slow: 320ms;
+
+/* 执行中工具图标扫光带（2026-10-06 对话流视觉裁决）：暗色亮带 / 亮色主题反转暗带
+   rgba(23,23,26,0.3)，preset 不覆盖；消费点 = sheen-x keyframes（style.css 动画区） */
+--sheen: rgba(236, 236, 236, 0.55);
 
 /* 组件尺寸 */
 --content-max-w: 720px;  --composer-btn-size: 30px;
