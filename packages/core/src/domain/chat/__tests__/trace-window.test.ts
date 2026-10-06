@@ -2,7 +2,10 @@
  * trace-window 纯函数单测（streaming-trace-window::core wave）。
  *
  * 覆盖 TC1-TC7 共 7 类场景 + design-review G1（非末位 text 不收集）+ G2（streaming assistant
- * 末尾多非 text 块的去重）。每条断言 visible 的 flatIndex 序列 + compactedCount + failedCount 精确值。
+ * 末尾多非 text 块的去重）+ TC-edge 边界态（0 streaming assistant 窗口稳定性）+ D1
+ * （ui-signal-density §3.3）groupConsecutiveBash 分组规则。TC/G1/G2/TC-edge 用例断言
+ * visible 的 flatIndex 序列 + compactedCount + failedCount 精确值；D1 用例断言分组输出
+ * units 的形态、组头三条口径与段首锚定 key。
  *
  * 运行：cd packages/core && npx vitest run src/domain/chat/__tests__/trace-window.test.ts
  */
@@ -562,7 +565,7 @@ describe('D1 groupConsecutiveBash: 分组规则', () => {
     expect(units.filter(isGroup)).toHaveLength(0)
   })
 
-  it('组内 running 除外：running bash 独立行、不入组、不打断前面的连续段（口径①③）', () => {
+  it('组内 running 除外：running bash 不入组、保持独立行（口径①③），段尾 running 停止成段', () => {
     // [bash✓ bash✓ bash▶running] → 组×2 + running 独立行（V15 T1 形态）
     const tools = [
       makeTool({ id: 'b0' }),
