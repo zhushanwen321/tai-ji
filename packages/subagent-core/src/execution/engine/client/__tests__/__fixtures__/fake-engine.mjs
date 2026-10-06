@@ -224,8 +224,17 @@ if (MODE === "hang") {
       return;
     }
     if (frame.method === undefined) {
-      // 帧②：反向请求的应答（id 为字符串 = 反向请求 id）
-      if (typeof frame.id === "string") askUserResults.set(frame.id, frame.result);
+      // 反向请求的应答（id 为字符串 = 反向请求 id）。ack 两阶段（R9-2）：帧①只有
+      // {ack:true}（handler 结果异步补帧②）——不落终态，等帧② value/cancelled/
+      // unsupported；CPU 饱和下①②间隔可超轮询间隔，先落 ack 会让 askUser 轮询
+      // 把 ack 当终态 echo（并发 flaky 实例 2026-10-06）。
+      if (typeof frame.id === "string") {
+        const r = frame.result;
+        const isAckOnly =
+          r !== null && typeof r === "object" &&
+          "ack" in r && !("value" in r) && !("cancelled" in r) && !("unsupported" in r);
+        if (!isAckOnly) askUserResults.set(frame.id, r);
+      }
       return;
     }
     const { id, method, params } = frame;

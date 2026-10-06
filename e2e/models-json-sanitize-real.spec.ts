@@ -16,8 +16,9 @@
  * - 真实 models.json（seed 临时目录，PI_CODING_AGENT_DIR 隔离）
  * - 真实 sanitizeInvalidProviders（tsx 子进程跑 runtime 源码）
  *
- * ── [版本语义 0.80.3 → 0.84.4]（探针实测 2026-09-15，实装 0.84.4）────────────────
- * 权威源 = node_modules/@earendil-works/pi-coding-agent@0.84.4 的 dist 编译 JS + bundled
+ * ── [版本语义 0.80.3 → 0.84.4，pi 1.0.0 复验一致]（探针实测 2026-09-15 实装 0.84.4；
+ * 2026-10-06 pi bump 1.0.0 后本 spec 全绿，下方固化断言在 1.0.0 仍准确）────────
+ * 权威源 = node_modules/@earendil-works/pi-coding-agent 实装版的 dist 编译 JS + bundled
  * 二进制实跑（C-proc-08：禁用记忆/网络断言 pi 行为）。探针落在 /tmp 一次性脚本，关键实测
  * 输出已固化到下方两条断言的注释中。
  *

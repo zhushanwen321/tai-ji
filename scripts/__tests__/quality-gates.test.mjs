@@ -119,12 +119,18 @@ describe('子进程命令构建（py 参数面锚点）', () => {
       'c0ffee0',
     ])
   })
-  it('typecheck 三处：命令与 cwd 与 pr-pre-merge.sh 同款', () => {
+  it('typecheck 四处：命令与 cwd 与 pr-pre-merge.sh 同款（mobile-renderer 为 renderer 同构消费包）', () => {
     const steps = buildTypecheckSteps()
-    expect(steps.map((s) => s.name)).toEqual(['typecheck:extensions', 'typecheck:runtime', 'typecheck:renderer'])
+    expect(steps.map((s) => s.name)).toEqual([
+      'typecheck:extensions',
+      'typecheck:runtime',
+      'typecheck:renderer',
+      'typecheck:mobile-renderer',
+    ])
     expect(steps[0]).toMatchObject({ cmd: 'npx', args: ['tsc', '--noEmit'], cwd: 'extensions' })
     expect(steps[1]).toMatchObject({ cmd: 'pnpm', cwd: 'packages/runtime' })
     expect(steps[2]).toMatchObject({ cmd: 'pnpm', cwd: 'packages/renderer' })
+    expect(steps[3]).toMatchObject({ cmd: 'pnpm', cwd: 'packages/mobile-renderer' })
   })
 })
 
@@ -137,6 +143,7 @@ describe('runGates 聚合编排（fake 子进程，不真跑重型命令）', ()
       'typecheck:extensions',
       'typecheck:runtime',
       'typecheck:renderer',
+      'typecheck:mobile-renderer',
       'coverage-gate',
       'coverage-blindspot',
       'metrics-gate',

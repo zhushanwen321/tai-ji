@@ -3,8 +3,9 @@
  * quality-gates.mjs —— 质量门聚合出口（review-pipeline-redesign 设计 §5-U1 / §3.3 决策 4）。
  *
  * 聚合（统一出口，编排层一次调用）：
- *   1. typecheck 三处（自跑）：extensions `npx tsc --noEmit` / runtime `pnpm run typecheck` /
- *      renderer `pnpm run typecheck`——命令与 cwd 与 scripts/pr-pre-merge.sh 同款。
+ *   1. typecheck 四处（自跑）：extensions `npx tsc --noEmit` / runtime `pnpm run typecheck` /
+ *      renderer `pnpm run typecheck` / mobile-renderer `pnpm run typecheck`——命令与 cwd
+ *      与 scripts/pr-pre-merge.sh 同款。
  *      （根 package.json 无 typecheck:extensions 等聚合 script，故按目标包实际 script 直跑。）
  *   2. coverage-gate：子进程调用 .agents/skills/pr-cr-fix/scripts/coverage-gate.py（既有实现，
  *      不移植判定逻辑）。该实体在 .agents（不入 git），缺失时报错并指明缺失路径，不静默跳过；
@@ -104,12 +105,15 @@ export function buildMetricsCommand(pyPath, base) {
   return ['python3', pyPath, '--base', base]
 }
 
-/** typecheck 三处（自跑）。命令与 cwd 与 pr-pre-merge.sh 的 typecheck 步骤同款。 */
+/** typecheck 四处（自跑）。命令与 cwd 与 pr-pre-merge.sh 的 typecheck 步骤同款。
+ *  mobile-renderer 在列的根据：它是 renderer 的同构消费包（桥接 core 词表/类型），
+ *  不在列时其类型破坏要到构建步骤才暴露（v0.10.14 轮 U4 词表改名实例）。 */
 export function buildTypecheckSteps() {
   return [
     { name: 'typecheck:extensions', cmd: 'npx', args: ['tsc', '--noEmit'], cwd: 'extensions' },
     { name: 'typecheck:runtime', cmd: 'pnpm', args: ['run', 'typecheck'], cwd: 'packages/runtime' },
     { name: 'typecheck:renderer', cmd: 'pnpm', args: ['run', 'typecheck'], cwd: 'packages/renderer' },
+    { name: 'typecheck:mobile-renderer', cmd: 'pnpm', args: ['run', 'typecheck'], cwd: 'packages/mobile-renderer' },
   ]
 }
 
@@ -311,7 +315,7 @@ export async function runGates(deps, args) {
 
   const { base, source } = resolveBase({ side, explicitBase }, deps.git)
 
-  // 1. typecheck 三处（自跑）
+  // 1. typecheck 四处（自跑）
   runTypecheckGates(deps, gates)
 
   // 2. coverage-gate（py）
@@ -337,7 +341,7 @@ function missingPythonEntities(deps) {
     .filter((rel) => !deps.exists(rel))
 }
 
-/** [runGates 拆分] gate 1：typecheck 三处（命令/cwd 与 pr-pre-merge.sh 同款）。 */
+/** [runGates 拆分] gate 1：typecheck 四处（命令/cwd 与 pr-pre-merge.sh 同款）。 */
 function runTypecheckGates(deps, gates) {
   for (const step of buildTypecheckSteps()) {
     const r = deps.exec(step.cmd, step.args, step.cwd)

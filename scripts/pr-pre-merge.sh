@@ -2,16 +2,18 @@
 # pr-pre-merge.sh — pre-merge 工程验证一体化（taiji 适配版）
 #
 # 按顺序执行 typecheck → lint → test → build，任意一步失败立即退出。
-# 覆盖三条代码线：extensions/ + packages/runtime + packages/renderer。
+# 覆盖四条代码线：extensions/ + packages/runtime + packages/renderer + packages/mobile-renderer
+# （mobile-renderer 在列的根据：renderer 同构消费包，缺列时其类型/测试破坏要到构建或
+# 合并后才暴露——v0.10.14 轮 U4 词表改名实例）。
 #
 # 三种模式（无参默认行为与旧版完全一致，向后兼容）:
 #   bash scripts/pr-pre-merge.sh                          # 默认：typecheck(仅 extensions) + lint
-#                                                         #        + 三线测试全跑
+#                                                         #        + 四线测试全跑
 #   bash scripts/pr-pre-merge.sh --skip-tests             # static gate（流程阶段 1.1）：
-#                                                         #   typecheck 四处 + lint；测试步全跳过，
+#                                                         #   typecheck 五处 + lint；测试步全跳过，
 #                                                         #   result 反映 typecheck + lint
 #   bash scripts/pr-pre-merge.sh --test-result PASS|FAIL  # 终局 gate（流程阶段 3a）：
-#                                                         #   typecheck 四处 + lint + test:runtime 实跑
+#                                                         #   typecheck 五处 + lint + test:runtime 实跑
 #                                                         #   （无插桩；TAIJI_SKIP_REAL_PI=1 只跑 unit 轨，
 #                                                         #   e2e 不在 PR/merge 承接）；test:extensions/renderer
 #                                                         #   不执行，以注入值计入 result
@@ -35,7 +37,7 @@ usage() {
     cat >&2 <<'USAGE'
 用法:
   bash scripts/pr-pre-merge.sh                          # 默认：typecheck(仅 extensions) + lint + 三线测试全跑
-  bash scripts/pr-pre-merge.sh --skip-tests             # static gate：typecheck 三处 + lint，测试全跳过
+  bash scripts/pr-pre-merge.sh --skip-tests             # static gate：typecheck 五处 + lint，测试全跳过
   bash scripts/pr-pre-merge.sh --test-result PASS|FAIL  # 终局 gate：typecheck 四处 + lint + test:runtime 实跑，
                                                         # 其余测试线以注入值计入 result
 通用参数: --quiet（只输出最终结果，等价 PR_PRE_MERGE_QUIET=1）
@@ -190,6 +192,7 @@ if [[ "$MODE" != "default" ]]; then
     # 测试 tsconfig（tsconfig.typecheck-test.json）：vitest 测试文件被默认 tsconfig 的 exclude
     # 挡在门外，只有此脚本纳入 include——测试桩与生产契约漂移的唯一编译期拦截点。
     run_step "typecheck:renderer-tests" bash -c 'cd packages/renderer && pnpm run typecheck:test'
+    run_step "typecheck:mobile-renderer" bash -c 'cd packages/mobile-renderer && pnpm run typecheck'
 fi
 
 # ── Step 2: lint（根 eslint 覆盖全局含 extensions）
@@ -206,6 +209,8 @@ if [[ "$MODE" == "default" ]]; then
     run_step "test:runtime" bash -c 'cd packages/runtime && TAIJI_SKIP_REAL_PI=1 npx vitest run'
     # renderer 测试（vitest config 在 packages/renderer/，含 @ alias）
     run_step "test:renderer" bash -c 'cd packages/renderer && npx vitest run'
+    # mobile-renderer 测试（renderer 同构消费包，词表/桥接 fixture 漂移拦截点）
+    run_step "test:mobile-renderer" bash -c 'cd packages/mobile-renderer && npx vitest run'
 elif [[ "$MODE" == "test-result" ]]; then
     # extensions / renderer 线由 coverage-gate 承接（插桩口径），此处不重复执行，
     # 判定以注入值计入最终 result；runtime 线实跑——无插桩，TAIJI_SKIP_REAL_PI=1 跑
