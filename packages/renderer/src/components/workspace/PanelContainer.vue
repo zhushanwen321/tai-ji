@@ -39,11 +39,12 @@
     <!-- 对话流 + drawer 动态宽度区（feat-chat-flow-width，手写 flex 替换 reka-ui Splitter）。
          替换原因：① Splitter 单 panel 时强制 flexGrow:1（computePanelFlexBoxStyle），无法实现
          「无 drawer 对话流限宽 3/4」；② SplitterPanel 挂载/卸载瞬时完成 layout 重算，无法做
-         开合宽度动画。手写布局三点能力：无 drawer 时 main 占 75% 且 margin-inline calc 居中
-         （对话流整体在工作区视觉居中，两侧各 12.5% 留白），main 层 --content-max-w:100% 解除
-         720px 封顶（内容列占满 75% 区域）；drawer 打开时 main/drawer 双侧 width + margin-inline
-         transition 动画到拆分比例；handle 拖动（pointer capture 跟手，拖动期间 transition:none）
-         + 键盘微调 + localStorage 持久化。
+         开合宽度动画。手写布局能力（ui-signal-density D10 2026-10-06 修订）：无 drawer 时
+         main 卡撑满公共容器（width 100% + margin 0），卡内内容列（对话流 + composer，消费
+         .content-col 的 max-width: var(--content-max-w)）限宽 60% 居中——留白在卡内而非卡外；
+         60% 实算低于 720px 下限即撑满，drawer 挤窄后恒撑满（派生单处在 useDrawerSplitWidth）；
+         drawer 打开时 main width 动画到拆分比例、内容列恒撑满；handle 拖动（pointer capture
+         跟手，拖动期间 transition:none）+ 键盘微调 + localStorage 持久化。
          drawer wrapper 常驻（width 0 ↔ drawerPct%）承载 width 动画；DrawerPanel 内部 aside
          Transition（淡入右移）与 wrapper width 动画同时长（--duration-slow），叠加和谐。
          [HISTORICAL] taiji:splitter-layout 派发已随消费方退役（终态同步 2026-10-03）：
@@ -470,9 +471,9 @@ watch(
  */
 
 // ── 动态宽度（feat-chat-flow-width）：drawer 开合动画 + 可拖动宽度 ──
-// 宽度模型/拖动/键盘/持久化/BrowserPane rect 同步均在 useDrawerSplitWidth（含替换
-// reka-ui Splitter 的原因）；模板绑定 splitAreaEl + mainAreaStyle（width + margin-inline
-// 居中 + --content-max-w 封顶解除）+ drawer 侧 width style + handle 事件。
+// 宽度模型/拖动/键盘/持久化均在 useDrawerSplitWidth（含替换 reka-ui Splitter 的原因、
+// 内容列 60% + 720px 下限的派生）；模板绑定 splitAreaEl + mainAreaStyle（width + margin +
+// --content-max-w 内容列令牌）+ drawer 侧 width style + handle 事件。
 const splitAreaEl = ref<HTMLElement | null>(null)
 const {
   drawerPct,
