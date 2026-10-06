@@ -13,11 +13,11 @@
 - 现象：`SubagentModelSwitchGateway.resolveSessionMeta` 的 record 分支按 `getSubagentRecordsDir(agentDir, s.cwd)` 共享目录存在性判定归属，同 cwd 多会话全部命中 `sessions.find` 第一个（scanSessions mtime 序）——请求被路由到非归属会话的 pi 进程，宿主 `getRecordForAction` 归属校验拒绝。并行多会话场景必现；单会话正常使用不可现。
 - 修复方向（A4 建议）：record 分支改按 record 事件帧 rootSessionId（或会话 id 精确匹配）判定归属，目录存在性只作快速过滤不作归属裁决。
 
-## 缺陷三：chat 域活进程判活形态不匹配，执行中热切全部降级记账型（U2 编排判活面，验收节点 A1 实证）
+## 缺陷三：chat 域执行中热切降级记账型（已改判结案，2026-10-06 专项调查）
 
-- 现象：宿主镜像判活（`subagent-core engine/host/spawned-children.ts` 镜像）与 chat 域每轮新进程形态不匹配——即使在跑轮次内（存在活进程），执行中切换也全部降级记账型；§7.2 分流「有活进程 → 已生效型」路径真机不可达。
-- 修复方向：判活锚点改到真实存活事实（引擎侧子进程注册表或 runtime spawn 记录），或明确「轮间无活进程 = 记账型合法」并把「轮内热切」的可达性补齐——须先核实 chat 域进程形态（每轮新进程 vs 会话常驻）再定，属设计 §7.2 分流的实施核对项。
-- 连带：`model_change` 断言面依赖条目序列完备，冷 spawn 换模型不写该条目——§7.2 审计口径在冷 spawn 形态需改锚 assistant 条目 model 字段或约定补写（验收脚本 a14 与设计口径同步适配）。
+- 初判（A1 自报）：宿主镜像判活与 chat 每轮新进程形态不匹配，执行中切换全部降级记账型。
+- **改判（专项调查，置信度 high）**：「镜像缺注册」不成立——chat 域 runChatRoundViaEngine 恒构造 resume.recordId（chat-rounds.ts:467-497），childSpawned 反向帧键 = record.id（server.ts:275-279），桥接进 core 镜像（engine-client.ts:83-94），chat/workflow 都注册、轮内镜像项存在（spawn-runner.ts:500-508 agent_settled 才回收）。A1 两次 captured NOT_ACTIVE 均落轮间（记账型合法）；两次轮内尝试死于网关共享 cwd 误路由 + 信封失配（缺陷二同源，已修），从未到达判活门。同 build 同日反证：A4 变体2 轮内命中引擎错误码、重试已生效型；A5 子场景② chat 轮内热切回执生效值。
+- 结论：判活链无需修复；A1 归因错误的根源 = 验收时序未锚定轮内 + 当时的网关缺陷。重验收轮 A1 须以轮内探针锚定切换时点（单轮长任务 + 发切换前探针 record running + session 尾条非收尾；探针证轮内而仍 recorded 才记缺陷）。
 
 ## 验收环境教训（非缺陷）
 
