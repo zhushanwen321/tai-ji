@@ -804,3 +804,34 @@ describe('纯 error 气泡的 text 块宿主（ADR-0122 断连未确认终局）
     expect(flat[0]!.block.ref).toBe('崩溃前正文')
   })
 })
+
+// ── 展开段 memo（streaming 性能，TurnRail.vue railMemo 同族范式）──────────────
+// WeakMap 按 msg 引用缓存 expandAssistantBlocks 输出段：引用同 ⇒ 内容同（ADR-0039
+// 不可变替换）⇒ 段值恒等；对外可观察的命中信号 = OrderedBlock 包装引用复用（重算则新建）。
+
+describe('flattenTurnBlocks 展开段 memo', () => {
+  it('同 assistant 引用二次调用：memo 命中（OrderedBlock 引用相同），输出值恒等', () => {
+    const a1 = makeAssistant({
+      id: 'a1',
+      contentBlocks: [{ type: 'toolCall', refId: 'tc1' }],
+      tools: [makeTool({ id: 'tc1' })],
+    })
+    const flat1 = flattenTurnBlocks([a1])
+    const flat2 = flattenTurnBlocks([a1])
+    expect(flat2).toEqual(flat1)
+    expect(flat2[0]!.block).toBe(flat1[0]!.block)
+  })
+
+  it('不同引用内容相同的 assistant：各自计算，不误命中', () => {
+    const build = () =>
+      makeAssistant({
+        id: 'a1',
+        contentBlocks: [{ type: 'toolCall', refId: 'tc1' }],
+        tools: [makeTool({ id: 'tc1', toolName: 'bash' })],
+      })
+    const flat1 = flattenTurnBlocks([build()])
+    const flat2 = flattenTurnBlocks([build()])
+    expect(flat2).toEqual(flat1)
+    expect(flat2[0]!.block).not.toBe(flat1[0]!.block)
+  })
+})

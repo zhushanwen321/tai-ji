@@ -66,11 +66,35 @@ export const W = 4
  * 把返回的 OrderedBlock[] 拼接，每个 block 包装成 FlatBlock，flatIndex 从 0 全局递增（跨 assistant 连续）。
  * 空数组 → 返回 []。纯函数无副作用（不修改入参）。
  */
+/**
+ * per-assistant 展开段 memo（streaming 性能优化，范式同 TurnRail.vue railMemo）。
+ *
+ * 背景：ui 侧 flatBlocks computed（Turn.vue）在 streaming 期间每 delta 拍重跑，本函数对
+ * turn 内全部 assistant（含已完成的历史 assistant，实测单 turn 61 个）反复重跑
+ * expandAssistantBlocks 的 contentBlocks 遍历 + thinking/toolCalls find 配对。
+ * WeakMap 按 msg 引用缓存是正确的：ADR-0039 不可变替换——消息体任何内容变化（content/
+ * status/thinking/toolCalls/contentBlocks）必产生新 Message 引用（填充点全部「新数组 +
+ * { ...m }」形态），引用同 ⇒ 内容同 ⇒ 展开段值恒等（OrderedBlock.ref 透传 thinking/
+ * toolCalls 数组元素，引用同 ⇒ 数组同 ⇒ 元素同）；内容变化必然 miss 后重算。
+ * msg 对象被 GC 后 WeakMap 条目自动回收，无泄漏。
+ * 缓存 OrderedBlock[]（展开段）而非 FlatBlock[]：flatIndex 是拼接时才可知的全局下标，
+ * 缓存包装层需 mutate 写回或逐帧浅拷贝；包装成本远低于展开+配对，留在外层每帧新建
+ * （与缓存前逐字节一致）。模块级：纯函数的值语义不变，缓存只消除重复计算。
+ */
+// @data-owner #58 —— chat 对话流渲染派生 memo ④（turn 展开段：assistant 消息引用 →
+// OrderedBlock[]，纯派生可随时丢弃重建、无独立生命周期；WeakMap 条目随引用 GC 自动回收）
+const expandSegmentMemo = new WeakMap<Message, OrderedBlock[]>()
+
 export function flattenTurnBlocks(assistants: Message[]): FlatBlock[] {
   const result: FlatBlock[] = []
   let flatIndex = 0
   for (const msg of assistants) {
-    for (const block of expandAssistantBlocks(msg)) {
+    let blocks = expandSegmentMemo.get(msg)
+    if (blocks === undefined) {
+      blocks = expandAssistantBlocks(msg)
+      expandSegmentMemo.set(msg, blocks)
+    }
+    for (const block of blocks) {
       result.push({
         assistantId: msg.id,
         assistantStatus: msg.status,
