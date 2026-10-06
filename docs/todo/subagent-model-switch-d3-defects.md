@@ -1,6 +1,6 @@
 # subagent-model-switch D3 验收缺陷登记（2026-10-06 首轮真机验收产出）
 
-状态：未解决（D3 首轮验收 A1/A4/A6 节点产出；A2/A3 degraded 已含入口层降级说明；修复后须重验收覆盖）。
+状态：缺陷一/二已修复（重验收轮覆盖）；缺陷三改判结案（判活链无需修复）；缺陷四/五/六未解决（待裁决立案）；顺带发现 1/3 已修或已固化，2 部分修（空 slug 点击语义待产品裁决）、4/5/6/7 待裁决。
 
 ## 缺陷一：chat 域模型切换入口点击不可达（U1 入口层，验收节点 A6 实证）
 
@@ -25,6 +25,17 @@
 - 根因链：effective 型回执只写 `displayState.effectiveModel` 不写 `overrideIntent`（`useSubagentModel.ts:193`）；badge 分支取 `overrideIntent ?? record.modelOverride`（`:103/:106`）；renderer `record.modelOverride` 刷新通道 = session.subagents 全量重推（`useMessageEffects.ts:205`），重推点 = bg-notify（`event-interpreter.ts:772`）——轮内无重推 → 首次轮内热切的 badge 存在首个轮内空窗。
 - 影响面：仅 badge 显示时延；标签本体、覆盖记账、切换语义均正确（A6br3 三源证据一致）。裁决方向：与 badge 数据流收敛方案合并评估——effective 型回执补写 overrideIntent，或 record.modelOverride 增量刷新通道。
 
+## 缺陷五：混合 run 聚合间歇性把 zcode 成员误归失败名单（2026-10-07 A7r2 实证）
+
+- 现象：run-2 聚合应答把 zc1（zcode 成员）归入 failures 分型 `engine_state_readback_failed`，应属 not-applicable；间歇性（同场景 4/5 次正常）。
+- 根因链：record 磁盘快照缺 `parentRunId` 字段 → 接线层抛无码 plain Error → 聚合对无码错误兜底分型 readback 失败，capability 预检未到达。与顺带发现 4 同族（快照投影失真家族）；GUI drawer 的 workflow 块未渲染同根（栈 `workflow-record-projection.ts:237`）。
+- 裁决方向：record 快照投影补 parentRunId（或聚合对 engine 路由成员先走 capability 预检再判引擎错误），与顺带发现 4 合并立案。
+
+## 缺陷六：聚合成员可见性时序 flake（2026-10-07 A7r2 实证，根因未定位）
+
+- 现象：同 run 首次切换应答 members=[]（空）、重试非空——运行中成员存在静默漏切面（漏切成员只靠 run 级意图写入兜底，重派时记账仍到达，覆盖不丢）。
+- 裁决方向：查聚合 members 收集的时序源（活进程窗与可见窗错开的具体环节），确定「可见性」契约后收敛。
+
 ## 验收环境教训（非缺陷）
 
 - 并行 inspect 共享单窗口 DOM：UI 输入通道全局唯一焦点，逐键注入与会话切换穿插交叉污染——多 agent 单窗口 UI 验收须预置时隙互斥协议；重验收轮按串行链编排（前一轮 A5 升级裁决已现场补课）。
@@ -40,3 +51,6 @@
 
 4. **records .json 磁盘快照为陈旧投影（立案待裁决）**：records/sa-*.json 快照 modelOverride=null / recentEffectiveModel=null / status=running(stale)，与 .events 的 override 帧及 runtime 内存投影不一致（A6br2 量化：第四轮完成后快照依旧 null/running）。UI 标签数据源为 runtime 派生不受影响；影响面 = 任何以磁盘快照为断言面的文件级检查。裁决方向：确认快照语义（创建时形态 or 应同步投影）——若属投影写回缺口，归 record-store 快照写面（ADR-0078 管辖）；断言纪律 = 权威面锚 .events 帧 / journal / session 文件，快照 json 不作断言面。
 5. **运行中实体在托盘子代理面板无行**（A4r4 deviation：进行中 0 三次核验，同期 pi 进程活跃 + record-round-started 已发）——运行中实体的 drawer 入口经对话流 subagent block 可达、托盘不可达；是否立案 = 托盘产品语义裁决（运行中该不该有行），非缺陷定性。
+6. **zcode 引擎显式 personal provider 模型首派即败**（A7r2）：app-server 侧报「Provider Registry 中不存在 Model」与引擎侧校验源不一致；引擎缺省模型可跑，切换记账仍正确到达。裁决方向：统一两侧模型解析源。
+7. **composer 模型选择器同 short-id 歧义**（A7r2 辅助观察）：同名 short-id 多候选时选择指向不明确；fixture 以显式钉模型规避，非阻塞。
+8. **e2e global-setup 自动构建与真轨守卫的 dist 形态冲突（2026-10-07 A13 首跑实证）**：`e2e/fixtures/global-setup.ts:45` 自动构建注入 `VITE_MOCK=true`（服务 mock 轨），而 electron-real 的 launch-real 守卫拒绝含 mock fixture 标记的 renderer bundle 并要求「VITE_E2E=true 且不传 VITE_MOCK」——两轨共享同一 dist 路径、自动构建形态只会满足 mock 轨；worktree 首次跑真轨（dist 缺失触发自动构建）必踩。本轮回避 = 手工 `VITE_E2E=true pnpm run build:e2e` 重建后重跑。裁决方向：按轨分 dist 或按 project 感知构建形态。
