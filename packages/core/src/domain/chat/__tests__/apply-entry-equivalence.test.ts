@@ -934,7 +934,7 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
     // 剥 id/piEntryId 后逐字段一致——timestamp 两侧 fixture 同值可直比（差异只在 ref 侧
     // appendUser 客户端时钟，上方窗断言已覆盖）。此维度对三条路径共用（message_end 帧
     // 恒先喂 reducer，E5c 不再重复）。
-    const liveReducer = s.store.testInternals._entryStatesForTest.get(sid)!.messages
+    const liveReducer = s.store.testInternals._entryStatesForTest.get(sid)!.state.messages
     expect(liveReducer).toHaveLength(1)
     const { id: _li, piEntryId: _lp, ...liveReducerMsg } = liveReducer[0]!
     const { id: _ri, piEntryId: _rp, ...replayMsg } = replay
@@ -1018,7 +1018,7 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
     expect(replay.timestamp).toBe(2000)
 
     // reducer 权威镜像同构（多 text part 拼接 + 标记剥离两处同源点的直接断言）
-    const liveReducer = s.store.testInternals._entryStatesForTest.get(sid)!.messages
+    const liveReducer = s.store.testInternals._entryStatesForTest.get(sid)!.state.messages
     expect(liveReducer).toHaveLength(1)
     const { id: _li, piEntryId: _lp, ...liveReducerMsg } = liveReducer[0]!
     const { id: _ri, piEntryId: _rp, ...replayMsg } = replay

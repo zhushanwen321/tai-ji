@@ -10,8 +10,9 @@ import { truncateToolOutputBatch, truncateToolOutputBatchCached } from './trunca
 import { dispatchMessageEvent } from './effects/registry'
 import {
   applyEntry,
+  createChatViewStateBuffer,
   createInitialChatViewState,
-  type ChatViewState,
+  type ChatViewStateBuffer,
 } from './apply-entry'
 import { createStreamingStateMachine } from './streaming-state-machine'
 import {
@@ -378,19 +379,26 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    */
   const inflightCounts = ref<Map<string, number>>(new Map())
   /**
-   * [W21] per-session reducer state（实时 feed 喂入 applyEntry 的累积态）。
+   * [W21] per-session reducer state（实时 feed 喂入 reducer 的累积态，buffer 活容器形态）。
    *
    * 实时路径（message_end / tool_call_end 重构 entry）与文件重放（get_entries →
    * replayEntries，hydrate 链）喂同一个 reducer——本 Map 是实时侧的累积 state，
    * 「live ≡ reload」从构造上成立（同 reducer 同输入序列必得同 state，等价性断言见
    * runtime src/__tests__/equivalence/live-reload.test.ts）。
    *
+   * 值 = ChatViewStateBuffer（跨帧 mutable 累积缓冲）：实时每帧一条 entry 的落账从
+   * copy-on-write 整表拷贝（10k 消息会话每帧 O(n) 分配）变为 O(1) 原地累积——buffer
+   * 与 applyEntry / replayEntries 共享同一派生段与 dispatch 骨架，产物 deep-equal
+   * （apply-entry-buffer-equivalence.test.ts 守卫）。**buffer.state 是活容器**：消费点
+   * 只允许同步读（如 applySubagentEntries 基线投影紧随 feed 之后），不得跨帧持有其
+   * 数组 / Set 引用并假设内容不变。
+   *
    * 非 Vue ref（[ADR-0049 例外]：factory 单例 Map，存的是纯投影数据非响应式业务状态）：
    * 渲染不走它——实时渲染走 messages ref 的 overlay 路径
    * （message_start/delta/complete，streaming 语义）；本 state 是权威累积，供 W22
    * broadcast≡get_state 对账与后续 ref 收敛消费。disposeSession / LRU 驱逐同点清理。
    */
-  const entryStates = new Map<string, ChatViewState>()
+  const entryStates = new Map<string, ChatViewStateBuffer>()
   /** FileChanges 子域控制器（W10，ADR-0024 D5），委托 chat-changeset.ts。messages 由本 store 注入，设计见 ./README.md + chat-changeset.ts。 */
   const changeset = createChangeSetController(messages)
   const { changeSetStatuses, getChangeSetStatus, setChangeSetStatus, applyFileChanges, markChangeSetsSuperseded } = changeset
@@ -730,7 +738,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   }
 
   /**
-   * [W21] 重构 entry 喂 per-session reducer state（applyEntry）——实时 feed 与文件重放
+   * [W21] 重构 entry 喂 per-session reducer state（buffer.feed）——实时 feed 与文件重放
    * （hydrate 链的 replayEntries）喂同一个 reducer。
    *
    * 本语义：纯累积（权威镜像），不直接投影 messages ref——实时渲染走 overlay 路径
@@ -738,12 +746,16 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * reducer 无法表达：running toolCall / delta 累积；例外——user 消息 [W2] 已 entry 化，
    * appendUser 构造 user entry 经本方法喂入 + overlay 投影，乐观 user 插入自此落入
    * reducer 可表达域）。ref 与 reducer state 的收敛（对账投影）归 W22 broadcast≡get_state
-   * 全量化。纯度：applyEntry 纯函数（copy-on-write），同 entry 序列必得同 state——
-   * 「live ≡ reload」在构造上成立。
+   * 全量化。同 entry 序列必得同 state——「live ≡ reload」在构造上成立（buffer 与
+   * applyEntry 共享派生段 + dispatch 骨架，产物 deep-equal 见 apply-entry.ts 文件头）。
    */
   function applyEntryFrame(sessionId: string, entry: PiEntry): void {
-    const cur = entryStates.get(sessionId) ?? createInitialChatViewState()
-    entryStates.set(sessionId, applyEntry(cur, entry))
+    let buf = entryStates.get(sessionId)
+    if (buf === undefined) {
+      buf = createChatViewStateBuffer()
+      entryStates.set(sessionId, buf)
+    }
+    buf.feed(entry)
   }
 
   /**
@@ -784,10 +796,12 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     }
     // 基线投影（无 PiEntry 的纯 toolCall 帧不触发投影——分区保持，overlay 直接操作 ref）。
     // 已投影过的消息引用直接复用上次产物（reducer 不截断、历史 toolCall 原文 MB 级时
-    // 每帧全量重编码是投影热开销），输出形态与 truncateToolOutputBatch(map 浅拷贝) 逐值一致
-    const state = entryStates.get(virtualId)
-    if (state) {
-      commitMessages(messages, virtualId, truncateToolOutputBatchCached(state.messages, subagentProjectedCache))
+    // 每帧全量重编码是投影热开销），输出形态与 truncateToolOutputBatch(map 浅拷贝) 逐值一致。
+    // buffer.state 活容器在此同步消费（紧随上方 feed，不跨帧持有数组引用）；
+    // truncateToolOutputBatchCached 恒返回新数组，活数组不出本表达式
+    const buf = entryStates.get(virtualId)
+    if (buf) {
+      commitMessages(messages, virtualId, truncateToolOutputBatchCached(buf.state.messages, subagentProjectedCache))
     }
     // toolCall overlay 后置：基于投影后分区操作，保证挂载目标是基线末位 assistant
     for (const form of entries) {
@@ -1178,7 +1192,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     testInternals: {
       /** D-3 streaming flag 惰性派生缓存（断言 disposeSession/LRU 驱逐清理语义用，生产代码勿读）。 */
       _sessionStreamingFlagsForTest: sessionStreamingFlags,
-      /** [W21] per-session reducer 累积态（断言 applyEntryFrame 喂入/清理语义用，生产代码勿读）。 */
+      /** [W21] per-session reducer 累积态（buffer 活容器，断言 applyEntryFrame 喂入/清理语义用，生产代码勿读；读值形态经 `.state` 访问）。 */
       _entryStatesForTest: entryStates,
     },
   }

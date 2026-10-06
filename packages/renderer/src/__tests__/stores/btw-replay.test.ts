@@ -194,7 +194,7 @@ describe('live ≡ reload 等价口径（btw 分区纳入 applyEntry 等价性�
     for (const entry of entries) {
       store.applyMessageEvent(vid, { type: 'message.message_end', payload: { sessionId: vid, entry } })
     }
-    const liveState = store.testInternals._entryStatesForTest.get(vid)
+    const liveState = store.testInternals._entryStatesForTest.get(vid)?.state
     expect(liveState).toBeDefined()
 
     // reload 腿：文件回放投影（runtime getEntries → lift → replayEntries 同一 reducer）经接线注入

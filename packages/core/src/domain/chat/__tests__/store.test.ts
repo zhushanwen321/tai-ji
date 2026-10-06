@@ -488,7 +488,7 @@ describe('createChatStore factory', () => {
       // ref：乐观 user 一条（真实帧不 commit ref——与 W21 assistant 同款 overlay 分工）
       expect(sut.store.getMessages(sid)).toHaveLength(1)
       // reducer：真实帧一条（乐观不喂）
-      const liveMsgs = sut.store.testInternals._entryStatesForTest.get(sid)!.messages
+      const liveMsgs = sut.store.testInternals._entryStatesForTest.get(sid)!.state.messages
       expect(liveMsgs).toHaveLength(1)
       // 重开侧：同形态 user entry（pi 持久化形态——content 纯文本）重放同一 reducer
       const reloadState = replayEntries([{
@@ -1072,7 +1072,7 @@ describe('createChatStore factory', () => {
           message: { role: 'user', content: 'hello', timestamp: 1000 },
         },
       }))
-      const state = s.store.testInternals._entryStatesForTest.get(sid)
+      const state = s.store.testInternals._entryStatesForTest.get(sid)?.state
       expect(state?.messages).toHaveLength(1)
       expect(state?.messages[0]).toMatchObject({ role: 'user', content: [{ type: 'text', text: 'hello' }], status: 'complete' })
       // ref 不动（send 时 appendUser 的乐观消息负责实时渲染；ref 收敛归 W22 对账）
@@ -1107,7 +1107,7 @@ describe('createChatStore factory', () => {
           message: { role: 'toolResult', toolCallId: 'tc-9', toolName: 'read', content: [{ type: 'text', text: 'file body' }], isError: true, timestamp: 3000 },
         },
       }))
-      const state = s.store.testInternals._entryStatesForTest.get(sid)
+      const state = s.store.testInternals._entryStatesForTest.get(sid)?.state
       // reducer：assistant 投影（toolCalls completed）+ toolResult 窗口局部配对回填（isError → error 态）
       expect(state?.messages).toHaveLength(1)
       const tc = state?.messages[0].toolCalls?.[0]
