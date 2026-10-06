@@ -50,10 +50,10 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 多会话管理 | 侧边栏会话列表、切换 12 步链、删除清理编排、LRU、未读标记 | harness 的本质 = 多 agent 工作流并行管理；单会话裸跑不构成工作台 |
 | 模型与 thinking level | 能力注册表、生效回执（RPC 状态化）、模型切换 | 用户控制 agent 智能水平/成本的核心旋钮；锁死单模型不可用 |
 | 中断/取消 | turn 取消链、取消后状态一致性 | 失控 agent 无法停止 = 持续烧 token 不可用 |
-| Markdown 渲染 | shiki 高亮、HTML 分通道净化（可信段摘出回填 + 用户 HTML DOMPurify 白名单）、相对资源通道（resourceBaseDir 双通道）、CSP 兼容、降级路径 | 对话内容呈现主体；纯文本降级已属不可读（曾 CSP 事故） |
+| Markdown 渲染 | shiki 高亮、HTML 分通道净化（可信段摘出回填 + 用户 HTML DOMPurify 白名单）、相对资源通道（resourceBaseDir 双通道）、html-preview 块渲染（对话流内联容器 HtmlPreviewInline，sandbox iframe 原位渲染，v16/ADR-0119）、产物文件抽屉恢复源码高亮（v16 渲染态退役）、CSP 兼容、降级路径 | 对话内容呈现主体；纯文本降级已属不可读（曾 CSP 事故） |
 | 扩展装载框架 | builtin 21 包装载、分组检查（infrastructure 不可禁）、worker 隔离 | 所有进阶能力的装载底座，挂了 feature 扩展全灭 |
-| subagent/workflow 面板与派发 | composer 任务托盘的 subagent/workflow 列表与运行计数（含 built-in 第 4 件「子会话」观察入口——调度模式派发进度的主视图；含行内取消/中止——workflow 一次性生命周期 abort-only，pause/resume 已随扩展 D-2 移除）、workflow 可视化 overlay（2026-10-02：双入口改向全屏 overlay——左 DAG 蓝图 + 右多级 tab 实况面板，挂掉回落 drawer WorkflowTab 对冲）、drawer 详情 tab（回落载体）、通知链 | agent 生产力的核心形态（边界判例 #2，2026-09-12 升 P0）；2026-09-16 观察入口自侧栏 Agents/Flows tab 迁 composer 任务托盘（侧栏收敛三 tab，入口唯一化） |
-| 设置页 | provider/API key 管理、系统提示词编辑、**模式（预设）编辑 + 模式提示词卡**、主题 | provider 配置是首次使用必经路径，配不了连会话都起不了 |
+| subagent/workflow 面板与派发 | composer 任务托盘的 subagent/workflow 列表与运行计数（含 built-in 第 4 件「子会话」观察入口——调度模式派发进度的主视图；含行内取消/中止——workflow 一次性生命周期 abort-only，pause/resume 已随扩展 D-2 移除）、workflow 可视化 overlay（2026-10-02：双入口改向全屏 overlay——左 DAG 蓝图 + 右多级 tab 实况面板，挂掉回落 drawer WorkflowTab 对冲）、drawer 详情 tab（回落载体）、通知链 | agent 生产力的核心形态（边界判例 #2，2026-09-12 升 P0）；2026-09-16 观察入口自侧栏 Agents/Flows tab 迁 composer 任务托盘（侧栏收敛三 tab，入口唯一化）；展示承载层 = 展示容器体系（右抽屉 8 tab / 底抽屉 / 浮层统一壳 + 键盘栈序编排器，display-containers）——容器体系挂掉 = P0 面板内容不可见，属 P0 链路一环（不另立独立条目） |
+| 设置页 | provider/API key 管理、系统提示词编辑、**模式（预设）编辑 + 模式提示词卡**、主题、settings.json 写入面（跨进程锁 + 字段域 merge + 损坏拒入——settings.json 是「设置」功能的载体，写坏影响全部会话；codemode 启动迁移/开关写入同域，写方与字段域归属见 data-source-registry §6） | provider 配置是首次使用必经路径，配不了连会话都起不了 |
 | 插件系统 | PluginService、trusted/sandbox 隔离、statusBar、交互点位（headerAction 顶栏按钮区 / modal 弹层 / action-bar 交互原语 + 条目镜像数据面） | harness 可扩展能力主体（testing 13）；交互点位是管理面类需求的规范底座，modal/徽标链路挂了 = 插件无法提供任何可交互入口 |
 | 统一提问表单 FormOverlay | agent 提问浮层（ask-user/scheduler/plan 三方统一）、Other 保留、pi 恢复 turn | agent↔用户交互闭环的唯一通道（边界判例 #3，2026-09-12 升 P0） |
 
@@ -78,12 +78,17 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | smart-context | 自动压缩、双模式摘要接管、分档提醒（手动 compact 兜底） |
 | structured-output / plan / todo 面板 | workflow 结构化输出、计划面板（审批闸口三决策：修订/执行/搁置 + 降级「重新提交审批」），todo 渲染、plan 执行方式选择（无 plan-exec 技能时直通不弹表单；goal 桥派发 / plan-exec skill / goal） |
 | i18n | zh/en 切换、消息键完整（边界判例 #1） |
-| 快捷键与 side drawer | 全局快捷键、composer pi 对齐快捷键（shift+tab 档位循环 / ctrl+p、ctrl+shift+p 模型双向循环 / ctrl+x 复制最后回复）、文件预览/diff/git tab（testing 05） |
+| 快捷键与 side drawer | 全局快捷键、composer pi 对齐快捷键（shift+tab 档位循环 / ctrl+p、ctrl+shift+p 模型双向循环 / ctrl+x 复制最后回复）、文件预览/diff/git tab（testing 05）；终端展示容器（右抽屉迁底抽屉）：底抽屉全宽开关（`` ⌃` `` / StatusBar 按钮）双入口，终端**多实例**（关键用例组：多实例并行——实例切换条新建/切换/关闭/空态与实例间输出隔离；实例级生命周期——主动关闭·自然退出·会话删除级联·runtime shutdown 级联；刷新与世代恢复——⌘R 对账重建·runtime 重启世代重置·同世代闪断不重置） |
+| 浮层浏览器（应用内网页预览） | 对话流 localhost 链接点击进浮层（OverlayShell + BrowserPane）、地址栏/复制链接/在系统浏览器打开、错误占位与重试、切 session 浮层随行。**挂掉后果 = dev server 链接退回系统浏览器打开，预览能力基本可用但上下文切换中断**（基本可用稍可忍受） |
 | session 导入 | 多源统一入口：来源选择（pi/zcode）、候选列表、导入；zcode 源真实宿主库只读转换（session-import-sources 指南；SessionImportSource SPI） |
 | 后台命令观察面（composer 任务托盘 bash 面板） | background task 展示（testing 02） |
 | 对话流时间戳 | 行尾耗时·时刻槽、TurnMeta 首末区间、reload endTime 回填（chat-flow-timestamp；TurnMeta/Block/apply-entry-convert 单测 + live≡reload 等价性） |
 | btw 旁路提问（drawer 辅助对话流） | composer btw 按钮入口、fork 快照线（独立 pi 进程 / `btw:` 虚拟 id / `btw/<encodeCwd>/<mainSid>/` 目录隔离）、消息分区、主删级联与持久恢复、交互 drawer 路由（D8）。**挂掉后果 = 主对话链路完整可用**（btw 创建/提问/面板失效仅损失辅助提问面，不动 P0 对话主链；设计原文口径「触及最高 P 级 P2——btw 为常用辅助面，挂掉后主链路完整可用」）。错误处理按 §1「P2/P3 降级隔离不拖垮核心」契约：接入点 catch + 日志 + 功能关闭/占位兜底，禁向上传播打断 P0/P1 主流程，降级 ≠ 吞错（运行时错误码 `fork_failed / spawn_state_invalid / state_mismatch / line_not_found / thread_file_missing` 供 runtime 分流与日志归因；renderer 呈现 = 通用降级文案 + 原因透传 + 行内可重试入口，不按码分流——2026-09-22 一致性审查对账修正） |
+| 远程访问（手机浏览器经 LAN 直连） | 设置→远程访问开关与 token 轮换、移动壳同源托管、remote token 验身（关态默认纯回环零暴露） |
 | 语音朗读（TTS） | assistant 回复朗读按钮三态（idle/loading/playing，生成中置灰）、设置页「语音」菜单（三家 provider 表单：凭据/基础/音频/风格/长尾，Key 联动带入 + MiMo baseUrl 集群预填）、runtime `tts.*` 四 RPC（三家 driver + 分句合成 + WAV 缓存 + 双条件 FIFO 封顶）、错误码 toast 分流（§5.4 六码）。**挂掉后果 = 对话主链路完整可用**（朗读按钮不渲染/合成失败仅损失听觉通道，不动 P0 对话主链；ai-voice-tts 设计原文口径 P2）。错误处理按 §1 P2 降级隔离契约：u6 播放器 catch + 错误码 toast + 回 idle，runtime `tts_*` 错误码词表（`tts_not_configured / tts_auth_failed / tts_quota_exceeded / tts_vendor_error / tts_network_error / tts_text_too_long / tts_empty_text`），缓存写失败日志不阻断（磁盘治理失败下次写入收敛）。总开关关闭时 idle 朗读本地拦截不发 RPC（data-source-registry #45） |
+| Code Mode（codemode） | 模型写 JavaScript 脚本调用工具（pi 1.0 内置扩展，QuickJS 沙箱：脚本内并行调用/过滤过大结果/生成图片）：常驻默认启用（启动迁移幂等写 `+codemode`，字段已配置不碰）、设置页「系统」Code Mode 开关（`config.getCodemodeEnabled` / `config.setCodemodeEnabled`，损坏错误态）、嵌套脚本调用事件过滤（对话流单工具块，live ≡ reload）、脚本调用工具块与图片条渲染（复用既有通用工具块 + 图片条通道，零新渲染组件）。**挂掉后果 = 对话主链路完整可用**（codemode 未激活/脚本报错仅损失脚本调用能力，普通工具调用不受影响，不动 P0 对话主链；codemode 设计原文口径「功能本体 P2——codemode 故障时对话主链路完整可用，同 TTS/btw 口径」）。错误处理按 §1 P2 降级隔离契约：启动迁移失败不阻塞启动（warn 留痕 + 下次启动幂等补跑）；开关操作遇 settings.json 损坏呈错误态（Switch 禁用 + 完整路径可复制 + 修复指引，不静默重置不代偿）。**P0 关联**：写入域本身是 P0（§2 设置页行——settings.json 写坏影响全部会话），本功能对它的义务 = 只动 `defaultTools` 的 codemode 相关系目 + 写前损坏拒入，见 data-source-registry §6 tools 域行 |
+| MCP 服务器管理 | 设置页 MCP 分区：服务器清单（用户级，坏条目「配置有误」标注不阻塞）、表单/代码双模式添加与编辑（stdio 本地命令 / http 远程地址，表单外键原样保留）、启停/删除确认、连接测试（spawn `pi mcp list --json` 真实连接，逐服务器状态与失败原因）；配置由新启动的会话读取（运行中会话保持不变，页头说明该语义）。**挂掉后果 = 无法在界面管理 MCP 服务器**（分区/清单/连接测试失效仅损失管理面，手编 `<数据目录>/agent/mcp.json` 与终端 `pi mcp` 命令仍可用，不动 P0 对话主链；pi-mcp-management 设计原文口径 P2——「挂掉后果：界面无法管理 MCP，高级用户仍可手编配置文件，harness 其余功能不受影响」）。错误处理按 §1 P2 降级隔离契约：读写层 fail-fast（保存校验不过不落盘、文件损坏拒入报错不静默重置——不覆盖外部手编内容，修复指引含文件路径）；连接测试为辅助功能，失败/超时降级为状态显示（保留上次结果），不阻塞清单读写；域内错误经 reply 信封结构化返回（错误码 + 修复动作文案），不向上传播打断 P0/P1 主流程 |
+| fast-handoff 会话交接 | 源 session 一键交接：runtime 让源 session 跑 handoff turn 生成交接文档（agent-driven）→ 新建承接 session 注入文档首条 → 广播跳转（`HandoffService`；Staging Mode 模型/思考档位继承，ADR-0056）。**挂掉后果 = 一键交接失效**（手动新建 session + 自行迁移上下文仍可用，不动 P0 对话主链）。错误处理按 §1 P2 降级隔离契约：失败经 message.error 通道广播到源 session 对话流（空文档 / pi 出错重试用尽 / timeout / abort / pi 中途退出各分支显式 reject——重试中间帧 willRetry 跳过 + 终态 error 帧拒绝，pi1-disposition-chat-flow U3② 修复的「首个 agent_end 即收尾」重试误杀），不向上传播打断 P0/P1 主流程 |
 
 ## 5. P3 — 特定人群/低影响
 
@@ -102,6 +107,8 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 
 已移除条目（2026-09-12 用户裁决，功能已不存在）：双 Panel / split mode（UI 无活跃实现，仅 store 层 PanelTree 类型残留）；cw-tool / coding-workflow。
 
+已移除条目（2026-10-04 用户裁决「直接废除 bridge」，功能已不存在）：plugin-bridge（插件工具接入 pi 的通路暂缺，见 docs/todo/plugin-tool-access-gap.md）。
+
 ## 6. 引擎与 extension 分级表
 
 **引擎**：pi 引擎接入 = **P0**（主力，唯一不可替代）；zcode 引擎 = **P2**（第二引擎，边界判例 #4）。
@@ -109,7 +116,6 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 包 | 组 | 分级 | 依据 |
 |----|----|------|------|
 | ask-user | universal | **P0** | 边界判例 #3（2026-09-12 用户裁决升 P0） |
-| plugin-bridge | taiji | **P0** | 跟随插件系统（P0） |
 | subagent-workflow | universal | **P0** | 边界判例 #2（2026-09-12 用户裁决升 P0） |
 | agent-ext | taiji | P1 | taiji 集成基座，挂了集成能力降级但 pi 主链路存活 |
 | base-tool-enhance | universal | P1 | bash 前台链挂了 agent 失去执行能力（原生回退仅保底） |

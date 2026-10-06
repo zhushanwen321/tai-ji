@@ -39,7 +39,6 @@ function lineRec(vid: string, mainSid: string): BtwLineRecord {
     snapshotKind: 'forked',
     hidden: true,
     createdAt: 1,
-    lastActivityAt: 1,
     pendingInteraction: false,
     reclaimImminent: false,
     contractRounds: 1,

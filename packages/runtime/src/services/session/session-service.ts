@@ -43,7 +43,7 @@ import type { SessionTraceSnapshot } from './trace-sync.js'
 import { SessionRecords } from './session-records.js'
 import type { OversizeAwareResult } from './session-records.js'
 import { SessionModelControl } from './session-model-control.js'
-import { isModelInRegistry, providerHasCredential, resolveActivateTimeoutMs } from './session-model-guards.js'
+import { isModelInRegistry, providerHasCredential } from './session-model-guards.js'
 import { SessionHistoryReader } from './history-rebuild-cache.js'
 import type { HistoryFileReadResult, HistoryWindowResult } from '../session-history.js'
 import { resolveSkillPaths, resolveExtensionPaths, resolveReplaceSystemPrompt, resolveLaunchPresetOptions } from './launch-params.js'
@@ -57,7 +57,7 @@ import { captureMachinePiDigest } from '../../infra/crash-correlation.js'
 // crash-forensics 台账挂点域（D1 detailDigest 格式化 + D3 checkpoint / D5 mirror 的
 // attach 预置与 reclaim 摘除，§3.3）：实现迁 crash-forensics-hooks.ts（行为保持抽取，
 // max-lines 门禁），本 Facade 保留调用点。
-import { buildCrashDetailDigest, dropCrashLedgersOnReclaim, registerCrashLedgerAttachHooks } from './crash-forensics-hooks.js'
+import { buildCrashDetailDigest, registerCrashLedgerAttachHooks } from './crash-forensics-hooks.js'
 // main（file-lock-unification reaper 下沉，D2 触发面 A）：removeSessionEntry 汇聚点收殓
 // 孤儿后台任务——[T8 有限拆分 2026-09] 调用点随销毁收敛链编排迁入 session-entry-removal.ts
 // （模块单例直接 import，语义不变），本 Facade 不再消费。
@@ -74,12 +74,11 @@ import { BackgroundTaskService } from '../background-task/background-task-servic
 import type { IConfigStore } from '../ports/config.js'
 import type { ISessionStore, SessionOutcome } from '../ports/session.js'
 import type { IGitInfoReader } from '../ports/git-info.js'
-import type { IManagedSessionView, ScannedSession, SendMessageHook, SessionOccupancy } from './types.js'
+import type { IManagedSessionView, ScannedSession, SendMessageHook } from './types.js'
 import type { DeliverySubmitResult, SessionDeliveryRegistry } from './session-delivery-registry.js'
 import type { WorkspaceService } from '../workspace/workspace-service.js'
 import { SessionLifecycle } from './session-lifecycle.js'
 import { RevokeOrchestrator } from './revoke-orchestrator.js'
-import type { ReclaimSessionDeps } from './session-lifecycle.js'
 // B3 ensure 链分支（btw-question M2-b 授权）：ensureActive 对 btw vid 转自建附着编排。
 // type-only（本文件对 btw-service 零 value 依赖，无环——btw-service 不反向 import 本文件）。
 import type { BtwService } from './btw-service.js'
@@ -88,8 +87,6 @@ import type { BtwService } from './btw-service.js'
 import { SessionEntryRemovalOrchestrator, runDestroyStepIsolated } from './session-entry-removal.js'
 // 空闲回收占座原语与等待观测超时（idle-pi-reclamation D6-2，u2）。type-only import：
 // Seat 实例由 u3 组合根创建后 setter 注入，本模块不持有创建权（不引入运行时依赖环）。
-import type { ReclaimSeat } from './idle-pi-reaper.js'
-import { RECLAIM_SEAT_WAIT_OBSERVE_MS } from './idle-pi-reaper.js'
 import { RespawnOrchestrator } from './pi-respawn.js'
 import { MessageDispatcher } from './message-dispatcher.js'
 // [A1 接线] skill 注入映射源（skill-reload-nondestructive D7）：records/dispatcher 的
@@ -151,7 +148,6 @@ export const userStoppedMarkStore: UserStoppedMarkStore = {
  * internal-command-filter 过滤不显示），两处注释互为指针，改名必须同批。
  */
 const BG_RECONCILE_COMMAND = '/__taiji_bg_reconcile__'
-const BG_RECONCILE_TRIGGER_THROTTLE_MS = 60_000
 
 export class SessionService implements ISessionService, ILifecycleSessionOps, IDispatcherSessionOps, IScannerSessionOps {
   /**
@@ -228,7 +224,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   private modelCapabilityReconciler: ((sessionId: string) => Promise<unknown>) | null = null
 
   /**
-   * session 删除回调（组合根注入 terminalService.destroyPty）。
+   * session 删除回调（组合根注入 terminalService.destroySessionPties）。
    * 主动 delete（lifecycle.delete）和进程异常退出（onSessionExit）均经 removeSessionEntry
    * 汇聚触发，同步销毁该 session 绑定的 PTY。
    */
@@ -369,21 +365,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 意图——非候选无害（豁免判定只会多豁免不会误杀），恢复后继续有效；量级每 sid 一个数字。
    */
   private readonly lastViewedAtBySession = new Map<string, number>()
-  /**
-   * background 任务完成通知补投的 per-session 触发节流（bg-task-notify-durability
-   * runtime 触发面）：sessionId → 最近一次发起 `__taiji_bg_reconcile__` 的时间戳。
-   *
-   * 位置先例 = 上方 lastViewedAtBySession（per-sid Map、随实例生命周期生灭、刻意不做
-   * 删除清理——量级每 sid 一个数字，回收态残留条目只影响节流窗口不影响正确性；60s
-   * 内切走再切回属正常节奏，不重复打扰 pi）。写方唯一 = maybeTriggerBgReconcile。
-   */
-  private readonly bgReconcileTriggeredAt = new Map<string, number>()
-  /**
-   * 空闲回收占座（idle-pi-reclamation D6-2，u2）。u3 组合根经 setReclaimSeat 注入与
-   * reaper/reclaimManagedSession 共享的同实例；缺省 null = 行为不变（ensureActive 无
-   * 让路逻辑）——不破坏既有测试构造点（同 setConfigService 的 setter 注入模式）。
-   */
-  private reclaimSeat: ReclaimSeat | null = null
+
   constructor(
     private readonly pm: IProcessManager,
     private readonly broker: IMessageBroker,
@@ -430,12 +412,12 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       // restore 时（dispatcher 已就绪）。
       forceQuitFallback: (sessionId) => this.dispatcher.forceQuit(sessionId),
     })
-    // D4 收敛环接线：宿主 Map 存取（上方 store）+ abort 能力（dispatcher.abort 完整链——
-    // 成功收口广播 / 失败超时强杀收敛）。gate 未 configure 时全部 no-op/抛错，本构造器是
-    // 生产唯一接线点（测试可经 resetForTest + 局部 configure 替换）。
-    // [U2 修复] source='convergence'：收敛环掐的是 runtime 自动收敛的补发 turn（非用户
-    // 操作），终态 reason 写 'Convergence abort (auto)' 与用户 abort 可区分（日志/终态
-    // 不得谎报用户语义；aborted 完成帧广播保持不变——前端 no-op）。
+    // userStopped 拦截链接线：宿主 Map 存取（上方 store）+ abort 能力（dispatcher.abort
+    // 完整链——成功收口广播 / 失败超时强杀收敛）。gate 未 configure 时全部 no-op/抛错，
+    // 本构造器是生产唯一接线点（测试可经 resetForTest + 局部 configure 替换）。
+    // [U2 修复] source='convergence'：agent_start 挂点掐的是 runtime 自动拦截的旁路
+    // turn（非用户操作），终态 reason 写 'Convergence abort (auto)' 与用户 abort 可区分
+    //（日志/终态不得谎报用户语义；aborted 完成帧广播保持不变——前端 no-op）。
     userStoppedGate.configure({
       marks: userStoppedMarkStore,
       abortSession: (sessionId) => this.dispatcher.abort(sessionId, 'convergence'),
@@ -455,10 +437,8 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       getSession: (sessionId) => this.lifecycle.get(sessionId),
       getReplicatedStates: (sessionId) => this.projection.getReplicatedStates(sessionId),
       syncTraceEntries: (sessionId, trigger) => this.traceSync.syncTraceEntries(sessionId, trigger),
-      // U2：停止态/回收态切换先经 ensureActive 拉活或 join 同一 in-flight；
-      // 上界 15s（`TAIJI_SESSION_ACTIVATE_TIMEOUT_MS` 可调，≤0 = 不限时逃生门）。
+      // U2：停止态/回收态切换先经 ensureActive 拉活或 join 同一 in-flight。
       ensureActive: (sessionId) => this.ensureActive(sessionId),
-      activateTimeoutMs: resolveActivateTimeoutMs(process.env),
       // `Model not found` 三型分型的两判（configService 晚期注入 → 闭包内每次调用动态读；
       // 未注入 / listProviders 抛错时 fail-open，宁可落双因文案也不误报更「确定」的码）。
       isModelRegistered: (provider, modelId) => isModelInRegistry(this.configService, provider, modelId),
@@ -612,10 +592,12 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * - W4 stopped 终态写在 removeSessionEntry 之后：session 是 delete 前缓存的引用，
    *   persistSessionOutcome 的内部 get 在条目删除后返回 undefined，不能走它（首终态
    *   优先语义见回调体内注释）。
-   * - respawn.schedule 收尾是设计裁决：本链天然不含 forceQuitSession（dispatcher 手工
+   * - respawn.crashExit 收尾是设计裁决：本链天然不含 forceQuitSession（dispatcher 手工
    *   编排 + exit 事件双层守卫拦截）与 intentional destroy（process-manager 拦截）——
-   *   用户手动强杀的 session 结构性不触发自动恢复（crash-resilience D7，A7 反向验收）；
-   *   启动前守卫（active / in-flight restore / 熔断）在 schedule 内。
+   *   用户手动强杀的 session 结构性不触发崩溃上报（crash-resilience D7，A7 反向验收）；
+   *   上报前守卫（active / in-flight restore）在 crashExit 内。
+   *   （原 5s 延迟自动恢复调度已随 ADR-0122 防御机制清查退役——崩溃显式上报，恢复
+   *   决策归用户。）
    */
   private registerSessionExitHandler(): void {
     // 进程崩溃清理:协调 adapter detach / Map 删 / 列表刷新 / session.exited 广播
@@ -649,6 +631,13 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       })
       runDestroyStepIsolated('adapter.detach', sessionId, () => {
         session.adapter.detach()
+      })
+      // pi 断连事件 → 投递域收口（ADR-0122 命令终局事件化断连腿）：挂起的在途投递批量
+      // 转显式失败（用户可见「执行结果未确认」上报），不留 in-flight 悬挂。挂点约束 =
+      // 先于 removeSessionEntry——销毁链扇出 delivery dispose（静默清队）与
+      // bus.clearSession（通知不可达），晚于此链点的失败上报送不到前端。
+      runDestroyStepIsolated('delivery.onPiDisconnected', sessionId, () => {
+        this.deliveryRegistry?.onPiDisconnected(sessionId)
       })
 
       // 构建人类可读的退出原因（含 stderr 尾部，诊断价值 > 敏感性风险，本地工具场景）
@@ -704,12 +693,13 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
         // 前端据此标记 session dead 态 + 插入 error 消息 + toast 提示。
         //（wave:perf-w09：exitedMsg 的 broadcast 腿已删——session 级单通道，上方 publish 唯一出口。）
 
-        // u8（crash-resilience D7-①②）：非主动退出 → 5s 延迟自动恢复。挂在本链（而非
-        // session.exited 消息生产点）是设计裁决：本链天然不含 forceQuitSession（dispatcher
-        // 手工编排 + exit 事件双层守卫拦截）与 intentional destroy（process-manager 按
-        // processes.has 拦截）——用户手动强制退出的 session 构性不触发自动恢复（A7 反向验收）。
-        // 启动前守卫（active / restoringSessions in-flight / 熔断）在 schedule 内。
-        this.respawn.schedule(sessionId)
+        // u8（crash-resilience D7-①）挂点沿用：非主动退出 → 崩溃显式上报（ADR-0122——
+        // 原 5s 延迟自动恢复已退役）。挂在本链（而非 session.exited 消息生产点）是设计
+        // 裁决：本链天然不含 forceQuitSession（dispatcher 手工编排 + exit 事件双层守卫
+        // 拦截）与 intentional destroy（process-manager 按 processes.has 拦截）——用户
+        // 手动强制退出的 session 结构性不触发崩溃上报（A7 反向验收）。
+        // 上报前守卫（active / restoringSessions in-flight）在 crashExit 内。
+        this.respawn.crashExit(sessionId)
       } catch (e: unknown) {
         // 收敛尾段（removeEntry / stopped 终态 / 列表广播 / respawn 承诺）失败显形：
         // 不得静默吞掉，也不得沿 pm 回调多播上抛（RT-4#1）。
@@ -744,7 +734,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     this.btwService = btwService
   }
 
-  /** session 删除回调注入（组合根绑 terminalService.destroyPty）。 */
+  /** session 删除回调注入（组合根绑 terminalService.destroySessionPties）。 */
   setOnSessionDelete(handler: (sessionId: string) => void): void {
     this.onSessionDelete = handler
   }
@@ -899,20 +889,19 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   async renameSession(sessionId: string, newName: string): Promise<void> { return this.lifecycle.renameSession(sessionId, newName) }
   async restoreSession(sessionId: string): Promise<SessionSummary> {
     const summary = await this.lifecycle.restoreSession(sessionId)
-    // [D3 msg-pipeline-debloat] 恢复成功三合一出口（单一发布事实源）：判别 → 发布
-    // session.restored → 清零连续失败计数。本 facade 是恢复四入口的真实汇合点（自动
-    // respawn / 惰性 ensureActive / 手动 RPC / startup-reattach 的 restore 内核都是它），
-    // 发布锚钉在此；三信号判别读取先于清零（见 pi-respawn.onRestoreSuccess）。普通懒
-    // spawn / startup-reattach 三信号皆空静默恢复不发布；熔断只针对连续失败，成功即出清
-    //（唯一清零入口，与 pi-respawn.cancel 只清 timer 不清计数配套）。
+    // [D3 msg-pipeline-debloat] 恢复成功出口（单一发布事实源）：判别 → 发布
+    // session.restored → 核销崩溃登记。本 facade 是恢复入口的真实汇合点（惰性
+    // ensureActive / 手动 RPC / startup-reattach 的 restore 内核都是它），发布锚钉在此。
+    // 普通懒 spawn / startup-reattach 无崩溃登记静默恢复不发布（判别见
+    // pi-respawn.onRestoreSuccess）。
     this.onRestoreSuccess(sessionId)
     return summary
   }
 
   /**
-   * [D3] 恢复成功三合一出口（判别 → 发布 session.restored → 清连续失败计数），委托
-   * respawn 编排器（三信号状态全在其内）。生产唯一调用点 = restoreSession facade 成功
-   * 尾部；组装级测试的 restoreSession 替身（spy 掉 lifecycle 的 FS/spawn 链）按同一契约
+   * [D3] 恢复成功出口（判别 → 发布 session.restored → 核销崩溃登记），委托 respawn
+   * 编排器（崩溃登记状态全在其内）。生产唯一调用点 = restoreSession facade 成功尾部；
+   * 组装级测试的 restoreSession 替身（spy 掉 lifecycle 的 FS/spawn 链）按同一契约
    * 在成功尾部调用本方法，保证发布判别链与生产一致。
    */
   onRestoreSuccess(sessionId: string): void {
@@ -1030,61 +1019,10 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   /**
-   * 删除查看时间戳条目（R4 清理挂点：removeSessionEntry 汇聚点调用）。真删除时清条目；
-   * 回收态（reclaimManagedSession）刻意**不**清——回收态保留条目是设计 D2 #6 意图：
-   * 非候选无害（豁免判定只会多豁免不会误杀），恢复后继续有效。
+   * 删除查看时间戳条目（R4 清理挂点：removeSessionEntry 汇聚点调用）。真删除时清条目。
    */
   clearSessionViewed(sessionId: string): void {
     this.lastViewedAtBySession.delete(sessionId)
-  }
-
-  /**
-   * 查询 session 占用状态投影（idle pi reclamation D2 #1 豁免信号，u3a 只读访问器）。
-   *
-   * occupancy 是运行时内部态（IManagedSessionView.occupancy，事件驱动幂等投影，
-   * 唯一写方 updateSessionOccupancy；不进 toSummary——对外只经 session.occupancy
-   * state 帧），本方法是其唯一外部只读读点：委托 lifecycle Map（所有权在 lifecycle，
-   * S3 单写者约定）取条目读字段。
-   * 未附着 / 已摘除（含回收后）返回 undefined——reaper 侧语义「无条目即无占用信号」，
-   * 回收安全由 reclaimManagedSession 的最终同步豁免块兜底（与 getClientActivity 的
-   * 「宁漏不误杀」同向）。
-   */
-  getSessionOccupancy(sessionId: string): SessionOccupancy | undefined {
-    return this.lifecycle.get(sessionId)?.occupancy
-  }
-
-  /**
-   * 查询 session 是否处于 restore 进行中（idle pi reclamation D2 #7 豁免信号，u3b 装配）。
-   *
-   * 恢复注册表的所有权在 RespawnOrchestrator（u8 join 状态 SSOT），其实例是本类 private
-   * 字段——本方法是其唯一外部只读读点（与上方 getSessionOccupancy 同构的薄委托：内部态
-   * 无公开访问器时在 Facade 加只读口，组合根 reaper 豁免装配消费）。
-   */
-  isSessionRestoring(sessionId: string): boolean {
-    return this.respawn.isRestoring(sessionId)
-  }
-
-  /**
-   * 注入空闲回收占座（idle-pi-reclamation D6-2，u3 组合根装配）。必须传与 reaper 判定
-   * 循环 / reclaimManagedSession 相同的 ReclaimSeat 实例——三处共享同一互斥状态。
-   */
-  setReclaimSeat(seat: ReclaimSeat): void {
-    this.reclaimSeat = seat
-  }
-
-  /**
-   * 空闲回收执行入口（u3 装配：reaper options.reclaim 绑定本方法）。委托 lifecycle 的
-   * 七步最小摘除编排——进程处置语义收口在 Map 所有者（D3），Facade 只做一行委托。
-   * 返回 false = 未回收（占座被占 / 最终豁免拦截 / 代际校验取消）。
-   *
-   * D3 checkpoint + D5 mirror reclaim 成功摘除挂点：挂 ok 分支（未回收路径零改动、
-   * 防误摘，与 reclaimed 台账行同抑制语义）——实现迁 crash-forensics-hooks.ts
-   * （dropCrashLedgersOnReclaim，行为保持抽取，语义注释见该模块）。
-   */
-  async reclaimSession(sessionId: string, deps: ReclaimSessionDeps): Promise<boolean> {
-    const reclaimed = await this.lifecycle.reclaimManagedSession(sessionId, deps)
-    if (reclaimed) dropCrashLedgersOnReclaim(sessionId)
-    return reclaimed
   }
 
   // ── W18：record entry 派生缓存（S6 迁出至 session-records.ts；interpreter 经组合根
@@ -1129,48 +1067,10 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     // existing sessions 条目已有 detach + safeDestroy + removeSessionEntry 清场），
     // 不把死 client 交给 prompt。
     if (existing && !existing.exited) return existing
-    // 占座让路（idle-pi-reclamation D6-2）：回收编排进行中（seat 命中）→ 等待释放后走
-    // 既有 restore，绝不抢跑——抢跑的 restoreSession 对未完成摘除的 session 走 existing
-    // 清场分支 = 死亡清理汇聚点被完整触发（bus.clearSession 断流 + destroyPty 连杀 +
-    // didDestroy 投递，被否谱系「超时抢跑」）。等待的确定性由 reclaim 的 finally 释放保证。
-    // [u2 回归根因] 同步短路守卫：seat 未命中时必须零微任务让步。awaitReclaimSeatRelease
-    // 是 async 函数，无条件 `await` 即使内部同步 return 也让 restore 入口晚一个微任务，
-    // 「seat 缺省 = 行为不变」的 u2 契约在微任务粒度被破坏——ensureActive() 调用不再
-    // 同步进入 respawn.ensureRestored→restoreSession（join 语义本体未坏，restoringSessions
-    // 注册表照常去重），但测试构造依赖同步进入时序（同步断言 spy 次数 / ③b 的 deferred
-    // 注册窗口），Gate A 5 例 join 失败均源于此。isHeld 为纯同步查询，命中路径行为与
-    // 原 awaitReclaimSeatRelease 内部检查逐微任务等价（内部检查保留作双保险）。
-    if (this.reclaimSeat?.isHeld(sessionId)) {
-      await this.awaitReclaimSeatRelease(sessionId)
-    }
     await this.respawn.ensureRestored(sessionId)
     const client = this.pm.getClient(sessionId)
     if (!client) throw new Error('Restore succeeded but client not available')
     return client
-  }
-
-  /**
-   * 等待回收占座释放（D6-2「等待方永不抢跑」硬约束的实现）。
-   *
-   * 占座区间天然有界（最坏 ~2-3s：kill 硬上限 2s + 同步摘除），且由 reclaimManagedSession
-   * 的 finally 结构性保证终将释放——所以本等待的语义是「等到为止」：单轮观测超时
-   * （RECLAIM_SEAT_WAIT_OBSERVE_MS，5s）只记 ERROR（占座实现有 bug 的信号），随后继续
-   * 等待，绝不调用任何销毁语义或直接走 restore。
-   */
-  private async awaitReclaimSeatRelease(sessionId: string): Promise<void> {
-    const seat = this.reclaimSeat
-    if (!seat || !seat.isHeld(sessionId)) return
-    let waitedMs = 0
-    while (seat.isHeld(sessionId)) {
-      const released = await seat.waitRelease(sessionId, RECLAIM_SEAT_WAIT_OBSERVE_MS)
-      if (released) return
-      waitedMs += RECLAIM_SEAT_WAIT_OBSERVE_MS
-      console.error(
-        `[session-service] ensureActive has waited ${waitedMs}ms for reclaim seat release `
-        + `(sessionId=${sessionId}) — seat held longer than the bounded reclaim window is a bug `
-        + `signal, continuing to wait (never preempt, D6-2)`,
-      )
-    }
   }
 
   // ── history 读编排域（S6 迁出至 history-rebuild-cache.ts；三分支重建/inflight 合并/尾读降级详见该模块）──
@@ -1191,10 +1091,8 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
 
   /**
    * 驱逐单 session 的历史重建缓存条目（B8，memory-leak-remediation §3.3-B8 候选 C）。
-   * 回收≠销毁：不走 removeSessionEntry 汇聚点；驱逐后重激活走单次全量重建（P7 张力
-   * 四要素显式登记的代价）。组合根 reclaim 装配消费——ReclaimSessionDeps.
-   * evictHistoryRebuildCache 绑本方法（实现与语义见 history-rebuild-cache.ts
-   * SessionHistoryReader.onSessionReclaimed）。
+   * 驱逐后重激活走单次全量重建（P7 张力四要素显式登记的代价）。实现与语义见
+   * history-rebuild-cache.ts SessionHistoryReader.onSessionReclaimed。
    */
   evictHistoryRebuildCache(sessionId: string): void { this.historyReader.onSessionReclaimed(sessionId) }
 
@@ -1276,9 +1174,9 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 的窗口一步到位，不要求用户先发消息；恢复失败向上抛，由 handler 转 error envelope，
    * 前端呈现 E9 恢复指引）。② client.prompt('/plan abort') 直发：`/` 前缀 prompt 被
    * pi 先行执行为 extension command、不产用户消息、streaming 中可用（主审 R2 复核实证）；
-   * pi 实装锚点（0.84.4）：dist/core/agent-session.js:826-833——prompt 对 `/` 前缀先行
-   * 尝试 extension command（源码注释明言 execute immediately, even during streaming），
-   * handled 即 return 不产用户消息；命令解析 _tryExecuteExtensionCommand :954。本断言
+   * pi 实装锚点（语义登记 PS-49，verifiedWith 以 pi-semantics.json 为准）：prompt 对 `/`
+   * 前缀先行尝试 extension command（源码注释明言 execute immediately, even during
+   * streaming），handled 即 return 不产用户消息；命令解析 _tryExecuteExtensionCommand。本断言
    * 双承重：此写入路径 + .githooks/check_prompt_outposts.py 豁免条目的依据。刻意绕过
    * dispatcher busy 预检——照 workflowAction（session-records.ts workflowAction）先例，
    * 审批挂起期 busy defer 会吞掉退出命令（E10 卡死链的入口），直发让 extension 侧
@@ -1385,10 +1283,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
 
   /**
    * 取消全部 pending 自动恢复 timer（crash-resilience D7-② shutdown 取消语义；组合根
-   * index.ts 的 shutdown 序列专用——必须先于 server.stop 内的 destroyAll 调用：若 destroyAll
-   * 之后 pending timer 仍可触发，shutdown 中途会 spawn 新孤儿 pi，收割器只在下次启动后
-   * 5s 跑一次，用户直接退出 app 则孤儿无限存活烧 token。对齐 u5b stopMemoryWatermarkTimer
-   * 的 shutdown 先取消先例）。
+   * index.ts 的 shutdown 序列专用（核销崩溃登记；先于 server.stop 内的 destroyAll 调用）。
    */
   cancelAllPendingRespawns(): void {
     this.respawn.cancelAll()
@@ -1593,29 +1488,22 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * background 任务完成通知补投的 runtime 触发（bg-task-notify-durability 第二触发面）。
    *
    * 背景：桌面「切走会话再切回」是同进程重新挂接——pi 进程存活、不重发 session_start
-   * （真机实证；pi 0.84.4 实装锚点：session_start 事件 per AgentSession 只发一次——
-   * dist/core/agent-session.js:152 构造时赋值、:1919 bindExtensions 内唯一 emit、
-   * :2230 reload 场景显式 reason="reload"；切回 = runtime 重新挂接同一存活进程，
+   * （真机实证；pi 1.0.0 实装锚点：session_start 事件 per AgentSession 只发一次——
+   * dist/core/agent-session.js 构造时赋值 _sessionStartEvent、bindExtensions 内唯一正常
+   * emit、reload 场景显式 reason="reload"；切回 = runtime 重新挂接同一存活进程，
    * 不经 AgentSession 构造），扩展侧挂在 session_start 上的维护链在「投递失败但
    * 进程存活」场景（设计 G2 核心场景）永不触发。getCommands 是切回后 renderer
    * 主动拉取的必经查询（broadcast 与订阅时序竞争的既有补偿点），在此按节流补触发。
    *
    * 执行形态：fire-and-forget——不 await（getCommands 延迟敏感，补投结果不阻塞查询）、
-   * 失败只 console.warn（补投失败无害：扩展侧三判据幂等，下次触发重查）。命令通道
-   * `{ maintenance: true }`（SendCommandOptions 维护豁免口的首个用户）——补投不体现
-   * 用户活跃，不得刷新 lastActivityAt 妨碍空闲回收。
-   *
-   * 节流：60s per-session（bgReconcileTriggeredAt Map）。时间戳在发起时记录（对触发
-   * 尝试节流，非对完成节流——fire-and-forget 无完成点）。无待补任务时扩展侧三判据
-   * 早退，零输出零 turn。
+   * 失败只 console.warn（补投失败无害：扩展侧三判据幂等，下次触发重查）。
+   * maintenance 维护豁免口（SendCommandOptions）已随 ADR-0122 防御机制清查退役；
+   * 60s 触发节流（BG_RECONCILE_TRIGGER_THROTTLE_MS 抑制窗）同批退役——无待补任务时
+   * 扩展侧三判据早退，零输出零 turn。
    */
   private maybeTriggerBgReconcile(sessionId: string, client: IPiEngine): void {
-    const now = Date.now()
-    const last = this.bgReconcileTriggeredAt.get(sessionId)
-    if (last !== undefined && now - last < BG_RECONCILE_TRIGGER_THROTTLE_MS) return
-    this.bgReconcileTriggeredAt.set(sessionId, now)
     // fire-and-forget：void 前缀表达「不消费结果」，.catch 防 unhandled rejection
-    void client.prompt(BG_RECONCILE_COMMAND, undefined, undefined, { maintenance: true }).catch((err) => {
+    void client.prompt(BG_RECONCILE_COMMAND).catch((err) => {
       console.warn(`[session-service] bg reconcile trigger failed (sessionId=${sessionId}):`, err)
     })
   }

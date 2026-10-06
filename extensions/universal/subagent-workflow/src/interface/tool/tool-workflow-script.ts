@@ -13,8 +13,9 @@
  * C5②（convergence D-6）：generate 五道闸校验管线 + tmp 写盘下沉 core
  * generateWorkflowScript（报错文案逐字平移，CA2 前提）；save/delete 改调 core
  * barrel（第三可选目录参数缺省即 pi 布局 .pi/workflows——pi 现两参调用形态零变化）。
- * 结构化 {ok}|{error} → pi 的 execute-throw 契约转换在本层（pi 只对 execute throw
- * 置 isError:true）；AbortSignal 的 aborted 检查在 execute 入口统一拦截（与
+ * 结构化 {ok}|{error} → pi 的 execute-throw 契约转换在本层（pi 1.0.0：execute 抛出经
+ * pi-agent-core agent-loop.js executePreparedToolCall 外层 catch 统一转 isError:true）；
+ * AbortSignal 的 aborted 检查在 execute 入口统一拦截（与
  * workflow / subagents 两 tool 同源，tool-shared assertNotAborted；C4 偏差 #4）。
  *
  * 层归属：Interface。依赖 Pi SDK + engine script-lint + infra workflow-files。
@@ -183,7 +184,8 @@ export function registerWorkflowScriptTool(
     ): Promise<WorkflowScriptExecuteResult> {
       // P1-2 abort 前置（三 tool 对称）：5 个 action 统一在 execute 入口拦截——
       // 原先只在 generate 内检查，lint/save/delete/list 四路径漏拦。throw（W4b）：
-      // pi 只对 execute throw 置 isError:true，返回值里的 isError 被 agent-loop 丢弃。
+      // 错误路径统一 throw（单一错误路径纪律；pi 1.0.0 agent-loop 对抛出统一转
+      // isError:true error result）。
       assertNotAborted(signal);
       let result: WorkflowScriptExecuteResult;
       switch (params.action) {
@@ -203,8 +205,9 @@ export function registerWorkflowScriptTool(
           result = await actionList(registry);
           break;
         default:
-          // 防御性（schema StringEnum 先拦）：throw（W4b）——pi 只对 execute throw 置
-          // isError:true，返回值里的 isError 被 agent-loop 丢弃（agent-loop.js:453-483）。
+          // 防御性（schema StringEnum 先拦）：throw（W4b）——错误路径统一 throw
+          // （pi 1.0.0 pi-agent-core agent-loop.js executePreparedToolCall :579-588：
+          // 抛出经外层 catch 转 isError:true error result）。
           throw new Error(`Unknown action: ${String(params.action)}`);
       }
       // GUI 协议：RPC 模式下附加 __gui__ 到 details（attach 单点在 tool-shared）
@@ -229,7 +232,8 @@ export function registerWorkflowScriptTool(
 // ── generate action ──────────────────────────────────────────
 
 export function actionGenerate(params: ScriptParams): WorkflowScriptExecuteResult {
-  // throw（W4b）：pi 只对 execute throw 置 isError:true（返回值 isError 被丢弃）。
+  // throw（W4b）：错误路径统一 throw（单一错误路径纪律；pi 1.0.0 agent-loop 对抛出
+  // 统一转 isError:true error result）。
   // abort 前置在 execute 入口统一拦截（三 tool 同源，tool-shared assertNotAborted），
   // 本函数不再自带 signal 检查。
   const name = params.name ?? "";
@@ -386,9 +390,9 @@ async function actionList(registry: WorkflowScriptRegistry): Promise<WorkflowScr
 // ── helper ───────────────────────────────────────────────────
 
 /**
- * 构造纯文本非错误结果（W4b：isError 参数已删除——pi 只对 execute throw 置
- * isError:true，返回值里的 isError 被 agent-loop 丢弃（agent-loop.js:453-483），
- * 错误一律 throw，编译器兜底防回潮）。
+ * 构造纯文本非错误结果（W4b：isError 参数已删除——异常错误路径一律 throw（单一
+ * 错误路径纪律；pi 1.0.0 pi-agent-core agent-loop.js :579-588 对抛出统一转
+ * isError:true error result），编译器兜底防回潮）。
  */
 function textResult(text: string): WorkflowScriptExecuteResult {
   return {

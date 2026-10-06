@@ -8,12 +8,13 @@ import type { PiMessage } from '../src/infra/pi/rpc-client.js'
  * Task 2 tests: EventAdapter extension event translation.
  *
  * Verifies that:
- * 1. extension_ui_request with confirm/select/input/notify → extension.ui_request ServerMessage
- * 2. extension_ui_request with setStatus/setWidget → null (discarded)
+ * 1. extension_ui_request dialog 族（confirm/select/input/editor）→ extension.dialog 帧
+ *    （pi1-disposition-chat-flow D6：载荷判别字段 dialogKind，taiji 词表）
+ * 2. extension_ui_request with setStatus/setWidget → 各自独立帧（不进 dialog 族）
  * 3. extension_error → extension.error ServerMessage
  * 4. tool_execution_update → message.tool_call_update ServerMessage
  * 5. Original mapping of confirm/select to a tool-call-pending message is REMOVED
- *    (asserted positively: confirm/select produce ONLY extension.ui_request, no other types)
+ *    (asserted positively: confirm/select produce ONLY extension.dialog, no other types)
  * 6. All ServerMessages include sessionId
  */
 
@@ -45,10 +46,10 @@ describe('EventAdapter: extension event translation', () => {
     sent = result.sent
   })
 
-  // ── extension_ui_request → extension.ui_request ──────────────
+  // ── extension_ui_request → extension.dialog ──────────────
 
-  describe('extension_ui_request (interactive methods)', () => {
-    it('translates confirm method to extension.ui_request', async () => {
+  describe('extension_ui_request (dialog family)', () => {
+    it('translates confirm method to extension.dialog (dialogKind=confirm)', async () => {
       adapter.attach({
         onEvent: (listener) => {
           listener(piEvent({
@@ -64,17 +65,17 @@ describe('EventAdapter: extension event translation', () => {
       await flushAsync()
 
       expect(sent).toHaveLength(1)
-      expect(sent[0].type).toBe('extension.ui_request')
+      expect(sent[0].type).toBe('extension.dialog')
       expect(sent[0].payload).toMatchObject({
         sessionId: 'test-session-1',
         requestId: 'req-1',
-        method: 'confirm',
+        dialogKind: 'confirm',
         title: 'Allow file access?',
         message: 'Extension wants to read /tmp/test.txt',
       })
     })
 
-    it('translates select method to extension.ui_request', async () => {
+    it('translates select method to extension.dialog (dialogKind=select)', async () => {
       adapter.attach({
         onEvent: (listener) => {
           listener(piEvent({
@@ -91,14 +92,14 @@ describe('EventAdapter: extension event translation', () => {
       await flushAsync()
 
       expect(sent).toHaveLength(1)
-      expect(sent[0].type).toBe('extension.ui_request')
+      expect(sent[0].type).toBe('extension.dialog')
       const payload = sent[0].payload as Record<string, unknown>
-      expect(payload.method).toBe('select')
+      expect(payload.dialogKind).toBe('select')
       // options 透传 string[]（.map(String)，不再 .map(o=>o.label) 拍扁）
       expect(payload.options).toEqual(['A', 'B'])
     })
 
-    it('translates input method to extension.ui_request', async () => {
+    it('translates input method to extension.dialog (dialogKind=input)', async () => {
       adapter.attach({
         onEvent: (listener) => {
           listener(piEvent({
@@ -114,17 +115,17 @@ describe('EventAdapter: extension event translation', () => {
       await flushAsync()
 
       expect(sent).toHaveLength(1)
-      expect(sent[0].type).toBe('extension.ui_request')
+      expect(sent[0].type).toBe('extension.dialog')
       expect(sent[0].payload).toMatchObject({
         sessionId: 'test-session-1',
         requestId: 'req-3',
-        method: 'input',
+        dialogKind: 'input',
         title: 'Enter a value',
         default: 'placeholder text',
       })
     })
 
-    it('translates notify method to extension:notify (fire-and-forget, no ui_request)', async () => {
+    it('translates notify method to extension:notify (fire-and-forget, separate family)', async () => {
       adapter.attach({
         onEvent: (listener) => {
           listener(piEvent({
@@ -149,7 +150,7 @@ describe('EventAdapter: extension event translation', () => {
       })
     })
 
-    it('produces ONLY extension.ui_request for confirm (no tool-call-pending mapping)', async () => {
+    it('produces ONLY extension.dialog for confirm (no tool-call-pending mapping)', async () => {
       adapter.attach({
         onEvent: (listener) => {
           listener(piEvent({
@@ -163,11 +164,11 @@ describe('EventAdapter: extension event translation', () => {
       })
       await flushAsync()
 
-      // 正向断言：confirm 只产出 extension.ui_request，不调染 tool-call 状态（旧 pending 映射已移除）
-      expect(sent.map((m) => m.type)).toEqual(['extension.ui_request'])
+      // 正向断言：confirm 只产出 extension.dialog，不调染 tool-call 状态（旧 pending 映射已移除）
+      expect(sent.map((m) => m.type)).toEqual(['extension.dialog'])
     })
 
-    it('produces ONLY extension.ui_request for select (no tool-call-pending mapping)', async () => {
+    it('produces ONLY extension.dialog for select (no tool-call-pending mapping)', async () => {
       adapter.attach({
         onEvent: (listener) => {
           listener(piEvent({
@@ -181,13 +182,13 @@ describe('EventAdapter: extension event translation', () => {
       })
       await flushAsync()
 
-      expect(sent.map((m) => m.type)).toEqual(['extension.ui_request'])
+      expect(sent.map((m) => m.type)).toEqual(['extension.dialog'])
     })
   })
 
-  // ── extension_ui_request (bridge methods) ─────────────────────
+  // ── extension_ui_request (fire-and-forget methods) ─────────────────────
 
-  describe('extension_ui_request (bridge methods)', () => {
+  describe('extension_ui_request (fire-and-forget methods)', () => {
     it('bridges setStatus to extension.status WS event', async () => {
       adapter.attach({
         onEvent: (listener) => {

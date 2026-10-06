@@ -30,7 +30,7 @@ interface SystemPromptConfig {
 /** 既有用例隔离关注点用的「capability 显式关闭」片段（保持原精确断言） */
 const CAP_OFF: { capability: { enabled: boolean } } = { capability: { enabled: false } }
 
-/** capability 段 header 锚（与扩展源码 TAIJI_CAPABILITY_SECTION 的 header 一致） */
+/** capability 段 header 锚（与扩展源码 renderCapabilitySection 渲染段的 header 一致） */
 const CAP_HEADER = '# TaiJi capabilities'
 
 const PLUGIN_PATH = new URL('../../../extensions/taiji/system-prompt/index.ts', import.meta.url).pathname
@@ -156,6 +156,24 @@ describe('@zhushanwen/pi-system-prompt', () => {
     expect(handler({ systemPrompt: 'BASE' })).toEqual({
       systemPrompt: expect.stringContaining(CAP_HEADER),
     })
+  })
+
+  it('capability 段含 M0 正/负面清单文案（设计 D1 ①②）', async () => {
+    const factory = await loadPlugin()
+    const { handler } = installPlugin(factory)
+
+    const result = handler({ systemPrompt: 'BASE' })
+    const prompt = result!.systemPrompt as string
+    const capability = prompt.slice(prompt.indexOf(CAP_HEADER))
+    // ① 正面清单（标签族 + 呈现属性）与 ② 负面清单均在真实注入文本里
+    expect(capability).toContain('You may use these tags: ')
+    expect(capability).toContain('Presentational attributes allowed: ')
+    expect(capability).toContain('Do not use these tags (they are stripped before rendering): ')
+    expect(capability).toContain('Do not use these attributes (they are stripped and have no effect): ')
+    expect(capability).toContain('table')
+    expect(capability).toContain('colspan')
+    expect(capability).toContain('svg')
+    expect(capability).toContain('data-*')
   })
 
   it('append.prompt 纯空白 → 返回 undefined', async () => {

@@ -1,0 +1,66 @@
+# 终端多实例（一个会话开多个终端）延期登记
+
+> **状态**：**已实施**（2026-10-03/04：经 tech-design-wf 三阶段 + dev-flow-wf 七段实施落地——设计文档 `.tmp/tech-design/terminal-multi-instance.md` v1.9，实施计划双格式同目录；实例编号 `term:<sid>:<n>` 贯通四层，runtime 为实例注册表与序号分配事实源，底部抽屉加实例切换条）。本文件自初始登记起至实施完成的过程记录保留于下，作为设计输入溯源。
+>
+> **未随本期落地的同族项**（依赖本设计建立的实例编号先例，后续另立项）：浏览器多页面、浮层实例 tab 条（本文档「同族延期项」节）。
+>
+> **本文件定位**：登记"终端多实例"这一已识别需求、其真实成本与解锁条件。裁决关闭或立项实施时更新状态行。
+
+## 需求
+
+三容器重构后，终端住底抽屉（bottom drawer），但仍是**每会话一个 PTY**。用户明确表达过"terminal 可以开多个"的诉求（2026-10-02 容器体系讨论），需要多个终端实例 tab（如一个跑测试、一个跑 dev server、一个临时命令）。
+
+## 为什么本期不做（成本实录）
+
+终端身份 = sessionId 一元键，贯穿四层，多实例 = 引入"终端实例 id"维度的协议级改造：
+
+1. **renderer**：`useTerminal.ts` 的分区键是 sessionId（模块级 `Map<sessionId, TerminalPartition>`，:129）；buffer 分区、flush 监听器同键。
+2. **runtime**：`terminal-service.ts` 的 `ptyMap = Map<sid, IPty>`（:87），spawn 幂等逻辑按 sid 去重（:98-102）。
+3. **WS 协议**：`terminal.data / exit / alive` 消息按 sid 路由，帧格式无实例字段。
+4. **RPC**：`terminalApi.spawn({sessionId...})` 入参无实例 id。
+
+四层要同步加实例维度，且要处理实例级生命周期（创建/ kill 单个实例、会话销毁时级联、buffer 按实例持久）。
+
+## 同族延期项（同一改造批次考虑）
+
+- **浏览器多页面**：主进程 WebContentsView 池同样按 sessionId 单实例（browser-view-manager.ts:33，LRU 上限 3），多网页 tab 要加同一性质的实例维度。
+- **浮层实例 tab 条**（混排类型，2026-10-02 已裁决形态）：依赖上面两项的实例 id 落地后才有实例可切。
+
+## 解锁条件 / 立项触发
+
+- 三容器重构 W1（底抽屉 + 终端搬家）交付并稳定后；
+- 设计时必须同时回答：实例 id 的命名空间（`term:<sid>:<n>`？）、WS 帧加字段的兼容策略（旧 renderer × 新 runtime）、底抽屉实例 tab 条与容器的关系（届时底抽屉从"终端面板"升格为真容器，参考设计文档 `.tmp/tech-design/display-containers.md` §7.1 的 YAGNI 注记）。
+
+## 关联
+
+- 设计文档（过程产物，不入 git）：`.tmp/tech-design/display-containers.md`（三容器重构，W4 节）
+- 现状锚点：`packages/renderer/src/composables/features/terminal/useTerminal.ts`、`packages/runtime/src/` terminal-service、`apps/electron/main/browser/browser-view-manager.ts`
+
+## 残留风险与待裁决（交付时登记，2026-10-04）
+
+> 来源：impl-plan §6 残留风险表 + D3 走查留痕（`.tmp/dev-flow/terminal-multi-instance.*`，过程产物不入 git）。本登记为交付后的仓内可查载体；各条重审触发出现时按条响应。
+
+### 残留风险
+
+| # | 残留风险 | 触发条件 | 影响 | 重审触发 |
+|---|---------|---------|------|---------|
+| R2 | 异常路径孤儿进程（P5 已登记基线） | 应用被 SIGKILL / runtime 崩溃，且终端内起过 `nohup`/disown 类子进程 | 系统残留孤儿进程（资源泄漏，非编号正确性问题） | 残留导致端口/fd 冲突，或收到用户报告残留进程干扰 |
+| R3 | 多实例资源占用（无硬上限） | 真机 ≥10 实例并行的内存/fd 占用对单实例基线超线性增长；或上线后性能类反馈 | 极端使用下资源压力 | 上述触发任一出现即重审软上限 |
+| R4 | ack 残窗可达性不可从仓内证实 | 守卫与 list 对账双通道的回收是否被真实触发 | 若残窗真实存在，幽灵条目由双通道自动回收；若不达，守卫为冗余防御（幂等无害） | 探针发现新窗口形态或回收失败 |
+| R5 | 序号计数器依赖 runtime 内存（重启归零） | runtime 重启后 renderer 未同步重置（世代判据失效） | 跨世代撞号串输出 | 出现跨世代串输出症状 |
+| R6 | 面板容器域②③④（浏览器多页面 / 浮层实例条 / 分屏）未覆盖 | 用户后续要求 | 需求缺口 | 用户提出该族需求 |
+| R7 | ack 残窗可达性**未做真机探针**（幽灵条目是否真被回收） | 真机造「spawn 后立即 exit」并观察切换条 | 双通道回收已由 u2 合成单测覆盖；未触发则守卫为冗余防御 | 真机观察到「活着的死实例」且未被回收 |
+| R8 | `terminal.list` 对账失败分支未构造验收 | 注入拉取失败或真机弱网 | 失败语义若偏差会在重启后误报或误清 | 出现「重启后误报/误清条目」症状 |
+
+### 待裁决（产品口径）
+
+- **T10「重置后空态」产品口径**：实装为世代变更重连后重挂载腿自动新建本世代默认实例（空态窗口 ~50-150ms 不可稳定观测）。若产品须保留「重置后空态、由用户点「+」新建」，需产品侧抑制挂载腿自动新建（改动落 TerminalView/useTerminal，非验收资产可解）。
+- **I-A1「+」是否自动激活新实例（已裁决 2026-10-04）**：产品裁决 = **点「+」自动切换 active 并聚焦新实例输入区**（点「+」是显式用户意图，与「首挂载不夺焦」不冲突）；`terminal.list` 对账路径仍不抢 active。已落实现：`TerminalView.onCreate` 在 ack 建档拿到编号后显式 `selectInstance` + `focus`（`createWithToast` 返回编号），`registerInstance` 仍仅在 active 为空时落位；设计 §3.1/§3.3/§4 T1 已同步回写。断言：单测 TV-11/TV-15 + RC-5/REG-3/REG-4（对账不抢 active、active 回空后重新落位防回归）+ e2e T1/T8/T9（新建后直接可写、焦点在新实例）。
+- **I-A5 O1-O2 redraw 观察**：一次「删除已显示终端的会话→新建会话→重开」观察到旧会话命令文本叠在新会话提示符行；受控复现（不删除前会话）未复现，超 A5 单实例范围，登记待裁决。
+- **世代判据是否需显式透出 token 拉取失败（F1-56 分支②）**：F1-56 取分支①（文档对齐实装——世代判据不可表达拉取失败）后，备选分支②「`use-connection` 显式透出 token 拉取失败并保守重置终端域」留待裁决。现文档口径 = 拉取失败不可表达（`getCurrentToken()` 同步只读、无失败态；token 拉取失败时 use-connection 回落 `connectWs(url, undefined)`，ws-client 保留旧 token，连接沿读旧值判「未变、不重置」，该场景由 auth 失败/重连链覆盖），与设计 §0.5 P6 段一致。若采纳分支②：实施面 = `use-connection` 拉取失败态透出 + `getCurrentToken` 语义扩展 + 重置触发面复核（防把「拉取失败」误当世代变更清空有效历史）；触发条件 = 真机出现「世代变更未被 token 判据捕获」症状。
+
+### 探针欠账
+
+- **P5 真机探针未执行**（终端内起 `nohup sleep 600` → 正常退出应用 → 查系统进程表应无残留）：正常退出 PTY 清理目前仅由 u4 单测与打点断言覆盖，非真机证据（impl-plan §6 R9）。
+- **R7 ack 残窗真机探针未执行**（见上表 R7）。
+- **T10 世代重置提示真机可见面未走查**（世代变更重置时「输入可能丢失」toast 的真机渲染面）：GEN-3 单测只覆盖「确有滞留命令时发提示」的触发条件逻辑，不覆盖真机 toast 渲染面；D3 四节点无世代变更构造故未走查（`docs/testing/e2e-map.json` E2E-TERMINAL-01 note 指向本条）。走查方法 = 真机制造世代变更（SIGKILL runtime 进程 → supervisor 自动重启换 token；或先 stop 再 `restartRuntime`）+ 预置滞留命令 → 观察「输入可能丢失」toast 真机渲染；**不可用 devtools 直调 `runtime-restart` IPC**——`runtime-supervisor.ts:303-309` 的 `restartRuntime()` 在 runtime 存活时是幂等分支（仅广播 `runtime-port` 后 return，不 spawn 新进程、token 不变），造的是设计 §4 T12 的「非世代广播沿」而非 T10 的世代变更。该面不在本轨断言内（spec 的 T10 用例无 toast 断言），须补真机走查或给 T10 增断言后方可验证；本轨 T8/T9/T13 三例尚未执行（T10 已由 D3 verify A10 三次绿灯）。

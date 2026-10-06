@@ -124,10 +124,12 @@
           <SystemPage v-else-if="activeMenu === 'system'" :key="activeMenu" :system="system" @update="onSystemUpdate" />
           <SystemPromptPage v-else-if="activeMenu === 'system-prompt'" :key="activeMenu" />
           <TerminalPage v-else-if="activeMenu === 'terminal'" :key="activeMenu" />
+          <McpSection v-else-if="activeMenu === 'mcp'" :key="activeMenu" />
           <PiPresetsPage v-else-if="activeMenu === 'preset'" :key="activeMenu" />
           <TtsPage v-else-if="activeMenu === 'tts'" :key="activeMenu" />
           <WorktreePage v-else-if="activeMenu === 'worktree'" :key="activeMenu" />
           <UpdatePage v-else-if="activeMenu === 'update'" :key="activeMenu" />
+          <RemoteAccessPage v-else-if="activeMenu === 'remote-access'" :key="activeMenu" />
           <AppearancePage v-else-if="activeMenu === 'appearance'" :key="activeMenu" :system="system" @update="onSystemUpdate" />
           <UsagePage v-else-if="activeMenu === 'usage'" :key="activeMenu" />
         </div>
@@ -140,8 +142,10 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, Volume2, X, Download, Palette, BarChart3, ArrowLeft, ArrowRight, PanelLeftClose } from '@lucide/vue'
+import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, Server, Volume2, X, Download, Palette, BarChart3, ArrowLeft, ArrowRight, PanelLeftClose, Wifi } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
+import { cycleTabFocus, getFocusableElements } from '@/composables/logic/focus-trap'
 import { getSettingsStore, useSettings, type SystemSettings } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
 import { createMirrorSave } from '@/composables/features/settings/setting-field'
@@ -154,10 +158,12 @@ import PluginContributionsPage from './extension/PluginContributionsPage.vue'
 import SystemPage from './system/SystemPage.vue'
 import SystemPromptPage from './system/SystemPromptPage.vue'
 import TerminalPage from './terminal/TerminalPage.vue'
+import McpSection from './mcp/McpSection.vue'
 import WorktreePage from './worktree/WorktreePage.vue'
 import PiPresetsPage from './preset/PiPresetsPage.vue'
 import TtsPage from './tts/TtsPage.vue'
 import UpdatePage from './update/UpdatePage.vue'
+import RemoteAccessPage from './remote-access/RemoteAccessPage.vue'
 import UsagePage from './usage/UsagePage.vue'
 import AppearancePage from './appearance/AppearancePage.vue'
 
@@ -169,10 +175,12 @@ const menus = [
   { id: 'extension', labelKey: 'settings.menu.extension', icon: Blocks },
   { id: 'system-prompt', labelKey: 'settings.menu.systemPrompt', icon: ScrollText },
   { id: 'terminal', labelKey: 'settings.menu.terminal', icon: TerminalSquare },
+  { id: 'mcp', labelKey: 'settings.menu.mcp', icon: Server },
   { id: 'preset', labelKey: 'settings.menu.preset', icon: ClipboardList },
   { id: 'tts', labelKey: 'settings.menu.tts', icon: Volume2 },
   { id: 'worktree', labelKey: 'settings.menu.worktree', icon: GitBranch },
   { id: 'update', labelKey: 'settings.menu.update', icon: Download },
+  { id: 'remote-access', labelKey: 'settings.menu.remoteAccess', icon: Wifi },
   { id: 'system', labelKey: 'settings.menu.system', icon: SlidersHorizontal },
   { id: 'usage', labelKey: 'settings.menu.usage', icon: BarChart3 },
 ] as const
@@ -183,6 +191,15 @@ const { t } = useI18n()
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ 'update:open': [value: boolean] }>()
+
+// 模态表面聚合注册（§6.7）：开合态绑 props.open 状态本体；旗标组由登记表按 id 读取
+// （模态族双键均让位 + shieldsView unconditional）。onBeforeUnmount 卸载对称注销。
+const disposeSurfaceRegistration = registerModalSurface({
+  surface: 'settings-modal',
+  key: 'settings-modal',
+  isOpen: () => props.open,
+})
+onBeforeUnmount(disposeSurfaceRegistration)
 
 const activeMenu = ref<MenuId>('provider')
 /** extension 域子视图（M16）：main=扩展管理 ExtensionPage / contributions=插件贡献 PluginContributionsPage。 */
@@ -264,27 +281,10 @@ function onKeydown(e: KeyboardEvent): void {
     return
   }
   if (e.key === 'Tab') {
-    handleTabCycle(e)
+    cycleTabFocus(e, getFocusables)
     return
   }
   handleNavItemNavigation(e)
-}
-
-/** Tab 焦点陷阱：焦点在末个且非 shift → 回首个；在首个且 shift → 跳末个；
- *  其余 Tab（中间元素间移动）不拦截，交给浏览器原生顺序。 */
-function handleTabCycle(e: KeyboardEvent): void {
-  const list = getFocusables()
-  if (list.length === 0) return
-  const first = list[0]
-  const last = list[list.length - 1]
-  const active = document.activeElement
-  if (active === last && !e.shiftKey) {
-    e.preventDefault()
-    first.focus()
-  } else if (active === first && e.shiftKey) {
-    e.preventDefault()
-    last.focus()
-  }
 }
 
 /** nav 内 ↑↓/Home/End 移动切换：焦点须在 .nav-item 上，否则放行；
@@ -306,15 +306,11 @@ function handleNavItemNavigation(e: KeyboardEvent): void {
   select(menus[next].id)
 }
 
+/** overlay 内可聚焦元素（Tab 循环三路语义见共享单元 focus-trap）。
+ *  整个 overlay（navRoot 的最近 dialog 容器）作为焦点陷阱范围 */
 function getFocusables(): HTMLElement[] {
-  // 整个 overlay（navRoot 的最近 dialog 容器）作为焦点陷阱范围
-  const root = navRootEl.value?.closest('.fso') as HTMLElement | null
-  if (!root) return []
-  return Array.from(
-    root.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    ),
-  )
+  const root = navRootEl.value?.closest('.fso')
+  return root ? getFocusableElements(root) : []
 }
 
 /** SystemPage 偏好更新 → 走 store（写 localStorage + 同步 DOM + i18n）+ toast 反馈。 */

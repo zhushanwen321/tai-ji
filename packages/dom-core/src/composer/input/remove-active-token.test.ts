@@ -172,6 +172,22 @@ describe('removeActiveTokenText（D2b 文本定位删除）', () => {
     expect(onChanged).not.toHaveBeenCalled()
   })
 
+  it('行首/换行后行首形态（chip 感知 skill 域）：node 起始 `/rev` 唯一命中即删', () => {
+    // 有 chip 时 detect 侧（skillTriggerPatternFor）把行首纳入 skill 域，清理侧同宽才能覆盖；
+    // `^` 为 per-node 语义（TreeWalker 逐 text node）——token 自成 node 起始即命中
+    el = setupElInBody('<span class="slash-chip"><span class="chip-label">a</span></span>\u200B<br>/rev')
+    expect(
+      removeActiveTokenText({
+        el,
+        domainPatternSource: ACTIVE_TOKEN_DOMAIN_PATTERN_SOURCES.skill,
+        query: 'rev',
+        onChanged,
+      }),
+    ).toBe(true)
+    expect(textNodesOutsideChips(el)).toEqual(['\u200B', ''])
+    expect(onChanged).toHaveBeenCalledTimes(1)
+  })
+
   it('断言 5（空 query 边界）：纯触发符 `/` 正则退化为纯域约束形，唯一命中即删', () => {
     // 只输触发符（query=''）：命中行首 `/`（后跟串尾）→ 删除触发符本身，注入 chip 替代它
     el = setupElInBody('/')

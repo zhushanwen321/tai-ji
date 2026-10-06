@@ -18,6 +18,7 @@
     <SystemAutoRenameSection />
     <SystemSmartContextSection />
     <SystemLlmRetrySection />
+    <SystemCodemodeSection />
     <SystemDiagnosticsSection />
   </div>
 </template>
@@ -30,6 +31,7 @@ import SystemShortcutSection from './SystemShortcutSection.vue'
 import SystemAutoRenameSection from './SystemAutoRenameSection.vue'
 import SystemSmartContextSection from './SystemSmartContextSection.vue'
 import SystemLlmRetrySection from './SystemLlmRetrySection.vue'
+import SystemCodemodeSection from './SystemCodemodeSection.vue'
 import SystemDiagnosticsSection from './SystemDiagnosticsSection.vue'
 import type { SystemSettings } from '@taiji/core'
 

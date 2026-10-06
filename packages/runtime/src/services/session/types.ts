@@ -100,20 +100,6 @@ export interface IManagedSessionView {
    */
   bashRunToken: string | undefined
   /**
-   * pi 侧孤儿 bash 标记（timeout-slow-flow-wallclock D2 + P6 断言④，纯运行时态不进 toSummary）。
-   *
-   * bash RPC 超时（RpcTimeoutError）后 runtime 已停止等待（isBashRunning 由 finally 复位），
-   * 但 D2 语义是「停止等待 ≠ 处决」——pi 侧命令可能仍在跑且照常落盘。置此标记让 abortBash
-   * 守卫放行（诚实文案第①步「abortBash 可终止」的 runtime 承诺），否则守卫「runtime 不等待
-   * = 无命令在跑」的旧语义会短路早退，abort_bash 永不发出、UI 谎报已取消。
-   *
-   * 写方：sendBash 超时 catch 置 true；abortBash 的 abort_bash 发出且 pi 确认后清 false。
-   * bash 自然结束无法自动清（迟到 response 被 timedOutIds/NULL_EVENTS 丢弃，runtime 无从
-   * 得知）——标记残留只导致下次 abortBash 再发一次幂等的 abort_bash（pi 对无 bash 在跑时
-   * 无操作正常返回），无害。session 条目删除时随对象一同丢弃（与 pendingBashResults 同区）。
-   */
-  orphanBashRunning?: boolean
-  /**
    * bash 结果待落列（W1 fix-chat-flow-order，D2 双分支镜像 pi）。
    *
    * session 处于 streaming（活跃 run）时，sendBash 收到的 pi bash RPC 结果压入此列
@@ -312,7 +298,7 @@ export interface PendingBashResultData {
  *    - hook 触发 / 阻断 / 改写（tool-call-start/end 携带原始 input/output 供 hook 改写后转发）
  *    - file_changes baseline diff（tool-changed / turn-bound）
  *    - context.update / thinkingLevel 回写 session 缓存
- *    - status / bridge / extension-ui 路由到 server
+ *    - status / extension-ui 路由到 server
  *
  * 一个 pi 事件可产生多个 translated event（数组返回）。
  * EventAdapter 不 import services 域类型 —— hook 的结构化契约（HookTransform）编码在此，
@@ -413,15 +399,17 @@ export type PiTranslatedEvent =
    * LLM 请求起算锚点（composer-genstats-ttft，pi turn_start 到达翻译——已移出 NULL_EVENTS）。
    * interpreter 挂 LlmWindowSampler.onRequestStart()：记 requestStartedAt = Date.now()，同步清
    * ttftMs / firstOutputAt（重锚清除不变量：残留生命周期严格限本请求，与既有窗口锚一致）。
-   * 窗口构成（设计 §3.2，pi 0.84.4 实装时序）：turn_start 在 prepareNextTurn 之后 emit → 原生
+   * 窗口构成（设计 §3.2，pi 实装时序——语义登记 PS-46，verifiedWith 以 pi-semantics.json 为准）：
+   * turn_start 在 prepareNextTurn 之后 emit → 原生
    * auto-compaction 不含在窗口；工具执行亦不含（工具后下一轮 turn_start 重新起算）；turn_start
    * 后的 steering 注入段计入（通常毫秒级，接受）。
    */
   | { kind: 'llm-request-start'; sessionId: string }
   /**
    * LLM 请求窗口首个输出信号（composer-genstats-ttft，pi text_start / thinking_start /
-   * toolcall_start 三子类型翻译——单点收无 delta 兜底：pi-ai 0.84.4 全族流式实现凡产 delta
-   * 必先产对应 *_start，兜底不存在服务对象）。interpreter 挂 LlmWindowSampler.onFirstOutput()：
+   * toolcall_start 三子类型翻译——单点收无 delta 兜底（语义登记 PS-47，verifiedWith 以
+   * pi-semantics.json 为准：pi-ai 全族流式实现凡产 delta 必先产对应 *_start，
+   * 兜底不存在服务对象）。interpreter 挂 LlmWindowSampler.onFirstOutput()：
    * 幂等 first-wins（已有 firstOutputAt 直接 return），ttftMs = firstOutputAt − requestStartedAt；
    * 信号先于锚点到达（不可能序，防御）无锚直接 return 不产值。
    */
@@ -430,8 +418,6 @@ export type PiTranslatedEvent =
   | { kind: 'status-set'; sessionId: string; key: string; text: string; textRaw?: string }
   /** extension setStatus 对应的 WS 帧（interpreter 转发）。 */
   | { kind: 'status-broadcast'; message: ServerMessage }
-  /** bridge:* 前缀请求 —— interpreter 路由到 server.handleBridgeRequest。 */
-  | { kind: 'bridge-ui'; requestId: string; sessionId: string; method: string; data: Record<string, unknown> }
   /** 交互式 extension_ui_request（confirm/select/input/notify/editor）—— interpreter 注册超时。 */
   | { kind: 'extension-ui'; requestId: string; sessionId: string; method: string; payload: Record<string, unknown> }
   /** session-manager 请求（select + SESSION_MANAGER_MARKER）—— interpreter fire-and-forget 路由到 SessionManagerHandler。 */

@@ -29,7 +29,7 @@ describe('PendingTracker · F5 命令超时善后', () => {
     const timeoutError = new Error('Command timeout (30000ms): test-cmd')
 
     // 注册一个 pending 请求
-    const promise = tracker.register('cmd-1', timeoutMs, timeoutError)
+    const promise = tracker.register('cmd-1', timeoutError, timeoutMs)
 
     // 验证已注册
     expect(tracker.has('cmd-1')).toBe(true)
@@ -50,7 +50,7 @@ describe('PendingTracker · F5 命令超时善后', () => {
     const timeoutMs = 30000
     const timeoutError = new Error('timeout')
 
-    const promise = tracker.register('cmd-2', timeoutMs, timeoutError)
+    const promise = tracker.register('cmd-2', timeoutError, timeoutMs)
 
     // 在超时前收到响应
     vi.advanceTimersByTime(1000) // 1s 后
@@ -69,7 +69,7 @@ describe('PendingTracker · F5 命令超时善后', () => {
     const timeoutMs = 30000
     const timeoutError = new Error('timeout')
 
-    const promise = tracker.register('cmd-3', timeoutMs, timeoutError).catch(() => {})
+    const promise = tracker.register('cmd-3', timeoutError, timeoutMs).catch(() => {})
 
     // 推进时间到超时
     vi.advanceTimersByTime(timeoutMs)
@@ -86,8 +86,8 @@ describe('PendingTracker · F5 命令超时善后', () => {
     const timeoutMs = 30000
     const timeoutError = new Error('timeout')
 
-    const promise1 = tracker.register('cmd-a', timeoutMs, timeoutError).catch(() => {})
-    const promise2 = tracker.register('cmd-b', timeoutMs, timeoutError).catch(() => {})
+    const promise1 = tracker.register('cmd-a', timeoutError, timeoutMs).catch(() => {})
+    const promise2 = tracker.register('cmd-b', timeoutError, timeoutMs).catch(() => {})
 
     expect(tracker.size).toBe(2)
 
@@ -105,9 +105,9 @@ describe('PendingTracker · F5 命令超时善后', () => {
     const timeoutMs = 30000
     const timeoutError = new Error('timeout')
 
-    const promise1 = tracker.register('cmd-x', timeoutMs, timeoutError).catch(() => {})
-    const promise2 = tracker.register('cmd-y', timeoutMs, timeoutError).catch(() => {})
-    const promise3 = tracker.register('cmd-z', timeoutMs, timeoutError).catch(() => {})
+    const promise1 = tracker.register('cmd-x', timeoutError, timeoutMs).catch(() => {})
+    const promise2 = tracker.register('cmd-y', timeoutError, timeoutMs).catch(() => {})
+    const promise3 = tracker.register('cmd-z', timeoutError, timeoutMs).catch(() => {})
 
     expect(tracker.size).toBe(3)
 
@@ -126,8 +126,8 @@ describe('PendingTracker · F5 命令超时善后', () => {
     const timeoutMs = 30000
     const timeoutError = new Error('timeout')
 
-    const promise1 = tracker.register('cmd-1', timeoutMs, timeoutError).catch(() => {})
-    const promise2 = tracker.register('cmd-2', timeoutMs, timeoutError)
+    const promise1 = tracker.register('cmd-1', timeoutError, timeoutMs).catch(() => {})
+    const promise2 = tracker.register('cmd-2', timeoutError, timeoutMs)
 
     // 只 reject cmd-1
     const rejected = tracker.reject('cmd-1', new Error('RPC error'))
@@ -156,7 +156,7 @@ describe('PendingTracker · F5 命令超时善后', () => {
 
   it('resolve() clears the timeout (no late rejection)', async () => {
     const t = new PendingTracker<number, string>()
-    const p = t.register(1, 1000, new Error('timeout'))
+    const p = t.register(1, new Error('timeout'), 1000)
     t.resolve(1, 'ok')
     vi.advanceTimersByTime(5000) // well past timeout
     await expect(p).resolves.toBe('ok')
@@ -164,7 +164,7 @@ describe('PendingTracker · F5 命令超时善后', () => {
 
   it('rejectAll() clears timeouts (no double-reject after)', async () => {
     const t = new PendingTracker<number, string>()
-    const p = t.register(1, 1000, new Error('timeout'))
+    const p = t.register(1, new Error('timeout'), 1000)
     t.rejectAll(new Error('disposed'))
     vi.advanceTimersByTime(5000)
     // promise already settled as 'disposed', not the timeout error
@@ -175,9 +175,9 @@ describe('PendingTracker · F5 命令超时善后', () => {
   it('handles concurrent out-of-order resolution by key', async () => {
     const t = new PendingTracker<number, string>()
     const promises = [
-      t.register(1, 1000, new Error('t')),
-      t.register(2, 1000, new Error('t')),
-      t.register(3, 1000, new Error('t')),
+      t.register(1, new Error('t'), 1000),
+      t.register(2, new Error('t'), 1000),
+      t.register(3, new Error('t'), 1000),
     ]
     t.resolve(3, 'C')
     t.resolve(1, 'A')
@@ -188,8 +188,8 @@ describe('PendingTracker · F5 命令超时善后', () => {
   it('number and string keys both work as generic K', async () => {
     const numT = new PendingTracker<number, string>()
     const strT = new PendingTracker<string, string>()
-    const pn = numT.register(1, 100, new Error('t'))
-    const ps = strT.register('id-1', 100, new Error('t'))
+    const pn = numT.register(1, new Error('t'), 100)
+    const ps = strT.register('id-1', new Error('t'), 100)
     numT.resolve(1, 'n')
     strT.resolve('id-1', 's')
     await expect(pn).resolves.toBe('n')

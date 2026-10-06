@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, rm, readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
+import { mkdtemp, rm, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -15,6 +15,7 @@ import {
   setSettingsLockTimingForTest,
   getActiveSettingsPath,
   invalidateSettingsCache,
+  SettingsCorruptedError,
   type PiSettings,
 } from '../src/infra/pi/pi-settings-store.js'
 
@@ -48,9 +49,13 @@ describe('pi-settings-store', () => {
       expect(readSettings()).toEqual({ defaultModel: 'gpt-4', packages: ['x'] })
     })
 
-    it('returns empty on corrupt JSON', () => {
+    it('throws SettingsCorruptedError on corrupt JSON (fail-fast, no quarantine, file intact)', () => {
+      // 读侧统一阻断（用户终裁）：损坏回落空对象已废弃——损坏即抛，文件原样、零隔离副本
       writeFileSync(settingsPath, '{ broken', 'utf-8')
-      expect(readSettings()).toEqual({})
+      expect(() => readSettings()).toThrow(SettingsCorruptedError)
+      expect(existsSync(settingsPath)).toBe(true)
+      expect(readFileSync(settingsPath, 'utf-8')).toBe('{ broken')
+      expect(readdirSync(tmpDir).filter(name => name.includes('.corrupt-'))).toEqual([])
     })
 
     it('returns empty on non-object JSON (e.g. array)', () => {

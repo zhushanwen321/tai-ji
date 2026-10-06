@@ -296,11 +296,11 @@ describe('DF-1: Extension UI 请求-响应 (EventAdapter → Server → RpcClien
 
     // 2. EventAdapter 翻译 + 触发 onExtensionUIRequest
     expect(fixture.adapterSent).toHaveLength(1)
-    expect(fixture.adapterSent[0].type).toBe('extension.ui_request')
+    expect(fixture.adapterSent[0].type).toBe('extension.dialog')
     expect(fixture.adapterSent[0].payload).toMatchObject({
       sessionId: 'test-session-1',
       requestId: 'req-confirm-1',
-      method: 'confirm',
+      dialogKind: 'confirm',
       title: 'Allow file access?',
       message: 'Extension wants to read /tmp/test.txt',
     })
@@ -338,7 +338,7 @@ describe('DF-1: Extension UI 请求-响应 (EventAdapter → Server → RpcClien
     // 2. 验证 adapter 翻译 (options 经 .map(String) 透传 string[])
     expect(fixture.adapterSent).toHaveLength(1)
     const payload = fixture.adapterSent[0].payload as Record<string, unknown>
-    expect(payload.method).toBe('select')
+    expect(payload.dialogKind).toBe('select')
     expect(payload.options).toEqual(['Option A', 'Option B'])
 
     // 3. 前端发送 extension.ui_response (result='option1')

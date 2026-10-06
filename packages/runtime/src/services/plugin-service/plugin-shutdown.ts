@@ -26,11 +26,6 @@ export interface PluginShutdownDeps {
 }
 
 export async function shutdownPluginCollaborators(deps: PluginShutdownDeps): Promise<void> {
-  // D6/W3 rebuild 受约束：关停第一步立即关闭 rebuild 通道——deactivateAll 可能耗时
-  // 数秒（单插件 deactivate 5s 超时），期间 rebuild 冷却到期会复活插件（LC-C2）。
-  // host.shutdown 在链末尾才清，此时已晚。
-  deps.host.cancelPendingRebuilds()
-
   // S3-W1/W2：命令执行 pending 全部拒绝 + session 事件注册表清空
   //（Worker 即将终止，等待中的 executeCommand 与后续事件投递都无意义）。
   deps.commandInvokes.rejectAll(new Error('Plugin service shutting down'))

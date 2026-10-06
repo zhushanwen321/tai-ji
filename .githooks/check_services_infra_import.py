@@ -64,7 +64,18 @@ DOCUMENTED_MODULES = {
     # 为它定义 port 只会增加无意义间接层（遮蔽是写日志的前置纯变换，非可替换的 IO 能力）。
     "argv-redact",
 # 登记同步见 docs/architecture/runtime-layering.md §3 ③e
-    
+    # infra/pi 门面族四模块（2026-10-04，pi1-disposition 设计 D2①/D5①⑥/D15.1 落地登记）：
+    # 全部 kernel 类纯函数/纯常量（无状态、无 IO、无副作用）——协议常量与解析（pi-protocol：
+    # PI_EVENT 词表 + 命令清单解析 + disposition 归一）、拒绝分型文案（pi-rejection）、
+    # 结构化字段派生（event-adapter）、thinking 档位词表（thinking-levels）。services 消费它们
+    # 是 pi 1.0 对齐设计的显式结构（pi 词汇合法持有点清单 D5 的「翻译层」就是这些门面），
+    # 为纯常量/纯函数定义 port 只会增加无意义间接层，同 argv-redact 裁决形态。
+    "pi-protocol",
+    "pi-rejection",
+    "event-adapter",
+    "thinking-levels",
+# 登记同步见 docs/architecture/runtime-layering.md §3 ③g
+
 }
 
 # 现状基线债（不在 §3 表；每项的裁决注释保留原位，待 ports 收编后移除）
@@ -95,17 +106,44 @@ ALLOWED_MODULES = DOCUMENTED_MODULES | BASELINE_MODULES
 IMPORT_RE = re.compile(r"""^\s*import\s+\{[^}]*\}\s+from\s+['"]([^'"]*infra/[^'"]+)['"]""", re.MULTILINE)
 
 
+def staged_files() -> set[str] | None:
+    """暂存区文件清单（仓库根相对 posix 路径）。非 git 环境返回 None = 回退全目录扫描。"""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "-z"],
+            capture_output=True, cwd=PROJECT_ROOT,
+        )
+    except OSError:
+        return None
+    if out.returncode != 0:
+        return None
+    return {p for p in out.stdout.decode("utf-8", errors="replace").split("\0") if p}
+
+
 def main() -> int:
+    staged = staged_files()
     violations = []
+    scanned = 0
     for f in sorted(SERVICES_ROOT.rglob("*.ts")):
         if f.name.endswith(".test.ts") or "__tests__" in f.parts:
             continue
         rel = f.relative_to(PROJECT_ROOT).as_posix()
+        if staged is not None:
+            if rel not in staged:
+                continue
+            if not f.exists():  # staged 删除项无可扫描内容
+                continue
+        scanned += 1
         for m in IMPORT_RE.finditer(f.read_text(encoding="utf-8", errors="replace")):
             module = Path(m.group(1)).stem
             if module not in ALLOWED_MODULES:
                 violations.append(f"{rel}: value import infra/{module}（services 层 IO 须经 port 接口）")
 
+    if staged is not None and scanned == 0:
+        print("[check_services_infra_import] staged 无 services 规则目录文件，跳过扫描")
+        return 0
     if violations:
         print("[check_services_infra_import] services 层存在白名单外的 infra value import（三层设计「跨切面例外」）：")
         for v in violations:

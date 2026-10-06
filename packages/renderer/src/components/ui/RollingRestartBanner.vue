@@ -1,18 +1,17 @@
 <template>
   <!--
     [crash-forensics-and-watchdog §3.3 D5 / D3，u7d + 偏差 #27] 滚动重启四态横幅 +
-    reattach 高压延迟轻态。视觉骨架复用 CrashRecoveredBar（fixed 顶部居中，零布局侵入），
-    但不复用其一次性语义——推迟等待是持续态：状态源 useRollingRestartStatus（广播加速
-    显示 + rollingRestart.status 只读 RPC 拉取恢复，重连/刷新不丢）。
+    reattach 高压延迟轻态。fixed 顶部居中，零布局侵入；推迟等待是持续态：状态源
+    useRollingRestartStatus（广播加速显示 + rollingRestart.status 只读 RPC 拉取恢复，
+    重连/刷新不丢）。
     挂载点 AppShell（连接后主界面；restarting 全屏过渡态由 App.vue 承接，横幅无需在场）。
-    **窗口级互斥（D5「同一时刻只有一条横幅」，滚动重启优先）**：本条 z-index 高于
-    CrashRecoveredBar（9999）一档——两者同位叠加时本条完整覆盖后者（不透明 bg-surface），
-    视觉上恒只有一条；红牌消除后 CrashRecoveredBar 恢复可达。跨条互斥需要双向感知
-    （改 useCrashRecoveryNotice/CrashRecoveredBar，领地外），采用覆盖式单向互斥并登记。
+    **横幅唯一性（D5「同一时刻只有一条横幅」）**：z-[10000] 顶部同位唯一横幅
+    （不透明 bg-surface 完整覆盖下层同位元素）。
   -->
   <Transition name="rolling-restart-banner">
     <div
       v-if="visible"
+      ref="bannerRef"
       data-testid="rolling-restart-banner"
       :data-phase="phase.kind"
       role="alert"
@@ -36,16 +35,34 @@
 </template>
 
 <script setup lang="ts">
-import { computed, type Component } from 'vue'
+import { computed, onBeforeUnmount, ref, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, CheckCircle2, Hourglass, TriangleAlert, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
 import { useRollingRestartStatus } from '@/composables/useRollingRestartStatus'
 
 const { t } = useI18n()
 const { phase, dismiss } = useRollingRestartStatus()
 
 const visible = computed(() => phase.value.kind !== 'idle')
+
+// 模态表面聚合注册（§6.7 横幅族）：非阻塞横幅不入让位族，只入 view 遮蔽族（shieldsView
+// intersecting——与 view 矩形几何相交才隐藏）。开合态绑 visible 状态本体（phase 广播驱动）；
+// rect 读横幅根元素实测（四态文案/图标切换的几何在重渲染后由上报链重测）。旗标组由登记表按 id 读取。
+const bannerRef = ref<HTMLElement | null>(null)
+function bannerRect(): { x: number; y: number; width: number; height: number } | null {
+  if (!bannerRef.value) return null
+  const r = bannerRef.value.getBoundingClientRect()
+  return { x: r.x, y: r.y, width: r.width, height: r.height }
+}
+const disposeSurfaceRegistration = registerModalSurface({
+  surface: 'rolling-restart-banner',
+  key: 'rolling-restart-banner',
+  isOpen: () => visible.value,
+  rect: bannerRect,
+})
+onBeforeUnmount(disposeSurfaceRegistration)
 
 /** 分档色调：推迟/预告 = warn、红牌 = danger、已恢复 = info（token 色，不硬编码）。 */
 const toneClass = computed(() => {

@@ -61,7 +61,7 @@ export class ModelMessageHandler {
     // 'provider/id' 复合串（请求 ≠ 生效），拆解回填保持 reply 协议形状。
     // U2 后 switchModel 的激活前置语义（停止态/回收态先 ensureActive 拉活再切）：不存在
     // 「无活跃进程 → 回 echo 请求值」的早退分支了——失败一律以分型错误 reject（激活阶段
-    // SESSION_ACTIVATE_FAILED / SESSION_NOT_FOUND / SESSION_ACTIVATE_TIMEOUT 透传或包装，
+    // SESSION_ACTIVATE_FAILED / SESSION_NOT_FOUND 透传或包装，
     // set 阶段 MODEL_NOT_FOUND / PROVIDER_CREDENTIAL_MISSING / ENGINE_MODEL_MISSING，见
     // 设计 §3.4），成功则必为 pi `get_state` 回读的生效值。失败经 server.ts handleMessage
     // 的全局 catch 统一 sendError（code 透传 + details.sessionId），无「按请求值回

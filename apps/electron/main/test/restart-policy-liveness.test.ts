@@ -7,7 +7,7 @@
  * 本文件是【回归基线测试】——restart-policy 已有实现，这里只验证：
  * - MAX_RESTARTS=5 + 退避序列 1/2/4/8/16s（W5 后必须保持不变）
  * - clearForManualRestart 清零后给新 5 次配额（W5 后必须保持不变）
- * - recordSuccess 稳定窗口 STABLE_MS=10s 后清零（W5 后必须保持不变）
+ * - recordSuccess 无时间窗清零（ADR-0122：计数清零唯一入口 = 用户显式重试）
  *
  * 注意：W5 新增的存活探针（checkHealthEndpoint / forceRestartForLiveness）
  * 属于 supervisor-health-liveness.test.ts 的范畴，此处不涉及。
@@ -19,17 +19,12 @@ import {
   RestartPolicy,
   MAX_RESTARTS,
   RESTART_BASE_DELAY_MS,
-  STABLE_MS,
 } from '../supervisor/restart-policy.js'
 
 // 回归基线断言：常量值在 W5 后不得变动（存活探针复用同一套退避/上限）
 describe('W5 回归基线：restart-policy 常量不变', () => {
   it('MAX_RESTARTS=5（存活探针触发的重启也走同一上限）', () => {
     expect(MAX_RESTARTS).toBe(5)
-  })
-
-  it('STABLE_MS=10s（存活探针成功后同样按此窗口清零）', () => {
-    expect(STABLE_MS).toBe(10_000)
   })
 
   it('RESTART_BASE_DELAY_MS=1s（退避基数不变）', () => {
@@ -97,8 +92,8 @@ describe('W5 回归基线：clearForManualRestart 清零后给新 5 次配额', 
   })
 })
 
-// 回归基线：稳定窗口清零（W5 后存活探针成功也按此窗口重置计数）
-describe('W5 回归基线：recordSuccess 稳定窗口 STABLE_MS=10s 后清零', () => {
+// 回归基线：无时间窗清零（ADR-0122：recordSuccess 只记录事实，计数清零唯一入口 = 用户显式重试）
+describe('recordSuccess 无时间窗清零（ADR-0122）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -106,48 +101,34 @@ describe('W5 回归基线：recordSuccess 稳定窗口 STABLE_MS=10s 后清零',
     vi.useRealTimers()
   })
 
-  it('窗口内连续成功不清零（同簇累计，存活探针也遵循）', () => {
+  it('连续成功不清零（存活探针恢复也不清零）', () => {
     const p = new RestartPolicy()
     p.recordCrashAndGetDelay()
     p.recordCrashAndGetDelay()
     expect(p.count).toBe(2)
 
-    // 首次成功：lastSuccessAt 初始 0，守卫不成立，不清零
     p.recordSuccess()
     expect(p.count).toBe(2)
 
-    // 窗口内再次成功：now - lastSuccessAt ≈ 0 < STABLE_MS，不清零
+    vi.advanceTimersByTime(60_000)
     p.recordSuccess()
     expect(p.count).toBe(2)
   })
 
-  it('窗口外成功清零（新故障簇，存活探针恢复后计数重置）', () => {
-    const p = new RestartPolicy()
-    p.recordCrashAndGetDelay()
-    p.recordCrashAndGetDelay()
-    expect(p.count).toBe(2)
-
-    p.recordSuccess() // 设 lastSuccessAt = T0
-    expect(p.count).toBe(2)
-
-    // 推进时间超过稳定窗口
-    vi.advanceTimersByTime(STABLE_MS + 1)
-    p.recordSuccess() // now - T0 > STABLE_MS → 清零
-    expect(p.count).toBe(0)
-  })
-
-  it('清零后新崩溃从 1 开始（存活探针恢复后再崩溃不累计历史）', () => {
+  it('计数持续累计直到 MAX 或 clearForManualRestart（用户显式重试是唯一清零入口）', () => {
     const p = new RestartPolicy()
     for (let i = 0; i < 3; i++) p.recordCrashAndGetDelay()
     expect(p.count).toBe(3)
 
-    // 稳定运行超过窗口
     p.recordSuccess()
-    vi.advanceTimersByTime(STABLE_MS + 1)
+    vi.advanceTimersByTime(60_000)
     p.recordSuccess()
+    expect(p.count).toBe(3)
+
+    p.clearForManualRestart()
     expect(p.count).toBe(0)
 
-    // 新故障簇：从 1 开始（非 4）
+    // 新故障簇：从 1 开始
     p.recordCrashAndGetDelay()
     expect(p.count).toBe(1)
     expect(p.exhausted).toBe(false)

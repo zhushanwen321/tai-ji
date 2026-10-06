@@ -181,11 +181,10 @@ describe('杀链决策日志（D6-⑥：谁触发/杀谁/为什么，u5b 同形�
   })
 
   it('重启用尽：abandon 决策行（attempts=MAX_RESTARTS，reason 指向手动重试）', async () => {
-    // 构造约束（策略语义决定，不能固定 16s/轮）：每轮重启成功即 recordSuccess，
-    // 成功间隔 >STABLE_MS(10s) 会清零计数（16s 退避本身超过稳定窗口）——按真实
-    // delay 序列（1/2/4/8s，累计 <10s 不清零）推进 4 轮把计数推到 4，第 5 轮
-    // 让 start 失败（waitForHealth reject → handleRestartFailure，不经 recordSuccess）
-    // 使计数触顶 5 → abandon 分支。
+    // 构造约束：recordSuccess 不清零计数（ADR-0122 无时间窗），崩溃计数单调累计
+    // ——按真实 delay 序列（1/2/4/8s）推进 4 轮把计数推到 4，第 5 轮让 start 失败
+    // （waitForHealth reject → handleRestartFailure，不经 recordSuccess）使计数触顶
+    // 5 → abandon 分支。
     const { waitForHealth } = await import('../supervisor/health-checker.js')
     // 精确让 attempt5 的 waitForHealth 失败：计数含初始 start（第 1 次）+ attempt1..4
     // （第 2-5 次），第 6 次调用 = attempt5。计数基准从 start 前开始（Once 队列会被

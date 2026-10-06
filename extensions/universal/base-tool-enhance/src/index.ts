@@ -3,8 +3,8 @@
  *
  * M1：同名 override pi 内置 bash 工具 + 前台委托官方工厂 + 工具报错审计 hook（D11）。
  * M2：background 任务核心生命周期——bash background 分支（spawn 后台 + registry +
- * 轮询器单例任务表）、bash_output / bash_kill 工具、进程退出收殓、subagent 降级。
- * M3：pending-notifications 通知接入——load 时刷新轮询器通知通路的 pi 引用（D17
+ * 模块级单例任务表）、bash_output / bash_kill 工具、进程退出收殓、subagent 降级。
+ * M3：pending-notifications 通知接入——load 时刷新通知通路的 pi 引用（D17
  * session 替换接管）+ 挂 exit 边沿通知回调（unregister emit + sendMessage steer）+
  * session_start 对账（appendEntry 权威路径兜底 pending 收尾）+ 完成通知补投
  * （bg-task-notify-durability：终态无痕迹无标记的任务下次激活合并补投 + 同步幂等标记）。
@@ -33,7 +33,7 @@ import { createBashOverrideToolDefinition } from "./bash-tool.ts";
 import { handleTaskExit, refreshPiReference } from "./background/notify.ts";
 import { installProcessExitGuard } from "./background/process-exit-guard.ts";
 import { reconcilePendingEntries } from "./background/pending-reconcile.ts";
-import { setOnTaskExit } from "./background/poller.ts";
+import { setOnTaskExit } from "./background/exit-collector.ts";
 import { setupToolErrorAudit } from "./tool-error-audit.ts";
 
 const logger = getLogger("base-tool-enhance");
@@ -43,7 +43,7 @@ export default function baseToolEnhanceExtension(pi: ExtensionAPI): void {
 	// ResourceLoader/eventBus + extension 重新 load → 本调用把通知通路（notify.ts
 	// 模块级引用）切到新 pi——任务发起于旧 session 而完成通知投递新 session。
 	refreshPiReference(pi);
-	// ⑧⑨ 轮询器 exit 边沿 → pending:unregister emit + sendMessage steer（kill 路径
+	// ⑧⑨ exit 事件边沿 → pending:unregister emit + sendMessage steer（kill 路径
 	// 不 sendMessage，见 notify.ts 单点归属规则）。重复 load 幂等（覆盖同一回调）
 	setOnTaskExit(handleTaskExit);
 	// 同名 "bash" 覆盖内置工具（pi agent-session _refreshToolRegistry：custom 定义后注册者胜）

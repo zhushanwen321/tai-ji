@@ -32,10 +32,12 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import type { Segment } from '@taiji/shared'
 import {
   useContenteditableInput,
   useComposerChipCommands,
   findImageChipElById,
+  restoreSegmentsIntoInput,
 } from '@taiji/dom-core/composer/input'
 import { useComposerInputDeps } from './composer-input-deps'
 
@@ -218,12 +220,34 @@ function getInputElement(): HTMLDivElement | null {
   return elRef.value
 }
 
+/**
+ * segments 快照整框回填（发送失败草稿恢复，remote-use D6 / §5.4 检查点4 补的接口）：
+ * 委托 dom-core restoreSegmentsIntoInput 唯一实现（text 段 setText 重建 + 非 text 段
+ * 经 insert* 还原真 chip，与桌面 useComposerRestore.restoreSegments 同一定义点）。
+ * 消费方：移动壳 MobileComposer（send === false 时回填原文本）。
+ */
+function setSegments(segments: Segment[]): void {
+  restoreSegmentsIntoInput(
+    {
+      setText,
+      insertImageBadge,
+      insertSlashChip,
+      insertFileChip,
+      insertSessionChip,
+      insertSubagentChip,
+      insertSkillChip,
+    },
+    segments,
+  )
+}
+
 defineExpose({
   clear,
   focus,
   getText,
   getSegments,
   setText,
+  setSegments,
   insertTextAtCursor,
   getInputElement,
   insertSlashChip,

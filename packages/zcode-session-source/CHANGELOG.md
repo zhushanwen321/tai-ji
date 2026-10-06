@@ -1,5 +1,17 @@
 # @zhushanwen/zcode-session-source
 
+## 0.2.5
+
+### Patch Changes
+
+- 802af968f: Pin the pi peer dependency range to ^1.0.0 (stale pi implementation anchors in comments refreshed to 1.0.0). No behavior change.
+
+## 0.2.4
+
+### Patch Changes
+
+- 492e02447: Remove the test-only countSnapshotDirs helper from the recovery module; snapshot-count assertions now live entirely in the test fixtures, keeping zero-residue checks explicit instead of depending on a production-side counter.
+
 ## 0.2.3
 
 ### Patch Changes

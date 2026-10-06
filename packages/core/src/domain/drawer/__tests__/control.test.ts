@@ -4,6 +4,9 @@
  * 覆盖：bindDrawerSessionId 绑定 / per-session 分区隔离 + 切回恢复 / null sid no-op。
  * [P4 s5 drawer-widget-removal] tasks tab 强制 docked 用例与 FR-9（手动 open 清 pendingOpen）
  * 用例已删——pendingOpen 机制 + tasks tab 随 tasks 域移除（PluginViewContainer 承接）。
+ * [display-containers §6.6③ W0] docked 用例已删（死状态全链删除，pin 按钮一并移除）；
+ * 选中态五字段迁出后 getViewedVids 用例改经 coordination.openSubagent / selection.setBtwView
+ * 驱动（复合谓词单一源 = selection/predicates.ts）。
  *
  * 运行：cd packages/core && npx vitest run src/domain/drawer/__tests__/control.test.ts
  * 测试框架 vitest（禁止 node:test / tsx --test）。core vitest 环境为 node（vue reactivity
@@ -16,8 +19,9 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { ref } from 'vue'
 import type { Ref } from 'vue'
-import { bindDrawerSessionId, useDrawerControl, getBoundSessionId, bindViewedVidPanels, getViewedVids, drawerControl } from '../control'
-import { openDrawerTab, toggleDrawerDock, closeDrawer, setDrawerTab, _resetDrawerForTest } from '../coordination'
+import { bindDrawerSessionId, useDrawerControl, getBoundSessionId } from '../control'
+import { openDrawerTab, openSubagent, closeDrawer, setDrawerTab, _resetDrawerForTest } from '../coordination'
+import { bindViewedVidPanels, getViewedVids, setBtwView } from '../selection'
 
 /** 当前测试分区键（每用例新建，bindDrawerSessionId 覆盖绑定） */
 let sid: Ref<string | null>
@@ -34,41 +38,24 @@ beforeEach(() => {
 })
 
 describe('drawer control 分区隔离与切回恢复', () => {
-  it('A 开 git + docked，切 B 为默认态，切回 A 恢复三态（isOpen/activeTab/docked）', () => {
+  it('A 开 git，切 B 为默认态，切回 A 恢复控制态两字段（isOpen/activeTab）', () => {
     focusSession('A')
-    const { isOpen, activeTab, docked } = useDrawerControl()
+    const { isOpen, activeTab } = useDrawerControl()
     openDrawerTab('git')
-    toggleDrawerDock() // docked=true（仅 A 分区）
     expect(isOpen.value).toBe(true)
     expect(activeTab.value).toBe('git')
-    expect(docked.value).toBe(true)
 
     // 切到 B（B 独立操作，不影响 A 分区）
     focusSession('B')
     const drawerB = useDrawerControl()
     expect(drawerB.isOpen.value).toBe(false)
-    expect(drawerB.activeTab.value).toBe('terminal')
-    expect(drawerB.docked.value).toBe(false)
+    expect(drawerB.activeTab.value).toBe('git')
 
     // 切回 A
     focusSession('A')
     const drawerA = useDrawerControl()
     expect(drawerA.isOpen.value).toBe(true)
     expect(drawerA.activeTab.value).toBe('git')
-    expect(drawerA.docked.value).toBe(true)
-  })
-
-  it('docked 仅当前分区，不污染其他 session', () => {
-    focusSession('A')
-    openDrawerTab('git')
-    toggleDrawerDock()
-    expect(useDrawerControl().docked.value).toBe(true)
-
-    focusSession('B')
-    expect(useDrawerControl().docked.value).toBe(false) // B 默认，不被 A 污染
-
-    focusSession('A')
-    expect(useDrawerControl().docked.value).toBe(true)
   })
 
   it('切 sid 后 isOpen 立即为 true（reactive 容器契约回归：plain object init 会失效）', () => {
@@ -92,16 +79,15 @@ describe('null sid no-op 语义', () => {
     expect(getBoundSessionId()).toBe(null)
     expect(() => {
       openDrawerTab('git')
-      openDrawerTab('terminal', { commandName: '/commit' })
+      openDrawerTab('doc', { commandName: '/commit' })
     }).not.toThrow()
 
-    // 绑定真实 sid 后，其分区是默认态（isOpen=false/activeTab=terminal）——
+    // 绑定真实 sid 后，其分区是默认态（isOpen=false/activeTab=git）——
     // 证明 null sid 期的 open 没有泄漏进任何真实分区
     focusSession('X')
     const drawer = useDrawerControl()
     expect(drawer.isOpen.value).toBe(false)
-    expect(drawer.activeTab.value).toBe('terminal')
-    expect(drawer.docked.value).toBe(false)
+    expect(drawer.activeTab.value).toBe('git')
   })
 
   it('bindDrawerSessionId 幂等：重复绑定同一 ref 不报错，新 ref 覆盖', () => {
@@ -135,7 +121,7 @@ describe('B9 getViewedVids：agentcall LRU 联动豁免查询源（panel 枚举�
 
   it('panel 焦点 session 的 drawer 正在查看 subagent tab → 该 vid 计入豁免集', () => {
     focusSession('A')
-    drawerControl.setSubagentView('agentcall:acs-1', 'workflow')
+    openSubagent({ virtualId: 'agentcall:acs-1', enteredFrom: 'workflow' })
     panels.value = ['A']
 
     expect(getViewedVids()).toEqual(new Set(['agentcall:acs-1']))
@@ -143,7 +129,7 @@ describe('B9 getViewedVids：agentcall LRU 联动豁免查询源（panel 枚举�
 
   it('关闭 drawer 后不豁免（A6：关闭 drawer 后再切走，分区应可释放）', () => {
     focusSession('A')
-    drawerControl.setSubagentView('agentcall:acs-1', 'workflow')
+    openSubagent({ virtualId: 'agentcall:acs-1', enteredFrom: 'workflow' })
     closeDrawer()
     panels.value = ['A']
 
@@ -152,8 +138,8 @@ describe('B9 getViewedVids：agentcall LRU 联动豁免查询源（panel 枚举�
 
   it('drawer 开在其他 tab（非 subagent）→ 不算正在查看，不豁免', () => {
     focusSession('A')
-    drawerControl.setSubagentView('agentcall:acs-1', 'workflow')
-    setDrawerTab('terminal')
+    openSubagent({ virtualId: 'agentcall:acs-1', enteredFrom: 'workflow' })
+    setDrawerTab('git')
     panels.value = ['A']
 
     expect(getViewedVids()).toEqual(new Set())
@@ -161,9 +147,9 @@ describe('B9 getViewedVids：agentcall LRU 联动豁免查询源（panel 枚举�
 
   it('多 panel 全查（split 模式）：各 panel 焦点分区的选中 vid 都计入；null panel 跳过', () => {
     focusSession('A')
-    drawerControl.setSubagentView('agentcall:acs-a', 'workflow')
+    openSubagent({ virtualId: 'agentcall:acs-a', enteredFrom: 'workflow' })
     focusSession('B')
-    drawerControl.setSubagentView('subagent:B:s1', 'chat')
+    openSubagent({ virtualId: 'subagent:B:s1', enteredFrom: 'chat' })
     panels.value = ['A', null, 'B']
 
     expect(getViewedVids()).toEqual(new Set(['agentcall:acs-a', 'subagent:B:s1']))
@@ -173,9 +159,9 @@ describe('B9 getViewedVids：agentcall LRU 联动豁免查询源（panel 枚举�
     // B 曾开过 drawer 选中 acs-b，焦点切走后 B 分区保留——但 panel 枚举只含 A，
     // B 的选中 vid 不得进入豁免集（否则永久过度豁免）
     focusSession('B')
-    drawerControl.setSubagentView('agentcall:acs-b', 'workflow')
+    openSubagent({ virtualId: 'agentcall:acs-b', enteredFrom: 'workflow' })
     focusSession('A')
-    drawerControl.setSubagentView('agentcall:acs-a', 'workflow')
+    openSubagent({ virtualId: 'agentcall:acs-a', enteredFrom: 'workflow' })
     panels.value = ['A']
 
     expect(getViewedVids()).toEqual(new Set(['agentcall:acs-a']))
@@ -184,7 +170,7 @@ describe('B9 getViewedVids：agentcall LRU 联动豁免查询源（panel 枚举�
   it('panel 枚举为空列表（无 panel 或全 null）→ 空集（安全默认：驱逐无豁免）', () => {
     panels.value = [] // beforeEach 绑定后即空列表
     focusSession('A')
-    drawerControl.setSubagentView('agentcall:acs-1', 'workflow')
+    openSubagent({ virtualId: 'agentcall:acs-1', enteredFrom: 'workflow' })
 
     expect(getViewedVids()).toEqual(new Set())
   })
@@ -203,7 +189,7 @@ describe('D5 getViewedVids：btw 线查看豁免（btw-question，M3-a）', () =
   it('drawer 开在 btw tab 且正在查看某线 → 该线 vid 计入豁免集（查看中不驱逐）', () => {
     focusSession('A')
     openDrawerTab('btw')
-    drawerControl.setBtwView('btw:pi-1')
+    setBtwView('btw:pi-1')
     panels.value = ['A']
 
     expect(getViewedVids()).toEqual(new Set(['btw:pi-1']))
@@ -212,7 +198,7 @@ describe('D5 getViewedVids：btw 线查看豁免（btw-question，M3-a）', () =
   it('关闭 drawer 后不豁免（同 A6 语义：关 drawer 即离开查看态）', () => {
     focusSession('A')
     openDrawerTab('btw')
-    drawerControl.setBtwView('btw:pi-1')
+    setBtwView('btw:pi-1')
     closeDrawer()
     panels.value = ['A']
 
@@ -222,8 +208,8 @@ describe('D5 getViewedVids：btw 线查看豁免（btw-question，M3-a）', () =
   it('drawer 切到其他 tab → btw 线不豁免（选中残留不泄漏豁免）', () => {
     focusSession('A')
     openDrawerTab('btw')
-    drawerControl.setBtwView('btw:pi-1')
-    setDrawerTab('terminal')
+    setBtwView('btw:pi-1')
+    setDrawerTab('git')
     panels.value = ['A']
 
     expect(getViewedVids()).toEqual(new Set())
@@ -240,9 +226,9 @@ describe('D5 getViewedVids：btw 线查看豁免（btw-question，M3-a）', () =
   it('混合形态：A 看 btw 线、B 看 agentcall → 两族各自计入（互不挤占）', () => {
     focusSession('A')
     openDrawerTab('btw')
-    drawerControl.setBtwView('btw:pi-a')
+    setBtwView('btw:pi-a')
     focusSession('B')
-    drawerControl.setSubagentView('agentcall:acs-b', 'workflow')
+    openSubagent({ virtualId: 'agentcall:acs-b', enteredFrom: 'workflow' })
     panels.value = ['A', 'B']
 
     expect(getViewedVids()).toEqual(new Set(['btw:pi-a', 'agentcall:acs-b']))
@@ -253,7 +239,7 @@ describe('D5 getViewedVids：btw 线查看豁免（btw-question，M3-a）', () =
     // B 的选中线不得进入豁免集（否则永久过度豁免，btw 分区永不驱逐）
     focusSession('B')
     openDrawerTab('btw')
-    drawerControl.setBtwView('btw:pi-b')
+    setBtwView('btw:pi-b')
     focusSession('A')
     panels.value = ['A']
 
@@ -263,7 +249,7 @@ describe('D5 getViewedVids：btw 线查看豁免（btw-question，M3-a）', () =
   it('切回恢复（D7④）：离开 btw tab 再切回，选中未清、恢复豁免', () => {
     focusSession('A')
     openDrawerTab('btw')
-    drawerControl.setBtwView('btw:pi-1')
+    setBtwView('btw:pi-1')
     panels.value = ['A']
 
     setDrawerTab('git')
@@ -276,8 +262,8 @@ describe('D5 getViewedVids：btw 线查看豁免（btw-question，M3-a）', () =
   it('清空选中（setBtwView(undefined)，关线/面板空态调用）→ 不再豁免', () => {
     focusSession('A')
     openDrawerTab('btw')
-    drawerControl.setBtwView('btw:pi-1')
-    drawerControl.setBtwView(undefined)
+    setBtwView('btw:pi-1')
+    setBtwView(undefined)
     panels.value = ['A']
 
     expect(getViewedVids()).toEqual(new Set())

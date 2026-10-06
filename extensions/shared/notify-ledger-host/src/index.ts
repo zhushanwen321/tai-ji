@@ -25,9 +25,8 @@ export interface NotifyLedgerHostLogger { // oe-exempt:20260930:framework:SDK �
 /** 工厂选项：两装配方（subagent-workflow / session-manager）的观测差异参数化。 */
 export interface CreatePiNotifyLedgerHostOptions { // oe-exempt:20260930:framework:SDK 工厂参数契约——两消费包以不同 options 实例化
 	/**
-	 * guardStaleCtx 观测标签的组件前缀：label = `${component}:sendDelivery` /
-	 * `${component}:sendDisplayMessage`（建议 "包目录名:场景" 形态，对齐
-	 * ext-guards GuardStaleCtxOptions.label 约定）。
+	 * guardStaleCtx 观测标签的组件前缀：label = `${component}:sendDelivery`
+	 *（建议 "包目录名:场景" 形态，对齐 ext-guards GuardStaleCtxOptions.label 约定）。
 	 */
 	component: string;
 	/**
@@ -40,13 +39,6 @@ export interface CreatePiNotifyLedgerHostOptions { // oe-exempt:20260930:framewo
 	 *（如 "[session-manager] "），无前缀的省略——warn 文案逐字节保持装配前形态。
 	 */
 	staleWarnPrefix?: string;
-	/**
-	 * 是否实现可选端口 sendDisplayMessage（abandon 对会话补显形，T4③）。缺省
-	 * false = 最小 host（与该端口补显形之前的行为一致）；subagent-workflow 生产
-	 * 装配传 true（NotifyLedgerHost.sendDisplayMessage 的「生产 bind 恒实现」语义
-	 * 由装配方显式声明，不藏在工厂缺省里）。
-	 */
-	sendDisplayMessage?: boolean;
 }
 
 /**
@@ -55,9 +47,8 @@ export interface CreatePiNotifyLedgerHostOptions { // oe-exempt:20260930:framewo
  * 送达语义（两装配方共用的既有设计，收敛于此为单一权威注释）：
  * - **单通道送达（D5）**：sendDelivery 唯一形态 = `pi.sendMessage(message,
  *   { triggerTurn: true })`（唤醒主 agent turn）；courier 已在发送前二次复查
- *   isIdle，多通道投递选项已删。sendDisplayMessage（若实现）无 triggerTurn——
- *   display 消息进会话可见但不唤醒，与 sendDelivery 分工，通道不复用。
- * - **stale ctx 防御**：delivery 经 settled 边沿 / 看门狗 / 恢复重放异步触发，
+ *   isIdle，多通道投递选项已删。
+ * - **stale ctx 防御**：delivery 经 settled 边沿 / 恢复重放异步触发，
  *   可能落在 session 替换窗口——触碰 stale pi 命中 assertActive（PS-30）即无人
  *   接 rejection。stale 静默降级（本条通知不投递，attemptDeliver 按已受理标
  *   sentAt——session 替换后通知对旧 session 已无意义）+ warn 归因；非 stale
@@ -91,11 +82,5 @@ export function createPiNotifyLedgerHost(
 				pi.sendMessage(message, { triggerTurn: true }),
 			),
 	};
-	if (options.sendDisplayMessage) {
-		host.sendDisplayMessage = (message) =>
-			guardedSend("sendDisplayMessage", "notify abandon display skipped (stale ctx)", () =>
-				pi.sendMessage(message),
-			);
-	}
 	return host;
 }

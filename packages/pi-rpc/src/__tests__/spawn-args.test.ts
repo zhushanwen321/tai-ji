@@ -11,6 +11,15 @@
 // [HISTORICAL] 唯一有意偏离：u2（模式提示词注入）起两个 prompt flag 的**内联值**
 // 统一前置 `\n`（pi 二义陷阱构造性区分，见 spawn-args.ts toInlinePromptValue），
 // 故含 systemPrompt/appendSystemPrompt 的快照值不再与切换前逐字节相同（其余 token 不变）。
+// [HISTORICAL] 第二处有意偏离：codemode D8 起两模板恒带 `--extension builtin:codemode`
+// （pi 1.0 起 --no-extensions 连内置扩展一起排除，显式 -e 是唯一装载通道；随 pi 1.0
+// 升级同行，0.84.4 下该参数报 Unknown built-in extension）——快照值再增该 token 对。
+// [HISTORICAL] 第三处有意偏离：pi-mcp-management P11 起主 agent 模板基座再恒带
+// `--extension builtin:mcp`（内置 MCP 扩展是 mcp.json 的唯一消费方，不装载则界面
+// 保存的配置零生效）；subagent 模板不加（设计 §5 U1 辐射面裁决：N×M 连接放大 +
+// mcp_servers 提示词节 + direct 档首 prompt 延迟，subagent 消费 MCP 工具为零证据
+// 场景不预付）——本文件 subagent 段快照不含该 token，与 pi-subagent-cli 测试同为
+// 「subagent 不受传导」回归锚。
 
 import { describe, expect, it, vi, afterEach } from 'vitest'
 
@@ -30,9 +39,10 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('buildPiMainAgentArgs（主 agent 模板）', () => {
-  it('最小参数：基座 = --mode rpc --no-extensions --approve（B1 起无 --session-dir）', () => {
+  it('最小参数：基座 = --mode rpc --no-extensions --approve + builtin:codemode（D8）+ builtin:mcp（P11 配套，仅主模板）', () => {
     expect(buildPiMainAgentArgs({}, undefined)).toEqual([
       '--mode', 'rpc', '--no-extensions', '--approve',
+      '--extension', 'builtin:codemode', '--extension', 'builtin:mcp',
     ])
   })
 
@@ -74,6 +84,7 @@ describe('buildPiMainAgentArgs（主 agent 模板）', () => {
     const args = buildPiMainAgentArgs({ skillPaths: ['/s1', '/s2'], extensionPaths: ['/e1', '/e2'] }, undefined)
     expect(args).toEqual([
       '--mode', 'rpc', '--no-extensions', '--approve',
+      '--extension', 'builtin:codemode', '--extension', 'builtin:mcp',
       '--skill', '/s1', '--skill', '/s2',
       '--extension', '/e1', '--extension', '/e2',
     ])
@@ -138,6 +149,7 @@ describe('buildPiMainAgentArgs（主 agent 模板）', () => {
     )
     expect(args).toEqual([
       '--mode', 'rpc', '--no-extensions', '--approve',
+      '--extension', 'builtin:codemode', '--extension', 'builtin:mcp',
       '--model', 'prov/mid',
       '--system-prompt', '\nsys',
       '--append-system-prompt', '\napp',
@@ -167,9 +179,10 @@ const baseParams: PiSubagentSpawnParams = {
 }
 
 describe('buildPiSubagentSpawnArgs（subagent 模板）', () => {
-  it('基础参数：--mode rpc --session-dir <dir> --model provider/id，不含 -p / task', () => {
+  it('基础参数：--mode rpc --session-dir <dir> --model provider/id + 模板尾部 builtin:codemode（D8），不含 -p / task', () => {
     expect(buildPiSubagentSpawnArgs(baseParams)).toEqual([
       '--mode', 'rpc', '--session-dir', '/sessions/dir', '--model', 'openai/gpt-4o',
+      '--extension', 'builtin:codemode',
     ])
   })
 
@@ -206,15 +219,23 @@ describe('buildPiSubagentSpawnArgs（subagent 模板）', () => {
     expect(args[args.indexOf('--skill') + 1]).toBe('/skills/x')
   })
 
-  it('不拼基座 flag：--no-extensions/--approve/--extension/--no-context-files 由引擎侧显式拼装（D2），本函数零基座段', () => {
+  it('引擎侧基座 flag 仍由包装层拼装：--no-extensions/--approve/--no-context-files 本函数不带；--extension 仅 D8 的 builtin:codemode 恒带', () => {
     const args = buildPiSubagentSpawnArgs(baseParams)
     expect(args).not.toContain('--no-extensions')
     expect(args).not.toContain('--approve')
-    expect(args).not.toContain('--extension')
     expect(args).not.toContain('--no-context-files')
+    // 白名单 extension 路径仍由引擎侧 appendExtensionArgs 拼装，本函数不收路径参数；
+    // 唯一的 --extension 是模板自带的 D8 旗标（-ne 下显式 -e 仍装载）。
+    expect(args.filter((a) => a === '--extension')).toHaveLength(1)
+    expect(args[args.indexOf('--extension') + 1]).toBe('builtin:codemode')
   })
 
-  it('快照锚定：典型全参数集 argv 形态（基座 flag 段已退役，引擎侧 spawn-args 显式拼装）', () => {
+  it('回归锚：subagent 模板不含 builtin:mcp（P11 仅主模板装载——subagent 装载会引入 N×M 连接放大与启动延迟，设计 §5 U1 辐射面裁决；本断言防未来误传导）', () => {
+    const args = buildPiSubagentSpawnArgs(baseParams)
+    expect(args).not.toContain('builtin:mcp')
+  })
+
+  it('快照锚定：典型全参数集 argv 形态（--no-extensions 等基座 flag 已退役由引擎侧拼装；D8 起尾部恒带 builtin:codemode）', () => {
     const args = buildPiSubagentSpawnArgs({
       modelRef: { provider: 'openai', id: 'gpt-4o' },
       thinkingLevel: 'low',
@@ -232,6 +253,7 @@ describe('buildPiSubagentSpawnArgs（subagent 模板）', () => {
       '--append-system-prompt', '/tmp/p.md',
       '--fork', '/parent.jsonl',
       '--skill', '/skills/x',
+      '--extension', 'builtin:codemode',
     ])
   })
 })

@@ -28,8 +28,7 @@ export interface SubagentInFlightReport {
   inFlight: number
   /**
    * 上报所属 session（ctx.sessionManager.getSessionId()）。pi 延迟写入窗口内可能取
-   * 不到（plugin-bridge getSessionId 同款防御）——缺席时消费方按无法归属丢弃整帧
-   * （不镜像），不视为协议错误。
+   * 不到——缺席时消费方按无法归属丢弃整帧（不镜像），不视为协议错误。
    */
   sessionId?: string
   /** 产生时点（ms epoch，pi 进程内取值）。诊断/乱序排查用，消费方不依赖其单调性。 */

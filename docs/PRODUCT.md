@@ -116,7 +116,7 @@ product
 | Slash 命令 | local（/clear /help）/ protocol（/compact）/ skill（/skill:\<name>）三类；CMD/SK tag 分类 |
 | AgentRunBlock | 折叠渲染（thinking/tool 合并 MergeBlock，write/edit 独立卡片，chip 摘要条） |
 | Markdown | Shiki 高亮 + 行号 + 复制 + 折叠、GFM 表格、KaTeX、Mermaid 懒加载、DOMPurify 净化 |
-| Settings | Provider/Skill/Agent/System 四 tab；Skill/Agent 扫描导入四步流程；实时 WS 同步 |
+| Settings | Provider/Appearance/Skill/Agent/Extension/System Prompt/Terminal/MCP/Preset/TTS/Worktree/Update/System/Usage 分区；MCP 分区管理 MCP 服务器（清单、表单/代码双模式添加与编辑、启停/删除确认、连接测试；配置由新启动的会话读取）；Skill/Agent 扫描导入四步流程；实时 WS 同步 |
 | Plugin 系统 | Worker Thread 隔离、JSON-RPC 2.0、懒激活、KV 持久化 |
 | Provider 管理 | API Key 增删改、默认模型、复用 pi 配置 |
 

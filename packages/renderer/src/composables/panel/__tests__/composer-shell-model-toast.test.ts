@@ -142,14 +142,14 @@ describe('onModelSelectUi / onThinkingSelectUi 错误→toast 包装（U4 三纪
 
   it('档位切换 reject → 同款 toast 映射（onThinkingSelectUi 与 onModelSelectUi 同构）', async () => {
     modelThinking.onThinkingSelect.mockRejectedValueOnce(
-      Object.assign(new Error('level boom'), { code: 'SESSION_ACTIVATE_TIMEOUT' }),
+      Object.assign(new Error('level boom'), { code: 'SESSION_ACTIVATE_FAILED' }),
     )
     const shell = mountShell()
 
     await expect(shell.onThinkingSelect('high')).resolves.toBeUndefined()
 
     expect(toastMock.error).toHaveBeenCalledTimes(1)
-    expect(toastMock.error).toHaveBeenCalledWith('会话恢复超时，请稍后重试')
+    expect(toastMock.error).toHaveBeenCalledWith('会话无法恢复，请在侧栏重新打开')
   })
 
   it('成功路径零 toast（不误报）', async () => {

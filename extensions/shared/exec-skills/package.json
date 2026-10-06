@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-exec-skills",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Shared skill acquisition library for Pi extensions — disk-scanning discovery over pi's four skill roots (settings overrides + plan-exec frontmatter marker + name dedup) and the pi-registry execution gate (resolveSkills). Shared library, not a Pi extension.",
   "type": "module",
   "main": "src/index.ts",
@@ -30,10 +30,10 @@
     "@zhushanwen/pi-extension-logger": "workspace:*"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.4"
+    "@earendil-works/pi-coding-agent": "^1.0.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@earendil-works/pi-coding-agent": "^1.0.0",
     "@vitest/coverage-v8": "^4.1.9",
     "vitest": "^4.1.8"
   }

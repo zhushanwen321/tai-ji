@@ -588,3 +588,40 @@ describe('runOAuthLogin — device poll 错误处理（MF-3）', () => {
       .rejects.toThrow('OAuth device token request timed out')
   })
 })
+
+describe('runOAuthLogin — 流程必需端点守卫（radius 运行时发现语义，pi 1.0.0）', () => {
+  // pi 1.0.0 快照允许端点缺失（radius 端点从 gateway 运行时发现，静态提取为空是预期降级）；
+  // 缺失时 fail-fast 给可操作错误，不进入深层 postForm(undefined) 崩溃
+  const RADIUS_CONFIG: BuiltinOAuthConfig = {
+    clientId: 'pi-gateway',
+    flow: 'device',
+    endpoints: {},
+    scopes: ['gateway', 'offline_access'],
+  }
+
+  it('device flow 端点缺失：fail-fast 可操作错误，不发起任何 HTTP 请求', async () => {
+    mockFetch(async () => jsonResponse({}, 200))
+    await expect(runOAuthLogin('radius', RADIUS_CONFIG, {}, new AbortController().signal, POLL_TUNING))
+      .rejects.toThrow(/endpoints deviceCode\/token .*runtime discovery/)
+    expect(vi.mocked(fetch).mock.calls).toHaveLength(0)
+  })
+
+  it('callback flow 端点缺失：同样 fail-fast（authorize/token）', async () => {
+    mockFetch(async () => jsonResponse({}, 200))
+    await expect(runOAuthLogin('some-callback-provider', {
+      clientId: 'c',
+      flow: 'callback',
+      endpoints: {},
+      scopes: [],
+    }, {}, new AbortController().signal, POLL_TUNING))
+      .rejects.toThrow(/endpoints authorize\/token .*runtime discovery/)
+    expect(vi.mocked(fetch).mock.calls).toHaveLength(0)
+  })
+
+  it('端点齐备不受守卫影响（xai 对照：越过守卫到达 device-code 请求，报 HTTP 错而非守卫错）', async () => {
+    mockFetch(async () => jsonResponse({ error: 'invalid_client' }, 400))
+    // 守卫放行的证明 = 错误来自 device authorization 阶段（HTTP 400），而非 runtime discovery 守卫
+    await expect(runOAuthLogin('xai', XAI_CONFIG, {}, new AbortController().signal, POLL_TUNING))
+      .rejects.toThrow('OAuth device authorization failed (HTTP 400)')
+  })
+})

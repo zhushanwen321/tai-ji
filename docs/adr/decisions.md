@@ -41,6 +41,39 @@ pi 当前持有的 session JSONL 唯一写方是 pi 进程——taiji 任何代�
 ### ADR-0083 btw 旁路提问：派生临时会话形态
 btw 旁路提问（主对话旁开 drawer 辅助对话流）的会话形态定案（2026-09-22 定案，2026-09-23 交付）：① 每条 btw 线 = 主会话当前进度的 **pi 原生 fork 全树快照**（`--fork` + `--session-dir`，含分支；不复用 session-fork.ts 单路径截断），跑在独立 pi 进程；源状态三分支（正常 / 无快照线（fork throw → 回落无 fork 新建 spawn，宿主零直写）/ 截断快照）；② 虚拟 ID 第三家族 `btw:<piSessionId>` 两段式（与 pi id 零冲突契约：真 sid 禁冒号、虚拟 id 永含冒号；派生键第二段 = owner piSessionId，INVAR-1.1 强制化 + 生产值域断言）；③ 持久化 = 目录即关联（`btw/<encodeCwd>/<mainSid>/`，注册表启动重建 hidden 复原）+ 重载链（applyEntry 全量回放；离线尾读含 btw 目录解析路径）+ 孤儿补账；仅主删级联删（deleteSession / deleteByCwd 连带）/ 显式关线，关闭/退出/闲置回收均不删；④ G4 三防线（目录隔离 / `hidden: true` / 不记工作区历史）——关联只服务生命周期与自身线列表，不进任何展示链；⑤ 派生资源边界（zcode selection side chat 先例对照）：命令族硬禁 + 派发能力保留 + 投影收窄（无 opener）+ 派生键三触发分层（失效保留 / 终结清除 / btw 驱逐同驱）+ model-only 行为契约注入；⑥ 挂起交互请求终态机（应答 / 撤回 / 失效 + 回收提醒/未读清除支），失效提示三路收敛——事件 invalidated 与快照对账差集两路写入收敛单入口 + 回放悬空对账独立路（信号源 = pi 会话文件持久层，不依赖内存簿记跨进程存活）；交互呈现现行形态 = **D8 降级启用**（V4 核实三通道抽离的 plan 通道不成立）：五类请求统一 drawer 内联确认条 + 富表单降档，三通道 per-vid 路由为未启用备手（产品意图仍为与主 agent 同形态保真，plan-store 分区化后可复评启用）。权威源：`.tmp/tech-design/btw-question.md`（设计文档，不入 git；实施记录 git 可追溯）。登记：数据面见 data-source-registry ⑧ btw 补登链；未新增约束族（机制边界由既有 C-ext-19 / C-pi-12/13 / C-data-01 等覆盖）。
 
+### ADR-0123 codemode 常驻默认开 + 设置页可关（2026-10-03 用户裁决，codemode 设计 T1 确认点）
+**决策**：codemode（pi 1.0 内置的脚本化工具调用能力）产品形态 = **常驻默认打开 + 设置页开关可关（默认显示开）**——用户零配置开箱即得。落地三支柱：① **启动迁移幂等写入**：settings.json `defaultTools` 字段缺失 → 写 `["+codemode"]`；字段存在（含坏值）→ 不碰，尊重手改——「字段缺失 = 未配置 = 默认开；字段存在 = 有人配置过 = 尊重」，与 pi `mergeDefaultTools` 缺失回落语义同构；② **开关写增量条目**：打开 = 先移除 `"-codemode"` 再按 pi 解析语义幂等补 `"+codemode"`；关闭 = 移除 `"+codemode"` 与纯名 `"codemode"` 后，数组为空时写 `["-codemode"]` 占位（防启动迁移写回、防落空数组），非空则保留其余条目原样——激活态单一事实源恒为 settings.json，禁止运行时 `setActiveTools()` 影子点亮；③ **spawn 恒带装载旗标**：pi spawn 参数恒带 `--extension builtin:codemode`（pi 1.0 起 `--no-extensions` 把内置扩展一并排除，缺旗标会「配置已开但会话未装载」）。
+
+**依据**：pi RPC 无 per-session 工具开关参数，settings.json `defaultTools` 是唯一持久控制通道；增量条目与用户手工编辑、MCP 侧 `autoEnableCodemode` 联动正交同向叠加。否决面：launch preset `--tools` 会话级全量枚举（pi 调整默认集即静默失真，多入口重复接线）；运行时激活 API（影子状态双源漂移）；纯开关无默认写入（违背默认开裁决）。
+
+**登记**：无新约束族。实装 = `packages/runtime/src/infra/pi/pi-codemode-settings.ts`（启动迁移 + 字段域 + 损坏 fail-fast 跳过告警）+ `packages/runtime/src/infra/pi/pi-settings-store.ts`（'tools' scope 与损坏检测单点）+ `packages/pi-rpc/src/spawn-args.ts`（恒带旗标）+ WS 通道（`packages/runtime/src/services/ports/codemode-settings.ts` / `packages/runtime/src/transport/codemode-message-handler.ts`）+ `packages/renderer/src/components/settings/system/SystemCodemodeSection.vue`。机制现状另登记于 [docs/CONTEXT.md](../CONTEXT.md)（codemode / defaultTools 词条）、[docs/FEATURE-PRIORITIES.md](../FEATURE-PRIORITIES.md) 与 [docs/architecture/data-source-registry.md](../architecture/data-source-registry.md) §6；设计文档 `.tmp/tech-design/codemode.md`（不入库，过程产物），本条即该裁决的现行登记处。
+
+### ADR-0124 出站结果回程契约：disposition 终局 + handled 通知 + 孤儿对账 + 命令出站形态（2026-10-04 设计裁决，pi1-disposition-chat-flow D1/D2）
+**决策**：出站条目的终局判定由 pi disposition 响应与投递标记回执双通道承接，终局事实一对一通知前端：
+1. **disposition 接线 + handled tombstone 终局**：出站 prompt（`promptWithBusyRetry`）读响应 disposition（rpc-client 出口经 `parseInputDisposition` 归一）；extension 命令被 pi 接管（disposition=handled）的条目不进 in-flight 等待，直接写入 `DeliveryTombstone`——终态固定为 delivered，语义从「送达事实」扩为「离开系统的事实」（不新造终态形态；cancelled 保持用户撤销专用——被接管混入撤销判据面会破坏 `isUserReclaimRejection` 双信号判据与「已投递不可撤」语义），继承断线重连 resync 判重防线。
+2. **终局通知**：内核经 WS 消息 `session.deliveryHandled { sessionId, clientUuid }`（一次性事件消息，非 last-value 快照）一对一通知前端；前端静默回滚三件套（移除乐观气泡 + 清空空窗计时器 + 递减在途计数），无错误提示。不采用快照消息承载（消息缺席无法区分取消/接管/丢失）与受理回执携带（受理回执必须即刻返回，等处置会让 reply 时延顶到 pi 处置时长、且把受理口径按车道割裂）。
+3. **孤儿对账**：`session.delivery` 快照到达（含断线重连回放）时，本地在途气泡的 clientUuid **曾经在场**（曾出现于任一帧投影——必要条件，防连发场景误清第二条气泡）且已离开在途（终态判据双分支：不在当前投影 / 在投影呈 delivered 终态）→ 按 handled 同形态静默清除。数据源 = delivery 快照投影而非 transcript 投影（pi 1.0 首次 flush 前会话文件不存在，transcript 口径不可判定；且仍在内核排队的条目会被误清）。**操作域限定（U2 实装收窄）**：对账清除只作用于受理回执 isCommand 登记的命令条目（useChat `handledDeliveryTargets` 在册成员）——普通消息条目终局必有 message_end 回执链管气泡，孤儿清除操作普通条目会在「快照帧先于 message_end 回执到达」窗口删掉已送达气泡（direct 车道降级豁免下构成文本丢失面）；命令条目不注标出站永无回执，是唯一悬挂源，清除恒正确。「本端无取消操作」豁免条件随操作域收窄结构性消解，无需取消豁免集合——命令条目撤销后清除恒正确（cancel 成功 → 内核删条目 → 下一帧「不在投影」分支清气泡，原文已回填草稿；cancel 竞态落败 → delivered 在场 → 命令已执行，清气泡同样正确）。曾见集合随对应气泡移除、上界 = 活跃气泡数；页面刷新后退化为「不清除」（保守方向，误清零风险），悬挂残留由重开 session 恢复。
+4. **命令识别 + 出站形态分型**：session 建立时经 `get_commands` 拉清单缓存；识别规则 = 文本 `/` 开头 + 首空格前段剥前导 `/` 后与清单 name 逐字精确匹配 + `source === 'extension'`（pi 侧接管判定只查扩展注册命令，匹配集与匹配口径两侧构造性一致）。识别为命令的条目出站**不尾附投递标记**（裸命令文本），终局凭据 = disposition 本身；未识别的 `/` 开头条目按普通消息带标记出站（实际被接管则 handled 仍驱动终局，纯单词漏识别则退化普通回合、与现状一致）；skill 与 prompt 模板输入恒走普通消息链路（注标出站 + message_end 回执——两类输入在 pi 侧展开开回合、不返回 handled，剥标记即无终局凭据）。清单拉取失败时全量按普通消息出站（兜底分支）。
+
+**效果**：命令终局时效从「永等 → 30s 超时」变为「响应即终局」；普通消息出站形态与送达回执链路零变化（pi 无输入持久化回执，标记 + message_end 命中是唯一送达凭据）。实装 = `packages/runtime/src/services/session/session-delivery-registry.ts` + `packages/session-delivery/`（内核）+ `packages/shared/src/protocol.ts`（`session.deliveryHandled` 消息）+ 前端消费（useChat / store）。登记无新约束族（ADR-0074 投递所有权内核的回程通道延伸）。设计文档 `.tmp/tech-design/pi1-disposition-chat-flow.md`（不入库，过程产物），本条即该契约的现行登记处。
+
+### ADR-0125 occupancy 事实驱动 + CP6 回落窗退役（2026-10-04 设计裁决，pi1-disposition-chat-flow D3）
+**决策**：occupancy（dispatching/generating/idle 投影）回落由事实凭据驱动，2 秒定时回落窗（CP6）退役：
+1. `deliverOne` 前置换位加 `turn === 'idle'` 条件——生成中出站保持 generating 不覆盖；handled 响应到达即主动回落 dispatching → idle（pi 权威回答取代时间窗猜测）。
+2. CP6 删除后的防悬挂承接 = `sweepInFlight` 对账扫描补 occupancy 收尾：confirm 分支（transcript 命中）与命令清单静默终局分支在清空该 session 最后一笔在途条目时，若 `turn === 'dispatching'` 则转移 idle（幂等门 = 仅 dispatching 才回落，不覆盖 generating/settling；真误判由 turn 事件自愈）。凭据 = transcript 命中 / 命令清单命中的事实（事件驱动），触发时机随既有 10s 宽限对账轮，不新增定时窗；requeue 分支（transcript 未命中重投）条目仍在途、不做收尾。
+3. **时间平抑红线登记**：CP6 的退役条件 = pi 提供权威去向事实——由 ADR-0124 的 disposition 接线达成。sweep 收尾动作的根因 = 「started 形态下回合事件异常不可达但 transcript 已有事实凭据」的残余形态兜底，退役条件 = pi 提供回合事件必达保证或输入级回执。
+
+**效果**：时间平抑类机制净减一；空闲发命令不干扰原回合生成状态。实装 = `packages/runtime/src/services/session/event-interpreter.ts`（CP6 删除 + sweep 收尾）+ `session-delivery-registry.ts`（前置条件 + handled 回落）。登记无新约束族。设计文档同 ADR-0108（不入库，过程产物），本条即该退役决策的现行登记处。
+
+### ADR-0126 pi 词汇合法持有点清单 + 泄漏机器检查（2026-10-04 设计裁决，pi1-disposition-chat-flow D5）
+**决策**：pi 词汇（pi 系 import / 事件名字面量 / 拒绝文案 / pi 方法名 / 协议类型）只允许出现在两层**合法持有点清单**内，清单外由 `.githooks/check_pi_type_leak.py` 五项机器检查拦截（类型项 + import / 事件名 / 文案 / 方法名四项）。**本条即清单 SSOT，与检查器文件头注同源维护——两处改一处必同步**：
+1. **合法持有点清单（两层）**：runtime 内 = `packages/runtime/src/infra/pi/**`（infra 门面层）+ `packages/runtime/src/services/session/session-delivery-registry.ts`（文件头封闭声明）；仓内 pi 系镜像层 = `packages/pi-rpc/**`（RPC 消息契约镜像）+ `packages/pi-subagent-cli/**`（pi spawn 事件直接适配器）。文案项更严：唯一驻留点 = `infra/pi`（消费方经 `infra/pi/pi-rejection.ts` 导入常量，清单内其他文件亦不得持有）。与类型项存量 ALLOWLIST（2026-08-22 过渡基线，独立专项治理）互不取代、不合并维护——两套白名单分管两类词汇。
+2. **事件名词表界定规则**：扫描词表 = `packages/runtime/src/infra/pi/pi-protocol.ts` 的 `PI_EVENT_NAMES` 常量数组值域（字面量唯一驻留点，兼作检查器词表派生载体——检查器启动解析提取，定位失败或空表 fail-fast 退出非 0，摘要行输出词表基数）。等价关系「常量表值域 ≡ PiEvent 联合判别值全集 − 同形剔除集」由同文件两层编译期断言机器强制（`as const satisfies` 子集层 + `PiEventNameDriftGuard` 的 ExpectNever 穷尽层）——联合扩成员而常量表与剔除集均未收即 tsc 红，剔除集扩容路径由该红灯获得机器触发入口；检查器 python 侧零第二套词表（扩联合后下次运行自动取到新词表，检查器代码零改动）。services 层引用 pi 事件名一律经 `PI_EVENT` 具名常量导入，字面量直写即违规。
+3. **同形剔除集（6 词，不进扫描词表防误报，与 pi-protocol.ts `PiEventNameHomoglyphExempt` 同源）**：trace-trigger 联合判别值 3 词（message_end / agent_settled / entry_appended——pi 原始事件名作 taiji 侧触发标签，已属 taiji 自有词表成员）+ compaction_end（taiji 判别值是连字符 'compaction-end'，pi 原词经 onTraceSync 宽 string 传值——该词无类型约束防线，防线下限 = 唯一用途点单点存在 + 评审承接）+ 通用词 2 词（status / error——taiji 通用词汇大面积同形）。
+4. **「检不出」盲区声明（口径边界，登记备查）**：(a) taiji 复合消息类型尾段（如 'message.message_start'）——字符串完整值 ≠ 词表词，属整串相等口径的选型理由而非盲区；(b) 无引号对象键形态（`{ agent_start: ... }`）——标识符键非字符串字面量，检不出（该形态的现存实例已随 plugin-bridge 退役删除；未来再现时扩「对象键」匹配形态为纯增量动作，检查器头注即重审触发器）；(c) 日志模板串内嵌——完整值 ≠ 词表词不命中，日志文本非协议穿透通道，保留原文。剔除代价如实登记：剔除集 6 词上的 L2 型泄漏（services 层直听 pi 原始事件流）检不住。
+
+**效果**：pi 升级的代码审查范围 = 合法持有点清单（类型项另含存量 ALLOWLIST 过渡基线）；检查上线以泄漏修法族落地为前置，首检红灯仅限设计登记的预期存量（整串口径）。同源对端 = `.githooks/check_pi_type_leak.py` 文件头注（白名单 / 词表派生规则 / 剔除集 / 盲区声明的检查器侧副本）与 `pi-protocol.ts` 剔除集断言红灯指引。登记无新约束族（既有 C-comm-02 延伸）。设计文档同 ADR-0108（不入库，过程产物），本条即该清单的现行登记处。
+
 ## 通信与协议
 
 ### ADR-0055 MessageBus：per-session 消息分发 SSOT
@@ -56,8 +89,8 @@ runtime→renderer 的 per-session 消息分发（`packages/runtime/src/services
 ### ADR-0016 ServerMessageType 类型约束（部分有效）
 事件/RPC 消息类型受 ServerMessageType 联合约束，emit 拼错编译期报错（原 event-bus 文件已随包重构消失，现形态 = protocol.ts 类型定义 + route-inbound 分发，约束精神不变）。
 
-### ADR-0010 / ADR-0012 Extension UI 独立通道 + plugin bridge（0012 部分有效）
-pi extension 的 confirm/select/input 交互走独立 `extension.ui_request`/`extension.ui_timeout` 事件，与 Tool Approval 的 tool_call_pending 语义隔离、错误隔离。plugin-bridge（`extensions/taiji/plugin-bridge`）是插件工具进 pi 的唯一适配层，转发机制现为 select marker 通道（与 session-manager/ask-user 同构）。登记 C-comm-12。
+### ADR-0010 / ADR-0012 Extension UI 独立通道（0012 的 plugin bridge 部分已退役）
+pi extension 的 confirm/select/input 交互走独立 `extension.ui_request`/`extension.ui_timeout` 事件，与 Tool Approval 的 tool_call_pending 语义隔离、错误隔离；该通路的现行形态 = event-adapter 直接消费 pi 事件按结构化字段路由（ADR-0111）。plugin-bridge 已整体退役（插件工具进 pi 通路暂缺，现行登记见 `docs/todo/plugin-tool-access-gap.md`）。登记 C-comm-12。
 
 ### ADR-0024 FileChanges runtime 解析通道
 event-adapter 在 tool_execution_end 按 write/edit 分派提取 FileChange（参数名 path 为契约权威），bash 不解析、由回合边界 git 对账补齐 delete/bash 变更；runtime 只推 accumulating/ready 两态，审查态归前端。登记 C-comm-04。
@@ -165,10 +198,21 @@ managed session 完成通知从「每次 settle 无条件回流（CompletionBack
 
 过程设计文档为不入库产物（已随交付弃置）——**本 ADR 即决策现行登记处**，实施记录 git 可追溯（commit d06d9464a 起）。
 
+### ADR-0127 extension_ui_request 通路结构化契约（2026-10-04 设计裁决，pi1-disposition-chat-flow D6）
+**决策**：extension UI 交互通路按结构化字段路由，bridge 中介零驻留（plugin-bridge 已整体退役，RPC 事件 payload 是 event-adapter 对 pi 事件的直接消费，无转发注入）：
+1. event-adapter 从 pi RPC 事件 payload 派生结构化字段：`method`（pi 1.0 RPC 实发全集 9 个：select / confirm / input / editor / notify / setStatus / setWidget / setTitle / set_editor_text）、`kind`。`extensionName` 不派生（U4 实装裁决：pi 1.0 extension_ui_request 九变体 payload 均无扩展名字段——dist rpc-mode.js + rpc-types.d.ts 实读核实，强加即恒 undefined 死字段；扩展归属信息仅 extension_error 事件自带 extensionPath，该事件翻译处保留该字段）。
+2. **kind 词表三值（dialog / notify / widget），值值有消费点**：dialog 族 = `extension.dialog`（载荷 dialogKind ∈ select/confirm/input/editor，需回包族）；notify 族 = `extension:notify`；widget 族 = `extension:widget`。setStatus / set_editor_text 与 select 的 marker 家族（session-manager 通道 / inflight 上报）属 runtime/前端内部状态上报——**不进 kind 词表、保持特化出口**（进词表判据 = 该值物化于某族 WS 消息载荷并驱动路由，防词表死分支；亦避免与 event-adapter 内部路由字段 PiTranslatedEvent.kind 撞名）。setTitle 无出口：warn 留痕 + noop（pi 升级语义变化可诊断）。
+3. transport handler 与前端按消息类型路由（取代 marker 字符串分支识别）；marker 约定 → 结构化 kind 的翻译职责收敛在 event-adapter（合法持有点内，见 ADR-0110），title 降级为纯展示。
+
+**效果**：新通道接入 = 声明一处；kind 词表与 9 method 映射表即终态实有值（无死分支），可作实施对账底表；taiji 协议零 pi 专有方法名穿透（由 ADR-0110 方法名项检查拦截）。实装 = `packages/runtime/src/infra/pi/event-adapter.ts`（派生与分发）+ transport handler 消息类型路由 + `packages/core/src/transport/api/domains/extension.ts`（前端消费）。登记无新约束族。设计文档同 ADR-0108（不入库，过程产物），本条即该契约的现行登记处。
+
 ## 状态管理范式（renderer/core）
 
 ### ADR-0049 per-session Map 分区范式（最高频引用）
-任何持有 per-session 状态的 composable/组件必须用 `useSessionScopedState` 工厂（`packages/core/src/foundation/use-session-scoped-state.ts`，内部 Map<sessionId,T> 分区）；禁止实例级状态依赖组件树隔离、禁止 watch(sessionId) 手动清空。WS handler 必须用 `updateFor(capturedSid)` 显式分区（结构性消除切换竞态）；cleanup 统一挂 `useSidebar.deleteSession → triggerSessionCleanups` 销毁编排，纯加状态不接线清理的 PR 打回。例外清单显式登记（useSessionEvents 订阅编排层、全局 sid 协调器类模块级 Map、Pinia factory 体内 Map、useTerminal 混合形态、TurnRenderCache shallowRef 容器、useTtsPlayer 全局单例播放状态——同一时刻每窗口只有一条消息在朗读，状态窗口级唯一而非 per-session，cleanup 走 deleteSession 统一编排调 stop）。**范围修订（ADR-0074 投递所有权内核）**：队列区状态不作为独立 cleanup 注册项——现役载体 = 投递内核的 per-session 投影（`session.delivery` 帧消费），清理点在 core `useChat.disposeSession`（随 `deleteSession → triggerSessionCleanups → disposeChat` 编排一并执行），renderer 侧注册清单不新增队列分区项。机器防线：taste-lint `no-instance-level-session-state`（error 级）。登记 C-state-01、C-state-08。
+任何持有 per-session 状态的 composable/组件必须用 `useSessionScopedState` 工厂（`packages/core/src/foundation/use-session-scoped-state.ts`，内部 Map<sessionId,T> 分区）；禁止实例级状态依赖组件树隔离、禁止 watch(sessionId) 手动清空。WS handler 必须用 `updateFor(capturedSid)` 显式分区（结构性消除切换竞态）；cleanup 统一挂双壳各自的删除编排入口（桌面 `useSidebar.deleteSession` / 移动壳 `app-runtime.deleteSession`，两者均归入 core `triggerSessionCleanups` 统一执行）销毁编排，纯加状态不接线清理的 PR 打回。例外清单显式登记（useSessionEvents 订阅编排层、全局 sid 协调器类模块级 Map、Pinia factory 体内 Map、useTerminal 混合形态、TurnRenderCache shallowRef 容器、useTtsPlayer 全局单例播放状态——同一时刻每窗口只有一条消息在朗读，状态窗口级唯一而非 per-session，cleanup 走 deleteSession 统一编排调 stop）。**范围修订（ADR-0074 投递所有权内核）**：队列区状态不作为独立 cleanup 注册项——现役载体 = 投递内核的 per-session 投影（`session.delivery` 帧消费），清理点在 core `useChat.disposeSession`（随 `deleteSession → triggerSessionCleanups → disposeChat` 编排一并执行），renderer 侧注册清单不新增队列分区项。机器防线：taste-lint `no-instance-level-session-state`（error 级）。登记 C-state-01、C-state-08。
+
+### ADR-0121 回放重复防御范式：同源查重 + 跨源清洗两层各管一段（2026-10-03 设计裁决）
+chat 消息流对重复投递的防御按重复来源分两层，各管一段、不互相兜底：**同源重复**（同一 runtime 消息流同一 messageId 的重复投递——订阅失败后重订的全量回放、重连重订与缺失段回拉的重叠段）走**消费端 messageId 查重**：`packages/core/src/domain/chat/effects/registry.ts` 的 `message.message_start` handler 见同 id 气泡已存在则复用不 append；查重命中仅跳过 append——不改已有气泡 status（已终结保持终态由 sealed guard 幂等丢弃后续 delta，内容不丢；流式中保持 streaming，delta 由「最后一条 streaming assistant」定位继续累积到原气泡），`clearPendingSend` 照常执行（早返回会跳过 clear，把乐观发送态卡在 pending 窗口）。**跨源重复**（getHistory 基线的 entry 派生 id 与回放消息的 runtime messageId 是不相交 id 空间，查重结构性不命中）走**切入链时序 + 基线合并清洗**：先订阅（切入链步 5）后拉基线（步 9），首订回放产物经 `packages/core/src/domain/chat/store.ts` 的 `mergeBaselineWithLive` 尾部保护段清洗（已终结实体被基线替换）；双壳切入时序一致是该层成立前提。链外残余窗口（重连全量重订落在已加载分区）允许瞬态重复，残留至下一次清洗触发点（再次切入或 connected 边沿对账，同走 `mergeBaselineWithLive`）收敛为单份。**不采用**：①链外全量回放后强制基线合并清洗增强——链外重复属同源重复，查重已防住；②回放期序号门扩展（`subscribeSession` 回放前置「回放中」状态供序号门判定）——引入 subscription-state ↔ registry 跨模块状态耦合，其内容级双计防御的独立价值登记 [docs/todo/long-stream-delta-double-count.md](../todo/long-stream-delta-double-count.md) 观察项（触发条件 = 链外全量重订回放落在已加载分区且该分区含流式中轮次；症状判别 = 流式中气泡内容跳增（双计）或无头 delta（新气泡仅 delta 片段）；重审触发 = 真机复现内容跳增即重启该方案）。
 
 ### ADR-0043 消息模型 Segment[]
 user message content 为 Segment 判别联合（text/skill/file/mention），badge 信息从 composer DOM（getSegmentsFromEl）结构化传递到渲染层；序列化/反序列化各只一处（segmentsToPrompt / parsePiUserContent）；归一化函数在 `packages/shared/src/segments.ts`。assistant/system 仍为纯 string。登记 C-state-02。
@@ -274,6 +318,8 @@ skill 候选两态统一 taiji 源：globalSkills ∪ projectSkills（location �
 ### ADR-0054 Browser Drawer 用 WebContentsView
 内嵌网页用 WebContentsView（任意 URL + 独立 preload + CDP target），排除 iframe（X-Frame-Options 硬伤）与 webview tag（官方 discouraged）。实装 `apps/electron/main/browser/browser-view-manager.ts`。登记 C-build-06。
 
+[2026-10-04 理由边界修正] 「禁 iframe」的排除理由（依赖 `X-Frame-Options` / CSP `frame-ancestors` 的硬伤）只对**嵌入第三方远程网页**成立——目标站响应头拒绝被嵌。本地 HTML 文件由应用自有 `protocol.handle` 服务、响应不携带这些头，理由不命中；对话流 HTML 产物预览走 `sandbox="allow-scripts"` iframe（无 `allow-same-origin`、文档落 opaque origin、网络出站由内容级 CSP 封死）不在本条禁用范围。边界收窄同批落 `constraints.json` C-build-06 与 [ADR-0118](#adr-0107-对话流-html-预览与产物落点约定2026-10-04-设计裁决chat-html-support)。
+
 ### ADR-0066 太极·玄纯灰 V3（唯一现行视觉 ADR）
 全族去冷蓝换纯灰（bg/surface/neutral/border 同步），accent 弱蓝灰 `#a5adc2`（见下方补记），状态色保留极弱色相（M/A/D badge 语义辨识下限）。值权威 = `packages/renderer/src/style.css`（暗色默认，亮色 [data-theme=light] 镜像）。视觉演化史见 [docs/design-evolution.md](../design-evolution.md)。
 
@@ -355,14 +401,26 @@ subagent 体系的资源面决策三条现状（原记于包内 `extensions/univ
 | D7-40 | ui↔renderer 镜像族收编 @taiji/shared（镜像守卫生效后的正式收编） | 下次 renderer 域改动立项时顺带 | 3 处镜像归 shared 单份，守卫测试删除 |
 | D7-41 | 惰性恢复跨 timer fire 子态发帧（attempt 让位裸 return 不置标志 → 三信号皆 miss；根治 = 第四信号或让位腿 join+标志改造，需裁决 join 失败记账归属） | 该格 UX 收口退化——症状锚点 = 活 session 回落 dead 终态页需手动解锁，或下次 respawn 域专项 | 判据封闭或收口机制重构 |
 
-### ADR-0074 窗口外壳 mimic_mac 形态维持（issue #24 复核 reaffirm，2026-10-01）
+### ADR-0115 窗口外壳 mimic_mac 形态维持（issue #24 复核 reaffirm，2026-10-01）
 GitHub issue #24（Windows 10 窗口外壳四问题）复核结论：用户抱怨全部指向 win/linux 自绘路径的实现缺陷（悬停圆点消失、16px 图标溢出 12px 圆点、侧栏顶部不可拖拽、四角色差方块、默认尺寸不看屏幕），无一条指向「自绘彩色圆点放左侧模拟 mac」的形态本身——无推翻既定裁决的新证据，mimic_mac 维持（三平台左上视觉统一，数值 SSOT = [DESIGN.md §11](../DESIGN.md)）。窗口控制按钮改为各平台原生风格的方案不采用（三平台视觉从此分裂，破坏「跨平台同一工作台」气质）。实现缺陷已在同批修复：悬停同色覆盖 + 8px 图标锁定 + 非 mac 顶部拖拽条带（DESIGN.md §11 增补段）。
 
-### ADR-0075 窗口圆角策略：应用内圆角仅 mac，不加窗口配置键（2026-10-01）
+### ADR-0116 窗口圆角策略：应用内圆角仅 mac，不加窗口配置键（2026-10-01）
 三平台窗口圆角策略定案：mac = 系统圆角 + AppShell 根节点 `rounded-[10px]` 保留；Windows 11 = 无边框窗口系统默认圆角（Electron `roundedCorners` 默认值即 `true`，实装依据 electron.d.ts 平台标注 darwin/win32）；Windows 10 与 Linux = 方角（OS 能力边界）。应用内圆角仅 mac 渲染（AppShell 根节点 setup 期 `detectPlatform()` 类绑定，非 CSS 选择器分支——避免非 mac 首次渲染 rounded 闪现，且组件测试可断言）；非 mac 四角与窗口内容同色，色差方块随应用内圆角关闭而消除。两条不采用登记防复发：① **显式声明 `roundedCorners: true`**——默认值即 `true`，显式化行为增量为零（Win11 本就圆角、Win10 键无效果、Linux 键不适用），零收益纯维护成本；② **透明窗口统一圆角**（`transparent: true`）——丢失系统贴边吸附与投影、部分 Linux 合成器直接失效，为视觉细节引入 P0 级窗口行为风险。
 
-### ADR-0076 窗口尺寸持久化三字段裁决：{width, height, isMaximized}、仅主窗口、close 同步 flush（2026-10-01）
+### ADR-0117 窗口尺寸持久化三字段裁决：{width, height, isMaximized}、仅主窗口、close 同步 flush（2026-10-01）
 非 mac 平台的窗口尺寸持久化（`<getDataDir()>/window-state.json`）字段恰三件 `{width, height, isMaximized}`，四条语义裁决：① **位置（x,y）不持久化**——窗口由 Electron 默认居中放置；已接受代价：多显示器用户重启后窗口回主屏居中、不记忆用户摆放位置（位置记忆引入恢复错位问题家族——副屏拔除后窗口开在不可见区域、「相交不足一半丢弃」的阈值裁决、恢复归属歧义，收益与证据不匹配；重审触发 = 用户反馈不可忍受）。② **仅主窗口写者**——只有 bootstrap 创建的主窗口挂持久化监听与启动恢复（`isMainWindow` 门标志），create-window IPC 迁移窗口不读不挂，持久化文件全局单写者，多窗口 last-writer-wins 互踩结构性消除。③ **close 同步 flush**——关闭事件取消防抖定时器立即落盘，`isMaximized` 取退出时刻窗口实际值：「最大化→直接关闭」序列下最大化期间跳过写、无防抖数据，须以退出时刻状态落 `isMaximized: true`，重启才能按正常态尺寸 show 后恢复最大化，同时消除防抖窗口的退出竞态。④ **最大化/全屏态跳过防抖写**——字段恒记最近一次正常态尺寸；resize/move 防抖 500ms 合并写；启动读取损坏/字段非法 → 丢弃回默认尺寸 + warn 日志（不阻断启动），合法值 clamp 到当前工作区后生效。实装 `apps/electron/main/window/window-state.ts`（不 import electron，窗口经最小结构接口注入；tmp+rename 原子写）。默认尺寸公式（主屏工作区 62%/75%、cap 1440×960、下限 800×600）与 darwin 分支恒 1200×800 的零改动边界同属本条裁决，数值权威 = [DESIGN.md §11](../DESIGN.md)。
+
+### ADR-0120 远程访问凭据走跨进程文件热读，开启信号走 argv flag（2026-10-03 用户裁决登记）
+
+**决策**：远程访问（手机浏览器经局域网直连 runtime，词条见 [CONTEXT.md](../CONTEXT.md)）三个通道裁决：
+
+1. **remote token 凭据通道 = `<dataDir>/remote-access.json`（0600）跨进程文件**：main 是唯一写者（`apps/electron/main/remote-access/store.ts`，原子写 = 同目录 tmp + fsync + renameSync，防读侧撕裂），runtime **每次 WS auth 握手时读文件取当前值**（`packages/runtime/src/infra/remote-access.ts` 的 `readRemoteAccessToken`，由组合根以 `remoteTokenProvider` 注入，关态不装配零 IO）——token 轮换 = main 重写文件即生效，不重启 runtime、不中断在途 turn；文件缺失/损坏 → remote 凭据成员为空、退化为仅 spawn token 可认证（fail-closed）+ 频控日志（同因首次响亮含恢复指引，读取成功即重置）。
+2. **开启信号 = argv flag `--remote-access`（配套 `--mobile-dist=<path>`），新增 env 键 = 0**：listen host（`127.0.0.1` / `0.0.0.0`）是启动期一次性决策，supervisor 按 `remote-access.json` 的 enabled 在 spawn 时现读拼参（非快照）；argv 不经环境变量继承链——scripts 直跑、验证脚本、vitest e2e 池等非 supervisor 启动路径不传 flag 即天然关态，构造性免疫、无需任何剥除机制。
+3. **shape 判据单源 = shared**（`packages/shared/src/remote-access.ts` 的 `isRemoteAccessConfigShape` / `REMOTE_TOKEN_HEX64` / `REMOTE_ACCESS_FILENAME`）；main 写侧从严（hex + createdAt 全验）、runtime 读侧从宽（enabled=false 早退跳过 hex）的不对称是文档化刻意差异，不上收、不参数化。
+
+**依据**：① env 注入 remote token 不可行——env 在 spawn 时固化，「轮换即时生效」与「桌面无感（重启 runtime 会杀 pi 进程树、中断在途 turn）」不可兼得：轮换触发重启则杀在途 turn，不重启则 runtime 持有旧值永不刷新；文件热读使「轮换 = 写文件」由构造成立。② env 开启信号不可行——关态剥除只挂 supervisor spawn 一路，仓内存在多条直跑 runtime 的启动路径（`validate-runtime-bundle.sh`、verify-ws-auth 等验证脚本、e2e 池），任何一条漏剥即 fail-open（LAN 监听面）；argv 判据让该整族路径不传 flag 即关态，无需逐路径设防。③ main/runtime 共享 dataDir 是既有架构约定（`resolveRuntimeToken` 读 `<dataDir>/runtime-token` 同通道先例）；auth 是低频事件（每连接一次），每握手读 4KB 文件成本可忽略。④ 轮换不踢存量已认证连接（auth 只门禁握手是现状语义）——「怀疑泄漏」的完整处置 = 面板轮换（断新接入）+ 关开开关（重启 runtime 踢全部存量连接），登记于 CONTEXT.md「remote token」词条。
+
+**登记**：契约 SSOT = `packages/shared/src/remote-access.ts`；配置面 = `apps/electron/main/remote-access/`（写侧）与 `packages/runtime/src/transport/connection-manager.ts`（读侧鉴权消费）；无新约束族、无新增机器检查——fail-closed 语义由 connection-manager 单测锁定（E5 dist 探测 / E10 损坏重建处置单测在位）。设计过程产物 `.tmp/tech-design/remote-use-mobile.md`（不入库、git 不可追溯），本条为通道裁决的权威登记处。
 
 ## 已否谱系（决策已过时/被推翻，一行注记防重新发现旧坑）
 
@@ -440,3 +498,126 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **登记**：无新约束族（推拉纪律承 ADR-0097）；实装 = `packages/shared/src/protocol.ts`（两 RPC 契约与错误码闭集）+ `packages/runtime/src/services/session/session-records.ts`（指纹扩维）。设计文档 `.tmp/tech-design/workflow-visualization.md`（不入库，过程产物）；本条即该决策的现行登记处。
 
+
+### ADR-0107 展示容器三形态拓扑与内容归属：右抽屉 / 底抽屉 / 浮层，容器注册表为唯一权威（2026-10-03 设计裁决，display-containers §6.1/§7.1/§7.2）
+**决策**：展示型内容按内容形状分进三个固定容器——右抽屉（竖长阅读型，终态 8 tab：git/doc/detail/subagent/bashTask/plan/btw + workflow 回落载体）、底抽屉（横宽输出流，本期仅 terminal 一种内容、不预设 tab 枚举——第二种横向内容出现时它才从「终端面板」升格为「容器」）、浮层（全画布：browser/workflow）。内容归属的声明处 = 容器注册表（core 纯数据 + 图标标识串，ui 层映射组件），DrawerPanel 硬编码 tabs 数组改注册表驱动；注册表为唯一权威，ui 壳组件与 core 协调函数都读它、禁止各自文字化。workflow tab 保留作 [ADR-0104](#adr-0104-workflow-可视化入口语义分立openworkflow-改向-overlay--openworkflowindrawer-显式-drawer-语义2026-10-02-设计裁决workflow-visualization-d1) 回落链载体（L1 常驻第 8 图标，主入口仍浮层；回落触发面 = 浮层装载/渲染失败，render-error 链实装已核实）。TraceInspector 临时上下文页不入 L1 注册表（slot 首位注入绕过 activeTab 体系），在老能力映射表登记保位。右抽屉默认 activeTab 从 'terminal' 改 'git'（枚举收窄后首项且高频）。控制态粒度：开合态 per-session 分区（useSessionScopedState 范式）；尺寸类（底抽屉 heightPct）= 全局布局值全局单键 `taiji:bottom-drawer-height` 持久化（对齐右抽屉宽度 `taiji:drawer-width` 先例，姊妹容器同构尺寸同粒度）、显示期 clamp 不写回持久值、拖拽区间 15%–70%。
+
+**依据**：不采用「单抽屉优化」——terminal 半宽折行与 browser 死腔证明竖长容器承载不了形状错配的内容，容器级问题抽屉内优化无解；不采用「自由 docking 互移」——见 ADR-0109。注册表机制的证据 = 10 tab 硬编码已拥挤 + browser 死腔无人发现（归属无声明处）。
+
+**登记**：无新约束族（拓扑经注册表数据结构自承载）；实装 = `packages/core/src/domain/drawer/registry.ts`（新）+ `packages/core/src/domain/bottom-drawer/` + `packages/core/src/domain/overlay/`，W0-W2 分波（W0 注册表先载旧 10 条行为不变）。设计文档 `.tmp/tech-design/display-containers.md`（不入库，过程产物）；本条即该决策的现行登记处。
+
+### ADR-0108 tab 两层上限：类型层容器拥有，实例层内容拥有，二选一不叠加（2026-10-03 设计裁决，display-containers §6.3）
+**决策**：任何容器内可见 tab 最多两层。L1 类型层（固定图标列表，回答「这是什么类型的东西」）由容器拥有；L2 实例层（文档式 tab 条或组件内部导航，回答「具体是哪一个」）由内容拥有；**实例层要么在组件内部、要么用容器统一实例条，二选一不叠加**。本期唯一新增实例层 = detail 多文件 tab（做在 detail 面板内顶部；keep-alive 多实例共存——切换不丢滚动位置与 diff/preview 模式态；注入语义 = 入口命中未开文件新增 tab 并激活、命中已开仅激活、不设打开上限）；PlanDocsPanel 文档切换条与 BtwPanel 线列表属组件内部导航，维持不变。
+
+**依据**：不采用「容器层统一实例条」——与组件已有内部导航叠成三层，tab 套 tab 是公认混淆源；DESIGN.md §6.3「形态 B：icon 一级 + 各 tab 自治二级」既有方向；现状 PlanDocsPanel 证明组件内部导航够用。
+
+**登记**：无新约束族；实装 = `packages/renderer/src/composables/features/file-tree/useDetailPane.ts`（单值→map）等，W3（顺带承接 detail 展示链 per-session 化终局解——selectedPath 全局单值串线与 DetailPane 单实例清空）。设计文档同 ADR-0107；本条即该决策的现行登记处。
+
+### ADR-0109 固定家 + 显式双入口，否决内容自由互移（2026-10-03 设计裁决，display-containers §6.4，承 ADR-0104 模式推广）
+**决策**：每种内容一个固定归属容器；个别内容多一个备用容器，靠内容标题栏上的显式动作（「浮层展开」/「收回抽屉」）切换；入口函数语义分立——`openX` 与 `openXInDrawer` 两个函数、不叫同一函数传参区分（ADR-0104 已验证模式的推广）。本期双入口只给 workflow（既有）；subagent 浮层 trace 模式（左右分栏）为 W4 后续，本期 SubagentTab 零改动，「浮层展开」动作位随 W4 trace 模式一并设计（不预埋不可见的视觉占位，display-containers §5.4）。
+
+**依据**：不采用自由拖拽互移——①多数内容只在一种形状里是对的（browser 在竖长抽屉里的死腔即证据）；②移动要迁移运行态（终端 PTY 不能死、浏览器 view 要重挂定位），成本 = 内容数 × 容器数；③ VS Code 的视图自由移动是其最复杂、使用率最低的功能之一。用户要的不是互移，是「这个实例此刻需要更大空间」——尺寸拖拽 + 展开/收回动作已覆盖。
+
+**登记**：无新约束族；W4 实装 subagent trace 模式时落动作位。设计文档同 ADR-0107；本条即该决策的现行登记处。
+
+### ADR-0110 键盘栈序：Esc 固定层级序唯一属主 + 模态表面聚合双键旗标 + 局部表面执行序两档 + view 转发键清单（2026-10-03 设计裁决，display-containers §6.7）
+**决策**：① Esc/⌘W 关闭序 = **固定层级序**（浮层 → 底抽屉 → 右抽屉，不按开序时间记账、状态模型不存开序）；全关后 ⌘W 才关窗口。② Esc 唯一属主 = AppShell 层栈序编排器（window keydown bubble 监听、根 setup 首位注册，isComposing 前置守卫；存量 WorkflowVizOverlay 与抽屉侧 Esc 监听拆除——现状双裸监听同按双关已核实）。焦点所有权五层分派：焦点所在内容自消费 Esc 时编排器让位（未收编模态族 / staging 活跃态与地址栏编辑态 / 底抽屉终端聚焦——xterm 5.5 Escape cancel 实装 stopPropagation 事件到不了 window、禁 capture 接管 / 浮层浏览器页面内——Esc 归页面自身语义）。③ **模态表面聚合**（AppShell 级开合态注册单一事实源）成员带旗标组：`yieldsEsc` / `yields⌘W`（两键让位各自独立）与 `shieldsView`（原生 view 遮蔽联动）。弹出层族（reka DismissableLayer 托管的 Popover/Select/ContextMenu）**只让 Esc 不让 ⌘W**——reka 不以 ⌘W dismiss，让位即死键（按键无动作且无递进）；模态族（有未提交输入保护理由）双键均让位。指针驱动瞬态表面（HoverCard/Tooltip 类）显式豁免双旗标（hover 中按 Esc 双动作登记为已知可接受边界）。④ **局部表面 Esc 消费方按相对编排器执行序两档分流**：先行档（capture 相任意节点 / document 级（树序压倒注册序）/ 元素级冒泡先达）= 消费即 preventDefault 约定；后行档（window bubble 且注册晚于编排器，全仓唯一 = SessionList escCount）= 入聚合让位登记，开合态绑删除确认态本体（SessionItem 确认态 / folderConfirmingCwd 聚合谓词），非 escCount 广播计数器（单调递增非状态本体，误绑 = 全局 Esc 死键）。⑤ `` ⌃` `` = 底抽屉开关，主进程 before-input-event **窗口级**拦截（⌘W 同款转发链；不经 shortcut-registry/globalShortcut——那是系统级全局键，会全系统占用并抢走其它应用同键；失焦时无动作）。⑥ 焦点进入浮层浏览器 WebContentsView 后，三键（⌃`/⌘W）连同 app 快捷键族（⌘K/⌘,/⌘[ 等，renderer 注册处 IPC 上报）经 **view 转发键清单**接管（双端匹配配对契约 + 键矩阵单测）；**Esc 不入清单**（页面所有权优先）。焦点契约：任一容器关闭后焦点回 composer；staging 活跃态与浮层浏览器地址栏编辑态聚焦时 Esc 优先服务输入语义（不触发容器栈序）；裸 composer 输入态无 Esc 消费面、Esc 走层级序（第 5 层，与现状一致）。
+
+**依据**：现状 Esc 双裸监听（overlay 仅 preventDefault 不阻断传播 + PanelContainer 裸挂）同按双关——统一编排必须拆其一；⌘J 已被 fast-handoff 占用（选键历史注释明言）；VS Code `` ⌃` `` 为窗口级（肌肉记忆现成）；弹出层族 wrapper 补 preventDefault 方案被否决（反杀 reka 自身 dismiss——`if (!event.defaultPrevented) dismiss` 判定在前，须再手动关闭的组合改造逐 wrapper 侵入）；「聚合注册同步于开关动作」硬约束对 reka 托管弹层无自然钩子，降档为 flush 时序 + 注册序前提（编排器根 setup 先注册，FIFO 同相位先执行让位判定）。
+
+**登记**：门禁项 = Esc 消费方扫描脚本化（先行档无 preventDefault / 不在任一档登记即红；reka 原语 import 纳入扫描锚点防直接组装盲区）随 W1 单测族或交付后落地；实装 = 编排器/聚合新模块 + 局部表面改造 + window-factory ⌃` 拦截，W1。设计文档同 ADR-0107；本条即该决策的现行登记处。
+
+### ADR-0111 docked 死状态删除（2026-10-03 设计裁决，display-containers §6.6③）
+**决策**：`DrawerControlState.docked` 与其全链（pin 图标 / emit 链 / toggleDrawerDock / useSideDrawer re-export / i18n key）整体删除——全仓唯一消费方是 pin 图标变色与 title 切换，无任何行为逻辑（close() 无 docked 门、无条件置 isOpen=false），死状态机械清扫，无行为回归。
+
+**依据**：保留 = 假功能信号（用户点 pin 期待行为、实际无任何效果）；删除安全性经源码核实（单消费方）。
+
+**登记**：无新约束族；实装 = W0 状态还债单元（与选中态迁出、瞬时参数分区同批）。设计文档同 ADR-0107；本条即该决策的现行登记处。
+
+### ADR-0112 原生 view 层级共存守卫与显示收口（browser 浮层复活配套，2026-10-03 设计裁决，display-containers §7.4）
+**决策**：WebContentsView 恒渲染于宿主全部 DOM 之上（z-index 不可穿越），配套四条守卫：① **显示收口谓词**——view 显示当且仅当「浮层开 ∧ 内容 browser ∧ 无错误态 ∧ 无相交 shieldsView 面」；错误态（页面加载失败 / create 失败 reject / render-process-gone）主动 `browserHide`（keep-alive 幂等），三触发恢复动作一律收敛到对该单一谓词求值、禁止各触发独立 show（防恢复通道竞态）。② **shieldsView 几何相交双阈值空间滞回**——进入隐藏 = 遮蔽面与 view 原始矩形相交；退出隐藏 = 与外扩矩形（外扩 N px）仍完全不相交；缓冲带内两切换条件皆假、双向状态保持（施密特结构）；显式不采用 debounce / 时间滞回（时间平抑红线——空间解可达成同一目的）；重算触发面 = resize + rect 推送链 + 成员开态内 rect 变化 + 浮层内容切换。③ **浮层随行**——浮层开着切 session 时 view 换显豁免（内容与 view 保持发起会话的，视口不空白）；`focus()` 收口：非「浮层开 ∧ 内容 browser」态只隐藏不显示（实装 `focus(sessionId)` 无条件 `_showEntry` 与「恢复现状语义」矛盾——关浮层→切走→切回的残影旁路，主进程/renderer 改动项；browserFocus 生产调用面唯一已核实）。④ **会话删除级联**——仅发起会话触发浮层关闭 + view 销毁（SessionCleanupHooks browser 分支 + browserDestroy）。错误通道：`browserCreate` IPC 失败改 reject（现状 create 失败仅主进程 warn 静默）；池满不是失败（LRU 自动淘汰）。
+
+**依据**：仓内 view 池 hide() 残留事故前科（[HISTORICAL] 注释在案）；Toast 相交隐藏期重开浮层的 show 竞态、关浮层后切回的复显反例（逐路径推演 + 实装核实）。
+
+**登记**：无新约束族；实装 = `apps/electron/main/browser/browser-view-manager.ts` 等主进程半边，W2；S9/S10 真机断言对账（含滞回两半边）。设计文档同 ADR-0107；本条即该决策的现行登记处。
+
+### ADR-0113 终端多实例：实例编号贯通四层 + runtime 为注册表与序号分配事实源 + 世代判据 = token 变化（2026-10-04 交付，terminal-multi-instance）
+
+**决策**：一个会话内可并行多个终端，主键由「会话 id」升为「实例编号」——① **编号格式** `term:<会话id>:<序号>`：序号由后台按会话维度分配、会话内单调递增、**实例关闭后不复用**（复用会让迟到 exit 帧误清新实例分区、清理到达前的旧残留串入新分区）；枚举/归属校验一律取**精确前缀 `term:<sid>:` + 序号段数字校验（`^\d+$`）**，禁按冒号切分取段；由编号反解 sid / 序号则取最后一个冒号前的余段 + 数字校验（sid 域不含冒号由格式保证；该口径把「sid 域不含冒号」从必要条件降级为防御项）。② **事实源 = runtime**：注册表 = 重键后的 `ptyMap` 派生视图（键集即存活实例全集，不建平行结构）+ 会话级序号计数器；**否决「live 键 max+1 纯函数派生」**（实例死绝后 max 回落会复用编号，竞态窗口无键隔离）；界面经新增查询帧 `terminal.list` 在**三触发点**（⌘R 刷新 / 会话激活 / 世代变更重连）对账恢复，对账范围钉死为被查会话（他会话键不参与增删）。③ **世代判据 = auth token 是否变化**（端口值不可靠——`findAvailablePort` 重启常落回原端口；`runtime-port` 广播沿是世代变更的保守超集，含无新进程的幂等分支）；**重置触发面收窄为世代变更**，同世代 WS 闪断不重置（宽触发会清空仍有效的输出历史、且派生无触发点的订阅重建义务）；重置枚举含输出分区、写队列状态机（滞留命令丢弃 + 提示）、**模块级订阅表先退订再清空**（跨世代同形键会命中幂等守卫致新世代订阅静默 no-op）；旧 token 不可得时保守判为世代变更。④ **关闭语义**：主动关闭与自然退出（exit/崩溃）同语义——切换条移除 + 三腿清理（输出分区 / 写队列实例态 / 模块级订阅退订）；「最后一个实例禁用关闭」是 **UI 供养规则而非域不变量**（唯一实例可自然退出归零至空态）；会话删除与 runtime shutdown 均级联全量杀链（新增 shutdown 步骤 `dispose-terminal-pties`，紧随 `server-stop`）。⑤ **三码互斥**：`unknown_terminal_id`（注册成员资格的否定回执，**唯一触发回收**的码）、`terminal_id_required`（缺编号 / 编号类型非法的畸形帧）、`terminal_id_session_mismatch`（编号会话段与请求会话不一致）——后两者走普通错误通道、不触发回收（同码会把仍存活的实例误判为幽灵并清理）。⑥ **ack 残窗双通道回收**：`spawn` 完成到界面建档之间可丢 `terminal.data`（首屏输出）与 `terminal.exit`（假阳幽灵条目）；回收靠「首个否定回执守卫」+「`terminal.list` 对账」两通道并列（均幂等、先到先回收、**无排序契约**），可达性不据仓内推导下断言、实施期探针留痕。
+
+**依据**：并行长任务是终端典型用法（服务常驻 + 测试跑批），而会话是重量级对象（各带对话与模型上下文），「多开会话」不解决同一工作上下文内并行；「单终端分屏」是伪并行（一个 PTY 不可能同时跑两个交互命令）。编号唯一性与不回填的立法理由 = 迟到帧与清理窗口的竞态隔离；世代判据取 token 而非端口/沿的理由 = 两者均可证伪（端口可复用、沿含幂等分支）。
+
+**登记**：约束登记 = C-proc-18 的 shutdown 步序 SSOT 同步为 15 步（新增终端 PTY 全量清理紧随 `server-stop`）；e2e 资产 = `E2E-TERMINAL-01`（`e2e/terminal-multi-instance.spec.ts`，L2/on-diff/serial，覆盖 T1/T2/T4/T8/T9/T10/T13；T3/T5 走 L4 真机、T6/T7/T11/T12 归单测）。设计文档 = `.tmp/tech-design/terminal-multi-instance.md`（过程产物，不入 git）；实施与验收证据 = `.tmp/dev-flow/terminal-multi-instance.*`。同族未落地项（浏览器多页面、浮层实例 tab 条）依赖本编号先例，另立项。
+
+### ADR-0114 主区三卡化：内容区各自成卡 + 实例 tab 条范式统一 + 终端头部一行化（2026-10-04 用户裁决，drawer-cardification）
+
+**决策**：① 对话流 / 右抽屉 / 底抽屉三块内容区各自持 float-panel 壳（surface + border + 10px 圆角 + shadow-1），卡间 8px 缝，卡内底色统一——**推翻 D2「一体化生长」裁决**（原右抽屉从主面板右缘生长、共享外壳与横跨 header）；PanelHeader / StatusBar 保持横跨工具条/状态条语义，不属任何卡。② 右抽屉 L1 栏选中态回归 §3.4 标准 tab 型（bg-elevated + neutral-fg）——原「bg-surface-hover 例外」以「drawer 与 main 同 surface」为前提，三卡化后前提消失。③ 终端面板头部一行化：实例切换条（tab 条 + 右簇「+」/收起按钮）单行承载，原第二行工具栏（清屏/终止）移除——终止与 tab 关闭叉同义，清屏功能退役（用户裁决接受）。④ 终端区收起语义 = 收起非销毁（实例保留、重开走对账恢复），入口 = 头部收起按钮 + 顶栏开关 + `⌃`` ` 三通道。⑤ 终端开关迁 PanelHeader 顶栏（右抽屉开关左边），StatusBar trailing 原生动作通道退役，StatusBar 回落「有状态项才显示」纯显隐。⑥ 实例 tab 条范式统一（§5.3.1）：终端实例 tab / detail 文件 tab / plugin L2 tab 三族同构——非激活 bg-input+border、激活 bg-elevated+border-strong、关闭叉常驻命中 ≥20px（原「hover 才显现」形态因可发现性差被用户裁决推翻）；pin 功能全链移除（L2TabBar/L2TabItem/PluginViewContainer/WorkflowLivePanel，用户裁决：不需要该功能）。⑦ TurnRail 定位从 fixed 视口垂直居中改为 absolute 于对话流容器右缘——fixed 不感知底抽屉高度，窗口矮/抽屉高时叠进终端卡（跨区缺陷）；absolute 后随对话流卡 overflow 裁剪，跨区构造性不可能。
+
+**依据**：用户 2026-10-04 对底/右抽屉的 5 点产品反馈（三区分割缺失、开关位置、头部两行、tab 可区分性、tab 关闭叉）+ critique 补充发现（TurnRail 跨区、tab 条无横向滚动、空态黑块、最后实例禁用叉伪装可点、composer 窄宽叠字）。一体化生长的「同 surface 无缝」语言在多容器并存场景不可辨识（三区边界靠 1px 拖拽线不可发现），卡片化是分区可见性的直接解；代价 = 卡缝占 8px×2 垂直空间与推翻 D2 的回写成本，收益 = 分区心智清晰 + tab 范式全局一致 + 跨区缺陷构造性消除。
+
+**登记**：设计 SSOT = docs/DESIGN.md §3.4/§4.1/§5.3.1/§6.1/§6.3/§6.4（2026-10-04 同批回写）；CONTEXT.md「底抽屉」词条开关入口同步。实现落点 = MainPanel（壳下沉）/ PanelContainer（三卡 + 卡缝 handle）/ DrawerPanel（卡片化）/ TerminalView + TerminalInstanceBar（head 一行）/ TerminalToggleButton（原 StatusBarTerminalToggle 迁移）/ DetailPane / L2TabBar / TurnRail。
+
+### ADR-0118 对话流 HTML 预览与产物落点约定（2026-10-04 设计裁决，chat-html-support）
+
+**决策**：对话流支持「agent 交付 HTML 产物 → 用户在应用内直接看渲染结果」——扩写 capability 段成精确能力契约（M0：正/负面清单；M1：交付约定与预览约束 + 每 turn 注入会话产物目录绝对路径）、新 fence info string `html-preview` + 对话流预览卡片、DetailPane 对 `.html` 新增渲染态。四条关键裁决：
+
+1. **产物目录选在白名单既有成员内**（`<dataDir>/artifacts/<sessionId>/`）：local-file 协议白名单静态成员集（`apps/electron/main/utils/local-file-prefixes.ts`）已含 `<dataDir>` 前缀，产物落其下则预览无需新增白名单成员、renderer 不成为白名单输入方（「白名单外路径一律 403」不变量保持）。目录推导公式单点 = `packages/shared/src/paths.ts` 的 `getSessionArtifactsDir`（含 sessionId 穿越校验，规则与 `isPiSessionId` 同域：允许 `.` / `_`、禁 `:`——不用 `getImageCacheDir` 的窄集）；system-prompt 扩展侧不 import shared（包边界 + C-proc-26 / C-proc-09 门禁组合），以同公式镜像推导，两实现段名与校验正则字面量对拍机检。
+2. **session cwd 动态注册方案不采用**：该方案让 renderer 首次成为 local-file 白名单的输入方（白名单防线对 renderer 的信任假设从零变为有），并连带引入新 IPC 通道、进程内集合、注册时序竞争、预检对注册完成的依赖；落点约定后这些复杂度全部无服务对象。**已接受代价**：项目目录内的 HTML 不能被应用内预览——恢复路径 = 要求 agent 把产物写到会话产物目录，或经「查看源码」在项目内直接读源码。
+3. **预检通道统一落主进程 `localFile:servable`**（入参绝对路径，出参 `{servable, reason, size}`，reason ∈ `not_found` / `is_dir` / `out_of_whitelist`）：卡片（经 deps `probeArtifact?`）与抽屉渲染态共用；谓词与 `protocol.handle` 复用同一规范化管线模块（白名单成员资格先行短路 → 存在性 → 目录性——越界路径不触 fs，杜绝任意路径存在性探测通道）。**不新增 runtime 文件 RPC**：白名单成员资格只在 main 信任域可见，runtime file 族的 cwd 守门看不见白名单，两处预检会形成两套准入语义。
+3b. **实施期补全：源码态读取通道 `localFile:read`**（2026-10-04，D2 一致性审查反证）——产物目录在 session cwd 之外，既有 runtime `file.read` 的 cwd 守门不可达，故 `.html` 的**源码态**读取需一条与 servable **同源**的主进程通道：同谓词模块（准入前缀成员资格先行短路，越界不触 fs）、仅 `out_of_whitelist` 时回落既有 cwd 通道；通道名 `localFile:read`（`packages/shared/src/ipc-channels.ts` 登记）。它是第 3 条「预检通道统一落主进程」原则的对称补全（**探测与读取同源**），未新增白名单成员、未新增白名单输入方。
+
+3c. **实施期收窄：读/预检通道准入 = 会话产物子树**（2026-10-05，branch-review dmg-r1-2）——`localFile:servable` / `localFile:read` 两条 IPC 的准入前缀 = 产物子树 `<dataDir>/artifacts/**`（`computeLocalFileReadPrefixes`，`apps/electron/main/utils/local-file-prefixes.ts`），不复用协议 handler 全量白名单。理由：通道入参含模型消息文本承载的路径载荷（html-preview fence = 不可信输入），全量白名单含 `<dataDir>` 整前缀（含 `<dataDir>/agent/auth.json` 等凭据），读/预检面复用全量白名单 = 渲染进程被注入后可直读数据目录内任意文件文本。收窄后越界仍返回 `out_of_whitelist`（不触 fs），消费方回落既有通道（useDetailPane cwd 通道 / 容器降级占位）；三条调用链（容器源码态、挂载前 size 预检、抽屉产物源码读取）全部只消费产物路径，无功能回退。协议 handler（渲染面：图片 / iframe 服务）保持全量白名单不变；谓词函数与检查顺序同源不变，未新增白名单成员、未新增白名单输入方。
+
+4. **产物回收用文件系统级判据**（对齐 `apps/electron/main/images/image-cache.ts` 先例的「判据落文件系统层、不依赖进程级在场集」形态）：① 删会话级联删目录（与既有 `cache/images` 级联同一落点 `session-lifecycle.ts`、同一幂等形态）；② 保留期扫描（默认 7 天，`TAIJI_ARTIFACTS_KEEP_DAYS` 可覆盖；runtime 会话服务内启动扫 + 每日复扫）判据 =「产物目录子树最新文件 mtime 超龄 **且** 目录名 sessionId 在三棵会话树无同名会话文件」。**枚举深度规格另写**（主树 `sessions/<encodeCwd>/*.jsonl` 两层 / subagent `subagents/<encodeCwd>/sessions/*.jsonl` 三层 / btw `btw/<encodeCwd>/<mainSid>/*.jsonl` 三层，逐层 readdir 自实现）——不得照 `image-cache.ts` 的 `isOrphanSessionDir` 单层形态（该先例与生产两层布局失配，缺陷另登记 `docs/todo/image-cache-orphan-depth-mismatch.md`）；文件名 → id 解析用同型 `sessionFileIdFromName`，解析失配（合法 sid 含 `_` / `.`）保守取向为「视为存在、不清」。
+
+**三条配套**：① **引用语法** = 新 fence info string `html-preview`（首词匹配，内容 = 单行文件路径；空 / 多行 → 卡片降级态「路径非法」），卡片走 Vue 段组件（`HtmlPreviewCard.vue`）不进 v-html / DOMPurify 通道——「用户 HTML 白名单契约」与「预览卡片不经 sanitize 通道」不变量保持；段类型复用 mermaid 同构通道，finalize 仅由 fence 收尾 / 消息 complete 触发（静默 200ms 不提前 finalize——半截路径不产假降级卡片）。② **渲染态** = DetailPane 对 `.html` 新增「预览 | 源码」切换，渲染态为 `<iframe sandbox="allow-scripts" src="local-file:///<百分号编码 abs>?r=<n>">`（无 `allow-same-origin`，文档落 opaque origin，读不到主窗口 DOM / localStorage / cookie；`?r=n` 仅作重导航触发）；CSP meta（`packages/renderer/index.html`）新增 `frame-src 'self' local-file:`。③ **协议响应头** = `protocol.handle('local-file')` 全部响应附加 `Cache-Control: no-store`，`.html` / `.htm` 再附加内容级 CSP（`default-src 'none'` 封网络出站；`script-src 'unsafe-inline' local-file:` 保脚本与相对子资源；指令集不含 opaque origin 下恒不匹配的 `'self'`）——sandbox 管「碰不到主窗口」、文档 CSP 管「连不出网络」双保险。
+
+**依据**：① 根因是四环缺失（能力契约 / 交付模式 / 预览链路 / 产物落点未约定），落点约定消除整类「白名单外不可读」问题，比事后放宽白名单（renderer 成为白名单输入方）代价更低；② 预览文档唯一需要的同源能力是相对子资源，而子资源经 local-file 协议加载不依赖 origin 同源，故 sandbox 可不给 `allow-same-origin`；③ 两条被否路线的击穿点——srcdoc 方案（file.read RPC + iframe srcdoc）能力死（继承主文档 CSP 致内联脚本不执行、相对子资源无基准地址，交互价值消失）；WebContentsView 方案在抽屉内可行，但与对话流内联预览方向冲突（窗口层原生覆盖视图不随虚拟滚动同步，需一整套滚动同步机制）。
+
+**登记**：约束 C-build-06 表述随本裁决收窄——scope 由「嵌入式网页」收窄为「嵌入第三方远程网页」，理由（`X-Frame-Options` / CSP `frame-ancestors` 硬伤）仅对远程站成立，本地 HTML 由应用自有 `protocol.handle` 服务、不携带这些头（见 ADR-0054 理由边界修正补记），登记 `docs/constraints.json` C-build-06；未新增约束族（预览隔离由 sandbox + 文档 CSP 构造性保证，落在 C-build-06 的 review-electron-build 面内）。设计文档 `.tmp/tech-design/chat-html-support.md`（不入库，过程产物）；实施 = 8 单元（u-foundation / u1-prompt / u2-infra / u-artifacts / u3-detailpane / u4-card / u5-docs / u6-acceptance）。
+
+### ADR-0119 html-preview 渲染形态 = 对话流内联容器（2026-10-04 用户裁决，chat-html-support v16）
+
+**决策**：`html-preview` fence 段在**对话流内直接渲染**（`HtmlPreviewInline.vue` 内联容器：头部条[文件名/大小/源码-预览切换/刷新/收起展开] + sandbox iframe 原位嵌入消息流）；原「预览卡片 → 点击 → DetailPane 渲染态」两级形态**退役**——DetailPane 对 `.html` 恢复基线源码高亮，相对链接不再承载预览。安全模型零变化：sandbox 权限面、`local-file` 协议白名单、`localFile:servable` 预检、CSP `frame-src`、内容级 CSP 全部平移适用（机制规格从原 D4 抽屉渲染态整体平移到容器）。
+
+**要点**：
+1. **单渲染面原则**：内联容器是唯一渲染面。抽屉保留渲染态会造成「同一文件两个渲染入口、两套挂载序列」的双轨；内联容器的展开/源码态已覆盖抽屉渲染态的全部用户价值。`localFile:read` 通道保留（消费方 = 容器源码态 `useChatViewDeps` readArtifact 与 DetailPane 文件树/抽屉源码读取 `useDetailPane` loadPreviewContent——与设计 §6.4 D4「退役的连带回收」同口径；变更集卡入口语义是看 diff，不消费该通道）。
+2. **高度策略降级裁决**：内容高度自适应（iframe 内上报）三条通道均不可行——产物文档内协作脚本不可假设、opaque origin 收不到定向 postMessage、`sandbox` 无 `allow-same-origin` 时 `contentDocument` 恒 null——降级为固定 480px（展开 720px）、超限 iframe 内滚动；升级预案（协议 handler 注入上报脚本）登记设计文档 §6.3。
+3. **流式与降级形态保持**：finalize 仅由 fence 收尾/消息完成触发（静默不提前）；预检三原因降级占位形态延续（文件名 + 原因两行，恢复指引由失败路径表承载）。**S4 验收留痕口径（终态同步 R1 显式声明）**：「链接 → 抽屉源码高亮」为基线行为恢复（file-type 分发与 DetailPane code 类高亮由既有单测承载），**不作独立真机重验**——v16 重验覆盖 A3a/A3b/A5/A8 + A6；产物目录文件场景的链接正向断言受基线 forceDiff 存量缺口阻断（`docs/todo/message-link-artifact-file-force-diff-reject.md`，A20 定性 = 基线存量机制、本分支零触碰），缺口修复后补验。
+
+**依据**：用户裁决动机 = HTML 交付物在对话流内直接可见可交互，不经点击跳转（交互式图表/自包含组件的核心价值前置呈现）；ADR-0118 方案 A 本就预期「iframe 在 DOM 流内随滚动天然正确」，本裁决是该预期的终态化；已接受代价 = 对话流 turn 虚拟化使旧 turn 容器随滚动卸载/重挂载（脚本重执行，既有虚拟化行为的固有代价，实测无可感知卡顿阈值内）。
+
+**登记**：设计文档 v16（`.tmp/tech-design/chat-html-support.md` §6.3/§6.4）；实施 = u7-inline-refactor 单元（M1.5 批次）；验收 = v16 重跑四项（渲染/观感/安全负面/降级矩阵）+ 打包态，全部通过（2026-10-04）。S4 相对链接场景随之重定义为「链接 → 抽屉源码态（基线行为恢复）」；链接打开产物目录文件被基线 forceDiff 通道拒绝的存量缺口另登记 `docs/todo/message-link-artifact-file-force-diff-reject.md`。
+
+### ADR-0122 事实驱动原则体系：状态、传播、失败、呈现的统一纪律（2026-10-05 用户裁决）
+**决策**：本地 GUI 应用的工程原则体系，总原则 = **事实驱动，不做补偿性猜测**——系统的每一个状态判定都锚定确定性事实（回执到达、断连信号、同步查询返回、磁盘记录）；用时间猜事实、用补偿掩盖丢失、用乐观呈现代替确认的机制一律不建，存量一律清拆。分则按四个层面：
+
+**地基——故障模型（进程生死二态）**：本机全链（回环网络、本地管道、本地文件）内进程间消息不会无缘无故丢失，「没收到」的唯一现实解释是对端进程死亡，而死亡有操作系统级断连信号。不存在需要独立防御的「对端活着但消息丢了」形态；应用层广播的时序竞态用事实查询消解（见判定层），不建防御机制。
+
+**传播架构（活状态与存储的分工）**：
+- 活状态走订阅推送，存储只做恢复源：进程活着时才有意义的实时状态（运行事件、进度、流式输出）一律订阅-推送传播；文件与记录只承担持久化事实源与崩溃/断点恢复两个职责。禁止用监视存储模拟实时（tail 日志、watch 数据目录、轮询表）。判据：数据在进程死后仍有意义（恢复/对账/审计）→ 落盘由恢复场景读；仅活着时有意义 → 推送不落盘或落盘只为审计。
+- 推管即时，拉管正确：推送丢失可容忍，消费方重连后按消费水位从事实源补读（拉取通道）；事实源读取不可绕过。推是延迟优化，拉是正确性底线（与 ADR-0097「拉为主、推补充」合并解释：拉保证正确性与收敛，推只优化延迟）。
+- 单一事实源，消费方只持水位：一个状态只有一个产生方、一份权威存储；消费方本地只留订阅水位，重连凭水位补读。禁止多消费方各自拉同一存储再互相对账。
+
+**判定与决策（事实的三级来源）**：
+- 状态判定锚定确定性事实，来源严格递减：同步事实查询 > 确定性事件 > （禁止）时间推测。能查到的状态直接查（会话空闲、进程存活、消费水位），事件只作提前触发的加速器；禁止「先信事件、不信了才查事实」的两段式。
+- 竞态用顺序契约与事实查询消解：多步写（数据文件与登记）的竞态用创建顺序契约（登记先行）加持有者存活查询消解，不用宽限窗猜「是否还在写」。
+- 知识与决策同地：重试、恢复这类决策需要「后果是什么」的语义知识；谁拥有语义知识谁决策。内核与基础设施只做无语义的忠实执行与如实上报，不建自动重试/自动恢复/静默重投。
+
+**失败与呈现（显式纪律）**：
+- 失败显式上报：失败不自动补偿——失败即显式通知（人看页面通知、agent 收失败回执），首败即停；时间窗扫描、宽限窗、静默终局、自动重试、对账补偿全部不建。
+- UI 呈现跟随事实：确认成功才呈现（受理回执到达气泡才上屏），不建「先显示、错了再回收」的乐观态；结果未知显式标注（如「执行结果未确认，重发前请核对」），不静默假装无事发生。
+
+**范围纪律**：
+- 机制服务可达场景：产品全链路无入口的形态不为它建行为路径（含注释穷举与用例）。判定依据 = 触发源存在性。
+- 信任边界内不设防：本机全链无网络类故障面，墙钟兜底不建；「调用永不返回」（实现卡死）的处置 = 显式失败 + 用户重启应用，不自动恢复。
+
+**删除判据**：删掉某机制后数据仍最终一致 → 它是补偿补丁，删；不一致 → 事件顺序契约本身未定义，先定义契约（谁的事实、谁推送、丢了如何补拉）再删。
+
+**元原则**：原则面前无存量豁免——与本体系冲突的既往裁决一并推翻（已删：zcode 无进展检测双 timer、notify 看门狗重投、update 停滞检测、event-tail watch 族、structured-output 强制退出等，清单见 defense-mechanism-cleanup 登记）。
+
+**保留白名单（原则不适用域）**：产品功能定时（调度/提醒/产品轮询能力）、调用方显式配置传入的超时参数、恢复场景的文件读取、锁语义原语、事件驱动的对账与拉取通道（ADR-0097 实现本体）、构建脚本类。
+
+**依据**：本体系收敛自 pi 1.0 适配设计包交付后的系列裁决（2026-10-05）：命令终局事件化（handled/started/断连三事件）、投递 backoff 退役、全项目防御机制清查（约 270 处登记）、event-tail 退役与推送通道方向、受理层同步上屏、scheduler 切换对账翻转为事实查询。故障模型依据 = 本地进程通信无网络类瞬态失败面，对端死亡有 OS 级信号。
+
+**登记**：清查清单与删改记录 = `docs/todo/defense-mechanism-cleanup.md` 与 `.tmp/dev-flow/defense-scan/`（四分区清单 + 改动清单）；投递域重构与推送通道设计 = `.tmp/tech-design/` 产出（过程产物，决策以本条与 cleanup 登记为准）；AGENTS.md「防御机制第一原则」规则条目为本条的规则面投影。原「时间平抑类逻辑红线」为本体系判定层的既有条目，继续有效。

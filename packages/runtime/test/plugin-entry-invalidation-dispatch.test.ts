@@ -313,8 +313,8 @@ describe('Entry 失效订阅四路清理接线', () => {
 
     // crash / disable / uninstall 三路各恰好一处接线（crash 路另有行为级用例交叉验证）
     expect(source.match(/this\.entryInvalidationDispatch\.clearForPlugin\(pluginId\)/g)).toHaveLength(3)
-    // disable 路：togglePlugin(false) 分支内（紧随 sessionEventDispatch 清理、await syncToolsToBridge 之前）
-    expect(source).toMatch(/this\.sessionEventDispatch\.clearForPlugin\(pluginId\)\n\s+this\.entryInvalidationDispatch\.clearForPlugin\(pluginId\)\n\s+await this\.syncToolsToBridge\(\)/)
+    // disable 路：togglePlugin(false) 分支内（紧随 sessionEventDispatch 清理）
+    expect(source).toMatch(/this\.sessionEventDispatch\.clearForPlugin\(pluginId\)\n\s+this\.entryInvalidationDispatch\.clearForPlugin\(pluginId\)/)
     // uninstall 路：uninstallPlugin 体内（紧随 sessionEventDispatch 清理、status bar 清理之前）
     expect(source).toMatch(/this\.sessionEventDispatch\.clearForPlugin\(pluginId\)\n\s+this\.entryInvalidationDispatch\.clearForPlugin\(pluginId\)\n\n\s+\/\/ 清理 status bar items/)
     // session-destroyed 路：与 didDestroy 同址（追加式回调体内）

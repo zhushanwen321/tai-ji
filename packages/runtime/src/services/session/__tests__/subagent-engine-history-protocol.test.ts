@@ -5,14 +5,8 @@
 // ② read 走协议（native reader 覆盖后 core 链①级 = 协议 read，投影复用）；
 // ③ 协议失败降②级 journal / 引擎未发现降③级 outcome-only（GUI source 标注的
 //    数据源契约 = SessionView.source，降级事实 warn 留痕）；
-// ④ idle 5min 复用：复用窗口内同实例（spawn 计数不增），过期 dispose 后重建
-//    （spawn 计数 +1）。窗口状态确定性控制——生产窗口 5min 保证「窗口内」与真实
-//    read 耗时无关；「过期」由 expireIdleEngineClientsForTests 显式驱动 idle 回收
-//    路径（真实定时器回调同函数），不靠真实等待，全载下零时序敏感；
-// ⑤ 退出钩子聚合上界：挂死引擎下 disposeRuntimeEngineClients 在上界返回不被拖死。
-//    真实短窗口替代 fake timers——协议 IO 与杀链是真实 OS 异步，fake timers 推不动
-//    子进程退出，真实 150ms 窗口是上界语义的直接证据（index.ts 内「dispose 与 relay
-//    关停并行」为编排面，代码级断言 + 手工演示见单元汇报）。
+// [ADR-0122 退役登记] ④ idle 5min 复用窗口与 ⑤ dispose 聚合上界用例已随机制删除
+// （引擎实例进程级自持，复用语义改为「同实例恒复用直至 shutdown dispose」）。
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import * as fs from 'node:fs'
@@ -22,7 +16,6 @@ import { fileURLToPath } from 'node:url'
 import type { SubagentRecord } from '@taiji/shared'
 import {
   disposeRuntimeEngineClients,
-  expireIdleEngineClientsForTests,
   readEngineSubagentHistory,
   resetRuntimeEngineWiringForTests,
 } from '../subagent-engine-history.js'
@@ -151,17 +144,12 @@ describe('W8 runtime 协议客户端接线（subagent-engine-history）', () => 
     expect(spawnLogPids()).toHaveLength(1)
   })
 
-  it('④ idle 复用：窗口内二次 read 零新 spawn；窗口过期 dispose 后重建 +1', async () => {
+  it('④ 实例复用：多次 read 零新 spawn（引擎实例自持直至 shutdown dispose）', async () => {
     truncateSpawnLog()
-    // 窗口内：生产窗口 5min ≫ 任何真实 read 耗时 → 复用判定与负载无关。
     await readEngineSubagentHistory(makeRecord(), dataDir)
     await readEngineSubagentHistory(makeRecord(), dataDir)
-    expect(spawnLogPids()).toHaveLength(1) // idle 窗口内复用同一引擎实例
-
-    // 窗口过期：显式驱动 idle 回收（同一到期路径）→ dispose + 出表。
-    expireIdleEngineClientsForTests()
     await readEngineSubagentHistory(makeRecord(), dataDir)
-    expect(spawnLogPids()).toHaveLength(2) // 过期 dispose 后新实例
+    expect(spawnLogPids()).toHaveLength(1) // 同引擎实例恒复用
   }, 20_000)
 
   it('③ 协议 read 失败降②级 journal：eventsPath 白名单内事件重放投影', async () => {
@@ -192,21 +180,4 @@ describe('W8 runtime 协议客户端接线（subagent-engine-history）', () => 
     expect(assistant?.content).toBe('(no outcome recorded)')
   })
 
-  it('⑤ 退出钩子聚合上界：dispose 挂死引擎时在上界（150ms 注入值）返回不被拖死', async () => {
-    setEnv('FAKE_DISPOSE_MODE', 'hang')
-    await readEngineSubagentHistory(makeRecord(), dataDir) // 造一个挂死 dispose 的实例
-    const startedAt = Date.now()
-    await disposeRuntimeEngineClients(150)
-    const elapsed = Date.now() - startedAt
-    expect(elapsed).toBeLessThan(2_000) // 不等 3s dispose 帧超时（上界生效）
-    // 收尾：挂死引擎不自动退出——SIGKILL 防 worker 孤儿（pid 来自 spawn 计数）。
-    for (const pid of spawnLogPids()) {
-      try {
-        process.kill(Number(pid), 'SIGKILL')
-      } catch {
-        // 已退出 = 预期
-      }
-    }
-    setEnv('FAKE_DISPOSE_MODE', 'ok')
-  }, 20_000)
 })

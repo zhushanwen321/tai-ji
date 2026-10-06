@@ -126,6 +126,7 @@ grep -rn 'client\.getEntries(' packages/runtime/src --include='*.ts' | grep -v '
 | `services/session/btw-service.ts` + `btw-fork-exec.ts` | btw 线目录扫描（`readdirSync` + `readSessionHeader`） | 照实 | btw 旁路对话记录 = 独立文件、已发生事实 |
 | `services/session/restore-seeding.ts` + `infra/pi/session-file-streaming.ts` | 归一化管线（session_end 识别 / cwd 修复，分块正序逐行变换原子替换） | 非投影读者 | 逐行透传格式修复，不派生投影、不丢行 |
 | `services/session/import-source-external-file.ts` / `import-source-zcode.ts` / `import-service.ts` + `infra/pi/session-file-external-scan.ts` | 外部 session 导入扫描（`scanPiSessions` 去重双检 / `scanExternalSessions` 轻量提取） | 照实（非投影） | 读外部目录非活跃 session；导入 = 复制事实，撤回机制不触及 |
+| `services/session/events-projection.ts` | record 族投影 entry 源（冷启动腿：`session-records.ts:513` `scanRecordFamilyEntriesFromSessionFile` 流式扫描 → :514 `applyEntryBatch`；活跃腿：get_entries 游标 → :758 `applyEntryBatch`——本文件仅头部注释自述该消费致 R2 锚点命中，自身不调扫描） | 照实 | v2 subagent/workflow 注册/终态条目 = run 真实执行过的事实记录，与 subagent/workflow-extractor、journal-projection 冷启动腿同概念域同口径（扫描不裁剪，照实构造性保持；plan 家族不进投影，无随树腿）；事件源（record 事件文件 / run journal）为 record 域独立文件，不在 pi session `.jsonl` 普查对象内；读取语义落在 session-file-extraction 骨架 + session-records 编排（均已登记），撤回重建经 session-records U6d 全量重喂——零追加单元 |
 
 ### 4.5 消费面委托（锚点命中、自身不读文件）
 
@@ -136,7 +137,6 @@ grep -rn 'client\.getEntries(' packages/runtime/src --include='*.ts' | grep -v '
 | 包 | 消费点 | 说明 |
 |----|--------|------|
 | permission | `index.ts` `pi.on("session_tree")` → statusline/footer 重绘 | 重绘时读新分支 config，不读 session 文件 |
-| plugin-bridge | `index.ts` `observeHandler("session_tree")` | 事件转发给 taiji plugins（observe 通道） |
 | subagent-workflow | `session_tree` → `terminateRunningRuns` | 撤回编排以 workflow-running 前置检查阻止该副作用触发（撤回遇活跃 run 不放行） |
 | scheduler（extensions/universal） | `backend.ts` `pi.on("session_tree")` → 重折叠任务集 | 纯重建体（loadTasks 换 Map），零 dispatch 零 append；被撤任务到点不触发（A14） |
 
@@ -146,7 +146,7 @@ grep -rn 'client\.getEntries(' packages/runtime/src --include='*.ts' | grep -v '
 
 ## 6. 设计判定清单之外的新发现读者（已裁决）
 
-以下读者由机器锚点命中、不在 message-revoke 设计 §5 U6 的逐项判定清单内。裁决（2026-09-24 流水线主 agent，依据 = G2 二分准则「未来状态随树 / 已发生事实照实」+ 注入面判定）：**N1-N12 全部维持照实 / 非投影归类，零追加单元**——run / 通知 / bash 执行 / 压缩计数 / trace / fork / btw / 导入均为已发生事实（重建即伪造事实），无一注入模型上下文。附核实项：smart-context 压缩组装的文件重注入（compact-handler `readFileForReinject`）读的是项目源码文件而非 session 数据、且输入 branchEntries 来自活跃路径——撤回后新压缩输入天然不含被撤内容，与撤回零冲突。N13/N14 为分支审查补登（2026-10-01，理由见行内）：两者读取走 getEntries RPC 通道，不在 runtime 侧锚点命令族（E1/R1/R2/R3 重跑均不命中）——登记缺口不被机器锚点拦截，按 C-proc-28 登记义务归类；§2 已补 R4 检索锚（runtime 侧 client.getEntries 通道），该通道后续读者可被检索、不再漏网。
+以下读者由机器锚点命中、不在 message-revoke 设计 §5 U6 的逐项判定清单内。裁决（2026-09-24 流水线主 agent，依据 = G2 二分准则「未来状态随树 / 已发生事实照实」+ 注入面判定）：**N1-N12 全部维持照实 / 非投影归类，零追加单元**——run / 通知 / bash 执行 / 压缩计数 / trace / fork / btw / 导入均为已发生事实（重建即伪造事实），无一注入模型上下文。附核实项：smart-context 压缩组装的文件重注入（compact-handler `readFileForReinject`）读的是项目源码文件而非 session 数据、且输入 branchEntries 来自活跃路径——撤回后新压缩输入天然不含被撤内容，与撤回零冲突。N13/N14 为分支审查补登（2026-10-01，理由见行内）：两者读取走 getEntries RPC 通道，不在 runtime 侧锚点命令族（E1/R1/R2/R3 重跑均不命中）——登记缺口不被机器锚点拦截，按 C-proc-28 登记义务归类；§2 已补 R4 检索锚（runtime 侧 client.getEntries 通道），该通道后续读者可被检索、不再漏网。N15 为分支审查补登（2026-10-04，理由见行内）：R2 锚点命中面内的存量漏登（非当次 diff 引入），按 C-proc-28 登记义务归类。
 
 | # | 读者 | 归类（已裁决） | 判定理由 |
 |---|------|----------|------|
@@ -164,6 +164,7 @@ grep -rn 'client\.getEntries(' packages/runtime/src --include='*.ts' | grep -v '
 | N12 | runtime 导入族（import-source / external-scan） | 照实（非投影） | 外部目录，撤回机制不触及 |
 | N13 | runtime `revoke-orchestrator` `readTreeSnapshot`（get_entries 快照——③ 定位 / ⑤ 信令前校验共用一次拉取，⑥ 回退后校验复用同款读点；非投影构建） | 照实 | 树回退定位与活跃路径校验读者，非投影构建：校验对象是树回退定位所需的活跃路径状态（与 §4.1 U6a 重建链同语义域），但读 get_entries 全文件快照、不派生展示投影、不注入模型上下文——⑤ 幂等判定「目标不在活跃路径但全文件存在 → 已撤」正需全文件事实，按活跃路径裁剪反而使读者失效。归类照实（已发生文件事实），零追加单元；机制裁决见 ADR-0076（decisions.md:295「完成确认 = reply 后 get_entries 校验」） |
 | N14 | runtime `session-delivery-registry` `readTranscriptUserTexts`（getEntries 全文读，`resync/rebuild/在途宽限扫描` 三调用点共用读点——判 delivered / 判重；非投影构建） | 照实 | 投递对账读者，判据 = 「投递已发生」事实：user 文本集合按裸标记扫描，命中 transcript → 判 delivered 抑制重建/重投（被撤条目已进文件恒判 delivered，不重建重投、无复活破坏）；未命中才重投（必达优先于去重，读取失败保守判未送达）。读 getEntries 全文件 user 文本、不派生展示投影、不注入模型上下文。与 N13 同走 getEntries RPC 通道（E1/R1-R3 锚点族外，2026-10-01 分支审查补登，按 C-proc-28 登记义务归类；通道检索锚 = §2 R4） | — |
+| N15 | runtime `events-projection` record 族投影 entry 源（冷启动 `scanRecordFamilyEntriesFromSessionFile` 流式扫描喂入、活跃 get_entries 游标喂入——编排与喂入点均在 `session-records.ts:513-514` / :758，本文件头部注释自述消费致 R2 锚点命中；2026-10-04 分支审查补登，按 C-proc-28 登记义务归类） | 照实 | 与 subagent/workflow-extractor、journal-projection 冷启动腿同概念域同口径——v2 注册/终态条目 = run 真实执行过的事实记录，扫描不裁剪（照实构造性保持）；plan 家族不进投影，无随树腿；事件源（record 事件文件 / run journal）为 record 域独立文件，不在 pi session `.jsonl` 普查对象内；读取语义落在 session-file-extraction 骨架 + session-records 编排（均已登记），撤回重建经 session-records U6d 全量重喂。归类照实，零追加单元 | — |
 
 ## 7. 已知边界登记
 

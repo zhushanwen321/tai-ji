@@ -9,25 +9,28 @@
  * 物全部自动重建」语义一致）。
  *
  * 收紧语义（#28② 已收口）：defaultReliefAction = 压窗到 LRU_RELIEF_MAX_SESSIONS(4) +
- * evictIfNeeded 立即驱逐一轮（压力持续期 runtime 每采样拍重发通知 → 每拍都有驱逐机会，
- * 压窗值幂等重设无副作用）。
+ * 驱逐一轮（evictLruWithUnsubscribe 复合入口，remote-use D2——被驱逐会话连带退订，与
+ * 切入链驱逐同式；压力持续期 runtime 每采样拍重发通知 → 每拍都有驱逐机会，压窗值幂等
+ * 重设无副作用）。
  * - **压窗值裁决**：D4 未钉数值（Gate W 校准清单可调），取默认窗一半（8→4）——「收紧」
  *   的最小有效档，避免过激驱逐把「切回重进」变常态路径。
  * - **恢复语义裁决（D4 未指明，登记）**：压窗一次**不自动恢复默认**。协议面 'normal'
  *   不广播（renderer 无「压力消退」信号可消费），自动恢复无从触发；已驱逐的 session
  *   不回补（恢复默认只影响后续判定），应用重启后 LRU 模块态归零天然复位。
  *
- * 状态形态：窗口级单例（非 per-session）——内存压力是全局信号，与 useCrashRecoveryNotice
- * 同款「窗口级单例状态，ADR-0049 Map 分区范式不适用」判定（无 sidRef、无 per-session
- * 分区，useSessionScopedState 的 setup-scoped 工厂契约不成立）。
+ * 状态形态：窗口级单例（非 per-session）——内存压力是全局信号，「窗口级单例状态，
+ * ADR-0049 Map 分区范式不适用」（无 sidRef、无 per-session 分区，useSessionScopedState
+ * 的 setup-scoped 工厂契约不成立）。
  *
  * 订阅防重复（AGENTS 关键规则 2）：模块级 refCount——多实例（split mode）共享单条物理
  * events.onGlobalType 订阅，首个消费者注册、最后一个卸载时退订（useAppUpdate 同款范式）。
  */
 import { ref, shallowRef, onScopeDispose, type Ref } from 'vue'
 import * as events from '@taiji/core/transport/api'
-import { setLruMaxSessions } from '@taiji/core'
+import { setLruMaxSessions, evictLruWithUnsubscribe } from '@taiji/core'
+import type { ChatStoreInstance } from '@taiji/core'
 import type { WatchdogMemoryLevel, WatchdogMemoryPressurePayload } from '@taiji/shared'
+import { session as sessionApi } from '@/api'
 import { useChatStore } from '@/stores/chat'
 
 /** 压力级别（含消费侧常态 'normal'——协议只在越线时广播，缺省态即 normal）。 */
@@ -61,14 +64,22 @@ let unsubscribe: (() => void) | null = null
 let reliefAction: MemoryReliefAction = defaultReliefAction
 
 /**
- * 默认收紧动作（#28②）：压窗到 LRU_RELIEF_MAX_SESSIONS + evictIfNeeded 立即驱逐一轮。
+ * 默认收紧动作（#28②）：压窗到 LRU_RELIEF_MAX_SESSIONS + 立即驱逐一轮
+ * （evictLruWithUnsubscribe 复合入口，remote-use D2——被驱逐会话连带退订，同文件头
+ * 收紧语义段表述）。
  * setLruMaxSessions 幂等（压力持续期每拍重设同值无副作用）；不自动恢复默认（见文件头
  * 恢复语义裁决——'normal' 不广播，无消退信号）。
  */
 function defaultReliefAction(): void {
   try {
     setLruMaxSessions(LRU_RELIEF_MAX_SESSIONS)
-    useChatStore().evictIfNeeded()
+    // [remote-use D2] 驱逐走复合入口（与 useSidebar evictLru 同式接线）：被驱逐会话连带
+    // 退订 + 发 session.unsubscribe——不退订则订阅残留、后续消息经 commitMessages 重建
+    // 分区使驱逐白做（D2 论据对 relief 驱逐路径同样成立）。cast = pinia unwrap 类型
+    // 鸿沟（useSidebar 同款先例）。
+    evictLruWithUnsubscribe(useChatStore() as unknown as ChatStoreInstance, {
+      unsubscribe: sessionApi.unsubscribe,
+    })
   } catch (e) {
     // best-effort：pinia 未就绪（极端早到通知）/ store 异常时降级为静默——renderer 侧
     // 收紧失败不影响 runtime 侧降级链（台账与滚动重启决策都在 runtime）。

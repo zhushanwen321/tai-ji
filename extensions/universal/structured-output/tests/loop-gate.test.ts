@@ -16,8 +16,6 @@ import {
 	WorkflowGate,
 	MAX_CONSECUTIVE_FAILURES,
 	normalizeErrorSignature,
-	TEARDOWN_FORCE_EXIT_MS,
-	armForceExitTeardown,
 } from "../src/loop-gate.js";
 import { setupWorkflowHook } from "../src/workflow-hook.js";
 import { STALE_CTX_MARKER } from "@zhushanwen/pi-ext-guards";
@@ -37,8 +35,8 @@ import {
 const originalSchemaEnv = process.env[SCHEMA_ENV_NAME];
 
 afterEach(() => {
-	// 闸门 terminal 会武装真实 15s 兜底硬退 timer——触发 terminal 的测试用 fake timers
-	// 包裹，此处还原真实 timers 并丢弃未触发的 fake timer（不残留跨测试的硬退风险）
+	// terminal 链含 fire-and-forget 异步 handler 的测试用 fake timers 包裹，此处还原
+	// 真实 timers 并丢弃未触发的 fake timer（不残留跨测试的 timer）
 	vi.useRealTimers();
 	restoreSchemaEnv(originalSchemaEnv);
 	vi.restoreAllMocks();
@@ -594,7 +592,7 @@ describe("echo keys 分桶（并集恒定陷阱回归）", () => {
 
 describe("setupWorkflowHook assembly (via mock pi)", () => {
 	it("第 3 次同签名失败 → abort+shutdown 恰一次（abort 先行）+ 双通道日志", async () => {
-		vi.useFakeTimers(); // terminal 武装 15s 兤底硬退 timer——fake 掉避免真实 timer 泄漏
+		vi.useFakeTimers(); // terminal 链 fire-and-forget handler——fake 掉避免真实 timer 泄漏
 		const pi = createMockPi();
 		// R3 F-3：stderr 通道可见性——SW spawn 管道转发 stderr 时主进程可见（此处锁 SO 侧写入行为）
 		const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
@@ -662,37 +660,11 @@ describe("setupWorkflowHook assembly (via mock pi)", () => {
 });
 
 
-// ── terminal bounded teardown（R3 F-2：abort 停当前 turn + 15s 兤底硬退）──────────
+// ── terminal teardown（abort 停当前 turn + shutdown 优雅终止；无兜底硬退 timer）──────
 
-describe("terminal bounded teardown（R3 F-2）", () => {
-	it("兤底窗口常量 = 15_000ms（10s 优雅 + 5s 硬杀余量合并；锁定防意外漂移）", () => {
-		expect(TEARDOWN_FORCE_EXIT_MS).toBe(15_000);
-	});
-
-	it("兤底 timer 到点（15s）仍未退出 → stderr 留因 + process.exit(1) 硬退；窗口内不退", async () => {
-		vi.useFakeTimers();
-		const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
-		const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-		armForceExitTeardown();
-
-		await vi.advanceTimersByTimeAsync(TEARDOWN_FORCE_EXIT_MS - 1);
-		expect(exitSpy).not.toHaveBeenCalled();
-		await vi.advanceTimersByTimeAsync(1);
-		expect(exitSpy).toHaveBeenCalledTimes(1);
-		expect(exitSpy).toHaveBeenCalledWith(1);
-		// 硬退前 stderr 已留原因（失败要出声：父进程与排查者可见退出原因）
-		expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining("force-exiting"));
-	});
-
-	it("幂等：重复武装只挂一个 timer，到点只硬退一次", async () => {
-		vi.useFakeTimers();
-		const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
-		armForceExitTeardown();
-		armForceExitTeardown();
-		await vi.advanceTimersByTimeAsync(TEARDOWN_FORCE_EXIT_MS);
-		expect(exitSpy).toHaveBeenCalledTimes(1);
-	});
-});
+// （原 R3 F-2 bounded teardown 组——15s 兜底硬退 timer 的常量锁定 / 到点硬退 /
+// 幂等武装三用例——已随 ADR-0122 清查删除：墙钟兜底不建，pi 挂死不 settle 的
+// 处置 = 父进程既有失败路径 + 用户重启应用。）
 
 // ── D2 双闸门合一等价断言（单状态机交互时序锁）─────────────────
 //
@@ -751,7 +723,7 @@ describe("D2 双闸门合一等价（单状态机交互时序锁）", () => {
 
 describe("index assembly: gate wired into workflow mode", () => {
 	it("workflow 模式下 3 次同签名失败 → terminal 后 turn_end 不 steer（hook 保险分支）", async () => {
-		vi.useFakeTimers(); // terminal 武装 15s 兤底硬退 timer——fake 掉避免真实 timer 泄漏
+		vi.useFakeTimers(); // terminal 链 fire-and-forget handler——fake 掉避免真实 timer 泄漏
 		const pi = createMockPi();
 		await loadExtension(pi, SCHEMA);
 
@@ -786,10 +758,10 @@ describe("index assembly: gate wired into workflow mode", () => {
 // loop-gate.ts runTerminalTeardown）：优雅退出（abort+shutdown）被 guardStaleCtx
 // 包裹，本接入点未注入 isCtxStale 代际检查——stale 分诊完全依赖错误文案兜底（pi
 // assertActive 抛错文案含 STALE_CTX_MARKER，PS-30 门禁守卫）。三态锁定：
-//   ① stale（文案分诊）→ 跳过优雅退出（shutdown 不被调）+ 15s force-exit timer 仍武装
-//     （自清理语义不丢，等价可观察态 = advance 到点后 process.exit(1) 被调）
-//   ② 非 stale → 优雅退出照常（abort 先行 + shutdown）+ timer 同步武装（正常路径回归）
-//   ③ 非 stale 真实错误 → 原样上抛（守卫不吞 bug），timer 不武装
+//   ① stale（文案分诊）→ 跳过优雅退出（shutdown 不被调）+ stderr 降级日志
+//   ② 非 stale → 优雅退出照常（abort 先行 + shutdown）（正常路径回归）
+//   ③ 非 stale 真实错误 → 原样上抛（守卫不吞 bug）
+// （原三态各自的 force-exit timer 武装断言随 ADR-0122 墙钟兜底删除一并移除。）
 describe("terminal teardown stale ctx 守卫（crash-resilience D1）", () => {
 	/** 三次同签名失败驱动 gate 到 newlyTerminal（每次 emit 后 handler 同步完成）。 */
 	const GATE_ERROR = paramLayerErrorText("  - magic: must be equal to constant", "{}");
@@ -801,9 +773,8 @@ describe("terminal teardown stale ctx 守卫（crash-resilience D1）", () => {
 		await pi.emit("tool_execution_end", ev);
 	}
 
-	it("① stale（assertActive 文案分诊）：跳过 shutdown + stderr 降级日志 + force-exit timer 仍武装", async () => {
-		vi.useFakeTimers(); // terminal 武装 15s 兜底硬退 timer——fake 掉避免真实 timer 泄漏
-		const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+	it("① stale（assertActive 文案分诊）：跳过 shutdown + stderr 降级日志", async () => {
+		vi.useFakeTimers();
 		const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 		const pi = createMockPi();
 		// session 替换窗口的真实形态：ctx 已被 pi runner 标记 stale，assertActive 同步抛
@@ -819,25 +790,20 @@ describe("terminal teardown stale ctx 守卫（crash-resilience D1）", () => {
 		// stale 分诊：abort 已触（错误被守卫接住不外抛），shutdown 未被调（优雅退出跳过）
 		expect(pi.ctx.abort).toHaveBeenCalledTimes(1);
 		expect(pi.ctx.shutdown).not.toHaveBeenCalled();
-		// 观测点：onStale 降级日志（排查者可见「跳过原因 + 兜底保持武装」）
+		// 观测点：onStale 降级日志（排查者可见跳过原因）
 		expect(stderrSpy).toHaveBeenCalledWith(
 			expect.stringContaining("terminal teardown skipped (stale ctx, session replaced)"),
 		);
-		// force-exit timer 保持武装：到点仍未退出 → 硬退（自清理语义在 stale 窗口不丢）
-		await vi.advanceTimersByTimeAsync(TEARDOWN_FORCE_EXIT_MS);
-		expect(exitSpy).toHaveBeenCalledTimes(1);
-		expect(exitSpy).toHaveBeenCalledWith(1);
 	});
 
-	it("② 非 stale 正常路径回归：abort 先行 + shutdown 照常，force-exit timer 同步武装", async () => {
+	it("② 非 stale 正常路径回归：abort 先行 + shutdown 照常", async () => {
 		vi.useFakeTimers();
-		const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
 		const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 		const pi = createMockPi();
 		setupWorkflowHook(pi, SCHEMA);
 
 		await driveToTerminal(pi);
-		// 优雅退出照常（R3 F-2 时序：abort 停当前 turn → shutdown 请求优雅退出）
+		// 优雅退出照常（时序：abort 停当前 turn → shutdown 请求优雅退出）
 		expect(pi.ctx.abort).toHaveBeenCalledTimes(1);
 		expect(pi.ctx.shutdown).toHaveBeenCalledTimes(1);
 		expect(pi.ctx.abort.mock.invocationCallOrder[0]!)
@@ -846,16 +812,10 @@ describe("terminal teardown stale ctx 守卫（crash-resilience D1）", () => {
 		expect(stderrSpy).not.toHaveBeenCalledWith(
 			expect.stringContaining("terminal teardown skipped"),
 		);
-		// timer 与优雅退出并存：正常退出发生在 15s 窗口内时 timer 随进程消亡，
-		// 但武装本身无条件发生（挂死兜底不依赖 stale 判定）
-		await vi.advanceTimersByTimeAsync(TEARDOWN_FORCE_EXIT_MS);
-		expect(exitSpy).toHaveBeenCalledTimes(1);
-		expect(exitSpy).toHaveBeenCalledWith(1);
 	});
 
-	it("③ 非 stale 真实错误原样上抛（守卫不吞 bug）：handler rejected，不武装 force-exit", async () => {
+	it("③ 非 stale 真实错误原样上抛（守卫不吞 bug）：handler rejected", async () => {
 		vi.useFakeTimers();
-		const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
 		const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 		const pi = createMockPi();
 		pi.ctx.abort.mockImplementation(() => {
@@ -869,9 +829,6 @@ describe("terminal teardown stale ctx 守卫（crash-resilience D1）", () => {
 		// 非 stale 错误经守卫原样上抛 → async handler 变 rejected Promise（调用方可观测）
 		await expect(pi.emit("tool_execution_end", ev)).rejects.toThrow("real bug");
 		expect(pi.ctx.shutdown).not.toHaveBeenCalled();
-		// 守卫抛错中断了 teardown 链：timer 未武装，advance 后无硬退
-		await vi.advanceTimersByTimeAsync(TEARDOWN_FORCE_EXIT_MS);
-		expect(exitSpy).not.toHaveBeenCalled();
 		expect(stderrSpy).not.toHaveBeenCalledWith(
 			expect.stringContaining("terminal teardown skipped"),
 		);

@@ -89,7 +89,8 @@ function extOf(path: string): string {
  * 判定文件渲染类别（按扩展名）。
  * - .md/.markdown/.mdx → markdown
  * - .png/.jpg/... → image
- * - .ts/.js/.vue/.json/... → code
+ * - .html/.htm/.ts/.js/.vue/.json/... → code（.html/.htm 走 shiki 源码高亮——chat-html-support
+ *   v16 形态变更后抽屉渲染态退役，预览面收敛到消息流内联容器，§6.4 D4）
  * - 其余（含无扩展名） → text
  *
  * 注意：不返回 'binary'——二进制判定由后端 git.getDiff 的 binary 标志负责，

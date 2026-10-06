@@ -8,10 +8,11 @@
 
 import { readFile } from 'node:fs/promises'
 
-import type { Entry, ParseResult, SessionMessageRole } from './types.js'
+import { SESSION_MESSAGE_ROLES, type Entry, type ParseResult, type SessionMessageRole } from './types.js'
 
+/** role 值守卫：取数源 = SESSION_MESSAGE_ROLES（词表值清单，扩展点见该常量注释的穷尽断言）。 */
 function isMessageRole(v: unknown): v is SessionMessageRole {
-  return v === 'user' || v === 'assistant' || v === 'toolResult'
+  return (SESSION_MESSAGE_ROLES as readonly string[]).includes(v as string)
 }
 
 /**

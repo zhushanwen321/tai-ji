@@ -7,20 +7,17 @@
 收敛到 api（window/dialog/runtime-port/system domain）。本脚本把这两条不变量固化为
 pre-commit 检查，防止 store/composable/组件回退到直调底层通道。
 
-白名单（合法直调点）：
-  ws-client（tc-transport-consolidation D5 后形态：api/transport.ts 死代码已删，
-  extension-host 出站直连 core ws-client send——合法直调点 = 两 bridge 文件 +
-  单例装配）：
-    - composables/shell/useExtensionHostBridge.ts  bridge 直连（mountPoints.sync /
-      executeCommand 出站，D5 批准形态）
-    - composables/shell/extension-host-dialog.ts   bridge 直连（plugin.uiResponse 出站，
-      D5 批准形态）
-    - api/singleton.ts             单例装配（防御性放行 send）
-  （u4 后 composables/useConnection.ts 已不 import 任何 ws-client 说明符——连接编排
-  经 core use-connection 直连真实模块，白名单成员资格失效，条目已删。）
+扫描范围（SCAN_ROOTS）：renderer/src 全量 + ui/src/extension-host——两处的出站
+桥接件共用同一 ws-client 直调不变量，扫描不得留下包级盲区。
+
+白名单（合法直调点，键 = packages/ 下相对路径）：
+  ws-client send（extension-host 出站桥接件直连 core ws-client）：
+    - renderer/src/composables/shell/useExtensionHostBridge.ts  bridge 直连
+      （mountPoints.sync / executeCommand 出站）
+    - ui/src/extension-host/shell-adapters.ts       壳适配件直连（plugin.uiResponse
+      出站，由 renderer 壳装配）
   electronAPI：
-    - api/ipc-transport.ts         IPC 封装层（electronAPI 的唯一真实消费者）
-    - api/singleton.ts             单例装配（createIpcTransport(window.electronAPI)）
+    - renderer/src/lib/ipc.ts       IPC 封装层（electronAPI 的唯一真实消费者）
 
 检测目标：
   1. `import { ... send ... } from '.../ws-client'`（含 `send as 别名`）
@@ -31,21 +28,23 @@ pre-commit 检查，防止 store/composable/组件回退到直调底层通道。
 
 import re
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SCAN_ROOT = PROJECT_ROOT / "packages" / "renderer" / "src"
+PACKAGES_ROOT = PROJECT_ROOT / "packages"
+SCAN_ROOTS = [
+    PACKAGES_ROOT / "renderer" / "src",
+    PACKAGES_ROOT / "ui" / "src" / "extension-host",
+]
 
 WS_WHITELIST = {
-    "composables/shell/useExtensionHostBridge.ts",
-    "composables/shell/extension-host-dialog.ts",
-    "api/singleton.ts",
-    "composables/useConnection.ts",
+    "renderer/src/composables/shell/useExtensionHostBridge.ts",
+    "ui/src/extension-host/shell-adapters.ts",
 }
 
 IPC_WHITELIST = {
-    "api/ipc-transport.ts",
-    "api/singleton.ts",
+    "renderer/src/lib/ipc.ts",
 }
 
 # 命名导入块 + from '.../ws-client'（type-only import 同样拦，防止 import type 规避）
@@ -57,12 +56,17 @@ WS_CLIENT_IMPORT = re.compile(
 ELECTRON_API_CALL = re.compile(r"window\.electronAPI\s*\?\s*\.\s*\w+|window\.electronAPI\.\w+")
 
 
+def _scan_targets() -> Iterator[tuple[Path, str]]:
+    for root in SCAN_ROOTS:
+        for f in sorted(root.rglob("*")):
+            if f.suffix not in (".ts", ".vue"):
+                continue
+            yield f, f.relative_to(PACKAGES_ROOT).as_posix()
+
+
 def scan_ws() -> list[str]:
     errors: list[str] = []
-    for f in sorted(SCAN_ROOT.rglob("*")):
-        if f.suffix not in (".ts", ".vue"):
-            continue
-        rel = f.relative_to(SCAN_ROOT).as_posix()
+    for f, rel in _scan_targets():
         # [HISTORICAL] __tests__/ 排除：单元测试测 ws-client.send 本身是其职责，
         # 与业务代码（store/composable/组件）直调底层通道是两回事。规则目标是
         # 防止业务侧绕过 api 门面，不是禁止测试。
@@ -90,10 +94,7 @@ def scan_ws() -> list[str]:
 
 def scan_ipc() -> list[str]:
     errors: list[str] = []
-    for f in sorted(SCAN_ROOT.rglob("*")):
-        if f.suffix not in (".ts", ".vue"):
-            continue
-        rel = f.relative_to(SCAN_ROOT).as_posix()
+    for f, rel in _scan_targets():
         # [HISTORICAL] __tests__/ 排除（与 scan_ws 同理，见上方注释；含嵌套目录段匹配）
         if rel.startswith("__tests__/") or "/__tests__/" in rel:
             continue

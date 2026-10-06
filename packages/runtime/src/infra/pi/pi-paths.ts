@@ -77,6 +77,15 @@ export function getSettingsPath(): string {
 }
 
 /**
+ * pi MCP 服务器配置（pi 1.0 起内置 MCP 扩展在会话启动时读取，taiji 经 pi-mcp-store
+ * 唯一读写）：`<agentDir>/mcp.json`。用户级文件；pi 另读项目级 `<cwd>/.pi/mcp.json`，
+ * 后者不经本 store（设计裁决 I4，taiji 不管理项目级）。
+ */
+export function getMcpConfigPath(): string {
+  return join(getPiAgentDir(), 'mcp.json')
+}
+
+/**
  * taiji 扩展域 providers.json 路径：`<piAgentDir>/config/providers.json`。
  *
  * 承载自 pi models.json 迁出的 taiji 私有字段（provider 级 quota/authMethod、
@@ -155,7 +164,7 @@ export function getBtwSessionsRoot(): string {
 
 /**
  * pi 会话 id 合法值域判定（pi `assertValidSessionId` 同款正则，
- * dist/core/session-manager.js:15-19 正则字面量 :16，verifiedWith 0.84.4；登记 pi-semantics PS-52）：
+ * dist/core/session-manager.js 正则字面量；语义登记 pi-semantics PS-52，verifiedWith 以该登记为准）：
  * 首尾字母数字，中间允许 `[A-Za-z0-9._-]`。真 sid 永不含 `:` ⇒ 本校验同时挡住
  * btw vid 误传（`btw:<sid>` 含冒号必拒——vid 是 runtime/前端路由 key，不直传目录层）。
  */

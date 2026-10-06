@@ -2,7 +2,7 @@
   <!--
     展示组件 · trace-inspector（session-trace D5b：drawer 临时上下文页）。
     选中 trace 行才切入（PanelContainer default slot v-if chain 最前），不占一级 tab 位
-    （SideDrawerTab 体系不变）；顶部「← 返回」清除选中 → 复原前 tab 内容（activeTab 未被
+    （RightDrawerTab 体系不变）；顶部「← 返回」清除选中 → 复原前 tab 内容（activeTab 未被
     改过，单向 main→drawer）。两态：
     - 聚合态（selectedKey = entry key）：kind 分支详情（消息类文本/逐 block/工具输出/
       压缩 summary 全文/SYSTEM 留痕全文，其余原始 JSON 兜底，G1 不丢信息）。

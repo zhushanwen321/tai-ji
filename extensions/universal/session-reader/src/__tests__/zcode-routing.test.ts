@@ -310,13 +310,16 @@ describe('变体 M：manifest 主路径（instrument：manifest 锚与 entry 锚
     writeRootSessionFile()
   })
 
-  it('outline：读到 manifest 锚的 sess_bbb（ZBSENTINEL 在，ZASENTINEL 不在），两轮 T000/T001', async () => {
+  it('outline：读到 manifest 锚的 sess_bbb（ZBSENTINEL 在，ZASENTINEL 不在），两轮 T001/T002', async () => {
     const r = await handleSessionRead({ action: 'outline', session: SA_M }, signals())
     const text = r.content[0]?.text ?? ''
     expect(text).toContain('ZBSENTINEL')
     expect(text).not.toContain('ZASENTINEL')
-    expect(text).toContain('T000')
+    // D9② 占位行折叠：T000 = converter 注入的 session_info 前置条目（纯记录，非对话），
+    // 折叠后不产行；对话轮保留原 turn.index（T001/T002），totalTurns 仍 = 2
     expect(text).toContain('T001')
+    expect(text).toContain('T002')
+    expect(text).not.toMatch(/\bT000\b/)
     // outline 的 isCompaction 恒 false 属已登记形态（§4 已接受代价）——无独立压缩 turn
     expect(text).not.toContain('compaction')
   })

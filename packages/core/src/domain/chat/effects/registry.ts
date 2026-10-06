@@ -75,6 +75,7 @@ import { findLastAssistantIndex, findToolCallOwner } from '../chunk-processor'
 import { commitMessages, REASON_FALLBACK_ERROR_TEXT, terminalMessagePatch } from '../mutations'
 import { truncateToolCall } from '../truncate-tool-output'
 import { bashStartEffect, bashResultEffect, bashAbortedEffect } from '../bash-effects'
+import { randomUuid } from '../../../utils/random-uuid'
 import { applyEntryFrameWithOverlay } from './entry-overlay'
 import { isDevMode } from '../../../platform/dev-mode'
 // [投递所有权内核 u3b] message_end(user) 送达回执（内核标记 id 匹配，C-data-08 修订方向）
@@ -164,7 +165,7 @@ function isLastAssistantStreaming(
  *    本次不落盘（thinking_end 的空 thinking 分支——原实现该处直接 return 不 commit）。
  *
  * 副作用顺序说明：6 处调用点中 5 处（text_delta / thinking_start / thinking_delta /
- * tool_call_start / tool_call_update）的 payload 读取与派生构造（含 randomUUID 兜底 id、
+ * tool_call_start / tool_call_update）的 payload 读取与派生构造（含 randomUuid 兜底 id、
  * Date.now 生成）整体前移到 guard 之前，与原内联顺序（guard → 定位 → 读 payload → 更新）
  * 相比是顺序前移而非一致——纯读取、无观察面调用，故与基线行为等价；留在 update 闭包内
  * 的读取仅 tool_call_update 的 readDetail（thinking_end 无 payload 读取）。约束：前移段
@@ -249,7 +250,7 @@ function appendFallbackErrorBubble(
   const errNow = Date.now()
   commitMessages(messages, sid, [
     ...prev,
-    { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: errNow, endedAt: errNow },
+    { id: `a-${randomUuid()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: errNow, endedAt: errNow },
   ])
 }
 
@@ -321,18 +322,28 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // 不再是任何机制的工作前提。store 侧 queueStates 分区与其清理方法已随 u5a 退役（删除）
     // （store.ts 不在 u3b 领地）。
     const prev = messages.value.get(sid)?.value ?? []
-    const messageId = readString(payload, 'messageId') ?? `a-${crypto.randomUUID()}`
-    commitMessages(messages, sid, [
-      ...prev,
-      {
-        id: messageId,
-        role: 'assistant',
-        content: '',
-        status: 'streaming',
-        timestamp: Date.now(),
-        contentBlocks: [],
-      },
-    ])
+    const messageId = readString(payload, 'messageId') ?? `a-${randomUuid()}`
+    // [D1 回放重复防御] 同 id 气泡已存在 → 复用该气泡不 append（同源重复帧：订阅失败
+    // 重订的全量回放 / 重连回拉重叠段——两次投递都来自 runtime 消息流，messageId 相同）。
+    // 查重命中仅跳过 append：不改已有气泡 status（已终结保持终态——sealed guard 使后续
+    // delta 幂等丢弃，内容不丢；流式中保持 streaming，delta 由「最后一条 streaming
+    // assistant」定位继续累积到原气泡）；clearPendingSend 照常执行——此处早返回会跳过
+    // clear，把乐观态卡在 pending 窗口。防御射程 = 同源重复帧；跨源重复（getHistory
+    // 基线 id 与回放 messageId 是不相交 id 空间）归 D2 链时序对齐，不归本查重。
+    // （messageId 缺省 fallback 随机 id 必不与既有 id 相同，查重判定天然不影响缺省分支。）
+    if (!prev.some((m) => m.id === messageId)) {
+      commitMessages(messages, sid, [
+        ...prev,
+        {
+          id: messageId,
+          role: 'assistant',
+          content: '',
+          status: 'streaming',
+          timestamp: Date.now(),
+          contentBlocks: [],
+        },
+      ])
+    }
     // 空窗结束：clearPendingSend（接管 dispatching 语义）
     clearPendingSend(sid)
   },
@@ -417,7 +428,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     const prev = messages.value.get(sid)?.value ?? []
     commitMessages(messages, sid, [
       ...prev,
-      { id: `s-${crypto.randomUUID()}`, role: 'system', content: warnContent, status: 'complete', timestamp: Date.now(), liveOnly: true },
+      { id: `s-${randomUuid()}`, role: 'system', content: warnContent, status: 'complete', timestamp: Date.now(), liveOnly: true },
     ])
   },
 
@@ -440,7 +451,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
   // ── thinking 流（折进 trace，W05 endTime）──
   'message.thinking_start': (ctx, sid, payload) => {
     // [D-010 sealed]
-    const blockId = readString(payload, 'thinkingId') ?? `th-${crypto.randomUUID()}`
+    const blockId = readString(payload, 'thinkingId') ?? `th-${randomUuid()}`
     const contentIndex = readNumber(payload, 'contentIndex')
     updateStreamingAssistant(ctx, sid, findLastAssistantIndex, (m) => {
       const thinking = [...(m.thinking ?? []), { id: blockId, content: '', collapsed: true, startTime: Date.now() }]
@@ -485,7 +496,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // toolCallId 缺失时 fallback 随机 id（迁移前同款宽容防御：异常事件不断流）。
     const entry = payload['entry'] as PiToolCallEntryForm | undefined
     if (entry === undefined) return warnMalformedEntryDropped('message.tool_call_start', sid)
-    const callId = typeof entry.toolCallId === 'string' ? entry.toolCallId : `tc-${crypto.randomUUID()}`
+    const callId = typeof entry.toolCallId === 'string' ? entry.toolCallId : `tc-${randomUuid()}`
     const toolName = typeof entry.toolName === 'string' ? entry.toolName : 'tool'
     const call: ToolCall = {
       id: callId,
@@ -636,7 +647,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // 决策点 3），覆写归 reducer——本文件不再是覆写点。
     const entry: PiCustomMessageEntry = {
       type: 'custom_message',
-      id: `cm-${crypto.randomUUID()}`,
+      id: `cm-${randomUuid()}`,
       parentId: null,
       timestamp: new Date().toISOString(),
       customType: readString(payload, 'customType') ?? '',
@@ -677,7 +688,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     const summary = readCompactionSummary(payload)
     const entry: PiCompactionEntry = {
       type: 'compaction',
-      id: `cmp-${crypto.randomUUID()}`,
+      id: `cmp-${randomUuid()}`,
       parentId: null,
       timestamp: new Date(summary.timestamp ?? Date.now()).toISOString(),
       ...(summary.summary !== undefined && { summary: summary.summary }),
@@ -703,7 +714,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     const summary = readBranchSummary(payload)
     const entry: PiBranchSummaryEntry = {
       type: 'branch_summary',
-      id: `br-${crypto.randomUUID()}`,
+      id: `br-${randomUuid()}`,
       parentId: null,
       timestamp: new Date(summary.timestamp ?? Date.now()).toISOString(),
       ...(summary.summary !== undefined && { summary: summary.summary }),

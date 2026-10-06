@@ -9,19 +9,21 @@
  * 本 composable 把派生职责从 useSidebar 抽离，让只用派生状态的消费者改依赖本轻量 composable，
  * 不再拉入 useSidebar 的 session CRUD 巨型闭包（消除不必要的依赖耦合）。
  *
- * 派生逻辑本体（deriveStatus 纯函数）在 composables/logic/sessionStatus.ts（与 DOT_CLASS 同源，
- * 5 态 SSOT 聚合）；本 composable 只做「读 chat/session store → 包成响应式 ComputedRef」的薄包装。
+ * 派生逻辑本体（deriveSessionStatus 参数化谓词）已下沉 @taiji/core（remote-use A14/U20：
+ * session store 导出——桌面全量投影 / 移动 occupancy+subagent 运行态子集双壳同源）；
+ * 本 composable 只做「读 chat/session store 收集输入 → 包成响应式 ComputedRef」的薄包装
+ * （桌面投影收集层——extensionUI/backgroundWork 是 pinia store，core 不感知）。
  *
  * 为什么是 features 层而非 store 内：stores 互不 import，派生需同时读 chat store（消息分区）+
  * session store（activeId），无法放在单个 store 内（R2 铁律：stores 间禁止互相 import）。
  */
 import { computed } from 'vue'
 import type { ComputedRef } from 'vue'
+import { deriveSessionStatus } from '@taiji/core'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useBackgroundWork } from '@/composables/features/chat/useBackgroundWork'
-import { deriveStatus } from '@/composables/logic/sessionStatus'
 import type { DerivedStatus } from '@/types'
 
 /**
@@ -69,16 +71,24 @@ export function useSessionDerivations() {
         // hasBackgroundWork：主 turn 已结束但有 background subagent/workflow 仍在跑 → working 态。
         // 必须在 computed 体内读（建立对 recordsBySession 的响应式依赖，records 变化自动重算）。
         const hasBackgroundWork = hasSessionBackgroundWork(id)
-        // hasBlockingOverlayPending：阻塞型交互 overlay 请求 pending → waiting 态。
+        // hasBlockingOverlay：阻塞型交互 overlay 请求 pending → waiting 态（桌面全量投影成员）。
         // 判定键 = form 键 + planReview 键（D12 拓宽：plan 审批挂起同计入 waiting，多 session
         // 下后台 session 的审批挂起侧栏可见），权威口径见 stores/extension-ui.ts
         // hasPendingBlockingOverlay 注释：新 form 帧原生携带、legacy askUser / scheduleCreate
         // 帧经归一层附加后统一命中（T3 + schedule-create U6 随判定键收敛自动联动）；planReview
         // 键由 runtime event-adapter PLAN_REVIEW_MARKER 分支附加。
         // 非响应式 getter，但 computed 通过其引用的 requestsBySession 响应式 ref 建立依赖。
-        //（deriveStatus 形参名 hasFormOverlayPending 为历史名，实际已含 planReview，见 core 注释）
-        const hasBlockingOverlayPending = extensionUIStore.hasPendingBlockingOverlay(id)
-        return deriveStatus(id, chat, chat.isActive(id), chat.isCompacting(id), hasBackgroundWork, meta, hasBlockingOverlayPending)
+        //（core SessionStatusInputs.hasBlockingOverlay 承接该输入；移动壳无此源恒 false，D9② 白名单）
+        const hasBlockingOverlay = extensionUIStore.hasPendingBlockingOverlay(id)
+        // 判定谓词 = core deriveSessionStatus（U20 下沉单点，与移动列表同源）；
+        // isActive/isCompacting 体内读取建立 chat 分区响应式依赖
+        return deriveSessionStatus(id, chat, {
+          isActive: chat.isActive(id),
+          isCompacting: chat.isCompacting(id),
+          hasBackgroundWork,
+          metaStatus: meta,
+          hasBlockingOverlay,
+        })
       })
       statusCache.set(id, c)
     }

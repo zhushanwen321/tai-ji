@@ -2,11 +2,13 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter as pathDelimiter, dirname, join } from 'node:path'
 import { execSync } from 'node:child_process'
+// 临时 id 生成走 core 唯一入口（禁直调 crypto.randomUUID，secure context/Node 版本防御）
+import { randomUuid } from '@taiji/core/utils/random-uuid'
 import { RpcClient, type RpcClientOptions } from './rpc-client.js'
 import { getConfigDir } from './pi-paths.js'
 import { assertPiSessionFile } from './session-attach-assert.js'
 import type { IProcessManager } from '../../services/ports/pi-engine.js'
-import { toErrorMessage } from '../../utils/errors.js'
+import { SETTINGS_CORRUPTED, errorWithCode, toErrorMessage } from '../../utils/errors.js'
 import { isPackaged } from '../../utils/runtime-env.js'
 import { buildOutboundChildEnv } from '../spawn-env.js'
 // E-2（subagent-realtime-channel §4.2/§4.4）：findPiExecutable 抽出为共享函数
@@ -20,6 +22,10 @@ import {
   ensureRuntimeEngineRootsEnv,
   getEngineRootsSpawnEnv,
 } from '../../services/session/engine-roots.js'
+// pi 会话启动门禁的损坏判定单点（用户终裁 fail-fast）：getSettingsCorruption 每次
+// 调用现查（raw 预检不经 JsonStore，检测动作自身不触发改名），保证「改坏 → 拒绝 →
+// 修复 → 放行」全程无需重启 runtime。
+import { getSettingsCorruption } from './pi-settings-store.js'
 
 interface ManagedProcess {
   client: RpcClient
@@ -28,35 +34,11 @@ interface ManagedProcess {
 }
 
 /**
- * 短命 pi 附着就绪上限（W11）：spawn 冷启动中位数 ~500ms（P0.5 探针，瓶颈在 Node
- * 冷启动）+ switchSession RPC（<1ms），端到端预算 ~600ms；5s 上限覆盖慢机/首次冷缓存。
- */
-const EPHEMERAL_READY_TIMEOUT_MS = 5_000
-
-/**
  * pi 版本探测失败的负缓存时长（缓存治理 1-7）：失败值 60s 内直接返 'unknown' 不再探测，
  * 过期重试——瞬态失败（pi 缺失/PATH 未就绪/探测超时）不永久定罪，也避免 pi 缺失环境
  * 每次调用都吃 5s 探测超时。对齐 GitStateService notRepoCache 先例；成功值仍永久缓存。
  */
 const PI_VERSION_FAILURE_TTL_MS = 60_000
-
-/**
- * 给 promise 套一层超时（短命 pi 就绪等待专用）。
- *
- * 超时后底层 promise 仍可能 pending（switchSession 自身 SLOW_TIMEOUT_MS 120s）——
- * withEphemeralPi 的 finally destroySession 会 kill 进程 → RpcClient.rejectAll 让其
- * settle，本包装的 then/catch 已就位，不产生 unhandled rejection。
- */
-function raceReadyTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), ms)
-    timer.unref()
-    p.then(
-      (v) => { clearTimeout(timer); resolve(v) },
-      (e) => { clearTimeout(timer); reject(e) },
-    )
-  })
-}
 
 /**
  * Manages pi subprocess lifecycles. Each session gets its own
@@ -146,10 +128,46 @@ export class ProcessManager implements IProcessManager {
   }
 
   /**
+   * pi 会话启动门禁（用户终裁 fail-fast，2026-10-05）：settings.json 损坏时不允许启动 pi。
+   *
+   * 检测单点 getSettingsCorruption()（pi-settings-store）每次现查（无缓存）——settings.json
+   * 是 taiji/pi/用户三方共享的核心配置，可能在任意时刻被改坏（手工编辑是一等场景）；
+   * 现查保证「同进程内先拒后修再放行」无需重启。
+   *
+   * 插入点语义：
+   * - createSession 是 pi 进程 spawn 的**唯一入口**——会话创建（lifecycle.createNew）、
+   *   恢复（spawnRestoreClient，覆盖 session.restore RPC / 崩溃自动重生 respawn /
+   *   惰性恢复 ensureActive / 重启 reattach）、fork（switch_session 重 spawn 形态）、
+   *   短命 pi（withEphemeralPi，非活跃 session 改名等一次性附着）全部汇入此处，
+   *   单点门禁结构性覆盖全部 spawn 形态，无需各入口逐个插检查。
+   * - 位置在一切副作用之前（含旧进程 destroySession）：损坏时零副作用直接拒绝，
+   *   已运行会话不经此入口、不受影响（「只拦新 spawn」语义）。
+   * - 错误信封：errorWithCode(SETTINGS_CORRUPTED) 经 transport 中央 catch 透传为
+   *   error envelope（code + message，与 MODEL_NOT_CONFIGURED 同通路）；restore 链
+   *   经既有 catch 收敛为 RESTORE_FAILED（message 原样保留）。
+   */
+  private assertSettingsReadableForSpawn(): void {
+    const corruption = getSettingsCorruption()
+    if (!corruption.corrupted) return
+    const copyHint = corruption.corruptCopyPath
+      ? ` The damaged original was preserved at ${corruption.corruptCopyPath}.`
+      : ''
+    throw errorWithCode(
+      `Cannot start pi session: settings.json is corrupted (${corruption.filePath}).`
+      + copyHint
+      + ' Fix or delete the file, then retry; no restart is needed.',
+      SETTINGS_CORRUPTED,
+    )
+  }
+
+  /**
    * Spawn a new pi subprocess for the given session.
    * If a process already exists for this sessionId it is killed first.
    */
   async createSession(sessionId: string, cwd: string, options?: RpcClientOptions): Promise<RpcClient> {
+    // pi 会话启动门禁（见方法上方 JSDoc）：损坏时零副作用拒绝，进程未 spawn。
+    this.assertSettingsReadableForSpawn()
+
     if (this.processes.has(sessionId)) {
       await this.destroySession(sessionId)
     }
@@ -255,20 +273,11 @@ export class ProcessManager implements IProcessManager {
   }
 
   /**
-   * W11（数据源治理）：短命 pi 附着指定 session 文件执行一次性 RPC，用后即毁。
-   *
-   * 形态（探针场景 B 定型，逐次冷起——父文档 D2 裁决禁 warm pi）：复用 createSession
-   * spawn `pi --mode rpc` → `switchSession(sessionFile)` 附着该文件（就绪上限 5s）→
-   * fn(client) → destroySession。session JSONL 本体的唯一写方是 pi：fn 内的 RPC
-   * （如 setSessionName）由 pi 自身 appendFileSync 落盘，taiji 不触碰文件。
-   *
-   * 附着经 switchSession RPC 而非 `pi --session <file>` CLI flag——RpcClient 的 spawn
-   * 参数面（rpc-client.ts）不在本 wave 改动范围，switchSession 是既有附着原语
-   * （restoreSession 同款）。spawn 时 pi 先建内存新 session（首条 assistant 前不落盘，
-   * 规则 #6），switchSession 切走后即弃，sessions 目录零残留。
-   *
-   * 失败语义：spawn 失败 / 就绪超时 / fn 抛错一律 rethrow（进程在 finally 销毁），
-   * 调用方（如 renameSession 非活跃分支）按既有失败路径报错、保留旧值可重试。
+   * W11（数据源治理）：短命 pi 附着指定 session 文件执行一次性 RPC，用后即毁
+   * （spawn → switchSession 附着 → fn(client) → 销毁）。
+   * session JSONL 的唯一写方是 pi——fn 内 RPC（如 setSessionName）由 pi 自身落盘。
+   * spawn 失败 / fn 抛错一律 rethrow，调用方保留旧值可重试。
+   * 就绪等待墙钟（EPHEMERAL_READY_TIMEOUT_MS 5s race）已随 ADR-0122 防御机制清查退役。
    *
    * @param sessionFile 目标 session JSONL 绝对路径（须已存在；不存在时 switchSession
    *                    由 pi 报错，走同一失败路径）
@@ -281,14 +290,10 @@ export class ProcessManager implements IProcessManager {
     // cwd fallback，p1p4-closure W1；restoreSession 同款），与本入口无关。目录竞态消失时
     // 兜底 homedir，让失败落在 switchSession（pi 报「文件不存在」）而非 spawn ENOENT。
     const spawnCwd = existsSync(dirname(sessionFile)) ? dirname(sessionFile) : homedir()
-    const ephemeralId = `ephemeral-${Date.now()}-${crypto.randomUUID()}`
+    const ephemeralId = `ephemeral-${Date.now()}-${randomUuid()}`
     const client = await this.createSession(ephemeralId, spawnCwd)
     try {
-      await raceReadyTimeout(
-        client.switchSession(sessionFile),
-        EPHEMERAL_READY_TIMEOUT_MS,
-        `Ephemeral pi attach timed out after ${EPHEMERAL_READY_TIMEOUT_MS}ms (sessionFile: ${sessionFile})`,
-      )
+      await client.switchSession(sessionFile)
       // W2（restore-fork-attach-fix F4）：附着必断言（I1）。withEphemeralPi 附着本就是
       // 真实文件、天然通过；接线它使「附着必断言」成为无例外结构（设计文档 D4），
       // 新附着调用点照抄即得守卫。

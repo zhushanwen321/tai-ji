@@ -30,7 +30,6 @@ import {
   lastWrittenJson,
   resetRpcClientMock,
 } from '../../test/helpers/rpc-client-mock'
-const clientOpts = { startupDelayMs: 0 } as const // 测试注入：启动确认窗口归零（窗口语义不变，见 RpcClientOptions.startupDelayMs）
 
 // ── Mocks（工厂单源在 test/helpers/rpc-client-mock.ts，vi.mock 声明留本文件——路径按本文件解析）──
 
@@ -85,7 +84,7 @@ describe('RpcClient RT-2 加固：listener 隔离（#3b）', () => {
     resetRpcClientMock()
     piSessionLogMock.end.mockClear()
     const { RpcClient } = await import('../infra/pi/rpc-client.js')
-    client = new RpcClient({ ...clientOpts, cwd: '/project' })
+    client = new RpcClient({ cwd: '/project' })
     await client.start()
   })
 
@@ -133,7 +132,7 @@ describe('RpcClient RT-2 加固：响应形状守卫（#4）', () => {
   beforeEach(async () => {
     resetRpcClientMock()
     const { RpcClient } = await import('../infra/pi/rpc-client.js')
-    client = new RpcClient({ ...clientOpts, cwd: '/project' })
+    client = new RpcClient({ cwd: '/project' })
     await client.start()
   })
 
@@ -215,7 +214,7 @@ describe('RpcClient RT-2 加固：proc error terminate 出口（#6）', () => {
     piSessionLogMock.write.mockClear()
     piSessionLogMock.end.mockClear()
     const { RpcClient } = await import('../infra/pi/rpc-client.js')
-    client = new RpcClient({ ...clientOpts, cwd: '/project', sessionId: 's-rt2-6' })
+    client = new RpcClient({ cwd: '/project', sessionId: 's-rt2-6' })
     await client.start()
   })
 

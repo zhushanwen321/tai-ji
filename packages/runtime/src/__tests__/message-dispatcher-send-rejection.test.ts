@@ -4,7 +4,8 @@
  * 迁移口径：
  * - `classifyPromptRejection` 双字符串映射：**逐字保留**（消费方 = 内核适配器
  *   session-delivery-registry.promptWithBusyRetry；dispatcher 侧 re-export 已随过度设计
- *   审计候选 1 删除，本文件改从定义方 session-delivery-registry.js import）。registry 侧行为
+ *   审计候选 1 删除；pi1-disposition-chat-flow U3① 再下沉 infra/pi/pi-rejection.js——文案
+ *   infra/pi 单点驻留，本文件改从定义方 import）。registry 侧行为
  *   断言见 src/__tests__/session-delivery-registry.test.ts「u2 错误分类迁移（D6）」。
  * - pi busy 类拒绝的处置迁移（compacting → 持有等 compaction_end；processing → occupancy
  *   反转 generating；非 busy → message.error）在本文件锁定。
@@ -18,10 +19,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { MessageDispatcher } from '../services/session/message-dispatcher.js'
 import { SessionMessageHandler } from '../transport/session-message-handler.js'
 import {
-  classifyPromptRejection,
   createSessionDeliveryRegistry,
   type SessionDeliveryDeps,
 } from '../services/session/session-delivery-registry.js'
+// classifyPromptRejection 已下沉 infra/pi（U3①，D5③ 文案 infra/pi 单点驻留）——本文件从定义方 import。
+import { classifyPromptRejection } from '../infra/pi/pi-rejection.js'
 import type { IDispatcherSessionOps } from '../services/session/session-internal.js'
 import type { IManagedSessionView } from '../services/session/types.js'
 import type { IMessageBus } from '../services/message-bus/message-bus.js'

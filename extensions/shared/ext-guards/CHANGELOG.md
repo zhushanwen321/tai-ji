@@ -1,5 +1,11 @@
 # @zhushanwen/pi-ext-guards
 
+## 0.4.3
+
+### Patch Changes
+
+- 802af968f: Pin the pi peer dependency range to ^1.0.0 (smart-context also pins typebox; stale pi implementation anchors in comments refreshed to 1.0.0). No behavior change.
+
 ## 0.4.2
 
 ### Patch Changes

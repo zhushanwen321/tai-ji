@@ -6,7 +6,9 @@ import {
   isSubagentInFlightReport,
   type SubagentInFlightReport,
 } from './types'
-import { BRIDGE_MARKER } from '../plugin-bridge/marker'
+// [pi1-disposition-chat-flow D7①] RETIRED_BRIDGE_MARKER 随 plugin-bridge 协议模块退役删除——
+// 冲突性断言改字面量锚定（退役 marker 不可能再与本包 marker 冲突，保留断言防未来复用该值）。
+const RETIRED_BRIDGE_MARKER = '\x00TAIJI_BRIDGE'
 import { SESSION_MANAGER_MARKER } from '../session-manager/marker'
 import { ASK_USER_MARKER } from '../ask-user/marker'
 
@@ -28,7 +30,7 @@ describe('subagent-inflight marker 精确值', () => {
   it('SUBAGENT_INFLIGHT_MARKER 不与其他 select 通道 marker 冲突', () => {
     expect(SUBAGENT_INFLIGHT_MARKER).not.toBe(SESSION_MANAGER_MARKER)
     expect(SUBAGENT_INFLIGHT_MARKER).not.toBe(ASK_USER_MARKER)
-    expect(SUBAGENT_INFLIGHT_MARKER).not.toBe(BRIDGE_MARKER)
+    expect(SUBAGENT_INFLIGHT_MARKER).not.toBe(RETIRED_BRIDGE_MARKER)
   })
 })
 

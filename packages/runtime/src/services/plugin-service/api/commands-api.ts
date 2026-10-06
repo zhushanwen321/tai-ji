@@ -67,7 +67,7 @@ export interface CommandDescriptor {
    * - <=0 或 Infinity — 显式 opt-out（不限时，以 timer 域上界近似）；
    * - 非法值（非 number / NaN）— 注册入口 fail-fast（INVALID_TIMEOUT_MS），
    *   运行时脏值由 resolveToolTimeoutMs 回落默认兜底；
-   * - 缺省 — 回落 DEFAULT_TOOL_EXECUTE_TIMEOUT_MS（30min，bridge-interop）。
+   * - 缺省 — 回落 DEFAULT_TOOL_EXECUTE_TIMEOUT_MS（30min，tool-timeout）。
    */
   timeoutMs?: number
 }
@@ -154,7 +154,7 @@ export function registerCommandRpcHandlers(
     const when = asOptionalString(command.when, 'when')
     // D4 声明通道窄校验（对齐 tool-api 的 INVALID_TIMEOUT_MS 形态）：timeoutMs 可选，
     // present 即必须 number 且非 NaN——脏值 fail-fast 拒注册；0 / 负数 / Infinity 是
-    // 合法声明（显式 opt-out，运行时语义归 bridge-interop resolveToolTimeoutMs），
+    // 合法声明（显式 opt-out，运行时语义归 tool-timeout 的 resolveToolTimeoutMs），
     // 原样透传存储。
     const declaredTimeoutMs = command.timeoutMs
     if (

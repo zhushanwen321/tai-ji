@@ -8,14 +8,15 @@
 // - triggerClose：readyState → CLOSED 后调 onclose
 // - triggerMessage：原样透传 data 给 onmessage
 // - close()：置 CLOSED + 计数（不自动触发 onclose——由 ws-client 摘回调后调用，见 disconnect）
-import type { WebSocketLike } from '../../../platform/port'
+import type { WebSocketCloseInfo, WebSocketLike } from '../../../platform/port'
 import { WS_READY_STATE } from '../../../platform/port'
 
 export interface FakeWebSocket extends WebSocketLike {
   /** 手动触发 open（readyState→OPEN 后调 onopen） */
   triggerOpen(): void
-  /** 手动触发 close（readyState→CLOSED 后调 onclose） */
-  triggerClose(): void
+  /** 手动触发 close（readyState→CLOSED 后调 onclose；close info 可选——对齐原生
+   *  CloseEvent 携带 code/reason/wasClean，无参形态等价 mock 桩的无事件关闭） */
+  triggerClose(info?: WebSocketCloseInfo): void
   /** 手动触发 message（透传 data 给 onmessage） */
   triggerMessage(data: unknown): void
   /** 手动触发 error（透传 err 给 onerror） */
@@ -52,9 +53,9 @@ export function createFakeWebSocket(): FakeWebSocket {
       readyState = WS_READY_STATE.OPEN
       fake.onopen?.()
     },
-    triggerClose(): void {
+    triggerClose(info?: WebSocketCloseInfo): void {
       readyState = WS_READY_STATE.CLOSED
-      fake.onclose?.()
+      fake.onclose?.(info)
     },
     triggerMessage(data: unknown): void {
       fake.onmessage?.({ data })

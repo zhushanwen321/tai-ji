@@ -48,6 +48,15 @@ export interface PermissionRequest {
   requestId: string
 }
 
+/** 权限审批终局（remote-use-mobile S5-V3 撤窗）。requestId 与开窗 permissionRequest
+ *  广播同源；payload 缺 requestId（旧版广播）时消费端回退按 pluginId 匹配，故此处置空串。 */
+export interface PermissionRequestResolved {
+  pluginId: string
+  requestId: string
+  /** true 批准 / false 拒绝（含挂起期清理唤醒）——审计/展示用，不参与撤窗匹配 */
+  approved: boolean
+}
+
 /** 对话框请求（IF2/DM3，s4 消费渲染 companion-band）。 */
 export interface DialogRequest {
   requestId: string
@@ -96,6 +105,7 @@ export type InternalEvent =
   | { kind: 'plugin-status-set-update'; sessionId?: string; status: StatusSetEntry[] }
   | { kind: 'extension-status'; sessionId?: string; status: ExtensionStatusEntry }
   | { kind: 'plugin-permission-request'; sessionId?: string; request: PermissionRequest }
+  | { kind: 'plugin-permission-request-resolved'; sessionId?: string; resolved: PermissionRequestResolved }
   | { kind: 'plugin-crashed'; pluginId: string; error: string }
   | { kind: 'plugin-notification'; sessionId?: string; notification: NotificationPayload }
   | { kind: 'plugin-config-changed'; pluginId: string; config: unknown }

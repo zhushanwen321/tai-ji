@@ -23,6 +23,9 @@
  * - `isDeleted(sid)`：查询该 sid 是否处于「已删未重建」态（与 updateFor 的拦截共用同一份
  *   deletedSids，含重建出列语义）。供消费方自管的分区外辅助表（非分区态的模块级 Map）
  *   在写入点做同口径迟到写拦截——不必自建第二份删除登记（避免与工厂的出列语义漂移）
+ * - `hasPartition(sid)`：只读分区存在性查询（分区表中是否有该 sid 的条目）。供「先查后清」
+ *   类重置动作前置检查——不存在则跳过写入，防 updateFor 的惰性建分区把清理动作本身变成
+ *   常驻空分区的制造点（remote-use D5/U6 exited 分通道重置，消费方 = DialogRequestQueue.resetFor）
  * - `cleanup(sid)`：从 Map 移除指定 sid 分区并记入 deletedSids（下次访问重新 init；
  *   重新 init 时出列，此后 updateFor 恢复写入——删除后同 id 重建不丢写）
  * - 切 sid 不丢旧数据（Map 保留），切回恢复
@@ -104,12 +107,13 @@ export function __clearSessionCleanupRegistryForTest(): void {
  *
  * @param sid 响应式 session id（Ref<string|null>），null 表示无活跃 session
  * @param init 新 session 的状态工厂（惰性调用，每 sid 仅一次）
- * @returns { current, update, updateFor, cleanup, isDeleted }
+ * @returns { current, update, updateFor, cleanup, isDeleted, hasPartition }
  *   - current: 当前 sid 分区的 computed（null 返回默认实例不写 Map）
  *   - update(updater): 操作当前 sid 分区（读 sid.value 实时值，用于 UI 操作）
  *   - updateFor(targetSid, updater): 显式指定 sid 分区（用于 WS handler 捕获订阅时 sid，防 M1 竞态）
  *   - cleanup(sid): 移除指定 sid 分区
- *   - isDeleted(sid): 查询「已删未重建」态（分区外辅助表的同口径迟到写拦截，见上方契约）
+ *   - isDeleted(sid): 查询「已删未重建」态（分区外辅助表的迟到写拦截，见上方契约）
+ *   - hasPartition(sid): 只读分区存在性查询（先查后清类重置动作的前置检查，见上方契约）
  */
 export function useSessionScopedState<T>(
   sid: Ref<string | null>,
@@ -121,6 +125,8 @@ export function useSessionScopedState<T>(
   cleanup: (sid: string) => void
   /** 已删 sid 查询（D-B2-1 口径延伸）：与 updateFor 拦截共用同一份 deletedSids。 */
   isDeleted: (sid: string) => boolean
+  /** 分区存在性查询（remote-use U6）：先查后清类重置动作的前置检查，只读零副作用。 */
+  hasPartition: (sid: string) => boolean
   /** 测试钩子：清空所有分区（bump version 触发 current 重算）。生产代码禁止调用。 */
   _clearAllForTest: () => void
 } {
@@ -169,6 +175,15 @@ export function useSessionScopedState<T>(
    */
   function isDeleted(id: string): boolean {
     return deletedSids.has(id)
+  }
+
+  /**
+   * 分区存在性查询（remote-use U6 / D5 exited 分区清理段）：分区表中是否有该 sid 条目。
+   * 只读零副作用（不触发 getOrCreatePartition 的惰性 init），供 resetFor 类「先查后清」
+   * 重置动作前置检查——不存在则整体跳过写入，防清理动作本身制造常驻空分区。
+   */
+  function hasPartition(id: string): boolean {
+    return partitions.has(id)
   }
 
   // current computed：按 sid.value 查分区。
@@ -250,6 +265,7 @@ export function useSessionScopedState<T>(
     updateFor,
     cleanup,
     isDeleted,
+    hasPartition,
     _clearAllForTest: () => {
       partitions.clear()
       deletedSids.clear()

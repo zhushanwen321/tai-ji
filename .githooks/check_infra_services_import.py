@@ -24,6 +24,8 @@ check_services_infra_import.py 只拦 services→infra，infra→services 方向
     写侧与 infra 启动清洗侧共享同一口径的单点，分层论证见该模块头注释）
   inflight-mirror：[u7b D5 例外] 在途镜像单例（marker 旁路写、滚动重启判定读，
     event-adapter 消费点已有同款注释登记）
+  journal-report-router：[event-push-channel] journal 推送路由单例（marker 旁路写、
+    SessionRecords 构造期注册 sink 读，同 inflight-mirror 形态先例）
 
 退出码: 0 通过 / 2 违规
 """
@@ -45,6 +47,7 @@ ALLOWED_MODULES = {
     "provider-catalog",
     "provider-model-item",
     "inflight-mirror",
+    "journal-report-router",
 }
 
 # type-only 语句（import type / export type ... from '...'，含多行形态）先剔除再扫 value

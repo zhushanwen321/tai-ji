@@ -18,7 +18,7 @@
  * 运行：npx vitest run src/__tests__/event-interpreter.test.ts
  */
 import { afterEach, describe, it, expect, vi } from 'vitest'
-import { EventInterpreter, OCCUPANCY_SETTLE_WINDOW_MS, occupancySettleWindow } from '../services/session/event-interpreter.js'
+import { EventInterpreter } from '../services/session/event-interpreter.js'
 import type { GenStatsSample, PiTranslatedEvent, SessionOccupancyTransition } from '../services/session/types.js'
 import type { ServerMessage } from '@taiji/shared'
 
@@ -733,21 +733,17 @@ describe('agent-settled V7 dev-only 延迟注入（session-dead-structural-fixes
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('缺陷 1 修复：delay ≥ 收敛窗（3000ms）→ 拒绝生效零行为差异（防 settled 被推迟过收敛窗，破坏「掐而 settled 未到」判定）', () => {
+  it('大 delay 值照常生效（原「delay ≥ 收敛窗拒绝」上界约束随收敛窗删除一并移除，delay 与收敛判定不再耦合）', () => {
     vi.useFakeTimers()
     const onAgentSettled = vi.fn()
     const onOccupancyTransition = vi.fn()
     const { interp } = makeInterpreter({ onAgentSettled, onOccupancyTransition })
-    for (const [i, tooLarge] of ['3000', '5000', '60000'].entries()) {
-      vi.stubEnv(ENV_KEY, tooLarge)
-      interp.interpret([{ kind: 'agent-settled' }])
-      // 同步处理（拒绝生效）：delay 达到 ABORT_STALL_CONVERGENCE_WINDOW_MS 量级时，
-      // restore-abort 受害 turn 的 settled 会被推迟到收敛窗满之后 → onWindowElapsed 在
-      // pendingSettled=false 下误判收敛清标记（设计 v4 ③边界缝确定性重开）
-      expect(onAgentSettled).toHaveBeenCalledTimes(i + 1)
-      expect(onOccupancyTransition).toHaveBeenCalledWith('idle')
-    }
-    expect(vi.getTimerCount()).toBe(0)
+    vi.stubEnv(ENV_KEY, '60000')
+    interp.interpret([{ kind: 'agent-settled' }])
+    // 延迟注入生效：副作用挂 timer（未到点未执行）
+    expect(onAgentSettled).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(1)
+    vi.unstubAllEnvs()
   })
 
   it('缺陷 2 修复：dispose 后在途延迟 timer 到点零副作用（防幽灵 idle 打在同 id restore 的新 session 上）', async () => {
@@ -793,50 +789,6 @@ describe('agent-settled V7 dev-only 延迟注入（session-dead-structural-fixes
   })
 })
 
-/**
- * CP6：turn 事件到达即取消命令-only 收口窗口（scheduler-trigger-inversion §11 CP6）。
- *
- * 这里锁 interpreter 侧的接线：`turn-start`（handleTurnLifecycleEvent）与 `hook{agent_start}`
- * （handleMetaEvent）两个挂点必须调用 occupancySettleWindow.cancel——窗口由 dispatcher 武装。
- * 取消用「回调不再触发」行为级断言（而非内部 Map 断言）。
- */
-describe('EventInterpreter × CP6 短窗取消接线', () => {
-  afterEach(() => {
-    occupancySettleWindow.resetForTest()
-    vi.useRealTimers()
-  })
-
-  it('turn-start 到达 → 取消窗口（到期不再回调）', () => {
-    vi.useFakeTimers()
-    occupancySettleWindow.resetForTest()
-    const onElapsed = vi.fn()
-    occupancySettleWindow.arm('s1', onElapsed)
-    const { interp } = makeInterpreter()
-    interp.interpret([{ kind: 'turn-start', messageId: 'm1' }])
-    vi.advanceTimersByTime(OCCUPANCY_SETTLE_WINDOW_MS * 2)
-    expect(onElapsed).not.toHaveBeenCalled()
-  })
-
-  it('hook{agent_start} 到达 → 取消窗口（到期不再回调）', () => {
-    vi.useFakeTimers()
-    occupancySettleWindow.resetForTest()
-    const onElapsed = vi.fn()
-    occupancySettleWindow.arm('s1', onElapsed)
-    const { interp } = makeInterpreter()
-    interp.interpret([{ kind: 'hook', eventType: 'agent_start', data: {} }])
-    vi.advanceTimersByTime(OCCUPANCY_SETTLE_WINDOW_MS * 2)
-    expect(onElapsed).not.toHaveBeenCalled()
-  })
-
-  it('无 turn 事件（命令-only）→ 窗口如期回调（对照组：取消不是无条件）', () => {
-    vi.useFakeTimers()
-    occupancySettleWindow.resetForTest()
-    const onElapsed = vi.fn()
-    occupancySettleWindow.arm('s1', onElapsed)
-    const { interp } = makeInterpreter()
-    // 无关事件（非 turn）不取消
-    interp.interpret([{ kind: 'hook', eventType: 'tool_execution_start', data: {} }])
-    vi.advanceTimersByTime(OCCUPANCY_SETTLE_WINDOW_MS)
-    expect(onElapsed).toHaveBeenCalledTimes(1)
-  })
-})
+// [pi1-disposition-chat-flow D3③] 「EventInterpreter × CP6 短窗取消接线」测试组随 CP6
+// 回落窗退役整体删除（窗口机制不存在，两挂点取消接线随之消失；occupancy 回落现由
+// pi 权威事实驱动——handled 响应即回落，行为锚定移至 session-delivery-registry 侧测试）。

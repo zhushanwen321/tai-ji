@@ -5,8 +5,7 @@
  * 职责：把本 runtime 进程当前**活跃 session 清单 + 每 session 恢复元数据**持续落到
  * `<dataDir>/run/runtime-checkpoint.json`，供「runtime 死后新 runtime 的 reattach 编排」
  * （u5）判定该恢复谁。落盘时机 = session 生命周期事件（attach / detach / reclaim /
- * respawn 成功，由 session-service 挂点驱动）+ reaper 5min tick 搭车刷新时效字段
- * （idle-pi-reaper 每拍本来就要遍历活跃 session 算 idleMs，顺带刷新零新增探测）。
+ * respawn 成功，由 session-service 挂点驱动）。
  *
  * 五契约（设计 §5「checkpoint 五契约」逐条映射，本模块落地其中 4 条；收割时序属 u5）：
  * 1. **删除属主双轨**：本模块提供 `removeSession`（摘除条目，非删文件）与只读面；**不提供

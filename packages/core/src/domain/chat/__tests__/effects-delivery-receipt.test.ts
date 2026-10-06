@@ -10,7 +10,9 @@
  * - ①a 标记回执：命中投影条目 → 投影转 delivered + morph 段按序入流（捕获过才入）+
  *   inflight 占位回收 + 帧消费终止（不走 ②）
  * - 双形态匹配契约桥：裸 uuid（期望形态）/ u-<uuid> 原文都命中（跨 u1 契约错配消除面）
- * - direct 车道回执：无 morph 段 → 不重复入流，仅占位回收
+ * - direct 车道回执：发送端有本地同 id 气泡 → 不重复入流（防双插由 hasLocalBubble
+ *   承接，D4），仅占位回收；观看端无气泡 direct 消息入流补显（V17，锚
+ *   effects/__tests__/user-delivery.test.ts）
  * - 未命中下落 ②：无标记 / 标记不命中投影 → 纯计数兜底（现状链）
  * - 幂等：已 delivered 条目二次回执不重复消费
  * - [dmg-r1-5] 多标记帧整批消费（splitComposed 放弃拆分 → 整条多标记文本一次进
@@ -53,10 +55,10 @@ const CLIENT_UUID = `u-${UUID}`
  * incrementInflight 已随 ctx 成员收口删除（增量归 store 方法面）——测试预置计数走
  * 本闭包的 addInflight 直写 Map，与 store.incrementInflight 增量语义等价。
  */
-function makeCtx(): MessageEffectContext & { inflightOf: () => number; addInflight: (n?: number) => void } {
+function makeCtx(localMessages: Message[] = []): MessageEffectContext & { inflightOf: () => number; addInflight: (n?: number) => void } {
   const inflight = new Map<string, number>()
   return {
-    messages: ref(new Map([[SID, shallowRef([] as Message[])]])),
+    messages: ref(new Map([[SID, shallowRef(localMessages)]])),
     retryStates: ref(new Map()),
     applyFileChanges: vi.fn(),
     markChangeSetsSuperseded: vi.fn(),
@@ -133,9 +135,14 @@ describe('message_end(user) 送达回执（u3b / D2① 泛化，C-data-08 修订
     expect(ctx.inflightOf()).toBe(0)
   })
 
-  it('AC3: direct 条目回执 → 无 morph 段不重复入流（气泡原位保持），仅投影转态 + 占位回收', () => {
+  it('AC3: direct 条目回执 → 无 morph 段且本地有同 id 气泡不重复入流（D4 后防双插由 id 判定承接，气泡原位保持）', () => {
+    // [D4 修订] 修前本用例锁定「direct 车道整体豁免」（无气泡也不入流）；D4
+    //（remote-use-shell-unification）后 direct 豁免由 hasLocalBubble 精确承接——观看端
+    // foreign 无气泡 → 入流补显（直调侧谓词锚见 effects/__tests__/user-delivery.test.ts
+    // D4-AC1/AC4），本用例改为发送端形态（本地有同 id 乐观气泡），经全 handler 链锁定
+    // 防双插 + 回执侧照常（投影转态 + 占位回收与入流判定正交）。
     replaceDeliveryProjection(SID, [entry({ lane: 'direct' })])
-    const ctx = makeCtx()
+    const ctx = makeCtx([{ id: CLIENT_UUID, role: 'user', content: [{ type: 'text', text: 'hi' }], status: 'complete', timestamp: 0 }])
     ctx.addInflight(1)
 
     dispatchMessageEvent(ctx, SID, userEndFrame(SID, 'hi', UUID))

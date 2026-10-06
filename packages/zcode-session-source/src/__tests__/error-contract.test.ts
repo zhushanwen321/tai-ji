@@ -23,13 +23,18 @@ import { join } from 'node:path'
 import {
   SNAPSHOT_TMP_PREFIX,
   SqliteUnreadableError,
-  countSnapshotDirs,
   openViaSnapshot,
   openWithRecovery,
 } from '../recovery.ts'
 import type { SqliteDb, SqliteDriver } from '../sqlite-driver.ts'
 import { openZcodeSessionDb } from '../sqlite-access.ts'
-import { checkpointAndClose, makeFixtureDir, openWritableSqlite } from './helpers.ts'
+import {
+  checkpointAndClose,
+  expectNoNewSnapshotDirs,
+  makeFixtureDir,
+  openWritableSqlite,
+  snapshotDirNameSet,
+} from './helpers.ts'
 
 // ── 假驱动注入面（仅 recovery 错误收尾契约组使用；slot 为空 = 回退真实驱动）──────────
 
@@ -256,7 +261,7 @@ describe('recovery 错误收尾契约（假驱动：close 失败 / probe 失败 
     try {
       const dbPath = join(fx.root, 'db.sqlite')
       writeFileSync(dbPath, 'dummy bytes — probe will fail before parsing')
-      const snapshotsBefore = countSnapshotDirs()
+      const snapshotsBefore = snapshotDirNameSet()
 
       let caught: unknown
       try {
@@ -270,8 +275,10 @@ describe('recovery 错误收尾契约（假驱动：close 失败 / probe 失败 
       // 归因以探测错误为准：close 错误吞掉不参与（失败路径错误面不污染）
       expect(err.message).toContain('fake probe NOTADB')
       expect(err.message).not.toContain('fake close broken')
-      // L3 失败路径收尾：快照目录读后即清（差分语义见下方失败路径组注释——私有根下无并发噪声）
-      expect(countSnapshotDirs()).toBeLessThanOrEqual(snapshotsBefore)
+      // L3 失败路径收尾：快照目录读后即清（零新增残留断言，并发噪声免疫形态
+      // 见 helpers.expectNoNewSnapshotDirs —— 旧 toBeLessThanOrEqual 计数差分挡得住
+      // 外部清理噪声、挡不住创建噪声，同族竞态已由新形态收口）
+      await expectNoNewSnapshotDirs(snapshotsBefore)
     } finally {
       fx.cleanup()
     }
@@ -298,7 +305,7 @@ describe('recovery 错误收尾契约（假驱动：close 失败 / probe 失败 
     try {
       const dbPath = join(fx.root, 'db.sqlite')
       writeFileSync(dbPath, 'dummy bytes — snapshot copy will open but lack tables')
-      const snapshotsBefore = countSnapshotDirs()
+      const snapshotsBefore = snapshotDirNameSet()
 
       let caught: unknown
       try {
@@ -309,9 +316,12 @@ describe('recovery 错误收尾契约（假驱动：close 失败 / probe 失败 
       expect(caught).toBeInstanceOf(Error)
       expect((caught as Error).message).toContain('table-set validation')
       expect((caught as Error).message).toContain('session/message/part')
-      // 差分断言锁「本路径不新增快照」；tmpdir 已被本文件 mock 到私有根（见文件头部
-      // mock 块），计数只看见本文件的快照，无并发 worker 污染。
-      expect(countSnapshotDirs()).toBeLessThanOrEqual(snapshotsBefore)
+      // 差分断言只锁「本路径不新增快照残留」（零新增形态，并发噪声免疫机制
+      // 见 helpers.expectNoNewSnapshotDirs）：SNAPSHOT_TMP_PREFIX 住全局共享 tmpdir，
+      // 旧计数差分（相等 / ≤）会被 vitest 并发 worker 与 runtime 侧用例在采样窗口内的
+      // 合法创建/清理噪声打破（全包并发跑偶发红、单文件跑绿的竞态形态——Gate A
+      // 两轮实挂同族根因，归因与修复见该助手注释）。
+      await expectNoNewSnapshotDirs(snapshotsBefore)
     } finally {
       fx.cleanup()
     }

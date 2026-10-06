@@ -1,5 +1,17 @@
 # @zhushanwen/pi-session-reader
 
+## 0.10.0
+
+### Minor Changes
+
+- 802af968f: The session outline now folds record-only entries (usage, session info, model changes, custom audit entries, branch summaries): outline lines and turn counts reflect conversation turns only, while expand/detail still reach every entry by its original turn index (requires pi 1.0.0).
+
+## 0.9.1
+
+### Patch Changes
+
+- 492e02447: chore: refresh dependency range (triggered by @zhushanwen/zcode-session-source@0.2.3 → @zhushanwen/zcode-session-source@0.2.4)
+
 ## 0.9.0
 
 ### Minor Changes

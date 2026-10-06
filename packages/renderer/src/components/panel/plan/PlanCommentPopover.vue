@@ -211,9 +211,12 @@ function onMouseDown(e: MouseEvent): void {
   dismiss()
 }
 
-/** Esc 关闭（D13⑪ / DESIGN.md §5.13 Esc 关闭 overlay）：浮条/编辑态均整体关闭（安全选择 = 不提交） */
+/** Esc 关闭（D13⑪ / DESIGN.md §5.13 Esc 关闭 overlay）：浮条/编辑态均整体关闭（安全选择 = 不提交）。
+ *  消费即 preventDefault（§6.7 先行档契约）：document 级监听执行序先于编排器 window bubble，
+ *  不置位 defaultPrevented 时编排器会在同一 Esc 上再关一层容器（双动作击穿点）。 */
 function onKeyDown(e: KeyboardEvent): void {
   if (e.key !== 'Escape' || !sel.value) return
+  e.preventDefault()
   dismiss()
 }
 

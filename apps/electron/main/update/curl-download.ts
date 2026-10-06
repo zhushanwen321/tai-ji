@@ -42,7 +42,7 @@ import { UpdateError } from './types.js'
 
 // ─── 常量（对齐口径见各注释；download-asset 的同名常量未导出，故本地声明） ────
 
-/** 空闲中止：30s 无有效字节即中止（--speed-limit 1 --speed-time 30），对齐 IDLE_TIMEOUT_MS。 */
+/** 空闲中止：30s 无有效字节即中止（--speed-limit 1 --speed-time 30，curl 进程参数）。 */
 const CURL_SPEED_TIME_SECONDS = 30
 
 /** 连接超时 10s：对齐检测路径既有 10s 语义（D6）。 */

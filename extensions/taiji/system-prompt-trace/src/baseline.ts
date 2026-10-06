@@ -20,7 +20,7 @@ import type { PromptBaseline } from "./types.js";
 /**
  * 解析单行 session JSONL 为留痕 entry data（运行时 guard；任何形状不符 / JSON 损坏返回 null）。
  * pi 落盘形状：{"type":"custom","customType":"taiji:system-prompt","data":{...},...}
- * （session-manager.ts:1122 appendCustomEntry）。
+ * （pi 1.0.0 实装 session-manager.js:901 appendCustomEntry）。
  */
 function parseTraceEntryData(line: string): { hash: string; version: number; fullText: string } | null {
 	let parsed: unknown;

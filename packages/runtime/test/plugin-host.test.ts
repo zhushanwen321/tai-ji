@@ -114,7 +114,6 @@ describe('PluginHost', { timeout: 30_000 }, () => {
 
     expect(handle.status).toBe('terminated')
     expect(crashes).toEqual([])
-    expect(host.getCrashCount('term-trusted')).toBe(0)
 
     await host.shutdown()
   })
@@ -141,7 +140,6 @@ describe('PluginHost', { timeout: 30_000 }, () => {
 
     expect(handle.status).toBe('terminated')
     expect(crashes).toEqual([])
-    expect(host.getCrashCount('shutdown-trusted')).toBe(0)
   })
 
   // ── 回归：process 版 shutdown 同样不误报（sandbox 子进程正常关停）──
@@ -168,173 +166,4 @@ describe('PluginHost', { timeout: 30_000 }, () => {
     expect(crashes).toEqual([])
   })
 
-  // ── U7/D5: loadPlugin 超时 → handleWorkerCrash 回收链（P-10 检查点）──
-  // fake timers 同步 advance 手法：loadPlugin 内 postMessage 后、无事件循环让渡时
-  // 同步 advanceTimersByTime，超时回调确定性先于 Worker 线程的 loaded 回包被主线程
-  // 消费（跨线程消息需经真实事件循环派发，fake timer 同步触发）——无需「不回复的
-  // bootstrap」即可确定性复现 load 超时。
-  it('loadPlugin timeout triggers crash chain: terminate + rebuild scheduling (D5)', async () => {
-    const rpc = new PluginRpcServer()
-    const host = new PluginHost(rpc, { workerBootstrapOverride: WORKER_MOCK })
-
-    const crashes: Array<{ workerId: string; pluginIds: string[]; error: string }> = []
-    host.setCrashCallback((workerId, pluginIds, error) => {
-      crashes.push({ workerId, pluginIds, error })
-    })
-
-    const workerId = await host.assignWorker('load-timeout', 'trusted')
-
-    // P-10 检查点实测：load 超时入口 handle.status === 'active'（createWorker 刚创建，
-    // 未涉 crash/terminate）——满足 handleWorkerCrash 幂等守卫前置，无需直接 terminate 兜底
-    expect(host.getWorkerHandleById(workerId)!.status).toBe('active')
-
-    const worker = host.getWorkerInstance(workerId)!
-    const termSpy = vi.spyOn(worker, 'terminate')
-    // exit 监听：幂等守卫断言用（WORKER_MOCK 自然退出 code 0，故只锚事件发生不锁 code 值）
-    const exitCodes: number[] = []
-    worker.on('exit', (code) => exitCodes.push(code))
-
-    vi.useFakeTimers()
-    try {
-      const pending = host.loadPlugin(workerId, 'load-timeout', '/virtual/plugin', 'trusted')
-
-      // 默认 LOAD_PLUGIN_TIMEOUT_MS = 10s 精确边界：9_999ms 未超时
-      vi.advanceTimersByTime(9_999)
-      expect(host.getCrashCount('load-timeout')).toBe(0)
-      expect(host.getPendingRebuildTimer(workerId)).toBeUndefined()
-
-      vi.advanceTimersByTime(1)
-      await expect(pending).rejects.toThrow(/loadPlugin timeout for worker/)
-
-      // crash 链完整执行：terminate 被调 + handle/索引清理 + crash 计数 + rebuild 排期
-      expect(termSpy).toHaveBeenCalledTimes(1)
-      expect(host.getWorkerHandleById(workerId)).toBeUndefined()
-      expect(host.getCrashCount('load-timeout')).toBe(1)
-      expect(host.getPendingRebuildTimer(workerId)).toBeDefined()
-      expect(crashes.length).toBe(1)
-      expect(crashes[0].error).toContain('loadPlugin timeout')
-      expect(crashes[0].pluginIds).toEqual(['load-timeout'])
-    } finally {
-      vi.useRealTimers()
-    }
-
-    // 幂等守卫：本 terminate 触发的 exit 不二次 crash（事件驱动等真实传播）
-    await vi.waitFor(() => expect(exitCodes.length).toBeGreaterThan(0), { timeout: 2000 })
-    expect(crashes.length).toBe(1)
-    expect(host.getCrashCount('load-timeout')).toBe(1)
-
-    await host.shutdown()
-  })
-
-  // ── U7/D5: loadTimeoutMs 覆盖参数（对齐 fork 版 PluginPoolOptions 先例）──
-  it('loadTimeoutMs option overrides the 10s default (fork parity)', async () => {
-    const rpc = new PluginRpcServer()
-    // 覆盖 2s：2s-1ms 未超时、2s 整触发——证明取的是覆盖值而非默认 10s
-    const host = new PluginHost(rpc, { workerBootstrapOverride: WORKER_MOCK, loadTimeoutMs: 2_000 })
-
-    const workerId = await host.assignWorker('load-timeout-opt', 'trusted')
-
-    vi.useFakeTimers()
-    try {
-      const pending = host.loadPlugin(workerId, 'load-timeout-opt', '/virtual/plugin', 'trusted')
-
-      vi.advanceTimersByTime(1_999)
-      expect(host.getCrashCount('load-timeout-opt')).toBe(0)
-      expect(host.getPendingRebuildTimer(workerId)).toBeUndefined()
-
-      vi.advanceTimersByTime(1)
-      expect(host.getCrashCount('load-timeout-opt')).toBe(1)
-      expect(host.getPendingRebuildTimer(workerId)).toBeDefined()
-      await expect(pending).rejects.toThrow(/after 2000ms/)
-    } finally {
-      vi.useRealTimers()
-    }
-
-    await host.shutdown()
-  })
-
-  // ── V6②: load 超时 crash 连坐——同宿主已激活插件 rebuild 后自动重载 ──
-  // 设计 §6.5/§9 V6②：load 超时 ≈ Worker event loop 卡死，terminate + rebuild
-  // （连带同宿主其他插件重载）与 crash 路径处理完全一致。全链（真实 PluginService
-  // 装配 + mock Worker 线程）验证：同宿主 ACTIVE 插件随 crash 链置 CRASHED（而非
-  // 被激活失败终态覆盖为 UNLOADED）→ 冷却后 rebuild（trusted-2）→ 按既有
-  // CRASHED-only 重载编排恢复 ACTIVE（工具可用）。UNLOADED 跳过语义（用户
-  // disable/uninstall 不复活）由 lifecycle-races LC-U1 在 PluginService 层覆盖。
-  it('V6②: loadPlugin timeout collateral — active same-host plugin ends CRASHED and is reloaded after rebuild', async () => {
-    const tmpRoot = await mkdtemp(join(tmpdir(), 'v62-host-root-'))
-    const tmpConfig = await mkdtemp(join(tmpdir(), 'v62-host-config-'))
-    const broadcasts: unknown[] = []
-    const broker: IMessageBroker = {
-      send: () => {},
-      broadcast: (msg) => { broadcasts.push(msg) },
-      sendError: () => {},
-    }
-    const service = new PluginService(new PluginRegistry(tmpRoot, tmpConfig), broker, { configDir: tmpConfig })
-    // initialize 前换装 mock-bootstrap 宿主：registerWorkerCallbacks（crash/rebuilt/reply）
-    // 会接线到该实例——生产装配路径零复制（crash callback → markCrashed、rebuilt → 重载编排均走真实代码）
-    service.host = new PluginHost(service.rpcServer, { workerBootstrapOverride: WORKER_MOCK })
-    await service.initialize()
-
-    const makeTrustedDescriptor = (pluginId: string): PluginDescriptor => ({
-      pluginId,
-      version: '1.0.0',
-      displayName: pluginId,
-      description: '',
-      main: 'index.js',
-      activationEvents: ['onStartupFinished'],
-      trustLevel: 'trusted',
-      status: 'UNLOADED',
-      contributes: {},
-      permissions: [],
-      engines: { 'taiji': '*' },
-      pluginPath: `/tmp/${pluginId}/index.js`,
-      source: 'built-in',
-      extensionDependencies: [],
-    })
-    const normalDesc = makeTrustedDescriptor('gateb-normal')
-    const hangDesc = makeTrustedDescriptor('gateb-hang-load')
-    service.registry.cacheDescriptors([normalDesc, hangDesc])
-    service.activator.registerDescriptors([normalDesc, hangDesc])
-
-    // 同宿主正常插件先激活成功（Gate B 前置形态）
-    await service.activator.activatePlugin('gateb-normal', { type: 'onStartupFinished' }, service.host)
-    expect(service.activator.getState('gateb-normal')).toBe('ACTIVE')
-    const trusted1WorkerId = service.host.getWorkerHandle('gateb-normal')!.workerId
-
-    // U7 同款 fake timers 同步 advance 手法：gateb-hang 经 assignWorker 复用 trusted-1
-    // （登记进 handle.pluginIds，同宿主共享），load 挂起后同步烧完 10s load 超时
-    // （确定性先于 mock 的 loaded 回包），触发 crash 链
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    try {
-      await service.host.assignWorker('gateb-hang-load', 'trusted', hangDesc.pluginPath)
-      const hangLoad = service.host.loadPlugin(trusted1WorkerId, 'gateb-hang-load', hangDesc.pluginPath, 'trusted')
-      vi.advanceTimersByTime(10_000)
-      await expect(hangLoad).rejects.toThrow(/loadPlugin timeout for worker/)
-
-      // 连坐：同宿主 ACTIVE 插件随 crash 链置 CRASHED（而非 UNLOADED）
-      expect(service.activator.getState('gateb-normal')).toBe('CRASHED')
-      expect(service.activator.getState('gateb-hang-load')).toBe('CRASHED')
-      expect(service.host.getPendingRebuildTimer(trusted1WorkerId)).toBeDefined()
-
-      // 冷却（5s）到期 → rebuild trusted-2 → 既有 CRASHED-only 重载编排接手；
-      // 重载链（loadPlugin / activate 回包）是真实线程 I/O，切回真实 timer 轮询等收敛
-      await vi.advanceTimersByTimeAsync(5_000)
-    } finally {
-      vi.useRealTimers()
-    }
-
-    const deadline = Date.now() + 10_000
-    while (service.activator.getState('gateb-normal') !== 'ACTIVE' && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 25))
-    }
-
-    // rebuild 后同宿主插件恢复 ACTIVE（V6②：工具可用），且落在重建后的新宿主上
-    expect(service.activator.getState('gateb-normal')).toBe('ACTIVE')
-    expect(service.activator.getState('gateb-hang-load')).toBe('ACTIVE')
-    expect(service.host.getWorkerHandle('gateb-normal')!.workerId).not.toBe(trusted1WorkerId)
-
-    await service.shutdown()
-    await rm(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    await rm(tmpConfig, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-  })
 })

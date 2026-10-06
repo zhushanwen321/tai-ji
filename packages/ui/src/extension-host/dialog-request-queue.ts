@@ -101,6 +101,17 @@ export interface DialogRequestQueue {
   respond(requestId: string, result: boolean | string | null): void
   /** 用户取消（等价 respond(requestId, null)） */
   cancel(requestId: string): void
+  /**
+   * 清空指定 session 分区内容（pending/responding 写入空态；remote-use D5/U6 exited 分通道重置）。
+   *
+   * 重置语义非销毁：不进 deletedSids，重置后同 sid 新请求照常入队（exited ≠ 删除——会话
+   * 崩溃后继续存在并恢复，恢复期新请求合法，V18 负面变体）；销毁语义（cleanup → 迟到写
+   * 拦截）留给删除路径 triggerSessionCleanups，两者不得混用。
+   *
+   * 前置分区存在性检查：分区不存在则 no-op 不建分区——updateFor 经 getOrCreatePartition
+   * 惰性建分区，照搬会让清理动作本身制造常驻空分区（无清理路径，与 S7 内存有界相悖）。
+   */
+  resetFor(sessionId: string): void
 }
 
 /**
@@ -202,11 +213,24 @@ export function createDialogRequestQueue(
     return filter ? pending.some(filter) : pending.length > 0
   }
 
+  /**
+   * exited 分通道重置（remote-use D5/U6）：先查后清——hasPartition 前置检查，分区不存在
+   * 则整体跳过（不建分区）；存在则经 updateFor 写入空态（不进 deletedSids，重置语义）。
+   */
+  function resetFor(sessionId: string): void {
+    if (!state.hasPartition(sessionId)) return
+    state.updateFor(sessionId, (s) => {
+      s.pending = []
+      s.responding = undefined
+    })
+  }
+
   return {
     currentRequest,
     pendingCount,
     hasRequest,
     respond,
     cancel,
+    resetFor,
   }
 }

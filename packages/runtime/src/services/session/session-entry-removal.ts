@@ -49,8 +49,6 @@ import { toErrorMessage } from '../../utils/errors.js'
 import { getRuntimeCheckpointStore } from './runtime-checkpoint.js'
 // D5 在途镜像（crash-forensics §3.3 D5）：detach 同点位摘除 = 本链第 3 步。
 import { inflightMirror } from './inflight-mirror.js'
-// userStopped 收敛环（session-dead-structural-fixes D4）：只停环不清标记（第 4 步）。
-import { userStoppedGate } from './event-interpreter.js'
 // 收殓下沉触发面 A（file-lock-unification-and-reaper-sink §3.3）：孤儿后台任务收殓（第 11 步）。
 import { reapSessionBackgroundTasks } from './background-task-reaper.js'
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
@@ -152,13 +150,10 @@ export class SessionEntryRemovalOrchestrator {
     runDestroyStepIsolated('mirror.detach', sessionId, () => {
       inflightMirror.dropSession(sessionId)
     })
-    // D4：收敛环定时器清理（所有删除路径汇聚点：主动删 / 进程退出 / forceQuit / restore
-    // 清场）。只停环不清标记——forceQuit（K1/K2）尾步经过本汇聚链，标记必须存活到后续
-    // restore（标记宿主独立于 ManagedSession 生命周期的原因，见 session-service.ts 模块级
-    // Map 注释）；delete 路径的标记清理由 lifecycle.delete 显式调 gate.disposeForDelete。
-    runDestroyStepIsolated('userStoppedGate.disposeForEntryRemoval', sessionId, () => {
-      userStoppedGate.disposeForEntryRemoval(sessionId)
-    })
+    // userStopped 标记不在本汇聚点清理：forceQuit（K1/K2）尾步经过本链，标记必须存活到
+    // 后续 restore（标记宿主独立于 ManagedSession 生命周期的原因，见 session-service.ts
+    // 模块级 Map 注释）；delete 路径的标记清理由 lifecycle.delete 显式调 gate.disposeForDelete。
+    // （原 D4 收敛环定时器清理已随 ADR-0122 时间窗删除移除。）
 
     // ── 第 5-9 步：Map 条目删除与删除回调扇出 ──
     // S3-W2：删除前缓存 summary（插件 didDestroy 通知需要 SessionInfo；删除后 Map 查不到）。
@@ -187,8 +182,8 @@ export class SessionEntryRemovalOrchestrator {
       this.deps.cancelRespawn(sessionId)
     })
     // R4（idle-pi-reclamation D2 #6）：真删除是 lastViewedAt 条目的清理挂点——本汇聚链是
-    // 「该 session 已不存在」的精确时点（与 respawn.cancel 同因同挂点）。回收态不清
-    // （reclaimManagedSession 不经本汇聚链，回收态保留条目是 D2 #6 设计意图）。
+    // 「该 session 已不存在」的精确时点（与 respawn.cancel 同因同挂点）。空闲回收机制
+    // 已删除（ADR-0122）：无「回收态保留条目」分支，本清理仅在真删除路径触发。
     runDestroyStepIsolated('clearSessionViewed', sessionId, () => {
       this.deps.clearSessionViewed(sessionId)
     })
@@ -227,14 +222,11 @@ export class SessionEntryRemovalOrchestrator {
 
     // ── 第 12-13 步：per-session 域状态销毁与 MessageBus 分区清理 ──
     // wave:perf-w20（D6-1）：session 删除 / pi 进程退出时清历史重建缓存 + lastLeafId
-    // ——真删除后缓存必须清，清理行为本身正确。但「pi 进程退出后缓存基线（lastLeafId）
-    // 必不再与新进程的 entry 集合对应、保留只会走 "Entry not found" fallback」的因果断言
-    // 已被实测推翻；[B8 更新] 空闲回收（reclaimManagedSession）仍不经本汇聚链（回收≠
-    // 销毁），但其历史缓存条目改由回收编排驱逐（ReclaimSessionDeps.
-    // evictHistoryRebuildCache → evictHistoryRebuildCache，§3.3-B8 候选 C），P7 实测的
-    // 「回收→恢复零重建」路径被显式放弃（证据：packages/runtime/src/__tests__/services/
-    // idle-pi-reclaim-integration.test.ts 阶段 4）。S6 起清理随域迁入 historyReader
-    //（onSessionDisposed 直调形态，traceSync/projection 同款）。
+    // ——真删除后缓存必须清，清理行为本身正确。本汇聚链只覆盖真删除；撤回链对缓存的
+    // 驱逐经 SessionService.evictHistoryRebuildCache 直调 historyReader
+    //（onSessionReclaimed），不经本汇聚链（撤回 ≠ 销毁，session 条目保留）。
+    // S6 起清理随域迁入 historyReader（onSessionDisposed 直调形态，traceSync/projection
+    // 同款）。
     runDestroyStepIsolated('historyReader.onSessionDisposed', sessionId, () => {
       this.deps.disposeHistoryReader(sessionId)
     })

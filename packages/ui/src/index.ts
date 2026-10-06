@@ -12,9 +12,14 @@ export * from './features/new-task'
 // ── overlays（w4 new-task-search UI 迁移：SearchModal 全局搜索浮层）──
 export { default as SearchModal } from './overlays/SearchModal.vue'
 
-// ── lib（公共工具层：文件反查 + class 合并，SSOT 归位，renderer 经 re-export shim 消费）──
+// ── lib（公共工具层：文件反查 + class 合并 + base64 编码，SSOT 归位，renderer 经 re-export shim 消费）──
 export * from './lib/file-basename'
+export * from './lib/base64'
 export { cn } from './lib/utils'
+
+// ── 模态表面注册桥（display-containers §6.7：ui 包表面宿主经 inject 自注册，
+// renderer App 根 provide 实函数——层级方向见 modal-surface-registrar.ts 文件头）──
+export * from './modal-surface-registrar'
 
 // RenderingProtocol 层的公共面（GuiComponentRenderer / AnsiText / 注册表机制）经
 // `@taiji/ui/rendering-protocol` 子路径暴露。7 原语是 RenderingProtocol 内部

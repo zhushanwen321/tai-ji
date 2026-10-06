@@ -22,8 +22,8 @@ import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { truncateCommand } from "./command-display.ts";
+import { attachExitCollector } from "./exit-collector.ts";
 import { emitPendingRegister } from "./notify.ts";
-import { ensurePollerRunning } from "./poller.ts";
 import { getRegistryPath, taskToRegistryEntry, writeRegistryEntry } from "./registry.ts";
 import { countActiveTasks, markKillingIntent, oldestActiveTask, registerSpawnedTask } from "./task-store.ts";
 import type { BackgroundTask } from "./types.ts";
@@ -111,7 +111,7 @@ function shellForPlatform(): { shell: string; args: string[] } {
 
 /**
  * 启动后台任务：并发检查 → spawn（输出重定向 .log）→ 单例表登记 + registry 写
- * running 条目 → 显式 timeout 定时器 → 启动轮询器。
+ * running 条目 → 显式 timeout 定时器 → 挂接 exit 事件边沿收尾。
  * 立即返回，不等待命令退出（turn 不被占用，G1）。
  */
 export function spawnBackgroundTask(opts: SpawnBackgroundOptions): SpawnBackgroundResult {
@@ -164,8 +164,9 @@ export function spawnBackgroundTask(opts: SpawnBackgroundOptions): SpawnBackgrou
 			detached: true,
 			stdio: ["ignore", outputFd, outputFd],
 		});
-		// 唯一的事件监听例外：no-op error listener 防 spawn 异步失败 emit error 无监听
-		// 导致进程崩溃（EventEmitter 语义）。不做任何状态推进——exit 感知归轮询器（D17）。
+		// no-op error listener 防 spawn 异步失败 emit error 无监听导致进程崩溃
+		//（EventEmitter 语义），不做任何状态推进——exit 感知归 exit 事件边沿
+		//（attachExitCollector，ADR-0122 改造：原 2s 轮询器已删）。
 		child.on("error", () => {});
 		child.unref();
 	} catch (err) {
@@ -221,25 +222,26 @@ export function spawnBackgroundTask(opts: SpawnBackgroundOptions): SpawnBackgrou
 	registerSpawnedTask(task);
 	writeRegistryEntry(registryPath, taskToRegistryEntry(task));
 	emitPendingRegister(task);
-	ensurePollerRunning();
+	// exit 事件边沿挂接（事件驱动感知，ADR-0122 改造后无轮询器）
+	attachExitCollector(task);
 	return { ok: true, task };
 }
 
 /**
  * 后台显式 timeout（D6：任务寿命可由使用者显式约束）。到点：pid 身份校验通过 →
- * kill-tree + 两侧标 killing intent（reason 候选 timeout）——实际终态由轮询器边沿
- * 收尾写（单一终态归属），此处不写终态。身份校验不过（登记原进程已不在：已死或
+ * kill-tree + 两侧标 killing intent（reason 候选 timeout）——实际终态由 exit 事件
+ * 边沿收尾写（单一终态归属），此处不写终态。身份校验不过（登记原进程已不在：已死或
  * pid 复用嫌疑）→ 跳过 kill **且跳过 intent 标记**（D6-en/R2-S1 加固）：无条件
  * markKillingIntent("timeout") 会把 UI 代杀 / AI bash_kill 刚预写的 killed 改写成
- * timeout → reason=timeout → sendMessage 误报「timed out」唤醒 AI；跳过后由轮询器
+ * timeout → reason=timeout → sendMessage 误报「timed out」唤醒 AI；跳过后由 exit
  * 边沿按事实收尾（自然死亡 → natural；registry 预写 killing → 经 D6-en 读回判
- * killed）。接受语义微移：到期前 ~2s 内自然死亡的任务改标 natural（仅影响 AI
+ * killed）。接受语义微移：到期前极窄窗口内自然死亡的任务改标 natural（仅影响 AI
  * 通知文案）。
  */
 function armBackgroundTimeout(task: BackgroundTask, timeoutSec: number): void {
 	const timer = setTimeout(() => {
 		// pid 复用防御（§3.6，同 bash_kill 范式，宁不杀勿误杀）：
-		// 任务早已退出（exit 边沿未被轮询器收尾或竞态未及）且 pid 在到点前被系统复用
+		// 任务早已退出（exit 边沿未被收尾或竞态未及）且 pid 在到点前被系统复用
 		// 时，直接 killProcessTree 会杀掉复用 pid 上的无辜进程（整进程组 SIGKILL）。
 		if (!isRecordedPidStillOriginal(task)) {
 			logger.warn("background timeout: pid identity unverified (reuse suspected or start time unreadable), skipping kill", {
@@ -252,9 +254,7 @@ function armBackgroundTimeout(task: BackgroundTask, timeoutSec: number): void {
 			});
 			// D6-en/R2-S1 加固：登记原进程已不在时同样跳过 intent 标记——内存 intent
 			// 是本进程权威（task-store.ts 头部不变量），被无条件改写为 timeout 即丢失
-			// killed 语义（D6-en 读回与 AI bash_kill 预写双双失效）。此处提前 return
-			// 时轮询器必在跑（本任务仍是活跃条目，惰性自停条件是活跃数为 0），边沿
-			// 收尾不受影响。
+			// killed 语义（D6-en 读回与 AI bash_kill 预写双双失效）。
 			return;
 		}
 		// 回退路径诊断经 onFallback 注入 logger 适配（ext-simplify-13 D2）
@@ -266,7 +266,6 @@ function armBackgroundTimeout(task: BackgroundTask, timeoutSec: number): void {
 		const marked = markKillingIntent(task.taskId, "timeout");
 		if (marked === undefined) return;
 		writeRegistryEntry(marked.registryPath, taskToRegistryEntry(marked));
-		ensurePollerRunning();
 	}, timeoutSec * MS_PER_SECOND);
 	timer.unref?.();
 	task.timeoutTimer = timer;

@@ -8,7 +8,6 @@
  * 七条路径（设计文档 K 清单无 K4）各一断言——触发路径时 logger.warn（项目 runtime 惯例
  * console.warn，经 infra/logger patch 后落盘 <dataDir>/logs 轮转）被调用且含对应 source：
  * - K1 user_force_quit：dispatcher.forceQuit（用户侧栏强制退出）
- * - K2 abort_timeout：dispatcher.abort 的 RpcTimeoutError 强杀收口
  * - K3 restore_clear：lifecycle.restoreSession 清场杀活跃旧 pi
  * - K5 delete：lifecycle.delete 删除活跃 session
  * - K6 destroy_all：process-manager.destroyAll
@@ -65,7 +64,6 @@ vi.mock('../src/infra/pi/pi-paths.js', async (importOriginal) => {
 
 // 模块 mock 声明完毕后再 import 被测对象
 import { MessageDispatcher } from '../src/services/session/message-dispatcher.js'
-import { RpcTimeoutError } from '../src/infra/pi/rpc-client.js'
 import type { IDispatcherSessionOps } from '../src/services/session/session-internal.js'
 import type { IManagedSessionView } from '../src/services/session/types.js'
 import type { IMessageBus } from '../src/services/message-bus/message-bus.js'
@@ -111,11 +109,11 @@ function makeMockSession(): IManagedSessionView {
   }
 }
 
-function makeDispatcherMocks(opts: { abortError?: Error } = {}) {
+function makeDispatcherMocks(_opts: { abortError?: Error } = {}) {
   const session = makeMockSession()
   const client = {
     abort: vi.fn(async () => {
-      if (opts.abortError) throw opts.abortError
+      if (_opts.abortError) throw _opts.abortError
     }),
   } as unknown as IPiEngine
 
@@ -166,18 +164,6 @@ describe('D5① K1/K2：message-dispatcher kill 日志（kill_source 结构化�
     expect(line).toContain('forceQuit')
   })
 
-  it('K2: abort RPC 超时强杀收口 → warn 含 kill_source=abort_timeout 与信号链', async () => {
-    const { dispatcher } = makeDispatcherMocks({
-      abortError: new RpcTimeoutError('abort', 60_000),
-    })
-
-    await dispatcher.abort('s1')
-
-    const line = findKillLog(warnSpy, 'abort_timeout')
-    expect(line).toBeDefined()
-    // 信号链要素：user abort 触发 + RPC 超时兜底形态
-    expect(line).toContain('abort')
-  })
 })
 
 // ── K3 / K5：session-lifecycle（harness 同 session-lifecycle-attach.test.ts）──
@@ -381,23 +367,15 @@ describe('D5① K7：reap-orphan-pi 收殓日志（kill_source 结构化字段�
   })
 
   it('K7: 启动孤儿收殓命中孤儿 → warn 含 kill_source=reap_orphan 与信号链', async () => {
-    const signalCalls: Array<{ pid: number; signal: 'SIGTERM' | 'SIGKILL' | 0 }> = []
+    const signalCalls: Array<{ pid: number; signal: 'SIGKILL' }> = []
     const options: ReapOrphanOptions = {
       dataDir: REAP_SESSIONS_DIR,
       ownPid: 999,
-      killGraceMs: 50,
       listProcesses: () => Promise.resolve(orphanRow(4242)),
       readSpawnMarkers: () => [MARKER],
       signal: (pid, signal) => {
         signalCalls.push({ pid, signal })
-        // SIGTERM(ok) → 探活 signal 0 抛 ESRCH（已死）→ 收殓完成
-        if (signal === 0) {
-          const e = new Error('kill ESRCH') as NodeJS.ErrnoException
-          e.code = 'ESRCH'
-          throw e
-        }
       },
-      delay: () => Promise.resolve(),
     }
 
     const result = await reapOrphanPiProcesses(options)
@@ -405,9 +383,9 @@ describe('D5① K7：reap-orphan-pi 收殓日志（kill_source 结构化字段�
     expect(result.reaped).toEqual([4242])
     const line = findKillLog(warnSpy, 'reap_orphan')
     expect(line).toBeDefined()
-    // 信号链要素：孤儿判定 + SIGTERM → 宽限 → SIGKILL 序列
-    expect(line).toContain('SIGTERM')
-    expect(signalCalls[0]).toEqual({ pid: 4242, signal: 'SIGTERM' })
+    // 信号链要素：孤儿判定 + SIGKILL 直杀
+    expect(line).toContain('SIGKILL')
+    expect(signalCalls[0]).toEqual({ pid: 4242, signal: 'SIGKILL' })
   })
 
   it('K7 无孤儿：零收殓不打 kill 日志', async () => {
@@ -417,7 +395,6 @@ describe('D5① K7：reap-orphan-pi 收殓日志（kill_source 结构化字段�
       listProcesses: () => Promise.resolve(''),
       readSpawnMarkers: () => [MARKER],
       signal: () => {},
-      delay: () => Promise.resolve(),
     }
     const result = await reapOrphanPiProcesses(options)
     expect(result.reaped).toEqual([])

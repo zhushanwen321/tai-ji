@@ -141,7 +141,7 @@ describe('P-adopt 变体 2：无内核在途的纯外来滞留（「空闲 + 槽
     expect(extractMarkerIds(h.promptCalls[0]!)).toHaveLength(1) // 收养条目带内核身份标记
 
     // 下轮对账：槽位已空 → 零新增投递（不重复）
-    await h.registry.reconcile('s1', 'watchdog')
+    await h.registry.reconcile('s1', 'agent-settled')
     await h.flush()
     expect(h.promptCalls).toHaveLength(1)
   })

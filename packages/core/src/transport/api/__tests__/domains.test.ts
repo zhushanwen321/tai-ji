@@ -288,15 +288,15 @@ describe('extension 域 RPC 动作', () => {
   it('getPendingRequests 按类型守卫过滤非法条目', async () => {
     mockCommand.mockResolvedValueOnce({
       requests: [
-        { requestId: 'ok1', method: 'confirm', sessionId: 's1' },
+        { requestId: 'ok1', dialogKind: 'confirm', sessionId: 's1' },
         null,
         'bad',
-        { requestId: 1, method: 'confirm' },
-        { requestId: 'no-method' },
+        { requestId: 1, dialogKind: 'confirm' },
+        { requestId: 'no-dialogKind' },
       ],
     })
     const r = await extension.getPendingRequests('s1')
-    expect(r).toEqual([{ requestId: 'ok1', method: 'confirm', sessionId: 's1' }])
+    expect(r).toEqual([{ requestId: 'ok1', dialogKind: 'confirm', sessionId: 's1' }])
   })
 
   it('onExtensions 经 onGlobalType(config.extensions) 解包 extensions', () => {
@@ -318,11 +318,11 @@ describe('extension 域 RPC 动作', () => {
     extension.onUIRequest('s1', handler)
 
     const registered = mockOn.mock.calls[0][1]
-    const req = { sessionId: 's1', requestId: 'r1', method: 'confirm' }
-    registered({ type: 'extension.ui_request', payload: req })
+    const req = { sessionId: 's1', requestId: 'r1', dialogKind: 'confirm' }
+    registered({ type: 'extension.dialog', payload: req })
     expect(handler).toHaveBeenCalledWith(req)
 
-    registered({ type: 'extension.ui_request', payload: { sessionId: 'other', requestId: 'r2', method: 'input' } })
+    registered({ type: 'extension.dialog', payload: { sessionId: 'other', requestId: 'r2', dialogKind: 'input' } })
     registered({ type: 'message.text_delta', payload: { sessionId: 's1' } })
     expect(handler).toHaveBeenCalledTimes(1)
   })
@@ -397,12 +397,14 @@ describe('plugin 域', () => {
     expect(unsub).toBe(off)
   })
 
-  it('approvePermissions / revokePermissions 透传并丢弃 reply', async () => {
+  it('approvePermissions / revokePermissions / denyPermissions 透传并丢弃 reply', async () => {
     mockCommand.mockResolvedValue({ plugins: [] })
     await expect(plugin.approvePermissions('pl', ['fs.read'])).resolves.toBeUndefined()
     expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['plugin.approvePermissions', { pluginId: 'pl', permissions: ['fs.read'] }])
     await expect(plugin.revokePermissions('pl')).resolves.toBeUndefined()
     expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['plugin.revokePermissions', { pluginId: 'pl' }])
+    await expect(plugin.denyPermissions('pl')).resolves.toBeUndefined()
+    expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['plugin.denyPermissions', { pluginId: 'pl' }])
   })
 })
 
@@ -731,19 +733,33 @@ describe('settings 域', () => {
 
 // ── terminal 域 ────────────────────────────────────────────────────────────
 describe('terminal 域', () => {
-  it('spawn/write/resize/kill/attach 五命令', async () => {
+  it('spawn/write/resize/kill/attach/list 六命令（多实例：既有实例操作带 terminalId）', async () => {
     mockCommand.mockResolvedValue({})
     const params = { sessionId: 's1', cwd: '/a' } as never
     await terminal.terminalApi.spawn(params)
     expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['terminal.spawn', params])
-    await terminal.terminalApi.write('s1', 'ls\n')
-    expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['terminal.write', { sessionId: 's1', data: 'ls\n' }])
-    await terminal.terminalApi.resize('s1', 80, 24)
-    expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['terminal.resize', { sessionId: 's1', cols: 80, rows: 24 }])
-    await terminal.terminalApi.kill('s1')
-    expect(mockCommand.mock.calls[3].slice(0, 2)).toEqual(['terminal.kill', { sessionId: 's1' }])
-    await terminal.terminalApi.attach('s1')
-    expect(mockCommand.mock.calls[4].slice(0, 2)).toEqual(['terminal.attach', { sessionId: 's1' }])
+    await terminal.terminalApi.write('s1', 'term:s1:1', 'ls\n')
+    expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual([
+      'terminal.write',
+      { sessionId: 's1', terminalId: 'term:s1:1', data: 'ls\n' },
+    ])
+    await terminal.terminalApi.resize('s1', 'term:s1:1', 80, 24)
+    expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual([
+      'terminal.resize',
+      { sessionId: 's1', terminalId: 'term:s1:1', cols: 80, rows: 24 },
+    ])
+    await terminal.terminalApi.kill('s1', 'term:s1:1')
+    expect(mockCommand.mock.calls[3].slice(0, 2)).toEqual(['terminal.kill', { sessionId: 's1', terminalId: 'term:s1:1' }])
+    await terminal.terminalApi.attach('s1', 'term:s1:1')
+    expect(mockCommand.mock.calls[4].slice(0, 2)).toEqual(['terminal.attach', { sessionId: 's1', terminalId: 'term:s1:1' }])
+  })
+
+  it('list 返回 ack.instances（缺省空数组）', async () => {
+    mockCommand.mockResolvedValueOnce({ instances: [{ terminalId: 'term:s1:1', alive: true }] })
+    await expect(terminal.terminalApi.list('s1')).resolves.toEqual([{ terminalId: 'term:s1:1', alive: true }])
+    expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['terminal.list', { sessionId: 's1' }])
+    mockCommand.mockResolvedValueOnce({})
+    await expect(terminal.terminalApi.list('s1')).resolves.toEqual([])
   })
 })
 

@@ -33,7 +33,13 @@ vi.mock('@zhushanwen/pi-extension-logger', () => ({
 
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
-import createExtension from '../index'
+import createExtension, {
+  CAPABILITY_FORBIDDEN,
+  CAPABILITY_INLINE_TAG_FAMILIES,
+  CAPABILITY_PRESENTATION_ATTRS,
+  SESSION_ARTIFACTS_DIR_SEGMENT,
+  resolveSessionArtifactsDir,
+} from '../index'
 import type { ExtensionAPI, BeforeAgentStartEvent } from '@earendil-works/pi-coding-agent'
 
 vi.mock('node:fs', () => ({
@@ -51,8 +57,8 @@ const CAP_HEADER = '# TaiJi capabilities'
 /** 既有用例隔离关注点用的「capability 显式关闭」config 片段 */
 const CAP_OFF = '"capability": {"enabled": false}'
 
-/** hook 注册表桩（参照 msg-id-mapper harness 模式） */
-function createHarness(): { beforeAgentStart: (event: BeforeAgentStartEvent) => unknown } {
+/** hook 注册表桩（参照 msg-id-mapper harness 模式）——handler 第二参 ctx 透传（路径注入测试用） */
+function createHarness(): { beforeAgentStart: (event: BeforeAgentStartEvent, ctx?: unknown) => unknown } {
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
   const pi = {
     on: (event: string, handler: (...args: unknown[]) => unknown) => {
@@ -61,14 +67,14 @@ function createHarness(): { beforeAgentStart: (event: BeforeAgentStartEvent) => 
   } as unknown as ExtensionAPI
   createExtension(pi)
   return {
-    beforeAgentStart: (event) => handlers.get('before_agent_start')!(event),
+    beforeAgentStart: (event, ctx) => handlers.get('before_agent_start')!(event, ctx),
   }
 }
 
-/** 触发一次 hook 的便捷封装（常规 event：systemPrompt 字符串） */
-function runHook(systemPrompt: string): { systemPrompt?: string } | undefined {
+/** 触发一次 hook 的便捷封装（常规 event：systemPrompt 字符串；ctx 可选） */
+function runHook(systemPrompt: string, ctx?: unknown): { systemPrompt?: string } | undefined {
   const h = createHarness()
-  return h.beforeAgentStart({ type: 'before_agent_start', prompt: 'hi', systemPrompt }) as
+  return h.beforeAgentStart({ type: 'before_agent_start', prompt: 'hi', systemPrompt }, ctx) as
     | { systemPrompt?: string }
     | undefined
 }
@@ -449,5 +455,173 @@ describe('cachedReadFileSync（mtime 级内容缓存，KV-cache 稳定性改造�
     expect(runHook('base')).toEqual({ systemPrompt: 'base\n\nP1' })
     setupFs() // config 恢复默认 ENOENT → defaults：append 无、capability 默认开
     expect(runHook('base')).toEqual({ systemPrompt: expect.stringContaining(CAP_HEADER) })
+  })
+})
+
+// ── 能力段 ①② 渲染锁定 + 产物目录镜像常量（chat-html-support u1-prompt）──────────
+
+/** 能力段清单区的边界标签（文案与源码 renderCapabilitySection 渲染的 capability 段同字面量）。 */
+const POS_TAGS_LABEL = 'You may use these tags: '
+const POS_ATTRS_LABEL = 'Presentational attributes allowed: '
+const FORBIDDEN_TAGS_LABEL = 'Do not use these tags (they are stripped before rendering): '
+const FORBIDDEN_ATTRS_LABEL = 'Do not use these attributes (they are stripped and have no effect): '
+
+/** 从能力段截取 startLabel..endLabel 之间的逗号分隔清单。缺失边界 → 断言失败（防静默跳过）。 */
+function parseListRegion(section: string, startLabel: string, endLabel: string): string[] {
+  const i = section.indexOf(startLabel)
+  expect(i, `能力段缺少清单标签: ${startLabel}`).toBeGreaterThanOrEqual(0)
+  const start = i + startLabel.length
+  const j = section.indexOf(endLabel, start)
+  expect(j, `能力段缺少清单结束标签: ${endLabel}`).toBeGreaterThan(start)
+  return section.slice(start, j).split(', ').map((s) => s.trim())
+}
+
+/** 集合比较用：去重 + 稳定排序（渲染顺序不参与断言，成员集合才是契约）。 */
+const asSet = (xs: readonly string[]): string[] => [...new Set(xs)].sort()
+
+/** 触发一次 hook 并返回 capability 段全文（默认开关开、无 append / global）。 */
+function capabilitySectionText(): string {
+  setupFs({ config: `{"append": {"enabled": false, "prompt": ""}, "capability": {"enabled": true}}` })
+  const prompt = runHook('BASE-PROMPT')!.systemPrompt as string
+  const i = prompt.indexOf(CAP_HEADER)
+  expect(i).toBeGreaterThanOrEqual(0)
+  return prompt.slice(i)
+}
+
+describe('capability 段 ①② 渲染锁定（文案 = 常量渲染产物，手写散文旁路即红）', () => {
+  it('正面清单逐项等于常量集合（含全部成员、无旁路成员、无重复）', () => {
+    const section = capabilitySectionText()
+    const tags = parseListRegion(section, POS_TAGS_LABEL, '. ' + POS_ATTRS_LABEL)
+    const attrs = parseListRegion(section, POS_ATTRS_LABEL, '.\n')
+    const allTags = Object.values(CAPABILITY_INLINE_TAG_FAMILIES).flat()
+
+    // 无重复（渲染旁路/手写追加会引入重复项）
+    expect(tags.length).toBe(new Set(tags).size)
+    expect(attrs.length).toBe(new Set(attrs).size)
+    // 集合逐项相等：缺成员 = 文案旁路漏写；多成员 = 手写散文多出
+    expect(asSet(tags)).toEqual(asSet(allTags))
+    expect(asSet(attrs)).toEqual(asSet(CAPABILITY_PRESENTATION_ATTRS))
+  })
+
+  it('负面清单逐项等于常量集合（构造性剥除的标签与属性）', () => {
+    const section = capabilitySectionText()
+    const forbiddenTags = parseListRegion(section, FORBIDDEN_TAGS_LABEL, '. ' + FORBIDDEN_ATTRS_LABEL)
+    const forbiddenAttrs = parseListRegion(section, FORBIDDEN_ATTRS_LABEL, '.\n')
+
+    expect(asSet(forbiddenTags)).toEqual(asSet(CAPABILITY_FORBIDDEN.tags))
+    expect(asSet(forbiddenAttrs)).toEqual(asSet(CAPABILITY_FORBIDDEN.attributes))
+  })
+
+  it('capability.enabled=false → 整段（含 ①② 清单）不注入', () => {
+    setupFs({ config: `{"append": {"enabled": false, "prompt": ""}, ${CAP_OFF}}` })
+    expect(runHook('BASE-PROMPT')).toBeUndefined()
+  })
+
+  it('清单常量成员与渲染管线白名单同域（包内自锚：52 标签 / 76 属性）', () => {
+    expect(Object.values(CAPABILITY_INLINE_TAG_FAMILIES).flat()).toHaveLength(52)
+    expect(CAPABILITY_PRESENTATION_ATTRS).toHaveLength(76)
+    // 族归类不重复：每个标签恰出现一次
+    const all = Object.values(CAPABILITY_INLINE_TAG_FAMILIES).flat()
+    expect(all.length).toBe(new Set(all).size)
+    // 禁用清单与正面清单不相交（构造性剥除语义）
+    const positive = new Set(all)
+    for (const tag of CAPABILITY_FORBIDDEN.tags) expect(positive.has(tag)).toBe(false)
+  })
+})
+
+describe('产物目录镜像常量与推导 helper（设计 D1/D7，供 u-artifacts 公式对拍消费）', () => {
+  it('段名字面量为 artifacts', () => {
+    expect(SESSION_ARTIFACTS_DIR_SEGMENT).toBe('artifacts')
+  })
+
+  it('合法 pi sid → <dataDir>/artifacts/<sessionId>', () => {
+    expect(resolveSessionArtifactsDir('0198ab12-cdef-7000-8000-1234567890ab')).toBe(
+      path.join(DATA_DIR, 'artifacts', '0198ab12-cdef-7000-8000-1234567890ab'),
+    )
+    // 允许 `.` 与 `_`（与 isPiSessionId 同域）
+    expect(resolveSessionArtifactsDir('a.b-c_d')).toBe(path.join(DATA_DIR, 'artifacts', 'a.b-c_d'))
+  })
+
+  it('非法 sessionId（含冒号 / 空串 / 首尾非字母数字）→ throw（防路径穿越）', () => {
+    for (const bad of ['btw:x', '', '_leading', 'trailing-', 'a/b', '..', 'a b']) {
+      expect(() => resolveSessionArtifactsDir(bad)).toThrow(/invalid sessionId/)
+    }
+  })
+
+  it('resolveDataDir 回退（无 TAIJI_AGENT_DATA_DIR 时取 PI_CODING_AGENT_DIR 上级）', () => {
+    delete process.env.TAIJI_AGENT_DATA_DIR
+    process.env.PI_CODING_AGENT_DIR = path.join('/tmp/fallback-data', 'agent')
+    expect(resolveSessionArtifactsDir('abc')).toBe(path.join('/tmp/fallback-data', 'artifacts', 'abc'))
+  })
+})
+
+// ── 能力段 ③④ 与产物目录路径注入（chat-html-support §6.1 D1 / §5.1 样例）────────────
+
+/** 触发一次 hook 并返回 capability 段全文（capability 开、无 append / global；ctx 可选）。 */
+function capabilityTextWithCtx(ctx?: unknown): string {
+  setupFs({ config: `{"append": {"enabled": false, "prompt": ""}, "capability": {"enabled": true}}` })
+  const prompt = runHook('BASE-PROMPT', ctx)!.systemPrompt as string
+  const i = prompt.indexOf(CAP_HEADER)
+  expect(i).toBeGreaterThanOrEqual(0)
+  return prompt.slice(i)
+}
+
+/** ctx 桩：sessionManager.getSessionId 返回给定值（u-foundation 核实的 pi ExtensionContext 形状） */
+function ctxWithSessionId(getSessionId: () => string): unknown {
+  return { sessionManager: { getSessionId } }
+}
+
+describe('capability 段 ③④（HTML 交付约定 + 预览约束）与产物目录路径注入', () => {
+  const SID = '0198ab12-cdef-7000-8000-1234567890ab'
+
+  it('ctx 会话 id 在 → ③ 段含产物目录绝对路径（与会话 id 匹配）', () => {
+    const text = capabilityTextWithCtx(ctxWithSessionId(() => SID))
+    // 路径 = <dataDir>/artifacts/<sid>（与 shared getSessionArtifactsDir 同公式）
+    expect(text).toContain(resolveSessionArtifactsDir(SID))
+    expect(text).toContain(path.join(DATA_DIR, 'artifacts', SID))
+    // ③ 段交付约定与 ④ 段预览约束齐备
+    expect(text).toContain('info string is html-preview')
+    expect(text).toContain("that file's absolute path")
+    expect(text).toContain('update the file in place on later changes')
+    expect(text).toContain('recycled automatically once stale')
+    expect(text).toContain('Previewed HTML runs sandboxed with no network access')
+    expect(text).toContain('CDN links will not load')
+  })
+
+  it('会话 id 缺失（无 ctx / getSessionId 空串 / sessionManager 缺失）→ 该处退化且其余文案完整', () => {
+    const cases: (unknown | undefined)[] = [
+      undefined,
+      ctxWithSessionId(() => ''),
+      {},
+    ]
+    for (const ctx of cases) {
+      const text = capabilityTextWithCtx(ctx)
+      expect(text).toContain('session artifacts directory (unavailable this turn)')
+      // 其余 ③④ 文案完整（只路径处退化）
+      expect(text).toContain('info string is html-preview')
+      expect(text).toContain('regenerate on reference failure instead of assuming persistence')
+      expect(text).toContain('scripts/styles/images may be inline or reference local files')
+      expect(text).toContain('fonts must be inlined as data: URIs')
+      expect(text).toContain('blocked by the browser CORS policy')
+      expect(text).toContain('CDN links will not load')
+      // 不出现半截/伪造路径
+      expect(text).not.toContain(path.join(DATA_DIR, 'artifacts'))
+    }
+  })
+
+  it('getSessionId 抛错 / 非法 id（含冒号 virtual id）→ 退化不阻塞，其余文案完整', () => {
+    const throwing = ctxWithSessionId(() => { throw new Error('no session context') })
+    const virtualId = ctxWithSessionId(() => 'btw:0198ab12-cdef')
+    for (const ctx of [throwing, virtualId]) {
+      const text = capabilityTextWithCtx(ctx)
+      expect(text).toContain('(unavailable this turn)')
+      expect(text).toContain('info string is html-preview')
+      expect(text).not.toContain(path.join(DATA_DIR, 'artifacts'))
+    }
+  })
+
+  it('capability.enabled=false → ③④ 同整段一起不注入', () => {
+    setupFs({ config: `{"append": {"enabled": false, "prompt": ""}, ${CAP_OFF}}` })
+    expect(runHook('BASE-PROMPT', ctxWithSessionId(() => SID))).toBeUndefined()
   })
 })

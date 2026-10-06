@@ -9,7 +9,7 @@
  * - 9 个 plugin:*：config / crashed / messageDecoration / notification / permissionRequest /
  *   statusBarUpdate / statusChange / statusSetUpdate / uiRequest
  * - 5 个 extension:*：extension:widget / extension:widgetGui / extension:status /
- *   extension:notify / extension.ui_request
+ *   extension:notify / extension.dialog
  */
 export interface IncomingPluginMessage {
   type: string

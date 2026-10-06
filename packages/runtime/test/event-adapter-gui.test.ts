@@ -309,12 +309,12 @@ describe('event-adapter: ask-user ASK_USER_MARKER 检测 (U6-U8)', () => {
     const extUi = findExtensionUi(results)
     expect(extUi).toBeDefined()
 
-    // message 帧：extension.ui_request + form=true + formQuestions（legacy 归一上移 runtime）
+    // message 帧：extension.dialog + form=true + formQuestions（legacy 归一上移 runtime）
     const msg = findMessage(results)
     expect(msg).toBeDefined()
-    expect(msg!.message.type).toBe('extension.ui_request')
+    expect(msg!.message.type).toBe('extension.dialog')
     expect(msg!.message.payload.form).toBe(true)
-    expect(msg!.message.payload.method).toBe('select')
+    expect(msg!.message.payload.dialogKind).toBe('select')
     expect(msg!.message.payload.requestId).toBe('req-askuser')
     expect(msg!.message.payload.formQuestions).toEqual([
       { type: 'choice', header: 'db', question: '选哪个?', options: [{ label: 'PG' }] },
@@ -338,8 +338,8 @@ describe('event-adapter: ask-user ASK_USER_MARKER 检测 (U6-U8)', () => {
 
     const msg = findMessage(results)
     expect(msg).toBeDefined()
-    expect(msg!.message.type).toBe('extension.ui_request')
-    expect(msg!.message.payload.method).toBe('select')
+    expect(msg!.message.type).toBe('extension.dialog')
+    expect(msg!.message.payload.dialogKind).toBe('select')
     expect(msg!.message.payload.title).toBe('Pick a color')
     // options 透传 string[]，不是 undefined[]（旧 .map(o=>o.label) bug）
     expect(msg!.message.payload.options).toEqual(['red', 'green', 'blue'])
@@ -357,8 +357,8 @@ describe('event-adapter: ask-user ASK_USER_MARKER 检测 (U6-U8)', () => {
 
     const msg = findMessage(results)
     expect(msg).toBeDefined()
-    expect(msg!.message.type).toBe('extension.ui_request')
-    expect(msg!.message.payload.method).toBe('select')
+    expect(msg!.message.type).toBe('extension.dialog')
+    expect(msg!.message.payload.dialogKind).toBe('select')
     // 降级为普通 select（无 askUser/askUserQuestions 字段）
     expect(msg!.message.payload.askUser).toBeUndefined()
     // 与 schedule-create 源键互不串扰
@@ -393,7 +393,7 @@ describe('event-adapter: ask-user ASK_USER_MARKER 检测 (U6-U8)', () => {
 
     const msg = findMessage(results)
     expect(msg).toBeDefined()
-    expect(msg!.message.payload.method).toBe('confirm')
+    expect(msg!.message.payload.dialogKind).toBe('confirm')
     expect(msg!.message.payload.askUser).toBeUndefined()
   })
 })

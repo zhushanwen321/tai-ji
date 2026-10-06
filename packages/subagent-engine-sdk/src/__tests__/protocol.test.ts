@@ -8,8 +8,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   CANCEL_SETTLE_GRACE_MS,
-  CRASH_REBUILD_BACKOFF_MS,
-  CRASH_REBUILD_MAX_ATTEMPTS,
   ENGINE_PROTOCOL_VERSION,
   HANDSHAKE_TIMEOUT_MS,
   REVERSE_REQUEST_TIMEOUT_MS,
@@ -98,11 +96,6 @@ describe("量级常量（impl-plan §2.1 逐项写死）", () => {
     expect(REVERSE_REQUEST_TIMEOUT_MS).toBe(10_000);
     expect(HANDSHAKE_TIMEOUT_MS).toBe(10_000);
     expect(CANCEL_SETTLE_GRACE_MS).toBe(3_000);
-  });
-
-  it("崩溃重建 3 次上限 + 指数退避 1s/2s/4s", () => {
-    expect(CRASH_REBUILD_MAX_ATTEMPTS).toBe(3);
-    expect([...CRASH_REBUILD_BACKOFF_MS]).toEqual([1_000, 2_000, 4_000]);
   });
 
   it("stderr 崩溃现场尾部 400 字符", () => {

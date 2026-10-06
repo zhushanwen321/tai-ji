@@ -368,8 +368,8 @@ describe('onPiEvent context shape adaptation (Fix-2)', () => {
     const { handlerId, collected } = await registerObserver('agent_start')
     await executeHookRequest({
       handlerId: handlerId(),
-      // 平铺 payload 恰含顶层 data 字段且其内无 eventName——不得误判为 bridge 包装、
-      // 不得用注册时事件名覆盖实际收到的 event 字段（Fix-2 错报边界）
+      // 平铺 payload 恰含顶层 data 字段且其内无 eventName——不得用注册时事件名覆盖
+      // 实际收到的 event 字段（Fix-2 错报边界）
       context: { event: 'tool_execution_end', toolCallId: 'tc-2', data: { output: 'ok' } },
     })
     expect(collected).toEqual([{
@@ -378,18 +378,7 @@ describe('onPiEvent context shape adaptation (Fix-2)', () => {
     }])
   })
 
-  it('bridge wrapped shape data:{eventName, data}: unwraps inner data (unchanged semantics)', async () => {
-    const { handlerId, collected } = await registerObserver('agent_start')
-    await executeHookRequest({
-      handlerId: handlerId(),
-      // bridge（handleBridgeEvent）/ 标准 HookContext 形状
-      context: { data: { eventName: 'session_start', data: { sessionId: 's-9' } } },
-    })
-    expect(collected).toEqual([{
-      eventName: 'session_start',
-      data: { sessionId: 's-9' },
-    }])
-  })
+  // [pi1-disposition-chat-flow D7①] bridge 包装形状用例随通路退役删除（适配层该分支已删）。
 
   it('flat variant {eventName, data} at top level: takes top-level data', async () => {
     const { handlerId, collected } = await registerObserver('agent_start')

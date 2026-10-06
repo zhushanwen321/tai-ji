@@ -50,16 +50,8 @@ describe('EventInterpreter · handle 三段分发锚定（W3 复杂度债务偿�
     expect(sent).toEqual([frame])
   })
 
-  it('R3: bridge-ui → onBridgeUIRequest(requestId, sessionId, method, data)', () => {
-    const onBridgeUIRequest = vi.fn()
-    const interpreter = new EventInterpreter('sid-r3', { send, onBridgeUIRequest })
-    const data = { marker: 'x' }
-
-    interpreter.interpret([{ kind: 'bridge-ui', requestId: 'req-1', sessionId: 'evt-sid', method: 'select', data }])
-
-    expect(onBridgeUIRequest).toHaveBeenCalledTimes(1)
-    expect(onBridgeUIRequest).toHaveBeenCalledWith('req-1', 'evt-sid', 'select', data)
-  })
+  // [pi1-disposition-chat-flow D7①] R3（bridge-ui → onBridgeUIRequest）随 bridge 退役删除
+  // （kind 与 option 均已删，编号空位保留登记对账）。
 
   it('R4: session-manager-ui → onSessionManagerRequest(requestId, sessionId, action, params)', () => {
     const onSessionManagerRequest = vi.fn()

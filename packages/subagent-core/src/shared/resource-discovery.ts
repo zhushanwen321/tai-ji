@@ -322,8 +322,10 @@ function computeWorkspaceRoot(dir: string): string {
 
 // ── 文件扩展名判定 ───────────────────────────────────────────
 
-/** 根据资源种类判定脚本文件扩展名 */
-function isTargetFile(name: string, kind: ResourceKind): boolean {
+/** 根据资源种类判定脚本文件扩展名。
+ * 导出给宿主测试的期望集推导共用（staged-discovery.test.ts）：期望集与发现层
+ * 必须是同一份判据，手工复刻会在发现层口径变化时假红。 */
+export function isTargetFile(name: string, kind: ResourceKind): boolean {
   // _ 前缀 = draft/示例，不参与发现（与原 agent-registry/workflow 约定一致）
   if (name.startsWith("_")) return false;
   if (kind === "agents") {

@@ -19,8 +19,6 @@ import { errorWithCode } from '../../utils/errors.js'
 export interface ToolService {
   /** 工具注册表，key 为 toolKey */
   toolRegistry: Map<string, ToolEntry>
-  /** 工具变更后同步到 bridge 层 */
-  syncToolsToBridge: () => Promise<void>
 }
 
 /**
@@ -47,7 +45,7 @@ export function registerToolRpcHandlers(
 
     // D1 声明通道窄校验（对齐 ui-api INVALID_* 风格）：timeoutMs 可选，present 即必须
     // 是 number 且非 NaN——脏值 fail-fast 拒注册（INVALID_TIMEOUT_MS）；0 / 负数 /
-    // Infinity 是合法声明（显式 opt-out，运行时语义归 bridge-interop resolveToolTimeoutMs），
+    // Infinity 是合法声明（显式 opt-out，运行时语义归 tool-timeout 的 resolveToolTimeoutMs），
     // 原样透传存储。
     const timeoutMs = params.timeoutMs
     if (timeoutMs !== undefined && (typeof timeoutMs !== 'number' || Number.isNaN(timeoutMs))) {
@@ -80,9 +78,6 @@ export function registerToolRpcHandlers(
       },
     })
 
-    // 同步到 bridge
-    await service.syncToolsToBridge()
-
     return toolKey
   })
 
@@ -98,7 +93,6 @@ export function registerToolRpcHandlers(
     if (!toolKey.startsWith(`${pluginId}:`)) return
     if (service.toolRegistry.has(toolKey)) {
       service.toolRegistry.delete(toolKey)
-      await service.syncToolsToBridge()
     }
   })
 }

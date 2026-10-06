@@ -7,6 +7,10 @@
  * 真实数据源实现由壳（P5）provide（接 runtime config.plugins 订阅 + S2
  * status-bar-controller/view-host-store/contribution-registry + message-bus-bridge
  * / runtime WS 通道），本包只定义契约与组件本体。
+ * 壳特有装配（bus 来源选择 / provide 时机）留在各壳，本包另提供双壳（桌面 renderer /
+ * 移动 mobile-renderer）逐字节共享的纯翻译件（shell-adapters：WS source 适配 +
+ * CompanionBand source/transport 工厂；permission-request-controller：权限审批编排
+ * 状态机 factory，两壳薄接线消费）。
  */
 export { default as PluginSettingsPage } from './PluginSettingsPage.vue'
 export {
@@ -29,10 +33,13 @@ export {
 export { default as CompanionBand } from './CompanionBand.vue'
 export {
   DIALOG_REQUEST_SOURCE_KEY,
+  DIALOG_QUEUE_HANDLE_KEY,
   UI_RESPONSE_TRANSPORT_KEY,
   OVERLAY_LIFECYCLE_KEY,
+  type DialogQueueHandleRegistrar,
   type DialogRequest,
   type DialogRequestOption,
+  type DialogRequestQueue,
   type DialogRequestSource,
   type UiResponseTransport,
   type OverlayLifecycleSource,
@@ -43,6 +50,11 @@ export {
   PERMISSION_TRANSPORT_KEY,
   type PermissionTransport,
 } from './permission-transport'
+export {
+  createPermissionRequestController,
+  type PermissionRequestController,
+  type PermissionRequestState,
+} from './permission-request-controller'
 export { default as L2TabBar } from './L2TabBar.vue'
 export type { L2TabItem } from './l2-tab-item'
 export { default as PluginViewContainer } from './PluginViewContainer.vue'
@@ -51,3 +63,12 @@ export {
   type PluginViewsSource,
   type PluginViewSummary,
 } from './views-source'
+export {
+  convertToDialogRequest,
+  createCompanionDialogAdapters,
+  createUiResponseTransport,
+  createWsPluginMessageSource,
+  type CompanionDialogAdapters,
+  type CompanionDialogAdaptersOptions,
+  type CompanionDialogAdaptersTesting,
+} from './shell-adapters'

@@ -84,13 +84,22 @@ extraResources:
       - "!**/__tests__/**"
       - "!**/*.test.*"
       - "!**/*.d.ts"
-      # 排除 sourcemap + 包根级文档（实测 ~8.7MB/包垃圾，设计 §3.2）。
-      # [禁令] 禁止用 !**/*.md 通配：staged extensions 含 7 个 skills/<name>/SKILL.md，
+      # 排除 sourcemap + **包根级**文档（实测 ~8.7MB/包垃圾，设计 §3.2）。
+      # [禁令] 禁止用 !**/*.md 通配：staged extensions 含 10 个 skills/<name>/SKILL.md，
       # 是 pi 内置 skills 的运行时资源（资源发现机制读取），通配会静默删除内置 skills；
-      # md 只按精确文件名排（包根级文档实测仅 README.md / ARCHITECTURE.md 两种名字）。
+      # md 只按精确文件名排（包根级文档 = `*/*/README.md` 两级：@zhushanwen/<pkg>/）。
+      #
+      # [2026-10-03 修复] 原为 `!**/README.md` / `!**/ARCHITECTURE.md`——**递归**语义，
+      # 会连嵌套文档一起删（曾删掉 pi-subagent-workflow/workflows/README.md，当时它是内置
+      # workflow 的发现锚点本体，造成打包版 `subagents` 批量工具不可用且静默一个版本）。
+      # 收紧为 `!*/*/…`（仅 scope/包根两层），语义已逐模式实测：
+      #   `!**/README.md` → 包根+嵌套均删；`!*/*/README.md` → 仅包根删、嵌套保留。
+      # 失败方向安全：模式偏窄时后果是多几 KB 文档，而非运行时资产被静默剪枝。
+      # 配套护栏：scripts/postbuild-validate.sh 的 check_builtin_ext_assets() 存活 diff
+      # 白名单只允许「包根级」文档删除（一级相对路径）——两者必须同步改。
       - "!**/*.map"
-      - "!**/README.md"
-      - "!**/ARCHITECTURE.md"
+      - "!*/*/README.md"
+      - "!*/*/ARCHITECTURE.md"
   # built-in taiji plugins（resources/plugins/<name>，如 statusline）。
   # prepare-builtin-plugins.sh 预编译 index.ts → index.js（与源同目录）；plugin-registry
   # 打包后扫描 <cwd>/resources/plugins（cwd=Resources），故 to 保持 resources/plugins 嵌套。
@@ -121,6 +130,17 @@ extraResources:
   # TAIJI_AGENT_ENGINE_ROOTS 显式注入 pi 子进程（不 cwd 探测）。sourcemap 不进产物。
   - from: resources/engines
     to: engines
+    filter:
+      - "**/*"
+      - "!**/*.map"
+  # 移动壳构建产物（remote-access 静态托管，D3）：packages/mobile-renderer 的 vite
+  # 独立 web 构建（base:'./'，outDir 本包 dist，与 electron 加载链无耦合），由
+  # build / build:dir 编排在 renderer 构建后先行 `pnpm run build:mobile` 产出。
+  # to: mobile-dist → 打包后位于 <process.resourcesPath>/mobile-dist，该路径是
+  # supervisor prod 分支拼 --mobile-dist=<Resources>/mobile-dist 的锚点（supervisor
+  # 拼参侧与本条目必须同步，改名两处一起改）。sourcemap 不进产物。
+  - from: ../../packages/mobile-renderer/dist
+    to: mobile-dist
     filter:
       - "**/*"
       - "!**/*.map"

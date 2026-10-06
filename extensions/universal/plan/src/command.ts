@@ -149,6 +149,9 @@ export function registerPlanCommand(
         const plansDir = path.join(projectDir, ".tmp", "plans");
         const existingPlans = findExistingPlans(plansDir);
         if (existingPlans.length > 0) {
+          // D10②：选项清单经 display:false 注入（LLM 消费），用户可见性由 notify 承担
+          // （现状 display:false 消息用户零可见——反馈矩阵修复）
+          ctx.ui.notify(`Found ${existingPlans.length} existing plan file(s) in .tmp/plans — options sent to the model.`, "info");
           sendPlanContextMessage(
             pi,
             `[PLAN MODE] Found existing plan files:\n${existingPlans.map((p, i) => `  ${i + 1}. ${p}`).join("\n")}\n\n` +
@@ -229,13 +232,15 @@ function sendPlanContextMessage(pi: ExtensionAPI, content: string): void {
 }
 
 /** E1 fail-fast 回复：不进入计划模式（不写 entry / 不限制工具 / 不注入计划提示词），回复可用技能清单与纠正命令 */
-function reportUnknownSkills(pi: ExtensionAPI, resolution: Extract<SkillResolution, { ok: false }>): void {
+function reportUnknownSkills(pi: ExtensionAPI, ctx: ExtensionContext, resolution: Extract<SkillResolution, { ok: false }>): void {
   const available = resolution.available.length > 0
     ? resolution.available.map((n) => `  - ${n}`).join("\n")
     : "  (no skills installed)";
   const problem = resolution.missing.length > 0
     ? `unknown skill(s): ${resolution.missing.join(", ")}`
     : "--skills was given but no skill names followed it";
+  // D10②：fail-fast 错误的用户可见性由 notify 承担（display:false 注入仅 LLM 可见）
+  ctx.ui.notify(`Plan mode not entered: ${problem}`, "error");
   sendPlanContextMessage(
     pi,
     `[PLAN MODE] Failed to enter: ${problem}.\n\n` +
@@ -249,7 +254,9 @@ function reportUnknownSkills(pi: ExtensionAPI, resolution: Extract<SkillResoluti
  * 不限制工具 / 不注入计划提示词），回复问题句（互斥/不存在/非 md，problem 内
  * 已带用法样例）。
  */
-function reportTemplateFlagError(pi: ExtensionAPI, problem: string): void {
+function reportTemplateFlagError(pi: ExtensionAPI, ctx: ExtensionContext, problem: string): void {
+  // D10②：fail-fast 错误的用户可见性由 notify 承担（display:false 注入仅 LLM 可见）
+  ctx.ui.notify(`Plan mode not entered: ${problem}`, "error");
   sendPlanContextMessage(
     pi,
     `[PLAN MODE] Failed to enter: ${problem}.\n\n` +
@@ -274,6 +281,7 @@ function handleEnterPlanMode(
   if (parsed.skills !== undefined && parsed.templatePath !== undefined) {
     reportTemplateFlagError(
       pi,
+      ctx,
       "--template and --skills are mutually exclusive. Use one: /plan <requirement> --skills a,b | /plan <requirement> --template <path>",
     );
     return;
@@ -284,7 +292,7 @@ function handleEnterPlanMode(
   if (parsed.templatePath !== undefined) {
     const resolution = resolveTemplateFile(parsed.templatePath, ctx.cwd);
     if (!resolution.ok) {
-      reportTemplateFlagError(pi, resolution.problem);
+      reportTemplateFlagError(pi, ctx, resolution.problem);
       return;
     }
     // 全文在校验通过后、任何进入副作用（entry/工具限制）之前读好——读失败
@@ -293,7 +301,7 @@ function handleEnterPlanMode(
     try {
       templateContent = fs.readFileSync(resolution.absPath, "utf-8");
     } catch {
-      reportTemplateFlagError(pi, `Template file not readable: ${resolution.absPath}. ${TEMPLATE_USAGE_SAMPLE}`);
+      reportTemplateFlagError(pi, ctx, `Template file not readable: ${resolution.absPath}. ${TEMPLATE_USAGE_SAMPLE}`);
       return;
     }
     templateAbsPath = resolution.absPath;
@@ -309,14 +317,14 @@ function handleEnterPlanMode(
     if (failed.ok) {
       throw new Error("plan: empty --skills must fail skill resolution (invariant)");
     }
-    reportUnknownSkills(pi, failed);
+    reportUnknownSkills(pi, ctx, failed);
     return;
   }
   let resolved: SkillRef[] = [];
   if (requested.length > 0) {
     const resolution = resolveSkills(pi, requested);
     if (!resolution.ok) {
-      reportUnknownSkills(pi, resolution);
+      reportUnknownSkills(pi, ctx, resolution);
       return;
     }
     resolved = resolution.resolved;
@@ -326,7 +334,7 @@ function handleEnterPlanMode(
   // 进入核心收敛到 enter.ts（plan(enter) tool 与 slash 命令共用）；本入口只负责
   // flag 解析/校验（上方）与提示词投递（下方 sendMessage custom message 注入）。
   // state 由 activatePlanMode 就地改 + persist（getPlanState 缓存同一对象）。
-  const { prompt } = activatePlanMode(pi, planCtx.states, sessionId, ctx, {
+  const { state: activated, prompt } = activatePlanMode(pi, planCtx.states, sessionId, ctx, {
     requirement,
     skills: resolved,
     projectDir: ctx.cwd,
@@ -334,6 +342,9 @@ function handleEnterPlanMode(
       ? { template: { absPath: templateAbsPath, content: templateContent } }
       : {}),
   });
+  // D10②：进入成功的用户可见性由 notify 承担（提示词注入 display:false 仅 LLM 可见；
+  // widget 已呈激活态，notify 补命令反馈通道）
+  ctx.ui.notify(`Plan mode entered: ${activated.planFilePath}`, "info");
 
   // Inject plan mode prompt as custom message（display/triggerTurn 语义见 sendPlanContextMessage。
   // 非 streaming 直调 _runAgentPrompt 跳过 prompt() 前置链，首轮 systemPrompt 叠加

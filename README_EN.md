@@ -32,17 +32,17 @@ Mirror repository: [gitcode.com/qq_18433817/tai-ji](https://gitcode.com/qq_18433
 
 **macOS (Apple Silicon)**
 ```bash
-curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.11/TaiJi-0.10.11-mac-arm64.dmg -o /tmp/TaiJi.dmg && open /tmp/TaiJi.dmg
+curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.14/TaiJi-0.10.14-mac-arm64.dmg -o /tmp/TaiJi.dmg && open /tmp/TaiJi.dmg
 ```
 
 **Linux**
 ```bash
-curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.11/TaiJi-0.10.11-x86_64.AppImage -o ~/TaiJi.AppImage && chmod +x ~/TaiJi.AppImage && ~/TaiJi.AppImage
+curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.14/TaiJi-0.10.14-x86_64.AppImage -o ~/TaiJi.AppImage && chmod +x ~/TaiJi.AppImage && ~/TaiJi.AppImage
 ```
 
 **Windows (PowerShell)**
 ```powershell
-Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.11/TaiJi-0.10.11-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.14/TaiJi-0.10.14-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
 ```
 
 </details>
@@ -54,17 +54,17 @@ Repository: [github.com/zhushanwen321/tai-ji](https://github.com/zhushanwen321/t
 
 **macOS (Apple Silicon)**
 ```bash
-curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.11/TaiJi-0.10.11-mac-arm64.dmg -o /tmp/TaiJi.dmg && open /tmp/TaiJi.dmg
+curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.14/TaiJi-0.10.14-mac-arm64.dmg -o /tmp/TaiJi.dmg && open /tmp/TaiJi.dmg
 ```
 
 **Linux**
 ```bash
-curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.11/TaiJi-0.10.11-x86_64.AppImage -o ~/TaiJi.AppImage && chmod +x ~/TaiJi.AppImage && ~/TaiJi.AppImage
+curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.14/TaiJi-0.10.14-x86_64.AppImage -o ~/TaiJi.AppImage && chmod +x ~/TaiJi.AppImage && ~/TaiJi.AppImage
 ```
 
 **Windows (PowerShell)**
 ```powershell
-Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.11/TaiJi-0.10.11-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.14/TaiJi-0.10.14-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
 ```
 
 </details>
@@ -163,7 +163,7 @@ The following 16 extensions are usable standalone outside taiji (all published t
 | [`pi-cache-probe`](extensions/universal/cache-probe/README.md) | Cache prefix fingerprint collection |
 | [`pi-cw-tool`](extensions/universal/cw-tool/README.md) | cw 2.0 runner + read-only `cw_query` tool |
 
-The remaining 5 (`agent-ext` / `msg-id-mapper` / `plugin-bridge` / `system-prompt` / `system-prompt-trace`, npm package names have `pi-` prefix) are taiji-integration-specific, source code under `extensions/taiji/`. For extension development, see [docs/extensions/development-guide.md](docs/extensions/development-guide.md).
+The remaining 4 (`agent-ext` / `msg-id-mapper` / `system-prompt` / `system-prompt-trace`, npm package names have `pi-` prefix) are taiji-integration-specific, source code under `extensions/taiji/`. For extension development, see [docs/extensions/development-guide.md](docs/extensions/development-guide.md).
 
 ---
 

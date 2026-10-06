@@ -54,7 +54,7 @@ describe("WT1: 默认配置生成（首次无配置文件）", () => {
 		expect(config.enabled).toBe(true);
 		expect(config.classifier.enabled).toBe(true);
 		expect(config.classifier.model).toBe("auto");
-		expect(config.classifier.timeout).toBe(90);
+		expect(config.classifier.timeout).toBe(0);
 		expect(config.classifier.autoApproveLowRisk).toBe(true);
 		expect(config.classifier.autoDenyHighRisk).toBe(true);
 		expect(config.userRules).toEqual([]);
@@ -130,7 +130,7 @@ describe("WT3: 配置解析容错（malformed JSON）", () => {
 		const config = loadAndWatchConfig();
 		expect(config.mode).toBe("strict");
 		expect(config.classifier.model).toBe("auto"); // 默认
-		expect(config.classifier.timeout).toBe(90); // 默认
+		expect(config.classifier.timeout).toBe(0); // 默认
 	});
 
 	it("TC6 (C3b): classifier.model 传对象形式 → console.warn + 回落默认 auto", () => {

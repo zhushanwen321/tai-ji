@@ -95,11 +95,10 @@ vi.mock('../src/infra/logger.js', () => ({
   createPiSessionLog: () => ({ write: vi.fn(), end: vi.fn() }),
 }))
 
-const clientOpts = { startupDelayMs: 0 } as const // 测试注入：启动确认窗口归零
 
 async function startWith(options: RpcClientOptions): Promise<import('../src/infra/pi/rpc-client.js').RpcClient> {
   const { RpcClient } = await import('../src/infra/pi/rpc-client.js')
-  const client = new RpcClient({ ...clientOpts, ...options })
+  const client = new RpcClient({ ...options })
   await client.start()
   return client
 }

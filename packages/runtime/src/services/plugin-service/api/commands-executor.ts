@@ -14,8 +14,9 @@ import { COMMAND_RPC_METHODS, commandCompositeKey } from './commands-api.js'
 // 执行超时取值链复用 D1 工具执行的 resolveToolTimeoutMs（声明优先 / opt-out /
 // 非法回落 DEFAULT_TOOL_EXECUTE_TIMEOUT_MS 30min / clamp），不另设命令专属常量。
 // formatDurationMs / isDeclaredTimeoutActive 同源自 D1（impl-plan §5 假差异收敛：
-// busy 提示文案与 declared 判定统一走 bridge-interop 单一权威，本地复制已删）。
-import { formatDurationMs, isDeclaredTimeoutActive, resolveToolTimeoutMs } from '../bridge-interop.js'
+// busy 提示文案与 declared 判定统一走 tool-timeout 单一权威，本地复制已删）。
+// [pi1-disposition-chat-flow D7⑤] 驻留文件自 bridge-interop 迁至 tool-timeout（实现零变化）。
+import { formatDurationMs, isDeclaredTimeoutActive, resolveToolTimeoutMs } from '../tool-timeout.js'
 import { toErrorMessage } from '../../../utils/errors.js'
 import { PendingTracker } from '../../../utils/async/pending-tracker.js'
 
@@ -114,7 +115,6 @@ export async function executeCommand(
   startTimes.set(registration.handlerId, Date.now())
   const result = deps.commandInvokes.register(
     registration.handlerId,
-    timeoutMs,
     Object.assign(
       new Error(
         `Command '${compositeKey}' timed out after ${formatDurationMs(timeoutMs)} ` +
@@ -123,6 +123,7 @@ export async function executeCommand(
       ),
       { code: -32000 },
     ),
+    timeoutMs,
   )
   deps.rpcServer.notify(
     handle.workerId,

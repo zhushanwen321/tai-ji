@@ -705,7 +705,10 @@ describe('选中插 chip 集成（C 组，真实浮层 + 真实输入区）', ()
   })
 
   it('C2 @ 选 subagent → 插 .mention-at chip（@slug + dataset.chipSubagentId）', async () => {
-    getSubagentsMock.mockResolvedValueOnce({ subagents: SUBAGENT_FIXTURE, oversize: false })
+    // 同一 session 分区有两条合法拉取腿：ComposerTray 外壳挂载即首拉（useTrayCounts D13
+    // watch immediate）+ 浮层 open 边沿刷新（command-popover-open-fetch）。mock 必须用稳定
+    // 实现供满两次——Once 会被首拉消耗，open 刷新落到默认空 mock 反向清空分区。
+    getSubagentsMock.mockResolvedValue({ subagents: SUBAGENT_FIXTURE, oversize: false })
     wrapper = mountRealComposer()
     await flushPromises()
     await typeInComposer(wrapper, '@build', 6)

@@ -16,7 +16,12 @@ import * as configDomain from './config'
 import * as extensionDomain from './extension'
 import { command } from '../request'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
-import type { RenameMode, ServerMessageMap } from '@taiji/shared'
+import type {
+  CodemodeEnabledResult,
+  CodemodeSetEnabledResult,
+  RenameMode,
+  ServerMessageMap,
+} from '@taiji/shared'
 
 // [W4] SystemSettings 类型 + SYSTEM_KEY/DEFAULT_SYSTEM/getSystem/updateSystem 持久化已迁
 // @taiji/core（domain/settings system-storage + types）。本文件仅保留 transport 转发
@@ -166,6 +171,24 @@ export async function setSmartContextThresholds(thresholds: number[]): Promise<S
 /** 设置排除模型列表（每条完整 provider/modelId，runtime 侧过滤无 "/" 条目去重）。 */
 export async function setSmartContextExcludedModels(models: string[]): Promise<SmartContextExcludedModelsReply> {
   return command('config.setSmartContextExcludedModels', { models }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+// ── codemode 开关（config.getCodemodeEnabled / config.setCodemodeEnabled）──
+// codemode 设计 D1/A1：开关命令对，reply 类型 = shared codemode 域 payload 原样
+//（分工同 shared codemode.ts 头注：消息类型字符串与 type→payload 映射登记在 shared
+// protocol.ts，含 ServerMessageMap 的 config.codemodeEnabled / config.codemodeSetEnabled
+// reply 键；本域函数签名直接 import shared codemode 域类型，不走上方其他命令的
+// ServerMessageMap 索引访问形态；case 分发由 runtime transport 层 handler 登记）。
+// 损坏错误态（corruption 非空）与写入语义见 shared codemode.ts。
+
+/** 读取 codemode 开关（corruption 非空 = settings.json 损坏错误态，enabled 恒 false）。 */
+export async function getCodemodeEnabled(): Promise<CodemodeEnabledResult> {
+  return command('config.getCodemodeEnabled', {}, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 设置 codemode 开关（增量条目规范化等写入语义归 runtime；损坏拒入走 ok:false 信封不 reject）。 */
+export async function setCodemodeEnabled(enabled: boolean): Promise<CodemodeSetEnabledResult> {
+  return command('config.setCodemodeEnabled', { enabled }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
 // [W4] getSystem/updateSystem（纯前端 localStorage 持久化）已迁 @taiji/core

@@ -39,8 +39,8 @@ export {
   extractAgentCallSessionId,
 } from '@taiji/shared'
 import { createInflightDedup } from '@taiji/core/foundation/create-inflight-dedup'
+import { createEmptyResultStrikeGuard, createPartitionedLoadState, createPartitionedRecords } from '../lib/partitioned-session-records'
 import { session as sessionApi } from '@/api'
-import { createEmptyResultStrikeGuard, createPartitionedRecords } from '../lib/partitioned-session-records'
 
 // ── [P3/D6] progress 投影消费（纯函数，drawer WorkflowTab 与托盘面板共用）──
 
@@ -119,32 +119,16 @@ export const useWorkflowStore = defineStore('workflow', () => {
    */
   const partition = createPartitionedRecords<WorkflowRunRecord>()
 
-  /** 加载态（M1：loadWorkflows 在途时 true；per-session Map 分区，ADR-0049 派——
-   * split 模式双面板并行拉取时，任一 pane 的在途/失败不得遮蔽另一 pane 的状态） */
-  const loadingBySession = ref(new Map<string, boolean>())
-  /** 加载错误（M1：失败时设该 sid 分区错误消息；缺省 null = 无错误；records 保留旧数据不清空.
-   * 全局单值形态会把 pane A 的失败显示到 pane B 的面板（store 级串扰），分区化治根） */
-  const loadErrorBySession = ref(new Map<string, string | null>())
   /**
-   * [RT-4#8] oversize 降级标志（per-session 分区，语义同 subagent store）：session 文件
-   * >32MB 时列表不可用（records 恒空），面板显示降级提示；置位时保留旧分区数据。
+   * 每 session 加载态三件套（loading / loadError / oversize 分区，ADR-0049 派）。
+   * 实现单源在 lib/partitioned-session-records 的 createPartitionedLoadState
+   * （待裁决项 1 收敛 2026-10-04，原手抄 71 行退役）；facet 的领域语义注释保留在各
+   * 使用点——与 subagent store 同款（loading：split 双面板互不遮蔽；loadError：失败设
+   * 该 sid 分区错误消息、分区数据保留旧值不清空；oversize：[RT-4#8] 列表不可用降级提示，
+   * 置位时保留旧分区数据）。
    */
-  const oversizeBySession = ref(new Map<string, boolean>())
-
-  /** per-session 加载态读取（消费方 computed 内调用建立响应依赖） */
-  function isLoadingOf(sessionId: string): boolean {
-    return loadingBySession.value.get(sessionId) ?? false
-  }
-
-  /** per-session 加载错误读取 */
-  function loadErrorOf(sessionId: string): string | null {
-    return loadErrorBySession.value.get(sessionId) ?? null
-  }
-
-  /** [RT-4#8] per-session oversize 降级读取（面板降级提示判据） */
-  function oversizeOf(sessionId: string): boolean {
-    return oversizeBySession.value.get(sessionId) ?? false
-  }
+  const loadState = createPartitionedLoadState()
+  const { isLoadingOf, loadErrorOf, oversizeOf } = loadState
 
   /**
    * [M7 D6] mainSessionId → Set<agentCallVirtualId> 映射。
@@ -152,14 +136,6 @@ export const useWorkflowStore = defineStore('workflow', () => {
    * 主 session delete 时无法按前缀定位。此映射让 deleteSession 经它清全部 agentcall virtualId。
    */
   const mainSessionAgentCalls = new Map<string, Set<string>>()
-
-  /**
-   * [W3-3] sid → running 信号延迟重试的 setTimeout id 映射。
-   * triggerWorkflowReload 对 running 信号调度 500ms 后的兜底 loadWorkflows，用此 Map 去重——
-   * 同 sid 多次 running 信号只保留最后一次的重试 timer，旧 timer clearTimeout。store dispose
-   * 时经 onScopeDispose 全部 clearTimeout，防 HMR 后操作已废弃的 store。
-   */
-  const workflowReloadTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   /**
    * [W0/D4] per-session in-flight 拉取登记（并发失效共享一次拉取）。
@@ -182,19 +158,11 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const dirtyWorkflows = new Map<string, boolean>()
 
   /**
-   * [W0/D4] 释放 sid 的拉取收敛簿记 + running 重试 timer（clearSession / clearWorkflows /
-   * dispose 收口点共用）。timer 清理此前只在 clearWorkflows / onScopeDispose，clearSession
-   * 缺口是既有 bug（已删 session 的重试在 500ms 后对已清空的 store 触发 loadWorkflows），
-   * 本次顺手补齐。
+   * [W0/D4] 释放 sid 的拉取收敛簿记（clearSession / clearWorkflows / dispose 收口点共用）。
    */
   function releaseLoadBookkeeping(sessionId: string): void {
     inflightDedup.delete(sessionId)
     dirtyWorkflows.delete(sessionId)
-    const timer = workflowReloadTimers.get(sessionId)
-    if (timer !== undefined) {
-      clearTimeout(timer)
-      workflowReloadTimers.delete(sessionId)
-    }
   }
 
   /**
@@ -205,15 +173,13 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const EMPTY_RESULT_STRIKE_LIMIT = 2
   const strikeGuard = createEmptyResultStrikeGuard(EMPTY_RESULT_STRIKE_LIMIT, 'workflow-store', 'getWorkflows')
 
-  // [W15] 防御性清理：workflowReloadTimers 是模块级 Map（不在 ref 里），HMR / store dispose
-  // 时若不主动 clearTimeout，在途的 running 重试 timer 仍会在 500ms 后触发 loadWorkflows(sid)
-  // 操作已废弃的 store。参照 subagent.ts 的 onScopeDispose panelStreamUnsub 模式。
+  // [W15] 防御性清理：inflightDedup / dirtyWorkflows 是非响应式 Map（不在 ref 里），HMR /
+  // store dispose 时主动 clear，防旧实例的 drainDirty 读到已废弃 store 的簿记。参照
+  // subagent.ts 的 onScopeDispose panelStreamUnsub 模式。
   // mainSessionAgentCalls 由 clearWorkflows / clearAgentCallMapping 显式管理（业务路径触发），
   // 此处不重复清理（避免与 deleteSession 的精确清理冲突）。
   if (getCurrentScope()) {
     onScopeDispose(() => {
-      workflowReloadTimers.forEach((t) => clearTimeout(t))
-      workflowReloadTimers.clear()
       // [W0/D4] 拉取收敛簿记一并清：在途 promise 完成后的 drainDirty 读到空簿记 → 不补拉
       inflightDedup.clear()
       dirtyWorkflows.clear()
@@ -258,12 +224,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   /** 清除指定 session 的 workflow 列表分区（deleteSession 调，防泄漏，ADR-0049 AC-8） */
   function clearSession(sessionId: string): void {
-    strikeGuard.reset(sessionId)
     partition.clear(sessionId)
-    loadingBySession.value.delete(sessionId)
-    loadErrorBySession.value.delete(sessionId)
-    oversizeBySession.value.delete(sessionId)
-    // [W0/D4] 簿记 + running 重试 timer 随分区一并释放（dirty 不复活已删分区；timer 缺口补齐）
+    loadState.clear(sessionId)
+    // [W0/D4] 拉取收敛簿记随分区一并释放（dirty 不复活已删分区）
     releaseLoadBookkeeping(sessionId)
     // [可视化 U5/D11⑤] 该 session 名下 run 的事件流缓存随分区一并释放；活跃 run 归属该
     // session 时清除活跃锚（overlay 关闭编排归 useSidebar.deleteSession 链，数据面在此收口）
@@ -504,64 +467,67 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   /** 实际拉取执行体（loadWorkflows 收敛壳内调用；失败不抛——写 loadError 分区） */
   async function performLoadWorkflows(sessionId: string): Promise<void> {
-    loadingBySession.value.set(sessionId, true)
-    loadErrorBySession.value.delete(sessionId)
+    loadState.beginLoad(sessionId)
     try {
       // [RT-4#8] 结构化返回：oversize=true（文件 >32MB 列表不可用）置降级标志 + 保留旧
-      // 分区数据（不经 strike guard——不可用 ≠ 删空）；面板显示降级提示而非空列表。
-      const { workflows: records, oversize } = await sessionApi.getWorkflows(sessionId)
+      // 分区数据（不可用 ≠ 删空）；面板显示降级提示而非空列表。
+      // [待裁决项 4] found=false = 会话不在册（pi 延迟落盘窗口 / 扫描竞态）——保留分区
+      // 不覆盖；found=true 的空列表是真实空，直接覆盖（原连续空计数 strike 守卫随歧义
+      // 根治退役）。缺省（undefined，mock / 旧 runtime）按 found 处理。推送路径不经本判定。
+      const { workflows: records, oversize, found } = await sessionApi.getWorkflows(sessionId)
       if (oversize) {
-        strikeGuard.reset(sessionId)
-        oversizeBySession.value.set(sessionId, true)
+        loadState.setOversize(sessionId)
         return
       }
-      oversizeBySession.value.delete(sessionId)
-      // 空结果守卫（sidebar-sync-plan P1 + R1 business-logic S3，与 subagent.ts 同款）：
-      // strike 语义单源在 createEmptyResultStrikeGuard JSDoc（lib/partitioned-session-records），
-      // 此处只判定 + 覆盖前清零。推送路径是权威数据，不经此守卫。
-      if (
-        strikeGuard.shouldKeepExisting(sessionId, records.length, getRecordsBySession(sessionId).length)
-      ) {
-        return
-      }
-      strikeGuard.reset(sessionId)
+      loadState.clearOversize(sessionId)
+      if (found === false) return
       applyRecords(sessionId, records)
     } catch (e) {
-      // M1：失败不覆盖现有分区（保留旧数据），设该 sid 分区 loadError；strike 重置
-      //（「连续 RPC 成功且空」语义纯净，读失败与数据空不同通道，不让 RPC 故障累计出误清分区）
-      strikeGuard.reset(sessionId)
+      // M1：失败不覆盖现有分区（保留旧数据），设该 sid 分区 loadError
       const msg = e instanceof Error ? e.message : String(e)
       console.error('[workflow-store] loadWorkflows failed:', e)
-      loadErrorBySession.value.set(sessionId, msg)
+      loadState.setLoadError(sessionId, msg)
     } finally {
-      // delete 而非 set(sid, false)：load 在途时 clearSession 已删分区的话，set 会
-      // 为已删 session 重生条目（残留）；get ?? false 缺省读取语义等价（无条目 = 不在途）
-      loadingBySession.value.delete(sessionId)
+      loadState.endLoad(sessionId)
     }
   }
 
-  /** running 信号延迟重试间隔（ms）。workflow-state-link 可能刚写入，首次 RPC 拉取为空。 */
-  const RUNNING_RETRY_MS = 500
-
   /**
-   * workflow 增量信号处理：立即拉一次全量 + running 信号延迟重试。
+   * workflow 增量信号处理：立即拉取完整列表。
    *
    * runtime 在 workflow 发起/结束时刻推送 session.workflowUpdate 增量信号，前端收到后触发
    * loadWorkflows RPC 拉取完整列表。由 useConnection.routeInbound 在所有 session（含非活跃）
    * 无条件兜底调用——不能只依赖 per-focus 订阅（切走即退订 → 终态丢弃 → 托盘/详情缺终态）。
    *
-   * running 信号特殊处理：workflow tool-call-end 触发 running 信号时，主 session JSONL 的
-   * workflow-state-link 可能刚 append 还未 flush（pi 延迟写入时序）。延迟 RUNNING_RETRY_MS 再拉一次兜底。
+   * [时间平抑红线登记]（原 RUNNING_RETRY_MS=500 running 信号盲等重试已删除——待裁决项 5
+   * 根治 2026-10-04）：
+   *   原 500ms 延迟重试补偿的根因：担忧 workflow-state-link 条目刚 append 还未落盘稳定，
+   *   信号后的首次拉取可能空。该担忧属 [W1/D6] 读侧换源（磁盘直读时代）的残留——现行信号
+   *   由 runtime 投影合并后发出（session-records.ts publishRecordChanges），renderer 拉取
+   *   读同一投影实例：信号发出时数据构造性可读，首拉空的时序窗口不存在；runtime 发射点
+   *   另有可读性门（filterReadableWorkflowSignals）拦截未来信号源与读源解耦的形态，
+   *   不可读则推迟到下一轮水位 diff（无定时器）。会话不在册窗口（found=false）由
+   *   [待裁决项 4] 的保留分区语义承接，不靠时间兜底。
+   *   退役条件（重审触发）：pi 侧出现「信号发出时数据不必然可读」的机制变化（信号源与
+   *   读源解耦且 runtime 可读性门未覆盖）——届时在 runtime 发射点补读前校验，禁止恢复
+   *   消费侧定时盲等。
    *
    * @param sessionId 信号归属的 session ID
-   * @param status 信号里的 workflow status（'running' 触发延迟重试，其他只拉一次。
-   *   [D2] 显式裁决维持：interrupted 落「其他」分支只拉一次——中断 run 事件流静止
-   *   无需轮询，resume 复活变 running 后自然进入重试分支）
+   * @param status 信号里的 workflow status（[D2] 显式裁决：interrupted 与终态同待遇只拉
+   *   一次——中断 run 事件流静止，resume 复活变 running 后随下一次信号刷新）
    */
   function triggerWorkflowReload(sessionId: string, status: string): void {
     const sid = sessionId
-    // 增量信号 → 立即拉取完整列表
-    void loadWorkflows(sid)
+    // 增量信号 → 立即拉取完整列表；running 信号后列表为空 = workflow-state-link 可能未
+    // 落盘（pi 延迟写入时序），显式 warn 出声（诊断信号，非补偿——不延迟重拉）
+    void loadWorkflows(sid).then(() => {
+      if (status === 'running' && getRecordsBySession(sid).length === 0) {
+        console.warn(
+          '[workflow-store] running 信号后 workflow 列表为空：workflow-state-link 可能未落盘（pi 延迟写入），终态显示缺失',
+          sid,
+        )
+      }
+    })
     // [可视化 U5/D4] overlay 活跃 run 的事件流重新拉取（§3.1-4：overlay 订阅 run 级信号
     // 触发 getWorkflows + 事件流重新拉取——store 内聚合接线，信号处理链零改动）。force
     // 覆盖 ready 缓存；在途丢弃检查由 performLoadRunEvents 内建（信号到达时 overlay 已切
@@ -575,35 +541,18 @@ export const useWorkflowStore = defineStore('workflow', () => {
       // agentcall 快照通道同链刷新）
       activeRunSignalEpoch.value += 1
     }
-    // running 信号延迟重试：workflow-state-link 可能刚写入，首次拉取为空
-    if (status === 'running') {
-      // W3-3：用模块级 Map 跟踪 timer，去重（同 sid 多次 running 信号只保留最后一次的重试）
-      const existing = workflowReloadTimers.get(sid)
-      if (existing) clearTimeout(existing)
-      const timer = setTimeout(() => {
-        workflowReloadTimers.delete(sid)
-        void loadWorkflows(sid)
-      }, RUNNING_RETRY_MS)
-      workflowReloadTimers.set(sid, timer)
-    }
   }
 
   /** 清空所有 workflow 分区 + 清 agentcall 映射（全局重置场景用） */
   function clearWorkflows(): void {
-    // RD-3#12：先按当前分区键重置 strike 簿记（strike 仅在对非空分区连续空结果时残留，
-    // recordsBySession 键即残留 strike 键全集），再整表替换 + 清 loading/error/oversize 三
-    // facet（+ oversize），与 clearSession 全清对齐——否则残留 loading=true → spinner 永转 /
-    // 残留 error → 错误态卡死 / 残留 strike → 重新预置后首次空结果误判删空。顺带清在途 running
-    // 重试 timer（否则 500ms 后对已清空的 store 触发 loadWorkflows）。
+    // strike 簿记按当前分区键重置（残留 strike → 重新预置后首次空结果误判删空）。
     for (const sid of partition.recordsBySession.value.keys()) strikeGuard.reset(sid)
+    // RD-3#12：整表替换 records + 全清 loading/error（+ oversize）三 facet，与 clearSession
+    // 全清对齐——残留 loading=true → spinner 永转 / 残留 error → 错误态卡死。
     partition.recordsBySession.value = new Map()
     // W3-2：清非响应式的 mainSessionAgentCalls（registerAgentCall 写入，deleteSession/clearWorkflows 调本函数清）
     mainSessionAgentCalls.clear()
-    loadingBySession.value = new Map()
-    loadErrorBySession.value = new Map()
-    oversizeBySession.value = new Map()
-    workflowReloadTimers.forEach((t) => clearTimeout(t))
-    workflowReloadTimers.clear()
+    loadState.clearAll()
     // [W0/D4] 拉取收敛簿记一并清（同 clearSession / dispose 三点清理义务）
     inflightDedup.clear()
     dirtyWorkflows.clear()

@@ -895,8 +895,8 @@ async function executeSubmitReview(
 
     case "revise": {
       // custom message 形态注入：streaming 时显式
-      // deliverAs:'steer' 排队至下一次 LLM 调用（pi 实装锚点：dist/core/agent-session.js
-      // :859-868（0.84.4）——isStreaming 分支 steer 走 :868 _queueSteer；sendMessage 缺省
+      // deliverAs:'steer' 排队至下一次 LLM 调用（语义登记 PS-58，verifiedWith 以
+      // pi-semantics.json 为准——isStreaming 分支 steer 走 _queueSteer；sendMessage 缺省
       // deliverAs 同为 steer，显式传保持排队语义自明）；非 streaming 由 triggerTurn:true 开轮
       // 状态写走 transition()（D1 'revise' 边：reviewing → revising）且先于 steer 注入：
       // ok:false = 审批已被交错操作推进，此时注入评论并报成功会让 agent 空跑一轮——
@@ -1072,7 +1072,7 @@ async function resolveCompleteChoice(
       // 泛型组件工厂签名比 GuiContext 的宽松形状窄，整 ctx 直传类型不兼容）。
       // select 必须 .bind(ctx.ui)（对齐 ask-user / scheduler 同协议形态）：callMarkerRpc 先
       // 解构再裸调用，this 依赖 pi 实装 select 为箭头闭包——显式 bind 消除该隐式依赖
-      // （pi 实装锚点：dist/modes/rpc/rpc-mode.js:84（0.84.4）——select 为箭头函数闭包）。
+      // （pi 实装锚点：dist/modes/rpc/rpc-mode.js select 为箭头函数闭包）。
       const form = await uiFormInteract(
         { mode: ctx.mode, hasUI: ctx.hasUI, ui: { select: ctx.ui.select.bind(ctx.ui) } },
         [question],
@@ -1279,11 +1279,11 @@ export function registerPlanTool(
     name: "plan",
     label: "Plan Mode",
     // 串行声明（D-B1-4）：全部 action 就地突变共享 PlanState，声明串行消除并行交错类
-    //（A1 死锁机理的调度半边）。pi 0.84.4 声明粒度是工具级——同批任一 sequential 工具
-    // 使整批工具顺序执行。pi 实装锚点：dist/core/extensions/types.d.ts:363-370（0.84.4，
-    // executionMode 是 per-tool 声明，"sequential" = this tool must execute one at a time
-    // with other tool calls）+ @earendil-works/pi-agent-core dist/agent-loop.js:287-288
-    //（0.84.4，hasSequentialToolCall = toolCalls.some(...) 命中即整批走
+    //（A1 死锁机理的调度半边）。pi 声明粒度是工具级——同批任一 sequential 工具
+    // 使整批工具顺序执行。pi 实装锚点（1.0.0 复核）：dist/core/extensions/types.d.ts
+    // executionMode（per-tool 声明，"sequential" = this tool must execute one at a time
+    // with other tool calls）+ @earendil-works/pi-agent-core dist/agent-loop.js
+    //（hasSequentialToolCall = toolCalls.some(...) 命中即整批走
     // executeToolCallsSequential）。单行回退通道 = 移除本声明即回默认并行。
     executionMode: "sequential",
     description:

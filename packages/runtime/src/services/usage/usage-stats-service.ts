@@ -92,8 +92,8 @@ export class UsageStatsService {
    * 聚合全部 session 文件的用量数据。
    *
    * 两层扫描（方案 B 布局）：pi 默认布局把 session jsonl 写入
-   * `<sessionsDir>/<encodeCwd>/` 子目录（锚点 pi@0.84.4 dist/core/session-manager.js:242-246
-   * getDefaultSessionDirPath：`join(agentDir, "sessions", "--<encoded-cwd>--")`，
+ * `<sessionsDir>/<encodeCwd>/` 子目录（锚点 pi 1.0.0 dist/core/session-manager.js
+ * getDefaultSessionDirPath：`join(agentDir, "sessions", "--<encoded-cwd>--")`，
    * SessionManager.create 无显式 sessionDir 时走 getDefaultSessionDir 同源），单层 readdir
    * 会漏掉全部子目录文件 → 统计归零，故根层 + 一层子目录都统计（§11.12：两层即够——pi 只写一层
    * encodeCwd，`_migrated-no-cwd/` 与 fork 产物也都是一层）。
@@ -223,10 +223,10 @@ export class UsageStatsService {
   }
 
   /**
-   * 流式扫描单个 JSONL 文件，按四分类计入 usage。
+   * 流式扫描单个 JSONL 文件，按五分类计入 usage。
    *
-   * 计入规则（①②③ 对齐 pi getUsageCostBreakdown，锚点：@earendil-works/pi-coding-agent@0.84.4
-   * dist/core/usage-totals.js:23-33，升级 pi 时须重新核对该锚点；④ 为 taiji 自有口径）：
+   * 计入规则（①②③⑤ 对齐 pi getUsageCostBreakdown，锚点：@earendil-works/pi-coding-agent@1.0.0
+   * dist/core/usage-totals.js:41-70；④ 为 taiji 自有口径）：
    * ① type==='message' && message.role==='assistant' && message.usage → 主桶
    * ② type==='message' && message.role==='toolResult' && message.usage → compaction 虚拟桶
    * ③ (type==='compaction' || type==='branch_summary') && entry.usage → compaction 虚拟桶
@@ -234,10 +234,13 @@ export class UsageStatsService {
    *    非 string/空串回退 'compaction'（usage-page-fixes §3.3 ④ 守卫与回退字面量）
    * ④ type==='custom' && customType==='rename-session' && data.usage 为非 null 对象
    *    → rename-session 虚拟桶（G3）
+   * ⑤ type==='usage'（pi 1.0.0 新 entry，cache_warm 等非对话操作的用量记录）→ 主桶
+   *    （pi 自身口径：usage entry 按 `${provider}/${model}` 计入合计）
    *
-   * 四类判定互斥（①② 同 type 不同 role，③④ 不同 type），拆分到
+   * 五类判定互斥（①② 同 type 不同 role，③④⑤ 各不同 type），拆分到
    * rowFromAssistant / rowFromToolResult / rowFromCompactionEntry /
-   * rowFromRenameSessionEntry 四个辅助方法；本方法只做行读取 + cwd 提取 + 编排。
+   * rowFromRenameSessionEntry / rowFromUsageEntry 五个辅助方法；本方法只做行读取 +
+   * cwd 提取 + 编排。
    *
    * @returns FileShard 分片（含 rows, skippedLines, cwd）
    */
@@ -275,12 +278,13 @@ export class UsageStatsService {
           foundSessionEntry = true
         }
 
-        // 按原顺序尝试四类判定；'skip' 短路（timestamp 无效行不再计入任何桶）
+        // 按原顺序尝试五类判定；'skip' 短路（timestamp 无效行不再计入任何桶）
         const row =
           this.rowFromAssistant(entry, cwd) ??
           this.rowFromToolResult(entry, cwd) ??
           this.rowFromCompactionEntry(entry, cwd) ??
-          this.rowFromRenameSessionEntry(entry, cwd)
+          this.rowFromRenameSessionEntry(entry, cwd) ??
+          this.rowFromUsageEntry(entry, cwd)
 
         if (row === 'skip') {
           skippedLines++
@@ -385,6 +389,26 @@ export class UsageStatsService {
 
     const model = typeof data?.model === 'string' && data.model !== '' ? data.model : 'rename-session'
     return this.makeRow(date, 'rename-session', model, cwd, usage as Record<string, unknown>)
+  }
+
+  /**
+   * ⑤ pi 1.0.0 usage entry（模型产生的非对话操作用量，如缓存保活 cache_warm）→
+   * 真实 provider/model 行。落盘形态锚：pi dist/core/session-manager.js appendUsage
+   * 字面量（type:'usage' + kind/provider/model/usage/note）。不接入则用量页成本合计
+   * 与 pi 自身统计口径出现缺口（B1）。usage 存在性守卫：entry.usage 为非 null 对象才计
+   * row（同 ①②③ 范式）；kind 不参与分类（provider/model 是行字段真值）。
+   * 命中但 timestamp 无效 → 'skip'（计 skippedLines）；不命中 → null。
+   */
+  private rowFromUsageEntry(entry: Record<string, unknown>, cwd: string | null): ScanRowResult {
+    if (entry.type !== 'usage') return null
+    if (typeof entry.usage !== 'object' || entry.usage === null) return null
+
+    const date = toLocalDate(entry.timestamp as string)
+    if (date === null) return 'skip'
+
+    const provider = typeof entry.provider === 'string' && entry.provider !== '' ? entry.provider : '(unknown)'
+    const model = typeof entry.model === 'string' && entry.model !== '' ? entry.model : '(unknown)'
+    return this.makeRow(date, provider, model, cwd, entry.usage as Record<string, unknown>)
   }
 
   /**

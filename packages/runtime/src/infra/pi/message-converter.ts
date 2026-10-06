@@ -163,7 +163,7 @@ function fillToolCallOutput(tc: ToolCall, toolResult: PiHistoryToolResult): void
   // 对称恢复 outputRaw（关键规则 9：对话流状态必须可重开恢复）。
   // 实时路径（event-adapter handleToolExecutionEnd）已统一委托 normalizePiToolResult（W1），
   // 此处历史路径对称：output 存 stripAnsi 版本，outputRaw 存原始 ANSI 文本（仅当含 ANSI 时）。
-  const { output, outputRaw } = normalizePiToolResult(toolResult)
+  const { output, outputRaw, images } = normalizePiToolResult(toolResult)
   tc.output = output
   if (outputRaw) tc.outputRaw = outputRaw
   if (toolResult.isError) tc.status = 'error'
@@ -172,5 +172,7 @@ function fillToolCallOutput(tc: ToolCall, toolResult: PiHistoryToolResult): void
   if (toolResult.details && typeof toolResult.details === 'object' && !Array.isArray(toolResult.details)) {
     tc.details = toolResult.details
   }
-
+  // images 对齐：与 core reducer（apply-entry fillHostToolCall → computeToolCallFill）同源
+  // 提取——孤儿回填路径（增量窗口翻页合并）此前漏取该字段，重开翻页后工具结果图片丢失。
+  if (images !== undefined) tc.images = images
 }

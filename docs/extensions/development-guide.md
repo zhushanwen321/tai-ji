@@ -150,7 +150,7 @@ extensions/
 
 **[规范]** Pi SDK 包始终用 `peerDependencies`（非 `dependencies`），由 Pi 运行时提供。`peerDependencies` 必须 `optional: true`，因为扩展运行在 Pi 进程内。
 
-当前 Pi SDK 的 scope 分布（上游 npm `@earendil-works/pi-coding-agent@0.84.4`；曾用 fork taiji-pi 已废弃切回）：
+当前 Pi SDK 的 scope 分布（上游 npm `@earendil-works/pi-coding-agent`，版本以根 `package.json` 为准；曾用 fork taiji-pi 已废弃切回）：
 
 | 包 | 作用域 | 说明 |
 |---|---|---|
@@ -567,11 +567,11 @@ registerMyCommand(pi, () => runtime);  // command 也传 getter
 }
 ```
 
-SDK 的 `AgentToolResult` 类型未声明 `isError`——返回值不携带错误标记，**throw 是唯一的错误信号**。
+pi 1.0.0 的 `AgentToolResult` 类型已声明 `isError?: boolean`（pi-agent-core `dist/types.d.ts:386`）——返回值标记被工具循环尊重，抛错同样由 pi 统一转 `isError: true`（两版语义等价，见下）。**统一 throw 仍是本项目纪律**（单一错误路径），不因类型声明放开 catch 返回写法。
 
 **[规范]** 错误处理采用 **throw 范式**：内部实现函数与 `execute` 直接 `throw`，**不要 catch 后在返回值里带 `isError: true`**。
 
-- pi 实装锚点（pi-agent-core `dist/agent-loop.js` `executePreparedToolCall`）：`execute` 正常返回时 pi 恒置 `isError: false`，返回值上的 `isError` 字段**被丢弃**——catch 后返回 `{ isError: true }` 等于错误被标成功；`execute` 抛出时由 pi 外层 catch 统一转 `isError: true` 的 error tool result（错误消息原样成为 content，异常不会带崩 Pi）；
+- pi 实装锚点（pi@1.0.0 pi-agent-core `dist/agent-loop.js` `executePreparedToolCall`）：`execute` 正常返回按 `isError: result.isError === true` 尊重返回值上的 `isError` 标记（`:579`）；`execute` 抛出时由 pi 外层 catch 统一转 `isError: true` 的 error tool result（`:581-588`；错误消息原样成为 content，异常不会带崩 Pi）。catch 后返回 `{ isError: true }` 与 throw 语义等价、**不构成错误标成功通道**，仍要求统一 throw 是纪律选择（单一错误路径）；
 - catch 仅用于**包装重抛**（如 `throw new Error(\`Error: ${toErrorMessage(err)}\`)`——scheduler 先例：统一消息格式并剥离堆栈），不得吞掉异常转为正常返回；
 - 错误消息只用 `err.message`（或 `String(err)`），**禁止把 `err.stack` 拼进 content**——堆栈不得外泄到 LLM 上下文与持久化记录，防止错误信息蔓延；
 - 同时禁止 `{ content: [{ text: "错误: ..." }] }` 不带失败标记的**错误成功模式**（调用方无法区分成功与失败——throw 范式下由 pi 置 isError 保证）。
@@ -583,7 +583,7 @@ async execute(_toolCallId, params) {
   return { content: [{ type: "text", text: `Success: ${result}` }] };
 }
 
-// 错误：catch 后在返回值里带 isError:true——字段被 pi 丢弃，错误轮被标成功
+// 错误：catch 后在返回值里带 isError:true——违反统一 throw 纪律（pi 1.0.0 会尊重该标记、与 throw 语义等价，但错误路径必须单一，禁双轨混用）
 async execute(_toolCallId, params) {
   try {
     const result = await riskyOperation();
@@ -1240,7 +1240,7 @@ export function expandTilde(p: string): string {
 
 | 要求 | 说明 |
 |------|------|
-| 错误不得伪装成功 | execute 直接 throw（pi 统一置 isError:true）；返回值里的 isError 被 pi 丢弃，禁止靠它标记错误 |
+| 错误不得伪装成功 | execute 直接 throw（pi 统一置 isError:true）；禁止 catch 后在返回值里带 `isError: true`（统一 throw 纪律，禁双轨混用） |
 | 不允许模块加载时报错 | 配置加载失败在 session_start 中处理，不在模块顶层 |
 | 不允许 process.exit | 扩展无权结束进程 |
 | 不允许无限循环 | while(true) 必须有迭代上限 |
@@ -1706,7 +1706,7 @@ src/
 |--------|------|---------|
 | 模块级全局变量 | 多 session 共享状态，数据错乱 | 工厂闭包变量（会话级）/ `globalThis[Symbol.for]`（进程级单例，见 §7.5） |
 | 未保护的 ctx 访问 | session 关闭后崩溃 | `isStaleContextError()` 检查 |
-| execute 内 catch 后返回 `{ isError: true }` | 返回值 isError 被 pi 丢弃，错误轮被标成功（pi 外层本就会 catch execute 异常转 error result，异常不会带崩 Pi） | execute 直接 throw，pi 统一置 isError:true（消息不含堆栈） |
+| execute 内 catch 后返回 `{ isError: true }` | 违反统一 throw 纪律——错误路径必须单一（pi 1.0.0 会尊重该标记、与 throw 语义等价，双轨混用无益；pi 外层本就会 catch execute 异常转 error result，异常不会带崩 Pi） | execute 直接 throw，pi 统一置 isError:true（消息不含堆栈） |
 | 异步操作无信号 | 无法取消，残留资源 | 透传 `signal` |
 | 不设防重入 | 并发操作破坏状态 | `isProcessing` 标志 |
 | agent_end 中启动 LLM 调用 | 上下文已过期 | 只做同步清理 |
@@ -1770,7 +1770,7 @@ src/
 
 ### 健壮性阶段（必须通过）
 
-- [ ] execute 错误路径直接 throw（pi 统一置 isError:true）；禁止 catch 后返回带 `isError: true` 的结果（字段被 pi 丢弃，错误标成功）；错误消息不含堆栈
+- [ ] execute 错误路径直接 throw（pi 统一置 isError:true）；禁止 catch 后返回带 `isError: true` 的结果（统一 throw 纪律，禁双轨混用）；错误消息不含堆栈
 - [ ] 异步操作支持 `signal` 取消
 - [ ] Stale context 检测 + `safeNotify` 保护
 - [ ] 防重入标志保护并发操作

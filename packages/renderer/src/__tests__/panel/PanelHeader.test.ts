@@ -101,8 +101,8 @@ describe('PanelHeader session 文件名展示（正常态）', () => {
 
 describe('PanelHeader i18n 契约', () => {
   it('E1: 中英文 locale 均包含 copySessionFile 文案', async () => {
-    const { default: zh } = await import('@/i18n/locales/zh-CN/panel')
-    const { default: en } = await import('@/i18n/locales/en-US/panel')
+    const { default: zh } = await import('@taiji/ui/locale/zh-CN/panel')
+    const { default: en } = await import('@taiji/ui/locale/en-US/panel')
     expect(zh.header.copySessionFile).toBe('复制 session 文件路径')
     expect(en.header.copySessionFile).toBe('Copy session file path')
   })

@@ -1,11 +1,12 @@
 /**
  * Extension UI 交互 composable——bus 订阅编排 + filter 分流读取。
  *
- * pi extension 调 ctx.ui.select/confirm/input → runtime 推 extension.ui_request
- * → core MessageBusBridge 归一为 bus 'ui-request' 事件（plugin:uiRequest + extension.ui_request
+ * pi extension 调 ctx.ui.select/confirm/input → runtime 推 extension.dialog
+ * （pi1-disposition-chat-flow D6：前端按消息类型分发）
+ * → core MessageBusBridge 归一为 bus 'ui-request' 事件（plugin:uiRequest + extension.dialog
  * 双源合一）→ 本 composable 订阅 bus、写入 extensionUIStore（session 级 pending SSOT）→
  * 渲染层（Panel inline overlay）从 store 分区派生 → 用户操作 → sendExtensionUIResponse
- * 回传（带 method）→ pi Promise resolve。
+ * 回传（method = dialogKind 同形值）→ pi Promise resolve。
  *
  * 状态归属（CW wave `session-active-ssot` T2）：pending 队列已提升到 extensionUIStore
  *（session 级 SSOT），让 deriveStatus 经 hasPendingBlockingOverlay 能查到阻塞 overlay
@@ -42,7 +43,7 @@ import type { InternalEvent, DialogRequest } from '@taiji/core'
 import type { ExtensionInteractMethod } from '@taiji/shared'
 import type { PlanReviewRequest } from '@zhushanwen/extension-protocol'
 import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
-import { notifyUiResponseNotDelivered } from '@/composables/shell/extension-host-dialog'
+import { notifyUiResponseNotDelivered } from '@/composables/shell/ui-response-feedback'
 import i18n from '@/i18n'
 import { useToast } from '@/composables/useToast'
 import { sendExtensionUIResponse, getPendingRequests, type ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
@@ -57,7 +58,7 @@ export type UIRequestFilter = (req: ExtensionUIRequest) => boolean
  * 统一表单 overlay 请求过滤器（Panel inline 渲染用）：form 键（终态判定面，D5 收敛）。
  * 全部表单族帧（新 form marker / legacy askUser / scheduleCreate marker）由 runtime
  * event-adapter marker 分支统一产出 form:true。普通 dialog 请求仍由 CompanionBand 消费
- * bus 直连（extension-host-dialog C4 对称排除，零重叠契约）。
+ * bus 直连（shell-adapters C4 对称排除，零重叠契约）。
  */
 export const formFilter: UIRequestFilter = (req) => req.form === true
 
@@ -277,9 +278,10 @@ function pickPlanFields(
  * bus 事件 request（DialogRequest）→ ExtensionUIRequest 适配（IF3）。
  *
  * DialogRequest 是 parseUiRequest/parseExtensionUiRequest 经 ...payload 展开构造的——
- * runtime extension.ui_request 原始 payload（含 form/formQuestions/allowCancel/message/
+ * runtime extension.dialog 原始 payload（含 form/formQuestions/allowCancel/message/
  * options 等）保留在索引签名里（event-adapter UI_FORM_MARKER 分支 payload 标记 form:true）。
- * method 用原始 method（可能超界如 editor）?? kind 兜底（kind 已归一 select/confirm/input）。
+ * dialogKind 用帧判别字段（taiji 词表，可能超界如 editor）?? kind 兜底（kind 已归一
+ * select/confirm/input）。
  */
 function toExtensionUIRequest(sid: string, request: DialogRequest): ExtensionUIRequest {
   // receivedAt：优先采信帧携带的数值，缺失则由本层打戳（当前 runtime 广播帧不带该键，
@@ -288,7 +290,7 @@ function toExtensionUIRequest(sid: string, request: DialogRequest): ExtensionUIR
   return {
     sessionId: sid,
     requestId: request.requestId,
-    method: (request.method as ExtensionInteractMethod | undefined) ?? request.kind,
+    dialogKind: (request.dialogKind as ExtensionInteractMethod | undefined) ?? request.kind,
     ...pickDialogFields(request),
     ...pickFormFields(request),
     ...pickLegacyFields(request),
@@ -331,7 +333,7 @@ export function useExtensionUI(
     // 切 session 后旧 sid 迟到事件写旧分区，不污染新分区；事件自带归属，无需捕获订阅时 sid）。
     // C4 分流：富交互硬过滤先行（form / planReview 两标记请求入 store 分区——分别渲染
     // FormOverlay / PlanReviewBar；普通 dialog 由 CompanionBand 消费 bus，
-    // extension-host-dialog 侧对称排除，零重叠契约），filter 是第二道闸（实例只放各自
+    // shell-adapters 侧对称排除，零重叠契约），filter 是第二道闸（实例只放各自
     // 标记——store 共享，谁放行谁入队，requestId dedup 兜底双实例幂等）。
     // C2：事件 sid 缺失（无 sid 的 ui-request）跳过入队（warn）——渲染面依赖 session 分区。
     unsubFns.push(
@@ -460,7 +462,7 @@ export function useExtensionUI(
       useToast().error(t('extensionUI.requestExpired'), { sessionId: sid })
       return false
     }
-    const delivered = sendExtensionUIResponse(target.sessionId, target.requestId, target.method, result)
+    const delivered = sendExtensionUIResponse(target.sessionId, target.requestId, target.dialogKind, result)
     if (!delivered) {
       notifyUiResponseNotDelivered(target.sessionId)
       return false

@@ -1,18 +1,20 @@
 /**
- * U4_MODEL_SWITCH：dispatch 模型切换（设计 D3 修订版 + D1 归属简化）验收
+ * U4_MODEL_SWITCH：dispatch 模型切换（设计 D3 修订版 + D1 归属简化 + ADR-0122
+ * 事实查询翻转）验收
  *
- * 覆盖设计 §3.3 D-B4-4 D1 的五块机制（D1 终态：agent_settled + isIdle 复核拆 turnIndex
- * 归属状态机——原 turnIndex 归属：4 状态字段 + 6 事件挂点 + customType 前缀匹配）：
+ * 覆盖五块机制（D1 终态：agent_settled + isIdle 复核拆 turnIndex 归属状态机——原
+ * turnIndex 归属：4 状态字段 + 6 事件挂点 + customType 前缀匹配）：
  * - 切换：dispatchTaskInner 在 sendMessage 前 setModel（busy 亦生效——本层不做 idle 检查）
- * - 恢复：agent_settled（run 完全落定）+ isIdle 复核是唯一事件通道——idle 即恢复；
- *   非 idle（settled 与用户新 run 交错）转 awaiting-restore 推迟，tick 重入 idle 兑现；
- *   不挂 agent_end（end 后可能有自动续跑 turn，恢复只认 settled）
+ * - 恢复：判定锚点 = isIdle() 同步事实查询（判定层级最高）；agent_settled 确定性事件是
+ *   提前触发的加速器——事件到达即查询并兑现；非 idle（settled 与用户新 run 交错）不切
+ *   （记录保留），tick 的 isIdle() 查询在 idle 重入时兑现；不挂 agent_end（end 后可能
+ *   有自动续跑 turn，恢复只认 settled）
  * - 互斥：切换在途时其他需切模型任务 skip + pending 留待下 tick 重试
  * - 串行化（MF-2）：settled 恢复在途 / 切换 setModel 在途未建记录窗口内，后继需切模型
  *   任务的 setModel 排队等前序模型 op 完成（任意两个 setModel 不并发、双记录不叠写）
- * - 对账兜底（时间平抑红线登记见 runtime.ts MODEL_SWITCH_RECONCILE_TICKS）：严格先于同
- *   tick dispatch 循环；在途标记 2 tick 过期强制开放（agent_settled 丢失的兜底路径）；
- *   未决记录守卫（无记录时模型漂移 = 用户自主行为不动作）
+ * - tick 事实查询兜正确性（原 2-tick 计数对账已按 ADR-0122 删除）：严格先于同 tick
+ *   dispatch 循环；记录存在 + idle 即恢复（agent_settled 丢失时由查询收敛——拉保证
+ *   正确、事件只优化延迟）；未决记录守卫（无记录时模型漂移 = 用户自主行为不动作）
  * - 降级与接管副作用：setModel false 不阻塞 dispatch；sendMessage 抛错 catch 先恢复；
  *   模型语义异常只走日志（不进持久化词表）
  *
@@ -126,7 +128,7 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       expect(ops.setModelCalls).toEqual([])
     })
 
-    it('settled 非 idle（与用户新 run 交错）→ 转 awaiting-restore 推迟，tick 重入 idle 兑现', async () => {
+    it('settled 非 idle（与用户新 run 交错）→ 不切（记录保留），tick 重入 idle 兑现', async () => {
       task = await addModelTask('job', TASK_M)
       await runtime.dispatchTask(task)
       expect(ops.setModelCalls).toEqual([TASK_M])
@@ -137,14 +139,14 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       await flushAsync()
       expect(ops.setModelCalls).toEqual([TASK_M])
 
-      // 兜底不变：后续 tick 重入 idle 仍恢复（awaiting-restore 无窗口过期）
+      // 兜底不变：后续 tick 的 isIdle() 查询在 idle 重入时恢复（记录无时间窗过期）
       ops.idle = true
       runtime.startScheduler()
       await vi.advanceTimersByTimeAsync(TICK_INTERVAL_MS)
       expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
     })
 
-    it('恢复 setModel(原) false → restore-failed 终态：warn 日志 + 清标记 + 对账不再动作', async () => {
+    it('恢复 setModel(原) false → restore-failed 终态：warn 日志 + 清标记 + 后续查询不再动作', async () => {
       task = await addModelTask('job', TASK_M)
       await runtime.dispatchTask(task)
       expect(ops.setModelCalls).toEqual([TASK_M])
@@ -157,7 +159,7 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       const warnText = loggerMock.warn.mock.calls.map(c => String(c[0])).join('\n')
       expect(warnText).toContain('restore-failed')
 
-      // 标记已清：后续对账窗口不重复动作
+      // 标记已清：后续 tick 的 isIdle() 查询不重复动作
       ops.setModelResult = true
       runtime.startScheduler()
       await vi.advanceTimersByTimeAsync(TICK_INTERVAL_MS * 3)
@@ -179,8 +181,10 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
     it('切换在途时第二个需切模型任务 skip + pending 保留 + A 结算后重试成功', async () => {
       const taskA = await addModelTask('job-a', TASK_M)
       await runtime.dispatchTask(taskA)
+      ops.idle = false // A 的 run 在途（isIdle 事实查询非 idle）：互斥窗口成立的前提
 
       // B 到期走 tick 路径：step2 标 pending → step3 dispatch 命中互斥 skip
+      //（tick 开头的事实查询因非 idle 不动作，记录保留 → 互斥命中）
       const taskB = await addModelTask('job-b', OTHER_M)
       taskB.nextRunAt = 0
       runtime.startScheduler()
@@ -197,7 +201,8 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       expect(okC).toBe(true)
       expect(backend.sentMessages).toHaveLength(2)
 
-      // A 结算（settled + idle 恢复）后 B 重试成功
+      // A 结算（run 落定后会话空闲 → settled + idle 恢复）后 B 重试成功
+      ops.idle = true
       runtime.handleRunSettled()
       await flushAsync()
       const okRetry = await runtime.dispatchTask(taskB)
@@ -206,23 +211,22 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       expect(ops.setModelCalls).toEqual([TASK_M, ORIG, OTHER_M])
     })
 
-    it('互斥强制结算的恢复与后续切换串行：恢复(原)完成前新切换目标不得写入（无交错）', async () => {
-      // 场景（runTaskNow 直连路径）：互斥命中触发 mutex-forced 强制结算恢复；若恢复
+    it('互斥结算的恢复与后续切换串行：恢复(原)完成前新切换目标不得写入（无交错）', async () => {
+      // 场景（runTaskNow 直连路径）：互斥命中触发事实查询结算恢复；若恢复
       // fire-and-forget，恢复先同步清记录再 await setModel(原)，紧随的需切模型任务 B 的
       // setModel(目标) 与之并发、完成顺序不定（恢复后完成则 B 的 turn 用错模型）。修复后
-      // 互斥分支 await 强制结算——锁定「恢复(原)记账并完成前，新切换不得发起」的顺序契约。
+      // 互斥分支 await 结算——锁定「恢复(原)记账并完成前，新切换不得发起」的顺序契约。
       //
-      // 状态构造说明：公开行为下 reconcile 在 ticksOpen 递增过窗口的同一 tick 内即结算
-      //（idle 恢复 / 非 idle 转推迟），互斥分支命中的「in-flight 过窗口残留」是防御分支——
-      // 此处直接注入该内部状态（extensions 测试目录豁免 unsafe-cast 规则，ask-user 等先例）。
+      // 状态构造说明：公开行为下「记录存在 + idle」即结算（ADR-0122 事实查询，无窗口
+      // 计数），互斥分支命中的未决记录直接可用——此处只断言记录存在
+      //（extensions 测试目录豁免 unsafe-cast 规则，ask-user 等先例）。
       const taskA = await addModelTask('job-a', TASK_M)
       await runtime.dispatchTask(taskA)
       expect(ops.setModelCalls).toEqual([TASK_M])
 
-      // A 的事件全部丢失；把在途标记推过对账窗口（> MODEL_SWITCH_RECONCILE_TICKS = 2）
-      const internal = runtime as unknown as { pendingModelSwitch: { ticksOpen: number } | null }
+      // A 的事件丢失（无 settled 注入）；未决记录直接可结算
+      const internal = runtime as unknown as { pendingModelSwitch: unknown | null }
       expect(internal.pendingModelSwitch).not.toBeNull()
-      internal.pendingModelSwitch!.ticksOpen = 3
 
       // 恢复(ORIG) 的 setModel 在「已记账未完成」态挂起（模拟真实 RPC 在途窗口）
       let releaseRestore: (() => void) | undefined
@@ -233,7 +237,7 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       vi.spyOn(ops, 'setModelByRef').mockImplementation(async (ref: string) => {
         ops.setModelCalls.push(ref)
         if (ops.setModelResult) ops.currentRef = ref
-        if (gatedCalls++ === 0) await restoreInFlight // 首个调用 = mutex-forced 恢复
+        if (gatedCalls++ === 0) await restoreInFlight // 首个调用 = mutex-settle 事实查询恢复
         return ops.setModelResult
       })
 
@@ -341,7 +345,7 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       expect(ops.currentRef).toBe(OTHER_M)
     })
 
-    it('同 tick 双任务顺序：A 恢复过期强制开放 + B 到期切换 → B 生效不被 A 回滚', async () => {
+    it('同 tick 双任务顺序：A 结算恢复 + B 到期切换 → B 生效不被 A 回滚', async () => {
       // A dispatch（记录在途）后事件全部丢失
       const taskA = await addModelTask('job-a', TASK_M)
       await runtime.dispatchTask(taskA)
@@ -349,16 +353,9 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       taskB.nextRunAt = 0 // 到期
 
       runtime.startScheduler()
-      // tick1：对账 ticksOpen=1（窗口内等事件）；B pending → 互斥 skip
-      await vi.advanceTimersByTimeAsync(TICK_INTERVAL_MS)
-      expect(backend.sentMessages).toHaveLength(1)
-      expect(taskB.pending).toBe(true)
-      // tick2：ticksOpen=2 仍在窗口内；B 仍 skip
-      await vi.advanceTimersByTimeAsync(TICK_INTERVAL_MS)
-      expect(backend.sentMessages).toHaveLength(1)
-      // tick3：ticksOpen=3 > 2 → A 强制开放（idle 即恢复）→ dispatch 循环 B 切换成功。
-      // 顺序约束（对账 await 先于 dispatch 循环）：A 的恢复 setModel 完成后 B 才 setModel，
-      // B 生效且不被 A 回滚（若交错则最后写入是 ORIG）
+      // 首 tick：结算先于 dispatch 循环（顺序约束）——记录存在 + idle 即恢复 A（isIdle
+      // 事实查询，无窗口计数），B 的 setModel 在恢复完成后执行，B 生效且不被 A 回滚
+      //（若交错则最后写入是 ORIG）
       await vi.advanceTimersByTimeAsync(TICK_INTERVAL_MS)
       expect(ops.setModelCalls).toEqual([TASK_M, ORIG, OTHER_M])
       expect(ops.currentRef).toBe(OTHER_M)
@@ -437,22 +434,18 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
     })
   })
 
-  describe('对账兜底', () => {
-    it('agent_settled 丢失：在途标记超过 2 tick 未关闭 → 强制开放并对账恢复（事件丢失路径）', async () => {
+  describe('tick 事实查询兜正确性（事件丢失路径）', () => {
+    it('agent_settled 丢失：记录存在 + idle → 下个 tick 的 isIdle() 查询恢复', async () => {
       task = await addModelTask('job', TASK_M)
       await runtime.dispatchTask(task)
       // 无任何事件注入（settled 恢复通道不触发）
 
       runtime.startScheduler()
-      await vi.advanceTimersByTimeAsync(TICK_INTERVAL_MS) // tick1: ticksOpen=1
-      await vi.advanceTimersByTimeAsync(TICK_INTERVAL_MS) // tick2: ticksOpen=2，窗口内
-      expect(ops.setModelCalls).toEqual([TASK_M])
-
-      await vi.advanceTimersByTimeAsync(TICK_INTERVAL_MS) // tick3: >2 → 强制开放（idle）→ 恢复
+      await vi.advanceTimersByTimeAsync(TICK_INTERVAL_MS) // 首 tick：isIdle() 事实查询 → 恢复
       expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
     })
 
-    it('无未决记录时模型漂移 = 用户自主行为，对账不动作', async () => {
+    it('无未决记录时模型漂移 = 用户自主行为，查询不动作', async () => {
       ops.currentRef = 'prov-x/model-y' // 无 dispatch，用户手动改模型
       runtime.startScheduler()
       await vi.advanceTimersByTimeAsync(TICK_INTERVAL_MS * 5)

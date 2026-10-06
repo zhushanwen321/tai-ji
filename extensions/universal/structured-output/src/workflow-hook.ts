@@ -4,7 +4,7 @@
  * 装配形态（workflow 模式，见 src/index.ts）：
  *   - tool_execution_end：唯一 listener——喂 loop-gate 的 WorkflowGate（合一状态机：
  *     steer 记账段 + 硬杀计数段，先记账后计数），newlyTerminal 时触发硬杀副作用链
- *     （runTerminalTeardown：日志 → abort+shutdown → 15s 兜底硬退）。
+ *     （runTerminalTeardown：日志 → abort+shutdown 优雅终止）。
  *   - turn_end：唯一 listener——模型未成功产出 structured-output 时以 steer 方式注入
  *     重试提醒（软闸门），提示词不伪装用户气泡，对话流用户内容 100% 来自用户输入；
  *     最多重试 MAX_HOOK_RETRIES 次，防止无限循环。
@@ -206,7 +206,7 @@ export function setupWorkflowHook(pi: PiAPI, schemaJson: string): void {
 		// 审查项#8：await 发送结果——发送失败（如 compaction 中开轮抛错 / 扩展已
 		// 被 assertActive 拒绝）不扣减重试预算（不调 onTurnEnd），否则 fire-and-forget
 		// 丢一份 steer + 白扣一次预算，两次即永久哑火。
-		// pi 0.84.4 实装（loader.js）：extension 侧 sendMessage 同步转发且吞掉异步
+		// pi 实装（loader.js，1.0.0 复核同构）：extension 侧 sendMessage 同步转发且吞掉异步
 		// rejection（bindCore .catch(emitError) 转事件）返回 void——await 对 undefined
 		// 立即解析；此处的 try/catch 兜住同步 throw（assertActive）与未来 pi 返回真
 		// Promise 的形态。

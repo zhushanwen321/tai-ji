@@ -37,6 +37,8 @@ import type {
   TerminalConfig,
   SetProviderData,
   ConnectionTestResultRow,
+  CodemodeEnabledResult,
+  CodemodeSetEnabledResult,
   LlmRetryConfig,
   BuiltinProviderTemplate,
   ScannedSkillInfo,
@@ -180,6 +182,8 @@ export interface SettingsTransport {
   getRenameModel(): Promise<ServerMessageMap['config.renameModel']>
   /** 智能上下文压缩配置全量（compactModel 空串 = 未设置；thresholds 为 token 绝对数） */
   getSmartContextConfig(): Promise<ServerMessageMap['config.smartContextConfig']>
+  /** codemode 开关（corruption 非空 = settings.json 损坏错误态；reply 为 shared codemode payload 原样） */
+  getCodemodeEnabled(): Promise<CodemodeEnabledResult>
 
   // ── 用量 / 子代理引擎 ──
   /** 用量统计（session JSONL 扫描聚合） */
@@ -256,6 +260,8 @@ export interface SettingsTransport {
   setSmartContextThresholds(thresholds: number[]): Promise<ServerMessageMap['config.smartContextThresholds']>
   /** 排除模型列表（每条完整 provider/modelId，runtime 侧过滤去重） */
   setSmartContextExcludedModels(models: string[]): Promise<ServerMessageMap['config.smartContextExcludedModels']>
+  /** codemode 开关（ok:false = settings.json 损坏拒入，error + corruption 同源错误态；两态信封不 reject） */
+  setCodemodeEnabled(enabled: boolean): Promise<CodemodeSetEnabledResult>
 
   // ── 子代理引擎 ──
   /** 设置全局默认子代理引擎（写 config.json，新 session 生效） */

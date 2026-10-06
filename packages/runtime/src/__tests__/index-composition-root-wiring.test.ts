@@ -14,7 +14,6 @@
  * - watchdog:memoryPressure broadcast：renderer 通知出口 + 同拍喂滚动重启编排（D5 决策输入）
  * - setRollingRestartStatusProvider：rollingRestart.status 只读 RPC 数据源（「broadcast
  *   时序竞争」教训：持续态必须可拉取，renderer 重连后拉取恢复横幅）
- * - startIdleReaper：后台初始化序列 ⑩ 触发的孤儿 pi 收殓闭包（装配 → 传递）
  * - startMemoryWatermarkTimer：水位采样定时器（评估器 watermark-daily 数据源）
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/index-composition-root-wiring.test.ts
@@ -45,13 +44,6 @@ describe('组合根 watchdog / rolling-restart 接线（源码级守卫）', () 
   it('armed 门共用：滚动重启 armed 取自 resolveWatchdogConfig 结果（Gate W 单一开关）', () => {
     expect(source).toContain('const watchdogConfig = resolveWatchdogConfig(process.env)')
     expect(source).toContain('armed: watchdogConfig.armed,')
-  })
-
-  it('idle reaper：装配闭包先于传递（runStartupBackgroundInit 序列 ⑩ 触发点）', () => {
-    const defIdx = source.indexOf('const startIdleReaper = ')
-    const handoffIdx = source.indexOf('startIdleReaper,')
-    expect(defIdx).toBeGreaterThan(-1)
-    expect(handoffIdx).toBeGreaterThan(defIdx)
   })
 
   it('水位定时器：startMemoryWatermarkTimer 以 session 数 + pi 进程数为采样源启动', () => {

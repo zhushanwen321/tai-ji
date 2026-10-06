@@ -279,6 +279,14 @@ EXEMPT_CALLSITES = [
         "（RT-8#9 检查逐调用点化登记 2026-09-20）",
     ),
     (
+        "infra/pi/pi-mcp-probe.ts",
+        "spawn(command, args, opts",
+        "pi mcp list 连接探针默认 spawn impl（options.spawnImpl 注入缝的缺省实现）："
+        "env 在 runMcpProbe 内经 buildPiOutboundEnv 组装（D3 契约①：与会话 spawn "
+        "同一装配点），底层白名单构建器以 buildChildEnv: buildOutboundChildEnv "
+        "参数注入——间接组装形态，非裸继承（与 rpc-client.ts 条目同构）",
+    ),
+    (
         "services/terminal/terminal-service.ts",
         "pty.spawn(shell",
         "用户终端 PTY spawn 的 env 内联经本文件 buildEnv() 组装（buildOutboundChildEnv "

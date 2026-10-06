@@ -3,42 +3,48 @@
  *
  * 职责：
  * - 持有 clients 连接池（Set<WebSocket>），供 broker.broadcast 遍历。
- * - WS 服务器生命周期：start（listen 127.0.0.1 + 注册 connection 回调）/ stop（关闭 wss + http）。
+ * - WS 服务器生命周期：start（listen 绑定地址参数化，默认 127.0.0.1——remote-access D1；
+ *   注册 connection 回调）/ stop（关闭 wss + http）。
  * - auth 握手（S1-W1，spec §3.3 D4）：连接建立后首条消息必须是 {type:'auth', payload:{token}}，
- *   校验通过（unauthed → authed）前不受理任何其他消息（静默丢弃）、10s 超时断开、
- *   失败以 close 1008。authToken=null 时 fail-closed（拒绝全部连接——组合根 env 与
- *   token 文件都缺失的场景，见 index.ts resolveRuntimeToken）。
- * - 心跳：每条消息重置计时器，超时关闭连接（防僵尸连接）。仅对 authed 连接生效——
- *   未认证连接由 authTimer 兜底，防「auth 前发 ping 刷心跳绕过认证超时」。
+ *   校验通过（unauthed → authed）前不受理任何其他消息（静默丢弃）、
+ *   失败以 close 1008。token 校验是集合成员比较（remote-access D2）：{spawn token} ∪
+ *   {remote token（仅开态、每次握手热读 provider）}；两个通道都缺失时 fail-closed
+ *   （拒绝全部连接——组合根 env 与 token 文件都缺失且无 remote 通道的场景，见 index.ts
+ *   resolveRuntimeToken 与 remoteTokenProvider 装配）。
  * - HTTP /health 端点（与 WS 同端口，简单存活探针；不要求 token——supervisor 探活用，
  *   响应只有 status/uptime，无敏感数据）。
+ * - 移动壳静态托管分派（remote-access D3/E5，S3 拆分后）：静态实现与开态判定均在
+ *   infra/mobile-static.ts + 组合根，本类只持一个可空 handler 引用——注入时非 /health 请求
+ *   委托 handler 服务，未注入（null）时 /health 之外一律 404，与无远程访问形态
+ *   逐字节一致。
  * - maxPayload：单条消息上限（超限连接被 close 1009，见 shared MAX_WS_PAYLOAD_BYTES 校准注释）。
  *
  * 不含：消息路由（server.ts handleMessage）、消息发送（broker）、业务逻辑（handlers）。
  * 连接 auth 成功后把 ws + 解析出的 msg 通过注入的回调交给上层（RuntimeServer）处理。
  */
-import { createServer, type Server as HttpServer } from 'node:http'
+import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
 import { WebSocketServer, WebSocket, type WebSocket as WsType } from 'ws'
-import { MAX_WS_PAYLOAD_BYTES, type ClientMessage } from '@taiji/shared'
+import {
+  MAX_WS_PAYLOAD_BYTES,
+  type ClientMessage,
+} from '@taiji/shared'
 import { toErrorMessage } from '../utils/errors.js'
 import type { ErrorDetails } from './message-context.js'
 
 const HTTP_OK = 200
 const HTTP_NOT_FOUND = 404
-const MAX_WS_CLOSE_CODE = 4000
-const HEARTBEAT_TIMEOUT_MS = 45_000
 /** WS 1001 Going Away（RFC 6455）——服务端计划内关停时发给全部存量连接的 close 码。 */
 const WS_CLOSE_GOING_AWAY = 1001
 /**
  * stop 等待存量连接优雅退出的有界上界：本机回环 close 握手毫秒级，2s = 20 倍极端余量，
  * 正常路径不触发；超时后 closeAllConnections 强制断开属回收层兜底（非正常路径依赖）。
  */
-const STOP_LINGER_GRACE_MS = 2_000
-/** auth 握手超时：连接建立后未在此时限内通过认证即断开（spec §3.3 D4 定 10s）。 */
-const AUTH_TIMEOUT_MS = 10_000
 /** WS policy violation 关闭码（RFC 6455）——auth 失败 / fail-closed 拒绝统一用它。 */
 const WS_CLOSE_POLICY_VIOLATION = 1008
+
+/** 默认监听绑定地址（remote-access D1）：纯回环，与参数化前现状逐字节一致。 */
+const DEFAULT_LISTEN_HOST = '127.0.0.1'
 
 /** 常量比较（抗时序攻击）：长度不等直接 false（token 长度非秘密）。 */
 function tokenEquals(a: string, b: string): boolean {
@@ -47,6 +53,20 @@ function tokenEquals(a: string, b: string): boolean {
   if (ba.length !== bb.length) return false
   return timingSafeEqual(ba, bb)
 }
+
+// ── 移动壳静态托管（remote-access D3/E4/E5）────────────────────────────────
+// 实现已抽至 infra/mobile-static.ts（S3 拆分：静态托管与连接生命周期是正交变化轴；
+// 文件 IO 属 infra 领地——runtime-layering.md §2 transport 层不碰 node:fs）。
+// 开态判定（remote-access flag → dist 探测 → handler 构造）归组合根（index.ts），
+// 本模块只消费注入的 handler（见 ConnectionManagerOptions.mobileStaticHandler）。
+
+/**
+ * 移动壳静态 handler 注入形态（remote-access D3/S3）：实现居 infra/mobile-static.ts
+ * （createMobileStaticHandler 返回值与其结构兼容）。transport 不 import infra——边界
+ * 类型在消费侧本地声明，组合根装配点把 infra 实现注入本选项，签名失配由装配处
+ * typecheck 拦截（结构化类型系统的编译期对账）。
+ */
+export type MobileStaticHandler = (req: IncomingMessage, res: ServerResponse) => Promise<void>
 
 /**
  * 连接事件回调（由 RuntimeServer 注入）。
@@ -64,27 +84,78 @@ export interface ConnectionCallbacks {
   onDisconnect?(ws: WsType): void
 }
 
+/**
+ * 远程访问服务形态选项（remote-access U0.1）：组合根经 parseArgs（argv，D9）解析并
+ * 做完开态判定后经 RuntimeServer 透传注入。全部可选——缺省即现状形态（纯回环 + 单
+ * spawn token，零静态挂载）。
+ */
+export interface ConnectionManagerOptions {
+  /**
+   * 移动壳静态 handler（remote-access D3，S3 拆分后形态）：由 infra/mobile-static.ts 的
+   * createMobileStaticHandler 构造，组合根仅在 remote-access 开态且 dist 探测通过
+   * （resolveMobileStaticRoot 非空）时注入；本类不感知静态细节，只按「是否注入」
+   * 分派——未注入（关态/E5 禁用）时 /health 之外一律 404，与无远程访问形态逐字节
+   * 一致。所有分支都写完响应，分派即视为已服务。
+   */
+  mobileStaticHandler?: MobileStaticHandler
+  /**
+   * remote token 热读 provider（remote-access D2）：**每次 auth 握手时调用**，
+   * 返回值非 null 时作为集合第二成员参与校验（逐成员 tokenEquals）。
+   * 未注入 = 关态：不调用、remote 集合恒空、零文件 IO（D9 ambient 免疫的运行时半边）。
+   * 返回 null = E10（文件缺失/损坏，读侧已响亮日志），该次握手 remote 通道为空。
+   */
+  remoteTokenProvider?: () => string | null
+}
+
 export class ConnectionManager {
   private httpServer: HttpServer
   private wss: WebSocketServer
   /** 连接池（仅 authed 连接）——broker.broadcast 遍历此集合向所有客户端推送。 */
   readonly clients = new Set<WsType>()
-  private heartbeatTimers = new Map<WsType, ReturnType<typeof setTimeout>>()
   /** 未认证连接的握手超时计时器（auth 成功/连接关闭时清除）。 */
-  private authTimers = new Map<WsType, ReturnType<typeof setTimeout>>()
   /** 已通过 auth 的连接集合（与 clients 池同步维护）。 */
   private authedConnections = new Set<WsType>()
+  /**
+   * 已对 pre-auth 丢弃告警过的连接（code-harden P2 连接级频控）：每连接只 warn 首条
+   * 非 auth 消息，后续静默丢弃——防 10s 握手窗口内逐条刷屏；连接清理时随之删除。
+   */
+  private preAuthWarned = new Set<WsType>()
+  /**
+   * 移动壳静态 handler（remote-access D3/E5，S3 拆分后）：组合根开态判定 + dist 探测
+   * 通过时注入，实现与生命周期在 infra/mobile-static.ts。null = 关态或 E5 禁用，HTTP 分派
+   * 不进静态分支（与无远程访问形态逐字节一致）。
+   */
+  private readonly mobileStaticHandler: MobileStaticHandler | null
 
   constructor(
     private port: number,
     private callbacks: ConnectionCallbacks,
-    /** auth token；null = fail-closed（拒绝全部连接）。 */
+    /** auth token（spawn 通道）；null = 该通道缺失（集合语义下是否 fail-closed 见 handleConnection）。 */
     private authToken: string | null,
+    /** 远程访问服务形态选项（remote-access U0.1）；缺省 = 现状形态（纯回环 + 单 spawn token）。 */
+    private options: ConnectionManagerOptions = {},
   ) {
+    this.mobileStaticHandler = options.mobileStaticHandler ?? null
+    // HTTP 超时依赖登记（code-harden P2：消除未定义性，显式声明依赖的 Node 默认值，
+    // 本服务不自设值）：
+    // - requestTimeout 默认 300s、headersTimeout 默认 60s（Node ≥18 引入；本机 Node
+    //   v24.11 探针实测 300000/60000，仓库 engines 要求 node>=24）。静态托管（mobile-static）
+    //   与 /health 均为毫秒级本地 GET/HEAD，远低于上界；slowloris 类慢请求由
+    //   headersTimeout 60s 兜住——默认值对本服务合理，不另设。
+    // - keepAliveTimeout 默认 5s：仅回收无活跃请求的空闲 keep-alive 连接，不影响在途请求。
+    // - WS 连接不受上述值影响：upgrade 完成后 socket 由 ws 库接管，已脱离 HTTP 请求
+    //   解析器（requestTimeout/headersTimeout 只作用于 HTTP 请求接收阶段）；WS 存活由
+    //   应用层心跳墙钟（45s 超时断连）已随 ADR-0122 防御机制清查退役——僵尸连接由
+    //   TCP 层断连信号 + close 事件路径终结。
     this.httpServer = createServer((req, res) => {
+      // 分派顺序固定：/health 探针先于静态托管（开态行为不变）；handler 未注入
+      // （关态/E5 禁用）只有 /health 与 404 两条路径，与远程访问引入前逐字节一致。
       if (req.url === '/health') {
         res.writeHead(HTTP_OK, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ status: 'ok', uptime: process.uptime() }))
+      } else if (this.mobileStaticHandler !== null) {
+        // 静态实现委托注入的 handler（infra/mobile-static.ts）；handler 所有分支都写完响应。
+        void this.mobileStaticHandler(req, res)
       } else {
         res.writeHead(HTTP_NOT_FOUND)
         res.end()
@@ -101,8 +172,12 @@ export class ConnectionManager {
     })
   }
 
-  /** 启动 HTTP + WS 监听（显式绑回环，不对局域网开放）；注册 connection 回调。 */
-  start(): Promise<void> {
+  /**
+   * 启动 HTTP + WS 监听；注册 connection 回调。
+   * 绑定地址参数化（remote-access D1）：默认 127.0.0.1 纯回环（与参数化前现状逐字节一致），
+   * 远程访问开态由组合根传 '0.0.0.0'。仍是同一个 HTTP+WS server、同一份连接池。
+   */
+  start(host: string = DEFAULT_LISTEN_HOST): Promise<void> {
     return new Promise((resolve, reject) => {
       this.wss.on('connection', (ws) => this.handleConnection(ws))
       this.httpServer.on('error', (err: NodeJS.ErrnoException) => {
@@ -114,8 +189,8 @@ export class ConnectionManager {
         }
         reject(err)
       })
-      this.httpServer.listen(this.port, '127.0.0.1', () => {
-        console.log(`[runtime] listening on 127.0.0.1:${this.port}`)
+      this.httpServer.listen(this.port, host, () => {
+        console.log(`[runtime] listening on ${host}:${this.port}`)
         resolve()
       })
     })
@@ -127,21 +202,15 @@ export class ConnectionManager {
     // 连接数日志两个口径分开输出（review findings-confirmation #5）：旧 `total: clients.size + 1`
     // 把未 auth 新连接混进 authed 池计数——重连风暴期（pre-auth drop 443 条现场）半开旧连接 +
     // 未 auth 新连接堆积时 total 虚高误导排查。authenticated = 已认证池（clients，同
-    // authedConnections 同步维护）；pending auth = 握手中连接（authTimers）含本条（set 在本行之后）。
-    console.log(
-      `[runtime] client connected (authenticated: ${this.authedConnections.size}, ` +
-        `pending auth incl. this one: ${this.authTimers.size + 1})`,
-    )
-    // fail-closed：无 token 配置时拒绝全部连接（组合根已落 warning，这里只拒绝）。
-    if (this.authToken === null) {
+    // authedConnections 同步维护）；认证墙钟已退役（ADR-0122），未认证连接不入本计数。
+    console.log(`[runtime] client connected (authenticated: ${this.authedConnections.size})`)
+    // fail-closed：两个凭据通道（spawn token / remote token 热读）都缺失时拒绝全部连接
+    // （组合根已落 warning，这里只拒绝）。开态 spawn token 缺失但 remote 通道在时仍走
+    // 正常握手——集合校验时 remote 也为空则 bad_token 拒绝，fail-closed 语义不破。
+    if (this.authToken === null && !this.options.remoteTokenProvider) {
       this.rejectAuth(ws, 'no_token_configured')
       return
     }
-    // unauthed：启动握手超时，认证通过前不进 clients 池、不推 initial state、不启心跳。
-    this.authTimers.set(ws, setTimeout(() => {
-      console.warn('[runtime] auth timeout, closing connection')
-      ws.close(WS_CLOSE_POLICY_VIOLATION, 'Auth timeout')
-    }, AUTH_TIMEOUT_MS))
     ws.on('message', (data) => this.handleRawMessage(ws, data))
     ws.on('close', () => this.handleClose(ws))
     ws.on('error', (err) => {
@@ -169,7 +238,6 @@ export class ConnectionManager {
     }
     // authed：auth 消息重复发送属协议错误，静默忽略（不进 handleMessage 路由）。
     if (msg.type === 'auth') return
-    this.resetHeartbeat(ws)
     this.callbacks.onMessage(msg, ws).catch((err) => {
       console.error('[runtime] unhandled error in handleMessage:', err)
       // RT-1#3：兜底信封补 sessionId（裁决 7：错误消息必须可归属 session）——server 主漏斗
@@ -184,29 +252,45 @@ export class ConnectionManager {
     })
   }
 
-  /** unauthed 状态机：只受理首条 auth 消息；其他消息静默丢弃（设计意图，spec §3.3 D4）。 */
+  /**
+   * unauthed 状态机：只受理首条 auth 消息；其他消息每连接首条 warn、后续静默丢弃
+   * （spec §3.3 D4 丢弃语义不变 + code-harden P2 连接级频控防刷屏）。
+   */
   private handleUnauthedMessage(ws: WsType, msg: ClientMessage): void {
     if (msg.type !== 'auth') {
-      console.warn(`[runtime] dropping pre-auth message (type=${String((msg as { type?: unknown }).type)})`)
+      if (!this.preAuthWarned.has(ws)) {
+        this.preAuthWarned.add(ws)
+        console.warn(`[runtime] dropping pre-auth message (type=${String((msg as { type?: unknown }).type)})；该连接后续 pre-auth 消息静默丢弃、不再告警`)
+      }
       return
     }
     const token = (msg.payload as { token?: unknown } | undefined)?.token
-    if (typeof token !== 'string' || !tokenEquals(token, this.authToken ?? '')) {
+    if (typeof token !== 'string' || !this.isAcceptedToken(token)) {
       console.warn('[runtime] auth failed: bad token')
       this.rejectAuth(ws, 'bad_token')
       return
     }
-    // unauthed → authed：清握手计时、入池、回执、推 initial state、启心跳。
-    const timer = this.authTimers.get(ws)
-    if (timer) clearTimeout(timer)
-    this.authTimers.delete(ws)
+    // unauthed → authed：入池、回执、推 initial state。
     this.authedConnections.add(ws)
     this.clients.add(ws)
     ws.send(JSON.stringify({ type: 'auth.result', payload: { ok: true } }))
     this.callbacks.onConnect(ws)
-    this.resetHeartbeat(ws)
     // 口径对齐上方 handleConnection：authenticated 只计已认证池（旧文案 total 同值但语义混用）
     console.log(`[runtime] client authenticated (authenticated: ${this.clients.size})`)
+  }
+
+  /**
+   * token 集合成员校验（remote-access D2）：{spawn token} ∪ {remote token}，逐成员
+   * 走 tokenEquals（timingSafeEqual）——单值扩集合不退化抗时序属性，禁 includes/Set.has。
+   * remote 通道每次握手热读（provider 调用点唯一在此，保证轮换文件即生效）；关态
+   * provider 未装配时短路返回（不调用、零文件 IO）。
+   */
+  private isAcceptedToken(token: string): boolean {
+    if (this.authToken !== null && tokenEquals(token, this.authToken)) return true
+    const provider = this.options.remoteTokenProvider
+    if (!provider) return false
+    const remote = provider()
+    return remote !== null && tokenEquals(token, remote)
   }
 
   /** 认证失败路径：回执结果 + close 1008。 */
@@ -232,23 +316,7 @@ export class ConnectionManager {
   private cleanupConnection(ws: WsType): void {
     this.clients.delete(ws)
     this.authedConnections.delete(ws)
-    this.clearHeartbeat(ws)
-    const timer = this.authTimers.get(ws)
-    if (timer) { clearTimeout(timer); this.authTimers.delete(ws) }
-  }
-
-  private resetHeartbeat(ws: WsType): void {
-    const existing = this.heartbeatTimers.get(ws)
-    if (existing) clearTimeout(existing)
-    this.heartbeatTimers.set(ws, setTimeout(() => {
-      console.warn('[runtime] heartbeat timeout, closing connection')
-      ws.close(MAX_WS_CLOSE_CODE, 'Heartbeat timeout')
-    }, HEARTBEAT_TIMEOUT_MS))
-  }
-
-  private clearHeartbeat(ws: WsType): void {
-    const timer = this.heartbeatTimers.get(ws)
-    if (timer) { clearTimeout(timer); this.heartbeatTimers.delete(ws) }
+    this.preAuthWarned.delete(ws)
   }
 
   /**
@@ -267,38 +335,18 @@ export class ConnectionManager {
    * 正是设计预期恢复路径，ws-client 对任意 close 码统一走 scheduleReconnect）。
    */
   async stop(): Promise<void> {
-    // 握手中（未 auth）连接先取出——下方清 authTimers 后不可达；它们同样占用 httpServer
-    // 连接计数，close 帧必须覆盖。
-    const pendingAuthConnections = [...this.authTimers.keys()]
-    for (const timer of this.heartbeatTimers.values()) {
-      clearTimeout(timer)
-    }
-    this.heartbeatTimers.clear()
-    for (const timer of this.authTimers.values()) {
-      clearTimeout(timer)
-    }
-    this.authTimers.clear()
-    // 1001 Going Away（RFC 6455）：计划内服务端关停语义。ws 库 close 对已关闭/握手中
-    // 连接均为安全 no-op，不抛错。
+    // 1001 Going Away（RFC 6455）：计划内服务端关停语义。ws 库 close 对已关闭连接均为
+    // 安全 no-op，不抛错。
     for (const ws of this.authedConnections) ws.close(WS_CLOSE_GOING_AWAY, 'Server shutting down')
-    for (const ws of pendingAuthConnections) ws.close(WS_CLOSE_GOING_AWAY, 'Server shutting down')
     // 摘 wss upgrade 监听 + httpServer 停止接受新连接。
     this.wss.close()
     // /health 探针的 keep-alive 空闲连接不经 WS close 帧路径，显式清（探针已验证：本方法
     // 只清无活跃请求的连接，不触碰 upgrade 后的 WS socket）。
     this.httpServer.closeIdleConnections()
-    // 等待全部连接结束。正常路径 close 握手在本机回环毫秒级完成；STOP_LINGER_GRACE_MS 是
-    // 回收层有界兜底（ADR-0047 口径）：对不回 close 帧的异常对端强制断开，保证 stop 必然
-    // resolve、runtime 必然走到 process.exit(86)。
+    // 等待全部连接结束（close 回调即真值）。关停 linger 强断兜底
+    //（STOP_LINGER_GRACE_MS 2s）已随 ADR-0122 防御机制清查退役。
     return new Promise((resolve) => {
-      const forceTimer = setTimeout(() => {
-        console.warn('[runtime] stop: connections lingering after grace period — force closing')
-        this.httpServer.closeAllConnections()
-      }, STOP_LINGER_GRACE_MS)
-      this.httpServer.close(() => {
-        clearTimeout(forceTimer)
-        resolve()
-      })
+      this.httpServer.close(() => resolve())
     })
   }
 }

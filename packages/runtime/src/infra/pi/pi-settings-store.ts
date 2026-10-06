@@ -7,7 +7,8 @@
  *     IExtensionSettings port、skills 投影经 pi-skill-paths）
  *   - pi 子进程（rpc 面落盘写点仅 set_auto_retry 无条件 persist；set_model /
  *     set_thinking_level 是会话级切换不落盘——persist 是 options 条件分支且 rpc 入口
- *     不传，pi 0.84.4 rpc-mode.js:367-374/:390、agent-session.js:1252-1261/:1358-1366）
+ *     不传，pi 1.0.0 rpc-mode.js case "set_model"/"set_thinking_level" 均不带 options、
+ *     agent-session.js setModel/setThinkingLevel 仅 options.persist 为真才写全局默认）
  *
  * 本模块是 settings.json 的**单一所有者**：
  *   - 唯一读写点：read() / write() / updateSettingsFields()，模块外不直接碰文件。
@@ -39,13 +40,32 @@
  * 字段域 merge（D1b）：写回时只覆盖 scope 声明的顶层 key，其余 key 取锁内最新读——
  * 进程内「分区靠调用方自觉」的历史约定升级为 API 强制（mutator 误改他域字段会被丢弃）。
  *
+ * 🔒 写侧损坏拒入（settings-corruption-global-defense）：updateSettingsFields 进锁后先经
+ * getSettingsCorruption() 预检（与读改写同一临界区），命中损坏 → 结构化告警 +
+ * 抛 SettingsWriteRejectedError 拒绝本次写入——坏文件原样保留，修复后无需重启即恢复。
+ * 门禁在唯一写入口一处生效，覆盖全部字段域（model/skills/extension/retry/tools/full）。
+ *
+ * 🔒 读侧统一阻断（settings-corruption-global-defense 用户终裁：核心配置损坏一律
+ * fail-fast，损坏就不应该能启动 pi）：readSettings() 读前经 getSettingsCorruption()
+ * 现查，损坏 → 抛 SettingsCorruptedError 阻断——不隔离改名、不回落空/缺省基线；
+ * settings store 的 JsonStore 以 corruptReadPolicy:'throw' 关闭读时隔离（隔离+回落
+ * 机制只在 settings 读取路径退役，JsonStore 本体其他消费方语义不变），堵「预检后
+ * 并发改坏 → JsonStore 读时隔离 → 空基线」的竞态窗口。请求路径消费方经 WS 全局
+ * catch 上传错误信封；启动/后台路径消费方显式 catch 呈结构化告警；修复文件后
+ * 无需重启即恢复（检测每次现查）。
+ *
  * disabled-packages.json 是 taiji 自己的文件（pi 不读），不在本 store 管辖（C4 单独收口）。
  *
- * 🔒 三层架构：本模块属 infra（直接碰文件系统），services 经 port 访问，不直接 import 本模块。
+ * 🔒 三层架构：本模块属 infra（直接碰文件系统），services 经 port 访问，不直接 import 本模块
+ * （例外：错误类/损坏判定的 instanceof 传导可直连——config-service 捕获 SettingsCorruptedError
+ * 同构于既有先例 isModelsStoreCorrupted，属协议面传导而非读写绕过 port）。
  */
 
+import { readdirSync, readFileSync } from 'node:fs'
+import { basename, dirname } from 'node:path'
 import { JsonStore } from '../../utils/json-store.js'
 import { withFileLockSync, type SyncFileLockOptions } from '../../utils/file-lock.js'
+import { isEnoent } from '../../utils/errors.js'
 import { getSettingsPath } from './pi-paths.js'
 
 /**
@@ -69,6 +89,11 @@ export interface PiSettings {
   // 透传类型：pi 侧 schema 可含未知子字段且可能为坏值（D3/D7 容错），结构由消费方
   // pi-retry-settings 解析，store 不做形状假设。
   retry?: unknown
+  // ── tools 域（pi-codemode-settings 管理）──
+  // 透传类型：pi 的 defaultTools 条目可含坏值（非字符串元素——pi 解析侧先 filter 剥除再
+  // 解析，settings-manager.js getDefaultTools），结构由消费方 pi-codemode-settings 解析，
+  // store 不做形状假设。
+  defaultTools?: unknown
   // ── pi 其他未知字段（透传，不破坏）──
   [key: string]: unknown
 }
@@ -83,11 +108,12 @@ export interface PiSettings {
  *   - extension = packages（extension-service 域）
  *   - retry     = retry（LLM 重试配置域，pi-retry-settings 管理；域内嵌套键级
  *     merge 见 pi-retry-settings 的 D3 规则）
+ *   - tools     = defaultTools（pi 默认工具集域，pi-codemode-settings 管理）
  *   - full      = 全部。**白名单仅一个调用点**：pi-maintenance.ts 启动迁移
  *     （无并发 pi 进程窗口）。新代码禁止使用 full scope（review checklist 项，
  *     见 docs/architecture/data-source-registry.md 跨进程文件登记表）。
  */
-export type SettingsFieldScope = 'model' | 'skills' | 'extension' | 'retry' | 'full'
+export type SettingsFieldScope = 'model' | 'skills' | 'extension' | 'retry' | 'tools' | 'full'
 
 /** 各 scope 覆盖的顶层字段（full 走全量，不在此表）。 */
 const SCOPE_FIELDS: Record<Exclude<SettingsFieldScope, 'full'>, readonly string[]> = {
@@ -95,11 +121,14 @@ const SCOPE_FIELDS: Record<Exclude<SettingsFieldScope, 'full'>, readonly string[
   skills: ['skills'],
   extension: ['packages'],
   retry: ['retry'],
+  tools: ['defaultTools'],
 }
 
 /**
  * settings.json 存储：read-through（revision 指纹校验 + ENOENT 容错）+ atomicWrite。
  * schema guard（必须是 object）放进 deserialize 钩子。
+ * corruptReadPolicy:'throw'（读侧统一阻断，用户终裁）：损坏读不走隔离回落、原样上抛，
+ * 由 readSettings 统一转译 SettingsCorruptedError——settings 读取路径零隔离、零回落。
  */
 let settingsStore = createSettingsStore(getSettingsPath())
 
@@ -111,6 +140,7 @@ let lockOptions: SyncFileLockOptions = {}
 
 function createSettingsStore(path: string): JsonStore<PiSettings> {
   return new JsonStore<PiSettings>(path, {}, {
+    corruptReadPolicy: 'throw',
     deserialize: (raw): PiSettings => {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
         console.warn(`[pi-settings-store] ${path} schema 不匹配，使用 fallback`)
@@ -147,9 +177,31 @@ export function invalidateSettingsCache(): void {
 /**
  * 读取 settings.json（带 revision 指纹缓存，U5——命中以磁盘 stat 指纹未变为前提，无固定 TTL）。
  * 模块外的「读」统一经此函数；缓存让高频读（getDefaultModel 等）不每次触盘。
+ *
+ * 🔒 读侧统一阻断（用户终裁：损坏一律 fail-fast）：读前经 getSettingsCorruption() 现查
+ * （唯一检测原语，覆盖「文件存在但非法 / 存在但不可读 / 原文件缺失但有 .corrupt- 副本」
+ * 三形态），命中 → 抛 SettingsCorruptedError，不触发隔离改名、不回落空/缺省基线；
+ * 未损坏才走 settingsStore.read()。预检与读盘之间的并发改坏竞态窗口由 store 的
+ * corruptReadPolicy:'throw' 堵住（JsonStore 损坏读原样上抛），此处统一转译为
+ * SettingsCorruptedError，保证本函数抛出的损坏错误形状单一。
  */
 export function readSettings(): PiSettings {
-  return settingsStore.read()
+  const corruption = getSettingsCorruption()
+  if (corruption.corrupted) {
+    throw new SettingsCorruptedError(corruption)
+  }
+  try {
+    return settingsStore.read()
+  } catch (e) {
+    // 竞态窗口：预检（未损坏）之后、store 读盘之前文件被并发改坏——corruptReadPolicy:'throw'
+    // 让该次读原样上抛，这里复核一次检测原语并转译，保证损坏错误形状单一；非损坏读错误
+    // （检测原语也判合法的 fs 异常）维持原样上抛，不吞。
+    const now = getSettingsCorruption()
+    if (now.corrupted) {
+      throw new SettingsCorruptedError(now)
+    }
+    throw e
+  }
 }
 
 /**
@@ -170,11 +222,61 @@ function withSettingsLock<T>(fn: () => T): T {
 }
 
 /**
- * 锁内同步 read-modify-write + 字段域 merge（D1a + D1b）。
+ * settings.json 写点拒入错误：updateSettingsFields 锁内损坏预检命中时抛出——损坏基线上
+ * 写回会以空/缺省基线合法化覆盖用户其他字段，故拒绝而非放行。code 经 server.ts
+ * handleMessage 的 catch 透传为 error envelope（ModelsStoreCorruptedError 同款）；调用方
+ * 可捕获后按域转译为各自的结果信封（如 CodemodeSetEnabledResult 的 ok:false 形态）。
+ */
+export class SettingsWriteRejectedError extends Error {
+  readonly code = 'settings_write_rejected'
+  /** 命中时的损坏判定（filePath / corruptCopyPath 供调用方组装域内错误信封）。 */
+  readonly corruption: SettingsCorruption
+  constructor(corruption: SettingsCorruption) {
+    const copyNote = corruption.corruptCopyPath
+      ? `，原内容可从隔离副本找回: ${corruption.corruptCopyPath}`
+      : ''
+    super(
+      `settings.json 已损坏，拒绝写入。文件: ${corruption.filePath}${copyNote}。` +
+      `修复或删除该文件后重试（损坏检测每次现查，修复即恢复，无需重启）。`,
+    )
+    this.name = 'SettingsWriteRejectedError'
+    this.corruption = corruption
+  }
+}
+
+/**
+ * settings.json 读侧损坏阻断错误：readSettings 读前损坏现查命中时抛出（用户终裁：
+ * 核心配置损坏一律 fail-fast——损坏的配置不应被静默回落成空配置继续运行）。code 经
+ * server.ts handleMessage 的 catch 透传为 error envelope（settings_corrupted，前端据此
+ * 差异化引导）；启动/后台路径消费方显式捕获本类，呈含路径与修复指引的结构化告警。
+ * 修复或删除该文件后重试即恢复，无需重启。
+ */
+export class SettingsCorruptedError extends Error {
+  readonly code = 'settings_corrupted'
+  /** 命中时的损坏判定（filePath / corruptCopyPath 供调用方组装域内错误信封）。 */
+  readonly corruption: SettingsCorruption
+  constructor(corruption: SettingsCorruption) {
+    const copyNote = corruption.corruptCopyPath
+      ? `，原内容可从隔离副本找回: ${corruption.corruptCopyPath}`
+      : ''
+    super(
+      `settings.json 已损坏，已阻断读取（fail-fast）。文件: ${corruption.filePath}${copyNote}。` +
+      `修复或删除该文件后重试，无需重启。`,
+    )
+    this.name = 'SettingsCorruptedError'
+    this.corruption = corruption
+  }
+}
+
+/**
+ * 锁内同步 read-modify-write + 字段域 merge（D1a + D1b）+ 锁内损坏预检拒入（写侧全局防线）。
  *
- * 时序：取锁（ELOCKED busy-wait ~25ms/次，预算 ~1s，耗尽 fail-fast）→ 锁内失效缓存
- * 重读最新文件（吃进 pi 并发写）→ mutator 改深拷贝 → 按 scope merge → atomicWrite →
- * 释放锁（finally）。
+ * 时序：取锁（ELOCKED busy-wait ~25ms/次，预算 ~1s，耗尽 fail-fast）→ 锁内损坏预检
+ * （getSettingsCorruption，同文件一次 raw 读 + parse，毫秒级内，临界区契约不受影响；
+ * 不拿第二把锁——该原语是裸 fs 读，无锁交互）→ 命中损坏则拒绝：结构化告警 +
+ * 抛 SettingsWriteRejectedError，坏文件原样保留（先于 JsonStore 读，不触发读时隔离
+ * 改名、不以空基线写回，修复后重试即恢复）→ 未命中则失效缓存重读最新文件（吃进
+ * pi 并发写）→ mutator 改深拷贝 → 按 scope merge → atomicWrite → 释放锁（finally）。
  *
  * @param scope 调用方声明负责的字段域。写回时只覆盖 scope 内的顶层 key（mutator 对
  *   scope 外 key 的修改会被丢弃——API 强制分区），其余 key 保留锁内最新读的值。
@@ -182,9 +284,27 @@ function withSettingsLock<T>(fn: () => T): T {
  * @param mutator 接收当前 settings 的深拷贝，原地修改自己 scope 内的字段。
  *   **契约：mutator 内禁止任何 I/O、await、嵌套 updateSettingsFields**（纯内存改字段；
  *   同步持锁上下文里做 I/O 会拉长临界区挤压 pi 的 200ms 预算，嵌套取锁必然死等预算）。
+ * @throws SettingsWriteRejectedError 锁内预检命中损坏文件（写被拒绝，文件未被触碰）。
+ *   与锁获取失败（ELOCKED 预算耗尽）同为「本次写未发生」的失败语义，调用方按域处置。
+ * @throws SettingsCorruptedError 预检与锁内重读之间的并发改坏竞态窗口（预检未命中后
+ *   文件被改坏，readSettings 读侧阻断上抛）——本次写未发生，调用方按域处置。
  */
 export function updateSettingsFields(scope: SettingsFieldScope, mutator: (settings: PiSettings) => void): void {
   withSettingsLock(() => {
+    // 锁内损坏预检（写侧全局拒入）：预检与读改写同一临界区串行，唯一写入口一处门禁
+    // 覆盖全部字段域；命中时本次写直接拒绝，拒绝动作自身不触碰文件（检测原语是 raw 读）
+    const corruption = getSettingsCorruption()
+    if (corruption.corrupted) {
+      const copyNote = corruption.corruptCopyPath
+        ? `，原内容可从隔离副本找回: ${corruption.corruptCopyPath}`
+        : ''
+      console.warn(
+        `[pi-settings-store] settings.json 已损坏，拒绝本次写入（字段域: ${scope}）。` +
+        `文件: ${corruption.filePath}${copyNote}。` +
+        `恢复指引：修复或删除该文件后重试（损坏检测每次现查，修复即恢复，无需重启）。`,
+      )
+      throw new SettingsWriteRejectedError(corruption)
+    }
     // 锁内强制重读最新（显式失效——不依赖指纹校验，基于缓存值写回会丢并发方修改）
     settingsStore.invalidate()
     const latest = readSettings()
@@ -207,4 +327,82 @@ function mergeScopeFields(scope: Exclude<SettingsFieldScope, 'full'>, latest: Pi
     }
   }
   return merged
+}
+
+// ── 损坏检测单点（codemode 设计裁决项 A1）────────────────────────────────
+
+/**
+ * settings.json 损坏判定结果（A1 落定形态）。
+ * 协议消费方（u-foundation shared 协议类型 / services 错误态）按此形状对齐。
+ */
+export interface SettingsCorruption {
+  corrupted: boolean
+  /** settings.json 当前生效路径（getActiveSettingsPath()，含测试重定向）。 */
+  filePath: string
+  /** 已被其他读方隔离的 `.corrupt-<时间戳>` 副本路径；无副本时为 null。 */
+  corruptCopyPath: string | null
+}
+
+/**
+ * settings.json 损坏检测单点（A1）：读侧统一阻断（readSettings）与写点拒入
+ * （updateSettingsFields）的唯一判定入口。写侧消费方 = updateSettingsFields（锁内预检，
+ * 与读改写同临界区）；读侧消费方 = readSettings（不拿锁现查——读不需要互斥，是刻意形态）。
+ *
+ * 关键约束：**raw 预检，不经 JsonStore**——settings store 的 JsonStore 以
+ * corruptReadPolicy:'throw' 关闭了隔离，但「检测」仍必须先于读动作发生（损坏即阻断、
+ * 不触达 store 缓存），因此这里直接 readFileSync + JSON.parse 尝试，不触碰 store 缓存。
+ *
+ * **结果不缓存，每次调用现查**：settings.json 是三方共享文件，可能在会话中途被改坏
+ * （手工编辑是第一等场景）；写点拒入与「修复后无需重启即恢复」的保证依赖每次以文件
+ * 当前真值判定。缓存形态会把「改坏 → 写点放行 → 锁内重读触发隔离 → 空基线合法化覆盖」
+ * 的窗口从指令级扩大为会话级（A1「不采用」节）。
+ *
+ * 检测两形态（设计 A1）：
+ *   ① 原路径存在但 JSON 非法（含存在但不可读——读不出文本即无法证明合法，按损坏
+ *      处理 fail-safe：损坏放行读/写都会以空/缺省基线运行或覆盖）；
+ *   ② 原路径不存在但存在 `.corrupt-<时间戳>` 隔离副本（历史读方隔离的遗留取证文件；
+ *      settings 读取路径已无隔离动作，存量副本只作损坏信号源。多副本时报告最新的
+ *      一个，ISO 压缩时间戳字典序即时间序）。
+ *
+ * 文件不存在且无副本 = 全新安装正常态，非损坏。
+ */
+export function getSettingsCorruption(): SettingsCorruption {
+  const filePath = getActiveSettingsPath()
+  let raw: string
+  try {
+    raw = readFileSync(filePath, 'utf-8')
+  } catch (e) {
+    if (isEnoent(e)) {
+      // 原路径不存在：查 `.corrupt-<时间戳>` 隔离副本（形态②）
+      return detectCorruptCopy(filePath)
+    }
+    // 存在但不可读（EACCES 等）：无法证明 JSON 合法，按损坏处理（fail-safe，见 JSDoc 形态①）
+    return { corrupted: true, filePath, corruptCopyPath: null }
+  }
+  try {
+    JSON.parse(raw)
+  } catch {
+    return { corrupted: true, filePath, corruptCopyPath: null }
+  }
+  return { corrupted: false, filePath, corruptCopyPath: null }
+}
+
+/** 扫描原路径同目录的 `<原文件名>.corrupt-<时间戳>` 副本；返回损坏判定 + 最新副本路径。 */
+function detectCorruptCopy(filePath: string): SettingsCorruption {
+  const dir = dirname(filePath)
+  const prefix = `${basename(filePath)}.corrupt-`
+  try {
+    const copies = readdirSync(dir)
+      .filter(name => name.startsWith(prefix))
+      .sort() // ISO 压缩时间戳字典序 = 时间序，取末位 = 最新副本
+    const latest = copies.length > 0 ? copies[copies.length - 1] : null
+    return {
+      corrupted: latest !== null,
+      filePath,
+      corruptCopyPath: latest !== null ? `${dir}/${latest}` : null,
+    }
+  } catch {
+    // 目录不可读：无法确认副本存在性，按「原路径不存在 + 无副本」处理（全新安装正常态）
+    return { corrupted: false, filePath, corruptCopyPath: null }
+  }
 }

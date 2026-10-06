@@ -17,6 +17,9 @@ parameters:
     attempt:
       type: number
       description: "重发起序号，>1 时轮次目录带 .attemptN 后缀防覆盖，缺省 1"
+    model:
+      type: string
+      description: "审查/修复 agent 使用的模型 id（provider/model），缺省 zai-coding-cn/glm-5.3-flash"
   required: [designDoc]
 usage: |
   ### 发起
@@ -37,6 +40,7 @@ const designDoc = $ARGS.designDoc;
 const projectRoot = $ARGS.projectRoot || $WORKSPACE;
 const maxRounds = Number($ARGS.maxRounds || 10);
 const attempt = Number($ARGS.attempt || 1);
+const MODEL = $ARGS.model || 'zai-coding-cn/glm-5.3-flash';
 if (!designDoc || !fs.existsSync(designDoc)) throw new Error(`designDoc 不存在：${designDoc}`);
 
 // ── 路径约定（flow/review.md 产物路径）────────────────
@@ -98,7 +102,7 @@ ${mode}
 结构化返回（字段以 schema 为准）：revisionSummary=本轮修订摘要（给下轮聚焦复审注入）；attackerHints=给下轮 reviewer 的攻击点建议；escalations=影响决策=是的条目；suggestionFixed/suggestionDeferred/suggestionArchived=处置计数。`;
   let fix;
   try {
-    fix = await agent({ prompt, schema: FIX_SCHEMA, description: 'apply-review-fixes' });
+    fix = await agent({ prompt, schema: FIX_SCHEMA, description: 'apply-review-fixes', model: MODEL });
   } catch (e) {
     log(`fixer agent 失败（round ${n}）：${e}`);
     return { terminated: 'fix-failure', sugg: null, err: String(e) };
@@ -112,7 +116,7 @@ ${mode}
     const report = ((e && e.stdout) || '').toString();
     log(`处置表校验失败（round ${n}），回喂补正：${report.slice(0, 500)}`);
     try {
-      await agent({ prompt: `上次修复产出的处置表未过机器校验，请补正。处置表：${dispJson}（与 ${dispMd} 保持同步）。校验报告：${report || `自行运行 node ${CHECK} ${dispJson} --problems ${problemsJson} 查看`}。按报告逐条补正后重跑校验至退出码 0。只补正处置表与必要的文档同步，不新开修复面。结构化返回 ok=最终校验是否通过。`, schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] }, description: 'repair-dispositions' });
+      await agent({ prompt: `上次修复产出的处置表未过机器校验，请补正。处置表：${dispJson}（与 ${dispMd} 保持同步）。校验报告：${report || `自行运行 node ${CHECK} ${dispJson} --problems ${problemsJson} 查看`}。按报告逐条补正后重跑校验至退出码 0。只补正处置表与必要的文档同步，不新开修复面。结构化返回 ok=最终校验是否通过。`, schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] }, description: 'repair-dispositions', model: MODEL });
       runCheck();
     } catch (e2) {
       checkOk = false;
@@ -136,6 +140,7 @@ const value = await agent({
 结构化返回（字段以 schema 为准）：problems 每条 {ref:"review-value#N", level, title}，条数合计须等于 mustFix+suggestion；oneliner=你的一句话复述。`,
   schema: VALUE_SCHEMA,
   description: 'value-review',
+  model: MODEL,
 });
 const valueMustFix = countMustFix(value.problems || []);
 if (valueMustFix > 0 || (value.mustFix || 0) > 0) {
@@ -177,6 +182,7 @@ ${focusText(round)}
 结构化返回（字段以 schema 为准）：problems 每条 {ref:"review-${dim}#N", level, title}，条数合计须等于 mustFix+suggestion。`,
       schema: REVIEW_SCHEMA,
       description: `review-${dim}`,
+      model: MODEL,
     })));
   } catch (e) {
     terminated = 'review-failure';

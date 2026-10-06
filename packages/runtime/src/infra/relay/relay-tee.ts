@@ -11,6 +11,13 @@
  *      split('\n')，与 extension widget 通道 A-1 的 payload 语义逐字段一致，前端零感知
  *      切换；payload.sessionId 改为虚拟分区 id）。
  *
+ * entry 原样透传（不在此层做内容截断）：image 块（toolResult content 的 base64）与
+ * 输出文本的 live 可见性依赖完整透传，此前本层曾对 >256KB 的 toolResult 做整体替换
+ * 截断——图片/文本/details 全部丢失且 reload 腿才恢复，与主会话 tool_call_end 帧
+ * （无此层截断）形成通道水位劈叉。量级防护单点在下游出站守卫
+ * （outbound-frame-registry 已注册 session.subagentEntriesAppended：8MB 告警档 +
+ * 32MB 契约保持式截断，与主会话帧同一防线）。
+ *
  * 隔离范式（对齐 interpreter W1 per-event try-catch）：单事件（单行）翻译/提取/发布失败
  * 只丢弃该事件 + warn（含 recordId 与原始字节 tail），不连坐后续事件、不影响编排通路
  * （转发分支在 registry，不经 tee）、不杀进程。连续 ≥TEE_MAX_CONSECUTIVE_FAILURES 失败
@@ -28,13 +35,6 @@ import type { PiTranslatedEvent } from '../../services/session/types.js'
 
 /** 连续失败放弃阈值（§4.3：如 ≥50）。 */
 export const TEE_MAX_CONSECUTIVE_FAILURES = 50
-
-/** KB 换算常数（与 logger.ts 先例同款，消 magic number）。 */
-const BYTES_PER_KB = 1024
-/** tool result entry 截断阈值 KB 数（§10-3 缓解）。 */
-const TEE_TOOL_RESULT_MAX_KB = 256
-/** tool result entry 截断阈值（§10-3 缓解：超限只投截断摘要，完整内容留给 reload 腿）。 */
-export const TEE_TOOL_RESULT_MAX_BYTES = TEE_TOOL_RESULT_MAX_KB * BYTES_PER_KB
 
 /** warn 日志里原始字节 tail 的长度上限（诊断够用即可，不刷屏）。 */
 const TEE_LOG_TAIL_BYTES = 200
@@ -189,7 +189,7 @@ export class RelayTee {
         if (t === 'message.message_end') {
           const entry = (ev.message.payload as { entry?: unknown }).entry as PiMessageEntry | undefined
           if (entry === undefined) return
-          entries.push(this.truncateToolResultIfNeeded(entry))
+          entries.push(entry)
           const role = entry.message?.role
           if (role === 'assistant') {
             // assistant 定稿 → 清除打字机中间态（协议注释：lines undefined = 终态清除）
@@ -216,43 +216,12 @@ export class RelayTee {
         return
       }
       case 'tool-call-end':
-        entries.push(this.truncateToolResultIfNeeded(ev.entry))
+        entries.push(ev.entry)
         return
       default:
         // turn-start/turn-end/status/hook/... 等：tee 不做编排副作用，entry 载体已在
         // message/tool-call 分支覆盖
         return
-    }
-  }
-
-  /**
-   * 大 payload 缓解（§10-3）：toolResult entry 序列化超阈值时只投截断摘要——完整内容
-   * 留给 reload 腿（P5 直读 JSONL 有全量）。保留 toolCallId/toolName/isError/timestamp
-   * 等结构字段（前端配对回填依赖），丢弃 content 大体与 details。
-   */
-  private truncateToolResultIfNeeded(entry: PiMessageEntry): PiMessageEntry {
-    const role = entry.message?.role
-    if (role !== 'toolResult') return entry
-    let serialized: string
-    try {
-      serialized = JSON.stringify(entry)
-    } catch {
-      // 序列化失败（畸形 content 等）无法判大小，原样透传——下游 reducer 自有守卫
-      return entry
-    }
-    if (serialized === undefined || Buffer.byteLength(serialized, 'utf-8') <= TEE_TOOL_RESULT_MAX_BYTES) {
-      return entry
-    }
-    const text =
-      `[relay tee truncated] tool result ${Buffer.byteLength(serialized, 'utf-8')} bytes exceeds `
-      + `${TEE_TOOL_RESULT_MAX_BYTES} limit — full content available via session reload`
-    return {
-      ...entry,
-      message: {
-        ...entry.message,
-        content: [{ type: 'text', text }],
-        details: undefined,
-      },
     }
   }
 }

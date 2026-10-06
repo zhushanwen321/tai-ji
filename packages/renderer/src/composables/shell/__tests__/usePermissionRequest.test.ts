@@ -1,16 +1,16 @@
 // @vitest-environment node
 
 /**
- * usePermissionRequest.test.ts —— permissionRequest 闭环单测（MF-9 补测）。
+ * usePermissionRequest.test.ts —— 桌面壳装配薄接线 smoke。
  *
- * 覆盖闭环（bus 订阅 → reactive state → transport 回传 → pending 重置）：
- *  - TC1: plugin-permission-request 事件 → state 更新（pluginId/permissions/pending=true）
- *  - TC2: approve 成功 → pending=false（弹窗关闭）
- *  - TC3: approve 失败（RPC reject）→ pending=false（错误路径重置，项目规则#3 状态卡死防护）
- *  - TC4: revoke 成功/失败 → pending=false
- *  - TC5: 重复初始化幂等（HMR 防 listener 翻倍）：bus.on 只注册一次 handler
- *  - TC6-TC8: plugin:permissionRequestExpired 超时撤窗（timeout-plugin-service D3，
- *    取消非判拒）：命中撤回 / pluginId 不匹配 noop / 无挂起 noop 幂等
+ * 状态机本体（畸形事件守卫 / permissions 拷贝 / BM3 失败保持 / D3 expired 撤窗 /
+ * 新请求覆盖）单测在 packages/ui extension-host
+ * __tests__/permission-request-controller.test.ts（双壳共享 factory）。本文件只钉
+ * 桌面壳装配契约：
+ *  - TC0: init 前调 usePermissionRequest() → fail-fast（装配时序错误显形，不静默）
+ *  - TC1: init → app.provide(PERMISSION_TRANSPORT_KEY) 注入 factory transport 且与
+ *    usePermissionRequest() state 同源（transport 回传驱动 state 收口）
+ *  - TC2: 重复初始化幂等（HMR 防 listener 翻倍）：bus handler 数恒 1
  *
  * 运行：cd packages/renderer && npx vitest run src/composables/shell/__tests__/usePermissionRequest.test.ts
  */
@@ -18,15 +18,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { InternalEventBus } from '@taiji/core'
 import type { InternalEvent } from '@taiji/core'
 import { initPermissionRequest, usePermissionRequest } from '../usePermissionRequest'
-import { PERMISSION_TRANSPORT_KEY } from '@taiji/ui/extension-host'
-import { dispatchGlobal } from '@taiji/core/transport/api'
+import { PERMISSION_TRANSPORT_KEY, type PermissionTransport } from '@taiji/ui/extension-host'
 
-// mock RPC 回传域（approve/revoke 走 command → ws-client，测试环境不连 WS）
+// mock RPC 回传域（approve/deny 走 command → ws-client，测试环境不连 WS）
 const approvePermissions = vi.fn()
-const revokePermissions = vi.fn()
 vi.mock('@taiji/core/transport/api/domains/plugin', () => ({
   approvePermissions: (...args: unknown[]) => approvePermissions(...args),
-  revokePermissions: (...args: unknown[]) => revokePermissions(...args),
+  denyPermissions: () => Promise.resolve(),
 }))
 
 /** 通过 bus.emit 模拟 bridge 归一后的 permission 事件 */
@@ -49,159 +47,52 @@ function makeApp() {
   return { provided, app }
 }
 
-describe('usePermissionRequest permissionRequest 闭环', () => {
+describe('usePermissionRequest 桌面壳装配薄接线', () => {
   let bus: InternalEventBus
 
   beforeEach(() => {
-    vi.restoreAllMocks()
     approvePermissions.mockReset()
-    revokePermissions.mockReset()
     bus = new InternalEventBus()
   })
 
-  it('TC1: plugin-permission-request 事件 → reactive state 更新（pluginId/permissions/pending=true）', () => {
-    const { app } = makeApp()
+  it('TC0: init 前调 usePermissionRequest() → fail-fast（装配时序错误指向恢复动作，不静默返回空 state）', () => {
+    expect(() => usePermissionRequest()).toThrow(/initPermissionRequest/)
+  })
+
+  it('TC1: init → provide 注入 factory transport，与 usePermissionRequest() state 同源（回传驱动收口）', async () => {
+    const { app, provided } = makeApp()
     initPermissionRequest(app as never, bus)
+
+    // provide 契约：PERMISSION_TRANSPORT_KEY 下注入 transport
+    const transport = provided.find((p) => p.key === PERMISSION_TRANSPORT_KEY)?.value as PermissionTransport
 
     emitPermissionRequest(bus, 'tasks', ['shell', 'fs'])
-
     const state = usePermissionRequest()
     expect(state.pluginId).toBe('tasks')
-    expect(state.permissions).toEqual(['shell', 'fs'])
-    expect(state.pending).toBe(true)
-  })
-
-  it('TC2: approve 成功 → pending=false（弹窗关闭）', async () => {
-    const { app, provided } = makeApp()
-    initPermissionRequest(app as never, bus)
-    const transport = provided.find((p) => p.key === PERMISSION_TRANSPORT_KEY)?.value as {
-      approve: (pluginId: string, permissions: string[]) => void
-      revoke: (pluginId: string) => void
-    }
-
-    emitPermissionRequest(bus)
-    const state = usePermissionRequest()
     expect(state.pending).toBe(true)
 
+    // 同源验证：provide 的 transport 回传成功 → usePermissionRequest() state 收口
     approvePermissions.mockResolvedValue(undefined)
-    transport.approve('p1', ['shell'])
+    transport.approve('tasks', ['shell'])
     await vi.waitFor(() => expect(state.pending).toBe(false))
-    expect(approvePermissions).toHaveBeenCalledWith('p1', ['shell'])
+    expect(approvePermissions).toHaveBeenCalledWith('tasks', ['shell'])
   })
 
-  it('TC3: approve 失败（RPC reject）→ 保留弹窗 + error 态，pending 保持 true（RD-3#6 可重试）', async () => {
-    const { app, provided } = makeApp()
-    initPermissionRequest(app as never, bus)
-    const transport = provided.find((p) => p.key === PERMISSION_TRANSPORT_KEY)?.value as {
-      approve: (pluginId: string, permissions: string[]) => void
-    }
-
-    emitPermissionRequest(bus)
-    const state = usePermissionRequest()
-    expect(state.pending).toBe(true)
-
-    // RD-3#6：approve 失败不再关窗（此前 pending=false 与成功同形）——保留弹窗 + error 态
-    approvePermissions.mockRejectedValue(new Error('rpc boom'))
-    transport.approve('p1', ['shell'])
-    await vi.waitFor(() => expect(state.error).toBe('rpc boom'))
-    expect(state.pending).toBe(true)
-
-    // 可重试：再次点击批准，成功 → 关窗 + 清 error
-    approvePermissions.mockResolvedValue(undefined)
-    transport.approve('p1', ['shell'])
-    await vi.waitFor(() => expect(state.pending).toBe(false))
-    expect(state.error).toBeNull()
-  })
-
-  it('TC4: revoke 成功关窗 + 清 error；失败保留弹窗 + error 态（RD-3#6）', async () => {
-    const { app, provided } = makeApp()
-    initPermissionRequest(app as never, bus)
-    const transport = provided.find((p) => p.key === PERMISSION_TRANSPORT_KEY)?.value as {
-      revoke: (pluginId: string) => void
-    }
-
-    emitPermissionRequest(bus)
-    const state = usePermissionRequest()
-
-    // 成功路径 → 关窗 + error 清空
-    revokePermissions.mockResolvedValue(undefined)
-    transport.revoke('p1')
-    await vi.waitFor(() => expect(state.pending).toBe(false))
-    expect(state.error).toBeNull()
-    expect(revokePermissions).toHaveBeenCalledWith('p1')
-
-    // 失败路径（新请求触发 pending=true + 清 error 后 revoke reject）→ 保留弹窗 + error 态
-    emitPermissionRequest(bus)
-    expect(state.pending).toBe(true)
-    expect(state.error).toBeNull()
-    revokePermissions.mockRejectedValue(new Error('rpc boom'))
-    transport.revoke('p1')
-    await vi.waitFor(() => expect(state.error).toBe('rpc boom'))
-    expect(state.pending).toBe(true)
-  })
-
-  it('TC5: 重复初始化幂等（HMR 防 listener 翻倍）：bus handler 数恒为 1', () => {
+  it('TC2: 重复初始化幂等（HMR 防 listener 翻倍）：bus handler 数恒为 1', () => {
     const { app } = makeApp()
 
     initPermissionRequest(app as never, bus)
     initPermissionRequest(app as never, bus)
 
-    // 白盒验证幂等本质：第二次 init 先调旧 unsub（退订）再注册新 handler——
+    // 白盒验证幂等本质：第二次 init 先 dispose 旧 controller（退订）再建新——
     // bus 内 plugin-permission-request 的 handler 数恒为 1（不翻倍，项目规则#2）。
     const handlers = (bus as unknown as { handlers: Map<string, Set<unknown>> }).handlers
     expect(handlers.get('plugin-permission-request')?.size).toBe(1)
 
-    // 行为验证：事件仍正常驱动 state
+    // 行为验证：事件驱动的是第二次 init 后的 state（旧 controller 已 dispose）
     emitPermissionRequest(bus)
     const state = usePermissionRequest()
     expect(state.pluginId).toBe('p1')
     expect(state.pending).toBe(true)
-  })
-
-  // ── plugin:permissionRequestExpired 超时撤窗（timeout-plugin-service D3） ──
-
-  /** 通过 global 通道模拟 runtime 撤窗广播（payload { pluginId }，无 sessionId） */
-  function emitPermissionExpired(pluginId: string) {
-    dispatchGlobal({ type: 'plugin:permissionRequestExpired', payload: { pluginId } })
-  }
-
-  it('TC6: expired 广播命中当前弹窗 → pending=false（超时撤窗，取消非判拒）', () => {
-    const { app } = makeApp()
-    initPermissionRequest(app as never, bus)
-
-    emitPermissionRequest(bus, 'p1', ['shell'])
-    const state = usePermissionRequest()
-    expect(state.pending).toBe(true)
-
-    emitPermissionExpired('p1')
-    expect(state.pending).toBe(false)
-  })
-
-  it('TC7: expired 广播 pluginId 不匹配 → noop（陈旧广播不得误撤后到插件的新审批弹窗）', () => {
-    const { app } = makeApp()
-    initPermissionRequest(app as never, bus)
-
-    emitPermissionRequest(bus, 'p2', ['fs'])
-    const state = usePermissionRequest()
-    expect(state.pending).toBe(true)
-
-    // 旧插件 p1 的迟到 expired 广播：当前弹窗属于 p2，不应被撤
-    emitPermissionExpired('p1')
-    expect(state.pending).toBe(true)
-    expect(state.pluginId).toBe('p2')
-
-    // p2 自己的 expired 才撤
-    emitPermissionExpired('p2')
-    expect(state.pending).toBe(false)
-  })
-
-  it('TC8: 无挂起弹窗时 expired 广播 → noop 幂等（迟到批准对已删 pending noop 的前端对称面）', () => {
-    const { app } = makeApp()
-    initPermissionRequest(app as never, bus)
-
-    const state = usePermissionRequest()
-    expect(state.pending).toBe(false)
-    emitPermissionExpired('p1')
-    expect(state.pending).toBe(false)
   })
 })

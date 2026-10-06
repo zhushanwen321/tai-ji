@@ -844,16 +844,19 @@ describe("m3: bash 工具收到非字符串 command 时 logger.warn（不静默�
 	});
 });
 
-// ──────────────────────── M3: realUserPromise 超时兜底 ────────────────────────
+// ──────────────────────── M3: AI-ask 分支等待用户决策（无包内超时） ────────────────────────
 
-describe("M3: runLayer3WithRacing AI-ask 分支超时兜底（防永久挂起）", () => {
-	it("AI ask + requestUserApproval 永挂 → 5 分钟超时 fail-closed deny（不永久阻塞）", async () => {
-		// 用 fake timer 模拟 5 分钟流逝，避免真实等待
+describe("M3: runLayer3WithRacing AI-ask 分支（ADR-0122：无包内超时兜底）", () => {
+	it("AI ask → 无超时兜底等待；远超原 5min 后用户决策照常生效", async () => {
 		vi.useFakeTimers();
 		try {
+			let resolveApproval: (d: UserDecision) => void = () => {};
 			const deps = makeDeps({
 				classify: () => Promise.resolve(fallbackClassifier()), // outcome=ask
-				approve: () => new Promise<UserDecision>(() => undefined), // 永不 resolve（模拟挂起）
+				approve: () =>
+					new Promise<UserDecision>((resolve) => {
+						resolveApproval = resolve;
+					}),
 			});
 			const { runLayer3WithRacing } = await import("../pipeline.js");
 			const decisionPromise = runLayer3WithRacing(
@@ -862,11 +865,19 @@ describe("M3: runLayer3WithRacing AI-ask 分支超时兜底（防永久挂起）
 				DEFAULT_CFG,
 				undefined,
 			);
-			// 推进 5 分钟（超过 APPROVAL_TIMEOUT_MS=300_000）
-			await vi.advanceTimersByTimeAsync(300_001);
+			// 推进 10 分钟（远超原 APPROVAL_TIMEOUT_MS=300_000）：决策未出（无超时兜底，等待用户是交互语义）
+			await vi.advanceTimersByTimeAsync(600_000);
+			let settled = false;
+			void decisionPromise.then(() => {
+				settled = true;
+			});
+			await Promise.resolve();
+			expect(settled).toBe(false);
+			// 用户最终决策 → 按决策返回（用户晚到不被超时截杀）
+			resolveApproval({ approved: true, reason: "late approval" });
 			const decision = await decisionPromise;
-			expect(decision.action).toBe("deny"); // fail-closed
-			expect(decision.reason).toContain("timeout");
+			expect(decision.action).toBe("allow");
+			expect(decision.source).toBe("user");
 		} finally {
 			vi.useRealTimers();
 		}

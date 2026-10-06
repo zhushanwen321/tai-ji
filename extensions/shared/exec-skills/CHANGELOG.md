@@ -1,5 +1,11 @@
 # @zhushanwen/pi-exec-skills
 
+## 0.2.1
+
+### Patch Changes
+
+- 802af968f: (no changeset body; patch version bump)
+
 ## 0.2.0
 
 ### Minor Changes

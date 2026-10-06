@@ -1,18 +1,18 @@
 // src/__tests__/widget-push.test.ts
 //
-// scheduler widget 推送修正（D1 指纹跳推 + D2 保活底线帧）集成单测：
+// scheduler widget 推送（D1 指纹跳推）集成单测：
 // 走 index.ts 真实装配链（session_start → runtime.onAfterTick → refreshWidget），
 // 观测面 = ctx.ui.setWidget 调用序列（每个实际推送恰一次调用——跳推判定在
 // setSchedulerWidget 之前，setWidgetDual 的 TUI 分支与清屏分支都落 setWidget）。
 //
-// 行为契约（scheduler widget 推送修正设计 D1-b/D2）：
-// - 任务集指纹不变 → 跳推（时间流逝不是状态变化，静态期零推送——G1）
-// - 保活底线双条件：任务集非空（含 disabled——任务存在即调度意图）且距上次实际推送
-//   ≥10min → 强制推一帧；空任务集不发保活帧（清屏后零帧，会话可被 idle reaper 正常回收——G3）
+// 行为契约（scheduler widget 推送修正设计 D1-b）：
+// - 任务集指纹不变 → 跳推（时间流逝不是状态变化，静态期零推送——G1；跨原保活窗口
+//   时长仍零推送，锁定原 D2 保活底线帧已随 idle reaper 退役不回归）
+// - 空任务集同样静态期零推送（清屏帧只推一次）
 // - fail-open：指纹计算异常即推送（宁可多推不可漏显）+ warn 留痕
 // - locale 入指纹：切语言一次推送自愈（集成臂；kind 字段在 widget.test.ts 纯函数臂锁定）
 //
-// timer 红线：fake timers（vitest useFakeTimers），保活窗口用大步进 advance（fake 无墙钟成本）。
+// timer 红线：fake timers（vitest useFakeTimers），静置用大步进 advance（fake 无墙钟成本）。
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -37,8 +37,8 @@ vi.mock('@zhushanwen/pi-extension-logger', () => ({
 import schedulerExtension from '../index.js'
 import { TICK_INTERVAL_MS } from '../runtime.js'
 import { TASK_ENTRY_TYPE } from '../types.js'
-/** 与 index.ts 的 WIDGET_KEEPALIVE_INTERVAL_MS 同值（10min；常量不导出，测试锚定同值）。 */
-const KEEPALIVE_INTERVAL_MS = 10 * 60 * 1000
+/** 原保活窗口时长（10min；原 D2 已退役）——静态用例静置越过后断言仍零推送。 */
+const RETIRED_KEEPALIVE_WINDOW_MS = 10 * 60 * 1000
 const BASE = Date.parse('2026-01-01T00:00:00Z')
 
 /** 构造一个远期到期的启用任务 upsert entry（owner = sessionFile，避免 fork owner 过滤）。 */
@@ -98,7 +98,7 @@ function createFakeCtx(sessionFile: string, entries: unknown[] = []): {
   return { ctx, setWidget }
 }
 
-describe('widget 推送判定（D1 指纹跳推 + D2 保活底线帧）', () => {
+describe('widget 推送判定（D1 指纹跳推）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(BASE)
@@ -109,7 +109,7 @@ describe('widget 推送判定（D1 指纹跳推 + D2 保活底线帧）', () => 
     vi.useRealTimers()
   })
 
-  it('D1: 任务集静态期间零推送（指纹不变跳推），任务集内但有 disabled 同样静态', async () => {
+  it('D1: 任务集静态期间零推送——静置越过原保活窗口仍零推送（D2 退役不回归）', async () => {
     const { pi, events } = createMockPi()
     schedulerExtension(pi)
     const sessionStart = events.get('session_start')!
@@ -117,34 +117,12 @@ describe('widget 推送判定（D1 指纹跳推 + D2 保活底线帧）', () => 
     sessionStart({ type: 'session_start', reason: 'startup' }, ctx)
     expect(setWidget).toHaveBeenCalledTimes(1) // 首帧必推（实例态重置）
 
-    // 静置 9.5min（17 个 tick）：每次 tick 指纹相同、保活未到期 → 零推送
-    await vi.advanceTimersByTimeAsync(17 * TICK_INTERVAL_MS)
+    // 静置越过原保活窗口（10min + 2 个 tick）：指纹相同 → 零推送（无保活底线帧）
+    await vi.advanceTimersByTimeAsync(RETIRED_KEEPALIVE_WINDOW_MS + 2 * TICK_INTERVAL_MS)
     expect(setWidget).toHaveBeenCalledTimes(1)
   })
 
-  it('D2: 非空任务集跨保活窗口 → 强制推一帧，内容与首帧相同（静态面恒定）', async () => {
-    const { pi, events } = createMockPi()
-    schedulerExtension(pi)
-    const sessionStart = events.get('session_start')!
-    const { ctx, setWidget } = createFakeCtx('/test/wp-keepalive.json', [
-      taskEntry('/test/wp-keepalive.json'),
-    ])
-    sessionStart({ type: 'session_start', reason: 'startup' }, ctx)
-    expect(setWidget).toHaveBeenCalledTimes(1)
-    const firstFrame = setWidget.mock.calls[0]![1]
-
-    // 静置越过保活窗口：下一 tick（保活到期后首个 30s 节拍）强制推一帧
-    await vi.advanceTimersByTimeAsync(KEEPALIVE_INTERVAL_MS + TICK_INTERVAL_MS)
-    expect(setWidget).toHaveBeenCalledTimes(2)
-    // 保活帧纯粹为心跳：文本与首帧相同（D1 静态化后显示面不随时间变化）
-    expect(setWidget.mock.calls[1]![1]).toEqual(firstFrame)
-
-    // 第二个保活窗口同样恰好一帧（有界心跳，非恢复 30s 节拍）
-    await vi.advanceTimersByTimeAsync(KEEPALIVE_INTERVAL_MS + TICK_INTERVAL_MS)
-    expect(setWidget).toHaveBeenCalledTimes(3)
-  })
-
-  it('D2: 空任务集不发保活帧（清屏后零帧，会话保持可回收）', async () => {
+  it('D1: 空任务集静态期零推送（清屏帧只推一次）', async () => {
     const { pi, events } = createMockPi()
     schedulerExtension(pi)
     const sessionStart = events.get('session_start')!
@@ -153,26 +131,9 @@ describe('widget 推送判定（D1 指纹跳推 + D2 保活底线帧）', () => 
     expect(setWidget).toHaveBeenCalledTimes(1) // 首帧 = 清屏帧（setWidget(key, undefined)）
     expect(setWidget.mock.calls[0]![1]).toBeUndefined()
 
-    // 静置 30min（远超保活窗口）：无任务 → 无保活帧
+    // 静置 30min：空任务集指纹稳定 → 零推送
     await vi.advanceTimersByTimeAsync(30 * 60 * 1000)
     expect(setWidget).toHaveBeenCalledTimes(1)
-  })
-
-  it('D2: 全 disabled 的任务集仍保活（任务存在即调度意图）', async () => {
-    const { pi, events } = createMockPi()
-    schedulerExtension(pi)
-    const sessionStart = events.get('session_start')!
-    const file = '/test/wp-disabled.json'
-    const { ctx, setWidget } = createFakeCtx(file, [taskEntry(file, { enabled: false })])
-    sessionStart({ type: 'session_start', reason: 'startup' }, ctx)
-    expect(setWidget).toHaveBeenCalledTimes(1)
-
-    await vi.advanceTimersByTimeAsync(KEEPALIVE_INTERVAL_MS + TICK_INTERVAL_MS)
-    expect(setWidget).toHaveBeenCalledTimes(2) // disabled 不豁免保活（re-enable 后须可执行）
-    // 用户可见面：保活帧携带完整静态行（计数段在场——TUI 最近任务行只取 enabled 任务，
-    // 全 disabled 时行 = 计数段，这是既有 enabled 过滤行为）
-    const frame = String((setWidget.mock.calls[1]![1] as string[])[0] ?? '')
-    expect(frame).toBe('[scheduler] 0 scheduled')
   })
 
   it('fail-open: 指纹计算异常 → 该 tick 照常推送 + warn 留痕', async () => {

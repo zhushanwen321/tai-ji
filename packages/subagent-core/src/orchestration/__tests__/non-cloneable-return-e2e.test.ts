@@ -12,8 +12,6 @@
  * 主线程 belt（exit(0) 无终态消息 → 立即 failed）由 worker-exit-without-result.test.ts
  * handler 级单测覆盖；两条防线共同保证「run 必达终态」不变式。
  *
- * 退避经 TAIJI_SUBAGENT_TEST_RETRY_BACKOFF_BASE_MS=1 压缩到 ms 级（生产默认
- * 1+2+4s 不变）；4 次 worker 启动仍真实发生——per-test timeout 保留 30s headroom。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -49,18 +47,8 @@ async function waitForTerminal(
 }
 
 describe("[F1] 不可克隆 return → run failed（非悬挂）— e2e", () => {
-  // 压缩重试矩阵退避（1+2+4s → 1+2+4ms；backoffDelay 调用时读 env，无需在模块
-  // 加载前设置）。生产默认不变，见 worker-message-pump RETRY_BACKOFF_BASE_ENV 测试通道。
-  beforeEach(() => {
-    vi.stubEnv("TAIJI_SUBAGENT_TEST_RETRY_BACKOFF_BASE_MS", "1");
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
   it(
-    "return { fn: () => 1 } → 经 script-error 重试矩阵收敛到 done,failed，归因含 structured-clone failed",
+    "return { fn: () => 1 } → 一次即收敛到 done,failed，归因含 structured-clone failed",
     async () => {
       const runs = new Map<string, WorkflowRun>();
       const store: RunStore = {

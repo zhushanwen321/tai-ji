@@ -3,12 +3,8 @@
 //
 // 包结构：
 // - core/                  通用协议层（所有 extension 共用：GuiComponent + 布局原语 + 传输编码 + 双模 widget helper）
-// - extensions/            有运行时定制逻辑的 extension（marker + helper）
-//   - ask-user/            富交互（select 通道 + marker）
-//   - plan/                plan 生命周期状态机 + 审阅回传值域契约（纯数据 + 纯函数，零 pi 依赖）
-//   - scheduler/           scheduler 任务条目契约 + 折叠器 + 时间格式化（扩展与插件同源单实现，零 pi/node 依赖）
-//   - scheduler-create/    scheduler 创建确认共享资产（类型 + 形状/时间折叠守卫）
-//   - ui-form/             统一提问表单协议（类型 + marker + 交互 helper + 守卫）
+// - extensions/            有运行时定制逻辑的 extension（marker + helper；子协议模块不在此逐名列举，
+//                          唯一清单 = 本文件导出段各 `── ./extensions/<name>` 注释，防双副本漂移）
 // - pending-entries        pending 事件流差集核心（纯算法，落盘形态语义）
 // - background-task        base-tool-enhance 后台任务 registry.json 文件契约（src 平级文件）
 //
@@ -162,7 +158,7 @@ export type {
 } from './extensions/ui-form/helpers'
 export { isFormQuestion, isFormAnswers } from './extensions/ui-form/guards'
 
-// ── session-manager 协议（agent-managed session：select 通道 + marker；实现在 extensions/universal/session-manager）──
+// ── ./extensions/session-manager：agent-managed session 协议（select 通道 + marker；实现在 extensions/universal/session-manager）──
 export type {
   SessionManagerAction,
   SessionManagerParams,
@@ -197,7 +193,7 @@ export {
 } from './extensions/session-manager/types'
 export { SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS } from './extensions/session-manager/marker'
 
-// ── subagent-inflight 协议（在途聚合上报：绝对计数帧经 select 通道 + marker；写侧实现在 extensions/universal/subagent-workflow host/inflight-reporter + subagent-core 出口，读侧在 runtime event-adapter u7b）──
+// ── ./extensions/subagent-inflight：在途聚合上报协议（绝对计数帧经 select 通道 + marker；写侧实现在 extensions/universal/subagent-workflow host/inflight-reporter + subagent-core 出口，读侧在 runtime event-adapter u7b）──
 export type { SubagentInFlightReport } from './extensions/subagent-inflight/types'
 export {
   SUBAGENT_INFLIGHT_MARKER,
@@ -208,7 +204,24 @@ export {
   isInFlightReportAck,
 } from './extensions/subagent-inflight/types'
 
-// ── subagent-notify 词表（subagent-workflow 通知通道 custom_message customType 单源：
+// ── ./extensions/subagent-journal：journal 事件推送协议（事件报告帧经 select 通道 + marker；
+// 写侧实现在 extensions/universal/subagent-workflow host/journal-reporter + subagent-core 落盘出口
+// notifyJournalAppended，读侧在 runtime event-adapter marker 路由 → session-records 派生视图）──
+export type {
+  SubagentJournalDomain,
+  SubagentJournalEvent,
+  SubagentJournalReport,
+} from './extensions/subagent-journal/types'
+export {
+  SUBAGENT_JOURNAL_MARKER,
+} from './extensions/subagent-journal/marker'
+export {
+  JOURNAL_REPORT_ACK,
+  isSubagentJournalReport,
+  isJournalReportAck,
+} from './extensions/subagent-journal/types'
+
+// ── ./extensions/subagent-notify：subagent-workflow 通知通道词表（custom_message customType 单源：
 // 写侧 = 壳 sendMessage / subagent-core notifier+ledger，读侧 = shared/runtime/core；
 // 等值锁在壳 __tests__/contract.notify-custom-types.test.ts）──
 export {
@@ -217,26 +230,10 @@ export {
   SUBAGENT_DIRECTIVE_CUSTOM_TYPE,
 } from './extensions/subagent-notify/custom-types'
 
-// ── plugin-bridge 协议（plugin system bridge：插件工具/事件/拦截经 select 通道 + marker 桥接；实现在 extensions/taiji/plugin-bridge + runtime bridge-handler）──
-export type {
-  BridgeMethod,
-  BridgeRequest,
-  BridgeToolExecuteResponse,
-  BridgeSyncPayload,
-  BridgeInterceptResponse,
-  BridgeErrorResponse,
-} from './extensions/plugin-bridge/types'
-export { BRIDGE_MARKER, BRIDGE_METHODS } from './extensions/plugin-bridge/marker'
-// 回包形状守卫族（D11：marker + types + 守卫同住，自 plugin-bridge index.ts 迁入）
-export {
-  isBridgeErrorResponse,
-  isBridgeToolExecuteResponse,
-  isBridgeSyncPayload,
-  isBridgeInterceptResponse,
-  isSyncedTool,
-} from './extensions/plugin-bridge/guards'
+// [pi1-disposition-chat-flow D7①] plugin-bridge 协议段（marker/types/guards + 桶导出）
+// 随 plugin-bridge 整体退役删除；select 通道原语（core/select-rpc.ts）为公共层保留。
 
-// ── subagent-engine 协议（引擎可发现性：engines.json 状态文件 + 引擎配置视图；实现在 extensions/universal/subagent-workflow + runtime RPC）──
+// ── ./extensions/subagent-engine：引擎可发现性协议（engines.json 状态文件 + 引擎配置视图；实现在 extensions/universal/subagent-workflow + runtime RPC）──
 export type {
   SubagentEnginesFile,
   SubagentEngineConfigView,

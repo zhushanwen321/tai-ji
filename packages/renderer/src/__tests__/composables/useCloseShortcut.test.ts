@@ -1,57 +1,59 @@
-// @vitest-environment node
-
 /**
- * useCloseShortcut 单测（Cmd/Ctrl+W 优先关 drawer）。
+ * useCloseShortcut 单测（容器快捷键 IPC 桥，display-containers §6.7/§7.5）。
  *
- * 覆盖：
- * - shortcut type='close' + drawer 开 → close drawer，不调 windowClose
- * - shortcut type='close' + drawer 关 → windowClose IPC
- * - shortcut type 非 'close' → 不响应
+ * 覆盖（桥接契约 + 编排器集成）：
+ * - 'shortcut' type='close'（⌘W）→ 编排器 handleCmdWShortcut：层级序逐层关容器、全关后关窗；
+ * - 'shortcut' type='toggle-bottom-drawer'（⌃`）→ 底抽屉开关（浮层开着照常切换）；
+ * - 其它 type（'standard'/'focus' 等 globalShortcut 族）→ 不响应；
+ * - 退订契约：onScopeDispose 调用 onShortcut 返回的退订函数。
  *
- * mock 策略：vi.mock('@/lib/ipc') 捕获 onShortcut（暴露 callback）+ windowClose；
- * vi.mock('@/composables/features/drawer/useSideDrawer') 提供 isOpen ref + close spy。
+ * mock 策略：vi.mock('@/lib/ipc') 捕获 onShortcut（暴露 callback）+ windowClose spy；
+ * 容器开合态用真实 core 三域状态（编排器判定真值，不 mock）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useCloseShortcut.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { ref } from 'vue'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { effectScope } from 'vue'
 
-// ── mock lib/ipc：onShortcut 暴露 callback + windowClose 捕获 ──
-const mockWindowClose = vi.fn().mockResolvedValue(undefined)
+const windowClose = vi.fn(() => Promise.resolve())
 let shortcutCallback: ((type: string) => void) | null = null
+let unsubscribeCalled = false
 const mockOnShortcut = vi.fn((cb: (type: string) => void) => {
   shortcutCallback = cb
   return () => {
+    unsubscribeCalled = true
     shortcutCallback = null
   }
 })
 
 vi.mock('@/lib/ipc', () => ({
   onShortcut: (cb: (type: string) => void) => mockOnShortcut(cb),
-  windowClose: () => mockWindowClose(),
-}))
-
-// ── mock useSideDrawer：可控的 isOpen ref + close spy ──
-const isOpenRef = ref(false)
-const mockClose = vi.fn()
-
-vi.mock('@/composables/features/drawer/useSideDrawer', () => ({
-  useSideDrawer: () => ({
-    isOpen: isOpenRef,
-    close: mockClose,
-  }),
+  windowClose: () => windowClose(),
 }))
 
 import { useCloseShortcut } from '@/composables/features/app/useCloseShortcut'
+import {
+  bindTestSession,
+  containerStates,
+  openBottom,
+  openRight,
+  openWorkflowOverlay,
+  resetOrchestratorFixtures,
+} from './key-orchestrator/helpers'
 
 beforeEach(() => {
   vi.clearAllMocks()
-  isOpenRef.value = false
+  unsubscribeCalled = false
   shortcutCallback = null
+  resetOrchestratorFixtures()
+  bindTestSession()
 })
 
-/** 在 effectScope 内调 composable，返回 scope。测试结束前不 stop（onScopeDispose 会退订） */
+afterEach(() => {
+  resetOrchestratorFixtures()
+})
+
+/** 在 effectScope 内调 composable（onScopeDispose 跟随 scope 退订） */
 function setupCloseShortcut(): { stop: () => void } {
   const scope = effectScope()
   scope.run(() => {
@@ -60,34 +62,56 @@ function setupCloseShortcut(): { stop: () => void } {
   return { stop: () => scope.stop() }
 }
 
-describe('useCloseShortcut（Cmd/Ctrl+W 优先关 drawer）', () => {
-  it('drawer 开 → type=close → 关 drawer，不调 windowClose', () => {
-    isOpenRef.value = true
+describe('useCloseShortcut（容器快捷键 IPC 桥 → 编排器）', () => {
+  it('type=close（⌘W）：三容器全开 → 沿层级序逐层关，全关后才 windowClose', () => {
+    openBottom()
+    openRight()
+    openWorkflowOverlay()
     const { stop } = setupCloseShortcut()
 
     shortcutCallback?.('close')
-    expect(mockClose).toHaveBeenCalledTimes(1)
-    expect(mockWindowClose).not.toHaveBeenCalled()
-    stop()
-  })
-
-  it('drawer 关 → type=close → windowClose IPC', () => {
-    isOpenRef.value = false
-    const { stop } = setupCloseShortcut()
+    expect(containerStates()).toEqual({ overlay: false, bottom: true, right: true })
+    shortcutCallback?.('close')
+    shortcutCallback?.('close')
+    expect(containerStates()).toEqual({ overlay: false, bottom: false, right: false })
+    expect(windowClose, '全关前不关窗').not.toHaveBeenCalled()
 
     shortcutCallback?.('close')
-    expect(mockClose).not.toHaveBeenCalled()
-    expect(mockWindowClose).toHaveBeenCalledTimes(1)
+    expect(windowClose, '全关后再 close 才关窗').toHaveBeenCalledTimes(1)
     stop()
   })
 
-  it('type 非 close → 不响应', () => {
+  it('type=toggle-bottom-drawer（⌃`）：底抽屉开合切换（浮层开着照常切换）', () => {
+    openWorkflowOverlay()
+    const { stop } = setupCloseShortcut()
+
+    shortcutCallback?.('toggle-bottom-drawer')
+    expect(containerStates().bottom, '⌃` 开底抽屉（浮层开着也切）').toBe(true)
+    shortcutCallback?.('toggle-bottom-drawer')
+    expect(containerStates().bottom, '再按 ⌃` 收回').toBe(false)
+    expect(windowClose).not.toHaveBeenCalled()
+    stop()
+  })
+
+  it('type 非 close/toggle-bottom-drawer（globalShortcut 族）→ 不响应', () => {
+    openRight()
     const { stop } = setupCloseShortcut()
 
     shortcutCallback?.('standard')
     shortcutCallback?.('focus')
-    expect(mockClose).not.toHaveBeenCalled()
-    expect(mockWindowClose).not.toHaveBeenCalled()
+    expect(containerStates().right, '其它 type 不动容器').toBe(true)
+    expect(windowClose).not.toHaveBeenCalled()
     stop()
+  })
+
+  it('onScopeDispose 退订：scope 停止后再发 type 不响应', () => {
+    openRight()
+    const { stop } = setupCloseShortcut()
+    stop()
+
+    expect(unsubscribeCalled, '退订函数被调用').toBe(true)
+    shortcutCallback?.('close')
+    expect(containerStates().right, '退订后不再响应').toBe(true)
+    expect(windowClose).not.toHaveBeenCalled()
   })
 })

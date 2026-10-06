@@ -11,13 +11,13 @@
  * - windowId 注入到 URL query，renderer 读取后用于注册到 WindowManager
  * - D2b 导航拦截：will-navigate 拒绝非应用自身源 + setWindowOpenHandler 默认 deny
  *   （integrity-hardening §3.2；防 XSS 经整页导航/新窗口接管 electronAPI）
- * - renderer 崩溃自动恢复链（D2-③）：render-process-gone 详情
- *   经 main-logger 落盘 + 按 windowId 熔断的自动 reload（60s 滑窗 ≤3 次）+ 超限静态
- *   错误页（重试按钮导航回应用源时重置该窗口计数）
+ * - renderer 崩溃显式失败（ADR-0122）：render-process-gone 详情
+ *   经 main-logger 落盘 + 崩溃台账 + 一次崩溃即静态错误页（重试按钮导航回应用源；
+ *   [HISTORICAL] 原 60s 滑窗 ≤3 次自动 reload 熔断已删）
  *
  * 依赖方向：window-factory → electron + input-validators + main/interfaces（type-only）
  *   + logs/main-logger（render-process-gone 详情落盘，u3）+ logs/crash-journal（renderer
- *   事件台账，crash-forensics D1）+ window/recovery-policy（熔断）
+ *   事件台账，crash-forensics D1）
  *   + logs/renderer-console-handler（console-message 落盘监听，renderer-console-persist U2）
  */
 import path from 'node:path'
@@ -28,7 +28,6 @@ import { isAllowedAppNavigation, isValidExternalUrl } from '../gateway/input-val
 import { mainLogger } from '../logs/main-logger.js'
 import { crashJournal } from '../logs/crash-journal.js'
 import { handleRendererConsoleMessage, isRendererConsoleDisabled } from '../logs/renderer-console-handler.js'
-import { RecoveryPolicy } from './recovery-policy.js'
 import { getDataDir } from '@taiji/shared/paths'
 import {
   createMainWindowStatePersistence,
@@ -50,34 +49,19 @@ export const VITE_READY_TIMEOUT_MS = 30_000
 /** Vite 轮询间隔 */
 export const VITE_POLL_INTERVAL_MS = 300
 
-// ── renderer 崩溃自动恢复（D2-③ / u3-renderer-recovery）────
-
-/** 模块级熔断计数器：以 windowId 为键（设计 D2 原文），多窗口互不影响；
- *  窗口 'closed' 时 reset 防长寿进程 Map 泄漏（见 createWindow 内挂点）。 */
-const rendererRecovery = new RecoveryPolicy()
-
-/** 自动 reload 重载应用时的恢复标志 query（T2「一次性恢复提示条」main 侧注入形态）：
- *  renderer 消费点 = packages/renderer/src/composables/useCrashRecoveryNotice.ts
- *  （首次消费读标志展示提示条并 replaceState 剥离，组件 = CrashRecoveredBar.vue）。 */
-export const CRASH_RECOVERY_QUERY_FLAG = 'crash'
+// ── renderer 崩溃显式失败（ADR-0122）────
+// [HISTORICAL] 原 D2-③/u3-renderer-recovery「60s 滑窗 ≤3 次自动 reload + 熔断」已删
+// （ADR-0122：自动重试属无效防御）。render-process-gone 现为一次崩溃即加载静态错误页
+// （失败显式上报 + 用户手动重试），详情与台账照常落盘。
 
 /**
- * 构造应用窗口 URL 的 query（windowId 必带；sessionId 与恢复标志按需）。
+ * 构造应用窗口 URL 的 query（windowId 必带；sessionId 按需）。
  * dev loadURL 与 prod/E2E loadFile 共用同一构造（loadFile 侧经 Object.fromEntries
  * 转 Record 形态），保证两条形态 query 字段一致。
  */
-export function buildAppQuery(
-  windowId: string,
-  sessionId?: string,
-  extra?: Record<string, string>,
-): URLSearchParams {
+export function buildAppQuery(windowId: string, sessionId?: string): URLSearchParams {
   const params = new URLSearchParams({ windowId })
   if (sessionId) params.set('sessionId', sessionId)
-  if (extra) {
-    for (const [key, value] of Object.entries(extra)) {
-      params.set(key, value)
-    }
-  }
   return params
 }
 
@@ -97,14 +81,13 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * 静态错误页 HTML（T2 失败路径：同窗口 60s 内第 4 次崩溃后熔断展示）。
+ * 静态错误页 HTML（ADR-0122 失败路径：渲染进程崩溃一次即显式失败展示）。
  *
  * 内联 HTML + data: URL 加载（选型理由：静态 .html 文件需进 electron-builder files
  * 白名单——打包面改动属 AGENTS.md 规则 12 事故最高发区；data: URL 零文件依赖、
- * prod/dev 行为一致）。文案为设计 T2 失败路径定值；logsDir 由 getDataDir() 动态
- * 推导注入（AGENTS.md 规则：路径白名单禁止硬编码）。「重试」按钮经注入的 retryUrl
- * 导航回应用自身源（will-navigate 白名单放行），main 侧 did-navigate 监听据此重置
- * 该窗口熔断计数。
+ * prod/dev 行为一致）。logsDir 由 getDataDir() 动态推导注入（AGENTS.md 规则：路径
+ * 白名单禁止硬编码）。「重试」按钮经注入的 retryUrl 导航回应用自身源（will-navigate
+ * 白名单放行），main 侧 did-navigate 监听据此记手动重试成功日志。
  */
 export function buildStaticErrorPageHtml(logsDir: string, retryUrl: string): string {
   // script 内 URL 用 JSON 字符串字面量注入，'<' 全部转义防 </script> 提前闭合
@@ -128,8 +111,8 @@ export function buildStaticErrorPageHtml(logsDir: string, retryUrl: string): str
     '</head>',
     '<body>',
     '<main>',
-    '<h1>界面反复崩溃</h1>',
-    '<p>界面反复崩溃，请尝试重启应用。</p>',
+    '<h1>界面已崩溃</h1>',
+    '<p>应用界面发生崩溃，点击重试恢复；若反复出现，请重启应用。</p>',
     `<p>诊断日志位于 <code>${LOGS_DIR_PLACEHOLDER}</code></p>`,
     '<button type="button" id="retry">重试</button>',
     '</main>',
@@ -211,42 +194,12 @@ async function loadWindowContent(
 }
 
 /**
- * 崩溃后自动重载应用界面（T2 主路径：目标 1s 内恢复可用）。
- *
- * 重载 URL（非 webContents.reload()）：需注入恢复标志 query（recoveredFrom=crash，
- * renderer 侧 useCrashRecoveryNotice 据此展示一次性提示条并清除标志），reload() 不改 query 做不到。dev/prod 分支与
- * loadWindowContent 同构但不复用它：恢复路径不做 waitForVite 轮询（窗口存活过说明
- * Vite 曾就绪；30s 轮询违背 1s 恢复目标）也不重开 DevTools（原会话的副作用于恢复
- * 场景是噪声）。loadURL 失败走既有 did-fail-load 日志，不在此吞错。
- */
-function reloadWindowAfterCrash(
-  win: BrowserWindow,
-  windowId: string,
-  sessionId: string | undefined,
-  isDev: boolean,
-  reason: string | undefined,
-): void {
-  const query = buildAppQuery(windowId, sessionId, {
-    recoveredFrom: CRASH_RECOVERY_QUERY_FLAG,
-    crashReason: reason ?? 'unknown',
-  })
-  const isE2E = process.env.TAIJI_E2E === '1'
-  if (!isE2E && isDev) {
-    win.loadURL(`${VITE_DEV_URL}?${query.toString()}`)
-  } else {
-    win.loadFile(path.join(app.getAppPath(), 'renderer/dist/index.html'), {
-      query: Object.fromEntries(query),
-    })
-  }
-}
-
-/**
- * 展示静态错误页（T2 失败路径：熔断后停自动 reload）+ 挂手动重试导航监听。
+ * 展示静态错误页（ADR-0122：渲染进程崩溃一次即显式失败）+ 挂手动重试导航监听。
  *
  * 错误页经 data: URL 加载（选型见 buildStaticErrorPageHtml）；logsDir 从 getDataDir()
  * 动态推导（与 main-logger 的 logs 目录同一推导，禁止硬编码）。重试按钮触发页面发起
  * 的导航回应用自身源（will-navigate 白名单放行），did-navigate 监听确认导航成功后
- * 重置该窗口熔断计数并记日志——用户手动重试 = 重新获得完整自动 reload 预算。
+ * 记日志（用户手动重试是唯一恢复通道，无自动重试）。
  */
 function showStaticErrorPage(
   win: BrowserWindow,
@@ -256,7 +209,7 @@ function showStaticErrorPage(
 ): void {
   const logsDir = path.join(getDataDir(), 'logs')
   const retryUrl = buildRetryUrl(windowId, sessionId, isDev)
-  mainLogger.warn('[window] renderer crash circuit-breaker opened, showing static error page', {
+  mainLogger.warn('[window] renderer crashed, showing static error page (manual retry required)', {
     windowId,
     logsDir,
   })
@@ -265,7 +218,6 @@ function showStaticErrorPage(
   const onDidNavigate = (_e: unknown, url: string): void => {
     // data: URL 是错误页自身的程序化加载，非重试导航
     if (url.startsWith('data:')) return
-    rendererRecovery.reset(windowId)
     mainLogger.info('[window] renderer recovery manual retry accepted', { windowId, url })
     win.webContents.removeListener('did-navigate', onDidNavigate)
   }
@@ -404,10 +356,10 @@ export async function createWindow(
   // W7 加载失败 / 渲染进程崩溃监听（webContents 创建后立即挂，覆盖 loadFile/loadURL 全过程）：
   //   - did-fail-load：loadURL/loadFile 失败（如 Vite 重启中、构建产物损坏）。打 error 日志。
   //   - render-process-gone：渲染进程崩溃（OOM / 崩溃）。详情经 main-logger 落盘
-  //     （G5：reason/exitCode/窗口标识/时间戳）+ 自动恢复链（D2-③）：
-  //     非 destroyed 窗口经熔断计数（recovery-policy，60s 滑窗 ≤3 次按窗口隔离）决策
-  //     自动 reload 或静态错误页。此处不持有 windowManager 引用，windows Map 的清理
-  //     仍由 win 'closed' 事件（window-manager.register 已绑定）兜底。
+  //     （G5：reason/exitCode/窗口标识/时间戳）+ 崩溃台账（crash-forensics D1），
+  //     一次崩溃即加载静态错误页（ADR-0122：失败显式上报，手动重试是唯一恢复通道；
+  //     [HISTORICAL] 原 60s 滑窗 ≤3 次自动 reload 熔断已删）。此处不持有 windowManager
+  //     引用，windows Map 的清理仍由 win 'closed' 事件（window-manager.register 已绑定）兜底。
   win.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL) => {
     console.error(
       `[window] did-fail-load: windowId=${windowId} url=${validatedURL} ` +
@@ -415,8 +367,8 @@ export async function createWindow(
     )
   })
   win.webContents.on('render-process-gone', (_e, details) => {
-    // clean-exit = 正常退出路径（非崩溃，如 window.close 流程）：不计入 RecoveryPolicy、
-    // 不写台账、不 reload——否则污染评估器条件 #9（reload 计数）且与关窗流程存在竞态窗口
+    // clean-exit = 正常退出路径（非崩溃，如 window.close 流程）：不写台账、不进错误页
+    // ——否则污染评估器条件 #9（崩溃计数）且与关窗流程存在竞态窗口
     if (details?.reason === 'clean-exit') return
     // 详情落盘（u5a main-logger writer；E3 取证缺口修复：崩溃详情不再只有 dev console 一行）
     mainLogger.error('[window] render-process-gone', {
@@ -426,23 +378,11 @@ export async function createWindow(
       detectedAt: new Date().toISOString(),
     })
     if (win.isDestroyed()) return
-    const action = rendererRecovery.recordCrash(windowId, Date.now())
-    if (action === 'reload') {
-      // 崩溃台账（crash-forensics D1 renderer 行）：reload 事件，reason 透传 Electron
-      // RenderProcessGoneDetails 枚举（'oom' 真实存在——renderer OOM 可与普通崩溃
-      // 'crashed' 在台账区分；评估器 #9 数 reload、#10 按 reason 分类）。
-      crashJournal.append({ layer: 'renderer', event: 'reload', reason: details?.reason ?? null })
-      reloadWindowAfterCrash(win, windowId, options?.sessionId, deps.isDev, details?.reason)
-    } else {
-      // 熔断转静态页事件（D1 renderer 行「熔断转静态页事件」；挂在 RecoveryPolicy
-      // 决策的消费点——recovery-policy 本体保持零 IO 纯逻辑，见其文件头约束）。
-      crashJournal.append({ layer: 'renderer', event: 'crash', reason: 'circuit-breaker' })
-      showStaticErrorPage(win, windowId, options?.sessionId, deps.isDev)
-    }
-  })
-  // 窗口关闭清熔断计数：windowId 条目不残留（长寿 main 进程 Map 泄漏防护）
-  win.once('closed', () => {
-    rendererRecovery.reset(windowId)
+    // 崩溃台账（crash-forensics D1 renderer 行）：reason 透传 Electron
+    // RenderProcessGoneDetails 枚举（'oom' 真实存在——renderer OOM 可与普通崩溃
+    // 'crashed' 在台账区分；评估器 #9 数 crash、#10 按 reason 分类）。
+    crashJournal.append({ layer: 'renderer', event: 'crash', reason: details?.reason ?? null })
+    showStaticErrorPage(win, windowId, options?.sessionId, deps.isDev)
   })
 
   // renderer console 落盘监听（renderer-console-persist 设计 D1/U2）：被动收集面挂
@@ -477,21 +417,29 @@ export async function createWindow(
     unresponsiveJournaled = false
   })
 
-  // Cmd/Ctrl+W 拦截：drawer 打开时优先关 drawer，而非关窗口。
+  // 容器快捷键窗口级拦截（display-containers §7.5）：⌘/Ctrl+W 与 ⌃` 转发 renderer 编排器决策。
   // before-input-event 在 Electron 默认菜单 accelerator（role:'close'）之前触发，
-  // event.preventDefault() 可阻止默认的关窗口行为，让 renderer 决定关 drawer 还是关窗口。
-  // renderer 收到 'shortcut' type='close' 后：drawer 开则关 drawer + 回传 consumed，
-  // drawer 关则不 consumed（让默认关窗口行为继续）——但 before-input-event 是同步的，
-  // 无法等 renderer 异步回传。故此处统一 preventDefault，由 renderer 决定：
-  //   - drawer 开 → 关 drawer（不关窗口）
-  //   - drawer 关 → 调 windowClose() IPC 主动关窗口
-  // 跨平台：mac=metaKey(w)，win/linux=controlKey(w)。CmdOrCtrl 在 before-input-event 里
+  // event.preventDefault() 可阻止默认的关窗口行为；before-input-event 是同步的、无法等
+  // renderer 异步回传，故此处统一 preventDefault，由 renderer 编排器（key-orchestrator）决定：
+  //   - ⌘W（type='close'）→ 沿层级序逐层关容器（浮层 → 底抽屉 → 右抽屉），全关后
+  //     renderer 调 windowClose() IPC 主动关窗口（yields⌘W 模态开着则无动作）
+  //   - ⌃`（type='toggle-bottom-drawer'）→ 底抽屉开关
+  // ⌃` 判定 = Control+Backquote 严格匹配（跨平台一致、无 shift/alt/meta 附加）：窗口级拦截
+  // 不经 shortcut-registry（那是 globalShortcut 系统级注册表，会从 VS Code 等其它应用抢键）；
+  // taiji 失焦时 before-input-event 不触发 = 无动作。
+  // 跨平台 ⌘W：mac=metaKey(w)，win/linux=controlKey(w)。CmdOrCtrl 在 before-input-event 里
   // 需手动判断（event.input.modifiers 含 'control' 或 'meta'）。
   win.webContents.on('before-input-event', (event, input) => {
     if (input.key.toLowerCase() === 'w' && (input.control || input.meta)) {
       event.preventDefault()
       if (!win.isDestroyed()) {
         win.webContents.send('shortcut', 'close')
+      }
+    }
+    if (input.key === '`' && input.control && !input.meta && !input.alt && !input.shift) {
+      event.preventDefault()
+      if (!win.isDestroyed()) {
+        win.webContents.send('shortcut', 'toggle-bottom-drawer')
       }
     }
   })

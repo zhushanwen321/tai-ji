@@ -295,7 +295,7 @@ describe('PluginRegistry', () => {
 //
 // 覆盖 tool-api.ts 注册入口的窄校验与透传（设计 §6.1 D1 / §7 文件地图 / 错误规格表
 // 「声明值非法」行）：
-// - 合法正数 → 透传存储（运行时语义归 bridge-interop resolveToolTimeoutMs，U1 领地）
+// - 合法正数 → 透传存储（运行时语义归 tool-timeout resolveToolTimeoutMs，U1 领地）
 // - 非 number / NaN → 注册入口 fail-fast（INVALID_TIMEOUT_MS，对齐 ui-api INVALID_* 风格）
 // - 0 / 负数 / Infinity → 合法声明（显式 opt-out），不抛、透传
 // - 缺省 → 不落键，现状注册行为不变（兼容用例）
@@ -315,7 +315,6 @@ describe('ToolRegistration.timeoutMs — register 入口校验与透传 (U2)', (
   interface Harness {
     rpc: PluginRpcServer
     toolRegistry: Map<string, ToolEntry>
-    syncCalls: () => number
     dispatchRegister: (params: Record<string, unknown>) => Promise<RpcResponse & { error?: { code: string | number; message: string } }>
   }
 
@@ -323,10 +322,8 @@ describe('ToolRegistration.timeoutMs — register 入口校验与透传 (U2)', (
   function setup(): Harness {
     const rpc = new PluginRpcServer()
     const toolRegistry = new Map<string, ToolEntry>()
-    let syncCount = 0
-    registerToolRpcHandlers(rpc, {
+      registerToolRpcHandlers(rpc, {
       toolRegistry,
-      syncToolsToBridge: async () => { syncCount++ },
     })
     const port = createMockPort()
     rpc.registerWorker('w1', port)
@@ -334,7 +331,6 @@ describe('ToolRegistration.timeoutMs — register 入口校验与透传 (U2)', (
     return {
       rpc,
       toolRegistry,
-      syncCalls: () => syncCount,
       dispatchRegister: async (params) => {
         const id = nextId++
         await rpc.dispatch('w1', { jsonrpc: '2.0', id, method: 'plugin.tools.register', params })
@@ -359,10 +355,9 @@ describe('ToolRegistration.timeoutMs — register 入口校验与透传 (U2)', (
 
     expect('result' in resp).toBeTruthy()
     expect(h.toolRegistry.get('my-plugin:my-tool')!.schema.timeoutMs).toBe(600_000)
-    expect(h.syncCalls()).toBe(1)
   })
 
-  it('timeoutMs 为字符串 → 抛 INVALID_TIMEOUT_MS，不落 registry、不 sync', async () => {
+  it('timeoutMs 为字符串 → 抛 INVALID_TIMEOUT_MS，不落 registry', async () => {
     const h = setup()
     const resp = await h.dispatchRegister(baseParams({ timeoutMs: '600000' }))
 
@@ -370,17 +365,15 @@ describe('ToolRegistration.timeoutMs — register 入口校验与透传 (U2)', (
     expect(String(resp.error!.code)).toBe('INVALID_TIMEOUT_MS')
     expect(resp.error!.message.includes('timeoutMs')).toBeTruthy()
     expect(h.toolRegistry.size).toBe(0)
-    expect(h.syncCalls()).toBe(0)
   })
 
-  it('timeoutMs 为 NaN → 抛 INVALID_TIMEOUT_MS，不落 registry、不 sync', async () => {
+  it('timeoutMs 为 NaN → 抛 INVALID_TIMEOUT_MS，不落 registry', async () => {
     const h = setup()
     const resp = await h.dispatchRegister(baseParams({ timeoutMs: Number.NaN }))
 
     expect('error' in resp).toBeTruthy()
     expect(String(resp.error!.code)).toBe('INVALID_TIMEOUT_MS')
     expect(h.toolRegistry.size).toBe(0)
-    expect(h.syncCalls()).toBe(0)
   })
 
   it('不传 timeoutMs → 注册成功且 schema 不落键（现状兼容，缺省回落语义归 U1）', async () => {

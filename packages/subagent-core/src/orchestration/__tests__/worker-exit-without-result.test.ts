@@ -9,9 +9,9 @@
  * 修复语义（本文件锚定）：
  * - exit(0) 且本 runtime 代际未收到 return/error 消息 → transition done,failed +
  *   WORKER_EXITED_WITHOUT_RESULT_MSG 归因 + pending:unregister + onRunDone
- * - exit(0) 但已收到终态消息（script-error 重试退避窗口）→ no-op（rebuild 即将发生）
+ * - exit(0) 但已收到终态消息 → no-op（正常收尾）
  * - handleWorkerMessage 的 return/error 分支必须标记 receivedTerminalMessage（判定的依据）
- * - 非零 exit 行为不变（委托 handleWorkerError 重试矩阵）
+ * - 非零 exit → 委托 handleWorkerError 一次即 failed（[ADR-0122] 原重试矩阵已删）
  *
  * SW-DATA-3 背景：handleReturn / handleWorkerError / handleScriptError 的
  * `await deps.store.save(run)` 未捕获——ENOSPC 等落盘失败时 rejection 经 worker-host 的
@@ -44,8 +44,6 @@ const EXITED_WITHOUT_RESULT_MSG =
 // ── helpers（对齐 worker-message-pump-handlers.test.ts）─────────────────
 
 interface RunMockOpts {
-  workerErrorCount?: number;
-  scriptErrorCount?: number;
   /** 预置 receivedTerminalMessage（模拟 return/error 消息已送达）。 */
   receivedTerminalMessage?: boolean;
 }
@@ -66,8 +64,6 @@ function makeRunningRun(opts: RunMockOpts = {}): WorkflowRun {
     },
     meta: {
       startedAt: new Date().toISOString(),
-      workerErrorCount: opts.workerErrorCount,
-      scriptErrorCount: opts.scriptErrorCount,
     },
     spec: {
       scriptName: "test-wf",
@@ -145,7 +141,7 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
     expect(deps.store.save).toHaveBeenCalledTimes(1);
   });
 
-  it("exit(0) 但已收到终态消息（script-error 重试退避窗口）→ no-op，不被误判 failed", async () => {
+  it("exit(0) 但已收到终态消息 → no-op，不被误判 failed", async () => {
     const run = makeRunningRun({ receivedTerminalMessage: true });
     await seedRunCreated(run);
     const deps = makeDeps();
@@ -185,120 +181,62 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
     expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 
-  it("非零 exit 行为不变：委托 handleWorkerError（未超限 → 退避后 rebuild 重试，不直接 failed）", async () => {
-    // fake timers 跳过 scheduleRebuild 的真实 1s 退避
-    vi.useFakeTimers();
-    try {
-      const run = makeRunningRun();
+  it("非零 exit：委托 handleWorkerError → 一次即 done,failed（ADR-0122，无自动重建）", async () => {
+    const run = makeRunningRun();
     await seedRunCreated(run);
-      const deps = makeDeps();
-      const handlers = makeHandlers();
+    const deps = makeDeps();
+    const handlers = makeHandlers();
 
-      const pending = handleWorkerExit(run, 1, makeHandle(), deps, handlers);
-      await vi.advanceTimersByTimeAsync(1000); // 退避 1s → 触发 rebuildRuntime
-      await pending;
+    await handleWorkerExit(run, 1, makeHandle(), deps, handlers);
 
-      // 未超限 → rebuild（workerHost.start 重建），run 保持 running、不判 failed
-      expect(isRunSettled(run)).toBe(false);
-      expect(run.meta.workerErrorCount).toBe(1);
-      expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
-      expect(deps.onRunDone).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
+    expect(deps.workerHost.start).not.toHaveBeenCalled();
+    expect(deps.onRunDone).toHaveBeenCalledTimes(1);
   });
 });
 
 // ── [R4-F1] handleWorkerError：error + exit(1) 同代际双派发只计一次 ────
 
 describe("handleWorkerError — [R4-F1] 同代际双事件幂等", () => {
-  it("worker 崩溃：error 事件先到（退避窗口内）+ exit(1) 委托二次到达 → 只计一次、只 rebuild 一次", async () => {
-    // 真实时序：worker 崩溃 → onError 与 exit 几乎同时触发。handleWorkerError 进入
-    // scheduleRebuild 的退避 delay（未完成）时 exit(1) 到达 handleWorkerExit → 委托
-    // handleWorkerError 二次进入。旧实现在此处重复计数 + 第二个 scheduleRebuild
-    //（单次崩溃 workerErrorCount +2、双 rebuild 交错）。
-    vi.useFakeTimers();
-    try {
-      const run = makeRunningRun();
+  it("worker 崩溃：error 事件先到 → 一次即 done,failed；exit(1) 委托后到 → settled 守卫丢弃", async () => {
+    // 真实时序：worker 崩溃 → onError 与 exit 几乎同时触发。第一个事件直接终态化
+    // （ADR-0122 无退避窗口），第二个事件被 stale 守卫丢弃——onRunDone 恰一次。
+    const run = makeRunningRun();
     await seedRunCreated(run);
-      const deps = makeDeps();
-      const handlers = makeHandlers();
+    const deps = makeDeps();
+    const handlers = makeHandlers();
 
-      // 第一次：uncaught error 事件（进入退避 delay，不 await 完成）
-      const p1 = handleWorkerError(run, new Error("worker crashed"), deps, handlers);
-      // 第二次：exit(1) 在退避窗口内到达（runtime 尚未被 replace，同代际）
-      const p2 = handleWorkerExit(run, 1, makeHandle(), deps, handlers);
-      await vi.advanceTimersByTimeAsync(1000); // 跳过退避 → 第一个事件的 rebuild 执行
-      await Promise.all([p1, p2]);
+    await handleWorkerError(run, new Error("worker crashed"), deps, handlers);
+    await handleWorkerExit(run, 1, makeHandle(), deps, handlers);
 
-      // 双事件只处理一次：计数 +1（非 +2）、单次 rebuild、run 保持 running
-      expect(run.meta.workerErrorCount).toBe(1);
-      expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
-      expect(isRunSettled(run)).toBe(false);
-      expect(deps.onRunDone).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
+    expect(deps.onRunDone).toHaveBeenCalledTimes(1);
+    expect(deps.workerHost.start).not.toHaveBeenCalled();
   });
 
-  it("幂等守卫不误伤新代际：rebuild 后新 worker 的 error 正常处理（计数/重建各自 +1）", async () => {
-    vi.useFakeTimers();
-    try {
-      const run = makeRunningRun();
+  it("error + exit(1) 双到达只转一次 done,failed（unregister / workflow-record 恰一次）", async () => {
+    const run = makeRunningRun();
     await seedRunCreated(run);
-      const deps = makeDeps();
-      const handlers = makeHandlers();
+    const deps = makeDeps();
+    const handlers = makeHandlers();
 
-      // 第一代：error → 标记本代际 → 退避 → rebuild（新 RunRuntime，标志重置 false）
-      const p1 = handleWorkerError(run, new Error("crash gen-1"), deps, handlers);
-      await vi.advanceTimersByTimeAsync(1000);
-      await p1;
-      expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
+    const p1 = handleWorkerError(run, new Error("worker crashed"), deps, handlers);
+    const p2 = handleWorkerExit(run, 1, makeHandle(), deps, handlers);
+    await Promise.all([p1, p2]);
 
-      // 新代际（rebuildRuntime 构造的真 RunRuntime 实例）标志为 false
-      expect((run.runtime as { receivedTerminalMessage?: boolean }).receivedTerminalMessage).toBe(false);
-
-      // 新代际再崩 → 正常走重试矩阵（计数 2、第二次 rebuild）
-      const p2 = handleWorkerError(run, new Error("crash gen-2"), deps, handlers);
-      // 第二次重试退避是指数值 backoffDelay(2) = 1000×2 = 2000ms，非 1000
-      await vi.advanceTimersByTimeAsync(2000);
-      await p2;
-
-      expect(run.meta.workerErrorCount).toBe(2);
-      expect(deps.workerHost.start).toHaveBeenCalledTimes(2);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("超限路径同样幂等：error + exit(1) 双到达只转一次 done,failed（onRunDone 只调一次）", async () => {
-    vi.useFakeTimers();
-    try {
-      // 预置 workerErrorCount = MAX（3）：本次 error 计数到 4 → 超限 → done,failed
-      const run = makeRunningRun({ workerErrorCount: 3 });
-    await seedRunCreated(run);
-      const deps = makeDeps();
-      const handlers = makeHandlers();
-
-      const p1 = handleWorkerError(run, new Error("worker crashed"), deps, handlers);
-      const p2 = handleWorkerExit(run, 1, makeHandle(), deps, handlers);
-      await Promise.all([p1, p2]);
-
-      expect(run.meta.workerErrorCount).toBe(4); // 只 +1
-      expect(isRunSettled(run)).toBe(true);
-      expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
-      expect(deps.onRunDone).toHaveBeenCalledTimes(1);
-      // [W1] 终局 coda 现含两条 entry（workflow-record 终态条目 + unregister）——
-      // 幂等锚点 = unregister 恰一次（无重复直落），workflow-record 也恰一次
-      expect(
-        deps.appendEntry.mock.calls.filter((c) => c[0] === "pending:unregister"),
-      ).toHaveLength(1);
-      expect(
-        deps.appendEntry.mock.calls.filter((c) => c[0] === "workflow-record"),
-      ).toHaveLength(1);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
+    expect(deps.onRunDone).toHaveBeenCalledTimes(1);
+    // [W1] 终局 coda 现含两条 entry（workflow-record 终态条目 + unregister）——
+    // 幂等锚点 = unregister 恰一次（无重复直落），workflow-record 也恰一次
+    expect(
+      deps.appendEntry.mock.calls.filter((c) => c[0] === "pending:unregister"),
+    ).toHaveLength(1);
+    expect(
+      deps.appendEntry.mock.calls.filter((c) => c[0] === "workflow-record"),
+    ).toHaveLength(1);
   });
 });
 
@@ -317,30 +255,14 @@ describe("handleWorkerMessage — [F1] 终态消息标记", () => {
     expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "done" });
   });
 
-  it("error 消息同样置 true——在 rebuild 前的退避窗口内捕获（replaceRuntime 前 start 时刻）", async () => {
-    // 断言时机说明：标记的生命周期是「本 runtime 代际」。await 整个 handleWorkerMessage
-    // 后 scheduleRebuild 已完成 replaceRuntime，runtime 已换新代际（flag=false 属正确语义）。
-    // 真正需要标记保护的窗口是退避期间（旧 worker exit(0) 到达、run.runtime 仍指向旧代际），
-    // 故在 rebuildRuntime 调 workerHost.start 的时刻（replaceRuntime 之前）捕获。
-    vi.useFakeTimers();
-    try {
-      const run = makeRunningRun();
+  it("error 消息同样置 true（本 runtime 代际标记，供 exit(0) 判定与 R4-F1 幂等守卫消费）", async () => {
+    const run = makeRunningRun();
     await seedRunCreated(run);
-      const deps = makeDeps();
-      let flagAtRebuildStart: boolean | undefined;
-      (deps.workerHost.start as ReturnType<typeof vi.fn>).mockImplementation(() => {
-        flagAtRebuildStart = (run.runtime as { receivedTerminalMessage?: boolean }).receivedTerminalMessage;
-        return { postMessage: vi.fn() };
-      });
+    const deps = makeDeps();
 
-      const pending = handleWorkerMessage(run, { type: "error", error: "boom" }, deps, makeHandlers());
-      await vi.advanceTimersByTimeAsync(1000); // 跳过 scheduleRebuild 真实 1s 退避
-      await pending;
+    await handleWorkerMessage(run, { type: "error", error: "boom" }, deps, makeHandlers());
 
-      expect(flagAtRebuildStart).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect((run.runtime as { receivedTerminalMessage?: boolean }).receivedTerminalMessage).toBe(true);
   });
 });
 
@@ -367,8 +289,8 @@ describe("store.save 抛错（ENOSPC 等）— [SW-DATA-3] 不阻断终态推进
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
   });
 
-  it("handleWorkerError 重试超限：save reject 被吸收，终态 + 通知照常", async () => {
-    const run = makeRunningRun({ workerErrorCount: 3 });
+  it("handleWorkerError：save reject 被吸收，终态 + 通知照常", async () => {
+    const run = makeRunningRun();
     await seedRunCreated(run);
     const deps = makeDeps();
     deps.store.save.mockRejectedValue(new Error("ENOSPC: no space left on device"));
@@ -386,8 +308,8 @@ describe("store.save 抛错（ENOSPC 等）— [SW-DATA-3] 不阻断终态推进
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
   });
 
-  it("handleScriptError 重试超限：save reject 被吸收，终态 + 通知照常", async () => {
-    const run = makeRunningRun({ scriptErrorCount: 3 });
+  it("handleScriptError：save reject 被吸收，终态 + 通知照常", async () => {
+    const run = makeRunningRun();
     await seedRunCreated(run);
     const deps = makeDeps();
     deps.store.save.mockRejectedValue(new Error("ENOSPC: no space left on device"));

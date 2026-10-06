@@ -32,17 +32,17 @@
 
 **macOS（Apple Silicon）**
 ```bash
-curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.11/TaiJi-0.10.11-mac-arm64.dmg -o /tmp/TaiJi.dmg && open /tmp/TaiJi.dmg
+curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.14/TaiJi-0.10.14-mac-arm64.dmg -o /tmp/TaiJi.dmg && open /tmp/TaiJi.dmg
 ```
 
 **Linux**
 ```bash
-curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.11/TaiJi-0.10.11-x86_64.AppImage -o ~/TaiJi.AppImage && chmod +x ~/TaiJi.AppImage && ~/TaiJi.AppImage
+curl -L https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.14/TaiJi-0.10.14-x86_64.AppImage -o ~/TaiJi.AppImage && chmod +x ~/TaiJi.AppImage && ~/TaiJi.AppImage
 ```
 
 **Windows（PowerShell）**
 ```powershell
-Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.11/TaiJi-0.10.11-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download/v0.10.14/TaiJi-0.10.14-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
 ```
 
 </details>
@@ -54,17 +54,17 @@ Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download
 
 **macOS（Apple Silicon）**
 ```bash
-curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.11/TaiJi-0.10.11-mac-arm64.dmg -o /tmp/TaiJi.dmg && open /tmp/TaiJi.dmg
+curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.14/TaiJi-0.10.14-mac-arm64.dmg -o /tmp/TaiJi.dmg && open /tmp/TaiJi.dmg
 ```
 
 **Linux**
 ```bash
-curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.11/TaiJi-0.10.11-x86_64.AppImage -o ~/TaiJi.AppImage && chmod +x ~/TaiJi.AppImage && ~/TaiJi.AppImage
+curl -L https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.14/TaiJi-0.10.14-x86_64.AppImage -o ~/TaiJi.AppImage && chmod +x ~/TaiJi.AppImage && ~/TaiJi.AppImage
 ```
 
 **Windows（PowerShell）**
 ```powershell
-Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.11/TaiJi-0.10.11-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
+Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/download/v0.10.14/TaiJi-0.10.14-setup-x64.exe" -OutFile "$env:TEMP\TaiJi-setup.exe" -UseBasicParsing; & "$env:TEMP\TaiJi-setup.exe"
 ```
 
 </details>
@@ -164,7 +164,7 @@ taiji 的 Agent 能力通过 pi 扩展机制实现，源码在 [`extensions/`](e
 | [`pi-cw-tool`](extensions/universal/cw-tool/README.md) | cw 2.0 runner + `cw_query` 工具 |
 | [`pi-provider-live-sync`](extensions/universal/provider-live-sync/README.md) | Provider 配置实时同步 |
 
-其余 5 个（`agent-ext` / `msg-id-mapper` / `plugin-bridge` / `system-prompt` / `system-prompt-trace`，npm 包名带 `pi-` 前缀）为 taiji 集成专用，源码在 `extensions/taiji/` 下。扩展开发见 [docs/extensions/development-guide.md](docs/extensions/development-guide.md)。
+其余 4 个（`agent-ext` / `msg-id-mapper` / `system-prompt` / `system-prompt-trace`，npm 包名带 `pi-` 前缀）为 taiji 集成专用，源码在 `extensions/taiji/` 下。扩展开发见 [docs/extensions/development-guide.md](docs/extensions/development-guide.md)。
 
 ---
 

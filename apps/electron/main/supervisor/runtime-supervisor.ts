@@ -197,14 +197,98 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
   }
 
   /**
-   * 启动 runtime（幂等）。
+   * 启动 runtime（幂等 + 并发串行化）。
    *
    * 时序：if child 活着 → 复用 → stop（清旧）→ findAvailablePort → spawn → waitForHealth → writePortFile。
    * 重置 stopping 标志（从崩溃重启或用户手动重试进入时，清掉上次的 stopping）。
    *
+ * 并发串行化（AM2，TOCTOU 双 spawn 根修）：toggle 入口（restartForConfigChange）
+ * 与启动链/崩溃重启并发时，双方都可能通过幂等守卫（守卫检查在 await stop 之前完成）
+   * → 双 spawn 抢端口。修复 = promise 链串行队列：
+   * - 串行而非 join（共享同一 promise）：join 会让后到的 toggle 复用先到的启动结果——
+   *   拿到旧配置的启动端口（幂等守卫命中旧实例），违背「toggle 必须以新配置重启」的
+   *   语义；串行队列保证每次 start 调用独立执行幂等判定。
+   * - 前序失败不阻塞后序：链条以 settle 后的空 promise 续接，失败不毒化队列。
+   * - 只串行化本方法：stop()/restartRuntime() 不包——attemptRestart→start 已经过本
+   *   串行入口，嵌套包裹会在 doStart 内 await start 时自死锁（doStart 无内部递归
+   *   start 调用，已核实）。
+   *
    * @returns 实际监听的端口号
    */
-  async start(): Promise<number> {
+  start(): Promise<number> {
+    const run = this.startChain.then(() => this.doStart(), () => this.doStart())
+    this.startChain = run.then(() => undefined, () => undefined)
+    return run
+  }
+
+  /**
+   * start 串行队列尾指针：每个新 start 排在其后（AM2）。类型含 unknown 拒因——
+   * 消费侧（start 包装）对 reject 分支显式续跑 doStart，不依赖前序成败。
+   */
+  private startChain: Promise<unknown> = Promise.resolve()
+
+  /**
+   * 配置变更触发的 runtime 重启（remote-access 开关切换入口；listen host 与
+   * remote argv 是启动期一次性决策，配置落盘后必须真重启才生效）。
+   *
+   * 与 restartRuntime() 的差异：后者对存活进程幂等短路（直接广播端口不重启），
+   * 恰恰违背「以新配置重启」的语义；本方法无条件 stop + 重新 spawn。
+   *
+   * 编排（收口：原 bridge-handlers 复刻的 stop→start→广播编排上收至此，
+   * renderer 可见协议变为 supervisor 单点）：
+   * 1. 排入 startChain 串行队列（AM2：与手动 start / 崩溃重启并发不双 spawn；
+   *    队列续接语义同 start()——前序失败不毒化后序）；
+   * 2. 队列内先广播 runtime-restarting 再动作（对齐崩溃重启链时序：renderer 的
+   *    useConnection 在 restarting 即收口 pending 并停自动重连；广播晚于 stop 会让
+   *    多秒 stop+spawn+健康检查窗口内 renderer 无任何重连提示）；
+   * 3. stop()（markStopping 防 exit 误判崩溃）→ doStart()（禁止调公开 start()——
+   *    会再次排队 startChain 自死锁）→ 成功广播 runtime-port（新端口）。
+   *
+   * 失败语义：不走崩溃退避链（handleRestartFailure）——配置变更重启是用户显式
+   * 动作，失败即补 runtime-failed 终态广播（renderer 经既有 failed 态拿重试按钮，
+   * 协议不变量 closing：每次 runtime-restarting 广播必有终态广播——runtime-port
+   * 或 runtime-failed）后 reject 上抛（invoke rejection，面板 toast 显形）；此时
+   * runtime 已停，用户经既有 runtime-restart IPC 手动重试。
+   *
+   * @returns 重启后实际监听的端口号
+   */
+  restartForConfigChange(): Promise<number> {
+    const run = this.startChain.then(
+      () => this.doRestartForConfigChange(),
+      () => this.doRestartForConfigChange(),
+    )
+    this.startChain = run.then(() => undefined, () => undefined)
+    return run
+  }
+
+  /** restartForConfigChange 的队列内执行体（广播 → stop → 重新 spawn → 广播端口/失败广播）。 */
+  private async doRestartForConfigChange(): Promise<number> {
+    // attempt=0：单次尝试不进退避计数（非崩溃链；payload 形态与崩溃重启链一致）
+    this.broadcastToAllWindows('runtime-restarting', { attempt: 0 })
+    await this.stop()
+    try {
+      // doStart 前置 stop 已清 child，幂等守卫不命中 → 必然真 spawn（新配置生效的保证）
+      const port = await this.doStart()
+      this.broadcastToAllWindows('runtime-port', port)
+      return port
+    } catch (e) {
+      // 失败补 failed 终态广播：renderer 经既有 failed 态拿重试按钮，协议不变量
+      // closing（restarting 必有终态广播，否则 renderer 停在 restarting 态不自愈，
+      // 且 port=null 使面板 toggle 被 port!==null 门挡住，恢复通道 UI 不可达）。
+      // payload 形态对齐 scheduleRestart 耗尽分支（attempts + message）；纯 reject
+      // 语义不变（不走崩溃退避链），补广播后原样 rethrow。
+      const message = e instanceof Error ? e.message : String(e)
+      // toggle 失败同样刷新真因（RD-3#2，对齐 startAndNotify / attemptRestart 记录形态）：
+      // renderer 若错过本次 runtime-failed 广播（boot 竞态 / 无窗口在场），拉取兜底通道
+      // get-runtime-start-error 仍能取到真因——缺此行真因随当次广播窗口丢失
+      this.lastStartError = message
+      this.broadcastToAllWindows('runtime-failed', { attempts: 0, message })
+      throw e
+    }
+  }
+
+  /** start() 的原函数体（幂等守卫 + 完整启动时序），串行队列内执行（AM2）。 */
+  private async doStart(): Promise<number> {
     // 重置停止标志（start 是新生命周期的开始，无论上次是崩溃还是主动 stop）
     this.policy.reset()
     // 同理复位 before-quit 上下文标记（防御性：正常时序 start 先于 before-quit，
@@ -244,7 +328,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
 
     writePortFile(port)
     this._port = port
-    // 重启成功 → 记录（稳定窗口后清零计数）
+    // 重启成功 → 记录事实（计数无时间窗清零，清零唯一入口 = 用户显式重试）
     this.policy.recordSuccess()
     // [HISTORICAL] 复位 stopping：上方 `await this.stop()`（清旧进程）曾 markStopping，
     // 成功启动后若不复位，运行期崩溃的 exit 会被 onRuntimeExit 误判「主动停止」短路
@@ -445,7 +529,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
     // u7c（crash-forensics D5 ④）：planned 边（86）——滚动重启计划内退出走立即重启
     // 零退避零计数：policy.recordPlanned() 不进 counting 状态机、不做 shouldRestart 门
     // 检查（exhausted 态下滚动重启仍须照常重启）、延迟恒 0。重启成功后 start() 的
-    // recordSuccess 按既有稳定窗口规则收敛 crash 计数。start() 失败则经 attemptRestart
+    // recordSuccess 只记录事实（计数无时间窗清零，ADR-0122）。start() 失败则经 attemptRestart
     // → handleRestartFailure 回到既有退避路径（计划内重启失败 = 需要退避的异常形态）。
     if (verdict === 'planned-shutdown') {
       const delay = this.policy.recordPlanned()

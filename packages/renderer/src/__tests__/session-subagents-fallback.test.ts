@@ -10,7 +10,8 @@
  * 验证链路：transport.onMessage 注册的 routeInbound handler 收到终态推送 →
  *   1. subagents 非活跃 session（focus≠A）：applyRecords(A, [done]) → A 分区更新，hasRunning(A)=false
  *   2. workflowUpdate 非活跃 session：终态信号触发 loadWorkflows → 分区 done，hasRunningWorkflow=false
- *   （running 信号 500ms 延迟重试在 store 层，由 stores/workflow.test.ts triggerWorkflowReload describe 锁定）
+ *   （信号到达即拉一次，running 不再有 500ms 延迟重试——待裁决项 5 根治，构造性时序见
+ *   stores/workflow.ts triggerWorkflowReload 的 [时间平抑红线登记]）
  *
  * mock 策略：vi.hoisted 捕获 ws-client.onMessage 注册的 routeInbound handler，测试向其注入
  * ServerMessage。mock ipc/ws-client 避免 init() 真实连接。mock @/api/domains/session 域函数

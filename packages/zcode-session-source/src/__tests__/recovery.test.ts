@@ -14,7 +14,6 @@ import { join } from 'node:path'
 import {
   SNAPSHOT_TMP_PREFIX,
   SqliteUnreadableError,
-  countSnapshotDirs,
   openViaSnapshot,
   openWithRecovery,
 } from '../recovery.ts'
@@ -24,10 +23,12 @@ import {
   checkpointAndClose,
   defaultTranscriptSeeds,
   dirSnapshot,
+  expectNoNewSnapshotDirs,
   isBun,
   makeFixtureDir,
   openWritableSqlite,
   quiesceDir,
+  snapshotDirNameSet,
 } from './helpers.ts'
 import {
   expectProbeOutcomeAccounting,
@@ -121,7 +122,7 @@ describe('W1 恢复路径配对断言（静息态库：-wal 缺失）', () => {
 
       const driver = await loadSqliteDriver()
       const before = dirSnapshot(fx.root)
-      const snapshotsBefore = countSnapshotDirs()
+      const snapshotsBefore = snapshotDirNameSet()
       // 平台矩阵对账（node/darwin bun：works；linux bun：throws）——对不上 =
       // bun 捆绑 sqlite 语义漂移警报；未登记平台探测兜底
       const probe = await probeRestDbImmutableUriOpen(dbPath)
@@ -146,7 +147,7 @@ describe('W1 恢复路径配对断言（静息态库：-wal 缺失）', () => {
       if (probe.outcome === 'works') {
         expect(dirSnapshot(fx.root)).toEqual(before)
       }
-      expect(countSnapshotDirs()).toBe(snapshotsBefore)
+      await expectNoNewSnapshotDirs(snapshotsBefore)
     } finally {
       fx.cleanup()
     }
@@ -165,7 +166,7 @@ describe('W2 两态断言（-wal 在场）', () => {
           .prepare('INSERT INTO session (id, directory, title, task_type, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?)')
           .run('s-w2', '/tmp/w2', 'LIVE-WAL-ROW', 'interactive', 1, 2)
         expect(statSync(`${fixture.dbPath}-wal`).size).toBeGreaterThan(0)
-        const snapshotsBefore = countSnapshotDirs()
+        const snapshotsBefore = snapshotDirNameSet()
 
         const opened = await openWithRecovery(fixture.dbPath)
         try {
@@ -176,8 +177,8 @@ describe('W2 两态断言（-wal 在场）', () => {
         } finally {
           opened.dispose()
         }
-        // 未触发 L3（快照计数差分为零；via 已断言 L1——结构上到不了 L3）
-        expect(countSnapshotDirs()).toBe(snapshotsBefore)
+        // 未触发 L3（无新增快照残留；via 已断言 L1——结构上到不了 L3）
+        await expectNoNewSnapshotDirs(snapshotsBefore)
       } finally {
         writer.close()
       }
@@ -197,7 +198,7 @@ describe('W2 两态断言（-wal 在场）', () => {
           .prepare('INSERT INTO session (id, directory, title, task_type, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?)')
           .run('s-w2g', '/tmp/w2g', 'GATED', 'interactive', 1, 2)
         const before = dirSnapshot(fx.root)
-        const snapshotsBefore = countSnapshotDirs()
+        const snapshotsBefore = snapshotDirNameSet()
 
         chmodSync(fixture.dbPath, 0o000) // 直开失败（EACCES → CANTOPEN），-wal 在场
         let caught: unknown
@@ -212,7 +213,7 @@ describe('W2 两态断言（-wal 在场）', () => {
         expect(err.attempted).toEqual(['L1-direct'])
         expect(err.message).toContain('-wal present')
         // 绝不触发任何拷贝
-        expect(countSnapshotDirs()).toBe(snapshotsBefore)
+        await expectNoNewSnapshotDirs(snapshotsBefore)
         expect(dirSnapshot(fx.root)).toEqual(before)
 
         chmodSync(fixture.dbPath, 0o644)
@@ -231,7 +232,7 @@ describe('阶梯编排（openWithRecovery）', () => {
     const fx = makeFixtureDir('zss-ladder-')
     try {
       await buildFixtureDb(fx.root, defaultTranscriptSeeds(), { quiesce: true })
-      const snapshotsBefore = countSnapshotDirs()
+      const snapshotsBefore = snapshotDirNameSet()
       const opened = await openWithRecovery(join(fx.root, 'db.sqlite'))
       try {
         // via 是两项开库行为（平台矩阵登记）的编排投影——known 红灯 = bun 捆绑
@@ -252,7 +253,7 @@ describe('阶梯编排（openWithRecovery）', () => {
         // 附属（那是只读连接的驱动行为，§3.5「-shm 创建面」已披露）——此处仅确认
         // 快照路径零产物
       }
-      expect(countSnapshotDirs()).toBe(snapshotsBefore)
+      await expectNoNewSnapshotDirs(snapshotsBefore)
     } finally {
       fx.cleanup()
     }
@@ -263,7 +264,7 @@ describe('阶梯编排（openWithRecovery）', () => {
     try {
       const dbPath = join(fx.root, 'db.sqlite')
       writeFileSync(dbPath, 'definitely not a sqlite database'.repeat(10))
-      const snapshotsBefore = countSnapshotDirs()
+      const snapshotsBefore = snapshotDirNameSet()
 
       let caught: unknown
       try {
@@ -278,7 +279,7 @@ describe('阶梯编排（openWithRecovery）', () => {
       expect(err.attempted).toEqual(['L1-direct', 'L2-immutable', 'L3-snapshot'])
       expect(err.message).toContain('recovery ladder exhausted')
       // L3 失败路径 finally 清理：快照目录不残留
-      expect(countSnapshotDirs()).toBe(snapshotsBefore)
+      await expectNoNewSnapshotDirs(snapshotsBefore)
     } finally {
       fx.cleanup()
     }
@@ -306,7 +307,7 @@ describe('L3 快照兜底（单级）', () => {
     try {
       await buildFixtureDb(fx.root, defaultTranscriptSeeds(), { quiesce: true })
       const dbPath = join(fx.root, 'db.sqlite')
-      const snapshotsBefore = countSnapshotDirs()
+      const snapshotsBefore = snapshotDirNameSet()
 
       const snap = await openViaSnapshot(dbPath)
       expect(snap.snapshotDir.split('/').pop()).toMatch(new RegExp(`^${SNAPSHOT_TMP_PREFIX}`))
@@ -319,7 +320,7 @@ describe('L3 快照兜底（单级）', () => {
       snap.db.close()
       const { rmSync } = await import('node:fs')
       rmSync(snap.snapshotDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-      expect(countSnapshotDirs()).toBe(snapshotsBefore)
+      await expectNoNewSnapshotDirs(snapshotsBefore)
     } finally {
       fx.cleanup()
     }
@@ -330,7 +331,7 @@ describe('L3 快照兜底（单级）', () => {
     try {
       const dbPath = join(fx.root, 'db.sqlite')
       writeFileSync(dbPath, 'garbage garbage garbage'.repeat(8))
-      const snapshotsBefore = countSnapshotDirs()
+      const snapshotsBefore = snapshotDirNameSet()
 
       let caught: unknown
       try {
@@ -341,7 +342,7 @@ describe('L3 快照兜底（单级）', () => {
       expect(caught).toBeInstanceOf(Error)
       expect((caught as Error).message).not.toContain('size gate')
       // 失败路径清理（openViaSnapshot 内 catch 分支）：快照目录已删
-      expect(countSnapshotDirs()).toBe(snapshotsBefore)
+      await expectNoNewSnapshotDirs(snapshotsBefore)
     } finally {
       fx.cleanup()
     }
@@ -353,7 +354,7 @@ describe('L3 快照兜底（单级）', () => {
       const dbPath = join(fx.root, 'big.sqlite')
       writeFileSync(dbPath, '')
       truncateSync(dbPath, 300 * 1024 * 1024) // 稀疏文件：truncate 即得，0ms 级
-      const snapshotsBefore = countSnapshotDirs()
+      const snapshotsBefore = snapshotDirNameSet()
 
       let caught: unknown
       try {
@@ -363,7 +364,7 @@ describe('L3 快照兜底（单级）', () => {
       }
       expect(caught).toBeInstanceOf(SqliteUnreadableError)
       expect((caught as Error).message).toContain('size gate')
-      expect(countSnapshotDirs()).toBe(snapshotsBefore)
+      await expectNoNewSnapshotDirs(snapshotsBefore)
 
       const { unlinkSync } = await import('node:fs')
       unlinkSync(dbPath)

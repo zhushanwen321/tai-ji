@@ -16,7 +16,7 @@ export type {
   CompactErrorCode,
   // hook 否决类分类码（message.send / message.bash / delivery.submit blocked）：同上跨包共用
   MessageBlockedCode,
-  TerminalConfig, TerminalErrorCode, TerminalUnknownErrorCode, TerminalEnvelopeCode,
+  TerminalConfig, TerminalInstanceSummary, TerminalRoutingErrorCode, TerminalErrorCode, TerminalUnknownErrorCode, TerminalEnvelopeCode,
   SkillCacheScope, SkillCacheInvalidatedPayload,
   SessionTraceHeaderPayload, SessionTraceMalformedLine, SessionTraceSessionEndPayload,
   SessionViewSnapshot,
@@ -62,7 +62,7 @@ export type {
   PiRespawnNoticeVariant,
   SendPromptReason,
 } from './message'
-export { parseBgNotifyDetails, COMPLETE_NOTIFY_CUSTOM_TYPES, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective, PI_RESPAWN_NOTICE_CUSTOM_TYPE, parseRespawnNoticeVariant, parseBackgroundBashDetails, parseWorkflowResultNotify, MSG_ID_TAG_RE, MSG_ID_TAG_BARE_RE, BARE_UUID_RE, markerLiteral, DELIVERY_PREVIEW_MAX_CHARS, decodeNewlineEscapes } from './message'
+export { parseBgNotifyDetails, COMPLETE_NOTIFY_CUSTOM_TYPES, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective, PI_RESPAWN_NOTICE_CUSTOM_TYPE, parseRespawnNoticeVariant, parseBackgroundBashDetails, parseWorkflowResultNotify, MSG_ID_TAG_RE, MSG_ID_TAG_BARE_RE, BARE_UUID_RE, MSG_ID_UUID_SEGMENT, MSG_ID_ADOPTED_SEGMENT, markerLiteral, DELIVERY_PREVIEW_MAX_CHARS, decodeNewlineEscapes } from './message'
 // w21 pi-entry：pi session entry wire 类型（runtime 实时重构 ↔ core reducer ↔ protocol payload 三方共用）
 export type {
   PiEntry, PiEntryBase, PiMessageEntry, PiMessageBody,
@@ -91,13 +91,42 @@ export type {
 // LLM 重试配置域（类型 + D8 合法域常量 + 校验纯函数，renderer 表单与 runtime 写入侧共用）
 export type { LlmRetryConfig, LlmRetryProviderConfig } from './llm-retry'
 export { LLM_RETRY_DOMAIN, validateLlmRetryConfig } from './llm-retry'
+// codemode 域 WS 协议契约（codemode 设计 D1/A1：开关命令对请求响应 + settings.json 损坏错误态形状，renderer 与 runtime 共用）
+export type {
+  CodemodeSettingsCorruption,
+  CodemodeEnabledResult,
+  CodemodeSetEnabledRequest,
+  CodemodeSetEnabledResult,
+} from './codemode'
+// mcp 域 WS 协议契约（pi-mcp-management 设计：mcp.list/add/update/setEnabled/remove/test/testCancel 七命令 + 条目/徽标/损坏错误态形状，renderer 与 runtime 共用）
+export type {
+  McpExposureLevel,
+  McpServerEntryValue,
+  McpOauthConfig,
+  McpServerEntry,
+  McpConfigCorruption,
+  McpListRequest,
+  McpListResult,
+  McpAddRequest,
+  McpUpdateRequest,
+  McpRemoveRequest,
+  McpSetEnabledRequest,
+  McpMutationResult,
+  McpTestRequest,
+  McpTestHandle,
+  McpTestCancelRequest,
+  McpTestCancelResult,
+  McpTestResultEvent,
+  McpProbeState,
+  McpServerStatusBadge,
+} from './mcp'
 // RPC 超时校准链常量 SSOT（timeout-slow-flow-wallclock D2/D3，renderer/runtime 双端编译期对齐）
 export { BASH_RPC_TIMEOUT_MS, COMPACT_RPC_TIMEOUT_MS, RENDERER_RPC_MARGIN_MS } from './timeouts'
 export * from './extension'
 export * from './git'
 export * from './plugin'
 
-export { BASE_PORT, DEV_PORT_OFFSET, MAX_PORT, ENV_WHITELIST_PREFIXES, AMBIENT_ENV_NAMES, SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES, SUBAGENT_RECORD_CUSTOM_TYPE, PROVIDER_API_TYPES, KNOWN_PI_API_TYPES, SYSTEM_PROMPT_MAX_LENGTH, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, IMAGE_LIMITS, MAX_WS_PAYLOAD_BYTES, PLUGIN_NOTIFY_LIMITS, UI_TOAST_LIMITS, ENGINE_LAUNCH_ENV_KEYS, PRESET_FALLBACK_ENV_KEYS, TAIJI_RUNTIME_PI_RECLAIM_IDLE_MS, TAIJI_RUNTIME_PI_RECLAIM_TICK_MS, TAIJI_RUNTIME_PI_RECLAIM_VIEWED_WINDOW_MS, TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS, DEFAULT_PI_RECLAIM_IDLE_MS, DEFAULT_PI_RECLAIM_TICK_MS, DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS, DEFAULT_PI_RECLAIM_FORM_MAX_AGE_MS, TAIJI_SESSION_ACTIVATE_TIMEOUT_MS, DEFAULT_SESSION_ACTIVATE_TIMEOUT_MS, MAX_SPEAK_CHARS, TTS_CACHE_MAX_FILES, TTS_CACHE_MAX_BYTES } from './constants'
+export { BASE_PORT, DEV_PORT_OFFSET, MAX_PORT, ENV_WHITELIST_PREFIXES, AMBIENT_ENV_NAMES, SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES, SUBAGENT_RECORD_CUSTOM_TYPE, PROVIDER_API_TYPES, KNOWN_PI_API_TYPES, SYSTEM_PROMPT_MAX_LENGTH, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, IMAGE_LIMITS, MAX_WS_PAYLOAD_BYTES, PLUGIN_NOTIFY_LIMITS, UI_TOAST_LIMITS, ENGINE_LAUNCH_ENV_KEYS, PRESET_FALLBACK_ENV_KEYS, MAX_SPEAK_CHARS, TTS_CACHE_MAX_FILES, TTS_CACHE_MAX_BYTES } from './constants'
 
 export type { ProviderApiType } from './constants'
 // 崩溃韧性共享契约 SSOT（实施计划 u-foundation：
@@ -110,7 +139,15 @@ export { OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES, RING_BUDGET_B
 // Electron IPC 通道名 SSOT（u-foundation：renderer-log 上报通道 D2 /
 // image-cache 落盘通道族首成员 D6-⑨）；既有通道仍内联于 preload/main 不在此收敛，
 // 存量边界说明见 ipc-channels.ts 头注释。
-export { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE } from './ipc-channels'
+export { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ } from './ipc-channels'
+// local-file 预检 / 源码读取通道 payload 类型（chat-html-support §6.9 D9：preload 两文件 /
+// renderer lib/ipc / main local-file-prefixes 四方共用同一形态声明——C-comm-22 唯一类型源）。
+export type {
+  LocalFileServableReason,
+  LocalFileServableResult,
+  LocalFileReadReason,
+  LocalFileReadResult,
+} from './ipc-payloads'
 // renderer-log 通道 payload 类型（u2：preload ElectronAPI 签名与 main
 // handler 校验共用同一形态声明，防两端漂移；main 侧仍做运行时再校验，见 ipc-payloads.ts 头注释）。
 export type { RendererErrorSource, RendererMemorySnapshot, RendererLogPayload } from './ipc-payloads'
@@ -134,6 +171,10 @@ export {
   type DiagnosticExportError,
   type DiagnosticExportBundleResult,
 } from './ipc-payloads'
+// browser:shields 遮蔽面上报通道契约（display-containers §6.7：payload 形状 /
+// ShieldFace 单项——preload ElectronAPI 签名、renderer ipc 封装与聚合上报、
+// main display-gate 校验三方共用同一形态声明，防漂移）。
+export type { ShieldRect, ShieldFace, ShieldsFacesPayload } from './ipc-payloads'
 // 崩溃台账事件 Schema SSOT（docs/architecture/crash-forensics-and-watchdog.md §3.3 D1，
 // 实施计划 u1a：layer/event/reason 枚举 + 字段集 + writer 接口——u1b runtime 与
 // u1c main 两 writer 共用，禁止复制定义；纯类型/常量无 node 依赖，barrel 安全）。
@@ -179,6 +220,12 @@ export * from './file-tree'
 export type { RecentWorkspaceRecord } from './workspace'
 export type { Project, ProjectStoreState } from './project'
 export type { SubagentRecord, SubagentStatus, ClosedDisplayStatus } from './subagent'
+// 远程访问配置契约 SSOT（remote-access.json：main 写入侧与 runtime 握手热读侧共用；
+// 含 IPC 信封类型 RemoteAccessInfo/RemoteAccessToggleResult，main/preload/renderer
+// 三端共同 import；含无策略 shape 谓词（main/runtime 双侧 shape 判据单源）；
+// 纯类型/常量/纯函数无 node 依赖，barrel 安全）。
+export type { RemoteAccessConfig, RemoteAccessUrl, RemoteAccessInfo, RemoteAccessToggleResult } from './remote-access'
+export { REMOTE_ACCESS_FILENAME, REMOTE_TOKEN_HEX64, isRemoteAccessConfigShape } from './remote-access'
 // 导入会话 RPC 契约（pi / zcode 多源，runtime/renderer 两端共同 import；多源扩展见 docs/architecture/session-import-sources.md）
 export type {
   ImportSourceKind, ImportWarning, ImportErrorCode,
@@ -201,7 +248,17 @@ export {
   btwVirtualId,
   isBtwVirtualId,
   extractBtwPiSessionId,
+  resolveVirtualSessionId,
 } from './virtual-session-id'
+// 终端实例编号格式谓词（`term:<sid>:<seq>`，terminal-multi-instance §0.5 P7 精确前缀口径）——
+// runtime terminal-service / renderer terminal-instance-registry / core terminal-write-queue 三包共用 SSOT
+export {
+  TERMINAL_ID_ROOT,
+  terminalIdPrefixOf,
+  isTerminalIdOfSession,
+  sessionIdOfTerminalId,
+  seqOfTerminalId,
+} from './terminal-id'
 // Coding Plan 额度查询类型
 export type {
   QuotaWindow,

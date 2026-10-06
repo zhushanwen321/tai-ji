@@ -394,7 +394,7 @@ bash scripts/validate-runtime-bundle.sh    # 作为第 7 步自动运行（pre-c
 | B1 | `plugin.toggle {enabled:false}` 后 status ≠ active 且 `enabled=false` + 日志含 `[e2e-minimal] deactivate called` | toggle 停用链路 |
 | B2 | `plugin.toggle {enabled:true}` 后 status 恢复 `active` + 日志再次含 `activate called` | toggle 重激活链路 |
 | D1 | `message.send`（fake session，hook 先于 ensureActive 执行，SESSION_NOT_FOUND error envelope 属预期） | message-dispatcher hook 时序 |
-| E1 | e2e-perm boot 挂起等审批 → WS `plugin.approvePermissions` → reply 中 `status=active` | 权限审批唤醒链路 |
+| E1 | e2e-perm boot 挂起等审批 → WS `plugin.approvePermissions`（reply pong ack）→ 紧随 `plugin.list` 查询 `status=active` | 权限审批唤醒链路 |
 | E2 | 批准 RPC 总耗时 < 10s（实测 ~100ms；修复前干等 30s 超时，boot plugins=30007.5ms） | 同上 |
 | 日志断言 | `[e2e-hook] onBeforeSendMessage fired: hello v6magic marker` + `transform computed` + `[e2e-perm] activate called`（worker stdout 经 host 转发落 runtime 日志） | hook 真实执行 + 批准后 activate 真实执行 |
 | 负向断言 | 日志 0 次 `failed/timed out`（hook 管道失败）/ `ERR_MODULE_NOT_FOUND`（F1 事故特征）/ `PERMISSION_DENIED` | 回归防护 |

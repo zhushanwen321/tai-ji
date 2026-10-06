@@ -253,6 +253,9 @@ export const UNIFIED_LOG_PREDICATE =
 
 export function buildLogShowArgs(crashTsMs: number): string[] {
   return [
+    // macOS `log` 必须带子命令（`log show --start ...`）；缺 `show` 时 log 以
+    // 「unrecognized option」退出、取证整链空转（execFile('log', args) 只拼选项不拼子命令）。
+    'show',
     '--start', formatLogShowTime(crashTsMs - UNIFIED_LOG_WINDOW_MS),
     '--end', formatLogShowTime(crashTsMs + UNIFIED_LOG_WINDOW_MS),
     '--style', 'compact',

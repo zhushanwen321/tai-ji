@@ -23,7 +23,7 @@ import {
   createSessionDeliveryRegistry,
   type SessionDeliveryDeps,
 } from '../session-delivery-registry.js'
-import { applySessionOccupancyTransition, OCCUPANCY_SETTLE_WINDOW_MS, occupancySettleWindow } from '../event-interpreter.js'
+import { applySessionOccupancyTransition } from '../event-interpreter.js'
 import type { IDispatcherSessionOps } from '../session-internal.js'
 import type { IManagedSessionView } from '../types.js'
 import type { IPiEngine, IProcessManager } from '../../ports/pi-engine.js'
@@ -57,6 +57,10 @@ interface HarnessOptions {
   hookModifiedContent?: string
   hookBlocked?: boolean
   promptError?: Error
+  /** client.prompt 的返回值（disposition 接线用例注入；缺省 {} = 无 disposition 字段）。 */
+  promptResult?: unknown
+  /** get_commands 清单（命令识别用例注入；缺省 [] = 空清单）。 */
+  commands?: Array<{ name: string; source: string }>
   sessionByClient?: Partial<IManagedSessionView>
   /** [CP6 移植] deps.getSession 的返回视图（收口窗回调重查/置位断言用；缺省同 session）。 */
   sessionView?: unknown
@@ -70,12 +74,13 @@ function makeHarness(opts: HarnessOptions = {}) {
     prompt: vi.fn(async (..._args: unknown[]) => {
       calls.push('prompt')
       if (opts.promptError) throw opts.promptError
-      return {}
+      return opts.promptResult ?? {}
     }),
     // 入口同步 touch（idle-pi-reclamation D6-1）经 pm.getClient 到达本 fake
     touchActivity: vi.fn(),
     getEntries: vi.fn(async () => ({ data: { entries: [] } })),
     clearQueue: vi.fn(async () => ({ steering: [], followUp: [] })),
+    getCommands: vi.fn(async () => opts.commands ?? []),
     onEvent: vi.fn(() => () => {}),
   }
   const session = makeMockSession(opts.sessionByClient ?? {})
@@ -392,23 +397,14 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
     expect(h.client.prompt).toHaveBeenCalledTimes(1)
     expect(h.published.filter((m) => m.type === 'send.rejected')).toHaveLength(0)
   })
-
-  it('入口同步 touch 保持（hook 执行窗口内不显空闲，防 idle 回收误伤）', async () => {
-    const h = makeHarness()
-    const touch = h.client.touchActivity as unknown as { mock: { calls: unknown[] } }
-    await h.dispatcher.sendMessage('s1', '消息')
-    expect(touch.mock.calls.length).toBeGreaterThanOrEqual(1)
-  })
 })
 
 /**
- * CP6：命令-only prompt 的 occupancy 收口（scheduler-trigger-inversion §11 CP6）。
- *
- * 前提已实测确认：pi 对 `/` 开头文本先执行命令 handler、纯命令不产 turn 事件；dispatcher
- * 已在 prompt 前置 dispatching ⇒ 无收口则永远卡住。断言口径泛化（不限于 scheduler 场景）:
- * 收口对**所有** prompt 生效。
+ * [pi1-disposition-chat-flow D1/D3] 原 CP6 短窗测试组随窗口机制退役删除；occupancy 的
+ * 回落现由 pi 权威事实驱动（handled 响应即回落；ADR-0122 终局事件化）。本组锚定投递
+ * 链路上的 handled 终局行为（终局 / 通知 / occupancy 回落幂等门 / started 不驱动界面）。
  */
-describe('CP6 命令-only prompt occupancy 收口（短窗 + 幂等门）', () => {
+describe('handled 终局与 occupancy 事实驱动（D1/D3，CP6 退役后）', () => {
   type OccTurn = 'idle' | 'dispatching' | 'generating' | 'settling'
   interface FakeView {
     [key: string]: unknown
@@ -421,78 +417,56 @@ describe('CP6 命令-only prompt occupancy 收口（短窗 + 幂等门）', () =
 
   beforeEach(() => {
     vi.useFakeTimers()
-    occupancySettleWindow.resetForTest()
   })
   afterEach(() => {
-    occupancySettleWindow.resetForTest()
     vi.useRealTimers()
   })
 
-  it('prompt resolve 后无 turn 事件：2s 内回落 idle（命令-only 场景，维度与 scheduler 无关）', async () => {
-    const view: FakeView = { id: 's1', cwd: '/w/s1', occupancy: { turn: 'idle', compacting: false, bash: false } }
-    const h = makeHarness({ sessionByClient: view, sessionView: view })
-    const result = await h.dispatcher.sendMessage('s1', '/any-command')
-    expect(result).toMatchObject({ blocked: false })
-    await h.flush() // 内核投递是异步腿：prompt resolve + 武装收口窗在此完成
-    // prompt resolve 后仍在 dispatching（窗口未到期）
-    expect(view.occupancy.turn).toBe('dispatching')
-    // 短窗到期 → 回落 idle（幂等门允许：turn === dispatching）
-    await vi.advanceTimersByTimeAsync(OCCUPANCY_SETTLE_WINDOW_MS)
+
+  it('handled 响应（命令接管）：条目 delivered 终局 + session.deliveryHandled 通知 + dispatching→idle 回落', async () => {
+    const view = makeView()
+    const h = makeHarness({ sessionView: view, promptResult: { disposition: 'handled' } })
+    await h.dispatcher.sendMessage('s1', '/any-command')
+    await h.flush()
+    // occupancy 事实驱动回落（D3②：命令不会跟回合事件，pi 权威回答取代时间窗）
     expect(view.occupancy.turn).toBe('idle')
-    // 前端可观察到 idle 帧（渲染按钮不复残留 stop）
-    const occFrames = h.published.filter((m) => m.type === 'session.occupancy')
-    expect(occFrames[occFrames.length - 1]?.payload).toEqual({
-      sessionId: 's1', turn: 'idle', compacting: false, bash: false,
-    })
+    // D1③ 终局通知（一次性事件）一对一发出
+    const handled = h.published.filter((m) => m.type === 'session.deliveryHandled')
+    expect(handled.length).toBe(1)
+    expect(handled[0]!.payload).toMatchObject({ sessionId: 's1', clientUuid: expect.any(String) })
+    // D1② tombstone 终局（delivered——对账器不重投，resync 判重防线继承）
+    const entries = h.registry.entries('s1')
+    expect(entries?.tombstones.some((t) => t.state === 'delivered')).toBe(true)
+    expect(entries?.active.some((e) => e.state === 'in-flight' || e.state === 'queued')).toBe(false)
   })
 
-  it('短窗未到期（< 2s）：不提前回落（控制面量级，不给任务加预算）', async () => {
-    const view = makeView()
-    const h = makeHarness({ sessionByClient: view, sessionView: view })
-    await h.dispatcher.sendMessage('s1', '/slow-command')
+  it('幂等门：handled 回落不覆盖 generating（turn 事件已推进时不覆盖真实状态）', async () => {
+    const view: FakeView = { id: 's1', cwd: '/w/s1', occupancy: { turn: 'generating', compacting: false, bash: false } }
+    const h = makeHarness({ sessionView: view, promptResult: { disposition: 'handled' } })
+    await h.dispatcher.sendMessage('s1', '/todos')
     await h.flush()
-    await vi.advanceTimersByTimeAsync(OCCUPANCY_SETTLE_WINDOW_MS - 1)
-    expect(view.occupancy.turn).toBe('dispatching')
-  })
-
-  it('期间有 turn 事件（agent_start/turn_start 到达即 cancel）：窗口取消，状态不被覆盖', async () => {
-    const view = makeView()
-    const h = makeHarness({ sessionByClient: view, sessionView: view })
-    await h.dispatcher.sendMessage('s1', '真实 turn 的 prompt')
-    await h.flush()
-    expect(view.occupancy.turn).toBe('dispatching')
-    // interpreter 的 turn-start / agent_start 挂点即调此取消（与生产同一入口）
-    occupancySettleWindow.cancel('s1')
-    // turn 推进为 generating（真实状态）
-    view.occupancy = { turn: 'generating', compacting: false, bash: false }
-    await vi.advanceTimersByTimeAsync(OCCUPANCY_SETTLE_WINDOW_MS * 3)
-    // 窗口已取消 → 不得回落 idle（不覆盖真实状态）
+    // 回落仅限 dispatching（不覆盖 generating/settling；真误判由 turn 事件自愈）
     expect(view.occupancy.turn).toBe('generating')
+    // 终局与通知照常（幂等门只约束 occupancy，不约束终局链路）
+    expect(h.published.filter((m) => m.type === 'session.deliveryHandled').length).toBe(1)
   })
 
-  it('幂等门（调度竞态兜底）：即使窗口未被取消，回调见 turn !== dispatching 也不覆盖', async () => {
+  it('started 响应（普通消息）：无终局通知、occupancy 保持 dispatching 等 turn-start 驱动（D4）', async () => {
     const view = makeView()
-    const h = makeHarness({ sessionByClient: view, sessionView: view })
-    await h.dispatcher.sendMessage('s1', 'turn already generating')
+    const h = makeHarness({ sessionView: view, promptResult: { disposition: 'started' } })
+    await h.dispatcher.sendMessage('s1', '普通消息')
     await h.flush()
-    // 模拟 "turn 事件已写状态但取消失败" 的竞态：只改状态不取消
-    view.occupancy = { turn: 'settling', compacting: false, bash: false }
-    await vi.advanceTimersByTimeAsync(OCCUPANCY_SETTLE_WINDOW_MS)
-    expect(view.occupancy.turn).toBe('settling')
-    // 也未广播伪造 idle 帧
-    expect(h.published.filter((m) => m.type === 'session.occupancy')
-      .some((m) => (m.payload as { turn?: string }).turn === 'idle')).toBe(false)
+    // queued/started 不驱动界面（D4）：无回落、无通知，occupancy 由 turn-start 事件推进
+    expect(view.occupancy.turn).toBe('dispatching')
+    expect(h.published.filter((m) => m.type === 'session.deliveryHandled').length).toBe(0)
   })
 
-  it('session 已不在（回收/重建竞态）：回调静默 no-op，不报错', async () => {
+  it('无 disposition 字段（pi < 1.0 / mock）：全链路与升级前一致（无回落、无通知）', async () => {
     const view = makeView()
-    const h = makeHarness({ sessionByClient: view, sessionView: view })
-    await h.dispatcher.sendMessage('s1', '/cmd')
+    const h = makeHarness({ sessionView: view })
+    await h.dispatcher.sendMessage('s1', 'legacy prompt')
     await h.flush()
     expect(view.occupancy.turn).toBe('dispatching')
-    // 投递后 session 被回收（getSession 已查不到）→ 窗口到期时回调早退，原视图不被回写
-    h.setGetSessionResult(undefined)
-    await vi.advanceTimersByTimeAsync(OCCUPANCY_SETTLE_WINDOW_MS)
-    expect(view.occupancy.turn).toBe('dispatching')
+    expect(h.published.filter((m) => m.type === 'session.deliveryHandled').length).toBe(0)
   })
 })

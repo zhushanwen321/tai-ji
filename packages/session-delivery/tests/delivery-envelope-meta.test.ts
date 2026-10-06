@@ -77,13 +77,13 @@ describe('envelope additive meta（notifyId 穿 envelope）', () => {
     handle.dispose()
   })
 
-  it('错误重试耗尽 rejected → meta 随原消息到达回调（失败腿可定位债权）', () => {
+  it('首败即停 rejected → meta 随原消息到达回调（失败腿可定位债权，ADR-0122）', () => {
     const onSettled = vi.fn()
     const port = makePort({ send: () => ({ accepted: false as const, reason: 'closed' }) })
-    const handle = createDelivery(port, { onSettled, backoff: { ms: 1, max: 1 } })
+    const handle = createDelivery(port, { onSettled })
 
     handle.send(textMsg('doomed claim', { meta: { notifyId: 'sm-fail' } }))
-    vi.advanceTimersByTime(5) // 首败 → 1 次退避重试 → 再败 → rejected 终态
+    vi.advanceTimersByTime(5) // 首败即停：rejected 终态
 
     expect(onSettled).toHaveBeenCalledTimes(1)
     expect(onSettled.mock.calls[0]![1]).toBe('rejected')

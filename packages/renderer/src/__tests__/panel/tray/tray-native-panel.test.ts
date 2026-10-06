@@ -38,7 +38,7 @@ import { useWorkflowStore } from '@/stores/workflow'
 import { useToast } from '@/composables/useToast'
 import { clearToasts } from '../../helpers/toast-queue'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
-import { bindDrawerSessionId, bindWorkflowOverlayOpener, getDrawerControlState, _resetDrawerForTest } from '@taiji/core/domain/drawer'
+import { bindDrawerSessionId, bindWorkflowOverlayOpener, getDrawerControlState, useBashTaskSelection, useSubagentSelection, useWorkflowSelection, _resetDrawerForTest } from '@taiji/core/domain/drawer'
 import { subagentVirtualId } from '@taiji/shared'
 import TrayNativePanel from '@/components/panel/tray/TrayNativePanel.vue'
 import { TRAY_COUNTS_KEY, useTrayCounts } from '@/components/panel/tray/useTrayCounts'
@@ -650,7 +650,7 @@ describe('TrayNativePanel 行点击归宿矩阵（D2）', () => {
     await wrapper.find('[data-testid="tray-bash-row"]').trigger('click')
     await flushPromises()
     const control = getDrawerControlState()
-    expect(control.selectedBackgroundTaskId).toBe('bt-1')
+    expect(useBashTaskSelection().selectedBackgroundTaskId.value).toBe('bt-1')
     expect(control.activeTab).toBe('bashTask')
     expect(control.isOpen).toBe(true)
   })
@@ -663,9 +663,10 @@ describe('TrayNativePanel 行点击归宿矩阵（D2）', () => {
     await wrapper.find('[data-testid="tray-subagent-row"]').trigger('click')
     await flushPromises()
     const control = getDrawerControlState()
-    expect(control.selectedSubagentId).toBe(subagentVirtualId(SID, 'sub-1'))
+    const subagentSelection = useSubagentSelection()
+    expect(subagentSelection.selectedSubagentId.value).toBe(subagentVirtualId(SID, 'sub-1'))
     expect(control.activeTab).toBe('subagent')
-    expect(control.enteredFrom).toBe('chat')
+    expect(subagentSelection.enteredFrom.value).toBe('chat')
     expect(control.isOpen).toBe(true)
   })
 
@@ -680,8 +681,7 @@ describe('TrayNativePanel 行点击归宿矩阵（D2）', () => {
     await flushPromises()
     // 托盘行零改动（仍传 runId）；改向后 openWorkflow 转发 overlay opener，不触达 drawer
     expect(overlayOpener).toHaveBeenCalledWith('wf-1', undefined, undefined)
-    const control = getDrawerControlState()
-    expect(control.selectedWorkflowName).not.toBe('wf-1')
+    expect(useWorkflowSelection().selectedWorkflowName.value).not.toBe('wf-1')
   })
 })
 

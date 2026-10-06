@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CSP 能力一致性检查：renderer/ui 源码中的 CSP 敏感 API 必须与 index.html CSP 指令一致。
+CSP 能力一致性检查：各壳源码中的 CSP 敏感 API 必须与所在壳 index.html 的 CSP 指令一致。
 
 背景（2026-08-21 v0.9.3+ 线上事故）：index.html CSP 收紧为 script-src 'self' 后，
 shiki 默认 Oniguruma 引擎的 WebAssembly.instantiate 被 CSP 拒绝（CompileError）→
@@ -8,17 +8,23 @@ createHighlighter 抛错 → 全部 markdown 渲染静默降级纯文本（对�
 skill 文档无格式 + 换行丢失，跨 v0.9.3/v0.9.4 两个版本）。测试环境（vitest/jsdom）
 无 CSP 约束测不出，commit 时 CSP 只验证了「违规为零」没验证「既有功能仍正常」。
 
+双壳判定（按 SCAN_GROUPS 分组）：桌面 renderer 与移动壳 mobile-renderer（vite web
+构建 → electron-builder 打包到 Resources/mobile-dist → runtime 静态托管）各有独立
+CSP meta，组内源码对照该组 index.html 的 script-src 判定。ui 是两壳共享组件库，归入
+桌面组——两壳 script-src 当前同为 'self'，判定结果一致；若某壳单独放行 eval/wasm，
+能力变更须以最严壳为准显式决策。
+
 检查规则：
-  源码出现敏感 API 且 index.html CSP 未放行对应能力 → 违规：
+  源码出现敏感 API 且所在壳 index.html CSP 未放行对应能力 → 违规：
     - `WebAssembly.`      → 需 script-src 含 'wasm-unsafe-eval' 或 'unsafe-eval'
     - `eval(`             → 需 script-src 含 'unsafe-eval'
     - `new Function(`     → 需 script-src 含 'unsafe-eval'
 
-  白名单（ALLOWLIST）：确有正当需要（如未来引入合法 WASM 依赖）时，同步改 index.html
-  CSP 放行 + 在 ALLOWLIST 登记文件，把「能力变更」变成显式决策而非静默漂移。
+  白名单（ALLOWLIST）：确有正当需要（如未来引入合法 WASM 依赖）时，同步改对应
+  index.html CSP 放行 + 在 ALLOWLIST 登记文件，把「能力变更」变成显式决策而非静默漂移。
 
 已知局限：无法发现第三方依赖内部（如 shiki oniguruma loader）的 WASM 使用——
-产物级防护见 scripts/postbuild-validate.sh 的 renderer chunk WASM 扫描。
+产物级防护见 scripts/postbuild-validate.sh 的 renderer/mobile WASM chunk 扫描。
 
 退出码：0 通过 / 2 违规
 """
@@ -28,10 +34,24 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-INDEX_HTML = PROJECT_ROOT / "packages" / "renderer" / "index.html"
-SCAN_ROOTS = [
-    PROJECT_ROOT / "packages" / "renderer" / "src",
-    PROJECT_ROOT / "packages" / "ui" / "src",
+
+# 按壳分组的判定基准：每组源码对照各自的 index.html CSP（mobile-renderer 的独立
+# CSP meta 见 packages/mobile-renderer/index.html，script-src 'self' 不放行
+# eval/wasm——能力变更须同步对应 index.html 与本脚本判定范围）。
+SCAN_GROUPS = [
+    {
+        "index_html": PROJECT_ROOT / "packages" / "renderer" / "index.html",
+        "scan_roots": [
+            PROJECT_ROOT / "packages" / "renderer" / "src",
+            PROJECT_ROOT / "packages" / "ui" / "src",
+        ],
+    },
+    {
+        "index_html": PROJECT_ROOT / "packages" / "mobile-renderer" / "index.html",
+        "scan_roots": [
+            PROJECT_ROOT / "packages" / "mobile-renderer" / "src",
+        ],
+    },
 ]
 
 # 合法使用敏感 API 的文件（相对各自 SCAN_ROOT，posix 路径）。当前为空——
@@ -52,11 +72,11 @@ META_TAG = re.compile(r"<meta\b[^>]*Content-Security-Policy[^>]*>", re.IGNORECAS
 CONTENT_ATTR = re.compile(r"content=(?P<q>[\"'])(?P<value>(?:(?!(?P=q)).)+)(?P=q)", re.IGNORECASE | re.DOTALL)
 
 
-def parse_csp_script_sources() -> list[str] | None:
+def parse_csp_script_sources(index_html: Path) -> list[str] | None:
     """解析 index.html CSP meta 的 script-src source 列表；无 CSP 或无 script-src 返回 None。"""
-    if not INDEX_HTML.exists():
+    if not index_html.exists():
         return None
-    text = INDEX_HTML.read_text(encoding="utf-8")
+    text = index_html.read_text(encoding="utf-8")
     tag = META_TAG.search(text)
     if not tag:
         return None
@@ -71,23 +91,27 @@ def parse_csp_script_sources() -> list[str] | None:
     return None
 
 
-def main() -> int:
-    script_sources = parse_csp_script_sources()
+def scan_group(group: dict, errors: list[str]) -> bool:
+    """扫描一组（一个壳）：按该组 index.html 的 CSP 判定组内源码。
+
+    index.html 不可解析时打印错误并返回 False（调用方退出 2）。
+    """
+    index_html: Path = group["index_html"]
+    script_sources = parse_csp_script_sources(index_html)
     if script_sources is None:
-        print("[ERROR] 无法解析 packages/renderer/index.html 的 script-src 指令（CSP meta 缺失或格式变化）")
+        print(f"[ERROR] 无法解析 {index_html.relative_to(PROJECT_ROOT).as_posix()} 的 script-src 指令（CSP meta 缺失或格式变化）")
         print("        请检查 CSP meta 标签完整性；本检查依赖它做能力一致性判定")
-        return 2
+        return False
 
     has_unsafe_eval = "'unsafe-eval'" in script_sources
     has_wasm = has_unsafe_eval or "'wasm-unsafe-eval'" in script_sources
     # CSP 放行状态变化时打印，方便 review 时注意到能力边界
     print(
-        f"[INFO] script-src = {' '.join(script_sources)}"
+        f"[INFO] {index_html.relative_to(PROJECT_ROOT).as_posix()}: script-src = {' '.join(script_sources)}"
         f"（wasm={has_wasm}, eval={has_unsafe_eval}）"
     )
 
-    errors: list[str] = []
-    for scan_root in SCAN_ROOTS:
+    for scan_root in group["scan_roots"]:
         if not scan_root.exists():
             continue
         for f in sorted(scan_root.rglob("*")):
@@ -114,9 +138,17 @@ def main() -> int:
                         continue
                     scope = f.relative_to(PROJECT_ROOT).as_posix()
                     errors.append(f"  {scope}:{ln_no}: {stripped[:100]}")
+    return True
+
+
+def main() -> int:
+    errors: list[str] = []
+    for group in SCAN_GROUPS:
+        if not scan_group(group, errors):
+            return 2
 
     if errors:
-        print("[ERROR] renderer/ui 源码使用了 CSP 未放行的能力（script-src 'self' 不含 eval/wasm）")
+        print("[ERROR] 壳源码使用了 CSP 未放行的能力（script-src 'self' 不含 eval/wasm）")
         print("        本次事故背景：CSP 拦 WASM 曾致全部 markdown 渲染静默降级纯文本（2026-08 v0.9.3+）")
         print("        修复方向（按优先级）：")
         print("          1. 改用无该能力的实现（参考 composables/logic/markdown.ts 的")

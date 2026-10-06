@@ -138,8 +138,25 @@ export function parseRespawnNoticeVariant(details: unknown): PiRespawnNoticeVari
  * MSG_ID_TAG_BARE_RE / BARE_UUID_RE）的 uuid 段全部由本串构造——uuid 模式段禁止在
  * 本仓他处手写（[MF-1-11]；PS-26 探针锁定全仓单处手写体，msg-id-mapper extension
  * 的同构正则属「extension 独立发布不依赖 shared」登记豁免，不在收敛面）。
+ *
+ * 导出给「只认 renderer 气泡 id（uuid 形态）、不认内核收养 id」的提取方组合
+ * （skill-notice-publisher 的气泡锚定 clientUuid——收养 id 无本地气泡，锚定无意义），
+ * 段本体仍单点。
  */
-const MSG_ID_UUID_SEGMENT = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+export const MSG_ID_UUID_SEGMENT = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+
+/**
+ * 内核收养条目 id 段（`m-<token>-<n>`，runtime registry 对无 clientUuid 提交生成的
+ * 收养形态；与 session-delivery-registry DELIVERY_MARKER_ID_RE 的 `m-` 分支同构）。
+ * 两个标记正则的身份段 = uuid 段 | 收养段——缺收养段时（2026-10-03 D3 验收 A8 归因，
+ * 探针实证）外部 message.send 无 clientUuid 提交的回执标记在消费端构造性 miss：
+ * runtime 侧投影正常转 delivered，前端 user-delivery ① 命中不了条目 → 观看端 live
+ * 无人入流（live ≠ reload）。ADR-0077 严格/宽松二分在消费端补齐宽松半边。
+ */
+export const MSG_ID_ADOPTED_SEGMENT = 'm-[0-9a-z]+-[0-9a-z]+'
+
+/** 标记身份段（uuid 形态 | 内核收养形态），MSG_ID_TAG_RE / MSG_ID_TAG_BARE_RE 共用。 */
+const MSG_ID_IDENTITY_SEGMENT = `(${MSG_ID_UUID_SEGMENT}|${MSG_ID_ADOPTED_SEGMENT})`
 
 /**
  * 投递身份标记正则（`<!--taiji:msg:<uuid>-->` 全文匹配 SSOT，双形态）：
@@ -148,24 +165,25 @@ const MSG_ID_UUID_SEGMENT = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
  * 供送达回执匹配）。两形态指向同一 clientUuid，回归期（renderer 拼 u- 形态 + 内核
  * 追加裸形态）首个命中即正确值。
  *
- * 捕获组：1 = 可选 `u-` 前缀；2 = 裸 uuid。i 旗标 + 小写字符类等价覆盖大写十六进制，
- * 消费方统一 toLowerCase 归一。无 /g 无 lastIndex 状态，模块级单例可安全跨消费方共享。
+ * 捕获组：1 = 可选 `u-` 前缀；2 = 身份段（uuid 或内核收养 `m-` 形态，见
+ * MSG_ID_ADOPTED_SEGMENT）。i 旗标 + 小写字符类等价覆盖大写十六进制，消费方统一
+ * toLowerCase 归一。无 /g 无 lastIndex 状态，模块级单例可安全跨消费方共享。
  * （收敛自 core user-delivery.ts 与 runtime skill-notice-publisher.ts 两份已漂移手写体。）
  */
-export const MSG_ID_TAG_RE = new RegExp(`<!--taiji:msg:(u-)?(${MSG_ID_UUID_SEGMENT})-->`, 'i')
+export const MSG_ID_TAG_RE = new RegExp(`<!--taiji:msg:(u-)?${MSG_ID_IDENTITY_SEGMENT}-->`, 'i')
 
 /**
- * 裸形态标记正则（uuid 双形态中只认裸 `<uuid>`，DEFER 判定专用——**不是投递身份判定
- * 正则**，后者 = runtime session-delivery-registry 的 DELIVERY_MARKER_ID_RE，复合
- * `m-` 收养条目形态；严格/宽松二分见 ADR-0077）。捕获组 1 = 裸 uuid。
+ * 裸形态标记正则（双形态中只认裸身份段，DEFER 判定专用——**不是投递身份判定
+ * 正则**，后者 = runtime session-delivery-registry 的 DELIVERY_MARKER_ID_RE，其
+ * `m-` 收养分支与本正则的身份段同源同构）。捕获组 1 = 裸身份段。
  *
  * 消费方（core apply-entry-convert 的 DEFER_FLUSH_MARKER_RE 面 / runtime
- * entry-tree-builder 的 deferId 提取）一律 import 本常量：uuid 段与 MSG_ID_TAG_RE
- * 同源（MSG_ID_UUID_SEGMENT 单点），无独立派生器、无双侧同步纪律。
+ * entry-tree-builder 的 deferId 提取）一律 import 本常量：身份段与 MSG_ID_TAG_RE
+ * 同源（MSG_ID_IDENTITY_SEGMENT 单点），无独立派生器、无双侧同步纪律。
  * id 空间互斥语义：uuid 字符集不含字母 u，结构上不命中 `u-` 前缀标记（反之 TAG_MATCH
- * 不命中裸标记）——锚定 PS-26 探针行为断言。
+ * 的 u- 分支不命中裸标记）——锚定 PS-26 探针行为断言。
  */
-export const MSG_ID_TAG_BARE_RE = new RegExp(`<!--taiji:msg:(${MSG_ID_UUID_SEGMENT})-->`, 'i')
+export const MSG_ID_TAG_BARE_RE = new RegExp(`<!--taiji:msg:${MSG_ID_IDENTITY_SEGMENT}-->`, 'i')
 
 /**
  * 裸 uuid 全串锚定正则（8-4-4-4-12 hex，i 旗标）。消费方 = runtime revoke-orchestrator
@@ -670,7 +688,7 @@ export interface Message {
    * - reload：JSONL / get_entries 的 entry 时间戳（pi appendMessage 落在 message_end，
    *   即该消息产出结束；entry 时间戳不参与 reducer——由运行时历史链路回填，见
    *   runtime infra `session-entry-mapper.applyEntryEndTimes`；pi 行为锚点见
-   *   docs/pi-semantics.json PS-37：agent-session.js :384/:398，0.84.4）
+   *   docs/pi-semantics.json PS-37（agent-session.js message_end 落点，verifiedWith 以该登记为准））
    *
    * 用途 = turn 级聚合口径的时间轴右端（TurnMeta「已工作」时长/时刻区间）：没有它，
    * 单条 assistant 的 turn 会退化为 startedAt === endedAt（旧实现恒显「1s」）。

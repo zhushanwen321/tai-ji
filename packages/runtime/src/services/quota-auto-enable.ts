@@ -6,9 +6,9 @@
  *
  * 适用条件（matchAutoEnablePreset，四条缺一不可）：
  * - 凭证为明文（plaintext）：env/command 落盘的是占位串，真值由 pi 运行时解析——pi 实装
- *   锚点 @earendil-works/pi-coding-agent@0.84.4 dist/core/resolve-config-value.js：
- *   parseConfigValueReference :65 以 `!` 前缀识别 command、parseConfigValueTemplate :21
- *   解析 `$VAR`/`${VAR}`、resolveConfigValue :123 求值。占位形态对 taiji 不可判定为
+ *   锚点 @earendil-works/pi-coding-agent@1.0.0 dist/core/resolve-config-value.js：
+ *   parseConfigValueReference 以 `!` 前缀识别 command、parseConfigValueTemplate
+ *   解析 `$VAR`/`${VAR}`、resolveConfigValue 求值。占位形态对 taiji 不可判定为
  *   即刻可用：quota 凭证链（provider-credential-resolver，D3 收口）拒执行 command
  *   （不执行 shell），env 引用的取值取决于运行时环境——自动开启均成立不了「查即可用」；
  *   明文 key 即刻可用

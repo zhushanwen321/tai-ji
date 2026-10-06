@@ -32,6 +32,8 @@ import {
   type ProviderId,
   type LlmRetryConfig,
   type RenameMode,
+  type CodemodeEnabledResult,
+  type CodemodeSetEnabledResult,
 } from '@taiji/shared'
 import type { IConfigService } from '../interfaces.js'
 import type { IConfigStore } from './ports/config.js'
@@ -69,6 +71,7 @@ import {
 } from './smart-context-config.js'
 import { loadAppConfig as loadAppConfigImpl, saveAppConfig as saveAppConfigImpl, type SaveAppConfigResult } from './app-config-store.js'
 import { isModelsStoreCorrupted as isModelsStoreCorruptedImpl } from '../infra/pi/pi-provider-store.js'
+import { SETTINGS_CORRUPTED, errorCodeOf, toErrorMessage } from '../utils/errors.js'
 import {
   getDefaultModel as getDefaultModelImpl,
   setDefaultModel as setDefaultModelImpl,
@@ -112,6 +115,7 @@ import {
   setTerminalConfig as setTerminalConfigImpl,
 } from './terminal-config-helper.js'
 import type { ILlmRetrySettings, LlmRetryConfigSnapshot } from './ports/llm-retry-settings.js'
+import type { ICodemodeSettings } from './ports/codemode-settings.js'
 import type { IProviderCredentialResolver } from './ports/provider-credential-resolver.js'
 
 // ── Service ─────────────────────────────────────────────────────
@@ -162,6 +166,12 @@ export class ConfigService implements IConfigService {
      * 后置回填（QuotaService 依赖 ConfigService，构造期拿不到）。
      */
     private quotaStateCleaner?: QuotaStateCleaner,
+    /**
+     * codemode 开关域 port（pi settings.json 的 defaultTools 字段，codemode 设计 D1/A1）。
+     * 实现 PiCodemodeSettings（infra 层，PiRetrySettings 同款分层）在组合根注入。可选注入：未注入时 get/set 抛错
+     * （生产恒注入；既有测试不关心 codemode 域可不传，同 llmRetrySettings 形态）。
+     */
+    private codemodeSettings?: ICodemodeSettings,
   ) {}
 
   /**
@@ -484,7 +494,23 @@ export class ConfigService implements IConfigService {
   }
 
   migrateSettingsSkillsToDiscovery(): void {
-    this.configStore.migrateSettingsSkillsToDiscovery()
+    // 启动路径（组合根 listen 前同步段调用）：settings.json 损坏时读侧统一阻断抛
+    // settings_corrupted（错误码判别，见 utils/errors errorCodeOf；类识别属 infra 层
+    // 内部消费方形态）——显式捕获呈结构化告警（message 单一来源组装于错误类构造处，
+    // 含路径与修复指引），不阻塞启动（ES1，沿 cleanLeakedPackages /
+    // runCodemodeStartupMigration 同款；迁移幂等，修复文件后重启自动补跑）。
+    // 非损坏错误不吞，维持上抛。
+    try {
+      this.configStore.migrateSettingsSkillsToDiscovery()
+    } catch (e) {
+      if (errorCodeOf(e) === SETTINGS_CORRUPTED) {
+        console.warn(
+          `[config-service] skills 启动迁移跳过（不阻塞启动，修复后重启自动补跑）。${toErrorMessage(e)}`,
+        )
+        return
+      }
+      throw e
+    }
   }
 
   // ── Agent CRUD（委托 agent-config-helper）────────────────────────
@@ -585,5 +611,23 @@ export class ConfigService implements IConfigService {
       throw new Error('[config-service] llmRetrySettings not available (setRetryConfig)')
     }
     return this.llmRetrySettings.setRetryConfig(config)
+  }
+
+  // ── Codemode 开关（codemode 设计 D1/A1，单行委托注入 port）──
+  // pi settings.json 的 defaultTools 域：损坏检查/错误态映射/增量条目写入逻辑在
+  // PiCodemodeSettings（infra，组合本模块字段域函数 + getSettingsCorruption 单点）。
+
+  getCodemodeEnabled(): CodemodeEnabledResult {
+    if (!this.codemodeSettings) {
+      throw new Error('[config-service] codemodeSettings not available (getCodemodeEnabled)')
+    }
+    return this.codemodeSettings.getEnabled()
+  }
+
+  setCodemodeEnabled(enabled: boolean): CodemodeSetEnabledResult {
+    if (!this.codemodeSettings) {
+      throw new Error('[config-service] codemodeSettings not available (setCodemodeEnabled)')
+    }
+    return this.codemodeSettings.setEnabled(enabled)
   }
 }

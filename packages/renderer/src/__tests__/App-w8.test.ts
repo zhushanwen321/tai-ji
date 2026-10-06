@@ -82,6 +82,13 @@ vi.mock('@/composables/useInboundFrameGuard', () => ({
   },
 }))
 
+// stub 权限弹窗状态（App setup 顶层调 usePermissionRequest()）。真实模块是 init-gated 的
+// （main.ts 挂载前 initPermissionRequest 建 controller，未 init 调用 fail-fast），本文件不跑
+// main.ts 装配链——perm state 非被测面，stub 关闭态即可（状态机本体见 ui factory 单测）。
+vi.mock('@/composables/shell/usePermissionRequest', () => ({
+  usePermissionRequest: () => ({ pending: false, error: false, pluginId: '', permissions: [] }),
+}))
+
 import { mount } from '@vue/test-utils'
 import App from '@/App.vue'
 

@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-ask-user",
-  "version": "7.3.4",
+  "version": "7.3.5",
   "description": "Inline adaptive ask_user tool for Pi — single/multi-question structured input with split-pane preview and an inline free-text editor.",
   "type": "module",
   "main": "index.ts",
@@ -38,17 +38,17 @@
     "@zhushanwen/pi-extension-logger": "workspace:*"
   },
   "devDependencies": {
-    "@earendil-works/pi-tui": "^0.84.4",
+    "@earendil-works/pi-tui": "^1.0.0",
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^4.1.9",
     "fast-check": "^4.9.0",
-    "typebox": "*",
+    "typebox": "1.3.27",
     "vitest": "^4.1.8"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.4",
-    "@earendil-works/pi-tui": "^0.84.4",
-    "typebox": "*"
+    "@earendil-works/pi-coding-agent": "^1.0.0",
+    "@earendil-works/pi-tui": "^1.0.0",
+    "typebox": "1.3.27"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-tui": {

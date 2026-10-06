@@ -649,7 +649,7 @@ function modelIdPairOf(provider: unknown, id: unknown): string | null {
 /**
  * 单 entry 的模型信息提取（extractLatestModelFromJsonl 的解析语义落点）。
  *
- * 对齐 pi 实装 getSessionContextSettings（dist/core/session-manager.js:148-160，0.84.4 实锚）：
+ * 对齐 pi 实装 getSessionContextSettings（pi 1.0.0 dist/core/session-manager.js）：
  * - model_change entry：provider / modelId 是 entry 顶级平铺字段（pi 唯一显式 setModel 写点）
  * - assistant message entry：entry.type === 'message' 且 message.role === 'assistant'，
  *   取 message.provider + message.model
@@ -1082,7 +1082,8 @@ function scanSessionMeta(filePath: string, degraded?: ScanDegradedStats): Scanne
  *
  * 列表构建消费方（SessionScanner.listAll → listPersistedSessions，侧栏列表）在 TTL 窗口内
  * 直接命中缓存快照（零 readdirSync/statSync）。1s 保证 pi 落盘新 session 文件后秒级出现在
- * 列表（pi 延迟写入：首个 assistant 前不落盘，列表本就无法更早发现，TTL 过期即重扫）。
+ * 列表（pi 延迟写入：user/assistant 首消息后才落盘——pi 1.0.0 起 user 首消息即建文件，
+ * 但 flush 前列表仍无法发现，TTL 过期即重扫）。
  *
  * 正确性敏感的**单 session 路径解析消费方**（getHistoryTailFromFile / getSubagentHistory /
  * getSubagents / getWorkflows / findScannedSession 等）必须传 force 旁路——pi 是外部进程

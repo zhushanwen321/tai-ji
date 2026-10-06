@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-base-tool-enhance",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "description": "Base tool enhancement - override builtin bash tool: foreground delegates to pi official factory, incremental background mode (design decisions documented in source comments)",
   "type": "module",
   "main": "src/index.ts",
@@ -39,9 +39,9 @@
     "vitest": "^4.1.8"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@earendil-works/pi-coding-agent": "^1.0.0",
     "@zhushanwen/pi-pending-notifications": "workspace:*",
-    "typebox": "*"
+    "typebox": "1.3.27"
   },
   "peerDependenciesMeta": {
     "@zhushanwen/pi-pending-notifications": {

@@ -5,8 +5,8 @@
  * - 不在 session_start 写——该事件 emit 早于 resources_discover 的 prompt 重建，快照必不完整、
  *   首 turn 必误报一次 change；
  * - 首个 turn_start 写 initial/resume——此时 getSystemPrompt() 已含 before_agent_start 注入
- *   （pi 的事件链：用户消息 handler 先 await emitBeforeAgentStart（agent-session.ts:1243-1244），
- *   再 agent_start → turn_start 事件分发（agent-session.ts:739-746））；
+ *   （pi 1.0.0 事件链：用户消息 handler 先 await emitBeforeAgentStart（agent-session.js:1555），
+ *   再 agent_start → turn_start 事件分发（agent-session.js:866-875））；
  * - 后续每个 turn_start 做 hash 对比，变化才写 change。
  */
 

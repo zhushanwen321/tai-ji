@@ -8,8 +8,7 @@
  * - detach（removeSessionEntry 汇聚点，覆盖主动删 / 进程退出 / forceQuit / restore 清场）→
  *   条目摘除；**文件不删**（删除属主在 main 退出链与 u5 reattach 编排——契约 1）。
  * - reclaim 成功 → 条目摘除；reclaim 未成功（返回 false）→ 零改动（防误摘）。
- * - 不在每次 touch 刷盘（D3 时效性裁决）：markSessionViewed 不触发任何 checkpoint 写入
- *   （lastViewedAt 由 reaper tick 搭车刷新，见 idle-pi-reaper.checkpoint.test.ts）。
+ * - 不在每次 touch 刷盘（D3 时效性裁决）：markSessionViewed 不触发任何 checkpoint 写入。
  *
  * 装置：真 SessionService（轻量 deps 桩，session-service-background-task.test.ts createSetup
  * 同款）+ 目录注入的 checkpoint store（mkdtemp tmp 自建自删，fs-guard 白名单）。
@@ -20,7 +19,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ReclaimSeat } from '../idle-pi-reaper.js'
 import { getRuntimeCheckpointStore, initRuntimeCheckpointStore } from '../runtime-checkpoint.js'
 import type { IPiEngine } from '../../ports/pi-engine.js'
 import { createSetup } from './helpers/session-service-setup.js'
@@ -95,25 +93,6 @@ describe('SessionService × runtime checkpoint（D3 attach/detach/reclaim 挂点
     await service.initializeManagedSession(SID, {} as unknown as IPiEngine, '/project', 'label', '/project/s.jsonl')
 
     expect(readEntries().map((e) => e.piSessionId)).toEqual([SID])
-  })
-
-  it('reclaim 成功：条目摘除；reclaim 返回 false：零改动', async () => {
-    const { service } = createSetup()
-    await service.initializeManagedSession(SID, {} as unknown as IPiEngine, '/project', 'label', '/project/s.jsonl')
-
-    // 未占用 → 七步编排走通（destroySession 桩）→ 摘除条目
-    const seat = new ReclaimSeat()
-    const reclaimed = await service.reclaimSession(SID, { seat, listRelayChildrenByMainSession: () => [] })
-    expect(reclaimed).toBe(true)
-    expect(getRuntimeCheckpointStore().hasSession(SID)).toBe(false)
-
-    // 再审：session 已摘出 Map → 编排返回 false（无条目）→ 不得改动清单
-    await service.initializeManagedSession(SID, {} as unknown as IPiEngine, '/project', 'label', '/project/s.jsonl')
-    const seat2 = new ReclaimSeat()
-    seat2.tryAcquire(SID) // 占座被占 → 立即 false（未回收）
-    const again = await service.reclaimSession(SID, { seat: seat2, listRelayChildrenByMainSession: () => [] })
-    expect(again).toBe(false)
-    expect(getRuntimeCheckpointStore().hasSession(SID)).toBe(true)
   })
 
   it('不在每次 touch 刷盘（时效性裁决）：markSessionViewed 不写 checkpoint', async () => {

@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-provider-live-sync",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Keep the running pi process's model snapshot in sync with on-disk provider/model/credential config changes.",
   "type": "module",
   "main": "index.ts",
@@ -36,7 +36,7 @@
     "vitest": "^4.1.8"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.4"
+    "@earendil-works/pi-coding-agent": "^1.0.0"
   },
   "scripts": {
     "typecheck": "npx tsc --noEmit",

@@ -1,5 +1,5 @@
 /**
- * Electron IPC payload 类型 SSOT（renderer → main 方向，与 ipc-channels.ts 通道名配对）。
+ * Electron IPC payload 类型 SSOT（与 ipc-channels.ts 通道名配对，请求与返回两侧）。
  *
  * 现状归属：既有 IPC payload 类型按领域散落（update.ts 的 UpdateErrorPayload、panel.ts
  * 的 WindowState 等）；renderer-log 是跨领域诊断通道，无既有领域文件可归，独立成文件
@@ -197,3 +197,81 @@ export type DiagnosticExportBundleResult =
   }
   | { status: 'canceled' }
   | { status: 'error'; error: DiagnosticExportError }
+
+// ── shieldsView 遮蔽面上报（browser:shields invoke 通道，display-containers §6.7）──
+
+/** 几何矩形（视口坐标 CSS px，getBoundingClientRect 同空间；view rect 链同一坐标系） */
+export interface ShieldRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * shieldsView 遮蔽面单项（模态表面聚合 §6.7 的 view 遮蔽族成员，renderer 聚合侧上报；
+ * 主进程消费方语义：无条件隐藏 / 几何相交隐藏双档，见 display-gate.ts）。
+ * - fullscreen=true：全屏阻塞面（遮罩盖满视口）→ 无条件隐藏 view
+ * - fullscreen=false：非全屏面（横幅/弹出层族）→ 与 view 矩形几何相交才隐藏；rect 缺失
+ *   按相交保守处理（宁可隐藏 view 也不让阻塞交互被盖住——fail-safe 方向）。
+ */
+export interface ShieldFace {
+  id: string
+  fullscreen: boolean
+  rect?: ShieldRect
+}
+
+/**
+ * renderer → main 遮蔽面**全量**上报 payload（browser:shields invoke 通道，替换语义）。
+ * preload ElectronAPI 签名 / renderer ipc 封装与聚合上报 / main handler 校验（runtime
+ * 再校验，类型不作信任依据）三方共用同一形态声明，防漂移。
+ */
+export interface ShieldsFacesPayload {
+  faces: ShieldFace[]
+}
+// ── local-file 预检与源码读取（LOCAL_FILE_SERVABLE / LOCAL_FILE_READ invoke 通道）
+//    [chat-html-support §6.9 D9 / §6.4 D4 / §8.2 S3] ─────────────────────────────
+
+/**
+ * local-file servable 预检失败原因（§6.4 D4 子决策①检查顺序的谓词三轴）：
+ * - `out_of_whitelist`：白名单成员资格不通过（先行短路——不触文件系统）
+ * - `not_found`：白名单内但文件不存在
+ * - `is_dir`：白名单内但目标是目录（不可作文件服务）
+ */
+export type LocalFileServableReason = 'not_found' | 'is_dir' | 'out_of_whitelist'
+
+/**
+ * `localFile:servable` 预检结果（HtmlPreviewInline `probeArtifact?` 挂载前准入检查，
+ * §6.9 D9 入/出参面 SSOT）。
+ *
+ * 谓词 = 准入前缀成员资格（先行短路）→ 存在性 → 目录性，与 local-file 协议 handler
+ * 复用主进程同一模块函数（越界路径不触 fs，不构成存在性探测通道）；通道准入前缀 =
+ * 会话产物子树 `<dataDir>/artifacts/**`（读/预检通道收窄面，非协议 handler 全量白名单）：
+ * - `servable: true`  → `size` 附文件字节数（HtmlPreviewInline 头部条显示文件名与大小）
+ * - `servable: false` → `reason` 指明降级原因
+ */
+export interface LocalFileServableResult {
+  servable: boolean
+  reason?: LocalFileServableReason
+  /** servable=true 时的文件字节数 */
+  size?: number
+}
+
+/**
+ * `localFile:read` 源码内容读取失败原因：servable 三原因 + 读取本身失败
+ * （权限 / 解码等，§8.2 S3 源码态）。
+ */
+export type LocalFileReadReason = LocalFileServableReason | 'read_failed'
+
+/**
+ * `localFile:read` 源码内容读取结果（§8.2 S3「切换『源码』看到 shiki 高亮」）。
+ *
+ * 谓词与 `LocalFileServableResult` / 协议 handler 同一白名单模块（越界不触 fs）；通道
+ * 准入前缀 = 产物子树 `<dataDir>/artifacts/**`（读通道收窄面，非协议 handler 全量白名单
+ * ——`<dataDir>` 整前缀含 pi agent 目录凭据）：
+ * - `ok: true`  → `content` + `truncated`（超 1 MiB 截断，与 runtime `file.read` 同语义）
+ * - `ok: false` → `reason` 指明失败原因
+ */
+export type LocalFileReadResult =
+  | { ok: true; content: string; truncated: boolean }
+  | { ok: false; reason: LocalFileReadReason }

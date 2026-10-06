@@ -750,3 +750,38 @@ describe('D1 groupConsecutiveBash: 分组规则', () => {
     ])
   })
 })
+
+// ── [ADR-0122 断连未确认终局] 纯 error 气泡的 text 块宿主保证 ──────────────────
+// content 空 + error 非空的 error 消息（秒败 turn / 断连显式失败上报）必须产出 text 块：
+// Block 的 error danger 行只挂 text 分支，零块消息的 error 文案在对话流不可见（静默悬挂）。
+
+describe('纯 error 气泡的 text 块宿主（ADR-0122 断连未确认终局）', () => {
+  it('fallback 路径：content 空 + error 非空（status error）→ 产 1 个空正文 text 块（error 行宿主）', () => {
+    // makeAssistant 是显式字段列表（不带 error），按 Message 真实形态补 error 字段
+    const errMsg: Message = {
+      ...makeAssistant({ id: 'a-err', content: '', status: 'error' }),
+      error: '执行结果未确认',
+    }
+    const flat = flattenTurnBlocks([errMsg])
+    expect(flat).toHaveLength(1)
+    expect(flat[0]!.block.kind).toBe('text')
+    expect(flat[0]!.block.ref).toBe('')
+    expect(flat[0]!.assistantStatus).toBe('error')
+  })
+
+  it('非 error 的空 content 消息保持零块（不误产空块）', () => {
+    const silent = makeAssistant({ id: 'a-silent', content: '', status: 'complete' })
+    expect(flattenTurnBlocks([silent])).toHaveLength(0)
+  })
+
+  it('error 非空 + content 非空：单 text 块（追加形态，正文 + error 行）不双产', () => {
+    const errMsg: Message = {
+      ...makeAssistant({ id: 'a-both', content: '崩溃前正文', status: 'error' }),
+      error: '会话出错',
+    }
+    const flat = flattenTurnBlocks([errMsg])
+    expect(flat).toHaveLength(1)
+    expect(flat[0]!.block.kind).toBe('text')
+    expect(flat[0]!.block.ref).toBe('崩溃前正文')
+  })
+})

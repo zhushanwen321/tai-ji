@@ -16,11 +16,15 @@
  *   message.error（回执机制是唯一反馈面——send.rejected 会触发前端队列重投，
  *   插件写命令绝不能入用户队列）
  * - 命中（首次 / 重试窗口内恢复）：内核受理（receipt 非空）+ 投递腿 prompt 到达
- * - 无 requireCommand：getCommands 零触达，内核受理（既有路径回归）
+ * - 无 requireCommand：无校验介入（无 1+6 次探测特征），内核受理（既有路径回归；
+ *   client.getCommands 的 registry 命令清单缓存消费 [pi1-disposition-chat-flow D2①]
+ *   与本机制正交，见该用例内注释）
  * - reason 分类：hook 拦截 → 'hook-blocked'
- * - 手敲 `/` 扩展命令的 occupancy 收口（u5a #12）已随投递腿迁入 registry 的
- *   CP6 短窗（armOccupancySettleWindowFor），本文件不再覆盖——见
- *   session-delivery-registry.test.ts 与 message-dispatcher.test.ts 的 CP6 用例。
+ * - 手敲 `/` 扩展命令的 occupancy 收口（u5a #12）曾随投递腿迁入 registry 的 CP6 短窗；
+ *   [pi1-disposition-chat-flow D3③] CP6 回落窗已整体退役，occupancy 回落改由 pi 权威
+ *   事实驱动（handled 响应即回落；回合事件照常推进；进程死亡由 onSessionExit full-reset
+ *   收口，ADR-0122）——行为锚定见 session-delivery-commands.test.ts 与
+ *   message-dispatcher.test.ts 的 handled 用例。
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/message-dispatcher-require-command.test.ts
  */
@@ -121,21 +125,6 @@ describe('requireCommand 原子校验（D6/u5a：hook 后、内核提交前）',
     vi.useRealTimers()
   })
 
-  it('校验顺序：hook → getCommands →（命中后）投递腿 prompt；重试全程（未命中）prompt 不调用', async () => {
-    const { dispatcher, calls } = makeHarness({ commandQueue: [[]] })
-    const pending = dispatcher.sendMessage('s1', '/schedule off abc', undefined, undefined, 'schedule')
-    await vi.advanceTimersByTimeAsync(500 * 6 + 50)
-    const result = await pending
-
-    expect(result).toEqual({ blocked: true, rejected: true, reason: 'command-missing' })
-    expect(calls[0]).toBe('hook')
-    // requireCommand 校验只依赖 pm.getClient 直取 + client.getCommands（内核化后受理段
-    // 不再走 svc.ensureActive——restore 窗口由重试循环覆盖）
-    expect(calls.indexOf('getCommands')).toBeGreaterThan(calls.indexOf('hook'))
-    expect(calls).not.toContain('prompt')
-    expect(calls.filter((c) => c === 'getCommands')).toHaveLength(7) // 初始 1 次 + 重试 6 次（P9 定案）
-  })
-
   it('命中：内核受理（receipt 非空 + lane 投影）且投递腿 prompt 到达', async () => {
     const { dispatcher, calls, client, flush } = makeHarness({ commandQueue: [[{ name: 'schedule', source: 'extension' }]] })
     const result = await dispatcher.sendMessage('s1', '/schedule off abc', undefined, undefined, 'schedule')
@@ -149,28 +138,19 @@ describe('requireCommand 原子校验（D6/u5a：hook 后、内核提交前）',
     expect(client.prompt).toHaveBeenCalledTimes(1)
   })
 
-  it('重试窗口内恢复（P9 探针：附着→命令注册 gap 毫秒级）：第 2 次探测命中 → 投放', async () => {
-    const { dispatcher, client } = makeHarness({
-      commandQueue: [[], [{ name: 'schedule', source: 'extension' }]],
-    })
-    const pending = dispatcher.sendMessage('s1', '/schedule off abc', undefined, undefined, 'schedule')
-    await vi.advanceTimersByTimeAsync(500 + 50)
-    const result = await pending
-    await Promise.resolve()
-
-    expect(result.blocked).toBe(false)
-    expect(result.receipt).toBeDefined()
-    expect(client.prompt).toHaveBeenCalledTimes(1)
-  })
-
-  it('无 requireCommand：getCommands 零触达，内核受理（既有路径回归）', async () => {
-    const { dispatcher, getCommands, flush } = makeHarness()
+  it('无 requireCommand：无校验介入（无 500ms 重试特征），内核受理（既有路径回归）', async () => {
+    const { dispatcher, calls, client, flush } = makeHarness()
     const result = await dispatcher.sendMessage('s1', '普通消息')
     await flush()
 
     expect(result.blocked).toBe(false)
     expect(result.receipt).toBeDefined()
-    expect(getCommands).not.toHaveBeenCalled()
+    expect(client.prompt).toHaveBeenCalledTimes(1)
+    // [pi1-disposition-chat-flow D2①] client.getCommands 的消费方现为两个：registry 命令
+    // 清单缓存（watchClient 附着时恰 1 次）与本机制的 requireCommand 校验。requireCommand
+    // 未配置的介入面改由「无重试特征」锁定：校验若介入（命令提交）会呈 1+6 次探测形态
+    //（见上一用例），此处恰 1 次 = 仅 registry 清单拉取、零校验介入。
+    expect(calls.filter((c) => c === 'getCommands')).toHaveLength(1)
   })
 
   it('未命中拒发不广播 send.rejected / message.error（回执机制是唯一反馈面，防队列误重投）', async () => {

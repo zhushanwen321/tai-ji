@@ -985,9 +985,12 @@ describe('恢复窗口过渡态的 message_start 收口 gate（crash-resilience 
 
 // ── [u5a 收口扩展 / #12 对称腿] 扩展命令手敲链 pendingSend 复位 ──
 // pi 扩展命令（手敲 /schedule … 等）同步执行、无 message_start/agent_start 回流 →
-// pendingSend（send 前乐观置位、正常由 message_start 清）永久在挂 → isActive 并集判定
+// pendingSend（受理上屏时置位、正常由 message_start 清）永久在挂 → isActive 并集判定
 // 恒 true（steer placeholder + abort 按钮卡死）。修复：handleSessionOccupancy 收到三维
 // 全 idle 权威帧时清 pendingSend（权威帧兜底乐观态；与 defer flush 判据同形）。
+// [ADR-0122 受理回执后上屏] idle 帧的收口对象 = 受理确认后置位的 pendingSend（reply 先于
+// idle 帧到达的正常时序）；idle 帧先于 reply 的极端时序下置位尚未发生（帧 no-op），命令
+// 条目的收口归 session.deliveryHandled 终局（U2① 用例锁定）——全事件驱动，无墙钟兜底。
 
 describe('扩展命令手敲链 pendingSend 复位（#12 对称腿）', () => {
   beforeEach(() => {
@@ -996,11 +999,12 @@ describe('扩展命令手敲链 pendingSend 复位（#12 对称腿）', () => {
 
   it('全 idle 权威帧到达清 pendingSend（无 turn 回流通路的乐观态复位 → isActive 复位）', async () => {
     const f = makeFixture()
-    const p = f.useChat.send('ec1', textToSegments('/schedule list'))
+    await f.useChat.send('ec1', textToSegments('/schedule list'))
+    // 受理上屏后 pendingSend 置位（扩展命令无 message_start 可清）
+    expect(f.chatStore.isPendingSend('ec1')).toBe(true)
     // runtime 收口帧（message-dispatcher willExecuteAsExtensionCommand 命中后广播）：
-    // 扩展命令无 message_start，唯一复位信号就是这条全 idle 帧本身
+    // 扩展命令无 message_start，权威 idle 帧兜底清乐观态
     f.emit('ec1', msg('ec1', 'session.occupancy', { turn: 'idle', compacting: false, bash: false }))
-    await p
     expect(f.chatStore.isActive('ec1')).toBe(false)
     f.dispose()
   })

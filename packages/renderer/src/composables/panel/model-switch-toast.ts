@@ -18,7 +18,6 @@ interface ErrorWithCode {
 
 const CODE_TO_KEY: Record<string, string> = {
   SESSION_ACTIVATE_FAILED: 'panel.panel.modelSwitch.sessionActivateFailed',
-  SESSION_ACTIVATE_TIMEOUT: 'panel.panel.modelSwitch.sessionActivateTimeout',
   MODEL_NOT_FOUND: 'panel.panel.modelSwitch.modelNotFound',
   PROVIDER_CREDENTIAL_MISSING: 'panel.panel.modelSwitch.providerCredentialMissing',
   ENGINE_MODEL_MISSING: 'panel.panel.modelSwitch.engineModelMissing',

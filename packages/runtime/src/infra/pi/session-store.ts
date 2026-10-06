@@ -97,6 +97,8 @@ export class PiSessionStore implements ISessionStore {
       size = statSync(filePath).size
     } catch {
       // 规则 6：pi 延迟写入窗口内文件不存在是常态（非错误），空态判定归调用方
+      //（首次落盘条件 = 存在 user 或 assistant 消息；pi 1.0.0 起用户首条消息即建文件，
+      // 但「pi 首次 flush 前」的窗口语义不变——路径有值、文件可能尚不存在）
       return null
     }
     // D5④（crash-resilience §3.3）：超读取预检阈值不读全文——返回明确 oversize 标记，

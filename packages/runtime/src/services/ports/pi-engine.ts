@@ -123,23 +123,11 @@ export interface PiSessionOptions {
   /**
    * 档位字符串透传（非空即发）；合法性由上游入口层校验（launch-params
    * resolveEffectiveThinking，词表 = shared PI_THINKING_LEVELS），本层不重复校验。
-   * 不可把「pi 会拒绝非法档位」当兜底依赖——pi（0.84.4）对非法 --thinking 仅 push
+   * 不可把「pi 会拒绝非法档位」当兜底依赖——pi（1.0.0 复核）对非法 --thinking 仅 push
    * warning diagnostic 并丢弃档位、进程照常以缺省档启动（pi-coding-agent
-   * dist/cli/args.js:112-121；仅 type==="error" 才 exit：dist/main.js:476-478）。
+   * dist/cli/args.js `--thinking` 分支；仅 diagnostics 含 type==="error" 才 exit：dist/main.js）。
    */
   thinkingLevel?: string
-}
-
-/**
- * sendCommand / prompt 的调用方标记（idle-pi-reclamation 设计 D1「维护通道排除」）。
- *
- * maintenance: true 标记本次调用是维护类通道（不体现用户/session 活跃）——RpcClient
- * 不刷新 lastActivityAt。当前无固定用户（原 promptReload 的 `/__taiji_reload__` 通道随
- * W5 skill→pi reload 编排退役，2026-09-25），机制保留为维护类内部命令的通用豁免口。
- */
-export interface SendCommandOptions {
-  /** 维护类调用：不刷新 RpcClient.lastActivityAt（空闲回收判定不受影响）。 */
-  maintenance?: boolean
 }
 
 /**
@@ -150,6 +138,10 @@ export interface SendCommandOptions {
  *
  * 逃生口已关闭（W2 收口）：sendCommand/sendRaw 不再暴露，响应归一下沉到 RpcClient 内部。
  * 调用方消费语义方法（switchSession/getState/sendExtensionUiResponse 等），不再有「发任意 pi 命令」的能力。
+ *
+ * RPC 墙钟超时（sendCommand timeout 档位 / prompt timeoutMs 不限时档 /
+ * SendCommandOptions maintenance 维护豁免）已随 ADR-0122 防御机制清查退役——
+ * pi 对 RPC 永不响应时调用方 promise 悬挂，失败信号归 pi exit/error 事件链。
  */
 export interface IPiEngine {
   // ── 命令通信 ──
@@ -159,18 +151,13 @@ export interface IPiEngine {
    * images 是 shared 层图片附件形状（{data;base64;mimeType}，无 pi 私有 type 字段）。
    * 类型组装（补 type:'image'）下沉到 RpcClient 实现内部，本接口只暴露 shared 形状，
    * 保持 pi 私有字段不出 infra 层（AGENTS.md 规则 #5）。undefined/空数组归一化为不传。
-   */
-  /**
-   * 发送用户消息。
    *
    * streamingBehavior 控制 streaming 期间的投递语义：
    * - undefined（默认）：streaming 时抛错（旧行为，MessageDispatcher 等调用方依赖此守卫）
    * - 'steer'：streaming 时入队，turn 边界注入（等价于 pi steer）
    * - 'followUp'：streaming 时入队，run 结束后注入（等价于 pi followUp）
-   *
-   * U1 仅开通能力，不改现有调用方行为；U5 session-manager send 排队时消费。
    */
-  prompt(content: string, images?: Array<{ data: string; mimeType: string }>, streamingBehavior?: 'steer' | 'followUp', options?: SendCommandOptions): Promise<PiMessage>
+  prompt(content: string, images?: Array<{ data: string; mimeType: string }>, streamingBehavior?: 'steer' | 'followUp'): Promise<PiMessage>
   abort(): Promise<PiMessage>
   steer(content: string): Promise<PiMessage>
   followUp(content: string): Promise<PiMessage>
@@ -226,28 +213,21 @@ export interface IPiEngine {
   // ── 进程生命周期（本进程自身） ──
   /** 启动 pi 子进程。由 ProcessManager.createSession 内部调用，service 一般不直接调。 */
   start(): Promise<void>
-  /** 终止 pi 子进程（SIGTERM，超时后 SIGKILL）。 */
+  /** 终止 pi 子进程（SIGKILL 直杀，grace 等待窗已随 ADR-0122 退役）。 */
   kill(): Promise<void>
   /** 注册本进程退出回调。多播（可多订阅者），返回 unsubscribe（与 onEvent 对称）。 */
   onExit(callback: PiProcessExitCallback): () => void
   /** 进程是否已退出。 */
   readonly exited: boolean
 
-  // ── 空闲信号（idle-pi-reclamation 设计 D1 / D6-1）──
+  // ── 活动时钟（观测面） ──
   /**
-   * 最近一次 pi 双向活动时刻（ms epoch），空闲回收判定的信号源。
-   *
-   * 写点（RpcClient 内部）：出站 sendCommand（maintenance 标记除外）/ 入站
-   * handleMessage 全帧 / touchActivity()。初值 = spawn 时刻。pi 空闲期无周期性
-   * stdout（ADR-0047 ping 只在 turn 内），该值在用户态空闲下单调静止，判定干净。
+   * 最近一次 pi 双向活动时刻（ms epoch）。
+   * 写点（RpcClient 内部）：出站 sendCommand / 入站 handleMessage 全帧。初值 = spawn 时刻。
+   * 消费方为观测面（crash 取证「死前最后活动时刻」等）。原空闲回收判定消费
+   * （idle-pi-reclamation reaper + touchActivity 手动刷新）已随 ADR-0122 退役。
    */
   readonly lastActivityAt: number
-  /**
-   * 手动刷新空闲时钟。调用方语义 = MessageDispatcher.sendPrompt 入口同步 touch
-   * （设计 D6-1）：markSessionActive 置 occupancy=dispatching 位于 await hook / await
-   * ensureActive 之后，「prompt 已发出、hook/restore 执行中」窗口靠入口 touch 关闭。
-   */
-  touchActivity(): void
 }
 
 /**
@@ -257,7 +237,13 @@ export interface IPiEngine {
  * 这是「多进程调度」视角：按 sessionId 查/建/销毁 pi 进程，是 IPiEngine 的集合管理者。
  */
 export interface IProcessManager {
-  /** 创建并启动一个新的 pi 进程，绑定到 sessionId。返回其 IPiEngine 句柄。 */
+  /**
+   * 创建并启动一个新的 pi 进程，绑定到 sessionId。返回其 IPiEngine 句柄。
+   *
+   * pi 会话启动门禁（fail-fast）：settings.json 损坏（getSettingsCorruption 现查命中）
+   * 时抛 `code = 'settings_corrupted'` 错误，进程不 spawn——创建/恢复/fork/自动重生/
+   * 短命 pi 全部经本方法，单点覆盖；已运行会话不经此入口，不受影响。
+   */
   createSession(sessionId: string, cwd: string, options?: PiSessionOptions): Promise<IPiEngine>
   /** 销毁 sessionId 对应的 pi 进程。 */
   destroySession(sessionId: string): Promise<void>

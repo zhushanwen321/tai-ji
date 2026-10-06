@@ -3,14 +3,25 @@
  *
  * 职责：用户在源 session 点 handoff → runtime 让源 session 跑一个 handoff turn
  * （pi agent 根据 HANDOFF_PROMPT_TEMPLATE 生成 handoff 文档）→ runtime 从
- * agent_end 事件提取文档文本 → 新建空白 session → 注入文档首条 → 广播跳转。
+ * turn-end 终态帧提取文档文本 → 新建空白 session → 注入文档首条 → 广播跳转。
  *
  * 与旧同步拼字符串实现的区别：主 session 的 pi 全程跑一个 agent turn 生成文档，
  * 而非 runtime 自行 assembleHandoffDoc。文档质量交给 agent，runtime 只负责编排
- * （prompt / 监听 agent_end / 提取 text / 创建新 session / 注入 / 广播）。
+ * （prompt / 监听 turn-end 终态帧 / 提取 text / 创建新 session / 注入 / 广播）。
  *
- * 完成判定：runHandoff 等待源 session 的 agent_end 事件（或 timeout / abort /
- * pi 中途退出），提取最终文本作为 doc。
+ * 完成判定：runHandoff 等待源 session 的 turn-end 终态帧（event-adapter 翻译形态，
+ * 或 timeout / abort / pi 中途退出），提取最终文本作为 doc。
+ *
+ * [pi1-disposition-chat-flow U3② / D15.1] 事件消费形态：原直听 pi 原始 agent_end
+ * （pi 词汇泄漏进 services，且首个 agent_end 即收尾——pi 出错自动重试场景 stdout 流
+ * 有多个 agent_end，第一个失败轮就把 handoff 判死：空文档 reject 或以错误文本建会话，
+ * 即「重试误杀」）。现经 event-adapter 的 projectHandoffTurnEnd 消费翻译后的内部
+ * turn-end 帧，混合案 a+ 两处过滤同一监听器：
+ * ① `willRetry: true`（pi 自动重试的中间失败帧）→ 跳过等待下一轮（完备性前提：重试
+ *   耗尽判定恒返回 false，最后一帧恒 willRetry=false——pi agent-session.js 实读）；
+ * ② 终态帧 `stopReason === 'error'` → 拒绝（mid-stream 失败的错误消息可保留部分正文，
+ *   不能把错误文本当交接文档注入新会话）。溢出续跑场景的残余误杀（干净 reject）登记
+ *   接受（Q8 裁决）。
  *
  * 失败经 message.error 通道广播到源 session 对话流；timeout / abort / exit 经
  * Promise reject 抛出。
@@ -23,7 +34,7 @@
 import type { IMessageBroker } from '../interfaces.js'
 import type { SessionService } from './session/session-service.js'
 import type { IPiEngine } from './ports/pi-engine.js'
-import type { PiAgentEndEvent, PiAgentEndMessage } from '../infra/pi/pi-protocol.js'
+import { projectHandoffTurnEnd } from '../infra/pi/event-adapter.js'
 import { buildHandoffPrompt, sanitizeReply } from './handoff-prompt.js'
 import { wrapWithXmlTag } from './handoff-formatter.js'
 
@@ -55,7 +66,7 @@ interface HandoffServiceOpts {
 }
 
 /**
- * handoff turn 等待 agent_end 的超时（ms）。
+ * handoff turn 等待 turn-end 终态帧的超时（ms）。
  *
  * agent 生成 handoff 文档可能涉及多次工具调用（读文件等），10 分钟
  * 是宽松上限：正常 handoff turn 远小于此，超时几乎必然意味着 pi 卡死。
@@ -75,10 +86,10 @@ export const HANDOFF_TIMEOUT_MS = 600_000
 /**
  * 进行中的 handoff 句柄。存入 inflight Map，供 abortHandoff 取消用。
  *
- * detachListener：从 srcClient.onEvent 卸载 agent_end 监听。
+ * detachListener：从 srcClient.onEvent 卸载事件监听。
  * timeoutTimer：HANDOFF_TIMEOUT_MS 后触发 reject 的定时器。
  * detachExitWatcher：退订源 pi 退出监听（W3，onExit 多播订阅的 unsubscribe）。
- * resolve/reject：agentEndPromise 的两个端，由 agent_end 事件或 timeout/abort/exit 触发。
+ * resolve/reject：agentEndPromise 的两个端，由 turn-end 终态帧或 timeout/abort/exit 触发。
  * srcClient：源 session 的 IPiEngine，abort 时调 .abort() 取消 pi turn。
  */
 interface InflightHandoff {
@@ -88,35 +99,6 @@ interface InflightHandoff {
   resolve: (doc: string) => void
   reject: (err: Error) => void
   srcClient: IPiEngine
-}
-
-/**
- * 从 agent_end 事件的 messages 末条提取最终文本。
- *
- * 防御性实现（参考 event-adapter.ts:196-202 但独立）：
- * 1. messages 为 undefined / 空数组 → 返回 ''。
- * 2. 末条 content 是 unknown，先 Array.isArray 断言。
- * 3. filter 出 object 且 type==='text' 的 block，取 .text。
- *    S1：额外校验 text 是 string——pi 若发 {type:'text', text:123}（畸形）会被过滤掉
- *    （而非被 String(123) 拼成 "123"），归一化为空文档走 empty reject 路径。
- * 4. 全部 text block join 后返回；无 text block → ''。
- *
- * @param messages agent_end 事件的 messages 数组（PiAgentEndMessage[]）
- * @returns 提取的纯文本；空 / undefined / 无 text → ''
- */
-export function extractFinalTextFromAgentEnd(messages: PiAgentEndMessage[] | undefined): string {
-  if (!messages || messages.length === 0) return ''
-  const last = messages[messages.length - 1]
-  const content: unknown = last.content
-  if (!Array.isArray(content)) return ''
-  return content
-    .filter((item): item is { type: 'text'; text: string } => {
-      if (typeof item !== 'object' || item === null) return false
-      const obj = item as { type?: unknown; text?: unknown }
-      return obj.type === 'text' && typeof obj.text === 'string'
-    })
-    .map((block) => block.text ?? '')
-    .join('')
 }
 
 export class HandoffService {
@@ -148,7 +130,7 @@ export class HandoffService {
    * 2. getHistory 判空（无历史不可 handoff）。
    * 3. getSession 取 cwd + label。
    * 4. ensureActive 拿源 session 的 IPiEngine。
-   * 5. 注册 agent_end 监听 + timeout + exit 探测，建 agentEndPromise（W3/W4）。
+    * 5. 注册事件监听（projectHandoffTurnEnd 投影消费，U3②）+ timeout + exit 探测，建 agentEndPromise（W3/W4）。
    *    settle（resolve/reject）前先 cleanupInflight 移除 entry，关闭 settle 后到 finally
    *    之间 abort 仍生效的窗口；poll srcClient.exited 兜底检测 pi 中途退出（最长挂 10 分钟）。
    * 6. fire-and-forget 发送 handoff prompt（await 只确认 pi 收到 ack）。
@@ -194,11 +176,11 @@ export class HandoffService {
     const srcClient = await this.opts.sessionService.ensureActive(srcSessionId)
 
     // 5. 建 agentEndPromise + 注册 inflight（监听 + timeout + exit 探测）。
-    // agentEndPromise 是唯一的等待支路：agent_end resolve、timeout / abort / exit reject
+    // agentEndPromise 是唯一的等待支路：turn-end 终态帧 resolve、timeout / abort / exit reject
     // 都经它的 resolve/reject 完成（inflight.timeoutTimer 与 abortHandoff 共享 reject 句柄）。
     //
-    // W4：三条 settle 路径（agent_end / timeout / exit）在调用 resolve/reject 之前
-    // 先 cleanupInflight 把 entry 从 Map 移除，否则 agent_end resolve 后到 runHandoff 的
+    // W4：三条 settle 路径（turn-end 终态帧 / timeout / exit）在调用 resolve/reject 之前
+    // 先 cleanupInflight 把 entry 从 Map 移除，否则 turn-end 终态帧 resolve 后到 runHandoff 的
     // finally 之间（仍在 await agentEndPromise 之后、cleanup 之前的微任务窗口）abortHandoff
     // 仍能拿到 entry 调 reject（已 resolved 的 promise，no-op）+ 广播 handoffAborted，
     // 随后 runHandoff 继续广播 handoffComplete → 前端先 aborted 再 complete，UX 抖动。
@@ -216,9 +198,20 @@ export class HandoffService {
       }
 
       const detachListener = srcClient.onEvent((event) => {
-        const typed = event as PiAgentEndEvent
-        if (typed.type !== 'agent_end') return
-        const doc = extractFinalTextFromAgentEnd(typed.messages)
+        // [U3②/D15.1] 消费 event-adapter 翻译后的内部 turn-end 帧（原直听 pi 原始
+        // agent_end 已退役——事件名字面量与 Pi 词汇归零，重试误杀随两处过滤修复）。
+        const frame = projectHandoffTurnEnd(event, srcSessionId)
+        if (!frame) return
+        // 过滤①（混合案 a+）：willRetry=true 是 pi 自动重试的中间失败帧——跳过等下一轮
+        //（重试耗尽帧恒 willRetry=false，终态必经下方两分支收尾）。
+        if (frame.willRetry) return
+        // 过滤②：终态失败帧拒绝——mid-stream 失败可保留部分正文，不能把错误文本当
+        // 交接文档注入新会话（Q8 裁决补的残余缺口）。
+        if (frame.stopReason === 'error') {
+          finalize('reject', new Error('handoff: agent run failed (stopReason=error)'))
+          return
+        }
+        const doc = frame.content ?? ''
         if (!doc) {
           finalize('reject', new Error('handoff: agent produced empty document'))
           return
@@ -254,7 +247,7 @@ export class HandoffService {
       // B3：buildHandoffPrompt 不再接受 reply 参数，reply 改为新 session 开场消息
       await srcClient.prompt(buildHandoffPrompt())
 
-      // 7. 等结果（agent_end resolve / timeout 或 abort reject）
+      // 7. 等结果（turn-end 终态帧 resolve / timeout 或 abort reject）
       doc = await agentEndPromise
     } finally {
       // 8. 清理 inflight（无论成功 / 失败 / abort）
@@ -333,7 +326,7 @@ export class HandoffService {
    * 查询 handoff 是否进行中（idle pi reclamation D2 #4 豁免信号，u3a 只读访问器）。
    *
    * inflight Map 的条目生命周期与「handoff turn 在途」精确同界：runHandoff 第 5 步注册
-   * （prompt 受理前后、等 agent_end），settle 各路（agent_end / timeout / abort / exit）
+   * （prompt 受理前后、等 turn-end 终态帧），settle 各路（turn-end / timeout / abort / exit）
    * 经 finalize 清理 + runHandoff finally 兜底清理——条目存在 ⇔ 源 session 正在跑
    * handoff turn，正是 reaper 必须豁免的窗口（回收会杀掉正在生成 handoff 文档的 pi）。
    */

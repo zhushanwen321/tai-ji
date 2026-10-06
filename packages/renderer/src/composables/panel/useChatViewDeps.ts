@@ -19,12 +19,15 @@
  * - triggerEnterForkMode/triggerEnterHandoffMode → forkAsk/handoffAsk 回调
  * - useSideDrawer（open）→ openDrawer
  * - useFileTreeStore（selectFile）→ onFileClick
- * - useFileSearch（load）+ collectFilePaths/collectBasenames → loadFileCandidates + renderMarkdown env
- * - renderMarkdownSegments（markdown.ts，含 shiki 高亮 + 路径链接化）→ renderMarkdown
- * - renderMermaid（mermaid.ts）→ renderMermaid
+ * - useFileSearch（load）+ collectFilePaths/collectBasenames → loadFileCandidates + renderMarkdown env；
+ *   虚拟 id（subagent:/agentcall:/btw:）先经 shared resolveVirtualSessionId 解析到真实 session id
+ *   再发起 file.search（runtime 只登记真实 pi session，vid 直传必 session_not_found——fileSearch vid 修复）
+ * - renderMarkdownSegments（@taiji/ui/features/chat/markdown，D10 渲染链下沉，含 shiki 高亮 +
+ *   路径链接化 + copyLabel 文案注入）→ renderMarkdown
+ * - renderMermaid（@taiji/ui/features/chat/mermaid）→ renderMermaid
  * - assistantToMarkdown（messageFormat.ts）→ toMarkdown
  */
-import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, onScopeDispose, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { FileNode, Message, Segment } from '@taiji/shared'
 import { normalizeContent } from '@taiji/shared'
@@ -35,21 +38,32 @@ import { useChat } from '@/composables/features/chat/useChat'
 import { useTtsPlayer } from '@/composables/features/chat/useTtsPlayer'
 import { useTtsSpeechEnabled } from '@/components/settings/tts/use-tts-enabled'
 import { useTurnExpansion } from '@/composables/panel/useTurnExpansion'
-import { useSideDrawer, type SideDrawerTab } from '@/composables/features/drawer/useSideDrawer'
+import { useSideDrawer, type RightDrawerTab } from '@/composables/features/drawer/useSideDrawer'
+import { openBrowser } from '@taiji/core/domain/overlay'
+import * as events from '@taiji/core/transport/api'
 import { useFileTreeStore } from '@/stores/fileTree'
+import { resolveVirtualSessionId } from '@taiji/shared'
 import { useFileSearch } from '@/composables/features/search/useFileSearch'
 import { useToast } from '@/composables/useToast'
 import { triggerEnterForkMode } from '@/composables/panel/useForkModeChannel'
 import { triggerEnterHandoffMode } from '@/composables/panel/useHandoffModeChannel'
-import { renderMarkdownSegments } from '@/composables/logic/markdown'
+import { renderMarkdownSegments } from '@taiji/ui/features/chat/markdown'
 import {
   createIncrementalRenderCache,
   renderIncremental,
   STREAMING_FENCE_SILENCE_MS,
-} from '@/composables/logic/markdown-incremental'
-import { renderMermaid } from '@/composables/logic/mermaid'
+} from '@taiji/ui/features/chat/markdown-incremental'
+import { renderMermaid } from '@taiji/ui/features/chat/mermaid'
 import { assistantToMarkdown } from '@/composables/logic/messageFormat'
 import { collectBasenames, collectFilePaths } from '@/lib/file-basename'
+import { localFileRead, localFileServable } from '@/lib/ipc'
+
+/** Set 内容等价（大小 + 逐成员），白名单去重赋值的判等基础 */
+function setsEqual(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false
+  for (const v of a) if (!b.has(v)) return false
+  return true
+}
 
 /**
  * 装配 ChatViewDeps。
@@ -63,7 +77,13 @@ import { collectBasenames, collectFilePaths } from '@/lib/file-basename'
  */
 export function useChatViewDeps(
   sessionId: Ref<string>,
-  override?: { resourceBaseDir?: ComputedRef<string | undefined> },
+  override?: {
+    resourceBaseDir?: ComputedRef<string | undefined>
+    /** 虚拟 id 归属真实 session（agentcall 两段式 vid 无 mainSid 命名空间，挂载链显式传入——
+     *  MessageStream mainSessionId prop 一跳；subagent:/btw: vid 自带归属，不消费本字段）。
+     *  缺失时 agentcall vid 无 cwd 数据源 → 白名单空集 + 不发起必失败的 file.search。 */
+    mainSessionId?: ComputedRef<string | undefined>
+  },
 ): ChatViewDeps {
   const { t } = useI18n()
   const { error: toastError } = useToast()
@@ -77,10 +97,17 @@ export function useChatViewDeps(
   const fileTreeStore = useFileTreeStore()
   const { load: loadFileCandidates } = useFileSearch()
 
+  /** vid → 真实 session id（shared resolveVirtualSessionId，跨层 SSOT）：file.search 与
+   *  cwd 查询只认真实 pi session，vid 直传必 session_not_found。ownerSid 是挂载链显式
+   *  传入的归属 session（agentcall 专属；读 .value 保持响应式，owner 切换后解析跟随）。 */
+  const ownerSid = override?.mainSessionId
+  const realSidOf = (sid: string): string | undefined => resolveVirtualSessionId(sid, ownerSid?.value)
+
   /** 当前 session 的本地文件白名单（filePaths 含 / 路径 + localFiles 裸 basename）。
    *  对齐旧 MarkdownRenderer 的 refreshLocalFiles：sessionId 变化重新 load（无缓存，
-   *  缓存治理 U1 1-3 退役——每次现拉 file.search），fire-and-forget RPC 完成后赋值触发重渲染。
-   *  renderMarkdown 消费这两个 Set 作 markdown 路径/basename 链接化白名单。 */
+   *  缓存治理 U1 1-3 退役——每次现拉 file.search），fire-and-forget RPC 完成后赋值触发重渲染；
+   *  另有 agent turn settled 刷新（下方订阅，覆盖 turn 内新建文件）。renderMarkdown 消费
+   *  这两个 Set 作 markdown 路径/basename 链接化白名单。 */
   const filePaths = ref<Set<string>>(new Set())
   const localFiles = ref<Set<string>>(new Set())
   async function refreshLocalFiles(sid: string | null): Promise<void> {
@@ -89,14 +116,28 @@ export function useChatViewDeps(
       localFiles.value = new Set()
       return
     }
+    const realSid = realSidOf(sid)
+    if (!realSid) {
+      // 虚拟 id 无归属 session（agentcall 挂载链未传 mainSessionId 等未知形态）→ 无 cwd
+      // 数据源，白名单空集（该视图 markdown 路径降级纯文本）。不发必失败的 file.search
+      // （修复前每次挂载打一发 session_not_found 的 fileSearch warn——fileSearch vid 修复）。
+      filePaths.value = new Set()
+      localFiles.value = new Set()
+      return
+    }
     try {
-      const nodes = await loadFileCandidates(sid)
+      const nodes = await loadFileCandidates(realSid)
       // 代际守卫（ADR-0049 updateFor(capturedSid) 同源思路）：await 期间 sessionId 可能已切到
       // 新 session——迟到的 file.search 结果属旧 session，写入会跨 session 串台（新 session 的
       // markdown 路径按旧文件集判定链接化）。不等则整体丢弃，由新 session 自己的加载负责落位。
       if (sid !== sessionId.value) return
-      filePaths.value = collectFilePaths(nodes)
-      localFiles.value = collectBasenames(nodes)
+      const nextPaths = collectFilePaths(nodes)
+      const nextBasenames = collectBasenames(nodes)
+      // 内容等价 → 不赋值：保持 Set 引用稳定（env 签名不变 → 增量渲染缓存不失效、已完成
+      // 消息不重渲染）。turn-settle 每 turn 触发一次刷新，绝大多数 turn 文件集未变。
+      if (setsEqual(filePaths.value, nextPaths) && setsEqual(localFiles.value, nextBasenames)) return
+      filePaths.value = nextPaths
+      localFiles.value = nextBasenames
     } catch (e) {
       // 降级：load 失败时白名单为空集，markdown 路径降级纯文本（与无 env 一致，无回归）。
       // 同样受代际守卫约束：旧 session 的失败结果不得清空新 session 已加载的白名单。
@@ -110,12 +151,41 @@ export function useChatViewDeps(
   }
   watch(sessionId, (sid) => { void refreshLocalFiles(sid) }, { immediate: true })
 
+  /** agent turn settled → 白名单刷新（complete / error 收口帧均触发；abort 经 complete{stopReason:'aborted'}）。
+   *  动机（2026-10-03 display-containers 交付复盘缺陷）：白名单快照在会话视图挂载时拉取（上方
+   *  watch 只随 sessionId 变化重拉），turn 内 agent 新建/删除的文件不进白名单 → 该 turn 回复里
+   *  反引号引用的新落盘文件路径不链接化（纯文本死链）。turn 收口帧是天然刷新锚点：此时本 turn
+   *  的全部写盘已完成。内容等价守卫保证无文件变化的 turn 零赋值零重渲染，常态成本 = 一次
+   *  file.search RPC。
+   *  订阅生命周期：裸 events.on（useSessionEvents 有 getCurrentInstance 守卫，本装配器存在
+   *  effectScope 直调形态不满足）+ watch(sessionId) 重订 + onScopeDispose 退订；切 sid 边界的
+   *  迟到帧由 refreshLocalFiles 内代际守卫兜底。 */
+  let unsubTurnSettle: (() => void) | null = null
+  watch(sessionId, (sid) => {
+    unsubTurnSettle?.()
+    unsubTurnSettle = null
+    if (!sid) return
+    unsubTurnSettle = events.on(sid, (msg) => {
+      if (msg.type === 'message.complete' || msg.type === 'message.error') {
+        void refreshLocalFiles(sid)
+      }
+    })
+  }, { immediate: true })
+  onScopeDispose(() => {
+    unsubTurnSettle?.()
+    unsubTurnSettle = null
+  })
+
   /** 按 id 查 session cwd（sessionStore.list 线性查，与 useDetailPane.sessionCwd 同源同层）。
-   *  resourceBaseDir env 装配与 deps.sessionCwdOf（ui MarkdownRenderer ④路 props 缺省
-   *  fallback，设计 D4 双通道）共用此单一实现，避免双份查询逻辑漂移。 */
+   *  虚拟 id 先解析到归属真实 session 再查（sessionCwdOf 的 deps 消费方传的是 vid——
+   *  MarkdownRenderer ④路点击解析拿 cwd）。resourceBaseDir env 装配与 deps.sessionCwdOf
+   *  （ui MarkdownRenderer ④路 props 缺省 fallback，设计 D4 双通道）共用此单一实现，
+   *  避免双份查询逻辑漂移。 */
   function sessionCwdOf(sid: string): string | undefined {
     if (!sid) return undefined
-    return sessionStore.list.find((s) => s.id === sid)?.cwd ?? undefined
+    const real = realSidOf(sid)
+    if (!real) return undefined
+    return sessionStore.list.find((s) => s.id === real)?.cwd ?? undefined
   }
 
   /** 当前 session 的相对资源解析基准目录（resourceBaseDir，设计 markdown-html-sanitize-render
@@ -139,6 +209,25 @@ export function useChatViewDeps(
     // resourceBaseDir env 装配共用 sessionCwdOf 单一实现；override 存在时 env 与 deps
     // 字段取值不同是有意的——override 只覆盖 env 通道，deps 恒按 id 查 session cwd）
     sessionCwdOf,
+    /** 产物 servable 预检（chat-html-support §6.3 D3「跨层依赖注入」/ §6.9 D9）：HtmlPreviewInline
+     *  挂载前经此调主进程 localFile:servable 判定（白名单 ∪ 存在 ∪ 非目录，与协议 handler
+     *  同谓词）。electronAPI 消费收敛在 lib/ipc（唯一适配点）；无 IPC（web/mock）时 reject，
+     *  容器按「预检不可用」跳过预检直接挂载（不阻塞预览入口，真实服务判定在协议 handler）。 */
+    probeArtifact: (absPath: string) => localFileServable(absPath),
+    /** 产物源码读取（chat-html-support v16 §6.3「源码态」/ §6.9 D9 localFile:read 通道）：
+     *  HtmlPreviewInline 切「源码」后经此读产物文件全文（产物目录在 session cwd 外，runtime
+     *  file.read 的 cwd 守门不可达）。lib/ipc 的结构化失败原因（not_found / is_dir /
+     *  out_of_whitelist / read_failed）以 err.reason 结构化属性附于 reject 的 Error（message
+     *  保留供 console 诊断）——容器按原因显具体文案（复用 panel.detail.htmlReason* 词条，
+     *  not_found「产物已被保留期回收」等真实原因用户侧可见）；无 IPC（web/mock）同样 reject
+     *  （无 reason 属性 → 容器 fallback 固定占位文案）。 */
+    readArtifact: async (absPath: string) => {
+      const result = await localFileRead(absPath)
+      if (!result.ok) {
+        throw Object.assign(new Error(`localFileRead failed: ${result.reason}`), { reason: result.reason })
+      }
+      return { content: result.content }
+    },
 
     // ── 操作回调 ──
     toggleExpand: (turnKey: string): void => turnExpansion.toggle(turnKey),
@@ -187,10 +276,16 @@ export function useChatViewDeps(
     /** 朗读态查询：useTtsPlayer 全局单例（D11）按 messageId 投影，三态直通 */
     speakStateOf: (messageId: string) => tts.speakStateOf(messageId),
     openDrawer: (tab, opts?): void => {
-      drawer.open(tab as SideDrawerTab, opts)
+      drawer.open(tab as RightDrawerTab, opts)
+    },
+    // [display-containers §7.4 URL 注入链] localhost 链接 → 浮层浏览器（core openBrowser：
+    // 单例换内容 + BrowserPane 挂浮层壳）；发起会话 = 调用方（MarkdownRenderer）透传的 sessionId
+    openBrowser: (url: string, sessionId: string): void => {
+      openBrowser(url, sessionId)
     },
     onFileClick: (path: string): void => {
-      fileTreeStore.selectFile(path)
+      // per-session：选中态落位 + 同步注入 detail tab（W3 注入语义；目标会话 = 本 deps 绑定会话）
+      fileTreeStore.selectFile(sessionId.value, path)
     },
 
     // ── 数据加载 ──
@@ -198,13 +293,17 @@ export function useChatViewDeps(
 
     // ── 渲染桥接 ──
     /** 渲染 markdown 为 segments（含 shiki 高亮 + 路径/basename 链接化 + img 相对 src 重写，
-     *  白名单与 resourceBaseDir 由上方 computed/watch 维护） */
+     *  白名单与 resourceBaseDir 由上方 computed/watch 维护）。
+     *  copyLabel 注入：ui 渲染模块不依赖壳 i18n 单例（D10 i18n 解耦），复制按钮 title 文案
+     *  每次调用求值传入（locale 切换下一帧生效；迁移前由渲染模块 bake 的 t('composable.copyLabel')
+     *  逐字等价——文案等价由 ui markdown.test.ts C1/C2 断言守卫）。 */
     renderMarkdown: (source: string, sid?: string) => {
       void sid // sid 仅作 sessionId 派生提示，实际白名单/基准目录由 watch(sessionId) 统一刷新（单 session 壳）
       return renderMarkdownSegments(source, {
         filePaths: filePaths.value,
         localFiles: localFiles.value,
         resourceBaseDir: resourceBaseDir.value,
+        copyLabel: t('composable.copyLabel'),
       })
     },
     /** D-5 增量渲染（W22 协议 / W23 消费）：前缀段引用恒等缓存 + tail 段每帧重建 + streaming-fence
@@ -221,6 +320,7 @@ export function useChatViewDeps(
           filePaths: filePaths.value,
           localFiles: localFiles.value,
           resourceBaseDir: resourceBaseDir.value,
+          copyLabel: t('composable.copyLabel'),
         },
         opts,
       )

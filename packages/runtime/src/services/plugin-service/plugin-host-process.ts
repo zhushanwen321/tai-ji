@@ -32,9 +32,6 @@ import { resolveAndValidateFile, dispatchHostRpcMessage, safeDispatchHostMessage
  */
 
 const MAX_PLUGINS_PER_TRUSTED_PROCESS = 10
-const LOAD_PLUGIN_TIMEOUT_MS = 10_000
-/** shutdown 等待子进程退出的上限（超过则 SIGKILL） */
-const SHUTDOWN_KILL_TIMEOUT_MS = 2000
 /**
  * disconnect 后等待 exit 事件的兜底窗口（L-5）。
  * 实测探针：子进程退出时父进程事件序为 disconnect → exit，且 exit 事件晚于
@@ -107,8 +104,6 @@ export interface PluginPoolOptions {
   workerBootstrapOverride?: string
   /** fork execArgv（ESM loader 经 --import 注入点；默认空，不继承父进程 flags） */
   execArgv?: string[]
-  /** loadPlugin 超时（测试注入短超时用；默认 10s） */
-  loadTimeoutMs?: number
   /**
    * disconnect 后等 exit 的兜底窗口（测试注入小值用；默认 DISCONNECT_GRACE_MS）。
    * 窗口语义不变（exit 权威分流 + 存活断连报 crash），只调宽度。
@@ -125,7 +120,6 @@ export class PluginHostProcess implements PluginHostProcessContract {
   private trustedCounter = 0
   private readonly bootstrapPathOverride?: string
   private readonly execArgv: string[]
-  private readonly loadTimeoutMs: number
   private readonly disconnectGraceMs: number
 
   /** pluginId → processId 反向索引（D2-5：getProcessHandle O(1)，替代全进程线性扫） */
@@ -135,7 +129,6 @@ export class PluginHostProcess implements PluginHostProcessContract {
     this.rpcServer = rpcServer
     this.bootstrapPathOverride = options?.bootstrapPathOverride
     this.execArgv = options?.execArgv ?? []
-    this.loadTimeoutMs = options?.loadTimeoutMs ?? LOAD_PLUGIN_TIMEOUT_MS
     this.disconnectGraceMs = options?.disconnectGraceMs ?? DISCONNECT_GRACE_MS
   }
 
@@ -198,21 +191,14 @@ export class PluginHostProcess implements PluginHostProcessContract {
    * loadedModules 的分区键，activate 消息按真实 pluginId 查找。旧实现从
    * pluginPath 末段推导（目录时代假设），pluginPath 改为入口文件后 pop 出
    * 'index.js' 之类文件名 → loadedModules 键失配 → activate 报 Module not loaded。
-   * 超时（loadTimeoutMs）后 reject 并清理该子进程（E2：宿主清理）。
+   * loadPlugin 墙钟超时（loadTimeoutMs + 宿主清理）已随 ADR-0122 防御机制清查退役——
+   * 子进程顶层死循环 = loaded/error 永不到达 = 本 Promise 悬挂，处置归用户。
    */
   async loadPlugin(processId: string, pluginId: string, pluginPath: string, trustLevel?: 'trusted' | 'sandbox'): Promise<void> {
     const child = this.processInstances.get(processId)
     if (!child) throw new Error(`Process not found: ${processId}`)
 
     return new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error(`loadPlugin timeout for process ${processId}`))
-        // E2: 超时后宿主清理该子进程（kill + unregister）
-        this.terminateProcess(processId).catch((e: unknown) => {
-          console.debug(`[plugin-host-process] cleanup after load timeout failed for ${processId}:`, e)
-        })
-      }, this.loadTimeoutMs)
-
       const onMessage = (msg: unknown) => {
         // D6 入口防御 + loadPlugin 过滤：trusted 子进程多插件共享（≤10），loaded/error
         // 回复必须按 pluginId 归属——只匹配 m.type 会命中并发加载的其他插件的回复
@@ -221,7 +207,6 @@ export class PluginHostProcess implements PluginHostProcessContract {
         if (!isRecordMessage(msg)) return
         const m = msg
         if ((m.type === 'loaded' || m.type === 'error') && m.pluginId === pluginId) {
-          clearTimeout(timeout)
           child.off('message', onMessage)
           if (m.type === 'loaded') resolve()
           else reject(new Error(String(m.error ?? 'load failed')))
@@ -317,10 +302,10 @@ export class PluginHostProcess implements PluginHostProcessContract {
   }
 
   /**
-   * 优雅终止子进程：SIGTERM → 等待 exit（最多 SHUTDOWN_KILL_TIMEOUT_MS）→ SIGKILL 兜底。
+   * 终止子进程：SIGKILL 直杀 + 立即 resolve（exit 收尾由进程生命周期接手）。
    *
-   * terminateProcess 与 shutdown 共用此升级链（MF-3：消除不对称，防 SIGTERM 抵抗导致 orphan）。
-   * timer.unref() 避免兜底定时器阻塞 runtime 退出。
+   * terminateProcess 与 shutdown 共用（MF-3 单实现）。SIGTERM → grace 等待 → SIGKILL
+   * 升级链已随 ADR-0122 防御机制清查退役（优雅退出窗删除后 SIGTERM 成死信号）。
    */
   private killChildGracefully(child: ChildProcess): Promise<void> {
     return new Promise<void>((resolve) => {
@@ -328,25 +313,12 @@ export class PluginHostProcess implements PluginHostProcessContract {
         resolve()
         return
       }
-      const timer = setTimeout(() => {
-        try {
-          child.kill('SIGKILL')
-        } catch (e: unknown) {
-          // best-effort：进程可能刚退出，kill 抛错不阻塞清理
-          console.debug(`[plugin-host-process] SIGKILL escalation failed:`, e)
-        }
-        resolve()
-      }, SHUTDOWN_KILL_TIMEOUT_MS)
-      timer.unref?.()
-      child.once('exit', () => {
-        clearTimeout(timer)
-        resolve()
-      })
+      child.once('exit', () => resolve())
       try {
-        child.kill()
+        child.kill('SIGKILL')
       } catch (e: unknown) {
         // best-effort：进程可能已退出，kill 抛错不阻塞清理
-        console.debug(`[plugin-host-process] kill failed:`, e)
+        console.debug(`[plugin-host-process] SIGKILL failed:`, e)
       }
     })
   }

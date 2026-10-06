@@ -1,13 +1,14 @@
 /**
- * DetailPane 组件单测：header 文件路径查看与复制。
+ * DetailPane 组件单测：header 文件路径查看与复制 + 实例层 tab 条（display-containers W3）。
  *
  * 覆盖：
  * - header 显示文件名 + 复制绝对路径按钮
  * - hover 文件名时 tooltip 展示绝对路径 + 复制文件名按钮
  * - 点击复制按钮写入剪贴板
+ * - S4 tab 条：多 tab 渲染（含激活标记）/ 点击切换（activateTab）/ × 关闭（closeTab 且不误触切换）
  *
- * mock 策略：vi.mock('@/composables/features/file-tree/useDetailPane') 控制 state 与 sessionCwd，
- * HoverCard 相关子组件 stub 掉以便断言 tooltip 内容。
+ * mock 策略：vi.mock('@/composables/features/file-tree/useDetailPane') 控制 state/tabs/activePath
+ * 与 sessionCwd，HoverCard 相关子组件 stub 掉以便断言 tooltip 内容。
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/panel/DetailPane.test.ts
  */
@@ -17,6 +18,9 @@ import { createPinia, setActivePinia } from 'pinia'
 import DetailPane from '@/components/panel/DetailPane.vue'
 
 const mockToggleView = vi.fn()
+const mockActivateTab = vi.fn()
+const mockCloseTab = vi.fn()
+const mockSaveScroll = vi.fn()
 
 // 可变 fixture：resourceBaseDir 传值矩阵用例在 mount 前改 path/cwd/kind。
 // state 必须是真 ref（<script setup> 模板对 ref 绑定自动解包、普通对象不解包——
@@ -36,13 +40,21 @@ vi.mock('@/composables/features/file-tree/useDetailPane', async () => {
     kind: 'text',
   })
   const cwdHolder = { value: '/Users/demo/project' as string | null }
+  // tab 条 fixture（S4 用例在 mount 前改 tabs/activePath；默认空 = 不渲染 tab 条）
+  const tabs = ref<unknown[]>([])
+  const activePath = ref<string | null>(null)
   return {
     useDetailPane: () => ({
       state,
+      tabs,
+      activePath,
       toggleView: mockToggleView,
+      activateTab: mockActivateTab,
+      closeTab: mockCloseTab,
+      saveScroll: mockSaveScroll,
       sessionCwd: () => cwdHolder.value,
     }),
-    __fixture: { state, cwdHolder },
+    __fixture: { state, cwdHolder, tabs, activePath },
   }
 })
 
@@ -75,6 +87,20 @@ beforeEach(() => {
     configurable: true,
   })
 })
+
+/** 重置 tab 条 fixture（用例隔离：默认空 tab 不渲染 tab 条、空态显示） */
+async function resetTabFixture(): Promise<void> {
+  const mod = (await import('@/composables/features/file-tree/useDetailPane')) as unknown as {
+    __fixture: {
+      state: { value: Record<string, unknown> }
+      tabs: { value: unknown[] }
+      activePath: { value: string | null }
+    }
+  }
+  mod.__fixture.tabs.value = []
+  mod.__fixture.activePath.value = null
+  mod.__fixture.state.value = { ...mod.__fixture.state.value, path: '', status: 'idle' }
+}
 
 describe('DetailPane header 文件路径查看与复制', () => {
   it('U1: 显示文件名和复制绝对路径按钮', () => {
@@ -117,8 +143,8 @@ describe('DetailPane header 文件路径查看与复制', () => {
 
 describe('DetailPane i18n 契约', () => {
   it('E1: 中英文 locale 均包含复制相关文案', async () => {
-    const { default: zh } = await import('@/i18n/locales/zh-CN/panel')
-    const { default: en } = await import('@/i18n/locales/en-US/panel')
+    const { default: zh } = await import('@taiji/ui/locale/zh-CN/panel')
+    const { default: en } = await import('@taiji/ui/locale/en-US/panel')
     expect(zh.detail.copyFilePath).toBe('复制路径')
     expect(zh.detail.copyFileName).toBe('复制文件名')
     expect(en.detail.copyFilePath).toBe('Copy path')
@@ -187,5 +213,64 @@ describe('DetailPane resourceBaseDir 传值矩阵（drawer 文件目录，设计
     const val = wrapper.find('[data-testid="detail-markdown"]').attributes('data-base')
     // absolutePath = /README.md（已是绝对路径），lastIndexOf('/') === 0 → undefined（防 base 变成空串）
     expect(val === undefined || val === '').toBe(true)
+  })
+})
+
+describe('DetailPane 实例层 tab 条（display-containers W3 §6.3，S4）', () => {
+  /** 组装 tab 条 fixture（两个文件 tab，a 激活） */
+  async function useTwoTabs(): Promise<void> {
+    const mod = (await import('@/composables/features/file-tree/useDetailPane')) as unknown as {
+      __fixture: {
+        state: { value: Record<string, unknown> }
+        tabs: { value: unknown[] }
+        activePath: { value: string | null }
+      }
+    }
+    mod.__fixture.tabs.value = [
+      { path: 'src/a.ts', status: 'content', viewMode: 'preview', scrollTop: 120 },
+      { path: 'docs/b.md', status: 'content', viewMode: 'diff', scrollTop: 0 },
+    ]
+    mod.__fixture.activePath.value = 'src/a.ts'
+    mod.__fixture.state.value = {
+      ...mod.__fixture.state.value,
+      path: 'src/a.ts',
+      status: 'content',
+    }
+  }
+
+  it('U5: 多 tab 渲染（文件名 + 激活标记），单内容视图只有激活实例', async () => {
+    await useTwoTabs()
+    const wrapper = mountDetailPane()
+    const tabs = wrapper.findAll('[data-testid="detail-tab"]')
+    expect(tabs.length).toBe(2)
+    expect(tabs[0].text()).toContain('a.ts')
+    expect(tabs[1].text()).toContain('b.md')
+    expect(tabs[0].attributes('data-active')).toBe('true')
+    expect(tabs[1].attributes('data-active')).toBe('false')
+  })
+
+  it('U6: 点击非激活 tab → 调 activateTab（keep-alive 切换，内容/模式态由实例保持）', async () => {
+    await useTwoTabs()
+    const wrapper = mountDetailPane()
+    const tabs = wrapper.findAll('[data-testid="detail-tab"]')
+    await tabs[1].trigger('click')
+    expect(mockActivateTab).toHaveBeenCalledWith('docs/b.md')
+  })
+
+  it('U7: 点击 tab 的 × → 调 closeTab 且不误触切换（stop）', async () => {
+    await useTwoTabs()
+    const wrapper = mountDetailPane()
+    const closeBtns = wrapper.findAll('[data-testid="detail-tab-close"]')
+    expect(closeBtns.length).toBe(2)
+    await closeBtns[0].trigger('click')
+    expect(mockCloseTab).toHaveBeenCalledWith('src/a.ts')
+    expect(mockActivateTab).not.toHaveBeenCalled()
+  })
+
+  it('U8: 无打开 tab → tab 条不渲染（空态不受影响）', async () => {
+    await resetTabFixture()
+    const wrapper = mountDetailPane()
+    expect(wrapper.find('[data-testid="detail-tab-strip"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="detail-empty"]').exists()).toBe(true)
   })
 })

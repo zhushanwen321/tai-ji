@@ -1,5 +1,6 @@
 /**
- * A6-inflight: in-flight 防重 + sendChecked + onSettled + 错误重试（D4）。
+ * A6-inflight: in-flight 防重 + sendChecked + onSettled + 首败即停（ADR-0122，
+ * 原 D4 错误重试链已退役——重试决策归消费方）。
  */
 import { describe, expect, it, vi } from 'vitest'
 import { createDelivery } from '../src/delivery.js'
@@ -194,103 +195,45 @@ describe('A6-inflight sendChecked', () => {
   })
 })
 
-describe('A6-inflight port.send 错误重试（D4：失败不丢消息）', () => {
-  it('#2 前两次抛错第三次成功 → 受理转 in-flight，confirmDelivered 后 delivered（消息不出队直到成功）', async () => {
-    vi.useFakeTimers()
-    let calls = 0
+describe('A6-inflight port.send 首败即停（ADR-0122：失败不静默、不重试）', () => {
+  it('#2 同步抛错 → 首败即 rejected + 条目移除（无重试）', () => {
     const settled: string[] = []
     const port = makeMockPort({
-      send: () => {
-        calls++
-        if (calls < 3) throw new Error('transient')
-        return undefined
-      },
+      send: () => { throw new Error('transient') },
     })
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle = createDelivery(port, {
-      backoff: { ms: 100, max: 50 },
       onSettled: (_m, outcome) => settled.push(outcome),
     })
 
     handle.send(textMsg('hello'))
-    expect(port.sendCalls).toHaveLength(1) // 首试抛错
-    expect(settled).toEqual([]) // 未终态：重试中
-    expect(handle.depth()).toBe(1) // 在途重试中计入深度
-
-    vi.advanceTimersByTime(100)
-    expect(port.sendCalls).toHaveLength(2) // 重试 1 又抛错
-    expect(settled).toEqual([])
-
-    vi.advanceTimersByTime(100)
-    expect(port.sendCalls).toHaveLength(3) // 重试 2 成功
-    // D9⑤：受理成功只转 in-flight（送达口径回调等 confirmDelivered）
-    expect(settled).toEqual([])
-    expect(handle.depth()).toBe(0) // 已受理，不计深度
-    expect(handle.entriesFull().active[0]?.state).toBe('in-flight')
-
-    expect(handle.confirmDelivered(handle.entriesFull().active[0]!.id)).toBe(true)
-    expect(settled).toEqual(['delivered'])
+    expect(port.sendCalls).toHaveLength(1) // 恰一次投递
+    expect(settled).toEqual(['rejected']) // 失败显式上报
+    expect(handle.entriesFull().active).toHaveLength(0) // 条目移除，不留守
+    expect(handle.entriesFull().tombstones).toHaveLength(0) // 未受理无判重语义
 
     warnSpy.mockRestore()
     handle.dispose()
-    vi.useRealTimers()
   })
 
-  it('#2 连续抛错达 backoff 上限 → settle rejected + onSettled 上报', () => {
-    vi.useFakeTimers()
+  it('#2 async port.send reject 同形态：首败即 rejected（Promise 拒绝等价抛错）', async () => {
     const settled: string[] = []
     const port = makeMockPort({
-      send: () => { throw new Error('pi stuck') },
+      send: () => Promise.reject(new Error('rpc reset')),
     })
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle = createDelivery(port, {
-      backoff: { ms: 100, max: 3 },
       onSettled: (_m, outcome) => settled.push(outcome),
     })
 
     handle.send(textMsg('hello'))
-    expect(settled).toEqual([])
-
-    // 尝试 1(t0) + 重试 t100/t200/t300 → 第 4 次失败后 attempts=4 > max=3 → rejected
-    vi.advanceTimersByTime(300)
-    expect(port.sendCalls).toHaveLength(4)
+    await new Promise((r) => setTimeout(r, 0)) // Promise reject（宏任务）结算
+    expect(port.sendCalls).toHaveLength(1)
     expect(settled).toEqual(['rejected'])
-    expect(handle.depth()).toBe(0) // 终态 rejected，不无限积压
+    expect(handle.entriesFull().active).toHaveLength(0)
 
     warnSpy.mockRestore()
     handle.dispose()
-    vi.useRealTimers()
-  })
-
-  it('#2 async port.send reject 同样走重试（Promise 拒绝等价抛错），受理后 confirmDelivered 落 delivered', async () => {
-    vi.useFakeTimers()
-    let calls = 0
-    const settled: string[] = []
-    const port = makeMockPort({
-      send: () => {
-        calls++
-        if (calls === 1) return Promise.reject(new Error('rpc reset'))
-        return Promise.resolve()
-      },
-    })
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const handle = createDelivery(port, {
-      backoff: { ms: 100, max: 50 },
-      onSettled: (_m, outcome) => settled.push(outcome),
-    })
-
-    handle.send(textMsg('hello'))
-    await vi.advanceTimersByTimeAsync(100)
-    expect(port.sendCalls).toHaveLength(2)
-    // D9⑤：重试后受理成功只转 in-flight
-    expect(settled).toEqual([])
-
-    expect(handle.confirmDelivered(handle.entriesFull().active[0]!.id)).toBe(true)
-    expect(settled).toEqual(['delivered'])
-
-    warnSpy.mockRestore()
-    handle.dispose()
-    vi.useRealTimers()
   })
 })
 
@@ -315,14 +258,13 @@ describe('A6-inflight onSettled 终态信号', () => {
     handle.dispose()
   })
 
-  it('port.send 抛错且零重试上限（max:0）→ 回调 rejected', () => {
+  it('port.send 抛错 → 回调 rejected（首败即停，ADR-0122）', () => {
     const settledCalls: { msg: DeliveryMessage; outcome: string }[] = []
     const port = makeMockPort({
       send: () => { throw new Error('fail') },
     })
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle = createDelivery(port, {
-      backoff: { ms: 0, max: 0 }, // 零重试：首败即终态
       onSettled: (msg, outcome) => settledCalls.push({ msg, outcome }),
     })
 
@@ -360,7 +302,7 @@ describe('A6-inflight onSettled 终态信号', () => {
     handle.dispose()
   })
 
-  it('async port.send reject 且零重试上限（max:0）→ 回调 rejected', async () => {
+  it('async port.send reject → 回调 rejected（首败即停，ADR-0122）', async () => {
     let sendReject: ((err: Error) => void) | undefined
     const settledCalls: { msg: DeliveryMessage; outcome: string }[] = []
     const port = makeMockPort({
@@ -368,7 +310,6 @@ describe('A6-inflight onSettled 终态信号', () => {
     })
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const handle = createDelivery(port, {
-      backoff: { ms: 0, max: 0 }, // 零重试：首败即终态
       onSettled: (msg, outcome) => settledCalls.push({ msg, outcome }),
     })
 

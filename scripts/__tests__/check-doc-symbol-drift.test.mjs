@@ -22,6 +22,8 @@ import {
   buildDocsMdNameIndex,
   extractDataOwnerClaims,
   extractDataOwnerAnnotations,
+  extractAdrRegistry,
+  checkAdrRefsInText,
 } from '../check-doc-symbol-drift.mjs'
 
 // ---------- R1 JS/TS 注释区间提取 ----------
@@ -232,5 +234,55 @@ describe('R6 extractDataOwnerAnnotations', () => {
 
   it('taste:allow-no-data-owner 豁免族不进入注解集合（不属登记锚点）', () => {
     expect([...extractDataOwnerAnnotations('// taste:allow-no-data-owner W24-EX-B')]).toEqual([])
+  })
+})
+
+// ---------- R7 ADR 编号登记面与引用存在性 ----------
+
+describe('R7 extractAdrRegistry', () => {
+  it('合条标题收全部编号，标题正文提及的其他编号不收（承 ADR-XXXX 是引用不是定义）', () => {
+    const md = [
+      '### ADR-0001 / ADR-0002（digest）runtime 分层与手动 DI',
+      '### ADR-0102 run 侧 v1 读面整体删除（2026-09-30 用户裁决，承 ADR-0094 同款裁决的延伸）',
+    ].join('\n')
+    const { defined, deprecated } = extractAdrRegistry(md)
+    expect([...defined.keys()].sort()).toEqual(['ADR-0001', 'ADR-0002', 'ADR-0102'])
+    expect(deprecated.size).toBe(0)
+  })
+
+  it('同一编号两条标题 = 重复占用（行号列表 >1）；已否谱系行进 deprecated 不进 defined', () => {
+    const md = [
+      '### ADR-0075 workflow 域四支柱（2026-09-21）',
+      '正文引用 ADR-0097 不算定义',
+      '### ADR-0075 窗口圆角策略（2026-10-01）',
+      '- **ADR-0008** navigate-tree 桥接命令——命令已删。',
+      '- **ADR-0019 / ADR-0022** 冷蓝暗色视觉方向——被 ADR-0066 推翻。',
+    ].join('\n')
+    const { defined, deprecated } = extractAdrRegistry(md)
+    expect(defined.get('ADR-0075')).toEqual([1, 3])
+    expect(defined.has('ADR-0097')).toBe(false)
+    expect([...deprecated].sort()).toEqual(['ADR-0008', 'ADR-0019', 'ADR-0022'])
+    expect(deprecated.has('ADR-0066')).toBe(false)
+  })
+})
+
+describe('R7 checkAdrRefsInText', () => {
+  const registry = extractAdrRegistry([
+    '### ADR-0097 拉为主推补充（2026-09-26 架构裁决）',
+    '- **ADR-0008** navigate-tree 桥接命令——命令已删。',
+  ].join('\n'))
+
+  it('引用现行编号与已否编号合法；未登记编号报悬空（带行号）；标题行/已否行自身不算引用', () => {
+    const md = [
+      '### ADR-0097 拉为主推补充（2026-09-26 架构裁决）',
+      '- **ADR-0008** navigate-tree 桥接命令——命令已删。',
+      '数据同步第一原则：拉为主、推补充 [ADR-0097]（合法引用）',
+      '决策见 ADR-0008（已否编号的合法历史引用）',
+      '错引 ADR-9999 与 ADR-0098（两条悬空）',
+    ].join('\n')
+    expect(checkAdrRefsInText(md, registry)).toEqual([
+      { line: 5, num: 'ADR-9999' },
+      { line: 5, num: 'ADR-0098' },
+    ])
   })
 })

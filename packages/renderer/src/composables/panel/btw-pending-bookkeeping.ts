@@ -9,7 +9,7 @@
  *
  * 依赖边界（层级约束：本模块必须保持在 useBtwTabData 之下、可被 store 层直接消费）：
  * 只 import vue / shared·ui 类型 + stores/extension-ui——不 import bus 订阅
- * （getExtensionBus）、dialog 转换（extension-host-dialog 的 convertToDialogRequest /
+ * （getExtensionBus）、dialog 转换（@taiji/ui shell-adapters 的 convertToDialogRequest /
  * createUiResponseTransport）与 stores/chat，上述任何一条依赖都会构成
  * store → composable/壳层 → stores/chat 的环。
  * 订阅壳（bus 事件 → 入账）与 transport 应答（respondBtwDialog——送达才出队）在
@@ -60,11 +60,16 @@ const reclaimReminderVids = reactive(new Set<string>())
 
 type UiRequestEvent = Extract<InternalEvent, { kind: 'ui-request' }>
 
-/** D8 请求范围判定（调用方已保证 sid 是 btw vid） */
+/** D8 请求范围判定（调用方已保证 sid 是 btw vid）。
+ *  判别字段双源兼容（pi1-disposition-chat-flow D6）：bus request 的对话框判别字段
+ *  dialogKind（pi 源——extension.dialog 帧经 bridge parseExtensionUiRequest 归一，
+ *  pi method 止点于 event-adapter、帧与归一产物均无 method）?? method（plugin 源——
+ *  plugin:uiRequest 归一产物保留的 plugin 协议自有字段）。 */
 export function isBtwDialogRequest(e: UiRequestEvent): boolean {
-  const r = e.request as { form?: unknown; planReview?: unknown; method?: unknown }
+  const r = e.request as { form?: unknown; planReview?: unknown; dialogKind?: unknown; method?: unknown }
   if (r.form === true || r.planReview === true) return true
-  return typeof r.method === 'string' && BTW_DIALOG_METHODS.includes(r.method)
+  const kind = typeof r.dialogKind === 'string' ? r.dialogKind : r.method
+  return typeof kind === 'string' && BTW_DIALOG_METHODS.includes(kind)
 }
 
 /** dialog 族渲染载荷入队（requestId dedup——实时帧到达时入账，订阅壳调用） */

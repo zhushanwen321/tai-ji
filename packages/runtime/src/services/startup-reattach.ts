@@ -39,7 +39,12 @@
  */
 import { existsSync, unlinkSync } from 'node:fs'
 import type { CrashJournalWriter, ReattachDeferredPayload } from '@taiji/shared'
-import { DEFAULT_PI_RECLAIM_IDLE_MS, DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS } from '@taiji/shared'
+// 恢复活跃度窗口（reaper 退役后收敛为 reattach 自有恢复语义，本地常量承载——
+// 2h 空闲 / 30min 被查看；原 idle-pi-reclamation D4/D2 #6 标定值沿用）。
+// eslint-disable-next-line no-magic-numbers -- 设计标定阈值（D4/D2 #6），校准依据见上方注释
+const REATTACH_ACTIVE_IDLE_MS = 2 * 60 * 60 * 1000
+// eslint-disable-next-line no-magic-numbers -- 设计标定阈值（D4/D2 #6），校准依据见上方注释
+const REATTACH_ACTIVE_VIEWED_MS = 30 * 60 * 1000
 import {
   DEFAULT_MEM_PRESSURE_THRESHOLDS,
   isMemPressureHigh,
@@ -245,8 +250,8 @@ interface ResolvedReattachOptions {
  */
 function resolveReattachOptions(options: StartupReattachOptions): ResolvedReattachOptions {
   return {
-    idleWindowMs: options.idleWindowMs ?? DEFAULT_PI_RECLAIM_IDLE_MS,
-    viewedWindowMs: options.viewedWindowMs ?? DEFAULT_PI_RECLAIM_VIEWED_WINDOW_MS,
+    idleWindowMs: options.idleWindowMs ?? REATTACH_ACTIVE_IDLE_MS,
+    viewedWindowMs: options.viewedWindowMs ?? REATTACH_ACTIVE_VIEWED_MS,
     concurrency: Math.max(1, options.restoreConcurrency ?? DEFAULT_REATTACH_CONCURRENCY),
     harvestWaitBoundMs: options.harvestWaitBoundMs ?? DEFAULT_HARVEST_WAIT_BOUND_MS,
     highWaterPollMs: options.highWaterPollMs ?? DEFAULT_HIGH_WATER_POLL_MS,
