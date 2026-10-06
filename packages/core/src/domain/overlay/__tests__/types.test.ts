@@ -19,12 +19,13 @@ import type {
 
 // ── 编译期断言（tsc 系执行）──
 
-// kind 双员（browser / workflow）
-const overlayKinds: OverlayKind[] = ['browser', 'workflow']
+// kind 三员（browser / workflow / scheduler）
+const overlayKinds: OverlayKind[] = ['browser', 'workflow', 'scheduler']
 
-// 判别联合：browser 载荷 url+sessionId（发起会话，URL 注入链）/ workflow 载荷 sessionId+runId（与迁移前 overlayCurrent 同构）
+// 判别联合：browser 载荷 url+sessionId（发起会话，URL 注入链）/ workflow 载荷 sessionId+runId（与迁移前 overlayCurrent 同构）/ scheduler 载荷 sessionId（定时任务面板 per-session 分区键）
 const browserContent: OverlayContent = { kind: 'browser', payload: { url: 'http://127.0.0.1:5173/', sessionId: 'sess-1' } }
 const workflowContent: OverlayContent = { kind: 'workflow', payload: { sessionId: 'sess-1', runId: 'run-1' } }
+const schedulerContent: OverlayContent = { kind: 'scheduler', payload: { sessionId: 'sess-1' } }
 
 // 开合态：关 = current 复位 null；开 = 单例 current
 const closedState: OverlayControlState = { isOpen: false, current: null }
@@ -43,8 +44,8 @@ type InvalidShieldsViewRejected = 'always' extends ShieldsViewMode ? false : tru
 const shieldsViewNegativeAnchor: InvalidShieldsViewRejected = true
 
 describe('overlay 开合态类型契约（§7.1 单例 kind/payload 换内容）', () => {
-  it('kind 双员 = browser / workflow（浮层 2 条目锚）', () => {
-    expect(overlayKinds).toEqual(['browser', 'workflow'])
+  it('kind 三员 = browser / workflow / scheduler（浮层条目锚，scheduler 整合 2026-10-06）', () => {
+    expect(overlayKinds).toEqual(['browser', 'workflow', 'scheduler'])
   })
 
   it('关态 current 复位 null；开态持单例 current（用户可见：关浮层无残留内容、开新内容替换旧内容）', () => {
@@ -54,9 +55,10 @@ describe('overlay 开合态类型契约（§7.1 单例 kind/payload 换内容）
     expect(openState.current).toBe(workflowContent)
   })
 
-  it('payload 形状：browser=URL 注入链（url + 发起会话）/ workflow=与迁移前 overlayCurrent 同构（SSOT 迁移对账锚）', () => {
+  it('payload 形状：browser=URL 注入链（url + 发起会话）/ workflow=与迁移前 overlayCurrent 同构（SSOT 迁移对账锚）/ scheduler=定时任务面板会话键', () => {
     expect(browserContent).toEqual({ kind: 'browser', payload: { url: 'http://127.0.0.1:5173/', sessionId: 'sess-1' } })
     expect(workflowContent).toEqual({ kind: 'workflow', payload: { sessionId: 'sess-1', runId: 'run-1' } })
+    expect(schedulerContent).toEqual({ kind: 'scheduler', payload: { sessionId: 'sess-1' } })
   })
 })
 

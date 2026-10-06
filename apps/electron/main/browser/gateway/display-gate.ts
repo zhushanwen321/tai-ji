@@ -37,8 +37,9 @@ export interface DisplayRect { // oe-exempt:20261003:framework:类型契约先�
 export type { ShieldFace } from '@taiji/shared'
 import type { ShieldFace, ShieldRect } from '@taiji/shared'
 
-/** 浮层内容种类（core overlay 域同词表） */
-export type OverlayContentKind = 'browser' | 'workflow'
+/** 浮层内容种类（core overlay 域同词表；scheduler = 定时任务 tab 整合 2026-10-06——
+ *  非 browser 内容谓词恒假，view 照常隐藏） */
+export type OverlayContentKind = 'browser' | 'workflow' | 'scheduler'
 
 /** 浮层开合态（renderer 经 IPC 上报；view 显示收口的事实源之一） */
 export interface OverlayDisplayState { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
@@ -137,8 +138,8 @@ export function parseOverlayDisplayState(payload: unknown): OverlayDisplayState 
   if (!payload.open) {
     return { ...CLOSED_OVERLAY }
   }
-  if (payload.content !== 'browser' && payload.content !== 'workflow') {
-    throw new Error(`[browser:overlay-state] content must be "browser" | "workflow" when open, got ${String(payload.content)}`)
+  if (payload.content !== 'browser' && payload.content !== 'workflow' && payload.content !== 'scheduler') {
+    throw new Error(`[browser:overlay-state] content must be "browser" | "workflow" | "scheduler" when open, got ${String(payload.content)}`)
   }
   if (typeof payload.sessionId !== 'string' || payload.sessionId.length === 0) {
     throw new Error('[browser:overlay-state] sessionId must be a non-empty string when open')

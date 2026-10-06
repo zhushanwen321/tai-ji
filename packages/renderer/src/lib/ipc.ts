@@ -229,7 +229,7 @@ export function browserDestroy(sessionId: string): Promise<void> {
  */
 export function browserSetOverlayState(state: {
   open: boolean
-  content: 'browser' | 'workflow' | null
+  content: 'browser' | 'workflow' | 'scheduler' | null
   sessionId: string | null
 }): Promise<void> {
   return api?.browserSetOverlayState(state) ?? Promise.resolve()

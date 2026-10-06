@@ -9,8 +9,9 @@
  * workflow 浮层载荷与迁移前 overlayCurrent `{ sessionId, runId }` 同构（SSOT 迁移对账锚）。
  */
 
-/** 浮层内容类型（§7.2 浮层 2 条目：browser（网页）/ workflow（工作流图）） */
-export type OverlayKind = 'browser' | 'workflow'
+/** 浮层内容类型（§7.2 浮层条目 + scheduler 整合（2026-10-06 用户裁决）：
+ * browser（网页）/ workflow（工作流图）/ scheduler（定时任务面板）） */
+export type OverlayKind = 'browser' | 'workflow' | 'scheduler'
 
 /** browser 浮层载荷（openBrowser(url, sessionId) URL 注入链重建，W2 接线）。
  * sessionId = 发起会话（链接所在会话）：view 池按 session 键控（BrowserPane 订阅标识）、
@@ -29,10 +30,18 @@ export interface WorkflowOverlayPayload { // oe-exempt:20261003:framework:类型
   runId: string
 }
 
+/** scheduler 浮层载荷（定时任务面板整合进 workflow 浮层成一级 tab，2026-10-06 用户裁决）：
+ * sessionId = 面板数据所属会话（scheduler-manager 插件树按 per-session 分区持续推送，
+ * 不依赖旧 plugin modal 开着；浮层内 ViewHost 按 (sessionId, viewId) 消费同一分区）。 */
+export interface SchedulerOverlayPayload { // oe-exempt:20261006:framework:类型契约先行——容器契约层声明，overlay 一级 tab UI 即为消费面
+  sessionId: string
+}
+
 /** 浮层当前内容（判别联合，kind/payload 换内容） */
 export type OverlayContent =
   | { kind: 'browser'; payload: BrowserOverlayPayload }
   | { kind: 'workflow'; payload: WorkflowOverlayPayload }
+  | { kind: 'scheduler'; payload: SchedulerOverlayPayload }
 
 /** 浮层开合态（单例）：isOpen=false 时 current 置 null（关浮层复位，§7.4 发起会话删除级联同语义） */
 export interface OverlayControlState { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费面

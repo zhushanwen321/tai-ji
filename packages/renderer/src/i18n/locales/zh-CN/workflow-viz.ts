@@ -17,6 +17,8 @@ export default {
     // overlay 壳
     overlayTitle: '工作流实况',
     overlayClose: '关闭',
+    overlayTabRuns: '运行',
+    overlayTabScheduler: '定时任务',
     runStatusRunning: '运行中',
     runStatusDone: '已完成',
     // DAG 画布

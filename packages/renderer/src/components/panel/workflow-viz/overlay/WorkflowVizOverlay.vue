@@ -7,12 +7,19 @@
   结构与分层（display-containers §6.5/§7.3）：面板 + 遮罩 + 两通道关闭（点遮罩 /
   按钮）+ Tab 焦点陷阱注册 + IME 守卫 + 焦点契约（打开 focus 面板 / 关闭回 composer）
   全部归 OverlayShell；本组件是挂进壳标题栏 slot 与 body 的 workflow 内容层。
-  header 单行六元素（图标 + workflow 名 + slug + 状态 pill + errorCode + 已用时长，
-  关闭钮归壳不计入元素数；v5 终裁参数信息不进 header——workflow-overlay-refine D2）+
-  body 纵向两段（workflow-overlay-refine D1，份额 1.6:1）：上区 DAG（WorkflowVizDag
+  header 双态（scheduler 整合一级 tab，2026-10-06 用户裁决）：tab=runs = 六元素行
+  （图标 + workflow 名 + slug + 状态 pill + errorCode + 已用时长，关闭钮归壳不计入
+  元素数；v5 终裁参数信息不进 header——workflow-overlay-refine D2）；tab=scheduler =
+  Clock + 定时任务标题。body 顶部一级 tab 条（TraceViewToggle 分段范式；「运行」tab
+  按 run 缺省禁用——scheduler 直达打开本浮层可以没有 run 数据），tab=runs 时 body
+  纵向两段（workflow-overlay-refine D1，份额 1.6:1）：上区 DAG（WorkflowVizDag
   画布 / DAG 不可得降级列表 / 解析中 / 未匹配实例分组 + 左下角 D4 状态图例（仅画布
   就绪时在场，dot 类与节点同源 dag/tone.ts、pointer-events-none 不拦截画布交互），
-  全宽）+ 下区 dock（slot——U5 多级 tab 面板填充位，全宽）。
+  全宽）+ 下区 dock（slot——U5 多级 tab 面板填充位，全宽）；tab=scheduler 时 body =
+  ViewHost（消费 scheduler-manager 插件推树，viewId 单源 SCHEDULER_MODAL_VIEW_ID，
+  与 PluginModalHost 拼接约定同源；树未到 empty=hidden 零 DOM）。tab 是受控 prop
+  （SSOT 在控制器 workflow-viz-overlay.ts，Host 透传 + update:tab 写回），壳纯展示
+  不持有开合态。
 
   **ESC 不在本壳链路监听**（display-containers §6.7 唯一属主 = 栈序编排器）：关闭通道
   只有两路（点遮罩 / 右上关闭按钮，均走 OverlayShell 的 close 事件 → 本层 close() 上抛）。
@@ -45,8 +52,18 @@
     :close-label="t('panel.workflowViz.overlayClose')"
     @close="close"
   >
-    <!-- 标题栏 slot：图标 + workflow 名 + slug + 状态 pill + errorCode + 已用时长（关闭按钮归壳，恒在最右；D2 v5 终裁不展示 args） -->
+    <!-- 标题栏 slot 双态：runs = 图标 + workflow 名 + slug + 状态 pill + errorCode + 已用时长
+         （关闭按钮归壳，恒在最右；D2 v5 终裁不展示 args）；scheduler = Clock + 定时任务标题
+         （run 元素整体让位——run 数据不属 scheduler 内容） -->
     <template #title>
+      <template v-if="tab === 'scheduler'">
+        <Clock class="size-[15px] shrink-0 text-neutral-dim" aria-hidden="true" />
+        <span
+          class="min-w-0 shrink-0 font-mono text-[length:var(--text-xs)] font-semibold text-neutral-fg"
+          data-testid="wfvz-overlay-scheduler-title"
+        >{{ t('panel.workflowViz.overlayTabScheduler') }}</span>
+      </template>
+      <template v-else>
         <Workflow class="size-[15px] shrink-0 text-neutral-dim" aria-hidden="true" />
         <span class="min-w-0 shrink-0 font-mono text-[length:var(--text-xs)] font-semibold text-neutral-fg">{{ run?.scriptName ?? '' }}</span>
         <span
@@ -75,10 +92,39 @@
           class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-mid"
           data-testid="wfvz-overlay-elapsed"
         >{{ formatDuration(elapsedMs) }}</span>
+      </template>
     </template>
 
-      <!-- body：上区 DAG（纵向主视图，全宽）+ 下区实况面板 dock（slot），份额 1.6:1 -->
-      <div class="flex min-h-0 flex-1 flex-col">
+    <!-- 一级 tab 条（scheduler 整合 2026-10-06）：TraceViewToggle 分段范式（凹陷槽 bg-bg-input
+         + active 浮起 bg-bg-elevated）。无 run 时「运行」禁用（灰置）——scheduler 直达打开
+         本浮层可以没有 run 数据；tab SSOT 在控制器（Host 受控透传），壳只上抛切换意图 -->
+    <nav
+      class="ml-3 mt-2 flex flex-none items-center gap-0.5 self-start rounded-md bg-bg-input p-[2px]"
+      data-testid="wfvz-overlay-tabs"
+      role="tablist"
+    >
+      <Button
+        v-for="seg in tabSegments"
+        :key="seg.value"
+        variant="ghost"
+        size="sm"
+        class="h-[18px] gap-1 rounded-sm px-2.5 text-[length:var(--text-2xs)]"
+        :class="tab === seg.value
+          ? 'bg-bg-elevated text-neutral-fg hover:bg-bg-elevated'
+          : 'text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
+        :disabled="seg.value === 'runs' && run === null"
+        :aria-selected="tab === seg.value"
+        :data-testid="`wfvz-overlay-tab-${seg.value}`"
+        @click="onTabClick(seg.value)"
+      >
+        <component :is="seg.icon" class="size-3 shrink-0" aria-hidden="true" />
+        {{ seg.label }}
+      </Button>
+    </nav>
+
+      <!-- body：tab=runs 上区 DAG（纵向主视图，全宽）+ 下区实况面板 dock（slot），份额 1.6:1；
+           tab=scheduler 定时任务面板（ViewHost 消费插件推树，empty=hidden 首帧零 DOM） -->
+      <div v-if="tab === 'runs'" class="flex min-h-0 flex-1 flex-col">
         <aside
           class="relative flex min-h-0 flex-[1.6] flex-col"
           data-testid="wfvz-overlay-dag-pane"
@@ -212,46 +258,65 @@
           <slot />
         </section>
       </div>
+      <!-- tab=scheduler：定时任务面板（viewId 单源常量 = 控制器 SCHEDULER_MODAL_VIEW_ID，
+           与 PluginModalHost 的 modal-<pluginId>-<modalId> 拼接约定同源；树未到 = hidden
+           零 DOM，容器仍锚定内容区形态） -->
+      <div
+        v-else
+        class="flex min-h-0 flex-1 flex-col overflow-y-auto p-4"
+        data-testid="wfvz-overlay-scheduler-pane"
+      >
+        <ViewHost :view-id="SCHEDULER_MODAL_VIEW_ID" :session-id="schedulerSessionId ?? ''" empty="hidden" />
+      </div>
   </OverlayShell>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Workflow } from '@lucide/vue'
+import { Clock, Workflow } from '@lucide/vue'
 import { WORKFLOW_RUN_OUTCOME_LABELS, type WorkflowAgentCall, type WorkflowDag, type WorkflowRunRecord } from '@taiji/shared'
 import { Button } from '@/components/ui/button'
+import { ViewHost } from '@taiji/ui/extension-host'
 import { formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
 import OverlayShell from './OverlayShell.vue'
 import WorkflowVizDag from '../dag/WorkflowVizDag.vue'
 import { dotTone } from '../dag/tone'
+import { SCHEDULER_MODAL_VIEW_ID, type OverlayTab } from './workflow-viz-overlay'
 import type { WorkflowUnmatchedInstance } from '../blueprint-match'
 import type { WorkflowVizDagClickPayload, WorkflowVizDagNodeStatus } from '../dag/types'
 import type { WorkflowVizDagLoadError } from './types'
 
-const props = defineProps<{
-  open: boolean
-  /** 当前 run 记录（getWorkflows 通道；null = 数据未就绪，header 出空骨架）。 */
-  run: WorkflowRunRecord | null
-  /** DAG 蓝图（getWorkflowDag 成功臂；null + dagError=null = 解析中）。 */
-  dag: WorkflowDag | null
-  /** DAG 不可得归一错误（null = 通道正常）。 */
-  dagError: WorkflowVizDagLoadError | null
-  /** 节点六态映射（已派生输入，透传画布；派生单处在 u5）。 */
-  nodeStates?: Record<string, WorkflowVizDagNodeStatus>
-  /** 当前 phase 分区（已派生输入，透传画布）。 */
-  activePhase?: string | null
-  /**
-   * 未匹配实例（已派生输入——匹配单处在容器 Host，D2⑥ 零命中/歧义不静默丢弃；
-   * 壳按 phase 分组渲染画布下方的指定分组，命中数/歧义标注随行）。
-   */
-  unmatched?: WorkflowUnmatchedInstance[]
-  /**
-   * 已用时长 ms（已派生输入——D9「中断停走」口径由上层单处派生函数产出；
-   * 缺省不渲染时长槽，本壳不做计时派生）。
-   */
-  elapsedMs?: number
-}>()
+const props = withDefaults(
+  defineProps<{
+    open: boolean
+    /** 当前 run 记录（getWorkflows 通道；null = 数据未就绪，header 出空骨架）。 */
+    run: WorkflowRunRecord | null
+    /** DAG 蓝图（getWorkflowDag 成功臂；null + dagError=null = 解析中）。 */
+    dag: WorkflowDag | null
+    /** DAG 不可得归一错误（null = 通道正常）。 */
+    dagError: WorkflowVizDagLoadError | null
+    /** 一级 tab 展示态（受控——SSOT 在控制器 workflow-viz-overlay.ts，Host 透传；壳纯展示不持有）。 */
+    tab?: OverlayTab
+    /** scheduler tab 内容的所属会话（ViewHost per-session 分区键；缺省 = 取不到树走 hidden 空态）。 */
+    schedulerSessionId?: string
+    /** 节点六态映射（已派生输入，透传画布；派生单处在 u5）。 */
+    nodeStates?: Record<string, WorkflowVizDagNodeStatus>
+    /** 当前 phase 分区（已派生输入，透传画布）。 */
+    activePhase?: string | null
+    /**
+     * 未匹配实例（已派生输入——匹配单处在容器 Host，D2⑥ 零命中/歧义不静默丢弃；
+     * 壳按 phase 分组渲染画布下方的指定分组，命中数/歧义标注随行）。
+     */
+    unmatched?: WorkflowUnmatchedInstance[]
+    /**
+     * 已用时长 ms（已派生输入——D9「中断停走」口径由上层单处派生函数产出；
+     * 缺省不渲染时长槽，本壳不做计时派生）。
+     */
+    elapsedMs?: number
+  }>(),
+  { tab: 'runs', schedulerSessionId: undefined },
+)
 
 const emit = defineEmits<{
   /** 关闭动作统一出口（右上关闭按钮 / 点遮罩走 close；ESC 由栈序编排器直接关 core 开合态，不经本壳）。 */
@@ -260,9 +325,25 @@ const emit = defineEmits<{
   select: [payload: WorkflowVizDagClickPayload]
   /** DAG 解析重试（parse_failed 专属入口——失败不缓存故可重试）。 */
   'retry-dag': []
+  /** 一级 tab 切换上抛（受控模式：tab SSOT 在控制器，Host 写回 setOverlayTab）。 */
+  'update:tab': [tab: OverlayTab]
 }>()
 
 const { t } = useI18n()
+
+// ── 一级 tab 条（scheduler 整合）：分段定义（序 = 缺省视图优先）──
+
+/** tab 词条 + 图标（TraceViewToggle 分段范式）。 */
+const tabSegments = computed<Array<{ value: OverlayTab; label: string; icon: typeof Workflow }>>(() => [
+  { value: 'runs', label: t('panel.workflowViz.overlayTabRuns'), icon: Workflow },
+  { value: 'scheduler', label: t('panel.workflowViz.overlayTabScheduler'), icon: Clock },
+])
+
+/** tab 点击（禁用判据在入口守卫，不依赖浏览器对 disabled 按钮的点击抑制）：无 run 时「运行」不可进。 */
+function onTabClick(value: OverlayTab): void {
+  if (value === 'runs' && props.run === null) return
+  emit('update:tab', value)
+}
 
 // ── D4 状态图例（六态 + 停止叠加说明；挂 DAG 区左下，绝对定位不占布局流）──
 

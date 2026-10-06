@@ -8,6 +8,8 @@ export default {
     // overlay shell
     overlayTitle: 'Workflow live view',
     overlayClose: 'Close',
+    overlayTabRuns: 'Runs',
+    overlayTabScheduler: 'Scheduled tasks',
     runStatusRunning: 'Running',
     runStatusDone: 'Completed',
     // DAG canvas

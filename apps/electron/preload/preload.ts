@@ -127,7 +127,7 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
    *  内容时立即上报——主进程侧联动隐藏 view（keep-alive）。非法 payload reject（error envelope） */
   browserSetOverlayState(state: {
     open: boolean
-    content: 'browser' | 'workflow' | null
+    content: 'browser' | 'workflow' | 'scheduler' | null
     sessionId: string | null
   }): Promise<void>
   /** 显示收口事实源之一（§5.1 规则 6② / §6.7）：shieldsView 遮蔽面**全量**上报（替换语义）。
@@ -369,7 +369,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   browserGetSelection: (sessionId: string) => ipcRenderer.invoke('browser:get-selection', sessionId),
   browserSetOverlayState: (state: {
     open: boolean
-    content: 'browser' | 'workflow' | null
+    content: 'browser' | 'workflow' | 'scheduler' | null
     sessionId: string | null
   }) => ipcRenderer.invoke('browser:overlay-state', state),
   browserSetShields: (payload: ShieldsFacesPayload) => ipcRenderer.invoke('browser:shields', payload),

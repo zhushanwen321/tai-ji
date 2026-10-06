@@ -14,10 +14,13 @@
 import { overlayControl, getOverlayControlState } from './state'
 import type { OverlayContent } from './types'
 
-/** 载荷有效性判据（browser:url+sessionId 非空 / workflow:sessionId+runId 均非空） */
+/** 载荷有效性判据（browser:url+sessionId 非空 / workflow:sessionId+runId 均非空 / scheduler:sessionId 非空） */
 function isValidContent(content: OverlayContent): boolean {
   if (content.kind === 'browser') {
     return content.payload.url.trim() !== '' && content.payload.sessionId.trim() !== ''
+  }
+  if (content.kind === 'scheduler') {
+    return content.payload.sessionId.trim() !== ''
   }
   return content.payload.sessionId.trim() !== '' && content.payload.runId.trim() !== ''
 }
@@ -47,6 +50,19 @@ export function closeOverlay(): void {
  */
 export function openBrowser(url: string, sessionId: string): void {
   openOverlay({ kind: 'browser', payload: { url, sessionId } })
+}
+
+/**
+ * 打开浮层定时任务面板（scheduler 整合进 workflow 浮层成一级 tab，2026-10-06 用户裁决）：
+ * scheduler-manager 插件树经 views.update 按 (sessionId, viewId) 分区持续推送（会话激活
+ * 链即推，不依赖旧 plugin modal 开着），浮层内 ViewHost 消费同一分区即得内容（插件零改动）。
+ *
+ * @param sessionId 面板数据所属会话（per-session 分区键；tab 内容随当前会话）
+ *
+ * 已开态调用 = 单例换内容（换会话直接换载荷）；无效载荷 no-op（openOverlay 校验）。
+ */
+export function openSchedulerOverlay(sessionId: string): void {
+  openOverlay({ kind: 'scheduler', payload: { sessionId } })
 }
 
 /**
