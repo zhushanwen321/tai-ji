@@ -84,9 +84,10 @@ const _assertions: Array<true> = [
 // ── 能力位键集锁（U5 词表锁扩展：病灶 7「漏登 core 两表 → undefined 透传 → gate
 //    放行」的编译期堵截）──
 // engine-manifest.ts 两表以 `satisfies` 声明（保留字面键集），`keyof typeof` 即真实键集：
-//   A：CONSERVATIVE_CAPABILITIES（11 键，含 maxTurns:false）⟷ EngineCapabilities 全集（11=11）；
-//   B：CAPABILITY_ENUMS（10 键——maxTurns 走 engine-manifest.ts parseCapabilities 的
-//      boolean 专用解析分支，不经保守表）⟷ Exclude<keyof EngineCapabilities, "maxTurns">（10=10）。
+//   A：CONSERVATIVE_CAPABILITIES（12 键，含 maxTurns:false + setModel）⟷ EngineCapabilities
+//      全集（12=12；[subagent-model-switch] setModel 为首个可选新轴，两表同批登记）；
+//   B：CAPABILITY_ENUMS（11 键——maxTurns 走 engine-manifest.ts parseCapabilities 的
+//      boolean 专用解析分支，不经保守表）⟷ Exclude<keyof EngineCapabilities, "maxTurns">（11=11）。
 // 新增能力轴漏登任一表 = 此处编译红。直槽承载（不用 Array<true> 的 `true as _X` 槽：
 // 断言结果为 never 时该槽会被静默吞掉，直槽 `[_A, _B] = [true, true]` 令 never 显形）。
 type _CapConservativeKeys = AssertMutuallyAssignable<
@@ -105,7 +106,7 @@ describe("协议契约类型双向可赋值（编译期断言的运行时锚）"
     expect(_assertions.every((v) => v === true)).toBe(true);
   });
 
-  it("能力位键集锁：11=11 与 10=10 双向互等成立（U5；漏登新轴 = typecheck 红指向本文件）", () => {
+  it("能力位键集锁：12=12 与 11=11 双向互等成立（U5；[subagent-model-switch] setModel 新轴两表同批登记；漏登新轴 = typecheck 红指向本文件）", () => {
     expect(_capKeyLocks).toEqual([true, true]);
   });
 });

@@ -17,6 +17,17 @@
 //   engine_crashed              进程意外退出 → 在途 run 失败（附 stderr 尾
 //                               STDERR_TAIL_CHARS=400 字符）；重建最多 3 次退避 1s/2s/4s
 //   engine_probe_failed         probe 失败 → 既有 fallback 三守卫不变
+//   engine_model_not_in_snapshot  setModel 目标模型不在子进程快照 → 宿主写覆盖意图
+//                               （模型本身有效，下一轮 spawn 现取目录）
+//   engine_credential_missing   setModel 子进程凭据校验失败（checkAuth 权威兜底）→
+//                               宿主按校验型失败处置（chat 单成员不写意图；run 级聚合
+//                               列失败名单、run 级意图照写——设计 §7.5 凭据行）
+//   engine_state_readback_failed  setModel 命令已发出但回读无回执、生效值未知 →
+//                               宿主写覆盖意图 + 错误应答（不虚构生效值）
+//   engine_run_not_active       setModel 目标 run 无活跃子进程（§7.3 全部竞态窗口内
+//                               退出同一处置——定位时/命令写入/读应答/回读期间）→
+//                               宿主转纯记账路径（chat 已记账型应答 / 聚合 not-active
+//                               成员态——非失败分型，不进 SET_MODEL_ERROR_CODES）
 //   其余 engine_*               引擎在 error 帧原样给出 → core 透传，文案契约不变
 //
 // [登记非实装·透传面新码] engine_method_unsupported——未知成员宽容语义②（条文权威
@@ -29,6 +40,49 @@
 // docs/extensions/subagents/engine-development-guide.md（未知 method 必回透传面
 // 错误码 + conformance 用例）。
 
+// ============================================================
+// setModel 方法错误码子词表（设计 subagent-model-switch §7.3/§7.5；
+// setModel 应答错误 envelope 的分型值域——宿主编排层按分型裁决持久化意图处置）
+// ============================================================
+
+/**
+ * setModel 正向方法的错误码三型（引擎 error 帧给出；宿主消费分型）。
+ * 追加进 ENGINE_PROTOCOL_ERROR_CODES 主词表（成员清单单源 = 本数组，主词表 spread）。
+ *
+ * 三型定名经 ADR-0071 评审（u-foundation 实施期裁决）：统一 engine_ 前缀——
+ * 协议 error 帧的 code 词法约束是 ^engine_（schema.ts protocolErrorSchema pattern，
+ * 全部引擎应答错误共用），且现役词表 9 码全部 engine_ 前缀（error-codes.ts 头注
+ * 「对齐现役错误码词表风格」）；设计文档 §7.3 的第一型字面名 model_not_in_snapshot
+ * 不满足 pattern，按约束加前缀定名 engine_model_not_in_snapshot。第三型采纳设计
+ * 候选名 engine_state_readback_failed。
+ */
+export const SET_MODEL_ERROR_CODES = [
+  /** 目标模型不在当前进程快照（子进程模型快照冻结于 spawn 时刻——模型本身有效，
+   *  下一轮 spawn 现取目录即可用；宿主按「写覆盖意图」处置，设计 §7.2 快照型失败行）。 */
+  "engine_model_not_in_snapshot",
+  /** 凭据校验失败（子进程 set_model checkAuth 抛错——宿主预检通过后 registry 态漂移
+   *  的权威兜底；宿主按校验型失败处置，设计 §7.5 凭据行）。 */
+  "engine_credential_missing",
+  /** 命令已发出（set_model 可能已执行）但读应答 / get_state 回读无回执、生效值未知
+   *  （非进程退出情形——退出归无活进程路径；宿主按「写覆盖意图 + 错误应答」处置，
+   *  设计 §7.5 回读失败行）。 */
+  "engine_state_readback_failed",
+] as const;
+
+/** setModel 错误分型值域（聚合失败名单 reason 字段的类型源；词表扩位时同步跟随）。 */
+export type SetModelErrorCode = (typeof SET_MODEL_ERROR_CODES)[number];
+
+/**
+ * setModel「无活进程」应答码（设计 §7.3/§7.5：定位时 / 命令写入 / 读应答 / 回读
+ * 四个竞态窗口内发现子进程已退出——**同一处置**按无活进程形态应答，引擎回本码
+ * error 帧）。进主词表的依据与 SET_MODEL_ERROR_CODES 三型相同：宿主消费分型
+ * （chat 域转已记账型应答 / run 级聚合落 not-active 成员态，§7.2 处置表），不是
+ * 「core 不解释文案」的纯透传面。刻意**不进** SET_MODEL_ERROR_CODES：聚合失败
+ * 名单的分型值域只收「转发失败」三型，无活进程是成员三态之一（not-active），
+ * 不是失败——两值域语义正交。
+ */
+export const SET_MODEL_NOT_ACTIVE_CODE = "engine_run_not_active";
+
 /** 协议核心错误码（引擎 error 帧 + core 同步拦截共用的固定词表）。 */
 export const ENGINE_PROTOCOL_ERROR_CODES = [
   "engine_not_found",
@@ -40,6 +94,8 @@ export const ENGINE_PROTOCOL_ERROR_CODES = [
   "engine_handshake_timeout",
   "engine_crashed",
   "engine_probe_failed",
+  ...SET_MODEL_ERROR_CODES,
+  SET_MODEL_NOT_ACTIVE_CODE,
 ] as const;
 
 export type EngineProtocolErrorCode = (typeof ENGINE_PROTOCOL_ERROR_CODES)[number];
@@ -146,6 +202,27 @@ export function assertChatConversationSupported(
   if (capabilities.conversation === "unsupported") {
     throw engineConversationUnsupportedError(engineId);
   }
+}
+
+/**
+ * 引擎 setModel 能力位负向的具名错误（A6 方向防御同族——对照
+ * engineConversationUnsupportedError 先例）：引擎 server 收到 setModel 请求但本引擎
+ * capabilities.setModel 非 'native'（含缺省 undefined = unsupported）时同步拒。
+ * 宿主侧发送前预检（§7.2 步骤②）正常不会发出该调用——本错误是 manifest/实装漂移
+ * 时引擎侧的自拒兜底，契约行为 = 结构化错误帧而非崩溃。
+ */
+export function engineSetModelUnsupportedError(
+  engineId: string,
+  declared: EngineCapabilities["setModel"],
+): EngineSdkError {
+  return new EngineSdkError(
+    "engine_capability_unsupported",
+    `engine '${engineId}' does not support hot model switching (capabilities.setModel = ` +
+      `${declared ?? "unsupported (undeclared)"}); the host pre-check (design §7.2 step 2) must not dispatch setModel to it`,
+    `Route the switch to an engine that declares capabilities.setModel = 'native', or record the override for the next run instead. ` +
+      `If this engine actually supports hot switching, fix the manifest capabilities declaration.`,
+    { engineId, capability: "setModel", declared: declared ?? "unsupported" },
+  );
 }
 
 // ============================================================

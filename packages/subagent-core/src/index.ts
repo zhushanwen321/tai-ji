@@ -199,7 +199,14 @@ export { CLOSED_REASONS, NEW_STOP_REASONS, ROUND_TERMINAL_STOP_REASONS, STOP_REA
 export { DEFAULT_AGENT_NAME } from "./execution/domain/record-model.ts";
 export type { AgentEventLogEntry, BgResponse, CancelResponse, CloseResponse, DisplayItem, ForkFromResponse, ListResponse, MessageResponse, SubagentListItem, SubagentRecord, SubagentToolResult } from "./execution/assembly/types.ts";
 export type { ClosedReason, ExecutionMode, ExecutionOutcome, ExecutionStatus, ExternalState } from "./execution/domain/record-types.ts";
-export type { ExecutionRecord } from "./execution/domain/record-model.ts";
+export type { ExecutionRecord, ModelOverride } from "./execution/domain/record-model.ts";
+// [subagent-model-switch] 模型切换 run 级聚合契约（u-foundation 定形，U5 实装）。
+export type {
+  RunModelSwitchAggregateInput,
+  RunSwitchAggregateResult,
+  RunSwitchMemberFailure,
+  RunSwitchMemberState,
+} from "./execution/assembly/types.ts";
 
 // execution-record 投影函数族：record → 渲染态投影（outcome / elapsed / tool
 // calls），interface 渲染层唯一消费入口（live 进度投影面 = SubagentRecord 投影族）。
@@ -644,6 +651,9 @@ export {
   doneReasonToRunOutcome,
   foldRunEventCheckpoint,
   INITIAL_RUN_EVENT_FOLD,
+  // [subagent-model-switch §7.4] 覆盖记账折叠辅助（壳侧 foldRecordStreamToRun 挂
+  // meta.modelOverride 与 core resume 三档回落的共用单点）。
+  latestModelOverride,
   RUN_EVENTS_SUFFIX,
   // [§3.2] record 流单行坏行判定原语（core 恢复读面与壳 strict 读面共用单源——规则
   // 在 core，错误文案由各调用方自持；此前两处各写一份判据，漂移即同一坏行一边拒绝
@@ -652,6 +662,7 @@ export {
   parseLegacyArgsSummary,
   type LegacyArgsSummaryIssue,
   type LegacyArgsSummaryResult,
+  type ModelOverrideEvent,
   type RunAskStepFold,
   type RunEventFoldCheckpoint,
   type RunEventJournal,
@@ -660,6 +671,7 @@ export {
   type RunEventLineResult,
   type RunJournalFold,
   type RunOutcome,
+  type WorkflowModelOverride,
   type WorkflowRunEvent,
 } from "./orchestration/run-events.ts";
 

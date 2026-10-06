@@ -1,7 +1,13 @@
 // src/protocol/methods.ts
 //
-// 9 正向方法（core → 引擎）params/result 逐方法写死（v1）。设计权威源：
+// 正向方法（core → 引擎）params/result 逐方法写死（v1）。设计权威源：
 // 设计 §3.3 方法集表 + impl-plan §2.1「10 正向方法」（[H1] 收敛为 9）。
+//
+// [subagent-model-switch §7.3 增量]：第 10 个正向方法 setModel（执行中模型热切换；
+// RunParams 同级的 run 定向方法——params 以 runId 寻址，对照 cancel）。additive
+// 演进不 bump 版本：引擎按 capabilities.setModel 位声明支持与否，位非 'native' 的
+// 引擎不会被宿主调用本方法（发送前预检——消费点登记见 contract-types.ts 能力位注释），
+// 旧引擎/不支持引擎收到本方法按「未知正向 method 应答义务」回 error 帧。
 //
 // [v1.x 增量（chat-domain 设计 §3.2 D1-A）]：增量以可选参数形态落在 run.params.chat
 // （会话形态参数 + 冷续 resume 锚点），major 不 bump。[H1] chat-run 统一后续聊 =
@@ -11,7 +17,10 @@
 // 应答面补充约定（设计 §3.3）：initialize 应答仅诊断（与 manifest 不一致 → warn 留痕，
 // 不参与同步成员判据；唯一阻断面 = 被 gate 能力位多声明 → engine_capability_mismatch）；
 // listModels / validateModel 为诊断面（宿主侧同步成员读 manifest，不经本方法）；
-// dispose 幂等；ping 为健康检查（ADR-0047：静默 ≠ 卡死，不据此杀任务）。
+// dispose 幂等；ping 为健康检查（ADR-0047：静默 ≠ 卡死，不据此杀任务）；
+// setModel 应答 = 回读生效值（引擎 set 后经 get_state 同源读回，不信命令应答即真——
+// pi 部分模型族静默替换成同族模型，生效值 ≠ 请求值，先例 = 主对话 set→回读范式）；
+// 失败经 error 帧，分型值域 = error-codes.ts SET_MODEL_ERROR_CODES 三型。
 //
 // 未知正向 method 的应答义务（未知成员宽容语义②，条文权威 = ADR-0071）：宿主演进
 // 会派出本引擎未知的正向 method（协议 additive 演进的跨代窗口）——引擎必须回 error
@@ -28,15 +37,18 @@ import type {
   EngineHandleData,
   AgentOutcome,
   ModelCatalogEntry,
+  ModelRef,
   ProbeReport,
   ResumeAnchor,
   SessionView,
 } from "./contract-types.ts";
 
 /**
- * 正向方法名联合（恰好 9 个；PROTOCOL_METHODS 常量数组与之同源互证）。
+ * 正向方法名联合（恰好 10 个；PROTOCOL_METHODS 常量数组与之同源互证）。
  * [H1] `interact` 成员已随 chat-run 统一退役（docs/architecture/subagent-chat-run-unification.md
  * §3.3 D5：续聊轮统一为「新 run + resume 锚点」，U5 删除）。
+ * [subagent-model-switch] `setModel` 为执行中模型热切换方法（capabilities.setModel
+ * 位门控；消费点 = 宿主发送前预检，位不支持不发调用）。
  */
 export type ProtocolMethod =
   | "initialize"
@@ -47,7 +59,8 @@ export type ProtocolMethod =
   | "listModels"
   | "validateModel"
   | "dispose"
-  | "ping";
+  | "ping"
+  | "setModel";
 
 /** 方法名全集（运行时顺序化枚举；与 ProtocolMethod 的同源关系由测试断言）。 */
 export const PROTOCOL_METHODS = [
@@ -60,6 +73,7 @@ export const PROTOCOL_METHODS = [
   "validateModel",
   "dispose",
   "ping",
+  "setModel",
 ] as const satisfies readonly ProtocolMethod[];
 
 // ============================================================
@@ -248,6 +262,46 @@ export interface PingResult {
   pong: true;
 }
 
+/**
+ * [subagent-model-switch §7.3] setModel 参数——RunParams 同级的 run 定向方法
+ * （params 以 runId 寻址活跃子进程，对照 cancel）。
+ *
+ * 语义（引擎侧实装义务，权威 = 设计 §7.3）：定位活跃子进程 → 转发 pi 原生
+ * `set_model` → 读应答 → get_state 回读生效值 → 应答。请求 model 是**目标意图**
+ * （pi 部分模型族会静默替换成同族模型），生效值以应答 effectiveModel 为准。
+ * 失败经 error 帧，分型值域 = SET_MODEL_ERROR_CODES 三型
+ * （engine_model_not_in_snapshot / engine_credential_missing / engine_state_readback_failed）；
+ * 目标 run 无活跃子进程（定位时 / 命令写入 / 读应答 / 回读四个竞态窗口内退出——
+ * 同一处置）按「无活进程」形态应答 = error 帧 `SET_MODEL_NOT_ACTIVE_CODE`
+ * （engine_run_not_active，宿主转纯记账路径，§7.5 子进程已退出行）。
+ *
+ * 消费链：U2 宿主编排经 EnginePort 调用（capabilities.setModel='native' 预检通过后）；
+ * U3 pi 引擎实装；U5 run 级聚合逐成员转发复用同一方法。
+ */
+export interface SetModelParams {
+  /** 目标 run 的 id（RunParams.runId 同源——引擎以它定位活跃子进程）。 */
+  runId: string;
+  /** 目标模型 ref（provider + modelId；宿主编排层负责与 canonical ref 目录互校）。 */
+  model: ModelRef;
+  /**
+   * 目标 thinking 档位（缺省 = 不指定档位，引擎按新模型档位联动语义走缺省裁决——
+   * pi set_model 联动重设 thinking 档位）。词表与 task.thinkingLevel 同构（引擎
+   * 自解释，宿主预检按现役候选链裁决，设计 §6.2 记账形状）。
+   */
+  thinkingLevel?: string;
+}
+
+/**
+ * [subagent-model-switch §7.3] setModel 应答——**回读生效值**（get_state 同源读回，
+ * 非命令应答转述；同族替换时 effectiveModel ≠ 请求 model）。
+ */
+export interface SetModelResult {
+  /** 生效模型 ref（pi 子进程活状态读回）。 */
+  effectiveModel: ModelRef;
+  /** 生效 thinking 档位（pi set_model 联动重设后的实际档位）。 */
+  effectiveThinkingLevel: string;
+}
+
 /** 方法 → params 类型映射。 */
 export interface ProtocolParamsMap {
   initialize: InitializeParams;
@@ -259,6 +313,7 @@ export interface ProtocolParamsMap {
   validateModel: ValidateModelParams;
   dispose: DisposeParams;
   ping: PingParams;
+  setModel: SetModelParams;
 }
 
 /** 方法 → result 类型映射。 */
@@ -272,4 +327,5 @@ export interface ProtocolResultMap {
   validateModel: ValidateModelResult;
   dispose: DisposeResult;
   ping: PingResult;
+  setModel: SetModelResult;
 }

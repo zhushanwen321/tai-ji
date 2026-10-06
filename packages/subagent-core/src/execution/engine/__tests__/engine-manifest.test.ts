@@ -21,6 +21,8 @@ const FULL_VALID: EngineCapabilities = {
   interrupt: "native",
   permissionMode: "native",
   maxTurns: true,
+  // [subagent-model-switch] setModel 新轴（CAPABILITY_ENUMS 词表已收，fixture 全键跟随）。
+  setModel: "native",
 };
 
 describe("parseCapabilities 旧格式 warn 回退（P7 验收 c）", () => {

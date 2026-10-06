@@ -40,6 +40,11 @@ export type {
   // workflow 可视化（workflow-visualization U2 协议冻结）：两条拉取 RPC 的错误码
   // 闭集 + reply 判别 union（runtime handler 落码 + renderer 错误归一跨包消费）
   WorkflowDagErrorCode, WorkflowDagReply, WorkflowRunEventsErrorCode, WorkflowRunEventsReply,
+  // subagent.setModel 应答族（subagent-model-switch u-foundation 定形 → U1 前端域消费）：
+  // chat 两型判别 union + run 级聚合三组件（形状 SSOT = protocol.ts 具名类型段）
+  SubagentSetModelReply, SubagentChatSetModelReply,
+  SubagentSetModelEffectiveReply, SubagentSetModelRecordedReply,
+  SubagentSetModelAggregateReply, SubagentSetModelMemberState, SubagentSetModelMemberFailure,
 } from './protocol'
 // 消息撤回（U3）：__taiji_nav__ 信令命令名常量——U4 runtime 编排跨包消费；
 // 本文件对 protocol.ts 是显式 allowlist（非 export *），漏登记会使常量对下游不可达。
@@ -207,7 +212,7 @@ export { mandatoryExtensions }
 export * from './file-tree'
 export type { RecentWorkspaceRecord } from './workspace'
 export type { Project, ProjectStoreState } from './project'
-export type { SubagentRecord, SubagentStatus, ClosedDisplayStatus } from './subagent'
+export type { SubagentRecord, SubagentStatus, ClosedDisplayStatus, SubagentModelOverrideStatus, SubagentRecentEffectiveModel } from './subagent'
 // 导入会话 RPC 契约（pi / zcode 多源，runtime/renderer 两端共同 import；多源扩展见 docs/architecture/session-import-sources.md）
 export type {
   ImportSourceKind, ImportWarning, ImportErrorCode,

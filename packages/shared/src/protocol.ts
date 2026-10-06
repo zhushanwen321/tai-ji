@@ -175,6 +175,9 @@ export type ClientMessageType =
   | 'config.setSkillDirs' | 'config.setAgentDirs' | 'config.setExtensionDirs'
   | 'config.getSystemPrompt' | 'config.setSystemPrompt'
   | 'model.list' | 'model.switch' | 'session.setThinkingLevel'
+  // subagent.setModel：subagent / workflow run 执行模型切换（subagent-model-switch
+  // 设计 §7.1；u-foundation 定形 wire 契约，U1 接 runtime handler 消费）。
+  | 'subagent.setModel'
   // [退役待删 R2-D] tool.approve/deny/always_allow 三条目已死：renderer 从不发送，runtime
   // 无 handler（发即收 unknown_type 错误信封）。真实审批路径 = extension.ui_request/ui_response
   // 交互通道 + config.setToolPermissions；随 runtime 裁决同批删条目。
@@ -728,6 +731,10 @@ export interface ClientMessageMap {
   'config.setSystemPrompt': { config: SystemPromptConfig }
   'model.list': Record<string, never>
   'model.switch': { sessionId: string; provider: ProviderId; modelId: string }
+  // subagent.setModel 请求（subagent-model-switch §7.1 wire 契约，U1 消费）：
+  // recordId = chat 域 subagent 会话目标（chat 应答两型）；runId = workflow run 级全切目标
+  // （聚合应答三组件）。两键互斥按目标二选一；provider/modelId 平铺照 model.switch 形态。
+  'subagent.setModel': { recordId?: string; runId?: string; provider: ProviderId; modelId: string; thinkingLevel?: string }
   'session.setThinkingLevel': { sessionId: string; level: string }
   // [退役待删 R2-D] 三条目已死（无发送方无 handler，见 ClientMessageType 段退役注释），
   // payload 形状仅为协议登记完整性保留，勿据此实现消费方。
@@ -1106,6 +1113,9 @@ export type ServerMessageType =
   // session-trace（design §3.1 失败路径）：现取当前 system prompt 的 reply（当前值非历史）。
   | 'session.currentSystemPrompt'
   | 'subagent.stream_delta' | 'subagent.directive'
+  // subagent.modelSet：subagent.setModel 的 reply type（subagent-model-switch §7.1；
+  // payload = SubagentSetModelReply 应答三形态判别联合，见具名类型段）。
+  | 'subagent.modelSet'
   | 'message.message_start' | 'message.text_delta' | 'message.thinking_delta'
   | 'message.thinking_start' | 'message.thinking_end'
   | 'message.tool_call_start' | 'message.tool_call_end'
@@ -1612,6 +1622,65 @@ export interface ModelSwitchMutationReply {
   provider: string
   modelId: string
 }
+
+// ── subagent.setModel 的应答三形态（subagent-model-switch §7.1，u-foundation 定形）──
+//
+// 同一命令按目标分流两域应答：recordId（chat 域）→ 应答两型判别联合（kind 字段）；
+// runId（workflow run 级全切）→ 聚合应答三组件（无 kind——按请求参数分流判别，
+// 或以 members/failures/summary 字段在场判别）。前端消费范式照 model.switch 回执
+// 修型（U6）：以应答值写显示态，禁乐观写请求值（§7.1「禁乐观写」）。
+//
+// effectiveModel 结构 = 引擎协议 ModelRef（packages/subagent-engine-sdk contract-types，
+// SSOT；shared 不依赖 SDK，此处内联结构等价形状——两处漂移由 U1 接线测试对账）。
+
+/** chat 域已生效型：引擎命令成功且回读到手——生效模型 ref + 生效 thinking 档位（§6.4）。
+ *  有活进程的切换走此型。 */
+export interface SubagentSetModelEffectiveReply {
+  kind: 'effective'
+  effectiveModel: { provider: string; modelId: string }
+  effectiveThinkingLevel: string
+}
+
+/** chat 域已记账型：无活进程（含竞态窗口内退出、引擎不支持热切转记账）——已记录、
+ *  下次执行生效。**不携带档位值**（无回读源，档位将由下次解析按现役候选链对新模型
+ *  推导，预告值必然是猜测，§7.1）。 */
+export interface SubagentSetModelRecordedReply {
+  kind: 'recorded'
+  /** 提示性文案（「已记录，下次执行生效」/ 引擎不支持热切的提示等，§5.2）。 */
+  note: string
+}
+
+/** chat 域应答两型判别联合。 */
+export type SubagentChatSetModelReply = SubagentSetModelEffectiveReply | SubagentSetModelRecordedReply
+
+/** 聚合应答成员态条目（三态语义权威 = 设计 §7.4；形状 SSOT = subagent-core
+ *  RunSwitchMemberState，结构等价投影）。生效值字段仅 switched 成员携带。 */
+export interface SubagentSetModelMemberState {
+  runId: string
+  state: 'switched' | 'not-active' | 'not-applicable'
+  effectiveModel?: { provider: string; modelId: string }
+  effectiveThinkingLevel?: string
+}
+
+/** 聚合应答失败名单条目（转发失败成员；reason 分型值域 = SDK SET_MODEL_ERROR_CODES
+ *  三型，词表扩位时同步跟随）。成员标识与成员态数组同维（同一已受理成员 runId，
+ *  两数组是同一成员集合的互斥划分，§7.1）。 */
+export interface SubagentSetModelMemberFailure {
+  runId: string
+  reason: 'engine_model_not_in_snapshot' | 'engine_credential_missing' | 'engine_state_readback_failed'
+}
+
+/** run 级全切聚合应答——三组件固定结构（§7.1 定形）：恒保留三组件，退化仅指无生效值
+ *  可报（全员非 switched 时成员条目无档位字段），失败名单无失败成员时为空名单、不省略
+ *  组件。前端按成员分项呈现，不坍缩为标量消息。 */
+export interface SubagentSetModelAggregateReply {
+  members: SubagentSetModelMemberState[]
+  failures: SubagentSetModelMemberFailure[]
+  summary: string
+}
+
+/** subagent.setModel 的 reply 总形（chat 两型 ∪ run 级聚合）。 */
+export type SubagentSetModelReply = SubagentChatSetModelReply | SubagentSetModelAggregateReply
 
 /** session.setThinkingLevel 的 reply（session.thinkingLevelSet）：level 是 pi 实际生效档
  *  （pi 钳制不支持的档位时 ≠ 请求值，如 mimo 族 max→high）。消费侧禁乐观写请求值。 */
@@ -2233,6 +2302,9 @@ export interface ServerMessageMapBase {
   // 对该 customType 覆写 display:true）产出同字段的 custom system message，字段解析 SSOT =
   // shared.parseSubagentDirective（live ≡ reload，关键规则 9）。
   'subagent.directive': { sessionId: string; subagentId: string; slug: string; direction: 'user'; text: string }
+  // subagent.modelSet：subagent.setModel 的 reply（subagent-model-switch §7.1）——
+  // chat 域应答两型（kind 判别）∪ run 级聚合三组件；形状见 SubagentSetModelReply 族。
+  'subagent.modelSet': SubagentSetModelReply
   // app.info：runtime 启动时推送应用 + pi 版本号（全局通道，无 sessionId）。
   'app.info': { appVersion: string; piVersion: string }
   // context.update：上下文用量（index.ts onContextUpdate 推；cacheHit/modelId 无来源，D9 保留 UI 占位）。
@@ -3050,6 +3122,10 @@ export interface ReplyPayloadMap {
   'model.switch': ServerMessageMap['model.switched'] // reply model.switched（回执修型 U6：transport 层在
             // model.switch case 消费 switchModel 返回的生效值（session-service 读回 get_state 生效模型）
             // 拆解回填 provider/modelId，对齐 C-pi-13 改状态 RPC 一律回生效值）
+  // subagent.setModel：reply subagent.modelSet（payload 消费型——chat 两型按 kind 判别，
+  // run 级聚合三组件；应答值写显示态禁乐观写，§7.1。mutation 登记义务：runtime 侧
+  // MUTATION_RPC_REGISTRY 同步登记归 U1 接线，漏登记 = mutation-reply-contract 测试红）。
+  'subagent.setModel': ServerMessageMap['subagent.modelSet']
   'session.compact': void         // reply session.compacted
   'session.delete': void          // reply session.deleted
   'session.deleteByCwd': BatchDeleteResult // reply session.deletedByCwd（前端读 deleted/failed 列表）
