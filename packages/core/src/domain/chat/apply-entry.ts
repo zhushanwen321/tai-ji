@@ -90,12 +90,6 @@ export type {
   PiCustomMessageEntry,
 } from '@taiji/shared'
 
-// normalizePiToolResult 实体在 apply-entry-utils.ts（convert 侧 computeToolCallFill 同源
-// 调用，依赖单向 convert → utils——实体放本文件会成环），此处 re-export 维持既有 core API
-// 不变（effects/registry 继续从本模块 import，见文件头分叉注释）。NormalizedToolResult 类型
-// re-export 已删（无消费方——registry 只用函数值，返回类型经推断；Gate-1.5 unused_types）。
-export { normalizePiToolResult } from './apply-entry-utils'
-
 // ── chat 视图态切片 ─────────────────────────────────────────────────
 
 /**
