@@ -14,7 +14,7 @@
  * = 重试切换，当前生效状态以面板与记录链/journal 为准——不虚构「未生效」。
  */
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, unlinkSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readFileSync, readSync, unlinkSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import type {
@@ -151,6 +151,7 @@ function mapResultFileToWireReply(raw: string): SubagentSetModelReply {
   if (!isObject(parsed)) throw corruptReplyError('根非对象')
   const file = parsed as {
     scope?: unknown
+    error?: unknown
     reply?: unknown
     aggregate?: unknown
     message?: unknown
@@ -158,10 +159,16 @@ function mapResultFileToWireReply(raw: string): SubagentSetModelReply {
   }
 
   if (file.scope === 'error') {
-    // 校验型失败（ref 非法 / 目录无此模型 / 凭据预检 / thinking 档位 / run 已终局）：
-    // 无引擎分型可透，域内 code 承载；message 携带宿主编排的候选/可用档位恢复指引。
-    const message = typeof file.message === 'string' ? file.message : 'model switch rejected (no message)'
-    throw new SubagentModelSwitchError('subagent_model_switch_failed', message)
+    // 校验型失败（ref 非法 / 目录无此模型 / 凭据预检 / thinking 档位 / run 已终局）+
+    // handler 域内失败（D3-A4 缺陷修复：信封带 scope:error，真实 code/message 透传——
+    // 不再笼统折算 subagent_model_switch_failed）。message 携带宿主编排的恢复指引。
+    const err = isObject(file.error) ? (file.error as { code?: unknown; message?: unknown }) : undefined
+    const code = typeof err?.code === 'string' && err.code !== '' ? err.code : 'subagent_model_switch_failed'
+    const message =
+      (typeof err?.message === 'string' && err.message !== '' && err.message) ||
+      (typeof file.message === 'string' && file.message !== '' && file.message) ||
+      'model switch rejected (no message)'
+    throw new SubagentModelSwitchError(code, message)
   }
 
   if (file.scope === 'chat') {
@@ -201,6 +208,30 @@ function mapResultFileToWireReply(raw: string): SubagentSetModelReply {
 }
 
 /**
+ * record 事件文件首帧（record-created）的 rootSessionId 读取——会话归属精确判定锚
+ * （D3-A4 缺陷修复）。只读文件头 4KB（created 帧恒为首行，信封 + 索引字段 KB 级）；
+ * 解析失败 / 字段缺失返回 undefined（= 未命中，调用方归 false）。
+ */
+function readRecordEventsRootSessionId(eventsFile: string): string | undefined {
+  // eslint-disable-next-line no-magic-numbers -- 首帧读窗常数 4KB（created 帧恒为首行，信封 KB 级，语义见上注）
+  const HEAD_BYTES = 4096
+  const fd = openSync(eventsFile, 'r')
+  try {
+    const buf = Buffer.alloc(HEAD_BYTES)
+    const n = readSync(fd, buf, 0, HEAD_BYTES, 0)
+    const firstLine = buf.toString('utf-8', 0, n).split('\n')[0]
+    const parsed: unknown = JSON.parse(firstLine)
+    if (!isObject(parsed)) return undefined
+    const root = (parsed as { rootSessionId?: unknown }).rootSessionId
+    return typeof root === 'string' && root !== '' ? root : undefined
+  } catch {
+    return undefined
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/**
  * 网关生产实装工厂（组合根构造注入 server.optional.subagentModelSwitchGateway）。
  */
 export function createSubagentModelSwitchGateway(deps: SubagentModelGatewayDeps): SubagentModelSwitchGateway {
@@ -223,7 +254,12 @@ export function createSubagentModelSwitchGateway(deps: SubagentModelGatewayDeps)
       const recordId = target.recordId
       return sessions.find((s) => {
         try {
-          return existsSync(recordEventsPath(getSubagentRecordsDir(agentDir, s.cwd), recordId))
+          const eventsFile = recordEventsPath(getSubagentRecordsDir(agentDir, s.cwd), recordId)
+          if (!existsSync(eventsFile)) return false
+          // 归属判定 = record-created 帧 rootSessionId 精确匹配（D3-A4 缺陷修复：
+          // recordsDir 由 cwd 派生、多会话共享同一目录——目录存在性只作快速过滤，
+          // 首个命中会把请求路由到非归属会话的 pi 进程，宿主归属校验拒绝）。
+          return readRecordEventsRootSessionId(eventsFile) === s.id
         } catch {
           return false // 非法 record id = 白名单拒绝 = 未命中（守卫读面不抛）
         }

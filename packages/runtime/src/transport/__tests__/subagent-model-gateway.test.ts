@@ -131,11 +131,13 @@ function setModelParams(recordId?: string, runId?: string): {
   }
 }
 
-/** 事件文件预置（resolveSessionId 定位锚：record events，D3 落点 = records 目录对偶）。 */
-function seedRecordEvent(recordId: string): void {
+/** 事件文件预置（归属判定锚：record-created 帧 rootSessionId === 会话 id——D3-A4 修复后
+ *  目录存在性只作过滤，归属按首帧 rootSessionId 精确匹配）。 */
+function seedRecordEvent(recordId: string, ownerSessionId: string = SESSION_ID): void {
   const recordsDir = join(agentDir, 'subagents', encodeCwdForTest(sessionCwd), 'records')
   mkdirSync(recordsDir, { recursive: true })
-  writeFileSync(join(recordsDir, `${recordId}.events`), '')
+  const created = { type: 'record-created', seq: 1, ts: 1, id: recordId, rootSessionId: ownerSessionId }
+  writeFileSync(join(recordsDir, `${recordId}.events`), `${JSON.stringify(created)}\n`)
 }
 /** run journal 预置（resolveSessionId 定位锚：workflow-state journal，getRunOverride 同式）。 */
 function seedRunJournal(runId: string): void {
@@ -310,12 +312,23 @@ describe('createSubagentModelSwitchGateway — 守卫', () => {
     await expect(gw.setModel(setModelParams('sa-1'))).rejects.toThrow(/not active.*激活该会话后重试/s)
   })
 
-  it('resolveSessionId：recordId 按 records events 存在性命中；未知目标 undefined', () => {
+  it('resolveSessionId：recordId 按 events 存在性 + rootSessionId 归属命中；未知目标 undefined', () => {
     seedRecordEvent('sa-1')
     const gw = createSubagentModelSwitchGateway(deps())
     expect(gw.resolveSessionId({ recordId: 'sa-1' })).toBe(SESSION_ID)
     expect(gw.resolveSessionId({ recordId: 'sa-ghost' })).toBeUndefined()
     expect(gw.resolveSessionId({})).toBeUndefined()
+  })
+
+  it('resolveSessionId：共享 cwd 多会话时按 rootSessionId 归属判定，不误路由首个会话（D3-A4 回归）', () => {
+    const OTHER_ID = 'main-session-2'
+    const other = { ...scannedSession(), id: OTHER_ID, lastModified: 1 }
+    seedRecordEvent('sa-1', OTHER_ID)
+    const gw = createSubagentModelSwitchGateway(
+      deps({ scanSessions: () => [scannedSession(), other as ScannedSessionMeta] }),
+    )
+    // events 文件在共享 recordsDir 下对两个会话都「存在」——归属必须命中 rootSessionId 所有权，非首序
+    expect(gw.resolveSessionId({ recordId: 'sa-1' })).toBe(OTHER_ID)
   })
 
   it('resolveSessionId：runId 按 workflow-state journal 存在性命中', () => {

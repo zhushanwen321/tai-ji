@@ -40,8 +40,11 @@ const logger = getLogger("subagents");
  */
 const REQUEST_ID_PATTERN = /^[\w-]{1,128}$/;
 
-/** 错误 envelope 形状（结果文件内的失败承载；code 值域 = 本文件错误分型常量族）。 */
+/** 错误 envelope 形状（结果文件内的失败承载；code 值域 = 本文件错误分型常量族）。
+ *  scope: "error" = 网关 mapResultFileToWireReply 的分派判别键（D3-A4 缺陷修复：
+ *  缺 scope 时域内失败被「scope 未知」通道错误吞掉，真实 code/recovery 丢失）。 */
 interface SubagentModelEnvelope { // oe-exempt:20261006:framework:通道结果信封契约形状（单命令单载体，单实现常态）
+  scope: "error";
   error: { code: string; message: string; recovery: string };
 }
 
@@ -172,6 +175,7 @@ export async function runSubagentModelRpc(
     writeResultFile(
       invalidFile,
       JSON.stringify({
+        scope: "error",
         error: {
           code: "invalid_payload",
           message: parsed.validationMessage,
@@ -193,6 +197,7 @@ export async function runSubagentModelRpc(
       writeResultFile(
         resultsFile,
         JSON.stringify({
+          scope: "error",
           error: {
             code: "subagent_runtime_not_ready",
             message: "subagent 执行运行时未就绪（session 未启动或已 dispose）",
@@ -226,6 +231,7 @@ export async function runSubagentModelRpc(
     writeResultFile(
       resultsFile,
       JSON.stringify({
+        scope: "error",
         error: {
           code: errorCodeOf(err) ?? "subagent_model_switch_failed",
           message: toErrorMessage(err),

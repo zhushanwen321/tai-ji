@@ -76,20 +76,24 @@
           @select="onModelSelect"
         >
           <template #trigger>
-            <Button
-              variant="ghost"
-              class="ml-auto flex shrink-0 items-center gap-1 rounded-sm px-1 font-mono text-[length:var(--text-3xs)] text-neutral-dim transition-colors hover:text-neutral-fg"
-              :title="t('panel.sideDrawer.subagentModelSwitchTitle')"
-              data-testid="subagent-model-trigger"
-            >
-              <span v-if="modelDisplay.label" class="max-w-[160px] truncate">{{ modelDisplay.label }}</span>
-              <span
-                v-if="modelDisplay.overridden"
-                class="shrink-0 rounded-sm border border-accent/40 px-1 text-[length:var(--text-3xs)] text-accent"
-                data-testid="subagent-override-badge"
-              >{{ t('panel.sideDrawer.subagentOverrideBadge') }}</span>
-              <ChevronDown class="size-3 shrink-0 opacity-60" />
-            </Button>
+            <!-- 调用方自包 PopoverTrigger as-child（ModelSelectPopover 组件契约：#trigger slot 不自带包裹）——
+                 D3-A6 缺陷修复：裸 Button 点击不弹 popover（单测 mock 组件致点击行为零覆盖）。 -->
+            <PopoverTrigger as-child>
+              <Button
+                variant="ghost"
+                class="ml-auto flex shrink-0 items-center gap-1 rounded-sm px-1 font-mono text-[length:var(--text-3xs)] text-neutral-dim transition-colors hover:text-neutral-fg"
+                :title="t('panel.sideDrawer.subagentModelSwitchTitle')"
+                data-testid="subagent-model-trigger"
+              >
+                <span v-if="modelDisplay.label" class="max-w-[160px] truncate">{{ modelDisplay.label }}</span>
+                <span
+                  v-if="modelDisplay.overridden"
+                  class="shrink-0 rounded-sm border border-accent/40 px-1 text-[length:var(--text-3xs)] text-accent"
+                  data-testid="subagent-override-badge"
+                >{{ t('panel.sideDrawer.subagentOverrideBadge') }}</span>
+                <ChevronDown class="size-3 shrink-0 opacity-60" />
+              </Button>
+            </PopoverTrigger>
           </template>
         </ModelSelectPopover>
         <span
@@ -165,6 +169,7 @@ import {
 import type { ProviderId, SubagentRecord, WorkflowAgentCall } from '@taiji/shared'
 import MessageStream from './MessageStream.vue'
 import ModelSelectPopover from './ModelSelectPopover.vue'
+import { PopoverTrigger } from '@/components/ui/popover'
 import { DEFAULT_ENGINE_ID } from '@/constants/engine-icons'
 // u6.1 chat facet 收口：对话流数据编排（chat store ops 面消费）下沉 composable，
 // 组件只保留 readers 面消费

@@ -52,19 +52,22 @@
           @select="onRunModelSelect"
         >
           <template #trigger>
-            <Button
-              variant="ghost"
-              class="flex shrink-0 items-center gap-1 rounded-sm px-1 font-mono text-[length:var(--text-3xs)] text-neutral-dim transition-colors hover:text-neutral-fg"
-              data-testid="drawer-workflow-model-trigger"
-            >
-              <span v-if="runModelDisplay.label" class="max-w-[140px] truncate">{{ runModelDisplay.label }}</span>
-              <span
-                v-if="runModelDisplay.overridden"
-                class="shrink-0 rounded-sm border border-accent/40 px-1 text-[length:var(--text-3xs)] text-accent"
-                data-testid="drawer-workflow-override-badge"
-              >{{ t('panel.sideDrawer.subagentOverrideBadge') }}</span>
-              <ChevronDown class="size-3 shrink-0 opacity-60" />
-            </Button>
+            <!-- 调用方自包 PopoverTrigger as-child（ModelSelectPopover 组件契约，同 SubagentTab D3-A6 修复）。 -->
+            <PopoverTrigger as-child>
+              <Button
+                variant="ghost"
+                class="flex shrink-0 items-center gap-1 rounded-sm px-1 font-mono text-[length:var(--text-3xs)] text-neutral-dim transition-colors hover:text-neutral-fg"
+                data-testid="drawer-workflow-model-trigger"
+              >
+                <span v-if="runModelDisplay.label" class="max-w-[140px] truncate">{{ runModelDisplay.label }}</span>
+                <span
+                  v-if="runModelDisplay.overridden"
+                  class="shrink-0 rounded-sm border border-accent/40 px-1 text-[length:var(--text-3xs)] text-accent"
+                  data-testid="drawer-workflow-override-badge"
+                >{{ t('panel.sideDrawer.subagentOverrideBadge') }}</span>
+                <ChevronDown class="size-3 shrink-0 opacity-60" />
+              </Button>
+            </PopoverTrigger>
           </template>
         </ModelSelectPopover>
         <!-- workflow 一次性生命周期（subagent-workflow D-2）：仅 abort，pause/resume 已移除 -->
@@ -172,6 +175,7 @@ import { formatTokens } from '@/lib/token-format'
 import { formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
 import { normalizeWorkflowScriptName } from '@/components/panel/workflow-viz/run-name'
 import ModelSelectPopover from './ModelSelectPopover.vue'
+import { PopoverTrigger } from '@/components/ui/popover'
 // subagent-model-switch §7.1（U1）：run 级执行模型全切 + 标签读取规则四分支
 import {
   resolveSubagentModelDisplay,
