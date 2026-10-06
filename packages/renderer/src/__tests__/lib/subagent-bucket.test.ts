@@ -23,7 +23,7 @@ import {
   type SubagentRecord,
   type SubagentStatus,
 } from '@taiji/shared'
-import { isRunningProjection } from '@/lib/subagent-bucket'
+import { isRunningProjection, subagentDotClass } from '@/lib/subagent-bucket'
 import { SESSION_01A09F83_GHOST_FIXTURE, type GhostFixtureSpec } from './subagent-ghost-fixture'
 
 /**
@@ -240,5 +240,18 @@ describe('[P1 门] 01a09f83 fixture 回放（严格口径 badge 计数 = 0）', 
 
   it('⛔门：修复后严格口径回放「真在跑」集合为空（幽灵 8→0；[两视图裁决 2026-09-16] 后计数口径 = isRunningProjection 过滤）', () => {
     expect(fixtureRecords.filter(isRunningProjection)).toEqual([])
+  })
+})
+
+describe('subagentDotClass — 词表外/缺失 status 兜底（D3r3 验收顺带缺陷回归）', () => {
+  it('status 缺失不抛错，落中性 accent 档', () => {
+    const r = { subagentId: 'r-x' } as never
+    expect(() => subagentDotClass(r)).not.toThrow()
+    expect(subagentDotClass(r)).toBe('bg-accent')
+  })
+
+  it('status 词表外值不抛错，落中性 accent 档', () => {
+    const r = { subagentId: 'r-y', status: 'not-in-vocab' } as never
+    expect(subagentDotClass(r)).toBe('bg-accent')
   })
 })

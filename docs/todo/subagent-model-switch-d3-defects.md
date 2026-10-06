@@ -23,3 +23,9 @@
 
 - 并行 inspect 共享单窗口 DOM：UI 输入通道全局唯一焦点，逐键注入与会话切换穿插交叉污染——多 agent 单窗口 UI 验收须预置时隙互斥协议；重验收轮按串行链编排（前一轮 A5 升级裁决已现场补课）。
 - 凭据缺失变体结构性不可达：catalog 准入即凭据检查，§5.2 宿主预检分支无构造面（设计字面的构造前提不成立）；变体以同族校验型分型「目录无此模型」承接成立。
+
+## 顺带发现（D3r3，非本设计范围，P2 已修/登记 2026-10-06）
+
+1. **托盘已结束 tab 渲染崩（已修）**：`subagent-bucket.ts subagentDotClass` 对词表外/缺失 status 无守卫，`SUBAGENT_DOT_RULES[undefined].find` 抛 TypeError → 已结束列表整列不渲染 + 全局错误 toast（证据 A4r3/r3-05、r3-08 截图 + renderer-error log 22:05-22:06）。修复 = 词表外/缺失兜底中性 accent 档 + 回归用例两枚。
+2. **@新任务 directive record 缺 agent/slug 字段的展示与点击（部分修）**：directive 派发 record.json agent=None（sa-3dd4468b 实证）→ mention 候选行 "undefined · undefined"、空 slug 点击误入「新建」流。已修展示层（副行 direct 兜底 + 过滤缺省安全）；**空 slug 点击语义未修**（insertSubagentChip 消费契约需产品裁决：按 subagentId 引用还是视为新建）——登记待裁决，验收路径以 WS 直发替代（A4r3 已证可行）。
+3. **验收环境纪律（流程项已固化）**：runtime 修复 commit 晚于实例启动 = 修复未生效陷阱（tsx 非热载）——inspect 任务书开工自查项已入 D3r3-A4；后续验收 ENV 模板应含「实例启动时点 vs 修复 commit 时点」比对与强制重启条款。

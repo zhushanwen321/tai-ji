@@ -82,6 +82,9 @@ export const SUBAGENT_DOT_RULES = {
  * 上方 satisfies 漏配新键先行编译红，本索引处不产生第二道检查（单点锁）。
  */
 export function subagentDotClass(record: SubagentRecord): string {
-  const hit = SUBAGENT_DOT_RULES[record.status].find((entry) => entry.match(record))
+  // 词表外 / 缺失 status 兜底中性档（D3r3 验收顺带发现：directive 派发 record 投影字段
+  // 缺失时本行 `.find` 抛 TypeError，托盘已结束 tab 整列表不渲染）——不假设 status 恒在词表。
+  const rules = SUBAGENT_DOT_RULES[record.status]
+  const hit = rules?.find((entry) => entry.match(record))
   return hit ? hit.cls : 'bg-accent'
 }
