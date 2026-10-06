@@ -93,17 +93,22 @@
     </div>
 
     <!-- ── bash 组块（ui-signal-density §3.3 D1 U3）：连续 bash 折成一行组头「×N · 共 Xs」。
-         组头计数三条口径（×N=已完成成员数 / Xs=已完成成员耗时合计 / M=组内失败数）由 core
-         groupConsecutiveBash 一次算好（header），本组件零解析；组头不跑计时器（组内 running
-         成员保持独立行，计时跳动只在 running 行上）。失败不隐瞒（V8）：成员含 error 时行尾
-         traceFailed 段（M = 组内口径，与 TraceCompactorRow 全局 failedCount 分账）。
-         展开后成员保持各自 1 行收起态（嵌套普通 tool Block 复用既有行形态与 PR-1 行高不变量），
-         要看某个成员的输出需再点那一行（两步路径，D1 已接受代价①）。展开态住组件本地 ref、
-         不进 store 不持久化（与 toolCollapsed/thinkingExpanded 同级，D1「组展开态住在哪里」）。 -->
+         组资格只看工具类型不看状态（D1 语义变更：running 成员也入组），组头计数三条口径
+         （×N=成员数 / Xs=已完成成员耗时合计 / M=组内失败数）与 hasRunning 由 core
+         groupConsecutiveBash 一次算好（header），本组件零解析。组头不跑计时器（组头时长
+         只累计已完成成员；running 成员入组，其计时跳动在展开后的成员行内）。
+         hasRunning=true（组内含执行中成员）时组头套执行态视觉：loader 图标 + accent 文字色
+         （与 tool/workflow 分支的 running 态同款）；false 时静态组图标 + 中性灰。
+         失败不隐瞒（V8）：成员含 error 时行尾 traceFailed 段（M = 组内口径，与
+         TraceCompactorRow 全局 failedCount 分账）。展开后成员保持各自 1 行收起态（嵌套
+         普通 tool Block 复用既有行形态与 PR-1 行高不变量），要看某个成员的输出需再点
+         那一行（两步路径，D1 已接受代价①）。展开态住组件本地 ref、不进 store 不持久化
+         （与 toolCollapsed/thinkingExpanded 同级，D1「组展开态住在哪里」）。 -->
     <div v-else-if="type === 'bash-group' && group" class="trace-bash-group" data-testid="bash-group">
       <div
         data-testid="bash-group-header"
-        class="flex min-w-0 cursor-pointer select-none items-center gap-1.5 text-[length:var(--text-sm)] font-medium text-neutral-mid transition-opacity hover:opacity-80"
+        class="flex min-w-0 cursor-pointer select-none items-center gap-1.5 text-[length:var(--text-sm)] font-medium transition-opacity hover:opacity-80"
+        :class="group.hasRunning ? 'text-accent' : 'text-neutral-mid'"
         role="button"
         tabindex="0"
         :aria-expanded="groupExpanded"
@@ -112,7 +117,9 @@
         @keydown.enter.prevent="toggleGroup"
         @keydown.space.prevent="toggleGroup"
       >
-        <component :is="BLOCK_ICON_LUCIDE['bash-group']" :class="BLOCK_ICON_CLASS" />
+        <!-- running 态 loader（双环 + accent），其余走静态组图标 -->
+        <span v-if="group.hasRunning" class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+        <component :is="BLOCK_ICON_LUCIDE['bash-group']" v-else :class="BLOCK_ICON_CLASS" />
         <span class="min-w-0 truncate text-left">{{ t('panel.message.traceBashSummary', { count: group.header.count, duration: formatDuration(group.header.durationMs) }) }}</span>
         <span v-if="group.header.failedCount > 0" data-testid="bash-group-failed" class="shrink-0 text-danger">· {{ t('panel.message.traceFailed', { count: group.header.failedCount }) }}</span>
       </div>
@@ -329,9 +336,9 @@ const props = defineProps<{
   thinkingId?: string
   /** tool_call 数据（type==='tool' 时必填） */
   tool?: ToolCall
-  /** bash 组块数据（type==='bash-group' 时由 Turn.vue 透传；D1 组块数据契约 members+header）。
-   *  header 三条口径（count/durationMs/failedCount）由 core groupConsecutiveBash 一次算好。 */
-  group?: { members: FlatBlock[]; header: { count: number; durationMs: number; failedCount: number } }
+  /** bash 组块数据（type==='bash-group' 时由 Turn.vue 透传；D1 组块数据契约 members+header+hasRunning）。
+   *  header 三条口径（count/durationMs/failedCount）与 hasRunning 由 core groupConsecutiveBash 一次算好。 */
+  group?: { members: FlatBlock[]; header: { count: number; durationMs: number; failedCount: number }; hasRunning: boolean }
   /** thinking 块初始折叠态（来自 ThinkingBlock.collapsed，默认收起） */
   collapsed?: boolean
   /** working 态（turn 进行中）：thinking 各态默认折叠（collapsed 初值 true），working→false

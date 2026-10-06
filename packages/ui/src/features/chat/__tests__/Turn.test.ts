@@ -726,26 +726,27 @@ function makeBashChainTurn(opts: { completed?: number; running?: boolean; assist
 }
 
 describe('ui-signal-density D1 U3: Turn bash 组块接线（三路径 + PR-6）', () => {
-  it('路径 B（工作回合窗口）：连续 bash 折成组行，running bash 独立行、不并入组（V15 T1 形态）', () => {
+  it('路径 B（工作回合窗口）：连续 bash 折成组行，running bash 入组（D1 语义变更：组资格只看工具类型）', () => {
     const wrapper = mountTurn({
       turn: makeBashChainTurn({ completed: 3, running: true }),
       isSessionActive: true,
       isLastTurn: true,
     })
     const kinds = wrapper.findAll('.trace .trace-blk').map((b) => b.attributes('data-type'))
-    // [bash-group(3 个已完成连续 bash), tool(running bash 独立行), text(末位正文)]
-    expect(kinds).toEqual(['bash-group', 'tool', 'text'])
+    // [bash-group(3 个已完成 + 1 个 running 成员), text(末位正文)]——running 不再独立成行
+    expect(kinds).toEqual(['bash-group', 'text'])
   })
 
   it('路径 B 窗口截断语义：组头 ×N = 窗口内成员数（W=4 收编 1 个后组行只剩窗口内成员）', () => {
-    // 5 个连续 bash + running：③池 5 → 窗口末 4 → 组 ×4，最早的 b0 被收编进 TraceCompactorRow
+    // 5 个连续 bash + running：③池 5 → 窗口末 4 → 组 = b1..b4 + running（D1 语义变更：running 入组），
+    // 最早的 b0 被收编进 TraceCompactorRow
     const wrapper = mountTurn({
       turn: makeBashChainTurn({ completed: 5, running: true }),
       isSessionActive: true,
       isLastTurn: true,
     })
     const kinds = wrapper.findAll('.trace .trace-blk').map((b) => b.attributes('data-type'))
-    expect(kinds).toEqual(['bash-group', 'tool', 'text'])
+    expect(kinds).toEqual(['bash-group', 'text'])
     expect(wrapper.find('[data-testid="trace-compactor"]').exists()).toBe(true) // b0 并入计数
   })
 
@@ -812,23 +813,23 @@ describe('ui-signal-density D1 U3: Turn bash 组块接线（三路径 + PR-6）'
     })
     const header1 = wrapper.find('[data-testid="bash-group-header"]')
     expect(header1.exists()).toBe(true)
-    // 展开组（真实 Block 本地 ref）
+    // 展开组（真实 Block 本地 ref）。D1 语义变更（running 入组）：成员 = 3 个已完成 + running = 4
     await header1.trigger('click')
-    expect(wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk').length).toBe(3)
+    expect(wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk').length).toBe(4)
     const node1 = header1.element
-    // 段尾延长：b3 完成、r3→r4 新 running（members 3→4，run head 不变 → key 稳定）
+    // 段尾延长：b3 完成、r3→r4 新 running（members 4→5，run head 不变 → key 稳定）
     await wrapper.setProps({ turn: makeBashChainTurn({ completed: 4, running: true }) })
     const header2 = wrapper.find('[data-testid="bash-group-header"]')
     expect(header2.exists()).toBe(true)
     expect(header2.element.isSameNode(node1)).toBe(true) // 不 remount（PR-6 方向①）
-    // 展开态保持：成员行仍在 DOM（4 个）
-    expect(wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk').length).toBe(4)
+    // 展开态保持：成员行仍在 DOM（5 个）
+    expect(wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk').length).toBe(5)
   })
 
   it('PR-6 方向②（窗口右滑段首出窗）：members[0] 变更而 run head 锚不变，组行 DOM 节点不变（isSameNode，v8 key 规则的核心验证）', async () => {
     const wrapper = mount(Turn, {
       props: {
-        turn: makeBashChainTurn({ completed: 5, running: true }), // 窗口=末4：组(b1..b4, head=b0=0)
+        turn: makeBashChainTurn({ completed: 5, running: true }), // 窗口=末4：组(b1..b4+running, head=b0=0)
         sessionId: SID,
         isSessionActive: true,
         isLastTurn: true,
@@ -848,13 +849,14 @@ describe('ui-signal-density D1 U3: Turn bash 组块接线（三路径 + PR-6）'
     expect(header1.exists()).toBe(true)
     await header1.trigger('click')
     const node1 = header1.element
-    // 窗口右滑：b5 完成入池、新 running r 启动 → 窗口=末4：组(b2..b5)，members[0] 从 b1 变 b2；
+    // 窗口右滑：b5 完成入池、新 running r 启动 → 窗口=末4：组(b2..b5+running)，members[0] 从 b1 变 b2；
     // 若 key=members[0].flatIndex（v7 旧规则被击穿的形态）→ remount → isSameNode=false
     await wrapper.setProps({ turn: makeBashChainTurn({ completed: 6, running: true }) })
     const header2 = wrapper.find('[data-testid="bash-group-header"]')
     expect(header2.exists()).toBe(true)
     expect(header2.element.isSameNode(node1)).toBe(true) // run head 锚定 → 不 remount（PR-6 方向②）
-    // 展开态保持（remount 会丢组件本地 ref 的展开态）
-    expect(wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk').length).toBe(4)
+    // 展开态保持（remount 会丢组件本地 ref 的展开态）。D1 语义变更（running 入组）：
+    // 两次成员数 = 4 个窗口内已完成 + running = 5
+    expect(wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk').length).toBe(5)
   })
 })

@@ -196,17 +196,20 @@ function countFailedOutsideVisible(blocks: FlatBlock[], visibleSet: Set<number>)
  */
 export interface BashGroupBlock {
   kind: 'bash-group'
-  /** 组成员（连续 bash 的可见块，按 flatIndex 升序；running bash 不入组、保持独立行） */
+  /** 组成员（连续 bash 的可见块，按 flatIndex 升序；组资格只看工具类型，running 也入组） */
   members: FlatBlock[]
   /** 组头聚合（三条计数口径，D1）：值在纯函数侧一次算好，渲染层零解析 */
   header: {
-    /** ×N = 组内已完成成员数（running 不在独立行之外的任何地方出现，恒等 members.length） */
+    /** ×N = 成员数（含 running） */
     count: number
-    /** 共 Xs = 已完成成员耗时合计（endTime − startTime 之和；endTime 缺失的成员按 0 计） */
+    /** 共 Xs = 已完成成员耗时合计（endTime − startTime 之和；endTime 缺失的成员按 0 计；running 成员不计入——其 endTime 必缺失，天然按 0） */
     durationMs: number
     /** · 含 M 次失败 = 成员中 status==='error' 的数量（组内口径，与 TraceCompactorRow 的全局 failedCount 分账，V15⑦ 对账等式两项并列） */
     failedCount: number
   }
+  /** 组内是否含 status==='running' 的成员（放接口顶层——它是渲染信号不是计数口径，不入 header）。
+   *  渲染层据此给组头套执行态视觉：loader 图标 + accent 文字色（与其余执行中块同款）。 */
+  hasRunning: boolean
   /** 段首锚定 key（run head，v8）：members[0] 在 flatBlocks 全序列中所属连续 bash 段的段首 flatIndex。
    *  只取首成员的段首入键（v9 契约缝①）；对窗口滑动（段首成员被收编出窗）与段尾延长（running 并入）
    *  两个生长方向都稳定——窗口滑动不改段首在 flatBlocks 里的位置、段尾延长也不改段首。 */
@@ -252,18 +255,21 @@ function bashRunHeadIndex(firstMember: FlatBlock, flatBlocks: FlatBlock[]): numb
   return head
 }
 
-/** 组块构建：三条计数口径一次算好 + 段首锚定 key。 */
+/** 组块构建：三条计数口径 + hasRunning 一次算好 + 段首锚定 key。 */
 function buildBashGroup(members: FlatBlock[], flatBlocks: FlatBlock[]): BashGroupBlock {
   let durationMs = 0
   let failedCount = 0
+  let hasRunning = false
   for (const m of members) {
     durationMs += bashMemberDurationMs(m)
     if ((m.block.ref as ToolCall).status === 'error') failedCount += 1
+    if ((m.block.ref as ToolCall).status === 'running') hasRunning = true
   }
   return {
     kind: 'bash-group',
     members,
     header: { count: members.length, durationMs, failedCount },
+    hasRunning,
     headFlatIndex: bashRunHeadIndex(members[0], flatBlocks),
   }
 }
@@ -284,53 +290,35 @@ export function isBashGroupBlock(unit: TraceRenderUnit): unit is BashGroupBlock 
  *
  * 输入是可见派生序列（Turn.vue visibleBlocks 三分支汇合后的 FlatBlock[]）+ 同源同拍的 flatBlocks
  * （段首回查用）。规则：
- * - 只对连续 ≥2 个 bash 工具块成组；不成组清单（read/grep/glob/cat/ls/find/write/edit/
+ * - 组资格只看工具类型、不看状态（D1 语义变更：running 与已完成一视同仁）：连续 ≥2 个 bash
+ *   工具块即成段成组（含 running 成员，组头 hasRunning=true 时渲染层呈现执行态——loader +
+ *   accent）；不成组清单（read/grep/glob/cat/ls/find/write/edit/
  *   todo_write/thinking/subagent/workflow/text…）一律保持独立行，且打断成组（用户裁决 R5）。
- * - running bash 保持独立行：不入组（组头三条口径均不含 running）、也不打断前面的连续段
- *   （段内透明——仅当其后仍有同段候选块；段尾 running 停止成段。完成后让出 ② 独立行入 ③池，
- *   与相邻组连续则并入，V15⑥）。
  * - error bash 入组为失败成员（header.failedCount 计数，组行尾「· 含 M 次失败」承载，
  *   V8 双路径）；error 块不在输入序列中时（路径 B 窗口被 ③池剔除）前后两段按假邻接合并
  *   （v9 契约缝②），该 error 由 TraceCompactorRow 的全局 failedCount 报告、不入组内 M。
- * - 组块排序位置 = members[0].flatIndex；输出保持输入序列原序（实现在可见下标上分段扫描
- *   后按原序组装，running 透明跳过不产生顺序颠倒）。
+ * - 组块排序位置 = members[0].flatIndex；输出保持输入序列原序（分段扫描后按原序组装）。
  * 空输入 → 返回 []。
  */
 export function groupConsecutiveBash(visible: FlatBlock[], flatBlocks: FlatBlock[]): TraceRenderUnit[] {
   const n = visible.length
-  const isCandidate = (fb: FlatBlock): boolean =>
-    isBashToolBlock(fb) && (fb.block.ref as ToolCall).status !== 'running'
-  const isRunningBash = (fb: FlatBlock): boolean =>
-    isBashToolBlock(fb) && (fb.block.ref as ToolCall).status === 'running'
 
-  // ① 分段扫描：候选段 = 连续候选块，段内可透明夹 running（仅当其后仍有同段候选）。
-  //    segOf[k] = 可见下标 k 所属段号（-1 = 非候选独立块）。
+  // ① 分段扫描：段 = 连续 bash 工具块（组资格只看工具类型，running 与已完成一视同仁，
+  //    与段首回查 bashRunHeadIndex 的「纯几何段」口径一致）。遇非 bash 即断段。
+  //    segOf[k] = 可见下标 k 所属段号（-1 = 非 bash 独立块）。
   const segments: number[][] = []
   const segOf: number[] = new Array(n).fill(-1)
   let i = 0
   while (i < n) {
-    if (!isCandidate(visible[i])) {
+    if (!isBashToolBlock(visible[i])) {
       i += 1
       continue
     }
     const seg: number[] = []
-    while (i < n) {
-      const fb = visible[i]
-      if (isCandidate(fb)) {
-        seg.push(i)
-        segOf[i] = segments.length
-        i += 1
-        continue
-      }
-      if (isRunningBash(fb)) {
-        let k = i + 1
-        while (k < n && isRunningBash(visible[k])) k += 1
-        if (k < n && isCandidate(visible[k])) {
-          i += 1 // 段内透明 running
-          continue
-        }
-      }
-      break
+    while (i < n && isBashToolBlock(visible[i])) {
+      seg.push(i)
+      segOf[i] = segments.length
+      i += 1
     }
     segments.push(seg)
   }

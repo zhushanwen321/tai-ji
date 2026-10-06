@@ -9,7 +9,6 @@ import {
   ListChecks,
   AlertTriangle,
   ArrowRight,
-  Layers,
 } from '@lucide/vue'
 import type { ToolCallStatus } from '@taiji/shared'
 
@@ -65,8 +64,9 @@ export function getBlockIcon(
  * Demo H 最终值：thinking=brain / tool-read=book-open / tool-bash=square-terminal /
  * tool-edit=pencil / tool-other=square-function / subagent=users / workflow=list-checks /
  * failed=alert-triangle / text=arrow-right。
- * bash-group（ui-signal-density §3.3 D1 U3）= layers（连续 bash 组块图标；
- * Layers 已在本包 slash-icons.ts 引入过，同源 @lucide/vue 直引）。
+ * bash-group（ui-signal-density §3.3 D1 U3）= square-terminal：组头是 bash 段的聚合行，
+ * 图标沿用 bash 语义（与 tool-bash 同源）；组身份由「×N · 共 Xs」计数前缀承载，行内有
+ * running 成员时图标位让给 RUNNING_LOADER_SVG（渲染层 hasRunning 分支，不走本映射）。
  */
 export const BLOCK_ICON_LUCIDE: Record<Exclude<BlockIconKind, 'running'>, Component> = {
   thinking: Brain,
@@ -78,7 +78,7 @@ export const BLOCK_ICON_LUCIDE: Record<Exclude<BlockIconKind, 'running'>, Compon
   workflow: ListChecks,
   failed: AlertTriangle,
   text: ArrowRight,
-  'bash-group': Layers,
+  'bash-group': SquareTerminal,
 }
 
 /**

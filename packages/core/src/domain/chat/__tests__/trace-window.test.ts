@@ -491,7 +491,8 @@ describe('TC-edge：边界态（0 streaming assistant）窗口稳定性', () => 
 
 // ── D1（ui-signal-density §3.3）：groupConsecutiveBash 连续 bash 折叠 ──────────
 // 覆盖 U2 拆分清单的分组规则面：空输入恒等 / 单个不成组 / 连续多个才成组 / 非 bash 打断 /
-// running 除外 / 计数三条口径 / 段首锚定 key（v8 run head + v9 契约缝①②③）/ 纯函数不修改入参。
+// running 入组（D1 语义变更：组资格只看工具类型不看状态）/ hasRunning 两态 / 计数三条口径 /
+// 段首锚定 key（v8 run head + v9 契约缝①②③）/ 纯函数不修改入参。
 
 /** D1 组测试用：从 assistant 列表拍平后直接取全量（路径 C 形态）或窗口切片（路径 B 形态）后分组。 */
 function groupOf(flat: FlatBlock[], windowSize?: number): TraceRenderUnit[] {
@@ -565,8 +566,8 @@ describe('D1 groupConsecutiveBash: 分组规则', () => {
     expect(units.filter(isGroup)).toHaveLength(0)
   })
 
-  it('组内 running 除外：running bash 不入组、保持独立行（口径①③），段尾 running 停止成段', () => {
-    // [bash✓ bash✓ bash▶running] → 组×2 + running 独立行（V15 T1 形态）
+  it('running bash 入组（D1 语义变更：组资格只看工具类型不看状态），段尾 running 并入同组', () => {
+    // [bash✓ bash✓ bash▶running] → 单组 ×3（members 含 running 块，无独立 running 行）
     const tools = [
       makeTool({ id: 'b0' }),
       makeTool({ id: 'b1' }),
@@ -580,14 +581,31 @@ describe('D1 groupConsecutiveBash: 分组规则', () => {
     })
     const flat = flattenTurnBlocks([a1])
     const units = groupOf(flat)
-    expect(units).toHaveLength(2)
+    expect(units).toHaveLength(1)
     const g = units[0] as BashGroupBlock
     expect(isGroup(g)).toBe(true)
-    expect(g.header.count).toBe(2)
-    expect(g.members.every((m) => (m.block.ref as ToolCall).status !== 'running')).toBe(true)
-    // running 块原样独立行透传（FlatBlock）
-    expect(isGroup(units[1])).toBe(false)
-    expect((units[1] as FlatBlock).flatIndex).toBe(2)
+    expect(g.header.count).toBe(3)
+    expect(g.members.map((m) => m.flatIndex)).toEqual([0, 1, 2])
+    expect(g.members.some((m) => (m.block.ref as ToolCall).status === 'running')).toBe(true)
+    expect(g.hasRunning).toBe(true)
+  })
+
+  it('hasRunning 两态：组含 running → true；全完成 → false', () => {
+    const mk = (statuses: ToolCall['status'][]) => {
+      const tools = statuses.map((s, i) => makeTool({ id: `b${i}`, status: s }))
+      return groupOf(
+        flattenTurnBlocks([
+          makeAssistant({
+            id: 'a1',
+            status: statuses.includes('running') ? 'streaming' : 'complete',
+            tools,
+            blocks: tools.map((t) => ({ type: 'toolCall' as const, refId: t.id })),
+          }),
+        ]),
+      )[0] as BashGroupBlock
+    }
+    expect(mk(['completed', 'running', 'completed']).hasRunning).toBe(true)
+    expect(mk(['completed', 'completed']).hasRunning).toBe(false)
   })
 
   it('计数三条口径：count=成员数、durationMs=Σ(endTime−startTime)、failedCount=成员内 error 数', () => {
@@ -660,8 +678,8 @@ describe('D1 groupConsecutiveBash: 分组规则', () => {
   })
 
   it('key 段首锚定（v8 run head）：窗口右滑段首成员被收编出窗后 headFlatIndex 不变（v9 契约缝①）', () => {
-    // 5 个连续 bash + W=4：T1 窗口 = b1..b4（head=b0 的段首 0）；
-    // T2 再完成一个、新 running 启动（窗口右滑）→ 窗口 = b2..b5，members[0] 从 b1 变 b2，
+    // 5 个连续 bash + running：T1 窗口 = b1..b4 + r5（D1 语义变更：running 入组）；
+    // T2 再完成一个、新 running 启动（窗口右滑）→ 窗口 = b2..b5 + r6，members[0] 从 b1 变 b2，
     // 但首成员所属段段首仍 = 0 → key 稳定（remount 不发生的前提）
     const make = (n: number, runningId: string | null) => {
       const tools: ToolCall[] = []
@@ -685,8 +703,9 @@ describe('D1 groupConsecutiveBash: 分组规则', () => {
     const t2Units = groupOf(flattenTurnBlocks([make(6, 'r6')]), W)
     const g1 = t1Units.find(isGroup) as BashGroupBlock
     const g2 = t2Units.find(isGroup) as BashGroupBlock
-    expect(g1.members.map((m) => m.flatIndex)).toEqual([1, 2, 3, 4])
-    expect(g2.members.map((m) => m.flatIndex)).toEqual([2, 3, 4, 5])
+    // D1 语义变更（running 入组）：段尾 running 成员随窗口内的已完成成员并入同组
+    expect(g1.members.map((m) => m.flatIndex)).toEqual([1, 2, 3, 4, 5])
+    expect(g2.members.map((m) => m.flatIndex)).toEqual([2, 3, 4, 5, 6])
     expect(g1.headFlatIndex).toBe(0)
     expect(g2.headFlatIndex).toBe(0) // members[0] 变了，段首锚不变 → :key 稳定
   })

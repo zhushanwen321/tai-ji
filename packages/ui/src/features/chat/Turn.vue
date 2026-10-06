@@ -453,7 +453,8 @@ function unitKey(unit: TraceRenderUnit): number {
 
 /**
  * v-memo deps（按单元类型二选一，见模板注释）。
- * 组块四项 = D1 契约字面；普通块五项 = W21 D-4 既有键清单原样迁移。
+ * 组块五项 = D1 契约字面（hasRunning = 组头执行态视觉的切换信号，running 成员全部完成时
+ * loader ↔ 静态图标翻转）；普通块五项 = W21 D-4 既有键清单原样迁移。
  * deps 在父组件渲染作用域求值（assistantById 为 computed，此处取 .value）。
  */
 function unitMemoDeps(unit: TraceRenderUnit): unknown[] {
@@ -463,6 +464,7 @@ function unitMemoDeps(unit: TraceRenderUnit): unknown[] {
       unit.members[unit.members.length - 1].block.ref,
       unit.header.count,
       unit.header.durationMs,
+      unit.hasRunning,
     ]
   }
   return [
@@ -486,7 +488,7 @@ interface BlockUnitProps {
   status?: Message['status']
   error?: string
   messageTimestamp?: number
-  group?: { members: FlatBlock[]; header: { count: number; durationMs: number; failedCount: number } }
+  group?: { members: FlatBlock[]; header: { count: number; durationMs: number; failedCount: number }; hasRunning: boolean }
 }
 
 /**
@@ -497,7 +499,7 @@ interface BlockUnitProps {
  */
 function unitBlockProps(unit: TraceRenderUnit): BlockUnitProps {
   if (isBashGroupBlock(unit)) {
-    return { type: 'bash-group', group: { members: unit.members, header: unit.header } }
+    return { type: 'bash-group', group: { members: unit.members, header: unit.header, hasRunning: unit.hasRunning } }
   }
   const kind = unit.block.kind
   return {

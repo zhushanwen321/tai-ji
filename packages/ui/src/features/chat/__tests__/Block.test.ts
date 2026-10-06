@@ -663,7 +663,7 @@ describe('chat-flow-timestamp U2: Block 行尾时间槽（A3/A4 + D2 悬停化�
 // 组头 / 失败段 testid、展开收起、成员默认收起态、两步路径、failed 成员默认展开（V8）。
 // ═════════════════════════════════════════════════════════════════
 
-/** bash 组块 fixture：ToolCall[] → Turn.vue 组分支透传的 group prop 形态（members+header）。 */
+/** bash 组块 fixture：ToolCall[] → Turn.vue 组分支透传的 group prop 形态（members+header+hasRunning）。 */
 function makeBashGroupProp(tools: ToolCall[]) {
   return {
     members: tools.map((tc, i) => ({
@@ -677,6 +677,7 @@ function makeBashGroupProp(tools: ToolCall[]) {
       durationMs: tools.reduce((sum, t) => sum + Math.max(0, (t.endTime ?? 0) - t.startTime), 0),
       failedCount: tools.filter((t) => t.status === 'error').length,
     },
+    hasRunning: tools.some((t) => t.status === 'running'),
   }
 }
 
@@ -717,6 +718,29 @@ describe('ui-signal-density D1 U3: Block bash-group 组块', () => {
       makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' } }),
     ]))
     expect(wrapper.find('[data-testid="bash-group-failed"]').exists()).toBe(false)
+  })
+
+  it('hasRunning 执行态视觉（D1 语义变更）：true → 组头 loader（animate-loader-spin + svg）+ 整行 text-accent；false → 静态图标 + text-neutral-mid', () => {
+    const runningWrapper = mountBashGroup(makeBashGroupProp([
+      makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' }, startTime: 0, endTime: 1000 }),
+      makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' }, status: 'running', startTime: 2000 }),
+    ]))
+    const runningHeader = runningWrapper.find('[data-testid="bash-group-header"]')
+    expect(runningHeader.classes()).toContain('text-accent')
+    expect(runningHeader.classes()).not.toContain('text-neutral-mid')
+    // loader 形态与其余执行中块同款：RUNNING_LOADER_SVG 塞进 animate-loader-spin 旋转容器
+    const loader = runningHeader.find('.animate-loader-spin')
+    expect(loader.exists()).toBe(true)
+    expect(loader.find('svg').exists()).toBe(true)
+
+    const doneWrapper = mountBashGroup(makeBashGroupProp([
+      makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } }),
+      makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' } }),
+    ]))
+    const doneHeader = doneWrapper.find('[data-testid="bash-group-header"]')
+    expect(doneHeader.classes()).toContain('text-neutral-mid')
+    expect(doneHeader.classes()).not.toContain('text-accent')
+    expect(doneHeader.find('.animate-loader-spin').exists()).toBe(false)
   })
 
   it('展开收起：默认收起（成员不在 DOM）；点组头展开 → 成员行各自 1 行收起态；再点收起 → 成员消失', async () => {
