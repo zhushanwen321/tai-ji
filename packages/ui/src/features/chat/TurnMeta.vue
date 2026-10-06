@@ -1,7 +1,9 @@
 <template>
   <!--
-    TurnMeta：回合级元信息（已工作/工作中 + badge）。
-    从 Turn.vue 拆出。badge 灰阶化（H 设计：bg-surface-2 text-neutral-mid 替代彩色）。
+    TurnMeta：回合状态条（状态字 + elapsed + 区间 + tokens + 思考/工具计数，单行）。
+    从 Turn.vue 拆出。全行统一形态：各段 mono + text-2xs + text-neutral-dim，以 `·` 分隔，
+    无底色无边框无图标；accent 仅用于交互指示（streaming spinner / chevron 展开态）。
+    （用户裁决 2026-10-06）
   -->
   <!-- turn-meta + hr wrapper（sticky 已移除：负 margin 覆盖 scrollEl padding-top 的技巧不可靠——
        working 态贴顶时与 scrollEl 顶部有间隔，滚过来的文字从 gap 漏出。改回正常文档流）。
@@ -15,7 +17,7 @@
     <Button
       variant="ghost"
       size="sm"
-      class="turn-meta h-auto w-fit items-center justify-start gap-2.5 self-start px-1 py-1 font-sans text-[length:var(--text-sm)] font-medium transition-colors duration-[var(--duration-fast)] ease-[var(--ease)]"
+      class="turn-meta h-auto w-fit items-center justify-start gap-2.5 self-start px-1 py-1 font-mono font-normal text-[length:var(--text-2xs)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)]"
       :class="[
         !turn.hasFoldable
           ? 'cursor-default hover:text-neutral-mid'
@@ -31,9 +33,11 @@
            时长改为整 turn 墙钟（含工具执行/等待）后，等构建/等子代理/等用户回答都会触红，
            颜色不再是「生成异常」信号（唯一可靠的信号是时长数字本身） -->
       <Loader2 v-if="isStreaming" class="size-3.5 shrink-0 animate-spin text-accent" />
-      <span class="text-[length:var(--text-sm)] font-medium">
-        <span class="lbl" :class="isWorkingTurn ? 'text-accent' : 'text-neutral-mid'">{{ statusLabel }}</span>
-        <span class="elapsed ml-1 font-mono font-medium tracking-[0.01em] text-neutral-fg">{{ elapsed }}</span>
+      <!-- 状态段（状态字 + elapsed）：与区间/tokens/计数段同构——恒 text-neutral-dim，
+           working 态不再染 accent（用户裁决 2026-10-06） -->
+      <span class="tm-status font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums">
+        <span class="lbl">{{ statusLabel }}</span>
+        <span class="elapsed ml-1">{{ elapsed }}</span>
       </span>
       <!-- Turn 区间（整个 agent-turn 起止时刻）：进行中右端显「（进行中）」，
            定格后显末次产出结束时刻 -->
@@ -56,14 +60,10 @@
         class="chev size-[9px] text-neutral-dim transition-transform duration-[var(--duration)] ease-[var(--ease)]"
         :class="isExpanded(turnKey) ? 'rotate-90 text-accent' : ''"
       />
-      <!-- H 设计 badge 灰阶化：bg-surface-2 text-neutral-mid 替代 bg-reasoning-soft/bg-info-soft。
-           mid #96969c on surface-2 #27272a = 5.06:1 过 AA；dim #74747a = 3.21:1 不过（tokens SSOT） -->
-      <span v-if="thinkCount > 0" class="badge badge-think inline-flex items-center gap-1 rounded-full bg-surface-2 px-1.5 py-0.5 font-mono text-[length:var(--text-2xs)] font-medium tracking-[0.02em] text-neutral-mid">
-        <Brain class="size-2" />{{ t('panel.message.thinkCount', { count: thinkCount }) }}
-      </span>
-      <span v-if="toolCount > 0" class="badge badge-tool inline-flex items-center gap-1 rounded-full bg-surface-2 px-1.5 py-0.5 font-mono text-[length:var(--text-2xs)] font-medium tracking-[0.02em] text-neutral-mid">
-        <SquareFunction class="size-2" />{{ t('panel.message.toolCount', { count: toolCount }) }}
-      </span>
+      <!-- 思考/工具计数段：与区间/tokens 段同构的纯文本段（mono text-2xs neutral-dim，
+           `·` 起头，无底色无圆角无图标）——用户裁决 2026-10-06 -->
+      <span v-if="thinkCount > 0" class="badge badge-think ml-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums">· {{ t('panel.message.thinkCount', { count: thinkCount }) }}</span>
+      <span v-if="toolCount > 0" class="badge badge-tool ml-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums">· {{ t('panel.message.toolCount', { count: toolCount }) }}</span>
     </Button>
     <hr class="border-0 border-t border-border" />
   </div>
@@ -71,7 +71,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Brain, ChevronRight, Loader2, SquareFunction } from '@lucide/vue'
+import { ChevronRight, Loader2 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
 // barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
