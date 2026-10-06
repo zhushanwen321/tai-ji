@@ -283,7 +283,7 @@ interface CallDraft {
 /**
  * record 事件流 → WorkflowRun 聚合重建（纯函数，零 IO）。
  *
- * fold 语义（词表 = run-events.ts [D4] 对齐后 9 事件）：
+ * fold 语义（词表 = run-events.ts 事件词表，单源）：
  * - `run-created`：spec.scriptSource（全文，[D1]）+ args（全文，设计 §3.1 载荷表；
  *   旧格式帧回落 argsSummary 尽力恢复——parseLegacyArgsSummary）+ startedAt 锚点
  *   （帧 ts 优先，回落注册条目 startedAt）；
@@ -294,7 +294,10 @@ interface CallDraft {
  *   形态建占位行——同 journal fold 兜底）；sessionFile/sessionId 从 result 透传
  *   （对齐 finalizeCall 的 call 字段填充纪律）；
  * - `run-settled`：终局（status=done + reason 映射 + completedAt=帧 ts）；无帧 =
- *   running（交恢复链收编）。
+ *   running（交恢复链收编）；
+ * - `model-override`：latestModelOverride 折叠 → meta.modelOverride（最新一条生效，
+ *   覆盖旧覆盖值不叠加；无覆盖不造键——详见 foldRecordStreamToRun 内
+ *   [subagent-model-switch §6.6①/§7.4] 注释，不在此重复展开）。
  *
  * record 流不承载的字段（budget 计数/errorLogs/trace 完整面）按恢复语义最小形态
  * 缺省——步骤级详情的恢复读面 = record 流直读（session-reader 家族链），不经本聚合。
