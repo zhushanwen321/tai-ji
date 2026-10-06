@@ -291,9 +291,11 @@ export class WorkflowDispatch {
     // 调用参数 model（覆盖存在时，调用参数中的显式 model 也被覆盖——用户覆盖赢，
     // §2 目标 3）。覆写发生在 resolveWorkflowIdentity 之前：pi 路径的 paramOverride
     // 与非 pi 路径的 engineModel 两个解析输入源同点生效，D8 派发期目录校验校验的
-    // 也是覆盖值。thinkingLevel 不覆写——档位由解析链现役候选链裁决（调用参数显式
-    // 档位 > 覆盖记账档位 > frontmatter，§6.2 记账形状）。内存 miss（主 agent 重启
-    // 后首次派发）经 rebuildRunOverride 从 run 事件流折叠重建（含内存回填）。
+    // 也是覆盖值。thinkingLevel 在本点不覆写调用参数——档位由解析链现役候选链裁决
+    //（调用参数显式档位 > 覆盖记账档位 > frontmatter，§6.2 记账形状），裁决产物
+    //（含档位）在 runWorkflowEngineTask 的 taskSpec 组装点进执行通道。内存 miss
+    //（主 agent 重启后首次派发）经 rebuildRunOverride 从 run 事件流折叠重建（含
+    // 内存回填）。
     const dispatchOverride =
       this.deps.getModelOverride(parentRunId) ?? (await this.deps.rebuildRunOverride(parentRunId));
     if (dispatchOverride !== undefined) {
@@ -623,10 +625,18 @@ export class WorkflowDispatch {
       // 任务声明：opts 直传（D6 合流——AgentCallOpts 即 EnginePort 任务形状，SAR 同款
       // 零映射），model 覆写为 record 留痕词形（resolveIdentity 解析产物，与
       // runAndFinalize 的 taskSpecWithModel 同源权威；二次咨询命中时 = 重盖章后的
-      // 覆盖词形）。
+      // 覆盖词形）。[F1-17] pi 路径同步携带解析链最终产物档位（§6.2「跨轮档位以
+      // 解析链为准」的执行通道落地——此前档位只进盖章留痕，argv 无档位 = 执行用
+      // 引擎自身缺省，与「用户覆盖赢」总则相悖）：调用参数未显式带档位时用解析产物
+      // 值，显式档位优先（候选链最高层语义保持）。zcode 路径不动（引擎自治）。
       const taskSpec: AgentCallOpts = {
         ...opts,
         ...(record.model !== undefined ? { model: record.model } : {}),
+        ...(engine.id === DEFAULT_ENGINE_ID &&
+        effectiveResolved.thinkingLevel !== undefined &&
+        opts.thinkingLevel === undefined
+          ? { thinkingLevel: effectiveResolved.thinkingLevel }
+          : {}),
       };
       const { handle, outcome } = await engine.run(taskSpec, runCtx);
       journal.backfillHandle(handle);

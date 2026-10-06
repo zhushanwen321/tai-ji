@@ -175,8 +175,13 @@ export interface ChatRoundsDeps {
    *  点——source 供留痕，调用方保证在收口轮通知送达之后）。 */
   readonly archiveRecord: (record: ExecutionRecord, source: string) => Promise<void>;
   /** [RunOrchestration 协作回调] engine.run taskSpec 装配单一来源（executeOptions
-   *  协议映射 + model = record 留痕词形覆盖）。 */
-  readonly taskSpecWithModel: (opts: ExecuteOptions, model: string | undefined) => AgentCallOpts;
+   *  协议映射 + model = record 留痕词形覆盖 + thinkingLevel = record 盖章解析产物
+   *  携带——F1-17，调用参数显式档位优先）。 */
+  readonly taskSpecWithModel: (
+    opts: ExecuteOptions,
+    model: string | undefined,
+    thinkingLevel: string | undefined,
+  ) => AgentCallOpts;
   /** [RunOrchestration 协作回调] AgentOutcome → execution AgentResult 单一映射源
    * （含 sessionFile 回填 + binding 落盘）。 */
   readonly outcomeToAgentResult: (record: ExecutionRecord, outcome: AgentOutcome) => AgentResult;
@@ -465,8 +470,9 @@ export class ChatRounds {
       this.deps.getStore().reportRecordTransition(record);
     };
     return engine.run(
-      // resume 锚点轮引擎侧覆盖 model 解析（taskSpec 装配单一来源见 taskSpecWithModel）。
-      this.deps.taskSpecWithModel(opts, record.model),
+      // resume 锚点轮引擎侧覆盖 model 解析（taskSpec 装配单一来源见 taskSpecWithModel；
+      // thinkingLevel 携带 record 盖章解析产物——F1-17，调用参数显式档位优先）。
+      this.deps.taskSpecWithModel(opts, record.model, record.thinkingLevel),
       {
         taskId: record.id,
         // [D4] record 身份信封（引擎写进任务子进程身份 env；构造单点 = identityEnvelopeOf）

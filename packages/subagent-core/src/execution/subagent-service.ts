@@ -380,7 +380,8 @@ export class SubagentService {
       finalizeAborted: (record) => this.recordLifecycle.finalizeAborted(record),
       idleTimeoutRecycle: (record) => this.recordLifecycle.idleTimeoutRecycle(record),
       archiveRecord: (record, source) => this.recordLifecycle.archiveRecord(record, source),
-      taskSpecWithModel: (opts, model) => this.runOrchestration.taskSpecWithModel(opts, model),
+      taskSpecWithModel: (opts, model, thinkingLevel) =>
+        this.runOrchestration.taskSpecWithModel(opts, model, thinkingLevel),
       outcomeToAgentResult: (record, outcome) =>
         this.runOrchestration.outcomeToAgentResult(record, outcome),
       settleOneShotOutcome: (record, result, aborted) =>
@@ -785,9 +786,8 @@ export class SubagentService {
    *   - isEngineNotActiveError：SDK SET_MODEL_NOT_ACTIVE_CODE 判别——引擎转发期间
    *     子进程退出（§7.3 全部竞态窗口）按「无活进程」形态转纯记账路径。
    *   - runAggregate：runModelSwitchAggregate（U5 聚合函数）+ resolveMemberPort
-   *     成员引擎解析（{@link resolveMemberEnginePortForSwitch}）；persistOverrideIntent
-   *     回调不注入——run 级意图写入由编排层在聚合返回后统一执行（步骤③），回调
-   *     双写会让 journal 覆盖事件落两笔。
+   *     成员引擎解析（{@link resolveMemberEnginePortForSwitch}）。run 级意图写入由
+   *     编排层在聚合返回后统一执行（步骤③——聚合层只做转发与分派）。
    *   - assertRunNotTerminal / listAcceptedMemberRunIds：run registry fold 终局判定
    *     （record fold 唯一权威）与已受理成员清单（{@link listAcceptedMemberRunIdsForSwitch}）。
    *

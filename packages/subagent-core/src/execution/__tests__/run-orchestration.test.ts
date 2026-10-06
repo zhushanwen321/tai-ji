@@ -28,6 +28,8 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ModelConfigService } from "../assembly/model-config-service.ts";
+import type { ExecuteOptions } from "../assembly/types.ts";
+import type { AgentCallOpts } from "../../orchestration/models/types.ts";
 import { withWorktreeCwd } from "../service/run-orchestration.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
@@ -206,5 +208,48 @@ describe("withWorktreeCwd（worktree handle → task.cwd 合流）", () => {
     expect(withWorktreeCwd({ prompt: "t" })).toEqual({ prompt: "t" });
     // 显式 cwd 无 worktree 时原样保留（正交参数语义不变）
     expect(withWorktreeCwd({ prompt: "t", cwd: "/repo" }).cwd).toBe("/repo");
+  });
+});
+
+// ── taskSpecWithModel：thinkingLevel 携带（F1-17 chat 域同形态——D5 裁决）──
+// 携带的是解析链最终产物（= record 盖章值；§6.2「跨轮档位以解析链为准」的执行通道
+// 落地）：调用参数显式档位优先（候选链最高层语义保持），无解析档位不动原值。
+
+describe("taskSpecWithModel（thinkingLevel 携带：解析产物进执行通道）", () => {
+  let agentDir: string;
+  let modelService: ModelConfigService;
+
+  beforeEach(() => {
+    agentDir = makeTmpAgentDir();
+    modelService = makeModelService(agentDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  /** taskSpecWithModel 是纯装配（不触 deps）——经壳内 runOrchestration 实例直调。 */
+  function specOf(opts: ExecuteOptions, model: string | undefined, thinkingLevel: string | undefined): AgentCallOpts {
+    const service = new SubagentService({ cwd: agentDir, modelService });
+    const orchestration = Reflect.get(service, "runOrchestration") as {
+      taskSpecWithModel: (opts: ExecuteOptions, model: string | undefined, thinkingLevel: string | undefined) => AgentCallOpts;
+    };
+    return orchestration.taskSpecWithModel(opts, model, thinkingLevel);
+  }
+
+  it("解析档位在场 + 调用无显式档位 → taskSpec.thinkingLevel = 解析产物（record 盖章值进 argv）", () => {
+    const spec = specOf({ task: "t", slug: "s" }, "p/m", "high");
+    expect(spec.model).toBe("p/m");
+    expect(spec.thinkingLevel).toBe("high");
+  });
+
+  it("调用显式档位优先于解析产物（候选链最高层语义保持，不覆写）", () => {
+    const spec = specOf({ task: "t", slug: "s", thinkingLevel: "low" }, "p/m", "high");
+    expect(spec.thinkingLevel).toBe("low");
+  });
+
+  it("无解析档位 → 不携带键（不动原值——引擎走自身缺省解析）", () => {
+    const spec = specOf({ task: "t", slug: "s" }, "p/m", undefined);
+    expect("thinkingLevel" in spec).toBe(false);
   });
 });

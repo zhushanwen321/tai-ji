@@ -275,6 +275,11 @@ export interface PingResult {
  * 同一处置）按「无活进程」形态应答 = error 帧 `SET_MODEL_NOT_ACTIVE_CODE`
  * （engine_run_not_active，宿主转纯记账路径，§7.5 子进程已退出行）。
  *
+ * 无 thinkingLevel 参数（D5 裁决 M1-1）：热切档位由 pi set_model 按新模型档位表
+ * 联动重设管辖（生效值以应答 effectiveThinkingLevel 为准）；用户显式档位经覆盖
+ * 记账在下一轮 spawn 由解析链裁决（§6.2 跨轮档位以解析链为准）。未来引擎真支持
+ * 档位热切时走 additive 演进（新增可选参数）。
+ *
  * 消费链：U2 宿主编排经 EnginePort 调用（capabilities.setModel='native' 预检通过后）；
  * U3 pi 引擎实装；U5 run 级聚合逐成员转发复用同一方法。
  */
@@ -283,12 +288,6 @@ export interface SetModelParams {
   runId: string;
   /** 目标模型 ref（provider + modelId；宿主编排层负责与 canonical ref 目录互校）。 */
   model: ModelRef;
-  /**
-   * 目标 thinking 档位（缺省 = 不指定档位，引擎按新模型档位联动语义走缺省裁决——
-   * pi set_model 联动重设 thinking 档位）。词表与 task.thinkingLevel 同构（引擎
-   * 自解释，宿主预检按现役候选链裁决，设计 §6.2 记账形状）。
-   */
-  thinkingLevel?: string;
 }
 
 /**

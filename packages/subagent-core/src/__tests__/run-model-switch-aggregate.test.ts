@@ -10,8 +10,9 @@
 //   ② 部分失败不回滚：快照型 / 凭据型 / 回读失败型逐一列入名单，其余成员结果正常
 //      返回，函数不抛异常（§7.5 聚合行）。
 //   ③ 失败名单与成员态数组同维：同一受理成员 runId、两数组互斥、并集 = 受理集。
-//   ④ run 级覆盖意图写入不受个别成员失败影响：含失败成员场景回调仍被调用恰好一次
-//      （§7.5 聚合行「写」处置）。
+//   ④ run 级覆盖意图写入不归聚合层（D5 裁决 M1-2——persistOverrideIntent 回调随字段
+//      删除，聚合只做转发与分派；编排层「失败成员在场意图恒写」断言 =
+//      model-switch.test.ts 处置表行 4）。
 //   ⑤ summary：承载未派发步骤沿用说明；全员非 switched 退化为「已记录，未派发步骤
 //      生效」、不携带档位（§7.1）。
 
@@ -212,7 +213,7 @@ describe("runModelSwitchAggregate 三态分派", () => {
     expect(result.failures).toEqual([]);
   });
 
-  it("转发参数透传：runId / model / thinkingLevel 原样送达引擎（缺省档位 = undefined）", async () => {
+  it("转发参数透传：runId / model 原样送达引擎；档位不进热切 wire（D5 裁决 M1-1——热切档位由 pi set_model 按新模型联动重设管辖，用户显式档位经覆盖记账跨轮生效）", async () => {
     const alive = switchedPort();
     const explicit = switchedPort();
 
@@ -222,13 +223,13 @@ describe("runModelSwitchAggregate 三态分派", () => {
     expect(alive.setModelCalls[0]).toEqual({
       runId: "m-1",
       model: TARGET_MODEL,
-      thinkingLevel: undefined,
     });
     expect(explicit.setModelCalls[0]).toEqual({
       runId: "m-2",
       model: TARGET_MODEL,
-      thinkingLevel: "low",
     });
+    // 入参意图元数据（RunModelSwitchAggregateInput.thinkingLevel）不上 wire。
+    expect("thinkingLevel" in explicit.setModelCalls[0]!).toBe(false);
   });
 });
 
@@ -336,61 +337,25 @@ describe("runModelSwitchAggregate 名单同维断言", () => {
 });
 
 // ============================================================
-// ④ run 级覆盖意图写入不受个别成员失败影响
+// ④ run 级覆盖意图写入不归聚合层（D5 裁决 M1-2）
 // ============================================================
 
-describe("runModelSwitchAggregate 覆盖意图写入", () => {
-  it("含失败成员场景：意图写入回调仍被调用恰好一次（§7.5 聚合行「写」处置）", async () => {
-    let intentWrites = 0;
-    const memberPorts: Record<string, SetModelCapableEnginePort> = {
-      "m-snapshot": failingPort("engine_model_not_in_snapshot"),
-      "m-credential": failingPort("engine_credential_missing"),
-      "m-readback": failingPort("engine_state_readback_failed"),
-    };
-
-    const result = await runModelSwitchAggregate(
-      callWith(memberPorts, {
-        memberRunIds: ["m-snapshot", "m-credential", "m-readback"],
-        persistOverrideIntent: () => {
-          intentWrites += 1;
-        },
-      }),
-    );
-
-    expect(intentWrites).toBe(1);
-    expect(result.failures).toHaveLength(3);
-    expect(result.members).toEqual([]);
-  });
-
-  it("全成功场景：意图写入回调恰好一次，且时点在全量转发完成后", async () => {
-    let intentWrites = 0;
-    let forwardedAtIntent = -1;
-    const alive = switchedPort();
-    const second = switchedPort();
-
+describe("runModelSwitchAggregate 覆盖意图写入边界", () => {
+  it("聚合层不持意图写入回调（persistOverrideIntent 已随字段删除）——纯转发分派后正常返回", async () => {
+    // 「意图写入不受个别成员失败影响 / 恰好一次」的编排层断言 =
+    // model-switch.test.ts 处置表行 4（run 级聚合个别成员转发失败 → run 级意图恒写）。
     const result = await runModelSwitchAggregate(
       callWith(
-        { "m-1": alive, "m-2": second },
         {
-          memberRunIds: ["m-1", "m-2"],
-          persistOverrideIntent: () => {
-            intentWrites += 1;
-            forwardedAtIntent = alive.setModelCalls.length + second.setModelCalls.length;
-          },
+          "m-switched": switchedPort(),
+          "m-failed": failingPort("engine_model_not_in_snapshot"),
         },
+        { memberRunIds: ["m-switched", "m-failed"] },
       ),
     );
 
-    expect(intentWrites).toBe(1);
-    expect(forwardedAtIntent).toBe(2);
-    expect(result.members).toHaveLength(2);
-  });
-
-  it("缺省回调（不传 persistOverrideIntent）正常返回聚合结果", async () => {
-    const result = await runModelSwitchAggregate(callWith({ "m-a": switchedPort() }));
-
     expect(result.members).toHaveLength(1);
-    expect(result.failures).toEqual([]);
+    expect(result.failures).toEqual([{ runId: "m-failed", reason: "engine_model_not_in_snapshot" }]);
   });
 });
 
@@ -427,21 +392,11 @@ describe("runModelSwitchAggregate summary", () => {
     expect(result.summary).toBe("已记录，未派发步骤生效");
   });
 
-  it("空受理清单：三组件恒保留、退化为已记录文案、意图回调仍恰好一次", async () => {
-    let intentWrites = 0;
-
-    const result = await runModelSwitchAggregate(
-      callWith({}, {
-        memberRunIds: [],
-        persistOverrideIntent: () => {
-          intentWrites += 1;
-        },
-      }),
-    );
+  it("空受理清单：三组件恒保留、退化为已记录文案", async () => {
+    const result = await runModelSwitchAggregate(callWith({}, { memberRunIds: [] }));
 
     expect(result.members).toEqual([]);
     expect(result.failures).toEqual([]);
     expect(result.summary).toBe("已记录，未派发步骤生效");
-    expect(intentWrites).toBe(1);
   });
 });

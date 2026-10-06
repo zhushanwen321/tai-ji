@@ -15,13 +15,13 @@
 //     （分型值域 = SDK SET_MODEL_ERROR_CODES）。两数组是同一受理成员集合的互斥划分。
 //   - **部分失败不回滚**：任一成员失败只进名单，其余成员结果正常返回，函数不因成员
 //     失败抛异常（任务书目标 2；§6.1③）。
-//   - **run 级覆盖意图写入不受个别成员失败影响**（§7.5 聚合行「写」处置）：意图写入
-//     回调由调用方（U2 编排）注入，本函数在全量转发完成后恒调用恰好一次；回调自身
-//     故障上抛给调用方（持久化故障的报错应答归 U2 编排，§5.2「覆盖持久化」行），
-//     不在聚合层吞掉。
+//   - **run 级覆盖意图写入不归聚合层**（D5 裁决 M1-2）：意图写入由调用方（U2 编排）
+//     在本函数返回后统一执行（单一时序三步的步骤③）——聚合层只做转发与分派。
 //
 // 聚合层不做目标模型校验（canonical ref / 目录 / 凭据 / 档位预检）——公共校验步骤①
-// 归 U2 宿主编排（§7.2），本函数只做转发与分派，model/thinkingLevel 原样透传。
+// 归 U2 宿主编排（§7.2），本函数只做转发与分派，model 原样透传；thinkingLevel 为
+// run 级意图元数据（§6.4：热切档位由 pi 联动重设管辖，热切 wire 不携带档位——
+// D5 裁决 M1-1），聚合层不消费。
 
 import {
   SET_MODEL_ERROR_CODES,
@@ -62,7 +62,7 @@ export type ResolveMemberEnginePort = (memberRunId: string) => SetModelCapableEn
 
 /**
  * 聚合调用输入 = 契约输入（assembly/types.ts RunModelSwitchAggregateInput，u-foundation
- * 定形）+ 本函数运行时必需的依赖注入面（引擎转发 + 意图写入回调）。
+ * 定形）+ 本函数运行时必需的依赖注入面（引擎转发）。
  *
  * [u-foundation 修正通道] 契约 input 未承载引擎访问面（u-foundation runlog「形状定形
  * 裁决」第 4 条预留「U5 消费时如有出入按实际联调修正并回写本条」）；本扩展类型即该
@@ -71,12 +71,6 @@ export type ResolveMemberEnginePort = (memberRunId: string) => SetModelCapableEn
 export interface RunModelSwitchAggregateCall extends RunModelSwitchAggregateInput { // oe-exempt:20261006:framework:u-foundation 契约的修正通道注入面（契约文件领地禁碰，单实现常态）
   /** per-member 引擎转发面（见 ResolveMemberEnginePort）。 */
   resolveMemberPort: ResolveMemberEnginePort;
-  /**
-   * run 级覆盖意图写入回调（§7.5 聚合行「写」处置）：全量转发完成后恒调用恰好一次，
-   * 不因个别成员失败跳过。缺省 = 调用方返回后自行执行（任务书两种消费形态的等价
-   * 时序）。回调故障上抛（不吞——持久化故障的报错应答归 U2，§5.2）。
-   */
-  persistOverrideIntent?: () => void | Promise<void>;
 }
 
 /**
@@ -105,7 +99,7 @@ const SUMMARY_RECORDED_ONLY = "已记录，未派发步骤生效";
  *      ≠ 目标意图，§6.4）；
  *   4. 转发 reject：code = ENGINE_RUN_NOT_ACTIVE_CODE → not-active；其余（三型
  *      失败分型 / 词表外透传码 / 解析失败）→ 失败名单。
- * 全部成员分派完毕后调用 persistOverrideIntent 恰好一次（在场时），再组装汇总文案。
+ * 全部成员分派完毕后组装汇总文案（run 级覆盖意图写入归 U2 编排步骤③，见文件头）。
  */
 export async function runModelSwitchAggregate(
   call: RunModelSwitchAggregateCall,
@@ -124,7 +118,6 @@ export async function runModelSwitchAggregate(
       const result = await port.setModel({
         runId: memberRunId,
         model: call.model,
-        thinkingLevel: call.thinkingLevel,
       });
       members.push({
         runId: memberRunId,
@@ -144,10 +137,7 @@ export async function runModelSwitchAggregate(
     }
   }
 
-  // run 级覆盖意图写入不受个别成员失败影响（§7.5 聚合行「写」处置）：恒调用恰好
-  // 一次；回调故障上抛给调用方（§5.2「覆盖持久化」行的报错应答归 U2 编排）。
-  await call.persistOverrideIntent?.();
-
+  // run 级覆盖意图写入归 U2 编排步骤③（聚合返回后统一执行——本函数不持回调）。
   const switchedCount = members.filter((m) => m.state === "switched").length;
   const summary =
     switchedCount > 0

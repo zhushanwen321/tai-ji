@@ -91,7 +91,7 @@ interface Harness { // oe-exempt:20261006:test:测试专用装配 harness 单实
   store: RecordStore;
   recordsDir: string;
   record: ReturnType<typeof createRecord>;
-  engineSetModelCalls: Array<{ runId: string; model: { provider: string; modelId: string }; thinkingLevel?: string }>;
+  engineSetModelCalls: Array<{ runId: string; model: { provider: string; modelId: string } }>;
   persistedRunOverrides: Array<{ runId: string; override: ModelOverride }>;
   aggregateCalls: number;
 }
@@ -142,10 +142,11 @@ function makeHarness(opts: {
     engineSetModel:
       opts.engineSetModel ??
       ((_port, params) => {
-        engineSetModelCalls.push({ runId: params.runId, model: params.model, ...(params.thinkingLevel !== undefined ? { thinkingLevel: params.thinkingLevel } : {}) });
+        engineSetModelCalls.push({ runId: params.runId, model: params.model });
         return Promise.resolve({
           effectiveModel: { provider: params.model.provider, modelId: `${params.model.modelId}-turbo` },
-          effectiveThinkingLevel: params.thinkingLevel ?? "high",
+          // M1-1：热切 wire 无档位参数——回读档位 = 引擎侧联动重设语义的裁决（桩恒定值）。
+          effectiveThinkingLevel: "high",
         });
       }),
     isEngineNotActiveError: opts.isEngineNotActive ?? (() => false),

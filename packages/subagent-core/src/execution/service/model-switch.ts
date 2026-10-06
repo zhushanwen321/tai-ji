@@ -134,8 +134,8 @@ export interface ModelSwitchDeps { // oe-exempt:20261006:framework:setModel 编�
   /**
    * run 级全切聚合通道（签名 = assembly/types RunModelSwitchAggregateInput）。生产
    * 实装 = runModelSwitchAggregate（U5 聚合函数，壳装配注入 resolveMemberPort 成员
-   * 引擎解析；persistOverrideIntent 回调不注入——run 级意图写入由本编排聚合返回后
-   * 统一执行，下方步骤③，回调双写会让 journal 覆盖事件落两笔）。
+   * 引擎解析）。run 级意图写入由本编排聚合返回后统一执行（下方步骤③——聚合层
+   * 只做转发与分派，不持持久化回调）。
    */
   readonly runAggregate: (input: RunModelSwitchAggregateInput) => Promise<RunSwitchAggregateResult>;
   /**
@@ -271,7 +271,6 @@ export async function setModel(
     const result = await deps.engineSetModel(engine, {
       runId: record.id,
       model,
-      ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
     });
     // 处置表行 1（成功——生效值回读到手）：写 + 已生效型应答（回读值，不进记账）。
     writeChatOverride(deps, record, override);

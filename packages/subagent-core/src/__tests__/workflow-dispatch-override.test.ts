@@ -10,6 +10,8 @@
 //     （不变量 1 的复活例外；§6.6 复活接线）；
 //   - 回归：无覆盖时派发行为与现状一致（ctxModel 兜底 / record.model = 解析词形）；
 //     非复活路径既有盖章行为不变；
+//   - F1-17（D5 裁决）覆盖记账档位进执行通道：taskSpec.thinkingLevel = 解析链最终
+//     产物档位（记账档位在场 + 调用无显式档位；调用显式档位优先）；
 //   - U4a 事件管线闭合：journal 覆盖事件（model-override 帧）→ miss 重建
 //     （rebuildRunOverride 折叠 + 回填）→ 派发吃覆盖——真实调用链上的读面闭合。
 //
@@ -362,6 +364,48 @@ describe("workflow 派发链覆盖消费（U4b）", () => {
 
     expect(run.ctx.ctxModel).toMatchObject({ provider: "p", id: "m" });
     expect(record.model).toBe("p/m");
+
+    run.settle({ content: "done" });
+    await pending;
+  });
+
+  // ============================================================
+  // 6. F1-17 覆盖记账档位进执行通道（§6.2 跨轮档位以解析链为准 / D5 裁决）
+  // ============================================================
+
+  it("F1-17 档位携带：记账档位在场 + 调用无显式档位 → taskSpec.thinkingLevel = 记账档位（盖章与 argv 同源，仅留痕不生效缺口封住）", async () => {
+    const h = makeHarness();
+    h.modelService.setModelOverride("run-lvl", { ...overrideOf(), thinkingLevel: "high" });
+
+    const pending = h.service.executeWorkflowAgent(baseOpts(), "run-lvl");
+    await flush();
+    const run = soleRun(h.fake);
+    const record = runningRecord(h.store);
+
+    // 档位 = 记账档位（解析链第 0 层候选链产物——userOverride 槽裁决），进执行通道
+    //（pi spawn argv 源）+ 盖章一致（restampRecordModel 单点）。
+    expect(run.task.thinkingLevel).toBe("high");
+    expect(record.thinkingLevel).toBe("high");
+    expect(run.task.model).toBe(OVERRIDE_REF);
+
+    run.settle({ content: "done" });
+    await pending;
+  });
+
+  it("F1-17 档位携带：调用显式档位优先于记账档位（候选链最高层语义保持，§6.2 记账形状）", async () => {
+    const h = makeHarness();
+    h.modelService.setModelOverride("run-lvl-explicit", { ...overrideOf(), thinkingLevel: "high" });
+
+    const pending = h.service.executeWorkflowAgent(baseOpts({ thinkingLevel: "low" }), "run-lvl-explicit");
+    await flush();
+    const run = soleRun(h.fake);
+    const record = runningRecord(h.store);
+
+    // 调用参数显式档位最高层：taskSpec 用调用值（解析链产物同为调用值——候选链
+    // paramOverride 槽最高优先），盖章随解析产物同步。
+    expect(run.task.thinkingLevel).toBe("low");
+    expect(record.thinkingLevel).toBe("low");
+    expect(run.task.model).toBe(OVERRIDE_REF);
 
     run.settle({ content: "done" });
     await pending;

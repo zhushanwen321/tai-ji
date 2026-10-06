@@ -181,9 +181,9 @@ function extractPiStateSnapshot(data: unknown): {
  * 失败形态——「退出」与「超时」两种结局严格互斥，不混淆。不悬挂（每阶段有界）、
  * 不部分生效（pi 侧 set_model 是原子命令，失败即未切换）。
  *
- * params.thinkingLevel 刻意不转发：pi set_model 无档位参数，档位由 pi 按新模型
- * 档位表联动重设（设计 §6.4——热切档位以联动值为生效事实，用户显式档位经覆盖
- * 记账在下一轮 spawn 由解析链裁决，跨轮边界档位以解析链为准）。
+ * 档位语义：pi set_model 无档位参数，热切档位由 pi 按新模型档位表联动重设（设计
+ * §6.4——热切档位以联动值为生效事实，生效值经 get_state 回读应答宿主；用户显式
+ * 档位经覆盖记账在下一轮 spawn 由解析链裁决，跨轮边界档位以解析链为准）。
  */
 export async function setModelOnActiveChild(
   runId: string,
