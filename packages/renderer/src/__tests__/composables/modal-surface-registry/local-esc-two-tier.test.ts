@@ -93,7 +93,6 @@ describe('两档登记清单 ↔ §6.7 扫描清单全等（守卫类）', () =>
       'packages/renderer/src/components/settings/system/SystemShortcutSection.vue': '模态内消费方（改键录制）',
       // 未收编模态族：模态自消费 + 聚合让位（modal-surface-registry 登记表成员）
       'packages/renderer/src/components/settings/SettingsModal.vue': '未收编模态族（自消费 + 聚合让位）',
-      'packages/renderer/src/components/extension/PluginModalHost.vue': '未收编模态族（自消费 + 聚合让位）',
       'packages/ui/src/overlays/SearchModal.vue': '未收编模态族（自消费 + 聚合让位）',
     }
     const hits = scanEscConsumers(root)

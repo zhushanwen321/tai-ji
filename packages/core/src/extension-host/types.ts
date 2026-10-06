@@ -96,7 +96,7 @@ export interface NotificationPayload {
 /** plugin modal/headerAction 三帧协议类型（AP-1/AP-2）re-export——SSOT = @taiji/shared
  *  protocol（shared 不依赖 core，core→shared 为既有合法依赖边）。re-export 维持
  *  `@taiji/core` / `@taiji/core/extension-host` 出口面（index.ts `export * from './types'`）
- *  与既有消费方（plugin-modal-slot / message-bus-bridge / renderer PluginModalHost）引用面不变。 */
+ *  与既有消费方（plugin-modal-slot / message-bus-bridge）引用面不变。 */
 export type { PluginModalClosedReason, PluginModalStatePayload, HeaderActionUpdatePayload }
 
 /** core 内部事件 union（IF2）。消费端 on(kind, handler) 编译期类型安全。 */
@@ -123,7 +123,11 @@ export type InternalEvent =
 
 // ── ContributionRecord（DM1）─────────────────────────────────────────
 
-/** contribution 类型（DM1）。headerAction/modal 为 plugin-header-action-modal-points 新增点位（AP-1/AP-2）。 */
+/**
+ * contribution 类型（DM1）。headerAction 为 plugin-header-action-modal-points 新增点位（AP-1）。
+ * 'modal' 已随插件 modal 链消费退役成死成员（声明侧 PluginContributes.modals 已删、
+ * 解析零产出；bridge 声明读取与 plugin-modal-slot 机制面批 2 删除后一并清掉）。
+ */
 export type ContributionType =
   | 'view'
   | 'menu'
@@ -156,8 +160,8 @@ export interface ContributionRecord {
   configuration?: { properties: unknown }
   /** 声明原文存档：badge/tooltip/disabled 等可变字段经 plugin:headerActionUpdate 广播，声明侧只有静态形状；
    *  activation = 点击激活方式（声明驱动分派键，见 PluginContributesHeaderAction.activation）。 */
-  headerAction?: { title: string; icon: string; commandId: string; order?: number; activation?: 'scheduler-overlay' }
-  /** 声明原文存档（AP-2/D4：无 commandId 字段）——title/width 供 renderer fallback 读声明 */
+  headerAction?: { title: string; icon: string; commandId?: string; order?: number; activation?: 'scheduler-overlay' }
+  /** 死字段（modal 链退役）：声明侧已删、解析零产出；bridge 声明读取段消费，批 2 随机制面一并删。 */
   modal?: { title: string; width?: 'sm' | 'md' | 'lg' }
 }
 
@@ -236,31 +240,29 @@ export interface PluginContributesStatusBarItem {
   tooltip?: string
 }
 
-/** headerAction contribution（AP-1，panel header 按钮区）。icon 为 lucide 名字符串（宿主解析，插件不给 SVG）；
- *  badge/tooltip/disabled 等可变字段不在声明侧，经 api.ui.updateHeaderAction + plugin:headerActionUpdate 广播。 */
+/** headerAction contribution（AP-1，composer 左簇按钮区）。icon 为 lucide 名字符串（宿主解析，插件不给 SVG）；
+ *  badge/tooltip/disabled/hidden 等可变字段不在声明侧，经 api.ui.updateHeaderAction + plugin:headerActionUpdate 广播。 */
 export interface PluginContributesHeaderAction {
   id: string
   title: string
   icon: string
-  commandId: string
+  /**
+   * 命令链命令 id（可选）。缺省（无 activation 且无 commandId）声明无法走命令链，
+   * 渲染端不渲染；带 commandId 的缺省声明点击经 CommandRegistry.execute。
+   * activation='scheduler-overlay' 声明无需 commandId——点击走 overlay 分派
+   * （renderer 侧 openSchedulerTab），不经命令链。
+   */
+  commandId?: string
   /** 与内置按钮组的相对序；缺省追加在后 */
   order?: number
   /**
    * 点击激活方式（声明驱动分派，渲染端消费；core 不读此字段）。
-   * 缺省 = 走 commandId 命令链（既有语义：E13 可用性三态 + E3 点击 execute）；
+   * 缺省 = 走 commandId 命令链（E13 可用性三态 + E3 点击 execute，需 commandId）；
    * 'scheduler-overlay' = 点击打开 workflow-viz overlay 的定时任务 tab（renderer 侧
-   * openSchedulerTab，不经命令链——commandId 仍保留给 modal 写操作配套与 E13 判定源）。
+   * openSchedulerTab，不经命令链）。
    * 与 PluginContributesView.activationEvent（view 激活时机事件）语义无关。
    */
   activation?: 'scheduler-overlay'
-}
-
-/** modal contribution（AP-2/D4：声明只有 {id,title,width?}，无 commandId 字段——开层只有
- *  api.ui.showModal 一条路，声明侧供枚举/置灰/默认元数据）。 */
-export interface PluginContributesModal {
-  id: string
-  title: string
-  width?: 'sm' | 'md' | 'lg'
 }
 
 /**
@@ -278,7 +280,6 @@ export interface PluginContributes {
   configuration?: PluginContributesConfiguration
   statusBarItems?: PluginContributesStatusBarItem[]
   headerActions?: PluginContributesHeaderAction[]
-  modals?: PluginContributesModal[]
 }
 
 /**

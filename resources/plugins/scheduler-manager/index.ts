@@ -1,37 +1,37 @@
 /**
- * scheduler-manager —— taiji builtin plugin（设计 plugin-header-action-modal-points 首消费者，
- * 规范验收样本；任务管理数据面零 scheduler 专属 API）。
+ * scheduler-manager —— taiji builtin plugin（任务管理面板；数据面零 scheduler 专属 API）。
  *
- * 点位使用（设计 §3.4）：
- * - AP-1 headerAction：本会话启用任务数徽标（空任务无数字）+ 入口可见性（hidden）——
+ * 点位使用：
+ * - headerAction：本会话启用任务数徽标（空任务无数字）+ 入口可见性（hidden）——
  *   任务清单为空推 hidden=true（宿主渲染端整体不渲染该入口，与 disabled 灰置正交；
  *   声明侧静态形状由 core builtinContributions 承担），有任务推 false 恢复显示。
  *   刷新触发 = entry 失效订阅 + onDidActivateSession 补拉 + 写命令成功后的清 notice
  *   推送（「任务集合可能变化」的时点统一汇聚在 pushTreeAndBadge → pushHeaderAction
- *   出口，非写入驱动，场景 9）；读失败态不重算 hidden（保持上次值，E4「恢复中」语义）。
- * - AP-2 modal：showModal(modalId, {sessionId}) 后立即 views.update（首帧空白 =
- *   一次 RPC 往返）；内容树严格按 §3.1.1 字段操作对账表组装，表外零元素（G6）。
- * - AP-3 action-bar：每任务三动作（暂停/恢复 toggle、立即执行 run、删除 rm）。
- * - AP-4 数据面：per-session 累计 entries（首拉全量 + sinceEntryId 增量 append），
+ *   出口，非写入驱动，场景 9）；读失败态不重算 hidden（保持上次值，「恢复中」语义）。
+ *   入口点击由宿主渲染端直开 workflow-viz overlay 定时任务 tab（activation 声明驱动
+ *   分派，不经插件命令链）；本插件只经 views.update 持续推树，overlay 的 ViewHost
+ *   消费（MODAL_VIEW_ID 分区）。内容树严格按 §3.1.1 字段操作对账表组装，表外零元素（G6）。
+ * - action-bar：每任务三动作（暂停/恢复 toggle、立即执行 run、删除 rm）。
+ * - 数据面：per-session 累计 entries（首拉全量 + sinceEntryId 增量 append），
  *   折叠始终对累计全量调共享 replayFoldEntries（前缀依赖语义不被破坏）；游标失效
  *   （Entry not found）→ 丢弃累计全量重拉自愈（E11）；无 client → SESSION_NOT_ACTIVE
  *   → 按会话 status 分「恢复中/不可用」两态（E4）。树回退（消息撤回）经
  *   'taiji:revoked' 失效信号触发镜像重建（丢弃累计 → 全量重拉，runtime readEntries
  *   已按活跃路径裁剪，被撤子树的 task op 不在回包——面板/徽标残留随之清除）。
  *
- * 写路径（设计 §3.3 D6）：四个动作只拼白名单子命令字面量 on|off|rm|run + 折叠快照中
- * 存在的 8 位 hex id（快照无该 id → TASK_NOT_FOUND 行内提示、不发命令，E5——防
- * /schedule 参数路由落空进创建分支，§2.4 坑 3），经 sendMessage({requireCommand:
- * 'schedule'}) 原子校验后发 /schedule 命令；回执 {accepted, reason?} 驱动行内 notice
- * （E7/E14；运行面分支只看 accepted，reason 仅文案面）。不乐观更新——快照与游标由
- * 失效订阅驱动刷新（C-pi-13 不撒谎）。
+ * 写路径（设计 §3.3 D6）：三个动作（toggle/run/delete，overlay 树内 action-bar 按钮）
+ * 只拼白名单子命令字面量 on|off|rm|run + 折叠快照中存在的 8 位 hex id（快照无该 id →
+ * TASK_NOT_FOUND 行内提示、不发命令，E5——防 /schedule 参数路由落空进创建分支，
+ * §2.4 坑 3），经 sendMessage({requireCommand: 'schedule'}) 原子校验后发 /schedule 命令；
+ * 回执 {accepted, reason?} 驱动行内 notice（E7/E14；运行面分支只看 accepted，reason 仅
+ * 文案面）。不乐观更新——快照与游标由失效订阅驱动刷新（C-pi-13 不撒谎）。
  *
  * 按钮灰置（E13，插件侧判定）：getCommands(sessionId) 查 'schedule' 命令名（纯查询）
  * → 未注册 = disabled + tooltip（宿主渲染端按 availability 三态合成 i18n tooltip，
  * SDK 无 i18n 能力、插件不推文案）；SESSION_NOT_ACTIVE = 无法判定 → 保持上次值
  * （首次缺省可点，失败由 E14 写路径兜底）；会话激活/从恢复窗口走出后重判。
  *
- * open 的 sessionId 来源：headerAction 点击链（HeaderActionsHost onClick →
+ * 写命令的 sessionId 来源：树内 action-bar 点击链（ViewHost onClick →
  * CommandRegistry.execute(commandId)）不携带会话上下文，插件以 onDidActivateSession
  * 维护焦点会话（渲染端焦点会话 = 最后一次 session.switch 成功会话；首屏 landing→
  * selectSession 亦经 switch）+ activate 时 sessions.list() 取 lastActiveAt 最大者
@@ -72,11 +72,13 @@ interface DisposableLike {
 
 // ── 常量 ─────────────────────────────────────────────────────────
 
-const PLUGIN_ID = 'scheduler-manager'
 const HEADER_ACTION_ID = 'scheduler-manager.open'
-const MODAL_ID = 'scheduler-manager.panel'
-/** 渲染端平铺命名（PluginModalHost.vue：viewId = modal-<pluginId>-<modalId>） */
-const MODAL_VIEW_ID = `modal-${PLUGIN_ID}-${MODAL_ID}`
+/**
+ * 面板树视图 id（overlay 定时任务 tab 的 ViewHost 消费分区；历史命名
+ * modal-<pluginId>-<modalId> 即 modal-scheduler-manager-scheduler-manager.panel，
+ * modal 链退役后原值保留不改名——renderer 侧 SCHEDULER_MODAL_VIEW_ID 同串消费）。
+ */
+const MODAL_VIEW_ID = 'modal-scheduler-manager-scheduler-manager.panel'
 /** per-session 任务上限（scheduler runtime MAX_TASKS 同值；统计行分母，E8） */
 const MAX_TASKS = 50
 /** pi 侧 /schedule 扩展命令名（requireCommand 与 E13 判定同源） */
@@ -193,7 +195,7 @@ export function buildTaskActions(task: ScheduledTask): GuiComponent {
 }
 
 /**
- * modal 内容树（§3.1.1 对账表逐项：stats-line 统计行 + 每任务「list-tree 行 +
+ * 面板内容树（§3.1.1 对账表逐项：stats-line 统计行 + 每任务「list-tree 行 +
  * action-bar 操作」一对 + 至多 1 行 ansi-text（空态提示或操作 notice），零表外元素）。
  */
 export function buildModalTree(tasks: ScheduledTask[], opts?: { notice?: string }): GuiComponent[] {
@@ -268,7 +270,11 @@ interface SessionMirror {
    * （undefined 期间或上次值原样重推 = 保持上次值），数据恢复后随下一轮刷新收敛。
    */
   hidden?: boolean
-  /** 最近一次操作结果（行内 notice，至多 1 行） */
+  /**
+   * 最近一次操作结果（行内 notice，至多 1 行）。清零点 = 写命令成功路径（setNoticeAndPush
+   * null）；modal 关闭清零点已随 modal 链退役删除——overlay 常驻形态下 notice 停留到
+   * 下一次写操作（成功清零或新提示覆盖）。
+   */
   notice: string | null
   disposables: DisposableLike[]
 }
@@ -296,8 +302,8 @@ function teardownMirror(sessionId: string): void {
 }
 
 /**
- * 订阅挂点 = 会话首次需要徽标/列表时（didActivate / open / 冷启动兜底三入口汇聚于此）。
- * badge 更新依赖同一失效订阅，故 modal 开关不挂解（设计 AP-4）。
+ * 订阅挂点 = 会话首次需要徽标/列表时（didActivate / 冷启动兜底两入口汇聚于此）。
+ * badge 更新与面板树推送依赖同一失效订阅（树持续推送，不随入口显隐挂解）。
  */
 function ensureMirror(api: Api, sessionId: string, sink: DisposableLike[]): SessionMirror {
   const existing = mirrors.get(sessionId)
@@ -464,7 +470,7 @@ function foldTasks(mirror: SessionMirror): Map<string, ScheduledTask> {
 }
 
 /**
- * 推 modal 树 + headerAction 徽标（每轮数据刷新统一出口）。
+ * 推面板树（overlay 定时任务 tab ViewHost 消费）+ headerAction 徽标（每轮数据刷新统一出口）。
  * 读失败态 = 列表区提示（不渲染陈旧行、不显示假空态，E4）；徽标保持上次值。
  */
 async function pushTreeAndBadge(api: Api, mirror: SessionMirror): Promise<void> {
@@ -492,7 +498,7 @@ async function pushTreeAndBadge(api: Api, mirror: SessionMirror): Promise<void> 
   try {
     await api.views.update(MODAL_VIEW_ID, tree, { sessionId: mirror.sessionId })
   } catch (e) {
-    // best-effort：modal 可能刚被关闭（视图已不存在），不重抛——下一轮失效刷新/推送重试收敛
+    // best-effort：ViewHost 分区可能尚未挂载（overlay tab 未打开），不重抛——下一轮失效刷新/推送重试收敛
     console.warn('[scheduler-manager] views.update failed:', toMessage(e))
   }
   await pushHeaderAction(api, mirror)
@@ -639,33 +645,13 @@ async function handleWrite(
   }
 }
 
-// ── modal 开合（showModal 后立即 views.update）────────────────────────────────
-
-async function handleOpen(api: Api, sink: DisposableLike[]): Promise<void> {
-  const sessionId = focusSessionId
-  if (!sessionId) {
-    await api.notify.warning('定时任务：当前没有可打开的会话')
-    return
-  }
-  const mirror = ensureMirror(api, sessionId, sink)
-  mirror.notice = null
-  try {
-    await api.ui.showModal(MODAL_ID, { sessionId })
-  } catch (e) {
-    // E10：有 pending 插件对话框时被拒——提示稍后重试（用户先回应宿主弹窗）
-    await api.notify.warning(`定时任务面板暂时无法打开：${toMessage(e)}（请先回应宿主弹窗后重试）`)
-    return
-  }
-  await pushTreeAndBadge(api, mirror)
-}
-
 // ── 激活入口 ─────────────────────────────────────────────────────
 
 export async function activate(context: PluginContext): Promise<void> {
   const { api } = context
   const sink = context.subscriptions
 
-  // 焦点会话追踪（open 链 sessionId 唯一来源）+ 激活补拉（场景 9：重启后仍正确）
+  // 焦点会话追踪（写命令链 sessionId 唯一来源）+ 激活补拉（场景 9：重启后仍正确）
   sink.push(
     api.sessions.onDidActivateSession((session) => {
       focusSessionId = session.id
@@ -674,17 +660,10 @@ export async function activate(context: PluginContext): Promise<void> {
   )
   sink.push(api.sessions.onDidDestroySession((session) => teardownMirror(session.id)))
 
-  // modal 关闭：清 notice（重开首帧干净；壳层同帧清 ViewHostStore 分区）
-  sink.push(
-    api.ui.onModalClosed((event) => {
-      if (event.modalId !== MODAL_ID) return
-      for (const mirror of mirrors.values()) mirror.notice = null
-    }),
-  )
-
   // 命令注册（id 与 builtinContributions 声明逐字一致；'.' 合法、':' 被
-  // INVALID_COMMAND_ID 拒——复合键 = pluginId:commandId，声明/注册两端同串对上）
-  await api.commands.register({ id: HEADER_ACTION_ID, title: '定时任务' }, () => handleOpen(api, sink))
+  // INVALID_COMMAND_ID 拒——复合键 = pluginId:commandId，声明/注册两端同串对上）。
+  // toggle/run/delete 服务 overlay 定时任务 tab 树内 action-bar 写操作按钮；
+  // open 命令已随插件 modal 链退役（入口点击改道 overlay 直开，不经命令链）。
   await api.commands.register(
     { id: 'scheduler-manager.toggle', title: '暂停/恢复定时任务' },
     (args) => handleWrite(api, 'toggle', args),
@@ -712,5 +691,5 @@ export async function activate(context: PluginContext): Promise<void> {
     console.warn('[scheduler-manager] cold-start list() failed:', toMessage(e))
   }
 
-  console.log('[scheduler-manager] activated: headerAction + modal points consumer ready')
+  console.log('[scheduler-manager] activated: headerAction + overlay tree consumer ready')
 }

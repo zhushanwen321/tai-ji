@@ -64,10 +64,9 @@ export type OverlayTab = 'runs' | 'scheduler'
 export const overlayTab = ref<OverlayTab>('runs')
 
 /**
- * 定时任务面板 viewId 单源：与 PluginModalHost 的 `modal-<pluginId>-<modalId>` 拼接约定
- * 同源（pluginId=scheduler-manager、modalId=scheduler-manager.panel——即 resources/plugins/
- * scheduler-manager 的 MODAL_VIEW_ID 同串）。插件对旧 modal 与本 tab 推同一 per-session
- * 分区树，两处消费互不依赖。
+ * 定时任务面板 viewId 单源：resources/plugins/scheduler-manager 的 MODAL_VIEW_ID 同串
+ * （历史命名 modal-<pluginId>-<modalId>，modal 链退役后原值保留）。插件持续推同一
+ * per-session 分区树，本 tab 的 ViewHost 消费。
  */
 export const SCHEDULER_MODAL_VIEW_ID = 'modal-scheduler-manager-scheduler-manager.panel'
 

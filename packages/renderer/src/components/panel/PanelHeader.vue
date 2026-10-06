@@ -126,12 +126,6 @@
         :session-id="sessionId"
         empty="hidden"
       />
-      <!-- plugin modal 全局单例层（AP-2 / u4b）：Teleport 到 body，本组件只承载挂载点；
-           模块级守卫保证 split 双 panel 下仅首个实例渲染层。无 open 槽时零 DOM。 -->
-      <PluginModalHost
-        v-if="sessionId"
-        :session-id="sessionId"
-      />
       <!-- 终端开关（三卡化 2026-10-04 迁入：原 StatusBar 底栏落点退役，鼠标路径入口与其它
            容器开关同区，位于右侧抽屉开关左边）。恒显（不随折叠态 chrome 迁移、不随 sessionId
            消失——landing 态也开终端区，与原 StatusBar 按钮行为对齐）。 -->
@@ -167,7 +161,6 @@ import { useCopy } from '@/composables/panel/useCopy'
 import TerminalToggleButton from './TerminalToggleButton.vue'
 import { useSessionTrace, setTraceView } from '@/composables/features/trace/useSessionTrace'
 import TraceViewToggle from './trace/TraceViewToggle.vue'
-import PluginModalHost from '@/components/extension/PluginModalHost.vue'
 import { ViewHost } from '@taiji/ui/extension-host'
 import type { DerivedStatus } from '@/types'
 import { STATUS_ICON } from '@/composables/logic/sessionStatus'

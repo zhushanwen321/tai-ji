@@ -176,8 +176,9 @@ function dispatchHeaderAction(src: HeaderActionsSource, sid: string, commandId: 
 /** 单条声明 → 按钮视图（无 headerAction 段 = null；运行时 hidden=true = null，剔除即不出按钮——
  *  过滤在列表构建层、先于 disabled 合成；hidden 缺省/false 照常走渲染。两种声明同样生效）。
  *  点击按声明 activation 分派：'scheduler-overlay' 分支不触 E13 判定/E3 簿记（resolveCommandAvailability
- *  有 lastResolved 写副作用，命令链状态机对 overlay 直开无意义）；缺省分支（无 activation 字段）
- *  行为与既有实现逐字节一致。 */
+ *  有 lastResolved 写副作用，命令链状态机对 overlay 直开无意义），无需 commandId；缺省
+ *  分支（无 activation 字段）走命令链，声明必须带 commandId——无 commandId 的声明无法
+ *  走命令链 = 不渲染。 */
 function toHeaderActionButton(
   src: HeaderActionsSource,
   decl: ContributionRecord,
@@ -200,9 +201,11 @@ function toHeaderActionButton(
       onClick: () => openSchedulerTab(sid),
     }
   }
-  const availability = src.resolveCommandAvailability(sid, ha.commandId)
-  const effective = effectiveAvailabilityOf(sid, ha.commandId, availability)
-  const missing = commandMissing.value.has(`${sid}::${ha.commandId}`)
+  if (!ha.commandId) return null
+  const commandId = ha.commandId
+  const availability = src.resolveCommandAvailability(sid, commandId)
+  const effective = effectiveAvailabilityOf(sid, commandId, availability)
+  const missing = commandMissing.value.has(`${sid}::${commandId}`)
   return {
     key: `${decl.pluginId}::${decl.contributionId}`,
     testid: actionTestId(decl.pluginId, decl.contributionId),
@@ -210,7 +213,7 @@ function toHeaderActionButton(
     badge: badgeOf(entry),
     disabled: isHeaderActionDisabled(effective, missing, availability, entry),
     tooltip: headerActionTooltip(availability, effective, entry, ha.title),
-    onClick: () => dispatchHeaderAction(src, sid, ha.commandId),
+    onClick: () => dispatchHeaderAction(src, sid, commandId),
   }
 }
 

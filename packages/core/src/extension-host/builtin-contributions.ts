@@ -43,34 +43,29 @@ export const builtinContributions: BuiltinContribution[] = [
     },
   },
   {
-    // scheduler-manager（plugin-header-action-modal-points 首消费者，AP-1/AP-2）：
-    // headerActions/modals 为新点位声明（icon 为 lucide 名宿主解析，插件不给 SVG；width 三档闭集）。
-    // headerAction 入口渲染位 = composer 左簇（「+」之后、btw 按钮之前，HeaderActionsHost
-    // 承载；用户裁决 2026-10-06）。声明本体字段名 headerActions 是声明驱动机制的机制名，
-    // 与渲染位置无关，不随落点改名。
+    // scheduler-manager：headerAction 徽标入口 + overlay 定时任务 tab 内容树供给插件。
+    // headerAction 声明的 icon 为 lucide 名宿主解析，插件不给 SVG。入口渲染位 = composer
+    // 左簇（「+」之后、btw 按钮之前，HeaderActionsHost 承载；用户裁决 2026-10-06）。
+    // 声明本体字段名 headerActions 是声明驱动机制的机制名，与渲染位置无关，不随落点改名。
     // 声明 = 入口常驻的静态形状；可见性由插件运行时裁决——无任务时插件经
     // updateHeaderAction 推 hidden=true，HeaderActionsHost 列表构建层剔除该入口
     // （不出按钮，与 disabled 灰置正交；hidden 缺省 false = 照常渲染）。
-    // commands 是命令点击链的必要配套：commandId 须经 ensureCommandDeclarationsSync 注册进
-    // CommandRegistry，点击才走 execute → WS plugin.executeCommand → Worker handler 闭环；
-    // 缺声明则 E3「命令查不到」错误路径成为唯一路径（open 缺失 → G1 点击开层失效；
-    // toggle/run/delete 缺失 → modal 内 action-bar 写操作 ERR6 死链）。id 与插件侧
-    // api.commands.register 逐字一致（resources/plugins/scheduler-manager/index.ts）。
+    // commands 是 overlay 树内 action-bar 写操作（toggle/run/delete）的命令通路：声明经
+    // ensureCommandDeclarationsSync 注册进 CommandRegistry，树内按钮点击走
+    // execute → WS plugin.executeCommand → Worker handler 闭环；缺声明则 ERR6
+    // 「命令查不到」成为唯一路径。id 与插件侧 api.commands.register 逐字一致
+    // （resources/plugins/scheduler-manager/index.ts）。open 命令已随插件 modal 链退役
+    // （入口点击改道 overlay 直开，activation 声明驱动分派，无需命令）。
     pluginId: 'scheduler-manager',
     contributes: {
       headerActions: [
         // activation='scheduler-overlay'（workflow-overlay-scheduler 整合，2026-10-06 用户裁决）：
-        // 入口点击改道为直开 workflow-viz overlay 定时任务 tab（renderer 侧声明驱动分派），
-        // 不再经 execute 命令链弹插件 modal。commandId 保留不删——commands 命令声明仍是
-        // modal 写操作（toggle/run/delete）ERR6 防线配套，且 E13 可用性判定依赖命令注册
-        // 存在；modal 链退役是后续独立清理。
-        { id: 'scheduler-manager.open', title: '定时任务', icon: 'clock', commandId: 'scheduler-manager.open', order: 20, activation: 'scheduler-overlay' },
-      ],
-      modals: [
-        { id: 'scheduler-manager.panel', title: '定时任务', width: 'md' },
+        // 入口点击直开 workflow-viz overlay 定时任务 tab（renderer 侧声明驱动分派），
+        // 不经命令链——声明无 commandId（点击不走 execute）；toggle/run/delete 三命令
+        // 仍保留，服务 overlay 树内写操作按钮。
+        { id: 'scheduler-manager.open', title: '定时任务', icon: 'clock', order: 20, activation: 'scheduler-overlay' },
       ],
       commands: [
-        { command: 'scheduler-manager.open', title: '定时任务' },
         { command: 'scheduler-manager.toggle', title: '暂停/恢复定时任务' },
         { command: 'scheduler-manager.run', title: '立即执行定时任务' },
         { command: 'scheduler-manager.delete', title: '删除定时任务' },

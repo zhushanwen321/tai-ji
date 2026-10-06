@@ -30,9 +30,9 @@ const PLACEMENT_BY_TYPE: Record<Exclude<ContributionType, 'view' | 'menu'>, stri
   statusBarItem: 'statusbar',
   slashCommand: 'slash',
   configuration: 'settings',
-  // headerAction 复用已注册挂载点名 panel.header（不新增名字，AP-1）；modal 为新挂载点
-  // （bootstrap registerMountPoints 注册，AP-2）
+  // headerAction 复用已注册挂载点名 panel.header（不新增名字，AP-1）
   headerAction: 'panel.header',
+  // modal 键为死键（ContributionType 'modal' 死成员的类型要求；解析零产出），批 2 随机制面删
   modal: 'modal',
 }
 
@@ -40,7 +40,7 @@ const PLACEMENT_BY_TYPE: Record<Exclude<ContributionType, 'view' | 'menu'>, stri
 //
 // parseContributes 的分段提取：每段只解析一种 contribution type，段内循环体与
 // 原内联实现逐字节一致；parseContributes 按原 push 顺序 concat 各段，
-// 跨段顺序（view→menu→command→statusBarItem→slashCommand→configuration→headerAction→modal）
+// 跨段顺序（view→menu→command→statusBarItem→slashCommand→configuration→headerAction）
 // 即注册顺序。
 
 function parseViewContributions(pluginId: string, c: PluginContributes): ContributionRecord[] {
@@ -155,21 +155,6 @@ function parseHeaderActionContributions(pluginId: string, c: PluginContributes):
       placement: PLACEMENT_BY_TYPE.headerAction,
       available: false,
       headerAction: { title: h.title, icon: h.icon, commandId: h.commandId, order: h.order, activation: h.activation },
-    })
-  }
-  return out
-}
-
-function parseModalContributions(pluginId: string, c: PluginContributes): ContributionRecord[] {
-  const out: ContributionRecord[] = []
-  for (const m of c.modals ?? []) {
-    out.push({
-      pluginId,
-      contributionId: m.id,
-      type: 'modal',
-      placement: PLACEMENT_BY_TYPE.modal,
-      available: false,
-      modal: { title: m.title, width: m.width },
     })
   }
   return out
@@ -314,7 +299,6 @@ export class ContributionRegistry {
       ...parseSlashCommandContributions(pluginId, c),
       ...parseConfigurationContribution(pluginId, c),
       ...parseHeaderActionContributions(pluginId, c),
-      ...parseModalContributions(pluginId, c),
     ]
   }
 }

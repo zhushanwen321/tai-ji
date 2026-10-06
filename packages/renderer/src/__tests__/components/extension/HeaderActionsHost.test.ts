@@ -46,14 +46,15 @@ const schedulerAction: ContributionRecord = {
   headerAction: { title: '定时任务', icon: 'clock', commandId: 'scheduler-manager.open', order: 20 },
 }
 
-/** overlay 直开声明（activation='scheduler-overlay'，与 builtin scheduler-manager 现值同形状） */
+/** overlay 直开声明（activation='scheduler-overlay'，与 builtin scheduler-manager 现值同形状：
+ *  点击走 overlay 分派不经命令链，声明无 commandId） */
 const schedulerOverlayAction: ContributionRecord = {
   pluginId: 'scheduler-manager',
   contributionId: 'scheduler-manager.open',
   type: 'headerAction',
   placement: 'panel.header',
   available: true,
-  headerAction: { title: '定时任务', icon: 'clock', commandId: 'scheduler-manager.open', order: 20, activation: 'scheduler-overlay' },
+  headerAction: { title: '定时任务', icon: 'clock', order: 20, activation: 'scheduler-overlay' },
 }
 
 function makeSource(overrides: Partial<HeaderActionsSource> = {}): HeaderActionsSource {
@@ -387,5 +388,19 @@ describe('activation 分派（scheduler-overlay 直开 overlay，声明驱动）
     await wrapper.find('[data-testid=header-action-scheduler-manager-open]').trigger('click')
     expect(executeCommand).toHaveBeenCalledWith('scheduler-manager.open')
     expect(openSchedulerTab).not.toHaveBeenCalled()
+  })
+
+  it('无 commandId 且无 activation 的声明无法走命令链 = 不渲染（commandId 可选化的缺省语义）', () => {
+    const orphan: ContributionRecord = {
+      pluginId: 'demo',
+      contributionId: 'demo.nocmd',
+      type: 'headerAction',
+      placement: 'panel.header',
+      available: true,
+      headerAction: { title: '无命令', icon: 'bell', order: 1 },
+    }
+    const source = makeSource({ getDeclarations: () => [orphan] })
+    const wrapper = mountHost(source)
+    expect(wrapper.find('button').exists()).toBe(false)
   })
 })

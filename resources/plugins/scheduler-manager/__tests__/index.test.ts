@@ -2,23 +2,20 @@
  * scheduler-manager 插件行为面单测。
  *
  * 构建者白盒 + 使用者黑盒：经 plugin-sdk createMockAgentAPI mock 驱动 activate()
- * 与注册的 command handlers，覆盖九块：
+ * 与注册的 command handlers，覆盖：
  * ① handleWrite 回执分支矩阵（accepted/command-missing/其余（hook-blocked/error）
  *    + 无效 id + TASK_NOT_FOUND 自愈）
  * ② doRefresh 的 E11 游标失效全量重拉与 E4 恢复两态（terminal vs recovering）
  * ③ 重试预算耗尽态稳定（不重试不清零，外部信号重置预算）
- * ④ handleOpen modal 开合链（showModal 调参 + 不等防抖首拉的首帧推树 + 无焦点
- *    会话分支 + E10 pending 对话框拒绝）
- * ⑤ 生命周期拆镜（onModalClosed 清 notice / onDidDestroySession → teardownMirror
- *    后失效信号冻结）
- * ⑥ 恢复窗口写路径两支用户文案（写成功提示 restore 副作用 / 写抛错提示手动打开）
- * ⑦ onDidActivateSession 焦点切换（focusSessionId → open 链指向新会话 +
+ * ④ 生命周期拆镜（onDidDestroySession → teardownMirror 后失效信号冻结）
+ * ⑤ 恢复窗口写路径两支用户文案（写成功提示 restore 副作用 / 写抛错提示手动打开）
+ * ⑥ onDidActivateSession 焦点切换（focusSessionId → 写命令链指向新会话 +
  *    ensureMirror 为新 sid 补挂）
- * ⑧ 展示层三态分支（已过期「即将触发」两态文案 / 上次成败标记 + 失败原因行 /
- *    成功标记且无原因行——经 handleOpen 推树断言）
- * ⑨ 撤回信号镜像重建（'taiji:revoked' → 丢弃累计 + 全量重拉，折叠不含被撤任务；
+ * ⑦ 展示层三态分支（已过期「即将触发」两态文案 / 上次成败标记 + 失败原因行 /
+ *    成功标记且无原因行——经首拉推树断言）
+ * ⑧ 撤回信号镜像重建（'taiji:revoked' → 丢弃累计 + 全量重拉，折叠不含被撤任务；
  *    任务域订阅仍走增量不误重建）
- * ⑩ hidden 入口可见性（空清单 true / 有任务 false；读失败态保持上次值）
+ * ⑨ hidden 入口可见性（空清单 true / 有任务 false；读失败态保持上次值）
  *
  * 隔离：被测模块持有模块级状态（mirrors Map / focusSessionId），每条用例
  * vi.resetModules() 后动态 import 取 fresh 模块。timer 面（防抖 200ms / 重试 2s）
@@ -30,7 +27,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMockAgentAPI } from '../../../../packages/plugin-sdk/src/index.ts'
 import type {
-  PluginModalClosedReason,
   PluginSessionEntries,
   SessionInfo,
 } from '../../../../packages/plugin-sdk/src/index.ts'
@@ -123,12 +119,8 @@ interface Harness {
     content: string
     requireCommand?: string
   }>
-  /** showModal 调用记录（modalId + opts） */
-  showModalCalls: Array<[string, { sessionId: string }]>
   /** notify.warning 调用记录（用户可见提示断言入口） */
   notifyWarnings: string[]
-  /** onModalClosed 捕获的回调（modal 关闭信号注入口） */
-  closeModal: (modalId: string, reason?: PluginModalClosedReason) => void
   /** onDidDestroySession 捕获的回调（会话销毁信号注入口） */
   destroySession: (session: SessionInfo) => void
   /** onDidActivateSession 捕获的回调（会话激活/焦点切换信号注入口） */
@@ -148,7 +140,6 @@ async function setup(opts: {
   sessions?: SessionInfo[]
   sendMessageReceipt?: SendReceipt
   sendMessageError?: Error
-  showModalError?: Error
   /** 失效订阅 dispose 抛错（teardown 防御分支：释放失败不阻断其余清理） */
   invalidateDisposeError?: Error
 }): Promise<Harness> {
@@ -227,34 +218,10 @@ async function setup(opts: {
     },
   )
 
-  const showModalCalls: Harness['showModalCalls'] = []
-  api.ui.showModal = vi.fn(
-    async (
-      modalId: string,
-      modalOpts: { sessionId: string },
-    ): Promise<{ opened: true; epoch: number }> => {
-      showModalCalls.push([modalId, modalOpts])
-      if (opts.showModalError) throw opts.showModalError
-      return { opened: true, epoch: 1 }
-    },
-  )
-
   const notifyWarnings: Harness['notifyWarnings'] = []
   api.notify.warning = vi.fn(async (message: string): Promise<void> => {
     notifyWarnings.push(message)
   })
-
-  let modalClosedHandler:
-    | ((event: { modalId: string; reason: PluginModalClosedReason }) => void)
-    | null = null
-  api.ui.onModalClosed = vi.fn(
-    (
-      handler: (event: { modalId: string; reason: PluginModalClosedReason }) => void,
-    ): { dispose: () => void } => {
-      modalClosedHandler = handler
-      return { dispose: () => {} }
-    },
-  )
 
   let destroyHandler: ((session: SessionInfo) => void) | null = null
   api.sessions.onDidDestroySession = vi.fn(
@@ -283,10 +250,7 @@ async function setup(opts: {
       invalidateHandlers.get(customType)?.(sessionId, customType),
     readCalls,
     sendCalls,
-    showModalCalls,
     notifyWarnings,
-    closeModal: (modalId: string, reason: PluginModalClosedReason = 'dismissed') =>
-      modalClosedHandler?.({ modalId, reason }),
     destroySession: (session: SessionInfo) => destroyHandler?.(session),
     activateSession: (session: SessionInfo) => activateHandler?.(session),
     lastTree: () => trees[trees.length - 1] ?? [],
@@ -649,78 +613,10 @@ describe('scheduleRetry: 预算耗尽态稳定', () => {
   })
 })
 
-// ── ④ handleOpen modal 开合链（MF-2-7 补齐）──────────────────────────────────
+// ── ④ 生命周期：onDidDestroySession 拆镜（MF-2-7）────────────────────────────
 
-describe('handleOpen: modal 开合链', () => {
-  it('无焦点会话 → notify.warning 提示，不开 modal', async () => {
-    const h = await setup({ sessions: [] })
-
-    await h.handlers.get('scheduler-manager.open')?.()
-
-    expect(h.notifyWarnings).toEqual(['定时任务：当前没有可打开的会话'])
-    expect(h.showModalCalls).toEqual([])
-  })
-
-  it('有焦点会话 → showModal(MODAL_ID + sessionId)，不等防抖首拉立即推首帧树', async () => {
-    const h = await setup({})
-
-    await h.handlers.get('scheduler-manager.open')?.()
-
-    expect(h.showModalCalls).toEqual([['scheduler-manager.panel', { sessionId: 's-1' }]])
-    // 首帧不依赖防抖首拉（readCalls 仍 0），树已推到本 modal 视图（空态提示而非空白）
-    expect(h.readCalls).toHaveLength(0)
-    const lastCall = vi.mocked(h.api.views.update).mock.calls.at(-1)
-    expect(lastCall?.[0]).toBe('modal-scheduler-manager-scheduler-manager.panel')
-    expect(lastCall?.[2]).toEqual({ sessionId: 's-1' })
-    expect(ansiLines(lastCall?.[1] ?? [])).toContain(
-      '本会话还没有定时任务 —— 在对话里说，或手敲 /schedule <排期> <内容> 创建。',
-    )
-  })
-
-  it('showModal 被 pending 对话框拒绝（E10）→ notify.warning 含「请先回应宿主弹窗」且不推树', async () => {
-    const h = await setup({ showModalError: new Error('MODAL_BLOCKED_BY_UI_REQUEST') })
-
-    await h.handlers.get('scheduler-manager.open')?.()
-
-    expect(h.notifyWarnings).toEqual([
-      '定时任务面板暂时无法打开：MODAL_BLOCKED_BY_UI_REQUEST（请先回应宿主弹窗后重试）',
-    ])
-    expect(vi.mocked(h.api.views.update)).not.toHaveBeenCalled()
-  })
-})
-
-// ── ⑤ 生命周期：onModalClosed 清 notice / onDidDestroySession 拆镜（MF-2-7）───
-
-describe('onModalClosed / onDidDestroySession: 生命周期', () => {
+describe('onDidDestroySession: 生命周期拆镜', () => {
   const TASK = 'aaaabbbb'
-  const RETRY_LINE = '操作未生效，请重试'
-
-  it('本 modal 关闭清 notice；别的 modal 关闭不清', async () => {
-    const h = await setup({
-      readScript: [
-        { sessionFile: SESSION_FILE, entries: [upsertEntry(TASK, true, 'e1')], leafEntryId: 'e1' },
-        { sessionFile: SESSION_FILE, entries: [], leafEntryId: 'e1' },
-      ],
-      sendMessageReceipt: { accepted: false, reason: 'error' },
-    })
-    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
-
-    // 制造行内 notice（失败重试文案）
-    await h.handlers.get('scheduler-manager.toggle')?.({ id: TASK, enabled: false })
-    expect(ansiLines(h.lastTree())).toContain(RETRY_LINE)
-
-    // 别的 modal 关闭：notice 保留（下一轮失效刷新后仍可见）
-    h.closeModal('other-plugin.modal')
-    h.invalidate('s-1')
-    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
-    expect(ansiLines(h.lastTree())).toContain(RETRY_LINE)
-
-    // 本 modal 关闭：notice 清除（重开首帧干净，树中无 ansi 行）
-    h.closeModal('scheduler-manager.panel')
-    h.invalidate('s-1')
-    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
-    expect(ansiLines(h.lastTree())).toEqual([])
-  })
 
   it('会话销毁 → 拆订阅清镜像；其后失效信号不再触发拉取', async () => {
     const h = await setup({
@@ -760,7 +656,7 @@ describe('onModalClosed / onDidDestroySession: 生命周期', () => {
   })
 })
 
-// ── ⑥ 恢复窗口写路径两支用户文案（MF-2-7）────────────────────────────────────
+// ── ⑤ 恢复窗口写路径两支用户文案（MF-2-7）────────────────────────────────────
 
 describe('handleWrite: 恢复窗口两支文案', () => {
   const TASK = 'aaaabbbb'
@@ -809,15 +705,15 @@ describe('handleWrite: 恢复窗口两支文案', () => {
   })
 })
 
-// ── ⑦ onDidActivateSession 焦点切换 + ensureMirror 补挂（MF-3-5）──────────────
+// ── ⑥ onDidActivateSession 焦点切换 + ensureMirror 补挂（MF-3-5）──────────────
 
 describe('onDidActivateSession: 焦点切换 + ensureMirror 补挂', () => {
-  it('激活另一会话 → 焦点切换，open 链与新会话镜像均指向新 sid', async () => {
+  it('激活另一会话 → 焦点切换，写命令链与新会话镜像均指向新 sid', async () => {
     const SESSION_FILE_2 = '/sessions/s-2.jsonl'
     const h = await setup({
       readScript: [
-        // s-1 冷启动兜底首拉（空）
-        { sessionFile: SESSION_FILE, entries: [] },
+        // s-1 冷启动兜底首拉（1 个启用任务，供 toggle 快照命中发命令）
+        { sessionFile: SESSION_FILE, entries: [upsertEntry('aaaa1111', true, 'e1')], leafEntryId: 'e1' },
         // s-2 激活补挂首拉（1 个启用任务）
         {
           sessionFile: SESSION_FILE_2,
@@ -826,10 +722,13 @@ describe('onDidActivateSession: 焦点切换 + ensureMirror 补挂', () => {
         },
       ],
     })
+    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
 
-    // 前置：冷启动兜底焦点 = s-1，open 链指向 s-1
-    await h.handlers.get('scheduler-manager.open')?.()
-    expect(h.showModalCalls).toEqual([['scheduler-manager.panel', { sessionId: 's-1' }]])
+    // 前置：冷启动兜底焦点 = s-1，写命令链指向 s-1
+    await h.handlers.get('scheduler-manager.toggle')?.({ id: 'aaaa1111', enabled: false })
+    expect(h.sendCalls).toEqual([
+      { sessionId: 's-1', role: 'user', content: '/schedule off aaaa1111', requireCommand: 'schedule' },
+    ])
 
     // 用户激活另一会话 s-2：焦点切换 + ensureMirror 为新 sid 补挂（防抖武装）
     h.activateSession(makeSession({ id: 's-2', label: 'other-session' }))
@@ -844,16 +743,13 @@ describe('onDidActivateSession: 焦点切换 + ensureMirror 补挂', () => {
     expect(lastHeaderAction(h.api)).toMatchObject({ sessionId: 's-2', badge: '1' })
     expect(h.lastTree().filter((n) => n.type === 'action-bar')).toHaveLength(1)
 
-    // 焦点已切换：再次 open 的 showModal 与首帧树均指向 s-2
-    await h.handlers.get('scheduler-manager.open')?.()
-    expect(h.showModalCalls.at(-1)).toEqual(['scheduler-manager.panel', { sessionId: 's-2' }])
-    const lastCall = vi.mocked(h.api.views.update).mock.calls.at(-1)
-    expect(lastCall?.[0]).toBe('modal-scheduler-manager-scheduler-manager.panel')
-    expect(lastCall?.[2]).toEqual({ sessionId: 's-2' })
+    // 焦点已切换：写命令链指向 s-2
+    await h.handlers.get('scheduler-manager.toggle')?.({ id: 'aaaa1111', enabled: false })
+    expect(h.sendCalls.at(-1)?.sessionId).toBe('s-2')
   })
 })
 
-// ── ⑨ 撤回信号镜像重建（U7：'taiji:revoked' → 丢弃累计 + 全量重拉）────────────
+// ── ⑧ 撤回信号镜像重建（U7：'taiji:revoked' → 丢弃累计 + 全量重拉）────────────
 
 describe('onEntriesInvalidated(taiji:revoked): 树回退镜像重建', () => {
   const REVOKED = 'taiji:revoked'
@@ -904,7 +800,7 @@ describe('onEntriesInvalidated(taiji:revoked): 树回退镜像重建', () => {
   })
 })
 
-// ── ⑧ 展示层三态分支（MF-4-3：buildTaskRows 经 handleOpen 推树断言）───────────
+// ── ⑦ 展示层三态分支（MF-4-3：buildTaskRows 经首拉推树断言）───────────
 
 describe('buildTaskRows: 展示层三态', () => {
   it('已过期 → 即将触发；失败 → 成败标记 + 独立原因行；成功 → 标记且无原因行', async () => {
@@ -936,8 +832,6 @@ describe('buildTaskRows: 展示层三态', () => {
       ],
     })
     await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
-
-    await h.handlers.get('scheduler-manager.open')?.()
 
     // 启用按 nextRunAt 升序：过期任务最前；b/c nextRunAt 相等 → 稳定排序保持插入序。
     // 相对时间值均留单位边界裕度（防抖推进 200ms 不翻转：2m/1d/in 1d）。

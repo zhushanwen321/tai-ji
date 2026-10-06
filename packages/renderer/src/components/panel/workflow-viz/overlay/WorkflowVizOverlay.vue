@@ -16,8 +16,8 @@
   画布 / DAG 不可得降级列表 / 解析中 / 未匹配实例分组 + 左下角 D4 状态图例（仅画布
   就绪时在场，dot 类与节点同源 dag/tone.ts、pointer-events-none 不拦截画布交互），
   全宽）+ 下区 dock（slot——U5 多级 tab 面板填充位，全宽）；tab=scheduler 时 body =
-  ViewHost（消费 scheduler-manager 插件推树，viewId 单源 SCHEDULER_MODAL_VIEW_ID，
-  与 PluginModalHost 拼接约定同源；树未到 empty=hidden 零 DOM）。tab 是受控 prop
+  ViewHost（消费 scheduler-manager 插件推树，viewId 单源 SCHEDULER_MODAL_VIEW_ID；
+  树未到 empty=hidden 零 DOM）。tab 是受控 prop
   （SSOT 在控制器 workflow-viz-overlay.ts，Host 透传 + update:tab 写回），壳纯展示
   不持有开合态。
 
@@ -259,8 +259,7 @@
         </section>
       </div>
       <!-- tab=scheduler：定时任务面板（viewId 单源常量 = 控制器 SCHEDULER_MODAL_VIEW_ID，
-           与 PluginModalHost 的 modal-<pluginId>-<modalId> 拼接约定同源；树未到 = hidden
-           零 DOM，容器仍锚定内容区形态） -->
+           树未到 = hidden 零 DOM，容器仍锚定内容区形态） -->
       <div
         v-else
         class="flex min-h-0 flex-1 flex-col overflow-y-auto p-4"
