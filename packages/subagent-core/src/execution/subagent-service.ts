@@ -858,12 +858,16 @@ export class SubagentService {
           ),
         // [U4a 事件管线消费 / U4b 接线] run 级覆盖意图持久化：run 事件流追加
         // `model-override` 记账帧（事件类型/词表/fold 均为 U4a 产物，本接线复用既有
-        // journal 写入口——非新持久化载体）。写入面说明：run-events 注释指向的
-        // dispatchRunTrigger 需要 WorkflowRun 聚合根，interrupted 态 run（中断后补切
-        // 的合法场景，验收场景 3）不在活体注册表不可达——改走 journal 单点 append
-        // （同实例 keyed 缓存 + seq 单调分配，W1 seq 契约；model-override 是非转移
-        // 记账事件不占转移表行，与转移事件的 seq 交错合法）。失败上抛 → setModel
-        // 报错应答（§7.5 覆盖持久化行：内存覆盖仍生效——内存写先于本调用）。
+        // journal 写入口——非新持久化载体）。写入面说明（[F1-17] 裁决修正）：不走
+        // dispatchRunTrigger 的真因是 model-override 为非转移记账事件（不占
+        // RUN_TRANSITIONS 表行），appendTransition 首行 transition() 对无转移表行
+        // 事件必抛 IllegalTransitionError——结构上进不了转移裁决链；RunDispatchSource
+        // = { runId, journalDir? } 对 interrupted 态 run（中断后补切的合法场景，验收
+        // 场景 3）本可达，不可达的是转移通道而非 run 本身。同款直写先例 =
+        // appendRunDiagnosticEvent 的 worker-log 直写（terminal-actions）。改走
+        // journal 单点 append（同实例 keyed 缓存 + seq 单调分配，W1 seq 契约；与
+        // 转移事件的 seq 交错合法）。失败上抛 → setModel 报错应答（§7.5 覆盖持久化
+        // 行：内存覆盖仍生效——内存写先于本调用）。
         persistRunOverride: async (runId, override) => {
           const { journal } = resolveRunEventJournal();
           await journal.append(runId, {

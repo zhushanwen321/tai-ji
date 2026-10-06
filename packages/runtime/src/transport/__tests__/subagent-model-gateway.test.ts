@@ -378,6 +378,9 @@ describe('SubagentMessageHandler ← 生产网关注入（组合根形态）', (
 // 即红）+ keyof 双向差集锁（字段改名/删除/新增即红——含可选字段：可选属性缺席
 // 不破坏结构可赋值，双向 extends 对可选字段改名不红，缺口由差集在 keyof 层显形）
 // + 错误码词表 ⊆ wire reason 联合：任一侧改形/扩位/改键名，本文件类型检查即红。
+// 已知逃逸面（[F3-2]）：嵌套可选字段单侧扩位 MutuallyAssignable/SameKeys 均不抓
+// （SameKeys 只比顶层键集，嵌套对象内部的可选扩位两侧互赋值仍成立），由 U1 接线
+// 测试对账（shared/protocol.ts:1633「两处漂移由 U1 接线测试对账」声明）。
 
 /** 双向结构可赋值断言原语（A extends B 且 B extends A）——结构类型语义的形状对账；
  *  严格 Equal 会因品牌/可选字段差异误红，对账目标是「core 改形 → 此处编译红」。 */

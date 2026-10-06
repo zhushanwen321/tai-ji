@@ -493,9 +493,12 @@ export interface WorkflowModelOverride {
  * 派发侧覆写（决策六②），三者在场时回放哈希不受扰动。
  *
  * 写入面 = 宿主切换编排（U4b）经 journal append 单点直写（seq 由 journal 实装
- * 分配，W1 seq 契约：新写行信封必填正整数 seq）；不经 dispatchRunTrigger——该
- * 入口需要活体 run 聚合根（terminal-actions 的转移投递入口），interrupted 态
- * run（中断后补切的合法场景，§8 验收场景 3）不在活体注册表、不可达。写点 =
+ * 分配，W1 seq 契约：新写行信封必填正整数 seq）；不经 dispatchRunTrigger——
+ * model-override 是非转移记账事件（不占 RUN_TRANSITIONS 表行），
+ * appendTransition 首行 transition() 对无转移表行事件必抛 IllegalTransitionError，
+ * 结构上进不了转移裁决链（RunDispatchSource = { runId, journalDir? } 对
+ * interrupted 态 run 本可达，见 §8 验收场景 3 中断后补切；不可达的是转移通道而非
+ * run 本身，同款直写先例 = appendRunDiagnosticEvent 的 worker-log）。写点 =
  * subagent-service.ts persistRunOverride 闭包（journal.append 的第二合法写点，
  * 登记见 RunEventJournal.append 单写者约束）。
  */
@@ -561,10 +564,16 @@ type DistributiveOmit<T, K extends keyof never> = T extends unknown ? Omit<T, K>
 /**
  * run 事件 journal 的接口形态（append / scan）。
  *
- * 单写者约束（D5，[D15] 后落点）：append 的唯一合法调用方 = terminal-actions
- * （dispatchRunTrigger 唯一投递入口 + appendTransition 单写点——journal 单写者
- * 纪律的物理载体）——引擎侧事件经既有 run 事件通道上报后由写者落账，
- * 引擎不直接写 journal。类型层无法约束调用方，该约束由实装与守卫共同保证。
+ * 单写者约束（D5；[F1-17] 裁决后按双写点现实登记）：append 的合法写点共两处，
+ * 除此之外引擎/读侧一律不写——
+ *   1. terminal-actions：dispatchRunTrigger 唯一投递入口（转移事件经
+ *      appendTransition 的 journal.append 落账）+ 同模块 appendRunDiagnosticEvent
+ *      的 worker-log 诊断直写（best-effort 非转移诊断事件）；
+ *   2. execution 层 subagent-service.ts persistRunOverride 的 model-override
+ *      记账直写（非转移事件进不了转移裁决链，登记理由见 append 方法级注释）。
+ * 引擎侧事件经既有 run 事件通道上报后由写点落账，引擎不直接写 journal。类型层
+ * 无法约束调用方，该约束由实装与守卫共同保证。写点登记三处保持一致：本接口
+ * append 方法级注释 + run-event-journal.ts scanRunEvents 读面注释。
  */
 export interface RunEventJournal {
   /**
@@ -574,15 +583,20 @@ export interface RunEventJournal {
    * 在 journal 实装内，构造性单调）；runId 显式传参而非从事件取——仅 run-created
    * 携带 runId，目标文件定位不依赖事件形态。
    *
-   * 单写者约束（[D15] 终局编排单一入口后）：合法调用方 = terminal-actions 的
+   * 单写者约束（[F1-17] 裁决后形态——合法写点两处，与接口头注 / run-event-journal
+   * .ts scanRunEvents 读面注释三处一致）：合法调用方 = terminal-actions 的
    * dispatchRunTrigger（唯一投递入口——活体链与经 interruptRun /
    * settleRunAccounting 的收编冷路径都经它；resume 的复活转移由 resume-run 在锁
    * 段内经同一入口投递）+ terminal-actions.appendTransition 的 journal.append
-   * 单写点 + U4b 宿主切换编排的 model-override 记账直写（subagent-service.ts
-   * persistRunOverride——非转移记账事件；dispatchRunTrigger 需要活体 run 聚合根
-   * 而 interrupted 态 run 不可达（§8 验收场景 3 中断后补切形态），故登记为第二
-   * 合法写点）——除此之外引擎/读侧一律不写。收编链追加的是 run-interrupted 转移
-   * 事件（[D2] 中断非终局，不再落 run-settled(outcome=interrupted)）。
+   * 单写点 + execution 层 model-override 记账直写（subagent-service.ts
+   * persistRunOverride，第二合法写点）。直写登记理由：model-override 是非转移
+   * 记账事件（不占 RUN_TRANSITIONS 表行），appendTransition 首行 transition()
+   * 对无转移表行事件必抛 IllegalTransitionError——结构上进不了转移裁决链
+   * （RunDispatchSource = { runId, journalDir? } 对 interrupted 态 run 本可达，
+   * 不可达的是转移通道而非 run 本身）；同款直写先例 = appendRunDiagnosticEvent
+   * 的 worker-log 诊断直写。除此之外引擎/读侧一律不写。收编链追加的是
+   * run-interrupted 转移事件（[D2] 中断非终局，不再落
+   * run-settled(outcome=interrupted)）。
    */
   append(runId: string, event: WorkflowRunEventInput): Promise<WorkflowRunEvent>;
   /**
