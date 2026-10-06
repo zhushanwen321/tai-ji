@@ -102,6 +102,9 @@ vi.mock("../interface/tool/subagent-tool.ts", () => ({
 vi.mock("../interface/command/subagents.ts", () => ({
   registerSubagentsCommand: vi.fn(),
 }));
+vi.mock("../interface/command/subagent-model.ts", () => ({
+  registerSubagentModelCommand: vi.fn(),
+}));
 vi.mock("../interface/gui/bg-notify-render.ts", () => ({
   renderBgNotifyMessage: vi.fn(),
 }));

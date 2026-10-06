@@ -44,6 +44,7 @@ import { toErrorMessage } from '../utils/errors.js'
 export const MODEL_SWITCH_PROMPT_TIMEOUT_MS = 60_000
 
 /** 结果文件读取的单次预算（uuid 命名 + 请求作用域，文件体 = 单条 JSON 应答，KB 级）。 */
+// eslint-disable-next-line no-magic-numbers -- 预算常数 256KB（256 × 1024，语义见上注）
 const RESULT_FILE_MAX_BYTES = 256 * 1024
 
 /** 通道级失败统一 code（§7.5 通道行：出站点超时 / 结果文件缺失 / 发送失败同分型）。 */
