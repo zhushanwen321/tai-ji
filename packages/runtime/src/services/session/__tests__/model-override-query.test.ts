@@ -160,6 +160,36 @@ describe('getRunOverride — run 域 journal 覆盖查询', () => {
     expect(query.getRunOverride('main-1', 'run-404')).toBeUndefined()
   })
 
+  it('覆盖帧早于 256KB 尾读窗口起点（尾部被 worker-log 堆积淹没）→ undefined（miss = 按无覆盖显示、不虚报、无报错）', () => {
+    const sessionFilePath = join(tmpDir, 'sessions', 'main-1.jsonl')
+    mkdirSync(join(tmpDir, 'sessions'), { recursive: true })
+    writeFileSync(sessionFilePath, '')
+    const workflowStateDir = join(tmpDir, 'sessions', 'workflow-state')
+    mkdirSync(workflowStateDir, { recursive: true })
+    const journalPath = join(workflowStateDir, `run-1${RUN_EVENTS_SUFFIX}`)
+    // 覆盖帧在文件头 + worker-log 堆积 >256KB 在后：尾读窗口（OVERRIDE_TAIL_WINDOW_KB）
+    // 起点落在堆积段内、覆盖帧出窗 → 窗口内无命中（代码注释登记的 miss 语义）。
+    const head = `${JSON.stringify({ type: 'model-override', seq: 2, ts: 10, model: { provider: 'p-run', modelId: 'm-run' } })}\n`
+    const fillerLines: string[] = []
+    let fillerBytes = 0
+    let seq = 3
+    while (fillerBytes <= 256 * 1024) {
+      const line = JSON.stringify({ type: 'worker-log', seq, ts: 11, entry: { level: 'warn', message: 'x'.repeat(200) } })
+      fillerLines.push(line)
+      fillerBytes += line.length + 1
+      seq += 1
+    }
+    writeFileSync(journalPath, head + fillerLines.join('\n') + '\n')
+    const query = makeQuery([{ id: 'main-1', filePath: sessionFilePath }])
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(query.getRunOverride('main-1', 'run-1')).toBeUndefined()
+      expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
   it('record 事件文件后缀与 run journal 后缀互不混用（RECORD_EVENTS_SUFFIX ≠ RUN_EVENTS_SUFFIX）', () => {
     expect(RECORD_EVENTS_SUFFIX).toBe('.events')
     expect(RUN_EVENTS_SUFFIX).toBe('.record.jsonl')

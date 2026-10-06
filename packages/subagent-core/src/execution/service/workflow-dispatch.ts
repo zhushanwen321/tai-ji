@@ -484,7 +484,8 @@ export class WorkflowDispatch {
    *   （覆写先于 resolveWorkflowIdentity）。ctxModel 投影仅补 RunContext 形状
    *   完备、非 pi 引擎不消费（zcode 出声忽略——zcode-engine warnIgnoredCtxModel，
    *   F16b「ctxModel 是 pi 链路兜底」）；「引擎侧只消费 provider/id 拼词形、name
-   *   不参与」的表述仅对 pi 引擎成立（pi-engine buildRunRequiredParams）。
+   *   不参与」的表述仅对 pi 引擎成立（pi-engine buildRunIdentityParams——ctxModel →
+   *   spawn model 词形，pi-engine.ts:362-364）。
    *
    * 非本域 record（origin 非 workflow / parentRunId 缺省——runWorkflowEngineTask
    * 被 SAR 直调占位路径复用时的守卫）短路原样返回。

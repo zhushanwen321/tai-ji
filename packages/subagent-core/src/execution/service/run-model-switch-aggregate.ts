@@ -2,7 +2,8 @@
 //
 // [subagent-model-switch U5] run 级全切聚合函数——设计 §7.4「全切『管现在』半场」+
 // §7.1 聚合三组件定形 + §7.5「全切聚合」行的实装。调用方 = U2 宿主编排的 workflow
-// run 级分流分支（契约签名 declare 占位在 execution/assembly/types.ts）。
+// run 级分流分支（契约 input 见 execution/assembly/types.ts RunModelSwitchAggregateInput；
+// 实装签名 = RunModelSwitchAggregateCall，本文件）。
 //
 // 职责边界（§7.4）：对已受理成员 runId 全量逐个经引擎 setModel 转发——
 //   - **不做宿主侧存活预判**：进程存活事实的权威在引擎侧，宿主 record 状态只是投影

@@ -374,16 +374,30 @@ describe('SubagentMessageHandler ← 生产网关注入（组合根形态）', (
 // RunSwitch*（形状 SSOT）与 shared protocol SubagentSetModel*（wire 投影）是两份
 // 独立声明（shared 不依赖 subagent-core，物理单源不可行），core 改形而无本对账时
 // gateway 的 unknown→as 盲 cast 零编译红、wire 载荷静默漂移（击穿设计 §7.1
-// 「聚合三组件恒保留」硬不变量）。断言形态 = 双向 extends 编译锁 + 错误码词表
-// ⊆ wire reason 联合：任一侧改形/扩位，本文件类型检查即红。
+// 「聚合三组件恒保留」硬不变量）。断言形态 = 双向 extends 编译锁（字段类型漂移
+// 即红）+ keyof 双向差集锁（字段改名/删除/新增即红——含可选字段：可选属性缺席
+// 不破坏结构可赋值，双向 extends 对可选字段改名不红，缺口由差集在 keyof 层显形）
+// + 错误码词表 ⊆ wire reason 联合：任一侧改形/扩位/改键名，本文件类型检查即红。
 
 /** 双向结构可赋值断言原语（A extends B 且 B extends A）——结构类型语义的形状对账；
  *  严格 Equal 会因品牌/可选字段差异误红，对账目标是「core 改形 → 此处编译红」。 */
 type MutuallyAssignable<A, B> = A extends B ? (B extends A ? true : never) : never
 
+/** keyof 双向差集断言原语（两侧键集合相等）——补 MutuallyAssignable 的洞：可选
+ *  字段改名/删除在双向 extends 下不红（可选属性缺席不破坏可赋值），键差集在此
+ *  显形（任一侧多出/改名键 → Exclude 非空 → 不再是 true → 编译红）。 */
+type SameKeys<A, B> = Exclude<keyof A, keyof B> extends never
+  ? (Exclude<keyof B, keyof A> extends never ? true : never)
+  : never
+
 describe('core ↔ shared setModel 聚合应答形状对账（协议契约不变量）', () => {
   it('RunSwitchMemberState ≡ SubagentSetModelMemberState（双向 extends 编译锁）', () => {
     const check: MutuallyAssignable<RunSwitchMemberState, SubagentSetModelMemberState> = true
+    expect(check).toBe(true)
+  })
+
+  it('RunSwitchMemberState ≡ SubagentSetModelMemberState（keyof 双向差集——可选生效值字段改名/删除即红）', () => {
+    const check: SameKeys<RunSwitchMemberState, SubagentSetModelMemberState> = true
     expect(check).toBe(true)
   })
 
@@ -397,6 +411,11 @@ describe('core ↔ shared setModel 聚合应答形状对账（协议契约不变
 
   it('RunSwitchAggregateResult ≡ SubagentSetModelAggregateReply（三组件恒保留）', () => {
     const check: MutuallyAssignable<RunSwitchAggregateResult, SubagentSetModelAggregateReply> = true
+    expect(check).toBe(true)
+  })
+
+  it('RunSwitchAggregateResult ≡ SubagentSetModelAggregateReply（keyof 双向差集——组件改名/增删即红）', () => {
+    const check: SameKeys<RunSwitchAggregateResult, SubagentSetModelAggregateReply> = true
     expect(check).toBe(true)
   })
 })
