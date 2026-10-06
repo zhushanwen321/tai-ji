@@ -175,8 +175,10 @@ import { DEFAULT_ENGINE_ID } from '@/constants/engine-icons'
 // 组件只保留 readers 面消费
 import { useSubagentTabData } from '@/composables/panel/useSubagentTabData'
 // subagent-model-switch §7.1（U1）：执行模型切换（回执写状态禁乐观写）+ 标签读取规则
+// （thinking 槽取值同源 composable 纯函数——热切回执档位优先，回退启动盖章值）
 import {
   resolveSubagentModelDisplay,
+  resolveSubagentThinkingLevel,
   useSubagentModel,
 } from '@/composables/features/subagent/useSubagentModel'
 
@@ -186,6 +188,9 @@ const subagentStore = useSubagentStore()
 const workflowStore = useWorkflowStore()
 
 const { selectedSubagentId, enteredFrom } = useDrawerControl()
+
+// 切换编排（回执写状态在 composable；displayOf 供 thinking 槽与 modelDisplay 消费）
+const { setSubagentModel, displayOf } = useSubagentModel()
 
 /** 从 workflowStore records 查找指定 acsId 的 agent call（agentcall 入口的元信息来源） */
 function findAgentCall(acsId: string): WorkflowAgentCall | undefined {
@@ -208,11 +213,13 @@ const subagentMeta = computed<{ agent: string; slug?: string; meta?: string; eng
     const subId = extractSubagentId(vid)
     const record = subagentStore.getRecordsBySession(mainSessionId).find((r) => r.subagentId === subId)
     if (!record) return null
-    // 模型槽位移交 modelDisplay（标签读取规则四分支），meta 只余 thinking 档位。
+    // 模型槽位移交 modelDisplay（标签读取规则四分支），meta 只余 thinking 档位：
+    // §6.4 展示口径——热切回执生效档位（展示态）优先，回退启动盖章值（record.thinkingLevel）。
+    const thinkingLevel = resolveSubagentThinkingLevel(displayOf(record.subagentId), record.thinkingLevel)
     return {
       agent: record.agent,
       slug: record.slug || undefined,
-      meta: record.thinkingLevel ? `thinking ${record.thinkingLevel}` : undefined,
+      meta: thinkingLevel ? `thinking ${thinkingLevel}` : undefined,
       engine: record.engine || undefined,
       // 停因词（U8b §3.2.8）：有值即投影——idle 与 A-lite 轮终 running-resumable 均携带
       // 合法停因；「为什么停」一句话解释，不参与资格判定
@@ -245,7 +252,6 @@ const chatMeta = computed<SubagentRecord | null>(() => {
 
 // ── 执行模型切换（subagent-model-switch §7.1，U1）────────────────────
 
-const { setSubagentModel, displayOf } = useSubagentModel()
 /** 切换中（ModelSelectPopover switching 门：禁重复开合与点选） */
 const switching = ref(false)
 

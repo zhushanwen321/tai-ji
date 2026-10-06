@@ -51,7 +51,7 @@ const BYTES_PER_KB = 1024
 const OVERRIDE_TAIL_WINDOW_BYTES = OVERRIDE_TAIL_WINDOW_KB * BYTES_PER_KB
 
 /** modelOverrideQuery 窄口（session-records deps / workflow-record-projection 入参同形；
- *  亦为 SubagentModelSwitchGateway 查询两方法的窄接口面同形基座）。 */
+ *  覆盖状态查询的唯一入口——切换网关不承载查询，M1-3 收敛）。 */
 export interface ModelOverrideQuery {
   getRecordOverride(sessionId: string, recordId: string): SubagentModelOverrideStatus | undefined
   getRunOverride(sessionId: string, runId: string): SubagentModelOverrideStatus | undefined

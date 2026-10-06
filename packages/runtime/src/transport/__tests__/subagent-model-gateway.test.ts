@@ -107,10 +107,6 @@ function deps(overrides?: Partial<SubagentModelGatewayDeps>): SubagentModelGatew
   return {
     getClient: () => promptStub('resolve-only'),
     scanSessions: () => [scannedSession()],
-    overrideQuery: {
-      getRecordOverride: () => undefined,
-      getRunOverride: () => undefined,
-    },
     agentDir,
     ...overrides,
   }
@@ -145,7 +141,7 @@ function seedRecordEvent(recordId: string, ownerSessionId: string = SESSION_ID):
     `${JSON.stringify(envelope)}\n${JSON.stringify(created)}\n`,
   )
 }
-/** run journal 预置（resolveSessionId 定位锚：workflow-state journal，getRunOverride 同式）。 */
+/** run journal 预置（resolveSessionId 定位锚：workflow-state journal 存在性）。 */
 function seedRunJournal(runId: string): void {
   const journalDir = join(dirname(scannedSession().filePath), 'workflow-state')
   mkdirSync(journalDir, { recursive: true })
@@ -340,21 +336,6 @@ describe('createSubagentModelSwitchGateway — 守卫', () => {
   it('resolveSessionId：runId 按 workflow-state journal 存在性命中', () => {
     const gw = createSubagentModelSwitchGateway(deps())
     expect(gw.resolveSessionId({ runId: 'wf-1' })).toBe(SESSION_ID)
-  })
-
-  it('getRecordOverride / getRunOverride 委托 overrideQuery（不重写查询逻辑）', () => {
-    const status = { model: 'p/m' }
-    const gw = createSubagentModelSwitchGateway(
-      deps({
-        overrideQuery: {
-          getRecordOverride: (sid, rid) => (sid === 's' && rid === 'r' ? status : undefined),
-          getRunOverride: (sid, wid) => (sid === 's' && wid === 'w' ? status : undefined),
-        },
-      }),
-    )
-    expect(gw.getRecordOverride('s', 'r')).toBe(status)
-    expect(gw.getRunOverride('s', 'w')).toBe(status)
-    expect(gw.getRecordOverride('other', 'r')).toBeUndefined()
   })
 })
 

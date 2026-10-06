@@ -3,11 +3,13 @@
 /**
  * useSubagentModel 单测（subagent-model-switch §7.1 入口层，U1 验收面——renderer 半边）。
  *
- * 覆盖（mock 宿主应答回执范式 + 标签读取规则四分支）：
+ * 覆盖（mock 宿主应答回执范式 + 标签读取规则四分支 + thinking 槽取值）：
  * - **禁乐观写**：api promise 未 resolve 前显示态零写入（应答到达才写状态）；
  * - 回执分流：chat 两型（effective → 生效值 / recorded → 覆盖意图）+ run 级聚合
  *   （switched → 成员生效值 / not-active·not-applicable → 成员覆盖意图 / 失败名单
  *   不写 + toast 分项）；
+ * - thinking 档位同步（§6.4）：回执带 effectiveThinkingLevel → 展示态字段更新且面板
+ *   取值跟随；回执缺省该字段（聚合成员 optional）→ 字段不动、面板回退盖章值；
  * - 失败路径：RPC reject → 显示态零写入（标签读取规则分支③的构造性成立载体）+
  *   返回 undefined；
  * - resolveSubagentModelDisplay 四分支：① 回执生效值在场 → 实际生效值；④ 分叉态
@@ -37,6 +39,7 @@ vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: toastMocks.
 
 import {
   resolveSubagentModelDisplay,
+  resolveSubagentThinkingLevel,
   useSubagentModel,
   resetSubagentModelDisplayForTests,
 } from '../useSubagentModel'
@@ -125,7 +128,7 @@ describe('useSubagentModel — 回执写状态（禁乐观写）', () => {
 
     resolveRpc({ kind: 'effective', effectiveModel: { provider: 'p', modelId: 'm2' }, effectiveThinkingLevel: 'high' })
     await pending
-    expect(displayOf('sa-1')).toEqual({ effectiveModel: 'p/m2' })
+    expect(displayOf('sa-1')).toEqual({ effectiveModel: 'p/m2', thinkingLevel: 'high' })
   })
 
   it('chat 已生效型：回读生效值写入（生效值 ≠ 请求目标时以回执为准）', async () => {
@@ -178,8 +181,8 @@ describe('useSubagentModel — 回执写状态（禁乐观写）', () => {
     const reply = await setSubagentModel({ runId: 'wf-1', provider: 'p', modelId: 'target' })
 
     expect(reply).toBeDefined()
-    // switched：成员生效值（引擎回读）
-    expect(memberDisplayOf('wf-1', 'sa-a')).toEqual({ effectiveModel: 'p/m-a' })
+    // switched：成员生效值（引擎回读）+ 生效档位（成员携带时随行）
+    expect(memberDisplayOf('wf-1', 'sa-a')).toEqual({ effectiveModel: 'p/m-a', thinkingLevel: 'high' })
     // not-active / not-applicable：覆盖意图（记账路径，重派生效）
     expect(memberDisplayOf('wf-1', 'sa-b')).toEqual({ overrideIntent: 'p/target' })
     expect(memberDisplayOf('wf-1', 'sa-c')).toEqual({ overrideIntent: 'p/target' })
@@ -188,5 +191,48 @@ describe('useSubagentModel — 回执写状态（禁乐观写）', () => {
     expect(toastMocks.error).toHaveBeenCalledTimes(1)
     expect(toastMocks.error.mock.calls[0]?.[0]).toContain('sa-d')
     expect(toastMocks.error.mock.calls[0]?.[0]).toContain('engine_state_readback_failed')
+  })
+})
+
+// ── thinking 档位同步（§6.4：切换回执连 thinkingLevel 一起同步，防面板档位脱节）──
+
+describe('useSubagentModel — thinking 档位同步（§6.4）', () => {
+  it('chat 已生效型：回执带 effectiveThinkingLevel → 展示态字段更新，面板取值跟随热切值', async () => {
+    apiMocks.setModel.mockResolvedValue({
+      kind: 'effective',
+      effectiveModel: { provider: 'p', modelId: 'm2' },
+      effectiveThinkingLevel: 'low',
+    })
+    const { setSubagentModel, displayOf } = useSubagentModel()
+
+    await setSubagentModel({ recordId: 'sa-1', provider: 'p', modelId: 'm' })
+
+    expect(displayOf('sa-1')?.thinkingLevel).toBe('low')
+    // 面板 thinking 槽取值（SubagentTab 消费同源纯函数）：展示态档位优先于盖章值
+    expect(resolveSubagentThinkingLevel(displayOf('sa-1'), 'high')).toBe('low')
+  })
+
+  it('聚合 switched 成员缺省档位字段：展示态不写字段（UI 跟随事实，禁乐观回显）', async () => {
+    apiMocks.setModel.mockResolvedValue({
+      members: [{ runId: 'sa-a', state: 'switched', effectiveModel: { provider: 'p', modelId: 'm-a' } }],
+      failures: [],
+      summary: '已切换',
+    })
+    const { setSubagentModel, memberDisplayOf } = useSubagentModel()
+
+    await setSubagentModel({ runId: 'wf-1', provider: 'p', modelId: 'target' })
+
+    // 回执缺省 effectiveThinkingLevel → 展示态无该字段（不虚构档位）
+    expect(memberDisplayOf('wf-1', 'sa-a')).toEqual({ effectiveModel: 'p/m-a' })
+    // 面板取值回退启动盖章值（record.thinkingLevel）
+    expect(resolveSubagentThinkingLevel(memberDisplayOf('wf-1', 'sa-a'), 'high')).toBe('high')
+  })
+
+  it('resolveSubagentThinkingLevel：展示态在场取热切值；回执态缺席回退盖章值', () => {
+    expect(resolveSubagentThinkingLevel({ effectiveModel: 'p/m', thinkingLevel: 'low' }, 'high')).toBe('low')
+    expect(resolveSubagentThinkingLevel({ effectiveModel: 'p/m' }, 'high')).toBe('high')
+    expect(resolveSubagentThinkingLevel(undefined, 'high')).toBe('high')
+    // 盖章值也缺省（record 无 thinkingLevel）：槽位整体缺省（面板隐藏 thinking 槽）
+    expect(resolveSubagentThinkingLevel(undefined, undefined)).toBeUndefined()
   })
 })

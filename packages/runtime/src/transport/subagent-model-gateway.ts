@@ -7,8 +7,8 @@
  * extension 写入 / 本侧写后读一次并删除——无轮询无监视）。
  *
  * 职责边界：载荷组装 + 出站点 prompt（显式墙钟超时）+ 结果文件读删 + wire 应答映射；
- * 覆盖状态查询（getRecordOverride / getRunOverride）委托 model-override-query 生产后端
- * （D2 组交付，本适配器不重写查询逻辑——单一实现纪律）。
+ * 覆盖状态查询不经过本网关（model-override-query 是唯一查询入口，详情载荷组装路径
+ * 直接装配，M1-3 收敛——本端口只保留 setModel + resolveSessionId）。
  *
  * 通道级失败分型（§7.5「runtime→extension 通道」行）：生效状态未知如实报，恢复动作
  * = 重试切换，当前生效状态以面板与记录链/journal 为准——不虚构「未生效」。
@@ -29,7 +29,6 @@ import {
 } from '@zhushanwen/subagent-core'
 
 import type { SubagentModelSwitchGateway } from '../interfaces.js'
-import type { ModelOverrideQuery } from '../services/session/model-override-query.js'
 import type { ScannedSessionMeta } from '../services/ports/session.js'
 import { getPiAgentDir } from '../infra/pi/pi-paths.js'
 import { toErrorMessage } from '../utils/errors.js'
@@ -66,8 +65,6 @@ export interface SubagentModelGatewayDeps { // oe-exempt:20261006:framework:网�
   getClient(sessionId: string): SubagentModelPromptClient | undefined
   /** session 扫描（resolveSessionId 定位 + 结果目录数据根 cwd 解析的唯一来源）。 */
   scanSessions(opts?: { force?: boolean }): ScannedSessionMeta[]
-  /** 覆盖状态查询生产后端（委托，不重写——D2 组 model-override-query 单一实现）。 */
-  overrideQuery: ModelOverrideQuery
   /** pi agent 目录锚（记录域 subagents/ 布局根；缺省 getPiAgentDir()，测试注入 tmp）。 */
   agentDir?: string
 }
@@ -249,7 +246,7 @@ export function createSubagentModelSwitchGateway(deps: SubagentModelGatewayDeps)
    * 目标 → session 元数据（id + cwd 数据根）解析；解析不到 undefined（信封缺省语义）。
    * 定位锚与覆盖查询（model-override-query）同源：recordId = records 目录事件文件存在性
    * （manifest 对偶，D3 落点；recordEventsPath 自带 id 白名单防穿越）；runId = 该 session
-   * workflow-state journal 存在性（getRunOverride 同式派生）。
+   * workflow-state journal 存在性。
    */
   function resolveSessionMeta(target: { recordId?: string; runId?: string }): ScannedSessionMeta | undefined {
     const sessions = deps.scanSessions({ force: true })
@@ -346,9 +343,6 @@ export function createSubagentModelSwitchGateway(deps: SubagentModelGatewayDeps)
       return mapResultFileToWireReply(raw)
     },
 
-    // 覆盖状态查询：委托 model-override-query 生产后端（单一实现，不重写）。
-    getRecordOverride: (sessionId, recordId) => deps.overrideQuery.getRecordOverride(sessionId, recordId),
-    getRunOverride: (sessionId, runId) => deps.overrideQuery.getRunOverride(sessionId, runId),
     resolveSessionId: (target) => resolveSessionMeta(target)?.id,
   }
 }

@@ -31,6 +31,8 @@ export interface SubagentModelDisplayState { // oe-exempt:20261006:framework:wir
   effectiveModel?: string
   /** 已记账型回执的覆盖意图值（本次切换目标——分支②「已记账型标签显示覆盖值」）。 */
   overrideIntent?: string
+  /** 已生效型回执的生效 thinking 档位（§6.4：热切联动重设后的实际档位，防面板档位与生效值脱节）；回执缺省不写。 */
+  thinkingLevel?: string
 }
 
 /** 模型标签显示态（四分支合成输出）。 */
@@ -125,6 +127,19 @@ export function resolveSubagentModelDisplay(input: SubagentModelDisplayInput): S
   return { label: input.stampedModel, overridden: false }
 }
 
+/**
+ * thinking 槽取值（§6.4 展示口径的档位半边，纯函数可单测）：热切回执的生效档位
+ * （展示态 thinkingLevel——pi setModel 联动重设后的实际档位）优先，回退启动盖章值
+ * （record.thinkingLevel）。回执缺省档位字段时展示态不写（UI 跟随事实，禁乐观回显），
+ * 此处自然回退盖章值——面板档位不与实际生效值脱节（§6.4 不采用理由）。
+ */
+export function resolveSubagentThinkingLevel(
+  display: SubagentModelDisplayState | undefined,
+  stampedLevel: string | undefined,
+): string | undefined {
+  return display?.thinkingLevel ?? stampedLevel
+}
+
 /** setSubagentModel 的目标参数（wire 契约：recordId 与 runId 二选一；provider 品牌类型随 wire 契约）。 */
 export interface SubagentSetModelTarget { // oe-exempt:20261006:framework:wire 切换目标契约形状（u-foundation 定形，单实现常态）
   recordId?: string
@@ -181,7 +196,12 @@ export function useSubagentModel() {
       const key = target.recordId
       if (key === undefined) return
       if (reply.kind === 'effective') {
-        displayStates.set(key, { effectiveModel: toModelRef(reply.effectiveModel.provider, reply.effectiveModel.modelId) })
+        displayStates.set(key, {
+          effectiveModel: toModelRef(reply.effectiveModel.provider, reply.effectiveModel.modelId),
+          // §6.4：切换回执连生效档位一起同步（面板 thinking 档位随热切更新）；回执缺省
+          // 该字段不写（UI 跟随事实，禁乐观回显——读取端回退启动盖章值）
+          ...(reply.effectiveThinkingLevel !== undefined ? { thinkingLevel: reply.effectiveThinkingLevel } : {}),
+        })
       } else {
         displayStates.set(key, { overrideIntent: intentRef })
       }
@@ -193,7 +213,12 @@ export function useSubagentModel() {
     for (const member of reply.members) {
       const key = subagentMemberDisplayKey(runId, member.runId)
       if (member.state === 'switched' && member.effectiveModel !== undefined) {
-        displayStates.set(key, { effectiveModel: toModelRef(member.effectiveModel.provider, member.effectiveModel.modelId) })
+        displayStates.set(key, {
+          effectiveModel: toModelRef(member.effectiveModel.provider, member.effectiveModel.modelId),
+          // 成员生效档位为 optional（wire 契约：仅回读成功成员携带）：缺省不写，
+          // 同上「UI 跟随事实」——档位未知时不虚构，读取端回退盖章值
+          ...(member.effectiveThinkingLevel !== undefined ? { thinkingLevel: member.effectiveThinkingLevel } : {}),
+        })
       } else if (member.state === 'not-active' || member.state === 'not-applicable') {
         displayStates.set(key, { overrideIntent: intentRef })
       }

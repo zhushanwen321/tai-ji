@@ -35,8 +35,6 @@ function setModelMsg(payload: Record<string, unknown>, id = 'req-1'): ClientMess
 function mockGateway(overrides?: Partial<SubagentModelSwitchGateway>): SubagentModelSwitchGateway {
   return {
     setModel: vi.fn(async () => ({ kind: 'recorded', note: '已记录，下次执行生效' }) satisfies SubagentSetModelReply),
-    getRecordOverride: vi.fn(() => undefined),
-    getRunOverride: vi.fn(() => undefined),
     resolveSessionId: vi.fn(() => 'main-session-1'),
     ...overrides,
   }

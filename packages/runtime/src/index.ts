@@ -46,7 +46,6 @@ import { ProviderCredentialResolver } from './services/auth/provider-credential-
 import type { IProviderCredentialResolver } from './services/ports/provider-credential-resolver.js'
 import { PresetService } from './services/preset-service.js'
 import { ModelService } from './services/model-service.js'
-import { createModelOverrideQuery } from './services/session/model-override-query.js'
 
 import { BASE_PORT, MAX_PORT, mandatoryExtensions, isBtwVirtualId } from '@taiji/shared'
 import type { ImportSourceKind } from '@taiji/shared'
@@ -1440,14 +1439,13 @@ async function main(): Promise<void> {
   const tServicesReady = performance.now()
   // [subagent-model-switch U6] 模型切换网关生产适配器（§7.1.1 通道）：出站点 prompt +
   // 结果文件回收 + wire 应答映射。依赖同源派生——getClient 照 workflowAction 的
-  // deps.pm.getClient 形态（sessionService.getRpcClient 同一 pm）；sessionStore 与
-  // SessionRecords 装配（session-service.ts createModelOverrideQuery 注入点）同一实例；
-  // agentDir 缺省走适配器内 getPiAgentDir()（与 model-override-query 缺省锚一致）。
+  // deps.pm.getClient 形态（sessionService.getRpcClient 同一 pm）；agentDir 缺省走
+  // 适配器内 getPiAgentDir()（与 model-override-query 缺省锚一致）。覆盖状态查询不经
+  // 本网关（M1-3 收敛：model-override-query 是唯一查询入口，详情载荷组装路径直接装配）。
   // 注入后 handler 不再走 subagent_model_switch_unwired 兜底。
   const subagentModelSwitchGateway = createSubagentModelSwitchGateway({
     getClient: (sessionId) => sessionService.getRpcClient(sessionId),
     scanSessions: (opts) => sessionStore.scanSessions(opts),
-    overrideQuery: createModelOverrideQuery({ sessionStore }),
   })
   server.setServices(sessionService, configService, modelService, {
     extension: extensionService,
