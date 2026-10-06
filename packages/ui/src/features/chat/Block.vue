@@ -326,7 +326,7 @@ import BlockSubagent from './BlockSubagent.vue'
 import BlockScrollBox from './BlockScrollBox.vue'
 import ToolResultImages from './ToolResultImages.vue'
 import { BLOCK_ICON_CLASS, BLOCK_ICON_LUCIDE, BLOCK_LABEL_CLASS, RUNNING_LOADER_SVG, getBlockIcon } from './block-icon'
-import { formatClock, formatDuration, shortenForHeader, tailLines, stripAnsi } from './format-utils'
+import { formatClock, formatDuration, formatJsonIfValid, shortenForHeader, tailLines, stripAnsi } from './format-utils'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
 // barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
@@ -418,31 +418,8 @@ const toolResultClass = computed(() => [
   },
 ])
 
-/** JSON.stringify 缩进空格数（具名常量避 no-magic-numbers） */
-const JSON_INDENT = 2
-
-/**
- * JSON output 格式化：displayContent 为合法 JSON 时返回 2 空格缩进格式化串，否则 null。
- *
- * 背景：subagent（cw 递归编排）大量用 bash 执行 `cw ...` 命令，其 stdout 是 JSON
- *（cw execute/design/review 等结构化输出）。原样 whitespace-pre-wrap 渲染时，
- * 单行 JSON 既长又不可读，展开工具卡片看到一整坨压缩 JSON。
- * 格式化后缩进换行，可读性大幅提升；非 JSON（普通命令输出/文本）回退原样渲染。
- *
- * 判定：trim 后首字符为 `{` 或 `[` 才尝试 parse（避免对普通文本白跑 JSON.parse）。
- * 大对象开销可接受——computed 缓存 + 仅 toolExpanded（tool-result 渲染）时求值。
- */
-const parsedJsonOutput = computed<string | null>(() => {
-  const raw = displayContent.value
-  if (typeof raw !== 'string') return null
-  const trimmed = raw.trim()
-  if (trimmed.length === 0 || (trimmed[0] !== '{' && trimmed[0] !== '[')) return null
-  try {
-    return JSON.stringify(JSON.parse(trimmed), null, JSON_INDENT)
-  } catch {
-    return null
-  }
-})
+/** JSON output 格式化（合法 JSON → 2 空格缩进；非 JSON 回退 null 原样渲染）——实现拆至 format-utils（本文件行数预算，无行为差异）。 */
+const parsedJsonOutput = computed(() => formatJsonIfValid(displayContent.value))
 /** 复制用内容：bash 包含命令+输出，其余同 displayContent */
 const copyContent = computed(() => {
   if (isBashTool.value && argPath.value) {

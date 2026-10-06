@@ -150,3 +150,26 @@ const ANSI_RE = /\x1b\[[0-9;]*m/g
 export function stripAnsi(text: string): string {
   return text.replace(ANSI_RE, '')
 }
+
+/** JSON 缩进空格数（具名常量避 no-magic-numbers）。 */
+const JSON_INDENT = 2
+
+/**
+ * JSON output 格式化：raw 为字符串且 trim 后首字符为 `{` / `[` 时尝试 parse，
+ * 合法 → 2 空格缩进格式化串；否则 null（调用方回退原样渲染）。
+ *
+ * 背景：subagent（cw 递归编排）大量用 bash 执行结构化命令，stdout 是单行压缩
+ * JSON，原样 whitespace-pre-wrap 渲染不可读；格式化后可读性大幅提升。
+ * 判定先行避免对普通文本白跑 JSON.parse。大对象开销可接受——调用方 computed 缓存
+ * + 仅展开工具卡片时求值。（自 Block.vue 抽出，无行为差异。）
+ */
+export function formatJsonIfValid(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  if (trimmed.length === 0 || (trimmed[0] !== '{' && trimmed[0] !== '[')) return null
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, JSON_INDENT)
+  } catch {
+    return null
+  }
+}
