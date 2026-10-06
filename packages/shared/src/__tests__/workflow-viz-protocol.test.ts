@@ -80,7 +80,7 @@ const DAG_ERROR_CODES = [
  */
 const TRUNCATED_FIELD_NAMES = ['input', 'result', 'scriptSource', 'args'] as const
 
-/** §3.1-2① record 事件词表（跟随 core WorkflowRunEvent 联合 10 成员）。 */
+/** §3.1-2① record 事件词表（跟随 core WorkflowRunEvent 联合 11 成员——subagent-model-switch 增 model-override 记账帧）。 */
 const EVENT_TYPE_NAMES = [
   'run-created',
   'phase-started',
@@ -91,6 +91,7 @@ const EVENT_TYPE_NAMES = [
   'run-interrupted',
   'run-resumed',
   'run-settled',
+  'model-override',
   'worker-log',
 ] as const
 
@@ -181,7 +182,7 @@ describe('session.getWorkflowRunEvents 协议契约（U2，设计 §3.1-4 SSOT�
     expect(WORKFLOW_RUN_EVENT_TRUNCATE_BYTES).toBe(2048)
   })
 
-  it('事件类型全集：10 成员与 core WorkflowRunEvent 词表锚定一致 + 覆盖编译锁在盘', () => {
+  it('事件类型全集：11 成员与 core WorkflowRunEvent 词表锚定一致 + 覆盖编译锁在盘', () => {
     expect([...WORKFLOW_RUN_EVENT_TYPES_ALL]).toEqual([...EVENT_TYPE_NAMES])
     expectTypeOf<WorkflowRunEventType>().toEqualTypeOf<(typeof EVENT_TYPE_NAMES)[number]>()
     // 联合成员 type 键的双向穷举（与 workflow.ts 编译锁同判据的测试侧镜像）

@@ -22,7 +22,7 @@
 // 方）删除。[D4 事件词对齐 pi]（workflow-run-resume-revision）：ask-* 自造前缀改为
 // agent-started/agent-retrying/agent-settled（pi 原生 agent_start…agent_settled 同构），
 // 并新增 phase-started/phase-settled（D3 phase 状态机转移事件）与
-// run-interrupted/run-resumed（D2 interrupted 暂停态的转移事件）——词表 9 个。
+// run-interrupted/run-resumed（D2 interrupted 暂停态的转移事件）+ model-override（模型覆盖记账，不进状态机）+ worker-log（诊断）——词表 11 个。
 //
 // 层归属：Engine。状态机核心（词表 + 转移表 + transition）零 IO / 零时钟依赖，
 // 可独立编译测试；journal 实装是本模块唯一 IO 边（node:fs + core logger facade）。
@@ -172,7 +172,7 @@ function extractFailedRunErrorCode(run: WorkflowRun): RunErrorCode {
   return lastFailureKind ?? "unknown";
 }
 
-// ── 事件词表（D5-2 → [D4] 对齐 pi 后 9 个）───────────────────
+// ── 事件词表（D5-2 → [D4] 对齐 pi 9 个 + model-override + worker-log，11 个）──
 
 /**
  * 事件类型全集（判别键）——增删成员须先改设计载荷表再动此词表（D5 纪律；
@@ -450,9 +450,55 @@ export interface RunResumedEvent extends EventEnvelope { // oe-exempt:20260929:f
    * resume-run.resumeRunLocked 的 run-resumed 派发）。
    */
   budgetTokens?: number;
+  /**
+   * 本次复活实际生效的模型 canonical ref（`provider/modelId`，与 run-created.model
+   * 同构；subagent-model-switch 决策七：resume 生效模型三档回落的落定值随帧落盘，
+   * 观测面 + 跨崩溃存续）。条件式落字段（缺省/空串不落——未指定且无覆盖记账的
+   * 复活与现状同形）；写入点 = resume-run.resumeRunLocked 的 run-resumed 派发。
+   * 消费边界：观测面为主——派发侧的模型消费走宿主覆盖通道（决策六②，U4b 接线），
+   * 本字段不改重建 spec 的 run 级模型（决策七不采用①：改 spec 会击穿回放比对）。
+   */
+  model?: string;
 }
 
 /** `run-settled`——run 终局（一个 run 恰好一帧；终局通知的单点判定源，防多处各判漏分支）。 */
+/**
+ * 模型覆盖记账值（subagent-model-switch §6.2 记账形状 + §7.4 持久化 bullet）。
+ *
+ * model 形状 = SDK ModelRef（`{ provider, modelId }`，u-foundation 定形的结构化
+ * 契约——「拆装只发生在宿主编排层单点」；wire 语义：宿主组帧时拼 canonical ref
+ * `provider/modelId`，读取面按同语法拆回）。thinkingLevel 仅在用户切换时显式选择
+ * 档位才记账（§6.2：缺席时下一轮档位按现役候选链对新模型完整裁决）。
+ *
+ * 折叠语义（消费面单点 latestModelOverride）：生效覆盖值 = 最新一条，覆盖旧覆盖
+ * 值不叠加（设计不变量 2：至多一个用户覆盖值）。
+ */
+export interface WorkflowModelOverride {
+  /** 目标模型 ref（provider + modelId；SDK ModelRef 同形）。 */
+  model: { provider: string; modelId: string };
+  /** 显式选择的 thinking 档位（仅用户显式选择时记账；缺席 = 解析链完整裁决）。 */
+  thinkingLevel?: string;
+  /** 覆盖下达时刻（epoch ms；信封 ts 的载荷侧镜像——挂载值脱离事件信封单独存续）。 */
+  ts: number;
+}
+
+/**
+ * `model-override`——workflow run 级模型覆盖记账事件（subagent-model-switch §6.6
+ * 决策六①：run 的事件流追加覆盖记录，事件流是追加式单源、唯一合法持久化形态）。
+ *
+ * **不参与生命周期状态机**（worker-log 同款——记账面与状态面正交）：fold 显式
+ * 跳过（foldRunEventCheckpoint），不占 RUN_TRANSITIONS 表行，水位照常推进。
+ * 硬约束（调研 S3）：覆盖记录只做记账持久化与 resume 生效值缺省，不进 worker
+ * 的 `$MODEL`、不改重建 spec 的 run 级模型、不碰回放一致性比对——覆盖走宿主
+ * 派发侧覆写（决策六②），三者在场时回放哈希不受扰动。
+ *
+ * 写入面 = 宿主切换编排（U4b）经既有单写者入口 dispatchRunTrigger（W1 seq 契约：
+ * 新写行信封必填正整数 seq）。
+ */
+export interface ModelOverrideEvent extends EventEnvelope, WorkflowModelOverride { // oe-exempt:20261006:framework:workflow/record 协议契约类型——与既有 run 事件族同款豁免
+  type: "model-override";
+}
+
 /**
  * worker 诊断日志帧（[§2.1 errorLogs 持久化] ADR-0093）。
  *
@@ -478,7 +524,7 @@ export interface RunSettledEvent extends EventEnvelope { // oe-exempt:20260929:f
   artifactsDir: string;
 }
 
-/** run 事件判别联合（D5 词表全集，[D4] 对齐后 9 个；判别键 = type）。 */
+/** run 事件判别联合（D5 词表全集，[D4] 对齐 9 个 + model-override 记账 + worker-log 诊断；判别键 = type）。 */
 export type WorkflowRunEvent =
   | RunCreatedEvent
   | PhaseStartedEvent
@@ -489,6 +535,7 @@ export type WorkflowRunEvent =
   | RunInterruptedEvent
   | RunResumedEvent
   | RunSettledEvent
+  | ModelOverrideEvent
   | WorkerLogEvent;
 
 /**
@@ -1215,7 +1262,11 @@ export function foldRunEventCheckpoint(
     // 诊断事件（worker-log）不进状态机：诊断面与状态面正交，且终态是吸收态——若让
     // 它走 transition，run 终局后迟到的诊断日志会把 fold 判成坏帧。水位仍推进，避免
     // tail 消费方每轮重读同一批诊断行。
-    if (event.type === "worker-log") {
+    // 记账事件（model-override）同款跳过（subagent-model-switch §6.6①）：宿主覆盖
+    // 记账与生命周期正交——转移表无行，走 transition 会误判坏帧停摆（P8 核实结论）。
+    // 覆盖值的折叠消费在派生视图半边（壳侧 foldRecordStreamToRun → meta.modelOverride
+    // 与 resume 的 latestModelOverride 提取），不在状态机半边。
+    if (event.type === "worker-log" || event.type === "model-override") {
       checkpoint = { ...checkpoint, lastSeq: typeof seq === "number" ? seq : checkpoint.lastSeq };
       continue;
     }
@@ -1283,6 +1334,27 @@ export function errorLogsFromEvents(events: readonly WorkflowRunEvent[]): Worker
     if (event.type === "worker-log") logs.push(event.entry);
   }
   return logs.length > MAX_ERROR_LOGS ? logs.slice(-MAX_ERROR_LOGS) : logs;
+}
+
+/**
+ * 事件流 → 最新模型覆盖记账值（subagent-model-switch §6.2 折叠语义：生效覆盖值 =
+ * 最新一条，覆盖旧覆盖值不叠加——设计不变量 2；无覆盖 undefined）。
+ *
+ * 单点辅助，双消费面：① 壳侧 foldRecordStreamToRun 挂 WorkflowRunMeta.modelOverride
+ * （重启重建的派生视图）；② core resume-run 生效模型三档回落的中档（决策七）。
+ * 尾向扫描首条命中即返回（与 findLatestRunResumed 同款手写循环——findLast 属
+ * ES2023 lib，本包 target ES2022）。
+ */
+export function latestModelOverride(
+  events: readonly WorkflowRunEvent[],
+): WorkflowModelOverride | undefined {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i]!;
+    if (event.type === "model-override") {
+      return { model: event.model, ...(event.thinkingLevel !== undefined ? { thinkingLevel: event.thinkingLevel } : {}), ts: event.ts };
+    }
+  }
+  return undefined;
 }
 
 // ── journal 实装（createRunEventJournal——本模块唯一 IO 边）────

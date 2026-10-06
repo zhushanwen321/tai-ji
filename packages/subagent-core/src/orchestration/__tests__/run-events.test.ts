@@ -2,12 +2,12 @@
 // workflow-run-resume-revision [D2]/[D4] 重构后词表）。
 //
 // 覆盖：
-// - 词表断言：RUN_EVENT_TYPES 9 个（[D4] 对齐 pi：ask-* → agent-*、新增
+// - 词表断言：RUN_EVENT_TYPES 11 个（[D4] 对齐 pi：ask-* → agent-*、新增
 //   phase-started/phase-settled（[D3]）与 run-interrupted/run-resumed（[D2]）；
 //   armed 随 [D5] 删、member-pool 随 [D6] 绑定消解删）；ALL_RUN_LIFECYCLES
 //   四态 + interrupted 暂停态（[D2]）；ALL_RUN_OUTCOMES 四值（completed→done
 //   改名、interrupted 移出、time_limited 升格）
-// - 判别联合 exhaustive：switch 全 9 分支、无 default 吞噬（never 穷尽性断言——
+// - 判别联合 exhaustive：switch 全分支、无 default 吞噬（never 穷尽性断言——
 //   编译期由 tsc --noEmit 把关，运行期用样本事件核对分支映射）
 // - 载荷形状：样本事件逐字段断言（agent-settled / run-settled 各含成功与失败
 //   两形态；run-interrupted / run-resumed 转移事件）
@@ -49,7 +49,7 @@ import {
 } from "../run-events.ts";
 import { ALL_DONE_REASONS, isTerminalDoneReason } from "../models/types.ts";
 
-// ── 样本事件（覆盖全部 9 个 type；路径值均为 fixture 假路径）────
+// ── 样本事件（覆盖全部 11 个 type；路径值均为 fixture 假路径）────
 //
 // seq 信封：样本按全链时序取号（与 append 分配序一致——record 实装
 // 用例的「append → scan 往返等价」直接复用样本数组断言）。
@@ -163,6 +163,15 @@ const workerLogSample: WorkflowRunEvent = {
   entry: { level: "error", message: "worker blew up" },
 };
 
+/** [subagent-model-switch §6.6] 覆盖记账帧样本（不进状态机；latestModelOverride 折叠消费）。 */
+const modelOverrideSample: WorkflowRunEvent = {
+  type: "model-override",
+  seq: 13,
+  ts: TS + 260_000,
+  model: { provider: "zai-coding-cn", modelId: "glm-5.3" },
+  thinkingLevel: "high",
+};
+
 const runSettledCompleted: WorkflowRunEvent = {
   type: "run-settled",
   seq: 11,
@@ -199,7 +208,7 @@ function stripSeq<T extends { seq: number }>(event: T): Omit<T, "seq"> {
 }
 
 /**
- * switch 覆盖全部 9 个 type 且无 default 分支——switch 之后 event 只剩 never，
+ * switch 覆盖全部 11 个 type 且无 default 分支——switch 之后 event 只剩 never，
  * 对其赋值即穷尽性断言：词表新增成员时该行编译失败（tsc 把关），强制同步扩展
  * 本处理样例。返回分支标记供运行期核对样本事件各命中唯一分支。
  */
@@ -223,6 +232,8 @@ function labelOf(event: WorkflowRunEvent): string {
       return `run-resumed:${event.host ?? "none"}`;
     case "run-settled":
       return `run-settled:${event.outcome}:${event.errorCode ?? "none"}`;
+    case "model-override":
+      return `model-override:${event.model.provider}/${event.model.modelId}:${event.thinkingLevel ?? "none"}`;
     case "worker-log":
       return `worker-log:${event.entry.level}:${event.entry.message}`;
   }
@@ -233,7 +244,7 @@ function labelOf(event: WorkflowRunEvent): string {
 // ── 词表 ─────────────────────────────────────────────────────
 
 describe("事件词表（D5 → [D4] 对齐 pi）", () => {
-  it("RUN_EVENT_TYPES 恰好 10 个成员（[D4] agent-* 对齐 + phase-*/run-interrupted/run-resumed 新增；armed 随 [D5] 删、member-pool 随 [D6] 绑定消解删；无 world-run 族——脚本 API 面无子进程调用通道；worker-log 随 [ADR-0094] 诊断日志持久化新增，**不进状态机**故不占转移表行）", () => {
+  it("RUN_EVENT_TYPES 恰好 11 个成员（[D4] agent-* 对齐 + phase-*/run-interrupted/run-resumed 新增；armed 随 [D5] 删、member-pool 随 [D6] 绑定消解删；无 world-run 族——脚本 API 面无子进程调用通道；model-override 随 subagent-model-switch 覆盖记账新增、worker-log 随 [ADR-0094] 诊断日志持久化新增，两者均**不进状态机**故不占转移表行）", () => {
     expect(RUN_EVENT_TYPES).toEqual([
       "run-created",
       "phase-started",
@@ -244,6 +255,7 @@ describe("事件词表（D5 → [D4] 对齐 pi）", () => {
       "run-interrupted",
       "run-resumed",
       "run-settled",
+      "model-override",
       "worker-log",
     ]);
   });
@@ -279,7 +291,7 @@ describe("事件词表（D5 → [D4] 对齐 pi）", () => {
 // ── 判别联合穷尽性 ───────────────────────────────────────────
 
 describe("判别联合 exhaustive（无 default 吞噬）", () => {
-  it("9 类样本事件各命中唯一分支，标记与预期一致", () => {
+  it("11 类样本事件各命中唯一分支，标记与预期一致", () => {
     const samples: WorkflowRunEvent[] = [
       runCreated,
       phaseStarted,
@@ -290,6 +302,7 @@ describe("判别联合 exhaustive（无 default 吞噬）", () => {
       runInterrupted,
       runResumed,
       runSettledFailed,
+      modelOverrideSample,
     ];
     expect(samples.map(labelOf)).toEqual([
       "run-created:review-fix-loop",
@@ -301,6 +314,7 @@ describe("判别联合 exhaustive（无 default 吞噬）", () => {
       "run-interrupted:crashed",
       "run-resumed:pi-host-1",
       "run-settled:failed:engine_crashed",
+      "model-override:zai-coding-cn/glm-5.3:high",
     ]);
   });
 
@@ -317,6 +331,7 @@ describe("判别联合 exhaustive（无 default 吞噬）", () => {
       runResumed,
       runSettledFailed,
       runSettledCompleted,
+      modelOverrideSample,
       workerLogSample,
     ];
     expect(new Set(samples.map((e) => e.type))).toEqual(new Set(RUN_EVENT_TYPES));
@@ -498,7 +513,7 @@ describe("RunEventJournal 接口形态（仅类型签名——实装归 journal 
 // 状态机（转移表 + transition 纯函数 + record 实装）
 // ═══════════════════════════════════════════════════════════
 
-/** 全触发类型（9 journal 事件 + 1 控制事件 = 10，穷尽遍历用；[D4] 词表后）。 */
+/** 全触发类型（11 journal 事件 + 1 控制事件 = 12，穷尽遍历用；[D4] 词表 + model-override 后）。 */
 const ALL_TRIGGER_TYPES: readonly (RunEventType | ControlTriggerType)[] = [
   ...RUN_EVENT_TYPES,
   ...CONTROL_TRIGGER_TYPES,
@@ -515,6 +530,11 @@ const triggerSamples: Record<RunEventType | ControlTriggerType, TransitionTrigge
   "run-interrupted": runInterrupted,
   "run-resumed": runResumed,
   "run-settled": runSettledFailed,
+  "model-override": {
+    type: "model-override",
+    model: { provider: "zai-coding-cn", modelId: "glm-5.3" },
+    ts: 1_700_000_000_000,
+  },
   "worker-log": { type: "worker-log", entry: { level: "error", message: "boom" }, ts: 1_700_000_000_000 },
   "cancel-requested": { type: "cancel-requested", reason: "user abort" },
 };
@@ -632,12 +652,12 @@ describe("转移表完整性", () => {
     }
   });
 
-  it("表规模快照：15 行 / 14 个合法 (lifecycle × 事件) 组合 / 41 个表外组合（5 × 11 = 55 全积）——[D2] dispatched 并入 running、armed 三行随 [D5] 删、member-pool 三行随 [D6] 删、新增 run-interrupted 两行 + run-resumed 一行 + phase 三行；[ADR-0094] worker-log 是诊断帧、不进状态机故无表行（表外组合 +5 = 每个 lifecycle 一个）", () => {
+  it("表规模快照：15 行 / 14 个合法 (lifecycle × 事件) 组合 / 46 个表外组合（5 × 12 = 60 全积）——[D2] dispatched 并入 running、armed 三行随 [D5] 删、member-pool 三行随 [D6] 删、新增 run-interrupted 两行 + run-resumed 一行 + phase 三行；worker-log（[ADR-0094] 诊断帧）与 model-override（subagent-model-switch 覆盖记账帧）均不进状态机故无表行（表外组合各 +5 = 每个 lifecycle 一个）", () => {
     expect(RUN_TRANSITIONS).toHaveLength(15);
     const legalKeys = new Set(RUN_TRANSITIONS.map((r) => `${r.from}|${r.on}`));
     expect(legalKeys.size).toBe(14);
-    expect(ALL_RUN_LIFECYCLES.length * ALL_TRIGGER_TYPES.length).toBe(55);
-    expect(55 - legalKeys.size).toBe(41);
+    expect(ALL_RUN_LIFECYCLES.length * ALL_TRIGGER_TYPES.length).toBe(60);
+    expect(60 - legalKeys.size).toBe(46);
   });
 
   it("[D2] interrupted 唯一出边 = run-resumed（暂停态无特例转移行、无 guard——终局/取消在 interrupted 态表外 fail-fast，非「终局了却没死透」）", () => {

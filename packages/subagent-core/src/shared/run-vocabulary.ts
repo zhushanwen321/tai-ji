@@ -163,6 +163,7 @@ export const RUN_EVENT_TYPES = [
   "run-interrupted",
   "run-resumed",
   "run-settled",
+  "model-override",
   "worker-log",
 ] as const;
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number];

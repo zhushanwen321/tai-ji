@@ -69,7 +69,13 @@ function scanEvents(runId: string): Promise<readonly WorkflowRunEvent[]> {
 /** 预置「崩溃收编后」record 流：2 settled + 1 in-flight + run-interrupted。 */
 async function seedInterruptedRecord(
   runId: string,
-  opts: { scriptSource?: string; scriptPath?: string; withSessionFile?: boolean } = {},
+  opts: {
+    scriptSource?: string;
+    scriptPath?: string;
+    withSessionFile?: boolean;
+    createdModel?: string;
+    overrides?: Array<{ provider: string; modelId: string; thinkingLevel?: string }>;
+  } = {},
 ): Promise<void> {
   const journal = createRunEventJournal(journalDir);
   await journal.append(runId, {
@@ -79,6 +85,7 @@ async function seedInterruptedRecord(
     argsSummary: "{}",
     scriptSource: opts.scriptSource ?? SCRIPT_SOURCE,
     ...(opts.scriptPath !== undefined ? { scriptPath: opts.scriptPath } : {}),
+    ...(opts.createdModel !== undefined ? { model: opts.createdModel } : {}),
     ts: T0,
   });
   await journal.append(runId, {
@@ -107,6 +114,16 @@ async function seedInterruptedRecord(
     attempt: 1,
     ts: T0 + 7_000,
   });
+  // 覆盖记账帧（subagent-model-switch §6.6①：宿主切换编排经单写者入口落盘；
+  // 记账面不进状态机，journal 直写是测试面对单写者原语的直接消费）
+  for (const [i, override] of (opts.overrides ?? []).entries()) {
+    await journal.append(runId, {
+      type: "model-override",
+      model: { provider: override.provider, modelId: override.modelId },
+      ...(override.thinkingLevel !== undefined ? { thinkingLevel: override.thinkingLevel } : {}),
+      ts: T0 + 7_500 + i,
+    });
+  }
   await journal.append(runId, {
     type: "run-interrupted",
     errorCode: "crashed",
@@ -933,5 +950,69 @@ describe("resumeRun — 段 6 接管失败补偿（僵尸 run 防线）", () => 
     } finally {
       errorSpy.mockRestore();
     }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// [subagent-model-switch 决策七] resume 生效模型三档回落：
+//   resume 显式参数 > journal 覆盖记账（model-override 折叠）> run-created.model；
+//   生效值随 run-resumed 帧落盘（观测面 + 跨崩溃存续）；重建 spec.model 不改写
+//   （决策七不采用①边界——改 spec 会击穿回放比对，消费点归派发侧 U4b）。
+// ════════════════════════════════════════════════════════════════════════════
+
+describe("resume 生效模型三档回落（决策七，与预算双轴同构）", () => {
+  /** resume 后取最近一条 run-resumed 帧（生效值落盘断言面）。 */
+  async function lastResumedEvent(runId: string): Promise<Extract<WorkflowRunEvent, { type: "run-resumed" }>> {
+    const events = await scanEvents(runId);
+    const resumed = events.filter((e): e is Extract<WorkflowRunEvent, { type: "run-resumed" }> => e.type === "run-resumed");
+    expect(resumed.length).toBeGreaterThan(0);
+    return resumed.at(-1)!;
+  }
+
+  it("档 1：显式 model 参数 > journal 覆盖记账（两者同时在场上，参数赢）", async () => {
+    await seedInterruptedRecord("wf-model-param", {
+      createdModel: "origin/o1",
+      overrides: [{ provider: "b-provider", modelId: "b1" }],
+    });
+    const { deps, runs } = makeDeps();
+
+    await resumeRun("wf-model-param", deps, { now: () => T0 + 100_000, model: "c-provider/c1" });
+
+    const resumed = await lastResumedEvent("wf-model-param");
+    expect(resumed.model).toBe("c-provider/c1");
+    // 决策七不采用①边界：重建 spec.model 不被改写（保持 run-created 档原值）
+    expect(runs.get("wf-model-param")!.spec.model).toBe("origin/o1");
+  });
+
+  it("档 2：无参 resume 吃 journal 覆盖记账（结构化 {provider, modelId} 拼 canonical ref；多条覆盖取最新不叠加）", async () => {
+    await seedInterruptedRecord("wf-model-override", {
+      createdModel: "origin/o1",
+      overrides: [
+        { provider: "b-provider", modelId: "b1" },
+        { provider: "c-provider", modelId: "c2", thinkingLevel: "high" },
+      ],
+    });
+    const { deps, runs } = makeDeps();
+
+    // 不带参数——2026-10-05 用户裁决核心诉求：resume 不带参数也吃持久化覆盖
+    await resumeRun("wf-model-override", deps, { now: () => T0 + 100_000 });
+
+    const resumed = await lastResumedEvent("wf-model-override");
+    expect(resumed.model).toBe("c-provider/c2");
+    expect(runs.get("wf-model-override")!.spec.model).toBe("origin/o1");
+  });
+
+  it("档 3：无覆盖时回落 run-created.model；三处皆无 = run-resumed 帧不落 model 键（现状同形）", async () => {
+    await seedInterruptedRecord("wf-model-created", { createdModel: "origin/o1" });
+    const { deps } = makeDeps();
+    await resumeRun("wf-model-created", deps, { now: () => T0 + 100_000 });
+    expect((await lastResumedEvent("wf-model-created")).model).toBe("origin/o1");
+
+    // 三处皆无（未显式、无覆盖、创建未指定 = 继承主 agent 模型）：帧无 model 键
+    await seedInterruptedRecord("wf-model-none");
+    const { deps: depsNone } = makeDeps();
+    await resumeRun("wf-model-none", depsNone, { now: () => T0 + 100_000 });
+    const noneResumed = await lastResumedEvent("wf-model-none");
+    expect("model" in noneResumed).toBe(false);
   });
 });

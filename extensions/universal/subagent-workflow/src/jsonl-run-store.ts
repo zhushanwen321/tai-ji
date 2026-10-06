@@ -76,7 +76,7 @@ import {
   type WorkflowRunEvent,
 } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
-import { errorLogsFromEvents, rebuildBudget, runAccountingFromEvents } from "@zhushanwen/subagent-core";
+import { errorLogsFromEvents, latestModelOverride, rebuildBudget, runAccountingFromEvents } from "@zhushanwen/subagent-core";
 import { guardStaleCtx, isEnoentError, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // ── [W1 / D1] v2 条目读面（注册定界 + 终态条目抑制）────────────────
@@ -506,6 +506,11 @@ function foldRecordStreamToRun(
   const calls = draftsToAgentCalls(drafts, sharedNodes, nodes);
 
   const settledEvent = lastRunSettledEvent(events);
+  // [subagent-model-switch §6.6①/§7.4] 覆盖记账折叠（派生视图半边）：生效覆盖值 =
+  // 最新一条（latestModelOverride core 单点——覆盖旧覆盖值不叠加，不变量 2）；
+  // 无覆盖 undefined 不造键。fold 未跟时本行缺失 = 覆盖状态静默丢行——
+  // jsonl-run-store-loadall 的 fold 消费用例是此丢行风险的机器防线（P8 第五道）。
+  const modelOverride = latestModelOverride(events);
   if (settledEvent === undefined) {
     const interruptedAt = lastInterruptedAt(events);
     return WorkflowRun.reconstruct(
@@ -524,6 +529,7 @@ function foldRecordStreamToRun(
         //（CLI/TUI 不显示僵尸「运行中」；resume 资格判据在 core fold lifecycle，
         // 不受本投影影响）。
         ...(interruptedAt !== undefined ? { interruptedAt } : {}),
+        ...(modelOverride !== undefined ? { modelOverride } : {}),
       },
     );
   }
@@ -543,6 +549,7 @@ function foldRecordStreamToRun(
     {
       startedAt: startedAtIso,
       completedAt: new Date(settledEvent.ts).toISOString(),
+      ...(modelOverride !== undefined ? { modelOverride } : {}),
     },
   );
 }

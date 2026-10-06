@@ -16,6 +16,10 @@
  * store 单模式）。
  */
 
+// SubagentModelOverrideStatus / SubagentRecentEffectiveModel：wire 详情载荷字段形状
+// 单源（./subagent 具名类型，subagent-model-switch U1 详情载荷透传）。
+import type { SubagentModelOverrideStatus, SubagentRecentEffectiveModel } from './subagent'
+
 /**
  * workflow run 状态投影三态（[D2] workflow-run-resume-revision）：running（进行中）/
  * interrupted（已中断、可续跑——暂停态，非终局）/ done（终局）。中断 run 在 GUI
@@ -88,6 +92,19 @@ export interface WorkflowAgentCall {
    * 派生态展示；缺省 = 无重试记录。
    */
   lastRetry?: { attempt: number; backoffMs: number; reason: string }
+  /**
+   * 用户覆盖状态（subagent-model-switch §9 transport 行，run 详情侧按成员标识逐成员
+   * 携带——run 级覆盖意图经 runtime 详情载荷组装分发到各成员条目；缺席 = 该 run 无
+   * 用户覆盖。与 SubagentRecord.modelOverride 同构，语义见该字段注释）。
+   */
+  modelOverride?: SubagentModelOverrideStatus
+  /**
+   * 最近生效值（subagent-model-switch §6.4 分叉态重载承接字段，run 详情侧逐成员携带、
+   * 聚合面不取单一值——同族替换可只发生在部分成员）。仅 pi 引擎成员派生（源 = 该成员
+   * pi session 文件 model_change 尾条目）；与 SubagentRecord.recentEffectiveModel 同构，
+   * 语义见该字段注释。
+   */
+  recentEffectiveModel?: SubagentRecentEffectiveModel
 }
 
 /**
@@ -297,6 +314,7 @@ export const WORKFLOW_RUN_EVENT_TYPES_ALL = [
   'run-interrupted',
   'run-resumed',
   'run-settled',
+  'model-override',
   'worker-log',
 ] as const satisfies readonly string[]
 
@@ -432,6 +450,8 @@ export interface WorkflowRunResumedEntry extends WorkflowRunEventEntryBase {
   budgetTimeMs?: number
   /** 本次复活实际生效的 token 预算上界（可缺省 = 不限制或旧格式帧）。 */
   budgetTokens?: number
+  /** 本次复活实际生效的模型 canonical ref（`provider/modelId`，与 run-created.model 同构；可缺省 = 未指定且无覆盖记账）。 */
+  model?: string
 }
 
 /** `run-settled` 条目（run 终局，一个 run 恰好一帧）。 */
@@ -447,6 +467,18 @@ export interface WorkflowRunSettledEntry extends WorkflowRunEventEntryBase {
   artifactsDir: string
 }
 
+/**
+ * `model-override` 条目（workflow run 级模型覆盖记账——宿主切换编排写入，
+ * subagent-model-switch §6.6①；不参与生命周期状态机的记账面）。
+ */
+export interface WorkflowRunModelOverrideEntry extends WorkflowRunEventEntryBase {
+  type: 'model-override'
+  /** 目标模型 ref（provider + modelId，与引擎协议 ModelRef 同形）。 */
+  model: { provider: string; modelId: string }
+  /** 显式选择的 thinking 档位（仅用户显式选择时携带；缺席 = 解析链完整裁决）。 */
+  thinkingLevel?: string
+}
+
 /** `worker-log` 条目（worker 诊断日志帧——不参与生命周期状态机的诊断面）。 */
 export interface WorkflowRunWorkerLogEntry extends WorkflowRunEventEntryBase {
   type: 'worker-log'
@@ -455,7 +487,7 @@ export interface WorkflowRunWorkerLogEntry extends WorkflowRunEventEntryBase {
 }
 
 /**
- * record 事件流条目判别联合（事件流 RPC 的行形态；判别键 = type，10 成员跟随
+ * record 事件流条目判别联合（事件流 RPC 的行形态；判别键 = type，11 成员跟随
  * core WorkflowRunEvent 词表）。大字段截断语义见各成员注释与信封
  * truncatedFields——四个全文载荷字段（input/result/scriptSource/args）在本协议
  * 形态中恒为文本截断值（对象字段 = JSON 序列化文本前缀），被截断者由
@@ -471,6 +503,7 @@ export type WorkflowRunEventEntry =
   | WorkflowRunInterruptedEntry
   | WorkflowRunResumedEntry
   | WorkflowRunSettledEntry
+  | WorkflowRunModelOverrideEntry
   | WorkflowRunWorkerLogEntry
 
 /** 联合成员 type 键的提取（覆盖编译锁的输入）。 */

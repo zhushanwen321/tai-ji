@@ -45,6 +45,7 @@ import {
 import { RUN_EVENTS_SUFFIX } from "../shared/run-vocabulary.ts";
 import {
   foldRunEventFrames,
+  latestModelOverride,
   parseLegacyArgsSummary,
   parseRecordStreamLine,
   type RunEventLineIssue,
@@ -235,6 +236,10 @@ export function computeActiveElapsedMs(events: readonly WorkflowRunEvent[]): num
       case "run-settled":
         closeSegment();
         continue;
+      case "model-override":
+        // 宿主覆盖记账帧（subagent-model-switch §6.6①）：非执行事件——不切段、
+        // 不推进 lastExecutionTs（记账 ts 不计入活跃段算式，与边界帧同族的正交面）
+        continue;
       default:
         lastExecutionTs = Math.max(lastExecutionTs ?? 0, event.ts);
     }
@@ -287,6 +292,17 @@ export interface ResumeRunOptions { // oe-exempt:20260929:framework:resumeRun pu
    * 落盘——全链单值，不在别处二次折算。
    */
   budgetTokens?: number;
+  /**
+   * 目标模型 canonical ref（`provider/modelId[:thinkingLevel]` 语法，与 run-created.model
+   * 同构；subagent-model-switch 决策七）。生效模型三档回落（单点在
+   * assertResumeEligibility，与预算双轴同构）：显式提供 = 覆盖；缺省 = 沿用 journal
+   * 覆盖记账（model-override 帧折叠，latestModelOverride 单点提取——resume 不带参数
+   * 也吃持久化覆盖，2026-10-05 用户裁决核心诉求）；再缺省 = run-created 帧的创建
+   * 模型；三处都没有 = 继承主 agent 模型（现状语义）。生效值随本次 run-resumed 帧
+   * 落盘（观测面 + 跨崩溃存续）；派发侧消费走宿主覆盖通道（决策六②，U4b 接线），
+   * 不改重建 spec 的 run 级模型（决策七不采用①：改 spec 会击穿回放比对）。
+   */
+  model?: string;
   /** 时钟注入（epoch ms）；缺省 Date.now()——run-resumed 帧 ts 与预算算式的确定性测试通道。 */
   now?: () => number;
   /** 宿主标识（run-resumed 帧 host 载荷——跨进程锁裁决的胜出方语境）。 */
@@ -424,6 +440,27 @@ function effectiveResumeBudget(
 }
 
 /**
+ * 生效模型三档回落（assertResumeEligibility 拆出，与 effectiveResumeBudget 同构单点
+ * ——subagent-model-switch 决策七）：显式 options.model > journal 覆盖记账
+ * （model-override 帧，latestModelOverride 折叠——结构化 {provider, modelId} 在本
+ * 单点拼 canonical ref `${provider}/${modelId}`，parseModelSelector 语法 provider
+ * 不含 `/`，无损可逆）> run-created 记录的创建模型；三处都没有 = undefined（继承
+ * 主 agent 模型，现状语义）。本值同时供 run-resumed 帧落盘——不出现第二处折算。
+ */
+function effectiveResumeModel(
+  options: ResumeRunOptions | undefined,
+  events: readonly WorkflowRunEvent[],
+  created: Extract<WorkflowRunEvent, { type: "run-created" }>,
+): string | undefined {
+  const override = latestModelOverride(events);
+  const overrideRef =
+    override !== undefined && override.model.provider !== "" && override.model.modelId !== ""
+      ? `${override.model.provider}/${override.model.modelId}`
+      : undefined;
+  return options?.model ?? overrideRef ?? created.model;
+}
+
+/**
  * D10 预算预检（assertResumeEligibility 拆出；场景 16：搁置不计，活跃已耗不退）。
  * 时间轴：已耗活跃时长 ≥ 上限即拒绝。token 轴（与时间轴对齐）：已耗口径 =
  * runAccountingFromEvents 单源（agent-settled.result.usage 同一加权折算，下界近似
@@ -470,7 +507,7 @@ function assertResumeEligibility(
   runId: string,
   recordPath: string,
   options: ResumeRunOptions | undefined,
-): { events: WorkflowRunEvent[]; created: Extract<WorkflowRunEvent, { type: "run-created" }>; activeElapsedMs: number; budgetTimeMs: number | undefined; budgetTokens: number | undefined } {
+): { events: WorkflowRunEvent[]; created: Extract<WorkflowRunEvent, { type: "run-created" }>; activeElapsedMs: number; budgetTimeMs: number | undefined; budgetTokens: number | undefined; model: string | undefined } {
   const reject = (message: string): ResumeRejectionError => new ResumeRejectionError(message);
   const { events, created } = readResumableStream(runId, recordPath);
   // [§2.5 D14] args 一致性判定（fail-fast 于任何副作用之前）：数据源 = 上面已读到的
@@ -499,7 +536,9 @@ function assertResumeEligibility(
   const lastResumed = findLatestRunResumed(events);
   const { budgetTimeMs, budgetTokens } = effectiveResumeBudget(options, lastResumed, created);
   const activeElapsedMs = assertBudgetNotExhausted(runId, events, budgetTimeMs, budgetTokens);
-  return { events, created, activeElapsedMs, budgetTimeMs, budgetTokens };
+  // 生效模型（三档回落单点，与预算双轴同构——决策七「资格校验与生效值解析单点」）
+  const model = effectiveResumeModel(options, events, created);
+  return { events, created, activeElapsedMs, budgetTimeMs, budgetTokens, model };
 }
 
 
@@ -579,13 +618,15 @@ function journalDirSpread(
  * 段 5 run-resumed 帧载荷组装（resumeRunLocked 拆出）：各条件 spread 段——reason /
  * host 缺席不落键；本次复活实际生效的预算随帧落盘（跨崩溃存续的数据面）仅 > 0 落
  * 字段——未设/0/负值不落（与 run-created 同款条件式），读取面按「最近一条
- * run-resumed 的字段 ?? run-created 的字段」回落。
+ * run-resumed 的字段 ?? run-created 的字段」回落。生效模型同款落盘（三档回落
+ * 落定值，canonical ref；缺省不落 = 未指定且无覆盖记账的复活与现状同形）。
  */
 function buildRunResumedPayload(
   options: ResumeRunOptions | undefined,
   planSummary: string | undefined,
   budgetTimeMs: number | undefined,
   budgetTokens: number | undefined,
+  model: string | undefined,
   resumedAt: number,
 ): Extract<WorkflowRunEventInput, { type: "run-resumed" }> {
   return {
@@ -594,6 +635,7 @@ function buildRunResumedPayload(
     ...(options?.host !== undefined ? { host: options.host } : {}),
     ...(budgetTimeMs !== undefined && budgetTimeMs > 0 ? { budgetTimeMs } : {}),
     ...(budgetTokens !== undefined && budgetTokens > 0 ? { budgetTokens } : {}),
+    ...(model !== undefined && model !== "" ? { model } : {}),
     ts: resumedAt,
   };
 }
@@ -638,7 +680,7 @@ async function resumeRunLocked(
   now: () => number,
 ): Promise<string> {
   // ── 2. 资格校验 ──
-  const { events, created, activeElapsedMs, budgetTimeMs, budgetTokens } = assertResumeEligibility(runId, recordPath, options);
+  const { events, created, activeElapsedMs, budgetTimeMs, budgetTokens, model } = assertResumeEligibility(runId, recordPath, options);
 
   // ── 2b. 派发前语法闸（第 4 道检查的 resume 侧）──
   // run-created 里的 scriptSource 是权威脚本文本；不可编译（顶层重声明宿主预声明名）
@@ -669,7 +711,7 @@ async function resumeRunLocked(
   const dispatchSource = { runId, ...journalDirSpread(options) };
   const resumedAt = now();
   try {
-    await dispatchRunTrigger(dispatchSource, buildRunResumedPayload(options, planSummary, budgetTimeMs, budgetTokens, resumedAt));
+    await dispatchRunTrigger(dispatchSource, buildRunResumedPayload(options, planSummary, budgetTimeMs, budgetTokens, model, resumedAt));
   } catch (err) {
     // 让位（表外转移）仅在流被并发篡改时可达（锁段内无并发写者）——资格异常上抛，
     // 状态无损（run-resumed 未落，run 仍 interrupted 可重试）

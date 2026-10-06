@@ -231,6 +231,8 @@ function projectRunEventEntry(event: WorkflowRunEvent): WorkflowRunEventEntry {
         ...(event.reason !== undefined ? { reason: event.reason } : {}),
         artifactsDir: event.artifactsDir,
       }
+    case 'model-override':
+      return projectModelOverride(event)
     case 'worker-log':
       return { type: 'worker-log', ...eventEnvelope(event), entry: event.entry }
   }
@@ -304,6 +306,17 @@ function projectRunResumed(event: Extract<WorkflowRunEvent, { type: 'run-resumed
     ...(event.host !== undefined ? { host: event.host } : {}),
     ...(event.budgetTimeMs !== undefined ? { budgetTimeMs: event.budgetTimeMs } : {}),
     ...(event.budgetTokens !== undefined ? { budgetTokens: event.budgetTokens } : {}),
+    ...(event.model !== undefined ? { model: event.model } : {}),
+  }
+}
+
+/** model-override 条目：覆盖记账载荷透传（小载荷无截断面）。 */
+function projectModelOverride(event: Extract<WorkflowRunEvent, { type: 'model-override' }>): WorkflowRunEventEntry {
+  return {
+    type: 'model-override',
+    ...eventEnvelope(event),
+    model: event.model,
+    ...(event.thinkingLevel !== undefined ? { thinkingLevel: event.thinkingLevel } : {}),
   }
 }
 

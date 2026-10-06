@@ -303,3 +303,116 @@ describe("[D6(a) 第 1 步] 重水合 run 的终局判定源 = 重建 fold 结�
     expect(runs.has(run.runId)).toBe(false);
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// [subagent-model-switch §6.6①/§7.4] fold 覆盖事件消费用例（P8 第五道防线）：
+// record 流写入 model-override 覆盖事件行 → fold 产物（WorkflowRun）meta 含覆盖
+// 状态。fold 按事件类型字面量独立分派、core 词表已扩但本 fold 未跟时新事件行被
+// 静默跳过 = 覆盖状态丢行——本用例在该回归下确实变红（meta.modelOverride 缺失），
+// 是「词表已扩、fold 未跟」丢行风险的唯一快速防线（设计 §3.5 P8 防线清单）。
+// ════════════════════════════════════════════════════════════════════════════
+
+describe("fold 覆盖事件消费（model-override → meta.modelOverride 派生视图）", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-fold-model-override-"));
+    loggerMock.warn.mockClear();
+    loggerMock.error.mockClear();
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  /** 写 record 流 + v2 注册条目 → loadAll 重建该 run。 */
+  async function rebuild(runId: string, lines: string[]): Promise<WorkflowRun> {
+    const recordPath = recordPathOf(tmpDir, runId);
+    fs.mkdirSync(path.dirname(recordPath), { recursive: true });
+    fs.writeFileSync(recordPath, `${lines.join("\n")}\n`, "utf8");
+    const store = new JsonlRunStore({
+      sessionDir: tmpDir,
+      ctx: mkCtx([v2RegisteredEntry(runId, recordPath)]),
+    });
+    const loaded = await store.loadAll();
+    expect(loaded.map((r) => r.runId)).toEqual([runId]);
+    return loaded[0]!;
+  }
+
+  it("写入覆盖事件行 → fold 产物 meta.modelOverride 含覆盖状态（fold 未跟时本用例红——P8 丢行防线）", async () => {
+    const run = await rebuild("wf-fold-ovr-single", [
+      JSON.stringify({
+        type: "run-created",
+        seq: 1,
+        ts: Date.now(),
+        runId: "wf-fold-ovr-single",
+        workflowName: "test-script",
+        argsSummary: "{}",
+        scriptSource: "agent('a')",
+      }),
+      JSON.stringify({
+        type: "model-override",
+        seq: 2,
+        ts: Date.now() + 1_000,
+        model: { provider: "b-provider", modelId: "b1" },
+        thinkingLevel: "high",
+      }),
+    ]);
+
+    expect(run.meta.modelOverride).toEqual({
+      model: { provider: "b-provider", modelId: "b1" },
+      thinkingLevel: "high",
+      ts: expect.any(Number),
+    });
+  });
+
+  it("两条覆盖事件 → 生效值 = 最新一条（覆盖旧覆盖值不叠加，不变量 2）", async () => {
+    const run = await rebuild("wf-fold-ovr-latest", [
+      JSON.stringify({
+        type: "run-created",
+        seq: 1,
+        ts: Date.now(),
+        runId: "wf-fold-ovr-latest",
+        workflowName: "test-script",
+        argsSummary: "{}",
+        scriptSource: "agent('a')",
+      }),
+      JSON.stringify({
+        type: "model-override",
+        seq: 2,
+        ts: Date.now() + 1_000,
+        model: { provider: "b-provider", modelId: "b1" },
+      }),
+      JSON.stringify({
+        type: "model-override",
+        seq: 3,
+        ts: Date.now() + 2_000,
+        model: { provider: "c-provider", modelId: "c1" },
+      }),
+      JSON.stringify({ type: "run-settled", seq: 4, ts: Date.now() + 3_000, outcome: "done", artifactsDir: "/tmp/wf" }),
+    ]);
+
+    expect(run.meta.modelOverride).toEqual({
+      model: { provider: "c-provider", modelId: "c1" },
+      ts: expect.any(Number),
+    });
+  });
+
+  it("无覆盖事件 → meta 无 modelOverride 键（缺省不造键）；覆盖帧不干扰 calls/终局折叠", async () => {
+    const run = await rebuild("wf-fold-ovr-absent", [
+      JSON.stringify({
+        type: "run-created",
+        seq: 1,
+        ts: Date.now(),
+        runId: "wf-fold-ovr-absent",
+        workflowName: "test-script",
+        argsSummary: "{}",
+        scriptSource: "agent('a')",
+      }),
+      JSON.stringify({ type: "run-settled", seq: 2, ts: Date.now() + 1_000, outcome: "done", artifactsDir: "/tmp/wf" }),
+    ]);
+
+    expect("modelOverride" in run.meta).toBe(false);
+    expect(isRunSettled(run)).toBe(true);
+  });
+});
