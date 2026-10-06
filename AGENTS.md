@@ -204,6 +204,7 @@ cw testRunner 的 monorepo 坑已修复（wave design 填 `plan.testCwd: "<子�
 | `SKIP_BOUNDARY_CHECK` | AC7 extension-host 边界检查（core 源码变更时） |
 | `SKIP_PREFLIGHT_CHECK` | 打包配置预检查（electron-builder.yml / tsup.config.ts 变更时） |
 | `SKIP_DIRECTORY_RULES_CHECK` | 目录规范检查（禁 demos/impeccable + 外部 symlink） |
+| `SKIP_PATH_REF_DRIFT_CHECK` | 路径引用漂移检查（staged 删除/移动的旧路径 → 全仓残留引用拦截，防触发正则/测试 fixture/钩子脚本静默失效） |
 | `SKIP_I18N_CJK_CHECK` | i18n CJK 残留检测（.vue 模板硬编码中文） |
 | `SKIP_I18N_LOCALE_SYNC_CHECK` | i18n locale 双侧 key 对齐检查 |
 
@@ -221,6 +222,6 @@ CSP 能力一致性检查（`check_csp_compatibility.py`）[HISTORICAL]：2026-0
 | taste:allow-inline-import-type | `// taste:allow-inline-import-type` | `grep -rn "taste:allow-inline-import-type" packages` | `taste-lint/rules/no-inline-import-type.mjs` | 行内 import type 形态豁免（规则在册，当前全仓零使用） |
 | taste:allow-instance-level-session-state | `// taste:allow-instance-level-session-state` | `grep -rn "taste:allow-instance-level-session-state" packages` | `taste-lint/rules/no-instance-level-session-state.mjs` | 实例级 session 状态误报豁免（规则在册，合法形态以 ADR-0049 例外清单为准） |
 
-非项目自建的通用豁免形态（工具标准，不另行盘点）：`eslint-disable` / `eslint-disable-next-line` / `eslint-disable-line`（ESLint 消费，项目规则禁用其绕过检查——见「Lint / Hooks 原则」）；`@ts-expect-error`（tsc 消费）。脚本内的豁免登记表（非注释标记形态）：`scripts/check-doc-symbol-drift.mjs` 的 `PATH_REF_EXEMPT` / `COMMENT_DOC_REF_EXEMPT`（文档路径引用豁免，逐条附理由）。
+非项目自建的通用豁免形态（工具标准，不另行盘点）：`eslint-disable` / `eslint-disable-next-line` / `eslint-disable-line`（ESLint 消费，项目规则禁用其绕过检查——见「Lint / Hooks 原则」）；`@ts-expect-error`（tsc 消费）。脚本内的豁免登记表（非注释标记形态）：`scripts/check-doc-symbol-drift.mjs` 的 `PATH_REF_EXEMPT` / `COMMENT_DOC_REF_EXEMPT`（文档路径引用豁免，逐条附理由）；`.githooks/check_path_ref_drift.py` 的 `PATH_REF_EXEMPT`（被删除/移动路径的残留引用豁免，逐条附理由）。
 
 豁免标记的定期复核机制不做（2026-10-04 裁决：由用户人工处理）；oe-exempt 的 wip/test 类目自带过期日期，过期即由检查自动恢复拦截，不依赖复核。

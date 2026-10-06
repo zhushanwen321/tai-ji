@@ -1452,6 +1452,30 @@ else
 fi
 
 # ============================================================================
+# 路径引用漂移检查（staged 删除/移动的旧路径 → 全仓残留引用拦截）
+#   场景：文件迁移/删除后，守卫触发正则、测试 fixture、钩子脚本里内嵌的旧路径
+#   不随更新 = 防线静默失效（v0.10.14 轮 markdown-sanitize.ts 迁移实例）。
+#   豁免登记处 = .githooks/check_path_ref_drift.py 的 PATH_REF_EXEMPT。
+# ============================================================================
+
+PATH_REF_DRIFT_CHECKER=".githooks/check_path_ref_drift.py"
+
+if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_PATH_REF_DRIFT_CHECK" != "1" ]; then
+    if [ ! -f "$PATH_REF_DRIFT_CHECKER" ]; then
+        echo -e "${YELLOW}[WARN] 找不到检查脚本 $PATH_REF_DRIFT_CHECKER${NC}"
+    elif python3 "$PATH_REF_DRIFT_CHECKER"; then
+        :
+    else
+        echo ""
+        echo -e "${RED}[ERROR] 路径引用漂移检查失败${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+else
+    echo -e "${YELLOW}[SKIP] 路径引用漂移检查已跳过${NC}"
+fi
+
+# ============================================================================
 # i18n CJK 残留检测（.vue 模板不得含硬编码中文）
 # ============================================================================
 
