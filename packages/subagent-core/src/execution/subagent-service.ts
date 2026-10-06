@@ -56,8 +56,12 @@ import type { StreamSink } from "./assembly/stream-sink.ts";
 // [R4] state-marker（writeRecordBinding）已迁 run-orchestration；EngineSdkError/
 // ResumeAnchor（引擎死亡分诊）已迁 run-orchestration。
 import type { ClosedReason } from "./domain/record-types.ts";
-import type { ExecutionRecord } from "./domain/record-model.ts";
+import type { ExecutionRecord, ModelOverride } from "./domain/record-model.ts";
 import type { AgentEvent, ExecuteOptions, ExecutionHandle, RecordSnapshot, SubagentRecord } from "./assembly/types.ts";
+// [subagent-model-switch §7.2] setModel 编排（目标 5 壳接线——本体纯函数 + deps 装配）。
+import type { ModelRef } from "@zhushanwen/subagent-engine-sdk";
+import { setModel } from "./service/model-switch.ts";
+import type { ModelSwitchTarget, SetModelReply } from "./service/model-switch.ts";
 // [R4] ExecutionMode / ForkDepthExceededError / DEFAULT_AGENT_NAME / WorktreeHandle 消费
 // 已随 run 域迁聚合——types import 收窄为转发签名所需类型面。
 // [R1] 转发 getter 返回类型标注（实例已迁聚合，仅 type 引用）。
@@ -93,6 +97,13 @@ import { RecordLifecycle } from "./service/record-lifecycle.ts";
 import { coldLookupForAction, type ColdLookupDeps } from "./assembly/cold-lookup.ts";
 import { resurrectClosed } from "./persistence/execution-record.ts";
 import type { MemberReviveOutcome } from "./service/workflow-dispatch.ts";
+// [subagent-model-switch §6.2 读取规则 / §7.5 覆盖持久化行（U4b 接线）] workflow 域
+// 覆盖的 miss 重建读面（scanRunEvents——persistence 同层既有方向）与 run 覆盖事件的
+// 折叠单点（latestModelOverride）。后者是 execution → orchestration 的新增值导入：
+// 折叠语义消费面单点（run-events「消费面单点 latestModelOverride」）优先于拆边纪律
+// ——手写折叠即双轨；拆边批可后续整族收编（登记单元 deviations）。
+import { resolveRunEventJournal, scanRunEvents } from "./persistence/run-event-journal.ts";
+import { latestModelOverride } from "../orchestration/run-events.ts";
 // [H3/R4] 域 #6/#7/#12/#14/#15 聚合（run 域执行编排）+ [D-R4-1] 拆分的 workflow 族
 // 聚合（executeWorkflowAgent 派发链）+ [2026-09-13 design-code-sync] 拆出的 chat 域
 // 轮次编排聚合（Continuation 协作面 + kickOffChatRound 族）——聚合组间零互调零
@@ -255,6 +266,12 @@ export class SubagentService {
     // [W4 发射点② / U5 收口项②] markRoundIdle 簿记⑧的 pending 注销闭包接线（唯一
     // 装配点——轮终注销由 store 统一发射，调用方薄壳不再双轨重复发）。
     this.store.setPendingUnregister((id, status) => this.notifyHost.emitPendingUnregister(id, status));
+    // [subagent-model-switch §6.2] 覆盖记账内存表的 miss 重建通道（读取规则：解析
+    // 第 0 层读宿主内存表；内存 miss——主 agent 进程重启后首次解析——按域从持久化
+    // 权威重建）。chat 域 = 执行记录链最新记录的 modelOverride 字段（事件流折叠
+    // 投影——scanFile 补投影 + 冷复活水合的读面）。workflow 域（runId 键）的 run
+    // 事件流折叠重建随 U4a 接线（本闭包内按键形态分流扩展）。
+    this.modelService.setOverrideRebuild((key) => this.store.getFullRecord(key)?.modelOverride);
     // [R3] 域 #3/#8/#10/#13 聚合（record 读建面：孤儿恢复/查询投影/action 网关/身份解析
     // 与 record 创建）。deps 全晚绑定闭包（构造期零求值——store/manifestStore/modelService
     // 为 #1 留壳共享依赖经 getter 现读同一实例；sessionRootId/sessionId/mainSessionFile/
@@ -393,6 +410,28 @@ export class SubagentService {
       releaseRoundResources: (record, holdSlot, stream) =>
         this.runOrchestration.releaseRoundResources(record, holdSlot, stream),
       reviveMemberRecord: (recordId) => this.reviveWorkflowMemberRecord(recordId),
+      // [subagent-model-switch §6.6② / U4b] 覆盖记账表接线（读取当前覆盖值）：
+      // workflow 域作用域键 = parentRunId，读取通道 = U2 内存表单点（getModelOverride
+      // ——内存命中直返 + chat 域同步重建闭包）。
+      getModelOverride: (key) => this.modelService.getModelOverride(key),
+      // [§6.2 读取规则 / U4a 事件管线消费] workflow 域 miss 重建（主 agent 重启后
+      // 首次派发）：run 事件流折叠产物 latestModelOverride 单点（「最新一条，覆盖旧
+      // 覆盖值不叠加」，不变量 2）→ ModelOverride 词形转换 → 回填内存表（与
+      // getModelOverride 的 rebuild 回填同语义，后续派发内存命中不再读 journal）。
+      // resume 不带参数也吃持久化覆盖的管线终点（journal 覆盖事件 → 本折叠 → 派发
+      // 侧覆写 / taskSpec 二次咨询 / 复活重盖章三个消费点）。
+      rebuildRunOverride: async (runId) => {
+        const events = await scanRunEvents(runId);
+        const folded = latestModelOverride(events);
+        if (folded === undefined) return undefined;
+        const override: ModelOverride = {
+          ref: { provider: folded.model.provider, modelId: folded.model.modelId },
+          ...(folded.thinkingLevel !== undefined ? { thinkingLevel: folded.thinkingLevel } : {}),
+          setAt: folded.ts,
+        };
+        this.modelService.setModelOverride(runId, override);
+        return override;
+      },
     });
   }
 
@@ -719,6 +758,92 @@ export class SubagentService {
     agentConfig?: AgentConfig,
   ): ResolvedModel {
     return this.runOrchestration.resolveModel(agent, override, ctxModel, agentConfig);
+  }
+
+  /**
+   * [subagent-model-switch §7.2] setModel 编排入口（目标 5 壳接线）。本体 =
+   * service/model-switch.ts 的纯函数编排（单一时序三步——校验 → 按状态分流 →
+   * 写持久化意图），deps 在本方法内装配（闭包现读壳共享依赖：modelService /
+   * store / chatRounds；跨聚合零 import，G2「经壳编排」形态）。
+   *
+   * U3/U5/U4 联调前接线（本单元以桩/接口编程交付，真实转发联调挂 U3/U5 commit
+   * 门补跑）：
+   *   - engineSetModel：fail-fast 桩——capability setModel 位非 'native' 的引擎在
+   *     步骤②预检即被拦截，本通道不可达；U3 于 EnginePort/EngineClient 实装后替换
+   *     为协议通道。
+   *   - isEngineNotActiveError：恒 false 保守桩（U3 应答形态定形后接线）——判别
+   *     miss 时竞态退出按错误应答处置（写 + 错误，不虚构生效值，与处置表不冲突）。
+   *   - runAggregate / assertRunNotTerminal / listAcceptedMemberRunIds：
+   *     fail-fast 桩——U5 实装后替换（workflow run 级全切联调面）。persistRunOverride
+   *     已由 U4b 接线为 journal 覆盖事件真实通道（U4a 事件类型 + 本单元写入面）。
+   *     runAggregate 桩先行 throw 意味着 run 级切换在本单元仍不可达（U5 落地后
+   *     persistRunOverride 通道随联调生效）。
+   *
+   * 覆盖表重建回调（进程内意图表 miss → 记录链重建）：chat 域 = store.getFullRecord
+   * 的 modelOverride 字段（v2 fold 投影——scanFile 补投影 + 冷复活水合）；workflow
+   * 域的 run 事件流折叠重建随 U4a 接线（同一回调内按键形态分流扩展）。
+   */
+  setModel(
+    target: ModelSwitchTarget,
+    model: ModelRef,
+    thinkingLevel?: string,
+  ): Promise<SetModelReply> {
+    return setModel(
+      {
+        getModelService: () => this.modelService,
+        markModelOverride: (record, override) => {
+          this.store.markModelOverride(record, override);
+        },
+        resolveEnginePort: (record) => this.chatRounds.resolveEnginePortForSwitch(record),
+        engineSetModel: () => {
+          throw new Error(
+            "engine setModel relay is not wired yet (U3 lands the EnginePort/EngineClient " +
+              "setModel method). Reachable only when an engine declares capabilities.setModel " +
+              "= 'native' before U3 ships — report this as an integration-ordering bug.",
+          );
+        },
+        isEngineNotActiveError: () => false,
+        runAggregate: () => {
+          throw new Error(
+            "run-level model switch aggregate is not wired yet (U5 lands " +
+              "runModelSwitchAggregate). Workflow-run scope switching is unreachable " +
+              "until the runtime entry (U1) and U5 ship — report this as an integration-ordering bug.",
+          );
+        },
+        assertRunNotTerminal: () => {
+          throw new Error(
+            "workflow run terminal-state check is not wired yet (U4/U5). Workflow-run " +
+              "scope switching is unreachable until the runtime entry (U1) ships.",
+          );
+        },
+        listAcceptedMemberRunIds: () => {
+          throw new Error(
+            "accepted member listing for run-level switch is not wired yet (U5). " +
+              "Workflow-run scope switching is unreachable until the runtime entry (U1) ships.",
+          );
+        },
+        // [U4a 事件管线消费 / U4b 接线] run 级覆盖意图持久化：run 事件流追加
+        // `model-override` 记账帧（事件类型/词表/fold 均为 U4a 产物，本接线复用既有
+        // journal 写入口——非新持久化载体）。写入面说明：run-events 注释指向的
+        // dispatchRunTrigger 需要 WorkflowRun 聚合根，interrupted 态 run（中断后补切
+        // 的合法场景，验收场景 3）不在活体注册表不可达——改走 journal 单点 append
+        // （同实例 keyed 缓存 + seq 单调分配，W1 seq 契约；model-override 是非转移
+        // 记账事件不占转移表行，与转移事件的 seq 交错合法）。失败上抛 → setModel
+        // 报错应答（§7.5 覆盖持久化行：内存覆盖仍生效——内存写先于本调用）。
+        persistRunOverride: async (runId, override) => {
+          const { journal } = resolveRunEventJournal();
+          await journal.append(runId, {
+            type: "model-override",
+            model: { provider: override.ref.provider, modelId: override.ref.modelId },
+            ...(override.thinkingLevel !== undefined ? { thinkingLevel: override.thinkingLevel } : {}),
+            ts: override.setAt,
+          });
+        },
+      },
+      target,
+      model,
+      thinkingLevel,
+    );
   }
 
   /**

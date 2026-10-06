@@ -112,8 +112,17 @@ export interface ResolvedModel {
  *
  * @param agentConfig     agent .md 解析结果（查 model override + thinkingLevel）
  * @param modelRegistry   registry（仅 override 路径用）
- * @param paramOverride   调用方显式 override（最高优先级）
+ * @param paramOverride   调用方显式 override
  * @param ctxModel        主 agent 当前模型（兜底，直接透传）
+ * @param userOverride    [subagent-model-switch 第 0 层] 用户覆盖记账词形
+ *                        （canonical ref + 可选档位）。在场时**直接 lookup 解析
+ *                        覆盖值返回**——三层整体短路（不变量 4：解析产物恒等于
+ *                        覆盖值解析产物，不存在「覆盖了但下一轮还是旧模型」）。
+ *                        缺席时现行三层原样。档位候选链（覆盖路径）：
+ *                        paramOverride.thinkingLevel > userOverride.thinkingLevel >
+ *                        覆盖串内联后缀 > agentConfig.thinkingLevel > frontmatter
+ *                        串内联 > 最高档兜底（§6.2 记账形状——显式候选档位对新
+ *                        模型不可用即抛错，不静默降级）。
  */
 /** 取第一个已定义的值（档位优先级展开用；undefined 视为「未指定」）。 */
 function firstDefined<T>(...values: readonly (T | undefined)[]): T | undefined {
@@ -134,8 +143,29 @@ export function resolveModel(
   modelRegistry: ModelRegistryLike,
   paramOverride?: { model?: string; thinkingLevel?: string },
   ctxModel?: ModelInfo,
+  userOverride?: { model: string; thinkingLevel?: string },
 ): ResolvedModel {
-  // 1. paramOverride（最高优先级）。显式指定但 lookup/auth 失败 → 直接抛错，
+  // 0. [subagent-model-switch 第 0 层] 用户覆盖记账（最高优先级——用户覆盖赢，
+  // 优先于调用参数与 agent frontmatter 显式指定的模型，裁决记录「覆盖优先级」行）。
+  // 覆盖在场 → 直接 lookup 解析覆盖值返回，三层整体不触达（不变量 4 的机器核对点）。
+  // 覆盖值经同一裁决链（assertCanonicalModelRef 全等 + auth + 档位裁决）——不能把
+  // 用户带进一个注定启动失败的模型（不变量 3）。
+  if (userOverride !== undefined) {
+    return lookupAndResolve(
+      userOverride.model,
+      firstDefined(
+        paramOverride?.thinkingLevel,
+        userOverride.thinkingLevel,
+        parseModelSelector(userOverride.model).thinkingLevel,
+        agentConfig?.thinkingLevel,
+        inlineThinkingOfAgentConfig(agentConfig),
+      ),
+      modelRegistry,
+      "userOverride",
+    );
+  }
+
+  // 1. paramOverride。显式指定但 lookup/auth 失败 → 直接抛错，
   // 不降级到下层（避免「以为用了 X 实际用 Y」的静默错误）。
   // 档位候选按优先级：调用参数自带字段 > 模型串内联后缀 > frontmatter 字段 >
   // frontmatter 模型串后缀——越靠近「这一次调用」越权威；同层内字段比内联后缀权威。
@@ -213,7 +243,7 @@ function lookupAndResolve(
   modelStr: string,
   requestedThinking: string | undefined,
   registry: ModelRegistryLike,
-  source: "paramOverride" | "agentConfig",
+  source: "paramOverride" | "agentConfig" | "userOverride",
 ): ResolvedModel {
   const ref = assertCanonicalModelRef(modelStr, registry, { source });
   const model = registry.find(ref.provider, ref.id);

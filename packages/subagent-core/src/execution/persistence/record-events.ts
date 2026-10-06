@@ -107,7 +107,11 @@ export function isRecordEventHeader(value: unknown): value is RecordEventHeader 
 
 // ── 事件词表（D3 映射表，恰好 6 类）────────────────────────────
 
-/** 事件类型全集（判别键）。恰好 6 个——增删成员须先改设计 D3 映射表再动此词表。 */
+/** 事件类型全集（判别键）。恰好 7 个——[subagent-model-switch §6.2] 增补第 7 类
+ *  `record-model-override`（chat 域用户覆盖记账的持久化帧，见事件接口注释）。
+ *  原 6 类的增删须先改设计 D3 映射表再动此词表；本类由 subagent-model-switch
+ *  设计 §6.2 裁决的载体语义（执行记录新增字段）按 record 域现行事实源架构落位
+ *  （运行态写入的唯一合法落点 = 事件文件，登记实施单元 runlog）。 */
 export const RECORD_EVENT_TYPES = [
   "record-created",
   "record-bound",
@@ -115,6 +119,7 @@ export const RECORD_EVENT_TYPES = [
   "record-round-idle",
   "record-settled",
   "record-reopened",
+  "record-model-override",
 ] as const;
 
 export type RecordEventType = (typeof RECORD_EVENT_TYPES)[number];
@@ -285,14 +290,36 @@ export interface RecordReopenedEvent extends RecordEventEnvelope { // oe-exempt:
   transcriptRef?: TranscriptRef;
 }
 
-/** record 事件判别联合（D3 词表全集，恰好 6 个；判别键 = type）。 */
+/**
+ * `record-model-override`——chat 域用户覆盖记账落账（模型切换意图帧）。
+ *
+ * [subagent-model-switch §6.2] 用户覆盖的持久化载体 = 执行记录（事件流）新增字段：
+ * 载荷即 {@link ModelOverride} 的意图形状——`ref` 恒为用户目标 ref（非引擎回读
+ * 生效值，§6.4 生效值不进记账）；`thinkingLevel` 仅用户显式选择档位时携带。
+ * 不变量约束由形状构造性承载：帧后写覆盖 fold 槽位 → 至多一个生效覆盖（不变量 2）；
+ * 切换操作不触碰 record-created 帧（`model` 盖章值不改写——不变量 5）。
+ * 折叠消费：fold.modelOverride → revive 水合（hydrateReviveBaseline 缺省回填）+
+ * 扫描投影（scanFile light 补投影）——重启后解析第 0 层从记录链恢复覆盖。
+ */
+export interface RecordModelOverrideEvent extends RecordEventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
+  type: "record-model-override";
+  /** 用户目标模型 ref（结构单源 = SDK ModelRef 的结构等价形状；provider/modelId）。 */
+  ref: { provider: string; modelId: string };
+  /** 用户显式选择的 thinking 档位（缺省 = 未选择，下一轮按解析链候选链裁决）。 */
+  thinkingLevel?: string;
+  /** 覆盖下达时刻（epoch ms）——审计与「最近一次切换」判据。 */
+  setAt: number;
+}
+
+/** record 事件判别联合（D3 词表全集 + [subagent-model-switch] 第 7 类；判别键 = type）。 */
 export type RecordEvent =
   | RecordCreatedEvent
   | RecordBoundEvent
   | RecordRoundStartedEvent
   | RecordRoundIdleEvent
   | RecordSettledEvent
-  | RecordReopenedEvent;
+  | RecordReopenedEvent
+  | RecordModelOverrideEvent;
 
 /**
  * 写侧入参形态：事件去掉 seq（seq 由 事件文件单写者分配——单调性的构造性保证，
@@ -363,6 +390,12 @@ export interface RecordEventFoldState { // oe-exempt:20260929:framework:workflow
   settled: RecordSettledEvent | undefined;
   /** 最近一次重开帧（record-reopened 落账；transcriptRef / epoch·round 归零的折叠载体）。 */
   reopened: RecordReopenedEvent | undefined;
+  /**
+   * 当前用户覆盖记账（record-model-override 落账；undefined = 从未被覆盖）。
+   * [subagent-model-switch] 后写覆盖语义（新帧整替旧值）——构造性满足「至多一个
+   * 用户覆盖值」（不变量 2）；跨重启经 revive 水合 / 扫描投影恢复（解析第 0 层）。
+   */
+  modelOverride: RecordModelOverrideEvent | undefined;
   /** fold 水位：已接受事件的最高 seq（增量续读/截断重读的去重依据）。 */
   lastSeq: number;
   /** 已接受的最后一条事件（空文件/全坏行 = undefined）。 */
@@ -378,6 +411,7 @@ export const INITIAL_RECORD_EVENT_FOLD_STATE: RecordEventFoldState = {
   roundIdle: undefined,
   settled: undefined,
   reopened: undefined,
+  modelOverride: undefined,
   lastSeq: 0,
   lastEvent: undefined,
 };
@@ -422,6 +456,11 @@ export function applyRecordEvent(
         lastSeq: event.seq,
         lastEvent: event,
       };
+    case "record-model-override":
+      // [subagent-model-switch] 后写覆盖（新帧整替旧值——覆盖替换幂等，不叠加）；
+      // 不清除 settled / 不动轮次（记账帧与生命周期正交——终态 record 的续聊复活
+      // 前下达的切换意图同样要随链恢复）。
+      return { ...state, modelOverride: event, lastSeq: event.seq, lastEvent: event };
   }
 }
 

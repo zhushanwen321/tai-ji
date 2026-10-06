@@ -955,6 +955,10 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
     origin: r.origin,
     parentRunId: r.parentRunId,
     stepIndex: r.stepIndex,
+    // [subagent-model-switch §6.2] 用户覆盖记账随内存源投影（读模型可见面——冷复活
+    // 水合的候选数据源 + 覆盖状态查询通道）。持久化权威 = record-model-override 事件
+    // 帧（写点 = store.markModelOverride），本投影只透传内存值；undefined 自然缺省。
+    modelOverride: r.modelOverride,
   };
 }
 
@@ -985,5 +989,19 @@ export function hydrateReviveBaseline(record: ExecutionRecord, fold: RecordEvent
   const reopenedRef = fold.reopened?.transcriptRef;
   if (record.transcriptRef === undefined && reopenedRef !== undefined) {
     record.transcriptRef = reopenedRef;
+  }
+  // [subagent-model-switch §6.2/P7] 用户覆盖记账水合（缺省回填，非空不覆盖——与
+  // transcriptRef 同构）：事件流 record-model-override 帧的折叠产物是跨重启后解析
+  // 第 0 层的恢复源（主 agent 重启 → 冷复活 → record.modelOverride 在场 → 续聊轮
+  // 解析命中覆盖）。折叠缺席（从未覆盖）时保持 undefined 零影响。
+  if (record.modelOverride === undefined && fold.modelOverride !== undefined) {
+    type MutableOverrideRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
+    (record as MutableOverrideRecord).modelOverride = {
+      ref: fold.modelOverride.ref,
+      ...(fold.modelOverride.thinkingLevel !== undefined
+        ? { thinkingLevel: fold.modelOverride.thinkingLevel }
+        : {}),
+      setAt: fold.modelOverride.setAt,
+    };
   }
 }

@@ -20,6 +20,7 @@ import {
   type ResolvedModel,
   resolveModel,
 } from "./model-resolver.ts";
+import type { ModelOverride } from "../domain/record-model.ts";
 import type { SubagentsGlobalConfig } from "./types.ts";
 import { GLOBAL_SLOT_KEYS } from "../../shared/global-slots.ts";
 
@@ -79,6 +80,20 @@ export class ModelConfigService {
   private _sessionId: string | undefined;
   /** 主 agent 当前 model 缓存（session_start 注入，model_select 刷新）。 */
   private _ctxModel: ModelInfo | undefined;
+  /**
+   * [subagent-model-switch §6.2] 用户覆盖记账内存表（进程内当前意图）。
+   * 键 = 覆盖作用域标识：chat 域 = subagent record id、workflow 域 = runId
+   * （两键空间不相交，单表承载）。持久化权威 = chat 域 record.modelOverride 事件帧 /
+   * workflow 域 run 覆盖事件（U4a），本表是「进程内当前意图」的读取面（设计读取规则：
+   * 解析第 0 层读宿主内存表；内存 miss 按域重建）——写入点 = setModel 编排步骤③。
+   */
+  private readonly modelOverrides = new Map<string, ModelOverride>();
+  /**
+   * 内存 miss 的按域重建通道（晚绑定回调，装配注入）：chat 域从执行记录链最新记录的
+   * modelOverride 字段重建（subagent-service 装配闭包 → store 查询），workflow 域从
+   * run 事件流折叠产物重建（U4a 接线）。未注入 / 回调返回 undefined = 无覆盖。
+   */
+  private rebuildOverride: ((key: string) => ModelOverride | undefined) | undefined;
 
   constructor(init: ModelConfigServiceInit) {
     this.agentRegistryDir = init.agentDir;
@@ -183,11 +198,14 @@ export class ModelConfigService {
   // ── 模型解析（SubagentService.execute 内部调）──────────────
 
   /**
-   * 解析 agent 的模型（三层：override → agentConfig → 主 agent model）。
+   * 解析 agent 的模型（第 0 层用户覆盖短路 + 三层：override → agentConfig → 主 agent model）。
    *
-   * @param agentRef   agent 引用（.md 绝对路径；查 agentConfig 的 model override）
-   * @param override   调用方显式 override（最高优先级）
-   * @param ctxModel   主 agent 当前模型（兜底，直接透传）
+   * @param agentRef     agent 引用（.md 绝对路径；查 agentConfig 的 model override）
+   * @param override     调用方显式 override
+   * @param ctxModel     主 agent 当前模型（兜底，直接透传）
+   * @param agentConfig  已解析的 agent 配置（调用方已加载时复用，避免同一 agentRef 二次 loadByPath）
+   * @param userOverride [subagent-model-switch 第 0 层] 用户覆盖记账词形（在场时三层
+   *                     整体短路，resolveModel 纯函数同名参数直传——语义见其 doc）。
    */
   resolveModel(
     agentRef: string,
@@ -195,11 +213,12 @@ export class ModelConfigService {
     ctxModel?: ModelInfo,
     /** 已解析的 agent 配置（调用方已加载时复用，避免同一 agentRef 二次 loadByPath）。 */
     agentConfig?: AgentConfig,
+    userOverride?: { model: string; thinkingLevel?: string },
   ): ResolvedModel {
     this.assertReady();
     const config = agentConfig ?? (agentRef ? this.agentRegistry.loadByPath(agentRef) : undefined);
     // ctxModel 优先用显式传入（execute 路径），其次用 session 缓存（renderCall 路径）
-    return resolveModel(config, this.modelRegistry!, override, ctxModel ?? this._ctxModel);
+    return resolveModel(config, this.modelRegistry!, override, ctxModel ?? this._ctxModel, userOverride);
   }
 
   /** 查询 agent 配置（SubagentService 内部判定 defaultBackground 用）。
@@ -220,6 +239,40 @@ export class ModelConfigService {
    */
   getRequiredAgentConfig(agentRef: string): AgentConfig {
     return this.agentRegistry.loadByPath(agentRef, true);
+  }
+
+  // ── 用户覆盖记账（subagent-model-switch §6.2；setModel 编排 + 解析第 0 层消费）──
+
+  /**
+   * 写入/替换覆盖记账（进程内当前意图）。同一键再次写入 = 覆盖旧覆盖值（不变量 2
+   * ——至多一个覆盖值，不叠加；无清除操作，覆盖只能被下一次切换替换）。
+   * 持久化写入不在本方法（编排层经 store.markModelOverride / U4 事件写点落盘）。
+   */
+  setModelOverride(key: string, override: ModelOverride): void {
+    this.modelOverrides.set(key, override);
+  }
+
+  /**
+   * 读取覆盖记账：内存命中直返；miss 经重建回调按域从持久化权威恢复（chat 域 =
+   * 执行记录链最新记录的 modelOverride 字段）并回填内存（主 agent 重启后首次解析
+   * 的重建形态，§6.2 读取规则）。双 miss = undefined（从未覆盖）。
+   */
+  getModelOverride(key: string): ModelOverride | undefined {
+    const hit = this.modelOverrides.get(key);
+    if (hit !== undefined) return hit;
+    const rebuilt = this.rebuildOverride?.(key);
+    if (rebuilt !== undefined) {
+      this.modelOverrides.set(key, rebuilt);
+    }
+    return rebuilt;
+  }
+
+  /**
+   * 注入内存 miss 的按域重建通道（晚绑定，装配点 = SubagentService 构造——store
+   * 查询闭包）。传 undefined = 拆除（测试隔离用）。
+   */
+  setOverrideRebuild(fn: ((key: string) => ModelOverride | undefined) | undefined): void {
+    this.rebuildOverride = fn;
   }
 
   // ── 配置读取（subagent-service 调）────────────────────────

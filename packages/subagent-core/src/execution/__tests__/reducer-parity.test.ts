@@ -12,7 +12,7 @@
 // 覆盖口径：文本/思考增量、toolCall 配对（含 tool_end 无 start 的幽灵兜底）、isError
 // 状态位、turn_end 闭合与计数、message_end 的 usage 归一与 totalTokens、error 记录与
 // 轮终清除、no-op 事件（compaction/activity/armed）。
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { updateFromEvent as sdkUpdateFromEvent } from "@zhushanwen/subagent-engine-sdk";
 import type { ReplayRecordView } from "@zhushanwen/subagent-engine-sdk";
@@ -20,6 +20,18 @@ import type { ReplayRecordView } from "@zhushanwen/subagent-engine-sdk";
 import type { ExecutionRecord } from "../domain/record-model.ts";
 import type { AgentEvent, AgentUsage } from "../assembly/types.ts";
 import { createRecord, updateFromEvent } from "../persistence/execution-record.ts";
+
+// 两侧 reducer 各自以 Date.now() 给 toolCall 打 startedTs（execution-record.ts
+// applyToolStart / SDK journal-replay 副本同形）——真实墙钟下同一事件喂两侧跨毫秒
+// 边界时 startedTs 差 1ms，toEqual 对拍即挂（负载下偶发红）。fake timers 固定时钟
+// 让两侧打戳恒同值，对拍回归纯 reducer 语义等价（本文件的被测面）。
+beforeEach(() => {
+  vi.useFakeTimers({ now: 1_700_000_000_000 });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function makeCore(): ExecutionRecord {
   return createRecord("sa-parity", {

@@ -178,7 +178,7 @@ import type { RoundsCtx } from "./record-store-rounds.ts";
 import { reconstructFromFile } from "./session-reconstructor.ts";
 import type { IdentityHeaderRecon } from "./session-reconstructor.ts";
 import type { ClosedReason, StopReason, TranscriptRef } from "../domain/record-types.ts";
-import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { ExecutionRecord, ModelOverride } from "../domain/record-model.ts";
 import type { AgentEvent, RecordSnapshot, SubagentRecord } from "../assembly/types.ts";
 // [U4a / D3b (a″)] findForeignLiveInstance：孤儿恢复的活实例跳过判据——现查探针
 // 替代重建时 externalInstance 缓存（pid 单判据 + self-pid 排除，比缓存更新鲜）。
@@ -738,6 +738,43 @@ export class RecordStore {
    */
   markReopened(record: ExecutionRecord, transcriptRef: TranscriptRef): boolean {
     return markReopenedImpl(record, transcriptRef, this.terminalCtx);
+  }
+
+  /**
+   * 意图原语：用户覆盖记账落账（[subagent-model-switch §6.2]，setModel 编排步骤③
+   * 的 chat 域持久化写点）。两面写：
+   *   ① 内存 record 的 `modelOverride` 字段（readonly 身份域之外的可变意图域——经
+   *      MutableRecord 映射写，先例 = conversation-continuation worktreeHandle 回填）；
+   *   ② record 事件文件追加 `record-model-override` 帧（运行态唯一事实源——v2 条目
+   *      registered 诞生时写 / settled 终态时写，均不覆盖运行中窗口；fold 后写覆盖
+   *      语义构造性满足「至多一个覆盖值」）。事件面未接线（纯内存测试形态）时内存
+   *      面单独生效（与 register/archive 缺省分支同款取舍）。
+   *
+   * 历史事实零触碰：本原语不改写 `record.model` 盖章值、不追加任何回写历史的事件
+   * （不变量 5——覆盖是「未来意图」，model 是「该轮启动事实」，两字段并存）。
+   *
+   * @returns true = 记账完成；false = id 不在内存表（未注册/已回收）——调用方校验
+   *          型失败路径不会到达此处（record 由调用方从 store 取出），防御留痕。
+   */
+  markModelOverride(record: ExecutionRecord, override: ModelOverride): boolean {
+    const existing = this.records.get(record.id);
+    if (existing === undefined || existing !== record) {
+      logger.debug("[subagents] markModelOverride: record not the in-memory instance, skipping", {
+        detail: { id: record.id },
+      });
+      return false;
+    }
+    type MutableRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
+    (record as MutableRecord).modelOverride = override;
+    this.eventStreamFace?.appendJournal(record.id, {
+      type: "record-model-override",
+      ref: { ...override.ref },
+      ...(override.thinkingLevel !== undefined ? { thinkingLevel: override.thinkingLevel } : {}),
+      setAt: override.setAt,
+      ts: Date.now(),
+    });
+    this.notifyChange();
+    return true;
   }
 
   // [H4 三轴拆分] settleSnapshotPatch / fullBindingPayload / persistSettleSnapshot
@@ -1680,6 +1717,20 @@ export class RecordStore {
     if (stats.totalTokens !== undefined) entry.light.totalTokens = stats.totalTokens;
     if (stats.turns !== undefined) entry.light.turns = stats.turns;
     if (stats.endedAt !== undefined) entry.light.endedAt = stats.endedAt;
+    // [subagent-model-switch §6.2] 覆盖记账补投影（与统计域换源同构——身份基底
+    // （identity entry / 索引）不承载运行态意图，事件流折叠补齐）：fold 有覆盖帧时
+    // light 补带 modelOverride，冷复活水合（resurrectColdRecord）与内存表重建
+    // （覆盖表 miss → 记录链重建）据此恢复。索引命中腿不投影——覆盖帧追加必改
+    // events 戳（缓存键第四维）→ 索引条目过期 → 落回本探测分支，构造性无丢失窗口。
+    if (fold?.modelOverride !== undefined) {
+      entry.light.modelOverride = {
+        ref: fold.modelOverride.ref,
+        ...(fold.modelOverride.thinkingLevel !== undefined
+          ? { thinkingLevel: fold.modelOverride.thinkingLevel }
+          : {}),
+        setAt: fold.modelOverride.setAt,
+      };
+    }
     this.fileCache.set(file, entry);
     this.idToFile.set(base.id, file);
     return entry;
