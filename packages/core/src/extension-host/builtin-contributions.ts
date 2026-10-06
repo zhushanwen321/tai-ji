@@ -59,7 +59,12 @@ export const builtinContributions: BuiltinContribution[] = [
     pluginId: 'scheduler-manager',
     contributes: {
       headerActions: [
-        { id: 'scheduler-manager.open', title: '定时任务', icon: 'clock', commandId: 'scheduler-manager.open', order: 20 },
+        // activation='scheduler-overlay'（workflow-overlay-scheduler 整合，2026-10-06 用户裁决）：
+        // 入口点击改道为直开 workflow-viz overlay 定时任务 tab（renderer 侧声明驱动分派），
+        // 不再经 execute 命令链弹插件 modal。commandId 保留不删——commands 命令声明仍是
+        // modal 写操作（toggle/run/delete）ERR6 防线配套，且 E13 可用性判定依赖命令注册
+        // 存在；modal 链退役是后续独立清理。
+        { id: 'scheduler-manager.open', title: '定时任务', icon: 'clock', commandId: 'scheduler-manager.open', order: 20, activation: 'scheduler-overlay' },
       ],
       modals: [
         { id: 'scheduler-manager.panel', title: '定时任务', width: 'md' },

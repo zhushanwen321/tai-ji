@@ -13,13 +13,22 @@
  *   false 与未推送帧照常渲染
  * - E3 点击 → executeCommand(commandId)；命令缺失（返回 false）→ 本地置灰（禁静默 no-op）；
  *   宿主重判 registered（命令重注册回来）→ 置灰让位、按钮恢复可点（F5）
+ * - activation 分派（声明驱动）：'scheduler-overlay' 点击 → openSchedulerTab（模块 mock），
+ *   不调 executeCommand、不触 E13 判定（resolveCommandAvailability 零调用）；disabled 单源
+ *   = 运行时镜像；hidden 剔除对 overlay/缺省两种声明同样生效；缺省声明点击仍走 executeCommand
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/extension/HeaderActionsHost.test.ts
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { nextTick, ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import HeaderActionsHost from '@/components/extension/HeaderActionsHost.vue'
+// 真模块顶层有 core overlay 绑定/watch 副作用（模块加载即装配），测试只消费
+// openSchedulerTab 纯写入口——整体 mock 隔离，装配副作用不进测试环境
+vi.mock('@/components/panel/workflow-viz/overlay/workflow-viz-overlay', () => ({
+  openSchedulerTab: vi.fn(),
+}))
+import { openSchedulerTab } from '@/components/panel/workflow-viz/overlay/workflow-viz-overlay'
 import {
   HEADER_ACTIONS_SOURCE_KEY,
   type HeaderActionsSource,
@@ -35,6 +44,16 @@ const schedulerAction: ContributionRecord = {
   placement: 'panel.header',
   available: true,
   headerAction: { title: '定时任务', icon: 'clock', commandId: 'scheduler-manager.open', order: 20 },
+}
+
+/** overlay 直开声明（activation='scheduler-overlay'，与 builtin scheduler-manager 现值同形状） */
+const schedulerOverlayAction: ContributionRecord = {
+  pluginId: 'scheduler-manager',
+  contributionId: 'scheduler-manager.open',
+  type: 'headerAction',
+  placement: 'panel.header',
+  available: true,
+  headerAction: { title: '定时任务', icon: 'clock', commandId: 'scheduler-manager.open', order: 20, activation: 'scheduler-overlay' },
 }
 
 function makeSource(overrides: Partial<HeaderActionsSource> = {}): HeaderActionsSource {
@@ -53,6 +72,10 @@ function mountHost(source: HeaderActionsSource, sessionId = 's1') {
     global: { provide: { [HEADER_ACTIONS_SOURCE_KEY]: source } },
   })
 }
+
+beforeEach(() => {
+  vi.mocked(openSchedulerTab).mockClear()
+})
 
 describe('HeaderActionsHost', () => {
   it('按声明渲染按钮，testid 形态 = header-action-<pluginId>-<id 段>', () => {
@@ -294,5 +317,75 @@ describe('HeaderActionsHost', () => {
   it('sessionId 为空（landing）不渲染', () => {
     const wrapper = mountHost(makeSource(), '')
     expect(wrapper.find('button').exists()).toBe(false)
+  })
+})
+
+describe('activation 分派（scheduler-overlay 直开 overlay，声明驱动）', () => {
+  it("activation='scheduler-overlay'：点击调 openSchedulerTab(sid)，不调 executeCommand、不触 E13 判定", async () => {
+    const executeCommand = vi.fn(() => true)
+    const resolveCommandAvailability = vi.fn((): HeaderActionCommandAvailability => 'registered')
+    const source = makeSource({
+      getDeclarations: () => [schedulerOverlayAction],
+      executeCommand,
+      resolveCommandAvailability,
+    })
+    const wrapper = mountHost(source)
+    await wrapper.find('[data-testid=header-action-scheduler-manager-open]').trigger('click')
+    // 用户可见断言：按钮仍在命令链之外直开 overlay（转发发起 session id）
+    expect(openSchedulerTab).toHaveBeenCalledTimes(1)
+    expect(openSchedulerTab).toHaveBeenCalledWith('s1')
+    expect(executeCommand).not.toHaveBeenCalled()
+    // E13 判定有 lastResolved 簿记副作用，overlay 路径不得触碰
+    expect(resolveCommandAvailability).not.toHaveBeenCalled()
+  })
+
+  it("activation='scheduler-overlay'：命令三态不参与灰置，disabled 单源 = 运行时镜像", () => {
+    // 运行时 disabled=true：灰置 + 「暂不可用」泛化文案（与命令链同语义）
+    const entry: HeaderActionEntry = {
+      headerActionId: 'scheduler-manager.open',
+      pluginId: 'scheduler-manager',
+      disabled: true,
+      updatedAt: 1,
+    }
+    const disabledSource = makeSource({
+      getDeclarations: () => [schedulerOverlayAction],
+      getRuntimeState: () => entry,
+      resolveCommandAvailability: () => 'unregistered',
+    })
+    const disabledWrapper = mountHost(disabledSource)
+    const btn = disabledWrapper.find('[data-testid=header-action-scheduler-manager-open]')
+    expect(btn.attributes('disabled')).toBeDefined()
+    expect(btn.attributes('title')).toBe('暂不可用')
+    // 无运行时 disabled：即使命令 unregistered 也不灰置、tooltip 落声明 title
+    const noEntrySource = makeSource({
+      getDeclarations: () => [schedulerOverlayAction],
+      resolveCommandAvailability: () => 'unregistered',
+    })
+    const noEntryWrapper = mountHost(noEntrySource)
+    const cleanBtn = noEntryWrapper.find('[data-testid=header-action-scheduler-manager-open]')
+    expect(cleanBtn.attributes('disabled')).toBeUndefined()
+    expect(cleanBtn.attributes('title')).toBe('定时任务')
+  })
+
+  it('hidden 剔除对两种声明同样生效（overlay 直开声明 hidden=true 同样零 DOM）', () => {
+    const entry: HeaderActionEntry = {
+      headerActionId: 'scheduler-manager.open',
+      pluginId: 'scheduler-manager',
+      hidden: true,
+      updatedAt: 1,
+    }
+    const source = makeSource({ getDeclarations: () => [schedulerOverlayAction], getRuntimeState: () => entry })
+    const wrapper = mountHost(source)
+    expect(wrapper.find('[data-testid=header-action-scheduler-manager-open]').exists()).toBe(false)
+    expect(wrapper.find('button').exists()).toBe(false)
+  })
+
+  it('缺省声明（无 activation 字段）点击仍走 executeCommand、不触 openSchedulerTab（既有命令链零变化）', async () => {
+    const executeCommand = vi.fn(() => true)
+    const source = makeSource({ getDeclarations: () => [schedulerAction], executeCommand })
+    const wrapper = mountHost(source)
+    await wrapper.find('[data-testid=header-action-scheduler-manager-open]').trigger('click')
+    expect(executeCommand).toHaveBeenCalledWith('scheduler-manager.open')
+    expect(openSchedulerTab).not.toHaveBeenCalled()
   })
 })

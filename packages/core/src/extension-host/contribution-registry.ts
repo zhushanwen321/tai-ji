@@ -154,7 +154,7 @@ function parseHeaderActionContributions(pluginId: string, c: PluginContributes):
       type: 'headerAction',
       placement: PLACEMENT_BY_TYPE.headerAction,
       available: false,
-      headerAction: { title: h.title, icon: h.icon, commandId: h.commandId, order: h.order },
+      headerAction: { title: h.title, icon: h.icon, commandId: h.commandId, order: h.order, activation: h.activation },
     })
   }
   return out

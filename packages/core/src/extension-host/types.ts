@@ -154,8 +154,9 @@ export interface ContributionRecord {
   statusBarItem?: { text: string; alignment: 'left' | 'right'; priority: number; scope: 'global' | 'per-session'; commandId?: string }
   slashCommand?: { name: string; description: string }
   configuration?: { properties: unknown }
-  /** 声明原文存档：badge/tooltip/disabled 等可变字段经 plugin:headerActionUpdate 广播，声明侧只有静态形状 */
-  headerAction?: { title: string; icon: string; commandId: string; order?: number }
+  /** 声明原文存档：badge/tooltip/disabled 等可变字段经 plugin:headerActionUpdate 广播，声明侧只有静态形状；
+   *  activation = 点击激活方式（声明驱动分派键，见 PluginContributesHeaderAction.activation）。 */
+  headerAction?: { title: string; icon: string; commandId: string; order?: number; activation?: 'scheduler-overlay' }
   /** 声明原文存档（AP-2/D4：无 commandId 字段）——title/width 供 renderer fallback 读声明 */
   modal?: { title: string; width?: 'sm' | 'md' | 'lg' }
 }
@@ -244,6 +245,14 @@ export interface PluginContributesHeaderAction {
   commandId: string
   /** 与内置按钮组的相对序；缺省追加在后 */
   order?: number
+  /**
+   * 点击激活方式（声明驱动分派，渲染端消费；core 不读此字段）。
+   * 缺省 = 走 commandId 命令链（既有语义：E13 可用性三态 + E3 点击 execute）；
+   * 'scheduler-overlay' = 点击打开 workflow-viz overlay 的定时任务 tab（renderer 侧
+   * openSchedulerTab，不经命令链——commandId 仍保留给 modal 写操作配套与 E13 判定源）。
+   * 与 PluginContributesView.activationEvent（view 激活时机事件）语义无关。
+   */
+  activation?: 'scheduler-overlay'
 }
 
 /** modal contribution（AP-2/D4：声明只有 {id,title,width?}，无 commandId 字段——开层只有

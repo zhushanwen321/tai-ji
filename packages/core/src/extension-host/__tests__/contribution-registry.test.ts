@@ -358,6 +358,38 @@ describe('ContributionRegistry 新点位路由（AP-1/AP-2）', () => {
     expect(all[1].modal).toEqual({ title: '定时任务', width: 'md' })
   })
 
+  it('AP-1c: headerAction 声明 activation 透传到 ContributionRecord（声明驱动分派键，渲染端消费）', () => {
+    const { registry } = setup()
+    registry.loadExternal([{
+      pluginId: 'sched',
+      contributes: {
+        headerActions: [
+          { id: 'sched.open', title: '定时任务', icon: 'clock', commandId: 'sched.open', order: 20, activation: 'scheduler-overlay' },
+          { id: 'sched.cmd', title: 'Cmd', icon: 'clock', commandId: 'sched.cmd' },
+        ],
+      },
+    }])
+    const all = registry.getContributions({ pluginId: 'sched', type: 'headerAction' })
+    const byId = new Map(all.map((c) => [c.contributionId, c]))
+    // 带值声明：键透传到 record（renderer 按 activation 分派点击，core 不消费）
+    expect(byId.get('sched.open')?.headerAction?.activation).toBe('scheduler-overlay')
+    // 缺省声明（无 activation 字段）：record 侧保持 undefined（渲染端按缺省走命令链）
+    expect(byId.get('sched.cmd')?.headerAction?.activation).toBeUndefined()
+  })
+
+  it('AP-1d: builtin scheduler-manager 声明带 activation=scheduler-overlay 且经 registerBuiltin 透传', () => {
+    // builtin 字面量声明侧
+    const builtinHa = builtinContributions[2].contributes.headerActions?.[0]
+    expect(builtinHa?.activation).toBe('scheduler-overlay')
+    expect(builtinHa?.commandId).toBe('scheduler-manager.open') // 命令链配套保留（modal 写操作 ERR6 防线 + E13 判定源）
+    // registerBuiltin 解析后 record 侧同键（renderer 声明镜像消费的就是 record）
+    const { registry } = setup()
+    registry.registerBuiltin()
+    const rec = registry.getContributions({ pluginId: 'scheduler-manager', type: 'headerAction' })[0]
+    expect(rec.contributionId).toBe('scheduler-manager.open')
+    expect(rec.headerAction?.activation).toBe('scheduler-overlay')
+  })
+
   it('AP-2d: modal 声明 width 缺省 → record payload 保留 undefined（renderer fallback 解析源）', () => {
     const { registry } = setup()
     registry.loadExternal([{
