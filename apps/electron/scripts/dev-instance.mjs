@@ -57,6 +57,7 @@ import {
   copyTreeFiltered,
   deriveParams,
   ensureInstanceDir,
+  piStageVersionMismatch,
   resolveCustomDataDir,
 } from './dev-instance-lib.mjs'
 
@@ -269,6 +270,27 @@ if (argv[0] === 'init-template') {
   if (hasFlag('--mock')) {
     env.VITE_MOCK = 'true'
     env.TAIJI_MOCK = '1'
+  }
+  // resources/pi stage 版本拦截（dev spawn 链优先 resources/pi，stage 落后于声明 = pi 启动
+  // 即退——2026-10-06 pi 1.0.0 merge 后 symlink 仍钉 0.84.4 实测；--print 探测同样拦截：
+  // 实例不可用就应暴露，不发假端口）。stage 不存在（CI/未 prepare）跳过——find-pi-executable
+  // 回落 PATH 链；package.json 不可解析不拦启动（check-pi-sync S8 对该形态有独立呈报）。
+  const stagePkgPath = path.join(APP_ROOT, 'resources', 'pi', 'package.json')
+  if (fs.existsSync(stagePkgPath)) {
+    try {
+      const rootPkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8'))
+      const declared =
+        rootPkg.dependencies?.['@earendil-works/pi-coding-agent'] ??
+        rootPkg.devDependencies?.['@earendil-works/pi-coding-agent']
+      const stageVersion = JSON.parse(fs.readFileSync(stagePkgPath, 'utf-8')).version
+      const mismatch = piStageVersionMismatch(declared, stageVersion)
+      if (mismatch) {
+        console.error(mismatch)
+        process.exit(1)
+      }
+    } catch {
+      // 解析失败不拦 dev 启动：声明缺失 / stage package.json 损坏由 check-pi-sync S8 呈报
+    }
   }
   ensureInstanceDir(p, hasFlag('--fresh'), {
     fail: (msg) => { console.error(msg); process.exit(1) },
