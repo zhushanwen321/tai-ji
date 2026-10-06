@@ -461,7 +461,13 @@ const toolTailLines = computed(() => {
   // bash：outputRaw 缺失（无 ANSI 输出）时回退 displayContent（D3 尾行取数）
   const raw = isBashTool.value ? (outputRaw.value ?? displayContent.value) : displayContent.value
   if (!raw) return []
-  return tailLines(isBashTool.value ? stripAnsi(raw) : raw, TAIL_WINDOW_LINES)
+  // 尾部窗口先行：tailLines 是尾部扫描 O(窗口)，先取尾再对窗口内 2 行 stripAnsi。
+  // 反序（先全文 strip 再取尾）是 O(全文) 正则替换产出全文新串，每条 tool output 推送
+  // 命中一次，架空 tailLines 的尾部扫描优化（format-utils.ts 2026-08 注释）。
+  // 等价性：ANSI_RE 只匹配 \x1b[0-9;]*m——字符类不含 \n，strip 不增删换行、单次匹配
+  // 不跨行，行边界 strip 前后不变，两序逐字节一致（对拍 format-utils.test.ts）。
+  const tail = tailLines(raw, TAIL_WINDOW_LINES)
+  return isBashTool.value ? tail.map(stripAnsi) : tail
 })
 const { displayLines: toolDisplayLines, contentStyle: toolScrollStyle } = useTailScroll(toolTailLines)
 

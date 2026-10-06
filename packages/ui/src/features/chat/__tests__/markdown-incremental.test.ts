@@ -36,7 +36,7 @@ import type { MarkdownSegment } from '../markdown-types'
 // 配置不影响 html_block 规则）；扫描器常量同源复刻的正确性 = 边界与它全等。
 const mdHtml = new MarkdownIt({ html: true })
 
-/** 行首 offset 表（与实现 enumerateLines 同语义的测试侧复刻） */
+/** 行首 offset 表（split('\n') 累加行长，与实现内行枚举同语义的测试侧复刻） */
 function lineStartsOf(src: string): number[] {
   const starts: number[] = []
   let s = 0
@@ -851,5 +851,40 @@ describe('STREAMING_FENCE_SILENCE_MS — finalize 静默阈值常量', () => {
   it('阈值为 200ms（08 §5.4 实施期 A/B 起点，非结论值）', async () => {
     const m = await freshModule()
     expect(m.STREAMING_FENCE_SILENCE_MS).toBe(200)
+  })
+})
+
+// scanMarkdownBlocks 行枚举的游标化改造最易漂移的两处枚举语义，固定 offset 断言锁定
+//（预期值以改造前实现实跑标定，特征锚定）：① 末行带终止换行且换行即文档末字符 →
+// 尾随候选 offset = content.length；② 末行无换行 → 不产尾随候选。中间候选（nl+1 =
+// 下一行行首）由 M1-M13 / P2/P11 矩阵覆盖。
+describe('findStableBoundary — 尾随换行枚举等价（特征锚定）', () => {
+  beforeEach(() => {
+    vi.resetModules()
+  })
+
+  it('尾随换行 + 开放尾段落：尾随候选（文档尾）不闭合，边界退到 tail 干净块起始', async () => {
+    const { findStableBoundary } = await freshModule()
+    // 'A\n\nB\n'：候选序 [0闭合, 2不闭合(A段开放), 3闭合(空行闭合A段), 5不闭合(B段开放)]
+    // → 边界 3 = "B" 行首（改造前实现实跑标定）
+    expect(findStableBoundary('A\n\nB\n')).toBe(3)
+  })
+
+  it('尾随空行：尾随候选闭合，边界 = content.length', async () => {
+    const { findStableBoundary } = await freshModule()
+    // 'A\n\nB\n\n'：空行使段落闭合，候选 6（content.length）合法且最大 → 6（同 P11-r2）
+    expect(findStableBoundary('A\n\nB\n\n')).toBe(6)
+  })
+
+  it('未闭合 fence + 尾随换行：fence 开行前为边界', async () => {
+    const { findStableBoundary } = await freshModule()
+    // 'para\n\n```ts\nconst x\n'：fence 开到 EOF → 候选 12 / 20 均不闭合 → 边界 6
+    expect(findStableBoundary('para\n\n```ts\nconst x\n')).toBe(6)
+  })
+
+  it('无尾随换行的末行：不产尾随候选（对照形态）', async () => {
+    const { findStableBoundary } = await freshModule()
+    // 'A\n\nB'：B 段开放，无尾随候选 → 边界 3（同 P2-r1）
+    expect(findStableBoundary('A\n\nB')).toBe(3)
   })
 })
