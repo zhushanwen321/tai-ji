@@ -165,8 +165,11 @@ export function buildStreamViewItems(
       return { kind: 'broken', key: `broken-${index}`, preview: '' }
     }
   })
-  // 全项复用 → 返回旧数组引用（内容与新建逐字节一致，复用引用只是切断下游 diff）
-  const result = reusedCount === items.length ? prevResult : out
+  // 全项复用 → 返回旧数组引用（内容与新建逐字节一致，复用引用只是切断下游 diff）。
+  // 空输入不参与复用判定：items.length===0 时 reusedCount(0)===items.length(0) 恒真，
+  // 会把上一输入（跨 session / 跨实例）的渲染项原样返回——空会话串台显示上一会话
+  // 消息（SubagentDirectiveStream per-session 隔离用例的失败根因），空输入恒返回新建。
+  const result = items.length > 0 && reusedCount === items.length ? prevResult : out
   cacheItems = items
   cacheLastUserTurnIdx = lastUserTurnIdx
   cacheLastRenderTurn = lastRenderTurn

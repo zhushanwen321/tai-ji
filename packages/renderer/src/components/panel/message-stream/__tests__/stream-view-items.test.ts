@@ -148,4 +148,23 @@ describe('buildStreamViewItems — 逐项恒等缓存（streaming perf）', () =
     expect(second[0]).toBe(first[0])
     expect(first[0]).toMatchObject({ kind: 'skillNotice', key: 'n-sig', preview: 'a, b' })
   })
+
+  it('空输入不返回旧缓存：非空构建后切空数组 → 空结果（防跨会话渲染项串台）', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // session A：非空渲染项进入模块级单槽缓存
+    const turnA = turnFixture(0, 'u1', 'session a content')
+    const noticeA = { kind: 'systemNotice', message: makeUserMsg('s-a', 'session a notice') } as unknown as SkillNoticeStreamItem
+    const viewsA = buildStreamViewItems([turnItem(turnA), noticeA], 0, turnA)
+    expect(viewsA).toHaveLength(2)
+
+    // session B：空输入（无消息的新会话）→ 必须返回空数组，禁止 0===0 误判复用 A 的结果
+    const viewsB = buildStreamViewItems([], -1, null)
+    expect(viewsB).toHaveLength(0)
+
+    // 空输入后重建非空：缓存已随空输入覆盖，新会话内容正确构建
+    const turnB = turnFixture(0, 'u2', 'session b content')
+    const viewsC = buildStreamViewItems([turnItem(turnB)], 0, turnB)
+    expect(viewsC).toHaveLength(1)
+    expect(viewsC[0]).toMatchObject({ kind: 'turn', key: 't-u2', preview: 'session b content' })
+  })
 })
