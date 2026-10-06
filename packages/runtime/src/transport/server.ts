@@ -14,7 +14,7 @@ import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage, ClientMessageType, RollingRestartStatusPayload, ServerMessage, ServerMessageType, SkillCacheScope } from '@taiji/shared'
 import { EXTENSION_EVENTS, OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES } from '@taiji/shared'
 import type { SessionManagerAction } from '@zhushanwen/extension-protocol'
-import type { ISessionService, IConfigService, IModelService, IMessageBroker, IExtensionService, IPluginService, IAuthService } from '../interfaces.js'
+import type { ISessionService, IConfigService, IModelService, IMessageBroker, IExtensionService, IPluginService, IAuthService, SubagentModelSwitchGateway } from '../interfaces.js'
 
 /** authService 未注入时的兜底（组合根必传；防御性空实现防 handler 空指针） */
 const noopAuthService: IAuthService = {
@@ -55,6 +55,7 @@ import { UsageMessageHandler } from './usage-message-handler.js'
 import { PresetMessageHandler } from './preset-message-handler.js'
 import { SessionManagerHandler } from './session-manager-handler.js'
 import { BtwMessageHandler } from './btw-message-handler.js'
+import { SubagentMessageHandler } from './subagent-message-handler.js'
 // BtwRoutingDeps（btw-question M2-b / B1 授权）：组合根构造 BtwService 后经 optional.btw 注入。
 import type { BtwRoutingDeps } from './btw-message-handler.js'
 import type { MessageHandlerContext, ErrorDetails } from './message-context.js'
@@ -140,6 +141,13 @@ export interface RuntimeServerOptionalServices {
    * 生产组合根恒注入，缺省语义服务存量测试装配）。
    */
   btw?: BtwRoutingDeps
+  /**
+   * subagent / workflow run 执行模型切换的宿主消费端口（subagent-model-switch §7.1
+   * 入口层）：SubagentMessageHandler 路由依赖。可选：未注入时 handler 恒装配、
+   * case 内回 subagent_model_switch_unwired 可操作错误（不落 unknown_type——前端
+   * 入口已在，错误指向 U2/U5 接线而非路由失败）。
+   */
+  subagentModelSwitchGateway?: SubagentModelSwitchGateway
 }
 
 export class RuntimeServer implements IMessageBroker {
@@ -192,6 +200,9 @@ export class RuntimeServer implements IMessageBroker {
   private sessionManagerHandler!: SessionManagerHandler
   /** btw 三帧 handler（btw-question M2-b）：optional.btw 注入时装配（可选批次）。 */
   private btwMessageHandler?: BtwMessageHandler
+
+  /** subagent 域 handler（subagent.setModel；gateway 未注入时 case 内回 unwired 错误，恒装配）。 */
+  private subagentMessageHandler!: SubagentMessageHandler
 
   /**
    * u7c（crash-forensics D5）：滚动重启状态只读查询 provider（组合根 setRollingRestartStatusProvider
@@ -407,6 +418,13 @@ export class RuntimeServer implements IMessageBroker {
       ...messaging,
       pluginService: this.pluginService ?? null,
     })
+    // subagent.setModel（subagent-model-switch §7.1 入口层）：gateway 未注入时恒装配
+    // ——case 内回 subagent_model_switch_unwired 可操作错误（错误指向 U2/U5 接线，
+    // 不落 unknown_type 的路由失败语义；mock 注入验收见 transport __tests__）。
+    this.subagentMessageHandler = new SubagentMessageHandler({
+      ...messaging,
+      modelSwitchGateway: optional.subagentModelSwitchGateway,
+    })
   }
 
   /**
@@ -570,6 +588,7 @@ export class RuntimeServer implements IMessageBroker {
       ...this.sessionHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => this.sessionHandler.handleSessionMessage(msg, ws)] as const),
       ...this.extensionHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => this.extensionHandler.handleExtensionMessage(msg, ws)] as const),
       ...this.pluginMessageHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => this.pluginMessageHandler.handlePluginMessage(msg, ws)] as const),
+      ...this.subagentMessageHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => this.subagentMessageHandler.handleSubagentMessage(msg, ws)] as const),
       ...(gitHandler ? gitHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => gitHandler.handleGitMessage(msg, ws)] as const) : []),
       ...(fileHandler ? fileHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => fileHandler.handleFileMessage(msg, ws)] as const) : []),
       ...(workspaceHandler ? workspaceHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => workspaceHandler.handleWorkspaceMessage(msg, ws)] as const) : []),

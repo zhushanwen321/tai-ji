@@ -337,6 +337,11 @@ export default {
     noBashTask: '未选中后台命令',
     bashTaskHint: '在 composer 工具条的任务托盘中打开「后台命令」面板，点击任务查看详情',
     bashTaskStartedAt: '开始 {time}',
+    // subagent-model-switch §7.1（U1）：subagent / workflow run 执行模型切换。
+    subagentOverrideBadge: '用户覆盖中',
+    subagentModelSwitchTitle: '切换此子代理的执行模型（无活跃进程时记账，下次执行生效）',
+    modelSwitchFailed: '切换模型失败：{msg}',
+    modelSwitchMemberFailed: '成员 {member} 切换失败（{reason}）——其他成员不受影响',
     bashTaskRunningFor: '已运行 {duration}',
     bashTaskDuration: '耗时 {duration}',
     bashTaskExitCode: 'exit {code}',

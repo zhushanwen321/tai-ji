@@ -26,6 +26,8 @@ import type {
   GitStatusResult,
   FileNode,
   SubagentRecord,
+  SubagentModelOverrideStatus,
+  SubagentSetModelReply,
   WorkflowRunRecord,
   PlanStateView,
   SystemPromptConfig,
@@ -723,6 +725,43 @@ export interface IModelService {
   reconcileModelCapabilities(sessionId: string): Promise<import('./services/model-capability.js').CapabilityDrift[]>
   /** 订阅对账 drift 事件（单订阅者语义，重复调用覆盖）。 */
   setCapabilityDriftSink(sink: (drifts: import('./services/model-capability.js').CapabilityDrift[]) => void): void
+}
+
+// ── SubagentModelSwitchGateway ────────────────────────────────────
+
+/**
+ * subagent / workflow run 执行模型切换的宿主消费端口（subagent-model-switch §7.1
+ * 入口层；U1 定形，生产实装 = U2/U5 宿主编排的 runtime 侧适配器，经组合根注入）。
+ *
+ * 宿主 setModel 编排跑在 pi 进程 extension 内（subagent-core 封装层），runtime 经
+ * 本端口触达；U1 以 mock 注入验收回执范式，真实链路联调挂 U2/U5 commit 门补跑。
+ */
+export interface SubagentModelSwitchGateway {
+  /**
+   * 执行模型切换：请求 → 宿主编排（校验 → 按活进程状态分流 → 写持久化意图）→
+   * 应答三形态判别联合（chat 域两型 kind 字段判别 / run 级聚合三组件）。校验型失败
+   * 以分型错误 reject（§5.2），由 transport handler 转错误信封。
+   */
+  setModel(params: {
+    recordId?: string
+    runId?: string
+    provider: string
+    modelId: string
+    thinkingLevel?: string
+  }): Promise<SubagentSetModelReply>
+  /**
+   * chat 域覆盖状态查询（同步形态——详情载荷 live 帧发布路径 publishRecordChanges
+   * 受「同步应用 = 生效回执前提」约束，session-records.ts applyJournalReport；生产
+   * 实装 = 覆盖记账的 runtime 侧投影查询）。无覆盖返回 undefined（载荷不造键）。
+   */
+  getRecordOverride(recordId: string): SubagentModelOverrideStatus | undefined
+  /** workflow run 域覆盖状态查询（run 级意图单值；无覆盖 undefined）。 */
+  getRunOverride(runId: string): SubagentModelOverrideStatus | undefined
+  /**
+   * 目标 → 所属 session 解析（错误信封 sessionId 用，会话隔离红线：subagent.setModel
+   * payload 无 sessionId 字段，错误应答必须补齐）。解析不到返回 undefined（信封缺省）。
+   */
+  resolveSessionId(target: { recordId?: string; runId?: string }): string | undefined
 }
 
 // ── IPluginService ────────────────────────────────────────────────

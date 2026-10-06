@@ -344,6 +344,11 @@ export default {
     noBashTask: 'No background command selected',
     bashTaskHint: 'Open the "Background commands" panel in the composer task tray and click a task to view details',
     bashTaskStartedAt: 'Started {time}',
+    // subagent-model-switch §7.1（U1）：subagent / workflow run 执行模型切换。
+    subagentOverrideBadge: 'user override',
+    subagentModelSwitchTitle: 'Switch execution model of this subagent (recorded when no live process; applies next run)',
+    modelSwitchFailed: 'Model switch failed: {msg}',
+    modelSwitchMemberFailed: 'Member {member} switch failed ({reason}) — other members unaffected',
     bashTaskRunningFor: 'Running for {duration}',
     bashTaskDuration: 'Duration {duration}',
     bashTaskExitCode: 'exit {code}',
@@ -406,6 +411,7 @@ export default {
     close: 'Close',
     fullscreenTitle: 'Mermaid diagram fullscreen',
     fullscreenDesc: 'Use zoom controls to view Mermaid diagram details.',
+ 
   },
   modelSelect: {
     noModel: 'No models available. Import credentials or configure a provider in Settings first.',

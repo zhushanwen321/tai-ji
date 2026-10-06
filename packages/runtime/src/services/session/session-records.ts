@@ -25,7 +25,13 @@
  */
 import { readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { SubagentRecord, WorkflowRunRecord, PlanStateView, PlanDocMeta } from '@taiji/shared'
+import type {
+  SubagentRecord,
+  SubagentModelOverrideStatus,
+  WorkflowRunRecord,
+  PlanStateView,
+  PlanDocMeta,
+} from '@taiji/shared'
 import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 // subagent-record / workflow-record 词表均已收 core 单源（runtime 投影经 core barrel 消费；
 // shared 的 subagent-record 副本仅剩 renderer 消费）
@@ -49,10 +55,13 @@ import { extractSubagentsFromSessionFile } from './subagent-extractor.js'
 import {
   extractRecordEngine,
   readEngineSubagentHistory,
+  readPiSessionLatestModelChange,
   DEFAULT_SUBAGENT_ENGINE,
 } from './subagent-engine-history.js'
 import { extractWorkflowsFromSessionFile } from './workflow-extractor.js'
 import { scanRecordFamilyEntriesFromSessionFile } from './session-file-extraction.js'
+// run 详情侧逐成员透传（覆盖状态 + 最近生效值分发到 agentCalls，subagent-model-switch §9）
+import { projectSubagentModelDetailIntoRuns } from './workflow-record-projection.js'
 import { SessionEventProjection } from './events-projection.js'
 // [event-push-channel] journal 事件推送消费方注册（constructor 内 setJournalReportSink）
 import { setJournalReportSink } from './journal-report-router.js'
@@ -252,6 +261,17 @@ export interface SessionRecordsDeps {
    * 供测试省略）；生产组合根恒接线，缺省时注入退化为 global-only 映射。
    */
   getSessionCwd?(sessionId: string): string | undefined
+  /**
+   * 详情载荷覆盖状态查询（subagent-model-switch §9 transport 行，U1 详情载荷透传）。
+   * 同步形态——live 帧发布路径 publishRecordChanges 受「同步应用 = 生效回执前提」
+   * 约束（applyJournalReport D7）；生产实装 = SubagentModelSwitchGateway（组合根注入，
+   * U2/U5 接线），缺省 undefined = 载荷不带覆盖状态字段（字段缺席 = 无覆盖语义）。
+   * 窄接口面 = gateway 的查询两方法（结构子集，gateway 实装天然满足）。
+   */
+  modelOverrideQuery?: {
+    getRecordOverride(recordId: string): SubagentModelOverrideStatus | undefined
+    getRunOverride(runId: string): SubagentModelOverrideStatus | undefined
+  }
 }
 
 /** JSON 落盘缩进（全仓 JSON_INDENT = 2 约定）。 */
@@ -760,7 +780,10 @@ export class SessionRecords {
     if (subagentsDifferFromPublished(cache.subagents, cache.publishedSubagents)) {
       bus.publish(sessionId, {
         type: 'session.subagents',
-        payload: { sessionId, subagents: Array.from(cache.subagents.values()) },
+        // 详情载荷增强（覆盖状态 + 最近生效值）在帧构造点施放——派生缓存（cache.subagents）
+        // 保持纯投影产物，增强不回写缓存、不参与水位 diff（覆盖写入的 runtime 感知走
+        // record 事件流 → 投影变化 → 水位 diff → 本帧构造时读最新值的时序）。
+        payload: { sessionId, subagents: this.enhanceSubagentDetails(Array.from(cache.subagents.values())) },
       })
       cache.publishedSubagents = new Map(cache.subagents) // publish 完成即推进（镜像当前派生 id 集）
       frames.push('session.subagents')
@@ -796,6 +819,49 @@ export class SessionRecords {
    */
   private readonly oversizeWarned = new Set<string>()
 
+  /**
+   * subagent 详情载荷增强（subagent-model-switch §9 transport 行，U1 详情载荷透传）：
+   * ① 覆盖状态（modelOverride）——modelOverrideQuery 查询，无覆盖不造键；workflow
+   *    origin 成员跳过（其覆盖作用域 = 所属 run，归 run 级查询分发，见
+   *    projectSubagentModelDetailIntoRuns——成员级查询会错拿 chat 域作用域）；
+   * ② 最近生效值（recentEffectiveModel）——仅 pi 引擎成员派生（源 = 成员 pi session
+   *    文件 model_change 尾条目，实际执行事实权威）；非 pi 成员不参与派生、不携带；
+   *    文件不存在或无条目按无值（未发生热切 = 无分叉态，字段本无消费场景）。
+   *
+   * 出口 = session.subagents 两通道（getSubagents 读 RPC + publishRecordChanges live
+   * 全量帧）——renderer store 分区是整帧替换语义，单通道增强会被另一通道的无增强帧
+   * 冲掉，故两出口统一过本函数。同步实现（尾块文件读 + 同步查询），满足 live 发布
+   * 路径的同步约束。无增强项时返回原数组引用（零拷贝快路径）。
+   */
+  private enhanceSubagentDetails(records: SubagentRecord[]): SubagentRecord[] {
+    const query = this.deps.modelOverrideQuery
+    let enhanced: SubagentRecord[] | null = null
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i]!
+      let current = enhanced !== null ? enhanced[i]! : record
+      let changed = false
+      if (query !== undefined && record.origin !== 'workflow') {
+        const override = query.getRecordOverride(record.subagentId)
+        if (override !== undefined) {
+          current = { ...current, modelOverride: override }
+          changed = true
+        }
+      }
+      if (extractRecordEngine(record) === DEFAULT_SUBAGENT_ENGINE && record.sessionFile !== null) {
+        const change = readPiSessionLatestModelChange(record.sessionFile)
+        if (change !== undefined) {
+          current = { ...current, recentEffectiveModel: change }
+          changed = true
+        }
+      }
+      if (changed && enhanced === null) {
+        enhanced = records.slice(0, i) as SubagentRecord[]
+      }
+      if (enhanced !== null) enhanced[i] = current
+    }
+    return enhanced ?? records
+  }
+
   private warnOversizeOnce(sessionId: string, kind: 'subagents' | 'workflows'): void {
     const key = `${sessionId}:${kind}`
     if (this.oversizeWarned.has(key)) return
@@ -818,11 +884,12 @@ export class SessionRecords {
     if (isSessionFileOversize(target.filePath)) {
       const { records, oversize } = extractSubagentsFromSessionFile(target.filePath)
       if (oversize) this.warnOversizeOnce(sessionId, 'subagents')
-      return { records, oversize }
+      // 详情载荷增强与投影分支同构（分叉态重载消费不因巨文件降级缺字段）。
+      return { records: this.enhanceSubagentDetails(records), oversize }
     }
     const cache = this.ensureRecordEntriesCache(sessionId)
     const projection = this.ensureProjection(sessionId, cache)
-    return { records: Array.from(projection.subagents.values()), oversize: false }
+    return { records: this.enhanceSubagentDetails(Array.from(projection.subagents.values())), oversize: false }
   }
 
   /**
@@ -962,11 +1029,23 @@ export class SessionRecords {
     if (isSessionFileOversize(target.filePath)) {
       const { records, oversize } = extractWorkflowsFromSessionFile(target.filePath)
       if (oversize) this.warnOversizeOnce(sessionId, 'workflows')
+      // oversize 降级路径不带详情增强（v1 巨文件时代会话，无成员派生源锚；降级语义
+      // 与 getSubagents 分支的「兼容读路径照常增强」不同——此处无同 session 成员投影
+      // 可圈定，保持条目原样）。
       return { records, oversize }
     }
     const cache = this.ensureRecordEntriesCache(sessionId)
     const projection = this.ensureProjection(sessionId, cache)
-    return { records: Array.from(projection.workflows.values()), oversize: false }
+    // run 详情载荷增强（subagent-model-switch §9 transport 行）：run 级覆盖查询 +
+    // 逐成员携带（最近生效值源 = 成员 SubagentRecord 的增强产物——先经
+    // enhanceSubagentDetails 取成员派生值，再由 projectSubagentModelDetailIntoRuns
+    // 按 (parentRunId, stepIndex) 圈定权威成员分发到 agentCalls；聚合面不取单一值）。
+    const workflows = projectSubagentModelDetailIntoRuns(
+      Array.from(projection.workflows.values()),
+      this.enhanceSubagentDetails(Array.from(projection.subagents.values())),
+      this.deps.modelOverrideQuery,
+    )
+    return { records: workflows, oversize: false }
   }
 
   /**

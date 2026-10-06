@@ -441,6 +441,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
       roundIdle: undefined,
       settled: settledRecordEvent(),
       reopened: undefined,
+      modelOverride: undefined,
       lastSeq: 3,
       lastEvent: undefined,
     }
@@ -495,6 +496,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
       },
       settled: undefined,
       reopened: undefined,
+      modelOverride: undefined,
       lastSeq: 3,
       lastEvent: {
         type: 'record-round-idle' as const,
@@ -531,6 +533,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
       roundIdle,
       settled: undefined,
       reopened: undefined,
+      modelOverride: undefined,
       lastSeq: 4,
       lastEvent: { type: 'record-round-started' as const, seq: 4, ts: 3000, round: 2, epoch: 0 },
     }
@@ -560,6 +563,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
       },
       settled: undefined,
       reopened: undefined,
+      modelOverride: undefined,
       lastSeq: 5,
       lastEvent: { type: 'record-round-started' as const, seq: 5, ts: 3500, round: 1, epoch: 1 },
     }
@@ -585,6 +589,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
       },
       settled: undefined,
       reopened: { type: 'record-reopened' as const, seq: 4, ts: 3000, epoch: 1, round: 0 },
+      modelOverride: undefined,
       lastSeq: 4,
       lastEvent: { type: 'record-reopened' as const, seq: 4, ts: 3000, epoch: 1, round: 0 },
     }
@@ -617,6 +622,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
       roundIdle,
       settled: undefined,
       reopened: undefined,
+      modelOverride: undefined,
       lastSeq: 3,
       lastEvent: roundIdle,
     }
@@ -643,6 +649,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
       roundIdle,
       settled: undefined, // reopened / round-started 已清除 settled
       reopened: undefined,
+      modelOverride: undefined,
       lastSeq: 6,
       lastEvent: roundIdle,
     }
@@ -668,6 +675,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
       },
       settled: settledRecordEvent({ seq: 3, resultSummary: 'settled summary' }),
       reopened: undefined,
+      modelOverride: undefined,
       lastSeq: 3,
       lastEvent: undefined,
     }
@@ -701,6 +709,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
       roundIdle,
       settled: undefined,
       reopened: undefined,
+      modelOverride: undefined,
       lastSeq: 4,
       lastEvent: roundIdle,
     }
@@ -726,6 +735,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
       roundIdle,
       settled: undefined,
       reopened: undefined,
+      modelOverride: undefined,
       lastSeq: 5,
       lastEvent: { type: 'record-round-started' as const, seq: 5, ts: 4000, round: 2, epoch: 0 },
     }
@@ -751,6 +761,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
       roundIdle,
       settled: settledRecordEvent({ seq: 3, resultSummary: 'settled summary', error: 'settled failure' }),
       reopened: undefined,
+      modelOverride: undefined,
       lastSeq: 3,
       lastEvent: undefined,
     }
@@ -892,7 +903,7 @@ describe('mergeEventProjection（单点合并）', () => {
     const fold = {
       identity: createdEvent('sa-1'),
       bound: undefined, round: undefined, epoch: undefined, roundIdle: undefined,
-      settled: undefined, reopened: undefined, lastSeq: 1, lastEvent: undefined,
+      settled: undefined, reopened: undefined, modelOverride: undefined, lastSeq: 1, lastEvent: undefined,
     }
     sources.recordFolds.set('sa-1', fold)
     const merged = mergeEventProjection(sources, 's1')
@@ -907,7 +918,7 @@ describe('mergeEventProjection（单点合并）', () => {
     foreign.rootSessionId = 's-other'
     sources.recordFolds.set('sa-foreign', {
       identity: foreign, bound: undefined, round: undefined, epoch: undefined,
-      roundIdle: undefined, settled: undefined, reopened: undefined, lastSeq: 1, lastEvent: undefined,
+      roundIdle: undefined, settled: undefined, reopened: undefined, modelOverride: undefined, lastSeq: 1, lastEvent: undefined,
     })
     const merged = mergeEventProjection(sources, 's1')
     expect(merged.subagents.has('sa-foreign')).toBe(false)
@@ -935,6 +946,7 @@ describe('mergeEventProjection（单点合并）', () => {
       bound: undefined, round: undefined, epoch: undefined, roundIdle: undefined,
       settled: settledRecordEvent(),
       reopened: undefined,
+      modelOverride: undefined,
       lastSeq: 3, lastEvent: undefined,
     })
     const merged = mergeEventProjection(sources, 's1')

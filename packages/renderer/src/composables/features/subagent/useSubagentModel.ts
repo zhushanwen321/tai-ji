@@ -1,0 +1,200 @@
+/**
+ * useSubagentModel —— subagent / workflow run 执行模型切换编排（subagent-model-switch
+ * §7.1 入口层前端半边；R2 features 层，跨 api + 回执态的唯一合法层，ADR-0028「api 调用
+ * 只在 features 层」落点）。
+ *
+ * 回执消费范式照 useModel.ts 现役范式（U6 弃乐观写）：**应答到达才写显示态，禁用请求值
+ * 乐观写**——已生效型的生效模型可能 ≠ 请求目标（pi 模型族静默替换成同族模型，§6.4）；
+ * 已记账型不携带档位值。RPC 失败不写任何状态（标签维持切换前显示——分支③由本范式
+ * 构造性成立：错误应答不落显示态）。
+ *
+ * 显示态（回执态）的归属与生命周期：renderer 会话期内存（模块级 reactive Map，跨组件
+ * 实例共享——SubagentTab / WorkflowTab 各自调本 composable 读同一份）；**不写
+ * SubagentRecord.model 等详情载荷字段**（那是 runtime 详情载荷组装的域，前端写它会
+ * 被下一帧 runtime 推送冲掉）。重载后回执态随组件生命周期丢失，标签由详情载荷字段
+ * 承接（分支④「最近生效值」/ 覆盖状态），见 resolveSubagentModelDisplay。
+ */
+import { reactive } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { toErrorMessage } from '@taiji/core'
+import { subagent as subagentApi } from '@/api'
+import { useToast } from '@/composables/useToast'
+import type { ProviderId, SubagentSetModelReply } from '@taiji/shared'
+
+/**
+ * 单目标的模型显示态（renderer 会话期回执态）。
+ * effectiveModel 与 overrideIntent 互斥写入（一次切换只落其一），读取端按
+ * resolveSubagentModelDisplay 的优先级合成。
+ */
+export interface SubagentModelDisplayState { // oe-exempt:20261006:framework:wire 展示契约形状（u-foundation 定形，单实现常态）
+  /** 已生效型回执的生效模型（canonical ref 串 'provider/id'——引擎回读值）。 */
+  effectiveModel?: string
+  /** 已记账型回执的覆盖意图值（本次切换目标——分支②「已记账型标签显示覆盖值」）。 */
+  overrideIntent?: string
+}
+
+/** 模型标签显示态（四分支合成输出）。 */
+export interface SubagentModelDisplay {
+  /** 标签文本（undefined = 无可显示值——消费方按现状隐藏槽位）。 */
+  label: string | undefined
+  /** 「用户覆盖中」标注在场（覆盖意图已表达——§7 实现期同步义务的前端标注）。 */
+  overridden: boolean
+}
+
+/** 显示态键：chat 域 = recordId；workflow 域 = `${runId}:${memberRunId}`（成员标识 = 聚合应答与成员态数组的同维成员 runId，§7.1）。 */
+type DisplayKey = string
+
+/** workflow 成员显示键（runId + 聚合成员标识）。 */
+export function subagentMemberDisplayKey(runId: string, memberRunId: string): DisplayKey {
+  return `${runId}:${memberRunId}`
+}
+
+/**
+ * 回执态注册表（模块级单例——renderer 会话期，跨组件实例共享；测试经
+ * resetSubagentModelDisplayForTests 隔离）。
+ *
+ * taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，同 useToast 通知列表性质）：
+ * 切换回执的显示态（生效值 / 覆盖意图），生命周期 = 页面会话期，重载后由详情载荷字段
+ * 承接（标签读取规则分支④）——非持久化数据所有者。
+ */
+const displayStates = reactive(new Map<DisplayKey, SubagentModelDisplayState>())
+
+/** 测试隔离：清空回执态注册表（生产禁用——会话期态，生产生命周期 = 页面刷新）。 */
+export function resetSubagentModelDisplayForTests(): void {
+  displayStates.clear()
+}
+
+/** canonical ref 串（'provider/id'）。 */
+function toModelRef(provider: string, modelId: string): string {
+  return `${provider}/${modelId}`
+}
+
+/** 四分支合成输入（详情载荷面 + 回执态面）。 */
+export interface SubagentModelDisplayInput { // oe-exempt:20261006:framework:wire 展示输入契约形状（u-foundation 定形，单实现常态）
+  /** 回执态（renderer 会话期；未切换过 / 重载后 = undefined）。 */
+  display?: SubagentModelDisplayState
+  /** 盖章值（record.model / call.model，现状兜底）。 */
+  stampedModel?: string
+  /** 覆盖状态（详情载荷 modelOverride.model；无覆盖 undefined）。 */
+  modelOverride?: string
+  /** 最近生效值（详情载荷 recentEffectiveModel——pi session model_change 尾条目）。 */
+  recentEffectiveModel?: { provider: string; modelId: string }
+}
+
+/**
+ * 标签读取规则四分支（subagent-model-switch §9 文件地图 transport 行；纯函数可单测）：
+ * ① 生效值在场（回执态）→ 显示实际生效值（热切回读值；同族替换时生效值 ≠ 覆盖意图，
+ *    如实显示生效值）；
+ * ② 已记账型路径 → 显示覆盖意图值 + 「用户覆盖中」标注；
+ * ③ 生效值回读失败 → 不落本函数输入（错误应答不写显示态），标签维持切换前显示——由
+ *    「禁乐观写 + 失败不写」构造性成立，无显式分支；
+ * ④ 分叉态重载（面板重载 + 同族替换已发生，回执态已丢）→ 按详情载荷「最近生效值」
+ *    显示，不回退覆盖意图值。
+ *
+ * 优先级链：回执生效值 > 详情载荷最近生效值 > 覆盖意图值 > 盖章值（现状兜底）。
+ * overridden = 覆盖意图在场（覆盖状态载荷字段或已记账回执）——覆盖生效处显式标注
+ * 「用户覆盖中」（§7 实现期文档同步义务的前端部分）。
+ */
+export function resolveSubagentModelDisplay(input: SubagentModelDisplayInput): SubagentModelDisplay {
+  const overrideIntent = input.display?.overrideIntent ?? input.modelOverride
+  // ① 回执生效值在场（覆盖标注按覆盖意图在场性——生效值 ≠ 覆盖意图时仍如实显示生效值）
+  if (input.display?.effectiveModel !== undefined) {
+    return { label: input.display.effectiveModel, overridden: overrideIntent !== undefined }
+  }
+  // ④ 分叉态重载：详情载荷最近生效值承接（不回退覆盖意图值）
+  if (input.recentEffectiveModel !== undefined) {
+    return {
+      label: toModelRef(input.recentEffectiveModel.provider, input.recentEffectiveModel.modelId),
+      overridden: overrideIntent !== undefined,
+    }
+  }
+  // ② 已记账型（回执 recorded，或重载后仅覆盖状态载荷在场）：覆盖意图值 + 标注
+  if (overrideIntent !== undefined) {
+    return { label: overrideIntent, overridden: true }
+  }
+  // 兜底：盖章值（从未切换——现状语义不变）
+  return { label: input.stampedModel, overridden: false }
+}
+
+/** setSubagentModel 的目标参数（wire 契约：recordId 与 runId 二选一；provider 品牌类型随 wire 契约）。 */
+export interface SubagentSetModelTarget { // oe-exempt:20261006:framework:wire 切换目标契约形状（u-foundation 定形，单实现常态）
+  recordId?: string
+  runId?: string
+  provider: ProviderId
+  modelId: string
+  thinkingLevel?: string
+}
+
+/**
+ * useSubagentModel：提交走 subagent.setModel 新消息 + 回执写显示态（禁乐观写）+
+ * 失败 toast（§5.2 错误文案经 toErrorMessage 直出——runtime 已按分型给可操作文案）。
+ */
+export function useSubagentModel() {
+  const { t } = useI18n()
+  const { error: toastError } = useToast()
+
+  /** chat 域目标的显示态读取（响应式——Map 项变化触发重算）。 */
+  function displayOf(recordId: string): SubagentModelDisplayState | undefined {
+    return displayStates.get(recordId)
+  }
+
+  /** workflow run 成员目标的显示态读取（响应式；成员标识 = 聚合成员 runId）。 */
+  function memberDisplayOf(runId: string, memberRunId: string): SubagentModelDisplayState | undefined {
+    return displayStates.get(subagentMemberDisplayKey(runId, memberRunId))
+  }
+
+  /**
+   * 提交切换：请求 → runtime → 宿主编排 → 应答三形态分流写显示态：
+   * - chat 两型：effective → 写 effectiveModel（回读生效值）；recorded → 写 overrideIntent
+   *   （本次目标——「已记录，下次执行生效」的标签承接）；
+   * - run 级聚合：按成员键写——switched 成员写生效值；not-active / not-applicable 成员写
+   *   overrideIntent（记账路径，重派生效）；失败名单成员不写（生效值未知，分支③），
+   *   以 toast 分项呈现（成员标识 + 失败分型）。
+   *
+   * @returns 应答（成功）；失败返回 undefined（toast 已报，显示态未动）。
+   */
+  async function setSubagentModel(target: SubagentSetModelTarget): Promise<SubagentSetModelReply | undefined> {
+    try {
+      const reply = await subagentApi.setModel(target)
+      applyReplyToDisplay(target, reply)
+      return reply
+    } catch (e) {
+      toastError(t('panel.sideDrawer.modelSwitchFailed', { msg: toErrorMessage(e) }))
+      return undefined
+    }
+  }
+
+  /** 应答 → 显示态写入（setSubagentModel 的状态半边；导出供测试直驱回执消费断言）。 */
+  function applyReplyToDisplay(target: SubagentSetModelTarget, reply: SubagentSetModelReply): void {
+    const intentRef = toModelRef(target.provider, target.modelId)
+    if ('kind' in reply) {
+      // chat 域两型（recordId 目标）
+      const key = target.recordId
+      if (key === undefined) return
+      if (reply.kind === 'effective') {
+        displayStates.set(key, { effectiveModel: toModelRef(reply.effectiveModel.provider, reply.effectiveModel.modelId) })
+      } else {
+        displayStates.set(key, { overrideIntent: intentRef })
+      }
+      return
+    }
+    // run 级聚合（runId 目标）：按成员键分写（成员标识 = 聚合成员 runId）
+    const runId = target.runId
+    if (runId === undefined) return
+    for (const member of reply.members) {
+      const key = subagentMemberDisplayKey(runId, member.runId)
+      if (member.state === 'switched' && member.effectiveModel !== undefined) {
+        displayStates.set(key, { effectiveModel: toModelRef(member.effectiveModel.provider, member.effectiveModel.modelId) })
+      } else if (member.state === 'not-active' || member.state === 'not-applicable') {
+        displayStates.set(key, { overrideIntent: intentRef })
+      }
+      // switched 但无生效值（契约外形态）：不写（禁虚构生效值）
+    }
+    for (const failure of reply.failures) {
+      // 失败名单成员：不写显示态（生效值未知——分支③构造性成立），toast 分项呈现
+      toastError(t('panel.sideDrawer.modelSwitchMemberFailed', { member: failure.runId, reason: failure.reason }))
+    }
+  }
+
+  return { setSubagentModel, displayOf, memberDisplayOf, applyReplyToDisplay }
+}

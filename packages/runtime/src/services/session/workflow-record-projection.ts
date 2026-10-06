@@ -9,7 +9,13 @@ import type {
   WorkflowRecordRegisteredEntryData,
   WorkflowRecordSettledEntryData,
 } from "@zhushanwen/subagent-core";
-import type { WorkflowRunRecord, WorkflowAgentCall, WorkflowRunPhaseFoldEntry } from "@taiji/shared";
+import type {
+  SubagentModelOverrideStatus,
+  SubagentRecord,
+  WorkflowRunRecord,
+  WorkflowAgentCall,
+  WorkflowRunPhaseFoldEntry,
+} from "@taiji/shared";
 
 /** ms → ISO（WorkflowAgentCall/WorkflowRunRecord 时间契约是 ISO 字符串）。 */
 function toIso(ms: number): string {
@@ -195,4 +201,85 @@ export function projectV2Workflow(
     ...(fold !== undefined && fold.phases.size > 0 ? { phases: projectPhaseFolds(fold.phases) } : {}),
     ...(fold?.created?.argsSummary !== undefined ? { argsSummary: fold.created.argsSummary } : {}),
   }
+}
+
+/**
+ * run 详情载荷的模型字段增强（subagent-model-switch §9 transport 行，U1 详情载荷
+ * 透传——run 详情侧按成员标识逐成员携带、聚合面不取单一值）：
+ * - **覆盖状态**：run 级覆盖（query.getRunOverride）分发到该 run 全部 agentCall 条目
+ *   （run 级全切是 run 作用域意图，各成员条目携带同值；无覆盖不造键）；
+ * - **最近生效值**：成员 SubagentRecord 的增强产物（调用方先经 enhanceSubagentDetails
+ *   派生——含 pi session model_change 尾条目读取与「仅 pi 成员」判定）按
+ *   (parentRunId, stepIndex) 圈定后透传到对应 agentCall。同族替换可只发生在部分成员，
+ *   聚合面不取单一值；一键多 attempt 的权威成员取与 workflow-step-merge.pickAuthoritativeRecord
+ *   同判据（running 优先、startedAt 最新——显示权威一致）。
+ *
+ * 纯函数（无 IO）；输入 runs/subagents 均为已合并投影产物，无增强项时返回原引用
+ * （零拷贝快路径，调用方 getWorkflows 每次读 RPC 消费）。
+ */
+export function projectSubagentModelDetailIntoRuns(
+  runs: WorkflowRunRecord[],
+  subagents: SubagentRecord[],
+  query:
+    | {
+        getRecordOverride(recordId: string): SubagentModelOverrideStatus | undefined
+        getRunOverride(runId: string): SubagentModelOverrideStatus | undefined
+      }
+    | undefined,
+): WorkflowRunRecord[] {
+  if (runs.length === 0) return runs
+  // 成员圈定索引：(parentRunId, stepIndex) → 权威 record（同判据 pickAuthoritativeRecord：
+  // running 优先，次取 startedAt 最新）。
+  const byRun = new Map<string, Map<number, SubagentRecord>>()
+  for (const record of subagents) {
+    const runId = record.parentRunId
+    const stepIndex = record.stepIndex
+    if (runId === undefined || stepIndex === undefined) continue
+    let byStep = byRun.get(runId)
+    if (byStep === undefined) {
+      byStep = new Map<number, SubagentRecord>()
+      byRun.set(runId, byStep)
+    }
+    const incumbent = byStep.get(stepIndex)
+    if (incumbent === undefined || pickAuthoritativeMember(record, incumbent)) byStep.set(stepIndex, record)
+  }
+  let result: WorkflowRunRecord[] | null = null
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i]!
+    const byStep = byRun.get(run.runId)
+    const runOverride = query?.getRunOverride(run.runId)
+    if (byStep === undefined && runOverride === undefined) continue
+    let changed = false
+    const agentCalls = run.agentCalls.map((call) => {
+      const member = byStep?.get(call.id)
+      const override = runOverride ?? member?.modelOverride
+      const recent = member?.recentEffectiveModel
+      if (override === undefined && recent === undefined) return call
+      // 引用相等短路（返回值直进 RPC reply 不缓存，无跨轮幂等消费位；形状级比较
+      // 不必——成员增强产物每次读 RPC 重派生）。
+      if (call.modelOverride === override && call.recentEffectiveModel === recent) return call
+      changed = true
+      return {
+        ...call,
+        ...(override !== undefined ? { modelOverride: override } : {}),
+        ...(recent !== undefined ? { recentEffectiveModel: recent } : {}),
+      }
+    })
+    if (!changed) continue
+    if (result === null) result = runs.slice(0, i)
+    result.push({ ...run, agentCalls })
+  }
+  return result ?? runs
+}
+
+/**
+ * 成员权威判据（与 workflow-step-merge.pickAuthoritativeRecord 同判据的二元形式）：
+ * running 优先；同态取 startedAt 最新（缺失视为最早）。成员模型字段透传的显示权威
+ * 与步骤行权威一致，避免同一 call 两处取不同 attempt 的字段。
+ */
+function pickAuthoritativeMember(candidate: SubagentRecord, incumbent: SubagentRecord): boolean {
+  const candidateRunning = candidate.status === 'running'
+  const incumbentRunning = incumbent.status === 'running'
+  if (candidateRunning !== incumbentRunning) return candidateRunning
+  return (candidate.startedAt ?? Number.NEGATIVE_INFINITY) >= (incumbent.startedAt ?? Number.NEGATIVE_INFINITY)
 }
