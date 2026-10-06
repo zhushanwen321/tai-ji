@@ -505,6 +505,8 @@ export interface HeaderActionUpdatePayload {
   badge?: string
   tooltip?: string
   disabled?: boolean
+  /** true = 入口整体不渲染（与 disabled 灰置正交）；缺省 false */
+  hidden?: boolean
 }
 
 // ── ClientMessage discriminated union ───────────────────────────

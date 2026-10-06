@@ -45,6 +45,9 @@ export const builtinContributions: BuiltinContribution[] = [
   {
     // scheduler-manager（plugin-header-action-modal-points 首消费者，AP-1/AP-2）：
     // headerActions/modals 为新点位声明（icon 为 lucide 名宿主解析，插件不给 SVG；width 三档闭集）。
+    // 声明 = 入口常驻的静态形状；可见性由插件运行时裁决——无任务时插件经
+    // updateHeaderAction 推 hidden=true，HeaderActionsHost 列表构建层剔除该入口
+    // （不出按钮，与 disabled 灰置正交；hidden 缺省 false = 照常渲染）。
     // commands 是命令点击链的必要配套：commandId 须经 ensureCommandDeclarationsSync 注册进
     // CommandRegistry，点击才走 execute → WS plugin.executeCommand → Worker handler 闭环；
     // 缺声明则 E3「命令查不到」错误路径成为唯一路径（open 缺失 → G1 点击开层失效；

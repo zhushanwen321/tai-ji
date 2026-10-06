@@ -11,6 +11,9 @@
     （首次缺省可点，E14 写路径兜底——失败不拦入口）
   - 运行时 disabled：插件 updateHeaderAction 推的 entry.disabled=true 直接灰置；
     缺 tooltip 时提示「暂不可用」不落声明 title（场景 12，插件侧业务态消费）
+  - 运行时 hidden：插件 updateHeaderAction 推的 entry.hidden=true 时入口整体不渲染
+    （不出按钮，与 disabled 灰置正交；缺省 false）——scheduler「无任务不显示」契约
+    的渲染端承接，过滤在列表构建层（toHeaderActionButton 返回 null）、先于 disabled 合成
   - E3 点击 → CommandRegistry.execute：命令缺失（emit error，ERR6）后按钮本地置灰，
     禁静默 no-op；宿主重判 registered（命令重注册）后置灰让位、按钮恢复可点
   - 无声明时整组件零 DOM（不挤压右侧内置按钮，同 ViewHost empty="hidden" 语义）
@@ -162,7 +165,8 @@ function dispatchHeaderAction(src: HeaderActionsSource, sid: string, commandId: 
   }
 }
 
-/** 单条声明 → 按钮视图（无 headerAction 段 = null，filter 剔除） */
+/** 单条声明 → 按钮视图（无 headerAction 段 = null；运行时 hidden=true = null，剔除即不出按钮——
+ *  过滤在列表构建层、先于 disabled 三源合成；hidden 缺省/false 照常走渲染）。 */
 function toHeaderActionButton(
   src: HeaderActionsSource,
   decl: ContributionRecord,
@@ -171,6 +175,7 @@ function toHeaderActionButton(
   const ha = decl.headerAction
   if (!ha) return null
   const entry = src.getRuntimeState(sid, decl.contributionId)
+  if (entry?.hidden === true) return null
   const availability = src.resolveCommandAvailability(sid, ha.commandId)
   const effective = effectiveAvailabilityOf(sid, ha.commandId, availability)
   const missing = commandMissing.value.has(`${sid}::${ha.commandId}`)

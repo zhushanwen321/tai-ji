@@ -2,7 +2,7 @@
  * scheduler-manager 插件行为面单测。
  *
  * 构建者白盒 + 使用者黑盒：经 plugin-sdk createMockAgentAPI mock 驱动 activate()
- * 与注册的 command handlers，覆盖八块：
+ * 与注册的 command handlers，覆盖九块：
  * ① handleWrite 回执分支矩阵（accepted/command-missing/其余（hook-blocked/error）
  *    + 无效 id + TASK_NOT_FOUND 自愈）
  * ② doRefresh 的 E11 游标失效全量重拉与 E4 恢复两态（terminal vs recovering）
@@ -18,6 +18,7 @@
  *    成功标记且无原因行——经 handleOpen 推树断言）
  * ⑨ 撤回信号镜像重建（'taiji:revoked' → 丢弃累计 + 全量重拉，折叠不含被撤任务；
  *    任务域订阅仍走增量不误重建）
+ * ⑩ hidden 入口可见性（空清单 true / 有任务 false；读失败态保持上次值）
  *
  * 隔离：被测模块持有模块级状态（mirrors Map / focusSessionId），每条用例
  * vi.resetModules() 后动态 import 取 fresh 模块。timer 面（防抖 200ms / 重试 2s）
@@ -320,6 +321,7 @@ function lastHeaderAction(api: ReturnType<typeof createMockAgentAPI>): {
   sessionId: string
   badge?: string
   disabled?: boolean
+  hidden?: boolean
 } {
   const calls = vi.mocked(api.ui.updateHeaderAction).mock.calls
   return calls[calls.length - 1]?.[1] ?? { sessionId: '' }
@@ -385,6 +387,38 @@ describe('activate: 冷启动兜底 + 首拉折叠 + 徽标', () => {
     expect(h.readCalls[1]?.opts.sinceEntryId).toBe('e1')
     expect(lastHeaderAction(h.api).badge).toBe('1')
     expect(h.lastTree().filter((n) => n.type === 'action-bar')).toHaveLength(2)
+  })
+
+  it('hidden 可见性：空任务清单推 hidden=true（无任务不显示），任务出现后推 false 恢复显示', async () => {
+    const h = await setup({
+      readScript: [
+        { sessionFile: SESSION_FILE, entries: [], leafEntryId: 'e0' },
+        { sessionFile: SESSION_FILE, entries: [upsertEntry('aaaabbbb', true, 'e1')], leafEntryId: 'e1' },
+      ],
+    })
+    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
+    expect(lastHeaderAction(h.api).hidden).toBe(true)
+
+    // 任务出现（失效驱动增量刷新）→ 入口恢复显示
+    h.invalidate('s-1')
+    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
+    expect(lastHeaderAction(h.api).hidden).toBe(false)
+  })
+
+  it('hidden 读失败态保持上次值：恢复窗口不重算，数据恢复后随刷新收敛', async () => {
+    const h = await setup({
+      readScript: [
+        { sessionFile: SESSION_FILE, entries: [upsertEntry('aaaabbbb', true, 'e1')], leafEntryId: 'e1' },
+        new Error('session read blew up'),
+      ],
+    })
+    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
+    expect(lastHeaderAction(h.api).hidden).toBe(false)
+
+    // 读失败（恢复窗口）：hidden 保持上次值 false 原样重推，不误判为「无任务」
+    h.invalidate('s-1')
+    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
+    expect(lastHeaderAction(h.api).hidden).toBe(false)
   })
 })
 

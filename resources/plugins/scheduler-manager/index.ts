@@ -3,9 +3,12 @@
  * 规范验收样本；任务管理数据面零 scheduler 专属 API）。
  *
  * 点位使用（设计 §3.4）：
- * - AP-1 headerAction：本会话启用任务数徽标（空任务无数字、按钮常驻——常驻由
- *   core builtinContributions 静态声明承担，不依赖数据量）；刷新触发 = entry 失效
- *   订阅 + onDidActivateSession 补拉（非写入驱动，场景 9）。
+ * - AP-1 headerAction：本会话启用任务数徽标（空任务无数字）+ 入口可见性（hidden）——
+ *   任务清单为空推 hidden=true（宿主渲染端整体不渲染该入口，与 disabled 灰置正交；
+ *   声明侧静态形状由 core builtinContributions 承担），有任务推 false 恢复显示。
+ *   刷新触发 = entry 失效订阅 + onDidActivateSession 补拉 + 写命令成功后的清 notice
+ *   推送（「任务集合可能变化」的时点统一汇聚在 pushTreeAndBadge → pushHeaderAction
+ *   出口，非写入驱动，场景 9）；读失败态不重算 hidden（保持上次值，E4「恢复中」语义）。
  * - AP-2 modal：showModal(modalId, {sessionId}) 后立即 views.update（首帧空白 =
  *   一次 RPC 往返）；内容树严格按 §3.1.1 字段操作对账表组装，表外零元素（G6）。
  * - AP-3 action-bar：每任务三动作（暂停/恢复 toggle、立即执行 run、删除 rm）。
@@ -259,6 +262,12 @@ interface SessionMirror {
   commandDisabled: boolean | null
   /** 徽标当前值（空任务 undefined；读失败态保持上次值——全量覆盖语义下插件每次重推完整状态） */
   badge?: string
+  /**
+   * 入口可见性当前值（true = 任务清单为空，宿主整体不渲染该入口；undefined = 尚未
+   * 判定不推，渲染端按缺省 false 显示）。与 badge 同源同刷新节奏：读失败态不重算
+   * （undefined 期间或上次值原样重推 = 保持上次值），数据恢复后随下一轮刷新收敛。
+   */
+  hidden?: boolean
   /** 最近一次操作结果（行内 notice，至多 1 行） */
   notice: string | null
   disposables: DisposableLike[]
@@ -476,6 +485,9 @@ async function pushTreeAndBadge(api: Api, mirror: SessionMirror): Promise<void> 
     tree = buildModalTree(tasks, { notice: mirror.notice ?? undefined })
     const enabledCount = tasks.filter((t) => t.enabled).length
     mirror.badge = enabledCount > 0 ? String(enabledCount) : undefined
+    // 「无任务不显示」：任务清单为空 → 入口整体不渲染（hidden=true）；有任务恢复显示。
+    // 读失败分支不重算（保持上次值，与徽标「恢复中」语义一致）。
+    mirror.hidden = tasks.length === 0
   }
   try {
     await api.views.update(MODAL_VIEW_ID, tree, { sessionId: mirror.sessionId })
@@ -493,6 +505,7 @@ async function pushHeaderAction(api: Api, mirror: SessionMirror): Promise<void> 
       sessionId: mirror.sessionId,
       ...(mirror.badge !== undefined ? { badge: mirror.badge } : {}),
       ...(mirror.commandDisabled !== null ? { disabled: mirror.commandDisabled } : {}),
+      ...(mirror.hidden !== undefined ? { hidden: mirror.hidden } : {}),
     })
   } catch (e) {
     // best-effort：徽标推送失败不重抛——下一轮失效刷新/推送重试收敛

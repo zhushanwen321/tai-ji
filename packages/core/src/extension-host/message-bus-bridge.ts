@@ -347,7 +347,7 @@ export function parseModalState(msg: IncomingPluginMessage): InternalEvent | nul
 
 /**
  * plugin:headerActionUpdate 解析守卫（AP-1 徽标更新帧）。
- * payload = { pluginId, headerActionId, sessionId, badge?, tooltip?, disabled? }。
+ * payload = { pluginId, headerActionId, sessionId, badge?, tooltip?, disabled?, hidden? }。
  * sessionId 必带（AP-1 契约：渲染端按 (sessionId, headerActionId) 写会话分区；
  * 缺 → null 守卫失败丢弃 + error）。badge ≤4 字符的截断由渲染端承担，守卫存原文。
  */
@@ -367,6 +367,7 @@ export function parseHeaderActionUpdate(msg: IncomingPluginMessage): InternalEve
       badge: asOptionalString(payload.badge),
       tooltip: asOptionalString(payload.tooltip),
       disabled: typeof payload.disabled === 'boolean' ? payload.disabled : undefined,
+      hidden: typeof payload.hidden === 'boolean' ? payload.hidden : undefined,
     },
   }
 }

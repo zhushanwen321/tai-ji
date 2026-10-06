@@ -549,6 +549,12 @@ export function registerUiRpcHandlers(
         'INVALID_DISABLED',
       )
     }
+    if (params.hidden !== undefined && typeof params.hidden !== 'boolean') {
+      throw errorWithCode(
+        `Invalid hidden: expected a boolean but received ${typeof params.hidden}.`,
+        'INVALID_HIDDEN',
+      )
+    }
     // badge ≤4 字符的截断由渲染端承担（AP-1），帧面存原文
     // B-F2：回执如实反映投递结果——出线未接线（optional-chain 跳过）或 broadcastFn
     // 缺失被 warn 丢弃时回 {updated:false}，不让插件误以为渲染端已收到
@@ -560,6 +566,7 @@ export function registerUiRpcHandlers(
         ...(badge !== undefined && { badge }),
         ...(tooltip !== undefined && { tooltip }),
         ...(params.disabled !== undefined && { disabled: params.disabled }),
+        ...(params.hidden !== undefined && { hidden: params.hidden }),
       }) ?? false
     return { updated: delivered }
   })
@@ -621,11 +628,11 @@ export function createUiApi(
   /** AP-2 关③：插件自身关闭，走与宿主 dismiss 相同的 closed 路径（已关层 no-op）。 */
   hideModal(modalId: string): Promise<{ closed: boolean }>
   /**
-   * AP-1：badge/tooltip/disabled 可变字段更新（sessionId 必填，徽标是 per-session 语义）。
+   * AP-1：badge/tooltip/disabled/hidden 可变字段更新（sessionId 必填，徽标是 per-session 语义）。
    * 回执 {updated}：true = 广播帧已发出；false = 渲染端未收到（装配缺陷被丢弃），插件
    * 可据此告警或走轮询兜底，不应把 false 当成功。
    */
-  updateHeaderAction(id: string, opts: { sessionId: string; badge?: string; tooltip?: string; disabled?: boolean }): Promise<{ updated: boolean }>
+  updateHeaderAction(id: string, opts: { sessionId: string; badge?: string; tooltip?: string; disabled?: boolean; hidden?: boolean }): Promise<{ updated: boolean }>
   /** AP-2：modal 被关闭（宿主 dismiss / 切会话 / 宿主浮层 / replaced / plugin-gone）的定向通知订阅。 */
   onModalClosed(handler: (event: { modalId: string; reason: PluginModalClosedReason }) => void): Disposable
 } {
@@ -666,7 +673,7 @@ export function createUiApi(
     hideModal: (modalId: string) =>
       rpcClient.request('plugin.ui.hideModal', { pluginId, modalId }).then(v => v as { closed: boolean }),
 
-    updateHeaderAction: (id: string, opts: { sessionId: string; badge?: string; tooltip?: string; disabled?: boolean }) =>
+    updateHeaderAction: (id: string, opts: { sessionId: string; badge?: string; tooltip?: string; disabled?: boolean; hidden?: boolean }) =>
       rpcClient
         .request('plugin.ui.updateHeaderAction', { pluginId, headerActionId: id, ...opts })
         .then(v => v as { updated: boolean }),
