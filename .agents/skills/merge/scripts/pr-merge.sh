@@ -147,3 +147,17 @@ if [[ "$CURRENT_BRANCH" != "main" ]]; then
 fi
 
 echo -e "  ${GREEN}✅ 本地 main 已同步到 $GH_REMOTE/main${NC}"
+
+# 依赖一致性：合入可能前进 main 的 lockfile（集成分支带新依赖/版本 bump），
+# node_modules 已存在时 pre-merge-check.sh 的缺失性安装不会触发——此处按 lockfile 补装。
+# 一致时为快速 no-op（几秒）；不一致且漏装时 pi 实装版本滞留旧版，会被 pi-semantics
+# 守卫拦截（v0.10.14 发布轮实例：合入后 node_modules 停留旧 pi）。
+echo ""
+echo "  同步 main 依赖（lockfile 变化时补装，一致时快速跳过）..."
+if ! (cd "$MAIN_WT" && CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install --frozen-lockfile >/dev/null 2>&1); then
+    echo -e "${RED}Error: main worktree 依赖安装失败${NC}"
+    echo "  手动执行: cd $MAIN_WT && CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install --frozen-lockfile"
+    echo "  恢复后重跑本脚本（幂等，已合并的 PR 会跳过合并步骤）"
+    exit 1
+fi
+echo -e "  ${GREEN}✅ main 依赖与 lockfile 一致${NC}"

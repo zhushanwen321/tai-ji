@@ -150,7 +150,7 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/pr-merge.sh <pr-number>
 
 **空 checks 防误判**：PR 的 `statusCheckRollup` 为空（CI checks 尚未注册）时，脚本不判「CI 通过」，而是每 15s 重查、最多 4 次；仍为空则 exit 1 并输出排查指引（确认 PR head commit 是否触发 CI / 人工核实），不会在 CI 完全未运行时开始合并。
 
-脚本内部自动 sync 本地 main（`git fetch github && git reset --hard github/main`），无需手动执行。
+脚本内部自动 sync 本地 main（`git fetch github && git reset --hard github/main`），无需手动执行。sync 后自动按 lockfile 同步 main 依赖（`pnpm install --frozen-lockfile`，一致时快速跳过）——合入可能前进 lockfile 而 `node_modules` 已存在不会触发缺失性安装，漏装会让 pi 实装版本滞留旧版、被后续 pi-semantics 守卫拦截。
 
 ### 阶段 3: Post-merge CI
 
