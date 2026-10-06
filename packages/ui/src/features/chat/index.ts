@@ -24,6 +24,8 @@ export type { ChatViewDeps, DrawerOpenOptions } from './chat-view-deps'
 export * from './block-icon'
 export * from './format-utils'
 export * from './slash-icons'
+// rail 节点摘要 memo（TurnRail 渲染与 useMessageStreamRail 投影恒等判定共用的单一 WeakMap）
+export { railMemoFor } from './rail-turn-memo'
 // 类型
 export type { MarkdownSegment, IncrementalMarkdownResult, IncrementalMarkdownCache } from './markdown-types'
 // 展示组件

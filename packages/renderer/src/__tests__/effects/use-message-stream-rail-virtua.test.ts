@@ -29,13 +29,13 @@ import { createMockVlist } from './_virtua-mock-helper'
 
 // ── 测试数据工厂 ────────────────────────────────────────────────────
 
-/** 构造一个 turn RenderItem（index 可控）。 */
-function turnItem(index: number): RenderItem {
+/** 构造一个 turn RenderItem（index 可控；content 缺省 'q'，rail 投影摘要 = 'q'）。 */
+function turnItem(index: number, content = 'q'): RenderItem {
   return {
     kind: 'turn',
     turn: {
       index,
-      user: { id: `u${index}`, role: 'user', content: 'q' } as never,
+      user: { id: `u${index}`, role: 'user', content } as never,
       assistants: [],
       isStreaming: false,
       hasFoldable: false,
@@ -200,12 +200,14 @@ describe('useMessageStreamRail · streaming perf（railTurns 引用恒等 + O(1)
     wrapper.unmount()
   })
 
-  it('turn 引用变化（streaming 末位 turn 重建）→ railTurns 产出新数组且未变成员引用逐项保留', () => {
-    // 行为不变反面：任一 turn 引用变化必须照常产出新数组（不能过度缓存吞掉真实变更）。
+  it('turn 引用变化且 rail 投影摘要变化 → railTurns 产出新数组且未变成员引用逐项保留', () => {
+    // 行为不变反面：末位 turn 的 rail 可见内容变化（user 正文变 → 摘要变）必须照常产出
+    // 新数组（不能过度缓存吞掉真实变更）；此处同时换 index 与 content 保证新旧引用与
+    // 投影签名都不同。
     const base = makeRenderItems()
     const { rail, renderItemsRef, wrapper } = mountRail({ renderItems: base })
     const first = rail.railTurns.value
-    const rebuiltLast = turnItem(4) // 模拟 toRenderItemsIncremental 只重建末位 turn
+    const rebuiltLast = turnItem(4, 'changed question') // 模拟末位 turn 重建且内容真实变化
 
     renderItemsRef.value = [base[0]!, base[1]!, rebuiltLast]
     const second = rail.railTurns.value
@@ -214,6 +216,57 @@ describe('useMessageStreamRail · streaming perf（railTurns 引用恒等 + O(1)
     expect(second[0]).toBe(first[0])
     expect(second[1]).toBe(first[1])
     expect(second[2]).toBe(rebuiltLast.turn)
+    wrapper.unmount()
+  })
+
+  it('仅末位 turn 引用不同且 rail 投影摘要未变 → railTurns 复用旧数组引用（投影恒等放宽）', () => {
+    // streaming perf：末位 turn 每 delta 帧新引用（ADR-0039 不可变替换），但 rail 显示的
+    // 摘要（userSummary/agentSummary/failed/iconClass）未变 → TurnRail render 输出不变，
+    // 旧数组引用复用让 TurnRail props 不变 → 常驻面板零 vnode diff。
+    const base = makeRenderItems()
+    const { rail, renderItemsRef, wrapper } = mountRail({ renderItems: base })
+    const first = rail.railTurns.value
+    const rebuiltLast = turnItem(4) // content 同为 'q' → rail 投影摘要相同
+
+    renderItemsRef.value = [base[0]!, base[1]!, rebuiltLast]
+
+    expect(rail.railTurns.value).toBe(first)
+    wrapper.unmount()
+  })
+
+  it('投影恒等复用后 onJump 末位 rail 下标仍跳到当前最新 turn（结构定位兜底）', () => {
+    // 旧数组末位持旧引用，按引用 findIndex 必 miss → 兜底「第 idx 个 turn 项」定位，
+    // 仍指向 renderItems 中当前末位 turn（重建后的新引用），跳转语义不变。
+    const base = makeRenderItems()
+    const findItemIndex = vi.fn(() => 0)
+    const mock = createMockVlist({ findItemIndex })
+    const vlistRef = ref<VirtualizerHandle | null>(mock)
+    const { rail, renderItemsRef, wrapper } = mountRail({ renderItems: base, vlistRef })
+    rail.railTurns.value // 触发首次求值
+    const rebuiltLast = turnItem(4) // 摘要相同 → 放宽复用
+
+    renderItemsRef.value = [base[0]!, base[1]!, rebuiltLast]
+    rail.onJump(2) // rail 末位下标
+
+    expect(mock.scrollToIndex).toHaveBeenCalledWith(2, { align: 'start' })
+    wrapper.unmount()
+  })
+
+  it('投影恒等复用后 updateActiveTurnIndex 对末位新引用仍定位末位下标（补映射不退化）', () => {
+    // 放宽帧返回旧数组时同步补末位下标映射：滚动反查到末位新引用时 O(1) 命中，
+    // activeTurnIndex 保持末位（2），不退化 findIndex/-1。
+    const base = makeRenderItems()
+    const findItemIndex = vi.fn(() => 2) // 视口反查指向 renderItems[2] = 末位 turn
+    const mock = createMockVlist({ scrollOffset: 800, findItemIndex })
+    const vlistRef = ref<VirtualizerHandle | null>(mock)
+    const { rail, renderItemsRef, wrapper } = mountRail({ renderItems: base, vlistRef })
+    rail.railTurns.value
+    const rebuiltLast = turnItem(4)
+
+    renderItemsRef.value = [base[0]!, base[1]!, rebuiltLast]
+    rail.updateActiveTurnIndex()
+
+    expect(rail.activeTurnIndex.value).toBe(2)
     wrapper.unmount()
   })
 
