@@ -20,6 +20,9 @@
 //     钩子零生产调用（引擎注册表只装 cli descriptor，RemoteEngine 不经协议传进程句柄；
 //     引擎侧唯一数据消费者只读 pid/killed 窄载荷），三处宿主侧死注册一并删除。生命周期
 //     谓词自 W6 起读协议镜像（childSpawned/childStateChanged，EngineClient）。
+//   - [subagent-model-switch 已实施 2026-10-06] EnginePort.setModel?——执行中模型热切换
+//     可选面（设计 §7.3；manifest capabilities.setModel = 'native' 条件实现，成员摘除
+//     形态同 validateModel）。错误分型值域 = SDK setModel 域词表（三型失败 + 无活进程码）。
 //
 // 三个能力面（D1；[H1 U6] interact 面已随 chat 域退役删除——续聊统一为新 run + resume）：
 //   run        —— 主语义：一次性 fire-to-completion 任务执行（会话形态续聊轮同走 run，
@@ -42,6 +45,8 @@ import type {
   EngineHandleData,
   ProbeReport,
   SessionView,
+  SetModelParams,
+  SetModelResult,
 } from "./types.ts";
 
 // ============================================================
@@ -222,6 +227,22 @@ export interface EnginePort {
    * 输入词形统一用 EngineModelSelectorInput 别名表达（契约派生，禁裸 string 重写）。
    */
   validateModel?(modelRef: EngineModelSelectorInput): { canonicalRef: string };
+
+  /**
+   * [subagent-model-switch §7.3] 可选面：执行中模型热切换（协议 setModel 正向方法的
+   * 宿主侧承载，经 EngineClient 协议帧转发引擎）。实现 = cli 形态引擎的 RemoteEngine
+   * 按 manifest `capabilities.setModel === "native"` 条件实现（非 native 引擎成员
+   * 摘除——validateModel 构造器摘除同款形态，消费方以
+   * `typeof engine.setModel === "function"` 统一探测）。
+   *
+   * 消费点 = 宿主编排的发送前预检（§7.2 步骤②，capabilities.setModel 位非 native
+   * 不发调用、转覆盖记账路径——ADR-0071 判据 7 消费点登记，位注释见 SDK
+   * contract-types.ts）。错误分型值域 = SDK setModel 域词表：三型失败
+   * （engine_model_not_in_snapshot / engine_credential_missing /
+   * engine_state_readback_failed）+ 无活进程码（engine_run_not_active——宿主转
+   * 已记账型应答 / not-active 成员态，非失败分型）。
+   */
+  setModel?(params: SetModelParams): Promise<SetModelResult>;
 
   /**
    * [R1 D6] 可选停机面：释放引擎持有的常驻资源（如 app-server 常驻进程 / 长连接）。

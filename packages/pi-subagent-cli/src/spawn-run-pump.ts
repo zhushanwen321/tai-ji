@@ -12,6 +12,7 @@ import { isBrokenPipeError } from "@zhushanwen/pi-rpc";
 import { getLogger, pumpNdjsonLines } from "@zhushanwen/subagent-engine-sdk";
 
 import { unregisterActiveChild } from "./active-children.ts";
+import { dispatchControlResponse } from "./control-responses.ts";
 import { toErrorMessage } from "./error-message.ts";
 import { extractGetStateFields, type GetStateResult } from "./get-state-handshake.ts";
 import {
@@ -186,6 +187,10 @@ function createLineConsumer(deps: StdoutPumpDeps): (line: string) => void {
         return;
       case "response":
         identity.dispatchStateResponse(parsed.id, parsed.success, parsed.data);
+        // [subagent-model-switch §7.3] 进程级控制应答等待表并行分发（setModel 通路
+        // ——run 生命周期外的控制面操作等不到 per-run 监听表；两表按 id 各自一次性
+        // 消费，未登记 id 各自自弃）。
+        dispatchControlResponse(parsed.id, parsed.success, parsed.data, parsed.error);
         return;
       case "extension_ui_request":
         enqueueUi(parsed.id, parsed.request);

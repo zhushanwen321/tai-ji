@@ -51,6 +51,7 @@ export {
   buildSwitchSessionParams,
   buildPromptCommandFrame,
   buildGetStateCommandFrame,
+  buildSetModelCommandFrame,
   buildUiResponseFrame,
   buildExtensionUiResponsePayload,
 } from './commands.ts'

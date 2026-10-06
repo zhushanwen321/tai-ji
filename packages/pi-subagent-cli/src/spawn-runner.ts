@@ -715,6 +715,12 @@ export async function runSpawnOnce(
   }
 }
 
+// [subagent-model-switch §7.3] setModel 子进程通路（定位活跃子进程 → 命令写入 →
+// 读应答 → get_state 回读）落 control-responses.ts——spawn-runner 职责 = spawn 执行
+// 与 run 生命周期，模型热切控制面与其正交（该编排移入即越本文件 max-lines 上限）；
+// 接线原语复用不变：stdin-writer sendSetModelCommand / active-children 记账表 /
+// pump 应答分发（spawn-run-pump.ts response 分支）。
+
 // 活跃子进程记账（自本文件提取至 active-children.ts，行为等价）：
 // re-export 保持既有导入面（index.ts / pi-engine.ts / __tests__）。
 export {

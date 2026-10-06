@@ -1331,6 +1331,27 @@
       "note": "设计文档同步纪律（C-proc-10）的机器门：pre-commit 按 docs/architecture/ 或映射源码路径触发（install-hooks.sh DOC_SYMBOL_DRIFT 段）。本 rule 登记脚本资产的 coverage（剪枝清单 = node_modules/.git/dist/coverage/test-results/playwright-report/.taiji-harness/resources/.zcode——.zcode 为 workflow 引擎 gitignored 工作区，agents 手工维护目录不受影响）；改动脚本扫描面/剪枝清单/映射表时跑 node scripts/check-doc-symbol-drift.mjs 冒烟（exit 0 + 四段 OK 行）"
     },
     {
+      "id": "E2E-GUIDEPROJ-01",
+      "summary": "引擎指南契约投影检查（check-guide-contract-projection：engine-development-guide 的协议方法/错误码/能力位/manifest 示例与 SDK 源码词表三面逐键一致）",
+      "scope": [
+        "scripts/check-guide-contract-projection.mjs",
+        "docs/extensions/subagents/engine-development-guide.md"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-guide-contract-projection.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-guide-contract-projection.mjs",
+      "owner": "extensions",
+      "authority": "docs/extensions/subagents/engine-development-guide.md",
+      "note": "引擎协议面演进的投影一致门：指南与源码词表任一侧变更时跑（exit 0 + 逐面 OK 行），更新触发义务见根 AGENTS.md 主题索引；红灯按脚本输出的 ✗ 明细同 commit 更新指南或回退源码误改。U3（subagent-model-switch）引入 setModel 方法/三型错误码/能力位扩位时登记本 rule——脚本既有但此前未入 coverage 登记处"
+    },
+    {
       "id": "E2E-RESUME-01",
       "summary": "workflow run 断点续跑确定性场景族（scenario-01…25 无门段：主链回放 / 拒绝族 / 三档恢复 / 预算 / 重建保真 / D14 args 校验）+ record-mode 夹具族 + 壳层与 core 侧 resume 单测（进程内真 resumeRun + faux runner，零 token；含内置模板 scriptPath 守卫探针族 review-fix-loop-scriptpath-failfast——空串形态 = 旧 record 流 resume）",
       "scope": [

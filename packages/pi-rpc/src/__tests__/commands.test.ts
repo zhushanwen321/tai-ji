@@ -12,6 +12,7 @@ import {
   buildSwitchSessionParams,
   buildPromptCommandFrame,
   buildGetStateCommandFrame,
+  buildSetModelCommandFrame,
   buildUiResponseFrame,
   buildExtensionUiResponsePayload,
   serializeCommandFrame,
@@ -67,6 +68,16 @@ describe('完整命令帧（fire-and-forget 形态，pi-subagent-cli 消费）',
     const frame = buildGetStateCommandFrame('gs-1')
     expect(JSON.parse(frame)).toEqual({ id: 'gs-1', type: 'get_state' })
     expect(Object.keys(JSON.parse(frame)).sort()).toEqual(['id', 'type'])
+  })
+
+  it('buildSetModelCommandFrame：{id,type:"set_model",provider,modelId}（[subagent-model-switch §7.3] 与既有命令帧同型：单行 JSON、LF 分界、无换行；载荷对齐 pi SetModelCommand）', () => {
+    const frame = buildSetModelCommandFrame('sm-1', { provider: 'zai-coding-cn', modelId: 'glm-5.3-flash' })
+    // 字段面快照：与 buildPromptCommandFrame 同族——{id,type,...params} 键序 + 单行无换行
+    expect(frame).toBe('{"id":"sm-1","type":"set_model","provider":"zai-coding-cn","modelId":"glm-5.3-flash"}')
+    expect(frame.endsWith('\n')).toBe(false)
+    expect(frame.includes('\n')).toBe(false)
+    const parsed = JSON.parse(frame) as Record<string, unknown>
+    expect(Object.keys(parsed)).toEqual(['id', 'type', 'provider', 'modelId'])
   })
 
   it('serializeCommandFrame：{id,type,...params} 键序', () => {

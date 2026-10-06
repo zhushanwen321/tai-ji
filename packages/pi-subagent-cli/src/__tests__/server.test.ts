@@ -4,7 +4,8 @@
 // engine = EnginePort 内存 fake（无子进程 / 无真实数据目录——本文件零 fs 触碰），
 // stdout 写入面注入内存 sink。覆盖：
 //   ① 帧分类路由：请求帧分发 / 反向应答落位 / 入站反向请求 bad_frame / 坏帧静默；
-//   ② 9 正向方法表驱动路由（逐方法 → EnginePort 成员；[H1 U5] interact 已退役）+
+//   ② 10 正向方法表驱动路由（逐方法 → EnginePort 成员；[H1 U5] interact 已退役；
+//      [subagent-model-switch] setModel 含能力位防御分支）+
 //      未知方法 engine_protocol_unknown_method（错误原文含方法名与 request id）；
 //   ③ run 协议载荷还原：ctx.model 合回 task / ctxModel canonical 词形解析 /
 //      streamMode onDelta → host/streamDelta / 事件通知 seq 单调 / cancel abort /
@@ -77,7 +78,7 @@ const INIT_PARAMS: InitializeParams = {
 
 const FAKE_OUTCOME = { content: "你好", exitCode: 0, engineId: "pi", sessionId: HANDLE.sessionRef.recordId };
 
-interface OutFrame {
+interface OutFrame { // oe-exempt:20261006:test:测试专用出帧形态断言结构单实现为常态
   id?: number | string;
   method?: string;
   params?: unknown;
@@ -319,6 +320,38 @@ describe("dispatchTable 表驱动路由（逐方法 → EnginePort 成员）", (
     const second = makeServer(makeEngine({ dispose: undefined }));
     const r2 = await request(second.server, second.sink, 1, "dispose", {});
     expect(r2.result).toEqual({ ok: true });
+  });
+
+  it("[subagent-model-switch] setModel：native 引擎路由 EnginePort.setModel（载荷透传 + result 写回）；缺省声明位（fixture 无 setModel 键 = unsupported）→ engine_capability_unsupported", async () => {
+    // 缺省 fake：capabilities 未声明 setModel（undefined = unsupported）→ 分发行能力位防御拒绝
+    const gate = makeEngine();
+    const g = makeServer(gate);
+    const rejected = await request(g.server, g.sink, 1, "setModel", {
+      runId: "rec-1",
+      model: { provider: "p", modelId: "m" },
+    });
+    expect(rejected.error?.code).toBe("engine_capability_unsupported");
+    expect(vi.mocked(gate.setModel ?? vi.fn())).not.toHaveBeenCalled();
+
+    // native 声明 + 成员实装 → 路由 engine（协议载荷 cast 收敛在适配行）
+    const setModelFn = vi.fn(async (params: { runId: string; model: unknown }) => ({
+      effectiveModel: params.model,
+      effectiveThinkingLevel: "high",
+    }));
+    const native = makeEngine({
+      capabilities: vi.fn((): EngineCapabilities => ({ ...CAPABILITIES, setModel: "native" })),
+      setModel: setModelFn as unknown as FakeEngine["setModel"],
+    });
+    const n = makeServer(native);
+    const routed = await request(n.server, n.sink, 2, "setModel", {
+      runId: "rec-2",
+      model: { provider: "p", modelId: "m" },
+    });
+    expect(routed.result).toEqual({
+      effectiveModel: { provider: "p", modelId: "m" },
+      effectiveThinkingLevel: "high",
+    });
+    expect(setModelFn).toHaveBeenCalledWith({ runId: "rec-2", model: { provider: "p", modelId: "m" } });
   });
 });
 

@@ -42,7 +42,8 @@
         "resume": "native",
         "interrupt": "kill-only",
         "permissionMode": "native",
-        "maxTurns": true
+        "maxTurns": true,
+        "setModel": "native"
       },
       "modelCatalog": {
         "dynamic": true,
