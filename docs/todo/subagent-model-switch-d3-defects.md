@@ -1,6 +1,6 @@
 # subagent-model-switch D3 验收缺陷登记（2026-10-06 首轮真机验收产出）
 
-状态：缺陷一/二已修复（重验收轮覆盖）；缺陷三改判结案（判活链无需修复）；缺陷四/五/六未解决（待裁决立案）；顺带发现 1/3 已修或已固化，2 部分修（空 slug 点击语义待产品裁决）、4/5/6/7 待裁决。
+状态：缺陷一/二已修复（重验收轮覆盖）；缺陷三改判结案（判活链无需修复）；缺陷四已修（D5 F1-31 裁决候选 A，2026-10-07）；缺陷五/六未解决（待裁决立案）；顺带发现 1/3 已修或已固化，2 部分修（空 slug 点击语义待产品裁决）、4/5/6/7 待裁决。
 
 ## 缺陷一：chat 域模型切换入口点击不可达（U1 入口层，验收节点 A6 实证）
 
@@ -24,6 +24,7 @@
 - 现象：轮内热切后主标签即时更新且值始终正确，但「用户覆盖中」badge 缺席约 4 分钟（切 1 00:09:12 → 轮 1 idle 后 00:13:17 在场），轮终自愈非恒缺；切 2/3 badge 即时在场（切 1 的覆盖已随轮 2 round-started bg-notify 预先入 store）。
 - 根因链：effective 型回执只写 `displayState.effectiveModel` 不写 `overrideIntent`（`useSubagentModel.ts:193`）；badge 分支取 `overrideIntent ?? record.modelOverride`（`:103/:106`）；renderer `record.modelOverride` 刷新通道 = session.subagents 全量重推（`useMessageEffects.ts:205`），重推点 = bg-notify（`event-interpreter.ts:772`）——轮内无重推 → 首次轮内热切的 badge 存在首个轮内空窗。
 - 影响面：仅 badge 显示时延；标签本体、覆盖记账、切换语义均正确（A6br3 三源证据一致）。裁决方向：与 badge 数据流收敛方案合并评估——effective 型回执补写 overrideIntent，或 record.modelOverride 增量刷新通道。
+- 已修（2026-10-07，D5 F1-31 裁决候选 A）：commit 729473960——effective 型回执同时写 `overrideIntent`（请求目标 ref；应答 wire 无意图字段，回执本身即该意图的受理凭证）；候选 B「runtime 切换后即时重推 records」为推送补偿、违反 ADR-0097，不采用。读取端生效值优先、意图承「用户覆盖中」标注（`useSubagentModel.ts` SubagentModelDisplayState 注释与 resolveSubagentModelDisplay 优先级链同步更新）；已记账型标签承接不变；useSubagentModel 单测 16 用例回归绿。
 
 ## 缺陷五：混合 run 聚合间歇性把 zcode 成员误归失败名单（2026-10-07 A7r2 实证）
 
