@@ -131,13 +131,19 @@ function setModelParams(recordId?: string, runId?: string): {
   }
 }
 
-/** 事件文件预置（归属判定锚：record-created 帧 rootSessionId === 会话 id——D3-A4 修复后
- *  目录存在性只作过滤，归属按首帧 rootSessionId 精确匹配）。 */
+/** 事件文件预置（归属判定锚：信封首行 + record-created 帧 rootSessionId === 会话 id——
+ *  D3-A4 修复后目录存在性只作过滤，归属按 created 帧 rootSessionId 精确匹配；
+ *  真实文件形态 = 首行 record-events 信封（无 rootSessionId）+ 第 2 行 created 帧，
+ *  sa-ef73dfb7 实证——读取器按 type 过滤多行扫描，不假设行号）。 */
 function seedRecordEvent(recordId: string, ownerSessionId: string = SESSION_ID): void {
   const recordsDir = join(agentDir, 'subagents', encodeCwdForTest(sessionCwd), 'records')
   mkdirSync(recordsDir, { recursive: true })
+  const envelope = { type: 'record-events', id: recordId }
   const created = { type: 'record-created', seq: 1, ts: 1, id: recordId, rootSessionId: ownerSessionId }
-  writeFileSync(join(recordsDir, `${recordId}.events`), `${JSON.stringify(created)}\n`)
+  writeFileSync(
+    join(recordsDir, `${recordId}.events`),
+    `${JSON.stringify(envelope)}\n${JSON.stringify(created)}\n`,
+  )
 }
 /** run journal 预置（resolveSessionId 定位锚：workflow-state journal，getRunOverride 同式）。 */
 function seedRunJournal(runId: string): void {

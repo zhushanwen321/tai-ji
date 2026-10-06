@@ -208,22 +208,32 @@ function mapResultFileToWireReply(raw: string): SubagentSetModelReply {
 }
 
 /**
- * record 事件文件首帧（record-created）的 rootSessionId 读取——会话归属精确判定锚
- * （D3-A4 缺陷修复）。只读文件头 4KB（created 帧恒为首行，信封 + 索引字段 KB 级）；
- * 解析失败 / 字段缺失返回 undefined（= 未命中，调用方归 false）。
+ * record 事件文件的 rootSessionId 读取（会话归属精确判定锚，D3-A4 缺陷修复）。
+ * 文件首行 = `{"type":"record-events","id":...}` 信封帧（无 rootSessionId），
+ * `record-created` 帧在其后（实测恒为第 2 行）——按 type 过滤多行扫描取值，不假设
+ * 固定行号。只读文件头 4KB 窗口（信封 + created 帧 KB 级）；窗口内无 created 帧或
+ * 解析失败返回 undefined（= 未命中，调用方归 false）。
  */
 function readRecordEventsRootSessionId(eventsFile: string): string | undefined {
-  // eslint-disable-next-line no-magic-numbers -- 首帧读窗常数 4KB（created 帧恒为首行，信封 KB 级，语义见上注）
+  // eslint-disable-next-line no-magic-numbers -- 首帧读窗常数 4KB（信封 + created 帧 KB 级，语义见上注）
   const HEAD_BYTES = 4096
   const fd = openSync(eventsFile, 'r')
   try {
     const buf = Buffer.alloc(HEAD_BYTES)
     const n = readSync(fd, buf, 0, HEAD_BYTES, 0)
-    const firstLine = buf.toString('utf-8', 0, n).split('\n')[0]
-    const parsed: unknown = JSON.parse(firstLine)
-    if (!isObject(parsed)) return undefined
-    const root = (parsed as { rootSessionId?: unknown }).rootSessionId
-    return typeof root === 'string' && root !== '' ? root : undefined
+    for (const line of buf.toString('utf-8', 0, n).split('\n')) {
+      if (line.trim() === '') continue
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(line)
+      } catch {
+        continue // 半写行（尾部截断）跳过，继续扫后续行
+      }
+      if (!isObject(parsed) || (parsed as { type?: unknown }).type !== 'record-created') continue
+      const root = (parsed as { rootSessionId?: unknown }).rootSessionId
+      return typeof root === 'string' && root !== '' ? root : undefined
+    }
+    return undefined
   } catch {
     return undefined
   } finally {
