@@ -204,6 +204,9 @@ export class ZcodeEngine implements EnginePort {
       permissionMode: "native",
       // [D3-④] 无 turn_end 语义，轮数上限不可兑现（预检 gate 据此同步拒绝）
       maxTurns: false,
+      // [subagent-model-switch] zcode 引擎不在模型切换设计范围（协议面引擎中立预留，
+      // 后续另立项接入）——setModel 通路未接通，unsupported 如实声明
+      setModel: "unsupported",
     };
   }
 
