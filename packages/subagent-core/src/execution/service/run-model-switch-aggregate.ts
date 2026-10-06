@@ -87,11 +87,18 @@ export const ENGINE_RUN_NOT_ACTIVE_CODE = "engine_run_not_active";
 /** summary 退化文案（§7.1：全员非 switched 时无生效值可报，不携带档位）。 */
 const SUMMARY_RECORDED_ONLY = "已记录，未派发步骤生效";
 
+/** 单成员转发结果（并发闭包的 tagged 返回——成员态或失败名单条目）。 */
+type MemberOutcome =
+  | { kind: "member"; state: RunSwitchMemberState }
+  | { kind: "failure"; failure: RunSwitchMemberFailure };
+
 /**
- * run 级全切聚合（契约签名见 assembly/types.ts declare 占位——本实装以
- * RunModelSwitchAggregateCall 收窄入参，契约文件零改动）。
+ * run 级全切聚合（契约 input 见 assembly/types.ts RunModelSwitchAggregateInput；
+ * 本实装入参 = RunModelSwitchAggregateCall = 契约 input + resolveMemberPort 依赖
+ * 注入面——实装签名落点即本函数，types.ts 形状 SSOT 注释指向此处）。
  *
- * 语义（设计 §7.4，逐成员独立、受理序保序）：
+ * 语义（设计 §7.4，逐成员独立、受理序保序；成员转发并发扇出、结果按受理序组装
+ * ——§7.1.1 出站点 60s 墙钟超时的量级匹配前提「逐成员秒级收敛窗 + 并发扇出」）：
  *   1. resolveMemberPort(runId) 解析成员引擎通道；
  *   2. capabilities().setModel 非 native → not-applicable（先于引擎调用与目标模型
  *      校验，§8 场景 7 步骤④）；
@@ -107,33 +114,51 @@ export async function runModelSwitchAggregate(
   const members: RunSwitchMemberState[] = [];
   const failures: RunSwitchMemberFailure[] = [];
 
-  for (const memberRunId of call.memberRunIds) {
-    try {
-      const port = call.resolveMemberPort(memberRunId);
-      // capability 预检门控先于引擎调用与目标模型校验（§8 场景 7 步骤④）。
-      if (port.capabilities().setModel !== "native") {
-        members.push({ runId: memberRunId, state: "not-applicable" });
-        continue;
+  // 并发扇出（[F1-12] 串行 → 并发）：成员间无顺序依赖（逐成员独立，§7.4），串行
+  // 转发使成员时延线性累加（N 成员总时延 = N × 单成员收敛窗）；每成员闭包内完整
+  // try/catch，promise 理论不 reject——allSettled 防御性接住意外 reject（归失败
+  // 名单，不静默丢成员——三组件恒保留语义）。
+  const outcomes = await Promise.allSettled(
+    call.memberRunIds.map(async (memberRunId): Promise<MemberOutcome> => {
+      try {
+        const port = call.resolveMemberPort(memberRunId);
+        // capability 预检门控先于引擎调用与目标模型校验（§8 场景 7 步骤④）。
+        if (port.capabilities().setModel !== "native") {
+          return { kind: "member", state: { runId: memberRunId, state: "not-applicable" } };
+        }
+        const result = await port.setModel({
+          runId: memberRunId,
+          model: call.model,
+        });
+        return {
+          kind: "member",
+          state: {
+            runId: memberRunId,
+            state: "switched",
+            effectiveModel: result.effectiveModel,
+            effectiveThinkingLevel: result.effectiveThinkingLevel,
+          },
+        };
+      } catch (err) {
+        const code = errorCodeOf(err);
+        if (code === ENGINE_RUN_NOT_ACTIVE_CODE) {
+          // 引擎定位不到活跃子进程（已退出成员——含任务已完成 / 中断 / 竞态退出），
+          // 覆盖走记账路径、重派时生效（§7.4 not-active；§7.5「子进程已退出」行）。
+          return { kind: "member", state: { runId: memberRunId, state: "not-active" } };
+        }
+        return { kind: "failure", failure: { runId: memberRunId, reason: failureReasonOf(code) } };
       }
-      const result = await port.setModel({
-        runId: memberRunId,
-        model: call.model,
-      });
-      members.push({
-        runId: memberRunId,
-        state: "switched",
-        effectiveModel: result.effectiveModel,
-        effectiveThinkingLevel: result.effectiveThinkingLevel,
-      });
-    } catch (err) {
-      const code = errorCodeOf(err);
-      if (code === ENGINE_RUN_NOT_ACTIVE_CODE) {
-        // 引擎定位不到活跃子进程（已退出成员——含任务已完成 / 中断 / 竞态退出），
-        // 覆盖走记账路径、重派时生效（§7.4 not-active；§7.5「子进程已退出」行）。
-        members.push({ runId: memberRunId, state: "not-active" });
-      } else {
-        failures.push({ runId: memberRunId, reason: failureReasonOf(code) });
-      }
+    }),
+  );
+
+  // 按受理序组装（allSettled 产物序 = 输入序，保序不受并发影响）。
+  for (const [index, outcome] of outcomes.entries()) {
+    if (outcome.status === "fulfilled") {
+      if (outcome.value.kind === "member") members.push(outcome.value.state);
+      else failures.push(outcome.value.failure);
+    } else {
+      // 理论不可达（成员闭包全 catch）；防御性归失败名单，回读失败分型兜底。
+      failures.push({ runId: call.memberRunIds[index] ?? "(unknown)", reason: failureReasonOf(undefined) });
     }
   }
 

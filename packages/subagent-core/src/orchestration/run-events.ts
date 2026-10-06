@@ -492,8 +492,12 @@ export interface WorkflowModelOverride {
  * 的 `$MODEL`、不改重建 spec 的 run 级模型、不碰回放一致性比对——覆盖走宿主
  * 派发侧覆写（决策六②），三者在场时回放哈希不受扰动。
  *
- * 写入面 = 宿主切换编排（U4b）经既有单写者入口 dispatchRunTrigger（W1 seq 契约：
- * 新写行信封必填正整数 seq）。
+ * 写入面 = 宿主切换编排（U4b）经 journal append 单点直写（seq 由 journal 实装
+ * 分配，W1 seq 契约：新写行信封必填正整数 seq）；不经 dispatchRunTrigger——该
+ * 入口需要活体 run 聚合根（terminal-actions 的转移投递入口），interrupted 态
+ * run（中断后补切的合法场景，§8 验收场景 3）不在活体注册表、不可达。写点 =
+ * subagent-service.ts persistRunOverride 闭包（journal.append 的第二合法写点，
+ * 登记见 RunEventJournal.append 单写者约束）。
  */
 export interface ModelOverrideEvent extends EventEnvelope, WorkflowModelOverride { // oe-exempt:20261006:framework:workflow/record 协议契约类型——与既有 run 事件族同款豁免
   type: "model-override";
@@ -574,7 +578,10 @@ export interface RunEventJournal {
    * dispatchRunTrigger（唯一投递入口——活体链与经 interruptRun /
    * settleRunAccounting 的收编冷路径都经它；resume 的复活转移由 resume-run 在锁
    * 段内经同一入口投递）+ terminal-actions.appendTransition 的 journal.append
-   * 单写点——除此之外引擎/读侧一律不写。收编链追加的是 run-interrupted 转移
+   * 单写点 + U4b 宿主切换编排的 model-override 记账直写（subagent-service.ts
+   * persistRunOverride——非转移记账事件；dispatchRunTrigger 需要活体 run 聚合根
+   * 而 interrupted 态 run 不可达（§8 验收场景 3 中断后补切形态），故登记为第二
+   * 合法写点）——除此之外引擎/读侧一律不写。收编链追加的是 run-interrupted 转移
    * 事件（[D2] 中断非终局，不再落 run-settled(outcome=interrupted)）。
    */
   append(runId: string, event: WorkflowRunEventInput): Promise<WorkflowRunEvent>;
@@ -1340,8 +1347,13 @@ export function errorLogsFromEvents(events: readonly WorkflowRunEvent[]): Worker
  * 事件流 → 最新模型覆盖记账值（subagent-model-switch §6.2 折叠语义：生效覆盖值 =
  * 最新一条，覆盖旧覆盖值不叠加——设计不变量 2；无覆盖 undefined）。
  *
- * 单点辅助，双消费面：① 壳侧 foldRecordStreamToRun 挂 WorkflowRunMeta.modelOverride
- * （重启重建的派生视图）；② core resume-run 生效模型三档回落的中档（决策七）。
+ * 单点辅助，直接调用面枚举（消费面扩大时同步本清单，锚 grep
+ * `latestModelOverride(` 生产调用点）：① 壳侧 foldRecordStreamToRun 挂
+ * WorkflowRunMeta.modelOverride（重启重建的派生视图）；② core resume-run 生效
+ * 模型三档回落的中档（决策七，resume-run.ts）；③ U4b 派发侧内存表 miss 重建
+ * （subagent-service.ts rebuildRunOverride 闭包，workflow-dispatch 派发链消费）；
+ * 另有 runtime 侧等价尾读第四面（model-override-query.ts 的独立实装，自注释
+ * 「构造性等价」——不调用本函数、按尾块倒序读同源 journal 文件）。
  * 尾向扫描首条命中即返回（与 findLatestRunResumed 同款手写循环——findLast 属
  * ES2023 lib，本包 target ES2022）。
  */

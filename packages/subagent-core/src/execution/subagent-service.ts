@@ -206,6 +206,13 @@ export class SubagentService {
 
   private readonly manifestStore: ManifestStore;
 
+  /** [F1-18 / §6.2 读取规则] workflow 域覆盖重建负缓存（已扫无覆盖的 runId 集）：
+   * 从未被切换过的 run 内存恒 miss，负缓存短路重复的 journal 全量重扫（派发热路径
+   * 常态开销），形态先例 = member-reuse-pool loadedRuns（每 run 至多一次 scan 含
+   * 空载登记）。只短路 journal 重扫、不遮蔽 setModelOverride 内存写——内存命中查询
+   * 在前（getModelOverride 先查内存表），切换后内存表有值、负缓存永不触发。 */
+  private readonly overrideRebuildNegativeCache = new Set<string>();
+
   /**
    * [D6 #7a] records 目录（与 manifestStore 同源同一推导）——屏障失败 warn 带 manifest
    * 文件路径用（ManifestStore.dir 私有，此处不破封装另存同源值；漂移由构造点同语句保证不发生）。
@@ -281,7 +288,11 @@ export class SubagentService {
     // 权威重建）。本闭包 = chat 域重建（执行记录链最新记录的 modelOverride 字段——
     // 事件流折叠投影——scanFile 补投影 + 冷复活水合的读面）。workflow 域（runId 键）
     // 的 miss 重建 = deps.rebuildRunOverride 独立通道（journal 折叠 latestModelOverride
-    // 单点，WorkflowDispatch 装配段注入），由 workflow-dispatch 派发链消费（不经本闭包）。
+    // 单点，WorkflowDispatch 装配段注入），由 workflow-dispatch 派发链消费——注意
+    // runId 键仍会先经本闭包（ModelConfigService.getModelOverride 对任意 miss 键调
+    // rebuildOverride）：getFullRecord(runId) 查无（runId 非 record id，恒 undefined
+    // 空手而归）后才由 rebuildRunOverride 走 journal 折叠，闭包被调用、只是对 runId
+    // 恒 miss 不产生错值。
     this.modelService.setOverrideRebuild((key) => this.store.getFullRecord(key)?.modelOverride);
     // [R3] 域 #3/#8/#10/#13 聚合（record 读建面：孤儿恢复/查询投影/action 网关/身份解析
     // 与 record 创建）。deps 全晚绑定闭包（构造期零求值——store/manifestStore/modelService
@@ -433,9 +444,18 @@ export class SubagentService {
       // resume 不带参数也吃持久化覆盖的管线终点（journal 覆盖事件 → 本折叠 → 派发
       // 侧覆写 / taskSpec 二次咨询 / 复活重盖章三个消费点）。
       rebuildRunOverride: async (runId) => {
+        // [F1-18] 负缓存命中（已扫无覆盖）直接返回空，不再 scanRunEvents 重扫——
+        // 从未切换过的 run 每次派发都经此处，重扫是派发热路径的重复 journal I/O。
+        // 负缓存只短路 journal 重扫：切换发生时 setModelOverride 写内存表在前，
+        // getModelOverride 内存命中先于本函数，负缓存不遮蔽任何内存写。
+        if (this.overrideRebuildNegativeCache.has(runId)) return undefined;
         const events = await scanRunEvents(runId);
         const folded = latestModelOverride(events);
-        if (folded === undefined) return undefined;
+        if (folded === undefined) {
+          // 空载登记（loadedRuns 形态）：后续派发不再重扫该 run 的 journal。
+          this.overrideRebuildNegativeCache.add(runId);
+          return undefined;
+        }
         const override: ModelOverride = {
           ref: { provider: folded.model.provider, modelId: folded.model.modelId },
           ...(folded.thinkingLevel !== undefined ? { thinkingLevel: folded.thinkingLevel } : {}),

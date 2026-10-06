@@ -274,19 +274,16 @@ export interface RunSwitchAggregateResult {
 }
 
 /**
- * run 级全切聚合函数（U5 实装；本单元仅定形签名，无运行时实现——调用方 =
- * U2 宿主编排的 workflow run 级分流分支）。
+ * run 级全切聚合函数——实装 = `service/run-model-switch-aggregate.ts`
+ * `runModelSwitchAggregate`（签名 = RunModelSwitchAggregateCall = 契约 input
+ * RunModelSwitchAggregateInput + resolveMemberPort 依赖注入面）；调用方 =
+ * U2 宿主编排的 workflow run 级分流分支（subagent-service 壳装配注入）。
  *
  * 语义（设计 §7.4）：对 memberRunIds 全量逐个经引擎 setModel 转发（引擎
  * capabilities.setModel 预检门控先于调用，§8 场景 7 步骤④）→ 三态分派 + 失败名单
  * 分派 → 聚合三组件。个别成员失败不回滚其他成员，也不阻断 run 级覆盖意图写入
  * （§7.5 聚合行——意图写入归 U2 编排层，不在本函数内）。
- *
- * declare 形态：契约先行占位，U5 以同名实装替换（去掉 declare、补函数体）。
  */
-export declare function runModelSwitchAggregate(
-  input: RunModelSwitchAggregateInput,
-): Promise<RunSwitchAggregateResult>;
 
 // ============================================================
 // Runtime → TUI 的投影契约

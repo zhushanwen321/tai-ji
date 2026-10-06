@@ -30,6 +30,21 @@ const { loggerMock } = vi.hoisted(() => ({
 }));
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
+// [F1-18] scanRunEvents 调用计数（透传包装，行为零变化）——负缓存用例的观测面：
+// 派发链上该模块路径的全部消费者（覆盖重建 / 成员复用绑定）共享同一计数，按
+// runId 过滤归因。
+const { scanCalls } = vi.hoisted(() => ({ scanCalls: [] as string[] }));
+vi.mock("../execution/persistence/run-event-journal.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../execution/persistence/run-event-journal.ts")>();
+  return {
+    ...actual,
+    scanRunEvents: async (runId: string, journalDir?: string) => {
+      scanCalls.push(runId);
+      return actual.scanRunEvents(runId, journalDir);
+    },
+  };
+});
+
 import { ModelConfigService } from "../execution/assembly/model-config-service.ts";
 import type { ModelInfo, ModelRegistryLike } from "../execution/assembly/model-resolver.ts";
 import { createRecord, trySettleLegacyClosed } from "../execution/persistence/execution-record.ts";
@@ -350,6 +365,33 @@ describe("workflow 派发链覆盖消费（U4b）", () => {
     expect(run2.ctx.ctxModel).toMatchObject({ provider: "zai-coding", id: "flash" });
     run2.settle({ content: "done" });
     await pending2;
+  });
+
+  it("F1-18 负缓存：无覆盖 run 首派登记、二派不再 scanRunEvents 重扫 journal（派发热路径重复 I/O 短路）", async () => {
+    const h = makeHarness();
+    const countOf = (): number => scanCalls.filter((id) => id === "run-neg").length;
+    scanCalls.length = 0;
+
+    const pending = h.service.executeWorkflowAgent(baseOpts(), "run-neg");
+    await flush();
+    const run = soleRun(h.fake);
+    run.settle({ content: "done" });
+    await pending;
+
+    // 首派：内存 miss → rebuildRunOverride 扫一次（空载登记负缓存）；无覆盖走 ctxModel 兜底
+    const firstCount = countOf();
+    expect(firstCount).toBeGreaterThanOrEqual(1);
+    expect(run.task.model).toBe("p/m");
+
+    // 二派（内存表仍 miss——无覆盖可回填）：负缓存短路，零重扫
+    const pending2 = h.service.executeWorkflowAgent(baseOpts({ description: "neg-b" }), "run-neg");
+    await flush();
+    const run2 = h.fake.runs[1]!;
+    run2.settle({ content: "done" });
+    await pending2;
+
+    expect(countOf()).toBe(firstCount);
+    expect(run2.task.model).toBe("p/m");
   });
 
   it("非复活路径既有盖章行为不变：覆盖缺席（他 run 作用域不串扰）时新建 record 盖章 = identity 解析词形", async () => {

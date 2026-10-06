@@ -68,9 +68,26 @@ vi.mock('@/composables/panel/useSubagentTabData', () => ({
     recordEngine: () => 'pi',
   }),
 }))
-vi.mock('../ModelSelectPopover.vue', () => ({
-  default: { name: 'ModelSelectPopover', template: '<div data-testid="model-select-stub"><slot name="trigger" /></div>' },
-}))
+// [D3-A6 / F1-25] trigger slot 直通 stub 须包真实 Popover 壳：SubagentTab 的
+// #trigger 内容含 PopoverTrigger（调用方自包 as-child 契约，缺陷一修复后），
+// 无 PopoverRoot 上下文时 PopoverTrigger inject 崩（曾致本文件 3 用例
+// `Injection "Symbol(PopoverRootContext)" not found` 红）。popover 内容不渲染——
+// 本文件钉标签呈现，点击行为由 SubagentTab.model-popover.test.ts 真实渲染承担。
+vi.mock('../ModelSelectPopover.vue', async () => {
+  const { Popover } = await import('@/components/ui/popover')
+  const { defineComponent, h } = await import('vue')
+  return {
+    default: defineComponent({
+      name: 'ModelSelectPopover',
+      setup(_, { slots }) {
+        return () =>
+          h('div', { 'data-testid': 'model-select-stub' }, [
+            h(Popover, null, { default: () => slots.trigger?.() }),
+          ])
+      },
+    }),
+  }
+})
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: vi.fn((key: string) => key) }),

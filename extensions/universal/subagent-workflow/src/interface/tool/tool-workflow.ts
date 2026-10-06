@@ -113,7 +113,10 @@ const WorkflowParams = Type.Object({
     Type.String({ description: "Error/reason message (optional, used with abort)" }),
   ),
   model: Type.Optional(Type.String({
-    description: "Run-level model override in 'provider/modelId' format. When set, all agents spawned by this run inherit it by default (unless a per-call agent() opts.model is set). Omit to inherit the main agent's model.",
+    description:
+      "Run-level model override in 'provider/modelId' format. When set, all agents spawned by this run inherit it by default (unless a per-call agent() opts.model is set). " +
+      "A user-issued runtime model override (panel model switch / /subagent-model command) takes precedence over this parameter — user override wins over any explicitly scripted model. " +
+      "Omit to inherit the main agent's model.",
   })),
   thinkingLevel: Type.Optional(StringEnum(THINKING_ORDER, {
     description: "Run-level thinkingLevel override (off/minimal/low/medium/high/xhigh/max). All agents in this run inherit it by default. Omit to default each agent to its model's highest available level.",
@@ -231,14 +234,18 @@ export function registerWorkflowTool(
       "completed calls from the record at zero token cost and continues where the run stopped. " +
       "Do NOT resume a settled (done/failed/cancelled) run — start a new run instead.",
       "resume: pass the SAME args as the original run (they are verified field-by-field; a mismatch is rejected " +
-      "with the differing fields listed). Omit args to reuse the original ones. Changed args = different intent = new run.",
+      "with the differing fields listed). Omit args to reuse the original ones. Changed args = different intent = new run. " +
+      "To resume with a different model: switch the run's model first (panel model selector or /subagent-model on that run), " +
+      "then resume without model arguments — the persisted user override drives all re-dispatched steps.",
       "Call shapes (JSON): " +
       "- run: {\"action\":\"run\",\"name\":\"<script>\",\"args\":{...},\"tokens\":N,\"time\":N,\"model\":\"<provider/modelId>\",\"thinkingLevel\":\"<level>\"}. " +
       "- status: {\"action\":\"status\"}. " +
       "- abort: {\"action\":\"abort\",\"runId\":\"<id>\"} (optional: {\"error\":\"<reason>\"}). " +
       "- resume: {\"action\":\"resume\",\"runId\":\"<id>\",\"args\":{...},\"tokens\":N,\"time\":N} — args/tokens/time optional.",
       "Budget: Do NOT set tokens/time unless the user explicitly requests a limit. Built-in workflows run unlimited by default.",
-      "Model/thinkingLevel: omit by default (inherit main agent's model). Only set model/thinkingLevel when the user explicitly requests a specific model or thinking depth for this run.",
+      "Model/thinkingLevel: omit by default (inherit main agent's model). Only set model/thinkingLevel when the user explicitly requests a specific model or thinking depth for this run. " +
+      "Note: a user-issued runtime model override (panel switch / /subagent-model) takes precedence over these parameters — if a run's explicitly scripted model seems ignored, " +
+      "check for an active user override (run journal model-override frame) before assuming a resolution bug.",
       "Anti-patterns: Flattening args sub-fields (task/items/...) to the top level — they belong inside args. Calling {\"action\":\"run\"} without name.",
       "CRITICAL: For orchestration patterns, ALWAYS use action:run with the <location> absolute " +
       "path of a listed workflow — NEVER use workflow-script action:generate to recreate patterns " +

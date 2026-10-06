@@ -478,9 +478,13 @@ export class WorkflowDispatch {
    *   auth 同链复核，档位候选链含覆盖记账档位（调用参数显式档位最高，§6.2）。覆盖
    *   值后来失效（模型下架 / 凭据撤销 / 档位不可用）在此抛错 → 调用方 catch 合成
    *   failed result（fail-fast 不降级，与显式指定不可用即抛错的现役语义同构）。
-   * - 非 pi 引擎（过渡期混合 run）：覆盖词形直消费——引擎校验已在 identity 解析点
-   *   对覆写后的 engineModel 完成（覆写先于 resolveWorkflowIdentity）；ctxModel 为
-   *   ref 结构投影（引擎侧只消费 provider/id 拼词形，name 不参与）。
+   * - 非 pi 引擎（过渡期混合 run）：覆盖值送达引擎的真实通道 = taskSpec.model
+   *   （record.model 重盖章直改 + 下方 taskSpec 组装 `model: record.model` →
+   *   引擎 task.model）；引擎校验已在 identity 解析点对覆写后的 engineModel 完成
+   *   （覆写先于 resolveWorkflowIdentity）。ctxModel 投影仅补 RunContext 形状
+   *   完备、非 pi 引擎不消费（zcode 出声忽略——zcode-engine warnIgnoredCtxModel，
+   *   F16b「ctxModel 是 pi 链路兜底」）；「引擎侧只消费 provider/id 拼词形、name
+   *   不参与」的表述仅对 pi 引擎成立（pi-engine buildRunRequiredParams）。
    *
    * 非本域 record（origin 非 workflow / parentRunId 缺省——runWorkflowEngineTask
    * 被 SAR 直调占位路径复用时的守卫）短路原样返回。

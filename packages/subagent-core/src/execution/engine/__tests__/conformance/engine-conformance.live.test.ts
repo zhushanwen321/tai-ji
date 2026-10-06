@@ -37,6 +37,7 @@ import {
   RELAY_ENV_SESSION_ID,
   RELAY_ENV_SOCKET,
   RELAY_PROTOCOL_VERSION,
+  SET_MODEL_NOT_ACTIVE_CODE,
   isRelayActive,
 } from "@zhushanwen/subagent-engine-sdk";
 import { assertAgentEventInvariants } from "./agent-event-invariants.ts";
@@ -64,6 +65,7 @@ const PI_LIVE_CAPABILITIES: EngineCapabilities = {
   interrupt: "kill-only",
   permissionMode: "ignored",
   maxTurns: true,
+  setModel: "native",
 };
 
 describe.skipIf(!LIVE)("conformance run 层（协议客户端 × 引擎包 CLI，手动门）", () => {
@@ -110,6 +112,56 @@ describe.skipIf(!LIVE)("conformance run 层（协议客户端 × 引擎包 CLI�
       await engine.dispose();
     }
   }, 120_000);
+
+  it("pi：setModel 控制面最小面（capabilities 位声明核对 + 已退出 run 的结构化 not-active 错误帧）", async (testCtx) => {
+    const model = process.env["PI_LIVE_MODEL"];
+    if (model === undefined || model === "") {
+      testCtx.skip("PI_LIVE_MODEL 未设置（需真实 provider/model 凭据）——setModel conformance 面跳过");
+      return;
+    }
+    const [provider, modelId] = model.split("/");
+    if (provider === undefined || provider === "" || modelId === undefined || modelId === "") {
+      testCtx.skip(`PI_LIVE_MODEL 非 provider/modelId 复合形态（${model}）——setModel conformance 面跳过`);
+      return;
+    }
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "w10-live-setmodel-"));
+    const client = new EngineClient({
+      engineId: "pi",
+      command: process.execPath,
+      args: [PI_CLI_ENTRY, "--no-extensions"],
+      hostKind: "test",
+      hostVersion: "w10-live-setmodel",
+      dataDir,
+      envPrefixes: [],
+    });
+    const engine = new RemoteEngine({
+      engineId: "pi",
+      client,
+      manifest: { capabilities: PI_LIVE_CAPABILITIES },
+      dataDir,
+      hostKind: "test",
+    });
+    try {
+      // ① capability 位声明核对（fixture 与 pi 引擎实装 manifest 同源——
+      //    pi-engine.ts capabilities 声明 setModel: "native"；RemoteEngine 按该位
+      //    门控 setModel 成员）。
+      expect(engine.capabilities().setModel).toBe("native");
+      expect(typeof engine.setModel).toBe("function");
+      // ② 短任务跑完 → pi 孙进程退出（per-run 生命周期）→ setModel 对已退出 run
+      //    经协议 error 帧应答结构化 not-active 错误码（§7.4「定位不到」承接态；
+      //    热切成功路径的结构化应答面由 pi-subagent-cli model-switch-control 单测
+      //    承担，此处钉住协议 wire 面的请求-错误帧闭环）。
+      const task = { prompt: "Reply with the single word: ok", description: "live-setmodel", model, cwd: os.tmpdir() };
+      const ctx: RunContext = { taskId: "sa-live-pi-setmodel", onEvent: () => {} };
+      const { outcome } = await engine.run(task, ctx);
+      expect(outcome.error).toBeUndefined();
+      await expect(
+        engine.setModel({ runId: ctx.taskId, model: { provider, modelId } }),
+      ).rejects.toMatchObject({ code: SET_MODEL_NOT_ACTIVE_CODE });
+    } finally {
+      await engine.dispose();
+    }
+  }, 180_000);
 
   it("zcode：probe 真机（C1 live 面：三项 check 全过）", async () => {
     const engine = new ZcodeEngine({ engineDataDir: () => "/tmp/zcode-conformance-live" });

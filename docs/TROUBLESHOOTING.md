@@ -537,3 +537,13 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 - **根因**：共享 config `core.bare=true`（bare repo + worktree 布局）下，worktree 依赖 per-worktree `config.worktree`（`core.bare=false` + `core.hooksPath`）覆盖。该补写是 git-cwt 包装层（`~/.shell/07-git-ws.sh`，[2026-09-11] 同族注释）的职责，`create-worktree.sh` 与 `setup-worktree.sh` 都不做——dev-merge.sh 绕过包装层直调创建脚本即漏。已修（auto-create 后补写 worktree 级 config；check_clean 区分 git 失败 exit≥2 与真脏）。
 - **连带发现**：`.bare/custom-hooks/setup-worktree.sh` 曾丢失可执行位（`[ -x ]` 为假 → 项目 hook 被静默跳过，依赖安装与 Electron/pi 缓存链接全缺）。已 `chmod +x` 根治；症状 = 创建输出无「执行项目 setup hook」行且新 worktree 无 node_modules。
 - **处置**：现症修复 = `git --git-dir=<.bare/worktrees/<name>> config --worktree core.bare false` + `core.hooksPath <同目录>/hooks`，再补跑 `bash .bare/custom-hooks/setup-worktree.sh <worktree路径>`。
+
+### 29. workflow 脚本 / agent frontmatter 显式指定的模型没生效（被用户覆盖压过——合法行为，非解析回归）
+
+- **症状**：workflow 脚本的 run 级 `model` 参数、`agent()` 调用参数或 agent frontmatter 显式写了模型，实际执行却用了另一个模型（面板/命令切换过的模型）。
+- **机制**：subagent/workflow 执行域的模型解析链有第 0 层「用户覆盖」——用户经面板模型选择器或 `/subagent-model` 命令对某 subagent 会话 / workflow run 下达过实时切换后，覆盖值优先级最高（压过 frontmatter 与脚本/调用参数显式指定，用户覆盖赢）；覆盖作用域 = 该会话/run 的剩余执行（含中断后 resume 与主 agent 重启后重开）。机制 SSOT：ADR-0113；术语见 docs/CONTEXT.md「模型覆盖」词条。
+- **三步排查**：
+  1. **查覆盖记账在场**：workflow run → run 事件 journal（`<数据目录>` 下 run-events 的 `<runId>` 文件）grep `model-override` 帧；chat 域 subagent → record 事件文件 grep `record-model-override` 帧。覆盖帧在场 = 用户覆盖赢生效，属预期行为而非 bug。
+  2. **resume 场景查生效值**：journal 的 `run-resumed` 事件携带生效模型——三档回落：resume 显式参数（协议预留）> 持久化覆盖记录 > run 创建时模型。
+  3. **查成员实际执行模型**：成员 pi session 文件的 `model_change` 条目序列（尾条目 = 当前实际使用模型，审计权威）。
+- **处置**：需要脚本显式模型赢时，对该目标再次切换即可（覆盖替换幂等——新覆盖值压旧值，不存在叠加）；确认从未切换过而模型仍不符预期，才按模型解析回归排查（三层解析：调用参数 > frontmatter > ctxModel）。

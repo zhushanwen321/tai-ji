@@ -19,8 +19,10 @@ import { dirname, join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WebSocket as WsType } from 'ws'
-import type { ClientMessage, SubagentSetModelReply } from '@taiji/shared'
+import type { ClientMessage, SubagentSetModelAggregateReply, SubagentSetModelMemberFailure, SubagentSetModelMemberState, SubagentSetModelReply } from '@taiji/shared'
 import { getSubagentModelSwitchResultsDir } from '@zhushanwen/subagent-core'
+import type { RunSwitchAggregateResult, RunSwitchMemberFailure, RunSwitchMemberState } from '@zhushanwen/subagent-core'
+import { SET_MODEL_ERROR_CODES } from '@zhushanwen/subagent-engine-sdk'
 
 import { createSubagentModelSwitchGateway, MODEL_SWITCH_PROMPT_TIMEOUT_MS } from '../subagent-model-gateway.js'
 import type { SubagentModelGatewayDeps, SubagentModelPromptClient } from '../subagent-model-gateway.js'
@@ -363,5 +365,38 @@ describe('SubagentMessageHandler ← 生产网关注入（组合根形态）', (
     expect(reply).toHaveBeenCalledTimes(1)
     expect(reply.mock.calls[0]?.[2]).toBe('subagent.modelSet')
     expect(sendError).not.toHaveBeenCalled()
+  })
+})
+
+// ── core ↔ shared 聚合应答形状类型级对账（[F1-21]）─────────────────────────
+//
+// 防线背景：protocol.ts「两处漂移由 U1 接线测试对账」的落点即此处——core
+// RunSwitch*（形状 SSOT）与 shared protocol SubagentSetModel*（wire 投影）是两份
+// 独立声明（shared 不依赖 subagent-core，物理单源不可行），core 改形而无本对账时
+// gateway 的 unknown→as 盲 cast 零编译红、wire 载荷静默漂移（击穿设计 §7.1
+// 「聚合三组件恒保留」硬不变量）。断言形态 = 双向 extends 编译锁 + 错误码词表
+// ⊆ wire reason 联合：任一侧改形/扩位，本文件类型检查即红。
+
+/** 双向结构可赋值断言原语（A extends B 且 B extends A）——结构类型语义的形状对账；
+ *  严格 Equal 会因品牌/可选字段差异误红，对账目标是「core 改形 → 此处编译红」。 */
+type MutuallyAssignable<A, B> = A extends B ? (B extends A ? true : never) : never
+
+describe('core ↔ shared setModel 聚合应答形状对账（协议契约不变量）', () => {
+  it('RunSwitchMemberState ≡ SubagentSetModelMemberState（双向 extends 编译锁）', () => {
+    const check: MutuallyAssignable<RunSwitchMemberState, SubagentSetModelMemberState> = true
+    expect(check).toBe(true)
+  })
+
+  it('RunSwitchMemberFailure ≡ SubagentSetModelMemberFailure 且 SET_MODEL_ERROR_CODES ⊆ wire reason 联合', () => {
+    const shape: MutuallyAssignable<RunSwitchMemberFailure, SubagentSetModelMemberFailure> = true
+    expect(shape).toBe(true)
+    // 词表成员逐个可赋 reason 联合（词表扩位未同步 wire 联合时此处编译红 + 运行时断言失败）
+    const reasonValues: SubagentSetModelMemberFailure['reason'][] = [...SET_MODEL_ERROR_CODES]
+    expect(reasonValues).toHaveLength(SET_MODEL_ERROR_CODES.length)
+  })
+
+  it('RunSwitchAggregateResult ≡ SubagentSetModelAggregateReply（三组件恒保留）', () => {
+    const check: MutuallyAssignable<RunSwitchAggregateResult, SubagentSetModelAggregateReply> = true
+    expect(check).toBe(true)
   })
 })

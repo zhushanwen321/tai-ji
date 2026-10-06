@@ -215,9 +215,14 @@ export async function setModel(
       await deps.assertRunNotTerminal(target.runId);
     }
     // canonical ref 全等 + 凭据预检 + thinking 档位预检：resolveModel 对新模型按
-    // 现役候选链完整裁决（预检 = 提前跑一遍未来解析——同一函数同一路径，不留
-    // 「受理时未裁决、下一轮 spawn 才硬失败」的窗口，§6.2 记账形状）。抛错 =
-    // 校验型失败（§5.2 对应行文案由裁决函数产出，含候选/可用档位恢复指引）。
+    // 现役候选链裁决（预检 = 提前跑一遍未来解析——同一函数同一路径）。预检候选
+    // 链的完整度按域分野（§7.2 步骤①）：chat 域带 agentConfig（frontmatter 档位
+    // 环参与裁决）——「受理时未裁决、下一轮 spawn 才硬失败」的窗口在该域不留；
+    // run 级分支 agentRef 空串、agentConfig 恒 undefined——成员级显式档位
+    // （frontmatter / 脚本调用参数）不在受理预检候选链内，个别成员档位对新模型
+    // 不可用时受理照过、留待派发期第 0 层解析按成员失败分项呈现（§6.1③ 容错
+    // 语义：个别成员失败不升级为整单拒绝）。抛错 = 校验型失败（§5.2 对应行
+    // 文案由裁决函数产出，含候选/可用档位恢复指引）。
     modelService.resolveModel(
       target.domain === "chat" ? target.record.agent : "",
       undefined,
