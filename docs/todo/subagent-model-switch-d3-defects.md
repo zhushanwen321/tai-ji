@@ -54,3 +54,4 @@
 6. **zcode 引擎显式 personal provider 模型首派即败**（A7r2）：app-server 侧报「Provider Registry 中不存在 Model」与引擎侧校验源不一致；引擎缺省模型可跑，切换记账仍正确到达。裁决方向：统一两侧模型解析源。
 7. **composer 模型选择器同 short-id 歧义**（A7r2 辅助观察）：同名 short-id 多候选时选择指向不明确；fixture 以显式钉模型规避，非阻塞。
 8. **e2e global-setup 自动构建与真轨守卫的 dist 形态冲突（2026-10-07 A13 首跑实证）**：`e2e/fixtures/global-setup.ts:45` 自动构建注入 `VITE_MOCK=true`（服务 mock 轨），而 electron-real 的 launch-real 守卫拒绝含 mock fixture 标记的 renderer bundle 并要求「VITE_E2E=true 且不传 VITE_MOCK」——两轨共享同一 dist 路径、自动构建形态只会满足 mock 轨；worktree 首次跑真轨（dist 缺失触发自动构建）必踩。本轮回避 = 手工 `VITE_E2E=true pnpm run build:e2e` 重建后重跑。裁决方向：按轨分 dist 或按 project 感知构建形态。
+9. **thinkinglevel-real spec reader 落后 ADR-0078 键名改名（已修，2026-10-07）**：registered 条目持久化键 b48d1a373 起 `journalPath→recordPath`，spec reader 仍读 journalPath → registered 恒 null → 三 TC 全挂（PLAYWRIGHT_DEBUG_KEEP_DATA 取证：条目在场、字段名不符）。修复 = reader/定位链/断言文案对齐 recordPath（2e2220113），重跑 3/3 绿。同族教训：持久化键改名未同步 e2e 资产、且该 spec 自改名后无人触发过（真轨按改动范围触发的盲区）。
