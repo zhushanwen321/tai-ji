@@ -139,7 +139,6 @@ export interface PluginContributes {
   configuration?: PluginContributesConfiguration
   statusBarItems?: PluginContributesStatusBarItem[]
   headerActions?: PluginContributesHeaderAction[]
-  modals?: PluginContributesModal[]
 }
 
 /**
@@ -230,16 +229,6 @@ export interface PluginContributesHeaderAction {
   commandId: string
   /** 与内置按钮组的相对序；缺省追加在后 */
   order?: number
-}
-
-/**
- * @proposed — modal 弹层声明（只有 {id,title,width?}，无 commandId 字段——开层只有
- * api.ui.showModal 一条路，声明侧供枚举/置灰/默认元数据）。
- */
-export interface PluginContributesModal {
-  id: string
-  title: string
-  width?: 'sm' | 'md' | 'lg'
 }
 
 // ── RPC 线协议类型（Wire Protocol）────────────────────────────────────
@@ -556,17 +545,6 @@ export interface SessionInfo {
   lastActiveAt: number
 }
 
-/**
- * @stable — [AP-2/u5b] plugin modal 关闭原因词表（单点闭集；宿主 dismiss / 切会话 /
- * 宿主浮层 / runtime replaced / 插件消失五类发起方共用）。
- */
-export type PluginModalClosedReason =
-  | 'dismissed'
-  | 'session-switched'
-  | 'host-overlay'
-  | 'replaced'
-  | 'plugin-gone'
-
 // ── Storage 类型 ─────────────────────────────────────────────────
 
 /**
@@ -787,23 +765,12 @@ export interface Phase2AgentAPI extends Phase1AgentAPI {
     notify(level: 'info' | 'warn' | 'error', message: string): Promise<void>
     updateStatusBarItem(id: string, text: string, options?: StatusBarItemOptions): Promise<void>
     /**
-     * [AP-2/u5b] 开层：sessionId 必填（E15）；有 pending 插件对话框时 reject
-     * MODAL_BLOCKED_BY_UI_REQUEST（E10）；广播出线未接线/broadcastFn 缺失时 reject
-     * MODAL_BROADCAST_NOT_WIRED（装配缺陷显式报错，不谎报 opened）。开层后应立即
-     * views.update 推内容（首帧空白 = 一次 RPC 往返）。
-     */
-    showModal(modalId: string, opts: { sessionId: string; title?: string; width?: 'sm' | 'md' | 'lg' }): Promise<{ opened: true; epoch: number }>
-    /** [AP-2/u5b] 插件自身关闭：走与宿主 dismiss 相同的 closed 路径；已关层 no-op。 */
-    hideModal(modalId: string): Promise<{ closed: boolean }>
-    /**
      * [AP-1/u5b] headerAction 可变字段更新：sessionId 必填（徽标是 per-session 语义）；
      * badge ≤4 字符由宿主截断，badge/tooltip 超 4KB 拒绝（INVALID_BADGE / INVALID_TOOLTIP）。
      * 回执 {updated}：true = 广播帧已发出；false = 渲染端未收到（宿主装配缺陷被丢弃）——
      * 插件可据此告警，不应把 false 当成功。
      */
     updateHeaderAction(id: string, opts: { sessionId: string; badge?: string; tooltip?: string; disabled?: boolean }): Promise<{ updated: boolean }>
-    /** [AP-2/u5b] modal 被关闭（宿主 dismiss / 切会话 / 宿主浮层 / replaced / plugin-gone）的定向通知订阅。 */
-    onModalClosed(handler: (event: { modalId: string; reason: PluginModalClosedReason }) => void): Disposable
   }
   readonly agent: {
     /** U6 回执：resolve 生效模型复合串（pi pattern 换模时 ≠ 请求值；降级路径空串） */

@@ -25,9 +25,9 @@
  * 经 DIALOG_REQUEST_SOURCE_KEY/UI_RESPONSE_TRANSPORT_KEY 注入。
  *
  * plugin-header-action-modal-points（u4b）接线：HeaderActionStore（#42 徽标镜像）+
- * plugin-modal-slot 帧订阅（#43 槽镜像）+ headerAction 声明镜像（响应式，E2 清理/重放后
- * 刷新）+ E2 触发链（plugin:statusChange/plugin:crashed → 三容器清理 + 命令注销）+
- * ACTION_EXECUTOR_KEY / HEADER_ACTIONS_SOURCE_KEY / PLUGIN_MODAL_SOURCE_KEY 三个 provide。
+ * headerAction 声明镜像（响应式，E2 清理/重放后刷新）+ E2 触发链
+ *（plugin:statusChange/plugin:crashed → 容器清理 + 命令注销）+
+ * ACTION_EXECUTOR_KEY / HEADER_ACTIONS_SOURCE_KEY 两个 provide。
  */
 import type { App, InjectionKey } from 'vue'
 import { reactive, shallowReactive, shallowRef, watch } from 'vue'
@@ -46,8 +46,6 @@ import {
   OverlayLifecycle,
   ActivationManager,
   CommandRegistry,
-  clearPluginModalForPlugin,
-  subscribePluginModalSlot,
   type ActivationTrigger,
   type CommandExecutor,
   type ContributionRecord,
@@ -172,7 +170,7 @@ export function toContributionInfos(
   }))
 }
 
-// ── u4b（plugin-header-action-modal-points AP-1/AP-2）两个渲染宿主的数据源契约 ──
+// ── u4b（plugin-header-action-modal-points AP-1）渲染宿主的数据源契约 ──
 //
 // key 定义在本模块（对齐 SLASH_COMMAND_SOURCE_KEY 的「壳内定义、壳 provide、组件 inject」
 // 先例），组件侧只认 key 不认实现；单测经 global.provide 注入 mock 源。
@@ -193,29 +191,6 @@ export interface HeaderActionsSource {
 }
 
 export const HEADER_ACTIONS_SOURCE_KEY: InjectionKey<HeaderActionsSource> = Symbol('header-actions-source')
-
-/** plugin.dismissModal 关闭原因闭集（core types 同构别名，组件签名可读性） */
-export type PluginModalDismissReason =
-  | 'dismissed'
-  | 'session-switched'
-  | 'host-overlay'
-  | 'replaced'
-  | 'plugin-gone'
-
-/** PluginModalHost 数据源（声明侧元数据 fallback：E1 降级链 declaration 段）+
- *  C→S dismissModal 上报（经本 bridge 门面发出——D3/R4 WS send 统一门面，组件禁直调
- *  ws-client，check_no_direct_ws_send.py 白名单登记本 bridge 与 ui 侧
- *  extension-host/shell-adapters 两个出站桥接件）。 */
-export interface PluginModalSource {
-  getDeclaration(
-    pluginId: string,
-    modalId: string,
-  ): { title?: string; width?: 'sm' | 'md' | 'lg' } | undefined
-  /** 上报 C→S plugin.dismissModal（runtime 校验 (pluginId, modalId, epoch) 三元组后广播 closed + notify 插件；接收侧归 u5b）。 */
-  dismiss(pluginId: string, modalId: string, epoch: number, reason: PluginModalDismissReason): void
-}
-
-export const PLUGIN_MODAL_SOURCE_KEY: InjectionKey<PluginModalSource> = Symbol('plugin-modal-source')
 
 /**
  * E13 判定的最小读取面（会话命令分区；结构契约而非 pinia store 全型——纯函数直测
@@ -445,9 +420,6 @@ export function initExtensionHostBridge(app: App): void {
     sessionScoped: createReactiveSessionScopedMap(() => reactive(new Map<string, HeaderActionEntry>())),
   })
   headerActionStore.subscribe()
-  // plugin-modal-slot 帧订阅（#43）：plugin:modalState → 槽镜像（open/closed 仲裁在 core 单模块）。
-  // 幂等（模块级守卫），重复 init 不翻倍。
-  subscribePluginModalSlot(bus)
 
   // headerAction 声明镜像：ContributionRegistry 是 headless 非响应 Map（组件 computed 无法
   // 追踪 clearForPlugin/registerBuiltin 的原地变化），shallowRef 整表替换供组件响应式消费。
@@ -461,7 +433,7 @@ export function initExtensionHostBridge(app: App): void {
     if (s === 'connected') refreshHeaderActionDeclarations()
   }, { immediate: true })
 
-  // E2 触发链：runtime plugin:statusChange / plugin:crashed 广播 → bus 事件 → 清理三容器 +
+  // E2 触发链：runtime plugin:statusChange / plugin:crashed 广播 → bus 事件 → 清理容器 +
   // 注销该插件命令（ContributionRegistry 无按插件枚举，先查后清）；disabled→active 重启用走
   // 静态表重放（registerBuiltin + 命令声明重放；external 声明表壳侧无镜像，重放归 s3 透传）。
   const handlePluginGone = (pluginId: string): void => {
@@ -472,7 +444,6 @@ export function initExtensionHostBridge(app: App): void {
     contributions.clearForPlugin(pluginId)
     for (const id of commandIds) commandRegistry.unregisterCommand(id)
     headerActionStore.clearForPlugin(pluginId)
-    clearPluginModalForPlugin(pluginId)
     refreshHeaderActionDeclarations()
   }
   const handlePluginBack = (pluginId: string): void => {
@@ -489,12 +460,6 @@ export function initExtensionHostBridge(app: App): void {
     else if (e.status === 'active' || e.status === 'loaded') handlePluginBack(e.pluginId)
   })
   bus.on('plugin-crashed', (e) => handlePluginGone(e.pluginId))
-  // AP-2 开帧残留治理：closed 帧到达时清该 (sessionId, viewId) 的 ViewHostStore 分区——
-  // 重开首帧为空白而非上次残留树（宁缺勿错；插件契约 = showModal 后立即 views.update）。
-  bus.on('plugin:modalState', (e) => {
-    const f = e.modalState
-    if (f.state === 'closed') viewHostStore.invalidate(f.sessionId, `modal-${f.pluginId}-${f.modalId}`)
-  })
 
   // action-bar 执行器（AP-3）：ui 侧 ACTION_EXECUTOR_KEY（跨包 symbol 同一实例），
   // 实现 = core CommandRegistry.execute 包装（结构兼容 ui 最小接口，无 ui→core 依赖边）。
@@ -515,22 +480,6 @@ export function initExtensionHostBridge(app: App): void {
       const missing = !commandRegistry.get(commandId)
       void commandRegistry.execute(commandId)
       return !missing
-    },
-  })
-  // PluginModalHost 数据源（声明侧元数据 fallback；E1 降级链的 declaration 段）
-  // + dismissModal 出站（D3 门面：check_no_direct_ws_send.py 白名单仅本 bridge 与 ui 侧
-  //   extension-host/shell-adapters 两个出站桥接件）
-  app.provide(PLUGIN_MODAL_SOURCE_KEY, {
-    getDeclaration: (pluginId, modalId) => {
-      const c = contributions
-        .getContributions({ type: 'modal' })
-        .find((r) => r.pluginId === pluginId && r.contributionId === modalId)
-      return c?.modal ? { title: c.modal.title, width: c.modal.width } : undefined
-    },
-    dismiss: (pluginId, modalId, epoch, reason) => {
-      // 帧类型与 payload 形状由 shared protocol.ts ClientMessageMap['plugin.dismissModal']
-      // 直接校验（u5b 已落地，无受控断言）
-      send({ type: 'plugin.dismissModal', payload: { pluginId, modalId, epoch, reason } })
     },
   })
 

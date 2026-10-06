@@ -497,9 +497,8 @@ describe('configureRouteInbound — crossSession 通道（ADR-0060）', () => {
   it('⑩g extension:requestsInvalidated（P2-2 失效链）命中 crossSession 声明条目 → dispatchCrossSession', () => {
     // D-recheck2-1 回归锚：帧经 bridge EXTENSION_HANDLERS 归一为 'requests-invalidated'
     // 事件（useExtensionUI 摘审批条），但 bridge 壳只订阅 onGlobal/onCrossSession——
-    // 本表漏声明 crossSession 则帧只进 session 通道，解析器永收不到，审批条僵尸 ready 残留
-    //（plugin:modalState 条目注释记载的同款失败模式）。payload 带 sessionId → 必须走有 sid
-    // 分支的 crossSession 双通道。
+    // 本表漏声明 crossSession 则帧只进 session 通道，解析器永收不到，审批条僵尸 ready 残留。
+    // payload 带 sessionId → 必须走有 sid 分支的 crossSession 双通道。
     const ports = makePorts()
     const dispatcher = configureRouteInbound(ports)
     dispatcher(
@@ -529,7 +528,6 @@ describe('configureRouteInbound — crossSession 通道（ADR-0060）', () => {
       'extension:requestsInvalidated',
       'plugin:uiRequest',
       'plugin:viewUpdate',
-      'plugin:modalState',
       'plugin:headerActionUpdate',
     ]
     for (const type of literals) {

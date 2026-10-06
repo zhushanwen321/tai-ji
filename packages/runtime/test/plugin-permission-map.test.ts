@@ -42,9 +42,8 @@ interface ServiceInternals {
 
 /**
  * SSOT 已登记、RPC handler 尚未实装的方法豁免表（u2d 批次建立）。[u5b 已清空]：
- * activate 订阅族（session-api 六点扩表）与 ui 命令式三点位（ui-api showModal/
- * hideModal/updateHeaderAction）handler 均已落地，5 方法全部转正——豁免表保留空集
- * 形态供后续批次复用（登记即债务，落地即清账）。
+ * activate 订阅族（session-api 六点扩表）与 ui 命令式点位（ui-api updateHeaderAction）
+ * handler 均已落地——豁免表保留空集形态供后续批次复用（登记即债务，落地即清账）。
  */
 const PENDING_U5B_METHODS: ReadonlySet<string> = new Set<string>([])
 
@@ -102,11 +101,12 @@ describe('plugin-permission-map SSOT（AC-I6）', () => {
     const orphans = [...registeredMethods].filter(m => !ssot.has(m))
     expect(orphans, `methods registered but missing from PLUGIN_RPC_METHODS: ${orphans.join(', ')}`).toEqual([])
     // 数量级回归锚点：47（agent5 commands3 config3 hooks2 notify1 sessionData4
-    // sessions8 storage8 tools2 ui6 views2 workspace3）+ AP-4 读面 9（readEntries/
-    // getCommands/register+unregisterEntryInvalidation 4 + activate 族 2 + ui 三点位 3，
-    // [u5b] 后五者 handler 已落地转正）= 56。registeredMethods.size 同步锚点：56/56。
-    expect(PLUGIN_RPC_METHODS.length).toBe(56)
-    expect(registeredMethods.size).toBe(56)
+    // sessions8 storage8 tools2 ui6 views2 workspace3）+ AP-4 读面 6（readEntries/
+    // getCommands/register+unregisterEntryInvalidation 4 + activate 族 2）+ ui 命令式
+    // 点位 1（updateHeaderAction，[u5b] handler 已落地转正）= 54。
+    // registeredMethods.size 同步锚点：54/54。
+    expect(PLUGIN_RPC_METHODS.length).toBe(54)
+    expect(registeredMethods.size).toBe(54)
   })
 
   it('AC-I6: 全部口径归一化产物无孤儿（每个产出方法名都在真实注册表）', () => {

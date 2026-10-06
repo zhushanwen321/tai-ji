@@ -81,12 +81,11 @@ export interface BrokerServices {
 /**
  * 全局广播通道的 sessionId 豁免清单（AP-2 裁定）：帧 payload 必带 sessionId，但
  * sessionId 仅作 payload 归属信息（renderer 按会话过滤渲染），路由键 = 全局广播
- * （所有连接都要收到——modal/headerAction 状态不是 per-connection 订阅态），且为
+ * （所有连接都要收到——headerAction 状态不是 per-connection 订阅态），且为
  * transient 状态帧（不经 message-bus publish，结构性不入 ring）。清单外新增的带
  * sessionId 全局广播帧仍触发下方哨兵告警。
  */
 const GLOBAL_BROADCAST_SESSION_ID_EXEMPT = new Set<ServerMessageType>([
-  'plugin:modalState',
   'plugin:headerActionUpdate',
 ])
 

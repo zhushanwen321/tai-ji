@@ -32,8 +32,6 @@ const PLACEMENT_BY_TYPE: Record<Exclude<ContributionType, 'view' | 'menu'>, stri
   configuration: 'settings',
   // headerAction 复用已注册挂载点名 panel.header（不新增名字，AP-1）
   headerAction: 'panel.header',
-  // modal 键为死键（ContributionType 'modal' 死成员的类型要求；解析零产出），批 2 随机制面删
-  modal: 'modal',
 }
 
 // ── 解析：PluginContributes v2 → ContributionRecord[]（按 type 分段 helper）──

@@ -20,8 +20,8 @@ export type {
   SkillCacheScope, SkillCacheInvalidatedPayload,
   SessionTraceHeaderPayload, SessionTraceMalformedLine, SessionTraceSessionEndPayload,
   SessionViewSnapshot,
-  // plugin modal/headerAction 帧载荷（plugin-header-action-modal-points AP-1/AP-2）
-  PluginModalClosedReason, PluginModalStatePayload, HeaderActionUpdatePayload,
+  // plugin headerAction 帧载荷（plugin-header-action-modal-points AP-1）
+  HeaderActionUpdatePayload,
   WatchdogMemoryLevel, WatchdogMemoryPressurePayload,
   RollingRestartState, RollingRestartReason, RollingRestartInflightSummary,
   RollingRestartDeferredPayload, RollingRestartCountdownPayload, RollingRestartForcedPayload,

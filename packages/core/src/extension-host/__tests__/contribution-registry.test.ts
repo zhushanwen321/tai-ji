@@ -109,10 +109,10 @@ describe('ContributionRegistry.registerBuiltin（DM5）', () => {
     // 不进 sidebar（D5）；该视图退役后 builtin 整体零 view 声明
     expect(builtinContributions[1].contributes.views).toBeUndefined()
     expect(builtinContributions.every((b) => b.contributes.views === undefined)).toBe(true)
-    // scheduler-manager 声明形状（modal 链退役后）：headerActions 1（activation 直开声明，
+    // scheduler-manager 声明形状：headerActions 1（activation 直开声明，
     // 无 commandId）+ commands 3（overlay 树内 action-bar 写操作 toggle/run/delete——缺
     // 声明则写操作在 CommandRegistry 无注册通路成死链，id 与插件 api.commands.register 逐字一致）。
-    // modals 声明键已随 PluginContributesModal 退役删除（类型面已无该字段，声明侧无法再产出）。
+    // 声明类型面无 modals 键（无法再产出该类声明）。
     expect(builtinContributions[2].contributes.headerActions).toHaveLength(1)
     expect(builtinContributions[2].contributes.commands).toHaveLength(3)
     expect(builtinContributions[2].contributes.commands?.map((c) => c.command)).toEqual([

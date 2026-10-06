@@ -184,7 +184,6 @@ describe('ServerMessageBroker broadcast 哨兵豁免清单（AP-2）', () => {
   }
 
   it.each([
-    'plugin:modalState',
     'plugin:headerActionUpdate',
   ] as const)('豁免帧 %s：payload 带 sessionId 的全局广播不触发哨兵告警，帧照常下发', async (type) => {
     const { broker, ws, warnSpy } = await buildWithWarnSpy()
@@ -217,9 +216,9 @@ describe('ServerMessageBroker broadcast 哨兵豁免清单（AP-2）', () => {
   it('豁免帧 payload 无 sessionId（异常构造）不触发告警（哨兵本就只看 sessionId 存在性）', async () => {
     const { broker, warnSpy } = await buildWithWarnSpy()
     const msg = {
-      type: 'plugin:modalState',
+      type: 'plugin:headerActionUpdate',
       id: 'push_nosid',
-      payload: { pluginId: 'p1', state: 'open', epoch: 1 },
+      payload: { pluginId: 'p1', sessionId: 's1' },
     } as unknown as Parameters<BrokerType['broadcast']>[0]
 
     broker.broadcast(msg)

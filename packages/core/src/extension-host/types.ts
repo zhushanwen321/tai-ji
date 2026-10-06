@@ -2,12 +2,12 @@
  * types.ts —— ExtensionHost 层共享类型（DM3 InternalEvent union + payload 类型 + DM1 ContributionRecord）。
  *
  * 本文件是 core/src/extension-host/ 全部模块的类型集中定义处（headless，runtime 零依赖；
- * 唯一例外 = plugin modal/headerAction 三帧协议类型自 @taiji/shared type-only import——
+ * 唯一例外 = plugin headerAction 帧协议类型自 @taiji/shared type-only import——
  * wire 协议 SSOT 单点在 shared/protocol.ts，此处不持副本）。
  * 形状对齐 wave plan：IF2（InternalEvent union）/ DM3（payload 类型）/ DM1（ContributionRecord）/
  * s1 schema v2（PluginContributes，对齐 packages/plugin-sdk/src/types.ts 的 PluginContributes v2）。
  */
-import type { PluginModalClosedReason, PluginModalStatePayload, HeaderActionUpdatePayload } from '@taiji/shared'
+import type { HeaderActionUpdatePayload } from '@taiji/shared'
 
 // ── InternalEvent union（IF2）────────────────────────────────────────
 
@@ -93,11 +93,11 @@ export interface NotificationPayload {
   [key: string]: unknown
 }
 
-/** plugin modal/headerAction 三帧协议类型（AP-1/AP-2）re-export——SSOT = @taiji/shared
+/** plugin headerAction 帧协议类型（AP-1）re-export——SSOT = @taiji/shared
  *  protocol（shared 不依赖 core，core→shared 为既有合法依赖边）。re-export 维持
  *  `@taiji/core` / `@taiji/core/extension-host` 出口面（index.ts `export * from './types'`）
- *  与既有消费方（plugin-modal-slot / message-bus-bridge）引用面不变。 */
-export type { PluginModalClosedReason, PluginModalStatePayload, HeaderActionUpdatePayload }
+ *  与既有消费方（message-bus-bridge）引用面不变。 */
+export type { HeaderActionUpdatePayload }
 
 /** core 内部事件 union（IF2）。消费端 on(kind, handler) 编译期类型安全。 */
 export type InternalEvent =
@@ -116,7 +116,6 @@ export type InternalEvent =
   | { kind: 'extension-notify'; sessionId?: string; notification: NotificationPayload }
   | { kind: 'requests-invalidated'; sessionId?: string; requestIds: string[]; reason: string } // 挂起 UI 请求失效广播（P2-2）
   | { kind: 'session-destroyed'; sessionId: string }
-  | { kind: 'plugin:modalState'; modalState: PluginModalStatePayload } // S→C 开合帧（AP-2，u4a bridge 接线）
   | { kind: 'plugin:headerActionUpdate'; headerAction: HeaderActionUpdatePayload } // S→C 徽标更新帧（AP-1，u4a bridge 接线）
   | { kind: 'unregistered-mount-point'; pluginId: string; contributionId: string; expectedMountPoint: string }
   | { kind: 'error'; source: string; message: string }
@@ -125,8 +124,6 @@ export type InternalEvent =
 
 /**
  * contribution 类型（DM1）。headerAction 为 plugin-header-action-modal-points 新增点位（AP-1）。
- * 'modal' 已随插件 modal 链消费退役成死成员（声明侧 PluginContributes.modals 已删、
- * 解析零产出；bridge 声明读取与 plugin-modal-slot 机制面批 2 删除后一并清掉）。
  */
 export type ContributionType =
   | 'view'
@@ -136,7 +133,6 @@ export type ContributionType =
   | 'slashCommand'
   | 'configuration'
   | 'headerAction'
-  | 'modal'
 
 /**
  * 解析后 contribution 统一结构（DM1）。
@@ -161,8 +157,6 @@ export interface ContributionRecord {
   /** 声明原文存档：badge/tooltip/disabled 等可变字段经 plugin:headerActionUpdate 广播，声明侧只有静态形状；
    *  activation = 点击激活方式（声明驱动分派键，见 PluginContributesHeaderAction.activation）。 */
   headerAction?: { title: string; icon: string; commandId?: string; order?: number; activation?: 'scheduler-overlay' }
-  /** 死字段（modal 链退役）：声明侧已删、解析零产出；bridge 声明读取段消费，批 2 随机制面一并删。 */
-  modal?: { title: string; width?: 'sm' | 'md' | 'lg' }
 }
 
 // ── ViewContributionSummary（IF1，视图宿主消费的扁平视图摘要）───────────
