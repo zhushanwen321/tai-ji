@@ -12,19 +12,22 @@
  * 实例共享——SubagentTab / WorkflowTab 各自调本 composable 读同一份）；**不写
  * SubagentRecord.model 等详情载荷字段**（那是 runtime 详情载荷组装的域，前端写它会
  * 被下一帧 runtime 推送冲掉）。重载后回执态随组件生命周期丢失，标签由详情载荷字段
- * 承接（分支④「最近生效值」/ 覆盖状态），见 resolveSubagentModelDisplay。
+ * 承接（分支④「最近生效值」——仅活进程在场 / 覆盖状态），见 resolveSubagentModelDisplay。
  */
 import { reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toErrorMessage } from '@taiji/core'
 import { subagent as subagentApi } from '@/api'
 import { useToast } from '@/composables/useToast'
-import type { ProviderId, SubagentSetModelReply } from '@taiji/shared'
+import type { ProviderId, SubagentSetModelReply, SubagentStatus, WorkflowAgentCall } from '@taiji/shared'
 
 /**
  * 单目标的模型显示态（renderer 会话期回执态）。
- * effectiveModel 与 overrideIntent 互斥写入（一次切换只落其一），读取端按
- * resolveSubagentModelDisplay 的优先级合成。
+ * effectiveModel 与 overrideIntent 同场并存（F1-31 裁决候选 A）：已生效型回执同时写
+ * 生效值与意图 ref——回执本身即用户意图的受理凭证，「用户覆盖中」badge 的事实依据 =
+ * 意图已受理，不等待 record.modelOverride 载荷重推（D3 缺陷四轮内空窗修复）；已记账型
+ * 只写 overrideIntent（无回读源，标签承接不变）。读取端按 resolveSubagentModelDisplay
+ * 的优先级合成（生效值优先、意图承覆盖标注）。
  */
 export interface SubagentModelDisplayState { // oe-exempt:20261006:framework:wire 展示契约形状（u-foundation 定形，单实现常态）
   /** 已生效型回执的生效模型（canonical ref 串 'provider/id'——引擎回读值）。 */
@@ -81,6 +84,9 @@ export interface SubagentModelDisplayInput { // oe-exempt:20261006:framework:wir
   modelOverride?: string
   /** 最近生效值（详情载荷 recentEffectiveModel——pi session model_change 尾条目）。 */
   recentEffectiveModel?: { provider: string; modelId: string }
+  /** 详情载荷主体执行状态（chat 域 = SubagentRecord.status；workflow 域 = WorkflowAgentCall.status）。
+   *  分支④活进程门控（§6.4/§9 消费域三条件之一）：仅 'running' 时分支④可达。 */
+  recordStatus?: SubagentStatus | WorkflowAgentCall['status']
 }
 
 /**
@@ -93,11 +99,15 @@ export interface SubagentModelDisplayInput { // oe-exempt:20261006:framework:wir
  *    历史生效值，不是本次切换后的生效事实，其消费域仅限④分叉态重载（回执态整体缺席）；
  * ③ 生效值回读失败 → 不落本函数输入（错误应答不写显示态），标签维持切换前显示——由
  *    「禁乐观写 + 失败不写」构造性成立，无显式分支；
- * ④ 分叉态重载（面板重载 + 同族替换已发生，回执态已丢）→ 按详情载荷「最近生效值」
- *    显示，不回退覆盖意图值。
+ * ④ 分叉态重载（面板重载 + 同族替换已发生 + **活进程在场**，回执态已丢）→ 按详情载荷
+ *    「最近生效值」显示，不回退覆盖意图值——门控依据（§6.4/§9 消费域三条件）：分支④
+ *    语义是「重载后显示轮内生效值」，只对正在运行的成员有意义；已结束成员的重载显示
+ *    走覆盖意图（②'，与「用户覆盖中」badge 同源）或盖章值。pi 成员的 recentEffectiveModel
+ *    恒有值（spawn 首条即写 model_change），无门控时②'恒不可达、recorded 型切换重载后
+ *    标签与实际生效值背离。
  *
  * 优先级链：回执生效值 > 回执覆盖意图（已记账回执优先于载荷最近生效值）> 载荷最近生效值
- * （仅回执态整体缺席时分叉态重载）> 载荷覆盖状态 > 盖章值（现状兜底）。
+ * （仅回执态整体缺席且活进程在场——分叉态重载）> 载荷覆盖状态 > 盖章值（现状兜底）。
  * overridden = 覆盖意图在场（覆盖状态载荷字段或已记账回执）——覆盖生效处显式标注
  * 「用户覆盖中」（§7 实现期文档同步义务的前端部分）。
  */
@@ -112,8 +122,12 @@ export function resolveSubagentModelDisplay(input: SubagentModelDisplayInput): S
   if (input.display?.overrideIntent !== undefined) {
     return { label: input.display.overrideIntent, overridden: true }
   }
-  // ④ 分叉态重载（回执态整体缺席）：详情载荷最近生效值承接（不回退覆盖意图值）
-  if (input.recentEffectiveModel !== undefined) {
+  // ④ 分叉态重载（回执态整体缺席 + 活进程在场——recordStatus === 'running'）：
+  //    详情载荷最近生效值承接（不回退覆盖意图值）。门控语义：「重载后显示轮内生效值」
+  //    只对正在运行的成员有意义（§6.4/§9 消费域三条件）；已结束成员不吃
+  //    recentEffectiveModel（pi 成员该值恒有值——spawn 首条即写 model_change），落到
+  //    ②' 覆盖意图或盖章值
+  if (input.recordStatus === 'running' && input.recentEffectiveModel !== undefined) {
     return {
       label: toModelRef(input.recentEffectiveModel.provider, input.recentEffectiveModel.modelId),
       overridden: overrideIntent !== undefined,
@@ -169,7 +183,8 @@ export function useSubagentModel() {
 
   /**
    * 提交切换：请求 → runtime → 宿主编排 → 应答三形态分流写显示态：
-   * - chat 两型：effective → 写 effectiveModel（回读生效值）；recorded → 写 overrideIntent
+   * - chat 两型：effective → 写 effectiveModel（回读生效值）+ overrideIntent（意图受理
+   *   凭证——F1-31 裁决候选 A）；recorded → 写 overrideIntent
    *   （本次目标——「已记录，下次执行生效」的标签承接）；
    * - run 级聚合：按成员键写——switched 成员写生效值；not-active / not-applicable 成员写
    *   overrideIntent（记账路径，重派生效）；失败名单成员不写（生效值未知，分支③），
@@ -198,6 +213,10 @@ export function useSubagentModel() {
       if (reply.kind === 'effective') {
         displayStates.set(key, {
           effectiveModel: toModelRef(reply.effectiveModel.provider, reply.effectiveModel.modelId),
+          // 意图受理凭证（F1-31 裁决候选 A）：回执型同时携带意图 ref（本次切换目标——
+          // 应答 wire 无意图字段，取请求目标 ref，回执即该意图的受理凭证）——badge 事实
+          // 依据 = 意图已受理，消除 record.modelOverride 重推前的轮内空窗（D3 缺陷四）
+          overrideIntent: intentRef,
           // §6.4：切换回执连生效档位一起同步（面板 thinking 档位随热切更新）；回执缺省
           // 该字段不写（UI 跟随事实，禁乐观回显——读取端回退启动盖章值）
           ...(reply.effectiveThinkingLevel !== undefined ? { thinkingLevel: reply.effectiveThinkingLevel } : {}),

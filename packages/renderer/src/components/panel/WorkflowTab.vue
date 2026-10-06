@@ -238,6 +238,7 @@ const runModelDisplay = computed(() => {
     stampedModel: authoritative.model,
     modelOverride: authoritative.modelOverride?.model,
     recentEffectiveModel: authoritative.recentEffectiveModel,
+    recordStatus: authoritative.status,
   })
 })
 

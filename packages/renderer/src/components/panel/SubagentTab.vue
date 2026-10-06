@@ -268,6 +268,7 @@ const modelDisplay = computed(() => {
     stampedModel: record.model,
     modelOverride: record.modelOverride?.model,
     recentEffectiveModel: record.recentEffectiveModel,
+    recordStatus: record.status,
   })
 })
 

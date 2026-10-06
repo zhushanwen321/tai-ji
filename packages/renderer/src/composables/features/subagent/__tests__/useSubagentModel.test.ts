@@ -13,9 +13,13 @@
  * - 失败路径：RPC reject → 显示态零写入（标签读取规则分支③的构造性成立载体）+
  *   返回 undefined；
  * - resolveSubagentModelDisplay 四分支：① 回执生效值在场 → 实际生效值；④ 分叉态
- *   重载（无回执态 + 载荷最近生效值在场）→ 生效值承接、不回退覆盖意图值；② 已记账
+ *   重载（无回执态 + 活进程在场 recordStatus:'running' + 载荷最近生效值在场）→ 生效值
+ *   承接、不回退覆盖意图值；④ 门控（F1-30）：已结束成员（idle）重载不吃
+ *   recentEffectiveModel → 落覆盖意图（②'）或盖章值；② 已记账
  *   → 覆盖意图值 + 「用户覆盖中」标注（优先级高于④——已记账回执在场时「最近生效值」
- *   是同会话早前热切的历史值，§6.4 口径显示覆盖意图值）；兜底 → 盖章值。
+ *   是同会话早前热切的历史值，§6.4 口径显示覆盖意图值）；兜底 → 盖章值；
+ * - effective 型回执意图受理凭证（F1-31 裁决候选 A）：effective 回执同时写
+ *   overrideIntent（请求目标 ref）——badge 事实依据 = 意图已受理，D3 缺陷四轮内空窗修复。
  *
  * 全 mock：@/api 门面 + vue-i18n + useToast（不发真实请求；单例回执态经
  * resetSubagentModelDisplayForTests 用例间隔离）。
@@ -63,14 +67,39 @@ describe('resolveSubagentModelDisplay — 标签读取规则四分支', () => {
     expect(display.overridden).toBe(true)
   })
 
-  it('分支④：分叉态重载（回执态已丢 + 载荷最近生效值在场）→ 按最近生效值显示，不回退覆盖意图值', () => {
+  it('分支④：分叉态重载（回执态已丢 + 活进程在场 + 载荷最近生效值在场）→ 按最近生效值显示，不回退覆盖意图值', () => {
     const display = resolveSubagentModelDisplay({
       stampedModel: 'p/stamped',
       modelOverride: 'p/intent',
       recentEffectiveModel: { provider: 'p', modelId: 'recent-effective' },
+      recordStatus: 'running',
     })
     expect(display.label).toBe('p/recent-effective')
     expect(display.overridden).toBe(true)
+  })
+
+  it('分支④ 门控（F1-30）：已结束成员（idle）重载不吃最近生效值 → 落覆盖意图值（分支②\'，badge 同源）', () => {
+    // recorded 型切换 + 重载：recorded 回执态已丢，pi 成员 recentEffectiveModel 恒有值
+    // （spawn 首条即写 model_change）——无门控时标签显示历史生效值、与实际生效值背离
+    // （D3-A6b 17:57 实测）；门控后已结束成员走覆盖意图（与「用户覆盖中」badge 同源）
+    const display = resolveSubagentModelDisplay({
+      stampedModel: 'p/stamped',
+      modelOverride: 'p/intent',
+      recentEffectiveModel: { provider: 'p', modelId: 'recent-effective' },
+      recordStatus: 'idle',
+    })
+    expect(display.label).toBe('p/intent')
+    expect(display.overridden).toBe(true)
+  })
+
+  it('分支④ 门控（F1-30）：已结束成员重载 + 无覆盖 → 盖章值（不再吃最近生效值）', () => {
+    const display = resolveSubagentModelDisplay({
+      stampedModel: 'p/stamped',
+      recentEffectiveModel: { provider: 'p', modelId: 'recent-effective' },
+      recordStatus: 'idle',
+    })
+    expect(display.label).toBe('p/stamped')
+    expect(display.overridden).toBe(false)
   })
 
   it('分支②：已记账型（无生效值源 + 覆盖意图在场）→ 覆盖意图值 + 「用户覆盖中」标注', () => {
@@ -128,10 +157,11 @@ describe('useSubagentModel — 回执写状态（禁乐观写）', () => {
 
     resolveRpc({ kind: 'effective', effectiveModel: { provider: 'p', modelId: 'm2' }, effectiveThinkingLevel: 'high' })
     await pending
-    expect(displayOf('sa-1')).toEqual({ effectiveModel: 'p/m2', thinkingLevel: 'high' })
+    // 生效值 + 意图受理凭证（F1-31：overrideIntent = 请求目标 ref）+ 生效档位
+    expect(displayOf('sa-1')).toEqual({ effectiveModel: 'p/m2', overrideIntent: 'p/m', thinkingLevel: 'high' })
   })
 
-  it('chat 已生效型：回读生效值写入（生效值 ≠ 请求目标时以回执为准）', async () => {
+  it('chat 已生效型：回读生效值写入，且 overrideIntent = 请求目标 ref（意图受理凭证，F1-31）', async () => {
     apiMocks.setModel.mockResolvedValue({
       kind: 'effective',
       effectiveModel: { provider: 'p', modelId: 'sibling-model' },
@@ -143,7 +173,9 @@ describe('useSubagentModel — 回执写状态（禁乐观写）', () => {
 
     expect(apiMocks.setModel).toHaveBeenCalledWith({ recordId: 'sa-1', provider: 'p', modelId: 'requested' })
     expect(displayOf('sa-1')?.effectiveModel).toBe('p/sibling-model')
-    expect(displayOf('sa-1')?.overrideIntent).toBeUndefined()
+    // F1-31 裁决候选 A：回执即意图受理凭证——同族替换（生效值 ≠ 目标）时意图 ref
+    // 仍是本次请求目标，badge 事实依据 = 意图已受理（D3 缺陷四轮内空窗修复）
+    expect(displayOf('sa-1')?.overrideIntent).toBe('p/requested')
   })
 
   it('chat 已记账型：覆盖意图写入（本次目标值，无档位值不虚构）', async () => {
@@ -181,7 +213,9 @@ describe('useSubagentModel — 回执写状态（禁乐观写）', () => {
     const reply = await setSubagentModel({ runId: 'wf-1', provider: 'p', modelId: 'target' })
 
     expect(reply).toBeDefined()
-    // switched：成员生效值（引擎回读）+ 生效档位（成员携带时随行）
+    // switched：成员生效值（引擎回读）+ 生效档位（成员携带时随行）——聚合成员不写
+    // overrideIntent（F1-31 裁决范围 = chat 域 effective 型回执；聚合成员 badge 依赖
+    // run 级意图通道与载荷重推，边界经本断言固化）
     expect(memberDisplayOf('wf-1', 'sa-a')).toEqual({ effectiveModel: 'p/m-a', thinkingLevel: 'high' })
     // not-active / not-applicable：覆盖意图（记账路径，重派生效）
     expect(memberDisplayOf('wf-1', 'sa-b')).toEqual({ overrideIntent: 'p/target' })
