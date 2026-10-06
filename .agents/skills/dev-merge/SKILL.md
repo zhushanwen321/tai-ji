@@ -53,7 +53,7 @@ description: >-
 机器可判的合入门禁前置到分支边界（审查项唯一主责：质量门与 changeset 归分支边界承担，终局 PR 期只做复核兜底）。cwd = 当前 feat worktree 根，依次跑：
 
 ```bash
-node scripts/quality-gates.mjs --side dev-merge   # 质量门聚合：typecheck 三处 + 增量 coverage（含新增文件机器盲区判定，coverage-file-gate-exempt 可豁免）+ metrics
+node scripts/quality-gates.mjs --side dev-merge   # 质量门聚合：typecheck 四处（含 mobile-renderer）+ 增量 coverage（含新增文件机器盲区判定，coverage-file-gate-exempt 可豁免）+ metrics
 node scripts/changeset-check.mjs                  # changeset 完整性：diff 触及 extensions/**/src/** 且包缺 .changeset/*.md → WARN 清单
 ```
 
