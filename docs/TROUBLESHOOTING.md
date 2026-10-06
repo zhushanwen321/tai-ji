@@ -543,7 +543,7 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 - **症状**：workflow 脚本的 run 级 `model` 参数、`agent()` 调用参数或 agent frontmatter 显式写了模型，实际执行却用了另一个模型（面板/命令切换过的模型）。
 - **机制**：subagent/workflow 执行域的模型解析链有第 0 层「用户覆盖」——用户经面板模型选择器或 `/subagent-model` 命令对某 subagent 会话 / workflow run 下达过实时切换后，覆盖值优先级最高（压过 frontmatter 与脚本/调用参数显式指定，用户覆盖赢）；覆盖作用域 = 该会话/run 的剩余执行（含中断后 resume 与主 agent 重启后重开）。机制 SSOT：ADR-0113；术语见 docs/CONTEXT.md「模型覆盖」词条。
 - **三步排查**：
-  1. **查覆盖记账在场**：workflow run → run 事件 journal（`<数据目录>` 下 run-events 的 `<runId>` 文件）grep `model-override` 帧；chat 域 subagent → record 事件文件 grep `record-model-override` 帧。覆盖帧在场 = 用户覆盖赢生效，属预期行为而非 bug。
+  1. **查覆盖记账在场**：workflow run → run 事件 journal（`<数据目录>` 下 workflow-state 的 `<runId>.record.jsonl` 文件）grep `model-override` 帧；chat 域 subagent → record 事件文件 grep `record-model-override` 帧。覆盖帧在场 = 用户覆盖赢生效，属预期行为而非 bug。
   2. **resume 场景查生效值**：journal 的 `run-resumed` 事件携带生效模型——三档回落：resume 显式参数（协议预留）> 持久化覆盖记录 > run 创建时模型。
   3. **查成员实际执行模型**：成员 pi session 文件的 `model_change` 条目序列（尾条目 = 当前实际使用模型，审计权威）。
 - **处置**：需要脚本显式模型赢时，对该目标再次切换即可（覆盖替换幂等——新覆盖值压旧值，不存在叠加）；确认从未切换过而模型仍不符预期，才按模型解析回归排查（三层解析：调用参数 > frontmatter > ctxModel）。

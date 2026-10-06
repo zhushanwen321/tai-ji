@@ -244,7 +244,8 @@ export function registerWorkflowTool(
       "- resume: {\"action\":\"resume\",\"runId\":\"<id>\",\"args\":{...},\"tokens\":N,\"time\":N} — args/tokens/time optional.",
       "Budget: Do NOT set tokens/time unless the user explicitly requests a limit. Built-in workflows run unlimited by default.",
       "Model/thinkingLevel: omit by default (inherit main agent's model). Only set model/thinkingLevel when the user explicitly requests a specific model or thinking depth for this run. " +
-      "Note: a user-issued runtime model override (panel switch / /subagent-model) takes precedence over these parameters — if a run's explicitly scripted model seems ignored, " +
+      "Note: a user-issued runtime model override (panel switch / /subagent-model) takes precedence over the model parameter — an explicitly scripted thinkingLevel still applies " +
+      "(explicit levels outrank the override's inline level). If a run's explicitly scripted model seems ignored, " +
       "check for an active user override (run journal model-override frame) before assuming a resolution bug.",
       "Anti-patterns: Flattening args sub-fields (task/items/...) to the top level — they belong inside args. Calling {\"action\":\"run\"} without name.",
       "CRITICAL: For orchestration patterns, ALWAYS use action:run with the <location> absolute " +
