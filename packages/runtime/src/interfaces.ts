@@ -752,11 +752,13 @@ export interface SubagentModelSwitchGateway {
   /**
    * chat 域覆盖状态查询（同步形态——详情载荷 live 帧发布路径 publishRecordChanges
    * 受「同步应用 = 生效回执前提」约束，session-records.ts applyJournalReport；生产
-   * 实装 = 覆盖记账的 runtime 侧投影查询）。无覆盖返回 undefined（载荷不造键）。
+   * 实装 = 覆盖记账的 runtime 侧投影查询，createModelOverrideQuery 同形基座）。
+   * sessionId 是定位锚首参（记录域文件按 session cwd 分片，无全局 id 索引）。
+   * 无覆盖返回 undefined（载荷不造键）。
    */
-  getRecordOverride(recordId: string): SubagentModelOverrideStatus | undefined
+  getRecordOverride(sessionId: string, recordId: string): SubagentModelOverrideStatus | undefined
   /** workflow run 域覆盖状态查询（run 级意图单值；无覆盖 undefined）。 */
-  getRunOverride(runId: string): SubagentModelOverrideStatus | undefined
+  getRunOverride(sessionId: string, runId: string): SubagentModelOverrideStatus | undefined
   /**
    * 目标 → 所属 session 解析（错误信封 sessionId 用，会话隔离红线：subagent.setModel
    * payload 无 sessionId 字段，错误应答必须补齐）。解析不到返回 undefined（信封缺省）。

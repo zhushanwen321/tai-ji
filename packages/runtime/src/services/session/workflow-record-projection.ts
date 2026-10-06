@@ -215,15 +215,17 @@ export function projectV2Workflow(
  *   同判据（running 优先、startedAt 最新——显示权威一致）。
  *
  * 纯函数（无 IO）；输入 runs/subagents 均为已合并投影产物，无增强项时返回原引用
- * （零拷贝快路径，调用方 getWorkflows 每次读 RPC 消费）。
+ * （零拷贝快路径，调用方 getWorkflows 每次读 RPC 消费）。sessionId 是覆盖查询的
+ * 定位锚首参（query 实装按 session cwd 分片定位记录域文件——无全局 id 索引）。
  */
 export function projectSubagentModelDetailIntoRuns(
+  sessionId: string,
   runs: WorkflowRunRecord[],
   subagents: SubagentRecord[],
   query:
     | {
-        getRecordOverride(recordId: string): SubagentModelOverrideStatus | undefined
-        getRunOverride(runId: string): SubagentModelOverrideStatus | undefined
+        getRecordOverride(sessionId: string, recordId: string): SubagentModelOverrideStatus | undefined
+        getRunOverride(sessionId: string, runId: string): SubagentModelOverrideStatus | undefined
       }
     | undefined,
 ): WorkflowRunRecord[] {
@@ -247,7 +249,7 @@ export function projectSubagentModelDetailIntoRuns(
   for (let i = 0; i < runs.length; i++) {
     const run = runs[i]!
     const byStep = byRun.get(run.runId)
-    const runOverride = query?.getRunOverride(run.runId)
+    const runOverride = query?.getRunOverride(sessionId, run.runId)
     if (byStep === undefined && runOverride === undefined) continue
     let changed = false
     const agentCalls = run.agentCalls.map((call) => {

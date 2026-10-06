@@ -2910,7 +2910,7 @@ export interface BashDispatchReceipt {
  * command<K>()（renderer api/request.ts）用此 map 推导返回类型：`Promise<ReplyPayloadMap[K]>`。
  *
  * [C-pi-14/ADR-0065] mutation 类 RPC（改状态值且 renderer 有 store 副本，覆盖域 = session
- * 配置状态 / model / preset 三域）的映射约定：分支一（后端可变换请求值——pi 钳制/pattern
+ * 配置状态 / model / preset / config / mcp 五域）的映射约定：分支一（后端可变换请求值——pi 钳制/pattern
  * 换模）必须 payload 消费型引用携带生效值字段的 `XxxMutationReply` 具名类型，禁 void；
  * 分支二（后端原样存储）reply 携带回显字段，确需 ack 型的须在 ADR-0065 豁免清单登记理由。
  * 新增 mutation 必须同步登记 runtime 契约测试 MUTATION_RPC_REGISTRY（不入清单即测试红）。
@@ -3123,8 +3123,9 @@ export interface ReplyPayloadMap {
             // model.switch case 消费 switchModel 返回的生效值（session-service 读回 get_state 生效模型）
             // 拆解回填 provider/modelId，对齐 C-pi-13 改状态 RPC 一律回生效值）
   // subagent.setModel：reply subagent.modelSet（payload 消费型——chat 两型按 kind 判别，
-  // run 级聚合三组件；应答值写显示态禁乐观写，§7.1。mutation 登记义务：runtime 侧
-  // MUTATION_RPC_REGISTRY 同步登记归 U1 接线，漏登记 = mutation-reply-contract 测试红）。
+  // run 级聚合三组件；应答值写显示态禁乐观写，§7.1。subagent 域不在 MUTATION_DOMAINS
+  // 检查范围（ADR-0065 五域边界：session/model/preset/config/mcp），无登记义务——
+  // 照登记反而触发 mutation-reply-contract「登记失效」红）。
   'subagent.setModel': ServerMessageMap['subagent.modelSet']
   'session.compact': void         // reply session.compacted
   'session.delete': void          // reply session.deleted

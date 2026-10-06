@@ -198,7 +198,7 @@ describe('详情载荷字段面 — getSubagents 出口', () => {
         scanSessions: vi.fn(() => [{ id: 'main-1', filePath: join(tmpDir, 'main-1.jsonl') }]),
       } as unknown as ISessionStore,
       modelOverrideQuery: {
-        getRecordOverride: vi.fn((recordId: string) => (recordId === 'sa-1' ? override : undefined)),
+        getRecordOverride: vi.fn((_sessionId: string, recordId: string) => (recordId === 'sa-1' ? override : undefined)),
         getRunOverride: vi.fn(() => undefined),
       },
     })
@@ -385,9 +385,9 @@ describe('projectSubagentModelDetailIntoRuns — run 详情逐成员携带', () 
       getRecordOverride: vi.fn(() => undefined),
       getRunOverride: vi.fn(() => ({ model: 'p/new', thinkingLevel: 'high' }) satisfies SubagentModelOverrideStatus),
     }
-    const result = projectSubagentModelDetailIntoRuns(runs, [memberA, memberB], query)
+    const result = projectSubagentModelDetailIntoRuns('main-1', runs, [memberA, memberB], query)
 
-    expect(query.getRunOverride).toHaveBeenCalledWith('wf-1')
+    expect(query.getRunOverride).toHaveBeenCalledWith('main-1', 'wf-1')
     const calls = result[0]?.agentCalls
     expect(calls).toHaveLength(2)
     // run 级覆盖：全成员携带同值（run 作用域意图）
@@ -401,14 +401,14 @@ describe('projectSubagentModelDetailIntoRuns — run 详情逐成员携带', () 
   it('无覆盖无成员增强：原引用返回（零拷贝快路径）', () => {
     const runs = [{ ...runBase, agentCalls: [{ id: 0, agent: 'w', status: 'running' as const }] }]
     const plainMember: SubagentRecord = { ...memberA, recentEffectiveModel: undefined }
-    const result = projectSubagentModelDetailIntoRuns(runs, [plainMember], undefined)
+    const result = projectSubagentModelDetailIntoRuns('main-1', runs, [plainMember], undefined)
     expect(result).toBe(runs)
   })
 
   it('成员圈定按 (parentRunId, stepIndex)：其他 run 的成员不串扰', () => {
     const runs = [{ ...runBase, agentCalls: [{ id: 0, agent: 'w', status: 'running' as const }] }]
     const otherRunMember: SubagentRecord = { ...memberA, parentRunId: 'wf-other' }
-    const result = projectSubagentModelDetailIntoRuns(runs, [otherRunMember], undefined)
+    const result = projectSubagentModelDetailIntoRuns('main-1', runs, [otherRunMember], undefined)
     expect(result[0]?.agentCalls[0]?.recentEffectiveModel).toBeUndefined()
   })
 })
