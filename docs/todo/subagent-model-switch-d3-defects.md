@@ -19,6 +19,12 @@
 - **改判（专项调查，置信度 high）**：「镜像缺注册」不成立——chat 域 runChatRoundViaEngine 恒构造 resume.recordId（chat-rounds.ts:467-497），childSpawned 反向帧键 = record.id（server.ts:275-279），桥接进 core 镜像（engine-client.ts:83-94），chat/workflow 都注册、轮内镜像项存在（spawn-runner.ts:500-508 agent_settled 才回收）。A1 两次 captured NOT_ACTIVE 均落轮间（记账型合法）；两次轮内尝试死于网关共享 cwd 误路由 + 信封失配（缺陷二同源，已修），从未到达判活门。同 build 同日反证：A4 变体2 轮内命中引擎错误码、重试已生效型；A5 子场景② chat 轮内热切回执生效值。
 - 结论：判活链无需修复；A1 归因错误的根源 = 验收时序未锚定轮内 + 当时的网关缺陷。重验收轮 A1 须以轮内探针锚定切换时点（单轮长任务 + 发切换前探针 record running + session 尾条非收尾；探针证轮内而仍 recorded 才记缺陷）。
 
+## 缺陷四：轮内首次热切后「用户覆盖中」badge 轮内空窗（时延自愈型，2026-10-07 A6br3 实证）
+
+- 现象：轮内热切后主标签即时更新且值始终正确，但「用户覆盖中」badge 缺席约 4 分钟（切 1 00:09:12 → 轮 1 idle 后 00:13:17 在场），轮终自愈非恒缺；切 2/3 badge 即时在场（切 1 的覆盖已随轮 2 round-started bg-notify 预先入 store）。
+- 根因链：effective 型回执只写 `displayState.effectiveModel` 不写 `overrideIntent`（`useSubagentModel.ts:193`）；badge 分支取 `overrideIntent ?? record.modelOverride`（`:103/:106`）；renderer `record.modelOverride` 刷新通道 = session.subagents 全量重推（`useMessageEffects.ts:205`），重推点 = bg-notify（`event-interpreter.ts:772`）——轮内无重推 → 首次轮内热切的 badge 存在首个轮内空窗。
+- 影响面：仅 badge 显示时延；标签本体、覆盖记账、切换语义均正确（A6br3 三源证据一致）。裁决方向：与 badge 数据流收敛方案合并评估——effective 型回执补写 overrideIntent，或 record.modelOverride 增量刷新通道。
+
 ## 验收环境教训（非缺陷）
 
 - 并行 inspect 共享单窗口 DOM：UI 输入通道全局唯一焦点，逐键注入与会话切换穿插交叉污染——多 agent 单窗口 UI 验收须预置时隙互斥协议；重验收轮按串行链编排（前一轮 A5 升级裁决已现场补课）。
@@ -29,3 +35,8 @@
 1. **托盘已结束 tab 渲染崩（已修）**：`subagent-bucket.ts subagentDotClass` 对词表外/缺失 status 无守卫，`SUBAGENT_DOT_RULES[undefined].find` 抛 TypeError → 已结束列表整列不渲染 + 全局错误 toast（证据 A4r3/r3-05、r3-08 截图 + renderer-error log 22:05-22:06）。修复 = 词表外/缺失兜底中性 accent 档 + 回归用例两枚。
 2. **@新任务 directive record 缺 agent/slug 字段的展示与点击（部分修）**：directive 派发 record.json agent=None（sa-3dd4468b 实证）→ mention 候选行 "undefined · undefined"、空 slug 点击误入「新建」流。已修展示层（副行 direct 兜底 + 过滤缺省安全）；**空 slug 点击语义未修**（insertSubagentChip 消费契约需产品裁决：按 subagentId 引用还是视为新建）——登记待裁决，验收路径以 WS 直发替代（A4r3 已证可行）。
 3. **验收环境纪律（流程项已固化）**：runtime 修复 commit 晚于实例启动 = 修复未生效陷阱（tsx 非热载）——inspect 任务书开工自查项已入 D3r3-A4；后续验收 ENV 模板应含「实例启动时点 vs 修复 commit 时点」比对与强制重启条款。
+
+## 顺带发现（D3r2-r4 补登记，非本设计范围）
+
+4. **records .json 磁盘快照为陈旧投影（立案待裁决）**：records/sa-*.json 快照 modelOverride=null / recentEffectiveModel=null / status=running(stale)，与 .events 的 override 帧及 runtime 内存投影不一致（A6br2 量化：第四轮完成后快照依旧 null/running）。UI 标签数据源为 runtime 派生不受影响；影响面 = 任何以磁盘快照为断言面的文件级检查。裁决方向：确认快照语义（创建时形态 or 应同步投影）——若属投影写回缺口，归 record-store 快照写面（ADR-0078 管辖）；断言纪律 = 权威面锚 .events 帧 / journal / session 文件，快照 json 不作断言面。
+5. **运行中实体在托盘子代理面板无行**（A4r4 deviation：进行中 0 三次核验，同期 pi 进程活跃 + record-round-started 已发）——运行中实体的 drawer 入口经对话流 subagent block 可达、托盘不可达；是否立案 = 托盘产品语义裁决（运行中该不该有行），非缺陷定性。
