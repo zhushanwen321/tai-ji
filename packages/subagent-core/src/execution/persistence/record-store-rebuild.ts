@@ -840,14 +840,14 @@ export function terminalManifestRecord(record: ExecutionRecord): ManifestRecord 
     ...(record.stepIndex !== undefined ? { stepIndex: record.stepIndex } : {}),
     ...(record.modelOverride !== undefined
       ? {
-          modelOverride: {
-            ref: record.modelOverride.ref,
-            ...(record.modelOverride.thinkingLevel !== undefined
-              ? { thinkingLevel: record.modelOverride.thinkingLevel }
-              : {}),
-            setAt: record.modelOverride.setAt,
-          },
-        }
+        modelOverride: {
+          ref: record.modelOverride.ref,
+          ...(record.modelOverride.thinkingLevel !== undefined
+            ? { thinkingLevel: record.modelOverride.thinkingLevel }
+            : {}),
+          setAt: record.modelOverride.setAt,
+        },
+      }
       : {}),
   };
 }
@@ -917,14 +917,14 @@ export function derivedManifestRecord(rec: SubagentRecord): ManifestRecord {
     ...(rec.stepIndex !== undefined ? { stepIndex: rec.stepIndex } : {}),
     ...(rec.modelOverride !== undefined
       ? {
-          modelOverride: {
-            ref: rec.modelOverride.ref,
-            ...(rec.modelOverride.thinkingLevel !== undefined
-              ? { thinkingLevel: rec.modelOverride.thinkingLevel }
-              : {}),
-            setAt: rec.modelOverride.setAt,
-          },
-        }
+        modelOverride: {
+          ref: rec.modelOverride.ref,
+          ...(rec.modelOverride.thinkingLevel !== undefined
+            ? { thinkingLevel: rec.modelOverride.thinkingLevel }
+            : {}),
+          setAt: rec.modelOverride.setAt,
+        },
+      }
       : {}),
   };
 }

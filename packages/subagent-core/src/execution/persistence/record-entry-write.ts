@@ -286,14 +286,14 @@ export function buildAdoptedManifestProjection(
     ...(identity.stepIndex !== undefined ? { stepIndex: identity.stepIndex } : {}),
     ...(fold.modelOverride !== undefined
       ? {
-          modelOverride: {
-            ref: fold.modelOverride.ref,
-            ...(fold.modelOverride.thinkingLevel !== undefined
-              ? { thinkingLevel: fold.modelOverride.thinkingLevel }
-              : {}),
-            setAt: fold.modelOverride.setAt,
-          },
-        }
+        modelOverride: {
+          ref: fold.modelOverride.ref,
+          ...(fold.modelOverride.thinkingLevel !== undefined
+            ? { thinkingLevel: fold.modelOverride.thinkingLevel }
+            : {}),
+          setAt: fold.modelOverride.setAt,
+        },
+      }
       : {}),
   };
 }
