@@ -46,6 +46,34 @@
           class="shrink-0 rounded-sm border border-hairline px-1.5 py-px text-[length:var(--text-3xs)] text-neutral-dim">
           {{ t('panel.tray.workflowInterrupted') }}
         </span>
+        <!-- run 级执行模型全切（subagent-model-switch §6.1 决策一：已终局 run 的切换由
+             runtime fail-fast 报「run 已终局」；入口对任意态开放，错误经 toast 承载）。
+             标签 = run 级四分支合成（首个非 pending 成员的显示权威——run 级覆盖分发全成员，
+             聚合面不取单一值；标签取权威成员避免「部分成员同族替换」时显示不存在的单一值）。 -->
+        <ModelSelectPopover
+          :selected="runModelDisplay.label ?? ''"
+          :switching="switching"
+          @select="onRunModelSelect"
+        >
+          <template #trigger>
+            <!-- 调用方自包 PopoverTrigger as-child（ModelSelectPopover 组件契约，同 SubagentTab D3-A6 修复）。 -->
+            <PopoverTrigger as-child>
+              <Button
+                variant="ghost"
+                class="flex shrink-0 items-center gap-1 rounded-sm px-1 font-mono text-[length:var(--text-3xs)] text-neutral-dim transition-colors hover:text-neutral-fg"
+                data-testid="drawer-workflow-model-trigger"
+              >
+                <span v-if="runModelDisplay.label" class="max-w-[140px] truncate">{{ runModelDisplay.label }}</span>
+                <span
+                  v-if="runModelDisplay.overridden"
+                  class="shrink-0 rounded-sm border border-accent/40 px-1 text-[length:var(--text-3xs)] text-accent"
+                  data-testid="drawer-workflow-override-badge"
+                >{{ t('panel.sideDrawer.subagentOverrideBadge') }}</span>
+                <ChevronDown class="size-3 shrink-0 opacity-60" />
+              </Button>
+            </PopoverTrigger>
+          </template>
+        </ModelSelectPopover>
         <!-- workflow 一次性生命周期（subagent-workflow D-2）：仅 abort，pause/resume 已移除 -->
         <div v-if="workflow.status === 'running'" class="flex shrink-0 items-center gap-0.5">
           <Button
@@ -85,7 +113,7 @@
             <div
               v-for="call in group.calls"
               :key="call.id"
-              class="group relative cursor-pointer rounded-md px-2 py-[6px] transition-colors hover:bg-surface-hover"
+              class="group relative cursor-pointer select-none rounded-md px-2 py-[6px] transition-colors hover:bg-surface-hover"
               :class="{ 'opacity-40': call.status === 'pending' }"
               :title="call.status === 'pending' ? t('sidebar.workflowDetail.pendingHint') : undefined"
               data-testid="drawer-workflow-agent-call"
@@ -136,7 +164,7 @@
 <script setup lang="ts">
 import { computed, onScopeDispose, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check, Loader2, Square, Workflow } from '@lucide/vue'
+import { Check, ChevronDown, Loader2, Square, Workflow } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useWorkflowSelection, openSubagent } from '@taiji/core/domain/drawer'
@@ -150,7 +178,14 @@ import { useWorkflowAction } from '@/composables/features/workflow/useWorkflowAc
 import { formatTokens } from '@/lib/token-format'
 import { formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
 import { normalizeWorkflowScriptName } from '@/components/panel/workflow-viz/run-name'
-import type { WorkflowRunRecord, WorkflowAgentCall } from '@taiji/shared'
+import ModelSelectPopover from './ModelSelectPopover.vue'
+import { PopoverTrigger } from '@/components/ui/popover'
+// subagent-model-switch §7.1（U1）：run 级执行模型全切 + 标签读取规则四分支
+import {
+  resolveSubagentModelDisplay,
+  useSubagentModel,
+} from '@/composables/features/subagent/useSubagentModel'
+import type { ProviderId, WorkflowRunRecord, WorkflowAgentCall } from '@taiji/shared'
 
 const { t } = useI18n()
 const panelStore = usePanelStore()
@@ -184,6 +219,50 @@ const workflow = computed<WorkflowRunRecord | null>(() => {
 
 /** abort 两段式确认态（当前选中 workflow 的） */
 const aborting = computed(() => workflow.value !== null && isAbortConfirming(workflow.value.runId))
+
+// ── run 级执行模型全切（subagent-model-switch §7.1，U1）────────────────
+
+const { setSubagentModel, memberDisplayOf } = useSubagentModel()
+/** 切换中（ModelSelectPopover switching 门） */
+const switching = ref(false)
+
+/**
+ * run 级模型标签显示态：显示权威成员 = 首个非 pending 成员（run 级覆盖分发全成员同值，
+ * 聚合面不取单一值——标签取权威成员的面字段合成，避免「部分成员同族替换」时显示不存在的
+ * 单一值；成员回执态经 memberDisplayOf 按 (runId, memberRecordId) 键读取——键域 = 成员
+ * record id，与聚合应答 member.runId 同源（详情载荷 memberRecordId 透出，单源锚）；
+ * session id（pi uuidv7）与 call.id（taskIndex）都不在该键域，仅作缺省兜底）。
+ */
+const runModelDisplay = computed(() => {
+  const wf = workflow.value
+  if (wf === null) return { label: undefined as string | undefined, overridden: false }
+  const authoritative = wf.agentCalls.find((c) => c.status !== 'pending') ?? wf.agentCalls[0]
+  if (authoritative === undefined) return { label: undefined as string | undefined, overridden: false }
+  const memberRunId = authoritative.memberRecordId ?? authoritative.sessionId ?? String(authoritative.id)
+  return resolveSubagentModelDisplay({
+    display: memberDisplayOf(wf.runId, memberRunId),
+    stampedModel: authoritative.model,
+    modelOverride: authoritative.modelOverride?.model,
+    recentEffectiveModel: authoritative.recentEffectiveModel,
+    recordStatus: authoritative.status,
+  })
+})
+
+/** 点选候选 → subagent.setModel（run 级全切目标）；回执写状态在 composable（禁乐观写）。 */
+async function onRunModelSelect(payload: { modelId: string; provider: ProviderId }): Promise<void> {
+  const wf = workflow.value
+  if (wf === null || switching.value) return
+  switching.value = true
+  try {
+    await setSubagentModel({
+      runId: wf.runId,
+      provider: payload.provider,
+      modelId: payload.modelId,
+    })
+  } finally {
+    switching.value = false
+  }
+}
 
 /** phase 分组 + 组内状态聚合（原从侧栏工作流详情视图迁入，该视图已退役） */
 interface PhaseGroup {

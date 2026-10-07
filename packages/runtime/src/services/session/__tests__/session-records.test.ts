@@ -333,6 +333,51 @@ describe('refreshRecordEntries：拉取与发布', () => {
   // 「同值重复 entry 不重复发布」用例与 session-records-reconcile.test.ts
   // 「同值增量（新 entryId 同内容）不发布」场景相同，此处不重复。
 
+  it('投影未就绪时报告到达 → 就地建投影后应用并发布（D3 顺带发现 5：不再丢报等待轮边界冷读）', async () => {
+    // 场景：session 注册了但从无订阅拉取（recordEntriesCaches 无该 session 缓存），
+    // record 域 journal 事件报告先到——修复前返回 false（写侧折叠，事件要等下次
+    // ensureProjection 触发点才冷读收敛，托盘「进行中」轮内全程停留旧态）。
+    const dir = mkdtempSync(join(tmpdir(), 'session-records-early-report-'))
+    // 记录事件文件：record-created（round-started 前置身份帧）+ round-started（running 态事实）
+    // 目录锚 = getSubagentRecordsDir(agentDir, cwd) 推导（encodeCwd 折叠——与生产同源，
+    // mock 的 scanSessions 必须带 cwd 否则投影落 entry-only 降级、记录域报告无处应用）
+    const encCwd = '--' + dir.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-') + '--'
+    const recordsDir = join(dir, 'subagents', encCwd, 'records')
+    mkdirSync(recordsDir, { recursive: true })
+    const eventsPath = join(recordsDir, 'sa-early.events')
+    const created = { type: 'record-events', id: 'sa-early', ver: 1 }
+    const createdFrame = { type: 'record-created', seq: 1, ts: 1000, id: 'sa-early', agent: 'worker', task: 't', slug: 's', origin: 'tool', rootSessionId: 's1', depth: 0, mode: 'background', startedAt: 1000 }
+    const roundStarted = { type: 'record-round-started', seq: 2, ts: 1100, id: 'sa-early', round: 1 }
+    writeFileSync(eventsPath, [created, createdFrame, roundStarted].map((l) => JSON.stringify(l)).join('\n') + '\n')
+    try {
+      piAgentDirRef.dir = dir
+      const { records, publish } = makeRecords({
+        sessionStore: { scanSessions: vi.fn(() => [{ id: 's1', filePath: join(dir, 's1.jsonl'), cwd: dir }]) } as unknown as ISessionStore,
+      })
+      registerSession(records) // 只注册生命周期（不触发任何拉取/订阅链——缓存与投影均未建）
+      writeFileSync(join(dir, 's1.jsonl'), '{}\n')
+
+      const acked = routeJournalReport('s1', {
+        domain: 'record',
+        fileKey: 'sa-early',
+        events: [createdFrame, roundStarted],
+        sessionId: 's1',
+        emittedAt: Date.now(),
+      })
+      // 修复前 false（投影未建丢报）；修复后就地建投影 + 应用成功 + 回 ack
+      expect(acked).toBe(true)
+      const subMsgs = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.subagents')
+      expect(subMsgs.length).toBeGreaterThanOrEqual(1)
+      // 投影内的成员是 running 态（round-started 折叠产物——托盘「进行中」计数的数据源）
+      const payload = subMsgs[0]![1] as { payload: { subagents: Array<{ subagentId: string; status: string }> } }
+      const member = (payload.payload.subagents ?? []).find((r) => r.subagentId === 'sa-early')
+      expect(member?.status).toBe('running')
+    } finally {
+      piAgentDirRef.dir = ''
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
   it('轮终翻转维度（终态条目注册→idle / result 写入 / model 写入）触发 publish；legacy 残留键容忍不触发', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)

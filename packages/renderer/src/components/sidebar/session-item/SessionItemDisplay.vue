@@ -37,11 +37,8 @@
   <!-- 主体：label + sub（fork 血缘 / branch） -->
   <div class="min-w-0 flex-1">
     <div
-      class="flex min-w-0 items-center gap-1 text-[length:var(--text-xs)] leading-[1.35]"
-      :class="[
-        active ? 'text-accent' : 'text-neutral-fg',
-        markedDone ? 'opacity-60' : '',
-      ]"
+      class="flex min-w-0 items-center gap-1 text-[length:var(--text-xs)] leading-[1.35] text-neutral-fg"
+      :class="markedDone ? 'opacity-60' : ''"
     >
       <span class="min-w-0 flex-1 truncate">{{ session.label }}</span>
       <!-- agent-spawned badge（U8）：accent 低饱和形态（bg-accent-soft + text-accent，
@@ -109,7 +106,6 @@ type IconKind = 'spinning' | 'hollow' | 'hollow-dim' | 'waiting' | 'error' | 'do
 
 const props = withDefaults(defineProps<{
   session: SessionItemSession
-  active: boolean
   status: DerivedStatus
   /** 子会话数（按 parentAgentSessionId 计数，SessionList 注入）；0/缺省不渲染徒标 */
   childCount?: number

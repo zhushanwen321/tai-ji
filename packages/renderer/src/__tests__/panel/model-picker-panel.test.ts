@@ -40,7 +40,7 @@ describe('ModelPickerPanel hoverSelect（W3a 可选通道）', () => {
     expect(wrapper.emitted('hoverSelect')).toBeUndefined()
   })
 
-  it('hoverSelect: true → pointerenter 上抛 hoverSelect(id)', async () => {
+  it('hoverSelect: true → pointerenter 上抛 hoverSelect({ id, providerId })（单 payload，顺带发现 7 起 providerId 随组上行）', async () => {
     const wrapper = mountPanel({ hoverSelect: true })
     const row = wrapper.find('[data-testid="model-picker-item-claude-4"]')
     expect(row.exists()).toBe(true)
@@ -48,14 +48,14 @@ describe('ModelPickerPanel hoverSelect（W3a 可选通道）', () => {
     await row.trigger('pointerenter')
     const emitted = wrapper.emitted('hoverSelect')
     expect(emitted).toBeTruthy()
-    expect(emitted![0][0]).toBe('claude-4')
+    expect(emitted![0][0]).toEqual({ id: 'claude-4' })
   })
 
-  it('click 通道不受 hoverSelect 影响：照常 emit update:modelValue(id)', async () => {
+  it('click 通道不受 hoverSelect 影响：照常 emit update:modelValue({ id, providerId })', async () => {
     const wrapper = mountPanel({ hoverSelect: true })
     await wrapper.find('[data-testid="model-picker-item-claude-4"]').trigger('click')
     const emitted = wrapper.emitted('update:modelValue')
     expect(emitted).toBeTruthy()
-    expect(emitted![0][0]).toBe('claude-4')
+    expect(emitted![0][0]).toEqual({ id: 'claude-4' })
   })
 })

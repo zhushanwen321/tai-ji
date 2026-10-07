@@ -285,6 +285,26 @@ export interface SessionView {
 // ============================================================
 
 /**
+ * 模型 ref（provider + modelId 二元组）——setModel 正向方法请求/应答与宿主侧
+ * 用户覆盖记账共用的模型指向形状（设计 subagent-model-switch §6.2/§7.3）。
+ *
+ * 刻意用结构化对象而非现役 wire 的字符串 canonical ref（`ctx.model` = "provider/id"）：
+ * 切换操作的原生输入面就是「provider 选了哪个模型」两个独立选择（前端模型选择器 /
+ * runtime `model.switch` 均平铺 provider/modelId），字符串拼接形态会在协议两侧各做一次
+ * 拆/拼（拆分规则 = provider 含 '/' 时无法无歧义反转），结构化形状让拆装只发生在宿主
+ * 编排层单点（U2 组帧时拼 canonical ref、读回执时拆 ref）。
+ *
+ * 消费方：u-foundation 定形 → U2（宿主编排组帧）/ U3（引擎实现读帧）/ U5（聚合应答
+ * effectiveModel）/ U1（前端 wire 应答）按本形状传递，禁止各写一份等价形状。
+ */
+export interface ModelRef {
+  /** 模型 provider id（前端 ProviderId 词表，如 "zai-coding-cn"）。 */
+  provider: string;
+  /** provider 内的模型 id（如 "glm-5.3-flash"）。 */
+  modelId: string;
+}
+
+/**
  * 引擎进程形态（manifest `taiji.subagentEngine.processModel` 声明字面量；设计
  * pi-workflow-run-resource-model §3.3 决策 3）。语义：
  *   - 'per-window'：窗口作用域实例——引擎薄壳进程随派发窗口（workflow run /
@@ -299,7 +319,7 @@ export interface SessionView {
 export type EngineProcessModel = "per-window" | "shared-service";
 
 /**
- * 引擎能力声明（11 位）。三级：native / emulated / unsupported。
+ * 引擎能力声明（11 必填位 + 1 可选位 setModel）。三级：native / emulated / unsupported。
  * 声明的是本仓 subagent 链路实际接通的能力，不是引擎 RPC 层的理论能力。
  * 同步权威 = manifest（注册期直读）；握手应答仅诊断（§3.3「同步成员清单」）。
  * 进程形态声明是独立字段（上方 EngineProcessModel——manifest 契约面，不在本
@@ -336,6 +356,22 @@ export interface EngineCapabilities {
   permissionMode: "native" | "fixed" | "ignored";
   /** maxTurns 轮数上限执行能力位（pi=true / zcode=false）。 */
   maxTurns: boolean;
+  /**
+   * [ADR-0071 判据 7 消费点/载体登记——能力位演进先例 steer 之后的第二登记条目]
+   * 执行中模型热切换位（设计 subagent-model-switch §7.3）。
+   *
+   * - **wire 载体**：capabilities manifest 位声明；配套执行通道 = setModel 正向方法
+   *   （methods.ts，与 steer「声明 unsupported、无独立执行通道」的缺失登记不同——
+   *   本位声明与执行通道同批进协议，宿主不发 unsupported 引擎的调用）。
+   * - **消费点**：宿主编排的发送前预检（设计 §7.2 步骤②）——位非 'native' 时宿主
+   *   不发 setModel 方法调用，转覆盖记账路径 + 提示性应答（避免把
+   *   engine_protocol_unknown_method 原样抛给用户）。
+   * - **缺省最弱档**：可选键，undefined 与 'unsupported' 同义（旧 manifest 未声明 =
+   *   不可热切；additive 演进——旧引擎忽略未知键，宿主预检不放行即零行为差）。
+   * - **值域无 emulated**：热切换无宿主侧仿真形态（覆盖记账本身引擎无关、不属本位
+   *   语义），只有「引擎内即时生效（native）/ 不支持（unsupported）」两态。
+   */
+  setModel?: "native" | "unsupported";
 }
 
 /** 引擎探针报告（probe 应答）。ok=false 时 error 必填（恢复指引）。 */

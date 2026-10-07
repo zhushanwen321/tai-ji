@@ -42,7 +42,7 @@
           :key="child.id"
           data-testid="tray-session-row"
           :data-child-session-id="child.id"
-          class="group/item relative flex cursor-pointer items-start gap-2 rounded-md px-2 py-1 transition-colors hover:bg-surface-hover"
+          class="group/item relative flex cursor-pointer select-none items-start gap-2 rounded-md px-2 py-1 transition-colors hover:bg-surface-hover"
           :title="child.label"
           @click="openChild(child)"
           @mouseleave="stopConfirm.clear()"

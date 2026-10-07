@@ -28,6 +28,7 @@ import type { ToolCallStatus } from '@taiji/shared'
 export type BlockIconKind =
   | 'thinking' | 'tool-read' | 'tool-bash' | 'tool-edit' | 'tool-other'
   | 'subagent' | 'workflow' | 'running' | 'failed' | 'text'
+  | 'bash-group'
 
 /** toolName → tool 细分类映射（未命中的 toolName 走 'tool-other'） */
 const TOOL_ICON_MAP: Record<string, BlockIconKind> = {
@@ -63,6 +64,9 @@ export function getBlockIcon(
  * Demo H 最终值：thinking=brain / tool-read=book-open / tool-bash=square-terminal /
  * tool-edit=pencil / tool-other=square-function / subagent=users / workflow=list-checks /
  * failed=alert-triangle / text=arrow-right。
+ * bash-group（ui-signal-density §3.3 D1 U3）= square-terminal：组头是 bash 段的聚合行，
+ * 图标沿用 bash 语义（与 tool-bash 同源）；组身份由「×N · 共 Xs」计数前缀承载，行内有
+ * running 成员时图标位让给 RUNNING_LOADER_SVG（渲染层 hasRunning 分支，不走本映射）。
  */
 export const BLOCK_ICON_LUCIDE: Record<Exclude<BlockIconKind, 'running'>, Component> = {
   thinking: Brain,
@@ -74,6 +78,7 @@ export const BLOCK_ICON_LUCIDE: Record<Exclude<BlockIconKind, 'running'>, Compon
   workflow: ListChecks,
   failed: AlertTriangle,
   text: ArrowRight,
+  'bash-group': SquareTerminal,
 }
 
 /**
@@ -100,5 +105,8 @@ export const RUNNING_LOADER_SVG: string =
  * （toolName / name / slug 均 13px）同档，层级由色彩承担而非缩到 11px。
  */
 export const BLOCK_ICON_CLASS = 'size-3.5 shrink-0 text-neutral-ico hover:text-neutral-ico-hover'
+/** 动作词 label（思考 / 执行工具 / WORKFLOW. / SUBAGENT. 前缀）：字重走 --fw-bold（600）；
+ *  颜色落行层级灰 --neutral-mid——标签随所在行灰阶（2026-10-06 用户裁决：动作词不再
+ *  顶白，行视觉锚点由工具名加粗承担）。字号取 --text-sm 与块内其余槽位同档。 */
 export const BLOCK_LABEL_CLASS =
-  'mr-0.5 inline-block shrink-0 whitespace-nowrap text-[length:var(--text-sm)] font-medium text-neutral-dim'
+  'mr-0.5 inline-block shrink-0 whitespace-nowrap text-[length:var(--text-sm)] [font-weight:var(--fw-bold)] text-neutral-mid'

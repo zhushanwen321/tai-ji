@@ -37,12 +37,16 @@ import * as events from '@taiji/core/transport/api'
 // scoped slot，setup 暴露 VirtualizerHandle 兼容字段——论证见该 helper 文件头）
 vi.mock('virtua/vue', () => virtuaVueMockModule())
 
-// sessionApi mock：fetchAndInject 内部调 getSubagentHistory（快照腿）
+// sessionApi mock：fetchAndInject 内部调 getSubagentHistory（快照腿）。
+// [B2 u-renderer] getSubagentStreamState = 接入拉取（触发点①）执行通道（chat store
+// subagentStreamPull 执行器经 '@/api' 门面直达本域 mock）——缺成员时触发点①同步 TypeError，
+// 必须在工厂给默认回执（found:false = 无进行中流，core 分支 3 不动作）。
 vi.mock('@taiji/core/transport/api/domains/session', () => ({
   getSubagentHistory: vi.fn(),
   getSubagents: vi.fn().mockResolvedValue([]),
   subagentAction: vi.fn(),
   getAgentCallHistory: vi.fn(),
+  getSubagentStreamState: vi.fn().mockResolvedValue({ found: false, msgSeq: 0, lastDeltaSeq: 0, lines: [] }),
 }))
 // subagent store 经 @/api 门面导入 session；vitest 环境 VITE_MOCK=true 时门面把 session
 // 解析到 src/api/mock（非 domains/session，mockApi.getSubagentHistory 在测试里永不 resolve，
@@ -215,7 +219,133 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     // 双键订阅（主 sid + 虚拟分区 id，tee 帧 payload.sessionId 归属差异适配）
     expect(events.on).toHaveBeenCalledWith(MAIN_SID, expect.any(Function))
     expect(events.on).toHaveBeenCalledWith(VIRTUAL_ID, expect.any(Function))
+    // [B2 §4.3 触发点①反例] done record 无进行中流 → 不发起接入拉取（稳态冗余 RPC 不发）
+    expect(sessionApi.getSubagentStreamState).not.toHaveBeenCalled()
     wrapper.unmount()
+  })
+
+  // ── [B2 u-renderer §4.3] 拉取触发接线端到端（帧 → handler 分派 → chat 分区/DOM）──
+
+  /**
+   * 取 subscribeStream 挂在虚拟分区键上的 WS handler（events mock 的注册调用记录）。
+   * findLast：虚拟分区键在本组件树有多个订阅注册点（MessageStream 链先注册一次 + 本用例
+   * subscribeStream 双键），最后注册 = subagent store 单 scope 的现役订阅（同 token 覆盖语义）。
+   */
+  function streamHandler(): (msg: { type?: string; payload?: unknown }) => void {
+    const call = vi.mocked(events.on).mock.calls.findLast(([key]) => key === VIRTUAL_ID)
+    expect(call).toBeDefined()
+    return call![1] as (msg: { type?: string; payload?: unknown }) => void
+  }
+
+  it('接入拉取（触发点①）：running record 打开 → 订阅建立后主动 getSubagentStreamState，详情页正常在场', async () => {
+    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
+    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    const wrapper = mountTab()
+    try {
+      await settle(wrapper)
+
+      // 订阅建立完成后对运行中 record 主动拉取（recordId 口径与 tee 帧一致 = subagentId）
+      expect(sessionApi.getSubagentStreamState).toHaveBeenCalledWith(MAIN_SID, SUB_ID)
+      // DOM：拉取响应 found:false（工厂默认）→ 不动作，详情页正常渲染无错误态
+      expect(wrapper.find('[data-testid="drawer-subagent-tab"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="drawer-subagent-error"]').exists()).toBe(false)
+    } finally {
+      wrapper.unmount() // 断言失败也卸载（组件树 / mock 计数跨用例隔离）
+    }
+  })
+
+  it('chunk 帧分派（触发点②③端到端）：干净起步零拉取；跳号触发失步拉取，响应水位收敛后 DOM 无重复文本', async () => {
+    // done record：无接入拉取（触发点①不触发，拉取计数零基线、在途去重槽无占用——
+    // running record 的接入拉取在途期间会去重掉并发失步拉取，属 §4.3 既定行为，不在本用例混排）
+    useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'done' })])
+    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
+    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    const wrapper = mountTab()
+    try {
+      await settle(wrapper)
+
+      const handler = streamHandler()
+      const pulled = () => vi.mocked(sessionApi.getSubagentStreamState).mock.calls.length
+      expect(pulled()).toBe(0) // done record：接入拉取零调用基线
+
+      // 干净起步（无状态机 + deltaSeq=0）：直接建状态机追加，不拉取（触发点②反例端到端）
+      handler({ type: 'subagent.stream_chunk', payload: { sessionId: VIRTUAL_ID, recordId: SUB_ID, msgSeq: 1, deltaSeq: 0, delta: '首段' } })
+      await settle(wrapper)
+      expect(pulled()).toBe(0)
+      handler({ type: 'subagent.stream_chunk', payload: { sessionId: VIRTUAL_ID, recordId: SUB_ID, msgSeq: 1, deltaSeq: 1, delta: '+次段' } })
+      await settle(wrapper)
+      expect(pulled()).toBe(0)
+
+      // 跳号（deltaSeq=3 跳过 2）：失步 → 拉取（触发点③）；响应水位 3 覆盖缓冲 chunk
+      vi.mocked(sessionApi.getSubagentStreamState).mockResolvedValueOnce({
+        found: true, msgSeq: 1, lastDeltaSeq: 3, lines: ['首段+次段', '晚到补齐'],
+      })
+      handler({ type: 'subagent.stream_chunk', payload: { sessionId: VIRTUAL_ID, recordId: SUB_ID, msgSeq: 1, deltaSeq: 3, delta: '晚到补齐' } })
+      await settle(wrapper)
+      expect(pulled()).toBe(1)
+      expect(sessionApi.getSubagentStreamState).toHaveBeenLastCalledWith(MAIN_SID, SUB_ID)
+
+      // 黑盒 DOM：拉取全文 + 顺序 chunk 内容在消息流可见；缓冲 deltaSeq=3 ≤ 水位丢弃 → 无重复
+      const text = wrapper.findAll('[data-testid="turn-stub"]').map((t) => t.text()).join('|')
+      expect(text).toContain('首段+次段')
+      expect(text).toContain('晚到补齐')
+      expect(text).not.toContain('晚到补齐晚到补齐')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('清除帧 msgSeq 定稿水位：清除帧落水位后，同消息的失步拉取响应不复活定稿内容', async () => {
+    useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'done' })]) // done：零接入拉取基线
+    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
+    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    const wrapper = mountTab()
+    try {
+      await settle(wrapper)
+
+      const handler = streamHandler()
+      // chunk 追加 → 清除帧（R 路径携带 msgSeq=1）：置 sealedMsgSeq + finalize
+      handler({ type: 'subagent.stream_chunk', payload: { sessionId: VIRTUAL_ID, recordId: SUB_ID, msgSeq: 1, deltaSeq: 0, delta: '定稿正文' } })
+      await settle(wrapper)
+      handler({ type: 'subagent.stream_delta', payload: { sessionId: VIRTUAL_ID, recordId: SUB_ID, lines: undefined, msgSeq: 1 } })
+      await settle(wrapper)
+      expect(wrapper.text()).toContain('定稿正文')
+
+      // 定稿后同 msgSeq 的失步 chunk 触发拉取 → 响应 msgSeq ≤ 水位 → 丢弃（不复活定稿消息）
+      vi.mocked(sessionApi.getSubagentStreamState).mockResolvedValueOnce({
+        found: true, msgSeq: 1, lastDeltaSeq: 9, lines: ['stale-不应上屏'],
+      })
+      handler({ type: 'subagent.stream_chunk', payload: { sessionId: VIRTUAL_ID, recordId: SUB_ID, msgSeq: 1, deltaSeq: 5, delta: 'late' } })
+      await settle(wrapper)
+      expect(sessionApi.getSubagentStreamState).toHaveBeenCalledTimes(1) // 仅本次失步（无接入拉取）
+      const text = wrapper.findAll('[data-testid="turn-stub"]').map((t) => t.text()).join('|')
+      expect(text).toContain('定稿正文')
+      expect(text).not.toContain('stale-不应上屏')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('W 路径全量形态兼容：stream_delta 带 lines 全量替换上屏；清除帧无 msgSeq 不触发拉取', async () => {
+    // done record：接入拉取零调用基线，W 清除帧后仍为零（不进 chunk 状态机）
+    useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'done' })])
+    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
+    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    const wrapper = mountTab()
+    try {
+      await settle(wrapper)
+
+      const handler = streamHandler()
+      handler({ type: 'subagent.stream_delta', payload: { sessionId: MAIN_SID, recordId: SUB_ID, lines: ['w-全量文本'] } })
+      await settle(wrapper)
+      expect(wrapper.findAll('[data-testid="turn-stub"]').map((t) => t.text()).join('|')).toContain('w-全量文本')
+
+      handler({ type: 'subagent.stream_delta', payload: { sessionId: MAIN_SID, recordId: SUB_ID, lines: undefined } })
+      await settle(wrapper)
+      expect(sessionApi.getSubagentStreamState).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+    }
   })
 
   it('引擎 badge（U3 D9）：engine 缺省 → 常态 badge 显示 pi', async () => {

@@ -22,7 +22,7 @@ export type SubagentRpcAction =
 /** /workflows RPC action 判别联合。 */
 export type WorkflowRpcAction =
   | { action: "abort"; runId: string }
-  | { action: "resume"; runId: string }
+  | { action: "resume"; runId: string; model?: string }
   | { action: "lifecycle-missing-id"; verb: "abort" | "resume" }
   | { action: "lifecycle-removed"; verb: "pause" }
   | { action: "noop" };
@@ -128,8 +128,9 @@ export function parseSubagentRpcCommand(argsStr: string): SubagentRpcAction {
  * 支持格式：
  * - `abort <runId>` → { action: "abort", runId }
  * - `abort`（无 runId）→ { action: "lifecycle-missing-id", verb: "abort" }
- * - `resume <runId>` → { action: "resume", runId }（断点续跑——与 TUI verb、
- *   workflow tool action:"resume" 三通道同语义）
+ * - `resume <runId> [model]` → { action: "resume", runId, model? }（断点续跑——与
+ *   TUI verb、workflow tool action:"resume" 三通道同语义；model 可选 canonical ref
+ *   'provider/modelId[:thinkingLevel]'，落统一覆盖记账——F1-26 后续项）
  * - `resume`（无 runId）→ { action: "lifecycle-missing-id", verb: "resume" }
  * - `pause ...`（已移除的 lifecycle verb，带或不带 runId 均同）→
  *   { action: "lifecycle-removed", verb: "pause" }——removed verb 优先于 missing-id 判定
@@ -140,7 +141,7 @@ export function parseWorkflowRpcCommand(argsStr: string): WorkflowRpcAction {
   const args = argsStr.trim().split(/\s+/).filter(Boolean);
   if (args.length === 0) return { action: "noop" };
 
-  const [verb, runId] = args;
+  const [verb, runId, model] = args;
   if (isRemovedLifecycleVerb(verb)) {
     return { action: "lifecycle-removed", verb };
   }
@@ -149,7 +150,7 @@ export function parseWorkflowRpcCommand(argsStr: string): WorkflowRpcAction {
     if (!runId) return { action: "lifecycle-missing-id", verb };
     return verb === "abort"
       ? { action: "abort", runId }
-      : { action: "resume", runId };
+      : { action: "resume", runId, ...(model !== undefined ? { model } : {}) };
   }
   return { action: "noop" };
 }

@@ -104,6 +104,22 @@ export const HANDSHAKE_TIMEOUT_MS = 10_000;
 /** cancel 后引擎收敛终态的窗口（ms）；超时 core 走杀链。 */
 export const CANCEL_SETTLE_GRACE_MS = 3_000;
 
+/**
+ * setModel 引擎侧单阶段控制窗（ms）：pi 实现等子进程 `set_model` 应答、等
+ * `get_state` 回读各占一窗（设计 subagent-model-switch §7.3——命令与回读全程带
+ * 存活检查，超时上限复用现役取消收敛窗量级：控制面单请求 = 秒级）。窗满且进程
+ * 仍存活 → `engine_state_readback_failed`；窗满时进程已退出 → 无活进程形态
+ * （`SET_MODEL_NOT_ACTIVE_CODE`）——两种处置不可混淆。
+ */
+export const SET_MODEL_STAGE_TIMEOUT_MS = 3_000;
+
+/**
+ * setModel 正向方法的宿主侧单请求上界（ms）：≥ 引擎侧两阶段最坏时延
+ * （2 × SET_MODEL_STAGE_TIMEOUT_MS）+ 协议余量；量级锚 = 数据面单请求
+ * REVERSE_REQUEST_TIMEOUT_MS 的 10s 先例（控制面单请求必须秒级有界——宿主不悬挂）。
+ */
+export const SET_MODEL_REQUEST_TIMEOUT_MS = 10_000;
+
 // [HISTORICAL] 原 engine_crashed 重建上限/退避常量族（CRASH_REBUILD_MAX_ATTEMPTS /
 // CRASH_REBUILD_BACKOFF_MS）随自动重建删除（ADR-0122：初建失败一次即 unavailable 显式上报）。
 

@@ -365,6 +365,14 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 - **实体还原**（实体误删 / `.bare` 损坏）：`git archive refs/skills-snapshot | tar -x -C <workspace 根>`；本地 ref 不可用先 `git fetch github refs/skills-snapshot:refs/skills-snapshot`（本 workspace remote 名 = `github`；fresh clone 默认 `origin`——`refs/remotes/origin/*` 是 remote 改名前的 stale 残留，`rev-parse origin/main` 仍解析出陈旧值属半工作陷阱，勿作为依据）。还原后 `diff -r` 核对。
 - **快照链排障**：`git rev-parse refs/skills-snapshot` 不存在 = 任一 worktree 手动跑 `bash .githooks/snapshot-skills.sh`；hook 输出 `[WARN] skills 快照失败` = 非阻断（下次 commit 自动重试，多为离线 push 超时）；跨机器重建前 `git ls-remote github refs/skills-snapshot` 核对新鲜度。
 
+### 28. e2e/console 兜底检索撞 error 级 `ResizeObserver loop completed with undelivered notifications`（2026-10-06 ui-redesign-combined D3 验收登记）
+
+**现象**：验收/调试经 CDP 捕获 console 时，流式虚拟列表跟随滚动的采样窗口内出现多条 `[console.error] source=window-onerror: ResizeObserver loop completed with undelivered notifications.`（典型：对话流行数 liveness 采样类剧本）。
+
+**判定**：Chromium 机制性噪声，环境类、非产品缺陷——同一帧内 ResizeObserver 回调改布局导致投递循环超限，浏览器以 ErrorEvent 冒泡到 window.onerror。判定依据：触发场景吻合 renderer 的 ResizeObserver 使用点（对话流五个 composable，rAF-RO 时序见 docs/testing/01-chat-panel-composer.md）；同 step 的功能断言全部通过。
+
+**排障**：e2e/验收任务书含「无 error 级 console」字面判据时，命中本条按归因豁免（带保留通过），豁免须在验收记录留痕（归因 + 功能断言通过证据），禁止静默吞；功能断言同窗失败则不适用本条，按真实缺陷归因。
+
 ## 环境变量速查
 
 | 变量 | 用途 | 生产默认值 | 开发默认值 |
@@ -556,3 +564,13 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 - **根因**：共享 config `core.bare=true`（bare repo + worktree 布局）下，worktree 依赖 per-worktree `config.worktree`（`core.bare=false` + `core.hooksPath`）覆盖。该补写是 git-cwt 包装层（`~/.shell/07-git-ws.sh`，[2026-09-11] 同族注释）的职责，`create-worktree.sh` 与 `setup-worktree.sh` 都不做——dev-merge.sh 绕过包装层直调创建脚本即漏。已修（auto-create 后补写 worktree 级 config；check_clean 区分 git 失败 exit≥2 与真脏）。
 - **连带发现**：`.bare/custom-hooks/setup-worktree.sh` 曾丢失可执行位（`[ -x ]` 为假 → 项目 hook 被静默跳过，依赖安装与 Electron/pi 缓存链接全缺）。已 `chmod +x` 根治；症状 = 创建输出无「执行项目 setup hook」行且新 worktree 无 node_modules。
 - **处置**：现症修复 = `git --git-dir=<.bare/worktrees/<name>> config --worktree core.bare false` + `core.hooksPath <同目录>/hooks`，再补跑 `bash .bare/custom-hooks/setup-worktree.sh <worktree路径>`。
+
+### 29. workflow 脚本 / agent frontmatter 显式指定的模型没生效（被用户覆盖压过——合法行为，非解析回归）
+
+- **症状**：workflow 脚本的 run 级 `model` 参数、`agent()` 调用参数或 agent frontmatter 显式写了模型，实际执行却用了另一个模型（面板/命令切换过的模型）。
+- **机制**：subagent/workflow 执行域的模型解析链有第 0 层「用户覆盖」——用户经面板模型选择器或 `/subagent-model` 命令对某 subagent 会话 / workflow run 下达过实时切换后，覆盖值优先级最高（压过 frontmatter 与脚本/调用参数显式指定，用户覆盖赢）；覆盖作用域 = 该会话/run 的剩余执行（含中断后 resume 与主 agent 重启后重开）。机制 SSOT：ADR-0129；术语见 docs/CONTEXT.md「模型覆盖」词条。
+- **三步排查**：
+  1. **查覆盖记账在场**：workflow run → run 事件 journal（`<数据目录>` 下 workflow-state 的 `<runId>.record.jsonl` 文件）grep `model-override` 帧；chat 域 subagent → record 事件文件 grep `record-model-override` 帧。覆盖帧在场 = 用户覆盖赢生效，属预期行为而非 bug。
+  2. **resume 场景查生效值**：journal 的 `run-resumed` 事件携带生效模型——三档回落：resume 显式参数（协议预留）> 持久化覆盖记录 > run 创建时模型。
+  3. **查成员实际执行模型**：成员 pi session 文件的 `model_change` 条目序列（尾条目 = 当前实际使用模型，审计权威）。
+- **处置**：需要脚本显式模型赢时，对该目标再次切换即可（覆盖替换幂等——新覆盖值压旧值，不存在叠加）；确认从未切换过而模型仍不符预期，才按模型解析回归排查（三层解析：调用参数 > frontmatter > ctxModel）。

@@ -183,4 +183,46 @@ export interface LifecycleDeps {
     signal?: AbortSignal,
     stepIndex?: number,
   ) => Promise<AgentResult>;
+ /**
+ * [F1-18 修复] resume 显式 model 落账后的宿主投影同步回调。
+ *
+ * journal model-override 帧落盘只是持久化半边——宿主侧还有两个派生投影（覆盖记账
+ * 内存表 + workflow 域覆盖重建负缓存），不同步则进程存活期内重派被旧投影遮蔽
+ * （内存表旧覆盖值内存命中 / 负缓存「已扫无覆盖」stale 登记短路 journal 重扫），
+ * resume 的模型意图静默丢失。resume 写点（resume-run appendResumeModelOverride）
+ * 落账成功后经本回调同步；宿主实现（extension makeDeps → SubagentService.
+ * applyRunOverrideProjection）与既有 setModel 写点的「落账 + 内存表」双写形态对齐。
+ *
+ * 可选——未注入时（旧测试 deps）跳过投影（向后兼容，行为同修复前）；生产装配恒注入。
+ * 载荷为结构类型（journal 帧拆装结果），不引 execution 域类型——本 ports 文件
+ * 零 infra/execution 依赖纪律。
+ */
+  onResumeModelOverrideCommitted?: (
+    runId: string,
+    override: RunOverrideProjection,
+  ) => void;
+ /**
+  * [dmg-r2-5] 宿主会话锚现读口（run-created 帧 rootSessionId 的唯一载荷源）。
+  *
+  * 引擎层不持会话身份（WorkflowRun 聚合 / RunSpec 均无会话域），归属锚只能由
+  * 壳侧注入：实现 = 组合根 makeDeps 注入（sessionRootId 根进程语义与 record 域
+  * rootSessionId 同源——根进程 = 本 session id，嵌套 = env 贯穿的真 ROOT）。
+  * 消费点 = lifecycle.runWorkflow → dispatchRunCreated 条件式落帧（值 null/空不落
+  * 字段）。runtime 网关（subagent-model-gateway）runId 分支读该字段做同 cwd 多
+  * 会话的宿主精确路由——不注入时帧缺字段，读侧回落既有存在性判定（旧格式行放行）。
+  *
+  * 可选——未注入时（旧测试 deps）run-created 帧不落该字段（行为同修复前）。
+  */
+  getSessionRootId?: () => string | null;
+}
+
+/**
+ * [F1-18 修复] resume 显式 model 落账帧的拆装结果（投影回调载荷）。
+ * 与 orchestration model-override 帧的 model/thinkingLevel/ts 字段同构。
+ */
+export interface RunOverrideProjection {
+  provider: string;
+  modelId: string;
+  thinkingLevel?: string;
+  ts: number;
 }

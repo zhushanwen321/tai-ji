@@ -32,6 +32,11 @@ import { existsSync } from 'node:fs'
 import { isBtwVirtualId } from '@taiji/shared'
 import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId, PlanStateView, SessionRevokeMessageReply, SendPromptReason, WorkflowRunEventsReply, WorkflowDagReply } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
+// subagent 流状态只读快照形状（B2 subagent-stream-chunk §4.1）：type-only import——
+// services 层不 value import 有状态 IO infra（relay registry 句柄归组合根 index.ts，
+// 经 setSubagentStreamStateSource 晚绑定注入，同 setBtwService 模式），仅借 infra 侧
+// 接口类型对齐 wire 契约（与 shared session.getSubagentStreamState reply 逐字段一致）。
+import type { RelayTeeStreamState } from '../../infra/relay/relay-tee.js'
 import type {
   ISessionService, IMessageBroker, SessionCreateOptions,
   IEventAdapter, IExtensionService, IConfigService,
@@ -41,6 +46,7 @@ import type { IProcessManager, IPiEngine, PiCommandInfo } from '../ports/pi-engi
 import { TraceSync } from './trace-sync.js'
 import type { SessionTraceSnapshot } from './trace-sync.js'
 import { SessionRecords } from './session-records.js'
+import { createModelOverrideQuery } from './model-override-query.js'
 import type { OversizeAwareResult } from './session-records.js'
 import { SessionModelControl } from './session-model-control.js'
 import { isModelInRegistry, providerHasCredential } from './session-model-guards.js'
@@ -149,6 +155,15 @@ export const userStoppedMarkStore: UserStoppedMarkStore = {
  */
 const BG_RECONCILE_COMMAND = '/__taiji_bg_reconcile__'
 
+/**
+ * subagent 流状态数据源端口（B2 subagent-stream-chunk §4.1，session.getSubagentStreamState
+ * RPC 的数据源路由半）：(sessionId, recordId) → RelayTee 内存三元组只读投影，undefined =
+ * 该 record 无在管 tee（未注册 / child exit 已清理 / session 不匹配）。实现由组合根注入
+ * （relay registry 句柄归 index.ts——「services 层不 value import 有状态 IO infra」同款
+ * 约束，见 rollingRestart relayInFlight 接线注释）。
+ */
+export type SubagentStreamStateSource = (sessionId: string, recordId: string) => RelayTeeStreamState | undefined
+
 export class SessionService implements ISessionService, ILifecycleSessionOps, IDispatcherSessionOps, IScannerSessionOps {
   /**
    * in-flight 恢复注册表已迁 pi-respawn 编排器（u8，D7-③ join 状态 SSOT——自动恢复与
@@ -218,6 +233,12 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * resolve 返回 undefined，尾读按异常态 warn 空页，主链不受影响）。
    */
   private btwService: (Pick<BtwService, 'ensureProcess'> & Partial<Pick<BtwService, 'getLine'>>) | null = null
+  /**
+   * subagent 流状态数据源（B2 subagent-stream-chunk §4.1，组合根晚绑定注入）：实现与
+   * 语义见文件头 SubagentStreamStateSource。未注入（存量测试构造 / relay 未启用）时
+   * getSubagentStreamState 恒返回 found:false 缺省形态（协议合法回执，非错误）。
+   */
+  private subagentStreamStateSource: SubagentStreamStateSource | null = null
   /**
    * U6：能力对账回调（组合根绑 modelService.reconcileModelCapabilities，附着路径调用）。
    */
@@ -483,6 +504,11 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       // [A1 接线] subagentAction 的 skill 注入 project 扫描基准（与 getSessionCwd 同源）
       getSessionCwd: (sessionId) => this.getSessionCwd(sessionId),
       getMessageBus: () => this.messageBus,
+      // [subagent-model-switch U2 接线] 详情载荷覆盖状态查询的生产后端（磁盘投影查询，
+      // model-override-query.ts）：session 域内部装配（deps 依赖本域 sessionStore——
+      // 与 traceSync/records 等域内构造同范式）；测试经 deps.modelOverrideQuery 显式
+      // mock 覆盖（U1「端口缺席 = 载荷不造键」语义不受影响）。
+      modelOverrideQuery: createModelOverrideQuery({ sessionStore: this.sessionStore }),
     }, new SkillInjector(this.skillSource))
     // pi 崩溃自动恢复编排组装（u8，D7）：restore 复用既有惰性恢复内核（facade.restoreSession
     // → lifecycle.restoreSession，附着自动走 u4c 预算化 restore 路径——⑤档超阈值走逆序分块
@@ -732,6 +758,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    */
   setBtwService(btwService: Pick<BtwService, 'ensureProcess'> & Partial<Pick<BtwService, 'getLine'>>): void {
     this.btwService = btwService
+  }
+
+  /**
+   * 注入 subagent 流状态数据源（B2 subagent-stream-chunk §4.1；组合根在 initRelayServer
+   * 后接线）。消费面按调用时刻解析（闭包内 getActiveRelayRegistry 延迟取实例），注入
+   * 时机无需先于 relay server 激活。
+   */
+  setSubagentStreamStateSource(source: SubagentStreamStateSource): void {
+    this.subagentStreamStateSource = source
   }
 
   /** session 删除回调注入（组合根绑 terminalService.destroySessionPties）。 */
@@ -1111,6 +1146,16 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   async getSubagents(sessionId: string): Promise<OversizeAwareResult<SubagentRecord>> { return this.records.getSubagents(sessionId) }
   /** subagent 对话流历史（record.sessionFile 直读 + 非 pi 引擎降级链，实现迁 session-records.ts）。 */
   async getSubagentHistory(sessionId: string, subagentId: string): Promise<HistoryFileReadResult> { return this.records.getSubagentHistory(sessionId, subagentId) }
+  /**
+   * 运行中 subagent 流状态只读快照（B2 subagent-stream-chunk §4.1，session.getSubagentStreamState
+   * RPC 后端）：单次同步读（数据源 = RelayTee 内存三元组，与 feed 同一事件循环串行，无锁——
+   * 执行结构本身保证一致）。数据源未注入或源报告无该 record 条目 → found:false 缺省形态
+   * （协议注释：无进行中流 = 合法回执非错误，msgSeq/lastDeltaSeq 恒 0、lines 恒空）。
+   */
+  getSubagentStreamState(sessionId: string, recordId: string): ServerMessageMap['session.getSubagentStreamState'] {
+    const state = this.subagentStreamStateSource?.(sessionId, recordId)
+    return state ?? { found: false, msgSeq: 0, lastDeltaSeq: 0, lines: [] }
+  }
   /** [U7] 引擎配置视图（engines.json + config.json，实现迁 session-records.ts）。 */
   async getSubagentEngineConfig(): Promise<SubagentEngineConfigView> { return this.records.getSubagentEngineConfig() }
   /** [U7] 设置默认引擎（带跨进程锁的 RMW + 原子写，实现迁 session-records.ts）。 */

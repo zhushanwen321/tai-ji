@@ -7,13 +7,13 @@
  * unsubscribe（防 listener 翻倍，项目规则#2）。
  *
  * 映射表（IF3）：
- *   12 个 plugin 系：statusBarUpdate→plugin-status-bar-update；statusSetUpdate→
+ *   11 个 plugin 系：statusBarUpdate→plugin-status-bar-update；statusSetUpdate→
  *     plugin-status-set-update；permissionRequest→plugin-permission-request；crashed→
  *     plugin-crashed；notification→plugin-notification；config→plugin-config-changed；
  *     messageDecoration→plugin-message-decoration；statusChange→plugin-status-change；
- *     uiRequest→ui-request；viewUpdate→extension-widget；modalState→plugin:modalState；
- *     headerActionUpdate→plugin:headerActionUpdate（后两成员为 plugin-header-action-modal-points
- *     新增点位帧，消费端 = plugin-modal-slot / HeaderActionStore 经 InternalEventBus 订阅）
+ *     uiRequest→ui-request；viewUpdate→extension-widget；
+ *     headerActionUpdate→plugin:headerActionUpdate（plugin-header-action-modal-points
+ *     点位帧，消费端 = HeaderActionStore 经 InternalEventBus 订阅）
  *   1 个 permission 终局帧（remote-use-mobile S5-V3）：permissionRequestResolved→
  *     plugin-permission-request-resolved（消费端 = permission-request-controller 撤窗，
  *     payload 缺 requestId 置空串、消费端回退按 pluginId 匹配）
@@ -49,7 +49,7 @@
  * 例外（CT-D5 毒化隔离）：statusBarUpdate 的 items 内单条坏值跳过该条保留其余
  * （全坏才整包 error）——坏条目来自单个插件，不连坐其余插件的条目。
  */
-import type { InternalEvent, StatusBarEntry, PluginModalClosedReason, PluginModalStatePayload } from './types'
+import type { InternalEvent, StatusBarEntry } from './types'
 import type { InternalEventBus } from './internal-event-bus'
 import type { PluginMessageSource, IncomingPluginMessage } from './plugin-message-source'
 
@@ -284,70 +284,11 @@ function parseViewUpdate(msg: IncomingPluginMessage): InternalEvent | null {
   }
 }
 
-// ── plugin-header-action-modal-points 两帧守卫（AP-1/AP-2）────────────
-
-/**
- * width / reason 词表穷举表——键集锁死为对应协议类型的字面量闭集（编译期 parity 锁：
- * 类型增删成员时缺员/多员均编译失败，杜绝词表与类型靠人眼对齐的漂移面）。
- * 查询走 hasOwnProperty（`in` 会命中 Object.prototype 上的 'toString' 等原型键）。
- */
-const MODAL_WIDTHS: Record<NonNullable<PluginModalStatePayload['width']>, true> = {
-  sm: true,
-  md: true,
-  lg: true,
-}
-
-const MODAL_CLOSED_REASONS: Record<PluginModalClosedReason, true> = {
-  dismissed: true,
-  'session-switched': true,
-  'host-overlay': true,
-  replaced: true,
-  'plugin-gone': true,
-}
-
-function isModalWidth(value: unknown): value is NonNullable<PluginModalStatePayload['width']> {
-  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(MODAL_WIDTHS, value)
-}
-
-function isModalClosedReason(value: unknown): value is PluginModalClosedReason {
-  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(MODAL_CLOSED_REASONS, value)
-}
-
-/**
- * plugin:modalState 解析守卫（AP-2 开合帧：runtime 仲裁结果的 S→C 全局广播，transient）。
- * payload = { pluginId, modalId, sessionId, title?, width?, state:'open'|'closed', epoch, reason? }。
- * sessionId 必带（AP-2 契约，payload 归属信息；缺 → null 守卫失败丢弃 + error）。
- * epoch 必须为 ≥1 的安全整数（槽代数契约：正整数、按每次生效 open 严格递增，plugin-modal-slot 同款）。
- * width/reason 越界置 undefined（宽容窄化，对齐 parseStatusBarItem 的 scope 处置）。
- */
-export function parseModalState(msg: IncomingPluginMessage): InternalEvent | null {
-  const payload = asRecord(msg.payload)
-  if (!payload) return null
-  const pluginId = asString(payload.pluginId)
-  const modalId = asString(payload.modalId)
-  const sessionId = asString(payload.sessionId)
-  const epoch = payload.epoch
-  if (pluginId === null || modalId === null || sessionId === null) return null
-  if (payload.state !== 'open' && payload.state !== 'closed') return null
-  if (typeof epoch !== 'number' || !Number.isSafeInteger(epoch) || epoch < 1) return null
-  return {
-    kind: 'plugin:modalState',
-    modalState: {
-      pluginId,
-      modalId,
-      sessionId,
-      title: asOptionalString(payload.title),
-      width: isModalWidth(payload.width) ? payload.width : undefined,
-      state: payload.state,
-      epoch,
-      reason: isModalClosedReason(payload.reason) ? payload.reason : undefined,
-    },
-  }
-}
+// ── plugin-header-action-modal-points 帧守卫（AP-1）────────────────────
 
 /**
  * plugin:headerActionUpdate 解析守卫（AP-1 徽标更新帧）。
- * payload = { pluginId, headerActionId, sessionId, badge?, tooltip?, disabled? }。
+ * payload = { pluginId, headerActionId, sessionId, badge?, tooltip?, disabled?, hidden? }。
  * sessionId 必带（AP-1 契约：渲染端按 (sessionId, headerActionId) 写会话分区；
  * 缺 → null 守卫失败丢弃 + error）。badge ≤4 字符的截断由渲染端承担，守卫存原文。
  */
@@ -367,6 +308,7 @@ export function parseHeaderActionUpdate(msg: IncomingPluginMessage): InternalEve
       badge: asOptionalString(payload.badge),
       tooltip: asOptionalString(payload.tooltip),
       disabled: typeof payload.disabled === 'boolean' ? payload.disabled : undefined,
+      hidden: typeof payload.hidden === 'boolean' ? payload.hidden : undefined,
     },
   }
 }
@@ -471,7 +413,6 @@ const PLUGIN_HANDLERS: Record<string, (msg: IncomingPluginMessage) => InternalEv
   'plugin:statusChange': parseStatusChange,
   'plugin:uiRequest': parseUiRequest,
   'plugin:viewUpdate': parseViewUpdate,
-  'plugin:modalState': parseModalState,
   'plugin:headerActionUpdate': parseHeaderActionUpdate,
 }
 

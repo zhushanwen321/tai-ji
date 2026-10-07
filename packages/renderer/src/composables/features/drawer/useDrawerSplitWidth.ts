@@ -7,12 +7,16 @@
  * ② SplitterPanel 挂载/卸载瞬时重算 layout，无过渡参与，无法做开合宽度动画。
  * 故 PanelContainer 换手写 flex 布局，本 composable 承载其宽度模型：
  *
- * - 无 drawer：main 占 MAIN_STANDALONE_PCT% 且左右 margin calc 居中（两侧各 (100%-75%)/2 留白，
- *   对话流整体在工作区视觉居中），main 层 --content-max-w:100% 解除 720px 封顶（内容占满 75%）；
+ * - 无 drawer：main 卡撑满公共容器（width 100% + margin 0），卡内内容列（对话流 +
+ *   composer，消费 .content-col 的 max-width: var(--content-max-w)）限宽为 panel 的
+ *   CONTENT_COL_PCT%（60%）并居中——留白在卡内而非卡外（2026-10-06 用户裁决：60% 的
+ *   作用对象是内容列，不是卡容器）；
+ * - 内容列比例宽带绝对值下限：60% 实算低于 CONTENT_COL_MIN_PX 即改撑满（panel 被
+ *   drawer 挤窄后恒撑满同因）。实测来源 = split-area 宽（ResizeObserver，与纵轴
+ *   显示期 clamp 同范式）；未测得（0）时按纯比例走，观察器就绪后校正；
  * - 有 drawer：drawer 占 drawerPct%（默认 50），main 占剩侧（模板侧 calc(100% - drawerPct% - 4px)），
- *   margin 0 贴左；--content-max-w 恒 100% 不随开合切换（内容 min(容器,容器)=容器，
- *   width/margin 全程可插值，开合动画无跳变）；
- * - 开合时双侧 width + margin transition（--duration-slow，与 DrawerPanel aside 淡入同时长）；
+ *   margin 0 贴左；内容列恒撑满；
+ * - 开合时双侧 width transition（margin 两态恒 0，无值可过渡）；
  * - 拖动（pointer capture 跟手，拖动期间 transition:none）/ 键盘微调调整 drawerPct，
  *   clamp [DRAWER_MIN_PCT, DRAWER_MAX_PCT]，localStorage 持久化。
  *
@@ -47,22 +51,17 @@ const DRAWER_DEFAULT_PCT = 50
 const KEYBOARD_STEP_PCT = 2
 /** 小数 → 百分比换算因子（no-magic-numbers） */
 const PCT_SCALE = 100
-/** standalone 留白分摊两侧（左右各半，no-magic-numbers） */
-const MARGIN_SIDES = 2
 
-/** 无 drawer 时 main 区域占比（2026-10-04 二轮裁决：对话流卡默认撑满公共容器——
- *  三卡化后公共容器 = 主区除侧栏外全部空间，拉开 drawer 才让位） */
-export const MAIN_STANDALONE_PCT = 100
+/** standalone 内容列占比（ui-signal-density D10：对话流 + composer 内容列 = panel 宽的 3/5） */
+export const CONTENT_COL_PCT = 60
+/** 内容列比例宽生效的绝对值下限（px）：60% 实算低于下限即改撑满——panel 被 drawer 挤窄后
+ *  恒撑满同因（2026-10-06 用户裁决）。值 = 全局 --content-max-w 默认（style.css 720px，
+ *  settings / landing / composer 同锚的既有内容列口径） */
+export const CONTENT_COL_MIN_PX = 720
 
 function clampDrawerPct(v: number): number {
   return Math.min(DRAWER_MAX_PCT, Math.max(DRAWER_MIN_PCT, v))
 }
-
-/** standalone 时 main 两侧 margin（撑满语义下恒 0%；保留公式与显式值形态——
- *  margin 键在两态样式里保持同形，开合动画只过渡 width 不跳 margin。物理属性
- *  margin-left/right 而非 margin-inline：水平 LTR 下等效，且 transition-[width,margin]
- *  简写自然覆盖） */
-export const MAIN_STANDALONE_MARGIN = `${(PCT_SCALE - MAIN_STANDALONE_PCT) / MARGIN_SIDES}%`
 
 /** 恢复持久化的 drawer 宽度（非法/缺失回退默认 50） */
 function loadDrawerPct(): number {
@@ -79,26 +78,62 @@ export function useDrawerSplitWidth(splitAreaEl: Ref<HTMLElement | null>, drawer
   const isDragging = ref(false)
   const drawerPct = ref<number>(loadDrawerPct())
 
-  /** main/drawer 双侧过渡类：拖动期间移除 transition 保证跟手，其余时间 width + margin 过渡 */
+  /** main/drawer 双侧过渡类：拖动期间移除 transition 保证跟手，其余时间 width 过渡 */
   const splitTransitionClass = computed(() =>
     isDragging.value
       ? ''
-      : 'transition-[width,margin] duration-[var(--duration-slow)] ease-[var(--ease)]',
+      : 'transition-[width] duration-[var(--duration-slow)] ease-[var(--ease)]',
   )
+
+  /** split-area 实测宽度（px）：内容列 60%↔撑满 的派生输入。未测得（0，观察器就绪前/
+   *  jsdom 无回调）时按纯比例走，ResizeObserver 首次回调后校正——范式同纵轴
+   *  useBottomDrawerHeight 的显示期 clamp（实测驱动派生，非时间推测） */
+  const splitAreaWidthPx = ref(0)
+
+  function measureSplitArea(): void {
+    const el = splitAreaEl.value
+    if (el) splitAreaWidthPx.value = el.getBoundingClientRect().width
+  }
+
+  let splitAreaObserver: ResizeObserver | null = null
+  watch(
+    splitAreaEl,
+    (el) => {
+      splitAreaObserver?.disconnect()
+      splitAreaObserver = null
+      if (!el) return
+      measureSplitArea()
+      splitAreaObserver = new ResizeObserver(measureSplitArea)
+      splitAreaObserver.observe(el)
+    },
+    { immediate: true },
+  )
+  onScopeDispose(() => {
+    splitAreaObserver?.disconnect()
+    splitAreaObserver = null
+  })
+
+  /** 内容列宽度令牌（--content-max-w 派生单处）：split 态恒撑满（panel 被挤窄后不再按
+   *  比例收，D10 下限语义）；standalone = 60%，实测 60% 值低于绝对下限时改撑满 */
+  const contentColMaxW = computed<string>(() => {
+    if (drawerOpen.value) return '100%'
+    const w = splitAreaWidthPx.value
+    if (w > 0 && (w * CONTENT_COL_PCT) / PCT_SCALE < CONTENT_COL_MIN_PX) return '100%'
+    return `${CONTENT_COL_PCT}%`
+  })
 
   /**
    * main-area 动态样式（宽度模型 SSOT，模板直连）：
-   * - standalone：width 100%（撑满公共容器）+ margin 0；
+   * - standalone：width 100% 撑满公共容器 + margin 0；--content-max-w 派生内容列宽
+   *   （60% 或下限触发后的 100%），对话流/composer 内容列经 .content-col 消费居中；
    * - split：width calc(100% - drawerPct% - 4px) + margin 0 贴左（4px = 卡缝宽 a，
    *   与窗口边距 p-1 同值；handle 即缝本体；drawer 卡占 drawerPct%）。
-   * --content-max-w 两态恒 100% 不切换：值不变 → 无过渡跳变，内容 width:100% 永远跟随容器，
-   * 开合动画期间 min(容器,容器)=容器 全程连续。
    */
   const mainAreaStyle = computed<Record<string, string>>(() => ({
-    '--content-max-w': '100%',
-    ...(drawerOpen.value
-      ? { width: `calc(100% - ${drawerPct.value}% - 4px)`, marginLeft: '0', marginRight: '0' }
-      : { width: `${MAIN_STANDALONE_PCT}%`, marginLeft: MAIN_STANDALONE_MARGIN, marginRight: MAIN_STANDALONE_MARGIN }),
+    '--content-max-w': contentColMaxW.value,
+    width: drawerOpen.value ? `calc(100% - ${drawerPct.value}% - 4px)` : '100%',
+    marginLeft: '0',
+    marginRight: '0',
   }))
 
   function persistDrawerPct(): void {

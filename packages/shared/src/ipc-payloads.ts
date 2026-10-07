@@ -229,6 +229,17 @@ export interface ShieldFace {
 export interface ShieldsFacesPayload {
   faces: ShieldFace[]
 }
+
+// ── browser:overlay-state 浮层开合/内容上报（display-containers §7.4）──
+
+/**
+ * 浮层内容种类闭集（browser 网页 / workflow 工作流图 / scheduler 定时任务 tab），
+ * `browser:overlay-state` IPC payload 契约的词表单源：core overlay 域（OverlayKind
+ * 派生别名）、main display-gate 校验解析、preload ElectronAPI 签名、renderer ipc
+ * 封装四方共用同一形态声明，防漂移——renderer 侧收窄为子集时 TS 结构可赋值性会使
+ * 手抄词表漂移静默通过，main 侧只剩运行时 throw 兜底。
+ */
+export type OverlayContentKind = 'browser' | 'workflow' | 'scheduler'
 // ── local-file 预检与源码读取（LOCAL_FILE_SERVABLE / LOCAL_FILE_READ invoke 通道）
 //    [chat-html-support §6.9 D9 / §6.4 D4 / §8.2 S3] ─────────────────────────────
 

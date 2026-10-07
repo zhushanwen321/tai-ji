@@ -54,7 +54,7 @@ beforeEach(() => {
 })
 
 describe('BlockSubagent: 标题行渲染（顶层 input 拍平字段）', () => {
-  it('渲染 subagent prefix + agent（accent）+ · + slug（accent）', () => {
+  it('渲染 subagent prefix + agent（--name 暖驼）+ · + slug（层级灰）', () => {
     const wrapper = mount(BlockSubagent, {
       props: { tool: makeSubagent(), sessionId: 's1' },
     })
@@ -65,8 +65,10 @@ describe('BlockSubagent: 标题行渲染（顶层 input 拍平字段）', () => 
     expect(text).toContain('researcher')
     // slug（顶层 input.slug）
     expect(text).toContain('research-trace-ui')
-    // agent / slug 走 accent 色
-    expect(wrapper.find('.text-accent').exists()).toBe(true)
+    // agent 名染对话流专属名称色 var(--name)（用户裁决 2026-10-06，原 accent）
+    expect(wrapper.findAll('span').some((s) => s.classes().includes('text-[color:var(--name)]'))).toBe(true)
+    // slug 降行层级灰 --neutral-mid（与「子代理」标签同色；用户裁决 2026-10-06，原 accent）
+    expect(wrapper.findAll('span').some((s) => s.classes().includes('text-neutral-mid'))).toBe(true)
   })
 
   it('无 input.agent 时回退默认 general-purpose', () => {
@@ -78,7 +80,7 @@ describe('BlockSubagent: 标题行渲染（顶层 input 拍平字段）', () => 
     expect(wrapper.text()).toContain('general-purpose')
   })
 
-  it('有 model + thinkingLevel 时渲染括号（model accent，括号/· thinking dim）', () => {
+  it('有 model + thinkingLevel 时渲染括号（model 层级灰，括号/· thinking dim）', () => {
     const wrapper = mount(BlockSubagent, {
       props: {
         tool: makeSubagent({

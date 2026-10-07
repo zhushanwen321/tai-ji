@@ -76,7 +76,7 @@ import {
   type WorkflowRunEvent,
 } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
-import { errorLogsFromEvents, rebuildBudget, runAccountingFromEvents } from "@zhushanwen/subagent-core";
+import { errorLogsFromEvents, latestModelOverride, rebuildBudget, runAccountingFromEvents } from "@zhushanwen/subagent-core";
 import { guardStaleCtx, isEnoentError, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // ── [W1 / D1] v2 条目读面（注册定界 + 终态条目抑制）────────────────
@@ -283,7 +283,7 @@ interface CallDraft {
 /**
  * record 事件流 → WorkflowRun 聚合重建（纯函数，零 IO）。
  *
- * fold 语义（词表 = run-events.ts [D4] 对齐后 9 事件）：
+ * fold 语义（词表 = run-events.ts 事件词表，单源）：
  * - `run-created`：spec.scriptSource（全文，[D1]）+ args（全文，设计 §3.1 载荷表；
  *   旧格式帧回落 argsSummary 尽力恢复——parseLegacyArgsSummary）+ startedAt 锚点
  *   （帧 ts 优先，回落注册条目 startedAt）；
@@ -294,7 +294,10 @@ interface CallDraft {
  *   形态建占位行——同 journal fold 兜底）；sessionFile/sessionId 从 result 透传
  *   （对齐 finalizeCall 的 call 字段填充纪律）；
  * - `run-settled`：终局（status=done + reason 映射 + completedAt=帧 ts）；无帧 =
- *   running（交恢复链收编）。
+ *   running（交恢复链收编）；
+ * - `model-override`：latestModelOverride 折叠 → meta.modelOverride（最新一条生效，
+ *   覆盖旧覆盖值不叠加；无覆盖不造键——详见 foldRecordStreamToRun 内
+ *   [subagent-model-switch §6.6①/§7.4] 注释，不在此重复展开）。
  *
  * record 流不承载的字段（budget 计数/errorLogs/trace 完整面）按恢复语义最小形态
  * 缺省——步骤级详情的恢复读面 = record 流直读（session-reader 家族链），不经本聚合。
@@ -506,6 +509,11 @@ function foldRecordStreamToRun(
   const calls = draftsToAgentCalls(drafts, sharedNodes, nodes);
 
   const settledEvent = lastRunSettledEvent(events);
+  // [subagent-model-switch §6.6①/§7.4] 覆盖记账折叠（派生视图半边）：生效覆盖值 =
+  // 最新一条（latestModelOverride core 单点——覆盖旧覆盖值不叠加，不变量 2）；
+  // 无覆盖 undefined 不造键。fold 未跟时本行缺失 = 覆盖状态静默丢行——
+  // jsonl-run-store-loadall 的 fold 消费用例是此丢行风险的机器防线（P8 第五道）。
+  const modelOverride = latestModelOverride(events);
   if (settledEvent === undefined) {
     const interruptedAt = lastInterruptedAt(events);
     return WorkflowRun.reconstruct(
@@ -524,6 +532,7 @@ function foldRecordStreamToRun(
         //（CLI/TUI 不显示僵尸「运行中」；resume 资格判据在 core fold lifecycle，
         // 不受本投影影响）。
         ...(interruptedAt !== undefined ? { interruptedAt } : {}),
+        ...(modelOverride !== undefined ? { modelOverride } : {}),
       },
     );
   }
@@ -543,6 +552,7 @@ function foldRecordStreamToRun(
     {
       startedAt: startedAtIso,
       completedAt: new Date(settledEvent.ts).toISOString(),
+      ...(modelOverride !== undefined ? { modelOverride } : {}),
     },
   );
 }

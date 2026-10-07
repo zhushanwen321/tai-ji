@@ -2,6 +2,8 @@ import { defineConfig } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { REAL_TRACK_SPECS } from './e2e/fixtures/real-track-specs'
+
 const REPO_ROOT = path.dirname(fileURLToPath(import.meta.url))
 
 /**
@@ -33,23 +35,18 @@ const REPO_ROOT = path.dirname(fileURLToPath(import.meta.url))
  *（复用 W1/W2 spawnVite 范式），不用全局 webServer——避免 visual 的 vite 依赖拖累 electron project。
  */
 /**
- * real 轨 spec 族（真实 app 启动：launch-app-real / 真机轨）：
+ * real 轨 spec 族（真实 app 启动：launch-app-real / 真机轨）——清单本体迁至
+ * e2e/fixtures/real-track-specs.ts（SSOT：playwright project 匹配与 global-setup
+ * 构建形态判定共用同一清单；变更登记说明见该文件头注）。消费关系：
  * - electron project 用它做 testIgnore —— mock bundle 与 real bundle 同 outDir 互斥
  *   （launch-app-real.ts 的 assertRealRendererBundle 对 mock 标记 fail-fast），real spec
  *   卷入 mock 轨必红；`--project=electron` 语义收敛为零 token mock 轨
  * - electron-real project 用它做 testMatch —— real 轨 run 命令是显式文件形态（如
  *   `npx playwright test e2e/workspace-real.spec.ts`，不带 --project），Playwright 的
  *   project testIgnore 对显式文件参数同样生效，排除后必须由本 project 承接才能被发现
- * - 清单 SSOT = docs/testing/e2e-map.json REAL/SKILLRELOAD/BTW/MODELS 各 rule 的 assets；
- *   两类形态：文件名带 -real（*-real*.spec.ts）与沿用真实 app 轨但不带 -real 命名的
- *   btw-turn-isolation / skill-reload-* / workflow-disconnect-recovery，逐一列明
+ * - 清单登记 SSOT = docs/testing/e2e-map.json REAL/SKILLRELOAD/BTW/MODELS 各 rule 的
+ *   assets；清单常量本体在 e2e/fixtures/real-track-specs.ts
  */
-const REAL_TRACK_SPECS = [
-  '**/*-real*.spec.ts',
-  'e2e/btw-turn-isolation.spec.ts',
-  'e2e/skill-reload-*.spec.ts',
-  'e2e/workflow-disconnect-recovery.spec.ts',
-]
 
 export default defineConfig({
   testDir: './e2e',

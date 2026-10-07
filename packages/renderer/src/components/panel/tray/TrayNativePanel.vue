@@ -83,7 +83,7 @@
           <template v-if="kind === 'bash'">
             <div
               v-for="entry in bashRows" :key="entry.taskId"
-              class="group/item relative flex cursor-pointer items-start gap-2 rounded-md px-2 py-1 transition-colors hover:bg-surface-hover"
+              class="group/item relative flex cursor-pointer select-none items-start gap-2 rounded-md px-2 py-1 transition-colors hover:bg-surface-hover"
               data-testid="tray-bash-row" :aria-label="`${statusText(entry)}: ${entry.command}`"
               @click="openBashTask(entry)" @mouseleave="killConfirm.clear()"
             >
@@ -120,7 +120,7 @@
           <template v-else-if="kind === 'subagent'">
             <div
               v-for="record in subagentRows" :key="record.subagentId"
-              class="group relative cursor-pointer rounded-md px-2 py-1 transition-colors hover:bg-surface-hover"
+              class="group relative cursor-pointer select-none rounded-md px-2 py-1 transition-colors hover:bg-surface-hover"
               data-testid="tray-subagent-row"
               :title="record.slug ? record.agent + ' · ' + record.slug : record.agent"
               @click="openSubagentRow(record)" @mouseleave="cancelConfirm.clear()"
@@ -161,7 +161,7 @@
           <template v-else>
             <div
               v-for="record in workflowRows" :key="record.runId"
-              class="group relative cursor-pointer rounded-md px-2 py-1 transition-colors hover:bg-surface-hover"
+              class="group relative cursor-pointer select-none rounded-md px-2 py-1 transition-colors hover:bg-surface-hover"
               data-testid="tray-workflow-row"
               @click="openWorkflowRow(record)" @mouseleave="clearAbortConfirm"
             >

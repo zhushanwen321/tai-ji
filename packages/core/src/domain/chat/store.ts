@@ -10,10 +10,11 @@ import { truncateToolOutputBatch, truncateToolOutputBatchCached } from './trunca
 import { dispatchMessageEvent } from './effects/registry'
 import {
   applyEntry,
+  createChatViewStateBuffer,
   createInitialChatViewState,
-  type ChatViewState,
+  type ChatViewStateBuffer,
 } from './apply-entry'
-import { createStreamingStateMachine } from './streaming-state-machine'
+import { createStreamingStateMachine, type SubagentStreamStateSnapshot } from './streaming-state-machine'
 import {
   touchLru as lruTouch,
   evictIfNeeded as lruEvictIfNeeded,
@@ -293,6 +294,14 @@ function restoreRespawnNotices(partition: Message[], merged: Message[]): Message
 export interface ChatStoreOptions {
   /** [B9] 查询被驱逐 sid（mainSid / btw 线 vid）名下应联动释放的 agentcall virtualId（豁免已应用）；见 LruEvictDeps.agentCallEvictionsOf */
   agentCallEvictionsOf?: (mainSid: string) => string[]
+  /**
+   * [B2 subagent-stream-chunk §4.3] subagent 流状态拉取执行器（core 不直接发 RPC，
+   * renderer 层注入——对齐 agentCallEvictionsOf 回调注入模式）。失步 / 接入拉取经此
+   * 执行 session.getSubagentStreamState；renderer 侧实现按 extractMainSessionId(virtualId)
+   * 解析主 session（shared 单一实现）后调 api.session.getSubagentStreamState。
+   * 缺省 = chunk 失步拉取 no-op（缓冲保留，见 streaming-state-machine.ts 契约注释）。
+   */
+  subagentStreamPull?: (virtualId: string, recordId: string) => Promise<SubagentStreamStateSnapshot>
 }
 
 export function createChatStore(options: ChatStoreOptions = {}) {
@@ -344,7 +353,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * Set 形态（布尔语义无载荷）对齐 failedHistory/hydrated；disposeSession 同点清理。
    */
   const respawnPending = ref<Set<string>>(new Set())
-  /** handingOff 瞬时态子域控制器（对称 compactingSessions），委托 chat-handoff.ts。设计见 ./README.md + chat-handoff.ts。 */
+  /** handingOff 瞬时态子域控制器（对称 compacting 子域），委托 chat-handoff.ts。设计见 ./README.md + chat-handoff.ts。 */
   const handoff = createHandoffController()
   const { handingOffSessions, isHandingOff, setHandingOff } = handoff
   /** 按 sessionId 分区的自动重试态（W06-B，auto_retry_start/end） */
@@ -378,19 +387,26 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    */
   const inflightCounts = ref<Map<string, number>>(new Map())
   /**
-   * [W21] per-session reducer state（实时 feed 喂入 applyEntry 的累积态）。
+   * [W21] per-session reducer state（实时 feed 喂入 reducer 的累积态，buffer 活容器形态）。
    *
    * 实时路径（message_end / tool_call_end 重构 entry）与文件重放（get_entries →
    * replayEntries，hydrate 链）喂同一个 reducer——本 Map 是实时侧的累积 state，
    * 「live ≡ reload」从构造上成立（同 reducer 同输入序列必得同 state，等价性断言见
    * runtime src/__tests__/equivalence/live-reload.test.ts）。
    *
+   * 值 = ChatViewStateBuffer（跨帧 mutable 累积缓冲）：实时每帧一条 entry 的落账从
+   * copy-on-write 整表拷贝（10k 消息会话每帧 O(n) 分配）变为 O(1) 原地累积——buffer
+   * 与 applyEntry / replayEntries 共享同一派生段与 dispatch 骨架，产物 deep-equal
+   * （apply-entry-buffer-equivalence.test.ts 守卫）。**buffer.state 是活容器**：消费点
+   * 只允许同步读（如 applySubagentEntries 基线投影紧随 feed 之后），不得跨帧持有其
+   * 数组 / Set 引用并假设内容不变。
+   *
    * 非 Vue ref（[ADR-0049 例外]：factory 单例 Map，存的是纯投影数据非响应式业务状态）：
    * 渲染不走它——实时渲染走 messages ref 的 overlay 路径
    * （message_start/delta/complete，streaming 语义）；本 state 是权威累积，供 W22
    * broadcast≡get_state 对账与后续 ref 收敛消费。disposeSession / LRU 驱逐同点清理。
    */
-  const entryStates = new Map<string, ChatViewState>()
+  const entryStates = new Map<string, ChatViewStateBuffer>()
   /** FileChanges 子域控制器（W10，ADR-0024 D5），委托 chat-changeset.ts。messages 由本 store 注入，设计见 ./README.md + chat-changeset.ts。 */
   const changeset = createChangeSetController(messages)
   const { changeSetStatuses, getChangeSetStatus, setChangeSetStatus, applyFileChanges, markChangeSetsSuperseded } = changeset
@@ -408,7 +424,8 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    */
   const { historyWindows, setHistoryWindow, getHistoryWindow, clearHistoryWindow } = createTruncatedWindowController()
 
-  // ── streaming 状态机深模块（B6：3 个原模块级状态机编排函数 + 2 个新提取的瞬态清理 helper 内聚为 factory，本 store 仅委托）──
+  // ── streaming 状态机深模块（B6：3 个原模块级状态机编排函数 + 2 个新提取的瞬态清理 helper 内聚为 factory，本 store 仅委托；
+  //    [B2 subagent-stream-chunk §4.3] 增量 chunk 消费状态机同体，拉取执行器经 options 注入）──
   const streamingStateMachine = createStreamingStateMachine({
     messages,
     occupancies,
@@ -417,6 +434,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     pendingSend,
     clearOccupancy,
     setHandingOff,
+    subagentStreamPull: options.subagentStreamPull,
   })
 
   // ── 派生态（D-3 per-session 惰性派生，D-005 语义保留）──
@@ -519,8 +537,20 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   )
   /** W3 H3：LRU 驱逐（阈值触发）/ 显式驱逐（带虚拟 key）/ [M7] 单虚拟 key 删除 */
   function evictIfNeeded(): void { lruEvictIfNeeded(lruEvictDeps) }
-  function evictSessionWithVirtual(sessionId: string): void { lruEvictSession(sessionId, lruEvictDeps) }
-  function evictVirtualKey(virtualId: string): void { lruEvictDeps.deleteMessageKey(virtualId) }
+  function evictSessionWithVirtual(sessionId: string): void {
+    lruEvictSession(sessionId, lruEvictDeps)
+    // [B2 subagent-stream-chunk §4.3] subagent chunk 分区状态机随主 session 驱逐清除
+    // （按 mainSid 归属匹配，覆盖该 sid 名下全部 subagent 虚拟键——驱逐重进后由接入
+    // 拉取 + chunk 重建，可重建型簿记）。
+    streamingStateMachine.clearSubagentChunkStateForSession(sessionId)
+  }
+  function evictVirtualKey(virtualId: string): void {
+    lruEvictDeps.deleteMessageKey(virtualId)
+    // [B2 subagent-stream-chunk §4.3] record/分区级：虚拟分区删除时该键名下全部 record
+    // 分区一并清（§4.3「record 级随虚拟分区删除清除」挂点；agentcall / btw 键非三段式
+    // 结构，clearSubagentChunkState 对无分区键幂等 no-op）。
+    streamingStateMachine.clearSubagentChunkState(virtualId)
+  }
 
   /** 取指定 session 的自动重试态（无则 undefined） */
   function getRetryState(sessionId: string): RetryState | undefined {
@@ -730,7 +760,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   }
 
   /**
-   * [W21] 重构 entry 喂 per-session reducer state（applyEntry）——实时 feed 与文件重放
+   * [W21] 重构 entry 喂 per-session reducer state（buffer.feed）——实时 feed 与文件重放
    * （hydrate 链的 replayEntries）喂同一个 reducer。
    *
    * 本语义：纯累积（权威镜像），不直接投影 messages ref——实时渲染走 overlay 路径
@@ -738,12 +768,16 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * reducer 无法表达：running toolCall / delta 累积；例外——user 消息 [W2] 已 entry 化，
    * appendUser 构造 user entry 经本方法喂入 + overlay 投影，乐观 user 插入自此落入
    * reducer 可表达域）。ref 与 reducer state 的收敛（对账投影）归 W22 broadcast≡get_state
-   * 全量化。纯度：applyEntry 纯函数（copy-on-write），同 entry 序列必得同 state——
-   * 「live ≡ reload」在构造上成立。
+   * 全量化。同 entry 序列必得同 state——「live ≡ reload」在构造上成立（buffer 与
+   * applyEntry 共享派生段 + dispatch 骨架，产物 deep-equal 见 apply-entry.ts 文件头）。
    */
   function applyEntryFrame(sessionId: string, entry: PiEntry): void {
-    const cur = entryStates.get(sessionId) ?? createInitialChatViewState()
-    entryStates.set(sessionId, applyEntry(cur, entry))
+    let buf = entryStates.get(sessionId)
+    if (buf === undefined) {
+      buf = createChatViewStateBuffer()
+      entryStates.set(sessionId, buf)
+    }
+    buf.feed(entry)
   }
 
   /**
@@ -784,10 +818,12 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     }
     // 基线投影（无 PiEntry 的纯 toolCall 帧不触发投影——分区保持，overlay 直接操作 ref）。
     // 已投影过的消息引用直接复用上次产物（reducer 不截断、历史 toolCall 原文 MB 级时
-    // 每帧全量重编码是投影热开销），输出形态与 truncateToolOutputBatch(map 浅拷贝) 逐值一致
-    const state = entryStates.get(virtualId)
-    if (state) {
-      commitMessages(messages, virtualId, truncateToolOutputBatchCached(state.messages, subagentProjectedCache))
+    // 每帧全量重编码是投影热开销），输出形态与 truncateToolOutputBatch(map 浅拷贝) 逐值一致。
+    // buffer.state 活容器在此同步消费（紧随上方 feed，不跨帧持有数组引用）；
+    // truncateToolOutputBatchCached 恒返回新数组，活数组不出本表达式
+    const buf = entryStates.get(virtualId)
+    if (buf) {
+      commitMessages(messages, virtualId, truncateToolOutputBatchCached(buf.state.messages, subagentProjectedCache))
     }
     // toolCall overlay 后置：基于投影后分区操作，保证挂载目标是基线末位 assistant
     for (const form of entries) {
@@ -841,7 +877,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
 
   /**
    * 多 session 统一收口（断连 / runtime 重启兜底）：遍历瞬态 session，逐个调 resetTransientStates。
-   * 遍历范围是 messages.keys() ∪ compactingSessions ∪ retryStates ∪ pendingSend 并集
+   * 遍历范围是 messages.keys() ∪ occupancy 分区中 compacting 的 sid ∪ handingOffSessions ∪ retryStates ∪ pendingSend 并集
    *（不能只遍历 messages——compacting/retry/pendingSend 可独立于消息存在）。详见 ./README.md。
    */
   function finalizeAllStreaming(reason: FinalizeReason): void {
@@ -1065,7 +1101,11 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   /** 截断 session 消息到 messageId（编辑重发用）。委托 chat-mutations.truncateMessagesFrom。 */
   const truncateFrom = (sessionId: string, messageId: string, inclusive: boolean): void => truncateMessagesFrom(messages, sessionId, messageId, inclusive)
 
-  /** 清理指定 session 的全部 per-session 状态（deleteSession 调用，S3）：messages/hydrated/pendingSend/compactingSessions/retryStates/failedHistory/changeSetStatuses + timer + LRU 记录 + premature timeout 快照（u10/G4）。背景见 ./README.md。 */
+  /** 清理指定 session 的全部 per-session 状态（deleteSession 调用，S3）：Map 分区
+   * messages/retryStates/inflightCounts/compactingReasons/occupancies/historyWindows + Set
+   * 分区 hydrated/pendingSend/handingOffSessions/failedHistory/respawnPending +
+   * changeSetStatuses（前缀过滤）/ entryStates / executingBash / streaming flag 惰性缓存 /
+   * subagent chunk 分区状态机 + LRU 时序记录。背景见 ./README.md。 */
   function disposeSession(sessionId: string): void {
     // Map ref：不可变写保证响应式（new Map + delete + 赋值新 Map）。
     // D-1 后 messages 的 Map entry 是 per-session ShallowRef 分区——本循环删的是 Map entry
@@ -1103,6 +1143,11 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     // D-3 生命周期：streaming flag 惰性派生缓存随 messages 分区同点清理（漏删即慢泄漏，
     // 07 文档 §3.3.2 cleanup 契约）。
     sessionStreamingFlags.delete(sessionId)
+    // [B2 subagent-stream-chunk §4.3] subagent chunk 分区状态机随 session 销毁清除——本方法
+    // 是双壳删除编排链成员（useSidebar.deleteSession / app-runtime.deleteSession →
+    // triggerSessionCleanups → hooks.disposeChat → useChat.disposeSession → 此处），session
+    // 级挂点按 mainSid 归属匹配清全部 subagent 虚拟键的 chunk 分区（ADR-0049 生命周期范式）。
+    streamingStateMachine.clearSubagentChunkStateForSession(sessionId)
     disposeLruEntry(sessionId) // R5: 清理 LRU 时序记录，防止内存泄漏
   }
 
@@ -1127,6 +1172,16 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     prependHistory,
     applySubagentStreamDelta: (virtualId: string, lines: string[]) => streamingStateMachine.applySubagentStreamDelta(virtualId, lines),
     finalizeSubagentStream: (virtualId: string) => streamingStateMachine.finalizeSubagentStream(virtualId),
+    // [B2 subagent-stream-chunk §4.3] 增量 chunk 消费状态机入口（契约见 streaming-state-machine.ts；
+    // 消费方 = renderer subagent store 分派改造（u-renderer）：chunk / 拉取 / 清除三路接线）
+    applySubagentStreamChunk: (virtualId: string, recordId: string, msgSeq: number, deltaSeq: number, delta: string) =>
+      streamingStateMachine.applySubagentStreamChunk(virtualId, recordId, msgSeq, deltaSeq, delta),
+    applySubagentStreamState: (virtualId: string, recordId: string, response: SubagentStreamStateSnapshot) =>
+      streamingStateMachine.applySubagentStreamState(virtualId, recordId, response),
+    requestSubagentStreamState: (virtualId: string, recordId: string) => streamingStateMachine.requestSubagentStreamState(virtualId, recordId),
+    sealSubagentStream: (virtualId: string, recordId: string, msgSeq: number) => streamingStateMachine.sealSubagentStream(virtualId, recordId, msgSeq),
+    clearSubagentChunkState: (virtualId: string, recordId?: string) => streamingStateMachine.clearSubagentChunkState(virtualId, recordId),
+    clearSubagentChunkStateForSession: (sessionId: string) => streamingStateMachine.clearSubagentChunkStateForSession(sessionId),
     applySubagentEntries,
     appendUser,
     getInflight,
@@ -1178,7 +1233,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     testInternals: {
       /** D-3 streaming flag 惰性派生缓存（断言 disposeSession/LRU 驱逐清理语义用，生产代码勿读）。 */
       _sessionStreamingFlagsForTest: sessionStreamingFlags,
-      /** [W21] per-session reducer 累积态（断言 applyEntryFrame 喂入/清理语义用，生产代码勿读）。 */
+      /** [W21] per-session reducer 累积态（buffer 活容器，断言 applyEntryFrame 喂入/清理语义用，生产代码勿读；读值形态经 `.state` 访问）。 */
       _entryStatesForTest: entryStates,
     },
   }
@@ -1228,6 +1283,8 @@ export type ChatStoreOps = Pick<
   | 'setChangeSetStatus' | 'markChangeSetsSuperseded' | 'markHistoryFailed'
   | 'clearHistoryError' | 'hydrate' | 'setMessages' | 'reconcileHistory'
   | 'prependHistory' | 'applySubagentStreamDelta' | 'finalizeSubagentStream'
+  | 'applySubagentStreamChunk' | 'applySubagentStreamState' | 'requestSubagentStreamState'
+  | 'sealSubagentStream' | 'clearSubagentChunkState' | 'clearSubagentChunkStateForSession'
   | 'applySubagentEntries' | 'appendUser'
   | 'applyMessageEvent' | 'finalizeSession'
   | 'finalizeAllStreaming' | 'resetTransientStates' | 'addPendingSend'

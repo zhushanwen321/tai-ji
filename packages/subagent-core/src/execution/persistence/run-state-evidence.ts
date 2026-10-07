@@ -38,16 +38,6 @@ import { runSettledOutcomeToDoneReason } from "../../shared/run-vocabulary.ts";
 
 const logger = getLogger("run-state-evidence");
 
-/**
- * run 状态目录名（<dataRoot> 下的固定分量）。
- *
- * 单源导出（barrel 上收）：pi 壳 JsonlRunStore / workflow-events 的
- * `<sessionDir>/workflow-state` 布局与 pi 宿主枚举的 agentDir 根回退目录
- * 同名分量——字面量散布时任一侧单独改名即静默漂移（store 读写错目录 /
- * stall 判定读不到 journal）。
- */
-export const STATE_DIR_NAME = "workflow-state";
-
 /** Node fs 错误 code 判定（ENOENT = 路径不存在，并发删除场景；对齐 pi isEnoentError）。 */
 function isEnoentError(err: unknown): boolean {
   return typeof err === "object" && err !== null && "code" in err &&

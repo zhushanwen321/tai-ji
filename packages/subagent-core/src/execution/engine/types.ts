@@ -38,6 +38,8 @@ export type {
   ProbeReport,
   ReplayedTurn,
   SessionView,
+  SetModelParams,
+  SetModelResult,
 } from "@zhushanwen/subagent-engine-sdk";
 
 // ============================================================

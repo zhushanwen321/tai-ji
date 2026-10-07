@@ -1,8 +1,10 @@
 // 协议契约类型双向可赋值断言（W2 挂靠，impl-plan §2.1「core 侧双向可赋值断言」）。
 //
 // SDK 契约类型（@zhushanwen/subagent-engine-sdk，SSOT）与 core 中立类型是结构等价
-// 闭包——任一侧字段漂移（字段缺失 / 可选性漂移 / 联合分支不齐）在本文件编译期报错。
-// 运行时无逻辑；`const _assert: true = <expr>` 形态让断言结果进入类型检查。
+// 闭包——任一侧字段漂移（字段缺失 / 可选性漂移 / 联合分支不齐）在本文件编译期报错；
+// 可选字段的单侧改名/删除在双向可赋值下不红（可选属性缺席不破坏结构可赋值），由
+// 下方 keyof 配对锁在键集层补拦（[F3-3]）。运行时无逻辑；`const _assert: true =
+// <expr>` 形态让断言结果进入类型检查。
 //
 // UiRequest / UiResponse / UiRequestHandler / UiMethod 的 core 侧出口 =
 // execution/ui/dialog-queue.ts 的 SDK 再导出（W7 已切换，SSOT = SDK ui-types）——
@@ -81,12 +83,30 @@ const _assertions: Array<true> = [
   true as _CoreSdkAgentCallOpts,
 ];
 
+// ── 字段键集配对锁（[F3-3]）：补双向可赋值断言的洞——可选字段单侧改名/删除时
+//    互赋值两方向仍成立（可选属性缺席不破坏可赋值），只有键集互等断言能拦。直槽
+//    元组承载：断言退化为 never 时对应槽的 true 赋值编译红（never 不被静默吞掉，
+//    与下方能力位键集锁同一理由）。仓内先例 = runtime workflow-run-events-reader.ts
+//    的 DagFamily 双侧锁同款形态。覆盖 = 上方七个 Core*↔Sdk* 断言的顶层键集
+//    （Ui* 四型 core 侧与 SDK 同源，无漂移面，不设锁）。
+type _CoreSdkKeyPairLock = [
+  AssertMutuallyAssignable<keyof CoreAgentEvent, keyof SdkAgentEvent>,
+  AssertMutuallyAssignable<keyof CoreAgentOutcome, keyof SdkAgentOutcome>,
+  AssertMutuallyAssignable<keyof CoreEngineCapabilities, keyof SdkEngineCapabilities>,
+  AssertMutuallyAssignable<keyof CoreEngineHandleData, keyof SdkEngineHandleData>,
+  AssertMutuallyAssignable<keyof CoreProbeReport, keyof SdkProbeReport>,
+  AssertMutuallyAssignable<keyof CoreSessionView, keyof SdkSessionView>,
+  AssertMutuallyAssignable<keyof CoreWorktreeHandle, keyof SdkWorktreeHandle>,
+];
+const _keyPairLock: _CoreSdkKeyPairLock = [true, true, true, true, true, true, true];
+
 // ── 能力位键集锁（U5 词表锁扩展：病灶 7「漏登 core 两表 → undefined 透传 → gate
 //    放行」的编译期堵截）──
 // engine-manifest.ts 两表以 `satisfies` 声明（保留字面键集），`keyof typeof` 即真实键集：
-//   A：CONSERVATIVE_CAPABILITIES（11 键，含 maxTurns:false）⟷ EngineCapabilities 全集（11=11）；
-//   B：CAPABILITY_ENUMS（10 键——maxTurns 走 engine-manifest.ts parseCapabilities 的
-//      boolean 专用解析分支，不经保守表）⟷ Exclude<keyof EngineCapabilities, "maxTurns">（10=10）。
+//   A：CONSERVATIVE_CAPABILITIES（12 键，含 maxTurns:false + setModel）⟷ EngineCapabilities
+//      全集（12=12；[subagent-model-switch] setModel 为首个可选新轴，两表同批登记）；
+//   B：CAPABILITY_ENUMS（11 键——maxTurns 走 engine-manifest.ts parseCapabilities 的
+//      boolean 专用解析分支，不经保守表）⟷ Exclude<keyof EngineCapabilities, "maxTurns">（11=11）。
 // 新增能力轴漏登任一表 = 此处编译红。直槽承载（不用 Array<true> 的 `true as _X` 槽：
 // 断言结果为 never 时该槽会被静默吞掉，直槽 `[_A, _B] = [true, true]` 令 never 显形）。
 type _CapConservativeKeys = AssertMutuallyAssignable<
@@ -105,7 +125,7 @@ describe("协议契约类型双向可赋值（编译期断言的运行时锚）"
     expect(_assertions.every((v) => v === true)).toBe(true);
   });
 
-  it("能力位键集锁：11=11 与 10=10 双向互等成立（U5；漏登新轴 = typecheck 红指向本文件）", () => {
+  it("能力位键集锁：12=12 与 11=11 双向互等成立（U5；[subagent-model-switch] setModel 新轴两表同批登记；漏登新轴 = typecheck 红指向本文件）", () => {
     expect(_capKeyLocks).toEqual([true, true]);
   });
 });

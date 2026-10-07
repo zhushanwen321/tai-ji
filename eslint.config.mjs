@@ -198,7 +198,7 @@ export default [
   // MarkdownSegment 协议），行数超 500。拆分需先定增量协议归属（W23 消费方对接后），
   // 属独立重构任务。短期 max-lines override 避免阻塞，长期应拆分。
   {
-    files: ['packages/renderer/src/composables/logic/markdown.ts'],
+    files: ['packages/ui/src/features/chat/markdown.ts'],
     rules: {
       'max-lines': 'off',
     },
@@ -480,8 +480,8 @@ export default [
   // 收益不抵成本。短期 max-lines override 避免阻塞。
   {
     files: [
-      'packages/renderer/src/i18n/locales/zh-CN/settings.ts',
-      'packages/renderer/src/i18n/locales/en-US/settings.ts',
+      'packages/ui/src/locale/zh-CN/settings.ts',
+      'packages/ui/src/locale/en-US/settings.ts',
     ],
     rules: {
       'max-lines': 'off',

@@ -149,6 +149,8 @@ const FULL_CAPABILITIES = {
   interrupt: "native",
   permissionMode: "native",
   maxTurns: true,
+  // [subagent-model-switch] setModel 新轴（CAPABILITY_ENUMS 词表已收，fixture 全键跟随）。
+  setModel: "native",
 };
 
 let tmpRoot: string;
@@ -269,12 +271,14 @@ describe("manifest schema 字段级解析", () => {
       interrupt: "kill-only",
       permissionMode: "ignored",
       maxTurns: false,
+      // [subagent-model-switch] setModel 缺键同走保守缺省（最弱档 unsupported）。
+      setModel: "unsupported",
     });
     const warns = collectedLogs.filter((l) => l.level === "warn").map((l) => l.message);
     expect(warns.some((m) => m.includes("capabilities.steer missing"))).toBe(true);
     expect(warns.some((m) => m.includes("unknown capabilities key(s) ignored: unknownKey"))).toBe(true);
     // 未知键不进 capabilities（词表封闭）
-    expect(Object.keys(result.discovered[0].descriptor.capabilities)).toHaveLength(11);
+    expect(Object.keys(result.discovered[0].descriptor.capabilities)).toHaveLength(12);
   });
 
   it("capabilities 整段缺失 → 全保守 + warn（包仍装载）", () => {

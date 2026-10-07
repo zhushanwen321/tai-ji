@@ -65,7 +65,41 @@
           :title="t('panel.sideDrawer.subagentStopReason')"
           data-testid="subagent-stop-reason"
         >{{ subagentMeta.stopReason }}</span>
-        <span v-if="subagentMeta?.meta" class="ml-auto shrink-0 truncate font-mono text-[length:var(--text-3xs)] text-neutral-dim">
+        <!-- 模型标签（subagent-model-switch §7.1 入口层）：chat 域成员可切换
+             （ModelSelectPopover 复用；提交走 subagent.setModel，回执写状态禁乐观写）；
+             标签读取规则四分支合成见 modelDisplay。agentcall 视图只显示（成员级入口
+             登记后续项，§6.1 分流规则第三条）。 -->
+        <ModelSelectPopover
+          v-if="chatMeta !== null"
+          :selected="modelDisplay.label ?? ''"
+          :switching="switching"
+          @select="onModelSelect"
+        >
+          <template #trigger>
+            <!-- 调用方自包 PopoverTrigger as-child（ModelSelectPopover 组件契约：#trigger slot 不自带包裹）——
+                 D3-A6 缺陷修复：裸 Button 点击不弹 popover（单测 mock 组件致点击行为零覆盖）。 -->
+            <PopoverTrigger as-child>
+              <Button
+                variant="ghost"
+                class="ml-auto flex shrink-0 items-center gap-1 rounded-sm px-1 font-mono text-[length:var(--text-3xs)] text-neutral-dim transition-colors hover:text-neutral-fg"
+                :title="t('panel.sideDrawer.subagentModelSwitchTitle')"
+                data-testid="subagent-model-trigger"
+              >
+                <span v-if="modelDisplay.label" class="max-w-[160px] truncate">{{ modelDisplay.label }}</span>
+                <span
+                  v-if="modelDisplay.overridden"
+                  class="shrink-0 rounded-sm border border-accent/40 px-1 text-[length:var(--text-3xs)] text-accent"
+                  data-testid="subagent-override-badge"
+                >{{ t('panel.sideDrawer.subagentOverrideBadge') }}</span>
+                <ChevronDown class="size-3 shrink-0 opacity-60" />
+              </Button>
+            </PopoverTrigger>
+          </template>
+        </ModelSelectPopover>
+        <span
+          v-if="chatMeta === null && subagentMeta?.meta"
+          class="ml-auto shrink-0 truncate font-mono text-[length:var(--text-3xs)] text-neutral-dim"
+        >
           {{ subagentMeta.meta }}
         </span>
       </div>
@@ -122,9 +156,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlertCircle, Bot, ChevronLeft, Clock, Lock } from '@lucide/vue'
+import { AlertCircle, Bot, ChevronDown, ChevronLeft, Clock, Lock } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import { useSubagentSelection, openWorkflowInDrawer } from '@taiji/core/domain/drawer'
 import { usePanelStore } from '@/stores/panel'
@@ -139,12 +173,21 @@ import {
   isAgentCallVirtualId,
   extractAgentCallSessionId,
 } from '@/stores/workflow'
-import type { SubagentRecord, WorkflowAgentCall } from '@taiji/shared'
+import type { ProviderId, SubagentRecord, WorkflowAgentCall } from '@taiji/shared'
 import MessageStream from './MessageStream.vue'
+import ModelSelectPopover from './ModelSelectPopover.vue'
+import { PopoverTrigger } from '@/components/ui/popover'
 import { DEFAULT_ENGINE_ID } from '@/constants/engine-icons'
 // u6.1 chat facet 收口：对话流数据编排（chat store ops 面消费）下沉 composable，
 // 组件只保留 readers 面消费
 import { useSubagentTabData } from '@/composables/panel/useSubagentTabData'
+// subagent-model-switch §7.1（U1）：执行模型切换（回执写状态禁乐观写）+ 标签读取规则
+// （thinking 槽取值同源 composable 纯函数——热切回执档位优先，回退启动盖章值）
+import {
+  resolveSubagentModelDisplay,
+  resolveSubagentThinkingLevel,
+  useSubagentModel,
+} from '@/composables/features/subagent/useSubagentModel'
 
 const { t } = useI18n()
 const panelStore = usePanelStore()
@@ -152,6 +195,9 @@ const subagentStore = useSubagentStore()
 const workflowStore = useWorkflowStore()
 
 const { selectedSubagentId, enteredFrom } = useSubagentSelection()
+
+// 切换编排（回执写状态在 composable；displayOf 供 thinking 槽与 modelDisplay 消费）
+const { setSubagentModel, displayOf } = useSubagentModel()
 
 /** 从 workflowStore records 查找指定 acsId 的 agent call（agentcall 入口的元信息来源） */
 function findAgentCall(acsId: string): WorkflowAgentCall | undefined {
@@ -164,7 +210,7 @@ function findAgentCall(acsId: string): WorkflowAgentCall | undefined {
   return undefined
 }
 
-/** 标题栏元信息（响应式：records 变化时重算） */
+/** 标题栏元信息（响应式：records 变化时重算）。chatMeta = 三段式虚拟 id 的 record；agentcall 两段式 = null。 */
 const subagentMeta = computed<{ agent: string; slug?: string; meta?: string; engine?: string; stopReason?: string } | null>(() => {
   const vid = selectedSubagentId.value
   if (!vid) return null
@@ -174,13 +220,13 @@ const subagentMeta = computed<{ agent: string; slug?: string; meta?: string; eng
     const subId = extractSubagentId(vid)
     const record = subagentStore.getRecordsBySession(mainSessionId).find((r) => r.subagentId === subId)
     if (!record) return null
-    const metaParts: string[] = []
-    if (record.model) metaParts.push(record.model)
-    if (record.thinkingLevel) metaParts.push(`thinking ${record.thinkingLevel}`)
+    // 模型槽位移交 modelDisplay（标签读取规则四分支），meta 只余 thinking 档位：
+    // §6.4 展示口径——热切回执生效档位（展示态）优先，回退启动盖章值（record.thinkingLevel）。
+    const thinkingLevel = resolveSubagentThinkingLevel(displayOf(record.subagentId), record.thinkingLevel)
     return {
       agent: record.agent,
       slug: record.slug || undefined,
-      meta: metaParts.length > 0 ? metaParts.join(' · ') : undefined,
+      meta: thinkingLevel ? `thinking ${thinkingLevel}` : undefined,
       engine: record.engine || undefined,
       // 停因词（U8b §3.2.8）：有值即投影——idle 与 A-lite 轮终 running-resumable 均携带
       // 合法停因；「为什么停」一句话解释，不参与资格判定
@@ -201,6 +247,54 @@ const subagentMeta = computed<{ agent: string; slug?: string; meta?: string; eng
   return null
 })
 
+/** 当前选中的 chat 域 record（模型显示态合成与切换目标键；agentcall 两段式 = null）。 */
+const chatMeta = computed<SubagentRecord | null>(() => {
+  const vid = selectedSubagentId.value
+  if (!vid || !isSubagentVirtualId(vid)) return null
+  const record = subagentStore
+    .getRecordsBySession(extractMainSessionId(vid))
+    .find((r) => r.subagentId === extractSubagentId(vid))
+  return record ?? null
+})
+
+// ── 执行模型切换（subagent-model-switch §7.1，U1）────────────────────
+
+/** 切换中（ModelSelectPopover switching 门：禁重复开合与点选） */
+const switching = ref(false)
+
+/**
+ * 模型标签显示态（标签读取规则四分支合成，纯函数单源 resolveSubagentModelDisplay）：
+ * 各分支语义与优先级链唯一权威 = 其头注释（useSubagentModel.ts），此处不重复罗列，
+ * 防双处维护漂移。
+ */
+const modelDisplay = computed(() => {
+  const record = chatMeta.value
+  if (record === null) return { label: undefined as string | undefined, overridden: false }
+  return resolveSubagentModelDisplay({
+    display: displayOf(record.subagentId),
+    stampedModel: record.model,
+    modelOverride: record.modelOverride?.model,
+    recentEffectiveModel: record.recentEffectiveModel,
+    recordStatus: record.status,
+  })
+})
+
+/** 点选候选 → subagent.setModel（chat 域目标）；回执写状态在 composable（禁乐观写）。 */
+async function onModelSelect(payload: { modelId: string; provider: ProviderId }): Promise<void> {
+  const record = chatMeta.value
+  if (record === null || switching.value) return
+  switching.value = true
+  try {
+    await setSubagentModel({
+      recordId: record.subagentId,
+      provider: payload.provider,
+      modelId: payload.modelId,
+    })
+  } finally {
+    switching.value = false
+  }
+}
+
 /** 引擎 badge 文案（U3 D9）：常态引擎名（缺省 pi；运行期不会换引擎，无回退态） */
 const engineBadgeText = computed<string>(() => {
   const meta = subagentMeta.value
@@ -213,15 +307,8 @@ const engineBadgeTitle = computed<string>(() => {
   return t('panel.sideDrawer.engineBadgeTitle', { engine: meta?.engine || DEFAULT_ENGINE_ID })
 })
 
-/** 当前选中 subagent 的 record（三段式虚拟 id 才有；agentcall 两段式返回 null） */
-const currentRecord = computed<SubagentRecord | null>(() => {
-  const vid = selectedSubagentId.value
-  if (!vid || !isSubagentVirtualId(vid)) return null
-  const record = subagentStore
-    .getRecordsBySession(extractMainSessionId(vid))
-    .find((r) => r.subagentId === extractSubagentId(vid))
-  return record ?? null
-})
+/** 当前选中 subagent 的 record（三段式虚拟 id 才有；agentcall 两段式返回 null）＝ chatMeta（同一判据，模型切换消费同键）。 */
+const currentRecord = chatMeta
 
 // 对话流数据编排（loadError 兜底态 + 加载/停止；recordEngine 供 coarse 提示与兜底判断复用）
 const { loadError, loadSubagentData, stopSubagentStream, recordEngine } = useSubagentTabData({

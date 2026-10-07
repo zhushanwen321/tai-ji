@@ -31,6 +31,7 @@
       <ModelPickerPanel
         :groups="pickerGroups"
         :model-value="bareModelId(selectedValue)"
+        :model-value-provider-id="selectedProviderId"
         :has-candidates="hasAnyModel"
         @update:model-value="onPickFromPanel"
       />
@@ -83,18 +84,30 @@ const { groups, hasAnyModel, pickerGroups } = useModelPickerData(() => props.pro
 /** 当前选中值（纯受控：直接用 props，不存本地副本，避免 watch 拉回导致 UI 闪退） */
 const selectedValue = computed(() => props.selected ?? '')
 
+/** 当前选中的 provider 归属（复合串拆段——高亮双匹配与展示名精确匹配的依据） */
+const selectedProviderId = computed(() => {
+  const v = selectedValue.value
+  const i = v.lastIndexOf('/')
+  return i > 0 ? v.slice(0, i) : undefined
+})
+
 const currentName = computed(() => {
   if (!selectedValue.value) return t('panel.modelSelect.placeholder')
+  // 复合串精确匹配优先（同 short-id 多 provider 时展示被选中的那个），回落裸 id
+  const exact = settingsStore.models.value.find((m) => `${m.providerId}/${m.id}` === selectedValue.value)
+  if (exact) return exact.name ?? exact.id
   const id = bareModelId(selectedValue.value)
   return settingsStore.models.value.find((m) => m.id === id)?.name ?? id
 })
 
-/** panel 选中回调：裸 id → 反查 providerId → 复用 onSelect 的 select 语义 */
-function onPickFromPanel(modelId: string): void {
+/** panel 选中回调：组级 providerId 优先（被点行归属——同 short-id 多 provider 歧义
+ *  修复，D3 顺带发现 7），缺省回落裸 id 反查（自建分组形态） */
+function onPickFromPanel(payload: { id: string; providerId?: ProviderId }): void {
+  const { id: modelId } = payload
+  const provider = payload.providerId ?? resolveProviderIdFromGroups(groups.value, modelId)
   // 渲染与点击之间 groups 被刷新（模型禁用/移除、providerFilter 变化）时反查失败：
   // 不发 select——provider 缺失时伪造空串会穿品牌类型，下游拼出 `/modelId` 畸形复合 id；
   // 静默忽略该次点击，浮层保持打开展示刷新后的列表
-  const provider = resolveProviderIdFromGroups(groups.value, modelId)
   if (!provider) return
   onSelect(modelId, provider)
 }

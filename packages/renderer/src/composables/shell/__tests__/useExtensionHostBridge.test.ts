@@ -310,7 +310,7 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
     expect(transportSendSpy).toHaveBeenCalledTimes(1)
     expect(transportSendSpy).toHaveBeenCalledWith({
       type: 'plugin.mountPoints.sync',
-      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'statusbar', 'modal'] },
+      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'statusbar'] },
     })
   })
 
@@ -330,7 +330,7 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
     expect(transportSendSpy).toHaveBeenCalledTimes(2)
     expect(transportSendSpy).toHaveBeenLastCalledWith({
       type: 'plugin.mountPoints.sync',
-      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'statusbar', 'modal'] },
+      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'statusbar'] },
     })
   })
 
@@ -360,7 +360,7 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
     expect(transportSendSpy).toHaveBeenCalledTimes(3)
     expect(transportSendSpy).toHaveBeenLastCalledWith({
       type: 'plugin.mountPoints.sync',
-      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'statusbar', 'modal'] },
+      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'statusbar'] },
     })
   })
 })

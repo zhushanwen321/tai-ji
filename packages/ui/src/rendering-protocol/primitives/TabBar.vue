@@ -128,7 +128,7 @@ const dotClass = (status?: 'done' | 'pending') => {
     <div
       v-for="(tab, i) in tabs"
       :key="i"
-      class="tab-bar__tab flex items-center gap-1 rounded-sm px-2.5 py-1 font-mono text-[length:var(--text-xs)] text-neutral-dim transition-colors hover:text-neutral-fg"
+      class="tab-bar__tab flex select-none items-center gap-1 rounded-sm px-2.5 py-1 font-mono text-[length:var(--text-xs)] text-neutral-dim transition-colors hover:text-neutral-fg"
       :class="{
         'bg-elevated text-neutral-fg': isActiveTab(tab, i),
         'cursor-pointer': containerized,

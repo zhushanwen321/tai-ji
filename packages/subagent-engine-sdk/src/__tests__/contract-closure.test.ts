@@ -71,11 +71,15 @@ type _NoTaskCtxDualWrite = AssertMutuallyAssignable<
   never
 >;
 
-// C2-① 存量能力位逐一必填的类型面：任一键被误标可选即 EngineCapabilities 不再
-// 可赋值给 Required 形态 → 红。运行时键集合投影见 REQUIRED_CAPABILITY_KEYS。
+// C2-① 存量能力位逐一必填的类型面：任一**存量键**被误标可选即
+// REQUIRED_CAPABILITY_KEYS 投影形态不再可赋值给 Required 形态 → 红。
+// [subagent-model-switch] 锁域从「整个 EngineCapabilities」收窄到 REQUIRED_CAPABILITY_KEYS
+// 11 键——首个可选新轴 setModel 进接口后，全接口 Required 形态必然含可选键（C2-②
+// 约定「新增轴走可选键」），锁意图（存量键必填）由词表投影承接；新增轴的缺省最弱档
+// 语义由 C2-② 用例守。
 type _CapabilityKeysAllRequired = AssertMutuallyAssignable<
-  EngineCapabilities,
-  Required<EngineCapabilities>
+  Pick<EngineCapabilities, (typeof REQUIRED_CAPABILITY_KEYS)[number]>,
+  Required<Pick<EngineCapabilities, (typeof REQUIRED_CAPABILITY_KEYS)[number]>>
 >;
 
 // C2-① 存量 11 键名词表（逐一必填的运行时投影；新增轴走可选键，不进本词表）。

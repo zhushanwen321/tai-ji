@@ -65,7 +65,4 @@ export default {
   scheduleCreateRelHours: 'in {h} h',
   scheduleCreateRelHoursMinutes: 'in {h} h {m} min',
   scheduleCreateRelDays: 'in {n} days',
-  // ── Plugin modal host chrome (PluginModalHost, AP-2: chrome is title + close button only) ──
-  pluginModalClose: 'Close',
-  pluginModalCloseEsc: 'Close (Esc)',
 }

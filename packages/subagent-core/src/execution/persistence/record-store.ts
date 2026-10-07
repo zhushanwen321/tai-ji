@@ -140,7 +140,7 @@ import {
   identityFromFold,
   isFreshCache,
   manifestToSubagent,
-  receiptStatisticsFromFold,
+  projectFoldToLight,
   recordToSubagent,
   sameNullableStamp,
   sameStamp,
@@ -178,7 +178,7 @@ import type { RoundsCtx } from "./record-store-rounds.ts";
 import { reconstructFromFile } from "./session-reconstructor.ts";
 import type { IdentityHeaderRecon } from "./session-reconstructor.ts";
 import type { ClosedReason, StopReason, TranscriptRef } from "../domain/record-types.ts";
-import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { ExecutionRecord, ModelOverride } from "../domain/record-model.ts";
 import type { AgentEvent, RecordSnapshot, SubagentRecord } from "../assembly/types.ts";
 // [U4a / D3b (a″)] findForeignLiveInstance：孤儿恢复的活实例跳过判据——现查探针
 // 替代重建时 externalInstance 缓存（pid 单判据 + self-pid 排除，比缓存更新鲜）。
@@ -738,6 +738,49 @@ export class RecordStore {
    */
   markReopened(record: ExecutionRecord, transcriptRef: TranscriptRef): boolean {
     return markReopenedImpl(record, transcriptRef, this.terminalCtx);
+  }
+
+  /**
+   * 意图原语：用户覆盖记账落账（[subagent-model-switch §6.2]，setModel 编排步骤③
+   * 的 chat 域持久化写点）。两面写：
+   *   ① 内存 record 的 `modelOverride` 字段（readonly 身份域之外的可变意图域——经
+   *      MutableRecord 映射写，先例 = conversation-continuation worktreeHandle 回填）；
+   *   ② record 事件文件追加 `record-model-override` 帧（运行态唯一事实源——v2 条目
+   *      registered 诞生时写 / settled 终态时写，均不覆盖运行中窗口；fold 后写覆盖
+   *      语义构造性满足「至多一个覆盖值」）。事件面未接线（纯内存测试形态）时内存
+   *      面单独生效（与 register/archive 缺省分支同款取舍）。
+   *
+   * 历史事实零触碰：本原语不改写 `record.model` 盖章值、不追加任何回写历史的事件
+   * （不变量 5——覆盖是「未来意图」，model 是「该轮启动事实」，两字段并存）。
+   *
+   * @returns true = 记账完成；false = id 不在内存表（未注册/已回收）——调用方校验
+   *          型失败路径不会到达此处（record 由调用方从 store 取出），防御留痕。
+   */
+  markModelOverride(record: ExecutionRecord, override: ModelOverride): boolean {
+    const existing = this.records.get(record.id);
+    if (existing === undefined || existing !== record) {
+      logger.debug("[subagents] markModelOverride: record not the in-memory instance, skipping", {
+        detail: { id: record.id },
+      });
+      return false;
+    }
+    type MutableRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
+    (record as MutableRecord).modelOverride = override;
+    this.eventStreamFace?.appendJournal(record.id, {
+      type: "record-model-override",
+      ref: { ...override.ref },
+      ...(override.thinkingLevel !== undefined ? { thinkingLevel: override.thinkingLevel } : {}),
+      setAt: override.setAt,
+      ts: Date.now(),
+    });
+    // [顺带发现 4 / D3 缺陷五] 派生 manifest 投影随覆盖写点同步刷新（写序 = 事件帧先、
+    // manifest 后——水位构造性新鲜）：磁盘快照在该写点不再停留陈旧值；zcode 成员的
+    // manifest 兜底载体对 run 级查询（parentRunId 反查）保持新鲜可见（缺陷六可见性
+    // 窗口的收窄面）。与轮终 writeDerivedManifest 同款写面（D7：manifest 写函数调用
+    // 字面只留本文件）。
+    this.writeManifestPersisted(record.id, derivedManifestRecord(recordToSubagent(record)));
+    this.notifyChange();
+    return true;
   }
 
   // [H4 三轴拆分] settleSnapshotPatch / fullBindingPayload / persistSettleSnapshot
@@ -1669,17 +1712,11 @@ export class RecordStore {
     const fold = this.eventStreamFace?.foldOf(base.id);
     const state = stateMarkerFromFold(fold);
     const entry = buildFileCacheEntry(base, file, stamps, state, this.eventsStampOfId(base.id));
-    // [U7 / §3.2.7 统计口径单基准] 统计域换源折叠（原 binding 快照补投影的接替）：
-    // light 重建从收条事件恢复 round/turns/tokens/endedAt 终值——「冷复活前后计数
-    // 一致」的读侧半边（写侧 = settle/轮终事件 + markResurrected 水合）。快照可滞后
-    // 于在飞轮（settle 后 jsonl 续写），此时 record 在内存由 mergedRecords 内存源
-    // 覆盖（内存增量覆盖磁盘终值），详情走 getFullRecord 从 jsonl 全量重放——三面
-    // 优先级衔接无跳变。
-    const stats = receiptStatisticsFromFold(fold);
-    if (stats.round !== undefined) entry.light.round = stats.round;
-    if (stats.totalTokens !== undefined) entry.light.totalTokens = stats.totalTokens;
-    if (stats.turns !== undefined) entry.light.turns = stats.turns;
-    if (stats.endedAt !== undefined) entry.light.endedAt = stats.endedAt;
+    // [U7 / §3.2.7 统计口径单基准] 统计域换源折叠 + [subagent-model-switch §6.2]
+    // 覆盖记账补投影——投影单规则收拢在 projectFoldToLight（rebuild 轴），快照可滞后
+    // 于在飞轮时 record 在内存由 mergedRecords 内存源覆盖（内存增量覆盖磁盘终值），
+    // 详情走 getFullRecord 从 jsonl 全量重放——三面优先级衔接无跳变。
+    projectFoldToLight(entry.light, fold);
     this.fileCache.set(file, entry);
     this.idToFile.set(base.id, file);
     return entry;
@@ -1925,6 +1962,30 @@ export class RecordStore {
     const file = this.idToFile.get(id);
     if (!file) return undefined;
     return this.scanFile(file)?.light;
+  }
+
+  /**
+   * [D3 缺陷五] manifest 兜底的单 id 读取（getMutable / findLightById 双 miss 后的
+   * 第三源）：zcode 成员无子 session 文件（不在文件扫描集）、settle 后出内存——
+   * bound 物化的 manifest 是其磁盘唯一载体，run 级全切的成员引擎转发面对它不可达
+   * = 无码 plain Error 误入聚合失败名单（分型 readback 失败）。只服务引擎路由解析：
+   * 消费的 identity 域字段（origin/parentRunId/engine/engineHandle）在创建/绑定后
+   * 不变，陈旧 manifest 的身份域仍可信——不做水位校验（状态域消费方禁用本方法，
+   * 状态读取走 mergedRecords 四源合并）。读不到/损坏/状态越界 → undefined。
+   */
+  findByIdManifestFallback(id: string): SubagentRecord | undefined {
+    if (this.manifestDir === undefined) return undefined;
+    let raw: string;
+    try {
+      raw = fs.readFileSync(path.join(this.manifestDir, `${id}.json`), "utf8");
+    } catch {
+      return undefined; // 文件缺失/不可读 = 无兜底形态
+    }
+    try {
+      return manifestToSubagent(JSON.parse(raw) as ManifestRecord) ?? undefined;
+    } catch {
+      return undefined; // 解析失败 = 保守（与 mergeManifestRecords 坏链侧同款）
+    }
   }
 
   /**

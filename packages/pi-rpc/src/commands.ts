@@ -92,6 +92,21 @@ export function buildGetStateCommandFrame(id: string): string {
   return serializeCommandFrame(id, 'get_state', {})
 }
 
+/**
+ * set_model 完整命令帧（pi-subagent-cli setModel 通路消费；buildPromptCommandFrame
+ * 同族新成员）。载荷形状对齐 pi RPC 协议（rpc-types.d.ts RpcCommand 联合的
+ * set_model 成员，`{type:"set_model", provider, modelId}`——联合内匿名成员，pi 侧
+ * 未按名导出该成员类型）：`{id, type:"set_model", provider, modelId}`
+ * ——pi 侧从进程内快照按 provider+id 精确查找，快照冻结于 spawn 时刻（缺失即
+ * `Model not found` 错误应答）。
+ */
+export function buildSetModelCommandFrame(
+  id: string,
+  input: { provider: string; modelId: string },
+): string {
+  return serializeCommandFrame(id, 'set_model', { provider: input.provider, modelId: input.modelId })
+}
+
 /** UI 应答形状（subagent 侧 UiResponse 的结构子集；ack = fire-and-forget 不写 stdin）。 */
 export interface UiResponseShape {
   value?: unknown

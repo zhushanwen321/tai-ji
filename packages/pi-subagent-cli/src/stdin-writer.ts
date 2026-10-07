@@ -23,6 +23,7 @@ import * as crypto from "node:crypto";
 import {
   buildGetStateCommandFrame,
   buildPromptCommandFrame,
+  buildSetModelCommandFrame,
   buildUiResponseFrame,
   isBrokenPipeError,
   tryWriteStdinLine,
@@ -93,6 +94,40 @@ export function sendGetStateCommand(child: ChildProcess): string {
   const id = crypto.randomUUID();
   writeStdinLine(child, buildGetStateCommandFrame(id), "get_state command");
   return id;
+}
+
+/**
+ * [subagent-model-switch §7.3] 向子进程 stdin 写 set_model 命令（setModel 通路：
+ * 命令写入接线复用本模块既有原语——pi-rpc buildSetModelCommandFrame 组帧 +
+ * tryWriteStdinLine 裸写 + isBrokenPipeError 判别）。
+ *
+ * 与 prompt 路径的 writeStdinLine 错误策略刻意不同：setModel 是控制面操作，投递
+ * 失败（no-stdin / destroyed / EPIPE——均为子进程已死或将死的形态）必须以判别式
+ * 结果上浮，让调用方按「无活进程」形态处置（§7.5 命令写入窗口退出行），而不是
+ * throw 驱动冷恢复或静默返回后悬挂等待。
+ *
+ * @returns delivered:true 携带请求 id（调用方用它在 awaitControlResponse 等应答）；
+ *          delivered:false = 投递失败（子进程无活形态，含非 EPIPE 写异常——debug
+ *          留痕后同判，不让异常路径逃出判别式）
+ */
+export function sendSetModelCommand(
+  child: ChildProcess,
+  input: { provider: string; modelId: string },
+): { delivered: true; requestId: string } | { delivered: false } {
+  const id = crypto.randomUUID();
+  const outcome = tryWriteStdinLine(child.stdin, buildSetModelCommandFrame(id, input));
+  if (outcome.ok) {
+    if (outcome.backpressure) {
+      logger.warn("[subagents] stdin backpressure on set_model command");
+    }
+    return { delivered: true, requestId: id };
+  }
+  if (outcome.reason === "error" && !isBrokenPipeError(outcome.error)) {
+    logger.warn("[subagents] unexpected stdin write error on set_model command", {
+      detail: toErrorMessage(outcome.error),
+    });
+  }
+  return { delivered: false };
 }
 
 /**

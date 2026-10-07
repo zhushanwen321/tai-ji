@@ -7,7 +7,7 @@
  * 注：ServerMessage(id) → pending.resolve 的回灌由 features 层 dispatcher 串联（Wave 3）。
  *      mock 模式下不走本域（api/index 切到 mock 门面）。
  */
-import type { SessionSummary, SessionGroup, SubagentRecord, WorkflowRunRecord, Message, BatchDeleteResult, ServerMessage, ThinkingLevel, ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply, SessionRevokeMessageReply, WorkflowRunEventsReply, WorkflowDagReply } from '@taiji/shared'
+import type { SessionSummary, SessionGroup, SubagentRecord, WorkflowRunRecord, Message, BatchDeleteResult, ServerMessage, ServerMessageMap, ThinkingLevel, ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply, SessionRevokeMessageReply, WorkflowRunEventsReply, WorkflowDagReply } from '@taiji/shared'
 import { PI_THINKING_LEVELS } from '@taiji/shared'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 import { command } from '../request'
@@ -224,6 +224,23 @@ export async function getSubagents(
 export async function getSubagentHistory(sessionId: string, subagentId: string): Promise<Message[]> {
   const reply = await command('session.getSubagentHistory', { sessionId, subagentId }, RPC_BACKSTOP_TIMEOUT_MS)
   return reply.messages
+}
+
+/**
+ * 拉取 subagent 进行中流状态（B2 subagent-stream-chunk §4.1，与 getSubagentHistory 同域同模式）：
+ * RelayTee 既有内存状态的只读快照，增量 chunk 消息的失步恢复与接入首拉通道。
+ * reply payload（同名 reply，payload 消费型）：{ found, msgSeq, lastDeltaSeq, lines }——
+ * found=false = 该 record 当前无进行中流（未开始或已定稿，设计内合法回执非错误）；
+ * found=true 时 lines = 当前消息累积全文（textAccumulated split 形态，消费端复用现有
+ * 全量替换入口），lastDeltaSeq = 这份全文包含到第几条 delta（水位去重判据）。
+ * 消费端接线 = chat store requestSubagentStreamState（经 ChatStoreOptions.subagentStreamPull
+ * 注入，§4.3 按序判定四分支在 core 状态机）。
+ */
+export function getSubagentStreamState(
+  sessionId: string,
+  recordId: string,
+): Promise<ServerMessageMap['session.getSubagentStreamState']> {
+  return command('session.getSubagentStreamState', { sessionId, recordId }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
 /**

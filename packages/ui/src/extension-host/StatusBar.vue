@@ -84,7 +84,7 @@ const visibleItems = computed<StatusBarEntry[]>(() => {
       :key="item.id"
       data-testid="status-bar-item"
       :title="item.tooltip"
-      class="whitespace-nowrap text-muted-foreground"
+      class="whitespace-nowrap text-muted-foreground select-none"
       :class="[
         item.alignment === 'right' ? 'ml-auto' : '',
         item.commandId ? 'cursor-pointer hover:text-foreground' : '',

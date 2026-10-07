@@ -191,12 +191,48 @@ export interface SubagentRecord {
    */
   engine?: string
   /**
+   * 用户覆盖状态（subagent-model-switch §9 transport 行详情载荷透传）——当前用户
+   * 模型覆盖意图（作用域 = 该 subagent 会话的剩余执行），优先级高于 agent 配置与
+   * 调用参数。权威源 = 执行记录链最新记录的 modelOverride 记账（runtime 详情载荷
+   * 组装时经覆盖查询端口读取）；缺席 = 从未被用户覆盖（不造键）。消费位 = 面板
+   * 「用户覆盖中」标注与已记账型路径的标签显示（标签读取规则分支②）。
+   */
+  modelOverride?: SubagentModelOverrideStatus
+  /**
+   * 最近生效值（subagent-model-switch §6.4 分叉态重载承接字段）——该成员 pi session
+   * 文件 `model_change` 条目尾条目（实际执行事实权威，详情载荷组装时派生读取，零新增
+   * 持久化载体）。**仅 pi 引擎成员派生**（非 pi 成员会话态在引擎侧库、无 pi session
+   * 文件，不参与派生、不携带该字段）；文件不存在或无 model_change 条目按无值处理
+   * （未发生热切 = 无分叉态，字段本无消费场景）。消费位 = 分叉态重载（面板重载后
+   * 回执态已丢）的标签显示——显示生效值、不回退覆盖意图值（分支④）。
+   */
+  recentEffectiveModel?: SubagentRecentEffectiveModel
+  /**
    * 引擎自描述定位符（非 pi 引擎的历史详情读取键，读侧守卫语义见 runtime
    * subagent-engine-history 的 SubagentEngineHandle）。sessionRef 为引擎自定义键值
    * （zcode = { sessionId, dbPath }），整体透传不枚举内部键；eventsPath 绝对路径
    * （读前校验前缀白名单）；poolKey 隔离池定位。缺省 = pi（走 JSONL 直读链）。
    */
   engineHandle?: { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string }
+}
+
+/**
+ * 用户模型覆盖状态视图（wire 详情载荷字段形状，subagent-model-switch §9 transport 行）。
+ * model = canonical ref 串（'provider/id'）。runtime 详情载荷组装时经覆盖查询端口读取
+ * （权威源 = 执行记录链最新记录的 modelOverride 记账 / run 事件流覆盖事件折叠产物）。
+ */
+export interface SubagentModelOverrideStatus {
+  model: string
+  thinkingLevel?: string
+}
+
+/**
+ * 最近生效值视图（wire 详情载荷字段形状，subagent-model-switch §6.4）：源 = 成员 pi
+ * session 文件 model_change 尾条目的 provider/modelId。
+ */
+export interface SubagentRecentEffectiveModel {
+  provider: string
+  modelId: string
 }
 
 /**

@@ -27,17 +27,22 @@ import * as path from "node:path";
 
 import {
   EngineSdkError,
+  SET_MODEL_NOT_ACTIVE_CODE,
   getLogger,
   type AgentEvent,
   type AgentOutcome,
   type EngineCapabilities,
+  type ModelRef,
   type ProbeReport,
   type SessionView,
+  type SetModelParams,
+  type SetModelResult,
   type UiRequest,
   type UiResponse,
 } from "@zhushanwen/subagent-engine-sdk";
 
 import { PI_ADAPTER_VERSION, PI_ENGINE_ID } from "./constants.ts";
+import { setModelOnActiveChild } from "./control-responses.ts";
 import { toErrorMessage } from "./error-message.ts";
 import type { AgentCallOpts, EngineHandle, EnginePort, EngineCtxModel, RunContext } from "./port-types.ts";
 import type { PiInvocation } from "./pi-invocation.ts";
@@ -118,6 +123,10 @@ export class PiEngine implements EnginePort {
       permissionMode: "native",
       // turn limiter + spawn watchdog 估算兑现轮数上限
       maxTurns: true,
+      // [subagent-model-switch] pi 子进程 set_model 通道现成 + 引擎 setModel 正向方法
+      // 实装（setModelOnActiveChild：stdin 写入 → 读应答 → get_state 回读，§7.3 全
+      // 竞态窗口处置）——与 package.json manifest 声明位同批翻 native
+      setModel: "native",
     };
   }
 
@@ -201,6 +210,63 @@ export class PiEngine implements EnginePort {
     const journaled = replayJournalToSessionView(handle, PI_ENGINE_ID);
     if (journaled !== undefined) return journaled;
     return { engineId: PI_ENGINE_ID, turns: [], source: "outcome-only" };
+  }
+
+  /**
+   * [subagent-model-switch §7.3] setModel：执行中模型热切换。子进程通路
+   * （定位活跃子进程 → stdin `set_model` → 读应答 → get_state 回读生效值）在
+   * setModelOnActiveChild（spawn-runner）；本方法承载原始结局 → 协议应答的错误码
+   * 映射（三型失败分型 + 无活进程码，值域 = SDK setModel 域词表）。
+   *
+   * 错误全部经 EngineSdkError 结构化上浮（server 层 toProtocolError 原样转错误帧，
+   * code 不被改写）——「无活进程」形态（SET_MODEL_NOT_ACTIVE_CODE）与回读失败形态
+   * （engine_state_readback_failed）严格分型，宿主按 §7.2 处置表分派记账与应答。
+   */
+  async setModel(params: SetModelParams): Promise<SetModelResult> {
+    const model: ModelRef = params.model;
+    const outcome = await setModelOnActiveChild(params.runId, model);
+    switch (outcome.kind) {
+      case "switched":
+        return {
+          effectiveModel: outcome.effectiveModel,
+          effectiveThinkingLevel: outcome.effectiveThinkingLevel,
+        };
+      case "not-active":
+        // 「无活进程」形态（§7.5 子进程已退出行——四竞态窗口同一处置）：宿主转纯
+        // 记账路径（chat 已记账型应答 / 聚合 not-active 成员态），非失败分型。
+        throw new EngineSdkError(
+          SET_MODEL_NOT_ACTIVE_CODE,
+          `no active child process for run '${params.runId}' (already exited, or exited during ` +
+            `the locate/write/ack/readback window)`,
+          "No recovery needed: the switch intent is recorded by the host and takes effect on the next run; in-flight work is unaffected.",
+          { runId: params.runId },
+        );
+      case "model-not-in-snapshot":
+        // 快照冻结（spawn 后新增模型；模型本身有效——宿主按写覆盖意图处置，§7.5 快照行）
+        throw new EngineSdkError(
+          "engine_model_not_in_snapshot",
+          `model ${model.provider}/${model.modelId} is not in the child process snapshot of run '${params.runId}': ${outcome.detail}`,
+          "The model snapshot is frozen at spawn time. Use a model already available to this run, or restart the run (terminate and resume / next round) to pick up newly added models.",
+          { runId: params.runId, model },
+        );
+      case "credential-missing":
+        // checkAuth 权威兜底（宿主预检通过后 registry 态漂移窗口；§7.5 凭据行）
+        throw new EngineSdkError(
+          "engine_credential_missing",
+          `credential check failed for ${model.provider}/${model.modelId} in run '${params.runId}': ${outcome.detail}`,
+          `Configure the API key for provider '${model.provider}', then retry the switch; the running task is unaffected.`,
+          { runId: params.runId, model },
+        );
+      case "readback-failed":
+        // 生效值回读失败（非进程退出情形——退出归 not-active；生效值未知如实报，§7.5 回读行）
+        throw new EngineSdkError(
+          "engine_state_readback_failed",
+          `set_model was sent to run '${params.runId}' but the effective state could not be read back ` +
+            `(stage: ${outcome.stage}): ${outcome.detail}`,
+          "The switch command may or may not have taken effect. Retry the switch (idempotent override replace); the running task is unaffected.",
+          { runId: params.runId, model, stage: outcome.stage },
+        );
+    }
   }
 
   /** dispose：全量收割活跃子进程（幂等）。 */

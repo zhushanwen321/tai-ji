@@ -93,10 +93,7 @@ describe('plugin-sdk freeze 运行时侧（AC12 后半：runtime api 对象冻�
         showInput: async () => undefined,
         notify: async () => undefined,
         updateStatusBarItem: async () => undefined,
-        showModal: async () => ({ opened: true, epoch: 1 }),
-        hideModal: async () => ({ closed: false }),
         updateHeaderAction: async () => ({ updated: true }),
-        onModalClosed: () => ({ dispose: () => undefined }),
       },
       agent: {
         setModel: async () => '',

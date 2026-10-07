@@ -35,7 +35,9 @@
       @wheel.prevent="onWheel"
     >
       <g :transform="`translate(${vp.tx},${vp.ty}) scale(${vp.k})`" data-testid="wfvz-dag-viewport">
-        <!-- phase 分区背景列（当前 phase 高亮：accent 描边） -->
+        <!-- phase 分区背景列（当前 phase 高亮：accent 描边）。分区虚线描边 border-strong
+             级弱化「面板感」、强化「分组感」（workflow-overlay-refine D3）；分区标签
+             2xs/font-medium 与节点名 3xs 拉开半档（D3 标签档位，V1-wf③ 分层断言口径） -->
         <g
           v-for="c in layout.clusters"
           :key="c.phase"
@@ -44,7 +46,7 @@
           :data-testid="`wfvz-dag-cluster-${c.phase}`"
         >
           <rect
-            class="fill-surface stroke-border-hairline [rx:var(--radius-sm)] [stroke-dasharray:5_4]"
+            class="fill-surface stroke-border-strong [rx:var(--radius-sm)] [stroke-dasharray:5_4]"
             :class="c.phase === activePhase ? 'stroke-accent [stroke-width:1.5]' : ''"
             :x="c.x"
             :y="c.y"
@@ -52,7 +54,7 @@
             :height="c.height"
           />
           <text
-            class="fill-neutral-mid text-[length:var(--text-3xs)] font-semibold tracking-[0.04em]"
+            class="fill-neutral-mid text-[length:var(--text-2xs)] font-medium tracking-[0.03em]"
             :x="c.x + CLUSTER_TITLE_INSET"
             :y="c.y + CLUSTER_TITLE_H_BASE"
           >{{ c.phase }}</text>
@@ -122,7 +124,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { WorkflowDag, WorkflowDagEdgeKind, WorkflowRunOutcome, WorkflowRunStatus } from '@taiji/shared'
 import { layoutDag, layoutEdges } from './layout'
@@ -177,7 +179,7 @@ const ZOOM_WHEEL_FACTOR = 0.0012
 const PAN_THRESHOLD_PX = 5
 
 const svgRef = ref<SVGSVGElement | null>(null)
-/** 视口变换（tx/ty 平移 + k 缩放；切换 run 重置）。 */
+/** 视口变换（tx/ty 平移 + k 缩放；初始与切换 run 重置时 tx 居中——见 centeredTx）。 */
 const vp = reactive({ k: 1, tx: 0, ty: 0 })
 
 /** dag prop 未就绪（null）时布局用的空 DAG（layoutDag/layoutEdges 均纯函数不 mutate 输入）。 */
@@ -193,23 +195,48 @@ function nodeState(nodeId: string): WorkflowVizDagNodeStatus {
 }
 
 /**
- * D9 停止叠加归一：run 已停止时在途节点不蓝脉冲——interrupted（暂停）与
- * cancelled（用户主动终局）落中性暗（tray-tone「同语义同色」先例）；
- * failed / time_limited 落失败色系（D9 着色映射全枚举）；done + outcome 缺省
- * （v1 存量数据缺口）保守中性暗，不作成败断言；run 运行中 = null（无叠加）。
+ * D9 停止叠加归一（叠加两档只属于「被停止的 run」，正常完成不是停止）：
+ * run 运行中 = null（无叠加，在途节点正常蓝脉冲）；outcome='done' = null（正常
+ * 完成的 run 六态自明——done 节点 success 绿与 skipped 虚线不被叠加吞掉，D9
+ * 「DAG done = success 供扫读」）；interrupted（暂停）与 cancelled（用户主动终局）
+ * 落中性暗（tray-tone「同语义同色」先例）；failed / time_limited 落失败色系
+ * （D9 着色映射全枚举）；done + outcome 缺省（v1 存量数据缺口）保守中性暗，
+ * 不作成败断言。
  */
 const stopTone = computed<WorkflowVizDagStopTone>(() => {
   if (props.runStatus === undefined || props.runStatus === 'running') return null
   if (props.runStatus === 'interrupted') return 'neutral'
   if (props.runOutcome === 'failed' || props.runOutcome === 'time_limited') return 'failed'
+  if (props.runOutcome === 'done') return null
   return 'neutral'
 })
 
 // 切换 run（D11：开新 run 切内容）→ 画布视口重置（新蓝图从全局概览起步）
 watch(() => props.dag, () => {
   vp.k = 1
-  vp.tx = 0
+  vp.tx = centeredTx()
   vp.ty = 0
+})
+
+/**
+ * 初始视口水平居中（workflow-overlay-refine D1 / 走查 edge#12：上区内容水平对中，
+ * 全宽上区不留画布贴左的大段右空白）。mock `.dag-stage` 的 justify-content:center
+ * 在自绘 SVG 语境的等价实现：内容位置由 viewport transform 决定，居中 = tx 取容器
+ * 与画布的半余宽；画布更宽时贴 0（k 恒 1，C1 已关闭——不引入 fit）。容器尺寸无布局
+ * 环境（jsdom clientWidth 缺失）→ 0，退化为贴左不破坏渲染。窗口 resize 不追居中：
+ * pan 可达且属用户主动交互，不属本机制。
+ */
+// 中点除数（余宽的一半 = 水平居中偏移）；具名以过 no-magic-numbers
+const HALF = 2
+
+function centeredTx(): number {
+  const containerW = svgRef.value?.clientWidth ?? 0
+  return Math.max(0, (containerW - layout.value.width) / HALF)
+}
+
+// 打开 overlay 即挂载（壳 v-if dag !== null）→ 初始视口按容器宽居中
+onMounted(() => {
+  vp.tx = centeredTx()
 })
 
 // ── 缩放平移（原型 04-final-overlay.html 手法：client 坐标差换算，规避

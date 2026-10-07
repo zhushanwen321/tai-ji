@@ -7,7 +7,7 @@ colors:
   fg: "#dedee2"
   muted: "#96969c"
   border: "rgba(255, 255, 255, 0.07)"
-  accent: "#cfcfd4"
+  accent: "#a5adc2"
   success: "#78a87e"
   warn: "#b79c54"
   danger: "#bf6b6b"
@@ -160,7 +160,7 @@ v6 审查发现「被选中」出现三种视觉语言，统一为二分：
 
 实色背景上的前景元素（文字/图形）必须用该色的 `-fg` 变体，不从 neutral 谱系借。
 
-**事故**：drawer unread badge 圆点用 `--neutral-fg`，玄主题下 accent(`#cfcfd4`) 与 neutral-fg(`#dedee2`) 亮度差仅 ~4%，圆点融进胶囊底不可见。`--accent-fg`（`#1a1a1c` 深字）才是 accent 实色上的正确前景色，6 个主题预设都配了对。
+**事故**：drawer unread badge 圆点用 `--neutral-fg`，玄主题下 accent（事故时值 `#cfcfd4`；现行定稿 `#a5adc2`）与 neutral-fg(`#dedee2`) 亮度差仅 ~4%，圆点融进胶囊底不可见。`--accent-fg`（`#1a1a1c` 深字）才是 accent 实色上的正确前景色，6 个主题预设都配了对。
 
 **检查**：看到 `background: var(--accent)` + 前景元素，前景应该是 `--accent-fg`，不是 `--neutral-fg`。
 
@@ -251,6 +251,10 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --neutral-faint: #46464c;  /* 极弱/装饰 */
 --neutral-ico:   #86868c;  /* 图标默认色 */
 --neutral-ico-hover: #dedee2;
+
+/* 对话流专属名称色（2026-10-06 对话流视觉裁决）：workflow / subagent 的具体名称——
+   暖驼微暖低饱和，不随主色态变化；亮色主题覆盖 #8c6231（对比 5.2:1），preset 不覆盖 */
+--name: #d7b894;
 ```
 
 ### 4.3 边框 / 分隔（v6 慎用，静态容器不叠加）
@@ -264,9 +268,9 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 ### 4.4 主色 / 状态色（太极·玄默认：水墨降饱和，克制放开档）
 
 ```css
-/* 主色（玄 = 纯灰系）*/
---accent:        #cfcfd4;
---accent-hover:  #e0e0e4;
+/* 主色（玄 = 近无彩度底 + 一枚贯穿全应用的弱蓝灰；彩度「依稀」量级，可寻不与状态色争语义）*/
+--accent:        #a5adc2;
+--accent-hover:  #b5bdd4;  /* accent 等色相提亮一档（OKLCh dL≈0.052，与其余 preset 同模式） */
 --accent-soft:   color-mix(in oklch, var(--accent) 10%, transparent);  /* 派生 */
 --accent-ring:   color-mix(in oklch, var(--accent) 30%, transparent);  /* 派生 */
 --accent-fg:     #1a1a1c;  /* accent 实色上的文字（玄主题用深字）*/
@@ -298,6 +302,11 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 ```css
 --font-sans: system-ui, 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
 --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+
+/* 字重三档（2026-10-06 对话流视觉裁决）：消费方用 Tailwind 任意值类 [font-weight:var(--fw-*)] */
+--fw-text: 400;  /* 日常文字 */
+--fw-mid: 500;   /* 中档：行容器 / 组头 */
+--fw-bold: 600;  /* 粗体：动作词 / 工具名 */
 
 /* 字号 scale（base 13→14 上移，calc 自适应）*/
 > 2026-08-25：--font-sans 改系统栈，supersede ADR-0019 的 Inter 字体子决策（chat-visual-font-optimize）
@@ -333,6 +342,10 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --ease: cubic-bezier(0.4,0,0.2,1);
 --duration-fast: 120ms;  --duration: 200ms;  --duration-slow: 320ms;
 
+/* 执行中工具图标扫光带（2026-10-06 对话流视觉裁决）：暗色亮带 / 亮色主题反转暗带
+   rgba(23,23,26,0.3)，preset 不覆盖；消费点 = sheen-x keyframes（style.css 动画区） */
+--sheen: rgba(236, 236, 236, 0.55);
+
 /* 组件尺寸 */
 --content-max-w: 720px;  --composer-btn-size: 30px;
 --bash-output-max-height: 240px;  --bar-fill-soft: 55%;
@@ -353,7 +366,7 @@ demo 引入完整多主题系统（spec 无，demo 重大扩展）。机制：�
 **阴 · 暗色族（3 个）**——背景近中性，色相只做「依稀相」(S≤6%)，靠明度阶梯说话：
 | 主题 | accent | 特色 |
 |---|---|---|
-| **太极·玄（默认）** | `#cfcfd4` 纯灰 | 暗端防糊，阶梯上抬+加宽级差 |
+| **太极·玄（默认）** | `#a5adc2` 弱蓝灰 | 暗端防糊，阶梯上抬+加宽级差；唯一贯穿全应用的色相锚点（OKLCh C 0.0315，依稀量级） |
 | 太极·黛蓝 | `#9ca9c9` 依稀蓝相 | S≈8% |
 | 太极·暖墨 | `#cbc3b3` 暖相 | 宣纸暖 |
 
@@ -488,7 +501,7 @@ hover 时右侧整单元（badge/耗时）`visibility:hidden` 让位 ghost 操�
 
 **通用（全场景）**：
 - **工具失败**（exit≠0）：图标统一 `--neutral-ico`，行尾加 mono `exit N` 中性标签（`bg-bg-elevated` 胶囊）
-- **彩色边界**：保留 = 真 failure danger / 待行动 accent / git 语义色（降极小圆点）；降中性 = workflow done / GoalCard badge / ±stats / 目录改动数
+- **彩色边界**：保留 = 真 failure danger / 待行动 accent / git 语义色（降极小圆点）；降中性 = workflow done / GoalCard badge / ±stats / 目录改动数。**workflow DAG 画布节点不在本降中性清单**——画布是过程主视图，done = success 绿供进展扫读（「哪些绿了、哪个还在跑」），列表 badge 场景「done 是多数派稳态故降中性」的逻辑不适用于画布（workflow-overlay-refine D9 裁决）
 - **GitPanel 行级 badge 中性化**：M/A/D 统一 `neutral-dim`，仅 U（冲突）染 `danger + font-weight 700`
   > **场景区分**：GitPanel 行级 badge 因信息密度高需中性化降噪；**ChangeSetCard 文件 badge 保留彩色**（M=info / A=success / D=danger），因对话流场景信息密度低，彩色辅助辨识收益大于降噪收益。两条不矛盾，是同一原则在不同信息密度场景的取舍。
 

@@ -19,7 +19,7 @@
     <!-- 分组行 + 模型行 -->
     <template v-for="group in groups" :key="group.pid">
       <!-- 分组头 -->
-      <div class="grid grid-cols-[minmax(180px,1fr)_84px_84px_84px_84px_104px_76px_108px] items-center gap-1 px-2 py-1 cursor-pointer border-t border-hairline bg-[color-mix(in_oklch,var(--bg-sunken)_50%,transparent)] transition-colors hover:bg-[var(--row-hover)]" @click="toggle(group.pid)">
+      <div class="grid select-none grid-cols-[minmax(180px,1fr)_84px_84px_84px_84px_104px_76px_108px] items-center gap-1 px-2 py-1 cursor-pointer border-t border-hairline bg-[color-mix(in_oklch,var(--bg-sunken)_50%,transparent)] transition-colors hover:bg-[var(--row-hover)]" @click="toggle(group.pid)">
         <span class="flex min-w-0 items-center gap-1.5">
           <span class="inline-block size-2 shrink-0 rounded-[2px]" :style="{ background: getProviderColor(providerColors, group.pid) }" />
           <span class="truncate text-[12px] font-medium text-[var(--neutral-fg)]">{{ group.pid }}</span>

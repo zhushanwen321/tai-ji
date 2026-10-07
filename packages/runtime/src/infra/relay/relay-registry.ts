@@ -35,7 +35,7 @@ import { buildOutboundChildEnv } from '../spawn-env.js'
 import { createPiRelayLog, type PiSessionLog } from '../logger.js'
 import { toErrorMessage } from '../../utils/errors.js'
 import { isPidAlive } from '../../utils/protocol-background-task.js'
-import { RelayTee } from './relay-tee.js'
+import { RelayTee, type RelayTeeStreamState } from './relay-tee.js'
 import { getRelayChildrenDir, getRelayPidFilePath } from './relay-paths.js'
 
 /**
@@ -309,6 +309,23 @@ export class RelayRegistry {
       targets.push({ kill: () => killRelayChild(entry.child) })
     }
     return targets
+  }
+
+  /**
+   * 按 (mainSessionId, recordId) 的流状态只读查询（B2 subagent-stream-chunk §4.1，
+   * session.getSubagentStreamState RPC 的数据源路由半）：recordId 定位在册 relay 条目，
+   * 归属 mainSessionId 不一致视同无条目（防跨 session 串读）。
+   * 返回 undefined = 该 record 无在管 tee（未注册 / child exit 已清理 / session 不匹配）；
+   * 命中 = tee.getStreamState() 原样透传（found:false 的流内语义归一在 tee 侧）。
+   * 线性查找对齐 hasByMainSessionId 取态：recordIdToConn 是 O(1) 反向索引，条目数 =
+   * 在途 subagent 数（量级小）；纯只读，不改变任何注册/清理行为。
+   */
+  getStreamStateByRecord(sessionId: string, recordId: string): RelayTeeStreamState | undefined {
+    const conn = this.recordIdToConn.get(recordId)
+    if (conn === undefined) return undefined
+    const entry = this.entries.get(conn)
+    if (entry === undefined || entry.mainSessionId !== sessionId) return undefined
+    return entry.tee.getStreamState()
   }
 
   /** socket server 的 connection 入口：等待握手 → 校验 → 注册 + spawn + 字节泵。 */

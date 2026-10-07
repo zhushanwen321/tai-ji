@@ -1594,5 +1594,62 @@
       "note": "消费方：packages/runtime/src/services/session/session-lifecycle.ts applyRestoreAbortConvergence docblock 与 packages/runtime/src/services/session/event-interpreter.ts UserStoppedGate 头注（两处符号名 + 行号锚回指本条）。无独立单测探针——no-op 断言的承重面是真实 pi 子进程的 RPC 语义（e2e 面），单测层直调需真实 AgentSession 实例、探 mock 不探实装收益低（同 PS-69 先例），靠锚点符号名复审。pi 升级时重验：abort() 是否仍纯可选链掐点组合、waitForIdle 是否仍 isIdle 早退、是否新增有状态副作用（置位标志/记录/通知）"
     },
     "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-75",
+    "claim": "setModel 凭据门控失败词形封闭：checkAuth 不过恒抛模板串 `No API key for ${provider}/${id}`，该错误经 rpc-mode 外层 catch 以 response success:false + error 原文到达子进程 stdout——pi-subagent-cli classifySetModelFailure 以 startsWith(\"No API key\") 分型 credential-missing（packages/pi-subagent-cli/src/control-responses.ts:149）。词形漂移 = 该分型错位落 readback-failed 残余兜底型，宿主凭据缺失处置链（校验型失败不写覆盖记账、§7.5 凭据行）失效",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "setModel → _modelRuntime.checkAuth throw",
+        "note": ":1911-1913 —— `if (!(await this._modelRuntime.checkAuth(model.provider)))` → `throw new Error(\\`No API key for ${model.provider}/${model.id}\\`)`【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "observe",
+      "note": "消费方：pi-subagent-cli setModel 转发错误三型封闭映射 classifySetModelFailure（control-responses.ts:146-151，头注回指本条）——`Model not found`（快照型，PS-41）与 `No API key`（凭据型）两前缀之外的残余消息按 readback-failed 收口。pi 升级时重验：agent-session.js setModel 的 throw 词形是否仍为 `No API key for <provider>/<id>`（grep dist）；词形变化须同步改 classifySetModelFailure 的分型前缀"
+    },
+    "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-76",
+    "claim": "setModel 成功路径恒落 `type:\"model_change\"` 条目：agent-session.js:1917 调 sessionManager.appendModelChange(provider, modelId)，条目形状 {type,id,parentId,timestamp,provider,modelId}（session-manager.js:851-862，append 后沿 PS-17 同步链落 JSONL）。承重：model-switch 设计不变量 5「切换事实可审计」与详情载荷「最近生效值」尾读派生（model-override-query）都以此为 pi 侧权威——该调用缺失/改名 = 审计链与生效值显示同时失真",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "setModel → sessionManager.appendModelChange",
+        "note": ":1917（setModel :1910-1927 体内，checkAuth 门控之后、persist 分支之前；cycleModel 两路径 :1969/:1996 同族）【行号锚基于 pi@1.0.0 实装实测】"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/session-manager.js",
+        "symbol": "appendModelChange(provider, modelId)",
+        "note": ":851-862 —— entry type:\"model_change\" + _appendEntry 推进 leaf【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-model-snapshot.test.ts"
+    },
+    "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-77",
+    "claim": "新 session（buildSessionContext 无既有消息 → hasExistingSession=false）创建时首条即写恢复元数据：createAgentSession else 分支先 appendModelChange(启动模型)（sdk.js:287）再 appendThinkingLevelChange(初始档位)（:289），源注释「Save initial model and thinking level for new sessions so they can be restored on resume」。承重：model-switch 设计「最近生效值」字段对 pi 成员恒有值的结构性前提（未热切 running 成员的尾条目 = 启动模型）；该分支缺失/后移 = 新成员该字段退化为无值防御分支",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/sdk.js",
+        "symbol": "createAgentSession !hasExistingSession else 分支",
+        "note": ":279-290 —— if(hasExistingSession) 补缺元数据 :280-282；else（新 session）:284-290 首条 appendModelChange(:287) + appendThinkingLevelChange(:289)【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "observe",
+      "note": "消费方：model-switch 设计 §9 文件地图「最近生效值」派生读取（仅 pi 成员执行，runtime subagent 详情载荷组装路径）。pi 升级时重验：sdk.js createAgentSession 的 !hasExistingSession 分支是否仍首条写 model_change（grep dist/core/sdk.js appendModelChange）"
+    },
+    "verifiedWith": "1.0.0"
   }
 ]

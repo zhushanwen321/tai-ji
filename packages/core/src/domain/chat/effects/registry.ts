@@ -56,8 +56,7 @@ import type {
   ServerMessageType,
   ToolCall,
 } from '@taiji/shared'
-import { normalizePiToolResult } from '../apply-entry'
-import { truncateEntryToolOutput } from '../apply-entry-utils'
+import { deriveToolResultOutputs } from '../apply-entry-utils'
 import type { RetryState, FinalizeReason } from '../store-types'
 import type { MessageEffectContext, MessageEffectHandler } from '../effect-types'
 export type { MessageEffectContext, MessageEffectHandler } from '../effect-types'
@@ -288,6 +287,9 @@ function terminalErrorEffect(
  * 上层条件写入保留 running 期间的旧值（迁移前 `?? c.output` 同语义）。
  * [D6-⑧] live overlay 与 reducer（computeToolCallFill）过同一 64KB 截断函数——
  * 非六类工具（write/edit/MCP）大结果 live 与 reload 形态一致（D3 代价 C 根治）。
+ * [perf] 归一 + 截断经 deriveToolResultOutputs 共享派生（body 引用 memo）：本腿与
+ * reducer 腿持同一 entry.message 引用（reducer 腿先喂），后到腿命中缓存——单帧同一
+ * body 的全文归一/encode 从两份降为一份；截断语义与产物逐字节不变。
  */
 function deriveToolCallEndOverlay(message: PiMessageEntry['message']): {
   hasContent: boolean
@@ -297,17 +299,16 @@ function deriveToolCallEndOverlay(message: PiMessageEntry['message']): {
   images: Array<{ data: string; mimeType: string }> | undefined
 } {
   const hasContent = message.content !== undefined
-  const { output: rawOutput, outputRaw: rawOutputRaw, images } = hasContent
-    ? normalizePiToolResult(message)
-    : { output: undefined, outputRaw: undefined, images: undefined }
-  const outputT = rawOutput !== undefined ? truncateEntryToolOutput(rawOutput) : undefined
-  const outputRawT = rawOutputRaw !== undefined ? truncateEntryToolOutput(rawOutputRaw) : undefined
+  if (!hasContent) {
+    return { hasContent, output: undefined, outputRaw: undefined, outputTruncated: false, images: undefined }
+  }
+  const outputs = deriveToolResultOutputs(message)
   return {
     hasContent,
-    output: outputT?.text,
-    outputRaw: outputRawT?.text,
-    outputTruncated: (outputT?.truncated ?? false) || (outputRawT?.truncated ?? false),
-    images,
+    output: outputs.output.text,
+    outputRaw: outputs.outputRaw?.text,
+    outputTruncated: outputs.output.truncated || (outputs.outputRaw?.truncated ?? false),
+    images: outputs.images,
   }
 }
 

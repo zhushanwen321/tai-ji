@@ -489,6 +489,9 @@ describe('MessageBus', () => {
     expect(topicOf('message.thinking_start')).toBe('transient')
     expect(topicOf('message.thinking_end')).toBe('transient')
     expect(topicOf('subagent.stream_delta')).toBe('transient')
+    // B2 subagent-stream-chunk：增量内容 chunk 与清除帧同族 transient——不分配 seq、不入 ring、
+    // 不写快照，直传订阅者；收敛走失步/接入拉取（session.getSubagentStreamState）
+    expect(topicOf('subagent.stream_chunk')).toBe('transient')
     expect(topicOf('terminal.data')).toBe('transient')
     expect(topicOf('message.stream_warn')).toBe('transient')
     expect(topicOf('plugin:viewUpdate')).toBe('transient')

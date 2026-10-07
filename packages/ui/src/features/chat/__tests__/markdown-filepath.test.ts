@@ -190,7 +190,7 @@ describe('AC-2 真实渲染不卡顿', () => {
   it('750+ chars 中英混排+反引号+表格行 单次 render < 200ms 且不抛错', async () => {
     const triggerBlock = [
       '这是一段混排文本，包含长英文单词如 configurationmanagementstrategies 和 backwardcompatibilityguarantees，',
-      '以及反引号路径 `packages/renderer/src/composables/logic/markdown.ts` 和 `~/Code/project/foo.ts`。',
+      '以及反引号路径 `packages/ui/src/features/chat/markdown.ts` 和 `~/Code/project/foo.ts`。',
       '还有表格行：',
       '| 字段 | 类型 | 说明 |',
       '|------|------|------|',
@@ -204,7 +204,7 @@ describe('AC-2 真实渲染不卡顿', () => {
     try {
       html = await freshRender(triggerBlock, {
         filePaths: new Set([
-          'packages/renderer/src/composables/logic/markdown.ts',
+          'packages/ui/src/features/chat/markdown.ts',
         ]),
       })
     } catch (e) {

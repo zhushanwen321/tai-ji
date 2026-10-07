@@ -1,9 +1,14 @@
 /**
- * Playwright globalSetup —— 测试启动前确保 Electron 构建产物存在，且 renderer 构建形态与本次轨匹配。
+ * Playwright globalSetup —— 测试启动前确保 Electron 构建产物存在、新鲜，且构建形态与本次轨匹配。
  *
- * 两种情况会跑 build:e2e（build:main + build:preload + build:vite with VITE_E2E）：
- * ① 产物缺失；② renderer 产物形态（mock / real）与本次运行 spec 所需轨形态不一致。
- * 产物齐备且形态匹配则跳过（增量开发时避免每次重建，节省时间）。
+ * 三种情况会跑 build:e2e（build:main + build:preload + build:vite with VITE_E2E）：
+ * ① 产物缺失；② renderer 产物形态（mock / real）与本次运行 spec 所需轨形态不一致；③ 产物过期。
+ * 产物齐备、新鲜且形态匹配则跳过（增量开发时避免每次重建，节省时间）。
+ *
+ * ── 新鲜度门禁 ──────────────────────────────────────────────────────────────
+ * renderer bundle 的 mtime 必须晚于直供 dist 的五棵源码树（RENDERER_SOURCE_ROOTS：
+ * ui/core/renderer + shared/extension-protocol）的最新 mtime，否则视为过期——防止测试跑在源码
+ * 中途状态构建的过期 bundle 上（被测 DOM ≠ 当前源码，spec 断言对着旧 DOM 报假红）。
  *
  * ── 形态门禁（v-e2e-real-post-w3 失败归因 spec-bug 的根因修复）──────────────────
  * mock 轨与 real 轨共用 apps/electron/renderer/dist（构建期 VITE_MOCK define），旧逻辑只查
@@ -47,6 +52,18 @@ const ARTIFACTS = [
   path.join(ELECTRON_DIR, 'renderer/dist/index.html'),
 ]
 
+// renderer bundle 的新鲜度基准 = 直供 renderer bundle 的源码树（vite build 每次全量重写 dist，
+// index.html 的 mtime 即最近一次 renderer 构建时点）。shared / extension-protocol 两树
+// 不经 dist 中转、源码直供进 renderer bundle（dist 内联），改动同样使 bundle 过期，故一并纳入
+const RENDERER_INDEX = path.join(ELECTRON_DIR, 'renderer/dist/index.html')
+const RENDERER_SOURCE_ROOTS = [
+  path.join(REPO_ROOT, 'packages/ui/src'),
+  path.join(REPO_ROOT, 'packages/core/src'),
+  path.join(REPO_ROOT, 'packages/renderer/src'),
+  path.join(REPO_ROOT, 'packages/shared/src'),
+  path.join(REPO_ROOT, 'packages/extension-protocol/src'),
+]
+
 /** renderer 构建形态（轨形态）：mock = 带 VITE_MOCK 的 mock fixture 构建；real = 不带 VITE_MOCK */
 export type BundleVariant = 'mock' | 'real'
 
@@ -56,6 +73,38 @@ function artifactsMissing(): boolean {
   return ARTIFACTS.some((p) => !fs.existsSync(p))
 }
 
+interface NewestSource {
+  mtimeMs: number
+  file: string
+}
+
+function newestSourceChange(roots: string[]): NewestSource {
+  let newest: NewestSource = { mtimeMs: 0, file: '' }
+  const stack = [...roots]
+  while (stack.length > 0) {
+    const dir = stack.pop()!
+    if (!fs.existsSync(dir)) continue
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        stack.push(full)
+      } else if (entry.isFile()) {
+        const mtimeMs = fs.statSync(full).mtimeMs
+        if (mtimeMs > newest.mtimeMs) {
+          newest = { mtimeMs, file: path.relative(REPO_ROOT, full) }
+        }
+      }
+    }
+  }
+  return newest
+}
+
+function rendererBundleStale(): NewestSource | null {
+  if (!fs.existsSync(RENDERER_INDEX)) return null // 缺失走 artifactsMissing 通道
+  const bundleMtimeMs = fs.statSync(RENDERER_INDEX).mtimeMs
+  const newest = newestSourceChange(RENDERER_SOURCE_ROOTS)
+  return newest.mtimeMs > bundleMtimeMs ? newest : null
+}
 /** 当前 renderer 产物形态（null = assets 缺失/空，无从判定） */
 export function detectCurrentBundleVariant(): BundleVariant | null {
   if (!fs.existsSync(RENDERER_DIST_ASSETS)) return null
@@ -157,29 +206,31 @@ function buildE2E(variant: BundleVariant): void {
 }
 
 /**
- * 产物就绪保障：齐备且形态匹配则跳过 build；缺失 / 形态失配则按本次轨形态重建并校验
+ * 产物就绪保障：齐备、新鲜且形态匹配则跳过 build；缺失 / 过期 / 形态失配则按本次轨形态重建并校验
  * （校验与收尾日志拆到 verifyRebuiltArtifacts——globalSetup 只做 visual 轨短路 + 参数解析）。
  */
-function ensureArtifacts(required: BundleVariant | null, current: BundleVariant | null): void {
+function ensureArtifacts(required: BundleVariant | null, current: BundleVariant | null, stale: NewestSource | null): void {
   const missing = artifactsMissing()
   const mismatch = required !== null && current !== null && required !== current
 
-  if (!missing && !mismatch) {
+  if (!missing && !mismatch && stale === null) {
     console.log(
-      `[e2e global-setup] 构建产物已存在（renderer ${current ?? '形态未知'} bundle` +
+      `[e2e global-setup] 构建产物已存在且新鲜（renderer ${current ?? '形态未知'} bundle` +
         (required ? `，与本次轨所需 ${required} 匹配` : '') +
-        '），跳过 build',
+        '，晚于 RENDERER_SOURCE_ROOTS 五树），跳过 build',
     )
     return
   }
 
-  // 产物缺失时按本次轨形态构建（无定向时沿用 mock 形态——既有默认行为）；
+  // 产物缺失 / 过期时按本次轨形态构建（无定向时沿用 mock 形态——既有默认行为）；
   // 形态失配时强制按所需形态重建（形态切换成为运行内建前置，不再依赖手动恢复命令）
   const variant: BundleVariant = required ?? 'mock'
   console.log(
     missing
       ? `[e2e global-setup] 构建产物缺失，跑 build:e2e（${variant} bundle）...`
-      : `[e2e global-setup] renderer bundle 形态失配（当前 ${current}，本次轨需 ${required}），重建 ${variant} bundle ...`,
+      : stale !== null
+        ? `[e2e global-setup] 构建产物过期（${stale.file} mtime 晚于 renderer bundle），跑 build:e2e（${variant} bundle）...`
+        : `[e2e global-setup] renderer bundle 形态失配（当前 ${current}，本次轨需 ${required}），重建 ${variant} bundle ...`,
   )
   buildE2E(variant)
   const after = verifyRebuiltArtifacts(required)
@@ -210,5 +261,9 @@ export default async function globalSetup(config?: FullConfig): Promise<void> {
     return
   }
 
-  ensureArtifacts(requiredBundleVariant(config?.argv ?? process.argv), detectCurrentBundleVariant())
+  ensureArtifacts(
+    requiredBundleVariant(config?.argv ?? process.argv),
+    detectCurrentBundleVariant(),
+    rendererBundleStale(),
+  )
 }

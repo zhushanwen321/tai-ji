@@ -321,7 +321,9 @@ skill 候选两态统一 taiji 源：globalSkills ∪ projectSkills（location �
 [2026-10-04 理由边界修正] 「禁 iframe」的排除理由（依赖 `X-Frame-Options` / CSP `frame-ancestors` 的硬伤）只对**嵌入第三方远程网页**成立——目标站响应头拒绝被嵌。本地 HTML 文件由应用自有 `protocol.handle` 服务、响应不携带这些头，理由不命中；对话流 HTML 产物预览走 `sandbox="allow-scripts"` iframe（无 `allow-same-origin`、文档落 opaque origin、网络出站由内容级 CSP 封死）不在本条禁用范围。边界收窄同批落 `constraints.json` C-build-06 与 [ADR-0118](#adr-0107-对话流-html-预览与产物落点约定2026-10-04-设计裁决chat-html-support)。
 
 ### ADR-0066 太极·玄纯灰 V3（唯一现行视觉 ADR）
-全族去冷蓝换纯灰（bg/surface/neutral/border 同步），accent 中亮灰 #cfcfd4，状态色保留极弱色相（M/A/D badge 语义辨识下限）。值权威 = `packages/renderer/src/style.css`（暗色默认，亮色 [data-theme=light] 镜像）。视觉演化史见 [docs/design-evolution.md](../design-evolution.md)。
+全族去冷蓝换纯灰（bg/surface/neutral/border 同步），accent 弱蓝灰 `#a5adc2`（见下方补记），状态色保留极弱色相（M/A/D badge 语义辨识下限）。值权威 = `packages/renderer/src/style.css`（暗色默认，亮色 [data-theme=light] 镜像）。视觉演化史见 [docs/design-evolution.md](../design-evolution.md)。
+
+> **补记（2026-10，ui-signal-density D3，用户终裁全局路径）**：玄主题 accent 现值 = 弱蓝灰 `#a5adc2`（OKLCh C 0.0315 / H 269°，对 bg `#131316` 对比 8.26:1），定位为**重新引入弱色相的尝试**——不是对「去冷蓝 = 防色疲劳」的安全论证：冷蓝 `#4f8ef7`（C≈0.15 / H≈220°）的否决理由不变，新值彩度约其 1/5、色相从青蓝转向紫灰，「长时间使用不疲劳」需真实使用反馈验证，设计阶段不可判定。**重审触发条件**：用户报告暗色界面视觉疲劳 / 冷色相不适。届时回退首选 = 锚点专用令牌（`--accent` 回纯灰、新增 `--accent-anchor` 弱蓝灰只挂三处点睛位——侧栏新建任务主按钮、选中会话行、当前导航/活动指示；见 ui-signal-density §3.2 候选 F）。
 
 ### ADR-0084 Overview 视图整体移除
 用户裁决 Overview（多会话鸟瞰）不应在任何地方存在，全链路删除（组件/路由 view/入口链/i18n/测试）。背景：入口早已收敛（v6 D14 移除 sidebar 按钮，仅 ⌘K 命令面板 go-overview 可达），实态为 v1 骨架无真实用户价值。替代形态：会话切换与统筹由 Sidebar Session List + ⌘K 搜索满足；后台任务可见性由侧栏 Agents/Flows 视图 + 通知体系承担。连带删除唯一消费者 sessionDigest 派生（useSessionDerivations）。
@@ -480,6 +482,8 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **登记**：无新约束族（调用意图经函数名区分，语义边界由 coordination.ts 的 D1/D10 注释锚点与测试钉住）；实装 = `packages/core/src/domain/drawer/coordination.ts`。设计文档 `.tmp/tech-design/workflow-visualization.md`（不入库，过程产物）；本条即该决策的现行登记处。
 
+> **补记（2026-10-06，workflow-overlay-refine D2，header 形态修订）**：workflow-visualization（2026-10-02）交付的 overlay「双 header」形态——壳 header 与 `WorkflowLivePanel.vue` 自身 header 行（状态 pill / elapsed / args）并存——已被该设计 D2 修订为**单 header** 终态：LivePanel 自身 header 行删除（面板顶部直接从 L2TabBar 开始，run 状态要素由壳 header 单点呈现），args 整体不进 header（用户 v5 终裁：真实形态是 JSON 串、扫读价值低）。本条登记的入口语义分立与回落链不受影响；overlay 现行结构以该形态为准。
+
 ### ADR-0105 workflow DAG 静态解析器落 subagent-core（2026-10-02 设计裁决，workflow-visualization §3.2 解析位置 A 方案）
 **决策**：`scriptSource → DAG JSON` 静态解析器（acorn 解析；节点/边/phase 分区/条件谓词/并行组/循环回边/调用点行号；模板名保留；不支持语法 fail-fast 结构化错误）落 **subagent-core**（workflow 编排核心包）——解析器紧邻 script-lint 与 record 写入点，与引擎 CLI 包（pi-subagent-cli / zcode-subagent-cli）无关（引擎包被边界禁止依赖 core）；解析产物作为 run 数据的派生物经 `session.getWorkflowDag(runId)` RPC 透出（runtime 读该 run record 的 `run-created` scriptSource，调 core 解析器，runId 内存缓存、仅缓存成功结果）。到达 renderer 的链路 = runtime tsup bundle（noExternal inline core）。**acorn 依赖只声明在 subagent-core**（runtime 不声明——runtime tsup 对自身 dependencies 默认 external，声明错位会致打包态断链）。
 
@@ -617,3 +621,27 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **依据**：本体系收敛自 pi 1.0 适配设计包交付后的系列裁决（2026-10-05）：命令终局事件化（handled/started/断连三事件）、投递 backoff 退役、全项目防御机制清查（约 270 处登记）、event-tail 退役与推送通道方向、受理层同步上屏、scheduler 切换对账翻转为事实查询。故障模型依据 = 本地进程通信无网络类瞬态失败面，对端死亡有 OS 级信号。
 
 **登记**：清查清单与删改记录 = `docs/todo/defense-mechanism-cleanup.md` 与 `.tmp/dev-flow/defense-scan/`（四分区清单 + 改动清单）；投递域重构与推送通道设计 = `.tmp/tech-design/` 产出（过程产物，决策以本条与 cleanup 登记为准）；AGENTS.md「防御机制第一原则」规则条目为本条的规则面投影。原「时间平抑类逻辑红线」为本体系判定层的既有条目，继续有效。
+
+### ADR-0128 subagent 流式通道 = 增量推送 + 按需拉取（2026-10-06 用户裁决，B2 设计裁决）
+
+**决策**：subagent 流式输出通道（relay 路径）采用「chunk 增量消息（带 msgSeq/deltaSeq 双序号）+ 按需拉取收敛」——不做周期快照、不做攒批。拉取触发 = 接入（订阅建立/记录刷新发现运行中 record/流中首条 chunk 缺前缀）与失步（deltaSeq 跳号）两类事件；恢复源 = 新增 RPC `session.getSubagentStreamState` 读取 RelayTee 既有内存状态（当前 msgSeq / 已发 delta 数 / 累积全文），产生端不保留 delta 历史。响应携带水位（记录已处理到哪的位置标记：lastDeltaSeq，这份全文含到第几条 delta），消费端凭水位去重缓冲回放。形态对标 Kubernetes ListAndWatch（接入 LIST 全量 → WATCH 增量 → 失步重新 LIST）。
+
+**要点**：
+1. **ADR-0097 豁免**：分则「功能域禁止消费侧补充拉取」红灯由本通道触发豁免——拉取对象是既有内存状态的只读视图（非新建补偿状态）；失步在活连接上按传输契约（TCP 有序可靠 + transient 直传订阅者）不会发生，拉取触发源是连接生命周期事件与防御性检查，不是高频补偿路径；豁免范围仅限 subagent 流式通道。
+2. **兼容窗口不设防**：npm 移动壳跨版本窗口内旧 renderer 收未知 chunk 静默忽略、无实时流显示，定稿 entry 照常——用户裁决移动壳尚无用户、renderer/runtime 同仓同发，不为兼容窗口保留冗余推送机制，亦不设移动壳冒烟义务。
+3. **无时间窗逻辑**：失步修复与失败重触发均为事件驱动（跳号 / 下一条 chunk 到达），无周期快照、无重试定时器（ADR-0122）。
+4. **周期快照制不采用**（本设计前一版形态，经对抗比较后裁决）：机制面最小且对旧 renderer 兼容窗口友好，但稳态多发约 9× 全文量字节、恢复延迟受快照间隔约束——与「恢复语义对齐现状量级」的长期合理性判据冲突。
+
+**依据**：用户裁决「只做长期合理的方案，不做短期成本控制考量的方案」（2026-10-06）；拉取收敛与 ADR-0097「拉为主、推补充」直配，恢复源 = 同步查询（ADR-0122 状态判定来源最高优先级）。
+
+**登记**：设计文档 `.tmp/tech-design/subagent-stream-chunk-design.md`（过程产物，不入库）；实施跨 shared / runtime / core / renderer 四包 + 本登记，清单见设计文档 §5。
+
+### ADR-0129 subagent 执行模型切换：用户覆盖语义与跨端命令通道（2026-10-06 用户裁决「按 A 做」）
+**决策**：
+- **用户覆盖赢**：`setModel` 在模型解析链第 0 层加用户覆盖记账，优先级高于 agent frontmatter 与脚本/调用参数显式指定的模型。
+- **持久化与热切是同一意图的两半，必须同步落**：只热切会被下一轮 spawn 的旧 `--model` argv 压回（pi CLI flag 恒优先于 session 恢复）；只记账则执行中不受控。记账载体 = record 事件文件 `record-model-override` 帧（chat 域）/ run journal `model-override` 事件（workflow 域），fold 取最新、替换不叠加；records 磁盘快照 json 是投影非事实源（不作断言面）。
+- **跨端通道（runtime → pi extension）= prompt 斜杠命令出站点**：runtime `client.prompt("/subagent-model <单行 JSON>")` → pi `prompt()` 扩展命令分支（流式中也立即执行；排队路径会拒扩展命令，不可绕行）→ subagent-workflow 进程内编排 → 结果文件 `<subagent 数据根>/model-switch/<requestId>.json` 回执（原子写、网关读后即删、60s 超时 best-effort）。pi 1.0.0 无结构化 RPC 注册面（rpc-mode 命令词表封闭）且上游不 fork/不提 PR——斜杠命令是仓内在产标准通道（三先例：workflow abort / subagents 动作族 / plan abort）；新出站点登记 `.githooks/check_prompt_outposts.py` 白名单。
+- **成员态三态（引擎中立）**：switched（生效值+档位回执）/ not-active（引擎定位不到活跃子进程，已退出成员承接态）/ not-applicable（引擎 capability unsupported，提示性应答非错误，记账照写）+ 失败名单（独立组件，非成员态——转发失败成员的成员标识 + fail-fast 分型；单成员失败不回滚其他成员、不影响 run 级意图写入）。聚合应答恒为「成员态数组 + 失败名单 + 汇总文案」三组件固定结构（前端按成员分项呈现）。run 级全切为 2026-10-05 用户裁决翻转初稿「run 级只记账不转发成员」条款的结果（随持久化裁决一并确认——该反向方案已否决，勿再议）。resume 生效模型三档回落：resume 显式参数 > 持久化覆盖 > run 创建模型。
+
+**登记**：设计 SSOT = `.tmp/tech-design/subagent-model-switch.md`（§5.2 解析链 / §7.1.1 通道机制 / §7.4 三态）；术语投影 = docs/CONTEXT.md「模型覆盖」词条；验收终态 = 5 轮真机验收 degraded 无阻塞缺陷（`.tmp/dev-flow/subagent-model-switch.acceptance/verdict.json`）；验收期遗留裁决项 = `docs/todo/subagent-model-switch-d3-defects.md`。
+>>>>>>> feat-workflow-change-model

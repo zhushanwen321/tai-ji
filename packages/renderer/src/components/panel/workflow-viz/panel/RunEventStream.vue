@@ -125,6 +125,7 @@ function typeClassOf(type: WorkflowRunEventEntry['type']): string {
     case 'phase-settled':
     case 'run-resumed':
     case 'run-settled':
+    case 'model-override':
       return 'text-accent'
     case 'agent-started':
     case 'agent-settled':
@@ -172,6 +173,8 @@ function summaryOf(e: WorkflowRunEventEntry): string {
       return e.reason ?? ''
     case 'run-settled':
       return `${e.outcome}${suffixOf(e.reason)}`
+    case 'model-override':
+      return `${e.model.provider}/${e.model.modelId}${suffixOf(e.thinkingLevel)}`
     case 'worker-log':
       return e.entry.message
     default: {

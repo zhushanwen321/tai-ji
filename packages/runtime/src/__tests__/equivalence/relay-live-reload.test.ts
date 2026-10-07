@@ -224,20 +224,39 @@ describe('equivalence: relay live ≡ reload（tee entry 帧 × getSubagentHisto
       expect(f.msg.type).toBe('session.subagentEntriesAppended')
     }
 
-    // stream_delta 帧契约（§4.3 打字机中间态）：payload.sessionId = 虚拟分区 id、lines 累积全文 split
-    const deltaFrames = frames.filter(
-      (f): f is { sessionId: string; msg: ServerMessage & { payload: { recordId: string; lines?: string[] | undefined } } } =>
+    // B2 chunk 契约（§4.2）：内容通道 = 增量 stream_chunk——msgSeq = per-record assistant
+    // 消息序号（从 1 起，3 条 assistant 消息 = 1/2/3）、deltaSeq = per-message 从 0 递增、
+    // delta 原样转发；R 路径不再产生携带 lines 全文的 stream_delta
+    const chunkFrames = frames.filter(
+      (f): f is { sessionId: string; msg: ServerMessage & { payload: { sessionId: string; recordId: string; msgSeq: number; deltaSeq: number; delta: string } } } =>
+        f.msg.type === 'subagent.stream_chunk',
+    )
+    expect(chunkFrames.map((f) => [f.msg.payload.msgSeq, f.msg.payload.deltaSeq, f.msg.payload.delta])).toEqual([
+      [1, 0, '先读取'],
+      [1, 1, '入口文件'],
+      [2, 0, '入口是 main.ts\n导出'],
+      [2, 1, ' main 函数'],
+      [3, 0, '测试目录包含 '],
+      [3, 1, '3 个用例文件'],
+    ])
+    for (const f of chunkFrames) {
+      expect(f.msg.payload.recordId).toBe(RECORD_ID)
+      // payload.sessionId = 虚拟分区 id（chunk 归属面）；publish 路由 key = 主 sid（bus 分区面）
+      expect(f.msg.payload.sessionId).toBe(VIRTUAL_ID)
+      expect(f.sessionId).toBe(MAIN_SID)
+    }
+    // assistant 定稿清除帧：每条 assistant message_end 一条（3 条），lines undefined +
+    // additive msgSeq = 被定稿消息序号（消费端 sealedMsgSeq 置位依据）
+    const clearFrames = frames.filter(
+      (f): f is { sessionId: string; msg: ServerMessage & { payload: { sessionId: string; lines?: string[] | undefined; msgSeq?: number } } } =>
         f.msg.type === 'subagent.stream_delta',
     )
-    expect(deltaFrames.length).toBeGreaterThanOrEqual(6)
-    for (const f of deltaFrames) {
-      expect(f.msg.payload.recordId).toBe(RECORD_ID)
-    }
-    const typedDeltas = deltaFrames.filter((f) => f.msg.payload.lines !== undefined)
-    expect(typedDeltas[0]?.msg.payload.lines).toEqual(['先读取'])
-    expect(typedDeltas[1]?.msg.payload.lines).toEqual(['先读取入口文件'])
-    // assistant 定稿清除帧：每条 assistant message_end 一条 lines:undefined（3 条 assistant）
-    expect(deltaFrames.filter((f) => f.msg.payload.lines === undefined)).toHaveLength(3)
+    expect(clearFrames).toHaveLength(3)
+    expect(clearFrames.map((f) => f.msg.payload.msgSeq)).toEqual([1, 2, 3])
+    expect(clearFrames.every((f) => f.msg.payload.lines === undefined)).toBe(true)
+    // 失步拉取语义锚点（§4.1/§4.2）：消费端失步检测/水位回放在 core/renderer 单元验证，
+    // 此处锚定拉取数据源（tee 状态查询三元组）的终态形状——全部消息定稿后 found=false
+    expect(tee.getStreamState()).toEqual({ found: false, msgSeq: 0, lastDeltaSeq: 0, lines: [] })
 
     // overlay 形态（toolCall form）按 applySubagentEntries 同规则剔除——store 层 UI 态不在
     // reducer 不变量内（§2.4 不变量只约束 reducer state）
@@ -270,6 +289,36 @@ describe('equivalence: relay live ≡ reload（tee entry 帧 × getSubagentHisto
       output: 'export function main() { bootstrap() }',
     })
 
+    tee.dispose()
+  })
+
+  it('流中拉取数据源形状（B2 失步/接入拉取占位）：getStreamState 同步读进行中三元组', () => {
+    // 消费端失步检测与水位回放逻辑在 core/renderer 单元验证（§4.3）；本文件锚定其数据源
+    // ——产生端只在 feed 刻度间推进状态，拉取（RPC 半）同步读到的快照必须自洽：
+    // found=true + msgSeq=1 + lastDeltaSeq 水位 + lines 全文 split 形态
+    const tee = new RelayTee({
+      mainSessionId: MAIN_SID,
+      recordId: RECORD_ID,
+      publish: () => {},
+    })
+    tee.feed(
+      Buffer.from(
+        [
+          JSON.stringify({ type: 'message_start', message: { role: 'assistant', content: [], timestamp: 1100 } }),
+          JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '先读取' } }),
+          JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '入口文件' } }),
+        ]
+          .map((l) => l + '\n')
+          .join(''),
+        'utf-8',
+      ),
+    )
+    expect(tee.getStreamState()).toEqual({
+      found: true,
+      msgSeq: 1,
+      lastDeltaSeq: 1,
+      lines: ['先读取入口文件'],
+    })
     tee.dispose()
   })
 })

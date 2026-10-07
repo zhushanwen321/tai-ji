@@ -11,6 +11,8 @@ import {
   ENGINE_PROTOCOL_VERSION,
   HANDSHAKE_TIMEOUT_MS,
   REVERSE_REQUEST_TIMEOUT_MS,
+  SET_MODEL_REQUEST_TIMEOUT_MS,
+  SET_MODEL_STAGE_TIMEOUT_MS,
   STDERR_TAIL_CHARS,
   SUPPORTED_PROTOCOL_RANGE,
   isProtocolVersionCompatible,
@@ -44,7 +46,10 @@ import {
 import {
   ENGINE_ERROR_CODE_PREFIX,
   ENGINE_PROTOCOL_ERROR_CODES,
+  SET_MODEL_ERROR_CODES,
+  SET_MODEL_NOT_ACTIVE_CODE,
   engineProtocolMismatchError,
+  engineSetModelUnsupportedError,
   isEngineErrorPassthroughCode,
   isEngineProtocolErrorCode,
 } from "../protocol/error-codes.ts";
@@ -98,14 +103,20 @@ describe("量级常量（impl-plan §2.1 逐项写死）", () => {
     expect(CANCEL_SETTLE_GRACE_MS).toBe(3_000);
   });
 
+  it("setModel 控制面超时（[subagent-model-switch §7.3] 引擎单阶段窗 3s 锚 cancel 收敛窗量级；宿主单请求上界 10s ≥ 2×3s + 余量）", () => {
+    expect(SET_MODEL_STAGE_TIMEOUT_MS).toBe(3_000);
+    expect(SET_MODEL_REQUEST_TIMEOUT_MS).toBe(10_000);
+    expect(SET_MODEL_REQUEST_TIMEOUT_MS).toBeGreaterThanOrEqual(SET_MODEL_STAGE_TIMEOUT_MS * 2);
+  });
+
   it("stderr 崩溃现场尾部 400 字符", () => {
     expect(STDERR_TAIL_CHARS).toBe(400);
   });
 });
 
-describe("9 正向方法全集", () => {
-  it("恰好 9 个方法，无多无少（v1 方法集；[H1] interact 已随 chat-run 统一退役）", () => {
-    expect(PROTOCOL_METHODS).toHaveLength(9);
+describe("10 正向方法全集", () => {
+  it("恰好 10 个方法，无多无少（v1 方法集；[H1] interact 已随 chat-run 统一退役；[subagent-model-switch] setModel 经 capabilities.setModel 位 additive 进集）", () => {
+    expect(PROTOCOL_METHODS).toHaveLength(10);
     expect([...PROTOCOL_METHODS]).toEqual([
       "initialize",
       "probe",
@@ -116,6 +127,7 @@ describe("9 正向方法全集", () => {
       "validateModel",
       "dispose",
       "ping",
+      "setModel",
     ]);
   });
 
@@ -187,8 +199,8 @@ describe("6 反向通道全集与超时二分（R9-2；[池抽象降级] 原 hos
   });
 });
 
-describe("错误码表（impl-plan §2.1 逐项）", () => {
-  it("9 个核心错误码齐全", () => {
+describe("错误码表（impl-plan §2.1 逐项 + subagent-model-switch §7.3 setModel 三型 + 无活进程码）", () => {
+  it("13 个核心错误码齐全（9 基座 + setModel 三型——成员单源 = SET_MODEL_ERROR_CODES，主词表 spread；+ engine_run_not_active 无活进程码）", () => {
     expect([...ENGINE_PROTOCOL_ERROR_CODES]).toEqual([
       "engine_not_found",
       "engine_protocol_mismatch",
@@ -199,17 +211,41 @@ describe("错误码表（impl-plan §2.1 逐项）", () => {
       "engine_handshake_timeout",
       "engine_crashed",
       "engine_probe_failed",
+      "engine_model_not_in_snapshot",
+      "engine_credential_missing",
+      "engine_state_readback_failed",
+      "engine_run_not_active",
     ]);
+  });
+
+  it("setModel 域词表：失败分型三型与无活进程码互斥（失败名单值域不含 not-active——成员三态之一，非失败）", () => {
+    expect(SET_MODEL_ERROR_CODES).toEqual([
+      "engine_model_not_in_snapshot",
+      "engine_credential_missing",
+      "engine_state_readback_failed",
+    ]);
+    expect(SET_MODEL_NOT_ACTIVE_CODE).toBe("engine_run_not_active");
+    expect((SET_MODEL_ERROR_CODES as readonly string[]).includes(SET_MODEL_NOT_ACTIVE_CODE)).toBe(false);
   });
 
   it("收窄 guard：命中词表 true；其余 engine_* 前缀走透传判定", () => {
     expect(isEngineProtocolErrorCode("engine_crashed")).toBe(true);
+    expect(isEngineProtocolErrorCode("engine_run_not_active")).toBe(true);
     expect(isEngineProtocolErrorCode("engine_custom_boom")).toBe(false);
     expect(isEngineProtocolErrorCode("boom")).toBe(false);
     expect(isEngineErrorPassthroughCode("engine_custom_boom")).toBe(true);
     expect(isEngineErrorPassthroughCode("engine_crashed")).toBe(false);
     expect(isEngineErrorPassthroughCode("no_prefix")).toBe(false);
     expect(ENGINE_ERROR_CODE_PREFIX).toBe("engine_");
+  });
+
+  it("setModel 能力位负向具名错误：code = engine_capability_unsupported + declared 缺省兜底（引擎侧自拒契约——明确错误而非崩）", () => {
+    const err = engineSetModelUnsupportedError("zcode", "unsupported");
+    expect(err.code).toBe("engine_capability_unsupported");
+    expect(err.message).toContain("setModel");
+    expect(err.toStructured().data).toMatchObject({ engineId: "zcode", capability: "setModel", declared: "unsupported" });
+    const undeclared = engineSetModelUnsupportedError("legacy", undefined);
+    expect(undeclared.toStructured().data).toMatchObject({ declared: "unsupported" });
   });
 });
 

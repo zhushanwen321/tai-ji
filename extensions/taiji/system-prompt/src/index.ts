@@ -81,7 +81,7 @@ const GLOBAL_AGENTS_CANDIDATES = ['AGENTS.md', 'AGENTS.MD']
  * 常量，能力段文案由这些常量渲染——禁止把清单写成散文旁路（成员集合可被
  * `scripts/check-capability-allowlist-sync.mjs` 与渲染管线白名单对拍，零散文解析）。
  *
- * 成员来源 = `packages/renderer/src/composables/logic/markdown-sanitize.ts` 的
+ * 成员来源 = `packages/ui/src/features/chat/markdown-sanitize.ts` 的
  * `ALLOWED_TAGS` 实际字面量（52 项，GitHub 风格白名单翻译，按族归类，每项恰一次）。
  * 与渲染白名单的任一方向漂移（清单多出未放行成员 / 白名单新增未入清单）由对拍机检
  * 红灯拦住，pre-commit 按路径触发。

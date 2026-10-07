@@ -98,14 +98,18 @@ export function buildSubagentCandidates(
   const items: SymbolCandidate[] = records
     .filter((r) => {
       if (!q) return true
-      return r.slug.toLowerCase().includes(q) || r.agent.toLowerCase().includes(q)
+      // directive 派发的 record agent/slug 可缺省（D3r3 验收顺带发现）——缺省字段不参与过滤
+      return (
+        (r.slug ?? '').toLowerCase().includes(q) || (r.agent ?? '').toLowerCase().includes(q)
+      )
     })
     .map((r) => ({
       id: `subagent-${r.subagentId}`,
       name: r.slug || r.subagentId,
       kind: 'subagent',
       icon: 'subagents',
-      subText: `${r.agent} · ${r.status}`,
+      // agent 缺省显示 direct（直接派发无具名 agent）；status 缺省不渲染该段
+      subText: [r.agent || 'direct', r.status].filter(Boolean).join(' · '),
       subagentId: r.subagentId,
       slug: r.slug,
     }))

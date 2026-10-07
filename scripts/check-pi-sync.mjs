@@ -465,7 +465,7 @@ let snapshot
   }
 }
 
-// ── S8 dev binary 版本（声明基准，warn 级）────────────────────────────
+// ── S8 dev binary 版本（声明基准，fail 级——2026-10-06 用户裁决：劈叉即 pi 启动即退，不容忍）──
 {
   if (!existsSync(RESOURCES_PI_PKG)) {
     // CI / 未 prepare 的干净 checkout：binary 不在仓库内，静默跳过（矩阵注明 dev-only）
@@ -474,8 +474,8 @@ let snapshot
     try {
       const pkg = JSON.parse(readFileSync(RESOURCES_PI_PKG, 'utf-8'))
       if (pkg.version !== declaredAgent) {
-        warn(
-          `S8 dev binary（resources/pi）版本 = ${pkg.version}, 声明 = ${declaredAgent} —— 仅警告不拦截：dev binary 走 workspace 缓存 symlink，可能有意保留多版本；发版前如需对齐执行 bash scripts/prepare-pi-resources.sh ${declaredAgent}`,
+        fail(
+          `S8 dev binary（resources/pi）版本 = ${pkg.version}, 声明 = ${declaredAgent} —— dev 实际 spawn 的二进制落后于 runtime 语义基准，pi 启动即退（2026-10-06 builtin: 内置扩展协议劈叉实测）。恢复二选一：a) resources/pi 为指向 .pi-binary-cache 的 symlink 时，把该目录下 6 个 symlink 重指向 pi-${declaredAgent}-<平台> 缓存（命令形态见 dev-instance 启动拦截的报错文案）；b) bash scripts/prepare-pi-resources.sh ${declaredAgent}（对 symlink 形态无效——其存在性检查会透过 symlink 判真跳过）。恢复后重跑 node scripts/check-pi-sync.mjs`,
         )
       } else {
         ok(`S8 dev binary 版本 = ${pkg.version}`)

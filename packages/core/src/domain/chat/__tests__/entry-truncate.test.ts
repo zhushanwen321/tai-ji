@@ -15,9 +15,13 @@
 import { describe, it, expect } from 'vitest'
 import type { Message } from '@taiji/shared'
 import type { PiMessageEntry, ServerMessage } from '@taiji/shared'
-import { applyEntry, replayEntries, createInitialChatViewState, normalizePiToolResult } from '../apply-entry'
+import { applyEntry, replayEntries, createInitialChatViewState } from '../apply-entry'
 import { computeToolCallFill } from '../apply-entry-convert'
-import { ENTRY_TOOL_OUTPUT_MAX_BYTES, truncateEntryToolOutput } from '../apply-entry-utils'
+import {
+  ENTRY_TOOL_OUTPUT_MAX_BYTES,
+  normalizePiToolResult,
+  truncateEntryToolOutput,
+} from '../apply-entry-utils'
 import { dispatchMessageEvent } from '../effects/registry'
 import { makeCtx as sharedMakeCtx, msg as serverMsg } from './helpers/fixtures'
 import type { MessageEffectContext } from '../effect-types'

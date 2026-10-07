@@ -94,7 +94,7 @@ describe('custom 通知链 live ≡ reload（custom 双管线收敛守护网）'
     const entry = persistedCustomEntry()
     // 实时路径：event-adapter 透传 payload → customStart effect 构造 entry 喂 reducer + ref
     s.store.applyMessageEvent(sid, customStartMsg(sid, customStartPayload(entry)))
-    const liveState = s.store.testInternals._entryStatesForTest.get(sid)
+    const liveState = s.store.testInternals._entryStatesForTest.get(sid)?.state
     // 旧双管线回退时（customStart 不喂 reducer）liveState 为空/缺失 → 此处先红
     expect(liveState?.messages).toHaveLength(1)
     // 重开路径：同一 entry 直接重放（get_entries → replayEntries）
@@ -129,7 +129,7 @@ describe('custom 通知链 live ≡ reload（custom 双管线收敛守护网）'
     }))
     const refMsgs = s.store.getMessages(sid)
     expect(refMsgs).toHaveLength(1)
-    const reducerMsgs = s.store.testInternals._entryStatesForTest.get(sid)!.messages
+    const reducerMsgs = s.store.testInternals._entryStatesForTest.get(sid)!.state.messages
     expect(reducerMsgs).toHaveLength(1)
     // 同一 entry 派生 → 全字段（含 id）相等；ref id 形态保留 cm- 前缀（Vue key /
     // truncateFrom 消费的唯一性契约）
@@ -156,7 +156,7 @@ describe('custom 通知链 live ≡ reload（custom 双管线收敛守护网）'
       s.store.applyMessageEvent(sid, customStartMsg(sid, c.payload))
     }
     const refMsgs = s.store.getMessages(sid)
-    const reducerMsgs = s.store.testInternals._entryStatesForTest.get(sid)!.messages
+    const reducerMsgs = s.store.testInternals._entryStatesForTest.get(sid)!.state.messages
     expect(refMsgs).toHaveLength(cases.length)
     for (let i = 0; i < cases.length; i++) {
       expect(refMsgs[i].display).toBe(cases[i].expected)
@@ -192,7 +192,7 @@ describe('custom 通知链 live ≡ reload（custom 双管线收敛守护网）'
       },
     } as ServerMessage)
     // 单点喂入：reducer 与 ref 各一条（双管线残留或回退去双计守卫时此处为 2 条 → 红）
-    expect(s.store.testInternals._entryStatesForTest.get(sid)!.messages).toHaveLength(1)
+    expect(s.store.testInternals._entryStatesForTest.get(sid)!.state.messages).toHaveLength(1)
     expect(s.store.getMessages(sid)).toHaveLength(1)
     s.dispose()
   })
@@ -204,7 +204,7 @@ describe('custom 通知链 live ≡ reload（custom 双管线收敛守护网）'
       customType: 'legacy-notify', content: 'x', details: 'not-a-record',
     }))
     const refMsgs = s.store.getMessages(sid)
-    const reducerMsgs = s.store.testInternals._entryStatesForTest.get(sid)!.messages
+    const reducerMsgs = s.store.testInternals._entryStatesForTest.get(sid)!.state.messages
     // 实时侧：窄化到 undefined（apply-entry isLooseRecord 守卫），与重开一致
     expect(refMsgs[0].details).toBeUndefined()
     expect(reducerMsgs[0].details).toBeUndefined()
@@ -226,7 +226,7 @@ describe('custom 通知链 live ≡ reload（custom 双管线收敛守护网）'
       }))
     }
     const refMsgs = s.store.getMessages(sid)
-    const reducerMsgs = s.store.testInternals._entryStatesForTest.get(sid)!.messages
+    const reducerMsgs = s.store.testInternals._entryStatesForTest.get(sid)!.state.messages
     expect(refMsgs).toHaveLength(3)
     expect(reducerMsgs).toHaveLength(3)
     const ids = new Set(refMsgs.map((m) => m.id))

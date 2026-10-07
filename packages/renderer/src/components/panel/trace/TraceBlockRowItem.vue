@@ -7,7 +7,7 @@
     子行是「调用 + 结果态」，与紧随的 TOOL 结果行配对呈现，非重复渲染。
   -->
   <div
-    class="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-[5px] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-surface-2"
+    class="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-[5px] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-surface-2"
     :class="selected ? 'bg-surface-hover hover:bg-surface-hover' : ''"
     :data-testid="`trace-block-row-${parent.seq}-${index}`"
     :data-block-kind="blockBadgeLabel(block)"

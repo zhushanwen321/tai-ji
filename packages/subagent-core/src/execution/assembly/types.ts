@@ -12,11 +12,15 @@ import type { GuiRenderResult } from "@zhushanwen/extension-protocol";
 // 剩余族的字段）；Turn / ToolCall / AgentUsageTotal / AgentFailureKind 随 record 聚合与
 // AgentResult 迁入 execution/domain/record-model.ts，由那里直接从 SDK 取——本文件对它们
 // 仅保留 re-export（见下方 SDK re-export 块）。
-import type { WorktreeHandle } from "@zhushanwen/subagent-engine-sdk";
+// [subagent-model-switch] ModelRef / SetModelErrorCode 供模型切换聚合应答三组件消费。
+import type { ModelRef, SetModelErrorCode, WorktreeHandle } from "@zhushanwen/subagent-engine-sdk";
 import type { ModelInfo } from "./model-resolver.ts";
 
 // [§2.4/D2] 领域词汇与聚合的权威路径 = execution/domain/（本文件不再 re-export）
 import type { ExecutionStatus, RecordOrigin, ClosedReason, ExecutionOutcome, ProjectedOutcome, ExternalState, ExecutionMode, StopReason } from "../domain/record-types.ts";
+// [subagent-model-switch §6.2] SubagentRecord.modelOverride 的载荷类型（与
+// ExecutionRecord.modelOverride 同源——领域词汇权威在 domain/record-model.ts）。
+import type { ModelOverride } from "../domain/record-model.ts";
 
 
 
@@ -192,6 +196,90 @@ export class DirtyWorktreeError extends Error {
   }
 }
 
+
+// ============================================================
+// 模型切换 run 级聚合契约（设计 subagent-model-switch §7.1/§7.4；
+// u-foundation 定形，U5 实装——实装 = service/run-model-switch-aggregate.ts
+// runModelSwitchAggregate，签名 = RunModelSwitchAggregateCall = 契约 input
+// RunModelSwitchAggregateInput + resolveMemberPort 依赖注入面）
+// ============================================================
+
+/**
+ * run 级全切聚合的入参（U5 聚合函数签名面；形状为本单元定形契约）。
+ *
+ * - `model` / `thinkingLevel`：本次切换的目标意图（已过 U2 宿主编排的公共校验步骤①
+ *   ——canonical ref + 目录 + 凭据 + 档位预检；聚合层只做转发与分派，不重复校验）。
+ * - `memberRunIds`：该 run 已受理成员的 runId 全量清单（不做宿主侧存活预判——进程
+ *   存活事实的权威在引擎侧，宿主 record 状态只是投影，§7.4）。
+ */
+export interface RunModelSwitchAggregateInput {
+  /** 所属 workflow run 的 id（聚合应答 summary 的归属键）。 */
+  runId: string;
+  /** 目标模型 ref（透传给每个成员的引擎 setModel 转发）。 */
+  model: ModelRef;
+  /** 目标 thinking 档位（缺省 = 不指定）。 */
+  thinkingLevel?: string;
+  /** 已受理成员 runId 全量清单（逐成员独立转发，个别失败不回滚其他成员）。 */
+  memberRunIds: string[];
+}
+
+/**
+ * 聚合应答的成员态条目（三态语义权威 = 设计 §7.4）：
+ * - `switched`：热切成功，携带该成员生效模型 ref + 生效 thinking 档位（引擎回读值，
+ *   非请求值——同族替换时 ≠ 目标意图）；
+ * - `not-active`：引擎定位不到该成员活跃子进程（已退出成员），覆盖走记账路径、
+ *   重派时生效；
+ * - `not-applicable`：该成员引擎 capability 不支持热切（发送前预检不支持），覆盖走
+ *   记账路径；不算失败、不虚构生效值（过渡期混合引擎 run 的显式状态）。
+ *
+ * 生效值字段仅 switched 成员携带；非 switched 成员两字段缺省（无回读源不虚构）。
+ */
+export interface RunSwitchMemberState {
+  /** 成员 runId（与失败名单同维——两数组是同一已受理成员集合的互斥划分，§7.1）。 */
+  runId: string;
+  state: "switched" | "not-active" | "not-applicable";
+  /** 生效模型 ref（仅 state="switched" 携带）。 */
+  effectiveModel?: ModelRef;
+  /** 生效 thinking 档位（仅 state="switched" 携带）。 */
+  effectiveThinkingLevel?: string;
+}
+
+/**
+ * 聚合应答的失败名单条目——转发失败成员（三态无态可落：非 switched 生效值未回读
+ * 到手 / 非 not-active 引擎定位到了活跃子进程 / 非 not-applicable 预检已通过，§7.1）。
+ * `reason` **开放值域** = SDK setModel 错误码三型 ∪ 词表外透传码（engine_crashed 等
+ * engine_* 面原样上报——实装 failureReasonOf 刻意透传，消费方对未知码按原文兜底
+ * 显示），`(string & {})` 放行透传码同时保留三型自动补全。
+ * **三处类型同步义务**：本类型 reason ∪ wire 投影 SubagentSetModelMemberFailure.reason
+ * （shared protocol.ts，已知字面词表 = SUBAGENT_SET_MODEL_FAILURE_REASON_CODES）∪ 实装
+ * failureReasonOf 返回类型（service/run-model-switch-aggregate.ts），值域口径改动三处
+ * 同批；对账锚 = packages/runtime/src/infra/subagent-model-gateway.test.ts
+ * 「core ↔ shared setModel 对账」段（SDK 词表扩位时已知子集同批跟随）。
+ */
+export interface RunSwitchMemberFailure {
+  /** 成员 runId（与成员态数组同维，§7.1）。 */
+  runId: string;
+  /** 失败分型（已知三型见 SDK SET_MODEL_ERROR_CODES；词表外 engine_* 透传码原样透传）。 */
+  reason: SetModelErrorCode | (string & {});
+}
+
+/**
+ * run 级全切聚合应答——三组件固定结构（§7.1 定形）：恒保留三组件，退化仅指
+ * 无生效值可报（全员非 switched 时成员条目无档位字段），失败名单无失败成员时为
+ * 空名单、不省略组件。前端按成员分项呈现，不坍缩为标量消息。
+ *
+ * 形状 SSOT = 本类型；前端 wire 应答（packages/core transport domains + shared
+ * protocol.ts 的 SubagentSetModelAggregateReply）为结构等价投影（依赖方向不允许
+ * 物理单源——shared 不依赖 subagent-core），两处漂移由 U1 接线测试对账。
+ */
+export interface RunSwitchAggregateResult {
+  /** 成员态数组（三态，恒保留）。 */
+  members: RunSwitchMemberState[];
+  /** 失败名单（转发失败成员 + 失败分型；无失败时为空数组，恒保留）。 */
+  failures: RunSwitchMemberFailure[];
+  /** 汇总文案（承载未派发步骤沿用说明；全员非 switched 时退化为「已记录，未派发步骤生效」）。 */
+  summary: string;
+}
 
 // ============================================================
 // Runtime → TUI 的投影契约
@@ -490,6 +578,14 @@ export interface SubagentRecord {
   /** 模型留痕（R4/D6-①）：undefined = 用户未指定（引擎自身缺省解析），非空串。 */
   model: string | undefined;
   thinkingLevel: string | undefined;
+  /**
+   * 用户覆盖记账（[subagent-model-switch §6.2]，与 {@link ExecutionRecord.modelOverride}
+   * 同源投影：内存源 recordToSubagent / 事件流折叠 scanFile 补投影）。additive：
+   * undefined（存量 / 从未覆盖）零迁移。持久化权威 = record-model-override 事件帧
+   * （写点 = store.markModelOverride），本字段是读模型可见面（冷复活水合 + 覆盖
+   * 状态查询通道）。
+   */
+  modelOverride?: ModelOverride;
   eventLog: AgentEventLogEntry[];
   /** [STEP3] 从 turns[] 派生的展示项（对齐 nicobailon getDisplayItems）。 */
   displayItems: DisplayItem[];

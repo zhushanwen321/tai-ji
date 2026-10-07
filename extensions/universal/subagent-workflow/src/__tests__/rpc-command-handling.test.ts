@@ -43,7 +43,7 @@ vi.mock("@zhushanwen/pi-extension-logger", () => ({
 
 // 被 mock 的模块——vi.mock 路径与被测源文件解析到同一物理模块，确保 vitest 拦截同一模块实例。
 // 使用 import 副作用顺序：vi.mock 在文件顶部提升，此处 import 拿到的是 mock 版本。
-import { setSubagentService } from "@zhushanwen/subagent-core";
+import { setSubagentService, setModelConfigService } from "@zhushanwen/subagent-core";
 import { registerWorkflowsCommand } from "../interface/command/commands.ts";
 import { registerSubagentsCommand } from "../interface/command/subagents.ts";
 import {
@@ -62,6 +62,21 @@ function resetServiceSlot(): void {
     | { current: unknown }
     | undefined;
   if (slot) slot.current = null;
+}
+
+/** 重置进程级 ModelConfigService 单例槽（model catalog 预检用例的清理，同款 Symbol 直写）。 */
+function resetModelServiceSlot(): void {
+  const slot = Reflect.get(globalThis, Symbol.for(GLOBAL_SLOT_KEYS.modelService)) as
+    | { current: unknown }
+    | undefined;
+  if (slot) slot.current = null;
+}
+
+/** 目录放行的最小 ModelConfigService fake（getAvailable 只含 p1/m1）。 */
+function injectModelServiceWith(entries: Array<{ provider: string; id: string }>): void {
+  setModelConfigService({
+    getModelRegistry: () => ({ getAvailable: () => entries }),
+  } as never);
 }
 
 /** 经真实单例访问器注入 fake service（消费方 interface/* 经 barrel 读同一 globalThis 槽）。 */
@@ -289,6 +304,14 @@ describe("parseWorkflowRpcCommand", () => {
     expect(parseWorkflowRpcCommand("resume run-def")).toEqual({
       action: "resume",
       runId: "run-def",
+    });
+  });
+
+  it("resume + runId + model → { action: 'resume', runId, model }（F1-26 后续项：显式模型第三通道入参）", () => {
+    expect(parseWorkflowRpcCommand("resume run-def p2/m2:high")).toEqual({
+      action: "resume",
+      runId: "run-def",
+      model: "p2/m2:high",
     });
   });
 
@@ -786,11 +809,52 @@ describe("registerWorkflowsCommand — RPC 分支 dispatch", () => {
 
     expect(mockedResumeRun).toHaveBeenCalledTimes(1);
     expect(mockedResumeRun).toHaveBeenCalledWith("run-def", expect.anything());
+    // 无 model 不落键：调用恰为 (runId, deps) 两参（spread 条件反写不会静默通过）
+    expect(mockedResumeRun.mock.calls[0]).toHaveLength(2);
     expect(mockedAbortRun).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       "Workflow run-def: resuming — completed calls replay at zero token cost, unfinished calls re-dispatched",
       "info",
     );
+  });
+
+  it("RPC + resume + model → resumeRun 第三参 { model } 透传（handler 接线层不丢参）", async () => {
+    injectModelServiceWith([{ provider: "p2", id: "m2" }]);
+    try {
+      const mockedResumeRun = vi.mocked(resumeRun);
+      mockedResumeRun.mockResolvedValue("run-def");
+
+      await runHandler("resume run-def p2/m2:high");
+
+      expect(mockedResumeRun).toHaveBeenCalledTimes(1);
+      expect(mockedResumeRun).toHaveBeenCalledWith("run-def", expect.anything(), {
+        model: "p2/m2:high",
+      });
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        "Workflow run-def: resuming with model p2/m2:high — completed calls replay at zero token cost, unfinished calls re-dispatched",
+        "info",
+      );
+    } finally {
+      resetModelServiceSlot();
+    }
+  });
+
+  it("RPC + resume + model 目录查无 → 同步拒单 warning（tool 通道同款 D8 语义，不落覆盖记账）", async () => {
+    injectModelServiceWith([{ provider: "p1", id: "m1" }]);
+    try {
+      const mockedResumeRun = vi.mocked(resumeRun);
+      mockedResumeRun.mockResolvedValue("run-def");
+
+      await runHandler("resume run-def pX/nope");
+
+      // 目录查无在 resumeRun 之前拒绝——不产生假成功 notify
+      expect(mockedResumeRun).not.toHaveBeenCalled();
+      const call = vi.mocked(ctx.ui.notify).mock.calls[0];
+      expect(String(call?.[0])).toContain("pX/nope");
+      expect(call?.[1]).toBe("warning");
+    } finally {
+      resetModelServiceSlot();
+    }
   });
 
   it("RPC + resume 失败（资格拒绝等）→ warning 文案含拒绝原因，不向上抛", async () => {
@@ -805,10 +869,10 @@ describe("registerWorkflowsCommand — RPC 分支 dispatch", () => {
     );
   });
 
-  it("RPC + resume 无 runId → Usage 提示 warning", async () => {
+  it("RPC + resume 无 runId → Usage 提示含可选 [model]（与 TUI verb 分支同文案）", async () => {
     await runHandler("resume");
 
-    expect(ctx.ui.notify).toHaveBeenCalledWith("Usage: /workflows resume <runId>", "warning");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Usage: /workflows resume <runId> [model]", "warning");
   });
 
   it("RPC + abort 无 runId → Usage 提示 warning", async () => {

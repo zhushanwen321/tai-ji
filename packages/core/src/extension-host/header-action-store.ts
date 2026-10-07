@@ -1,7 +1,7 @@
 /**
  * header-action-store.ts —— HeaderActionStore（AP-1 headerAction 点位的运行时状态容器）。
  *
- * headerAction 的可变字段（badge/tooltip/disabled）per-session 分区缓存：声明侧静态形状
+ * headerAction 的可变字段（badge/tooltip/disabled/hidden）per-session 分区缓存：声明侧静态形状
  * （title/icon/commandId/order）在 ContributionRegistry，运行时可变状态经
  * plugin:headerActionUpdate 广播帧写入本 store（按 (sessionId, headerActionId) 定位）。
  * 徽标是 per-session 语义（多会话/split 下各显各的，AP-1），故分区键 = sessionId。
@@ -23,6 +23,8 @@ export interface HeaderActionEntry {
   badge?: string
   tooltip?: string
   disabled?: boolean
+  /** true = 入口整体不渲染，与 disabled 灰置正交；缺省 false */
+  hidden?: boolean
   updatedAt: number
 }
 
@@ -32,6 +34,8 @@ export interface HeaderActionSetInput {
   badge?: string
   tooltip?: string
   disabled?: boolean
+  /** true = 入口整体不渲染，与 disabled 灰置正交；缺省 false */
+  hidden?: boolean
 }
 
 export interface HeaderActionStoreDeps {
@@ -71,6 +75,7 @@ export class HeaderActionStore {
         badge: input.badge,
         tooltip: input.tooltip,
         disabled: input.disabled,
+        hidden: input.hidden,
         updatedAt: Date.now(),
       })
     })

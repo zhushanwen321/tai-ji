@@ -42,7 +42,6 @@ export default {
     forward: 'Forward',
     workingDir: 'Working directory',
     branch: 'Branch',
-    gitStatus: 'Git status · Open sidebar',
     copySessionFile: 'Copy session file path',
     // Plugin header action buttons (HeaderActionsHost, E13 tri-state tooltip; plugin-header-action-modal-points AP-1)
     pluginActionExtensionNotLoaded: 'Required extension not loaded in this session',
@@ -159,6 +158,10 @@ export default {
     traceExpandAll: 'Expand all ({count} steps)',
     traceCollapse: 'Collapse to latest',
     traceFailed: '{count} failed',
+    // [ui-signal-density D1 U3] bash group header copy (Block.vue group branch): en mirrors the
+    // zh literal "{count} consecutive bash · total {duration}"; the failure clause reuses
+    // traceFailed ("· {count} failed" at the row tail) — same failure-count phrasing domain
+    traceBashSummary: '{count} consecutive bash · total {duration}',
     bashCancelled: 'cancelled',
     bashTimeout: 'timeout',
     bashOutputTruncated: 'Output truncated',
@@ -344,6 +347,11 @@ export default {
     noBashTask: 'No background command selected',
     bashTaskHint: 'Open the "Background commands" panel in the composer task tray and click a task to view details',
     bashTaskStartedAt: 'Started {time}',
+    // subagent-model-switch §7.1（U1）：subagent / workflow run 执行模型切换。
+    subagentOverrideBadge: 'user override',
+    subagentModelSwitchTitle: 'Switch execution model of this subagent (recorded when no live process; applies next run)',
+    modelSwitchFailed: 'Model switch failed: {msg}',
+    modelSwitchMemberFailed: 'Member {member} switch failed ({reason}) — other members unaffected',
     bashTaskRunningFor: 'Running for {duration}',
     bashTaskDuration: 'Duration {duration}',
     bashTaskExitCode: 'exit {code}',
@@ -418,6 +426,7 @@ export default {
     close: 'Close',
     fullscreenTitle: 'Mermaid diagram fullscreen',
     fullscreenDesc: 'Use zoom controls to view Mermaid diagram details.',
+ 
   },
   // html-preview fence inline preview container (chat-html-support §6.3 D3, v16 form change; degrade reason codes map one-to-one)
   htmlPreview: {

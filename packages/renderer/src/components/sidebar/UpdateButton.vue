@@ -85,7 +85,7 @@
     <!-- downloaded：已下载待安装，click 弹确认 Dialog -->
     <span
       v-else-if="state.state === 'downloaded'"
-      class="inline-flex items-center gap-0.5 text-[length:var(--text-3xs)] text-success cursor-pointer"
+      class="inline-flex select-none items-center gap-0.5 text-[length:var(--text-3xs)] text-success cursor-pointer"
       data-testid="update-downloaded"
       :title="t('sidebar.update.downloaded')"
       @click="onInstallClick"

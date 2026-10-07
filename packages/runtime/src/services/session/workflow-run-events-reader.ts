@@ -186,53 +186,85 @@ function eventEnvelope(event: WorkflowRunEvent): Pick<WorkflowRunEventEntry, 'ts
   }
 }
 
+/** phase-started 条目：phase 透传（无截断面）。 */
+function projectPhaseStarted(event: Extract<WorkflowRunEvent, { type: 'phase-started' }>): WorkflowRunEventEntry {
+  return { type: 'phase-started', ...eventEnvelope(event), phase: event.phase }
+}
+
+/** agent-retrying 条目：重试定位与退避字段透传（无截断面）。 */
+function projectAgentRetrying(event: Extract<WorkflowRunEvent, { type: 'agent-retrying' }>): WorkflowRunEventEntry {
+  return {
+    type: 'agent-retrying',
+    ...eventEnvelope(event),
+    taskIndex: event.taskIndex,
+    attempt: event.attempt,
+    backoffMs: event.backoffMs,
+    reason: event.reason,
+  }
+}
+
+/** phase-settled 条目：phase 透传（无截断面）。 */
+function projectPhaseSettled(event: Extract<WorkflowRunEvent, { type: 'phase-settled' }>): WorkflowRunEventEntry {
+  return { type: 'phase-settled', ...eventEnvelope(event), phase: event.phase }
+}
+
+/** run-interrupted 条目：中断错误码与原因可选透传。 */
+function projectRunInterrupted(event: Extract<WorkflowRunEvent, { type: 'run-interrupted' }>): WorkflowRunEventEntry {
+  return {
+    type: 'run-interrupted',
+    ...eventEnvelope(event),
+    ...(event.errorCode !== undefined ? { errorCode: event.errorCode } : {}),
+    ...(event.reason !== undefined ? { reason: event.reason } : {}),
+  }
+}
+
+/** run-settled 条目：终局载荷透传（错误码/原因可选）。 */
+function projectRunSettled(event: Extract<WorkflowRunEvent, { type: 'run-settled' }>): WorkflowRunEventEntry {
+  return {
+    type: 'run-settled',
+    ...eventEnvelope(event),
+    outcome: event.outcome,
+    ...(event.errorCode !== undefined ? { errorCode: event.errorCode } : {}),
+    ...(event.reason !== undefined ? { reason: event.reason } : {}),
+    artifactsDir: event.artifactsDir,
+  }
+}
+
+/** worker-log 条目：worker 日志行透传（无截断面）。 */
+function projectWorkerLog(event: Extract<WorkflowRunEvent, { type: 'worker-log' }>): WorkflowRunEventEntry {
+  return { type: 'worker-log', ...eventEnvelope(event), entry: event.entry }
+}
+
 /**
  * core 事件 → shared 条目映射（逐成员载荷透传；input/result/scriptSource/args 四
  * 大字段按白名单截断并标注）。词表/字段形态跟随 core WorkflowRunEvent 联合与
  * shared WorkflowRunEventEntry u2 冻结契约（两端的覆盖编译锁守漂移）。
- * 按事件类型分派到独立投影函数（每型字段形态自成一族，拆开各自演化）。
+ * 本函数只做类型分派；每型字段形态自成一族投影函数，拆开各自演化。
  */
 function projectRunEventEntry(event: WorkflowRunEvent): WorkflowRunEventEntry {
   switch (event.type) {
     case 'run-created':
       return projectRunCreated(event)
     case 'phase-started':
-      return { type: 'phase-started', ...eventEnvelope(event), phase: event.phase }
+      return projectPhaseStarted(event)
     case 'agent-started':
       return projectAgentStarted(event)
     case 'agent-retrying':
-      return {
-        type: 'agent-retrying',
-        ...eventEnvelope(event),
-        taskIndex: event.taskIndex,
-        attempt: event.attempt,
-        backoffMs: event.backoffMs,
-        reason: event.reason,
-      }
+      return projectAgentRetrying(event)
     case 'agent-settled':
       return projectAgentSettled(event)
     case 'phase-settled':
-      return { type: 'phase-settled', ...eventEnvelope(event), phase: event.phase }
+      return projectPhaseSettled(event)
     case 'run-interrupted':
-      return {
-        type: 'run-interrupted',
-        ...eventEnvelope(event),
-        ...(event.errorCode !== undefined ? { errorCode: event.errorCode } : {}),
-        ...(event.reason !== undefined ? { reason: event.reason } : {}),
-      }
+      return projectRunInterrupted(event)
     case 'run-resumed':
       return projectRunResumed(event)
     case 'run-settled':
-      return {
-        type: 'run-settled',
-        ...eventEnvelope(event),
-        outcome: event.outcome,
-        ...(event.errorCode !== undefined ? { errorCode: event.errorCode } : {}),
-        ...(event.reason !== undefined ? { reason: event.reason } : {}),
-        artifactsDir: event.artifactsDir,
-      }
+      return projectRunSettled(event)
+    case 'model-override':
+      return projectModelOverride(event)
     case 'worker-log':
-      return { type: 'worker-log', ...eventEnvelope(event), entry: event.entry }
+      return projectWorkerLog(event)
   }
 }
 
@@ -304,6 +336,17 @@ function projectRunResumed(event: Extract<WorkflowRunEvent, { type: 'run-resumed
     ...(event.host !== undefined ? { host: event.host } : {}),
     ...(event.budgetTimeMs !== undefined ? { budgetTimeMs: event.budgetTimeMs } : {}),
     ...(event.budgetTokens !== undefined ? { budgetTokens: event.budgetTokens } : {}),
+    ...(event.model !== undefined ? { model: event.model } : {}),
+  }
+}
+
+/** model-override 条目：覆盖记账载荷透传（小载荷无截断面）。 */
+function projectModelOverride(event: Extract<WorkflowRunEvent, { type: 'model-override' }>): WorkflowRunEventEntry {
+  return {
+    type: 'model-override',
+    ...eventEnvelope(event),
+    model: event.model,
+    ...(event.thinkingLevel !== undefined ? { thinkingLevel: event.thinkingLevel } : {}),
   }
 }
 

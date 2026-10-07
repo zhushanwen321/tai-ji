@@ -54,7 +54,64 @@ function turnPreview(turn: MessageTurn): string {
 }
 
 /**
+ * 上次构建缓存（模块级单槽，streaming perf）：纯派生 memo，比较对象 = 输入引用本身，
+ * 同输入必同输出（无 session/props 维度，跨 MessageStream 实例换输入即 miss 重建，
+ * 与 TurnRail railMemo 同款模块级形态）。切 session 后首帧逐项 miss 全量重建覆盖，
+ * 旧 session 引用随覆盖释放，无跨会话残留面。
+ */
+// @data-owner #58 —— chat 对话流渲染派生 memo ②（streamViewItems 逐项恒等缓存单槽，
+// 纯派生可丢弃重建，下次构建整体覆盖）
+let cacheItems: SkillNoticeStreamItem[] | null = null
+let cacheLastUserTurnIdx = -1
+let cacheLastRenderTurn: MessageTurn | null = null
+let cacheResult: StreamViewItem[] = []
+
+/**
+ * 单项复用判定：上次同位置 view item 是否可原样复用（preview 不重算）。
+ *
+ * 复用依据两层，全部显式 O(1) 比对、不依赖跨帧推理：
+ * 1. 核心载体引用恒等（turn/message/entry ===）：ADR-0039/0041 不可变更新保证
+ *    引用同 ⇒ 内容同 ⇒ preview（全文正则派生）与 key（首条消息 id 派生）同——
+ *    与 TurnRail railMemo 消费同一不变量（core toRenderItemsIncremental 对签名未变
+ *    的 turn 逐引用复用，历史项在本层引用恒稳定）。
+ * 2. 标量派生字段逐个显式比对（canEdit/isLastTurn）：入参 lastUserTurnIdx /
+ *    lastRenderTurn 变化不阻断其余项复用——变化只影响受影响项（重建），其余项
+ *    比对通过即逐字节同值。streaming 帧的 lastRenderTurn 每帧新引用，靠这层
+ *    显式比对而非入参快判，历史项才能跨帧存活。
+ *
+ * broken 项不复用（返回 false）：占位行是瞬时降级态，每帧重试正常构建（数据
+ * 修复后自然恢复），复用会把瞬时故障固化。
+ */
+function canReuseView(prev: StreamViewItem, item: SkillNoticeStreamItem, index: number, lastUserTurnIdx: number, lastRenderTurn: MessageTurn | null): boolean {
+  if (prev.kind === 'turn' && item.kind === 'turn') {
+    return (
+      prev.turn === item.turn &&
+      prev.key === renderKey(item) &&
+      prev.canEdit === (!!item.turn.user && index === lastUserTurnIdx) &&
+      prev.isLastTurn === (item.turn === lastRenderTurn)
+    )
+  }
+  if (prev.kind === 'bashExecution' && item.kind === 'bashExecution') {
+    return prev.message === item.message && prev.key === renderKey(item)
+  }
+  if (prev.kind === 'systemNotice' && item.kind === 'systemNotice') {
+    return prev.message === item.message && prev.key === renderKey(item)
+  }
+  if (prev.kind === 'skillNotice' && item.kind === 'skillNotice') {
+    return prev.entry === item.entry
+  }
+  return false
+}
+
+/**
  * streamItems → 视图模型（1:1 投影，见文件头索引一致性约束）。
+ *
+ * streaming perf（逐项恒等缓存）：core commit 每 delta 帧替换 streamItems 引用，
+ * 全量 map 重建会让历史 turn（引用恒稳定，几百项）每帧重付 previewText 全文正则
+ * （preview 唯一消费点是 broken/failed 占位行，正常渲染零消费）。本层逐位复用：
+ * 载体引用与标量派生字段全同 → 原样复用旧 view item（见 canReuseView）；全部项
+ * 复用时连数组引用一并复用（下游 Virtualizer :data 引用不变，virtua 内部 diff 整体跳过）。
+ * 1:1 约束不受影响：复用/重建逐位对应，长度与顺序由 items 本身决定。
  *
  * @param items streamItems 基准数组（core RenderItem 三态 + skillNotice）
  * @param lastUserTurnIdx 最后一个含 user 的 turn 的下标（canEdit 判定，与 slot index 同基准）
@@ -65,7 +122,23 @@ export function buildStreamViewItems(
   lastUserTurnIdx: number,
   lastRenderTurn: MessageTurn | null,
 ): StreamViewItem[] {
-  return items.map((item, index) => {
+  // 入参零变化快判：引用级直接返回上次结果（computed 意外重算 / 同帧多消费者零开销）
+  if (cacheItems === items && cacheLastUserTurnIdx === lastUserTurnIdx && cacheLastRenderTurn === lastRenderTurn) {
+    return cacheResult
+  }
+  // 逐位复用：上次数组存在即可逐位尝试（长度变化只影响超界位——尾部 append 前缀仍复用，
+  // load-more 前插时前缀 miss 重算、后缀复用；全量重扫退化为全重建，均为正确降级）
+  const canReusePerItem = cacheItems !== null
+  const prevResult = cacheResult
+  let reusedCount = 0
+  const out: StreamViewItem[] = items.map((item, index) => {
+    if (canReusePerItem) {
+      const prev = prevResult[index]
+      if (prev !== undefined && canReuseView(prev, item, index, lastUserTurnIdx, lastRenderTurn)) {
+        reusedCount += 1
+        return prev
+      }
+    }
     try {
       if (item.kind === 'skillNotice') {
         // skillNotice 用 notice 稳定 id 作 key（原 slot :key="item.entry.id" 同源）
@@ -92,4 +165,14 @@ export function buildStreamViewItems(
       return { kind: 'broken', key: `broken-${index}`, preview: '' }
     }
   })
+  // 全项复用 → 返回旧数组引用（内容与新建逐字节一致，复用引用只是切断下游 diff）。
+  // 空输入不参与复用判定：items.length===0 时 reusedCount(0)===items.length(0) 恒真，
+  // 会把上一输入（跨 session / 跨实例）的渲染项原样返回——空会话串台显示上一会话
+  // 消息（SubagentDirectiveStream per-session 隔离用例的失败根因），空输入恒返回新建。
+  const result = items.length > 0 && reusedCount === items.length ? prevResult : out
+  cacheItems = items
+  cacheLastUserTurnIdx = lastUserTurnIdx
+  cacheLastRenderTurn = lastRenderTurn
+  cacheResult = result
+  return result
 }

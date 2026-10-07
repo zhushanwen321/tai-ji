@@ -94,8 +94,8 @@ function settledInput(over: Partial<SettledInput> = {}): SettledInput {
   };
 }
 
-describe("词表钉住（D3 映射表逐项对应——恰好 6 类）", () => {
-  it("事件类型全集恰为 6 类且互异（增删须先改设计 D3 表）", () => {
+describe("词表钉住（D3 映射表逐项对应 6 类 + [subagent-model-switch] 第 7 类）", () => {
+  it("事件类型全集恰为 7 类且互异（前 6 类增删须先改设计 D3 表；第 7 类 = subagent-model-switch §6.2 覆盖记账帧）", () => {
     expect([...RECORD_EVENT_TYPES]).toEqual([
       "record-created",
       "record-bound",
@@ -103,6 +103,7 @@ describe("词表钉住（D3 映射表逐项对应——恰好 6 类）", () => {
       "record-round-idle",
       "record-settled",
       "record-reopened",
+      "record-model-override",
     ]);
     expect(new Set(RECORD_EVENT_TYPES).size).toBe(RECORD_EVENT_TYPES.length);
   });

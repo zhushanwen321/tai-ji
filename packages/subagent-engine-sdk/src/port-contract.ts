@@ -32,6 +32,7 @@ import type {
   ResumeAnchor,
   SessionView,
 } from "./protocol/contract-types.ts";
+import type { SetModelParams, SetModelResult } from "./protocol/methods.ts";
 
 /**
  * 引擎进程内全量任务声明 = SDK AgentCallOpts 引擎面子集 + 协议 ctx 还原字段（model/
@@ -152,6 +153,15 @@ export interface EnginePort {
   read(handle: EngineHandle): Promise<SessionView>;
   listModels?(): Array<{ id: string; name?: string }> | null;
   validateModel?(modelRef: string | undefined): { canonicalRef: string };
+  /**
+   * [subagent-model-switch §7.3] 可选面：执行中模型热切换（协议 setModel 正向方法的
+   * 进程内承载）。实现引擎须 capabilities.setModel = 'native' 同批声明（位与方法
+   * 成对进出——capabilities 注释的消费点登记）；server 分发行在位非 native 时回
+   * engineSetModelUnsupportedError 结构化错误（契约行为 = 明确错误而非崩）。
+   * 实现语义 = 定位活跃子进程 → 命令写入 → 读应答 → 状态回读 → 应答生效值
+   * （SetModelResult），竞态窗口处置见设计 §7.3。
+   */
+  setModel?(params: SetModelParams): Promise<SetModelResult>;
   dispose?(): Promise<void>;
 }
 

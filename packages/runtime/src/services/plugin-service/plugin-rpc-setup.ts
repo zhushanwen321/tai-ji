@@ -14,7 +14,7 @@ import { registerToolRpcHandlers } from './tool-api.js'
 import { registerHookRpcHandlers } from './hook-api.js'
 import { registerSessionRpcHandlers, ActiveSessionResolver, sessionInfoFromSummary, type SessionEventDispatch } from './api/session-api.js'
 import type { EntryInvalidationDispatch } from './plugin-entry-invalidation-dispatch.js'
-import { PLUGIN_MODAL_CLOSED_NOTIFY_METHOD, wireRuntimeModalExits } from './api/ui-api.js'
+import { wireRuntimeUiExits } from './api/ui-api.js'
 import { registerConfigRpcHandlers, toConfigKey, fromConfigKey, isConfigKey } from './api/config-api.js'
 import { registerStorageRpcHandlers, storageHandlersFrom } from './api/storage-api.js'
 import { registerNotifyRpcHandler, notifyHandlersFrom, broadcastPluginNotification, NotifyRateLimiter } from './api/notify-api.js'
@@ -100,11 +100,6 @@ export interface RpcSetupContext {
    * 由 PluginService.notifyEntryInvalidation 派发。
    */
   entryInvalidation: EntryInvalidationDispatch
-  /**
-   * E10 判定（AP-2 浮层规则②）：ui-request-queue 是否有 pending 插件对话框。
-   * 缺省（未装配）时 showModal 跳过该判定（装配面收窄为「不拦截」，不误拒）。
-   */
-  hasPendingUiRequest?: () => boolean
   /** 挂载点集合（renderer 经 plugin.mountPoints.sync 上报的副本，AC10） */
   mountPoints: string[]
   /** Worker invoke.result 回传的 pending resolve/reject（S3-W1，PluginService 私有）；sourceWorkerId 为回传来源通道（D2 回传归属校验） */
@@ -134,24 +129,14 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
   // 同一实例（同一插件的配额跨入口合并计费），默认 20 条/s（shared SSOT）。
   const notifyLimiter = new NotifyRateLimiter()
 
-  // ── plugin modal/headerAction 广播出线装配（AP-1/AP-2，u5b）──────────────
-  // ui-api 的 runtime 槽是模块级单例（core plugin-modal-slot 先例），广播与 Worker
-  // notify 经此注入：全局广播走 broadcastFn（broker.broadcast 同语义回退由 broadcastFn
-  // 装配方承担——本层无 broker 引用），modalClosed 经 rpcServer 定向 notify owner Worker。
-  // 广播帧（plugin:modalState / plugin:headerActionUpdate）不经 message-bus publish，
-  // 结构性不入 ring（transient；renderer 另以 lastEpoch 兜底乱序）。
-  wireRuntimeModalExits({
-    // 两个 broadcast 回传是否真正发出（false = broadcastFn 缺失 warn 丢弃）——
-    // ui-api 据此拒绝「假成功」回执（B-F2：showModal 拒开层、updateHeaderAction 回
-    // {updated:false}），装配缺陷不再被包装成插件面的成功。
-    broadcastModalState: (payload) => {
-      if (deps.broadcastFn) {
-        deps.broadcastFn('plugin:modalState', payload)
-        return true
-      }
-      console.warn('[plugin-rpc-setup] plugin:modalState broadcast dropped: no broadcastFn configured')
-      return false
-    },
+  // ── plugin headerAction 广播出线装配（AP-1，u5b）──────────────────────────
+  // ui-api 的出线是模块级单例，广播经此注入：全局广播走 broadcastFn（broker.broadcast
+  // 同语义回退由 broadcastFn 装配方承担——本层无 broker 引用）。广播帧
+  //（plugin:headerActionUpdate）不经 message-bus publish，结构性不入 ring（transient）。
+  wireRuntimeUiExits({
+    // broadcast 回传是否真正发出（false = broadcastFn 缺失 warn 丢弃）——
+    // ui-api 据此拒绝「假成功」回执（B-F2：updateHeaderAction 回 {updated:false}），
+    // 装配缺陷不再被包装成插件面的成功。
     broadcastHeaderActionUpdate: (payload) => {
       if (deps.broadcastFn) {
         deps.broadcastFn('plugin:headerActionUpdate', payload)
@@ -160,10 +145,6 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
       console.warn('[plugin-rpc-setup] plugin:headerActionUpdate broadcast dropped: no broadcastFn configured')
       return false
     },
-    notifyModalClosed: (workerId, payload) => {
-      rpcServer.notify(workerId, PLUGIN_MODAL_CLOSED_NOTIFY_METHOD, payload)
-    },
-    hasPendingUiRequest: () => ctx.hasPendingUiRequest?.() ?? false,
   })
 
   // Tool RPC handlers

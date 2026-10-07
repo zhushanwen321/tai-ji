@@ -83,10 +83,22 @@ test.describe('GUI 组件渲染 E2E', () => {
     await activateSession(page)
     await sendMessageAndWaitComplete(page)
 
-    // turn 完成后默认收起 trace（含 tool 块）。点 turn-meta header 展开 trace。
+    // turn-meta 条件点击（ui-signal-density D1 后适配）：s3 mock 的 workflow 托盘含 11 条演员
+    // （4 条 running）→ derivedStatus 恒 working → TurnMeta disabled，且 working 态 trace 已默认
+    // 展开（Turn.vue showTrace = isWorkingTurn || isExpanded），点击多余；enabled 分支 =
+    // 历史终态回合路径（trace 收起，需手动展开）。
     const turnMeta = page.locator('.turn-meta').first()
     await expect(turnMeta).toBeVisible({ timeout: 5_000 })
-    await turnMeta.click()
+    if (await turnMeta.isEnabled()) {
+      await turnMeta.click()
+    }
+
+    // 组头分支（ui-signal-density §4.2 设计 v7 要求）：连续 bash 折组后须先点组头展开成员行，
+    // 才能定位到成员 tool-block-header；本 mock 序列只有一个 read 工具不成组，防御性分支。
+    const groupHeader = page.getByTestId('bash-group-header')
+    if ((await groupHeader.count()) > 0) {
+      await groupHeader.first().click()
+    }
 
     // trace 展开后，tool 块 header 可见（mock 推了 toolName='read'），点击展开 tool 详情
     const toolHeader = page.getByTestId('tool-block-header')

@@ -21,9 +21,11 @@ export interface ModelGroup {
   models: ModelInfo[]
 }
 
-/** ModelPickerPanel 分组形状（provider 名 + {id,name} 列表；providerId 不进表现层） */
+/** ModelPickerPanel 分组形状（provider 名 + {id,name} 列表；providerId 随组下行——
+ *  点击事件的 provider 归属单点，反查函数只作无 providerId 组的兜底） */
 export interface PickerGroupRef {
   provider: string
+  providerId: ProviderId
   models: { id: string; name?: string }[]
 }
 
@@ -63,10 +65,12 @@ function buildModelGroups(
   return [...map.values()]
 }
 
-/** ModelPickerPanel 分组形状映射（providerId 不进表现层） */
+/** ModelPickerPanel 分组形状映射（providerId 随组下行——同 short-id 多 provider 时
+ *  点击归属以被点行的组为准，不再按裸 id 全局反查首中，D3 顺带发现 7 歧义修复） */
 function toPickerGroups(groups: readonly ModelGroup[]): PickerGroupRef[] {
   return groups.map((g) => ({
     provider: g.provider,
+    providerId: g.providerId,
     models: g.models.map((m) => ({ id: m.id, name: m.name })),
   }))
 }
@@ -94,13 +98,15 @@ export function useModelPickerData(
   providerFilter?: MaybeRefOrGetter<ProviderId[] | undefined>,
 ): {
   /** 过滤 providerFilter + enabled 的全量候选（未做搜索过滤，供 panel 区分空态） */
-  groups: ComputedRef<ModelGroup[]>
-  /** 模型池是否非空（enabled 过滤 + providerFilter 限定），空态区分依据 */
-  hasAnyModel: ComputedRef<boolean>
-  /** ModelPickerPanel 分组形状 */
-  pickerGroups: ComputedRef<PickerGroupRef[]>
-  /** 裸 modelId → providerId 反查（undefined = 反查失败，消费方静默忽略） */
-  resolveProviderId: (modelId: string) => ProviderId | undefined
+    groups: ComputedRef<ModelGroup[]>
+    /** 模型池是否非空（enabled 过滤 + providerFilter 限定），空态区分依据 */
+    hasAnyModel: ComputedRef<boolean>
+    /** ModelPickerPanel 分组形状（providerId 随组） */
+    pickerGroups: ComputedRef<PickerGroupRef[]>
+    /** 裸 modelId → providerId 反查（undefined = 反查失败，消费方静默忽略）。
+     *  [顺带发现 7] 同 short-id 多 provider 时反查首中不保证是被点行——主路径消费
+     *  panel 事件携带的组级 providerId，本函数仅兜底无 providerId 的自建分组形态。 */
+    resolveProviderId: (modelId: string) => ProviderId | undefined
 } {
   const settingsStore = getSettingsStore()
 

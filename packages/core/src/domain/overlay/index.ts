@@ -20,6 +20,7 @@ export {
   openOverlay,
   closeOverlay,
   openBrowser,
+  openSchedulerOverlay,
   closeBrowserOverlayForSession,
   _resetOverlayForTest,
 } from './coordination'

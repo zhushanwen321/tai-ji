@@ -72,7 +72,7 @@ export function toProtocolError(err: unknown, recovery: string): ProtocolErrorPa
 //
 // 抽的是两引擎 `EngineProtocolServer.handleFrame` 的**分类 + 应答管线**：帧分类、反向
 // 请求帧在引擎侧的坏帧应答、正向请求的分发与错误帧回转、无法归类帧的静默忽略。回环里
-// 引擎特有的部分（反向应答的两阶段 ack 语义、9 方法表本体）留在各引擎，经
+// 引擎特有的部分（反向应答的两阶段 ack 语义、正向方法表本体）留在各引擎，经
 // `FrameLoopContext` 注入。
 
 /** 入站帧分类结果（纯判定、零副作用，便于单测逐分支断言）。 */
@@ -129,7 +129,7 @@ export interface FrameLoopContext { // oe-exempt:20260930:framework:SDK 协议�
   write: FrameWriter;
   /** 反向应答帧落地（各引擎的两阶段 ack 语义在此，**刻意不统一**）。 */
   settleReverse(id: number | string, frame: { result?: unknown; error?: unknown }): void;
-  /** 正向请求分发（9 方法表；抛出的错误经 `toError` 转错误帧）。 */
+  /** 正向请求分发（引擎装配表；抛出的错误经 `toError` 转错误帧）。 */
   dispatch(id: number, method: string, params: unknown): unknown;
   /** 错误 → 错误帧载荷（各引擎的恢复指引文案不同，故由引擎注入）。 */
   toError(err: unknown): ProtocolErrorPayload;
@@ -168,7 +168,7 @@ export function handleInboundFrame(frame: unknown, ctx: FrameLoopContext): Inbou
 // ── [§2.11 第三批] 反向请求客户端 / 运行事件通知 / 初始化握手（两引擎逐字同文部分） ──
 //
 // 留在各引擎的部分：应答侧 `settleReverse`（pi 的两阶段 ack + askUI 应答面检查 vs zcode
-// ack 即结算，**语义不同不得合并**）、9 方法表本体、`run` 前门。这里只抽发送侧与握手。
+// ack 即结算，**语义不同不得合并**）、正向方法表本体、`run` 前门。这里只抽发送侧与握手。
 
 /**
  * 反向请求发送（引擎 → 宿主请求的发出与等待登记）。

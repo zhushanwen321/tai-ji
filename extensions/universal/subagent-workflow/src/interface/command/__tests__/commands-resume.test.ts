@@ -1,13 +1,13 @@
 /**
- * /workflows 命令的 resume 通道契约（workflow-run-resume-revision U3）。
+ * /workflows 命令的 resume 通道契约（workflow-run-resume-revision U3 + F1-26 后续项）。
  *
- * 覆盖面（TUI 模式）：/workflows resume <runId> → 执行断点续跑后 notify，不打开
- * 面板；缺 runId → Usage 提示；resumeRun 拒绝 → warning notify 透出恢复指引文案。
+ * 覆盖面（TUI 模式）：/workflows resume <runId> [model] → 执行断点续跑后 notify，
+ * 不打开面板；缺 runId → Usage 提示（含可选 [model]）；resumeRun 拒绝 → warning
+ * notify 透出恢复指引文案；显式 model 的 handler 透传（第三参 { model } / 无 model
+ * 不落键）与目录预检拒单（与 tool 通道同款 D8 语义）。
  *
- * RPC 模式（taiji GUI）的 resume verb 接线未随 U3 落地：解析词表在
- * command-actions.ts（领地外，resume verb 现仍解析为 lifecycle-removed），其
- * dispatch 断言由 src/__tests__/rpc-command-handling.test.ts 原样锁定——词表
- * 适配归编排层（见 commands.ts handleRpcMode 注释）。workflow tool 通道
+ * RPC 模式（taiji GUI）的 resume verb 接线与 model 透传由
+ * src/__tests__/rpc-command-handling.test.ts 覆盖；workflow tool 通道
  * （action:"resume"，含 D14 args 校验）由 tool-workflow-resume.test.ts 覆盖。
  *
  * mock 策略：resume-run 深路径 stub（对齐 tool-workflow-resume.test.ts）；命令
@@ -19,6 +19,7 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 // 被 mock 的模块——import 路径与被测源文件的等值实例（对齐 tool-workflow-resume.test.ts）
 import { resumeRun } from "@zhushanwen/subagent-core/orchestration/resume-run.ts";
+import { setModelConfigService, GLOBAL_SLOT_KEYS } from "@zhushanwen/subagent-core";
 
 import { registerWorkflowsCommand } from "../commands.ts";
 
@@ -66,9 +67,26 @@ function makeCtx(mode: "rpc" | "tui"): { ctx: ExtensionCommandContext; notifies:
   return { ctx: ctx as never, notifies };
 }
 
+/** 重置进程级 ModelConfigService 单例槽（model catalog 预检用例的注入/清理，
+ *  Symbol 直写——key 与生产 getModelServiceSlot 的 MODEL_SERVICE_SLOT_KEY 一致）。 */
+function resetModelServiceSlot(): void {
+  const slot = Reflect.get(globalThis, Symbol.for(GLOBAL_SLOT_KEYS.modelService)) as
+    | { current: unknown }
+    | undefined;
+  if (slot) slot.current = null;
+}
+
+/** 注入目录为 entries 的最小 ModelConfigService fake（duck-typed getAvailable）。 */
+function injectModelServiceWith(entries: Array<{ provider: string; id: string }>): void {
+  setModelConfigService({
+    getModelRegistry: () => ({ getAvailable: () => entries }),
+  } as never);
+}
+
 beforeEach(() => {
   vi.mocked(resumeRun).mockReset();
   vi.mocked(resumeRun).mockResolvedValue("wf-x");
+  resetModelServiceSlot();
 });
 
 // ── TUI 模式 ─────────────────────────────────────────────────
@@ -79,9 +97,36 @@ describe("/workflows TUI resume", () => {
     const { ctx, notifies } = makeCtx("tui");
     await cmd.handler("resume wf-x", ctx);
     expect(vi.mocked(resumeRun)).toHaveBeenCalledWith("wf-x", expect.anything());
+    // 无 model 不落键：调用恰为 (runId, deps) 两参（spread 条件反写不会静默通过）
+    expect(vi.mocked(resumeRun).mock.calls[0]).toHaveLength(2);
     expect(notifies).toHaveLength(1);
     expect(notifies[0]!.msg).toContain("resuming");
     expect(notifies[0]!.level).toBe("info");
+  });
+
+  it("resume <runId> <model> → resumeRun 第三参 { model } 透传 + notify 带模型", async () => {
+    injectModelServiceWith([{ provider: "p2", id: "m2" }]);
+    const cmd = captureCommand();
+    const { ctx, notifies } = makeCtx("tui");
+    await cmd.handler("resume wf-x p2/m2:high", ctx);
+    expect(vi.mocked(resumeRun)).toHaveBeenCalledWith("wf-x", expect.anything(), {
+      model: "p2/m2:high",
+    });
+    expect(notifies[0]!.msg).toContain("resuming with model p2/m2:high");
+    expect(notifies[0]!.level).toBe("info");
+  });
+
+  it("resume 显式 model 目录查无 → 同步拒单 warning（tool 通道同款 D8 语义，不落覆盖记账）", async () => {
+    injectModelServiceWith([{ provider: "p1", id: "m1" }]);
+    const cmd = captureCommand();
+    const { ctx, notifies } = makeCtx("tui");
+    await cmd.handler("resume wf-x pX/nope", ctx);
+    // 目录查无在 resumeRun 之前拒绝——不产生假成功 notify
+    expect(vi.mocked(resumeRun)).not.toHaveBeenCalled();
+    expect(notifies).toHaveLength(1);
+    expect(notifies[0]!.msg).toContain("Failed to resume workflow wf-x:");
+    expect(notifies[0]!.msg).toContain("pX/nope");
+    expect(notifies[0]!.level).toBe("warning");
   });
 
   it("resume 缺 runId → Usage warning", async () => {
@@ -89,7 +134,7 @@ describe("/workflows TUI resume", () => {
     const { ctx, notifies } = makeCtx("tui");
     await cmd.handler("resume", ctx);
     expect(vi.mocked(resumeRun)).not.toHaveBeenCalled();
-    expect(notifies[0]).toMatchObject({ msg: "Usage: /workflows resume <runId>", level: "warning" });
+    expect(notifies[0]).toMatchObject({ msg: "Usage: /workflows resume <runId> [model]", level: "warning" });
   });
 
   it("resumeRun 拒绝 → warning notify（TUI 同款透出）", async () => {

@@ -181,3 +181,22 @@ export function ensureInstanceDir(p, fresh, opts = {}) {
   log(`[dev-instance] ✅ 实例目录已从模板创建: ${resolved}`)
   return true
 }
+
+/**
+ * resources/pi stage 版本与声明劈叉判定：一致返回 null，劈叉返回含恢复动作的完整报错文案。
+ *
+ * 背景（2026-10-06 实测）：worktree 的 resources/pi 是 workspace 缓存（.pi-binary-cache/）
+ * 的 symlink stage，worktree 创建时按当时声明版本钉定、不随后续 merge 重指——pi 升级
+ * merge 后 dev spawn 的二进制落后于 runtime 语义基准，以「builtin: 内置扩展协议不被旧版
+ * 识别」等形态启动即退（session.create 全挂）。恢复 a/b 覆盖 symlink 与非 symlink 两种
+ * stage 形态：prepare-pi-resources.sh 的存在性检查会透过 symlink 判真而跳过，对 symlink
+ * 形态无效，故 a 给出直接重指命令。
+ */
+export function piStageVersionMismatch(declared, stageVersion, archTag = `darwin-${process.arch}`) {
+  if (declared === stageVersion) return null
+  return [
+    `[dev-instance] resources/pi stage 版本与声明劈叉：stage = ${stageVersion}，声明 = ${declared}——dev spawn 的 pi 会因版本落后于 runtime 语义基准启动即退（2026-10-06 实测形态：Failed to load extension ".../builtin:..."）。恢复（二选一）：`,
+    `  a) symlink stage（指向 .pi-binary-cache）：cd apps/electron/resources/pi && for f in assets export-html package.json photon_rs_bg.wasm pi-darwin-arm64 theme; do ln -sfn <缓存根>/pi-${declared}-${archTag}/$f "$f"; done`,
+    `  b) 其他形态：bash scripts/prepare-pi-resources.sh ${declared}`,
+  ].join('\n')
+}

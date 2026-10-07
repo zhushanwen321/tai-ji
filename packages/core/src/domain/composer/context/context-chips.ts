@@ -38,11 +38,16 @@ export function useComposerContextChips(inputRef: Ref<ComposerInputInstance | nu
   /** ContextChipsBar 数据源：从 segments 派生的 image chips */
   const attachedItems = ref<Array<{ id: string; name: string; type: 'image' }>>([])
 
-  /** 从输入区 segments 刷新 image chips（input 变化 / chip 删除后调）。
-   *  attachedItems 内部字段名保持 `name`（ContextChipsBar 消费），值从 segment.displayName
-   *  派生（用户可读名）；segment 的 fileName（磁盘全名）对 chip 行展示无意义，不暴露。 */
-  function refreshAttachedItems(): void {
-    const segs = inputRef.value?.getSegments() ?? []
+  /**
+   * 从输入区 segments 刷新 image chips（input 变化 / chip 删除后调）。
+   * attachedItems 内部字段名保持 `name`（ContextChipsBar 消费），值从 segment.displayName
+   * 派生（用户可读名）；segment 的 fileName（磁盘全名）对 chip 行展示无意义，不暴露。
+   * @param segments 调用方已持有的 segments 快照（可选）——Composer onInputChange 与
+   * selectedSkillNames 共用同一次 getSegments 遍历（同帧 DOM 无写，复用恒等价）；
+   * 未传时自行读取（chip 删除 / drop 等无既有快照的调用点走读取分支）。
+   */
+  function refreshAttachedItems(segments?: Segment[]): void {
+    const segs = segments ?? inputRef.value?.getSegments() ?? []
     attachedItems.value = segs
       .filter(
         (s): s is Extract<Segment, { type: 'image' }> => s.type === 'image',

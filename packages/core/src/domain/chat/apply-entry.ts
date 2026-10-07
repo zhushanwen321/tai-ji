@@ -9,7 +9,9 @@
  *   消息 id 与缺失 timestamp 全部从 entry 派生（确定性），两次喂入同一序列 state 全等。
  * - 不 mutate 输入 state / entry：toolResult 回填等就地变更点全部 copy-on-write。
  *   [transient fold] replayEntries 的 fold 路径内部经 mutable collector 原地累积（见下方
- *   collector 叙事），输入 state / entry 同样不被 mutate——可变性只存在于 fold 过程内。
+ *   collector 叙事），输入 state / entry 同样不被 mutate——可变性只存在于 fold 过程内；
+ *   createChatViewStateBuffer 的 feed 同理（可变性只落在 buffer 自己的容器内，输入
+ *   entry 对象不被 mutate）。
  * - console.warn 是可观测性（未知 role / 孤儿 toolResult），不影响确定性——与迁移前行为对齐。
  *
  * [transient fold，collector 拆段] handler 拆两段：「派生段」（deriveXxxMessage 纯函数，构造
@@ -23,6 +25,14 @@
  *   与历史 load-more 在 10k entry 会话上的真实痛点）。mutable 中间态只存在于 fold
  *   过程内，snapshot 组装产物后不再写——「内部累积、产物同构」约定，产物与 copy-on-write 路径
  *   deep-equal（元断言测试 apply-entry-fold-equivalence.test.ts 守卫），不加运行时冻结开销。
+ * - createChatViewStateBuffer → buffer collector：跨 feed 调用持久的 mutable 累积缓冲
+ *   （store entryStates 活容器形态）——容器操作与 mutable collector 同构，差别只在容器
+ *   生命周期从「单次 fold 过程内」延长到「session 分区生命周期」，实时每帧一条 entry 的
+ *   场景（store.applyEntryFrame）从每帧 copy-on-write 整表拷贝（10k 消息会话每帧 O(n)
+ *   分配）变为 O(1) 原地落账。**新约束：buffer.state 是活容器（引用恒定、容器内容原地
+ *   累积），读方不得跨帧持有其数组/Set 引用并假设内容不变**——需要稳定值时用 snapshot()
+ *   浅拷贝。产物与 copy-on-write 路径 deep-equal 的同构约定同 mutable collector
+ *   （apply-entry-buffer-equivalence.test.ts 守卫）。
  *
  * 规则迁移源：packages/runtime/src/infra/pi/message-converter.ts 重放路径
  * （convertSinglePiMessage 的 content parts 解析 / skill block 剖离 / usage / fileChanges 静态提取、
@@ -45,7 +55,8 @@
  * - apply-entry-utils.ts：共享底层（normalizePiToolResult / toMs / Record 守卫 / 常量类型）
  * - apply-entry-convert.ts：message body 转换群（convertMessageBody / computeToolCallFill 等）
  * - 本文件：reducer 本体（派生段 deriveXxx / commit 段 handler / dispatch 骨架 /
- *   ChatStateCollector 两实现 / applyEntry / replayEntries）+ 对外导出面。
+ *   ChatStateCollector 三实现 / applyEntry / replayEntries / createChatViewStateBuffer）
+ *   + 对外导出面。
  */
 import type {
   Message,
@@ -89,12 +100,6 @@ export type {
   PiBranchSummaryEntry,
   PiCustomMessageEntry,
 } from '@taiji/shared'
-
-// normalizePiToolResult 实体在 apply-entry-utils.ts（convert 侧 computeToolCallFill 同源
-// 调用，依赖单向 convert → utils——实体放本文件会成环），此处 re-export 维持既有 core API
-// 不变（effects/registry 继续从本模块 import，见文件头分叉注释）。NormalizedToolResult 类型
-// re-export 已删（无消费方——registry 只用函数值，返回类型经推断；Gate-1.5 unused_types）。
-export { normalizePiToolResult } from './apply-entry-utils'
 
 // ── chat 视图态切片 ─────────────────────────────────────────────────
 
@@ -160,8 +165,8 @@ function deriveBaseId(entry: PiEntryBase, messageCount: number): string {
 
 /**
  * ChatViewState 落账抽象：派生段构造 Message / ToolCall 后经此提交，读口供 handler 的
- * 窗口配对 / 幂等去重查询。两个实现差异只在落账方式（copy-on-write vs 原地），
- * 派生与 dispatch 完全共享——「同一 reducer 双路喂入」的构造性保证。
+ * 窗口配对 / 幂等去重查询。三个实现差异只在落账方式（copy-on-write vs fold 内原地 vs
+ * 跨帧原地），派生与 dispatch 完全共享——「同一 reducer 双路喂入」的构造性保证。
  *
  * 不导出（模块内部 seam）：state 结构经 collector 收口，外部无法绕过 fold 构造 ChatViewState。
  */
@@ -275,6 +280,90 @@ function createMutableCollector(initial: ChatViewState): ChatStateCollector {
         lastAssistantWithToolCalls,
       }
     },
+  }
+}
+
+/**
+ * 跨 feed 调用持久的 mutable 累积缓冲（store entryStates 活容器形态，第三种 collector）。
+ *
+ * 动机：实时链路每帧一条 entry 喂 applyEntry（copy-on-write），10k 消息会话每帧整表拷贝
+ * messages 数组 + orphan 数组 + delivered Set——净分配随会话长度线性增长（短命垃圾 → GC
+ * 停顿）。buffer 把容器提升为跨 feed 持久的实例字段，每帧落账 O(1)：消息对象仍不可变
+ * （replace 类操作只换槽位引用，不 mutate 对象），可变点只剩容器本身。
+ *
+ * 派生段与 dispatch 骨架复用同前两种形态（feed 内直调 dispatchEntry）——「同一 reducer
+ * 双路喂入」对 buffer 形态构造性保持，产物与 copy-on-write / mutable fold 路径 deep-equal
+ * （apply-entry-buffer-equivalence.test.ts 守卫）。
+ *
+ * **活容器约束（本形态新增，读方义务）**：`state` 引用恒定，容器内容随 feed 原地累积——
+ * 读方不得跨帧持有其数组 / Set 引用并假设内容不变（如需稳定值用 snapshot() 浅拷贝）。
+ * 写入口唯一 = 本 buffer 的 feed（state 对象对单写方之外禁写）。
+ *
+ * `initial` 语义与 createMutableCollector 相同：浅拷贝容器，调用方持有态不被 mutate。
+ * snapshot() 是浅拷贝（容器层拷贝、消息对象共享引用），供对账 / 测试低频使用——高频读
+ * 直接走 `state`（零分配），snapshot 不承担防御拷贝消息对象的义务。
+ */
+export interface ChatViewStateBuffer {
+  /** 活容器视图：引用恒定、内容随 feed 原地累积（读方不得跨帧持有容器引用假设不变） */
+  readonly state: ChatViewState
+  /** 喂入一条 entry，原地落账（不 mutate 输入 entry 对象） */
+  feed(entry: PiEntry): void
+  /** 浅拷贝快照（容器层 clone、消息对象共享引用），供对账 / 测试低频使用 */
+  snapshot(): ChatViewState
+}
+
+export function createChatViewStateBuffer(initial?: ChatViewState): ChatViewStateBuffer {
+  const messages: Message[] = initial !== undefined ? [...initial.messages] : []
+  const orphanToolResults: PiToolResultBody[] = initial !== undefined ? [...initial.orphanToolResults] : []
+  const deliveredToolResultIds = new Set(initial?.deliveredToolResultIds)
+  const state: ChatViewState = {
+    messages,
+    orphanToolResults,
+    deliveredToolResultIds,
+    lastAssistantWithToolCalls: initial?.lastAssistantWithToolCalls ?? -1,
+  }
+  const collector: ChatStateCollector = {
+    get messageCount() {
+      return messages.length
+    },
+    hasDeliveredToolResult(toolCallId) {
+      return deliveredToolResultIds.has(toolCallId)
+    },
+    peekLastAssistantWithToolCalls() {
+      const last = state.lastAssistantWithToolCalls
+      const host = last >= 0 ? messages[last] : undefined
+      return host !== undefined ? { index: last, message: host } : undefined
+    },
+    appendMessage(msg) {
+      messages.push(msg)
+    },
+    replaceMessageAt(index, msg) {
+      messages[index] = msg
+    },
+    addOrphanToolResult(orphan) {
+      orphanToolResults.push(orphan)
+    },
+    recordDeliveredToolResult(toolCallId) {
+      deliveredToolResultIds.add(toolCallId)
+    },
+    markLastAssistantWithToolCalls(index) {
+      state.lastAssistantWithToolCalls = index
+    },
+    snapshot() {
+      return {
+        messages: [...messages],
+        orphanToolResults: [...orphanToolResults],
+        deliveredToolResultIds: new Set(deliveredToolResultIds),
+        lastAssistantWithToolCalls: state.lastAssistantWithToolCalls,
+      }
+    },
+  }
+  return {
+    state,
+    feed(entry) {
+      dispatchEntry(collector, entry)
+    },
+    snapshot: () => collector.snapshot(),
   }
 }
 

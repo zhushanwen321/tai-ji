@@ -127,6 +127,10 @@ export type ClientMessageType =
   // wave:runtime-wiring 已在 ClientMessageMap 补登记 request payload 形状（见下方）。
   | 'session.subscribe' | 'session.unsubscribe'
   | 'session.getSubagents' | 'session.getSubagentHistory'
+  // subagent 流状态拉取（B2 subagent-stream-chunk §4.1）：按 recordId 读 RelayTee 既有内存
+  // 状态的只读快照——增量 chunk 消息的失步恢复与接入首拉通道。reply 与 request 同名
+  //（session.subscribe 模式，sendCommand 按 id resolve）。
+  | 'session.getSubagentStreamState'
   // plan 模式重设计（D1-⑥ 冷启动首拉）：getPlanState 读 session JSONL 内最后一条
   // plan-state entry 派生状态视图（stateSnapshot 是 bus 内存态、pi exit 即清空，
   // 冷送达/切换首拉靠本 RPC——与 session.getSubagents 首拉同构）。
@@ -175,6 +179,9 @@ export type ClientMessageType =
   | 'config.setSkillDirs' | 'config.setAgentDirs' | 'config.setExtensionDirs'
   | 'config.getSystemPrompt' | 'config.setSystemPrompt'
   | 'model.list' | 'model.switch' | 'session.setThinkingLevel'
+  // subagent.setModel：subagent / workflow run 执行模型切换（subagent-model-switch
+  // 设计 §7.1；u-foundation 定形 wire 契约，U1 接 runtime handler 消费）。
+  | 'subagent.setModel'
   // [退役待删 R2-D] tool.approve/deny/always_allow 三条目已死：renderer 从不发送，runtime
   // 无 handler（发即收 unknown_type 错误信封）。真实审批路径 = extension.ui_request/ui_response
   // 交互通道 + config.setToolPermissions；随 runtime 裁决同批删条目。
@@ -197,11 +204,6 @@ export type ClientMessageType =
   | 'plugin.config.get' | 'plugin.config.set'
   | 'plugin.uiResponse'
   | 'plugin.mountPoints.sync'
-  // plugin.dismissModal：宿主 UI 发起的 plugin modal 关闭上报（plugin-header-action-modal-points
-  // AP-2 关①；renderer PluginModalHost 经 useExtensionHostBridge 门面发送）。runtime 校验
-  // (pluginId, modalId, epoch) 三元组与当前槽匹配（陈旧 epoch → 忽略 + 日志）后广播
-  // plugin:modalState{closed, reason} + notify 插件 plugin.ui.modalClosed。
-  | 'plugin.dismissModal'
   | 'file.read'
   | 'file.tree' | 'file.tree.expand' | 'file.search' | 'file.search.cwd'
   | 'git.diff'
@@ -461,37 +463,7 @@ export type BatchDeleteResult = {
  */
 export type RenameMode = 'first-prompt' | 'first-stop' | 'agent-tool'
 
-// ── plugin modal/headerAction 帧载荷（plugin-header-action-modal-points AP-1/AP-2）──
-
-/**
- * plugin modal 关闭原因词表（AP-2 单点：宿主/插件/runtime 三类发起方共用此闭集）。
- * 本处是唯一权威定义——core extension-host/types.ts type-only import + re-export 本类型
- * （shared 不依赖 core；消费方经 @taiji/shared 或 @taiji/core 引用同一份）。
- */
-export type PluginModalClosedReason =
-  | 'dismissed'
-  | 'session-switched'
-  | 'host-overlay'
-  | 'replaced'
-  | 'plugin-gone'
-
-/**
- * plugin modal 开合帧载荷（AP-2；'plugin:modalState'，S→C 全局广播 transient 帧）。
- * payload = 调用参数原文（可缺省）——title/width 的解析与 fallback 在 renderer
- *（单一解析源，runtime 不读声明）；sessionId 必带（仅作 payload 归属信息，
- * 路由键 = 全局广播）。epoch = 单调递增槽代数（同 (pluginId,modalId) 重复 open 与
- * replaced 均递增）。
- */
-export interface PluginModalStatePayload {
-  pluginId: string
-  modalId: string
-  sessionId: string
-  title?: string
-  width?: 'sm' | 'md' | 'lg'
-  state: 'open' | 'closed'
-  epoch: number
-  reason?: PluginModalClosedReason
-}
+// ── plugin headerAction 帧载荷（plugin-header-action-modal-points AP-1）──
 
 /**
  * headerAction 运行时更新帧载荷（AP-1；'plugin:headerActionUpdate'）。必带 sessionId
@@ -505,6 +477,8 @@ export interface HeaderActionUpdatePayload {
   badge?: string
   tooltip?: string
   disabled?: boolean
+  /** true = 入口整体不渲染（与 disabled 灰置正交）；缺省 false */
+  hidden?: boolean
 }
 
 // ── ClientMessage discriminated union ───────────────────────────
@@ -627,6 +601,9 @@ export interface ClientMessageMap {
   // subagent 列表/对话流读取（runtime 直读主 session JSONL + subagent JSONL，不依赖扩展）
   'session.getSubagents': { sessionId: string }
   'session.getSubagentHistory': { sessionId: string; subagentId: string }
+  // session.getSubagentStreamState（B2 subagent-stream-chunk §4.1）：recordId 定位目标
+  // subagent record；reply 与 request 同名（payload 消费型，形状见 ServerMessageMapBase）。
+  'session.getSubagentStreamState': { sessionId: string; recordId: string }
   // plan 模式（plan 模式重设计 D1-⑥/D5）：getPlanState 状态首拉，reply 复用 session.planState
   // 广播 payload（同 session.getSubagents → session.subagents 复用形态）；abortPlan 为 PlanModeBar
   // 退出命令（确认 Popover 后），
@@ -768,6 +745,10 @@ export interface ClientMessageMap {
   'config.setSystemPrompt': { config: SystemPromptConfig }
   'model.list': Record<string, never>
   'model.switch': { sessionId: string; provider: ProviderId; modelId: string }
+  // subagent.setModel 请求（subagent-model-switch §7.1 wire 契约，U1 消费）：
+  // recordId = chat 域 subagent 会话目标（chat 应答两型）；runId = workflow run 级全切目标
+  // （聚合应答三组件）。两键互斥按目标二选一；provider/modelId 平铺照 model.switch 形态。
+  'subagent.setModel': { recordId?: string; runId?: string; provider: ProviderId; modelId: string; thinkingLevel?: string }
   'session.setThinkingLevel': { sessionId: string; level: string }
   // [退役待删 R2-D] 三条目已死（无发送方无 handler，见 ClientMessageType 段退役注释），
   // payload 形状仅为协议登记完整性保留，勿据此实现消费方。
@@ -799,16 +780,6 @@ export interface ClientMessageMap {
   'plugin.config.set': { pluginId: string; key: string; value: unknown }
   'plugin.uiResponse': { requestId: string; result: unknown }
   'plugin.mountPoints.sync': { mountPoints: string[] }
-  // plugin.dismissModal：宿主侧关闭上报（AP-2 关①）。epoch = 渲染端所展示层的槽代数
-  //（陈旧 epoch 的 dismiss 被 runtime 忽略——「关闭在途→立即重开」序列下不误关新层）；
-  // reason 是 PluginModalClosedReason 闭集的宿主子集（实际由宿主发起的只有前三者，
-  // replaced/plugin-gone 由 runtime 侧产生；帧面按单点词表全集登记，越界值 runtime 拒收）。
-  'plugin.dismissModal': {
-    pluginId: string
-    modalId: string
-    epoch: number
-    reason: PluginModalClosedReason
-  }
   'file.read': { path: string; sessionId?: string }
   'file.tree': { sessionId: string }
   'file.tree.expand': { sessionId: string; path: string }
@@ -1136,6 +1107,10 @@ export type ServerMessageType =
   | 'session.revokeMessage'
   | 'project.loaded'
   | 'session.subagents' | 'session.subagentHistory'
+  // session.getSubagentStreamState（B2 subagent-stream-chunk §4.1）：运行中 subagent 流状态
+  // 拉取 RPC 的 reply type（与 request 同名——session.subscribe / delivery.* 同款 payload
+  // 消费型同名模式；payload 见 ServerMessageMapBase 对应条目）。
+  | 'session.getSubagentStreamState'
   // plan 模式状态投影广播（plan 模式重设计 D1）：stateSnapshot 'plan' typeKey 的 live 载体帧
   //（last-value 语义——重连/切回经 stateSnapshot 回放自动恢复）；冷启动/切换首拉走
   // session.getPlanState RPC，reply 复用本 payload。
@@ -1153,7 +1128,13 @@ export type ServerMessageType =
   | 'session.traceEntries' | 'session.traceEntryAppended'
   // session-trace（design §3.1 失败路径）：现取当前 system prompt 的 reply（当前值非历史）。
   | 'session.currentSystemPrompt'
-  | 'subagent.stream_delta' | 'subagent.directive'
+  // subagent.stream_chunk（B2 subagent-stream-chunk §4.1）：增量内容推送，transient 语义与
+  // subagent.stream_delta 同族（不分配 seq、不入 ring、不写快照，直传订阅者，断连即丢；
+  // topic 登记在 runtime message-bus TOPIC_TABLE）。
+  | 'subagent.stream_delta' | 'subagent.stream_chunk' | 'subagent.directive'
+  // subagent.modelSet：subagent.setModel 的 reply type（subagent-model-switch §7.1；
+  // payload = SubagentSetModelReply 应答三形态判别联合，见具名类型段）。
+  | 'subagent.modelSet'
   | 'message.message_start' | 'message.text_delta' | 'message.thinking_delta'
   | 'message.thinking_start' | 'message.thinking_end'
   | 'message.tool_call_start' | 'message.tool_call_end'
@@ -1232,12 +1213,6 @@ export type ServerMessageType =
   // 迟到审批对已删 pending miss noop 不产生本帧（该请求终局已由 expired 覆盖）。
   | 'plugin:permissionRequestResolved'
   | 'plugin:viewUpdate'
-  // plugin:modalState：plugin modal 开合帧（plugin-header-action-modal-points AP-2）。
-  // runtime showModal/hideModal/dismissModal 仲裁后全局广播（槽与层都是全局单例，
-  // sessionId 仅作 payload 归属信息、不经 per-session 通道）；帧类 = transient/不入
-  // ring（经 broker 全局广播直发，不经 message-bus publish，重连重放不回放陈旧开/关；
-  // renderer 另以 lastEpoch 丢弃 epoch < lastEpoch 的乱序入帧兜底）。
-  | 'plugin:modalState'
   // plugin:headerActionUpdate：headerAction 可变字段（badge/tooltip/disabled）下行帧
   //（AP-1）。必带 sessionId——渲染端按 (sessionId, headerActionId) 写对应会话分区；
   // 经 broker 全局广播直发（同上不入 ring）。
@@ -1667,6 +1642,100 @@ export interface ModelSwitchMutationReply {
   modelId: string
 }
 
+// ── subagent.setModel 的应答三形态（subagent-model-switch §7.1，u-foundation 定形）──
+//
+// 同一命令按目标分流两域应答：recordId（chat 域）→ 应答两型判别联合（kind 字段）；
+// runId（workflow run 级全切）→ 聚合应答三组件（无 kind——按请求参数分流判别，
+// 或以 members/failures/summary 字段在场判别）。前端消费范式照 model.switch 回执
+// 修型（U6）：以应答值写显示态，禁乐观写请求值（§7.1「禁乐观写」）。
+//
+// effectiveModel 结构 = 引擎协议 ModelRef（packages/subagent-engine-sdk contract-types，
+// SSOT；shared 不依赖 SDK，此处内联结构等价形状——两处漂移由 U1 接线测试对账）。
+
+/** chat 域已生效型：引擎命令成功且回读到手——生效模型 ref + 生效 thinking 档位（§6.4）。
+ *  有活进程的切换走此型。 */
+export interface SubagentSetModelEffectiveReply {
+  kind: 'effective'
+  effectiveModel: { provider: string; modelId: string }
+  effectiveThinkingLevel: string
+}
+
+/** chat 域已记账型：无活进程（含竞态窗口内退出、引擎不支持热切转记账）——已记录、
+ *  下次执行生效。**不携带档位值**（无回读源，档位将由下次解析按现役候选链对新模型
+ *  推导，预告值必然是猜测，§7.1）。 */
+export interface SubagentSetModelRecordedReply {
+  kind: 'recorded'
+  /** 提示性文案（「已记录，下次执行生效」/ 引擎不支持热切的提示等，§5.2）。 */
+  note: string
+}
+
+/** chat 域应答两型判别联合。 */
+export type SubagentChatSetModelReply = SubagentSetModelEffectiveReply | SubagentSetModelRecordedReply
+
+/** 聚合应答成员态条目（三态语义权威 = 设计 §7.4；形状 SSOT = subagent-core
+ *  RunSwitchMemberState，结构等价投影）。生效值字段仅 switched 成员携带。 */
+export interface SubagentSetModelMemberState {
+  runId: string
+  state: 'switched' | 'not-active' | 'not-applicable'
+  effectiveModel?: { provider: string; modelId: string }
+  effectiveThinkingLevel?: string
+}
+
+/** 聚合应答失败名单 reason 的已知字面词表（shared 侧登记，值 = SDK
+ *  SET_MODEL_ERROR_CODES 三型；shared 不依赖 SDK，逐值登记后由对账测试锚定——锚 =
+ *  packages/runtime/src/infra/subagent-model-gateway.test.ts「core ↔ shared setModel
+ *  对账」段，SDK 词表扩位时同批跟随）。 */
+export const SUBAGENT_SET_MODEL_FAILURE_REASON_CODES = [
+  'engine_model_not_in_snapshot',
+  'engine_credential_missing',
+  'engine_state_readback_failed',
+] as const
+
+/** 失败名单 reason 的已知字面子集（封闭，仅供对账锚与封闭子集消费方引用）。 */
+export type SubagentSetModelKnownFailureReason = (typeof SUBAGENT_SET_MODEL_FAILURE_REASON_CODES)[number]
+
+/** 聚合应答失败名单条目（转发失败成员；reason **开放值域** = 已知三型 ∪ 词表外透传码
+ *  （engine_crashed 等 engine_* 面原样上报——core 聚合实装 failureReasonOf 刻意透传，
+ *  消费方对未知码按原文兜底显示），`(string & {})` 放行透传码同时保留三型自动补全）。
+ *  **三处类型同步义务**：本类型 reason ∪ subagent-core RunSwitchMemberFailure.reason ∪
+ *  聚合实装 failureReasonOf 返回类型，值域口径改动三处同批（对账锚同上）。成员标识与
+ *  成员态数组同维（同一已受理成员 runId，两数组是同一成员集合的互斥划分，§7.1）。 */
+export interface SubagentSetModelMemberFailure {
+  runId: string
+  reason: SubagentSetModelKnownFailureReason | (string & {})
+}
+
+/**
+ * 「错误应答 = 记账已写」分型词表（subagent-model-switch §7.2 处置表行 3/7 的显示面
+ * 契约，D3 缺陷七）：宿主编排以这两码回错误应答前已写覆盖记账（快照型——模型本身
+ * 有效，下一轮 spawn 现取目录即可用；回读失败型——命令已送达，意图已表达），前端
+ * 据此亮「用户覆盖中」badge（覆盖意图已受理的事实依据）。词表外错误码一律不得亮
+ * badge：`engine_credential_missing`（切换整体未生效，不写）与全部校验型/通道型
+ * 失败（生效状态未知或未写）。机制权威 = subagent-core model-switch.ts catch 分支
+ * 处置表（core 侧登记载体 = ACCOUNTED_SET_MODEL_ERROR_CODES 导出常量）；本词表扩位
+ * 须与该表同批（词表登记注释同款纪律），**对账测试锚** =
+ * packages/runtime/src/infra/subagent-model-gateway.test.ts 的
+ * 「core ↔ shared setModel 对账」（词表值级等值断言——core 扩码本词表漏跟即红）。
+ */
+export const SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES = [
+  'engine_model_not_in_snapshot',
+  'engine_state_readback_failed',
+] as const
+
+export type SubagentSetModelAccountedErrorCode = (typeof SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES)[number]
+
+/** run 级全切聚合应答——三组件固定结构（§7.1 定形）：恒保留三组件，退化仅指无生效值
+ *  可报（全员非 switched 时成员条目无档位字段），失败名单无失败成员时为空名单、不省略
+ *  组件。前端按成员分项呈现，不坍缩为标量消息。 */
+export interface SubagentSetModelAggregateReply {
+  members: SubagentSetModelMemberState[]
+  failures: SubagentSetModelMemberFailure[]
+  summary: string
+}
+
+/** subagent.setModel 的 reply 总形（chat 两型 ∪ run 级聚合）。 */
+export type SubagentSetModelReply = SubagentChatSetModelReply | SubagentSetModelAggregateReply
+
 /** session.setThinkingLevel 的 reply（session.thinkingLevelSet）：level 是 pi 实际生效档
  *  （pi 钳制不支持的档位时 ≠ 请求值，如 mimo 族 max→high）。消费侧禁乐观写请求值。 */
 export interface ThinkingLevelMutationReply {
@@ -1986,9 +2055,6 @@ export interface ServerMessageMapBase {
     guiTree: unknown[]
     updatedAt: number
   }
-  // plugin:modalState：plugin modal 开合帧（AP-2；runtime 仲裁后全局广播，transient 直发
-  // 不入 ring）。payload 契约见 PluginModalStatePayload（上方类型定义）。
-  'plugin:modalState': PluginModalStatePayload
   // plugin:headerActionUpdate：headerAction 可变字段下行帧（AP-1；必带 sessionId，
   // 渲染端按 (sessionId, headerActionId) 写会话分区）。payload 契约见 HeaderActionUpdatePayload。
   'plugin:headerActionUpdate': HeaderActionUpdatePayload
@@ -2294,7 +2360,31 @@ export interface ServerMessageMapBase {
   // subagent.stream_delta：running subagent 的逐字 streaming（路径 A-1）。
   // pi 扩展层合并 text_delta 后经 ctx.ui.setWidget("subagent-stream-<recordId>", lines) 转发，
   // runtime EventAdapter 捕获后转为此 WS 帧。lines 是累积全文（split('\n')），undefined = 终态清除。
-  'subagent.stream_delta': { sessionId: string; recordId: string; lines: string[] | undefined }
+  // B2 起 R 路径（chunk 化，§4.2）不再经此通道发内容，仅收尾清除帧经此发送；清除帧 additive
+  // 携带 msgSeq（= 被清除消息的序号，供消费端封口水位，§4.1），内容帧不再出现。
+  'subagent.stream_delta': { sessionId: string; recordId: string; lines: string[] | undefined; msgSeq?: number }
+  // subagent.stream_chunk（B2 subagent-stream-chunk §4.1）：running subagent 的增量内容推送，
+  // 唯一的内容推送通道。transient 主题（与 subagent.stream_delta 同族：不分配 seq、不入 ring、
+  // 不写快照，直传订阅者，断连即丢，无回放；topic 登记在 runtime message-bus TOPIC_TABLE）。
+  // delta 是真增量片段（非累积全文），消费端按 (recordId, msgSeq, deltaSeq) 双序号拼合：
+  // - msgSeq = per-record assistant 消息序号（表达消息边界，现协议靠全量覆盖隐式表达）；
+  //   产生端从 1 开始（首条 assistant 消息 = 1，message_start 递进），消费端状态机初始 0；
+  // - deltaSeq = per-message 从 0 递增。
+  // 失步（deltaSeq 跳号）与接入（晚订阅/刷新）恢复走 session.getSubagentStreamState 拉取；
+  // 定稿仍由 subagent.stream_delta 的清除消息（lines: undefined）+ entry 权威链收敛。
+  'subagent.stream_chunk': { sessionId: string; recordId: string; msgSeq: number; deltaSeq: number; delta: string }
+  // session.getSubagentStreamState：session.getSubagentStreamState RPC 的 reply（与 request
+  // 同名——session.subscribe 模式）。运行中 subagent 流状态的只读快照（RelayTee 既有内存
+  // 状态的投影，不新增保留状态）：
+  // - found=false = 该 record 当前无进行中流（未开始或已定稿）；此时 msgSeq/lastDeltaSeq
+  //   无流式语义（值 0），lines 为空数组——常态可达（drawer 关闭窗口内流已定稿）；
+  // - found=true 时 lines = 当前消息累积全文（textAccumulated 的 split('\n') 形态，与旧
+  //   stream_delta payload 的 lines 同形，消费端复用现有全量替换入口）；msgSeq = 该全文
+  //   所属的消息序号；lastDeltaSeq = 这份全文包含到第几条 delta（水位：记录已处理到哪的
+  //   位置标记，消费端用作去重判据）。
+  // 失败走统一 error envelope（本 RPC 是同步内存读，设计内「无进行中流」= found:false
+  // 合法回执，不是错误；无独立错误码词表）。
+  'session.getSubagentStreamState': { found: boolean; msgSeq: number; lastDeltaSeq: number; lines: string[] }
   // subagent.directive：用户定向消息的 live 广播（@ subagent chip 发送 → extension 留痕
   // custom_message entry → pi message_end{role:'custom'} → 本广播，设计 §3.3.3a live 链路）。
   // 带 sessionId（架构约定 #7 session 隔离）；renderer（U2b）聊天流据此插定向气泡
@@ -2302,6 +2392,9 @@ export interface ServerMessageMapBase {
   // 对该 customType 覆写 display:true）产出同字段的 custom system message，字段解析 SSOT =
   // shared.parseSubagentDirective（live ≡ reload，关键规则 9）。
   'subagent.directive': { sessionId: string; subagentId: string; slug: string; direction: 'user'; text: string }
+  // subagent.modelSet：subagent.setModel 的 reply（subagent-model-switch §7.1）——
+  // chat 域应答两型（kind 判别）∪ run 级聚合三组件；形状见 SubagentSetModelReply 族。
+  'subagent.modelSet': SubagentSetModelReply
   // app.info：runtime 启动时推送应用 + pi 版本号（全局通道，无 sessionId）。
   'app.info': { appVersion: string; piVersion: string }
   // context.update：上下文用量（index.ts onContextUpdate 推；cacheHit/modelId 无来源，D9 保留 UI 占位）。
@@ -2909,7 +3002,7 @@ export interface BashDispatchReceipt {
  * command<K>()（renderer api/request.ts）用此 map 推导返回类型：`Promise<ReplyPayloadMap[K]>`。
  *
  * [C-pi-14/ADR-0065] mutation 类 RPC（改状态值且 renderer 有 store 副本，覆盖域 = session
- * 配置状态 / model / preset 三域）的映射约定：分支一（后端可变换请求值——pi 钳制/pattern
+ * 配置状态 / model / preset / config / mcp 五域）的映射约定：分支一（后端可变换请求值——pi 钳制/pattern
  * 换模）必须 payload 消费型引用携带生效值字段的 `XxxMutationReply` 具名类型，禁 void；
  * 分支二（后端原样存储）reply 携带回显字段，确需 ack 型的须在 ADR-0065 豁免清单登记理由。
  * 新增 mutation 必须同步登记 runtime 契约测试 MUTATION_RPC_REGISTRY（不入清单即测试红）。
@@ -2974,6 +3067,9 @@ export interface ReplyPayloadMap {
   'session.getTraceEntries': ServerMessageMap['session.traceEntries']
   'session.fetchCurrentSystemPrompt': ServerMessageMap['session.currentSystemPrompt']
   'session.getSubagentHistory': ServerMessageMap['session.subagentHistory']
+  // session.getSubagentStreamState：payload 消费型（同名 reply——session.subscribe 模式）。
+  // renderer 读 found/msgSeq/lastDeltaSeq/lines 做水位去重与全量替换（B2 subagent-stream-chunk §4.3）。
+  'session.getSubagentStreamState': ServerMessageMap['session.getSubagentStreamState']
   'session.getSubagentEngineConfig': ServerMessageMap['session.subagentEngineConfig']
   'session.setSubagentDefaultEngine': ServerMessageMap['session.subagentDefaultEngineSet']
   'session.getSubagents': ServerMessageMap['session.subagents']
@@ -3011,9 +3107,6 @@ export interface ReplyPayloadMap {
   'plugin.config.get': ServerMessageMap['plugin:config']
   'plugin.config.set': ServerMessageMap['plugin:config']
   'plugin.mountPoints.sync': ServerMessageMap['pong']
-  // plugin.dismissModal → reply 'pong' {}（fire-and-forget ack；关闭的权威反馈 =
-  // plugin:modalState{closed} 广播 + plugin.ui.modalClosed notify，不走本 reply）
-  'plugin.dismissModal': ServerMessageMap['pong']
   'workspace.listRecent': ServerMessageMap['workspace.recentList']
   'workspace.record': ServerMessageMap['workspace.recentList']
   'project.load': ServerMessageMap['project.loaded']
@@ -3125,6 +3218,11 @@ export interface ReplyPayloadMap {
   'model.switch': ServerMessageMap['model.switched'] // reply model.switched（回执修型 U6：transport 层在
             // model.switch case 消费 switchModel 返回的生效值（session-service 读回 get_state 生效模型）
             // 拆解回填 provider/modelId，对齐 C-pi-13 改状态 RPC 一律回生效值）
+  // subagent.setModel：reply subagent.modelSet（payload 消费型——chat 两型按 kind 判别，
+  // run 级聚合三组件；应答值写显示态禁乐观写，§7.1。已登记 mutation 守卫清单
+  // mutation-reply-contract.test.ts 的 MUTATION_RPC_REGISTRY（分支一 effective-value，
+  // 生效值断言锚 effective 分支）——subagent 域新增 mutation 须同批登记，漏登记即红）。
+  'subagent.setModel': ServerMessageMap['subagent.modelSet']
   'session.compact': void         // reply session.compacted
   'session.delete': void          // reply session.deleted
   'session.deleteByCwd': BatchDeleteResult // reply session.deletedByCwd（前端读 deleted/failed 列表）

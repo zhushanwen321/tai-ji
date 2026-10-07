@@ -34,9 +34,11 @@ import { closeOverlay, getOverlayControlState, openBrowser } from '@taiji/core/d
 import {
   closeWorkflowVizOverlay,
   closeWorkflowVizOverlayForSession,
+  openSchedulerTab,
   openWorkflowVizOverlay,
   overlayDag,
   overlayDagError,
+  overlayTab,
   retryDagParse,
 } from '../workflow-viz-overlay'
 import { useWorkflowStore } from '@/stores/workflow'
@@ -370,7 +372,7 @@ describe('Host 容器（黑盒 DOM + D10 回落）', () => {
     wrapper.unmount()
   })
 
-  it('零命中实例在左栏未匹配分组可见（D2⑥ 不静默丢弃——真实匹配链派生，S3 对账出口）', async () => {
+  it('零命中实例在上区未匹配分组可见（D2⑥ 不静默丢弃——真实匹配链派生，S3 对账出口）', async () => {
     // phase 'elsewhere' 不在 DAG 分区 → 零命中进 unmatched（Host 派生经 matchInstancesToNodes）
     await seedRecords([makeRun('wf-1', 's1', { agentCalls: [
       { id: 0, agent: 'stray-agent', phase: 'elsewhere', status: 'done' },
@@ -426,6 +428,65 @@ describe('Host 容器（黑盒 DOM + D10 回落）', () => {
     expect(wrapper.find('[data-testid="wf-live-panel-stub"]').exists()).toBe(true)
     wrapper.unmount()
     consoleSpy.mockRestore()
+  })
+})
+
+describe('scheduler 一级 tab（Host 挂载门控 + tab 状态机，scheduler 整合 2026-10-06）', () => {
+  it('scheduler 直达打开：overlay 面板呈现 + scheduler pane 在场 + runs body 不在场 + header 换定时任务标题 + 「运行」tab 禁用（无 run 数据）', async () => {
+    const wrapper = mount(WorkflowVizOverlayHost)
+
+    openSchedulerTab(SID)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="wfvz-overlay-panel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="wfvz-overlay-scheduler-pane"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="wfvz-overlay-dag-pane"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="wfvz-overlay-live-pane"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="wfvz-overlay-scheduler-title"]').exists()).toBe(true)
+    const runsTab = wrapper.find('[data-testid="wfvz-overlay-tab-runs"]')
+    expect(runsTab.attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('workflow 开着点「定时任务」tab：scheduler pane 出现 + DAG 区卸载；点回「运行」还原（tab 只切展示维度，core 内容 kind 不变）', async () => {
+    await seedRecords([makeRun('wf-1', 's1')])
+    const wrapper = mount(WorkflowVizOverlayHost)
+
+    openWorkflowVizOverlay(SID, 'wf-1')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="wfvz-overlay-dag-pane"]').exists()).toBe(true)
+
+    await wrapper.find('[data-testid="wfvz-overlay-tab-scheduler"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="wfvz-overlay-scheduler-pane"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="wfvz-overlay-dag-pane"]').exists()).toBe(false)
+    expect(currentRun()).toEqual({ sessionId: SID, runId: 'wf-1' })
+
+    await wrapper.find('[data-testid="wfvz-overlay-tab-runs"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="wfvz-overlay-dag-pane"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('关闭复位（任意通道）：Esc 编排器直关 core 开合态 → overlayTab 复位 runs；重开按入口定', () => {
+    openSchedulerTab(SID)
+    expect(overlayTab.value).toBe('scheduler')
+    // closeOverlay = core 直关（stack-order Esc 通道同形态，不经控制器关闭函数）
+    closeOverlay()
+    expect(overlayTab.value).toBe('runs')
+
+    openSchedulerTab(SID)
+    expect(overlayTab.value).toBe('scheduler')
+    closeWorkflowVizOverlay() // 壳 close 通道
+    expect(overlayTab.value).toBe('runs')
+  })
+
+  it('session 删除级联对 scheduler 内容同判据：删发起 session 关、删其他不关（D11⑤ §7.4 同语义）', () => {
+    openSchedulerTab(SID)
+    closeWorkflowVizOverlayForSession('other-sid')
+    expect(isOverlayOpen()).toBe(true)
+    closeWorkflowVizOverlayForSession(SID)
+    expect(isOverlayOpen()).toBe(false)
   })
 })
 

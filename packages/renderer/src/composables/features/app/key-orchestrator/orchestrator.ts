@@ -1,5 +1,5 @@
 /**
- * 键盘栈序编排器（display-containers §6.7/§7.5 唯一属主）——Esc / ⌘W / ⌃` 三键的判定单源。
+ * 键盘栈序编排器（display-containers §6.7/§7.5 唯一属主）——Esc / ⌘W / ⌃` / Ctrl+F 的判定单源。
  *
  * 职责：
  * - **Esc**（window keydown **bubble**，AppShell 根 setup 首位注册）：isComposing 前置守卫
@@ -12,6 +12,9 @@
  *   同一层级序逐层关，全关后调 windowClose 关窗（before-input-event 已吞默认关窗行为）。
  * - **⌃`**（主进程 before-input-event 窗口级 → 'shortcut' type='toggle-bottom-drawer'）：
  *   isImeComposing 守卫 → toggleBottomDrawer()（浮层开着照常切换——§5.1 规则 3）。
+ * - **Ctrl/Cmd+F**（find-in-surface）：isComposing 守卫 → defaultPrevented 先检 →
+ *   useFindInSurface.openFindAtPointer()（悬停归属优先 → 回退栈序 → 全无不动作）。
+ *   Esc 分支内含「查找框开着 → 先关查找框」层（临时覆盖层先于容器剥层）。
  * - **Tab 焦点陷阱**（浮层分支）：浮层开着时 Tab 首末循环（§7.3 随迁保位，W2 随 OverlayShell
  *   归位）；面板 ref 经 overlay 宿主注入（overlay-focus-trap）。**Tab 属主 = 最上层表面**
  *   （2026-10-03 用户裁决）：模态/弹层叠在浮层上时 Tab 归该模态焦点域——先行档已消费
@@ -31,9 +34,10 @@ import { focusComposer } from './focus-composer'
 import { isImeComposing, startImeCompositionTracking } from './ime-composition'
 import { trapTabIntoOverlayPanel } from './overlay-focus-trap'
 import { closeTopContainer } from './stack-order'
+import { useFindInSurface } from '@/composables/features/find/useFindInSurface'
 
 /**
- * window keydown（bubble 相位）——Esc / Tab 浮层分支。
+ * window keydown（bubble 相位）——Esc / Tab 浮层分支 / Ctrl+F。
  * isComposing 守卫统一前置（§6.7：IME 组合态三键一律不动作；组合态 Esc 是「取消候选」
  * 的输入键，Tab 同守卫防组合态误改焦点）。
  */
@@ -44,6 +48,15 @@ function onWindowKeydown(e: KeyboardEvent): void {
     // 聚合让位族（yieldsEsc）任一成员开着 → 不动作（Esc 先服务视觉最外层）
     if (e.defaultPrevented) return
     if (anyModalSurfaceYieldsEsc()) return
+    // 表面内查找开着 → Esc 先关查找框再轮到容器剥层。FindBar 根上 keydown.stop 已消费
+    // 输入框聚焦态（stopPropagation 不冒泡到 window），此处兜非聚焦态：焦点在表面其它
+    // 位置时 Esc 不得穿透成「关容器」——查找框是表面上的临时覆盖层，先于容器关闭。
+    const find = useFindInSurface()
+    if (find.isOpen.value) {
+      find.close()
+      e.preventDefault()
+      return
+    }
     if (closeTopContainer()) e.preventDefault()
     return
   }
@@ -55,6 +68,15 @@ function onWindowKeydown(e: KeyboardEvent): void {
     if (e.defaultPrevented) return
     if (anyModalSurfaceYieldsEsc()) return
     trapTabIntoOverlayPanel(e)
+    return
+  }
+  // Ctrl/Cmd+F：表面内查找（find-in-surface）。归属判定在 useFindInSurface.openFindAtPointer
+  // （鼠标悬停优先 → 回退栈序 → 全无不动作）。mod 判定与 useGlobalShortcuts 同款
+  // （metaKey||ctrlKey 双平台同触，无需平台分支）；禁 capture——同 Esc 的 xterm 红线。
+  if (e.key === 'f' && (e.metaKey || e.ctrlKey)) {
+    if (e.defaultPrevented) return
+    e.preventDefault()
+    useFindInSurface().openFindAtPointer()
   }
 }
 

@@ -31,7 +31,7 @@ import type {
   SubagentRecordRegisteredEntryData,
   SubagentRecordSettledEntryData,
 } from "./record-entry.ts";
-import type { RecordBoundEvent, RecordEventFoldState } from "./record-events.ts";
+import type { RecordBoundEvent, RecordEventFoldState, RecordModelOverrideEvent } from "./record-events.ts";
 import type { ManifestRecord } from "./manifest-store.ts";
 // [U7 / §3.2.6 引擎中立锚] transcriptAnchorOf（cold-lookup 导出接口）：record →
 // transcript 锚的派生单点（显式 transcriptRef 优先 / zcode engineHandle.sessionRef
@@ -403,6 +403,39 @@ export function isValidClosedReason(value: string | undefined): value is ClosedR
   return value !== undefined && CLOSED_REASONS.has(value);
 }
 
+/**
+ * manifest 覆盖记账字段的读侧形状守卫（isEngineHandleShape 同款口径——未知 JSON 不裸收，
+ * 外部写入垃圾归一 undefined）。
+ */
+export function isValidModelOverrideShape(
+  v: unknown,
+): v is { ref: { provider: string; modelId: string }; thinkingLevel?: string; setAt: number } {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const o = v as Record<string, unknown>;
+  if (typeof o.setAt !== "number") return false;
+  if (o.thinkingLevel !== undefined && typeof o.thinkingLevel !== "string") return false;
+  if (typeof o.ref !== "object" || o.ref === null || Array.isArray(o.ref)) return false;
+  const ref = o.ref as Record<string, unknown>;
+  return typeof ref.provider === "string" && typeof ref.modelId === "string";
+}
+
+/**
+ * ModelOverride 规范拷贝单点（record/fold/manifest 各载体间的字段级复制——thinkingLevel
+ * 缺省不落键，消费方 `'thinkingLevel' in obj` 判定与序列化键集恒定）。此前 fold→light 补
+ * 投影 / 终态 manifest / derived manifest / 水合四处手写同构 spread，收拢防第三处副本漂移。
+ */
+function copyModelOverride(o: {
+  ref: { provider: string; modelId: string };
+  thinkingLevel?: string;
+  setAt: number;
+}): { ref: { provider: string; modelId: string }; thinkingLevel?: string; setAt: number } {
+  return {
+    ref: o.ref,
+    ...(o.thinkingLevel !== undefined ? { thinkingLevel: o.thinkingLevel } : {}),
+    setAt: o.setAt,
+  };
+}
+
 export function sameNullableStamp(a: Stamp | null, b: Stamp | null): boolean {
   if (a === null || b === null) return a === b;
   return sameStamp(a, b);
@@ -507,6 +540,27 @@ export function receiptStatisticsFromFold(fold: RecordEventFoldState | undefined
     totalTokens: idleReceipt.totalTokens,
     endedAt: settled !== undefined ? settled.endedAt : idleReceipt.ts,
   };
+}
+
+/**
+ * [U7 / §3.2.7 统计口径单基准 + subagent-model-switch §6.2] fold → light 补投影
+ * （store 扫描探测腿装配后调用）：统计域换源折叠（round/totalTokens/turns/endedAt
+ * 在场即投影）+ 覆盖记账补投影（fold 有覆盖帧时 light 补带 modelOverride，冷复活
+ * 水合与内存表重建据此恢复）。索引命中腿不投影——覆盖帧追加必改 events 戳（缓存键
+ * 第四维）→ 索引条目过期 → 落回探测分支，构造性无丢失窗口。
+ */
+export function projectFoldToLight(
+  light: SubagentRecord,
+  fold: RecordEventFoldState | undefined,
+): void {
+  const stats = receiptStatisticsFromFold(fold);
+  if (stats.round !== undefined) light.round = stats.round;
+  if (stats.totalTokens !== undefined) light.totalTokens = stats.totalTokens;
+  if (stats.turns !== undefined) light.turns = stats.turns;
+  if (stats.endedAt !== undefined) light.endedAt = stats.endedAt;
+  if (fold?.modelOverride !== undefined) {
+    light.modelOverride = copyModelOverride(fold.modelOverride);
+  }
 }
 
 /**
@@ -791,6 +845,13 @@ export function terminalManifestRecord(record: ExecutionRecord): ManifestRecord 
     model: record.model,
     engine: record.engine,
     engineHandle: record.engineHandle,
+    // [H2 W1 / D3 缺陷五] 来源身份与覆盖记账随终态投影下行（与 derived 投影同域）。
+    ...(record.origin === "workflow" ? { origin: "workflow" as const } : {}),
+    ...(record.parentRunId !== undefined ? { parentRunId: record.parentRunId } : {}),
+    ...(record.stepIndex !== undefined ? { stepIndex: record.stepIndex } : {}),
+    ...(record.modelOverride !== undefined
+      ? { modelOverride: copyModelOverride(record.modelOverride) }
+      : {}),
   };
 }
 
@@ -852,6 +913,14 @@ export function derivedManifestRecord(rec: SubagentRecord): ManifestRecord {
     model: rec.model,
     engine: rec.engine,
     engineHandle: rec.engineHandle,
+    // [H2 W1 / D3 缺陷五] 来源身份与覆盖记账随投影下行（manifest 源反查 parentRunId
+    // 是 run 级全切成员清单的可见性键；zcode 成员的 manifest 兜底载体缺它即漏成员）。
+    ...(rec.origin === "workflow" ? { origin: "workflow" as const } : {}),
+    ...(rec.parentRunId !== undefined ? { parentRunId: rec.parentRunId } : {}),
+    ...(rec.stepIndex !== undefined ? { stepIndex: rec.stepIndex } : {}),
+    ...(rec.modelOverride !== undefined
+      ? { modelOverride: copyModelOverride(rec.modelOverride) }
+      : {}),
   };
 }
 
@@ -895,6 +964,12 @@ export function manifestToSubagent(m: ManifestRecord): SubagentRecord | null {
     sessionFile: m.sessionFile,
     engine: m.engine,
     engineHandle: isEngineHandleShape(m.engineHandle) ? m.engineHandle : undefined,
+    // [H2 W1 / D3 缺陷五] 来源身份回读（旧 manifest 无字段 → undefined = tool 语义，
+    // 与 entry/内存源投影同形——manifest 源反查 collectRecordsByParentRunId 不再漏成员）。
+    ...(m.origin === "workflow" ? { origin: "workflow" as const } : {}),
+    ...(typeof m.parentRunId === "string" && m.parentRunId !== "" ? { parentRunId: m.parentRunId } : {}),
+    ...(typeof m.stepIndex === "number" ? { stepIndex: m.stepIndex } : {}),
+    ...(isValidModelOverrideShape(m.modelOverride) ? { modelOverride: m.modelOverride } : {}),
   };
 }
 
@@ -955,6 +1030,10 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
     origin: r.origin,
     parentRunId: r.parentRunId,
     stepIndex: r.stepIndex,
+    // [subagent-model-switch §6.2] 用户覆盖记账随内存源投影（读模型可见面——冷复活
+    // 水合的候选数据源 + 覆盖状态查询通道）。持久化权威 = record-model-override 事件
+    // 帧（写点 = store.markModelOverride），本投影只透传内存值；undefined 自然缺省。
+    modelOverride: r.modelOverride,
   };
 }
 
@@ -971,6 +1050,21 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
  * fold 来源 = TerminalCtx.foldOf 注入位（调用时读事件面——事件面未接线的纯内存
  * 形态返回 undefined，本函数整体 no-op）。
  */
+/**
+ * [subagent-model-switch §6.2/P7] 用户覆盖记账水合（缺省回填，非空不覆盖——与
+ * transcriptRef 同构）：事件流 record-model-override 帧的折叠产物是跨重启后解析
+ * 第 0 层的恢复源（主 agent 重启 → 冷复活 → record.modelOverride 在场 → 续聊轮
+ * 解析命中覆盖）。折叠缺席（从未覆盖）时保持 undefined 零影响。
+ */
+function hydrateModelOverride(
+  record: ExecutionRecord,
+  override: RecordModelOverrideEvent | undefined,
+): void {
+  if (record.modelOverride !== undefined || override === undefined) return;
+  type MutableOverrideRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
+  (record as MutableOverrideRecord).modelOverride = copyModelOverride(override);
+}
+
 export function hydrateReviveBaseline(record: ExecutionRecord, fold: RecordEventFoldState | undefined): void {
   if (fold === undefined) return;
   const stats = baselineStatisticsFromFold(fold);
@@ -986,4 +1080,5 @@ export function hydrateReviveBaseline(record: ExecutionRecord, fold: RecordEvent
   if (record.transcriptRef === undefined && reopenedRef !== undefined) {
     record.transcriptRef = reopenedRef;
   }
+  hydrateModelOverride(record, fold.modelOverride);
 }

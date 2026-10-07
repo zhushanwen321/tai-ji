@@ -15,8 +15,10 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
   openBrowser,
+  openSchedulerOverlay,
   openOverlay,
   closeBrowserOverlayForSession,
+  closeOverlay,
   _resetOverlayForTest,
 } from '../coordination'
 import { getOverlayControlState } from '../state'
@@ -46,6 +48,39 @@ describe('openBrowser URL 注入链（§7.4：localhost 链接点击 → 浮层 
     openBrowser('   ', 'sess-a')
     openBrowser('http://localhost:1420/', ' ')
     expect(getOverlayControlState().current).toEqual({ kind: 'browser', payload: { url: 'http://localhost:1420/', sessionId: 'sess-a' } })
+  })
+})
+
+describe('openSchedulerOverlay（scheduler 整合浮层一级 tab，2026-10-06：插件树持续推送，浮层直取）', () => {
+  it('开浮层：isOpen=true + current=scheduler 载荷（所属会话）', () => {
+    openSchedulerOverlay('sess-a')
+    const state = getOverlayControlState()
+    expect(state.isOpen).toBe(true)
+    expect(state.current).toEqual({ kind: 'scheduler', payload: { sessionId: 'sess-a' } })
+  })
+
+  it('已开态（workflow 内容）再开 = 单例换内容（isOpen 保持开、载荷替换为 scheduler）', () => {
+    openOverlay({ kind: 'workflow', payload: { sessionId: 'sess-a', runId: 'wf-1' } })
+    openSchedulerOverlay('sess-a')
+    const state = getOverlayControlState()
+    expect(state.isOpen).toBe(true)
+    expect(state.current).toEqual({ kind: 'scheduler', payload: { sessionId: 'sess-a' } })
+  })
+
+  it('sessionId 空白 → no-op（原态保持；无效内容不进浮层）', () => {
+    openSchedulerOverlay('sess-a')
+    openSchedulerOverlay('   ')
+    expect(getOverlayControlState().current).toEqual({ kind: 'scheduler', payload: { sessionId: 'sess-a' } })
+  })
+
+  it('关浮层复位不变量对 scheduler 内容同构：closeOverlay 后 isOpen=false + current=null（S5 反向锚：browser 级联不关 scheduler 内容）', () => {
+    openSchedulerOverlay('sess-a')
+    closeBrowserOverlayForSession('sess-a')
+    expect(getOverlayControlState().isOpen).toBe(true)
+    expect(getOverlayControlState().current?.kind).toBe('scheduler')
+    closeOverlay()
+    expect(getOverlayControlState().isOpen).toBe(false)
+    expect(getOverlayControlState().current).toBeNull()
   })
 })
 

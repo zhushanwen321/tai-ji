@@ -4,7 +4,7 @@
  * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/format-utils.test.ts
  */
 import { describe, it, expect } from 'vitest'
-import { shortenForHeader, tailLines, formatClock } from '../format-utils'
+import { shortenForHeader, tailLines, stripAnsi, formatClock } from '../format-utils'
 
 describe('shortenForHeader', () => {
   // U1: bash 命令——绝对路径 4 段截短，相对路径不动
@@ -124,6 +124,88 @@ describe('tailLines', () => {
       const text = randomText(rand, rand() < 0.5 ? 12 : 120)
       for (let n = 1; n <= 10; n++) {
         expect(tailLines(text, n)).toEqual(tailLinesRef(text, n))
+      }
+    }
+  })
+})
+
+/**
+ * tailLines × stripAnsi 执行顺序对拍（Block.vue tool 尾行窗口取数）。
+ *
+ * 背景：toolTailLines 先对全文 stripAnsi 再 tailLines，O(全文) 正则替换产出全文新串，
+ * 只为取尾 2 行——架空 tailLines 的尾部扫描优化。改为先 tailLines 再对窗口行逐行
+ * stripAnsi。等价性依据：stripAnsi 的 ANSI_RE = /\x1b\[[0-9;]*m/g 字符类 [0-9;] 不含
+ * \n（也不含 \r，CRLF 安全）——strip 不增删换行、单次匹配不跨行，行边界 strip 前后
+ * 不变，与 strip 后取尾逐字节一致。本组对拍锁定该等价性（参照实现 = 旧顺序）。
+ */
+describe('tailLines × stripAnsi 顺序对拍', () => {
+  /** 旧顺序（参照基准）：全文 strip → tailLines */
+  function stripThenTail(text: string, n: number): string[] {
+    return tailLines(stripAnsi(text), n)
+  }
+  /** 新顺序：tailLines → 窗口行逐行 strip */
+  function tailThenStrip(text: string, n: number): string[] {
+    return tailLines(text, n).map(stripAnsi)
+  }
+
+  it('对拍: ANSI 状态跨行 / 行首行尾 ANSI / 空行 / 纯文本固定用例', () => {
+    const cases = [
+      '', // 空串
+      'plain line 1\nplain line 2', // 纯文本
+      '\x1b[31mred start', // 行首 ANSI 不闭合（色码到 EOF 不构成完整匹配）
+      'no color\n\x1b[32mgreen line\x1b[0m\n\x1b[1;34mheading\x1b[0m', // ANSI 行首行尾
+      '\x1b[31munclosed color\nspans line boundary\nstill red', // ANSI 状态跨行（开码不闭合）
+      'a\n\n\x1b[31m\n\x1b[0m\n', // 空行 + 孤立 ANSI 行 + 尾随换行
+      '\x1b[32m✓ success\x1b[0m\n\x1b[1;34m── build output ──\x1b[0m\nfinal line of output', // 真实 bash 输出形态
+      `${'x'.repeat(5000)}\n\x1b[31mtail line\x1b[0m`, // 长头部 + ANSI 尾行
+      'crlf\r\n\x1b[32mwin line\x1b[0m\r\n', // CRLF 行尾（\r 不在字符类，同安全）
+    ]
+    for (const text of cases) {
+      for (const n of [1, 2, 3, 100]) {
+        expect(tailThenStrip(text, n)).toEqual(stripThenTail(text, n))
+      }
+    }
+  })
+
+  it('固定期望: 真实 bash ANSI 输出尾 2 行内容（防两序同错）', () => {
+    const raw = 'step-1\n\x1b[32m✓ step-2\x1b[0m\n\x1b[1;34m── final ──\x1b[0m'
+    expect(tailThenStrip(raw, 2)).toEqual(['✓ step-2', '── final ──'])
+  })
+
+  /** 线性同余伪随机（与上方 tailLines 对拍组同型，seeded 可复现） */
+  function makeLcg(seed: number): () => number {
+    let s = seed >>> 0
+    return () => {
+      s = (s * 1664525 + 1013904223) >>> 0
+      return s / 4294967296
+    }
+  }
+
+  /** 生成随机 ANSI 文本：普通词行 + 随机注入 SGR 色码（行首/行中/行尾，含不闭合码） */
+  function randomAnsiText(rand: () => number, targetLen: number): string {
+    const words = ['build', 'step', 'ok', 'err', 'x', 'done', 'pass']
+    const codes = ['\x1b[31m', '\x1b[0m', '\x1b[1;34m', '\x1b[38;5;196m', '\x1b[2J', '\r']
+    let out = ''
+    while (out.length < targetLen) {
+      const roll = rand()
+      if (roll < 0.5) {
+        out += `${words[Math.floor(rand() * words.length)]} `
+      } else if (roll < 0.7) {
+        out += '\n'
+      } else {
+        // 色码与 \x1b[2J / \r 混入（后者 stripAnsi 不处理，两序行为一致即等价）
+        out += codes[Math.floor(rand() * codes.length)]
+      }
+    }
+    return out
+  }
+
+  it('对拍: 随机 ANSI 文本（20KB 级）多 n 等价', () => {
+    const rand = makeLcg(2026)
+    for (let i = 0; i < 5; i++) {
+      const text = randomAnsiText(rand, 20000)
+      for (const n of [1, 2, 3, 7, 50]) {
+        expect(tailThenStrip(text, n)).toEqual(stripThenTail(text, n))
       }
     }
   })

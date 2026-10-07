@@ -12,7 +12,9 @@
  *   1. 宿主词表：errors.ts 的 ENGINE_ERROR_CODES as-const 数组 ↔ 指南 §4「封闭枚举 N 条」
  *      行的全量反引号码表——集合相等 + 计数一致（双向：源码新增/删除成员、指南漏改/错改均拦）。
  *   2. SDK 协议码：error-codes.ts 的 ENGINE_PROTOCOL_ERROR_CODES ↔ 指南 §4「N 条固定词表」
- *      计数一致（指南按 §4 F13 裁决「指全不列全」，故只对账计数）。
+ *      计数一致（指南按 §4 F13 裁决「指全不列全」，故只对账计数）。词表成员含同文件
+ *      子词表常量引用（SET_MODEL_ERROR_CODES spread / SET_MODEL_NOT_ACTIVE_CODE 单值
+ *      ——setModel 域成员清单单源形态），提取时递归展开后再计数。
  *   3. 能力位：engine-manifest.ts 的 CAPABILITY_ENUMS 键集 ∪ {maxTurns}（knownKeys 同源，
  *      :131）↔ 指南 §3「能力位全集 N 位」计数 + §3 表逐键行存在。
  *   4. manifest 能力值三面对账：zcode-subagent-cli 包 package.json 的
@@ -40,11 +42,35 @@ function read(rel) {
   return readFileSync(path.join(ROOT, rel), 'utf8')
 }
 
-/** 从 as-const 数组声明提取字符串成员。 */
-function extractConstArray(src, name, file) {
-  const m = src.match(new RegExp(`export const ${name} = \\[([^\\]]*)\\]`, 's'))
-  if (!m) fail(`源码解析失败：${file} 中找不到 export const ${name} = [...]（源码形态变更须同步本守卫）`)
-  return [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1])
+/**
+ * 从 as-const 数组声明提取字符串成员；成员可引用同文件其他常量（`...SUB_ARRAY`
+ * spread 或 `CONST` 单值引用——error-codes.ts 的 setModel 域子词表单源形态），
+ * 递归展开，环形引用剪枝。
+ */
+function extractConstArray(src, name, file, seen = new Set()) {
+  if (seen.has(name)) return []
+  seen.add(name)
+  const arr = src.match(new RegExp(`export const ${name} = \\[([^\\]]*)\\]`, 's'))
+  if (arr) {
+    const out = []
+    for (const token of arr[1].split(',')) {
+      const t = token.trim()
+      if (t === '') continue
+      // 成员可带行内 JSDoc（子词表形态）——取 token 内首个双引号字面量，非全串匹配
+      const literal = t.match(/"([^"]+)"/)
+      if (literal) {
+        out.push(literal[1])
+        continue
+      }
+      const ref = t.match(/^\.\.\.(\w+)$/) ?? t.match(/^(\w+)$/)
+      if (ref) out.push(...extractConstArray(src, ref[1], file, seen))
+    }
+    return out
+  }
+  const str = src.match(new RegExp(`export const ${name} = "([^"]+)"`))
+  if (str) return [str[1]]
+  fail(`源码解析失败：${file} 中找不到 export const ${name}（数组或字符串常量；源码形态变更须同步本守卫）`)
+  return []
 }
 
 /** 从 CAPABILITY_ENUMS 块提取键集（值域校验交编译层，此处只对账键集投影）。 */

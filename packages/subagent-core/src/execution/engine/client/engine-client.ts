@@ -33,6 +33,7 @@ import {
   isResponseFrame,
   isNotificationFrame,
   isReverseRequestFrame,
+  SET_MODEL_REQUEST_TIMEOUT_MS,
   STDERR_TAIL_CHARS,
   engineProtocolMismatchError,
   hostKindOf,
@@ -40,6 +41,8 @@ import {
   type EngineHandleData,
   type InitializeResult,
   type RequestFrame,
+  type SetModelParams,
+  type SetModelResult,
 } from "@zhushanwen/subagent-engine-sdk";
 
 import { SpawnedChildrenMirror, type MirrorChangeEvent } from "./mirror.ts";
@@ -563,6 +566,20 @@ export class EngineClient {
   /** cancel 受理窗口 = CANCEL_SETTLE_GRACE_MS；终态收敛由调用方（RemoteEngine）等 run 应答。 */
   async cancelRun(runId: string, reason: string): Promise<void> {
     await this.request("cancel", { runId, reason }, { timeoutMs: CANCEL_SETTLE_GRACE_MS });
+  }
+
+  /**
+   * [subagent-model-switch §7.3] setModel 类型化调用面（cancelRun 同族）：控制面单
+   * 请求，上界 SET_MODEL_REQUEST_TIMEOUT_MS（10s——≥ 引擎侧两阶段窗 2×3s + 协议
+   * 余量；控制面单请求必须秒级有界，宿主不悬挂）。错误经 error 帧 reject 为
+   * EngineSdkError（code 原样保留——三型失败分型 + engine_run_not_active 无活进程
+   * 形态，宿主编排按 §7.2 处置表分派）。
+   */
+  async setModel(params: SetModelParams): Promise<SetModelResult> {
+    const result = await this.request("setModel", params, {
+      timeoutMs: SET_MODEL_REQUEST_TIMEOUT_MS,
+    });
+    return result as SetModelResult;
   }
 
   // ── 收割 / 停机 ──────────────────────────────────────────────────────────

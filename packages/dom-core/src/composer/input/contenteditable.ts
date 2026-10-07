@@ -98,7 +98,7 @@ export function useContenteditableInput(
   onKeydown: (e: KeyboardEvent) => void
   onCompositionEnd: () => void
   onPaste: (e: ClipboardEvent) => void
-  syncEmpty: () => void
+  syncEmpty: (text?: string) => void
   getText: () => string
   getSegments: () => Segment[]
   saveSelection: () => void
@@ -147,8 +147,14 @@ export function useContenteditableInput(
     return getSegmentsFromEl(getEl())
   }
 
-  function syncEmpty(): void {
-    isEmpty.value = getText().trim() === ''
+  /**
+   * 空态判定唯一收口（8 个调用点：onInput / clear 族 / clear / setText + ComposerInput onMounted）。
+   * @param text 调用方已持有的全文快照（可选）——onInput 传参复用同一次 getText 遍历，
+   * 避免同帧对同一棵 DOM 树二次全量解析；未传时自行读取（clear 族等「DOM 写后判定」调用点
+   * 必须走读取分支，不能复用写前旧值）。
+   */
+  function syncEmpty(text?: string): void {
+    isEmpty.value = (text ?? getText()).trim() === ''
   }
 
   function detectHashTrigger(): { query: string } | null {
@@ -197,8 +203,10 @@ export function useContenteditableInput(
   }
 
   function onInput(): void {
-    syncEmpty()
+    // 单次全文遍历复用（性能 A 档）：syncEmpty 判空与 emitInput 消费同一 text 快照。
+    // 两者之间原本就无 DOM 写（syncEmpty 只赋 isEmpty ref），同帧读取恒等价。
     const text = getText()
+    syncEmpty(text)
     emitInput(text)
     preferredCaretX = null
     // bash 豁免短路（设计 D6）：bash 态（!/!! 前缀）下符号全是命令语法成分，

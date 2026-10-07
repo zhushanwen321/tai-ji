@@ -22,15 +22,23 @@
  *   丢弃，对齐 store D11①）+ parse_failed 重试（失败不缓存故可重试）。
  * - session 删除关 overlay（D11⑤）：closeWorkflowVizOverlayForSession 供
  *   useSidebar.deleteSession 编排链经 SessionCleanupHooks.closeWorkflowOverlay 调用。
+ * - overlay 一级 tab（scheduler 整合，2026-10-06 用户裁决）：overlayTab 展示态（开合态/
+ *   内容 SSOT 在 core，tab 是本模块的展示维度）+ openSchedulerTab / setOverlayTab 写入口
+ *   + 关闭任意通道复位 watch + SCHEDULER_MODAL_VIEW_ID 单源（ViewHost 分区键）。
  */
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import type { WorkflowDag, WorkflowRunRecord } from '@taiji/shared'
 import {
   bindWorkflowOverlayOpener,
   bindWorkflowRunLookup,
   openWorkflowInDrawer,
 } from '@taiji/core/domain/drawer'
-import { closeOverlay, getOverlayControlState, openOverlay } from '@taiji/core/domain/overlay'
+import {
+  closeOverlay,
+  getOverlayControlState,
+  openOverlay,
+  openSchedulerOverlay,
+} from '@taiji/core/domain/overlay'
 import { session as sessionApi } from '@/api'
 import { usePanelStore } from '@/stores/panel'
 import { useWorkflowStore } from '@/stores/workflow'
@@ -45,6 +53,33 @@ export const overlayDag = ref<WorkflowDag | null>(null)
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记 §4 ⑧ 2026-10-02）：overlay DAG 错误槽
 /** DAG 不可得归一错误（null = 通道正常）。 */
 export const overlayDagError = ref<WorkflowVizDagLoadError | null>(null)
+
+// ── overlay 一级 tab（scheduler 整合进浮层，2026-10-06 用户裁决）─────────────────────
+
+/** 浮层一级 tab：'runs' = DAG + 实况 dock（现状 body）；'scheduler' = 定时任务面板（ViewHost 消费插件树）。 */
+export type OverlayTab = 'runs' | 'scheduler'
+
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，补登 §4 ⑧ 2026-10-06）：overlay 一级 tab 槽
+/** 浮层一级 tab 展示态（开合态/内容 SSOT 在 core，tab 是 renderer 展示维度——壳经 Host 受控透传）。 */
+export const overlayTab = ref<OverlayTab>('runs')
+
+/**
+ * 定时任务面板 viewId：单源 = extension-protocol SCHEDULER_MODAL_VIEW_ID（插件
+ * views.update 推树与本 tab ViewHost 消费跨包共用，历史命名 modal-<pluginId>-<modalId>
+ * 原值保留）；此处 re-export 保持既有导入路径（壳/测试）不变。
+ */
+export { SCHEDULER_MODAL_VIEW_ID } from '@zhushanwen/extension-protocol'
+
+// overlay 关闭（任意通道：Esc 编排器直关 core 开合态 / 壳 close / 会话删除级联）→ tab 复位
+// 'runs'；下次打开由入口显式置位（openWorkflowVizOverlay→'runs' / openSchedulerTab→'scheduler'）。
+// flush sync：复位锚在「关闭发生」时刻而非渲染 tick——状态级不变量（关 = tab 归位），无渲染顺序依赖。
+watch(
+  () => getOverlayControlState().isOpen,
+  (open) => {
+    if (!open) overlayTab.value = 'runs'
+  },
+  { flush: 'sync' },
+)
 
 // ── run 反查（opener 与 chips lookup 共用的单处实现）──────────────────────────
 
@@ -73,13 +108,29 @@ function findRun(sessionId: string, nameOrRunId: string, slug?: string): Workflo
 
 // ── 开关 + DAG 拉取 ──────────────────────────────────────────────────────────
 
-/** 打开 overlay（入口改向与编程打开的唯一入口）：换内容当前 run + 重置 DAG 态 + 拉取。 */
+/** 打开 overlay（入口改向与编程打开的唯一入口）：换内容当前 run + tab 归位 runs + 重置 DAG 态 + 拉取。 */
 export function openWorkflowVizOverlay(sessionId: string, runId: string): void {
   if (!sessionId || !runId) return
   openOverlay({ kind: 'workflow', payload: { sessionId, runId } })
+  overlayTab.value = 'runs'
   overlayDag.value = null
   overlayDagError.value = null
   void loadDag(sessionId, runId)
+}
+
+/**
+ * 打开浮层定时任务 tab（scheduler 直达入口）：core 换内容 scheduler kind + tab 置 scheduler。
+ * 换入的会话可能无 run 数据（shell 侧「运行」tab 按 run 缺省禁用）。
+ */
+export function openSchedulerTab(sessionId: string): void {
+  if (!sessionId) return
+  openSchedulerOverlay(sessionId)
+  overlayTab.value = 'scheduler'
+}
+
+/** tab 切换（壳 tab 条点击接线）：只写 renderer tab 展示维度，不改 core 开合态/内容。 */
+export function setOverlayTab(tab: OverlayTab): void {
+  overlayTab.value = tab
 }
 
 /** 关闭 overlay（三通道统一出口）：仅切标志——缓存清理由 store 生命周期承担（D11②）。 */
@@ -87,10 +138,14 @@ export function closeWorkflowVizOverlay(): void {
   closeOverlay()
 }
 
-/** session 删除编排（SessionCleanupHooks.closeWorkflowOverlay）：删除的是发起 session 时关。 */
+/** session 删除编排（SessionCleanupHooks.closeWorkflowOverlay）：删除的是发起 session 时关
+ *  （workflow 与 scheduler 两类内容同判据——载荷都持发起 sessionId，§7.4 级联同语义）。 */
 export function closeWorkflowVizOverlayForSession(sessionId: string): void {
   const cur = getOverlayControlState().current
-  if (cur?.kind === 'workflow' && cur.payload.sessionId === sessionId) closeWorkflowVizOverlay()
+  if (
+    (cur?.kind === 'workflow' || cur?.kind === 'scheduler')
+    && cur.payload.sessionId === sessionId
+  ) closeWorkflowVizOverlay()
 }
 
 /**

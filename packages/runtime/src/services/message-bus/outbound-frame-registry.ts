@@ -67,8 +67,8 @@ export const DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS: OutboundFrameGuardOptions = {
 // | message.tool_call_end              | payload.entry.message.content           | content  | services/session/event-interpreter.ts:1089（工具结果文本；与 message_end 双路下发，两帧都注册保帧间一致） |
 // | message.tool_call_start            | payload.entry.arguments                 | record   | services/session/event-interpreter.ts:1032（write 类工具写入全文在 arguments，toolResult 只回小确认） |
 // | session.traceEntryAppended         | payload.entries                         | array-entry | services/session/trace-sync.ts:363 / :434（pi entry JSON 逐条增量） |
-// | session.subagentEntriesAppended    | payload.entries                         | array-entry | infra/relay/relay-tee.ts:120（穷举新发现——subagent entry 增量帧，与 traceEntryAppended 同构；subagent 历史是巨型 JSONL 高发源，设计 D5① 自证） |
-// | subagent.stream_delta              | payload.lines                           | array-string | infra/relay/relay-tee.ts:172 / :190（lines = 累积全文 split('\n')；undefined = 终态清除，undefined 时帧小不触发守卫） |
+// | session.subagentEntriesAppended    | payload.entries                         | array-entry | infra/relay/relay-tee.ts:204（穷举新发现——subagent entry 增量帧，与 traceEntryAppended 同构；subagent 历史是巨型 JSONL 高发源，设计 D5① 自证） |
+// | subagent.stream_delta              | payload.lines                           | array-string | services/session/event-interpreter.ts:780（W 路径全量形态，lines = 累积全文 split('\n')；B2 后 R 路径 relay-tee 仅余清除帧 lines undefined 小帧不触发守卫） |
 // | message.bashResult                 | payload.output                          | string   | services/session/message-dispatcher.ts:1042 / :1115（穷举新发现——bash 终态帧的 output 全文；上游 pi bash RPC 自截是既有防线，本条目是其失效时的纵深） |
 // | terminal.data                      | payload.data                            | string   | services/terminal/terminal-service.ts:113（穷举新发现——PTY 输出块，用户 cat 大文件可达 MB 级；transient 类，miss 丢弃无 gap 风险） |
 //
@@ -99,6 +99,13 @@ export const DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS: OutboundFrameGuardOptions = {
 //   extensions/universal/plan/src/state.ts capPlanRequirement）/ backgroundTask:updated /
 //   terminal.alive / terminal.exit / terminal.ack /
 //   subagent.directive：标量/小列表状态帧。
+// - subagent.stream_chunk（B2 subagent-stream-chunk §4.1，infra/relay/relay-tee.ts 产生）：
+//   增量内容 chunk 小消息（单条 delta 片段 + msgSeq/deltaSeq 序号），payload 无无上界大
+//   字段——不登记。单条 chunk 超限（理论形态：单个 delta 超阈值）走 miss 整条丢弃，消费
+//   端表现为 deltaSeq 跳号、走失步拉取恢复（设计 §4.3 chunk 超限特例）——刻意不登记截断：
+//   截断占位文本会被拼进消息流成为内容污染，丢弃 + 跳号拉取才是正确恢复形态。既有
+//   subagent.stream_delta lines 登记保留（widget 通道 W 路径全量形态仍在用；R 路径余留
+//   清除帧 payload 小，不触发守卫）。
 // - plugin:uiRequest（plugin-service.ts:206）/ plugin:viewUpdate（:291）：插件动态 payload
 //   （dialog/html 字段无固定路径）——transient/stream 兜底覆盖（超限丢弃 + error 日志）。
 // - extension.ui_request（event-adapter.ts:526 统一产点，planReview 帧产点 :875）：交互请求

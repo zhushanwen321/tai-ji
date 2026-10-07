@@ -7,7 +7,7 @@
  *
  * 依赖方向：无下游（读全局 window.electronAPI，类型经 declare global 自动可用）
  */
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, LocalFileServableReason, LocalFileServableResult, LocalFileReadReason, LocalFileReadResult } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, LocalFileServableReason, LocalFileServableResult, LocalFileReadReason, LocalFileReadResult } from '@taiji/shared'
 import type { ImageCacheWritePort } from '@taiji/core'
 
 /** preload 注入的 electronAPI（web/mock / node 测试环境为 undefined——后者连
@@ -229,7 +229,8 @@ export function browserDestroy(sessionId: string): Promise<void> {
  */
 export function browserSetOverlayState(state: {
   open: boolean
-  content: 'browser' | 'workflow' | null
+  /** 词表单源 = @taiji/shared OverlayContentKind（browser:overlay-state payload 契约） */
+  content: OverlayContentKind | null
   sessionId: string | null
 }): Promise<void> {
   return api?.browserSetOverlayState(state) ?? Promise.resolve()

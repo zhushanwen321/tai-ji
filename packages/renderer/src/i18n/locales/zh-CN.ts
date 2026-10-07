@@ -16,6 +16,7 @@ import rollingRestart from './zh-CN/rollingRestart'
 import plan from './zh-CN/plan'
 import btw from './zh-CN/btw'
 import workflowViz from './zh-CN/workflow-viz'
+import find from './zh-CN/find'
 
 export default {
   common,
@@ -39,4 +40,5 @@ export default {
   rollingRestart,
   plan,
   btw,
+  find,
 }

@@ -21,13 +21,14 @@
         </div>
       </div>
     </div>
-    <!-- 展示态气泡 -->
+    <!-- 展示态气泡（group/ts 命名分组：用户时刻与气泡同行，悬停该行 / 键盘焦点进入该行
+         时刻才显现——D2 四处时刻槽悬停化之一） -->
     <div
       v-else
-      class="flex items-start justify-end gap-2"
+      class="group/ts flex items-start justify-end gap-2"
     >
-      <!-- 用户时刻（气泡左侧） -->
-      <span v-if="turn.user?.timestamp" class="shrink-0 self-start pt-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums" data-testid="user-timestamp">
+      <!-- 用户时刻（气泡左侧，D2 悬停化） -->
+      <span v-if="turn.user?.timestamp" class="shrink-0 self-start pt-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity duration-150 group-hover/ts:opacity-100 group-focus-within/ts:opacity-100" data-testid="user-timestamp">
         {{ formatClock(turn.user.timestamp) }}
       </span>
       <div

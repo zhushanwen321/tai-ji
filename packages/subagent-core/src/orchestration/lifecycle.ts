@@ -425,7 +425,10 @@ export async function runWorkflow(
   // runId 不复用、无 fold 消费方，可接受）；失败 = journal IO 错误，取证面降级
   // 不阻断创建主链（对齐 SW-DATA-3：error 留痕后继续——此时该 run 的后续事件因
   // fold 停在 created 而表外转移 fail-fast，事件丢失可归因到本条 error 日志）。
-  const createdDispatch = dispatchRunCreated(run);
+  // 宿主会话锚现读（dmg-r2-5：run-created 帧 rootSessionId 的载荷源——同 cwd 多
+  // 会话下 runtime 网关 runId 路由的精确归属判据）。deps 未注入（旧测试 deps）时
+  // undefined = 帧不落字段（旧格式行形态，读侧放行）。
+  const createdDispatch = dispatchRunCreated(run, deps.getSessionRootId?.() ?? undefined);
 
   // 构造 handlers + runtime（worker + controller）
   const handlers = makeHandlers(run, deps);

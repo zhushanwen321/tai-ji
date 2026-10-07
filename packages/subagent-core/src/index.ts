@@ -199,7 +199,26 @@ export { CLOSED_REASONS, NEW_STOP_REASONS, ROUND_TERMINAL_STOP_REASONS, STOP_REA
 export { DEFAULT_AGENT_NAME } from "./execution/domain/record-model.ts";
 export type { AgentEventLogEntry, BgResponse, CancelResponse, CloseResponse, DisplayItem, ForkFromResponse, ListResponse, MessageResponse, SubagentListItem, SubagentRecord, SubagentToolResult } from "./execution/assembly/types.ts";
 export type { ClosedReason, ExecutionMode, ExecutionOutcome, ExecutionStatus, ExternalState } from "./execution/domain/record-types.ts";
-export type { ExecutionRecord } from "./execution/domain/record-model.ts";
+export type { ExecutionRecord, ModelOverride } from "./execution/domain/record-model.ts";
+// [subagent-model-switch U6] setModel 编排应答契约 type-only 导出：/subagent-model 命令
+// handler（extension 壳）消费——壳生产消费纪律禁止深路径 import；type-only 编译期擦除，
+// 零运行时面。形状 SSOT 仍在 service/model-switch.ts。
+export type {
+  ChatSetModelReply,
+  ModelSwitchTarget,
+  SetModelReply,
+} from "./execution/service/model-switch.ts";
+// [subagent-model-switch] 处置表「写记账后回错误应答」分型词表（值导出）：runtime 对账
+// 测试消费（与 shared SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES 值级等值断言——词表
+// 扩位漏跟即红），语义见 service/model-switch.ts 常量注释。
+export { ACCOUNTED_SET_MODEL_ERROR_CODES } from "./execution/service/model-switch.ts";
+// [subagent-model-switch] 模型切换 run 级聚合契约（u-foundation 定形，U5 实装）。
+export type {
+  RunModelSwitchAggregateInput,
+  RunSwitchAggregateResult,
+  RunSwitchMemberFailure,
+  RunSwitchMemberState,
+} from "./execution/assembly/types.ts";
 
 // execution-record 投影函数族：record → 渲染态投影（outcome / elapsed / tool
 // calls），interface 渲染层唯一消费入口（live 进度投影面 = SubagentRecord 投影族）。
@@ -567,10 +586,13 @@ export type {
 // 终局证据判定核与保留期维护（workflow-run-store-convergence U3+U4：自
 // orchestration/file-run-store.ts 迁入 execution/persistence/，RunStore 写实现
 // 身份已退役——生产唯一实现 = pi 壳 JsonlRunStore）。
-// [C3 常量上收] STATE_DIR_NAME：pi 壳 workflow-events / jsonl-run-store 的
-// `<sessionDir>/workflow-state` 与 pi 宿主枚举的 agentDir 根回退目录同名分量
-// 单源——壳侧字面量改 import 消费，防布局分量漂移。
-export { STATE_DIR_NAME } from "./execution/persistence/run-state-evidence.ts";
+// [C3 常量上收] STATE_DIR_NAME（定义随 dmg-r3-3 归位 shared/run-vocabulary 词表
+// 最低层——workflow-state-root 经它消费，挂 run-state-evidence 会构成
+// evidence → run-event-journal → workflow-state-root → evidence 三级循环）：
+// pi 壳 workflow-events / jsonl-run-store 的 `<sessionDir>/workflow-state` 与
+// pi 宿主枚举的 agentDir 根回退目录同名分量单源——壳侧字面量改 import 消费，
+// 防布局分量漂移。
+export { STATE_DIR_NAME } from "./shared/run-vocabulary.ts";
 
 // [W1 / D5] 统一保留维护轮入口：run journal prune + record 事件文件 prune 同轮
 // 幂等扫描 + 判据②候选数日志。三触发点（新 run 首写 / 新 record 事件文件首写 /
@@ -588,7 +610,7 @@ export { reapOrphanRuns } from "./execution/persistence/run-state-evidence.ts";
 // rootCwd 贯穿 env 名单源（根进程无 env → ctx.cwd 兜底，与 SessionBaselines 推导
 // 同式——壳侧复制推导式时经此常量锚定 env 名防漂移）。壳生产消费必须走 barrel。
 export { ENV_ROOT_CWD } from "./execution/service/session-baselines.ts";
-export { getSubagentRecordsDir } from "./execution/assembly/path-encoding.ts";
+export { getSubagentRecordsDir, getSubagentModelSwitchResultsDir } from "./execution/assembly/path-encoding.ts";
 
 // resolvePiSessionScopedDir：pi 宿主 sessionDir 布局（cwd slug + existsSync 探测）
 // 的单一权威源——pi 壳 session-lifecycle 的 resolveSessionDir 经 opts.agentDir
@@ -644,6 +666,9 @@ export {
   doneReasonToRunOutcome,
   foldRunEventCheckpoint,
   INITIAL_RUN_EVENT_FOLD,
+  // [subagent-model-switch §7.4] 覆盖记账折叠辅助（壳侧 foldRecordStreamToRun 挂
+  // meta.modelOverride 与 core resume 三档回落的共用单点）。
+  latestModelOverride,
   RUN_EVENTS_SUFFIX,
   // [§3.2] record 流单行坏行判定原语（core 恢复读面与壳 strict 读面共用单源——规则
   // 在 core，错误文案由各调用方自持；此前两处各写一份判据，漂移即同一坏行一边拒绝
@@ -652,6 +677,7 @@ export {
   parseLegacyArgsSummary,
   type LegacyArgsSummaryIssue,
   type LegacyArgsSummaryResult,
+  type ModelOverrideEvent,
   type RunAskStepFold,
   type RunEventFoldCheckpoint,
   type RunEventJournal,
@@ -660,6 +686,7 @@ export {
   type RunEventLineResult,
   type RunJournalFold,
   type RunOutcome,
+  type WorkflowModelOverride,
   type WorkflowRunEvent,
 } from "./orchestration/run-events.ts";
 

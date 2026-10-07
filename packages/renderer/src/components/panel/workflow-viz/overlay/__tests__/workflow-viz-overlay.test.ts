@@ -21,6 +21,8 @@ import { defineComponent, h } from 'vue'
 import type { WorkflowDag, WorkflowRunRecord } from '@taiji/shared'
 import WorkflowVizOverlay from '../WorkflowVizOverlay.vue'
 import WorkflowVizOverlayGuard from '../WorkflowVizOverlayGuard.vue'
+import { SCHEDULER_MODAL_VIEW_ID } from '../workflow-viz-overlay'
+import { VIEW_HOST_SOURCE_KEY, type ViewCacheEntry, type ViewHostSource } from '@taiji/ui/extension-host'
 import { getOverlayFocusTrapPanel } from '@/composables/features/app/key-orchestrator'
 import type { WorkflowUnmatchedInstance } from '../../blueprint-match'
 import type { WorkflowVizDagLoadError } from '../../overlay/types'
@@ -81,11 +83,12 @@ describe('WorkflowVizOverlay 壳（黑盒 DOM）', () => {
     expect(panel.attributes('aria-modal')).toBe('true')
   })
 
-  it('header 可见：脚本名 + slug + 状态 pill + args 摘要 + 关闭按钮', () => {
+  it('header 可见：脚本名 + slug + 状态 pill + 关闭按钮；header 内无 args 元素（D2 v5 终裁）', () => {
     const wrapper = mountOverlay({ run: run({ argsSummary: 'base=main reviewers=4' }) })
     expect(wrapper.find('[data-testid="wfvz-overlay-header"]').text()).toContain('pr-lifecycle')
     expect(wrapper.find('[data-testid="wfvz-overlay-slug"]').text()).toBe('pr-lifecycle-7f3a')
-    expect(wrapper.find('[data-testid="wfvz-overlay-args"]').text()).toContain('base=main')
+    // V6-wf：args 元素不进 header——run 带 argsSummary 数据也不渲染（参数信息整体丢弃）
+    expect(wrapper.find('[data-testid="wfvz-overlay-args"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="wfvz-overlay-close"]').exists()).toBe(true)
   })
 
@@ -99,6 +102,14 @@ describe('WorkflowVizOverlay 壳（黑盒 DOM）', () => {
   it('状态 pill：interrupted → 「已中断（可续跑）」（tray 词源复用）', () => {
     const wrapper = mountOverlay({ run: run({ status: 'interrupted' }) })
     expect(wrapper.find('[data-testid="wfvz-overlay-run-pill"]').text()).toContain('已中断（可续跑）')
+  })
+
+  it('状态 pill：cancelled 终局 → shared 词表「已取消」+ 中性色（D9 全枚举，非绿——原面板层 pill 断言迁壳层）', () => {
+    const wrapper = mountOverlay({ run: run({ status: 'done', outcome: 'cancelled', reason: 'aborted' }) })
+    const pill = wrapper.find('[data-testid="wfvz-overlay-run-pill"]')
+    expect(pill.text()).toContain('已取消')
+    expect(pill.classes()).toContain('text-neutral-mid')
+    expect(pill.classes()).not.toContain('text-success')
   })
 
   it('终局 pill：done+failed → shared 词表「失败」+ errorCode 摘要可见（D9 失败终态）', () => {
@@ -207,12 +218,29 @@ describe('WorkflowVizOverlay 壳（黑盒 DOM）', () => {
     })
   })
 
-  it('右栏实况面板 slot 透传（U5 面板填充位）', () => {
+  it('body 纵向两段（D1 观察者形态）：上区 DAG flex-[1.6] + 下区 dock flex-1，无左右分栏中缝', () => {
+    const wrapper = mountOverlay({ dag: SAMPLE_DAG, nodeStates: { n1: 'done' } })
+    const dagPane = wrapper.find('[data-testid="wfvz-overlay-dag-pane"]')
+    const livePane = wrapper.find('[data-testid="wfvz-overlay-live-pane"]')
+    // 纵向份额：上区 1.6 / 下区 1（flex-[1.6] 发射为 flex:1.6 1.6 0%）
+    expect(dagPane.classes()).toContain('flex-[1.6]')
+    expect(dagPane.classes()).not.toContain('basis-[45%]')
+    expect(dagPane.classes()).not.toContain('border-r')
+    expect(livePane.classes()).toContain('flex-1')
+    // 画布与 dock 同为 body 纵向容器的兄弟段（上区在前）
+    const body = dagPane.element.parentElement
+    expect(body).not.toBeNull()
+    expect(body!.children[0]).toBe(dagPane.element)
+    expect(body!.children[1]).toBe(livePane.element)
+  })
+
+  it('下区 dock slot 透传（U5 面板填充位，纵向布局下挂 live-pane 段内）', () => {
     const wrapper = mount(WorkflowVizOverlay, {
       props: { open: true, run: run(), dag: null, dagError: null },
       slots: { default: h('div', { 'data-testid': 'wfvz-test-slot-probe' }, 'panel') },
     })
-    expect(wrapper.find('[data-testid="wfvz-test-slot-probe"]').exists()).toBe(true)
+    const pane = wrapper.find('[data-testid="wfvz-overlay-live-pane"]')
+    expect(pane.find('[data-testid="wfvz-test-slot-probe"]').exists()).toBe(true)
   })
 })
 
@@ -243,7 +271,7 @@ describe('WorkflowVizOverlay 未匹配实例分组（D2⑥ 展示面，黑盒 DO
     expect(empty.find('[data-testid="wfvz-overlay-unmatched"]').exists()).toBe(false)
     const absent = mountOverlay({ dag: SAMPLE_DAG })
     expect(absent.find('[data-testid="wfvz-overlay-unmatched"]').exists()).toBe(false)
-    // U7 回归断言：dag 就绪 + 无未匹配实例时，左栏不得同时渲染「解析中」占位
+    // U7 回归断言：dag 就绪 + 无未匹配实例时，上区不得同时渲染「解析中」占位
     expect(empty.find('[data-testid="wfvz-overlay-dag-loading"]').exists()).toBe(false)
     expect(absent.find('[data-testid="wfvz-overlay-dag-loading"]').exists()).toBe(false)
   })
@@ -295,6 +323,84 @@ describe('WorkflowVizOverlay DAG 不可得降级（黑盒 DOM）', () => {
   it('channel（RPC 通道错误归一形态）：通用获取失败文案', () => {
     const wrapper = mountOverlay({ dagError: { code: 'channel', message: 'rpc failed' } })
     expect(wrapper.find('[data-testid="wfvz-overlay-dag-error"]').text()).toContain('获取 workflow 结构失败')
+  })
+})
+
+describe('WorkflowVizOverlay 一级 tab（scheduler 整合 2026-10-06，黑盒 DOM）', () => {
+  /** scheduler 树 stub 源：(s1, SCHEDULER_MODAL_VIEW_ID) 命中，其余 miss */
+  function makeSchedulerSource(entry: ViewCacheEntry): ViewHostSource {
+    return {
+      getView: vi.fn((sessionId: string, viewId: string) =>
+        sessionId === 's1' && viewId === SCHEDULER_MODAL_VIEW_ID ? entry : undefined),
+      getViewIds: vi.fn(() => []),
+    }
+  }
+
+  function schedulerEntry(): ViewCacheEntry {
+    return {
+      viewId: SCHEDULER_MODAL_VIEW_ID,
+      pluginId: 'scheduler-manager',
+      guiTree: [{ type: 'ansi-text', props: { lines: ['2 启用 · 1 停用 · 共 3'] } }] as ViewCacheEntry['guiTree'],
+      updatedAt: 1,
+    }
+  }
+
+  it('缺省 tab=runs：tab 条两 tab 可见且 runs 选中（aria-selected），runs body 在场、scheduler pane 不渲染', () => {
+    const wrapper = mountOverlay({ dag: SAMPLE_DAG })
+    expect(wrapper.find('[data-testid="wfvz-overlay-tabs"]').exists()).toBe(true)
+    const runsTab = wrapper.find('[data-testid="wfvz-overlay-tab-runs"]')
+    const schedulerTab = wrapper.find('[data-testid="wfvz-overlay-tab-scheduler"]')
+    expect(runsTab.exists()).toBe(true)
+    expect(schedulerTab.exists()).toBe(true)
+    expect(runsTab.attributes('aria-selected')).toBe('true')
+    expect(schedulerTab.attributes('aria-selected')).toBe('false')
+    expect(wrapper.find('[data-testid="wfvz-overlay-dag-pane"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="wfvz-overlay-scheduler-pane"]').exists()).toBe(false)
+  })
+
+  it('tab=scheduler：scheduler pane 在场且 ViewHost 渲染插件树（用户可见文本），runs body 卸载；header 换定时任务标题（run 元素让位）', () => {
+    const wrapper = mount(WorkflowVizOverlay, {
+      props: { open: true, run: run(), dag: SAMPLE_DAG, dagError: null, tab: 'scheduler', schedulerSessionId: 's1' },
+      global: { provide: { [VIEW_HOST_SOURCE_KEY as symbol]: makeSchedulerSource(schedulerEntry()) } },
+    })
+    const pane = wrapper.find('[data-testid="wfvz-overlay-scheduler-pane"]')
+    expect(pane.exists()).toBe(true)
+    expect(pane.text()).toContain('2 启用 · 1 停用 · 共 3')
+    expect(wrapper.find('[data-testid="wfvz-overlay-dag-pane"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="wfvz-overlay-live-pane"]').exists()).toBe(false)
+    // header 双态：定时任务标题在场，run 六元素整体让位
+    expect(wrapper.find('[data-testid="wfvz-overlay-scheduler-title"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="wfvz-overlay-slug"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="wfvz-overlay-run-pill"]').exists()).toBe(false)
+  })
+
+  it('树未到（source miss + empty=hidden）：容器在场、ViewHost 零 DOM（首帧空白契约形态）', () => {
+    const wrapper = mount(WorkflowVizOverlay, {
+      props: { open: true, run: null, dag: null, dagError: null, tab: 'scheduler', schedulerSessionId: 's-miss' },
+      global: { provide: { [VIEW_HOST_SOURCE_KEY as symbol]: makeSchedulerSource(schedulerEntry()) } },
+    })
+    expect(wrapper.find('[data-testid="wfvz-overlay-scheduler-pane"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="view-host"]').exists()).toBe(false)
+  })
+
+  it('run=null：「运行」tab 禁用（disabled 形态）且点击不上抛；scheduler tab 可点上抛', async () => {
+    const wrapper = mountOverlay({ run: null, dag: null })
+    const runsTab = wrapper.find('[data-testid="wfvz-overlay-tab-runs"]')
+    expect(runsTab.attributes('disabled')).toBeDefined()
+    await runsTab.trigger('click')
+    expect(wrapper.emitted('update:tab')).toBeUndefined()
+    await wrapper.find('[data-testid="wfvz-overlay-tab-scheduler"]').trigger('click')
+    expect(wrapper.emitted('update:tab')?.[0]).toEqual(['scheduler'])
+  })
+
+  it('run 在场：两 tab 均可点，点 scheduler 上抛 update:tab（tab SSOT 在控制器，壳只上抛）', async () => {
+    const wrapper = mountOverlay({ dag: SAMPLE_DAG })
+    await wrapper.find('[data-testid="wfvz-overlay-tab-scheduler"]').trigger('click')
+    expect(wrapper.emitted('update:tab')?.[0]).toEqual(['scheduler'])
+    const runsTab = wrapper.find('[data-testid="wfvz-overlay-tab-runs"]')
+    expect(runsTab.attributes('disabled')).toBeUndefined()
+    await runsTab.trigger('click')
+    expect(wrapper.emitted('update:tab')?.[1]).toEqual(['runs'])
   })
 })
 

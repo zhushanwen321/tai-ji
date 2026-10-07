@@ -84,6 +84,13 @@ export const LOCAL_ESC_CONSUMERS = [
     basis: '元素级监听（@keydown.esc.prevent 新建项目输入 Esc 取消，冒泡先达；.prevent 即 defaultPrevented 约定已落实）——2026-10-03 终态同步补登：模板修饰符形态不在早期 Escape 字面量扫描面（F1-15 盲区），scanEscConsumers 三形态扫描补收',
   },
   {
+    id: 'find-bar',
+    file: 'packages/renderer/src/components/find/FindBar.vue',
+    tier: 'first',
+    contract: 'prevent-default',
+    basis: '元素级监听（@keydown.esc.prevent 关查找框并清高亮，冒泡先达；.prevent 即 defaultPrevented 约定已落实，根上 stopPropagation 双保险防编排器收到）——find-in-surface 第一期',
+  },
+  {
     id: 'session-list-confirm',
     file: 'packages/renderer/src/components/sidebar/SessionList.vue',
     tier: 'second',

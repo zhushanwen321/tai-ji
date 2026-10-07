@@ -42,7 +42,6 @@ export default {
     forward: '前进',
     workingDir: '工作目录',
     branch: '分支',
-    gitStatus: 'Git 状态 · 打开侧栏',
     copySessionFile: '复制 session 文件路径',
     // plugin 顶栏按钮区（HeaderActionsHost，E13 三态 tooltip；plugin-header-action-modal-points AP-1）
     pluginActionExtensionNotLoaded: '本会话未加载所需扩展',
@@ -158,6 +157,10 @@ export default {
     traceExpandAll: '展开全部（{count} 步）',
     traceCollapse: '恢复精简',
     traceFailed: '含 {count} 次失败',
+    // [ui-signal-density D1 U3] bash 组块组头文案（Block.vue 组分支消费）：zh 按设计字面
+    // 「{count} 个连续 bash · 共 {duration}」；失败分句复用 traceFailed（组行尾「· 含 M 次失败」），
+    // 不另开键——语义域同属失败计数句式（设计降级路径条的 key 归属裁决）
+    traceBashSummary: '{count} 个连续 bash · 共 {duration}',
     bashCancelled: '已取消',
     bashTimeout: '已超时',
     bashOutputTruncated: '输出已截断',
@@ -337,6 +340,11 @@ export default {
     noBashTask: '未选中后台命令',
     bashTaskHint: '在 composer 工具条的任务托盘中打开「后台命令」面板，点击任务查看详情',
     bashTaskStartedAt: '开始 {time}',
+    // subagent-model-switch §7.1（U1）：subagent / workflow run 执行模型切换。
+    subagentOverrideBadge: '用户覆盖中',
+    subagentModelSwitchTitle: '切换此子代理的执行模型（无活跃进程时记账，下次执行生效）',
+    modelSwitchFailed: '切换模型失败：{msg}',
+    modelSwitchMemberFailed: '成员 {member} 切换失败（{reason}）——其他成员不受影响',
     bashTaskRunningFor: '已运行 {duration}',
     bashTaskDuration: '耗时 {duration}',
     bashTaskExitCode: 'exit {code}',

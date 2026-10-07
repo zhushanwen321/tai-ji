@@ -66,7 +66,7 @@ import {
   disposeWorkflowWindowEngineState,
   resolveWorkflowWindowEnginePort,
 } from "../engine/routing.ts";
-import { splitEngineModelRef } from "../engine/model-validation.ts";
+import { splitEngineModelRef, joinEngineModelRef } from "../engine/model-validation.ts";
 // 引擎路由裁决单点（engine 缺省 = pi / 带原生引擎锚却无 engine 字段 = 身份域损坏抛错）。
 import { resolveEngineRouteId } from "../engine/common/session-view-service.ts";
 import { DEFAULT_ENGINE_ID, getEngine } from "../engine/registry.ts";
@@ -175,8 +175,13 @@ export interface ChatRoundsDeps {
    *  点——source 供留痕，调用方保证在收口轮通知送达之后）。 */
   readonly archiveRecord: (record: ExecutionRecord, source: string) => Promise<void>;
   /** [RunOrchestration 协作回调] engine.run taskSpec 装配单一来源（executeOptions
-   *  协议映射 + model = record 留痕词形覆盖）。 */
-  readonly taskSpecWithModel: (opts: ExecuteOptions, model: string | undefined) => AgentCallOpts;
+   *  协议映射 + model = record 留痕词形覆盖 + thinkingLevel = record 盖章解析产物
+   *  携带——F1-17，调用参数显式档位优先）。 */
+  readonly taskSpecWithModel: (
+    opts: ExecuteOptions,
+    model: string | undefined,
+    thinkingLevel: string | undefined,
+  ) => AgentCallOpts;
   /** [RunOrchestration 协作回调] AgentOutcome → execution AgentResult 单一映射源
    * （含 sessionFile 回填 + binding 落盘）。 */
   readonly outcomeToAgentResult: (record: ExecutionRecord, outcome: AgentOutcome) => AgentResult;
@@ -465,8 +470,9 @@ export class ChatRounds {
       this.deps.getStore().reportRecordTransition(record);
     };
     return engine.run(
-      // resume 锚点轮引擎侧覆盖 model 解析（taskSpec 装配单一来源见 taskSpecWithModel）。
-      this.deps.taskSpecWithModel(opts, record.model),
+      // resume 锚点轮引擎侧覆盖 model 解析（taskSpec 装配单一来源见 taskSpecWithModel；
+      // thinkingLevel 携带 record 盖章解析产物——F1-17，调用参数显式档位优先）。
+      this.deps.taskSpecWithModel(opts, record.model, record.thinkingLevel),
       {
         taskId: record.id,
         // [D4] record 身份信封（引擎写进任务子进程身份 env；构造单点 = identityEnvelopeOf）
@@ -568,6 +574,19 @@ export class ChatRounds {
   }
 
   /**
+   * [subagent-model-switch §7.2 步骤②] 会话级操作的引擎解析转发（setModel 转发面
+   * 消费——与轮次派发同一路由裁决单点 {@link resolveRoundEnginePort}：per-window
+   * 引擎复用轮窗口登记实例、shared-service 透传 registry，切换命中的进程与派发
+   * 进程同源）。public 转发 = 跨聚合消费面（model-switch deps 装配闭包指本方法；
+   * private 本体与轮次派发共享，防两处路由判据漂移）。
+   */
+  resolveEnginePortForSwitch(
+    record: Pick<ExecutionRecord, "engine" | "engineHandle" | "id">,
+  ): EnginePort {
+    return this.resolveRoundEnginePort(record);
+  }
+
+  /**
    * 首轮派发入口（[D-R4-1 兑现] RunOrchestration.executeViaEngine 的 Continuation
    * 协作回调面；[modeless 波1] 四象限坍缩后的唯一派发路径）：continuationFor
    * ensure + startFirstRound（首轮 task = dispatchRound([opts.task])，无 resume——
@@ -664,6 +683,47 @@ export class ChatRounds {
    */
   dispatchChatRoundForContinuation(record: ExecutionRecord, input: ContinuationDispatchInput): void {
     const spec = input.firstRoundSpec;
+    // [subagent-model-switch 第 0 层接线] 用户覆盖在场 → 解析覆盖值 + 新一轮启动
+    // 盖章（§7.2 chat 域跨轮接线：第 0 层命中覆盖 → 本轮 record.model 盖新模型 →
+    // taskSpec 自然带新值）。盖章时点语义 = 不变量 1「最近一轮启动模型」——新一轮
+    // 启动前的最后取值点定值（重派视作新一轮启动的盖章动作，非切换对历史的改写，
+    // 不变量 5 不受影响）。解析走 resolveModel 第 0 层参数（canonical ref 全等 +
+    // auth + 档位候选链对新模型完整裁决，§6.2 记账形状）——覆盖值后来失效（模型
+    // 下架 / 凭据撤销 / frontmatter 档位不可用）在此抛错 → onRoundRejected 失败轮末
+    // 分流（fail-fast 不降级，与显式指定不可用即抛错的现役语义同构）。
+    if (record.modelOverride !== undefined) {
+      const resolvedOverride = this.deps.getModelService().resolveModel(
+        record.agent,
+        undefined,
+        undefined,
+        undefined,
+        {
+          model: `${record.modelOverride.ref.provider}/${record.modelOverride.ref.modelId}`,
+          ...(record.modelOverride.thinkingLevel !== undefined
+            ? { thinkingLevel: record.modelOverride.thinkingLevel }
+            : {}),
+        },
+      );
+      type MutableStampRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
+      (record as MutableStampRecord).model = joinEngineModelRef(resolvedOverride.model);
+      (record as MutableStampRecord).thinkingLevel = resolvedOverride.thinkingLevel;
+      this.kickOffChatRound(
+        record,
+        spec !== undefined
+          ? { ...spec.opts, task: input.task, worktree: record.worktreeHandle }
+          : { task: input.task, slug: record.slug, worktree: record.worktreeHandle },
+        { agent: record.agent, agentConfig: undefined, resolved: resolvedOverride },
+        input.signal,
+        PRIORITY_BACKGROUND,
+        input.resume,
+        {
+          onSettled: input.handlers.onSettled,
+          onRejected: input.handlers.onRejected,
+          onAbandoned: input.handlers.onAbandoned,
+        },
+      );
+      return;
+    }
     // [R4/D6-④] 续聊 identity 重建对 record.model 判空：undefined = 用户未指定模型
     //（引擎自身缺省解析）——跳过 splitEngineModelRef 重建、resolved.model 留空，
     // 与首轮「缺席不盖章」同语义（禁空串哨兵：读侧水合归一后 "" 不再产生）。

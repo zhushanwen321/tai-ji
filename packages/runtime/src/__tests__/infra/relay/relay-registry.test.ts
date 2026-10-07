@@ -161,9 +161,16 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
       '}',
       "if (mode === 'events') {",
       "  process.stderr.write('pi boot noise\\n')",
+      "  process.stdout.write(JSON.stringify({ type: 'message_start' }) + '\\n')",
       "  process.stdout.write(JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hi' } }) + '\\n')",
       "  process.stdout.write(JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }], timestamp: Date.now() } }) + '\\n')",
       '}',
+      "// stream-open 模式：输出 message_start + text_delta 后挂住（无 message_end）——",
+      "// tee 恒处 in-flight 刻度，getStreamStateByRecord 用例据此做无时序竞态的断言",
+      "if (mode === 'stream-open') {",
+      "  process.stdout.write(JSON.stringify({ type: 'message_start' }) + '\\n')",
+      "  process.stdout.write(JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hi' } }) + '\\n')",
+      "}",
       "if (mode === 'exit7') process.exit(7)",
       "if (mode === 'echo') {",
       "  process.stdin.setEncoding('utf-8')",
@@ -175,8 +182,8 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
       "  let i = 0",
       "  setInterval(() => { process.stdout.write(`chunk-${i++}\\n`) }, 10)",
       '}',
-      "// hang/events 模式挂住事件循环：立即退出会与 stdout pipe flush 竞态丢数据",
-      "if (mode === 'hang' || mode === 'events') setTimeout(() => {}, 60000)",
+      "// hang/events/stream-open 模式挂住事件循环：立即退出会与 stdout pipe flush 竞态丢数据",
+      "if (mode === 'hang' || mode === 'events' || mode === 'stream-open') setTimeout(() => {}, 60000)",
       '',
     ].join('\n'))
     published = []
@@ -374,7 +381,7 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     agent.destroy()
   })
 
-  t('tee 分支：stdout 事件 → session.subagentEntriesAppended + stream_delta（归属虚拟分区）', async () => {
+  t('tee 分支：stdout 事件 → session.subagentEntriesAppended + stream_chunk（B2 双序号增量契约，归属虚拟分区）', async () => {
     await startServer()
     const agent = new TestAgent(getActiveRelaySocketPath()!)
     await agent.opened
@@ -383,9 +390,26 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     const entriesFrame = published.find((p) => p.msg.type === 'session.subagentEntriesAppended')!
     expect(entriesFrame.sid).toBe('main-1')
     expect((entriesFrame.msg.payload as { subagentId: string }).subagentId).toBe('rec-1')
-    const deltas = published.filter((p) => p.msg.type === 'subagent.stream_delta')
-    expect(deltas.length).toBeGreaterThan(0)
-    expect((deltas[0].msg.payload as { sessionId: string }).sessionId).toBe('subagent:main-1:rec-1')
+    // B2：内容通道 = 增量 chunk（R 路径不再产生携带 lines 全文的 stream_delta）。
+    // 假 pi events 序列 = message_start（无 message 字段 = assistant turn）→ text_delta 'hi'
+    // → assistant message_end，chunk 契约逐字段：msgSeq 从 1 起、deltaSeq 从 0 起、delta 原样。
+    const chunks = published.filter((p) => p.msg.type === 'subagent.stream_chunk')
+    expect(chunks.length).toBeGreaterThan(0)
+    expect(chunks[0].msg.payload).toMatchObject({
+      sessionId: 'subagent:main-1:rec-1',
+      recordId: 'rec-1',
+      msgSeq: 1,
+      deltaSeq: 0,
+      delta: 'hi',
+    })
+    // 定稿清除帧：lines undefined + additive msgSeq（全量 lines 形态在 R 路径已绝迹）
+    const fullLineDeltas = published.filter(
+      (p) => p.msg.type === 'subagent.stream_delta' && (p.msg.payload as { lines?: string[] }).lines !== undefined,
+    )
+    expect(fullLineDeltas).toHaveLength(0)
+    const clearFrame = published.find((p) => p.msg.type === 'subagent.stream_delta')
+    expect(clearFrame).toBeDefined()
+    expect(clearFrame!.msg.payload).toMatchObject({ sessionId: 'subagent:main-1:rec-1', lines: undefined, msgSeq: 1 })
     // 编排通路同字节保真：up 帧拼接与假 pi 原始输出一致（两次 write 可能合并为单 chunk，
     // 断言按内容不按帧数）
     await waitFor(() => {
@@ -415,7 +439,8 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
         return content.includes('text_delta') && content.includes('message_end')
       }, 30_000, 'mirror content flushed')
       const content = readFileSync(join(logsDir, mirrorName()!), 'utf-8')
-      // 逐字节保真：假 pi 两行 JSONL 各带换行，镜像原样保留（不补/不吞换行）
+      // 逐字节保真：假 pi 三行 JSONL 各带换行（message_start / text_delta / message_end），
+      // 镜像原样保留（不补/不吞换行）——按事件名计数断言，不依赖行序
       expect(content.match(/text_delta/g)?.length).toBe(1)
       expect(content.match(/message_end/g)?.length).toBe(1)
       expect(content.endsWith('\n')).toBe(true)
@@ -646,6 +671,40 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     agent.destroy()
   })
 
+  // B2 subagent-stream-chunk §4.1 registry 半（getStreamStateByRecord 三分支真值表）。
+  // session-service-subagent-stream-state.test.ts 以假 source 替身只覆盖 service/handler
+  // 链（其头注释声称的「registry 半的 tee 存在性路由在 relay-registry 单测面」即本用例）：
+  // 防串读分支（recordId 命中但 mainSessionId 不一致视同无条目）是 RPC 双键路由的安全
+  // 分支，必须直测——条目结构（mainSessionId 字段/entries Map 键）重构时此处是红灯。
+  // stream-open 模式假 pi 消费 text_delta 后 tee 恒处 in-flight 刻度（无 message_end），
+  // found:true 断言不依赖 chunk/end 时序竞态；注册/清理完成信号同 hasByMainSessionId
+  // 用例（pid 文件落盘/删除，不探测私有 Map）。
+  t('getStreamStateByRecord 真值表：在册归属一致透传 tee 三元组；归属不一致/不在册 undefined；清理后 undefined', async () => {
+    await startServer()
+    const registry = getActiveRelayRegistry()!
+    // 分支③：recordId 不在册 → undefined（未注册/child exit 已清理/session 不匹配同归一）
+    expect(registry.getStreamStateByRecord('main-1', 'rec-1')).toBeUndefined()
+    const agent = new TestAgent(getActiveRelaySocketPath()!)
+    await agent.opened
+    agent.send(validHandshake({ argv: [fakePi, 'stream-open'] }))
+    // tee 已消费 text_delta 的完成信号 = chunk 帧发布（tee 同步逐行处理，chunk 出现即
+    // message_start 已先序消费；此后无更多输入，流状态恒定）
+    await waitFor(() => published.some((p) => p.msg.type === 'subagent.stream_chunk'), 30_000, 'stream chunk published')
+    // 分支①：recordId 在册且 mainSessionId 归属一致 → tee.getStreamState() 原样透传
+    //（msgSeq 从 1 起、lastDeltaSeq = 已发 chunk 数-1、lines = 累积全文 split 形态）
+    expect(registry.getStreamStateByRecord('main-1', 'rec-1')).toEqual({
+      found: true, msgSeq: 1, lastDeltaSeq: 0, lines: ['hi'],
+    })
+    // 分支②（防串读）：recordId 命中但归属 mainSessionId 不一致 → undefined
+    expect(registry.getStreamStateByRecord('main-other', 'rec-1')).toBeUndefined()
+    // 分支③：recordId 不在册（归属一致也枉然）
+    expect(registry.getStreamStateByRecord('main-1', 'rec-none')).toBeUndefined()
+    // 清理后：断连即杀 → kill 链 → child exit → cleanupEntry 注销（pid 文件删除为完成信号）
+    agent.destroy()
+    await waitFor(() => !existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'entry cleaned up after disconnect kill')
+    expect(registry.getStreamStateByRecord('main-1', 'rec-1')).toBeUndefined()
+  })
+
   describe('重启残留扫描（伪造 stale pid 文件 + 时间戳）', () => {
     // pid 文件先于 server 写入（模拟崩溃残留），children 目录需预建（生产由 registry 构造建）
     beforeEach(async () => {
@@ -772,7 +831,10 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
 
   t('message-bus topic 登记：session.subagentEntriesAppended 是 state 类（验收 3）', () => {
     expect(topicOf('session.subagentEntriesAppended')).toBe('state')
-    // stream_delta 维持 transient（tee 续用既有帧，不改变 topic 分类）
+    // stream_delta 维持 transient（清除信号续用既有帧，不改变 topic 分类）
     expect(topicOf('subagent.stream_delta')).toBe('transient')
+    // B2：增量 chunk 同族 transient——不分配 seq、不入 ring、不写快照，直传订阅者
+    //（收敛走失步/接入拉取，非 ring 回放）
+    expect(topicOf('subagent.stream_chunk')).toBe('transient')
   })
 })

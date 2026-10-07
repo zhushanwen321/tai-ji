@@ -94,6 +94,7 @@ import type * as realBtwDomain from '../api/domains/btw'
 
 import type * as realUsageDomain from '../api/domains/usage'
 import type * as realTtsDomain from '../api/domains/tts'
+import type * as realSubagentDomain from '../api/domains/subagent'
 
 
 /** real 域形状单点（mock 锚定源；散函数模块的 namespace 类型即域接口） */
@@ -111,6 +112,7 @@ export type BtwDomain = typeof realBtwDomain
 
 export type UsageDomain = typeof realUsageDomain
 export type TtsDomain = typeof realTtsDomain
+export type SubagentDomain = typeof realSubagentDomain
 
 
 /** 去 tuple 标签（Parameters 产 labeled tuple；参数名是修饰不是类型身份，归一后再比对）。导出：被导出的 SameTuple / DomainParamsExact 引用 */
@@ -148,7 +150,7 @@ import { __setMockFileAck } from './file'
 import { __setMockGitAck } from './git'
 
 // workflow/subagent fixture（E2E 验证 Flows/Agents tab，从 workflow-data.ts 拆出控文件行数）
-import { fixtureWorkflows, fixtureSubagents, fixtureRunEvents } from './workflow-data'
+import { fixtureWorkflows, fixtureSubagents, fixtureRunEventsByRun, fixtureDagByRun, fixtureDagErrors } from './workflow-data'
 
 /** "npm:" 前缀长度（install source 解析用，对齐 runtime NPM_PREFIX_LENGTH） */
 const NPM_PREFIX = 'npm:'
@@ -651,6 +653,17 @@ const sessionImpl = {
   },
 
   /**
+   * Mock subagent 流状态拉取（B2 subagent-stream-chunk §4.1；[G4 锚定] SessionDomain 类型
+   * 锚定下 mock 缺成员即编译红，最小实现与 getSubagentHistory 空数组同风格）：mock 无
+   * RelayTee 流基建，恒 found:false（无进行中流——消费端 §4.3 分支 3 不动作，定稿内容由
+   * entry 权威链承载），msgSeq/lastDeltaSeq 无流式语义置 0、lines 空数组（协议缺省形态）。
+   */
+  async getSubagentStreamState(_sessionId: string, _recordId: string): Promise<ServerMessageMap['session.getSubagentStreamState']> {
+    await sleep(TIMING.ack)
+    return { found: false, msgSeq: 0, lastDeltaSeq: 0, lines: [] }
+  },
+
+  /**
    * Mock workflow 列表。
    * s3 返回 fixture，其他 session 返回空——同 getSubagents 的区分逻辑。
    * [RT-4#8] 形态对齐 real（结构化返回；mock 恒非 oversize）。
@@ -663,26 +676,35 @@ const sessionImpl = {
 
   /**
    * Mock run 事件流（workflow-visualization §3.1-4；[G4 锚定补齐] 同因：门面三元下 mock
-   * 缺成员即接口同构破）。按 runId 分流：wf-mock-001 返回 fixtureRunEvents 成功回执
-   * （workflow-viz overlay 事件流/Gantt 子页的正向对账数据，e2e/workflow-viz-overlay.spec.ts）；
-   * 其余 runId 返回结构化 record_not_found 领域回执（形态对齐 real 错误臂；该降级形态的
-   * renderer 分流由组件测试覆盖——workflow-live-panel.test.ts 错误二分用例）。
+   * 缺成员即接口同构破）。按 runId 查 fixtureRunEventsByRun 返回对应演员的事件行集
+   * （[D8] workflow-overlay-refine §3.3 演员清单——wf-mock-001 既有 done + 十演员，
+   * 冻结清单见 workflow-data.ts 头注释与 runlog）；未登记 runId 返回结构化
+   * record_not_found 领域回执（形态对齐 real 错误臂；该降级形态的 renderer 分流由
+   * 组件测试覆盖——workflow-live-panel.test.ts 错误二分用例）。
    */
   async getWorkflowRunEvents(sessionId: string, runId: string): Promise<WorkflowRunEventsReply> {
     await sleep(TIMING.ack)
-    if (runId === 'wf-mock-001') {
-      return { sessionId, runId, events: fixtureRunEvents.map((e) => ({ ...e })) }
+    if (Object.prototype.hasOwnProperty.call(fixtureRunEventsByRun, runId)) {
+      return { sessionId, runId, events: fixtureRunEventsByRun[runId].map((e) => ({ ...e })) }
     }
     return { sessionId, runId, code: 'record_not_found', message: 'mock 无 record 事件流记录' }
   },
 
   /**
    * Mock run DAG 蓝图（workflow-visualization §3.1-5；[G4 锚定补齐] 同因：门面三元下 mock
-   * 缺成员即接口同构破）。mock 无 record 文件基建 → 返回结构化 record_not_found 领域回执
-   *（形态对齐 real 错误臂；overlay 左栏按码分流降级形态 = 按 phase 分组只读列表）。
+   * 缺成员即接口同构破）。[D8 定稿②③] 按 runId 查预置表返回——成功臂 fixtureDagByRun
+   * （预置成品 DAG，mock 内不跑解析器）、错误臂 fixtureDagErrors（parse_failed 演员——
+   * 降级断言 V5①/OV4 的唯一数据源）；未登记 runId 恒 record_not_found 领域回执
+   *（形态对齐 real 错误臂；未登记 runId 的降级形态仍由本负例承载）。
    */
   async getWorkflowDag(sessionId: string, runId: string): Promise<WorkflowDagReply> {
     await sleep(TIMING.ack)
+    if (Object.prototype.hasOwnProperty.call(fixtureDagByRun, runId)) {
+      return { sessionId, runId, dag: { ...fixtureDagByRun[runId] } }
+    }
+    if (Object.prototype.hasOwnProperty.call(fixtureDagErrors, runId)) {
+      return { sessionId, runId, code: fixtureDagErrors[runId].code, message: fixtureDagErrors[runId].message }
+    }
     return { sessionId, runId, code: 'record_not_found', message: 'mock 无 record 文件基建' }
   },
 
@@ -2134,3 +2156,19 @@ const ttsImpl = {
 // [G4] 参数全等断言：mock tts 任一方法少参/多参/错型在此行编译失败
 export type TtsDomainParamsExact = AssertExact<DomainParamsExact<TtsDomain, typeof ttsImpl>>
 export const tts: TtsDomain = ttsImpl
+
+// ── subagent 域 mock（subagent-model-switch §7.1 入口层，U1）────────────────
+// 与 real 域同接口（门面三元要求两侧同构）。行为：setModel 恒回已记账型应答
+// （mock 无宿主编排/活进程链——「已记录，下次执行生效」是 mock 语境下唯一诚实的
+// 形态；已生效型需引擎回读，mock 不虚构生效值）。
+const subagentImpl = {
+  async setModel(params: Parameters<typeof realSubagentDomain.setModel>[0]): Promise<ServerMessageMap['subagent.modelSet']> {
+    await sleep(TIMING.ack)
+    void params
+    return { kind: 'recorded', note: '已记录，下次执行生效（mock）' }
+  },
+}
+
+// [G4] 参数全等断言：mock subagent 任一方法少参/多参/错型在此行编译失败
+export type SubagentDomainParamsExact = AssertExact<DomainParamsExact<SubagentDomain, typeof subagentImpl>>
+export const subagent: SubagentDomain = subagentImpl

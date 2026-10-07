@@ -9,7 +9,7 @@
       v-for="(row, i) in sortedRows"
       :key="row.key"
       :data-testid="`usage-model-${row.key}`"
-      class="grid cursor-pointer grid-cols-[24px_minmax(0,1fr)_auto_80px_56px] items-center gap-1 rounded-[var(--radius-sm)] px-2 py-1 transition-colors hover:bg-[var(--row-hover)]"
+      class="grid cursor-pointer select-none grid-cols-[24px_minmax(0,1fr)_auto_80px_56px] items-center gap-1 rounded-[var(--radius-sm)] px-2 py-1 transition-colors hover:bg-[var(--row-hover)]"
       :class="{ 'bg-[var(--accent-soft)]': isolate === row.key }"
       @click="toggle(row.key)"
     >

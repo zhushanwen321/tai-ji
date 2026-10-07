@@ -46,8 +46,9 @@ export const MOCK_BUNDLE_MARKER = 'Promise 代码评审'
  * pre-flight：确认当前 renderer 产物是 mock bundle（real 产物在场即 fail-fast）。
  *
  * 与 launch-app-real.ts 的 assertRealRendererBundle 对称。背景：两条轨共用
- * apps/electron/renderer/dist（构建期 VITE_MOCK define），而 e2e globalSetup 只查产物
- * 存在、不查构建形态。若先跑 real 轨再跑 mock 轨，renderer 走 real transport 链路
+ * apps/electron/renderer/dist（构建期 VITE_MOCK define）。e2e globalSetup 已做形态
+ * 感知构建（按 argv 请求轨自动重建形态不符的产物），本 pre-flight 是运行期第二道
+ * 防线（混合信号运行 / 手工重建后的形态漂移）：若 renderer 走 real transport 链路
  * （无 mock 层/无 fixture session），所有 mock spec 的 session 断言会以 30s 超时呈现，
  * 失败信号不指向恢复动作。此处把该前置条件变成带恢复命令的响亮失败。
  */
