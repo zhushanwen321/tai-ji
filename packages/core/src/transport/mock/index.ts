@@ -651,6 +651,17 @@ const sessionImpl = {
   },
 
   /**
+   * Mock subagent 流状态拉取（B2 subagent-stream-chunk §4.1；[G4 锚定] SessionDomain 类型
+   * 锚定下 mock 缺成员即编译红，最小实现与 getSubagentHistory 空数组同风格）：mock 无
+   * RelayTee 流基建，恒 found:false（无进行中流——消费端 §4.3 分支 3 不动作，定稿内容由
+   * entry 权威链承载），msgSeq/lastDeltaSeq 无流式语义置 0、lines 空数组（协议缺省形态）。
+   */
+  async getSubagentStreamState(_sessionId: string, _recordId: string): Promise<ServerMessageMap['session.getSubagentStreamState']> {
+    await sleep(TIMING.ack)
+    return { found: false, msgSeq: 0, lastDeltaSeq: 0, lines: [] }
+  },
+
+  /**
    * Mock workflow 列表。
    * s3 返回 fixture，其他 session 返回空——同 getSubagents 的区分逻辑。
    * [RT-4#8] 形态对齐 real（结构化返回；mock 恒非 oversize）。

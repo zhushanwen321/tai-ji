@@ -14,7 +14,7 @@ import {
   createInitialChatViewState,
   type ChatViewStateBuffer,
 } from './apply-entry'
-import { createStreamingStateMachine } from './streaming-state-machine'
+import { createStreamingStateMachine, type SubagentStreamStateSnapshot } from './streaming-state-machine'
 import {
   touchLru as lruTouch,
   evictIfNeeded as lruEvictIfNeeded,
@@ -294,6 +294,14 @@ function restoreRespawnNotices(partition: Message[], merged: Message[]): Message
 export interface ChatStoreOptions {
   /** [B9] 查询被驱逐 sid（mainSid / btw 线 vid）名下应联动释放的 agentcall virtualId（豁免已应用）；见 LruEvictDeps.agentCallEvictionsOf */
   agentCallEvictionsOf?: (mainSid: string) => string[]
+  /**
+   * [B2 subagent-stream-chunk §4.3] subagent 流状态拉取执行器（core 不直接发 RPC，
+   * renderer 层注入——对齐 agentCallEvictionsOf 回调注入模式）。失步 / 接入拉取经此
+   * 执行 session.getSubagentStreamState；renderer 侧实现按 extractMainSessionId(virtualId)
+   * 解析主 session（shared 单一实现）后调 api.session.getSubagentStreamState。
+   * 缺省 = chunk 失步拉取 no-op（缓冲保留，见 streaming-state-machine.ts 契约注释）。
+   */
+  subagentStreamPull?: (virtualId: string, recordId: string) => Promise<SubagentStreamStateSnapshot>
 }
 
 export function createChatStore(options: ChatStoreOptions = {}) {
@@ -416,7 +424,8 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    */
   const { historyWindows, setHistoryWindow, getHistoryWindow, clearHistoryWindow } = createTruncatedWindowController()
 
-  // ── streaming 状态机深模块（B6：3 个原模块级状态机编排函数 + 2 个新提取的瞬态清理 helper 内聚为 factory，本 store 仅委托）──
+  // ── streaming 状态机深模块（B6：3 个原模块级状态机编排函数 + 2 个新提取的瞬态清理 helper 内聚为 factory，本 store 仅委托；
+  //    [B2 subagent-stream-chunk §4.3] 增量 chunk 消费状态机同体，拉取执行器经 options 注入）──
   const streamingStateMachine = createStreamingStateMachine({
     messages,
     occupancies,
@@ -425,6 +434,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     pendingSend,
     clearOccupancy,
     setHandingOff,
+    subagentStreamPull: options.subagentStreamPull,
   })
 
   // ── 派生态（D-3 per-session 惰性派生，D-005 语义保留）──
@@ -527,8 +537,20 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   )
   /** W3 H3：LRU 驱逐（阈值触发）/ 显式驱逐（带虚拟 key）/ [M7] 单虚拟 key 删除 */
   function evictIfNeeded(): void { lruEvictIfNeeded(lruEvictDeps) }
-  function evictSessionWithVirtual(sessionId: string): void { lruEvictSession(sessionId, lruEvictDeps) }
-  function evictVirtualKey(virtualId: string): void { lruEvictDeps.deleteMessageKey(virtualId) }
+  function evictSessionWithVirtual(sessionId: string): void {
+    lruEvictSession(sessionId, lruEvictDeps)
+    // [B2 subagent-stream-chunk §4.3] subagent chunk 分区状态机随主 session 驱逐清除
+    // （按 mainSid 归属匹配，覆盖该 sid 名下全部 subagent 虚拟键——驱逐重进后由接入
+    // 拉取 + chunk 重建，可重建型簿记）。
+    streamingStateMachine.clearSubagentChunkStateForSession(sessionId)
+  }
+  function evictVirtualKey(virtualId: string): void {
+    lruEvictDeps.deleteMessageKey(virtualId)
+    // [B2 subagent-stream-chunk §4.3] record/分区级：虚拟分区删除时该键名下全部 record
+    // 分区一并清（§4.3「record 级随虚拟分区删除清除」挂点；agentcall / btw 键非三段式
+    // 结构，clearSubagentChunkState 对无分区键幂等 no-op）。
+    streamingStateMachine.clearSubagentChunkState(virtualId)
+  }
 
   /** 取指定 session 的自动重试态（无则 undefined） */
   function getRetryState(sessionId: string): RetryState | undefined {
@@ -1117,6 +1139,11 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     // D-3 生命周期：streaming flag 惰性派生缓存随 messages 分区同点清理（漏删即慢泄漏，
     // 07 文档 §3.3.2 cleanup 契约）。
     sessionStreamingFlags.delete(sessionId)
+    // [B2 subagent-stream-chunk §4.3] subagent chunk 分区状态机随 session 销毁清除——本方法
+    // 是双壳删除编排链成员（useSidebar.deleteSession / app-runtime.deleteSession →
+    // triggerSessionCleanups → hooks.disposeChat → useChat.disposeSession → 此处），session
+    // 级挂点按 mainSid 归属匹配清全部 subagent 虚拟键的 chunk 分区（ADR-0049 生命周期范式）。
+    streamingStateMachine.clearSubagentChunkStateForSession(sessionId)
     disposeLruEntry(sessionId) // R5: 清理 LRU 时序记录，防止内存泄漏
   }
 
@@ -1141,6 +1168,16 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     prependHistory,
     applySubagentStreamDelta: (virtualId: string, lines: string[]) => streamingStateMachine.applySubagentStreamDelta(virtualId, lines),
     finalizeSubagentStream: (virtualId: string) => streamingStateMachine.finalizeSubagentStream(virtualId),
+    // [B2 subagent-stream-chunk §4.3] 增量 chunk 消费状态机入口（契约见 streaming-state-machine.ts；
+    // 消费方 = renderer subagent store 分派改造（u-renderer）：chunk / 拉取 / 清除三路接线）
+    applySubagentStreamChunk: (virtualId: string, recordId: string, msgSeq: number, deltaSeq: number, delta: string) =>
+      streamingStateMachine.applySubagentStreamChunk(virtualId, recordId, msgSeq, deltaSeq, delta),
+    applySubagentStreamState: (virtualId: string, recordId: string, response: SubagentStreamStateSnapshot) =>
+      streamingStateMachine.applySubagentStreamState(virtualId, recordId, response),
+    requestSubagentStreamState: (virtualId: string, recordId: string) => streamingStateMachine.requestSubagentStreamState(virtualId, recordId),
+    sealSubagentStream: (virtualId: string, recordId: string, msgSeq: number) => streamingStateMachine.sealSubagentStream(virtualId, recordId, msgSeq),
+    clearSubagentChunkState: (virtualId: string, recordId?: string) => streamingStateMachine.clearSubagentChunkState(virtualId, recordId),
+    clearSubagentChunkStateForSession: (sessionId: string) => streamingStateMachine.clearSubagentChunkStateForSession(sessionId),
     applySubagentEntries,
     appendUser,
     getInflight,
@@ -1242,6 +1279,8 @@ export type ChatStoreOps = Pick<
   | 'setChangeSetStatus' | 'markChangeSetsSuperseded' | 'markHistoryFailed'
   | 'clearHistoryError' | 'hydrate' | 'setMessages' | 'reconcileHistory'
   | 'prependHistory' | 'applySubagentStreamDelta' | 'finalizeSubagentStream'
+  | 'applySubagentStreamChunk' | 'applySubagentStreamState' | 'requestSubagentStreamState'
+  | 'sealSubagentStream' | 'clearSubagentChunkState' | 'clearSubagentChunkStateForSession'
   | 'applySubagentEntries' | 'appendUser'
   | 'applyMessageEvent' | 'finalizeSession'
   | 'finalizeAllStreaming' | 'resetTransientStates' | 'addPendingSend'
