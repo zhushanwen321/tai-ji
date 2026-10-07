@@ -161,6 +161,7 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
       '}',
       "if (mode === 'events') {",
       "  process.stderr.write('pi boot noise\\n')",
+      "  process.stdout.write(JSON.stringify({ type: 'message_start' }) + '\\n')",
       "  process.stdout.write(JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hi' } }) + '\\n')",
       "  process.stdout.write(JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }], timestamp: Date.now() } }) + '\\n')",
       '}',
@@ -374,7 +375,7 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     agent.destroy()
   })
 
-  t('tee 分支：stdout 事件 → session.subagentEntriesAppended + stream_delta（归属虚拟分区）', async () => {
+  t('tee 分支：stdout 事件 → session.subagentEntriesAppended + stream_chunk（B2 双序号增量契约，归属虚拟分区）', async () => {
     await startServer()
     const agent = new TestAgent(getActiveRelaySocketPath()!)
     await agent.opened
@@ -383,9 +384,26 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     const entriesFrame = published.find((p) => p.msg.type === 'session.subagentEntriesAppended')!
     expect(entriesFrame.sid).toBe('main-1')
     expect((entriesFrame.msg.payload as { subagentId: string }).subagentId).toBe('rec-1')
-    const deltas = published.filter((p) => p.msg.type === 'subagent.stream_delta')
-    expect(deltas.length).toBeGreaterThan(0)
-    expect((deltas[0].msg.payload as { sessionId: string }).sessionId).toBe('subagent:main-1:rec-1')
+    // B2：内容通道 = 增量 chunk（R 路径不再产生携带 lines 全文的 stream_delta）。
+    // 假 pi events 序列 = message_start（无 message 字段 = assistant turn）→ text_delta 'hi'
+    // → assistant message_end，chunk 契约逐字段：msgSeq 从 1 起、deltaSeq 从 0 起、delta 原样。
+    const chunks = published.filter((p) => p.msg.type === 'subagent.stream_chunk')
+    expect(chunks.length).toBeGreaterThan(0)
+    expect(chunks[0].msg.payload).toMatchObject({
+      sessionId: 'subagent:main-1:rec-1',
+      recordId: 'rec-1',
+      msgSeq: 1,
+      deltaSeq: 0,
+      delta: 'hi',
+    })
+    // 定稿清除帧：lines undefined + additive msgSeq（全量 lines 形态在 R 路径已绝迹）
+    const fullLineDeltas = published.filter(
+      (p) => p.msg.type === 'subagent.stream_delta' && (p.msg.payload as { lines?: string[] }).lines !== undefined,
+    )
+    expect(fullLineDeltas).toHaveLength(0)
+    const clearFrame = published.find((p) => p.msg.type === 'subagent.stream_delta')
+    expect(clearFrame).toBeDefined()
+    expect(clearFrame!.msg.payload).toMatchObject({ sessionId: 'subagent:main-1:rec-1', lines: undefined, msgSeq: 1 })
     // 编排通路同字节保真：up 帧拼接与假 pi 原始输出一致（两次 write 可能合并为单 chunk，
     // 断言按内容不按帧数）
     await waitFor(() => {
@@ -415,7 +433,8 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
         return content.includes('text_delta') && content.includes('message_end')
       }, 30_000, 'mirror content flushed')
       const content = readFileSync(join(logsDir, mirrorName()!), 'utf-8')
-      // 逐字节保真：假 pi 两行 JSONL 各带换行，镜像原样保留（不补/不吞换行）
+      // 逐字节保真：假 pi 三行 JSONL 各带换行（message_start / text_delta / message_end），
+      // 镜像原样保留（不补/不吞换行）——按事件名计数断言，不依赖行序
       expect(content.match(/text_delta/g)?.length).toBe(1)
       expect(content.match(/message_end/g)?.length).toBe(1)
       expect(content.endsWith('\n')).toBe(true)
@@ -772,7 +791,10 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
 
   t('message-bus topic 登记：session.subagentEntriesAppended 是 state 类（验收 3）', () => {
     expect(topicOf('session.subagentEntriesAppended')).toBe('state')
-    // stream_delta 维持 transient（tee 续用既有帧，不改变 topic 分类）
+    // stream_delta 维持 transient（清除信号续用既有帧，不改变 topic 分类）
     expect(topicOf('subagent.stream_delta')).toBe('transient')
+    // B2：增量 chunk 同族 transient——不分配 seq、不入 ring、不写快照，直传订阅者
+    //（收敛走失步/接入拉取，非 ring 回放）
+    expect(topicOf('subagent.stream_chunk')).toBe('transient')
   })
 })

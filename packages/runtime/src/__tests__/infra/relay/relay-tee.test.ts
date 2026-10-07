@@ -1,9 +1,10 @@
 /**
  * relay-tee 单测（E-2，验收 1 的 tee 部分）。
  *
- * 覆盖：entry 化产出（message_end / toolCall 两形态 + 锚点补齐）、stream_delta 中间态
- * （累积全文 + 虚拟分区归属 + 定稿清除）、单事件隔离（坏字节丢弃不连坐）、连续 50
- * 失败放弃、大 payload tool result 截断（>256KB 摘要）。
+ * 覆盖：entry 化产出（message_end / toolCall 两形态 + 锚点补齐）、stream_chunk 增量契约
+ * （B2：delta 原样转发 + msgSeq/deltaSeq 双序号 + 虚拟分区归属 + 定稿清除帧 additive
+ * msgSeq）、状态查询入口 getStreamState（拉取数据源三元组）、单事件隔离（坏字节丢弃不
+ * 连坐）、连续 50 失败放弃、大 payload tool result 全量透传。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { RelayTee, TEE_MAX_CONSECUTIVE_FAILURES } from '../../../infra/relay/relay-tee.js'
@@ -35,10 +36,18 @@ function entryFrames(published: Array<{ sid: string; msg: ServerMessage }>) {
     .map((p) => p.msg.payload as { sessionId: string; subagentId: string; entries: Array<{ type: string; [k: string]: unknown }> })
 }
 
+/** stream_delta 帧 payload（R 路径现只产清除形态：lines undefined + additive msgSeq）。 */
 function deltaFrames(published: Array<{ sid: string; msg: ServerMessage }>) {
   return published
     .filter((p) => p.msg.type === 'subagent.stream_delta')
-    .map((p) => p.msg.payload as { sessionId: string; recordId: string; lines: string[] | undefined })
+    .map((p) => p.msg.payload as { sessionId: string; recordId: string; lines: string[] | undefined; msgSeq?: number })
+}
+
+/** stream_chunk 帧 payload（B2 增量内容契约：msgSeq/deltaSeq/delta）。 */
+function chunkFrames(published: Array<{ sid: string; msg: ServerMessage }>) {
+  return published
+    .filter((p) => p.msg.type === 'subagent.stream_chunk')
+    .map((p) => p.msg.payload as { sessionId: string; recordId: string; msgSeq: number; deltaSeq: number; delta: string })
 }
 
 describe('RelayTee entry 化产出', () => {
@@ -98,34 +107,110 @@ describe('RelayTee entry 化产出', () => {
   })
 })
 
-describe('RelayTee stream_delta 中间态', () => {
-  it('text_delta 累积全文（lines 语义对齐 A-1），sessionId 是虚拟分区 id', () => {
+describe('RelayTee stream_chunk 增量契约（B2 subagent-stream-chunk §4.2）', () => {
+  it('text_delta → stream_chunk：delta 原样转发 + 双序号（msgSeq 从 1 起、deltaSeq per-message 从 0）+ 虚拟分区归属', () => {
     const { tee, published } = createTee()
     feedLines(tee, [
       { type: 'message_start' },
       { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hello ' } },
       { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'world' } },
     ])
-    const deltas = deltaFrames(published)
-    expect(deltas).toHaveLength(2)
+    const chunks = chunkFrames(published)
+    expect(chunks).toHaveLength(2)
     const virtualId = subagentVirtualId('main-1', 'rec-1')
-    expect(deltas.every((d) => d.sessionId === virtualId)).toBe(true)
-    expect(deltas[0].lines).toEqual(['hello '])
-    expect(deltas[1].lines).toEqual(['hello world'])
+    expect(chunks.every((c) => c.sessionId === virtualId)).toBe(true)
+    expect(chunks.every((c) => c.recordId === 'rec-1')).toBe(true)
+    expect(chunks[0]).toMatchObject({ msgSeq: 1, deltaSeq: 0, delta: 'hello ' })
+    expect(chunks[1]).toMatchObject({ msgSeq: 1, deltaSeq: 1, delta: 'world' })
   })
 
-  it('assistant message_end 定稿 → 发清除帧（lines undefined）+ 重置累积', () => {
+  it('R 路径不再产生携带 lines 全文的 stream_delta：中间态零全量帧，stream_delta 仅剩定稿清除（lines undefined + additive msgSeq）', () => {
     const { tee, published } = createTee()
     feedLines(tee, [
       { type: 'message_start' },
       { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'a' } },
       { type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'a' }] } },
-      // 下一轮 assistant 消息的 delta 从空累积重新开始
+      // 下一轮 assistant 消息：msgSeq 递进 2，deltaSeq 重置 0
       { type: 'message_start' },
       { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'b' } },
     ])
     const deltas = deltaFrames(published)
-    expect(deltas.map((d) => d.lines)).toEqual([['a'], undefined, ['b']])
+    // 只剩清除帧（lines undefined），携带 msgSeq = 被定稿消息的序号（sealedMsgSeq 置位依据）
+    expect(deltas).toHaveLength(1)
+    expect(deltas[0].lines).toBeUndefined()
+    expect(deltas[0].msgSeq).toBe(1)
+    const chunks = chunkFrames(published)
+    expect(chunks.map((c) => [c.msgSeq, c.deltaSeq, c.delta])).toEqual([
+      [1, 0, 'a'],
+      [2, 0, 'b'],
+    ])
+  })
+
+  it('user/toolResult message_end 不发清除帧、user message_start 不递进 msgSeq（msgSeq 只数 assistant 消息）', () => {
+    const { tee, published } = createTee()
+    feedLines(tee, [
+      // user 轮（翻译层 message_start{user} 产 noop，tee 不见；message_end 只产 entry）
+      { type: 'message_end', message: { role: 'user', content: [{ type: 'text', text: 'q' }], timestamp: 1 } },
+      // assistant 轮
+      { type: 'message_start' },
+      { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'a1' } },
+    ])
+    expect(deltaFrames(published)).toHaveLength(0)
+    expect(chunkFrames(published).map((c) => [c.msgSeq, c.deltaSeq, c.delta])).toEqual([[1, 0, 'a1']])
+    // toolResult message_end 同理：只产 entry，不发清除帧
+    feedLines(tee, [
+      { type: 'message_end', message: { role: 'toolResult', content: [{ type: 'text', text: 'r' }], toolCallId: 'tc-1', timestamp: 2 } },
+      { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'a2' } },
+    ])
+    expect(deltaFrames(published)).toHaveLength(0)
+    // msgSeq 未被 user/toolResult 打断，仍在第 1 条 assistant 消息内递进
+    expect(chunkFrames(published).map((c) => [c.msgSeq, c.deltaSeq, c.delta])).toEqual([
+      [1, 0, 'a1'],
+      [1, 1, 'a2'],
+    ])
+  })
+})
+
+describe('RelayTee 状态查询入口 getStreamState（B2 §4.2，session.getSubagentStreamState 数据源）', () => {
+  it('未开始 / 已定稿 / dispose 后：found=false，其余字段恒 0/0/[]', () => {
+    const { tee } = createTee()
+    // 未开始
+    expect(tee.getStreamState()).toEqual({ found: false, msgSeq: 0, lastDeltaSeq: 0, lines: [] })
+    // 已定稿（assistant message_end 之后流不再 in-flight）
+    feedLines(tee, [
+      { type: 'message_start' },
+      { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'x' } },
+      { type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'x' }] } },
+    ])
+    expect(tee.getStreamState()).toEqual({ found: false, msgSeq: 0, lastDeltaSeq: 0, lines: [] })
+    // dispose 后（child exit / abandoned）
+    tee.dispose()
+    expect(tee.getStreamState()).toEqual({ found: false, msgSeq: 0, lastDeltaSeq: 0, lines: [] })
+  })
+
+  it('进行中流：同步读三元组 (msgSeq, lastDeltaSeq 水位, lines 累积全文 split 形态)', () => {
+    const { tee } = createTee()
+    // message_start 已见、尚无 delta：水位 -1（expectedDeltaSeq 重置 0，首条 chunk 不被去重误丢）
+    feedLines(tee, [{ type: 'message_start' }])
+    expect(tee.getStreamState()).toEqual({ found: true, msgSeq: 1, lastDeltaSeq: -1, lines: [''] })
+    feedLines(tee, [
+      { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '入口是 main.ts\n导出' } },
+      { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: ' main 函数' } },
+    ])
+    // 2 条 delta 已发：水位 = 最后一条的 deltaSeq = 1；lines 与旧 stream_delta payload 同形
+    expect(tee.getStreamState()).toEqual({
+      found: true,
+      msgSeq: 1,
+      lastDeltaSeq: 1,
+      lines: ['入口是 main.ts', '导出 main 函数'],
+    })
+    // 第二条 assistant 消息：msgSeq 递进、水位归 -1、lines 重置
+    feedLines(tee, [
+      { type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'x' }] } },
+      { type: 'message_start' },
+      { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'y' } },
+    ])
+    expect(tee.getStreamState()).toEqual({ found: true, msgSeq: 2, lastDeltaSeq: 0, lines: ['y'] })
   })
 })
 
@@ -273,14 +358,14 @@ describe('[B1 / btw-question D9③] 生产半边：btw 线归属的键中段翻�
       { type: 'message_start' },
       { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hi' } },
     ])
-    const deltas = deltaFrames(published)
-    expect(deltas).toHaveLength(1)
+    const chunks = chunkFrames(published)
+    expect(chunks).toHaveLength(1)
     // ① 三段键、不 throw，与 shared 工厂按线 piSessionId 构造逐字一致（INVAR-1.1 键契约闭环）
-    expect(deltas[0].sessionId).toBe(subagentVirtualId('line-rt-b1', 'rec-b1'))
-    expect(isSubagentVirtualId(deltas[0].sessionId)).toBe(true)
+    expect(chunks[0].sessionId).toBe(subagentVirtualId('line-rt-b1', 'rec-b1'))
+    expect(isSubagentVirtualId(chunks[0].sessionId)).toBe(true)
     // ② 清理前缀 owner 面：中段 = 线 piSessionId（renderer disposeBtwLinePartitions 按
     //    isVirtualKeyOf(key, extractBtwPiSessionId(vid)) 前缀命中——owner 同源即闭环）
-    expect(extractMainSessionId(deltas[0].sessionId)).toBe('line-rt-b1')
+    expect(extractMainSessionId(chunks[0].sessionId)).toBe('line-rt-b1')
     // D9 路由键不变：bus publish 第一参仍是线 vid（分区路由），仅键中段翻译
     expect(published[0].sid).toBe(vid)
     // entry 帧同理：路由键 vid、payload 归属 vid（路由键 ≠ 键中段，两面解耦）

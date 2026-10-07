@@ -3,13 +3,22 @@
  *
  * 每个注册的 relay 子进程一个实例：child stdout 字节 → event-adapter 纯翻译函数
  * （PiEvent → PiTranslatedEvent[]，独立实例语义——不与主 pi 会话的 adapter/interpreter
- * 共享任何状态）→ entry 化提取 → 两种 WS 帧广播：
+ * 共享任何状态）→ entry 化提取 → WS 帧广播：
  *   ① session.subagentEntriesAppended {sessionId: mainSid, subagentId: recordId, entries}
  *      ——终态权威，前端虚拟分区喂 applyEntry（与主对话流 message.message_end /
  *      tool_call_* 帧的 entry 形态同构，live ≡ reload 构造性成立）；
- *   ② subagent.stream_delta ——text_delta 中间态打字机（续用既有帧，lines 是累积全文
- *      split('\n')，与 extension widget 通道 A-1 的 payload 语义逐字段一致，前端零感知
- *      切换；payload.sessionId 改为虚拟分区 id）。
+ *   ② subagent.stream_chunk {sessionId: 虚拟分区 id, recordId, msgSeq, deltaSeq, delta}
+ *      ——text_delta 增量内容推送（B2 subagent-stream-chunk §4.2：delta 原样转发，双序号
+ *      标识拼合位置；msgSeq = per-record assistant 消息序号从 1 起、message_start 递进，
+ *      deltaSeq = per-message 从 0 递增；transient 直传，断连即丢，失步/接入走
+ *      session.getSubagentStreamState 拉取）；
+ *   ③ subagent.stream_delta {lines: undefined, msgSeq} ——assistant 定稿清除信号（R 路径
+ *      只产清除形态，不再携带 lines 全文；msgSeq 为 additive 字段，消费端据此置定稿水位；
+ *      携带 lines 全文的形态余留 widget 通道 W 路径使用）。
+ *
+ * 状态查询入口 getStreamState()：同步读当前流三元组 (msgSeq, 已发 delta 数, textAccumulated)
+ * 的只读投影（形状与 session.getSubagentStreamState reply payload 逐字段一致），供 RPC 层
+ * 原样透传；不保留任何 delta 历史或切分边界索引（拉取语义 = 当前全量状态，非历史区间）。
  *
  * entry 原样透传（不在此层做内容截断）：image 块（toolResult content 的 base64）与
  * 输出文本的 live 可见性依赖完整透传，此前本层曾对 >256KB 的 toolResult 做整体替换
@@ -26,7 +35,7 @@
  * stderr 不进 tee（只转发，registry 负责）；子进程 exit 由 registry 调 dispose 销毁
  * （行缓冲/累积文本/锚点缓存全释放）。
  */
-import type { ServerMessage } from '@taiji/shared'
+import type { ServerMessage, ServerMessageMap } from '@taiji/shared'
 import { subagentVirtualId, isBtwVirtualId, extractBtwPiSessionId } from '@taiji/shared'
 import type { PiEntry, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
 import { translate } from '../pi/event-adapter.js'
@@ -48,14 +57,35 @@ export interface RelayTeeOptions {
   publish: (sessionId: string, msg: ServerMessage) => void
 }
 
+/**
+ * 流状态只读快照（getStreamState 返回形状，与 shared 协议 session.getSubagentStreamState
+ * reply payload 逐字段一致——u-runtime-rpc 半装配时按本签名路由到对应 tee 原样透传）。
+ */
+export interface RelayTeeStreamState {
+  /** 该 record 当前有进行中的 assistant 流（未开始/已定稿/已销毁 = false，此时其余字段恒 0/0/[]）。 */
+  found: boolean
+  /** 当前 assistant 消息序号（从 1 起，message_start 递进）。 */
+  msgSeq: number
+  /** 当前消息已含到第几条 delta（最后一条 chunk 的 deltaSeq；尚无 delta = -1）。 */
+  lastDeltaSeq: number
+  /** 当前消息累积全文（textAccumulated 的 split('\n') 形态，与旧 stream_delta payload 的 lines 同形）。 */
+  lines: string[]
+}
+
 /** tee 侧轻量帧序状态（与 interpreter 的同名字段同构但独立持有，见类注释）。 */
 interface TeeFrameState {
   /** 当前 assistant 消息翻译层 messageId（toolCall entry 挂载目标）。 */
   currentMessageId: string | undefined
   /** toolCallId → contentIndex 产出顺序锚点（pi toolcall_start，消费后删除）。 */
   toolCallContentIndex: Map<string, number>
-  /** 当前 assistant 消息的 text 累积（stream_delta 的 lines 累积全文语义）。 */
+  /** 当前 assistant 消息的 text 累积（chunk 流的拉取数据源，getStreamState lines 形态）。 */
   textAccumulated: string
+  /** per-record assistant 消息序号（chunk.msgSeq，从 1 起——首条 message_start 递进到 1）。 */
+  msgSeq: number
+  /** 当前消息已发布 delta 条数（下一条 chunk 的 deltaSeq；per-message 从 0 递增）。 */
+  deltaSeq: number
+  /** 当前 assistant 消息进行中（message_start 已见、message_end 未到）——found 判据。 */
+  inFlight: boolean
 }
 
 export class RelayTee {
@@ -65,6 +95,9 @@ export class RelayTee {
     currentMessageId: undefined,
     toolCallContentIndex: new Map(),
     textAccumulated: '',
+    msgSeq: 0,
+    deltaSeq: 0,
+    inFlight: false,
   }
   private consecutiveFailures = 0
   private _abandoned = false
@@ -125,6 +158,33 @@ export class RelayTee {
     }
   }
 
+  /**
+   * 流状态查询入口（B2 subagent-stream-chunk §4.2，session.getSubagentStreamState RPC 的
+   * 数据源）：同步读当前流状态的只读投影，返回形状与 reply payload 逐字段一致——RPC 层
+   * 原样透传，不再二次投影。
+   *
+   * - found = 有进行中的 assistant 流（message_start 已见且未 message_end）。未开始 /
+   *   已定稿 / dispose 后（child exit）= false，其余字段按协议恒 0 / 0 / []；
+   * - lastDeltaSeq = 当前消息已含到第几条 delta（最后一条 chunk 的 deltaSeq = 已发条数-1；
+   *   尚无 delta = -1——消费端 expectedDeltaSeq 重置为 水位+1 = 0，首条 chunk 不被去重误丢）。
+   *
+   * 无锁：JS 事件循环单线程，与 feed 消费同一调用队列串行，读到的三字段出自同一状态刻度
+   * （执行结构本身保证一致）。不保留任何 delta 历史或切分边界索引——拉取语义是「当前全量
+   * 状态」，不是「历史区间」。
+   */
+  getStreamState(): RelayTeeStreamState {
+    const state = this.state
+    if (state === null || !state.inFlight) {
+      return { found: false, msgSeq: 0, lastDeltaSeq: 0, lines: [] }
+    }
+    return {
+      found: true,
+      msgSeq: state.msgSeq,
+      lastDeltaSeq: state.deltaSeq - 1,
+      lines: state.textAccumulated.split('\n'),
+    }
+  }
+
   private handleLine(line: string): void {
     // W1 同款隔离边界：单事件（单行）失败只丢弃本事件。JSON.parse 失败（坏字节/半行）、
     // translate 抛错、entry 形态异常、publish 抛错都落这里——后续事件照常。
@@ -181,28 +241,41 @@ export class RelayTee {
         const t = ev.message.type
         if (t === 'message.message_start') {
           // 新 assistant 消息：记录挂载目标 + 重置 text 累积（上一条的中间态已被其
-          // message_end 的 entry 定稿取代）
+          // message_end 的 entry 定稿取代）。B2 chunk 契约：消息边界推进——msgSeq 递进
+          //（从 1 起）、deltaSeq 归零、流进入 in-flight。翻译层对 user/system/toolResult
+          // 的 message_start 产 noop（event-adapter handleMessageStart），此处只见 assistant
+          // turn，msgSeq 即 per-record assistant 消息序号。
           const messageId = (ev.message.payload as { messageId?: unknown }).messageId
           state.currentMessageId = typeof messageId === 'string' ? messageId : undefined
           state.textAccumulated = ''
+          state.msgSeq += 1
+          state.deltaSeq = 0
+          state.inFlight = true
           return
         }
         if (t === 'message.text_delta') {
           const delta = (ev.message.payload as { delta?: unknown }).delta
           if (typeof delta !== 'string') return
           state.textAccumulated += delta
-          // [stream-probe 临时探针] delta 消息计数 + 累积全文长度累计（O(n²) 量测点）
+          // [stream-probe 临时探针] delta 消息计数 + 累积全文长度累计（O(n²) 量测点；
+          // 量的是「若仍发全量」的重发总量，改增量后基线对比口径不变，拆除 = impl-plan
+          // 阶段 5 收尾步骤）
           this.probeDeltaCount += 1
           this.probeLinesTotalChars += state.textAccumulated.length
+          // B2：内容改走增量 chunk（delta 原样转发 + 双序号标识拼合位置）。deltaSeq 先取
+          // 后进（publish 抛错走单事件隔离丢弃时序号不虚占）。R 路径不再产生携带 lines
+          // 全文的 stream_delta（该形态余留 W 路径产生端）。
           this.opts.publish(this.opts.mainSessionId, {
-            type: 'subagent.stream_delta',
+            type: 'subagent.stream_chunk',
             payload: {
               sessionId: this.virtualId,
               recordId: this.opts.recordId,
-              // A-1 帧语义：lines 是累积全文 split('\n')——前端「零感知切换」的字段级依据
-              lines: state.textAccumulated.split('\n'),
+              msgSeq: state.msgSeq,
+              deltaSeq: state.deltaSeq,
+              delta,
             },
           })
+          state.deltaSeq += 1
           return
         }
         if (t === 'message.message_end') {
@@ -211,10 +284,20 @@ export class RelayTee {
           entries.push(entry)
           const role = entry.message?.role
           if (role === 'assistant') {
-            // assistant 定稿 → 清除打字机中间态（协议注释：lines undefined = 终态清除）
+            // assistant 定稿 → 清除打字机中间态（协议注释：lines undefined = 终态清除）。
+            // B2 additive：payload 增 msgSeq（消费端据此置 sealedMsgSeq 定稿水位）；shared
+            // 协议类型未登记该可选字段（W 路径清除帧不带 msgSeq，类型由 W 产生端契约
+            // 持有）——本地交叉类型承载 wire additive，赋回原契约位类型兼容。
+            state.inFlight = false
+            const clearPayload: ServerMessageMap['subagent.stream_delta'] & { msgSeq: number } = {
+              sessionId: this.virtualId,
+              recordId: this.opts.recordId,
+              lines: undefined,
+              msgSeq: state.msgSeq,
+            }
             this.opts.publish(this.opts.mainSessionId, {
               type: 'subagent.stream_delta',
-              payload: { sessionId: this.virtualId, recordId: this.opts.recordId, lines: undefined },
+              payload: clearPayload,
             })
             state.textAccumulated = ''
           }

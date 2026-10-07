@@ -99,6 +99,13 @@ export const DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS: OutboundFrameGuardOptions = {
 //   extensions/universal/plan/src/state.ts capPlanRequirement）/ backgroundTask:updated /
 //   terminal.alive / terminal.exit / terminal.ack /
 //   subagent.directive：标量/小列表状态帧。
+// - subagent.stream_chunk（B2 subagent-stream-chunk §4.1，infra/relay/relay-tee.ts 产生）：
+//   增量内容 chunk 小消息（单条 delta 片段 + msgSeq/deltaSeq 序号），payload 无无上界大
+//   字段——不登记。单条 chunk 超限（理论形态：单个 delta 超阈值）走 miss 整条丢弃，消费
+//   端表现为 deltaSeq 跳号、走失步拉取恢复（设计 §4.3 chunk 超限特例）——刻意不登记截断：
+//   截断占位文本会被拼进消息流成为内容污染，丢弃 + 跳号拉取才是正确恢复形态。既有
+//   subagent.stream_delta lines 登记保留（widget 通道 W 路径全量形态仍在用；R 路径余留
+//   清除帧 payload 小，不触发守卫）。
 // - plugin:uiRequest（plugin-service.ts:206）/ plugin:viewUpdate（:291）：插件动态 payload
 //   （dialog/html 字段无固定路径）——transient/stream 兜底覆盖（超限丢弃 + error 日志）。
 // - extension.ui_request（event-adapter.ts:526 统一产点，planReview 帧产点 :875）：交互请求

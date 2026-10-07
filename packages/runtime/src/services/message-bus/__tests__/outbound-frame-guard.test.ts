@@ -164,6 +164,22 @@ describe('guardOutboundPushFrame（push 通路守卫纯函数）', () => {
     expect(lines[0]).toContain('已在传输层截断')
   })
 
+  it('subagent.stream_chunk（B2 chunk 通道）小消息不登记：超限走 miss 整条丢弃（跳号 → 消费端失步拉取恢复），不截断', () => {
+    // 设计 §4.3 chunk 超限特例：截断占位文本会被拼进消息流成为内容污染——chunk 刻意不
+    // 进 LARGE_FIELD_REGISTRY，超限唯一形态 = registry_miss 整条丢弃；产生端计数已先推进，
+    // 消费端表现为 deltaSeq 跳号，走 session.getSubagentStreamState 拉取恢复。
+    const msg: ServerMessage = {
+      type: 'subagent.stream_chunk',
+      payload: { sessionId: 's1', recordId: 'r1', msgSeq: 1, deltaSeq: 7, delta: 'x'.repeat(5000) },
+    }
+    const r = guardOutboundPushFrame(msg, 's1', SMALL_OPTS)
+    expect(r.action).toBe('dropped')
+    if (r.action !== 'dropped') return
+    expect(r.dropReason).toBe('registry_miss')
+    // 入参零污染（不 mutate）
+    expect((msg.payload as { delta: string }).delta).toBe('x'.repeat(5000))
+  })
+
   it('array-entry 类占位形态：traceEntryAppended 的 entries 超限 → 单元素 PiMessageEntry 占位数组（reducer 可消化形态）', () => {
     const msg: ServerMessage = {
       type: 'session.traceEntryAppended',
