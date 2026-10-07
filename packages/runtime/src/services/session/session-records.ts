@@ -942,7 +942,10 @@ export class SessionRecords {
     let enhanced: SubagentRecord[] | null = null
     for (let i = 0; i < records.length; i++) {
       const record = records[i]!
-      let current = enhanced !== null ? enhanced[i]! : record
+      // current 恒从原始 records[i] 出发（enhanced 的惰性 slice 只覆盖到首个命中索引
+      // 之前，enhanced[i] 在本轮写入前必为空洞——曾读它当基值，命中项之后的 record
+      // 被原样写 undefined / 展开丢光原字段）。
+      let current = record
       let changed = false
       if (query !== undefined && record.origin !== 'workflow') {
         const override = query.getRecordOverride(sessionId, record.subagentId)

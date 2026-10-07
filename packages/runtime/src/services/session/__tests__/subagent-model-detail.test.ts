@@ -212,6 +212,67 @@ describe('详情载荷字段面 — getSubagents 出口', () => {
     expect(record?.recentEffectiveModel).toEqual({ provider: 'p-new', modelId: 'm-new' })
   })
 
+  it('多 record 命中/未命中混合：逐条输出完整（未命中项不得丢 record，命中项不得丢原字段）', async () => {
+    const subFile = join(tmpDir, 'sub-multi.jsonl')
+    writeFileSync(subFile, modelChangeLine('p-a', 'm-a') + '\n')
+    writeMainSession('main-1', [
+      // 索引 0：双命中（覆盖 + pi model_change 派生）
+      registeredEntry('sa-a'),
+      settledEntry('sa-a', { sessionFile: subFile }),
+      // 索引 1：未命中（pi 但无 sessionFile → 不派生；查询无覆盖）
+      registeredEntry('sa-b'),
+      settledEntry('sa-b'),
+      // 索引 2：仅覆盖命中（非 pi 引擎成员）
+      registeredEntry('sa-c'),
+      settledEntry('sa-c', { engine: 'zcode', engineHandle: { sessionRef: { sessionId: 'z1', dbPath: '/db.sqlite' }, poolKey: 'shared' } }),
+      // 索引 3：未命中（同索引 1 形态）
+      registeredEntry('sa-d'),
+      settledEntry('sa-d'),
+    ])
+    const overrides: Record<string, SubagentModelOverrideStatus> = {
+      'sa-a': { model: 'p-x/m-x', thinkingLevel: 'high' },
+      'sa-c': { model: 'p-y/m-y' },
+    }
+    const { records } = makeRecords({
+      sessionStore: {
+        scanSessions: vi.fn(() => [{ id: 'main-1', filePath: join(tmpDir, 'main-1.jsonl') }]),
+      } as unknown as ISessionStore,
+      modelOverrideQuery: {
+        getRecordOverride: vi.fn((_sessionId: string, recordId: string) => overrides[recordId]),
+        getRunOverride: vi.fn(() => undefined),
+      },
+    })
+    const fire = registerSession(records)
+    fire('main-1')
+
+    const { records: subagents } = await records.getSubagents('main-1')
+    // 输出完整性：4 条全在、逐条原字段保留（惰性拷贝越界读曾把首个命中项之后的
+    // record 写成 undefined / 展开丢光原字段）
+    expect(subagents).toHaveLength(4)
+    for (const id of ['sa-a', 'sa-b', 'sa-c', 'sa-d']) {
+      const record = subagents.find((s) => s.subagentId === id)
+      expect(record, `record ${id} missing from payload`).toBeDefined()
+      expect(record?.agent).toBe('worker')
+      expect(record?.task).toBe('Do work')
+      expect(record?.slug).toBe('work')
+      expect(record?.model).toBe('p/old')
+    }
+    // 双命中项：两个增强字段在场
+    const withBoth = subagents.find((s) => s.subagentId === 'sa-a')
+    expect(withBoth?.modelOverride).toEqual({ model: 'p-x/m-x', thinkingLevel: 'high' })
+    expect(withBoth?.recentEffectiveModel).toEqual({ provider: 'p-a', modelId: 'm-a' })
+    // 仅覆盖命中项：覆盖在场、非 pi 不派生生效值
+    const withOverride = subagents.find((s) => s.subagentId === 'sa-c')
+    expect(withOverride?.modelOverride).toEqual({ model: 'p-y/m-y' })
+    expect(withOverride?.recentEffectiveModel).toBeUndefined()
+    // 未命中项：不造键
+    for (const id of ['sa-b', 'sa-d']) {
+      const plain = subagents.find((s) => s.subagentId === id)
+      expect(plain?.modelOverride).toBeUndefined()
+      expect(plain?.recentEffectiveModel).toBeUndefined()
+    }
+  })
+
   it('无覆盖 / 无 model_change / 查询端口缺席：字段不造键', async () => {
     writeMainSession('main-1', [registeredEntry('sa-1'), settledEntry('sa-1')])
     const { records } = makeRecords({
@@ -398,11 +459,15 @@ describe('projectSubagentModelDetailIntoRuns — run 详情逐成员携带', () 
     expect(calls?.[1]?.recentEffectiveModel).toBeUndefined()
   })
 
-  it('无覆盖无成员增强：原引用返回（零拷贝快路径）', () => {
+  it('无覆盖无成员增强但有权威成员：重建并恒透出 memberRecordId（dmg-r1-2 成员键单源——回执态读取键须在首次切换前就位，零拷贝快路径仅剩成员圈定全 miss 形态）', () => {
     const runs = [{ ...runBase, agentCalls: [{ id: 0, agent: 'w', status: 'running' as const }] }]
     const plainMember: SubagentRecord = { ...memberA, recentEffectiveModel: undefined }
     const result = projectSubagentModelDetailIntoRuns('main-1', runs, [plainMember], undefined)
-    expect(result).toBe(runs)
+    // 成员标识透出即发生重建（引用不等）——但模型字段两键不造（无覆盖/无生效值）
+    expect(result).not.toBe(runs)
+    expect(result[0]?.agentCalls[0]?.memberRecordId).toBe(plainMember.subagentId)
+    expect(result[0]?.agentCalls[0]?.modelOverride).toBeUndefined()
+    expect(result[0]?.agentCalls[0]?.recentEffectiveModel).toBeUndefined()
   })
 
   it('成员圈定按 (parentRunId, stepIndex)：其他 run 的成员不串扰', () => {
