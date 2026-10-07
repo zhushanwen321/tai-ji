@@ -34,12 +34,14 @@ export interface DisplayRect { // oe-exempt:20261003:framework:类型契约先�
 // shieldsView 遮蔽面形状（browser:shields payload 契约）SSOT 在 @taiji/shared
 // ipc-payloads.ts——preload ElectronAPI 签名 / renderer 聚合上报 / 本模块校验解析三方
 // 共用同一形态声明防漂移；既有导入路径（browser-view-manager / 测试）经此 re-export 不变。
-export type { ShieldFace } from '@taiji/shared'
-import type { ShieldFace, ShieldRect } from '@taiji/shared'
+export type { ShieldFace, OverlayContentKind } from '@taiji/shared'
+import type { ShieldFace, ShieldRect, OverlayContentKind } from '@taiji/shared'
 
-/** 浮层内容种类（core overlay 域同词表；scheduler = 定时任务 tab 整合 2026-10-06——
- *  非 browser 内容谓词恒假，view 照常隐藏） */
-export type OverlayContentKind = 'browser' | 'workflow' | 'scheduler'
+// 浮层内容种类（core overlay 域同词表；scheduler = 定时任务 tab 整合 2026-10-06——
+//  非 browser 内容谓词恒假，view 照常隐藏）：词表单源 = @taiji/shared
+// OverlayContentKind（browser:overlay-state payload 契约四方共用），经上方 re-export
+// 保持既有导入路径（browser-view-manager / 测试）不变；下 :parse 校验的运行时三值
+// 检查保留——进程边界防线上类型不替代运行时校验。
 
 /** 浮层开合态（renderer 经 IPC 上报；view 显示收口的事实源之一） */
 export interface OverlayDisplayState { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面

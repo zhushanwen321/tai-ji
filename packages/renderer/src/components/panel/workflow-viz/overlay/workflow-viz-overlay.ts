@@ -64,11 +64,11 @@ export type OverlayTab = 'runs' | 'scheduler'
 export const overlayTab = ref<OverlayTab>('runs')
 
 /**
- * 定时任务面板 viewId 单源：resources/plugins/scheduler-manager 的 MODAL_VIEW_ID 同串
- * （历史命名 modal-<pluginId>-<modalId>，modal 链退役后原值保留）。插件持续推同一
- * per-session 分区树，本 tab 的 ViewHost 消费。
+ * 定时任务面板 viewId：单源 = extension-protocol SCHEDULER_MODAL_VIEW_ID（插件
+ * views.update 推树与本 tab ViewHost 消费跨包共用，历史命名 modal-<pluginId>-<modalId>
+ * 原值保留）；此处 re-export 保持既有导入路径（壳/测试）不变。
  */
-export const SCHEDULER_MODAL_VIEW_ID = 'modal-scheduler-manager-scheduler-manager.panel'
+export { SCHEDULER_MODAL_VIEW_ID } from '@zhushanwen/extension-protocol'
 
 // overlay 关闭（任意通道：Esc 编排器直关 core 开合态 / 壳 close / 会话删除级联）→ tab 复位
 // 'runs'；下次打开由入口显式置位（openWorkflowVizOverlay→'runs' / openSchedulerTab→'scheduler'）。

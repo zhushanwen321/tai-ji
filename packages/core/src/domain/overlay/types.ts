@@ -8,10 +8,13 @@
  * （DAG 缓存留 renderer）——开合态只保留 core 一份，禁止 core/renderer 双权威并存。
  * workflow 浮层载荷与迁移前 overlayCurrent `{ sessionId, runId }` 同构（SSOT 迁移对账锚）。
  */
+import type { OverlayContentKind } from '@taiji/shared'
 
 /** 浮层内容类型（§7.2 浮层条目 + scheduler 整合（2026-10-06 用户裁决）：
- * browser（网页）/ workflow（工作流图）/ scheduler（定时任务面板）） */
-export type OverlayKind = 'browser' | 'workflow' | 'scheduler'
+ * browser（网页）/ workflow（工作流图）/ scheduler（定时任务面板））。
+ * 词表单源 = @taiji/shared OverlayContentKind（browser:overlay-state IPC payload
+ * 契约四方共用），本域派生别名保持既有导出名与消费面不变。 */
+export type OverlayKind = OverlayContentKind
 
 /** browser 浮层载荷（openBrowser(url, sessionId) URL 注入链重建，W2 接线）。
  * sessionId = 发起会话（链接所在会话）：view 池按 session 键控（BrowserPane 订阅标识）、

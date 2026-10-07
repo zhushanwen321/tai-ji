@@ -125,3 +125,13 @@ export function snapshotToTask(snapshot: TaskSnapshot): ScheduledTask {
     history: snapshot.history.map(h => ({ ...h })),
   }
 }
+
+// ── taiji 宿主面板视图 id ──
+
+/**
+ * scheduler-manager 插件推树的 overlay 定时任务 tab ViewHost 分区键（历史命名
+ * modal-<pluginId>-<modalId>，modal 链退役后原值保留）：插件 views.update 推树与
+ * taiji renderer ViewHost 消费跨包共用本单源——双端各持字面量时任一端漂移即
+ * ViewHost per-session 分区静默 miss（tab 空白无报错），收敛到本文件单点导出。
+ */
+export const SCHEDULER_MODAL_VIEW_ID = 'modal-scheduler-manager-scheduler-manager.panel'

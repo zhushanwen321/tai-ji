@@ -1,6 +1,6 @@
 // apps/electron/preload/preload.ts
 import { contextBridge, ipcRenderer } from 'electron'
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, LocalFileServableResult, LocalFileReadResult } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, LocalFileServableResult, LocalFileReadResult } from '@taiji/shared'
 import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ } from '@taiji/shared'
 
 // local-file 预检 / 源码读取的 payload 类型（LocalFileServableResult / LocalFileReadResult）
@@ -127,7 +127,8 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
    *  内容时立即上报——主进程侧联动隐藏 view（keep-alive）。非法 payload reject（error envelope） */
   browserSetOverlayState(state: {
     open: boolean
-    content: 'browser' | 'workflow' | 'scheduler' | null
+    /** 词表单源 = @taiji/shared OverlayContentKind（browser:overlay-state payload 契约） */
+    content: OverlayContentKind | null
     sessionId: string | null
   }): Promise<void>
   /** 显示收口事实源之一（§5.1 规则 6② / §6.7）：shieldsView 遮蔽面**全量**上报（替换语义）。
@@ -369,7 +370,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   browserGetSelection: (sessionId: string) => ipcRenderer.invoke('browser:get-selection', sessionId),
   browserSetOverlayState: (state: {
     open: boolean
-    content: 'browser' | 'workflow' | 'scheduler' | null
+    content: OverlayContentKind | null
     sessionId: string | null
   }) => ipcRenderer.invoke('browser:overlay-state', state),
   browserSetShields: (payload: ShieldsFacesPayload) => ipcRenderer.invoke('browser:shields', payload),

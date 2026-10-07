@@ -10,7 +10,7 @@
  *   出口，非写入驱动，场景 9）；读失败态不重算 hidden（保持上次值，「恢复中」语义）。
  *   入口点击由宿主渲染端直开 workflow-viz overlay 定时任务 tab（activation 声明驱动
  *   分派，不经插件命令链）；本插件只经 views.update 持续推树，overlay 的 ViewHost
- *   消费（MODAL_VIEW_ID 分区）。内容树严格按 §3.1.1 字段操作对账表组装，表外零元素（G6）。
+ *   消费（SCHEDULER_MODAL_VIEW_ID 分区）。内容树严格按 §3.1.1 字段操作对账表组装，表外零元素（G6）。
  * - action-bar：每任务三动作（暂停/恢复 toggle、立即执行 run、删除 rm）。
  * - 数据面：per-session 累计 entries（首拉全量 + sinceEntryId 增量 append），
  *   折叠始终对累计全量调共享 replayFoldEntries（前缀依赖语义不被破坏）；游标失效
@@ -51,6 +51,7 @@ import type { PluginContext } from '../../../packages/runtime/src/services/plugi
 // prepare-builtin-plugins.sh 的 --alias 保留作裸包名兜底，不再被本插件消费。
 import {
   TASK_ENTRY_TYPE,
+  SCHEDULER_MODAL_VIEW_ID,
   replayFoldEntries,
   formatSchedule,
   formatRelativeTime,
@@ -73,12 +74,9 @@ interface DisposableLike {
 // ── 常量 ─────────────────────────────────────────────────────────
 
 const HEADER_ACTION_ID = 'scheduler-manager.open'
-/**
- * 面板树视图 id（overlay 定时任务 tab 的 ViewHost 消费分区；历史命名
- * modal-<pluginId>-<modalId> 即 modal-scheduler-manager-scheduler-manager.panel，
- * modal 链退役后原值保留不改名——renderer 侧 SCHEDULER_MODAL_VIEW_ID 同串消费）。
- */
-const MODAL_VIEW_ID = 'modal-scheduler-manager-scheduler-manager.panel'
+// 面板树视图 id（overlay 定时任务 tab 的 ViewHost 消费分区）：单源 =
+// extension-protocol SCHEDULER_MODAL_VIEW_ID（scheduler 契约单点导出），renderer
+// ViewHost 侧同源 import——双端各持字面量漂移即分区静默 miss，已收敛。
 /** per-session 任务上限（scheduler runtime MAX_TASKS 同值；统计行分母，E8） */
 const MAX_TASKS = 50
 /** pi 侧 /schedule 扩展命令名（requireCommand 与 E13 判定同源） */
@@ -496,7 +494,7 @@ async function pushTreeAndBadge(api: Api, mirror: SessionMirror): Promise<void> 
     mirror.hidden = tasks.length === 0
   }
   try {
-    await api.views.update(MODAL_VIEW_ID, tree, { sessionId: mirror.sessionId })
+    await api.views.update(SCHEDULER_MODAL_VIEW_ID, tree, { sessionId: mirror.sessionId })
   } catch (e) {
     // best-effort：ViewHost 分区可能尚未挂载（overlay tab 未打开），不重抛——下一轮失效刷新/推送重试收敛
     console.warn('[scheduler-manager] views.update failed:', toMessage(e))

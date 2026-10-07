@@ -83,6 +83,7 @@ export {
   HISTORY_LIMIT,
   appendExecutionRecord,
   snapshotToTask,
+  SCHEDULER_MODAL_VIEW_ID,
 } from './extensions/scheduler/types'
 export type { SchedulerEntryLike, ReplayFoldOptions } from './extensions/scheduler/replay'
 export { replayFoldEntries } from './extensions/scheduler/replay'
