@@ -39,6 +39,7 @@ import {
   SUBAGENT_RECORD_CUSTOM_TYPE,
   WORKFLOW_RECORD_CUSTOM_TYPE,
   getSubagentRecordsDir,
+  STATE_DIR_NAME,
 } from '@zhushanwen/subagent-core'
 import { extractPlanStateFromSessionFile, scanPlanStateEntries, INACTIVE_PLAN_STATE_VIEW } from './plan-state-extractor.js'
 // PLAN_STATE_CUSTOM_TYPE canonical = extension-protocol legacy-entries（D-B4-1 从 shared
@@ -570,7 +571,7 @@ export class SessionRecords {
     const projection = new SessionEventProjection({
       sessionId,
       recordsDir: typeof cwd === 'string' ? getSubagentRecordsDir(getPiAgentDir(), cwd) : undefined,
-      runJournalDir: meta !== undefined ? join(dirname(meta.filePath), 'workflow-state') : undefined,
+      runJournalDir: meta !== undefined ? join(dirname(meta.filePath), STATE_DIR_NAME) : undefined,
       onProjectionChange: () => this.onEventProjectionChange(sessionId),
     })
     if (meta !== undefined) {
@@ -603,7 +604,7 @@ export class SessionRecords {
     const cwd = meta.cwd
     projection.attachEventSources({
       recordsDir: typeof cwd === 'string' ? getSubagentRecordsDir(getPiAgentDir(), cwd) : undefined,
-      runJournalDir: join(dirname(meta.filePath), 'workflow-state'),
+      runJournalDir: join(dirname(meta.filePath), STATE_DIR_NAME),
     })
     this.syncCacheFromProjection(cache, projection)
   }

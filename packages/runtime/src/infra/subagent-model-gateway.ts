@@ -26,6 +26,7 @@ import {
   getSubagentRecordsDir,
   recordEventsPath,
   RUN_EVENTS_SUFFIX,
+  STATE_DIR_NAME,
 } from '@zhushanwen/subagent-core'
 
 import type { SubagentModelSwitchGateway } from '../interfaces.js'
@@ -225,29 +226,98 @@ function mapResultFileToWireReply(raw: string): SubagentSetModelReply {
   throw corruptReplyError(`scope 未知（${String(file.scope)}）`)
 }
 
+/** 首帧读窗常数：4KB（信封 + created 帧头部 KB 级）。created 帧自身超窗时经行尾
+ * 补读延伸（dmg-r3-1，见 readEventsRootSessionId 内注），窗口不为此调大——常态
+ * 小帧零额外 IO。 */
+const HEAD_BYTES = 4096
+
+/** 行尾补读上界（dmg-r3-1）：run-created 帧 scriptSource 全文 / record-created 帧
+ * task 全文可达数十 KB，上界给足余量又防异常巨行失控读盘（与 RESULT_FILE_MAX_BYTES
+ * 同量级）；超界按坏行 warn 留痕。 */
+// eslint-disable-next-line no-magic-numbers -- 上界常数 256KB（256 × 1024，语义见上注）
+const ANCHOR_LINE_MAX_BYTES = 256 * 1024
+
+/** 行尾补读的分块缓冲（8KB 步进，直到行尾 `\n` 或上界）。 */
+const READ_TAIL_CHUNK_BYTES = 8192
+
+const NEWLINE_BYTE = 0x0a
+
+/**
+ * 截断行的行尾补读（dmg-r3-1）：从窗口已读终点继续读至行尾 `\n`（含），有界；
+ * EOF / 超上界无行尾返回 undefined（真坏行，调用方 warn 留痕）。UTF-8 自同步性
+ * 保证 0x0A 不出现在多字节序列内部字节中，indexOf 命中即真换行；分块切点多字节
+ * 字符产生的 U+FFFD 只影响大载荷值文本的显示保真度、不影响 JSON.parse 与锚字段
+ * 读取（锚字段在帧头部，不落分块边界损坏面；本读取器只消费 rootSessionId）。
+ */
+function readLineTail(fd: number, fromOffset: number, maxBytes: number): string | undefined {
+  const chunks: string[] = []
+  let pos = fromOffset
+  let consumed = 0
+  const buf = Buffer.alloc(READ_TAIL_CHUNK_BYTES)
+  while (consumed < maxBytes) {
+    const want = Math.min(buf.length, maxBytes - consumed)
+    let n: number
+    try {
+      n = readSync(fd, buf, 0, want, pos)
+    } catch {
+      return undefined
+    }
+    if (n <= 0) return undefined // EOF：行尾不存在（半写行）
+    // 行尾判定只认本次实读字节 [0, n)——不扫残留区（上轮旧字节），不依赖
+    // 「上轮无换行则残留区亦无」的归纳不变量
+    const nl = buf.subarray(0, n).indexOf(NEWLINE_BYTE)
+    if (nl !== -1) {
+      chunks.push(buf.toString('utf-8', 0, nl))
+      return chunks.join('')
+    }
+    chunks.push(buf.toString('utf-8', 0, n))
+    consumed += n
+    pos += n
+  }
+  return undefined // 行超上界
+}
+
 /**
  * record / run 事件文件首帧的 rootSessionId 读取（会话归属精确判定锚；recordId 侧
  * = D3-A4 缺陷修复，runId 侧 = dmg-r2-5 缺陷修复，同一形态）。按 createdType 过滤
  *（'record-created' / 'run-created'）多行扫描取值，不假设固定行号。只读文件头 4KB
- * 窗口（created 帧头部 KB 级——归属锚字段在帧载荷前部，不受其后大载荷
- * scriptSource/args 全文影响）；窗口内无 created 帧或解析失败返回 undefined
- * （缺失语义归调用方裁决——recordId 侧归未命中，runId 侧回落目录存在性）。
+ * 窗口；created 帧行自身超窗时（run-created 帧 scriptSource 全文 / record-created 帧
+ * task 全文可达数十 KB——rootSessionId 不保证在载荷前部：record-created 帧字段序
+ * task 在锚之前，buildCreatedEventPayload 实装）按行尾补读延伸该行后正常 parse。
+ * 窗口内无 created 帧或解析失败返回 undefined（缺失语义归调用方裁决——recordId 侧
+ * 归未命中，runId 侧回落目录存在性）；坏行（半写 / 超上界巨行）warn 留痕后同判
+ * 无锚——不再静默 continue（dmg-r3-1：锚失败与旧格式行不可区分时，runId 侧弱锚
+ * 放行 / recordId 侧误报 not_found 均无诊断入口）。
  */
 function readEventsRootSessionId(eventsFile: string, createdType: string): string | undefined {
-  // 首帧读窗常数：4KB（信封 + created 帧头部 KB 级，语义见上注——归属锚字段在
-  // 帧载荷前部，窗口只需覆盖到它，不受其后大载荷全文影响）。
-  const HEAD_BYTES = 4096
   const fd = openSync(eventsFile, 'r')
   try {
     const buf = Buffer.alloc(HEAD_BYTES)
     const n = readSync(fd, buf, 0, HEAD_BYTES, 0)
-    for (const line of buf.toString('utf-8', 0, n).split('\n')) {
+    const lines = buf.toString('utf-8', 0, n).split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i] ?? ''
       if (line.trim() === '') continue
       let parsed: unknown
       try {
         parsed = JSON.parse(line)
       } catch {
-        continue // 半写行（尾部截断）跳过，继续扫后续行
+        // 尾段被窗口切断（i = 末段且窗口被填满 = 文件更长）=「行未读完」而非
+        // 「行损坏」：补读行尾重 parse。created 帧恒在文件头部（信封 + created
+        // 前两行），本行即末段，无后续行可扫。补读失败 = 真坏行。
+        const tail = i === lines.length - 1 && n === HEAD_BYTES
+          ? readLineTail(fd, n, ANCHOR_LINE_MAX_BYTES - HEAD_BYTES)
+          : undefined
+        if (tail === undefined) {
+          console.warn(`[subagent-model-gateway] ${createdType} anchor line unreadable (truncated past limit or partial write), treated as anchor-less: ${eventsFile}`)
+          continue
+        }
+        try {
+          parsed = JSON.parse(line + tail)
+        } catch {
+          console.warn(`[subagent-model-gateway] ${createdType} anchor line malformed after tail read, treated as anchor-less: ${eventsFile}`)
+          continue
+        }
       }
       if (!isObject(parsed) || (parsed as { type?: unknown }).type !== createdType) continue
       const root = (parsed as { rootSessionId?: unknown }).rootSessionId
@@ -278,7 +348,7 @@ export function createSubagentModelSwitchGateway(deps: SubagentModelGatewayDeps)
     if (target.runId !== undefined) {
       if (!TARGET_ID_PATTERN.test(target.runId)) return undefined
       return sessions.find((s) => {
-        const journalFile = join(dirname(s.filePath), 'workflow-state', `${target.runId}${RUN_EVENTS_SUFFIX}`)
+        const journalFile = join(dirname(s.filePath), STATE_DIR_NAME, `${target.runId}${RUN_EVENTS_SUFFIX}`)
         if (!existsSync(journalFile)) return false
         // 归属判定 = run-created 首帧 rootSessionId 精确匹配（对齐 recordId 侧
         // D3-A4 形态：目录由 cwd 派生、同 cwd 多会话共享——存在性只作快速过滤，

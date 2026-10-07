@@ -42,6 +42,7 @@ import {
   parseRecordEventFileLine,
   recordEventsPath,
   RUN_EVENTS_SUFFIX,
+  STATE_DIR_NAME,
   type RecordEvent,
   type WorkflowRunEvent,
 } from '@zhushanwen/subagent-core'
@@ -175,7 +176,7 @@ export function createModelOverrideQuery(deps: ModelOverrideQueryDeps): ModelOve
         console.warn(`[model-override-query] run id rejected: ${runId}`)
         return undefined
       }
-      const journalPath = join(dirname(filePath), 'workflow-state', `${runId}${RUN_EVENTS_SUFFIX}`)
+      const journalPath = join(dirname(filePath), STATE_DIR_NAME, `${runId}${RUN_EVENTS_SUFFIX}`)
       const frame = readTailFrame<WorkflowRunEvent>(
         journalPath,
         parseWorkflowRunEventFileLine,

@@ -371,23 +371,82 @@ describe('createSubagentModelSwitchGateway — 守卫', () => {
     expect(gw.resolveSessionId({ runId: 'wf-legacy' })).toBe(SESSION_ID)
   })
 
-  it('resolveSessionId：大 scriptSource 帧（远超 4KB 读窗）锚字段仍在载荷前部可读——归属不受大载荷截断影响', () => {
+  it('resolveSessionId：大 scriptSource 帧（远超 4KB 读窗）行尾补读后锚可解析——弱锚放行不因截断复存（dmg-r3-1 回归）', () => {
     // 生产字段序 = dispatchRunCreated 字面量序（type → runId → rootSessionId → … →
-    // scriptSource 巨大载荷在锚之后）：窗口截断的是 scriptSource 尾部，锚已可解析。
+    // scriptSource 巨大载荷在锚尾部）。双会话 fixture：截断若使锚不可读，读取器
+    // 返回 undefined → runId 侧弱锚放行 scan 序首个会话（main-session-1）——断言
+    // second（rootSessionId 所有权）使「弱锚放行」与「精确锚命中」可区分。
+    const OTHER_ID = 'main-session-2'
+    const other = { ...scannedSession(), id: OTHER_ID, lastModified: 1 }
     const journalDir = join(dirname(scannedSession().filePath), 'workflow-state')
     mkdirSync(journalDir, { recursive: true })
     const bigScript = 'x'.repeat(64 * 1024)
     const frame = JSON.stringify({
       type: 'run-created',
       runId: 'wf-big-script',
-      rootSessionId: SESSION_ID,
+      rootSessionId: OTHER_ID,
       workflowName: 'big',
       scriptSource: bigScript,
       ts: 1,
     })
     writeFileSync(join(journalDir, 'wf-big-script.record.jsonl'), `${frame}\n`)
-    const gw = createSubagentModelSwitchGateway(deps())
-    expect(gw.resolveSessionId({ runId: 'wf-big-script' })).toBe(SESSION_ID)
+    const gw = createSubagentModelSwitchGateway(
+      deps({ scanSessions: () => [scannedSession(), other as ScannedSessionMeta] }),
+    )
+    expect(gw.resolveSessionId({ runId: 'wf-big-script' })).toBe(OTHER_ID)
+  })
+
+  it('resolveSessionId：大 task 的 record-created 帧（锚字段被切出 4KB 读窗）行尾补读后归属命中，不误报 not found（dmg-r3-1 回归）', () => {
+    // record-created 生产字段序（core buildCreatedEventPayload）：task 全文在
+    // rootSessionId 之前——大 task 把锚字段切出读窗，截断行必须读完整行才能取锚
+    //（窗口内正则直提取不可达）。双会话 fixture 使「严格等值落空 = not found 误报」
+    // 与「精确锚命中」可区分。
+    const OTHER_ID = 'main-session-2'
+    const other = { ...scannedSession(), id: OTHER_ID, lastModified: 1 }
+    const recordsDir = join(agentDir, 'subagents', encodeCwdForTest(sessionCwd), 'records')
+    mkdirSync(recordsDir, { recursive: true })
+    const bigTask = 'y'.repeat(64 * 1024)
+    const envelope = { type: 'record-events', id: 'sa-big-task' }
+    const created = {
+      type: 'record-created',
+      ts: 1,
+      id: 'sa-big-task',
+      agent: 'p',
+      task: bigTask,
+      slug: 's',
+      origin: 'tool',
+      rootSessionId: OTHER_ID,
+      depth: 0,
+      mode: 'chat',
+      startedAt: 1,
+    }
+    writeFileSync(
+      join(recordsDir, 'sa-big-task.events'),
+      `${JSON.stringify(envelope)}\n${JSON.stringify(created)}\n`,
+    )
+    const gw = createSubagentModelSwitchGateway(
+      deps({ scanSessions: () => [scannedSession(), other as ScannedSessionMeta] }),
+    )
+    expect(gw.resolveSessionId({ recordId: 'sa-big-task' })).toBe(OTHER_ID)
+  })
+
+  it('resolveSessionId：截断行补读失败（半写行 EOF 无行尾）warn 留痕后按无锚裁决，不静默同判（dmg-r3-1）', () => {
+    // 文件 > 4KB 且末行无行尾 = 半写行形态：补读至 EOF 无行尾 → 无锚。runId 侧
+    // 回落目录存在性放行首个会话（与旧格式行同语义），差别 = console.warn 留痕——
+    // 锚失败从静默变为可诊断。
+    const journalDir = join(dirname(scannedSession().filePath), 'workflow-state')
+    mkdirSync(journalDir, { recursive: true })
+    const head = JSON.stringify({ type: 'run-created', seq: 1, ts: 1, runId: 'wf-half-written', rootSessionId: SESSION_ID })
+    const partial = `${head}${'x'.repeat(5 * 1024)}`
+    writeFileSync(join(journalDir, 'wf-half-written.record.jsonl'), partial)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const gw = createSubagentModelSwitchGateway(deps())
+      expect(gw.resolveSessionId({ runId: 'wf-half-written' })).toBe(SESSION_ID)
+      expect(warnSpy).toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 })
 

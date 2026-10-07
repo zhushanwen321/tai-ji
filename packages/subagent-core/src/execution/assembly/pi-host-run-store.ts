@@ -53,8 +53,8 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import { getLogger } from "../../core/logger.ts";
-import { findRunSettlementEvidence, STATE_DIR_NAME } from "../persistence/run-state-evidence.ts";
-import { RUN_EVENTS_SUFFIX } from "../../shared/run-vocabulary.ts";
+import { findRunSettlementEvidence } from "../persistence/run-state-evidence.ts";
+import { RUN_EVENTS_SUFFIX, STATE_DIR_NAME } from "../../shared/run-vocabulary.ts";
 import { errorCodeOf } from "../../shared/fs-error.ts";
 
 const logger = getLogger("pi-host-run-store");

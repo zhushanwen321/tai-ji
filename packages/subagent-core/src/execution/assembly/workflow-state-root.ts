@@ -29,6 +29,10 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+// STATE_DIR_NAME 归 run-vocabulary 词表最低层（挂 run-state-evidence 会经
+// run-event-journal 反指本文件构成循环——dmg-r3-3）。
+import { STATE_DIR_NAME } from "../../shared/run-vocabulary.ts";
+
 /** pi SDK getAgentDir 的 env 覆盖通道（实装版 dist config.js ENV_AGENT_DIR）。 */
 const PI_AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 
@@ -71,7 +75,7 @@ export function resolvePiSessionScopedDir(opts?: PiSessionScopedDirOptions): str
  * resolvePiSessionScopedDir 的纯后缀派生（同 opts 注入面）。
  */
 export function resolvePiWorkflowStateDir(opts?: PiSessionScopedDirOptions): string {
-  return join(resolvePiSessionScopedDir(opts), "workflow-state");
+  return join(resolvePiSessionScopedDir(opts), STATE_DIR_NAME);
 }
 
 /** pi agent 目录（getAgentDir 同语义；core 缺省推导锚定见文件头注）。 */

@@ -554,8 +554,9 @@ export function dispatchRunCreated(run: WorkflowRun, rootSessionId?: string): Pr
   return dispatchRunTrigger(run, {
     type: "run-created",
     runId: run.runId,
-    // 归属会话锚（dmg-r2-5）：字段序紧跟 runId（读侧 runtime 网关按首帧短窗口
-    // 提取，不依赖整行读完——scriptSource 全文可能远超窗口）。
+    // 归属会话锚（dmg-r2-5）：字段序紧跟 runId——锚字段物理在场于帧头部，读侧
+    // runtime 网关按首帧短窗口直读；帧自身超窗时（scriptSource 全文可达数十 KB）
+    // 读侧对该行行尾补读后正常 parse（dmg-r3-1——只补读锚行，不读文件其余部分）。
     ...(rootSessionId !== undefined && rootSessionId !== "" ? { rootSessionId } : {}),
     workflowName: run.spec.scriptName,
     // [D1] record 单源存储收敛：scriptSource 全文唯一落点 = 本帧（快照已删）——
