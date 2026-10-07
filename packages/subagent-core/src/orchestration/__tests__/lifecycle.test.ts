@@ -366,6 +366,35 @@ describe("runWorkflow", () => {
     }
   });
 
+  // [dmg-r2-5] 宿主会话锚接线：deps.getSessionRootId 注入时 run-created 首帧
+  // 条件式落 rootSessionId（同 cwd 多会话下 runtime 网关 runId 路由的精确归属
+  // 判据）；未注入（旧测试 deps）帧不落字段（旧格式行形态，读侧放行）。
+  it("run-created 首帧条件式落 rootSessionId：deps 注入会话锚时落字段，未注入不落", async () => {
+    const journalDir = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-root-sid-"));
+    setRunEventJournalDirForTest(journalDir);
+    try {
+      const deps = makeDeps() as LifecycleDeps & { getSessionRootId?: () => string | null };
+      deps.getSessionRootId = () => "root-session-1";
+
+      const anchoredRunId = await runWorkflow(makeSpec(), deps);
+      const anchoredEvents = await createRunEventJournal(journalDir).scan(anchoredRunId);
+      expect(anchoredEvents[0]).toMatchObject({
+        type: "run-created",
+        runId: anchoredRunId,
+        rootSessionId: "root-session-1",
+      });
+
+      const legacyDeps = makeDeps(); // 无 getSessionRootId（旧测试 deps 形态）
+      const legacyRunId = await runWorkflow(makeSpec(), legacyDeps);
+      const legacyEvents = await createRunEventJournal(journalDir).scan(legacyRunId);
+      expect(legacyEvents[0]).toMatchObject({ type: "run-created", runId: legacyRunId });
+      expect("rootSessionId" in legacyEvents[0]).toBe(false);
+    } finally {
+      setRunEventJournalDirForTest(undefined);
+      fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
   // 竞态锁（L4 A4 附带发现：8 跑 1 丢 6 帧）：run-created 入队必须先于
   // workerHost.start——enqueueRunDispatch 同步入队 + 队列执行序 = 入队序，
   // worker 首个 agent() 的 ask 帧必然排在 created 之后落账。

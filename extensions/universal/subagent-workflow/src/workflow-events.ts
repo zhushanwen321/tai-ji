@@ -417,6 +417,13 @@ export function setupWorkflowDomain(
         }
         service.applyRunOverrideProjection(runId, override);
       },
+      // [dmg-r2-5] 宿主会话锚现读口（run-created 帧 rootSessionId 载荷源）：与
+      // workflowAgentDispatch 同款 service 单例现读形态——sessionRootId 根进程语义
+      // 与 record 域 rootSessionId 同源（根进程 = 本 session id，嵌套 = env ROOT）。
+      // 同 cwd 多会话共享 workflow-state 目录，runtime 网关 runId 路由靠该字段精确
+      // 判归属；service 缺席返回 null（帧不落字段，读侧旧格式行放行——不抛，创建
+      // 主链不因锚缺席失败）。
+      getSessionRootId: () => getSubagentService()?.getSessionRootId() ?? null,
       log,
     };
     return deps;
@@ -717,6 +724,11 @@ export function setupWorkflowDomain(
     // "sar-unattached" → armed 回执落账键错 → fold 出 created 态 → IllegalTransitionError
     // 让位，run journal 恒缺 armed 帧（真机 wf-1790034646281-w7tp4f 实证链，R2 裁决）。
     get workflowAgentDispatch() { return createLazy(resolveDeps, "workflowAgentDispatch"); },
+    // [dmg-r2-5] 宿主会话锚必须随 lazyDeps 转发（workflowAgentDispatch 同款先例）：
+    // workflow tool / subagents tool 的 run action 以 lazyDeps 为 deps 启动 run，漏本
+    // 成员则 run-created 帧不落 rootSessionId（可选成员静默放行）——同 cwd 多会话下
+    // runtime 网关 runId 路由恒回落目录存在性弱锚，精确归属形同虚设。
+    get getSessionRootId() { return createLazy(resolveDeps, "getSessionRootId"); },
     // scheduleTimeBudget / appendEntry 不可缺席（ports.ts D-12 regression fix 同族）：
     // rebuildRuntime 重排 run 级墙钟预算计时器、finalizeRun 的 pending:unregister
     // 直落都经这两个成员消费——lazyDeps 缺席会让消费点拿到 undefined（可选属性

@@ -144,11 +144,17 @@ function seedRecordEvent(recordId: string, ownerSessionId: string = SESSION_ID):
     `${JSON.stringify(envelope)}\n${JSON.stringify(created)}\n`,
   )
 }
-/** run journal 预置（resolveSessionId 定位锚：workflow-state journal 存在性）。 */
-function seedRunJournal(runId: string): void {
+/** run journal 预置（resolveSessionId 定位锚：workflow-state journal 存在性）。
+ *  ownerSessionId 提供时写 run-created 首帧（dmg-r2-5 归属锚——rootSessionId 紧跟
+ *  runId 的生产字段序）；缺省 = 空文件（旧格式行形态：无归属锚，读侧回落存在性）。 */
+function seedRunJournal(runId: string, ownerSessionId?: string): void {
   const journalDir = join(dirname(scannedSession().filePath), 'workflow-state')
   mkdirSync(journalDir, { recursive: true })
-  writeFileSync(join(journalDir, `${runId}.record.jsonl`), '')
+  const created =
+    ownerSessionId === undefined
+      ? ''
+      : `${JSON.stringify({ type: 'run-created', seq: 1, ts: 1, runId, rootSessionId: ownerSessionId })}\n`
+  writeFileSync(join(journalDir, `${runId}.record.jsonl`), created)
 }
 /** enc 段编码（测试侧镜像 core encodeCwd——布局单源在 path-encoding.ts，此处只造锚）。 */
 function encodeCwdForTest(cwd: string): string {
@@ -339,6 +345,49 @@ describe('createSubagentModelSwitchGateway — 守卫', () => {
   it('resolveSessionId：runId 按 workflow-state journal 存在性命中', () => {
     const gw = createSubagentModelSwitchGateway(deps())
     expect(gw.resolveSessionId({ runId: 'wf-1' })).toBe(SESSION_ID)
+  })
+
+  it('resolveSessionId：同 cwd 多会话按 run-created 帧 rootSessionId 归属，不误路由首个会话（dmg-r2-5 回归）', () => {
+    const OTHER_ID = 'main-session-2'
+    const other = { ...scannedSession(), id: OTHER_ID, lastModified: 1 }
+    seedRunJournal('wf-owned-by-other', OTHER_ID)
+    const gw = createSubagentModelSwitchGateway(
+      deps({ scanSessions: () => [scannedSession(), other as ScannedSessionMeta] }),
+    )
+    // journal 在共享 workflow-state 目录下对两个会话都「存在」——归属必须命中
+    // 首帧 rootSessionId 所有权（second 会话），非 scan 序首个
+    expect(gw.resolveSessionId({ runId: 'wf-owned-by-other' })).toBe(OTHER_ID)
+  })
+
+  it('resolveSessionId：runId 首帧 rootSessionId 与扫描会话同 id 时正向命中', () => {
+    seedRunJournal('wf-owned-by-first', SESSION_ID)
+    const gw = createSubagentModelSwitchGateway(deps())
+    expect(gw.resolveSessionId({ runId: 'wf-owned-by-first' })).toBe(SESSION_ID)
+  })
+
+  it('resolveSessionId：旧格式 run journal（首帧无 rootSessionId）回落存在性命中——存量 run 行为不劣化', () => {
+    seedRunJournal('wf-legacy') // 空文件 = 本字段落地前的流
+    const gw = createSubagentModelSwitchGateway(deps())
+    expect(gw.resolveSessionId({ runId: 'wf-legacy' })).toBe(SESSION_ID)
+  })
+
+  it('resolveSessionId：大 scriptSource 帧（远超 4KB 读窗）锚字段仍在载荷前部可读——归属不受大载荷截断影响', () => {
+    // 生产字段序 = dispatchRunCreated 字面量序（type → runId → rootSessionId → … →
+    // scriptSource 巨大载荷在锚之后）：窗口截断的是 scriptSource 尾部，锚已可解析。
+    const journalDir = join(dirname(scannedSession().filePath), 'workflow-state')
+    mkdirSync(journalDir, { recursive: true })
+    const bigScript = 'x'.repeat(64 * 1024)
+    const frame = JSON.stringify({
+      type: 'run-created',
+      runId: 'wf-big-script',
+      rootSessionId: SESSION_ID,
+      workflowName: 'big',
+      scriptSource: bigScript,
+      ts: 1,
+    })
+    writeFileSync(join(journalDir, 'wf-big-script.record.jsonl'), `${frame}\n`)
+    const gw = createSubagentModelSwitchGateway(deps())
+    expect(gw.resolveSessionId({ runId: 'wf-big-script' })).toBe(SESSION_ID)
   })
 })
 

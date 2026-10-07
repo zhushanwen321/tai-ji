@@ -226,14 +226,16 @@ function mapResultFileToWireReply(raw: string): SubagentSetModelReply {
 }
 
 /**
- * record 事件文件的 rootSessionId 读取（会话归属精确判定锚，D3-A4 缺陷修复）。
- * 文件首行 = `{"type":"record-events","id":...}` 信封帧（无 rootSessionId），
- * `record-created` 帧在其后（实测恒为第 2 行）——按 type 过滤多行扫描取值，不假设
- * 固定行号。只读文件头 4KB 窗口（信封 + created 帧 KB 级）；窗口内无 created 帧或
- * 解析失败返回 undefined（= 未命中，调用方归 false）。
+ * record / run 事件文件首帧的 rootSessionId 读取（会话归属精确判定锚；recordId 侧
+ * = D3-A4 缺陷修复，runId 侧 = dmg-r2-5 缺陷修复，同一形态）。按 createdType 过滤
+ *（'record-created' / 'run-created'）多行扫描取值，不假设固定行号。只读文件头 4KB
+ * 窗口（created 帧头部 KB 级——归属锚字段在帧载荷前部，不受其后大载荷
+ * scriptSource/args 全文影响）；窗口内无 created 帧或解析失败返回 undefined
+ * （缺失语义归调用方裁决——recordId 侧归未命中，runId 侧回落目录存在性）。
  */
-function readRecordEventsRootSessionId(eventsFile: string): string | undefined {
-  // eslint-disable-next-line no-magic-numbers -- 首帧读窗常数 4KB（信封 + created 帧 KB 级，语义见上注）
+function readEventsRootSessionId(eventsFile: string, createdType: string): string | undefined {
+  // 首帧读窗常数：4KB（信封 + created 帧头部 KB 级，语义见上注——归属锚字段在
+  // 帧载荷前部，窗口只需覆盖到它，不受其后大载荷全文影响）。
   const HEAD_BYTES = 4096
   const fd = openSync(eventsFile, 'r')
   try {
@@ -247,7 +249,7 @@ function readRecordEventsRootSessionId(eventsFile: string): string | undefined {
       } catch {
         continue // 半写行（尾部截断）跳过，继续扫后续行
       }
-      if (!isObject(parsed) || (parsed as { type?: unknown }).type !== 'record-created') continue
+      if (!isObject(parsed) || (parsed as { type?: unknown }).type !== createdType) continue
       const root = (parsed as { rootSessionId?: unknown }).rootSessionId
       return typeof root === 'string' && root !== '' ? root : undefined
     }
@@ -265,17 +267,29 @@ function readRecordEventsRootSessionId(eventsFile: string): string | undefined {
 export function createSubagentModelSwitchGateway(deps: SubagentModelGatewayDeps): SubagentModelSwitchGateway {
   /**
    * 目标 → session 元数据（id + cwd 数据根）解析；解析不到 undefined（信封缺省语义）。
-   * 定位锚与覆盖查询（model-override-query）同源：recordId = records 目录事件文件存在性
-   * （manifest 对偶，D3 落点；recordEventsPath 自带 id 白名单防穿越）；runId = 该 session
-   * workflow-state journal 存在性。
+   * 定位锚与覆盖查询（model-override-query）同源：recordId = records 目录事件文件存在
+   * 性（manifest 对偶，D3 落点；recordEventsPath 自带 id 白名单防穿越）+ created 帧
+   * rootSessionId 精确归属；runId = 该 session workflow-state journal 存在性 + 首帧
+   * rootSessionId 精确归属（dmg-r2-5——同 cwd 多会话共享同一 workflow-state 目录，
+   * 仅凭存在性会把请求路由到非归属会话的 pi 进程）。
    */
   function resolveSessionMeta(target: { recordId?: string; runId?: string }): ScannedSessionMeta | undefined {
     const sessions = deps.scanSessions({ force: true })
     if (target.runId !== undefined) {
       if (!TARGET_ID_PATTERN.test(target.runId)) return undefined
-      return sessions.find((s) =>
-        existsSync(join(dirname(s.filePath), 'workflow-state', `${target.runId}${RUN_EVENTS_SUFFIX}`)),
-      )
+      return sessions.find((s) => {
+        const journalFile = join(dirname(s.filePath), 'workflow-state', `${target.runId}${RUN_EVENTS_SUFFIX}`)
+        if (!existsSync(journalFile)) return false
+        // 归属判定 = run-created 首帧 rootSessionId 精确匹配（对齐 recordId 侧
+        // D3-A4 形态：目录由 cwd 派生、同 cwd 多会话共享——存在性只作快速过滤，
+        // 首个命中会把请求路由到非归属会话的 pi 进程，宿主归属校验拒绝，成员端口
+        // 解析落空而覆盖意图已写共享 journal，显示与实况不符）。旧格式首帧（本字段
+        // 落地前的流，含 resume 复活的存量 run）无该字段 → undefined → 回落目录
+        // 存在性命中（「旧格式行放行」同 scriptSource 先例——严格拒绝会让存量 run
+        // 的模型切换整体失效，行为劣化）。
+        const anchored = readEventsRootSessionId(journalFile, 'run-created')
+        return anchored === undefined || anchored === s.id
+      })
     }
     if (target.recordId !== undefined) {
       const agentDir = deps.agentDir ?? getPiAgentDir()
@@ -287,7 +301,7 @@ export function createSubagentModelSwitchGateway(deps: SubagentModelGatewayDeps)
           // 归属判定 = record-created 帧 rootSessionId 精确匹配（D3-A4 缺陷修复：
           // recordsDir 由 cwd 派生、多会话共享同一目录——目录存在性只作快速过滤，
           // 首个命中会把请求路由到非归属会话的 pi 进程，宿主归属校验拒绝）。
-          return readRecordEventsRootSessionId(eventsFile) === s.id
+          return readEventsRootSessionId(eventsFile, 'record-created') === s.id
         } catch {
           return false // 非法 record id = 白名单拒绝 = 未命中（守卫读面不抛）
         }

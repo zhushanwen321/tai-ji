@@ -157,6 +157,21 @@ describe("finalizeRun 落 run-settled（终态单写点）", () => {
     expect("scriptPath" in emptyEvents[0]).toBe(false);
   });
 
+  it("run-created 帧条件式落 rootSessionId 归属锚（dmg-r2-5：同 cwd 多会话宿主精确路由）——传入落字段、缺省不落", async () => {
+    const run = makeRealRun("wf-ev-anchor-sid");
+    await dispatchRunCreated(run, "root-session-1");
+
+    const events = await scanRunEvents("wf-ev-anchor-sid");
+    expect(events[0]).toMatchObject({ type: "run-created", rootSessionId: "root-session-1" });
+
+    const noAnchor = makeRealRun("wf-ev-anchor-sid-missing");
+    await dispatchRunCreated(noAnchor);
+
+    const noAnchorEvents = await scanRunEvents("wf-ev-anchor-sid-missing");
+    expect(noAnchorEvents[0]).toMatchObject({ type: "run-created" });
+    expect("rootSessionId" in noAnchorEvents[0]).toBe(false);
+  });
+
   it("failed → run-settled(failed)，reason 承载诊断文本", async () => {
     const run = makeRealRun("wf-ev-2");
     await dispatchRunCreated(run);

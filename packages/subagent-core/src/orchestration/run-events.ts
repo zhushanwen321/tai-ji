@@ -219,6 +219,17 @@ export interface RunCreatedEvent extends EventEnvelope { // oe-exempt:20260929:f
    * runId 的事件——record 流文件本身即 run 域，其余事件不重复携带。
    */
   runId: string;
+  /**
+   * 归属会话锚（根 Pi session id，record-created.rootSessionId 同款语义）。同 cwd
+   * 多会话共享同一 sessions 目录与其下 workflow-state 目录，runtime 网关
+   * （subagent-model-gateway）runId 分支若只凭 journal 文件存在性定位宿主，会把
+   * 模型切换路由到非归属 pi 进程——本字段是精确归属判据（比对扫描会话 id，形态
+   * 对齐 recordId 侧 record-created 帧锚）。可选 = 读取面对旧格式行放行（本字段
+   * 落地前的流缺失时读侧回落既有存在性判定，存量 run 行为不劣化），写侧契约由
+   * 写入方承担（写入点 = terminal-actions dispatchRunCreated，条件式可选项：
+   * 宿主会话锚缺席时不落字段——与 scriptPath/model 同款条件式）。
+   */
+  rootSessionId?: string;
   /** 脚本身份名（RunSpec.scriptName，meta.name 或文件名 stem）。 */
   workflowName: string;
   /** 调用参数摘要（截断的序列化形态——展示/日志用途的行内小摘要；恢复读面优先

@@ -411,6 +411,40 @@ describe("lazyDeps.workflowAgentDispatch 转发成员（[A1 R3] 缺失 = pump �
   });
 });
 
+// ── ①b [dmg-r2-5] lazyDeps.getSessionRootId 转发成员 ──────────────────────────
+//
+// 守卫同源与转发契约锁定（workflowAgentDispatch 同款先例）：lazyDeps 漏本成员时
+// workflow/subagents tool 的 run action 以 lazyDeps 启动 run → run-created 帧
+// 不落 rootSessionId（可选成员静默放行）——同 cwd 多会话下 runtime 网关 runId
+// 路由恒回落目录存在性弱锚，精确归属形同虚设。
+
+describe("lazyDeps.getSessionRootId 转发成员（[dmg-r2-5] 缺失 = run-created 帧锚静默缺席）", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis, SERVICE_SLOT_KEY);
+  });
+
+  it("守卫同源：session 未初始化时属性访问 throw 'Session not initialized'（与 store 等成员同消息）", async () => {
+    const { pi } = makePi();
+    const handle = setupWorkflowDomain(pi, { inflightReporter: makeReporter() }); // 无 session_start
+    expect(() => handle.lazyDeps.getSessionRootId).toThrowError("Session not initialized");
+  });
+
+  it("转发契约：现读 SubagentService.getSessionRootId；service 缺席归 null（帧不落字段，创建主链不失败）", async () => {
+    const { handle } = await mountWithSession("sess-root-sid-forward");
+    const getSessionRootId = vi.fn(() => "root-session-9");
+    Reflect.set(globalThis, SERVICE_SLOT_KEY, {
+      current: { getSessionRootId, dispose: vi.fn() },
+    });
+
+    expect(handle.lazyDeps.getSessionRootId()).toBe("root-session-9");
+    expect(getSessionRootId).toHaveBeenCalledTimes(1);
+
+    // service 缺席：null 归一（可选成员静默放行语义，不抛）
+    Reflect.set(globalThis, SERVICE_SLOT_KEY, { current: undefined });
+    expect(handle.lazyDeps.getSessionRootId()).toBeNull();
+  });
+});
+
 // ── ② D1：reload 分支 ─────────────────────────────────────────────────────────
 
 describe("D1 session_shutdown reason=reload：破坏性动作全跳过，adoption 前提保全", () => {

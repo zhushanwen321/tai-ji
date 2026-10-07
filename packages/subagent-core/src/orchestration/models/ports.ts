@@ -201,6 +201,19 @@ export interface LifecycleDeps {
     runId: string,
     override: RunOverrideProjection,
   ) => void;
+ /**
+  * [dmg-r2-5] 宿主会话锚现读口（run-created 帧 rootSessionId 的唯一载荷源）。
+  *
+  * 引擎层不持会话身份（WorkflowRun 聚合 / RunSpec 均无会话域），归属锚只能由
+  * 壳侧注入：实现 = 组合根 makeDeps 注入（sessionRootId 根进程语义与 record 域
+  * rootSessionId 同源——根进程 = 本 session id，嵌套 = env 贯穿的真 ROOT）。
+  * 消费点 = lifecycle.runWorkflow → dispatchRunCreated 条件式落帧（值 null/空不落
+  * 字段）。runtime 网关（subagent-model-gateway）runId 分支读该字段做同 cwd 多
+  * 会话的宿主精确路由——不注入时帧缺字段，读侧回落既有存在性判定（旧格式行放行）。
+  *
+  * 可选——未注入时（旧测试 deps）run-created 帧不落该字段（行为同修复前）。
+  */
+  getSessionRootId?: () => string | null;
 }
 
 /**

@@ -534,11 +534,12 @@ function reportDispatchFailure(runId: string, err: unknown): void {
  * created 之后，竞态丢帧结构性消除），落账完成的 await 由调用方持有（「runWorkflow
  * 返回 ⟹ 投影可查」）。载荷 runId/scriptName/args/scriptPath/budgetTimeMs/
  * budgetTokens/model 全部同源自 run.spec（scriptPath/budgetTimeMs/budgetTokens/
- * model 为条件式可选项）。
+ * model 为条件式可选项）；rootSessionId 同源自宿主会话锚（deps 现读注入，dmg-r2-5
+ * ——同 cwd 多会话的宿主精确路由锚，条件式：缺席不落字段，读侧旧格式行放行）。
  * 重复调用 = running × run-created 表外转移 fail-fast（IllegalTransitionError），
  * 构造性排除双帧。
  */
-export function dispatchRunCreated(run: WorkflowRun): Promise<TransitionResult> {
+export function dispatchRunCreated(run: WorkflowRun, rootSessionId?: string): Promise<TransitionResult> {
   // [W2/V1] 活体态同步 seed（created 基线检查点，条件式）：runWorkflow 返回前
   // liveRunFoldCheckpoints 必命中——isRunSettled 的「miss = 已终局」单向判定由此
   // 消除创建窗口假阳性（run 刚启动的窗口不会误判已终局）。
@@ -553,6 +554,9 @@ export function dispatchRunCreated(run: WorkflowRun): Promise<TransitionResult> 
   return dispatchRunTrigger(run, {
     type: "run-created",
     runId: run.runId,
+    // 归属会话锚（dmg-r2-5）：字段序紧跟 runId（读侧 runtime 网关按首帧短窗口
+    // 提取，不依赖整行读完——scriptSource 全文可能远超窗口）。
+    ...(rootSessionId !== undefined && rootSessionId !== "" ? { rootSessionId } : {}),
     workflowName: run.spec.scriptName,
     // [D1] record 单源存储收敛：scriptSource 全文唯一落点 = 本帧（快照已删）——
     // resume 的确定性重放（rebuildRunFromRecord / D13 嵌套检测）依赖此字段
