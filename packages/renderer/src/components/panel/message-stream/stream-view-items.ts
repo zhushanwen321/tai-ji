@@ -82,25 +82,69 @@ let cacheResult: StreamViewItem[] = []
  * broken 项不复用（返回 false）：占位行是瞬时降级态，每帧重试正常构建（数据
  * 修复后自然恢复），复用会把瞬时故障固化。
  */
+/** turn 项逐字段比对（载体引用 + 标量派生字段，见 canReuseView 的两层复用依据）。 */
+function turnViewUnchanged(
+  prev: Extract<StreamViewItem, { kind: 'turn' }>,
+  item: Extract<SkillNoticeStreamItem, { kind: 'turn' }>,
+  index: number,
+  lastUserTurnIdx: number,
+  lastRenderTurn: MessageTurn | null,
+): boolean {
+  return (
+    prev.turn === item.turn &&
+    prev.key === renderKey(item) &&
+    prev.canEdit === (!!item.turn.user && index === lastUserTurnIdx) &&
+    prev.isLastTurn === (item.turn === lastRenderTurn)
+  )
+}
+
+function canReuseTurnView(prev: StreamViewItem, item: SkillNoticeStreamItem, index: number, lastUserTurnIdx: number, lastRenderTurn: MessageTurn | null): boolean {
+  if (prev.kind !== 'turn' || item.kind !== 'turn') return false
+  return turnViewUnchanged(prev, item, index, lastUserTurnIdx, lastRenderTurn)
+}
+
+function canReuseBashExecutionView(prev: StreamViewItem, item: SkillNoticeStreamItem): boolean {
+  if (prev.kind !== 'bashExecution' || item.kind !== 'bashExecution') return false
+  return prev.message === item.message && prev.key === renderKey(item)
+}
+
+function canReuseSystemNoticeView(prev: StreamViewItem, item: SkillNoticeStreamItem): boolean {
+  if (prev.kind !== 'systemNotice' || item.kind !== 'systemNotice') return false
+  return prev.message === item.message && prev.key === renderKey(item)
+}
+
+function canReuseSkillNoticeView(prev: StreamViewItem, item: SkillNoticeStreamItem): boolean {
+  if (prev.kind !== 'skillNotice' || item.kind !== 'skillNotice') return false
+  return prev.entry === item.entry
+}
+
+/** kind → 该 kind 的逐位复用比对器（查表分发替换分支链；kind 不在同一格内即不复用）。 */
+const reuseCheckByKind: Record<SkillNoticeStreamItem['kind'], (prev: StreamViewItem, item: SkillNoticeStreamItem, index: number, lastUserTurnIdx: number, lastRenderTurn: MessageTurn | null) => boolean> = {
+  turn: canReuseTurnView,
+  bashExecution: canReuseBashExecutionView,
+  systemNotice: canReuseSystemNoticeView,
+  skillNotice: canReuseSkillNoticeView,
+}
+
+/**
+ * 单项复用判定：上次同位置 view item 是否可原样复用（preview 不重算）。
+ *
+ * 复用依据两层，全部显式 O(1) 比对、不依赖跨帧推理：
+ * 1. 核心载体引用恒等（turn/message/entry ===）：ADR-0039/0041 不可变更新保证
+ *    引用同 ⇒ 内容同 ⇒ preview（全文正则派生）与 key（首条消息 id 派生）同——
+ *    与 TurnRail railMemo 消费同一不变量（core toRenderItemsIncremental 对签名未变
+ *    的 turn 逐引用复用，历史项在本层引用恒稳定）。
+ * 2. 标量派生字段逐个显式比对（canEdit/isLastTurn）：入参 lastUserTurnIdx /
+ *    lastRenderTurn 变化不阻断其余项复用——变化只影响受影响项（重建），其余项
+ *    比对通过即逐字节同值。streaming 帧的 lastRenderTurn 每帧新引用，靠这层
+ *    显式比对而非入参快判，历史项才能跨帧存活。
+ *
+ * broken 项不复用（返回 false）：占位行是瞬时降级态，每帧重试正常构建（数据
+ * 修复后自然恢复），复用会把瞬时故障固化。
+ */
 function canReuseView(prev: StreamViewItem, item: SkillNoticeStreamItem, index: number, lastUserTurnIdx: number, lastRenderTurn: MessageTurn | null): boolean {
-  if (prev.kind === 'turn' && item.kind === 'turn') {
-    return (
-      prev.turn === item.turn &&
-      prev.key === renderKey(item) &&
-      prev.canEdit === (!!item.turn.user && index === lastUserTurnIdx) &&
-      prev.isLastTurn === (item.turn === lastRenderTurn)
-    )
-  }
-  if (prev.kind === 'bashExecution' && item.kind === 'bashExecution') {
-    return prev.message === item.message && prev.key === renderKey(item)
-  }
-  if (prev.kind === 'systemNotice' && item.kind === 'systemNotice') {
-    return prev.message === item.message && prev.key === renderKey(item)
-  }
-  if (prev.kind === 'skillNotice' && item.kind === 'skillNotice') {
-    return prev.entry === item.entry
-  }
-  return false
+  if (prev.kind !== item.kind) return false
+  return reuseCheckByKind[item.kind](prev, item, index, lastUserTurnIdx, lastRenderTurn)
 }
 
 /**

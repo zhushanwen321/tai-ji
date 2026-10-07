@@ -59,6 +59,7 @@ import {
   readPiSessionLatestModelChange,
   DEFAULT_SUBAGENT_ENGINE,
 } from './subagent-engine-history.js'
+import type { SessionModelChangeEntry } from './subagent-engine-history.js'
 import { extractWorkflowsFromSessionFile } from './workflow-extractor.js'
 import { scanRecordFamilyEntriesFromSessionFile } from './session-file-extraction.js'
 // run 详情侧逐成员透传（覆盖状态 + 最近生效值分发到 agentCalls，subagent-model-switch §9）
@@ -296,6 +297,30 @@ export interface SessionRecordsDeps {
 
 /** JSON 落盘缩进（全仓 JSON_INDENT = 2 约定）。 */
 const JSON_INDENT = 2
+
+/**
+ * [enhanceSubagentDetails 拆分] record 级覆盖状态判据：workflow origin 成员跳过
+ * （其覆盖作用域 = 所属 run，归 run 级查询分发，见
+ * projectSubagentModelDetailIntoRuns——成员级查询会错拿 chat 域作用域）。
+ */
+function recordModelOverride(
+  sessionId: string,
+  query: SessionRecordsDeps['modelOverrideQuery'],
+  record: SubagentRecord,
+): SubagentModelOverrideStatus | undefined {
+  if (query === undefined || record.origin === 'workflow') return undefined
+  return query.getRecordOverride(sessionId, record.subagentId)
+}
+
+/**
+ * [enhanceSubagentDetails 拆分] 最近生效值判据：仅 pi 引擎成员派生（源 = 成员 pi
+ * session 文件 model_change 尾条目，实际执行事实权威）；非 pi 成员 / 文件不存在 /
+ * 无条目按无值（未发生热切 = 无分叉态，字段本无消费场景）。
+ */
+function recordRecentEffectiveModel(record: SubagentRecord): SessionModelChangeEntry | undefined {
+  if (extractRecordEngine(record) !== DEFAULT_SUBAGENT_ENGINE || record.sessionFile === null) return undefined
+  return readPiSessionLatestModelChange(record.sessionFile)
+}
 
 /**
  * [reload-closeout D2] 送达水位对账定时腿间隔（低频兜底；主路径 = agent_settled 腿秒级）。
@@ -925,49 +950,53 @@ export class SessionRecords {
   private readonly oversizeWarned = new Set<string>()
 
   /**
+   * [enhanceSubagentDetails 拆分] 单 record 增强（两字段目标值一次展开；键不冲突，
+   * 与原「override 先套、recent 再套」的顺序叠加产物逐字段等价）。任一字段缺席不造键。
+   */
+  private enhanceOneSubagentRecord(
+    sessionId: string,
+    query: SessionRecordsDeps['modelOverrideQuery'],
+    record: SubagentRecord,
+  ): SubagentRecord {
+    const override = recordModelOverride(sessionId, query, record)
+    const recent = recordRecentEffectiveModel(record)
+    if (override === undefined && recent === undefined) return record
+    return {
+      ...record,
+      ...(override !== undefined ? { modelOverride: override } : {}),
+      ...(recent !== undefined ? { recentEffectiveModel: recent } : {}),
+    }
+  }
+
+  /**
    * subagent 详情载荷增强（subagent-model-switch §9 transport 行，U1 详情载荷透传）：
-   * ① 覆盖状态（modelOverride）——modelOverrideQuery 查询，无覆盖不造键；workflow
-   *    origin 成员跳过（其覆盖作用域 = 所属 run，归 run 级查询分发，见
-   *    projectSubagentModelDetailIntoRuns——成员级查询会错拿 chat 域作用域）；
-   * ② 最近生效值（recentEffectiveModel）——仅 pi 引擎成员派生（源 = 成员 pi session
-   *    文件 model_change 尾条目，实际执行事实权威）；非 pi 成员不参与派生、不携带；
-   *    文件不存在或无条目按无值（未发生热切 = 无分叉态，字段本无消费场景）。
+   * ① 覆盖状态（modelOverride）——modelOverrideQuery 查询，无覆盖不造键（判据见
+   *    recordModelOverride）；
+   * ② 最近生效值（recentEffectiveModel）——仅 pi 引擎成员派生（判据见
+   *    recordRecentEffectiveModel）。
    *
    * 出口 = session.subagents 两通道（getSubagents 读 RPC + publishRecordChanges live
    * 全量帧）——renderer store 分区是整帧替换语义，单通道增强会被另一通道的无增强帧
    * 冲掉，故两出口统一过本函数。同步实现（尾块文件读 + 同步查询），满足 live 发布
    * 路径的同步约束。无增强项时返回原数组引用（零拷贝快路径）。
+   *
+   * current 恒从原始 records[i] 出发（enhanced 的惰性 slice 只覆盖到首个命中索引
+   * 之前，enhanced[i] 在本轮写入前必为空洞——曾读它当基值，命中项之后的 record
+   * 被原样写 undefined / 展开丢光原字段）。同款「惰性 slice + 全索引写」模式在
+   * workflow-record-projection.ts projectSubagentModelDetailIntoRuns 有第二处实装
+   * （dmg-r2-1 修复同型丢 run），两处注释互引防第三份手写副本。
    */
   private enhanceSubagentDetails(sessionId: string, records: SubagentRecord[]): SubagentRecord[] {
     const query = this.deps.modelOverrideQuery
     let enhanced: SubagentRecord[] | null = null
     for (let i = 0; i < records.length; i++) {
-      const record = records[i]!
-      // current 恒从原始 records[i] 出发（enhanced 的惰性 slice 只覆盖到首个命中索引
-      // 之前，enhanced[i] 在本轮写入前必为空洞——曾读它当基值，命中项之后的 record
-      // 被原样写 undefined / 展开丢光原字段）。同款「惰性 slice + 全索引写」模式在
-      // workflow-record-projection.ts projectSubagentModelDetailIntoRuns 有第二处实装
-      // （dmg-r2-1 修复同型丢 run），两处注释互引防第三份手写副本。
-      let current = record
-      let changed = false
-      if (query !== undefined && record.origin !== 'workflow') {
-        const override = query.getRecordOverride(sessionId, record.subagentId)
-        if (override !== undefined) {
-          current = { ...current, modelOverride: override }
-          changed = true
-        }
-      }
-      if (extractRecordEngine(record) === DEFAULT_SUBAGENT_ENGINE && record.sessionFile !== null) {
-        const change = readPiSessionLatestModelChange(record.sessionFile)
-        if (change !== undefined) {
-          current = { ...current, recentEffectiveModel: change }
-          changed = true
-        }
-      }
-      if (changed && enhanced === null) {
-        enhanced = records.slice(0, i) as SubagentRecord[]
-      }
-      if (enhanced !== null) enhanced[i] = current
+      const enhancedRecord = this.enhanceOneSubagentRecord(sessionId, query, records[i]!)
+      // 引用相等 = 本条无增强项；仅「惰性数组未建立」时可跳过（零拷贝快路径）——
+      // enhanced 建立后每个后续索引（含未命中项）必须显式写回，跳过 = dmg-r2-1 同型
+      // 丢 record（首命中项之后的索引从返回列表丢失）。
+      if (enhancedRecord === records[i] && enhanced === null) continue
+      if (enhanced === null) enhanced = records.slice(0, i) as SubagentRecord[]
+      enhanced[i] = enhancedRecord
     }
     return enhanced ?? records
   }

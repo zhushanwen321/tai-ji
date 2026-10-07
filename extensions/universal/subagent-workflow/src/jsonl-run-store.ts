@@ -67,13 +67,17 @@ import {
   noteRebuiltSettlement,
   settlementRecordOfRunSettledFrame,
   type AgentResult,
+  type Budget,
   type ExecutionTraceNode,
   type RunEventLineIssue,
   type RunOutcome,
+  type RunSpec,
   type RunStore,
+  type WorkflowModelOverride,
   type WorkflowRecordRegisteredEntryData,
   type WorkflowRecordSettledEntryData,
   type WorkflowRunEvent,
+  type WorkerLogEntry,
 } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
 import { errorLogsFromEvents, latestModelOverride, rebuildBudget, runAccountingFromEvents } from "@zhushanwen/subagent-core";
@@ -478,26 +482,32 @@ function rebuildRunSpecFromEntries(
   };
 }
 
-function foldRecordStreamToRun(
-  runId: string,
-  reg: WorkflowRecordRegisteredEntryData,
-  events: readonly WorkflowRunEvent[],
-  settled?: WorkflowRecordSettledEntryData,
-): WorkflowRun {
-  const created = events.find(
-    (e): e is Extract<WorkflowRunEvent, { type: "run-created" }> => e.type === "run-created",
-  );
-  const startedAtMs =
-    created?.ts ?? (Number.isFinite(reg.startedAt) ? reg.startedAt : Date.now());
-  const startedAtIso = new Date(startedAtMs).toISOString();
-  const spec = rebuildRunSpecFromEntries(created, reg, resolveSpecBudget(created, events));
-  // [§2.1b] 会计重建：v2 终态条目带活体口径 usedTokens/callCount → 真值优先；条目缺席
-  // 回落 agent-settled.result.usage 的同一加权口径（下界近似，含 usedCost）。
-  const budget = rebuildBudget(settled, events);
-  // [§2.1 errorLogs 持久化 / ADR-0093] 诊断日志重建：worker-log 帧 → errorLogs（与活体
-  // 写入同语义：按序 + 尾部上限裁剪）。此前无持久面、重启即空。
-  const errorLogs = errorLogsFromEvents(events);
+/**
+ * [foldRecordStreamToRun 拆分] 两分支 reconstruct 共用的 fold 产物（spec 之外的
+ * 快照/元数据公共字段）。
+ */
+interface FoldCommonParts {
+  budget: Budget;
+  errorLogs: WorkerLogEntry[];
+  startedAt: string;
+}
 
+/**
+ * [foldRecordStreamToRun 拆分] 两分支 reconstruct 共用的聚合重建块（trace + calls +
+ * 覆盖记账——原 fold 主干的公共块提取）。
+ */
+interface RebuiltRunAggregate {
+  calls: Map<number, AgentCall>;
+  trace: Trace;
+  /** 生效模型覆盖记账（无覆盖 undefined 不造键——语义见 rebuildRunAggregate 内注释）。 */
+  modelOverride: WorkflowModelOverride | undefined;
+}
+
+/**
+ * 聚合重建块：drafts → trace 节点 → Trace 副本 → call 集合（D-10 引用共享链）+
+ * 覆盖记账折叠。纯函数，零 IO。
+ */
+function rebuildRunAggregate(events: readonly WorkflowRunEvent[]): RebuiltRunAggregate {
   const drafts = collectRunCallDrafts(events);
 
   // Trace 先重建：call 的 traceNode 回链到 Trace 副本（D-10 引用共享；匹配不到
@@ -508,53 +518,121 @@ function foldRecordStreamToRun(
 
   const calls = draftsToAgentCalls(drafts, sharedNodes, nodes);
 
-  const settledEvent = lastRunSettledEvent(events);
   // [subagent-model-switch §6.6①/§7.4] 覆盖记账折叠（派生视图半边）：生效覆盖值 =
   // 最新一条（latestModelOverride core 单点——覆盖旧覆盖值不叠加，不变量 2）；
   // 无覆盖 undefined 不造键。fold 未跟时本行缺失 = 覆盖状态静默丢行——
   // jsonl-run-store-loadall 的 fold 消费用例是此丢行风险的机器防线（P8 第五道）。
   const modelOverride = latestModelOverride(events);
-  if (settledEvent === undefined) {
-    const interruptedAt = lastInterruptedAt(events);
-    return WorkflowRun.reconstruct(
-      runId,
-      spec,
-      {
-        budget,
-        calls,
-        trace,
-        errorLogs,
-      },
-      {
-        startedAt: startedAtIso,
-        // 中断标记（[D2] 中断态经 meta 投影表达）：末次 run-interrupted 后无
-        // run-resumed 复活 → meta.interruptedAt 置位，runSummary 投影 'interrupted'
-        //（CLI/TUI 不显示僵尸「运行中」；resume 资格判据在 core fold lifecycle，
-        // 不受本投影影响）。
-        ...(interruptedAt !== undefined ? { interruptedAt } : {}),
-        ...(modelOverride !== undefined ? { modelOverride } : {}),
-      },
-    );
-  }
+  return { calls, trace, modelOverride };
+}
+
+/**
+ * 非终局分支 reconstruct：无 run-settled 帧 = running（交恢复链收编）+ 中断标记
+ * 投影（[D2]）。
+ */
+function reconstructUnsettledRun(
+  runId: string,
+  spec: RunSpec,
+  aggregate: RebuiltRunAggregate,
+  parts: FoldCommonParts,
+  events: readonly WorkflowRunEvent[],
+): WorkflowRun {
+  const interruptedAt = lastInterruptedAt(events);
+  return WorkflowRun.reconstruct(
+    runId,
+    spec,
+    {
+      budget: parts.budget,
+      calls: aggregate.calls,
+      trace: aggregate.trace,
+      errorLogs: parts.errorLogs,
+    },
+    {
+      startedAt: parts.startedAt,
+      // 中断标记（[D2] 中断态经 meta 投影表达）：末次 run-interrupted 后无
+      // run-resumed 复活 → meta.interruptedAt 置位，runSummary 投影 'interrupted'
+      //（CLI/TUI 不显示僵尸「运行中」；resume 资格判据在 core fold lifecycle，
+      // 不受本投影影响）。
+      ...(interruptedAt !== undefined ? { interruptedAt } : {}),
+      ...(aggregate.modelOverride !== undefined ? { modelOverride: aggregate.modelOverride } : {}),
+    },
+  );
+}
+
+/**
+ * 终局分支 reconstruct：run-settled 帧派生 DoneReason + completedAt；失败终局带
+ * 帧 reason 文本（不落 generic 恢复文案）。
+ */
+function reconstructSettledRun(
+  runId: string,
+  spec: RunSpec,
+  aggregate: RebuiltRunAggregate,
+  parts: FoldCommonParts,
+  settledEvent: RunSettledFrame,
+): WorkflowRun {
   const reason = runSettledOutcomeToDoneReason(settledEvent.outcome, settledEvent.errorCode);
   return WorkflowRun.reconstruct(
     runId,
     spec,
     {
       reason,
-      budget,
-      calls,
-      trace,
-      errorLogs,
+      budget: parts.budget,
+      calls: aggregate.calls,
+      trace: aggregate.trace,
+      errorLogs: parts.errorLogs,
       // 成功终局无 error；失败终局带帧 reason 文本（不落 generic 恢复文案）
       ...(reason !== "completed" && settledEvent.reason !== undefined ? { error: settledEvent.reason } : {}),
     },
     {
-      startedAt: startedAtIso,
+      startedAt: parts.startedAt,
       completedAt: new Date(settledEvent.ts).toISOString(),
-      ...(modelOverride !== undefined ? { modelOverride } : {}),
+      ...(aggregate.modelOverride !== undefined ? { modelOverride: aggregate.modelOverride } : {}),
     },
   );
+}
+
+/**
+ * startedAt 毫秒锚：run-created 帧 ts 优先，回落注册条目 startedAt（非有限数值 =
+ * 兜底当前时刻，保 startedAt 恒有值）。
+ */
+function resolveStartedAtMs(
+  created: Extract<WorkflowRunEvent, { type: "run-created" }> | undefined,
+  reg: WorkflowRecordRegisteredEntryData,
+): number {
+  return created?.ts ?? (Number.isFinite(reg.startedAt) ? reg.startedAt : Date.now());
+}
+
+/**
+ * record 事件流 → WorkflowRun 聚合（纯函数，零 IO；fold 语义词表说明见文件头
+ * 「record 流 fold 重建」节）。主干只做产物编排：公共 fold 产物（budget/errorLogs/
+ * startedAt/spec）+ 聚合重建块（rebuildRunAggregate）+ 按终局帧有无分流到
+ * reconstructUnsettledRun / reconstructSettledRun。
+ */
+function foldRecordStreamToRun(
+  runId: string,
+  reg: WorkflowRecordRegisteredEntryData,
+  events: readonly WorkflowRunEvent[],
+  settled?: WorkflowRecordSettledEntryData,
+): WorkflowRun {
+  const created = events.find(
+    (e): e is Extract<WorkflowRunEvent, { type: "run-created" }> => e.type === "run-created",
+  );
+  const spec = rebuildRunSpecFromEntries(created, reg, resolveSpecBudget(created, events));
+  // [§2.1b] 会计重建：v2 终态条目带活体口径 usedTokens/callCount → 真值优先；条目缺席
+  // 回落 agent-settled.result.usage 的同一加权口径（下界近似，含 usedCost）。
+  // [§2.1 errorLogs 持久化 / ADR-0093] 诊断日志重建：worker-log 帧 → errorLogs（与活体
+  // 写入同语义：按序 + 尾部上限裁剪）。此前无持久面、重启即空。
+  const parts: FoldCommonParts = {
+    budget: rebuildBudget(settled, events),
+    errorLogs: errorLogsFromEvents(events),
+    startedAt: new Date(resolveStartedAtMs(created, reg)).toISOString(),
+  };
+  const aggregate = rebuildRunAggregate(events);
+  const settledEvent = lastRunSettledEvent(events);
+  if (settledEvent === undefined) {
+    return reconstructUnsettledRun(runId, spec, aggregate, parts, events);
+  }
+  return reconstructSettledRun(runId, spec, aggregate, parts, settledEvent);
 }
 
 // ── JsonlRunStore ────────────────────────────────────────────

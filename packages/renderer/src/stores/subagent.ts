@@ -56,13 +56,72 @@ type ApplyDeltaFn = (virtualId: string, lines: string[]) => void
 /** chat.finalizeSubagentStream 注入回调（W4：streaming → complete 收口进 chat store） */
 type FinalizeStreamFn = (virtualId: string) => void
 
+/** WS stream 帧形态（分派只按 type 字面量路由，payload 按 type 窄化）。 */
+interface StreamFrame {
+  type?: string
+  payload?: unknown
+}
+
+/** stream 帧分派上下文（subscribeStream 闭包参数显式化——帧分派逻辑与订阅接线解耦）。 */
+interface StreamFrameContext {
+  recordId: string
+  virtualId: string
+  chunkOps?: SubagentStreamChunkOps
+  chatApplyDelta: ApplyDeltaFn
+  chatFinalizeStream: FinalizeStreamFn
+}
+
+/** R 路径增量 chunk 帧（唯一内容推送通道）→ chunkOps.applyChunk（core 状态机管线：边界
+ *  推进 / 顺序追加 / 失步入缓冲 + 拉取）。分派语义权威 = subscribeStream 头注释。 */
+function applyChunkFrame(msg: StreamFrame, ctx: StreamFrameContext): void {
+  if (ctx.chunkOps === undefined) return // chunk 通道未接线（旧调用方兼容窗口）：忽略
+  const payload = msg.payload as { recordId?: string; msgSeq?: number; deltaSeq?: number; delta?: string }
+  if (payload.recordId !== ctx.recordId) return
+  ctx.chunkOps.applyChunk(ctx.virtualId, ctx.recordId, payload.msgSeq ?? 0, payload.deltaSeq ?? 0, payload.delta ?? '')
+}
+
+/** stream_delta 帧：清除帧（lines === undefined）= 单条 assistant 定稿——先置定稿水位再
+ *  收口 streaming 实体（订阅保留）；W 路径全量形态（余留）→ 全文替换原样。 */
+function applyDeltaFrame(msg: StreamFrame, ctx: StreamFrameContext): void {
+  const payload = msg.payload as { recordId?: string; lines?: string[] | undefined; msgSeq?: number }
+  if (payload.recordId !== ctx.recordId) return
+
+  if (payload.lines === undefined) {
+    // 清除帧 = 单条 assistant 定稿：R 路径携带 additive msgSeq → 先置定稿水位
+    //（sealedMsgSeq 单调，拦截晚到拉取响应复活定稿消息）；W 路径无 msgSeq 不进状态机。
+    if (payload.msgSeq !== undefined && ctx.chunkOps) {
+      ctx.chunkOps.seal(ctx.virtualId, ctx.recordId, payload.msgSeq)
+    }
+    // 只收口 streaming 实体。订阅保留（续聊轮的后续 chunk 仍可达，R1 构造性消解）；
+    // 定稿内容由 entry 帧投影链覆盖。
+    ctx.chatFinalizeStream(ctx.virtualId)
+    return
+  }
+  // W 路径全量形态（余留）：累积全文替换原样
+  ctx.chatApplyDelta(ctx.virtualId, payload.lines)
+}
+
+/** 构造 stream 帧处理函数（chunk / stream_delta 两通道分派；双键订阅共用同一处理函数，
+ *  每条消息只命中一键）。 */
+function createStreamFrameHandler(ctx: StreamFrameContext): (msg: StreamFrame) => void {
+  return (msg) => {
+    // ── R 路径增量 chunk（唯一内容推送通道）──
+    if (msg.type === 'subagent.stream_chunk') {
+      applyChunkFrame(msg, ctx)
+      return
+    }
+    if (msg.type !== 'subagent.stream_delta') return
+    applyDeltaFrame(msg, ctx)
+  }
+}
+
 /**
  * [B2 subagent-stream-chunk §4.3] chunk 通道回调束（subscribeStream 第 7 参，可选）。
  * R 路径增量消费的三入口，全部是 chat store ops 面（core streaming-state-machine 管线），
  * 由调用方（drawer SubagentTabData 编排）注入；缺省 = chunk / 定稿水位不接线（旧调用方
  * 兼容形态——W 路径全量 delta 与清除收口不受影响，chunk 帧静默忽略）。
  */
-export interface SubagentStreamChunkOps {
+interface SubagentStreamChunkOps {
   /** subagent.stream_chunk 分派 → chat.applySubagentStreamChunk（边界推进/追加/失步入缓冲管线） */
   applyChunk: (virtualId: string, recordId: string, msgSeq: number, deltaSeq: number, delta: string) => void
   /** 清除帧携带 msgSeq 时置定稿水位 → chat.sealSubagentStream（sealedMsgSeq 单调；W 路径清除帧无 msgSeq 不调） */
@@ -335,33 +394,8 @@ export const useSubagentStore = defineStore('subagent', () => {
     chunkOps?: SubagentStreamChunkOps,
   ): void {
     stopStream(scope)
-    const handler = (msg: { type?: string; payload?: unknown }): void => {
-      // ── R 路径增量 chunk（唯一内容推送通道）──
-      if (msg.type === 'subagent.stream_chunk') {
-        if (!chunkOps) return // chunk 通道未接线（旧调用方兼容窗口）：忽略
-        const payload = msg.payload as { recordId?: string; msgSeq?: number; deltaSeq?: number; delta?: string }
-        if (payload.recordId !== recordId) return
-        chunkOps.applyChunk(virtualId, recordId, payload.msgSeq ?? 0, payload.deltaSeq ?? 0, payload.delta ?? '')
-        return
-      }
-      if (msg.type !== 'subagent.stream_delta') return
-      const payload = msg.payload as { recordId?: string; lines?: string[] | undefined; msgSeq?: number }
-      if (payload.recordId !== recordId) return
-
-      if (payload.lines === undefined) {
-        // 清除帧 = 单条 assistant 定稿：R 路径携带 additive msgSeq → 先置定稿水位
-        //（sealedMsgSeq 单调，拦截晚到拉取响应复活定稿消息）；W 路径无 msgSeq 不进状态机。
-        if (payload.msgSeq !== undefined && chunkOps) {
-          chunkOps.seal(virtualId, recordId, payload.msgSeq)
-        }
-        // 只收口 streaming 实体。订阅保留（续聊轮的后续 chunk 仍可达，R1 构造性消解）；
-        // 定稿内容由 entry 帧投影链覆盖。
-        chatFinalizeStream(virtualId)
-        return
-      }
-      // W 路径全量形态（余留）：累积全文替换原样
-      chatApplyDelta(virtualId, payload.lines)
-    }
+    // 帧分派逻辑单源在模块级 createStreamFrameHandler（分派语义权威 = 本函数头注释）
+    const handler = createStreamFrameHandler({ recordId, virtualId, chunkOps, chatApplyDelta, chatFinalizeStream })
     // 双键：旧 widget 通道（payload.sessionId=主 sid）与 tee（payload.sessionId=虚拟分区 id）
     const unsubs = [events.on(mainSessionId, handler), events.on(virtualId, handler)]
     streamUnsub.set(scope, () => {

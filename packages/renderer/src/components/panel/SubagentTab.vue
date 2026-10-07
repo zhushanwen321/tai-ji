@@ -210,40 +210,46 @@ function findAgentCall(acsId: string): WorkflowAgentCall | undefined {
   return undefined
 }
 
+/** 标题栏元信息形状（chat record 与 agentcall 快照两视图共用的投影）。 */
+type SubagentHeaderMeta = { agent: string; slug?: string; meta?: string; engine?: string; stopReason?: string }
+
+/** 三段式虚拟 id（chat 域 record）的标题栏元信息。 */
+function subagentRecordMeta(vid: string): SubagentHeaderMeta | null {
+  const mainSessionId = extractMainSessionId(vid)
+  const subId = extractSubagentId(vid)
+  const record = subagentStore.getRecordsBySession(mainSessionId).find((r) => r.subagentId === subId)
+  if (!record) return null
+  // 模型槽位移交 modelDisplay（标签读取规则四分支），meta 只余 thinking 档位：
+  // §6.4 展示口径——热切回执生效档位（展示态）优先，回退启动盖章值（record.thinkingLevel）。
+  const thinkingLevel = resolveSubagentThinkingLevel(displayOf(record.subagentId), record.thinkingLevel)
+  return {
+    agent: record.agent,
+    slug: record.slug || undefined,
+    meta: thinkingLevel ? `thinking ${thinkingLevel}` : undefined,
+    engine: record.engine || undefined,
+    // 停因词（U8b §3.2.8）：有值即投影——idle 与 A-lite 轮终 running-resumable 均携带
+    // 合法停因；「为什么停」一句话解释，不参与资格判定
+    stopReason: record.stopReason,
+  }
+}
+
+/** 两段式虚拟 id（agentcall 快照）的标题栏元信息。 */
+function agentCallHeaderMeta(vid: string): SubagentHeaderMeta | null {
+  const call = findAgentCall(extractAgentCallSessionId(vid))
+  if (!call) return null
+  return {
+    agent: call.agent,
+    // model 'default' 不显示（占位值不展示，语义沿用退役的侧栏工作流详情视图）
+    meta: call.model && call.model !== 'default' ? call.model : undefined,
+  }
+}
+
 /** 标题栏元信息（响应式：records 变化时重算）。chatMeta = 三段式虚拟 id 的 record；agentcall 两段式 = null。 */
-const subagentMeta = computed<{ agent: string; slug?: string; meta?: string; engine?: string; stopReason?: string } | null>(() => {
+const subagentMeta = computed<SubagentHeaderMeta | null>(() => {
   const vid = selectedSubagentId.value
   if (!vid) return null
-
-  if (isSubagentVirtualId(vid)) {
-    const mainSessionId = extractMainSessionId(vid)
-    const subId = extractSubagentId(vid)
-    const record = subagentStore.getRecordsBySession(mainSessionId).find((r) => r.subagentId === subId)
-    if (!record) return null
-    // 模型槽位移交 modelDisplay（标签读取规则四分支），meta 只余 thinking 档位：
-    // §6.4 展示口径——热切回执生效档位（展示态）优先，回退启动盖章值（record.thinkingLevel）。
-    const thinkingLevel = resolveSubagentThinkingLevel(displayOf(record.subagentId), record.thinkingLevel)
-    return {
-      agent: record.agent,
-      slug: record.slug || undefined,
-      meta: thinkingLevel ? `thinking ${thinkingLevel}` : undefined,
-      engine: record.engine || undefined,
-      // 停因词（U8b §3.2.8）：有值即投影——idle 与 A-lite 轮终 running-resumable 均携带
-      // 合法停因；「为什么停」一句话解释，不参与资格判定
-      stopReason: record.stopReason,
-    }
-  }
-
-  if (isAgentCallVirtualId(vid)) {
-    const call = findAgentCall(extractAgentCallSessionId(vid))
-    if (!call) return null
-    return {
-      agent: call.agent,
-      // model 'default' 不显示（占位值不展示，语义沿用退役的侧栏工作流详情视图）
-      meta: call.model && call.model !== 'default' ? call.model : undefined,
-    }
-  }
-
+  if (isSubagentVirtualId(vid)) return subagentRecordMeta(vid)
+  if (isAgentCallVirtualId(vid)) return agentCallHeaderMeta(vid)
   return null
 })
 

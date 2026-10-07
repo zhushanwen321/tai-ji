@@ -53,11 +53,11 @@ const KEYBOARD_STEP_PCT = 2
 const PCT_SCALE = 100
 
 /** standalone 内容列占比（ui-signal-density D10：对话流 + composer 内容列 = panel 宽的 3/5） */
-export const CONTENT_COL_PCT = 60
+const CONTENT_COL_PCT = 60
 /** 内容列比例宽生效的绝对值下限（px）：60% 实算低于下限即改撑满——panel 被 drawer 挤窄后
  *  恒撑满同因（2026-10-06 用户裁决）。值 = 全局 --content-max-w 默认（style.css 720px，
  *  settings / landing / composer 同锚的既有内容列口径） */
-export const CONTENT_COL_MIN_PX = 720
+const CONTENT_COL_MIN_PX = 720
 
 function clampDrawerPct(v: number): number {
   return Math.min(DRAWER_MAX_PCT, Math.max(DRAWER_MIN_PCT, v))
@@ -196,7 +196,7 @@ export function useDrawerSplitWidth(splitAreaEl: Ref<HTMLElement | null>, drawer
 
 /** 显示期 clamp 的主区（对话流 + composer）最小可视高度（px，§5.3「窗口太矮」失败路径。
  *  具体阈值是设计 §11-1 实施期真机校准项） */
-export const MIN_MAIN_AREA_HEIGHT_PX = 240
+const MIN_MAIN_AREA_HEIGHT_PX = 240
 
 /**
  * 底抽屉高度模型（纵轴）：

@@ -24,7 +24,15 @@ import { useI18n } from 'vue-i18n'
 import { toErrorMessage } from '@taiji/core'
 import { subagent as subagentApi } from '@/api'
 import { useToast } from '@/composables/useToast'
-import type { ProviderId, SubagentSetModelReply, SubagentStatus, WorkflowAgentCall } from '@taiji/shared'
+import type {
+  ProviderId,
+  SubagentChatSetModelReply,
+  SubagentSetModelAggregateReply,
+  SubagentSetModelMemberFailure,
+  SubagentSetModelReply,
+  SubagentStatus,
+  WorkflowAgentCall,
+} from '@taiji/shared'
 import { SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES } from '@taiji/shared'
 
 /**
@@ -55,8 +63,8 @@ export interface SubagentModelDisplay {
 /** 显示态键：chat 域 = recordId；workflow 域 = `${runId}:${memberRunId}`（成员标识 = 聚合应答与成员态数组的同维成员 runId，§7.1）。 */
 type DisplayKey = string
 
-/** workflow 成员显示键（runId + 聚合成员标识）。 */
-export function subagentMemberDisplayKey(runId: string, memberRunId: string): DisplayKey {
+/** workflow 成员显示键（runId + 聚合成员标识；模块私有——runtime/shared 侧仅注释对齐锚，无代码消费方）。 */
+function subagentMemberDisplayKey(runId: string, memberRunId: string): DisplayKey {
   return `${runId}:${memberRunId}`
 }
 
@@ -79,6 +87,65 @@ export function resetSubagentModelDisplayForTests(): void {
 /** canonical ref 串（'provider/id'）。 */
 function toModelRef(provider: string, modelId: string): string {
   return `${provider}/${modelId}`
+}
+
+/** chat 域两型回执 → 显示态写入（recordId 键）：effective 写生效值 + 意图凭证 + 生效档位，
+ *  recorded 只写覆盖意图（本次目标——「已记录，下次执行生效」的标签承接）。 */
+function applyChatModelReply(key: string, reply: SubagentChatSetModelReply, intentRef: string): void {
+  if (reply.kind !== 'effective') {
+    displayStates.set(key, { overrideIntent: intentRef })
+    return
+  }
+  displayStates.set(key, {
+    effectiveModel: toModelRef(reply.effectiveModel.provider, reply.effectiveModel.modelId),
+    // 意图受理凭证（F1-31 裁决候选 A）：回执型同时携带意图 ref（本次切换目标——
+    // 应答 wire 无意图字段，取请求目标 ref，回执即该意图的受理凭证）——badge 事实
+    // 依据 = 意图已受理，消除 record.modelOverride 重推前的轮内空窗（D3 缺陷四）
+    overrideIntent: intentRef,
+    // §6.4：切换回执连生效档位一起同步（面板 thinking 档位随热切更新）；回执缺省
+    // 该字段不写（UI 跟随事实，禁乐观回显——读取端回退启动盖章值）
+    ...(reply.effectiveThinkingLevel !== undefined ? { thinkingLevel: reply.effectiveThinkingLevel } : {}),
+  })
+}
+
+/** run 级聚合回执 → 按成员键分写（成员标识 = 聚合成员 runId）：switched 且有生效值成员
+ *  写生效值 + 意图；not-active / not-applicable 成员只写意图（记账路径，重派生效）；
+ *  switched 但无生效值（契约外形态）不写（禁虚构生效值）；失败名单成员不写生效值
+ *  （分支③）但一律补写意图亮 badge，失败事实经 onMemberFailure 呈现（补写不吞错误）。 */
+function applyAggregateModelReply(
+  runId: string,
+  reply: SubagentSetModelAggregateReply,
+  intentRef: string,
+  onMemberFailure: (failure: SubagentSetModelMemberFailure) => void,
+): void {
+  for (const member of reply.members) {
+    const key = subagentMemberDisplayKey(runId, member.runId)
+    if (member.state === 'switched' && member.effectiveModel !== undefined) {
+      displayStates.set(key, {
+        effectiveModel: toModelRef(member.effectiveModel.provider, member.effectiveModel.modelId),
+        // 意图受理凭证（chat 域 effective 分支 F1-31 同款；dmg-r3-4）：宿主 run 级意图
+        // 恒写（model-switch workflow-run 分支聚合返回后不分成败码 setModelOverride +
+        // persistRunOverride），switched 成员后续重派同样吃 run 级覆盖——badge 事实依据
+        // = 意图已受理，补写意图 ref 不等 model-override 帧落 journal 后的下次载荷重推
+        // （消除与同批失败成员 badge 同屏不一致的窗口内空窗）
+        overrideIntent: intentRef,
+        // 成员生效档位为 optional（wire 契约：仅回读成功成员携带）：缺省不写，
+        // 同上「UI 跟随事实」——档位未知时不虚构，读取端回退盖章值
+        ...(member.effectiveThinkingLevel !== undefined ? { thinkingLevel: member.effectiveThinkingLevel } : {}),
+      })
+    } else if (member.state === 'not-active' || member.state === 'not-applicable') {
+      displayStates.set(key, { overrideIntent: intentRef })
+    }
+  }
+  for (const failure of reply.failures) {
+    // 失败名单成员：生效值未知（分支③，不写 effectiveModel），但 overrideIntent 一律
+    // 补写亮 badge——宿主 run 级意图恒写（model-switch workflow-run 分支：聚合返回后
+    // 统一 setModelOverride + persistRunOverride，不分成败码），失败成员（含
+    // credential_missing / 透传码）后续重派一律吃 run 级覆盖（workflow-dispatch 派发
+    // 侧覆写 opts.model）；chat 域 catch 通道的「记账已写」词表门控不适用于本分面。
+    displayStates.set(subagentMemberDisplayKey(runId, failure.runId), { overrideIntent: intentRef })
+    onMemberFailure(failure)
+  }
 }
 
 /** 四分支合成输入（详情载荷面 + 回执态面）。 */
@@ -225,62 +292,25 @@ export function useSubagentModel() {
     }
   }
 
-  /** 应答 → 显示态写入（setSubagentModel 的状态半边；导出供测试直驱回执消费断言）。 */
+  /** 应答 → 显示态写入（setSubagentModel 的状态半边；导出供测试直驱回执消费断言）。
+   *  分域状态写入单源在模块级 applyChatModelReply / applyAggregateModelReply，此处只做
+   *  域分流与失败 toast 接线（toast 依赖本 composable 闭包的 i18n）。 */
   function applyReplyToDisplay(target: SubagentSetModelTarget, reply: SubagentSetModelReply): void {
     const intentRef = toModelRef(target.provider, target.modelId)
     if ('kind' in reply) {
       // chat 域两型（recordId 目标）
       const key = target.recordId
       if (key === undefined) return
-      if (reply.kind === 'effective') {
-        displayStates.set(key, {
-          effectiveModel: toModelRef(reply.effectiveModel.provider, reply.effectiveModel.modelId),
-          // 意图受理凭证（F1-31 裁决候选 A）：回执型同时携带意图 ref（本次切换目标——
-          // 应答 wire 无意图字段，取请求目标 ref，回执即该意图的受理凭证）——badge 事实
-          // 依据 = 意图已受理，消除 record.modelOverride 重推前的轮内空窗（D3 缺陷四）
-          overrideIntent: intentRef,
-          // §6.4：切换回执连生效档位一起同步（面板 thinking 档位随热切更新）；回执缺省
-          // 该字段不写（UI 跟随事实，禁乐观回显——读取端回退启动盖章值）
-          ...(reply.effectiveThinkingLevel !== undefined ? { thinkingLevel: reply.effectiveThinkingLevel } : {}),
-        })
-      } else {
-        displayStates.set(key, { overrideIntent: intentRef })
-      }
+      applyChatModelReply(key, reply, intentRef)
       return
     }
     // run 级聚合（runId 目标）：按成员键分写（成员标识 = 聚合成员 runId）
     const runId = target.runId
     if (runId === undefined) return
-    for (const member of reply.members) {
-      const key = subagentMemberDisplayKey(runId, member.runId)
-      if (member.state === 'switched' && member.effectiveModel !== undefined) {
-        displayStates.set(key, {
-          effectiveModel: toModelRef(member.effectiveModel.provider, member.effectiveModel.modelId),
-          // 意图受理凭证（chat 域 effective 分支 F1-31 同款；dmg-r3-4）：宿主 run 级意图
-          // 恒写（model-switch workflow-run 分支聚合返回后不分成败码 setModelOverride +
-          // persistRunOverride），switched 成员后续重派同样吃 run 级覆盖——badge 事实依据
-          // = 意图已受理，补写意图 ref 不等 model-override 帧落 journal 后的下次载荷重推
-          // （消除与同批失败成员 badge 同屏不一致的窗口内空窗）
-          overrideIntent: intentRef,
-          // 成员生效档位为 optional（wire 契约：仅回读成功成员携带）：缺省不写，
-          // 同上「UI 跟随事实」——档位未知时不虚构，读取端回退盖章值
-          ...(member.effectiveThinkingLevel !== undefined ? { thinkingLevel: member.effectiveThinkingLevel } : {}),
-        })
-      } else if (member.state === 'not-active' || member.state === 'not-applicable') {
-        displayStates.set(key, { overrideIntent: intentRef })
-      }
-      // switched 但无生效值（契约外形态）：不写（禁虚构生效值）
-    }
-    for (const failure of reply.failures) {
-      // 失败名单成员：生效值未知（分支③，不写 effectiveModel），但 overrideIntent 一律
-      // 补写亮 badge——宿主 run 级意图恒写（model-switch workflow-run 分支：聚合返回后
-      // 统一 setModelOverride + persistRunOverride，不分成败码），失败成员（含
-      // credential_missing / 透传码）后续重派一律吃 run 级覆盖（workflow-dispatch 派发
-      // 侧覆写 opts.model）；chat 域 catch 通道的「记账已写」词表门控不适用于本分面。
-      displayStates.set(subagentMemberDisplayKey(runId, failure.runId), { overrideIntent: intentRef })
+    applyAggregateModelReply(runId, reply, intentRef, (failure) => {
       // toast 分项呈现照常（错误应答的失败事实必须可见——显示态补写不吞错误）
       toastError(t('panel.sideDrawer.modelSwitchMemberFailed', { member: failure.runId, reason: failure.reason }))
-    }
+    })
   }
 
   return { setSubagentModel, displayOf, memberDisplayOf, applyReplyToDisplay }

@@ -50,27 +50,33 @@ function read(rel) {
 function extractConstArray(src, name, file, seen = new Set()) {
   if (seen.has(name)) return []
   seen.add(name)
-  const arr = src.match(new RegExp(`export const ${name} = \\[([^\\]]*)\\]`, 's'))
-  if (arr) {
-    const out = []
-    for (const token of arr[1].split(',')) {
-      const t = token.trim()
-      if (t === '') continue
-      // 成员可带行内 JSDoc（子词表形态）——取 token 内首个双引号字面量，非全串匹配
-      const literal = t.match(/"([^"]+)"/)
-      if (literal) {
-        out.push(literal[1])
-        continue
-      }
-      const ref = t.match(/^\.\.\.(\w+)$/) ?? t.match(/^(\w+)$/)
-      if (ref) out.push(...extractConstArray(src, ref[1], file, seen))
-    }
-    return out
-  }
+  const members = extractArrayMembers(src, name, file, seen)
+  if (members !== null) return members
   const str = src.match(new RegExp(`export const ${name} = "([^"]+)"`))
   if (str) return [str[1]]
   fail(`源码解析失败：${file} 中找不到 export const ${name}（数组或字符串常量；源码形态变更须同步本守卫）`)
   return []
+}
+
+/** as-const 数组声明的成员提取（非数组声明返回 null——与「空数组声明」区分，空数组合法）。 */
+function extractArrayMembers(src, name, file, seen) {
+  const arr = src.match(new RegExp(`export const ${name} = \\[([^\\]]*)\\]`, 's'))
+  if (!arr) return null
+  const out = []
+  for (const token of arr[1].split(',')) {
+    const t = token.trim()
+    if (t !== '') out.push(...expandArrayToken(src, t, file, seen))
+  }
+  return out
+}
+
+/** 单个成员 token 展开为码字符串数组：字符串字面量 / 子词表引用 / 非 token 文本（忽略）三分。 */
+function expandArrayToken(src, t, file, seen) {
+  // 成员可带行内 JSDoc（子词表形态）——取 token 内首个双引号字面量，非全串匹配
+  const literal = t.match(/"([^"]+)"/)
+  if (literal) return [literal[1]]
+  const ref = t.match(/^\.\.\.(\w+)$/) ?? t.match(/^(\w+)$/)
+  return ref ? extractConstArray(src, ref[1], file, seen) : []
 }
 
 /** 从 CAPABILITY_ENUMS 块提取键集（值域校验交编译层，此处只对账键集投影）。 */

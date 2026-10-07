@@ -356,22 +356,27 @@ export function zcodeRefOf(record: ExecutionRecord): ZcodeTranscriptRef | undefi
   return anchor !== undefined && isZcodeTranscriptRef(anchor) ? anchor : undefined;
 }
 
+/** 未知 JSON 的 plain-object 判定（isEngineHandleShape / isValidModelOverrideShape
+ *  读侧形状守卫的公共口径——数组与 null 不算对象）。 */
+function isPlainObjectShape(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
 /** engineHandle entry 值的运行时 guard（未知 JSON 不裸收；形状与 runtime 读侧
  *  subagent-engine-history 的 extractRecordEngineHandle 守卫语义对齐：poolKey
  *  必有非空 string + sessionRef 值全 string 才收，eventsPath 可选 string）。 */
 export function isEngineHandleShape(
   v: unknown,
 ): v is { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string } {
-  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
-  const h = v as Record<string, unknown>;
-  if (typeof h.poolKey !== "string" || h.poolKey.length === 0) return false;
-  if (typeof h.sessionRef !== "object" || h.sessionRef === null || Array.isArray(h.sessionRef)) {
+  if (!isPlainObjectShape(v)) return false;
+  if (typeof v.poolKey !== "string" || v.poolKey.length === 0) return false;
+  if (!isPlainObjectShape(v.sessionRef)) {
     return false;
   }
-  for (const value of Object.values(h.sessionRef as Record<string, unknown>)) {
+  for (const value of Object.values(v.sessionRef)) {
     if (typeof value !== "string") return false;
   }
-  if (h.eventsPath !== undefined && typeof h.eventsPath !== "string") return false;
+  if (v.eventsPath !== undefined && typeof v.eventsPath !== "string") return false;
   return true;
 }
 
@@ -403,20 +408,22 @@ export function isValidClosedReason(value: string | undefined): value is ClosedR
   return value !== undefined && CLOSED_REASONS.has(value);
 }
 
+/** 覆盖记账 ref 字段的形状守卫（provider/modelId 全 string 才收）。 */
+function isValidModelOverrideRefShape(v: unknown): v is { provider: string; modelId: string } {
+  return isPlainObjectShape(v) && typeof v.provider === "string" && typeof v.modelId === "string";
+}
+
 /**
  * manifest 覆盖记账字段的读侧形状守卫（isEngineHandleShape 同款口径——未知 JSON 不裸收，
  * 外部写入垃圾归一 undefined）。
  */
-export function isValidModelOverrideShape(
+function isValidModelOverrideShape(
   v: unknown,
 ): v is { ref: { provider: string; modelId: string }; thinkingLevel?: string; setAt: number } {
-  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
-  const o = v as Record<string, unknown>;
-  if (typeof o.setAt !== "number") return false;
-  if (o.thinkingLevel !== undefined && typeof o.thinkingLevel !== "string") return false;
-  if (typeof o.ref !== "object" || o.ref === null || Array.isArray(o.ref)) return false;
-  const ref = o.ref as Record<string, unknown>;
-  return typeof ref.provider === "string" && typeof ref.modelId === "string";
+  if (!isPlainObjectShape(v)) return false;
+  if (typeof v.setAt !== "number") return false;
+  if (v.thinkingLevel !== undefined && typeof v.thinkingLevel !== "string") return false;
+  return isValidModelOverrideRefShape(v.ref);
 }
 
 /**

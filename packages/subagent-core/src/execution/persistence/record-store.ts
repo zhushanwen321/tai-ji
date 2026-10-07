@@ -1662,22 +1662,8 @@ export class RecordStore {
       binding: statStamp(`${file}${RECORD_BINDING_SIDECAR_EXT}`),
     };
 
-    const cached = this.fileCache.get(file);
-    if (cached !== undefined && isFreshCache(cached, stamps, this.eventsStampOf(cached))) {
-      if (cached.negative) {
-        // [②B 负缓存事件侧信号] bound 帧可能已追加进既有事件文件（syncBoundEvent 只
-        // 追加事件、不写 .record-binding，jsonl 戳也不变——负缓存的三维比对看不到它，
-        // 按戳判新鲜会永久不可见）。返回 null 前先经事件目录反查：命中（bound 帧已在
-        // ——同进程经 noteFileToRecordId 增量维护，跨进程新事件文件经 dir mtime 重装
-        // 载）即打破负缓存，穿透到下方正常探测。跨进程「追加进既有事件文件且无
-        // binding 写」的残余形态由生产绑定路径覆盖：spawn 回填站点
-        // （run-orchestration.writeBindingForRecord）必写 binding，binding 戳变化
-        // 先一步打破负缓存——本反查只兜「binding 写缺席」的窗口。
-        if (this.identityFromFoldByFile(file) === undefined) return null;
-      } else {
-        return cached;
-      }
-    }
+    const fresh = this.freshCacheEntryOrProbe(file, stamps);
+    if (fresh !== undefined) return fresh;
 
     // [perf L-1] 磁盘索引查询（首扫惰性装载，miss/空索引时 get 恒 undefined = 无索引）。
     // 条目戳匹配 jsonl 当前 stat → 零内容读取构造缓存条目。undefined = 未命中
@@ -1690,19 +1676,45 @@ export class RecordStore {
       const fromIndex = this.buildEntryFromIndex(file, stamps);
       if (fromIndex !== undefined) return fromIndex;
     }
+    return this.probeAndCache(file, stamps, jsonl.size);
+  }
 
-    // [perf L-1] 索引 miss/戳不匹配落到原两级探测：本轮探测结果必须进索引（含负探测）。
-    // 覆盖两种形态：首扫（映像已装载但 miss/不匹配）与后续轮次（映像已释放，凡进重建分支必是戳变化）。
+  /**
+   * 戳校验命中内存缓存时的复用判定（scanFile 拆出；返回约定同 buildEntryFromIndex：
+   * undefined = 落探测重建；null = 负缓存命中跳过；条目 = 直接复用）。
+   */
+  private freshCacheEntryOrProbe(file: string, stamps: FileStamps): FileCacheEntry | null | undefined {
+    const cached = this.fileCache.get(file);
+    if (cached === undefined || !isFreshCache(cached, stamps, this.eventsStampOf(cached))) return undefined;
+    if (!cached.negative) return cached;
+    // [②B 负缓存事件侧信号] bound 帧可能已追加进既有事件文件（syncBoundEvent 只
+    // 追加事件、不写 .record-binding，jsonl 戳也不变——负缓存的三维比对看不到它，
+    // 按戳判新鲜会永久不可见）。返回 null 前先经事件目录反查：命中（bound 帧已在
+    // ——同进程经 noteFileToRecordId 增量维护，跨进程新事件文件经 dir mtime 重装
+    // 载）即打破负缓存，穿透到下方正常探测。跨进程「追加进既有事件文件且无
+    // binding 写」的残余形态由生产绑定路径覆盖：spawn 回填站点
+    // （run-orchestration.writeBindingForRecord）必写 binding，binding 戳变化
+    // 先一步打破负缓存——本反查只兜「binding 写缺席」的窗口。
+    if (this.identityFromFoldByFile(file) === undefined) return null;
+    return undefined;
+  }
+
+  /**
+   * 两级探测重建（scanFile 拆出）：[perf L-1] 索引 miss/戳不匹配落到原两级探测——
+   * 本轮探测结果必须进索引（含负探测）。覆盖两种形态：首扫（映像已装载但 miss/不匹配）
+   * 与后续轮次（映像已释放，凡进重建分支必是戳变化）。
+   * 返回 null：无 identity → 写负缓存（防每轮全文重读；后续扫描 stat 命中直接跳过，
+   * 戳变化——文件补写 / 绑定后到落盘——自动重试）。
+   */
+  private probeAndCache(file: string, stamps: FileStamps, jsonlSize: number): FileCacheEntry | null {
     this.indexDirty = true;
 
-    const header = detectIdentity(file, jsonl.size);
+    const header = detectIdentity(file, jsonlSize);
     // [身份换源] 身份源两级：子文件 identity entry（历史权威，命中时其余不参与）
     // → 事件流折叠（事件流是唯一事实源：id 经事件目录反查，身份域 + model/
     // thinkingLevel/worktree 取 record-created 载荷）。两级皆缺 → 负缓存。
     const base = header ?? this.identityFromFoldByFile(file);
     if (!base) {
-      // 负缓存：确认无 identity。后续扫描 stat 命中直接跳过；戳变化（文件补写 /
-      // 绑定后到落盘）自动重试。
       this.fileCache.set(file, { negative: true, ...stamps });
       return null;
     }

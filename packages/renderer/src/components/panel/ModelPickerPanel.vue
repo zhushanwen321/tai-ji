@@ -70,7 +70,7 @@ const props = withDefaults(defineProps<{
 })
 
 /** 行事件单 payload（id + 所属组 providerId——provider 归属单点随组上行；组无 providerId 时缺省） */
-export interface ModelPickPayload {
+interface ModelPickPayload {
   id: string
   providerId?: ProviderId
 }

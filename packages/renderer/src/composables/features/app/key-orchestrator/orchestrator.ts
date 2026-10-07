@@ -37,47 +37,74 @@ import { closeTopContainer } from './stack-order'
 import { useFindInSurface } from '@/composables/features/find/useFindInSurface'
 
 /**
- * window keydown（bubble 相位）——Esc / Tab 浮层分支 / Ctrl+F。
+ * §6.7 模态共存守卫（Esc / Tab 双检同源）：先行档消费方（capture/document/元素级）已消费
+ * （defaultPrevented）或聚合让位族（yieldsEsc）任一成员开着 → 不动作（先服务视觉最外层）。
+ */
+function modalSurfaceBlocksEvent(e: KeyboardEvent): boolean {
+  return e.defaultPrevented || anyModalSurfaceYieldsEsc()
+}
+
+/**
+ * 表面内查找开着 → 关查找框并消费事件（返回 true）；没开 → 返回 false 交还容器剥层。
+ * FindBar 根上 keydown.stop 已消费输入框聚焦态（stopPropagation 不冒泡到 window），
+ * 此处兜非聚焦态：焦点在表面其它位置时 Esc 不得穿透成「关容器」——查找框是表面上的
+ * 临时覆盖层，先于容器关闭。
+ */
+function closeFindIfOpen(e: KeyboardEvent): boolean {
+  const find = useFindInSurface()
+  if (!find.isOpen.value) return false
+  find.close()
+  e.preventDefault()
+  return true
+}
+
+/** Esc 分支：模态共存守卫 → 查找框优先 → 层级序剥层。 */
+function handleEscapeKeydown(e: KeyboardEvent): void {
+  if (modalSurfaceBlocksEvent(e)) return
+  if (closeFindIfOpen(e)) return
+  if (closeTopContainer()) e.preventDefault()
+}
+
+/**
+ * Tab 浮层分支：浮层开着时首末循环（§7.3 随迁保位，W2 随 OverlayShell 归位；面板 ref 经
+ * overlay 宿主注入）。Tab 属主 = 最上层表面（2026-10-03 用户裁决；登记
+ * docs/todo/display-containers-overlay-tab-ownership.md）：模态/弹层叠在浮层上 → Tab 归
+ * 该模态焦点域，陷阱不把焦点拉回浮层面板（双检即 modalSurfaceBlocksEvent，与 Esc 同源）。
+ */
+function handleOverlayTabKeydown(e: KeyboardEvent): void {
+  if (!getOverlayControlState().isOpen) return
+  if (modalSurfaceBlocksEvent(e)) return
+  trapTabIntoOverlayPanel(e)
+}
+
+/**
+ * Ctrl/Cmd+F 分支：表面内查找（find-in-surface）。归属判定在 useFindInSurface.openFindAtPointer
+ * （鼠标悬停优先 → 回退栈序 → 全无不动作）。mod 判定与 useGlobalShortcuts 同款
+ * （metaKey||ctrlKey 双平台同触，无需平台分支）；禁 capture——同 Esc 的 xterm 红线。
+ */
+function handleFindShortcutKeydown(e: KeyboardEvent): void {
+  if (!(e.metaKey || e.ctrlKey)) return
+  if (e.defaultPrevented) return
+  e.preventDefault()
+  useFindInSurface().openFindAtPointer()
+}
+
+/**
+ * window keydown（bubble 相位）——按键分发到 Esc / Tab 浮层 / Ctrl+F 三个分支。
  * isComposing 守卫统一前置（§6.7：IME 组合态三键一律不动作；组合态 Esc 是「取消候选」
  * 的输入键，Tab 同守卫防组合态误改焦点）。
  */
 function onWindowKeydown(e: KeyboardEvent): void {
   if (e.isComposing) return
   if (e.key === 'Escape') {
-    // §6.7 模态共存守卫两重：先行档消费方（capture/document/元素级）已消费 → 不动作；
-    // 聚合让位族（yieldsEsc）任一成员开着 → 不动作（Esc 先服务视觉最外层）
-    if (e.defaultPrevented) return
-    if (anyModalSurfaceYieldsEsc()) return
-    // 表面内查找开着 → Esc 先关查找框再轮到容器剥层。FindBar 根上 keydown.stop 已消费
-    // 输入框聚焦态（stopPropagation 不冒泡到 window），此处兜非聚焦态：焦点在表面其它
-    // 位置时 Esc 不得穿透成「关容器」——查找框是表面上的临时覆盖层，先于容器关闭。
-    const find = useFindInSurface()
-    if (find.isOpen.value) {
-      find.close()
-      e.preventDefault()
-      return
-    }
-    if (closeTopContainer()) e.preventDefault()
+    handleEscapeKeydown(e)
     return
   }
-  if (e.key === 'Tab' && getOverlayControlState().isOpen) {
-    // Tab 属主 = 最上层表面（2026-10-03 用户裁决；登记 docs/todo/display-containers-overlay-tab-ownership.md）：
-    // 模态/弹层叠在浮层上 → Tab 归该模态焦点域，陷阱不把焦点拉回浮层面板。
-    // 双检与 Esc 分支同源（§6.7 模态共存守卫）：先行档消费方已消费（defaultPrevented）→
-    // 不动作；聚合让位族（yieldsEsc）任一成员开着 → 不动作（Tab 先服务视觉最外层）。
-    if (e.defaultPrevented) return
-    if (anyModalSurfaceYieldsEsc()) return
-    trapTabIntoOverlayPanel(e)
+  if (e.key === 'Tab') {
+    handleOverlayTabKeydown(e)
     return
   }
-  // Ctrl/Cmd+F：表面内查找（find-in-surface）。归属判定在 useFindInSurface.openFindAtPointer
-  // （鼠标悬停优先 → 回退栈序 → 全无不动作）。mod 判定与 useGlobalShortcuts 同款
-  // （metaKey||ctrlKey 双平台同触，无需平台分支）；禁 capture——同 Esc 的 xterm 红线。
-  if (e.key === 'f' && (e.metaKey || e.ctrlKey)) {
-    if (e.defaultPrevented) return
-    e.preventDefault()
-    useFindInSurface().openFindAtPointer()
-  }
+  if (e.key === 'f') handleFindShortcutKeydown(e)
 }
 
 /**

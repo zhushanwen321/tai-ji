@@ -51,6 +51,13 @@ const STATUS_ORDER: Record<string, number> = {
 /** 未知 status 的默认排序权重（排在已知 status 之后）。 */
 const UNKNOWN_STATUS_WEIGHT = 9;
 
+/** RPC 非 lifecycle 通知 action 词表（abort/resume 之外的三个纯 notify 分支——
+ *  rpcSideNotify 的穷举域；abort/resume 在 handleRpcMode 内 if 早退）。 */
+type WorkflowRpcSideAction = Extract<
+  WorkflowRpcAction,
+  { action: "lifecycle-removed" | "lifecycle-missing-id" | "noop" }
+>;
+
 // ── /workflows command ───────────────────────────────────────
 
 /**
@@ -129,41 +136,7 @@ export function registerWorkflowsCommand(
         return;
       }
 
-      // TUI 动词命令：/workflows resume <runId>——执行断点续跑后 notify，不打开面板
-      // （abort 动词在 TUI 侧无既有通道，不在此顺手扩——resume 是本批接入面）
-      const trimmedArgs = args.trim();
-      const [verb, ...rest] = trimmedArgs.split(/\s+/).filter(Boolean);
-      if (verb === "resume") {
-        const runId = rest[0];
-        if (!runId) {
-          ctx.ui.notify("Usage: /workflows resume <runId> [model]", "warning");
-          return;
-        }
-        // 可选第二参数 = 显式模型 canonical ref（'provider/modelId[:thinkingLevel]'）——
-        // 落统一覆盖记账（F1-26 后续项：与 setModel 补切同通道，resume 合一步表达）。
-        const model = rest[1];
-        try {
-          if (model !== undefined) assertResumeModelInCatalog(model);
-          await resumeRun(runId, deps, ...(model !== undefined ? [{ model }] : []));
-          ctx.ui.notify(
-            `Workflow ${runId}: resuming${model !== undefined ? ` with model ${model}` : ""} — completed calls replay at zero token cost, unfinished calls re-dispatched`,
-            "info",
-          );
-        } catch (err) {
-          ctx.ui.notify(`Failed to resume workflow ${runId}: ${toErrorMessage(err)}`, "warning");
-        }
-        return;
-      }
-
-      // 直接按 runId / 前缀匹配打开
-      const directRunId = trimmedArgs;
-      if (directRunId) {
-        await openByRunId(directRunId, getRuns, ctx, deps);
-        return;
-      }
-
-      // 无参——列表选择
-      await openFromList(getRuns, ctx, deps);
+      await handleTuiCommand(args, ctx, getRuns, deps);
     },
   });
 }
@@ -182,38 +155,36 @@ export function registerWorkflowsCommand(
  *   （F3 定稿——提示语义优先于 missing-id：run 一次性生命周期后不可挂起）
  * - lifecycle-missing-id → Usage 提示
  * - noop → 无 action 或未知 action：GUI 端已屏蔽此 command 入口，此处兜底
+ *
+ * 分派形态：两个 lifecycle 动作 if 早退（控制流收窄，零断言），其余三个纯
+ * notify action 收敛进 rpcSideNotify 的穷举 switch。
  */
 async function handleRpcMode(
   parsed: WorkflowRpcAction,
   ctx: ExtensionCommandContext,
   deps: LauncherDeps,
 ): Promise<void> {
+  if (parsed.action === "abort") {
+    await abortWithNotify(parsed.runId, deps, ctx);
+    return;
+  }
+  if (parsed.action === "resume") {
+    await resumeWithNotify(parsed.runId, parsed.model, deps, ctx);
+    return;
+  }
+  rpcSideNotify(parsed, ctx);
+}
+
+/**
+ * 非 lifecycle RPC action（lifecycle-removed / lifecycle-missing-id / noop）的
+ * 穷举 notify 分派。default 保留 exhaustiveness 断言：未来新增 action verb 忘加
+ * case 时 tsc 报错。
+ */
+function rpcSideNotify(
+  parsed: WorkflowRpcSideAction,
+  ctx: ExtensionCommandContext,
+): void {
   switch (parsed.action) {
-    case "abort": {
-      try {
-        await abortRun(parsed.runId, deps);
-        // abort 单态后 pastTense 固定（原三态拼接随 pause/resume 删除）
-        ctx.ui.notify(`Workflow ${parsed.runId}: aborted`, "info");
-      } catch (err) {
-        const msg = toErrorMessage(err);
-        ctx.ui.notify(`Failed to abort workflow ${parsed.runId}: ${msg}`, "warning");
-      }
-      return;
-    }
-    case "resume": {
-      try {
-        if (parsed.model !== undefined) assertResumeModelInCatalog(parsed.model);
-        await resumeRun(parsed.runId, deps, ...(parsed.model !== undefined ? [{ model: parsed.model }] : []));
-        ctx.ui.notify(
-          `Workflow ${parsed.runId}: resuming${parsed.model !== undefined ? ` with model ${parsed.model}` : ""} — completed calls replay at zero token cost, unfinished calls re-dispatched`,
-          "info",
-        );
-      } catch (err) {
-        const msg = toErrorMessage(err);
-        ctx.ui.notify(`Failed to resume workflow ${parsed.runId}: ${msg}`, "warning");
-      }
-      return;
-    }
     case "lifecycle-removed":
       ctx.ui.notify(
         `Workflow ${parsed.verb} has been removed — runs are one-shot. To stop a run early: /workflows abort <runId>`,
@@ -223,12 +194,7 @@ async function handleRpcMode(
     case "lifecycle-missing-id":
       // Usage 按 verb 区分（与 TUI verb 分支同文案——两模式统一）：resume 的可选
       // [model] 参数要出现在提示里，GUI 侧缺 runId 时得到的指引不指向旧用法。
-      ctx.ui.notify(
-        parsed.verb === "resume"
-          ? "Usage: /workflows resume <runId> [model]"
-          : `Usage: /workflows ${parsed.verb} <runId>`,
-        "warning",
-      );
+      ctx.ui.notify(missingIdUsageText(parsed.verb), "warning");
       return;
     case "noop":
       ctx.ui.notify("View workflows in the composer task tray", "info");
@@ -239,6 +205,100 @@ async function handleRpcMode(
       throw new Error(`Unhandled workflow RPC action: ${String(_exhaustive)}`);
     }
   }
+}
+
+/** lifecycle-missing-id 的 Usage 文案：resume 带可选 [model] 参数，其余 verb 仅 runId。 */
+function missingIdUsageText(verb: "abort" | "resume"): string {
+  return verb === "resume" ? "Usage: /workflows resume <runId> [model]" : `Usage: /workflows ${verb} <runId>`;
+}
+
+/** abort 执行 + 结果通知（成功/失败均 notify，不向上抛——RPC 通道唯一 abort 入口）。 */
+async function abortWithNotify(
+  runId: string,
+  deps: LauncherDeps,
+  ctx: ExtensionCommandContext,
+): Promise<void> {
+  try {
+    await abortRun(runId, deps);
+    // abort 单态后 pastTense 固定（原三态拼接随 pause/resume 删除）
+    ctx.ui.notify(`Workflow ${runId}: aborted`, "info");
+  } catch (err) {
+    ctx.ui.notify(`Failed to abort workflow ${runId}: ${toErrorMessage(err)}`, "warning");
+  }
+}
+
+/**
+ * resume 执行 + 结果通知（TUI verb / RPC verb 两通道共享——同语义同文案，防
+ * 双处文案漂移）。显式 model 先做目录预检（assertResumeModelInCatalog），成功/
+ * 失败均 notify（不向上抛）。
+ */
+async function resumeWithNotify(
+  runId: string,
+  model: string | undefined,
+  deps: LauncherDeps,
+  ctx: ExtensionCommandContext,
+): Promise<void> {
+  try {
+    if (model !== undefined) assertResumeModelInCatalog(model);
+    await resumeRun(runId, deps, ...resumeModelArgs(model));
+    ctx.ui.notify(resumeStartedText(runId, model), "info");
+  } catch (err) {
+    ctx.ui.notify(`Failed to resume workflow ${runId}: ${toErrorMessage(err)}`, "warning");
+  }
+}
+
+/** 可选 model → resumeRun 变参（无覆盖 = 空变参，不造覆盖记账）。 */
+function resumeModelArgs(model: string | undefined): [] | [{ model: string }] {
+  return model !== undefined ? [{ model }] : [];
+}
+
+/** resume 启动通知文案（带显式 model 时回显模型，用户可确认覆盖生效）。 */
+function resumeStartedText(runId: string, model: string | undefined): string {
+  return `Workflow ${runId}: resuming${model !== undefined ? ` with model ${model}` : ""} — completed calls replay at zero token cost, unfinished calls re-dispatched`;
+}
+
+/**
+ * TUI 模式命令分派：resume verb → 断点续跑后 notify（不打开面板）；带参 → 按
+ * runId/前缀匹配打开；无参 → 列表选择。（abort 动词在 TUI 侧无既有通道，不在此
+ * 顺手扩——resume 是本批接入面）
+ */
+async function handleTuiCommand(
+  args: string,
+  ctx: ExtensionCommandContext,
+  getRuns: () => Map<string, WorkflowRun>,
+  deps: LauncherDeps,
+): Promise<void> {
+  const trimmedArgs = args.trim();
+  const [verb, ...rest] = trimmedArgs.split(/\s+/).filter(Boolean);
+  if (verb === "resume") {
+    await resumeTuiVerb(rest, ctx, deps);
+    return;
+  }
+  // 直接按 runId / 前缀匹配打开
+  if (trimmedArgs) {
+    await openByRunId(trimmedArgs, getRuns, ctx, deps);
+    return;
+  }
+  // 无参——列表选择
+  await openFromList(getRuns, ctx, deps);
+}
+
+/**
+ * TUI resume verb：缺 runId 给 Usage 提示。可选第二参数 = 显式模型 canonical ref
+ * （'provider/modelId[:thinkingLevel]'）——落统一覆盖记账（F1-26 后续项：与
+ * setModel 补切同通道，resume 合一步表达）。执行与通知复用 RPC 同款 resumeWithNotify。
+ */
+async function resumeTuiVerb(
+  rest: string[],
+  ctx: ExtensionCommandContext,
+  deps: LauncherDeps,
+): Promise<void> {
+  const runId = rest[0];
+  if (!runId) {
+    ctx.ui.notify("Usage: /workflows resume <runId> [model]", "warning");
+    return;
+  }
+  await resumeWithNotify(runId, rest[1], deps, ctx);
 }
 
 /**

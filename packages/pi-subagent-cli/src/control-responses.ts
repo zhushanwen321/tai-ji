@@ -33,7 +33,7 @@ import { sendGetStateCommand, sendSetModelCommand } from "./stdin-writer.ts";
 // ============================================================
 
 /** 控制命令等待的结局（response / 子进程退出 / 阶段超时三出口，调用方分派）。 */
-export type ControlResponseOutcome =
+type ControlResponseOutcome =
   | { kind: "response"; success: boolean; data: unknown; error: string | undefined }
   | { kind: "child-exited" }
   | { kind: "timeout" };
@@ -53,7 +53,7 @@ const pending = new Map<string, (outcome: ControlResponseOutcome) => void>();
  * close 与 error 都按「子进程退出」收敛（error = spawn 失败，子进程从未运行——
  * 对控制面同样是「无活进程」语义）。
  */
-export function awaitControlResponse(
+function awaitControlResponse(
   child: ChildProcess,
   requestId: string,
   timeoutMs: number,
@@ -225,28 +225,16 @@ function extractPiStateSnapshot(data: unknown): {
  * §6.4——热切档位以联动值为生效事实，生效值经 get_state 回读应答宿主；用户显式
  * 档位经覆盖记账在下一轮 spawn 由解析链裁决，跨轮边界档位以解析链为准）。
  */
-/**
- * ⑤ get_state 回读生效状态（回读前复检 + 回读窗 + 快照完整性检查；set_model 成功后
- * 的回读段独立成段——与读应答窗共用 awaitStageAck 三分诊）。
- */
-async function readbackEffectiveState(child: ChildProcess): Promise<SetModelForwardOutcome> {
-  // ④ 回读前复检（set_model 成功后、get_state 写入前的间隙退出 = 回读期间退出窗口）
-  if (!isChildAlive(child) || child.stdin === null || child.stdin === undefined || child.stdin.destroyed) {
-    return { kind: "not-active" };
-  }
+/** 回读前 stdin 可写判定（stdin 缺失/已毁 = 进程死亡在控制面的投影，与存活检查互补）。 */
+function stdinWritable(child: ChildProcess): boolean {
+  return child.stdin !== null && child.stdin !== undefined && !child.stdin.destroyed;
+}
 
-  // ⑤ get_state 回读（回读窗口；get_state 投递失败路径由 close 收敛或超时存活复检兜住）
-  const stateRequestId = sendGetStateCommand(child);
-  const stateAck = await awaitStageAck(child, stateRequestId, "state-readback", "get_state readback");
-  if (stateAck.kind !== "response") return stateAck;
-  if (!stateAck.success) {
-    return {
-      kind: "readback-failed",
-      stage: "state-readback",
-      detail: errorTextOr(stateAck.error, "get_state failed without an error message"),
-    };
-  }
-  const snapshot = extractPiStateSnapshot(stateAck.data);
+/**
+ * get_state 成功应答 → 回读段结局（快照完整性检查单点：model/thinkingLevel 任一缺失 =
+ * 状态不完整，按回读失败处置——不虚构生效值）。
+ */
+function switchedOutcomeFrom(snapshot: ReturnType<typeof extractPiStateSnapshot>): SetModelForwardOutcome {
   if (
     snapshot.modelProvider === undefined ||
     snapshot.modelId === undefined ||
@@ -263,6 +251,35 @@ async function readbackEffectiveState(child: ChildProcess): Promise<SetModelForw
     effectiveModel: { provider: snapshot.modelProvider, modelId: snapshot.modelId },
     effectiveThinkingLevel: snapshot.thinkingLevel,
   };
+}
+
+/** get_state 应答 → 回读段结局（失败应答的 detail 透传，空/缺省落 fallback 文案）。 */
+function stateReadbackOutcome(ack: Extract<StageAckOutcome, { kind: "response" }>): SetModelForwardOutcome {
+  if (!ack.success) {
+    return {
+      kind: "readback-failed",
+      stage: "state-readback",
+      detail: errorTextOr(ack.error, "get_state failed without an error message"),
+    };
+  }
+  return switchedOutcomeFrom(extractPiStateSnapshot(ack.data));
+}
+
+/**
+ * ⑤ get_state 回读生效状态（回读前复检 + 回读窗 + 快照完整性检查；set_model 成功后
+ * 的回读段独立成段——与读应答窗共用 awaitStageAck 三分诊）。
+ */
+async function readbackEffectiveState(child: ChildProcess): Promise<SetModelForwardOutcome> {
+  // ④ 回读前复检（set_model 成功后、get_state 写入前的间隙退出 = 回读期间退出窗口）
+  if (!isChildAlive(child) || !stdinWritable(child)) {
+    return { kind: "not-active" };
+  }
+
+  // ⑤ get_state 回读（回读窗口；get_state 投递失败路径由 close 收敛或超时存活复检兜住）
+  const stateRequestId = sendGetStateCommand(child);
+  const stateAck = await awaitStageAck(child, stateRequestId, "state-readback", "get_state readback");
+  if (stateAck.kind !== "response") return stateAck;
+  return stateReadbackOutcome(stateAck);
 }
 
 export async function setModelOnActiveChild(

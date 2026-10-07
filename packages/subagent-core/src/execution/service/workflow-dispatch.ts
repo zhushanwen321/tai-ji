@@ -287,22 +287,9 @@ export class WorkflowDispatch {
     // ③ 引擎感知 model 校验（非 pi = validateModelForEngine；pi = D8 派发期对称
     // 校验，详见 resolveWorkflowIdentity）+ identity 解析 +
     // record 引擎留痕盖章（详见 stampWorkflowEngineTrace）。
-    // [subagent-model-switch §7.4 派发侧覆写 / §6.6 决策六②] 用户覆盖在场 → 覆写
-    // 调用参数 model（覆盖存在时，调用参数中的显式 model 也被覆盖——用户覆盖赢，
-    // §2 目标 3）。覆写发生在 resolveWorkflowIdentity 之前：pi 路径的 paramOverride
-    // 与非 pi 路径的 engineModel 两个解析输入源同点生效，D8 派发期目录校验校验的
-    // 也是覆盖值。thinkingLevel 在本点不覆写调用参数——档位由解析链现役候选链裁决
-    //（调用参数显式档位 > 覆盖记账档位 > frontmatter，§6.2 记账形状），裁决产物
-    //（含档位）在 runWorkflowEngineTask 的 taskSpec 组装点进执行通道。内存 miss
-    //（主 agent 重启后首次派发）经 rebuildRunOverride 从 run 事件流折叠重建（含
-    // 内存回填）。
-    const dispatchOverride =
-      this.deps.getModelOverride(parentRunId) ?? (await this.deps.rebuildRunOverride(parentRunId));
-    if (dispatchOverride !== undefined) {
-      const overrideRef = `${dispatchOverride.ref.provider}/${dispatchOverride.ref.modelId}`;
-      opts.model = overrideRef;
-      execOpts.model = overrideRef;
-    }
+    // [subagent-model-switch §7.4 派发侧覆写] 用户覆盖在 resolveWorkflowIdentity
+    // 之前覆写调用参数 model（详见 applyDispatchOverride）。
+    await this.applyDispatchOverride(parentRunId, opts, execOpts);
     const identity = await this.resolveWorkflowIdentity(route, opts, execOpts, agentConfig);
     this.stampWorkflowEngineTrace(route, execOpts);
 
@@ -315,48 +302,17 @@ export class WorkflowDispatch {
     //    未命中 → 现状新建路径 + 登记。
     const memberName = opts.description ?? opts.agent;
     if (memberName !== undefined) {
-      const memberRecordId = await lookupMemberRecordId(parentRunId, memberName, this.memberReusePoolIo);
-      if (memberRecordId !== undefined) {
-        const revived = this.deps.reviveMemberRecord(memberRecordId);
-        if (revived.kind === "revived") {
-          // [subagent-model-switch §6.6 复活重新盖章] 重派视作新一轮启动：复活命中
-          // 后、引擎调用前，以最新解析产物（identity——上方派发侧覆写已把覆盖写进
-          // 解析输入，含第 0 层短路语义）重新盖章 model / thinkingLevel。不变量 1
-          // 的例外边界（重派 = 新一轮启动的盖章动作）；切换操作本身仍永不改写
-          // record.model（不变量 5 不受影响）。interrupted 后 resume 的重派步骤恰是
-          // 复活路径高发区——旧盖章值在此被最新解析产物替换，spawn argv 与盖章一致。
-          restampRecordModel(revived.record, identity.resolved);
-          const effectiveSignal = signal ?? revived.record.controller?.signal;
-          return this.runWorkflowEngineTask(
-            revived.record,
-            opts,
-            identity,
-            route.engine,
-            effectiveSignal,
-            onEvent,
-            stream,
-            { recordId: revived.record.id, resume: resumeAnchorOf(revived.record) },
-          );
-        }
-        if (revived.kind === "inFlight") {
-          // run 内名唯一（zcode 对齐语义）——同名并行第二写者 = 同一 session 文件
-          // 双写，fail-fast 拒绝（脚本观察到本 call 失败，已飞成员不受影响）。
-          throw new Error(
-            `workflow member "${memberName}" (record ${memberRecordId}) is still running — ` +
-            `a run must not have two agent() calls with the same name in flight (zcode-aligned ` +
-            `name uniqueness). Recovery: await the in-flight call, or use a distinct name ` +
-            `(e.g. \`${memberName}-2\`) for the concurrent call.`,
-          );
-        }
-        // missing：池命中但 record 不可达（磁盘被清等实施外损耗）——按未命中降级
-        // 新建 + warn 留痕（决策 9「fold 后仍缺项 → 未命中新建 + warn」的落点；
-        // 下方登记的换绑 warn 与本 warn 共同留痕）。
-        logger.warn(
-          `[subagents] member reuse pool hit for run ${parentRunId} (name "${memberName}" → ` +
-          `record ${memberRecordId}) but the record is not recoverable — dispatching a new ` +
-          `member instead (conversation history of the old record is lost).`,
-        );
-      }
+      const revivedResult = await this.tryReviveWorkflowMember(
+        parentRunId,
+        memberName,
+        opts,
+        identity,
+        route,
+        signal,
+        onEvent,
+        stream,
+      );
+      if (revivedResult !== undefined) return revivedResult;
     }
 
     // ── record 注册（origin:"workflow" + parentRunId + stepIndex；record 级
@@ -376,6 +332,90 @@ export class WorkflowDispatch {
 
     const effectiveSignal = signal ?? record.controller?.signal;
     return this.runWorkflowEngineTask(record, opts, identity, route.engine, effectiveSignal, onEvent, stream);
+  }
+
+  /**
+   * [executeWorkflowAgent 阶段拆分] 派发侧覆盖覆写（[subagent-model-switch §7.4 /
+   * §6.6 决策六②]）：用户覆盖在场 → 覆写调用参数 model（覆盖存在时，调用参数中的
+   * 显式 model 也被覆盖——用户覆盖赢，§2 目标 3）。覆写发生在 resolveWorkflowIdentity
+   * 之前：pi 路径的 paramOverride 与非 pi 路径的 engineModel 两个解析输入源同点
+   * 生效，D8 派发期目录校验校验的也是覆盖值。thinkingLevel 在本点不覆写调用参数
+   * ——档位由解析链现役候选链裁决（调用参数显式档位 > 覆盖记账档位 > frontmatter，
+   * §6.2 记账形状），裁决产物（含档位）在 runWorkflowEngineTask 的 taskSpec 组装点
+   * 进执行通道。内存 miss（主 agent 重启后首次派发）经 rebuildRunOverride 从 run
+   * 事件流折叠重建（含内存回填）。原位 mutate opts / execOpts。
+   */
+  private async applyDispatchOverride(
+    parentRunId: string,
+    opts: AgentCallOpts,
+    execOpts: ExecuteOptions,
+  ): Promise<void> {
+    const dispatchOverride =
+      this.deps.getModelOverride(parentRunId) ?? (await this.deps.rebuildRunOverride(parentRunId));
+    if (dispatchOverride === undefined) return;
+    const overrideRef = `${dispatchOverride.ref.provider}/${dispatchOverride.ref.modelId}`;
+    opts.model = overrideRef;
+    execOpts.model = overrideRef;
+  }
+
+  /**
+   * [executeWorkflowAgent 阶段拆分] 成员复用入口分岔（[U4 pi-workflow-run-resource-
+   * model 决策 10]）：命中 revive → 续写轮结果；inFlight → fail-fast 抛错；missing
+   * / 未命中 → 返回 undefined，调用方走新建路径。调用前提 = 路由/预检/identity 的
+   * 同步拒绝序列已在调用方先行完成（D3 顺序红线不受本拆分影响）。
+   */
+  private async tryReviveWorkflowMember(
+    parentRunId: string,
+    memberName: string,
+    opts: AgentCallOpts,
+    identity: ResolvedIdentity,
+    route: EngineRouteResult,
+    signal: AbortSignal | undefined,
+    onEvent?: (event: AgentEvent) => void,
+    stream?: AgentStreamSink,
+  ): Promise<WorkflowAgentResult | undefined> {
+    const memberRecordId = await lookupMemberRecordId(parentRunId, memberName, this.memberReusePoolIo);
+    if (memberRecordId === undefined) return undefined;
+    const revived = this.deps.reviveMemberRecord(memberRecordId);
+    if (revived.kind === "revived") {
+      // [subagent-model-switch §6.6 复活重新盖章] 重派视作新一轮启动：复活命中
+      // 后、引擎调用前，以最新解析产物（identity——派发侧覆写已把覆盖写进
+      // 解析输入，含第 0 层短路语义）重新盖章 model / thinkingLevel。不变量 1
+      // 的例外边界（重派 = 新一轮启动的盖章动作）；切换操作本身仍永不改写
+      // record.model（不变量 5 不受影响）。interrupted 后 resume 的重派步骤恰是
+      // 复活路径高发区——旧盖章值在此被最新解析产物替换，spawn argv 与盖章一致。
+      restampRecordModel(revived.record, identity.resolved);
+      const effectiveSignal = signal ?? revived.record.controller?.signal;
+      return this.runWorkflowEngineTask(
+        revived.record,
+        opts,
+        identity,
+        route.engine,
+        effectiveSignal,
+        onEvent,
+        stream,
+        { recordId: revived.record.id, resume: resumeAnchorOf(revived.record) },
+      );
+    }
+    if (revived.kind === "inFlight") {
+      // run 内名唯一（zcode 对齐语义）——同名并行第二写者 = 同一 session 文件
+      // 双写，fail-fast 拒绝（脚本观察到本 call 失败，已飞成员不受影响）。
+      throw new Error(
+        `workflow member "${memberName}" (record ${memberRecordId}) is still running — ` +
+        `a run must not have two agent() calls with the same name in flight (zcode-aligned ` +
+        `name uniqueness). Recovery: await the in-flight call, or use a distinct name ` +
+        `(e.g. \`${memberName}-2\`) for the concurrent call.`,
+      );
+    }
+    // missing：池命中但 record 不可达（磁盘被清等实施外损耗）——按未命中降级
+    // 新建 + warn 留痕（决策 9「fold 后仍缺项 → 未命中新建 + warn」的落点；
+    // 登记的换绑 warn 与本 warn 共同留痕）。
+    logger.warn(
+      `[subagents] member reuse pool hit for run ${parentRunId} (name "${memberName}" → ` +
+      `record ${memberRecordId}) but the record is not recoverable — dispatching a new ` +
+      `member instead (conversation history of the old record is lost).`,
+    );
+    return undefined;
   }
 
   /** [executeWorkflowAgent 阶段拆分] 八步迁移①：引擎路由（D2 单轨——统一经

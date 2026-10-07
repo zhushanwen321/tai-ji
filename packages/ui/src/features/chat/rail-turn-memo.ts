@@ -21,8 +21,9 @@ import type { MessageTurn } from '@taiji/core/domain/chat'
 import { hasFailedTool } from '@taiji/core/domain/chat'
 import { summarizeTurnForRail, summarizeAssistantForRail } from '@taiji/core/domain/chat'
 
-/** memo 条目的纯数据形状（非待实现契约——无 implements/extends 变体，用 type 别名） */
-type RailTurnMemo = {
+/** memo 条目的纯数据形状（非待实现契约——无 implements/extends 变体，用 type 别名；导出 =
+ * railMemoFor 返回类型可命名，消费方 useMessageStreamRail 做投影签名比对时字段有权威源） */
+export type RailTurnMemo = {
   /** user 行摘要（summarizeTurnForRail，无 user turn 为空串——模板 `|| ' '` 兜底不变） */
   userSummary: string
   /** agent 行摘要（summarizeAssistantForRail，空串时模板经占位门判定「进行中…」或空格 fallback——判据不在 memo 内） */

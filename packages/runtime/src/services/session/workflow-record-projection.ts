@@ -298,9 +298,62 @@ function buildMemberIndexByRun(subagents: SubagentRecord[]): Map<string, Map<num
 }
 
 /**
+ * [enhanceRunAgentCalls 拆分] 单 call 的成员增强目标字段（runOverride 优先于成员
+ * 自有覆盖——run 级全切是 run 作用域意图，分发到该 run 全部条目）。三字段全缺席 =
+ * 无增强项（零拷贝快路径保留条件）。成员标识恒透出（member 在场即携带，不等覆盖/
+ * 生效值在场）——它是回执显示态的读取键，切换发生时面板数据源可能尚无任何覆盖载荷
+ * （首次切换前两者恒缺席）。subagentId = record 创建事件 identity.id
+ * （projectV2Subagent 身份域），与聚合应答成员标识
+ * （listAcceptedMemberRunIdsForSwitch 的 ExecutionRecord.id）同源。
+ */
+interface AgentCallEnhancement {
+  memberRecordId?: WorkflowAgentCall['memberRecordId']
+  modelOverride?: WorkflowAgentCall['modelOverride']
+  recentEffectiveModel?: WorkflowAgentCall['recentEffectiveModel']
+}
+
+function callEnhancementTarget(
+  member: SubagentRecord | undefined,
+  runOverride: SubagentModelOverrideStatus | undefined,
+): AgentCallEnhancement | undefined {
+  const memberRecordId = member?.subagentId
+  const modelOverride = runOverride ?? member?.modelOverride
+  const recentEffectiveModel = member?.recentEffectiveModel
+  if (memberRecordId === undefined && modelOverride === undefined && recentEffectiveModel === undefined) {
+    return undefined
+  }
+  return { memberRecordId, modelOverride, recentEffectiveModel }
+}
+
+/** 引用相等短路（返回值直进 RPC reply 不缓存，无跨轮幂等消费位；形状级比较不必
+ * ——成员增强产物每次读 RPC 重派生）。 */
+function agentCallFieldsEqual(call: WorkflowAgentCall, target: AgentCallEnhancement): boolean {
+  return (
+    call.memberRecordId === target.memberRecordId &&
+    call.modelOverride === target.modelOverride &&
+    call.recentEffectiveModel === target.recentEffectiveModel
+  )
+}
+
+/** 目标字段条件展开（键缺席语义；展开序 = memberRecordId → modelOverride →
+ * recentEffectiveModel，与原组装逐字段同构）。 */
+function applyAgentCallEnhancement(call: WorkflowAgentCall, target: AgentCallEnhancement): WorkflowAgentCall {
+  return {
+    ...call,
+    ...(target.memberRecordId !== undefined ? { memberRecordId: target.memberRecordId } : {}),
+    ...(target.modelOverride !== undefined ? { modelOverride: target.modelOverride } : {}),
+    ...(target.recentEffectiveModel !== undefined ? { recentEffectiveModel: target.recentEffectiveModel } : {}),
+  }
+}
+
+/**
  * [projectSubagentModelDetailIntoRuns 拆分] 单 run 的 agentCalls 模型字段增强：
  * 任一 call 变更返回新 run 对象，无变更返回 undefined（skip 信号，主遍历循环尾
- * 原样写回）。
+ * 原样写回）。变更判定 = 单 call 增强产物与原 call 的引用不等（changed 归并进
+ * map 回调，重建判定链拆见 callEnhancementTarget / agentCallFieldsEqual /
+ * applyAgentCallEnhancement 三小函数）。代价：getWorkflows 每次读 RPC 对有成员的
+ * run 重建 agentCalls 数组（零拷贝快路径仅在成员圈定全 miss 时保留）——成员增强
+ * 产物本就每次读 RPC 重派生，重建为浅展开小对象，量级可忽略。
  */
 function enhanceRunAgentCalls(
   run: WorkflowRunRecord,
@@ -309,34 +362,10 @@ function enhanceRunAgentCalls(
 ): WorkflowRunRecord | undefined {
   let changed = false
   const agentCalls = run.agentCalls.map((call) => {
-    const member = byStep?.get(call.id)
-    const override = runOverride ?? member?.modelOverride
-    const recent = member?.recentEffectiveModel
-    // 成员标识恒透出（member 在场即携带，不等覆盖/生效值在场）——它是回执显示态的
-    // 读取键，切换发生时面板数据源可能尚无任何覆盖载荷（首次切换前两者恒缺席）。
-    // subagentId = record 创建事件 identity.id（projectV2Subagent 身份域），与聚合
-    // 应答成员标识（listAcceptedMemberRunIdsForSwitch 的 ExecutionRecord.id）同源。
-    // 代价：getWorkflows 每次读 RPC 对有成员的 run 重建 agentCalls 数组（零拷贝
-    // 快路径仅在成员圈定全 miss 时保留）——成员增强产物本就每次读 RPC 重派生，
-    // 重建为浅展开小对象，量级可忽略。
-    const memberRecordId = member?.subagentId
-    if (override === undefined && recent === undefined && memberRecordId === undefined) return call
-    // 引用相等短路（返回值直进 RPC reply 不缓存，无跨轮幂等消费位；形状级比较
-    // 不必——成员增强产物每次读 RPC 重派生）。
-    if (
-      call.modelOverride === override &&
-      call.recentEffectiveModel === recent &&
-      call.memberRecordId === memberRecordId
-    ) {
-      return call
-    }
+    const target = callEnhancementTarget(byStep?.get(call.id), runOverride)
+    if (target === undefined || agentCallFieldsEqual(call, target)) return call
     changed = true
-    return {
-      ...call,
-      ...(memberRecordId !== undefined ? { memberRecordId } : {}),
-      ...(override !== undefined ? { modelOverride: override } : {}),
-      ...(recent !== undefined ? { recentEffectiveModel: recent } : {}),
-    }
+    return applyAgentCallEnhancement(call, target)
   })
   if (changed) return { ...run, agentCalls }
   return undefined

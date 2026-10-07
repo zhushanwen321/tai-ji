@@ -163,8 +163,9 @@ readonly markModelOverride: (record: ExecutionRecord, override: ModelOverride) =
 // ============================================================
 
 /** ModelRef 结构 → canonical ref 词形（组帧单点——结构化形状的拆装收在宿主编排层，
- *  SDK contract-types ModelRef 注释的语义）。 */
-export function canonicalRefOf(modelRef: ModelRef): string {
+ *  SDK contract-types ModelRef 注释的语义）。模块内私有——词形只服务本编排层的
+ *  预检与记账，无外部消费面。 */
+function canonicalRefOf(modelRef: ModelRef): string {
   return `${modelRef.provider}/${modelRef.modelId}`;
 }
 
@@ -202,8 +203,10 @@ export const ACCOUNTED_SET_MODEL_ERROR_CODES = [
 ] as const satisfies readonly SetModelErrorCode[];
 
 /**
- * setModel 宿主编排（单一时序三步，§7.2）。校验型失败返回 error 应答（不写——
- * 处置表行 2）；内部 IO 异常原样上抛（调用方 sendError 承接）。
+ * setModel 宿主编排（单一时序三步，§7.2）：①校验（validateSetModelTarget，全部
+ * 写入前拦截——校验型失败返回 error 应答不写，处置表行 2）→ ②按域分流 → ③写
+ * 持久化意图（分流之后，按处置表，落各分流子函数）。内部 IO 异常原样上抛
+ *（调用方 sendError 承接）。
  */
 export async function setModel(
   deps: ModelSwitchDeps,
@@ -211,9 +214,27 @@ export async function setModel(
   model: ModelRef,
   thinkingLevel?: string,
 ): Promise<SetModelReply> {
-  const modelService = deps.getModelService();
+  const validationError = await validateSetModelTarget(deps, target, model, thinkingLevel);
+  if (validationError !== undefined) return validationError;
+  if (target.domain === "workflow-run") {
+    return switchWorkflowRunModel(deps, target, model, thinkingLevel);
+  }
+  return switchChatModel(deps, target, model, thinkingLevel);
+}
 
-  // ── 步骤 ① 校验（全部写入前拦截）────────────────────────
+/**
+ * 步骤 ① 校验（全部写入前拦截）：目录存在性（assertModelInCatalog 分类化拒单）+
+ * canonical ref 全等 / 凭据 / thinking 档位预检（resolveModel 提前跑一遍未来解析，
+ * 同一函数同一路径）+ workflow 域 run 非终局检查。校验型失败返回 error 应答（不写，
+ * 处置表行 2）；通过返回 undefined。
+ */
+async function validateSetModelTarget(
+  deps: ModelSwitchDeps,
+  target: ModelSwitchTarget,
+  model: ModelRef,
+  thinkingLevel?: string,
+): Promise<SetModelReply | undefined> {
+  const modelService = deps.getModelService();
   const canonical = canonicalRefOf(model);
   const registry = modelService.getModelRegistry();
   const agentConfig: AgentConfig | undefined =
@@ -253,30 +274,55 @@ export async function setModel(
     // 处置表行 2（校验型失败）：不写（步骤①拦截，未到步骤③）。
     return { scope: "error", message: toErrorMessage(err) };
   }
-  const override: ModelOverride = {
+  return undefined;
+}
+
+/** 覆盖意图载体组装（§7.2 步骤③写面的记账形状；setAt = 意图落账时点）。 */
+function buildModelOverride(model: ModelRef, thinkingLevel?: string): ModelOverride {
+  return {
     ref: { provider: model.provider, modelId: model.modelId },
     ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
     setAt: Date.now(),
   };
+}
 
-  // ── 步骤 ② 按状态分流 ── 步骤 ③ 写持久化意图（分流之后，按处置表）──
-  if (target.domain === "workflow-run") {
-    const aggregate = await deps.runAggregate({
-      runId: target.runId,
-      model,
-      ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
-      memberRunIds: deps.listAcceptedMemberRunIds(target.runId),
-    });
-    // 处置表行 4（run 级聚合个别成员转发失败——以及全员成功行 1 的 run 级面）：
-    // run 级意图恒写（§6.1③「一个成员失败不回滚其他成员」的直接推论；不写则已
-    // 热切成功的成员被下一轮 spawn 旧 argv 压回）。写面 = 内存表 + U4a 事件载体
-    //（await 持久化结果——失败上抛转报错应答，内存覆盖仍生效，§7.5）。
-    modelService.setModelOverride(target.runId, override);
-    await deps.persistRunOverride(target.runId, override);
-    return { scope: "workflow-run", aggregate };
-  }
+/**
+ * workflow run 级分流（步骤②聚合转发 + 步骤③写持久化意图）。
+ */
+async function switchWorkflowRunModel(
+  deps: ModelSwitchDeps,
+  target: Extract<ModelSwitchTarget, { domain: "workflow-run" }>,
+  model: ModelRef,
+  thinkingLevel?: string,
+): Promise<SetModelReply> {
+  const override = buildModelOverride(model, thinkingLevel);
+  const aggregate = await deps.runAggregate({
+    runId: target.runId,
+    model,
+    ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
+    memberRunIds: deps.listAcceptedMemberRunIds(target.runId),
+  });
+  // 处置表行 4（run 级聚合个别成员转发失败——以及全员成功行 1 的 run 级面）：
+  // run 级意图恒写（§6.1③「一个成员失败不回滚其他成员」的直接推论；不写则已
+  // 热切成功的成员被下一轮 spawn 旧 argv 压回）。写面 = 内存表 + U4a 事件载体
+  //（await 持久化结果——失败上抛转报错应答，内存覆盖仍生效，§7.5）。
+  deps.getModelService().setModelOverride(target.runId, override);
+  await deps.persistRunOverride(target.runId, override);
+  return { scope: "workflow-run", aggregate };
+}
 
+/**
+ * chat 域分流（步骤②：活进程判定 → capability 预检 → 引擎转发；步骤③写面按
+ * §7.2 处置表分型）。
+ */
+async function switchChatModel(
+  deps: ModelSwitchDeps,
+  target: Extract<ModelSwitchTarget, { domain: "chat" }>,
+  model: ModelRef,
+  thinkingLevel?: string,
+): Promise<SetModelReply> {
   const record = target.record;
+  const override = buildModelOverride(model, thinkingLevel);
   // chat 域活进程判定（宿主镜像判据——进程存活事实的权威在引擎侧，转发 miss 由
   // isEngineNotActiveError 通道承接竞态窗口）。
   if (!hasLiveProcessHandle(record.id)) {

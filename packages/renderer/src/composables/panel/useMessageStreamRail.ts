@@ -30,6 +30,24 @@ import { useTurnExpansionStore } from '@/stores/turn-expansion'
  */
 const EMPTY_SET: ReadonlySet<string> = Object.freeze(new Set<string>()) as ReadonlySet<string>
 
+/** 逐项引用恒等：长度相等且每项引用相同（引用同 ⇒ 内容同，ADR-0039 不可变更新保证）。 */
+function sameTurnRefSequence(a: readonly MessageTurn[], b: readonly MessageTurn[]): boolean {
+  return a.length === b.length && a.every((turn, i) => turn === b[i])
+}
+
+/** rail 可见投影签名逐字段比对（railMemoFor 四字段 = TurnRail 渲染消费的全部 turn 派生字段）。 */
+function railMemoEquals(
+  a: ReturnType<typeof railMemoFor>,
+  b: ReturnType<typeof railMemoFor>,
+): boolean {
+  return (
+    a.userSummary === b.userSummary &&
+    a.agentSummary === b.agentSummary &&
+    a.failed === b.failed &&
+    a.iconClass === b.iconClass
+  )
+}
+
 /** useMessageStreamRail 依赖（由 MessageStream.vue 注入，避免重复读取 store/props）。 */
 export interface UseMessageStreamRailDeps {
   sessionId: ComputedRef<string>
@@ -85,34 +103,40 @@ export function useMessageStreamRail(deps: UseMessageStreamRailDeps): {
    * 索引与本次数组同步（见 updateActiveTurnIndex）。
    */
   let railIndexByTurn = new WeakMap<MessageTurn, number>()
-  const railTurns = computed<MessageTurn[]>(() => {
-    const next = renderItems.value.filter((item) => item.kind === 'turn').map((item) => item.turn)
-    if (lastRailTurns.length === next.length && lastRailTurns.every((turn, i) => turn === next[i])) {
-      return lastRailTurns
-    }
+
+  /**
+   * 投影恒等放宽判定：仅末位 turn 引用不同（streaming 末位 turn 每 delta 重建）、其余
+   * 逐项引用相同，且末位 turn 的 rail 可见投影签名（railMemoFor 四字段——TurnRail 渲染
+   * 消费的全部 turn 派生字段）与上次相同 → 补末位下标映射并返回 true（复用旧数组）。
+   * 此时 TurnRail render 输出逐字节不变（摘要串相同 ⇒ 渲染相同），props 引用不变 →
+   * 常驻面板零 vnode diff、expandedTurns 依赖不失效。签名经共享 railMemoFor（@taiji/ui，
+   * 与 TurnRail 渲染同一 WeakMap）：每帧对末位 turn 至多算一次摘要，且该 memo 被后续
+   * 真重渲帧直接命中（判定与渲染同源，摘要成本不因判定翻倍）。摘要真变（用户可见变更）
+   * → 返回 false 走重建路径，TurnRail 照常更新，行为不变。
+   */
+  function lastTurnProjectionUnchanged(next: MessageTurn[]): boolean {
     const lastIdx = next.length - 1
-    const prevLast = lastIdx >= 0 ? lastRailTurns[lastIdx] : undefined
-    const nextLast = lastIdx >= 0 ? next[lastIdx] : undefined
+    if (lastIdx < 0) return false
+    const prevLast = lastRailTurns[lastIdx]
+    const nextLast = next[lastIdx]
     if (
-      prevLast !== undefined &&
-      nextLast !== undefined &&
-      lastRailTurns.length === next.length &&
-      lastRailTurns.slice(0, lastIdx).every((turn, i) => turn === next[i])
+      prevLast === undefined ||
+      nextLast === undefined ||
+      lastRailTurns.length !== next.length ||
+      !sameTurnRefSequence(lastRailTurns.slice(0, lastIdx), next.slice(0, lastIdx))
     ) {
-      const prevMemo = railMemoFor(prevLast)
-      const nextMemo = railMemoFor(nextLast)
-      if (
-        prevMemo.userSummary === nextMemo.userSummary &&
-        prevMemo.agentSummary === nextMemo.agentSummary &&
-        prevMemo.failed === nextMemo.failed &&
-        prevMemo.iconClass === nextMemo.iconClass
-      ) {
-        // rail 投影恒等 → 复用旧数组。补末位下标映射保持索引与当前 renderItems 同步
-        // （同位同投影）：updateActiveTurnIndex 对末位新引用仍 O(1) 命中，不退化 findIndex。
-        railIndexByTurn.set(nextLast, lastIdx)
-        return lastRailTurns
-      }
+      return false
     }
+    if (!railMemoEquals(railMemoFor(prevLast), railMemoFor(nextLast))) return false
+    // rail 投影恒等 → 复用旧数组。补末位下标映射保持索引与当前 renderItems 同步
+    // （同位同投影）：updateActiveTurnIndex 对末位新引用仍 O(1) 命中，不退化 findIndex。
+    railIndexByTurn.set(nextLast, lastIdx)
+    return true
+  }
+
+  /** 全量重建：采纳 next 数组 + 同步重建下标索引（lastRailTurns per-instance 闭包持有，
+   *  split mode 多实例各自 railTurns，禁模块级共享）。 */
+  function rebuildRailTurns(next: MessageTurn[]): MessageTurn[] {
     const index = new WeakMap<MessageTurn, number>()
     // first-wins 对齐 findIndex 语义（同 turn 引用重复出现理论不可达，防御性保持等价）
     next.forEach((turn, i) => {
@@ -121,6 +145,14 @@ export function useMessageStreamRail(deps: UseMessageStreamRailDeps): {
     lastRailTurns = next
     railIndexByTurn = index
     return next
+  }
+
+  const railTurns = computed<MessageTurn[]>(() => {
+    const next = renderItems.value.filter((item) => item.kind === 'turn').map((item) => item.turn)
+    // 快判 → 投影恒等放宽 → 全量重建，三级判定语义见上方 railTurns 机制注释
+    if (sameTurnRefSequence(lastRailTurns, next)) return lastRailTurns
+    if (lastTurnProjectionUnchanged(next)) return lastRailTurns
+    return rebuildRailTurns(next)
   })
 
   /**

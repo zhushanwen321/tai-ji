@@ -550,6 +550,46 @@ function assertResumeEligibility(
   return { events, created, activeElapsedMs, budgetTimeMs, budgetTokens, model };
 }
 
+/**
+ * [resumeRunLocked 拆分] 段 2b 派发前语法闸（第 4 道检查的 resume 侧）：run-created
+ * 里的 scriptSource 是权威脚本文本；不可编译（顶层重声明宿主预声明名）时 Worker 启动
+ * 后必然异步语法错（失败上抛，分类与行号丢失）。先于段 4/5/6 的一切写动作拒绝（干净
+ * 拒绝：run-resumed 未落、v2 条目未补、run 仍 interrupted）。record 的脚本文本不可改
+ * → 该 run 无法 resume，恢复动作 = 修脚本后重派新 run（文案已含指引）。空脚本文本
+ * 跳过（旧格式 record 无全文）。
+ */
+function assertResumeScriptCompilable(
+  runId: string,
+  created: Extract<WorkflowRunEvent, { type: "run-created" }>,
+): void {
+  const scriptSyntaxError = created.scriptSource !== undefined && created.scriptSource.trim() !== ""
+    ? checkWorkflowScriptSyntax(created.scriptSource)
+    : undefined;
+  if (scriptSyntaxError !== undefined) {
+    throw new ResumeRejectionError(
+      `Resume rejected: run ${runId} carries a workflow script that cannot compile (${scriptSyntaxError}). ` +
+        `Recovery: the script source is stored in the run record and cannot be edited — fix the script ` +
+        `(a script-level declaration must not reuse a name the worker pre-declares: ` +
+        `${WORKER_IIFE_HOST_DECLARED_NAMES.join(", ")}) and start a new run.`,
+    );
+  }
+}
+
+/**
+ * [resumeRunLocked 拆分] 段 2c 显式 model 参数的格式闸：malformed ref 落进覆盖记账
+ * 会毒化后续派发（覆盖是派发期模型输入源），入口 fail-fast。先于段 4/5/6 一切写动作
+ * ——干净拒绝，状态无损。
+ */
+function assertResumeModelRefWellFormed(runId: string, options: ResumeRunOptions | undefined): void {
+  if (options?.model !== undefined && !isModelRef(options.model)) {
+    throw new ResumeRejectionError(
+      `Resume rejected: run ${runId} resume model '${options.model}' is not a valid canonical ref. ` +
+        "Correct syntax: 'provider/modelId' or 'provider/modelId:thinkingLevel'. " +
+        "Recovery: retry the resume with a well-formed model ref.",
+    );
+  }
+}
+
 
 /**
  * [resumeRunLocked 拆分] 段 6：重建聚合 + D10 预算标记 + worker 接管 + pending 信号。
@@ -623,6 +663,31 @@ function journalDirSpread(
   return options?.journalDir !== undefined ? { journalDir: options.journalDir } : {};
 }
 
+/** run-resumed reason 条件 spread 段（planSummary 缺席不落键；journalDirSpread 同形态）。 */
+function reasonSpread(planSummary: string | undefined): { reason: string } | Record<string, never> {
+  return planSummary !== undefined ? { reason: planSummary } : {};
+}
+
+/** run-resumed host 条件 spread 段（options/host 缺席不落键）。 */
+function hostSpread(options: ResumeRunOptions | undefined): { host: string } | Record<string, never> {
+  return options?.host !== undefined ? { host: options.host } : {};
+}
+
+/** run-resumed budgetTimeMs 条件 spread 段（未设/0/负值不落——与 run-created 同款条件式）。 */
+function budgetTimeMsSpread(budgetTimeMs: number | undefined): { budgetTimeMs: number } | Record<string, never> {
+  return budgetTimeMs !== undefined && budgetTimeMs > 0 ? { budgetTimeMs } : {};
+}
+
+/** run-resumed budgetTokens 条件 spread 段（未设/0/负值不落——与 run-created 同款条件式）。 */
+function budgetTokensSpread(budgetTokens: number | undefined): { budgetTokens: number } | Record<string, never> {
+  return budgetTokens !== undefined && budgetTokens > 0 ? { budgetTokens } : {};
+}
+
+/** run-resumed model 条件 spread 段（缺省/空串不落 = 未指定且无覆盖记账的复活与现状同形）。 */
+function resumedModelSpread(model: string | undefined): { model: string } | Record<string, never> {
+  return model !== undefined && model !== "" ? { model } : {};
+}
+
 /**
  * 段 5 run-resumed 帧载荷组装（resumeRunLocked 拆出）：各条件 spread 段——reason /
  * host 缺席不落键；本次复活实际生效的预算随帧落盘（跨崩溃存续的数据面）仅 > 0 落
@@ -640,11 +705,11 @@ function buildRunResumedPayload(
 ): Extract<WorkflowRunEventInput, { type: "run-resumed" }> {
   return {
     type: "run-resumed",
-    ...(planSummary !== undefined ? { reason: planSummary } : {}),
-    ...(options?.host !== undefined ? { host: options.host } : {}),
-    ...(budgetTimeMs !== undefined && budgetTimeMs > 0 ? { budgetTimeMs } : {}),
-    ...(budgetTokens !== undefined && budgetTokens > 0 ? { budgetTokens } : {}),
-    ...(model !== undefined && model !== "" ? { model } : {}),
+    ...reasonSpread(planSummary),
+    ...hostSpread(options),
+    ...budgetTimeMsSpread(budgetTimeMs),
+    ...budgetTokensSpread(budgetTokens),
+    ...resumedModelSpread(model),
     ts: resumedAt,
   };
 }
@@ -692,31 +757,9 @@ async function resumeRunLocked(
   const { events, created, activeElapsedMs, budgetTimeMs, budgetTokens, model } = assertResumeEligibility(runId, recordPath, options);
 
   // ── 2b. 派发前语法闸（第 4 道检查的 resume 侧）──
-  // run-created 里的 scriptSource 是权威脚本文本；不可编译（顶层重声明宿主预声明名）
-  // 时 Worker 启动后必然异步语法错（失败上抛，分类与行号丢失）。
-  // 此处先于段 4/5/6 的一切写动作拒绝（干净拒绝：run-resumed 未落、v2 条目未补、
-  // run 仍 interrupted）。record 的脚本文本不可改 → 该 run 无法 resume，恢复动作 =
-  // 修脚本后重派新 run（文案已含指引）。空脚本文本跳过（旧格式 record 无全文）。
-  const scriptSyntaxError = created.scriptSource !== undefined && created.scriptSource.trim() !== ""
-    ? checkWorkflowScriptSyntax(created.scriptSource)
-    : undefined;
-  if (scriptSyntaxError !== undefined) {
-    throw new ResumeRejectionError(
-      `Resume rejected: run ${runId} carries a workflow script that cannot compile (${scriptSyntaxError}). ` +
-        `Recovery: the script source is stored in the run record and cannot be edited — fix the script ` +
-        `(a script-level declaration must not reuse a name the worker pre-declares: ` +
-        `${WORKER_IIFE_HOST_DECLARED_NAMES.join(", ")}) and start a new run.`,
-    );
-  }
-  // 显式 model 参数的格式闸（先于段 4/5/6 一切写动作——干净拒绝，状态无损）。
-  // malformed ref 落进覆盖记账会毒化后续派发（覆盖是派发期模型输入源），入口 fail-fast。
-  if (options?.model !== undefined && !isModelRef(options.model)) {
-    throw new ResumeRejectionError(
-      `Resume rejected: run ${runId} resume model '${options.model}' is not a valid canonical ref. ` +
-        "Correct syntax: 'provider/modelId' or 'provider/modelId:thinkingLevel'. " +
-        "Recovery: retry the resume with a well-formed model ref.",
-    );
-  }
+  assertResumeScriptCompilable(runId, created);
+  // ── 2c. 显式 model 参数的格式闸（先于段 4/5/6 一切写动作——干净拒绝，状态无损）──
+  assertResumeModelRefWellFormed(runId, options);
 
   // ── 3. 恢复计划计数（[ADR-0092]：已提交结果回放 / 未完成调用重派）──
   const plan = countResumePlan(events);

@@ -135,6 +135,11 @@ function rejectFromChatError(reply: Record<string, unknown>): never {
   throw new SubagentModelSwitchError(code, message)
 }
 
+/** 信封字段的非空字符串读取（空串视同缺失——scope:error 侧空值折算语义的唯一锚）。 */
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value !== '' ? value : undefined
+}
+
 /**
  * scope:error 信封 → 分型 reject（真实 code/message 透传）。
  */
@@ -143,11 +148,9 @@ function rejectFromErrorScope(file: { error?: unknown; message?: unknown }): nev
   // handler 域内失败（D3-A4 缺陷修复：信封带 scope:error，真实 code/message 透传——
   // 不再笼统折算 subagent_model_switch_failed）。message 携带宿主编排的恢复指引。
   const err = isObject(file.error) ? (file.error as { code?: unknown; message?: unknown }) : undefined
-  const code = typeof err?.code === 'string' && err.code !== '' ? err.code : 'subagent_model_switch_failed'
+  const code = nonEmptyString(err?.code) ?? 'subagent_model_switch_failed'
   const message =
-    (typeof err?.message === 'string' && err.message !== '' && err.message) ||
-    (typeof file.message === 'string' && file.message !== '' && file.message) ||
-    'model switch rejected (no message)'
+    nonEmptyString(err?.message) ?? nonEmptyString(file.message) ?? 'model switch rejected (no message)'
   throw new SubagentModelSwitchError(code, message)
 }
 
@@ -228,6 +231,55 @@ function mapResultFileToWireReply(raw: string): SubagentSetModelReply {
   throw corruptReplyError(`scope 未知（${String(file.scope)}）`)
 }
 
+/** setModel 入参形状（从端口接口提取，零镜像漂移）。 */
+type SubagentSetModelRequest = Parameters<SubagentModelSwitchGateway['setModel']>[0]
+
+/**
+ * 出站点载荷组装（§7.1.1 要素 1：载荷单行 JSON——JSON 承载结构化载荷，避开定位
+ * 参数文法转义负担）。可选定位/档位字段经条件展开保持「键缺席」语义。
+ */
+function buildSwitchPayload(params: SubagentSetModelRequest, requestId: string): string {
+  return JSON.stringify({
+    requestId,
+    ...(params.recordId !== undefined ? { recordId: params.recordId } : {}),
+    ...(params.runId !== undefined ? { runId: params.runId } : {}),
+    provider: params.provider,
+    modelId: params.modelId,
+    ...(params.thinkingLevel !== undefined ? { thinkingLevel: params.thinkingLevel } : {}),
+  })
+}
+
+/**
+ * 出站点竞速（prompt 正常回 / prompt 失败 / 超时三态）。promptPromise 双分支归一为
+ * 结局对象——竞速败者（迟到 resolve / 迟到 reject）零 unhandled 风险；race 落定后
+ * finally 清 timer（超时分支迟到的 timeout resolve 无消费方，无害）。
+ */
+function racePromptOutcome(client: SubagentModelPromptClient, payload: string): Promise<PromptOutcome> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const promptPromise: Promise<PromptOutcome> = client.prompt(`/subagent-model ${payload}`).then(
+    () => ({ kind: 'prompt' }) as PromptOutcome,
+    (error: unknown) => ({ kind: 'prompt-error', error }) as PromptOutcome,
+  )
+  const timeoutPromise = new Promise<PromptOutcome>((resolve) => {
+    timer = setTimeout(() => resolve({ kind: 'timeout' }), MODEL_SWITCH_PROMPT_TIMEOUT_MS)
+  })
+  return Promise.race([promptPromise, timeoutPromise]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer)
+  })
+}
+
+/** 结果文件缺失时的通道级失败归因（outcome 三态分派——超时 best-effort 迟到真值
+ * 已在调用方读侧先行回收，此处只剩失败归因）。 */
+function channelErrorForOutcome(outcome: PromptOutcome): SubagentModelSwitchError {
+  if (outcome.kind === 'timeout') {
+    return channelError(`模型切换命令超时（${MODEL_SWITCH_PROMPT_TIMEOUT_MS}ms 内宿主未回执）`)
+  }
+  if (outcome.kind === 'prompt-error') {
+    return channelError(`模型切换命令发送失败（${toErrorMessage(outcome.error)}）`)
+  }
+  return channelError('模型切换命令已执行但结果回执缺失（宿主 handler 未落结果文件）')
+}
+
 /** 首帧读窗常数：4KB（信封 + created 帧头部 KB 级）。created 帧自身超窗时经行尾
  * 补读延伸（dmg-r3-1，见 readEventsRootSessionId 内注），窗口不为此调大——常态
  * 小帧零额外 IO。 */
@@ -280,6 +332,85 @@ function readLineTail(fd: number, fromOffset: number, maxBytes: number): string 
 }
 
 /**
+ * 首窗读取（HEAD_BYTES 窗口一次 readSync + 按 `\n` 切行）。IO 失败返回 undefined
+ * （主函数兜为无锚）；fd 所有权归调用方（主函数 finally close）。
+ */
+function readHeadWindowLines(fd: number): { lines: string[]; headBytes: number } | undefined {
+  try {
+    const buf = Buffer.alloc(HEAD_BYTES)
+    const n = readSync(fd, buf, 0, HEAD_BYTES, 0)
+    return { lines: buf.toString('utf-8', 0, n).split('\n'), headBytes: n }
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 单行 anchor 解析（空行跳过；JSON.parse 失败走截断尾读路径）。返回 unknown——
+ * 行可为任意 JSON，created 帧形状由 isCreatedFrame 判定。
+ */
+function parseAnchorLine(
+  fd: number,
+  lines: readonly string[],
+  index: number,
+  headBytes: number,
+  createdType: string,
+  eventsFile: string,
+): unknown {
+  const line = lines[index] ?? ''
+  if (line.trim() === '') return undefined
+  try {
+    return JSON.parse(line)
+  } catch {
+    return parseTruncatedAnchorLine(fd, line, index === lines.length - 1, headBytes, createdType, eventsFile)
+  }
+}
+
+/**
+ * 尾段截断行的行尾补读重 parse（dmg-r3-1）：仅「末段 + 窗口被填满」才可能是行未
+ * 读完（否则是行内真坏）。补读失败 / 重 parse 失败均 warn 留痕后判无锚——不再静默
+ * continue（dmg-r3-1：锚失败与旧格式行不可区分时，runId 侧弱锚放行 / recordId 侧
+ * 误报 not_found 均无诊断入口）。
+ */
+function parseTruncatedAnchorLine(
+  fd: number,
+  line: string,
+  isLastSegment: boolean,
+  headBytes: number,
+  createdType: string,
+  eventsFile: string,
+): unknown {
+  const tail = isLastSegment && headBytes === HEAD_BYTES
+    ? readLineTail(fd, headBytes, ANCHOR_LINE_MAX_BYTES - HEAD_BYTES)
+    : undefined
+  if (tail === undefined) {
+    console.warn(`[subagent-model-gateway] ${createdType} anchor line unreadable (truncated past limit or partial write), treated as anchor-less: ${eventsFile}`)
+    return undefined
+  }
+  try {
+    return JSON.parse(line + tail)
+  } catch {
+    console.warn(`[subagent-model-gateway] ${createdType} anchor line malformed after tail read, treated as anchor-less: ${eventsFile}`)
+    return undefined
+  }
+}
+
+/** created 帧判定：行解析产物是对象且 type 匹配（多行流里非 created 行由调用方跳过）。 */
+function isCreatedFrame(parsed: unknown, createdType: string): boolean {
+  return isObject(parsed) && parsed.type === createdType
+}
+
+/**
+ * created 帧的 rootSessionId 提取（非空字符串才有效；缺失/空串归无锚——缺失语义
+ * 归调用方裁决：recordId 侧归未命中，runId 侧回落目录存在性）。
+ */
+function anchorRootSessionId(parsed: unknown): string | undefined {
+  if (!isObject(parsed)) return undefined
+  const root = parsed.rootSessionId
+  return typeof root === 'string' && root !== '' ? root : undefined
+}
+
+/**
  * record / run 事件文件首帧的 rootSessionId 读取（会话归属精确判定锚；recordId 侧
  * = D3-A4 缺陷修复，runId 侧 = dmg-r2-5 缺陷修复，同一形态）。按 createdType 过滤
  *（'record-created' / 'run-created'）多行扫描取值，不假设固定行号。只读文件头 4KB
@@ -288,45 +419,20 @@ function readLineTail(fd: number, fromOffset: number, maxBytes: number): string 
  * task 在锚之前，buildCreatedEventPayload 实装）按行尾补读延伸该行后正常 parse。
  * 窗口内无 created 帧或解析失败返回 undefined（缺失语义归调用方裁决——recordId 侧
  * 归未命中，runId 侧回落目录存在性）；坏行（半写 / 超上界巨行）warn 留痕后同判
- * 无锚——不再静默 continue（dmg-r3-1：锚失败与旧格式行不可区分时，runId 侧弱锚
- * 放行 / recordId 侧误报 not_found 均无诊断入口）。
+ * 无锚（见 parseTruncatedAnchorLine）。命中首个 created 帧即返回（root 缺失亦终止
+ * 扫描——created 帧恒在文件头部，无后续可扫）。
  */
 function readEventsRootSessionId(eventsFile: string, createdType: string): string | undefined {
   const fd = openSync(eventsFile, 'r')
   try {
-    const buf = Buffer.alloc(HEAD_BYTES)
-    const n = readSync(fd, buf, 0, HEAD_BYTES, 0)
-    const lines = buf.toString('utf-8', 0, n).split('\n')
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i] ?? ''
-      if (line.trim() === '') continue
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(line)
-      } catch {
-        // 尾段被窗口切断（i = 末段且窗口被填满 = 文件更长）=「行未读完」而非
-        // 「行损坏」：补读行尾重 parse。created 帧恒在文件头部（信封 + created
-        // 前两行），本行即末段，无后续行可扫。补读失败 = 真坏行。
-        const tail = i === lines.length - 1 && n === HEAD_BYTES
-          ? readLineTail(fd, n, ANCHOR_LINE_MAX_BYTES - HEAD_BYTES)
-          : undefined
-        if (tail === undefined) {
-          console.warn(`[subagent-model-gateway] ${createdType} anchor line unreadable (truncated past limit or partial write), treated as anchor-less: ${eventsFile}`)
-          continue
-        }
-        try {
-          parsed = JSON.parse(line + tail)
-        } catch {
-          console.warn(`[subagent-model-gateway] ${createdType} anchor line malformed after tail read, treated as anchor-less: ${eventsFile}`)
-          continue
-        }
+    const head = readHeadWindowLines(fd)
+    if (head === undefined) return undefined
+    for (let i = 0; i < head.lines.length; i++) {
+      const parsed = parseAnchorLine(fd, head.lines, i, head.headBytes, createdType, eventsFile)
+      if (parsed !== undefined && isCreatedFrame(parsed, createdType)) {
+        return anchorRootSessionId(parsed)
       }
-      if (!isObject(parsed) || (parsed as { type?: unknown }).type !== createdType) continue
-      const root = (parsed as { rootSessionId?: unknown }).rootSessionId
-      return typeof root === 'string' && root !== '' ? root : undefined
     }
-    return undefined
-  } catch {
     return undefined
   } finally {
     closeSync(fd)
@@ -382,71 +488,50 @@ export function createSubagentModelSwitchGateway(deps: SubagentModelGatewayDeps)
     return undefined
   }
 
+  /**
+   * [setModel 拆分] 目标解析卫语句：解析不到 session 元数据 = 目标可能已被清理，
+   * 分型拒绝（信封缺省语义见 resolveSessionMeta）。
+   */
+  function requireTargetMeta(params: SubagentSetModelRequest): ScannedSessionMeta {
+    const meta = resolveSessionMeta({ recordId: params.recordId, runId: params.runId })
+    if (meta !== undefined) return meta
+    const targetDesc = params.recordId ?? params.runId ?? '(missing)'
+    throw new SubagentModelSwitchError(
+      'subagent_target_not_found',
+      `未找到目标 ${targetDesc} 所属的会话——目标可能已被清理；恢复：刷新 subagent 面板后重试，或确认目标仍存在`,
+    )
+  }
+
+  /**
+   * [setModel 拆分] 活进程客户端卫语句：宿主编排运行在该会话的 pi 进程内，进程
+   * 不在场无法执行（含记账写入），分型拒绝。
+   */
+  function requireActiveClient(meta: ScannedSessionMeta): SubagentModelPromptClient {
+    const client = deps.getClient(meta.id)
+    if (client !== undefined) return client
+    throw new SubagentModelSwitchError(
+      'session_not_active',
+      `Session ${meta.id} not active——模型切换的宿主编排运行在该会话的 pi 进程内，进程不在场无法执行（含记账写入）；恢复：激活该会话后重试切换`,
+    )
+  }
+
   return {
     async setModel(params) {
-      const target = { recordId: params.recordId, runId: params.runId }
-      const meta = resolveSessionMeta(target)
-      if (!meta) {
-        const targetDesc = params.recordId ?? params.runId ?? '(missing)'
-        throw new SubagentModelSwitchError(
-          'subagent_target_not_found',
-          `未找到目标 ${targetDesc} 所属的会话——目标可能已被清理；恢复：刷新 subagent 面板后重试，或确认目标仍存在`,
-        )
-      }
-      const client = deps.getClient(meta.id)
-      if (!client) {
-        throw new SubagentModelSwitchError(
-          'session_not_active',
-          `Session ${meta.id} not active——模型切换的宿主编排运行在该会话的 pi 进程内，进程不在场无法执行（含记账写入）；恢复：激活该会话后重试切换`,
-        )
-      }
-
+      const meta = requireTargetMeta(params)
+      const client = requireActiveClient(meta)
       const requestId = randomUUID()
-      // 载荷单行 JSON（§7.1.1 要素 1：JSON 承载结构化载荷，避开定位参数文法转义负担）。
-      const payload = JSON.stringify({
-        requestId,
-        ...(params.recordId !== undefined ? { recordId: params.recordId } : {}),
-        ...(params.runId !== undefined ? { runId: params.runId } : {}),
-        provider: params.provider,
-        modelId: params.modelId,
-        ...(params.thinkingLevel !== undefined ? { thinkingLevel: params.thinkingLevel } : {}),
-      })
       const resultsFile = join(
         getSubagentModelSwitchResultsDir(deps.agentDir ?? getPiAgentDir(), meta.cwd),
         `${requestId}.json`,
       )
-
-      // 出站点竞速：prompt 正常回（handler 返回后才解析——preflight「handled」于
-      // handler 完成后发出，写后读成立）/ prompt 失败 / 超时三态。promptPromise 双分支
-      // 归一为结局对象——竞速败者（迟到 resolve / 迟到 reject）零 unhandled 风险。
-      let timer: ReturnType<typeof setTimeout> | undefined
-      const promptPromise: Promise<PromptOutcome> = client.prompt(`/subagent-model ${payload}`).then(
-        () => ({ kind: 'prompt' }) as PromptOutcome,
-        (error: unknown) => ({ kind: 'prompt-error', error }) as PromptOutcome,
-      )
-      const timeoutPromise = new Promise<PromptOutcome>((resolve) => {
-        timer = setTimeout(() => resolve({ kind: 'timeout' }), MODEL_SWITCH_PROMPT_TIMEOUT_MS)
-      })
-      let outcome: PromptOutcome
-      try {
-        outcome = await Promise.race([promptPromise, timeoutPromise])
-      } finally {
-        if (timer !== undefined) clearTimeout(timer)
-      }
-
-      // 写后读一次 + 读后即删（超时路径同样先读——best-effort 迟到真值检查，命中按
-      // 真实结果应答，§7.1.1 要素 4）。
+      // 出站点竞速（prompt 正常回 / prompt 失败 / 超时三态，racePromptOutcome）；
+      // prompt 正常回后 handler 才返回（preflight「handled」于 handler 完成后发出），
+      // 写后读成立。写后读一次 + 读后即删（超时路径同样先读——best-effort 迟到真值
+      // 检查，命中按真实结果应答，§7.1.1 要素 4）。
+      const outcome = await racePromptOutcome(client, buildSwitchPayload(params, requestId))
       const raw = readResultFileOnce(resultsFile)
       deleteResultFile(resultsFile)
-      if (raw === undefined) {
-        if (outcome.kind === 'timeout') {
-          throw channelError(`模型切换命令超时（${MODEL_SWITCH_PROMPT_TIMEOUT_MS}ms 内宿主未回执）`)
-        }
-        if (outcome.kind === 'prompt-error') {
-          throw channelError(`模型切换命令发送失败（${toErrorMessage(outcome.error)}）`)
-        }
-        throw channelError('模型切换命令已执行但结果回执缺失（宿主 handler 未落结果文件）')
-      }
+      if (raw === undefined) throw channelErrorForOutcome(outcome)
       return mapResultFileToWireReply(raw)
     },
 

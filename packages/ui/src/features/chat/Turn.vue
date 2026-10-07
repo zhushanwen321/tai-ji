@@ -492,6 +492,29 @@ interface BlockUnitProps {
 }
 
 /**
+ * 普通块按 kind 分派解出 Block 字段（每 kind 一次 ref 收窄，替代字段级嵌套三元的分支链）：
+ * ref 形状由 OrderedBlock 生产端约定——text=string / thinking=ThinkingBlock /
+ * tool|agentgraph=ToolCall。返回不含的键经 v-bind 展开与显式 undefined 同值（Vue props
+ * 缺席即 undefined），渲染结果不变。
+ */
+function kindBlockProps(
+  kind: FlatBlock['block']['kind'],
+  ref: FlatBlock['block']['ref'],
+): Partial<BlockUnitProps> {
+  switch (kind) {
+    case 'text':
+      return { content: ref as string }
+    case 'thinking': {
+      const t = ref as ThinkingBlock
+      return { content: t.content, thinkingId: t.id, collapsed: t.collapsed }
+    }
+    case 'tool':
+    case 'agentgraph':
+      return { tool: ref as ToolCall }
+  }
+}
+
+/**
  * Block props（按单元类型二选一）：普通块从 FlatBlock 解出 kind/ref + 所属 assistant 的
  * status/error/timestamp（D8 形态原样迁移）；bash 组块走 type='bash-group' + group 数据
  * （header 三条口径由 core 一次算好）。经 v-bind 展开收敛到单 Block 元素——vue/valid-v-memo
@@ -501,23 +524,15 @@ function unitBlockProps(unit: TraceRenderUnit): BlockUnitProps {
   if (isBashGroupBlock(unit)) {
     return { type: 'bash-group', group: { members: unit.members, header: unit.header, hasRunning: unit.hasRunning } }
   }
-  const kind = unit.block.kind
+  const assistant = assistantById.value.get(unit.assistantId)
   return {
-    type: kind,
-    content:
-      kind === 'text'
-        ? (unit.block.ref as string)
-        : kind === 'thinking'
-          ? (unit.block.ref as ThinkingBlock).content
-          : undefined,
-    tool: kind === 'tool' || kind === 'agentgraph' ? (unit.block.ref as ToolCall) : undefined,
-    thinkingId: kind === 'thinking' ? (unit.block.ref as ThinkingBlock).id : undefined,
-    collapsed: kind === 'thinking' ? (unit.block.ref as ThinkingBlock).collapsed : undefined,
+    type: unit.block.kind,
+    ...kindBlockProps(unit.block.kind, unit.block.ref),
     working: unit.assistantStatus === 'streaming',
     streaming: unit.assistantStatus === 'streaming',
     status: unit.assistantStatus,
-    error: assistantById.value.get(unit.assistantId)?.error,
-    messageTimestamp: assistantById.value.get(unit.assistantId)?.timestamp,
+    error: assistant?.error,
+    messageTimestamp: assistant?.timestamp,
   }
 }
 

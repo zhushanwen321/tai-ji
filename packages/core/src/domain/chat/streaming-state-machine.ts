@@ -131,8 +131,9 @@ export type SubagentStreamStateSnapshot = ServerMessageMap['session.getSubagentS
 /**
  * per (virtualId, recordId) 分区状态机（设计 §4.3，禁全局槽位——record 切换互不污染）。
  * 非 Vue 响应式状态（[ADR-0049 例外]：纯流式簿记，渲染只走 messages ref overlay 路径）。
+ * 仅本模块内部分区表使用（不进 domain/chat 出口，消费面 = createStreamingStateMachine 闭包）。
  */
-export interface SubagentChunkPartitionState {
+interface SubagentChunkPartitionState {
   /** 当前流式消息序号（消费端初始 0，§4.1；随 chunk 边界推进 / 响应重置推进） */
   msgSeq: number
   /** 期望的下一条 delta 序号（== 追加；> 失步；< 丢弃） */
