@@ -18,13 +18,28 @@
  *
  * 运行：npx vitest run src/__tests__/stores/chat-subagent-stream.test.ts
  */
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/stores/chat'
+import { session as coreMockSession } from '@taiji/core/transport/mock'
 import type { Message } from '@taiji/shared'
 
+/** 宏任务冲刷：拉取链（subagentStreamPull promise → .then 回灌状态机）全部 microtask 落地 */
+const flushPull = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+
+// [B2 u-renderer] 拉取执行器断言锚点：测试环境 VITE_MOCK=true（vitest.config define）→
+// stores/chat.ts 装配的 subagentStreamPull 执行器实际调用 core mock session 的
+// getSubagentStreamState（门面 mock 侧与此处是同一对象引用）——beforeEach spy 该方法获得
+// 调用断言与可控响应。刻意不 vi.mock('@/api') 模块：mock 工厂缺成员会打断 btw-replay 等
+// 同链消费方（worker OOM 实测），spy 单方法是替换面最小的可控形态。
+const pullMock = () => vi.mocked(coreMockSession.getSubagentStreamState)
+
 describe('W4 chat store — subagent streaming 收口（U8/U9）', () => {
-  beforeEach(() => setActivePinia(createPinia()))
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    setActivePinia(createPinia())
+    vi.spyOn(coreMockSession, 'getSubagentStreamState')
+  })
 
   const VIRTUAL_ID = 'subagent:bg-1'
 
@@ -258,5 +273,217 @@ describe('W4 chat store — subagent streaming 收口（U8/U9）', () => {
     expect(store.getMessages(VIRTUAL_ID)).toHaveLength(1)
     expect(store.getMessages(VIRTUAL_ID)[0].role).toBe('assistant')
     expect(store.getMessages(VIRTUAL_ID)[0].status).toBe('streaming')
+  })
+
+  // ── [B2 subagent-stream-chunk §4.3] 增量 chunk 消费状态机（store 委托层）──
+  // 状态机分支判定 / 水位回放 / 在途去重的全量断言在 core streaming-state-machine.test.ts
+  // （分区状态与拉取执行器注入属 core 工厂测试面）；本组锁定 pinia store 委托入口行为
+  // （renderer 分派改造（u-renderer）的消费面契约）。
+
+  const RECORD_ID = 'bg-1'
+
+  it('chunk 委托·干净起步与顺序追加：applySubagentStreamChunk 增量拼 content（非全量替换）', () => {
+    const store = useChatStore()
+    store.applySubagentStreamChunk(VIRTUAL_ID, RECORD_ID, 1, 0, 'a')
+    store.applySubagentStreamChunk(VIRTUAL_ID, RECORD_ID, 1, 1, 'b')
+
+    const list = store.getMessages(VIRTUAL_ID)
+    expect(list).toHaveLength(1)
+    expect(list[0].role).toBe('assistant')
+    expect(list[0].status).toBe('streaming')
+    expect(list[0].content).toBe('ab')
+    expect(list[0].id).toMatch(/^sa-/)
+  })
+
+  it('chunk 委托·跨消息边界：msgSeq 推进开新 streaming 消息（旧实体收口，增量不并入旧消息）', () => {
+    const store = useChatStore()
+    store.applySubagentStreamChunk(VIRTUAL_ID, RECORD_ID, 1, 0, '第一回合')
+    store.applySubagentStreamChunk(VIRTUAL_ID, RECORD_ID, 2, 0, '第二回合')
+
+    const list = store.getMessages(VIRTUAL_ID)
+    expect(list).toHaveLength(2)
+    expect(list[0].status).toBe('complete')
+    expect(list[0].content).toBe('第一回合')
+    expect(list[1].status).toBe('streaming')
+    expect(list[1].content).toBe('第二回合')
+  })
+
+  it('chunk 委托·失步缺前缀：未注入拉取执行器时不抛错、失步 chunk 不上屏（core 单测锁拉取路径）', () => {
+    const store = useChatStore()
+    store.applySubagentStreamChunk(VIRTUAL_ID, RECORD_ID, 1, 0, 'a')
+
+    expect(() => store.applySubagentStreamChunk(VIRTUAL_ID, RECORD_ID, 1, 5, 'gap')).not.toThrow()
+    const list = store.getMessages(VIRTUAL_ID)
+    expect(list).toHaveLength(1)
+    expect(list[0].content).toBe('a') // 失步 chunk 不上屏（待拉取收敛）
+  })
+
+  it('拉取响应委托·found:true 全量替换；found:false 不动作', () => {
+    const store = useChatStore()
+    store.applySubagentStreamState(VIRTUAL_ID, RECORD_ID, { found: true, msgSeq: 3, lastDeltaSeq: 1, lines: ['l0', 'l1'] })
+    let list = store.getMessages(VIRTUAL_ID)
+    expect(list).toHaveLength(1)
+    expect(list[0].status).toBe('streaming')
+    expect(list[0].content).toBe('l0\nl1') // 复用 applySubagentStreamDelta 全量替换形态
+
+    store.applySubagentStreamState(VIRTUAL_ID, RECORD_ID, { found: false, msgSeq: 0, lastDeltaSeq: 0, lines: [] })
+    list = store.getMessages(VIRTUAL_ID)
+    expect(list).toHaveLength(1) // 无进行中流：不新建不动
+    expect(list[0].content).toBe('l0\nl1')
+  })
+
+  it('拉取响应委托·≤ sealedMsgSeq 丢弃：sealSubagentStream 落水位后，定稿消息响应不复活内容', () => {
+    const store = useChatStore()
+    store.applySubagentStreamChunk(VIRTUAL_ID, RECORD_ID, 1, 0, 'live')
+    store.sealSubagentStream(VIRTUAL_ID, RECORD_ID, 1)
+
+    store.applySubagentStreamState(VIRTUAL_ID, RECORD_ID, { found: true, msgSeq: 1, lastDeltaSeq: 9, lines: ['sealed'] })
+
+    const list = store.getMessages(VIRTUAL_ID)
+    expect(list).toHaveLength(1)
+    expect(list[0].content).toBe('live') // 已定稿消息的晚到响应不覆写
+  })
+
+  it('生命周期委托：clearSubagentChunkState / clearSubagentChunkStateForSession 幂等不抛错', () => {
+    const store = useChatStore()
+    store.applySubagentStreamChunk(VIRTUAL_ID, RECORD_ID, 1, 0, 'a')
+
+    expect(() => {
+      store.clearSubagentChunkState(VIRTUAL_ID, RECORD_ID)
+      store.clearSubagentChunkState(VIRTUAL_ID)
+      store.clearSubagentChunkStateForSession('session-main')
+    }).not.toThrow()
+
+    // 清除后同键 chunk 干净重建（msgSeq 回 0，边界推进正常）
+    store.applySubagentStreamChunk(VIRTUAL_ID, RECORD_ID, 1, 0, 'fresh')
+    expect(store.getMessages(VIRTUAL_ID)).toHaveLength(2)
+    expect(store.getMessages(VIRTUAL_ID)[1].content).toBe('fresh')
+  })
+
+  // ── [B2 u-renderer §4.3] 拉取触发接线（触发点②③ + 单在途合并）──
+  // 拉取执行器 = stores/chat.ts 装配注入（subagentStreamPull → '@/api' session 域 mock 侧
+  // 单方法 spy，见文件头）。分派端（subscribeStream handler）的端到端断言在
+  // subagent-tab.test.ts；本组锁定 core 状态机经真实装配执行器的触发语义。
+  // 虚拟键用三段式工厂形态（subagent:<mainSid>:<subId>——执行器经 extractMainSessionId
+  // 解析主 session，两段式旧形态键解析出垃圾 mainSid）。
+
+  const MAIN_SID = 'session-main'
+  const THREE_SEG_VID = `subagent:${MAIN_SID}:${RECORD_ID}`
+
+  it('触发点② 首见缺前缀：无状态机首条 chunk deltaSeq>0 → 失步入缓冲 + 发起拉取，响应经全量替换入口上屏', async () => {
+    const store = useChatStore()
+    pullMock().mockResolvedValue({ found: true, msgSeq: 1, lastDeltaSeq: 5, lines: ['完整前缀', '与晚到片段'] })
+
+    // 无状态机 + deltaSeq=5 > 0：新建分区后边界推进 → expected=0 必失步入缓冲并触发拉取
+    store.applySubagentStreamChunk(THREE_SEG_VID, RECORD_ID, 1, 5, '晚到片段')
+    expect(pullMock()).toHaveBeenCalledTimes(1)
+    // 执行器入参 = 解析后的主 session + recordId（virtualId 三段式经 extractMainSessionId）
+    expect(pullMock()).toHaveBeenCalledWith(MAIN_SID, RECORD_ID)
+
+    await flushPull()
+    const list = store.getMessages(THREE_SEG_VID)
+    expect(list).toHaveLength(1)
+    expect(list[0].role).toBe('assistant')
+    expect(list[0].content).toBe('完整前缀\n与晚到片段') // 复用 applySubagentStreamDelta 全量替换
+    // 水位去重：缓冲 deltaSeq=5 ≤ lastDeltaSeq=5 不回放 → 全文唯一，无重复文本
+    expect(list[0].content).not.toContain('晚到片段晚到片段')
+  })
+
+  it('触发点② 反例（干净起步不拉取）：无状态机首条 chunk deltaSeq=0 → 直接建状态机追加，零拉取', () => {
+    const store = useChatStore()
+    store.applySubagentStreamChunk(THREE_SEG_VID, RECORD_ID, 1, 0, 'clean')
+
+    expect(pullMock()).not.toHaveBeenCalled()
+    expect(store.getMessages(THREE_SEG_VID)).toHaveLength(1)
+    expect(store.getMessages(THREE_SEG_VID)[0].content).toBe('clean')
+  })
+
+  it('触发点③ 失步跳号：顺序 chunk 后跳号 → 拉取，响应重置水位后缓冲 > 水位回放再失步 → 再次拉取收敛（回放水位单调推进）', async () => {
+    const store = useChatStore()
+    store.applySubagentStreamChunk(THREE_SEG_VID, RECORD_ID, 1, 0, 'a')
+    // 第一次拉取：水位 2（全文含 deltaSeq 0-2）；缓冲 chunk(1,4) > 3 回放再失步 → 第二次拉取
+    pullMock()
+      .mockResolvedValueOnce({ found: true, msgSeq: 1, lastDeltaSeq: 2, lines: ['a', 'b', 'c'] })
+      .mockResolvedValueOnce({ found: true, msgSeq: 1, lastDeltaSeq: 4, lines: ['a', 'b', 'c', 'd', 'e'] })
+
+    // 跳过 deltaSeq=1,2：失步入缓冲 + 拉取（同 record 首个在途）
+    store.applySubagentStreamChunk(THREE_SEG_VID, RECORD_ID, 1, 4, 'e')
+    expect(pullMock()).toHaveBeenCalledTimes(1)
+
+    await flushPull()
+    // 设计 §4.3「回放中再遇跳号 → 再次拉取」：第二次响应水位 4 覆盖缓冲 → expected=5，
+    // 缓冲 deltaSeq=4 ≤ 水位丢弃 → 内容收敛为最新全文（无缺段无重复，无无限拉取）
+    expect(pullMock()).toHaveBeenCalledTimes(2)
+    const list = store.getMessages(THREE_SEG_VID)
+    expect(list).toHaveLength(1)
+    expect(list[0].content).toBe('a\nb\nc\nd\ne')
+  })
+
+  it('单在途合并：在途拉取未返回期间连续失步 → 不重复发起（pullInFlight 去重），响应到达后一并收敛', async () => {
+    const store = useChatStore()
+    let resolvePull!: (v: { found: boolean; msgSeq: number; lastDeltaSeq: number; lines: string[] }) => void
+    pullMock().mockReturnValue(
+      new Promise<{ found: boolean; msgSeq: number; lastDeltaSeq: number; lines: string[] }>((resolve) => {
+        resolvePull = resolve
+      }),
+    )
+
+    store.applySubagentStreamChunk(THREE_SEG_VID, RECORD_ID, 1, 2, 'x') // 失步 → 发起拉取
+    store.applySubagentStreamChunk(THREE_SEG_VID, RECORD_ID, 1, 3, 'y') // 失步 → 在途去重
+    expect(pullMock()).toHaveBeenCalledTimes(1)
+
+    resolvePull({ found: true, msgSeq: 1, lastDeltaSeq: 3, lines: ['x', 'y'] })
+    await flushPull()
+    const list = store.getMessages(THREE_SEG_VID)
+    expect(list).toHaveLength(1)
+    expect(list[0].content).toBe('x\ny') // 缓冲两条均 ≤ 水位 3，丢弃不回放
+  })
+
+  // ── [B2 u-renderer §4.3] 清除挂点（生命周期挂既有删除编排链）──
+  // disposeSession / evictSessionWithVirtual / evictVirtualKey 是双壳 deleteSession →
+  // core triggerSessionCleanups → SessionCleanupHooks 编排链的真实成员方法；本组断言三个
+  // 挂点执行后 chunk 分区清除。观察信号 = 清除后同 (msgSeq, deltaSeq) chunk 走边界推进
+  // 开新消息（chunk 分区未清则 deltaSeq=0 < expected=1 被拦截丢弃）。messages 分区随挂点
+  // 的处置差异：disposeSession 只删 mainSid key（'a' 流式消息保留）；两个 evict 挂点经
+  // LRU 虚拟键联动连 messages 分区一并删（fresh chunk 成分区唯一消息）。
+
+  function seedStreamingChunk(store: ReturnType<typeof useChatStore>): void {
+    store.applySubagentStreamChunk(THREE_SEG_VID, RECORD_ID, 1, 0, 'a') // 分区 msgSeq=1, expected=1
+  }
+
+  it('清除挂点·session 级：disposeSession（deleteSession 编排链成员）按 mainSid 清名下 chunk 分区', () => {
+    const store = useChatStore()
+    seedStreamingChunk(store)
+
+    store.disposeSession(MAIN_SID)
+    store.applySubagentStreamChunk(THREE_SEG_VID, RECORD_ID, 1, 0, 'fresh')
+    const list = store.getMessages(THREE_SEG_VID)
+    expect(list).toHaveLength(2) // 'a' 保留 + fresh 走边界推进开新消息
+    expect(list[1].status).toBe('streaming')
+    expect(list[1].content).toBe('fresh')
+  })
+
+  it('清除挂点·显式驱逐：evictSessionWithVirtual 按 mainSid 清名下 chunk 分区', () => {
+    const store = useChatStore()
+    seedStreamingChunk(store)
+
+    store.evictSessionWithVirtual(MAIN_SID)
+    store.applySubagentStreamChunk(THREE_SEG_VID, RECORD_ID, 1, 0, 'fresh')
+    const list = store.getMessages(THREE_SEG_VID)
+    // messages 分区被 LRU 虚拟键联动一并清 → fresh 是唯一消息；chunk 分区未清时本 chunk
+    // 会被旧 expected 拦截 → 0 条（断言区分点）
+    expect(list).toHaveLength(1)
+    expect(list[0].content).toBe('fresh')
+  })
+
+  it('清除挂点·record 级：evictVirtualKey 清该虚拟键名下 chunk 分区（record 级随虚拟分区删除）', () => {
+    const store = useChatStore()
+    seedStreamingChunk(store)
+
+    store.evictVirtualKey(THREE_SEG_VID)
+    store.applySubagentStreamChunk(THREE_SEG_VID, RECORD_ID, 1, 0, 'fresh')
+    const list = store.getMessages(THREE_SEG_VID)
+    expect(list).toHaveLength(1) // 分区整体已删，fresh 重建为唯一消息（chunk 分区未清则 0 条）
+    expect(list[0].content).toBe('fresh')
   })
 })

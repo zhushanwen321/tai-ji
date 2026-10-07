@@ -151,7 +151,10 @@ export function useSubagentTabData(deps: SubagentTabDataDeps) {
         },
       ])
     }
-    // 恒订阅（U8 scope token；E-4 R3 消解点：订阅时机与 record 状态机解耦）
+    // 恒订阅（U8 scope token；E-4 R3 消解点：订阅时机与 record 状态机解耦）。
+    // [B2 subagent-stream-chunk §4.3] 第 7 参 chunk 通道回调束：增量 chunk / 定稿水位 /
+    // 接入拉取（触发点①在订阅建立后执行，时序上已处于 fetchAndInject entry 基线恢复之后）
+    // 三入口接 chat store ops 面；失步拉取的执行器（subagentStreamPull）在 chat store 装配点注入。
     subagentStore.subscribeStream(
       STREAM_SCOPE,
       mainSessionId,
@@ -159,6 +162,12 @@ export function useSubagentTabData(deps: SubagentTabDataDeps) {
       vid,
       (id, lines) => chatStore.applySubagentStreamDelta(id, lines),
       (id) => chatStore.finalizeSubagentStream(id),
+      {
+        applyChunk: (id, recId, msgSeq, deltaSeq, delta) =>
+          chatStore.applySubagentStreamChunk(id, recId, msgSeq, deltaSeq, delta),
+        seal: (id, recId, msgSeq) => chatStore.sealSubagentStream(id, recId, msgSeq),
+        requestState: (id, recId) => chatStore.requestSubagentStreamState(id, recId),
+      },
     )
   }
 

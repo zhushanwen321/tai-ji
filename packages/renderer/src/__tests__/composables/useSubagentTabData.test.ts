@@ -22,12 +22,16 @@ import { subagentVirtualId } from '@/stores/subagent'
 import { useSubagentTabData, type SubagentTabDataDeps } from '@/composables/panel/useSubagentTabData'
 import type { SubagentRecord, Message } from '@taiji/shared'
 
-// mock sessionApi：fetchAndInject 内部调 getSubagentHistory（快照腿）
+// mock sessionApi：fetchAndInject 内部调 getSubagentHistory（快照腿）。
+// [B2 u-renderer] getSubagentStreamState = 接入拉取（触发点①，running record 订阅建立后
+// 经 chat store subagentStreamPull 执行器直达本域）——缺成员时触发点①同步 TypeError 进
+// loadError；工厂给默认回执（found:false，core 分支 3 不动作）。
 vi.mock('@taiji/core/transport/api/domains/session', () => ({
   getSubagentHistory: vi.fn(),
   getSubagents: vi.fn().mockResolvedValue([]),
   subagentAction: vi.fn(),
   getAgentCallHistory: vi.fn(),
+  getSubagentStreamState: vi.fn().mockResolvedValue({ found: false, msgSeq: 0, lastDeltaSeq: 0, lines: [] }),
 }))
 // subagent store 经 @/api 门面导入 session；vitest 环境 VITE_MOCK=true 时门面把 session
 // 解析到 src/api/mock（mockApi.getSubagentHistory 永不 resolve → fetchAndInject 卡死）。
