@@ -54,10 +54,12 @@ import { RENDERER_DIST_ASSETS, MOCK_BUNDLE_MARKER } from './launch-app'
 /**
  * pre-flight：确认当前 renderer 产物是 real bundle（mock 产物在场即 fail-fast）。
  *
- * 背景：mock 轨与 real 轨共用 apps/electron/renderer/dist（构建期 VITE_MOCK define），
- * e2e globalSetup 只查产物存在、不查构建形态。若先跑 mock 轨再跑 real 轨，real spec 的
- * UI 段会因 renderer 渲染的是 mock fixture 数据而超时（30s `locator.click` 等不到 WS 建的
- * session），失败信号不指向恢复动作。此处把该前置条件变成带恢复命令的响亮失败。
+ * 背景：mock 轨与 real 轨共用 apps/electron/renderer/dist（构建期 VITE_MOCK define）。
+ * e2e globalSetup 已做形态感知构建（按 argv 请求轨自动重建形态不符的产物），本
+ * pre-flight 是运行期第二道防线（混合信号运行 / 手工重建后的形态漂移）：real spec 的
+ * UI 段撞上 mock bundle 会因 renderer 渲染 mock fixture 数据而超时（30s `locator.click`
+ * 等不到 WS 建的 session），失败信号不指向恢复动作。此处把该前置条件变成带恢复命令的
+ * 响亮失败。
  */
 function assertRealRendererBundle(): void {
   if (!fs.existsSync(RENDERER_DIST_ASSETS)) {

@@ -250,7 +250,8 @@
         "e2e/workspace-real.spec.ts",
         "e2e/ask-user-real.spec.ts",
         "e2e/tasks-drawer-real.spec.ts",
-        "e2e/workflow-thinkinglevel-real.spec.ts"
+        "e2e/workflow-thinkinglevel-real.spec.ts",
+        "e2e/fixtures/real-track-specs.ts"
       ],
       "layer": "L2",
       "assets": [
@@ -273,6 +274,10 @@
         {
           "kind": "harness",
           "ref": "e2e/fixtures/launch-app-real.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "e2e/fixtures/real-track-specs.ts"
         }
       ],
       "trigger": "on-diff",
