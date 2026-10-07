@@ -476,4 +476,41 @@ describe('projectSubagentModelDetailIntoRuns — run 详情逐成员携带', () 
     const result = projectSubagentModelDetailIntoRuns('main-1', runs, [otherRunMember], undefined)
     expect(result[0]?.agentCalls[0]?.recentEffectiveModel).toBeUndefined()
   })
+
+  it('changed/skip 交错多 run：输出完整不丢 run（dmg-r2-1——惰性 slice + push 追加式曾把首个 changed 之后 skip run 整条丢失）', () => {
+    const mkRun = (runId: string) => ({
+      ...runBase,
+      runId,
+      agentCalls: [{ id: 0, agent: 'worker-a', status: 'running' as const, model: 'p/old' }],
+    })
+    // 索引 1/3 是 changed（有成员携带生效值），0/2/4 是 skip（成员圈定全 miss）——
+    // 首个 changed（索引 1）触发惰性 slice 后，其后 skip run 必须原样保留在位。
+    const runs = [mkRun('wf-0'), mkRun('wf-1'), mkRun('wf-2'), mkRun('wf-3'), mkRun('wf-4')]
+    const memberOf = (runId: string, subagentId: string): SubagentRecord => ({
+      ...memberA,
+      subagentId,
+      parentRunId: runId,
+    })
+    const result = projectSubagentModelDetailIntoRuns(
+      'main-1',
+      runs,
+      [memberOf('wf-1', 'sa-1'), memberOf('wf-3', 'sa-3')],
+      undefined,
+    )
+
+    // 输出完整性：5 条全在、顺序保持、逐条对位
+    expect(result).toHaveLength(5)
+    expect(result.map((r) => r.runId)).toEqual(['wf-0', 'wf-1', 'wf-2', 'wf-3', 'wf-4'])
+    // skip run 原样写回（引用相等，不重建不带增强键）——索引 2/4 在首个 changed 之后，曾整条丢失
+    expect(result[0]).toBe(runs[0])
+    expect(result[2]).toBe(runs[2])
+    expect(result[4]).toBe(runs[4])
+    expect(result[2]?.agentCalls[0]?.memberRecordId).toBeUndefined()
+    expect(result[4]?.agentCalls[0]?.recentEffectiveModel).toBeUndefined()
+    // changed run：增强字段在场（成员标识 + 生效值逐成员透传）
+    expect(result[1]?.agentCalls[0]?.memberRecordId).toBe('sa-1')
+    expect(result[1]?.agentCalls[0]?.recentEffectiveModel).toEqual({ provider: 'p', modelId: 'effective-a' })
+    expect(result[3]?.agentCalls[0]?.memberRecordId).toBe('sa-3')
+    expect(result[3]?.agentCalls[0]?.recentEffectiveModel).toEqual({ provider: 'p', modelId: 'effective-a' })
+  })
 })

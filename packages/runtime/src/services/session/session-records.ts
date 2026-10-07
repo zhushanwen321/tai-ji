@@ -944,7 +944,9 @@ export class SessionRecords {
       const record = records[i]!
       // current 恒从原始 records[i] 出发（enhanced 的惰性 slice 只覆盖到首个命中索引
       // 之前，enhanced[i] 在本轮写入前必为空洞——曾读它当基值，命中项之后的 record
-      // 被原样写 undefined / 展开丢光原字段）。
+      // 被原样写 undefined / 展开丢光原字段）。同款「惰性 slice + 全索引写」模式在
+      // workflow-record-projection.ts projectSubagentModelDetailIntoRuns 有第二处实装
+      // （dmg-r2-1 修复同型丢 run），两处注释互引防第三份手写副本。
       let current = record
       let changed = false
       if (query !== undefined && record.origin !== 'workflow') {

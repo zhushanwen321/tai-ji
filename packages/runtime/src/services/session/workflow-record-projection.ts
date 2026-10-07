@@ -273,41 +273,48 @@ export function projectSubagentModelDetailIntoRuns(
     const run = runs[i]!
     const byStep = byRun.get(run.runId)
     const runOverride = query?.getRunOverride(sessionId, run.runId)
-    if (byStep === undefined && runOverride === undefined) continue
-    let changed = false
-    const agentCalls = run.agentCalls.map((call) => {
-      const member = byStep?.get(call.id)
-      const override = runOverride ?? member?.modelOverride
-      const recent = member?.recentEffectiveModel
-      // 成员标识恒透出（member 在场即携带，不等覆盖/生效值在场）——它是回执显示态的
-      // 读取键，切换发生时面板数据源可能尚无任何覆盖载荷（首次切换前两者恒缺席）。
-      // subagentId = record 创建事件 identity.id（projectV2Subagent 身份域），与聚合
-      // 应答成员标识（listAcceptedMemberRunIdsForSwitch 的 ExecutionRecord.id）同源。
-      // 代价：getWorkflows 每次读 RPC 对有成员的 run 重建 agentCalls 数组（零拷贝
-      // 快路径仅在成员圈定全 miss 时保留）——成员增强产物本就每次读 RPC 重派生，
-      // 重建为浅展开小对象，量级可忽略。
-      const memberRecordId = member?.subagentId
-      if (override === undefined && recent === undefined && memberRecordId === undefined) return call
-      // 引用相等短路（返回值直进 RPC reply 不缓存，无跨轮幂等消费位；形状级比较
-      // 不必——成员增强产物每次读 RPC 重派生）。
-      if (
-        call.modelOverride === override &&
-        call.recentEffectiveModel === recent &&
-        call.memberRecordId === memberRecordId
-      ) {
-        return call
-      }
-      changed = true
-      return {
-        ...call,
-        ...(memberRecordId !== undefined ? { memberRecordId } : {}),
-        ...(override !== undefined ? { modelOverride: override } : {}),
-        ...(recent !== undefined ? { recentEffectiveModel: recent } : {}),
-      }
-    })
-    if (!changed) continue
-    if (result === null) result = runs.slice(0, i)
-    result.push({ ...run, agentCalls })
+    // 需重建的 run（changed）记入 updated；skip run 保持 undefined（循环尾原样写回）
+    let updated: WorkflowRunRecord | undefined
+    if (byStep !== undefined || runOverride !== undefined) {
+      let changed = false
+      const agentCalls = run.agentCalls.map((call) => {
+        const member = byStep?.get(call.id)
+        const override = runOverride ?? member?.modelOverride
+        const recent = member?.recentEffectiveModel
+        // 成员标识恒透出（member 在场即携带，不等覆盖/生效值在场）——它是回执显示态的
+        // 读取键，切换发生时面板数据源可能尚无任何覆盖载荷（首次切换前两者恒缺席）。
+        // subagentId = record 创建事件 identity.id（projectV2Subagent 身份域），与聚合
+        // 应答成员标识（listAcceptedMemberRunIdsForSwitch 的 ExecutionRecord.id）同源。
+        // 代价：getWorkflows 每次读 RPC 对有成员的 run 重建 agentCalls 数组（零拷贝
+        // 快路径仅在成员圈定全 miss 时保留）——成员增强产物本就每次读 RPC 重派生，
+        // 重建为浅展开小对象，量级可忽略。
+        const memberRecordId = member?.subagentId
+        if (override === undefined && recent === undefined && memberRecordId === undefined) return call
+        // 引用相等短路（返回值直进 RPC reply 不缓存，无跨轮幂等消费位；形状级比较
+        // 不必——成员增强产物每次读 RPC 重派生）。
+        if (
+          call.modelOverride === override &&
+          call.recentEffectiveModel === recent &&
+          call.memberRecordId === memberRecordId
+        ) {
+          return call
+        }
+        changed = true
+        return {
+          ...call,
+          ...(memberRecordId !== undefined ? { memberRecordId } : {}),
+          ...(override !== undefined ? { modelOverride: override } : {}),
+          ...(recent !== undefined ? { recentEffectiveModel: recent } : {}),
+        }
+      })
+      if (changed) updated = { ...run, agentCalls }
+    }
+    // 惰性拷贝 + 全索引写（与 session-records.ts enhanceSubagentDetails 已修形态同款，
+    // 两处注释互引防第三份手写副本）：result 惰性 slice(0, i) 只覆盖首个 changed 之前
+    // 的区间，其后每个索引（含 skip run）必须显式写回——曾为 slice(0, i) + push 追加
+    // 式，首个 changed 之后的 skip run 从返回列表整条丢失（dmg-r1-1 同型第二份）。
+    if (updated !== undefined && result === null) result = runs.slice(0, i)
+    if (result !== null) result[i] = updated ?? run
   }
   return result ?? runs
 }
