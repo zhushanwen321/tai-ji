@@ -403,6 +403,22 @@ export function isValidClosedReason(value: string | undefined): value is ClosedR
   return value !== undefined && CLOSED_REASONS.has(value);
 }
 
+/**
+ * manifest 覆盖记账字段的读侧形状守卫（isEngineHandleShape 同款口径——未知 JSON 不裸收，
+ * 外部写入垃圾归一 undefined）。
+ */
+export function isValidModelOverrideShape(
+  v: unknown,
+): v is { ref: { provider: string; modelId: string }; thinkingLevel?: string; setAt: number } {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const o = v as Record<string, unknown>;
+  if (typeof o.setAt !== "number") return false;
+  if (o.thinkingLevel !== undefined && typeof o.thinkingLevel !== "string") return false;
+  if (typeof o.ref !== "object" || o.ref === null || Array.isArray(o.ref)) return false;
+  const ref = o.ref as Record<string, unknown>;
+  return typeof ref.provider === "string" && typeof ref.modelId === "string";
+}
+
 export function sameNullableStamp(a: Stamp | null, b: Stamp | null): boolean {
   if (a === null || b === null) return a === b;
   return sameStamp(a, b);
@@ -791,6 +807,21 @@ export function terminalManifestRecord(record: ExecutionRecord): ManifestRecord 
     model: record.model,
     engine: record.engine,
     engineHandle: record.engineHandle,
+    // [H2 W1 / D3 缺陷五] 来源身份与覆盖记账随终态投影下行（与 derived 投影同域）。
+    ...(record.origin === "workflow" ? { origin: "workflow" as const } : {}),
+    ...(record.parentRunId !== undefined ? { parentRunId: record.parentRunId } : {}),
+    ...(record.stepIndex !== undefined ? { stepIndex: record.stepIndex } : {}),
+    ...(record.modelOverride !== undefined
+      ? {
+          modelOverride: {
+            ref: record.modelOverride.ref,
+            ...(record.modelOverride.thinkingLevel !== undefined
+              ? { thinkingLevel: record.modelOverride.thinkingLevel }
+              : {}),
+            setAt: record.modelOverride.setAt,
+          },
+        }
+      : {}),
   };
 }
 
@@ -852,6 +883,22 @@ export function derivedManifestRecord(rec: SubagentRecord): ManifestRecord {
     model: rec.model,
     engine: rec.engine,
     engineHandle: rec.engineHandle,
+    // [H2 W1 / D3 缺陷五] 来源身份与覆盖记账随投影下行（manifest 源反查 parentRunId
+    // 是 run 级全切成员清单的可见性键；zcode 成员的 manifest 兜底载体缺它即漏成员）。
+    ...(rec.origin === "workflow" ? { origin: "workflow" as const } : {}),
+    ...(rec.parentRunId !== undefined ? { parentRunId: rec.parentRunId } : {}),
+    ...(rec.stepIndex !== undefined ? { stepIndex: rec.stepIndex } : {}),
+    ...(rec.modelOverride !== undefined
+      ? {
+          modelOverride: {
+            ref: rec.modelOverride.ref,
+            ...(rec.modelOverride.thinkingLevel !== undefined
+              ? { thinkingLevel: rec.modelOverride.thinkingLevel }
+              : {}),
+            setAt: rec.modelOverride.setAt,
+          },
+        }
+      : {}),
   };
 }
 
@@ -895,6 +942,12 @@ export function manifestToSubagent(m: ManifestRecord): SubagentRecord | null {
     sessionFile: m.sessionFile,
     engine: m.engine,
     engineHandle: isEngineHandleShape(m.engineHandle) ? m.engineHandle : undefined,
+    // [H2 W1 / D3 缺陷五] 来源身份回读（旧 manifest 无字段 → undefined = tool 语义，
+    // 与 entry/内存源投影同形——manifest 源反查 collectRecordsByParentRunId 不再漏成员）。
+    ...(m.origin === "workflow" ? { origin: "workflow" as const } : {}),
+    ...(typeof m.parentRunId === "string" && m.parentRunId !== "" ? { parentRunId: m.parentRunId } : {}),
+    ...(typeof m.stepIndex === "number" ? { stepIndex: m.stepIndex } : {}),
+    ...(isValidModelOverrideShape(m.modelOverride) ? { modelOverride: m.modelOverride } : {}),
   };
 }
 

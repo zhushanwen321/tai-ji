@@ -773,6 +773,12 @@ export class RecordStore {
       setAt: override.setAt,
       ts: Date.now(),
     });
+    // [顺带发现 4 / D3 缺陷五] 派生 manifest 投影随覆盖写点同步刷新（写序 = 事件帧先、
+    // manifest 后——水位构造性新鲜）：磁盘快照在该写点不再停留陈旧值；zcode 成员的
+    // manifest 兜底载体对 run 级查询（parentRunId 反查）保持新鲜可见（缺陷六可见性
+    // 窗口的收窄面）。与轮终 writeDerivedManifest 同款写面（D7：manifest 写函数调用
+    // 字面只留本文件）。
+    this.writeManifestPersisted(record.id, derivedManifestRecord(recordToSubagent(record)));
     this.notifyChange();
     return true;
   }
@@ -1976,6 +1982,30 @@ export class RecordStore {
     const file = this.idToFile.get(id);
     if (!file) return undefined;
     return this.scanFile(file)?.light;
+  }
+
+  /**
+   * [D3 缺陷五] manifest 兜底的单 id 读取（getMutable / findLightById 双 miss 后的
+   * 第三源）：zcode 成员无子 session 文件（不在文件扫描集）、settle 后出内存——
+   * bound 物化的 manifest 是其磁盘唯一载体，run 级全切的成员引擎转发面对它不可达
+   * = 无码 plain Error 误入聚合失败名单（分型 readback 失败）。只服务引擎路由解析：
+   * 消费的 identity 域字段（origin/parentRunId/engine/engineHandle）在创建/绑定后
+   * 不变，陈旧 manifest 的身份域仍可信——不做水位校验（状态域消费方禁用本方法，
+   * 状态读取走 mergedRecords 四源合并）。读不到/损坏/状态越界 → undefined。
+   */
+  findByIdManifestFallback(id: string): SubagentRecord | undefined {
+    if (this.manifestDir === undefined) return undefined;
+    let raw: string;
+    try {
+      raw = fs.readFileSync(path.join(this.manifestDir, `${id}.json`), "utf8");
+    } catch {
+      return undefined; // 文件缺失/不可读 = 无兜底形态
+    }
+    try {
+      return manifestToSubagent(JSON.parse(raw) as ManifestRecord) ?? undefined;
+    } catch {
+      return undefined; // 解析失败 = 保守（与 mergeManifestRecords 坏链侧同款）
+    }
   }
 
   /**

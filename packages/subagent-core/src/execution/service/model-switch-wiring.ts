@@ -68,8 +68,13 @@ export function listAcceptedMemberRunIdsForSwitch(
  * resolveChatEnginePort 窗口感知形态）；非 pi 成员走 resolveWorkflowWindowEnginePort
  * （shared-service 引擎透传 registry）。切换命中的进程与派发进程同源。
  *
- * 解析失败（成员 record 缺失 / parentRunId 留痕缺失）throw → 聚合归失败名单，不
- * 中断其余成员（run-model-switch-aggregate 契约）。capability not-applicable 判定
+ * 三源查找（D3 缺陷五）：getMutable（内存）→ findLightById（文件扫描）→
+ * findByIdManifestFallback（manifest 兜底——zcode 成员无子 session 文件不在扫描集、
+ * settle 后出内存，bound 物化的 manifest 是其磁盘唯一载体；缺兜底 = 无码 plain Error
+ * 误入聚合失败名单分型 readback 失败）。
+ *
+ * 解析失败（成员 record 三源全 miss / parentRunId 留痕缺失）throw → 聚合归失败名单，
+ * 不中断其余成员（run-model-switch-aggregate 契约）。capability not-applicable 判定
  * **不在此拦**——聚合层预检先于引擎调用（§8 场景 7 步骤④），unsupported 引擎成员
  * 必须到达预检落 not-applicable（拦在这里会错位进失败名单）；仅对「native 位 +
  * setModel 方法缺席」的装配损坏 fail-fast（native 位与方法同源条件实装，该组合
@@ -77,11 +82,14 @@ export function listAcceptedMemberRunIdsForSwitch(
  * setModel 永不被聚合调用（预检分支先行）。
  */
 export function resolveMemberEnginePortForSwitch(
-  store: Pick<RecordStore, "getMutable" | "findLightById">,
+  store: Pick<RecordStore, "getMutable" | "findLightById" | "findByIdManifestFallback">,
   resolveChatEnginePort: (windowKey?: string) => EnginePort,
   memberRunId: string,
 ): SetModelCapableEnginePort {
-  const record = store.getMutable(memberRunId) ?? store.findLightById(memberRunId);
+  const record =
+    store.getMutable(memberRunId) ??
+    store.findLightById(memberRunId) ??
+    store.findByIdManifestFallback(memberRunId);
   if (record === undefined) {
     throw new Error(`workflow 成员 record 不存在，无法转发模型切换（memberRunId=${memberRunId}）`);
   }

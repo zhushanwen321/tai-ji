@@ -55,6 +55,24 @@ export interface ManifestRecord {
    */
   engineHandle?: { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string };
   /**
+   * [H2 W1 / D3 缺陷五] 来源身份三字段（与 SubagentRecord 同名同形——origin/parentRunId/
+   * stepIndex）。manifest 源投影（manifestToSubagent）缺 parentRunId 时，workflow 成员
+   * 对 run 级查询（collectRecordsByParentRunId）不可见——zcode 成员无子 session 文件
+   * （磁盘扫描缺员），bound 物化的 manifest 是其 spawn 后唯一的磁盘兜底载体，投影缺
+   * 字段 = run 级全切成员清单漏成员（聚合 members=[] 静默漏切面）。旧 manifest 无此
+   * 字段（undefined = tool 语义），读侧守卫归一，零迁移。
+   */
+  origin?: "workflow";
+  parentRunId?: string;
+  stepIndex?: number;
+  /**
+   * [subagent-model-switch §6.2 / 顺带发现 4] 用户覆盖记账快照（与
+   * SubagentRecord.modelOverride 同形）。markModelOverride 写点同步刷新派生 manifest
+   * ——磁盘快照在该写点不再停留在陈旧值（快照语义 = 各意图写点的物化投影，权威 =
+   * record-model-override 事件帧）。读侧守卫同 engineHandle（未知 JSON 不裸收）。
+   */
+  modelOverride?: { ref: { provider: string; modelId: string }; thinkingLevel?: string; setAt: number };
+  /**
    * [M2 Gate B] closed 终态的 L2 关闭原因（status="closed" 时有意义）。旧 manifest 无
    * 此字段（undefined = 死因不可考，读侧守卫归一 undefined）。缺失时 manifest 源重建
    * 的快照丢 closedReason，endedMessageGuard 把 user-close/cancelled 误分流进

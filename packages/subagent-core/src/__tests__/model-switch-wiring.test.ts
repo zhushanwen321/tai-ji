@@ -263,7 +263,7 @@ describe("resolveMemberEnginePortForSwitch（U5 转发面：窗口键 + 路由 +
     const port = fakeSwitchPort("native");
     const resolveChatEnginePort = vi.fn(() => port);
     const record = makeMemberRecord("bg-pi", { parentRunId: "run-window-1" });
-    const store = { getMutable: vi.fn(() => record), findLightById: vi.fn(() => undefined) };
+    const store = { getMutable: vi.fn(() => record), findLightById: vi.fn(() => undefined), findByIdManifestFallback: vi.fn(() => undefined) };
 
     const resolved = resolveMemberEnginePortForSwitch(store, resolveChatEnginePort, "bg-pi");
 
@@ -278,6 +278,7 @@ describe("resolveMemberEnginePortForSwitch（U5 转发面：窗口键 + 路由 +
     const store = {
       getMutable: vi.fn(() => undefined),
       findLightById: vi.fn(() => light),
+      findByIdManifestFallback: vi.fn(() => undefined),
     };
 
     const resolved = resolveMemberEnginePortForSwitch(
@@ -293,6 +294,7 @@ describe("resolveMemberEnginePortForSwitch（U5 转发面：窗口键 + 路由 +
     const store = {
       getMutable: vi.fn(() => undefined),
       findLightById: vi.fn(() => undefined),
+      findByIdManifestFallback: vi.fn(() => undefined),
     };
 
     expect(() =>
@@ -306,7 +308,7 @@ describe("resolveMemberEnginePortForSwitch（U5 转发面：窗口键 + 路由 +
 
   it("parentRunId 留痕缺失 → throw（无法解析引擎窗口）", () => {
     const record = makeMemberRecord("bg-orphan", { parentRunId: undefined });
-    const store = { getMutable: vi.fn(() => record), findLightById: vi.fn(() => undefined) };
+    const store = { getMutable: vi.fn(() => record), findLightById: vi.fn(() => undefined), findByIdManifestFallback: vi.fn(() => undefined) };
 
     expect(() =>
       resolveMemberEnginePortForSwitch(
@@ -321,7 +323,7 @@ describe("resolveMemberEnginePortForSwitch（U5 转发面：窗口键 + 路由 +
     const port = fakeSwitchPort("unsupported");
     routingMock.resolveWorkflowWindowEnginePort.mockReturnValue(port);
     const record = makeMemberRecord("bg-zcode", { parentRunId: "run-window-3", engine: "zcode" });
-    const store = { getMutable: vi.fn(() => record), findLightById: vi.fn(() => undefined) };
+    const store = { getMutable: vi.fn(() => record), findLightById: vi.fn(() => undefined), findByIdManifestFallback: vi.fn(() => undefined) };
     const resolveChatEnginePort = vi.fn();
 
     const resolved = resolveMemberEnginePortForSwitch(store, resolveChatEnginePort, "bg-zcode");
@@ -342,7 +344,7 @@ describe("resolveMemberEnginePortForSwitch（U5 转发面：窗口键 + 路由 +
       capabilities: () => capsWith("native"),
     } as unknown as SetModelCapableEnginePort;
     const record = makeMemberRecord("bg-broken", { parentRunId: "run-window-4" });
-    const store = { getMutable: vi.fn(() => record), findLightById: vi.fn(() => undefined) };
+    const store = { getMutable: vi.fn(() => record), findLightById: vi.fn(() => undefined), findByIdManifestFallback: vi.fn(() => undefined) };
 
     expect(() =>
       resolveMemberEnginePortForSwitch(store, vi.fn(() => brokenPort), "bg-broken"),
@@ -354,7 +356,7 @@ describe("resolveMemberEnginePortForSwitch（U5 转发面：窗口键 + 路由 +
     // 落 not-applicable（§8 场景 7 步骤④），拦在 wiring 会错位进失败名单。
     const port = fakeSwitchPort("unsupported");
     const record = makeMemberRecord("bg-legacy", { parentRunId: "run-window-5" });
-    const store = { getMutable: vi.fn(() => record), findLightById: vi.fn(() => undefined) };
+    const store = { getMutable: vi.fn(() => record), findLightById: vi.fn(() => undefined), findByIdManifestFallback: vi.fn(() => undefined) };
 
     const resolved = resolveMemberEnginePortForSwitch(store, vi.fn(() => port), "bg-legacy");
 
@@ -366,7 +368,11 @@ describe("resolveMemberEnginePortForSwitch（U5 转发面：窗口键 + 路由 +
       ...makeLightRecord({ id: "bg-corrupt", parentRunId: "run-window-6" }),
       engineHandle: { sessionRef: { dbPath: "/tmp/zcode-db.sqlite" }, poolKey: "shared" },
     };
-    const store = { getMutable: vi.fn(() => undefined), findLightById: vi.fn(() => light) };
+    const store = {
+      getMutable: vi.fn(() => undefined),
+      findLightById: vi.fn(() => light),
+      findByIdManifestFallback: vi.fn(() => undefined),
+    };
 
     expect(() =>
       resolveMemberEnginePortForSwitch(
@@ -380,7 +386,7 @@ describe("resolveMemberEnginePortForSwitch（U5 转发面：窗口键 + 路由 +
   it(`路由判据锚定：engine 缺席 = ${DEFAULT_ENGINE_ID} 缺省（存量 record 零迁移）`, () => {
     const port = fakeSwitchPort("native");
     const record = makeMemberRecord("bg-default", { parentRunId: "run-window-7" });
-    const store = { getMutable: vi.fn(() => record), findLightById: vi.fn(() => undefined) };
+    const store = { getMutable: vi.fn(() => record), findLightById: vi.fn(() => undefined), findByIdManifestFallback: vi.fn(() => undefined) };
     const resolveChatEnginePort = vi.fn(() => port);
 
     resolveMemberEnginePortForSwitch(store, resolveChatEnginePort, "bg-default");
@@ -388,5 +394,33 @@ describe("resolveMemberEnginePortForSwitch（U5 转发面：窗口键 + 路由 +
     // 缺省路由走 chat 通道（窗口感知形态）而非 routing 表——pi 成员窗口键 = parentRunId。
     expect(resolveChatEnginePort).toHaveBeenCalledWith("run-window-7");
     expect(routingMock.resolveWorkflowWindowEnginePort).not.toHaveBeenCalled();
+  });
+
+  it("三源兜底（D3 缺陷五回归）：内存/文件扫描双 miss 的 zcode 成员经 manifest 兜底解析端口——不再误入失败名单", () => {
+    const port = fakeSwitchPort("unsupported");
+    routingMock.resolveWorkflowWindowEnginePort.mockReturnValue(port);
+    // zcode 成员 settle 后出内存、无子 session 文件不在扫描集——唯一磁盘载体 =
+    // bound 物化的 manifest（boundMaterialize 写点产物，投影含 parentRunId/engine）。
+    const manifestSourced = makeLightRecord({
+      id: "bg-zc-settled",
+      parentRunId: "run-window-8",
+      engine: "zcode",
+    });
+    const store = {
+      getMutable: vi.fn(() => undefined),
+      findLightById: vi.fn(() => undefined),
+      findByIdManifestFallback: vi.fn(() => manifestSourced),
+    };
+    const resolveChatEnginePort = vi.fn();
+
+    const resolved = resolveMemberEnginePortForSwitch(store, resolveChatEnginePort, "bg-zc-settled");
+
+    expect(store.findByIdManifestFallback).toHaveBeenCalledWith("bg-zc-settled");
+    expect(resolveChatEnginePort).not.toHaveBeenCalled();
+    expect(routingMock.resolveWorkflowWindowEnginePort).toHaveBeenCalledWith(
+      "run-window-8",
+      "zcode",
+    );
+    expect(resolved).toBe(port);
   });
 });

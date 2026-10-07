@@ -148,3 +148,115 @@ describe("markRoundIdle 轮终派生 manifest 投影（B2 簿记⑫）", () => {
     expect(raw["executionStatus"]).toBe("idle");
   });
 });
+
+// [D3 缺陷五 + 顺带发现 4] 来源身份与覆盖记账随 manifest 投影下行 + markModelOverride
+// 写点同步刷新派生投影——manifest 源反查（collectRecordsByParentRunId 的可见性键）与
+// 磁盘快照新鲜度（zcode 成员 spawn 后唯一磁盘兜底载体）的回归锚。
+describe("manifest 来源身份投影与 markModelOverride 派生刷新（D3 缺陷五/顺带发现 4）", () => {
+  let tmpDir: string;
+  let sessionsDir: string;
+  let manifestDir: string;
+  let sessionFile: string;
+  let store: RecordStore;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "round-manifest-identity-"));
+    sessionsDir = path.join(tmpDir, "sessions");
+    manifestDir = path.join(tmpDir, "records");
+    store = makeStore(sessionsDir, manifestDir);
+    sessionFile = path.join(sessionsDir, "2026-01-01_uuid.jsonl");
+    fs.writeFileSync(sessionFile, "{}\n", "utf-8");
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  const readManifest = (id: string): Record<string, unknown> =>
+    JSON.parse(fs.readFileSync(path.join(manifestDir, `${id}.json`), "utf-8")) as Record<string, unknown>;
+
+  it("workflow 成员的轮终派生投影携带 origin/parentRunId/stepIndex（run 级查询可见性键）", () => {
+    const record = makeRecord("wf-member", {
+      sessionFile,
+      origin: "workflow",
+      parentRunId: "wf-run-1",
+      stepIndex: 3,
+    });
+    store.register(record);
+    expect(store.markRoundIdle("wf-member", { kind: "success", content: "done" })).toBe(true);
+
+    const raw = readManifest("wf-member");
+    expect(raw["origin"]).toBe("workflow");
+    expect(raw["parentRunId"]).toBe("wf-run-1");
+    expect(raw["stepIndex"]).toBe(3);
+    // 反查链：manifest 源投影能被 collectRecordsByParentRunId 的过滤键命中。
+    const members = store.collectRecordsByParentRunId("wf-run-1", 50);
+    expect(members.map((r) => r.id)).toContain("wf-member");
+  });
+
+  it("markModelOverride 写点同步刷新派生 manifest（事件帧先写、manifest 后写——水位新鲜 + 快照不再停留陈旧值）", () => {
+    const record = makeRecord("ovr-member", {
+      sessionFile,
+      engine: "zcode",
+      engineHandle: { sessionRef: { sessionId: "z-1", dbPath: path.join(tmpDir, "db.sqlite") }, poolKey: "shared" },
+      origin: "workflow",
+      parentRunId: "wf-run-2",
+    });
+    store.register(record);
+
+    // 创建时不写 manifest（register 契约）——覆盖写点前的磁盘快照缺席。
+    expect(fs.existsSync(path.join(manifestDir, "ovr-member.json"))).toBe(false);
+
+    expect(
+      store.markModelOverride(record, {
+        ref: { provider: "p1", modelId: "m9" },
+        thinkingLevel: "high",
+        setAt: 1234,
+      }),
+    ).toBe(true);
+
+    const raw = readManifest("ovr-member");
+    // 覆盖记账快照 = 写点时值（顺带发现 4：磁盘快照不再 null 滞留）。
+    expect(raw["modelOverride"]).toEqual({
+      ref: { provider: "p1", modelId: "m9" },
+      thinkingLevel: "high",
+      setAt: 1234,
+    });
+    // 来源身份随刷新保留（缺陷五：zcode 成员的 manifest 兜底载体对 run 级查询可见）。
+    expect(raw["parentRunId"]).toBe("wf-run-2");
+    // 水位新鲜：manifest 的 eventsStamp 与当前事件文件 stat 一致（读侧不因过期跳过）。
+    const eventsPath = path.join(manifestDir, "ovr-member.events");
+    const stamp = fs.statSync(eventsPath);
+    const watermarked = raw["eventsStamp"] as { mtimeMs: number; size: number };
+    expect(watermarked.mtimeMs).toBe(stamp.mtimeMs);
+    expect(watermarked.size).toBe(stamp.size);
+    // manifest 源反查：覆盖记账值随投影可达（session-reader / 查询面的读侧半边）。
+    const members = store.collectRecordsByParentRunId("wf-run-2", 50);
+    const found = members.find((r) => r.id === "ovr-member");
+    expect(found?.modelOverride?.ref).toEqual({ provider: "p1", modelId: "m9" });
+  });
+
+  it("manifestToSubagent 读侧守卫：损坏 modelOverride 形状归一 undefined（未知 JSON 不裸收）", async () => {
+    fs.writeFileSync(
+      path.join(manifestDir, "corrupt-ovr.json"),
+      JSON.stringify({
+        id: "corrupt-ovr",
+        rootSessionId: "sess-current",
+        agentName: "worker",
+        status: "running",
+        createdAt: 1000,
+        modelOverride: { ref: { provider: 42 }, setAt: "not-a-number" },
+      }),
+      "utf-8",
+    );
+    const { ManifestStore } = await import("../persistence/manifest-store.ts");
+    const { manifestToSubagent } = await import("../persistence/record-store-rebuild.ts");
+    const ms = new ManifestStore(manifestDir);
+    const manifest = await ms.readManifest("corrupt-ovr");
+    expect(manifest).not.toBeNull();
+    const projected = manifestToSubagent(manifest!);
+    expect(projected?.modelOverride).toBeUndefined();
+    expect(projected?.parentRunId).toBeUndefined();
+    expect(projected?.origin).toBeUndefined();
+  });
+});
