@@ -419,6 +419,23 @@ export function isValidModelOverrideShape(
   return typeof ref.provider === "string" && typeof ref.modelId === "string";
 }
 
+/**
+ * ModelOverride 规范拷贝单点（record/fold/manifest 各载体间的字段级复制——thinkingLevel
+ * 缺省不落键，消费方 `'thinkingLevel' in obj` 判定与序列化键集恒定）。此前 fold→light 补
+ * 投影 / 终态 manifest / derived manifest / 水合四处手写同构 spread，收拢防第三处副本漂移。
+ */
+function copyModelOverride(o: {
+  ref: { provider: string; modelId: string };
+  thinkingLevel?: string;
+  setAt: number;
+}): { ref: { provider: string; modelId: string }; thinkingLevel?: string; setAt: number } {
+  return {
+    ref: o.ref,
+    ...(o.thinkingLevel !== undefined ? { thinkingLevel: o.thinkingLevel } : {}),
+    setAt: o.setAt,
+  };
+}
+
 export function sameNullableStamp(a: Stamp | null, b: Stamp | null): boolean {
   if (a === null || b === null) return a === b;
   return sameStamp(a, b);
@@ -542,13 +559,7 @@ export function projectFoldToLight(
   if (stats.turns !== undefined) light.turns = stats.turns;
   if (stats.endedAt !== undefined) light.endedAt = stats.endedAt;
   if (fold?.modelOverride !== undefined) {
-    light.modelOverride = {
-      ref: fold.modelOverride.ref,
-      ...(fold.modelOverride.thinkingLevel !== undefined
-        ? { thinkingLevel: fold.modelOverride.thinkingLevel }
-        : {}),
-      setAt: fold.modelOverride.setAt,
-    };
+    light.modelOverride = copyModelOverride(fold.modelOverride);
   }
 }
 
@@ -839,15 +850,7 @@ export function terminalManifestRecord(record: ExecutionRecord): ManifestRecord 
     ...(record.parentRunId !== undefined ? { parentRunId: record.parentRunId } : {}),
     ...(record.stepIndex !== undefined ? { stepIndex: record.stepIndex } : {}),
     ...(record.modelOverride !== undefined
-      ? {
-        modelOverride: {
-          ref: record.modelOverride.ref,
-          ...(record.modelOverride.thinkingLevel !== undefined
-            ? { thinkingLevel: record.modelOverride.thinkingLevel }
-            : {}),
-          setAt: record.modelOverride.setAt,
-        },
-      }
+      ? { modelOverride: copyModelOverride(record.modelOverride) }
       : {}),
   };
 }
@@ -916,15 +919,7 @@ export function derivedManifestRecord(rec: SubagentRecord): ManifestRecord {
     ...(rec.parentRunId !== undefined ? { parentRunId: rec.parentRunId } : {}),
     ...(rec.stepIndex !== undefined ? { stepIndex: rec.stepIndex } : {}),
     ...(rec.modelOverride !== undefined
-      ? {
-        modelOverride: {
-          ref: rec.modelOverride.ref,
-          ...(rec.modelOverride.thinkingLevel !== undefined
-            ? { thinkingLevel: rec.modelOverride.thinkingLevel }
-            : {}),
-          setAt: rec.modelOverride.setAt,
-        },
-      }
+      ? { modelOverride: copyModelOverride(rec.modelOverride) }
       : {}),
   };
 }
@@ -1067,13 +1062,7 @@ function hydrateModelOverride(
 ): void {
   if (record.modelOverride !== undefined || override === undefined) return;
   type MutableOverrideRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
-  (record as MutableOverrideRecord).modelOverride = {
-    ref: override.ref,
-    ...(override.thinkingLevel !== undefined
-      ? { thinkingLevel: override.thinkingLevel }
-      : {}),
-    setAt: override.setAt,
-  };
+  (record as MutableOverrideRecord).modelOverride = copyModelOverride(override);
 }
 
 export function hydrateReviveBaseline(record: ExecutionRecord, fold: RecordEventFoldState | undefined): void {

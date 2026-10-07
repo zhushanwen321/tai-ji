@@ -511,7 +511,6 @@ export class WorkflowDispatch {
         provider: override.ref.provider,
         reasoning: false,
       };
-      type MutableStampRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
       (record as MutableStampRecord).model = overrideRef;
       return {
         model: projected,
@@ -711,6 +710,9 @@ export class WorkflowDispatch {
 
 // ── [H2 W2] workflow 域派发 helper（executeWorkflowAgent 专用，M3 语义逐项复刻）──
 
+/** ExecutionRecord 去只读视图（盖章写面的局部合法形态；本文件两处盖章点共用）。 */
+type MutableStampRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
+
 /**
  * [subagent-model-switch §6.6] record.model / thinkingLevel 盖章（复活重新盖章与
  * taskSpec 二次咨询重盖章共用单点——「本轮启动前最后取值点定值，启动后不变」）。
@@ -723,7 +725,6 @@ function restampRecordModel(
   resolved: { model: ModelInfo | undefined; thinkingLevel: string | undefined },
 ): void {
   if (resolved.model === undefined) return;
-  type MutableStampRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
   const mutable = record as MutableStampRecord;
   mutable.model = joinEngineModelRef(resolved.model);
   mutable.thinkingLevel = resolved.thinkingLevel;

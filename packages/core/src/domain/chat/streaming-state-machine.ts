@@ -180,8 +180,13 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
    * 扩展层传的 lines 是 buffer 的 split('\n')，每次都是完整文本 → 用替换而非追加。
    * contentBlock 幂等：已有 text 块则不重复 push（与主流式 text_delta handler 对齐）。
    */
-  function applySubagentStreamDelta(virtualId: string, lines: string[]): void {
-    const fullText = lines.join('\n')
+  /**
+   * subagent 流式 assistant 写点的共用本体（applySubagentStreamDelta / appendSubagentStreamText
+   * 的单点，两者只差 content 来源——全文替换 vs 增量追加）：末位 assistant 仍在 streaming 时
+   * 写其 content（contentBlock 幂等），否则 push 新的 streaming assistant。resolveContent
+   * 参数 = 既有消息 content（新建分支为 undefined）。
+   */
+  function upsertStreamingAssistantText(virtualId: string, resolveContent: (existing: Message['content'] | undefined) => string): void {
     const prev = messages.value.get(virtualId)?.value ?? []
     const lastAssistantIdx = findLastAssistantIndex(prev)
     const next = [...prev]
@@ -191,18 +196,23 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
       const contentBlocks: ContentBlock[] = prevMsg.contentBlocks?.some((b) => b.type === 'text')
         ? prevMsg.contentBlocks
         : [...(prevMsg.contentBlocks ?? []), { type: 'text', refId: 'text' }]
-      next[lastAssistantIdx] = { ...prevMsg, content: fullText, contentBlocks }
+      next[lastAssistantIdx] = { ...prevMsg, content: resolveContent(prevMsg.content), contentBlocks }
     } else {
       next.push({
         id: `sa-${randomUuid()}`,
         role: 'assistant',
-        content: fullText,
+        content: resolveContent(undefined),
         status: 'streaming',
         contentBlocks: [{ type: 'text', refId: 'text' }],
         timestamp: Date.now(),
       })
     }
     commitMessages(messages, virtualId, next)
+  }
+
+  function applySubagentStreamDelta(virtualId: string, lines: string[]): void {
+    const fullText = lines.join('\n')
+    upsertStreamingAssistantText(virtualId, () => fullText)
   }
 
   /**
@@ -268,30 +278,10 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
    * 增量追加当前流式消息（chunk 优先序第 2 步「追加」的本体，与主流 message.text_delta
    * effect 同型：O(1) 摊销字符串拼接，非全量替换）。末位 assistant streaming → content
    * 追加 + text block 幂等；否则 push sa- 新 streaming assistant（与 applySubagentStreamDelta
-   * 的新建形态同构，只是初值 = 本条增量而非全文）。
+   * 共用 upsertStreamingAssistantText 本体，只差 content 来源 = 本条增量而非全文）。
    */
   function appendSubagentStreamText(virtualId: string, delta: string): void {
-    const prev = messages.value.get(virtualId)?.value ?? []
-    const lastAssistantIdx = findLastAssistantIndex(prev)
-    const next = [...prev]
-    if (lastAssistantIdx >= 0 && next[lastAssistantIdx].status === 'streaming') {
-      const prevMsg = next[lastAssistantIdx]
-      // 不可变写法（W1）+ contentBlock 幂等，与 applySubagentStreamDelta 同规则
-      const contentBlocks: ContentBlock[] = prevMsg.contentBlocks?.some((b) => b.type === 'text')
-        ? prevMsg.contentBlocks
-        : [...(prevMsg.contentBlocks ?? []), { type: 'text', refId: 'text' }]
-      next[lastAssistantIdx] = { ...prevMsg, content: prevMsg.content + delta, contentBlocks }
-    } else {
-      next.push({
-        id: `sa-${randomUuid()}`,
-        role: 'assistant',
-        content: delta,
-        status: 'streaming',
-        contentBlocks: [{ type: 'text', refId: 'text' }],
-        timestamp: Date.now(),
-      })
-    }
-    commitMessages(messages, virtualId, next)
+    upsertStreamingAssistantText(virtualId, (existing) => (existing === undefined ? delta : `${existing}${delta}`))
   }
 
   /**
