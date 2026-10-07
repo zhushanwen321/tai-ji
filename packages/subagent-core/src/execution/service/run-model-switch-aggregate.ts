@@ -26,6 +26,7 @@
 
 import {
   SET_MODEL_ERROR_CODES,
+  SET_MODEL_NOT_ACTIVE_CODE,
   type SetModelErrorCode,
   type SetModelParams,
   type SetModelResult,
@@ -74,17 +75,6 @@ export interface RunModelSwitchAggregateCall extends RunModelSwitchAggregateInpu
   resolveMemberPort: ResolveMemberEnginePort;
 }
 
-/**
- * 引擎「定位不到活跃子进程」的应答错误码（→ not-active 成员态）。
- *
- * [U3 联调对齐点] u-foundation 定形的 SET_MODEL_ERROR_CODES 三型均为「引擎定位到
- * 活跃子进程之后」的失败分型（§7.4/§7.5），不含「定位不到」形态；设计 §7.3「存活
- * 检查发现进程已退出时按无活进程形态应答宿主」要求引擎侧具备该应答形态。本常量为
- * U5 预设的识别码（词表外透传面引擎_* 前缀词法），U3 实装定名后若不同名只需对齐
- * 本常量一处（分派逻辑不变）；词表扩位时随 SET_MODEL_ERROR_CODES 同批登记。
- */
-export const ENGINE_RUN_NOT_ACTIVE_CODE = "engine_run_not_active";
-
 /** summary 退化文案（§7.1：全员非 switched 时无生效值可报，不携带档位）。 */
 const SUMMARY_RECORDED_ONLY = "已记录，未派发步骤生效";
 
@@ -105,7 +95,7 @@ type MemberOutcome =
  *      校验，§8 场景 7 步骤④）；
  *   3. setModel 转发成功 → switched（生效值取引擎回读应答，非请求值——同族替换时
  *      ≠ 目标意图，§6.4）；
- *   4. 转发 reject：code = ENGINE_RUN_NOT_ACTIVE_CODE → not-active；其余（三型
+ *   4. 转发 reject：code = SET_MODEL_NOT_ACTIVE_CODE → not-active；其余（三型
  *      失败分型 / 词表外透传码 / 解析失败）→ 失败名单。
  * 全部成员分派完毕后组装汇总文案（run 级覆盖意图写入归 U2 编排步骤③，见文件头）。
  */
@@ -142,7 +132,7 @@ export async function runModelSwitchAggregate(
         };
       } catch (err) {
         const code = errorCodeOf(err);
-        if (code === ENGINE_RUN_NOT_ACTIVE_CODE) {
+        if (code === SET_MODEL_NOT_ACTIVE_CODE) {
           // 引擎定位不到活跃子进程（已退出成员——含任务已完成 / 中断 / 竞态退出），
           // 覆盖走记账路径、重派时生效（§7.4 not-active；§7.5「子进程已退出」行）。
           return { kind: "member", state: { runId: memberRunId, state: "not-active" } };

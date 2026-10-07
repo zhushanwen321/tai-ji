@@ -19,6 +19,7 @@
 import { describe, expect, it } from "vitest";
 import {
   EngineSdkError,
+  SET_MODEL_NOT_ACTIVE_CODE,
   type EngineCapabilities,
   type ModelRef,
   type SetModelParams,
@@ -26,7 +27,6 @@ import {
 } from "@zhushanwen/subagent-engine-sdk";
 
 import {
-  ENGINE_RUN_NOT_ACTIVE_CODE,
   runModelSwitchAggregate,
   type RunModelSwitchAggregateCall,
   type SetModelCapableEnginePort,
@@ -127,7 +127,7 @@ function failingPort(code: string): FakeSwitchPort {
 
 const NOT_ACTIVE_BEHAVIOR: SetModelBehavior = {
   kind: "engineError",
-  code: ENGINE_RUN_NOT_ACTIVE_CODE,
+  code: SET_MODEL_NOT_ACTIVE_CODE,
 };
 
 /** 聚合调用组装：成员表 → resolver 查表（缺表成员 = 引擎未注册形态）。 */
