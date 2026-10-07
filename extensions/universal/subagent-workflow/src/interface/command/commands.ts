@@ -24,7 +24,13 @@ import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-wor
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import type { LauncherDeps } from "@zhushanwen/subagent-core";
-import { abortRun, getSubagentService, resumeRun } from "@zhushanwen/subagent-core";
+import {
+  abortRun,
+  assertModelInCatalog,
+  getModelConfigService,
+  getSubagentService,
+  resumeRun,
+} from "@zhushanwen/subagent-core";
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
 import { parseWorkflowRpcCommand, type WorkflowRpcAction } from "./command-actions.ts";
 import { createWorkflowsView, type ViewActions } from "../tui/views/WorkflowsView.ts";
@@ -137,6 +143,7 @@ export function registerWorkflowsCommand(
         // 落统一覆盖记账（F1-26 后续项：与 setModel 补切同通道，resume 合一步表达）。
         const model = rest[1];
         try {
+          if (model !== undefined) assertResumeModelInCatalog(model);
           await resumeRun(runId, deps, ...(model !== undefined ? [{ model }] : []));
           ctx.ui.notify(
             `Workflow ${runId}: resuming${model !== undefined ? ` with model ${model}` : ""} — completed calls replay at zero token cost, unfinished calls re-dispatched`,
@@ -195,6 +202,7 @@ async function handleRpcMode(
     }
     case "resume": {
       try {
+        if (parsed.model !== undefined) assertResumeModelInCatalog(parsed.model);
         await resumeRun(parsed.runId, deps, ...(parsed.model !== undefined ? [{ model: parsed.model }] : []));
         ctx.ui.notify(
           `Workflow ${parsed.runId}: resuming${parsed.model !== undefined ? ` with model ${parsed.model}` : ""} — completed calls replay at zero token cost, unfinished calls re-dispatched`,
@@ -213,7 +221,14 @@ async function handleRpcMode(
       );
       return;
     case "lifecycle-missing-id":
-      ctx.ui.notify(`Usage: /workflows ${parsed.verb} <runId>`, "warning");
+      // Usage 按 verb 区分（与 TUI verb 分支同文案——两模式统一）：resume 的可选
+      // [model] 参数要出现在提示里，GUI 侧缺 runId 时得到的指引不指向旧用法。
+      ctx.ui.notify(
+        parsed.verb === "resume"
+          ? "Usage: /workflows resume <runId> [model]"
+          : `Usage: /workflows ${parsed.verb} <runId>`,
+        "warning",
+      );
       return;
     case "noop":
       ctx.ui.notify("View workflows in the composer task tray", "info");
@@ -224,6 +239,28 @@ async function handleRpcMode(
       throw new Error(`Unhandled workflow RPC action: ${String(_exhaustive)}`);
     }
   }
+}
+
+/**
+ * 命令通道显式 model 的目录预检（D8 拒单语义，与 tool 通道 run/resume action 同款
+ * ——isModelRef 语法闸在 core resumeRun，此处补目录存在性：语法合法但目录查无
+ * （如 provider 段拼写错）在写覆盖记账之前同步拒绝，不延迟到派发期，避免「记账已
+ * 落盘 + 命令已 notify 成功」的假成功形态；三通道（TUI verb / RPC verb / tool）对称）。
+ * throw 落调用方 try/catch，分类化错误文案（含可用模型清单 + 修复指引）经 notify
+ * 直达用户。单例缺席（session_start 前不可达）降级跳过 + warn 留痕——派发期
+ * identity 解析仍是权威裁决（与 tool 通道降级语义一致）。
+ */
+function assertResumeModelInCatalog(model: string): void {
+  const modelService = getModelConfigService();
+  if (modelService === null) {
+    getLogger("subagent-workflow").warn(
+      "[commands] model catalog unavailable (model service not initialized) — resume model catalog check skipped; dispatch-time identity resolution remains authoritative",
+    );
+    return;
+  }
+  assertModelInCatalog(model, modelService.getModelRegistry(), {
+    source: "resume model override",
+  });
 }
 
 /**
