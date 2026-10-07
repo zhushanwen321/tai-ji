@@ -7,14 +7,16 @@
  *   多条覆盖帧尾向最新胜出（后写整替不变量 2）；无覆盖帧 / 文件不存在 / session 不在
  *   扫描结果 → undefined（不造键）；头行与半写残行宽容跳过；
  * - run 域（getRunOverride）：run journal model-override 帧 → wire 状态；无覆盖 /
- *   journal 不存在 → undefined；
+ *   journal 不存在 → undefined（ENOENT = 合法缺省，静默不 warn）；journal stat
+ *   失败（EACCES 非 ENOENT）→ warn 留痕后 undefined；非法 runId（穿越形态）→
+ *   warn 留痕（run id rejected）后 undefined；
  * - thinkingLevel 透传（显式档位在场携带）。
  *
  * 测试框架：vitest（从子包目录运行；mkdtemp 自建自删，禁触真实数据目录红线）。
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/model-override-query.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ISessionStore } from '../../ports/session.js'
@@ -152,12 +154,52 @@ describe('getRunOverride — run 域 journal 覆盖查询', () => {
     expect(query.getRunOverride('main-1', 'run-1')).toEqual({ model: 'p-run/m-run', thinkingLevel: 'low' })
   })
 
-  it('无覆盖帧 / journal 不存在 → undefined', () => {
+  it('无覆盖帧 / journal 不存在 → undefined（ENOENT = 合法缺省，静默不 warn）', () => {
     const sessionFilePath = join(tmpDir, 'sessions', 'main-1.jsonl')
     mkdirSync(join(tmpDir, 'sessions'), { recursive: true })
     writeFileSync(sessionFilePath, '')
-    const query = makeQuery([{ id: 'main-1', filePath: sessionFilePath }])
-    expect(query.getRunOverride('main-1', 'run-404')).toBeUndefined()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const query = makeQuery([{ id: 'main-1', filePath: sessionFilePath }])
+      expect(query.getRunOverride('main-1', 'run-404')).toBeUndefined()
+      expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('journal stat 失败（EACCES 非 ENOENT）→ warn 留痕后 undefined（不静默同判无覆盖）', () => {
+    const sessionFilePath = join(tmpDir, 'sessions', 'main-1.jsonl')
+    const workflowStateDir = join(tmpDir, 'sessions', 'workflow-state')
+    mkdirSync(workflowStateDir, { recursive: true })
+    writeFileSync(sessionFilePath, '')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      chmodSync(workflowStateDir, 0o000) // 父目录无搜索权限 → statSync(journal) EACCES
+      const query = makeQuery([{ id: 'main-1', filePath: sessionFilePath }])
+      expect(query.getRunOverride('main-1', 'run-1')).toBeUndefined()
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(String(warnSpy.mock.calls[0]?.[0])).toContain('stat failed')
+    } finally {
+      // 权限恢复先于自删（chmod 000 目录 rm 枚举会 EACCES，session-scan-degraded-flag 同款）
+      chmodSync(workflowStateDir, 0o755)
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('非法 runId（路径穿越形态）→ warn 留痕（run id rejected）后 undefined', () => {
+    const sessionFilePath = join(tmpDir, 'sessions', 'main-1.jsonl')
+    mkdirSync(join(tmpDir, 'sessions'), { recursive: true })
+    writeFileSync(sessionFilePath, '')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const query = makeQuery([{ id: 'main-1', filePath: sessionFilePath }])
+      expect(query.getRunOverride('main-1', '../evil')).toBeUndefined()
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(String(warnSpy.mock.calls[0]?.[0])).toContain('run id rejected')
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 
   it('覆盖帧早于 256KB 尾读窗口起点（尾部被 worker-log 堆积淹没）→ undefined（miss = 按无覆盖显示、不虚报、无报错）', () => {
