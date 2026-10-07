@@ -211,10 +211,11 @@ export function foldRunEventsToLifecycleState(
 /**
  * 诊断事件落账（[§2.1 errorLogs 持久化] ADR-0093）：worker 诊断日志进 record 流的唯一写点。
  *
- * 为什么放本模块：journal append 的单写者纪律规定「合法写点 = terminal-actions 域
- * + execution 层 model-override 记账直写两处」（见 run-events.ts 的
- * RunEventJournal 注释）——pump 经本函数落账而不是自己 append，纪律的物理边界
- * 不被撑破。
+ * 为什么放本模块：journal append 的单写者纪律规定「合法写点共三处 = terminal-actions
+ * 域 + execution 层 subagent-service.ts persistRunOverride + orchestration 层
+ * resume-run.ts appendResumeModelOverride 的 model-override 记账直写」（见
+ * run-events.ts 的 RunEventJournal 注释）——pump 经本函数落账而不是自己 append，
+ * 纪律的物理边界不被撑破。
  *
  * 语义：**best-effort**——诊断面不得影响 run 生命周期，落账失败只 warn 留痕（活体
  * errorLogs 已在内存里，重启重建面少这几条不改变终局语义）。append 实装内同步完成
