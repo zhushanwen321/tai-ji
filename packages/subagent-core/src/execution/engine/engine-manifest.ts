@@ -44,12 +44,10 @@ export const CONSERVATIVE_CAPABILITIES = {
   interrupt: "kill-only",
   permissionMode: "ignored",
   maxTurns: false,
-  // [subagent-model-switch] setModel 位保守缺省 = 最弱档 unsupported（可选新轴——
-  // 缺省与 unsupported 同义，宿主发送前预检不放行）。CAPABILITY_ENUMS 刻意**暂不登记**
-  // （五触点③「缺一即 undefined 透传 + gate 放行」）：manifest 声明面与引擎实装
-  // （U3 pi setModel）同批接通——ENUMS 提前登记会让未声明 setModel 的存量 manifest
-  // 每次加载多打 missing warn，且「链路未接通先声明」违 ADR-0071 C 型纪律；U3 接通
-  // 时同批登 ENUMS 值域 + pi/zcode manifest 声明位。
+  // [subagent-model-switch] setModel 位保守缺省 = 最弱档 unsupported：manifest 未
+  // 声明 setModel = 引擎未接热切换通路，宿主发送前预检不放行（缺省与 unsupported
+  // 同义）。CAPABILITY_ENUMS 已登记 setModel 值域，缺键经 parseCapabilities 回落
+  // 本档 + warn。
   setModel: "unsupported",
 } satisfies EngineCapabilities;
 
@@ -74,10 +72,11 @@ export const CAPABILITY_ENUMS = {
   interrupt: ["native", "kill-only"],
   permissionMode: ["native", "fixed", "ignored"],
   // [subagent-model-switch] setModel 位值域（无 emulated——热切换无宿主仿真形态，
-  // SDK EngineCapabilities.setModel 注释）。现值全部 unsupported：协议面已定形
-  // （u-foundation），引擎实装（U3 pi setModel 通路）接通前「链路未接通 = 不支持」
-  // 如实声明——U3 接通时翻 pi manifest 为 native；消费点 = 宿主发送前预检
-  // （capability-gate 判据接线随 U3/U2）。
+  // 见 SDK EngineCapabilities.setModel 注释）。pi 引擎已实装热切换通路、manifest
+  // 声明 native；zcode 未实装、声明 unsupported（同保守缺省）。消费点 = 宿主发送
+  // 前预检：非 native 不放行（remote-engine 成员不实现，消费方以
+  // `typeof engine.setModel === "function"` 探测转覆盖记账路径）；native 声明须与
+  // EnginePort.setModel 方法并存（model-switch-wiring 校验，缺失即报集成 bug）。
   setModel: ["native", "unsupported"],
 } satisfies Record<string, readonly string[]>;
 
