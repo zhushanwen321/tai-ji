@@ -34,12 +34,13 @@
   >
     <section
       ref="panelRef"
-      class="flex h-[88%] w-[92%] flex-col overflow-hidden rounded-lg border border-hairline bg-surface shadow-2 outline-none"
+      class="relative flex h-[88%] w-[92%] flex-col overflow-hidden rounded-lg border border-hairline bg-surface shadow-2 outline-none"
       role="dialog"
       aria-modal="true"
       :aria-label="label"
       tabindex="-1"
       data-testid="wfvz-overlay-panel"
+      data-find-surface="overlay"
       @click.stop
     >
       <!-- 标题栏：标题栏 slot（内容侧 header 信息）+ 恒定右侧关闭按钮 -->
@@ -63,6 +64,10 @@
 
       <!-- body：内容区（默认槽直接挂面板 flex-col，内容自带尺寸控制） -->
       <slot />
+      <!-- 表面内查找（find-in-surface）：面板部分为可搜表面（遮罩不算——点遮罩是关闭通道）。
+           关闭清理由 FindBar 自身的卸载兜底承接（壳 v-if 全量挂卸 → FindBar 卸载 → close），
+           壳无需感知 find 状态。 -->
+      <FindBar surface-kind="overlay" />
     </section>
   </div>
 </template>
@@ -71,6 +76,7 @@
 import { nextTick, onUnmounted, ref, watch } from 'vue'
 import { X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import FindBar from '@/components/find/FindBar.vue'
 import { focusComposer, registerOverlayFocusTrapPanel } from '@/composables/features/app/key-orchestrator'
 
 const props = defineProps<{

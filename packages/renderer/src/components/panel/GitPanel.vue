@@ -55,7 +55,7 @@
       <li
         v-for="f in result.files"
         :key="f.path"
-        class="group/li flex cursor-pointer items-center gap-2 rounded-sm px-1 py-0.5 hover:bg-surface-2"
+        class="group/li flex cursor-pointer select-none items-center gap-2 rounded-sm px-1 py-0.5 hover:bg-surface-2"
         :title="t('panel.git.viewDiff', { path: f.path })"
         @click="onFileClick(f.path)"
       >

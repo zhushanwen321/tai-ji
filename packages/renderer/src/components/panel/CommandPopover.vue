@@ -97,7 +97,7 @@
           <div
             v-for="(item, i) in items"
             :key="item.id"
-            class="cmd-row flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] leading-[1.4] transition-colors"
+            class="cmd-row flex w-full select-none items-center gap-2 px-2.5 py-1.5 text-left text-[12px] leading-[1.4] transition-colors"
             :class="i === activeIndex ? 'bg-surface text-accent' : 'text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg'"
             :aria-disabled="item.selected ? 'true' : undefined"
             @click="onSelect(item)"

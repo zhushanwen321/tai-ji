@@ -126,7 +126,7 @@
           <div
             v-for="b in blocks"
             :key="b.key"
-            class="flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-[length:var(--text-2xs)] text-neutral-mid hover:bg-surface-2"
+            class="flex cursor-pointer select-none items-center gap-2 rounded-sm px-1.5 py-1 text-[length:var(--text-2xs)] text-neutral-mid hover:bg-surface-2"
             :data-testid="`trace-inspector-block-${b.index}`"
             @click="selectTraceEntry(props.sessionId, b.key)"
           >

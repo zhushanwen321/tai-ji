@@ -34,7 +34,7 @@
     <div
       v-for="row of rows"
       :key="row.call.id"
-      class="grid items-center gap-x-2 px-2 py-[5px] cursor-pointer border-b border-hairline text-[length:var(--text-2xs)] transition-colors hover:bg-surface-hover"
+      class="grid select-none items-center gap-x-2 px-2 py-[5px] cursor-pointer border-b border-hairline text-[length:var(--text-2xs)] transition-colors hover:bg-surface-hover"
       :style="traceGridStyle"
       :class="row.call.status === 'pending' ? 'opacity-40' : ''"
       :data-testid="`wf-viz-trace-row-${row.call.id}`"

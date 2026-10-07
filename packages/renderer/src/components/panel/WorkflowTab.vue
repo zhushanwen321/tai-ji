@@ -85,7 +85,7 @@
             <div
               v-for="call in group.calls"
               :key="call.id"
-              class="group relative cursor-pointer rounded-md px-2 py-[6px] transition-colors hover:bg-surface-hover"
+              class="group relative cursor-pointer select-none rounded-md px-2 py-[6px] transition-colors hover:bg-surface-hover"
               :class="{ 'opacity-40': call.status === 'pending' }"
               :title="call.status === 'pending' ? t('sidebar.workflowDetail.pendingHint') : undefined"
               data-testid="drawer-workflow-agent-call"

@@ -110,12 +110,16 @@
           :data-state="isDragging ? 'drag' : undefined"
         />
       </div>
+      <!-- data-find-surface：表面内查找（find-in-surface）的表面标记——仅在 drawer 开着时
+           存在（关态 undefined），使「回退栈序按属性查询」天然只命中开着的表面。
+           FindBar 挂 drawer-area 内 absolute 右上（FindBar 根自带定位类）。 -->
       <div
         data-fs-scope="drawer"
-        class="h-full min-w-0 overflow-hidden"
+        class="relative h-full min-w-0 overflow-hidden"
         :class="splitTransitionClass"
         :style="{ width: drawerOpen ? `${drawerPct}%` : '0%' }"
         data-testid="drawer-area"
+        :data-find-surface="drawerOpen ? 'right-drawer' : undefined"
       >
         <DrawerPanel
           :is-open="drawerOpen"
@@ -177,6 +181,7 @@
             </div>
           </template>
         </DrawerPanel>
+        <FindBar v-if="drawerOpen" surface-kind="right-drawer" />
       </div>
     </div>
     <!-- 底抽屉（display-containers §6.2/§7.3）：插在 split 行之下、StatusBar 之上，横跨全宽
@@ -192,6 +197,7 @@
       class="relative shrink-0 overflow-hidden"
       :class="bottomTransitionClass"
       :style="{ height: bottomHeightStyle, marginTop: '4px' }"
+      :data-find-surface="bottomOpen ? 'bottom-drawer' : undefined"
     >
       <!-- 上沿手柄（三卡化）：命中区跨进卡上方缝（-top-1 h-1 覆盖 4px 缝，视觉线贴卡顶边）——
            缝即拖拽区。卡间缝统一为窗口边距 a = p-1 的 4px（2026-10-04 三轮裁决：实际边距
@@ -227,6 +233,9 @@
           />
         </div>
       </Transition>
+      <!-- 挂 Transition 外（Transition 要求单子项）；bottom-drawer 壳已 relative，FindBar
+           absolute 右上覆盖在终端卡之上。终端本体经 TerminalView 根的 data-find-skip 排除。 -->
+      <FindBar v-if="bottomOpen" surface-kind="bottom-drawer" />
     </div>
     </div>
     <!-- ExtensionHost 状态栏（audit §12.1）：数据经 app.provide STATUS_BAR_SOURCE_KEY 注入（useExtensionHostBridge），
@@ -261,6 +270,8 @@ import { useSessionDerivations } from '@/composables/features/chat/useSessionDer
 import { provideGitStatus } from '@/composables/features/file-tree/useGitStatus'
 import { useDrawerSplitWidth, useBottomDrawerHeight } from '@/composables/features/drawer/useDrawerSplitWidth'
 import { focusComposer } from '@/composables/features/app/key-orchestrator'
+import { useFindInSurface } from '@/composables/features/find/useFindInSurface'
+import FindBar from '@/components/find/FindBar.vue'
 import { usePlanDrawerSync } from '@/composables/use-plan-drawer-sync'
 import { useChatStore } from '@/stores/chat'
 import { useSessionTrace, clearTraceSelection } from '@/composables/features/trace/useSessionTrace'
@@ -452,6 +463,13 @@ watch(
     }
   },
 )
+
+// 表面内查找（find-in-surface）：切 session = 两个 drawer 的内容 DOM 全量换血，旧命中
+// 区间全部失效——搜索状态不持久化（设计留档 §2），直接关。关闭路径同时清高亮。
+const findInSurface = useFindInSurface()
+watch(panelSessionId, () => {
+  if (findInSurface.isOpen.value) findInSurface.close()
+})
 
 /**
  * [display-containers §6.7 W1] ESC 关抽屉已并入键盘栈序编排器（key-orchestrator 唯一属主）：

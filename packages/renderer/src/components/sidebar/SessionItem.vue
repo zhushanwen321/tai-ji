@@ -18,7 +18,7 @@
   >
     <div
       ref="rootEl"
-      class="session-item group/item relative flex cursor-pointer items-start gap-2 rounded-md px-2 py-1 transition-colors"
+      class="session-item group/item relative flex cursor-pointer select-none items-start gap-2 rounded-md px-2 py-1 transition-colors"
       :class="[
         active ? 'bg-accent-soft shadow-[inset_2px_0_0_var(--accent)]' : 'hover:bg-surface-hover',
         isDead ? 'opacity-50' : '',

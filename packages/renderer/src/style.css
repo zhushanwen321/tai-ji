@@ -534,10 +534,6 @@ body,
 
 }
 
-body {
-  user-select: none;
-}
-
 button {
   font-family: inherit;
   font-size: inherit;
@@ -545,6 +541,23 @@ button {
   background: none;
   border: none;
   cursor: pointer;
+}
+
+/* 内容默认可鼠标框选（翻转原 body { user-select: none } 全局禁选——内容是开放集合，
+   逐处补 select-text 永远补不全；交互控件是有限封闭集合，在此统一禁选）。
+   拖拽区（-webkit-app-region:drag）平台语义天然不可选，无需另设。 */
+button,
+a,
+label,
+summary,
+[role='button'],
+[role='tab'],
+[role='menuitem'],
+[role='option'],
+[role='switch'],
+[role='checkbox'],
+[role='radio'] {
+  user-select: none;
 }
 
 input,
@@ -567,6 +580,18 @@ textarea {
 ::-webkit-scrollbar-thumb:hover { background: var(--neutral-dim); }
 /* Firefox */
 * { scrollbar-width: thin; scrollbar-color: var(--neutral-faint) transparent; }
+
+/* 表面内查找（find-in-surface）命中高亮：CSS Custom Highlight API（Electron 42 / Chromium 142 已支持）。
+   paint 用 ::highlight 伪元素着色，不往 DOM 包 span——流式重渲染与 markdown 净化管线零干扰。
+   高亮注册点 = composables/features/find/highlight-painter.ts（CSS.highlights 'find-hits' / 'find-active'）。 */
+::highlight(find-hits) {
+  background-color: var(--accent-soft);
+  color: var(--accent-fg);
+}
+::highlight(find-active) {
+  background-color: var(--accent);
+  color: var(--accent-fg);
+}
 
 /* 注：demo base.css 的 .btn 原语系统不搬入此文件——renderer 用本地 ui 原语 <Button> 组件
  * （packages/renderer/src/components/ui/button），不消费 .btn-* class。按钮 variant/尺寸

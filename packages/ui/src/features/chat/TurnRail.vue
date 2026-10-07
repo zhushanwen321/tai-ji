@@ -48,7 +48,7 @@
           v-for="(turn, idx) in turns"
           :key="turnStableId(turn)"
           data-testid="rail-node"
-          class="group/rail-node rail-node relative flex cursor-pointer flex-col gap-0.5 rounded px-1.5 py-1 transition-colors hover:bg-surface-hover"
+          class="group/rail-node rail-node relative flex cursor-pointer select-none flex-col gap-0.5 rounded px-1.5 py-1 transition-colors hover:bg-surface-hover"
           :class="idx === activeTurnIndex ? 'active bg-accent-soft ring-1 ring-inset ring-accent-ring' : ''"
           @click="emit('jump', idx)"
         >
