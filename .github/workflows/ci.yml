@@ -269,6 +269,12 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
         run: pnpm install --frozen-lockfile
 
+      # pi-subagent-cli 的 bin 真机协议 e2e（protocol-e2e / protocol-chat-e2e）spawn
+      # dist/main.js（dist-first 加载），dist-fresh 守卫对缺失产物 fail-fast——fresh
+      # checkout 无 dist，测试前必须先构建（8c64c7c4a 守卫注释「CI 恒新构建」的前提在此补齐）。
+      - name: Build pi-subagent-cli
+        run: pnpm --filter @zhushanwen/pi-subagent-cli build
+
       - name: Test
         run: pnpm extensions:test
 
