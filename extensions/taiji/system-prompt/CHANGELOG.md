@@ -1,5 +1,11 @@
 # @zhushanwen/pi-system-prompt
 
+## 1.3.2
+
+### Patch Changes
+
+- 32854b942: Align the markdown-sanitize allowlist source-path comment after the file's move from packages/renderer to packages/ui (comment-only change).
+
 ## 1.3.1
 
 ### Patch Changes

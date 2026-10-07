@@ -1,5 +1,11 @@
 # @zhushanwen/extension-protocol
 
+## 0.19.0
+
+### Minor Changes
+
+- 32854b942: Export the shared scheduler view id constant `SCHEDULER_MODAL_VIEW_ID` from the package entry point, single-sourcing the view-id contract between the scheduler-manager plugin (ViewHost partition key) and the renderer workflow overlay.
+
 ## 0.18.0
 
 ### Minor Changes
