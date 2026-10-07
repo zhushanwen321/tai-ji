@@ -198,6 +198,37 @@ describe('useSubagentModel — 回执写状态（禁乐观写）', () => {
     expect(toastMocks.error).toHaveBeenCalledTimes(1)
   })
 
+  it('「记账已写」型错误（D3 缺陷七）：快照型错误码 → badge 同已记账型通道亮灯（overrideIntent 写入）+ toast', async () => {
+    // 宿主处置表行 3：先写覆盖记账再回错误——错误即意图受理凭证，badge 不等轮边界重推
+    apiMocks.setModel.mockRejectedValue(
+      Object.assign(new Error('目标模型不在引擎快照中，已记录，下次执行生效'), { code: 'engine_model_not_in_snapshot' }),
+    )
+    const { setSubagentModel, displayOf } = useSubagentModel()
+
+    const result = await setSubagentModel({ recordId: 'sa-1', provider: 'p', modelId: 'next-run-model' })
+
+    expect(result).toBeUndefined()
+    expect(displayOf('sa-1')).toEqual({ overrideIntent: 'p/next-run-model' })
+    expect(toastMocks.error).toHaveBeenCalledTimes(1)
+  })
+
+  it('「记账已写」型错误（D3 缺陷七）：回读失败型错误码同通道亮灯；未写型（credential_missing）不亮', async () => {
+    const { setSubagentModel, displayOf } = useSubagentModel()
+
+    apiMocks.setModel.mockRejectedValueOnce(
+      Object.assign(new Error('切换命令已送达但状态回读失败'), { code: 'engine_state_readback_failed' }),
+    )
+    await setSubagentModel({ recordId: 'sa-1', provider: 'p', modelId: 'm1' })
+    expect(displayOf('sa-1')).toEqual({ overrideIntent: 'p/m1' })
+
+    apiMocks.setModel.mockRejectedValueOnce(
+      Object.assign(new Error('模型 X 缺少 API key'), { code: 'engine_credential_missing' }),
+    )
+    await setSubagentModel({ recordId: 'sa-2', provider: 'p', modelId: 'm2' })
+    // 切换整体未生效（不写）——badge 不得亮（正确行为，非空窗）
+    expect(displayOf('sa-2')).toBeUndefined()
+  })
+
   it('run 级聚合：switched 成员写生效值、not-active 写覆盖意图、失败名单成员不写并 toast 分项', async () => {
     apiMocks.setModel.mockResolvedValue({
       members: [

@@ -5,8 +5,9 @@
  *
  * 回执消费范式照 useModel.ts 现役范式（U6 弃乐观写）：**应答到达才写显示态，禁用请求值
  * 乐观写**——已生效型的生效模型可能 ≠ 请求目标（pi 模型族静默替换成同族模型，§6.4）；
- * 已记账型不携带档位值。RPC 失败不写任何状态（标签维持切换前显示——分支③由本范式
- * 构造性成立：错误应答不落显示态）。
+ * 已记账型不携带档位值。RPC 失败默认不写任何状态（标签维持切换前显示——分支③由本范式
+ * 构造性成立），唯一例外 = 「记账已写」型错误码（SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES，
+ * D3 缺陷七：宿主先写覆盖记账再回错误，错误即意图受理凭证——badge 同已记账型通道亮灯）。
  *
  * 显示态（回执态）的归属与生命周期：renderer 会话期内存（模块级 reactive Map，跨组件
  * 实例共享——SubagentTab / WorkflowTab 各自调本 composable 读同一份）；**不写
@@ -20,6 +21,7 @@ import { toErrorMessage } from '@taiji/core'
 import { subagent as subagentApi } from '@/api'
 import { useToast } from '@/composables/useToast'
 import type { ProviderId, SubagentSetModelReply, SubagentStatus, WorkflowAgentCall } from '@taiji/shared'
+import { SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES } from '@taiji/shared'
 
 /**
  * 单目标的模型显示态（renderer 会话期回执态）。
@@ -198,6 +200,18 @@ export function useSubagentModel() {
       applyReplyToDisplay(target, reply)
       return reply
     } catch (e) {
+      // 「记账已写」型错误（D3 缺陷七）：处置表行 3/7（快照型 / 回读失败型）的错误
+      // 应答在宿主侧先写了覆盖记账再回错误——错误本身即意图受理凭证，badge 与
+      // 已记账型同通道亮灯（overrideIntent），不等轮边界载荷重推（缺陷四同机制）。
+      // 词表外错误（credential_missing 未写 / 校验型未写 / 通道型未知）一律不写。
+      const code = (e as { code?: unknown }).code
+      if (
+        target.recordId !== undefined &&
+        typeof code === 'string' &&
+        (SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES as readonly string[]).includes(code)
+      ) {
+        displayStates.set(target.recordId, { overrideIntent: toModelRef(target.provider, target.modelId) })
+      }
       toastError(t('panel.sideDrawer.modelSwitchFailed', { msg: toErrorMessage(e) }))
       return undefined
     }

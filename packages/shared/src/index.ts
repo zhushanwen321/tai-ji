@@ -49,6 +49,10 @@ export type {
 // 消息撤回（U3）：__taiji_nav__ 信令命令名常量——U4 runtime 编排跨包消费；
 // 本文件对 protocol.ts 是显式 allowlist（非 export *），漏登记会使常量对下游不可达。
 export { TAIJI_NAV_COMMAND } from './protocol'
+// subagent.setModel「记账已写」错误码分型词表（D3 缺陷七）：renderer badge 亮灯判定
+// 的跨包消费常量（机制权威 = subagent-core model-switch.ts 处置表，词表扩位同批）。
+export { SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES } from './protocol'
+export type { SubagentSetModelAccountedErrorCode } from './protocol'
 // hook 否决类分类码值常量（msg-pipeline-debloat D4-2 同族）：runtime 落码点 +
 // core useChat 判别点统一引用，跨包禁止手抄字面量。
 export { MESSAGE_BLOCKED_CODE } from './protocol'

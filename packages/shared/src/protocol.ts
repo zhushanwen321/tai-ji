@@ -1670,6 +1670,22 @@ export interface SubagentSetModelMemberFailure {
   reason: 'engine_model_not_in_snapshot' | 'engine_credential_missing' | 'engine_state_readback_failed'
 }
 
+/**
+ * 「错误应答 = 记账已写」分型词表（subagent-model-switch §7.2 处置表行 3/7 的显示面
+ * 契约，D3 缺陷七）：宿主编排以这两码回错误应答前已写覆盖记账（快照型——模型本身
+ * 有效，下一轮 spawn 现取目录即可用；回读失败型——命令已送达，意图已表达），前端
+ * 据此亮「用户覆盖中」badge（覆盖意图已受理的事实依据）。词表外错误码一律不得亮
+ * badge：`engine_credential_missing`（切换整体未生效，不写）与全部校验型/通道型
+ * 失败（生效状态未知或未写）。机制权威 = subagent-core model-switch.ts catch 分支
+ * 处置表；本词表扩位须与该表同批（词表登记注释同款纪律）。
+ */
+export const SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES = [
+  'engine_model_not_in_snapshot',
+  'engine_state_readback_failed',
+] as const
+
+export type SubagentSetModelAccountedErrorCode = (typeof SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES)[number]
+
 /** run 级全切聚合应答——三组件固定结构（§7.1 定形）：恒保留三组件，退化仅指无生效值
  *  可报（全员非 switched 时成员条目无档位字段），失败名单无失败成员时为空名单、不省略
  *  组件。前端按成员分项呈现，不坍缩为标量消息。 */
