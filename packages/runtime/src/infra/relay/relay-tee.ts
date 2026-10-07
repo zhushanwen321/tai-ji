@@ -286,8 +286,8 @@ export class RelayTee {
           if (role === 'assistant') {
             // assistant 定稿 → 清除打字机中间态（协议注释：lines undefined = 终态清除）。
             // B2 additive：payload 增 msgSeq（消费端据此置 sealedMsgSeq 定稿水位）；shared
-            // 协议类型未登记该可选字段（W 路径清除帧不带 msgSeq，类型由 W 产生端契约
-            // 持有）——本地交叉类型承载 wire additive，赋回原契约位类型兼容。
+            // 协议已登记 msgSeq?: number（additive，520c0de59）——本地交叉类型把可选收窄
+            // 为必填，防清除帧漏带 msgSeq 时静默通过类型检查。
             state.inFlight = false
             const clearPayload: ServerMessageMap['subagent.stream_delta'] & { msgSeq: number } = {
               sessionId: this.virtualId,

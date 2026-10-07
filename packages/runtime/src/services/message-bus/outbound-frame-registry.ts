@@ -67,8 +67,8 @@ export const DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS: OutboundFrameGuardOptions = {
 // | message.tool_call_end              | payload.entry.message.content           | content  | services/session/event-interpreter.ts:1089（工具结果文本；与 message_end 双路下发，两帧都注册保帧间一致） |
 // | message.tool_call_start            | payload.entry.arguments                 | record   | services/session/event-interpreter.ts:1032（write 类工具写入全文在 arguments，toolResult 只回小确认） |
 // | session.traceEntryAppended         | payload.entries                         | array-entry | services/session/trace-sync.ts:363 / :434（pi entry JSON 逐条增量） |
-// | session.subagentEntriesAppended    | payload.entries                         | array-entry | infra/relay/relay-tee.ts:120（穷举新发现——subagent entry 增量帧，与 traceEntryAppended 同构；subagent 历史是巨型 JSONL 高发源，设计 D5① 自证） |
-// | subagent.stream_delta              | payload.lines                           | array-string | infra/relay/relay-tee.ts:172 / :190（lines = 累积全文 split('\n')；undefined = 终态清除，undefined 时帧小不触发守卫） |
+// | session.subagentEntriesAppended    | payload.entries                         | array-entry | infra/relay/relay-tee.ts:204（穷举新发现——subagent entry 增量帧，与 traceEntryAppended 同构；subagent 历史是巨型 JSONL 高发源，设计 D5① 自证） |
+// | subagent.stream_delta              | payload.lines                           | array-string | services/session/event-interpreter.ts:780（W 路径全量形态，lines = 累积全文 split('\n')；B2 后 R 路径 relay-tee 仅余清除帧 lines undefined 小帧不触发守卫） |
 // | message.bashResult                 | payload.output                          | string   | services/session/message-dispatcher.ts:1042 / :1115（穷举新发现——bash 终态帧的 output 全文；上游 pi bash RPC 自截是既有防线，本条目是其失效时的纵深） |
 // | terminal.data                      | payload.data                            | string   | services/terminal/terminal-service.ts:113（穷举新发现——PTY 输出块，用户 cat 大文件可达 MB 级；transient 类，miss 丢弃无 gap 风险） |
 //
