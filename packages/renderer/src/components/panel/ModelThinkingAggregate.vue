@@ -29,7 +29,7 @@
       <Button
         variant="ghost"
         data-testid="composer-model-thinking-aggregate"
-        class="h-7 gap-1 rounded-sm px-1.5 text-neutral-dim transition-colors hover:text-neutral-mid"
+        class="h-7 gap-1 rounded-sm px-1.5 text-neutral-fg transition-colors"
         :title="t('panel.modelSelect.modelThinkingAggregateTitle')"
       >
         <Boxes class="size-4 shrink-0" />

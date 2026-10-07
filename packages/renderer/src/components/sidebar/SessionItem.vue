@@ -18,16 +18,16 @@
   >
     <div
       ref="rootEl"
-      class="session-item group/item relative flex cursor-pointer items-start gap-2 rounded-md px-2 py-1 transition-colors"
+      class="session-item group/item relative flex cursor-pointer select-none items-start gap-2 rounded-md px-2 py-1 transition-colors"
       :class="[
-        active ? 'bg-surface' : 'hover:bg-surface-hover',
+        active ? 'bg-accent-soft shadow-[inset_2px_0_0_var(--accent)]' : 'hover:bg-surface-hover',
         isDead ? 'opacity-50' : '',
       ]"
       :aria-label="ariaLabel"
       @click="emit('select', session.id)"
       @mouseleave="confirming = false"
     >
-      <SessionItemDisplay :session="displaySession" :active="active" :status="status" :child-count="childCount" />
+      <SessionItemDisplay :session="displaySession" :status="status" :child-count="childCount" />
 
       <SessionItemActions
         v-model:confirming="confirming"
@@ -53,7 +53,9 @@ import type { SessionItemSession } from './session-item/types'
 
 /**
  * 展示组件 · 单会话项（spec §5.6A / D12 列表主行范式）。
- * active=bg-surface+text-accent；hover ghost 操作（bottom-right）；
+ * active=accent 浅底（bg-accent-soft）+ 左侧 2px accent 竖条（inset shadow，不占布局），
+ * 标题文字保持中性色（用户裁决 2026-10-06，对齐 demo .sess.is-active 形态）；
+ * hover ghost 操作（bottom-right）；
  * agent-spawned session（U8）：标题旁 [AI] badge + 右键「查看父 session」菜单。
  * 非 dead session 右键另有「强制退出」逃生入口（两段确认，状态机在 ContextMenu 子组件）。
  */

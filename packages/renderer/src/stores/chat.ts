@@ -30,11 +30,22 @@
  */
 import { defineStore } from 'pinia'
 import { createChatStore } from '@taiji/core'
+import { extractMainSessionId } from '@taiji/shared'
+import { session as sessionApi } from '@/api'
 import { agentCallLruLinkage } from '@/composables/features/chat/agentcall-lru-linkage'
 import { setupBtwReplayWatch } from './btw-replay'
 
 export const useChatStore = defineStore('chat', () => {
-  const store = createChatStore(agentCallLruLinkage())
+  const store = createChatStore({
+    ...agentCallLruLinkage(),
+    // [B2 subagent-stream-chunk §4.3] subagent 流状态拉取执行器：core 状态机的失步/接入
+    // 拉取经此执行 session.getSubagentStreamState RPC（renderer 是唯一发 RPC 的层，core
+    // 不直接依赖 transport）。virtualId 三段式内嵌 mainSessionId（shared 单一实现解析）；
+    // recordId 即 subagentId（tee 帧口径）。响应回灌 core 状态机按序判定（§4.3 四分支在
+    // streaming-state-machine）；失败（断连/错误回执 reject）由 core 在途去重表 settle 清槽。
+    subagentStreamPull: (virtualId, recordId) =>
+      sessionApi.getSubagentStreamState(extractMainSessionId(virtualId), recordId),
+  })
   // [M2-c btw 重载链] 重开线回放接线：drawer 选中线翻出时文件 → 分区（applyEntry 投影）
   setupBtwReplayWatch(store)
   return store

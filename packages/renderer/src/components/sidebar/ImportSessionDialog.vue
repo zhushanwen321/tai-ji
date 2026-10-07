@@ -195,7 +195,7 @@
               :key="item.sessionId"
               data-testid="import-item"
               :title="item.sourcePath"
-              class="mb-1 cursor-pointer rounded-md border px-3 py-2 transition-colors"
+              class="mb-1 cursor-pointer select-none rounded-md border px-3 py-2 transition-colors"
               :class="[
                 selectedId === item.sessionId
                   ? 'border-accent-ring bg-surface'

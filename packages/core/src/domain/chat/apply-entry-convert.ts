@@ -29,7 +29,7 @@ import {
   textToSegments,
 } from '@taiji/shared'
 
-import { isLooseRecord, isPlainRecord, normalizePiToolResult, truncateEntryToolOutput } from './apply-entry-utils'
+import { deriveToolResultOutputs, isLooseRecord, isPlainRecord } from './apply-entry-utils'
 
 /**
  * [簇 A2] defer 队列 flush 投递确认标记正则（submitQueuedEntry 附加的形态）。
@@ -419,23 +419,26 @@ export function computeToolCallFill(body: PiMessageBody): {
    */
   endTime?: number
 } {
-  const { output, outputRaw, images } = normalizePiToolResult(body)
   // [D6-⑧] 累积态条目级截断：live（applyEntryFrame）与 reload（replayEntries）共用本点，
   // 同函数同阈值——D3 代价 C 根治（非六类工具大结果两路径形态一致）。
-  const outputT = truncateEntryToolOutput(output)
+  // [perf] 归一 + 截断走共享派生（apply-entry-utils）：live tool_call_end 帧中 reducer 腿
+  //（applyEntryFrame）先于 overlay 腿（registry deriveToolCallEndOverlay）喂入，在此首算
+  // 并记入引用 memo；overlay 腿持同一 entry.message 引用，命中 memo——单帧同一 body 的
+  // 全文归一/encode 从两份降为一份。replay 路径各 body 引用互不相同恒 miss，产物与
+  // inline 自算逐字节一致。
+  // outputRaw 与 output 同源（stripAnsi 前/后），任一超限即双双截断（保持两字段头部对齐），
+  // truncated 标记取两者之或。
+  const outputs = deriveToolResultOutputs(body)
   const isError = body.isError === true
   // F1 透传 details（含 __gui__），排除数组形态（迁移前显式判定，关键规则 9 可重开恢复）。
   const details = isPlainRecord(body.details) ? body.details : undefined
-  // outputRaw 与 output 同源（stripAnsi 前/后），任一超限即双双截断（保持两字段头部对齐），
-  // truncated 标记取两者之或。
-  const outputRawT = outputRaw !== undefined ? truncateEntryToolOutput(outputRaw) : undefined
   return {
-    output: outputT.text,
-    ...(outputRaw !== undefined && outputRawT !== undefined && { outputRaw: outputRawT.text }),
+    output: outputs.output.text,
+    ...(outputs.outputRaw !== undefined && { outputRaw: outputs.outputRaw.text }),
     isError,
     details,
-    images,
-    outputTruncated: outputT.truncated || (outputRawT?.truncated ?? false),
+    images: outputs.images,
+    outputTruncated: outputs.output.truncated || (outputs.outputRaw?.truncated ?? false),
     // [chat-flow-timestamp U1] endTime 回填源 = toolResult body.timestamp；缺失/非 number
     // 不设字段（旧数据/畸形 body 无耗时语义——设计 §2.5 数据缺口语义「只显时刻不显耗时」）。
     // typeof 运行时守卫：pi JSONL 是外部宽形态数据（usageField 同款防御模式）。

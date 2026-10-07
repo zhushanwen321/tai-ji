@@ -28,6 +28,7 @@ import {
   fnv1a,
   isRuntimeStateEntry,
   isWithinDevDataParent,
+  piStageVersionMismatch,
   resolveCustomDataDir,
 } from '../dev-instance-lib.mjs'
 
@@ -45,8 +46,22 @@ afterEach(() => {
 
 // ── 端口派生 ──────────────────────────────────────────────────────────
 
-describe('deriveParams 端口派生', () => {
-  it('fnv1a 稳定且 32bit 无符号', () => {
+describe('piStageVersionMismatch stage 版本劈叉判定', () => {
+  it('一致返回 null（含空串防御外的一致值）', () => {
+    expect(piStageVersionMismatch('1.0.0', '1.0.0')).toBeNull()
+  })
+
+  it('劈叉返回文案：含两版本号、实测形态、两条恢复路径', () => {
+    const msg = piStageVersionMismatch('1.0.0', '0.84.4', 'darwin-arm64')
+    expect(msg).toContain('0.84.4')
+    expect(msg).toContain('1.0.0')
+    expect(msg).toContain('builtin:')
+    expect(msg).toContain('prepare-pi-resources.sh 1.0.0')
+    expect(msg).toContain('pi-1.0.0-darwin-arm64')
+  })
+})
+
+describe('deriveParams 端口派生', () => {  it('fnv1a 稳定且 32bit 无符号', () => {
     expect(fnv1a('dev-0.9.19')).toBe(fnv1a('dev-0.9.19'))
     expect(fnv1a('')).toBe(0x811c9dc5) // FNV offset basis
     expect(Number.isInteger(fnv1a('main'))).toBe(true)

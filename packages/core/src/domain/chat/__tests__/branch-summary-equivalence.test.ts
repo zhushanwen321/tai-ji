@@ -94,7 +94,7 @@ describe('branchSummary live ≡ reload（D13 entry 化守护网）', () => {
     const entry = persistedBranchEntry()
     // 实时路径：branchSummary 帧 → effect 构造 branch_summary entry 喂 reducer + overlay
     s.store.applyMessageEvent(sid, branchSummaryMsg(sid, branchPayload(entry)))
-    const liveState = s.store.testInternals._entryStatesForTest.get(sid)
+    const liveState = s.store.testInternals._entryStatesForTest.get(sid)?.state
     // 旧直插分支回退时（branchSummary 不喂 reducer）liveState 为空/缺失 → 此处先红
     expect(liveState?.messages).toHaveLength(1)
     // 重开路径：同一 entry 直接重放（get_entries → replayEntries）
@@ -125,7 +125,7 @@ describe('branchSummary live ≡ reload（D13 entry 化守护网）', () => {
     s.store.applyMessageEvent(sid, branchSummaryMsg(sid, { fromId: 'n-1', timestamp: 200 }))
     // 重开侧：pi 持久化 entry 同样无 summary 字段
     const reload = replayEntries([persistedBranchEntry({ id: 'entry-x', summary: undefined, fromId: 'n-1', timestamp: new Date(200).toISOString() })])
-    const liveState = s.store.testInternals._entryStatesForTest.get(sid)!
+    const liveState = s.store.testInternals._entryStatesForTest.get(sid)!.state
     const refMsgs = s.store.getMessages(sid)
     expect(refMsgs).toHaveLength(1)
     // D13 行为变化锁定：live content = ''（reducer `rawSummary ?? ''`），不再是 'Branched'
@@ -145,7 +145,7 @@ describe('branchSummary live ≡ reload（D13 entry 化守护网）', () => {
     s.store.applyMessageEvent(sid, branchSummaryMsg(sid, { summary: '', fromId: 'n-2', timestamp: 300 }))
     const reload = replayEntries([persistedBranchEntry({ id: 'entry-y', summary: '', fromId: 'n-2', timestamp: new Date(300).toISOString() })])
     const refMsgs = s.store.getMessages(sid)
-    const liveState = s.store.testInternals._entryStatesForTest.get(sid)!
+    const liveState = s.store.testInternals._entryStatesForTest.get(sid)!.state
     expect(refMsgs[0].content).toBe('')
     expect(refMsgs[0].branchSummary).toMatchObject({ summary: '' })
     expect(stripVolatile(refMsgs[0])).toEqual(stripVolatile(reload.messages[0]))
@@ -162,7 +162,7 @@ describe('branchSummary live ≡ reload（D13 entry 化守护网）', () => {
     s.store.applyMessageEvent(sid, branchSummaryMsg(sid, { summary: '分支', fromId: 'n-1', timestamp: 600 }))
     // live reducer state 只含 branch（user 乐观插入不喂 reducer——user 类型的 live≡reload
     // 经 message_end 权威帧成立，非本文件靶子）
-    const liveState = s.store.testInternals._entryStatesForTest.get(sid)!
+    const liveState = s.store.testInternals._entryStatesForTest.get(sid)!.state
     expect(liveState.messages).toHaveLength(1)
     expect(liveState.messages[0].branchSummary).toBeDefined()
     // ref 消息 = user（overlay）+ branch（overlay），branch 归 turn 边界

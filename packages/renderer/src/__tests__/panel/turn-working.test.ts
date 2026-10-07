@@ -922,7 +922,7 @@ describe('Turn · forceWorking 虚拟 session 回归（edges wave CL1）', () =>
     })
     // sessionActive 回退 turn.isStreaming=true → showTrace=true（isLastTurn 默认 true）
     expect(wrapper.find('.trace').exists()).toBe(true)
-    // visible = thinking(0) + tool(1) + text(2) = 3（②空，W=6 全收）
+    // visible = thinking(0) + tool(1) + text(2) = 3（②空，W=4 全收）
     expect(wrapper.findAll('.trace .trace-blk').length).toBe(3)
     // streaming-tail 显示（isStreaming=true，末位 text 非 running tool）
     expect(wrapper.find('.streaming-tail').exists()).toBe(true)
@@ -930,8 +930,8 @@ describe('Turn · forceWorking 虚拟 session 回归（edges wave CL1）', () =>
 
   // 加固（review r2 mitigation）：forceWorking + >W 个完成块 → 窗口收编生效（CL1 反例场景）。
   // subagent 虚拟 session 块多时仍受窗口策略约束（visible=last W + text，compactedCount>0）。
-  // W=8→6：e9651bfa6（design D7 V1 tuning）
-  it('forceWorking + >W 完成块（10 tool）→ 窗口收编生效（visible=6 tool + text=7，compactedCount=4）', () => {
+  // W=8→6：e9651bfa6（design D7 V1 tuning）；W=6→4：ui-signal-density 候选 E（窗口收窄省 2 行）
+  it('forceWorking + >W 完成块（10 tool）→ 窗口收编生效（visible=4 tool + text=5，compactedCount=6）', () => {
     const tools = Array.from({ length: 10 }, (_, i) => ({
       id: `tc${i}`,
       toolName: 'read',
@@ -964,8 +964,8 @@ describe('Turn · forceWorking 虚拟 session 回归（edges wave CL1）', () =>
         stubs: { ChangeSetCard: true, MarkdownRenderer: true, Block: true, TraceCompactorRow: true },
       },
     })
-    // visible = last 6 of 10 tool + text = 7（W=6，窗口对 forceWorking 生效）
+    // visible = last 4 of 10 tool + text = 5（W=4，窗口对 forceWorking 生效）；并入 6 进 TraceCompactorRow
     const blocks = wrapper.findAllComponents({ name: 'Block' })
-    expect(blocks.length).toBe(7)
+    expect(blocks.length).toBe(5)
   })
 })

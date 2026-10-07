@@ -18,6 +18,7 @@ import type { VirtualizerHandle } from 'virtua/vue'
 import type { MessageTurn } from '@/composables/logic/messageTurns'
 import type { SkillNoticeStreamItem } from '@/composables/panel/useSkillNoticeStream'
 import { turnStableId } from '@taiji/core/domain/chat'
+import { railMemoFor } from '@taiji/ui'
 import { useTurnExpansion } from '@/composables/panel/useTurnExpansion'
 import { useTurnExpansionStore } from '@/stores/turn-expansion'
 
@@ -64,8 +65,17 @@ export function useMessageStreamRail(deps: UseMessageStreamRailDeps): {
    * 替换），filter/map 每次重算产出新数组——即使 turn 成员引用一个都没变，下游 TurnRail 的
    * turns prop / expandedTurns 的依赖也会因引用变更连带重算/重渲。末尾逐项 === 比对：
    * 长度相等且每项引用相同 → 返回上次数组引用（下游 props 不变 → Vue 跳过 patch）；
-   * 任一 turn 引用变化（streaming 末位 turn 重建 / 消息增删）→ 照常产出新数组，行为不变。
+   * 任一 turn 引用变化（消息增删 / 消息内容替换）→ 照常产出新数组，行为不变。
    * lastRailTurns 用 per-instance 闭包持有（split mode 多实例各自 railTurns，禁模块级共享）。
+   *
+   * 投影恒等放宽（streaming perf 二段）：仅末位 turn 引用不同（streaming 末位 turn 每
+   * delta 重建）、其余逐项引用相同，且末位 turn 的 rail 可见投影签名（railMemoFor 四字段
+   * userSummary/agentSummary/failed/iconClass——TurnRail 渲染消费的全部 turn 派生字段）
+   * 与上次相同 → 返回旧数组引用。此时 TurnRail render 输出逐字节不变（摘要串相同 ⇒ 渲染
+   * 相同），props 引用不变 → 常驻面板零 vnode diff、expandedTurns 依赖不失效。签名经
+   * 共享 railMemoFor（@taiji/ui，与 TurnRail 渲染同一 WeakMap）：每帧对末位 turn 至多算
+   * 一次摘要，且该 memo 被后续真重渲帧直接命中（判定与渲染同源，摘要成本不因判定翻倍）。
+   * 摘要真变（用户可见变更）→ 走下方重建路径，TurnRail 照常更新，行为不变。
    */
   let lastRailTurns: MessageTurn[] = []
   /**
@@ -80,6 +90,29 @@ export function useMessageStreamRail(deps: UseMessageStreamRailDeps): {
     if (lastRailTurns.length === next.length && lastRailTurns.every((turn, i) => turn === next[i])) {
       return lastRailTurns
     }
+    const lastIdx = next.length - 1
+    const prevLast = lastIdx >= 0 ? lastRailTurns[lastIdx] : undefined
+    const nextLast = lastIdx >= 0 ? next[lastIdx] : undefined
+    if (
+      prevLast !== undefined &&
+      nextLast !== undefined &&
+      lastRailTurns.length === next.length &&
+      lastRailTurns.slice(0, lastIdx).every((turn, i) => turn === next[i])
+    ) {
+      const prevMemo = railMemoFor(prevLast)
+      const nextMemo = railMemoFor(nextLast)
+      if (
+        prevMemo.userSummary === nextMemo.userSummary &&
+        prevMemo.agentSummary === nextMemo.agentSummary &&
+        prevMemo.failed === nextMemo.failed &&
+        prevMemo.iconClass === nextMemo.iconClass
+      ) {
+        // rail 投影恒等 → 复用旧数组。补末位下标映射保持索引与当前 renderItems 同步
+        // （同位同投影）：updateActiveTurnIndex 对末位新引用仍 O(1) 命中，不退化 findIndex。
+        railIndexByTurn.set(nextLast, lastIdx)
+        return lastRailTurns
+      }
+    }
     const index = new WeakMap<MessageTurn, number>()
     // first-wins 对齐 findIndex 语义（同 turn 引用重复出现理论不可达，防御性保持等价）
     next.forEach((turn, i) => {
@@ -89,6 +122,41 @@ export function useMessageStreamRail(deps: UseMessageStreamRailDeps): {
     railIndexByTurn = index
     return next
   })
+
+  /**
+   * renderItems 空间下标 → rail 下标（截至该下标共有几个 turn 项，0-based）。
+   * railTurns 恒为 renderItems 的 turn 子序列（同帧派生、同序同长），该序号即 turn 在
+   * railTurns 中的下标——索引 get miss 且按引用 findIndex 也 miss 时的结构正确兜底：
+   * 投影恒等放宽期间 railTurns 末位持旧引用，新引用不在旧数组，按序号定位仍指向
+   * 当前最新同位 turn（旧实现此路径返回 -1，indicator 会错位）。
+   */
+  function railOrdinalAt(renderIdx: number): number {
+    const items = renderItems.value
+    let ordinal = -1
+    const upper = Math.min(renderIdx, items.length - 1)
+    for (let i = 0; i <= upper; i += 1) {
+      if (items[i]?.kind === 'turn') ordinal += 1
+    }
+    return ordinal
+  }
+
+  /**
+   * rail 下标 → renderItems 下标（第 idx 个 turn 项的位置，onJump 兜底方向）。
+   * 与 railOrdinalAt 同一结构事实（railTurns = renderItems 的 turn 子序列）的反向运用：
+   * 按引用 findIndex miss（放宽期间末位旧引用已被 renderItems 替换）时，第 idx 个 turn
+   * 项即 railTurns[idx] 的当前同位 turn，跳转定位语义不变。
+   */
+  function nthTurnRenderIndex(idx: number): number {
+    const items = renderItems.value
+    let seen = -1
+    for (let i = 0; i < items.length; i += 1) {
+      if (items[i]?.kind === 'turn') {
+        seen += 1
+        if (seen === idx) return i
+      }
+    }
+    return -1
+  }
 
   /**
    * 派生当前 session 已展开的 turn 稳定 key 集合（TurnRail toggle 图标方向依据）。
@@ -140,11 +208,19 @@ export function useMessageStreamRail(deps: UseMessageStreamRailDeps): {
     const item = renderItems.value[renderIdx]
     if (item?.kind === 'turn') {
       // railTurns.value 读在前：正常时序（onVirtuaScroll）下 virtua 已渲染 ⇒ 模板已读过
-      // railTurns ⇒ 索引必已建；此读兜底任何未求值路径——惰性求值顺带同步重建索引。
+      // railTurns ⇒ 索引必已建；此读兜底任何未求值路径——惰性求值顺带同步重建索引
+      // （投影恒等放宽帧也会在此补末位映射）。
       const turns = railTurns.value
-      // miss 兜底 findIndex：索引与数组恒同步（同求值同重建），不变式被未来重构打破时
-      // 行为退回线性扫描，与旧实现完全一致。
-      activeTurnIndex.value = railIndexByTurn.get(item.turn) ?? turns.findIndex((t) => t === item.turn)
+      // miss 兜底两级：索引命中 O(1)；miss 先按引用 findIndex（行为与旧实现一致），
+      // 再 miss（-1，放宽期间末位新引用不在旧数组）落 railOrdinalAt 结构定位，
+      // 不再返回 -1 错位（旧实现该路径不可达，新形态下由结构序号保证正确）。
+      const mapped = railIndexByTurn.get(item.turn)
+      if (mapped !== undefined) {
+        activeTurnIndex.value = mapped
+        return
+      }
+      const found = turns.findIndex((t) => t === item.turn)
+      activeTurnIndex.value = found >= 0 ? found : railOrdinalAt(renderIdx)
     }
   }
 
@@ -158,9 +234,15 @@ export function useMessageStreamRail(deps: UseMessageStreamRailDeps): {
   function onJump(idx: number): void {
     const targetTurn = railTurns.value[idx]
     if (!targetTurn) return
-    const renderIdx = renderItems.value.findIndex(
+    let renderIdx = renderItems.value.findIndex(
       (item) => item.kind === 'turn' && item.turn === targetTurn,
     )
+    if (renderIdx < 0) {
+      // 投影恒等放宽期间 railTurns 末位持旧引用（rail 显示未变不更新数组），按引用
+      // 查找 miss——按「第 idx 个 turn 项」结构定位兜底，跳转语义不变（跳到当前
+      // 最新同位 turn）。旧行为此处直接 return（不滚动），该 miss 在旧形态不可达。
+      renderIdx = nthTurnRenderIndex(idx)
+    }
     if (renderIdx < 0) return
     const v = deps.vlistRef.value
     if (!v) return

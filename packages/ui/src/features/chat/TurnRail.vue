@@ -48,7 +48,7 @@
           v-for="(turn, idx) in turns"
           :key="turnStableId(turn)"
           data-testid="rail-node"
-          class="group/rail-node rail-node relative flex cursor-pointer flex-col gap-0.5 rounded px-1.5 py-1 transition-colors hover:bg-surface-hover"
+          class="group/rail-node rail-node relative flex cursor-pointer select-none flex-col gap-0.5 rounded px-1.5 py-1 transition-colors hover:bg-surface-hover"
           :class="idx === activeTurnIndex ? 'active bg-accent-soft ring-1 ring-inset ring-accent-ring' : ''"
           @click="emit('jump', idx)"
         >
@@ -122,8 +122,9 @@ import { Bot, ChevronDown, ChevronUp, User } from '@lucide/vue'
 // barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
 import type { MessageTurn } from '@taiji/core/domain/chat'
-import { hasFailedTool, turnStableId } from '@taiji/core/domain/chat'
-import { summarizeTurnForRail, summarizeAssistantForRail } from '@taiji/core/domain/chat'
+import { turnStableId } from '@taiji/core/domain/chat'
+// 相对路径同 Button 先例：chat 组件被 barrel 再导出，barrel 自引用会闭合一族循环依赖环
+import { railMemoFor } from './rail-turn-memo'
 import { RUNNING_LOADER_SVG } from './block-icon'
 import { useI18n } from 'vue-i18n'
 
@@ -223,58 +224,11 @@ const viewportStyle = computed(() => {
 })
 
 /**
- * agent 行 Bot 图标的着色 class（仅非 active 态调用；active 态走 loader-spin）：
- * - failed（hasFailedTool）→ text-danger（常驻红，§5.6B 统一 error=danger——rail 是全局导航，一眼可辨失败位置，
- *   不沿用 §6 Block 块的「hover 渐显」。早期 CL5 曾用 warn 哑光金克制，已被 §5.6B 状态色统一推翻）
- * - 其余（done 态）→ text-neutral-ico（中性灰 ICON 色，不抢视觉，区别于 user 行的 text-neutral-fg）
- *
- * 优先级：failed > ok —— 失败信息需要被注意到（即便 turn 正在 streaming，过往失败也要标记）。
- * active 态由 isActiveTurn 提前分流到 loader-spin，不进本函数。
- *
- * 保持普通函数形式（非 computed）：依赖循环变量 turn，转 computed 需引入按 turns 映射的数组，
- * 复杂度收益不成正比。开销可接受——调用次数 = rail 节点数（≤ turns 数，通常 <20）。
+ * rail 节点摘要 per-turn memo（2026-08 streaming 性能优化）：
+ * WeakMap 按 turn 引用缓存（引用同 ⇒ 内容同 ⇒ 摘要同，论证见 rail-turn-memo.ts），
+ * 模板每 render 调用 railMemoFor 命中零重算。实装已上移为共享导出
+ * ./rail-turn-memo.ts（TurnRail 渲染 + useMessageStreamRail 投影恒等判定
+ * 消费同一 WeakMap——判定与渲染同源，签名漂移结构性不可能），此处仅 re-import。
+ * agentIconClass（failed=danger 常驻红 / done=neutral-ico，§5.6B）随 memo 一并迁入。
  */
-function agentIconClass(turn: MessageTurn): string {
-  if (hasFailedTool(turn)) return 'text-danger'
-  return 'text-neutral-ico'
-}
-
-/**
- * rail 节点摘要 per-turn memo（2026-08 streaming 性能优化）。
- *
- * 背景：模板每 render 对全部节点重跑 summarize*（summarizeAssistantForRail → stripMarkdown
- * 15+ 次全文正则 + truncate 码点展开），streaming 期间每 token 重渲时历史节点被反复重算。
- * WeakMap 按 turn 引用缓存是正确的：core toRenderItemsIncremental 对签名未变的历史 turn
- * 逐引用复用（message-turns.ts 增量分支），且消息体不可变替换（ADR-0039）——
- * 引用同 ⇒ 内容同 ⇒ 摘要同；内容变化必然走不可变替换产生新引用（miss 后重算一次）。
- * turn 对象被 GC 后 WeakMap 条目自动回收，无泄漏。
- * 模块级而非组件内：跨 TurnRail 实例共享（MessageStream 与 SubagentTab 内嵌 MessageStream
- * 多实例并存，同一 turn 引用只算一次）。
- */
-interface RailTurnMemo {
-  /** user 行摘要（summarizeTurnForRail，无 user turn 为空串——模板 `|| ' '` 兜底不变） */
-  userSummary: string
-  /** agent 行摘要（summarizeAssistantForRail，空串时模板经占位门判定「进行中…」或空格 fallback——判据不在 memo 内） */
-  agentSummary: string
-  /** hasFailedTool 结果（agent 行文本 hover 升色依据） */
-  failed: boolean
-  /** agent 行 Bot 图标着色 class（agentIconClass 产出，与 failed 同帧同源） */
-  iconClass: string
-}
-const railMemo = new WeakMap<MessageTurn, RailTurnMemo>()
-
-/** 取 turn 的 rail 摘要 memo（首见计算并缓存，命中零重算）。模板每 render 调用。 */
-function railMemoFor(turn: MessageTurn): RailTurnMemo {
-  let memo = railMemo.get(turn)
-  if (memo === undefined) {
-    memo = {
-      userSummary: summarizeTurnForRail(turn),
-      agentSummary: summarizeAssistantForRail(turn),
-      failed: hasFailedTool(turn),
-      iconClass: agentIconClass(turn),
-    }
-    railMemo.set(turn, memo)
-  }
-  return memo
-}
 </script>

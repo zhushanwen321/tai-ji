@@ -20,8 +20,8 @@ export type {
   SkillCacheScope, SkillCacheInvalidatedPayload,
   SessionTraceHeaderPayload, SessionTraceMalformedLine, SessionTraceSessionEndPayload,
   SessionViewSnapshot,
-  // plugin modal/headerAction 帧载荷（plugin-header-action-modal-points AP-1/AP-2）
-  PluginModalClosedReason, PluginModalStatePayload, HeaderActionUpdatePayload,
+  // plugin headerAction 帧载荷（plugin-header-action-modal-points AP-1）
+  HeaderActionUpdatePayload,
   WatchdogMemoryLevel, WatchdogMemoryPressurePayload,
   RollingRestartState, RollingRestartReason, RollingRestartInflightSummary,
   RollingRestartDeferredPayload, RollingRestartCountdownPayload, RollingRestartForcedPayload,
@@ -175,6 +175,10 @@ export {
 // ShieldFace 单项——preload ElectronAPI 签名、renderer ipc 封装与聚合上报、
 // main display-gate 校验三方共用同一形态声明，防漂移）。
 export type { ShieldRect, ShieldFace, ShieldsFacesPayload } from './ipc-payloads'
+// browser:overlay-state 浮层开合/内容上报通道契约（display-containers §7.4：内容
+// 种类闭集——core overlay 域、main display-gate 校验、preload ElectronAPI 签名与
+// renderer ipc 封装四方共用同一词表，防漂移）。
+export type { OverlayContentKind } from './ipc-payloads'
 // 崩溃台账事件 Schema SSOT（docs/architecture/crash-forensics-and-watchdog.md §3.3 D1，
 // 实施计划 u1a：layer/event/reason 枚举 + 字段集 + writer 接口——u1b runtime 与
 // u1c main 两 writer 共用，禁止复制定义；纯类型/常量无 node 依赖，barrel 安全）。

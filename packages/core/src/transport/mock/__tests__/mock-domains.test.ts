@@ -197,14 +197,32 @@ describe('mock session domain', () => {
     expect(await session.getAgentCallHistory('s1', 'ac1')).toEqual([])
     expect((await session.getWorkflows('s3')).workflows.length).toBeGreaterThan(0)
     expect(await session.getWorkflows('other')).toEqual({ workflows: [], oversize: undefined, found: true })
-    // workflow 可视化拉取（G4 锚定补齐成员）：run 事件流按 runId 分流，DAG 恒 record_not_found；
-    // 两臂恒带 sessionId（C-comm-05，形态对齐 real）
+    // workflow 可视化拉取（G4 锚定补齐成员）：两通道按 runId 查预置表分发（[D8]
+    // workflow-overlay-refine §3.3——事件流与 DAG 均为演员预置成品，mock 内不跑解析器）；
+    // 未登记 runId 恒 record_not_found 负例；两臂恒带 sessionId（C-comm-05，形态对齐 real）
     const runEvents = await session.getWorkflowRunEvents('s3', 'wf-mock-001')
     expect(runEvents.runId).toBe('wf-mock-001')
     expect(runEvents.sessionId).toBe('s3')
     expect('events' in runEvents && runEvents.events.length).toBeGreaterThan(0)
     expect(await session.getWorkflowRunEvents('s3', 'other-run')).toEqual({ sessionId: 's3', runId: 'other-run', code: 'record_not_found', message: 'mock 无 record 事件流记录' })
-    expect(await session.getWorkflowDag('s3', 'wf-mock-001')).toEqual({ sessionId: 's3', runId: 'wf-mock-001', code: 'record_not_found', message: 'mock 无 record 文件基建' })
+    // [D8 定稿①] wf-mock-001 同批接 DAG 通道：返回预置成品 DAG（原「DAG 恒 record_not_found」
+    // 断言按新分发改写——降级断言的数据载体移 parse_failed 演员，定稿③）
+    const dag001 = await session.getWorkflowDag('s3', 'wf-mock-001')
+    expect(dag001.sessionId).toBe('s3')
+    expect('dag' in dag001 && dag001.dag.nodes.map((n) => n.templateName)).toEqual(['dev-W1', 'review-W1'])
+    // [D8 定稿③] parse_failed 演员承载降级断言：错误臂原样透出（原因码 + message）
+    expect(await session.getWorkflowDag('s3', 'wf-mock-parse-failed')).toEqual({ sessionId: 's3', runId: 'wf-mock-parse-failed', code: 'parse_failed', message: 'Unexpected token (3:5)' })
+    // 未登记 runId 的 DAG 负例（record_not_found 负例覆盖保留，不随通道分支化改写）
+    expect(await session.getWorkflowDag('s3', 'other-run')).toEqual({ sessionId: 's3', runId: 'other-run', code: 'record_not_found', message: 'mock 无 record 文件基建' })
+    // [D8] 十演员两通道可达对账（冻结清单 = workflow-data.ts 头注释 + runlog 首条；
+    // u-wf-e2e 按该清单 runId 写断言）——事件流逐演员成功回执、DAG 成功臂或 parse_failed 错误臂
+    const actorRunIds = ['wf-mock-running', 'wf-mock-pending', 'wf-mock-failed', 'wf-mock-retrying', 'wf-mock-interrupted', 'wf-mock-stopped-time-limited', 'wf-mock-parse-failed', 'wf-mock-empty-dag', 'wf-mock-wide-phase', 'wf-mock-mismatched-calls']
+    for (const actorId of actorRunIds) {
+      const events = await session.getWorkflowRunEvents('s3', actorId)
+      expect('events' in events, `${actorId} 事件流可达`).toBe(true)
+      const dag = await session.getWorkflowDag('s3', actorId)
+      expect('dag' in dag || dag.code === 'parse_failed', `${actorId} DAG 回执可达（成功臂或 parse_failed 错误臂）`).toBe(true)
+    }
     // [G4 锚定补齐] 缺失成员 stub：引擎配置视图 / 默认引擎回执回显 / agent call 路径恒空串
     expect(await session.getSubagentEngineConfig()).toEqual({ engines: [], defaultEngine: '' })
     expect(await session.setSubagentDefaultEngine('eng-x')).toEqual({ engineId: 'eng-x' })

@@ -32,7 +32,7 @@
       <div
         v-for="c in fileChanges"
         :key="c.filePath"
-        class="group/cs-file flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[length:var(--text-sm)] transition-colors hover:bg-surface-hover"
+        class="group/cs-file flex cursor-pointer select-none items-center gap-2 px-3 py-1.5 text-[length:var(--text-sm)] transition-colors hover:bg-surface-hover"
         data-testid="change-set-file"
         :title="t('panel.changeset.viewDiff', { path: c.filePath })"
         @click="onClickFile(c.filePath)"

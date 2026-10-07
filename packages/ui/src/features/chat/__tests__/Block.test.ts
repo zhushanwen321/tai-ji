@@ -1,10 +1,12 @@
 /**
- * Block.vue text 分支样式测试（block-rendering M0，TC-M0-4）。
+ * Block.vue text 分支样式测试（block-rendering M0，TC-M0-4；D5 行类型定档更新）。
  *
- * [block-rendering M0] 文字样式模型统一：所有 text 全 inline 统一正文级
- * （text-base/leading-7），颜色跟随所属 assistant streaming 态（streaming→neutral-mid，
- * complete/缺省→neutral-fg，单调不随兄弟 message 翻转）。旧「过程文字暗色小字」两级
- * 视觉层级已取消（text-sm/leading-relaxed/恒 neutral-mid 移除）。
+ * [block-rendering M0] 文字样式模型统一：所有 text 全 inline 统一正文级，颜色跟随所属
+ * assistant streaming 态（streaming→neutral-mid，complete/缺省→neutral-fg，单调不随兄弟
+ * message 翻转）。旧「过程文字暗色小字」两级视觉层级已取消（text-sm/leading-relaxed/
+ * 恒 neutral-mid 移除）。
+ * [D5 行类型定档] 正文行字号档位从 --text-base（14px）抬到 --text-md（15px）——
+ * 行类型「字号 × 明度」三层：正文 15px / 工具 13px / thinking 12px（ui-signal-density §3.3 D5）。
  *
  * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/Block.test.ts
  */
@@ -12,8 +14,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { Block } from '@taiji/ui'
-import type { MessageStatus } from '@taiji/shared'
-import { MdStub, AnsiStub, makeToolCall, mountToolBlock } from './helpers'
+import type { MessageStatus, ToolCall } from '@taiji/shared'
+import { MdStub, AnsiStub, GuiStub, makeToolCall, mountToolBlock } from './helpers'
 
 function mountTextBlock(over: { streaming?: boolean; status?: MessageStatus; error?: string; content?: string; messageTimestamp?: number } = {}) {
   return mount(Block, {
@@ -34,13 +36,15 @@ function mountTextBlock(over: { streaming?: boolean; status?: MessageStatus; err
   })
 }
 
-describe('block-rendering M0: Block text 分支正文样式（TC-M0-4）', () => {
-  it('text 分支统一正文级样式：text-base/leading-7，不含 text-sm/leading-relaxed', () => {
+describe('block-rendering M0 + D5: Block text 分支正文样式（TC-M0-4）', () => {
+  it('text 分支统一正文级样式：text-md/leading-[1.75]（D5 正文档 15px），不含过程样式 text-sm/leading-relaxed', () => {
     const wrapper = mountTextBlock({})
     const textEl = wrapper.find('.trace-blk > div')
-    expect(textEl.classes()).toContain('text-[length:var(--text-base)]')
-    expect(textEl.classes()).toContain('leading-7')
+    expect(textEl.classes()).toContain('text-[length:var(--text-md)]')
+    // 行高系数化 leading-[1.75]（用户裁决 2026-10-06，原 leading-7 = 1.75rem 定值改无单位系数）
+    expect(textEl.classes()).toContain('leading-[1.75]')
     expect(textEl.classes()).not.toContain('text-[length:var(--text-sm)]')
+    expect(textEl.classes()).not.toContain('text-[length:var(--text-base)]')
     expect(textEl.classes()).not.toContain('leading-relaxed')
   })
 
@@ -129,32 +133,32 @@ describe('error-visibility M1: failed tool header danger + 终态展开（TC1-3�
     expect(wrapper.text()).toContain('ENOENT: no such file')
   })
 
-  it('TC3: unfinished(end_not_received) tool header 保持中性灰（abort/中断非失败，不标红）', () => {
+  it('TC3: unfinished(end_not_received) tool header 染 text-neutral-mid（D5 工具行档，abort/中断非失败不标红）', () => {
     const wrapper = mountToolBlock(makeToolCall({ status: 'end_not_received' }))
     const header = wrapper.find('[data-testid="tool-block-header"]')
-    expect(header.classes()).toContain('text-neutral-dim')
+    expect(header.classes()).toContain('text-neutral-mid')
     // unfinished 不标红（区别于 failed）
     expect(header.classes()).not.toContain('text-danger')
   })
 })
 
-/* ── feat-chat-flow-dim：已完成过程块置灰（完成态降两档，与 running accent 形成亮暗对比）──
- * - completed tool header 从 neutral-fg 经 mid 降到 neutral-dim（用户实测 mid 档置灰感不足
- *   后明确裁决再降一档；dim 3.56:1 不过 AA，此裁决仅限过程块折叠 header）
- * - running 保持 accent 不回归 */
-describe('feat-chat-flow-dim: completed tool header 置灰', () => {
-  it('completed tool header 染 text-neutral-dim（不再是最亮 neutral-fg）', () => {
+/* ── D5 行类型定档：工具行 = 13px（--text-sm）× --neutral-mid（ui-signal-density §3.3 D5）──
+ * - completed/unfinished tool header 染 text-neutral-mid（工具行层级明度；取代旧
+ *   feat-chat-flow-dim 的 dim 档裁决——行层级改由「字号 × 明度」三档拉开）
+ * - running 保持 accent、failed 保持 danger（状态色不是层级色，不随 D5 变） */
+describe('D5 行类型定档: completed tool header 染 neutral-mid', () => {
+  it('completed tool header 染 text-neutral-mid（工具行档，不再是最亮 neutral-fg）', () => {
     const wrapper = mountToolBlock(makeToolCall({ status: 'completed' }))
     const header = wrapper.find('[data-testid="tool-block-header"]')
-    expect(header.classes()).toContain('text-neutral-dim')
+    expect(header.classes()).toContain('text-neutral-mid')
     expect(header.classes()).not.toContain('text-neutral-fg')
   })
 
-  it('running tool header 保持 text-accent（进行中不置灰）', () => {
+  it('running tool header 保持 text-accent（进行中状态色，不落工具行档）', () => {
     const wrapper = mountToolBlock(makeToolCall({ status: 'running' }))
     const header = wrapper.find('[data-testid="tool-block-header"]')
     expect(header.classes()).toContain('text-accent')
-    expect(header.classes()).not.toContain('text-neutral-dim')
+    expect(header.classes()).not.toContain('text-neutral-mid')
   })
 })
 
@@ -535,11 +539,15 @@ describe('bash-running-stream-output: bash 展开容器与输出守卫（U3）',
   })
 })
 
-/* ── [chat-flow-timestamp U2] Block 行尾时间槽（设计 §3 A3/A4）──
+/* ── [chat-flow-timestamp U2 + D2 悬停化] Block 行尾时间槽 ──
  * A3 tool 块行尾 `耗时 · 时刻`：完成态耗时 = formatDuration(end - start)（从实现读：
  * formatDuration(2000) = (2000/1000).toFixed(0)+'s' = '2s'，非 '2.0s'）；endTime 缺失只显时刻；
  * running 态耗时 span 染 text-accent（实时跳动）。A4 text/thinking 块行尾只显所属 message 时刻；
  * messageTimestamp 缺失整槽不渲染（数据缺口降级语义，设计 §2.5）。
+ * [D2] 三槽（tool/text/thinking）从常驻改悬停按需：DOM 恒在（messageTimestamp 有值时），
+ * 可见度由 `opacity-0 + group-hover/<group>:opacity-100 + group-focus-within/<group>:opacity-100`
+ * 三件套控制（悬停该行 + 键盘焦点进入该行两翼）。happy-dom 无真实 hover（PR-2 探针结论：
+ * 纯 CSS 手法下 DOM 存在性无前后差异），断言形态 = 三件套类名存在性（V2/V3 的形态等价物）。
  * 期望时刻用本地 Date getter 构造（clockOf，与 formatClock 同口径；禁硬编码时区串）。 */
 function clockOf(ms: number): string {
   const d = new Date(ms)
@@ -547,13 +555,20 @@ function clockOf(ms: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
-describe('chat-flow-timestamp U2: Block 行尾时间槽（A3/A4）', () => {
+describe('chat-flow-timestamp U2: Block 行尾时间槽（A3/A4 + D2 悬停化）', () => {
   function mountThinkingTimeBlock(over: Record<string, unknown> = {}) {
     // collapsed 显式传 undefined（同 M3 组：键缺失会吃掉 `?? true` 的 fallback）
     return mount(Block, {
       props: { type: 'thinking', content: 'deep reasoning content', thinkingId: 't-time', collapsed: undefined, ...over },
       global: { stubs: { MarkdownRenderer: MdStub } },
     })
+  }
+
+  /** V2/V3 断言口径：槽未悬停视觉隐藏（opacity-0），悬停/键盘焦点两翼显现类在场 */
+  function expectHoverVisibility(slot: { classes(): string[] }, group: string): void {
+    expect(slot.classes()).toContain('opacity-0')
+    expect(slot.classes()).toContain(`group-hover/${group}:opacity-100`)
+    expect(slot.classes()).toContain(`group-focus-within/${group}:opacity-100`)
   }
 
   it('A3 tool 块 startTime=1000/endTime=3000 → 槽文本 `2s·HH:MM:SS`（耗时 formatDuration(2000) + 时刻 formatClock(1000)）', () => {
@@ -602,5 +617,180 @@ describe('chat-flow-timestamp U2: Block 行尾时间槽（A3/A4）', () => {
     expect(textWrapper.find('[data-testid="text-time-slot"]').exists()).toBe(false)
     const thinkWrapper = mountThinkingTimeBlock({})
     expect(thinkWrapper.find('[data-testid="thinking-time-slot"]').exists()).toBe(false)
+  })
+
+  // ── D2 悬停化形态（V2/V3 的单测等价物；PR-2 探针结论：纯 CSS 手法下断言类名三件套）──
+
+  it('V2: text 块无常驻时刻——text-time-slot 带 opacity-0 + 悬停/键盘两翼显现类（group/text）', () => {
+    const wrapper = mountTextBlock({ messageTimestamp: 1000 })
+    const slot = wrapper.find('[data-testid="text-time-slot"]')
+    expect(slot.exists()).toBe(true)
+    expectHoverVisibility(slot, 'text')
+    // w-28 固定占位列已随悬停化移除（正文行恢复满宽），改 ml-auto 钉行尾
+    expect(slot.classes()).toContain('ml-auto')
+    expect(slot.classes()).not.toContain('w-28')
+  })
+
+  it('V2: thinking 块无常驻时刻——thinking-time-slot 三件套（group/think 行内已有命名分组容器）', () => {
+    const wrapper = mountThinkingTimeBlock({ messageTimestamp: 1000 })
+    const slot = wrapper.find('[data-testid="thinking-time-slot"]')
+    expect(slot.exists()).toBe(true)
+    expectHoverVisibility(slot, 'think')
+  })
+
+  it('V2: tool 块无常驻时刻——tool-time-slot 三件套（group/tool 行容器）', () => {
+    const wrapper = mountToolBlock(makeToolCall({ startTime: 1000, endTime: 3000 }))
+    const slot = wrapper.find('[data-testid="tool-time-slot"]')
+    expect(slot.exists()).toBe(true)
+    expectHoverVisibility(slot, 'tool')
+  })
+
+  it('V3: 三槽 group 容器在 DOM（悬停移开后回落 opacity-0 默认态 = 移开消失的结构前提）', () => {
+    // 移开消失 / 不常驻的结构前提 = 显现类挂在 group 伪类上、默认态只有 opacity-0；
+    // 本断言锁定三槽默认类集合不含任何恒显 opacity 类（如 opacity-100）
+    const textWrapper = mountTextBlock({ messageTimestamp: 1000 })
+    const textSlot = textWrapper.find('[data-testid="text-time-slot"]')
+    expect(textSlot.classes()).not.toContain('opacity-100')
+    const toolWrapper = mountToolBlock(makeToolCall({ startTime: 1000, endTime: 3000 }))
+    expect(toolWrapper.find('[data-testid="tool-time-slot"]').classes()).not.toContain('opacity-100')
+    const thinkWrapper = mountThinkingTimeBlock({ messageTimestamp: 1000 })
+    expect(thinkWrapper.find('[data-testid="thinking-time-slot"]').classes()).not.toContain('opacity-100')
+  })
+})
+
+// ═════════════════════════════════════════════════════════════════
+// ui-signal-density §3.3 D1 U3：Block bash-group 组块（连续 bash 折叠）
+// 组头三条计数口径由 core groupConsecutiveBash 算好（header），本文件断言渲染形态：
+// 组头 / 失败段 testid、展开收起、成员默认收起态、两步路径、failed 成员默认展开（V8）。
+// ═════════════════════════════════════════════════════════════════
+
+/** bash 组块 fixture：ToolCall[] → Turn.vue 组分支透传的 group prop 形态（members+header+hasRunning）。 */
+function makeBashGroupProp(tools: ToolCall[]) {
+  return {
+    members: tools.map((tc, i) => ({
+      assistantId: 'a1',
+      assistantStatus: 'complete' as const,
+      block: { kind: 'tool' as const, ref: tc },
+      flatIndex: i,
+    })),
+    header: {
+      count: tools.length,
+      durationMs: tools.reduce((sum, t) => sum + Math.max(0, (t.endTime ?? 0) - t.startTime), 0),
+      failedCount: tools.filter((t) => t.status === 'error').length,
+    },
+    hasRunning: tools.some((t) => t.status === 'running'),
+  }
+}
+
+function mountBashGroup(group: ReturnType<typeof makeBashGroupProp>) {
+  return mount(Block, {
+    props: { type: 'bash-group', group, sessionId: 'sess-bash-group-test' },
+    global: {
+      stubs: { GuiComponentRenderer: GuiStub, AnsiText: AnsiStub, MarkdownRenderer: MdStub },
+    },
+  })
+}
+
+describe('ui-signal-density D1 U3: Block bash-group 组块', () => {
+  it('组行形态：bash-group / bash-group-header testid 存在（§4.2 gui-components 组头分支的锚点）', () => {
+    const wrapper = mountBashGroup(makeBashGroupProp([makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'echo hi' }, startTime: 0, endTime: 1000 })]))
+    expect(wrapper.find('[data-testid="bash-group"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="bash-group-header"]').exists()).toBe(true)
+  })
+
+  it('组头三条口径渲染：count / durationMs / failedCount 数字出现在组头文本（header 由 core 算好，组件零解析）', () => {
+    const wrapper = mountBashGroup(
+      makeBashGroupProp([
+        makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' }, startTime: 0, endTime: 1500 }),
+        makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' }, status: 'error', startTime: 2000, endTime: 3500 }),
+        makeToolCall({ id: 'b2', toolName: 'bash', input: { command: 'c' }, startTime: 4000, endTime: 5000 }),
+      ]),
+    )
+    const headerText = wrapper.find('[data-testid="bash-group-header"]').text()
+    expect(headerText).toContain('3') // ×N = 组内已完成成员数
+    expect(headerText).toContain('4s') // 共 Xs = 1500+1500+1000 = 4000ms → formatDuration '4s'
+    expect(wrapper.find('[data-testid="bash-group-failed"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="bash-group-failed"]').text()).toContain('1') // · 含 M 次失败
+  })
+
+  it('failedCount=0 → 失败段不渲染（组行不虚构失败）', () => {
+    const wrapper = mountBashGroup(makeBashGroupProp([
+      makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } }),
+      makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' } }),
+    ]))
+    expect(wrapper.find('[data-testid="bash-group-failed"]').exists()).toBe(false)
+  })
+
+  it('hasRunning 执行态视觉（D1 语义变更）：true → 组头 loader（animate-loader-spin + svg）+ 整行 text-accent；false → 静态图标 + text-neutral-mid', () => {
+    const runningWrapper = mountBashGroup(makeBashGroupProp([
+      makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' }, startTime: 0, endTime: 1000 }),
+      makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' }, status: 'running', startTime: 2000 }),
+    ]))
+    const runningHeader = runningWrapper.find('[data-testid="bash-group-header"]')
+    expect(runningHeader.classes()).toContain('text-accent')
+    expect(runningHeader.classes()).not.toContain('text-neutral-mid')
+    // loader 形态与其余执行中块同款：RUNNING_LOADER_SVG 塞进 animate-loader-spin 旋转容器
+    const loader = runningHeader.find('.animate-loader-spin')
+    expect(loader.exists()).toBe(true)
+    expect(loader.find('svg').exists()).toBe(true)
+
+    const doneWrapper = mountBashGroup(makeBashGroupProp([
+      makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } }),
+      makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' } }),
+    ]))
+    const doneHeader = doneWrapper.find('[data-testid="bash-group-header"]')
+    expect(doneHeader.classes()).toContain('text-neutral-mid')
+    expect(doneHeader.classes()).not.toContain('text-accent')
+    expect(doneHeader.find('.animate-loader-spin').exists()).toBe(false)
+  })
+
+  it('展开收起：默认收起（成员不在 DOM）；点组头展开 → 成员行各自 1 行收起态；再点收起 → 成员消失', async () => {
+    const wrapper = mountBashGroup(makeBashGroupProp([
+      makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } }),
+      makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' } }),
+    ]))
+    expect(wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk').length).toBe(0) // 默认收起（成员行 = 组容器内嵌套 Block 根 .trace-blk；外层查找收窄到 bash-group 子树，排除 Block 根容器自身）
+    await wrapper.find('[data-testid="bash-group-header"]').trigger('click')
+    const members = wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk')
+    expect(members.length).toBe(2) // 成员行出现
+    // 成员保持各自 1 行收起态（PR-1 行高不变量）：无展开输出区
+    expect(wrapper.find('.tool-result').exists()).toBe(false)
+    // aria-expanded 翻转
+    expect(wrapper.find('[data-testid="bash-group-header"]').attributes('aria-expanded')).toBe('true')
+    await wrapper.find('[data-testid="bash-group-header"]').trigger('click')
+    expect(wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk').length).toBe(0) // 收起
+    expect(wrapper.find('[data-testid="bash-group-header"]').attributes('aria-expanded')).toBe('false')
+  })
+
+  it('两步路径（V1 已接受代价①）：组展开 → 点成员行 → 该成员完整输出可见', async () => {
+    const wrapper = mountBashGroup(makeBashGroupProp([
+      makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'echo step-one' }, output: 'step-one-output' }),
+      makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'echo step-two' } }),
+    ]))
+    await wrapper.find('[data-testid="bash-group-header"]').trigger('click')
+    // 第一步：组展开（成员行在场、均收起）
+    expect(wrapper.find('.tool-result').exists()).toBe(false)
+    // 第二步：点成员行 → 完整输出可见（bash 凹槽命令头 + 输出）
+    const firstHeader = wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk')[0].find('[data-testid="tool-block-header"]')
+    await firstHeader.trigger('click')
+    const expanded = wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk')[0]
+    expect(expanded.text()).toContain('echo step-one')
+    expect(expanded.text()).toContain('step-one-output')
+  })
+
+  it('V8 形态：failed 成员行在组展开后挂载即默认展开（错误输出立即可见，无需再点）', async () => {
+    const wrapper = mountBashGroup(makeBashGroupProp([
+      makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'ok' } }),
+      makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'boom' }, status: 'error', error: 'exit code 1' }),
+      makeToolCall({ id: 'b2', toolName: 'bash', input: { command: 'after' } }),
+    ]))
+    await wrapper.find('[data-testid="bash-group-header"]').trigger('click')
+    const members = wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk')
+    expect(members.length).toBe(3)
+    // 失败成员（第 2 个）挂载即展开：输出区在场（displayContent 兜底 tool.error）
+    expect(members[1].find('.tool-result').exists()).toBe(true)
+    expect(members[1].text()).toContain('exit code 1')
+    // 非失败成员保持收起
+    expect(members[0].find('.tool-result').exists()).toBe(false)
   })
 })

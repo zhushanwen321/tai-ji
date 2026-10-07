@@ -6,21 +6,26 @@
     import u4——分界 = WorkflowGanttSegments 视图模型契约）；未注入时渲染分段统计降级形态。
   -->
   <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-    <!-- 子页切换器 -->
-    <div class="flex shrink-0 gap-1 border-b border-hairline px-2 py-1.5" data-testid="wf-viz-subpage-switch">
-      <Button
-        v-for="page of SUBPAGES"
-        :key="page"
-        variant="ghost"
-        size="sm"
-        :data-testid="`wf-viz-subpage-${page}`"
-        :data-active="subpage === page ? 'true' : 'false'"
-        class="h-6 rounded-sm px-2 text-[length:var(--text-3xs)]"
-        :class="subpage === page ? 'bg-bg-elevated text-neutral-fg' : 'text-neutral-dim hover:text-neutral-fg'"
-        @click="subpage = page"
-      >
-        {{ subpageLabel(page) }}
-      </Button>
+    <!-- 子页切换器（D6 升格分段器：凹陷槽容器 + 选中态胶囊——DESIGN §5.3 SegmentedTab
+         既有范式，容器 bg-bg-input / 选中 bg-bg-elevated 中性浮起；切换逻辑零改动） -->
+    <div class="shrink-0 px-2 py-1.5">
+      <div class="inline-flex gap-0.5 rounded-lg bg-bg-input p-[3px]" data-testid="wf-viz-subpage-switch">
+        <Button
+          v-for="page of SUBPAGES"
+          :key="page"
+          variant="ghost"
+          size="sm"
+          :data-testid="`wf-viz-subpage-${page}`"
+          :data-active="subpage === page ? 'true' : 'false'"
+          class="h-6 rounded-sm px-3 text-[length:var(--text-3xs)]"
+          :class="subpage === page
+            ? 'bg-bg-elevated text-neutral-fg hover:bg-bg-elevated'
+            : 'text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
+          @click="subpage = page"
+        >
+          {{ subpageLabel(page) }}
+        </Button>
+      </div>
     </div>
 
     <!-- 实例 trace 子页 -->

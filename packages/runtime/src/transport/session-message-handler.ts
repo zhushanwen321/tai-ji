@@ -178,6 +178,7 @@ export class SessionMessageHandler {
     'session.getPlanState': (msg, ws) => this.handleSessionGetPlanState(msg, ws),
     'session.abortPlan': (msg, ws) => this.handleSessionAbortPlan(msg, ws),
     'session.getSubagentHistory': (msg, ws) => this.handleSessionGetSubagentHistory(msg, ws),
+    'session.getSubagentStreamState': (msg, ws) => this.handleSessionGetSubagentStreamState(msg, ws),
     'session.getSubagentEngineConfig': (msg, ws) => this.handleSessionGetSubagentEngineConfig(msg, ws),
     'session.setSubagentDefaultEngine': (msg, ws) => this.handleSessionSetSubagentDefaultEngine(msg, ws),
     'session.getWorkflows': (msg, ws) => this.handleSessionGetWorkflows(msg, ws),
@@ -621,6 +622,14 @@ export class SessionMessageHandler {
     // u4b（D5①）：巨型 subagent JSONL 超预检阈值时返回逆序窗口 + truncated 标记
     const { messages, truncated } = await this.ctx.sessionService.getSubagentHistory(msg.payload.sessionId, msg.payload.subagentId)
     return this.ctx.reply(ws, msg.id, 'session.subagentHistory', { sessionId: msg.payload.sessionId, subagentId: msg.payload.subagentId, messages, truncated })
+  }
+
+  private async handleSessionGetSubagentStreamState(msg: Extract<ClientMessage, { type: 'session.getSubagentStreamState' }>, ws: WsType): Promise<void> {
+    // B2 subagent-stream-chunk §4.1：运行中 subagent 流状态拉取（renderer 失步/接入恢复
+    // 数据源）。同步内存读（RelayTee 三元组单次读出，构造性一致无锁）；无进行中流 =
+    // found:false 合法回执（协议无独立错误码词表），透传不加工。
+    const { sessionId, recordId } = msg.payload
+    return this.ctx.reply(ws, msg.id, 'session.getSubagentStreamState', this.ctx.sessionService.getSubagentStreamState(sessionId, recordId))
   }
 
   // [U7] 子代理引擎配置：get（engines 动态清单 + defaultEngine）/ set（读改写 config.json，新 session 生效）

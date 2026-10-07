@@ -1,5 +1,5 @@
 /**
- * focus-trap 纯工具直测（PluginModalHost / SettingsModal 共享的 Tab 焦点陷阱）。
+ * focus-trap 纯工具直测（SettingsModal 等宿主共享的 Tab 焦点陷阱）。
  *
  * 三路循环语义：
  * - 末个非 shift Tab → preventDefault + 聚焦首个

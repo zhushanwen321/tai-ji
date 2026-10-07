@@ -22,17 +22,18 @@
         </template>
       </Brand>
 
-      <!-- 主操作 nav：新建任务 ⌘N（primary 主操作）/ 导入会话 ⌘I / 搜索 ⌘K（ghost 次操作）。
-           NavItem 层级：primary=accent 实色 / ghost=透明 双层级。 -->
+      <!-- 主操作 nav：新建任务（主操作，中性底不再 accent 实色——用户裁决 2026-10-06
+           对齐 demo .w-new 形态）/ 导入会话 ⌘I / 搜索 ⌘K（ghost 次操作）。
+           快捷键提示并入 :title（demo data-tip 悬停形态），不渲染常驻 kbd。 -->
       <nav class="flex flex-col gap-1 px-1">
         <Button
           variant="ghost"
-          class="group h-8 w-full justify-start gap-2.5 rounded-md bg-accent px-3 text-[length:var(--text-xs)] font-medium text-accent-fg transition-colors hover:bg-accent-hover hover:text-accent-fg"
+          class="group h-8 w-full justify-start gap-2.5 rounded-md border border-border-strong bg-surface-2 px-3 text-[length:var(--text-xs)] font-medium text-neutral-fg transition-colors hover:bg-surface-hover"
+          :title="`${t('sidebar.newTask')} · ${formatKbd('n')}`"
           @click="onNewSession"
         >
-          <Plus class="size-[15px] text-accent-fg" />
+          <Plus class="size-[15px]" />
           <span class="flex-1 text-left">{{ t('sidebar.newTask') }}</span>
-          <kbd class="font-mono text-[length:var(--text-3xs)] text-accent-fg opacity-70">{{ formatKbd('n') }}</kbd>
         </Button>
         <!-- 导入会话入口（import-session 设计 §3.1）：外部 pi session
              纳入管理。ghost 次操作；open 状态本组件持有，
@@ -41,20 +42,20 @@
           variant="ghost"
           data-testid="sidebar-import-session-btn"
           class="group h-8 w-full justify-start gap-2.5 rounded-md px-3 text-[length:var(--text-xs)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
+          :title="`${t('importSession.title')} · ${formatKbd('i')}`"
           @click="importOpen = true"
         >
           <Download class="size-[15px] text-neutral-dim transition-colors group-hover:text-neutral-mid" />
           <span class="flex-1 text-left">{{ t('importSession.title') }}</span>
-          <kbd class="rounded-sm border border-border-strong px-1.5 py-0.5 font-mono text-[length:var(--text-3xs)] text-neutral-dim">{{ formatKbd('i') }}</kbd>
         </Button>
         <Button
           variant="ghost"
           class="group h-8 w-full justify-start gap-2.5 rounded-md px-3 text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
+          :title="`${t('sidebar.search')} · ${formatKbd('k')}`"
           @click="searchModal.open()"
         >
           <Search class="size-[15px] text-neutral-dim transition-colors group-hover:text-neutral-mid" />
           <span class="flex-1 text-left">{{ t('sidebar.search') }}</span>
-          <kbd class="rounded-sm border border-border-strong px-1.5 py-0.5 font-mono text-[length:var(--text-3xs)] text-neutral-dim">{{ formatKbd('k') }}</kbd>
         </Button>
       </nav>
 

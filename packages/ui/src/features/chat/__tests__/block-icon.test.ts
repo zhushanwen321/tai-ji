@@ -53,6 +53,9 @@ describe('block-icon.ts', () => {
     expect(BLOCK_ICON_LUCIDE['tool-other']).toBe(SquareFunction)
     expect(BLOCK_ICON_LUCIDE.workflow).toBe(ListChecks)
     expect(BLOCK_ICON_LUCIDE.text).toBe(ArrowRight)
+    // D1 语义变更：bash-group 组头图标 = bash 语义（SquareTerminal，与 tool-bash 同源），
+    // 组身份由「×N」计数前缀承载；组内含 running 成员时图标位由渲染层 RUNNING_LOADER_SVG 顶替
+    expect(BLOCK_ICON_LUCIDE['bash-group']).toBe(SquareTerminal)
   })
 
   it('RUNNING_LOADER_SVG: 双环 loader（含 svg + circle，外环 r=10 + 内实心 r=3）', () => {

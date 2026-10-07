@@ -52,12 +52,12 @@
   --border-strong: rgba(255, 255, 255, 0.13);
   --hairline: rgba(255, 255, 255, 0.05); /* 行分隔 / drawer L1 栏底线 */
 
-  /* ── 主色（v6 玄：水墨降饱和，克制放开档）────────────── */
-  --accent: #cfcfd4;
-  --accent-hover: #e0e0e4;
+  /* ── 主色（玄：近无彩度画布上的一枚弱蓝灰 accent，ui-signal-density D3 定稿）── */
+  --accent: #a5adc2;
+  --accent-hover: #b5bdd4;      /* accent 等色相提亮一档（OKLCh dL≈0.052，与其余 preset 同模式） */
   --accent-soft: color-mix(in oklch, var(--accent) 10%, transparent);
   --accent-ring: color-mix(in oklch, var(--accent) 30%, transparent); /* 选中态内描边（Card-Active），见 design-system §2 */
-  --accent-fg: #1a1a1c;         /* accent 实色上的文字（玄主题用深字） */
+  --accent-fg: #1a1a1c;         /* accent 实色上的文字（玄主题用深字）；对 #a5adc2 对比 7.74:1 过 AA（D3 门禁） */
 
   /* ── 状态色（水墨降饱和，克制放开档）────────────────── */
   --success: #78a87e;

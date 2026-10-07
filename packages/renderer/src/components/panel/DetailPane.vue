@@ -32,7 +32,7 @@
         data-testid="detail-tab"
         :data-path="tab.path"
         :data-active="tab.path === activePath ? 'true' : 'false'"
-        class="flex shrink-0 cursor-pointer items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-[length:var(--text-2xs)] transition-colors"
+        class="flex shrink-0 cursor-pointer select-none items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-[length:var(--text-2xs)] transition-colors"
         :class="
           tab.path === activePath
             ? 'border-border-strong bg-bg-elevated text-neutral-fg'

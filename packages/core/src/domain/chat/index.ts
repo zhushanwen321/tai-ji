@@ -48,7 +48,7 @@ export type { ChatStoreOptions } from './store'
 export type { SessionOccupancyState } from './store'
 export * from './derive-status'
 // [session-dead C1 方案一] turn 进展观测面（设计 §3.3 D6/D7：结构事件边界派生计时 + ask_user 豁免）
-export { createStreamingStateMachine, type StreamingStateMachineDeps } from './streaming-state-machine'
+export { createStreamingStateMachine, type StreamingStateMachineDeps, type SubagentStreamStateSnapshot, type SubagentStreamChunk } from './streaming-state-machine'
 export type { ChatStoreInstance, ChatStoreReaders, ChatStoreOps } from './store'
 // w5 chat-use-chat：useChat composable 迁移（createUseChat factory + ChatApiPort）
 // w6 chat-ui-and-shell：chat 域纯逻辑（turn 分组/摘要）迁入

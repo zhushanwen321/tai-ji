@@ -10,8 +10,9 @@
  *   断言 drawer-panel + drawer-content DOM 存在（AC9/AC12 壳层载体）；drawer-tab-* 全量
  *   tab 按钮断言收拢在「注册表契约」用例（右抽屉终态 8 成员，其余用例只断言被测 tab）
  * - drawerOpen=true：DrawerPanel 在 drawer-area wrapper 内挂载（feat-chat-flow-width 手写
- *   flex 布局，替换 reka-ui Splitter：无 drawer main 撑满（2026-10-04 二轮裁决）、有 drawer 双侧 width 动画、
- *   handle 拖动/键盘调整 + localStorage 持久化，见下方「动态宽度」describe）
+ *   flex 布局，替换 reka-ui Splitter：无 drawer main 卡撑满、卡内内容列（对话流 + composer）
+ *   限宽 60% 居中（ui-signal-density D10 2026-10-06 修订，720px 下限后撑满）、
+ *   有 drawer 双侧 width 动画、handle 拖动/键盘调整 + localStorage 持久化，见下方「动态宽度」describe）
  * - drawerOpen=false：DrawerPanel aside 卸载，drawer-area 收缩为 0%（width 动画承载者常驻）
  * - close 按钮关闭 → drawer 卸载（旧 side-drawer.test.ts 行为迁移；ESC 已随
  *   display-containers §6.7 W1 归栈序编排器，壳层 ESC 零动作有专属负向用例 +
@@ -461,13 +462,23 @@ describe('PanelContainer unread badge 壳侧补回（AC-13，旧 SideDrawer 逻�
   }, 60_000)
 })
 
-// ── 动态宽度（feat-chat-flow-width）：无 drawer main 撑满 / 有 drawer 拆分 + 拖动/键盘/持久化 ──
+// ── 动态宽度（feat-chat-flow-width）：无 drawer 卡撑满 + 内容列 60%（720px 下限撑满）/ 有 drawer 拆分 + 拖动/键盘/持久化 ──
 
-/** jsdom 无布局：mock splitArea rect（宽 1000px，右缘 x=1000），drawer 宽 = (right - clientX)/width */
-function mockSplitAreaRect(wrapper: Awaited<ReturnType<typeof mountContainer>>): void {
+/** jsdom 无布局：mock splitArea rect（默认宽 1000px，右缘 x=1000），drawer 宽 = (right - clientX)/width */
+function mockSplitAreaRect(wrapper: Awaited<ReturnType<typeof mountContainer>>, width = 1000): void {
   const area = wrapper.find('[data-testid="split-area"]').element
   area.getBoundingClientRect = () =>
-    ({ width: 1000, right: 1000, left: 0, top: 0, bottom: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+    ({ width, right: width, left: 0, top: 0, bottom: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+}
+
+/** mount 前原型级 stub 全部元素 rect 宽度（内容列下限派生的测量输入在挂载期读取，
+ *  须先于 mount 就位；返回恢复函数）。height 恒 0：底抽屉显示期 clamp 未测得即回落，与无布局等价 */
+function stubAllElementRects(width: number): () => void {
+  const spy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(
+    () =>
+      ({ width, right: width, left: 0, top: 0, bottom: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect,
+  )
+  return () => spy.mockRestore()
 }
 
 /** 读取区域宽度 style（jsdom 不执行 CSS transition，style.width 即终态） */
@@ -482,25 +493,48 @@ function areaStyle(wrapper: Awaited<ReturnType<typeof mountContainer>>, testid: 
 }
 
 describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
-  it('无 drawer：main-area 撑满（100%）+ margin 0 + 内容封顶解除，drawer-area 0%，无 resize handle', async () => {
-    const panel = usePanelStore()
-    panel.loadSession(ROOT_PANEL_ID, 's-width-closed')
+  it('无 drawer：main-area 撑满 + 内容列 60% 居中（宽 panel），drawer-area 0%，无 resize handle', async () => {
+    // 1600 × 60% = 960 ≥ 720 下限 → 比例分支（挂载期测量读取，rect 须先于 mount 就位）
+    const restoreRect = stubAllElementRects(1600)
+    try {
+      const panel = usePanelStore()
+      panel.loadSession(ROOT_PANEL_ID, 's-width-closed')
 
-    const wrapper = await mountContainer()
-    await nextTick()
+      const wrapper = await mountContainer()
+      await nextTick()
 
-    // 撑满语义（2026-10-04 二轮裁决）：对话流卡默认占满公共容器，拉开 drawer 才让位
-    expect(areaWidth(wrapper, 'main-area')).toBe('100%')
-    const mainStyle = areaStyle(wrapper, 'main-area')
-    expect(mainStyle).toContain('margin-left: 0%')
-    expect(mainStyle).toContain('margin-right: 0%')
-    // 内容列封顶解除（.content-col 消费 --content-max-w；覆盖全局 720px → 内容占满容器）
-    expect(mainStyle).toContain('--content-max-w: 100%')
-    expect(areaWidth(wrapper, 'drawer-area')).toBe('0%')
-    expect(wrapper.find('[data-testid="drawer-resize-handle"]').exists()).toBe(false)
+      expect(areaWidth(wrapper, 'main-area')).toBe('100%')
+      const mainStyle = areaStyle(wrapper, 'main-area')
+      // 撑满语义（D10 2026-10-06 修订）：60% 作用对象是卡内内容列（对话流 + composer），
+      // 不是卡容器——留白在卡内两侧，卡与 header 横跨全宽
+      expect(mainStyle).toContain('margin-left: 0')
+      expect(mainStyle).toContain('margin-right: 0')
+      expect(mainStyle).toContain('--content-max-w: 60%')
+      expect(areaWidth(wrapper, 'drawer-area')).toBe('0%')
+      expect(wrapper.find('[data-testid="drawer-resize-handle"]').exists()).toBe(false)
+    } finally {
+      restoreRect()
+    }
   }, 60_000)
 
-  it('有 drawer（默认）：main = calc(100% - 50% - 4px) + margin 0 贴左 + 封顶解除不变，drawer = 50%，handle 挂载', async () => {
+  it('无 drawer 窄 panel：60% 实算低于 720px 下限 → 内容列撑满（--content-max-w: 100%）', async () => {
+    // 1000 × 60% = 600 < 720 → 下限触发撑满（drawer 挤窄后恒撑满同因）
+    const restoreRect = stubAllElementRects(1000)
+    try {
+      const panel = usePanelStore()
+      panel.loadSession(ROOT_PANEL_ID, 's-width-closed-narrow')
+
+      const wrapper = await mountContainer()
+      await nextTick()
+
+      expect(areaWidth(wrapper, 'main-area')).toBe('100%')
+      expect(areaStyle(wrapper, 'main-area')).toContain('--content-max-w: 100%')
+    } finally {
+      restoreRect()
+    }
+  }, 60_000)
+
+  it('有 drawer（默认）：main = calc(100% - 50% - 4px) + margin 0 贴左 + 内容列恒撑满，drawer = 50%，handle 挂载', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 's-width-open')
     openDrawerTab('git')
@@ -509,7 +543,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     await nextTick()
 
     expect(areaWidth(wrapper, 'main-area')).toBe('calc(100% - 50% - 4px)')
-    // split：main 贴左（drawer 贴右），margin 0；--content-max-w 两态恒 100%（开合无值切换跳变）
+    // split：main 贴左（drawer 贴右），margin 0；--content-max-w 恒撑满（panel 被挤窄后不按比例收）
     const mainStyle = areaStyle(wrapper, 'main-area')
     expect(mainStyle).toContain('margin-left: 0')
     expect(mainStyle).toContain('--content-max-w: 100%')
@@ -534,7 +568,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     await handle.trigger('pointerdown', { pointerId: 1 })
     await nextTick()
     // 拖动期间 transition 移除（跟手，不滞后）+ data-state=drag（高亮反馈）
-    expect(wrapper.find('[data-testid="main-area"]').classes().join(' ')).not.toContain('transition-[width,margin]')
+    expect(wrapper.find('[data-testid="main-area"]').classes().join(' ')).not.toContain('transition-[width]')
     expect(handle.attributes('data-state')).toBe('drag')
 
     // 指针移到 x=700 → drawer 宽 = (1000-700)/1000 = 30%
@@ -554,7 +588,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     await handle.trigger('pointerup', { pointerId: 1 })
     await nextTick()
     expect(localStorage.getItem('taiji:drawer-width')).toBe('20')
-    expect(wrapper.find('[data-testid="main-area"]').classes().join(' ')).toContain('transition-[width,margin]')
+    expect(wrapper.find('[data-testid="main-area"]').classes().join(' ')).toContain('transition-[width]')
     expect(handle.attributes('data-state')).toBeUndefined()
   }, 60_000)
 
@@ -617,17 +651,18 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     expect(areaWidth(wrapper, 'drawer-area')).toBe('60%')
   }, 60_000)
 
-  it('开合切换：drawer 打开后 main 从撑满动画到拆分比例（style 逐帧驱动，断言终态）', async () => {
+  it('开合切换：drawer 打开后 main 从撑满（内容列 60%）动画到拆分比例（内容列恒撑满），断言终态', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 's-width-toggle')
 
     const wrapper = await mountContainer()
     await nextTick()
+    // standalone：卡撑满（未 stub rect → 宽度未测得，内容列走纯比例分支 60%）
     expect(areaWidth(wrapper, 'main-area')).toBe('100%')
-    expect(areaStyle(wrapper, 'main-area')).toContain('margin-left: 0%')
-    expect(areaStyle(wrapper, 'main-area')).toContain('margin-right: 0%')
+    expect(areaStyle(wrapper, 'main-area')).toContain('margin-left: 0')
+    expect(areaStyle(wrapper, 'main-area')).toContain('--content-max-w: 60%')
 
-    // 打开 drawer：main 收缩到 50% 拆分（居中 margin 归 0 贴左）
+    // 打开 drawer：main 收缩到拆分比例（margin 恒 0 贴左），内容列改撑满
     // [HISTORICAL] 用例原名含「+ layout 事件派发」：taiji:splitter-layout 已随消费方
     // useBrowserRectSync 迁浮层删除而整体退役（终态同步 2026-10-03，§7.3 不造无人读的事件），
     // 派发断言随行为删除——全仓零监听方后保留派发断言等于锁死死事件。
@@ -635,6 +670,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     await nextTick()
     expect(areaWidth(wrapper, 'main-area')).toBe('calc(100% - 50% - 4px)')
     expect(areaStyle(wrapper, 'main-area')).toContain('margin-left: 0')
+    expect(areaStyle(wrapper, 'main-area')).toContain('--content-max-w: 100%')
     expect(areaWidth(wrapper, 'drawer-area')).toBe('50%')
   }, 60_000)
 })

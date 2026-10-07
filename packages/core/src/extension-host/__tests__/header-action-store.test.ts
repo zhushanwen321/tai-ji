@@ -44,6 +44,15 @@ describe('HeaderActionStore', () => {
       expect(entry!.badge).toBeUndefined()
       expect(entry!.tooltip).toBeUndefined()
       expect(entry!.disabled).toBeUndefined()
+      expect(entry!.hidden).toBeUndefined()
+    })
+
+    it('hidden 字段随帧透传（true/false 均入 store，缺省 undefined）', () => {
+      const { bus, store } = makeStore()
+      bus.emit({ kind: 'plugin:headerActionUpdate', headerAction: { pluginId: 'p1', headerActionId: 'a1', sessionId: 's1', hidden: true } })
+      expect(store.get('s1', 'a1')!.hidden).toBe(true)
+      bus.emit({ kind: 'plugin:headerActionUpdate', headerAction: { pluginId: 'p1', headerActionId: 'a1', sessionId: 's1', hidden: false } })
+      expect(store.get('s1', 'a1')!.hidden).toBe(false)
     })
   })
 
@@ -70,6 +79,14 @@ describe('HeaderActionStore', () => {
       store.set('s1', 'a1', { pluginId: 'p1', badge: '3' })
       store.set('s1', 'a1', { pluginId: 'p1', badge: '2' })
       expect(store.get('s1', 'a1')!.badge).toBe('2')
+    })
+
+    it('set 覆盖语义对 hidden 同样成立（帧缺 hidden → 条目 hidden 归 undefined）', () => {
+      const { store } = makeStore()
+      store.set('s1', 'a1', { pluginId: 'p1', hidden: true })
+      expect(store.get('s1', 'a1')!.hidden).toBe(true)
+      store.set('s1', 'a1', { pluginId: 'p1' })
+      expect(store.get('s1', 'a1')!.hidden).toBeUndefined()
     })
 
     it('未写入的键 get 返回 undefined（声明侧静态形状不在本 store）', () => {

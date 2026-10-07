@@ -81,19 +81,17 @@ export const PLUGIN_RPC_METHODS = [
   // tools 域（tool-api.ts，2 个）
   'plugin.tools.register',
   'plugin.tools.unregister',
-  // ui 域（api/ui-api.ts，9 个——uiRequestExpired 是 Worker→host 到期取消 notification
+  // ui 域（api/ui-api.ts，7 个——uiRequestExpired 是 Worker→host 到期取消 notification
   // （D2），复用无 id dispatch 通路故也在注册表内；未被任何能力映射覆盖 → sandbox
   // 不可授权（fail-closed），到期取消由 queue 防泄漏兜底收尾，trusted 不受影响。
-  // showModal/hideModal/updateHeaderAction 为 headerAction/modal 点位的命令式 API
-  // （handler 随 U5 落地）：ui 面今天无可声明能力词 → sandbox 永久 fail-closed（已知登记））
+  // updateHeaderAction 为 headerAction 点位的命令式 API（handler 随 U5 落地）：
+  // ui 面今天无可声明能力词 → sandbox 永久 fail-closed（已知登记））
   'plugin.ui.showSelect',
   'plugin.ui.showConfirm',
   'plugin.ui.showInput',
   'plugin.ui.notify',
   'plugin.ui.updateStatusBarItem',
   'plugin.ui.uiRequestExpired',
-  'plugin.ui.showModal',
-  'plugin.ui.hideModal',
   'plugin.ui.updateHeaderAction',
   // views 域（api/views-api.ts，2 个）
   'plugin.views.update',

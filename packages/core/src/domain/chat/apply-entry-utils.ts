@@ -147,3 +147,48 @@ export function normalizePiToolResult(raw: unknown): NormalizedToolResult {
 
   return { output, outputRaw, images }
 }
+
+// ── 归一 + 截断的合并派生（tool_call_end live 帧双腿共享的单一计算点）──────────────
+
+/** 归一（normalizePiToolResult）+ 64KB 截断（truncateEntryToolOutput）一次算清的字段包。 */
+export interface ToolResultOutputs {
+  output: { text: string; truncated: boolean }
+  outputRaw: { text: string; truncated: boolean } | undefined
+  images: Array<{ data: string; mimeType: string }> | undefined
+}
+
+/**
+ * 归一 + 64KB 截断按 body 引用 memo 后一次算清（perf：tool_call_end 双腿单次归一）。
+ *
+ * message.tool_call_end 一帧把同一 toolResult body 喂两处：reducer 腿
+ * （applyEntryFrame → fillHostToolCall → computeToolCallFill）与 live overlay 腿
+ * （registry deriveToolCallEndOverlay）。两腿各自 inline 归一 + 截断时，同一 MB 级
+ * output 在 WS 回调同步段重复全文正则扫描 + 重复 UTF-8 encode（单次 encode ≈ 1-2ms，
+ * 见 truncate-tool-output.ts）。本函数以 body 对象引用为键 memo 产物：两腿持同一
+ * entry.message 引用时第二腿命中，全文扫描与 encode 各只发生一次。
+ *
+ * 正确性前提 =「引用同 ⇒ 内容同」：pi entry body 在本模块群内不可变（reducer 纯度契约
+ * 「不 mutate 输入 entry」），与登记表 #58 派生缓存族同款归属语义。对 memo 无关的路径
+ * 天然无行为差异：replay（replayEntries）逐条喂入的 body 引用互不相同（文件 lift 产物 /
+ * adapter 逐帧构造），缓存恒 miss，逐条自算——与不经 memo 的直接计算产物逐字节一致。
+ * WeakMap 条目随 body 引用 GC 自动回收，无清理义务。
+ */
+// @data-owner #58 —— chat 对话流渲染派生 memo ③（toolResult body 引用 → 归一截断产物，
+// 纯派生可随时丢弃重建、无独立生命周期；条目 ③ 成员扩行登记随本改动批次补）
+const toolResultOutputsMemo = new WeakMap<object, ToolResultOutputs>()
+
+export function deriveToolResultOutputs(body: PiMessageBody): ToolResultOutputs {
+  // 防御：运行时畸形帧的 body 可能非对象（WeakMap.set 非对象键抛 TypeError）——
+  // 非对象键跳过 memo（归一本身对 string/null 分支有既定语义，照常计算）。
+  const memoKey: object | undefined = typeof body === 'object' && body !== null ? body : undefined
+  const hit = memoKey !== undefined ? toolResultOutputsMemo.get(memoKey) : undefined
+  if (hit !== undefined) return hit
+  const { output, outputRaw, images } = normalizePiToolResult(body)
+  const derived: ToolResultOutputs = {
+    output: truncateEntryToolOutput(output),
+    outputRaw: outputRaw !== undefined ? truncateEntryToolOutput(outputRaw) : undefined,
+    images,
+  }
+  if (memoKey !== undefined) toolResultOutputsMemo.set(memoKey, derived)
+  return derived
+}

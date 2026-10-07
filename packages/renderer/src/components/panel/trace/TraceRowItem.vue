@@ -12,7 +12,7 @@
     - MALFORMED headline 走 i18n（core headline 是数据提取，损坏行文案归 UI 层）。
   -->
   <div
-    class="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-[5px] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-surface-2"
+    class="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-[5px] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-surface-2"
     :class="[
       row.shadowed ? 'opacity-40 hover:opacity-75' : '',
       selected ? 'bg-surface-hover hover:bg-surface-hover' : '',

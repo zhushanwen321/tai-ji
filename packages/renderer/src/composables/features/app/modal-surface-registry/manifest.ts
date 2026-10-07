@@ -31,7 +31,7 @@ import type { ModalSurfaceFlags } from '@taiji/core/domain/overlay'
 
 /** §6.7 登记表家族行（同家族多表面共用旗标组） */
 export type ModalSurfaceFamily =
-  /** 全屏阻塞模态族（token z 形）：SettingsModal / PluginModalHost / AsyncErrorFallback overlay 态 */
+  /** 全屏阻塞模态族（token z 形）：SettingsModal / AsyncErrorFallback overlay 态 */
   | 'modal-token-z'
   /** 全屏阻塞模态族（裸数字 z 形）：SearchModal / DialogContent 确认框族（遮罩+面板） */
   | 'modal-dialog'
@@ -113,15 +113,6 @@ export const MODAL_SURFACE_MANIFEST = [
       { file: 'packages/renderer/src/components/settings/SettingsModal.vue', form: 'class-token', literal: 'var(--z-modal)', count: 1 },
     ],
     basis: '§6.7 表：全屏阻塞面；既有 window 级 Esc 兜底（defaultPrevented 先检后 preventDefault）',
-  },
-  {
-    id: 'plugin-modal-host',
-    family: 'modal-token-z',
-    kind: 'member',
-    zAnchors: [
-      { file: 'packages/renderer/src/components/extension/PluginModalHost.vue', form: 'class-token', literal: 'var(--z-modal)', count: 1 },
-    ],
-    basis: '§6.7 表：全屏阻塞面（插件 modal 挂载面）',
   },
   {
     id: 'async-error-fallback-overlay',

@@ -206,20 +206,61 @@ interface ScanLineState {
   poisonedFrom: number | null
 }
 
-/** 行枚举：{start, text}（text 不含行尾 \n） */
-function enumerateLines(content: string): { start: number; text: string }[] {
-  const lines: { start: number; text: string }[] = []
-  let s = 0
-  while (s < content.length) {
-    const nl = content.indexOf('\n', s)
-    if (nl === -1) {
-      lines.push({ start: s, text: content.slice(s) })
-      break
-    }
-    lines.push({ start: s, text: content.slice(s, nl) })
-    s = nl + 1
+/**
+ * 行级块结构扫描：单次正向遍历维护 fence 配对 / `$$` 数学块奇偶 / 段落开闭 / 列表上下文，
+ * 在每个行首记录「前缀是否全闭合」，再从末尾反向取第一个同时满足三条件的位置。
+ *
+ * 三条件（08 §3.3.3）：① 行首锚点；② 前段全闭合（含段落闭合：空行或自成块行后缘；
+ * fence/数学块配对完整）；③ tail 是单一独立开放块（拒绝缩进续行 / 前缀列表续并 /
+ * setext 下划线等「续行」形态）。
+ *
+ * 文档级拒绝（优先于三条件）：文档 fence 外任意位置含链接引用定义行（hasLinkRefDef）
+ * → boundary=null 走 fallback-full。引用解析是文档级的，任何切分都会让 [label] 链接化
+ * 与全量渲染发散（定义侧与引用侧无论谁进前缀/尾段都丢另一半），且前缀缓存引用恒等
+ * 使发散**持久化**（永不自愈）。
+ *
+ * 行枚举用游标遍历（streaming 期间每帧调用，60 帧/秒）：不物化行数组与每行 {start,text}
+ * 对象，每行 slice 后立即推进状态机——分配量从「全文行对象 + 全文行串」降到「全文行串」。
+ * 候选 offset 与物化数组版逐候选等价：行终止换行在 nl 时，非末行候选 = nl+1 =
+ * 下一行行首；末行带终止换行时 nl 必为文档末字符（否则枚举会继续），nl+1 =
+ * content.length = 原尾随候选 offset；末行无换行（nl=-1）不产候选。特征锚定测试锁
+ * 两侧枚举语义（尾随换行枚举等价组）。
+ *
+ * 纯函数：同输入同输出、零副作用、不触碰 markdown-it。
+ */
+function scanMarkdownBlocks(content: string): BlockScan {
+  if (content.trim() === '') return { boundary: 0, openFence: null }
+
+  // 候选边界 = 各行行首（+ 末尾 \n 后的文档尾行首）。candidate 0 = 空前缀（恒闭合）。
+  const candidates: BoundaryCandidate[] = [{ offset: 0, closed: true, listOpen: false }]
+  const st: ScanLineState = {
+    fence: null,
+    mathOdd: false,
+    paraOpen: false,
+    listOpen: false,
+    hasLinkRefDef: false,
+    html: null,
+    poisonedFrom: null,
   }
-  return lines
+
+  let cursor = 0
+  while (cursor < content.length) {
+    const nl = content.indexOf('\n', cursor)
+    if (nl === -1) {
+      advanceLine(content.slice(cursor), cursor, st)
+      break // 末行无终止换行：不产候选
+    }
+    advanceLine(content.slice(cursor, nl), cursor, st)
+    candidates.push({ offset: nl + 1, closed: isClosedAt(st), listOpen: st.listOpen })
+    cursor = nl + 1
+  }
+
+  const openFence = toOpenFence(st.fence)
+
+  // 含链接引用定义的文档无合法边界（见 ScanLineState.hasLinkRefDef 注释）——唯一保守出口 fallback-full
+  if (st.hasLinkRefDef) return { boundary: null, openFence }
+
+  return { boundary: pickLatestBoundary(content, candidates, st.poisonedFrom), openFence }
 }
 
 /** fence 开行识别：返回 null = 不是 fence 开行（无标记 / 缩进 >3 / 反引号 fence info 含反引号） */
@@ -429,67 +470,6 @@ function pickLatestBoundary(
     return c.offset
   }
   return null
-}
-
-/**
- * 行级块结构扫描：单次正向遍历维护 fence 配对 / `$$` 数学块奇偶 / 段落开闭 / 列表上下文，
- * 在每个行首记录「前缀是否全闭合」，再从末尾反向取第一个同时满足三条件的位置。
- *
- * 三条件（08 §3.3.3）：① 行首锚点；② 前段全闭合（含段落闭合：空行或自成块行后缘；
- * fence/数学块配对完整）；③ tail 是单一独立开放块（拒绝缩进续行 / 前缀列表续并 /
- * setext 下划线等「续行」形态）。
- *
- * 文档级拒绝（优先于三条件）：文档 fence 外任意位置含链接引用定义行（hasLinkRefDef）
- * → boundary=null 走 fallback-full。引用解析是文档级的，任何切分都会让 [label] 链接化
- * 与全量渲染发散（定义侧与引用侧无论谁进前缀/尾段都丢另一半），且前缀缓存引用恒等
- * 使发散**持久化**（永不自愈）。
- *
- * 纯函数：同输入同输出、零副作用、不触碰 markdown-it。
- */
-function scanMarkdownBlocks(content: string): BlockScan {
-  if (content.trim() === '') return { boundary: 0, openFence: null }
-
-  const lines = enumerateLines(content)
-
-  // 候选边界 = 各行行首（+ 末尾 \n 后的文档尾行首）。candidate 0 = 空前缀（恒闭合）。
-  const candidates: BoundaryCandidate[] = [{ offset: 0, closed: true, listOpen: false }]
-  const st: ScanLineState = {
-    fence: null,
-    mathOdd: false,
-    paraOpen: false,
-    listOpen: false,
-    hasLinkRefDef: false,
-    html: null,
-    poisonedFrom: null,
-  }
-
-  for (let i = 0; i < lines.length; i++) {
-    const { start, text } = lines[i]
-    advanceLine(text, start, st)
-
-    // 本行结束后的状态 → 下一行行首的候选（末行的“下一行首”仅在文档以 \n 结尾时存在）
-    const isLast = i === lines.length - 1
-    if (!isLast) {
-      candidates.push({
-        offset: lines[i + 1].start,
-        closed: isClosedAt(st),
-        listOpen: st.listOpen,
-      })
-    } else if (content.endsWith('\n')) {
-      candidates.push({
-        offset: content.length,
-        closed: isClosedAt(st),
-        listOpen: st.listOpen,
-      })
-    }
-  }
-
-  const openFence = toOpenFence(st.fence)
-
-  // 含链接引用定义的文档无合法边界（见 ScanLineState.hasLinkRefDef 注释）——唯一保守出口 fallback-full
-  if (st.hasLinkRefDef) return { boundary: null, openFence }
-
-  return { boundary: pickLatestBoundary(content, candidates, st.poisonedFrom), openFence }
 }
 
 /**

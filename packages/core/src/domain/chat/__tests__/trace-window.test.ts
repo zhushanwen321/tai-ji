@@ -2,13 +2,16 @@
  * trace-window 纯函数单测（streaming-trace-window::core wave）。
  *
  * 覆盖 TC1-TC7 共 7 类场景 + design-review G1（非末位 text 不收集）+ G2（streaming assistant
- * 末尾多非 text 块的去重）。每条断言 visible 的 flatIndex 序列 + compactedCount + failedCount 精确值。
+ * 末尾多非 text 块的去重）+ TC-edge 边界态（0 streaming assistant 窗口稳定性）+ D1
+ * （ui-signal-density §3.3）groupConsecutiveBash 分组规则。TC/G1/G2/TC-edge 用例断言
+ * visible 的 flatIndex 序列 + compactedCount + failedCount 精确值；D1 用例断言分组输出
+ * units 的形态、组头三条口径与段首锚定 key。
  *
  * 运行：cd packages/core && npx vitest run src/domain/chat/__tests__/trace-window.test.ts
  */
 import { describe, it, expect } from 'vitest'
-import { flattenTurnBlocks, computeTraceWindow, W } from '../trace-window'
-import type { FlatBlock } from '../trace-window'
+import { flattenTurnBlocks, computeTraceWindow, groupConsecutiveBash, isBashGroupBlock, W } from '../trace-window'
+import type { BashGroupBlock, FlatBlock, TraceRenderUnit } from '../trace-window'
 import type { Message, ToolCall, ThinkingBlock } from '@taiji/shared'
 
 // ── fixture 构造 helper ───────────────────────────────────────────────
@@ -29,6 +32,7 @@ function makeTool(over: Partial<ToolCall> = {}): ToolCall {
     input: over.input ?? {},
     status: over.status ?? 'completed',
     startTime: over.startTime ?? 0,
+    ...over,
   }
 }
 
@@ -195,9 +199,9 @@ describe('TC4 多 assistant 混合（2 assistant: complete + streaming）', () =
     expect(flat[4].block.kind).toBe('thinking')
   })
 
-  it('takeover=false, W=6: visible=[0,1,2,3,4]，进行中块(fb4)+末位text(fb2)+全部已完成过程块(fb0,fb1,fb3)', () => {
+  it('takeover=false, W=4: visible=[0,1,2,3,4]，进行中块(fb4)+末位text(fb2)+全部已完成过程块(fb0,fb1,fb3)', () => {
     const res = computeTraceWindow(flat, { windowSize: W, takeover: false })
-    // ①末位text=fb2(2) ②进行中=a2末尾非text=fb4(4) ③已完成过程块池=[fb0,fb1,fb3](3，W=6全收)
+    // ①末位text=fb2(2) ②进行中=a2末尾非text=fb4(4) ③已完成过程块池=[fb0,fb1,fb3](3，W=4全收)
     expect(flatIndices(res.visible)).toEqual([0, 1, 2, 3, 4])
     expect(res.compactedCount).toBe(0) // ③池3 − visible内③=3
     expect(res.failedCount).toBe(0)
@@ -231,9 +235,10 @@ describe('TC4 多 assistant 混合（2 assistant: complete + streaming）', () =
   })
 })
 
-// ── TC5：窗口边界 W=8（7 / 8 / 9 个 completed tool） ──────────────────
+// ── TC5：窗口边界 W=4（W 6→4（ui-signal-density 候选 E）后三档期望重算：
+//    ③池 5/6/7 个 completed tool → 窗口取末 4，收编 1/2/3） ──────────────
 
-describe('TC5 窗口边界 W=6', () => {
+describe('TC5 窗口边界 W=4', () => {
   function makeNCompletedTools(n: number): Message {
     const tools: ToolCall[] = []
     const blocks: Array<{ type: 'toolCall'; refId: string }> = []
@@ -245,27 +250,27 @@ describe('TC5 窗口边界 W=6', () => {
     return makeAssistant({ id: 'a1', status: 'complete', tools, blocks })
   }
 
-  it('5 个 completed tool: visible=[0..4], compactedCount=0', () => {
+  it('5 个 completed tool: visible=[1..4], compactedCount=1（收编flatIndex0）', () => {
     const flat = flattenTurnBlocks([makeNCompletedTools(5)])
     const res = computeTraceWindow(flat, { windowSize: W, takeover: false })
-    expect(flatIndices(res.visible)).toEqual([0, 1, 2, 3, 4])
-    expect(res.compactedCount).toBe(0)
+    expect(flatIndices(res.visible)).toEqual([1, 2, 3, 4])
+    expect(res.compactedCount).toBe(1)
     expect(res.failedCount).toBe(0)
   })
 
-  it('6 个 completed tool: visible=[0..5], compactedCount=0', () => {
+  it('6 个 completed tool: visible=[2..5], compactedCount=2（收编flatIndex0,1）', () => {
     const flat = flattenTurnBlocks([makeNCompletedTools(6)])
     const res = computeTraceWindow(flat, { windowSize: W, takeover: false })
-    expect(flatIndices(res.visible)).toEqual([0, 1, 2, 3, 4, 5])
-    expect(res.compactedCount).toBe(0)
+    expect(flatIndices(res.visible)).toEqual([2, 3, 4, 5])
+    expect(res.compactedCount).toBe(2)
     expect(res.failedCount).toBe(0)
   })
 
-  it('7 个 completed tool: visible=[1..6]（最近6个=flatIndex最大者）, compactedCount=1（收编flatIndex0）', () => {
+  it('7 个 completed tool: visible=[3..6]（最近4个=flatIndex最大者）, compactedCount=3（收编flatIndex0,1,2）', () => {
     const flat = flattenTurnBlocks([makeNCompletedTools(7)])
     const res = computeTraceWindow(flat, { windowSize: W, takeover: false })
-    expect(flatIndices(res.visible)).toEqual([1, 2, 3, 4, 5, 6])
-    expect(res.compactedCount).toBe(1)
+    expect(flatIndices(res.visible)).toEqual([3, 4, 5, 6])
+    expect(res.compactedCount).toBe(3)
     expect(res.failedCount).toBe(0)
   })
 })
@@ -484,6 +489,287 @@ describe('TC-edge：边界态（0 streaming assistant）窗口稳定性', () => 
   })
 })
 
+// ── D1（ui-signal-density §3.3）：groupConsecutiveBash 连续 bash 折叠 ──────────
+// 覆盖 U2 拆分清单的分组规则面：空输入恒等 / 单个不成组 / 连续多个才成组 / 非 bash 打断 /
+// running 入组（D1 语义变更：组资格只看工具类型不看状态）/ hasRunning 两态 / 计数三条口径 /
+// 段首锚定 key（v8 run head + v9 契约缝①②③）/ 纯函数不修改入参。
+
+/** D1 组测试用：从 assistant 列表拍平后直接取全量（路径 C 形态）或窗口切片（路径 B 形态）后分组。 */
+function groupOf(flat: FlatBlock[], windowSize?: number): TraceRenderUnit[] {
+  const visible = windowSize === undefined ? flat : computeTraceWindow(flat, { windowSize, takeover: false }).visible
+  return groupConsecutiveBash(visible, flat)
+}
+
+const isGroup = isBashGroupBlock // 谓词单点在 trace-window 导出处（'kind' in 收窄，FlatBlock 无 kind 字段）
+
+describe('D1 groupConsecutiveBash: 分组规则', () => {
+  it('空输入恒等（trivial 缝显式登记，U2）', () => {
+    expect(groupConsecutiveBash([], [])).toEqual([])
+  })
+
+  it('单个 bash 不成组（保持独立 FlatBlock）', () => {
+    const flat = flattenTurnBlocks([
+      makeAssistant({
+        id: 'a1',
+        tools: [makeTool({ id: 'tc1' })],
+        blocks: [{ type: 'toolCall', refId: 'tc1' }],
+      }),
+    ])
+    const units = groupOf(flat)
+    expect(units).toHaveLength(1)
+    expect(isGroup(units[0])).toBe(false)
+  })
+
+  it('连续 ≥2 个 bash 成一组；中间被非 bash 打断则拆成多组', () => {
+    // [bash bash read bash bash] → 组×2 + read + 组×2
+    const tools = [
+      makeTool({ id: 'b0' }),
+      makeTool({ id: 'b1' }),
+      makeTool({ id: 'r2', toolName: 'read', input: { path: '/x' } }),
+      makeTool({ id: 'b3' }),
+      makeTool({ id: 'b4' }),
+    ]
+    const flat = flattenTurnBlocks([
+      makeAssistant({
+        id: 'a1',
+        tools,
+        blocks: tools.map((t) => ({ type: 'toolCall' as const, refId: t.id })),
+      }),
+    ])
+    const units = groupOf(flat)
+    expect(units).toHaveLength(3) // [组(b0,b1), read, 组(b3,b4)]
+    expect(isGroup(units[0])).toBe(true)
+    expect(isGroup(units[1])).toBe(false) // read 独立行（R5：只有连续 bash 折叠）
+    expect(isGroup(units[2])).toBe(true)
+    const g0 = units[0] as BashGroupBlock
+    const g2 = units[2] as BashGroupBlock
+    expect(g0.members.map((m) => m.flatIndex)).toEqual([0, 1])
+    expect(g2.members.map((m) => m.flatIndex)).toEqual([3, 4])
+  })
+
+  it('thinking / text 同样打断成组（跨非工具块不成组，不采用④）', () => {
+    const th = makeThinking({ id: 't1' })
+    const tools = [makeTool({ id: 'b0' }), makeTool({ id: 'b1' })]
+    const flat = flattenTurnBlocks([
+      makeAssistant({
+        id: 'a1',
+        thinkingBlocks: [th],
+        tools,
+        blocks: [
+          { type: 'toolCall', refId: 'b0' },
+          { type: 'thinking', refId: 't1' },
+          { type: 'toolCall', refId: 'b1' },
+        ],
+      }),
+    ])
+    const units = groupOf(flat)
+    expect(units.filter(isGroup)).toHaveLength(0)
+  })
+
+  it('running bash 入组（D1 语义变更：组资格只看工具类型不看状态），段尾 running 并入同组', () => {
+    // [bash✓ bash✓ bash▶running] → 单组 ×3（members 含 running 块，无独立 running 行）
+    const tools = [
+      makeTool({ id: 'b0' }),
+      makeTool({ id: 'b1' }),
+      makeTool({ id: 'b2', status: 'running' }),
+    ]
+    const a1 = makeAssistant({
+      id: 'a1',
+      status: 'streaming',
+      tools,
+      blocks: tools.map((t) => ({ type: 'toolCall' as const, refId: t.id })),
+    })
+    const flat = flattenTurnBlocks([a1])
+    const units = groupOf(flat)
+    expect(units).toHaveLength(1)
+    const g = units[0] as BashGroupBlock
+    expect(isGroup(g)).toBe(true)
+    expect(g.header.count).toBe(3)
+    expect(g.members.map((m) => m.flatIndex)).toEqual([0, 1, 2])
+    expect(g.members.some((m) => (m.block.ref as ToolCall).status === 'running')).toBe(true)
+    expect(g.hasRunning).toBe(true)
+  })
+
+  it('hasRunning 两态：组含 running → true；全完成 → false', () => {
+    const mk = (statuses: ToolCall['status'][]) => {
+      const tools = statuses.map((s, i) => makeTool({ id: `b${i}`, status: s }))
+      return groupOf(
+        flattenTurnBlocks([
+          makeAssistant({
+            id: 'a1',
+            status: statuses.includes('running') ? 'streaming' : 'complete',
+            tools,
+            blocks: tools.map((t) => ({ type: 'toolCall' as const, refId: t.id })),
+          }),
+        ]),
+      )[0] as BashGroupBlock
+    }
+    expect(mk(['completed', 'running', 'completed']).hasRunning).toBe(true)
+    expect(mk(['completed', 'completed']).hasRunning).toBe(false)
+  })
+
+  it('计数三条口径：count=成员数、durationMs=Σ(endTime−startTime)、failedCount=成员内 error 数', () => {
+    const tools = [
+      makeTool({ id: 'b0', startTime: 0, endTime: 1500 }),
+      makeTool({ id: 'b1', status: 'error', startTime: 2000, endTime: 3500 }),
+      makeTool({ id: 'b2', startTime: 4000 }), // endTime 缺失（end_not_received）→ 按 0 计
+    ]
+    const flat = flattenTurnBlocks([
+      makeAssistant({
+        id: 'a1',
+        tools,
+        blocks: tools.map((t) => ({ type: 'toolCall' as const, refId: t.id })),
+      }),
+    ])
+    const units = groupOf(flat)
+    expect(units).toHaveLength(1)
+    const g = units[0] as BashGroupBlock
+    expect(g.header.count).toBe(3)
+    expect(g.header.durationMs).toBe(1500 + 1500)
+    expect(g.header.failedCount).toBe(1)
+  })
+
+  it('路径 B 假邻接（v9 契约缝②）：error 块被 ③池剔除后两段合并、failed 块不入组内 M', () => {
+    // [bash✓ bash✗ bash✓ bash✓]：W=4 窗口下 error 被 ③池剔除 → 可见序列 [✓ ✓ ✓]（3 个）
+    // 分组输入是可见派生序列 → 假邻接合并为一组 ×3，组内 M=0（全局 failedCount 口径归 TraceCompactorRow）
+    const tools = [
+      makeTool({ id: 'b0' }),
+      makeTool({ id: 'b1', status: 'error' }),
+      makeTool({ id: 'b2' }),
+      makeTool({ id: 'b3' }),
+    ]
+    const flat = flattenTurnBlocks([
+      makeAssistant({
+        id: 'a1',
+        tools,
+        blocks: tools.map((t) => ({ type: 'toolCall' as const, refId: t.id })),
+      }),
+    ])
+    const res = computeTraceWindow(flat, { windowSize: W, takeover: false })
+    expect(res.failedCount).toBe(1) // 全局口径：error 在收编区计数
+    const units = groupOf(flat, W)
+    expect(units).toHaveLength(1)
+    const g = units[0] as BashGroupBlock
+    expect(isGroup(g)).toBe(true)
+    expect(g.header.count).toBe(3) // 组头 ×N 含两段成员（假邻接合并）
+    expect(g.header.failedCount).toBe(0) // 组内 M 不含被剔除的 failed 块（两口径分账）
+  })
+
+  it('路径 C / takeover 全量序列：error bash 在序列中 → 入组为失败成员（V8 组行尾报失败）', () => {
+    const tools = [
+      makeTool({ id: 'b0' }),
+      makeTool({ id: 'b1', status: 'error' }),
+      makeTool({ id: 'b2' }),
+    ]
+    const flat = flattenTurnBlocks([
+      makeAssistant({
+        id: 'a1',
+        tools,
+        blocks: tools.map((t) => ({ type: 'toolCall' as const, refId: t.id })),
+      }),
+    ])
+    const units = groupOf(flat) // 全量（无窗口）
+    expect(units).toHaveLength(1)
+    const g = units[0] as BashGroupBlock
+    expect(g.header.count).toBe(3)
+    expect(g.header.failedCount).toBe(1)
+    // 失败成员仍在 members（V8「失败 bash 成员行挂载即默认展开」的数据前提）
+    expect(g.members.some((m) => (m.block.ref as ToolCall).status === 'error')).toBe(true)
+  })
+
+  it('key 段首锚定（v8 run head）：窗口右滑段首成员被收编出窗后 headFlatIndex 不变（v9 契约缝①）', () => {
+    // 5 个连续 bash + running：T1 窗口 = b1..b4 + r5（D1 语义变更：running 入组）；
+    // T2 再完成一个、新 running 启动（窗口右滑）→ 窗口 = b2..b5 + r6，members[0] 从 b1 变 b2，
+    // 但首成员所属段段首仍 = 0 → key 稳定（remount 不发生的前提）
+    const make = (n: number, runningId: string | null) => {
+      const tools: ToolCall[] = []
+      const blocks: Array<{ type: 'toolCall'; refId: string }> = []
+      for (let i = 0; i < n; i++) {
+        tools.push(makeTool({ id: `b${i}`, startTime: i * 100, endTime: i * 100 + 50 }))
+        blocks.push({ type: 'toolCall', refId: `b${i}` })
+      }
+      if (runningId) {
+        tools.push(makeTool({ id: runningId, status: 'running' }))
+        blocks.push({ type: 'toolCall', refId: runningId })
+      }
+      return makeAssistant({
+        id: 'a1',
+        status: 'streaming',
+        tools,
+        blocks,
+      })
+    }
+    const t1Units = groupOf(flattenTurnBlocks([make(5, 'r5')]), W)
+    const t2Units = groupOf(flattenTurnBlocks([make(6, 'r6')]), W)
+    const g1 = t1Units.find(isGroup) as BashGroupBlock
+    const g2 = t2Units.find(isGroup) as BashGroupBlock
+    // D1 语义变更（running 入组）：段尾 running 成员随窗口内的已完成成员并入同组
+    expect(g1.members.map((m) => m.flatIndex)).toEqual([1, 2, 3, 4, 5])
+    expect(g2.members.map((m) => m.flatIndex)).toEqual([2, 3, 4, 5, 6])
+    expect(g1.headFlatIndex).toBe(0)
+    expect(g2.headFlatIndex).toBe(0) // members[0] 变了，段首锚不变 → :key 稳定
+  })
+
+  it('key 段首锚定：members[0] 位于段中（段首已被收编出窗）时回查到真段首', () => {
+    // flatBlocks 全量段 [b0..b4]，窗口只留 b2..b4 → members[0]=b2，段首 = b0（flatIndex 0）
+    const tools = [0, 1, 2, 3, 4].map((i) => makeTool({ id: `b${i}` }))
+    const flat = flattenTurnBlocks([
+      makeAssistant({
+        id: 'a1',
+        tools,
+        blocks: tools.map((t) => ({ type: 'toolCall' as const, refId: t.id })),
+      }),
+    ])
+    const visible = computeTraceWindow(flat, { windowSize: 3, takeover: false }).visible
+    const units = groupConsecutiveBash(visible, flat)
+    const g = units.find(isGroup) as BashGroupBlock
+    expect(g.members.map((m) => m.flatIndex)).toEqual([2, 3, 4])
+    expect(g.headFlatIndex).toBe(0)
+  })
+
+  it('纯函数不修改入参（防御契约）：visible 与 flatBlocks 引用内容不变', () => {
+    const tools = [makeTool({ id: 'b0' }), makeTool({ id: 'b1' })]
+    const flat = flattenTurnBlocks([
+      makeAssistant({
+        id: 'a1',
+        tools,
+        blocks: tools.map((t) => ({ type: 'toolCall' as const, refId: t.id })),
+      }),
+    ])
+    const flatSnapshot = JSON.stringify(flat)
+    groupConsecutiveBash(flat, flat)
+    expect(JSON.stringify(flat)).toBe(flatSnapshot)
+  })
+
+  it('输出保持 flatIndex 升序（组块排序位置 = members[0].flatIndex）', () => {
+    // [thinking bash bash text] → thinking(0) 组(1) text(3)
+    const th = makeThinking({ id: 't1' })
+    const tools = [makeTool({ id: 'b1' }), makeTool({ id: 'b2' })]
+    const flat = flattenTurnBlocks([
+      makeAssistant({
+        id: 'a1',
+        content: 'done',
+        thinkingBlocks: [th],
+        tools,
+        blocks: [
+          { type: 'thinking', refId: 't1' },
+          { type: 'toolCall', refId: 'b1' },
+          { type: 'toolCall', refId: 'b2' },
+          { type: 'text', refId: 'text' },
+        ],
+      }),
+    ])
+    const units = groupOf(flat)
+    const positions = units.map((u) => (isGroup(u) ? u.members[0].flatIndex : u.flatIndex))
+    expect(positions).toEqual([...positions].sort((a, b) => a - b))
+    expect(units.map((u) => (isGroup(u) ? 'group' : u.block.kind))).toEqual([
+      'thinking',
+      'group',
+      'text',
+    ])
+  })
+})
+
 // ── [ADR-0122 断连未确认终局] 纯 error 气泡的 text 块宿主保证 ──────────────────
 // content 空 + error 非空的 error 消息（秒败 turn / 断连显式失败上报）必须产出 text 块：
 // Block 的 error danger 行只挂 text 分支，零块消息的 error 文案在对话流不可见（静默悬挂）。
@@ -516,5 +802,36 @@ describe('纯 error 气泡的 text 块宿主（ADR-0122 断连未确认终局）
     expect(flat).toHaveLength(1)
     expect(flat[0]!.block.kind).toBe('text')
     expect(flat[0]!.block.ref).toBe('崩溃前正文')
+  })
+})
+
+// ── 展开段 memo（streaming 性能，TurnRail.vue railMemo 同族范式）──────────────
+// WeakMap 按 msg 引用缓存 expandAssistantBlocks 输出段：引用同 ⇒ 内容同（ADR-0039
+// 不可变替换）⇒ 段值恒等；对外可观察的命中信号 = OrderedBlock 包装引用复用（重算则新建）。
+
+describe('flattenTurnBlocks 展开段 memo', () => {
+  it('同 assistant 引用二次调用：memo 命中（OrderedBlock 引用相同），输出值恒等', () => {
+    const a1 = makeAssistant({
+      id: 'a1',
+      contentBlocks: [{ type: 'toolCall', refId: 'tc1' }],
+      tools: [makeTool({ id: 'tc1' })],
+    })
+    const flat1 = flattenTurnBlocks([a1])
+    const flat2 = flattenTurnBlocks([a1])
+    expect(flat2).toEqual(flat1)
+    expect(flat2[0]!.block).toBe(flat1[0]!.block)
+  })
+
+  it('不同引用内容相同的 assistant：各自计算，不误命中', () => {
+    const build = () =>
+      makeAssistant({
+        id: 'a1',
+        contentBlocks: [{ type: 'toolCall', refId: 'tc1' }],
+        tools: [makeTool({ id: 'tc1', toolName: 'bash' })],
+      })
+    const flat1 = flattenTurnBlocks([build()])
+    const flat2 = flattenTurnBlocks([build()])
+    expect(flat2).toEqual(flat1)
+    expect(flat2[0]!.block).not.toBe(flat1[0]!.block)
   })
 })

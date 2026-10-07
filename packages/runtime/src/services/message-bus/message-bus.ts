@@ -214,6 +214,11 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   'message.thinking_start': 'transient',
   'message.thinking_end': 'transient',
   'subagent.stream_delta': 'transient',
+  // B2 subagent-stream-chunk §4.1：R 路径增量内容 chunk（delta 原样转发 + msgSeq/deltaSeq
+  // 双序号）。transient 直传订阅者（不分配 seq、不入 ring、不写快照，断连即丢）——收敛
+  // 不靠 ring 回放，走失步/接入拉取（session.getSubagentStreamState，读 RelayTee 既有
+  // 内存状态）+ 清除消息/entry 终态权威。
+  'subagent.stream_chunk': 'transient',
   'terminal.data': 'transient',
   'message.stream_warn': 'transient',
   'plugin:viewUpdate': 'transient',

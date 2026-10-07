@@ -4,15 +4,21 @@
  * 从 chat store 提取「messages ref 的 streaming→终态 mutate + 断连瞬态清理」内聚逻辑：
  * - applySubagentStreamDelta：subagent streaming delta 吸收（替换非追加，contentBlock 幂等）
  * - finalizeSubagentStream：subagent streaming 收口（sealed 守卫，幂等 no-op）
+ * - [B2 subagent-stream-chunk §4.3] per (virtualId, recordId) 增量 chunk 消费状态机：
+ *   applySubagentStreamChunk（chunk 优先序四步）/ applySubagentStreamState（拉取响应
+ *   按序判定四分支 + 水位回放）/ requestSubagentStreamState（拉取统一入口，在途去重）/
+ *   sealSubagentStream（sealedMsgSeq 单调水位）/ clearSubagentChunkState[ForSession]
+ *   （分区生命周期清除；拉取执行器经 deps.subagentStreamPull 注入）
  * - finalizeMessages：finalizeSession 的 message 终态映射（bash 跳过 / toolCall 收口 / endTime 条件）
  * - collectFinalizeCandidates：finalizeAllStreaming 候选 session 并集（6 源 refs）
  * - clearIndependentTransient：resetTransientStates 的 session 级独立瞬态清理
  *
  * 形态：factory 函数（createStreamingStateMachine）闭包持有 refs + helpers，方法签名只留
- * 业务参数。store.ts 仅做 ref 委托（6 处调用点），不再有模块级 *Impl 反模式
+ * 业务参数。store.ts 仅做 ref 委托（纯转发，无逻辑），不再有模块级 *Impl 反模式
  * （原为绕 max-lines-per-function 拆分）。
  */
-import type { ContentBlock, Message, ToolCall } from '@taiji/shared'
+import type { ContentBlock, Message, ServerMessageMap, ToolCall } from '@taiji/shared'
+import { extractMainSessionId, isSubagentVirtualId } from '@taiji/shared'
 import {
   commitMessages,
   isErrorFinalizeReason,
@@ -22,6 +28,7 @@ import {
 import { findLastAssistantIndex } from './chunk-processor'
 import type { FinalizeReason } from './store-types'
 import type { SessionOccupancyState } from './store'
+import { createInflightDedup } from '../../foundation/create-inflight-dedup'
 import { randomUuid } from '../../utils/random-uuid'
 
 /**
@@ -106,6 +113,36 @@ function finalizeStreamingMessage(
   }
 }
 
+// ── [B2 subagent-stream-chunk §4.3] subagent 增量 chunk 消费状态机 ──────────────────
+
+/** subagent.stream_chunk 消息的消费侧载荷（协议字段投影，见 shared ServerMessageMap['subagent.stream_chunk']）。 */
+export interface SubagentStreamChunk {
+  msgSeq: number
+  deltaSeq: number
+  delta: string
+}
+
+/**
+ * session.getSubagentStreamState reply 快照（shared 协议投影别名）：RelayTee 既有内存
+ * 状态的只读视图。found=false = 该 record 当前无进行中流（未开始或已定稿）。
+ */
+export type SubagentStreamStateSnapshot = ServerMessageMap['session.getSubagentStreamState']
+
+/**
+ * per (virtualId, recordId) 分区状态机（设计 §4.3，禁全局槽位——record 切换互不污染）。
+ * 非 Vue 响应式状态（[ADR-0049 例外]：纯流式簿记，渲染只走 messages ref overlay 路径）。
+ */
+export interface SubagentChunkPartitionState {
+  /** 当前流式消息序号（消费端初始 0，§4.1；随 chunk 边界推进 / 响应重置推进） */
+  msgSeq: number
+  /** 期望的下一条 delta 序号（== 追加；> 失步；< 丢弃） */
+  expectedDeltaSeq: number
+  /** 失步缓冲（跳号 chunk 等拉取响应回放；边界推进 / 响应重置时丢弃） */
+  buffer: SubagentStreamChunk[]
+  /** 已定稿最高消息序号（单调水位，从不重置；清除消息按携带 msgSeq 置位） */
+  sealedMsgSeq: number
+}
+
 /** 工厂依赖注入接口：全部 refs + setter + helpers 由 store 装配，本模块不直连外部状态。
  *  [u5b] compactingSessions Set / setCompacting 退役——occupancy 投影（session.occupancy
  *  帧驱动）是 compacting membership 唯一来源，clearOccupancy 承接断连收口。 */
@@ -117,6 +154,14 @@ export interface StreamingStateMachineDeps {
   pendingSend: { value: Set<string> }
   clearOccupancy: (sessionId: string) => void
   setHandingOff: (sessionId: string, value: boolean) => void
+  /**
+   * [B2 subagent-stream-chunk §4.3] subagent 流状态拉取执行器（core 不直接发 RPC，renderer
+   * 层经 ChatStoreOptions.subagentStreamPull 注入——对齐 agentCallEvictionsOf 回调注入模式）。
+   * 入参 (virtualId, recordId)；renderer 侧实现按 extractMainSessionId(virtualId) 解析主
+   * session 后调 api.session.getSubagentStreamState。reject = 连接断开 / 显式错误回执。
+   * 缺省（未接线）＝失步拉取 no-op（core 单测 / 未装配环境，缓冲保留、下一条 chunk 重触发）。
+   */
+  subagentStreamPull?: (virtualId: string, recordId: string) => Promise<SubagentStreamStateSnapshot>
 }
 
 /**
@@ -124,7 +169,7 @@ export interface StreamingStateMachineDeps {
  * 由闭包持有），行为由 streaming-state-machine.test.ts + store.test.ts 双锁。
  */
 export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
-  const { messages, occupancies, handingOffSessions, retryStates, pendingSend, clearOccupancy, setHandingOff } = deps
+  const { messages, occupancies, handingOffSessions, retryStates, pendingSend, clearOccupancy, setHandingOff, subagentStreamPull } = deps
 
   /**
    * subagent streaming delta 吸收纯逻辑（W4，模块作用域）：
@@ -181,6 +226,260 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
       ...(next[lastAssistantIdx].endedAt === undefined ? { endedAt: Date.now() } : {}),
     }
     commitMessages(messages, virtualId, next)
+  }
+
+  // ── [B2 subagent-stream-chunk §4.3] subagent 增量 chunk 消费状态机 ────────────────
+  // 契约权威 = 设计文档 §4.3（chunk 处理优先序四步 / 拉取响应按序判定四分支 /
+  // sealedMsgSeq 单调水位 / 在途拉取 settle 即清）。拉取执行器由 renderer 注入
+  // （deps.subagentStreamPull，core 不直接发 RPC）；无定时器/宽限窗（ADR-0122）——
+  // 失败重触发 = 事件驱动（下一条 chunk 到达）。
+
+  /** per (virtualId, recordId) 分区表（禁全局槽位；非响应式，ADR-0049 例外同 entryStates 判据） */
+  const chunkPartitions = new Map<string, Map<string, SubagentChunkPartitionState>>()
+
+  /**
+   * 同 record 在途拉取去重（C-data-18：禁止手写「同 key 并发异步去重 + settle 清理」
+   * 同构实现，一律组装 createInflightDedup；key = `${virtualId}::${recordId}`）。
+   * 槽独立于分区实例：分区清除/重建不弃在途拉取，其 settle（成功/失败）照常由 factory
+   * 引用比对清槽——修复前手写 boolean 位存在「旧拉取 rejection 清到重建后新分区」的
+   * 瞬时去重击穿，factory 槽位与分区生命周期解耦后该窗口不存在。
+   */
+  const pullDedup = createInflightDedup<SubagentStreamStateSnapshot>()
+
+  function createChunkPartition(): SubagentChunkPartitionState {
+    return { msgSeq: 0, expectedDeltaSeq: 0, buffer: [], sealedMsgSeq: 0 }
+  }
+
+  function getOrCreateChunkPartition(virtualId: string, recordId: string): SubagentChunkPartitionState {
+    let byRecord = chunkPartitions.get(virtualId)
+    if (!byRecord) {
+      byRecord = new Map()
+      chunkPartitions.set(virtualId, byRecord)
+    }
+    let state = byRecord.get(recordId)
+    if (!state) {
+      state = createChunkPartition()
+      byRecord.set(recordId, state)
+    }
+    return state
+  }
+
+  /**
+   * 增量追加当前流式消息（chunk 优先序第 2 步「追加」的本体，与主流 message.text_delta
+   * effect 同型：O(1) 摊销字符串拼接，非全量替换）。末位 assistant streaming → content
+   * 追加 + text block 幂等；否则 push sa- 新 streaming assistant（与 applySubagentStreamDelta
+   * 的新建形态同构，只是初值 = 本条增量而非全文）。
+   */
+  function appendSubagentStreamText(virtualId: string, delta: string): void {
+    const prev = messages.value.get(virtualId)?.value ?? []
+    const lastAssistantIdx = findLastAssistantIndex(prev)
+    const next = [...prev]
+    if (lastAssistantIdx >= 0 && next[lastAssistantIdx].status === 'streaming') {
+      const prevMsg = next[lastAssistantIdx]
+      // 不可变写法（W1）+ contentBlock 幂等，与 applySubagentStreamDelta 同规则
+      const contentBlocks: ContentBlock[] = prevMsg.contentBlocks?.some((b) => b.type === 'text')
+        ? prevMsg.contentBlocks
+        : [...(prevMsg.contentBlocks ?? []), { type: 'text', refId: 'text' }]
+      next[lastAssistantIdx] = { ...prevMsg, content: prevMsg.content + delta, contentBlocks }
+    } else {
+      next.push({
+        id: `sa-${randomUuid()}`,
+        role: 'assistant',
+        content: delta,
+        status: 'streaming',
+        contentBlocks: [{ type: 'text', refId: 'text' }],
+        timestamp: Date.now(),
+      })
+    }
+    commitMessages(messages, virtualId, next)
+  }
+
+  /**
+   * 消息边界推进的「开新 streaming 消息」（§4.3 优先序第 1 步）：末位 assistant 仍在
+   * streaming 时就地收口（旧消息已随 message_end 经 entry 权威定稿，此处只做显示层
+   * 对齐，终态由 entry 链覆盖——§6.2 定稿取代语义）+ push 新的空 streaming assistant，
+   * 保证新消息的增量不并进旧消息实体。
+   */
+  function openNewStreamingMessage(virtualId: string): void {
+    const prev = messages.value.get(virtualId)?.value ?? []
+    const lastAssistantIdx = findLastAssistantIndex(prev)
+    const next = [...prev]
+    if (lastAssistantIdx >= 0 && next[lastAssistantIdx].status === 'streaming') {
+      const oldMsg = next[lastAssistantIdx]
+      next[lastAssistantIdx] = {
+        ...oldMsg,
+        status: 'complete',
+        ...(oldMsg.endedAt === undefined ? { endedAt: Date.now() } : {}),
+      }
+    }
+    next.push({
+      id: `sa-${randomUuid()}`,
+      role: 'assistant',
+      content: '',
+      status: 'streaming',
+      contentBlocks: [{ type: 'text', refId: 'text' }],
+      timestamp: Date.now(),
+    })
+    commitMessages(messages, virtualId, next)
+  }
+
+  /**
+   * chunk 处理（chunk 入口与 buffer 回放共用的单一管线，§4.3 优先序，先边界后序号）：
+   * 1. msgSeq 边界推进（> 当前）：重置 expectedDeltaSeq = 0、丢弃旧 buffer、开新 streaming
+   *    消息（旧消息已随 message_end 经 entry 权威定稿，缓冲残留不再有意义）；跨多条消息的
+   *    前向跳号同理——中间消息的全文由 entry 链承载，无需逐条推进。
+   *    msgSeq < 当前 → 陈旧 chunk 丢弃（理由见方法尾注）。
+   * 2. deltaSeq == expected → 追加，expected++。
+   * 3. deltaSeq > expected → 失步：入 buffer，发起拉取（同 record 在途去重由 pullDedup 承接）。
+   * 4. deltaSeq < expected → 已含于最近一次拉取结果，丢弃。
+   *
+   * [msgSeq < 当前丢弃的理由]（设计 §4.3 第 1 步同文登记）与拉取响应分支 1/2 的陈旧
+   * 防护同一原则：回退 chunk 若推进边界会用旧消息内容覆写当前 streaming 实体（复活定稿
+   * 内容），且响应分支 4 的 buffer 回放会把边界推进前缓冲的旧消息 chunk 重新喂回本管线。
+   * 设计不变量「单条 WS 连接内广播有序」（§4.3）下正常 chunk 流只出现前向序号，该分支
+   * 不改变任何可达形态的行为。
+   */
+  function processSubagentStreamChunk(virtualId: string, recordId: string, state: SubagentChunkPartitionState, chunk: SubagentStreamChunk): void {
+    // 1. 消息边界（先边界后序号）
+    if (chunk.msgSeq < state.msgSeq) return // 陈旧 chunk（含回放中的旧消息残留），丢弃
+    if (chunk.msgSeq > state.msgSeq) {
+      state.msgSeq = chunk.msgSeq
+      state.expectedDeltaSeq = 0
+      state.buffer = [] // 丢弃旧 buffer（旧消息已定稿，残留无意义）
+      openNewStreamingMessage(virtualId)
+    }
+    // 2. == expected → 追加
+    if (chunk.deltaSeq === state.expectedDeltaSeq) {
+      state.expectedDeltaSeq++
+      appendSubagentStreamText(virtualId, chunk.delta)
+      return
+    }
+    // 3. > expected → 失步：入 buffer，发起拉取（在途去重在 requestSubagentStreamState 内）
+    if (chunk.deltaSeq > state.expectedDeltaSeq) {
+      state.buffer.push(chunk)
+      requestSubagentStreamState(virtualId, recordId)
+      return
+    }
+    // 4. < expected → 已含于最近一次拉取结果，丢弃
+  }
+
+  /**
+   * 发起拉取（§4.3 触发点 ②③ 的执行本体 + renderer 接入拉取（触发点 ①）的统一入口）：
+   * 同一 record 同时至多一个在途拉取（pullDedup 去重，C-data-18 factory）；响应经
+   * applySubagentStreamState 按序判定；失败（连接断开 / 显式错误回执，executor reject）
+   * 即 settle 清槽（factory 内建）、保持失步态，下一条 chunk 到达时重新触发（事件驱动，
+   * 无定时重试——ADR-0122）。
+   * 未注入执行器（deps.subagentStreamPull 缺省）→ no-op（缓冲保留）。
+   */
+  function requestSubagentStreamState(virtualId: string, recordId: string): void {
+    if (!subagentStreamPull) return
+    const key = `${virtualId}::${recordId}`
+    // 在途即返回（单消费者）：响应消费由首次发起方的 then 单点承接。复用路径不得再
+    // attach then——factory 复用语义是「复用者拿到同一 promise、各自 attach 各自消费」，
+    // 而本处消费（applySubagentStreamState）非幂等读，同响应双应用会把回放推进过的
+    // expected 重置回响应水位（状态回退）。
+    if (pullDedup.has(key)) return
+    const { promise } = pullDedup.run(key, () => subagentStreamPull(virtualId, recordId))
+    void promise
+      .then((response) => {
+        applySubagentStreamState(virtualId, recordId, response)
+      })
+      .catch(() => {
+        // 失败保持失步态（设计 §4.3「拉取失败与无应答」），定稿不受影响（entry 权威兜底）。
+        // 静默收窄：失败信号由失步态本身承载，下一条 chunk 重触发。在途槽已由 factory
+        // settle 即清（清理回调注册先于本 catch），无需手动清位。
+      })
+  }
+
+  /**
+   * 拉取响应按序判定（§4.3 四分支；在途标记清理由 pullDedup settle 即清承接——factory
+   * 的清理回调注册先于调用方 then，进入本函数时在途槽已清）：
+   * 1. response.msgSeq <= sealedMsgSeq → 内容已定稿：丢弃（晚到响应不得复活定稿消息）。
+   * 2. response.msgSeq < 当前 msgSeq → 陈旧响应：丢弃（RPC 应答与广播推进的交错窗口）。
+   * 3. found: false → 无进行中流：不动作（定稿内容由 entry 权威链与既有回放承载）。
+   * 4. 判定通过（含 response.msgSeq 超前于当前 msgSeq 的跨边界恢复——按响应重置状态本身
+   *    就是边界推进）→ lines 全量替换（复用 applySubagentStreamDelta）+ 按
+   *    (response.msgSeq, lastDeltaSeq) 重置状态 + 按序回放 buffer 中 deltaSeq >= expected
+   *    的 chunk（回放复用同一 chunk 管线；回放中再遇跳号 → 再次拉取）。
+   *
+   * [回放与在途去重的时序] 槽已随本次响应 settle 清除，回放中再触发的拉取 run 的是
+   * 新槽，语义「确有新的在途拉取」——去重不被击穿（原手写位须手动「回放前先清」的
+   * 顺序约束由 factory 时序契约构造性保证）。
+   *
+   * [去重即水位]（§4.3）：lastDeltaSeq 标记这份全文含到第几条 delta——重置后
+   * expected = lastDeltaSeq + 1，回放过滤条件 deltaSeq >= expected 即「> 水位回放、
+   * <= 水位丢弃」。
+   */
+  function applySubagentStreamState(virtualId: string, recordId: string, response: SubagentStreamStateSnapshot): void {
+    const state = getOrCreateChunkPartition(virtualId, recordId)
+    // 1. ≤ sealedMsgSeq → 已定稿，丢弃
+    if (response.msgSeq <= state.sealedMsgSeq) return
+    // 2. < 当前 msgSeq → 陈旧响应，丢弃
+    if (response.msgSeq < state.msgSeq) return
+    // 3. found: false → 无进行中流，不动作
+    if (!response.found) return
+    // 4. 判定通过：全量替换 + 状态重置 + buffer 按序回放（在途槽已由 factory settle 清，
+    //    回放再触发的拉取自行 run 新槽）
+    applySubagentStreamDelta(virtualId, response.lines)
+    state.msgSeq = response.msgSeq
+    state.expectedDeltaSeq = response.lastDeltaSeq + 1
+    const replay = state.buffer
+    state.buffer = []
+    for (const chunk of replay) {
+      processSubagentStreamChunk(virtualId, recordId, state, chunk)
+    }
+  }
+
+  /**
+   * chunk 入口（renderer subscribeStream handler 分派调用）：per (virtualId, recordId)
+   * 取或建分区后走单一 chunk 管线。触发点 ②（首见缺前缀）由「新建分区 + 第 3 步失步」
+   * 组合承载：无状态机首条 chunk 若 deltaSeq > 0，边界推进后 expected = 0 必失步入
+   * buffer 并触发拉取；「无状态机 + deltaSeq = 0」= 干净起步，直接建状态机追加、不拉取
+   * （§4.3，否则每条 record 流式启动都多一次稳态冗余 RPC）。
+   */
+  function applySubagentStreamChunk(virtualId: string, recordId: string, msgSeq: number, deltaSeq: number, delta: string): void {
+    const state = getOrCreateChunkPartition(virtualId, recordId)
+    processSubagentStreamChunk(virtualId, recordId, state, { msgSeq, deltaSeq, delta })
+  }
+
+  /**
+   * 定稿标记（§4.3 sealedMsgSeq）：清除消息（subagent.stream_delta lines: undefined）
+   * 按其携带的 msgSeq 置位——单调推进（取 max）、从不重置。分区不存在时创建（只置水位
+   * 不动消息）——缺前缀晚接入场景下，access 拉取响应的分支 1 判定依赖该水位已在清除时
+   * 落账。W 路径清除消息不带 msgSeq、不进本状态机（§4.1，renderer 分派侧保证）。
+   */
+  function sealSubagentStream(virtualId: string, recordId: string, msgSeq: number): void {
+    const state = getOrCreateChunkPartition(virtualId, recordId)
+    if (msgSeq > state.sealedMsgSeq) state.sealedMsgSeq = msgSeq
+  }
+
+  /**
+   * 分区/record 级清除（生命周期挂点：record 删除 / 虚拟分区删除路径由 renderer 接线，
+   * ADR-0049 分区范式）。recordId 缺省删整个 virtualId 名下全部分区。
+   */
+  function clearSubagentChunkState(virtualId: string, recordId?: string): void {
+    const byRecord = chunkPartitions.get(virtualId)
+    if (!byRecord) return
+    if (recordId === undefined) {
+      chunkPartitions.delete(virtualId)
+      return
+    }
+    byRecord.delete(recordId)
+    if (byRecord.size === 0) chunkPartitions.delete(virtualId)
+  }
+
+  /**
+   * session 级清除（生命周期挂点：双壳删除编排归入 core triggerSessionCleanups，由
+   * renderer 注册 cleanup 调用）。subagent 虚拟键三段式内嵌 mainSessionId
+   * （shared extractMainSessionId 单一实现），按第二段归属匹配删除（结构判定复用
+   * shared isSubagentVirtualId——非三段键不属于任何 main session 名下）。
+   */
+  function clearSubagentChunkStateForSession(sessionId: string): void {
+    for (const virtualId of [...chunkPartitions.keys()]) {
+      if (isSubagentVirtualId(virtualId) && extractMainSessionId(virtualId) === sessionId) {
+        chunkPartitions.delete(virtualId)
+      }
+    }
   }
 
   /**
@@ -249,8 +548,19 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
   return {
     applySubagentStreamDelta,
     finalizeSubagentStream,
+    // ── [B2 subagent-stream-chunk §4.3] chunk 消费状态机入口（store 逐一委托）──
+    applySubagentStreamChunk,
+    applySubagentStreamState,
+    requestSubagentStreamState,
+    sealSubagentStream,
+    clearSubagentChunkState,
+    clearSubagentChunkStateForSession,
     finalizeMessages,
     collectFinalizeCandidates,
     clearIndependentTransient,
+    /** [测试逃生舱] 分区表只读引用（状态机四分支/水位/在途拉取断言用，生产代码勿读）。 */
+    _chunkPartitionsForTest: chunkPartitions,
+    /** [测试逃生舱] 在途拉取去重表只读引用（has(key) 断言在途/settle 即清，生产代码勿读）。 */
+    _pullDedupForTest: pullDedup,
   }
 }

@@ -1,6 +1,8 @@
 /**
  * AnsiText 组件测试（W3 · v6 新建）。
  * v6：use_classes=true + 16 fg class 映射 + bg 丢弃 + XSS 转义 + 降级回退。
+ * 增量渲染：追加分支（前缀增长复用解析器实例 + DOM 只增不重建）/
+ *           重建分支（换内容新建实例隔离颜色状态）；三分支用例见「增量渲染」组。
  *
  * 运行：cd packages/ui && npx vitest run src/rendering-protocol/__tests__/AnsiText.test.ts
  */
@@ -85,26 +87,67 @@ describe('AnsiText', () => {
     expect(html).not.toContain('class="ansi-')
   })
 
-  // MF-2 回归：AnsiUp 实例不可跨重算复用（有状态流式解析器，复用会串色）
-  it('状态隔离：content 增量更新不复用上次的颜色状态（无串色）', async () => {
-    // 用本地 ref 驱动 AnsiText（模拟流式 tool result 增量更新），避免 setProps 的 .vue shim 类型问题
-    const content = ref(`${ESC}[31mred${ESC}`)
+  // 增量渲染三分支（续喂 + 追加 / 重建）。辅助：本地 ref 驱动 AnsiText，
+  // 避免 setProps 的 .vue shim 类型问题；返回容器元素 getter 与内容 ref。
+  function mountDriven(initial: string) {
+    const content = ref(initial)
     const wrapper = mount({
       setup() {
         return () => h(AnsiText, { content: content.value })
       },
     })
-    // 第一次：红色无 reset，旧实现会把 fg=red 状态留在复用实例上
-    expect(wrapper.find('[data-testid="ansi-text"]').html()).toContain('ansi-red-fg')
-    // 第二次：纯文本，不应被上次的 red 状态污染（复用实例会包成 ansi-red-fg span）
-    content.value = 'plain'
+    const el = () => wrapper.find('[data-testid="ansi-text"]').element as HTMLElement
+    return { content, el }
+  }
+
+  it('纯追加：前缀增长只追加节点，已有 DOM 节点原样保留（不重建）', async () => {
+    const { content, el } = mountDriven(`${ESC}[31mred`)
+    const first = el().children[0]
+    expect(el().childElementCount).toBeGreaterThan(0)
+    content.value = `${ESC}[31mred tail text`
     await flushPromises()
-    const html2 = wrapper.find('[data-testid="ansi-text"]').html()
-    expect(html2, '增量纯文本不应串色为 red').not.toContain('ansi-red-fg')
-    expect(html2).toContain('plain')
+    expect(el().textContent).toContain('red tail text')
+    // 旧节点引用恒等 = 走了追加分支（重建分支会整体替换出全新节点）
+    expect(el().children[0]).toBe(first)
   })
 
-  // MF-1 回归：catch 降级路径经 v-html 渲染，含 HTML payload 时必须转义防 XSS
+  it('追加时颜色状态延续：未 reset 的 fg 状态跨段持续（复用实例续喂语义）', async () => {
+    const { content, el } = mountDriven(`${ESC}[31mred`)
+    content.value = `${ESC}[31mred plain-continues`
+    await flushPromises()
+    // 增量段在 red 状态内（无 reset），续喂后仍着 red（若重建实例只喂 delta 会丢失状态漏染）
+    const redSpans = [...el().querySelectorAll('.ansi-red-fg')]
+    expect(redSpans.length).toBeGreaterThan(0)
+    expect(redSpans.at(-1)?.textContent).toContain('plain-continues')
+  })
+
+  // 整条替换（非前缀关系）→ 重建分支新建实例：颜色状态隔离，不串色。
+  // 即原 MF-2 回归的语义反转：串色防护针对「换内容」，「同段增长」反而必须复用状态。
+  it('整条替换为不同文本：重建实例，颜色状态隔离（无串色）', async () => {
+    const { content, el } = mountDriven(`${ESC}[31mred${ESC}`)
+    const first = el().children[0]
+    expect(el().innerHTML).toContain('ansi-red-fg')
+    content.value = 'plain'
+    await flushPromises()
+    const html = el().innerHTML
+    expect(html, '整条替换后纯文本不应串色为 red').not.toContain('ansi-red-fg')
+    expect(html).toContain('plain')
+    // 节点被整体替换 = 走了重建分支（新建 AnsiUp 隔离旧状态）
+    expect(el().children[0]).not.toBe(first)
+  })
+
+  it('前缀收缩（如流式尾窗头删）：触发重建，旧节点替换且内容更新', async () => {
+    const full = `${ESC}[31mhead-${'x'.repeat(50)}`
+    const { content, el } = mountDriven(full)
+    const first = el().children[0]
+    content.value = full.slice(20) // 头删：既非前缀增长也非整条同文，只能重建
+    await flushPromises()
+    expect(el().children[0]).not.toBe(first)
+    expect(el().textContent).not.toContain('head-')
+    expect(el().textContent!.length).toBeGreaterThan(0)
+  })
+
+  // MF-1 回归：catch 降级路径经命令式 DOM 注入渲染，含 HTML payload 时必须转义防 XSS
   it('catch 降级路径 XSS 防护：ansi_to_html 抛错且 content 含 <script> 时转义', () => {
     const spy = vi.spyOn(AnsiUp.prototype, 'ansi_to_html').mockImplementation(() => {
       throw new Error('parse fail')

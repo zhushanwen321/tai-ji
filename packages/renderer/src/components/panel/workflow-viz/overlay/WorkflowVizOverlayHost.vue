@@ -6,8 +6,11 @@
   「overlay 容器」的落点：
 
   - 数据源：开合/当前内容读 core/domain/overlay（SSOT，u-w1-core 迁移——workflow-viz-overlay
-    的 overlayOpen/overlayCurrent 已退役）；DAG 解析态（overlayDag/overlayDagError）留
-    renderer 控制器 workflow-viz-overlay.ts；run
+    的 overlayOpen/overlayCurrent 已退役）；DAG 解析态（overlayDag/overlayDagError）与
+    一级 tab 展示态（overlayTab，scheduler 整合 2026-10-06）留
+    renderer 控制器 workflow-viz-overlay.ts；本容器壳承载 workflow 与 scheduler 两类内容
+    （browser 由 BrowserOverlay 承载，三壳互斥）；scheduler 内容下 run 相关 props 按无 run
+    形态透传（run/dag/dagError = null，「运行」tab 由壳按 run 缺省禁用）；run
     投影从 workflowStore 分区按 runId 选中（recordsOf 响应式读，workflowUpdate 信号触发
     的重新拉取经 store 自动到达）；节点六态/当前 phase/已用时长在本容器单处派生后经
     props 透传（壳与面板均为已派生输入，不自行判定）。
@@ -19,15 +22,19 @@
     v-if 不渲染，关闭态 DOM 零痕迹。
   - 已用时长（壳 header 槽，设计 §3.1-1）：D9 停走口径（terminal = completedAt、
     interrupted = health.lastProgressAt 缺省回 startedAt、running = 当前时刻），1s tick
-    仅在 workflow 内容 open 态运行（内容切走/关闭即停，[U4] kind 门控）；面板 header 的同口径时长归面板自身（双 header 形态——壳层服务 overlay 全局态、面板层使面板可独立测试复用；数值单源 deriveWorkflowRunElapsedMs 恒一致，裁决登记 = 设计文档 §3.1-2 header 裁决记录，2026-10-02 D5 终态同步）。
+    仅在 workflow 内容 open 态运行（内容切走/关闭即停，[U4] kind 门控）；D2 单 header
+    终态（workflow-overlay-refine）：面板无 header 行，已用时长由壳 header 单点呈现
+    （派生单源 deriveWorkflowRunElapsedMs 不变，双 header 形态已废止）。
 -->
 <template>
   <WorkflowVizOverlayGuard :key="guardEpoch" @fallback="onFallback">
     <WorkflowVizOverlay
-      :open="isWorkflowOpen"
+      :open="isOverlayShellOpen"
       :run="runRecord"
       :dag="overlayDag"
       :dag-error="overlayDagError"
+      :tab="overlayTab"
+      :scheduler-session-id="overlaySessionId"
       :node-states="nodeStates"
       :active-phase="activePhase"
       :elapsed-ms="elapsedMs"
@@ -35,6 +42,7 @@
       @close="closeWorkflowVizOverlay"
       @select="onSelect"
       @retry-dag="retryDagParse"
+      @update:tab="setOverlayTab"
     >
       <WorkflowLivePanel
         v-if="panelInput"
@@ -72,7 +80,9 @@ import {
   closeWorkflowVizOverlay,
   overlayDag,
   overlayDagError,
+  overlayTab,
   retryDagParse,
+  setOverlayTab,
 } from './workflow-viz-overlay'
 import { useWorkflowStore, deriveWorkflowRunElapsedMs } from '@/stores/workflow'
 
@@ -82,9 +92,21 @@ const panelRef = ref<InstanceType<typeof WorkflowLivePanel> | null>(null)
 // 模块级 ref 已退役，开合态唯一权威 = core/domain/overlay）。
 const { isOpen: overlayOpen, current: overlayContent } = useOverlayControl()
 
-/** workflow 壳开合（单例换内容门控，u-w2-browser-mount）：仅浮层当前内容是 workflow 时开
- *  workflow 壳——browser 内容由 BrowserOverlay 的壳承载，两壳互斥不叠显。 */
+/** workflow 内容开合（单例换内容门控，u-w2-browser-mount）：browser 内容由 BrowserOverlay 的
+ *  壳承载，workflow/scheduler 两类内容由本组件壳承载（scheduler 整合 2026-10-06），三壳互斥不叠显。 */
 const isWorkflowOpen = computed(() => overlayOpen.value && overlayContent.value?.kind === 'workflow')
+
+/** scheduler 内容开合（定时任务 tab 直达）：本组件壳同时承载 workflow 与 scheduler 两类内容。 */
+const isSchedulerOpen = computed(() => overlayOpen.value && overlayContent.value?.kind === 'scheduler')
+
+/** 壳开合（本组件承载的两类内容任一在场即开——Guard/scheduler tab 数据链共用该门控）。 */
+const isOverlayShellOpen = computed(() => isWorkflowOpen.value || isSchedulerOpen.value)
+
+/** 当前内容所属会话（两类载荷都持 sessionId；scheduler tab 的 ViewHost per-session 分区键）。 */
+const overlaySessionId = computed(() => {
+  const cur = overlayContent.value
+  return cur !== null ? cur.payload.sessionId : ''
+})
 
 /** 当前 workflow run 投影（core OverlayContent → Host 的 run 选择形状；非 workflow 内容 = null）。 */
 const overlayRun = computed<{ sessionId: string; runId: string } | null>(() => {
@@ -95,12 +117,13 @@ const overlayRun = computed<{ sessionId: string; runId: string } | null>(() => {
 /** Guard 重挂代际（fallback 后递增；下次 open 重挂全新 Guard 实例复位 failed——D10 每次点击均重试）。 */
 const guardEpoch = ref(0)
 
-// workflow 内容开时递增（immediate 首挂同样建立递增基线，保证 :key 稳定存在）。
-// [U4 修复] 门控用 isWorkflowOpen（kind 判定）而非裸 overlayOpen：开合态 SSOT 迁 core 后
-// isOpen kind 无关（browser 浮层开着时也是 true），裸值会让 Guard 随 browser 开合无谓重挂、
-// 且错过「workflow → browser 换出再换回（isOpen 全程 true）」的重入重挂——fresh Guard
-// 复位 failed 的语义只对 workflow 内容有意义（D10 每次点击均重试）。
-watch(isWorkflowOpen, (open) => {
+// 本组件承载的内容（workflow / scheduler）开时递增（immediate 首挂同样建立递增基线，
+// 保证 :key 稳定存在）。[U4 修复] 门控用 isOverlayShellOpen（本组件两类内容的 kind 判定）
+// 而非裸 overlayOpen：开合态 SSOT 迁 core 后 isOpen kind 无关（browser 浮层开着时也是
+// true），裸值会让 Guard 随 browser 开合无谓重挂、且错过「workflow → browser 换出再换回
+// （isOpen 全程 true）」的重入重挂——fresh Guard 复位 failed 的语义对本组件两类内容都有
+// 意义（D10 每次点击均重试；workflow fallback 后经 scheduler 直达打开同样需要 fresh Guard）。
+watch(isOverlayShellOpen, (open) => {
   if (open) guardEpoch.value++
 }, { immediate: true })
 
@@ -157,8 +180,9 @@ const activePhase = computed<string | null>(() => {
   return null
 })
 
-// 已用时长 tick（仅 workflow 内容 open 态运行；内容切走（browser 换入）或关闭即停，
-// 不留常驻定时器。[U4 修复] kind 门控同 guardEpoch watch——isOpen 本身 kind 无关）
+// 已用时长 tick（仅 workflow 内容 open 态运行——scheduler 内容无 run 数据无需时长；
+// 内容切走（browser 换入 / scheduler 换入）或关闭即停，不留常驻定时器。[U4 修复] kind
+// 门控同 guardEpoch watch——isOpen 本身 kind 无关）
 const OPEN_TICK_INTERVAL_MS = 1000
 const now = ref(Date.now())
 let openTickTimer: ReturnType<typeof setInterval> | null = null

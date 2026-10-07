@@ -7,17 +7,20 @@
 
 /**
  * 文本型 trigger 基础类（ModelSelect / ThinkingLevel 共用）。
- * 紧凑高度 + 小圆角 + 弱化字色 + 悬停加深。AddMenu 是图标型 trigger，不复用此类。
+ * 紧凑高度 + 小圆角 + 正文档色 + 600 字重——composer 可操作文字提亮口径
+ * （可操作 = 亮字，ui-signal-density demo 第 8 条采纳）。悬停反馈由 ghost
+ * 基类的底色 hover 承担，不做字色变化（提亮后字色加深会倒挂）。
+ * AddMenu 是图标型 trigger，不复用此类。
  */
 export const TRIGGER_TEXT_CLASS =
-  'h-7 rounded-sm px-2 text-[11.5px] text-neutral-dim transition-colors hover:text-neutral-mid'
+  'h-7 rounded-sm px-2 text-[11.5px] text-neutral-fg font-semibold transition-colors'
 
 /**
  * 图标型 trigger 基础类（AddMenu 用）。
- * 固定尺寸 + 小圆角 + 弱化字色 + 悬停底色。
+ * 固定尺寸 + 小圆角 + 正文档色（同上可操作提亮口径）+ 悬停底色。
  */
 export const TRIGGER_ICON_CLASS =
-  'size-[28px] shrink-0 rounded-sm text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-mid'
+  'size-[28px] shrink-0 rounded-sm text-neutral-fg transition-colors hover:bg-surface-hover'
 
 /**
  * 列表项「选中态」类名（ModelSelect / ThinkingLevel 列表项共用）。

@@ -1,19 +1,27 @@
 <!--
-  HeaderActionsHost（plugin-header-action-modal-points AP-1 / u4b）——panel header 插件按钮区。
+  HeaderActionsHost（plugin-header-action-modal-points AP-1 / u4b）——composer 左簇插件按钮区。
 
   消费 ContributionRegistry 的 headerAction 声明（经 bridge 的响应式声明镜像）+
   HeaderActionStore per-session 运行时镜像（badge/tooltip/disabled，#42）渲染按钮组。
-  插入点：PanelHeader 既有按钮组内、ViewHost panel.header 之后 session-file 之前；
-  与内置按钮同视觉规格（drawer/git 同款 size-[22px]，DESIGN.md §11 几何不动）。
+  插入点（用户裁决 2026-10-06）：Composer 左簇、「+」（AddMenuPopover）之后、btw 按钮
+  （ComposerBtwButton）之前；按钮与左簇相邻 icon-btn 同规格（size-[28px] rounded-sm，
+  对齐 ComposerBtwButton / AddMenu 触发器形态），composer 底栏非 drag 区无 app-region 类。
 
   - badge ≤4 字符宿主截断，全文进 tooltip（AP-1 徽标契约）
   - E13 三态灰置：registered 可点 / unregistered 灰置+tooltip / unknown 保持上次值
     （首次缺省可点，E14 写路径兜底——失败不拦入口）
   - 运行时 disabled：插件 updateHeaderAction 推的 entry.disabled=true 直接灰置；
     缺 tooltip 时提示「暂不可用」不落声明 title（场景 12，插件侧业务态消费）
+  - 运行时 hidden：插件 updateHeaderAction 推的 entry.hidden=true 时入口整体不渲染
+    （不出按钮，与 disabled 灰置正交；缺省 false）——scheduler「无任务不显示」契约
+    的渲染端承接，过滤在列表构建层（toHeaderActionButton 返回 null）、先于 disabled 合成
   - E3 点击 → CommandRegistry.execute：命令缺失（emit error，ERR6）后按钮本地置灰，
     禁静默 no-op；宿主重判 registered（命令重注册）后置灰让位、按钮恢复可点
-  - 无声明时整组件零 DOM（不挤压右侧内置按钮，同 ViewHost empty="hidden" 语义）
+  - 点击分派按声明 activation（声明驱动，无插件 id 硬编码分支）：缺省（无字段）走上述
+    命令链；'scheduler-overlay' = 点击直开 workflow-viz overlay 定时任务 tab
+    （openSchedulerTab），不触 E13 判定/E3 簿记——disabled 只剩运行时镜像单源，
+    hidden/badge/tooltip 的 entry 消费与命令链一致
+  - 无声明时整组件零 DOM（不挤压左簇相邻按钮，同 ViewHost empty="hidden" 语义）
 -->
 <template>
   <template v-if="buttons.length > 0">
@@ -22,14 +30,14 @@
       :key="b.key"
       variant="ghost"
       size="icon"
-      class="relative size-[22px] rounded-md text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-mid [-webkit-app-region:no-drag]"
+      class="relative size-[28px] shrink-0 rounded-sm text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-mid disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-mid"
       :data-testid="b.testid"
       :disabled="b.disabled"
       :title="b.tooltip"
       :aria-label="b.tooltip"
       @click="b.onClick()"
     >
-      <component :is="b.icon" class="size-[15px]" />
+      <component :is="b.icon" class="size-4" />
       <span
         v-if="b.badge"
         class="absolute -right-1.5 -top-1.5 inline-flex h-3 min-w-3 items-center justify-center rounded-full bg-accent px-1 font-mono text-[9px] font-semibold leading-none text-accent-fg ring-1 ring-bg"
@@ -44,6 +52,7 @@ import { Clock, Puzzle } from '@lucide/vue'
 import type { Component } from 'vue'
 import { Button } from '@/components/ui/button'
 import { useI18n } from 'vue-i18n'
+import { openSchedulerTab } from '@/components/panel/workflow-viz/overlay/workflow-viz-overlay'
 import { HEADER_ACTIONS_SOURCE_KEY } from '@/composables/shell/useExtensionHostBridge'
 import type {
   HeaderActionCommandAvailability,
@@ -59,7 +68,7 @@ const props = defineProps<{
 const { t } = useI18n()
 const source = inject(HEADER_ACTIONS_SOURCE_KEY, null)
 
-/** badge 最大字符数（AP-1：徽标位是 22px 按钮的一个角，超长截断全文进 tooltip） */
+/** badge 最大字符数（AP-1：徽标位是 icon 按钮的一个角，超长截断全文进 tooltip） */
 const BADGE_MAX_CHARS = 4
 
 /** lucide 名 → 组件映射（宿主解析，插件不给 SVG）。未登记名 fallback 到通用插件图标。 */
@@ -136,9 +145,11 @@ function badgeOf(entry: HeaderActionEntry | undefined): string {
 /** tooltip 合成：unknown（会话恢复中）> unregistered（未加载扩展）> 运行时 entry.tooltip
  *  ?? disabled 态泛化文案（场景 12：灰置按钮缺 tooltip 时不得落到声明 title 误导可点；
  *  F6 分叉——unregistered 用「未加载扩展」原 key，插件业务 disabled 用「暂不可用」泛化 key）
- *  ?? 声明 title；badge 截断时原文拼首行（全文进 tooltip 契约）。 */
+ *  ?? 声明 title；badge 截断时原文拼首行（全文进 tooltip 契约）。
+ *  availability=null = overlay 直开入口（activation='scheduler-overlay'，不经命令链）——
+ *  命令三态两支不参与，恒落运行时/声明兜底段（entry 消费语义与命令链一致）。 */
 function headerActionTooltip(
-  availability: HeaderActionCommandAvailability,
+  availability: HeaderActionCommandAvailability | null,
   effective: EffectiveAvailability,
   entry: HeaderActionEntry | undefined,
   declaredTitle: string,
@@ -162,7 +173,12 @@ function dispatchHeaderAction(src: HeaderActionsSource, sid: string, commandId: 
   }
 }
 
-/** 单条声明 → 按钮视图（无 headerAction 段 = null，filter 剔除） */
+/** 单条声明 → 按钮视图（无 headerAction 段 = null；运行时 hidden=true = null，剔除即不出按钮——
+ *  过滤在列表构建层、先于 disabled 合成；hidden 缺省/false 照常走渲染。两种声明同样生效）。
+ *  点击按声明 activation 分派：'scheduler-overlay' 分支不触 E13 判定/E3 簿记（resolveCommandAvailability
+ *  有 lastResolved 写副作用，命令链状态机对 overlay 直开无意义），无需 commandId；缺省
+ *  分支（无 activation 字段）走命令链，声明必须带 commandId——无 commandId 的声明无法
+ *  走命令链 = 不渲染。 */
 function toHeaderActionButton(
   src: HeaderActionsSource,
   decl: ContributionRecord,
@@ -171,9 +187,25 @@ function toHeaderActionButton(
   const ha = decl.headerAction
   if (!ha) return null
   const entry = src.getRuntimeState(sid, decl.contributionId)
-  const availability = src.resolveCommandAvailability(sid, ha.commandId)
-  const effective = effectiveAvailabilityOf(sid, ha.commandId, availability)
-  const missing = commandMissing.value.has(`${sid}::${ha.commandId}`)
+  if (entry?.hidden === true) return null
+  if (ha.activation === 'scheduler-overlay') {
+    // overlay 直开入口：灰置唯一来源 = 运行时镜像 disabled（E13/E3 是 commandId 命令链
+    // 状态机，对本入口不可达）；tooltip 走 runtime/声明兜底段（命令三态两支不参与）。
+    return {
+      key: `${decl.pluginId}::${decl.contributionId}`,
+      testid: actionTestId(decl.pluginId, decl.contributionId),
+      icon: HEADER_ACTION_ICONS[ha.icon] ?? Puzzle,
+      badge: badgeOf(entry),
+      disabled: entry?.disabled === true,
+      tooltip: headerActionTooltip(null, undefined, entry, ha.title),
+      onClick: () => openSchedulerTab(sid),
+    }
+  }
+  if (!ha.commandId) return null
+  const commandId = ha.commandId
+  const availability = src.resolveCommandAvailability(sid, commandId)
+  const effective = effectiveAvailabilityOf(sid, commandId, availability)
+  const missing = commandMissing.value.has(`${sid}::${commandId}`)
   return {
     key: `${decl.pluginId}::${decl.contributionId}`,
     testid: actionTestId(decl.pluginId, decl.contributionId),
@@ -181,7 +213,7 @@ function toHeaderActionButton(
     badge: badgeOf(entry),
     disabled: isHeaderActionDisabled(effective, missing, availability, entry),
     tooltip: headerActionTooltip(availability, effective, entry, ha.title),
-    onClick: () => dispatchHeaderAction(src, sid, ha.commandId),
+    onClick: () => dispatchHeaderAction(src, sid, commandId),
   }
 }
 

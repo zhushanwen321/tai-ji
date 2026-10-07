@@ -49,6 +49,7 @@ function escEvent(): KeyboardEvent {
 const EXPECTED_IDS = [
   'ambiguous-file-popover',
   'command-popover',
+  'find-bar',
   'flat-list-nav',
   'plan-comment-popover',
   'project-switcher-create-input',
@@ -57,9 +58,9 @@ const EXPECTED_IDS = [
 ]
 
 describe('两档登记清单 ↔ §6.7 扫描清单全等（守卫类）', () => {
-  it('七成员基线全等：六先行档 prevent-default + 一后行档 aggregate-yield', () => {
+  it('八成员基线全等：七先行档 prevent-default + 一后行档 aggregate-yield', () => {
     expect(LOCAL_ESC_CONSUMERS.map((e) => e.id).sort()).toEqual(EXPECTED_IDS)
-    expect(LOCAL_ESC_CONSUMERS.filter((e) => e.tier === 'first')).toHaveLength(6)
+    expect(LOCAL_ESC_CONSUMERS.filter((e) => e.tier === 'first')).toHaveLength(7)
     expect(LOCAL_ESC_CONSUMERS.filter((e) => e.tier === 'second')).toHaveLength(1)
     for (const entry of LOCAL_ESC_CONSUMERS) {
       expect(entry.contract).toBe(entry.tier === 'first' ? 'prevent-default' : 'aggregate-yield')
@@ -93,7 +94,6 @@ describe('两档登记清单 ↔ §6.7 扫描清单全等（守卫类）', () =>
       'packages/renderer/src/components/settings/system/SystemShortcutSection.vue': '模态内消费方（改键录制）',
       // 未收编模态族：模态自消费 + 聚合让位（modal-surface-registry 登记表成员）
       'packages/renderer/src/components/settings/SettingsModal.vue': '未收编模态族（自消费 + 聚合让位）',
-      'packages/renderer/src/components/extension/PluginModalHost.vue': '未收编模态族（自消费 + 聚合让位）',
       'packages/ui/src/overlays/SearchModal.vue': '未收编模态族（自消费 + 聚合让位）',
     }
     const hits = scanEscConsumers(root)

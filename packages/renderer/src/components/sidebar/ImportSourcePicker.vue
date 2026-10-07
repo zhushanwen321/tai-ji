@@ -6,7 +6,7 @@
       v-for="opt in sourceOptions"
       :key="opt.kind"
       :data-testid="`import-source-option-${opt.kind}`"
-      class="flex cursor-pointer items-start gap-3 rounded-md border border-border px-3 py-3 transition-colors hover:border-border-strong hover:bg-surface-hover"
+      class="flex cursor-pointer select-none items-start gap-3 rounded-md border border-border px-3 py-3 transition-colors hover:border-border-strong hover:bg-surface-hover"
       @click="emit('pick', opt.kind)"
     >
       <component :is="opt.icon" class="mt-0.5 size-4 shrink-0 text-neutral-mid" />

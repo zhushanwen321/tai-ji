@@ -168,7 +168,7 @@ function onOAuthLogin(): void {
         <div
           v-for="opt in authOptions"
           :key="opt.id"
-          class="cursor-pointer rounded-md border px-3 py-2.5"
+          class="cursor-pointer select-none rounded-md border px-3 py-2.5"
           :class="authMethod === opt.id
             ? 'border-accent bg-accent-soft'
             : 'border-border bg-bg-card hover:border-border-strong'"

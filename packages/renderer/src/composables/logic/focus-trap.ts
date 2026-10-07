@@ -1,9 +1,9 @@
 /**
  * focus-trap —— modal/浮层 Tab 焦点陷阱纯工具（非响应式，键盘事件处理器内直调）。
  *
- * 抽取自 PluginModalHost / SettingsModal 的逐字重复实现：Tab 循环三路语义——
+ * 抽取自 SettingsModal 的逐字重复实现：Tab 循环三路语义——
  * 焦点在末个且非 shift → 回首个；在首个且 shift → 跳末个；其余 Tab（中间元素间
- * 移动）不拦截，交给浏览器原生顺序。两宿主的唯一真差异是焦点元素枚举的 DOM
+ * 移动）不拦截，交给浏览器原生顺序。各宿主的唯一真差异是焦点元素枚举的 DOM
  * 查询根，经 getFocusables 参数化注入，宿主各自决定枚举范围。
  */
 

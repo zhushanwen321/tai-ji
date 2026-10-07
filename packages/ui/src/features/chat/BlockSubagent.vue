@@ -19,14 +19,15 @@
         :class="[BLOCK_ICON_CLASS, isFailed ? 'hover:text-warn' : '']"
       />
       <span :class="BLOCK_LABEL_CLASS">{{ t('panel.message.subagent') }}</span>
-      <span class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-accent">{{ subagentAgent }}</span>
+      <!-- agent 名染对话流专属名称色 --name（2026-10-06 裁决）；slug / model 括注降行层级灰（与「子代理」标签同色 --neutral-mid） -->
+      <span class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-[color:var(--name)]">{{ subagentAgent }}</span>
       <template v-if="subagentSlug">
         <span class="text-neutral-faint">·</span>
-        <span class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-accent">{{ subagentSlug }}</span>
+        <span class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-neutral-mid">{{ subagentSlug }}</span>
       </template>
       <template v-if="subagentModel">
         <span class="text-neutral-dim font-mono text-[length:var(--text-xs)]">&nbsp;(</span>
-        <span class="font-mono text-[length:var(--text-xs)] text-accent">{{ subagentModel }}</span>
+        <span class="font-mono text-[length:var(--text-xs)] text-neutral-mid">{{ subagentModel }}</span>
         <span v-if="subagentThinkingLevel" class="text-neutral-dim font-mono text-[length:var(--text-xs)]">&nbsp;· thinking {{ subagentThinkingLevel }})</span>
         <span v-else class="text-neutral-dim font-mono text-[length:var(--text-xs)]">)</span>
       </template>

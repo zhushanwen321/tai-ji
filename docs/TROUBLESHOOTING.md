@@ -365,6 +365,14 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 - **实体还原**（实体误删 / `.bare` 损坏）：`git archive refs/skills-snapshot | tar -x -C <workspace 根>`；本地 ref 不可用先 `git fetch github refs/skills-snapshot:refs/skills-snapshot`（本 workspace remote 名 = `github`；fresh clone 默认 `origin`——`refs/remotes/origin/*` 是 remote 改名前的 stale 残留，`rev-parse origin/main` 仍解析出陈旧值属半工作陷阱，勿作为依据）。还原后 `diff -r` 核对。
 - **快照链排障**：`git rev-parse refs/skills-snapshot` 不存在 = 任一 worktree 手动跑 `bash .githooks/snapshot-skills.sh`；hook 输出 `[WARN] skills 快照失败` = 非阻断（下次 commit 自动重试，多为离线 push 超时）；跨机器重建前 `git ls-remote github refs/skills-snapshot` 核对新鲜度。
 
+### 28. e2e/console 兜底检索撞 error 级 `ResizeObserver loop completed with undelivered notifications`（2026-10-06 ui-redesign-combined D3 验收登记）
+
+**现象**：验收/调试经 CDP 捕获 console 时，流式虚拟列表跟随滚动的采样窗口内出现多条 `[console.error] source=window-onerror: ResizeObserver loop completed with undelivered notifications.`（典型：对话流行数 liveness 采样类剧本）。
+
+**判定**：Chromium 机制性噪声，环境类、非产品缺陷——同一帧内 ResizeObserver 回调改布局导致投递循环超限，浏览器以 ErrorEvent 冒泡到 window.onerror。判定依据：触发场景吻合 renderer 的 ResizeObserver 使用点（对话流五个 composable，rAF-RO 时序见 docs/testing/01-chat-panel-composer.md）；同 step 的功能断言全部通过。
+
+**排障**：e2e/验收任务书含「无 error 级 console」字面判据时，命中本条按归因豁免（带保留通过），豁免须在验收记录留痕（归因 + 功能断言通过证据），禁止静默吞；功能断言同窗失败则不适用本条，按真实缺陷归因。
+
 ## 环境变量速查
 
 | 变量 | 用途 | 生产默认值 | 开发默认值 |

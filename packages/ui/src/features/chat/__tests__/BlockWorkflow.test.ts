@@ -56,9 +56,9 @@ describe('BlockWorkflow: 标题行字段（v6 §11：prefix + name · slug）', 
     expect(wfBlock.exists()).toBe(true)
     // workflow prefix tag
     expect(wrapper.text()).toContain('workflow')
-    // name（accent）
+    // name（--name 暖驼，用户裁决 2026-10-06）
     expect(wrapper.text()).toContain('email-validation-refactor')
-    // slug（accent，· 分隔）
+    // slug（层级灰 --neutral-mid，用户裁决 2026-10-06；· 分隔）
     expect(wrapper.text()).toContain('email-refactor')
     // action 不展示（非 header 字段）
     expect(wrapper.text()).not.toContain('run')

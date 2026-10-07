@@ -42,7 +42,6 @@ export default {
     forward: 'Forward',
     workingDir: 'Working directory',
     branch: 'Branch',
-    gitStatus: 'Git status · Open sidebar',
     copySessionFile: 'Copy session file path',
     // Plugin header action buttons (HeaderActionsHost, E13 tri-state tooltip; plugin-header-action-modal-points AP-1)
     pluginActionExtensionNotLoaded: 'Required extension not loaded in this session',
@@ -159,6 +158,10 @@ export default {
     traceExpandAll: 'Expand all ({count} steps)',
     traceCollapse: 'Collapse to latest',
     traceFailed: '{count} failed',
+    // [ui-signal-density D1 U3] bash group header copy (Block.vue group branch): en mirrors the
+    // zh literal "{count} consecutive bash · total {duration}"; the failure clause reuses
+    // traceFailed ("· {count} failed" at the row tail) — same failure-count phrasing domain
+    traceBashSummary: '{count} consecutive bash · total {duration}',
     bashCancelled: 'cancelled',
     bashTimeout: 'timeout',
     bashOutputTruncated: 'Output truncated',

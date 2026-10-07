@@ -56,6 +56,21 @@ type ApplyDeltaFn = (virtualId: string, lines: string[]) => void
 /** chat.finalizeSubagentStream 注入回调（W4：streaming → complete 收口进 chat store） */
 type FinalizeStreamFn = (virtualId: string) => void
 
+/**
+ * [B2 subagent-stream-chunk §4.3] chunk 通道回调束（subscribeStream 第 7 参，可选）。
+ * R 路径增量消费的三入口，全部是 chat store ops 面（core streaming-state-machine 管线），
+ * 由调用方（drawer SubagentTabData 编排）注入；缺省 = chunk / 定稿水位不接线（旧调用方
+ * 兼容形态——W 路径全量 delta 与清除收口不受影响，chunk 帧静默忽略）。
+ */
+export interface SubagentStreamChunkOps {
+  /** subagent.stream_chunk 分派 → chat.applySubagentStreamChunk（边界推进/追加/失步入缓冲管线） */
+  applyChunk: (virtualId: string, recordId: string, msgSeq: number, deltaSeq: number, delta: string) => void
+  /** 清除帧携带 msgSeq 时置定稿水位 → chat.sealSubagentStream（sealedMsgSeq 单调；W 路径清除帧无 msgSeq 不调） */
+  seal: (virtualId: string, recordId: string, msgSeq: number) => void
+  /** 触发点①接入拉取（订阅建立完成后运行中 record 主动拉取）→ chat.requestSubagentStreamState（core 在途拉取去重） */
+  requestState: (virtualId: string, recordId: string) => void
+}
+
 export const useSubagentStore = defineStore('subagent', () => {
   // ── state ──
   /**
@@ -269,34 +284,46 @@ export const useSubagentStore = defineStore('subagent', () => {
   }
 
   /**
-   * 订阅 subagent.stream_delta WS 帧（路径 A-1，逐字增量 streaming）。
+   * 订阅 subagent 流式 WS 消息（B2 subagent-stream-chunk 改造后三路分派）。
    *
-   * W4：delta / 终态收口均经注入的 chat store 回调（chatApplyDelta / chatFinalizeStream），
-   * chat store 成为所有 assistant content mutation 的唯一入口。
-   * - lines 非空 → chatApplyDelta（chat.applySubagentStreamDelta）
-   * - lines === undefined → 单条 assistant 定稿的清除帧：仅收口 streaming 实体
-   *   （chatFinalizeStream），**不停订阅不 refetch**——E-4（subagent-realtime-channel
-   *   §6.3 退役步骤 1 + R1 消解）：tee 侧每条 assistant message_end 都发清除帧（非任务
-   *   终态），停订阅会断续聊轮（R1 复活）；定稿内容由同事件必发的
-   *   session.subagentEntriesAppended entry 帧投影覆盖（routeInbound 兜底链，不经本订阅），
-   *   refetch 变冗余。旧 extension widget 通道（E-3 合入前的过渡窗口）的 delta 为累积全文
-   *   替换式，收口即完整文本，无 entry 帧也不丢定稿。
+   * 分派（按 msg.type）：
+   * - `subagent.stream_chunk`（R 路径唯一内容推送通道，transient）→ chunkOps.applyChunk
+   *   （core 状态机管线：边界推进 / 顺序追加 / 失步入缓冲 + 拉取）。chunkOps 缺省时忽略
+   *   （chunk 通道未接线的调用方兼容形态）。
+   * - `subagent.stream_delta` lines === undefined（清除帧 = 单条 assistant 定稿）：
+   *   R 路径携带 additive msgSeq → chunkOps.seal 置定稿水位（sealedMsgSeq 单调，晚到拉取
+   *   响应据此防复活）；随后 chatFinalizeStream 收口 streaming 实体（原样保留，不停订阅
+   *   不 refetch——E-4 R1 消解：tee 每条 assistant message_end 都发清除帧，定稿内容由同
+   *   事件必发的 entry 帧投影覆盖）。W 路径清除帧无 msgSeq，不进 chunk 状态机（§4.1）。
+   * - `subagent.stream_delta` lines 非空（W 路径全量形态，R 路径已不产生）→ chatApplyDelta
+   *   全量替换原样（W 产生端不动，行为零变化）。
    *
-   * 双键订阅（E-4 差异适配）：tee 产出的 stream_delta payload.sessionId 是**虚拟分区 id**
-   * （relay-tee），routeInbound 按 payload.sessionId 路由 → dispatchSession(virtualId)；
-   * 旧 widget 通道 payload.sessionId 是主 sid。过渡期两通道并存（E-3 未合入前 extension
-   * 仍发 widget 帧），两个 key 挂同一 handler——内容同为累积全文替换式，重复到达幂等。
+   * W4 契约保持：内容 mutation 全部经注入的 chat store 回调，store 不直接碰 chat 分区。
    *
-   * U8：第一个参数 `scope` 是 **drawer scope token**（非 panelId）——overlay 移除后唯一消费方是
-   * drawer SubagentTab，它传固定常量 STREAM_SCOPE='drawer:subagent'。streamUnsub 按此 token keyed，
-   * drawer 单实例同一时刻只订阅一个 subagent（切 subagent 时先 stopStream 清旧再 set 起新）。
+   * 拉取触发接线（§4.3，执行体在 core 状态机，本函数只做分派与接入编排）：
+   * - ② 首见缺前缀 / ③ 失步（跳号）：chunk 帧进 chunkOps.applyChunk 后由 core 状态机判定
+   *   （新建分区 + deltaSeq > 0 必失步入缓冲并触发拉取；同 record 单在途去重）。
+   * - ① 接入拉取：双键订阅挂载**完成之后**，对订阅范围内运行中 record 主动拉取一次——
+   *   覆盖「流已停顿、等不到下一条 chunk」的角落；时序由调用方编排保证（loadSubagentData
+   *   中本函数在 fetchAndInject 即 entry 基线恢复完成之后执行，拉取结果不会被后到的整体
+   *   恢复抹掉）。运行中判定用宽松口径 isRunning（resumable 续轮仍有真实流活动，拉取是
+   *   幂等只读查询，found:false 分支安全无副作用）；非 running 不拉（done/idle 无进行中流，
+   *   拉取是稳态冗余 RPC）。chunkOps 缺省不接线。
+   *
+   * 双键订阅（E-4 差异适配）：tee 产出帧 payload.sessionId 是**虚拟分区 id**（relay-tee），
+   * routeInbound 按 payload.sessionId 路由 → dispatchSession(virtualId)；旧 widget 通道
+   * payload.sessionId 是主 sid。两个 key 挂同一 handler，每条消息只命中一键。
+   *
+   * U8：第一个参数 `scope` 是 **drawer scope token**（非 panelId）——streamUnsub 按此 token
+   * keyed，drawer 单实例同一时刻只订阅一个 subagent（切 subagent 时先 stopStream 清旧再 set 起新）。
    *
    * @param scope drawer scope token（消费方传固定常量，如 SubagentTab 的 STREAM_SCOPE）
    * @param mainSessionId 主 session ID（WS 事件订阅键：旧 widget 通道帧路由 key）
-   * @param recordId subagent record id（过滤 stream_delta payload.recordId）
-   * @param virtualId 虚拟 session ID（tee 帧路由 key + chatStore.messages 分区 key + streaming delta/finalize 目标）
-   * @param chatApplyDelta chatStore.applySubagentStreamDelta（注入，W4 streaming delta 收口入口）
-   * @param chatFinalizeStream chatStore.finalizeSubagentStream（注入，W4 终态收口入口）
+   * @param recordId subagent record id（过滤 chunk / stream_delta payload.recordId）
+   * @param virtualId 虚拟 session ID（tee 帧路由 key + chatStore.messages 分区 key + 各收口入口目标）
+   * @param chatApplyDelta chatStore.applySubagentStreamDelta（注入，W 路径全量替换 + core 拉取响应应用复用）
+   * @param chatFinalizeStream chatStore.finalizeSubagentStream（注入，清除帧收口入口）
+   * @param chunkOps chunk 通道回调束（可选，§4.3 三入口；缺省 = chunk / 水位不接线）
    */
   function subscribeStream(
     scope: string,
@@ -305,19 +332,34 @@ export const useSubagentStore = defineStore('subagent', () => {
     virtualId: string,
     chatApplyDelta: ApplyDeltaFn,
     chatFinalizeStream: FinalizeStreamFn,
+    chunkOps?: SubagentStreamChunkOps,
   ): void {
     stopStream(scope)
     const handler = (msg: { type?: string; payload?: unknown }): void => {
+      // ── R 路径增量 chunk（唯一内容推送通道）──
+      if (msg.type === 'subagent.stream_chunk') {
+        if (!chunkOps) return // chunk 通道未接线（旧调用方兼容窗口）：忽略
+        const payload = msg.payload as { recordId?: string; msgSeq?: number; deltaSeq?: number; delta?: string }
+        if (payload.recordId !== recordId) return
+        chunkOps.applyChunk(virtualId, recordId, payload.msgSeq ?? 0, payload.deltaSeq ?? 0, payload.delta ?? '')
+        return
+      }
       if (msg.type !== 'subagent.stream_delta') return
-      const payload = msg.payload as { recordId?: string; lines?: string[] | undefined }
+      const payload = msg.payload as { recordId?: string; lines?: string[] | undefined; msgSeq?: number }
       if (payload.recordId !== recordId) return
 
       if (payload.lines === undefined) {
-        // 清除帧 = 单条 assistant 定稿：只收口 streaming 实体。订阅保留（续聊轮
-        // 的后续 delta 仍可达，R1 构造性消解）；定稿内容由 entry 帧投影链覆盖。
+        // 清除帧 = 单条 assistant 定稿：R 路径携带 additive msgSeq → 先置定稿水位
+        //（sealedMsgSeq 单调，拦截晚到拉取响应复活定稿消息）；W 路径无 msgSeq 不进状态机。
+        if (payload.msgSeq !== undefined && chunkOps) {
+          chunkOps.seal(virtualId, recordId, payload.msgSeq)
+        }
+        // 只收口 streaming 实体。订阅保留（续聊轮的后续 chunk 仍可达，R1 构造性消解）；
+        // 定稿内容由 entry 帧投影链覆盖。
         chatFinalizeStream(virtualId)
         return
       }
+      // W 路径全量形态（余留）：累积全文替换原样
       chatApplyDelta(virtualId, payload.lines)
     }
     // 双键：旧 widget 通道（payload.sessionId=主 sid）与 tee（payload.sessionId=虚拟分区 id）
@@ -325,6 +367,10 @@ export const useSubagentStore = defineStore('subagent', () => {
     streamUnsub.set(scope, () => {
       for (const unsub of unsubs) unsub()
     })
+    // [B2 §4.3 触发点①] 接入拉取：订阅建立完成之后对运行中 record 主动拉取一次。
+    if (chunkOps && isRunning(mainSessionId, recordId)) {
+      chunkOps.requestState(virtualId, recordId)
+    }
   }
 
   /**

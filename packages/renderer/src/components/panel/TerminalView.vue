@@ -20,7 +20,9 @@
   - 新建失败：「+」走全局错误通道（toast）；挂载自动新建走 inline 错误条 + 重试。
 -->
 <template>
-  <div data-testid="terminal-view" class="flex h-full flex-col">
+  <!-- data-find-skip：终端区排除在表面内查找之外（find-in-surface 第一期，设计留档 §2
+       ——xterm canvas 渲染，DOM 文本定位器对其无意义）；整树跳过含实例切换条。 -->
+  <div data-testid="terminal-view" data-find-skip class="flex h-full flex-col">
     <!-- 头部一行：实例切换条 + 右簇（+/收起）；空态占位与「+」引导由 u3-bar 组件内建 -->
     <TerminalInstanceBar
       :instances="instances"

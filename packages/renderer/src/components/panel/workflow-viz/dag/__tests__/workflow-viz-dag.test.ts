@@ -158,6 +158,20 @@ describe('WorkflowVizDag 停止叠加（D9 着色映射）', () => {
     const wrapper = mountDag(sampleDag(), { runStatus: 'done', runOutcome: 'cancelled' })
     expect(wrapper.find('[data-testid="wfvz-dag-node-n-biz"]').attributes('data-stop-tone')).toBe('neutral')
   })
+
+  it('正常完成 run（outcome=done）：无叠加（done 节点 success 六态自明，D9 done=success 供扫读）', () => {
+    const states: Record<string, WorkflowVizDagNodeStatus> = { 'n-gate': 'done', 'n-biz': 'skipped' }
+    const wrapper = mountDag(sampleDag(), { runStatus: 'done', runOutcome: 'done', nodeStates: states })
+    const node = wrapper.find('[data-testid="wfvz-dag-node-n-biz"]')
+    expect(node.attributes('data-stop-tone')).toBeUndefined()
+    // dot 单 fill 类 = tone 色（无基础中性类竞争——D3 剧本实锤的中性灰根因已修）
+    const dot = node.find('circle')
+    expect(dot.classes().filter((c) => c.startsWith('fill-['))).toEqual(['fill-[var(--neutral-dim)]'])
+    // done 节点 dot 恢复 success 绿
+    const doneDot = wrapper.find('[data-testid="wfvz-dag-node-n-gate"] circle')
+    expect(doneDot.classes()).toContain('fill-[var(--success)]')
+    expect(doneDot.classes().filter((c) => c.startsWith('fill-['))).toHaveLength(1)
+  })
 })
 
 describe('WorkflowVizDag 节点级渲染边界与零节点形态', () => {
@@ -195,5 +209,66 @@ describe('WorkflowVizDag 节点级渲染边界与零节点形态', () => {
     expect(wrapper.find('[data-testid="wfvz-dag-cluster-solo"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="wfvz-dag-node-solo"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="wfvz-dag-cluster-gate"]').exists()).toBe(false)
+  })
+})
+
+describe('WorkflowVizDag 视口水平居中（workflow-overlay-refine D1 / V1-wf③ 上区内容水平对中）', () => {
+  it('无布局环境（jsdom clientWidth 缺失）初始 tx 贴 0，渲染不破坏', () => {
+    const wrapper = mountDag()
+    expect(wrapper.find('[data-testid="wfvz-dag-viewport"]').attributes('transform')).toBe('translate(0,0) scale(1)')
+  })
+
+  it('run 切换重置：tx = (容器宽−画布宽)/2（k 恒 1 无 fit，画布宽 180 = 节点 156 + 分区左右内边距 24）', async () => {
+    const wrapper = mountDag()
+    const svg = wrapper.find('[data-testid="wfvz-dag-svg"]').element
+    Object.defineProperty(svg, 'clientWidth', { value: 1000 })
+    const solo: WorkflowDag = {
+      phases: [{ name: 'solo', order: 0 }],
+      nodes: [node({ id: 'solo', phase: 'solo' })],
+      edges: [],
+      parallelGroups: [],
+      loops: [],
+    }
+    await wrapper.setProps({ dag: solo })
+    // 单分区画布宽 180 → tx = (1000−180)/2 = 410；此前用户 pan 过也在重置中回到居中
+    expect(wrapper.find('[data-testid="wfvz-dag-viewport"]').attributes('transform')).toBe('translate(410,0) scale(1)')
+  })
+
+  it('画布宽于容器时 tx 贴 0（不产生负偏移把内容推出左缘）', async () => {
+    const wrapper = mountDag()
+    const svg = wrapper.find('[data-testid="wfvz-dag-svg"]').element
+    Object.defineProperty(svg, 'clientWidth', { value: 100 })
+    const next: WorkflowDag = {
+      phases: [{ name: 'wide', order: 0 }, { name: 'tail', order: 1 }],
+      nodes: [node({ id: 'w0', phase: 'wide' }), node({ id: 't0', phase: 'tail' })],
+      edges: [],
+      parallelGroups: [],
+      loops: [],
+    }
+    await wrapper.setProps({ dag: next })
+    // 两分区画布宽 392 > 容器 100 → tx = max(0, (100−392)/2) = 0
+    expect(wrapper.find('[data-testid="wfvz-dag-viewport"]').attributes('transform')).toBe('translate(0,0) scale(1)')
+  })
+})
+
+describe('WorkflowVizDag 画布视觉（workflow-overlay-refine D3）', () => {
+  it('V1-wf③ 标签/节点分层：分区标签 2xs/font-medium/0.03em 字距、节点名 3xs（字号档 class 断言）', () => {
+    const wrapper = mountDag()
+    const label = wrapper.find('[data-testid="wfvz-dag-cluster-gate"] text')
+    expect(label.classes()).toContain('text-[length:var(--text-2xs)]')
+    expect(label.classes()).toContain('font-medium')
+    expect(label.classes()).toContain('tracking-[0.03em]')
+    // 节点名与分区标签拉开半档（节点名恒 3xs——分层的另一侧基准）
+    const nodeName = wrapper.find('[data-testid="wfvz-dag-node-n-gate"] text')
+    expect(nodeName.classes()).toContain('text-[length:var(--text-3xs)]')
+  })
+
+  it('分区虚线描边升 border-strong 级 + dasharray 保留（弱化「面板感」、强化「分组感」）', () => {
+    const wrapper = mountDag()
+    const rect = wrapper.find('[data-testid="wfvz-dag-cluster-gate"] rect')
+    expect(rect.classes()).toContain('stroke-border-strong')
+    expect(rect.classes()).toContain('[stroke-dasharray:5_4]')
+    // 描边升档不回退既有 hairline
+    expect(rect.classes()).not.toContain('stroke-border-hairline')
   })
 })

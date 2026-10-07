@@ -42,18 +42,25 @@
   --neutral-faint: #46464c;     /* 极弱/装饰 */
   --neutral-ico: #86868c;       /* 图标默认色 */
   --neutral-ico-hover: #dedee2; /* 图标 hover 色 */
+  /* 对话流专属名称色（2026-10-06 对话流视觉裁决，demo --w-name 反写）：
+     workflow / subagent 的具体名称——暖驼微暖低饱和，不随主色态变化；
+     亮色主题（[data-theme="light"]）覆盖加深档，preset 不覆盖 */
+  --name: #d7b894;
+  /* 执行中工具图标扫光带（2026-10-06 对话流视觉裁决，demo --w-sheen 反写）：
+     暗色亮带 / 亮色暗带反转，消费点 sheen-x keyframes（style.css 底部动画区） */
+  --sheen: rgba(236, 236, 236, 0.55);
 
   /* ── 边框/分隔 ─────────────────────────────────────────── */
   --border: rgba(255, 255, 255, 0.07);
   --border-strong: rgba(255, 255, 255, 0.13);
   --hairline: rgba(255, 255, 255, 0.05); /* 行分隔 / drawer L1 栏底线 */
 
-  /* ── 主色（v6 玄：水墨降饱和，克制放开档）────────────── */
-  --accent: #cfcfd4;
-  --accent-hover: #e0e0e4;
+  /* ── 主色（玄：近无彩度画布上的一枚弱蓝灰 accent，ui-signal-density D3 定稿）── */
+  --accent: #a5adc2;
+  --accent-hover: #b5bdd4;      /* accent 等色相提亮一档（OKLCh dL≈0.052，与其余 preset 同模式） */
   --accent-soft: color-mix(in oklch, var(--accent) 10%, transparent);
   --accent-ring: color-mix(in oklch, var(--accent) 30%, transparent); /* 选中态内描边（Card-Active），见 design-system §2 */
-  --accent-fg: #1a1a1c;         /* accent 实色上的文字（玄主题用深字） */
+  --accent-fg: #1a1a1c;         /* accent 实色上的文字（玄主题用深字）；对 #a5adc2 对比 7.74:1 过 AA（D3 门禁） */
 
   /* ── 状态色（水墨降饱和，克制放开档）────────────────── */
   --success: #78a87e;
@@ -73,6 +80,11 @@
   /* ── 字体 ───────────────────────────────────────────────── */
   --font-sans: system-ui, 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
   --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  /* 字重三档（2026-10-06 对话流视觉裁决）：正文 / 中档 / 粗体唯一来源，
+     消费方用 Tailwind 任意值类 [font-weight:var(--fw-*)] 引用 */
+  --fw-text: 400;               /* 日常文字 */
+  --fw-mid: 500;                /* 中档：行容器 / 组头 */
+  --fw-bold: 600;               /* 粗体：动作词 / 工具名 */
 
   /* 字号 scale（v6 §4：calc 自适应，2026-08-02 整体上移一档 base 13→14）
    * 自适应公式：calc(Npx × --font-scale-u × --font-scale-mq)
@@ -226,6 +238,9 @@
   --neutral-faint: #c7c5c0;
   --neutral-ico: #82807b;
   --neutral-ico-hover: #2b2a28;
+  /* 对话流专属名称色（亮色加深档，对比 5.2:1）+ 扫光带反转暗带（同 :root 注释） */
+  --name: #8c6231;
+  --sheen: rgba(23, 23, 26, 0.3);
 
   --border: rgba(0, 0, 0, 0.07);
   --border-strong: rgba(0, 0, 0, 0.14);
@@ -519,10 +534,6 @@ body,
 
 }
 
-body {
-  user-select: none;
-}
-
 button {
   font-family: inherit;
   font-size: inherit;
@@ -530,6 +541,23 @@ button {
   background: none;
   border: none;
   cursor: pointer;
+}
+
+/* 内容默认可鼠标框选（翻转原 body { user-select: none } 全局禁选——内容是开放集合，
+   逐处补 select-text 永远补不全；交互控件是有限封闭集合，在此统一禁选）。
+   拖拽区（-webkit-app-region:drag）平台语义天然不可选，无需另设。 */
+button,
+a,
+label,
+summary,
+[role='button'],
+[role='tab'],
+[role='menuitem'],
+[role='option'],
+[role='switch'],
+[role='checkbox'],
+[role='radio'] {
+  user-select: none;
 }
 
 input,
@@ -552,6 +580,18 @@ textarea {
 ::-webkit-scrollbar-thumb:hover { background: var(--neutral-dim); }
 /* Firefox */
 * { scrollbar-width: thin; scrollbar-color: var(--neutral-faint) transparent; }
+
+/* 表面内查找（find-in-surface）命中高亮：CSS Custom Highlight API（Electron 42 / Chromium 142 已支持）。
+   paint 用 ::highlight 伪元素着色，不往 DOM 包 span——流式重渲染与 markdown 净化管线零干扰。
+   高亮注册点 = composables/features/find/highlight-painter.ts（CSS.highlights 'find-hits' / 'find-active'）。 */
+::highlight(find-hits) {
+  background-color: var(--accent-soft);
+  color: var(--accent-fg);
+}
+::highlight(find-active) {
+  background-color: var(--accent);
+  color: var(--accent-fg);
+}
 
 /* 注：demo base.css 的 .btn 原语系统不搬入此文件——renderer 用本地 ui 原语 <Button> 组件
  * （packages/renderer/src/components/ui/button），不消费 .btn-* class。按钮 variant/尺寸
@@ -582,16 +622,19 @@ textarea {
 }
 @keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
 @keyframes loader-spin { to { transform: rotate(360deg); } }
-/* running toolcall 透明度呼吸（chat/Block.vue 模板 Tailwind 任意值类
-   animate-[toolcall-breathe_2.4s_ease-in-out_infinite] 消费；keyframes 必须在
-   全局定义——scoped 内定义会被编译器改名为哈希名而失效） */
-@keyframes toolcall-breathe {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
+/* 执行中工具图标扫光（2026-10-06 对话流视觉裁决）：
+   chat/Block.vue 普通工具块与 bash 组头的 running 图标容器（relative overflow-hidden
+   rounded-sm）内叠加 absolute inset-0 扫光层，Tailwind 任意值类
+   animate-[sheen-x_2.8s_cubic-bezier(.45,0,.25,1)_infinite] +
+   bg-[linear-gradient(100deg,transparent_22%,var(--sheen)_50%,transparent_78%)] 消费；
+   keyframes 必须在全局定义——scoped 内定义会被编译器改名为哈希名而失效 */
+@keyframes sheen-x {
+  0% { transform: translateX(-130%); }
+  100% { transform: translateX(130%); }
 }
 /* Gantt 运行段透明度呼吸（workflow-viz WorkflowVizGantt 模板 Tailwind 任意值类
-   animate-[wfvz-gantt-pulse_1.5s_ease-in-out_infinite] 消费；同 toolcall-breathe
-   理由 keyframes 必须全局定义） */
+   animate-[wfvz-gantt-pulse_1.5s_ease-in-out_infinite] 消费；同 sheen-x 理由
+   keyframes 必须全局定义） */
 @keyframes wfvz-gantt-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }

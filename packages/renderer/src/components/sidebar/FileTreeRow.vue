@@ -25,7 +25,7 @@
     <!-- 展开失败占位（点击沿用旧语义：已展开目录 → 折叠） -->
     <div
       v-else-if="row.hint === 'error'"
-      class="flex items-center gap-1.5 py-1 pr-2 font-mono text-[length:var(--text-3xs)] text-danger"
+      class="flex select-none items-center gap-1.5 py-1 pr-2 font-mono text-[length:var(--text-3xs)] text-danger"
       :style="rowPaddingStyle"
       :data-testid="`file-tree-error-${row.path}`"
       @click="emit('toggle', row)"
@@ -48,7 +48,7 @@
     <!-- 目录行 -->
     <div
       v-else-if="row.type === 'dir'"
-      class="flex w-max min-w-full cursor-pointer items-center gap-1 rounded-md py-0.5 pr-2 font-mono text-[length:var(--text-xs)] transition-colors hover:bg-surface-hover"
+      class="flex w-max min-w-full cursor-pointer select-none items-center gap-1 rounded-md py-0.5 pr-2 font-mono text-[length:var(--text-xs)] transition-colors hover:bg-surface-hover"
       :style="rowPaddingStyle"
       :data-testid="`file-tree-dir-${row.path}`"
       @click="emit('toggle', row)"
@@ -72,7 +72,7 @@
     <!-- 文件行（v-else 紧邻上方目录 v-else-if，链绑定到 row.type 判断） -->
     <div
       v-else
-      class="flex w-max min-w-full cursor-pointer items-center gap-1 rounded-md py-0.5 pr-2 transition-colors hover:bg-surface-hover"
+      class="flex w-max min-w-full cursor-pointer select-none items-center gap-1 rounded-md py-0.5 pr-2 transition-colors hover:bg-surface-hover"
       :class="{ 'bg-surface': selected }"
       :style="rowPaddingStyle"
       :data-testid="`file-tree-file-${row.path}`"

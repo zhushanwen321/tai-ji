@@ -39,11 +39,12 @@
     <!-- 对话流 + drawer 动态宽度区（feat-chat-flow-width，手写 flex 替换 reka-ui Splitter）。
          替换原因：① Splitter 单 panel 时强制 flexGrow:1（computePanelFlexBoxStyle），无法实现
          「无 drawer 对话流限宽 3/4」；② SplitterPanel 挂载/卸载瞬时完成 layout 重算，无法做
-         开合宽度动画。手写布局三点能力：无 drawer 时 main 占 75% 且 margin-inline calc 居中
-         （对话流整体在工作区视觉居中，两侧各 12.5% 留白），main 层 --content-max-w:100% 解除
-         720px 封顶（内容列占满 75% 区域）；drawer 打开时 main/drawer 双侧 width + margin-inline
-         transition 动画到拆分比例；handle 拖动（pointer capture 跟手，拖动期间 transition:none）
-         + 键盘微调 + localStorage 持久化。
+         开合宽度动画。手写布局能力（ui-signal-density D10 2026-10-06 修订）：无 drawer 时
+         main 卡撑满公共容器（width 100% + margin 0），卡内内容列（对话流 + composer，消费
+         .content-col 的 max-width: var(--content-max-w)）限宽 60% 居中——留白在卡内而非卡外；
+         60% 实算低于 720px 下限即撑满，drawer 挤窄后恒撑满（派生单处在 useDrawerSplitWidth）；
+         drawer 打开时 main width 动画到拆分比例、内容列恒撑满；handle 拖动（pointer capture
+         跟手，拖动期间 transition:none）+ 键盘微调 + localStorage 持久化。
          drawer wrapper 常驻（width 0 ↔ drawerPct%）承载 width 动画；DrawerPanel 内部 aside
          Transition（淡入右移）与 wrapper width 动画同时长（--duration-slow），叠加和谐。
          [HISTORICAL] taiji:splitter-layout 派发已随消费方退役（终态同步 2026-10-03）：
@@ -67,9 +68,7 @@
           :session-id="leaf.sessionId ?? undefined"
           :session-file="sessionFileOf(leaf)"
           :git-branch="gitBranchOf(leaf)"
-          :git-indicator="gitIndicatorOf(leaf)"
           :status="statusOf(leaf)"
-          @open-git="openDrawerTab('git')"
           @toggle-drawer="onDrawerToggle()"
         />
         <Panel
@@ -111,12 +110,16 @@
           :data-state="isDragging ? 'drag' : undefined"
         />
       </div>
+      <!-- data-find-surface：表面内查找（find-in-surface）的表面标记——仅在 drawer 开着时
+           存在（关态 undefined），使「回退栈序按属性查询」天然只命中开着的表面。
+           FindBar 挂 drawer-area 内 absolute 右上（FindBar 根自带定位类）。 -->
       <div
         data-fs-scope="drawer"
-        class="h-full min-w-0 overflow-hidden"
+        class="relative h-full min-w-0 overflow-hidden"
         :class="splitTransitionClass"
         :style="{ width: drawerOpen ? `${drawerPct}%` : '0%' }"
         data-testid="drawer-area"
+        :data-find-surface="drawerOpen ? 'right-drawer' : undefined"
       >
         <DrawerPanel
           :is-open="drawerOpen"
@@ -178,6 +181,7 @@
             </div>
           </template>
         </DrawerPanel>
+        <FindBar v-if="drawerOpen" surface-kind="right-drawer" />
       </div>
     </div>
     <!-- 底抽屉（display-containers §6.2/§7.3）：插在 split 行之下、StatusBar 之上，横跨全宽
@@ -193,6 +197,7 @@
       class="relative shrink-0 overflow-hidden"
       :class="bottomTransitionClass"
       :style="{ height: bottomHeightStyle, marginTop: '4px' }"
+      :data-find-surface="bottomOpen ? 'bottom-drawer' : undefined"
     >
       <!-- 上沿手柄（三卡化）：命中区跨进卡上方缝（-top-1 h-1 覆盖 4px 缝，视觉线贴卡顶边）——
            缝即拖拽区。卡间缝统一为窗口边距 a = p-1 的 4px（2026-10-04 三轮裁决：实际边距
@@ -228,6 +233,9 @@
           />
         </div>
       </Transition>
+      <!-- 挂 Transition 外（Transition 要求单子项）；bottom-drawer 壳已 relative，FindBar
+           absolute 右上覆盖在终端卡之上。终端本体经 TerminalView 根的 data-find-skip 排除。 -->
+      <FindBar v-if="bottomOpen" surface-kind="bottom-drawer" />
     </div>
     </div>
     <!-- ExtensionHost 状态栏（audit §12.1）：数据经 app.provide STATUS_BAR_SOURCE_KEY 注入（useExtensionHostBridge），
@@ -245,7 +253,6 @@ import type { PanelLeaf } from '@taiji/shared'
 import {
   bindDrawerSessionId,
   useDrawerControl,
-  openDrawerTab,
   closeDrawer,
   toggleDrawer,
   setDrawerTab,
@@ -261,9 +268,10 @@ import { usePanelStore } from '@/stores/panel'
 import { useSessionStore } from '@/stores/session'
 import { useSessionDerivations } from '@/composables/features/chat/useSessionDerivations'
 import { provideGitStatus } from '@/composables/features/file-tree/useGitStatus'
-import type { GitIndicator } from '@/composables/features/file-tree/useGitStatus'
 import { useDrawerSplitWidth, useBottomDrawerHeight } from '@/composables/features/drawer/useDrawerSplitWidth'
 import { focusComposer } from '@/composables/features/app/key-orchestrator'
+import { useFindInSurface } from '@/composables/features/find/useFindInSurface'
+import FindBar from '@/components/find/FindBar.vue'
 import { usePlanDrawerSync } from '@/composables/use-plan-drawer-sync'
 import { useChatStore } from '@/stores/chat'
 import { useSessionTrace, clearTraceSelection } from '@/composables/features/trace/useSessionTrace'
@@ -421,16 +429,10 @@ function onDrawerToggle(): void {
 
 /** git 状态唯一数据源（panel/spec.md：git 移入抽屉后）。
  *  在 PanelContainer 层按 panel 的 session 持有实例 → GIT_STATUS_KEY provide →
- *  GitPanel（抽屉内）注入。单实例避免双实例 stale（抽屉内 stage 后同步更新）。getter 随 panel 响应。 */
-const git = provideGitStatus(() => panelSessionId.value)
-
-/**
- * 各 Panel 透传给 PanelHeader 的 git 脏状态指示。
- * git 状态由本容器 provideGitStatus 持有（不依赖具体 leaf），参数仅为与其他 xxxOf(leaf) 保持调用一致。
- */
-function gitIndicatorOf(_l: PanelLeaf): GitIndicator | undefined {
-  return git.indicator.value
-}
+ *  GitPanel（抽屉内）注入。单实例避免双实例 stale（抽屉内 stage 后同步更新）。getter 随 panel 响应。
+ *  git 入口按钮已从 PanelHeader 移除（用户裁决 2026-10-06）：仅删顶栏入口，drawer git tab
+ *  能力保留（openDrawerTab('git') 通道与 GitPanel 挂载不动，后续可经编程路径再接入口）。 */
+provideGitStatus(() => panelSessionId.value)
 
 // ── AC-13：drawer 打开期间 agent 新消息感知（壳层职责，C3；旧 SideDrawer 逻辑迁移）──
 // drawer 打开时对话流被遮挡，agent 新消息需非侵入式感知（spec §4.5）。
@@ -462,6 +464,13 @@ watch(
   },
 )
 
+// 表面内查找（find-in-surface）：切 session = 两个 drawer 的内容 DOM 全量换血，旧命中
+// 区间全部失效——搜索状态不持久化（设计留档 §2），直接关。关闭路径同时清高亮。
+const findInSurface = useFindInSurface()
+watch(panelSessionId, () => {
+  if (findInSurface.isOpen.value) findInSurface.close()
+})
+
 /**
  * [display-containers §6.7 W1] ESC 关抽屉已并入键盘栈序编排器（key-orchestrator 唯一属主）：
  * 旧壳层 window keydown 监听已拆除——双监听双触发（一次 Esc 连剥两层），且 Esc 需按焦点
@@ -470,9 +479,9 @@ watch(
  */
 
 // ── 动态宽度（feat-chat-flow-width）：drawer 开合动画 + 可拖动宽度 ──
-// 宽度模型/拖动/键盘/持久化/BrowserPane rect 同步均在 useDrawerSplitWidth（含替换
-// reka-ui Splitter 的原因）；模板绑定 splitAreaEl + mainAreaStyle（width + margin-inline
-// 居中 + --content-max-w 封顶解除）+ drawer 侧 width style + handle 事件。
+// 宽度模型/拖动/键盘/持久化均在 useDrawerSplitWidth（含替换 reka-ui Splitter 的原因、
+// 内容列 60% + 720px 下限的派生）；模板绑定 splitAreaEl + mainAreaStyle（width + margin +
+// --content-max-w 内容列令牌）+ drawer 侧 width style + handle 事件。
 const splitAreaEl = ref<HTMLElement | null>(null)
 const {
   drawerPct,

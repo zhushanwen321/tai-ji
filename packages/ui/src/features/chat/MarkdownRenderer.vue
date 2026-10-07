@@ -272,9 +272,8 @@ function onClick(e: MouseEvent): void {
 
 <style scoped>
 /* ── markdown 排版（design-tokens 语义色，不硬编码）──
-   user-select:text 走 Tailwind select-text 类（template 的 .md-render div），
-   覆盖 body 全局 user-select:none（style.css:165）—— 那条全局 none 是为让
-   chrome/按钮区不可选，markdown 正文/代码是可读内容应允许框选。 */
+   全局默认已翻转：style.css 内容默认可选，交互控件统一禁选。
+   .md-render div 的 select-text 类保留为显式语义标记（行为上已与全局默认一致）。 */
 .md-render :deep(h1),
 .md-render :deep(h2),
 .md-render :deep(h3),

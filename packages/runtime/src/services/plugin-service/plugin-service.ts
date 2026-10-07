@@ -26,7 +26,6 @@ import { EXTERNAL_PLUGIN_ENABLED, EXTERNAL_PLUGIN_DISABLED_MESSAGE } from './plu
 import { resolveEsmLoaderExecArgv } from './plugin-esm-execargv.js'
 import { toPluginInfos } from './plugin-info-mapper.js'
 import { removePluginHookEntries, removePluginToolEntries, removePluginCommandEntries } from './plugin-contributions.js'
-import { dismissRuntimeModalForPluginGone } from './api/ui-api.js'
 import { broadcastOrBrokerWith, publishViewUpdateTo, createUiRequestBroadcastFn } from './plugin-broadcast.js'
 import type { PluginBroadcastDeps, ViewUpdateBroadcastPayload } from './plugin-broadcast.js'
 import { shutdownPluginCollaborators } from './plugin-shutdown.js'
@@ -306,8 +305,6 @@ export class PluginService implements IPluginService {
       // 原自动 rebuild 重激活链已退役）。
       for (const pluginId of pluginIds) {
         this.statusBarRegistry.clearForPlugin(pluginId)
-        // AP-2 关②：runtime modal 槽清理 + closed{plugin-gone} 广播（崩溃插件的层必须收起）
-        dismissRuntimeModalForPluginGone(pluginId)
         this.removeHookEntriesFor(pluginId)
         this.removeToolEntriesFor(pluginId)
         this.removeCommandEntriesFor(pluginId)
@@ -428,8 +425,6 @@ export class PluginService implements IPluginService {
         await this.activator.deactivatePlugin(pluginId, this.host)
         this.activator.stopWatching(pluginId) // 停止热重载监听
         this.statusBarRegistry.clearForPlugin(pluginId) // 清理 status bar items
-        // AP-2 关②：runtime modal 槽清理 + closed{plugin-gone} 广播（禁用插件的层必须收起）
-        dismissRuntimeModalForPluginGone(pluginId)
         this.removeHookEntriesFor(pluginId) // P-1：清 hook 注册，禁用插件的 hook 不再执行
         // Fix-7：禁用插件的工具/命令同步清注册——与 P-1 的 hook 清理对称，否则禁用插件的
         // 工具仍可被执行路由、命令 invoke 仍发向该插件（worker 已 deactivate，必超时）
@@ -540,8 +535,6 @@ export class PluginService implements IPluginService {
 
     // 清理 status bar items
     this.statusBarRegistry.clearForPlugin(pluginId)
-    // AP-2 关②：runtime modal 槽清理 + closed{plugin-gone} 广播（卸载插件的层必须收起）
-    dismissRuntimeModalForPluginGone(pluginId)
 
     this.broadcastPluginList()
     // RT-6#6：内存清理与回滚广播已全部完成，此刻才把磁盘删除失败抛给调用方——
@@ -711,7 +704,6 @@ export class PluginService implements IPluginService {
       // notifyEntryInvalidation 派发共享同一实例；pending 表直读（pendingUiRequests
       // 是 UiRequestQueue 公开字段，无新增队列面）。
       entryInvalidation: this.entryInvalidationDispatch,
-      hasPendingUiRequest: () => this.uiRequestQueue.pendingUiRequests.size > 0,
       deliverInvokeResult: (handlerId, payload, sourceWorkerId) =>
         deliverPluginInvokeResult(
           { commandRegistry: this.commandRegistry, commandInvokes: this.commandInvokes },
