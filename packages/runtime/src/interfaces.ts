@@ -229,6 +229,13 @@ export interface ISessionService {
    */
   getSubagentHistory(sessionId: string, subagentId: string): Promise<{ messages: Message[]; truncated: boolean }>
   /**
+   * 运行中 subagent 流状态只读快照（B2 subagent-stream-chunk §4.1，session.getSubagentStreamState
+   * RPC 后端）。found=false = 该 record 当前无进行中流（未开始 / 已定稿 / 无在管 tee），
+   * 此时 msgSeq/lastDeltaSeq 恒 0、lines 恒空数组——协议合法回执，非错误（无独立错误码
+   * 词表）。同步内存读（RelayTee 三元组单次读出，构造性一致无锁）。
+   */
+  getSubagentStreamState(sessionId: string, recordId: string): ServerMessageMap['session.getSubagentStreamState']
+  /**
    * [U7] 子代理引擎配置视图（engines.json 动态引擎列表 + config.json defaultEngine 合成）。
    * 纯磁盘读取，不依赖 pi 进程活跃；engines.json 缺失/损坏时 engines 兜底 ['pi']。
    */

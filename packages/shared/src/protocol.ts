@@ -127,6 +127,10 @@ export type ClientMessageType =
   // wave:runtime-wiring 已在 ClientMessageMap 补登记 request payload 形状（见下方）。
   | 'session.subscribe' | 'session.unsubscribe'
   | 'session.getSubagents' | 'session.getSubagentHistory'
+  // subagent 流状态拉取（B2 subagent-stream-chunk §4.1）：按 recordId 读 RelayTee 既有内存
+  // 状态的只读快照——增量 chunk 消息的失步恢复与接入首拉通道。reply 与 request 同名
+  //（session.subscribe 模式，sendCommand 按 id resolve）。
+  | 'session.getSubagentStreamState'
   // plan 模式重设计（D1-⑥ 冷启动首拉）：getPlanState 读 session JSONL 内最后一条
   // plan-state entry 派生状态视图（stateSnapshot 是 bus 内存态、pi exit 即清空，
   // 冷送达/切换首拉靠本 RPC——与 session.getSubagents 首拉同构）。
@@ -594,6 +598,9 @@ export interface ClientMessageMap {
   // subagent 列表/对话流读取（runtime 直读主 session JSONL + subagent JSONL，不依赖扩展）
   'session.getSubagents': { sessionId: string }
   'session.getSubagentHistory': { sessionId: string; subagentId: string }
+  // session.getSubagentStreamState（B2 subagent-stream-chunk §4.1）：recordId 定位目标
+  // subagent record；reply 与 request 同名（payload 消费型，形状见 ServerMessageMapBase）。
+  'session.getSubagentStreamState': { sessionId: string; recordId: string }
   // plan 模式（plan 模式重设计 D1-⑥/D5）：getPlanState 状态首拉，reply 复用 session.planState
   // 广播 payload（同 session.getSubagents → session.subagents 复用形态）；abortPlan 为 PlanModeBar
   // 退出命令（确认 Popover 后），
@@ -1093,6 +1100,10 @@ export type ServerMessageType =
   | 'session.revokeMessage'
   | 'project.loaded'
   | 'session.subagents' | 'session.subagentHistory'
+  // session.getSubagentStreamState（B2 subagent-stream-chunk §4.1）：运行中 subagent 流状态
+  // 拉取 RPC 的 reply type（与 request 同名——session.subscribe / delivery.* 同款 payload
+  // 消费型同名模式；payload 见 ServerMessageMapBase 对应条目）。
+  | 'session.getSubagentStreamState'
   // plan 模式状态投影广播（plan 模式重设计 D1）：stateSnapshot 'plan' typeKey 的 live 载体帧
   //（last-value 语义——重连/切回经 stateSnapshot 回放自动恢复）；冷启动/切换首拉走
   // session.getPlanState RPC，reply 复用本 payload。
@@ -1110,7 +1121,10 @@ export type ServerMessageType =
   | 'session.traceEntries' | 'session.traceEntryAppended'
   // session-trace（design §3.1 失败路径）：现取当前 system prompt 的 reply（当前值非历史）。
   | 'session.currentSystemPrompt'
-  | 'subagent.stream_delta' | 'subagent.directive'
+  // subagent.stream_chunk（B2 subagent-stream-chunk §4.1）：增量内容推送，transient 语义与
+  // subagent.stream_delta 同族（不分配 seq、不入 ring、不写快照，直传订阅者，断连即丢；
+  // topic 登记在 runtime message-bus TOPIC_TABLE）。
+  | 'subagent.stream_delta' | 'subagent.stream_chunk' | 'subagent.directive'
   | 'message.message_start' | 'message.text_delta' | 'message.thinking_delta'
   | 'message.thinking_start' | 'message.thinking_end'
   | 'message.tool_call_start' | 'message.tool_call_end'
@@ -2243,6 +2257,28 @@ export interface ServerMessageMapBase {
   // pi 扩展层合并 text_delta 后经 ctx.ui.setWidget("subagent-stream-<recordId>", lines) 转发，
   // runtime EventAdapter 捕获后转为此 WS 帧。lines 是累积全文（split('\n')），undefined = 终态清除。
   'subagent.stream_delta': { sessionId: string; recordId: string; lines: string[] | undefined }
+  // subagent.stream_chunk（B2 subagent-stream-chunk §4.1）：running subagent 的增量内容推送，
+  // 唯一的内容推送通道。transient 主题（与 subagent.stream_delta 同族：不分配 seq、不入 ring、
+  // 不写快照，直传订阅者，断连即丢，无回放；topic 登记在 runtime message-bus TOPIC_TABLE）。
+  // delta 是真增量片段（非累积全文），消费端按 (recordId, msgSeq, deltaSeq) 双序号拼合：
+  // - msgSeq = per-record assistant 消息序号（表达消息边界，现协议靠全量覆盖隐式表达）；
+  //   产生端从 1 开始（首条 assistant 消息 = 1，message_start 递进），消费端状态机初始 0；
+  // - deltaSeq = per-message 从 0 递增。
+  // 失步（deltaSeq 跳号）与接入（晚订阅/刷新）恢复走 session.getSubagentStreamState 拉取；
+  // 定稿仍由 subagent.stream_delta 的清除消息（lines: undefined）+ entry 权威链收敛。
+  'subagent.stream_chunk': { sessionId: string; recordId: string; msgSeq: number; deltaSeq: number; delta: string }
+  // session.getSubagentStreamState：session.getSubagentStreamState RPC 的 reply（与 request
+  // 同名——session.subscribe 模式）。运行中 subagent 流状态的只读快照（RelayTee 既有内存
+  // 状态的投影，不新增保留状态）：
+  // - found=false = 该 record 当前无进行中流（未开始或已定稿）；此时 msgSeq/lastDeltaSeq
+  //   无流式语义（值 0），lines 为空数组——常态可达（drawer 关闭窗口内流已定稿）；
+  // - found=true 时 lines = 当前消息累积全文（textAccumulated 的 split('\n') 形态，与旧
+  //   stream_delta payload 的 lines 同形，消费端复用现有全量替换入口）；msgSeq = 该全文
+  //   所属的消息序号；lastDeltaSeq = 这份全文包含到第几条 delta（水位：记录已处理到哪的
+  //   位置标记，消费端用作去重判据）。
+  // 失败走统一 error envelope（本 RPC 是同步内存读，设计内「无进行中流」= found:false
+  // 合法回执，不是错误；无独立错误码词表）。
+  'session.getSubagentStreamState': { found: boolean; msgSeq: number; lastDeltaSeq: number; lines: string[] }
   // subagent.directive：用户定向消息的 live 广播（@ subagent chip 发送 → extension 留痕
   // custom_message entry → pi message_end{role:'custom'} → 本广播，设计 §3.3.3a live 链路）。
   // 带 sessionId（架构约定 #7 session 隔离）；renderer（U2b）聊天流据此插定向气泡
@@ -2922,6 +2958,9 @@ export interface ReplyPayloadMap {
   'session.getTraceEntries': ServerMessageMap['session.traceEntries']
   'session.fetchCurrentSystemPrompt': ServerMessageMap['session.currentSystemPrompt']
   'session.getSubagentHistory': ServerMessageMap['session.subagentHistory']
+  // session.getSubagentStreamState：payload 消费型（同名 reply——session.subscribe 模式）。
+  // renderer 读 found/msgSeq/lastDeltaSeq/lines 做水位去重与全量替换（B2 subagent-stream-chunk §4.3）。
+  'session.getSubagentStreamState': ServerMessageMap['session.getSubagentStreamState']
   'session.getSubagentEngineConfig': ServerMessageMap['session.subagentEngineConfig']
   'session.setSubagentDefaultEngine': ServerMessageMap['session.subagentDefaultEngineSet']
   'session.getSubagents': ServerMessageMap['session.subagents']

@@ -1646,6 +1646,12 @@ async function main(): Promise<void> {
   // ── E-2：relay socket server（listen 后、后台初始化前）──────────────────
   // 早建早发现权限问题（设计 §4.1）。
   await initRelayServerOrExit(effectiveRoot, messageBus)
+  // B2 subagent-stream-chunk §4.1：session.getSubagentStreamState 数据源组合根接线。
+  // relay registry 句柄归 index.ts（rollingRestart relayInFlight 同款约束：services 层不
+  // value import 有状态 IO infra）；闭包按调用时刻解析——未启用/测试形态
+  // getActiveRelayRegistry() 为 undefined，service 侧归一 found:false 缺省形态。
+  sessionService.setSubagentStreamStateSource((sessionId, recordId) =>
+    getActiveRelayRegistry()?.getStreamStateByRecord(sessionId, recordId))
   // ── u5b-runtime-forensics D6-②：内存水位定时器启动 ──────────────────
   // listen 成功后启动（依赖 sessionService/pm 均已装配）。activeSession 数含公共
   // session（getActiveSessionIds 全量 lifecycle 键），pi 进程数是 ProcessManager 托管
