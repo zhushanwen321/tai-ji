@@ -424,7 +424,7 @@ defineExpose({ canSubmit, submit })
               :model-value="selectedModel ?? ''"
               :has-candidates="models.length > 0"
               item-test-id-prefix="schedule-create-model"
-              @update:model-value="selectedModel = $event; modelPickerOpen = false"
+              @update:model-value="selectedModel = $event.id; modelPickerOpen = false"
             />
           </div>
         </div>

@@ -40,6 +40,7 @@
       <ModelPickerPanel
         :groups="pickerGroups"
         :model-value="bareModelId(props.selected)"
+        :model-value-provider-id="selectedProviderId"
         :has-candidates="hasAnyModel"
         hover-select
         @hover-select="onHoverModel"
@@ -120,6 +121,12 @@ const { pickerGroups, hasAnyModel, resolveProviderId } = useModelPickerData()
 /** 当前选中裸 id（hover 去重与高亮同用此值，复合串先拆段） */
 const selectedBare = computed(() => bareModelId(props.selected))
 
+/** 当前选中的 provider 归属（复合串拆段——高亮双匹配依据，同 short-id 多 provider 不双行同亮） */
+const selectedProviderId = computed(() => {
+  const i = props.selected.lastIndexOf('/')
+  return i > 0 ? props.selected.slice(0, i) : undefined
+})
+
 // ── U4 单飞锁 + 本地 pending 去重（hover 触发面并发收敛）──
 // 去重基准 = 「runtime 已确认值 ∪ 本地已 emit 未回流目标」：hover 已启动切换后，
 // 同目标 click 不再发第二条 RPC；pending 在目标回流（selected/level 更新到位）或
@@ -141,26 +148,27 @@ watch(
 )
 
 /**
- * 裸 id → emit selectModel：反查 providerId，失败静默忽略（渲染与点击之间列表被刷新时
- * 不伪造 provider——与 ModelSelectPopover 同一兜底，逻辑在 model-picker-data 单份持有）。
+ * 裸 id + 组级 providerId → emit selectModel：provider 归属以被点行的组为准（同
+ * short-id 多 provider 歧义修复，D3 顺带发现 7），缺省回落裸 id 反查；反查失败静默
+ * 忽略（渲染与点击之间列表被刷新时不伪造 provider——与 ModelSelectPopover 同一兜底）。
  */
-function emitModel(modelId: string): void {
+function emitModel(modelId: string, providerId?: ProviderId): void {
   if (props.switching) return // U4：切换中忽略 hover/click 触发
   if (modelId === selectedBare.value || modelId === pendingModelBare.value) return // 同值不 emit（hover 天然去抖 + pending 幂等）
-  const provider = resolveProviderId(modelId)
+  const provider = providerId ?? resolveProviderId(modelId)
   if (!provider) return
   pendingModelBare.value = modelId
   emit('selectModel', { modelId, provider })
 }
 
 /** hover 模型行：切换但**不关**弹层（D2） */
-function onHoverModel(modelId: string): void {
-  emitModel(modelId)
+function onHoverModel(payload: { id: string; providerId?: ProviderId }): void {
+  emitModel(payload.id, payload.providerId)
 }
 
 /** click 模型行：切换并关弹层（switching 中不 emit，仅关浮层） */
-function onPickModel(modelId: string): void {
-  emitModel(modelId)
+function onPickModel(payload: { id: string; providerId?: ProviderId }): void {
+  emitModel(payload.id, payload.providerId)
   open.value = false
 }
 
