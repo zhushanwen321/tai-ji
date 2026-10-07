@@ -814,6 +814,9 @@ describe("capabilities（D5：仅 eventGranularity 变）", () => {
       interrupt: "kill-only",
       permissionMode: "native",
       maxTurns: false,
+      // [subagent-model-switch] zcode 引擎不在模型切换设计范围——unsupported 如实声明
+      // （zcode-engine.ts capabilities 快照同源跟随）
+      setModel: "unsupported",
     });
   });
 

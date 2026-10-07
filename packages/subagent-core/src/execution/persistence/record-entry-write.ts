@@ -279,6 +279,22 @@ export function buildAdoptedManifestProjection(
     slug: identity.slug,
     ...(bound !== undefined ? { engine: bound.engine } : {}),
     ...(bound !== undefined ? { engineHandle: bound.engineHandle } : {}),
+    // [H2 W1 / D3 缺陷五] 来源身份与覆盖记账随收编投影下行（identity created 帧承载
+    // 身份、fold 承载覆盖——收编的 workflow 成员对 run 级查询保持可见）。
+    ...(identity.origin === "workflow" ? { origin: "workflow" as const } : {}),
+    ...(identity.parentRunId !== undefined ? { parentRunId: identity.parentRunId } : {}),
+    ...(identity.stepIndex !== undefined ? { stepIndex: identity.stepIndex } : {}),
+    ...(fold.modelOverride !== undefined
+      ? {
+          modelOverride: {
+            ref: fold.modelOverride.ref,
+            ...(fold.modelOverride.thinkingLevel !== undefined
+              ? { thinkingLevel: fold.modelOverride.thinkingLevel }
+              : {}),
+            setAt: fold.modelOverride.setAt,
+          },
+        }
+      : {}),
   };
 }
 

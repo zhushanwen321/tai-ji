@@ -2,7 +2,7 @@
  * subagent-workflow Extension — Factory（extension 装配点）
  *
  * 合并 @zhushanwen/pi-subagents + @zhushanwen/pi-workflow 为统一包。
- * 注册项：4 tool（subagent + subagents + workflow + workflow-script）+ 2 command（subagents + workflows）
+ * 注册项：4 tool（subagent + subagents + workflow + workflow-script）+ 3 command（subagents + workflows + subagent-model）
  * + messageRenderer（subagent-bg-notify）+ session 事件。
  *
  * 包内结构（执行运行时已迁 packages/subagent-core，本包只留注册面与宿主适配）：
@@ -52,6 +52,8 @@ import { registerWorkflowsCommand } from "./interface/command/commands.ts";
 import { registerSubagentTool } from "./interface/tool/subagent-tool.ts";
 // ═══ interface/ 层（tools/commands/tui 合并） ═══
 import { registerSubagentsCommand } from "./interface/command/subagents.ts";
+// [subagent-model-switch U6] 模型切换 RPC 通道消费端（§7.1.1，runtime 出站点 prompt 触达）
+import { registerSubagentModelCommand } from "./interface/command/subagent-model.ts";
 import { registerSubagentsTool } from "./interface/tool/tool-subagents.ts";
 import { registerWorkflowTool } from "./interface/tool/tool-workflow.ts";
 import { registerWorkflowScriptTool } from "./interface/tool/tool-workflow-script.ts";
@@ -143,6 +145,7 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
   // ════════════════════════════════════════════════════════════
   registerSubagentTool(pi);
   registerSubagentsCommand(pi);
+  registerSubagentModelCommand(pi);
   pi.registerMessageRenderer(SUBAGENT_BG_NOTIFY_CUSTOM_TYPE, renderBgNotifyMessage);
 
   // ════════════════════════════════════════════════════════════
@@ -226,7 +229,7 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
   process.on("beforeExit", reapSpawnedChildrenOnShutdown);
 
   // ════════════════════════════════════════════════════════════
-  //  Tools（3 个）+ Commands（2 个）—— 注册面
+  //  Tools（3 个）+ Commands（3 个）—— 注册面
   //
   //  lazyDeps / isScriptRunning / registry 由 workflow-events.ts 装配结果提供。
   //  guard：workflow tool 与 subagents（批量派发入口）共用同一 guard——两者是同一条

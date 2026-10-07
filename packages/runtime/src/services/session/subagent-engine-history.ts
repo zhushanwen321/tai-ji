@@ -40,6 +40,7 @@ import {
   type SessionView,
 } from '@zhushanwen/subagent-core'
 import { discoverAndRegisterEngines } from '@zhushanwen/subagent-core/engine/engine-discovery-scan'
+import { extractLatestModelChangeFromJsonl } from '../../infra/pi/session-model-tail-read.js'
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import { toErrorMessage } from '../../utils/errors.js'
 
@@ -239,4 +240,32 @@ export async function readEngineSubagentHistory(record: SubagentRecord, dataDir:
   const engineId = extractRecordEngine(record)
   if (engineId !== DEFAULT_SUBAGENT_ENGINE) ensureProtocolReaderFor(engineId)
   return readSubagentHistoryMessages(record, dataDir)
+}
+
+// ── pi session model_change 尾条目派生（subagent-model-switch §9 transport 行）──
+
+/** model_change 条目的派生视图（shared SubagentRecentEffectiveModel 同构形状）。 */
+export interface SessionModelChangeEntry {
+  provider: string
+  modelId: string
+}
+
+/**
+ * pi session JSONL 的 `model_change` 尾条目派生（实际执行事实权威——§7.2 审计口径，
+ * 详情载荷组装时派生读取，零新增持久化载体）。
+ *
+ * 实现下沉 infra/pi 单点（`extractLatestModelChangeFromJsonl`，session-model-tail-read）：
+ * JSONL 尾读/解析原语与 pi entry 类型词汇（C-comm-02 持有点纪律——services 层不持
+ * pi 词汇）收敛在 infra，活跃路径裁剪随既有骨架统一（分支文件下物理尾逆读会命中
+ * 被撤子树的 model_change，与该 session 真实生效值漂移）；census §6 N16 登记读者
+ * 归类。本函数只保留消费面契约（导出名/签名/返回形状不变，session-records 与
+ * 直测零改动）。
+ *
+ * 仅 pi 引擎成员调用（非 pi 成员无 pi session 文件，调用方以 extractRecordEngine 判定）。
+ * 读不到（文件不存在 / 扫描窗无条目 / 条目字段畸形）按无值处理（undefined）——未发生
+ * 热切 = 无分叉态，字段本无消费场景；读失败按无值降级不抛（详情载荷增强是展示域，
+ * 不因它阻断列表返回，INVAR-tail-7 错误对等）。
+ */
+export function readPiSessionLatestModelChange(sessionFile: string): SessionModelChangeEntry | undefined {
+  return extractLatestModelChangeFromJsonl(sessionFile)
 }

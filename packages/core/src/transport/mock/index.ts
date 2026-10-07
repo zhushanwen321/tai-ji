@@ -94,6 +94,7 @@ import type * as realBtwDomain from '../api/domains/btw'
 
 import type * as realUsageDomain from '../api/domains/usage'
 import type * as realTtsDomain from '../api/domains/tts'
+import type * as realSubagentDomain from '../api/domains/subagent'
 
 
 /** real 域形状单点（mock 锚定源；散函数模块的 namespace 类型即域接口） */
@@ -111,6 +112,7 @@ export type BtwDomain = typeof realBtwDomain
 
 export type UsageDomain = typeof realUsageDomain
 export type TtsDomain = typeof realTtsDomain
+export type SubagentDomain = typeof realSubagentDomain
 
 
 /** 去 tuple 标签（Parameters 产 labeled tuple；参数名是修饰不是类型身份，归一后再比对）。导出：被导出的 SameTuple / DomainParamsExact 引用 */
@@ -2154,3 +2156,19 @@ const ttsImpl = {
 // [G4] 参数全等断言：mock tts 任一方法少参/多参/错型在此行编译失败
 export type TtsDomainParamsExact = AssertExact<DomainParamsExact<TtsDomain, typeof ttsImpl>>
 export const tts: TtsDomain = ttsImpl
+
+// ── subagent 域 mock（subagent-model-switch §7.1 入口层，U1）────────────────
+// 与 real 域同接口（门面三元要求两侧同构）。行为：setModel 恒回已记账型应答
+// （mock 无宿主编排/活进程链——「已记录，下次执行生效」是 mock 语境下唯一诚实的
+// 形态；已生效型需引擎回读，mock 不虚构生效值）。
+const subagentImpl = {
+  async setModel(params: Parameters<typeof realSubagentDomain.setModel>[0]): Promise<ServerMessageMap['subagent.modelSet']> {
+    await sleep(TIMING.ack)
+    void params
+    return { kind: 'recorded', note: '已记录，下次执行生效（mock）' }
+  },
+}
+
+// [G4] 参数全等断言：mock subagent 任一方法少参/多参/错型在此行编译失败
+export type SubagentDomainParamsExact = AssertExact<DomainParamsExact<SubagentDomain, typeof subagentImpl>>
+export const subagent: SubagentDomain = subagentImpl

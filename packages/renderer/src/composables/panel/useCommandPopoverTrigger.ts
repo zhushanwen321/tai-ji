@@ -362,8 +362,17 @@ export function useCommandPopoverTrigger(
       inputRef.value?.clearSubagentQueryText()
       const slug = payload.slug || ''
       const subagentId = payload.subagentId || ''
-      // 「新建 subagent」项（两字段空串）：插占位 slug chip（设计 3.1.3 场景 2）
-      inputRef.value?.insertSubagentChip(subagentId, slug || t('panel.command.newSubagentPlaceholder'))
+      if (subagentId) {
+        // 既有 record 引用（D3 顺带发现 2 收口裁决：消费契约 = 按 subagentId 引用——
+        // 与发送链分流判据同键）。显示名与候选行同口径 slug || subagentId；「新任务」
+        // 占位文案仅属新建项，不再顶替缺 slug record 的 chip 显示（directive 派发
+        // record agent/slug 可缺省，顶占位会让用户看到「@新任务」却实际定向旧任务）。
+        inputRef.value?.insertSubagentChip(subagentId, slug || subagentId)
+      } else {
+        // 「新建 subagent」项（subagentId 空串）：插占位 slug chip（设计 3.1.3 场景 2，
+        // 发送侧 slug 自动生成——占位文案是展示占位不可作 id）
+        inputRef.value?.insertSubagentChip(subagentId, slug || t('panel.command.newSubagentPlaceholder'))
+      }
     } else {
       inputRef.value?.clearDollarFileQueryText()
       inputRef.value?.insertFileChip(payload.name)

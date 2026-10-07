@@ -25,6 +25,9 @@
 import { RunRuntime } from "./run-runtime.ts";
 import type { RunSpec } from "./run-spec.ts";
 import type { RunExecutionSnapshot } from "./run-state.ts";
+// 类型边（编译期擦除，不构成值依赖环——run-event-journal 同款方向说明）：
+// 覆盖记账形状的权威定义在 run-events.ts（事件载荷与 meta 挂载值同一形状单源）。
+import type { WorkflowModelOverride } from "../run-events.ts";
 
 // ── WorkflowRunMeta ──────────────────────────────────────────
 
@@ -52,7 +55,15 @@ export interface WorkflowRunMeta {
    * （loadAll 重建）与 recoverCrashedRuns（收编链就地写入）。
    */
   interruptedAt?: string;
- /** Worker 线程错误计数（C.5；[ADR-0122] 后无生产写入方，旧 record 兼容读）。 */
+  /**
+   * 生效模型覆盖记账值（subagent-model-switch §6.6①/§7.4：journal 覆盖事件折叠进
+   * run 状态的派生视图——生效覆盖值 = 最新一条，覆盖旧覆盖值不叠加）。写点 =
+   * 壳侧 foldRecordStreamToRun（loadAll 重建，latestModelOverride 单点提取）；
+   * 无覆盖 undefined。记账投影面——派发侧覆写的消费判定归宿主覆盖通道（U4b），
+   * 本字段不回写事件流。
+   */
+  modelOverride?: WorkflowModelOverride;
+  /** Worker 线程错误计数（C.5；[ADR-0122] 后无生产写入方，旧 record 兼容读）。 */
   workerErrorCount?: number;
  /** 脚本错误计数（C.5；[ADR-0122] 后无生产写入方，旧 record 兼容读）。 */
   scriptErrorCount?: number;

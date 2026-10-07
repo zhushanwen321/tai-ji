@@ -3,7 +3,7 @@
  *
  * 锁定行为（ADR-0065 / C-pi-14，设计 state-truth-sync-architecture.md §3.3 D8）：
  * 全部 mutation 类 RPC（改状态值且 renderer 有 store 副本，覆盖域 = session 配置状态 /
- * model / preset / config 四域）必须登记在 MUTATION_RPC_REGISTRY，并按 ADR-0065 两分支归类——
+ * model / preset / config / mcp / subagent 六域）必须登记在 MUTATION_RPC_REGISTRY，并按 ADR-0065 两分支归类——
  * 分支一（后端可变换请求值：pi 钳制/pattern 换模）reply 必须携带生效值字段且消费侧
  * 禁乐观写；分支二（后端原样存储）reply 携带回显字段或登记豁免理由，消费侧允许
  * 乐观写 + reply 权威覆盖 + 失败回滚。
@@ -91,6 +91,21 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     contract: 'effective-value',
     replyKey: 'config.scopedModels',
     effectiveFields: ['scopedModels'],
+  },
+  {
+    // subagent.setModel（subagent-model-switch §7.1）：chat 域按 kind 分两型 + run 级聚合
+    // 三组件（reply 'subagent.modelSet' → SubagentSetModelReply 判别联合）。后端可变换请求
+    // 值：引擎命令成功且回读到手的 effective 型才携带生效模型 ref + 生效 thinking 档位；
+    // recorded 记账型（无活进程）不回读、生效值由下次执行推导（协议注释「预告值必然是
+    // 猜测」），消费侧禁乐观写请求值（协议注释「照 model.switch 回执修型（U6）」）。
+    // 生效值断言锚 effective 分支（extractReplyShape 穿透具名引用联合展开后命中字段层）；
+    // recorded / 聚合非 switched 成员无生效值属设计内合法产出（错误信封语义同
+    // config.setCodemodeEnabled / mcp.* ok:false），不在 effectiveFields 断言范围。
+    type: 'subagent.setModel',
+    branch: 'transformable',
+    contract: 'effective-value',
+    replyKey: 'subagent.modelSet',
+    effectiveFields: ['effectiveModel', 'effectiveThinkingLevel'],
   },
   // ── 分支二：后端原样存储，reply 携带回显字段（echo-value）──
   {
@@ -504,9 +519,11 @@ const CLIENT_MESSAGE_TYPES_BLOCK = extractBlock('export type ClientMessageType =
 const REPLY_PAYLOAD_MAP_BLOCK = extractBlock('export interface ReplyPayloadMap {')
 const SERVER_MESSAGE_MAP_BASE_BLOCK = extractBlock('export interface ServerMessageMapBase {')
 
-/** 谓词覆盖域（ADR-0065 范围边界）：session 配置状态 / model / preset / config / mcp 五域
- *（mcp 为 pi-mcp-management 设计纳入——add/update/remove 是 mcp.json 配置状态 mutation） */
-const MUTATION_DOMAINS = ['session', 'model', 'preset', 'config', 'mcp'] as const
+/** 谓词覆盖域（ADR-0065 范围边界）：session 配置状态 / model / preset / config / mcp /
+ * subagent 六域（mcp 为 pi-mcp-management 设计纳入——add/update/remove 是 mcp.json 配置
+ * 状态 mutation；subagent 为 subagent-model-switch 设计纳入——setModel 是执行模型配置
+ * mutation，renderer 持显示副本、回执含生效值字段） */
+const MUTATION_DOMAINS = ['session', 'model', 'preset', 'config', 'mcp', 'subagent'] as const
 
 /**
  * 改值动词形态（宽松 startsWith——宁可误红逼人显式归类，见文件头守卫取向声明）。
@@ -572,6 +589,45 @@ function extractNamedDeclarationBody(source: string, base: string): string | nul
   return null
 }
 
+/** type alias 右侧为纯具名引用（`A` 或 `A | B | ...`，无内联形状）时返回成员名清单，否则 null。
+ *  声明体尾随的下一条声明的注释块（extractNamedDeclarationBody type 分支的提取边界）先剥除再解析。 */
+function typeAliasRefMembers(body: string): string[] | null {
+  const eq = body.indexOf('=')
+  if (eq === -1) return null
+  const rhs = body
+    .slice(eq + 1)
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ')
+    .trim()
+  if (rhs === '' || rhs.includes('{')) return null
+  const members = rhs.split('|').map((m) => m.trim()).filter((m) => m !== '')
+  if (members.length === 0 || !members.every((m) => /^[A-Z][A-Za-z0-9]*$/.test(m))) return null
+  return members
+}
+
+/** 具名引用穿透展开：type alias 右侧为纯具名引用联合时（如 SubagentSetModelReply =
+ *  SubagentChatSetModelReply | SubagentSetModelAggregateReply，chat 两型再指向各自 interface），
+ *  字段声明在成员类型内，单层 body 提取取不到——递归展开各成员声明体拼接进 shape，
+ *  使 effective-value 断言能锚到真实字段层。右侧含内联形状（mcp 两态信封 /
+ *  CodemodeSetEnabledResult）或 interface body 的不再展开（字段已在本层，既有条目提取
+ *  语义不变）；seen 防循环引用，深度上限防御异常嵌套。 */
+function expandAliasUnionMembers(body: string, seen: Set<string>, depth = 0): string {
+  const MAX_EXPAND_DEPTH = 5
+  const members = depth < MAX_EXPAND_DEPTH ? typeAliasRefMembers(body) : null
+  if (members === null) return body
+  const parts = [body]
+  for (const member of members) {
+    if (seen.has(member)) continue
+    seen.add(member)
+    const memberBody = extractNamedDeclarationBody(PROTOCOL_SOURCE, member)
+      ?? extractNamedDeclarationBody(CODEMODE_DOMAIN_SOURCE, member)
+      ?? extractNamedDeclarationBody(MCP_DOMAIN_SOURCE, member)
+    if (memberBody === null) continue
+    parts.push(expandAliasUnionMembers(memberBody, seen, depth + 1))
+  }
+  return parts.join('\n')
+}
+
 function extractReplyShape(replyKey: string, requestType: string): string {
   const base = extractMapValue(SERVER_MESSAGE_MAP_BASE_BLOCK, replyKey)
   if (base !== undefined) {
@@ -582,7 +638,7 @@ function extractReplyShape(replyKey: string, requestType: string): string {
     if (body === null) {
       throw new Error(`reply '${replyKey}' 引用了具名类型 ${base}，但 protocol.ts / codemode / mcp 域文件中均未找到其声明`)
     }
-    return body
+    return expandAliasUnionMembers(body, new Set([base]))
   }
   const inline = extractMapValue(REPLY_PAYLOAD_MAP_BLOCK, requestType)
   if (inline !== undefined && inline.startsWith('{')) return inline
@@ -714,12 +770,18 @@ describe('MUTATION_RPC_REGISTRY 清单守卫（ADR-0065 / C-pi-14，D8 机器强
     // mcp 域（pi-mcp-management）：McpMutationResult 判别联合的 ok 分支 entry 必需——
     // Extract 收窄到成功分支再断言（'entry' 非全联合公共键，keyof 交集只含判别字段）
     const mcpMutationEntry: HasRequiredField<Extract<ServerMessageMap['mcp.add:result'], { ok: true }>, 'entry'> = true
+    // subagent.setModel（subagent-model-switch）：判别联合按 kind 收窄到 effective 分支——
+    // 生效模型 ref 与生效 thinking 档位必需（recorded / 聚合非 switched 成员无生效值属
+    // 设计内合法产出，同 mcp ok:false 错误信封不在断言范围）
+    const subagentSetModelEffectiveModel: HasRequiredField<Extract<ServerMessageMap['subagent.modelSet'], { kind: 'effective' }>, 'effectiveModel'> = true
+    const subagentSetModelEffectiveThinking: HasRequiredField<Extract<ServerMessageMap['subagent.modelSet'], { kind: 'effective' }>, 'effectiveThinkingLevel'> = true
 
     const assertions = [
       modelSwitchProvider, modelSwitchModelId, thinkingLevel,
       presetCreateEcho, presetUpdateEcho, engineIdEcho,
       smartContextEnabledEcho, terminalConfigEcho, scopedModelsEffective,
       providerUpdatedEcho, mcpMutationEntry,
+      subagentSetModelEffectiveModel, subagentSetModelEffectiveThinking,
     ]
     expect(assertions, '类型断言清单意外为空——本用例失效，请检查').not.toHaveLength(0)
     expect(assertions.every(Boolean)).toBe(true)

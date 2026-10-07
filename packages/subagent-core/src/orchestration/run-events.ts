@@ -22,7 +22,7 @@
 // 方）删除。[D4 事件词对齐 pi]（workflow-run-resume-revision）：ask-* 自造前缀改为
 // agent-started/agent-retrying/agent-settled（pi 原生 agent_start…agent_settled 同构），
 // 并新增 phase-started/phase-settled（D3 phase 状态机转移事件）与
-// run-interrupted/run-resumed（D2 interrupted 暂停态的转移事件）——词表 9 个。
+// run-interrupted/run-resumed（D2 interrupted 暂停态的转移事件）+ model-override（模型覆盖记账，不进状态机）+ worker-log（诊断）——词表 11 个。
 //
 // 层归属：Engine。状态机核心（词表 + 转移表 + transition）零 IO / 零时钟依赖，
 // 可独立编译测试；journal 实装是本模块唯一 IO 边（node:fs + core logger facade）。
@@ -172,7 +172,7 @@ function extractFailedRunErrorCode(run: WorkflowRun): RunErrorCode {
   return lastFailureKind ?? "unknown";
 }
 
-// ── 事件词表（D5-2 → [D4] 对齐 pi 后 9 个）───────────────────
+// ── 事件词表（D5-2 → [D4] 对齐 pi 9 个 + model-override + worker-log，11 个）──
 
 /**
  * 事件类型全集（判别键）——增删成员须先改设计载荷表再动此词表（D5 纪律；
@@ -219,6 +219,17 @@ export interface RunCreatedEvent extends EventEnvelope { // oe-exempt:20260929:f
    * runId 的事件——record 流文件本身即 run 域，其余事件不重复携带。
    */
   runId: string;
+  /**
+   * 归属会话锚（根 Pi session id，record-created.rootSessionId 同款语义）。同 cwd
+   * 多会话共享同一 sessions 目录与其下 workflow-state 目录，runtime 网关
+   * （subagent-model-gateway）runId 分支若只凭 journal 文件存在性定位宿主，会把
+   * 模型切换路由到非归属 pi 进程——本字段是精确归属判据（比对扫描会话 id，形态
+   * 对齐 recordId 侧 record-created 帧锚）。可选 = 读取面对旧格式行放行（本字段
+   * 落地前的流缺失时读侧回落既有存在性判定，存量 run 行为不劣化），写侧契约由
+   * 写入方承担（写入点 = terminal-actions dispatchRunCreated，条件式可选项：
+   * 宿主会话锚缺席时不落字段——与 scriptPath/model 同款条件式）。
+   */
+  rootSessionId?: string;
   /** 脚本身份名（RunSpec.scriptName，meta.name 或文件名 stem）。 */
   workflowName: string;
   /** 调用参数摘要（截断的序列化形态——展示/日志用途的行内小摘要；恢复读面优先
@@ -450,9 +461,61 @@ export interface RunResumedEvent extends EventEnvelope { // oe-exempt:20260929:f
    * resume-run.resumeRunLocked 的 run-resumed 派发）。
    */
   budgetTokens?: number;
+  /**
+   * 本次复活实际生效的模型 canonical ref（`provider/modelId`，与 run-created.model
+   * 同构；subagent-model-switch 决策七：resume 生效模型三档回落的落定值随帧落盘，
+   * 观测面 + 跨崩溃存续）。条件式落字段（缺省/空串不落——未指定且无覆盖记账的
+   * 复活与现状同形）；写入点 = resume-run.resumeRunLocked 的 run-resumed 派发。
+   * 消费边界：观测面为主——派发侧的模型消费走宿主覆盖通道（决策六②，U4b 接线），
+   * 本字段不改重建 spec 的 run 级模型（决策七不采用①：改 spec 会击穿回放比对）。
+   */
+  model?: string;
 }
 
-/** `run-settled`——run 终局（一个 run 恰好一帧；终局通知的单点判定源，防多处各判漏分支）。 */
+/**
+ * 模型覆盖记账值（subagent-model-switch §6.2 记账形状 + §7.4 持久化 bullet）。
+ *
+ * model 形状 = SDK ModelRef（`{ provider, modelId }`，u-foundation 定形的结构化
+ * 契约——「拆装只发生在宿主编排层单点」；wire 语义：宿主组帧时拼 canonical ref
+ * `provider/modelId`，读取面按同语法拆回）。thinkingLevel 仅在用户切换时显式选择
+ * 档位才记账（§6.2：缺席时下一轮档位按现役候选链对新模型完整裁决）。
+ *
+ * 折叠语义（消费面单点 latestModelOverride）：生效覆盖值 = 最新一条，覆盖旧覆盖
+ * 值不叠加（设计不变量 2：至多一个用户覆盖值）。
+ */
+export interface WorkflowModelOverride {
+  /** 目标模型 ref（provider + modelId；SDK ModelRef 同形）。 */
+  model: { provider: string; modelId: string };
+  /** 显式选择的 thinking 档位（仅用户显式选择时记账；缺席 = 解析链完整裁决）。 */
+  thinkingLevel?: string;
+  /** 覆盖下达时刻（epoch ms；信封 ts 的载荷侧镜像——挂载值脱离事件信封单独存续）。 */
+  ts: number;
+}
+
+/**
+ * `model-override`——workflow run 级模型覆盖记账事件（subagent-model-switch §6.6
+ * 决策六①：run 的事件流追加覆盖记录，事件流是追加式单源、唯一合法持久化形态）。
+ *
+ * **不参与生命周期状态机**（worker-log 同款——记账面与状态面正交）：fold 显式
+ * 跳过（foldRunEventCheckpoint），不占 RUN_TRANSITIONS 表行，水位照常推进。
+ * 硬约束（调研 S3）：覆盖记录只做记账持久化与 resume 生效值缺省，不进 worker
+ * 的 `$MODEL`、不改重建 spec 的 run 级模型、不碰回放一致性比对——覆盖走宿主
+ * 派发侧覆写（决策六②），三者在场时回放哈希不受扰动。
+ *
+ * 写入面 = 宿主切换编排（U4b）经 journal append 单点直写（seq 由 journal 实装
+ * 分配，W1 seq 契约：新写行信封必填正整数 seq）；不经 dispatchRunTrigger——
+ * model-override 是非转移记账事件（不占 RUN_TRANSITIONS 表行），
+ * appendTransition 首行 transition() 对无转移表行事件必抛 IllegalTransitionError，
+ * 结构上进不了转移裁决链（RunDispatchSource = { runId, journalDir? } 对
+ * interrupted 态 run 本可达，见 §8 验收场景 3 中断后补切；不可达的是转移通道而非
+ * run 本身，同款直写先例 = appendRunDiagnosticEvent 的 worker-log）。写点 =
+ * subagent-service.ts persistRunOverride 闭包（journal.append 的第二合法写点，
+ * 登记见 RunEventJournal.append 单写者约束）。
+ */
+export interface ModelOverrideEvent extends EventEnvelope, WorkflowModelOverride { // oe-exempt:20261006:framework:workflow/record 协议契约类型——与既有 run 事件族同款豁免
+  type: "model-override";
+}
+
 /**
  * worker 诊断日志帧（[§2.1 errorLogs 持久化] ADR-0093）。
  *
@@ -467,6 +530,7 @@ export interface WorkerLogEvent extends EventEnvelope { // oe-exempt:20260930:fr
   entry: WorkerLogEntry;
 }
 
+/** `run-settled`——run 终局（一个 run 恰好一帧；终局通知的单点判定源，防多处各判漏分支）。 */
 export interface RunSettledEvent extends EventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "run-settled";
   outcome: RunOutcome;
@@ -478,7 +542,7 @@ export interface RunSettledEvent extends EventEnvelope { // oe-exempt:20260929:f
   artifactsDir: string;
 }
 
-/** run 事件判别联合（D5 词表全集，[D4] 对齐后 9 个；判别键 = type）。 */
+/** run 事件判别联合（D5 词表全集，[D4] 对齐 9 个 + model-override 记账 + worker-log 诊断；判别键 = type）。 */
 export type WorkflowRunEvent =
   | RunCreatedEvent
   | PhaseStartedEvent
@@ -489,6 +553,7 @@ export type WorkflowRunEvent =
   | RunInterruptedEvent
   | RunResumedEvent
   | RunSettledEvent
+  | ModelOverrideEvent
   | WorkerLogEvent;
 
 /**
@@ -510,10 +575,19 @@ type DistributiveOmit<T, K extends keyof never> = T extends unknown ? Omit<T, K>
 /**
  * run 事件 journal 的接口形态（append / scan）。
  *
- * 单写者约束（D5，[D15] 后落点）：append 的唯一合法调用方 = terminal-actions
- * （dispatchRunTrigger 唯一投递入口 + appendTransition 单写点——journal 单写者
- * 纪律的物理载体）——引擎侧事件经既有 run 事件通道上报后由写者落账，
- * 引擎不直接写 journal。类型层无法约束调用方，该约束由实装与守卫共同保证。
+ * 单写者约束（D5；[F1-17] 裁决后按多写点现实登记）：append 的合法写点共三处，
+ * 除此之外引擎/读侧一律不写——
+ *   1. terminal-actions：dispatchRunTrigger 唯一投递入口（转移事件经
+ *      appendTransition 的 journal.append 落账）+ 同模块 appendRunDiagnosticEvent
+ *      的 worker-log 诊断直写（best-effort 非转移诊断事件）；
+ *   2. execution 层 subagent-service.ts persistRunOverride 的 model-override
+ *      记账直写（非转移事件进不了转移裁决链，登记理由见 append 方法级注释）；
+ *   3. orchestration 层 resume-run.ts appendResumeModelOverride 的 model-override
+ *      记账直写（resume 显式 model 参数的统一覆盖记账——F1-26 后续项；同款非转移
+ *      直写理由，写序 = run-resumed 转移之后、接管之前，失败走接管回滚围栏）。
+ * 引擎侧事件经既有 run 事件通道上报后由写点落账，引擎不直接写 journal。类型层
+ * 无法约束调用方，该约束由实装与守卫共同保证。写点登记三处保持一致：本接口
+ * append 方法级注释 + run-event-journal.ts scanRunEvents 读面注释。
  */
 export interface RunEventJournal {
   /**
@@ -523,12 +597,23 @@ export interface RunEventJournal {
    * 在 journal 实装内，构造性单调）；runId 显式传参而非从事件取——仅 run-created
    * 携带 runId，目标文件定位不依赖事件形态。
    *
-   * 单写者约束（[D15] 终局编排单一入口后）：合法调用方 = terminal-actions 的
-   * dispatchRunTrigger（唯一投递入口——活体链与经 interruptRun /
-   * settleRunAccounting 的收编冷路径都经它；resume 的复活转移由 resume-run 在锁
-   * 段内经同一入口投递）+ terminal-actions.appendTransition 的 journal.append
-   * 单写点——除此之外引擎/读侧一律不写。收编链追加的是 run-interrupted 转移
-   * 事件（[D2] 中断非终局，不再落 run-settled(outcome=interrupted)）。
+ * 单写者约束（[F1-17] 裁决后形态——合法写点三处，与接口头注 / run-event-journal
+ * .ts scanRunEvents 读面注释三处一致）：合法调用方 = terminal-actions 的
+ * dispatchRunTrigger（唯一投递入口——活体链与经 interruptRun /
+ * settleRunAccounting 的收编冷路径都经它；resume 的复活转移由 resume-run 在锁
+ * 段内经同一入口投递）+ terminal-actions.appendTransition 的 journal.append
+ * 单写点 + execution 层 model-override 记账直写（subagent-service.ts
+ * persistRunOverride，第二合法写点）+ orchestration 层 resume 显式 model 参数的
+ * model-override 记账直写（resume-run.ts appendResumeModelOverride，第三合法写点
+ * ——F1-26 后续项「补切 + 无参 resume 合一步」的统一记账通道）。直写登记理由：
+ * model-override 是非转移
+   * 记账事件（不占 RUN_TRANSITIONS 表行），appendTransition 首行 transition()
+   * 对无转移表行事件必抛 IllegalTransitionError——结构上进不了转移裁决链
+   * （RunDispatchSource = { runId, journalDir? } 对 interrupted 态 run 本可达，
+   * 不可达的是转移通道而非 run 本身）；同款直写先例 = appendRunDiagnosticEvent
+   * 的 worker-log 诊断直写。除此之外引擎/读侧一律不写。收编链追加的是
+   * run-interrupted 转移事件（[D2] 中断非终局，不再落
+   * run-settled(outcome=interrupted)）。
    */
   append(runId: string, event: WorkflowRunEventInput): Promise<WorkflowRunEvent>;
   /**
@@ -1215,7 +1300,11 @@ export function foldRunEventCheckpoint(
     // 诊断事件（worker-log）不进状态机：诊断面与状态面正交，且终态是吸收态——若让
     // 它走 transition，run 终局后迟到的诊断日志会把 fold 判成坏帧。水位仍推进，避免
     // tail 消费方每轮重读同一批诊断行。
-    if (event.type === "worker-log") {
+    // 记账事件（model-override）同款跳过（subagent-model-switch §6.6①）：宿主覆盖
+    // 记账与生命周期正交——转移表无行，走 transition 会误判坏帧停摆（P8 核实结论）。
+    // 覆盖值的折叠消费在派生视图半边（壳侧 foldRecordStreamToRun → meta.modelOverride
+    // 与 resume 的 latestModelOverride 提取），不在状态机半边。
+    if (event.type === "worker-log" || event.type === "model-override") {
       checkpoint = { ...checkpoint, lastSeq: typeof seq === "number" ? seq : checkpoint.lastSeq };
       continue;
     }
@@ -1283,6 +1372,32 @@ export function errorLogsFromEvents(events: readonly WorkflowRunEvent[]): Worker
     if (event.type === "worker-log") logs.push(event.entry);
   }
   return logs.length > MAX_ERROR_LOGS ? logs.slice(-MAX_ERROR_LOGS) : logs;
+}
+
+/**
+ * 事件流 → 最新模型覆盖记账值（subagent-model-switch §6.2 折叠语义：生效覆盖值 =
+ * 最新一条，覆盖旧覆盖值不叠加——设计不变量 2；无覆盖 undefined）。
+ *
+ * 单点辅助，直接调用面枚举（消费面扩大时同步本清单，锚 grep
+ * `latestModelOverride(` 生产调用点）：① 壳侧 foldRecordStreamToRun 挂
+ * WorkflowRunMeta.modelOverride（重启重建的派生视图）；② core resume-run 生效
+ * 模型三档回落的中档（决策七，resume-run.ts）；③ U4b 派发侧内存表 miss 重建
+ * （subagent-service.ts rebuildRunOverride 闭包，workflow-dispatch 派发链消费）；
+ * 另有 runtime 侧等价尾读第四面（model-override-query.ts 的独立实装，自注释
+ * 「构造性等价」——不调用本函数、按尾块倒序读同源 journal 文件）。
+ * 尾向扫描首条命中即返回（与 findLatestRunResumed 同款手写循环——findLast 属
+ * ES2023 lib，本包 target ES2022）。
+ */
+export function latestModelOverride(
+  events: readonly WorkflowRunEvent[],
+): WorkflowModelOverride | undefined {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i]!;
+    if (event.type === "model-override") {
+      return { model: event.model, ...(event.thinkingLevel !== undefined ? { thinkingLevel: event.thinkingLevel } : {}), ts: event.ts };
+    }
+  }
+  return undefined;
 }
 
 // ── journal 实装（createRunEventJournal——本模块唯一 IO 边）────

@@ -9,7 +9,13 @@ import type {
   WorkflowRecordRegisteredEntryData,
   WorkflowRecordSettledEntryData,
 } from "@zhushanwen/subagent-core";
-import type { WorkflowRunRecord, WorkflowAgentCall, WorkflowRunPhaseFoldEntry } from "@taiji/shared";
+import type {
+  SubagentModelOverrideStatus,
+  SubagentRecord,
+  WorkflowRunRecord,
+  WorkflowAgentCall,
+  WorkflowRunPhaseFoldEntry,
+} from "@taiji/shared";
 
 /** ms → ISO（WorkflowAgentCall/WorkflowRunRecord 时间契约是 ISO 字符串）。 */
 function toIso(ms: number): string {
@@ -214,4 +220,136 @@ export function projectV2Workflow(
     ...(fold !== undefined && fold.phases.size > 0 ? { phases: projectPhaseFolds(fold.phases) } : {}),
     ...(fold?.created?.argsSummary !== undefined ? { argsSummary: fold.created.argsSummary } : {}),
   }
+}
+
+/**
+ * run 详情载荷的模型字段增强（subagent-model-switch §9 transport 行，U1 详情载荷
+ * 透传——run 详情侧按成员标识逐成员携带、聚合面不取单一值）：
+ * - **覆盖状态**：run 级覆盖（query.getRunOverride）分发到该 run 全部 agentCall 条目
+ *   （run 级全切是 run 作用域意图，各成员条目携带同值；无覆盖不造键）；
+ * - **成员标识**：权威成员的 record id 透传到 agentCall.memberRecordId——run 级模型
+ *   切换聚合应答的成员标识（listAcceptedMemberRunIdsForSwitch 的 record id）与前端
+ *   成员回执显示态键（subagentMemberDisplayKey(runId, memberRecordId)）的单源对齐锚，
+ *   读端造键只认本字段（成员回执态键域 = 成员 record id，非 pi session uuid）；
+ * - **最近生效值**：成员 SubagentRecord 的增强产物（调用方先经 enhanceSubagentDetails
+ *   派生——含 pi session model_change 尾条目读取与「仅 pi 成员」判定）按
+ *   (parentRunId, stepIndex) 圈定后透传到对应 agentCall。同族替换可只发生在部分成员，
+ *   聚合面不取单一值；一键多 attempt 的权威成员取与 workflow-step-merge.pickAuthoritativeRecord
+ *   同判据（running 优先、startedAt 最新——显示权威一致）。
+ *
+ * 纯函数（无 IO）；输入 runs/subagents 均为已合并投影产物，无增强项时返回原引用
+ * （零拷贝快路径，调用方 getWorkflows 每次读 RPC 消费）。sessionId 是覆盖查询的
+ * 定位锚首参（query 实装按 session cwd 分片定位记录域文件——无全局 id 索引）。
+ */
+export function projectSubagentModelDetailIntoRuns(
+  sessionId: string,
+  runs: WorkflowRunRecord[],
+  subagents: SubagentRecord[],
+  query:
+    | {
+        getRecordOverride(sessionId: string, recordId: string): SubagentModelOverrideStatus | undefined
+        getRunOverride(sessionId: string, runId: string): SubagentModelOverrideStatus | undefined
+      }
+    | undefined,
+): WorkflowRunRecord[] {
+  if (runs.length === 0) return runs
+  const byRun = buildMemberIndexByRun(subagents)
+  let result: WorkflowRunRecord[] | null = null
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i]!
+    const byStep = byRun.get(run.runId)
+    const runOverride = query?.getRunOverride(sessionId, run.runId)
+    // 需重建的 run（changed）记入 updated；skip run 保持 undefined（循环尾原样写回）
+    let updated: WorkflowRunRecord | undefined
+    if (byStep !== undefined || runOverride !== undefined) {
+      updated = enhanceRunAgentCalls(run, byStep, runOverride)
+    }
+    // 惰性拷贝 + 全索引写（与 session-records.ts enhanceSubagentDetails 已修形态同款，
+    // 两处注释互引防第三份手写副本）：result 惰性 slice(0, i) 只覆盖首个 changed 之前
+    // 的区间，其后每个索引（含 skip run）必须显式写回——曾为 slice(0, i) + push 追加
+    // 式，首个 changed 之后的 skip run 从返回列表整条丢失（dmg-r1-1 同型第二份）。
+    if (updated !== undefined && result === null) result = runs.slice(0, i)
+    if (result !== null) result[i] = updated ?? run
+  }
+  return result ?? runs
+}
+
+/**
+ * [projectSubagentModelDetailIntoRuns 拆分] 成员圈定索引：(parentRunId, stepIndex) →
+ * 权威 record（同判据 pickAuthoritativeRecord：running 优先，次取 startedAt 最新）。
+ * 独立小函数：嵌套循环与 undefined 长链是圈复杂度计数大户，主遍历函数保持平铺
+ * （与 resolveWorkflowOrigin 同款取向）。
+ */
+function buildMemberIndexByRun(subagents: SubagentRecord[]): Map<string, Map<number, SubagentRecord>> {
+  const byRun = new Map<string, Map<number, SubagentRecord>>()
+  for (const record of subagents) {
+    const runId = record.parentRunId
+    const stepIndex = record.stepIndex
+    if (runId === undefined || stepIndex === undefined) continue
+    let byStep = byRun.get(runId)
+    if (byStep === undefined) {
+      byStep = new Map<number, SubagentRecord>()
+      byRun.set(runId, byStep)
+    }
+    const incumbent = byStep.get(stepIndex)
+    if (incumbent === undefined || pickAuthoritativeMember(record, incumbent)) byStep.set(stepIndex, record)
+  }
+  return byRun
+}
+
+/**
+ * [projectSubagentModelDetailIntoRuns 拆分] 单 run 的 agentCalls 模型字段增强：
+ * 任一 call 变更返回新 run 对象，无变更返回 undefined（skip 信号，主遍历循环尾
+ * 原样写回）。
+ */
+function enhanceRunAgentCalls(
+  run: WorkflowRunRecord,
+  byStep: Map<number, SubagentRecord> | undefined,
+  runOverride: SubagentModelOverrideStatus | undefined,
+): WorkflowRunRecord | undefined {
+  let changed = false
+  const agentCalls = run.agentCalls.map((call) => {
+    const member = byStep?.get(call.id)
+    const override = runOverride ?? member?.modelOverride
+    const recent = member?.recentEffectiveModel
+    // 成员标识恒透出（member 在场即携带，不等覆盖/生效值在场）——它是回执显示态的
+    // 读取键，切换发生时面板数据源可能尚无任何覆盖载荷（首次切换前两者恒缺席）。
+    // subagentId = record 创建事件 identity.id（projectV2Subagent 身份域），与聚合
+    // 应答成员标识（listAcceptedMemberRunIdsForSwitch 的 ExecutionRecord.id）同源。
+    // 代价：getWorkflows 每次读 RPC 对有成员的 run 重建 agentCalls 数组（零拷贝
+    // 快路径仅在成员圈定全 miss 时保留）——成员增强产物本就每次读 RPC 重派生，
+    // 重建为浅展开小对象，量级可忽略。
+    const memberRecordId = member?.subagentId
+    if (override === undefined && recent === undefined && memberRecordId === undefined) return call
+    // 引用相等短路（返回值直进 RPC reply 不缓存，无跨轮幂等消费位；形状级比较
+    // 不必——成员增强产物每次读 RPC 重派生）。
+    if (
+      call.modelOverride === override &&
+      call.recentEffectiveModel === recent &&
+      call.memberRecordId === memberRecordId
+    ) {
+      return call
+    }
+    changed = true
+    return {
+      ...call,
+      ...(memberRecordId !== undefined ? { memberRecordId } : {}),
+      ...(override !== undefined ? { modelOverride: override } : {}),
+      ...(recent !== undefined ? { recentEffectiveModel: recent } : {}),
+    }
+  })
+  if (changed) return { ...run, agentCalls }
+  return undefined
+}
+
+/**
+ * 成员权威判据（与 workflow-step-merge.pickAuthoritativeRecord 同判据的二元形式）：
+ * running 优先；同态取 startedAt 最新（缺失视为最早）。成员模型字段透传的显示权威
+ * 与步骤行权威一致，避免同一 call 两处取不同 attempt 的字段。
+ */
+function pickAuthoritativeMember(candidate: SubagentRecord, incumbent: SubagentRecord): boolean {
+  const candidateRunning = candidate.status === 'running'
+  const incumbentRunning = incumbent.status === 'running'
+  if (candidateRunning !== incumbentRunning) return candidateRunning
+  return (candidate.startedAt ?? Number.NEGATIVE_INFINITY) >= (incumbent.startedAt ?? Number.NEGATIVE_INFINITY)
 }

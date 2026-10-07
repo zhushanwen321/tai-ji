@@ -44,6 +44,11 @@ export const CONSERVATIVE_CAPABILITIES = {
   interrupt: "kill-only",
   permissionMode: "ignored",
   maxTurns: false,
+  // [subagent-model-switch] setModel 位保守缺省 = 最弱档 unsupported：manifest 未
+  // 声明 setModel = 引擎未接热切换通路，宿主发送前预检不放行（缺省与 unsupported
+  // 同义）。CAPABILITY_ENUMS 已登记 setModel 值域，缺键经 parseCapabilities 回落
+  // 本档 + warn。
+  setModel: "unsupported",
 } satisfies EngineCapabilities;
 
 /** 枚举能力位词表（与 types.ts EngineCapabilities 逐键对应；maxTurns 单独 boolean）。
@@ -66,6 +71,13 @@ export const CAPABILITY_ENUMS = {
   resume: ["native", "cold", "unsupported"],
   interrupt: ["native", "kill-only"],
   permissionMode: ["native", "fixed", "ignored"],
+  // [subagent-model-switch] setModel 位值域（无 emulated——热切换无宿主仿真形态，
+  // 见 SDK EngineCapabilities.setModel 注释）。pi 引擎已实装热切换通路、manifest
+  // 声明 native；zcode 未实装、声明 unsupported（同保守缺省）。消费点 = 宿主发送
+  // 前预检：非 native 不放行（remote-engine 成员不实现，消费方以
+  // `typeof engine.setModel === "function"` 探测转覆盖记账路径）；native 声明须与
+  // EnginePort.setModel 方法并存（model-switch-wiring 校验，缺失即报集成 bug）。
+  setModel: ["native", "unsupported"],
 } satisfies Record<string, readonly string[]>;
 
 /**

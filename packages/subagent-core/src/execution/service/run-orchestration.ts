@@ -624,7 +624,10 @@ export class RunOrchestration {
           ? { sessionRootId: this.sessionRootId }
           : {}),
       };
-      const { handle, outcome } = await engine.run(this.taskSpecWithModel(opts, record.model), runCtx);
+      const { handle, outcome } = await engine.run(
+        this.taskSpecWithModel(opts, record.model, record.thinkingLevel),
+        runCtx,
+      );
       record.engineHandle = {
         sessionRef: handle.data.sessionRef,
         poolKey: SHARED_POOL_KEY,
@@ -652,9 +655,19 @@ export class RunOrchestration {
   /** engine.run taskSpec 装配单一来源（runAndFinalize 与 kickOffChatRound 共用）：
    *  executeOptions 协议映射 + worktree 隔离合流（withWorktreeCwd）+ model = record
    *  留痕词形（resolved 解析产物，joinEngineModelRef 规范形）覆盖——原 identity.resolved
-   *  经 runSpawn --model 兜底的协议等价承载。 */
-  taskSpecWithModel(opts: ExecuteOptions, model: string | undefined): AgentCallOpts {
-    return withWorktreeCwd({ ...executeOptionsToEngineTaskSpec(opts), ...(model !== undefined ? { model } : {}) });
+   *  经 runSpawn --model 兜底的协议等价承载。[F1-17] thinkingLevel 同形携带解析链
+   *  最终产物（= record 盖章值；§6.2「跨轮档位以解析链为准」的执行通道落地）——
+   *  调用参数显式档位优先（候选链最高层语义保持），无解析档位不动原值。 */
+  taskSpecWithModel(
+    opts: ExecuteOptions,
+    model: string | undefined,
+    thinkingLevel: string | undefined,
+  ): AgentCallOpts {
+    return withWorktreeCwd({
+      ...executeOptionsToEngineTaskSpec(opts),
+      ...(model !== undefined ? { model } : {}),
+      ...(opts.thinkingLevel === undefined && thinkingLevel !== undefined ? { thinkingLevel } : {}),
+    });
   }
 
   /**

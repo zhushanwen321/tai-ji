@@ -160,6 +160,9 @@ subagent 运行状态的内存单源（`packages/subagent-core/src/execution/per
 
 **代码映射**: 协议类型 `packages/shared/src/protocol.ts`（ServerMessageMapBase 的 `subagent.stream_chunk` / `session.getSubagentStreamState` 条目）；产生端 `packages/runtime/src/infra/relay/relay-tee.ts`；消费端状态机 `packages/core/src/domain/chat/streaming-state-machine.ts`。
 
+### 模型覆盖（modelOverride）
+
+用户对执行中/已中断的 subagent 或 workflow run 实时下达的模型意图，作用域 = 该会话/run 的剩余执行（含中断后 resume 与进程重启后重开），优先级最高（用户覆盖赢，压过 agent frontmatter 与脚本显式参数）。载体 = record 事件文件 `record-model-override` 帧（chat 域）/ run journal `model-override` 帧（workflow 域），fold 取最新、替换不叠加（至多一个生效覆盖值）。配套术语：**生效模型** = pi 子进程当前实际使用的模型（审计权威 = pi session `model_change` 条目，热切后可与本轮盖章值不同）；**覆盖记账** = 覆盖意图的持久化半场（管未派发步骤/resume/重开），与**热切**半场（管在跑成员立即生效）构成同一意图的两半——只热切不记账会被下一轮 spawn 的旧 `--model` argv 压回。resume 生效模型三档回落：resume 显式参数 > 持久化覆盖记录 > run 创建时模型。**模型意图 / 历史事实（持久化二分）**：切换只写「意图」类载体（override 帧），永不修改「历史事实」类持久化（record.model 盖章、run-created.model、pi session model_change 条目）。机制 SSOT：[ADR-0129](adr/decisions.md)；用户通道 = 面板模型选择器 / `/subagent-model` 命令（runtime 经 prompt 斜杠命令出站点触达 pi extension，守卫 `.githooks/check_prompt_outposts.py` 白名单）。
 
 ### ToolCall
 

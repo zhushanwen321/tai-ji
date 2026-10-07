@@ -635,3 +635,13 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **依据**：用户裁决「只做长期合理的方案，不做短期成本控制考量的方案」（2026-10-06）；拉取收敛与 ADR-0097「拉为主、推补充」直配，恢复源 = 同步查询（ADR-0122 状态判定来源最高优先级）。
 
 **登记**：设计文档 `.tmp/tech-design/subagent-stream-chunk-design.md`（过程产物，不入库）；实施跨 shared / runtime / core / renderer 四包 + 本登记，清单见设计文档 §5。
+
+### ADR-0129 subagent 执行模型切换：用户覆盖语义与跨端命令通道（2026-10-06 用户裁决「按 A 做」）
+**决策**：
+- **用户覆盖赢**：`setModel` 在模型解析链第 0 层加用户覆盖记账，优先级高于 agent frontmatter 与脚本/调用参数显式指定的模型。
+- **持久化与热切是同一意图的两半，必须同步落**：只热切会被下一轮 spawn 的旧 `--model` argv 压回（pi CLI flag 恒优先于 session 恢复）；只记账则执行中不受控。记账载体 = record 事件文件 `record-model-override` 帧（chat 域）/ run journal `model-override` 事件（workflow 域），fold 取最新、替换不叠加；records 磁盘快照 json 是投影非事实源（不作断言面）。
+- **跨端通道（runtime → pi extension）= prompt 斜杠命令出站点**：runtime `client.prompt("/subagent-model <单行 JSON>")` → pi `prompt()` 扩展命令分支（流式中也立即执行；排队路径会拒扩展命令，不可绕行）→ subagent-workflow 进程内编排 → 结果文件 `<subagent 数据根>/model-switch/<requestId>.json` 回执（原子写、网关读后即删、60s 超时 best-effort）。pi 1.0.0 无结构化 RPC 注册面（rpc-mode 命令词表封闭）且上游不 fork/不提 PR——斜杠命令是仓内在产标准通道（三先例：workflow abort / subagents 动作族 / plan abort）；新出站点登记 `.githooks/check_prompt_outposts.py` 白名单。
+- **成员态三态（引擎中立）**：switched（生效值+档位回执）/ not-active（引擎定位不到活跃子进程，已退出成员承接态）/ not-applicable（引擎 capability unsupported，提示性应答非错误，记账照写）+ 失败名单（独立组件，非成员态——转发失败成员的成员标识 + fail-fast 分型；单成员失败不回滚其他成员、不影响 run 级意图写入）。聚合应答恒为「成员态数组 + 失败名单 + 汇总文案」三组件固定结构（前端按成员分项呈现）。run 级全切为 2026-10-05 用户裁决翻转初稿「run 级只记账不转发成员」条款的结果（随持久化裁决一并确认——该反向方案已否决，勿再议）。resume 生效模型三档回落：resume 显式参数 > 持久化覆盖 > run 创建模型。
+
+**登记**：设计 SSOT = `.tmp/tech-design/subagent-model-switch.md`（§5.2 解析链 / §7.1.1 通道机制 / §7.4 三态）；术语投影 = docs/CONTEXT.md「模型覆盖」词条；验收终态 = 5 轮真机验收 degraded 无阻塞缺陷（`.tmp/dev-flow/subagent-model-switch.acceptance/verdict.json`）；验收期遗留裁决项 = `docs/todo/subagent-model-switch-d3-defects.md`。
+>>>>>>> feat-workflow-change-model

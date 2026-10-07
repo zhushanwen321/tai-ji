@@ -23,6 +23,7 @@
 import type {
   AgentFailureKind,
   AgentUsageTotal,
+  ModelRef,
   ToolCall,
   Turn,
   WorktreeHandle,
@@ -60,6 +61,32 @@ export const DEFAULT_AGENT_NAME = "general-purpose";
 /** 窄化守卫：值是否为合法 StopReason 字面量（外部输入防御性解析用）。 */
 export function isValidStopReason(value: string | undefined): value is StopReason {
   return (STOP_REASONS as readonly string[]).includes(value ?? "");
+}
+
+/**
+ * 用户覆盖记账（设计 subagent-model-switch §3.4 统一语言 / §6.2 记账形状）——
+ * 用户实时下达的模型意图，作用域为一个 subagent 会话（同一 session 文件锚点串联的
+ * 执行记录链）；优先级高于 agent frontmatter 与调用参数显式指定的模型（用户覆盖赢）。
+ *
+ * 语义约束（消费方 U2 setModel 编排与解析链第 0 层按此实现）：
+ * - **不叠加**：同一会话至多一个覆盖值，再次换模型 = 覆盖旧覆盖值（§3.4 不变量 2）；
+ *   不另设清除操作，覆盖只能被下一次切换替换（§2 Out of scope）。
+ * - **意图而非生效值**：`ref` 恒为用户目标 ref（pi 部分模型族静默替换成同族模型时
+ *   生效模型 ≠ 本字段——生效值只进切换应答回执与前端展示，不回写记账，§6.4）；
+ *   `thinkingLevel` 仅在用户切换时显式选择档位才记录，pi 联动重设的瞬态档位不进记账
+ *   （跨轮档位以解析链现役候选链裁决为准）。
+ * - **传播**：解析命中覆盖的那一轮，新建执行记录时把当前覆盖原值写入新记录的
+ *   {@link ExecutionRecord.modelOverride}——覆盖随记录链传播。
+ * - **持久化只写意图**：切换操作永不改写 `record.model` 等历史事实类字段（不变量 5），
+ *   本字段是 chat 域覆盖意图的持久化载体（workflow 域载体 = run 事件流覆盖事件，归 U4a）。
+ */
+export interface ModelOverride {
+  /** 用户目标模型 ref（结构单源 = SDK ModelRef；宿主编排层负责 canonical ref 校验）。 */
+  ref: ModelRef;
+  /** 用户显式选择的 thinking 档位；缺省 = 未选择（下一轮按解析链候选链对新模型裁决）。 */
+  thinkingLevel?: string;
+  /** 覆盖下达时刻（epoch ms，Date.now()）——审计与「最近一次切换」判据。 */
+  setAt: number;
 }
 
 /** 判别联合收窄守卫：pi 锚分支。 */
@@ -120,6 +147,13 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
    */
   readonly model: string | undefined;
   readonly thinkingLevel: string | undefined;
+  /**
+   * 用户覆盖记账（意图类字段，见 {@link ModelOverride} 语义注释）。
+   * 可选 + 向后兼容：旧记录无此字段照常读取（undefined = 从未被用户覆盖）。
+   * 切换操作永不改写上方 model 盖章值（不变量 5）——本字段是「未来意图」，
+   * model 是「该轮启动事实」，两字段并存各司其职（§6.2）。
+   */
+  readonly modelOverride?: ModelOverride;
   readonly mode: ExecutionMode;
   readonly task: string;
   /**

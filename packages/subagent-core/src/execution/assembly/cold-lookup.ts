@@ -299,6 +299,13 @@ function resurrectColdRecord(
   // 由 reaper 兜底回收）。
   // [U5 接管] 拒绝动作将改为自动重建 + patch 恢复（§3.2.5），守卫语义届时重写。
   record.hadWorktree = found.worktree === true;
+  // [subagent-model-switch §6.2/P7] 用户覆盖记账水合：磁盘候选（fold 投影 / 内存源
+  // 投影）携带的 modelOverride 随冷复活进内存 record——主 agent 重启后解析第 0 层
+  // 的恢复源（新 record 产物恒无覆盖，直接赋值即缺省回填语义）。
+  type MutableOverrideRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
+  if (found.modelOverride !== undefined) {
+    (record as MutableOverrideRecord).modelOverride = found.modelOverride;
+  }
   // [U2a/B4 → D3c] 透明重生回边整体收编 store.markResurrected：acquire-first 顺序
   // （写 .alive 写权声明 → 删 .state → 删 .finalized legacy）+ resurrectClosed 内存
   // 翻回 + register，单 try 域原子收敛。准入唯一依据 = §3.2.3 物理三件套（守卫已在

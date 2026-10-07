@@ -56,8 +56,22 @@ import type { StreamSink } from "./assembly/stream-sink.ts";
 // [R4] state-marker（writeRecordBinding）已迁 run-orchestration；EngineSdkError/
 // ResumeAnchor（引擎死亡分诊）已迁 run-orchestration。
 import type { ClosedReason } from "./domain/record-types.ts";
-import type { ExecutionRecord } from "./domain/record-model.ts";
+import type { ExecutionRecord, ModelOverride } from "./domain/record-model.ts";
 import type { AgentEvent, ExecuteOptions, ExecutionHandle, RecordSnapshot, SubagentRecord } from "./assembly/types.ts";
+// [subagent-model-switch §7.2] setModel 编排（目标 5 壳接线——本体纯函数 + deps 装配）。
+import type { ModelRef } from "@zhushanwen/subagent-engine-sdk";
+import { SET_MODEL_NOT_ACTIVE_CODE } from "@zhushanwen/subagent-engine-sdk";
+import { setModel } from "./service/model-switch.ts";
+import type { ModelSwitchTarget, SetModelReply } from "./service/model-switch.ts";
+// [subagent-model-switch §7.4 生产接线] run 级全切聚合（runAggregate 通道本体）+ 三
+// 通道生产实现（run 非终局判定 / 已受理成员清单 / 成员引擎转发面——本体在
+// model-switch-wiring.ts，壳装配段单行委托）。
+import { runModelSwitchAggregate } from "./service/run-model-switch-aggregate.ts";
+import {
+  assertRunNotTerminalForSwitch,
+  listAcceptedMemberRunIdsForSwitch,
+  resolveMemberEnginePortForSwitch,
+} from "./service/model-switch-wiring.ts";
 // [R4] ExecutionMode / ForkDepthExceededError / DEFAULT_AGENT_NAME / WorktreeHandle 消费
 // 已随 run 域迁聚合——types import 收窄为转发签名所需类型面。
 // [R1] 转发 getter 返回类型标注（实例已迁聚合，仅 type 引用）。
@@ -93,6 +107,13 @@ import { RecordLifecycle } from "./service/record-lifecycle.ts";
 import { coldLookupForAction, type ColdLookupDeps } from "./assembly/cold-lookup.ts";
 import { resurrectClosed } from "./persistence/execution-record.ts";
 import type { MemberReviveOutcome } from "./service/workflow-dispatch.ts";
+// [subagent-model-switch §6.2 读取规则 / §7.5 覆盖持久化行（U4b 接线）] workflow 域
+// 覆盖的 miss 重建读面（scanRunEvents——persistence 同层既有方向）与 run 覆盖事件的
+// 折叠单点（latestModelOverride）。后者是 execution → orchestration 的新增值导入：
+// 折叠语义消费面单点（run-events「消费面单点 latestModelOverride」）优先于拆边纪律
+// ——手写折叠即双轨；拆边批可后续整族收编（登记单元 deviations）。
+import { resolveRunEventJournal, scanRunEvents } from "./persistence/run-event-journal.ts";
+import { latestModelOverride } from "../orchestration/run-events.ts";
 // [H3/R4] 域 #6/#7/#12/#14/#15 聚合（run 域执行编排）+ [D-R4-1] 拆分的 workflow 族
 // 聚合（executeWorkflowAgent 派发链）+ [2026-09-13 design-code-sync] 拆出的 chat 域
 // 轮次编排聚合（Continuation 协作面 + kickOffChatRound 族）——聚合组间零互调零
@@ -185,6 +206,16 @@ export class SubagentService {
 
   private readonly manifestStore: ManifestStore;
 
+  /** [F1-18 / §6.2 读取规则] workflow 域覆盖重建负缓存（已扫无覆盖的 runId 集）：
+   * 从未被切换过的 run 内存恒 miss，负缓存短路重复的 journal 全量重扫（派发热路径
+   * 常态开销），形态先例 = member-reuse-pool loadedRuns（每 run 至多一次 scan 含
+   * 空载登记）。只短路 journal 重扫、不遮蔽 setModelOverride 内存写——内存命中查询
+   * 在前（getModelOverride 先查内存表），切换后内存表有值、负缓存永不触发。
+   * 失效通道：journal model-override 帧落盘使「已扫无覆盖」登记为假——resume 写点
+   * 经 applyRunOverrideProjection 落账后作废（F1-18 修复；修复前零失效点，resume
+   * 显式 model 被 stale 登记遮蔽至进程重启）。 */
+  private readonly overrideRebuildNegativeCache = new Set<string>();
+
   /**
    * [D6 #7a] records 目录（与 manifestStore 同源同一推导）——屏障失败 warn 带 manifest
    * 文件路径用（ManifestStore.dir 私有，此处不破封装另存同源值；漂移由构造点同语句保证不发生）。
@@ -255,6 +286,17 @@ export class SubagentService {
     // [W4 发射点② / U5 收口项②] markRoundIdle 簿记⑧的 pending 注销闭包接线（唯一
     // 装配点——轮终注销由 store 统一发射，调用方薄壳不再双轨重复发）。
     this.store.setPendingUnregister((id, status) => this.notifyHost.emitPendingUnregister(id, status));
+    // [subagent-model-switch §6.2] 覆盖记账内存表的 miss 重建通道（读取规则：解析
+    // 第 0 层读宿主内存表；内存 miss——主 agent 进程重启后首次解析——按域从持久化
+    // 权威重建）。本闭包 = chat 域重建（执行记录链最新记录的 modelOverride 字段——
+    // 事件流折叠投影——scanFile 补投影 + 冷复活水合的读面）。workflow 域（runId 键）
+    // 的 miss 重建 = deps.rebuildRunOverride 独立通道（journal 折叠 latestModelOverride
+    // 单点，WorkflowDispatch 装配段注入），由 workflow-dispatch 派发链消费——注意
+    // runId 键仍会先经本闭包（ModelConfigService.getModelOverride 对任意 miss 键调
+    // rebuildOverride）：getFullRecord(runId) 查无（runId 非 record id，恒 undefined
+    // 空手而归）后才由 rebuildRunOverride 走 journal 折叠，闭包被调用、只是对 runId
+    // 恒 miss 不产生错值。
+    this.modelService.setOverrideRebuild((key) => this.store.getFullRecord(key)?.modelOverride);
     // [R3] 域 #3/#8/#10/#13 聚合（record 读建面：孤儿恢复/查询投影/action 网关/身份解析
     // 与 record 创建）。deps 全晚绑定闭包（构造期零求值——store/manifestStore/modelService
     // 为 #1 留壳共享依赖经 getter 现读同一实例；sessionRootId/sessionId/mainSessionFile/
@@ -352,7 +394,8 @@ export class SubagentService {
       finalizeAborted: (record) => this.recordLifecycle.finalizeAborted(record),
       idleTimeoutRecycle: (record) => this.recordLifecycle.idleTimeoutRecycle(record),
       archiveRecord: (record, source) => this.recordLifecycle.archiveRecord(record, source),
-      taskSpecWithModel: (opts, model) => this.runOrchestration.taskSpecWithModel(opts, model),
+      taskSpecWithModel: (opts, model, thinkingLevel) =>
+        this.runOrchestration.taskSpecWithModel(opts, model, thinkingLevel),
       outcomeToAgentResult: (record, outcome) =>
         this.runOrchestration.outcomeToAgentResult(record, outcome),
       settleOneShotOutcome: (record, result, aborted) =>
@@ -393,6 +436,37 @@ export class SubagentService {
       releaseRoundResources: (record, holdSlot, stream) =>
         this.runOrchestration.releaseRoundResources(record, holdSlot, stream),
       reviveMemberRecord: (recordId) => this.reviveWorkflowMemberRecord(recordId),
+      // [subagent-model-switch §6.6② / U4b] 覆盖记账表接线（读取当前覆盖值）：
+      // workflow 域作用域键 = parentRunId，读取通道 = U2 内存表单点（getModelOverride
+      // ——内存命中直返 + chat 域同步重建闭包）。
+      getModelOverride: (key) => this.modelService.getModelOverride(key),
+      // [§6.2 读取规则 / U4a 事件管线消费] workflow 域 miss 重建（主 agent 重启后
+      // 首次派发）：run 事件流折叠产物 latestModelOverride 单点（「最新一条，覆盖旧
+      // 覆盖值不叠加」，不变量 2）→ ModelOverride 词形转换 → 回填内存表（与
+      // getModelOverride 的 rebuild 回填同语义，后续派发内存命中不再读 journal）。
+      // resume 不带参数也吃持久化覆盖的管线终点（journal 覆盖事件 → 本折叠 → 派发
+      // 侧覆写 / taskSpec 二次咨询 / 复活重盖章三个消费点）。
+      rebuildRunOverride: async (runId) => {
+        // [F1-18] 负缓存命中（已扫无覆盖）直接返回空，不再 scanRunEvents 重扫——
+        // 从未切换过的 run 每次派发都经此处，重扫是派发热路径的重复 journal I/O。
+        // 负缓存只短路 journal 重扫：切换发生时 setModelOverride 写内存表在前，
+        // getModelOverride 内存命中先于本函数，负缓存不遮蔽任何内存写。
+        if (this.overrideRebuildNegativeCache.has(runId)) return undefined;
+        const events = await scanRunEvents(runId);
+        const folded = latestModelOverride(events);
+        if (folded === undefined) {
+          // 空载登记（loadedRuns 形态）：后续派发不再重扫该 run 的 journal。
+          this.overrideRebuildNegativeCache.add(runId);
+          return undefined;
+        }
+        const override: ModelOverride = {
+          ref: { provider: folded.model.provider, modelId: folded.model.modelId },
+          ...(folded.thinkingLevel !== undefined ? { thinkingLevel: folded.thinkingLevel } : {}),
+          setAt: folded.ts,
+        };
+        this.modelService.setModelOverride(runId, override);
+        return override;
+      },
     });
   }
 
@@ -722,6 +796,96 @@ export class SubagentService {
   }
 
   /**
+   * [subagent-model-switch §7.2] setModel 编排入口（目标 5 壳接线）。本体 =
+   * service/model-switch.ts 的纯函数编排（单一时序三步——校验 → 按状态分流 →
+   * 写持久化意图），deps 在本方法内装配（闭包现读壳共享依赖：modelService /
+   * store / chatRounds；跨聚合零 import，G2「经壳编排」形态）。
+   *
+   * 生产接线（§7.2 步骤②「按状态分流 → 引擎转发」/ §7.4「run 级全切」的真实通道）：
+   *   - engineSetModel：EnginePort.setModel 协议转发（引擎按 manifest
+   *     capabilities.setModel = 'native' 条件挂方法——native 位与方法缺席的组合 =
+   *     装配损坏，fail-fast 由转发通道守卫承接；非 native 引擎在编排步骤②预检即转
+   *     记账路径，不可达本通道）。
+   *   - isEngineNotActiveError：SDK SET_MODEL_NOT_ACTIVE_CODE 判别——引擎转发期间
+   *     子进程退出（§7.3 全部竞态窗口）按「无活进程」形态转纯记账路径。
+   *   - runAggregate：runModelSwitchAggregate（U5 聚合函数）+ resolveMemberPort
+   *     成员引擎解析（{@link resolveMemberEnginePortForSwitch}）。run 级意图写入由
+   *     编排层在聚合返回后统一执行（步骤③——聚合层只做转发与分派）。
+   *   - assertRunNotTerminal / listAcceptedMemberRunIds：run registry fold 终局判定
+   *     （record fold 唯一权威）与已受理成员清单（{@link listAcceptedMemberRunIdsForSwitch}）。
+   *
+   * 覆盖表重建回调（进程内意图表 miss → 记录链重建）：chat 域 = store.getFullRecord
+   * 的 modelOverride 字段（v2 fold 投影——scanFile 补投影 + 冷复活水合）；workflow
+   * 域的 run 事件流折叠重建已接 rebuildRunOverride（WorkflowDispatch 装配段）。
+   */
+  setModel(
+    target: ModelSwitchTarget,
+    model: ModelRef,
+    thinkingLevel?: string,
+  ): Promise<SetModelReply> {
+    return setModel(
+      {
+        getModelService: () => this.modelService,
+        markModelOverride: (record, override) => this.store.markModelOverride(record, override),
+        resolveEnginePort: (record) => this.chatRounds.resolveEnginePortForSwitch(record),
+        engineSetModel: (port, params) => {
+          if (port.setModel === undefined) {
+            throw new Error(
+              `engine '${port.id}' declares capabilities.setModel=native (precheck passed) ` +
+                `but exposes no setModel method — integration bug, report this`,
+            );
+          }
+          return port.setModel(params);
+        },
+        isEngineNotActiveError: (err: unknown): boolean =>
+          err instanceof Error &&
+          (err as { code?: unknown }).code === SET_MODEL_NOT_ACTIVE_CODE,
+        runAggregate: (input) =>
+          runModelSwitchAggregate({
+            ...input,
+            resolveMemberPort: (memberRunId) =>
+              resolveMemberEnginePortForSwitch(
+                this.store,
+                (windowKey) => this.runOrchestration.resolveChatEnginePort(windowKey),
+                memberRunId,
+              ),
+          }),
+        assertRunNotTerminal: (runId) => assertRunNotTerminalForSwitch(runId),
+        listAcceptedMemberRunIds: (runId) =>
+          listAcceptedMemberRunIdsForSwitch(
+            this.store,
+            this.sessionRootId ?? this.sessionId ?? undefined,
+            runId,
+          ),
+        // [U4a 事件管线消费 / U4b 接线] run 级覆盖意图持久化：run 事件流追加
+        // `model-override` 记账帧（事件类型/词表/fold 均为 U4a 产物，本接线复用既有
+        // journal 写入口——非新持久化载体）。写入面说明（[F1-17] 裁决修正）：不走
+        // dispatchRunTrigger 的真因是 model-override 为非转移记账事件（不占
+        // RUN_TRANSITIONS 表行），appendTransition 首行 transition() 对无转移表行
+        // 事件必抛 IllegalTransitionError——结构上进不了转移裁决链；RunDispatchSource
+        // = { runId, journalDir? } 对 interrupted 态 run（中断后补切的合法场景，验收
+        // 场景 3）本可达，不可达的是转移通道而非 run 本身。同款直写先例 =
+        // appendRunDiagnosticEvent 的 worker-log 直写（terminal-actions）。改走
+        // journal 单点 append（同实例 keyed 缓存 + seq 单调分配，W1 seq 契约；与
+        // 转移事件的 seq 交错合法）。失败上抛 → setModel 报错应答（§7.5 覆盖持久化
+        // 行：内存覆盖仍生效——内存写先于本调用）。
+        persistRunOverride: async (runId, override) => {
+          const { journal } = resolveRunEventJournal();
+          await journal.append(runId, {
+            type: "model-override",
+            model: { provider: override.ref.provider, modelId: override.ref.modelId },
+            ...(override.thinkingLevel !== undefined ? { thinkingLevel: override.thinkingLevel } : {}),
+            ts: override.setAt,
+          });
+        },
+      },
+      target,
+      model,
+      thinkingLevel,
+    );
+  }
+
+  /**
    * 统一执行入口。mode 固定 background（sync 已删除）。本体已迁 RunOrchestration
    *  （路由 → identity → record 创建 → worktree → 引擎 run 编排逐行等价随迁）；
    *  壳纯转发，对外签名不变（subagent-tool / subagent-actions 消费）。 */
@@ -753,6 +917,34 @@ export class SubagentService {
     stepIndex?: number,
   ): Promise<WorkflowAgentResult> {
     return this.workflowDispatch.executeWorkflowAgent(opts, parentRunId, signal, onEvent, stream, stepIndex);
+  }
+
+  /**
+   * [F1-18 修复] workflow run 覆盖记账的宿主投影同步（resume 写点的落账后半边）。
+   *
+   * journal model-override 帧落盘后宿主两个派生投影必须同步，否则进程存活期内
+   * 重派被旧投影遮蔽（resume 显式 model 静默丢失）：
+   * ① 覆盖记账内存表写值——若该 run 曾有覆盖，getModelOverride 内存命中旧值；
+   *    写入后重派走内存命中（与 setModel 写点的双写形态对齐）。
+   * ② 重建负缓存作废——「已扫无覆盖」登记在 journal append 后为假（stale 登记
+   *    会短路 rebuildRunOverride 的 journal 重扫，空载 run 首派即登记）。
+   *
+   * 生产调用链 = extension makeDeps 注入 LifecycleDeps.onResumeModelOverrideCommitted
+   * （resume-run appendResumeModelOverride 落账后回调）→ 本方法。载荷结构类型与
+   * ports.RunOverrideProjection 同构（orchestration → execution 经回调参数传递，
+   * 不反向 import）。
+   */
+  applyRunOverrideProjection(
+    runId: string,
+    override: { provider: string; modelId: string; thinkingLevel?: string; ts: number },
+  ): void {
+    const projected: ModelOverride = {
+      ref: { provider: override.provider, modelId: override.modelId },
+      ...(override.thinkingLevel !== undefined ? { thinkingLevel: override.thinkingLevel } : {}),
+      setAt: override.ts,
+    };
+    this.modelService.setModelOverride(runId, projected);
+    this.overrideRebuildNegativeCache.delete(runId);
   }
 
   /**

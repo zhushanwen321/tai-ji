@@ -43,7 +43,7 @@ grep -rln 'createReadStream' extensions/ --include='*.ts' | grep -v '\.test\.' |
 grep -rln "utils/jsonl" packages/runtime/src --include='*.ts' | grep -v '\.test\.' | grep -v __tests__ | grep -v 'src/utils/jsonl.ts'
 
 # R2 · runtime 侧提取器/扫描器/header 函数族（39 文件，含消费面委托）
-grep -rln 'FromSessionFile\|scanPiSessions\|scanExternalSessions\|getHistoryFromFilePath\|extractLatestModelFromJsonl\|extractSessionName\|extractSessionOutcome\|scanSessionMeta\|scanSubagentEntries\|scanWorkflowEntries\|scanPlanStateEntries\|readSessionHeader\|parseSessionHeader' packages/runtime/src --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
+grep -rln 'FromSessionFile\|scanPiSessions\|scanExternalSessions\|getHistoryFromFilePath\|extractLatestModelFromJsonl\|extractLatestModelChangeFromJsonl\|extractSessionName\|extractSessionOutcome\|scanSessionMeta\|scanSubagentEntries\|scanWorkflowEntries\|scanPlanStateEntries\|readSessionHeader\|parseSessionHeader' packages/runtime/src --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
 
 # R3 · runtime 侧流式逐行扫描（2 文件：usage-stats-service 读者 + logger 写流排除项）
 grep -rln 'createReadStream' packages/runtime/src --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
@@ -146,7 +146,7 @@ grep -rn 'client\.getEntries(' packages/runtime/src --include='*.ts' | grep -v '
 
 ## 6. 设计判定清单之外的新发现读者（已裁决）
 
-以下读者由机器锚点命中、不在 message-revoke 设计 §5 U6 的逐项判定清单内。裁决（2026-09-24 流水线主 agent，依据 = G2 二分准则「未来状态随树 / 已发生事实照实」+ 注入面判定）：**N1-N12 全部维持照实 / 非投影归类，零追加单元**——run / 通知 / bash 执行 / 压缩计数 / trace / fork / btw / 导入均为已发生事实（重建即伪造事实），无一注入模型上下文。附核实项：smart-context 压缩组装的文件重注入（compact-handler `readFileForReinject`）读的是项目源码文件而非 session 数据、且输入 branchEntries 来自活跃路径——撤回后新压缩输入天然不含被撤内容，与撤回零冲突。N13/N14 为分支审查补登（2026-10-01，理由见行内）：两者读取走 getEntries RPC 通道，不在 runtime 侧锚点命令族（E1/R1/R2/R3 重跑均不命中）——登记缺口不被机器锚点拦截，按 C-proc-28 登记义务归类；§2 已补 R4 检索锚（runtime 侧 client.getEntries 通道），该通道后续读者可被检索、不再漏网。N15 为分支审查补登（2026-10-04，理由见行内）：R2 锚点命中面内的存量漏登（非当次 diff 引入），按 C-proc-28 登记义务归类。
+以下读者由机器锚点命中、不在 message-revoke 设计 §5 U6 的逐项判定清单内。裁决（2026-09-24 流水线主 agent，依据 = G2 二分准则「未来状态随树 / 已发生事实照实」+ 注入面判定）：**N1-N12 全部维持照实 / 非投影归类，零追加单元**——run / 通知 / bash 执行 / 压缩计数 / trace / fork / btw / 导入均为已发生事实（重建即伪造事实），无一注入模型上下文。附核实项：smart-context 压缩组装的文件重注入（compact-handler `readFileForReinject`）读的是项目源码文件而非 session 数据、且输入 branchEntries 来自活跃路径——撤回后新压缩输入天然不含被撤内容，与撤回零冲突。N13/N14 为分支审查补登（2026-10-01，理由见行内）：两者读取走 getEntries RPC 通道，不在 runtime 侧锚点命令族（E1/R1/R2/R3 重跑均不命中）——登记缺口不被机器锚点拦截，按 C-proc-28 登记义务归类；§2 已补 R4 检索锚（runtime 侧 client.getEntries 通道），该通道后续读者可被检索、不再漏网。N15 为分支审查补登（2026-10-04，理由见行内）：R2 锚点命中面内的存量漏登（非当次 diff 引入），按 C-proc-28 登记义务归类。N16 为分支审查补登（2026-10-07，理由见行内）：当次 diff 引入的新读者（subagent 成员详情的 model_change 尾条目派生），按 C-proc-28 登记义务归类。
 
 | # | 读者 | 归类（已裁决） | 判定理由 |
 |---|------|----------|------|
@@ -165,6 +165,7 @@ grep -rn 'client\.getEntries(' packages/runtime/src --include='*.ts' | grep -v '
 | N13 | runtime `revoke-orchestrator` `readTreeSnapshot`（get_entries 快照——③ 定位 / ⑤ 信令前校验共用一次拉取，⑥ 回退后校验复用同款读点；非投影构建） | 照实 | 树回退定位与活跃路径校验读者，非投影构建：校验对象是树回退定位所需的活跃路径状态（与 §4.1 U6a 重建链同语义域），但读 get_entries 全文件快照、不派生展示投影、不注入模型上下文——⑤ 幂等判定「目标不在活跃路径但全文件存在 → 已撤」正需全文件事实，按活跃路径裁剪反而使读者失效。归类照实（已发生文件事实），零追加单元；机制裁决见 ADR-0076（decisions.md:295「完成确认 = reply 后 get_entries 校验」） |
 | N14 | runtime `session-delivery-registry` `readTranscriptUserTexts`（getEntries 全文读，`resync/rebuild/在途宽限扫描` 三调用点共用读点——判 delivered / 判重；非投影构建） | 照实 | 投递对账读者，判据 = 「投递已发生」事实：user 文本集合按裸标记扫描，命中 transcript → 判 delivered 抑制重建/重投（被撤条目已进文件恒判 delivered，不重建重投、无复活破坏）；未命中才重投（必达优先于去重，读取失败保守判未送达）。读 getEntries 全文件 user 文本、不派生展示投影、不注入模型上下文。与 N13 同走 getEntries RPC 通道（E1/R1-R3 锚点族外，2026-10-01 分支审查补登，按 C-proc-28 登记义务归类；通道检索锚 = §2 R4） | — |
 | N15 | runtime `events-projection` record 族投影 entry 源（冷启动 `scanRecordFamilyEntriesFromSessionFile` 流式扫描喂入、活跃 get_entries 游标喂入——编排与喂入点均在 `session-records.ts:513-514` / :758，本文件头部注释自述消费致 R2 锚点命中；2026-10-04 分支审查补登，按 C-proc-28 登记义务归类） | 照实 | 与 subagent/workflow-extractor、journal-projection 冷启动腿同概念域同口径——v2 注册/终态条目 = run 真实执行过的事实记录，扫描不裁剪（照实构造性保持）；plan 家族不进投影，无随树腿；事件源（record 事件文件 / run journal）为 record 域独立文件，不在 pi session `.jsonl` 普查对象内；读取语义落在 session-file-extraction 骨架 + session-records 编排（均已登记），撤回重建经 session-records U6d 全量重喂。归类照实，零追加单元 | — |
+| N16 | runtime `subagent-engine-history` `readPiSessionLatestModelChange`（薄委托 `infra/pi/session-model-tail-read.ts` `extractLatestModelChangeFromJsonl`——2026-10-07 分支审查补登：实现随 dmg-r1-5 下沉 infra/pi 单点（落点模块自 session-file-utils 按其 max-lines 预算拆出，扫描骨架仍复用该模块 scanJsonlFromTail），JSONL 尾读骨架 + `{ activePath: true }` 活跃路径裁剪与 §4.2 `extractLatestModelFromJsonl` 同款，登记条目跟随新落点；R2 锚点已补该函数名，后续读者可检索。`model-override-query.ts` 因头部注释提及该函数名致 R2 命中——其读取对象为 record 事件文件 / run journal（record 域独立文件，§1 不在普查对象，同 N15 口径），node:fs 直用登记见 runtime-layering §3④） | 照实 | N9 同口径：读取对象 = subagent 成员的 session 文件（record.sessionFile，成员引擎独立 spawn 的文件，C-sw-01 独立进程写），不随主树撤回；`model_change` 尾条目 = 已发生的显式切换执行事实（subagent-model-switch §7.2 审计口径「实际执行事实权威」），重建即伪造事实。实现带活跃路径裁剪是读取语义对成员文件自身分支形态的正确性（物理尾逆读会命中被撤子树 model_change 与真实生效值漂移），非 U6 撤回管线接线。归类照实，零追加单元 | — |
 
 ## 7. 已知边界登记
 

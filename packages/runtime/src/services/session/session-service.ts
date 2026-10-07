@@ -46,6 +46,7 @@ import type { IProcessManager, IPiEngine, PiCommandInfo } from '../ports/pi-engi
 import { TraceSync } from './trace-sync.js'
 import type { SessionTraceSnapshot } from './trace-sync.js'
 import { SessionRecords } from './session-records.js'
+import { createModelOverrideQuery } from './model-override-query.js'
 import type { OversizeAwareResult } from './session-records.js'
 import { SessionModelControl } from './session-model-control.js'
 import { isModelInRegistry, providerHasCredential } from './session-model-guards.js'
@@ -503,6 +504,11 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       // [A1 接线] subagentAction 的 skill 注入 project 扫描基准（与 getSessionCwd 同源）
       getSessionCwd: (sessionId) => this.getSessionCwd(sessionId),
       getMessageBus: () => this.messageBus,
+      // [subagent-model-switch U2 接线] 详情载荷覆盖状态查询的生产后端（磁盘投影查询，
+      // model-override-query.ts）：session 域内部装配（deps 依赖本域 sessionStore——
+      // 与 traceSync/records 等域内构造同范式）；测试经 deps.modelOverrideQuery 显式
+      // mock 覆盖（U1「端口缺席 = 载荷不造键」语义不受影响）。
+      modelOverrideQuery: createModelOverrideQuery({ sessionStore: this.sessionStore }),
     }, new SkillInjector(this.skillSource))
     // pi 崩溃自动恢复编排组装（u8，D7）：restore 复用既有惰性恢复内核（facade.restoreSession
     // → lifecycle.restoreSession，附着自动走 u4c 预算化 restore 路径——⑤档超阈值走逆序分块

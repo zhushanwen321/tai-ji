@@ -60,6 +60,7 @@ const os = require('node:os');
 
 const CLI_PATH = process.env.ZCODE_ENG_CLI_PATH;
 const V2_PATH = process.env.ZCODE_ENG_V2_CONFIG || path.join(os.homedir(), '.zcode', 'v2', 'config.json');
+const PROVIDER_CONFIG_PATH = process.env.ZCODE_ENG_PROVIDER_CONFIG || path.join(os.homedir(), '.zcode', 'v2', 'provider_config.json');
 const CONFIG_PATH = path.join(os.homedir(), '.zcode', 'cli', 'config.json');
 
 // 合并形态：真实 cli config 原样（model/plugins/mcp/subagents 等 worker 继承面不变）
@@ -68,6 +69,10 @@ const CONFIG_PATH = path.join(os.homedir(), '.zcode', 'cli', 'config.json');
 // 配置（2026-08-25 事故：残留旧 key 压过新凭据致 turn 0 401），故不取 real 优先。
 // model.main 缺失时只从 v2 透传（v2 也没有则不伪造——CLI 缺省解析自会落到注册表
 // 可用模型；plan 家族 id 已不可用，不再兜底伪造）。
+// [D3 顺带发现 6] provider_config.json（引擎侧模型校验源）补注入：仅存在于
+// providerRules 的个人 provider（v2 字典未物化）不在注入集 → app-server 注册表
+// 缺条目，显式模型首派即报「Provider Registry 中不存在 Model」。为带 apiKey+baseUrl
+// 且 v2/real 均缺失的 rule 合成 cli-config 条目（形状照抄现网个人条目）。
 // 返回 null = 无可注入凭据（v2 无 provider 条目）——不 patch，让原生报错透出。
 // 读源经 readOrig 间接取：patch 前首调 = fs.readFileSync 本体；patch 后 = 原函数
 // （防 patch 后的递归自调用）。
@@ -85,6 +90,7 @@ function injectedConfigText() {
     }
     return null;
   }
+  const realProviders = real.provider && typeof real.provider === 'object' ? real.provider : {};
   const v2Providers = v2.provider && typeof v2.provider === 'object' ? v2.provider : {};
   const hasKey = (entry) => entry && typeof entry === 'object'
     && entry.options && typeof entry.options.apiKey === 'string' && entry.options.apiKey !== '';
@@ -92,9 +98,60 @@ function injectedConfigText() {
   for (const [id, entry] of Object.entries(v2Providers)) {
     if (hasKey(entry)) injectable[id] = entry;
   }
+  // provider_config.json 补注入（读取失败静默降级——校验源缺席时引擎侧校验同样不可
+  // 用，注入面维持 v2-only 现状；providerRules 缺失不构成凭据错误）。
+  try {
+    const pc = JSON.parse(readOrig(PROVIDER_CONFIG_PATH, 'utf8'));
+    const pcCfg = pc && typeof pc.config === 'object' && pc.config ? pc.config : {};
+    const pcr = typeof pcCfg.providerConfigRules === 'object' && pcCfg.providerConfigRules ? pcCfg.providerConfigRules : {};
+    const rules = Array.isArray(pcr.providerRules) ? pcr.providerRules : [];
+    const mcr = typeof pcCfg.modelConfigRules === 'object' && pcCfg.modelConfigRules ? pcCfg.modelConfigRules : {};
+    const modelRules = Array.isArray(mcr.providerModelRules) ? mcr.providerModelRules : [];
+    const modelMeta = {};
+    for (const mr of modelRules) {
+      if (!mr || typeof mr !== 'object' || typeof mr.providerId !== 'string' || typeof mr.modelId !== 'string') continue;
+      (modelMeta[mr.providerId] = modelMeta[mr.providerId] || []).push(mr);
+    }
+    for (const rule of rules) {
+      if (!rule || typeof rule !== 'object') continue;
+      const id = typeof rule.providerId === 'string' ? rule.providerId : '';
+      const cfg = rule.config && typeof rule.config === 'object' ? rule.config : {};
+      const access = cfg.access && typeof cfg.access === 'object' ? cfg.access : {};
+      const api = cfg.api && typeof cfg.api === 'object' ? cfg.api : {};
+      // v2/real 已有 → 不重复合成（v2 条目更全，整条优先语义不受影响）
+      if (!id || injectable[id] || realProviders[id]) continue;
+      // hasKey 纪律同款：无 apiKey 不合成；无 baseUrl（endpoint 由模板提供的形态）
+      // 不合成——残缺条目比不注入更糟，原生「不存在 Model」报错照旧透出
+      if (typeof access.apiKey !== 'string' || access.apiKey === '') continue;
+      if (typeof api.baseUrl !== 'string' || api.baseUrl === '') continue;
+      const order = Array.isArray(cfg.modelOrder) ? cfg.modelOrder
+        : (Array.isArray(cfg.personalModelIds) ? cfg.personalModelIds : []);
+      const models = {};
+      for (const mr of modelMeta[id] || []) {
+        const mrCfg = mr.config && typeof mr.config === 'object' ? mr.config : {};
+        if (mrCfg.enabled === false) continue; // 禁用模型不进注册表（GUI 语义一致）
+        const props = mrCfg.properties && typeof mrCfg.properties === 'object' ? mrCfg.properties : {};
+        models[mr.modelId] = typeof props.contextWindow === 'number'
+          ? { limit: { context: props.contextWindow } }
+          : {};
+      }
+      for (const mid of order) {
+        if (typeof mid === 'string' && mid !== '' && !(mid in models)) models[mid] = {};
+      }
+      injectable[id] = {
+        name: typeof rule.providerName === 'string' ? rule.providerName : id,
+        // provider_config.json 不携带协议形态——standard-personal 组以 openai-compatible
+        // 为多数先例；错配时请求期协议错误可见（不阻塞注册表装载），真机漂移信号明确
+        kind: 'openai-compatible',
+        options: { apiKey: access.apiKey, baseURL: api.baseUrl },
+        source: 'custom',
+        models: models,
+      };
+    }
+  } catch { /* provider_config 缺失/损坏 → 补注入面静默降级（v2 注入不受影响） */ }
   if (Object.keys(injectable).length === 0) return null;
   const merged = { ...real };
-  merged.provider = { ...(real.provider && typeof real.provider === 'object' ? real.provider : {}), ...injectable };
+  merged.provider = { ...realProviders, ...injectable };
   if ((!merged.model || typeof merged.model !== 'object' || !merged.model.main)
       && v2.model && typeof v2.model === 'object' && v2.model.main) {
     merged.model = { ...(merged.model || {}), main: v2.model.main };

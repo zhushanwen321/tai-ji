@@ -256,6 +256,7 @@
         "e2e/ask-user-real.spec.ts",
         "e2e/tasks-drawer-real.spec.ts",
         "e2e/workflow-thinkinglevel-real.spec.ts",
+        "e2e/fixtures/real-track-specs.ts",
         "e2e/fixtures/sample-project/.pi/workflows/thinkinglevel-probe.js"
       ],
       "layer": "L2",
@@ -279,6 +280,10 @@
         {
           "kind": "harness",
           "ref": "e2e/fixtures/launch-app-real.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "e2e/fixtures/real-track-specs.ts"
         },
         {
           "kind": "harness",
@@ -1439,6 +1444,27 @@
       "owner": "docs",
       "authority": "docs/CODE-DUPLICATION-BASELINE.md",
       "note": "重复度度量口径的唯一机器入口（min-tokens 50 / strict / typescript 通道 / 五域源码 / 排除测试与生成物，基线 164 clones / 2543 lines / 0.73%）；改动脚本口径参数时须同批重测并更新 docs/CODE-DUPLICATION-BASELINE.md 基线数字（口径两处一致纪律见该文档「一键重跑」节）"
+    },
+    {
+      "id": "E2E-GUIDEPROJ-01",
+      "summary": "引擎指南契约投影检查（check-guide-contract-projection：engine-development-guide 的协议方法/错误码/能力位/manifest 示例与 SDK 源码词表三面逐键一致）",
+      "scope": [
+        "scripts/check-guide-contract-projection.mjs",
+        "docs/extensions/subagents/engine-development-guide.md"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-guide-contract-projection.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-guide-contract-projection.mjs",
+      "owner": "extensions",
+      "authority": "docs/extensions/subagents/engine-development-guide.md",
+      "note": "引擎协议面演进的投影一致门：指南与源码词表任一侧变更时跑（exit 0 + 逐面 OK 行），更新触发义务见根 AGENTS.md 主题索引；红灯按脚本输出的 ✗ 明细同 commit 更新指南或回退源码误改。U3（subagent-model-switch）引入 setModel 方法/三型错误码/能力位扩位时登记本 rule——脚本既有但此前未入 coverage 登记处"
     },
     {
       "id": "E2E-RESUME-01",

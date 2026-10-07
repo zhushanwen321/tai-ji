@@ -97,6 +97,12 @@ BASELINE_MODULES = {
     # terminal-service / plugin-host-process 消费 buildOutboundChildEnv 组装子进程 env
     # （env-propagation-boundary 设计 C-proc-09），同族随 R3 收编
     "spawn-env",
+    # session-model-tail-read（2026-10-07，dmg-r1-5）：session JSONL 的 model_change 显式
+    # 热切尾读提取器（subagent-model-switch §7.2「实际执行事实权威」），自 services 层
+    # subagent-engine-history 手写尾读下沉收敛（pi entry 词汇合法持有点纪律）——扫描骨架
+    # 复用 session-file-utils 的 scanJsonlFromTail（infra 内部单向），同 session-file-utils
+    # 族随 R3 收编
+    "session-model-tail-read",
 }
 
 # 检查判定用并集（行为与拆分前一致）

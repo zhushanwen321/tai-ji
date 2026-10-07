@@ -97,6 +97,10 @@ function piUnavailableEnginePort(): EnginePort {
       interrupt: "kill-only",
       permissionMode: "native",
       maxTurns: true,
+      // [subagent-model-switch] setModel 位同批补位（stub 快照权威 = 与 pi-subagent-cli
+      // manifest 逐位一致；位缺省 undefined 语义上是 unsupported，但快照注释声明逐位
+      // 对齐，漏位即快照漂移）
+      setModel: "native",
     }),
     probe: () => fail(),
     run: () => fail(),

@@ -134,6 +134,17 @@ export type RunErrorCode =
  */
 export const RUN_EVENTS_SUFFIX = ".record.jsonl";
 /**
+ * run 状态目录名（<dataRoot> 下的固定分量）。
+ *
+ * 单源导出（barrel 上收）：pi 壳 JsonlRunStore / workflow-events 的
+ * `<sessionDir>/workflow-state` 布局与 pi 宿主枚举的 agentDir 根回退目录
+ * 同名分量——字面量散布时任一侧单独改名即静默漂移（store 读写错目录 /
+ * stall 判定读不到 journal）。归位本文件（run 域词汇常量最低层声明处）：
+ * workflow-state-root（assembly 目录派生）与 runtime 读侧（gateway /
+ * model-override-query / session-records）双向消费不产生反向边（dmg-r3-3）。
+ */
+export const STATE_DIR_NAME = "workflow-state";
+/**
  * slug 最大长度（D6 合流迁入本文件，原权威定义在已删除的 execution/execute-options-mapper.ts）。
  * 历史值 20 偏紧——描述性 slug 如 "audit-structured-output"（23）/ "fix-subagent-wf-tools"（21）
  * 会撞上限，放宽到 35 兼顾「短到能塞进 TUI 标题行」与「容纳合理描述性 kebab-case 名」。
@@ -163,6 +174,7 @@ export const RUN_EVENT_TYPES = [
   "run-interrupted",
   "run-resumed",
   "run-settled",
+  "model-override",
   "worker-log",
 ] as const;
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number];

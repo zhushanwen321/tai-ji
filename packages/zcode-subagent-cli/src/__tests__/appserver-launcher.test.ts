@@ -84,6 +84,8 @@ interface HomeSpec {
   realRaw?: string;
   /** cli config 对象形态；undefined = 不布置该文件（GUI-only 宿主） */
   real?: unknown;
+  /** provider_config.json 对象形态（D3 顺带发现 6 补注入源）；undefined = 不布置 */
+  providerConfig?: unknown;
   /** 显式预设 ZCODE_BUILTIN_PROVIDER_CONFIG_FILE；缺省 = spawn env 不设该键 */
   builtinProviderEnv?: string;
 }
@@ -105,6 +107,11 @@ function setupHome(spec: HomeSpec): {
   fs.mkdirSync(path.dirname(v2Path), { recursive: true });
   if (spec.v2Raw !== undefined) fs.writeFileSync(v2Path, spec.v2Raw);
   else if (spec.v2 !== undefined) fs.writeFileSync(v2Path, JSON.stringify(spec.v2, null, 2));
+  const providerConfigPath = path.join(home, ".zcode", "v2", "provider_config.json");
+  if (spec.providerConfig !== undefined) {
+    fs.mkdirSync(path.dirname(providerConfigPath), { recursive: true });
+    fs.writeFileSync(providerConfigPath, JSON.stringify(spec.providerConfig, null, 2));
+  }
   const cliConfig = path.join(cliDir, "config.json");
   if (spec.realRaw !== undefined) fs.writeFileSync(cliConfig, spec.realRaw);
   else if (spec.real !== undefined) fs.writeFileSync(cliConfig, JSON.stringify(spec.real, null, 2));
@@ -130,6 +137,7 @@ function setupHome(spec: HomeSpec): {
           HOME: home,
           ZCODE_ENG_CLI_PATH: probePath,
           ZCODE_ENG_V2_CONFIG: v2Path,
+          ZCODE_ENG_PROVIDER_CONFIG: providerConfigPath,
           ZCODE_PROBE_STATE: statePath,
           ...explicit,
         } as NodeJS.ProcessEnv,
@@ -202,6 +210,90 @@ describe("wrapper 合并语义（v2 注入优先）", () => {
     expect(res.status).toBe(0);
     const cfg = JSON.parse(h.state().syncUtf8.text as string);
     expect(cfg.model.main).toBe("p1/model-x");
+  });
+});
+
+describe("provider_config 补注入（D3 顺带发现 6：引擎校验源个人 provider 合成）", () => {
+  it("仅存在于 providerRules 的个人 provider（v2 字典缺失）→ 合成 cli-config 条目（name/kind/options/models 带 contextWindow limit；禁用模型不进）", () => {
+    const h = setupHome({
+      v2: { provider: { "p-in-v2": providerEntry("v2-key") } },
+      real: {},
+      providerConfig: {
+        schemaVersion: 1,
+        config: {
+          providerConfigRules: {
+            providerRules: [
+              {
+                providerId: "new-provider",
+                providerName: "StepFun",
+                config: {
+                  group: "standard-personal",
+                  access: { type: "api-key", apiKey: "sk-fixture" },
+                  api: { baseUrl: "https://api.stepfun.test/v1" },
+                  personalModelIds: ["step-5-preview"],
+                  modelOrder: ["step-5-preview"],
+                },
+              },
+              {
+                // 无 baseUrl（endpoint 由模板提供）→ 不合成
+                providerId: "template-only",
+                providerName: "TemplateOnly",
+                config: { access: { type: "api-key", apiKey: "sk-t" }, modelOrder: ["m1"] },
+              },
+            ],
+          },
+          modelConfigRules: {
+            providerModelRules: [
+              { modelId: "step-5-preview", config: { enabled: true, properties: { contextWindow: 1000000 } }, providerId: "new-provider" },
+              { modelId: "step-disabled", config: { enabled: false }, providerId: "new-provider" },
+            ],
+          },
+        },
+      },
+    });
+    const run1 = h.run();
+    expect(run1.status).toBe(0);
+    const injected = JSON.parse(h.state().syncUtf8.text!) as { provider: Record<string, { name: string; kind: string; options: { apiKey: string; baseURL: string }; source: string; models: Record<string, unknown> }> };
+    // 合成条目：形状照抄现网个人条目；modelRules 的 contextWindow 进 limit；禁用模型不进
+    const synth = injected.provider["new-provider"];
+    expect(synth).toEqual({
+      name: "StepFun",
+      kind: "openai-compatible",
+      options: { apiKey: "sk-fixture", baseURL: "https://api.stepfun.test/v1" },
+      source: "custom",
+      models: { "step-5-preview": { limit: { context: 1000000 } } },
+    });
+    // 无 baseUrl rule 不合成
+    expect(injected.provider["template-only"]).toBeUndefined();
+    // v2 既有条目原样保留（整条优先语义不受合成影响）
+    expect(injected.provider["p-in-v2"]).toEqual(providerEntry("v2-key"));
+  });
+
+  it("providerRules 与 v2 同 id → 不重复合成（v2 整条优先）；provider_config 缺失 → 静默降级（v2 注入不受影响）", () => {
+    const rule = {
+      providerId: "shared-p",
+      providerName: "Shared",
+      config: {
+        access: { type: "api-key", apiKey: "rule-key" },
+        api: { baseUrl: "https://rule.test/v1" },
+        modelOrder: ["m1"],
+      },
+    };
+    const h1 = setupHome({
+      v2: { provider: { "shared-p": providerEntry("v2-key") } },
+      real: {},
+      providerConfig: { config: { providerConfigRules: { providerRules: [rule] }, modelConfigRules: { providerModelRules: [] } } },
+    });
+    const r1 = h1.run();
+    expect(r1.status).toBe(0);
+    const injected1 = JSON.parse(h1.state().syncUtf8.text!) as { provider: Record<string, { options: { apiKey: string } }> };
+    expect(injected1.provider["shared-p"]).toEqual(providerEntry("v2-key"));
+
+    const h2 = setupHome({ v2: { provider: { "v2-only": providerEntry("k") } }, real: {} });
+    const r2 = h2.run();
+    expect(r2.status).toBe(0);
+    const injected2 = JSON.parse(h2.state().syncUtf8.text!) as { provider: Record<string, unknown> };
+    expect(injected2.provider["v2-only"]).toEqual(providerEntry("k"));
   });
 });
 

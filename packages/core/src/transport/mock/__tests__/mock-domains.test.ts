@@ -638,7 +638,7 @@ describe('mock workspace / quota / project / preset domain', () => {
 // ── 门面导出与 real/whats 通道 ──────────────────────────────────────────────
 describe('mock 门面导出', () => {
   it('导出齐备（facade 三元消费方逐项存在）', () => {
-    for (const key of ['session', 'chat', 'config', 'model', 'extension', 'plugin', 'composer', 'search', 'settings', 'workspace', 'quota', 'project', 'preset', 'btw', 'tts'] as const) {
+    for (const key of ['session', 'chat', 'config', 'model', 'extension', 'plugin', 'composer', 'search', 'settings', 'workspace', 'quota', 'project', 'preset', 'btw', 'tts', 'subagent'] as const) {
       expect(mock[key]).toBeDefined()
     }
     expect(typeof mock.setMockE2E).toBe('function')
@@ -710,5 +710,17 @@ describe('mock tts 域', () => {
 
   it('speak：恒以 tts_not_configured 失败（错误路径驱动按钮/toast 状态机）', async () => {
     await expect(tts.speak({ sessionId: 's1', text: '你好' })).rejects.toMatchObject({ code: 'tts_not_configured' })
+  })
+})
+
+// ── mock subagent 域（subagent-model-switch §7.1 入口层，U1）────────────────
+describe('mock subagent 域', () => {
+  it('setModel：恒回已记账型应答（mock 无宿主编排/活进程链，不虚构生效值）', async () => {
+    await expect(
+      mock.subagent.setModel({ recordId: 'rec-1', provider: 'prov' as ProviderId, modelId: 'm1' }),
+    ).resolves.toEqual({ kind: 'recorded', note: '已记录，下次执行生效（mock）' })
+    await expect(
+      mock.subagent.setModel({ runId: 'run-1', provider: 'prov' as ProviderId, modelId: 'm1', thinkingLevel: 'high' }),
+    ).resolves.toEqual({ kind: 'recorded', note: '已记录，下次执行生效（mock）' })
   })
 })

@@ -46,6 +46,7 @@ import * as preset from '../domains/preset'
 import * as project from '../domains/project'
 import * as quota from '../domains/quota'
 import * as session from '../domains/session'
+import * as subagent from '../domains/subagent'
 import * as settings from '../domains/settings'
 import * as terminal from '../domains/terminal'
 import * as tts from '../domains/tts'
@@ -1057,5 +1058,36 @@ describe('tts 域 RPC 封装', () => {
     mockCommand.mockResolvedValueOnce({ filePath: '/x.wav' })
     await tts.speak({ text: '设置页测试样句' })
     expect(mockCommand.mock.calls[1]).toEqual(['tts.speak', { text: '设置页测试样句' }, 0])
+  })
+})
+
+// ── subagent 域（subagent-model-switch §7.1，U1）───────────────────────────
+describe('subagent 域 RPC 封装', () => {
+  it('setModel：recordId 形态 command 透传 + backstop 超时 + 应答原样返回（已生效型）', async () => {
+    const reply = {
+      kind: 'effective',
+      effectiveModel: { provider: 'p', modelId: 'm' },
+      effectiveThinkingLevel: 'high',
+    }
+    mockCommand.mockResolvedValueOnce(reply)
+    await expect(subagent.setModel({ recordId: 'rec-1', provider: 'p' as never, modelId: 'm' })).resolves.toEqual(reply)
+    expect(mockCommand).toHaveBeenCalledWith(
+      'subagent.setModel',
+      { recordId: 'rec-1', provider: 'p', modelId: 'm' },
+      RPC_BACKSTOP_TIMEOUT_MS,
+    )
+  })
+
+  it('setModel：runId 聚合形态 + thinkingLevel 可选键透传', async () => {
+    const reply = { members: [], failures: [], summary: '2 switched' }
+    mockCommand.mockResolvedValueOnce(reply)
+    await expect(
+      subagent.setModel({ runId: 'run-1', provider: 'p' as never, modelId: 'm', thinkingLevel: 'high' }),
+    ).resolves.toEqual(reply)
+    expect(mockCommand).toHaveBeenCalledWith(
+      'subagent.setModel',
+      { runId: 'run-1', provider: 'p', modelId: 'm', thinkingLevel: 'high' },
+      RPC_BACKSTOP_TIMEOUT_MS,
+    )
   })
 })

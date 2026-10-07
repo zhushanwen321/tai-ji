@@ -37,6 +37,8 @@ import type {
   EngineHandleData,
   ProbeReport,
   SessionView,
+  SetModelParams,
+  SetModelResult,
 } from "../types.ts";
 import type { EngineModelSelectorInput, EnginePort, EngineRunResult, RunContext } from "../port.ts";
 import type { EngineClient, RunRoute } from "./engine-client.ts";
@@ -263,6 +265,14 @@ export class RemoteEngine implements EnginePort {
       // typeof engine.validateModel === "undefined"。
       (this as { validateModel?: unknown }).validateModel = undefined;
     }
+    if (opts.manifest.capabilities.setModel !== "native") {
+      // [subagent-model-switch §7.3] setModel 成员同款形态映射：manifest setModel 位
+      // 非 'native'（含缺省 undefined = unsupported）→ 成员**不实现**——消费方
+      // （U2 编排发送前预检）以 `typeof engine.setModel === "function"` 统一探测，
+      // 位不支持即转覆盖记账路径，不经协议把 engine_protocol_unknown_method 原样
+      // 抛给用户（capabilities 注释的消费点登记）。
+      (this as { setModel?: unknown }).setModel = undefined;
+    }
   }
 
   /** 直读 manifest 注册期快照（无缓存——每次调用同值，快照不可变）。 */
@@ -335,6 +345,18 @@ export class RemoteEngine implements EnginePort {
       force: probeOpts?.force ?? false,
     })) as SdkProbeReport;
     return report;
+  }
+
+  /**
+   * [subagent-model-switch §7.3] setModel 协议映射（EngineClient.setModel 类型化面，
+   * cancelRun 同族控制面单请求）。错误分型经协议 error 帧原样上浮（EngineSdkError
+   * code 保留：三型失败 + engine_run_not_active 无活进程形态——消费方按 §7.2 处置表
+   * 分派）。非 native 引擎的本成员已在构造器摘除（见构造器注释）；位 native 的调用
+   * 若引擎侧漂移未实装，由引擎 server 的 setModel 分发行结构化拒。
+   */
+  async setModel(params: SetModelParams): Promise<SetModelResult> {
+    await this.opts.client.ensureConnected();
+    return this.opts.client.setModel(params);
   }
 
   /**

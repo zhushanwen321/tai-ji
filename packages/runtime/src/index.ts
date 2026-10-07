@@ -1,5 +1,6 @@
 // coverage-file-gate-exempt: 组合根装配接线面——决策逻辑在注入工厂（btw-line-spawn-options.ts 等，各有直测），本文件新增行是构造注入与回调接线，单测不可达（入口装配）；行为由 validate-runtime-bundle 与 runtime e2e 承载
 import { RuntimeServer } from './transport/server.js'
+import { createSubagentModelSwitchGateway } from './infra/subagent-model-gateway.js'
 // remote-access U0.1（D2/D9）：remote token 热读函数——仅 --remote-access 开态装配为
 // ConnectionManager 的 remoteTokenProvider（每次 auth 握手调用）；关态不装配零 IO。
 // 层位：文件 IO 居 infra（runtime-layering.md §2 transport 层不碰 node:fs）。
@@ -1446,6 +1447,16 @@ async function main(): Promise<void> {
   }
 
   const tServicesReady = performance.now()
+  // [subagent-model-switch U6] 模型切换网关生产适配器（§7.1.1 通道）：出站点 prompt +
+  // 结果文件回收 + wire 应答映射。依赖同源派生——getClient 照 workflowAction 的
+  // deps.pm.getClient 形态（sessionService.getRpcClient 同一 pm）；agentDir 缺省走
+  // 适配器内 getPiAgentDir()（与 model-override-query 缺省锚一致）。覆盖状态查询不经
+  // 本网关（M1-3 收敛：model-override-query 是唯一查询入口，详情载荷组装路径直接装配）。
+  // 注入后 handler 不再走 subagent_model_switch_unwired 兜底。
+  const subagentModelSwitchGateway = createSubagentModelSwitchGateway({
+    getClient: (sessionId) => sessionService.getRpcClient(sessionId),
+    scanSessions: (opts) => sessionStore.scanSessions(opts),
+  })
   server.setServices(sessionService, configService, modelService, {
     extension: extensionService,
     plugin: pluginService,
@@ -1487,6 +1498,9 @@ async function main(): Promise<void> {
     // btw 线三帧路由（btw-question M2-b，B1/B2 授权接线）：BtwService 窄面 + 主会话解析
     // 注入 BtwMessageHandler（assembleOptionalHandlers 装配 → buildRoutes 展开 handles）。
     btw: { service: btwService, resolveMain: resolveBtwMain },
+    // [subagent-model-switch U6] subagent.setModel 路由依赖（§7.1.1 通道生产适配器，
+    // 上方构造；缺席时 handler 恒回 unwired 可操作错误的兜底自此不可达）。
+    subagentModelSwitchGateway,
   })
 
   // Graceful shutdown on signals

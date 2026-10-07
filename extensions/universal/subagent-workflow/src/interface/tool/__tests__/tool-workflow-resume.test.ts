@@ -130,6 +130,26 @@ describe("actionResume", () => {
     expect(options.budgetTokens).toBe(50_000);
   });
 
+  it("model 形参透传（F1-26 后续项：core 落统一覆盖记账——补切 + 无参 resume 合一步）", async () => {
+    const recordPath = writeRecordStream([runCreatedFrame('{"a":1}')]);
+    await actionResume(
+      { action: "resume", runId: "wf-test", args: { a: 1 }, model: "p2/m2" } as never,
+      makeDeps(recordPath) as never,
+    );
+    const options = vi.mocked(resumeRun).mock.calls[0]![2] as { model?: string };
+    expect(options.model).toBe("p2/m2");
+  });
+
+  it("model 缺省 → options 不带 model 键（无参 resume 不写覆盖记账）", async () => {
+    const recordPath = writeRecordStream([runCreatedFrame('{"a":1}')]);
+    await actionResume(
+      { action: "resume", runId: "wf-test", args: { a: 1 } } as never,
+      makeDeps(recordPath) as never,
+    );
+    const options = vi.mocked(resumeRun).mock.calls[0]![2] as { model?: string };
+    expect("model" in options).toBe(false);
+  });
+
   it("tokens 缺省 → options 不带 budgetTokens 键（core 侧跳过覆盖、走三档回落）", async () => {
     await actionResume(
       { action: "resume", runId: "wf-test" } as never,

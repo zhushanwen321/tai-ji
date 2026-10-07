@@ -6,7 +6,7 @@ import * as path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { encodeCwd, getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import { encodeCwd, getSubagentModelSwitchResultsDir, getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
 
 describe("encodeCwd", () => {
   it("encodes a normal unix absolute path", () => {
@@ -100,5 +100,24 @@ describe("getSubagentRecordsDir", () => {
     const a = getSubagentRecordsDir("/agent", "/cwd1");
     const b = getSubagentRecordsDir("/agent", "/cwd2");
     expect(a).not.toBe(b);
+  });
+});
+
+describe("getSubagentModelSwitchResultsDir", () => {
+  it("returns agentDir/subagents/<encodedCwd>/model-switch（与 records 同 enc 段，§7.1.1 同源同族）", () => {
+    const result = getSubagentModelSwitchResultsDir("/home/user/.pi/agent", "/Users/x/proj");
+    expect(result).toBe(
+      path.join("/home/user/.pi/agent", "subagents", "--Users-x-proj--", "model-switch")
+    );
+  });
+
+  it("shares the same <enc> segment with getSubagentRecordsDir for same cwd", () => {
+    // §7.1.1 要素 3：结果目录与 records 目录同段——extension 写入侧与 runtime 读取侧
+    // 共用本 helper，同源性由结构保证（两侧不同源 = 通道回执永不命中）。
+    const agentDir = "/home/user/.pi/agent";
+    const cwd = "/Users/x/proj";
+    expect(path.dirname(getSubagentModelSwitchResultsDir(agentDir, cwd))).toBe(
+      path.dirname(getSubagentRecordsDir(agentDir, cwd))
+    );
   });
 });

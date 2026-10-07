@@ -157,6 +157,21 @@ describe("finalizeRun 落 run-settled（终态单写点）", () => {
     expect("scriptPath" in emptyEvents[0]).toBe(false);
   });
 
+  it("run-created 帧条件式落 rootSessionId 归属锚（dmg-r2-5：同 cwd 多会话宿主精确路由）——传入落字段、缺省不落", async () => {
+    const run = makeRealRun("wf-ev-anchor-sid");
+    await dispatchRunCreated(run, "root-session-1");
+
+    const events = await scanRunEvents("wf-ev-anchor-sid");
+    expect(events[0]).toMatchObject({ type: "run-created", rootSessionId: "root-session-1" });
+
+    const noAnchor = makeRealRun("wf-ev-anchor-sid-missing");
+    await dispatchRunCreated(noAnchor);
+
+    const noAnchorEvents = await scanRunEvents("wf-ev-anchor-sid-missing");
+    expect(noAnchorEvents[0]).toMatchObject({ type: "run-created" });
+    expect("rootSessionId" in noAnchorEvents[0]).toBe(false);
+  });
+
   it("failed → run-settled(failed)，reason 承载诊断文本", async () => {
     const run = makeRealRun("wf-ev-2");
     await dispatchRunCreated(run);
@@ -461,5 +476,145 @@ describe("dispatchAgentCall 落账（失败单次终态，零假帧）", () => {
     // 无 agent-retrying 帧（构造性零假帧）
     expect(events.filter((e) => e.type === "agent-retrying")).toHaveLength(0);
     expect(deps.onRunDone).not.toHaveBeenCalled(); // call 失败不触发 run 终局（run-settled 由脚本 return 驱动）
+  });
+});
+
+// ── 6. 回放不受扰动（subagent-model-switch §6.6 决策六 / 验收场景 3 通过标准）──
+//
+// 覆盖记账走宿主派发侧覆写（决策六②），不进 worker 的 $MODEL、不改重建 spec 的
+// run 级模型、不碰回放一致性比对——三者在场时 resume 重放的历史 call 回话不受
+// 扰动。mock 表驱动：journal 覆盖帧在场（model-override B）+ 历史 opts 含旧
+// model → 同 opts 重放命中 cached 回话（零 mismatch、零终局）；对照行 = 无覆盖
+// 的现状行为。反向断言（表外负样本）：漂移照旧检出——覆盖帧不构成比对豁免。
+
+describe("回放不受扰动（覆盖记账在场，历史旧 model 不触发 replay input mismatch）", () => {
+  /** 历史 call 构造（带 opts 的三参形态——文件头 makeSettledCall 是两参版、opts 固定
+   *  { prompt: "p" }；回放比对消费 cached.opts，本 describe 需要 opts 含 model 字段）。 */
+  function makeSettledCallWithOpts(callId: number, opts: Record<string, unknown>, result: AgentResult): AgentCall {
+    const node: ExecutionTraceNode = {
+      stepIndex: callId,
+      agent: "reviewer",
+      task: "p",
+      model: "test-model",
+      status: "running",
+      startedAt: new Date().toISOString(),
+    };
+    const call = new AgentCall(callId, opts as never, node);
+    call.markRunning();
+    call.markDone(result);
+    return call;
+  }
+
+  /** 表驱动夹具：历史 call opts 恒旧 model；差异仅在 journal 是否携带覆盖帧。 */
+  const replayCases = [
+    {
+      name: "对照行：无覆盖帧（现状行为）——历史 opts 含 model，一致重放回话",
+      seedOverride: false,
+    },
+    {
+      name: "覆盖帧在场（model-override B）——历史 opts 旧 model，一致重放仍回话（回放比对不受扰动）",
+      seedOverride: true,
+    },
+  ] as const;
+
+  for (const testCase of replayCases) {
+    it(testCase.name, async () => {
+      const runId = testCase.seedOverride ? "wf-ovr-replay" : "wf-base-replay";
+      const seedJournal = createRunEventJournal(journalDir);
+      await seedJournal.append(runId, {
+        type: "run-created",
+        runId,
+        workflowName: "test-wf",
+        argsSummary: "{}",
+        scriptSource: "agent('a')",
+        ts: Date.now(),
+      });
+      if (testCase.seedOverride) {
+        await seedJournal.append(runId, {
+          type: "model-override",
+          model: { provider: "b-provider", modelId: "b1" },
+          ts: Date.now() + 1,
+        });
+      }
+
+      const run = makeRealRun(runId);
+      // 历史 call：真实派发形态 opts（含旧 model 字段）+ done 终态
+      run.state.calls.set(0, makeSettledCallWithOpts(0, { prompt: "p", model: "old-provider/old-model" }, {
+        content: "cached result",
+        durationMs: 5,
+        toolCalls: [],
+      }));
+      const deps = makeDeps();
+      const handlers: WorkerHandlers = {
+        onMessage: vi.fn(async () => {}),
+        onError: vi.fn(async () => {}),
+        onExit: vi.fn(async () => {}),
+      };
+
+      await handleWorkerMessage(
+        run,
+        // resume 重放：脚本确定性重跑重发同 callId 同 opts（含旧 model——覆盖不改
+        // 历史调用参数，派发侧覆写在解析层、到不了回放比对）
+        { type: "agent-call", callId: 0, opts: { prompt: "p", model: "old-provider/old-model" } as never },
+        deps,
+        handlers,
+      );
+      await flushMicrotasks();
+
+      // 回话成功：cached 结果投递 + 零真实派发 + run 未被 mismatch 判死
+      expect(isRunSettled(run)).toBe(false);
+      expect(deps.runner.run).not.toHaveBeenCalled();
+      const events = await scanRunEvents(runId);
+      expect(events.some((e) => e.type === "run-settled")).toBe(false);
+      const runtime = run.runtime!;
+      expect(runtime.worker.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "agent-result", callId: 0, cached: true }),
+      );
+    });
+  }
+
+  it("负样本：覆盖帧在场不构成比对豁免——真漂移（prompt 变化）照旧 mismatch 终局", async () => {
+    const runId = "wf-ovr-drift";
+    const seedJournal = createRunEventJournal(journalDir);
+    await seedJournal.append(runId, {
+      type: "run-created",
+      runId,
+      workflowName: "test-wf",
+      argsSummary: "{}",
+      scriptSource: "agent('a')",
+      ts: Date.now(),
+    });
+    await seedJournal.append(runId, {
+      type: "model-override",
+      model: { provider: "b-provider", modelId: "b1" },
+      ts: Date.now() + 1,
+    });
+
+    const run = makeRealRun(runId);
+    run.state.calls.set(0, makeSettledCallWithOpts(0, { prompt: "original" }, {
+      content: "stale",
+      durationMs: 1,
+      toolCalls: [],
+    }));
+    const deps = makeDeps();
+    const handlers: WorkerHandlers = {
+      onMessage: vi.fn(async () => {}),
+      onError: vi.fn(async () => {}),
+      onExit: vi.fn(async () => {}),
+    };
+
+    await handleWorkerMessage(
+      run,
+      { type: "agent-call", callId: 0, opts: { prompt: "drifted (Date.now())" } as never },
+      deps,
+      handlers,
+    );
+    await flushMicrotasks();
+
+    // 漂移照旧检出：failed 终局落 run-settled（覆盖帧没有让比对失效）
+    const events = await scanRunEvents(runId);
+    const settled = events.find((e) => e.type === "run-settled");
+    expect(settled).toBeDefined();
+    expect(settled).toMatchObject({ outcome: "failed" });
   });
 });

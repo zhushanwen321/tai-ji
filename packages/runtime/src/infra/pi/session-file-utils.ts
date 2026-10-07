@@ -519,7 +519,9 @@ function forEachReversedParsedEntry(filePath: string, visit: (entry: Record<stri
   })
 }
 
-function scanJsonlFromTail(
+// 导出（dmg-r1-5 同批）：尾读骨架的同目录复用口——session-model-tail-read.ts（model_change
+// 显式热切尾读提取器，拆出件）import 本函数；消费面收敛在 infra/pi 内部，不外溢 services。
+export function scanJsonlFromTail(
   filePath: string,
   visit: (entry: Record<string, unknown>) => boolean,
   opts?: { activePath?: boolean },
@@ -734,6 +736,11 @@ export function extractLatestModelFromJsonl(filePath: string): { modelId: string
   if (hits.modelId === null) return undefined
   return { modelId: hits.modelId, thinkingLevel: hits.thinkingLevel ?? PI_DEFAULT_THINKING_LEVEL }
 }
+
+// model_change 显式热切尾读提取器（extractLatestModelChangeFromJsonl）已拆出至
+// './session-model-tail-read.ts'（dmg-r1-5 下沉 infra 同批，max-lines 预算 + 一文件
+// 一概念，先例同 residue-cleanup 族）；消费方 = services 层 subagent-engine-history
+// 薄委托（readPiSessionLatestModelChange），读者归类 census §6 N16。
 
 // ── 文件操作 ─────────────────────────────────────────────────
 

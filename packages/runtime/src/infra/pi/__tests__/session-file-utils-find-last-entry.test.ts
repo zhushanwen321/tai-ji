@@ -40,6 +40,7 @@ vi.mock('../../../utils/history-reverse-read.js', async (importOriginal) => {
 })
 
 import { extractSessionOutcome } from '../session-file-utils.js'
+import { extractLatestModelChangeFromJsonl } from '../session-model-tail-read.js'
 
 let tmpDir: string
 
@@ -128,5 +129,46 @@ describe('D5③ 小文件路径行为不变', () => {
     const outcome = extractSessionOutcome(join(tmpDir, 'nope.jsonl'))
     expect(outcome).toBeNull()
     expect(reverseReads).toHaveLength(0) // statSync 失败即短路，不进逆序扫
+  })
+})
+
+// ── extractLatestModelChangeFromJsonl（model_change 尾读，dmg-r1-5 下沉 + 裁剪）──
+
+function modelChangeLine(id: string, parentId: string | null, provider: string): string {
+  return JSON.stringify({ type: 'model_change', id, parentId, timestamp: '2026-10-07T00:00:00Z', provider, modelId: `m-${provider}` })
+}
+
+function assistantLine(id: string, parentId: string): string {
+  return JSON.stringify({ type: 'message', id, parentId, timestamp: '2026-10-07T00:00:01Z', message: { role: 'assistant', content: [] } })
+}
+
+describe('extractLatestModelChangeFromJsonl — 活跃路径裁剪（dmg-r1-5）', () => {
+  it('分支文件：被撤子树的 model_change 不命中，取活跃路径上的最近值（物理尾逆读会命中被撤值而漂移）', () => {
+    // 树形态（合法 pi 单根形态，文件尾 leaf = d）：
+    //   a: model_change(p-a) ← b: assistant ← { c: model_change(p-c) 被撤分支 / d: assistant 活跃分支 }
+    // 活跃路径 d→b→a，c 不在路径上被裁；物理尾逆读（修复前形态）会先命中 c——
+    // 被撤回合切过模型的显示残留，正是 dmg-r1-5 证据描述的漂移
+    const lines = [
+      headerLine(),
+      modelChangeLine('a', null, 'p-a'),
+      assistantLine('b', 'a'),
+      modelChangeLine('c', 'b', 'p-c'),
+      assistantLine('d', 'b'),
+    ]
+    const filePath = write('branch-active-path.jsonl', lines.join('\n') + '\n')
+
+    expect(extractLatestModelChangeFromJsonl(filePath)).toEqual({ provider: 'p-a', modelId: 'm-p-a' })
+  })
+
+  it('线性活跃路径多条 model_change：逆扫取最近生效值（最后热切胜出）', () => {
+    const lines = [
+      headerLine(),
+      modelChangeLine('a', null, 'p-a'),
+      assistantLine('b', 'a'),
+      modelChangeLine('c', 'b', 'p-c'),
+    ]
+    const filePath = write('linear-chain.jsonl', lines.join('\n') + '\n')
+
+    expect(extractLatestModelChangeFromJsonl(filePath)).toEqual({ provider: 'p-c', modelId: 'm-p-c' })
   })
 })
