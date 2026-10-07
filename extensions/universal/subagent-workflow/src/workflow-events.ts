@@ -402,6 +402,21 @@ export function setupWorkflowDomain(
         }
         return service.executeWorkflowAgent(opts, parentRunId, signal, undefined, undefined, stepIndex);
       },
+      // [F1-18 修复] resume 显式 model 落账后的宿主投影同步（生产接线——单例现读
+      // 同 workflowAgentDispatch 形态）。实现 = SubagentService.applyRunOverrideProjection
+      // （覆盖内存表写值 + 重建负缓存作废）；throw 走 resume 侧回滚围栏（run 回
+      // interrupted 可重试），service 缺席文案同款 [C2] 闭环。
+      onResumeModelOverrideCommitted: (runId, override) => {
+        const service = getSubagentService();
+        if (!service) {
+          throw new Error(
+            "resume model override projection unavailable: subagent service not initialized " +
+              "(session_start assembly failed). Recovery: retry the resume once the session " +
+              "is initialized; the override frame is already persisted in the run journal.",
+          );
+        }
+        service.applyRunOverrideProjection(runId, override);
+      },
       log,
     };
     return deps;

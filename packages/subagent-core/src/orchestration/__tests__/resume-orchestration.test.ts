@@ -140,12 +140,15 @@ function makeDeps(): {
   emit: ReturnType<typeof vi.fn>;
   workerStarts: number[];
   budgetSchedules: Array<{ runId: string; ms: number }>;
+  overrideProjection: ReturnType<typeof vi.fn>;
 } {
   const runs = new Map();
   const appendEntry = vi.fn();
   const emit = vi.fn();
   const workerStarts: number[] = [];
   const budgetSchedules: Array<{ runId: string; ms: number }> = [];
+  // [F1-18 修复] resume 显式 model 落账后的宿主投影回调捕获面
+  const overrideProjection = vi.fn();
   const deps: LifecycleDeps = {
     store: { save: vi.fn(async () => {}), loadAll: vi.fn(async () => []), stateFilePath: vi.fn(() => "") },
     workerHost: {
@@ -168,8 +171,9 @@ function makeDeps(): {
       budgetSchedules.push({ runId, ms });
       return undefined;
     }),
+    onResumeModelOverrideCommitted: overrideProjection,
   };
-  return { deps, runs, appendEntry, emit, workerStarts, budgetSchedules };
+  return { deps, runs, appendEntry, emit, workerStarts, budgetSchedules, overrideProjection };
 }
 
 function expectRejection(p: Promise<unknown>, fragment: string): Promise<void> {
@@ -1094,5 +1098,52 @@ describe("resumeRun 显式 model 参数 — 统一覆盖记账（补切 + 无参
     const events = await scanEvents("wf-resume-model-3");
     expect(events.some((e) => e.type === "run-resumed")).toBe(false);
     expect(events.some((e) => e.type === "model-override")).toBe(false);
+  });
+
+  // ── [F1-18 修复] 落账后同步宿主投影（onResumeModelOverrideCommitted 端口）──
+
+  it("落账后同步宿主投影：回调收到 parse 拆装结果（provider/modelId/thinkingLevel/ts 与 journal 帧一致）", async () => {
+    await seedInterruptedRecord("wf-resume-model-proj", { createdModel: "origin/o1" });
+    const { deps, overrideProjection } = makeDeps();
+
+    await resumeRun("wf-resume-model-proj", deps, {
+      model: "p-explicit/m9:high",
+      now: () => T0 + 100_000,
+    });
+
+    // journal 帧已落（拆装同源：帧与投影载荷出自同一次 parseModelSelector）
+    const events = await scanEvents("wf-resume-model-proj");
+    const override = events.find((e): e is Extract<WorkflowRunEvent, { type: "model-override" }> => e.type === "model-override");
+    expect(override).toBeDefined();
+    expect(override!.model).toEqual({ provider: "p-explicit", modelId: "m9" });
+
+    expect(overrideProjection).toHaveBeenCalledTimes(1);
+    expect(overrideProjection).toHaveBeenCalledWith("wf-resume-model-proj", {
+      provider: "p-explicit",
+      modelId: "m9",
+      thinkingLevel: "high",
+      ts: T0 + 100_000,
+    });
+  });
+
+  it("无参 resume 不触发宿主投影回调（无覆盖写点 = 无投影同步义务）", async () => {
+    await seedInterruptedRecord("wf-resume-model-noproj", { createdModel: "origin/o1" });
+    const { deps, overrideProjection } = makeDeps();
+
+    await resumeRun("wf-resume-model-noproj", deps, { now: () => T0 + 100_000 });
+
+    expect(overrideProjection).not.toHaveBeenCalled();
+  });
+
+  it("malformed ref 干净拒绝不触发投影（拒绝先于一切写动作，journal append 未发生即无投影）", async () => {
+    await seedInterruptedRecord("wf-resume-model-badproj");
+    const { deps, overrideProjection } = makeDeps();
+
+    await expectRejection(
+      resumeRun("wf-resume-model-badproj", deps, { model: "no-slash", now: () => T0 + 100_000 }),
+      "not a valid canonical ref",
+    );
+
+    expect(overrideProjection).not.toHaveBeenCalled();
   });
 });

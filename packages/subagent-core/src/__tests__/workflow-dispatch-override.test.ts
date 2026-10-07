@@ -57,6 +57,8 @@ import { CTX_MODEL } from "../execution/__tests__/helpers/model-registry-mock.ts
 import { makePi, type PiMock } from "../execution/__tests__/helpers/pi-mock.ts";
 import { dispatchRunTrigger, setRunEventJournalDirForTest } from "../orchestration/terminal-actions.ts";
 import { createRunEventJournal } from "../orchestration/run-events.ts";
+import { resumeRun } from "../orchestration/resume-run.ts";
+import type { LifecycleDeps } from "../orchestration/models/ports.ts";
 import type { AgentCallOpts } from "../orchestration/models/types.ts";
 import type { SubagentRecordEntryV2 } from "../execution/persistence/record-entry.ts";
 import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../execution/persistence/record-entry.ts";
@@ -392,6 +394,73 @@ describe("workflow 派发链覆盖消费（U4b）", () => {
 
     expect(countOf()).toBe(firstCount);
     expect(run2.task.model).toBe("p/m");
+  });
+
+  it("F1-18 修复回归：先派发登记负缓存 → resume 显式 model 落账+投影 → 重派吃覆盖（stale 登记不再遮蔽）", async () => {
+    const h = makeHarness();
+    scanCalls.length = 0;
+    const runId = "run-resume-ovr";
+    const countOf = (): number => scanCalls.filter((id) => id === runId).length;
+
+    // 1. 先派发（无覆盖）：负缓存空载登记（rebuildRunOverride 扫一次后登记）
+    const pending1 = h.service.executeWorkflowAgent(baseOpts(), runId);
+    await flush();
+    soleRun(h.fake).settle({ content: "done" });
+    await pending1;
+    const firstCount = countOf();
+    expect(firstCount).toBeGreaterThanOrEqual(1);
+
+    // 2. run 中断 → resume 显式 model。投影回调接线复刻生产形态
+    //    （extension makeDeps：deps 回调 → service.applyRunOverrideProjection）。
+    //    journal seed 全走 journal.append 直写（resume-orchestration seedInterruptedRecord
+    //    同款形态；不走 dispatchRunTrigger——它缓存 per-run 活体 fold checkpoint，
+    //    直写的 interrupted 不进 checkpoint，resume 落 run-resumed 会命中 stale
+    //    running 态被拒）。executeWorkflowAgent 本身不写 run journal。
+    const journal = createRunEventJournal(h.journalDir);
+    await journal.append(runId, {
+      type: "run-created",
+      runId,
+      workflowName: "override-it",
+      argsSummary: "{}",
+      ts: Date.now(),
+    });
+    await journal.append(runId, {
+      type: "run-interrupted",
+      errorCode: "crashed",
+      reason: "test crash",
+      ts: Date.now(),
+    });
+    const resumeDeps: LifecycleDeps = {
+      store: { save: vi.fn(async () => {}), loadAll: vi.fn(async () => []), stateFilePath: vi.fn(() => "") },
+      workerHost: {
+        start: vi.fn(
+          () =>
+            ({ postMessage: vi.fn(), terminate: vi.fn(async () => {}) }) as unknown as import("../orchestration/worker-handle.ts").WorkerHandle,
+        ),
+      },
+      runner: { run: vi.fn(async () => ({ content: "" })) },
+      runs: new Map(),
+      onResumeModelOverrideCommitted: (rid, override) => h.service.applyRunOverrideProjection(rid, override),
+    };
+    await resumeRun(runId, resumeDeps, { model: OVERRIDE_REF, now: () => Date.now() });
+
+    // 投影同步生效：内存表有值（重派走内存命中，不再依赖 journal 重扫）
+    expect(h.modelService.getModelOverride(runId)).toMatchObject({
+      ref: { provider: OVERRIDE_MODEL.provider, modelId: OVERRIDE_MODEL.id },
+    });
+
+    // 3. 重派吃覆盖——修复前：负缓存 stale 登记短路 rebuild（内存 miss 通道）→
+    //    按旧模型 spawn，resume 模型意图静默丢失；修复后：投影写表 + 负缓存作废。
+    const pending2 = h.service.executeWorkflowAgent(baseOpts({ description: "after-resume" }), runId);
+    await flush();
+    const run2 = h.fake.runs[1]!;
+    expect(run2.task.model).toBe(OVERRIDE_REF);
+    run2.settle({ content: "done" });
+    await pending2;
+
+    // 重派零重扫（内存命中优先）——锁定「写表 + 失效」投影形态，而非仅靠
+    // 负缓存失效触发 rebuild 重扫回填
+    expect(countOf()).toBe(firstCount);
   });
 
   it("非复活路径既有盖章行为不变：覆盖缺席（他 run 作用域不串扰）时新建 record 盖章 = identity 解析词形", async () => {

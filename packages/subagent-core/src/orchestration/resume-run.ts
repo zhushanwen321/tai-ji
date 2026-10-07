@@ -308,8 +308,10 @@ export interface ResumeRunOptions { // oe-exempt:20260929:framework:resumeRun pu
    * 后续项裁决）：语义 = 「setModel 补切 + 无参 resume」两步的合一步构造性等价——
    * 显式参数本身就是用户覆盖意图的一次表达，经同一记账通道落盘（覆盖表唯一意图源
    * 语义保持，不新增第二意图源；不变量 2 由 fold replace-not-stack 构造性满足——
-   * resume 时刻的覆盖替换此前值，与补切时序语义一致）。派发侧消费经既有
-   * rebuildRunOverride 通道（表 miss → journal 折叠 → 内存回填），零新增消费面。
+   * resume 时刻的覆盖替换此前值，与补切时序语义一致）。落账后经
+   * onResumeModelOverrideCommitted 端口同步宿主投影（F1-18 修复：内存表写值 +
+   * 负缓存作废，与 setModel 写点的「落账 + 内存表」双写形态对齐）；派发侧消费经
+   * 既有覆盖通道（内存命中直返 → miss 才 journal 折叠回填），零新增消费面。
    */
   model?: string;
   /** 时钟注入（epoch ms）；缺省 Date.now()——run-resumed 帧 ts 与预算算式的确定性测试通道。 */
@@ -754,9 +756,12 @@ async function resumeRunLocked(
     // 合一步：显式参数即用户覆盖意图表达，经同一 model-override 通道落盘，派发侧
     // 经既有 rebuildRunOverride 通道消费）。写序 = run-resumed 转移之后、接管之前；
     // 失败走接管失败同款回滚围栏（run 回 interrupted 可重试——覆盖未落 = 意图未
-    // 受理，带半截覆盖的 running 态才是坏状态）。
+    // 受理，带半截覆盖的 running 态才是坏状态）。落账后同步宿主投影（F1-18 修复
+    // ——内存表 + 负缓存，appendResumeModelOverride 内单点；投影回调 throw 同走
+    // 本回滚围栏：journal 帧已落但宿主投影未同步 = 重派消费面不可信，与接管失败
+    // 同级处置）。
     if (options?.model !== undefined) {
-      await appendResumeModelOverride(runId, options.model, now(), options?.journalDir);
+      await appendResumeModelOverride(runId, deps, options.model, now(), options?.journalDir);
     }
     adoptResumedRun(runId, deps, created, recordPath, {
       events, activeElapsedMs, budgetTimeMs, budgetTokens, resumedAt, plan,
@@ -777,6 +782,7 @@ async function resumeRunLocked(
  */
 async function appendResumeModelOverride(
   runId: string,
+  deps: LifecycleDeps,
   modelRef: string,
   ts: number,
   journalDir: string | undefined,
@@ -786,6 +792,18 @@ async function appendResumeModelOverride(
   await journal.append(runId, {
     type: "model-override",
     model: { provider: parsed.provider, modelId: parsed.id },
+    ...(parsed.thinkingLevel !== undefined ? { thinkingLevel: parsed.thinkingLevel } : {}),
+    ts,
+  });
+  // [F1-18 修复] 落账后同步宿主投影（端口注入，LifecycleDeps 承载——orchestration
+  // 不 import execution，接缝与 workflowAgentDispatch 同形态）。journal 帧落盘使
+  // 宿主两个派生投影 stale：覆盖记账内存表（若该 run 曾有覆盖，内存命中旧值遮蔽
+  // 本次意图）+ workflow 域重建负缓存（「已扫无覆盖」登记为假，短路 journal 重扫）。
+  // 回调 throw（如 service 缺席）走调用点回滚围栏——run 回 interrupted 可重试，
+  // journal 帧已落（重试 resume 重复追加同值帧，latest-wins 幂等无害）。
+  deps.onResumeModelOverrideCommitted?.(runId, {
+    provider: parsed.provider,
+    modelId: parsed.id,
     ...(parsed.thinkingLevel !== undefined ? { thinkingLevel: parsed.thinkingLevel } : {}),
     ts,
   });

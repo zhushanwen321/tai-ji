@@ -183,4 +183,33 @@ export interface LifecycleDeps {
     signal?: AbortSignal,
     stepIndex?: number,
   ) => Promise<AgentResult>;
+ /**
+ * [F1-18 修复] resume 显式 model 落账后的宿主投影同步回调。
+ *
+ * journal model-override 帧落盘只是持久化半边——宿主侧还有两个派生投影（覆盖记账
+ * 内存表 + workflow 域覆盖重建负缓存），不同步则进程存活期内重派被旧投影遮蔽
+ * （内存表旧覆盖值内存命中 / 负缓存「已扫无覆盖」stale 登记短路 journal 重扫），
+ * resume 的模型意图静默丢失。resume 写点（resume-run appendResumeModelOverride）
+ * 落账成功后经本回调同步；宿主实现（extension makeDeps → SubagentService.
+ * applyRunOverrideProjection）与既有 setModel 写点的「落账 + 内存表」双写形态对齐。
+ *
+ * 可选——未注入时（旧测试 deps）跳过投影（向后兼容，行为同修复前）；生产装配恒注入。
+ * 载荷为结构类型（journal 帧拆装结果），不引 execution 域类型——本 ports 文件
+ * 零 infra/execution 依赖纪律。
+ */
+  onResumeModelOverrideCommitted?: (
+    runId: string,
+    override: RunOverrideProjection,
+  ) => void;
+}
+
+/**
+ * [F1-18 修复] resume 显式 model 落账帧的拆装结果（投影回调载荷）。
+ * 与 orchestration model-override 帧的 model/thinkingLevel/ts 字段同构。
+ */
+export interface RunOverrideProjection {
+  provider: string;
+  modelId: string;
+  thinkingLevel?: string;
+  ts: number;
 }
