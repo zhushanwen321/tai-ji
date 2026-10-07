@@ -12,6 +12,12 @@
 //   （fixed 须全员带证据 / not-fixed 回 open / regressed 回 open 计顽固轮数 / escalate
 //   复活 deferred——结构化申报是 deferred 唯一复活入口，聚合重报不复活）。条目 id 为
 //   全局编号 dmg-r<轮>-<序号>（跨维度合并条目不再纯属于单一维度）；
+// - 申述核实（disputed 不再直接升人工）：fixer 申述 finding 不成立 → 下轮 reviewer 对账
+//   亲自读码裁决（dispute-upheld 维持 → 回 open 修复 / dispute-overturned 反证成立 → 关闭
+//   no-fix，依据落档）；must-fix 已清但存在待核实申述时不收敛，续跑纯核实轮（disputed
+//   维度并入派发）。同一问题至多两轮核实，两轮均维持 = 定性争议（机械手段穷尽）→
+//   disputeExhausted 保持 disputed 随 needs-human 终态交人工；无下轮可核实（轮次耗尽）
+//   同款升级——升级语义从「有申述就升」收窄为「机械核实不可行或已穷尽才升」；
 // - base 口径 = 分支增量（merge-base github/main HEAD），与 quality-gates --side dev-merge
 //   一致（pr-lifecycle 侧是累积 main，两侧差异有意）；
 // - fix 不由 fixer commit：组级文件清单申报、提交 agent（dmg-committer-<tag>-r<轮>，tag =
@@ -103,9 +109,17 @@ interface ReconEntry {
   prevId: string;
   /** fixed = 亲自核实已修复；not-fixed = 仍存在；regressed = 复发或修复引入新问题；
    *  escalate = deferred 条目相关上下文被本轮修复改变，申报复活（仅对注入的 deferred
-   *  清单条目生效——deferred 的唯一复活入口，聚合重报不复活） */
-  status: "fixed" | "not-fixed" | "regressed" | "escalate";
-  /** 读了什么、确认了什么；修复方声称 fixed 不算证据 */
+   *  清单条目生效——deferred 的唯一复活入口，聚合重报不复活）；
+   *  dispute-upheld / dispute-overturned = fixer 申述核实裁决（仅对注入的 disputed
+   *  清单条目生效——reviewer 亲自读码验证 fixer 反证后二选一：维持 finding 或撤销 finding） */
+  status:
+    | "fixed"
+    | "not-fixed"
+    | "regressed"
+    | "escalate"
+    | "dispute-upheld"
+    | "dispute-overturned";
+  /** 读了什么、确认了什么；修复方声称 fixed 不算证据；dispute 两态同样须附亲自核实的依据 */
   evidence: string;
 }
 
@@ -166,7 +180,8 @@ interface Aggregation {
 interface FixReport {
   /** 已修复条目（id 引用问题清单，affectedFiles 供工作流统一 commit；申报只置 fix-claimed，下轮对账核实后才 fixed） */
   fixes: { id: string; description: string; affectedFiles: string[] }[];
-  /** 申述（误报反证，evidence 须含 file:line 且有实质内容）；转人工裁决 */
+  /** 申述（误报反证，evidence 须含 file:line 且有实质内容）；下轮 reviewer 对账亲自核实
+   *  （维持→回 open 修复，反证成立→撤销关闭 no-fix；至多两轮，穷尽才升人工） */
   disputed: { id: string; evidence: string }[];
   /** 仅 minor 可延迟（reason 须写明改动量与涉及文件——仅当改动量非常大时才允许）；critical/major 延迟 = fix-failure */
   deferred: { id: string; reason: string }[];
@@ -217,10 +232,18 @@ interface DmgRecord {
   files: string[];
   evidence: string;
   guidance: string;
-  /** fix-claimed = fixer 已申报待下轮对账核实（申报不等于修复） */
-  status: "open" | "fix-claimed" | "fixed" | "deferred" | "disputed";
-  /** fixer 申述反证（disputed 时记录在案，随 needs-human 终态带出） */
+  /** fix-claimed = fixer 已申报待下轮对账核实（申报不等于修复）；disputed = fixer 申述
+   *  finding 不成立，待下轮 reviewer 对账亲自核实（维持→回 open，反证成立→关闭 no-fix）；
+   *  no-fix = 申述核实反证成立，finding 撤销关闭（核证据存档 lastReconEvidence / ledger） */
+  status: "open" | "fix-claimed" | "fixed" | "deferred" | "disputed" | "no-fix";
+  /** fixer 申述反证（disputed 时记录在案；注入下轮对账 prompt 供 reviewer 核实，
+   *  无下轮可核实时随 needs-human 终态带出） */
   disputeEvidence?: string;
+  /** 已完成的申述核实轮数（reviewer 裁决 upheld/overturned 各计一轮；fixer 再申述的准入上限） */
+  disputeCycles?: number;
+  /** 申述穷尽标记：两轮核实均维持 finding = 定性争议（机械手段已穷尽）——fixer 不得再申述，
+   *  条目保持 disputed 随 needs-human 终态交人工 */
+  disputeExhausted?: boolean;
   /** deferred 理由（fixer 申报；随终态 remaining 带出，并注入下轮对账 prompt 的 deferred 清单） */
   deferredReason?: string;
   /** 上轮对账结论的证据（对账套用的各路径均落档：fixed 核实证据与 not-fixed/regressed/申报不一致的问题证据；per-fixer 任务文档注入——fixer 知道上轮为什么没修好） */
@@ -1045,7 +1068,7 @@ async function main(): Promise<Record<string, unknown>> {
       let msg = message;
       if ((term === "clean" || term === "converged") && disputedRecs.length > 0) {
         term = "needs-human";
-        msg += `；${disputedRecs.length} 条 fixer 申述待人工裁决（${disputedRecs.map((r) => r.id).join("、")}）`;
+        msg += `；${disputedRecs.length} 条申述升人工（${disputedRecs.map((r) => `${r.id}${r.disputeExhausted ? "：两轮核实均维持=定性争议" : "：轮次耗尽未及核实"}`).join("、")}）`;
       }
       // 收敛出口改判（改造点 1）：deferredCommits 非空时成功出口不成立——待办组文件不进清扫、
       // 留工作区，第 2 步 merge 干净预检本就会拦，停回人工是正确出口；同时消解「待办清单非空、
@@ -1135,16 +1158,36 @@ async function main(): Promise<Record<string, unknown>> {
       const sg = cand.issues.length - mf;
       if (cand.mustFix !== mf || cand.suggestion !== sg) return `mustFix/suggestion 与 issues 计数不一致（声明 ${cand.mustFix}/${cand.suggestion}，实际 ${mf}/${sg}）`;
       if (round >= 2) {
-        if (!Array.isArray(cand.reconciliation)) return "R2+ 缺 reconciliation 数组";
-        const answered = new Set((cand.reconciliation as ReconEntry[]).map((e) => normIssueId(isRecord(e as unknown) ? e.prevId : "")));
-        for (const r of activeAll) {
-          if (!answered.has(normIssueId(r.id))) return `对账缺条：${r.id} 未申报`;
+      if (!Array.isArray(cand.reconciliation)) return "R2+ 缺 reconciliation 数组";
+      const answered = new Set((cand.reconciliation as ReconEntry[]).map((e) => normIssueId(isRecord(e as unknown) ? e.prevId : "")));
+      for (const r of activeAll) {
+        if (!answered.has(normIssueId(r.id))) return `对账缺条：${r.id} 未申报`;
+      }
+      // 申述核实必答：disputed 条目必须给出 dispute 结论（维持/推翻），否则申述核实轮空转
+      const disputedNow = records.filter((r) => r.status === "disputed");
+      const disputeAnswered = new Set(
+        (cand.reconciliation as ReconEntry[])
+          .filter((e) => isRecord(e as unknown) && (e.status === "dispute-upheld" || e.status === "dispute-overturned"))
+          .map((e) => normIssueId(isRecord(e as unknown) ? e.prevId : "")),
+      );
+      for (const r of disputedNow) {
+        if (!disputeAnswered.has(normIssueId(r.id))) return `申述核实缺条：${r.id} 未申报 dispute 结论（dispute-upheld / dispute-overturned 二选一）`;
+      }
+      for (const e of cand.reconciliation as ReconEntry[]) {
+        if (!isRecord(e as unknown)) return "reconciliation 元素非对象";
+        if (
+          e.status !== "fixed" && e.status !== "not-fixed" && e.status !== "regressed" && e.status !== "escalate"
+          && e.status !== "dispute-upheld" && e.status !== "dispute-overturned"
+        ) {
+          return `reconciliation status 非法：${String(e.status)}`;
         }
-        for (const e of cand.reconciliation as ReconEntry[]) {
-          if (!isRecord(e as unknown)) return "reconciliation 元素非对象";
-          if (e.status !== "fixed" && e.status !== "not-fixed" && e.status !== "regressed" && e.status !== "escalate") return `reconciliation status 非法：${String(e.status)}`;
-          if (e.status === "fixed" && nonEmptyStr(e.evidence) === "") return `fixed 申报缺证据：${String(e.prevId)}`;
+        if (e.status === "fixed" && nonEmptyStr(e.evidence) === "") return `fixed 申报缺证据：${String(e.prevId)}`;
+        if (e.status === "dispute-upheld" || e.status === "dispute-overturned") {
+          if (nonEmptyStr(e.evidence) === "") return `dispute 申报缺亲自核实依据：${String(e.prevId)}`;
+          const target = disputedNow.find((r) => normIssueId(r.id) === normIssueId(e.prevId));
+          if (!target) return `dispute 申报引用非申述中条目：${String(e.prevId)}（dispute 两态仅对 disputed 清单条目生效）`;
         }
+      }
       }
       return "";
     }
@@ -1169,6 +1212,7 @@ async function main(): Promise<Record<string, unknown>> {
       ];
       if (round >= 2) {
         const deferredPending = records.filter((r) => r.status === "deferred");
+        const disputedPending = records.filter((r) => r.status === "disputed");
         promptLines.push(
           `6. 对账申报（上轮活跃问题清单，逐条必答不得遗漏；fix-claimed = 修复方已申报，核实要求与 open 相同——修复方声称已修不算证据，须亲自读代码确认）：`,
           wrapUntrusted(JSON.stringify(activeAll.map((r) => ({ id: r.id, title: r.title, severity: r.severity, guidance: r.guidance, evidence: r.evidence })), null, 1)),
@@ -1176,8 +1220,13 @@ async function main(): Promise<Record<string, unknown>> {
           deferredPending.length > 0
             ? wrapUntrusted(deferredPending.map((r) => `- ${r.id} [${r.severity}] ${r.title}${r.deferredReason ? ` — deferred 理由: ${r.deferredReason}` : ""}`).join("\n"))
             : "-（无）",
+          `8. fixer 申述核实（下述条目的修复方申报了「finding 不成立」反证；逐条亲自读码/运行检查验证反证，reconciliation 中对该 prevId 置 status="dispute-upheld"（finding 成立，修复方必须修复）或 "dispute-overturned"（反证成立，finding 撤销关闭），逐条必答）：`,
+          disputedPending.length > 0
+            ? wrapUntrusted(disputedPending.map((r) => `- ${r.id} [${r.severity}] ${r.title}\n  finding 原证据: ${r.evidence}\n  fixer 反证: ${r.disputeEvidence ?? "（无）"}\n  涉及文件: ${r.files.join(", ")}`).join("\n"))
+            : "-（无）",
           `escalate 规则：仅当本轮修复改变了某 deferred 条目的相关上下文才可申报复活——reconciliation 中对该 prevId 置 status="escalate"（结构化申报是 deferred 唯一复活入口）；无上下文变化时保持 deferred，不重报、不升级。`,
-          `在返回 JSON 增加字段："reconciliation": [ { "prevId", "status": "fixed"|"not-fixed"|"regressed"|"escalate", "evidence" } ]（fixed 须附你亲自核实的证据）；本轮新发现并入 issues（severity/files/evidence/guidance 同款）。`,
+          `申述核实规则：只依据代码事实裁决，双方的声称都不算证据，维持与推翻都必须附你亲自验证的依据；维持 = dispute-upheld，推翻 = dispute-overturned。`,
+          `在返回 JSON 增加字段："reconciliation": [ { "prevId", "status": "fixed"|"not-fixed"|"regressed"|"escalate"|"dispute-upheld"|"dispute-overturned", "evidence" } ]（fixed 与 dispute 两态须附你亲自核实的依据）；本轮新发现并入 issues（severity/files/evidence/guidance 同款）。`,
         );
       }
       const reviewer = agent(`dmg-reviewer-${dim}-r${round}`, "你是资深代码评审员：只读审查，绝不修改任何文件；每个发现都要有你亲自读到的代码证据。");
@@ -1334,12 +1383,14 @@ async function main(): Promise<Record<string, unknown>> {
           prev.guidance = nonEmptyStr(i.guidance) !== "" ? nonEmptyStr(i.guidance) : prev.guidance;
           const sd = strArr(i.sourceDims).filter((d) => !prev!.sourceDims.includes(d));
           prev.sourceDims = [...prev.sourceDims, ...sd];
-          if (prev.status === "fixed") {
-            // 已确认修复的条目被重报 = 复发：回 open 计顽固（对齐 review-fix-loop MF-2）
+          if (prev.status === "fixed" || prev.status === "no-fix") {
+            // 已确认修复 / 申述撤销关闭的条目被重报 = 复发或审查员重新主张：回 open 计顽固
+            // （对齐 review-fix-loop MF-2；no-fix 复活后 fixer 受申述上限约束，只能修复或 defer）
+            const prevClosedStatus = prev.status;
             prev.status = "open";
             prev.regressed = true;
             prev.uncleanRounds += 1;
-            log(`[branch-review] ${prev.id} 已修复条目被重报 → 复发回 open`);
+            log(`[branch-review] ${prev.id} ${prevClosedStatus === "no-fix" ? "已撤销关闭（no-fix）" : "已修复"}条目被重报 → 复发回 open`);
           }
           // deferred 不经聚合重报复活（唯一复活入口 = reviewer 对账申报 escalate）；
           // disputed / fix-claimed / open 保持原状态，等对账套用块裁决
@@ -1423,6 +1474,37 @@ async function main(): Promise<Record<string, unknown>> {
           log(`[branch-review] escalate 复活：${it.id}（${it.title}）——reviewer 申报上下文已变，重回修复队列`);
         }
       }
+      // 申述核实套用：disputed 条目的 reviewer 裁决（verify-first 与 fixed 核实同款——
+      // 维持/推翻都须附亲自核实依据，结构化校验已强制）。保守方向 = finding 不丢：任一
+      // 维持或证据不全 → 回 open 修复；全员推翻且带证据 → finding 撤销关闭（no-fix）。
+      // 两轮核实均维持 = 定性争议（机械手段穷尽）→ disputeExhausted，保持 disputed 随
+      // needs-human 终态交人工——申述不能无限次豁免修复义务，人也不该裁读码能定案的分歧
+      for (const it of next) {
+        if (it.status !== "disputed") continue;
+        const cs = (claims.get(normIssueId(it.id)) ?? []).filter(
+          (c) => c.status === "dispute-upheld" || c.status === "dispute-overturned",
+        );
+        if (cs.length === 0) continue;
+        it.disputeCycles = (it.disputeCycles ?? 0) + 1;
+        const upheld = cs.find((c) => c.status === "dispute-upheld");
+        const allOverturned = cs.every((c) => c.status === "dispute-overturned" && nonEmptyStr(c.evidence) !== "");
+        if (upheld !== undefined || !allOverturned) {
+          it.lastReconEvidence = cs.map((c) => `${c.status}: ${c.evidence}`).join(" | ");
+          if ((it.disputeCycles ?? 0) >= 2) {
+            it.disputeExhausted = true;
+            log(`[branch-review] ${it.id} 申述两轮核实均维持 finding → 定性争议升人工（保持 disputed，随 needs-human 终态带出）`);
+          } else {
+            it.status = "open";
+            it.uncleanRounds += 1;
+            log(`[branch-review] ${it.id} 申述核实：finding 维持 → 回 open 修复（fixer 尚可申述一次，上限两轮）`);
+          }
+        } else {
+          it.status = "no-fix";
+          it.uncleanRounds = 0;
+          it.lastReconEvidence = cs.map((c) => c.evidence).join(" | ");
+          log(`[branch-review] ${it.id} 申述核实：反证成立 → finding 撤销关闭（no-fix，核实依据落档 ledger）`);
+        }
+      }
       records.length = 0;
       records.push(...next);
       // ledger.json 落盘（改造点 4）：问题清单持久化——run 终止后留审计与主 agent 处置失败终态
@@ -1497,7 +1579,7 @@ async function main(): Promise<Record<string, unknown>> {
             "1. 只修任务文档所列问题直接相关的文件；测试断言不得为让问题消失而删除或放宽。",
             "2. 尽量一并修复组内 minor 条目；仅当某 minor 改动量非常大（波及文件多/牵连机制广/风险高）时才允许申报 deferred，reason 必须写明改动量与涉及文件；critical/major 禁止 deferred。",
             "3. 不要 commit：工作流按你申报的 affectedFiles 统一提交；禁止 git add -A / git add .。",
-            "4. 怀疑误报走 disputed（evidence 须含 file:line 反证且有实质内容，空洞申述按失败处置）。",
+            "4. 怀疑误报走 disputed（evidence 须含 file:line 反证且有实质内容，空洞申述按失败处置）；申述由下一轮 reviewer 亲自读码核实——维持则你必须修复，反证成立则 finding 撤销关闭；同一问题至多两轮申述核实，两轮均维持即定性争议升人工。",
             "5. 并行约束：同批其他修复组在并行工作，只改本组问题涉及的文件；如修复确需触碰组外文件，先确认它不在其他组清单内（并行冲突），并在 affectedFiles 如实报告。",
             '6. 返回严格 JSON：{ "fixes": [ { "id": <问题清单条目 id>, "description", "affectedFiles": [...] } ], "disputed": [ { "id", "evidence" } ], "deferred": [ { "id", "reason" } ], "commitMessage": "fix(branch-review): <一句话>" }。',
           ].join("\n"),
@@ -1522,6 +1604,9 @@ async function main(): Promise<Record<string, unknown>> {
           if (!isRecord(d as unknown)) throw bad("disputed 元素非对象");
           const rec = groupRecs.find((r) => normIssueId(r.id) === normIssueId(d.id));
           if (!rec) throw bad(`disputed 引用未知 id：${String(d.id)}`);
+          if (rec.disputeExhausted === true || (rec.disputeCycles ?? 0) >= 2) {
+            throw bad(`disputed ${rec.id} 申述核实已达上限（已完成 ${rec.disputeCycles ?? 0} 轮${rec.disputeExhausted ? "，两轮均维持 = 定性争议已定" : ""}）——只能修复（fixes）或申报 deferred（仅 minor）`);
+          }
           const ev = nonEmptyStr(d.evidence);
           if (ev.length < 20) throw bad(`disputed 申述缺实质反证（${rec.id}，evidence 须含 file:line 反证事实，不足 20 字符按失败处置）`);
           rec.status = "disputed";
@@ -1655,7 +1740,9 @@ async function main(): Promise<Record<string, unknown>> {
     try {
       for (round = 1; round <= maxRounds; round++) {
         const activeAll = records.filter((r) => r.status === "open" || r.status === "fix-claimed");
-        const activeDims = round === 1 ? dims : [...new Set(activeAll.flatMap((r) => (r.sourceDims.length > 0 ? r.sourceDims : [r.dimension])))];
+        // disputed 条目参与维度派发：must-fix 已清的纯申述核实轮不因维度集为空而跳过审查
+        const pendingDisputes = records.filter((r) => r.status === "disputed");
+        const activeDims = round === 1 ? dims : [...new Set([...activeAll, ...pendingDisputes].flatMap((r) => (r.sourceDims.length > 0 ? r.sourceDims : [r.dimension])))];
         // phase 名须编译期字面量：循环体复用同名 marker = GUI 单节点；轮次/维度信息归 log/report（下方两行已承载）
         phase("branch-review 审查修复循环（每轮重审活跃维度）");
         const verdicts = await mapBatch(activeDims, REVIEWER_BATCH, async (dim) => ({
@@ -1682,6 +1769,14 @@ async function main(): Promise<Record<string, unknown>> {
         report({ stage: "branch-review", round, activeMustFix: active.length, openAll: records.filter((r) => r.status === "open").length, fixClaimed: records.filter((r) => r.status === "fix-claimed").length, deferredCommits: deferredCommits.length });
 
         if (active.length === 0) {
+          // 申述核实优先于收敛：must-fix 已清但存在待核实申述时不退出——下一轮 reviewer
+          // 对账亲自核实（无修复组纯核实轮，disputed 维度已并入 activeDims）；无下轮
+          // （round = maxRounds）才落收敛出口、申述随 needs-human 终态带出人工
+          const disputesToVerify = records.filter((r) => r.status === "disputed");
+          if (disputesToVerify.length > 0 && round < maxRounds) {
+            log(`[branch-review] must-fix 已清，待核实申述 ${disputesToVerify.length} 条（${disputesToVerify.map((r) => r.id).join("、")}）——不收敛，第 ${round + 1} 轮 reviewer 对账核实`);
+            continue;
+          }
           // 终态清扫（改造点 3）：收敛出口前显式路径提交全部可归责残留（两条过滤）；失败出口
           //（max-rounds / stuck / 定向终态）不清扫——保留现场供人工归因
           const sweep = await sweepResidual(round);

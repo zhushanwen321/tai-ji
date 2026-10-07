@@ -8,7 +8,10 @@ description: dev-merge 的前置两步 workflow（gates + branch-review）。①
   因 changeset-check 只认声明不懂跳过语义）。②branch-review——恒派 3 维 business-logic
   （含降级策略红线）/ arch-boundary / data-governance + 触发 3 维 electron-build /
   monorepo-impact / extension-api（diff 路径判定），触及非测试源码才跑，must-fix 全修循环
-  收敛；reviewer/聚合/fixer 强结构化返回，校验失败由同一 agent 回注失败原因重试一次、仍败
+  收敛（fixer 申述 finding 不成立 = disputed，由下一轮 reviewer 对账亲自读码核实：维持→
+  回 open 修复、反证成立→撤销关闭 no-fix，同一问题至多两轮核实——两轮均维持或轮次耗尽
+  未核实才随 needs-human 终态升人工）；reviewer/聚合/fixer 强结构化返回，校验失败由同一
+  agent 回注失败原因重试一次、仍败
   才 review-failure / aggregator-failure / fix-failure 终态（对齐 dev-merge SKILL 1.7
   CR 门 fail-fast 语义——无降级完成形态不变）；修复提交由提交 agent（dmg-committer）串行
   统一执行，撞提交前自动检查（pre-commit）拦截按三分类处置：env 类（报错写明环境恢复命令）
