@@ -146,6 +146,21 @@ subagent 跨 run 续聊时定位既有会话的凭据（引擎中立形态 `Resu
 subagent 运行状态的内存单源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：事实源 = record 事件文件（W1 介质归位，[ADR-0094](adr/decisions.md)），恢复 = v2 注册条目定界 + 事件文件 fold（v1 全量快照兼容层已整体删除，2026-09-30）；状态词表三维正交（见下文 [run/record 状态词表](#runrecord-状态词表w2-收敛adr-0080)），对外投影两态（`active` / `idle`，ended 随终态概念删除），轮终收条由 `record-settled` / `record-round-idle` 事件帧承载（事件流是唯一事实源），manifest 为物化投影。
 
 
+### Subagent 流式通道（subagent.stream_chunk / session.getSubagentStreamState）
+
+运行中 subagent 的实时输出通道（drawer 打字机唯一实时数据源），协议 = 增量推送 + 按需拉取（ADR-0128，对标 Kubernetes ListAndWatch：接入拉全量 → 推送增量 → 失步重新拉全量）：
+
+- **subagent.stream_chunk 消息型**：唯一的内容推送通道。runtime 对子代理的每个文本增量发一条 `{ sessionId, recordId, msgSeq, deltaSeq, delta }`，`delta` 是真增量片段（非累积全文）。transient 主题（不分配 seq、不入 ring、不写快照，断连即丢、无回放），推送允许丢失，正确性由拉取收敛兜底。
+- **msgSeq / deltaSeq 双序号**：`msgSeq` = per-record assistant 消息序号，表达消息边界（产生端从 1 开始——首条 assistant 消息 = 1，message_start 递进；消费端状态机初始 0）；`deltaSeq` = per-message 从 0 递增。消费端按双序号拼合：边界推进（msgSeq 变化）开新消息并重置 deltaSeq 期望值；序号连续即追加；跳号即失步。
+- **session.getSubagentStreamState RPC**：拉取某 record 当前流状态的只读快照（RelayTee 既有内存状态的投影，不新增保留状态）。入参 `{ sessionId, recordId }`；出参 `{ found, msgSeq, lastDeltaSeq, lines }`。`found: false` = 该 record 无进行中流（未开始或已定稿，合法回执非错误）；`found: true` 时 `lines` = 当前消息累积全文（消费端复用现有全量替换入口），`lastDeltaSeq` = 这份全文包含到第几条 delta。失败走统一 error envelope，无独立错误码词表。
+- **水位（watermark，记录已处理到哪的位置标记）**：`lastDeltaSeq` 在消费端的用法——拉取响应携带的 `lastDeltaSeq` 标记这份全文覆盖到哪条 delta，`<= 水位` 的在途/缓冲 chunk 丢弃，`> 水位` 的按序回放；跨通道（RPC 应答 × 广播）拼接正确性靠水位 + 缓冲回放保证。
+- **sealedMsgSeq**：消费端状态机的定稿水位——已定稿到的最高消息序号，单调推进、从不重置（清除消息按其携带的 msgSeq 置位）。用于丢弃「定稿后同消息序号的晚到拉取响应」，防止已定稿消息被复活。
+
+收敛分工：chunk 推送是性能提示；接入（订阅建立/晚订阅/刷新）与失步（跳号）触发拉取；定稿由清除消息 + entry 权威链（`session.subagentEntriesAppended`）收敛——拉为主、推补充（[ADR-0097](adr/decisions.md)）。
+
+**代码映射**: 协议类型 `packages/shared/src/protocol.ts`（ServerMessageMapBase 的 `subagent.stream_chunk` / `session.getSubagentStreamState` 条目）；产生端 `packages/runtime/src/infra/relay/relay-tee.ts`；消费端状态机 `packages/core/src/domain/chat/streaming-state-machine.ts`。
+
+
 ### ToolCall
 
 pi 引擎单次工具调用的记录。是数据模型的最小单位（bash、read、edit、write、subagent 等）。挂在 Message.toolCalls[] 上。
