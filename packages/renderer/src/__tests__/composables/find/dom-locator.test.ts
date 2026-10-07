@@ -77,4 +77,25 @@ describe('locateInDom', () => {
     expect(ranges).toHaveLength(1)
     expect(ranges[0].startContainer.parentElement?.tagName).toBe('SPAN')
   })
+
+  it('块级边界不拼接命中：前块尾 + 后块头拼出的串零命中（浏览器 Ctrl+F 惯例）', () => {
+    // 前段尾 "do" + 后段首 "ne" 在视觉上是两段文字，不构成连续的 "done"
+    const host = mount('<p>do</p><p>ne</p>')
+    expect(locateInDom(host, 'done')).toEqual([])
+  })
+
+  it('块级边界不破坏块内命中：相邻两块各自命中独立计数', () => {
+    const host = mount('<p>done</p><p>done</p>')
+    const ranges = locateInDom(host, 'done')
+    expect(ranges).toHaveLength(2)
+    expect(ranges.map((r) => r.toString())).toEqual(['done', 'done'])
+  })
+
+  it('表格单元格为独立块：跨单元格拼接零命中，单元格内命中正常', () => {
+    const host = mount('<table><tr><td>do</td><td>ne</td></tr></table>')
+    expect(locateInDom(host, 'done')).toEqual([])
+    const ranges = locateInDom(host, 'do')
+    expect(ranges).toHaveLength(1)
+    expect(ranges[0].startContainer.parentElement?.tagName).toBe('TD')
+  })
 })

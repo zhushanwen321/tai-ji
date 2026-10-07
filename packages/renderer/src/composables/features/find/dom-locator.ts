@@ -8,12 +8,37 @@
  * 实现不逐节点匹配，而是把容器内全部文本节点按文档序拼接成一条大字符串 + 各节点的
  * 起始偏移表，在大字符串上找全部命中，再经偏移表映射回（节点, 偏移）对 → Range，
  * 天然覆盖跨节点拼接。
+ *
+ * 块级边界（与浏览器 Ctrl+F 惯例对齐）：拼接只在同一文本流内进行——相邻文本节点的
+ * 最近块级祖先元素（段落/卡片/列表项/表格单元格等）不同时插入 '\n' 分隔符，使
+ * indexOf 不跨块匹配（前块尾 "do" + 后块首 "ne" 拼出视觉上不存在的 "done" 属假命中）。
+ * 块级祖先按标签名清单判定（纯数据判断，无环境差异）；爬到 container 本身作为兜底
+ * 身份——container 直下的裸文本同属一个文本流，相互拼接合法。
  */
 
 /** 拼接文本流中的一段：node 从大字符串 start 偏移开始贡献自己的全部文本 */
 type TextSegment = {
   node: Text
   start: number
+}
+
+/** HTML 块级标签清单（HTML 标准块级元素语义，与显示样式无关） */
+const BLOCK_TAGS = new Set([
+  'address', 'article', 'aside', 'blockquote', 'details', 'dd', 'div', 'dl', 'dt',
+  'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5',
+  'h6', 'header', 'hgroup', 'hr', 'li', 'main', 'nav', 'ol', 'p', 'pre', 'section',
+  'summary', 'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'ul',
+])
+
+/** 文本节点的最近块级祖先（文本流身份）：从 parent 向上爬，遇块级标签返回该元素；
+ *  爬到 container 返回 container 兜底——身份相同 ⇔ 无块级边界 ⇔ 同一文本流。 */
+function textFlowId(node: Text, container: HTMLElement): Element {
+  let cur: Element | null = node.parentElement
+  while (cur && cur !== container) {
+    if (BLOCK_TAGS.has(cur.tagName.toLowerCase())) return cur
+    cur = cur.parentElement
+  }
+  return container
 }
 
 export function locateInDom(container: HTMLElement, query: string): Range[] {
@@ -40,7 +65,12 @@ export function locateInDom(container: HTMLElement, query: string): Range[] {
     },
   })
   let current = walker.nextNode()
+  let prevFlow: Element | undefined
   while (current) {
+    // 块级边界插分隔符（segment 的 start 取插入后的 full.length——分隔符不属于任何文本节点）
+    const flow = textFlowId(current as Text, container)
+    if (prevFlow !== undefined && flow !== prevFlow) full += '\n'
+    prevFlow = flow
     segments.push({ node: current as Text, start: full.length })
     full += current.nodeValue ?? ''
     current = walker.nextNode()
