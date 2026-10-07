@@ -8,7 +8,9 @@
  *
  * 职责（原组件 loadSubagentData 全量迁移 + drawer-blank 修复 u2 增补）：
  * - subagent 三段式虚拟 id：fetchAndInject 拉历史（空历史不写分区，u1）+
- *   恒订阅 stream_delta（E-4 / R3 消解：不依赖 isRunning 陈旧缓存判定订阅时机）
+ *   恒订阅 stream（E-4 / R3 消解：不依赖 isRunning 陈旧缓存判定订阅时机；B2 后该订阅
+ *   承担 delta/chunk/clear 三路分派 + 触发点①接入拉取——本文件是三触发点唯一生产
+ *   接线点，见 loadSubagentVirtualPartition 内 B2 注释）
  *   + 客户端 outcome-only 兜底投影（U4 A8，判定先行）
  *   + 空历史时 task 用户气泡种入（drawer-blank u2：outcome 先行、seed 复用分区空守卫随后，
  *   判定顺序即优先级）
@@ -93,8 +95,10 @@ export function useSubagentTabData(deps: SubagentTabDataDeps) {
   /**
    * 按虚拟 id 类型分派加载（subagent 三段式 / agentcall 两段式，主体在对应 loader 内）。
    * - subagent 三段式：fetchAndInject 拉历史（返回值 = 拉取的 history；空历史不写分区，u1 契约）
-   *   + 恒订阅 stream_delta（E-4 / R3 消解：不再依赖 isRunning 陈旧缓存判定订阅时机——entry 帧
-   *   消费走 routeInbound 兜底链不依赖 drawer，stream_delta 订阅打开即挂，非 running 时空转零成本）
+   *   + 恒订阅 stream（E-4 / R3 消解：不再依赖 isRunning 陈旧缓存判定订阅时机——entry 帧
+   *   消费走 routeInbound 兜底链不依赖 drawer，订阅打开即挂，非 running 时空转零成本；B2 后
+   *   同一订阅承担 delta/chunk/clear 三路分派 + 触发点①接入拉取，见 loadSubagentVirtualPartition
+   *   内 B2 注释）
    *   空历史时兜底判定顺序即优先级（drawer-blank-fix 设计 §7.2）：①outcome 投影（非 pi）先行
    *   ②task 用户气泡种入随后——两判定共用分区空守卫，①命中或 E-4 已投影时②自然跳过
    * - agentcall 两段式：快照只读，仅拉历史（D4：不接实时流式）

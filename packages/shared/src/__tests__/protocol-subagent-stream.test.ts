@@ -8,9 +8,13 @@
  *  - SC4: found:false 边界形态可构造（该 record 无进行中流 = 合法回执，非错误）
  *  - SC5: 失败走既有统一 error envelope（'error' 条目原样承载，无新增错误帧/错误码）
  *
- * 模式与 protocol-seq.test.ts 一致：编译期 AssertHasKey/AssertExtends（本文件在 tsconfig
- * include 内，tsc --noEmit 真正执行）+ 运行期对象字面量可赋值断言（vitest）+
- * transient 标注源码扫描（注释字样属文本面，编译器不保护，运行期 grep 式断言守卫）。
+ * 模式与 protocol-seq.test.ts 一致。编译期防线的实际生效范围（探针实证）：AssertHasKey
+ * 约束违例真报错（TS2344，key 缺失即拦）；AssertExtends 以未使用类型别名形态实例化时
+ * 违例零报错（条件类型静默解析为错误元组，无赋值位置即无检查点）——本文件全部
+ * AssertExtends 裸别名属文档性断言，形状防线的承载 = 同文件值位置构造（payload/reply
+ * 对象字面量赋给目标类型，excess/missing 属性检查真实生效）。另有运行期对象字面量
+ * 可赋值断言（vitest）+ transient 标注源码扫描（注释字样属文本面，编译器不保护，
+ * 运行期 grep 式断言守卫）。
  *
  * 运行：cd packages/shared && npx tsc --noEmit && npx vitest run
  */
@@ -26,7 +30,8 @@ import type {
 } from '../protocol'
 
 // ── 编译期类型断言辅助（同 protocol-seq.test.ts 模式）──────────────
-// key 缺失 / 形状漂移时 tsc 报错（never 或 ['ERROR…'] 赋值失败）。
+// key 缺失 → AssertHasKey 约束违例报 TS2344；形状漂移的编译期防线在值位置构造
+// （对象字面量赋目标类型的 excess/missing 属性检查），裸 AssertExtends 别名不独立报错。
 
 type AssertHasKey<T, K extends keyof T> = true
 type AssertExtends<A, B> = A extends B ? true : ['ERROR: A does not extend B', A, B]

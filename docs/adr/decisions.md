@@ -634,4 +634,4 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **依据**：用户裁决「只做长期合理的方案，不做短期成本控制考量的方案」（2026-10-06）；拉取收敛与 ADR-0097「拉为主、推补充」直配，恢复源 = 同步查询（ADR-0122 状态判定来源最高优先级）。
 
-**登记**：设计文档 `.tmp/tech-design/subagent-stream-chunk-design.md`（过程产物，不入库）；实施跨 shared / runtime / core / renderer 五包 + 本登记，清单见设计文档 §5。
+**登记**：设计文档 `.tmp/tech-design/subagent-stream-chunk-design.md`（过程产物，不入库）；实施跨 shared / runtime / core / renderer 四包 + 本登记，清单见设计文档 §5。

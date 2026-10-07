@@ -14,7 +14,7 @@
  * - clearIndependentTransient：resetTransientStates 的 session 级独立瞬态清理
  *
  * 形态：factory 函数（createStreamingStateMachine）闭包持有 refs + helpers，方法签名只留
- * 业务参数。store.ts 仅做 ref 委托（6 处调用点），不再有模块级 *Impl 反模式
+ * 业务参数。store.ts 仅做 ref 委托（纯转发，无逻辑），不再有模块级 *Impl 反模式
  * （原为绕 max-lines-per-function 拆分）。
  */
 import type { ContentBlock, Message, ServerMessageMap, ToolCall } from '@taiji/shared'
@@ -324,17 +324,16 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
    * 1. msgSeq 边界推进（> 当前）：重置 expectedDeltaSeq = 0、丢弃旧 buffer、开新 streaming
    *    消息（旧消息已随 message_end 经 entry 权威定稿，缓冲残留不再有意义）；跨多条消息的
    *    前向跳号同理——中间消息的全文由 entry 链承载，无需逐条推进。
-   *    msgSeq < 当前 → 陈旧 chunk 丢弃（契约收窄见方法尾注）。
+   *    msgSeq < 当前 → 陈旧 chunk 丢弃（理由见方法尾注）。
    * 2. deltaSeq == expected → 追加，expected++。
    * 3. deltaSeq > expected → 失步：入 buffer，无在途拉取则发起拉取。
    * 4. deltaSeq < expected → 已含于最近一次拉取结果，丢弃。
    *
-   * [契约收窄登记] 设计第 1 步字面为「msgSeq ≠ 当前 → 边界推进」；对 msgSeq < 当前 的
-   * 回退 chunk，逐字实现会用旧消息内容覆写当前 streaming 实体（复活定稿内容），与设计
-   * 自身的陈旧防护原则（响应分支 1/2「晚到响应不得复活定稿消息」）冲突，且分支 4 的
-   * buffer 回放会把边界推进前缓冲的旧消息 chunk 重新喂回本管线——收窄为：仅 msgSeq >
-   * 当前 才边界推进，< 当前 丢弃。设计不变量「单条 WS 连接内广播有序」（§4.3）下正常
-   * chunk 流只出现前向序号，该收窄不改变任何可达形态的行为。
+   * [msgSeq < 当前丢弃的理由]（设计 §4.3 第 1 步同文登记）与拉取响应分支 1/2 的陈旧
+   * 防护同一原则：回退 chunk 若推进边界会用旧消息内容覆写当前 streaming 实体（复活定稿
+   * 内容），且响应分支 4 的 buffer 回放会把边界推进前缓冲的旧消息 chunk 重新喂回本管线。
+   * 设计不变量「单条 WS 连接内广播有序」（§4.3）下正常 chunk 流只出现前向序号，该分支
+   * 不改变任何可达形态的行为。
    */
   function processSubagentStreamChunk(virtualId: string, recordId: string, state: SubagentChunkPartitionState, chunk: SubagentStreamChunk): void {
     // 1. 消息边界（先边界后序号）

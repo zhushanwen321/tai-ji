@@ -10,7 +10,10 @@
  * - finalizeSubagentStream(virtualId)：streaming → complete 收口
  *
  * virtualId = 'subagent:<subagentId>'，是 chat store messages Map 的 key，
- * 与主 session 共用同一 Map（仅 key 不同）。
+ * 与主 session 共用同一 Map（仅 key 不同）。注意：本组 VIRTUAL_ID（下方 fixture）为
+ * W4 遗留两段式形态，仅作 Map key 使用；拉取路径用例必须用三段式工厂形态
+ * subagent:<mainSid>:<subId>（见 THREE_SEG_VID——执行器经 extractMainSessionId 解析主
+ * session，两段式键解析出垃圾 mainSid，SSOT 见 stores/subagent.ts 与下方 B2 注释）。
  *
  * E3（mount Panel 组件树 + WS subagent.stream_delta 端到端）需手工验证：
  * 这里降级为对 chat store action 的直接断言（store action 是组件树渲染的

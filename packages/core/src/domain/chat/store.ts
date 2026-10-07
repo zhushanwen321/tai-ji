@@ -353,7 +353,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * Set 形态（布尔语义无载荷）对齐 failedHistory/hydrated；disposeSession 同点清理。
    */
   const respawnPending = ref<Set<string>>(new Set())
-  /** handingOff 瞬时态子域控制器（对称 compactingSessions），委托 chat-handoff.ts。设计见 ./README.md + chat-handoff.ts。 */
+  /** handingOff 瞬时态子域控制器（对称 compacting 子域），委托 chat-handoff.ts。设计见 ./README.md + chat-handoff.ts。 */
   const handoff = createHandoffController()
   const { handingOffSessions, isHandingOff, setHandingOff } = handoff
   /** 按 sessionId 分区的自动重试态（W06-B，auto_retry_start/end） */
@@ -877,7 +877,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
 
   /**
    * 多 session 统一收口（断连 / runtime 重启兜底）：遍历瞬态 session，逐个调 resetTransientStates。
-   * 遍历范围是 messages.keys() ∪ compactingSessions ∪ retryStates ∪ pendingSend 并集
+   * 遍历范围是 messages.keys() ∪ occupancy 分区中 compacting 的 sid ∪ handingOffSessions ∪ retryStates ∪ pendingSend 并集
    *（不能只遍历 messages——compacting/retry/pendingSend 可独立于消息存在）。详见 ./README.md。
    */
   function finalizeAllStreaming(reason: FinalizeReason): void {
@@ -1101,7 +1101,11 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   /** 截断 session 消息到 messageId（编辑重发用）。委托 chat-mutations.truncateMessagesFrom。 */
   const truncateFrom = (sessionId: string, messageId: string, inclusive: boolean): void => truncateMessagesFrom(messages, sessionId, messageId, inclusive)
 
-  /** 清理指定 session 的全部 per-session 状态（deleteSession 调用，S3）：messages/hydrated/pendingSend/compactingSessions/retryStates/failedHistory/changeSetStatuses + timer + LRU 记录 + premature timeout 快照（u10/G4）。背景见 ./README.md。 */
+  /** 清理指定 session 的全部 per-session 状态（deleteSession 调用，S3）：Map 分区
+   * messages/retryStates/inflightCounts/compactingReasons/occupancies/historyWindows + Set
+   * 分区 hydrated/pendingSend/handingOffSessions/failedHistory/respawnPending +
+   * changeSetStatuses（前缀过滤）/ entryStates / executingBash / streaming flag 惰性缓存 /
+   * subagent chunk 分区状态机 + LRU 时序记录。背景见 ./README.md。 */
   function disposeSession(sessionId: string): void {
     // Map ref：不可变写保证响应式（new Map + delete + 赋值新 Map）。
     // D-1 后 messages 的 Map entry 是 per-session ShallowRef 分区——本循环删的是 Map entry

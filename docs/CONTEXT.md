@@ -151,7 +151,7 @@ subagent 运行状态的内存单源（`packages/subagent-core/src/execution/per
 运行中 subagent 的实时输出通道（drawer 打字机唯一实时数据源），协议 = 增量推送 + 按需拉取（ADR-0128，对标 Kubernetes ListAndWatch：接入拉全量 → 推送增量 → 失步重新拉全量）：
 
 - **subagent.stream_chunk 消息型**：唯一的内容推送通道。runtime 对子代理的每个文本增量发一条 `{ sessionId, recordId, msgSeq, deltaSeq, delta }`，`delta` 是真增量片段（非累积全文）。transient 主题（不分配 seq、不入 ring、不写快照，断连即丢、无回放），推送允许丢失，正确性由拉取收敛兜底。
-- **msgSeq / deltaSeq 双序号**：`msgSeq` = per-record assistant 消息序号，表达消息边界（产生端从 1 开始——首条 assistant 消息 = 1，message_start 递进；消费端状态机初始 0）；`deltaSeq` = per-message 从 0 递增。消费端按双序号拼合：边界推进（msgSeq 变化）开新消息并重置 deltaSeq 期望值；序号连续即追加；跳号即失步。
+- **msgSeq / deltaSeq 双序号**：`msgSeq` = per-record assistant 消息序号，表达消息边界（产生端从 1 开始——首条 assistant 消息 = 1，message_start 递进；消费端状态机初始 0）；`deltaSeq` = per-message 从 0 递增。消费端按双序号拼合：边界推进（msgSeq 前向变化）开新消息并重置 deltaSeq 期望值；msgSeq 回退（陈旧 chunk）丢弃不推进；序号连续即追加；跳号即失步。
 - **session.getSubagentStreamState RPC**：拉取某 record 当前流状态的只读快照（RelayTee 既有内存状态的投影，不新增保留状态）。入参 `{ sessionId, recordId }`；出参 `{ found, msgSeq, lastDeltaSeq, lines }`。`found: false` = 该 record 无进行中流（未开始或已定稿，合法回执非错误）；`found: true` 时 `lines` = 当前消息累积全文（消费端复用现有全量替换入口），`lastDeltaSeq` = 这份全文包含到第几条 delta。失败走统一 error envelope，无独立错误码词表。
 - **水位（watermark，记录已处理到哪的位置标记）**：`lastDeltaSeq` 在消费端的用法——拉取响应携带的 `lastDeltaSeq` 标记这份全文覆盖到哪条 delta，`<= 水位` 的在途/缓冲 chunk 丢弃，`> 水位` 的按序回放；跨通道（RPC 应答 × 广播）拼接正确性靠水位 + 缓冲回放保证。
 - **sealedMsgSeq**：消费端状态机的定稿水位——已定稿到的最高消息序号，单调推进、从不重置（清除消息按其携带的 msgSeq 置位）。用于丢弃「定稿后同消息序号的晚到拉取响应」，防止已定稿消息被复活。
