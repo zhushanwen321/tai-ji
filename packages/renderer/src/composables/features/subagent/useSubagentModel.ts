@@ -6,10 +6,11 @@
  * 回执消费范式照 useModel.ts 现役范式（U6 弃乐观写）：**应答到达才写显示态，禁用请求值
  * 乐观写**——已生效型的生效模型可能 ≠ 请求目标（pi 模型族静默替换成同族模型，§6.4）；
  * 已记账型不携带档位值。RPC 失败默认不写任何状态（标签维持切换前显示——分支③由本范式
- * 构造性成立），唯一例外 = 「记账已写」型错误码（SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES，
- * D3 缺陷七：宿主先写覆盖记账再回错误，错误即意图受理凭证——badge 同已记账型通道亮灯；
- * chat 域走 catch 通道，run 级聚合的该分型内联在聚合应答失败名单（reply.failures），按
- * 成员键同权责亮灯）。
+ * 构造性成立），例外分域：chat 域走 catch 通道，按「记账已写」型错误码亮灯
+ * （SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES，D3 缺陷七：宿主先写覆盖记账再回错误，
+ * 错误即意图受理凭证；词表外码如 credential_missing 在该域宿主不写，badge 不亮）；run 级
+ * 聚合不设分型门——宿主 run 级意图恒写（聚合返回后统一写，不分成败码），聚合应答失败名单
+ * （reply.failures）成员按成员键全量补写 overrideIntent 亮 badge（重派一律吃覆盖）。
  *
  * 显示态（回执态）的归属与生命周期：renderer 会话期内存（模块级 reactive Map，跨组件
  * 实例共享——SubagentTab / WorkflowTab 各自调本 composable 读同一份）；**不写
@@ -56,15 +57,6 @@ type DisplayKey = string
 /** workflow 成员显示键（runId + 聚合成员标识）。 */
 export function subagentMemberDisplayKey(runId: string, memberRunId: string): DisplayKey {
   return `${runId}:${memberRunId}`
-}
-
-/**
- * 「记账已写」分型判定（词表成员守卫）：run 级失败名单成员的 reason 落在该词表 =
- * 宿主对该成员已写覆盖记账（覆盖已受理、重派生效），错误本身即意图受理凭证——
- * 与 chat 域 catch 通道同权责（词表语义见 SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES）。
- */
-function isAccountedErrorCode(reason: string): boolean {
-  return (SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES as readonly string[]).includes(reason)
 }
 
 /**
@@ -201,9 +193,9 @@ export function useSubagentModel() {
    *   凭证——F1-31 裁决候选 A）；recorded → 写 overrideIntent
    *   （本次目标——「已记录，下次执行生效」的标签承接）；
    * - run 级聚合：按成员键写——switched 成员写生效值；not-active / not-applicable 成员写
-   *   overrideIntent（记账路径，重派生效）；失败名单成员不写生效值（分支③），但
-   *   「记账已写」分型（SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES）补写 overrideIntent
-   *   亮 badge（与 chat 域 catch 通道同权责），toast 分项呈现照常（成员标识 + 失败分型）。
+   *   overrideIntent（记账路径，重派生效）；失败名单成员不写生效值（分支③），但一律补写
+   *   overrideIntent 亮 badge（宿主 run 级意图恒写——聚合返回后统一写、不分成败码，失败
+   *   成员重派吃覆盖），toast 分项呈现照常（成员标识 + 失败分型）。
    *
    * @returns 应答（成功）；失败返回 undefined（toast 已报，显示态未动）。
    */
@@ -271,12 +263,12 @@ export function useSubagentModel() {
       // switched 但无生效值（契约外形态）：不写（禁虚构生效值）
     }
     for (const failure of reply.failures) {
-      // 失败名单成员：生效值未知（分支③，不写 effectiveModel），但「记账已写」分型
-      // （快照型 / 回读失败型——宿主转发前已写 run 级意图，该成员重派吃覆盖）与 chat
-      // 域同权责亮 badge（overrideIntent）；词表外（credential_missing / 透传码）不写。
-      if (isAccountedErrorCode(failure.reason)) {
-        displayStates.set(subagentMemberDisplayKey(runId, failure.runId), { overrideIntent: intentRef })
-      }
+      // 失败名单成员：生效值未知（分支③，不写 effectiveModel），但 overrideIntent 一律
+      // 补写亮 badge——宿主 run 级意图恒写（model-switch workflow-run 分支：聚合返回后
+      // 统一 setModelOverride + persistRunOverride，不分成败码），失败成员（含
+      // credential_missing / 透传码）后续重派一律吃 run 级覆盖（workflow-dispatch 派发
+      // 侧覆写 opts.model）；chat 域 catch 通道的「记账已写」词表门控不适用于本分面。
+      displayStates.set(subagentMemberDisplayKey(runId, failure.runId), { overrideIntent: intentRef })
       // toast 分项呈现照常（错误应答的失败事实必须可见——显示态补写不吞错误）
       toastError(t('panel.sideDrawer.modelSwitchMemberFailed', { member: failure.runId, reason: failure.reason }))
     }

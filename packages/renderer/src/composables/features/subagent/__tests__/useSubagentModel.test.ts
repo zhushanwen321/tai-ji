@@ -7,7 +7,7 @@
  * - **禁乐观写**：api promise 未 resolve 前显示态零写入（应答到达才写状态）；
  * - 回执分流：chat 两型（effective → 生效值 / recorded → 覆盖意图）+ run 级聚合
  *   （switched → 成员生效值 / not-active·not-applicable → 成员覆盖意图 / 失败名单
- *   不写 + toast 分项）；
+ *   全量补写覆盖意图——宿主 run 级意图恒写 + toast 分项）；
  * - thinking 档位同步（§6.4）：回执带 effectiveThinkingLevel → 展示态字段更新且面板
  *   取值跟随；回执缺省该字段（聚合成员 optional）→ 字段不动、面板回退盖章值；
  * - 失败路径：RPC reject → 显示态零写入（标签读取规则分支③的构造性成立载体）+
@@ -229,7 +229,7 @@ describe('useSubagentModel — 回执写状态（禁乐观写）', () => {
     expect(displayOf('sa-2')).toBeUndefined()
   })
 
-  it('run 级聚合：switched 成员写生效值、not-active 写覆盖意图、失败名单按记账分型分流写 badge 并 toast 分项', async () => {
+  it('run 级聚合：switched 成员写生效值、not-active 写覆盖意图、失败名单全量写 badge（不分成败码）并 toast 分项', async () => {
     apiMocks.setModel.mockResolvedValue({
       members: [
         { runId: 'sa-a', state: 'switched', effectiveModel: { provider: 'p', modelId: 'm-a' }, effectiveThinkingLevel: 'high' },
@@ -254,11 +254,13 @@ describe('useSubagentModel — 回执写状态（禁乐观写）', () => {
     // not-active / not-applicable：覆盖意图（记账路径，重派生效）
     expect(memberDisplayOf('wf-1', 'sa-b')).toEqual({ overrideIntent: 'p/target' })
     expect(memberDisplayOf('wf-1', 'sa-c')).toEqual({ overrideIntent: 'p/target' })
-    // 失败名单「记账已写」分型（快照/回读失败——宿主已写 run 级意图，重派吃覆盖）：
-    // 生效值不虚构（无 effectiveModel），overrideIntent 亮 badge（与 chat 域同权责）
+    // 失败名单成员一律补写 overrideIntent 亮 badge（dmg-r2-3）：宿主 run 级意图恒写
+    // （聚合返回后统一写、不分成败码），失败成员——含 credential_missing / 透传码——
+    // 后续重派一律吃 run 级覆盖（workflow-dispatch 派发侧覆写），badge 与重派事实对齐；
+    // 生效值仍不虚构（无 effectiveModel）。chat 域 catch 通道的词表门控（credential_
+    // missing 不亮）不适用于本分面。
     expect(memberDisplayOf('wf-1', 'sa-d')).toEqual({ overrideIntent: 'p/target' })
-    // 失败名单未写分型（credential_missing = 切换整体未生效）：不亮 badge
-    expect(memberDisplayOf('wf-1', 'sa-e')).toBeUndefined()
+    expect(memberDisplayOf('wf-1', 'sa-e')).toEqual({ overrideIntent: 'p/target' })
     // toast 分项呈现照常（错误事实必须可见，显示态补写不吞错误）
     expect(toastMocks.error).toHaveBeenCalledTimes(2)
     expect(toastMocks.error.mock.calls[0]?.[0]).toContain('sa-d')
