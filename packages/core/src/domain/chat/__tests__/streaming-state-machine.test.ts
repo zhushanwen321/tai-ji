@@ -338,8 +338,9 @@ describe('clearIndependentTransient', () => {
 // ── [B2 subagent-stream-chunk §4.3] 增量 chunk 消费状态机 ──────────────────────────
 // 契约权威 = 设计文档 §4.3：chunk 处理优先序四步 / 拉取响应按序判定四分支 /
 // 跨消息边界（推进重置 + 丢旧 buffer）/ 水位回放 / sealedMsgSeq 单调水位 /
-// 出口统一清 pullInFlight。分区状态经 _chunkPartitionsForTest 只读断言（行为断言为主，
-// buffer / pullInFlight 无消息投影，状态读口是唯一观测点）。
+// 在途拉取 settle 即清（pullDedup factory，C-data-18）。分区状态经 _chunkPartitionsForTest
+// 只读断言、在途态经 _pullDedupForTest.has(key) 断言（行为断言为主，buffer / 在途槽
+// 无消息投影，状态读口是唯一观测点）。
 
 /** chunk 状态机测试夹具：注入受控拉取执行器（deferred 手动 resolve/reject 控制时序） */
 function makeChunkMachine() {
@@ -358,14 +359,16 @@ function makeChunkMachine() {
   })
   const VID = subagentVirtualId('s1', 'bg-1')
   const RID = 'bg-1'
-  /** 分区状态只读断言口（buffer / pullInFlight / sealedMsgSeq 无消息投影，唯一观测点） */
+  /** 分区状态只读断言口（buffer / sealedMsgSeq 无消息投影，唯一观测点） */
   const partition = () => sm._chunkPartitionsForTest.get(VID)!.get(RID)!
+  /** (VID, RID) 在途拉取观测口（等价原分区 pullInFlight 字段：settle 即清由 factory 承接） */
+  const pullInFlight = () => sm._pullDedupForTest.has(`${VID}::${RID}`)
   /** 拉取执行器全部在微任务中续跑（.then/.catch），flush 两拍保证响应应用完成 */
   const flush = async () => {
     await Promise.resolve()
     await Promise.resolve()
   }
-  return { sm, messages, VID, RID, partition, pullCalls, flush, resolvePull: () => resolvePull, rejectPull: () => rejectPull }
+  return { sm, messages, VID, RID, partition, pullInFlight, pullCalls, flush, resolvePull: () => resolvePull, rejectPull: () => rejectPull }
 }
 
 describe('applySubagentStreamChunk（§4.3 chunk 处理优先序）', () => {
@@ -391,12 +394,12 @@ describe('applySubagentStreamChunk（§4.3 chunk 处理优先序）', () => {
   })
 
   it('TC-C3+4 失步（> expected）入 buffer 并触发拉取；在途去重（同 record 至多一个在途拉取）', () => {
-    const { sm, messages, VID, RID, partition, pullCalls } = makeChunkMachine()
+    const { sm, messages, VID, RID, partition, pullInFlight, pullCalls } = makeChunkMachine()
 
     sm.applySubagentStreamChunk(VID, RID, 1, 0, 'a')
     sm.applySubagentStreamChunk(VID, RID, 1, 2, 'x') // 跳过 deltaSeq=1 → 失步
     expect(partition().buffer).toEqual([{ msgSeq: 1, deltaSeq: 2, delta: 'x' }])
-    expect(partition().pullInFlight).toBe(true)
+    expect(pullInFlight()).toBe(true)
     expect(pullCalls).toHaveLength(1)
     expect(pullCalls[0]).toMatchObject({ virtualId: VID, recordId: RID })
 
@@ -486,28 +489,28 @@ describe('applySubagentStreamChunk（§4.3 chunk 处理优先序）', () => {
 
     expect(() => sm.applySubagentStreamChunk(VID2, RID2, 1, 5, 'x')).not.toThrow()
     expect(sm._chunkPartitionsForTest.get(VID2)!.get(RID2)!.buffer).toEqual([{ msgSeq: 1, deltaSeq: 5, delta: 'x' }])
-    expect(sm._chunkPartitionsForTest.get(VID2)!.get(RID2)!.pullInFlight).toBe(false)
+    expect(sm._pullDedupForTest.has(`${VID2}::${RID2}`)).toBe(false)
   })
 })
 
 describe('applySubagentStreamState（§4.3 拉取响应按序判定四分支）', () => {
-  it('TC-R1 分支 1（≤ sealedMsgSeq → 已定稿丢弃）：晚到响应不复活定稿消息，出口清 pullInFlight', async () => {
-    const { sm, messages, VID, RID, partition, resolvePull, flush } = makeChunkMachine()
+  it('TC-R1 分支 1（≤ sealedMsgSeq → 已定稿丢弃）：晚到响应不复活定稿消息，出口清在途槽', async () => {
+    const { sm, messages, VID, RID, partition, pullInFlight, resolvePull, flush } = makeChunkMachine()
     sm.sealSubagentStream(VID, RID, 1)
     sm.applySubagentStreamChunk(VID, RID, 1, 0, 'a') // 常规流式（expected=1）
     sm.applySubagentStreamChunk(VID, RID, 1, 3, 'x') // 失步 → 拉取在途
-    expect(partition().pullInFlight).toBe(true)
+    expect(pullInFlight()).toBe(true)
     const before = messages.value.get(VID)!.value
 
     resolvePull()!({ found: true, msgSeq: 1, lastDeltaSeq: 5, lines: ['final', 'text'] })
     await flush()
 
     expect(messages.value.get(VID)!.value).toBe(before) // 零写入：定稿消息的全文响应不复活内容
-    expect(partition().pullInFlight).toBe(false) // 出口统一清
+    expect(pullInFlight()).toBe(false) // settle 即清（factory）
   })
 
   it('TC-R2 分支 2（< 当前 msgSeq → 陈旧响应丢弃）：RPC 应答与广播推进交错窗口防护', async () => {
-    const { sm, messages, VID, RID, partition, resolvePull, flush } = makeChunkMachine()
+    const { sm, messages, VID, RID, partition, pullInFlight, resolvePull, flush } = makeChunkMachine()
     sm.applySubagentStreamChunk(VID, RID, 1, 5, 'x') // 失步 → 拉取在途
     sm.applySubagentStreamChunk(VID, RID, 2, 0, 'b') // 广播先推进边界（buffer 丢弃）
     resolvePull()!({ found: true, msgSeq: 1, lastDeltaSeq: 9, lines: ['stale'] })
@@ -518,26 +521,26 @@ describe('applySubagentStreamState（§4.3 拉取响应按序判定四分支）'
     expect(after[1].content).toBe('b')
     expect(partition().msgSeq).toBe(2)
     expect(partition().expectedDeltaSeq).toBe(1) // 未被响应重置
-    expect(partition().pullInFlight).toBe(false)
+    expect(pullInFlight()).toBe(false)
   })
 
-  it('TC-R3 found:false（协议形态 msgSeq=0）→ 零写入出口清 flag：经分支 1 等效拦截（设计注记「判定 1 通常已拦截」）', async () => {
-    const { sm, messages, VID, RID, partition, resolvePull, flush } = makeChunkMachine()
+  it('TC-R3 found:false（协议形态 msgSeq=0）→ 零写入出口清在途槽：经分支 1 等效拦截（设计注记「判定 1 通常已拦截」）', async () => {
+    const { sm, messages, VID, RID, partition, pullInFlight, resolvePull, flush } = makeChunkMachine()
     sm.applySubagentStreamChunk(VID, RID, 1, 0, 'a')
     sm.applySubagentStreamChunk(VID, RID, 1, 2, 'x') // 失步 → 拉取在途
     // 线上回执形态：found=false 时 msgSeq 无流式语义恒 0（shared 协议注释）——
-    // 0 <= sealedMsgSeq(0) 在分支 1 即拦截，与分支 3 同一出口（不动作 + 清 flag）
+    // 0 <= sealedMsgSeq(0) 在分支 1 即拦截，与分支 3 同一出口（不动作 + 清在途槽）
     resolvePull()!({ found: false, msgSeq: 0, lastDeltaSeq: 0, lines: [] })
     await flush()
 
     expect(messages.value.get(VID)!.value[0].content).toBe('a') // 内容不动
     expect(partition().msgSeq).toBe(1) // 水位状态不动（含 lastDeltaSeq 未应用）
     expect(partition().expectedDeltaSeq).toBe(1)
-    expect(partition().pullInFlight).toBe(false)
+    expect(pullInFlight()).toBe(false)
   })
 
-  it('TC-R3b 分支 3 本体（found:false 且 msgSeq 超前，白盒覆盖分支臂）→ 不动作，出口清 pullInFlight', async () => {
-    const { sm, messages, VID, RID, partition, resolvePull, flush } = makeChunkMachine()
+  it('TC-R3b 分支 3 本体（found:false 且 msgSeq 超前，白盒覆盖分支臂）→ 不动作，出口清在途槽', async () => {
+    const { sm, messages, VID, RID, partition, pullInFlight, resolvePull, flush } = makeChunkMachine()
     sm.applySubagentStreamChunk(VID, RID, 2, 0, 'b') // msgSeq=2, expected=1
     sm.applySubagentStreamChunk(VID, RID, 2, 3, 'x') // 失步 → 拉取在途
     // 非线上形态（found=false 恒 msgSeq=0）：msgSeq 超前的 found:false 仅可达分支 3 本体
@@ -547,14 +550,14 @@ describe('applySubagentStreamState（§4.3 拉取响应按序判定四分支）'
     expect(messages.value.get(VID)!.value[0].content).toBe('b') // 不动作
     expect(partition().msgSeq).toBe(2) // 状态未被响应重置
     expect(partition().expectedDeltaSeq).toBe(1)
-    expect(partition().pullInFlight).toBe(false)
+    expect(pullInFlight()).toBe(false)
   })
 
   it('TC-R4 分支 4（判定通过，含跨边界恢复）：全量替换 + 状态按响应重置（重置即边界推进）', async () => {
-    const { sm, messages, VID, RID, partition, resolvePull, flush } = makeChunkMachine()
+    const { sm, messages, VID, RID, partition, pullInFlight, resolvePull, flush } = makeChunkMachine()
     // 接入拉取（触发点 ①）：无任何 chunk 时经 requestSubagentStreamState 主动拉
     sm.requestSubagentStreamState(VID, RID)
-    expect(sm._chunkPartitionsForTest.get(VID)!.get(RID)!.pullInFlight).toBe(true)
+    expect(pullInFlight()).toBe(true)
 
     resolvePull()!({ found: true, msgSeq: 3, lastDeltaSeq: 1, lines: ['l0', 'l1'] })
     await flush()
@@ -566,7 +569,7 @@ describe('applySubagentStreamState（§4.3 拉取响应按序判定四分支）'
     expect(partition().msgSeq).toBe(3) // 按响应重置（超前当前 0 = 跨边界恢复）
     expect(partition().expectedDeltaSeq).toBe(2) // lastDeltaSeq + 1
     expect(partition().sealedMsgSeq).toBe(0) // 水位不受响应影响
-    expect(partition().pullInFlight).toBe(false)
+    expect(pullInFlight()).toBe(false)
   })
 
   it('TC-R4b requestSubagentStreamState 在途去重：并发触发合并为单次拉取', () => {
@@ -612,8 +615,8 @@ describe('水位回放（buffer replay，§4.3 分支 4 + 去重即水位）', (
     expect(pullCalls).toHaveLength(1)
   })
 
-  it('TC-P2b 回放中再遇跳号 → 再次拉取（pullInFlight 回放前先清，再触发可通过在途去重）', async () => {
-    const { sm, messages, VID, RID, partition, pullCalls, resolvePull, flush } = makeChunkMachine()
+  it('TC-P2b 回放中再遇跳号 → 再次拉取（在途槽已随响应 settle 清，再触发 run 新槽）', async () => {
+    const { sm, messages, VID, RID, partition, pullInFlight, pullCalls, resolvePull, flush } = makeChunkMachine()
     sm.applySubagentStreamChunk(VID, RID, 1, 2, 'c2') // 失步（跳过 0/1）
     sm.applySubagentStreamChunk(VID, RID, 1, 5, 'f5') // 继续失步（同 record 单在途）
     expect(pullCalls).toHaveLength(1)
@@ -625,22 +628,22 @@ describe('水位回放（buffer replay，§4.3 分支 4 + 去重即水位）', (
     expect(messages.value.get(VID)!.value[0].content).toBe('a\nmidc2')
     expect(partition().buffer).toEqual([{ msgSeq: 1, deltaSeq: 5, delta: 'f5' }])
     expect(pullCalls).toHaveLength(2)
-    expect(partition().pullInFlight).toBe(true) // 回放触发的拉取接管在途标记
+    expect(pullInFlight()).toBe(true) // 回放触发的拉取 run 新在途槽
   })
 
-  it('TC-F1 拉取失败（executor reject）→ 清 pullInFlight 保持失步态，下一条 chunk 重新触发（事件驱动无定时器）', async () => {
-    const { sm, VID, RID, partition, pullCalls, rejectPull, flush } = makeChunkMachine()
+  it('TC-F1 拉取失败（executor reject）→ settle 清在途槽、保持失步态，下一条 chunk 重新触发（事件驱动无定时器）', async () => {
+    const { sm, VID, RID, partition, pullInFlight, pullCalls, rejectPull, flush } = makeChunkMachine()
     sm.applySubagentStreamChunk(VID, RID, 1, 0, 'a')
     sm.applySubagentStreamChunk(VID, RID, 1, 2, 'x') // 失步 → 拉取
     rejectPull()!(new Error('connection closed'))
     await flush()
 
-    expect(partition().pullInFlight).toBe(false)
+    expect(pullInFlight()).toBe(false)
     expect(partition().buffer).toHaveLength(1) // 保持失步态（缓冲保留）
 
     sm.applySubagentStreamChunk(VID, RID, 1, 3, 'y') // 下一条失步 chunk → 重新触发
     expect(pullCalls).toHaveLength(2)
-    expect(partition().pullInFlight).toBe(true)
+    expect(pullInFlight()).toBe(true)
   })
 })
 
@@ -657,7 +660,7 @@ describe('sealedMsgSeq 单调水位（§4.3）', () => {
   })
 
   it('TC-S3 无分区清除消息（缺前缀晚接入）先落水位：后续接入拉取响应被分支 1 拦截', async () => {
-    const { sm, messages, VID, RID, partition, pullCalls, resolvePull, flush } = makeChunkMachine()
+    const { sm, messages, VID, RID, partition, pullInFlight, pullCalls, resolvePull, flush } = makeChunkMachine()
     sm.sealSubagentStream(VID, RID, 5) // 清除消息先于任何 chunk 到达（分区据置位创建）
     expect(partition().sealedMsgSeq).toBe(5)
 
@@ -666,7 +669,7 @@ describe('sealedMsgSeq 单调水位（§4.3）', () => {
     await flush()
 
     expect(messages.value.has(VID)).toBe(false) // 已定稿内容不复活
-    expect(partition().pullInFlight).toBe(false)
+    expect(pullInFlight()).toBe(false)
     expect(pullCalls).toHaveLength(1)
   })
 

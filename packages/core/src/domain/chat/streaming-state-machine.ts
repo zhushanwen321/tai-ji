@@ -28,6 +28,7 @@ import {
 import { findLastAssistantIndex } from './chunk-processor'
 import type { FinalizeReason } from './store-types'
 import type { SessionOccupancyState } from './store'
+import { createInflightDedup } from '../../foundation/create-inflight-dedup'
 import { randomUuid } from '../../utils/random-uuid'
 
 /**
@@ -138,8 +139,6 @@ export interface SubagentChunkPartitionState {
   expectedDeltaSeq: number
   /** 失步缓冲（跳号 chunk 等拉取响应回放；边界推进 / 响应重置时丢弃） */
   buffer: SubagentStreamChunk[]
-  /** 同一 record 至多一个在途拉取（去重即水位机制的并发闸） */
-  pullInFlight: boolean
   /** 已定稿最高消息序号（单调水位，从不重置；清除消息按携带 msgSeq 置位） */
   sealedMsgSeq: number
 }
@@ -231,19 +230,24 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
 
   // ── [B2 subagent-stream-chunk §4.3] subagent 增量 chunk 消费状态机 ────────────────
   // 契约权威 = 设计文档 §4.3（chunk 处理优先序四步 / 拉取响应按序判定四分支 /
-  // sealedMsgSeq 单调水位 / 出口统一清 pullInFlight）。拉取执行器由 renderer 注入
+  // sealedMsgSeq 单调水位 / 在途拉取 settle 即清）。拉取执行器由 renderer 注入
   // （deps.subagentStreamPull，core 不直接发 RPC）；无定时器/宽限窗（ADR-0122）——
   // 失败重触发 = 事件驱动（下一条 chunk 到达）。
 
   /** per (virtualId, recordId) 分区表（禁全局槽位；非响应式，ADR-0049 例外同 entryStates 判据） */
   const chunkPartitions = new Map<string, Map<string, SubagentChunkPartitionState>>()
 
-  function createChunkPartition(): SubagentChunkPartitionState {
-    return { msgSeq: 0, expectedDeltaSeq: 0, buffer: [], pullInFlight: false, sealedMsgSeq: 0 }
-  }
+  /**
+   * 同 record 在途拉取去重（C-data-18：禁止手写「同 key 并发异步去重 + settle 清理」
+   * 同构实现，一律组装 createInflightDedup；key = `${virtualId}::${recordId}`）。
+   * 槽独立于分区实例：分区清除/重建不弃在途拉取，其 settle（成功/失败）照常由 factory
+   * 引用比对清槽——修复前手写 boolean 位存在「旧拉取 rejection 清到重建后新分区」的
+   * 瞬时去重击穿，factory 槽位与分区生命周期解耦后该窗口不存在。
+   */
+  const pullDedup = createInflightDedup<SubagentStreamStateSnapshot>()
 
-  function getChunkPartition(virtualId: string, recordId: string): SubagentChunkPartitionState | undefined {
-    return chunkPartitions.get(virtualId)?.get(recordId)
+  function createChunkPartition(): SubagentChunkPartitionState {
+    return { msgSeq: 0, expectedDeltaSeq: 0, buffer: [], sealedMsgSeq: 0 }
   }
 
   function getOrCreateChunkPartition(virtualId: string, recordId: string): SubagentChunkPartitionState {
@@ -326,7 +330,7 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
    *    前向跳号同理——中间消息的全文由 entry 链承载，无需逐条推进。
    *    msgSeq < 当前 → 陈旧 chunk 丢弃（理由见方法尾注）。
    * 2. deltaSeq == expected → 追加，expected++。
-   * 3. deltaSeq > expected → 失步：入 buffer，无在途拉取则发起拉取。
+   * 3. deltaSeq > expected → 失步：入 buffer，发起拉取（同 record 在途去重由 pullDedup 承接）。
    * 4. deltaSeq < expected → 已含于最近一次拉取结果，丢弃。
    *
    * [msgSeq < 当前丢弃的理由]（设计 §4.3 第 1 步同文登记）与拉取响应分支 1/2 的陈旧
@@ -350,10 +354,10 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
       appendSubagentStreamText(virtualId, chunk.delta)
       return
     }
-    // 3. > expected → 失步：入 buffer，无在途拉取则发起
+    // 3. > expected → 失步：入 buffer，发起拉取（在途去重在 requestSubagentStreamState 内）
     if (chunk.deltaSeq > state.expectedDeltaSeq) {
       state.buffer.push(chunk)
-      if (!state.pullInFlight) requestSubagentStreamState(virtualId, recordId)
+      requestSubagentStreamState(virtualId, recordId)
       return
     }
     // 4. < expected → 已含于最近一次拉取结果，丢弃
@@ -361,30 +365,35 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
 
   /**
    * 发起拉取（§4.3 触发点 ②③ 的执行本体 + renderer 接入拉取（触发点 ①）的统一入口）：
-   * 同一 record 同时至多一个在途拉取（pullInFlight 去重）；响应经 applySubagentStreamState
-   * 按序判定；失败（连接断开 / 显式错误回执，executor reject）即清 pullInFlight、保持
-   * 失步态，下一条 chunk 到达时重新触发（事件驱动，无定时重试——ADR-0122）。
+   * 同一 record 同时至多一个在途拉取（pullDedup 去重，C-data-18 factory）；响应经
+   * applySubagentStreamState 按序判定；失败（连接断开 / 显式错误回执，executor reject）
+   * 即 settle 清槽（factory 内建）、保持失步态，下一条 chunk 到达时重新触发（事件驱动，
+   * 无定时重试——ADR-0122）。
    * 未注入执行器（deps.subagentStreamPull 缺省）→ no-op（缓冲保留）。
    */
   function requestSubagentStreamState(virtualId: string, recordId: string): void {
     if (!subagentStreamPull) return
-    const state = getOrCreateChunkPartition(virtualId, recordId)
-    if (state.pullInFlight) return
-    state.pullInFlight = true
-    void subagentStreamPull(virtualId, recordId)
+    const key = `${virtualId}::${recordId}`
+    // 在途即返回（单消费者）：响应消费由首次发起方的 then 单点承接。复用路径不得再
+    // attach then——factory 复用语义是「复用者拿到同一 promise、各自 attach 各自消费」，
+    // 而本处消费（applySubagentStreamState）非幂等读，同响应双应用会把回放推进过的
+    // expected 重置回响应水位（状态回退）。
+    if (pullDedup.has(key)) return
+    const { promise } = pullDedup.run(key, () => subagentStreamPull(virtualId, recordId))
+    void promise
       .then((response) => {
         applySubagentStreamState(virtualId, recordId, response)
       })
       .catch(() => {
-        // 失败清 pullInFlight（设计 §4.3「拉取失败与无应答」）：保持失步态，定稿不受
-        // 影响（entry 权威兜底）。静默收窄：失败信号由失步态本身承载，下一条 chunk 重触发。
-        const failed = getChunkPartition(virtualId, recordId)
-        if (failed) failed.pullInFlight = false
+        // 失败保持失步态（设计 §4.3「拉取失败与无应答」），定稿不受影响（entry 权威兜底）。
+        // 静默收窄：失败信号由失步态本身承载，下一条 chunk 重触发。在途槽已由 factory
+        // settle 即清（清理回调注册先于本 catch），无需手动清位。
       })
   }
 
   /**
-   * 拉取响应按序判定（§4.3 四分支，任何分支出口统一清 pullInFlight）：
+   * 拉取响应按序判定（§4.3 四分支；在途标记清理由 pullDedup settle 即清承接——factory
+   * 的清理回调注册先于调用方 then，进入本函数时在途槽已清）：
    * 1. response.msgSeq <= sealedMsgSeq → 内容已定稿：丢弃（晚到响应不得复活定稿消息）。
    * 2. response.msgSeq < 当前 msgSeq → 陈旧响应：丢弃（RPC 应答与广播推进的交错窗口）。
    * 3. found: false → 无进行中流：不动作（定稿内容由 entry 权威链与既有回放承载）。
@@ -393,10 +402,9 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
    *    (response.msgSeq, lastDeltaSeq) 重置状态 + 按序回放 buffer 中 deltaSeq >= expected
    *    的 chunk（回放复用同一 chunk 管线；回放中再遇跳号 → 再次拉取）。
    *
-   * [出口清 pullInFlight 的实现形态] 分支 1-3 各自显式清（该响应即承接的在途拉取，出口
-   * 不得残留）；分支 4 在任何状态写入前先清——回放中再触发的拉取会重新置位，其语义是
-   * 「确有新的在途拉取」，出口不可再清（否则在途去重被击穿）。全函数同步无 await，
-   * 清位与回放之间无 chunk 插入窗口（JS 单线程）。
+   * [回放与在途去重的时序] 槽已随本次响应 settle 清除，回放中再触发的拉取 run 的是
+   * 新槽，语义「确有新的在途拉取」——去重不被击穿（原手写位须手动「回放前先清」的
+   * 顺序约束由 factory 时序契约构造性保证）。
    *
    * [去重即水位]（§4.3）：lastDeltaSeq 标记这份全文含到第几条 delta——重置后
    * expected = lastDeltaSeq + 1，回放过滤条件 deltaSeq >= expected 即「> 水位回放、
@@ -405,23 +413,13 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
   function applySubagentStreamState(virtualId: string, recordId: string, response: SubagentStreamStateSnapshot): void {
     const state = getOrCreateChunkPartition(virtualId, recordId)
     // 1. ≤ sealedMsgSeq → 已定稿，丢弃
-    if (response.msgSeq <= state.sealedMsgSeq) {
-      state.pullInFlight = false
-      return
-    }
+    if (response.msgSeq <= state.sealedMsgSeq) return
     // 2. < 当前 msgSeq → 陈旧响应，丢弃
-    if (response.msgSeq < state.msgSeq) {
-      state.pullInFlight = false
-      return
-    }
+    if (response.msgSeq < state.msgSeq) return
     // 3. found: false → 无进行中流，不动作
-    if (!response.found) {
-      state.pullInFlight = false
-      return
-    }
-    // 4. 判定通过：先清在途标记（本响应已承接；回放再触发的拉取自行接管置位），
-    //    再全量替换 + 状态重置 + buffer 按序回放
-    state.pullInFlight = false
+    if (!response.found) return
+    // 4. 判定通过：全量替换 + 状态重置 + buffer 按序回放（在途槽已由 factory settle 清，
+    //    回放再触发的拉取自行 run 新槽）
     applySubagentStreamDelta(virtualId, response.lines)
     state.msgSeq = response.msgSeq
     state.expectedDeltaSeq = response.lastDeltaSeq + 1
@@ -562,5 +560,7 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
     clearIndependentTransient,
     /** [测试逃生舱] 分区表只读引用（状态机四分支/水位/在途拉取断言用，生产代码勿读）。 */
     _chunkPartitionsForTest: chunkPartitions,
+    /** [测试逃生舱] 在途拉取去重表只读引用（has(key) 断言在途/settle 即清，生产代码勿读）。 */
+    _pullDedupForTest: pullDedup,
   }
 }

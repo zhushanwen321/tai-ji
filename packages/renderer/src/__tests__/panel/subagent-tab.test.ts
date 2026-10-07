@@ -255,7 +255,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
   })
 
   it('chunk 帧分派（触发点②③端到端）：干净起步零拉取；跳号触发失步拉取，响应水位收敛后 DOM 无重复文本', async () => {
-    // done record：无接入拉取（触发点①不触发，拉取计数零基线、pullInFlight 无占用——
+    // done record：无接入拉取（触发点①不触发，拉取计数零基线、在途去重槽无占用——
     // running record 的接入拉取在途期间会去重掉并发失步拉取，属 §4.3 既定行为，不在本用例混排）
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'done' })])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])

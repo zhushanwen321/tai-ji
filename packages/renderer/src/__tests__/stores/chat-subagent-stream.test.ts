@@ -422,7 +422,7 @@ describe('W4 chat store — subagent streaming 收口（U8/U9）', () => {
     expect(list[0].content).toBe('a\nb\nc\nd\ne')
   })
 
-  it('单在途合并：在途拉取未返回期间连续失步 → 不重复发起（pullInFlight 去重），响应到达后一并收敛', async () => {
+  it('单在途合并：在途拉取未返回期间连续失步 → 不重复发起（在途去重），响应到达后一并收敛', async () => {
     const store = useChatStore()
     let resolvePull!: (v: { found: boolean; msgSeq: number; lastDeltaSeq: number; lines: string[] }) => void
     pullMock().mockReturnValue(

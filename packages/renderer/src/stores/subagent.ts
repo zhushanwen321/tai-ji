@@ -67,7 +67,7 @@ export interface SubagentStreamChunkOps {
   applyChunk: (virtualId: string, recordId: string, msgSeq: number, deltaSeq: number, delta: string) => void
   /** 清除帧携带 msgSeq 时置定稿水位 → chat.sealSubagentStream（sealedMsgSeq 单调；W 路径清除帧无 msgSeq 不调） */
   seal: (virtualId: string, recordId: string, msgSeq: number) => void
-  /** 触发点①接入拉取（订阅建立完成后运行中 record 主动拉取）→ chat.requestSubagentStreamState（core pullInFlight 去重） */
+  /** 触发点①接入拉取（订阅建立完成后运行中 record 主动拉取）→ chat.requestSubagentStreamState（core 在途拉取去重） */
   requestState: (virtualId: string, recordId: string) => void
 }
 
@@ -302,7 +302,7 @@ export const useSubagentStore = defineStore('subagent', () => {
    *
    * 拉取触发接线（§4.3，执行体在 core 状态机，本函数只做分派与接入编排）：
    * - ② 首见缺前缀 / ③ 失步（跳号）：chunk 帧进 chunkOps.applyChunk 后由 core 状态机判定
-   *   （新建分区 + deltaSeq > 0 必失步入缓冲并触发拉取；pullInFlight 单在途去重）。
+   *   （新建分区 + deltaSeq > 0 必失步入缓冲并触发拉取；同 record 单在途去重）。
    * - ① 接入拉取：双键订阅挂载**完成之后**，对订阅范围内运行中 record 主动拉取一次——
    *   覆盖「流已停顿、等不到下一条 chunk」的角落；时序由调用方编排保证（loadSubagentData
    *   中本函数在 fetchAndInject 即 entry 基线恢复完成之后执行，拉取结果不会被后到的整体
