@@ -193,7 +193,7 @@ const RACE_EXIT_NOTICE = "子进程在切换期间已退出，已记录，下次
  * 写面兜底（「命令已送达、意图已表达」的保守归属，catch 实装按 credential_missing
  * 特判组织——特判 = SDK 词表全集减本词表）；shared 的 SUBAGENT_SET_MODEL_ACCOUNTED_
  * ERROR_CODES 是本词表的前端显示面投影（badge 亮灯依据，词表外码不亮 badge）。
- * **对账锚**：packages/runtime/src/transport/__tests__/subagent-model-gateway.test.ts
+ * **对账锚**：packages/runtime/src/infra/subagent-model-gateway.test.ts
  * 「core ↔ shared setModel 对账」——本词表扩位漏同步 shared 时该测试红。
  */
 export const ACCOUNTED_SET_MODEL_ERROR_CODES = [
