@@ -247,14 +247,20 @@ export interface RunSwitchMemberState {
 /**
  * 聚合应答的失败名单条目——转发失败成员（三态无态可落：非 switched 生效值未回读
  * 到手 / 非 not-active 引擎定位到了活跃子进程 / 非 not-applicable 预检已通过，§7.1）。
- * `reason` 分型值域 = SDK setModel 错误码三型（词表扩位时同步跟随）。
+ * `reason` **开放值域** = SDK setModel 错误码三型 ∪ 词表外透传码（engine_crashed 等
+ * engine_* 面原样上报——实装 failureReasonOf 刻意透传，消费方对未知码按原文兜底
+ * 显示），`(string & {})` 放行透传码同时保留三型自动补全。
+ * **三处类型同步义务**：本类型 reason ∪ wire 投影 SubagentSetModelMemberFailure.reason
+ * （shared protocol.ts，已知字面词表 = SUBAGENT_SET_MODEL_FAILURE_REASON_CODES）∪ 实装
+ * failureReasonOf 返回类型（service/run-model-switch-aggregate.ts），值域口径改动三处
+ * 同批；对账锚 = packages/runtime/src/infra/subagent-model-gateway.test.ts
+ * 「core ↔ shared setModel 对账」段（SDK 词表扩位时已知子集同批跟随）。
  */
 export interface RunSwitchMemberFailure {
   /** 成员 runId（与成员态数组同维，§7.1）。 */
   runId: string;
-  /** 失败分型（engine_model_not_in_snapshot / engine_credential_missing /
-   *  engine_state_readback_failed）。 */
-  reason: SetModelErrorCode;
+  /** 失败分型（已知三型见 SDK SET_MODEL_ERROR_CODES；词表外 engine_* 透传码原样透传）。 */
+  reason: SetModelErrorCode | (string & {});
 }
 
 /**

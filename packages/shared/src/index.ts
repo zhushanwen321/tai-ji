@@ -53,6 +53,10 @@ export { TAIJI_NAV_COMMAND } from './protocol'
 // 的跨包消费常量（机制权威 = subagent-core model-switch.ts 处置表，词表扩位同批）。
 export { SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES } from './protocol'
 export type { SubagentSetModelAccountedErrorCode } from './protocol'
+// subagent.setModel run 级聚合失败名单 reason 的已知字面词表（开放值域的封闭子集——
+// 值域开放语义与三处类型同步义务登记见 protocol.ts SubagentSetModelMemberFailure）。
+export { SUBAGENT_SET_MODEL_FAILURE_REASON_CODES } from './protocol'
+export type { SubagentSetModelKnownFailureReason } from './protocol'
 // hook 否决类分类码值常量（msg-pipeline-debloat D4-2 同族）：runtime 落码点 +
 // core useChat 判别点统一引用，跨包禁止手抄字面量。
 export { MESSAGE_BLOCKED_CODE } from './protocol'

@@ -13,7 +13,8 @@
 //     模型不可用也是 not-applicable）。
 //   - **三态分派 + 失败名单**：switched（携带引擎回读生效值）/ not-active（引擎定位
 //     不到活跃子进程）/ not-applicable（capability 不支持）；转发失败成员进失败名单
-//     （分型值域 = SDK SET_MODEL_ERROR_CODES）。两数组是同一受理成员集合的互斥划分。
+//     （已知三型 = SDK SET_MODEL_ERROR_CODES，词表外透传码原样上报——reason 开放
+//     值域见 RunSwitchMemberFailure 契约注释）。两数组是同一受理成员集合的互斥划分。
 //   - **部分失败不回滚**：任一成员失败只进名单，其余成员结果正常返回，函数不因成员
 //     失败抛异常（任务书目标 2；§6.1③）。
 //   - **run 级覆盖意图写入不归聚合层**（D5 裁决 M1-2）：意图写入由调用方（U2 编排）
@@ -180,13 +181,13 @@ function isSetModelErrorCode(code: string): code is SetModelErrorCode {
 /**
  * 失败名单 reason 归类：三型直取；词表外透传码（engine_crashed 等 engine_* 面）原样
  * 上报——失败名单是转发失败成员的唯一诚实归属组件（not-active 会虚构存活事实、
- * 中断聚合违反「部分失败不回滚」）；类型面值域随 SDK 词表扩位收敛
- * （RunSwitchMemberFailure.reason 契约注释「词表扩位时同步跟随」），前端消费方对
- * 未知码按原文兜底显示。无码错误（非协议形态的意外 reject）按回读失败分型兜底——
- * 生效值未知是其共同事实，恢复指引「重试切换」对未知原因同样安全幂等（覆盖替换
- * 幂等，§5.2 回读失败行）。
+ * 中断聚合违反「部分失败不回滚」）；返回类型开放值域 = 已知三型 ∪ 透传码
+ * （RunSwitchMemberFailure.reason 契约注释登记「三处类型同步义务」，本函数返回类型
+ * 即第三处），前端消费方对未知码按原文兜底显示。无码错误（非协议形态的意外 reject）
+ * 按回读失败分型兜底——生效值未知是其共同事实，恢复指引「重试切换」对未知原因同样
+ * 安全幂等（覆盖替换幂等，§5.2 回读失败行）。
  */
-function failureReasonOf(code: string | undefined): SetModelErrorCode {
+function failureReasonOf(code: string | undefined): RunSwitchMemberFailure["reason"] {
   if (code !== undefined && isSetModelErrorCode(code)) return code;
-  return (code ?? "engine_state_readback_failed") as SetModelErrorCode;
+  return code ?? "engine_state_readback_failed";
 }

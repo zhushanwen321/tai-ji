@@ -1716,12 +1716,28 @@ export interface SubagentSetModelMemberState {
   effectiveThinkingLevel?: string
 }
 
-/** 聚合应答失败名单条目（转发失败成员；reason 分型值域 = SDK SET_MODEL_ERROR_CODES
- *  三型，词表扩位时同步跟随）。成员标识与成员态数组同维（同一已受理成员 runId，
- *  两数组是同一成员集合的互斥划分，§7.1）。 */
+/** 聚合应答失败名单 reason 的已知字面词表（shared 侧登记，值 = SDK
+ *  SET_MODEL_ERROR_CODES 三型；shared 不依赖 SDK，逐值登记后由对账测试锚定——锚 =
+ *  packages/runtime/src/infra/subagent-model-gateway.test.ts「core ↔ shared setModel
+ *  对账」段，SDK 词表扩位时同批跟随）。 */
+export const SUBAGENT_SET_MODEL_FAILURE_REASON_CODES = [
+  'engine_model_not_in_snapshot',
+  'engine_credential_missing',
+  'engine_state_readback_failed',
+] as const
+
+/** 失败名单 reason 的已知字面子集（封闭，仅供对账锚与封闭子集消费方引用）。 */
+export type SubagentSetModelKnownFailureReason = (typeof SUBAGENT_SET_MODEL_FAILURE_REASON_CODES)[number]
+
+/** 聚合应答失败名单条目（转发失败成员；reason **开放值域** = 已知三型 ∪ 词表外透传码
+ *  （engine_crashed 等 engine_* 面原样上报——core 聚合实装 failureReasonOf 刻意透传，
+ *  消费方对未知码按原文兜底显示），`(string & {})` 放行透传码同时保留三型自动补全）。
+ *  **三处类型同步义务**：本类型 reason ∪ subagent-core RunSwitchMemberFailure.reason ∪
+ *  聚合实装 failureReasonOf 返回类型，值域口径改动三处同批（对账锚同上）。成员标识与
+ *  成员态数组同维（同一已受理成员 runId，两数组是同一成员集合的互斥划分，§7.1）。 */
 export interface SubagentSetModelMemberFailure {
   runId: string
-  reason: 'engine_model_not_in_snapshot' | 'engine_credential_missing' | 'engine_state_readback_failed'
+  reason: SubagentSetModelKnownFailureReason | (string & {})
 }
 
 /**

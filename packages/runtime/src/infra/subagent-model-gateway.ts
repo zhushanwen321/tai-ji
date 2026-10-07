@@ -176,7 +176,9 @@ function mapChatReplyToWireReply(reply: Record<string, unknown>): SubagentSetMod
 /**
  * scope:workflow-run aggregate → wire 聚合应答（结构等价投影：core
  * RunSwitchAggregateResult ≡ wire SubagentSetModelAggregateReply，形状 SSOT 注释在
- * core types.ts；「两处漂移由 U1 接线测试对账」的映射点即此处）。
+ * core types.ts；「两处漂移由 U1 接线测试对账」的映射点即此处）。failures[].reason
+ * 两侧同为开放值域（已知三型 ∪ 词表外透传码——透传不筛选不归一，对账锚 =
+ * subagent-model-gateway.test.ts「core ↔ shared setModel 对账」段）。
  */
 function mapAggregateToWireReply(aggregate: Record<string, unknown>): SubagentSetModelAggregateReply {
   return {

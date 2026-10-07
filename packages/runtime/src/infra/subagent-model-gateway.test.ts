@@ -20,7 +20,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage, SubagentSetModelAggregateReply, SubagentSetModelMemberFailure, SubagentSetModelMemberState, SubagentSetModelReply } from '@taiji/shared'
-import { SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES } from '@taiji/shared'
+import { SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES, SUBAGENT_SET_MODEL_FAILURE_REASON_CODES } from '@taiji/shared'
 import { ACCOUNTED_SET_MODEL_ERROR_CODES, getSubagentModelSwitchResultsDir } from '@zhushanwen/subagent-core'
 import type { RunSwitchAggregateResult, RunSwitchMemberFailure, RunSwitchMemberState } from '@zhushanwen/subagent-core'
 import { SET_MODEL_ERROR_CODES } from '@zhushanwen/subagent-engine-sdk'
@@ -486,7 +486,9 @@ describe('SubagentMessageHandler ← 生产网关注入（组合根形态）', (
 // 「聚合三组件恒保留」硬不变量）。断言形态 = 双向 extends 编译锁（字段类型漂移
 // 即红）+ keyof 双向差集锁（字段改名/删除/新增即红——含可选字段：可选属性缺席
 // 不破坏结构可赋值，双向 extends 对可选字段改名不红，缺口由差集在 keyof 层显形）
-// + 错误码词表 ⊆ wire reason 联合：任一侧改形/扩位/改键名，本文件类型检查即红。
+// + 错误码词表值级对账：reason 联合为开放值域（已知三型 ∪ 词表外透传码）后，
+// 「词表 ⊆ wire reason 联合」不再具备编译级守卫力，词表同步改由
+// SUBAGENT_SET_MODEL_FAILURE_REASON_CODES 值级断言锚定（扩位漏跟即红）。
 // 已知逃逸面（[F3-2]）：嵌套可选字段单侧扩位 MutuallyAssignable/SameKeys 均不抓
 // （SameKeys 只比顶层键集，嵌套对象内部的可选扩位两侧互赋值仍成立），由 U1 接线
 // 测试对账（shared/protocol.ts:1633「两处漂移由 U1 接线测试对账」声明）。
@@ -516,9 +518,20 @@ describe('core ↔ shared setModel 聚合应答形状对账（协议契约不变
   it('RunSwitchMemberFailure ≡ SubagentSetModelMemberFailure 且 SET_MODEL_ERROR_CODES ⊆ wire reason 联合', () => {
     const shape: MutuallyAssignable<RunSwitchMemberFailure, SubagentSetModelMemberFailure> = true
     expect(shape).toBe(true)
-    // 词表成员逐个可赋 reason 联合（词表扩位未同步 wire 联合时此处编译红 + 运行时断言失败）
+    // reason 两侧均为开放值域（已知三型 ∪ 透传码），⊆ 方向不再具备编译级守卫力；
+    // 词表同步对账由下方 SUBAGENT_SET_MODEL_FAILURE_REASON_CODES 值级锚承接。本断言
+    // 保留为「词表成员逐个可赋 reason 联合」的形态记录。
     const reasonValues: SubagentSetModelMemberFailure['reason'][] = [...SET_MODEL_ERROR_CODES]
     expect(reasonValues).toHaveLength(SET_MODEL_ERROR_CODES.length)
+  })
+
+  it('SET_MODEL_ERROR_CODES ≡ shared SUBAGENT_SET_MODEL_FAILURE_REASON_CODES（reason 已知字面词表值级对账——SDK 扩位 shared 漏跟即红）', () => {
+    // reason 已知字面子集的机器锚（shared protocol.ts / core assembly/types.ts 注释同指
+    // 本处）：开放联合放行透传码后，两侧「已知三型」的同步靠本值级断言——SDK 词表
+    // 扩位而 shared 已知子集漏跟时（自动补全/文档面漂移），此处红（ACCOUNTED 词表
+    // 对账同款形态）。
+    expect([...SET_MODEL_ERROR_CODES]).toEqual([...SUBAGENT_SET_MODEL_FAILURE_REASON_CODES])
+    expect(SET_MODEL_ERROR_CODES).toHaveLength(SUBAGENT_SET_MODEL_FAILURE_REASON_CODES.length)
   })
 
   it('RunSwitchAggregateResult ≡ SubagentSetModelAggregateReply（三组件恒保留）', () => {
