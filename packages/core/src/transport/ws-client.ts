@@ -325,6 +325,12 @@ function flushPreAuthQueue(): void {
 /** 本轮重连起始时间戳（首次 scheduleReconnect 设置，connect 成功后置 null 重置） */
 let reconnectStartedAt: number | null = null
 
+// ── [stream-probe 临时探针]（subagent-stream-chunk-design §6 基线测量；零行为变化，
+// 拆除 = 设计 impl-plan 阶段 5 收尾步骤）──
+// 入站 parse 段累计耗时 + 帧数（模块级），disconnect() 一次性汇总并重置。
+let probeParseMsTotal = 0
+let probeParsedCount = 0
+
 /** 消息回调（连接骨架阶段不注册；后续业务层注册处理 ServerMessage） */
 let messageHandler: ((msg: ServerMessage) => void) | null = null
 
@@ -458,6 +464,9 @@ export function connect(url: string, credentials: ConnectCredentials): void {
       handleOversizedInboundFrame(measured)
       return
     }
+    // [stream-probe 临时探针] parse 段计时（finally 保证失败帧同样计入；catch 内日志
+    // 耗时偶发并入该段，罕见路径不影响量级结论）
+    const probeParseStart = performance.now()
     let parsed: unknown
     try {
       parsed = JSON.parse(String(event.data))
@@ -465,6 +474,9 @@ export function connect(url: string, credentials: ConnectCredentials): void {
       // JSON 解析失败：仅记日志跳过（dispatch 已移出 try，handler 抛错不再被此处吞掉）
       console.error('[ws] parse error:', e)
       return
+    } finally {
+      probeParseMsTotal += performance.now() - probeParseStart
+      probeParsedCount += 1
     }
     noteParsedInboundFrame(parsed)
     // auth 握手期：只消费 auth.result，其余消息（握手期不应出现）丢弃
@@ -540,6 +552,15 @@ export function getCurrentToken(): string | null {
 
 /** 主动断开（不触发重连） */
 export function disconnect(): void {
+  // [stream-probe 临时探针] 连接段 parse 耗时一次性汇总（有 parse 才输出；输出后重置，
+  // 下段连接独立统计）
+  if (probeParsedCount > 0) {
+    console.info(
+      `[stream-probe] ws-client parseFrames=${probeParsedCount} parseMsTotal=${probeParseMsTotal.toFixed(1)}`,
+    )
+    probeParseMsTotal = 0
+    probeParsedCount = 0
+  }
   // 递增 generation 使旧 WS 的回调失效
   wsGeneration++
   clearTimers()

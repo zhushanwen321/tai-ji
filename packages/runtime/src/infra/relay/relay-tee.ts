@@ -70,6 +70,14 @@ export class RelayTee {
   private _abandoned = false
   private readonly virtualId: string
 
+  // ── [stream-probe 临时探针]（subagent-stream-chunk-design §6 基线测量；零行为变化，
+  // 拆除 = 设计 impl-plan 阶段 5 收尾步骤）──
+  // 实例级累计：delta 消息条数 + Σ 每条 delta 携带的累积全文长度（lines join 长度），
+  // 直接量出产生端 O(n²) 重发总量。dispose()（child exit 必经）一次性汇总。
+  private probeDeltaCount = 0
+  private probeLinesTotalChars = 0
+  private probeReported = false
+
   constructor(private readonly opts: RelayTeeOptions) {
     // [btw-question D9③ / M1-a 键中段位约定] 虚拟键中段 = owner 会话的 piSessionId：
     // btw 线的 relay 以线 vid 归属（opts.mainSessionId 是 bus 路由键，发布面保持 vid 原样），
@@ -107,6 +115,14 @@ export class RelayTee {
   dispose(): void {
     this.state = null
     this.lineBuffer = ''
+    // [stream-probe 临时探针] 一次性汇总（dispose 可能被 abandon 与 registry exit 两次调用，
+    // flag 保证只输出一次）
+    if (!this.probeReported) {
+      this.probeReported = true
+      console.info(
+        `[stream-probe] relay-tee recordId=${this.opts.recordId} deltaMessages=${this.probeDeltaCount} linesTotalChars=${this.probeLinesTotalChars}`,
+      )
+    }
   }
 
   private handleLine(line: string): void {
@@ -175,6 +191,9 @@ export class RelayTee {
           const delta = (ev.message.payload as { delta?: unknown }).delta
           if (typeof delta !== 'string') return
           state.textAccumulated += delta
+          // [stream-probe 临时探针] delta 消息计数 + 累积全文长度累计（O(n²) 量测点）
+          this.probeDeltaCount += 1
+          this.probeLinesTotalChars += state.textAccumulated.length
           this.opts.publish(this.opts.mainSessionId, {
             type: 'subagent.stream_delta',
             payload: {

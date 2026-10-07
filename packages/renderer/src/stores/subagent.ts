@@ -307,6 +307,13 @@ export const useSubagentStore = defineStore('subagent', () => {
     chatFinalizeStream: FinalizeStreamFn,
   ): void {
     stopStream(scope)
+    // ── [stream-probe 临时探针]（subagent-stream-chunk-design §6 基线测量；零行为变化，
+    // 拆除 = 设计 impl-plan 阶段 5 收尾步骤）──
+    // 订阅段闭包级累计：apply 段耗时（chatApplyDelta 调用段）+ delta 消息条数 + Σ 行字符量，
+    // 每条 assistant 定稿清除帧（chatFinalizeStream 调用点）输出一次汇总并重置。
+    let probeDeltaCount = 0
+    let probeApplyMsTotal = 0
+    let probeLinesTotalChars = 0
     const handler = (msg: { type?: string; payload?: unknown }): void => {
       if (msg.type !== 'subagent.stream_delta') return
       const payload = msg.payload as { recordId?: string; lines?: string[] | undefined }
@@ -315,10 +322,25 @@ export const useSubagentStore = defineStore('subagent', () => {
       if (payload.lines === undefined) {
         // 清除帧 = 单条 assistant 定稿：只收口 streaming 实体。订阅保留（续聊轮
         // 的后续 delta 仍可达，R1 构造性消解）；定稿内容由 entry 帧投影链覆盖。
+        const finalizeStart = performance.now()
         chatFinalizeStream(virtualId)
+        // [stream-probe 临时探针] 定稿时点一次性汇总（每条 assistant 消息一段，输出后重置）
+        console.info(
+          `[stream-probe] renderer-subagent recordId=${recordId} deltaMessages=${probeDeltaCount} ` +
+            `applyMsTotal=${probeApplyMsTotal.toFixed(1)} linesTotalChars=${probeLinesTotalChars} ` +
+            `finalizeMs=${(performance.now() - finalizeStart).toFixed(1)}`,
+        )
+        probeDeltaCount = 0
+        probeApplyMsTotal = 0
+        probeLinesTotalChars = 0
         return
       }
+      // [stream-probe 临时探针] apply 段计时包裹（调用时序不变）
+      const applyStart = performance.now()
       chatApplyDelta(virtualId, payload.lines)
+      probeApplyMsTotal += performance.now() - applyStart
+      probeDeltaCount += 1
+      probeLinesTotalChars += payload.lines.join('').length
     }
     // 双键：旧 widget 通道（payload.sessionId=主 sid）与 tee（payload.sessionId=虚拟分区 id）
     const unsubs = [events.on(mainSessionId, handler), events.on(virtualId, handler)]
